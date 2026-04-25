@@ -1,0 +1,27 @@
+#!/bin/sh
+# iMak Trading Japan - Pre-commit hook (tracked source)
+#
+# .git/hooks/ は git 管理外なので、本ファイルが正本。
+# 新規環境セットアップ時:
+#   cp tools/hooks/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# 全テストを走らせ、失敗時は commit を拒否する物理ギブス。
+
+set -e
+
+echo "[pre-commit] Running all tests..."
+
+PYTHONIOENCODING=utf-8 python -m pytest tests/ iMakHQ/tests/ --tb=short -q
+RESULT=$?
+
+if [ $RESULT -ne 0 ]; then
+    echo ""
+    echo "[pre-commit] ❌ TESTS FAILED. Commit aborted."
+    echo "[pre-commit]    Fix the failing tests, then re-attempt commit."
+    echo "[pre-commit]    Bypass (use ONLY in emergency): git commit --no-verify"
+    exit 1
+fi
+
+echo "[pre-commit] ✅ All tests passed."
+exit 0

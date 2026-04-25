@@ -45,15 +45,13 @@ RECOMMENDED_SPECIFICS = [
     "C:Material", "C:Theme", "C:Color", "C:Size",
 ]
 
-# ===== 利益計算パラメータ（利益計算シート_v2.xlsx準拠） =====
-PROFIT_PARAMS = {
-    "exchange_rate": 159.245,   # USD→JPY（設定シート B2）
-    "ebay_fee_rate": 0.185,     # US実効手数料率（設定シート B9）
-    "promo_rate": 0.1,          # 実効プロモ率（設定シート B3）
-    "payo_rate": 0.025,         # ペイオニア手数料（設定シート B4）
-    "shipping_jpy": 2500,       # 一番くじ実送料（設定シート C17）
-}
-# net_ratio = 1 - 0.185 - 0.1 - 0.025 = 0.69
+# ===== 利益計算パラメータ（SSOT 抽象化: profit_params.get_check_csv_params 経由） =====
+# 2026-04-25 Step 7: ハードコード撲滅。カテゴリ名のみ注入、値は yaml(SSOT) から。
+import sys as _sys_pp
+_sys_pp.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+from profit_params import get_check_csv_params as _gccp_pp
+PROFIT_PARAMS = _gccp_pp("一番くじ")
+# net_ratio = 1 - fvf - promo - payo （profit_params の SSOT 値を使用）
 
 # 価格帯別パラメータ（GATE判定パラメータ検討.xlsx確定値）
 # (中央値上限, 目標利益率, 許容乖離率)

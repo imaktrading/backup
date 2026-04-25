@@ -253,6 +253,37 @@ def compute_min_price_usd(cost_jpy, category):
     return (cost_jpy + params["shipping_jpy"]) / (cache["exchange_rate"] * net_ratio)
 
 
+def get_check_csv_params(category):
+    """check_csv.py 系で使う dict shape を返す（SSOT 抽象化のための統一API）.
+
+    各プロジェクトの check_csv.py は、自プロジェクトのカテゴリ名を渡すだけで
+    PROFIT_PARAMS dict を取得できる。共通モジュール側に if 分岐は持たない（Step 7 設計）。
+
+    Args:
+        category: yaml で定義されたカテゴリ名（"TCG(PSA10)", "G-SHOCK", "一番くじ" 等）
+
+    Returns:
+        dict with keys: exchange_rate, ebay_fee_rate, promo_rate, payo_rate, shipping_jpy
+
+    Raises:
+        ValueError: 未定義カテゴリの場合
+    """
+    cache = _load()
+    cat_params = get_category_params(category)
+    if cat_params is None:
+        raise ValueError(
+            f"Unknown category: {category!r}. "
+            f"Defined categories: {sorted(cache['categories'].keys())}"
+        )
+    return {
+        "exchange_rate": cache["exchange_rate"],
+        "ebay_fee_rate": cat_params["fvf"],
+        "promo_rate":    cache["ad_rate"],
+        "payo_rate":     cache["payo_fee"],
+        "shipping_jpy":  cat_params["shipping_jpy"],
+    }
+
+
 def get_source():
     return _load()["source"]
 

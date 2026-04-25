@@ -46,23 +46,13 @@ RECOMMENDED_SPECIFICS = [
     "C:Cost", "C:Attack/Power",
 ]
 
-# ===== 利益計算パラメータ（SSOT: iMakeBayAPI/profit_params.py 経由で利益計算シートv2を参照） =====
-# 2026-04-24 二重基準解消:
-# 旧: 本ファイルで FVF=18.5%, shipping=2000円 をハードコード → psa_to_csv.py (FVF=13.25% from SSOT) と乖離し
-#     同一カードで gap% が 45% vs 60% のような矛盾判定を生む pipeline バグの根本原因
-# 新: profit_params.py （利益計算シートv2 から動的ロード）を SSOT として採用、両ツール完全同期
+# ===== 利益計算パラメータ（SSOT 抽象化: profit_params.get_check_csv_params 経由） =====
+# 2026-04-24 二重基準解消、2026-04-25 Step 7 SSOT 抽象化で再リファクタ:
+#   各プロジェクトはカテゴリ名を渡すだけ。共通モジュール側に if 分岐は持たない。
 import sys as _sys_pp
 _sys_pp.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
-from profit_params import get_category_params as _gcp_pp, _load as _load_pp
-_pp_cache = _load_pp()
-_tcg_params = _gcp_pp("TCG(PSA10)")
-PROFIT_PARAMS = {
-    "exchange_rate": _pp_cache["exchange_rate"],
-    "ebay_fee_rate": _tcg_params["fvf"],         # TCG(PSA10) 固有の FVF (13.25%) — 他カテゴリと混同しない
-    "promo_rate":   _pp_cache["ad_rate"],
-    "payo_rate":    _pp_cache["payo_fee"],
-    "shipping_jpy": _tcg_params["shipping_jpy"],
-}
+from profit_params import get_check_csv_params as _gccp_pp
+PROFIT_PARAMS = _gccp_pp("TCG(PSA10)")
 # net_ratio = 1 - fvf - promo - payo （profit_params の SSOT 値を使用）
 
 # 価格帯別パラメータ（GATE判定パラメータ検討.xlsx確定値）
