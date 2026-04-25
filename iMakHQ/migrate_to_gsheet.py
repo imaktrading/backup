@@ -16,8 +16,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 from openpyxl import load_workbook
 
-EXCEL_PATH = Path(r"c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakHQ\sheets\【NEW】利益計算シート_v2.xlsx")
-CREDS_PATH = Path(r"c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\double-hold-421922-7c0d38d3f73d.json")
+EXCEL_PATH = Path(r"c:\dev\iMak\iMakHQ\sheets\【NEW】利益計算シート_v2.xlsx")
+CREDS_PATH = Path(r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json")
 TARGET_URL = "https://docs.google.com/spreadsheets/d/1ft91iIsJjbMVw3Gx4GmeO-DQ0A47jp6O1TbiZeTslag/edit"
 
 SCOPES = [

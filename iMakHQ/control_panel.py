@@ -18,7 +18,7 @@ try:
 except Exception:
     pass
 
-WORKSPACE = r"c:/Users/imax2/OneDrive/デスクトップ/iMak_workspace"
+WORKSPACE = r"c:/dev/iMak"
 KEYWORDS_DIR = f"{WORKSPACE}/iMakKeywords"
 EBAY_SELLER = "imax-64"
 EBAY_KEYS_FILE = f"{WORKSPACE}/iMakeBayAPI/ebay keys.txt"
@@ -56,7 +56,7 @@ CONSOLIDATED_SHEETS = {
     "low":   ("1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0", 851100680),  # 統合Low
 }
 # SHEET_CATEGORY_MAP は廃止（自動取得に変更）
-GSHEET_CREDS_PATH = r"c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\double-hold-421922-7c0d38d3f73d.json"
+GSHEET_CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
 
 # ============ 参考リンク（最新売れ筋 / キーワード調査用） ============
 # 四半期更新されるeBayキーワードPDFへのリンク（iMakKeywords/）
@@ -457,7 +457,7 @@ SCRIPTS = [
         "urls_file": f"{WORKSPACE}/iMakMercari/search_urls.txt",
         "trend_key": "scout",
         "flow": """【入力】search_urls.txt
-  ファイル: c:/Users/imax2/OneDrive/デスクトップ/iMak_workspace/iMakMercari/search_urls.txt
+  ファイル: c:/dev/iMak/iMakMercari/search_urls.txt
   → 「📄 URLファイル開く」ボタンで編集可
 
 【現在スカウト対象カテゴリ】
@@ -937,8 +937,8 @@ class URLInputDialog(tk.Toplevel):
     paste box 形式で複数URL一括登録、説明書き付き。
     （一番くじは『一番くじ』枠内の専用ボタンに移設済み）"""
 
-    PSA_FILE = r"c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakTCG\certs.txt"
-    PSA_SCRIPT = r"c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakTCG\psa_to_csv.py"
+    PSA_FILE = r"c:\dev\iMak\iMakTCG\certs.txt"
+    PSA_SCRIPT = r"c:\dev\iMak\iMakTCG\psa_to_csv.py"
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -1034,7 +1034,7 @@ class HomePanel:
     """トップページ: 進捗ダッシュボード中心。リスティング実行は別ウィンドウへ。"""
     def __init__(self, root):
         self.root = root
-        root.title("出品くん - iMak Trading Japan")
+        root.title("出品くん v2 [C:\\dev\\iMak] - iMak Trading Japan")
         root.geometry(_load_geometry("home", "1100x820"))
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -1042,6 +1042,8 @@ class HomePanel:
         nav = ttk.Frame(root, padding=8)
         nav.pack(fill="x")
         ttk.Label(nav, text="🎁 出品くん", font=("", 16, "bold")).pack(side="left")
+        ttk.Label(nav, text=" v2", font=("", 16, "bold"), foreground="#cc0000").pack(side="left")
+        ttk.Label(nav, text=" [C:\\dev\\iMak]", font=("", 10, "bold"), foreground="#008000").pack(side="left")
         ttk.Label(nav, text="  ©iMak Trading", font=("", 10), foreground="gray").pack(side="left")
         pending_count, _ = _read_pending_tasks()
         task_label = f"📝 宿題 ({pending_count}件)" if pending_count else "📝 宿題"
@@ -1433,7 +1435,7 @@ class ListingPanel:
 class KujiWizardDialog(tk.Toplevel):
     """一番くじ ウィザード：URL入力 → Phase1 → CSV編集待ち → Phase2+CSV生成 を1ダイアログで案内"""
 
-    KUJI_DIR = r"c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMak_ichibankuji"
+    KUJI_DIR = r"c:\dev\iMak\iMak_ichibankuji"
     KUJI_FILE = KUJI_DIR + r"\kuji_urls.txt"
     PENDING_DIR = KUJI_DIR + r"\pending"
 

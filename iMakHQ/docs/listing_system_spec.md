@@ -154,7 +154,7 @@
 各主張は以下で再検証可能:
 
 ```bash
-cd "c:/Users/imax2/OneDrive/デスクトップ/iMak_workspace/"
+cd "c:/dev/iMak/"
 
 # §4.1 価格: median=0 固定確認
 grep -n "compute_listing_price" iMakMercari/*.py

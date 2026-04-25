@@ -36,7 +36,7 @@ FILE_LINE_PATTERN = re.compile(
 )
 
 # ワークスペースルート（basename解決のフォールバック用）
-WORKSPACE_ROOT = SCRIPT_DIR.parent  # c:/.../iMak_workspace
+WORKSPACE_ROOT = SCRIPT_DIR.parent  # c:/dev/iMak
 
 VERIFIER_SYSTEM = """あなたはiMak Trading Japanの**二次監査官**です。
 Claudeの一次監査官（implementation-auditor）が出したレポートの真偽を、別ベンダーAI（Gemini）として独立検証します。

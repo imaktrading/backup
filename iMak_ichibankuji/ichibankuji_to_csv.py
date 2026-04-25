@@ -203,7 +203,7 @@ def _load_collectibles_keywords(top_n=30):
     global _CACHED_COLLECTIBLES_KEYWORDS
     if _CACHED_COLLECTIBLES_KEYWORDS is not None:
         return _CACHED_COLLECTIBLES_KEYWORDS
-    pdf_path = r"C:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakKeywords\Collectibles_2026Q1.pdf"
+    pdf_path = r"C:\dev\iMak\iMakKeywords\Collectibles_2026Q1.pdf"
     kws = []
     err = None
     try:

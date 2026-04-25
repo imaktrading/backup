@@ -174,7 +174,7 @@ def _validate_research_metadata(sheet_key, cfg):
     # PDF更新検出（mtime > last_updated なら警告）
     pdf_name = cfg.get("keyword_pdf")
     if pdf_name:
-        pdf_path = _os.path.join(r"C:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakKeywords", pdf_name)
+        pdf_path = _os.path.join(r"C:\dev\iMak\iMakKeywords", pdf_name)
         if _os.path.exists(pdf_path):
             from datetime import datetime as _dt
             pdf_mtime = _dt.fromtimestamp(_os.path.getmtime(pdf_path)).date()

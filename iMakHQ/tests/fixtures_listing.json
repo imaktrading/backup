@@ -199,6 +199,27 @@
       "psa_brand": "POKEMON JAPANESE PROMO",
       "expect_match": false,
       "expect_case": null
+    },
+    {
+      "name": "★ザル判定修正-PRB02 vs ST16 (cert #143570665 実例): 別カードを dual citizenship 誤許容しない",
+      "title": "PSA 10 One Piece TCG ST-16 #ST16-005 Monkey D. Luffy Card",
+      "psa_brand": "ONE PIECE JAPANESE PRB02-MONKEY D. LUFFY",
+      "expect_match": false,
+      "expect_case": null
+    },
+    {
+      "name": "★ザル判定修正-PRB02 は白リスト外で拒否",
+      "title": "PSA 10 One Piece TCG OP-01 #OP01-005 Monkey D. Luffy",
+      "psa_brand": "ONE PIECE JAPANESE PRB02-005",
+      "expect_match": false,
+      "expect_case": null
+    },
+    {
+      "name": "★ザル判定修正-EB02 (PSA brand 側) は白リスト外で拒否",
+      "title": "PSA 10 One Piece TCG OP-01 #OP01-001 Luffy",
+      "psa_brand": "ONE PIECE JAPANESE EB02-001",
+      "expect_match": false,
+      "expect_case": null
     }
   ]
 }

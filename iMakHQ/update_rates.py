@@ -21,8 +21,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-SHEET_PATH = Path(r"c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakHQ\sheets\【NEW】利益計算シート_v2.xlsx")
-LOG_PATH = Path(r"c:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakHQ\update_rates.log")
+SHEET_PATH = Path(r"c:\dev\iMak\iMakHQ\sheets\【NEW】利益計算シート_v2.xlsx")
+LOG_PATH = Path(r"c:\dev\iMak\iMakHQ\update_rates.log")
 
 # 無料API (APIキー不要)
 API_URL = "https://api.exchangerate-api.com/v4/latest/USD"

@@ -71,7 +71,7 @@
 
 ## eBayキーワード最適化ルール
 
-タイトル生成時、`C:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakKeywords\` にある2026Q1キーワードPDFの上位キーワードを最優先で盛り込む。検索されないタイトルは意味がない。
+タイトル生成時、`C:\dev\iMak\iMakKeywords\` にある2026Q1キーワードPDFの上位キーワードを最優先で盛り込む。検索されないタイトルは意味がない。
 
 ### 該当PDF
 

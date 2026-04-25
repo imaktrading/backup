@@ -28,7 +28,7 @@ try:
 except Exception:
     pass
 
-WORKSPACE = Path(__file__).resolve().parent.parent.parent  # iMak_workspace/
+WORKSPACE = Path(__file__).resolve().parent.parent.parent  # c:/dev/iMak/
 FIXTURES_PATH = WORKSPACE / "iMakHQ" / "tests" / "fixtures_listing.json"
 FAILURE_LOG_PATH = WORKSPACE / "iMakHQ" / "review_logs" / "ebay_failure_log.jsonl"
 CSV_OUTPUT_DIR = WORKSPACE / "iMakHQ" / "csv_output"

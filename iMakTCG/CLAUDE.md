@@ -11,7 +11,7 @@ PSA鑑定番号からpsacard.comの鑑定ページをスクレイピングし、
 
 ## eBayキーワード最適化ルール
 
-タイトル生成時、`C:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakKeywords\Toys_Hobbies_2026Q1.pdf`（CCG Individual Cards）の上位キーワードを最優先で盛り込む。検索されないタイトルは意味がない。
+タイトル生成時、`C:\dev\iMak\iMakKeywords\Toys_Hobbies_2026Q1.pdf`（CCG Individual Cards）の上位キーワードを最優先で盛り込む。検索されないタイトルは意味がない。
 
 ### PDF上位キーワード（TCG関連抜粋）
 

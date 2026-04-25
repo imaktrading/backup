@@ -42,7 +42,7 @@
 
 ## eBayキーワード最適化ルール
 
-タイトル生成時、`C:\Users\imax2\OneDrive\デスクトップ\iMak_workspace\iMakKeywords\Collectibles_2026Q1.pdf`（Animation Art & Merchandise）の上位キーワードを最優先で盛り込む。検索されないタイトルは意味がない。
+タイトル生成時、`C:\dev\iMak\iMakKeywords\Collectibles_2026Q1.pdf`（Animation Art & Merchandise）の上位キーワードを最優先で盛り込む。検索されないタイトルは意味がない。
 
 ### PDF上位キーワード（一番くじフィギュア関連抜粋）
 

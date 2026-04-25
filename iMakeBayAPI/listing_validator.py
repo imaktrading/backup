@@ -386,8 +386,16 @@ _PROMO_BRAND_KEYWORDS = [
     "WEEKLY SHONEN JUMP",            # 雑誌付録
 ]
 
+# 2026-04-25 ザル判定修正: ケース1 で許容するのは「既知のプロモ封入セットコード」のみ。
+# PRB02 (Premium Booster) や通常 booster は別カードの可能性が高いので除外。
+# 実証済みの dual citizenship 事例:
+#   - OP11 (FIST OF DIVINE SPEED) ↔ ST16 (Shanks)
+#   - OP13 (CARRYING ON HIS WILL) ↔ EB02 / OP07 (Ace / Sabo)
+# 新たな dual citizenship が確認されたら 追加する（コードまたは yaml 経由）
+KNOWN_PROMO_SET_CODES = {"OP11", "OP13"}
 
-def _is_promo_dual_citizenship(title, psa_brand):
+
+def _is_promo_dual_citizenship(title, psa_brand, psa_card_number=None):
     """PSA brand と title のセットコードが異なる「プロモ二重国籍」を許容する判定ヘルパ。
 
     Returns:
@@ -397,7 +405,10 @@ def _is_promo_dual_citizenship(title, psa_brand):
 
     2026-04-24 Gemini監査: TCG ブランドガード追加（ガシャポン等への誤適用防止）
     2026-04-25 Gemini監査: プロモ命名のみで set code を持たない PSA brand に対応(ケース2)。
-                          ログをケース1/ケース2で分離、ヒットキーワードを可視化。
+    2026-04-25 ザル判定修正:
+      cert #143570665 で PRB02-005 (SR/Cost4/Power5000) を ST16-005 (C/Cost2/Power3000) として
+      誤通過させた事故を受け、ケース1 を「既知のプロモセットコード」白リストに制限。
+      PRB02/通常 booster set codes の同番号別カード混在を防ぐ。
     """
     if not title or not psa_brand:
         return ""
@@ -414,13 +425,18 @@ def _is_promo_dual_citizenship(title, psa_brand):
     for m in re.finditer(r'\b(OP|ST|EB|PRB)(\d+)', title_upper):
         title_codes.add(f"{m.group(1)}{m.group(2)}")
 
-    # ケース1 (既存): 両者に set code、title に PSA にないコード混入
+    # ケース1 (既存 + 白リスト制限): 両者に set code、title に PSA にないコード混入
     #   (例: Shanks PSA=OP11-A vs title=ST16, Ace PSA=OP13 vs title=EB02)
+    #   ★PSA codes に KNOWN_PROMO_SET_CODES が含まれている時のみ許容★
     if psa_codes and title_codes and (title_codes - psa_codes):
-        return (
-            f"プロモ二重国籍ケース1: PSA={sorted(psa_codes)} / "
-            f"Bandai補完={sorted(title_codes)}（PSA封入セット ≠ Bandai 元セット）"
-        )
+        if psa_codes & KNOWN_PROMO_SET_CODES:
+            matched_promo = sorted(psa_codes & KNOWN_PROMO_SET_CODES)
+            return (
+                f"プロモ二重国籍ケース1: PSA={sorted(psa_codes)} (既知promo {matched_promo}) / "
+                f"Bandai補完={sorted(title_codes)}（PSA封入セット ≠ Bandai 元セット）"
+            )
+        # 白リスト外: 別カード疑いで拒否（PRB02-005 vs ST16-005 のような同番号別カード防止）
+        return ""
 
     # ケース2 (2026-04-25 拡張): PSA brand に set code 無し
     #   (プロモ命名のみ "ONE PIECE PROMO" 等) + title に Bandai 補完由来 code

@@ -1144,6 +1144,65 @@ def _onepiece_rarity_to_ebay(rarity):
     return mapping.get(rarity, rarity)
 
 
+# 2026-04-25: ONE PIECE セットコード → eBay 公式フィルタ値（正式名称）マップ
+# eBay の C:Set フィルタは英語の正式名称を要求する。
+# 未収録のセットは set_code を返してフォールバック (検索性は落ちるが空欄よりマシ)
+_ONEPIECE_SET_NAME_MAP = {
+    "OP-01": "Romance Dawn",
+    "OP-02": "Paramount War",
+    "OP-03": "Pillars of Strength",
+    "OP-04": "Kingdoms of Intrigue",
+    "OP-05": "Awakening of the New Era",
+    "OP-06": "Wings of the Captain",
+    "OP-07": "500 Years in the Future",
+    "OP-08": "Two Legends",
+    "OP-09": "Emperors in the New World",
+    "OP-10": "Royal Blood",
+    "OP-11": "A Fist of Divine Speed",
+    "OP-12": "Legacy of the Master",
+    "OP-13": "Carrying On His Will",
+    "OP-14": "The Azure Sea's Seven Heroes",
+    "ST-01": "Straw Hat Crew",
+    "ST-02": "Worst Generation",
+    "ST-03": "The Seven Warlords of the Sea",
+    "ST-04": "Animal Kingdom Pirates",
+    "ST-05": "ONE PIECE FILM edition",
+    "ST-06": "Absolute Justice",
+    "ST-07": "Big Mom Pirates",
+    "ST-08": "Monkey D. Luffy",
+    "ST-09": "Yamato",
+    "ST-10": "The Three Captains",
+    "ST-11": "Uta",
+    "ST-12": "Zoro & Sanji",
+    "ST-13": "The Three Brothers",
+    "ST-14": "3D2Y",
+    "ST-15": "Edward Newgate",
+    "ST-16": "Uta",                     # ST16 Uta starter deck
+    "ST-17": "Donquixote Doflamingo",
+    "ST-18": "Buggy Pirates / Buggy's Crew",
+    "ST-19": "Smoker",
+    "ST-20": "Charlotte Katakuri",
+    "ST-21": "Ace & Newgate",
+    "ST-22": "ONE PIECE FILM RED",
+    "ST-23": "Shanks",
+    "ST-25": "Aramaki Premium Card Set",
+    "ST-26": "Reverse Captains",
+    "EB-01": "Memorial Collection",
+    "EB-02": "25th Anniversary Collection",
+    "PRB-01": "Premium Booster One Piece The Best",
+    "PRB-02": "Premium Booster Vol.2",
+}
+
+
+def _onepiece_set_code_to_name(set_code):
+    """ONE PIECE set code (OP-01 等) を eBay 正式名 (Romance Dawn 等) に変換.
+    マップ未収録なら set_code をそのまま返す（フォールバック）。
+    """
+    if not set_code:
+        return set_code
+    return _ONEPIECE_SET_NAME_MAP.get(set_code, set_code)
+
+
 def _onepiece_set_to_ebay(get_info_jp, card_id=""):
     """Bandai公式データ → eBay慣行のセットコードに変換。
     card_idが最も正確（カードが実際に収録されているセット）なので優先。
@@ -1381,14 +1440,32 @@ def build_row(cert_number, price, data, description, driver=None):
     attribute = official_color or official_attribute  # Claude 追放
 
     # 2026-04-24 Canonical Map (Phase 1): eBay フィルタ正規値へ無言整形
-    # Gemini 監査済: 綴り揺れ/Bandai略称のみ対象、Game name 等の3派閥共存語は含めない
+    # 2026-04-25 Phase 2: Card Type / Rarity 拡張、Leader Cost 空欄化、One Piece Set 補完
     _CANONICAL_FEATURES = {
-        "Alternate Art": "Alternative Art",  # eBay Features 正規綴り
+        "Alternate Art": "Alternative Art",
         "Alt Art":       "Alternative Art",
         "Alt. Art":      "Alternative Art",
     }
     _CANONICAL_CARD_TYPE = {
-        "Leader Card":   "Leader",           # eBay TOPセラー慣習（"Card"無し）
+        "Leader Card":    "Leader",
+        "Character Card": "Character",
+        "Event Card":     "Event",
+        "Stage Card":     "Stage",
+        "Battle Card":    "Battle",
+        "Extra Card":     "Extra",
+        "Don Card":       "DON",
+    }
+    # ONE PIECE rarity 略号 → eBay 正規綴り
+    _CANONICAL_RARITY_ONEPIECE = {
+        "C":   "Common",
+        "UC":  "Uncommon",
+        "R":   "Rare",
+        "SR":  "Super Rare",
+        "SEC": "Secret Rare",
+        "L":   "Leader",
+        "P":   "Promo",
+        "SP":  "Special",
+        "SP CARD": "Special",
     }
     if features in _CANONICAL_FEATURES:
         _new = _CANONICAL_FEATURES[features]
@@ -1398,10 +1475,31 @@ def build_row(cert_number, price, data, description, driver=None):
         _new = _CANONICAL_CARD_TYPE[card_type]
         print(f"    [AUTO-FIX] Card Type: {card_type!r} -> {_new!r} (Canonical Map)")
         card_type = _new
+    # Rarity は ONE PIECE のみ正規化（DragonBall/Gundam は別マップで Bandai 側で対応済）
+    if franchise == "One Piece" and rarity:
+        _ru = rarity.strip().upper()
+        if _ru in _CANONICAL_RARITY_ONEPIECE:
+            _new = _CANONICAL_RARITY_ONEPIECE[_ru]
+            if _new != rarity:
+                print(f"    [AUTO-FIX] Rarity: {rarity!r} -> {_new!r} (Canonical Map)")
+            rarity = _new
+
+    # 2026-04-25: Leader カードは Cost / Power が無い設計
+    # 　Bandai 側で誤って数値が入って返ってくるケースあり (例: cert 149801531 Shanks Cost=5)
+    # 　→ Leader 確定なら強制空欄化（公式仕様準拠）
+    if card_type == "Leader":
+        if cost not in ("", None):
+            print(f"    [AUTO-FIX] Leader Cost: {cost!r} -> '' (Leader はコスト持たない仕様)")
+            cost = ""
+
+    # 2026-04-25: ONE PIECE Set コード → 公式名称（eBay フィルタヒット率向上）
+    if franchise == "One Piece" and set_name:
+        _new_set = _onepiece_set_code_to_name(set_name)
+        if _new_set != set_name:
+            print(f"    [AUTO-FIX] Set: {set_name!r} -> {_new_set!r} (公式名称マップ)")
+            set_name = _new_set
 
     # One Piece Leader の rarity 空欄補完 (Canonical Map 適用後の値で判定)
-    # Bandai は「Leader=カードタイプであってレアリティではない」設計で空欄を返すが、
-    # eBay バイヤーは Rarity フィルタで "Leader" を検索する慣習あり（機会損失防止）
     if not rarity and card_type == "Leader" and franchise == "One Piece":
         rarity = "Leader"
     card_number = official_card_number  # 公式の完全番号 (例: "231/193")
