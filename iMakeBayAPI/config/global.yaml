@@ -1,0 +1,75 @@
+# =====================================
+# iMak Trading Japan - Global Config (SSOT for fallback values)
+# =====================================
+# このファイルは「値の SSOT」。ロジック（Python）からは config_loader 経由で読込。
+# プライマリの利益計算値は Google Sheet から取得され、本ファイルはその fallback。
+# Excel 仕様書は廃止予定。本 yaml が正本。
+#
+# 変更時は version を必ずインクリメント:
+#   "2026-04-25-v1" -> "2026-04-25-v2" -> "2026-04-26-v1"
+# version は出力 CSV / ログに刻印され、後追いで「どの設定で生成されたか」が分かる。
+
+version: "2026-04-25-v1"
+
+# ------------------------------------------------
+# eBay 共通定数（CLAUDE.md グローバル規約）
+# ------------------------------------------------
+ebay:
+  schedule_time_offset_days: 14
+  payment_profile_name: "SALE"
+  format: "FixedPrice"
+  duration: "GTC"
+  action_template: "SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8"
+
+# ------------------------------------------------
+# 利益計算 fallback（プライマリは GSheet 1ft91...）
+# ------------------------------------------------
+profit_fallback:
+  exchange_rate_usd: 159.245
+  ad_rate: 0.10
+  payo_fee: 0.025
+  intl_fee: 0.02
+  target_profit: 0.10
+
+# ------------------------------------------------
+# カテゴリ別 FVF/送料 fallback
+# ------------------------------------------------
+categories:
+  "TCG(PSA10)":     {fvf: 0.1325, shipping_jpy: 2000}
+  "G-SHOCK":        {fvf: 0.1325, shipping_jpy: 2000}
+  "Tシャツ(UT)":    {fvf: 0.153,  shipping_jpy: 2000}
+  "Montbell(一般)": {fvf: 0.153,  shipping_jpy: 2000}
+  "Montbell(ジャケット)": {fvf: 0.153, shipping_jpy: 4500}
+  "一番くじ":       {fvf: 0.1325, shipping_jpy: 2500}
+  "フィギュア":     {fvf: 0.1325, shipping_jpy: 3500}
+  "ユニクロ(非UT)": {fvf: 0.153,  shipping_jpy: 2000}
+  "ヴィンテージ玩具": {fvf: 0.1325, shipping_jpy: 2500}
+  "トミカ":         {fvf: 0.1325, shipping_jpy: 2000}
+  "POPMart":        {fvf: 0.1325, shipping_jpy: 2500}
+  "ガシャポン":     {fvf: 0.1325, shipping_jpy: 2000}
+  "ダイソー":       {fvf: 0.1325, shipping_jpy: 2000}
+  "バッグ(アネロ)": {fvf: 0.153,  shipping_jpy: 2500}
+
+# ------------------------------------------------
+# DDP送料テーブル（CLAUDE.md より、価格帯→ShippingProfileName）
+# ------------------------------------------------
+ddp_shipping_tiers:
+  - {max_usd: 39,   profile: "DDP-39"}
+  - {max_usd: 60,   profile: "DDP-40-60"}
+  - {max_usd: 100,  profile: "DDP-60-100"}
+  - {max_usd: 200,  profile: "DDP-100-200"}
+  - {max_usd: 300,  profile: "DDP-200-300"}
+  - {max_usd: 400,  profile: "DDP-300-400"}
+  - {max_usd: 500,  profile: "DDP-400-500"}
+  - {max_usd: 600,  profile: "DDP-500-600"}
+  - {max_usd: 800,  profile: "DDP-600-800"}
+  - {max_usd: 1000, profile: "DDP-800-1000"}
+
+# ------------------------------------------------
+# プロジェクトごとの ReturnProfile（CLAUDE.md より）
+# ------------------------------------------------
+return_profiles:
+  iMakTCG: "No return"
+  iMakG-shock: "customer1"
+  iMakMercari: "customer1"
+  iMak_ichibankuji: "customer1"

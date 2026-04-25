@@ -11,6 +11,7 @@ iMak Trading Japan - 利益計算パラメータ SSOT (Single Source of Truth)
 """
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -28,6 +29,11 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE_ROOT = SCRIPT_DIR.parent
 
+# config_loader を同ディレクトリから絶対 import （script として直実行時も動くように）
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+import config_loader  # noqa: E402
+
 GSHEET_URL = "https://docs.google.com/spreadsheets/d/1ft91iIsJjbMVw3Gx4GmeO-DQ0A47jp6O1TbiZeTslag/edit"
 CREDS_PATH = WORKSPACE_ROOT / "double-hold-421922-7c0d38d3f73d.json"
 GSCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -38,28 +44,16 @@ CACHE_TTL_SECONDS = 3600
 
 SPREADSHEET = WORKSPACE_ROOT / "iMakHQ" / "sheets" / "【NEW】利益計算シート_v2.xlsx"
 
-FALLBACK_EXCHANGE_RATE = 159.245
-FALLBACK_AD_RATE = 0.10
-FALLBACK_PAYO_FEE = 0.025
-FALLBACK_TARGET_PROFIT = 0.10
-INTL_FEE = 0.02
+# Fallback 値は config_loader 経由で yaml(global.yaml) から取得（SSOT）
+# 旧: ハードコード -> 新: iMakeBayAPI/config/global.yaml
+_pf_fb = config_loader.get_profit_fallback()
+FALLBACK_EXCHANGE_RATE = _pf_fb.get("exchange_rate_usd", 159.245)
+FALLBACK_AD_RATE = _pf_fb.get("ad_rate", 0.10)
+FALLBACK_PAYO_FEE = _pf_fb.get("payo_fee", 0.025)
+FALLBACK_TARGET_PROFIT = _pf_fb.get("target_profit", 0.10)
+INTL_FEE = _pf_fb.get("intl_fee", 0.02)
 
-FALLBACK_CATEGORIES = {
-    "TCG(PSA10)": (0.1325, 2000),
-    "G-SHOCK": (0.1325, 2000),
-    "Tシャツ(UT)": (0.153, 2000),
-    "Montbell(一般)": (0.153, 2000),
-    "Montbell(ジャケット)": (0.153, 4500),
-    "一番くじ": (0.1325, 2500),
-    "フィギュア": (0.1325, 3500),
-    "ユニクロ(非UT)": (0.153, 2000),
-    "ヴィンテージ玩具": (0.1325, 2500),
-    "トミカ": (0.1325, 2000),
-    "POPMart": (0.1325, 2500),
-    "ガシャポン": (0.1325, 2000),
-    "ダイソー": (0.1325, 2000),
-    "バッグ(アネロ)": (0.153, 2500),
-}
+FALLBACK_CATEGORIES = config_loader.get_categories_fallback()
 
 _cache = None
 
