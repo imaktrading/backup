@@ -1,0 +1,825 @@
+"*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)","*Category","*Title","PicURL","*StartPrice","ConditionID","ScheduleTime","CustomLabel","*Description","*Format","*Duration","*Quantity","*Location","BestOfferEnabled","ShippingProfileName","ReturnProfileName","PaymentProfileName","ConditionDescription","StoreCategoryID","C:Brand","C:Type","C:Size Type","C:Size","C:Color","C:Department","C:Style","C:Theme","C:Character","C:Character Family","C:Pattern","C:Neckline","C:Sleeve Length","C:Material","C:Features","C:Fit","C:Product Line","C:Vintage","C:Country/Region of Manufacture","C:Garment Care","C:Season","C:Closure"
+"Add",11450,"UNIQLO UT Dragon Ball Frieza T-Shirt White US XL Short Sleeve Men NWT Japan","https://static.mercdn.net/item/detail/orig/photos/m14829532815_1.jpg?1621304839",44.98,1000,"2026-04-28 06:20:14","UT-0414-1","<html lang=""en""><head>
+    <meta charset=""utf-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1, shrink-to-fit=no"">
+    <title>1-Column Ebay Template dewiso.com</title>
+    <!-- Bootstrap CSS for proper display when downloaded -->
+    <link rel=""stylesheet"" href=""https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"">
+    <style>
+        /* Override Bootstrap defaults to ensure no gaps */
+        body { margin: 0 !important; padding: 0 !important; font-size: 18px; }
+        * { margin: 0; padding: 0; }
+        img { max-width: 100%; }
+        
+        /* Primary color styles */
+        .primary-text-color { color: #ffffff; }
+        /* Secondary color styles */
+        .secondary-color-text { color: #000000; }
+        .secondary-color-bg { background-color: #ffffff; }
+        
+        /* Ensure container has proper max-width */
+        .container { max-width: 800px !important; }
+        
+        /* Gallery Styles */
+        .content__gallery {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        .thumb__float {
+            display: block;
+            cursor: pointer;
+            width: 100px;
+            height: 100px;
+            border: none;
+            box-shadow: none;
+            transition: opacity 0.3s;
+        }
+        
+        .thumb__float:hover {
+            opacity: 0.8;
+        }
+        
+        .thumb__wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .thumb__wrapper img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover;
+        }
+        
+        .slider__wrapper {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 16/9; /* Maintain aspect ratio */
+            max-height: 400px;
+            overflow: hidden;
+            position: relative;
+            border: none;
+            outline: none;
+        }
+        
+        .slider {
+            display: flex;
+            width: 300%;
+            height: 100%;
+            transition: transform 0.3s ease-in-out;
+            transform: translateX(0);
+        }
+        
+        .slider > div {
+            width: 33.333%;
+            height: 100%;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-color: inherit;
+            border: none;
+            outline: none;
+        }
+        
+        /* Focus states - for click persistence */
+        .thumb1:focus ~ .slider__wrapper .slider {
+            transform: translateX(0%);
+        }
+        
+        .thumb2:focus ~ .slider__wrapper .slider {
+            transform: translateX(-33.333%);
+        }
+        
+        .thumb3:focus ~ .slider__wrapper .slider {
+            transform: translateX(-66.666%);
+        }
+        
+        /* Hover states - CSS sibling selectors */
+        .thumb1:hover ~ .slider__wrapper .slider {
+            transform: translateX(0%);
+        }
+        
+        .thumb2:hover ~ .slider__wrapper .slider {
+            transform: translateX(-33.333%);
+        }
+        
+        .thumb3:hover ~ .slider__wrapper .slider {
+            transform: translateX(-66.666%);
+        }
+        
+        /* Remove focus outline for cleaner look */
+        .thumb__float:focus {
+            outline: none;
+            opacity: 0.7;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .slider__wrapper {
+                max-height: 300px;
+            }
+            
+            .thumb__float {
+                width: 75px;
+                height: 75px;
+            }
+            
+            .thumb__container {
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body id=""border-color"" style=""border: 1px solid rgb(50, 84, 40); margin: 0px; padding: 0px;"">
+<!-- TITLE --->
+<div id=""title-part"" class=""py-3"" style=""background: #325428;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row"">
+<div class=""col-12"">
+<h1 class=""primary-text-color"" style=""text-align: center;"">enjoy shopping!!</h1>
+</div>
+</div>
+</div>
+</div>
+<!-- DESCRIPTION/GALLERY CONTAINER -->
+<div id=""description-container"" class=""secondary-color-bg pb-3 pt-4"" style=""background-color: #ffffff;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row""><!-- GALLERY -->
+<div id=""image-gallery"" class=""col-12 mb-4""><b style=""display: inline !important;"">We handle genuine Japanese products.</b>Please check the photos and feel free to contact us for any questions.</div>
+<div id=""description-part"" class=""col-12 secondary-color-text"">
+<div class=""secondary-color-text"">
+<p><span style=""text-decoration: underline;""><strong><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">Description</span></span></strong></span></p>
+<p>This item is <b>Pre-owned</b> and has been thoroughly inspected. <b>Please judge the item's condition by carefully viewing the detailed photos.</b> Minor wear consistent with normal use may be present. All included accessories are shown in the images. We are happy to answer any questions you may have about the item before purchase.</p>
+<p><span style=""text-decoration: underline;""><strong>Shipping &amp; Estimated Delivery</strong></span></p>
+<p>Handling time is based on our shipping policy. We will do our best to ship quickly and pack your item carefully.</p>
+<ul>
+<li><span style=""vertical-align: inherit;"">eBay International Shipping(DDP to U.S.) : 1-2weeks</span></li>
+<li><span style=""vertical-align: inherit;"">Japan Post (Registered Airmail/ePacket) : 2-3weeks</span></li>
+<li><span style=""vertical-align: inherit;"">EMS/DHL/Fedex : 1-2weeks</span></li>
+</ul>
+<p><span style=""text-decoration: underline;""><strong>Customs and Duties Policy</strong></span></p>
+<p><strong>For U.S. Buyers (DDP: Delivered Duty Paid)</strong></p>
+<p>All import duties, taxes, and customs fees are <b>included</b> in the total amount. <b>No additional payment</b> is required upon delivery.</p>
+<p><strong>For Buyers outside the U.S. (DDU: Delivered Duty Unpaid)</strong></p>
+<p>Import duties, taxes, and customs fees are <b>not included</b> in the item price or shipping cost. These charges are the <b>buyer's responsibility</b> and vary by country.</p>
+<p><span style=""text-decoration: underline;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">Important Notes</span></span></span></span></span></span></p>
+<p><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span></p>
+<ul>
+<li><span style=""vertical-align: inherit;""><b><span>Customs &amp; Delays:</span></b><span> Customs clearance and postal delays may extend delivery times.<source-footnote ng-version=""0.0.0-PLACEHOLDER"" _nghost-ng-c2574466737=""""><sup _ngcontent-ng-c2574466737="""" class=""superscript"" data-turn-source-index=""1""></sup></source-footnote></span> If you experience a delay, please contact your local post office or carrier with your tracking number.</span></li>
+<li><span style=""vertical-align: inherit;""><b>Declaration Policy:</b> We cannot declare a lower value or mark items as ""gift.""</span></li>
+<li><span style=""vertical-align: inherit;""></span><span style=""vertical-align: inherit;""><b>Refund Policy:</b> If a package is returned due to unpaid import fees, <b>the original shipping cost will not be refunded.</b></span></li>
+<li><span style=""vertical-align: inherit;""><b>Issues:</b> If you have any issues with your item, please contact us first. We will do our best to help.</span></li>
+</ul>
+<p>Thank you for your understanding and cooperation.<span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bold;""></span></span></span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span></p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ICONS -->
+<div id=""info-part"" class=""secondary-color-bg pt-3"" style=""background-color: #ffffff;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row"">
+<div class=""col-12 col-md-6 pb-2"">
+<div class=""row pb-1 secondary-color-text"">
+<div class=""col-3 my-auto""><svg xmlns=""http://www.w3.org/2000/svg"" viewbox=""0 0 512 512"" style=""height: auto; max-height: 60px; fill: currentColor;"" title=""配送""> <path d=""M476.158,231.363l-13.259-53.035c3.625-0.77,6.345-3.986,6.345-7.839v-8.551c0-18.566-15.105-33.67-33.67-33.67h-60.392 V110.63c0-9.136-7.432-16.568-16.568-16.568H50.772c-9.136,0-16.568,7.432-16.568,16.568V256c0,4.427,3.589,8.017,8.017,8.017 c4.427,0,8.017-3.589,8.017-8.017V110.63c0-0.295,0.239-0.534,0.534-0.534h307.841c0.295,0,0.534,0.239,0.534,0.534v145.372 c0,4.427,3.589,8.017,8.017,8.017c4.427,0,8.017-3.589,8.017-8.017v-9.088h94.569c0.008,0,0.014,0.002,0.021,0.002 c0.008,0,0.015-0.001,0.022-0.001c11.637,0.008,21.518,7.646,24.912,18.171h-24.928c-4.427,0-8.017,3.589-8.017,8.017v17.102 c0,13.851,11.268,25.119,25.119,25.119h9.086v35.273h-20.962c-6.886-19.883-25.787-34.205-47.982-34.205 s-41.097,14.322-47.982,34.205h-3.86v-60.393c0-4.427-3.589-8.017-8.017-8.017c-4.427,0-8.017,3.589-8.017,8.017v60.391H192.817 c-6.886-19.883-25.787-34.205-47.982-34.205s-41.097,14.322-47.982,34.205H50.772c-0.295,0-0.534-0.239-0.534-0.534v-17.637 h34.739c4.427,0,8.017-3.589,8.017-8.017s-3.589-8.017-8.017-8.017H8.017c-4.427,0-8.017,3.589-8.017,8.017 s3.589,8.017,8.017,8.017h26.188v17.637c0,9.136,7.432,16.568,16.568,16.568h43.304c-0.002,0.178-0.014,0.355-0.014,0.534 c0,27.996,22.777,50.772,50.772,50.772s50.772-22.776,50.772-50.772c0-0.18-0.012-0.356-0.014-0.534h180.67 c-0.002,0.178-0.014,0.355-0.014,0.534c0,27.996,22.777,50.772,50.772,50.772c27.995,0,50.772-22.776,50.772-50.772 c0-0.18-0.012-0.356-0.014-0.534h26.203c4.427,0,8.017-3.589,8.017-8.017v-85.511C512,251.989,496.423,234.448,476.158,231.363z M375.182,144.301h60.392c9.725,0,17.637,7.912,17.637,17.637v0.534h-78.029V144.301z M375.182,230.881v-52.376h71.235 l13.094,52.376H375.182z M144.835,401.904c-19.155,0-34.739-15.583-34.739-34.739s15.584-34.739,34.739-34.739 c19.155,0,34.739,15.583,34.739,34.739S163.99,401.904,144.835,401.904z M427.023,401.904c-19.155,0-34.739-15.583-34.739-34.739 s15.584-34.739,34.739-34.739c19.155,0,34.739,15.583,34.739,34.739S446.178,401.904,427.023,401.904z M495.967,299.29h-9.086 c-5.01,0-9.086-4.076-9.086-9.086v-9.086h18.171V299.29z""></path> </svg></div>
+<div class=""col-9 my-auto""><span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">We prioritize fast handling.</span></span></span></div>
+</div>
+</div>
+<div class=""col-12 col-md-6 pb-3"">
+<div class=""row pb-1 secondary-color-text"">
+<div class=""col-3 my-auto""><svg xmlns=""http://www.w3.org/2000/svg"" viewbox=""0 0 44 44"" style=""height: auto; max-height: 60px; fill: currentColor;"" title=""接触""> <path d=""M43,6H1C0.447,6,0,6.447,0,7v30c0,0.553,0.447,1,1,1h42c0.552,0,1-0.447,1-1V7C44,6.447,43.552,6,43,6z M42,33.581 L29.612,21.194l-1.414,1.414L41.59,36H2.41l13.392-13.392l-1.414-1.414L2,33.581V8h40V33.581z""></path> <path d=""M39.979,8L22,25.979L4.021,8H2v0.807L21.293,28.1c0.391,0.391,1.023,0.391,1.414,0L42,8.807V8H39.979z""></path> </svg></div>
+<div class=""col-9 my-auto"">Feel free to contact us with any questions.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- FOOTER -->
+<div id=""copyright-part"" class=""py-3"" style=""background: #325428;"">
+<div class=""container primary-text-color"" style=""font-size: 90%; text-align: center;""><span style=""font-family: 'Market Sans', Arial, sans-serif; font-size: 14.4px; text-align: center;"">ARIGATO!! - Description generated by iMak Trading -</span></div>
+</div>
+</body></html>","FixedPrice","GTC",1,"Japan",1,"40-60","customer1","SALE","Brand new with tags. Shipped directly from Japan.",41827400010,"Uniqlo","T-Shirt","Regular","XL","White","Men","Pullover","Anime & Manga","Frieza","Dragon Ball","Graphic Print","Crew Neck","Short Sleeve","Cotton","All Seasons, Easy Care, Quick Dry, Stretch","Regular","Uniqlo UT","No","Does not apply","Machine Washable","Fall, Spring, Summer, Winter","Pullover"
+"Add",11450,"UNIQLO UT Dragon Ball DAIMA Goku T-Shirt Navy US XL Short Sleeve Men NWT Japan","https://static.mercdn.net/item/detail/orig/photos/m99473426607_1.jpg?1766836480",46.98,1000,"2026-04-28 06:20:28","UT-0414-2","<html lang=""en""><head>
+    <meta charset=""utf-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1, shrink-to-fit=no"">
+    <title>1-Column Ebay Template dewiso.com</title>
+    <!-- Bootstrap CSS for proper display when downloaded -->
+    <link rel=""stylesheet"" href=""https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"">
+    <style>
+        /* Override Bootstrap defaults to ensure no gaps */
+        body { margin: 0 !important; padding: 0 !important; font-size: 18px; }
+        * { margin: 0; padding: 0; }
+        img { max-width: 100%; }
+        
+        /* Primary color styles */
+        .primary-text-color { color: #ffffff; }
+        /* Secondary color styles */
+        .secondary-color-text { color: #000000; }
+        .secondary-color-bg { background-color: #ffffff; }
+        
+        /* Ensure container has proper max-width */
+        .container { max-width: 800px !important; }
+        
+        /* Gallery Styles */
+        .content__gallery {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        .thumb__float {
+            display: block;
+            cursor: pointer;
+            width: 100px;
+            height: 100px;
+            border: none;
+            box-shadow: none;
+            transition: opacity 0.3s;
+        }
+        
+        .thumb__float:hover {
+            opacity: 0.8;
+        }
+        
+        .thumb__wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .thumb__wrapper img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover;
+        }
+        
+        .slider__wrapper {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 16/9; /* Maintain aspect ratio */
+            max-height: 400px;
+            overflow: hidden;
+            position: relative;
+            border: none;
+            outline: none;
+        }
+        
+        .slider {
+            display: flex;
+            width: 300%;
+            height: 100%;
+            transition: transform 0.3s ease-in-out;
+            transform: translateX(0);
+        }
+        
+        .slider > div {
+            width: 33.333%;
+            height: 100%;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-color: inherit;
+            border: none;
+            outline: none;
+        }
+        
+        /* Focus states - for click persistence */
+        .thumb1:focus ~ .slider__wrapper .slider {
+            transform: translateX(0%);
+        }
+        
+        .thumb2:focus ~ .slider__wrapper .slider {
+            transform: translateX(-33.333%);
+        }
+        
+        .thumb3:focus ~ .slider__wrapper .slider {
+            transform: translateX(-66.666%);
+        }
+        
+        /* Hover states - CSS sibling selectors */
+        .thumb1:hover ~ .slider__wrapper .slider {
+            transform: translateX(0%);
+        }
+        
+        .thumb2:hover ~ .slider__wrapper .slider {
+            transform: translateX(-33.333%);
+        }
+        
+        .thumb3:hover ~ .slider__wrapper .slider {
+            transform: translateX(-66.666%);
+        }
+        
+        /* Remove focus outline for cleaner look */
+        .thumb__float:focus {
+            outline: none;
+            opacity: 0.7;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .slider__wrapper {
+                max-height: 300px;
+            }
+            
+            .thumb__float {
+                width: 75px;
+                height: 75px;
+            }
+            
+            .thumb__container {
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body id=""border-color"" style=""border: 1px solid rgb(50, 84, 40); margin: 0px; padding: 0px;"">
+<!-- TITLE --->
+<div id=""title-part"" class=""py-3"" style=""background: #325428;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row"">
+<div class=""col-12"">
+<h1 class=""primary-text-color"" style=""text-align: center;"">enjoy shopping!!</h1>
+</div>
+</div>
+</div>
+</div>
+<!-- DESCRIPTION/GALLERY CONTAINER -->
+<div id=""description-container"" class=""secondary-color-bg pb-3 pt-4"" style=""background-color: #ffffff;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row""><!-- GALLERY -->
+<div id=""image-gallery"" class=""col-12 mb-4""><b style=""display: inline !important;"">We handle genuine Japanese products.</b>Please check the photos and feel free to contact us for any questions.</div>
+<div id=""description-part"" class=""col-12 secondary-color-text"">
+<div class=""secondary-color-text"">
+<p><span style=""text-decoration: underline;""><strong><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">Description</span></span></strong></span></p>
+<p>This item is <b>Pre-owned</b> and has been thoroughly inspected. <b>Please judge the item's condition by carefully viewing the detailed photos.</b> Minor wear consistent with normal use may be present. All included accessories are shown in the images. We are happy to answer any questions you may have about the item before purchase.</p>
+<p><span style=""text-decoration: underline;""><strong>Shipping &amp; Estimated Delivery</strong></span></p>
+<p>Handling time is based on our shipping policy. We will do our best to ship quickly and pack your item carefully.</p>
+<ul>
+<li><span style=""vertical-align: inherit;"">eBay International Shipping(DDP to U.S.) : 1-2weeks</span></li>
+<li><span style=""vertical-align: inherit;"">Japan Post (Registered Airmail/ePacket) : 2-3weeks</span></li>
+<li><span style=""vertical-align: inherit;"">EMS/DHL/Fedex : 1-2weeks</span></li>
+</ul>
+<p><span style=""text-decoration: underline;""><strong>Customs and Duties Policy</strong></span></p>
+<p><strong>For U.S. Buyers (DDP: Delivered Duty Paid)</strong></p>
+<p>All import duties, taxes, and customs fees are <b>included</b> in the total amount. <b>No additional payment</b> is required upon delivery.</p>
+<p><strong>For Buyers outside the U.S. (DDU: Delivered Duty Unpaid)</strong></p>
+<p>Import duties, taxes, and customs fees are <b>not included</b> in the item price or shipping cost. These charges are the <b>buyer's responsibility</b> and vary by country.</p>
+<p><span style=""text-decoration: underline;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">Important Notes</span></span></span></span></span></span></p>
+<p><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span></p>
+<ul>
+<li><span style=""vertical-align: inherit;""><b><span>Customs &amp; Delays:</span></b><span> Customs clearance and postal delays may extend delivery times.<source-footnote ng-version=""0.0.0-PLACEHOLDER"" _nghost-ng-c2574466737=""""><sup _ngcontent-ng-c2574466737="""" class=""superscript"" data-turn-source-index=""1""></sup></source-footnote></span> If you experience a delay, please contact your local post office or carrier with your tracking number.</span></li>
+<li><span style=""vertical-align: inherit;""><b>Declaration Policy:</b> We cannot declare a lower value or mark items as ""gift.""</span></li>
+<li><span style=""vertical-align: inherit;""></span><span style=""vertical-align: inherit;""><b>Refund Policy:</b> If a package is returned due to unpaid import fees, <b>the original shipping cost will not be refunded.</b></span></li>
+<li><span style=""vertical-align: inherit;""><b>Issues:</b> If you have any issues with your item, please contact us first. We will do our best to help.</span></li>
+</ul>
+<p>Thank you for your understanding and cooperation.<span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bold;""></span></span></span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span></p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ICONS -->
+<div id=""info-part"" class=""secondary-color-bg pt-3"" style=""background-color: #ffffff;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row"">
+<div class=""col-12 col-md-6 pb-2"">
+<div class=""row pb-1 secondary-color-text"">
+<div class=""col-3 my-auto""><svg xmlns=""http://www.w3.org/2000/svg"" viewbox=""0 0 512 512"" style=""height: auto; max-height: 60px; fill: currentColor;"" title=""配送""> <path d=""M476.158,231.363l-13.259-53.035c3.625-0.77,6.345-3.986,6.345-7.839v-8.551c0-18.566-15.105-33.67-33.67-33.67h-60.392 V110.63c0-9.136-7.432-16.568-16.568-16.568H50.772c-9.136,0-16.568,7.432-16.568,16.568V256c0,4.427,3.589,8.017,8.017,8.017 c4.427,0,8.017-3.589,8.017-8.017V110.63c0-0.295,0.239-0.534,0.534-0.534h307.841c0.295,0,0.534,0.239,0.534,0.534v145.372 c0,4.427,3.589,8.017,8.017,8.017c4.427,0,8.017-3.589,8.017-8.017v-9.088h94.569c0.008,0,0.014,0.002,0.021,0.002 c0.008,0,0.015-0.001,0.022-0.001c11.637,0.008,21.518,7.646,24.912,18.171h-24.928c-4.427,0-8.017,3.589-8.017,8.017v17.102 c0,13.851,11.268,25.119,25.119,25.119h9.086v35.273h-20.962c-6.886-19.883-25.787-34.205-47.982-34.205 s-41.097,14.322-47.982,34.205h-3.86v-60.393c0-4.427-3.589-8.017-8.017-8.017c-4.427,0-8.017,3.589-8.017,8.017v60.391H192.817 c-6.886-19.883-25.787-34.205-47.982-34.205s-41.097,14.322-47.982,34.205H50.772c-0.295,0-0.534-0.239-0.534-0.534v-17.637 h34.739c4.427,0,8.017-3.589,8.017-8.017s-3.589-8.017-8.017-8.017H8.017c-4.427,0-8.017,3.589-8.017,8.017 s3.589,8.017,8.017,8.017h26.188v17.637c0,9.136,7.432,16.568,16.568,16.568h43.304c-0.002,0.178-0.014,0.355-0.014,0.534 c0,27.996,22.777,50.772,50.772,50.772s50.772-22.776,50.772-50.772c0-0.18-0.012-0.356-0.014-0.534h180.67 c-0.002,0.178-0.014,0.355-0.014,0.534c0,27.996,22.777,50.772,50.772,50.772c27.995,0,50.772-22.776,50.772-50.772 c0-0.18-0.012-0.356-0.014-0.534h26.203c4.427,0,8.017-3.589,8.017-8.017v-85.511C512,251.989,496.423,234.448,476.158,231.363z M375.182,144.301h60.392c9.725,0,17.637,7.912,17.637,17.637v0.534h-78.029V144.301z M375.182,230.881v-52.376h71.235 l13.094,52.376H375.182z M144.835,401.904c-19.155,0-34.739-15.583-34.739-34.739s15.584-34.739,34.739-34.739 c19.155,0,34.739,15.583,34.739,34.739S163.99,401.904,144.835,401.904z M427.023,401.904c-19.155,0-34.739-15.583-34.739-34.739 s15.584-34.739,34.739-34.739c19.155,0,34.739,15.583,34.739,34.739S446.178,401.904,427.023,401.904z M495.967,299.29h-9.086 c-5.01,0-9.086-4.076-9.086-9.086v-9.086h18.171V299.29z""></path> </svg></div>
+<div class=""col-9 my-auto""><span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">We prioritize fast handling.</span></span></span></div>
+</div>
+</div>
+<div class=""col-12 col-md-6 pb-3"">
+<div class=""row pb-1 secondary-color-text"">
+<div class=""col-3 my-auto""><svg xmlns=""http://www.w3.org/2000/svg"" viewbox=""0 0 44 44"" style=""height: auto; max-height: 60px; fill: currentColor;"" title=""接触""> <path d=""M43,6H1C0.447,6,0,6.447,0,7v30c0,0.553,0.447,1,1,1h42c0.552,0,1-0.447,1-1V7C44,6.447,43.552,6,43,6z M42,33.581 L29.612,21.194l-1.414,1.414L41.59,36H2.41l13.392-13.392l-1.414-1.414L2,33.581V8h40V33.581z""></path> <path d=""M39.979,8L22,25.979L4.021,8H2v0.807L21.293,28.1c0.391,0.391,1.023,0.391,1.414,0L42,8.807V8H39.979z""></path> </svg></div>
+<div class=""col-9 my-auto"">Feel free to contact us with any questions.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- FOOTER -->
+<div id=""copyright-part"" class=""py-3"" style=""background: #325428;"">
+<div class=""container primary-text-color"" style=""font-size: 90%; text-align: center;""><span style=""font-family: 'Market Sans', Arial, sans-serif; font-size: 14.4px; text-align: center;"">ARIGATO!! - Description generated by iMak Trading -</span></div>
+</div>
+</body></html>","FixedPrice","GTC",1,"Japan",1,"40-60","customer1","SALE","Brand new with tags. Shipped directly from Japan.",41827400010,"Uniqlo","T-Shirt","Regular","XL","Navy","Men","Pullover","Anime & Manga","Goku","Dragon Ball","Graphic Print","Crew Neck","Short Sleeve","Cotton","All Seasons, Easy Care, Quick Dry, Stretch","Regular","Uniqlo UT","No","Does not apply","Machine Washable","Fall, Spring, Summer, Winter","Pullover"
+"Add",11450,"UNIQLO UT Dragon Ball Z Goku T-Shirt White US XL Short Sleeve Men NWT Japan","https://static.mercdn.net/item/detail/orig/photos/m22212010691_1.jpg?1718546010",62.98,1000,"2026-04-28 06:20:44","UT-0414-3","<html lang=""en""><head>
+    <meta charset=""utf-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1, shrink-to-fit=no"">
+    <title>1-Column Ebay Template dewiso.com</title>
+    <!-- Bootstrap CSS for proper display when downloaded -->
+    <link rel=""stylesheet"" href=""https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"">
+    <style>
+        /* Override Bootstrap defaults to ensure no gaps */
+        body { margin: 0 !important; padding: 0 !important; font-size: 18px; }
+        * { margin: 0; padding: 0; }
+        img { max-width: 100%; }
+        
+        /* Primary color styles */
+        .primary-text-color { color: #ffffff; }
+        /* Secondary color styles */
+        .secondary-color-text { color: #000000; }
+        .secondary-color-bg { background-color: #ffffff; }
+        
+        /* Ensure container has proper max-width */
+        .container { max-width: 800px !important; }
+        
+        /* Gallery Styles */
+        .content__gallery {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        .thumb__float {
+            display: block;
+            cursor: pointer;
+            width: 100px;
+            height: 100px;
+            border: none;
+            box-shadow: none;
+            transition: opacity 0.3s;
+        }
+        
+        .thumb__float:hover {
+            opacity: 0.8;
+        }
+        
+        .thumb__wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .thumb__wrapper img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover;
+        }
+        
+        .slider__wrapper {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 16/9; /* Maintain aspect ratio */
+            max-height: 400px;
+            overflow: hidden;
+            position: relative;
+            border: none;
+            outline: none;
+        }
+        
+        .slider {
+            display: flex;
+            width: 300%;
+            height: 100%;
+            transition: transform 0.3s ease-in-out;
+            transform: translateX(0);
+        }
+        
+        .slider > div {
+            width: 33.333%;
+            height: 100%;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-color: inherit;
+            border: none;
+            outline: none;
+        }
+        
+        /* Focus states - for click persistence */
+        .thumb1:focus ~ .slider__wrapper .slider {
+            transform: translateX(0%);
+        }
+        
+        .thumb2:focus ~ .slider__wrapper .slider {
+            transform: translateX(-33.333%);
+        }
+        
+        .thumb3:focus ~ .slider__wrapper .slider {
+            transform: translateX(-66.666%);
+        }
+        
+        /* Hover states - CSS sibling selectors */
+        .thumb1:hover ~ .slider__wrapper .slider {
+            transform: translateX(0%);
+        }
+        
+        .thumb2:hover ~ .slider__wrapper .slider {
+            transform: translateX(-33.333%);
+        }
+        
+        .thumb3:hover ~ .slider__wrapper .slider {
+            transform: translateX(-66.666%);
+        }
+        
+        /* Remove focus outline for cleaner look */
+        .thumb__float:focus {
+            outline: none;
+            opacity: 0.7;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .slider__wrapper {
+                max-height: 300px;
+            }
+            
+            .thumb__float {
+                width: 75px;
+                height: 75px;
+            }
+            
+            .thumb__container {
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body id=""border-color"" style=""border: 1px solid rgb(50, 84, 40); margin: 0px; padding: 0px;"">
+<!-- TITLE --->
+<div id=""title-part"" class=""py-3"" style=""background: #325428;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row"">
+<div class=""col-12"">
+<h1 class=""primary-text-color"" style=""text-align: center;"">enjoy shopping!!</h1>
+</div>
+</div>
+</div>
+</div>
+<!-- DESCRIPTION/GALLERY CONTAINER -->
+<div id=""description-container"" class=""secondary-color-bg pb-3 pt-4"" style=""background-color: #ffffff;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row""><!-- GALLERY -->
+<div id=""image-gallery"" class=""col-12 mb-4""><b style=""display: inline !important;"">We handle genuine Japanese products.</b>Please check the photos and feel free to contact us for any questions.</div>
+<div id=""description-part"" class=""col-12 secondary-color-text"">
+<div class=""secondary-color-text"">
+<p><span style=""text-decoration: underline;""><strong><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">Description</span></span></strong></span></p>
+<p>This item is <b>Pre-owned</b> and has been thoroughly inspected. <b>Please judge the item's condition by carefully viewing the detailed photos.</b> Minor wear consistent with normal use may be present. All included accessories are shown in the images. We are happy to answer any questions you may have about the item before purchase.</p>
+<p><span style=""text-decoration: underline;""><strong>Shipping &amp; Estimated Delivery</strong></span></p>
+<p>Handling time is based on our shipping policy. We will do our best to ship quickly and pack your item carefully.</p>
+<ul>
+<li><span style=""vertical-align: inherit;"">eBay International Shipping(DDP to U.S.) : 1-2weeks</span></li>
+<li><span style=""vertical-align: inherit;"">Japan Post (Registered Airmail/ePacket) : 2-3weeks</span></li>
+<li><span style=""vertical-align: inherit;"">EMS/DHL/Fedex : 1-2weeks</span></li>
+</ul>
+<p><span style=""text-decoration: underline;""><strong>Customs and Duties Policy</strong></span></p>
+<p><strong>For U.S. Buyers (DDP: Delivered Duty Paid)</strong></p>
+<p>All import duties, taxes, and customs fees are <b>included</b> in the total amount. <b>No additional payment</b> is required upon delivery.</p>
+<p><strong>For Buyers outside the U.S. (DDU: Delivered Duty Unpaid)</strong></p>
+<p>Import duties, taxes, and customs fees are <b>not included</b> in the item price or shipping cost. These charges are the <b>buyer's responsibility</b> and vary by country.</p>
+<p><span style=""text-decoration: underline;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">Important Notes</span></span></span></span></span></span></p>
+<p><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span></p>
+<ul>
+<li><span style=""vertical-align: inherit;""><b><span>Customs &amp; Delays:</span></b><span> Customs clearance and postal delays may extend delivery times.<source-footnote ng-version=""0.0.0-PLACEHOLDER"" _nghost-ng-c2574466737=""""><sup _ngcontent-ng-c2574466737="""" class=""superscript"" data-turn-source-index=""1""></sup></source-footnote></span> If you experience a delay, please contact your local post office or carrier with your tracking number.</span></li>
+<li><span style=""vertical-align: inherit;""><b>Declaration Policy:</b> We cannot declare a lower value or mark items as ""gift.""</span></li>
+<li><span style=""vertical-align: inherit;""></span><span style=""vertical-align: inherit;""><b>Refund Policy:</b> If a package is returned due to unpaid import fees, <b>the original shipping cost will not be refunded.</b></span></li>
+<li><span style=""vertical-align: inherit;""><b>Issues:</b> If you have any issues with your item, please contact us first. We will do our best to help.</span></li>
+</ul>
+<p>Thank you for your understanding and cooperation.<span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bold;""></span></span></span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span></p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ICONS -->
+<div id=""info-part"" class=""secondary-color-bg pt-3"" style=""background-color: #ffffff;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row"">
+<div class=""col-12 col-md-6 pb-2"">
+<div class=""row pb-1 secondary-color-text"">
+<div class=""col-3 my-auto""><svg xmlns=""http://www.w3.org/2000/svg"" viewbox=""0 0 512 512"" style=""height: auto; max-height: 60px; fill: currentColor;"" title=""配送""> <path d=""M476.158,231.363l-13.259-53.035c3.625-0.77,6.345-3.986,6.345-7.839v-8.551c0-18.566-15.105-33.67-33.67-33.67h-60.392 V110.63c0-9.136-7.432-16.568-16.568-16.568H50.772c-9.136,0-16.568,7.432-16.568,16.568V256c0,4.427,3.589,8.017,8.017,8.017 c4.427,0,8.017-3.589,8.017-8.017V110.63c0-0.295,0.239-0.534,0.534-0.534h307.841c0.295,0,0.534,0.239,0.534,0.534v145.372 c0,4.427,3.589,8.017,8.017,8.017c4.427,0,8.017-3.589,8.017-8.017v-9.088h94.569c0.008,0,0.014,0.002,0.021,0.002 c0.008,0,0.015-0.001,0.022-0.001c11.637,0.008,21.518,7.646,24.912,18.171h-24.928c-4.427,0-8.017,3.589-8.017,8.017v17.102 c0,13.851,11.268,25.119,25.119,25.119h9.086v35.273h-20.962c-6.886-19.883-25.787-34.205-47.982-34.205 s-41.097,14.322-47.982,34.205h-3.86v-60.393c0-4.427-3.589-8.017-8.017-8.017c-4.427,0-8.017,3.589-8.017,8.017v60.391H192.817 c-6.886-19.883-25.787-34.205-47.982-34.205s-41.097,14.322-47.982,34.205H50.772c-0.295,0-0.534-0.239-0.534-0.534v-17.637 h34.739c4.427,0,8.017-3.589,8.017-8.017s-3.589-8.017-8.017-8.017H8.017c-4.427,0-8.017,3.589-8.017,8.017 s3.589,8.017,8.017,8.017h26.188v17.637c0,9.136,7.432,16.568,16.568,16.568h43.304c-0.002,0.178-0.014,0.355-0.014,0.534 c0,27.996,22.777,50.772,50.772,50.772s50.772-22.776,50.772-50.772c0-0.18-0.012-0.356-0.014-0.534h180.67 c-0.002,0.178-0.014,0.355-0.014,0.534c0,27.996,22.777,50.772,50.772,50.772c27.995,0,50.772-22.776,50.772-50.772 c0-0.18-0.012-0.356-0.014-0.534h26.203c4.427,0,8.017-3.589,8.017-8.017v-85.511C512,251.989,496.423,234.448,476.158,231.363z M375.182,144.301h60.392c9.725,0,17.637,7.912,17.637,17.637v0.534h-78.029V144.301z M375.182,230.881v-52.376h71.235 l13.094,52.376H375.182z M144.835,401.904c-19.155,0-34.739-15.583-34.739-34.739s15.584-34.739,34.739-34.739 c19.155,0,34.739,15.583,34.739,34.739S163.99,401.904,144.835,401.904z M427.023,401.904c-19.155,0-34.739-15.583-34.739-34.739 s15.584-34.739,34.739-34.739c19.155,0,34.739,15.583,34.739,34.739S446.178,401.904,427.023,401.904z M495.967,299.29h-9.086 c-5.01,0-9.086-4.076-9.086-9.086v-9.086h18.171V299.29z""></path> </svg></div>
+<div class=""col-9 my-auto""><span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">We prioritize fast handling.</span></span></span></div>
+</div>
+</div>
+<div class=""col-12 col-md-6 pb-3"">
+<div class=""row pb-1 secondary-color-text"">
+<div class=""col-3 my-auto""><svg xmlns=""http://www.w3.org/2000/svg"" viewbox=""0 0 44 44"" style=""height: auto; max-height: 60px; fill: currentColor;"" title=""接触""> <path d=""M43,6H1C0.447,6,0,6.447,0,7v30c0,0.553,0.447,1,1,1h42c0.552,0,1-0.447,1-1V7C44,6.447,43.552,6,43,6z M42,33.581 L29.612,21.194l-1.414,1.414L41.59,36H2.41l13.392-13.392l-1.414-1.414L2,33.581V8h40V33.581z""></path> <path d=""M39.979,8L22,25.979L4.021,8H2v0.807L21.293,28.1c0.391,0.391,1.023,0.391,1.414,0L42,8.807V8H39.979z""></path> </svg></div>
+<div class=""col-9 my-auto"">Feel free to contact us with any questions.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- FOOTER -->
+<div id=""copyright-part"" class=""py-3"" style=""background: #325428;"">
+<div class=""container primary-text-color"" style=""font-size: 90%; text-align: center;""><span style=""font-family: 'Market Sans', Arial, sans-serif; font-size: 14.4px; text-align: center;"">ARIGATO!! - Description generated by iMak Trading -</span></div>
+</div>
+</body></html>","FixedPrice","GTC",1,"Japan",1,"60-100","customer1","SALE","Brand new with tags. Shipped directly from Japan.",41827400010,"Uniqlo","T-Shirt","Regular","XL","White","Men","Pullover","Anime & Manga","Son Goku","Dragon Ball Z","Graphic Print","Crew Neck","Short Sleeve","Cotton","All Seasons, Easy Care, Quick Dry, Stretch","Regular","Uniqlo UT","No","Does not apply","Machine Washable","Fall, Spring, Summer, Winter","Pullover"
+"Add",11450,"UNIQLO UT Dragon Ball DAIMA Characters T-Shirt Black US 2XL Men NWT Japan","https://static.mercdn.net/item/detail/orig/photos/m68935282314_1.jpg?1772731759",48.98,1000,"2026-04-28 06:20:57","UT-0414-4","<html lang=""en""><head>
+    <meta charset=""utf-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1, shrink-to-fit=no"">
+    <title>1-Column Ebay Template dewiso.com</title>
+    <!-- Bootstrap CSS for proper display when downloaded -->
+    <link rel=""stylesheet"" href=""https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"">
+    <style>
+        /* Override Bootstrap defaults to ensure no gaps */
+        body { margin: 0 !important; padding: 0 !important; font-size: 18px; }
+        * { margin: 0; padding: 0; }
+        img { max-width: 100%; }
+        
+        /* Primary color styles */
+        .primary-text-color { color: #ffffff; }
+        /* Secondary color styles */
+        .secondary-color-text { color: #000000; }
+        .secondary-color-bg { background-color: #ffffff; }
+        
+        /* Ensure container has proper max-width */
+        .container { max-width: 800px !important; }
+        
+        /* Gallery Styles */
+        .content__gallery {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        .thumb__float {
+            display: block;
+            cursor: pointer;
+            width: 100px;
+            height: 100px;
+            border: none;
+            box-shadow: none;
+            transition: opacity 0.3s;
+        }
+        
+        .thumb__float:hover {
+            opacity: 0.8;
+        }
+        
+        .thumb__wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .thumb__wrapper img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover;
+        }
+        
+        .slider__wrapper {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 16/9; /* Maintain aspect ratio */
+            max-height: 400px;
+            overflow: hidden;
+            position: relative;
+            border: none;
+            outline: none;
+        }
+        
+        .slider {
+            display: flex;
+            width: 300%;
+            height: 100%;
+            transition: transform 0.3s ease-in-out;
+            transform: translateX(0);
+        }
+        
+        .slider > div {
+            width: 33.333%;
+            height: 100%;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-color: inherit;
+            border: none;
+            outline: none;
+        }
+        
+        /* Focus states - for click persistence */
+        .thumb1:focus ~ .slider__wrapper .slider {
+            transform: translateX(0%);
+        }
+        
+        .thumb2:focus ~ .slider__wrapper .slider {
+            transform: translateX(-33.333%);
+        }
+        
+        .thumb3:focus ~ .slider__wrapper .slider {
+            transform: translateX(-66.666%);
+        }
+        
+        /* Hover states - CSS sibling selectors */
+        .thumb1:hover ~ .slider__wrapper .slider {
+            transform: translateX(0%);
+        }
+        
+        .thumb2:hover ~ .slider__wrapper .slider {
+            transform: translateX(-33.333%);
+        }
+        
+        .thumb3:hover ~ .slider__wrapper .slider {
+            transform: translateX(-66.666%);
+        }
+        
+        /* Remove focus outline for cleaner look */
+        .thumb__float:focus {
+            outline: none;
+            opacity: 0.7;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .slider__wrapper {
+                max-height: 300px;
+            }
+            
+            .thumb__float {
+                width: 75px;
+                height: 75px;
+            }
+            
+            .thumb__container {
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body id=""border-color"" style=""border: 1px solid rgb(50, 84, 40); margin: 0px; padding: 0px;"">
+<!-- TITLE --->
+<div id=""title-part"" class=""py-3"" style=""background: #325428;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row"">
+<div class=""col-12"">
+<h1 class=""primary-text-color"" style=""text-align: center;"">enjoy shopping!!</h1>
+</div>
+</div>
+</div>
+</div>
+<!-- DESCRIPTION/GALLERY CONTAINER -->
+<div id=""description-container"" class=""secondary-color-bg pb-3 pt-4"" style=""background-color: #ffffff;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row""><!-- GALLERY -->
+<div id=""image-gallery"" class=""col-12 mb-4""><b style=""display: inline !important;"">We handle genuine Japanese products.</b>Please check the photos and feel free to contact us for any questions.</div>
+<div id=""description-part"" class=""col-12 secondary-color-text"">
+<div class=""secondary-color-text"">
+<p><span style=""text-decoration: underline;""><strong><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">Description</span></span></strong></span></p>
+<p>This item is <b>Pre-owned</b> and has been thoroughly inspected. <b>Please judge the item's condition by carefully viewing the detailed photos.</b> Minor wear consistent with normal use may be present. All included accessories are shown in the images. We are happy to answer any questions you may have about the item before purchase.</p>
+<p><span style=""text-decoration: underline;""><strong>Shipping &amp; Estimated Delivery</strong></span></p>
+<p>Handling time is based on our shipping policy. We will do our best to ship quickly and pack your item carefully.</p>
+<ul>
+<li><span style=""vertical-align: inherit;"">eBay International Shipping(DDP to U.S.) : 1-2weeks</span></li>
+<li><span style=""vertical-align: inherit;"">Japan Post (Registered Airmail/ePacket) : 2-3weeks</span></li>
+<li><span style=""vertical-align: inherit;"">EMS/DHL/Fedex : 1-2weeks</span></li>
+</ul>
+<p><span style=""text-decoration: underline;""><strong>Customs and Duties Policy</strong></span></p>
+<p><strong>For U.S. Buyers (DDP: Delivered Duty Paid)</strong></p>
+<p>All import duties, taxes, and customs fees are <b>included</b> in the total amount. <b>No additional payment</b> is required upon delivery.</p>
+<p><strong>For Buyers outside the U.S. (DDU: Delivered Duty Unpaid)</strong></p>
+<p>Import duties, taxes, and customs fees are <b>not included</b> in the item price or shipping cost. These charges are the <b>buyer's responsibility</b> and vary by country.</p>
+<p><span style=""text-decoration: underline;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">Important Notes</span></span></span></span></span></span></p>
+<p><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span></p>
+<ul>
+<li><span style=""vertical-align: inherit;""><b><span>Customs &amp; Delays:</span></b><span> Customs clearance and postal delays may extend delivery times.<source-footnote ng-version=""0.0.0-PLACEHOLDER"" _nghost-ng-c2574466737=""""><sup _ngcontent-ng-c2574466737="""" class=""superscript"" data-turn-source-index=""1""></sup></source-footnote></span> If you experience a delay, please contact your local post office or carrier with your tracking number.</span></li>
+<li><span style=""vertical-align: inherit;""><b>Declaration Policy:</b> We cannot declare a lower value or mark items as ""gift.""</span></li>
+<li><span style=""vertical-align: inherit;""></span><span style=""vertical-align: inherit;""><b>Refund Policy:</b> If a package is returned due to unpaid import fees, <b>the original shipping cost will not be refunded.</b></span></li>
+<li><span style=""vertical-align: inherit;""><b>Issues:</b> If you have any issues with your item, please contact us first. We will do our best to help.</span></li>
+</ul>
+<p>Thank you for your understanding and cooperation.<span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bold;""></span></span></span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""><span style=""font-weight: bolder;""><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;""></span></span></span></span></span></p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ICONS -->
+<div id=""info-part"" class=""secondary-color-bg pt-3"" style=""background-color: #ffffff;"">
+<div class=""container"" style=""max-width: 800px;"">
+<div class=""row"">
+<div class=""col-12 col-md-6 pb-2"">
+<div class=""row pb-1 secondary-color-text"">
+<div class=""col-3 my-auto""><svg xmlns=""http://www.w3.org/2000/svg"" viewbox=""0 0 512 512"" style=""height: auto; max-height: 60px; fill: currentColor;"" title=""配送""> <path d=""M476.158,231.363l-13.259-53.035c3.625-0.77,6.345-3.986,6.345-7.839v-8.551c0-18.566-15.105-33.67-33.67-33.67h-60.392 V110.63c0-9.136-7.432-16.568-16.568-16.568H50.772c-9.136,0-16.568,7.432-16.568,16.568V256c0,4.427,3.589,8.017,8.017,8.017 c4.427,0,8.017-3.589,8.017-8.017V110.63c0-0.295,0.239-0.534,0.534-0.534h307.841c0.295,0,0.534,0.239,0.534,0.534v145.372 c0,4.427,3.589,8.017,8.017,8.017c4.427,0,8.017-3.589,8.017-8.017v-9.088h94.569c0.008,0,0.014,0.002,0.021,0.002 c0.008,0,0.015-0.001,0.022-0.001c11.637,0.008,21.518,7.646,24.912,18.171h-24.928c-4.427,0-8.017,3.589-8.017,8.017v17.102 c0,13.851,11.268,25.119,25.119,25.119h9.086v35.273h-20.962c-6.886-19.883-25.787-34.205-47.982-34.205 s-41.097,14.322-47.982,34.205h-3.86v-60.393c0-4.427-3.589-8.017-8.017-8.017c-4.427,0-8.017,3.589-8.017,8.017v60.391H192.817 c-6.886-19.883-25.787-34.205-47.982-34.205s-41.097,14.322-47.982,34.205H50.772c-0.295,0-0.534-0.239-0.534-0.534v-17.637 h34.739c4.427,0,8.017-3.589,8.017-8.017s-3.589-8.017-8.017-8.017H8.017c-4.427,0-8.017,3.589-8.017,8.017 s3.589,8.017,8.017,8.017h26.188v17.637c0,9.136,7.432,16.568,16.568,16.568h43.304c-0.002,0.178-0.014,0.355-0.014,0.534 c0,27.996,22.777,50.772,50.772,50.772s50.772-22.776,50.772-50.772c0-0.18-0.012-0.356-0.014-0.534h180.67 c-0.002,0.178-0.014,0.355-0.014,0.534c0,27.996,22.777,50.772,50.772,50.772c27.995,0,50.772-22.776,50.772-50.772 c0-0.18-0.012-0.356-0.014-0.534h26.203c4.427,0,8.017-3.589,8.017-8.017v-85.511C512,251.989,496.423,234.448,476.158,231.363z M375.182,144.301h60.392c9.725,0,17.637,7.912,17.637,17.637v0.534h-78.029V144.301z M375.182,230.881v-52.376h71.235 l13.094,52.376H375.182z M144.835,401.904c-19.155,0-34.739-15.583-34.739-34.739s15.584-34.739,34.739-34.739 c19.155,0,34.739,15.583,34.739,34.739S163.99,401.904,144.835,401.904z M427.023,401.904c-19.155,0-34.739-15.583-34.739-34.739 s15.584-34.739,34.739-34.739c19.155,0,34.739,15.583,34.739,34.739S446.178,401.904,427.023,401.904z M495.967,299.29h-9.086 c-5.01,0-9.086-4.076-9.086-9.086v-9.086h18.171V299.29z""></path> </svg></div>
+<div class=""col-9 my-auto""><span><span style=""vertical-align: inherit;""><span style=""vertical-align: inherit;"">We prioritize fast handling.</span></span></span></div>
+</div>
+</div>
+<div class=""col-12 col-md-6 pb-3"">
+<div class=""row pb-1 secondary-color-text"">
+<div class=""col-3 my-auto""><svg xmlns=""http://www.w3.org/2000/svg"" viewbox=""0 0 44 44"" style=""height: auto; max-height: 60px; fill: currentColor;"" title=""接触""> <path d=""M43,6H1C0.447,6,0,6.447,0,7v30c0,0.553,0.447,1,1,1h42c0.552,0,1-0.447,1-1V7C44,6.447,43.552,6,43,6z M42,33.581 L29.612,21.194l-1.414,1.414L41.59,36H2.41l13.392-13.392l-1.414-1.414L2,33.581V8h40V33.581z""></path> <path d=""M39.979,8L22,25.979L4.021,8H2v0.807L21.293,28.1c0.391,0.391,1.023,0.391,1.414,0L42,8.807V8H39.979z""></path> </svg></div>
+<div class=""col-9 my-auto"">Feel free to contact us with any questions.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- FOOTER -->
+<div id=""copyright-part"" class=""py-3"" style=""background: #325428;"">
+<div class=""container primary-text-color"" style=""font-size: 90%; text-align: center;""><span style=""font-family: 'Market Sans', Arial, sans-serif; font-size: 14.4px; text-align: center;"">ARIGATO!! - Description generated by iMak Trading -</span></div>
+</div>
+</body></html>","FixedPrice","GTC",1,"Japan",1,"40-60","customer1","SALE","Brand new with tags. Shipped directly from Japan.",41827400010,"Uniqlo","T-Shirt","Regular","2XL","Black","Men","Pullover","Anime & Manga","Dragon Ball Characters","Dragon Ball","Graphic Print","Crew Neck","Short Sleeve","Cotton","All Seasons, Easy Care, Quick Dry, Stretch","Regular","Uniqlo UT","No","Does not apply","Machine Washable","Fall, Spring, Summer, Winter","Pullover"

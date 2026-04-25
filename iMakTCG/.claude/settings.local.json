@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python psa_to_csv.py)",
+      "Bash(python -c ':*)",
+      "WebSearch",
+      "WebFetch(domain:en.onepiece-cardgame.com)",
+      "WebFetch(domain:optcgapi.com)",
+      "WebFetch(domain:onepiece.limitlesstcg.com)",
+      "WebFetch(domain:www.onepiece-cardgame.com)",
+      "Bash(python)",
+      "Bash(2>&1)",
+      "Bash(ls -t ebay_upload_*.csv)",
+      "WebFetch(domain:pages.ebay.com)",
+      "WebFetch(domain:community.ebay.com)",
+      "WebFetch(domain:pics.ebay.com)",
+      "WebFetch(domain:export.ebay.com)",
+      "WebFetch(domain:www.ebay.com)",
+      "Bash(cp \"C:/Users/imax2/.claude/projects/C--Users-imax2/2c8f9153-b48a-46cf-8d86-a969c7cac888.jsonl\" \"C:/Users/imax2/.claude/projects/C--Users-imax2-OneDrive--------iMakMercari/\")",
+      "Bash(cp \"C:/Users/imax2/.claude/projects/C--Windows-System32/67f3bcf7-b8b5-44cb-8df8-a9ca18413f1e.jsonl\" \"C:/Users/imax2/.claude/projects/C--Users-imax2-OneDrive--------iMakMercari/\")",
+      "Bash(cp \"C:/Users/imax2/.claude/projects/C--Users-imax2/583798fb-0287-46b6-94ad-473a9b218e62.jsonl\" \"C:/Users/imax2/.claude/projects/C--Users-imax2-OneDrive--------iMakG-shock/\")",
+      "Bash(cp \"C:/Users/imax2/.claude/projects/C--Users-imax2/c77e61c0-df80-4888-8d88-363dae0423e4.jsonl\" \"C:/Users/imax2/.claude/projects/C--Users-imax2-OneDrive--------iMakTCG/\")",
+      "Bash(cp \"C:/Users/imax2/.claude/projects/C--Users-imax2/cf48f6b0-7ef3-44f6-99c5-39cc4db2440b.jsonl\" \"C:/Users/imax2/.claude/projects/C--Users-imax2-OneDrive--------iMak_ichibankuji/\")"
+    ]
+  }
+}

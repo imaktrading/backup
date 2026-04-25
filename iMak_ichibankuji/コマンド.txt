@@ -1,0 +1,1 @@
+python ichibankuji_to_csv.py

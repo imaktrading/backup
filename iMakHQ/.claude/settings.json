@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 7)",
+      "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 6)",
+      "Bash(PYTHONIOENCODING=utf-8 python gemini_verifier.py audit_logs/claude_audit_20260417.md)",
+      "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 3)",
+      "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 4)",
+      "Bash(PYTHONIOENCODING=utf-8 python -c \"import control_panel; print\\('SCRIPTS:', len\\(control_panel.SCRIPTS\\)\\); print\\('TREND_LINKS:', list\\(control_panel.TREND_LINKS.keys\\(\\)\\)\\); print\\('COMMON:', len\\(control_panel.COMMON_TREND_LINKS\\)\\)\")",
+      "Bash(where pythonw.exe)",
+      "Bash(where python *)",
+      "Bash(where pythonw *)",
+      "Bash(cscript //nologo \"c:/Users/imax2/OneDrive/デスクトップ/iMak_workspace/iMakHQ/操作パネル.vbs\")",
+      "Bash(PYTHONIOENCODING=utf-8 timeout 180 python montbell_outlet_scraper.py --categories 2 --limit 2)",
+      "Bash(mv \"操作パネル.vbs\" \"出品くん.vbs\")",
+      "Bash(mv \"操作パネル.bat\" \"出品くん.bat\")",
+      "Bash(taskkill /F /PID 1297)",
+      "Bash(taskkill /F /PID 1296)",
+      "Bash(cmd.exe /c \"taskkill //F //PID 1297\")",
+      "Bash(cmd.exe /c \"taskkill //F //PID 1296\")",
+      "Bash(powershell.exe -Command \"Stop-Process -Id 1297 -Force -ErrorAction SilentlyContinue; Stop-Process -Id 1296 -Force -ErrorAction SilentlyContinue; Write-Host 'done'\")",
+      "Bash(cmd.exe //c \"c:\\\\Users\\\\imax2\\\\OneDrive\\\\デスクトップ\\\\iMak_workspace\\\\iMakHQ\\\\backup_claude.bat\")",
+      "Bash(cmd.exe //c \"robocopy \\\\\"C:\\\\Users\\\\imax2\\\\OneDrive\\\\デスクトップ\\\\iMak_workspace_BACKUP_20260415_095411\\\\\" \\\\\"C:\\\\Users\\\\imax2\\\\backups\\\\iMak_workspace_BACKUP_20260415_095411\\\\\" /E /R:2 /W:5 /NP /NFL /NDL\")",
+      "Bash(cmd.exe //c \"c:\\\\Users\\\\imax2\\\\OneDrive\\\\デスクトップ\\\\iMak_workspace\\\\iMakHQ\\\\_tmp_move_backup.bat\")",
+      "Read(//c/Users/imax2/OneDrive/デスクトップ/iMak_workspace/iMakHQ/**)",
+      "Bash(cmd.exe //c \"tasklist /FI \\\\\"IMAGENAME eq python.exe\\\\\" /FO CSV /NH\")",
+      "Bash(cmd.exe //c tasklist)",
+      "Bash(cmd.exe //c \"wmic process where name=\\\\\"python.exe\\\\\" get ProcessId,CommandLine\")",
+      "Bash(PYTHONIOENCODING=utf-8 python daiwa_jp.py)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\imax2",
+      "C:\\Users\\imax2\\.claude\\projects\\c--Users-imax2-OneDrive-----------"
+    ]
+  }
+}

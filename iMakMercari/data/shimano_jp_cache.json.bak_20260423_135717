@@ -1,0 +1,32 @@
+{
+  "加古川店】中古SHIMANO|シマノリール23ストラディックC2000SHGスピニングリール】86】": {
+    "weight_g": "185",
+    "gear_ratio": "6:1",
+    "max_drag_kg": "3",
+    "line_capacity_nylon": "3－125、4－100、5－75",
+    "line_capacity_pe": "0.6－150、0.8－110、1－80",
+    "ball_bearings": "6+1",
+    "line_per_turn_cm": "81",
+    "handle_arm_mm": "45",
+    "spool_size": "43",
+    "country": "",
+    "source_url": "https://www.naturum.co.jp/product/?itemcd=3430891",
+    "matched_item": "23 ストラディック C2000SHG",
+    "match_quality": "exact"
+  },
+  "加古川店】中古SHIMANO|シマノリール25アルテグラC2000Sスピニングリール】86】": {
+    "weight_g": "180.0",
+    "gear_ratio": "6.0:1",
+    "max_drag_kg": "",
+    "line_capacity_nylon": "3－125、4－100、5－75",
+    "line_capacity_pe": "0.6－150、0.8－110、1－80",
+    "ball_bearings": "",
+    "line_per_turn_cm": "81",
+    "handle_arm_mm": "",
+    "spool_size": "43",
+    "country": "",
+    "source_url": "https://www.naturum.co.jp/product/?itemcd=3498198",
+    "matched_item": "25 アルテグラ C2000SHG",
+    "match_quality": "exact"
+  }
+}

@@ -1,0 +1,15 @@
+# メルカリスカウト検索URLリスト
+# 書式: コメント行で (category:xxx) (collab:xxx) ←ブラケットで記述、次行にURL
+#       (※このヘッダー内で記述すると parser が拾うため丸括弧で例示)
+#
+# 2026-04-23: Phase 3 ⑤ 市場連動ゲート検証のためリールのみ有効化
+#             旧 tshirt UNIQLO Dragon Ball は無効化（復活時は過去版参照）
+
+# [category:reel] 23 Daiwa イグジスト 高値帯（ALERT誘発狙い price_min=50000）
+https://jp.mercari.com/search?keyword=23%20%E3%82%A4%E3%82%B0%E3%82%B8%E3%82%B9%E3%83%88&sort=created_time&order=desc&status=on_sale&price_min=50000
+
+# [category:reel] 22 Shimano ステラ 高値帯（ALERT誘発狙い price_min=50000）
+https://jp.mercari.com/search?keyword=22%20%E3%82%B9%E3%83%86%E3%83%A9&sort=created_time&order=desc&status=on_sale&price_min=50000
+
+# [category:reel] 24 Daiwa セルテート 標準帯（GO判定対照群）
+https://jp.mercari.com/search?keyword=24%20%E3%82%BB%E3%83%AB%E3%83%86%E3%83%BC%E3%83%88&sort=created_time&order=desc&status=on_sale

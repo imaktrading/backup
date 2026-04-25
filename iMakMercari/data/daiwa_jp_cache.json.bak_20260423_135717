@@ -1,0 +1,32 @@
+{
+  "加古川店】中古DAIWA|ダイワリール24バスX100Hベイトリール/右ハンドル】85】": {
+    "weight_g": "195",
+    "gear_ratio": "7.5:1",
+    "max_drag_kg": "5",
+    "line_capacity_nylon": "",
+    "line_capacity_pe": "",
+    "ball_bearings": "",
+    "line_per_turn_cm": "",
+    "handle_arm_mm": "",
+    "spool_size": "",
+    "country": "",
+    "source_url": "https://www.naturum.co.jp/product/?itemcd=3456293",
+    "matched_item": "24バス X100H 右ハンドル",
+    "match_quality": "naturum"
+  },
+  "加古川店】中古DAIWA|ダイワリール21タトゥーラTW300XHLベイトリール/左ハンドル】86】": {
+    "weight_g": "325",
+    "gear_ratio": "",
+    "max_drag_kg": "11",
+    "line_capacity_nylon": "",
+    "line_capacity_pe": "",
+    "ball_bearings": "",
+    "line_per_turn_cm": "",
+    "handle_arm_mm": "",
+    "spool_size": "",
+    "country": "",
+    "source_url": "https://www.naturum.co.jp/product/?itemcd=3174721",
+    "matched_item": "TATULA(タトゥーラ) TW 300XHL 左巻き",
+    "match_quality": "naturum"
+  }
+}

@@ -1,0 +1,92 @@
+# =====================================
+# iMak Trading Japan - Monorepo .gitignore
+# Created: 2026-04-25
+# =====================================
+
+# === SECRETS (must never be committed) ===
+**/API key.txt
+**/api_key.txt
+**/ebay keys.txt
+**/gemini_key.txt
+**/groq_key.txt
+**/openai_key.txt
+**/anthropic_key.txt
+**/credentials.json
+**/service_account*.json
+double-hold-*.json
+*.pem
+*.key
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# === Virtual env ===
+.venv/
+venv/
+env/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === OS ===
+desktop.ini
+Thumbs.db
+.DS_Store
+ehthumbs.db
+
+# === Excel/Office temp ===
+~$*.xlsx
+~$*.xls
+~$*.docx
+
+# === Logs ===
+*.log
+psa_run_*.log
+**/logs/
+
+# === Cache files (regeneratable) ===
+**/*_cache.json
+**/cache/
+**/data/*_cache.json
+**/bandai_*_cache.json
+**/pokemon_*_cache.json
+**/psa_cache.json
+
+# === Generated CSV outputs (regeneratable) ===
+**/csv_output/*.csv
+**/csv_output/*.json
+**/ebay_upload_*.csv
+**/tcg_upload_*.csv
+**/tshirt_upload_*.csv
+**/gshock_upload_*.csv
+**/porter_upload_*.csv
+**/ichibankuji_upload_*.csv
+
+# === Review/audit logs (regeneratable) ===
+**/review_logs/*.jsonl
+**/review_logs/*.md
+**/audit_logs/*.md
+
+# === Sold data (large, regeneratable) ===
+**/sold_data/*.xlsx
+**/sold_data/*.csv
+
+# === Misc temp/test outputs ===
+**/_*.csv
+**/scout_result.xlsx
+**/tmp/
+**/temp/
+*.tmp

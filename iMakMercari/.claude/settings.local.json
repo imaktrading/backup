@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:store.shopping.yahoo.co.jp)",
+      "WebFetch(domain:en.montbell.jp)",
+      "WebFetch(domain:www.naturum.co.jp)",
+      "WebFetch(domain:www.yamakei-online.com)",
+      "Bash(python -c ':*)",
+      "Read(//c/Users/imax2/.claude/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\imax2\\.claude"
+    ]
+  }
+}

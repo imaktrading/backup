@@ -1,0 +1,204 @@
+{
+  "SUCCESS_CASES": [
+    {
+      "name": "正常なリール出品(中古)",
+      "mercari_state": "目立った傷や汚れなし",
+      "row": {
+        "*Title": "Shimano 22 Stella C3000XG Spinning Reel Pre-owned Japan",
+        "*Category": 261030,
+        "*StartPrice": 580.0,
+        "ConditionID": 3000,
+        "ConditionDescription": "Excellent condition. Very minor signs of use if any. Please review all photos for details.",
+        "C:Brand": "Shimano",
+        "CustomLabel": "REEL-STELLA-001"
+      }
+    },
+    {
+      "name": "正常なTシャツ出品(新品)",
+      "mercari_state": "新品",
+      "row": {
+        "*Title": "Uniqlo UT KAWS Limited T-shirt Black Brand New Japan",
+        "*Category": 15687,
+        "*StartPrice": 45.0,
+        "ConditionID": 1000,
+        "ConditionDescription": "Brand new, unused condition. Comes with original packaging when applicable.",
+        "C:Brand": "Uniqlo",
+        "CustomLabel": "TSHT-KAWS-001"
+      }
+    }
+  ],
+  "FAILURE_CASES": [
+    {
+      "name": "Brand欠落エラー",
+      "mercari_state": "新品",
+      "row": {
+        "*Title": "Generic T-shirt Brand New Japan",
+        "*Category": 15687,
+        "*StartPrice": 20.0,
+        "ConditionID": 1000,
+        "C:Brand": ""
+      },
+      "expected_error_field": "C:Brand"
+    },
+    {
+      "name": "タイトルマーカー不整合(新品IDなのにタイトルにNewがない)",
+      "mercari_state": "新品",
+      "row": {
+        "*Title": "Daiwa Exist SF2500SS",
+        "*Category": 261030,
+        "*StartPrice": 700.0,
+        "ConditionID": 1000,
+        "C:Brand": "Daiwa"
+      },
+      "expected_error_field": "*Title"
+    },
+    {
+      "name": "中古品の説明文欠落",
+      "mercari_state": "やや傷や汚れあり",
+      "row": {
+        "*Title": "Used Reel Pre-owned Japan",
+        "*Category": 261030,
+        "*StartPrice": 100.0,
+        "ConditionID": 3000,
+        "ConditionDescription": "",
+        "C:Brand": "Daiwa"
+      },
+      "expected_error_field": "ConditionDescription"
+    },
+    {
+      "name": "AutoFromEbay_STRADIC-001_21919308",
+      "category": "reel",
+      "mercari_state": "",
+      "row": {
+        "*Title": "Shimano Stradic Spinning Reel Pre-owned Japan",
+        "*Category": "261030",
+        "*StartPrice": "227.98",
+        "ConditionID": "3000",
+        "ConditionDescription": "Minor scratches.",
+        "C:Brand": "Shimano",
+        "C:Features": "Anti-Reverse, Aluminum Spool, Front Drag, Cold Forged Aluminum Spool",
+        "CustomLabel": "STRADIC-001"
+      },
+      "expected_error_field": "C:Features",
+      "_meta": {
+        "source": "ebay_response_auto",
+        "response_csv": "SYNTH_response.csv",
+        "ebay_error_code": "21919308",
+        "ebay_error_message": "Features's value of \"Anti-Reverse, Aluminum Spool, Front Drag, Cold Forged Aluminum Spool\" is too long. Enter a value of no more than 65 characters.",
+        "added_ts": "2026-04-23T20:21:14.991611"
+      }
+    }
+  ],
+  "PRICE_VALIDATION_CASES": [
+    {
+      "name": "CASE-A: reel GO - 価格妥当、通過",
+      "category": "reel",
+      "price_status": "GO",
+      "median_usd": 500,
+      "row": {
+        "*Title": "Shimano 22 Stella C3000XG Spinning Reel Pre-owned Japan",
+        "*Category": 261030,
+        "*StartPrice": 550.0,
+        "ConditionID": 3000,
+        "ConditionDescription": "Excellent condition. Very minor signs of use if any. Please review all photos for details.",
+        "C:Brand": "Shimano",
+        "CustomLabel": "PRICE-TEST-A"
+      },
+      "expect_error": false,
+      "expect_alert_message": false
+    },
+    {
+      "name": "CASE-B: reel ALERT - 相場乖離でHOLD",
+      "category": "reel",
+      "price_status": "ALERT",
+      "median_usd": 500,
+      "row": {
+        "*Title": "Shimano 22 Stella C3000XG Spinning Reel Pre-owned Japan",
+        "*Category": 261030,
+        "*StartPrice": 700.0,
+        "ConditionID": 3000,
+        "ConditionDescription": "Excellent condition. Very minor signs of use if any. Please review all photos for details.",
+        "C:Brand": "Shimano",
+        "CustomLabel": "PRICE-TEST-B"
+      },
+      "expect_error": true,
+      "expect_alert_message": true
+    },
+    {
+      "name": "CASE-C: porter除外 - ALERTでも通過(enabled=False)",
+      "category": "porter",
+      "price_status": "ALERT",
+      "median_usd": 500,
+      "row": {
+        "*Title": "Porter Yoshida Tanker Shoulder Bag Black Pre-owned Japan",
+        "*Category": 169291,
+        "*StartPrice": 900.0,
+        "ConditionID": 3000,
+        "ConditionDescription": "Excellent pre-owned condition. Light signs of wear. See photos for details.",
+        "C:Brand": "Porter",
+        "CustomLabel": "PRICE-TEST-C"
+      },
+      "expect_error": false,
+      "expect_alert_message": false
+    },
+    {
+      "name": "CASE-D: 後方互換 - 価格引数なしでも通過(既存呼出先影響なし)",
+      "category": "reel",
+      "row": {
+        "*Title": "Shimano 22 Stella C3000XG Spinning Reel Pre-owned Japan",
+        "*Category": 261030,
+        "*StartPrice": 550.0,
+        "ConditionID": 3000,
+        "ConditionDescription": "Excellent condition. Very minor signs of use if any. Please review all photos for details.",
+        "C:Brand": "Shimano",
+        "CustomLabel": "PRICE-TEST-D"
+      },
+      "expect_error": false,
+      "expect_alert_message": false
+    }
+  ],
+  "PROMO_DUAL_CITIZENSHIP_CASES": [
+    {
+      "name": "ケース1-Shanks: PSA OP11-A vs Bandai ST16",
+      "title": "ONE PIECE Shanks SR ST16-004 PSA 10 Japanese Promo",
+      "psa_brand": "ONE PIECE JAPANESE OP11-A FIST OF DIVINE SPEED",
+      "expect_match": true,
+      "expect_case": "ケース1"
+    },
+    {
+      "name": "ケース1-Ace: PSA OP13 vs Bandai EB02",
+      "title": "ONE PIECE Ace SP EB02-028 PSA 10 Japanese Special Alt Art",
+      "psa_brand": "ONE PIECE JAPANESE OP13-CARRYING ON HIS WILL",
+      "expect_match": true,
+      "expect_case": "ケース1"
+    },
+    {
+      "name": "ケース2-Hancock: PSA PROMO命名のみ + title ST03",
+      "title": "ONE PIECE Boa Hancock SR ST03-005 PSA 10 Japanese Promo",
+      "psa_brand": "ONE PIECE JAPANESE PROMO",
+      "expect_match": true,
+      "expect_case": "ケース2"
+    },
+    {
+      "name": "ケース2-Nami: PSA PREMIUM CARD COLLECTION + title EB02",
+      "title": "ONE PIECE Nami SR EB02-001 PSA 10 Japanese",
+      "psa_brand": "ONE PIECE JAPANESE PREMIUM CARD COLLECTION",
+      "expect_match": true,
+      "expect_case": "ケース2"
+    },
+    {
+      "name": "ケース2-Luffy: PSA WEEKLY SHONEN JUMP + title OP01",
+      "title": "ONE PIECE Luffy P SR OP01-001 PSA 10 Japanese Promo",
+      "psa_brand": "ONE PIECE JAPANESE WEEKLY SHONEN JUMP PROMO",
+      "expect_match": true,
+      "expect_case": "ケース2"
+    },
+    {
+      "name": "偽陽性遮断-非TCG: POKEMON brand には適用しない (TCG ガード)",
+      "title": "Charizard OP01-001 PSA 10 Promo",
+      "psa_brand": "POKEMON JAPANESE PROMO",
+      "expect_match": false,
+      "expect_case": null
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{ "path": "iMakHQ" },
+		{ "path": "iMakTCG" },
+		{ "path": "iMakG-shock" },
+		{ "path": "iMakMercari" },
+		{ "path": "iMak_ichibankuji" },
+		{ "path": "iMakeBayAPI" },
+		{ "path": "iMakKeywords" }
+	],
+	"settings": {}
+}
