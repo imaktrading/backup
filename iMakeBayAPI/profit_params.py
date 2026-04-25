@@ -253,6 +253,27 @@ def compute_min_price_usd(cost_jpy, category):
     return (cost_jpy + params["shipping_jpy"]) / (cache["exchange_rate"] * net_ratio)
 
 
+def get_pricing_tiers():
+    """価格帯別 GATE 判定パラメータを yaml(SSOT) から取得.
+    Returns: list of dict [{max_usd, target_profit, gap_limit}, ...]
+    """
+    return config_loader.load().get("pricing_tiers", [])
+
+
+def get_tier_params(median_usd):
+    """価格帯別パラメータを返す（全プロジェクト共通の SSOT API）.
+
+    Args:
+        median_usd: 中央値 USD 価格
+    Returns:
+        (target_profit, gap_limit) tuple
+    """
+    for tier in get_pricing_tiers():
+        if median_usd <= tier["max_usd"]:
+            return tier["target_profit"], tier["gap_limit"]
+    return 0.10, 0.10  # yaml が空 / 不正の最終 fallback
+
+
 def get_check_csv_params(category):
     """check_csv.py 系で使う dict shape を返す（SSOT 抽象化のための統一API）.
 

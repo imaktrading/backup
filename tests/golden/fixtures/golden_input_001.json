@@ -1,0 +1,44 @@
+{
+  "_meta": {
+    "description": "Step 4 真の本番: 実弾凍結フィクスチャ #001",
+    "frozen_at": "2026-04-25",
+    "purpose": "Bandai/PSA レスポンスを凍結し、build_listing_row が deterministic に CSV 行を生成することを検証"
+  },
+  "psa_response": {
+    "PSACert": {
+      "CertNumber": "137877750",
+      "Subject": "GUNDAM",
+      "Brand": "GUNDAM CCG EDITION BETA PROMOS",
+      "CardNumber": "006",
+      "Year": "2026",
+      "Grade": 10,
+      "GradeDescription": "GEM MT",
+      "Variety": "EX BASE SDG GGENE ETERNAL CLB PACK"
+    }
+  },
+  "bandai_card": {
+    "source": "bandai-tcg-plus",
+    "card_name": "EX-Base SDG GGENE Eternal CLB Pack",
+    "card_number": "006",
+    "set_name": "Beta Promos [GD-PR]",
+    "card_type": "Base Card",
+    "rarity": "Common",
+    "color": "",
+    "power": "",
+    "cost": "",
+    "special_trait": "",
+    "combo_power": ""
+  },
+  "frozen_inputs": {
+    "schedule_time": "2026-04-20 22:16:12",
+    "exchange_rate_usd": 159.245,
+    "cost_jpy": 5000,
+    "category_yaml": "TCG(PSA10)",
+    "ebay_category": 183454,
+    "store_category_id": "",
+    "pic_url": "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main/999.png",
+    "title_override": "Gundam CCG Edition Beta Promos #006 EX BASE SDG GGENE ETERNAL CLB PACK PSA 10 GE",
+    "start_price_usd": 100.0,
+    "shipping_profile_name": "DDP-100-200"
+  }
+}

@@ -44,34 +44,25 @@ INVENTORY_SHEET_IDS = [
 # eBay API
 EBAY_KEYS_FILE = os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI", "ebay keys.txt")
 
-# 利益計算パラメータ（利益計算シート_v2.xlsx準拠）
-EXCHANGE_RATE = 159.245
-EBAY_FEE = 0.185
-PROMO_RATE = 0.1
-PAYO_RATE = 0.025
-SHIPPING_JPY = 2000  # デフォルト。カテゴリで変える場合は検索URLに紐付ける
-NET_RATIO = 1 - EBAY_FEE - PROMO_RATE - PAYO_RATE  # 0.69
+# 利益計算パラメータ（SSOT 抽象化: profit_params.get_check_csv_params 経由）
+# 2026-04-25 Step 7 拡張: ハードコード撲滅、yaml(SSOT) 注入型に統一。
+#   旧: EBAY_FEE=0.185 / SHIPPING_JPY=2000 等を直接記述
+#   新: Mercari は Tシャツ(UT) カテゴリで FVF=15.3% (yaml と一致)
+import sys as _sys_pp
+_sys_pp.path.insert(0, os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI"))
+from profit_params import get_check_csv_params as _gccp_pp
+_pp = _gccp_pp("Tシャツ(UT)")
+EXCHANGE_RATE = _pp["exchange_rate"]
+EBAY_FEE      = _pp["ebay_fee_rate"]
+PROMO_RATE    = _pp["promo_rate"]
+PAYO_RATE     = _pp["payo_rate"]
+SHIPPING_JPY  = _pp["shipping_jpy"]  # デフォルト。カテゴリで変える場合は検索URLに紐付ける
+NET_RATIO = 1 - EBAY_FEE - PROMO_RATE - PAYO_RATE
 
-# 価格帯別パラメータ（GATE判定パラメータ検討.xlsx確定値）
-TIER_PARAMS = [
-    (39,   0.25, 0.50),
-    (60,   0.25, 0.50),
-    (100,  0.20, 0.50),
-    (200,  0.15, 0.50),
-    (300,  0.10, 0.40),
-    (400,  0.10, 0.25),
-    (500,  0.10, 0.20),
-    (600,  0.10, 0.15),
-    (800,  0.10, 0.10),
-    (9999, 0.10, 0.10),
-]
-
-
-def get_tier_params(median_usd):
-    for threshold, profit_target, gap_limit in TIER_PARAMS:
-        if median_usd <= threshold:
-            return profit_target, gap_limit
-    return 0.10, 0.10
+# 価格帯別パラメータ: SSOT 抽象化 (profit_params.get_tier_params 経由)
+# 旧: 本ファイル内に TIER_PARAMS リスト定義 (6ファイル重複)
+# 新: yaml(global.yaml) の pricing_tiers を SSOT、共通 API で取得
+from profit_params import get_tier_params  # noqa: F401  (re-export for back-compat)
 
 
 # ===== Chromeプロファイル管理 =====

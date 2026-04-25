@@ -1018,6 +1018,16 @@ def main():
             writer.writeheader()
             writer.writerows(results)
 
+        # Step 8 拡張: decision_log に config_version + 使用値を刻印
+        try:
+            import sys as _sys_dl
+            _sys_dl.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            from decision_log import log_csv_batch as _log_batch
+            _log_batch(project="iMakMercari", category="Tシャツ(UT)",
+                       output_path=OUTPUT_CSV, row_count=len(results))
+        except Exception as _e:
+            print(f"⚠️ decision_log 失敗 (Mercari): {type(_e).__name__}: {_e}")
+
         print(f"\n[OK] 完了! 出力: {OUTPUT_CSV}")
         print(f"成功: {len(results)}件 / 失敗・HOLD: {len(errors)}件")
     else:

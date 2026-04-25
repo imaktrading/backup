@@ -55,24 +55,8 @@ PROFIT_PARAMS = _gccp_pp("一番くじ")
 
 # 価格帯別パラメータ（GATE判定パラメータ検討.xlsx確定値）
 # (中央値上限, 目標利益率, 許容乖離率)
-TIER_PARAMS = [
-    (39,   0.25, 0.50),   # $0-39:   利益25%, 乖離50%まで
-    (60,   0.25, 0.50),   # $40-60:  利益25%, 乖離50%まで
-    (100,  0.20, 0.50),   # $60-100: 利益20%, 乖離50%まで
-    (200,  0.15, 0.50),   # $100-200:利益15%, 乖離50%まで
-    (300,  0.10, 0.40),   # $200-300:利益10%, 乖離40%まで
-    (400,  0.10, 0.25),   # $300-400:利益10%, 乖離25%まで
-    (500,  0.10, 0.20),   # $400-500:利益10%, 乖離20%まで
-    (600,  0.10, 0.15),   # $500-600:利益10%, 乖離15%まで
-    (800,  0.10, 0.10),   # $600-800:利益10%, 乖離10%まで
-    (9999, 0.10, 0.10),   # $800+:   利益10%, 乖離10%まで
-]
-
-def get_tier_params(median_usd):
-    for threshold, profit_target, gap_limit in TIER_PARAMS:
-        if median_usd <= threshold:
-            return profit_target, gap_limit
-    return 0.10, 0.10
+# 価格帯別パラメータ: SSOT 抽象化 (profit_params.get_tier_params 経由)
+from profit_params import get_tier_params  # noqa: F401
 
 # TOPセラー判定閾値
 TOP_SELLER_MIN_FEEDBACK = 500       # 取引実績500件以上

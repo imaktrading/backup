@@ -1062,6 +1062,14 @@ def main():
         writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
         writer.writerows(rows)
 
+    # Step 8 拡張: decision_log に config_version + 使用値を刻印
+    try:
+        from decision_log import log_csv_batch as _log_batch
+        _log_batch(project="iMakG-shock", category="G-SHOCK",
+                   output_path=output_file, row_count=max(0, len(rows) - 1))
+    except Exception as _e:
+        print(f"⚠️ decision_log 失敗 (G-shock): {type(_e).__name__}: {_e}")
+
     print(f"\n完了！出力: {output_file}")
     print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")
 

@@ -1020,6 +1020,15 @@ def _process_sheet_to_ebay_csv():
             writer.writeheader()
             writer.writerows(all_rows)
         print(f"\n✅ eBay CSV出力: {OUTPUT_CSV}  ({len(all_rows)}件)")
+        # Step 8 拡張: decision_log に config_version + 使用値を刻印
+        try:
+            import sys as _sys_dl
+            _sys_dl.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            from decision_log import log_csv_batch as _log_batch
+            _log_batch(project="iMak_ichibankuji", category="一番くじ",
+                       output_path=OUTPUT_CSV, row_count=len(all_rows))
+        except Exception as _e:
+            print(f"⚠️ decision_log 失敗 (ichibankuji): {type(_e).__name__}: {_e}")
         print(f"   ※ 出品完了後、統合Hight B列にItemIDを手入力で「処理済」化")
     else:
         print("\n❌ eBay CSV対象行なし")

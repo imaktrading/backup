@@ -113,6 +113,68 @@ def log_decision(
     return path
 
 
+def log_csv_batch(
+    *,
+    project: str,
+    category: str,
+    output_path: str,
+    row_count: int,
+    extra: Optional[dict] = None,
+) -> Path:
+    """CSV 1ファイル生成完了の summary record (4 メイン実行パス共通呼出).
+
+    Step 8 拡張 (2026-04-25): 「どの Config Version を使い、どの値を参照したか」
+    を CSV 生成のたびに必ず刻印するための共通呼出口。
+
+    Args:
+        project: "iMakTCG" / "iMakG-shock" / "iMakMercari" / "iMak_ichibankuji"
+        category: yaml カテゴリ名 ("TCG(PSA10)" / "G-SHOCK" 等)
+        output_path: 生成 CSV のフルパス
+        row_count: 書込行数
+        extra: 追加情報 (任意)
+
+    Returns:
+        ログファイルパス
+    """
+    # 使用された FVF/shipping/exchange_rate も同時刻印 (yaml の値が反映されたか後追い可能)
+    try:
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
+        from profit_params import get_check_csv_params
+        params = get_check_csv_params(category)
+        fvf = params["ebay_fee_rate"]
+        shipping_jpy = params["shipping_jpy"]
+        exchange_rate = params["exchange_rate"]
+    except Exception as e:
+        fvf = None
+        shipping_jpy = None
+        exchange_rate = None
+        if extra is None:
+            extra = {}
+        extra["param_lookup_error"] = f"{type(e).__name__}: {e}"
+
+    record_extra = {
+        "kind": "csv_batch",
+        "output_path": str(output_path),
+        "row_count": row_count,
+        "fvf_used": fvf,
+        "exchange_rate_used": exchange_rate,
+    }
+    if extra:
+        record_extra.update(extra)
+
+    return log_decision(
+        project=project,
+        sku=f"BATCH-{datetime.now().strftime('%H%M%S')}",
+        title=f"CSV batch generated ({row_count} rows)",
+        category=category,
+        shipping_jpy=shipping_jpy,
+        status="OK",
+        reason=f"CSV写出完了 → {output_path}",
+        extra=record_extra,
+    )
+
+
 def read_today_decisions() -> list:
     """本日のログをリストで返す（後追い解析用）"""
     path = _today_log_path()

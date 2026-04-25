@@ -1685,26 +1685,10 @@ def main():
     SHIPPING_JPY = get_category_params(PROFIT_CATEGORY)["shipping_jpy"]
     NET_RATIO = 1 - EBAY_FEE - PROMO_RATE - PAYO_RATE  # 目標利益を引かないNET（GATE判定で目標利益を別途差引）
 
-    # 価格帯別パラメータ（GATE判定パラメータ検討.xlsx確定値）
-    # (中央値上限, 目標利益率, 許容乖離率)
-    TIER_PARAMS = [
-        (39,   0.25, 0.50),   # $0-39:   利益25%, 乖離50%まで
-        (60,   0.25, 0.50),   # $40-60:  利益25%, 乖離50%まで
-        (100,  0.20, 0.50),   # $60-100: 利益20%, 乖離50%まで
-        (200,  0.15, 0.50),   # $100-200:利益15%, 乖離50%まで
-        (300,  0.10, 0.40),   # $200-300:利益10%, 乖離40%まで
-        (400,  0.10, 0.25),   # $300-400:利益10%, 乖離25%まで
-        (500,  0.10, 0.20),   # $400-500:利益10%, 乖離20%まで
-        (600,  0.10, 0.15),   # $500-600:利益10%, 乖離15%まで
-        (800,  0.10, 0.10),   # $600-800:利益10%, 乖離10%まで
-        (9999, 0.10, 0.10),   # $800+:   利益10%, 乖離10%まで
-    ]
-
-    def get_tier_params(median_usd):
-        for threshold, profit_target, gap_limit in TIER_PARAMS:
-            if median_usd <= threshold:
-                return profit_target, gap_limit
-        return 0.10, 0.10  # fallback
+    # 価格帯別パラメータ: SSOT 抽象化 (profit_params.get_tier_params 経由)
+    # 旧: 関数内で TIER_PARAMS リスト + ローカル get_tier_params 定義 (6ファイル重複の1つ)
+    # 新: yaml(global.yaml) の pricing_tiers が SSOT
+    from profit_params import get_tier_params  # noqa: F401
 
     MARKET_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "market_log.csv")
     MARKET_LOG_HEADERS = [
@@ -1869,6 +1853,14 @@ def main():
     with open(output_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
         writer.writerows(rows)
+
+    # Step 8 拡張: decision_log に config_version + 使用値を刻印
+    try:
+        from decision_log import log_csv_batch as _log_batch
+        _log_batch(project="iMakTCG", category="TCG(PSA10)",
+                   output_path=output_file, row_count=max(0, len(rows) - 1))
+    except Exception as _e:
+        print(f"⚠️ decision_log 失敗 (TCG): {type(_e).__name__}: {_e}")
 
     # 仕入値データをサイドカーJSONとして保存（check_csv.pyが参照）
     if cost_map:

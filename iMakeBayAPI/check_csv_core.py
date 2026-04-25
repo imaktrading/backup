@@ -25,29 +25,13 @@ import requests
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EBAY_KEYS_FILE = os.path.join(SCRIPT_DIR, "ebay keys.txt")
 
-# 価格帯別TIERパラメータ (GATE判定パラメータ検討.xlsx確定値)
-TIER_PARAMS = [
-    (39,   0.25, 0.50),
-    (60,   0.25, 0.50),
-    (100,  0.20, 0.50),
-    (200,  0.15, 0.50),
-    (300,  0.10, 0.40),
-    (400,  0.10, 0.25),
-    (500,  0.10, 0.20),
-    (600,  0.10, 0.15),
-    (800,  0.10, 0.10),
-    (9999, 0.10, 0.10),
-]
+# 価格帯別TIERパラメータ: SSOT 抽象化 (profit_params.get_tier_params)
+# 旧: 本ファイルにも TIER_PARAMS 定義あり (6ファイル重複の1つ)
+# 新: yaml(global.yaml) の pricing_tiers が SSOT
+from profit_params import get_tier_params, get_pricing_tiers  # noqa: F401
 
 TOP_SELLER_MIN_FEEDBACK = 500
 TOP_SELLER_MIN_PERCENTAGE = 98.0
-
-
-def get_tier_params(median_usd):
-    for threshold, profit_target, gap_limit in TIER_PARAMS:
-        if median_usd <= threshold:
-            return profit_target, gap_limit
-    return 0.10, 0.10
 
 
 # ===== eBay API =====

@@ -89,6 +89,50 @@ def test_log_extra_field(tmp_path):
     assert rec["extra"]["verdict"] == "HOLD"
 
 
+def test_log_csv_batch_all_4_projects(tmp_path):
+    """Step 8 拡張: 4プロジェクトの category で log_csv_batch が正常動作"""
+    _with_tmp_log_dir(tmp_path)
+    cases = [
+        ("iMakTCG", "TCG(PSA10)"),
+        ("iMakG-shock", "G-SHOCK"),
+        ("iMakMercari", "Tシャツ(UT)"),
+        ("iMak_ichibankuji", "一番くじ"),
+    ]
+    for project, category in cases:
+        decision_log.log_csv_batch(
+            project=project,
+            category=category,
+            output_path=f"/tmp/{project}_test.csv",
+            row_count=10,
+        )
+    decisions = decision_log.read_today_decisions()
+    assert len(decisions) == 4
+    for rec, (project, category) in zip(decisions, cases):
+        assert rec["project"] == project
+        assert rec["category"] == category
+        assert rec["extra"]["kind"] == "csv_batch"
+        assert rec["extra"]["row_count"] == 10
+        assert rec["extra"]["fvf_used"] is not None, f"{project}: FVF not captured"
+        assert rec["extra"]["exchange_rate_used"] is not None
+        # config_version 刻印
+        assert rec["config_version"] != "unknown"
+        assert "2026-04-25" in rec["config_version"]
+
+
+def test_log_csv_batch_unknown_category_handled(tmp_path):
+    """未知 category でも log_csv_batch は失敗しない（param_lookup_error 記録）"""
+    _with_tmp_log_dir(tmp_path)
+    decision_log.log_csv_batch(
+        project="iMakTest",
+        category="UNKNOWN-CATEGORY-XYZ",
+        output_path="/tmp/test.csv",
+        row_count=0,
+    )
+    rec = decision_log.read_today_decisions()[-1]
+    assert "param_lookup_error" in rec["extra"]
+    assert rec["extra"]["fvf_used"] is None
+
+
 # Standalone runner
 if __name__ == "__main__":
     try:
