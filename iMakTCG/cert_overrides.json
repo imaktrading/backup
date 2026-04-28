@@ -193,21 +193,9 @@
     }
   },
 
-  "149064750": {
-    "reason": "JEWELRY BONNEY OP07-019 雑誌付録版 (Weekly Shonen Jump '24-#35) - iMakCatalog ID hit P-019 (ベポ) を name 不一致で reject、Vision fallback で cost=4 と OCR 誤読。catalog OP07-019_p の正解値 (cost=5/power=5000/Rare/Green) で固定",
-    "applied_at": "2026-04-27",
-    "skip_official_lookup": true,
-    "manual_review_required": false,
-    "draft_source": "iMakCatalog OP07-019_p confirmed",
-    "specs": {
-      "card_type": "Character",
-      "rarity": "Rare",
-      "set_name": "500 Years in the Future",
-      "color": "Green",
-      "power": "5000",
-      "cost": "5",
-      "card_number": "OP07-019",
-      "character": "Jewelry Bonney"
-    }
+  "_removed_149064750": {
+    "_note": "2026-04-28: シナリオ (a) 確定 — Takaaki さん物理 PSA ページ目視で 'LEADER' 表記確認. 旧 override は 'Character/Rare' で固定していたが、Bandai 公式 API (api/user/card/102038) + iMakCatalog DB の OP07-019 系 5 records 全部 'Leader/L/Cost=5(Life)/Power=5000/Green' で一致. 旧 override note の '(cost=5/power=5000/Rare/Green) で固定' は記載者の誤読 (Rarity='L' を 'Rare の L' と勘違い → Card Type を Character と決めつけ). catalog hit に任せる. 16件 e2e で cert 107426544 が同 catalog 経路で Leader を正しく出力していることを確認済 (2026-04-28).",
+    "_removed_at": "2026-04-28",
+    "_phase1_verified": "OP07-019 → Jewelry Bonney / Card Type=Leader / Rarity=L / Power=5000 / Life=5 / Color=Green / Set='500 Years in the Future'"
   }
 }
