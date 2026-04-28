@@ -103,33 +103,20 @@ def get_oauth_token(app_id, app_secret):
 
 def search_ebay_active(token, keywords, limit=50):
     """Browse API で同一カードのアクティブ出品を検索（最大50件）。
-    Returns: (items_list, total_count)"""
-    url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
-    params = {
-        "q": keywords,
-        "filter": (
-            "buyingOptions:{FIXED_PRICE},"
-            "conditionIds:{2750},"  # Graded
-            "categoryIds:{183454}"  # CCG
-        ),
-        "sort": "price",
-        "limit": min(limit, 200),
-    }
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "Content-Type": "application/json",
-    }
-    try:
-        resp = requests.get(url, headers=headers, params=params, timeout=15)
-        if resp.status_code != 200:
-            return [], 0
-        data = resp.json()
-        total = data.get("total", 0)
-        return data.get("itemSummaries", []), total
-    except Exception as e:
-        print(f"  eBay API error: {e}")
-        return [], 0
+    Returns: (items_list, total_count)
+
+    2026-04-28 SSOT 化:
+      実体は iMakeBayAPI/market_gate.py (psa_to_csv ↔ check_csv 共通).
+      旧ロジック (本ファイル直書き) は market_gate に統合済.
+      psa_to_csv が直前に同 query を fetch してれば cache hit で同 data 返却 →
+      median ブレ解消 (dual_gate_disagreement.md CRITICAL の根本対処).
+    """
+    import sys as _sys, os as _os
+    _imakeBayAPI = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _imakeBayAPI not in _sys.path:
+        _sys.path.insert(0, _imakeBayAPI)
+    from market_gate import fetch_market_items as _fetch_mg
+    return _fetch_mg(token, keywords, limit=limit)
 
 
 def fetch_top_seller_specs(token, items, max_items=3):
@@ -602,17 +589,27 @@ Format: まず各リスティングの個別フィードバック、最後に全
 
 
 # ===== メイン =====
-def main():
+def main(csv_path: str | None = None):
+    """check_csv エントリポイント.
+
+    Phase D (2026-04-29): 関数呼出と CLI 単独実行の両対応にする.
+      - csv_path 引数を渡せば直接処理 (psa_to_csv からの import 用途)
+      - None なら sys.argv[1] か find_latest_csv() で従来通り解決 (CLI 用途)
+
+    Why: psa_to_csv → check_csv を同一プロセスで連結し、market_gate の
+    in-memory cache を共有させる (subprocess 跨ぎだと cache 喪失 → median ブレ).
+    """
     print("=== iMak Trading Japan - eBay CSV チェッカー ===\n")
 
     # CSV特定
-    if len(sys.argv) >= 2:
-        csv_path = sys.argv[1]
-    else:
-        csv_path = find_latest_csv()
-        if not csv_path:
-            print("エラー: ebay_upload CSVが見つかりません。パスを引数で指定してください。")
-            return
+    if csv_path is None:
+        if len(sys.argv) >= 2:
+            csv_path = sys.argv[1]
+        else:
+            csv_path = find_latest_csv()
+            if not csv_path:
+                print("エラー: ebay_upload CSVが見つかりません。パスを引数で指定してください。")
+                return
 
     print(f"対象: {csv_path}")
     headers, rows = load_csv(csv_path)

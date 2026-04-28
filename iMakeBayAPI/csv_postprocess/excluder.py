@@ -41,21 +41,48 @@ from pathlib import Path
 from typing import List, Tuple
 
 
-# check_csv の NO-GO 行パターン
+# check_csv の NO-GO 行パターン (GATE 判定サマリー部のみ)
 # 例: `  [5] PSA 10 Pokemon ... → ❌ NO-GO 出品2件 $115 乖離70% > 許容50%`
+#
+# 重要: `→` (arrow) を必須にして check_csv summary のみ matching する.
+# psa_to_csv の intermediate log は `[N] #XXX Char: 出品X件 | 中央値$X | ❌ NO-GO ...`
+# (パイプ + card_seq) で `→` 無し → このパターンに hit しない.
+# 2026-04-29 fix: psa_to_csv の card_seq を CSV row として誤解釈し、無関係な CSV 行が
+# 削除される事故を解消.
 _NOGO_LINE_RE = re.compile(
-    r"^\s*\[(\d+)\].*(?:NO[-\s]?GO|❌\s*NO[-\s]?GO)",
+    r"^\s*\[(\d+)\].*→\s*❌\s*NO[-\s]?GO",
     re.IGNORECASE,
 )
 
+# GATE 判定サマリーの section 開始マーカー (二重の安全策)
+_GATE_SECTION_MARKER = "GATE判定サマリー"
+
 
 def parse_nogo_indices(stdout_text: str) -> List[int]:
-    """check_csv stdout から NO-GO 行 index (1-based) を抽出.
+    """check_csv stdout の GATE 判定サマリー section から NO-GO 行 index 抽出.
 
-    Returns: [行 index, ...]  (CSV header を行 0 と見た場合の 1-based data 行)
+    安全策 (重要):
+      1. `🏁 GATE判定サマリー` 以降の行のみ対象 (psa_to_csv 出力と切り分け)
+      2. `→ ❌ NO-GO` arrow 必須 regex で check_csv summary のみマッチ
+      3. (1) の section marker が見つからなければ regex のみ適用 (後方互換)
+
+    Returns: [CSV 行 index (1-based, header を行 0 と見た data 行), ...]
     """
+    lines = stdout_text.splitlines()
+    in_summary = False
+    has_marker = any(_GATE_SECTION_MARKER in ln for ln in lines)
+
     indices = []
-    for line in stdout_text.splitlines():
+    for line in lines:
+        if has_marker:
+            # marker を見つけてから parse 開始
+            if not in_summary:
+                if _GATE_SECTION_MARKER in line:
+                    in_summary = True
+                continue
+            # summary section 終端 (次の section header らしき "===" 60+) で停止
+            if line.strip().startswith("=") and len(line.strip()) >= 30:
+                break
         m = _NOGO_LINE_RE.match(line)
         if m:
             try:
