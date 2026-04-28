@@ -589,17 +589,27 @@ Format: まず各リスティングの個別フィードバック、最後に全
 
 
 # ===== メイン =====
-def main():
+def main(csv_path: str | None = None):
+    """check_csv エントリポイント.
+
+    Phase D (2026-04-29): 関数呼出と CLI 単独実行の両対応にする.
+      - csv_path 引数を渡せば直接処理 (psa_to_csv からの import 用途)
+      - None なら sys.argv[1] か find_latest_csv() で従来通り解決 (CLI 用途)
+
+    Why: psa_to_csv → check_csv を同一プロセスで連結し、market_gate の
+    in-memory cache を共有させる (subprocess 跨ぎだと cache 喪失 → median ブレ).
+    """
     print("=== iMak Trading Japan - eBay CSV チェッカー ===\n")
 
     # CSV特定
-    if len(sys.argv) >= 2:
-        csv_path = sys.argv[1]
-    else:
-        csv_path = find_latest_csv()
-        if not csv_path:
-            print("エラー: ebay_upload CSVが見つかりません。パスを引数で指定してください。")
-            return
+    if csv_path is None:
+        if len(sys.argv) >= 2:
+            csv_path = sys.argv[1]
+        else:
+            csv_path = find_latest_csv()
+            if not csv_path:
+                print("エラー: ebay_upload CSVが見つかりません。パスを引数で指定してください。")
+                return
 
     print(f"対象: {csv_path}")
     headers, rows = load_csv(csv_path)
