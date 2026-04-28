@@ -51,7 +51,8 @@ _CARD_TYPE_JP_EN = {
     "ドン!!":       "Don",
 }
 
-# Color の JP→EN
+# Color の JP→EN (単独色のみ。compound は _translate_color() で動的 split 翻訳)
+# Bandai 公式 EN: Red/Green/Blue/Purple/Black/Yellow + 任意組合せ ('/' 区切り)
 _COLOR_JP_EN = {
     "赤":   "Red",
     "青":   "Blue",
@@ -63,22 +64,27 @@ _COLOR_JP_EN = {
     "茶":   "Brown",
     "金":   "Gold",
     "銀":   "Silver",
-    # マルチカラー系 (One Piece TCG 特有)
-    "赤/青":   "Red/Blue",
-    "赤/緑":   "Red/Green",
-    "赤/黄":   "Red/Yellow",
-    "赤/黒":   "Red/Black",
-    "赤/紫":   "Red/Purple",
-    "青/緑":   "Blue/Green",
-    "青/黄":   "Blue/Yellow",
-    "青/黒":   "Blue/Black",
-    "青/紫":   "Blue/Purple",
-    "緑/黄":   "Green/Yellow",
-    "緑/黒":   "Green/Black",
-    "緑/紫":   "Green/Purple",
-    "黄/黒":   "Yellow/Black",
-    "黄/紫":   "Yellow/Purple",
-    "黒/紫":   "Black/Purple",
+}
+
+# Attribute (One Piece TCG 公式 5 種) の JP→EN
+# Bandai TCG+ EN データの実値で確認: Slash/Strike/Ranged/Special/Wisdom (compound は '/' 区切り)
+# 公式 attribute は 5 種だけなので compound は _translate_attribute() で動的 split 翻訳
+_ATTRIBUTE_JP_EN = {
+    "斬": "Slash",
+    "打": "Strike",
+    "射": "Ranged",
+    "特": "Special",
+    "知": "Wisdom",
+}
+
+# 警告対象 = EN 値が期待されるフィールド (= JP 残存 = 翻訳漏れ).
+# 設計上 JP 値が入る *_jp / *_official / *_text* / Notes / metadata 系はここに含めない (silent).
+_EN_FIELDS_REQUIRING_TRANSLATION = {
+    "name_en",
+    "type_en",
+    "color_en",
+    "attribute_en",
+    "rarity_en",
 }
 
 # 著名キャラ名 JP→EN (One Piece TCG 想定、ヒットしなければ元値維持)
@@ -161,13 +167,17 @@ def localize_catalog_record(record: Optional[dict]) -> Optional[dict]:
 
         # 1. Card Type (JP→EN)
         out["type_en"] = _translate_card_type(out.get("type_en"))
-        # 2. Color (JP→EN)
+        # 2. Color (JP→EN, compound は動的 split 翻訳)
         out["color_en"] = _translate_color(out.get("color_en"))
-        # 3. Character name (JP→EN + ピリオド正規化)
+        # 3. Attribute (JP→EN, compound は動的 split 翻訳) — 2026-04-29 追加
+        out["attribute_en"] = _translate_attribute(out.get("attribute_en"))
+        # 4. Character name (JP→EN + ピリオド正規化)
         out["name_en"] = _translate_character_name(out.get("name_en"))
 
-        # 4. 残った日本語警告 (翻訳できなかったフィールドを発見的に検出)
-        for key, value in out.items():
+        # 5. 残った日本語警告 (whitelist された EN フィールドのみ check).
+        #    *_jp / *_official / *_text* / Notes 系は設計上 JP なので silent.
+        for key in _EN_FIELDS_REQUIRING_TRANSLATION:
+            value = out.get(key)
             if isinstance(value, str) and _JP_CHAR_RE.search(value):
                 print(f"    ⚠️ catalog_localization: 翻訳未対応 JP 文字残存 "
                       f"key={key!r} value={value!r} (要辞書追加)")
@@ -192,11 +202,36 @@ def _translate_card_type(value: Optional[str]) -> str:
 
 
 def _translate_color(value: Optional[str]) -> str:
+    """Color JP→EN 変換. 単独色で hit しなければ '/' 区切り compound として
+    各部分を翻訳して再結合する (例: '赤/緑/青' → 'Red/Green/Blue')."""
     if not value:
         return value or ""
     v = value.strip()
     if v in _COLOR_JP_EN:
         return _COLOR_JP_EN[v]
+    # Compound: split on '/' and translate each part
+    if "/" in v:
+        parts = [p.strip() for p in v.split("/") if p.strip()]
+        translated = [_COLOR_JP_EN.get(p, p) for p in parts]
+        # 全部が翻訳成功 (= JP 残存なし) の時のみ採用、1つでも失敗したら元値維持
+        if not any(_JP_CHAR_RE.search(p) for p in translated):
+            return "/".join(translated)
+    return v
+
+
+def _translate_attribute(value: Optional[str]) -> str:
+    """Attribute (One Piece TCG 公式 5 種) JP→EN.
+    compound は '/' 区切り split 翻訳 (例: '打/特' → 'Strike/Special')."""
+    if not value:
+        return value or ""
+    v = value.strip()
+    if v in _ATTRIBUTE_JP_EN:
+        return _ATTRIBUTE_JP_EN[v]
+    if "/" in v:
+        parts = [p.strip() for p in v.split("/") if p.strip()]
+        translated = [_ATTRIBUTE_JP_EN.get(p, p) for p in parts]
+        if not any(_JP_CHAR_RE.search(p) for p in translated):
+            return "/".join(translated)
     return v
 
 
@@ -246,11 +281,12 @@ def _normalize_period_name(name: str) -> str:
 # ============================================================================
 if __name__ == "__main__":
     samples = [
-        # P-001 Ichiban Kuji (実例: 全フィールド日本語)
+        # P-001 Ichiban Kuji (実例: 全フィールド日本語、attribute_en も JP)
         {
             "name_en": "モンキー・D・ルフィ",
             "type_en": "キャラクター",
             "color_en": "赤",
+            "attribute_en": "打",
             "rarity_en": "Promo",
             "card_id": "P-001",
         },
@@ -259,6 +295,7 @@ if __name__ == "__main__":
             "name_en": "Monkey.D.Luffy",
             "type_en": "Character",
             "color_en": "Green",
+            "attribute_en": "Slash",
             "rarity_en": "Rare",
             "card_id": "OP14-034",
         },
@@ -267,13 +304,26 @@ if __name__ == "__main__":
             "name_en": "Boa Hancock",
             "type_en": "Character",
             "color_en": "Blue",
+            "attribute_en": "Special",
             "card_id": "OP07-057",
         },
-        # 未知の日本語残存
+        # 多色 + 複合 attribute (動的 split 翻訳)
         {
-            "name_en": "謎のキャラ",
+            "name_en": "Test 6色キャラ",
             "type_en": "キャラクター",
-            "color_en": "赤/青",
+            "color_en": "赤/緑/青/紫/黒/黄",
+            "attribute_en": "斬/特",
+        },
+        # _jp / _official suffix 系 (silent: 警告対象外)
+        {
+            "name_en": "Monkey D. Luffy",
+            "type_en": "Character",
+            "color_en": "Red",
+            "attribute_en": "Strike",
+            "rarity_en": "L",
+            "feature_jp": "超新星/麦わらの一味",
+            "get_info_jp": "プロモーションカード",
+            "set_name_official": "ブースターパック 神速の拳【OP-11】",
         },
         # None 入力
         None,
