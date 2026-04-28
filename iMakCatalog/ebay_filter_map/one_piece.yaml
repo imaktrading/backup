@@ -1,0 +1,282 @@
+# One Piece Card Game — eBay フィルタ値マッピング
+#
+# 出典: iMakTCG/psa_to_csv.py の _ONEPIECE_SET_NAME_MAP / _onepiece_rarity_to_ebay
+#       (2026-04-25 時点でユーザーが eBay フィルタ値を確認済み)
+#
+# 注意:
+#   - source_value は scraper が DB に書く値と完全一致させる
+#       set      : set_name_official (公式原文の booster 名そのもの)
+#       set_code : 公式原文の角括弧内 (例: "OP-06") — set fallback として api._row_to_dict が抽出
+#       rarity   : TCG+ API の card_config.Rarity short code (L/C/UC/R/SR/SEC/...)
+#   - 新弾追加時は本ファイルに 1 行足して `python ebay_filter_map/loader.py one_piece` で再ロード
+#   - eBay の C:Set フィルタ表示が変わっていないか半年に一度ぐらい目視確認
+
+category: one_piece_tcg
+
+# ============================================================================
+# Set (公式原文ベタ一致) — bracket [XX-NN] 抽出が効かない汎用ラベル用
+# ============================================================================
+set:
+  # Promo / Misc ラベル — どれも eBay では "Promo Cards" にまとめられる想定
+  - source: Promotion Card
+    ebay: Promo Cards
+    note: REVIEW eBay 値
+  - source: Other Product Card
+    ebay: Promo Cards
+    note: REVIEW eBay 値
+  - source: プロモーションカード
+    ebay: Promo Cards
+    note: JA 'Promotion Card'
+  - source: 限定商品収録カード
+    ebay: Promo Cards
+    note: JA 'Limited Product Card' — REVIEW eBay 値
+
+  # Vision OCR 由来の長文セット名 (PSA カード上の印刷名、bracket [...] 抜き)
+  # 旧 psa_to_csv._ONEPIECE_SET_NAME_MAP の Vision エントリから移植
+  - source: PREMIUM BOOSTER -ONE PIECE CARD THE BEST-
+    ebay: Premium Booster One Piece The Best
+    note: Vision OCR (PRB-01)
+  - source: PREMIUM BOOSTER -ONE PIECE CARD THE BEST- VOL.2
+    ebay: Premium Booster Vol.2
+    note: Vision OCR (PRB-02)
+  - source: PREMIUM BOOSTER ONE PIECE CARD THE BEST
+    ebay: Premium Booster One Piece The Best
+    note: Vision OCR variant (PRB-01, no hyphens)
+  - source: PREMIUM BOOSTER ONE PIECE CARD THE BEST VOL.2
+    ebay: Premium Booster Vol.2
+    note: Vision OCR variant (PRB-02, no hyphens)
+
+# ============================================================================
+# Set code (公式原文の角括弧内コードからの fallback)
+# 例: "BOOSTER PACK -WINGS OF THE CAPTAIN- [OP-06]" → "OP-06" → "Wings of the Captain"
+# ============================================================================
+set_code:
+  # ----- Booster Pack (OP) -----
+  # 注: Bandai data に [OP-07] 形式と [OP07] 形式が混在しているので両方マップする
+  - source: OP-01
+    ebay: Romance Dawn
+    year: 2022
+  - source: OP-02
+    ebay: Paramount War
+    year: 2022
+  - source: OP-03
+    ebay: Pillars of Strength
+    year: 2023
+  - source: OP-04
+    ebay: Kingdoms of Intrigue
+    year: 2023
+  - source: OP-05
+    ebay: Awakening of the New Era
+    year: 2023
+  - source: OP-06
+    ebay: Wings of the Captain
+    year: 2024
+  - source: OP-07
+    ebay: 500 Years in the Future
+    year: 2024
+  - source: OP07
+    ebay: 500 Years in the Future
+    note: Bandai inconsistency — [OP07] without hyphen variant
+    year: 2024
+  - source: OP-08
+    ebay: Two Legends
+    year: 2024
+  - source: OP-09
+    ebay: Emperors in the New World
+    year: 2024
+  - source: OP-10
+    ebay: Royal Blood
+    year: 2024
+  - source: OP-11
+    ebay: A Fist of Divine Speed
+    year: 2025
+  - source: OP-12
+    ebay: Legacy of the Master
+    year: 2025
+  - source: OP-13
+    ebay: Carrying On His Will
+    year: 2025
+  - source: OP-14
+    ebay: The Azure Sea's Seven Heroes
+    year: 2025
+  - source: OP-15
+    ebay: Adventure on Kami's Island
+    note: REVIEW — eBay 実値要確認
+    year: 2026
+
+  # ----- Compound Booster (OP × EB combined releases for EN market) -----
+  - source: OP14-EB04
+    ebay: The Azure Sea's Seven Heroes
+    note: REVIEW — EB-04 を OP-14 と bundled した EN リリース
+    year: 2025
+  - source: OP15-EB04
+    ebay: Adventure on Kami's Island
+    note: REVIEW — EB-04 を OP-15 と bundled した EN リリース
+    year: 2026
+
+  # ----- Starter Deck (ST) -----
+  - source: ST-01
+    ebay: Straw Hat Crew
+    year: 2022
+  - source: ST-02
+    ebay: Worst Generation
+    year: 2022
+  - source: ST-03
+    ebay: The Seven Warlords of the Sea
+    year: 2022
+  - source: ST-04
+    ebay: Animal Kingdom Pirates
+    year: 2022
+  - source: ST-05
+    ebay: ONE PIECE FILM edition
+    year: 2023
+  - source: ST-06
+    ebay: Absolute Justice
+    year: 2023
+  - source: ST-07
+    ebay: Big Mom Pirates
+    year: 2023
+  - source: ST-08
+    ebay: Monkey D. Luffy
+    year: 2023
+  - source: ST-09
+    ebay: Yamato
+    year: 2023
+  - source: ST-10
+    ebay: The Three Captains
+    note: ULTRA DECK
+    year: 2023
+  - source: ST-11
+    ebay: Uta
+    year: 2023
+  - source: ST-12
+    ebay: Zoro and Sanji
+    year: 2023
+  - source: ST-13
+    ebay: The Three Brothers
+    note: ULTRA DECK
+    year: 2024
+  - source: ST-14
+    ebay: 3D2Y
+    year: 2024
+  - source: ST-15
+    ebay: Edward Newgate
+    year: 2024
+  - source: ST-16
+    ebay: Uta
+    note: ST-16 Uta starter deck (GREEN)
+    year: 2024
+  - source: ST-17
+    ebay: Donquixote Doflamingo
+    year: 2024
+  - source: ST-18
+    ebay: Monkey D Luffy
+    note: ST-18 PURPLE Monkey.D.Luffy starter — REVIEW eBay 値
+    year: 2025
+  - source: ST-19
+    ebay: Smoker
+    year: 2025
+  - source: ST-20
+    ebay: Charlotte Katakuri
+    year: 2025
+  - source: ST-21
+    ebay: Gear 5
+    note: ST-21 STARTER DECK EX -GEAR5- (旧 yaml 誤記 'Ace & Newgate' は ST-22 だった)
+    year: 2025
+  - source: ST-22
+    ebay: Ace & Newgate
+    note: ST-22 Ace & Newgate (旧 yaml 誤記 'FILM RED')
+    year: 2025
+  - source: ST-23
+    ebay: Shanks
+    note: RED Shanks
+    year: 2025
+  - source: ST-24
+    ebay: Jewelry Bonney
+    note: GREEN Jewelry Bonney
+    year: 2025
+  - source: ST-25
+    ebay: Buggy
+    note: BLUE Buggy (旧 yaml 誤記 'Aramaki Premium Card Set')
+    year: 2025
+  - source: ST-26
+    ebay: Monkey D Luffy
+    note: PURPLE/BLACK Monkey.D.Luffy (旧 yaml 誤記 'Reverse Captains')
+    year: 2025
+  - source: ST-27
+    ebay: Marshall D Teach
+    note: BLACK Marshall.D.Teach — REVIEW eBay 値
+    year: 2026
+  - source: ST-28
+    ebay: Yamato
+    note: GREEN/YELLOW Yamato (ST-09 と同名、別レコード)
+    year: 2026
+  - source: ST-29
+    ebay: Egghead
+    note: REVIEW eBay 値
+    year: 2026
+  - source: ST-30
+    ebay: Luffy & Ace
+    note: STARTER DECK EX -Luffy & Ace- (JA-only 現時点) — REVIEW eBay 値
+    year: 2026
+
+  # ----- Extra Booster (EB) -----
+  - source: EB-01
+    ebay: Memorial Collection
+    year: 2024
+  - source: EB-02
+    ebay: 25th Anniversary Collection
+    year: 2024
+  - source: EB-03
+    ebay: ONE PIECE Heroines Edition
+    note: REVIEW eBay 値
+    year: 2025
+  - source: EB-04
+    ebay: Egghead Crisis
+    note: EB-04 単体 (OP14-EB04 / OP15-EB04 とは別レコード) — REVIEW eBay 値
+    year: 2026
+
+  # ----- Premium Booster (PRB) -----
+  - source: PRB-01
+    ebay: Premium Booster One Piece The Best
+    year: 2024
+  - source: PRB01
+    ebay: Premium Booster One Piece The Best
+    note: Bandai inconsistency — [PRB01] without hyphen variant
+    year: 2024
+  - source: PRB-02
+    ebay: Premium Booster Vol.2
+    year: 2025
+
+# ============================================================================
+# Rarity (TCG+ API の short code → eBay フィルタ表示値)
+# 注: TCG+ API は既に eBay 短縮コード形式 (SR / C / UC 等) を返すので大半は identity 写像。
+#     L (Leader) は card type なので rarity としては空欄。
+# ============================================================================
+rarity:
+  - source: L
+    ebay: ""
+    note: Leader = card type, not rarity → eBay rarity 欄は空欄
+  - source: C
+    ebay: C
+  - source: UC
+    ebay: UC
+  - source: R
+    ebay: R
+  - source: SR
+    ebay: SR
+  - source: SEC
+    ebay: SEC
+  - source: P
+    ebay: Promo
+    note: Bandai "P" = eBay "Promo"
+  - source: TR
+    ebay: TR
+    note: Treasure Rare
+  - source: Special
+    ebay: SEC
+    note: Bandai "Special" = eBay "SEC" (parallel/alt-art 系)
+  - source: SP
+    ebay: SEC
+  - source: DON!!
+    ebay: DON!!

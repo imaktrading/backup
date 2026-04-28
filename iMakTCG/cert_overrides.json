@@ -1,0 +1,213 @@
+{
+  "_README": {
+    "purpose": "公式DB lookup が誤マッチ/未対応の cert に対する手動 Item Specifics 補完",
+    "philosophy": "既存ロジックを修正せず、特別処理として追加。失敗ナレッジの蓄積。",
+    "format": {
+      "<cert>": {
+        "reason": "なぜ overrides が必要か (人間可読)",
+        "applied_at": "YYYY-MM-DD",
+        "skip": "true なら処理対象から除外 (物理確認必須等)",
+        "skip_message": "skip理由 (出品ログに表示)",
+        "skip_official_lookup": "true なら公式DB lookup を完全スキップ + 下記 specs を採用",
+        "manual_review_required": "true なら値が draft 段階、物理カード確認で確定が必要",
+        "specs": {
+          "card_type": "Character / Pokémon / Trainer / Battle / Leader / Energy Marker 等",
+          "rarity": "Super Rare / Rare / Common / Promo 等 (eBay フィルタ正規値)",
+          "set_name": "eBay フィルタ正規値",
+          "color": "Black / Blue / Red / Green / Yellow / Multi-Color 等",
+          "power": "数値 or 空文字",
+          "cost": "数値 or 空文字",
+          "card_number": "PSA cert# と一致させる (selfcheck 通過のため)"
+        }
+      }
+    },
+    "operations": {
+      "新規追加": "出品失敗 → 物理カード or 公式サイトで Item Specs 確認 → 1件追加",
+      "削除": "iMakCatalog で吸収済 or 商品売却済の cert は削除 (月1回見直し)",
+      "監査": "applied_at で経緯追跡、reason で再発見性確保"
+    }
+  },
+
+  "142833357": {
+    "reason": "PERFUME FEMUR (OP07-057) - PSA Brand 'PCC BS Vol.4' は OP-07 (500 Years in the Future) からの再録版。公式英訳は Fragrant Leg (技名)、絵柄はBoa Hancock。Vision が画像下部の番号を OP07-057 → OP07-047 と誤読したのが原因で公式DB lookup 失敗していた。webfetch で OP07-057 を直接確認し正規値を確定 (2026-04-26)",
+    "applied_at": "2026-04-26",
+    "skip_official_lookup": true,
+    "manual_review_required": false,
+    "draft_source": "Bandai official DB confirmed via webfetch (OP07-057)",
+    "specs": {
+      "card_type": "Event",
+      "rarity": "Rare",
+      "set_name": "500 Years in the Future",
+      "color": "Blue",
+      "power": "",
+      "cost": "2",
+      "card_number": "OP07-057",
+      "character": "Boa Hancock"
+    }
+  },
+
+  "_removed_143570665": {
+    "_note": "2026-04-27: Phase 1 (iMakCatalog) で PRB02-005 が ID 完全一致 lookup により正しく返るので skip 不要に。旧 bandai_jp 名前検索フォールバックで ST16-005 に誤マッチしていた事象は構造的に解消 (lookup_one_piece は ID完全一致のみ + 名前検証)",
+    "_removed_at": "2026-04-27",
+    "_phase1_verified": "PRB02-005 → Monkey.D.Luffy SR Power=5000 Cost=4 Set='Premium Booster Vol.2'"
+  },
+
+  "138581760": {
+    "reason": "FA/PIKACHU 25TH ANNIVERSARY COLLECTION - 公式DB が別セット Pikachu (#225/742) にヒット。25周年Promoの Pikachu は別カード",
+    "applied_at": "2026-04-26",
+    "skip_official_lookup": true,
+    "manual_review_required": true,
+    "draft_source": "Claude knowledge base (not physical verified)",
+    "specs": {
+      "card_type": "Pokémon",
+      "rarity": "Promo",
+      "set_name": "25th Anniversary Collection",
+      "color": "Lightning",
+      "power": "60",
+      "cost": "",
+      "card_number": "001"
+    }
+  },
+
+  "128629880": {
+    "reason": "FLYING PIKACHU V 25TH ANNIVERSARY COLLECTION - 公式DB がピカチュウV (#001/024) を別セットで返却",
+    "applied_at": "2026-04-26",
+    "skip_official_lookup": true,
+    "manual_review_required": true,
+    "draft_source": "Claude knowledge base (not physical verified)",
+    "specs": {
+      "card_type": "Pokémon V",
+      "rarity": "Promo",
+      "set_name": "25th Anniversary Collection",
+      "color": "Lightning",
+      "power": "200",
+      "cost": "",
+      "card_number": "023"
+    }
+  },
+
+  "_removed_139562275": {
+    "_note": "2026-04-28: Phase 2b (Pokemon catalog) で SV8a-223 Eevee ex SAR が公式DB から正しく取れることを確認。catalog rarity=SAR は eBay の 'Special Art Rare' と同義. set_name='Terastal Festival ex' も yaml 経由で一致.",
+    "_removed_at": "2026-04-28",
+    "_phase2b_verified": "SV8a-223 イーブイex / rarity=SAR / set='Terastal Festival ex' / hp=200"
+  },
+
+  "120628342": {
+    "reason": "FA/ELESA'S SPARKLE VSTAR UNIVERSE - 公式DB の#246/172 は VSTAR UNIVERSE シークレット枠と推定",
+    "applied_at": "2026-04-26",
+    "skip_official_lookup": true,
+    "manual_review_required": true,
+    "draft_source": "Claude knowledge base (not physical verified)",
+    "specs": {
+      "card_type": "Trainer",
+      "rarity": "Special Art Rare",
+      "set_name": "VSTAR Universe",
+      "color": "",
+      "power": "",
+      "cost": "",
+      "card_number": "246"
+    }
+  },
+
+  "97580087": {
+    "reason": "FA/IRIDA SPACE JUGGLER - 公式DB が「カイ」検索で「エモンガ (#030/083)」誤マッチ",
+    "applied_at": "2026-04-26",
+    "skip_official_lookup": true,
+    "manual_review_required": true,
+    "draft_source": "Claude knowledge base (not physical verified)",
+    "specs": {
+      "card_type": "Trainer",
+      "rarity": "Special Art Rare",
+      "set_name": "Space Juggler",
+      "color": "",
+      "power": "",
+      "cost": "",
+      "card_number": "077"
+    }
+  },
+
+  "_removed_137306154": {
+    "_note": "2026-04-28: Phase 2b (Pokemon catalog) で SV9-105 リーリエのアブリボン AR が公式DB から正しく取れることを確認. catalog rarity=AR = eBay 'Art Rare'. set='Battle Partners'. 旧 override は価格GATE 回避目的だったが、価格判断は別 layer で行う方針.",
+    "_removed_at": "2026-04-28",
+    "_phase2b_verified": "SV9-105 リーリエのアブリボン / rarity=AR / set='Battle Partners' / hp=70"
+  },
+
+  "_removed_114060943": {
+    "_note": "2026-04-28: Phase 1 reprint fallback で EB01-057_OP11_dummy (Shirahoshi SP) が catalog 経由で正しく lookup される. PSA brand 'OP11' から Pedro (OP11-057 base) を reject 後、_OP11 suffix の同名 record を検索 + SP Alt suffix 優先で正解.",
+    "_removed_at": "2026-04-28",
+    "_phase1_verified": "EB01-057_OP11_dummy / Shirahoshi / rarity='SR SP'"
+  },
+
+  "_removed_152816423": {
+    "_note": "2026-04-28: Phase 1 promo fallback で EB01-006_P_treasure (Chopper Let's Start CP Promo) が catalog 経由で正しく lookup される. P-006 (Luffy) を reject 後、promo 全 set 検索で名前一致.",
+    "_removed_at": "2026-04-28",
+    "_phase1_verified": "EB01-006_P_treasure / Tony Tony.Chopper / rarity=SR"
+  },
+
+  "_removed_91553207": {
+    "_note": "2026-04-28: Phase 1 reprint fallback で OP05-091_OP06_SP_dummy_fix (Rebecca SP Alt) が catalog 経由で正しく lookup される. PSA brand 'OP06' から Victoria Cindry (OP06-091 base) を reject 後、_OP06 suffix の同名 record で SP Alt 優先.",
+    "_removed_at": "2026-04-28",
+    "_phase1_verified": "OP05-091_OP06_SP_dummy_fix / Rebecca / rarity=SR"
+  },
+
+  "85485028": {
+    "reason": "NAMI SP ALT (OP05-016) - 公式DB OP05-016 は Morley (R) で別カード。OP05 SP/Alt 枠は別番号体系。物理確認まで入稿NG",
+    "applied_at": "2026-04-26",
+    "skip": true,
+    "skip_message": "OP05 SP Alt 番号体系問題 (cert #85485028 Nami SP)"
+  },
+
+  "149927513": {
+    "reason": "MONKEY D. LUFFY OP12-015 - 公式DB と完全一致 (Character / SR / Cost4 / Power4000 / Counter1000 / Red)",
+    "applied_at": "2026-04-26",
+    "skip_official_lookup": true,
+    "manual_review_required": false,
+    "draft_source": "Bandai official DB confirmed via webfetch",
+    "specs": {
+      "card_type": "Character",
+      "rarity": "Super Rare",
+      "set_name": "Mentor and Student Bond",
+      "color": "Red",
+      "power": "4000",
+      "cost": "4",
+      "card_number": "OP12-015",
+      "character": "Monkey D. Luffy"
+    }
+  },
+
+  "149927533": {
+    "reason": "NAMI P-112 (Mini-Tin Pack Set Vol.2 Bisai) - 公式DB と完全一致 (Character / Promo / Cost5 / Power6000 / Counter1000 / Blue / Straw Hat Crew)",
+    "applied_at": "2026-04-26",
+    "skip_official_lookup": true,
+    "manual_review_required": false,
+    "draft_source": "Bandai official DB confirmed via webfetch",
+    "specs": {
+      "card_type": "Character",
+      "rarity": "Promo",
+      "set_name": "Promo Cards",
+      "color": "Blue",
+      "power": "6000",
+      "cost": "5",
+      "card_number": "P-112",
+      "character": "Nami"
+    }
+  },
+
+  "149064750": {
+    "reason": "JEWELRY BONNEY OP07-019 雑誌付録版 (Weekly Shonen Jump '24-#35) - iMakCatalog ID hit P-019 (ベポ) を name 不一致で reject、Vision fallback で cost=4 と OCR 誤読。catalog OP07-019_p の正解値 (cost=5/power=5000/Rare/Green) で固定",
+    "applied_at": "2026-04-27",
+    "skip_official_lookup": true,
+    "manual_review_required": false,
+    "draft_source": "iMakCatalog OP07-019_p confirmed",
+    "specs": {
+      "card_type": "Character",
+      "rarity": "Rare",
+      "set_name": "500 Years in the Future",
+      "color": "Green",
+      "power": "5000",
+      "cost": "5",
+      "card_number": "OP07-019",
+      "character": "Jewelry Bonney"
+    }
+  }
+}

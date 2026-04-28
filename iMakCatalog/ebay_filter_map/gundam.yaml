@@ -1,0 +1,114 @@
+# Gundam Card Game — eBay フィルタ値マッピング
+#
+# 出典: 2026-04-27 --full scrape 完走後の実 DB 値から確定
+#
+# 注意:
+#   - source_value は scraper が DB に書く値と完全一致させる
+#   - 新弾追加時は本ファイルに 1 行足して `python ebay_filter_map/loader.py gundam` で再ロード
+
+category: gundam_tcg
+
+# ============================================================================
+# Set (公式原文ベタ一致)
+# ============================================================================
+set:
+  # Promo / Misc ラベル
+  - source: Promotion Card
+    ebay: Promo Cards
+    note: REVIEW eBay 値
+  - source: プロモーションカード
+    ebay: Promo Cards
+    note: JA 'Promotion Card'
+  - source: リミテッドBOX Ver.β
+    ebay: Limited Box Beta Ver.
+    note: JA-only Limited Box β — REVIEW eBay 値
+  - source: Edition Beta
+    ebay: Edition Beta
+    note: REVIEW eBay 値
+
+# ============================================================================
+# Set code (公式原文の角括弧内)
+# ============================================================================
+set_code:
+  # ----- Booster Pack (GD) -----
+  - source: GD01
+    ebay: Newtype Rising
+    year: 2024
+  - source: GD02
+    ebay: Dual Impact
+    year: 2024
+  - source: GD03
+    ebay: Steel Requiem
+    year: 2025
+  - source: GD04
+    ebay: Phantom Aria
+    year: 2025
+
+  # ----- Starter Deck (ST) -----
+  - source: ST01
+    ebay: Heroic Beginnings
+    year: 2024
+  - source: ST02
+    ebay: Wings of Advance
+    year: 2024
+  - source: ST03
+    ebay: "Zeon's Rush"
+    year: 2024
+  - source: ST04
+    ebay: SEED Strike
+    year: 2024
+  - source: ST05
+    ebay: Iron Bloom
+    year: 2025
+  - source: ST06
+    ebay: Clan Unity
+    year: 2025
+  - source: ST07
+    ebay: Celestial Drive
+    year: 2025
+  - source: ST08
+    ebay: Flash of Radiance
+    year: 2025
+  - source: ST09
+    ebay: Destiny Ignition
+    year: 2026
+
+  # ----- Premium Card Collection (PC) -----
+  - source: PC01A
+    ebay: Premium Card Collection IBO
+    note: IRON-BLOODED ORPHANS — REVIEW eBay 値
+    year: 2026
+  - source: PC02A
+    ebay: Premium Card Collection GQuuuuuuX
+    note: Mobile Suit Gundam GQuuuuuuX — REVIEW eBay 値
+    year: 2026
+
+# ============================================================================
+# Rarity (TCG+ API short code → eBay フィルタ表示値)
+# 過去の bandai_tcg_plus.py GUNDAM_RARITY_MAP を参考
+# ============================================================================
+rarity:
+  - source: C
+    ebay: C
+    note: Common
+  - source: U
+    ebay: UC
+    note: Uncommon (Bandai 'U' → eBay 'UC')
+  - source: R
+    ebay: R
+  - source: SR
+    ebay: SR
+  - source: LR
+    ebay: LR
+    note: Legend Rare
+  - source: SPLR
+    ebay: SPLR
+    note: Special Legend Rare
+  - source: "SPLR+"
+    ebay: SPLR
+    note: SPLR variant + 印
+  - source: "LR+"
+    ebay: LR
+    note: LR parallel
+  - source: P
+    ebay: Promo

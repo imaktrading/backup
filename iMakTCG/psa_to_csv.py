@@ -15,9 +15,13 @@ import requests
 from datetime import datetime, timedelta
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
-import bandai_jp
 import pokemon_card_jp
 import bandai_tcg_plus
+
+# iMakCatalog (Phase 1: One Piece TCG を bandai_jp.py 直接スクレイプから DB lookup へ移行)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "iMakCatalog"))
+from integrations import psa_to_csv as catalog_psa
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -320,143 +324,6 @@ def get_store_category(franchise):
         if key.lower() in franchise.lower():
             return cat_id
     return 42054516010
-
-def extract_set_code_from_brand(brand):
-    """PSA Brand から Bandai 公式 set_code を抽出.
-    例: 'ONE PIECE JAPANESE OP08-TWO LEGENDS' → 'OP08'
-    プロモ/イベントなら 'P' を返す (Bandai promo prefix)
-    """
-    if not brand:
-        return None
-    b = brand.upper()
-    # 標準セットコード (OP01-OP99, ST01-ST99, EB01-EB99, PRB01-PRB99)
-    m = re.search(r'\b(OP\d+|ST\d+|EB\d+|PRB\d+)\b', b)
-    if m:
-        return m.group(1)
-    # プロモ判定
-    promo_keywords = [
-        "PROMOS", "PROMO", "ONE PIECE DAY", "BANDAI CARD GAME FEST",
-        "ANNIVERSARY", "PREMIUM CARD COLLECTION", "CHAMPIONSHIP",
-    ]
-    if any(k in b for k in promo_keywords):
-        return "P"
-    return None
-
-
-def _extract_set_name_from_get_info(get_info_jp):
-    """Bandai JP の get_info(入手情報) から eBay 用セット名を生成.
-    例: 'ブースターパック 二つの伝説【OP-08】' → 'Two Legends'
-        'ONE PIECE DAY 23 来場特典' → 'Promo Cards'
-        'パラレルの覇者【OP-06】' → 'Wings of the Captain' ← 日本語未翻訳は難しい
-    マッピング辞書 + 簡易正規化。未知はそのまま日本語を返す.
-    """
-    if not get_info_jp:
-        return ""
-    info = get_info_jp.strip()
-    # 既知セットマッピング (日本語名の一部 → 英語正式名)
-    set_map_jp_to_en = {
-        "パラレルの覇者": "Wings of the Captain",  # OP-06
-        "二つの伝説": "Two Legends",  # OP-08
-        "新時代の主役": "Awakening of the New Era",  # OP-05
-        "謀略の王国": "Kingdoms of Intrigue",  # OP-04
-        "強大な敵": "Pillars of Strength",  # OP-03
-        "頂上決戦": "Paramount War",  # OP-02
-        "ROMANCE DAWN": "Romance Dawn",  # OP-01
-        "500年後の未来": "500 Years in the Future",  # OP-07
-        "新たなる皇帝": "Emperors in the New World",  # OP-09
-        "ロイヤル・ブラッドライン": "Royal Bloodlines",  # OP-10
-        "記憶の断片": "Memorial Collection",  # EB-01
-        "Anime 25th collection": "Anime 25th Collection",  # EB-02
-        "Anime 25th Collection": "Anime 25th Collection",
-        "ONE PIECE CARD THE BEST": "Premium Booster -The Best-",  # PRB-01
-        "プレミアムブースター": "Premium Booster",
-        "ONE PIECE DAY": "Promo Cards",
-        "ONE PIECE CARD GAME": "Promo Cards",
-        "BANDAI CARD GAME FEST": "Promo Cards",
-        "プロモ": "Promo Cards",
-        "来場特典": "Promo Cards",
-        "タイアップ": "Promo Cards",
-        "キャンペーン": "Promo Cards",
-        "ガイド": "Promo Cards",
-    }
-    for jp, en in set_map_jp_to_en.items():
-        if jp in info:
-            return en
-    # マッピング無しなら空 (fallback)
-    return ""
-
-
-def lookup_bandai_card(driver, brand, card_number, subject):
-    """Bandai JP 公式からカード情報を取得. PSA Subjectとのマッチ検証付き."""
-    if not card_number:
-        return None
-    set_code = extract_set_code_from_brand(brand)
-
-    cards = []
-    if set_code:
-        card_id = f"{set_code}-{card_number}"
-        try:
-            cards = bandai_jp.fetch_card(driver, card_id)
-        except Exception as e:
-            print(f"    ⚠️ Bandai JP fetch エラー: {e}")
-            cards = []
-    else:
-        card_id = "(set_code抽出失敗)"
-
-    # PSA Subjectとの名前検証: Subject内の実体トークンが
-    # Bandai name_en または name_jp(翻訳済み)に含まれるか
-    subject_tokens = [
-        w.upper().strip('.,;:') for w in re.split(r'[\s/]+', subject)
-        if len(w) >= 3 and not w.isdigit()
-    ]
-    # 接続詞/一般語除外
-    stopwords = {"THE", "OF", "AND", "FOR", "ALTERNATE", "SPECIAL", "ART",
-                 "RARE", "PARALLEL", "MANGA", "FOIL", "HOLO", "PROMO",
-                 "ONE", "PIECE", "DAY", "FEST", "BANDAI", "CARD", "GAME",
-                 "PACKS", "BATTLE", "WINNER", "KING", "PIRATES",
-                 "ANNIVERSARY", "PREMIUM", "COLLECTION"}
-    name_tokens = [t for t in subject_tokens if t not in stopwords]
-
-    def card_name_matches(card):
-        en = (card.get("name_en") or "").upper()
-        jp = card.get("name_jp") or ""
-        combined = en + " " + jp
-        if not name_tokens:
-            return True  # トークン無しなら検証スキップ
-        return any(t in combined.upper() for t in name_tokens)
-
-    def card_number_matches(card):
-        """Bandai card_id の番号部分が PSA card_number と一致するか."""
-        cid = card.get("card_id", "")
-        m = re.match(r'^[A-Z]+\d*-(\d+)', cid)
-        if not m:
-            return False
-        return m.group(1).lstrip("0") == card_number.lstrip("0")
-
-    def is_valid_match(card):
-        return card_name_matches(card) and card_number_matches(card)
-
-    valid = [c for c in cards if is_valid_match(c)]
-    if not valid:
-        print(f"    ⚠️ Bandai JP ID={card_id} 一致せず → 名前検索フォールバック")
-        # キャラ名から逆引き検索
-        character = smart_titlecase(extract_character_name(subject))
-        try:
-            name_cards = bandai_jp.search_by_name(driver, character, card_number)
-        except Exception as e:
-            print(f"    ⚠️ Bandai JP name search エラー: {e}")
-            name_cards = []
-        valid = [c for c in name_cards if is_valid_match(c)]
-        if not valid:
-            print(f"    ⚠️ Bandai JP 名前検索でも一致せず (キャラ={character!r}) → PSAフォールバック")
-            return None
-
-    best = bandai_jp.select_best_variant(valid, subject, psa_set_hint=set_code or "")
-    if best:
-        print(f"    🎯 Bandai JP hit: {best.get('card_id')} {best.get('name_en')} "
-              f"({best.get('type_en')}, rarity={best.get('rarity_en')!r})")
-    return best
-
 
 def smart_titlecase(s):
     """全大文字文字列をタイトルケース化。数字含むトークンは大文字維持、
@@ -1071,6 +938,25 @@ def get_psa_data(driver, cert_number):
 
 # ===== Dragon Ball / Gundam カードID構築 =====
 # PSA Brand内のセット名 → Bandai TCG+ カード番号プレフィックス
+ENERGY_MARKER_DB = {
+    # Fusion World Energy Marker (E01 シリーズ)
+    # Bandai TCG+ API のスコープ外 (Booster/Starter とは別カテゴリ管理)
+    # → ハードコード対応。物理カードの色は PSA Subject に出ないため Color は空欄、
+    #    eBay 出品時はユーザーが目視確認のうえ手動補完する運用
+    f"E01-{i:02d}": {
+        "card_name": "Energy Marker",
+        "card_number": f"E01-{i:02d}",
+        "card_type": "Energy Marker",
+        "rarity": "Common",
+        "color": "",  # 物理確認必須
+        "power": "",
+        "cost": "",
+        "set_name": "Energy Marker Pack 01",
+        "source": "hardcoded",
+    } for i in range(1, 16)
+}
+
+
 DRAGONBALL_SET_PREFIX = {
     "AWAKENED PULSE": "FB01",
     "BLAZING AURA": "FB02",
@@ -1101,17 +987,33 @@ GUNDAM_SET_PREFIX = {
 
 
 def _dragonball_card_id(brand, card_number):
-    """PSA BrandとCardNumberからBandai TCG+用のcard_id(FB03-139形式)を構築"""
-    if not brand or not card_number:
+    """PSA BrandとCardNumberからBandai TCG+用のcard_id(FB03-139形式)を構築.
+
+    優先順位:
+    1) card_number が prefix 含む完全形 (例: FS09-16, FP-024) → 直接構築
+       - PSA cert の CardNumber 列は parse_psa_page (regex `#([\\w-]+)`) で完全形が入る
+    2) Brand から prefix を引く (旧フォールバック、card_number が番号のみの稀ケース用)
+    """
+    if not card_number:
+        return None
+    # Priority 1: card_number 完全形 (FB##/SB##/FS##/GB##/FP/E## + ハイフン + 数字)
+    m = re.match(r'^(FB\d+|SB\d+|FS\d+|GB\d+|FP|E\d+)-(\d+)$', card_number.upper())
+    if m:
+        prefix, num = m.group(1), m.group(2)
+        # Bandai TCG+ API のID形式:
+        #   FB/SB/GB (booster系): 3桁 zero-pad (FB01-039)
+        #   FS (Starter Deck) / FP (Promo) / E## (Energy): zero-pad 無し (FS09-16, FP-024, E01-11)
+        if prefix.startswith(("FB", "SB", "GB")):
+            return f"{prefix}-{num.zfill(3)}"
+        return f"{prefix}-{num}"
+    # Priority 2: Brand から prefix 引く (フォールバック)
+    if not brand:
         return None
     b = brand.upper()
-    for set_name, prefix in DRAGONBALL_SET_PREFIX.items():
+    # 長いキーを優先 (MANGA BOOSTER 02 > MANGA BOOSTER の誤マッチ防止)
+    for set_name in sorted(DRAGONBALL_SET_PREFIX.keys(), key=len, reverse=True):
         if set_name in b:
-            return f"{prefix}-{card_number.zfill(3)}"
-    # プレフィックスが見つからなければ、card_numberにFBが含まれるか確認
-    m = re.match(r'(FB\d+|SB\d+|FS\d+)-?(\d+)', card_number)
-    if m:
-        return f"{m.group(1)}-{m.group(2).zfill(3)}"
+            return f"{DRAGONBALL_SET_PREFIX[set_name]}-{card_number.zfill(3)}"
     return None
 
 
@@ -1129,106 +1031,120 @@ def _gundam_card_id(brand, card_number):
     return None
 
 
-# ===== One Piece Item Specifics整形 =====
-def _onepiece_rarity_to_ebay(rarity):
-    """Bandai公式のrarity_en → eBay慣行の略称に変換"""
-    mapping = {
-        "Secret Rare": "SEC",
-        "Special": "SEC",      # Bandai "Special" = eBay "SEC" (パラレル系)
-        "Super Rare": "SR",
-        "Rare": "R",
-        "Uncommon": "UC",
-        "Common": "C",
-        "Promo": "Promo",
-    }
-    return mapping.get(rarity, rarity)
+# 2026-04-26: ONE PIECE Item Specifics 整形 = iMakCatalog ebay_filter_map に集約
+# (旧 _onepiece_rarity_to_ebay / _ONEPIECE_SET_NAME_MAP / _onepiece_set_code_to_name は削除済)
+# → iMakCatalog/ebay_filter_map/one_piece.yaml + integrations/psa_to_csv.py を参照
 
 
-# 2026-04-25: ONE PIECE セットコード → eBay 公式フィルタ値（正式名称）マップ
-# eBay の C:Set フィルタは英語の正式名称を要求する。
-# 未収録のセットは set_code を返してフォールバック (検索性は落ちるが空欄よりマシ)
-_ONEPIECE_SET_NAME_MAP = {
-    "OP-01": "Romance Dawn",
-    "OP-02": "Paramount War",
-    "OP-03": "Pillars of Strength",
-    "OP-04": "Kingdoms of Intrigue",
-    "OP-05": "Awakening of the New Era",
-    "OP-06": "Wings of the Captain",
-    "OP-07": "500 Years in the Future",
-    "OP-08": "Two Legends",
-    "OP-09": "Emperors in the New World",
-    "OP-10": "Royal Blood",
-    "OP-11": "A Fist of Divine Speed",
-    "OP-12": "Legacy of the Master",
-    "OP-13": "Carrying On His Will",
-    "OP-14": "The Azure Sea's Seven Heroes",
-    "ST-01": "Straw Hat Crew",
-    "ST-02": "Worst Generation",
-    "ST-03": "The Seven Warlords of the Sea",
-    "ST-04": "Animal Kingdom Pirates",
-    "ST-05": "ONE PIECE FILM edition",
-    "ST-06": "Absolute Justice",
-    "ST-07": "Big Mom Pirates",
-    "ST-08": "Monkey D. Luffy",
-    "ST-09": "Yamato",
-    "ST-10": "The Three Captains",
-    "ST-11": "Uta",
-    "ST-12": "Zoro & Sanji",
-    "ST-13": "The Three Brothers",
-    "ST-14": "3D2Y",
-    "ST-15": "Edward Newgate",
-    "ST-16": "Uta",                     # ST16 Uta starter deck
-    "ST-17": "Donquixote Doflamingo",
-    "ST-18": "Buggy Pirates / Buggy's Crew",
-    "ST-19": "Smoker",
-    "ST-20": "Charlotte Katakuri",
-    "ST-21": "Ace & Newgate",
-    "ST-22": "ONE PIECE FILM RED",
-    "ST-23": "Shanks",
-    "ST-25": "Aramaki Premium Card Set",
-    "ST-26": "Reverse Captains",
-    "EB-01": "Memorial Collection",
-    "EB-02": "25th Anniversary Collection",
-    "PRB-01": "Premium Booster One Piece The Best",
-    "PRB-02": "Premium Booster Vol.2",
+# 2026-04-26: DRAGON BALL SCG セット名 → eBay フィルタ表示用クリーンアップ
+# Bandai TCG+ API は "BOOSTER PACK -AWAKENED PULSE- [FB01]" のような生表記を返すが
+# eBay の C:Set フィルタは Title Case の短縮名 (例: "Awakened Pulse") を要求。
+# 完全一致マップ + 汎用クリーンアップ (角括弧除去 + ハイフン区切り部分抽出 + Title Case) のフォールバック。
+_DRAGONBALL_SET_NAME_MAP = {
+    # Booster Pack
+    "BOOSTER PACK -AWAKENED PULSE- [FB01]": "Awakened Pulse",
+    "BOOSTER PACK -BLAZING AURA- [FB02]":   "Blazing Aura",
+    "BOOSTER PACK -RAGING ROAR- [FB03]":    "Raging Roar",
+    "BOOSTER PACK -FUSION SURGE- [FB04]":   "Fusion Surge",
+    "BOOSTER PACK -RISING SPARK- [FB05]":   "Rising Spark",
+    "BOOSTER PACK -PERFECT COMBINATION- [FB06]": "Perfect Combination",
+    "BOOSTER PACK -ULTRA LIMIT- [FB07]":    "Ultra Limit",
+    "BOOSTER PACK -SECRET OF EVOLUTION- [FB08]": "Secret of Evolution",
+    "BOOSTER PACK -DESTINED RIVALS- [FB09]": "Destined Rivals",
+    # Manga Booster
+    "MANGA BOOSTER 02 [SB02]":              "Manga Booster 02",
+    "MANGA BOOSTER 01 [SB01]":              "Manga Booster 01",
+    "MANGA BOOSTER -CRITICAL BLOW- [SB02]": "Critical Blow",
+    # Starter Deck
+    "STARTER DECK SAIYAN GENESIS [FS01]":   "Starter Deck Saiyan Genesis",
+    "STARTER DECK BUDOKAI WARRIORS [FS02]": "Starter Deck Budokai Warriors",
+    "STARTER DECK PERFECTION [FS03]":       "Starter Deck Perfection",
+    "STARTER DECK FRIEZA [FS04]":           "Starter Deck Frieza",
+    "STARTER DECK ANDROIDS [FS05]":         "Starter Deck Androids",
+    "STARTER DECK PIRATES [FS06]":          "Starter Deck Pirates",
+    "STARTER DECK ULTIMATE WARRIORS [FS07]": "Starter Deck Ultimate Warriors",
+    "STARTER DECK MAJIN BUU [FS08]":        "Starter Deck Majin Buu",
+    "STARTER DECK EX SHALLOT [FS09]":       "Starter Deck EX Shallot",
 }
 
 
-def _onepiece_set_code_to_name(set_code):
-    """ONE PIECE set code (OP-01 等) を eBay 正式名 (Romance Dawn 等) に変換.
-    マップ未収録なら set_code をそのまま返す（フォールバック）。
+def _strip_variant_from_character(name):
+    """キャラ名からバリアント識別子を剥がす (Bandai TCG+ API は 'Son Goku (Mini) : DA' 等を返す).
+
+    Character フィールドは「キャラクター」が本義なので、バリアント情報 (括弧書き、': XX' 接尾辞)
+    を除去して純粋なキャラ名のみにする。
+    例:
+        'Son Goku (Mini) : DA' → 'Son Goku'
+        'Vegito : SH'          → 'Vegito'
+        'Boa Hancock'          → 'Boa Hancock' (変化なし)
+        'Majin Buu : Kid'      → 'Majin Buu'
     """
-    if not set_code:
-        return set_code
-    return _ONEPIECE_SET_NAME_MAP.get(set_code, set_code)
+    if not name:
+        return name
+    # 括弧 (...) を除去
+    clean = re.sub(r'\s*\([^)]*\)\s*', ' ', name)
+    # 「: XX」以降を除去
+    clean = re.sub(r'\s*:\s*.+$', '', clean)
+    return clean.strip()
 
 
-def _onepiece_set_to_ebay(get_info_jp, card_id=""):
-    """Bandai公式データ → eBay慣行のセットコードに変換。
-    card_idが最も正確（カードが実際に収録されているセット）なので優先。
-    例: card_id='OP10-119' → 'OP-10'
-        card_id='ST02-007' → 'ST-02'
-        get_info_jp='ブースターパック 王族の血統【OP-10】' → 'OP-10'
+def _build_card_name(character_clean, subject, original_name=""):
+    """eBay C:Card Name 値を構築 (キャラ名 + Subject 派生バリアント識別子).
+
+    Args:
+        character_clean: 純キャラ名 (バリアント剥離済)
+        subject: PSA Subject (例: 'BOA HANCOCK ALTERNATE ART')
+        original_name: bandai TCG+ から来た元の name (例: 'Son Goku (Mini) : DA')
+                       これに括弧/: 接尾辞があれば優先採用
+
+    Returns: 'Boa Hancock (Alternate Art)' 等
     """
-    set_code = ""
+    if not character_clean:
+        return original_name or ""
+    # original_name に括弧/: 接尾辞 (バリアント識別子) があれば優先採用
+    if original_name and (re.search(r'\([^)]+\)', original_name) or ':' in original_name):
+        return original_name
+    if not subject:
+        return character_clean
+    su = subject.upper()
+    # PSA Subject から派生バリアント識別子を抽出 (1個だけ)
+    variants = []
+    for kw, label in [
+        ("SPECIAL ALTERNATE ART", "Special Alternate Art"),
+        ("SPARKLE FOIL",          "Sparkle Foil"),
+        ("ALTERNATE ART",         "Alternate Art"),
+        ("ALT ART",               "Alternate Art"),
+        ("SPECIAL ART",           "Special Art"),
+        ("BLACK & WHITE",         "Black & White"),
+        ("PARALLEL",              "Parallel"),
+    ]:
+        if kw in su:
+            variants.append(label)
+            break
+    if variants:
+        return f"{character_clean} ({variants[0]})"
+    return character_clean
 
-    # card_idから抽出（最優先 — カードが実際に属するセット）
-    if card_id:
-        # _p1等のバリアント識別子を除去してから
-        clean_id = re.sub(r'_[a-z]\d*$', '', card_id)
-        id_match = re.match(r'([A-Z]+)(\d+)-', clean_id)
-        if id_match:
-            prefix = id_match.group(1)
-            num = id_match.group(2)
-            set_code = f"{prefix}-{num}"
 
-    # card_idから取れなければget_info_jpから
-    if not set_code and get_info_jp:
-        code_match = re.search(r'【([A-Z]+-\d+)】', get_info_jp)
-        if code_match:
-            set_code = code_match.group(1)
+def _dragonball_set_name_to_ebay(raw_set_name):
+    """Dragon Ball SCG セット名を eBay フィルタ用にクリーンアップ.
+    1) 完全一致マップを最優先
+    2) フォールバック: 角括弧除去 + Title Case 化
+    """
+    if not raw_set_name:
+        return raw_set_name
+    if raw_set_name in _DRAGONBALL_SET_NAME_MAP:
+        return _DRAGONBALL_SET_NAME_MAP[raw_set_name]
+    # フォールバック: [XX99] 角括弧部分を除去 + Title Case
+    cleaned = re.sub(r'\s*\[[^\]]+\]\s*$', '', raw_set_name).strip()
+    # ハイフンで囲まれた中身があれば抽出 (例: "BOOSTER PACK -XXX-" → "XXX")
+    m = re.search(r'-([^-]+)-', cleaned)
+    if m:
+        cleaned = m.group(1).strip()
+    return cleaned.title() if cleaned.isupper() else cleaned
 
-    return set_code
+
+# 2026-04-26: 旧 _onepiece_set_to_ebay 削除 (iMakCatalog adapter が代替)
 
 
 # ===== Pokemon Item Specifics整形 =====
@@ -1300,11 +1216,72 @@ def _pokemon_character_name(subject):
     return name.strip()
 
 
+def _load_cert_overrides():
+    """cert_overrides.json を読み込む (失敗時は空 dict)。
+    キー '_README' は仕様メタなので除外して返す。
+    """
+    import os as _os
+    p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "cert_overrides.json")
+    if not _os.path.exists(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v for k, v in data.items() if k != "_README"}
+    except Exception as _e:
+        print(f"⚠️ cert_overrides.json 読込失敗: {_e}")
+        return {}
+
+
 def build_row(cert_number, price, data, description, driver=None):
     subject = data.get('Subject', 'Unknown')
     card_number = data.get('CardNumber', '')
     brand = data.get('Brand', '')
     year = data.get('Year', 2025)
+
+    # ===== cert_overrides.json による特別処理 =====
+    # 公式DB lookup が誤マッチ/未対応の cert に対する手動補完
+    # 既存ロジックは触らず、overrides 由来の値を上書きで採用
+    _OVERRIDES = _load_cert_overrides()
+    _override = _OVERRIDES.get(str(cert_number))
+    _override_applied = False
+    if _override:
+        if _override.get("skip"):
+            msg = _override.get("skip_message", "overrides で skip 指定")
+            print(f"    ⏭️ Skip (overrides): {msg}")
+            return None
+        if _override.get("skip_official_lookup"):
+            _override_applied = True
+            print(f"    📌 Override 適用: {_override.get('reason', '理由未記入')}")
+
+    # ===== 画像主導カード特定 (新ルーチン、独立モジュール) =====
+    # card_identifier.identify_from_image を試行。confidence high/medium なら
+    # 既存 lookup の前に official_* を上書き (「特定」のみ、「推測」はしない)。
+    # 失敗 (low/failed) 時は既存ロジック (Bandai名前検索 等) にフォールバック。
+    # ロールバック: この import & if ブロックをコメントアウトすれば完全に元に戻る。
+    _vision_result = None
+    if data.get('CardImageUrl') and not _override_applied:
+        try:
+            from card_identifier import identify_from_image as _identify
+            _vision_result = _identify(
+                cert_number=cert_number,
+                image_url=data.get('CardImageUrl', ''),
+                psa_brand=brand,
+                psa_subject=data.get('Subject', ''),
+            )
+        except Exception as _e:
+            print(f"    ⚠️ card_identifier 呼出失敗: {type(_e).__name__}: {_e}")
+            _vision_result = None
+        # ===== カード特定推論エージェント (新ルーチン、独立) =====
+        # Vision 結果を PSA cert (公式記録) で補正。card_number 数字不一致時は
+        # PSA 信頼で合成 card_number 生成 (Vision 誤読の構造的防御)。
+        # ロールバック: この try/except ブロックをコメントアウトで完全復元。
+        try:
+            from card_identification_agent import correct_vision_result_with_psa
+            _vision_result = correct_vision_result_with_psa(_vision_result, data)
+        except Exception as _e:
+            print(f"    ⚠️ identification_agent 失敗: {type(_e).__name__}: {_e}")
+            # _vision_result は元のまま、既存挙動継続
 
     card_number = str(card_number)  # ゼロ埋め保持
     game, set_name, franchise = detect_game_info(brand)
@@ -1323,72 +1300,98 @@ def build_row(cert_number, price, data, description, driver=None):
     official_illustrator = ""
     official_finish = ""
 
-    if driver and franchise == "One Piece":
-        # Bandai JP 公式 (One Piece)
-        bandai = lookup_bandai_card(driver, brand, card_number, subject)
+    # overrides 適用時: 公式DB lookup を完全スキップして overrides の specs を直接採用
+    if _override_applied:
+        _ov_specs = _override.get("specs", {})
+        official_card_type  = _ov_specs.get("card_type", "")
+        official_rarity     = _ov_specs.get("rarity", "")
+        official_color      = _ov_specs.get("color", "")
+        official_power      = str(_ov_specs.get("power", "")) if _ov_specs.get("power") not in (None, "") else ""
+        official_cost       = str(_ov_specs.get("cost", "")) if _ov_specs.get("cost") not in (None, "") else ""
+        official_attribute  = _ov_specs.get("attribute", "")
+        if _ov_specs.get("set_name"):
+            set_name = _ov_specs["set_name"]
+        if _ov_specs.get("card_number"):
+            official_card_number = _ov_specs["card_number"]
+        if _ov_specs.get("character"):
+            character = _ov_specs["character"]
+        # franchise 別分岐 (Pokemon等) をスキップしているので card_name 系を最低限初期化
+        # Pokemon 経路: subject 由来の名前を試行、失敗時は character で代替
+        if franchise == "Pokemon":
+            game = "Pokémon TCG"
+            try:
+                card_name = _pokemon_card_name(subject) or character
+            except Exception:
+                card_name = character
+        else:
+            card_name = character
+    elif franchise == "One Piece":
+        # iMakCatalog DB lookup (Phase 1: bandai_jp.py から移行).
+        # ID 完全一致のみ、フォールバック禁止 (PRB02-005 / ST16-005 事故再発防止).
+        # eBay フィルタ値変換 (set_name / rarity) は adapter が ebay_filter_map で実行済み.
+        bandai = catalog_psa.lookup_one_piece(brand, card_number, subject)
+        # ===== iMakCatalog 戻り値の eBay US 向け正規化 (新ルーチン、独立) =====
+        # JP→EN 翻訳 (キャラクター→Character / 赤→Red / モンキー・D・ルフィ→Monkey D. Luffy)
+        # + ピリオド連結補正 (Monkey.D.Luffy → Monkey D. Luffy)
+        # ロールバック: この try/except ブロックをコメントアウトで完全復元.
+        try:
+            from catalog_localization import localize_catalog_record
+            bandai = localize_catalog_record(bandai)
+        except Exception as _e:
+            print(f"    ⚠️ catalog_localization 失敗: {type(_e).__name__}: {_e}")
+            # bandai は元のまま、既存挙動継続
         if bandai:
             character = bandai.get("name_en") or character
-            set_name_bandai = _extract_set_name_from_get_info(bandai.get("get_info_jp", ""))
-            if set_name_bandai:
-                set_name = set_name_bandai
             official_card_type = bandai.get("type_en", "")
-            official_rarity = bandai.get("rarity_en", "")
+            official_rarity = bandai.get("rarity_en", "")     # 既に eBay 形式 (SR/C/L→空)
             official_color = bandai.get("color_en", "")
             official_power = bandai.get("power", "")
             official_cost = bandai.get("life_or_cost", "")
             official_attribute = bandai.get("attribute_en", "")
-            # Card Number: Bandai card_id (例: OP10-119_p3) → パラレル識別子を除去
+            # Card Number: variant suffix (_p1 / _ST28 / _EB02_LF 等) を全部剥がす
             bandai_card_id = bandai.get("card_id", "")
             if bandai_card_id:
-                # _p1, _p2, _p3, _r1 等のバリアント識別子を除去
-                official_card_number = re.sub(r'_[a-z]\d*$', '', bandai_card_id)
-            # Rarity: Bandai公式表記 → eBay略称に変換
-            official_rarity = _onepiece_rarity_to_ebay(official_rarity)
-            # Set名: get_info_jp からセットコード表記に変換
-            bandai_set_info = bandai.get("get_info_jp", "")
-            ebay_set = _onepiece_set_to_ebay(bandai_set_info, bandai_card_id)
-            if ebay_set:
-                set_name = ebay_set
-        else:
-            # Bandai公式でヒットしない場合: PSA BrandからセットIDを推定してCard Numberに付与
-            set_code = extract_set_code_from_brand(brand)
-            if set_code and not re.match(r'[A-Z]', card_number):
-                official_card_number = f"{set_code}-{card_number}"
+                official_card_number = re.sub(r'_.+$', '', bandai_card_id)
+            # Set: adapter が ebay_filter_map で変換済み
+            if bandai.get("set_name_ebay"):
+                set_name = bandai["set_name_ebay"]
+        # iMakCatalog miss → Vision に委ねる (fallback 構築は廃止、PSA Brand "P" + 番号
+        # で誤った P-XXX を作ってしまい Vision の正値を遮断していた問題を解消)
 
-    elif driver and franchise == "Pokemon":
+    elif franchise == "Pokemon":
         # Pokemon共通（公式ヒット有無にかかわらず設定）
         game = "Pokémon TCG"
         set_name = _pokemon_set_name(brand)
         character = _pokemon_character_name(subject)
         card_name = _pokemon_card_name(subject)
 
-        # Pokemon公式 (pokemon-card.com)
-        pokemon = pokemon_card_jp.fetch_card_with_subject(driver, brand, card_number, subject)
+        # iMakCatalog DB lookup (Phase 2b: pokemon_card_jp.fetch_card_with_subject から移行).
+        # ID 完全一致のみ、フォールバック禁止 (Pokemon 13件全滅事故再発防止).
+        pokemon = catalog_psa.lookup_pokemon(brand, card_number, subject)
         if pokemon:
-            print(f"    🎯 Pokemon公式: {pokemon.get('name_jp', '')} "
-                  f"(rarity={pokemon.get('rarity_en', '')!r}, "
-                  f"number={pokemon.get('card_number_full', '')!r})")
-            official_rarity = pokemon.get("rarity_en", "")
+            official_rarity = pokemon.get("rarity", "")
             official_power = pokemon.get("hp", "")
-            # Card Type: HPがあればポケモン、なければトレーナー
-            if pokemon.get("hp"):
-                official_card_type = "Pokémon"
-            else:
-                official_card_type = "Trainer"
+            # card_type: scraper が specs.card_type に Pokémon/Trainer/Energy を保存済
+            official_card_type = pokemon.get("card_type", "")
             official_attribute = pokemon.get("type_en", "")
-            official_illustrator = pokemon.get("illustrator", "")
+            official_illustrator = pokemon.get("illustrator") or ""
             if pokemon.get("card_number_full"):
                 official_card_number = pokemon["card_number_full"]
+            # set: adapter が ebay_filter_map で変換済み
+            if pokemon.get("set_name_ebay"):
+                set_name = pokemon["set_name_ebay"]
 
     elif franchise == "Dragon Ball":
-        # Dragon Ball Fusion World 公式 (Bandai TCG+ API)
+        # Dragon Ball Fusion World — iMakCatalog DB lookup (Phase 2: bandai_tcg_plus から移行).
+        # 例外パス: Energy Marker (E##-##) は Bandai TCG+ API 対象外なのでハードコード DB を維持.
         game = "Dragon Ball Super Card Game"
-        # PSA Brandからカード番号を抽出 (例: "DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE BLAZING AURA" + CardNumber "139")
-        # detect_game_infoで既にset_nameが設定されている
-        # card_idを構築: セット名から推定 (例: set="Blazing Aura" → FB03)
         db_card_id = _dragonball_card_id(brand, card_number)
-        if db_card_id:
-            db_card = bandai_tcg_plus.fetch_card(db_card_id, game="dragonball")
+        db_card = None
+        if db_card_id and db_card_id in ENERGY_MARKER_DB:
+            # Energy Marker は ENERGY_MARKER_DB (ハードコード) 経由
+            db_card = ENERGY_MARKER_DB[db_card_id]
+            print(f"    🎯 Energy Marker DB (hardcoded): {db_card_id}")
+            print(f"    ⚠️ Color は物理カード確認後に手動補完してください")
             if db_card:
                 official_card_type = db_card.get("card_type", "")
                 official_rarity = db_card.get("rarity", "")
@@ -1400,23 +1403,96 @@ def build_row(cert_number, price, data, description, driver=None):
                     set_name = db_card["set_name"]
                 if db_card.get("card_name"):
                     character = db_card["card_name"]
+        else:
+            # 通常カード: iMakCatalog DB lookup
+            db_card = catalog_psa.lookup_dragonball(brand, card_number, subject)
+            if db_card:
+                official_card_type = db_card.get("card_type", "")
+                official_rarity = db_card.get("rarity", "")     # 既に eBay 形式
+                official_color = db_card.get("color", "")
+                official_power = db_card.get("power", "")
+                official_cost = db_card.get("cost", "")
+                # variant suffix を剥がした card_number
+                db_full_id = db_card.get("card_id", "")
+                if db_full_id:
+                    official_card_number = re.sub(r'_.+$', '', db_full_id)
+                if db_card.get("set_name_ebay"):
+                    set_name = db_card["set_name_ebay"]
+                if db_card.get("card_name"):
+                    character = db_card["card_name"]
 
     elif franchise == "Gundam":
-        # Gundam Card Game 公式 (Bandai TCG+ API)
-        gd_card_id = _gundam_card_id(brand, card_number)
-        if gd_card_id:
-            gd_card = bandai_tcg_plus.fetch_card(gd_card_id, game="gundam")
-            if gd_card:
-                official_card_type = gd_card.get("card_type", "")
-                official_rarity = gd_card.get("rarity", "")
-                official_color = gd_card.get("color", "")
-                official_power = gd_card.get("power", "")
-                official_cost = gd_card.get("cost", "")
-                official_card_number = gd_card.get("card_number", card_number)
-                if gd_card.get("set_name"):
-                    set_name = gd_card["set_name"]
-                if gd_card.get("card_name"):
-                    character = gd_card["card_name"]
+        # iMakCatalog DB lookup (Phase 2: bandai_tcg_plus.fetch_card から移行).
+        # ID 完全一致のみ + 名前検証. eBay フィルタ値変換は adapter で済.
+        gd_card = catalog_psa.lookup_gundam(brand, card_number, subject)
+        if gd_card:
+            official_card_type = gd_card.get("card_type", "")
+            official_rarity = gd_card.get("rarity", "")     # 既に eBay 形式
+            official_color = gd_card.get("color", "")
+            official_power = gd_card.get("power", "")
+            official_cost = gd_card.get("cost", "")
+            # variant suffix を剥がした card_number
+            gd_card_id = gd_card.get("card_id", "")
+            if gd_card_id:
+                official_card_number = re.sub(r'_.+$', '', gd_card_id)
+            if gd_card.get("set_name_ebay"):
+                set_name = gd_card["set_name_ebay"]
+            if gd_card.get("card_name"):
+                character = gd_card["card_name"]
+
+    # ===== 画像主導カード特定の結果を反映 (新ルーチン由来) =====
+    # confidence high/medium の場合、既存 lookup 結果より優先で official_* を上書き。
+    # set_name は既存 Canonical Map に通す (大文字/コード形式の正規化)。
+    # ロールバック: この if ブロックをコメントアウトすれば既存挙動に完全復元。
+    if _vision_result and _vision_result.get("confidence") in ("high", "medium"):
+        v = _vision_result
+        # 2026-04-26: Vision は **gap fill のみ** に変更.
+        # iMakCatalog (公式 Bandai API) が既に提供したフィールドは Vision が上書きしない.
+        # (旧挙動で OP14-034 Luffy の set が Vision キャッシュ '"The Three Captains"' に
+        #  上書きされて Claude AI selfcheck が BLOCK した事例修正)
+        # 公式 prefix 付き番号 (例: 'OP14-034') は authoritative なので Vision は上書きしない.
+        # 一方 PSA raw 番号 (例: '019' = 数字のみ) は不完全なので Vision の prefix 付き
+        # ('OP07-019' 等) で gap-fill する.
+        if v.get("card_number") and (
+            not official_card_number
+            or not re.match(r"[A-Z]", official_card_number)
+        ):
+            official_card_number = v["card_number"]
+        if v.get("character") and not character:
+            character = v["character"]
+        if v.get("set_name") and not set_name:
+            # 既存 Canonical Map (iMakCatalog ebay_filter_map) に通して正規化
+            # 例: "OP13" → ハイフン補完で "OP-13" → "Carrying On His Will"
+            #     "ROMANCE DAWN" → 大文字検出で "Romance Dawn"
+            _raw_set = v["set_name"]
+            _normalized = catalog_psa.set_code_to_ebay_name(_raw_set)
+            if _normalized == _raw_set:
+                # マップヒット失敗 → ハイフン補完で再試行
+                _m_set = re.match(r'^(OP|ST|EB|PRB)(\d+)$', _raw_set, re.IGNORECASE)
+                if _m_set:
+                    _normalized = catalog_psa.set_code_to_ebay_name(
+                        f"{_m_set.group(1).upper()}-{_m_set.group(2)}"
+                    )
+            if _normalized != _raw_set:
+                set_name = _normalized
+            elif _raw_set.isupper():
+                # 全大文字 → Title Case 化 (例: "ROMANCE DAWN" → "Romance Dawn")
+                set_name = _raw_set.title()
+            else:
+                set_name = _raw_set
+        if v.get("rarity") and not official_rarity:
+            official_rarity = v["rarity"]
+        if v.get("color") and not official_color:
+            official_color = v["color"]
+        if v.get("card_type") and not official_card_type:
+            official_card_type = v["card_type"]
+        if v.get("cost") not in (None, "") and official_cost in (None, ""):
+            official_cost = str(v["cost"])
+        if v.get("power") not in (None, "") and official_power in (None, ""):
+            official_power = str(v["power"])
+        # franchise も上書き (画像から判定可能)
+        if v.get("franchise"):
+            franchise = v["franchise"].replace(" TCG", "").replace(" Card Game", "").replace(" Super Card Game", "") if franchise == "" else franchise
 
     # Claude APIでタイトル・カード情報生成（画像あり）
     card_image_url = data.get('CardImageUrl')
@@ -1430,6 +1506,10 @@ def build_row(cert_number, price, data, description, driver=None):
     # に従い、rarity/card_type/cost/power/attribute/finish 全てで claude_result を使わない。
     # 公式DB (bandai_jp / bandai_tcg_plus / pokemon_card_jp) がヒットしない場合は空欄で出品する。
     if franchise != "Pokemon":
+        # 2026-04-26: Character = 純キャラ名 (バリアント識別子剥離)
+        # Card Name = Character と同値 (eBay 慣習。バリアント情報は C:Features で表現)
+        # ※ Subject由来のバリアント識別子を Card Name に詰め込むのは過剰 (検索性低下)
+        character = _strip_variant_from_character(character)
         card_name = character
     rarity    = official_rarity      # Claude 追放
     features  = extract_variant_from_subject(subject)  # 関数ベース（PSA Subject パース、推論なし）
@@ -1467,6 +1547,18 @@ def build_row(cert_number, price, data, description, driver=None):
         "SP":  "Special",
         "SP CARD": "Special",
     }
+    # DRAGON BALL rarity 略号 → eBay 正規綴り
+    # 2026-04-26: Bandai TCG+ API は SR/UC/PR★ 等の略号/特殊記号を返すが eBay フィルタ非対応
+    _CANONICAL_RARITY_DRAGONBALL = {
+        "C":    "Common",
+        "UC":   "Uncommon",
+        "R":    "Rare",
+        "SR":   "Super Rare",
+        "SCR":  "Secret Rare",
+        "PR":   "Promo",
+        "PR★":  "Promo",  # ★ は eBay フィルタ非対応
+        "L":    "Leader",
+    }
     if features in _CANONICAL_FEATURES:
         _new = _CANONICAL_FEATURES[features]
         print(f"    [AUTO-FIX] Features: {features!r} -> {_new!r} (Canonical Map)")
@@ -1475,11 +1567,18 @@ def build_row(cert_number, price, data, description, driver=None):
         _new = _CANONICAL_CARD_TYPE[card_type]
         print(f"    [AUTO-FIX] Card Type: {card_type!r} -> {_new!r} (Canonical Map)")
         card_type = _new
-    # Rarity は ONE PIECE のみ正規化（DragonBall/Gundam は別マップで Bandai 側で対応済）
+    # Rarity 正規化 (フランチャイズ別マップ)
     if franchise == "One Piece" and rarity:
         _ru = rarity.strip().upper()
         if _ru in _CANONICAL_RARITY_ONEPIECE:
             _new = _CANONICAL_RARITY_ONEPIECE[_ru]
+            if _new != rarity:
+                print(f"    [AUTO-FIX] Rarity: {rarity!r} -> {_new!r} (Canonical Map)")
+            rarity = _new
+    elif franchise == "Dragon Ball" and rarity:
+        _ru = rarity.strip().upper()
+        if _ru in _CANONICAL_RARITY_DRAGONBALL:
+            _new = _CANONICAL_RARITY_DRAGONBALL[_ru]
             if _new != rarity:
                 print(f"    [AUTO-FIX] Rarity: {rarity!r} -> {_new!r} (Canonical Map)")
             rarity = _new
@@ -1493,8 +1592,15 @@ def build_row(cert_number, price, data, description, driver=None):
             cost = ""
 
     # 2026-04-25: ONE PIECE Set コード → 公式名称（eBay フィルタヒット率向上）
+    # 2026-04-26: iMakCatalog ebay_filter_map 経由に切替
     if franchise == "One Piece" and set_name:
-        _new_set = _onepiece_set_code_to_name(set_name)
+        _new_set = catalog_psa.set_code_to_ebay_name(set_name)
+        if _new_set != set_name:
+            print(f"    [AUTO-FIX] Set: {set_name!r} -> {_new_set!r} (iMakCatalog ebay_filter_map)")
+            set_name = _new_set
+    # 2026-04-26: DRAGON BALL Set 名 → eBay フィルタ表示用クリーンアップ
+    elif franchise == "Dragon Ball" and set_name:
+        _new_set = _dragonball_set_name_to_ebay(set_name)
         if _new_set != set_name:
             print(f"    [AUTO-FIX] Set: {set_name!r} -> {_new_set!r} (公式名称マップ)")
             set_name = _new_set
@@ -1525,6 +1631,27 @@ def build_row(cert_number, price, data, description, driver=None):
     else:
         title = build_title(game, set_name, card_number, subject)
         print(f"    📐 Rule title: {title} ({len(title)}字)")
+
+    # ===== タイトル生成エージェント (新ルーチン、独立) =====
+    # Phase 1: NG語フィルタ (Pk Set → Tin 等の Error 240 回避) + technique→character 置換
+    # Phase 2: iMakKeywords PDF 上位語スコアリング (検索ボリューム加味)
+    # Phase 3: TOP seller タイトル分析 (sold_data xlsx 頻出語)
+    # → 仮説 (variants) 生成 → 多角スコア → 最良案採用 (誤情報追加は厳格除外)
+    # ロールバック: この try/except ブロックをコメントアウトで完全復元。
+    try:
+        from title_generation_agent import refine_title
+        _agent_warnings = (_vision_result or {}).get("agent_warnings", [])
+        title = refine_title(
+            title,
+            character=character,
+            card_number=card_number,
+            franchise=franchise,
+            agent_warnings=_agent_warnings,
+        )
+    except Exception as _e:
+        print(f"    ⚠️ title_generation_agent 失敗: {type(_e).__name__}: {_e}")
+        # title は元のまま、既存挙動継続
+
     # SKU (CustomLabel): メルカリ item ID 形式 `m\d+` を最優先（tshirt_listing_rules 準拠）。
     # 無在庫運用でメルカリ元ページへの即時逆引きと二重出品防止を両立するキー設計。
     # URL 無し / 抽出失敗時のみ PSA cert# ベースにフォールバック。
@@ -1547,11 +1674,68 @@ def build_row(cert_number, price, data, description, driver=None):
     # psa_card_number は listing_validator の Rule 3 が「数字のみ」を前提にしているため、
     # line 1372 で official_card_number に上書き済の card_number ではなく PSA 生値を渡す。
     # （Bandai補完値を渡すと "ST16-004" vs "004" の false positive が発生する）
+    # overrides 適用時は3AIへ「人手検証済」コンテキストを追加
+    # (PSA cert# vs 公式 collection# の番号体系違いを許容、画像/Subject 整合性は引き続きチェック)
+    _override_context = None
+    if _override_applied:
+        _override_context = (
+            f"NOTE: This listing has manual overrides applied (cert_overrides.json).\n"
+            f"Reason: {_override.get('reason', '')}\n"
+            f"Reviewer: human-verified at {_override.get('applied_at', '')}\n"
+            f"PSA cert# may differ from any external DB collection# by design.\n"
+            f"Focus your validation on Subject/image consistency, NOT on cert# numerical match."
+        )
+    else:
+        # iMakCatalog (公式 DB) hit 時は authority context を 3AI に注入.
+        # set_name 表記揺れ / Pokemon の Attribute=Type 慣習 等を 3AI に説明し、
+        # 機械的 BLOCK を防ぐ. catalog miss の場合は None で通常判定継続.
+        try:
+            from catalog_authority_context import maybe_build_context as _cat_ctx
+            _override_context = _cat_ctx(
+                brand=brand,
+                card_number=data.get('CardNumber', ''),
+                subject=subject,
+                franchise=franchise,
+            )
+        except Exception:
+            _override_context = None
     if not validate_and_report(
         cert_number, title, tcg_specs, "", 183454, 2750, price, PIC_URL,
-        psa_brand=brand, psa_card_number=data.get('CardNumber', '')
+        psa_brand=brand, psa_card_number=data.get('CardNumber', ''),
+        override_context=_override_context,
     ):
         return None
+
+    # ===== Card Name/Character の variant suffix 剥がし (新ルーチン、独立) =====
+    # PSA Subject 由来の雑誌名/Anniversary略号/Pokemon prefix 等を除去し純キャラ名のみ.
+    # ロールバック: この try/except ブロックをコメントアウトで完全復元.
+    try:
+        from card_name_normalizer import normalize_card_name
+        character = normalize_card_name(character, franchise)
+        card_name = normalize_card_name(card_name, franchise)
+    except Exception as _e:
+        print(f"    ⚠️ card_name_normalizer 失敗: {type(_e).__name__}: {_e}")
+        # 元値維持、既存挙動継続
+
+    # ===== iMakCatalog 参照サブルーチン (補助情報源、独立) =====
+    # 既存 specs に空欄あれば catalog 値で補完. 矛盾あれば警告ログのみ (上書きしない).
+    # catalog は隣セッションで開発中、正式運用合意は未済 (2026-04-27)
+    # ロールバック: この try/except ブロックをコメントアウトで完全復元.
+    try:
+        from catalog_reference import reference_catalog_for_specs
+        _ref_specs = {"cost": str(cost), "power": str(power), "color": attribute}
+        _improved, _warnings = reference_catalog_for_specs(
+            franchise=franchise, card_number=card_number,
+            current_specs=_ref_specs,
+            psa_brand=brand, psa_subject=data.get('Subject', ''),
+        )
+        # 補完値だけ反映 (警告は print 済、ここでは反映しない)
+        cost = _improved.get("cost", cost) or cost
+        power = _improved.get("power", power) or power
+        attribute = _improved.get("color", attribute) or attribute
+    except Exception as _e:
+        print(f"    ⚠️ catalog_reference 失敗: {type(_e).__name__}: {_e}")
+        # 元値維持、既存挙動継続
 
     return [
         "Add", 183454, title, PIC_URL, price, 2750,
@@ -1710,7 +1894,14 @@ def main():
 
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
+    # 2026-04-26: バックグラウンド動作化 (目障り回避、機能には影響なし)
+    options.add_argument("--window-size=800,600")
+    options.add_argument("--window-position=100,100")
     driver = uc.Chrome(options=options, version_main=146)
+    try:
+        driver.minimize_window()  # 起動後即最小化
+    except Exception:
+        pass  # 最小化失敗してもメイン処理に影響させない
 
     description = load_description()
 

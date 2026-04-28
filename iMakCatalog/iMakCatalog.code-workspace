@@ -1,0 +1,8 @@
+{
+	"folders": [
+		{ "path": "." },
+		{ "path": "../iMakTCG", "name": "iMakTCG (連携先)" },
+		{ "path": "../iMakeBayAPI", "name": "iMakeBayAPI (連携先)" }
+	],
+	"settings": {}
+}

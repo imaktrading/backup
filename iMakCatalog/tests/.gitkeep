@@ -1,0 +1,5 @@
+# Phase 1 以降で追加:
+#   test_api.py            api.lookup / search / upsert / to_ebay_value のユニットテスト
+#   test_one_piece_tcg.py  Phase 1 スクレイパーテスト
+#   test_pokemon_tcg.py    Phase 2 スクレイパーテスト
+#   ...

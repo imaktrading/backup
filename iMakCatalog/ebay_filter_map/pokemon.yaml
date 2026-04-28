@@ -1,0 +1,340 @@
+# Pokemon TCG (Japanese) — eBay フィルタ値マッピング
+#
+# 出典: 2026-04-28 --full scrape 完走後の実 DB から取得 (21899 rows / 182 unique sets)
+#       Top 50+ set_code を網羅、残りは新弾発売時に追記
+#
+# Pokemon set_code 命名規則:
+#   - SV{n}{suffix?}        : Scarlet & Violet 系 (sv1~sv11W、複数 suffix あり)
+#   - S{n}{suffix?}         : Sword & Shield 系 (s1~s12a)
+#   - SM{n}{suffix?}        : Sun & Moon 系
+#   - M{n}{suffix?}         : Mega 系 (M2a, M4 等)
+#   - XY / DPt / BW / L     : 旧シリーズ
+#   - その他 (MC/SI/SVM/SVD/SMH/SD/CP4) : プロモ・misc
+#   - 大文字小文字混在: 公式 image_url='M2a'/PSA brand='M2A' → adapter 双方試行
+#
+# 注意:
+#   - 新弾発売時は本ファイルに追記 + `python ebay_filter_map/loader.py pokemon`
+#   - eBay 値は推測含む (REVIEW マーク)、定期的に eBay UI で確認
+
+category: pokemon_tcg
+
+# ============================================================================
+# Set (公式原文ベタ一致) — Pokemon は『拡張パック「XXX」』『ハイクラスパック「YYY」』 形式
+# 必要な promo / 特殊 set 用. 通常 set は set_code 経路を使う.
+# ============================================================================
+set: []
+
+# ============================================================================
+# Set code — DB の product_id prefix から抽出. api._row_to_dict が自動でフォールバック
+# ============================================================================
+set_code:
+  # ----- Scarlet & Violet (SV / SVxx) -----
+  - source: SV1V
+    ebay: Violet ex
+    note: REVIEW eBay 値
+    year: 2023
+  - source: SV1S
+    ebay: Scarlet ex
+    note: REVIEW eBay 値
+    year: 2023
+  - source: SV2D
+    ebay: Clay Burst
+    note: REVIEW eBay 値
+    year: 2023
+  - source: SV2P
+    ebay: Snow Hazard
+    note: REVIEW eBay 値
+    year: 2023
+  - source: SV2a
+    ebay: Pokemon 151
+    note: 拡張パック「ポケモンカード151」 — REVIEW eBay 値
+    year: 2023
+  - source: SV3
+    ebay: Ruler of the Black Flame
+    note: 拡張パック「黒炎の支配者」
+    year: 2023
+  - source: SV3a
+    ebay: Raging Surf
+    note: REVIEW eBay 値
+    year: 2023
+  - source: SV4
+    ebay: Future Flash
+    note: REVIEW eBay 値
+    year: 2023
+  - source: SV4K
+    ebay: Wild Force
+    note: REVIEW eBay 値
+    year: 2024
+  - source: SV4M
+    ebay: Cyber Judge
+    note: REVIEW eBay 値
+    year: 2024
+  - source: SV4a
+    ebay: Shiny Treasure ex
+    note: ハイクラスパック「シャイニートレジャーex」
+    year: 2023
+  - source: SV5K
+    ebay: Wild Force
+    note: REVIEW eBay 値
+    year: 2024
+  - source: SV5M
+    ebay: Cyber Judge
+    note: REVIEW eBay 値
+    year: 2024
+  - source: SV5a
+    ebay: Crimson Haze
+    note: REVIEW eBay 値
+    year: 2024
+  - source: SV6
+    ebay: Mask of Change
+    note: 拡張パック「変幻の仮面」 — REVIEW eBay 値
+    year: 2024
+  - source: SV6a
+    ebay: Night Wanderer
+    note: REVIEW eBay 値
+    year: 2024
+  - source: SV7
+    ebay: Stellar Miracle
+    note: 拡張パック「ステラミラクル」 — REVIEW eBay 値
+    year: 2024
+  - source: SV7a
+    ebay: Paradise Dragona
+    note: REVIEW eBay 値
+    year: 2024
+  - source: SV8
+    ebay: Super Electric Breaker
+    note: 拡張パック「超電ブレイカー」 — REVIEW eBay 値
+    year: 2024
+  - source: SV8a
+    ebay: Terastal Festival ex
+    note: ハイクラスパック「テラスタルフェスex」 — REVIEW eBay 値
+    year: 2024
+  - source: SV9
+    ebay: Battle Partners
+    note: 拡張パック「バトルパートナーズ」 — REVIEW eBay 値
+    year: 2025
+  - source: SV9a
+    ebay: Heat Wave Arena
+    note: REVIEW eBay 値
+    year: 2025
+  - source: SV10
+    ebay: Rocket Gang's Glory
+    note: 拡張パック「ロケット団の栄光」 — REVIEW eBay 値
+    year: 2025
+  - source: SV11B
+    ebay: Black Bolt
+    note: 拡張パック「ブラックボルト」 — REVIEW eBay 値
+    year: 2025
+  - source: SV11W
+    ebay: White Flare
+    note: 拡張パック「ホワイトフレア」 — REVIEW eBay 値
+    year: 2025
+  - source: SVD
+    ebay: Promo
+    note: SV プロモ系
+    year: 2023
+  - source: SVM
+    ebay: Promo
+    note: SV プロモ系
+    year: 2023
+
+  # ----- Sword & Shield (S / Sxa) -----
+  - source: S1H
+    ebay: Sword
+    note: REVIEW eBay 値
+    year: 2019
+  - source: S1W
+    ebay: Shield
+    note: REVIEW eBay 値
+    year: 2019
+  - source: S4a
+    ebay: Shiny Star V
+    note: ハイクラスパック「シャイニースターV」
+    year: 2020
+  - source: S6a
+    ebay: Eevee Heroes
+    note: 拡張パック「イーブイヒーローズ」 — REVIEW eBay 値
+    year: 2021
+  - source: S7R
+    ebay: Skyscraping Perfect
+    note: REVIEW eBay 値
+    year: 2021
+  - source: S8a
+    ebay: 25th Anniversary Collection
+    note: ハイクラスパック「25thアニバーサリーコレクション」
+    year: 2021
+  - source: S8b
+    ebay: VMAX Climax
+    note: ハイクラスパック「VMAXクライマックス」
+    year: 2021
+  - source: S9
+    ebay: Star Birth
+    note: 拡張パック「スターバース」
+    year: 2022
+  - source: S9a
+    ebay: Battle Region
+    note: REVIEW eBay 値
+    year: 2022
+  - source: S10D
+    ebay: Time Gazer
+    note: REVIEW eBay 値
+    year: 2022
+  - source: S10P
+    ebay: Space Juggler
+    note: REVIEW eBay 値
+    year: 2022
+  - source: S10a
+    ebay: Dark Phantasma
+    note: REVIEW eBay 値
+    year: 2022
+  - source: S11
+    ebay: Lost Abyss
+    note: 拡張パック「ロストアビス」
+    year: 2022
+  - source: S11a
+    ebay: Incandescent Arcana
+    note: REVIEW eBay 値
+    year: 2022
+  - source: S12
+    ebay: Paradigm Trigger
+    note: 拡張パック「パラダイムトリガー」
+    year: 2022
+  - source: S12a
+    ebay: VSTAR Universe
+    note: ハイクラスパック「VSTARユニバース」
+    year: 2022
+
+  # ----- Sun & Moon (SM / SMxx) -----
+  - source: SM12a
+    ebay: Tag All Stars
+    note: ハイクラスパック「TAG TEAM GX タッグオールスターズ」
+    year: 2019
+  - source: SM8b
+    ebay: GX Ultra Shiny
+    note: ハイクラスパック「GXウルトラシャイニー」
+    year: 2018
+  - source: SM4p
+    ebay: GX Battle Boost
+    note: REVIEW eBay 値
+    year: 2017
+  - source: SMH
+    ebay: SM Promos
+    note: SM プロモ
+    year: 2018
+  - source: SI
+    ebay: SM Starter Decks
+    note: SM スターターデッキ系
+    year: 2017
+
+  # ----- Mega Series (M / Mx) — newer Mega Evolution era -----
+  - source: M2a
+    ebay: Mega Dream ex
+    note: ハイクラスパック「MEGAドリームex」 — REVIEW eBay 値
+    year: 2024
+  - source: M2
+    ebay: Inferno X
+    note: 拡張パック「インフェルノX」 — REVIEW eBay 値
+    year: 2024
+  - source: M3
+    ebay: Munigus Zero
+    note: 拡張パック「ムニキスゼロ」 — REVIEW eBay 値
+    year: 2024
+  - source: M4
+    ebay: Ninja Spinner
+    note: 拡張パック「ニンジャスピナー」 — REVIEW eBay 値
+    year: 2024
+
+  # ----- Black & White / X & Y / Diamond & Pearl Platinum (旧) -----
+  - source: XY
+    ebay: The Best of XY
+    note: ハイクラスパック「THE BEST OF XY」
+    year: 2017
+  - source: XY1
+    ebay: Collection X
+    note: 拡張パック「コレクションX」
+    year: 2014
+  - source: XY5
+    ebay: Gaia Volcano
+    note: 拡張パック「ガイアボルケーノ」
+    year: 2015
+  - source: BW6
+    ebay: Freeze Bolt
+    note: REVIEW eBay 値
+    year: 2012
+  - source: DPt
+    ebay: Platinum
+    note: REVIEW eBay 値
+    year: 2009
+  - source: DPt2
+    ebay: Bond at the End of Time
+    note: REVIEW eBay 値
+    year: 2009
+  - source: DPt3
+    ebay: Frontier's Pulse
+    note: REVIEW eBay 値
+    year: 2009
+  - source: DPt4
+    ebay: Arceus Advent
+    note: REVIEW eBay 値
+    year: 2009
+  - source: L1
+    ebay: HeartGold Collection
+    note: REVIEW eBay 値
+    year: 2010
+
+  # ----- Misc / Promo / Special -----
+  - source: SD
+    ebay: Starter Deck
+    note: 各種 starter deck (汎用) — REVIEW eBay 値
+  - source: MC
+    ebay: Movie Promo
+    note: 映画特典プロモ系 — REVIEW eBay 値
+  - source: CP4
+    ebay: Premium Champion Pack
+    note: REVIEW eBay 値
+  - source: P
+    ebay: Promo
+    note: 一般プロモ
+
+# ============================================================================
+# Rarity (Pokemon 公式画像ファイル名から抽出した short code)
+# ============================================================================
+rarity:
+  - source: C
+    ebay: C
+    note: Common
+  - source: U
+    ebay: U
+    note: Uncommon
+  - source: R
+    ebay: R
+    note: Rare
+  - source: RR
+    ebay: RR
+    note: Double Rare (V/ex)
+  - source: RRR
+    ebay: RRR
+    note: Triple Rare
+  - source: SR
+    ebay: SR
+    note: Super Rare
+  - source: SAR
+    ebay: SAR
+    note: Special Art Rare
+  - source: AR
+    ebay: AR
+    note: Art Rare
+  - source: UR
+    ebay: UR
+    note: Ultra Rare
+  - source: HR
+    ebay: HR
+    note: Hyper Rare
+  - source: MA
+    ebay: MA
+    note: Mega Attack Rare
+  - source: MUR
+    ebay: MUR
+    note: Mega Ultra Rare
+  - source: P
+    ebay: Promo

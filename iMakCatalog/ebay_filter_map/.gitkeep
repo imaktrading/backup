@@ -1,0 +1,8 @@
+# 各カテゴリの eBay フィルタ値マッピング yaml を配置:
+#   one_piece_set.yaml    OP-01 → "Romance Dawn" 等
+#   pokemon_set.yaml      Pokemon セット (sv1〜)
+#   gundam_set.yaml       GD01 → "Newtype Rising" 等
+#   dragonball_set.yaml   FB01 → "Awakened Pulse" 等
+#   ...
+#
+# yaml は人間が編集 → スクリプトで ebay_filter_map テーブルに同期

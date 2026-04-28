@@ -1,0 +1,164 @@
+# Dragon Ball Super Card Game (Fusion World) — eBay フィルタ値マッピング
+#
+# 出典: 2026-04-27 --full scrape 完走後の実 DB 値から確定 (3805 rows / 30 sets)
+#       (旧 psa_to_csv._DRAGONBALL_SET_NAME_MAP は弾名が古く誤りあり、上書き済)
+#
+# 注意:
+#   - source_value は scraper が DB に書く値と完全一致させる
+#   - 新弾追加時は本ファイルに 1 行足して `python ebay_filter_map/loader.py dragonball` で再ロード
+
+category: dragonball_scg
+
+# ============================================================================
+# Set (公式原文ベタ一致)
+# ============================================================================
+set:
+  # Promo / Misc ラベル
+  - source: Promotion Cards
+    ebay: Promo Cards
+    note: REVIEW eBay 値
+  - source: プロモーションカード
+    ebay: Promo Cards
+    note: JA 'Promotion Card'
+
+  # JA 公式原文 (mojibake 文字列の正規化)
+  - source: ブースターパック DUAL EVOLUTION [FB09]
+    ebay: Dual Evolution
+    year: 2026
+  - source: ブースターパック 未知なる冒険[FB05]
+    ebay: New Adventure
+    note: REVIEW eBay 値
+    year: 2025
+  - source: ブースターパック 烈火の闘気【FB02】
+    ebay: Blazing Aura
+    year: 2024
+  - source: ブースターパック 迫り高き戦闘力 [FB08]
+    ebay: "Saiyan's Pride"
+    note: REVIEW eBay 値
+    year: 2025
+  - source: ブースターパック 迫り来る強敵[FB06]
+    ebay: Rivals Clash
+    note: REVIEW eBay 値
+    year: 2025
+
+# ============================================================================
+# Set code (公式原文の角括弧内コードからの fallback)
+# 注: 弾名は実際の DB から取得した正規値. 旧 psa_to_csv の値とは異なる可能性あり.
+# ============================================================================
+set_code:
+  # ----- Booster Pack (Fusion Booster) -----
+  - source: FB01
+    ebay: Awakened Pulse
+    year: 2024
+  - source: FB02
+    ebay: Blazing Aura
+    year: 2024
+  - source: FB03
+    ebay: Raging Roar
+    year: 2024
+  - source: FB04
+    ebay: Ultra Limit
+    note: 旧 psa_to_csv 'Fusion Surge' は誤
+    year: 2024
+  - source: FB05
+    ebay: New Adventure
+    note: 旧 psa_to_csv 'Rising Spark' は誤 — REVIEW eBay 値
+    year: 2025
+  - source: FB06
+    ebay: Rivals Clash
+    note: 旧 psa_to_csv 'Perfect Combination' は誤 — REVIEW eBay 値
+    year: 2025
+  - source: FB07
+    ebay: Wish for Shenron
+    note: 旧 psa_to_csv 'Ultra Limit' は誤 — REVIEW eBay 値
+    year: 2025
+  - source: FB08
+    ebay: "Saiyan's Pride"
+    note: 旧 psa_to_csv 'Secret of Evolution' は誤 — REVIEW eBay 値
+    year: 2025
+  - source: FB09
+    ebay: Dual Evolution
+    note: 旧 psa_to_csv 'Destined Rivals' は誤
+    year: 2026
+
+  # ----- Manga Booster -----
+  - source: SB01
+    ebay: Manga Booster 01
+    year: 2024
+  - source: SB02
+    ebay: Manga Booster 02
+    year: 2024
+
+  # ----- Starter Deck (Fusion Starter) -----
+  - source: FS01
+    ebay: Starter Deck Son Goku
+    note: 旧 'Saiyan Genesis' は誤
+    year: 2024
+  - source: FS02
+    ebay: Starter Deck Vegeta
+    note: 旧 'Budokai Warriors' は誤
+    year: 2024
+  - source: FS03
+    ebay: Starter Deck Broly
+    note: 旧 'Perfection' は誤
+    year: 2024
+  - source: FS04
+    ebay: Starter Deck Frieza
+    year: 2024
+  - source: FS05
+    ebay: Starter Deck Bardock
+    note: 旧 'Androids' は誤
+    year: 2025
+  - source: FS06
+    ebay: Starter Deck Son Goku (Mini)
+    note: 旧 'Pirates' は誤 — REVIEW eBay 値
+    year: 2025
+  - source: FS07
+    ebay: Starter Deck Vegeta (Mini)
+    note: 旧 'Ultimate Warriors' は誤 — REVIEW eBay 値
+    year: 2025
+  - source: FS08
+    ebay: Starter Deck Vegeta (Mini) Super Saiyan 3
+    note: 旧 'Majin Buu' は誤 — REVIEW eBay 値
+    year: 2025
+  - source: FS09
+    ebay: Starter Deck EX Shallot
+    year: 2025
+  - source: FS10
+    ebay: Starter Deck EX Giblet
+    note: REVIEW eBay 値
+    year: 2025
+  - source: FS11
+    ebay: Starter Deck EX The Phase of Evolution
+    note: REVIEW eBay 値
+    year: 2026
+  - source: FS12
+    ebay: Starter Deck EX The Beat of Ki
+    note: REVIEW eBay 値
+    year: 2026
+
+# ============================================================================
+# Rarity — TCG+ API は短縮コード (L/C/UC/R/SR/SCR/...) を返す
+# ============================================================================
+rarity:
+  - source: L
+    ebay: ""
+    note: Leader = card type, not rarity → eBay 空欄
+  - source: C
+    ebay: C
+  - source: UC
+    ebay: UC
+  - source: R
+    ebay: R
+  - source: SR
+    ebay: SR
+  - source: SCR
+    ebay: SCR
+  - source: "L★"
+    ebay: SCR
+    note: Leader Parallel
+  - source: "L★★"
+    ebay: SCR
+    note: Leader Super Parallel
+  - source: P
+    ebay: Promo

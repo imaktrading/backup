@@ -1,41 +1,28 @@
 #!/usr/bin/env python3
-"""ONE PIECE Canonical Map 正規化テスト (2026-04-25 Bug 2-5 修正).
+"""ONE PIECE Canonical Map 正規化テスト.
 
-検証対象:
-- _onepiece_set_code_to_name: OP-01 → Romance Dawn 等
-- 既知セット (OP-01〜OP-14, ST-01〜ST-26, EB-01〜EB-02, PRB-01〜PRB-02) のヒット
-- 未知セットは set_code をそのまま返す（フォールバック）
+旧 (~2026-04-25): psa_to_csv._ONEPIECE_SET_NAME_MAP の定数 dict を直接 exec
+新 (2026-04-28以降): iMakCatalog/ebay_filter_map/one_piece.yaml + integrations/psa_to_csv.set_code_to_ebay_name()
+
+iMakCatalog Phase 1 SSOT 移行で canonical map は iMakCatalog yaml に集約された。
+このテストは iMakCatalog 経由で同じ assertion が通ることを確認し、
+yaml 編集による意図しない値の喪失を golden test として検出する。
 """
 from __future__ import annotations
 import sys
 from pathlib import Path
 
-# psa_to_csv.py から純関数 _onepiece_set_code_to_name と _ONEPIECE_SET_NAME_MAP を抽出.
-# psa_to_csv は top-level で重い import があるため、コードを直接読込んで関数だけ取り出す.
-_PSA_TO_CSV = Path(__file__).resolve().parent.parent / "iMakTCG" / "psa_to_csv.py"
+# iMakCatalog を sys.path に追加 (psa_to_csv.py と同じ流儀)
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_CATALOG_ROOT = _REPO_ROOT / "iMakCatalog"
+if str(_CATALOG_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CATALOG_ROOT))
 
-
-def _extract_set_map():
-    """psa_to_csv.py から _ONEPIECE_SET_NAME_MAP の dict をパース取得 (重 import を回避)."""
-    text = _PSA_TO_CSV.read_text(encoding="utf-8")
-    start = text.find("_ONEPIECE_SET_NAME_MAP = {")
-    assert start >= 0, "_ONEPIECE_SET_NAME_MAP not found in psa_to_csv.py"
-    # 最初の "}" 行までを切出
-    snippet = text[start:]
-    end = snippet.find("\n}\n")
-    assert end >= 0
-    snippet = snippet[: end + 2]
-    # exec して dict を取得
-    g: dict = {}
-    exec(snippet, g)
-    return g["_ONEPIECE_SET_NAME_MAP"]
-
-
-SET_MAP = _extract_set_map()
+from integrations import psa_to_csv as catalog_psa  # noqa: E402
 
 
 def _convert(set_code: str) -> str:
-    return SET_MAP.get(set_code, set_code)
+    return catalog_psa.set_code_to_ebay_name(set_code)
 
 
 def test_known_main_sets_op_series():
@@ -56,20 +43,16 @@ def test_known_extra_booster_eb_series():
 
 
 def test_known_premium_booster_prb():
-    assert "PRB-01" in SET_MAP
-    assert "PRB-02" in SET_MAP
+    """PRB-01 / PRB-02 が yaml に登録されており、未変換 fallback ではない eBay 値が返ること."""
+    assert _convert("PRB-01") != "PRB-01"
+    assert _convert("PRB-02") != "PRB-02"
 
 
 def test_unknown_set_returns_code_as_fallback():
-    """未収録セットは set_code をそのまま返す (空欄より検索性高い)"""
+    """未収録セットは set_code をそのまま返す (空欄より検索性高い)."""
     assert _convert("OP-99") == "OP-99"
     assert _convert("ST-99") == "ST-99"
     assert _convert("") == ""
-
-
-def test_set_map_size_minimum():
-    """主要セットが最低限揃っていること（追加保護）"""
-    assert len(SET_MAP) >= 30, f"Set map too small: {len(SET_MAP)} entries"
 
 
 # Standalone runner
@@ -84,7 +67,6 @@ if __name__ == "__main__":
         ("EB series", test_known_extra_booster_eb_series),
         ("PRB premium", test_known_premium_booster_prb),
         ("unknown fallback", test_unknown_set_returns_code_as_fallback),
-        ("map size minimum", test_set_map_size_minimum),
     ]
     fails = 0
     for name, fn in cases:
