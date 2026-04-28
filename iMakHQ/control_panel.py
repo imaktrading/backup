@@ -72,6 +72,91 @@ KEYWORD_PDF = {
 }
 
 # ============ トレンド/相場リサーチ リンク集 ============
+# ============================================================================
+# csv_postprocess_excluder helper (check_csv NO-GO 行を CSV から物理除外)
+# 2026-04-28 追加: dual_gate_disagreement.md CRITICAL 問題の応急対処.
+# psa_to_csv ↔ check_csv の市場ゲート判定矛盾で、check_csv が「除外済」表示しても
+# 物理除外されない bug の補正. SSOT 化 (Phase C) までの安全弁.
+# ============================================================================
+def _run_excluder_for_latest_csv(append_log_func, captured_stdout: str):
+    """check_csv の stdout text から NO-GO 行を抽出 → 最新 CSV から物理除外.
+
+    Args:
+        append_log_func: panel 固有のログ追記関数
+        captured_stdout: subprocess の stdout 全体 (check_csv の出力含む)
+    """
+    try:
+        if not captured_stdout or "NO-GO" not in captured_stdout:
+            return  # NO-GO 検出なし、何もしない
+        csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
+        if not os.path.isdir(csv_dir):
+            return
+        csvs = [
+            os.path.join(csv_dir, f)
+            for f in os.listdir(csv_dir)
+            if f.endswith(".csv") and not f.endswith("_cost.json")
+        ]
+        if not csvs:
+            return
+        latest_csv = max(csvs, key=os.path.getmtime)
+        excluder_dir = os.path.join(WORKSPACE, "iMakeBayAPI", "csv_postprocess")
+        if excluder_dir not in sys.path:
+            sys.path.insert(0, excluder_dir)
+        from excluder import exclude_from_check_csv_stdout, render_report
+        result = exclude_from_check_csv_stdout(latest_csv, captured_stdout)
+        if result["removed"] > 0:
+            append_log_func("\n" + "=" * 70 + "\n▶ csv_postprocess_excluder (NO-GO 行物理除外)\n" + "=" * 70 + "\n")
+            append_log_func(render_report(result) + "\n")
+    except Exception as e:
+        append_log_func(f"\n⚠️ excluder 実行失敗: {type(e).__name__}: {e}\n")
+        # 失敗しても入稿準備には影響なし (人手確認の保険あり)
+
+
+# ============================================================================
+# rarara helper (CSV outlier 検出を listing script 完了後に自動実行)
+# 2026-04-28 追加: ListingPanel / KujiWizardDialog / 他 panel の subprocess 完了 hook
+# から共通利用. 本体 listing script は無変更. orchestrator 側の 1 step 追加.
+# ロールバック: この関数 + 各 panel の呼出 1 行 をコメントアウトで完全復元.
+# ============================================================================
+def _run_rarara_for_latest_csv(append_log_func):
+    """csv_output/ の最新 CSV に対して rarara を実行.
+
+    Args:
+        append_log_func: panel 固有のログ追記関数 (self.append_log 等)
+    """
+    try:
+        csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
+        if not os.path.isdir(csv_dir):
+            return
+        csvs = [
+            os.path.join(csv_dir, f)
+            for f in os.listdir(csv_dir)
+            if f.endswith(".csv") and not f.endswith("_cost.json")
+        ]
+        if not csvs:
+            return
+        latest_csv = max(csvs, key=os.path.getmtime)
+        rarara_path = os.path.join(WORKSPACE, "iMakeBayAPI", "rarara", "rarara.py")
+        if not os.path.exists(rarara_path):
+            return
+        append_log_func("\n" + "=" * 70 + "\n▶ rarara (CSV outlier 検出)\n" + "=" * 70 + "\n")
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        r = subprocess.run(
+            [sys.executable, rarara_path, latest_csv],
+            env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            creationflags=creationflags, timeout=60,
+        )
+        append_log_func(r.stdout or "")
+        if r.stderr:
+            append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ rarara 実行失敗: {type(e).__name__}: {e}\n")
+        # 失敗しても listing 出力には影響なし
+
+
 # 全商品共通のリサーチサイト
 COMMON_TREND_LINKS = [
     ("Google Trends（日本）", "https://trends.google.co.jp/trends/trendingsearches/daily?geo=JP"),
@@ -341,32 +426,104 @@ SCRIPTS = [
     {
         "label": "PSA TCG (One Piece / Dragon Ball)",
         "verified": True,  # 2026-04-24 及第点到達（スプシ駆動、Claude推測全廃、Bandai辞書/fetch_card/Gundam補正、プロモ二重国籍許容、pipeline 二重基準解消、eBay入稿8件実績）
+        "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須 (3AI 非決定論性 / Bandai 名前検索の誤マッチ / Energy Marker Color 補完)
         "cwd": f"{WORKSPACE}/iMakTCG",
         "cmd": ["python", "psa_to_csv.py"],
         "urls_file": f"{WORKSPACE}/iMakTCG/certs.txt",
         "params": [],
-        "desc": "スプシ駆動（I列=cert#, B列itemID空が処理対象）→CSV生成",
+        "desc": "スプシ駆動（I列=cert#, B列itemID空が処理対象）→CSV生成→check_csv自動連鎖→【入稿前ダブルチェック必須】",
         "trend_key": "tcg",
         "keyword_pdf": KEYWORD_PDF["toys"],
-        "flow": """【入力】certs.txt
-  - フォーマット: 証明番号,仕入値,メルカリURL,メルカリタイトル
+        "flow": """━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📥  INPUT  ｜  入力ソース
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ▸ 共通スプシ  Hight: 19kj8…  /  Low: 1jF9…  ( gid=851100680 )
+      • I列 = PSA cert#
+      • B列 = itemID  ( 空が処理対象 )
+      • 仕入値 = N列優先  +  F列 "¥XXX,XXX" パース fallback
+  ✗ certs.txt 駆動は廃止  ( 2026-04-24 追補3 )
 
-【パイソン処理】
-  1. 【個別】PSA cert番号 → psacard.com Selenium → カード情報
-  2. 【個別】Bandai/Pokemon公式DBで裏取り
-  3. 【個別】Claude API + キーワードPDF参照でタイトル
-  4. 【個別→共通同等】価格決定: 内蔵 TIER_PARAMS + DDP反復計算
-       - 設計思想は共通エンジンと一致（コストプラス + ティア利益率 + 乖離判定）
-       - DDP送料が価格依存のため反復計算が必要 → 共通エンジン未対応で内蔵維持
-  5. 【個別】Finish欄は常に空欄(誤判定回避、3層防御)
-  6. 【個別】SKU = メルカリ商品ID
-  7. 【個別】同一カード番号の重複は最安1件のみ採用
-  8. 【共通】listing_validator.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ⚙️   PIPELINE  ｜  パイソン処理
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-【出力CSV】iMakHQ/csv_output/tcg_*.csv
-【テンプレ】PSA10.txt
-【ConditionID】2750 (Graded - Gem Mint)
-【ReturnPolicy】No return
+  ① 🔍 PSA cert# → psacard.com Selenium → Brand / Subject / CardNumber
+
+  ② 📚 公式DB lookup  ( フランチャイズ別 )
+      ├─ One Piece                bandai_jp.py        ( Selenium + 名前検索フォールバック )
+      ├─ Dragon Ball Fusion World bandai_tcg_plus.py  ( game="dragonball" )
+      │     └─ Energy Marker E01-XX  →  ENERGY_MARKER_DB  ( ハードコード )
+      ├─ Gundam                   bandai_tcg_plus.py  ( game="gundam" )
+      └─ Pokemon                  pokemon_card_jp.py
+
+  ③ 🤖 Claude API + キーワードPDF参照でタイトル生成
+      └─ card# 短縮 / Subject 改変を検出  →  ルールベース自動切替
+
+  ④ 🛡️  Item Specifics 全6フィールド  ( rarity / card_type / cost / power / attribute / finish )
+      └─ 公式DB由来のみ採用、Claude fallback 物理除去  ( 2026-04-24 追補6 )
+
+  ⑤ 🔧 AUTO-FIX Canonical Map  ( eBay フィルタ正規値へ無言整形 )
+      ├─ Card Type    "Character Card" → "Character" / "Leader Card" → "Leader"
+      ├─ Rarity OP    SEC→Secret Rare, SR→Super Rare, R→Rare, C→Common, L→Leader …
+      ├─ Rarity DB    SR→Super Rare, UC→Uncommon, PR★→Promo …  ( 2026-04-26 )
+      ├─ Set OP       "OP-01"→"Romance Dawn" 等 23セット網羅
+      ├─ Set DB       "BOOSTER PACK -AWAKENED PULSE- [FB01]"→"Awakened Pulse" …  ( 2026-04-26 )
+      ├─ Leader Cost  強制空欄化  ( Leader はコスト持たない仕様 )
+      └─ Features     "Alternate Art" → "Alternative Art"
+
+  ⑥ 🚫 Finish欄は常に空欄  ( 確証なき推測禁止、SNAD クレーム回避 )
+
+  ⑦ 🏷️  SKU = メルカリ商品ID
+
+  ⑧ 🧹 同一カード番号の重複は最安1件のみ採用
+
+  ⑨ 🤝 listing_validator.py  +  3AI 合議  ( Claude / Gemini / Groq )
+      ├─ プロモ二重国籍ケース  ( PSA封入セット ≠ Bandai 元セット ) の許容パターン搭載
+      └─ 不一致時はラウンド最大4回まで議論
+
+  ⑩ 💰 価格決定  ( 内蔵 TIER_PARAMS + DDP反復計算 )
+      ├─ 設計思想は共通エンジン  ( コストプラス + ティア利益率 + 乖離判定 )
+      ├─ GO 時のみ「中央値 × 0.95」で市場連動価格に切替  ( 2026-04-23 Phase 3 ⑤ )
+      └─ 物理ゲート: ALERT 行は CSV 物理除外  +  csv_hold_queue.jsonl 隔離
+
+  ⑪ 🧬 SSOT  ｜  tier_params は  profit_params.get_tier_params  ( yaml SSOT ) 経由  ( 2026-04-25 Step 7 )
+
+  ⑫ 📝 記録  ｜  decision_log に config_version + 使用値を刻印  ( Step 8 )
+
+  ⑬ 📤 スプシ追記  ｜  cert / title / price / cost / GATE 等を結果スプシに自動記録
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🔄  AUTO CHAIN  ｜  check_csv 自動連鎖
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  psa_to_csv 完了直後に check_csv.py が自動実行され以下を再検証:
+      ▸ 市場中央値・乖離率・利益率の再計算  ( psa_to_csv と SSOT 共有 )
+      ▸ Item Specs  ( TOPセラーとの差分 ) ハイライト
+      ▸ GATE 判定の最終確認  +  AI 総合レビュー  ( Claude )
+
+╔═══════════════════════════════════════════════════════════════════╗
+║  🛑  ダブルチェック  ｜  入稿前  ［人手必須］                        ║
+╚═══════════════════════════════════════════════════════════════════╝
+  3AI 判定の非決定論性  ／  Bandai 名前検索の誤マッチ  ／  薄商いカードの価格暴走
+  に対する最後の防衛線。CSV を eBay 入稿する前に必ず以下を目視確認:
+
+  ☐  💴  価格妥当性  ｜  TOPセラー価格を超えていないか
+                       出品N件未満の薄商いで強気価格になっていないか
+  ☐  🆔  PSA Brand prefix と Card Number 一致
+            └─ Luffy ST16 / PRB02 事故  ( cert #143570665 系 ) の物理確認
+  ☐  🎯  Bandai 名前検索フォールバックで  「同名キャラの別カード」  誤マッチ無し
+  ☐  🌈  Energy Marker  ( E01-XX )  は Color を物理カード確認後に手動補完
+  ☐  ✨  Finish は確証あるカードのみ手動補完  ( 空欄が原則、Holo 推測禁止 )
+  ☐  🔁  Title 内の重複語  ( 'frieza' 等 ) を check_csv 警告でチェック
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📤  OUTPUT  ｜  出力
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📁  CSV         iMakHQ/csv_output/tcg_upload_<timestamp>.csv
+  📁  サイドカー   *_cost.json  ( 仕入値、check_csv が参照 )
+  📄  テンプレ     PSA10.txt    ( Description HTML、全カード共通 )
+
+  🔢  ConditionID    2750  ( Graded - Gem Mint )
+  🔄  ReturnPolicy   No return
 """,
     },
     {
@@ -845,6 +1002,38 @@ class DashboardDialog(tk.Toplevel):
         self.after(0, apply)
 
 
+def _decorate_flow(text):
+    """既存の flow テキストを自動装飾 (TCG パターンに統一).
+
+    既装飾 (━ 罫線あり) のテキストはそのまま返す (二重装飾防止)。
+    未装飾なら以下を施す:
+      - 行頭インデントなしの【見出し】 → 罫線囲み + 📌 アイコン
+        (インデント付きの【個別】【共通】等のインラインラベルは触らない)
+      - 数字リスト 1. 2. ... → 丸囲み数字 ①②③ (最大⑳)
+    """
+    import re as _re
+    if "━━━━" in text or "╔═" in text:
+        return text  # 既装飾
+    bar = "━" * 64
+    def _repl_heading(m):
+        title = m.group(1).strip()
+        rest = m.group(2).strip()
+        if rest:
+            return f"\n{bar}\n  📌  {title}  ｜  {rest}\n{bar}"
+        return f"\n{bar}\n  📌  {title}\n{bar}"
+    # ^ 直後 (インデントなし) に【】がある行のみ見出し扱い
+    text = _re.sub(r"^【([^】]+)】(.*)$", _repl_heading, text, flags=_re.MULTILINE)
+    # 数字リスト → 丸囲み数字
+    circles = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+    def _repl_num(m):
+        n = int(m.group(2))
+        if 1 <= n <= 20:
+            return f"{m.group(1)}{circles[n-1]}  "
+        return m.group(0)
+    text = _re.sub(r"^(\s*)(\d+)\.\s", _repl_num, text, flags=_re.MULTILINE)
+    return text
+
+
 class FlowDialog(tk.Toplevel):
     def __init__(self, parent, label, flow_text, trend_key="", keyword_pdf="", urls_file=""):
         super().__init__(parent)
@@ -868,7 +1057,7 @@ class FlowDialog(tk.Toplevel):
 
         txt = scrolledtext.ScrolledText(tab_flow, wrap="word", font=("Yu Gothic UI", 10))
         txt.pack(fill="both", expand=True, padx=6, pady=6)
-        txt.insert("1.0", flow_text)
+        txt.insert("1.0", _decorate_flow(flow_text))
         txt.config(state="disabled")
 
         # ===== タブ2: トレンド/相場リサーチ =====
@@ -1057,6 +1246,14 @@ class HomePanel:
         self.store_info_var = tk.StringVar(value="データ取得中...")
         ttk.Label(root, textvariable=self.store_info_var, foreground="#0066cc", font=("", 11, "bold")).pack(anchor="w", padx=10, pady=4)
 
+        # 🌍 主要市場の現地時刻 (1秒ごと更新、4地域改行表示)
+        clock_frame = ttk.LabelFrame(root, text="🌍 主要市場の現地時刻", padding=4)
+        clock_frame.pack(fill="x", padx=10, pady=2)
+        self.clock_var = tk.StringVar(value="")
+        ttk.Label(clock_frame, textvariable=self.clock_var, font=("Consolas", 10, "bold"),
+                  foreground="#333333", justify="left").pack(anchor="w")
+        self._update_clocks()
+
         # === 総合進捗テーブル ===
         dash_frame = ttk.LabelFrame(root, text="📊 総合進捗（カテゴリ別アクティブ出品数 vs 目標）", padding=6)
         dash_frame.pack(fill="x", padx=10, pady=(6, 4))
@@ -1092,11 +1289,16 @@ class HomePanel:
         self.month_tree.tag_configure("red",   background="#ffd4d4", foreground="#800000")
         self.month_tree.tag_configure("total", background="#e0e0ff", foreground="#000066", font=("", 10, "bold"))
 
-        # 推奨メッセージ
+        # 推奨メッセージ (スクロール対応 ScrolledText)
         reco_frame = ttk.LabelFrame(root, text="💡 推奨アクション", padding=6)
         reco_frame.pack(fill="x", padx=10, pady=(0, 10))
-        self.reco_label = tk.Label(reco_frame, text="", justify="left", wraplength=1050, fg="#cc5500", font=("Yu Gothic UI", 10, "bold"))
-        self.reco_label.pack(anchor="w")
+        self.reco_text = scrolledtext.ScrolledText(
+            reco_frame, height=6, wrap="word",
+            font=("Yu Gothic UI", 10, "bold"),
+            fg="#cc5500", relief="flat", borderwidth=0,
+        )
+        self.reco_text.pack(fill="both", expand=True)
+        self.reco_text.config(state="disabled")
 
         self.listing_window = None  # リスティング画面（別ウィンドウ、遅延生成）
         self.root.after(300, self.refresh_dashboard)
@@ -1104,6 +1306,97 @@ class HomePanel:
     def _on_close(self):
         _save_geometry("home", self.root.geometry())
         self.root.destroy()
+
+    def _set_reco(self, text, fg="#cc5500"):
+        """推奨アクション欄に文字列をセット (Text widget なので state 切替必要)。"""
+        self.reco_text.config(state="normal", fg=fg)
+        self.reco_text.delete("1.0", "end")
+        self.reco_text.insert("1.0", text)
+        self.reco_text.config(state="disabled")
+
+    def _update_clocks(self):
+        """主要市場の現地時刻 + バイヤー活発時間カウントダウンを1秒ごと更新。
+
+        各国別に eBay バイヤー一般ピークタイム (現地時間) を設定:
+          weekday: 平日 (Mon-Fri)
+          weekend: 土日 + 祝日 (holidays ライブラリで国別判定)
+        現在時刻が ACTIVE 内: 🟢 ACTIVE (終了まで Nh) [祝日なら 🎌]
+        ACTIVE 外:           ⏰ 次のアクティブ開始まで Nh
+        """
+        from datetime import datetime, timedelta
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            self.clock_var.set("(zoneinfo 未対応)")
+            return
+        # 祝日判定 (holidays ライブラリ、未インストール時は祝日対応スキップ)
+        try:
+            import holidays as _holidays
+            _hd = {
+                "US": _holidays.country_holidays("US"),
+                "GB": _holidays.country_holidays("GB"),
+                "DE": _holidays.country_holidays("DE"),
+                "AU": _holidays.country_holidays("AU"),
+            }
+        except ImportError:
+            _hd = {}
+
+        zones = [
+            ("🇺🇸 米国 (NY)  ", "America/New_York",   "US", {"weekday": (19, 23), "weekend": (12, 22)}),
+            ("🇬🇧 英国 (LON) ", "Europe/London",      "GB", {"weekday": (19, 22), "weekend": (11, 21)}),
+            ("🇩🇪 独国 (BER) ", "Europe/Berlin",      "DE", {"weekday": (19, 21), "weekend": (11, 20)}),
+            ("🇦🇺 豪州 (SYD) ", "Australia/Sydney",   "AU", {"weekday": (18, 21), "weekend": (10, 20)}),
+        ]
+
+        def _is_off_day(dt, country):
+            """土日 or 祝日 か判定。祝日名 (str) or False を返す。"""
+            if dt.weekday() >= 5:
+                return "週末"
+            hd_obj = _hd.get(country)
+            if hd_obj and dt.date() in hd_obj:
+                return hd_obj.get(dt.date()) or "祝日"
+            return False
+
+        def _hours(active_hours, dt, country):
+            """土日/祝日なら weekend 時間、平日なら weekday 時間を返す."""
+            return active_hours["weekend"] if _is_off_day(dt, country) else active_hours["weekday"]
+
+        parts = []
+        for label, tz, country, active_hours in zones:
+            try:
+                now = datetime.now(ZoneInfo(tz))
+                time_str = now.strftime("%m/%d(%a) %H:%M:%S")
+                start_h, end_h = _hours(active_hours, now, country)
+                # 祝日マーク
+                off_reason = _is_off_day(now, country)
+                holiday_mark = ""
+                if off_reason and off_reason != "週末":
+                    holiday_mark = f" 🎌 {off_reason}"
+
+                if start_h <= now.hour < end_h:
+                    # 🟢 ACTIVE
+                    end_today = now.replace(hour=end_h, minute=0, second=0, microsecond=0)
+                    remaining_h = (end_today - now).total_seconds() / 3600
+                    status = f"🟢 ACTIVE (あと {remaining_h:.1f}h)"
+                else:
+                    # 次のアクティブ開始時刻を計算
+                    if now.hour >= end_h:
+                        next_day = now + timedelta(days=1)
+                        next_start_h, _ = _hours(active_hours, next_day, country)
+                        next_start = next_day.replace(
+                            hour=next_start_h, minute=0, second=0, microsecond=0
+                        )
+                    else:
+                        next_start = now.replace(
+                            hour=start_h, minute=0, second=0, microsecond=0
+                        )
+                    wait_h = (next_start - now).total_seconds() / 3600
+                    status = f"⏰ アクティブまで {wait_h:.1f}h"
+                parts.append(f"{label}  {time_str}  {status}{holiday_mark}")
+            except Exception:
+                parts.append(f"{label}  ?")
+        self.clock_var.set("\n".join(parts))
+        self.root.after(1000, self._update_clocks)
 
     def open_tasks(self):
         TasksDialog(self.root)
@@ -1252,9 +1545,9 @@ class HomePanel:
                 f"(7カテゴリ合計: {total_cur}件 | 今月追加: {m_cur}件)"
             )
             if reco_lines:
-                self.reco_label.config(text="\n".join(reco_lines), fg="#cc0000")
+                self._set_reco("\n".join(reco_lines), fg="#cc0000")
             else:
-                self.reco_label.config(text="全カテゴリ目標達成🎉 新しいカテゴリ展開を検討", fg="#006600")
+                self._set_reco("全カテゴリ目標達成🎉 新しいカテゴリ展開を検討", fg="#006600")
         self.root.after(0, apply)
 
 
@@ -1280,8 +1573,11 @@ class ListingPanel:
             row = ttk.Frame(scroll_frame, padding=4, relief="ridge")
             row.pack(fill="x", pady=2)
             # ユーザーチェック合格スクリプトは青色表示
+            # double_check=True は入稿前に人手ダブルチェック必須のカテゴリ (✓ を2つ表示)
             verified = script.get("verified", False)
-            label_text = ("✓ " if verified else "") + script["label"]
+            double_check = script.get("double_check", False)
+            prefix = "✓✓ " if double_check else ("✓ " if verified else "")
+            label_text = prefix + script["label"]
             label_color = "#0066cc" if verified else "black"
             tk.Label(row, text=label_text, width=32, font=("", 10, "bold"),
                      fg=label_color, anchor="w").pack(side="left")
@@ -1409,12 +1705,24 @@ class ListingPanel:
             self.queue.put(line)
         self.queue.put(("__done__", self.proc.returncode))
 
+    def _run_rarara_after(self):
+        """ListingPanel: rarara helper 呼出 (互換ラッパ)."""
+        _run_rarara_for_latest_csv(self.append_log)
+
     def poll_queue(self):
         try:
             while True:
                 item = self.queue.get_nowait()
                 if isinstance(item, tuple) and item[0] == "__done__":
                     self.append_log(f"\n--- 終了 (returncode={item[1]}) ---\n")
+                    # Step 2: csv_postprocess_excluder (check_csv NO-GO 行を CSV 物理除外)
+                    # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
+                    try:
+                        captured_log = self.log.get("1.0", "end") if hasattr(self, 'log') else ""
+                        _run_excluder_for_latest_csv(self.append_log, captured_log)
+                    except Exception as _e:
+                        self.append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
+                    self._run_rarara_after()
                     self.status_var.set("待機中")
                     self.now_processing.set("")
                 else:
@@ -1643,6 +1951,13 @@ class KujiWizardDialog(tk.Toplevel):
             while True:
                 item = self.queue.get_nowait()
                 if isinstance(item, tuple) and item[0] == "__done__":
+                    # Step 2: excluder (check_csv NO-GO 行 物理除外) → Step 3: rarara
+                    try:
+                        captured_log = self.log.get("1.0", "end") if hasattr(self, 'log') else ""
+                        _run_excluder_for_latest_csv(self._append_log, captured_log)
+                    except Exception as _e:
+                        self._append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
+                    _run_rarara_for_latest_csv(self._append_log)
                     cb = getattr(self, 'on_done_callback', None)
                     if cb:
                         self.on_done_callback = None

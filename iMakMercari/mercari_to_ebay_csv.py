@@ -859,6 +859,18 @@ def main():
             title_en = result.get('title', '')
             item_specifics = result.get('item_specifics', {})
 
+            # ===== spec_normalizer (新ルーチン、独立) =====
+            # Item Specifics: Brand-default Country 強制 + 寸法 dual format.
+            # Title:          Brand prefix 統一 (PORTER → YOSHIDA PORTER 強制、HEAD PORTER 除く).
+            # ロールバック: この try/except ブロックをコメントアウトで完全復元.
+            try:
+                from spec_normalizer import normalize_specs, enforce_brand_prefix
+                item_specifics = normalize_specs(item_specifics, brand_hint=args.sheet or "")
+                title_en = enforce_brand_prefix(title_en, brand_hint=args.sheet or "")
+            except Exception as _e:
+                print(f"    ⚠️ spec_normalizer 失敗: {type(_e).__name__}: {_e}")
+                # 元値維持、既存挙動継続
+
             # --sheet 指定時: 完全eBay CSV行を生成
             if args.sheet and args.sheet in SHEET_REGISTRY:
                 cfg = SHEET_REGISTRY[args.sheet]
@@ -1021,7 +1033,7 @@ def main():
         # Step 8 拡張: decision_log に config_version + 使用値を刻印
         try:
             import sys as _sys_dl
-            _sys_dl.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            _sys_dl.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
             from decision_log import log_csv_batch as _log_batch
             _log_batch(project="iMakMercari", category="Tシャツ(UT)",
                        output_path=OUTPUT_CSV, row_count=len(results))
