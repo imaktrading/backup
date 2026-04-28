@@ -110,86 +110,21 @@ def get_ebay_oauth_token(app_id, app_secret):
 
 def search_market_price(token, game, card_number, character):
     """eBay Browse APIで市場価格を取得。競合0件なら None を返す。
-    価格基準: 全セラー中央値（TOPセラーは参考表示のみ）"""
-    game_short = {
-        "Dragon Ball Super Card Game": "Dragon Ball",
-        "One Piece Card Game": "One Piece",
-        "Gundam CCG": "Gundam",
-        "Pokemon": "Pokemon",
-        "Pokémon TCG": "Pokemon",
-    }.get(game, game)
-    # カード番号から分母を除去（"231/193" → "231"）eBay検索では不要
-    card_number = card_number.split("/")[0] if "/" in card_number else card_number
+    価格基準: 全セラー中央値（TOPセラーは参考表示のみ）
 
-    query = f"PSA 10 {game_short} #{card_number} {character}"
-    url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
-    params = {
-        "q": query,
-        "filter": (
-            "buyingOptions:{FIXED_PRICE},"
-            "conditionIds:{2750},"
-            "categoryIds:{183454}"
-        ),
-        "sort": "price",
-        "limit": 50,
-    }
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "Content-Type": "application/json",
-    }
-    try:
-        resp = requests.get(url, headers=headers, params=params, timeout=15)
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        items = data.get("itemSummaries", [])
-        total = data.get("total", 0)  # 市場全体の出品数
-        if not items:
-            return None
+    2026-04-28 SSOT 化:
+      実体は iMakeBayAPI/market_gate.py (psa_to_csv ↔ check_csv 共通).
+      旧ロジック (本ファイル直書き) は market_gate に統合済.
+      キャッシュ層 (TTL 600 秒) で連続実行時の median ブレ ($140 vs $115) を解消.
+    """
+    # market_gate を sys.path から import (iMakeBayAPI への参照は既存と同じ)
+    import sys as _sys, os as _os
+    _imakeBayAPI = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _imakeBayAPI not in _sys.path:
+        _sys.path.insert(0, _imakeBayAPI)
+    from market_gate import fetch_market_price as _fetch_mg
+    return _fetch_mg(token, game, card_number, character)
 
-        top_prices = []
-        all_prices = []
-        for item in items:
-            try:
-                price = float(item.get("price", {}).get("value", 0))
-                if price <= 0:
-                    continue
-            except (ValueError, TypeError):
-                continue
-            all_prices.append(price)
-            seller = item.get("seller", {})
-            score = seller.get("feedbackScore", 0)
-            pct_str = seller.get("feedbackPercentage", "0")
-            try:
-                pct = float(pct_str)
-            except (ValueError, TypeError):
-                pct = 0
-            if score >= TOP_SELLER_MIN_FEEDBACK and pct >= TOP_SELLER_MIN_PERCENTAGE:
-                top_prices.append(price)
-
-        if not all_prices:
-            return None
-
-        all_sorted = sorted(all_prices)
-        all_median = all_sorted[len(all_sorted) // 2]
-
-        top_median = None
-        if top_prices:
-            top_sorted = sorted(top_prices)
-            top_median = top_sorted[len(top_sorted) // 2]
-
-        return {
-            "all_median": all_median,
-            "all_count": len(all_prices),
-            "top_median": top_median,
-            "top_count": len(top_prices),
-            "total": total,  # 市場全体の出品数
-            "items": items,  # アイテム詳細取得用
-        }
-    except Exception as e:
-        print(f"    ⚠️ eBay API: {e}")
-        return None
 
 def fetch_top_seller_item_specifics(token, items, max_items=3):
     """TOPセラーのリスティングから Item Specifics を取得。
