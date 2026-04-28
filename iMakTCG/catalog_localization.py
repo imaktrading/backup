@@ -235,13 +235,43 @@ def _translate_attribute(value: Optional[str]) -> str:
     return v
 
 
+def _hiragana_to_katakana(s: str) -> str:
+    """ひらがな (U+3041〜U+3096) をカタカナ (U+30A1〜U+30F6) に変換.
+
+    範囲外の文字 (漢字・英字・記号・既にカタカナ) はそのまま.
+    iMakCatalog の card_name はソースによりひらがな/カタカナの揺れがあるため、
+    辞書 lookup 前に正規化して両表記を吸収する.
+
+    例:
+      "しらほし"  → "シラホシ"  (EB01-057 Shirahoshi、しらほしレギュラー)
+      "シラホシ"  → "シラホシ"  (no-op)
+      "光月おでん" → "光月オデン" (漢字は不変、ひらがなのみ変換)
+    """
+    out = []
+    for c in s:
+        cp = ord(c)
+        if 0x3041 <= cp <= 0x3096:
+            out.append(chr(cp + 0x60))
+        else:
+            out.append(c)
+    return "".join(out)
+
+
 def _translate_character_name(value: Optional[str]) -> str:
-    """キャラ名: 日本語辞書ヒット + ピリオド連結補正."""
+    """キャラ名: 日本語辞書ヒット + ピリオド連結補正.
+
+    辞書 lookup は ひらがな→カタカナ 正規化後に行う (2026-04-29 修正).
+    iMakCatalog の card_name 表記揺れ (例: しらほし vs シラホシ) を吸収する.
+    """
     if not value:
         return value or ""
     v = value.strip()
 
-    # 1. 日本語完全一致
+    # 1. 日本語完全一致 (ひらがな→カタカナ正規化後に lookup)
+    v_kata = _hiragana_to_katakana(v)
+    if v_kata in _CHARACTER_JP_EN:
+        return _CHARACTER_JP_EN[v_kata]
+    # 旧 entry 互換 (辞書側がひらがなで登録されてるケース)
     if v in _CHARACTER_JP_EN:
         return _CHARACTER_JP_EN[v]
 
