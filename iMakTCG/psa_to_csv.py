@@ -1737,6 +1737,13 @@ def build_row(cert_number, price, data, description, driver=None):
         print(f"    ⚠️ catalog_reference 失敗: {type(_e).__name__}: {_e}")
         # 元値維持、既存挙動継続
 
+    # 2026-04-28 Bug #2 fix (defensive): catalog_reference 側でも Leader cost を skip するが、
+    # 万一 Leader card_type で cost に値が残っている場合に備え、CSV 書き出し直前で再強制空欄化.
+    # Fix A (catalog_reference) と二重防御 (案 C: A+B).
+    if card_type == "Leader" and cost not in ("", None):
+        print(f"    [AUTO-FIX] Leader Cost (post-catalog): {cost!r} -> '' (Leader はコスト持たない仕様)")
+        cost = ""
+
     return [
         "Add", 183454, title, PIC_URL, price, 2750,
         275010, 275020, cert_number,

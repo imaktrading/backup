@@ -119,7 +119,15 @@ def reference_catalog_for_specs(
     out = dict(current_specs)
     warnings = []
 
+    # 2026-04-28 Bug #2 fix: Leader card の DB life_or_cost は Life 値であって Cost ではない.
+    # eBay 出品仕様では Leader の C:Cost は空欄が正なので、catalog 側 type_en==Leader なら
+    # spec_key=="cost" の gap-fill を一律 skip する (型不一致防止).
+    catalog_card_type = (record.get("type_en") or "").strip()
+
     for spec_key, catalog_key in _FILL_FIELD_MAP.items():
+        if spec_key == "cost" and catalog_card_type == "Leader":
+            # Leader は cost を持たない設計 → catalog 値で埋めない
+            continue
         catalog_val = (record.get(catalog_key) or "").strip() if isinstance(
             record.get(catalog_key), str
         ) else str(record.get(catalog_key) or "").strip()
