@@ -53,7 +53,7 @@
   },
 
   "138581760": {
-    "reason": "FA/PIKACHU 25TH ANNIVERSARY COLLECTION - 公式DB が別セット Pikachu (#225/742) にヒット。25周年Promoの Pikachu は別カード",
+    "reason": "PIKACHU 25th Anniversary Collection (s8a #001/028 通常レギュラー枠付き、Full Art ではない) - PSA Subject 'FA/' は実物と矛盾するが PSA 側の表記特性. 公式DB 検索が SV 系 #225/742 を返却するため override (2026-04-28 物理確認済)",
     "applied_at": "2026-04-26",
     "skip_official_lookup": true,
     "manual_review_required": true,
@@ -110,7 +110,7 @@
   },
 
   "97580087": {
-    "reason": "FA/IRIDA SPACE JUGGLER - 公式DB が「カイ」検索で「エモンガ (#030/083)」誤マッチ",
+    "reason": "IRIDA Space Juggler (s10P #077/067 SR Full Art Trainer、PSA 'FA/' と実物一致) - 公式DB が「カイ」検索で「エモンガ (#030/083)」誤マッチするため override (2026-04-28 物理確認済)",
     "applied_at": "2026-04-26",
     "skip_official_lookup": true,
     "manual_review_required": true,
