@@ -559,9 +559,12 @@ Consider eBay constraints (limited category/Specs options). Respond JSON only:
         return {"verdict": "ABSTAIN", "reason": f"Groq例外: {type(e).__name__}"}
 
 
-def deliberate_3ai(title, specs, psa_brand=None, psa_card_number=None, max_rounds=5):
+def deliberate_3ai(title, specs, psa_brand=None, psa_card_number=None, max_rounds=5,
+                   override_context=None):
     """3AI（Claude/Gemini/Groq）議論で合意形成。
     最大max_rounds回まで意見交換、合意できなければHOLD。
+    - override_context: cert_overrides 適用時に各AIのプロンプトに追加するコンテキスト
+                        (人手検証済の旨を伝え、cert#数値一致のみで誤BLOCKしないよう示唆)
     Returns: dict {
       "final_verdict": "PASS" / "BLOCK" / "HOLD",
       "rounds": [{round, opinions}, ...],
@@ -569,6 +572,8 @@ def deliberate_3ai(title, specs, psa_brand=None, psa_card_number=None, max_round
     }
     """
     context = _build_listing_context(title, specs, psa_brand, psa_card_number)
+    if override_context:
+        context = context + "\n\n=== HUMAN OVERRIDE CONTEXT ===\n" + override_context
     askers = {"Claude": _ask_claude, "Gemini": _ask_gemini, "Groq": _ask_groq}
 
     rounds = []
@@ -637,10 +642,11 @@ def _append_hold_log(idx, title, deliberation):
 def validate_and_report(idx, title, specs, model, category, condition_id, price, pic_url, condition_desc="",
                         psa_brand=None, psa_card_number=None,
                         use_gemini=True, use_groq=True, intermediate=False,
-                        use_deliberation=True):
+                        use_deliberation=True, override_context=None):
     """セルフチェック実行＋表示。
     - intermediate=True: 中間段階バリデーション（category/pic_url未確定OK）
     - use_deliberation=True: 3AI議論方式（Claude/Gemini/Groq、最大5R、HOLDで人間判断）
+    - override_context: cert_overrides 適用時の人手検証コンテキスト (3AI への追加プロンプト)
     Returns: bool (False=CSV除外、True=CSV出力)
     """
     errors, warnings = validate_row(
@@ -672,7 +678,8 @@ def validate_and_report(idx, title, specs, model, category, condition_id, price,
 
     # 3AI議論モード
     if use_deliberation:
-        delib = deliberate_3ai(title, specs, psa_brand, psa_card_number, max_rounds=5)
+        delib = deliberate_3ai(title, specs, psa_brand, psa_card_number, max_rounds=5,
+                               override_context=override_context)
         verdict = delib["final_verdict"]
 
         if verdict == "PASS":

@@ -37,6 +37,11 @@ TRAINER_EN_TO_JP = {
     "NEMONA": "ネモ",
     "CRISPIN": "アカマツ",
     "LACEY": "スグリ",
+    # 2026-04-26 追加 (FA/ プレフィックス除去後の名前で辞書参照)
+    "ELESA'S SPARKLE":     "カミツレのきらめき",
+    "ELESA":               "カミツレ",
+    "LILLIE'S RIBOMBEE":   "リーリエのアブリボン",
+    "LILLIE":              "リーリエ",
     # 今後追加
 }
 
@@ -60,6 +65,10 @@ POKEMON_EN_TO_JP = {
     "BLASTOISE": "カメックス",
     "VENUSAUR": "フシギバナ",
     "PIKACHU": "ピカチュウ",
+    "FLYING PIKACHU V": "ピカチュウV",
+    "FLYING PIKACHU": "ピカチュウ",
+    "PIKACHU V": "ピカチュウV",
+    "PIKACHU VMAX": "ピカチュウVMAX",
     "GENGAR": "ゲンガー",
     "ALAKAZAM": "フーディン",
     "STEELIX": "ハガネール",
@@ -171,33 +180,70 @@ def _extract_pokemon_name_jp(subject):
     """PSA Subjectからカード名を抽出し日本語に変換。
     ポケモンカード: 'MEGA SCRAFTY EX MEGA ATTACK' → 'ズルズキン'
     トレーナーカード: 'IRIS'S FIGHTING SPIRIT SPECIAL ART' → 'アイリスの闘志'
+    プロモ系:        'FA/PIKACHU 25TH ANNIVERSARY COLL.' → 'ピカチュウ'
     """
     s = subject.upper().strip()
 
-    # まずレアリティ接尾辞を除去してカード名部分を抽出
+    # ① レアリティ接頭辞 (FA/ AR/ SR/ SAR/ UR/ HR/) を除去
+    #    PSA は Full Art / Art Rare / Special Art Rare 等を "FA/" 形式で前置
+    s = re.sub(r'^(FA|AR|SR|SAR|SSR|UR|HR|CHR|CSR)/', '', s).strip()
+
+    # ② 末尾のセット名/コレクション名キーワードを除去
+    #    "25TH ANNIVERSARY COLL." / "VSTAR UNIVERSE" / "SPACE JUGGLER" / "BATTLE PARTNERS" 等
+    set_suffixes = [
+        r'\s+25TH\s+ANNIVERSARY\s+COLL\.?$',
+        r'\s+25TH\s+ANNIVERSARY$',
+        r'\s+VSTAR\s+UNIVERSE$',
+        r'\s+SPACE\s+JUGGLER$',
+        r'\s+BATTLE\s+PARTNERS$',
+        r'\s+MEGA\s+DREAM$',
+        r'\s+CHARIZARD\s+EX\s+SET$',
+        r'\s+CROWN\s+ZENITH$',
+        r'\s+SHINY\s+TREASURE$',
+        r'\s+TERASTAL\s+FEST(?:IVAL)?$',
+    ]
+    card_name = s
+    for pat in set_suffixes:
+        card_name = re.sub(pat, '', card_name)
+
+    # ③ レアリティ接尾辞を除去
     rarity_suffixes = [
         r'\s+MEGA\s+ATTACK\s+RARE$', r'\s+MEGA\s+ATTACK$',
         r'\s+SPECIAL\s+ART\s+RARE$', r'\s+SPECIAL\s+ART$',
-        r'\s+ART\s+RARE$', r'\s+ULTRA\s+RARE$',
+        r'\s+ART\s+RARE$', r'\s+ART$',
+        r'\s+ULTRA\s+RARE$',
         r'\s+MEGA\s+ULTRA\s+RARE$', r'\s+BRIGHT\s+WORLD\s+RARE$',
         r'\s+RARE$',
     ]
-    card_name = s
     for pat in rarity_suffixes:
         card_name = re.sub(pat, '', card_name)
     card_name = card_name.strip()
 
-    # トレーナーカード辞書を先にチェック（完全一致）
+    # ④ トレーナーカード辞書を先にチェック (完全一致)
     for en, jp in TRAINER_EN_TO_JP.items():
         if en.upper() == card_name:
             return jp
 
-    # ポケモンカード: "MEGA {NAME} EX" → NAME部分を抽出
+    # ⑤ ポケモンカード EX/V系: "MEGA {NAME} EX" / "{NAME} V" / "FLYING {NAME} V" 等
+    #    まず "FLYING {NAME} V" のような複合キャラ名を辞書で完全一致チェック
+    if card_name in POKEMON_EN_TO_JP:
+        return POKEMON_EN_TO_JP[card_name]
+
+    # ⑥ "MEGA {NAME} EX" → NAME部分を抽出
     m = re.match(r'(?:MEGA\s+)?(\w+(?:\s+\w+)?)\s+EX\b', card_name)
     if m:
         name = m.group(1).strip()
+    elif ' ' in card_name:
+        # 複数単語の場合、最後の単語を捨てて短縮 ("FLYING PIKACHU V" → "FLYING PIKACHU")
+        # その短縮形が辞書にあれば採用
+        parts = card_name.split()
+        for n in range(len(parts), 0, -1):
+            cand = ' '.join(parts[:n])
+            if cand in POKEMON_EN_TO_JP:
+                return POKEMON_EN_TO_JP[cand]
+        name = parts[0]
     else:
-        name = card_name.split()[0] if card_name else ""
+        name = card_name
 
     return POKEMON_EN_TO_JP.get(name, None)
 
