@@ -2110,17 +2110,20 @@ def main():
         _append_to_spreadsheet(cert_numbers, mercari_url_map, mercari_title_map, skip_certs)
 
     # CSVチェッカー自動実行
+    # Phase D (2026-04-29): subprocess.run → 関数呼出. 同一プロセスにすることで
+    # market_gate の in-memory cache が共有され、median ブレ (psa_to_csv $140 vs
+    # check_csv $115 等) が解消する. 詳細: memory dual_gate_disagreement.md
     if len(rows) > 1:
         print(f"\n{'═'*60}")
         print("  CSVチェックを開始します...")
         print(f"{'═'*60}\n")
         try:
-            subprocess.run(
-                [sys.executable, "check_csv.py", output_file],
-                cwd=os.path.dirname(os.path.abspath(__file__)),
-            )
+            from check_csv import main as _check_csv_main
+            _check_csv_main(output_file)
         except Exception as e:
-            print(f"⚠️ チェッカー実行エラー: {e}")
+            print(f"⚠️ チェッカー実行エラー: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
 
     input("\nEnterで終了...")
 
