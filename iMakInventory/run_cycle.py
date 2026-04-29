@@ -102,14 +102,26 @@ def _notify_toast(title: str, body: str):
 # ============================================================================
 # Phase wrappers
 # ============================================================================
-def _phase_monitor(sheet: str, limit: Optional[int], test_mode: bool) -> dict:
-    """monitor_listings 経由で HIGH + LOW を処理."""
+def _phase_monitor(
+    sheet: str, limit: Optional[int], test_mode: bool,
+    single_sheet_id: Optional[str] = None,
+    single_sheet_label: Optional[str] = None,
+    high_sheet_id: Optional[str] = None,
+    low_sheet_id: Optional[str] = None,
+) -> dict:
+    """monitor_listings 経由でスプシ処理 (HIGH/LOW セット or 単一)."""
     _log(f"=== Phase 1/3: monitor_listings (sheet={sheet}, limit={limit}) ===", test_mode)
     targets = []
-    if sheet in ("high", "both"):
-        targets.append(("HIGH", HIGH_SHEET_ID))
-    if sheet in ("low", "both"):
-        targets.append(("LOW", LOW_SHEET_ID))
+    if single_sheet_id:
+        # 単一スプシ mode (Phase 6a)
+        targets.append((single_sheet_label or "SHEET", single_sheet_id))
+    else:
+        h_id = high_sheet_id or HIGH_SHEET_ID
+        l_id = low_sheet_id or LOW_SHEET_ID
+        if sheet in ("high", "both"):
+            targets.append(("HIGH", h_id))
+        if sheet in ("low", "both"):
+            targets.append(("LOW", l_id))
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0,
              "by_sheet": {}}
     for label, sid in targets:
@@ -128,11 +140,22 @@ def _phase_monitor(sheet: str, limit: Optional[int], test_mode: bool) -> dict:
     return grand
 
 
-def _phase_revise_csv(sheet: str, test_mode: bool) -> dict:
+def _phase_revise_csv(
+    sheet: str, test_mode: bool,
+    single_sheet_id: Optional[str] = None,
+    single_sheet_label: Optional[str] = None,
+    high_sheet_id: Optional[str] = None,
+    low_sheet_id: Optional[str] = None,
+) -> dict:
     """revise_csv_generator (mode=pending) で CSV 生成."""
     _log(f"=== Phase 2/3: revise_csv_generator (sheet={sheet}, mode=pending) ===", test_mode)
     try:
-        result = run_revise_csv(sheet=sheet, mode="pending", dry_run=False)
+        result = run_revise_csv(
+            sheet=sheet, mode="pending", dry_run=False,
+            high_sheet_id=high_sheet_id, low_sheet_id=low_sheet_id,
+            single_sheet_id=single_sheet_id,
+            single_sheet_label=single_sheet_label,
+        )
         return result
     except Exception as e:
         _log(f"  ❌ revise_csv 例外: {type(e).__name__}: {e}", test_mode)
@@ -169,11 +192,17 @@ def run_cycle(
     limit: Optional[int] = None,
     test_mode: bool = False,
     skip_upload: bool = False,
+    sheet_id: Optional[str] = None,
+    sheet_label: Optional[str] = None,
+    high_sheet_id: Optional[str] = None,
+    low_sheet_id: Optional[str] = None,
 ) -> dict:
     cycle_log = {
         "ts_start": datetime.now().isoformat(timespec="seconds"),
         "test_mode": test_mode,
         "sheet": sheet,
+        "sheet_id": sheet_id,
+        "sheet_label": sheet_label,
         "limit": limit,
         "skip_upload": skip_upload,
         "phases": {},
@@ -190,7 +219,13 @@ def run_cycle(
 
     try:
         # Phase 1: monitor
-        m = _phase_monitor(sheet, limit, test_mode)
+        m = _phase_monitor(
+            sheet, limit, test_mode,
+            single_sheet_id=sheet_id,
+            single_sheet_label=sheet_label,
+            high_sheet_id=high_sheet_id,
+            low_sheet_id=low_sheet_id,
+        )
         cycle_log["phases"]["monitor"] = m
 
         # Phase 2: revise CSV (skip if no newly_sold)
@@ -200,7 +235,13 @@ def run_cycle(
             cycle_log["phases"]["upload"] = {"skipped": "no csv"}
             cycle_log["status"] = "success_no_changes"
         else:
-            r = _phase_revise_csv(sheet, test_mode)
+            r = _phase_revise_csv(
+                sheet, test_mode,
+                single_sheet_id=sheet_id,
+                single_sheet_label=sheet_label,
+                high_sheet_id=high_sheet_id,
+                low_sheet_id=low_sheet_id,
+            )
             cycle_log["phases"]["revise_csv"] = r
 
             # Phase 3: upload
@@ -251,13 +292,31 @@ def main():
                         help="[TEST] ログ + 完了通知発動")
     parser.add_argument("--skip-upload", action="store_true",
                         help="upload step skip (CSV 生成までで止める)")
+    # Phase 6a: 単一スプシ mode + ID 上書き
+    parser.add_argument("--sheet-id", default=None,
+                        help="単一スプシ mode: 指定 ID のみ処理 "
+                             "(--high-sheet-id/--low-sheet-id と排他)")
+    parser.add_argument("--sheet-label", default="SHEET",
+                        help="--sheet-id 使用時のラベル (default: SHEET)")
+    parser.add_argument("--high-sheet-id", default=os.environ.get("INVENTORY_HIGH_SHEET_ID"),
+                        help="HIGH 用 spreadsheet ID 上書き (env: INVENTORY_HIGH_SHEET_ID)")
+    parser.add_argument("--low-sheet-id", default=os.environ.get("INVENTORY_LOW_SHEET_ID"),
+                        help="LOW 用 spreadsheet ID 上書き (env: INVENTORY_LOW_SHEET_ID)")
     args = parser.parse_args()
+
+    if args.sheet_id and (args.high_sheet_id or args.low_sheet_id):
+        print("❌ --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
+        sys.exit(2)
 
     result = run_cycle(
         sheet=args.sheet,
         limit=args.limit,
         test_mode=args.test_mode,
         skip_upload=args.skip_upload,
+        sheet_id=args.sheet_id,
+        sheet_label=args.sheet_label,
+        high_sheet_id=args.high_sheet_id,
+        low_sheet_id=args.low_sheet_id,
     )
     print()
     print("=== final cycle_log ===")

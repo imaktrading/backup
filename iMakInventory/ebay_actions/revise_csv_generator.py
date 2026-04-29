@@ -166,34 +166,36 @@ def collect_from_pending_queue(
     verify_against_sheet: bool = True,
     high_sheet_id: Optional[str] = None,
     low_sheet_id: Optional[str] = None,
+    single_sheet_id: Optional[str] = None,
+    single_sheet_label: Optional[str] = None,
 ) -> tuple[list, list]:
     """pending_revise.jsonl から取り下げ候補を収集.
 
     Args:
-        sheet_filter: "high" / "low" / "both"
+        sheet_filter: "high" / "low" / "both" (HIGH/LOW モード時)
         verify_against_sheet: True の場合、スプシ側で D が依然 "○" の行のみ採用
-                             (Phase 2 → Phase 3 間に手動取消された行を除外)
-        high_sheet_id / low_sheet_id: TEST スプシ等で本番 ID を上書き (None なら本番)
+        high_sheet_id / low_sheet_id: TEST スプシ等で本番 ID 上書き
+        single_sheet_id / single_sheet_label: Phase 6a 単一スプシ mode
 
     Returns: (candidates, skipped_pending)
-        candidates:      Phase 3 で取り下げる対象
-        skipped_pending: queue にあったが verify で落ちた、または filter 外
     """
     queue = read_pending_queue()
     if not queue:
         return [], []
 
-    h_id = high_sheet_id or HIGH_SHEET_ID
-    l_id = low_sheet_id or LOW_SHEET_ID
-
-    # スプシ照合用に現状の D="○" 行を取得
+    # スプシ照合用 sheet_state 構築
     sheet_state: dict[tuple[str, int], dict] = {}
     if verify_against_sheet:
         targets = []
-        if sheet_filter in ("high", "both"):
-            targets.append(("HIGH", h_id))
-        if sheet_filter in ("low", "both"):
-            targets.append(("LOW", l_id))
+        if single_sheet_id:
+            targets.append((single_sheet_label or "SHEET", single_sheet_id))
+        else:
+            h_id = high_sheet_id or HIGH_SHEET_ID
+            l_id = low_sheet_id or LOW_SHEET_ID
+            if sheet_filter in ("high", "both"):
+                targets.append(("HIGH", h_id))
+            if sheet_filter in ("low", "both"):
+                targets.append(("LOW", l_id))
         for label, sid in targets:
             try:
                 sold = collect_sold_listings(label, sid)
@@ -201,20 +203,26 @@ def collect_from_pending_queue(
                     sheet_state[(label, s["row_index"])] = s
             except Exception as e:
                 print(f"  ⚠️ [{label}] 現状取得失敗: {type(e).__name__}: {e}")
-                # 照合失敗 → 安全側で全件 skip (誤取り下げ防止)
                 return [], queue
 
     candidates = []
     skipped = []
     for q in queue:
         label = q.get("sheet", "")
-        # filter
-        if sheet_filter == "high" and label != "HIGH":
-            skipped.append({**q, "skip_reason": "filter_high"})
-            continue
-        if sheet_filter == "low" and label != "LOW":
-            skipped.append({**q, "skip_reason": "filter_low"})
-            continue
+        # filter (mode 別)
+        if single_sheet_id:
+            # 単一スプシ mode: ラベルが一致する entry のみ採用
+            if label != (single_sheet_label or "SHEET"):
+                skipped.append({**q, "skip_reason": "filter_single_label_mismatch"})
+                continue
+        else:
+            # HIGH/LOW mode
+            if sheet_filter == "high" and label != "HIGH":
+                skipped.append({**q, "skip_reason": "filter_high"})
+                continue
+            if sheet_filter == "low" and label != "LOW":
+                skipped.append({**q, "skip_reason": "filter_low"})
+                continue
 
         # verify against sheet
         if verify_against_sheet:
@@ -443,28 +451,41 @@ def run(
     dry_run: bool = False,
     high_sheet_id: Optional[str] = None,
     low_sheet_id: Optional[str] = None,
+    single_sheet_id: Optional[str] = None,
+    single_sheet_label: Optional[str] = None,
 ) -> dict:
-    h_id = high_sheet_id or HIGH_SHEET_ID
-    l_id = low_sheet_id or LOW_SHEET_ID
+    # 単一スプシ mode (Phase 6a)
+    is_single_mode = bool(single_sheet_id)
 
-    targets = []
-    if sheet in ("high", "both"):
-        targets.append(("HIGH", h_id))
-    if sheet in ("low", "both"):
-        targets.append(("LOW", l_id))
+    if is_single_mode:
+        targets = [(single_sheet_label or "SHEET", single_sheet_id)]
+    else:
+        h_id = high_sheet_id or HIGH_SHEET_ID
+        l_id = low_sheet_id or LOW_SHEET_ID
+        targets = []
+        if sheet in ("high", "both"):
+            targets.append(("HIGH", h_id))
+        if sheet in ("low", "both"):
+            targets.append(("LOW", l_id))
 
     print(f"=== Revise CSV 生成 (sheet={sheet}, mode={mode}, dry_run={dry_run}, "
           f"force={force}, max_per_run={max_per_run}) ===")
-    if high_sheet_id or low_sheet_id:
+    if is_single_mode:
+        print(f"  ⚠️ 単一スプシ mode: label={single_sheet_label or 'SHEET'} id={single_sheet_id[:25]}...")
+    elif high_sheet_id or low_sheet_id:
+        h_id = high_sheet_id or HIGH_SHEET_ID
+        l_id = low_sheet_id or LOW_SHEET_ID
         print(f"  ⚠️ TEST モード: HIGH={h_id[:25]}... LOW={l_id[:25]}...")
 
     candidates = []
     pending_skipped = []
     if mode == "pending":
-        # Q2: Phase 2 で「今回新規〇付与した行のみ」キューから取る
+        # Phase 2 で今回新規〇付与した行のみキューから取る
         candidates, pending_skipped = collect_from_pending_queue(
             sheet_filter=sheet, verify_against_sheet=True,
-            high_sheet_id=h_id, low_sheet_id=l_id,
+            high_sheet_id=high_sheet_id, low_sheet_id=low_sheet_id,
+            single_sheet_id=single_sheet_id,
+            single_sheet_label=single_sheet_label,
         )
         print(f"  pending queue から: {len(candidates)} 件 (skip {len(pending_skipped)} 件)")
     elif mode == "all":
@@ -564,7 +585,17 @@ def main():
                         help="HIGH 用 spreadsheet ID 上書き (env: INVENTORY_HIGH_SHEET_ID)")
     parser.add_argument("--low-sheet-id", default=os.environ.get("INVENTORY_LOW_SHEET_ID"),
                         help="LOW 用 spreadsheet ID 上書き (env: INVENTORY_LOW_SHEET_ID)")
+    # 単一スプシ mode (Phase 6a)
+    parser.add_argument("--sheet-id", default=None,
+                        help="単一スプシ mode: 指定 ID のみ処理 "
+                             "(--high-sheet-id/--low-sheet-id と排他)")
+    parser.add_argument("--sheet-label", default="SHEET",
+                        help="--sheet-id 使用時のラベル (default: SHEET)")
     args = parser.parse_args()
+
+    if args.sheet_id and (args.high_sheet_id or args.low_sheet_id):
+        print("❌ --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
+        sys.exit(2)
 
     result = run(
         sheet=args.sheet,
@@ -574,6 +605,8 @@ def main():
         dry_run=args.dry_run,
         high_sheet_id=args.high_sheet_id,
         low_sheet_id=args.low_sheet_id,
+        single_sheet_id=args.sheet_id,
+        single_sheet_label=args.sheet_label,
     )
     print()
     print(f"=== 結果 ===")

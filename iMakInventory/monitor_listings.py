@@ -421,18 +421,32 @@ def main():
                         help="HIGH 用 spreadsheet ID 上書き (env: INVENTORY_HIGH_SHEET_ID)")
     parser.add_argument("--low-sheet-id", default=os.environ.get("INVENTORY_LOW_SHEET_ID"),
                         help="LOW 用 spreadsheet ID 上書き (env: INVENTORY_LOW_SHEET_ID)")
+    # 単一スプシ mode (Phase 6a): HIGH/LOW なしで任意 1 件指定
+    parser.add_argument("--sheet-id", default=None,
+                        help="単一スプシ mode: 指定 ID のみ処理 "
+                             "(--high-sheet-id/--low-sheet-id と排他、--sheet 引数は無視)")
+    parser.add_argument("--sheet-label", default="SHEET",
+                        help="--sheet-id 使用時のラベル (decision_log ファイル名用、default: SHEET)")
     args = parser.parse_args()
 
-    high_id = args.high_sheet_id or HIGH_SHEET_ID
-    low_id = args.low_sheet_id or LOW_SHEET_ID
-    if args.high_sheet_id or args.low_sheet_id:
-        log(f"  ⚠️ TEST モード: HIGH={high_id[:25]}... LOW={low_id[:25]}...")
-
-    targets = []
-    if args.sheet in ("high", "both"):
-        targets.append(("HIGH", high_id))
-    if args.sheet in ("low", "both"):
-        targets.append(("LOW", low_id))
+    # 単一スプシ mode (Phase 6a)
+    if args.sheet_id:
+        if args.high_sheet_id or args.low_sheet_id:
+            log("❌ --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
+            sys.exit(2)
+        log(f"  単一スプシ mode: label={args.sheet_label} id={args.sheet_id[:25]}...")
+        targets = [(args.sheet_label, args.sheet_id)]
+    else:
+        # 既存 HIGH/LOW モード (互換維持)
+        high_id = args.high_sheet_id or HIGH_SHEET_ID
+        low_id = args.low_sheet_id or LOW_SHEET_ID
+        if args.high_sheet_id or args.low_sheet_id:
+            log(f"  ⚠️ TEST モード: HIGH={high_id[:25]}... LOW={low_id[:25]}...")
+        targets = []
+        if args.sheet in ("high", "both"):
+            targets.append(("HIGH", high_id))
+        if args.sheet in ("low", "both"):
+            targets.append(("LOW", low_id))
 
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0}
     for label, sid in targets:
