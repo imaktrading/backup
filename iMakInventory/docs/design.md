@@ -517,14 +517,47 @@ Phase 5: cron + 通知 + 統合                          ←半日
 - 連続 8 失敗 (anti-bot 疑い) で abort
 - dry-run mode: スプシ書込なし、判定のみ + decision_log は保存
 
-#### Phase 3: Revise CSV 生成 (数時間)
+#### Phase 3: Revise CSV 生成 (✅ 完了 2026-04-29)
 
-`ebay_actions/revise_csv_generator.py` 新規:
-- 入力: スプシで対処要かつ自動取り下げ条件を満たす行 (cap 5件以内)
-- 出力: `csv_output/revise_<timestamp>.csv` (FileExchange 形式、UTF-8 BOMなし)
+[ebay_actions/revise_csv_generator.py](../ebay_actions/revise_csv_generator.py):
+- 入力: HIGH/LOW スプシ (商品管理シート) の D="○" or D="〇" 行
+- 出力: `csv_output/revise_<sheet>_<ts>.csv` (FileExchange 形式、UTF-8 BOMなし)
 - 列: `*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8),ItemID,*Quantity`
-- 値: `Revise,<itemID>,0`
-- decision_log/inventory_actions_<timestamp>.jsonl に raw 記録
+- 値: `Revise,<itemID>,0` (トラバホ delete*.csv と完全互換)
+- decision_log/revise_<ts>.jsonl に全件記録 (allowed + deferred)
+
+**Cap 戦略 (Takaaki さん確定 2026-04-29、戦略修正版)**:
+
+戦略原則: **「取り下げ漏れ (false negative) > 過剰取り下げ (false positive)」**
+- キャンセル発生 → Defect Rate 直撃 → 永久 BAN リスク
+- 過剰取り下げは機会損失だが再出品で復旧可能
+- → 漏れ NG / 過剰 OK 方向に倒す
+
+| 項目 | 値 | 根拠 |
+|---|---|---|
+| **per-run cap** | 100 件 | 4時間サイクル、通常想定 6-12件、100超は構造異常疑い |
+| **daily cap** | **なし** | 寝てる間も止めない、漏れ防止優先 |
+| 100 件超時 | manual approval (`--force`) | 構造異常検知のみ、通常運用は自動 |
+| dedup | 同一 run 内の itemID 重複は除外 | HIGH/LOW 両方に同 itemID が出ている等 |
+| Q1 統一 | D="○" は ツール ○ / 人手 ○ 区別なし | スプシシンプル運用 |
+| Phase 3 範囲 | **片方向**: ○ → 取り下げ → 終了 | 復活フローは Phase 4+ で検討 |
+
+**state ファイル**: `decision_log/revise_state.json`。日次カウントは記録のみ (運用追跡用)、cap 判定には使わない。
+
+**CLI**:
+```bash
+python -m ebay_actions.revise_csv_generator --sheet both --dry-run    # 検証
+python -m ebay_actions.revise_csv_generator --sheet both              # 通常実行
+python -m ebay_actions.revise_csv_generator --sheet both --force      # 100件超を強制
+python -m ebay_actions.revise_csv_generator --sheet high --max-per-run 50  # cap 変更
+```
+
+**smoke test 結果 (HIGH+LOW 全件)**:
+- HIGH D=○ 102件 + LOW D=○ 28件 = 130 候補 (smoke test 時点)
+- dedup 後: 129 件 (1 件は HIGH/LOW 重複)
+- per-run cap 100 (default) → PER_RUN_CAP_EXCEEDED で全件保留 (構造異常疑い)
+- `--force` で override → 129 件 CSV 出力成功
+- `--max-per-run 200` (cap 余裕) → OK / 129 件 CSV 出力
 
 #### Phase 4: Selenium FileExchange Web UI 操作 (1-2日)
 
