@@ -22,6 +22,15 @@ from listing_common import (
     get_default_condition_description,
 )
 
+# Phase 3-B (2026-04-29): iMakCatalog adapter — catalog hit 時に Selenium scrape を skip.
+# 失敗時 (iMakCatalog 未配置 / DB 未投入) は静かに None フォールバックして既存挙動を維持する.
+try:
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                       "..", "iMakCatalog", "integrations"))
+    from gshock_lookup import lookup_gshock as _catalog_lookup  # type: ignore
+except Exception:
+    _catalog_lookup = None
+
 URLS_FILE = "gshock_urls.txt"
 DESCRIPTION_FILE = "GSHOCK.txt"
 DEFAULT_PRICE = 100.00
@@ -571,6 +580,52 @@ def scrape_casiofanmag(model_base):
         return {}
 
 
+def _catalog_record_to_scrape_dict(record, fallback_model):
+    """iMakCatalog の lookup_gshock 戻り値を scrape_casio 互換 dict に逆変換.
+
+    Phase 3-B (2026-04-29): catalog hit 時に scrape_casio を skip して、
+    build_row が要求する shape の data dict を組み立てる.
+    キー名は scrape_casio 戻り値と完全一致 (build_row 改修不要).
+
+    band_strap_override のみ条件付き: catalog の band_strap が
+    "Two-Piece Strap" 以外のときだけセット (scrape_casio 側の挙動踏襲、
+    build_row が data.get('band_strap_override', 'Two-Piece Strap') で読むため).
+    """
+    if not record:
+        return None
+    specs = record.get("specs") or {}
+    product_id = record.get("product_id") or fallback_model
+    data = {
+        "model":             fallback_model,
+        "model_official":    product_id,
+        "model_base":        re.sub(r"(?:JF|JR)$", "", product_id),
+        # build_row が参照する全 key (scrape_casio 戻り値と同名)
+        "case_size":         specs.get("case_size", ""),
+        "case_thickness":    specs.get("case_thickness", ""),
+        "case_material":     specs.get("case_material", ""),
+        "case_shape":        specs.get("case_shape", ""),
+        "band_material":     specs.get("band_material", ""),
+        "band_width":        specs.get("band_width", ""),
+        "band_length":       specs.get("band_length", ""),
+        "band_color":        specs.get("band_color", ""),
+        "dial_color":        specs.get("dial_color", ""),
+        "bezel_color":       specs.get("bezel_color", ""),
+        "crystal":           specs.get("crystal", ""),
+        "movement":          specs.get("movement", ""),
+        "water_resistance":  specs.get("water_resistance", ""),
+        "weight":            specs.get("weight", ""),
+        "year":              specs.get("year", ""),
+        "display":           specs.get("display", ""),
+        "features":          specs.get("features", ""),
+        "is_metal":          bool(specs.get("is_metal", False)),
+    }
+    # band_strap_override: scrape_casio は "Two-Piece Strap" 以外の時のみセット
+    band_strap = specs.get("band_strap")
+    if band_strap and band_strap != "Two-Piece Strap":
+        data["band_strap_override"] = band_strap
+    return data
+
+
 def scrape_casio(driver, url):
     try:
         driver.get(url)
@@ -1015,7 +1070,22 @@ def main():
     for url in urls:
         model = extract_model_from_url(url)
         print(f"取得中: {model}...", end="", flush=True)
-        data = scrape_casio(driver, url)
+        # Phase 3-B (2026-04-29): catalog hit 経路 — Selenium scrape を skip.
+        # catalog miss / 未投入 / 例外 → 既存 scrape_casio フォールバック (byte 互換).
+        data = None
+        if _catalog_lookup is not None:
+            try:
+                _cat_rec = _catalog_lookup(model)
+                if _cat_rec:
+                    data = _catalog_record_to_scrape_dict(_cat_rec, model)
+                    if data:
+                        print(" [catalog hit]", end="", flush=True)
+            except Exception as _e:
+                # catalog エラーは Selenium fallback (既存挙動維持)
+                print(f" [catalog err: {type(_e).__name__}]", end="", flush=True)
+                data = None
+        if data is None:
+            data = scrape_casio(driver, url)
         if data:
             print(f" → {data.get('case_size','?')} / {data.get('crystal','?')} / StoreCat:{get_store_category(data['model_base'])} ✓")
             row = build_row(url, DEFAULT_PRICE, data, base_desc)
