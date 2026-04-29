@@ -16,6 +16,7 @@ tests/_probe_*.py
 debug/_probe_*.py
 debug/html_samples/*.png
 debug/html_samples/realerr_*.html
+debug/fril_samples/*.png
 # Amazon unqualifiedBuyBox 調査用 HTML (17MB+、investigation 用、必要なら probe_amazon_cart.py で再収集)
 debug/amazon_samples/offer_listing_*.html
 debug/amazon_samples/probe_thirdparty_*.html

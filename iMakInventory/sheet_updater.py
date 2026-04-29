@@ -234,7 +234,7 @@ def _domain_of(url: str) -> str:
 
 def detect_supplier(domain: str) -> str:
     """URL ドメインから supplier 名を判定.
-    対応: uniqlo / montbell / mercari / amazon / other (= 未対応)
+    対応: uniqlo / montbell / mercari / amazon / fril / other (= 未対応)
     """
     d = (domain or "").lower()
     if "uniqlo.com" in d:
@@ -245,6 +245,8 @@ def detect_supplier(domain: str) -> str:
         return "mercari"
     if "amazon.co.jp" in d or "amazon.com" in d:
         return "amazon"
+    if "fril.jp" in d:
+        return "fril"
     return "other"
 
 

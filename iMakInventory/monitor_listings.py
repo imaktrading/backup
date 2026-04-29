@@ -61,6 +61,7 @@ from scrapers.mercari_scraper import fetch_product_inventory as fetch_mercari  #
 from scrapers.mercari_scraper import create_driver as create_mercari_driver  # noqa: E402
 from scrapers.amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
 from scrapers.amazon_scraper import create_amazon_driver  # noqa: E402
+from scrapers.fril_scraper import fetch_product_inventory as fetch_fril  # noqa: E402
 
 LOG_DIR = SCRIPT_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -135,6 +136,12 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
             # personalized buy box (Featured Offer) を再評価する。
             # amazon_driver が None なら fallback path で都度 driver 起動 (遅い)。
             info = fetch_amazon(url, driver=amazon_driver, use_selenium_fallback=True)
+        except Exception as e:
+            result["error"] = f"{type(e).__name__}: {e}"
+            return result
+    elif supplier == "fril":
+        try:
+            info = fetch_fril(url)
         except Exception as e:
             result["error"] = f"{type(e).__name__}: {e}"
             return result
