@@ -57,18 +57,26 @@ EBAY_CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profi
 # eBay URLs
 EBAY_SIGNIN_URL = "https://signin.ebay.com/ws/eBayISAPI.dll?SignIn"
 EBAY_HOME_URL = "https://www.ebay.com"
-EBAY_FILEEXCHANGE_UPLOAD_URL = (
-    "https://k2b-bulk.ebay.com/ws/eBayISAPI.dll?FileExchangeUploadForm"
-)
-EBAY_FILEEXCHANGE_RESULTS_URL = (
-    "https://k2b-bulk.ebay.com/ws/eBayISAPI.dll?FileExchangeResults"
-)
+# 2026-04-30 トラバホ解析反映: Seller Hub の uploads ページに直接遷移する
+# (旧 k2b-bulk URL も eBay 側で 自動 redirect されるが、明示的に新 URL を使う)
+EBAY_FILEEXCHANGE_UPLOAD_URL = "https://www.ebay.com/sh/reports/uploads"
+EBAY_FILEEXCHANGE_RESULTS_URL = "https://www.ebay.com/sh/reports/uploads"
 
-# タイムアウト
-LOGIN_WAIT_SEC = 300       # 手動ログイン猶予 (5分)
-UPLOAD_WAIT_SEC = 120      # アップロード後の結果ページ表示待ち
-PAGE_LOAD_WAIT_SEC = 10    # 通常ページロード待ち
+# タイムアウト + リトライ
+LOGIN_WAIT_SEC = 300            # 手動ログイン猶予 (5分)
+UPLOAD_WAIT_SEC = 120           # アップロード後の結果ページ表示待ち
+PAGE_LOAD_WAIT_SEC = 10         # 通常ページロード待ち
 CHROME_VERSION_MAIN = 146
+
+# 2026-04-30 トラバホ __UploadCSVwithSoldedWithRetry 相当
+UPLOAD_RETRY_MAX = 3            # アップロード全体 3 回リトライ
+UPLOAD_RETRY_SLEEP_SEC = 3      # リトライ間隔
+LOGIN_RETRY_MAX = 3             # login 3 回リトライ
+LOGIN_RETRY_SLEEP_SEC = 3
+POPUP_MONITOR_TIMEOUT_SEC = 120 # ポップアップ "Upload in progress" → "Download results" 監視
+POPUP_POLL_INTERVAL = 2         # ポップアップポーリング 2 秒おき
+HISTORY_REFRESH_MAX = 3         # 履歴ページ refresh 確認 3 回
+HISTORY_REFRESH_SLEEP_SEC = 5
 
 DECISION_LOG_DIR = ROOT_DIR / "decision_log"
 CSV_OUTPUT_DIR = ROOT_DIR / "csv_output"
@@ -248,6 +256,18 @@ def upload_csv_via_form(driver, csv_path: Path, dry_run: bool = False) -> dict:
         result["error"] = "file input 要素見つからず (ページ構造変更?)"
         return result
 
+    # トラバホ解析: file input が hidden 状態だと send_keys が拒否されるため
+    # JavaScript で display:block に強制可視化
+    try:
+        driver.execute_script(
+            "arguments[0].style.display = 'block'; "
+            "arguments[0].style.visibility = 'visible'; "
+            "arguments[0].style.opacity = '1';",
+            file_input,
+        )
+    except WebDriverException:
+        pass  # JS 失敗しても send_keys が動く可能性あり、続行
+
     try:
         file_input.send_keys(str(csv_path.resolve()))
         time.sleep(1)
@@ -286,54 +306,61 @@ def upload_csv_via_form(driver, csv_path: Path, dry_run: bool = False) -> dict:
         result["error"] = f"submit click 失敗: {e}"
         return result
 
-    # 結果ページ / popup を待つ
-    end_at = time.time() + UPLOAD_WAIT_SEC
-    success_kw = ["upload successful", "正常", "成功", "received", "submitted",
-                  "your file has been", "fileexchangeresults"]
-    failure_kw = ["upload failed", "失敗", "error occurred"]
+    # トラバホ解析: ポップアップ #shui-upload-file__pop-up 監視
+    # "Upload in progress" → "Download results" リンク発見で成功判定
+    from selenium.common.exceptions import StaleElementReferenceException  # noqa: PLC0415
+    popup_seen = False
+    download_link_found = False
+    end_at = time.time() + POPUP_MONITOR_TIMEOUT_SEC
     while time.time() < end_at:
-        time.sleep(1)
+        time.sleep(POPUP_POLL_INTERVAL)
         try:
-            cur_url = driver.current_url or ""
-            page = (driver.page_source or "").lower()
+            popup = driver.find_element(By.CSS_SELECTOR, '#shui-upload-file__pop-up')
+            popup_text = (popup.text or "").lower()
+            if popup_text:
+                if not popup_seen:
+                    popup_seen = True
+                    result["popup_text"] = popup.text[:500]
+                # トラバホ: "Upload in progress" 含む → 続行 (まだ処理中)
+                # "Download results" リンク発見 → 成功
+                if "download results" in popup_text or "ダウンロード" in popup_text:
+                    download_link_found = True
+                    result["success"] = True
+                    result["result_text"] = "popup: Download results link found"
+                    result["page_url"] = driver.current_url
+                    result["popup_text"] = popup.text[:500]
+                    break
+        except (NoSuchElementException, StaleElementReferenceException):
+            # popup がまだ render されていない or DOM が再描画された
+            continue
         except WebDriverException:
             continue
 
-        # popup 検知 (alert)
-        try:
-            alert = driver.switch_to.alert
-            result["popup_text"] = alert.text
+    if not download_link_found:
+        # popup 監視で確定できず → 履歴ページ refresh で確認 (3 回)
+        # トラバホ: history page で ファイル名 + "-" 含むか確認
+        for _ in range(HISTORY_REFRESH_MAX):
             try:
-                alert.accept()
-            except Exception:
-                pass
-        except Exception:
-            pass
+                driver.get(EBAY_FILEEXCHANGE_RESULTS_URL)
+                time.sleep(HISTORY_REFRESH_SLEEP_SEC)
+                page = driver.page_source or ""
+                # session 切れ検知
+                if "セッションの有効期限が切れました" in page or "session has expired" in page.lower():
+                    continue  # refresh 再試行
+                # ファイル名 (拡張子なし) + "-" を含むか確認 (履歴の進捗表示)
+                csv_basename = csv_path.stem  # e.g., "revise_smoke_step1_20260430_071008"
+                if csv_basename in page and "-" in page:
+                    result["success"] = True
+                    result["result_text"] = "history page contains uploaded file"
+                    result["page_url"] = driver.current_url
+                    break
+            except WebDriverException:
+                continue
 
-        # 結果 URL に飛んでいる
-        if "fileexchangeresults" in cur_url.lower():
-            result["success"] = True
-            result["result_text"] = page[:500]
-            result["page_url"] = cur_url
-            return result
+    if not result["success"] and not result["error"]:
+        result["error"] = "upload result not detected (popup + history both inconclusive)"
+        result["page_url"] = driver.current_url if driver else ""
 
-        # 成功キーワード
-        if any(kw in page for kw in success_kw):
-            result["success"] = True
-            result["result_text"] = page[:500]
-            result["page_url"] = cur_url
-            return result
-
-        # 失敗キーワード
-        if any(kw in page for kw in failure_kw):
-            result["success"] = False
-            result["result_text"] = page[:500]
-            result["page_url"] = cur_url
-            result["error"] = "upload reported failure on result page"
-            return result
-
-    result["error"] = f"upload result not detected within {UPLOAD_WAIT_SEC} sec"
-    result["page_url"] = driver.current_url if driver else ""
     return result
 
 
@@ -420,21 +447,52 @@ def upload_one_csv(
     driver = None
     try:
         driver = create_ebay_driver(headless=False)
-        if not is_logged_in(driver):
-            print("  ⚠️ 未ログイン状態です。--login で先に手動ログインしてください")
-            result = {"success": False, "error": "not_logged_in",
-                      "result_text": "", "popup_text": "", "page_url": "", "screenshot": None}
-        else:
+
+        # トラバホ __UploadCSVwithSoldedWithRetry 相当: 全体 3 回リトライ層
+        result = {"success": False, "error": "not_attempted",
+                  "result_text": "", "popup_text": "", "page_url": "", "screenshot": None}
+        for attempt in range(1, UPLOAD_RETRY_MAX + 1):
+            print(f"  upload attempt {attempt}/{UPLOAD_RETRY_MAX}")
+
+            # ログイン 3 回リトライ層 (URL が uploads page に届くまで)
+            login_ok = False
+            for li in range(1, LOGIN_RETRY_MAX + 1):
+                if is_logged_in(driver):
+                    login_ok = True
+                    break
+                print(f"    login attempt {li}/{LOGIN_RETRY_MAX}: not logged in, retrying...")
+                time.sleep(LOGIN_RETRY_SLEEP_SEC)
+                # 失敗時は driver.refresh で signin redirect を再評価
+                try:
+                    driver.refresh()
+                except Exception:
+                    pass
+
+            if not login_ok:
+                print("  ⚠️ 未ログイン (login retry 尽きた)。--login で再度手動ログインしてください")
+                result = {"success": False, "error": "not_logged_in",
+                          "result_text": "", "popup_text": "", "page_url": "", "screenshot": None}
+                break  # 全体ループも抜ける
+
             print("  ✅ ログイン状態 OK")
             result = upload_csv_via_form(driver, csv_path, dry_run=dry_run)
 
-            # session_expired リトライ
+            if result.get("success"):
+                break
+
+            # session_expired は relogin で復帰可能性
             if result.get("error") == "session_expired" and max_login_retries > 0:
                 print("  ⚠️ session 切れ検知、再ログインを促します")
                 if manual_login(driver):
-                    result = upload_csv_via_form(driver, csv_path, dry_run=dry_run)
+                    continue  # 次の attempt で再 upload
                 else:
                     result["error"] = "session_expired_and_relogin_failed"
+                    break
+
+            # その他の失敗は次の attempt に進む (sleep 挟む)
+            if attempt < UPLOAD_RETRY_MAX:
+                print(f"  attempt {attempt} 失敗 ({result.get('error', 'unknown')}), {UPLOAD_RETRY_SLEEP_SEC}s 待機して retry")
+                time.sleep(UPLOAD_RETRY_SLEEP_SEC)
     except Exception as e:
         result = {
             "success": False,
