@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import traceback
@@ -384,13 +385,23 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="スプシ書込なし、判定のみ")
     parser.add_argument("--sleep", type=float, default=DEFAULT_SLEEP_SEC,
                         help=f"1リクエストごとの sleep 秒 (default: {DEFAULT_SLEEP_SEC})")
+    # TEST スプシ向けの sheet ID 上書き (env var fallback)
+    parser.add_argument("--high-sheet-id", default=os.environ.get("INVENTORY_HIGH_SHEET_ID"),
+                        help="HIGH 用 spreadsheet ID 上書き (env: INVENTORY_HIGH_SHEET_ID)")
+    parser.add_argument("--low-sheet-id", default=os.environ.get("INVENTORY_LOW_SHEET_ID"),
+                        help="LOW 用 spreadsheet ID 上書き (env: INVENTORY_LOW_SHEET_ID)")
     args = parser.parse_args()
+
+    high_id = args.high_sheet_id or HIGH_SHEET_ID
+    low_id = args.low_sheet_id or LOW_SHEET_ID
+    if args.high_sheet_id or args.low_sheet_id:
+        log(f"  ⚠️ TEST モード: HIGH={high_id[:25]}... LOW={low_id[:25]}...")
 
     targets = []
     if args.sheet in ("high", "both"):
-        targets.append(("HIGH", HIGH_SHEET_ID))
+        targets.append(("HIGH", high_id))
     if args.sheet in ("low", "both"):
-        targets.append(("LOW", LOW_SHEET_ID))
+        targets.append(("LOW", low_id))
 
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0}
     for label, sid in targets:

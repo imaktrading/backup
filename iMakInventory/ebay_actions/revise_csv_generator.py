@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from datetime import datetime, date
 from pathlib import Path
@@ -163,6 +164,8 @@ def read_pending_queue() -> list:
 def collect_from_pending_queue(
     sheet_filter: str = "both",
     verify_against_sheet: bool = True,
+    high_sheet_id: Optional[str] = None,
+    low_sheet_id: Optional[str] = None,
 ) -> tuple[list, list]:
     """pending_revise.jsonl から取り下げ候補を収集.
 
@@ -170,6 +173,7 @@ def collect_from_pending_queue(
         sheet_filter: "high" / "low" / "both"
         verify_against_sheet: True の場合、スプシ側で D が依然 "○" の行のみ採用
                              (Phase 2 → Phase 3 間に手動取消された行を除外)
+        high_sheet_id / low_sheet_id: TEST スプシ等で本番 ID を上書き (None なら本番)
 
     Returns: (candidates, skipped_pending)
         candidates:      Phase 3 で取り下げる対象
@@ -179,14 +183,17 @@ def collect_from_pending_queue(
     if not queue:
         return [], []
 
+    h_id = high_sheet_id or HIGH_SHEET_ID
+    l_id = low_sheet_id or LOW_SHEET_ID
+
     # スプシ照合用に現状の D="○" 行を取得
     sheet_state: dict[tuple[str, int], dict] = {}
     if verify_against_sheet:
         targets = []
         if sheet_filter in ("high", "both"):
-            targets.append(("HIGH", HIGH_SHEET_ID))
+            targets.append(("HIGH", h_id))
         if sheet_filter in ("low", "both"):
-            targets.append(("LOW", LOW_SHEET_ID))
+            targets.append(("LOW", l_id))
         for label, sid in targets:
             try:
                 sold = collect_sold_listings(label, sid)
@@ -434,15 +441,22 @@ def run(
     max_per_run: int = DEFAULT_MAX_PER_RUN,
     force: bool = False,
     dry_run: bool = False,
+    high_sheet_id: Optional[str] = None,
+    low_sheet_id: Optional[str] = None,
 ) -> dict:
+    h_id = high_sheet_id or HIGH_SHEET_ID
+    l_id = low_sheet_id or LOW_SHEET_ID
+
     targets = []
     if sheet in ("high", "both"):
-        targets.append(("HIGH", HIGH_SHEET_ID))
+        targets.append(("HIGH", h_id))
     if sheet in ("low", "both"):
-        targets.append(("LOW", LOW_SHEET_ID))
+        targets.append(("LOW", l_id))
 
     print(f"=== Revise CSV 生成 (sheet={sheet}, mode={mode}, dry_run={dry_run}, "
           f"force={force}, max_per_run={max_per_run}) ===")
+    if high_sheet_id or low_sheet_id:
+        print(f"  ⚠️ TEST モード: HIGH={h_id[:25]}... LOW={l_id[:25]}...")
 
     candidates = []
     pending_skipped = []
@@ -450,6 +464,7 @@ def run(
         # Q2: Phase 2 で「今回新規〇付与した行のみ」キューから取る
         candidates, pending_skipped = collect_from_pending_queue(
             sheet_filter=sheet, verify_against_sheet=True,
+            high_sheet_id=h_id, low_sheet_id=l_id,
         )
         print(f"  pending queue から: {len(candidates)} 件 (skip {len(pending_skipped)} 件)")
     elif mode == "all":
@@ -544,6 +559,11 @@ def main():
                         help="per-run cap 超過時に manual approval 相当で強行")
     parser.add_argument("--dry-run", action="store_true",
                         help="CSV 出力なし、判定のみ")
+    # TEST スプシ向けの sheet ID 上書き (env var fallback)
+    parser.add_argument("--high-sheet-id", default=os.environ.get("INVENTORY_HIGH_SHEET_ID"),
+                        help="HIGH 用 spreadsheet ID 上書き (env: INVENTORY_HIGH_SHEET_ID)")
+    parser.add_argument("--low-sheet-id", default=os.environ.get("INVENTORY_LOW_SHEET_ID"),
+                        help="LOW 用 spreadsheet ID 上書き (env: INVENTORY_LOW_SHEET_ID)")
     args = parser.parse_args()
 
     result = run(
@@ -552,6 +572,8 @@ def main():
         max_per_run=args.max_per_run,
         force=args.force,
         dry_run=args.dry_run,
+        high_sheet_id=args.high_sheet_id,
+        low_sheet_id=args.low_sheet_id,
     )
     print()
     print(f"=== 結果 ===")
