@@ -1,4 +1,4 @@
-# register_test_task.ps1
+﻿# register_test_task.ps1
 #
 # iMakInventory_TEST タスクを Windows タスクスケジューラに登録 (5 分ごと)
 # - 動作確認用、本番タスク登録前に短サイクルで挙動 verify

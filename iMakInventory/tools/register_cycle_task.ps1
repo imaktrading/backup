@@ -1,4 +1,4 @@
-# register_cycle_task.ps1
+﻿# register_cycle_task.ps1
 #
 # iMakInventory_Cycle タスクを Windows タスクスケジューラに登録 (4 時間ごと)
 # 本番運用用、TEST タスクで動作確認 OK 後に登録すること。
