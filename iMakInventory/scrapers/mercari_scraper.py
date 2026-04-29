@@ -59,7 +59,7 @@ DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 TIMEOUT_404_CHECK_SEC = 10
-SELENIUM_WAIT_SEC = 12     # ハイドレーション完了待ちの最大秒数
+SELENIUM_WAIT_SEC = 30     # ハイドレーション完了待ちの最大秒数 (HTML 検体分析で 30s が安全側)
 SELENIUM_POLL_INTERVAL = 0.5
 
 CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakMercari\chrome_profile"
@@ -150,113 +150,142 @@ def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
 def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
     """driver に url を load し在庫状態を判定.
 
+    判定ロジック (2026-04-29 HTML 検体 21件 100% 正解で確定):
+      1) [data-testid="checkout-button-container"] が描画されるまで WebDriverWait
+         (max 30s; container は in_stock/sold 21/21 全件で出現する universal proxy)
+      2) container 内に [data-testid="checkout-button"] を探す
+         a) 不在 → SOLD (取引中 / view-transaction-button 派生)
+         b) 存在 + class に "disabled__" or name="disabled" → SOLD
+         c) 存在 + name="purchase" → IN_STOCK
+         d) 上記いずれにも該当せず → real_err (新パターン、安全側)
+      3) container が timeout までに描画されなければ → real_err (誤取下げ防止)
+
+    Shops 系 (`/shops/product/`):
+      `variant-purchase-button` testid 存在 → IN_STOCK / 不在 or disabled → SOLD
+
     Returns:
-        {"name", "status", "in_stock", "price_jpy"} or None (判定不能)
+        {"name", "status", "in_stock", "price_jpy"} or None (real_err 含む判定不能)
     """
     from selenium.webdriver.common.by import By  # noqa: PLC0415
     from selenium.webdriver.support.ui import WebDriverWait  # noqa: PLC0415
     from selenium.webdriver.support import expected_conditions as EC  # noqa: PLC0415
-    from selenium.common.exceptions import TimeoutException, WebDriverException  # noqa: PLC0415
+    from selenium.common.exceptions import (  # noqa: PLC0415
+        TimeoutException, WebDriverException, NoSuchElementException,
+    )
 
     try:
         driver.get(url)
     except WebDriverException:
         return None
 
-    # 在庫あり buy ボタンの testid (URL 種別ごと)
-    buy_button_testid = (
-        "variant-purchase-button" if is_shops else "checkout-button"
-    )
-
-    # ハイドレーション完了 = item-name (item ページ) or display-name (shops) が描画済
+    # name / price 取得用 testid 候補
     name_testid_candidates = ["item-name", "display-name", "name"]
-
-    # 売切判定基準 (2026-04-29 false-negative バグ修正で導入):
-    # checkout-button は売切ページでも DOM に残るため、ボタン要素を見つけた後
-    # 以下のいずれかで売切と判定する。
-    #   1. button text == "売り切れました"
-    #   2. class に "disabled" を含む (merButton の disabled スタイル)
-    #   3. name 属性 == "disabled"
-    # それ以外 (text="購入手続きへ" 等) は在庫あり判定。
-    SOLD_BUTTON_TEXTS = ("売り切れました", "売り切れ", "Sold")
-
-    def _is_sold_button(elem) -> Optional[bool]:
-        """buy ボタン要素を見て sold/in_stock/unknown を返す.
-        Returns: True=sold, False=in_stock, None=判定不能
-        """
-        try:
-            txt = (elem.text or "").strip()
-            cls = (elem.get_attribute("class") or "").lower()
-            name_attr = (elem.get_attribute("name") or "").lower()
-            disabled_attr = (elem.get_attribute("disabled") or "")
-            if txt in SOLD_BUTTON_TEXTS:
-                return True
-            if "disabled" in cls or name_attr == "disabled" or disabled_attr:
-                return True
-            # 在庫あり想定の text
-            if any(kw in txt for kw in ("購入手続きへ", "購入手続き", "Buy now", "カートに追加")):
-                return False
-            # text 取得できない / 未知パターン → 判定不能
-            return None
-        except Exception:
-            return None
 
     in_stock = None
     name = ""
     price_jpy = None
-    button_text = ""
-    button_class = ""
 
-    end_at = time.time() + SELENIUM_WAIT_SEC
-    while time.time() < end_at:
-        # buy ボタンを見つけたら状態判定
-        try:
-            elem = driver.find_element(By.CSS_SELECTOR, f'[data-testid="{buy_button_testid}"]')
-            button_text = (elem.text or "").strip()
-            button_class = (elem.get_attribute("class") or "")
-            judgement = _is_sold_button(elem)
-            if judgement is True:
-                in_stock = False
+    # ============================================================
+    # Shops 系: variant-purchase-button で簡易判定 (検体無し、暫定踏襲)
+    # ============================================================
+    if is_shops:
+        end_at = time.time() + SELENIUM_WAIT_SEC
+        while time.time() < end_at:
+            try:
+                btn = driver.find_element(By.CSS_SELECTOR, '[data-testid="variant-purchase-button"]')
+                cls = (btn.get_attribute("class") or "").lower()
+                if "disabled" in cls or btn.get_attribute("disabled"):
+                    in_stock = False
+                else:
+                    in_stock = True
                 break
-            if judgement is False:
-                in_stock = True
+            except NoSuchElementException:
+                pass
+            # 削除済 / 見つからないページ
+            try:
+                page_text = driver.find_element(By.TAG_NAME, "body").text or ""
+                if any(kw in page_text for kw in [
+                    "商品が見つかりません",
+                    "削除されました",
+                    "削除されています",     # 出品者による取下げ (該当する商品は削除されています)
+                    "該当する商品は",        # 上記の前置
+                    "ページが見つかりません",
+                    "Not Found",
+                ]):
+                    return {"name": "(deleted)", "status": "DELETED",
+                            "in_stock": False, "price_jpy": None}
+            except Exception:
+                pass
+            time.sleep(SELENIUM_POLL_INTERVAL)
+        if in_stock is None:
+            return None  # real_err
+    else:
+        # ============================================================
+        # 通常 /item/m... : checkout-button-container ベースの判定
+        # ポーリングで「container 出現」or「削除済 body text」のどちらかを早期検知
+        # ============================================================
+        DELETION_KEYWORDS = (
+            "商品が見つかりません",
+            "削除されました",
+            "削除されています",     # 出品者による取下げ (該当する商品は削除されています)
+            "該当する商品は",        # 上記の前置
+            "ページが見つかりません",
+            "Not Found",
+        )
+        container_found = False
+        deleted = False
+        end_at = time.time() + SELENIUM_WAIT_SEC
+        while time.time() < end_at:
+            try:
+                driver.find_element(By.CSS_SELECTOR, '[data-testid="checkout-button-container"]')
+                container_found = True
                 break
-            # judgement is None: ハイドレーション途中で text 未確定 → 続けてポーリング
-        except Exception:
-            pass
+            except NoSuchElementException:
+                pass
+            try:
+                page_text = driver.find_element(By.TAG_NAME, "body").text or ""
+                if any(kw in page_text for kw in DELETION_KEYWORDS):
+                    deleted = True
+                    break
+            except Exception:
+                pass
+            time.sleep(SELENIUM_POLL_INTERVAL)
 
-        # ページが「商品が見つかりません」「削除されました」等を表示しているか
-        try:
-            page_text = driver.find_element(By.TAG_NAME, "body").text or ""
-            if any(kw in page_text for kw in [
-                "商品が見つかりません",
-                "削除されました",
-                "ページが見つかりません",
-                "Not Found",
-            ]):
-                return {
-                    "name": "(deleted)",
-                    "status": "DELETED",
-                    "in_stock": False,
-                    "price_jpy": None,
-                }
-        except Exception:
-            pass
-
-        time.sleep(SELENIUM_POLL_INTERVAL)
-
-    if in_stock is None:
-        # buy ボタンが timeout 時間内に判定可能状態にならなかった
-        # 最終的に sold-out 文字列がページに表示されているかで決める
-        try:
-            page_text = driver.find_element(By.TAG_NAME, "body").text or ""
-            if any(kw in page_text for kw in ("売り切れました", "Sold")):
-                in_stock = False
-            else:
-                # ハイドレーション失敗等で何も判定できない → fail-closed (None)
-                return None
-        except Exception:
+        if deleted:
+            return {"name": "(deleted)", "status": "DELETED",
+                    "in_stock": False, "price_jpy": None}
+        if not container_found:
+            # container も deletion text も見つからない → real_err
             return None
+
+        # container 内の checkout-button を探索
+        try:
+            container = driver.find_element(
+                By.CSS_SELECTOR, '[data-testid="checkout-button-container"]'
+            )
+        except NoSuchElementException:
+            return None
+
+        try:
+            btn_div = container.find_element(
+                By.CSS_SELECTOR, '[data-testid="checkout-button"]'
+            )
+        except NoSuchElementException:
+            # checkout-button 不在 = 取引中 (view-transaction-button) など
+            # → SOLD (1/10 派生パターン、HTML 検体で確認)
+            in_stock = False
+            btn_div = None
+
+        if btn_div is not None:
+            cls = (btn_div.get_attribute("class") or "").lower()
+            name_attr = (btn_div.get_attribute("name") or "").lower()
+            if "disabled__" in cls or name_attr == "disabled":
+                in_stock = False
+            elif name_attr == "purchase":
+                in_stock = True
+            else:
+                # 新パターン → 安全側で real_err
+                return None
 
     # 商品名・価格抽出
     if not name:

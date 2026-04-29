@@ -1,30 +1,77 @@
 """mercari_scraper sold-detection regression test.
 
-2026-04-29 false-negative バグ修正の固定化:
-  - checkout-button は売切ページでも DOM に残る
-  - 修正前: testid 存在で in_stock 判定 → false negative 9 件発覚
-  - 修正後: button text "売り切れました" / disabled class / name=disabled
-           で売切判定する
+2026-04-29 HTML 検体 21 件分析 (in_stock 11 / sold 10) で確定した判定軸:
+  1) [data-testid="checkout-button-container"] が描画 (universal hydration proxy)
+  2) container 内の checkout-button 不在 → SOLD (取引中派生)
+  3) checkout-button div に disabled__ class or name="disabled" → SOLD
+  4) checkout-button div に name="purchase" → IN_STOCK
+  5) 新パターン → real_err (fail-closed)
 
-このテストは Live Mercari URL を叩く (ネットワーク必須)。
-通常 CI からは除外、運用前ローカル smoke 用。
+本テストは 2 種類:
+  - test_offline_html_*: 保存済 HTML 検体を regex 解析し判定軸の安定性を検証
+                        (pre-commit / CI で常時実行、ネット不要)
+  - test_live_known_sold_urls: Live Mercari URL を叩いて Selenium ロジックの動作確認
+                              (pytest -m live で明示的に実行、環境依存)
 """
 from __future__ import annotations
 
-import os
+import re
 import sys
-import time
 from pathlib import Path
+
+import pytest
 
 # parent path 確保 (iMakInventory ルート)
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scrapers.mercari_scraper import fetch_product_inventory, create_driver  # noqa: E402
+SAMPLES_DIR = ROOT / "debug" / "html_samples"
 
 
-# Takaaki さん目視確認: いずれも実際売切 (TEST_HIGH 9件)
+# ============================================================================
+# HTML 文字列ベースの判定 (offline pytest 用)
+# ============================================================================
+def _detect_from_html(html: str) -> tuple[str, str]:
+    """HTML 文字列から在庫状態を判定. Selenium ロジックと同じ判定軸。
+
+    Returns: (verdict, reason)
+      verdict: "IN_STOCK" / "SOLD" / "real_err"
+    """
+    if 'data-testid="checkout-button-container"' not in html:
+        return "real_err", "checkout-button-container not found"
+
+    m = re.search(r'<div\b([^>]*?)data-testid="checkout-button"([^>]*)>', html)
+    if not m:
+        return "SOLD", "checkout-button absent (transaction-in-progress 等)"
+
+    div_tag = m.group(0).lower()
+    if "disabled__" in div_tag:
+        return "SOLD", 'disabled__ class'
+    if 'name="disabled"' in div_tag:
+        return "SOLD", 'name="disabled"'
+    if 'name="purchase"' in div_tag:
+        return "IN_STOCK", 'name="purchase"'
+    return "real_err", "unknown checkout-button state"
+
+
+# ============================================================================
+# 検体定義
+# ============================================================================
+# 在庫あり 11 件 (HTML 検体収集済)
+IN_STOCK_ITEMS = [
+    "m13033508222", "m49383173561", "m82262228708", "m64819241726",
+    "m85731918507", "m64454009245", "m34502758783", "m41555692668",
+    "m27139398286", "m76741283035", "m12964510802",
+]
+# 在庫なし 10 件 (HTML 検体収集済)
+SOLD_ITEMS = [
+    "m96600846115", "m63571237049", "m63905828803", "m32993695536",
+    "m69015839424", "m59588662304", "m94867178401", "m42421532190",
+    "m95836277025", "m99325579898",
+]
+
+# Takaaki さん目視確認の Live URL (regression、live marker)
 KNOWN_SOLD_URLS = [
     ("row6",   "https://jp.mercari.com/item/m81334162487"),
     ("row85",  "https://jp.mercari.com/item/m89212781202"),
@@ -38,42 +85,59 @@ KNOWN_SOLD_URLS = [
 ]
 
 
-def main():
-    print(f"=== mercari_scraper sold-detection regression test ({len(KNOWN_SOLD_URLS)} URLs) ===")
-    driver = create_driver(headless=True)
-    failures = []
-    try:
-        for label, url in KNOWN_SOLD_URLS:
-            print(f"\n[{label}] {url}")
-            info = fetch_product_inventory(url, driver=driver, use_selenium_fallback=False)
-            if info is None:
-                print(f"  ⚠️ scraper returned None (fail-closed)")
-                failures.append((label, "None", url))
-                continue
-            sku = info["skus"][0]
-            in_stock = sku["in_stock"]
-            print(f"  status={info['status']:>10}  in_stock={in_stock}  name='{info['name'][:40]}'")
-            # 期待: in_stock=False (= sold)
-            if in_stock:
-                print(f"  ❌ FAIL: 売切のはずが in_stock=True 判定 (false negative)")
-                failures.append((label, "false_negative", url))
-            else:
-                print(f"  ✅ OK: 正しく sold 判定")
-    finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
-
-    print()
-    print(f"=== 結果: {len(KNOWN_SOLD_URLS) - len(failures)}/{len(KNOWN_SOLD_URLS)} passed ===")
-    if failures:
-        print("失敗:")
-        for label, reason, url in failures:
-            print(f"  [{label}] {reason}: {url}")
-        sys.exit(1)
-    print("✅ 全件 sold 検出に成功 (false-negative バグ解消)")
+# ============================================================================
+# Offline tests (pytest, no network)
+# ============================================================================
+@pytest.fixture(scope="module")
+def samples_available():
+    """検体 HTML が存在するか確認 (debug/html_samples/)。
+    存在しない環境では skip して、Live test 環境差を吸収する。
+    """
+    if not SAMPLES_DIR.exists():
+        pytest.skip(f"HTML samples not found at {SAMPLES_DIR}")
+    return SAMPLES_DIR
 
 
+@pytest.mark.parametrize("item_id", IN_STOCK_ITEMS)
+def test_offline_html_in_stock(samples_available, item_id):
+    """検体 HTML 11 件: 在庫あり判定が IN_STOCK か."""
+    path = samples_available / f"in_stock_{item_id}.html"
+    if not path.exists():
+        pytest.skip(f"sample missing: {path.name}")
+    html = path.read_text(encoding="utf-8", errors="replace")
+    verdict, reason = _detect_from_html(html)
+    assert verdict == "IN_STOCK", f"{item_id}: got {verdict} ({reason})"
+
+
+@pytest.mark.parametrize("item_id", SOLD_ITEMS)
+def test_offline_html_sold(samples_available, item_id):
+    """検体 HTML 10 件: 売切判定が SOLD か."""
+    path = samples_available / f"sold_{item_id}.html"
+    if not path.exists():
+        pytest.skip(f"sample missing: {path.name}")
+    html = path.read_text(encoding="utf-8", errors="replace")
+    verdict, reason = _detect_from_html(html)
+    assert verdict == "SOLD", f"{item_id}: got {verdict} ({reason})"
+
+
+# ============================================================================
+# Live tests (pytest -m live、ネット必須、時間がかかる)
+# ============================================================================
+@pytest.mark.live
+@pytest.mark.parametrize("label,url", KNOWN_SOLD_URLS)
+def test_live_known_sold_urls(label, url):
+    """Live Mercari URL: Takaaki さん目視確認の 9 件で SOLD 検出か."""
+    from scrapers.mercari_scraper import fetch_product_inventory  # noqa: PLC0415
+    info = fetch_product_inventory(url, use_selenium_fallback=True)
+    assert info is not None, f"{label}: scraper returned None"
+    assert info["skus"][0]["in_stock"] is False, (
+        f"{label}: false negative (scraper says in_stock=True for known-sold URL)"
+    )
+
+
+# ============================================================================
+# CLI (旧 script 互換)
+# ============================================================================
 if __name__ == "__main__":
-    main()
+    # pytest に委譲
+    sys.exit(pytest.main([__file__, "-v"]))
