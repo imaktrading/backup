@@ -35,10 +35,16 @@ def test_jr_suffix_stripping():
     assert "DW-5600BB-1" in cands
 
 
-def test_no_suffix_returns_single_candidate():
-    """suffix なし型番は1候補のみ (重複排除)."""
+def test_no_suffix_returns_input_plus_suffix_variants():
+    """suffix なし型番は元値 + JF/JR 付加版を含む (2026-04-29 Phase 3-D で挙動変更).
+
+    旧仕様 (Phase 3-A) では 1 候補のみだったが、catalog hit 率向上のため
+    JF/JR 付加版も候補に含めるよう変更.
+    """
     cands = _generate_candidates("GA-2100-1A1")
-    assert cands == ["GA-2100-1A1"]
+    assert "GA-2100-1A1" in cands
+    assert "GA-2100-1A1JF" in cands
+    assert "GA-2100-1A1JR" in cands
 
 
 def test_lowercase_to_uppercase():
@@ -85,6 +91,29 @@ def test_candidates_no_duplicates():
     assert len(cands) == len(set(cands))
 
 
+def test_jf_jr_suffix_appending():
+    """suffix 無し入力で 'XXJF' / 'XXJR' 付加候補が出る (2026-04-29 Phase 3-D 追加).
+
+    背景: catalog は scrape_casio が body から検出した JF/JR 付き型番で保存する傾向.
+    例: gshock_urls.txt URL 'product.GM-5600YRA-8/' は GM-5600YRA-8 抽出 → catalog 内
+    'GM-5600YRA-8JF' を hit させる必要がある.
+    """
+    cands = _generate_candidates("GM-5600YRA-8")
+    # 元値も残る
+    assert "GM-5600YRA-8" in cands
+    # 付加版 (catalog hit に必要)
+    assert "GM-5600YRA-8JF" in cands
+    assert "GM-5600YRA-8JR" in cands
+
+
+def test_jf_jr_append_skipped_if_already_has_suffix():
+    """既に JF/JR が付いている入力は 付加版を生成しない (二重付加防止)."""
+    cands = _generate_candidates("GA-2100-1A1JF")
+    # 二重付加されていないこと
+    assert "GA-2100-1A1JFJF" not in cands
+    assert "GA-2100-1A1JFJR" not in cands
+
+
 # ============================================================================
 # lookup_gshock smoke tests (DB 未投入時の挙動)
 # ============================================================================
@@ -119,7 +148,7 @@ if __name__ == "__main__":
     cases = [
         ("JF suffix stripping",            test_jf_suffix_stripping),
         ("JR suffix stripping",            test_jr_suffix_stripping),
-        ("no suffix → 1 candidate",        test_no_suffix_returns_single_candidate),
+        ("no suffix → input + JF/JR suffix variants", test_no_suffix_returns_input_plus_suffix_variants),
         ("lowercase → uppercase",          test_lowercase_to_uppercase),
         ("missing prefix hyphen",          test_missing_prefix_hyphen),
         ("existing hyphens preserved",     test_existing_hyphens_not_destroyed),
@@ -127,6 +156,8 @@ if __name__ == "__main__":
         ("whitespace stripped",            test_whitespace_input_stripped),
         ("4-letter prefix",                test_long_prefix_4_letters),
         ("no duplicates",                  test_candidates_no_duplicates),
+        ("JF/JR suffix appending",         test_jf_jr_suffix_appending),
+        ("no double-append for existing JF", test_jf_jr_append_skipped_if_already_has_suffix),
         ("unknown model → None",           test_lookup_returns_none_for_unknown_model),
         ("empty input lookup → None",      test_lookup_returns_none_for_empty_input),
         ("special chars safety",           test_lookup_does_not_crash_on_special_chars),

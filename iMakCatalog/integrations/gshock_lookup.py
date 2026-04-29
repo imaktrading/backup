@@ -63,6 +63,7 @@ def _generate_candidates(model: str) -> list[str]:
       3. JF/JR suffix を剥がしたもの (大文字化済)
       4. ハイフン無し → 'PREFIX-NUM' 形式に補正したもの
       5. 4 + JF/JR 剥がし
+      6. JF/JR 付加 (suffix 無し入力で catalog 'XXX-YYJF' に hit させる)
 
     順序保持 + 重複除去.
     """
@@ -92,6 +93,15 @@ def _generate_candidates(model: str) -> list[str]:
     # 5. formatted の JF/JR 剥がし
     formatted_base = re.sub(r"(?:JF|JR)$", "", formatted)
     _add(formatted_base)
+    # 6. JF/JR 付加 (catalog 側は scrape_casio が body から検出した JF/JR 付きで保存される
+    #    傾向あり、入力に suffix が無い時は "JF"/"JR" 付加版でも試行する).
+    #    例: 入力 'GM-5600YRA-8' で catalog 'GM-5600YRA-8JF' を hit させる.
+    if not re.search(r"(?:JF|JR)$", upper):
+        _add(upper + "JF")
+        _add(upper + "JR")
+    if formatted != upper and not re.search(r"(?:JF|JR)$", formatted):
+        _add(formatted + "JF")
+        _add(formatted + "JR")
 
     return candidates
 
