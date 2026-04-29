@@ -29,6 +29,11 @@ SOLD_HTML_FILES = [
     "row654_8fc43d3d656fd1824e30d3f948d497a8.html",
 ]
 
+# SOLD-page-exists: 200 OK だが soldout-section が描画される (売却済だが page 残存)
+SOLD_PAGE_EXISTS_FILES = [
+    "sold_page_exists_d0431634.html",  # row 664
+]
+
 IN_STOCK_HTML_FILES = [
     "row655_a194e9a0b640de89bfce4edf25943eb4.html",
     "row656_b7f9424846abfb16f4e0dc1ff53d8a9a.html",
@@ -49,7 +54,7 @@ def samples_available():
 
 @pytest.mark.parametrize("filename", SOLD_HTML_FILES)
 def test_offline_fril_sold(samples_available, filename):
-    """検体 3 件 (404 page): SOLD 判定."""
+    """検体 3 件 (404 page): SOLD 判定 reason=deleted_page."""
     from scrapers.fril_scraper import _detect_stock  # noqa: PLC0415
     path = samples_available / filename
     if not path.exists():
@@ -60,6 +65,19 @@ def test_offline_fril_sold(samples_available, filename):
         f"{filename}: detection returned ({verdict}, {reason}), expected False (SOLD/DELETED)."
     )
     assert reason == "deleted_page"
+
+
+@pytest.mark.parametrize("filename", SOLD_PAGE_EXISTS_FILES)
+def test_offline_fril_sold_page_exists(samples_available, filename):
+    """SOLD-page-exists 検体: page 200 OK だが soldout-section あり → SOLD."""
+    from scrapers.fril_scraper import _detect_stock  # noqa: PLC0415
+    path = samples_available / filename
+    if not path.exists():
+        pytest.skip(f"sample missing: {path.name}")
+    html = path.read_text(encoding="utf-8", errors="replace")
+    verdict, reason = _detect_stock(html)
+    assert verdict is False
+    assert reason == "sold_page_exists"
 
 
 @pytest.mark.parametrize("filename", IN_STOCK_HTML_FILES)
@@ -79,9 +97,10 @@ def test_offline_fril_in_stock(samples_available, filename):
 
 def test_fril_constants_present():
     """新ロジックの判定軸定数が module に存在することを担保."""
-    from scrapers.fril_scraper import DELETED_PHRASE, IN_STOCK_PHRASE
+    from scrapers.fril_scraper import DELETED_PHRASE, IN_STOCK_PHRASE, SOLD_SECTION_PATTERN
     assert DELETED_PHRASE == "お探しのページは見つかりませんでした"
     assert IN_STOCK_PHRASE == "購入に進む"
+    assert SOLD_SECTION_PATTERN == 'class="soldout-section"'
 
 
 if __name__ == "__main__":

@@ -1,17 +1,25 @@
 """fril_scraper - Rakuten Fril (ラクマ旧サイト item.fril.jp) 在庫スクレイパー.
 
-判定軸 (2026-04-30 検体差分で確定、TEST_LOW row 652-661 全 10 件 100% 正解):
-  1. body text に「お探しのページは見つかりませんでした」 → DELETED (404 page)
-  2. body text に「購入に進む」 → IN_STOCK
-  3. 上記いずれにも該当せず → 判定不能 (None, fail-closed)
+判定軸 (2026-04-30 検体差分で確定、TEST_LOW row 652-685 計 33 件で検証):
+  1. class="soldout-section" 存在 → SOLD (page exists で売却済 / 商品保留)
+  2. body text に「お探しのページは見つかりませんでした」 → SOLD/DELETED (404 page)
+  3. body text に「購入に進む」 → IN_STOCK
+  4. 上記いずれにも該当せず → 判定不能 (None, fail-closed)
 
-Mercari と異なり Fril は data-testid を使っていない (旧式 SSR HTML)。
-判定は body text の固定フレーズで行う (i18n bundle 混入リスク低い、サーバー
-側 render の主要本文に登場するため stable)。
+Fril の SOLD には 2 ステート存在:
+  - **DELETED** (出品取下げ済): 404 page に redirect、80KB
+  - **SOLD-page-exists** (売却済だが page 残存): 200 OK、商品 page に
+    `<section class="soldout-section">` と `<div class="photo-box__soldout_ribbon">SOLD OUT</div>`
+    overlay。「購入に進む」 button 不在。
 
-検出パターンの差 (10 件検体):
-  - sold/deleted (3/3): 80KB の 404 ページ、「見つかりませんでした」=1, 「購入に進む」=0
-  - in_stock   (7/7): 220KB の商品詳細、「購入に進む」=1, 「見つかりませんでした」=0
+Mercari と異なり Fril は data-testid を使わない (旧式 SSR HTML)。
+判定は body text の固定フレーズ + class セレクタで行う。
+
+検体検証実績:
+  - DELETED   3/3 (row 652/653/654)
+  - SOLD-page-exists 1+ (row 664/673/674、検体 1 件保存)
+  - IN_STOCK  7/7 (row 655-661)
+  - in_stock 10件 (row 675-685) — 全件 buy_button で正解
 
 返却形式 (uniqlo_scraper と契約互換):
   {"name", "product_id", "color", "status", "fetched_at", "skus": [...]}
@@ -42,9 +50,12 @@ DEFAULT_HEADERS = {
 }
 TIMEOUT_SEC = 25
 
-# 判定軸 (検体 10 件で確定、100% 正解)
+# 判定軸 (検体検証で確定)
 DELETED_PHRASE = "お探しのページは見つかりませんでした"
 IN_STOCK_PHRASE = "購入に進む"
+# SOLD-page-exists (売却済だが商品 page 残存) のシグナル
+# class="soldout-section" は商品本体の wrapper、recommend widget には出ない
+SOLD_SECTION_PATTERN = 'class="soldout-section"'
 
 
 # ============================================================================
@@ -63,7 +74,15 @@ def parse_product_id(url: str) -> Optional[str]:
 def _detect_stock(html: str) -> tuple[Optional[bool], str]:
     """HTML から在庫状態を判定. Returns: (verdict, reason)
         verdict: True=IN_STOCK / False=SOLD/DELETED / None=判定不能 (fail-closed)
+
+    判定優先順位:
+      1. soldout-section: SOLD-page-exists 確定 (specific marker)
+      2. deleted_page:    404 redirect 確定
+      3. buy_button:      IN_STOCK 確定
+      4. その他:          判定不能 (None)
     """
+    if SOLD_SECTION_PATTERN in html:
+        return False, "sold_page_exists"
     if DELETED_PHRASE in html:
         return False, "deleted_page"
     if IN_STOCK_PHRASE in html:
@@ -150,9 +169,15 @@ def fetch_product_inventory(
         return None
 
     in_stock = bool(raw.get("in_stock", False))
-    status = "DELETED" if raw.get("_reason") in ("deleted_page", "http_404") else (
-        "IN_STOCK" if in_stock else "SOLD_OUT"
-    )
+    reason = raw.get("_reason", "")
+    if reason in ("deleted_page", "http_404"):
+        status = "DELETED"
+    elif reason == "sold_page_exists":
+        status = "SOLD_OUT"
+    elif in_stock:
+        status = "IN_STOCK"
+    else:
+        status = "UNKNOWN"
 
     return {
         "name": raw.get("name", ""),
