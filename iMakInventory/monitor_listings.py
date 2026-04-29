@@ -60,6 +60,7 @@ from sheet_updater import (  # noqa: E402
 from scrapers.mercari_scraper import fetch_product_inventory as fetch_mercari  # noqa: E402
 from scrapers.mercari_scraper import create_driver as create_mercari_driver  # noqa: E402
 from scrapers.amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
+from scrapers.amazon_scraper import create_amazon_driver  # noqa: E402
 
 LOG_DIR = SCRIPT_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -95,7 +96,7 @@ def _domain_of(url: str) -> str:
 # 1 行 (1 listing) の在庫チェック
 # ============================================================================
 def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
-                  mercari_driver=None) -> dict:
+                  mercari_driver=None, amazon_driver=None) -> dict:
     """1 listing 行の在庫状況を取得し判定結果を返す.
 
     Args:
@@ -130,7 +131,10 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
             return result
     elif supplier == "amazon":
         try:
-            info = fetch_amazon(url, use_selenium_fallback=False)
+            # Selenium fallback 有効: unqualifiedBuyBox 検出時に login profile で
+            # personalized buy box (Featured Offer) を再評価する。
+            # amazon_driver が None なら fallback path で都度 driver 起動 (遅い)。
+            info = fetch_amazon(url, driver=amazon_driver, use_selenium_fallback=True)
         except Exception as e:
             result["error"] = f"{type(e).__name__}: {e}"
             return result
@@ -265,12 +269,27 @@ def process_sheet(
             log("     → 各 row で都度 driver 生成に fallback (遅い)")
             mercari_driver = None
 
+    # Amazon URL がある場合は login 済 profile で driver を 1 つ生成 (Selenium fallback 用)
+    amazon_driver = None
+    needs_amazon = by_sup.get("amazon", 0) > 0
+    if needs_amazon:
+        log("  Amazon driver 起動中 (login profile)...")
+        try:
+            amazon_driver = create_amazon_driver(headless=True, use_login_profile=True)
+            log("  ✅ Amazon driver 起動完了 (login profile 再利用)")
+        except Exception as e:
+            log(f"  ⚠️ Amazon driver 起動失敗: {type(e).__name__}: {e}")
+            log("     → unqualifiedBuyBox 検出時の Selenium 再判定が無効")
+            amazon_driver = None
+
     results = []
     consec_failures = 0
     for i, row in enumerate(rows, start=1):
         prefix = f"  [{i}/{len(rows)}] row{row['row_index']:>4} "
         try:
-            res = check_one_row(row, sleep_sec=sleep_sec, mercari_driver=mercari_driver)
+            res = check_one_row(row, sleep_sec=sleep_sec,
+                                mercari_driver=mercari_driver,
+                                amazon_driver=amazon_driver)
         except Exception as e:
             res = {
                 "row_index": row["row_index"],
@@ -316,10 +335,15 @@ def process_sheet(
             log(f"  ❌ 連続失敗 {MAX_CONSEC_FAILURES} 件 → abort (anti-bot block 疑い)")
             break
 
-    # Mercari driver 後始末
+    # driver 後始末
     if mercari_driver is not None:
         try:
             mercari_driver.quit()
+        except Exception:
+            pass
+    if amazon_driver is not None:
+        try:
+            amazon_driver.quit()
         except Exception:
             pass
 

@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -54,9 +55,15 @@ PRICE_RE = re.compile(r"￥\s*([\d,]+)|¥\s*([\d,]+)")
 CART_BUTTON_PATTERN = 'id="add-to-cart-button"'
 OUT_OF_STOCK_DIV_PATTERN = 'id="outOfStock"'
 # Amazon が「おすすめ出品の要件を満たす出品はありません」状態で render する div。
-# 直販なし、3rd party seller も Featured Offer 不適格 → eBay 取り下げ判定 で SOLD 扱いが安全側。
-# 2026-04-30 TEST_LOW row 116/120 で発見、検体差分で判定軸確立。
+# 注意: ログイン状態 / Prime / 配送先 等で Featured Offer 表示が変わる (personalized buy box)。
+# 未ログインの requests / 新規 chrome profile では Featured Offer なし扱い → unqualifiedBuyBox 表示。
+# でもログインユーザーには Featured Offer が見えるケースあり (row 648/649 で発覚)。
+# → unqualifiedBuyBox 検出時は Selenium + Amazon ログイン profile で再判定する 2-stage 方式。
 UNQUALIFIED_BUYBOX_PATTERN = 'id="unqualifiedBuyBox_feature_div"'
+
+# Amazon ログイン用 Chrome profile (Mercari profile と分離、Takaaki さんが手動 login)
+EBAY_AMAZON_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_amazon"
+CHROME_VERSION_MAIN = 146
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -84,35 +91,20 @@ def parse_asin(url: str) -> Optional[str]:
 # ============================================================================
 # 在庫判定 (HTML body 解析)
 # ============================================================================
-def _detect_stock(html: str) -> Optional[bool]:
+def _detect_stock(html: str) -> tuple[Optional[bool], str]:
     """HTML から在庫状態を判定.
 
-    判定軸 (検体差分で確定):
-      1. id="add-to-cart-button" 存在 → IN_STOCK (確実、Amazon が IN_STOCK 商品にだけ render)
-      2. id="outOfStock" 存在 → SOLD (Amazon が取扱なし商品に render する div)
-      3. id="unqualifiedBuyBox_feature_div" 存在 → SOLD (おすすめ出品なし状態、
-         直販なし + 3rd party Featured Offer 不適格 = 実質購入不可)
-      4. どれも無し → 判定不能 (fail-closed = None、誤取下げ防止)
-
-    Note: HTML 全体に「在庫切れ」「現在お取り扱いできません」キーワードが
-    hidden widget (related items / variation placeholder 等) に含まれる
-    ため、旧コードの grep ベース判定は false positive 多発 (12/12 検証で発覚)。
-
     Returns:
-        True  : 在庫あり
-        False : 在庫切れ / 取扱なし / おすすめ出品なし
-        None  : 判定不能 (新パターン or anti-bot)
+        (verdict, reason) — verdict は True/False/None、reason は判定根拠
     """
-    # IN_STOCK 直接シグナル (最優先、構造的に確実)
     if CART_BUTTON_PATTERN in html:
-        return True
-    # SOLD 直接シグナル (2 種類)
+        return True, "cart_button"
     if OUT_OF_STOCK_DIV_PATTERN in html:
-        return False
+        return False, "outOfStock"
     if UNQUALIFIED_BUYBOX_PATTERN in html:
-        return False
-    # 既知パターンに合致せず → 判定不能
-    return None
+        # personalized buy box の可能性あり → 呼出元で Selenium 再判定推奨
+        return False, "unqualifiedBuyBox"
+    return None, "no_signal"
 
 
 def _extract_name(html: str) -> str:
@@ -169,7 +161,7 @@ def _fetch_via_requests(url: str) -> Optional[dict]:
     if "Type the characters" in html or "captcha" in html.lower()[:5000]:
         return None  # bot 検知 → fallback to Selenium
 
-    in_stock = _detect_stock(html)
+    in_stock, reason = _detect_stock(html)
     if in_stock is None:
         return None  # 判定不能 → fallback to Selenium
 
@@ -177,14 +169,20 @@ def _fetch_via_requests(url: str) -> Optional[dict]:
         "name": _extract_name(html),
         "in_stock": in_stock,
         "price_jpy": _extract_price_jpy(html),
+        "_reason": reason,
     }
 
 
 # ============================================================================
-# 二次方式: Selenium fallback
+# Driver factory + Selenium fallback
 # ============================================================================
-def _fetch_via_selenium(url: str, headless: bool = False) -> Optional[dict]:
-    """Selenium (undetected_chromedriver) で取得 (anti-bot 強化時用)."""
+def create_amazon_driver(headless: bool = True, use_login_profile: bool = True):
+    """Amazon 用 Chrome driver. Takaaki さんが手動 login したプロファイルを使用.
+
+    Args:
+        headless:           True で headless mode (cron 用)
+        use_login_profile:  True で永続 profile (cookie 持越)
+    """
     try:
         import undetected_chromedriver as uc  # noqa: PLC0415
     except ImportError:
@@ -195,26 +193,89 @@ def _fetch_via_selenium(url: str, headless: bool = False) -> Optional[dict]:
 
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=ja-JP")
+    options.add_argument("--start-maximized")
+    if use_login_profile:
+        os.makedirs(EBAY_AMAZON_PROFILE_DIR, exist_ok=True)
+        options.add_argument(f"--user-data-dir={EBAY_AMAZON_PROFILE_DIR}")
     if headless:
         options.add_argument("--headless=new")
 
-    driver = uc.Chrome(options=options, version_main=146)
+    return uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
+
+
+def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optional[dict]:
+    """Selenium (undetected_chromedriver + Amazon login profile) で取得.
+
+    Args:
+        url: Amazon URL
+        driver: 外部から渡された driver (再利用、推奨)。None なら内部で生成
+        headless: driver=None 時の起動モード
+    """
+    own_driver = False
+    if driver is None:
+        driver = create_amazon_driver(headless=headless)
+        own_driver = True
     try:
         driver.get(url)
         time.sleep(5)
         html = driver.page_source
     finally:
-        driver.quit()
+        if own_driver:
+            try: driver.quit()
+            except Exception: pass
 
-    in_stock = _detect_stock(html)
+    in_stock, reason = _detect_stock(html)
     if in_stock is None:
         return None
     return {
         "name": _extract_name(html),
         "in_stock": in_stock,
         "price_jpy": _extract_price_jpy(html),
+        "_reason": reason,
     }
+
+
+# ============================================================================
+# 手動 Amazon login (--login subcommand)
+# ============================================================================
+def manual_login(headless: bool = False) -> bool:
+    """ブラウザを開いてユーザーが手動で Amazon login → cookie 永続化 → 動作確認."""
+    print("=" * 60)
+    print("Amazon 手動ログイン (Featured Offer personalization 用)")
+    print("=" * 60)
+    print("ブラウザが開きます。以下の手順でログインしてください:")
+    print("  1. 開いたブラウザで Amazon.co.jp にログイン (2FA も含む)")
+    print("  2. ログイン後、配送先住所が設定されていることを確認 (Prime 加入推奨)")
+    print("  3. このターミナルに戻る")
+    print("  4. Enter を押すと cookie が保存される (永続 profile)")
+    print()
+
+    driver = create_amazon_driver(headless=False, use_login_profile=True)
+    try:
+        driver.get("https://www.amazon.co.jp/")
+        time.sleep(3)
+        print("(ブラウザでログインを完了してから Enter を押してください...)")
+        try:
+            input(">>> Enter to continue: ")
+        except EOFError:
+            pass
+
+        # 簡易確認: トップページに hi <name> 系の greeting があるか
+        try:
+            page = driver.page_source.lower()
+            if "hi," in page or "こんにちは" in page or "/gp/your-account" in page:
+                print("✅ ログイン確認、cookie 保存完了 (永続 profile に記録)")
+                return True
+            else:
+                print("⚠️ ログイン確認できず。再度お試しください。")
+                return False
+        finally:
+            pass
+    finally:
+        try: driver.quit()
+        except Exception: pass
 
 
 # ============================================================================
@@ -222,23 +283,46 @@ def _fetch_via_selenium(url: str, headless: bool = False) -> Optional[dict]:
 # ============================================================================
 def fetch_product_inventory(
     url: str,
+    driver=None,
     use_selenium_fallback: bool = True,
 ) -> Optional[dict]:
     """Amazon.co.jp 商品 URL から在庫・価格情報を取得.
 
-    Args:
-        url: Amazon 商品 URL (例: https://www.amazon.co.jp/dp/B0XXXXXXXX)
-        use_selenium_fallback: requests 失敗時に Selenium fallback を使うか
+    判定戦略 (2026-04-30 personalized buy box 対応版):
+      1. requests で素早く判定:
+         - cart-button あり → IN_STOCK 確定 (高速 path)
+         - outOfStock div あり → SOLD 確定
+         - unqualifiedBuyBox あり → ★Selenium fallback で再判定 (login cookie で
+                                     personalized buy box が見える可能性)
+         - 何もなし / CAPTCHA → Selenium fallback
+      2. Selenium fallback (Amazon login profile 経由):
+         - 同じ判定軸を再評価
+         - cart-button があれば IN_STOCK
+         - outOfStock / unqualifiedBuyBox なら SOLD
+         - その他 → None (real_err)
 
-    Returns:
-        uniqlo_scraper と契約互換の dict、または None (取得不能・判定不能時)。
-        fail-closed 原則により、None の場合は呼出元で「自動取り下げ発動しない」。
+    Args:
+        url:                   Amazon 商品 URL
+        driver:                外部から渡された Selenium driver (再利用、推奨)
+        use_selenium_fallback: True で Selenium fallback 有効
     """
     asin = parse_asin(url) or ""
 
     raw = _fetch_via_requests(url)
-    if raw is None and use_selenium_fallback:
-        raw = _fetch_via_selenium(url)
+
+    # unqualifiedBuyBox 検出時 = personalized buy box が見えていない可能性
+    # → Selenium で login profile 経由で再取得
+    needs_selenium_recheck = (
+        raw is not None
+        and raw.get("in_stock") is False
+        and raw.get("_reason") == "unqualifiedBuyBox"
+    )
+
+    if (raw is None or needs_selenium_recheck) and use_selenium_fallback:
+        sel_raw = _fetch_via_selenium(url, driver=driver)
+        if sel_raw is not None:
+            raw = sel_raw
+
     if raw is None:
         return None
 
@@ -263,13 +347,17 @@ def fetch_product_inventory(
 # ============================================================================
 if __name__ == "__main__":
     import sys
+    if len(sys.argv) >= 2 and sys.argv[1] == "login":
+        ok = manual_login()
+        sys.exit(0 if ok else 1)
+
     test_url = (
         sys.argv[1]
         if len(sys.argv) > 1
         else "https://www.amazon.co.jp/dp/B0XXXXXXXX"  # ダミー、要差替
     )
     print(f"--- Amazon scrape: {test_url} ---")
-    info = fetch_product_inventory(test_url, use_selenium_fallback=False)
+    info = fetch_product_inventory(test_url)
     if info is None:
         print("  ⚠️ 取得不能 (None) — Selenium fallback を試すか URL を確認してください")
         sys.exit(1)

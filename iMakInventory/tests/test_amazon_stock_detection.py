@@ -57,26 +57,25 @@ def test_offline_amazon_in_stock(samples_available, filename):
     if not path.exists():
         pytest.skip(f"sample missing: {path.name}")
     html = path.read_text(encoding="utf-8", errors="replace")
-    result = _detect_stock(html)
-    assert result is True, (
-        f"{filename}: detection returned {result}, expected True (in_stock). "
-        f"Takaaki さん目視確認では全件「在庫あり」."
+    verdict, reason = _detect_stock(html)
+    assert verdict is True, (
+        f"{filename}: detection returned ({verdict}, {reason}), expected True (in_stock)."
     )
+    assert reason == "cart_button"
 
 
 @pytest.mark.parametrize("filename", NO_BUYBOX_SOLD_HTML_FILES)
-def test_offline_amazon_no_buybox_is_sold(samples_available, filename):
-    """unqualifiedBuyBox 検体: SOLD 判定 (購入不可シグナル)."""
+def test_offline_amazon_no_buybox_is_sold_via_unqualified(samples_available, filename):
+    """unqualifiedBuyBox 検体: 一次判定 SOLD ('unqualifiedBuyBox' reason).
+    実運用では Selenium fallback で再判定するが、_detect_stock 単体は False を返す。"""
     from scrapers.amazon_scraper import _detect_stock  # noqa: PLC0415
     path = samples_available / filename
     if not path.exists():
         pytest.skip(f"sample missing: {path.name}")
     html = path.read_text(encoding="utf-8", errors="replace")
-    result = _detect_stock(html)
-    assert result is False, (
-        f"{filename}: detection returned {result}, expected False (SOLD)。"
-        f"unqualifiedBuyBox = Amazon 直販なし + Featured Offer なし = 購入不可 → SOLD."
-    )
+    verdict, reason = _detect_stock(html)
+    assert verdict is False
+    assert reason == "unqualifiedBuyBox"
 
 
 def test_amazon_constants_present():

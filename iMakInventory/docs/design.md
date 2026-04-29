@@ -1,8 +1,41 @@
 # iMakInventory 設計書 (Phase 0 → Phase 1 着手版)
 
-最終更新: 2026-04-29 (Takaaki さん確定要件 + トラバホ Log.txt 解析反映)
+最終更新: 2026-04-30 (Amazon unqualifiedBuyBox 後日対応として仕様化)
 作成: HQ Claude
 状態: Phase 0 完了 → Phase 1 着手中
+
+---
+
+## 既知の未解決事項 (後日対応)
+
+### Amazon unqualifiedBuyBox 検出時の personalized buy box 問題 (2026-04-30 保留)
+
+**症状**: Amazon が `<div id="unqualifiedBuyBox_feature_div">` を render する商品で、Takaaki さんのブラウザでは Featured Offer (Amazon 直販) が見えるが、scraper では見えない。
+
+**原因**:
+- Amazon の Featured Offer は **personalized buy box** (login / Prime / 配送先 / 過去履歴で render が変わる)
+- scraper が見る server-side HTML は anonymous user view → unqualifiedBuyBox 表示
+- Selenium + login profile を試行したが、headless detection や cookie 認識問題で再現困難
+
+**現仕様 (確定)**: `unqualifiedBuyBox_feature_div` 検出 → **SOLD 扱い** (eBay 取下げ対象)
+- 過剰取下げ OK 原則 (グローバル CLAUDE.md「漏れ NG > 過剰 OK」) に整合
+- Takaaki さん観点で「Amazon に在庫あり (Featured Offer)」のケースも eBay 取下げる
+- 機会損失 (再出品で復旧可能) は受容
+
+**実装済 infrastructure (将来活用用、現在は no-op)**:
+- `scrapers/amazon_scraper.py:create_amazon_driver()` — login profile 用 driver factory
+- `scrapers/amazon_scraper.py:manual_login()` — `python -m scrapers.amazon_scraper login` で手動 login
+- `scrapers/amazon_scraper.py:_fetch_via_selenium(driver=)` — driver 再利用対応
+- `scrapers/amazon_scraper.py:fetch_product_inventory(driver=)` — unqualifiedBuyBox 検出時 Selenium fallback (cookie 認識できれば動く)
+- `monitor_listings.py:check_one_row(amazon_driver=)` — process_sheet で driver 1 つ生成して全行で再利用
+
+**後日対応の方向性候補**:
+1. **browser_cookie3** で実 Chrome (Takaaki さんの普段使用) の cookie を抽出 → requests に注入
+2. **headless detection 回避** の高度な anti-detect スクリプト注入
+3. **/gp/offer-listing/<ASIN>** 別取得で actual seller 数判定
+4. **Amazon PA-API** に切替 (アフィリ売上要件あり)
+
+判断: 着手は Phase 4 Live smoke 完了後 / 運用開始後の機会損失観察に基づく。
 
 ---
 
