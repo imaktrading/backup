@@ -121,3 +121,50 @@ python -m ebay_actions.sell_feed_uploader upload \
 - eBay 側 listing 358454087573 (UNIQLO ヒロアカ) の qty が 0 になる
 - decision_log/upload_*.jsonl に成否記録
 - 不具合あれば履歴ページから人手で復旧
+
+---
+
+## 2026-04-30 (続き) — Phase 4 Live smoke Step 2c (本番 upload 実行)
+
+### 決定
+
+Takaaki さん「Step 2c GO」を受けて本番 upload 実行 (item 358454087573 の qty=0 化)。
+
+### 実行結果 (success: true)
+
+```
+job: by7cwpvmc
+csv: csv_output/revise_smoke_step1_20260430_071008.csv (Revise,358454087573,0)
+
+upload attempt 1/3: 失敗 — "popup + history both inconclusive"
+                         (popup 出る前にタイムアウト、3s sleep)
+upload attempt 2/3: ✅ 成功
+  popup_text: "アップロード完了\nrevise_smoke_step1_20260430_071008.csv\n結果をダウンロード"
+  result_text: "popup: Download results link found"
+  page_url: https://www.ebay.com/sh/reports/uploads
+  success: true
+```
+
+### 検証
+
+- ✅ **3 回リトライ層が機能した実例**: attempt 1 失敗 → 3s sleep → attempt 2 成功
+- ✅ popup 監視が "ダウンロード" (Japanese) で hit (英語 "download results" にも対応)
+- ✅ decision_log: `decision_log/upload_20260430_073541.jsonl` に success: true 記録
+- ⏳ eBay 側反映確認 (qty=0): Takaaki さん管理画面で目視確認お願い
+  (公開 itemID URL は 403 Bot block のため scraper では確認不可)
+
+### NG 確認
+
+- ❌ Step 3 (qty=1 復活) 未実行 (Takaaki さん次の指示まで実行禁止)
+- ❌ 自動的に Step 3 進まない
+
+### 完了基準
+
+- ✅ decision_log success: true
+- ⏳ eBay 側 listing qty=0 反映 = Takaaki さん管理画面確認
+
+### Takaaki さん次のアクション
+
+1. eBay seller hub (`https://www.ebay.com/sh/lst/active`) で listing 358454087573 の qty 確認
+2. qty=0 反映済 → Step 2c 完了確定
+3. 復活希望なら Step 3 (qty=1 化) を別 CSV 生成 + 同じ仕組みで upload
