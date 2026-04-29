@@ -34,6 +34,13 @@ IN_STOCK_HTML_FILES = [
     "selenium_anello_B0D1C2146V.html",
 ]
 
+# unqualifiedBuyBox 検体 (TEST_LOW row 116/120 で発見、おすすめ出品なし状態)
+# Amazon 直販なし + 3rd party Featured Offer 不適格 → SOLD 扱い (購入経路なし)
+NO_BUYBOX_SOLD_HTML_FILES = [
+    "requests_no_buybox_B0CSP211SN.html",
+    "requests_no_buybox_B0CSP2V9DP.html",
+]
+
 
 @pytest.fixture(scope="module")
 def samples_available():
@@ -57,11 +64,29 @@ def test_offline_amazon_in_stock(samples_available, filename):
     )
 
 
+@pytest.mark.parametrize("filename", NO_BUYBOX_SOLD_HTML_FILES)
+def test_offline_amazon_no_buybox_is_sold(samples_available, filename):
+    """unqualifiedBuyBox 検体: SOLD 判定 (購入不可シグナル)."""
+    from scrapers.amazon_scraper import _detect_stock  # noqa: PLC0415
+    path = samples_available / filename
+    if not path.exists():
+        pytest.skip(f"sample missing: {path.name}")
+    html = path.read_text(encoding="utf-8", errors="replace")
+    result = _detect_stock(html)
+    assert result is False, (
+        f"{filename}: detection returned {result}, expected False (SOLD)。"
+        f"unqualifiedBuyBox = Amazon 直販なし + Featured Offer なし = 購入不可 → SOLD."
+    )
+
+
 def test_amazon_constants_present():
     """新ロジックの判定軸定数が module に存在することを担保."""
-    from scrapers.amazon_scraper import CART_BUTTON_PATTERN, OUT_OF_STOCK_DIV_PATTERN
+    from scrapers.amazon_scraper import (
+        CART_BUTTON_PATTERN, OUT_OF_STOCK_DIV_PATTERN, UNQUALIFIED_BUYBOX_PATTERN,
+    )
     assert CART_BUTTON_PATTERN == 'id="add-to-cart-button"'
     assert OUT_OF_STOCK_DIV_PATTERN == 'id="outOfStock"'
+    assert UNQUALIFIED_BUYBOX_PATTERN == 'id="unqualifiedBuyBox_feature_div"'
 
 
 if __name__ == "__main__":

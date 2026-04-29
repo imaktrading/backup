@@ -53,6 +53,10 @@ PRICE_RE = re.compile(r"￥\s*([\d,]+)|¥\s*([\d,]+)")
 # button を出さない。これが Amazon 自身の構造的シグナルで誤検出しない。
 CART_BUTTON_PATTERN = 'id="add-to-cart-button"'
 OUT_OF_STOCK_DIV_PATTERN = 'id="outOfStock"'
+# Amazon が「おすすめ出品の要件を満たす出品はありません」状態で render する div。
+# 直販なし、3rd party seller も Featured Offer 不適格 → eBay 取り下げ判定 で SOLD 扱いが安全側。
+# 2026-04-30 TEST_LOW row 116/120 で発見、検体差分で判定軸確立。
+UNQUALIFIED_BUYBOX_PATTERN = 'id="unqualifiedBuyBox_feature_div"'
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -86,7 +90,9 @@ def _detect_stock(html: str) -> Optional[bool]:
     判定軸 (検体差分で確定):
       1. id="add-to-cart-button" 存在 → IN_STOCK (確実、Amazon が IN_STOCK 商品にだけ render)
       2. id="outOfStock" 存在 → SOLD (Amazon が取扱なし商品に render する div)
-      3. どちらも無し → 判定不能 (fail-closed = None、誤取下げ防止)
+      3. id="unqualifiedBuyBox_feature_div" 存在 → SOLD (おすすめ出品なし状態、
+         直販なし + 3rd party Featured Offer 不適格 = 実質購入不可)
+      4. どれも無し → 判定不能 (fail-closed = None、誤取下げ防止)
 
     Note: HTML 全体に「在庫切れ」「現在お取り扱いできません」キーワードが
     hidden widget (related items / variation placeholder 等) に含まれる
@@ -94,14 +100,16 @@ def _detect_stock(html: str) -> Optional[bool]:
 
     Returns:
         True  : 在庫あり
-        False : 在庫切れ / 取扱なし
+        False : 在庫切れ / 取扱なし / おすすめ出品なし
         None  : 判定不能 (新パターン or anti-bot)
     """
     # IN_STOCK 直接シグナル (最優先、構造的に確実)
     if CART_BUTTON_PATTERN in html:
         return True
-    # SOLD 直接シグナル
+    # SOLD 直接シグナル (2 種類)
     if OUT_OF_STOCK_DIV_PATTERN in html:
+        return False
+    if UNQUALIFIED_BUYBOX_PATTERN in html:
         return False
     # 既知パターンに合致せず → 判定不能
     return None
