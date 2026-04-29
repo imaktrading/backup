@@ -7,20 +7,32 @@
   - **新規スクレイピング実装ゼロ** (オーケストレーションのみ)
   - 月次バッチで products テーブルに upsert
 
+Anti-bot resilience (Phase 3-D / 2026-04-29 追加):
+  CASIO 公式は Akamai EdgeSuite WAF で保護されており、
+  約 30-70 リクエストで 403 ブロックを発動する.
+  対応:
+    A. Series 先取り (Pass 1) — 全 6 series モデル一覧を tight burst で取得し、
+       戦略価値を最優先で確保 (block 発火しても model list は確保済)
+    B. Block 検出 + retry — body に "permission to access" / "edgesuite" 等を検出したら
+       cooldown 75 秒 + driver 再起動で session 切替を試みる
+    C. Pacing — series 間 / model 間に短い sleep を挿入し block 発火頻度を低減
+
 依存:
   - iMakG-shock/gshock_to_csv.py (scrape_casio, MODEL_OVERRIDES, SERIES_WEIGHT 等)
   - iMakG-shock/casio_finder/casio_finder.py (scrape_casio_series, check_new_flag, CASIO_SERIES_PAGES)
   - undetected_chromedriver (Selenium、heavy)
 
 実行:
-  python iMakCatalog/scrapers/gshock.py --update                   # 全シリーズ差分更新
-  python iMakCatalog/scrapers/gshock.py --series GA-2100           # 単独シリーズのみ
-  python iMakCatalog/scrapers/gshock.py --model GA-2100-1A1JF      # 単独モデルのみ (テスト用)
+  python iMakCatalog/scrapers/gshock.py --update                          # 全シリーズ
+  python iMakCatalog/scrapers/gshock.py --update-subset DW-6900,DW-5600   # 指定シリーズのみ
+  python iMakCatalog/scrapers/gshock.py --series GA-2100                  # 単独シリーズ (legacy)
+  python iMakCatalog/scrapers/gshock.py --model GA-2100-1A1JF             # 単独モデル (テスト用)
 """
 from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -45,34 +57,79 @@ CATEGORY = "gshock"
 SOURCE = "casio_official"
 PRODUCT_URL_TEMPLATE = "https://www.casio.com/jp/watches/gshock/product.{model}/"
 
+# Anti-bot block 検出シグナル (Akamai EdgeSuite / Cloudflare 等).
+# body 文字列内にこれらが含まれていたら block 判定.
+_BLOCK_SIGNALS = (
+    "permission to access",       # Akamai 403 メッセージ
+    "errors.edgesuite.net",       # Akamai 403 ページ URL
+    "Reference #",                # Akamai リファレンス ID 行
+    "Access Denied",              # 汎用
+    "Cloudflare",                 # Cloudflare チャレンジ
+)
+
+# Cooldown / pacing 秒数 (block 検出時の待機時間).
+_COOLDOWN_AFTER_BLOCK = 75
+_PACING_BETWEEN_SERIES = 3
+_PACING_BETWEEN_MODELS = 2
+
 
 # ============================================================================
 # 公開 API
 # ============================================================================
-def update_all_series(driver=None) -> int:
-    """全シリーズ差分更新 (月次バッチ想定).
+def update_all_series(driver=None, series_filter: Optional[set] = None) -> int:
+    """全シリーズ差分更新 (月次バッチ想定). 2-pass + anti-bot resilience.
+
+    Pass 1: 全 series のモデル一覧を tight burst で取得 (戦略価値の確保最優先)
+    Pass 2: 各 model の詳細スクレイプ + upsert
+
+    各段階で block 検出 → cooldown + driver 再起動で recovery.
 
     Args:
         driver: 既存 Selenium driver を渡せば使い回す. None なら本関数内で起動・終了.
+        series_filter: 指定シリーズのみ対象 (例: {"DW-6900", "DW-5600"}).
+                       None なら CASIO_SERIES_PAGES 全件.
 
     Returns:
         upsert 成功件数.
     """
-    from casio_finder import scrape_casio_series, CASIO_SERIES_PAGES  # type: ignore
+    from casio_finder import CASIO_SERIES_PAGES  # type: ignore
 
     own_driver = driver is None
     if own_driver:
         driver = _start_driver()
+
+    if series_filter:
+        pages = [(n, u) for n, u in CASIO_SERIES_PAGES if n in series_filter]
+    else:
+        pages = list(CASIO_SERIES_PAGES)
+
     try:
-        total = 0
         scrape_id = _scrape_log_start()
         try:
-            for series_name, series_url in CASIO_SERIES_PAGES:
-                print(f"\n=== {series_name}: シリーズ取得中 ===")
-                models = scrape_casio_series(driver, series_name, series_url)
+            # === Pass 1: 全 series モデル一覧取得 (tight burst) ===
+            print(f"\n=== Pass 1/2: series モデル一覧取得 ({len(pages)} series) ===")
+            series_models: dict[str, list[str]] = {}
+            for series_name, series_url in pages:
+                print(f"\n[{series_name}] series page get...")
+                models, driver = _safe_fetch_series_models(driver, series_name, series_url)
+                series_models[series_name] = models
+                print(f"  → {len(models)} 件取得")
+                time.sleep(_PACING_BETWEEN_SERIES)
+
+            # === Pass 2: 各 model の詳細スクレイプ + upsert ===
+            total = 0
+            n_total = sum(len(m) for m in series_models.values())
+            print(f"\n=== Pass 2/2: model 詳細スクレイプ ({n_total} models) ===")
+            for series_name, models in series_models.items():
+                if not models:
+                    continue
+                print(f"\n[{series_name}] {len(models)} models")
                 for model in models:
-                    if _upsert_one_model(driver, model, series_name):
+                    success, driver = _safe_upsert_model(driver, model, series_name)
+                    if success:
                         total += 1
+                    time.sleep(_PACING_BETWEEN_MODELS)
+
             _scrape_log_finish(scrape_id, status="success", products_added=total)
             print(f"\n=== 完了: {total} models upserted ===")
         except Exception as e:
@@ -82,7 +139,10 @@ def update_all_series(driver=None) -> int:
         return total
     finally:
         if own_driver:
-            driver.quit()
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
 
 def update_single_series(series_name: str, series_url: str, driver=None) -> int:
@@ -117,7 +177,130 @@ def update_single_model(model: str, series_name: str = "", driver=None) -> bool:
 
 
 # ============================================================================
-# 内部処理 — scrape + upsert
+# Anti-bot resilience helpers (Phase 3-D)
+# ============================================================================
+def _is_blocked(driver) -> bool:
+    """Akamai / Cloudflare 等の anti-bot ブロック検出.
+
+    block ページ特徴:
+      - "You don't have permission to access ..."
+      - "errors.edgesuite.net" (Akamai 403)
+      - "Reference #..." (Akamai ref ID)
+
+    body 取得失敗時 (driver 例外等) は False 返却 (block ではないと判断).
+    """
+    from selenium.webdriver.common.by import By  # type: ignore
+    try:
+        body = driver.find_element(By.TAG_NAME, "body").text or ""
+    except Exception:
+        return False
+    return any(sig in body for sig in _BLOCK_SIGNALS)
+
+
+def _restart_driver(old_driver):
+    """driver を破棄 → 5 秒待機 → 新規起動 (Akamai セッション切替を期待).
+
+    block 検出後の最終手段. cooldown だけでは block が解除されない場合に session を切る.
+    """
+    print(f"  🔄 driver 再起動 (Akamai セッション切替)...", flush=True)
+    try:
+        old_driver.quit()
+    except Exception:
+        pass
+    time.sleep(5)
+    return _start_driver()
+
+
+def _safe_fetch_series_models(driver, series_name: str, series_url: str,
+                               max_attempts: int = 3) -> tuple:
+    """series page → モデル一覧 (block 検出 + retry/再起動付き).
+
+    挙動:
+      attempt 1: 通常実行 → block 検出なら cooldown
+      attempt 2: 再実行 → block 解除されてなければ driver 再起動
+      attempt 3: 再実行 → ダメなら空リスト返却 + skip
+
+    Returns:
+        (models_list, current_driver) — driver は restart で入れ替わる可能性あり
+    """
+    from casio_finder import scrape_casio_series  # type: ignore
+
+    for attempt in range(1, max_attempts + 1):
+        models = scrape_casio_series(driver, series_name, series_url)
+        blocked = _is_blocked(driver)
+        if not blocked and len(models) > 0:
+            return models, driver  # success
+        # 失敗パス
+        if blocked:
+            print(f"  🚧 [{series_name}] anti-bot block (attempt {attempt}/{max_attempts})")
+        else:
+            print(f"  ⚠️ [{series_name}] 0 件取得 (block なし、JS 描画?) (attempt {attempt}/{max_attempts})")
+        if attempt < max_attempts:
+            if blocked:
+                print(f"     cooldown {_COOLDOWN_AFTER_BLOCK} 秒...", flush=True)
+                time.sleep(_COOLDOWN_AFTER_BLOCK)
+            else:
+                time.sleep(10)
+            if attempt >= 2:
+                # 2 回失敗で driver 再起動 (session 切替)
+                driver = _restart_driver(driver)
+    print(f"  ⚠️ [{series_name}] {max_attempts} 回試行後も失敗、skip.")
+    return [], driver
+
+
+def _safe_upsert_model(driver, model: str, series_name: str = "",
+                        max_attempts: int = 2) -> tuple:
+    """1 model upsert (block 検出 + retry/再起動付き).
+
+    Returns:
+        (success_bool, current_driver)
+    """
+    from gshock_to_csv import scrape_casio  # type: ignore
+    from casio_finder import check_new_flag  # type: ignore
+    import api  # type: ignore
+
+    product_url = PRODUCT_URL_TEMPLATE.format(model=model)
+    print(f"  {model}...", end="", flush=True)
+
+    for attempt in range(1, max_attempts + 1):
+        data = scrape_casio(driver, product_url)
+        blocked = _is_blocked(driver)
+        # 成功条件: data あり + block なし + case_size 取得済 (block ページは case_size 空)
+        if data and not blocked and data.get("case_size"):
+            is_new, is_limited, price_jpy = check_new_flag(driver, model)
+            specs = _build_specs(data, series_name, is_new, is_limited, price_jpy)
+            model_official = data.get("model_official") or model
+            api.upsert(
+                category=CATEGORY,
+                product_id=model_official,
+                name=f"Casio G-SHOCK {model_official}",
+                specs=specs,
+                images=[],
+                source=SOURCE,
+                source_url=product_url,
+            )
+            print(f" [{specs.get('case_size','?')} / "
+                  f"{'NEW' if is_new else '-'} / "
+                  f"{'限定' if is_limited else '-'}]")
+            return True, driver
+        # 失敗パス
+        if blocked:
+            print(f" 🚧 block (attempt {attempt}/{max_attempts})")
+        else:
+            print(f" empty (attempt {attempt}/{max_attempts})")
+        if attempt < max_attempts:
+            if blocked:
+                time.sleep(_COOLDOWN_AFTER_BLOCK)
+                # block 後は driver 再起動 (session 切替で解除狙い)
+                driver = _restart_driver(driver)
+            else:
+                time.sleep(10)
+    print(f"     skip {model} (recovery 失敗)")
+    return False, driver
+
+
+# ============================================================================
+# 内部処理 — scrape + upsert (legacy, update_single_series/model 経由用)
 # ============================================================================
 def _upsert_one_model(driver, model: str, series_name: str = "") -> bool:
     """1 モデル分: scrape_casio + check_new_flag + api.upsert."""
@@ -266,12 +449,19 @@ def _cli():
     if not args:
         print("Usage:")
         print("  python iMakCatalog/scrapers/gshock.py --update")
+        print("  python iMakCatalog/scrapers/gshock.py --update-subset DW-6900,DW-5600")
         print("  python iMakCatalog/scrapers/gshock.py --series GA-2100")
         print("  python iMakCatalog/scrapers/gshock.py --model GA-2100-1A1JF")
         sys.exit(1)
 
     if args[0] == "--update":
         update_all_series()
+    elif args[0] == "--update-subset" and len(args) >= 2:
+        names = {s.strip() for s in args[1].split(",") if s.strip()}
+        if not names:
+            print("⚠️ subset 名が空")
+            sys.exit(1)
+        update_all_series(series_filter=names)
     elif args[0] == "--series" and len(args) >= 2:
         from casio_finder import CASIO_SERIES_PAGES  # type: ignore
         target = args[1]
