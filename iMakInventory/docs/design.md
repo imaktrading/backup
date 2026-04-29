@@ -541,6 +541,7 @@ Phase 5: cron + 通知 + 統合                          ←半日
 | dedup | 同一 run 内の itemID 重複は除外 | HIGH/LOW 両方に同 itemID が出ている等 |
 | Q1 統一 | D="○" は ツール ○ / 人手 ○ 区別なし | スプシシンプル運用 |
 | Phase 3 範囲 | **片方向**: ○ → 取り下げ → 終了 | 復活フローは Phase 4+ で検討 |
+| **Q2 (2026-04-29 確定)** | mode=pending (default) で Phase 2 で「今回付与した行のみ」処理 | 既存〇 (手動 / 過去処理済) はキューに入らない → 二重取り下げ防止。緊急時は `--mode all` で全 D=○ 一括処理可 |
 
 **state ファイル**: `decision_log/revise_state.json`。日次カウントは記録のみ (運用追跡用)、cap 判定には使わない。
 
@@ -559,9 +560,52 @@ python -m ebay_actions.revise_csv_generator --sheet high --max-per-run 50  # cap
 - `--force` で override → 129 件 CSV 出力成功
 - `--max-per-run 200` (cap 余裕) → OK / 129 件 CSV 出力
 
-#### Phase 4: Selenium FileExchange Web UI 操作 (1-2日)
+#### Phase 4: Selenium FileExchange Web UI 操作 (✅ 完了 2026-04-29)
 
-§5.2-5.5 参照。
+[ebay_actions/sell_feed_uploader.py](../ebay_actions/sell_feed_uploader.py):
+
+**コマンド**:
+```bash
+python -m ebay_actions.sell_feed_uploader login                       # 初回手動ログイン
+python -m ebay_actions.sell_feed_uploader upload <csv> [--dry-run]    # 1件 upload
+python -m ebay_actions.sell_feed_uploader queue [--dry-run]           # csv_output/ 順次処理
+```
+
+**実装ポイント**:
+- ChromeDriver: `undetected_chromedriver` + 永続プロファイル `C:\Users\imax2\local_data\iMakInventory\chrome_profile_ebay` (Mercari と分離)
+- ログイン: `--login` で手動 → cookie 自動保存 → 以降自動ログイン
+- ログイン状態判定: `https://www.ebay.com/myb/Summary` 遷移後の URL を見る (signin/captcha/fyplogin にリダイレクトされたら未ログイン)
+- セッション切れ検知: FileExchange URL 遷移後の URL に `signin.ebay.com` / `splashui/captcha` (Akamai) / `fyplogin` を含む → `session_expired`
+- アップロード: `<input type="file">` に CSV パス送信 → `<input type="submit">` クリック → 成功/失敗キーワード or `FileExchangeResults` URL 検知
+- ポップアップ対応: `driver.switch_to.alert` で popup_text 取得
+- dry-run mode: ファイル選択まで OK、Submit せず
+
+**安全装置**:
+- 二重 upload 防止: `decision_log/upload_state.json` に成功 CSV を記録、`queue` モードで自動 skip
+- スクリーンショット: file input が見つからない等の構造変更時は `decision_log/upload_failure_<ts>.png` 保存
+- session_expired 自動再 login: `manual_login()` 呼出で再ログイン (1 回まで)
+
+**smoke test 結果 (構造レベル)**:
+- ✅ Driver 起動 + eBay home 遷移
+- ✅ 未ログイン driver で `is_logged_in` → False (期待通り、splashui/captcha 検知)
+- ✅ 永続プロファイル初回 → False (cookie 無し、期待通り)
+- ✅ dry-run upload → "not_logged_in" エラー + decision_log 出力 (期待通り)
+- ⚠️ Live upload smoke (qty=0 ↔ 復活、test listing) は **Takaaki さんの初回 `--login` 完了後** に実施
+
+**運用動線 (4 phase 完成)**:
+```
+cron 4h おき:
+  1. python monitor_listings.py --sheet both
+       → 仕入元在庫検知 → スプシ D 列に ○ 自動付与
+       → newly_sold は decision_log/pending_revise.jsonl にも append (Q2)
+  2. python -m ebay_actions.revise_csv_generator --sheet both
+       → pending queue から (mode=pending default) Revise CSV 生成
+       → csv_output/revise_<ts>.csv (FileExchange 形式)
+       → 消費 entries は decision_log/processed_revise.jsonl へ archive
+  3. python -m ebay_actions.sell_feed_uploader queue
+       → csv_output/ の未アップロード CSV を順次 upload
+       → eBay listing が Quantity=0 (実質取り下げ)
+```
 
 #### Phase 5: 統合運用 (半日)
 

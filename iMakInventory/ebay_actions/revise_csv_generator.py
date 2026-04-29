@@ -61,11 +61,20 @@ from sheet_updater import (  # noqa: E402
 
 
 # ============================================================================
+# pending_revise queue (Phase 2 monitor_listings との連携)
+# ============================================================================
+# monitor_listings が delta="newly_sold" を検知した行のみキューに append される。
+# 既存〇 (手動 / 過去の Inventory 処理結果) はキューに入らない → Phase 3 で取り込まない。
+
+
+# ============================================================================
 # 設定
 # ============================================================================
 CSV_OUTPUT_DIR = ROOT_DIR / "csv_output"
 DECISION_LOG_DIR = ROOT_DIR / "decision_log"
 STATE_FILE = DECISION_LOG_DIR / "revise_state.json"
+PENDING_REVISE_FILE = DECISION_LOG_DIR / "pending_revise.jsonl"
+PROCESSED_REVISE_FILE = DECISION_LOG_DIR / "processed_revise.jsonl"
 
 # 売り切れマーカー (○ U+25CB / 〇 U+3007 両対応)
 SOLD_MARKERS = ("○", "〇")
@@ -126,6 +135,156 @@ def collect_sold_listings(sheet_label: str, sheet_id: str) -> list:
             "checked_at":  r.get("checked_at", ""),
         })
     return sold
+
+
+# ============================================================================
+# pending_revise queue (Q2 Takaaki さん確定: 「今回付与した行のみ」)
+# ============================================================================
+def read_pending_queue() -> list:
+    """pending_revise.jsonl を読込み、entries のリストを返す.
+
+    各 entry: {ts, sheet, row_index, url, item_id, title, supplier, raw_status, dry_run}
+    """
+    if not PENDING_REVISE_FILE.exists():
+        return []
+    entries = []
+    with open(PENDING_REVISE_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return entries
+
+
+def collect_from_pending_queue(
+    sheet_filter: str = "both",
+    verify_against_sheet: bool = True,
+) -> tuple[list, list]:
+    """pending_revise.jsonl から取り下げ候補を収集.
+
+    Args:
+        sheet_filter: "high" / "low" / "both"
+        verify_against_sheet: True の場合、スプシ側で D が依然 "○" の行のみ採用
+                             (Phase 2 → Phase 3 間に手動取消された行を除外)
+
+    Returns: (candidates, skipped_pending)
+        candidates:      Phase 3 で取り下げる対象
+        skipped_pending: queue にあったが verify で落ちた、または filter 外
+    """
+    queue = read_pending_queue()
+    if not queue:
+        return [], []
+
+    # スプシ照合用に現状の D="○" 行を取得
+    sheet_state: dict[tuple[str, int], dict] = {}
+    if verify_against_sheet:
+        targets = []
+        if sheet_filter in ("high", "both"):
+            targets.append(("HIGH", HIGH_SHEET_ID))
+        if sheet_filter in ("low", "both"):
+            targets.append(("LOW", LOW_SHEET_ID))
+        for label, sid in targets:
+            try:
+                sold = collect_sold_listings(label, sid)
+                for s in sold:
+                    sheet_state[(label, s["row_index"])] = s
+            except Exception as e:
+                print(f"  ⚠️ [{label}] 現状取得失敗: {type(e).__name__}: {e}")
+                # 照合失敗 → 安全側で全件 skip (誤取り下げ防止)
+                return [], queue
+
+    candidates = []
+    skipped = []
+    for q in queue:
+        label = q.get("sheet", "")
+        # filter
+        if sheet_filter == "high" and label != "HIGH":
+            skipped.append({**q, "skip_reason": "filter_high"})
+            continue
+        if sheet_filter == "low" and label != "LOW":
+            skipped.append({**q, "skip_reason": "filter_low"})
+            continue
+
+        # verify against sheet
+        if verify_against_sheet:
+            key = (label, q.get("row_index", -1))
+            cur = sheet_state.get(key)
+            if cur is None or cur["item_id"] != q.get("item_id", ""):
+                # スプシで〇が外れている / itemID が変わっている → skip (安全側)
+                skipped.append({**q, "skip_reason": "no_longer_sold_or_id_changed"})
+                continue
+            # スプシの最新値で上書き (title 等を最新に)
+            candidates.append({
+                "sheet_label": label,
+                "row_index":   cur["row_index"],
+                "item_id":     cur["item_id"],
+                "url":         cur.get("url", q.get("url", "")),
+                "title":       cur.get("title", q.get("title", "")),
+                "current_sold": cur.get("current_sold", "○"),
+                "checked_at":  cur.get("checked_at", ""),
+                "queue_ts":    q.get("ts", ""),
+            })
+        else:
+            candidates.append({
+                "sheet_label": label,
+                "row_index":   q.get("row_index", -1),
+                "item_id":     q.get("item_id", ""),
+                "url":         q.get("url", ""),
+                "title":       q.get("title", ""),
+                "current_sold": "○",
+                "checked_at":  "",
+                "queue_ts":    q.get("ts", ""),
+            })
+    return candidates, skipped
+
+
+def drain_pending_queue(consumed_item_ids: list[str]) -> int:
+    """processed として archive し、pending から該当 entry を除去.
+
+    consumed_item_ids: 今回 CSV に含めた itemID のリスト
+
+    pending_revise.jsonl の中身を再書込 (consumed を除外)、
+    processed_revise.jsonl に append.
+
+    Returns: 移動した件数
+    """
+    if not PENDING_REVISE_FILE.exists():
+        return 0
+    if not consumed_item_ids:
+        return 0
+
+    consumed = set(consumed_item_ids)
+    moved = 0
+    keep = []
+    with open(PENDING_REVISE_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                # 壊れた行は維持 (debug 可能にする)
+                keep.append(line)
+                continue
+            if entry.get("item_id") in consumed:
+                # archive
+                entry["consumed_at"] = datetime.now().isoformat(timespec="seconds")
+                with open(PROCESSED_REVISE_FILE, "a", encoding="utf-8") as af:
+                    af.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                moved += 1
+            else:
+                keep.append(line)
+
+    PENDING_REVISE_FILE.write_text(
+        ("\n".join(keep) + "\n") if keep else "",
+        encoding="utf-8",
+    )
+    return moved
 
 
 # ============================================================================
@@ -271,6 +430,7 @@ def append_decision_log(
 # ============================================================================
 def run(
     sheet: str = "both",
+    mode: str = "pending",
     max_per_run: int = DEFAULT_MAX_PER_RUN,
     force: bool = False,
     dry_run: bool = False,
@@ -281,16 +441,28 @@ def run(
     if sheet in ("low", "both"):
         targets.append(("LOW", LOW_SHEET_ID))
 
-    print(f"=== Revise CSV 生成 (sheet={sheet}, dry_run={dry_run}, force={force}, "
-          f"max_per_run={max_per_run}) ===")
+    print(f"=== Revise CSV 生成 (sheet={sheet}, mode={mode}, dry_run={dry_run}, "
+          f"force={force}, max_per_run={max_per_run}) ===")
+
     candidates = []
-    for label, sid in targets:
-        try:
-            sold = collect_sold_listings(label, sid)
-            print(f"  [{label}] D=○ 行: {len(sold)} 件")
-            candidates.extend(sold)
-        except Exception as e:
-            print(f"  ❌ [{label}] 読込失敗: {type(e).__name__}: {e}")
+    pending_skipped = []
+    if mode == "pending":
+        # Q2: Phase 2 で「今回新規〇付与した行のみ」キューから取る
+        candidates, pending_skipped = collect_from_pending_queue(
+            sheet_filter=sheet, verify_against_sheet=True,
+        )
+        print(f"  pending queue から: {len(candidates)} 件 (skip {len(pending_skipped)} 件)")
+    elif mode == "all":
+        # 全 D="○" 行を対象 (緊急時、過去未処理の一括処理用)
+        for label, sid in targets:
+            try:
+                sold = collect_sold_listings(label, sid)
+                print(f"  [{label}] D=○ 全件 (mode=all): {len(sold)} 件")
+                candidates.extend(sold)
+            except Exception as e:
+                print(f"  ❌ [{label}] 読込失敗: {type(e).__name__}: {e}")
+    else:
+        raise ValueError(f"unsupported mode: {mode}")
 
     print(f"  合計候補: {len(candidates)} 件 (dedup 前)")
 
@@ -326,6 +498,12 @@ def run(
         })
         save_state(state)
         print(f"  state 更新 (運用記録): 本日合計 {state['count']}")
+
+        # mode=pending: 消費した entries を queue から drain → processed へ archive
+        if mode == "pending" and allowed:
+            consumed_ids = [c["item_id"] for c in allowed]
+            moved = drain_pending_queue(consumed_ids)
+            print(f"  pending → processed archive: {moved} 件")
     elif dry_run and allowed:
         print(f"  [DRY RUN] CSV 出力 skip ({len(allowed)} 行が出力対象だった)")
         print(f"  サンプル先頭 5 件:")
@@ -357,6 +535,9 @@ def run(
 def main():
     parser = argparse.ArgumentParser(description="Revise CSV 生成 (FileExchange / Quantity=0)")
     parser.add_argument("--sheet", choices=["high", "low", "both"], default="both")
+    parser.add_argument("--mode", choices=["pending", "all"], default="pending",
+                        help="pending=Phase 2 で今回付与した行のみ (default、Q2 Takaaki さん確定); "
+                             "all=スプシの全 D=○ 行 (緊急時の一括処理用)")
     parser.add_argument("--max-per-run", type=int, default=DEFAULT_MAX_PER_RUN,
                         help=f"1 run (4h cycle) の最大件数 (default: {DEFAULT_MAX_PER_RUN})")
     parser.add_argument("--force", action="store_true",
@@ -367,6 +548,7 @@ def main():
 
     result = run(
         sheet=args.sheet,
+        mode=args.mode,
         max_per_run=args.max_per_run,
         force=args.force,
         dry_run=args.dry_run,

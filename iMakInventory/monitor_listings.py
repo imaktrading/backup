@@ -112,6 +112,7 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
         "row_index":    row["row_index"],
         "url":          url,
         "item_id":      row.get("item_id", ""),
+        "title":        row.get("title", ""),
         "supplier":     supplier,
         "is_sold":      None,
         "raw_status":   "",
@@ -180,6 +181,35 @@ def append_decision_log(sheet_label: str, results: list, dry_run: bool):
                 **r,
             }, ensure_ascii=False) + "\n")
     log(f"  decision_log: {path}")
+
+
+# ============================================================================
+# pending_revise queue (Phase 3 連携)
+# ============================================================================
+# 「Phase 2 で今回新規に〇を付与した行のみ」を Phase 3 (Revise CSV) に流す。
+# スプシに既存していた手動 〇 や、過去の Inventory 処理で付与された 〇 は
+# このキューには入らない → Phase 3/4 で誤って取り下げ対象にしない。
+PENDING_REVISE_FILE = DECISION_LOG_DIR / "pending_revise.jsonl"
+
+
+def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None:
+    """delta="newly_sold" の行を pending queue に append.
+    dry_run でも記録する (queue 状態の追跡用、ただし Phase 3 側で dry_run flag を尊重)。
+    """
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "ts":           datetime.now().isoformat(timespec="seconds"),
+        "sheet":        sheet_label,
+        "row_index":    result["row_index"],
+        "url":          result["url"],
+        "item_id":      result["item_id"],
+        "title":        result.get("title", ""),
+        "supplier":     result["supplier"],
+        "raw_status":   result["raw_status"],
+        "dry_run":      dry_run,
+    }
+    with open(PENDING_REVISE_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 # ============================================================================
@@ -272,6 +302,11 @@ def process_sheet(
                 "uncertain":       "?",
             }.get(res["delta"], "?")
             log(f"{prefix}{sup} {mark} [{res['raw_status'][:14]}] {delta_emoji} {res['delta']}: {row['title'][:30]}")
+
+            # Q2: 「今回新規に〇を付与した行」のみ pending queue に積む
+            # → Phase 3 (Revise CSV) は queue から取る = 既存〇は対象外
+            if res["delta"] == "newly_sold" and res.get("item_id"):
+                append_pending_revise(sheet_label, res, dry_run=dry_run)
 
         results.append(res)
 
