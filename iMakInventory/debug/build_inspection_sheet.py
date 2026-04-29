@@ -1,17 +1,11 @@
-"""Phase 6: 抜き取り検査シート構築.
+"""Phase 6: 抜き取り検査の〇マーク (商品管理シート D列).
 
 TEST_HIGH 100件 dry-run の IN_STOCK 判定 76件から random.sample(seed=42) で 20件抽出し、
-TEST_HIGH spreadsheet に「抜き取り検査」シートを追加する。
+商品管理シート (gid=851100680) の **D列** に〇を書き込む。
 
-Takaaki さんが目視結果を埋める → false negative 率を測定する用途。
-
-シート構成:
-  A: row (商品管理シートでの 1-based 行)
-  B: item_id (eBay listing ID)
-  C: URL (Mercari)
-  D: 判定結果 (Inventory が出した IN_STOCK)
-  E: 目視結果 (Takaaki さんが埋める: IN_STOCK / SOLD / DELETED など)
-  F: 備考 (Takaaki さん任意)
+Takaaki さんは商品管理シートを通常通り開いて、20 個の〇行を 1 件ずつ Mercari で目視確認:
+  - Mercari で「在庫あり」だった → scraper 正解 (true negative、ノイズ)
+  - Mercari で「売切」だった → scraper 漏れ (false negative)
 
 実行:
   python debug/build_inspection_sheet.py
@@ -33,7 +27,8 @@ from google.oauth2.service_account import Credentials
 
 TEST_HIGH_ID = "1oDjQC8WN_3WC2InPHAV-hPKmsa96rdNd4jxbGBzDimc"
 LATEST_LOG = ROOT / "decision_log" / "listings_HIGH_20260429_221600.jsonl"
-INSPECTION_TAB_NAME = "抜き取り検査"
+LISTINGS_GID = 851100680
+INSPECTION_TAB_NAME = "抜き取り検査"  # 旧方式タブ。残存していれば削除
 SAMPLE_N = 20
 SEED = 42
 
@@ -83,39 +78,41 @@ def main():
     sh = open_sheet_by_id(TEST_HIGH_ID)
     print(f"  open: {sh.title}")
 
-    # 既存「抜き取り検査」タブがあれば削除して新規作成 (再実行可能性)
-    existing = None
+    # 旧方式「抜き取り検査」タブ残存していれば削除
     for ws in sh.worksheets():
         if ws.title == INSPECTION_TAB_NAME:
-            existing = ws
+            print(f"  旧 '{INSPECTION_TAB_NAME}' タブ削除 (gid={ws.id})")
+            sh.del_worksheet(ws)
             break
-    if existing is not None:
-        print(f"  既存 '{INSPECTION_TAB_NAME}' 削除")
-        sh.del_worksheet(existing)
 
-    new_ws = sh.add_worksheet(title=INSPECTION_TAB_NAME, rows=str(len(sample) + 5), cols="6")
-    print(f"  新規 worksheet 作成: {INSPECTION_TAB_NAME} (id={new_ws.id})")
+    # 商品管理シート worksheet 取得
+    listings_ws = None
+    for ws in sh.worksheets():
+        if ws.id == LISTINGS_GID:
+            listings_ws = ws
+            break
+    if listings_ws is None:
+        print(f"  ❌ 商品管理シート (gid={LISTINGS_GID}) 見つかりません")
+        sys.exit(1)
+    print(f"  商品管理シート: {listings_ws.title} (id={listings_ws.id})")
 
-    # ヘッダ + データ書込
-    headers = ["row", "item_id", "URL", "判定結果", "目視結果", "備考"]
-    values = [headers]
+    # D列 (4 番目) に〇を batch 書込
+    cell_updates = []
     for s in sample:
-        values.append([
-            str(s["row_index"]),
-            s["item_id"],
-            s["url"],
-            "IN_STOCK",
-            "",  # 目視結果 (空欄)
-            "",  # 備考 (空欄)
-        ])
-    new_ws.update(values=values, range_name="A1", value_input_option="USER_ENTERED")
-    print(f"  書込完了: {len(sample) + 1} 行 (header 含む)")
+        cell_updates.append({
+            "range": f"D{s['row_index']}",
+            "values": [["〇"]],
+        })
+    listings_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+    print(f"  D列〇書込完了: {len(sample)} 件")
     print()
-    print(f"  シート URL: https://docs.google.com/spreadsheets/d/{TEST_HIGH_ID}/edit#gid={new_ws.id}")
+    print(f"  商品管理シート URL:")
+    print(f"  https://docs.google.com/spreadsheets/d/{TEST_HIGH_ID}/edit#gid={LISTINGS_GID}")
     print()
-    print(f"=== サンプル先頭 5 件 ===")
-    for s in sample[:5]:
-        print(f"  row{s['row_index']:>3} {s['item_id']:>14} {s['url'][:55]} title={s['title'][:30]}")
+    print(f"=== 〇付与した 20 行 (row_index 順) ===")
+    for s in sample:
+        print(f"  row{s['row_index']:>3}  {s['item_id']:>14}  {s['url']}")
+        print(f"           title: {s['title'][:50]}")
 
 
 if __name__ == "__main__":

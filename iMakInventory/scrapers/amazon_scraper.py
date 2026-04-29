@@ -43,6 +43,16 @@ from typing import Optional
 
 ASIN_RE = re.compile(r"/(?:dp|gp/product)/([A-Z0-9]{10})")
 PRICE_RE = re.compile(r"￥\s*([\d,]+)|¥\s*([\d,]+)")
+
+# 在庫判定軸 (2026-04-29 false-positive 12/12 バグから検体差分で確定)
+# 旧コード: html 全体に「在庫切れ」キーワード grep → hidden widget で誤検出
+# 新コード: cart button (id="add-to-cart-button") 存在で IN_STOCK 確定
+#
+# Amazon は IN_STOCK 商品の buy box にだけ <input id="add-to-cart-button">
+# を render する。SOLD/取扱なし商品は <div id="outOfStock"> を出して cart
+# button を出さない。これが Amazon 自身の構造的シグナルで誤検出しない。
+CART_BUTTON_PATTERN = 'id="add-to-cart-button"'
+OUT_OF_STOCK_DIV_PATTERN = 'id="outOfStock"'
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -54,23 +64,6 @@ DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 TIMEOUT_SEC = 25
-
-# 在庫切れキーワード (大文字小文字無視で部分マッチ)
-OUT_OF_STOCK_PATTERNS = [
-    "現在お取り扱いできません",
-    "在庫切れ",
-    "現在在庫切れ",
-    "一時的に在庫切れ",
-    "Currently unavailable",
-    "We don't know when",
-]
-# 在庫ありキーワード
-IN_STOCK_PATTERNS = [
-    "在庫あり",
-    "通常配送無料",
-    "残り",  # "残り N 点"
-    "In Stock",
-]
 
 
 # ============================================================================
@@ -88,20 +81,29 @@ def parse_asin(url: str) -> Optional[str]:
 # 在庫判定 (HTML body 解析)
 # ============================================================================
 def _detect_stock(html: str) -> Optional[bool]:
-    """HTML body から在庫状態を判定.
+    """HTML から在庫状態を判定.
+
+    判定軸 (検体差分で確定):
+      1. id="add-to-cart-button" 存在 → IN_STOCK (確実、Amazon が IN_STOCK 商品にだけ render)
+      2. id="outOfStock" 存在 → SOLD (Amazon が取扱なし商品に render する div)
+      3. どちらも無し → 判定不能 (fail-closed = None、誤取下げ防止)
+
+    Note: HTML 全体に「在庫切れ」「現在お取り扱いできません」キーワードが
+    hidden widget (related items / variation placeholder 等) に含まれる
+    ため、旧コードの grep ベース判定は false positive 多発 (12/12 検証で発覚)。
 
     Returns:
-        True  : 在庫あり (IN_STOCK_PATTERNS のいずれかに合致)
-        False : 在庫切れ (OUT_OF_STOCK_PATTERNS のいずれかに合致)
-        None  : 判定不能 (どちらにも該当せず、fail-closed)
+        True  : 在庫あり
+        False : 在庫切れ / 取扱なし
+        None  : 判定不能 (新パターン or anti-bot)
     """
-    # 在庫切れ判定が優先 (誤検知防止 = 売り切れ商品を「在庫あり」と誤認しない)
-    for pattern in OUT_OF_STOCK_PATTERNS:
-        if pattern in html:
-            return False
-    for pattern in IN_STOCK_PATTERNS:
-        if pattern in html:
-            return True
+    # IN_STOCK 直接シグナル (最優先、構造的に確実)
+    if CART_BUTTON_PATTERN in html:
+        return True
+    # SOLD 直接シグナル
+    if OUT_OF_STOCK_DIV_PATTERN in html:
+        return False
+    # 既知パターンに合致せず → 判定不能
     return None
 
 

@@ -14,6 +14,8 @@ __pycache__/
 # Probe / scratch
 tests/_probe_*.py
 debug/_probe_*.py
-debug/probe_*.py
 debug/html_samples/*.png
 debug/html_samples/realerr_*.html
+
+# Claude session lock (per-instance, not shared)
+.claude/
