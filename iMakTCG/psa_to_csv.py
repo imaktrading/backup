@@ -1956,9 +1956,14 @@ def main():
             # PSA 生値 (例: "001") を使うと全セットの Leader #001 を拾って median が不当に上振れる（Viviで $250 vs 実勢 $79）。
             card_number_raw = str(data.get('CardNumber', ''))  # PSA 生値（ログ/market_log 用に保持）
             card_number_full = str(rows[actual_idx][headers.index("C:Card Number")]).strip() or card_number_raw
+            # 2026-04-29 Phase D 補完 (cache 共有不変条件 / dual_gate_disagreement.md):
+            # character も CSV の C:Character (catalog localize 済) を使う。
+            # 旧: extract_character_name(subject) は "Jewelry Bonney Weekly Shonen Jump '24-#35" 等
+            #     未登録 suffix を残す → check_csv 側 query "Jewelry Bonney" と不一致 → cache miss
+            character_full = str(rows[actual_idx][headers.index("C:Character")]).strip() or character
             cost_jpy = cost_map.get(cert)
 
-            market = search_market_price(ebay_token, game, card_number_full, character)
+            market = search_market_price(ebay_token, game, card_number_full, character_full)
             card_number = card_number_raw  # 後段ログ互換のため元の変数名維持
             today = datetime.now().strftime("%Y-%m-%d")
 

@@ -81,3 +81,36 @@ def test_psa_to_csv_does_not_subprocess_check_csv():
     assert "from check_csv import main" in src, (
         "psa_to_csv は from check_csv import main で同一プロセス呼出するべき"
     )
+
+
+def test_psa_to_csv_uses_csv_character_for_market_search():
+    """psa_to_csv の market search は CSV C:Character を使う (Phase D 補完 / 2026-04-29).
+
+    背景:
+      psa_to_csv は L1958 で C:Card Number を CSV から読み取って query 構築に使うが、
+      character は L1953 で raw subject から smart_titlecase(extract_character_name(...)) で
+      別途生成していた. これにより C:Character (catalog localize 済) と
+      query 用 character (subject 残骸付き) が乖離 → check_csv 側 query と一致せず
+      cache miss → median ブレ (Bonney $175 vs $135 等).
+
+    本テストは以下を物理ギブス化:
+      1. psa_to_csv が search_market_price 呼出前に C:Character 列を読み出す
+      2. search_market_price 呼出には character_full が渡る (not raw `character`)
+    """
+    src = (_TCG / "psa_to_csv.py").read_text(encoding="utf-8")
+
+    # 1. C:Character の lookup が存在
+    assert 'headers.index("C:Character")' in src, (
+        "psa_to_csv は C:Character 列を CSV から読み取って query 用 character として使うべき"
+    )
+    # 2. search_market_price に character_full を渡している (旧: character)
+    #    複数の呼出パターンを吸収するため正規表現で柔軟に
+    import re
+    m = re.search(
+        r"search_market_price\(\s*ebay_token\s*,\s*game\s*,\s*card_number_full\s*,\s*character_full\s*\)",
+        src,
+    )
+    assert m, (
+        "search_market_price は (token, game, card_number_full, character_full) の順で "
+        "character_full を渡すべき (Phase D 補完)"
+    )
