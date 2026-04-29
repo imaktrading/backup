@@ -17,6 +17,9 @@ from pathlib import Path
 
 import pytest
 
+# Phase 7a: cycle precheck で実行する 検体ベース テスト群 (HTML サンプルのみ、network なし)
+pytestmark = pytest.mark.offline
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))

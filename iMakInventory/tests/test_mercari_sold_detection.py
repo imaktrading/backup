@@ -98,6 +98,7 @@ def samples_available():
     return SAMPLES_DIR
 
 
+@pytest.mark.offline
 @pytest.mark.parametrize("item_id", IN_STOCK_ITEMS)
 def test_offline_html_in_stock(samples_available, item_id):
     """検体 HTML 11 件: 在庫あり判定が IN_STOCK か."""
@@ -109,6 +110,7 @@ def test_offline_html_in_stock(samples_available, item_id):
     assert verdict == "IN_STOCK", f"{item_id}: got {verdict} ({reason})"
 
 
+@pytest.mark.offline
 @pytest.mark.parametrize("item_id", SOLD_ITEMS)
 def test_offline_html_sold(samples_available, item_id):
     """検体 HTML 10 件: 売切判定が SOLD か."""

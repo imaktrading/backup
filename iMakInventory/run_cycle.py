@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import socket
+import subprocess
 import sys
 import time
 import traceback
@@ -35,11 +36,14 @@ from monitor_listings import process_sheet  # noqa: E402
 from sheet_updater import HIGH_SHEET_ID, LOW_SHEET_ID  # noqa: E402
 from ebay_actions.revise_csv_generator import run as run_revise_csv  # noqa: E402
 from ebay_actions.sell_feed_uploader import upload_one_csv  # noqa: E402
+from ebay_actions.listing_verifier import verify_listings  # noqa: E402
+from audit import sample_and_append as audit_sample_and_append  # noqa: E402
 
 DECISION_LOG_DIR = SCRIPT_DIR / "decision_log"
 DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOCK_FILE = DECISION_LOG_DIR / ".cycle.lock"
 LOCK_STALE_HOURS = 6
+PYTEST_PRECHECK_TIMEOUT_SEC = 120  # 検体 42 件は 1 秒程度、120s で十分
 
 
 # ============================================================================
@@ -97,6 +101,48 @@ def _notify_toast(title: str, body: str):
         toaster.show_toast(title, body, duration=10, threaded=True)
     except Exception:
         pass
+
+
+# ============================================================================
+# Phase 7a: pytest precheck (offline marker)
+# ============================================================================
+def _phase_pytest_precheck(test_mode: bool) -> dict:
+    """巡回開始前に offline 検体テスト 42 件を実行。失敗時は巡回中止 (fail-closed).
+
+    Returns: {"status": "passed" | "failed" | "error", "stdout_tail", "stderr_tail", "elapsed"}
+    DOM 仕様変更で検出ロジックが壊れていないか cycle 前に物理担保する。
+    """
+    _log("=== Phase 0/4: pytest precheck (offline 検体 42件) ===", test_mode)
+    t0 = time.time()
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/", "-m", "offline", "-q",
+             "--tb=short", "--no-header"],
+            cwd=str(SCRIPT_DIR),
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=PYTEST_PRECHECK_TIMEOUT_SEC,
+        )
+        elapsed = time.time() - t0
+        if result.returncode == 0:
+            _log(f"  ✅ pytest precheck pass ({elapsed:.1f}s)", test_mode)
+            return {
+                "status": "passed",
+                "elapsed_sec": round(elapsed, 2),
+                "stdout_tail": (result.stdout or "")[-500:],
+            }
+        else:
+            _log(f"  ❌ pytest precheck FAILED rc={result.returncode} ({elapsed:.1f}s)", test_mode)
+            return {
+                "status": "failed",
+                "returncode": result.returncode,
+                "elapsed_sec": round(elapsed, 2),
+                "stdout_tail": (result.stdout or "")[-1500:],
+                "stderr_tail": (result.stderr or "")[-500:],
+            }
+    except subprocess.TimeoutExpired as e:
+        return {"status": "error", "error": f"timeout {PYTEST_PRECHECK_TIMEOUT_SEC}s"}
+    except Exception as e:
+        return {"status": "error", "error": f"{type(e).__name__}: {e}"}
 
 
 # ============================================================================
@@ -162,6 +208,38 @@ def _phase_revise_csv(
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _phase_audit_sample(
+    targets: list,
+    cycle_ts: str,
+    test_mode: bool,
+    n: int = 5,
+) -> dict:
+    """Phase 7d': IN_STOCK から 5 件 sample → audit シート append.
+
+    targets: [(label, sheet_id), ...]
+    """
+    _log(f"=== Phase 4: audit sample (n={n} per sheet) ===", test_mode)
+    results = {}
+    seed = int(datetime.now().timestamp())
+    for label, sid in targets:
+        try:
+            r = audit_sample_and_append(
+                sheet_id=sid,
+                sheet_label=label,
+                decision_log_dir=DECISION_LOG_DIR,
+                cycle_ts=cycle_ts,
+                n=n,
+                seed=seed,
+            )
+            _log(f"  [{label}] sampled={r['sampled']} appended={r['appended']}"
+                 f"{' err=' + r['error'] if r.get('error') else ''}", test_mode)
+            results[label] = r
+        except Exception as e:
+            _log(f"  ❌ [{label}] audit 例外: {type(e).__name__}: {e}", test_mode)
+            results[label] = {"error": f"{type(e).__name__}: {e}"}
+    return results
+
+
 def _phase_upload(csv_path_str: str, test_mode: bool) -> dict:
     """sell_feed_uploader.upload_one_csv で eBay FileExchange へ upload."""
     _log(f"=== Phase 3/3: sell_feed_uploader.upload (csv={csv_path_str}) ===", test_mode)
@@ -218,6 +296,40 @@ def run_cycle(
         return cycle_log
 
     try:
+        # Phase 0: pytest precheck (Phase 7a) — 検体 DOM 仕様変更を検知して fail-closed
+        precheck = _phase_pytest_precheck(test_mode)
+        cycle_log["phases"]["pytest_precheck"] = precheck
+        if precheck["status"] != "passed":
+            cycle_log["status"] = "aborted_pytest_precheck_failed"
+            _notify_toast(
+                "iMakInventory 巡回中止",
+                f"pytest 検体 失敗 = 仕様変更の可能性 (status={precheck['status']})。"
+                f"巡回 skip、検体追加 / scraper 修正 が必要。"
+            )
+            return cycle_log  # finally で lock release される
+
+        # Phase 0.5: listing verifier (Phase 7e) — 前回 upload の eBay 反映確認 (4h ずらし)
+        try:
+            _log("=== Phase 0.5/4: listing_verifier (前回 upload を verify) ===", test_mode)
+            verify_summary = verify_listings()
+            cycle_log["phases"]["listing_verify"] = {
+                "input_item_count": verify_summary.get("input_item_count", 0),
+                "new_item_count": verify_summary.get("new_item_count", 0),
+                "alerts_count": len(verify_summary.get("alerts", [])),
+                "decision_log_path": verify_summary.get("decision_log_path"),
+                "error": verify_summary.get("error"),
+            }
+            if verify_summary.get("alerts"):
+                _log(f"  ⚠️ verify alert: {len(verify_summary['alerts'])} 件 qty != 0", test_mode)
+                _notify_toast(
+                    "iMakInventory verify ALERT",
+                    f"前回 upload {len(verify_summary['alerts'])} 件で qty != 0 (取下げ失敗?)。"
+                    f"decision_log/verify_*.jsonl 確認"
+                )
+        except Exception as e:
+            _log(f"  ⚠️ verify 例外 (続行): {type(e).__name__}: {e}", test_mode)
+            cycle_log["phases"]["listing_verify"] = {"error": f"{type(e).__name__}: {e}"}
+
         # Phase 1: monitor
         m = _phase_monitor(
             sheet, limit, test_mode,
@@ -257,6 +369,30 @@ def run_cycle(
                     cycle_log["status"] = "success"
                 else:
                     cycle_log["status"] = "upload_failed"
+
+        # Phase 4: audit sample (Phase 7d') — IN_STOCK から 5 件抜き取り → audit シート追記
+        # cycle status に関わらず実行 (in_stock データがあれば audit する)
+        try:
+            audit_targets = []
+            if sheet_id:
+                audit_targets.append((sheet_label or "SHEET", sheet_id))
+            else:
+                h_id = high_sheet_id or HIGH_SHEET_ID
+                l_id = low_sheet_id or LOW_SHEET_ID
+                if sheet in ("high", "both"):
+                    audit_targets.append(("HIGH", h_id))
+                if sheet in ("low", "both"):
+                    audit_targets.append(("LOW", l_id))
+            audit_result = _phase_audit_sample(
+                audit_targets,
+                cycle_ts=cycle_log["ts_start"][:16].replace("T", " "),
+                test_mode=test_mode,
+                n=5,
+            )
+            cycle_log["phases"]["audit_sample"] = audit_result
+        except Exception as e:
+            _log(f"  ❌ audit sample 例外: {type(e).__name__}: {e}", test_mode)
+            cycle_log["phases"]["audit_sample"] = {"error": f"{type(e).__name__}: {e}"}
     except Exception as e:
         cycle_log["status"] = "error"
         cycle_log["error"] = f"{type(e).__name__}: {e}"
