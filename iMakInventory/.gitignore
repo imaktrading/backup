@@ -1,0 +1,15 @@
+# Runtime artifacts
+logs/
+decision_log/
+csv_output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+
+# Probe / scratch
+tests/_probe_*.py

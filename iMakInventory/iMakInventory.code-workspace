@@ -1,0 +1,8 @@
+{
+	"folders": [
+		{ "path": "." },
+		{ "path": "../iMakeBayAPI", "name": "iMakeBayAPI (連携先)" },
+		{ "path": "../iMakMercari", "name": "iMakMercari (連携先)" }
+	],
+	"settings": {}
+}
