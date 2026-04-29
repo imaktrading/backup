@@ -171,17 +171,57 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
     # ハイドレーション完了 = item-name (item ページ) or display-name (shops) が描画済
     name_testid_candidates = ["item-name", "display-name", "name"]
 
+    # 売切判定基準 (2026-04-29 false-negative バグ修正で導入):
+    # checkout-button は売切ページでも DOM に残るため、ボタン要素を見つけた後
+    # 以下のいずれかで売切と判定する。
+    #   1. button text == "売り切れました"
+    #   2. class に "disabled" を含む (merButton の disabled スタイル)
+    #   3. name 属性 == "disabled"
+    # それ以外 (text="購入手続きへ" 等) は在庫あり判定。
+    SOLD_BUTTON_TEXTS = ("売り切れました", "売り切れ", "Sold")
+
+    def _is_sold_button(elem) -> Optional[bool]:
+        """buy ボタン要素を見て sold/in_stock/unknown を返す.
+        Returns: True=sold, False=in_stock, None=判定不能
+        """
+        try:
+            txt = (elem.text or "").strip()
+            cls = (elem.get_attribute("class") or "").lower()
+            name_attr = (elem.get_attribute("name") or "").lower()
+            disabled_attr = (elem.get_attribute("disabled") or "")
+            if txt in SOLD_BUTTON_TEXTS:
+                return True
+            if "disabled" in cls or name_attr == "disabled" or disabled_attr:
+                return True
+            # 在庫あり想定の text
+            if any(kw in txt for kw in ("購入手続きへ", "購入手続き", "Buy now", "カートに追加")):
+                return False
+            # text 取得できない / 未知パターン → 判定不能
+            return None
+        except Exception:
+            return None
+
     in_stock = None
     name = ""
     price_jpy = None
+    button_text = ""
+    button_class = ""
 
     end_at = time.time() + SELENIUM_WAIT_SEC
     while time.time() < end_at:
-        # buy ボタンが見えたら in_stock 確定
+        # buy ボタンを見つけたら状態判定
         try:
-            driver.find_element(By.CSS_SELECTOR, f'[data-testid="{buy_button_testid}"]')
-            in_stock = True
-            break
+            elem = driver.find_element(By.CSS_SELECTOR, f'[data-testid="{buy_button_testid}"]')
+            button_text = (elem.text or "").strip()
+            button_class = (elem.get_attribute("class") or "")
+            judgement = _is_sold_button(elem)
+            if judgement is True:
+                in_stock = False
+                break
+            if judgement is False:
+                in_stock = True
+                break
+            # judgement is None: ハイドレーション途中で text 未確定 → 続けてポーリング
         except Exception:
             pass
 
@@ -206,19 +246,17 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
         time.sleep(SELENIUM_POLL_INTERVAL)
 
     if in_stock is None:
-        # buy ボタンが timeout 時間内に表示されなかった = 売り切れ判定
-        # ただし、ページがハイドレーション失敗等 (item-name 等の基本要素が無い) → 判定不能
+        # buy ボタンが timeout 時間内に判定可能状態にならなかった
+        # 最終的に sold-out 文字列がページに表示されているかで決める
         try:
-            for tid in name_testid_candidates:
-                try:
-                    elem = driver.find_element(By.CSS_SELECTOR, f'[data-testid="{tid}"]')
-                    name = elem.text.strip()
-                    break
-                except Exception:
-                    continue
-            in_stock = False  # buy ボタンなし、ページは読めている → 売り切れ
+            page_text = driver.find_element(By.TAG_NAME, "body").text or ""
+            if any(kw in page_text for kw in ("売り切れました", "Sold")):
+                in_stock = False
+            else:
+                # ハイドレーション失敗等で何も判定できない → fail-closed (None)
+                return None
         except Exception:
-            return None  # ページ自体ロード失敗 → 判定不能
+            return None
 
     # 商品名・価格抽出
     if not name:
