@@ -65,6 +65,19 @@ SELENIUM_POLL_INTERVAL = 0.5
 CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakMercari\chrome_profile"
 CHROME_VERSION_MAIN = 146
 
+# 削除済 / 取下げ済 page の body text マーカー (trabajo 解析 + 実検体で確認した活用形)
+# selenium WebElement.text は visible text のみ取得するため、script タグ内の i18n bundle
+# は混入しない (BeautifulSoup を使う必要なし)。
+DELETION_KEYWORDS = (
+    "商品が見つかりません",
+    "削除されました",         # "この商品は削除されました" (trabajo 文言1)
+    "削除されています",       # "該当する商品は削除されています" (出品者取下げ)
+    "該当する商品は",         # 上記の前置
+    "ページが見つかりません", # trabajo 文言2
+    "エラーが発生しました",   # trabajo 文言3 (Phase 7.2 で追加)
+    "Not Found",
+)
+
 
 # ============================================================================
 # URL → item id
@@ -186,11 +199,32 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
     price_jpy = None
 
     # ============================================================
-    # Shops 系: variant-purchase-button で簡易判定 (検体無し、暫定踏襲)
+    # Shops 系: 検体未取得 (Phase 7.1 で trabajo 解析を反映、Live verify 待ち)
+    #   IN_STOCK signal: [data-testid="variant-purchase-button"] active
+    #   SOLD signal:     [testid="disabled-purchase-button"] (注意: data- 無し!)
+    #                    or [data-testid="disabled-purchase-button"] (両 selector 併用)
+    #                    or variant-purchase-button が不在 / disabled
     # ============================================================
     if is_shops:
         end_at = time.time() + SELENIUM_WAIT_SEC
         while time.time() < end_at:
+            # SOLD 直接シグナル (trabajo 解析 selector)
+            sold_signal_found = False
+            for sold_sel in (
+                '[testid="disabled-purchase-button"]',       # trabajo: data- 無し
+                '[data-testid="disabled-purchase-button"]',  # 標準形 (念のため)
+            ):
+                try:
+                    driver.find_element(By.CSS_SELECTOR, sold_sel)
+                    sold_signal_found = True
+                    break
+                except NoSuchElementException:
+                    pass
+            if sold_signal_found:
+                in_stock = False
+                break
+
+            # IN_STOCK 直接シグナル
             try:
                 btn = driver.find_element(By.CSS_SELECTOR, '[data-testid="variant-purchase-button"]')
                 cls = (btn.get_attribute("class") or "").lower()
@@ -204,14 +238,7 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
             # 削除済 / 見つからないページ
             try:
                 page_text = driver.find_element(By.TAG_NAME, "body").text or ""
-                if any(kw in page_text for kw in [
-                    "商品が見つかりません",
-                    "削除されました",
-                    "削除されています",     # 出品者による取下げ (該当する商品は削除されています)
-                    "該当する商品は",        # 上記の前置
-                    "ページが見つかりません",
-                    "Not Found",
-                ]):
+                if any(kw in page_text for kw in DELETION_KEYWORDS):
                     return {"name": "(deleted)", "status": "DELETED",
                             "in_stock": False, "price_jpy": None}
             except Exception:
@@ -223,15 +250,8 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
         # ============================================================
         # 通常 /item/m... : checkout-button-container ベースの判定
         # ポーリングで「container 出現」or「削除済 body text」のどちらかを早期検知
+        # (DELETION_KEYWORDS は module-level 定数を参照)
         # ============================================================
-        DELETION_KEYWORDS = (
-            "商品が見つかりません",
-            "削除されました",
-            "削除されています",     # 出品者による取下げ (該当する商品は削除されています)
-            "該当する商品は",        # 上記の前置
-            "ページが見つかりません",
-            "Not Found",
-        )
         container_found = False
         deleted = False
         end_at = time.time() + SELENIUM_WAIT_SEC
