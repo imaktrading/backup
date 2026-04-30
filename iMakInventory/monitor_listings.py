@@ -71,8 +71,10 @@ DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mercari/Amazon 1 リクエストごとの sleep 秒 (anti-bot 対策)
 DEFAULT_SLEEP_SEC = 2
-# 連続失敗で Selenium fallback を諦める閾値
-MAX_CONSEC_FAILURES = 8
+# Mercari driver の連続 None で driver を再起動する閾値 (anti-bot 復帰試行)
+# Phase 9: 旧 MAX_CONSEC_FAILURES (=8) で全 supplier 早期 abort していたが、
+# 漏れ NG 原則のため abort 廃止し、driver 再起動 + ループ続行で全件処理する
+MERCARI_RESTART_THRESHOLD = 5
 
 
 def _log_path() -> Path:
@@ -283,7 +285,7 @@ def process_sheet(
             amazon_driver = None
 
     results = []
-    consec_failures = 0
+    mercari_consec_none = 0  # Phase 9: mercari driver 自動再起動用カウンタ
     for i, row in enumerate(rows, start=1):
         prefix = f"  [{i}/{len(rows)}] row{row['row_index']:>4} "
         try:
@@ -306,14 +308,33 @@ def process_sheet(
         # ログ表示
         sup = res["supplier"][:7].ljust(7)
         if res["error"]:
-            # 未対応 supplier は skip 扱い (連続失敗カウントに含めない)
+            # mercari の連続 None → driver 再起動を試行 (anti-bot recovery)
+            if (res["supplier"] == "mercari"
+                    and "scraper returned None" in (res["error"] or "")):
+                mercari_consec_none += 1
+                if mercari_consec_none >= MERCARI_RESTART_THRESHOLD:
+                    log(f"  ⚠️ mercari 連続 None {mercari_consec_none} 件 → driver 再起動を試行")
+                    if mercari_driver is not None:
+                        try:
+                            mercari_driver.quit()
+                        except Exception:
+                            pass
+                    try:
+                        mercari_driver = create_mercari_driver(headless=True)
+                        log("    ✅ mercari driver 再起動完了 (続行)")
+                        mercari_consec_none = 0
+                    except Exception as re:
+                        log(f"    ❌ mercari driver 再起動失敗: {re} (mercari は失敗継続、他 supplier は処理する)")
+                        mercari_driver = None
+                        mercari_consec_none = 0  # 再起動失敗を loop しないようリセット
             if (res["error"] or "").startswith("unsupported supplier"):
                 log(f"{prefix}{sup} - skip ({res['error'][:60]})")
             else:
-                consec_failures += 1
                 log(f"{prefix}{sup} ⚠️ {res['error'][:60]}")
         else:
-            consec_failures = 0
+            # 成功した supplier に対応するカウンタをリセット
+            if res["supplier"] == "mercari":
+                mercari_consec_none = 0
             mark = "○" if res["is_sold"] else "·"
             delta_emoji = {
                 "newly_sold":      "🔻",
@@ -330,10 +351,9 @@ def process_sheet(
 
         results.append(res)
 
-        # 連続失敗で abort (anti-bot ブロック等)
-        if consec_failures >= MAX_CONSEC_FAILURES:
-            log(f"  ❌ 連続失敗 {MAX_CONSEC_FAILURES} 件 → abort (anti-bot block 疑い)")
-            break
+        # Phase 9 修正: 早期 abort 廃止 (漏れ NG 原則)
+        # 旧 MAX_CONSEC_FAILURES=8 で全 supplier 巻き添え停止していたが、
+        # 全 421 件処理しきる方針。mercari 不調は driver 再起動で復旧試行。
 
     # driver 後始末
     if mercari_driver is not None:
@@ -368,28 +388,49 @@ def process_sheet(
         if len(url_alerts) > 10:
             log(f"    ... +{len(url_alerts) - 10} 件")
 
-    # 書込
+    # 書込 (Phase 9 修正: trabajo 同等の O 列全件更新仕様)
+    #   - O 列: 巡回処理した全行に時刻書込 (エラー含む)
+    #   - D 列: 「変化があった行」のみ更新 (人手書込を尊重)
+    checked_at_now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     updates = []
     for r in results:
         if r["error"] or r["is_sold"] is None:
-            continue  # fail-closed: 取得不能なら書込しない
-        # 既存 D="○" を上書きしない: 「人手 ○」を尊重する場合の保護
-        # 但し、Phase 2 時点では「ツール書込のみ」と仮定し、復活時も "" に戻す
-        updates.append({
-            "row_index":  r["row_index"],
-            "is_sold":    r["is_sold"],
-            "checked_at": datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
-        })
+            # 取得不能 → O 列だけ更新 (D 列は既存維持、fail-closed 維持)
+            updates.append({
+                "row_index":  r["row_index"],
+                "checked_at": checked_at_now,
+                "o_only":     True,
+            })
+            continue
+        # D 列に変化があるかどうか判定
+        new_d = "○" if r["is_sold"] else ""
+        old_d = (r.get("current_sold") or "").strip()
+        if new_d == old_d:
+            # 変化なし → O 列のみ更新 (D 列はそのまま)
+            updates.append({
+                "row_index":  r["row_index"],
+                "checked_at": checked_at_now,
+                "o_only":     True,
+            })
+        else:
+            # 変化あり → D + O 両方更新
+            updates.append({
+                "row_index":  r["row_index"],
+                "is_sold":    r["is_sold"],
+                "checked_at": checked_at_now,
+            })
 
     if dry_run:
         log("  [DRY RUN] スプシ書込 skip")
         for r in [x for x in results if x["delta"] in ("newly_sold", "newly_in_stock")][:10]:
             log(f"    変化検知サンプル: row{r['row_index']} {r['delta']} {r['url'][:50]}")
     elif updates:
-        log(f"  スプシ書込中... ({len(updates)} 件)")
+        d_count = sum(1 for u in updates if not u.get("o_only"))
+        o_count = len(updates)
+        log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + O 列 {o_count} 件)")
         try:
             res = update_listings_sold_marks(ws, updates)
-            log(f"  ✅ updated={res['updated']}")
+            log(f"  ✅ updated={res['updated']} (d_writes={res.get('d_writes', '?')} / o_writes={res.get('o_writes', '?')})")
         except Exception as e:
             log(f"  ❌ スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())

@@ -184,40 +184,47 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
         updates: [
             {
                 "row_index":  2 (1-based),
-                "is_sold":    True / False,
+                "is_sold":    True / False (o_only=True 時は無視),
                 "checked_at": "2026/04/29 17:00:00" (省略時は now),
+                "o_only":     True なら D 列を触らず O 列のみ更新 (Phase 9 fix),
             },
             ...
         ]
 
     書込ルール:
-      - D 列: is_sold=True → "○", False → "" (空欄、人手 ○ を上書きしない場合は呼出側で制御)
-      - O 列: 全 update に timestamp を書く
-      - 既存 D 列の値は呼出側で判断 (本関数は素直に上書き)
+      - o_only=True → O 列のみ書込 (エラー行 / 変化なし行で D 列を上書きしない)
+      - o_only 省略 / False → D + O 両方書込
+      - D 列: is_sold=True → "○", False → "" (人手 ○ を上書きしない場合は呼出側で制御)
+      - O 列: 全 update に timestamp を書く (= trabajo 同等仕様、巡回チェック日時)
 
-    Returns: {"updated": N}
+    Returns: {"updated": N, "d_writes": N, "o_writes": N}
     """
     if not updates:
-        return {"updated": 0}
+        return {"updated": 0, "d_writes": 0, "o_writes": 0}
 
     cell_updates = []
+    d_writes = 0
+    o_writes = 0
     for u in updates:
         row_idx = u["row_index"]
-        is_sold = bool(u.get("is_sold", False))
         checked_at = u.get("checked_at") or datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        # D 列単独 update (1 cell)
-        cell_updates.append({
-            "range": f"D{row_idx}",
-            "values": [["○" if is_sold else ""]],
-        })
-        # O 列 (15 列目) 単独 update
+
+        if not u.get("o_only", False):
+            is_sold = bool(u.get("is_sold", False))
+            cell_updates.append({
+                "range": f"D{row_idx}",
+                "values": [["○" if is_sold else ""]],
+            })
+            d_writes += 1
+
         cell_updates.append({
             "range": f"O{row_idx}",
             "values": [[checked_at]],
         })
+        o_writes += 1
 
     ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
-    return {"updated": len(updates)}
+    return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes}
 
 
 # ============================================================================
