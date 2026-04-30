@@ -116,14 +116,32 @@ def test_load_state_returns_dict_when_missing(tmp_path, monkeypatch):
 
 
 def test_save_load_state_roundtrip(tmp_path, monkeypatch):
-    """_save_state → _load_state で値が保持される."""
+    """_save_state → _load_state で値が保持される.
+
+    Phase 9 拡張: _load_state は cycle_times を setdefault で補完するため、
+    save 時にキーが無くても load 時に default が入る (新仕様)。
+    """
     import control_panel as cp
     fake_state = tmp_path / ".gui_state.json"
     monkeypatch.setattr(cp, "GUI_STATE_FILE", fake_state)
-    saved = {"high_history": ["A", "B"], "low_history": ["X"], "single_history": []}
+    saved = {"high_history": ["A", "B"], "low_history": ["X"], "single_history": [],
+             "cycle_times": ["09:00", "13:00"]}
     cp._save_state(saved)
     loaded = cp._load_state()
     assert loaded == saved
+
+
+def test_load_state_supplies_default_cycle_times(tmp_path, monkeypatch):
+    """cycle_times キーが無い旧 state ファイルにも default を補完する (互換維持)."""
+    import control_panel as cp
+    fake_state = tmp_path / ".gui_state.json"
+    fake_state.write_text(
+        '{"high_history": [], "low_history": [], "single_history": []}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cp, "GUI_STATE_FILE", fake_state)
+    loaded = cp._load_state()
+    assert loaded["cycle_times"] == cp._DEFAULT_TIMES
 
 
 # ============================================================================

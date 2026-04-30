@@ -153,5 +153,57 @@ def test_control_panel_subprocess_calls_have_creationflags():
     assert occurrences >= 4, f"creationflags=_NO_WINDOW が {occurrences} 件、4 以上必要"
 
 
+# ============================================================================
+# Phase 9 拡張: タイマー時刻 6 件 GUI 入力対応
+# ============================================================================
+def test_register_cycle_ps1_accepts_times_param():
+    """register_cycle_task.ps1 が -Times パラメータを受け取り、トリガーを動的構築."""
+    src = (ROOT / "tools" / "register_cycle_task.ps1").read_text(encoding="utf-8")
+    assert "[string]$Times" in src
+    assert "$Times -split" in src or "-split " in src
+    # HH:MM フォーマット検証
+    assert "HH:MM" in src
+    # default 値は 6 件 (Phase 9a の trabajo 並走想定値)
+    assert "10:00,14:00,18:00,22:00,02:00,06:00" in src
+
+
+def test_control_panel_has_six_time_inputs():
+    """control_panel に cycle_time_vars (6 個の time entry) がある."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    assert "cycle_time_vars" in src
+    assert "for i in range(6)" in src
+    assert "_DEFAULT_TIMES" in src
+    # default は trabajo 並走想定 6 件
+    assert '"10:00"' in src
+    assert '"14:00"' in src
+
+
+def test_control_panel_cycle_times_persisted_in_state():
+    """cycle_times を .gui_state.json に保存する."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    assert '"cycle_times"' in src or "'cycle_times'" in src
+    # state["cycle_times"] = collected[:6] の永続化ロジック
+    assert "self.state[" in src and "cycle_times" in src
+
+
+def test_control_panel_validates_time_format():
+    """空欄 skip + HH:MM 形式チェックロジックが存在."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    # HH:MM regex
+    assert r"\d{1,2}:\d{2}" in src
+    # 「最低 1 件」エラー
+    assert "最低 1 件" in src or "1 件以上" in src or "最低１" in src
+    # 空欄 skip コメント or continue
+    assert "空欄" in src or 'continue' in src
+
+
+def test_run_powershell_supports_extra_args():
+    """_run_powershell が extra_args を受け取り、コマンドに追加する."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    assert "extra_args" in src
+    # cmd.extend(extra_args) または相当
+    assert "cmd.extend(extra_args)" in src or "cmd += extra_args" in src
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

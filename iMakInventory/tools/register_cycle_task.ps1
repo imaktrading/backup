@@ -35,7 +35,11 @@ param (
     [string]$SheetLabel = "TEST_PARALLEL",
 
     # eBay upload skip (Stage 1 = $true、Stage 2 移行時は -SkipUpload:$false で無効化)
-    [bool]$SkipUpload = $true
+    [bool]$SkipUpload = $true,
+
+    # 起動時刻 (HH:MM カンマ区切り、最大 6 件、空欄 skip).
+    # default は trabajo (08/12/16/20/00/04) と 2h ずらした並走用 6 件。
+    [string]$Times = "10:00,14:00,18:00,22:00,02:00,06:00"
 )
 
 # fail-fast: 途中エラーで success メッセージを誤出力しない
@@ -115,12 +119,32 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-# 4h サイクル: 10:00, 14:00, 18:00, 22:00, 02:00, 06:00 の 6 トリガー
-# (trabajo の 08/12/16/20/00/04 と 2h ずらしで並走 ─ Phase 9a)
-$triggers = @()
-foreach ($h in 2, 6, 10, 14, 18, 22) {
-    $triggers += New-ScheduledTaskTrigger -Daily -At ([DateTime]::Today.AddHours($h))
+# 起動時刻トリガー組立 (最大 6 件、空欄 skip)
+$timeList = @()
+foreach ($t in ($Times -split ",")) {
+    $t = $t.Trim()
+    if ($t -eq "") { continue }
+    if ($t -notmatch '^\d{1,2}:\d{2}$') {
+        throw "起動時刻は HH:MM 形式で指定 (NG: '$t')"
+    }
+    try {
+        $dt = [DateTime]::Parse($t)
+    } catch {
+        throw "起動時刻 parse 失敗: '$t'"
+    }
+    $timeList += $dt
 }
+if ($timeList.Count -eq 0) {
+    throw "起動時刻が 1 件もない (-Times 空)。最低 1 件は指定してください"
+}
+if ($timeList.Count -gt 6) {
+    Write-Warning "起動時刻 $($timeList.Count) 件 (max 6 想定)、全て登録します"
+}
+$triggers = @()
+foreach ($dt in $timeList) {
+    $triggers += New-ScheduledTaskTrigger -Daily -At $dt
+}
+$timesDisplay = ($timeList | ForEach-Object { $_.ToString("HH:mm") }) -join ", "
 
 Write-Output "[INFO] Python: $pythonExe"
 
@@ -144,8 +168,8 @@ Register-ScheduledTask `
     | Out-Null
 
 Write-Output "[OK] $TaskName 登録完了"
-Write-Output "  schedule: 4h サイクル (10:00, 14:00, 18:00, 22:00, 02:00, 06:00)"
-Write-Output "  並走対象: trabajo (08/12/16/20/00/04) と 2h ずらし"
+Write-Output "  schedule:    $timesDisplay  ($($timeList.Count) 件)"
+Write-Output "  並走想定:    trabajo (08/12/16/20/00/04) と適当 ずらし運用"
 Write-Output "  sheet_id:    $SheetId"
 Write-Output "  sheet_label: $SheetLabel"
 $stageMode = if ($SkipUpload) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }

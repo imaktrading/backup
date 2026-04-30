@@ -81,13 +81,20 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 # ============================================================================
 # State persistence
 # ============================================================================
+_DEFAULT_TIMES = ["10:00", "14:00", "18:00", "22:00", "02:00", "06:00"]
+
+
 def _load_state() -> dict:
     if not GUI_STATE_FILE.exists():
-        return {"high_history": [], "low_history": [], "single_history": []}
+        return {"high_history": [], "low_history": [], "single_history": [],
+                "cycle_times": list(_DEFAULT_TIMES)}
     try:
-        return json.loads(GUI_STATE_FILE.read_text(encoding="utf-8"))
+        st = json.loads(GUI_STATE_FILE.read_text(encoding="utf-8"))
+        st.setdefault("cycle_times", list(_DEFAULT_TIMES))
+        return st
     except (json.JSONDecodeError, OSError):
-        return {"high_history": [], "low_history": [], "single_history": []}
+        return {"high_history": [], "low_history": [], "single_history": [],
+                "cycle_times": list(_DEFAULT_TIMES)}
 
 
 def _save_state(state: dict):
@@ -251,15 +258,33 @@ class ControlPanel:
         # === Task scheduler controls ===
         task_frame = ttk.LabelFrame(self.root, text="Windows タスクスケジューラ")
         task_frame.pack(fill="x", padx=8, pady=4)
-        ttk.Button(task_frame, text="状態確認",
+
+        # 起動時刻 (HH:MM × 6 件、空欄 skip)
+        times_row = ttk.Frame(task_frame)
+        times_row.pack(fill="x", padx=4, pady=2)
+        ttk.Label(times_row, text="起動時刻 (最大 6 件、空欄 skip):").pack(side="left", padx=4)
+        self.cycle_time_vars = []
+        saved_times = (self.state.get("cycle_times") or list(_DEFAULT_TIMES))[:6]
+        # 6 件まで埋めて、足りない分は空欄
+        while len(saved_times) < 6:
+            saved_times.append("")
+        for i in range(6):
+            var = tk.StringVar(value=saved_times[i])
+            ttk.Entry(times_row, textvariable=var, width=7).pack(side="left", padx=2)
+            self.cycle_time_vars.append(var)
+
+        # ボタン行
+        btn_row = ttk.Frame(task_frame)
+        btn_row.pack(fill="x", padx=4, pady=2)
+        ttk.Button(btn_row, text="状態確認",
                    command=self._task_status).pack(side="left", padx=4, pady=4)
-        ttk.Button(task_frame, text="TEST タスク登録 (5 分おき)",
+        ttk.Button(btn_row, text="TEST タスク登録 (5 分おき)",
                    command=lambda: self._task_register("test")).pack(side="left", padx=4, pady=4)
-        ttk.Button(task_frame, text="TEST タスク削除",
+        ttk.Button(btn_row, text="TEST タスク削除",
                    command=lambda: self._task_unregister("test")).pack(side="left", padx=4, pady=4)
-        ttk.Button(task_frame, text="本番タスク登録 (4h おき)",
+        ttk.Button(btn_row, text="本番タスク登録 (上記時刻で)",
                    command=lambda: self._task_register("cycle")).pack(side="left", padx=4, pady=4)
-        ttk.Button(task_frame, text="本番タスク削除",
+        ttk.Button(btn_row, text="本番タスク削除",
                    command=lambda: self._task_unregister("cycle")).pack(side="left", padx=4, pady=4)
 
         # === Restore (Phase 8c): backup シートから D 列を巻戻す ===
@@ -526,14 +551,18 @@ class ControlPanel:
     # =====================================================================
     # Task scheduler
     # =====================================================================
-    def _run_powershell(self, script: str, action: str = "Status") -> str:
+    def _run_powershell(self, script: str, action: str = "Status",
+                        extra_args: list[str] | None = None) -> str:
         ps = TOOLS_DIR / script
         if not ps.exists():
             return f"❌ {ps} not found"
+        cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps),
+               "-Action", action]
+        if extra_args:
+            cmd.extend(extra_args)
         try:
             r = subprocess.run(
-                ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps),
-                 "-Action", action],
+                cmd,
                 cwd=str(SCRIPT_DIR), capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=30,
                 creationflags=_NO_WINDOW,
@@ -552,13 +581,43 @@ class ControlPanel:
 
     def _task_register(self, kind: str):
         if kind == "cycle":
+            # GUI から起動時刻 6 件を吸い上げ、空欄を skip して -Times に渡す
+            time_re = re.compile(r"^\d{1,2}:\d{2}$")
+            collected = []
+            for var in self.cycle_time_vars:
+                t = (var.get() or "").strip()
+                if not t:
+                    continue
+                if not time_re.match(t):
+                    messagebox.showerror(
+                        "エラー", f"起動時刻は HH:MM 形式 (NG: {t!r})"
+                    )
+                    return
+                collected.append(t)
+            if not collected:
+                messagebox.showerror("エラー", "起動時刻を最低 1 件入力してください")
+                return
+            # state 永続化 (次回 GUI 起動時に復元)
+            try:
+                self.state["cycle_times"] = collected[:6]
+                _save_state(self.state)
+            except Exception:
+                pass
+
             if not messagebox.askyesno(
                 "本番タスク登録",
-                "本番タスク (4h サイクル) を登録します。\n"
-                "TEST タスクで動作確認 OK でしたか?\n\n登録を続行しますか?"
+                f"本番タスクを以下の時刻で登録します ({len(collected)} 件):\n"
+                f"  {', '.join(collected)}\n\n"
+                "TEST タスクで動作確認 OK でしたか? 登録を続行しますか?"
             ):
                 return
-        script = "register_test_task.ps1" if kind == "test" else "register_cycle_task.ps1"
+            script = "register_cycle_task.ps1"
+            extra = ["-Times", ",".join(collected)]
+            out = self._run_powershell(script, "Register", extra_args=extra)
+            self._show_dialog("cycle タスク登録結果", out)
+            return
+
+        script = "register_test_task.ps1"
         out = self._run_powershell(script, "Register")
         self._show_dialog(f"{kind} タスク登録結果", out)
 
