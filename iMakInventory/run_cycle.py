@@ -270,6 +270,7 @@ def run_cycle(
     limit: Optional[int] = None,
     test_mode: bool = False,
     skip_upload: bool = False,
+    monitor_only: bool = False,
     sheet_id: Optional[str] = None,
     sheet_label: Optional[str] = None,
     high_sheet_id: Optional[str] = None,
@@ -283,6 +284,7 @@ def run_cycle(
         "sheet_label": sheet_label,
         "limit": limit,
         "skip_upload": skip_upload,
+        "monitor_only": monitor_only,
         "phases": {},
         "status": "init",
     }
@@ -340,8 +342,13 @@ def run_cycle(
         )
         cycle_log["phases"]["monitor"] = m
 
-        # Phase 2: revise CSV (skip if no newly_sold)
-        if m.get("newly_sold", 0) == 0:
+        # Phase 2: revise CSV
+        if monitor_only:
+            _log(f"  --monitor-only mode → revise CSV / upload 共に skip", test_mode)
+            cycle_log["phases"]["revise_csv"] = {"skipped": "monitor_only"}
+            cycle_log["phases"]["upload"] = {"skipped": "monitor_only"}
+            cycle_log["status"] = "success_monitor_only"
+        elif m.get("newly_sold", 0) == 0:
             _log(f"  newly_sold = 0 → revise CSV step skip", test_mode)
             cycle_log["phases"]["revise_csv"] = {"skipped": "no newly_sold"}
             cycle_log["phases"]["upload"] = {"skipped": "no csv"}
@@ -428,6 +435,8 @@ def main():
                         help="[TEST] ログ + 完了通知発動")
     parser.add_argument("--skip-upload", action="store_true",
                         help="upload step skip (CSV 生成までで止める)")
+    parser.add_argument("--monitor-only", action="store_true",
+                        help="在庫チェックのみ (CSV 生成も upload も skip、audit は実行)")
     # Phase 6a: 単一スプシ mode + ID 上書き
     parser.add_argument("--sheet-id", default=None,
                         help="単一スプシ mode: 指定 ID のみ処理 "
@@ -449,6 +458,7 @@ def main():
         limit=args.limit,
         test_mode=args.test_mode,
         skip_upload=args.skip_upload,
+        monitor_only=args.monitor_only,
         sheet_id=args.sheet_id,
         sheet_label=args.sheet_label,
         high_sheet_id=args.high_sheet_id,

@@ -128,6 +128,9 @@ class ControlPanel:
         self.test_mode_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(opt_frame, text="--test-mode (完了通知 + ログ [TEST])",
                         variable=self.test_mode_var).pack(side="left", padx=8)
+        self.monitor_only_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opt_frame, text="--monitor-only (在庫チェックのみ、eBay UP なし)",
+                        variable=self.monitor_only_var).pack(side="left", padx=8)
         self.skip_upload_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(opt_frame, text="--skip-upload (CSV 生成までで止める)",
                         variable=self.skip_upload_var).pack(side="left", padx=8)
@@ -195,6 +198,8 @@ class ControlPanel:
         cmd = [sys.executable, "-u", "run_cycle.py"]
         if self.test_mode_var.get():
             cmd.append("--test-mode")
+        if self.monitor_only_var.get():
+            cmd.append("--monitor-only")
         if self.skip_upload_var.get():
             cmd.append("--skip-upload")
         limit = self.limit_var.get().strip()

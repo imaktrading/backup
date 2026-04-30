@@ -47,6 +47,26 @@ def test_run_cycle_has_sheet_id_param():
     assert "low_sheet_id" in sig.parameters
 
 
+def test_run_cycle_has_monitor_only_param():
+    """run_cycle.run_cycle が monitor_only flag 受ける."""
+    from run_cycle import run_cycle
+    import inspect
+    sig = inspect.signature(run_cycle)
+    assert "monitor_only" in sig.parameters
+    # default False
+    assert sig.parameters["monitor_only"].default is False
+
+
+def test_control_panel_has_monitor_only_var():
+    """control_panel に monitor_only checkbox 追加."""
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "control_panel.py"
+    content = src.read_text(encoding="utf-8")
+    assert "monitor_only_var" in content
+    assert "--monitor-only" in content
+    assert "在庫チェックのみ" in content
+
+
 def test_collect_from_pending_queue_has_single_params():
     """collect_from_pending_queue が single_sheet_id / single_sheet_label を受ける."""
     from ebay_actions.revise_csv_generator import collect_from_pending_queue
