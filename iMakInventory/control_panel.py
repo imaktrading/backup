@@ -198,7 +198,8 @@ class ControlPanel:
         run_frame.pack(fill="x", padx=8, pady=4)
         self.start_btn = ttk.Button(run_frame, text="▶ 巡回開始", command=self._start_cycle)
         self.start_btn.pack(side="left", padx=4)
-        self.stop_btn = ttk.Button(run_frame, text="■ 停止", command=self._stop_cycle, state="disabled")
+        # 停止ボタンは常に enabled (cron 起動分も lock file 経由で停止可能)
+        self.stop_btn = ttk.Button(run_frame, text="■ 停止", command=self._stop_cycle)
         self.stop_btn.pack(side="left", padx=4)
         self.status_label = ttk.Label(run_frame, text="待機中")
         self.status_label.pack(side="left", padx=8)
@@ -361,28 +362,102 @@ class ControlPanel:
 
     def _on_proc_exit(self, rc):
         self.start_btn.configure(state="normal")
-        self.stop_btn.configure(state="disabled")
+        # stop_btn は常に enabled に保つ (cron 起動分の停止用)
         self.status_label.configure(text=f"完了 (exit={rc})")
         self._append_log(f"=== 終了 exit={rc} ===\n")
         self._refresh_log_tail()
 
     def _stop_cycle(self):
-        if not self.proc:
+        """巡回停止 (Phase 9 拡張 B):
+
+        1) GUI から spawn した subprocess なら terminate→kill
+        2) なければ lock file から pid 取得 → kill (cron 起動分)
+        3) lock 削除 (stale 防止)
+        """
+        # 二重確認
+        if not messagebox.askyesno(
+            "巡回停止確認",
+            "実行中の巡回を停止しますか?\n"
+            "(GUI 起動 / cron 起動 どちらも停止対象)"
+        ):
             return
-        if self.proc.poll() is not None:
-            self._append_log("[stop] 既に終了済み\n")
-            return
-        try:
-            self.proc.terminate()
-            self._append_log("[stop] terminate() 送信\n")
-            # 短時間で kill
+
+        stopped_any = False
+
+        # 1) GUI 起動の subprocess を terminate/kill
+        if self.proc and self.proc.poll() is None:
             try:
-                self.proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-                self._append_log("[stop] kill() forced\n")
+                self.proc.terminate()
+                self._append_log("[stop] GUI subprocess に terminate() 送信\n")
+                try:
+                    self.proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.proc.kill()
+                    self._append_log("[stop] kill() forced\n")
+                stopped_any = True
+            except Exception as e:
+                self._append_log(f"[stop err] {e}\n")
+
+        # 2) lock file 経由で cron 起動分 (or 別 process) も停止
+        try:
+            killed = self._kill_via_lock_file()
+            if killed:
+                stopped_any = True
         except Exception as e:
-            self._append_log(f"[stop err] {e}\n")
+            self._append_log(f"[stop lock err] {type(e).__name__}: {e}\n")
+
+        if not stopped_any:
+            self._append_log("[stop] 実行中プロセスなし (lock file 不在 / GUI subprocess も既に終了)\n")
+        self.status_label.configure(text="停止済")
+
+    def _kill_via_lock_file(self) -> bool:
+        """decision_log/.cycle.lock を読み取り、記録された pid を kill.
+
+        Returns: True なら kill 実行 / lock 削除した。False なら lock 不在。
+        """
+        from pathlib import Path  # noqa: PLC0415
+        lock = SCRIPT_DIR / "decision_log" / ".cycle.lock"
+        if not lock.exists():
+            return False
+        try:
+            content = lock.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        # content 例: "pid=6992 host=DESKTOP ts=2026-04-30T14:33:00"
+        pid = None
+        for tok in content.split():
+            if tok.startswith("pid="):
+                try:
+                    pid = int(tok[4:])
+                except ValueError:
+                    pid = None
+                break
+        if pid is None:
+            self._append_log(f"[stop] lock 内容 parse 失敗: {content[:80]}\n")
+            return False
+
+        # taskkill /F /T /PID <pid> で子 process ごと kill
+        try:
+            r = subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, text=True, encoding="cp932", errors="replace",
+                timeout=10,
+            )
+            if r.returncode == 0:
+                self._append_log(f"[stop] taskkill /T /PID {pid} 成功\n")
+            else:
+                # rc=128 などは「pid 不在」、これは race condition で OK
+                self._append_log(f"[stop] taskkill rc={r.returncode}: {(r.stderr or r.stdout)[:120]}\n")
+        except Exception as e:
+            self._append_log(f"[stop taskkill err] {type(e).__name__}: {e}\n")
+
+        # lock 削除 (stale 防止)
+        try:
+            lock.unlink(missing_ok=True)
+            self._append_log("[stop] lock file 削除\n")
+        except OSError:
+            pass
+        return True
 
     def _append_log(self, text: str):
         self.log_text.insert("end", text)

@@ -62,6 +62,37 @@ LOCK_FILE = DECISION_LOG_DIR / ".cycle.lock"
 LOCK_STALE_HOURS = 6
 PYTEST_PRECHECK_TIMEOUT_SEC = 120  # 検体 42 件は 1 秒程度、120s で十分
 
+# Windows: 黒窓抑制用 flag (Phase 9 拡張 A2)
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
+def _patch_subprocess_no_window():
+    """Windows: subprocess.Popen を monkey-patch して全子 process に CREATE_NO_WINDOW 強制.
+
+    undetected_chromedriver は内部で subprocess.Popen 経由で chromedriver process を
+    起動するが、creationflags を渡す手段がない。そのため Popen 自体を patch する。
+    黒窓 (console window) 抑制が目的。GUI から起動された場合のみ実効、cron で
+    pythonw.exe 起動なら冪等 (どちらも window 出ない)。
+    """
+    if sys.platform != "win32":
+        return
+    _orig_popen = subprocess.Popen
+    if getattr(_orig_popen, "_imak_patched", False):
+        return  # 二重 patch 防止 (re-import 時)
+
+    no_window = subprocess.CREATE_NO_WINDOW
+
+    class _PatchedPopen(_orig_popen):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):
+            kwargs["creationflags"] = (kwargs.get("creationflags") or 0) | no_window
+            super().__init__(*args, **kwargs)
+
+    _PatchedPopen._imak_patched = True  # type: ignore[attr-defined]
+    subprocess.Popen = _PatchedPopen  # type: ignore[misc]
+
+
+_patch_subprocess_no_window()
+
 
 # ============================================================================
 # Logging
@@ -138,6 +169,7 @@ def _phase_pytest_precheck(test_mode: bool) -> dict:
             cwd=str(SCRIPT_DIR),
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=PYTEST_PRECHECK_TIMEOUT_SEC,
+            creationflags=_NO_WINDOW,
         )
         elapsed = time.time() - t0
         if result.returncode == 0:

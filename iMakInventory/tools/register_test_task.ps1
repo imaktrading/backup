@@ -38,6 +38,14 @@ try {
 if (-not (Test-Path $pythonExe)) {
     throw "Python 実行ファイル不在: $pythonExe"
 }
+# 黒窓 (console window) 抑制のため pythonw.exe を優先 (Phase 9 拡張 A1)
+$pythonwExe = Join-Path (Split-Path $pythonExe -Parent) "pythonw.exe"
+if (Test-Path $pythonwExe) {
+    Write-Output "[INFO] pythonw.exe (no console): $pythonwExe"
+    $pythonExe = $pythonwExe
+} else {
+    Write-Warning "pythonw.exe が同 dir に不在 → python.exe で fallback (黒窓出ます)"
+}
 
 # ※ $Args / $args は PowerShell 自動変数のため使用不可、$cmdArgs を使う
 $cmdArgs = "-u run_cycle.py --test-mode --limit 3"
@@ -84,6 +92,7 @@ $taskTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Now.AddMinutes(2)
             -RepetitionInterval (New-TimeSpan -Minutes 5) `
             -RepetitionDuration (New-TimeSpan -Hours 24)
 $taskSettings = New-ScheduledTaskSettingsSet `
+            -Hidden `
             -StartWhenAvailable `
             -AllowStartIfOnBatteries `
             -DontStopIfGoingOnBatteries `

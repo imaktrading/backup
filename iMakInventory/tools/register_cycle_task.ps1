@@ -63,6 +63,15 @@ try {
 if (-not (Test-Path $pythonExe)) {
     throw "Python 実行ファイル不在: $pythonExe"
 }
+# 黒窓 (console window) 抑制のため pythonw.exe を優先 (Phase 9 拡張 A1)
+# python.exe と同 dir にある想定。なければ警告して python.exe で fallback。
+$pythonwExe = Join-Path (Split-Path $pythonExe -Parent) "pythonw.exe"
+if (Test-Path $pythonwExe) {
+    Write-Output "[INFO] pythonw.exe (no console): $pythonwExe"
+    $pythonExe = $pythonwExe
+} else {
+    Write-Warning "pythonw.exe が同 dir に不在 ($pythonwExe) → python.exe で fallback (黒窓出ます)"
+}
 
 # run_cycle.py 引数を組立 (--sheet-id / --sheet-label / --skip-upload)
 # ※ $Args / $args は PowerShell 自動変数のため使用不可、$cmdArgs を使う
@@ -118,6 +127,7 @@ Write-Output "[INFO] Python: $pythonExe"
 # ※ $action は $Action パラメータと衝突 (PS 変数名は大小区別なし) → $taskAction
 $taskAction = New-ScheduledTaskAction -Execute $pythonExe -Argument $cmdArgs -WorkingDirectory $WorkingDir
 $taskSettings = New-ScheduledTaskSettingsSet `
+            -Hidden `
             -StartWhenAvailable `
             -AllowStartIfOnBatteries `
             -DontStopIfGoingOnBatteries `
