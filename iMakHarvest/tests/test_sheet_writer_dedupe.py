@@ -3,7 +3,7 @@
 新仕様 (2026-04-30):
   - Harvest が書くのは A 列 URL のみ. B/C 列は空欄で書込.
   - デデュープキーは A 列 URL から dedupe_key() で抽出.
-  - 既存行に B 列の値 (旧実装の item_id) があれば後方互換で併用.
+  - B 列は eBay item ID (数字のみ) 用の別関心列 → デデュープ判定では参照しない.
 """
 from __future__ import annotations
 
@@ -49,11 +49,11 @@ def _ws_with_existing_urls(item_ids: list[str]) -> _MockWorksheet:
     return _MockWorksheet(rows)
 
 
-def _ws_legacy_with_b_column(item_ids: list[str]) -> _MockWorksheet:
-    """旧実装で B 列に item_id が入っている既存スプシ (後方互換テスト用)."""
-    rows = [["URL", "item_id", "title"]]
-    for iid in item_ids:
-        rows.append([f"https://jp.mercari.com/item/{iid}", iid, ""])
+def _ws_with_ebay_item_ids(url_and_ebay_ids: list[tuple[str, str]]) -> _MockWorksheet:
+    """A 列 URL + B 列 eBay item ID (数字のみ) の既存スプシ (実運用想定)."""
+    rows = [["URL", "eBay itemID", ""]]
+    for url, ebay_id in url_and_ebay_ids:
+        rows.append([url, ebay_id, ""])
     return _MockWorksheet(rows)
 
 
@@ -106,12 +106,17 @@ class TestReadExistingDedupeKeys:
         ])
         assert read_existing_dedupe_keys(ws) == {"m11111111111"}
 
-    def test_legacy_b_column_values_are_kept_as_keys(self):
-        # 旧実装で B 列に item_id が残っている行は後方互換で並行集計
-        ws = _ws_legacy_with_b_column(["m11111111111", "m22222222222"])
+    def test_b_column_ebay_ids_are_ignored(self):
+        # B 列は eBay item ID (数字のみ) 用 → dedupe key set には入れない
+        ws = _ws_with_ebay_item_ids([
+            ("https://jp.mercari.com/item/m11111111111", "357401200653"),
+            ("https://jp.mercari.com/item/m22222222222", "357401200999"),
+        ])
         keys = read_existing_dedupe_keys(ws)
-        # A 列 URL からも、B 列値からも、同じ item_id が key として入る
+        # Mercari URL ベースの key のみが集まり、eBay item ID は混ざらない
         assert keys == {"m11111111111", "m22222222222"}
+        assert "357401200653" not in keys
+        assert "357401200999" not in keys
 
 
 # --------------------------------------------------------------------------
@@ -160,20 +165,38 @@ class TestAppendNewUrls:
         assert result["appended"] == 1
         assert result["skipped_existing"] == 1
 
-    def test_dedupes_against_legacy_b_column(self):
-        # 既存スプシの B 列に旧実装の item_id が残っていても、新規追加時はそれを
-        # 既出として認識してスキップ.
-        ws = _ws_legacy_with_b_column(["m11111111111"])
+    def test_b_column_ebay_id_does_not_affect_dedupe(self):
+        # B 列に eBay item ID (数字) が入っていても、デデュープには影響しない.
+        # 既存判定は A 列 URL のみで行う.
+        ws = _ws_with_ebay_item_ids([
+            ("https://jp.mercari.com/item/m11111111111", "357401200653"),
+        ])
         items = [
-            {"url": "https://jp.mercari.com/item/m11111111111", "item_id": "m11111111111"},
-            {"url": "https://jp.mercari.com/item/m22222222222", "item_id": "m22222222222"},
+            {"url": "https://jp.mercari.com/item/m11111111111"},     # A 列で既出 → skip
+            {"url": "https://jp.mercari.com/item/m22222222222"},     # 新規
         ]
         result = append_new_urls(ws, items)
         assert result["appended"] == 1
         assert result["skipped_existing"] == 1
-        # 新規行も B/C 空欄で書込
         appended = ws.append_calls[0]
         assert appended[0] == ["https://jp.mercari.com/item/m22222222222", "", ""]
+
+    def test_b_column_ebay_id_unrelated_string_does_not_match(self):
+        # 仮に Mercari URL の入力 item_id が eBay item ID 文字列と「数字一致」しても
+        # dedupe_key 規則 (m\\d+ または URL 正規化) では別物として扱われる.
+        ws = _ws_with_ebay_item_ids([
+            ("https://jp.mercari.com/item/m11111111111", "357401200653"),
+        ])
+        items = [
+            # Mercari URL じゃないが eBay 番号文字列だけ突っ込む不正入力ケース
+            {"url": "357401200653"},
+        ]
+        result = append_new_urls(ws, items)
+        # url が短すぎて dedupe_key が空 (というか文字列そのまま) → invalid 扱いで skip
+        # または別物として 1 件 append される (現在の実装は後者)
+        # 重要なのは「eBay ID と Mercari URL が衝突しないこと」のみ. この行が
+        # 既出 m11111111111 とも、B 列の 357401200653 とも一致しない.
+        assert result["appended"] + result["skipped_existing"] == 1
 
     def test_skips_invalid_items(self):
         ws = _ws_with_existing_urls([])

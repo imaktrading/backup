@@ -2,17 +2,20 @@
 
 設計原則:
   - 既存スプシ・列構成を一切壊さない
-  - Harvest が書くのは A 列 (URL) のみ. B/C 列は空欄で書込 (ユーザー側で別用途)
+  - Harvest が書くのは A 列 (URL) のみ. B/C 列は触らない (空欄)
   - デデュープは A 列 URL から item_id を内部抽出して比較
-    (B 列を空欄にしても重複防止が機能するように URL ベースのキーで判定)
   - 失敗時は raise (caller が retry 判断)
   - 既存行は絶対に上書きしない (新規 append のみ)
 
-スプシ列レイアウト:
-  A: URL          ← Harvest が書込 (新規行のみ)
-  B: 空欄         ← Harvest は触らない (ユーザーが手動で別用途に使う)
-  C: 空欄         ← Harvest は触らない
-  D 以降          ← Harvest は触らない (iMakInventory が後で D 列に売切フラグ等)
+スプシ列レイアウト (確定):
+  A: 仕入元 URL          ← Harvest が書込 (新規行のみ)
+  B: eBay item ID        ← 出品後にユーザー or 別ツールが書込 (Harvest は読まない)
+  C: 空欄                ← Harvest は触らない
+  D 以降                 ← Harvest は触らない (iMakInventory が後で売切フラグ等)
+
+B 列は eBay item ID (数字のみ) が入るため、Mercari item_id (m\\d+) や
+Amazon ASIN とは形式が異なり dedupe key と衝突しない. → デデュープは
+A 列 URL のみを参照して判定する.
 
 サービスアカウント認証情報パスは iMakInventory と共通 (CREDS_PATH)。
 """
@@ -81,11 +84,9 @@ def get_listings_worksheet(sh, gid: int = LISTINGS_GID):
 
 
 def read_existing_dedupe_keys(ws) -> set[str]:
-    """既存行から デデュープ key の set を取得.
+    """既存行から デデュープ key の set を取得 (A 列 URL のみ参照).
 
-    A 列 URL → dedupe_key() で抽出.
-    後方互換: B 列に値が残っている既存行 (旧実装で書込まれた m12345 等) も
-    並行で集める. これにより B 列空欄移行後も既存データとの重複判定が継続して効く.
+    B 列は eBay item ID (数字のみ) が入る別関心の列なので参照しない.
     """
     all_values = ws.get_all_values()
     if len(all_values) < 2:
@@ -97,11 +98,6 @@ def read_existing_dedupe_keys(ws) -> set[str]:
             k = dedupe_key(url)
             if k:
                 keys.add(k)
-        if len(row) >= COL_B:
-            v = (row[COL_B - 1] or "").strip()
-            # B 列に旧実装の item_id (m\\d+) が残っていれば併用
-            if v:
-                keys.add(v)
     return keys
 
 
