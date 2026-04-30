@@ -32,6 +32,16 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+# stdout/stderr を UTF-8 に強制 (Windows pythonw 経由起動時に cp932 fallback で
+# 絵文字 ✅/❌ 等が UnicodeEncodeError になるのを防ぐ)。
+for _stream_name in ("stdout", "stderr"):
+    _s = getattr(sys, _stream_name, None)
+    if _s is not None and hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
 from monitor_listings import process_sheet  # noqa: E402
 from sheet_updater import HIGH_SHEET_ID, LOW_SHEET_ID  # noqa: E402
 from ebay_actions.revise_csv_generator import run as run_revise_csv  # noqa: E402

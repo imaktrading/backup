@@ -283,12 +283,13 @@ class ControlPanel:
         if cmd is None:
             return
         self._append_log(f"=== 起動: {' '.join(cmd)} ===\n")
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
         try:
             self.proc = subprocess.Popen(
                 cmd, cwd=str(SCRIPT_DIR),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
-                bufsize=1,
+                bufsize=1, env=env,
             )
         except Exception as e:
             messagebox.showerror("起動失敗", f"{type(e).__name__}: {e}")
