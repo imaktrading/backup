@@ -133,16 +133,19 @@ def _check_404(url: str) -> Optional[bool]:
 # ============================================================================
 # Selenium driver factory
 # ============================================================================
-def create_driver(headless: bool = True, use_iMakMercari_profile: bool = False):
+def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
     """undetected_chromedriver の driver を生成して返す.
 
-    Phase 9 修正 (2026-04-30): use_iMakMercari_profile を default False に変更。
-    旧 default (True) では iMakMercari/chrome_profile を共有していたため、
-    Takaaki さんがブラウザを並行操作している時に driver session が壊れて
-    全件 None 返却 (= 偽の anti-bot 症状) を再現性なく引き起こしていた。
+    Phase 9 修正 履歴 (2026-04-30):
+    - 一度 default=False に変更したが (profile 競合 仮説)、実際は逆効果だった
+    - 19:30 cycle (profile=True): 46/46 Shops 成功
+    - 19:38 cycle (profile=False): 46/46 Shops 失敗
+    → profile (cookie / session) 無しだと mercari Shops が異なる DOM を serve
+      (variant-purchase-button が出ない、body text しかない簡易版)
+    → default=True に戻した。「朝できていたプログラム」と同じ挙動。
 
-    mercari `/item/m\\d+` および `/shops/product/...` は login 不要なため
-    fresh profile で問題なく取得できる。
+    profile lock 競合の懸念: 4h cycle で chrome 並行使用との衝突確率は低い。
+    衝突時のみ user 側でブラウザを一時退避してもらう運用とする。
 
     呼出元はループ内で 1 driver を再利用することを推奨。
     """
