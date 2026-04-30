@@ -39,16 +39,17 @@ GENERIC_LINK_SELECTOR = "a[href*='item/']"
 # /item/m12345... または /items/m12345...
 MERCARI_ITEM_RE = re.compile(r"/items?/(m\d+)")
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/126.0.0.0 Safari/537.36"
-)
+# UA はハードコードしない. Chrome 本体の本物 UA を使うことで Mercari の
+# 「お使いのブラウザがWebサイトに対応していない」検出を回避する.
+# (UA に Chrome/126 等の古いバージョンを書くと version_main=146 と矛盾し、
+#  Mercari 側のブラウザバージョンチェックで /mypage/likes が「ページが見つかりません」
+#  にフォールバックする現象が発生 — 2026-04-30 確認済)
 
-DEFAULT_INITIAL_WAIT_SEC = 15  # 初回ハイドレーション (mercari-liked-item 出現待ち)
+DEFAULT_INITIAL_WAIT_SEC = 25  # 初回ハイドレーション (mercari-liked-item 出現待ち)
 DEFAULT_LOAD_MORE_CLICKS = 6   # 「もっと見る」ボタン最大押下回数 (= 100 件以上を狙う)
 DEFAULT_AFTER_CLICK_SLEEP = 3.0
 DEFAULT_MAX_ITEMS = 200        # ハードリミット (暴走防止)
+DEBUG_DUMP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "debug")
 
 
 def parse_item_id(url: str) -> Optional[str]:
@@ -116,7 +117,7 @@ def create_driver(headless: bool = False, profile_dir: Optional[str] = None):
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=ja-JP")
     options.add_argument(f"--user-data-dir={profile}")
-    options.add_argument(f"--user-agent={USER_AGENT}")
+    # --user-agent は意図的に指定しない (Chrome 本体の UA を使う、上部コメント参照)
     if headless:
         options.add_argument("--headless=new")
 
@@ -124,20 +125,59 @@ def create_driver(headless: bool = False, profile_dir: Optional[str] = None):
 
 
 def _wait_for_likes_anchor(driver, timeout_sec: int) -> bool:
-    """a[data-testid='mercari-liked-item'] が現れるまで待機. 現れたら True。"""
+    """いいねページの商品 anchor が現れるまで待機. 現れたら True。
+
+    ハイドレーションが遅い場合に備え、3 秒経過した時点で 1 回ページ末尾までスクロール
+    (lazy-render 系を強制発火) → さらに polling を継続。
+    """
     from selenium.webdriver.common.by import By  # noqa: PLC0415
 
-    end_at = time.time() + timeout_sec
+    selectors = [
+        ITEM_ANCHOR_SELECTOR,           # a[data-testid='mercari-liked-item'] (trabajo 由来)
+        GENERIC_LINK_SELECTOR,           # a[href*='item/']
+        "a[href^='/item/']",             # よりタイト
+        "a[href*='/items/']",            # alt path
+    ]
+
+    start = time.time()
+    end_at = start + timeout_sec
+    scrolled = False
     while time.time() < end_at:
-        elements = driver.find_elements(By.CSS_SELECTOR, ITEM_ANCHOR_SELECTOR)
-        if elements:
-            return True
-        # フォールバック: data-testid が変わった場合
-        elements = driver.find_elements(By.CSS_SELECTOR, GENERIC_LINK_SELECTOR)
-        if elements:
-            return True
+        for sel in selectors:
+            elements = driver.find_elements(By.CSS_SELECTOR, sel)
+            # /item/ を含む href を持つ a が 1 つでもあれば OK
+            for el in elements:
+                href = (el.get_attribute("href") or "")
+                if "/item/" in href or "/items/" in href:
+                    return True
+        # 3 秒経過しても見つからなければ 1 回スクロールして lazy-render を強制発火
+        if not scrolled and time.time() - start > 3.0:
+            try:
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                driver.execute_script("window.scrollTo(0, 0);")
+            except Exception:
+                pass
+            scrolled = True
         time.sleep(0.5)
     return False
+
+
+def _dump_debug_artifacts(driver, label: str) -> tuple[str, str]:
+    """page_source とスクリーンショットを debug/ に保存. 戻り値は (html_path, png_path)."""
+    os.makedirs(DEBUG_DUMP_DIR, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    html_path = os.path.join(DEBUG_DUMP_DIR, f"{label}_{ts}.html")
+    png_path = os.path.join(DEBUG_DUMP_DIR, f"{label}_{ts}.png")
+    try:
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(driver.page_source or "")
+    except Exception:
+        html_path = ""
+    try:
+        driver.save_screenshot(png_path)
+    except Exception:
+        png_path = ""
+    return html_path, png_path
 
 
 def _click_load_more(driver) -> bool:
@@ -201,11 +241,16 @@ def collect_liked_urls(
         if not _wait_for_likes_anchor(driver, initial_wait_sec):
             # ログイン画面に飛ばされた、もしくは DOM 仕様変更
             # → 空リストを返さず raise (誤って空書込しない)
+            # debug 用に page_source とスクショを保存して selector 調査の手掛かりに
             current_url = driver.current_url
+            html_path, png_path = _dump_debug_artifacts(driver, "likes_no_anchor")
             raise RuntimeError(
-                "いいねページの anchor が初期化中に見つからない。"
-                f"現在の URL: {current_url}\n"
-                "ログイン状態を確認してください (--login で再ログイン)。"
+                "いいねページの anchor が初期化中に見つからない。\n"
+                f"  現在の URL : {current_url}\n"
+                f"  HTML dump : {html_path}\n"
+                f"  Screenshot: {png_path}\n"
+                "ログイン状態を確認してください (--login で再ログイン)。\n"
+                "ログイン済の場合は dump HTML を確認して selector の変更有無を調査。"
             )
 
         # 「もっと見る」を最大 N 回押下
@@ -261,10 +306,42 @@ if __name__ == "__main__":
     ap.add_argument("--headless", action="store_true", help="headless で実行 (login 後のみ推奨)")
     ap.add_argument("--max-items", type=int, default=DEFAULT_MAX_ITEMS)
     ap.add_argument("--load-more", type=int, default=DEFAULT_LOAD_MORE_CLICKS)
+    ap.add_argument(
+        "--dump-html",
+        action="store_true",
+        help="いいねページを開いて 25s 待機 + scroll → debug/likes_dump_*.html に保存して終了 (selector 調査用)",
+    )
     args = ap.parse_args()
 
     if args.login:
         login_interactive()
+        raise SystemExit(0)
+
+    if args.dump_html:
+        # selector 調査専用: ページを開いて待機 + scroll してから page_source を保存
+        d = create_driver(headless=args.headless)
+        try:
+            d.get(MERCARI_LIKES_URL)
+            time.sleep(8)
+            try:
+                d.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            except Exception:
+                pass
+            time.sleep(5)
+            try:
+                d.execute_script("window.scrollTo(0, 0);")
+            except Exception:
+                pass
+            time.sleep(2)
+            html_path, png_path = _dump_debug_artifacts(d, "likes_dump")
+            print(f"current url: {d.current_url}")
+            print(f"html path  : {html_path}")
+            print(f"screenshot : {png_path}")
+        finally:
+            try:
+                d.quit()
+            except Exception:
+                pass
         raise SystemExit(0)
 
     result = collect_liked_urls(

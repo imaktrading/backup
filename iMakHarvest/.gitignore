@@ -22,6 +22,14 @@ debug/_probe_*.py
 debug/html_samples/*.html
 debug/html_samples/*.png
 
+# Debug dumps (個人いいね情報・スクショを含むため絶対 commit 禁止)
+debug/likes_*.html
+debug/likes_*.png
+debug/*_dump_*.html
+debug/*_dump_*.png
+debug/likes_no_anchor_*.html
+debug/likes_no_anchor_*.png
+
 # Claude session lock
 .claude/
 
