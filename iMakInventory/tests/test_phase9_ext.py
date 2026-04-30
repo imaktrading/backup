@@ -226,5 +226,35 @@ def test_control_panel_passes_limit_to_cycle_task():
     assert '"-Limit"' in func_body
 
 
+def test_control_panel_passes_sheet_id_label_skip_to_cycle_task():
+    """control_panel が cycle 登録時に sheet ID / label / skip-upload も渡す."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    idx = src.find("def _task_register")
+    assert idx != -1
+    end = src.find("\n    def ", idx + 1)
+    func_body = src[idx:end]
+    # GUI input を読む
+    assert "single_id_var" in func_body
+    assert "single_label_var" in func_body
+    assert "skip_upload_var" in func_body
+    # PS1 引数として渡す
+    assert '"-SheetId"' in func_body
+    assert '"-SheetLabel"' in func_body
+    # SkipUpload は :$true / :$false 形式 (bool 罠回避)
+    assert "-SkipUpload:$true" in func_body
+    assert "-SkipUpload:$false" in func_body
+
+
+def test_control_panel_rejects_dual_mode_for_cycle_task():
+    """dual mode (HIGH/LOW) では cycle 登録できない (PS1 は単一 SheetId のみ対応)."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    idx = src.find("def _task_register")
+    end = src.find("\n    def ", idx + 1)
+    func_body = src[idx:end]
+    # dual mode 時にエラー dialog
+    assert 'mode == "single"' in func_body
+    assert "「単一スプシ」" in func_body or "単一スプシ mode" in func_body or "ラジオボタン" in func_body
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

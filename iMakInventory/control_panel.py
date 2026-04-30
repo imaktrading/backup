@@ -618,6 +618,28 @@ class ControlPanel:
                     )
                     return
 
+            # GUI の sheet 入力 (mode=single 想定) を cron task にも反映
+            mode = self.mode_var.get()
+            if mode == "single":
+                raw = self.single_id_var.get().strip()
+                sheet_id = extract_sheet_id(raw)
+                sheet_label = (self.single_label_var.get() or "").strip() or "TEST_PARALLEL"
+                if not sheet_id:
+                    messagebox.showerror(
+                        "エラー", "本番タスクは「単一スプシ」mode で URL/ID を入力してください"
+                    )
+                    return
+            else:
+                # dual mode は cron task の単一 SheetId モデルと不整合
+                messagebox.showerror(
+                    "エラー",
+                    "本番タスク登録は「単一スプシ」mode のみ対応 (HIGH/LOW セット mode 不可)。\n"
+                    "ラジオボタンで「単一スプシ」を選択してください。"
+                )
+                return
+
+            skip_upload = self.skip_upload_var.get()
+
             # state 永続化 (次回 GUI 起動時に復元)
             try:
                 self.state["cycle_times"] = collected[:6]
@@ -626,16 +648,28 @@ class ControlPanel:
                 pass
 
             limit_disp = f"{limit_int} 件" if limit_int > 0 else "無制限"
+            skip_disp = "skip (Stage 1)" if skip_upload else "実行 (Stage 2)"
             if not messagebox.askyesno(
                 "本番タスク登録",
-                f"本番タスクを以下の時刻で登録します ({len(collected)} 件):\n"
-                f"  {', '.join(collected)}\n"
-                f"  limit: {limit_disp}\n\n"
-                "TEST タスクで動作確認 OK でしたか? 登録を続行しますか?"
+                f"本番タスクを以下の設定で登録します:\n"
+                f"  起動時刻: {', '.join(collected)} ({len(collected)} 件)\n"
+                f"  sheet:    {sheet_label} ({sheet_id[:30]}...)\n"
+                f"  limit:    {limit_disp}\n"
+                f"  upload:   {skip_disp}\n\n"
+                "登録を続行しますか?"
             ):
                 return
             script = "register_cycle_task.ps1"
-            extra = ["-Times", ",".join(collected)]
+            # ※ -SkipUpload は PowerShell [bool] param、文字列 "$false" を渡すと
+            #   non-empty で True に coerce される罠あり → :$true / :$false 形式で
+            #   PowerShell 側に直接 bool literal を渡す
+            skip_token = "-SkipUpload:$true" if skip_upload else "-SkipUpload:$false"
+            extra = [
+                "-Times", ",".join(collected),
+                "-SheetId", sheet_id,
+                "-SheetLabel", sheet_label,
+                skip_token,
+            ]
             if limit_int > 0:
                 extra += ["-Limit", str(limit_int)]
             out = self._run_powershell(script, "Register", extra_args=extra)
