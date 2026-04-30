@@ -277,9 +277,15 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
     #                    or variant-purchase-button が不在 / disabled
     # ============================================================
     if is_shops:
+        # Phase 9 Shops DOM 仕様変更対応 (2026-04-30 検体: variant-purchase-button が
+        # 無くなり、body text の「購入手続きへ」/「在庫切れ」で判定する DOM に移行)。
+        # 旧 testid は best-effort で残しつつ、page text を主シグナルにする。
+        SHOPS_INSTOCK_TEXT = "購入手続きへ"
+        SHOPS_SOLDOUT_TEXTS = ("在庫切れ", "売り切れました", "Sold Out", "SoldOut",
+                               "販売を終了", "売り切れ")
         end_at = time.time() + SELENIUM_WAIT_SEC
         while time.time() < end_at:
-            # SOLD 直接シグナル (trabajo 解析 selector)
+            # SOLD 直接シグナル (trabajo 解析 selector、互換維持)
             sold_signal_found = False
             for sold_sel in (
                 '[testid="disabled-purchase-button"]',       # trabajo: data- 無し
@@ -295,7 +301,7 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
                 in_stock = False
                 break
 
-            # IN_STOCK 直接シグナル
+            # IN_STOCK 直接シグナル (旧 DOM、互換維持)
             try:
                 btn = driver.find_element(By.CSS_SELECTOR, '[data-testid="variant-purchase-button"]')
                 cls = (btn.get_attribute("class") or "").lower()
@@ -306,12 +312,26 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
                 break
             except NoSuchElementException:
                 pass
-            # 削除済 / 見つからないページ
+
+            # body text 判定 (新 DOM 主シグナル)
             try:
                 page_text = driver.find_element(By.TAG_NAME, "body").text or ""
                 if any(kw in page_text for kw in DELETION_KEYWORDS):
                     return {"name": "(deleted)", "status": "DELETED",
                             "in_stock": False, "price_jpy": None}
+                if any(s in page_text for s in SHOPS_SOLDOUT_TEXTS):
+                    in_stock = False
+                    break
+                # product-detail-container が出現していて「購入手続きへ」あり = IN_STOCK
+                if SHOPS_INSTOCK_TEXT in page_text:
+                    try:
+                        driver.find_element(
+                            By.CSS_SELECTOR, '[data-testid="product-detail-container"]'
+                        )
+                        in_stock = True
+                        break
+                    except NoSuchElementException:
+                        pass
             except Exception:
                 pass
             time.sleep(SELENIUM_POLL_INTERVAL)
