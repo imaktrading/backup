@@ -1,0 +1,9 @@
+selenium>=4.15
+undetected-chromedriver>=3.5.5
+gspread>=5.12
+google-auth>=2.27
+beautifulsoup4>=4.12
+lxml>=5.1
+requests>=2.31
+win10toast>=0.9
+pytest>=8.0

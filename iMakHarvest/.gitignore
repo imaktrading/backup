@@ -1,0 +1,30 @@
+# Runtime artifacts
+logs/
+decision_log/
+csv_output/
+
+# Chrome profile (Selenium 永続化, ログイン状態を含むため絶対 commit 禁止)
+chrome_profile_*/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.vscode/
+.gui_state.json
+
+# Probe / scratch
+tests/_probe_*.py
+debug/_probe_*.py
+debug/html_samples/*.html
+debug/html_samples/*.png
+
+# Claude session lock
+.claude/
+
+# Service account credential が万一プロジェクト直下に置かれた場合の保険
+*service-account*.json
+*-7c0d38d3f73d.json
