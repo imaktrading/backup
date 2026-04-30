@@ -133,8 +133,17 @@ def _check_404(url: str) -> Optional[bool]:
 # ============================================================================
 # Selenium driver factory
 # ============================================================================
-def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
+def create_driver(headless: bool = True, use_iMakMercari_profile: bool = False):
     """undetected_chromedriver の driver を生成して返す.
+
+    Phase 9 修正 (2026-04-30): use_iMakMercari_profile を default False に変更。
+    旧 default (True) では iMakMercari/chrome_profile を共有していたため、
+    Takaaki さんがブラウザを並行操作している時に driver session が壊れて
+    全件 None 返却 (= 偽の anti-bot 症状) を再現性なく引き起こしていた。
+
+    mercari `/item/m\\d+` および `/shops/product/...` は login 不要なため
+    fresh profile で問題なく取得できる。
+
     呼出元はループ内で 1 driver を再利用することを推奨。
     """
     try:
@@ -148,6 +157,7 @@ def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=ja-JP")
+    # 明示指定された場合のみ profile 共有 (Phase 6 までの旧動作互換)
     if use_iMakMercari_profile and os.path.isdir(CHROME_PROFILE_DIR):
         options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR}")
     if headless:
