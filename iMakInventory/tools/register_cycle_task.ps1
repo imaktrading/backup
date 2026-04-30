@@ -3,7 +3,8 @@
 # iMakInventory_Cycle タスクを Windows タスクスケジューラに登録 (4 時間ごと)
 # 本番運用用、TEST タスクで動作確認 OK 後に登録すること。
 #
-# 起動時刻: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 (毎日 6 回)
+# 起動時刻: 10:00, 14:00, 18:00, 22:00, 02:00, 06:00 (毎日 6 回)
+#   ─ trabajo (08/12/16/20/00/04 起動) と 2h ずらして並走 (Phase 9a)
 # 失敗時 retry: 1 回 (15 分後)
 #
 # Usage:
@@ -53,9 +54,10 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-# 4h サイクル: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 の 6 トリガー
+# 4h サイクル: 10:00, 14:00, 18:00, 22:00, 02:00, 06:00 の 6 トリガー
+# (trabajo の 08/12/16/20/00/04 と 2h ずらしで並走 ─ Phase 9a)
 $triggers = @()
-foreach ($h in 0, 4, 8, 12, 16, 20) {
+foreach ($h in 2, 6, 10, 14, 18, 22) {
     $triggers += New-ScheduledTaskTrigger -Daily -At ([DateTime]::Today.AddHours($h))
 }
 
@@ -73,11 +75,12 @@ Register-ScheduledTask `
     -Action $action `
     -Trigger $triggers `
     -Settings $settings `
-    -Description "iMakInventory 本番 cycle (4h おき: 0/4/8/12/16/20 時)" `
+    -Description "iMakInventory 本番 cycle (4h おき: 10/14/18/22/02/06 時、trabajo と 2h ずらし並走)" `
     | Out-Null
 
 Write-Output "[OK] $TaskName 登録完了"
-Write-Output "  schedule: 4h サイクル (00:00, 04:00, 08:00, 12:00, 16:00, 20:00)"
+Write-Output "  schedule: 4h サイクル (10:00, 14:00, 18:00, 22:00, 02:00, 06:00)"
+Write-Output "  並走対象: trabajo (08/12/16/20/00/04) と 2h ずらし"
 Write-Output "  command: $PythonExe $Args"
 Write-Output "  cwd: $WorkingDir"
 Write-Output "  retry: 1 回 / 15 分後"
