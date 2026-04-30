@@ -618,25 +618,16 @@ class ControlPanel:
                     )
                     return
 
-            # GUI の sheet 入力 (mode=single 想定) を cron task にも反映
+            # GUI の sheet / skip-upload 入力を cron task に反映
+            # mode が dual でも block しない: 入力があるものだけ PS1 に渡し、
+            # 残りは PS1 default (TEST_PARALLEL ID + skip=true) に任せる
             mode = self.mode_var.get()
+            sheet_id = ""
+            sheet_label = ""
             if mode == "single":
                 raw = self.single_id_var.get().strip()
                 sheet_id = extract_sheet_id(raw)
-                sheet_label = (self.single_label_var.get() or "").strip() or "TEST_PARALLEL"
-                if not sheet_id:
-                    messagebox.showerror(
-                        "エラー", "本番タスクは「単一スプシ」mode で URL/ID を入力してください"
-                    )
-                    return
-            else:
-                # dual mode は cron task の単一 SheetId モデルと不整合
-                messagebox.showerror(
-                    "エラー",
-                    "本番タスク登録は「単一スプシ」mode のみ対応 (HIGH/LOW セット mode 不可)。\n"
-                    "ラジオボタンで「単一スプシ」を選択してください。"
-                )
-                return
+                sheet_label = (self.single_label_var.get() or "").strip()
 
             skip_upload = self.skip_upload_var.get()
 
@@ -649,11 +640,15 @@ class ControlPanel:
 
             limit_disp = f"{limit_int} 件" if limit_int > 0 else "無制限"
             skip_disp = "skip (Stage 1)" if skip_upload else "実行 (Stage 2)"
+            sheet_disp = (
+                f"{sheet_label or '?'} ({sheet_id[:30]}...)"
+                if sheet_id else "PS1 default (TEST_PARALLEL)"
+            )
             if not messagebox.askyesno(
                 "本番タスク登録",
                 f"本番タスクを以下の設定で登録します:\n"
                 f"  起動時刻: {', '.join(collected)} ({len(collected)} 件)\n"
-                f"  sheet:    {sheet_label} ({sheet_id[:30]}...)\n"
+                f"  sheet:    {sheet_disp}\n"
                 f"  limit:    {limit_disp}\n"
                 f"  upload:   {skip_disp}\n\n"
                 "登録を続行しますか?"
@@ -664,12 +659,11 @@ class ControlPanel:
             #   non-empty で True に coerce される罠あり → :$true / :$false 形式で
             #   PowerShell 側に直接 bool literal を渡す
             skip_token = "-SkipUpload:$true" if skip_upload else "-SkipUpload:$false"
-            extra = [
-                "-Times", ",".join(collected),
-                "-SheetId", sheet_id,
-                "-SheetLabel", sheet_label,
-                skip_token,
-            ]
+            extra = ["-Times", ",".join(collected), skip_token]
+            if sheet_id:
+                extra += ["-SheetId", sheet_id]
+            if sheet_label:
+                extra += ["-SheetLabel", sheet_label]
             if limit_int > 0:
                 extra += ["-Limit", str(limit_int)]
             out = self._run_powershell(script, "Register", extra_args=extra)

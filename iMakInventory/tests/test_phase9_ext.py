@@ -245,15 +245,20 @@ def test_control_panel_passes_sheet_id_label_skip_to_cycle_task():
     assert "-SkipUpload:$false" in func_body
 
 
-def test_control_panel_rejects_dual_mode_for_cycle_task():
-    """dual mode (HIGH/LOW) では cycle 登録できない (PS1 は単一 SheetId のみ対応)."""
+def test_control_panel_does_not_block_dual_mode_for_cycle_task():
+    """dual mode でも cycle 登録できる: 入力があるものだけ PS1 に渡す.
+
+    旧コードは dual mode → エラー dialog で登録拒否していたが、ユーザの
+    操作を妨げるので削除。dual mode では sheet 関連は PS1 default に任せる。
+    """
     src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
     idx = src.find("def _task_register")
     end = src.find("\n    def ", idx + 1)
     func_body = src[idx:end]
-    # dual mode 時にエラー dialog
-    assert 'mode == "single"' in func_body
-    assert "「単一スプシ」" in func_body or "単一スプシ mode" in func_body or "ラジオボタン" in func_body
+    # dual mode 拒否 dialog が無いこと (エラー文字列で確認)
+    assert "「単一スプシ」mode のみ対応" not in func_body
+    # sheet_id / sheet_label は条件付きで extra に追加
+    assert 'if sheet_id:' in func_body or 'if sheet_id ' in func_body
 
 
 if __name__ == "__main__":
