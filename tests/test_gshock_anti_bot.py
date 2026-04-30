@@ -55,6 +55,12 @@ def _is_blocked(driver):
     return fn(driver)
 
 
+class _DeadDriver:
+    """quit() を呼んでも例外を投げない fake driver (URLError test 用)."""
+    def quit(self):
+        pass
+
+
 # ============================================================================
 # 各 BLOCK signal の hit 確認
 # ============================================================================
@@ -152,6 +158,74 @@ def test_update_all_series_accepts_series_filter():
     )
 
 
+# ============================================================================
+# URLError 捕獲 (2026-04-30 Phase 3-D follow-up)
+# ============================================================================
+def test_restart_driver_returns_none_on_persistent_failure(monkeypatch):
+    """_start_driver が常に URLError を投げる時、_restart_driver は最終 None を返す.
+
+    背景: 2026-04-29 β night1 で chromedriver CDN 取得失敗の URLError が caller まで
+    伝播して process crash. 修正後は 3 回 retry → halt 通知 (None) で graceful exit.
+    """
+    import urllib.error
+    import gshock
+
+    call_count = {"n": 0}
+
+    def fake_start():
+        call_count["n"] += 1
+        raise urllib.error.URLError("getaddrinfo failed [test simulation]")
+
+    # _start_driver を全回 fail に置換 (time.sleep も短縮して test 高速化)
+    monkeypatch.setattr(gshock, "_start_driver", fake_start)
+    monkeypatch.setattr(gshock.time, "sleep", lambda _s: None)
+
+    result = gshock._restart_driver(_DeadDriver())
+    assert result is None, "URLError 連続発火時は None を返すべき"
+    assert call_count["n"] == 3, f"3 回 retry されるべき (実際: {call_count['n']})"
+
+
+def test_restart_driver_returns_driver_on_first_success(monkeypatch):
+    """_start_driver が成功する場合は通常通り driver を返す (retry 不要)."""
+    import gshock
+
+    fake_driver_obj = object()
+    call_count = {"n": 0}
+
+    def fake_start():
+        call_count["n"] += 1
+        return fake_driver_obj
+
+    monkeypatch.setattr(gshock, "_start_driver", fake_start)
+    monkeypatch.setattr(gshock.time, "sleep", lambda _s: None)
+
+    result = gshock._restart_driver(_DeadDriver())
+    assert result is fake_driver_obj
+    assert call_count["n"] == 1, "成功時は 1 回呼び出しのみ"
+
+
+def test_restart_driver_recovers_on_second_attempt(monkeypatch):
+    """1 回失敗 → 2 回目成功で driver を返す (途中 recovery)."""
+    import urllib.error
+    import gshock
+
+    fake_driver_obj = object()
+    call_count = {"n": 0}
+
+    def fake_start():
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise urllib.error.URLError("transient DNS error [test]")
+        return fake_driver_obj
+
+    monkeypatch.setattr(gshock, "_start_driver", fake_start)
+    monkeypatch.setattr(gshock.time, "sleep", lambda _s: None)
+
+    result = gshock._restart_driver(_DeadDriver())
+    assert result is fake_driver_obj
+    assert call_count["n"] == 2
+
+
 # Standalone runner
 if __name__ == "__main__":
     try:
@@ -170,6 +244,7 @@ if __name__ == "__main__":
         ("driver exception → False",       test_driver_exception_returns_false),
         ("実本走 GD-X6900FB-7 block 文字列", test_real_run_block_text),
         ("update_all_series series_filter kwarg", test_update_all_series_accepts_series_filter),
+        # 注: 以下 3 ケースは pytest monkeypatch 必須で standalone runner からは省略
     ]
     fails = 0
     for name, fn in cases:

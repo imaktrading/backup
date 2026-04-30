@@ -109,7 +109,12 @@ def update_all_series(driver=None, series_filter: Optional[set] = None) -> int:
             # === Pass 1: 全 series モデル一覧取得 (tight burst) ===
             print(f"\n=== Pass 1/2: series モデル一覧取得 ({len(pages)} series) ===")
             series_models: dict[str, list[str]] = {}
+            halted = False
             for series_name, series_url in pages:
+                if driver is None:
+                    print(f"\n[{series_name}] ⛔ driver halt 検出、Pass 1 中断")
+                    halted = True
+                    break
                 print(f"\n[{series_name}] series page get...")
                 models, driver = _safe_fetch_series_models(driver, series_name, series_url)
                 series_models[series_name] = models
@@ -123,15 +128,27 @@ def update_all_series(driver=None, series_filter: Optional[set] = None) -> int:
             for series_name, models in series_models.items():
                 if not models:
                     continue
+                if driver is None:
+                    print(f"\n[{series_name}] ⛔ driver halt 検出、残 series skip")
+                    halted = True
+                    break
                 print(f"\n[{series_name}] {len(models)} models")
                 for model in models:
+                    if driver is None:
+                        # _safe_upsert_model が None を返したら以降の model も skip
+                        halted = True
+                        break
                     success, driver = _safe_upsert_model(driver, model, series_name)
                     if success:
                         total += 1
                     time.sleep(_PACING_BETWEEN_MODELS)
 
-            _scrape_log_finish(scrape_id, status="success", products_added=total)
-            print(f"\n=== 完了: {total} models upserted ===")
+            # halt があれば status=partial で記録 (success とも failed とも違う中間状態).
+            # scrape_log の status カラムは TEXT なので任意値 OK.
+            final_status = "partial" if halted else "success"
+            _scrape_log_finish(scrape_id, status=final_status, products_added=total)
+            done_marker = "完了 (一部 halt)" if halted else "完了"
+            print(f"\n=== {done_marker}: {total} models upserted ===")
         except Exception as e:
             _scrape_log_finish(scrape_id, status="failed",
                                error_message=f"{type(e).__name__}: {e}")
@@ -201,6 +218,10 @@ def _restart_driver(old_driver):
     """driver を破棄 → 5 秒待機 → 新規起動 (Akamai セッション切替を期待).
 
     block 検出後の最終手段. cooldown だけでは block が解除されない場合に session を切る.
+
+    DNS / chromedriver CDN 取得失敗 (URLError 等) は最大 3 回リトライ.
+    全失敗時は None を返す (caller が halt 判断).
+    本処理を try/except で囲わなかった結果が 2026-04-29 β night1 クラッシュ事故.
     """
     print(f"  🔄 driver 再起動 (Akamai セッション切替)...", flush=True)
     try:
@@ -208,7 +229,20 @@ def _restart_driver(old_driver):
     except Exception:
         pass
     time.sleep(5)
-    return _start_driver()
+
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            return _start_driver()
+        except Exception as e:
+            last_err = e
+            print(f"     driver 起動失敗 (attempt {attempt}/3): "
+                  f"{type(e).__name__}: {e}", flush=True)
+            if attempt < 3:
+                time.sleep(30)
+    print(f"  ⛔ driver 再起動を 3 回試行後も失敗、process halt します. "
+          f"last error: {type(last_err).__name__}: {last_err}", flush=True)
+    return None
 
 
 def _safe_fetch_series_models(driver, series_name: str, series_url: str,
@@ -226,6 +260,10 @@ def _safe_fetch_series_models(driver, series_name: str, series_url: str,
     from casio_finder import scrape_casio_series  # type: ignore
 
     for attempt in range(1, max_attempts + 1):
+        if driver is None:
+            # driver 復旧不能 → 残 attempt も実行不可、空リスト返却
+            print(f"  ⛔ [{series_name}] driver なし、残 attempt skip.")
+            return [], None
         models = scrape_casio_series(driver, series_name, series_url)
         blocked = _is_blocked(driver)
         if not blocked and len(models) > 0:
@@ -242,7 +280,7 @@ def _safe_fetch_series_models(driver, series_name: str, series_url: str,
             else:
                 time.sleep(10)
             if attempt >= 2:
-                # 2 回失敗で driver 再起動 (session 切替)
+                # 2 回失敗で driver 再起動 (session 切替). None なら次 attempt で halt.
                 driver = _restart_driver(driver)
     print(f"  ⚠️ [{series_name}] {max_attempts} 回試行後も失敗、skip.")
     return [], driver
@@ -263,6 +301,9 @@ def _safe_upsert_model(driver, model: str, series_name: str = "",
     print(f"  {model}...", end="", flush=True)
 
     for attempt in range(1, max_attempts + 1):
+        if driver is None:
+            print(f" ⛔ driver なし、skip.")
+            return False, None
         data = scrape_casio(driver, product_url)
         blocked = _is_blocked(driver)
         # 成功条件: data あり + block なし + case_size 取得済 (block ページは case_size 空)
@@ -291,7 +332,7 @@ def _safe_upsert_model(driver, model: str, series_name: str = "",
         if attempt < max_attempts:
             if blocked:
                 time.sleep(_COOLDOWN_AFTER_BLOCK)
-                # block 後は driver 再起動 (session 切替で解除狙い)
+                # block 後は driver 再起動 (session 切替で解除狙い). None なら次 attempt で skip.
                 driver = _restart_driver(driver)
             else:
                 time.sleep(10)
