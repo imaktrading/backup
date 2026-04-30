@@ -1,23 +1,25 @@
 """sheet_writer - 収集 URL を Google Sheets に追記 (デデュープ付き).
 
 設計原則:
-  - 既存スプシ・列構成を一切壊さない (HIGH/LOW listings シートと同じ列レイアウトを採用)
-  - 既出 item_id は再書込しない (B 列 item_id をキーにデデュープ)
+  - 既存スプシ・列構成を一切壊さない
+  - Harvest が書くのは A 列 (URL) のみ. B/C 列は空欄で書込 (ユーザー側で別用途)
+  - デデュープは A 列 URL から item_id を内部抽出して比較
+    (B 列を空欄にしても重複防止が機能するように URL ベースのキーで判定)
   - 失敗時は raise (caller が retry 判断)
   - 既存行は絶対に上書きしない (新規 append のみ)
 
-スプシ列レイアウト (iMakInventory HIGH/LOW listings 互換):
-  A: URL          ← Harvest が書込 (新規行)
-  B: item_id      ← Harvest が書込 (新規行)
-  C: title        ← Harvest が書込可 (Phase 1a では空欄)
-  D: 売り切れ     ← iMakInventory が後で書込 (Harvest は空欄のまま)
-  E~: その他     ← Harvest は触らない
+スプシ列レイアウト:
+  A: URL          ← Harvest が書込 (新規行のみ)
+  B: 空欄         ← Harvest は触らない (ユーザーが手動で別用途に使う)
+  C: 空欄         ← Harvest は触らない
+  D 以降          ← Harvest は触らない (iMakInventory が後で D 列に売切フラグ等)
 
 サービスアカウント認証情報パスは iMakInventory と共通 (CREDS_PATH)。
 """
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -33,9 +35,32 @@ LOW_SHEET_ID = "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0"
 LISTINGS_GID = 851100680  # 商品管理シートタブ (HIGH/LOW 共通)
 
 # 列マッピング (1-based)
-COL_URL = 1      # A
-COL_ITEM_ID = 2  # B
-COL_TITLE = 3    # C
+COL_URL = 1      # A: Harvest が書込
+COL_B = 2        # B: 空欄 (ユーザー別用途、Harvest は触らない)
+COL_C = 3        # C: 空欄
+
+# デデュープ key 抽出: メルカリ /item/m12345 / /items/m12345 → m12345
+_MERCARI_ID_RE = re.compile(r"/items?/(m\d+)", re.IGNORECASE)
+# Phase 1b/1c で Amazon ASIN・他 supplier の正規表現を追加予定
+
+
+def dedupe_key(url: str) -> str:
+    """URL からデデュープ用キーを生成.
+
+    - mercari item_id (m\\d+) が抽出できればそれを返す (?ref=likes 等の query 違いを吸収)
+    - 抽出できなければ URL の query/fragment を除いた正規化形を返す
+    - 空文字なら "" を返す (空 key は append しない側で弾く)
+    """
+    if not url:
+        return ""
+    s = url.strip()
+    if not s:
+        return ""
+    m = _MERCARI_ID_RE.search(s)
+    if m:
+        return m.group(1)
+    # 他 supplier 暫定対応: query / fragment / 末尾スラッシュを除去
+    return s.split("?")[0].split("#")[0].rstrip("/").lower()
 
 
 def open_sheet_by_id(spreadsheet_id: str):
@@ -55,18 +80,29 @@ def get_listings_worksheet(sh, gid: int = LISTINGS_GID):
     return sh.get_worksheet(0)
 
 
-def read_existing_item_ids(ws) -> set[str]:
-    """ワークシート B 列に既に存在する item_id を全件取得."""
+def read_existing_dedupe_keys(ws) -> set[str]:
+    """既存行から デデュープ key の set を取得.
+
+    A 列 URL → dedupe_key() で抽出.
+    後方互換: B 列に値が残っている既存行 (旧実装で書込まれた m12345 等) も
+    並行で集める. これにより B 列空欄移行後も既存データとの重複判定が継続して効く.
+    """
     all_values = ws.get_all_values()
     if len(all_values) < 2:
         return set()
-    existing: set[str] = set()
+    keys: set[str] = set()
     for row in all_values[1:]:
-        if len(row) >= COL_ITEM_ID:
-            v = (row[COL_ITEM_ID - 1] or "").strip()
+        if len(row) >= COL_URL:
+            url = (row[COL_URL - 1] or "").strip()
+            k = dedupe_key(url)
+            if k:
+                keys.add(k)
+        if len(row) >= COL_B:
+            v = (row[COL_B - 1] or "").strip()
+            # B 列に旧実装の item_id (m\\d+) が残っていれば併用
             if v:
-                existing.add(v)
-    return existing
+                keys.add(v)
+    return keys
 
 
 def append_new_urls(
@@ -74,35 +110,39 @@ def append_new_urls(
     items: list[dict],
     column_count: int = 3,
 ) -> dict:
-    """items を ws に追記 (既出 item_id は除外).
+    """items を ws に追記 (既出は dedupe_key で除外).
 
     Args:
         ws:    gspread worksheet
-        items: [{"url", "item_id", "title"?}, ...]
-        column_count: 書く列数 (default 3 = A:URL, B:item_id, C:title)
+        items: [{"url", "item_id"?, "title"?}, ...] (item_id/title は無視、
+               B/C 列は常に空欄で書込)
+        column_count: 書く列数 (default 3 = A:URL, B:空欄, C:空欄)
 
     Returns: {"appended": N, "skipped_existing": M, "input": K}
     """
     if not items:
         return {"appended": 0, "skipped_existing": 0, "input": 0}
 
-    existing = read_existing_item_ids(ws)
+    existing = read_existing_dedupe_keys(ws)
 
     new_rows = []
     skipped = 0
     seen_in_batch: set[str] = set()
     for it in items:
-        item_id = (it.get("item_id") or "").strip()
         url = (it.get("url") or "").strip()
-        if not item_id or not url:
+        if not url:
             skipped += 1
             continue
-        if item_id in existing or item_id in seen_in_batch:
+        key = dedupe_key(url)
+        if not key:
             skipped += 1
             continue
-        seen_in_batch.add(item_id)
-        row = [url, item_id, str(it.get("title") or "")]
-        # column_count に満たない場合は空欄で埋める (3 列固定で OK)
+        if key in existing or key in seen_in_batch:
+            skipped += 1
+            continue
+        seen_in_batch.add(key)
+        # A 列に URL のみ書込 (B/C は空欄、ユーザー別用途のため Harvest は埋めない)
+        row = [url, "", ""]
         if len(row) < column_count:
             row += [""] * (column_count - len(row))
         new_rows.append(row[:column_count])
