@@ -38,16 +38,20 @@ param (
     [bool]$SkipUpload = $true
 )
 
+# fail-fast: 途中エラーで success メッセージを誤出力しない
+$ErrorActionPreference = 'Stop'
+
 $TaskName = "iMakInventory_Cycle"
 $WorkingDir = "C:\dev\iMak\iMakInventory"
 $PythonExe = "python"
 
 # run_cycle.py 引数を組立 (--sheet-id / --sheet-label / --skip-upload)
+# ※ $Args / $args は PowerShell 自動変数のため使用不可、$cmdArgs を使う
 $argParts = @("-u", "run_cycle.py", "--sheet-id", $SheetId, "--sheet-label", $SheetLabel)
 if ($SkipUpload) {
     $argParts += "--skip-upload"
 }
-$Args = $argParts -join " "
+$cmdArgs = $argParts -join " "
 
 if ($Action -eq "Unregister") {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -84,8 +88,9 @@ foreach ($h in 2, 6, 10, 14, 18, 22) {
     $triggers += New-ScheduledTaskTrigger -Daily -At ([DateTime]::Today.AddHours($h))
 }
 
-$action = New-ScheduledTaskAction -Execute $PythonExe -Argument $Args -WorkingDirectory $WorkingDir
-$settings = New-ScheduledTaskSettingsSet `
+# ※ $action は $Action パラメータと衝突 (PS 変数名は大小区別なし) → $taskAction
+$taskAction = New-ScheduledTaskAction -Execute $PythonExe -Argument $cmdArgs -WorkingDirectory $WorkingDir
+$taskSettings = New-ScheduledTaskSettingsSet `
             -StartWhenAvailable `
             -AllowStartIfOnBatteries `
             -DontStopIfGoingOnBatteries `
@@ -95,9 +100,9 @@ $settings = New-ScheduledTaskSettingsSet `
 
 Register-ScheduledTask `
     -TaskName $TaskName `
-    -Action $action `
+    -Action $taskAction `
     -Trigger $triggers `
-    -Settings $settings `
+    -Settings $taskSettings `
     -Description "iMakInventory 本番 cycle (4h おき: 10/14/18/22/02/06 時、trabajo と 2h ずらし並走)" `
     | Out-Null
 
@@ -108,7 +113,7 @@ Write-Output "  sheet_id:    $SheetId"
 Write-Output "  sheet_label: $SheetLabel"
 $stageMode = if ($SkipUpload) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }
 Write-Output "  mode:        $stageMode"
-Write-Output "  command: $PythonExe $Args"
+Write-Output "  command: $PythonExe $cmdArgs"
 Write-Output "  cwd: $WorkingDir"
 Write-Output "  retry: 1 回 / 15 分後"
 Write-Output "  execution time limit: 3h"

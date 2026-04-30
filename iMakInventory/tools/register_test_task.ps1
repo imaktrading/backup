@@ -15,10 +15,14 @@ param (
     [string]$Action = "Register"
 )
 
+# fail-fast: 途中エラーで success メッセージを誤出力しない
+$ErrorActionPreference = 'Stop'
+
 $TaskName = "iMakInventory_TEST"
 $WorkingDir = "C:\dev\iMak\iMakInventory"
 $PythonExe = "python"
-$Args = "-u run_cycle.py --test-mode --limit 3"
+# ※ $Args / $args は PowerShell 自動変数のため使用不可、$cmdArgs を使う
+$cmdArgs = "-u run_cycle.py --test-mode --limit 3"
 
 if ($Action -eq "Unregister") {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -48,11 +52,12 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-$action = New-ScheduledTaskAction -Execute $PythonExe -Argument $Args -WorkingDirectory $WorkingDir
-$trigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Now.AddMinutes(2)) `
+# ※ $action は $Action パラメータと衝突 (PS 変数名は大小区別なし) → $taskAction
+$taskAction = New-ScheduledTaskAction -Execute $PythonExe -Argument $cmdArgs -WorkingDirectory $WorkingDir
+$taskTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Now.AddMinutes(2)) `
             -RepetitionInterval (New-TimeSpan -Minutes 5) `
             -RepetitionDuration (New-TimeSpan -Hours 24)
-$settings = New-ScheduledTaskSettingsSet `
+$taskSettings = New-ScheduledTaskSettingsSet `
             -StartWhenAvailable `
             -AllowStartIfOnBatteries `
             -DontStopIfGoingOnBatteries `
@@ -62,15 +67,15 @@ $settings = New-ScheduledTaskSettingsSet `
 
 Register-ScheduledTask `
     -TaskName $TaskName `
-    -Action $action `
-    -Trigger $trigger `
-    -Settings $settings `
+    -Action $taskAction `
+    -Trigger $taskTrigger `
+    -Settings $taskSettings `
     -Description "iMakInventory TEST cycle (5 分ごと、動作確認用、確認後 削除前提)" `
     | Out-Null
 
 Write-Output "[OK] $TaskName 登録完了"
 Write-Output "  schedule: 5 分ごと (24h)"
-Write-Output "  command: $PythonExe $Args"
+Write-Output "  command: $PythonExe $cmdArgs"
 Write-Output "  cwd: $WorkingDir"
 Write-Output ""
 Write-Output "確認:  PowerShell -ExecutionPolicy Bypass -File tools\register_test_task.ps1 -Action Status"
