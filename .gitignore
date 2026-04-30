@@ -3,6 +3,15 @@
 # Created: 2026-04-25
 # =====================================
 
+# === iMakCatalog runtime DB (2026-04-30) ===
+# 並列セッション間で branch checkout すると sqlite blob が baseline に巻き戻り
+# データロスする構造的問題を解消するため、本ファイルは git から除外する.
+# 復旧不可能なロスト事故を 2026-04-29 に経験 (DW-6900/DW-5600 計 101 records 消失).
+iMakCatalog/db/products.sqlite
+iMakCatalog/db/*.sqlite-journal
+iMakCatalog/db/*.sqlite-wal
+iMakCatalog/db/*.sqlite-shm
+
 # === SECRETS (must never be committed) ===
 **/API key.txt
 **/api_key.txt
