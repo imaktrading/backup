@@ -540,6 +540,8 @@ def extract_character_name(subject):
         r'\d+(?:ND|ST|RD|TH)\s+ANNIVERSARY\s+COMPLETE\s+GUIDE',
         r'\d+(?:ND|ST|RD|TH)\s+ANNIVERSARY',
         r'COMPLETE\s+GUIDE',
+        # 2026-05-01: OP01-016 Nami "PROMOTION CARD SET 1" 末尾残存対応.
+        r'PROMOTION\s+CARD\s+SET\s+\d+',
         r'PROMO',
         r'HOLO(?:FOIL)?',
         r'FOIL',
