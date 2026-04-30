@@ -603,6 +603,21 @@ class ControlPanel:
             if not collected:
                 messagebox.showerror("エラー", "起動時刻を最低 1 件入力してください")
                 return
+
+            # GUI の --limit 入力もタスクスケジューラに渡す (空欄 = 無制限)
+            limit_raw = (self.limit_var.get() or "").strip()
+            limit_int = 0
+            if limit_raw:
+                try:
+                    limit_int = int(limit_raw)
+                    if limit_int < 0:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror(
+                        "エラー", f"--limit は非負整数 (NG: {limit_raw!r}、空欄なら無制限)"
+                    )
+                    return
+
             # state 永続化 (次回 GUI 起動時に復元)
             try:
                 self.state["cycle_times"] = collected[:6]
@@ -610,15 +625,19 @@ class ControlPanel:
             except Exception:
                 pass
 
+            limit_disp = f"{limit_int} 件" if limit_int > 0 else "無制限"
             if not messagebox.askyesno(
                 "本番タスク登録",
                 f"本番タスクを以下の時刻で登録します ({len(collected)} 件):\n"
-                f"  {', '.join(collected)}\n\n"
+                f"  {', '.join(collected)}\n"
+                f"  limit: {limit_disp}\n\n"
                 "TEST タスクで動作確認 OK でしたか? 登録を続行しますか?"
             ):
                 return
             script = "register_cycle_task.ps1"
             extra = ["-Times", ",".join(collected)]
+            if limit_int > 0:
+                extra += ["-Limit", str(limit_int)]
             out = self._run_powershell(script, "Register", extra_args=extra)
             self._show_dialog("cycle タスク登録結果", out)
             return

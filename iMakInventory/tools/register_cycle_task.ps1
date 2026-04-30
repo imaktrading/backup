@@ -39,7 +39,11 @@ param (
 
     # 起動時刻 (HH:MM カンマ区切り、最大 6 件、空欄 skip).
     # default は trabajo (08/12/16/20/00/04) と 2h ずらした並走用 6 件。
-    [string]$Times = "10:00,14:00,18:00,22:00,02:00,06:00"
+    [string]$Times = "10:00,14:00,18:00,22:00,02:00,06:00",
+
+    # 1 巡回あたりの最大処理件数 (0 = 無制限、default)。
+    # 手動巡回での試運転ではなく、タスクスケジューラ側で件数を絞りたい場合に使う。
+    [int]$Limit = 0
 )
 
 # fail-fast: 途中エラーで success メッセージを誤出力しない
@@ -77,11 +81,14 @@ if (Test-Path $pythonwExe) {
     Write-Warning "pythonw.exe が同 dir に不在 ($pythonwExe) → python.exe で fallback (黒窓出ます)"
 }
 
-# run_cycle.py 引数を組立 (--sheet-id / --sheet-label / --skip-upload)
+# run_cycle.py 引数を組立 (--sheet-id / --sheet-label / --skip-upload / --limit)
 # ※ $Args / $args は PowerShell 自動変数のため使用不可、$cmdArgs を使う
 $argParts = @("-u", "run_cycle.py", "--sheet-id", $SheetId, "--sheet-label", $SheetLabel)
 if ($SkipUpload) {
     $argParts += "--skip-upload"
+}
+if ($Limit -gt 0) {
+    $argParts += @("--limit", $Limit.ToString())
 }
 $cmdArgs = $argParts -join " "
 
@@ -172,6 +179,8 @@ Write-Output "  schedule:    $timesDisplay  ($($timeList.Count) 件)"
 Write-Output "  並走想定:    trabajo (08/12/16/20/00/04) と適当 ずらし運用"
 Write-Output "  sheet_id:    $SheetId"
 Write-Output "  sheet_label: $SheetLabel"
+$limitDisplay = if ($Limit -gt 0) { "$Limit 件" } else { "無制限" }
+Write-Output "  limit:       $limitDisplay"
 $stageMode = if ($SkipUpload) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }
 Write-Output "  mode:        $stageMode"
 Write-Output "  command: $pythonExe $cmdArgs"

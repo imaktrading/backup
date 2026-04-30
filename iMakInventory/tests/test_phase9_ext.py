@@ -205,5 +205,26 @@ def test_run_powershell_supports_extra_args():
     assert "cmd.extend(extra_args)" in src or "cmd += extra_args" in src
 
 
+def test_register_cycle_ps1_accepts_limit_param():
+    """register_cycle_task.ps1 が -Limit パラメータを持つ."""
+    src = (ROOT / "tools" / "register_cycle_task.ps1").read_text(encoding="utf-8")
+    assert "[int]$Limit" in src
+    # Limit > 0 の場合のみ --limit に変換
+    assert "$Limit -gt 0" in src
+    assert '"--limit"' in src
+
+
+def test_control_panel_passes_limit_to_cycle_task():
+    """control_panel が cycle 登録時に -Limit 引数を渡す."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    # _task_register("cycle") 内で limit_var を読んで -Limit を渡す
+    idx = src.find("def _task_register")
+    assert idx != -1
+    end = src.find("\n    def ", idx + 1)
+    func_body = src[idx:end]
+    assert "limit_var" in func_body
+    assert '"-Limit"' in func_body
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
