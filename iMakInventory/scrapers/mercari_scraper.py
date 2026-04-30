@@ -160,6 +160,67 @@ def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
 # ============================================================================
 # Selenium ベース在庫判定
 # ============================================================================
+def _save_failure_snapshot(driver, url: str, reason: str) -> None:
+    """None 返却時に page snapshot を decision_log/mercari_fail_*.jsonl に保存.
+
+    根本原因切り分け用: anti-bot block / DOM 変更 / timeout のどれかを
+    後から判別できるようにする。1 cycle で多発すると重いので、最大 5 件で打切り。
+    """
+    import json as _json  # noqa: PLC0415
+    from pathlib import Path as _Path  # noqa: PLC0415
+
+    log_dir = _Path(__file__).resolve().parent.parent / "decision_log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    today_log = log_dir / f"mercari_fail_{datetime.now().strftime('%Y%m%d')}.jsonl"
+
+    # 既に同日の snapshot が 5 件以上あれば skip (ログ膨張回避)
+    if today_log.exists():
+        try:
+            with open(today_log, encoding="utf-8") as f:
+                if sum(1 for _ in f) >= 5:
+                    return
+        except OSError:
+            pass
+
+    snapshot = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "url": url,
+        "reason": reason,
+    }
+    try:
+        snapshot["current_url"] = driver.current_url or ""
+        snapshot["title"] = driver.title or ""
+        body_text = driver.execute_script(
+            "return document.body ? document.body.innerText.substring(0, 600) : '';"
+        )
+        snapshot["body_text_600"] = body_text or ""
+        # bot block / 認証要求の signal 検出
+        bot_kw = ["bot", "robot", "captcha", "認証", "ロボット", "アクセス拒否",
+                  "Forbidden", "Access Denied", "403", "ログイン"]
+        snapshot["bot_signals"] = [k for k in bot_kw if k.lower() in (body_text or "").lower()]
+        # DOM signal: どのテストID が出てるか
+        try:
+            ids_present = driver.execute_script("""
+                var els = document.querySelectorAll('[data-testid]');
+                var s = new Set();
+                for (var i = 0; i < Math.min(els.length, 50); i++) {
+                    s.add(els[i].getAttribute('data-testid'));
+                }
+                return Array.from(s);
+            """) or []
+            snapshot["data_testids"] = list(ids_present)[:30]
+        except Exception:
+            snapshot["data_testids"] = []
+    except Exception as e:
+        snapshot["snapshot_err"] = f"{type(e).__name__}: {e}"
+
+    try:
+        with open(today_log, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(snapshot, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
     """driver に url を load し在庫状態を判定.
 
@@ -245,6 +306,7 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
                 pass
             time.sleep(SELENIUM_POLL_INTERVAL)
         if in_stock is None:
+            _save_failure_snapshot(driver, url, "shops_purchase_button_not_found_30s")
             return None  # real_err
     else:
         # ============================================================
@@ -276,6 +338,7 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
                     "in_stock": False, "price_jpy": None}
         if not container_found:
             # container も deletion text も見つからない → real_err
+            _save_failure_snapshot(driver, url, "container_not_found_30s_timeout")
             return None
 
         # container 内の checkout-button を探索
@@ -284,6 +347,7 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
                 By.CSS_SELECTOR, '[data-testid="checkout-button-container"]'
             )
         except NoSuchElementException:
+            _save_failure_snapshot(driver, url, "container_disappeared_after_found")
             return None
 
         try:
@@ -305,6 +369,8 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
                 in_stock = True
             else:
                 # 新パターン → 安全側で real_err
+                _save_failure_snapshot(driver, url,
+                    f"unknown_btn_pattern cls={cls[:40]!r} name={name_attr!r}")
                 return None
 
     # 商品名・価格抽出
