@@ -31,7 +31,9 @@ from typing import Optional
 CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHarvest\chrome_profile_mercari"
 CHROME_VERSION_MAIN = 146
 
-MERCARI_LIKES_URL = "https://jp.mercari.com/mypage/likes"
+# 2026-04-30: Mercari Web 版で /mypage/likes は廃止 (404 fallback)、
+# 新 URL は /mypage/favorites (複数形). trabajo decompile 当時とは異なる.
+MERCARI_LIKES_URL = "https://jp.mercari.com/mypage/favorites"
 ITEM_ANCHOR_SELECTOR = "a[data-testid='mercari-liked-item']"
 LOAD_MORE_BUTTON_SELECTOR = "mer-button[class*='LoadMoreButton'] > button"
 GENERIC_LINK_SELECTOR = "a[href*='item/']"
@@ -46,10 +48,15 @@ MERCARI_ITEM_RE = re.compile(r"/items?/(m\d+)")
 #  にフォールバックする現象が発生 — 2026-04-30 確認済)
 
 DEFAULT_INITIAL_WAIT_SEC = 25  # 初回ハイドレーション (mercari-liked-item 出現待ち)
-DEFAULT_LOAD_MORE_CLICKS = 6   # 「もっと見る」ボタン最大押下回数 (= 100 件以上を狙う)
-DEFAULT_AFTER_CLICK_SLEEP = 3.0
-DEFAULT_MAX_ITEMS = 200        # ハードリミット (暴走防止)
+DEFAULT_LOAD_MORE_CLICKS = 12  # スクロール最大回数 (1 回 ≒ 20 件 ロード想定)
+DEFAULT_AFTER_CLICK_SLEEP = 2.0
+DEFAULT_MAX_ITEMS = 500        # ハードリミット (暴走防止)
 DEBUG_DUMP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "debug")
+
+# Chrome ウィンドウサイズ・位置 (画面右下に小さく配置、邪魔にならないが visible で bot 検出回避)
+# 完全な非表示 (minimize / headless) は Mercari に弾かれるため、小さく visible が現状の最適解.
+DEFAULT_WINDOW_SIZE = (820, 640)
+DEFAULT_WINDOW_POSITION = (40, 40)
 
 
 def parse_item_id(url: str) -> Optional[str]:
@@ -96,11 +103,21 @@ def extract_likes_from_html(page_source: str) -> list[dict]:
     return results
 
 
-def create_driver(headless: bool = False, profile_dir: Optional[str] = None):
+def create_driver(
+    headless: bool = False,
+    profile_dir: Optional[str] = None,
+    window_size: Optional[tuple[int, int]] = None,
+    window_position: Optional[tuple[int, int]] = None,
+):
     """undetected_chromedriver を起動して返す.
 
     Mercari のいいねページはログイン必須なので、初回は headless=False で手動ログイン後、
     2 回目以降は profile が再利用される。Phase 1a では headless=False をデフォルトに。
+
+    window_size / window_position:
+      ウィンドウを小さく配置することで作業中の邪魔を最小化する.
+      None で DEFAULT_WINDOW_SIZE / DEFAULT_WINDOW_POSITION を使用.
+      headless=True 時は無視 (画面なし).
     """
     try:
         import undetected_chromedriver as uc  # noqa: PLC0415
@@ -120,8 +137,25 @@ def create_driver(headless: bool = False, profile_dir: Optional[str] = None):
     # --user-agent は意図的に指定しない (Chrome 本体の UA を使う、上部コメント参照)
     if headless:
         options.add_argument("--headless=new")
+    else:
+        # visible モード時のみ window-size / position を反映 (visible で小さく)
+        ws = window_size or DEFAULT_WINDOW_SIZE
+        wp = window_position or DEFAULT_WINDOW_POSITION
+        options.add_argument(f"--window-size={ws[0]},{ws[1]}")
+        options.add_argument(f"--window-position={wp[0]},{wp[1]}")
 
-    return uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
+    driver = uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
+    if not headless:
+        # add_argument の window-size は起動時のみ反映され、UC が後で resize する場合があるので
+        # 念のため明示で再設定 (画面右下じゃなく左上にしないと visible でも作業の邪魔にしにくい)
+        try:
+            ws = window_size or DEFAULT_WINDOW_SIZE
+            wp = window_position or DEFAULT_WINDOW_POSITION
+            driver.set_window_size(ws[0], ws[1])
+            driver.set_window_position(wp[0], wp[1])
+        except Exception:
+            pass
+    return driver
 
 
 def _wait_for_likes_anchor(driver, timeout_sec: int) -> bool:
@@ -180,33 +214,52 @@ def _dump_debug_artifacts(driver, label: str) -> tuple[str, str]:
     return html_path, png_path
 
 
-def _click_load_more(driver) -> bool:
-    """「もっと見る」ボタンを 1 回押す. 押せたら True、ボタン無し / 不可視なら False."""
+def _count_anchors(driver) -> int:
+    """現時点の mercari-liked-item anchor 数を返す (lazy-load 進捗計測用)."""
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    return len(driver.find_elements(By.CSS_SELECTOR, ITEM_ANCHOR_SELECTOR))
+
+
+def _scroll_or_click_load_more(driver, sleep_after: float) -> bool:
+    """無限スクロール 1 ステップ実行. anchor が増えたら True、増えなければ False (= 末尾到達).
+
+    2026-04-30: /mypage/favorites は LoadMoreButton 廃止 + 無限スクロール式に変更.
+    旧「もっと見る」ボタンは存在しないが、互換のため fallback で残す.
+    """
     from selenium.webdriver.common.by import By  # noqa: PLC0415
     from selenium.common.exceptions import (  # noqa: PLC0415
         ElementNotInteractableException,
         StaleElementReferenceException,
     )
 
-    # 1) data-testid / class 付きの公式ボタン
+    before = _count_anchors(driver)
+
+    # 1) ページ末尾にスクロール (主要ロード方式)
+    try:
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+    except Exception:
+        pass
+
+    # 2) フォールバック: もし「もっと見る」ボタンが存在すれば押す (互換維持)
     elements = driver.find_elements(By.CSS_SELECTOR, LOAD_MORE_BUTTON_SELECTOR)
     if elements and elements[0].is_displayed():
         try:
             driver.execute_script("arguments[0].click();", elements[0])
-            return True
         except (ElementNotInteractableException, StaleElementReferenceException):
-            return False
+            pass
+    else:
+        for btn in driver.find_elements(By.CSS_SELECTOR, "button"):
+            try:
+                if (btn.text or "").strip() == "もっと見る":
+                    driver.execute_script("arguments[0].click();", btn)
+                    break
+            except StaleElementReferenceException:
+                continue
 
-    # 2) フォールバック: 「もっと見る」テキストの button 要素を全件チェック
-    buttons = driver.find_elements(By.CSS_SELECTOR, "button")
-    for btn in buttons:
-        try:
-            if (btn.text or "").strip() == "もっと見る":
-                driver.execute_script("arguments[0].click();", btn)
-                return True
-        except StaleElementReferenceException:
-            continue
-    return False
+    time.sleep(sleep_after)
+    after = _count_anchors(driver)
+    return after > before
 
 
 def collect_liked_urls(
@@ -253,12 +306,11 @@ def collect_liked_urls(
                 "ログイン済の場合は dump HTML を確認して selector の変更有無を調査。"
             )
 
-        # 「もっと見る」を最大 N 回押下
+        # 無限スクロールで全件ロード (anchor が増えなくなったら break = 末尾到達)
         for _ in range(load_more_clicks):
-            clicked = _click_load_more(driver)
-            if not clicked:
+            grew = _scroll_or_click_load_more(driver, sleep_after=after_click_sleep)
+            if not grew:
                 break
-            time.sleep(after_click_sleep)
 
         page_source = driver.page_source
         items = extract_likes_from_html(page_source)

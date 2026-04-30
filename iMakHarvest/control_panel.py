@@ -139,9 +139,11 @@ class HarvestPanel(tk.Tk):
         # オプション
         opt = tk.LabelFrame(self, text="オプション", padx=10, pady=8, font=("Meiryo UI", 10))
         opt.pack(fill="x", padx=12, pady=4)
-        self.show_browser_var = tk.BooleanVar(value=False)
+        # 既定 ON: Mercari は headless Chrome を bot 検出で弾く (2026-04-30 確認)
+        # → 画面表示モードでないと /mypage/likes が「未対応ブラウザ」フォールバックされる
+        self.show_browser_var = tk.BooleanVar(value=True)
         tk.Checkbutton(opt,
-                       text="処理中の画面を表示する (通常はチェックしないでください)",
+                       text="処理中の画面を表示する (Mercari は非表示モード非対応のため、推奨 ON)",
                        variable=self.show_browser_var,
                        font=("Meiryo UI", 10)).pack(anchor="w")
 
