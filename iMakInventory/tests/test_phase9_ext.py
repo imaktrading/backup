@@ -120,5 +120,38 @@ def test_control_panel_stop_has_confirmation_dialog():
     assert "停止しますか" in func_body or "巡回停止" in func_body
 
 
+# ============================================================================
+# Phase 9 緊急 fix: control_panel の subprocess flash 問題
+# ============================================================================
+def test_control_panel_has_popen_monkey_patch():
+    """control_panel.py 冒頭で subprocess.Popen を monkey-patch している.
+
+    旧バグ: cron info が 30秒おきに schtasks subprocess を spawn → console
+    flash で GUI フォーカス奪取 → キーボード入力不能。
+    """
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    assert "_patch_subprocess_no_window" in src
+    assert "_imak_patched" in src
+
+
+def test_control_panel_cron_info_throttled():
+    """_render_cron_info に 60秒 throttle がある."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    assert "CRON_INFO_REFRESH_SEC" in src
+    assert "_cron_info_last_refresh" in src
+    assert "_cron_info_cache_text" in src
+
+
+def test_control_panel_subprocess_calls_have_creationflags():
+    """control_panel 内の subprocess.run / Popen に creationflags=_NO_WINDOW."""
+    src = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    # _NO_WINDOW 定数定義
+    assert "_NO_WINDOW = subprocess.CREATE_NO_WINDOW" in src
+    # 各 subprocess.run / Popen 呼出に creationflags 引数
+    # (monkey-patch とは別に明示的にも仕込み = 二重防御)
+    occurrences = src.count("creationflags=_NO_WINDOW")
+    assert occurrences >= 4, f"creationflags=_NO_WINDOW が {occurrences} 件、4 以上必要"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

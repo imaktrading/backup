@@ -27,6 +27,32 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 
+
+# Windows: subprocess の console window を抑制 (Phase 9 緊急 fix)
+# 旧バグ事象: _render_cron_info の schtasks subprocess が 30 秒おき (巡回中は
+# 2 秒おき) に console window をフラッシュ → GUI フォーカス奪取で
+# キーボード入力不能になっていた。run_cycle.py と同じ monkey-patch を control
+# panel にも適用して全 subprocess.Popen に CREATE_NO_WINDOW 強制。
+def _patch_subprocess_no_window():
+    if sys.platform != "win32":
+        return
+    _orig_popen = subprocess.Popen
+    if getattr(_orig_popen, "_imak_patched", False):
+        return  # 二重 patch 防止 (re-import 時)
+    no_window = subprocess.CREATE_NO_WINDOW
+
+    class _PatchedPopen(_orig_popen):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):
+            kwargs["creationflags"] = (kwargs.get("creationflags") or 0) | no_window
+            super().__init__(*args, **kwargs)
+
+    _PatchedPopen._imak_patched = True  # type: ignore[attr-defined]
+    subprocess.Popen = _PatchedPopen  # type: ignore[misc]
+
+
+_patch_subprocess_no_window()
+
+
 # Google Sheets URL から ID 抽出
 GSHEETS_URL_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
 
@@ -49,6 +75,7 @@ GUI_STATE_FILE = SCRIPT_DIR / ".gui_state.json"
 DECISION_LOG_DIR = SCRIPT_DIR / "decision_log"
 TOOLS_DIR = SCRIPT_DIR / "tools"
 HISTORY_MAX = 5
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 # ============================================================================
@@ -87,6 +114,7 @@ class ControlPanel:
     SUMMARY_POLL_MS = 30_000  # 30 秒おきに状態を refresh
     PROGRESS_POLL_MS = 2_000  # 巡回中のみ 2 秒間隔で速い refresh
     ERRORS_WARN_THRESHOLD = 5  # この件数を超えたら赤色警告
+    CRON_INFO_REFRESH_SEC = 60  # cron 状態は重い (schtasks subprocess) ので 60 秒 throttle
 
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -95,6 +123,10 @@ class ControlPanel:
         self.state = _load_state()
         self.proc: subprocess.Popen | None = None
         self.reader_thread: threading.Thread | None = None
+        # cron info キャッシュ (subprocess 呼出を間引く)
+        self._cron_info_last_refresh = 0.0
+        self._cron_info_cache_text = "cron: (取得中...)"
+        self._cron_info_cache_fg = "gray"
         self._build_ui()
         self._refresh_log_tail()
         # サマリバーの自動更新ループを開始
@@ -337,7 +369,7 @@ class ControlPanel:
                 cmd, cwd=str(SCRIPT_DIR),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
-                bufsize=1, env=env,
+                bufsize=1, env=env, creationflags=_NO_WINDOW,
             )
         except Exception as e:
             messagebox.showerror("起動失敗", f"{type(e).__name__}: {e}")
@@ -441,7 +473,7 @@ class ControlPanel:
             r = subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
                 capture_output=True, text=True, encoding="cp932", errors="replace",
-                timeout=10,
+                timeout=10, creationflags=_NO_WINDOW,
             )
             if r.returncode == 0:
                 self._append_log(f"[stop] taskkill /T /PID {pid} 成功\n")
@@ -504,6 +536,7 @@ class ControlPanel:
                  "-Action", action],
                 cwd=str(SCRIPT_DIR), capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=30,
+                creationflags=_NO_WINDOW,
             )
             return r.stdout + r.stderr
         except subprocess.TimeoutExpired:
@@ -650,32 +683,52 @@ class ControlPanel:
             self.summary_errors_label.configure(text="", fg="black")
 
     def _render_cron_info(self):
-        """schtasks /Query で iMakInventory_Cycle の Last/Next を取得."""
+        """schtasks /Query で iMakInventory_Cycle の Last/Next を取得.
+
+        60 秒 throttle: cron 状態は短時間で変わらないため、毎 polling で
+        subprocess を spawn しない。Phase 9 緊急 fix: 旧コードは 30 秒
+        (巡回中 2 秒) おきに schtasks を呼んで console flash → GUI 入力不能
+        だった。
+        """
+        now = time.time()
+        if now - self._cron_info_last_refresh < self.CRON_INFO_REFRESH_SEC:
+            # キャッシュを使う
+            self.summary_cron_label.configure(
+                text=self._cron_info_cache_text, fg=self._cron_info_cache_fg,
+            )
+            return
+
         try:
             r = subprocess.run(
                 ["schtasks", "/Query", "/TN", "iMakInventory_Cycle", "/FO", "LIST", "/V"],
                 capture_output=True, text=True, encoding="cp932", errors="replace",
-                timeout=8,
+                timeout=8, creationflags=_NO_WINDOW,
             )
             if r.returncode != 0:
-                self.summary_cron_label.configure(
-                    text="cron: (iMakInventory_Cycle 未登録)", fg="gray",
-                )
-                return
-            out = r.stdout or ""
-            last_line = next((ln for ln in out.splitlines() if "前回の実行" in ln or "Last Run" in ln), "")
-            next_line = next((ln for ln in out.splitlines() if "次回の実行" in ln or "Next Run" in ln), "")
-            last = last_line.split(":", 1)[1].strip() if ":" in last_line else "?"
-            nxt = next_line.split(":", 1)[1].strip() if ":" in next_line else "?"
-            self.summary_cron_label.configure(
-                text=f"cron: Last={last}  Next={nxt}", fg="black",
-            )
+                self._cron_info_cache_text = "cron: (iMakInventory_Cycle 未登録)"
+                self._cron_info_cache_fg = "gray"
+            else:
+                out = r.stdout or ""
+                last_line = next((ln for ln in out.splitlines() if "前回の実行" in ln or "Last Run" in ln), "")
+                next_line = next((ln for ln in out.splitlines() if "次回の実行" in ln or "Next Run" in ln), "")
+                last = last_line.split(":", 1)[1].strip() if ":" in last_line else "?"
+                nxt = next_line.split(":", 1)[1].strip() if ":" in next_line else "?"
+                self._cron_info_cache_text = f"cron: Last={last}  Next={nxt}"
+                self._cron_info_cache_fg = "black"
         except subprocess.TimeoutExpired:
-            self.summary_cron_label.configure(text="cron: (取得タイムアウト)", fg="gray")
+            self._cron_info_cache_text = "cron: (取得タイムアウト)"
+            self._cron_info_cache_fg = "gray"
         except FileNotFoundError:
-            self.summary_cron_label.configure(text="cron: (schtasks 不在)", fg="gray")
+            self._cron_info_cache_text = "cron: (schtasks 不在)"
+            self._cron_info_cache_fg = "gray"
         except Exception as e:
-            self.summary_cron_label.configure(text=f"cron: 例外 {type(e).__name__}", fg="gray")
+            self._cron_info_cache_text = f"cron: 例外 {type(e).__name__}"
+            self._cron_info_cache_fg = "gray"
+
+        self._cron_info_last_refresh = now
+        self.summary_cron_label.configure(
+            text=self._cron_info_cache_text, fg=self._cron_info_cache_fg,
+        )
 
     def _read_latest_cycle_log(self) -> dict | None:
         try:
