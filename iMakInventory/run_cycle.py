@@ -43,11 +43,17 @@ for _stream_name in ("stdout", "stderr"):
             pass
 
 from monitor_listings import process_sheet  # noqa: E402
-from sheet_updater import HIGH_SHEET_ID, LOW_SHEET_ID  # noqa: E402
+from sheet_updater import (  # noqa: E402
+    HIGH_SHEET_ID, LOW_SHEET_ID, open_sheet_by_id,
+    get_listings_worksheet, read_listings_rows, LISTINGS_GID,
+)
 from ebay_actions.revise_csv_generator import run as run_revise_csv  # noqa: E402
 from ebay_actions.sell_feed_uploader import upload_one_csv  # noqa: E402
 from ebay_actions.listing_verifier import verify_listings  # noqa: E402
 from audit import sample_and_append as audit_sample_and_append  # noqa: E402
+from backup import (  # noqa: E402
+    backup_d_column, prune_old_backups, compute_d_diff, render_diff_md,
+)
 
 DECISION_LOG_DIR = SCRIPT_DIR / "decision_log"
 DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -263,6 +269,76 @@ def _phase_upload(csv_path_str: str, test_mode: bool) -> dict:
 
 
 # ============================================================================
+# Phase 8: D 列 backup / diff helpers
+# ============================================================================
+def _resolve_backup_targets(
+    sheet: str,
+    sheet_id: Optional[str],
+    sheet_label: Optional[str],
+    high_sheet_id: Optional[str],
+    low_sheet_id: Optional[str],
+) -> list:
+    """backup 対象 [(label, sheet_id), ...] を返す.
+
+    --sheet-id 単一指定 → [(sheet_label or "SHEET", sheet_id)]
+    --sheet=both        → [("HIGH", high), ("LOW", low)]
+    --sheet=high|low    → 片方のみ
+    """
+    if sheet_id:
+        return [(sheet_label or "SHEET", sheet_id)]
+    h_id = high_sheet_id or HIGH_SHEET_ID
+    l_id = low_sheet_id or LOW_SHEET_ID
+    targets = []
+    if sheet in ("high", "both"):
+        targets.append(("HIGH", h_id))
+    if sheet in ("low", "both"):
+        targets.append(("LOW", l_id))
+    return targets
+
+
+def _phase_compute_diff(
+    cycle_ts: str,
+    before_snapshot: dict,
+    backup_targets: list,
+    test_mode: bool,
+) -> dict:
+    """巡回前後の D 列差分を計算 → decision_log/diff_<cycle_ts>_<label>.md に出力.
+
+    Returns: {sheet_label: {newly_sold, newly_in_stock, unchanged_count, md_path}}
+    """
+    summary = {}
+    for label, sid in backup_targets:
+        before = before_snapshot.get(label) or []
+        if not before:
+            summary[label] = {"skipped": "no_before_snapshot"}
+            continue
+        try:
+            sh = open_sheet_by_id(sid)
+            ws = get_listings_worksheet(sh, gid=LISTINGS_GID)
+            after = read_listings_rows(ws, start_row=2, end_row=None, only_with_url=False)
+            diff = compute_d_diff(before, after)
+            md = render_diff_md(diff, sheet_label=label, cycle_ts=cycle_ts)
+            md_path = DECISION_LOG_DIR / f"diff_{cycle_ts}_{label}.md"
+            md_path.write_text(md, encoding="utf-8")
+            n_sold = len(diff["newly_sold"])
+            n_back = len(diff["newly_in_stock"])
+            _log(
+                f"  D 列差分 [{label}]: newly_sold={n_sold} / newly_in_stock={n_back} "
+                f"→ {md_path.name}",
+                test_mode,
+            )
+            summary[label] = {
+                "newly_sold": n_sold,
+                "newly_in_stock": n_back,
+                "unchanged_count": diff["unchanged_count"],
+                "md_path": str(md_path),
+            }
+        except Exception as e:
+            summary[label] = {"error": f"{type(e).__name__}: {e}"}
+    return summary
+
+
+# ============================================================================
 # cycle_<ts>.jsonl 記録
 # ============================================================================
 def _record_cycle_log(cycle_log: dict) -> Path:
@@ -343,6 +419,38 @@ def run_cycle(
             _log(f"  ⚠️ verify 例外 (続行): {type(e).__name__}: {e}", test_mode)
             cycle_log["phases"]["listing_verify"] = {"error": f"{type(e).__name__}: {e}"}
 
+        # Phase 0.7: D 列バックアップ + 古い backup 削除 (Phase 8a)
+        cycle_ts = cycle_log["ts_start"].replace("-", "").replace(":", "").replace("T", "_")[:15]
+        backup_targets = _resolve_backup_targets(
+            sheet, sheet_id, sheet_label, high_sheet_id, low_sheet_id,
+        )
+        backup_results = {}
+        before_snapshot = {}  # {sheet_label: [rows]} 差分計算用
+        for label, sid in backup_targets:
+            try:
+                _log(f"=== Phase 0.7/4: backup_d_column [{label}] ===", test_mode)
+                sh = open_sheet_by_id(sid)
+                # 差分用に backup 直前の D 列を memory に保持
+                ws = get_listings_worksheet(sh, gid=LISTINGS_GID)
+                before_snapshot[label] = read_listings_rows(
+                    ws, start_row=2, end_row=None, only_with_url=False,
+                )
+                br = backup_d_column(sh, cycle_ts=cycle_ts)
+                pr = prune_old_backups(sh)
+                backup_results[label] = {"backup": br, "prune": pr}
+                if br.get("error"):
+                    _log(f"  ⚠️ backup 失敗 [{label}]: {br['error']}", test_mode)
+                else:
+                    _log(
+                        f"  ✅ backup 完了 [{label}]: tab={br['backup_tab_name']} "
+                        f"rows={br['row_count']} prune.deleted={pr['deleted']}",
+                        test_mode,
+                    )
+            except Exception as e:
+                _log(f"  ⚠️ backup 例外 (続行) [{label}]: {type(e).__name__}: {e}", test_mode)
+                backup_results[label] = {"error": f"{type(e).__name__}: {e}"}
+        cycle_log["phases"]["backup"] = backup_results
+
         # Phase 1: monitor
         m = _phase_monitor(
             sheet, limit, test_mode,
@@ -352,6 +460,16 @@ def run_cycle(
             low_sheet_id=low_sheet_id,
         )
         cycle_log["phases"]["monitor"] = m
+
+        # Phase 1.5: D 列差分 → diff_<cycle_ts>.md (Phase 8b)
+        try:
+            diff_summary = _phase_compute_diff(
+                cycle_ts, before_snapshot, backup_targets, test_mode,
+            )
+            cycle_log["phases"]["d_diff"] = diff_summary
+        except Exception as e:
+            _log(f"  ⚠️ diff 計算例外 (続行): {type(e).__name__}: {e}", test_mode)
+            cycle_log["phases"]["d_diff"] = {"error": f"{type(e).__name__}: {e}"}
 
         # Phase 2: revise CSV
         if monitor_only:
@@ -425,10 +543,18 @@ def run_cycle(
 
     # Toast
     monitor = cycle_log["phases"].get("monitor", {})
+    d_diff = cycle_log["phases"].get("d_diff", {}) or {}
+    diff_sold = sum(
+        v.get("newly_sold", 0) for v in d_diff.values() if isinstance(v, dict)
+    )
+    diff_back = sum(
+        v.get("newly_in_stock", 0) for v in d_diff.values() if isinstance(v, dict)
+    )
     summary = (
         f"sold={monitor.get('newly_sold', '?')} "
         f"in_stock={monitor.get('newly_in_stock', '?')} "
         f"errors={monitor.get('errors', '?')}"
+        f" | D差分: ○化={diff_sold} 復活={diff_back}"
     )
     if test_mode or cycle_log["status"] not in ("success", "success_no_changes"):
         title = f"iMakInventory: {cycle_log['status']}{' (TEST)' if test_mode else ''}"

@@ -202,6 +202,26 @@ class ControlPanel:
         ttk.Button(task_frame, text="本番タスク削除",
                    command=lambda: self._task_unregister("cycle")).pack(side="left", padx=4, pady=4)
 
+        # === Restore (Phase 8c): backup シートから D 列を巻戻す ===
+        restore_frame = ttk.LabelFrame(self.root, text="スプシ復元 (D 列バックアップから巻戻し)")
+        restore_frame.pack(fill="x", padx=8, pady=4)
+        ttk.Label(restore_frame, text="復元対象 URL/ID:").grid(row=0, column=0, sticky="w", padx=4, pady=2)
+        self.restore_id_var = tk.StringVar()
+        self.restore_id_entry = ttk.Entry(restore_frame, textvariable=self.restore_id_var, width=70)
+        self.restore_id_entry.grid(row=0, column=1, sticky="w", padx=4, pady=2)
+        ttk.Button(restore_frame, text="backup 一覧読込",
+                   command=self._restore_load_backups).grid(row=0, column=2, padx=4, pady=2)
+        ttk.Label(restore_frame, text="backup シート:").grid(row=1, column=0, sticky="w", padx=4, pady=2)
+        self.restore_tab_var = tk.StringVar()
+        self.restore_tab_combo = ttk.Combobox(
+            restore_frame, textvariable=self.restore_tab_var, width=68, state="readonly"
+        )
+        self.restore_tab_combo.grid(row=1, column=1, sticky="w", padx=4, pady=2)
+        ttk.Button(restore_frame, text="プレビュー (差分のみ)",
+                   command=self._restore_preview).grid(row=2, column=1, sticky="w", padx=4, pady=4)
+        ttk.Button(restore_frame, text="🔄 復元実行",
+                   command=self._restore_apply).grid(row=2, column=2, sticky="w", padx=4, pady=4)
+
         self._on_mode_change()
 
     def _on_mode_change(self):
@@ -426,6 +446,102 @@ class ControlPanel:
         body.configure(state="disabled")
         body.pack(fill="both", expand=True, padx=8, pady=8)
         ttk.Button(dlg, text="閉じる", command=dlg.destroy).pack(pady=4)
+
+    # =====================================================================
+    # Restore (Phase 8c)
+    # =====================================================================
+    def _restore_get_sheet_id(self) -> str | None:
+        raw = self.restore_id_var.get().strip()
+        sid = extract_sheet_id(raw)
+        if not sid:
+            messagebox.showerror("エラー", "復元対象 URL or ID を入力してください")
+            return None
+        return sid
+
+    def _restore_load_backups(self):
+        sid = self._restore_get_sheet_id()
+        if not sid:
+            return
+        try:
+            from sheet_updater import open_sheet_by_id  # noqa: PLC0415
+            from backup import list_backup_tabs  # noqa: PLC0415
+            sh = open_sheet_by_id(sid)
+            tabs = list_backup_tabs(sh)
+            if not tabs:
+                messagebox.showinfo("情報", "backup_* シートが見つかりません")
+                self.restore_tab_combo["values"] = []
+                self.restore_tab_var.set("")
+                return
+            values = [t["title"] for t in tabs]
+            self.restore_tab_combo["values"] = values
+            self.restore_tab_var.set(values[0])
+            self._append_log(f"=== backup 一覧 ({len(tabs)} 件): 最新={values[0]} ===\n")
+        except Exception as e:
+            messagebox.showerror("失敗", f"{type(e).__name__}: {e}")
+
+    def _restore_preview(self):
+        sid = self._restore_get_sheet_id()
+        if not sid:
+            return
+        tab = self.restore_tab_var.get().strip()
+        if not tab:
+            messagebox.showerror("エラー", "backup シートを選択してください")
+            return
+        try:
+            from sheet_updater import open_sheet_by_id  # noqa: PLC0415
+            from backup import restore_from_backup  # noqa: PLC0415
+            sh = open_sheet_by_id(sid)
+            r = restore_from_backup(sh, tab, dry_run=True)
+            self._show_restore_result(r, applied=False)
+        except Exception as e:
+            messagebox.showerror("失敗", f"{type(e).__name__}: {e}")
+
+    def _restore_apply(self):
+        sid = self._restore_get_sheet_id()
+        if not sid:
+            return
+        tab = self.restore_tab_var.get().strip()
+        if not tab:
+            messagebox.showerror("エラー", "backup シートを選択してください")
+            return
+        # 二重確認: 復元はスプシ書込発生
+        if not messagebox.askyesno(
+            "復元実行 確認",
+            f"backup シート [{tab}] から D 列を巻戻します。\n"
+            f"この操作はスプシ書込が発生します。続行しますか?"
+        ):
+            return
+        try:
+            from sheet_updater import open_sheet_by_id  # noqa: PLC0415
+            from backup import restore_from_backup  # noqa: PLC0415
+            sh = open_sheet_by_id(sid)
+            r = restore_from_backup(sh, tab, dry_run=False)
+            self._show_restore_result(r, applied=True)
+        except Exception as e:
+            messagebox.showerror("失敗", f"{type(e).__name__}: {e}")
+
+    def _show_restore_result(self, r: dict, applied: bool):
+        if r.get("error"):
+            messagebox.showerror("失敗", r["error"])
+            return
+        n = r.get("to_restore", 0)
+        preview = r.get("diff_preview", [])
+        lines = []
+        lines.append(("✅ 復元完了" if applied else "📋 プレビュー (未適用)"))
+        lines.append(f"  backup_tab: {r.get('backup_tab')}")
+        lines.append(f"  to_restore: {n} 件")
+        lines.append("")
+        if preview:
+            lines.append("差分プレビュー (先頭 50 件):")
+            lines.append("  row  | before → after")
+            lines.append("  -----+---------------")
+            for p in preview:
+                b = repr(p.get("before") or "")
+                a = repr(p.get("after") or "")
+                lines.append(f"  {p['row']:>4} | {b} → {a}")
+        else:
+            lines.append("(差分 0 件 ─ 復元不要)")
+        self._show_dialog(("復元結果" if applied else "プレビュー結果"), "\n".join(lines))
 
 
 def main():
