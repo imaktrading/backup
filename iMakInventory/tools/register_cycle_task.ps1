@@ -34,8 +34,10 @@ param (
     [string]$SheetId = "1oDjQC8WN_3WC2InPHAV-hPKmsa96rdNd4jxbGBzDimc",
     [string]$SheetLabel = "TEST_PARALLEL",
 
-    # eBay upload skip (Stage 1 = $true、Stage 2 移行時は -SkipUpload:$false で無効化)
-    [bool]$SkipUpload = $true,
+    # eBay upload skip ("true"/"false" 文字列、Stage 1 = "true"、Stage 2 = "false")
+    # ※ subprocess 経由 (-File mode) で PowerShell [bool] param は値変換不可、
+    #   そのため [string] で受けて内部で eq 比較する。
+    [string]$SkipUpload = "true",
 
     # 起動時刻 (HH:MM カンマ区切り、最大 6 件、空欄 skip).
     # default は trabajo (08/12/16/20/00/04) と 2h ずらした並走用 6 件。
@@ -84,7 +86,9 @@ if (Test-Path $pythonwExe) {
 # run_cycle.py 引数を組立 (--sheet-id / --sheet-label / --skip-upload / --limit)
 # ※ $Args / $args は PowerShell 自動変数のため使用不可、$cmdArgs を使う
 $argParts = @("-u", "run_cycle.py", "--sheet-id", $SheetId, "--sheet-label", $SheetLabel)
-if ($SkipUpload) {
+# 文字列比較で skip 判定 ("false"/"0" 以外は全て skip 扱い)
+$skipBool = -not ($SkipUpload -eq "false" -or $SkipUpload -eq "0" -or $SkipUpload -eq "")
+if ($skipBool) {
     $argParts += "--skip-upload"
 }
 if ($Limit -gt 0) {
@@ -181,7 +185,7 @@ Write-Output "  sheet_id:    $SheetId"
 Write-Output "  sheet_label: $SheetLabel"
 $limitDisplay = if ($Limit -gt 0) { "$Limit 件" } else { "無制限" }
 Write-Output "  limit:       $limitDisplay"
-$stageMode = if ($SkipUpload) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }
+$stageMode = if ($skipBool) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }
 Write-Output "  mode:        $stageMode"
 Write-Output "  command: $pythonExe $cmdArgs"
 Write-Output "  cwd: $WorkingDir"

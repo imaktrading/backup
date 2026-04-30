@@ -638,28 +638,13 @@ class ControlPanel:
             except Exception:
                 pass
 
-            limit_disp = f"{limit_int} 件" if limit_int > 0 else "無制限"
-            skip_disp = "skip (Stage 1)" if skip_upload else "実行 (Stage 2)"
-            sheet_disp = (
-                f"{sheet_label or '?'} ({sheet_id[:30]}...)"
-                if sheet_id else "PS1 default (TEST_PARALLEL)"
-            )
-            if not messagebox.askyesno(
-                "本番タスク登録",
-                f"本番タスクを以下の設定で登録します:\n"
-                f"  起動時刻: {', '.join(collected)} ({len(collected)} 件)\n"
-                f"  sheet:    {sheet_disp}\n"
-                f"  limit:    {limit_disp}\n"
-                f"  upload:   {skip_disp}\n\n"
-                "登録を続行しますか?"
-            ):
-                return
+            # 確認 dialog 無し: ボタン押下で即実行 (誤 cancel 防止)
             script = "register_cycle_task.ps1"
-            # ※ -SkipUpload は PowerShell [bool] param、文字列 "$false" を渡すと
-            #   non-empty で True に coerce される罠あり → :$true / :$false 形式で
-            #   PowerShell 側に直接 bool literal を渡す
-            skip_token = "-SkipUpload:$true" if skip_upload else "-SkipUpload:$false"
-            extra = ["-Times", ",".join(collected), skip_token]
+            # ※ PS1 側の SkipUpload は [string] 型で受ける ("true"/"false")。
+            #   subprocess 経由 (-File) では [bool] param に値を渡せないため、
+            #   PS1 が文字列で受け取って内部で判定する。
+            extra = ["-Times", ",".join(collected),
+                     "-SkipUpload", ("true" if skip_upload else "false")]
             if sheet_id:
                 extra += ["-SheetId", sheet_id]
             if sheet_label:

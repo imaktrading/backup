@@ -27,7 +27,9 @@ param (
 
     [string]$SheetId = "1oDjQC8WN_3WC2InPHAV-hPKmsa96rdNd4jxbGBzDimc",
     [string]$SheetLabel = "TEST_PARALLEL",
-    [bool]$SkipUpload = $true
+    # subprocess 経由 (-File) で PowerShell [bool] param は値変換不可なので
+    # [string] で受けて内部判定 (Stage 1 = "true"、Stage 2 = "false")
+    [string]$SkipUpload = "true"
 )
 
 # fail-fast
@@ -102,7 +104,8 @@ if (Test-Path $pythonwExe) {
 
 # 引数組立 (--sheet-id / --sheet-label / --skip-upload)
 $argParts = @("-u", "run_cycle.py", "--sheet-id", $SheetId, "--sheet-label", $SheetLabel)
-if ($SkipUpload) {
+$skipBool = -not ($SkipUpload -eq "false" -or $SkipUpload -eq "0" -or $SkipUpload -eq "")
+if ($skipBool) {
     $argParts += "--skip-upload"
 }
 $cmdArgs = $argParts -join " "
@@ -133,7 +136,7 @@ Register-ScheduledTask `
     -Description "iMakInventory ワンショット予約 ($($target.ToString('yyyy-MM-dd HH:mm')) に 1 回実行)" `
     | Out-Null
 
-$stageMode = if ($SkipUpload) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }
+$stageMode = if ($skipBool) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }
 Write-Output "[OK] $TaskName 登録完了"
 Write-Output "  fire_at:     $($target.ToString('yyyy-MM-dd HH:mm:ss'))"
 Write-Output "  sheet_id:    $SheetId"

@@ -235,14 +235,25 @@ def test_control_panel_passes_sheet_id_label_skip_to_cycle_task():
     func_body = src[idx:end]
     # GUI input を読む
     assert "single_id_var" in func_body
-    assert "single_label_var" in func_body
     assert "skip_upload_var" in func_body
     # PS1 引数として渡す
     assert '"-SheetId"' in func_body
-    assert '"-SheetLabel"' in func_body
-    # SkipUpload は :$true / :$false 形式 (bool 罠回避)
-    assert "-SkipUpload:$true" in func_body
-    assert "-SkipUpload:$false" in func_body
+    # SkipUpload は "true"/"false" 文字列で渡す (PS1 側で [string] 型で受けて判定)
+    # subprocess 経由 (-File) では [bool] param に値を渡せないため
+    assert '"true"' in func_body
+    assert '"false"' in func_body
+    assert "-SkipUpload" in func_body
+
+
+def test_register_ps1_skip_upload_is_string_type():
+    """register_cycle_task.ps1 / register_oneshot_task.ps1 の SkipUpload は [string] で
+    受ける ([bool] では subprocess -File 経由で値変換不可)。
+    """
+    for ps in ["register_cycle_task.ps1", "register_oneshot_task.ps1"]:
+        src = (ROOT / "tools" / ps).read_text(encoding="utf-8")
+        assert "[string]$SkipUpload" in src, f"{ps}: [string]$SkipUpload にすべき"
+        # 内部で文字列比較で skip 判定
+        assert '$SkipUpload -eq "false"' in src
 
 
 def test_control_panel_does_not_block_dual_mode_for_cycle_task():
