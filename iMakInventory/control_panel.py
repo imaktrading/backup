@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -25,6 +26,23 @@ from pathlib import Path
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
+
+# Google Sheets URL から ID 抽出
+GSHEETS_URL_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
+
+
+def extract_sheet_id(value: str) -> str:
+    """URL or ID 文字列から spreadsheet ID を抽出.
+    既に ID なら trim して返す (英数字 + _- のみの 30 文字以上)。
+    """
+    if not value:
+        return ""
+    s = value.strip()
+    m = GSHEETS_URL_RE.search(s)
+    if m:
+        return m.group(1)
+    # URL ではなさそう → そのまま ID として返す (空白除去のみ)
+    return s
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 GUI_STATE_FILE = SCRIPT_DIR / ".gui_state.json"
@@ -92,26 +110,31 @@ class ControlPanel:
         self.dual_frame = ttk.LabelFrame(self.root, text="HIGH/LOW セット")
         self.dual_frame.pack(fill="x", padx=8, pady=4)
 
-        ttk.Label(self.dual_frame, text="HIGH ID:").grid(row=0, column=0, sticky="w", padx=4, pady=2)
+        ttk.Label(self.dual_frame, text="HIGH URL/ID:").grid(row=0, column=0, sticky="w", padx=4, pady=2)
         self.high_id_var = tk.StringVar()
-        self.high_combo = ttk.Combobox(self.dual_frame, textvariable=self.high_id_var, width=60,
+        self.high_combo = ttk.Combobox(self.dual_frame, textvariable=self.high_id_var, width=70,
                                        values=self.state.get("high_history", []))
         self.high_combo.grid(row=0, column=1, sticky="we", padx=4, pady=2)
 
-        ttk.Label(self.dual_frame, text="LOW  ID:").grid(row=1, column=0, sticky="w", padx=4, pady=2)
+        ttk.Label(self.dual_frame, text="LOW  URL/ID:").grid(row=1, column=0, sticky="w", padx=4, pady=2)
         self.low_id_var = tk.StringVar()
-        self.low_combo = ttk.Combobox(self.dual_frame, textvariable=self.low_id_var, width=60,
+        self.low_combo = ttk.Combobox(self.dual_frame, textvariable=self.low_id_var, width=70,
                                       values=self.state.get("low_history", []))
         self.low_combo.grid(row=1, column=1, sticky="we", padx=4, pady=2)
+
+        ttk.Label(self.dual_frame,
+                  text="(Google Sheets URL をそのまま貼付け OK、または ID 直接)",
+                  font=("", 8), foreground="gray").grid(
+            row=2, column=0, columnspan=2, sticky="w", padx=4)
         self.dual_frame.columnconfigure(1, weight=1)
 
         # === Single mode ===
         self.single_frame = ttk.LabelFrame(self.root, text="単一スプシ")
         self.single_frame.pack(fill="x", padx=8, pady=4)
 
-        ttk.Label(self.single_frame, text="ID:    ").grid(row=0, column=0, sticky="w", padx=4, pady=2)
+        ttk.Label(self.single_frame, text="URL/ID:").grid(row=0, column=0, sticky="w", padx=4, pady=2)
         self.single_id_var = tk.StringVar()
-        self.single_combo = ttk.Combobox(self.single_frame, textvariable=self.single_id_var, width=60,
+        self.single_combo = ttk.Combobox(self.single_frame, textvariable=self.single_id_var, width=70,
                                          values=self.state.get("single_history", []))
         self.single_combo.grid(row=0, column=1, sticky="we", padx=4, pady=2)
 
@@ -119,6 +142,11 @@ class ControlPanel:
         self.single_label_var = tk.StringVar(value="SHEET")
         ttk.Entry(self.single_frame, textvariable=self.single_label_var, width=20).grid(
             row=1, column=1, sticky="w", padx=4, pady=2)
+
+        ttk.Label(self.single_frame,
+                  text="(Google Sheets URL をそのまま貼付け OK、または ID 直接)",
+                  font=("", 8), foreground="gray").grid(
+            row=2, column=0, columnspan=2, sticky="w", padx=4)
         self.single_frame.columnconfigure(1, weight=1)
 
         # === Options ===
@@ -212,13 +240,16 @@ class ControlPanel:
                 return None
 
         if self.mode_var.get() == "dual":
-            high = self.high_id_var.get().strip()
-            low = self.low_id_var.get().strip()
+            high_raw = self.high_id_var.get().strip()
+            low_raw = self.low_id_var.get().strip()
+            high = extract_sheet_id(high_raw)
+            low = extract_sheet_id(low_raw)
             if not high and not low:
-                messagebox.showerror("エラー", "HIGH/LOW いずれかの ID を入力してください")
+                messagebox.showerror("エラー", "HIGH/LOW いずれかの URL or ID を入力してください")
                 return None
             if high:
                 cmd.extend(["--high-sheet-id", high])
+                # 履歴は ID で保存 (URL でも構わないが ID の方が短い)
                 self.state["high_history"] = _push_history(
                     self.state.get("high_history", []), high)
             if low:
@@ -226,9 +257,10 @@ class ControlPanel:
                 self.state["low_history"] = _push_history(
                     self.state.get("low_history", []), low)
         else:
-            sid = self.single_id_var.get().strip()
+            raw = self.single_id_var.get().strip()
+            sid = extract_sheet_id(raw)
             if not sid:
-                messagebox.showerror("エラー", "単一スプシ ID を入力してください")
+                messagebox.showerror("エラー", "単一スプシ URL or ID を入力してください")
                 return None
             cmd.extend(["--sheet-id", sid])
             label = self.single_label_var.get().strip() or "SHEET"

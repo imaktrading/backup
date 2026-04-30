@@ -126,5 +126,44 @@ def test_save_load_state_roundtrip(tmp_path, monkeypatch):
     assert loaded == saved
 
 
+# ============================================================================
+# 6c: extract_sheet_id (URL → ID 抽出)
+# ============================================================================
+def test_extract_sheet_id_from_full_url():
+    """通常の Google Sheets URL から ID を抽出."""
+    from control_panel import extract_sheet_id
+    sid = "1AbCdEf-_GhIjKlMnOpQrStUvWxYz1234567890ABCDE"
+    url = f"https://docs.google.com/spreadsheets/d/{sid}/edit#gid=0"
+    assert extract_sheet_id(url) == sid
+
+
+def test_extract_sheet_id_from_url_with_gid_query():
+    """gid query 付き URL でも ID 部だけ抽出."""
+    from control_panel import extract_sheet_id
+    sid = "101KL6abc_def-XYZ"
+    url = f"https://docs.google.com/spreadsheets/d/{sid}/edit?usp=sharing"
+    assert extract_sheet_id(url) == sid
+
+
+def test_extract_sheet_id_passthrough_bare_id():
+    """既に ID 文字列ならそのまま返す."""
+    from control_panel import extract_sheet_id
+    sid = "1AbCdEf-_GhIjKlMnOpQrStUvWxYz1234567890ABCDE"
+    assert extract_sheet_id(sid) == sid
+
+
+def test_extract_sheet_id_strips_whitespace():
+    """前後の空白は trim."""
+    from control_panel import extract_sheet_id
+    assert extract_sheet_id("  abc123  ") == "abc123"
+
+
+def test_extract_sheet_id_empty():
+    """空文字 / None 相当 → 空文字."""
+    from control_panel import extract_sheet_id
+    assert extract_sheet_id("") == ""
+    assert extract_sheet_id("   ") == ""
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
