@@ -224,10 +224,20 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
 # メインシート読込
 # ============================================================================
 def _domain_of(url: str) -> str:
+    """URL から netloc (ドメイン) を返す.
+
+    protocol 抜けの URL ("amazon.co.jp/dp/...") も許容する:
+    urllib.parse.urlparse はスキーム無しだと netloc を空に解釈するため、
+    "://" が無ければ "https://" を仮プレフィックスして再 parse する。
+    入力ミスで supplier 判定失敗 → 在庫漏れになるのを防ぐ (漏れ NG 原則)。
+    """
     if not url:
         return ""
+    s = url.strip()
+    if "://" not in s:
+        s = "https://" + s
     try:
-        return urllib.parse.urlparse(url).netloc.lower()
+        return urllib.parse.urlparse(s).netloc.lower()
     except Exception:
         return ""
 

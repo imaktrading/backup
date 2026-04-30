@@ -56,6 +56,7 @@ from sheet_updater import (  # noqa: E402
     read_listings_rows,
     update_listings_sold_marks,
     detect_supplier,
+    _domain_of,
 )
 from scrapers.mercari_scraper import fetch_product_inventory as fetch_mercari  # noqa: E402
 from scrapers.mercari_scraper import create_driver as create_mercari_driver  # noqa: E402
@@ -83,14 +84,6 @@ def log(msg: str):
     print(line)
     with open(_log_path(), "a", encoding="utf-8") as f:
         f.write(line + "\n")
-
-
-def _domain_of(url: str) -> str:
-    try:
-        from urllib.parse import urlparse
-        return urlparse(url).netloc.lower()
-    except Exception:
-        return ""
 
 
 # ============================================================================
@@ -358,10 +351,22 @@ def process_sheet(
     newly_sold = sum(1 for r in results if r["delta"] == "newly_sold")
     newly_in_stock = sum(1 for r in results if r["delta"] == "newly_in_stock")
     errors = sum(1 for r in results if r["error"])
+    # 不正 URL (unsupported supplier) を抽出して目立たせる ─ 漏れ NG 原則
+    url_alerts = [
+        {"row_index": r["row_index"], "url": r.get("url", ""), "error": r["error"]}
+        for r in results
+        if (r.get("error") or "").startswith("unsupported supplier")
+    ]
     log("")
     log(f"  === 集計 [{sheet_label}] ===")
     log(f"    処理: {len(results)} / 対象 {len(rows)}")
     log(f"    新規売切: {newly_sold} / 新規復活: {newly_in_stock} / 変化なし: {len(results) - newly_sold - newly_in_stock - errors} / エラー: {errors}")
+    if url_alerts:
+        log(f"  ⚠️ URL 不正で在庫検出スキップ: {len(url_alerts)} 件 (スプシ修正必要)")
+        for a in url_alerts[:10]:
+            log(f"    row{a['row_index']:>4} {a['url'][:80]}  ← {a['error'][:60]}")
+        if len(url_alerts) > 10:
+            log(f"    ... +{len(url_alerts) - 10} 件")
 
     # 書込
     updates = []
@@ -400,6 +405,7 @@ def process_sheet(
         "newly_sold":     newly_sold,
         "newly_in_stock": newly_in_stock,
         "errors":         errors,
+        "url_alerts":     url_alerts,
     }
 
 

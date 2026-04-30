@@ -129,6 +129,59 @@ def test_listing_verifier_detect_qty_state():
     assert state == "unknown"
 
 
+def test_detect_qty_state_limited_stock_alone_is_unknown():
+    """regression: 'Limited stock' 単独マッチで qty_positive 判定しない (false positive 防止).
+
+    eBay UI の無関係箇所 (sidebar / search / promo) に "Limited stock" 文字列が
+    出ても、数値 availability も Add to cart button id も無ければ "unknown"。
+    """
+    from ebay_actions.listing_verifier import _detect_qty_state
+    # 旧バグ再現 HTML: Limited stock 文字列はあるが具体的な qty 数値なし
+    html = """
+    <html><body>
+      <div class="promo">Limited stock available on selected items</div>
+      <div class="other">More items from this seller</div>
+    </body></html>
+    """
+    state, hint = _detect_qty_state(html)
+    assert state == "unknown", f"expected unknown but got {state} ({hint})"
+
+
+def test_detect_qty_state_only_left_alone_is_unknown():
+    """regression: "Only ... left" 単独マッチでも qty_positive にしない (数値必須)."""
+    from ebay_actions.listing_verifier import _detect_qty_state
+    # "Only" と "left" の両方が出るが、数値が結合してない
+    html = "Only premium sellers can offer this; few items left in similar listings"
+    state, hint = _detect_qty_state(html)
+    assert state == "unknown"
+
+
+def test_detect_qty_state_only_n_left_with_number_is_positive():
+    """'Only 3 left' のように数値が伴うパターンは qty_positive 維持."""
+    from ebay_actions.listing_verifier import _detect_qty_state
+    state, hint = _detect_qty_state("Only 3 left in stock")
+    assert state == "qty_positive"
+    assert "3" in hint
+
+
+def test_detect_qty_state_priority_ended_over_anything():
+    """ended は最優先 (Out of stock 等が同時にあっても ended)."""
+    from ebay_actions.listing_verifier import _detect_qty_state
+    state, hint = _detect_qty_state(
+        "This listing has ended. Out of stock. 5 available."
+    )
+    assert state == "ended"
+
+
+def test_detect_qty_state_cart_button_signal():
+    """Add to cart button id が active listing の構造シグナル."""
+    from ebay_actions.listing_verifier import _detect_qty_state
+    html = '<button id="atcRedesignId_btn">Add to cart</button>'
+    state, hint = _detect_qty_state(html)
+    assert state == "qty_positive"
+    assert "cart" in hint.lower()
+
+
 def test_listing_verifier_state_persistence(tmp_path, monkeypatch):
     """mark_verified → get_already_verified の roundtrip."""
     from ebay_actions import listing_verifier as lv

@@ -179,7 +179,7 @@ def _phase_monitor(
         if sheet in ("low", "both"):
             targets.append(("LOW", l_id))
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0,
-             "by_sheet": {}}
+             "url_alerts_count": 0, "by_sheet": {}}
     for label, sid in targets:
         try:
             stats = process_sheet(
@@ -190,6 +190,7 @@ def _phase_monitor(
             grand["by_sheet"][label] = stats
             for k in ("processed", "newly_sold", "newly_in_stock", "errors"):
                 grand[k] = grand[k] + stats.get(k, 0)
+            grand["url_alerts_count"] += len(stats.get("url_alerts") or [])
         except Exception as e:
             _log(f"  ❌ [{label}] 例外: {type(e).__name__}: {e}", test_mode)
             grand["by_sheet"][label] = {"error": f"{type(e).__name__}: {e}"}
