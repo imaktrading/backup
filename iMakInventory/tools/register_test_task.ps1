@@ -18,6 +18,13 @@ param (
 # fail-fast: 途中エラーで success メッセージを誤出力しない
 $ErrorActionPreference = 'Stop'
 
+# コンソール出力を UTF-8 化 (日本語メッセージ文字化け防止、Windows PS 5.1 既定 cp932 回避)
+try {
+    chcp 65001 | Out-Null
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {}
+
 $TaskName = "iMakInventory_TEST"
 $WorkingDir = "C:\dev\iMak\iMakInventory"
 $PythonExe = "python"
