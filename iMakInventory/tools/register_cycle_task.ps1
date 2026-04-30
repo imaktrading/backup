@@ -7,8 +7,18 @@
 #   ─ trabajo (08/12/16/20/00/04 起動) と 2h ずらして並走 (Phase 9a)
 # 失敗時 retry: 1 回 (15 分後)
 #
+# === Phase 9 並走モード (Stage 1) ===
+# trabajo 本番をコピーした TEST スプシで Inventory を走らせる。
+# eBay upload は trabajo に任せる (-SkipUpload デフォルト ON)。
+#   monitor + スプシ更新 + audit + backup + Revise CSV 生成 まで実行
+#   (Phase 7e verify は upload なしのため自動 skip)
+#
+# Stage 2 切替 (eBay upload を Inventory に移行する時):
+#   PowerShell -ExecutionPolicy Bypass -File tools\register_cycle_task.ps1 -SkipUpload:$false
+#
 # Usage:
 #   PowerShell -ExecutionPolicy Bypass -File tools\register_cycle_task.ps1
+#   PowerShell -ExecutionPolicy Bypass -File tools\register_cycle_task.ps1 -SheetId <ID> -SheetLabel <LABEL>
 #
 # Unregister:
 #   PowerShell -ExecutionPolicy Bypass -File tools\register_cycle_task.ps1 -Action Unregister
@@ -18,13 +28,26 @@
 
 param (
     [ValidateSet("Register", "Unregister", "Status")]
-    [string]$Action = "Register"
+    [string]$Action = "Register",
+
+    # Phase 9 並走モード: TEST スプシ (trabajo 本番をコピー済) で Inventory 走行
+    [string]$SheetId = "1oDjQC8WN_3WC2InPHAV-hPKmsa96rdNd4jxbGBzDimc",
+    [string]$SheetLabel = "TEST_PARALLEL",
+
+    # eBay upload skip (Stage 1 = $true、Stage 2 移行時は -SkipUpload:$false で無効化)
+    [bool]$SkipUpload = $true
 )
 
 $TaskName = "iMakInventory_Cycle"
 $WorkingDir = "C:\dev\iMak\iMakInventory"
 $PythonExe = "python"
-$Args = "-u run_cycle.py"
+
+# run_cycle.py 引数を組立 (--sheet-id / --sheet-label / --skip-upload)
+$argParts = @("-u", "run_cycle.py", "--sheet-id", $SheetId, "--sheet-label", $SheetLabel)
+if ($SkipUpload) {
+    $argParts += "--skip-upload"
+}
+$Args = $argParts -join " "
 
 if ($Action -eq "Unregister") {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -81,6 +104,10 @@ Register-ScheduledTask `
 Write-Output "[OK] $TaskName 登録完了"
 Write-Output "  schedule: 4h サイクル (10:00, 14:00, 18:00, 22:00, 02:00, 06:00)"
 Write-Output "  並走対象: trabajo (08/12/16/20/00/04) と 2h ずらし"
+Write-Output "  sheet_id:    $SheetId"
+Write-Output "  sheet_label: $SheetLabel"
+$stageMode = if ($SkipUpload) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }
+Write-Output "  mode:        $stageMode"
 Write-Output "  command: $PythonExe $Args"
 Write-Output "  cwd: $WorkingDir"
 Write-Output "  retry: 1 回 / 15 分後"
@@ -88,3 +115,4 @@ Write-Output "  execution time limit: 3h"
 Write-Output ""
 Write-Output "確認:  PowerShell -ExecutionPolicy Bypass -File tools\register_cycle_task.ps1 -Action Status"
 Write-Output "削除:  PowerShell -ExecutionPolicy Bypass -File tools\register_cycle_task.ps1 -Action Unregister"
+Write-Output "Stage 2 移行時:  PowerShell -ExecutionPolicy Bypass -File tools\register_cycle_task.ps1 -SkipUpload:`$false"
