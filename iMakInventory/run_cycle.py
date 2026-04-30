@@ -427,7 +427,7 @@ def run_cycle(
         return cycle_log
 
     # ライブ進捗 writer (Phase 9b: GUI が 30秒 polling して表示)
-    cleanup_stale_progress(max_age_hours=6)
+    cleanup_stale_progress()  # default: 30 分以上古いものを削除
     cycle_ts_compact = cycle_log["ts_start"].replace("-", "").replace(":", "").replace("T", "_")[:15]
     progress_writer = ProgressWriter(cycle_ts=cycle_ts_compact)
 

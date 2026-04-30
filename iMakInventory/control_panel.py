@@ -134,6 +134,12 @@ class ControlPanel:
         self._cron_info_last_refresh = 0.0
         self._cron_info_cache_text = "cron: (取得中...)"
         self._cron_info_cache_fg = "gray"
+        # GUI 起動時に古い progress 残骸を清掃 (Phase 9 修正)
+        try:
+            from progress import cleanup_stale_progress  # noqa: PLC0415
+            cleanup_stale_progress()
+        except Exception:
+            pass
         self._build_ui()
         self._refresh_log_tail()
         # サマリバーの自動更新ループを開始

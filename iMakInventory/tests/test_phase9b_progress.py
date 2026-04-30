@@ -59,7 +59,7 @@ def test_progress_writer_finalize_deletes_file(tmp_path, monkeypatch):
 
 
 def test_read_latest_progress_returns_newest(tmp_path, monkeypatch):
-    """複数 progress ファイルがあるとき cycle_ts 降順で最新を返す."""
+    """複数 progress ファイルがあるとき cycle_ts 降順で最新を返す (lock あり時)."""
     import progress as p
     monkeypatch.setattr(p, "DECISION_LOG_DIR", tmp_path)
     # 古い + 新しい
@@ -71,6 +71,8 @@ def test_read_latest_progress_returns_newest(tmp_path, monkeypatch):
         json.dumps({"cycle_ts": "20260430_180000", "phase": "monitor", "processed": 100}),
         encoding="utf-8",
     )
+    # lock があれば 「巡回中」扱いで progress 返す
+    (tmp_path / ".cycle.lock").write_text("pid=1234", encoding="utf-8")
     latest = p.read_latest_progress()
     assert latest is not None
     assert latest["cycle_ts"] == "20260430_180000"
@@ -84,7 +86,7 @@ def test_read_latest_progress_returns_none_if_empty(tmp_path, monkeypatch):
 
 
 def test_cleanup_stale_progress(tmp_path, monkeypatch):
-    """6h 以上前の progress ファイルは削除される (壊れた cycle 残骸の清掃)."""
+    """30 分以上前の progress ファイルは削除される (壊れた cycle 残骸の清掃)."""
     import os
     import progress as p
     monkeypatch.setattr(p, "DECISION_LOG_DIR", tmp_path)
@@ -92,13 +94,42 @@ def test_cleanup_stale_progress(tmp_path, monkeypatch):
     new = tmp_path / "progress_20260430_180000.jsonl"
     old.write_text("{}", encoding="utf-8")
     new.write_text("{}", encoding="utf-8")
-    # old を 7h 前に偽装
-    seven_hours_ago = time.time() - 7 * 3600
-    os.utime(old, (seven_hours_ago, seven_hours_ago))
-    deleted = p.cleanup_stale_progress(max_age_hours=6)
+    # old を 1h 前に偽装 (30 分閾値を超える)
+    one_hour_ago = time.time() - 3600
+    os.utime(old, (one_hour_ago, one_hour_ago))
+    # default 30 分閾値で削除
+    deleted = p.cleanup_stale_progress()
     assert deleted == 1
     assert not old.exists()
     assert new.exists()
+
+
+def test_read_latest_progress_returns_none_if_no_lock(tmp_path, monkeypatch):
+    """progress file あっても .cycle.lock が無ければ None (stale 扱い)."""
+    import progress as p
+    monkeypatch.setattr(p, "DECISION_LOG_DIR", tmp_path)
+    (tmp_path / "progress_20260430_140000.jsonl").write_text(
+        json.dumps({"cycle_ts": "20260430_140000", "phase": "monitor"}),
+        encoding="utf-8",
+    )
+    # lock file なし
+    assert p.read_latest_progress() is None
+
+
+def test_read_latest_progress_returns_data_if_lock_exists(tmp_path, monkeypatch):
+    """lock file が存在すれば progress data を返す (= 巡回中)."""
+    import progress as p
+    monkeypatch.setattr(p, "DECISION_LOG_DIR", tmp_path)
+    (tmp_path / "progress_20260430_140000.jsonl").write_text(
+        json.dumps({"cycle_ts": "20260430_140000", "phase": "monitor", "processed": 50}),
+        encoding="utf-8",
+    )
+    # lock file あり
+    (tmp_path / ".cycle.lock").write_text("pid=1234", encoding="utf-8")
+    data = p.read_latest_progress()
+    assert data is not None
+    assert data["phase"] == "monitor"
+    assert data["processed"] == 50
 
 
 # ============================================================================

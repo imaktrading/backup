@@ -106,8 +106,18 @@ class ProgressWriter:
 def read_latest_progress() -> Optional[dict]:
     """最新の progress_*.jsonl を返す.
 
-    複数ある場合は cycle_ts 降順で最新。なければ None。
+    stale 判定 (Phase 9 修正、Takaaki さん事象 2026-04-30 17:11):
+    - .cycle.lock が無い場合 → cycle process はもう生きてない → None 返す
+      (= GUI が「待機中」表示に戻る)
+    - lock があれば cycle 進行中 → JSON 内容を返す
+
+    複数 progress_*.jsonl がある場合は cycle_ts 降順で最新。
     """
+    lock_path = DECISION_LOG_DIR / ".cycle.lock"
+    if not lock_path.exists():
+        # process 死亡で lock release 済 + progress file が残骸 → stale 扱い
+        return None
+
     files = sorted(
         DECISION_LOG_DIR.glob(f"{PROGRESS_PREFIX}*.jsonl"),
         key=lambda p: p.name,
@@ -121,9 +131,15 @@ def read_latest_progress() -> Optional[dict]:
         return None
 
 
-def cleanup_stale_progress(max_age_hours: float = 6.0) -> int:
-    """壊れた cycle で残った古い progress ファイルを削除 (lock と同じ stale 判定)."""
-    cutoff = time.time() - max_age_hours * 3600
+def cleanup_stale_progress(max_age_minutes: float = 30.0) -> int:
+    """壊れた cycle で残った古い progress ファイルを削除.
+
+    Phase 9 修正で 6h → 30 分に短縮 (Takaaki さん事象: 35 分前のゴミが
+    GUI に「巡回中」と誤表示されていた)。
+    cycle execution time limit が 3h でも、進捗更新が 30 分間ない
+    = 異常 or 終了済 とみなして安全に削除。
+    """
+    cutoff = time.time() - max_age_minutes * 60
     deleted = 0
     for p in DECISION_LOG_DIR.glob(f"{PROGRESS_PREFIX}*.jsonl"):
         try:
