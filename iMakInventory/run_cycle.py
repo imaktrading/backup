@@ -54,6 +54,7 @@ from audit import sample_and_append as audit_sample_and_append  # noqa: E402
 from backup import (  # noqa: E402
     backup_d_column, prune_old_backups, compute_d_diff, render_diff_md,
 )
+from progress import ProgressWriter, cleanup_stale_progress  # noqa: E402
 
 DECISION_LOG_DIR = SCRIPT_DIR / "decision_log"
 DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -170,6 +171,7 @@ def _phase_monitor(
     single_sheet_label: Optional[str] = None,
     high_sheet_id: Optional[str] = None,
     low_sheet_id: Optional[str] = None,
+    progress_writer=None,
 ) -> dict:
     """monitor_listings 経由でスプシ処理 (HIGH/LOW セット or 単一)."""
     _log(f"=== Phase 1/3: monitor_listings (sheet={sheet}, limit={limit}) ===", test_mode)
@@ -186,11 +188,19 @@ def _phase_monitor(
             targets.append(("LOW", l_id))
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0,
              "url_alerts_count": 0, "by_sheet": {}}
+
+    # ProgressWriter を monitor_listings の callback として食わせる
+    progress_callback = None
+    if progress_writer is not None:
+        def progress_callback(**kwargs):  # noqa: E306
+            progress_writer.update(**kwargs)
+
     for label, sid in targets:
         try:
             stats = process_sheet(
                 sheet_id=sid, sheet_label=label,
                 start_row=2, end_row=None, limit=limit,
+                progress_callback=progress_callback,
                 dry_run=False, sleep_sec=1,
             )
             grand["by_sheet"][label] = stats
@@ -384,7 +394,13 @@ def run_cycle(
                       f"lock 保持中、巡回 skip ({path.name})")
         return cycle_log
 
+    # ライブ進捗 writer (Phase 9b: GUI が 30秒 polling して表示)
+    cleanup_stale_progress(max_age_hours=6)
+    cycle_ts_compact = cycle_log["ts_start"].replace("-", "").replace(":", "").replace("T", "_")[:15]
+    progress_writer = ProgressWriter(cycle_ts=cycle_ts_compact)
+
     try:
+        progress_writer.update(phase="pytest_precheck", force=True)
         # Phase 0: pytest precheck (Phase 7a) — 検体 DOM 仕様変更を検知して fail-closed
         precheck = _phase_pytest_precheck(test_mode)
         cycle_log["phases"]["pytest_precheck"] = precheck
@@ -398,6 +414,7 @@ def run_cycle(
             return cycle_log  # finally で lock release される
 
         # Phase 0.5: listing verifier (Phase 7e) — 前回 upload の eBay 反映確認 (4h ずらし)
+        progress_writer.update(phase="listing_verify", force=True)
         try:
             _log("=== Phase 0.5/4: listing_verifier (前回 upload を verify) ===", test_mode)
             verify_summary = verify_listings()
@@ -420,6 +437,7 @@ def run_cycle(
             cycle_log["phases"]["listing_verify"] = {"error": f"{type(e).__name__}: {e}"}
 
         # Phase 0.7: D 列バックアップ + 古い backup 削除 (Phase 8a)
+        progress_writer.update(phase="backup", force=True)
         cycle_ts = cycle_log["ts_start"].replace("-", "").replace(":", "").replace("T", "_")[:15]
         backup_targets = _resolve_backup_targets(
             sheet, sheet_id, sheet_label, high_sheet_id, low_sheet_id,
@@ -452,16 +470,19 @@ def run_cycle(
         cycle_log["phases"]["backup"] = backup_results
 
         # Phase 1: monitor
+        progress_writer.update(phase="monitor", force=True)
         m = _phase_monitor(
             sheet, limit, test_mode,
             single_sheet_id=sheet_id,
             single_sheet_label=sheet_label,
             high_sheet_id=high_sheet_id,
             low_sheet_id=low_sheet_id,
+            progress_writer=progress_writer,
         )
         cycle_log["phases"]["monitor"] = m
 
         # Phase 1.5: D 列差分 → diff_<cycle_ts>.md (Phase 8b)
+        progress_writer.update(phase="d_diff", force=True)
         try:
             diff_summary = _phase_compute_diff(
                 cycle_ts, before_snapshot, backup_targets, test_mode,
@@ -472,6 +493,7 @@ def run_cycle(
             cycle_log["phases"]["d_diff"] = {"error": f"{type(e).__name__}: {e}"}
 
         # Phase 2: revise CSV
+        progress_writer.update(phase="revise_csv", force=True)
         if monitor_only:
             _log(f"  --monitor-only mode → revise CSV / upload 共に skip", test_mode)
             cycle_log["phases"]["revise_csv"] = {"skipped": "monitor_only"}
@@ -493,6 +515,7 @@ def run_cycle(
             cycle_log["phases"]["revise_csv"] = r
 
             # Phase 3: upload
+            progress_writer.update(phase="upload", force=True)
             csv_path = r.get("csv_path") if isinstance(r, dict) else None
             if not csv_path or skip_upload:
                 _log(f"  upload skip (csv_path={csv_path}, skip_upload={skip_upload})", test_mode)
@@ -508,6 +531,7 @@ def run_cycle(
 
         # Phase 4: audit sample (Phase 7d') — IN_STOCK から 5 件抜き取り → audit シート追記
         # cycle status に関わらず実行 (in_stock データがあれば audit する)
+        progress_writer.update(phase="audit_sample", force=True)
         try:
             audit_targets = []
             if sheet_id:
@@ -537,6 +561,11 @@ def run_cycle(
     finally:
         _release_lock(test_mode)
         cycle_log["ts_end"] = datetime.now().isoformat(timespec="seconds")
+        # ライブ進捗ファイルを片付け (GUI が「待機中」表示に戻る)
+        try:
+            progress_writer.finalize()
+        except Exception:
+            pass
 
     log_path = _record_cycle_log(cycle_log)
     _log(f"=== cycle 完了: status={cycle_log['status']} log={log_path.name} ===", test_mode)

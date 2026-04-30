@@ -84,17 +84,44 @@ def _push_history(history: list, value: str) -> list:
 # GUI
 # ============================================================================
 class ControlPanel:
+    SUMMARY_POLL_MS = 30_000  # 30 秒おきに状態を refresh
+    PROGRESS_POLL_MS = 2_000  # 巡回中のみ 2 秒間隔で速い refresh
+    ERRORS_WARN_THRESHOLD = 5  # この件数を超えたら赤色警告
+
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("iMakInventory 操作パネル (Phase 6b)")
-        root.geometry("900x720")
+        root.title("iMakInventory 操作パネル (Phase 9b)")
+        root.geometry("900x780")
         self.state = _load_state()
         self.proc: subprocess.Popen | None = None
         self.reader_thread: threading.Thread | None = None
         self._build_ui()
         self._refresh_log_tail()
+        # サマリバーの自動更新ループを開始
+        self._summary_poll()
 
     def _build_ui(self):
+        # === Live summary bar (Phase 9b) ===
+        summary_frame = ttk.LabelFrame(self.root, text="状態サマリ")
+        summary_frame.pack(fill="x", padx=8, pady=4)
+        self.summary_status_label = tk.Label(
+            summary_frame, text="(更新待ち...)", anchor="w", justify="left",
+            font=("Yu Gothic UI", 10, "bold"),
+        )
+        self.summary_status_label.pack(fill="x", padx=4, pady=2)
+        self.summary_progress_label = tk.Label(
+            summary_frame, text="", anchor="w", justify="left",
+        )
+        self.summary_progress_label.pack(fill="x", padx=4, pady=2)
+        self.summary_cron_label = tk.Label(
+            summary_frame, text="cron: (未確認)", anchor="w", justify="left",
+        )
+        self.summary_cron_label.pack(fill="x", padx=4, pady=2)
+        self.summary_errors_label = tk.Label(
+            summary_frame, text="", anchor="w", justify="left",
+        )
+        self.summary_errors_label.pack(fill="x", padx=4, pady=2)
+
         # === Mode selector ===
         mode_frame = ttk.LabelFrame(self.root, text="スプシモード")
         mode_frame.pack(fill="x", padx=8, pady=4)
@@ -446,6 +473,146 @@ class ControlPanel:
         body.configure(state="disabled")
         body.pack(fill="both", expand=True, padx=8, pady=8)
         ttk.Button(dlg, text="閉じる", command=dlg.destroy).pack(pady=4)
+
+    # =====================================================================
+    # Live summary bar (Phase 9b)
+    # =====================================================================
+    def _summary_poll(self):
+        """30 秒おきに状態を更新。巡回中は 2 秒間隔で速く更新する."""
+        try:
+            self._summary_refresh()
+        except Exception as e:
+            try:
+                self.summary_status_label.configure(
+                    text=f"⚠️ summary refresh 例外: {type(e).__name__}: {e}",
+                    fg="orange",
+                )
+            except Exception:
+                pass
+        # 巡回中なら速く再 schedule
+        try:
+            from progress import read_latest_progress  # noqa: PLC0415
+            in_progress = read_latest_progress() is not None
+        except Exception:
+            in_progress = False
+        delay = self.PROGRESS_POLL_MS if in_progress else self.SUMMARY_POLL_MS
+        self.root.after(delay, self._summary_poll)
+
+    def _summary_refresh(self):
+        """progress + cycle log + cron task 情報を 1 度取得 → サマリ表示更新."""
+        from progress import read_latest_progress  # noqa: PLC0415
+
+        progress = read_latest_progress()
+        in_progress = progress is not None
+        # 状態行
+        if in_progress:
+            phase = progress.get("phase", "?")
+            sl = progress.get("sheet_label") or ""
+            sl_str = f" [{sl}]" if sl else ""
+            self.summary_status_label.configure(
+                text=f"🟢 巡回中: {phase}{sl_str} (cycle_ts={progress.get('cycle_ts','?')})",
+                fg="dark green",
+            )
+            # 進捗行
+            processed = progress.get("processed", 0)
+            total = progress.get("total", 0)
+            if total > 0:
+                pct = processed * 100 // max(total, 1)
+                bar_len = 30
+                filled = bar_len * processed // max(total, 1)
+                bar = "█" * filled + "░" * (bar_len - filled)
+                self.summary_progress_label.configure(
+                    text=f"  {bar} {processed}/{total} ({pct}%)",
+                    fg="black",
+                )
+            else:
+                self.summary_progress_label.configure(
+                    text=f"  phase={phase} (進捗カウント未取得)", fg="gray",
+                )
+            # errors
+            errors = int(progress.get("errors", 0) or 0)
+            self._render_errors(errors, prefix="ライブ errors=")
+        else:
+            # 待機中 → 直近 cycle log を読込
+            self.summary_progress_label.configure(text="", fg="black")
+            latest = self._read_latest_cycle_log()
+            if latest is None:
+                self.summary_status_label.configure(
+                    text="⚪ 待機中 (cycle log なし)", fg="black",
+                )
+                self.summary_errors_label.configure(text="", fg="black")
+            else:
+                ts_end = latest.get("ts_end") or latest.get("ts_start") or "?"
+                status = latest.get("status", "?")
+                monitor = latest.get("phases", {}).get("monitor", {}) or {}
+                processed = monitor.get("processed", "?")
+                newly_sold = monitor.get("newly_sold", "?")
+                errors = int(monitor.get("errors", 0) or 0)
+                self.summary_status_label.configure(
+                    text=f"⚪ 待機中 / 最終 {ts_end[-8:]} status={status}",
+                    fg="black",
+                )
+                self.summary_progress_label.configure(
+                    text=f"  最終 monitor: processed={processed} sold={newly_sold} errors={errors}",
+                    fg="black",
+                )
+                self._render_errors(errors, prefix="errors=")
+
+        # cron 情報
+        self._render_cron_info()
+
+    def _render_errors(self, errors: int, prefix: str = "errors="):
+        if errors > self.ERRORS_WARN_THRESHOLD:
+            self.summary_errors_label.configure(
+                text=f"  ⚠️ {prefix}{errors} (>{self.ERRORS_WARN_THRESHOLD}): 異常多発、cycle log 参照",
+                fg="red",
+            )
+        elif errors > 0:
+            self.summary_errors_label.configure(
+                text=f"  {prefix}{errors}", fg="dark orange",
+            )
+        else:
+            self.summary_errors_label.configure(text="", fg="black")
+
+    def _render_cron_info(self):
+        """schtasks /Query で iMakInventory_Cycle の Last/Next を取得."""
+        try:
+            r = subprocess.run(
+                ["schtasks", "/Query", "/TN", "iMakInventory_Cycle", "/FO", "LIST", "/V"],
+                capture_output=True, text=True, encoding="cp932", errors="replace",
+                timeout=8,
+            )
+            if r.returncode != 0:
+                self.summary_cron_label.configure(
+                    text="cron: (iMakInventory_Cycle 未登録)", fg="gray",
+                )
+                return
+            out = r.stdout or ""
+            last_line = next((ln for ln in out.splitlines() if "前回の実行" in ln or "Last Run" in ln), "")
+            next_line = next((ln for ln in out.splitlines() if "次回の実行" in ln or "Next Run" in ln), "")
+            last = last_line.split(":", 1)[1].strip() if ":" in last_line else "?"
+            nxt = next_line.split(":", 1)[1].strip() if ":" in next_line else "?"
+            self.summary_cron_label.configure(
+                text=f"cron: Last={last}  Next={nxt}", fg="black",
+            )
+        except subprocess.TimeoutExpired:
+            self.summary_cron_label.configure(text="cron: (取得タイムアウト)", fg="gray")
+        except FileNotFoundError:
+            self.summary_cron_label.configure(text="cron: (schtasks 不在)", fg="gray")
+        except Exception as e:
+            self.summary_cron_label.configure(text=f"cron: 例外 {type(e).__name__}", fg="gray")
+
+    def _read_latest_cycle_log(self) -> dict | None:
+        try:
+            files = sorted(
+                DECISION_LOG_DIR.glob("cycle_*.jsonl"),
+                key=lambda p: p.name, reverse=True,
+            )
+            if not files:
+                return None
+            return json.loads(files[0].read_text(encoding="utf-8"))
+        except Exception:
+            return None
 
     # =====================================================================
     # Restore (Phase 8c)

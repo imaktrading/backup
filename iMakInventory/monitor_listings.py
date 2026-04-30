@@ -230,6 +230,7 @@ def process_sheet(
     limit: Optional[int] = None,
     dry_run: bool = False,
     sleep_sec: float = DEFAULT_SLEEP_SEC,
+    progress_callback=None,
 ):
     log("=" * 60)
     log(f"商品管理シート [{sheet_label}] 開始 (sheet_id={sheet_id[:20]}..., dry_run={dry_run})")
@@ -286,8 +287,15 @@ def process_sheet(
 
     results = []
     mercari_consec_none = 0  # Phase 9: mercari driver 自動再起動用カウンタ
+    total_rows = len(rows)
+    if progress_callback is not None:
+        try:
+            progress_callback(phase="monitor", processed=0, total=total_rows, errors=0,
+                              sheet_label=sheet_label)
+        except Exception:
+            pass
     for i, row in enumerate(rows, start=1):
-        prefix = f"  [{i}/{len(rows)}] row{row['row_index']:>4} "
+        prefix = f"  [{i}/{total_rows}] row{row['row_index']:>4} "
         try:
             res = check_one_row(row, sleep_sec=sleep_sec,
                                 mercari_driver=mercari_driver,
@@ -351,8 +359,20 @@ def process_sheet(
 
         results.append(res)
 
+        # ライブ進捗通知 (callback は throttle を内部で管理)
+        if progress_callback is not None:
+            try:
+                progress_callback(
+                    phase="monitor",
+                    processed=i,
+                    total=total_rows,
+                    errors=sum(1 for r in results if r.get("error")),
+                    sheet_label=sheet_label,
+                )
+            except Exception:
+                pass
+
         # Phase 9 修正: 早期 abort 廃止 (漏れ NG 原則)
-        # 旧 MAX_CONSEC_FAILURES=8 で全 supplier 巻き添え停止していたが、
         # 全 421 件処理しきる方針。mercari 不調は driver 再起動で復旧試行。
 
     # driver 後始末
