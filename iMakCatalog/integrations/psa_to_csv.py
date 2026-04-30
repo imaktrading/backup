@@ -101,6 +101,10 @@ def extract_set_code_from_brand(brand: str) -> Optional[str]:
     promo_keywords = [
         "PROMOS", "PROMO", "ONE PIECE DAY", "BANDAI CARD GAME FEST",
         "ANNIVERSARY", "PREMIUM CARD COLLECTION", "CHAMPIONSHIP",
+        # 2026-05-01: Mini-Tin Vol.2 Bonney(P-113)/Robin(P-111) 事故対応.
+        # PSA brand 'MINI-TIN VOL.2 ROKUSHIRO' 等が認識されず PSA Subject にフォールバック →
+        # C:Card Name 汚染 / P- prefix 欠落の連鎖.
+        "MINI-TIN", "MINI TIN",
     ]
     if any(k in b for k in promo_keywords):
         return "P"

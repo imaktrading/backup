@@ -61,6 +61,11 @@ EBAY_FORBIDDEN_TERMS = [
     (r"\bLot\s+of\b",                    ""),
     (r"\bBundle\b",                      ""),
     (r"\bCollection\s+of\b",             "Collection"),
+    # 2026-05-01: Pokemon rarity prefix 残存 (Elesa Sparkle 'Fa/' 事故).
+    # PSA Subject 'FA/ELESA' 等を smart_titlecase した残骸 'Fa/' を title から除去.
+    # card_name_normalizer は C:Card Name/Character は剥がすが、build_title は
+    # raw subject 経由のため title 側に残る. 該当 prefix: FA AR SAR SR UR HR MR PR.
+    (r"\b(?:FA|AR|SAR|SR|UR|HR|MR|PR)/", ""),
 ]
 
 
