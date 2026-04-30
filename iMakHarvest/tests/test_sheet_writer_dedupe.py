@@ -1,9 +1,9 @@
-"""tests/test_sheet_writer_dedupe - append_new_urls の デデュープ / append-only 動作検証.
+"""tests/test_sheet_writer_dedupe - append_new_urls の デデュープ / 列レイアウト動作検証.
 
-新仕様 (2026-04-30):
-  - Harvest が書くのは A 列 URL のみ. B/C 列は空欄で書込.
-  - デデュープキーは A 列 URL から dedupe_key() で抽出.
-  - B 列は eBay item ID (数字のみ) 用の別関心列 → デデュープ判定では参照しない.
+仕様 (2026-04-30):
+  - Harvest が書くのは A/C/E/F/G/H 列 (URL/タイトル/状態/価格/画像/説明)
+  - B 列 (eBay item ID) と D 列 (Inventory 売切フラグ) は空欄で append
+  - デデュープキーは A 列 URL から dedupe_key() で抽出
 """
 from __future__ import annotations
 
@@ -41,19 +41,27 @@ class _MockWorksheet:
         self.batch_update_calls.append((args, kwargs))
 
 
+def _empty_row(url: str = "", ebay_id: str = "") -> list[str]:
+    """8 列 (A〜H) で 1 行を構築. 既存スプシのモック用."""
+    row = [""] * 8
+    row[0] = url
+    row[1] = ebay_id
+    return row
+
+
 def _ws_with_existing_urls(item_ids: list[str]) -> _MockWorksheet:
-    """A 列に URL のみ、B/C 列は空欄でモックを構築 (新仕様の既存スプシ)."""
-    rows = [["URL", "", ""]]
+    """A 列に URL のみ、他は空欄で 8 列モックを構築."""
+    rows = [["URL"] + [""] * 7]
     for iid in item_ids:
-        rows.append([f"https://jp.mercari.com/item/{iid}", "", ""])
+        rows.append(_empty_row(url=f"https://jp.mercari.com/item/{iid}"))
     return _MockWorksheet(rows)
 
 
 def _ws_with_ebay_item_ids(url_and_ebay_ids: list[tuple[str, str]]) -> _MockWorksheet:
-    """A 列 URL + B 列 eBay item ID (数字のみ) の既存スプシ (実運用想定)."""
-    rows = [["URL", "eBay itemID", ""]]
+    """A 列 URL + B 列 eBay item ID (数字のみ) の既存スプシ."""
+    rows = [["URL", "eBay itemID"] + [""] * 6]
     for url, ebay_id in url_and_ebay_ids:
-        rows.append([url, ebay_id, ""])
+        rows.append(_empty_row(url=url, ebay_id=ebay_id))
     return _MockWorksheet(rows)
 
 
@@ -126,9 +134,9 @@ class TestAppendNewUrls:
     def test_appends_only_new_items(self):
         ws = _ws_with_existing_urls(["m11111111111"])
         items = [
-            {"url": "https://jp.mercari.com/item/m11111111111", "item_id": "m11111111111"},
-            {"url": "https://jp.mercari.com/item/m22222222222", "item_id": "m22222222222"},
-            {"url": "https://jp.mercari.com/item/m33333333333", "item_id": "m33333333333"},
+            {"url": "https://jp.mercari.com/item/m11111111111"},
+            {"url": "https://jp.mercari.com/item/m22222222222"},
+            {"url": "https://jp.mercari.com/item/m33333333333"},
         ]
         result = append_new_urls(ws, items)
         assert result == {"appended": 2, "skipped_existing": 1, "input": 3}
@@ -138,21 +146,52 @@ class TestAppendNewUrls:
             "https://jp.mercari.com/item/m22222222222",
             "https://jp.mercari.com/item/m33333333333",
         ]
-        # B/C 列は常に空欄
+        # 全行 8 列、B 列 (index 1) と D 列 (index 3) は常に空欄
         for r in appended:
-            assert r[1] == ""
-            assert r[2] == ""
+            assert len(r) == 8
+            assert r[1] == ""  # B: eBay item ID
+            assert r[3] == ""  # D: 売切フラグ
 
-    def test_writes_b_and_c_columns_empty(self):
-        # 仕様: 入力 dict に item_id/title が入っていても B/C 列は空欄で書込
+    def test_writes_full_columns_with_detail(self):
+        # 詳細項目を持つ item を渡したとき、各列が正しく埋まる
         ws = _ws_with_existing_urls([])
-        items = [
-            {"url": "https://jp.mercari.com/item/m11111111111",
-             "item_id": "m11111111111", "title": "テスト商品"},
-        ]
+        items = [{
+            "url": "https://jp.mercari.com/item/m11111111111",
+            "title": "テスト商品",
+            "condition": "目立った傷や汚れなし",
+            "price_jpy": 1500,
+            "image_urls": ["https://img1.example.com/a.jpg",
+                           "https://img2.example.com/b.jpg"],
+            "description": "説明文\n複数行",
+        }]
         append_new_urls(ws, items)
-        appended = ws.append_calls[0]
-        assert appended[0] == ["https://jp.mercari.com/item/m11111111111", "", ""]
+        r = ws.append_calls[0][0]
+        assert r[0] == "https://jp.mercari.com/item/m11111111111"  # A: URL
+        assert r[1] == ""                                            # B: eBay (空)
+        assert r[2] == "テスト商品"                                  # C: タイトル
+        assert r[3] == ""                                            # D: 売切フラグ (空)
+        assert r[4] == "目立った傷や汚れなし"                         # E: 状態
+        assert r[5] == "1500"                                        # F: 価格
+        assert r[6] == "https://img1.example.com/a.jpg|https://img2.example.com/b.jpg"  # G: 画像
+        assert r[7] == "説明文\n複数行"                              # H: 説明
+
+    def test_writes_empty_when_detail_missing(self):
+        # title/price 等が無い item は対応する列が空欄になる
+        ws = _ws_with_existing_urls([])
+        items = [{"url": "https://jp.mercari.com/item/m11111111111"}]
+        append_new_urls(ws, items)
+        r = ws.append_calls[0][0]
+        assert r == ["https://jp.mercari.com/item/m11111111111",
+                     "", "", "", "", "", "", ""]
+
+    def test_price_none_writes_empty(self):
+        # price_jpy=None は "" として書く (0 にしない)
+        ws = _ws_with_existing_urls([])
+        items = [{"url": "https://jp.mercari.com/item/m11111111111",
+                  "price_jpy": None}]
+        append_new_urls(ws, items)
+        r = ws.append_calls[0][0]
+        assert r[5] == ""
 
     def test_skips_in_batch_duplicates(self):
         ws = _ws_with_existing_urls([])
@@ -179,7 +218,9 @@ class TestAppendNewUrls:
         assert result["appended"] == 1
         assert result["skipped_existing"] == 1
         appended = ws.append_calls[0]
-        assert appended[0] == ["https://jp.mercari.com/item/m22222222222", "", ""]
+        # 新規行は 8 列、A 列に URL、B/D 含めその他は空欄
+        assert appended[0] == ["https://jp.mercari.com/item/m22222222222",
+                                "", "", "", "", "", "", ""]
 
     def test_b_column_ebay_id_unrelated_string_does_not_match(self):
         # 仮に Mercari URL の入力 item_id が eBay item ID 文字列と「数字一致」しても

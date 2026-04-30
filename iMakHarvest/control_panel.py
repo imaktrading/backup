@@ -146,6 +146,18 @@ class HarvestPanel(tk.Tk):
                        text="処理中の画面を表示する (Mercari は非表示モード非対応のため、推奨 ON)",
                        variable=self.show_browser_var,
                        font=("Meiryo UI", 10)).pack(anchor="w")
+        # 詳細取得: 各商品ページを訪問して タイトル/価格/状態/説明/画像 を取得
+        self.fetch_detail_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(opt,
+                       text="商品詳細も取得する (タイトル/価格/状態/画像/説明) — 1 件あたり ~5 秒",
+                       variable=self.fetch_detail_var,
+                       font=("Meiryo UI", 10)).pack(anchor="w")
+        # SOLD 除外
+        self.exclude_sold_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(opt,
+                       text="SOLD 商品は除外 (売切は出品しても仕入れ不可)",
+                       variable=self.exclude_sold_var,
+                       font=("Meiryo UI", 10)).pack(anchor="w")
 
         # ステータス
         status_frame = tk.Frame(self)
@@ -227,17 +239,33 @@ class HarvestPanel(tk.Tk):
     def _run_mercari_thread(self, sheet_id: str, gid: int, label: str) -> None:
         self._running = True
         self._set_buttons_state(disabled=True)
-        self._set_status("メルカリ収集中...")
-        self._log(f"=== メルカリ いいね収集 開始 ===")
-        self._log(f"  出力先   : {label} (sheet_id={sheet_id[:14]}.., gid={gid})")
         headless = not self.show_browser_var.get()
-        self._log(f"  headless : {headless}")
+        fetch_detail = self.fetch_detail_var.get()
+        exclude_sold = self.exclude_sold_var.get()
+
+        self._set_status("メルカリ収集中...")
+        self._log("=== メルカリ いいね収集 開始 ===")
+        self._log(f"  出力先     : {label} (sheet_id={sheet_id[:14]}.., gid={gid})")
+        self._log(f"  headless   : {headless}")
+        self._log(f"  詳細取得   : {fetch_detail}")
+        self._log(f"  SOLD除外   : {exclude_sold}")
         try:
-            items = mercari_likes.collect_liked_urls(headless=headless)
-            self._log(f"  収集完了 : {len(items)} 件")
+            if fetch_detail:
+                def progress(cur, total, msg):
+                    self._set_status(f"商品詳細取得中... [{cur}/{total}]")
+                    self._log(f"  [{cur}/{total}] {msg}")
+
+                items = mercari_likes.collect_likes_with_details(
+                    headless=headless,
+                    exclude_sold=exclude_sold,
+                    progress_callback=progress,
+                )
+            else:
+                items = mercari_likes.collect_liked_urls(headless=headless)
+            self._log(f"  収集完了   : {len(items)} 件")
             self._set_status(f"スプシ書込中... ({len(items)} 件)")
             result = write_to_sheet(items, spreadsheet_id=sheet_id, gid=gid)
-            self._log(f"  書込結果 : appended={result['appended']}, "
+            self._log(f"  書込結果   : appended={result['appended']}, "
                       f"skipped_existing={result['skipped_existing']}, "
                       f"input={result['input']}")
             self._set_status(

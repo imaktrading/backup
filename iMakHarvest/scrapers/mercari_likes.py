@@ -325,6 +325,90 @@ def collect_liked_urls(
                 pass
 
 
+def collect_likes_with_details(
+    driver=None,
+    max_items: int = DEFAULT_MAX_ITEMS,
+    load_more_clicks: int = DEFAULT_LOAD_MORE_CLICKS,
+    initial_wait_sec: int = DEFAULT_INITIAL_WAIT_SEC,
+    after_click_sleep: float = DEFAULT_AFTER_CLICK_SLEEP,
+    headless: bool = False,
+    exclude_sold: bool = True,
+    progress_callback=None,
+) -> list[dict]:
+    """URL 収集 → 各商品ページを訪問して詳細を取得まで一括実行.
+
+    Args:
+        exclude_sold: True で SOLD 商品は除外 (in_stock=False をリストに含めない).
+        progress_callback: callable(current: int, total: int, msg: str) | None.
+                           進捗通知用 (GUI ログ表示等).
+        他: collect_liked_urls と同じ.
+
+    Returns:
+        [
+          {
+            "url", "item_id",
+            "title", "price_jpy", "condition", "description",
+            "image_urls", "in_stock", "status"
+          },
+          ...
+        ]
+        exclude_sold=True のとき SOLD は含まれない.
+        詳細取得失敗時は空欄で含める (推測で埋めない、CLAUDE.md fail-closed 原則).
+    """
+    from scrapers import mercari_item_detail  # noqa: PLC0415
+
+    own_driver = driver is None
+    if own_driver:
+        driver = create_driver(headless=headless)
+    try:
+        # 1) URL 収集 (driver は own せず渡す → collect_liked_urls 側で quit しない)
+        url_items = collect_liked_urls(
+            driver=driver,
+            max_items=max_items,
+            load_more_clicks=load_more_clicks,
+            initial_wait_sec=initial_wait_sec,
+            after_click_sleep=after_click_sleep,
+            headless=headless,
+        )
+
+        # 2) 各 URL の詳細取得
+        results: list[dict] = []
+        total = len(url_items)
+        for i, item in enumerate(url_items, start=1):
+            if progress_callback:
+                try:
+                    progress_callback(i, total, item["url"])
+                except Exception:
+                    pass
+            detail = mercari_item_detail.fetch_detail(driver, item["url"])
+            if detail is None:
+                # 取得失敗 → 空欄で残す (推測で埋めない)
+                merged = {
+                    **item,
+                    "title": "",
+                    "price_jpy": None,
+                    "condition": "",
+                    "description": "",
+                    "image_urls": [],
+                    "in_stock": None,
+                    "status": "UNKNOWN",
+                }
+            else:
+                merged = {**item, **detail}
+
+            # SOLD 除外: in_stock=False の場合のみ除外 (None=不明 は安全側で含める)
+            if exclude_sold and merged.get("in_stock") is False:
+                continue
+            results.append(merged)
+        return results
+    finally:
+        if own_driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
 def login_interactive(profile_dir: Optional[str] = None) -> None:
     """初回ログイン用. Chrome を非 headless で立ち上げ、ユーザーが手動でログインするのを待つ.
 

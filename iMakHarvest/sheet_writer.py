@@ -38,9 +38,17 @@ LOW_SHEET_ID = "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0"
 LISTINGS_GID = 851100680  # 商品管理シートタブ (HIGH/LOW 共通)
 
 # 列マッピング (1-based)
-COL_URL = 1      # A: Harvest が書込
-COL_B = 2        # B: 空欄 (ユーザー別用途、Harvest は触らない)
-COL_C = 3        # C: 空欄
+COL_URL = 1            # A: 仕入元 URL          - Harvest が書込
+COL_EBAY_ITEM_ID = 2   # B: eBay item ID        - 出品後にユーザー / 別ツールが書込 (Harvest は触らない)
+COL_TITLE = 3          # C: タイトル            - Harvest が書込
+COL_INVENTORY_FLAG = 4 # D: 売り切れフラグ      - iMakInventory が後で書込 (Harvest は触らない)
+COL_CONDITION = 5      # E: 商品状態            - Harvest が書込
+COL_PRICE = 6          # F: 価格                - Harvest が書込
+COL_IMAGES = 7         # G: 画像 URL            - Harvest が書込 (`|` 区切り)
+COL_DESCRIPTION = 8    # H: 商品説明            - Harvest が書込
+
+# Harvest が触らない (空欄 or 既存値保持) すべき列のインデックス set (1-based)
+HARVEST_UNTOUCHED_COLS = (COL_EBAY_ITEM_ID, COL_INVENTORY_FLAG)
 
 # デデュープ key 抽出: メルカリ /item/m12345 / /items/m12345 → m12345
 _MERCARI_ID_RE = re.compile(r"/items?/(m\d+)", re.IGNORECASE)
@@ -101,18 +109,54 @@ def read_existing_dedupe_keys(ws) -> set[str]:
     return keys
 
 
+def _build_row(item: dict) -> list:
+    """item dict から 8 列の行データを構築.
+
+    - 書込列 (A/C/E/F/G/H) には値を入れる
+    - 触らない列 (B/D) は "" にして既存値の上書きを避ける
+      (※ append_rows は新規行のみ追加するので、新規行の B/D は空欄になるだけ)
+    """
+    title = str(item.get("title") or "")
+    condition = str(item.get("condition") or "")
+    price = item.get("price_jpy")
+    price_str = "" if price is None else str(int(price))
+    images = item.get("image_urls") or []
+    image_str = "|".join(str(u) for u in images if u)
+    description = str(item.get("description") or "")
+
+    row = [""] * 8  # A〜H
+    row[COL_URL - 1] = (item.get("url") or "").strip()
+    # COL_EBAY_ITEM_ID (B) は空欄
+    row[COL_TITLE - 1] = title
+    # COL_INVENTORY_FLAG (D) は空欄
+    row[COL_CONDITION - 1] = condition
+    row[COL_PRICE - 1] = price_str
+    row[COL_IMAGES - 1] = image_str
+    row[COL_DESCRIPTION - 1] = description
+    return row
+
+
 def append_new_urls(
     ws,
     items: list[dict],
-    column_count: int = 3,
+    column_count: int = 8,
 ) -> dict:
     """items を ws に追記 (既出は dedupe_key で除外).
 
     Args:
         ws:    gspread worksheet
-        items: [{"url", "item_id"?, "title"?}, ...] (item_id/title は無視、
-               B/C 列は常に空欄で書込)
-        column_count: 書く列数 (default 3 = A:URL, B:空欄, C:空欄)
+        items: [
+                 {
+                   "url": str,                 # 必須
+                   "title"?: str,
+                   "condition"?: str,
+                   "price_jpy"?: int | None,
+                   "image_urls"?: list[str],
+                   "description"?: str,
+                 },
+                 ...
+               ]
+        column_count: 書く列数 (default 8 = A〜H、B/D は空欄で書込)
 
     Returns: {"appended": N, "skipped_existing": M, "input": K}
     """
@@ -137,8 +181,8 @@ def append_new_urls(
             skipped += 1
             continue
         seen_in_batch.add(key)
-        # A 列に URL のみ書込 (B/C は空欄、ユーザー別用途のため Harvest は埋めない)
-        row = [url, "", ""]
+
+        row = _build_row(it)
         if len(row) < column_count:
             row += [""] * (column_count - len(row))
         new_rows.append(row[:column_count])
