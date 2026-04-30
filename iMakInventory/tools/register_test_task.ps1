@@ -27,7 +27,18 @@ try {
 
 $TaskName = "iMakInventory_TEST"
 $WorkingDir = "C:\dev\iMak\iMakInventory"
-$PythonExe = "python"
+
+# Execute は絶対パス必須 (タスクスケジューラ環境では PATH 解決されない)
+$pythonExe = $null
+try {
+    $pythonExe = (Get-Command python -ErrorAction Stop).Source
+} catch {
+    throw "Python 実行ファイルを PATH 上で見つけられない: $($_.Exception.Message)"
+}
+if (-not (Test-Path $pythonExe)) {
+    throw "Python 実行ファイル不在: $pythonExe"
+}
+
 # ※ $Args / $args は PowerShell 自動変数のため使用不可、$cmdArgs を使う
 $cmdArgs = "-u run_cycle.py --test-mode --limit 3"
 
@@ -47,6 +58,12 @@ if ($Action -eq "Status") {
         Write-Output "[OK] $TaskName 登録済み"
         $task | Format-List TaskName, State, Triggers, Actions
         Get-ScheduledTaskInfo -TaskName $TaskName | Format-List LastRunTime, NextRunTime, LastTaskResult
+        # Execute が絶対パスかチェック (bug 再発防止)
+        $executePath = $task.Actions[0].Execute
+        if ($executePath -and -not [System.IO.Path]::IsPathRooted($executePath)) {
+            Write-Warning "Execute が絶対パスでない: '$executePath' → タスク起動時に ERROR_FILE_NOT_FOUND の可能性"
+            Write-Warning "再登録推奨: -Action Unregister → Register でこのスクリプトが絶対パスを再設定する"
+        }
     } else {
         Write-Output "[INFO] $TaskName 未登録"
     }
@@ -59,8 +76,10 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
+Write-Output "[INFO] Python: $pythonExe"
+
 # ※ $action は $Action パラメータと衝突 (PS 変数名は大小区別なし) → $taskAction
-$taskAction = New-ScheduledTaskAction -Execute $PythonExe -Argument $cmdArgs -WorkingDirectory $WorkingDir
+$taskAction = New-ScheduledTaskAction -Execute $pythonExe -Argument $cmdArgs -WorkingDirectory $WorkingDir
 $taskTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Now.AddMinutes(2)) `
             -RepetitionInterval (New-TimeSpan -Minutes 5) `
             -RepetitionDuration (New-TimeSpan -Hours 24)
@@ -82,7 +101,7 @@ Register-ScheduledTask `
 
 Write-Output "[OK] $TaskName 登録完了"
 Write-Output "  schedule: 5 分ごと (24h)"
-Write-Output "  command: $PythonExe $cmdArgs"
+Write-Output "  command: $pythonExe $cmdArgs"
 Write-Output "  cwd: $WorkingDir"
 Write-Output ""
 Write-Output "確認:  PowerShell -ExecutionPolicy Bypass -File tools\register_test_task.ps1 -Action Status"

@@ -50,7 +50,19 @@ try {
 
 $TaskName = "iMakInventory_Cycle"
 $WorkingDir = "C:\dev\iMak\iMakInventory"
-$PythonExe = "python"
+
+# Execute は絶対パス必須 (タスクスケジューラ環境では PATH 解決されない:
+# bug 実例 2026-04-30 14:00 起動失敗 LastResult 0x80070002 = ERROR_FILE_NOT_FOUND)
+# Get-Command で動的解決し、hardcode は避ける
+$pythonExe = $null
+try {
+    $pythonExe = (Get-Command python -ErrorAction Stop).Source
+} catch {
+    throw "Python 実行ファイルを PATH 上で見つけられない: $($_.Exception.Message)"
+}
+if (-not (Test-Path $pythonExe)) {
+    throw "Python 実行ファイル不在: $pythonExe"
+}
 
 # run_cycle.py 引数を組立 (--sheet-id / --sheet-label / --skip-upload)
 # ※ $Args / $args は PowerShell 自動変数のため使用不可、$cmdArgs を使う
@@ -76,6 +88,12 @@ if ($Action -eq "Status") {
         Write-Output "[OK] $TaskName 登録済み"
         $task | Format-List TaskName, State, Triggers, Actions
         Get-ScheduledTaskInfo -TaskName $TaskName | Format-List LastRunTime, NextRunTime, LastTaskResult
+        # Execute が絶対パスかチェック (bug 再発防止)
+        $executePath = $task.Actions[0].Execute
+        if ($executePath -and -not [System.IO.Path]::IsPathRooted($executePath)) {
+            Write-Warning "Execute が絶対パスでない: '$executePath' → タスク起動時に ERROR_FILE_NOT_FOUND の可能性"
+            Write-Warning "再登録推奨: -Action Unregister → Register でこのスクリプトが絶対パスを再設定する"
+        }
     } else {
         Write-Output "[INFO] $TaskName 未登録"
     }
@@ -95,8 +113,10 @@ foreach ($h in 2, 6, 10, 14, 18, 22) {
     $triggers += New-ScheduledTaskTrigger -Daily -At ([DateTime]::Today.AddHours($h))
 }
 
+Write-Output "[INFO] Python: $pythonExe"
+
 # ※ $action は $Action パラメータと衝突 (PS 変数名は大小区別なし) → $taskAction
-$taskAction = New-ScheduledTaskAction -Execute $PythonExe -Argument $cmdArgs -WorkingDirectory $WorkingDir
+$taskAction = New-ScheduledTaskAction -Execute $pythonExe -Argument $cmdArgs -WorkingDirectory $WorkingDir
 $taskSettings = New-ScheduledTaskSettingsSet `
             -StartWhenAvailable `
             -AllowStartIfOnBatteries `
@@ -120,7 +140,7 @@ Write-Output "  sheet_id:    $SheetId"
 Write-Output "  sheet_label: $SheetLabel"
 $stageMode = if ($SkipUpload) { "Stage 1 (eBay upload skip)" } else { "Stage 2 (eBay upload 有効)" }
 Write-Output "  mode:        $stageMode"
-Write-Output "  command: $PythonExe $cmdArgs"
+Write-Output "  command: $pythonExe $cmdArgs"
 Write-Output "  cwd: $WorkingDir"
 Write-Output "  retry: 1 回 / 15 分後"
 Write-Output "  execution time limit: 3h"
