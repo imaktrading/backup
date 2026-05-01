@@ -31,9 +31,11 @@ import sys
 from pathlib import Path
 
 
-# psa_to_csv と同じスプシ ID + worksheet
-PSA_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
-PSA_GID = 851100680   # 商品管理シート tab
+# 修正 (2026-05-01 19:48): 当初 PSA_SHEET_ID (PSA 仕入参照元) を指してたが、
+# psa_to_csv の `_append_to_spreadsheet()` が追記するのは GSHEET_TCG_ID の sheet1
+# (= 商品管理シート、出品ログ追記先). エラー対象を正確に拡張する.
+GSHEET_TCG_ID = "1RbGaiQxhYDd7s8nqT0jHeh7sQ6FJNCVnVxkEJLFmz9s"
+# sheet1 (= 一番左のタブ、商品管理シート)
 
 # 認証 JSON は repo root に置いてある (psa_to_csv L1741 と同じ場所)
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -41,7 +43,7 @@ GSHEET_CREDS_FILE = SCRIPT_DIR.parent / "double-hold-421922-7c0d38d3f73d.json"
 
 
 def expand(target_rows: int, confirm: bool = True) -> int:
-    """商品管理シートを target_rows まで拡張.
+    """商品管理シート (GSHEET_TCG_ID の sheet1) を target_rows まで拡張.
 
     Returns: 0 = 成功, 1 = 失敗.
     """
@@ -61,11 +63,11 @@ def expand(target_rows: int, confirm: bool = True) -> int:
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
     gc = gspread.authorize(creds)
-    sh = gc.open_by_key(PSA_SHEET_ID)
-    ws = sh.get_worksheet_by_id(PSA_GID)
+    sh = gc.open_by_key(GSHEET_TCG_ID)
+    ws = sh.sheet1   # psa_to_csv._append_to_spreadsheet と同じ worksheet 参照
 
     current = ws.row_count
-    print(f"対象 worksheet: '{ws.title}' (gid={PSA_GID})")
+    print(f"対象 worksheet: '{ws.title}' (sheet1)")
     print(f"  現在行数: {current}")
     print(f"  目標行数: {target_rows}")
 
