@@ -65,6 +65,7 @@ _POKEMON_SUFFIXES = [
     r"SHINY\s+TREASURE\s+EX",
     r"MEGA\s+DREAM\s+EX",
     r"POKEMON\s+GO",
+    r"REMIX\s+BOUT",  # 2026-05-01 18:46 追加 (Psyduck Remix Bout)
     r"SUPER",  # 単独 'SUPER' rarity 残骸 (Gengar Ex Super case)
 ]
 

@@ -82,6 +82,12 @@ def test_pokemon_card_name_strips_vstar_universe_with_prefix():
     assert fn("FA/RAYQUAZA VMAX VSTAR UNIVERSE") == "Rayquaza Vmax"
 
 
+def test_pokemon_card_name_strips_remix_bout():
+    """'PSYDUCK REMIX BOUT' → 'Psyduck' (cert 137607102, 18:46 run 重複対応)."""
+    fn = _psa_tcg._pokemon_card_name
+    assert fn("PSYDUCK REMIX BOUT") == "Psyduck"
+
+
 def test_pokemon_card_name_existing_behavior_preserved():
     """既存挙動: 既存パターンで動作する subject は変化しない."""
     fn = _psa_tcg._pokemon_card_name

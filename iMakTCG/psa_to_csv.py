@@ -1159,6 +1159,8 @@ def _pokemon_card_name(subject):
         r'\s+SHINY\s+TREASURE\s+EX$',
         r'\s+MEGA\s+DREAM\s+EX$',
         r'\s+POKEMON\s+GO$',
+        # 2026-05-01 18:46 観測: REMIX BOUT 追加 (cert 137607102 Psyduck Remix Bout 重複対応)
+        r'\s+REMIX\s+BOUT$',
         # rarity 単語 suffix ('GENGAR EX SUPER' → 'GENGAR EX')
         r'\s+SUPER$',
     ]
