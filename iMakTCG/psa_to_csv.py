@@ -1097,6 +1097,9 @@ def _dragonball_set_name_to_ebay(raw_set_name):
 POKEMON_SET_NAME_MAP = {
     "M2A-MEGA DREAM EX": "M2a: High Class Pack: Mega Dream Ex",
     "M2A": "M2a: High Class Pack: Mega Dream Ex",
+    # 2026-05-01 18:46 観測: PSA brand "POKEMON GO JAPANESE" → fallback で "Go Japanese"
+    # になり eBay 公式フィルタ値 "Pokémon GO" と乖離. dict 経由で正規化.
+    "GO JAPANESE": "Pokémon GO",
     # 今後追加
 }
 

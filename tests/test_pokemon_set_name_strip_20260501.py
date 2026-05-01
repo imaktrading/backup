@@ -130,3 +130,21 @@ def test_card_name_normalizer_strips_shiny_star_v():
 def test_card_name_normalizer_strips_super_suffix():
     from card_name_normalizer import normalize_card_name
     assert normalize_card_name("Gengar Ex Super", "Pokemon") == "Gengar Ex"
+
+
+# ============================================================================
+# D: POKEMON_SET_NAME_MAP に GO JAPANESE → Pokémon GO 追加
+# ============================================================================
+def test_pokemon_set_name_go_japanese_maps_to_pokemon_go():
+    """PSA brand 'POKEMON GO JAPANESE' → eBay 公式フィルタ値 'Pokémon GO'.
+
+    18:46 事故 (cert 131017208 Radiant Charizard、CSV C:Set='Go Japanese' 不正値) 対応.
+    """
+    fn = _psa_tcg._pokemon_set_name
+    assert fn("POKEMON GO JAPANESE") == "Pokémon GO"
+
+
+def test_pokemon_set_name_existing_mapping_preserved():
+    """既存マッピング (M2A-MEGA DREAM EX 等) は変化しない (副作用ゼロ確認)."""
+    fn = _psa_tcg._pokemon_set_name
+    assert fn("POKEMON JAPANESE M2A-MEGA DREAM EX") == "M2a: High Class Pack: Mega Dream Ex"
