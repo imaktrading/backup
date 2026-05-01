@@ -1112,11 +1112,23 @@ def _pokemon_set_name(brand):
 def _pokemon_card_name(subject):
     """PSA SubjectからCard Name (eBay用) を生成。
     例: 'MEGA SCRAFTY EX MEGA ATTACK' → 'Mega Scrafty EX'
+         'FA/UMBREON VMAX EEVEE HEROES' → 'Umbreon Vmax'
+         'HO-OH V INCANDESCENT ARCANA' → 'Ho-Oh V'
+
+    2026-05-01: list 拡張で Pokemon set 名 + rarity prefix を吸収.
+    refine_title が character を append する際の汚染源 (Card Name に set 名混入)
+    を上流で解消し、title 二重化 + Fa/ 残存を防止する.
     """
     if not subject:
         return subject
     s = subject.strip()
-    rarity_suffixes = [
+    # patterns: rarity prefix (^FA/, ^AR/ etc.) + rarity suffix + set 名 suffix.
+    # 既存挙動互換: 全て re.sub(IGNORECASE) で 1 ループ適用、順序は長い順.
+    strip_patterns = [
+        # Pokemon rarity prefix (PSA Subject 先頭の rarity 略号、'FA/UMBREON' 等)
+        r'^(?:FA|AR|SAR|SR|UR|HR|MR|PR)/+',
+
+        # Rarity suffix (既存)
         r'\s+MEGA\s+ATTACK\s+RARE$',
         r'\s+MEGA\s+ATTACK$',
         r'\s+MEGA\s+ULTRA\s+RARE$',
@@ -1126,9 +1138,23 @@ def _pokemon_card_name(subject):
         r'\s+ART\s+RARE$',
         r'\s+ULTRA\s+RARE$',
         r'\s+RARE$',
+
+        # 2026-05-01: Pokemon set 名 suffix (Subject 末尾の set 名残存対応).
+        # Card Name/Character は character のみで set 名は C:Set 列が持つ → 重複解消.
+        r'\s+INCANDESCENT\s+ARCANA$',
+        r'\s+EEVEE\s+HEROES$',
+        r'\s+SHINY\s+STAR\s+V$',
+        r'\s+DARK\s+PHANTASMA$',
+        r'\s+VSTAR\s+UNIVERSE$',
+        r'\s+WILD\s+FORCE$',
+        r'\s+SHINY\s+TREASURE\s+EX$',
+        r'\s+MEGA\s+DREAM\s+EX$',
+        r'\s+POKEMON\s+GO$',
+        # rarity 単語 suffix ('GENGAR EX SUPER' → 'GENGAR EX')
+        r'\s+SUPER$',
     ]
     result = s
-    for pat in rarity_suffixes:
+    for pat in strip_patterns:
         result = re.sub(pat, '', result, flags=re.IGNORECASE)
     return smart_titlecase(result.strip())
 

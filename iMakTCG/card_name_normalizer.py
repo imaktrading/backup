@@ -55,6 +55,17 @@ _POKEMON_SUFFIXES = [
     r"ART\s+RARE",
     r"ART",  # 単独 "ART" (= Art Rare 略号、Pokemon)
     r"COLL\.?",  # 単独の "COLL." 残骸
+    # 2026-05-01: 観測済 Pokemon set 名 suffix (psa_to_csv._pokemon_card_name と同期).
+    # 上流 (_pokemon_card_name) で剥がれていない場合の defense in depth.
+    r"INCANDESCENT\s+ARCANA",
+    r"EEVEE\s+HEROES",
+    r"SHINY\s+STAR\s+V",
+    r"DARK\s+PHANTASMA",
+    r"WILD\s+FORCE",
+    r"SHINY\s+TREASURE\s+EX",
+    r"MEGA\s+DREAM\s+EX",
+    r"POKEMON\s+GO",
+    r"SUPER",  # 単独 'SUPER' rarity 残骸 (Gengar Ex Super case)
 ]
 
 # One Piece event/promo variant 略号
