@@ -15,6 +15,10 @@
       - A=- B=○ :   inventory 過剰 (trabajo は空欄だが inventory が ○ = 過剰検知)
 
 マッチング: 列 A (URL) を primary key、なければ row_index で fallback。
+
+売切判定文字: U+25CB (○ WHITE CIRCLE, inventory 側) と U+3007 (〇 IDEOGRAPHIC NUMBER
+ZERO, trabajo 側) の双方を売切扱いとする (Phase 9c 突合で文字コード違いによる
+判定スベりが発覚した実例あり, 2026-05-01).
 """
 from __future__ import annotations
 
@@ -22,6 +26,12 @@ import argparse
 import sys
 from datetime import datetime
 from pathlib import Path
+
+SOLD_MARKS = {"○", "〇"}  # ○ (inventory) / 〇 (trabajo)
+
+
+def _is_sold(v: str) -> bool:
+    return (v or "").strip() in SOLD_MARKS
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent
@@ -85,8 +95,8 @@ def diff_sheets(a: dict, b: dict, label_a: str = "A", label_b: str = "B") -> dic
     for u in common:
         ai = a["by_url"][u]
         bi = b["by_url"][u]
-        a_sold = ai["sold"] == "○"
-        b_sold = bi["sold"] == "○"
+        a_sold = _is_sold(ai["sold"])
+        b_sold = _is_sold(bi["sold"])
         info = {
             "url": u,
             f"{label_a}_row": ai["row"],

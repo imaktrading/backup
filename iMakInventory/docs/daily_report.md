@@ -168,3 +168,39 @@ upload attempt 2/3: ✅ 成功
 1. eBay seller hub (`https://www.ebay.com/sh/lst/active`) で listing 358454087573 の qty 確認
 2. qty=0 反映済 → Step 2c 完了確定
 3. 復活希望なら Step 3 (qty=1 化) を別 CSV 生成 + 同じ仕組みで upload
+
+---
+
+## 2026-05-01 — Phase 9c 並走突合 (trabajo vs inventory)
+
+### 決定
+
+- **DELETED → ○ → auto revise の現行ロジックを維持** (Takaaki さん判断)
+- 「在庫あり → 在庫なし誤判定 (過剰)」は許容。理由: 機会損失のみで Defect Rate 影響なし
+- 「在庫なし → 在庫あり誤判定 (漏れ)」は致命 (キャンセル直結 = Defect Rate 直撃)、ゼロ維持優先
+
+### 変更
+
+- `tools/compare_sheets.py`: 売切判定文字を `{"○", "〇"}` 両対応化
+  - `SOLD_MARKS = {"○", "〇"}` 定数追加
+  - `_is_sold(v)` ヘルパー追加
+  - `diff_sheets` 内の `== "○"` → `_is_sold()` に置換
+  - **Why:** 突合初回 (`sheet_diff_20260501_115901.md`) で「全件 0/120」の偽情報が出た真因 = trabajo 側 `〇` (U+3007 IDEOGRAPHIC NUMBER ZERO) と inventory 側 `○` (U+25CB WHITE CIRCLE) の文字コード差。判定 `== "○"` が片方のみ拾っていた。`monitor_listings.py:164` は既に両対応済 (`in ("○", "〇")`)、突合ツールだけ取りこぼしていた
+
+### 検証
+
+- 突合対象: trabajo `19kj8N...` (統合Hight_商品管理シート20260420) vs inventory `1oDjQC8WN_3...` (TEST_統合Hight_商品管理シート)
+- 共通 URL: 421 件
+- 結果 (修正後 `sheet_diff_20260501_120229.md`):
+  - 一致 ○○: **115**
+  - 一致 --: 299
+  - inventory 漏れ (致命): **0**
+  - inventory 過剰: 6 → ユーザー目視確認後 **真の過剰 1 件のみ** (行 413 ポーター ブリーフケース)、残り 5 件は inventory 先回り正解 (trabajo 取りこぼし)
+  - trabajo 誤検知 (inventory 正解): 1 (行 66 鬼滅 UT)
+- inventory 正答率: **419/421 ≈ 99.5%**、漏れ 0、真の誤検知 1 (0.24%)
+- 真の誤検知 1 件 (行 413) の原因: scraper が `raw_status=DELETED` を売切扱い → 出品者一時取下げ等で実際は他で在庫ありの可能性。Defect Rate には無影響のため許容
+- pytest 146 passed / 1 failed (`test_live_known_sold_urls[row118-m14968932238]`、live Mercari アクセスの environmental issue で本修正と無関係)
+
+### 次のアクション
+
+- なし (現行ロジック維持)。次回 cycle 後に再突合して傾向継続確認
