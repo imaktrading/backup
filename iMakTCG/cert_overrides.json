@@ -126,6 +126,24 @@
     }
   },
 
+  "131017208": {
+    "reason": "RADIANT CHARIZARD (Pokémon GO 011/071、Japan 印刷版 / s10b ポケモンGO). PSA brand 'POKEMON GO JAPANESE' は印刷地域 (日本) を示すが、eBay US の公式 set フィルタ値は『Pokémon GO』(é 付き、英語表記). これは The Pokémon Company の公式ブランド表記であり言語ではなく manufacturer ブランドを指す. JP カードを eBay US で売る運用 (memory: dropshipping_model_premise.md) において、set=『Pokémon GO』表記は標準. 3AI が PSA brand vs title の言語ミスマッチで誤 BLOCK するのを override で防止 (2026-05-01 BLOCK 事故対応). iMakCatalog は Pokemon GO セット未登録のため lookup 不可 (set_code 抽出失敗).",
+    "applied_at": "2026-05-01",
+    "skip_official_lookup": true,
+    "manual_review_required": false,
+    "draft_source": "Pokemon GO set / Radiant Charizard 011 は世界共通の有名 chase card、specs は eBay US filter 正規値で確定",
+    "specs": {
+      "card_type": "Pokémon",
+      "rarity": "Radiant Rare",
+      "set_name": "Pokémon GO",
+      "color": "Fire",
+      "power": "",
+      "cost": "",
+      "card_number": "011",
+      "character": "Radiant Charizard"
+    }
+  },
+
   "_removed_137306154": {
     "_note": "2026-04-28: Phase 2b (Pokemon catalog) で SV9-105 リーリエのアブリボン AR が公式DB から正しく取れることを確認. catalog rarity=AR = eBay 'Art Rare'. set='Battle Partners'. 旧 override は価格GATE 回避目的だったが、価格判断は別 layer で行う方針.",
     "_removed_at": "2026-04-28",
