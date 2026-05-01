@@ -2008,7 +2008,32 @@ def _ensure_single_instance(port=53247):
         return False
 
 
+def _flush_dns_at_startup():
+    """出品くん起動時に Windows DNS cache を flush.
+
+    2026-05-01 18:17 事故対応: psa_to_csv の getaddrinfo failed → 全件 $100 fallback の
+    再発防止. 起動時 1 回 flush することで PSA TCG / G-Shock / Mercari / 一番くじ 等
+    出品くんから launch される全 program の最初の API call を clean DNS で開始させる.
+
+    本体 logic 不変、失敗時 silent (= flush できなくても起動は継続).
+    """
+    try:
+        import sys as _sys, os as _os
+        _imakeBayAPI = _os.path.join(
+            _os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"
+        )
+        if _imakeBayAPI not in _sys.path:
+            _sys.path.insert(0, _imakeBayAPI)
+        from dns_resilience import flush_dns_cache
+        if flush_dns_cache():
+            print("[startup] DNS cache flushed (Windows ipconfig /flushdns)")
+    except Exception as _e:
+        # 起動を妨げない (Linux/macOS / dns_resilience 不在 等は silent)
+        pass
+
+
 def main():
+    _flush_dns_at_startup()
     if not _ensure_single_instance():
         return
     root = tk.Tk()
