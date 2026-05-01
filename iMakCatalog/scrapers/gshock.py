@@ -25,6 +25,7 @@ Anti-bot resilience (Phase 3-D / 2026-04-29 追加):
 実行:
   python iMakCatalog/scrapers/gshock.py --update                          # 全シリーズ
   python iMakCatalog/scrapers/gshock.py --update-subset DW-6900,DW-5600   # 指定シリーズのみ
+  python iMakCatalog/scrapers/gshock.py --update-subset DW-6900 --max-models 5  # 小バッチ
   python iMakCatalog/scrapers/gshock.py --series GA-2100                  # 単独シリーズ (legacy)
   python iMakCatalog/scrapers/gshock.py --model GA-2100-1A1JF             # 単独モデル (テスト用)
 """
@@ -76,7 +77,8 @@ _PACING_BETWEEN_MODELS = 2
 # ============================================================================
 # 公開 API
 # ============================================================================
-def update_all_series(driver=None, series_filter: Optional[set] = None) -> int:
+def update_all_series(driver=None, series_filter: Optional[set] = None,
+                       max_models_per_session: Optional[int] = None) -> int:
     """全シリーズ差分更新 (月次バッチ想定). 2-pass + anti-bot resilience.
 
     Pass 1: 全 series のモデル一覧を tight burst で取得 (戦略価値の確保最優先)
@@ -88,6 +90,10 @@ def update_all_series(driver=None, series_filter: Optional[set] = None) -> int:
         driver: 既存 Selenium driver を渡せば使い回す. None なら本関数内で起動・終了.
         series_filter: 指定シリーズのみ対象 (例: {"DW-6900", "DW-5600"}).
                        None なら CASIO_SERIES_PAGES 全件.
+        max_models_per_session: Pass 2 の model attempt 上限.
+            None なら無制限. 指定すると attempt 数 (success/skip 問わず) がこの値に達した
+            時点で正常終了. Akamai の rate limit を超えないための「小バッチ」運用に必須.
+            production 経験則: ~10 models/session が block 発火閾値の下限.
 
     Returns:
         upsert 成功件数.
@@ -123,8 +129,11 @@ def update_all_series(driver=None, series_filter: Optional[set] = None) -> int:
 
             # === Pass 2: 各 model の詳細スクレイプ + upsert ===
             total = 0
+            attempts = 0
+            cap_reached = False
             n_total = sum(len(m) for m in series_models.values())
-            print(f"\n=== Pass 2/2: model 詳細スクレイプ ({n_total} models) ===")
+            cap_msg = f", session cap={max_models_per_session}" if max_models_per_session else ""
+            print(f"\n=== Pass 2/2: model 詳細スクレイプ ({n_total} models{cap_msg}) ===")
             for series_name, models in series_models.items():
                 if not models:
                     continue
@@ -132,23 +141,40 @@ def update_all_series(driver=None, series_filter: Optional[set] = None) -> int:
                     print(f"\n[{series_name}] ⛔ driver halt 検出、残 series skip")
                     halted = True
                     break
+                if cap_reached:
+                    break
                 print(f"\n[{series_name}] {len(models)} models")
                 for model in models:
                     if driver is None:
                         # _safe_upsert_model が None を返したら以降の model も skip
                         halted = True
                         break
+                    if max_models_per_session and attempts >= max_models_per_session:
+                        # Akamai 学習回避: session cap 到達で正常終了
+                        cap_reached = True
+                        break
+                    attempts += 1
                     success, driver = _safe_upsert_model(driver, model, series_name)
                     if success:
                         total += 1
                     time.sleep(_PACING_BETWEEN_MODELS)
 
-            # halt があれば status=partial で記録 (success とも failed とも違う中間状態).
-            # scrape_log の status カラムは TEXT なので任意値 OK.
-            final_status = "partial" if halted else "success"
+            # 終了状態の決定:
+            #   halt → driver 再起動失敗 (URLError 等)、partial
+            #   cap_reached → session cap 正常打切、success
+            #   それ以外 → 全件処理完了、success
+            if halted:
+                final_status = "partial"
+                done_marker = "完了 (一部 halt)"
+            elif cap_reached:
+                final_status = "success"
+                done_marker = f"session cap {max_models_per_session} 到達で正常打切"
+            else:
+                final_status = "success"
+                done_marker = "完了"
             _scrape_log_finish(scrape_id, status=final_status, products_added=total)
-            done_marker = "完了 (一部 halt)" if halted else "完了"
-            print(f"\n=== {done_marker}: {total} models upserted ===")
+            print(f"\n=== {done_marker}: {total} models upserted "
+                  f"(attempts={attempts}/{n_total}) ===")
         except Exception as e:
             _scrape_log_finish(scrape_id, status="failed",
                                error_message=f"{type(e).__name__}: {e}")
@@ -491,18 +517,38 @@ def _cli():
         print("Usage:")
         print("  python iMakCatalog/scrapers/gshock.py --update")
         print("  python iMakCatalog/scrapers/gshock.py --update-subset DW-6900,DW-5600")
+        print("  python iMakCatalog/scrapers/gshock.py --update-subset DW-6900 --max-models 5")
         print("  python iMakCatalog/scrapers/gshock.py --series GA-2100")
         print("  python iMakCatalog/scrapers/gshock.py --model GA-2100-1A1JF")
         sys.exit(1)
 
+    # --max-models N を args から抽出 (順序問わず受け付け).
+    # 「小バッチ」運用で Akamai rate limit 学習を避けるためのキャップ.
+    max_models = None
+    if "--max-models" in args:
+        idx = args.index("--max-models")
+        if idx + 1 >= len(args):
+            print("⚠️ --max-models の値が指定されていません")
+            sys.exit(1)
+        try:
+            max_models = int(args[idx + 1])
+        except ValueError:
+            print(f"⚠️ --max-models の値が整数でない: {args[idx + 1]!r}")
+            sys.exit(1)
+        if max_models <= 0:
+            print(f"⚠️ --max-models は正の整数でなければなりません: {max_models}")
+            sys.exit(1)
+        # 抽出した分を args から除去
+        args = [a for i, a in enumerate(args) if i not in (idx, idx + 1)]
+
     if args[0] == "--update":
-        update_all_series()
+        update_all_series(max_models_per_session=max_models)
     elif args[0] == "--update-subset" and len(args) >= 2:
         names = {s.strip() for s in args[1].split(",") if s.strip()}
         if not names:
             print("⚠️ subset 名が空")
             sys.exit(1)
-        update_all_series(series_filter=names)
+        update_all_series(series_filter=names, max_models_per_session=max_models)
     elif args[0] == "--series" and len(args) >= 2:
         from casio_finder import CASIO_SERIES_PAGES  # type: ignore
         target = args[1]

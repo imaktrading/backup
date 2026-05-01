@@ -158,6 +158,24 @@ def test_update_all_series_accepts_series_filter():
     )
 
 
+def test_update_all_series_accepts_max_models_per_session():
+    """update_all_series が max_models_per_session kwarg を受け付ける.
+
+    背景: 2026-05-01 step2 実走で Akamai 累積学習による block storm 確認.
+    観察: 朝 09:20 (DW-6900 38件 100%成功) → 4時間後の累積アクセス後 10%成功率.
+    対策: 1 session の attempt 数を絞って Akamai 学習閾値を超えないようにする.
+    """
+    import inspect
+    from gshock import update_all_series
+    sig = inspect.signature(update_all_series)
+    assert "max_models_per_session" in sig.parameters, (
+        "update_all_series が max_models_per_session kwarg を受け取れない"
+    )
+    assert sig.parameters["max_models_per_session"].default is None, (
+        "デフォルト値は None (無制限) であるべき"
+    )
+
+
 # ============================================================================
 # URLError 捕獲 (2026-04-30 Phase 3-D follow-up)
 # ============================================================================
