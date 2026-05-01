@@ -453,14 +453,27 @@ def _is_competing_franchise_term(term: str, my_franchise: Optional[str]) -> bool
 
 
 # Phase 2 で追補可能な「汎用 TCG SEO 語」(BANNED と重複しないもの)
-# psa_to_csv の BANNED_TITLE_WORDS = japanese/japan/gem mt/mint/graded/l@@k/look/wow/nr
-# に該当しないもののみ。Holo/Foil は Vision で確定時のみ追加すべきだが、
-# Phase 2 では Vision 連携なしの単純語彙のみ扱う。
+# psa_to_csv の BANNED_TITLE_WORDS (gem mt/mint/graded/l@@k/look/wow/nr) に該当しないもののみ。
+# Holo/Foil は Vision で確定時のみ追加すべきだが、Phase 2 では Vision 連携なしの単純語彙のみ扱う。
 # 注意: token (単語) 単位で評価するため、複数語の term ("alt art" 等) はここに分割して入れる
+#
+# 2026-05-01: Title が 50-65 字で頭打ちする問題への対応で大幅拡張.
+# 旧 15 単語 → 新 ~45 単語. TOP セラータイトル frequency 高い safe 語を追加.
 _UNIVERSAL_SEO_PERMITTED_TOKENS = {
+    # 既存
     "holo", "foil", "1st", "first", "edition",
     "tcg", "ccg", "english", "sealed", "alt", "alternate", "art",
     "card", "cards", "rare",
+    # 2026-05-01 追加: 地域 (BANNED 解除と同期)
+    "japanese", "jp", "jpn",
+    # 2026-05-01 追加: 年 (TCG カードの release year は universally 検索される)
+    "2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026",
+    # 2026-05-01 追加: Pokemon シリーズ era 名 (Pokémon TCG の世代マーカー、TOP セラー必須)
+    "sword", "shield", "sun", "moon", "scarlet", "violet", "xy",
+    # 2026-05-01 追加: 一般 set descriptor (誤情報リスク低、SEO 寄与高)
+    "promo", "promos", "collection", "anniversary", "starter",
+    # 2026-05-01 追加: その他 generic
+    "japanese", "set",
 }
 
 

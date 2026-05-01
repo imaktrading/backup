@@ -512,7 +512,10 @@ Game: {game}, Set: {set_name}, Card: #{card_number}, Label: {subject}
 
 # CLAUDE.md禁止ワード（大文字小文字無視で除去）
 BANNED_TITLE_WORDS = [
-    "japanese", "japan", "gem mt", "gem-mt", "gemmt",
+    # 2026-05-01: "japanese", "japan" を削除. JP 印刷版を eBay US で売る運用において
+    # これらは事実情報 (TOP 競合 11/15 件で使用、SEO 価値高). 旧 ban は SEO スパム
+    # ("look"/"wow"/"l@@k"/"gem mt") と一緒くたにしてた誤分類.
+    "gem mt", "gem-mt", "gemmt",
     "mint", "graded", "l@@k", "look", "wow", "nr",
 ]
 
