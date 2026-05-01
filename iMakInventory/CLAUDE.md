@@ -1,5 +1,18 @@
 # iMakInventory — 自社在庫監視 + eBay 自動取り下げ
 
+## 🛡️ Worktree 分離ルール (2026-05-01 制定・絶対厳守)
+
+**この worktree (`C:/dev/iMak_inventory/`) は Inventory Claude 専用**。
+
+- ✅ Inventory Claude: ここで作業
+- ❌ Catalog Claude / Harvest Claude / その他: **絶対 touch 禁止**
+- ❌ 他 worktree (`C:/dev/iMak/` `C:/dev/iMak_harvest/`) への touch も禁止
+
+詳細は `.PROJECT_LOCKED.md` 参照。グローバル `~/.claude/CLAUDE.md` の Worktree 分離
+ルールも厳守。違反は cron 自動巡回を破壊する致命行為。
+
+---
+
 トラバホ代替の自社開発プロジェクト。仕入元在庫監視と eBay 自動取り下げを統合運用する。
 
 ---

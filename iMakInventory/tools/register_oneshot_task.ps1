@@ -43,7 +43,8 @@ try {
 } catch {}
 
 $TaskName = "iMakInventory_OneShot"
-$WorkingDir = "C:\dev\iMak\iMakInventory"
+# WorkingDir: worktree 分離後の新 path (2026-05-01 修正)
+$WorkingDir = "C:\dev\iMak_inventory\iMakInventory"
 
 if ($Action -eq "Unregister") {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {

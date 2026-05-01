@@ -26,7 +26,8 @@ try {
 } catch {}
 
 $TaskName = "iMakInventory_TEST"
-$WorkingDir = "C:\dev\iMak\iMakInventory"
+# WorkingDir: worktree 分離後の新 path (2026-05-01 修正)
+$WorkingDir = "C:\dev\iMak_inventory\iMakInventory"
 
 # Execute は絶対パス必須 (タスクスケジューラ環境では PATH 解決されない)
 $pythonExe = $null

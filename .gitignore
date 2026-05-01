@@ -90,3 +90,9 @@ psa_run_*.log
 **/tmp/
 **/temp/
 *.tmp
+
+# Worktree marker (各 worktree のローカルファイル、git track しない)
+.PROJECT_LOCKED.md
+
+# control_panel GUI 運用状態 (ローカル運用ファイル、git track しない)
+iMakInventory/.gui_state.json

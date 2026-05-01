@@ -59,7 +59,8 @@ try {
 } catch {}
 
 $TaskName = "iMakInventory_Cycle"
-$WorkingDir = "C:\dev\iMak\iMakInventory"
+# WorkingDir: worktree 分離後の新 path (2026-05-01 修正、旧 C:\dev\iMak\iMakInventory は古いブランチのスナップショット)
+$WorkingDir = "C:\dev\iMak_inventory\iMakInventory"
 
 # Execute は絶対パス必須 (タスクスケジューラ環境では PATH 解決されない:
 # bug 実例 2026-04-30 14:00 起動失敗 LastResult 0x80070002 = ERROR_FILE_NOT_FOUND)
