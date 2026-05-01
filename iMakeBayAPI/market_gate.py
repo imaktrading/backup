@@ -121,7 +121,13 @@ def _fetch_items_raw(
         "Content-Type": "application/json",
     }
     try:
-        resp = requests.get(EBAY_BROWSE_URL, headers=headers, params=params, timeout=TIMEOUT_SEC)
+        # 2026-05-01: getaddrinfo 失敗時に DNS flush + 1 回 retry (dns_resilience).
+        # 17:43 末尾事故 (api.ebay.com 解決失敗) 自動回復のため、本体 logic 不変で wrap.
+        from dns_resilience import with_dns_retry
+        resp = with_dns_retry(
+            requests.get, EBAY_BROWSE_URL,
+            headers=headers, params=params, timeout=TIMEOUT_SEC,
+        )
         if resp.status_code != 200:
             return [], 0
         data = resp.json()

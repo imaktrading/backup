@@ -51,18 +51,37 @@ def load_ebay_keys():
 
 def get_oauth_token(app_id, app_secret):
     credentials = base64.b64encode(f"{app_id}:{app_secret}".encode()).decode()
-    resp = requests.post(
-        "https://api.ebay.com/identity/v1/oauth2/token",
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": f"Basic {credentials}",
-        },
-        data={
-            "grant_type": "client_credentials",
-            "scope": "https://api.ebay.com/oauth/api_scope",
-        },
-        timeout=15,
-    )
+    # 2026-05-01: getaddrinfo 失敗時に DNS flush + 1 回 retry (dns_resilience).
+    # 同フォルダ内なので相対 import 風に直接 (sys.path は呼出元側で設定済の前提).
+    try:
+        from dns_resilience import with_dns_retry
+        resp = with_dns_retry(
+            requests.post,
+            "https://api.ebay.com/identity/v1/oauth2/token",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {credentials}",
+            },
+            data={
+                "grant_type": "client_credentials",
+                "scope": "https://api.ebay.com/oauth/api_scope",
+            },
+            timeout=15,
+        )
+    except ImportError:
+        # フォールバック: dns_resilience が import できない場合は元挙動.
+        resp = requests.post(
+            "https://api.ebay.com/identity/v1/oauth2/token",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {credentials}",
+            },
+            data={
+                "grant_type": "client_credentials",
+                "scope": "https://api.ebay.com/oauth/api_scope",
+            },
+            timeout=15,
+        )
     resp.raise_for_status()
     return resp.json()["access_token"]
 

@@ -92,7 +92,16 @@ def load_ebay_keys():
 
 def get_ebay_oauth_token(app_id, app_secret):
     credentials = base64.b64encode(f"{app_id}:{app_secret}".encode()).decode()
-    resp = requests.post(
+    # 2026-05-01: getaddrinfo 失敗時に DNS flush + 1 回 retry (dns_resilience).
+    # 18:17 事故の直接原因 (token 取得段階で getaddrinfo failed → 全件 $100 fallback)
+    # を本体 logic 不変で自動回復させる.
+    import sys as _sys, os as _os
+    _imakeBayAPI = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _imakeBayAPI not in _sys.path:
+        _sys.path.insert(0, _imakeBayAPI)
+    from dns_resilience import with_dns_retry
+    resp = with_dns_retry(
+        requests.post,
         "https://api.ebay.com/identity/v1/oauth2/token",
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
