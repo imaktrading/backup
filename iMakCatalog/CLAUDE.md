@@ -1,5 +1,21 @@
 # iMakCatalog — 全カテゴリ商品マスターDB
 
+## 🛡️ Worktree 分離ルール (2026-05-01 制定・絶対厳守)
+
+**この worktree (`C:/dev/iMak/`) は Catalog Claude (+ HQ + Advisor 等) 専用**。
+
+- ✅ Catalog Claude / HQ / Advisor: ここで作業
+- ❌ Inventory Claude / Harvest Claude: **絶対 touch 禁止**
+- ❌ 他 worktree (`C:/dev/iMak_inventory/` `C:/dev/iMak_harvest/`) への touch も禁止
+
+特に `C:/dev/iMak/iMakInventory/` は **古い Phase 4 までのスナップショット**で、
+本物 (`C:/dev/iMak_inventory/iMakInventory/`) とは別物。誤って編集しない。
+
+詳細は `.PROJECT_LOCKED.md` 参照。グローバル `~/.claude/CLAUDE.md` の Worktree 分離
+ルールも厳守。違反は他プロジェクトの cron 自動巡回を破壊する致命行為。
+
+---
+
 iMak Trading Japan 全プロジェクトから参照される共通の商品データベース。
 各カテゴリ (TCG / G-SHOCK / リール / ポーター 等) の公式DB をローカル SQLite に集約し、
 listing スクリプトが `iMakCatalog.api.lookup(...)` で参照する。

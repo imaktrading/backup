@@ -1,5 +1,24 @@
 # iMakHQ — iMak Trading Japan 司令塔
 
+## 🛡️ Worktree 分離ルール (2026-05-01 制定・絶対厳守)
+
+**HQ は元 monorepo (`C:/dev/iMak/`) 内に配置**。Catalog Claude と同じ worktree。
+
+- ✅ HQ Claude (使う場合) / Catalog Claude / Advisor: ここで作業
+- ❌ Inventory Claude / Harvest Claude: **絶対 touch 禁止**
+- ❌ 他 worktree (`C:/dev/iMak_inventory/` `C:/dev/iMak_harvest/`) への touch も禁止
+
+詳細は `C:/dev/iMak/.PROJECT_LOCKED.md` 参照。グローバル `~/.claude/CLAUDE.md` の
+Worktree 分離ルールも厳守。
+
+## 📋 セッション運用 (2026-05-01 整理)
+
+実運用では **HQ Claude セッションは立ち上げない**。Advisor がコード修正以外の
+司令塔役 (相談・指示文ドラフト・通訳) を兼任する。HQ プロジェクトフォルダ自体は
+**「出品くん」** の制御パネルとして日常使用 (control_panel.py / 出品くん.vbs)。
+
+---
+
 iMak Trading Japan 全プロジェクトを統括する中央拠点。コードは置かない。ここで扱うのは横断的・メタ的な相談や新規構想。
 
 ---
