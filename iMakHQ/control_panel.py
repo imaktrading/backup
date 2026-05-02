@@ -1716,12 +1716,21 @@ class ListingPanel:
                 if isinstance(item, tuple) and item[0] == "__done__":
                     self.append_log(f"\n--- 終了 (returncode={item[1]}) ---\n")
                     # Step 2: csv_postprocess_excluder (check_csv NO-GO 行を CSV 物理除外)
+                    # Step 2.5: post_title_fix (TCG タイトル長補強・PSA 名前正規化, 2026-05-02 追加)
                     # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
                     try:
                         captured_log = self.log.get("1.0", "end") if hasattr(self, 'log') else ""
                         _run_excluder_for_latest_csv(self.append_log, captured_log)
                     except Exception as _e:
                         self.append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
+                    try:
+                        _ptf_dir = os.path.join(WORKSPACE, "iMakTCG", "tools")
+                        if _ptf_dir not in sys.path:
+                            sys.path.insert(0, _ptf_dir)
+                        from post_title_fix import run_post_title_fix_for_latest_csv
+                        run_post_title_fix_for_latest_csv(self.append_log)
+                    except Exception as _e:
+                        self.append_log(f"\n⚠️ post_title_fix hook 失敗: {_e}\n")
                     self._run_rarara_after()
                     self.status_var.set("待機中")
                     self.now_processing.set("")

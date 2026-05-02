@@ -1,0 +1,30 @@
+# PSA鑑定書の文字数制限による省略・データ汚れの正規化辞書
+# 読込: iMakTCG/tools/post_title_fix.py
+#
+# 動作: タイトル内に from の文字列が含まれていれば to に置換 (部分文字列完全一致)
+# 新パターンが流出するたびにここに追記する (post_title_fix.py のコード変更不要)
+#
+# 関連 memory:
+#   - id_strict_with_explicit_rescue.md (rescue は専用関数+テストで明示)
+#   - no_modification_chain.md (既存稼働コードを触らずデータ層で対処)
+
+exact_replacements:
+  - from: "Mlmtl.GX"
+    to: "Melmetal GX"
+    note: "PSA文字数制限による Melmetal の省略 (2026-05-02 流出 cert=147571967)"
+
+  - from: "Mlmtl.gx"
+    to: "Melmetal GX"
+    note: "上記の lower-case 変種"
+
+  - from: "Mlmtl"
+    to: "Melmetal"
+    note: "subject 内部分のみ (.GX 無し variant 用)"
+
+  - from: "Tony Chopper Tony Tony.Chopper"
+    to: "Tony Tony Chopper"
+    note: "PSA データ重複バグ (2026-05-02 流出 cert=149883973)"
+
+  - from: "Tony Tony.Chopper"
+    to: "Tony Tony Chopper"
+    note: "ピリオド区切り変種"
