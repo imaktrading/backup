@@ -418,6 +418,43 @@ def _scrape_via_external_sources(model: str) -> dict:
             data["features"] = "Solar Powered, " + data["features"]
         data["movement"] = "Solar Quartz"
 
+    # 6. post-processing 検閲 (g-central / casiofanmag 由来の既知バグ補正).
+    # production gshock_to_csv 影響を避けるため scrape_*** 本体は触らず本関数で sanitize.
+    return _sanitize_external_data(data)
+
+
+def _sanitize_external_data(data: dict) -> dict:
+    """g-central / casiofanmag 由来 data の検閲 post-processing.
+
+    既知バグ修正:
+      - year に型番由来の数字混入 (例: model='DW-6900' → casiofanmag が year='6900' 抽出).
+        scrape_casiofanmag の `(\\d{4})[^\\d].*?release|release.*?(\\d{4})` regex が
+        型番中の連続 4 数字に hit する事象.
+      - year が妥当範囲外 (1990-2030 の外) の値.
+
+    修正方針 (修正連鎖回避 / 5fee51a 準拠):
+      本番 gshock_to_csv で稼働中の scrape_gcentral / scrape_casiofanmag は触らず、
+      catalog 取込み層に検閲ロジックを集中させる.
+      → 本番出品処理に影響なし、catalog 側だけ品質向上.
+    """
+    import re as _re
+
+    year = data.get("year", "")
+    if year:
+        # 型番由来の数字に一致 → 誤抽出として空にする
+        model_base = data.get("model_base", "")
+        model_digits = "".join(_re.findall(r"\d+", model_base))
+        if model_digits and year in model_digits:
+            data["year"] = ""
+        else:
+            # 妥当範囲外 (1990-2030 の外) → 空にする
+            try:
+                yi = int(year)
+                if not (1990 <= yi <= 2030):
+                    data["year"] = ""
+            except ValueError:
+                data["year"] = ""
+
     return data
 
 

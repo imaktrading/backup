@@ -179,6 +179,55 @@ def test_update_all_series_accepts_series_filter():
     )
 
 
+# ============================================================================
+# post-processing _sanitize_external_data (2026-05-03 g-central 切替後追加)
+# ============================================================================
+def test_sanitize_year_from_model_digits_cleared():
+    """model_base に含まれる数字が year に誤抽出された場合は空に補正.
+
+    背景: scrape_casiofanmag の release 年 regex が型番由来 '6900' を hit する事故.
+    例: DW-6900 → year='6900' (本来 2024 等の発売年がほしい).
+    """
+    from gshock import _sanitize_external_data
+    out = _sanitize_external_data({"model_base": "DW-6900", "year": "6900"})
+    assert out["year"] == ""
+
+
+def test_sanitize_valid_year_kept():
+    """妥当 year (1990-2030 範囲内) は保持される."""
+    from gshock import _sanitize_external_data
+    out = _sanitize_external_data({"model_base": "DW-6900", "year": "2024"})
+    assert out["year"] == "2024"
+
+
+def test_sanitize_year_out_of_range_cleared():
+    """1990 未満 / 2030 超は空に補正."""
+    from gshock import _sanitize_external_data
+    assert _sanitize_external_data({"model_base": "X", "year": "1800"})["year"] == ""
+    assert _sanitize_external_data({"model_base": "X", "year": "9999"})["year"] == ""
+
+
+def test_sanitize_invalid_year_string_cleared():
+    """非数値の year は空に補正 (defensive)."""
+    from gshock import _sanitize_external_data
+    out = _sanitize_external_data({"model_base": "X", "year": "abc"})
+    assert out["year"] == ""
+
+
+def test_sanitize_empty_year_kept_empty():
+    """空 year はそのまま空 (no-op)."""
+    from gshock import _sanitize_external_data
+    out = _sanitize_external_data({"model_base": "DW-6900", "year": ""})
+    assert out["year"] == ""
+
+
+def test_sanitize_year_partial_model_match_cleared():
+    """型番 'GA-2100' に対し year='2100' は誤抽出として空."""
+    from gshock import _sanitize_external_data
+    out = _sanitize_external_data({"model_base": "GA-2100", "year": "2100"})
+    assert out["year"] == ""
+
+
 def test_update_all_series_accepts_max_models_per_session():
     """update_all_series が max_models_per_session kwarg を受け付ける.
 
