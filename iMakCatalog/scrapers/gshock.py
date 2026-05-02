@@ -115,7 +115,13 @@ def update_all_series(driver=None, series_filter: Optional[set] = None,
 
     own_driver = driver is None
     if own_driver:
-        driver = _start_driver()
+        # 初期 driver 起動も _restart_driver 経由で URLError 等の chromedriver CDN 取得失敗を
+        # 3 回 retry する (2026-05-03 修正: Phase 3-D で _restart_driver にだけ retry を入れたが、
+        # update_all_series 冒頭の初期起動で発火する URLError には未対応だった露呈).
+        # _restart_driver(None) は old_driver=None でも quit() を try/except で吸収する設計.
+        driver = _restart_driver(None)
+        if driver is None:
+            raise RuntimeError("初期 driver 起動が 3 回試行後も失敗 (DNS / chromedriver CDN 取得不可)")
 
     if series_filter:
         pages = [(n, u) for n, u in CASIO_SERIES_PAGES if n in series_filter]
