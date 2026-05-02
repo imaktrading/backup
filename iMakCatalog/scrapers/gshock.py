@@ -60,18 +60,31 @@ PRODUCT_URL_TEMPLATE = "https://www.casio.com/jp/watches/gshock/product.{model}/
 
 # Anti-bot block 検出シグナル (Akamai EdgeSuite / Cloudflare 等).
 # body 文字列内にこれらが含まれていたら block 判定.
+#
+# 2026-05-03 (Step 1 原因究明後 / A 改修):
+# Akamai は explicit 403 と silent 404 disguise (404 風 "見つかりませんでした" ページ)
+# を混合して serve する. 5/1 16:04 smoke では 100% silent 404 disguise だった.
+# → 404 disguise 文字列を block signal に追加. real 404 (削除済 model) も
+#    block 扱いになるが、同じく skip 動作で問題なし (false positive 影響軽微).
 _BLOCK_SIGNALS = (
+    # explicit Akamai
     "permission to access",       # Akamai 403 メッセージ
     "errors.edgesuite.net",       # Akamai 403 ページ URL
     "Reference #",                # Akamai リファレンス ID 行
     "Access Denied",              # 汎用
     "Cloudflare",                 # Cloudflare チャレンジ
+    # silent 404 disguise (CASIO + Akamai が組合せで使う 5/1 PM ~ 確認済の挙動)
+    "見つかりませんでした",       # CASIO 404 page "お探しのページは見つかりませんでした"
+    "ご不便をおかけして",         # 同 404 ページの定型文
 )
 
 # Cooldown / pacing 秒数 (block 検出時の待機時間).
+# 2026-05-03 (Step 1 後 / B 改修): リクエスト密度を ~1/15 に下げて Akamai 学習閾値を回避.
+#   旧: PACING 2/3s → 新: 30/60s
+#   1 model 1 ~ 2 分かかるが、yield 0% よりマシな小バッチ運用前提
 _COOLDOWN_AFTER_BLOCK = 75
-_PACING_BETWEEN_SERIES = 3
-_PACING_BETWEEN_MODELS = 2
+_PACING_BETWEEN_SERIES = 60
+_PACING_BETWEEN_MODELS = 30
 
 
 # ============================================================================

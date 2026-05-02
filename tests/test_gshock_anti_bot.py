@@ -95,6 +95,27 @@ def test_cloudflare_challenge():
     assert _is_blocked(_FakeDriver(body)) is True
 
 
+def test_silent_404_disguise_japanese():
+    """CASIO + Akamai が混合で serve する 404 風 disguise の検出 (2026-05-03 Step 2-A 追加).
+
+    背景: 5/1 PM 以降、CASIO 公式に bot からアクセスすると explicit 警告ゼロ、
+    404 風ページ "お探しのページは見つかりませんでした" のみが返る挙動を確認.
+    旧 _BLOCK_SIGNALS は explicit Akamai シグナルのみで silent 404 を見逃していた.
+    """
+    body = (
+        "新しい取り組み\n法人向け製品\n"
+        "  お探しのページは見つかりませんでした。\n"
+        "ご不便をおかけして申し訳ありません。\nTOPページ"
+    )
+    assert _is_blocked(_FakeDriver(body)) is True
+
+
+def test_silent_404_disguise_apology_keyword():
+    """'ご不便をおかけして' 単独でも block 判定 (定型文の片方だけでも検出)."""
+    body = "ご不便をおかけして申し訳ありません。"
+    assert _is_blocked(_FakeDriver(body)) is True
+
+
 # ============================================================================
 # 通常ページ (block なし) は False
 # ============================================================================
@@ -256,6 +277,8 @@ if __name__ == "__main__":
         ("Akamai Reference #",             test_akamai_reference_id),
         ("generic Access Denied",          test_generic_access_denied),
         ("Cloudflare challenge",           test_cloudflare_challenge),
+        ("silent 404 disguise (full)",     test_silent_404_disguise_japanese),
+        ("silent 404 disguise (apology)",  test_silent_404_disguise_apology_keyword),
         ("normal series page → not blocked", test_normal_series_page_not_blocked),
         ("normal product page → not blocked", test_normal_product_page_not_blocked),
         ("empty body → not blocked",       test_empty_body_not_blocked),
