@@ -1,5 +1,18 @@
 # iMakHarvest — 商品ソース URL 集約プロジェクト
 
+## 🛡️ Worktree 分離ルール (2026-05-01 制定・絶対厳守)
+
+**この worktree (`C:/dev/iMak_harvest/`) は Harvest Claude 専用**。
+
+- ✅ Harvest Claude: ここで作業
+- ❌ Inventory Claude / Catalog Claude / その他: **絶対 touch 禁止**
+- ❌ 他 worktree (`C:/dev/iMak/` `C:/dev/iMak_inventory/`) への touch も禁止
+
+詳細は `.PROJECT_LOCKED.md` 参照。グローバル `~/.claude/CLAUDE.md` の Worktree 分離
+ルールも厳守。違反は他プロジェクトの自動運用を破壊する致命行為。
+
+---
+
 iMak Trading Japan の出品候補商品の **入り口管理**。Mercari いいね /
 Amazon お気に入り / 等から商品 URL を収集し、各カテゴリのスプシに転記する。
 

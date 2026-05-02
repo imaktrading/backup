@@ -90,3 +90,6 @@ psa_run_*.log
 **/tmp/
 **/temp/
 *.tmp
+
+# Worktree marker (各 worktree のローカルファイル、git track しない)
+.PROJECT_LOCKED.md
