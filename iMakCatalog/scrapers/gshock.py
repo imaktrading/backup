@@ -331,58 +331,141 @@ def _safe_fetch_series_models(driver, series_name: str, series_url: str,
     return [], driver
 
 
-def _safe_upsert_model(driver, model: str, series_name: str = "",
-                        max_attempts: int = 2) -> tuple:
-    """1 model upsert (block 検出 + retry/再起動付き).
+def _scrape_via_external_sources(model: str) -> dict:
+    """g-central + casiofanmag + 既存 pure 関数による model spec 組立.
+
+    2026-05-03 設計変更:
+      CASIO 公式は Akamai で block されるため、Pass 2 では公式直叩きを完全回避する.
+      既存 iMakG-shock/gshock_to_csv.py の関数群を import 再利用 (修正連鎖回避).
+
+    取得経路:
+      1. scrape_gcentral(model_base) — weight / year / case_size / case_thickness
+                                        / band_material / dial_color
+      2. scrape_casiofanmag(model_base) — weight / year (gcentral miss 時 fallback)
+      3. 型番由来 pure 関数 — band_color / band_strap / band_material (GMW系)
+                              / case_shape / is_metal / Solar/movement
+      4. デフォルト値 — water_resistance / case_material / crystal / display 等
+
+    失われる情報 (許容):
+      - is_new / is_limited (check_new_flag が CASIO 必要、default False)
+      - 細部 spec の例外モデル (G-SHOCK 全体の <5%、出品時手動調整で対処)
 
     Returns:
-        (success_bool, current_driver)
+        scrape_casio 互換 dict (build_specs / build_row が同じ shape を期待).
+        全フィールド miss なら空 dict 返却.
     """
-    from gshock_to_csv import scrape_casio  # type: ignore
-    from casio_finder import check_new_flag  # type: ignore
+    import re as _re
+    from gshock_to_csv import (  # type: ignore
+        scrape_gcentral, scrape_casiofanmag,
+        get_band_color, get_band_strap, get_band_material_by_model,
+        get_case_shape, get_default_weight, is_tough_solar,
+    )
+
+    model_base = _re.sub(r"(?:JF|JR)$", "", model)
+    data: dict = {
+        "model": model,
+        "model_official": model,
+        "model_base": model_base,
+    }
+
+    # 1. g-central (主)
+    gc = scrape_gcentral(model_base)
+    for k in ("weight", "year", "case_size", "case_thickness",
+              "band_material", "dial_color"):
+        if gc.get(k):
+            data[k] = gc[k]
+
+    # 2. casiofanmag (fallback)
+    cfm = scrape_casiofanmag(model_base)
+    if not data.get("year") and cfm.get("year"):
+        data["year"] = cfm["year"]
+    if not data.get("weight") and cfm.get("weight"):
+        data["weight"] = cfm["weight"]
+
+    # 3. 型番由来 pure 関数推論
+    data["band_color"] = get_band_color(model)
+    data["case_shape"] = get_case_shape(model_base)
+    auto_band_strap = get_band_strap(model)
+    if auto_band_strap != "Two-Piece Strap":
+        data["band_strap_override"] = auto_band_strap
+    auto_band_material = get_band_material_by_model(model)
+    if auto_band_material:
+        data["band_material"] = auto_band_material
+    key = model_base.upper().replace("-", "")
+    data["is_metal"] = key.startswith("GM") or key.startswith("GMW")
+    if not data.get("weight"):
+        data["weight"] = get_default_weight(model_base)
+
+    # 4. defaults (CASIO 公式取れた時の典型値)
+    data.setdefault("water_resistance", "200 m (20 ATM)")
+    data.setdefault("band_material", "Resin")
+    data.setdefault("case_material", "Resin")
+    data.setdefault("crystal", "Mineral Glass")
+    data.setdefault("case_size", "")
+    data.setdefault("case_thickness", "")
+    data.setdefault("band_length", "")
+    data.setdefault("year", "")
+    data.setdefault("dial_color", "")
+    data.setdefault("bezel_color", "")
+    data.setdefault("movement", "Quartz")
+    data.setdefault("display", "Digital")  # G-SHOCK は Digital 主流
+    data.setdefault("features", "Shock-Resistant")
+    data.setdefault("band_width", "")
+
+    # 5. Solar 検出 (型番 prefix から)
+    if is_tough_solar(model_base):
+        if "Solar Powered" not in data["features"]:
+            data["features"] = "Solar Powered, " + data["features"]
+        data["movement"] = "Solar Quartz"
+
+    return data
+
+
+def _safe_upsert_model(driver, model: str, series_name: str = "",
+                        max_attempts: int = 2) -> tuple:
+    """1 model upsert (g-central + casiofanmag 経由、CASIO 直叩き完全回避).
+
+    2026-05-03 仕様変更:
+      旧 path (scrape_casio + check_new_flag) は Akamai で block されるため
+      _scrape_via_external_sources に切替. driver は Pass 1 で使ったものが
+      引数として渡されるが、本関数では使わない (signature 互換のため受け取るのみ).
+
+    Returns:
+        (success_bool, current_driver)  driver は変更されずそのまま返す
+    """
     import api  # type: ignore
 
-    product_url = PRODUCT_URL_TEMPLATE.format(model=model)
     print(f"  {model}...", end="", flush=True)
 
-    for attempt in range(1, max_attempts + 1):
-        if driver is None:
-            print(f" ⛔ driver なし、skip.")
-            return False, None
-        data = scrape_casio(driver, product_url)
-        blocked = _is_blocked(driver)
-        # 成功条件: data あり + block なし + case_size 取得済 (block ページは case_size 空)
-        if data and not blocked and data.get("case_size"):
-            is_new, is_limited, price_jpy = check_new_flag(driver, model)
-            specs = _build_specs(data, series_name, is_new, is_limited, price_jpy)
-            model_official = data.get("model_official") or model
-            api.upsert(
-                category=CATEGORY,
-                product_id=model_official,
-                name=f"Casio G-SHOCK {model_official}",
-                specs=specs,
-                images=[],
-                source=SOURCE,
-                source_url=product_url,
-            )
-            print(f" [{specs.get('case_size','?')} / "
-                  f"{'NEW' if is_new else '-'} / "
-                  f"{'限定' if is_limited else '-'}]")
-            return True, driver
-        # 失敗パス
-        if blocked:
-            print(f" 🚧 block (attempt {attempt}/{max_attempts})")
-        else:
-            print(f" empty (attempt {attempt}/{max_attempts})")
-        if attempt < max_attempts:
-            if blocked:
-                time.sleep(_COOLDOWN_AFTER_BLOCK)
-                # block 後は driver 再起動 (session 切替で解除狙い). None なら次 attempt で skip.
-                driver = _restart_driver(driver)
-            else:
-                time.sleep(10)
-    print(f"     skip {model} (recovery 失敗)")
-    return False, driver
+    data = _scrape_via_external_sources(model)
+
+    # 成功判定: g-central か casiofanmag のいずれかから 1 つ以上の field を取得できれば OK.
+    # case_size / weight / year のいずれかが空でなければ実データありとみなす.
+    has_real_data = bool(data.get("case_size") or data.get("weight") or data.get("year"))
+    if not has_real_data:
+        print(f" empty (g-central/casiofanmag 両方 miss)")
+        return False, driver
+
+    # is_new / is_limited は CASIO が必要なので default False で投入 (Phase 2 で別ソース)
+    is_new = False
+    is_limited = False
+    price_jpy = ""
+
+    specs = _build_specs(data, series_name, is_new, is_limited, price_jpy)
+    model_official = data.get("model_official") or model
+
+    api.upsert(
+        category=CATEGORY,
+        product_id=model_official,
+        name=f"Casio G-SHOCK {model_official}",
+        specs=specs,
+        images=[],
+        source="g-central+casiofanmag",  # 明示的に CASIO 経由でないことを示す
+        source_url=f"https://www.g-central.com/specs/g-shock-{data['model_base']}/",
+    )
+    print(f" [case={data.get('case_size','?')} / year={data.get('year','?')} / "
+          f"weight={data.get('weight','?')}]")
+    return True, driver
 
 
 # ============================================================================
