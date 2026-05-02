@@ -102,3 +102,29 @@ psa_run_*.log
 
 # Worktree marker (各 worktree のローカルファイル、git track しない)
 .PROJECT_LOCKED.md
+
+# === Claude Code session cache (各プロジェクト) ===
+**/.claude/
+
+# === Advisor 一時 decompile ===
+iMakAdvisor/.decompile_tmp/
+
+# === 個人 window geometry / settings ===
+**/.window_geometry.json
+
+# === 一時 scripts (アンダースコア始まり Python) ===
+**/_*.py
+
+# === decision logs (運用データ、再生成可) ===
+**/decision_logs/
+
+# === iMakHQ csv_output (運用データ、再生成可) ===
+iMakHQ/csv_output/
+
+# === iMakHQ rarara_reports (運用データ) ===
+iMakHQ/rarara_reports/
+
+# === 新 worktree (元 monorepo に古いスナップショット残る場合の保険) ===
+# 注意: 新 worktree は別 path (C:/dev/iMak_inventory etc) で管理、元 monorepo の同名フォルダは古いものなので ignore
+iMakInventory/
+iMakHarvest/
