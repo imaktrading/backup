@@ -100,7 +100,10 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
         sleep_sec:      1 リクエストごとの sleep 秒 (pacing)
         mercari_driver: Selenium driver の再利用 (None なら都度生成)
 
-    Returns: {row_index, url, item_id, supplier, is_sold, raw_status, current_sold, delta, error}
+    Returns: {row_index, url, item_id, supplier, is_sold, raw_status, current_sold, delta, error, price_jpy}
+
+    price_jpy: scraper が現在の仕入元価格 (¥) を取得できた場合のみ int、
+               取得失敗 / 価格欄なし / scrape 失敗 → None (N 列既存値維持のため上書きしない)
     """
     url = row["url"]
     domain = _domain_of(url)
@@ -117,6 +120,7 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
         "current_sold": row.get("current_sold", ""),
         "delta":        "uncertain",
         "error":        None,
+        "price_jpy":    None,
     }
 
     if supplier == "mercari":
@@ -159,6 +163,11 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
     in_stock = bool(skus[0].get("in_stock", False))
     result["is_sold"] = not in_stock
     result["raw_status"] = info.get("status") or ("in_stock" if in_stock else "out_of_stock")
+
+    # 現在価格 (N 列用): scraper が int で取れていれば乗せる、それ以外は None で維持
+    raw_price = skus[0].get("price_jpy")
+    if isinstance(raw_price, int) and not isinstance(raw_price, bool) and raw_price >= 0:
+        result["price_jpy"] = raw_price
 
     # delta 判定
     cur_marked_sold = result["current_sold"] in ("○", "〇")
@@ -411,34 +420,46 @@ def process_sheet(
     # 書込 (Phase 9 修正: trabajo 同等の O 列全件更新仕様)
     #   - O 列: 巡回処理した全行に時刻書込 (エラー含む)
     #   - D 列: 「変化があった行」のみ更新 (人手書込を尊重)
+    #   - N 列: scrape で価格取得できた行のみ更新 (None なら触らない、purely additive)
     checked_at_now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     updates = []
     for r in results:
+        price_jpy = r.get("price_jpy")  # None の場合 update dict には乗せない (= N 列触らない)
         if r["error"] or r["is_sold"] is None:
             # 取得不能 → O 列だけ更新 (D 列は既存維持、fail-closed 維持)
-            updates.append({
+            #          N 列は price_jpy=None なので触らない (既存値維持)
+            upd = {
                 "row_index":  r["row_index"],
                 "checked_at": checked_at_now,
                 "o_only":     True,
-            })
+            }
+            if price_jpy is not None:
+                upd["price_jpy"] = price_jpy
+            updates.append(upd)
             continue
         # D 列に変化があるかどうか判定
         new_d = "○" if r["is_sold"] else ""
         old_d = (r.get("current_sold") or "").strip()
         if new_d == old_d:
             # 変化なし → O 列のみ更新 (D 列はそのまま)
-            updates.append({
+            upd = {
                 "row_index":  r["row_index"],
                 "checked_at": checked_at_now,
                 "o_only":     True,
-            })
+            }
+            if price_jpy is not None:
+                upd["price_jpy"] = price_jpy
+            updates.append(upd)
         else:
             # 変化あり → D + O 両方更新
-            updates.append({
+            upd = {
                 "row_index":  r["row_index"],
                 "is_sold":    r["is_sold"],
                 "checked_at": checked_at_now,
-            })
+            }
+            if price_jpy is not None:
+                upd["price_jpy"] = price_jpy
+            updates.append(upd)
 
     if dry_run:
         log("  [DRY RUN] スプシ書込 skip")
@@ -446,11 +467,12 @@ def process_sheet(
             log(f"    変化検知サンプル: row{r['row_index']} {r['delta']} {r['url'][:50]}")
     elif updates:
         d_count = sum(1 for u in updates if not u.get("o_only"))
+        n_count = sum(1 for u in updates if u.get("price_jpy") is not None)
         o_count = len(updates)
-        log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + O 列 {o_count} 件)")
+        log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + N 列価格 {n_count} 件 + O 列 {o_count} 件)")
         try:
             res = update_listings_sold_marks(ws, updates)
-            log(f"  ✅ updated={res['updated']} (d_writes={res.get('d_writes', '?')} / o_writes={res.get('o_writes', '?')})")
+            log(f"  ✅ updated={res['updated']} (d_writes={res.get('d_writes', '?')} / n_writes={res.get('n_writes', '?')} / o_writes={res.get('o_writes', '?')})")
         except Exception as e:
             log(f"  ❌ スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())

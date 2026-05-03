@@ -70,7 +70,8 @@ LISTINGS_COL_URL = 1          # A: 仕入元 URL (Mercari/Amazon)
 LISTINGS_COL_ITEM_ID = 2      # B: eBay listing ID
 LISTINGS_COL_TITLE = 3        # C: タイトル (日本語)
 LISTINGS_COL_SOLD = 4         # D: 売り切れ ← Inventory が "○" を書く
-LISTINGS_COL_PRICE = 6        # F: 商品価格 (¥)
+LISTINGS_COL_PRICE = 6        # F: 出品時の価格 (¥) ← 触らない (履歴保存)
+LISTINGS_COL_PRICE_NOW = 14   # N: 現在の仕入元価格 (¥) ← Inventory が毎 cycle 上書き (None なら維持)
 LISTINGS_COL_CHECKED_AT = 15  # O: 売り切れチェック時間
 
 
@@ -177,7 +178,7 @@ def read_listings_rows(
 
 
 def update_listings_sold_marks(ws, updates: list) -> dict:
-    """商品管理シートの D 列 (売り切れ) と O 列 (チェック時間) を batch 更新.
+    """商品管理シートの D 列 (売り切れ) / O 列 (チェック時間) / N 列 (現在価格) を batch 更新.
 
     Args:
         ws:      gspread worksheet
@@ -187,6 +188,7 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
                 "is_sold":    True / False (o_only=True 時は無視),
                 "checked_at": "2026/04/29 17:00:00" (省略時は now),
                 "o_only":     True なら D 列を触らず O 列のみ更新 (Phase 9 fix),
+                "price_jpy":  int (現在価格、None or 省略時は N 列を触らない = 既存値維持),
             },
             ...
         ]
@@ -196,15 +198,19 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
       - o_only 省略 / False → D + O 両方書込
       - D 列: is_sold=True → "○", False → "" (人手 ○ を上書きしない場合は呼出側で制御)
       - O 列: 全 update に timestamp を書く (= trabajo 同等仕様、巡回チェック日時)
+      - N 列: price_jpy が int (>=0) で渡された行のみ書込。None / 省略 → 既存値維持
+        (一時的取得失敗で価値情報を消すリスク回避、trabajo SheetRow.cs n_nowPrice 同等仕様)
+        ※ D/O 列のロジックには一切影響しない (purely additive)
 
-    Returns: {"updated": N, "d_writes": N, "o_writes": N}
+    Returns: {"updated": N, "d_writes": N, "o_writes": N, "n_writes": N}
     """
     if not updates:
-        return {"updated": 0, "d_writes": 0, "o_writes": 0}
+        return {"updated": 0, "d_writes": 0, "o_writes": 0, "n_writes": 0}
 
     cell_updates = []
     d_writes = 0
     o_writes = 0
+    n_writes = 0
     for u in updates:
         row_idx = u["row_index"]
         checked_at = u.get("checked_at") or datetime.now().strftime("%Y/%m/%d %H:%M:%S")
@@ -223,8 +229,17 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
         })
         o_writes += 1
 
+        # N 列 (現在価格): price_jpy が int で渡された場合のみ書込。None / 不在 / 非 int は触らない。
+        price_jpy = u.get("price_jpy")
+        if isinstance(price_jpy, int) and not isinstance(price_jpy, bool) and price_jpy >= 0:
+            cell_updates.append({
+                "range": f"N{row_idx}",
+                "values": [[price_jpy]],
+            })
+            n_writes += 1
+
     ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
-    return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes}
+    return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes, "n_writes": n_writes}
 
 
 # ============================================================================
