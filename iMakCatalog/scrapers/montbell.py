@@ -193,8 +193,13 @@ def _make_driver():
 def update_one(product_id: str, driver=None) -> bool:
     """1 product を fetch + parse + upsert. driver は使い回し可.
 
+    廃盤対応 (2026-05-03 追加):
+      official 404 時は (1) Wayback Machine 最新 snapshot 試行 →
+      (2) 最小情報 stub の順でフォールバック.
+      → 中古主体運用で廃盤も catalog に登録する.
+
     Returns:
-        True (成功 = data あり upsert 済), False (404 / parse 失敗 / spec 取得失敗)
+        True (成功 = data あり upsert 済), False (parse 失敗 / 完全 miss)
     """
     own_driver = driver is None
     if own_driver:
@@ -211,8 +216,21 @@ def update_one(product_id: str, driver=None) -> bool:
 
         title = driver.title or ""
         if "Page Not Found" in title or "見つかりません" in title:
-            print(" [404]")
-            return False
+            # 廃盤 path: Wayback 最新 snapshot 試行
+            wayback_html = _fetch_wayback(url)
+            if wayback_html:
+                data = _parse_product(wayback_html, None, product_id, url)
+                if data and (data.get("name_jp") or data.get("specs", {}).get("weight_g")):
+                    _upsert_product(product_id, data, url, source="wayback_machine")
+                    wg = data.get("specs", {}).get("weight_g") or "?"
+                    print(f" [WAYBACK: {data.get('name_jp','?')[:30]} / {wg}g / "
+                          f"{len(data.get('color_variants', []))} colors]")
+                    return True
+            # Wayback も miss → 最小情報 stub
+            stub = _build_discontinued_stub(product_id, url)
+            _upsert_product(product_id, stub, url, source="discontinued_stub")
+            print(f" [STUB: discontinued (公式・Wayback ともに miss)]")
+            return True
 
         html = driver.page_source
         data = _parse_product(html, driver, product_id, url)
@@ -220,8 +238,7 @@ def update_one(product_id: str, driver=None) -> bool:
             print(" [parse failed]")
             return False
 
-        _upsert_product(product_id, data, url)
-        # weight_g は specs ネスト内
+        _upsert_product(product_id, data, url, source=SOURCE)
         wg = data.get("specs", {}).get("weight_g") or "?"
         print(f" [{data.get('name_jp','?')[:30]} / {wg}g / "
               f"{len(data.get('color_variants', []))} colors]")
@@ -292,10 +309,9 @@ def _parse_product(html: str, driver, product_id: str, url: str) -> Optional[dic
     # スペック block: <h4 class="ttlType03">仕様</h4> 直後の <p> ブロック内 全 【...】 を抽出
     spec_data = _parse_spec_block(html)
 
-    # カラー (suffix list)
-    color_variants = _parse_color_variants(driver, html)
-    # サイズ (size×color matrix の row 軸から)
-    size_variants = _parse_size_variants(driver)
+    # カラー / サイズ (HTML 主、driver は active 経路 fallback 用)
+    color_variants = _parse_color_variants(html, driver=driver)
+    size_variants = _parse_size_variants(html, driver=driver)
 
     # 価格 (¥XX,XXX)
     prices = re.findall(r"¥([\d,]+)", html)
@@ -406,20 +422,30 @@ def _parse_spec_block(html: str) -> dict:
     return result
 
 
-def _parse_color_variants(driver, html: str) -> list:
-    """カラーバリエーションを取得.
+def _parse_color_variants(html: str, driver=None) -> list:
+    """カラーバリエーションを取得 (HTML 主、driver は fallback).
 
-    既存 montbell_outlet_scraper の input[name='all_color'] パターンを流用.
-    suffix list を取得 → JP 名と EN 名を組合せ.
+    Wayback snapshot は driver なしで HTML のみ → HTML 直接パースを優先.
+    HTML から input[name='all_color'] / 【カラー】... を抽出.
     """
-    from selenium.webdriver.common.by import By
     suffix_list = []
-    try:
-        el = driver.find_element(By.CSS_SELECTOR, "input[name='all_color']")
-        raw = (el.get_attribute("value") or "").strip()
-        suffix_list = [s for s in raw.split(",") if s]
-    except Exception:
-        pass
+    # HTML から input[name='all_color'] の value を直接 regex 抽出
+    m_inp = re.search(
+        r'<input[^>]+name=[\'"]all_color[\'"][^>]+value=[\'"]([^\'"]+)[\'"]',
+        html,
+    )
+    if m_inp:
+        suffix_list = [s for s in m_inp.group(1).split(",") if s]
+
+    # HTML regex で取れなかった場合のみ driver fallback
+    if not suffix_list and driver is not None:
+        try:
+            from selenium.webdriver.common.by import By
+            el = driver.find_element(By.CSS_SELECTOR, "input[name='all_color']")
+            raw = (el.get_attribute("value") or "").strip()
+            suffix_list = [s for s in raw.split(",") if s]
+        except Exception:
+            pass
 
     # 【カラー】xxx(BK)、yyy(NV) パターンから JP 名抽出
     jp_map = {}
@@ -433,7 +459,6 @@ def _parse_color_variants(driver, html: str) -> list:
         jp = jp_map.get(sx, "")
         en = _COLOR_SUFFIX_EN.get(sx)
         if not en and jp:
-            # JP 名から EN 推定
             for jp_key, en_val in _COLOR_JP_EN.items():
                 if jp_key in jp:
                     en = en_val
@@ -442,22 +467,32 @@ def _parse_color_variants(driver, html: str) -> list:
     return out
 
 
-def _parse_size_variants(driver) -> list:
-    """サイズバリエーション (select[name$='_num'] パターン から逆引き)."""
-    from selenium.webdriver.common.by import By
+def _parse_size_variants(html: str, driver=None) -> list:
+    """サイズバリエーション (HTML 主、driver は fallback)."""
     sizes = []
     seen = set()
-    try:
-        for sel_el in driver.find_elements(By.CSS_SELECTOR, "select[name$='_num']"):
-            name = sel_el.get_attribute("name") or ""
-            m = re.match(r"^([A-Z0-9]+)_([A-Z0-9]+)_num$", name)
-            if m:
-                sz = m.group(1)
-                if sz not in seen:
-                    seen.add(sz)
-                    sizes.append(sz)
-    except Exception:
-        pass
+    # HTML から select[name='XX_YY_num'] パターンを regex 抽出
+    for m in re.finditer(
+        r'<select[^>]+name=[\'"]([A-Z0-9]+)_[A-Z0-9]+_num[\'"]', html
+    ):
+        sz = m.group(1)
+        if sz not in seen:
+            seen.add(sz)
+            sizes.append(sz)
+    # HTML 抽出 ゼロかつ driver あれば fallback
+    if not sizes and driver is not None:
+        try:
+            from selenium.webdriver.common.by import By
+            for sel_el in driver.find_elements(By.CSS_SELECTOR, "select[name$='_num']"):
+                name = sel_el.get_attribute("name") or ""
+                mm = re.match(r"^([A-Z0-9]+)_([A-Z0-9]+)_num$", name)
+                if mm:
+                    sz = mm.group(1)
+                    if sz not in seen:
+                        seen.add(sz)
+                        sizes.append(sz)
+        except Exception:
+            pass
     return sizes
 
 
@@ -575,10 +610,91 @@ def _derive_care(html: str) -> str:
 
 
 # ============================================================================
+# 廃盤対応: Wayback Machine fallback + 最小情報 stub (2026-05-03 追加)
+# ============================================================================
+def _fetch_wayback(original_url: str, timeout: int = 15) -> Optional[str]:
+    """Wayback Machine 最新 snapshot の HTML を取得.
+
+    取得経路:
+      1. Availability API (https://archive.org/wayback/available?url=...)
+         で closest snapshot URL を取得
+      2. snapshot URL を fetch (HTML 全体)
+
+    返値:
+      snapshot HTML (str) or None (snapshot 不在 / 通信エラー).
+    """
+    import requests  # type: ignore
+    try:
+        api_url = f"https://archive.org/wayback/available?url={original_url}"
+        r = requests.get(api_url, timeout=timeout,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        snapshot = ((r.json() or {}).get("archived_snapshots") or {}).get("closest", {})
+        if not snapshot or not snapshot.get("url") or not snapshot.get("available"):
+            return None
+        snapshot_url = snapshot["url"]
+    except Exception:
+        return None
+    try:
+        r2 = requests.get(snapshot_url, timeout=timeout,
+                          headers={"User-Agent": "Mozilla/5.0"})
+        if r2.status_code != 200:
+            return None
+        return r2.text
+    except Exception:
+        return None
+
+
+def _build_discontinued_stub(product_id: str, url: str) -> dict:
+    """公式・Wayback ともに miss の廃盤 product に最小情報 stub を組立.
+
+    catalog に「廃盤として登録あり」の record を残し、後で人手 augment 可能にする.
+    name_jp は不明なので空、specs はほぼ Not Specified.
+    """
+    return {
+        "product_id": product_id,
+        "name_jp": "",
+        "name_en": "",
+        "description_jp": "",
+        "url": url,
+        "specs": {
+            "outer_shell_material": "Not Specified",
+            "lining_material": "Not Specified",
+            "insulation_material": "Not Specified",
+            "fabric_type": "Not Specified",
+            "features": [],
+            "performance_activity": "Not Specified",
+            "garment_care": "Not Specified",
+            "jacket_coat_length": "Not Specified",
+            "type": "Jacket",
+            "style": "Not Specified",
+            "department": "Not Specified",
+            "country_of_origin": "Not Specified",
+            "weight_g": "",
+            "retail_price_jpy": "",
+            "brand": "montbell",
+            "size_type": "Regular",
+            "theme": "Outdoor",
+            "fit": "Regular",
+            "accents": "Logo",
+            "vintage": "No",
+            "handmade": "No",
+            "pattern": "Solid",
+            "discontinued": True,
+        },
+        "color_variants": [],
+        "size_variants": [],
+        "image_urls": [],
+    }
+
+
+# ============================================================================
 # DB upsert
 # ============================================================================
-def _upsert_product(product_id: str, data: dict, url: str):
-    """products テーブルへ upsert."""
+def _upsert_product(product_id: str, data: dict, url: str, source: str = SOURCE):
+    """products テーブルへ upsert. source は active=montbell_official /
+    廃盤=wayback_machine / discontinued_stub を区別."""
     import api  # type: ignore
     api.upsert(
         category=CATEGORY,
@@ -593,7 +709,7 @@ def _upsert_product(product_id: str, data: dict, url: str):
             "description_jp":   data.get("description_jp", ""),
         },
         images=data.get("image_urls", []),
-        source=SOURCE,
+        source=source,
         source_url=url,
     )
 

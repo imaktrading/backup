@@ -189,6 +189,57 @@ def test_derive_care_default_not_specified():
     assert m._derive_care("plain text without keywords") == "Not Specified"
 
 
+# ============================================================================
+# 廃盤対応 (Wayback / stub) — 2026-05-03 追加
+# ============================================================================
+def test_build_discontinued_stub_minimal_shape():
+    """stub は specs.discontinued=True と Not Specified 値が入る."""
+    stub = m._build_discontinued_stub("9999999", "https://example/9999999")
+    assert stub["product_id"] == "9999999"
+    assert stub["specs"]["discontinued"] is True
+    assert stub["specs"]["brand"] == "montbell"
+    assert stub["specs"]["outer_shell_material"] == "Not Specified"
+    assert stub["color_variants"] == []
+    assert stub["size_variants"] == []
+
+
+def test_parse_color_variants_html_only_no_driver():
+    """driver=None でも HTML から all_color の suffix list を抽出できる."""
+    html = (
+        '<input type="hidden" name="all_color" value="BK,NV,YL"/>'
+        '<p>【カラー】ブラック(BK)、ネイビー(NV)、イエロー(YL)</p>'
+    )
+    out = m._parse_color_variants(html, driver=None)
+    assert len(out) == 3
+    suffixes = [c["suffix"] for c in out]
+    assert "BK" in suffixes and "NV" in suffixes and "YL" in suffixes
+    # JP 名 mapping 確認
+    bk = next(c for c in out if c["suffix"] == "BK")
+    assert bk["jp"] == "ブラック" and bk["en"] == "Black"
+
+
+def test_parse_size_variants_html_only_no_driver():
+    """driver=None でも HTML から select[name='X_Y_num'] の size 軸を抽出."""
+    html = (
+        '<select name="S_BK_num"><option>1</option></select>'
+        '<select name="M_BK_num"><option>1</option></select>'
+        '<select name="L_NV_num"><option>1</option></select>'
+        '<select name="XL_NV_num"><option>1</option></select>'
+    )
+    out = m._parse_size_variants(html, driver=None)
+    assert out == ["S", "M", "L", "XL"]
+
+
+def test_parse_color_variants_empty_html_returns_empty():
+    out = m._parse_color_variants("<html><body>no color</body></html>", driver=None)
+    assert out == []
+
+
+def test_parse_size_variants_empty_html_returns_empty():
+    out = m._parse_size_variants("<html><body>no size</body></html>", driver=None)
+    assert out == []
+
+
 # Standalone runner
 if __name__ == "__main__":
     try:
@@ -223,6 +274,11 @@ if __name__ == "__main__":
         ("fabric default",                     test_derive_fabric_type_default_not_specified),
         ("care machine washable",              test_derive_care_machine_washable_when_keyword_present),
         ("care default",                       test_derive_care_default_not_specified),
+        ("discontinued stub shape",            test_build_discontinued_stub_minimal_shape),
+        ("color HTML only no driver",          test_parse_color_variants_html_only_no_driver),
+        ("size HTML only no driver",           test_parse_size_variants_html_only_no_driver),
+        ("color empty HTML",                   test_parse_color_variants_empty_html_returns_empty),
+        ("size empty HTML",                    test_parse_size_variants_empty_html_returns_empty),
     ]
     fails = 0
     for name, fn in cases:
