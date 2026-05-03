@@ -251,6 +251,7 @@ def get_listing_targets():
         price = row[5] if len(row) > 5 else ""
         photo_urls = row[6] if len(row) > 6 else ""
         description = row[7] if len(row) > 7 else ""
+        model = row[8].strip() if len(row) > 8 else ""  # I列: 型番 (ユーザー手動入力, 7桁数字)
 
         category = row[17] if len(row) > 17 else ""  # R列
         if url and not item_id and not sold and category == CATEGORY_FILTER:
@@ -258,6 +259,7 @@ def get_listing_targets():
                 "row": i, "url": url, "title_jp": title_jp,
                 "condition": condition, "price_jpy": price,
                 "photo_urls": photo_urls, "description": description,
+                "model": model,
             })
     return targets
 
@@ -276,9 +278,10 @@ def download_image_b64(url):
 def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b64, max_retries=2):
     """Claude APIでリスティング情報生成 + ホワイトリスト検証 + 違反時リトライ"""
     import anthropic
-    sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI"))
+    # 2026-05-03 専門化: 共有 whitelist_registry から montbell_whitelist (専用) に切替
+    # memory: category_specialization_principle.md / no_modification_chain.md
     try:
-        from whitelist_registry import validate_and_normalize, build_retry_feedback
+        from montbell_whitelist import validate_and_normalize, build_retry_feedback
         validate_fn = validate_and_normalize
         feedback_fn = build_retry_feedback
     except Exception:
@@ -326,7 +329,8 @@ Generate an eBay listing for this montbell jacket.""",
             return result
 
         specs = result.get("item_specifics", {})
-        normalized, violations = validate_fn(specs, "montbell")
+        # montbell_whitelist は category 引数不要 (montbell 専用なので)
+        normalized, violations = validate_fn(specs)
         result["item_specifics"] = normalized
         last_result = result
 
@@ -607,23 +611,23 @@ def main():
             size_us,
             color,
             specs.get("Department", "Men"),
-            specs.get("Outer Shell Material", "Nylon"),
+            specs.get("Outer Shell Material", "Not Specified"),  # 推測NG, 確証ない時は eBay 公式値 Not Specified
             specs.get("Style", "Parka"),
-            specs.get("Lining Material", "Does not apply"),
-            specs.get("Insulation Material", "Does not apply"),
+            specs.get("Lining Material", "Not Specified"),
+            specs.get("Insulation Material", "Not Specified"),
             specs.get("Theme", "Outdoor"),
             specs.get("Features", "Hooded, Lightweight"),
-            specs.get("Fabric Type", "Nylon"),
+            specs.get("Fabric Type", "Not Specified"),  # Fabric Type は織り方 (Softshell等)、素材 Nylon は Outer Shell Material 列
             specs.get("Pattern", "Solid"),
             specs.get("Accents", "Logo"),
             model,
             specs.get("Product Line", ""),
             specs.get("Closure", "Full Zip"),
-            specs.get("Performance/Activity", "Hiking, Outdoor"),
+            specs.get("Performance/Activity", "Hiking"),
             specs.get("Season", "Spring, Fall"),
             specs.get("Vintage", "No"),
-            specs.get("Country/Region of Manufacture", "Does not apply"),
-            specs.get("Garment Care", "Machine Washable"),
+            specs.get("Country/Region of Manufacture", "Not Specified"),
+            specs.get("Garment Care", "Not Specified"),
         ]
         # === 物理ゲート: audit_csv_row error なら HOLDキューへ隔離 ===
         from listing_common import gate_row_or_hold as _gate
