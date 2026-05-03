@@ -1,18 +1,38 @@
 # iMakCatalog — 全カテゴリ商品マスターDB
 
-## 🛡️ Worktree 分離ルール (2026-05-01 制定・絶対厳守)
+## 🛡️ Worktree 分離ルール (2026-05-03 更新・絶対厳守)
 
-**この worktree (`C:/dev/iMak/`) は Catalog Claude (+ HQ + Advisor 等) 専用**。
+**Catalog Claude の作業先 = `C:/dev/iMak_catalog/` (feature/catalog-phase2)**
 
-- ✅ Catalog Claude / HQ / Advisor: ここで作業
-- ❌ Inventory Claude / Harvest Claude: **絶対 touch 禁止**
-- ❌ 他 worktree (`C:/dev/iMak_inventory/` `C:/dev/iMak_harvest/`) への touch も禁止
+- ✅ Catalog Claude: `C:/dev/iMak_catalog/` で作業
+- ❌ Catalog Claude: 本元 `C:/dev/iMak/` (HQ/Advisor 専用) への touch **絶対禁止**
+- ❌ 全 Claude: 他 worktree への branch 切替・worktree 操作 禁止
 
-特に `C:/dev/iMak/iMakInventory/` は **古い Phase 4 までのスナップショット**で、
-本物 (`C:/dev/iMak_inventory/iMakInventory/`) とは別物。誤って編集しない。
+### 各 worktree の責任範囲
+
+| Worktree | Branch | セッション |
+|---|---|---|
+| `C:/dev/iMak/` | master | HQ / Advisor (branch 切替禁止) |
+| `C:/dev/iMak_catalog/` | feature/catalog-phase2 | **Catalog Claude (2026-05-03 新設)** |
+| `C:/dev/iMak_inventory/` | feature/inventory-phase1 | Inventory Claude |
+| `C:/dev/iMak_harvest/` | feature/harvest-phase1 | Harvest Claude |
+| `C:/dev/iMak_revise/` | feature/revise-phase1 | Revise Claude |
+
+### 事故履歴
+- 2026-04-30: Catalog Claude が本元で branch 切替 → Inventory の run_cycle.py 消失
+- 2026-05-03 08:20: 同型再発 (master → feature/gshock checkout で post_title_fix.py 等が working tree から退避、commit 済だったため復元可だった)
+- → **2026-05-03: Catalog 切出で構造的に再発防止** (本 worktree が新設された理由)
 
 詳細は `.PROJECT_LOCKED.md` 参照。グローバル `~/.claude/CLAUDE.md` の Worktree 分離
 ルールも厳守。違反は他プロジェクトの cron 自動巡回を破壊する致命行為。
+
+## 📦 DB の場所 (2026-05-03 変更)
+
+`products.sqlite` は **`C:/dev/iMak_data/catalog/products.sqlite`** に配置 (worktree 跨ぎ共有)。
+
+- 全 worktree が同じ DB を参照: `api._DB_PATH = Path("C:/dev/iMak_data/catalog/products.sqlite")`
+- 旧 `C:/dev/iMak/iMakCatalog/db/products.sqlite` は当面残すが参照禁止 (移行確認後に削除予定)
+- 修正箇所: `iMakCatalog/api.py` / `iMakCatalog/scrapers/gshock.py` (絶対パス化済)
 
 ---
 

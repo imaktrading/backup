@@ -221,7 +221,7 @@ def _scrape_log_start() -> Optional[int]:
     """scrape_log に開始 row を挿入. 失敗時は None 返却 (DB なしで動かす場合)."""
     try:
         import sqlite3
-        db_path = _CATALOG_ROOT / "db" / "products.sqlite"
+        db_path = Path(r"C:/dev/iMak_data/catalog/products.sqlite")
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()
         cur.execute(
@@ -244,7 +244,7 @@ def _scrape_log_finish(log_id: Optional[int], status: str,
         return
     try:
         import sqlite3
-        db_path = _CATALOG_ROOT / "db" / "products.sqlite"
+        db_path = Path(r"C:/dev/iMak_data/catalog/products.sqlite")
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             "UPDATE scrape_log SET finished_at = ?, status = ?, "
