@@ -34,7 +34,9 @@ from typing import Optional
 # ============================================================================
 # DB 接続
 # ============================================================================
-_DB_PATH = Path(__file__).parent / "db" / "products.sqlite"
+# 2026-05-03: worktree 跨ぎ共有のため絶対パス化 (Catalog 切出 Phase 2)
+# 旧 _DB_PATH = Path(__file__).parent / "db" / "products.sqlite"
+_DB_PATH = Path(r"C:/dev/iMak_data/catalog/products.sqlite")
 _SCHEMA_PATH = Path(__file__).parent / "db" / "schema.sql"
 
 
