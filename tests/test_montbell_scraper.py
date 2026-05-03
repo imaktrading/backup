@@ -190,6 +190,45 @@ def test_derive_care_default_not_specified():
 
 
 # ============================================================================
+# disp_fo (廃盤 endpoint) — 2026-05-04 追加
+# ============================================================================
+def test_discontinued_url_template_format():
+    """disp_fo URL pattern: /goods/disp_fo.php?product_id=X&force=1."""
+    url = m.DISCONTINUED_URL_TEMPLATE.format(pid="1103242")
+    assert "disp_fo.php" in url
+    assert "product_id=1103242" in url
+    assert "force=1" in url
+
+
+def test_og_decodes_html_entities():
+    """og:title などに含まれる HTML entity (&#039; = ') を decode して返す.
+
+    disp_fo HTML の og:title が "Men&#039;s" 形式 → decode しないと
+    department 判定 (endswith("Men's")) が失敗する.
+    """
+    html = '<meta property="og:title" content="ウインドブラスト パーカ Men&#039;s"/>'
+    out = m._og(html, "title")
+    assert out == "ウインドブラスト パーカ Men's"
+    # 末尾 "Men's" が確認できるので department 判定が正しく動く
+    assert out.endswith("Men's")
+
+
+def test_parse_spec_block_simple_material_fallback():
+    """素材ブロックに 表地/裏地 サブタグなし (1103242 ウインドブラスト等) でも、
+    素材本文を 表地 として fallback で記録."""
+    html = (
+        '<h4 class="ttlType03">仕様</h4><p>'
+        '【素材】40デニール・ナイロン・タフタ［はっ水加工］<br>'
+        '【平均重量】174g'
+        '</p>'
+    )
+    out = m._parse_spec_block(html)
+    # 表地 サブタグなしでも 全体が 表地 として記録される
+    assert "ナイロン" in out.get("表地", "")
+    assert "174g" in out.get("平均重量", "")
+
+
+# ============================================================================
 # 廃盤対応 (Wayback / stub) — 2026-05-03 追加
 # ============================================================================
 def test_build_discontinued_stub_minimal_shape():
@@ -279,6 +318,9 @@ if __name__ == "__main__":
         ("size HTML only no driver",           test_parse_size_variants_html_only_no_driver),
         ("color empty HTML",                   test_parse_color_variants_empty_html_returns_empty),
         ("size empty HTML",                    test_parse_size_variants_empty_html_returns_empty),
+        ("disp_fo URL template",               test_discontinued_url_template_format),
+        ("og: HTML entity decode",             test_og_decodes_html_entities),
+        ("spec block 素材 single-line fallback", test_parse_spec_block_simple_material_fallback),
     ]
     fails = 0
     for name, fn in cases:

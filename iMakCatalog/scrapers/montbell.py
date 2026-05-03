@@ -40,6 +40,8 @@ for p in (_CATALOG_ROOT, _MERCARI_DIR):
 CATEGORY = "montbell"
 SOURCE = "montbell_official"
 PRODUCT_URL_TEMPLATE = "https://webshop.montbell.jp/goods/disp.php?product_id={pid}"
+# 廃盤専用 endpoint (disp_fo). Selenium 不要・plain requests で server-rendered HTML 取得可.
+DISCONTINUED_URL_TEMPLATE = "https://webshop.montbell.jp/goods/disp_fo.php?product_id={pid}&force=1"
 
 
 # ============================================================================
@@ -216,7 +218,18 @@ def update_one(product_id: str, driver=None) -> bool:
 
         title = driver.title or ""
         if "Page Not Found" in title or "見つかりません" in title:
-            # 廃盤 path: Wayback 最新 snapshot 試行
+            # 廃盤 path 1: disp_fo.php (公式 廃盤 endpoint、plain requests で server-rendered)
+            fo_html = _fetch_disp_fo(product_id)
+            if fo_html:
+                fo_url = DISCONTINUED_URL_TEMPLATE.format(pid=product_id)
+                data = _parse_product(fo_html, None, product_id, fo_url)
+                if data and (data.get("name_jp") or data.get("specs", {}).get("weight_g")):
+                    _upsert_product(product_id, data, fo_url, source="official_disp_fo")
+                    wg = data.get("specs", {}).get("weight_g") or "?"
+                    print(f" [DISP_FO: {data.get('name_jp','?')[:30]} / {wg}g / "
+                          f"{len(data.get('color_variants', []))} colors]")
+                    return True
+            # 廃盤 path 2: Wayback 最新 snapshot (disp_fo も miss の保険)
             wayback_html = _fetch_wayback(url)
             if wayback_html:
                 data = _parse_product(wayback_html, None, product_id, url)
@@ -226,10 +239,10 @@ def update_one(product_id: str, driver=None) -> bool:
                     print(f" [WAYBACK: {data.get('name_jp','?')[:30]} / {wg}g / "
                           f"{len(data.get('color_variants', []))} colors]")
                     return True
-            # Wayback も miss → 最小情報 stub
+            # 全 source miss → 最小情報 stub
             stub = _build_discontinued_stub(product_id, url)
             _upsert_product(product_id, stub, url, source="discontinued_stub")
-            print(f" [STUB: discontinued (公式・Wayback ともに miss)]")
+            print(f" [STUB: discontinued (disp/disp_fo/Wayback ともに miss)]")
             return True
 
         html = driver.page_source
@@ -386,9 +399,15 @@ def _parse_product(html: str, driver, product_id: str, url: str) -> Optional[dic
 
 
 def _og(html: str, key: str) -> str:
-    """OpenGraph meta tag content を取り出し."""
+    """OpenGraph meta tag content を取り出し + HTML entity decode.
+
+    disp_fo HTML は &#039; (= ') 等のエンティティを残したまま返すため、
+    unescape しないと "Men&#039;s" のまま name_jp に格納されてしまう
+    (department 判定の endswith("Men's") も失敗する).
+    """
+    import html as _html
     m = re.search(rf'<meta property="og:{key}" content="([^"]+)"', html)
-    return m.group(1) if m else ""
+    return _html.unescape(m.group(1)) if m else ""
 
 
 def _parse_spec_block(html: str) -> dict:
@@ -412,11 +431,17 @@ def _parse_spec_block(html: str) -> dict:
         body_clean = re.sub(r"<[^>]+>", " ", body)
         body_clean = re.sub(r"\s+", " ", body_clean).strip()
         if tag == "素材":
-            # 素材は 表地/裏地/中わた サブセクション
+            # 素材: 表地/裏地/中わた サブセクション
+            found_sub = False
             for sub_tag in ("表地", "裏地", "中わた"):
                 sub_m = re.search(rf"{sub_tag}\s*[:：]\s*([^\n]+?)(?=(?:表地|裏地|中わた|$))", body_clean)
                 if sub_m:
                     result[sub_tag] = sub_m.group(1).strip().rstrip("、,")
+                    found_sub = True
+            # サブタグなし (シンプルな素材 1 行) → 全体を 表地 とみなす
+            # (例: 廃盤 disp_fo の 1103242 ウインドブラスト等で発生)
+            if not found_sub and body_clean:
+                result["表地"] = body_clean
         else:
             result[tag] = body_clean
     return result
@@ -612,6 +637,42 @@ def _derive_care(html: str) -> str:
 # ============================================================================
 # 廃盤対応: Wayback Machine fallback + 最小情報 stub (2026-05-03 追加)
 # ============================================================================
+def _fetch_disp_fo(product_id: str, timeout: int = 15) -> Optional[str]:
+    """廃盤専用 endpoint (disp_fo.php) から HTML を取得.
+
+    特性:
+      - Selenium 不要: server-rendered HTML が plain requests で取れる
+      - URL: https://webshop.montbell.jp/goods/disp_fo.php?product_id=<pid>&force=1
+      - spec block format は disp.php と同一 (【素材】【平均重量】等)
+
+    返値:
+      HTML (str) — 商品ページ内容を含む.
+      None — 404 / 通信エラー / 商品ページでない (= 仕様 block 不在).
+    """
+    import requests  # type: ignore
+    url = DISCONTINUED_URL_TEMPLATE.format(pid=product_id)
+    try:
+        r = requests.get(
+            url, timeout=timeout,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 Chrome/121.0 Safari/537.36",
+                "Accept-Language": "ja-JP,ja;q=0.9",
+            },
+        )
+        if r.status_code != 200 or len(r.text) < 5000:
+            return None
+    except Exception:
+        return None
+    # 商品ページ判定: 仕様 block が存在すること
+    if "ttlType03" not in r.text or "仕様" not in r.text:
+        return None
+    # 商品名チェック (og:title が あって "Page Not Found" 系でない)
+    if "Page Not Found" in r.text or "見つかりません" in r.text:
+        return None
+    return r.text
+
+
 def _fetch_wayback(original_url: str, timeout: int = 15) -> Optional[str]:
     """Wayback Machine 最新 snapshot の HTML を取得.
 
