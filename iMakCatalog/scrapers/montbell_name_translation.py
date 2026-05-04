@@ -69,10 +69,29 @@ EXISTING_REFERENCE_CORES = [
     "Ultra Light Shell Vest",          # 派生 (派生も Ultra Light 統一)
 ]
 
+# 商標 / 素材語 canonical 表記 (HQ 確定 2026-05-05、Title Case 統一)
+TRADEMARK_CANONICAL = {
+    "ドライテック":          "Drytec",
+    "スーパードライテック":  "Super Drytec",  # 1 単語連結
+    "シャミース":            "Chameece",
+    "クリマバリア":          "Climabarrier",
+    "クリマプラス":          "Climaplus",
+    "エクセロフト":          "Exceloft",
+    "サーマラップ":          "Thermarap",
+}
+
 # DEPRECATED 表記 (既存出品にあったが今後採用しない、再翻訳時に検出)
 DEPRECATED_PATTERNS = {
     "Ultralight": "Ultra Light",       # U.L. = Ultra Light の略 → 整合
     "Windblast": "Wind Blast",         # 多数派
+    "Dry Tec": "Drytec",               # 1 単語が canonical
+    "DRYTEC": "Drytec",                # eBay は Title Case
+    "Chamice": "Chameece",             # スペル誤り
+    "CHAMEECE": "Chameece",
+    "CLIMABARRIER": "Climabarrier",
+    "CLIMAPLUS": "Climaplus",
+    "EXCELOFT": "Exceloft",
+    "THERMARAP": "Thermarap",
 }
 
 
@@ -128,6 +147,10 @@ def _build_system_prompt() -> str:
         for old, new in DEPRECATED_PATTERNS.items()
     )
     parts_lines = "\n".join(f"  - {jp} → {en}" for jp, en in KNOWN_PARTS_JP_EN.items())
+    trademark_lines = "\n".join(
+        f"  - {jp} → {en} (Title Case 厳守)"
+        for jp, en in TRADEMARK_CANONICAL.items()
+    )
 
     return f"""あなたは Montbell (モンベル) 商品の name_jp (日本語名) を英語名 (name_en) に
 翻訳する翻訳ボットです.
@@ -140,6 +163,10 @@ def _build_system_prompt() -> str:
 
 【既知パーツ語 (これに従って翻訳)】
 {parts_lines}
+
+【商標 / 素材語 canonical 表記 (HQ 確定、Title Case 厳守)】
+これらは Montbell 公式商標. 必ず以下の表記で出力 (大文字・略語・分割禁止):
+{trademark_lines}
 
 【既存 eBay 出品で確定済の正解英訳 (= reference dictionary)】
 これらと意味的に同じ商品が来た場合、必ずこの表記を使うこと:
@@ -233,6 +260,27 @@ def get_pending_records() -> list:
     return rows
 
 
+def get_records_by_keyword(keywords: list) -> list:
+    """name_jp に keywords のいずれかを含む records を取得 (force re-translate 用)."""
+    import sqlite3
+    import api  # type: ignore
+
+    if not keywords:
+        return []
+    conn = sqlite3.connect(str(api._DB_PATH))
+    cur = conn.cursor()
+    where_clause = " OR ".join(["name_jp LIKE ?"] * len(keywords))
+    params = [CATEGORY] + [f"%{k}%" for k in keywords]
+    cur.execute(
+        f"SELECT product_id, name_jp FROM products WHERE category = ? "
+        f"AND ({where_clause}) ORDER BY product_id",
+        tuple(params),
+    )
+    rows = [{"product_id": r[0], "name_jp": r[1]} for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
 def upsert_translations(translations: list, existing_records: dict) -> int:
     """翻訳結果を catalog に upsert (既存 record の他フィールドは保持)."""
     import api  # type: ignore
@@ -266,13 +314,15 @@ def upsert_translations(translations: list, existing_records: dict) -> int:
 
 def run_translation(limit: Optional[int] = None,
                     batch_size: int = BATCH_SIZE,
-                    pacing_seconds: float = 1.0) -> dict:
+                    pacing_seconds: float = 1.0,
+                    pending: Optional[list] = None) -> dict:
     """name_en 未設定の records を bulk 翻訳 + upsert.
 
     Args:
         limit: 上限 (smoke 用、None なら全件)
         batch_size: 1 API call の件数
         pacing_seconds: batch 間 sleep
+        pending: 明示的に対象 record list を渡す (re-translation 用、name_en 上書き)
 
     Returns:
         {"total_pending": int, "translated": int, "upserted": int,
@@ -280,7 +330,8 @@ def run_translation(limit: Optional[int] = None,
     """
     import api  # type: ignore
 
-    pending = get_pending_records()
+    if pending is None:
+        pending = get_pending_records()
     if limit:
         pending = pending[:limit]
     print(f"=== translation pending: {len(pending)} records ===")
@@ -375,6 +426,18 @@ def _cli():
         run_translation(limit=n)
     elif args[0] == "--all":
         run_translation()
+    elif args[0] == "--retranslate-trademarks":
+        # Step 1: 商標/素材語含む全 records を再翻訳 (name_en 上書き)
+        keywords = list(TRADEMARK_CANONICAL.keys())
+        targets = get_records_by_keyword(keywords)
+        print(f"=== retranslate-trademarks 対象: {len(targets)} records ===")
+        run_translation(pending=targets)
+    elif args[0] == "--retranslate-by-keyword":
+        # 任意 keyword で再翻訳
+        kw = args[1].split(",")
+        targets = get_records_by_keyword(kw)
+        print(f"=== retranslate-by-keyword 対象 ({kw}): {len(targets)} records ===")
+        run_translation(pending=targets)
     elif args[0] == "--export":
         out = args[1] if len(args) > 1 else "montbell_name_review.csv"
         export_for_review(out)
