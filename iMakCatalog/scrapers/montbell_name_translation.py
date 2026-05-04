@@ -78,6 +78,7 @@ TRADEMARK_CANONICAL = {
     "クリマプラス":          "Climaplus",
     "エクセロフト":          "Exceloft",
     "サーマラップ":          "Thermarap",
+    "スペリオダウン":        "Superior Down",  # HQ 確定 2026-05-05: 公式 montbell.com/us/en で "Superior Down" 16/16
 }
 
 # DEPRECATED 表記 (既存出品にあったが今後採用しない、再翻訳時に検出)
@@ -92,6 +93,8 @@ DEPRECATED_PATTERNS = {
     "CLIMAPLUS": "Climaplus",
     "EXCELOFT": "Exceloft",
     "THERMARAP": "Thermarap",
+    "Sperio Down": "Superior Down",    # 公式 = Superior、Sperio は DEPRECATED
+    "Sperio": "Superior",
 }
 
 
