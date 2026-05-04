@@ -901,6 +901,159 @@ def backfill_from_disp_fo(limit: Optional[int] = None,
 
 
 # ============================================================================
+# webshop.montbell.jp category 一覧から active product_id を発掘 (2026-05-04)
+# ============================================================================
+# 2025+ はカタログ廃止 → web のみ存在. category.php?category=N が JS 描画
+# のため Selenium 必須. ジャケット/ダウン系の category 番号は webshop top
+# page から抽出 (cat 1=オールウエザー, 2=ウインドシェル, 3=ソフトシェル,
+# 6=ベスト, 12=サーマル, 13=インシュレーション, 14=アルパイン,
+# 65=フィールドウエア, 18=サイクル, 110=フィッシング).
+JACKET_CATEGORIES = {
+    1:   "オールウエザー (雨具)",
+    2:   "ウインドシェル",
+    3:   "ソフトシェル",
+    6:   "ベスト",
+    12:  "サーマル (フリース)",
+    13:  "インシュレーション (ダウン/化繊綿)",
+    14:  "アルパイン",
+    65:  "フィールドウエア",
+    18:  "サイクルウエア",
+    110: "フィッシングウエア",
+}
+CATEGORY_URL_TEMPLATE = "https://webshop.montbell.jp/goods/category.php?category={cat}"
+
+
+def discover_active_ids(category_id: int, driver=None,
+                         page_pacing: float = 4.0,
+                         max_pages_per_sublist: int = 20) -> list:
+    """category 一覧ページから全 active product_id を発掘.
+
+    URL chain (active 系):
+      1. category.php?category=N         → サブカテゴリ hub. list.php への
+                                            link が複数ある.
+      2. list.php?category=NNNNN          → 商品リスト本体 (1 page = 50 件まで)
+      3. list.php?category=NNNNN&page=K   → page=2,3,... で続き
+
+    Args:
+        category_id: webshop の category 番号 (例: 2 = ウインドシェル)
+        driver: 既存 Selenium driver. None なら新規起動.
+        page_pacing: page 間 sleep (rate limit 緩和).
+        max_pages_per_sublist: 1 sublist あたり page 上限 (暴走防止).
+
+    Returns:
+        product_id (7 桁 string) の sorted list (全 sublist 統合・重複排除済).
+    """
+    from selenium.webdriver.common.by import By  # type: ignore
+
+    own_driver = driver is None
+    if own_driver:
+        driver = _make_driver()
+    try:
+        # === Step 1: category.php → list.php sublist URLs ===
+        hub_url = CATEGORY_URL_TEMPLATE.format(cat=category_id)
+        driver.get(hub_url)
+        time.sleep(5)
+        sublist_urls: set = set()
+        for a in driver.find_elements(By.CSS_SELECTOR, "a[href*='list.php']"):
+            href = a.get_attribute("href") or ""
+            if "list.php?category=" in href:
+                # page= パラメータ等を剥がして base 化
+                base = re.sub(r"&page=\d+", "", href)
+                base = re.sub(r"#.*$", "", base)
+                sublist_urls.add(base)
+
+        # === Step 2-3: 各 list.php を pagination 込みで scrape ===
+        all_ids: set = set()
+        for list_url in sorted(sublist_urls):
+            seen_in_sublist: set = set()
+            page = 1
+            while page <= max_pages_per_sublist:
+                if page == 1:
+                    paged_url = list_url
+                else:
+                    sep = "&" if "?" in list_url else "?"
+                    paged_url = f"{list_url}{sep}page={page}"
+                driver.get(paged_url)
+                time.sleep(page_pacing)
+                for _ in range(3):
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(1)
+                html = driver.page_source
+                page_ids = set(re.findall(r"product_id=(\d{7})", html))
+                new_in_sublist = page_ids - seen_in_sublist
+                if not new_in_sublist:
+                    break  # 同じ ID しか出ない = 終端
+                seen_in_sublist.update(page_ids)
+                all_ids.update(page_ids)
+                # 50 未満は最終 page (1 page=50 件設計)
+                if len(page_ids) < 50:
+                    break
+                page += 1
+        return sorted(all_ids)
+    finally:
+        if own_driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
+def crawl_jacket_categories(category_ids: list = None, pacing_seconds: int = 5) -> dict:
+    """ジャケット/ダウン系 category を全 crawl + 全 active product を upsert.
+
+    Args:
+        category_ids: 対象 category list. None なら JACKET_CATEGORIES 全部.
+        pacing_seconds: product fetch 間 sleep (rate limit 緩和).
+
+    Returns:
+        {"discovered": {cat_id: [pid, ...]},
+         "upserted":   {pid: True/False}}
+    """
+    if category_ids is None:
+        category_ids = list(JACKET_CATEGORIES.keys())
+
+    driver = _make_driver()
+    discovered = {}
+    upserted = {}
+    try:
+        # Phase A: 各 category から product_id を発掘
+        all_ids = []
+        for cat_id in category_ids:
+            cat_name = JACKET_CATEGORIES.get(cat_id, f"category={cat_id}")
+            print(f"\n=== Discover category={cat_id} ({cat_name}) ===")
+            ids = discover_active_ids(cat_id, driver=driver)
+            print(f"  → {len(ids)} active product_id 発見")
+            discovered[cat_id] = ids
+            for pid in ids:
+                if pid not in all_ids:
+                    all_ids.append(pid)
+            time.sleep(2)
+        print(f"\n=== 全 category 合計 distinct product_id: {len(all_ids)} ===")
+
+        # Phase B: 既存 catalog に無い ID だけ update (既存は active なら回し直し不要)
+        import api  # type: ignore
+        targets = []
+        for pid in all_ids:
+            existing = api.lookup(CATEGORY, pid)
+            if existing is None:
+                targets.append(pid)
+        print(f"=== うち未登録 = upsert 対象: {len(targets)} ===")
+
+        # Phase C: 順次 update_one
+        for i, pid in enumerate(targets, 1):
+            print(f"  [{i}/{len(targets)}]", end=" ")
+            ok = update_one(pid, driver=driver)
+            upserted[pid] = ok
+            time.sleep(pacing_seconds)
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+    return {"discovered": discovered, "upserted": upserted}
+
+
+# ============================================================================
 # CLI
 # ============================================================================
 def _cli():
@@ -909,13 +1062,43 @@ def _cli():
         print("Usage:")
         print("  python iMakCatalog/scrapers/montbell.py 1106645")
         print("  python iMakCatalog/scrapers/montbell.py 1106645 1128635 1128648")
-        print("  python iMakCatalog/scrapers/montbell.py --backfill        # 全 records 補完")
+        print("  python iMakCatalog/scrapers/montbell.py --backfill        # 全 records disp_fo 補完")
         print("  python iMakCatalog/scrapers/montbell.py --backfill 10     # 先頭 10 records だけ smoke")
+        print("  python iMakCatalog/scrapers/montbell.py --discover 2      # category=2 の active id 列挙")
+        print("  python iMakCatalog/scrapers/montbell.py --crawl-jackets   # 全ジャケット category を crawl + upsert")
+        print("  python iMakCatalog/scrapers/montbell.py --crawl 2,3,13    # 指定 category のみ crawl + upsert")
         sys.exit(1)
 
     if args[0] == "--backfill":
         lim = int(args[1]) if len(args) > 1 else None
         backfill_from_disp_fo(limit=lim)
+        return
+
+    if args[0] == "--discover":
+        cat_id = int(args[1])
+        ids = discover_active_ids(cat_id)
+        print(f"\n=== category={cat_id}: {len(ids)} active product_id ===")
+        for pid in ids:
+            print(f"  {pid}")
+        return
+
+    if args[0] == "--crawl-jackets":
+        result = crawl_jacket_categories()
+        print(f"\n=== 完了 ===")
+        for cat, ids in result["discovered"].items():
+            print(f"  category={cat:>3d}: {len(ids):>3d} discovered")
+        ok_n = sum(1 for v in result["upserted"].values() if v)
+        print(f"  upserted: {ok_n}/{len(result['upserted'])}")
+        return
+
+    if args[0] == "--crawl":
+        cat_ids = [int(s) for s in args[1].split(",")]
+        result = crawl_jacket_categories(category_ids=cat_ids)
+        print(f"\n=== 完了 ===")
+        for cat, ids in result["discovered"].items():
+            print(f"  category={cat:>3d}: {len(ids):>3d} discovered")
+        ok_n = sum(1 for v in result["upserted"].values() if v)
+        print(f"  upserted: {ok_n}/{len(result['upserted'])}")
         return
 
     if len(args) == 1:
