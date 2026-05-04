@@ -125,6 +125,117 @@ def _merge_catalog_spec(specs, catalog_spec):
     if features:
         out["Features"] = ", ".join(features) if isinstance(features, list) else features
     return out
+
+
+# ============================================================================
+# メルカリ商品状態 → 英文テンプレ + ConditionID マップ (2026-05-04)
+# ============================================================================
+# AI 不要、メルカリ公式 ENUM (6 値) の対応表のみ
+_MERCARI_CONDITION_MAP = {
+    "新品、未使用":         ("Brand new, never used.", 1000, "Brand New"),
+    "未使用に近い":         ("Open box. Almost unused condition. Please review photos.", 1500, "Open Box"),
+    "目立った傷や汚れなし": ("Pre-owned. Minor signs of use, overall good condition. Please review photos.", 3000, "Pre-owned"),
+    "やや傷や汚れあり":     ("Pre-owned. Light wear visible. Please review photos.", 3000, "Pre-owned"),
+    "傷や汚れあり":         ("Pre-owned. Visible wear. Please review photos.", 3000, "Pre-owned"),
+    "全体的に状態が悪い":   ("Pre-owned. Significant wear, sold as-is. Please review photos.", 3000, "Pre-owned"),
+}
+
+
+def _extract_via_short_ai(target: dict, name_jp: str, anthropic_api_key: str) -> dict:
+    """短文 AI で商品名英訳 + 色 + サイズを抽出 (1回の short JSON タスク).
+
+    catalog の name_jp は AI に「公式商品名」として渡す.
+    メルカリのタイトル/説明文から色・サイズ表記を抽出.
+
+    Returns: {"name_en": str, "color": str, "size_jp": str, "size_us": str} or None
+    """
+    import anthropic
+    client = anthropic.Anthropic(api_key=anthropic_api_key)
+
+    prompt = f"""次のメルカリ商品の情報から、以下を JSON で返してください。
+
+【公式商品名 (JP)】: {name_jp}
+【メルカリのタイトル】: {target.get("title_jp", "")}
+【メルカリの商品説明】: {target.get("description", "")[:500]}
+
+返却 JSON:
+{{
+  "name_en": "公式商品名の英訳 (例: 'U.L. Stretch Wind Jacket', 'Storm Cruiser Jacket')",
+  "color": "色 (eBay 16色 enum: Beige/Black/Blue/Brown/Gold/Gray/Green/Ivory/Multicolor/Orange/Pink/Purple/Red/Silver/White/Yellow から選択)",
+  "size_jp": "JP サイズ (S/M/L/XL/XXL 等、メルカリ表記から)",
+  "size_us": "US サイズ (JP→US 変換: S→XS, M→S, L→M, XL→L, XXL→XL)"
+}}
+
+JSON のみ返してください。説明文不要。"""
+
+    try:
+        msg = client.messages.create(
+            model=MODEL, max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = msg.content[0].text.strip()
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        return json.loads(text)
+    except Exception as e:
+        print(f"    ⚠️ 短文 AI 抽出失敗: {type(e).__name__}: {e}")
+        return None
+
+
+def _build_listing_from_catalog(target: dict, catalog_result: dict, anthropic_api_key: str) -> dict:
+    """catalog HIT 時の listing 情報を組み立てる. AI は商品名英訳/色/サイズ抽出のみ.
+
+    タイトル: テンプレ組立 ("montbell {name_en} {color} US {size_us} (JP {size_jp}) {state} Japan")
+    Item Specifics: catalog 公式値 (whitelist 違反ゼロ)
+    商品状態: メルカリ ENUM → 英文テンプレ
+    """
+    name_jp = catalog_result.get("name_jp", "") or catalog_result.get("name", "")
+    extracted = _extract_via_short_ai(target, name_jp, anthropic_api_key)
+    if not extracted:
+        return None
+
+    name_en = extracted.get("name_en", "").strip()
+    color = extracted.get("color", "").strip()
+    size_jp = extracted.get("size_jp", "").strip()
+    size_us = extracted.get("size_us", "").strip()
+
+    # メルカリ「商品の状態」 → 英文テンプレ + ConditionID
+    condition_jp = (target.get("condition") or "").strip()
+    cond_desc, cond_id, state_label = _MERCARI_CONDITION_MAP.get(
+        condition_jp,
+        ("Pre-owned. Please review photos carefully before purchase.", 3000, "Pre-owned"),
+    )
+
+    # タイトル組立 (テンプレ)
+    title_parts = ["montbell", name_en, color, f"US {size_us}", f"(JP {size_jp})", state_label, "Japan"]
+    title_en = " ".join(p for p in title_parts if p).strip()
+    title_en = re.sub(r"\s+", " ", title_en)
+    if len(title_en) > 80:
+        title_en = title_en[:80].rsplit(" ", 1)[0]  # 単語境界で切る
+
+    # Item Specifics: catalog 公式 spec を base に組立
+    specs = {}
+    specs = _merge_catalog_spec(specs, catalog_result.get("specs", {}))
+    # Color / Size はメルカリ実物
+    if color:
+        specs["Color"] = color
+    if size_us:
+        specs["Size"] = size_us
+
+    return {
+        "title": title_en,
+        "product_name": name_en,
+        "model_number": catalog_result.get("product_id", ""),
+        "color": color,
+        "size_jp": size_jp,
+        "size_us": size_us,
+        "condition_description": cond_desc,
+        "condition_id": cond_id,
+        "item_specifics": specs,
+        "waterproof": False,  # 旧 Vision 用、不要
+    }
+
+
 PROFIT_CATEGORY = "Montbell(ジャケット)"
 PRICE_FLOOR_USD = 50
 EXCHANGE_RATE = get_exchange_rate()
@@ -568,15 +679,13 @@ def main():
         cat_name = catalog_result.get("name_jp", "")
         print(f"    🎯 iMakCatalog hit: {catalog_model} ({cat_name})")
 
-        # Claude API (画像送信なし = Vision 不要、title/color/condition_desc 生成のみ)
-        images_b64 = []  # catalog 公式値があるので画像不要
-        result = call_claude_api(
-            title_jp, target["description"], target["condition"],
-            target["price_jpy"], images_b64,
-        )
+        # === 2026-05-04 修正: AI を商品名英訳/色/サイズ抽出のみに限定 ===
+        # タイトルはテンプレ組立 / Item Specifics は catalog 公式値 / 状態は ENUM テンプレ
+        # 既存 call_claude_api (画像 + 全 specs 生成) は使わない (catalog 完成後は不要)
+        result = _build_listing_from_catalog(target, catalog_result, ANTHROPIC_API_KEY)
 
         if not result:
-            print(f"    ⚠️ 生成失敗 → スキップ")
+            print(f"    ⚠️ 短文 AI 抽出失敗 → スキップ")
             continue
 
         title_en = result.get("title", "")
@@ -656,17 +765,20 @@ def main():
             size_jp, size_us, material, waterproof,
         )
 
+        # ConditionID: メルカリ「商品の状態」 ENUM から決定 (新品=1000 / Open Box=1500 / Used=3000)
+        condition_id_final = result.get("condition_id", 3000)
+
         # セルフチェック（CSV出力前）
         from listing_validator import validate_and_report
         if not validate_and_report(
-            idx + 1, title_en, specs, model, EBAY_CATEGORY, 3000,
+            idx + 1, title_en, specs, model, EBAY_CATEGORY, condition_id_final,
             price, pic_url, condition_desc
         ):
             continue
 
         # CSV行
         row = [
-            "Add", EBAY_CATEGORY, title_en, pic_url, price, 3000,
+            "Add", EBAY_CATEGORY, title_en, pic_url, price, condition_id_final,
             get_schedule_time(), custom_label,
             desc, "FixedPrice", "GTC", 1, LOCATION,
             1, shipping, RETURN_POLICY, PAYMENT_POLICY,
