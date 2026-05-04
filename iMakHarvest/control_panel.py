@@ -13,6 +13,7 @@ trabajo の URL 抽出パネルを踏襲した GUI:
 """
 from __future__ import annotations
 
+import os
 import queue
 import re
 import threading
@@ -20,8 +21,12 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, scrolledtext
 
-from scrapers import mercari_likes
+from scrapers import amazon_wishlist, mercari_likes
 from sheet_writer import HIGH_SHEET_ID, LISTINGS_GID, LOW_SHEET_ID, write_to_sheet
+from sheet_writer_amazon import write_to_sheet as write_to_sheet_amazon
+
+# Amazon ウィッシュリスト URL 保存先 (Mercari の chrome_profile と同じ親ディレクトリ)
+AMAZON_URL_FILE = r"C:\Users\imax2\local_data\iMakHarvest\amazon_wishlist_url.txt"
 
 
 # ============================================================================
@@ -61,6 +66,30 @@ def parse_sheet_url(url: str) -> tuple[str, int]:
 
 
 # ============================================================================
+# Amazon URL persistence
+# ============================================================================
+def _load_amazon_url() -> str:
+    """前回保存した Amazon ウィッシュリスト URL を読込. 無ければ ""."""
+    try:
+        if os.path.exists(AMAZON_URL_FILE):
+            with open(AMAZON_URL_FILE, "r", encoding="utf-8") as f:
+                return f.read().strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _save_amazon_url(url: str) -> None:
+    """Amazon ウィッシュリスト URL を保存 (次回起動時の自動復元用)."""
+    try:
+        os.makedirs(os.path.dirname(AMAZON_URL_FILE), exist_ok=True)
+        with open(AMAZON_URL_FILE, "w", encoding="utf-8") as f:
+            f.write(url.strip())
+    except Exception:
+        pass
+
+
+# ============================================================================
 # UI
 # ============================================================================
 SERVICE_DEFS = [
@@ -70,7 +99,7 @@ SERVICE_DEFS = [
      True, ""),
     ("amazon", "Amazon",
      "Amazonの欲しいものリストに登録されている商品を元に情報を抽出します",
-     False, "(Phase 1c 実装予定)"),
+     True, ""),
     ("yahoo", "ヤフオク",
      "ヤフオクのお気に入りに登録されている商品を元に情報を抽出します",
      False, "(Phase 2 実装予定)"),
@@ -108,6 +137,19 @@ class HarvestPanel(tk.Tk):
         self._service_buttons: dict[str, tk.Button] = {}
         for key, label, desc, enabled, note in SERVICE_DEFS:
             self._service_buttons[key] = self._make_service_row(svc, key, label, desc, enabled, note)
+
+        # Amazon ウィッシュリスト URL 入力欄
+        amzn = tk.LabelFrame(self, text="Amazon ウィッシュリスト URL (公開リスト)",
+                             padx=10, pady=8, font=("Meiryo UI", 10))
+        amzn.pack(fill="x", padx=12, pady=4)
+        self.amazon_url_var = tk.StringVar(value=_load_amazon_url())
+        self.amazon_url_entry = tk.Entry(amzn, textvariable=self.amazon_url_var,
+                                          font=("Consolas", 9))
+        self.amazon_url_entry.pack(fill="x")
+        tk.Label(amzn,
+                 text="※ 例: https://www.amazon.co.jp/hz/wishlist/ls/XXXXXXXXXXXXX  "
+                      "(リストを「公開」設定にしておくこと)",
+                 fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
 
         # 出力先スプシ
         out = tk.LabelFrame(self, text="出力先スプシ", padx=10, pady=8, font=("Meiryo UI", 10))
@@ -214,9 +256,15 @@ class HarvestPanel(tk.Tk):
         if self._running:
             messagebox.showwarning("実行中", "現在別の収集が実行中です。完了をお待ちください。")
             return
-        if key != "mercari":
-            messagebox.showinfo("未実装", f"{key} は Phase 1a 範囲外です。")
+        if key == "mercari":
+            self._dispatch_mercari()
             return
+        if key == "amazon":
+            self._dispatch_amazon()
+            return
+        messagebox.showinfo("未実装", f"{key} は未実装です。")
+
+    def _dispatch_mercari(self) -> None:
         try:
             sheet_id, gid, label = self._resolve_sheet()
         except ValueError as e:
@@ -230,6 +278,41 @@ class HarvestPanel(tk.Tk):
         threading.Thread(
             target=self._run_mercari_thread,
             args=(sheet_id, gid, label),
+            daemon=True,
+        ).start()
+
+    def _dispatch_amazon(self) -> None:
+        wishlist_url = (self.amazon_url_var.get() or "").strip()
+        # ウィッシュリスト URL バリデーション
+        if not wishlist_url:
+            messagebox.showerror(
+                "URL 未入力",
+                "Amazon ウィッシュリスト URL を入力してください。\n"
+                "例: https://www.amazon.co.jp/hz/wishlist/ls/XXXXXXXXXXXXX",
+            )
+            return
+        try:
+            normalized_url = amazon_wishlist.normalize_wishlist_url(wishlist_url)
+        except ValueError as e:
+            messagebox.showerror("URL 不正", str(e))
+            return
+        try:
+            sheet_id, gid, label = self._resolve_sheet()
+        except ValueError as e:
+            messagebox.showerror("スプシ URL エラー", str(e))
+            return
+        if not messagebox.askyesno(
+            "確認",
+            f"Amazon のウィッシュリストから URL を収集し、\n"
+            f"出力先スプシ「{label}」に追記します。\n\n"
+            f"対象リスト:\n{normalized_url}\n\n実行しますか？",
+        ):
+            return
+        # 入力 URL を次回起動時のために保存 (実行が確定してから)
+        _save_amazon_url(wishlist_url)
+        threading.Thread(
+            target=self._run_amazon_thread,
+            args=(normalized_url, sheet_id, gid, label),
             daemon=True,
         ).start()
 
@@ -283,8 +366,61 @@ class HarvestPanel(tk.Tk):
             self._running = False
             self._set_buttons_state(disabled=False)
 
+    def _run_amazon_thread(self, wishlist_url: str, sheet_id: str, gid: int, label: str) -> None:
+        self._running = True
+        self._set_buttons_state(disabled=True)
+        headless = not self.show_browser_var.get()
+        fetch_detail = self.fetch_detail_var.get()
+        # exclude_sold は Amazon では「在庫切れ・取扱中止を除外」の意味で使い回す
+        exclude_unavailable = self.exclude_sold_var.get()
+
+        self._set_status("Amazon 収集中...")
+        self._log("=== Amazon ウィッシュリスト収集 開始 ===")
+        self._log(f"  対象 URL    : {wishlist_url}")
+        self._log(f"  出力先     : {label} (sheet_id={sheet_id[:14]}.., gid={gid})")
+        self._log(f"  headless   : {headless}")
+        self._log(f"  詳細取得   : {fetch_detail}")
+        self._log(f"  在庫切れ除外: {exclude_unavailable}")
+        try:
+            if fetch_detail:
+                def progress(cur, total, msg):
+                    self._set_status(f"商品詳細取得中... [{cur}/{total}]")
+                    self._log(f"  [{cur}/{total}] {msg}")
+
+                items = amazon_wishlist.collect_wishlist_with_details(
+                    wishlist_url=wishlist_url,
+                    headless=headless,
+                    exclude_unavailable=exclude_unavailable,
+                    progress_callback=progress,
+                )
+            else:
+                items = amazon_wishlist.collect_wishlist_urls(
+                    wishlist_url=wishlist_url,
+                    headless=headless,
+                )
+            self._log(f"  収集完了   : {len(items)} 件")
+            self._set_status(f"スプシ書込中... ({len(items)} 件)")
+            result = write_to_sheet_amazon(items, spreadsheet_id=sheet_id, gid=gid)
+            self._log(f"  書込結果   : appended={result['appended']}, "
+                      f"skipped_existing={result['skipped_existing']}, "
+                      f"input={result['input']}")
+            self._set_status(
+                f"完了: 新規 {result['appended']} 件 / 既出 skip {result['skipped_existing']} 件"
+            )
+            self._log("=== 完了 ===")
+            messagebox.showinfo("完了",
+                                f"収集 {len(items)} 件 → 新規追加 {result['appended']} 件 "
+                                f"(既出 skip {result['skipped_existing']} 件)")
+        except Exception as e:
+            self._log(f"!!! エラー: {e}")
+            self._set_status(f"失敗: {type(e).__name__}")
+            messagebox.showerror("エラー", str(e))
+        finally:
+            self._running = False
+            self._set_buttons_state(disabled=False)
+
     def _set_buttons_state(self, disabled: bool) -> None:
-        # active なボタン (= mercari) のみ disable/enable 切替
+        # active なサービスボタンのみ disable/enable 切替
         for key, btn in self._service_buttons.items():
             spec_enabled = next(s[3] for s in SERVICE_DEFS if s[0] == key)
             if not spec_enabled:
