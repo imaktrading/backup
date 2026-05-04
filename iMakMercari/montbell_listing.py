@@ -644,7 +644,9 @@ def main():
             pass
 
         shipping = get_shipping_policy(price)
-        custom_label = f"MB-{datetime.now().strftime('%m%d')}-{idx + 1}"
+        # CustomLabel: メルカリ itemID (TCG/Tshirt と同じ規則)、抽出失敗時は fallback
+        sku_match = re.search(r'/item/(m\d+)', target.get("url", ""))
+        custom_label = sku_match.group(1) if sku_match else f"MB-{datetime.now().strftime('%m%d')}-{idx + 1}"
 
         print(f"    💲 ${price} (仕入¥{cost_jpy})")
 
