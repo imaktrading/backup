@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS products (
                                         -- リール例: 'shimano_22stella_4000xg'
     name              TEXT NOT NULL,    -- 表示名 (英語/ローマ字、API原文)
     name_jp           TEXT,             -- 日本語名
+    name_en           TEXT,             -- 英語名 (montbell 等で公式英訳を保持、出品 listing で AI 翻訳廃止)
+                                        -- NULL OK (未設定 = HQ 側 fallback 動作、品質確認後に埋める運用)
+    name_en_source    TEXT,             -- name_en の出典 / 翻訳手段
+                                        -- 'montbell_us' (海外公式サイト) | 'montbell_official_en' (国内サイトの英語表記)
+                                        -- | 'dict' (辞書 transliteration) | 'claude_translation' (AI 翻訳)
+                                        -- | 'manual' (人手) | NULL (未設定)
     set_name          TEXT,             -- 公式原文 (= set_name_official、raw 保存)
                                         -- eBay フィルタ値変換は api.lookup() が ebay_filter_map で実行
     set_name_official TEXT,             -- 公式DB原文 (検証用、ebay_filter_map 引用元)
