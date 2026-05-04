@@ -113,6 +113,8 @@ def upsert(
     name: str,
     specs: dict,
     name_jp: Optional[str] = None,
+    name_en: Optional[str] = None,
+    name_en_source: Optional[str] = None,
     set_name: Optional[str] = None,
     set_name_official: Optional[str] = None,
     card_set_id: Optional[int] = None,
@@ -141,24 +143,38 @@ def upsert(
             (category, product_id),
         ).fetchone()
         if existing:
-            conn.execute(
-                "UPDATE products SET name = ?, name_jp = ?, set_name = ?, "
-                "set_name_official = ?, card_set_id = ?, language = ?, "
-                "specs = ?, images = ?, source = ?, source_url = ?, "
-                "updated_at = ? WHERE id = ?",
-                (name, name_jp, set_name, set_name_official, card_set_id,
-                 language, specs_json, images_json, source, source_url, now,
-                 existing["id"]),
-            )
+            # name_en / name_en_source は呼び出し側が明示的に渡した時のみ更新.
+            # スクレイパーの再走で None を渡された時に既存翻訳を破壊しない.
+            if name_en is not None or name_en_source is not None:
+                conn.execute(
+                    "UPDATE products SET name = ?, name_jp = ?, name_en = ?, "
+                    "name_en_source = ?, set_name = ?, set_name_official = ?, "
+                    "card_set_id = ?, language = ?, specs = ?, images = ?, "
+                    "source = ?, source_url = ?, updated_at = ? WHERE id = ?",
+                    (name, name_jp, name_en, name_en_source, set_name,
+                     set_name_official, card_set_id, language, specs_json,
+                     images_json, source, source_url, now, existing["id"]),
+                )
+            else:
+                conn.execute(
+                    "UPDATE products SET name = ?, name_jp = ?, set_name = ?, "
+                    "set_name_official = ?, card_set_id = ?, language = ?, "
+                    "specs = ?, images = ?, source = ?, source_url = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (name, name_jp, set_name, set_name_official, card_set_id,
+                     language, specs_json, images_json, source, source_url, now,
+                     existing["id"]),
+                )
             row_id = existing["id"]
         else:
             cur = conn.execute(
                 "INSERT INTO products (category, product_id, name, name_jp, "
-                "set_name, set_name_official, card_set_id, language, "
-                "specs, images, source, source_url, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (category, product_id, name, name_jp, set_name,
-                 set_name_official, card_set_id, language, specs_json,
+                "name_en, name_en_source, set_name, set_name_official, "
+                "card_set_id, language, specs, images, source, source_url, "
+                "created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (category, product_id, name, name_jp, name_en, name_en_source,
+                 set_name, set_name_official, card_set_id, language, specs_json,
                  images_json, source, source_url, now, now),
             )
             row_id = cur.lastrowid
@@ -267,6 +283,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "product_id": g("product_id"),
         "name": g("name"),
         "name_jp": g("name_jp"),
+        "name_en": g("name_en"),                   # NULL なら呼び出し側で fallback
+        "name_en_source": g("name_en_source"),     # 出典 / 翻訳手段の透明化
         "set_name": set_ebay or set_raw,           # eBay 値があれば優先、なければ raw
         "set_name_official": set_official,
         "card_set_id": g("card_set_id"),
