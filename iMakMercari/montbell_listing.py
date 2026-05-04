@@ -194,10 +194,11 @@ def _build_listing_from_catalog(target: dict, catalog_result: dict, anthropic_ap
     if not extracted:
         return None
 
-    name_en = extracted.get("name_en", "").strip()
-    color = extracted.get("color", "").strip()
-    size_jp = extracted.get("size_jp", "").strip()
-    size_us = extracted.get("size_us", "").strip()
+    # AI が JSON 値 null で返してくる可能性があるので or "" で正規化
+    name_en = (extracted.get("name_en") or "").strip()
+    color = (extracted.get("color") or "").strip()
+    size_jp = (extracted.get("size_jp") or "").strip()
+    size_us = (extracted.get("size_us") or "").strip()
 
     # メルカリ「商品の状態」 → 英文テンプレ + ConditionID
     condition_jp = (target.get("condition") or "").strip()
