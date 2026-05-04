@@ -607,20 +607,16 @@ def main():
         )
         print(f"    ✨ {title_en} ({len(title_en)}字)")
 
-        # TOPセラーItem Specifics参照
+        # eBay 中央値取得 (価格判定用、Item Specifics マージはしない)
+        # 2026-05-04: TOPセラー Item Specifics 参照を廃止 (catalog 公式値が正解、多数決は意味なし + 誤上書き原因)
+        # catalog HIT 時は specs が公式値で確定済、TOPセラー多数決を入れる余地ゼロ
+        # 中央値だけ価格判定 (pricing_engine ALERT) のために取得
         ebay_median = 0
         if ebay_token:
             ebay_query = f"montbell {product_name} jacket"
             top_specs, ebay_total, ebay_median = fetch_top_seller_specs(ebay_token, ebay_query)
-            if top_specs:
+            if ebay_median:
                 print(f"    📊 eBay {ebay_total}件 中央値${ebay_median:.0f}")
-                for key, val in top_specs.items():
-                    if key not in specs and val:
-                        print(f"    ℹ️ TOPセラー '{key}' = '{val}'（参考）")
-                for key, val in top_specs.items():
-                    if key in specs and not specs[key] and val:
-                        specs[key] = val
-                        print(f"    📋 '{key}' をTOPセラー値で補完: {val}")
             time.sleep(0.5)
 
         # PicURL: メルカリ1枚目のみ
