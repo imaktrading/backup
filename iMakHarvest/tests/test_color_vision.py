@@ -1,0 +1,348 @@
+"""tests/test_color_vision - Claude Vision 色判定モジュールの parse / mock API テスト.
+
+API mock で fail-closed 動作を検証:
+  - 確信ある単一色 → そのまま透過
+  - 「不明」「複数色」「判別不能」等 → 空文字
+  - 異常出力 (複数語 / 過長 / 引用符付き) → 空文字
+  - API exception (timeout / network / SDK 不在) → 空文字
+"""
+from __future__ import annotations
+
+import pytest
+
+from scrapers import color_vision
+from scrapers.color_vision import (
+    judge_color_from_image_url,
+    parse_color_response,
+    reset_client_cache,
+)
+
+
+pytestmark = pytest.mark.offline
+
+
+# --------------------------------------------------------------------------
+# parse_color_response: 出力テキスト → 色名抽出 (純粋関数)
+# --------------------------------------------------------------------------
+class TestParseColorResponseValid:
+    @pytest.mark.parametrize("text,expected", [
+        ("黒", "黒"),
+        ("白", "白"),
+        ("赤", "赤"),
+        ("ネイビー", "ネイビー"),
+        ("ベージュ", "ベージュ"),
+        ("水色", "水色"),
+        ("ピンク", "ピンク"),
+        ("オレンジ", "オレンジ"),
+        ("グレー", "グレー"),
+        ("アイボリー", "アイボリー"),
+    ])
+    def test_simple_color_passes_through(self, text, expected):
+        assert parse_color_response(text) == expected
+
+    def test_strips_whitespace(self):
+        assert parse_color_response("  黒\n") == "黒"
+
+    def test_strips_quotation_marks(self):
+        assert parse_color_response("「黒」") == "黒"
+        assert parse_color_response('"赤"') == "赤"
+
+    def test_color_suffix_passes_through_unchanged(self):
+        # 「黒色」「ブラックカラー」のような接尾辞付きは AI 側プロンプトで禁止指示済。
+        # parse 側は剥がさず透過する (「水色」「ローズピンク」等を壊さないため)。
+        # AI が指示を破って suffix 付きを返した場合も、HQ 側 listing スクリプトで正規化する。
+        assert parse_color_response("黒色") == "黒色"
+        assert parse_color_response("ブラックカラー") == "ブラックカラー"
+
+    def test_compound_color_names_preserved(self):
+        # 「色」「カラー」を語の一部として含む有効な色名はそのまま透過
+        assert parse_color_response("水色") == "水色"
+        assert parse_color_response("ローズピンク") == "ローズピンク"
+        assert parse_color_response("マルチカラー") == "マルチカラー"
+
+
+class TestParseColorResponseUncertain:
+    @pytest.mark.parametrize("text", [
+        "不明",
+        "わからない",
+        "判別不能",
+        "判定不能",
+        "分からない",
+        "複数",
+        "複数色",
+        "混在",
+        "unknown",
+        "Unknown",
+        "multiple colors",
+        "?",
+        "？",
+    ])
+    def test_uncertain_keyword_returns_empty(self, text):
+        assert parse_color_response(text) == ""
+
+    def test_empty_input(self):
+        assert parse_color_response("") == ""
+        assert parse_color_response("   ") == ""
+
+    def test_only_punctuation_returns_empty(self):
+        assert parse_color_response("...") == ""
+        assert parse_color_response("「」") == ""
+
+    def test_multiple_words_returns_empty(self):
+        # 空白で複数語 → 不明扱い
+        assert parse_color_response("黒 白") == ""
+        assert parse_color_response("黒 と 白") == ""
+
+    def test_excessive_length_returns_empty(self):
+        # 12 字超 → 異常出力扱い
+        long_text = "黒" * 13
+        assert parse_color_response(long_text) == ""
+
+    def test_explanation_sentence_returns_empty(self):
+        # AI が説明文を返してきたケース
+        assert parse_color_response("この商品は黒です") == ""
+
+
+# --------------------------------------------------------------------------
+# judge_color_from_image_url: mock client で API レスポンスをシミュレート
+# --------------------------------------------------------------------------
+class _MockMessage:
+    def __init__(self, text: str):
+        self.content = [_MockBlock(text)]
+
+
+class _MockBlock:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class _MockMessages:
+    def __init__(self, response_text: str = "", raise_exc: Exception | None = None):
+        self._response_text = response_text
+        self._raise_exc = raise_exc
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._raise_exc:
+            raise self._raise_exc
+        return _MockMessage(self._response_text)
+
+
+class _MockAnthropicClient:
+    def __init__(self, response_text: str = "", raise_exc: Exception | None = None):
+        self.messages = _MockMessages(response_text, raise_exc)
+
+
+class TestJudgeColorWithMockClient:
+    def setup_method(self):
+        reset_client_cache()
+
+    def test_returns_color_on_simple_response(self):
+        client = _MockAnthropicClient(response_text="黒")
+        result = judge_color_from_image_url(
+            "https://example.com/image.jpg", client=client,
+        )
+        assert result == "黒"
+
+    def test_returns_empty_on_uncertain_response(self):
+        client = _MockAnthropicClient(response_text="不明")
+        result = judge_color_from_image_url(
+            "https://example.com/image.jpg", client=client,
+        )
+        assert result == ""
+
+    def test_returns_empty_on_multiple_colors(self):
+        client = _MockAnthropicClient(response_text="複数色")
+        result = judge_color_from_image_url(
+            "https://example.com/image.jpg", client=client,
+        )
+        assert result == ""
+
+    def test_returns_empty_on_api_exception(self):
+        # ConnectionError / Timeout 等 → 空文字 (fail-closed)
+        client = _MockAnthropicClient(raise_exc=ConnectionError("network down"))
+        result = judge_color_from_image_url(
+            "https://example.com/image.jpg", client=client,
+        )
+        assert result == ""
+
+    def test_returns_empty_on_timeout_exception(self):
+        client = _MockAnthropicClient(raise_exc=TimeoutError("timed out"))
+        result = judge_color_from_image_url(
+            "https://example.com/image.jpg", client=client,
+        )
+        assert result == ""
+
+    def test_returns_empty_on_empty_image_url(self):
+        client = _MockAnthropicClient(response_text="黒")
+        result = judge_color_from_image_url("", client=client)
+        assert result == ""
+        # API は呼ばれない (early return)
+        assert client.messages.calls == []
+
+    def test_returns_empty_when_client_is_none(self):
+        # API key 無し / SDK 未インストール想定
+        result = judge_color_from_image_url(
+            "https://example.com/image.jpg", client=None,
+        )
+        assert result == ""
+
+    def test_passes_image_url_in_request(self):
+        client = _MockAnthropicClient(response_text="黒")
+        judge_color_from_image_url(
+            "https://m.media-amazon.com/test.jpg", client=client,
+        )
+        assert len(client.messages.calls) == 1
+        kwargs = client.messages.calls[0]
+        # 画像 URL がリクエストに含まれているか
+        content = kwargs["messages"][0]["content"]
+        assert content[0]["type"] == "image"
+        assert content[0]["source"]["url"] == "https://m.media-amazon.com/test.jpg"
+
+    def test_uses_correct_model(self):
+        client = _MockAnthropicClient(response_text="黒")
+        judge_color_from_image_url(
+            "https://example.com/image.jpg", client=client,
+        )
+        kwargs = client.messages.calls[0]
+        assert kwargs["model"] == color_vision.MODEL_ID
+        # Haiku 4.5 であることを確認
+        assert "haiku" in kwargs["model"].lower()
+
+
+# --------------------------------------------------------------------------
+# _load_api_key: 環境変数 / ファイル / 未設定 のフォールバック順
+# --------------------------------------------------------------------------
+class TestLoadApiKey:
+    def test_env_var_takes_precedence(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env_key_xyz")
+        assert color_vision._load_api_key() == "env_key_xyz"
+
+    def test_returns_empty_when_neither_set(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        # 存在しないパスを指す
+        nonexistent = tmp_path / "nope.txt"
+        monkeypatch.setattr(color_vision, "API_KEY_PATH", str(nonexistent))
+        assert color_vision._load_api_key() == ""
+
+    def test_reads_from_file_when_env_unset(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        key_file = tmp_path / "api_key.txt"
+        key_file.write_text("file_key_abc\n", encoding="utf-8")
+        monkeypatch.setattr(color_vision, "API_KEY_PATH", str(key_file))
+        assert color_vision._load_api_key() == "file_key_abc"
+
+    def test_strips_whitespace_from_file(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        key_file = tmp_path / "api_key.txt"
+        key_file.write_text("  trimmed_key  \n\n", encoding="utf-8")
+        monkeypatch.setattr(color_vision, "API_KEY_PATH", str(key_file))
+        assert color_vision._load_api_key() == "trimmed_key"
+
+
+# --------------------------------------------------------------------------
+# _judge_color (mercari_item_detail 経由): graceful failure 確認
+# --------------------------------------------------------------------------
+class TestMercariJudgeColorWrapper:
+    """_judge_color は color_vision を import するが、失敗時も例外を上位に投げない."""
+
+    def test_empty_image_urls_returns_empty(self):
+        from scrapers.mercari_item_detail import _judge_color  # noqa: PLC0415
+        assert _judge_color([]) == ""
+
+    def test_none_image_urls_returns_empty(self):
+        from scrapers.mercari_item_detail import _judge_color  # noqa: PLC0415
+        # None は image_urls=None として渡された場合
+        assert _judge_color(None) == ""
+
+
+# --------------------------------------------------------------------------
+# _first_product_image_url: image_urls から商品本体画像のみ抽出
+# --------------------------------------------------------------------------
+class TestFirstProductImageUrl:
+    """Mercari image_urls には出品者画像・関連商品サムネが混在する。
+    色判定では商品本体画像 (/item/detail/orig/photos/) のみ採用する。
+    """
+
+    def test_skips_seller_profile_picks_product(self):
+        # 実 dry-run で観測されたパターン: 先頭が出品者プロフィール画像
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        urls = [
+            "https://static.mercdn.net/thumb/members/webp/415216906.jpg?1465253168",  # 出品者画像
+            "https://static.mercdn.net/item/detail/orig/photos/m29660190746_1.jpg?1777261342",  # 商品 1
+            "https://static.mercdn.net/item/detail/orig/photos/m29660190746_2.jpg?1777261342",  # 商品 2
+        ]
+        assert _first_product_image_url(urls) == (
+            "https://static.mercdn.net/item/detail/orig/photos/m29660190746_1.jpg?1777261342"
+        )
+
+    def test_skips_related_item_thumbnails(self):
+        # 関連商品サムネイル (thumb/item/jpeg) も無視
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        urls = [
+            "https://static.mercdn.net/thumb/item/jpeg/m72018963718_1.jpg?1777881207",  # 関連
+            "https://static.mercdn.net/thumb/item/webp/m51203798829_1.jpg?1777902843",  # 関連
+            "https://static.mercdn.net/item/detail/orig/photos/m12345678901_1.jpg",  # 商品本体
+        ]
+        assert _first_product_image_url(urls) == (
+            "https://static.mercdn.net/item/detail/orig/photos/m12345678901_1.jpg"
+        )
+
+    def test_skips_noimage_placeholder(self):
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        urls = [
+            "https://static.mercdn.net/images/member_photo_noimage_thumb.png",
+            "https://static.mercdn.net/item/detail/orig/photos/m99999999999_3.jpg",
+        ]
+        assert _first_product_image_url(urls) == (
+            "https://static.mercdn.net/item/detail/orig/photos/m99999999999_3.jpg"
+        )
+
+    def test_returns_first_when_only_product_images(self):
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        urls = [
+            "https://static.mercdn.net/item/detail/orig/photos/m11111111111_1.jpg",
+            "https://static.mercdn.net/item/detail/orig/photos/m11111111111_2.jpg",
+        ]
+        assert _first_product_image_url(urls) == (
+            "https://static.mercdn.net/item/detail/orig/photos/m11111111111_1.jpg"
+        )
+
+    def test_returns_empty_when_no_product_images(self):
+        # 商品画像が 1 つも無い → 空 (fail-closed)
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        urls = [
+            "https://static.mercdn.net/thumb/members/webp/415216906.jpg",
+            "https://static.mercdn.net/thumb/item/jpeg/m72018963718_1.jpg",
+        ]
+        assert _first_product_image_url(urls) == ""
+
+    def test_empty_input(self):
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        assert _first_product_image_url([]) == ""
+        assert _first_product_image_url(None) == ""
+
+    def test_skips_empty_strings(self):
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        urls = [
+            "",
+            "https://static.mercdn.net/item/detail/orig/photos/m11111111111_1.jpg",
+        ]
+        assert _first_product_image_url(urls) == (
+            "https://static.mercdn.net/item/detail/orig/photos/m11111111111_1.jpg"
+        )
+
+    def test_supports_jpeg_extension(self):
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        urls = [
+            "https://static.mercdn.net/item/detail/orig/photos/m11111111111_1.jpeg",
+        ]
+        assert _first_product_image_url(urls) == urls[0]
+
+    def test_supports_webp_extension(self):
+        from scrapers.mercari_item_detail import _first_product_image_url  # noqa: PLC0415
+        urls = [
+            "https://static.mercdn.net/item/detail/orig/photos/m11111111111_1.webp",
+        ]
+        assert _first_product_image_url(urls) == urls[0]

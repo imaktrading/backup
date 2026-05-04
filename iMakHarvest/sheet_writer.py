@@ -9,9 +9,16 @@
 
 スプシ列レイアウト (確定):
   A: 仕入元 URL          ← Harvest が書込 (新規行のみ)
-  B: eBay item ID        ← 出品後にユーザー or 別ツールが書込 (Harvest は読まない)
-  C: 空欄                ← Harvest は触らない
-  D 以降                 ← Harvest は触らない (iMakInventory が後で売切フラグ等)
+  B: eBay item ID        ← 出品後にユーザー or 別ツールが書込 (Harvest は触らない)
+  C: タイトル            ← Harvest が書込
+  D: 売切フラグ          ← iMakInventory が書込 (Harvest は触らない)
+  E: 商品状態            ← Harvest が書込
+  F: 価格                ← Harvest が書込
+  G: 画像 URL            ← Harvest が書込 (`|` 区切り)
+  H: 商品説明            ← Harvest が書込
+  I-R: Harvest 不可侵 (空欄)
+  S: 色                  ← Harvest が書込 (Phase 1d)
+  T: サイズ              ← Harvest が書込 (Phase 1d)
 
 B 列は eBay item ID (数字のみ) が入るため、Mercari item_id (m\\d+) や
 Amazon ASIN とは形式が異なり dedupe key と衝突しない. → デデュープは
@@ -46,9 +53,14 @@ COL_CONDITION = 5      # E: 商品状態            - Harvest が書込
 COL_PRICE = 6          # F: 価格                - Harvest が書込
 COL_IMAGES = 7         # G: 画像 URL            - Harvest が書込 (`|` 区切り)
 COL_DESCRIPTION = 8    # H: 商品説明            - Harvest が書込
+COL_COLOR = 19         # S: 色                  - Harvest が書込 (Phase 1d)
+COL_SIZE = 20          # T: サイズ              - Harvest が書込 (Phase 1d)
 
 # Harvest が触らない (空欄 or 既存値保持) すべき列のインデックス set (1-based)
 HARVEST_UNTOUCHED_COLS = (COL_EBAY_ITEM_ID, COL_INVENTORY_FLAG)
+
+# 書込み列数 default. A〜T (1-20) を含む 20 列構成.
+DEFAULT_COLUMN_COUNT = 20
 
 # デデュープ key 抽出: メルカリ /item/m12345 / /items/m12345 → m12345
 _MERCARI_ID_RE = re.compile(r"/items?/(m\d+)", re.IGNORECASE)
@@ -110,11 +122,11 @@ def read_existing_dedupe_keys(ws) -> set[str]:
 
 
 def _build_row(item: dict) -> list:
-    """item dict から 8 列の行データを構築.
+    """item dict から 20 列 (A〜T) の行データを構築.
 
-    - 書込列 (A/C/E/F/G/H) には値を入れる
-    - 触らない列 (B/D) は "" にして既存値の上書きを避ける
-      (※ append_rows は新規行のみ追加するので、新規行の B/D は空欄になるだけ)
+    - 書込列 (A/C/E/F/G/H/S/T) には値を入れる
+    - 触らない列 (B/D, I-R) は "" にして既存値の上書きを避ける
+      (※ append_rows は新規行のみ追加するので、新規行の触らない列は空欄になるだけ)
     """
     title = str(item.get("title") or "")
     condition = str(item.get("condition") or "")
@@ -123,8 +135,10 @@ def _build_row(item: dict) -> list:
     images = item.get("image_urls") or []
     image_str = "|".join(str(u) for u in images if u)
     description = str(item.get("description") or "")
+    color = str(item.get("color") or "")
+    size = str(item.get("size") or "")
 
-    row = [""] * 8  # A〜H
+    row = [""] * DEFAULT_COLUMN_COUNT  # A〜T (20 列)
     row[COL_URL - 1] = (item.get("url") or "").strip()
     # COL_EBAY_ITEM_ID (B) は空欄
     row[COL_TITLE - 1] = title
@@ -133,13 +147,16 @@ def _build_row(item: dict) -> list:
     row[COL_PRICE - 1] = price_str
     row[COL_IMAGES - 1] = image_str
     row[COL_DESCRIPTION - 1] = description
+    # I-R (9-18) は空欄
+    row[COL_COLOR - 1] = color
+    row[COL_SIZE - 1] = size
     return row
 
 
 def append_new_urls(
     ws,
     items: list[dict],
-    column_count: int = 8,
+    column_count: int = DEFAULT_COLUMN_COUNT,
 ) -> dict:
     """items を ws に追記 (既出は dedupe_key で除外).
 
@@ -153,10 +170,12 @@ def append_new_urls(
                    "price_jpy"?: int | None,
                    "image_urls"?: list[str],
                    "description"?: str,
+                   "color"?: str,              # Phase 1d (Vision AI 判定、不明なら空)
+                   "size"?: str,               # Phase 1d (Mercari 構造化フィールド)
                  },
                  ...
                ]
-        column_count: 書く列数 (default 8 = A〜H、B/D は空欄で書込)
+        column_count: 書く列数 (default 20 = A〜T、B/D/I-R は空欄)
 
     Returns: {"appended": N, "skipped_existing": M, "input": K}
     """

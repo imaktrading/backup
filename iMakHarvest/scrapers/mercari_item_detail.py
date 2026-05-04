@@ -9,12 +9,15 @@ trabajo decompile (FormScraping.cs) + iMakInventory/scrapers/mercari_scraper.py
   - description   : 商品説明 (改行を含むプレーンテキスト)
   - image_urls    : 画像 URL のリスト
   - in_stock      : True (購入可) / False (SOLD = 売切 / 取引中)
+  - size          : 商品のサイズ (Mercari 構造化フィールド、空文字なら未入力)
+  - color         : 商品の色 (Mercari に色フィールド無いため Vision AI 判定、空文字なら判別不能)
 
 設計原則:
   - driver は呼出側から再利用 (loop で使い回し、起動コスト削減)
   - 取得失敗時は None / 空文字 (スプシ書込時に空欄になる)
   - SOLD 商品は in_stock=False で返し、呼出側で除外判定
   - 失敗判定 (404 / 削除済 / DOM 解析不能) も return None で表現
+  - color は image_urls[0] を Claude Haiku Vision に送信 (fail-closed: 不明なら空)
 """
 from __future__ import annotations
 
@@ -44,6 +47,16 @@ DELETION_KEYWORDS = (
 TITLE_TESTID_CANDIDATES = ("name", "item-name", "display-name")
 PRICE_TESTID_CANDIDATES = ("price", "product-price", "item-price")
 CONDITION_TESTID = "商品の状態"  # 日本語文字列
+SIZE_TESTID = "商品のサイズ"  # Mercari 構造化フィールド (出品者入力)
+
+# Mercari 商品本体画像 URL パターン.
+# image_urls には出品者プロフィール画像 (thumb/members/) や関連商品サムネイル
+# (thumb/item/jpeg/m...) も混入しているので、このパターンに一致する URL のみ
+# 「商品画像」とみなす (color 判定用).
+_MERCARI_PRODUCT_IMAGE_RE = re.compile(
+    r"static\.mercdn\.net/item/detail/orig/photos/m\d+_\d+\.(?:jpg|jpeg|png|webp)",
+    re.IGNORECASE,
+)
 
 DETAIL_WAIT_SEC = 20
 DETAIL_POLL_INTERVAL = 0.5
@@ -136,6 +149,8 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
     condition = _extract_condition(driver)
     description = _extract_description(driver)
     image_urls = _extract_image_urls(driver)
+    size = _extract_size(driver)
+    color = _judge_color(image_urls)
 
     return {
         "title": title,
@@ -145,6 +160,8 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
         "image_urls": image_urls,
         "in_stock": bool(in_stock),
         "status": "ON_SALE" if in_stock else "SOLD_OUT",
+        "size": size,
+        "color": color,
     }
 
 
@@ -232,6 +249,75 @@ def _extract_description(driver) -> str:
         except Exception:
             continue
     return ""
+
+
+def _extract_size(driver) -> str:
+    """商品のサイズ (Mercari 構造化フィールド) を抽出. 未入力 / 不在なら空文字.
+
+    selector 戦略 (商品の状態と同じパターン):
+      1) span[data-testid="商品のサイズ"] (trabajo パターン)
+      2) フォールバック: 全 span 走査で data-testid 一致のものを探す
+      3) 上記いずれも該当無しなら空文字 (CLAUDE.md fail-closed: HQ 側 fallback に委ねる)
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    try:
+        elem = driver.find_element(By.CSS_SELECTOR, f'span[data-testid="{SIZE_TESTID}"]')
+        return (elem.text or "").strip()
+    except Exception:
+        pass
+    try:
+        spans = driver.find_elements(By.TAG_NAME, "span")
+        for s in spans:
+            try:
+                if s.get_attribute("data-testid") == SIZE_TESTID:
+                    return (s.text or "").strip()
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ""
+
+
+def _first_product_image_url(image_urls: list[str] | None) -> str:
+    """image_urls から最初の **商品本体画像** URL を返す.
+
+    Mercari の image_urls には出品者プロフィール画像 (thumb/members/)、
+    関連商品サムネイル (thumb/item/) 等が混在するため、`/item/detail/orig/photos/`
+    パターンに一致する URL のみを「商品画像」として採用する。
+    一致なしなら空文字 (fail-closed: 関係ない画像で色判定するより空欄が正しい)。
+    """
+    if not image_urls:
+        return ""
+    for url in image_urls:
+        if not url:
+            continue
+        if _MERCARI_PRODUCT_IMAGE_RE.search(url):
+            return url
+    return ""
+
+
+def _judge_color(image_urls: list[str] | None) -> str:
+    """メイン商品画像から色を判定 (Claude Haiku Vision).
+
+    fail-closed:
+      - image_urls 空 → 空文字
+      - 商品本体画像 URL が見つからない (DOM 仕様変更?) → 空文字
+      - color_vision モジュールが API key 等の都合で動作不能 → 空文字
+      - AI 応答が「不明」/ 複数色 / 異常出力 → 空文字
+      - 例外発生 → 空文字 (harvest 全体は止めない)
+    """
+    product_url = _first_product_image_url(image_urls)
+    if not product_url:
+        return ""
+    try:
+        from scrapers.color_vision import judge_color_from_image_url  # noqa: PLC0415
+    except Exception:
+        return ""
+    try:
+        return judge_color_from_image_url(product_url)
+    except Exception:
+        return ""
 
 
 def _extract_image_urls(driver) -> list[str]:

@@ -46,6 +46,11 @@ COL_CONDITION = 5      # E: 商品状態
 COL_PRICE = 6          # F: 価格
 COL_IMAGES = 7         # G: 画像 URL
 COL_DESCRIPTION = 8    # H: 商品説明
+COL_COLOR = 19         # S: 色                  - Phase 1d (Amazon は基本空欄)
+COL_SIZE = 20          # T: サイズ              - Phase 1d (Amazon は基本空欄)
+
+# 書込み列数 default. A〜T (1-20) を含む 20 列構成 (sheet_writer.py と統一).
+DEFAULT_COLUMN_COUNT = 20
 
 # dedupe 用 ASIN regex
 # /dp/<ASIN>, /gp/product/<ASIN>, /gp/aw/d/<ASIN> をカバー
@@ -113,7 +118,12 @@ def read_existing_dedupe_keys(ws) -> set[str]:
 
 
 def _build_row(item: dict) -> list:
-    """item dict から 8 列の行データを構築. B/D 列は空欄."""
+    """item dict から 20 列 (A〜T) の行データを構築. B/D/I-R 列は空欄.
+
+    Amazon items は通常 color/size を持たないため S/T も空欄になる。
+    Mercari と同じ列構成を維持することで、HQ 側 listing スクリプトが
+    supplier 別分岐なしに同じスプシを読める。
+    """
     title = str(item.get("title") or "")
     condition = str(item.get("condition") or "")
     price = item.get("price_jpy")
@@ -121,8 +131,10 @@ def _build_row(item: dict) -> list:
     images = item.get("image_urls") or []
     image_str = "|".join(str(u) for u in images if u)
     description = str(item.get("description") or "")
+    color = str(item.get("color") or "")
+    size = str(item.get("size") or "")
 
-    row = [""] * 8  # A〜H
+    row = [""] * DEFAULT_COLUMN_COUNT  # A〜T (20 列)
     row[COL_URL - 1] = (item.get("url") or "").strip()
     # COL_EBAY_ITEM_ID (B) は空欄
     row[COL_TITLE - 1] = title
@@ -131,13 +143,16 @@ def _build_row(item: dict) -> list:
     row[COL_PRICE - 1] = price_str
     row[COL_IMAGES - 1] = image_str
     row[COL_DESCRIPTION - 1] = description
+    # I-R (9-18) は空欄
+    row[COL_COLOR - 1] = color
+    row[COL_SIZE - 1] = size
     return row
 
 
 def append_new_urls(
     ws,
     items: list[dict],
-    column_count: int = 8,
+    column_count: int = DEFAULT_COLUMN_COUNT,
 ) -> dict:
     """items を ws に追記 (既出 ASIN は除外).
 
@@ -151,10 +166,12 @@ def append_new_urls(
                    "price_jpy"?: int | None,
                    "image_urls"?: list[str],
                    "description"?: str,
+                   "color"?: str,              # 通常は空 (Amazon は色構造化フィールド無し)
+                   "size"?: str,               # 通常は空 (Amazon は size variation 別ロジック)
                  },
                  ...
                ]
-        column_count: 書く列数 (default 8 = A〜H、B/D は空欄)
+        column_count: 書く列数 (default 20 = A〜T、B/D/I-R は空欄)
 
     Returns: {"appended": N, "skipped_existing": M, "input": K}
     """

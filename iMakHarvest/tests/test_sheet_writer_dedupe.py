@@ -146,11 +146,14 @@ class TestAppendNewUrls:
             "https://jp.mercari.com/item/m22222222222",
             "https://jp.mercari.com/item/m33333333333",
         ]
-        # 全行 8 列、B 列 (index 1) と D 列 (index 3) は常に空欄
+        # 全行 20 列 (A〜T)、Harvest 不可侵列 (B/D, I-R) は常に空欄
         for r in appended:
-            assert len(r) == 8
+            assert len(r) == 20
             assert r[1] == ""  # B: eBay item ID
             assert r[3] == ""  # D: 売切フラグ
+            # I-R (index 8-17) は空欄
+            for i in range(8, 18):
+                assert r[i] == ""
 
     def test_writes_full_columns_with_detail(self):
         # 詳細項目を持つ item を渡したとき、各列が正しく埋まる
@@ -176,13 +179,14 @@ class TestAppendNewUrls:
         assert r[7] == "説明文\n複数行"                              # H: 説明
 
     def test_writes_empty_when_detail_missing(self):
-        # title/price 等が無い item は対応する列が空欄になる
+        # title/price 等が無い item は対応する列が空欄になる (S/T 含めて全 20 列)
         ws = _ws_with_existing_urls([])
         items = [{"url": "https://jp.mercari.com/item/m11111111111"}]
         append_new_urls(ws, items)
         r = ws.append_calls[0][0]
-        assert r == ["https://jp.mercari.com/item/m11111111111",
-                     "", "", "", "", "", "", ""]
+        expected = [""] * 20
+        expected[0] = "https://jp.mercari.com/item/m11111111111"
+        assert r == expected
 
     def test_price_none_writes_empty(self):
         # price_jpy=None は "" として書く (0 にしない)
@@ -218,9 +222,10 @@ class TestAppendNewUrls:
         assert result["appended"] == 1
         assert result["skipped_existing"] == 1
         appended = ws.append_calls[0]
-        # 新規行は 8 列、A 列に URL、B/D 含めその他は空欄
-        assert appended[0] == ["https://jp.mercari.com/item/m22222222222",
-                                "", "", "", "", "", "", ""]
+        # 新規行は 20 列、A 列に URL、B/D/I-R/S/T 含めその他は空欄
+        expected = [""] * 20
+        expected[0] = "https://jp.mercari.com/item/m22222222222"
+        assert appended[0] == expected
 
     def test_b_column_ebay_id_unrelated_string_does_not_match(self):
         # 仮に Mercari URL の入力 item_id が eBay item ID 文字列と「数字一致」しても
