@@ -546,20 +546,30 @@ def main():
         print(f"[{idx + 1}/{len(targets)}] {title_jp[:60]}")
         print(f"    URL: {target['url']}")
 
-        # 画像取得
-        images_b64 = []
-        if target["photo_urls"]:
-            for url in target["photo_urls"].split("|")[:4]:
-                b64 = download_image_b64(url.strip())
-                if b64:
-                    images_b64.append(b64)
+        # === iMakCatalog 連携 (2026-05-04): 型番 lookup → MISS なら SKIP ===
+        # 方針 (memory: dropshipping_model_premise / id_strict_with_explicit_rescue):
+        #   - catalog HIT → 公式値で Item Specifics 確定、Vision 不要 (画像送信なし)
+        #   - catalog MISS → SKIP (Precision 100% / Recall 諦める = CLAUDE.md 大原則)
+        #     スプシ I 列に型番未入力 or DB 未登録 = 確証なき出品はしない
+        catalog_result = None
+        catalog_model = target.get("model")  # スプシ I 列の型番
+        if catalog_model and _catalog_lookup is not None:
+            try:
+                catalog_result = _catalog_lookup("montbell", catalog_model)
+            except Exception as e:
+                print(f"    ⚠️ iMakCatalog lookup failed: {type(e).__name__}: {e}")
+                catalog_result = None
 
-        if not images_b64:
-            print(f"    ⚠️ 画像取得失敗 → スキップ")
+        if not (catalog_result and catalog_result.get("specs")):
+            # catalog MISS = SKIP (Vision 推測による誤出品を構造的に禁止)
+            print(f"    ⏭️ iMakCatalog miss: {catalog_model or '(型番なし)'} → SKIP (推測出品しない)")
             continue
 
-        # Claude API
-        print(f"    Claude API送信中（画像{len(images_b64)}枚）...")
+        cat_name = catalog_result.get("name_jp", "")
+        print(f"    🎯 iMakCatalog hit: {catalog_model} ({cat_name})")
+
+        # Claude API (画像送信なし = Vision 不要、title/color/condition_desc 生成のみ)
+        images_b64 = []  # catalog 公式値があるので画像不要
         result = call_claude_api(
             title_jp, target["description"], target["condition"],
             target["price_jpy"], images_b64,
@@ -573,31 +583,14 @@ def main():
         specs = result.get("item_specifics", {})
         condition_desc = result.get("condition_description", "")
         product_name = result.get("product_name", "")
-        model = result.get("model_number", "")
+        model = catalog_model  # catalog 型番を確定使用
         color = result.get("color", specs.get("Color", ""))
         size_jp = result.get("size_jp", "")
         size_us = result.get("size_us", specs.get("Size", ""))
         waterproof = result.get("waterproof", False)
 
-        # === iMakCatalog 連携: 型番から公式 spec で Item Specifics 確定 (2026-05-04) ===
-        # I 列の型番 (target.model) があれば catalog lookup → 公式値で Vision 推測を上書き
-        # 取れなければ既存の Vision 結果を fallback として継続
-        catalog_model = target.get("model") or model
-        if catalog_model and _catalog_lookup is not None:
-            try:
-                catalog_result = _catalog_lookup("montbell", catalog_model)
-                if catalog_result and catalog_result.get("specs"):
-                    catalog_spec = catalog_result["specs"]
-                    specs = _merge_catalog_spec(specs, catalog_spec)
-                    cat_name = catalog_result.get("name_jp", "")
-                    print(f"    🎯 iMakCatalog hit: {catalog_model} ({cat_name}) - Item Specifics を公式値で確定")
-                    # MPN/Model 列も確実に
-                    if not model:
-                        model = catalog_model
-                else:
-                    print(f"    ⚠️ iMakCatalog miss: {catalog_model} (Vision 推測値で fallback)")
-            except Exception as e:
-                print(f"    ⚠️ iMakCatalog lookup failed: {type(e).__name__}: {e}")
+        # catalog 公式 spec で Item Specifics を確定 (Claude の推測を上書き)
+        specs = _merge_catalog_spec(specs, catalog_result["specs"])
 
         material = specs.get("Outer Shell Material", "Nylon")
 
