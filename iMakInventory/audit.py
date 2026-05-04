@@ -119,8 +119,23 @@ def sample_and_append(
             "",   # 備考
         ])
 
+    # 明示 update で確実に末尾追記する (append_rows は初回 rows=100 の空セル領域と
+    # 相性が悪く、API 200 OK でも実書込されない症状が観測されたため,
+    # 2026-05-04 修正)。get_all_values で実データ最終行を計算し range 指定で書込。
     try:
-        ws.append_rows(rows, value_input_option="USER_ENTERED")
+        all_values = ws.get_all_values()
+        last_data_row = 0
+        for i, r in enumerate(all_values, start=1):
+            if any((cell or "").strip() for cell in r):
+                last_data_row = i
+        start_row = last_data_row + 1
+        end_row = start_row + len(rows) - 1
+        end_col = chr(ord("A") + len(AUDIT_HEADERS) - 1)
+        range_name = f"A{start_row}:{end_col}{end_row}"
+        # row_count 不足時は事前に拡張 (初回 100 だが将来の安全側で)
+        if end_row > ws.row_count:
+            ws.add_rows(end_row - ws.row_count)
+        ws.update(values=rows, range_name=range_name, value_input_option="USER_ENTERED")
     except Exception as e:
         return {"sampled": len(sample), "appended": 0, "log_used": str(log_path),
                 "error": f"append: {type(e).__name__}: {e}"}

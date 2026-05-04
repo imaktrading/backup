@@ -94,6 +94,137 @@ def test_audit_find_latest_listings_log(tmp_path):
 
 
 # ============================================================================
+# 7d'-fix (2026-05-04): append_rows 不具合 → 明示 update への置換 regression test
+# ============================================================================
+def test_audit_explicit_update_used_not_append_rows(tmp_path, monkeypatch):
+    """sample_and_append が ws.update (range 指定) を呼び、append_rows は呼ばない.
+
+    背景: append_rows は初回 add_worksheet(rows=100) の空セル領域と相性悪く、
+    API 200 OK でも実書込されない症状で 12 cycle 分の audit データが消失。
+    確実な ws.update(range=...) 方式に置換した (audit.py 2026-05-04)。
+    """
+    from unittest.mock import MagicMock
+    import audit
+
+    # 入力 listings ログ作成 (in_stock 2 件)
+    log = tmp_path / "listings_TEST_20260504.jsonl"
+    with open(log, "w", encoding="utf-8") as f:
+        for i in (1, 2):
+            f.write(json.dumps({
+                "row_index": i, "item_id": f"id{i}", "is_sold": False,
+                "url": f"u{i}", "title": "", "supplier": "mercari",
+                "raw_status": "ON_SALE", "error": None,
+            }) + "\n")
+
+    # ws モック: 既存 audit に header + 5 行データ (= 5/2 5:30 cycle 分相当)
+    ws = MagicMock()
+    ws.id = 999
+    ws.row_count = 100
+    ws.title = "audit"
+    existing = [audit.AUDIT_HEADERS]
+    existing += [["2026-05-02 5:30", str(i), f"old{i}", f"u{i}", "IN_STOCK", "", ""]
+                 for i in range(1, 6)]
+    ws.get_all_values = MagicMock(return_value=existing)
+
+    sh = MagicMock()
+    sh.worksheets = MagicMock(return_value=[ws])
+    monkeypatch.setattr(audit, "open_sheet_by_id", lambda sid: sh)
+
+    res = audit.sample_and_append(
+        sheet_id="dummy", sheet_label="TEST",
+        decision_log_dir=tmp_path, cycle_ts="2026-05-04 9:30",
+        n=2, seed=42,
+    )
+
+    # append_rows は呼ばれない (修正で update に置換)
+    ws.append_rows.assert_not_called()
+    # update は呼ばれる
+    assert ws.update.called, "ws.update が呼ばれていない"
+
+    # update の range は header 直後ではなく「実データ最終行+1」から
+    # 既存 6 行 (header + 5 行) の次 → row 7-8 に書込
+    call_kwargs = ws.update.call_args.kwargs
+    range_name = call_kwargs.get("range_name")
+    assert range_name == "A7:G8", f"想定 A7:G8、実際 {range_name}"
+
+    assert res["sampled"] == 2
+    assert res["appended"] == 2
+    assert res["error"] is None
+
+
+def test_audit_handles_empty_existing_tab(tmp_path, monkeypatch):
+    """既存 audit タブが header のみ (= 初回) でも正しく row 2 から書込."""
+    from unittest.mock import MagicMock
+    import audit
+
+    log = tmp_path / "listings_TEST_20260504.jsonl"
+    with open(log, "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "row_index": 1, "item_id": "id1", "is_sold": False,
+            "url": "u1", "title": "", "supplier": "mercari",
+            "raw_status": "ON_SALE", "error": None,
+        }) + "\n")
+
+    ws = MagicMock()
+    ws.id = 999
+    ws.row_count = 100
+    ws.title = "audit"
+    # header のみ存在
+    ws.get_all_values = MagicMock(return_value=[audit.AUDIT_HEADERS])
+
+    sh = MagicMock()
+    sh.worksheets = MagicMock(return_value=[ws])
+    monkeypatch.setattr(audit, "open_sheet_by_id", lambda sid: sh)
+
+    res = audit.sample_and_append(
+        sheet_id="dummy", sheet_label="TEST",
+        decision_log_dir=tmp_path, cycle_ts="2026-05-04 9:30",
+        n=1, seed=42,
+    )
+
+    range_name = ws.update.call_args.kwargs.get("range_name")
+    assert range_name == "A2:G2", f"header 直後 = A2:G2 想定、実際 {range_name}"
+    assert res["appended"] == 1
+
+
+def test_audit_expands_rows_when_exceeded(tmp_path, monkeypatch):
+    """row_count 不足時に add_rows で拡張する (将来の安全側)."""
+    from unittest.mock import MagicMock
+    import audit
+
+    log = tmp_path / "listings_TEST_20260504.jsonl"
+    with open(log, "w", encoding="utf-8") as f:
+        for i in range(10):
+            f.write(json.dumps({
+                "row_index": i, "item_id": f"id{i}", "is_sold": False,
+                "url": f"u{i}", "title": "", "supplier": "mercari",
+                "raw_status": "ON_SALE", "error": None,
+            }) + "\n")
+
+    ws = MagicMock()
+    ws.id = 999
+    ws.row_count = 5  # わざと不足させる
+    ws.title = "audit"
+    # header + 4 行 = 既存 5 行
+    existing = [audit.AUDIT_HEADERS] + [["x"]*7 for _ in range(4)]
+    ws.get_all_values = MagicMock(return_value=existing)
+
+    sh = MagicMock()
+    sh.worksheets = MagicMock(return_value=[ws])
+    monkeypatch.setattr(audit, "open_sheet_by_id", lambda sid: sh)
+
+    res = audit.sample_and_append(
+        sheet_id="dummy", sheet_label="TEST",
+        decision_log_dir=tmp_path, cycle_ts="2026-05-04 9:30",
+        n=5, seed=42,
+    )
+
+    # add_rows 呼出済 (row 6-10 に書く必要、row_count=5 だから不足)
+    ws.add_rows.assert_called_once()
+    assert res["appended"] == 5
+
+
+# ============================================================================
 # 7e: listing_verifier
 # ============================================================================
 def test_listing_verifier_imports():
