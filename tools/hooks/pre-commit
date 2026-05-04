@@ -6,10 +6,57 @@
 #   cp tools/hooks/pre-commit .git/hooks/pre-commit
 #   chmod +x .git/hooks/pre-commit
 #
-# 全テストを走らせ、失敗時は commit を拒否する物理ギブス。
+# 役割:
+#   (1) 本元 worktree (C:/dev/iMak/) の master 固定 — 5/3, 5/4 朝事故の物理再発防止
+#   (2) 全テスト走行、失敗時は commit 拒否
 
 set -e
 
+# ============================================================================
+# (1) 本元 worktree の master 固定 (5/3, 5/4 朝事故 物理再発防止)
+# ============================================================================
+# 5/3 朝: master → feature/gshock-anti-bot-resilience checkout で post_title_fix.py 等の
+#         uncommitted が working tree から退避された (commit 済で復元可だった)
+# 5/4 朝: master → feature/montbell-catalog checkout で同型再発、HQ の commit が誤 branch に積まれた
+#
+# ドキュメント警告 (.PROJECT_LOCKED.md / CLAUDE.md / memory) のみでは防げない (二度同型事故)
+# → pre-commit で物理的に commit を拒否することで、誤 branch での作業を強制発見
+
+WORKTREE_TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null)
+
+# 本元 worktree かどうか判定 (パス末尾が /iMak で /iMak_xxx ではない)
+case "$WORKTREE_TOPLEVEL" in
+    *"/dev/iMak"|*"/dev/iMak/")
+        IS_HQ_HOME=1
+        ;;
+    *)
+        IS_HQ_HOME=0
+        ;;
+esac
+
+if [ "$IS_HQ_HOME" = "1" ]; then
+    CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")
+    if [ "$CURRENT_BRANCH" != "master" ]; then
+        echo ""
+        echo "[pre-commit] ❌ 本元 worktree (C:/dev/iMak/) では master 以外で commit 禁止"
+        echo "[pre-commit]    現在のブランチ: $CURRENT_BRANCH"
+        echo "[pre-commit]    理由: 5/3, 5/4 朝事故 (master→他branch checkout で別セッションの作業が誤 branch に乗る) の物理再発防止"
+        echo "[pre-commit]"
+        echo "[pre-commit]    対処方法:"
+        echo "[pre-commit]      A. Catalog Claude / Inventory / Harvest / Revise の作業"
+        echo "[pre-commit]         → 専用 worktree で実行"
+        echo "[pre-commit]         cd C:/dev/iMak_catalog/  (or _inventory / _harvest / _revise)"
+        echo "[pre-commit]      B. HQ / Advisor の作業 → master に戻る"
+        echo "[pre-commit]         cd C:/dev/iMak/ && git checkout master"
+        echo "[pre-commit]      C. 緊急回避 (使用厳禁): git commit --no-verify"
+        echo ""
+        exit 1
+    fi
+fi
+
+# ============================================================================
+# (2) 全テスト走行
+# ============================================================================
 echo "[pre-commit] Running all tests..."
 
 PYTHONIOENCODING=utf-8 python -m pytest tests/ iMakHQ/tests/ --tb=short -q
