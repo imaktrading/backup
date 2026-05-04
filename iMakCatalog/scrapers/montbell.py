@@ -776,6 +776,131 @@ def _upsert_product(product_id: str, data: dict, url: str, source: str = SOURCE)
 
 
 # ============================================================================
+# 既存 records の disp_fo 補完 (backfill)
+# ============================================================================
+def _merge_specs(existing: dict, new_data: dict) -> dict:
+    """既存 specs に disp_fo 由来の new_data を merge.
+
+    方針:
+      - 既存が "Not Specified" / 空 / null → new_data 優先
+      - 既存が値あり → 既存優先 (PDF OCR の最初の値を維持)
+      - features は UNION (重複排除した union list)
+      - 例外: image_urls / color_variants は disp_fo 優先 (OCR で取れないため)
+    """
+    out = dict(existing)
+    for k, v in new_data.items():
+        if k in ("features",):
+            # union with dedupe
+            ex_list = existing.get(k) or []
+            new_list = v or []
+            merged = list(ex_list)
+            for item in new_list:
+                if item not in merged:
+                    merged.append(item)
+            out[k] = merged
+        elif k in ("color_variants", "image_urls"):
+            # disp_fo 優先 (OCR が空のことが多いため、disp_fo に値があれば採用)
+            if v:
+                out[k] = v
+            elif k not in out or not out.get(k):
+                out[k] = v
+        else:
+            ex = existing.get(k)
+            if not ex or ex == "Not Specified":
+                out[k] = v
+            # 既存が真値なら触らない
+    return out
+
+
+def backfill_from_disp_fo(limit: Optional[int] = None,
+                           rate_limit_seconds: float = 1.5,
+                           skip_sources: tuple = ("official_disp_fo", "montbell_official")):
+    """既存 montbell records を disp_fo で補完.
+
+    対象: PDF OCR 由来の records (source=catalog_pdf_ocr_*).
+    処理: disp_fo.php fetch → 成功なら spec/image を merge → upsert.
+    既に disp_fo / active source の records は skip.
+
+    Returns:
+        {"updated": int, "miss": int, "skipped": int}
+    """
+    import sqlite3
+    import json as _json
+    import api  # type: ignore
+
+    conn = sqlite3.connect(str(api._DB_PATH))
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT product_id, source, name, name_jp, specs, source_url "
+        "FROM products WHERE category=? ORDER BY product_id",
+        (CATEGORY,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    if limit:
+        rows = rows[:limit]
+
+    print(f"=== backfill_from_disp_fo: 対象 {len(rows)} records ===")
+    updated = 0
+    miss = 0
+    skipped = 0
+
+    for i, (pid, source, name, name_jp, specs_json, source_url) in enumerate(rows, 1):
+        if source in skip_sources:
+            skipped += 1
+            continue
+
+        print(f"  [{i}/{len(rows)}] {pid} ({source})...", end="", flush=True)
+        fo_html = _fetch_disp_fo(pid)
+        if not fo_html:
+            print(" miss")
+            miss += 1
+            time.sleep(rate_limit_seconds)
+            continue
+
+        fo_url = DISCONTINUED_URL_TEMPLATE.format(pid=pid)
+        new_data = _parse_product(fo_html, None, pid, fo_url)
+        if not new_data:
+            print(" parse-fail")
+            miss += 1
+            time.sleep(rate_limit_seconds)
+            continue
+
+        # merge: 既存 specs と new_data['specs'] を合成
+        existing_specs = _json.loads(specs_json or "{}")
+        new_specs_block = {
+            **new_data.get("specs", {}),
+            "color_variants": new_data.get("color_variants", []),
+            "size_variants":  new_data.get("size_variants", []),
+            "image_urls":     new_data.get("image_urls", []),
+            "description_jp": new_data.get("description_jp", ""),
+        }
+        merged = _merge_specs(existing_specs, new_specs_block)
+        merged["disp_fo_augmented"] = True
+
+        # upsert (source は更新しない、source_url は disp_fo に切替)
+        api.upsert(
+            category=CATEGORY,
+            product_id=pid,
+            name=name or new_data.get("name_jp", ""),
+            name_jp=name_jp or new_data.get("name_jp", ""),
+            specs=merged,
+            images=merged.get("image_urls", []),
+            source=source,  # 既存 source を維持 (origin tracing 保持)
+            source_url=fo_url,  # disp_fo の URL に更新 (latest source)
+        )
+        n_imgs = len(merged.get("image_urls", []))
+        n_colors = len(merged.get("color_variants", []))
+        print(f" → augmented ({n_imgs} imgs / {n_colors} colors)")
+        updated += 1
+        time.sleep(rate_limit_seconds)
+
+    print(f"\n=== backfill 完了: updated={updated} miss={miss} skipped={skipped} ===")
+    return {"updated": updated, "miss": miss, "skipped": skipped}
+
+
+# ============================================================================
 # CLI
 # ============================================================================
 def _cli():
@@ -784,7 +909,15 @@ def _cli():
         print("Usage:")
         print("  python iMakCatalog/scrapers/montbell.py 1106645")
         print("  python iMakCatalog/scrapers/montbell.py 1106645 1128635 1128648")
+        print("  python iMakCatalog/scrapers/montbell.py --backfill        # 全 records 補完")
+        print("  python iMakCatalog/scrapers/montbell.py --backfill 10     # 先頭 10 records だけ smoke")
         sys.exit(1)
+
+    if args[0] == "--backfill":
+        lim = int(args[1]) if len(args) > 1 else None
+        backfill_from_disp_fo(limit=lim)
+        return
+
     if len(args) == 1:
         ok = update_one(args[0])
         sys.exit(0 if ok else 1)

@@ -190,6 +190,73 @@ def test_derive_care_default_not_specified():
 
 
 # ============================================================================
+# _merge_specs (backfill 用) — 2026-05-04 追加
+# ============================================================================
+def test_merge_specs_keeps_existing_real_value():
+    """既存 specs に実値あり → 新値で上書きしない (PDF OCR 値の保持)."""
+    existing = {"outer_shell_material": "Nylon"}
+    new_data = {"outer_shell_material": "Polyester"}  # disp_fo の値
+    out = m._merge_specs(existing, new_data)
+    assert out["outer_shell_material"] == "Nylon"
+
+
+def test_merge_specs_overwrites_not_specified():
+    """既存が Not Specified → 新値で埋める."""
+    existing = {"outer_shell_material": "Not Specified"}
+    new_data = {"outer_shell_material": "Nylon"}
+    out = m._merge_specs(existing, new_data)
+    assert out["outer_shell_material"] == "Nylon"
+
+
+def test_merge_specs_overwrites_empty():
+    """既存が空文字 / null → 新値で埋める."""
+    existing = {"weight_g": ""}
+    new_data = {"weight_g": "303"}
+    out = m._merge_specs(existing, new_data)
+    assert out["weight_g"] == "303"
+
+
+def test_merge_specs_features_union():
+    """features は UNION で merge (重複排除)."""
+    existing = {"features": ["Hooded", "Lightweight"]}
+    new_data = {"features": ["Lightweight", "Water Resistant", "Pockets"]}
+    out = m._merge_specs(existing, new_data)
+    assert "Hooded" in out["features"]
+    assert "Lightweight" in out["features"]
+    assert "Water Resistant" in out["features"]
+    assert "Pockets" in out["features"]
+    # 重複なし
+    assert out["features"].count("Lightweight") == 1
+
+
+def test_merge_specs_image_urls_disp_fo_priority():
+    """image_urls は disp_fo に値があれば採用 (OCR が 0 のため)."""
+    existing = {"image_urls": []}
+    new_data = {"image_urls": ["https://example/img1.jpg"]}
+    out = m._merge_specs(existing, new_data)
+    assert out["image_urls"] == ["https://example/img1.jpg"]
+
+
+def test_merge_specs_color_variants_disp_fo_priority():
+    """color_variants も disp_fo 優先."""
+    existing = {"color_variants": []}
+    new_data = {"color_variants": [{"suffix": "BK", "jp": "ブラック", "en": "Black"}]}
+    out = m._merge_specs(existing, new_data)
+    assert len(out["color_variants"]) == 1
+    assert out["color_variants"][0]["suffix"] == "BK"
+
+
+def test_merge_specs_preserves_unrelated_keys():
+    """new_data に無いキーは existing から残す."""
+    existing = {"brand": "montbell", "size_type": "Regular"}
+    new_data = {"weight_g": "300"}
+    out = m._merge_specs(existing, new_data)
+    assert out["brand"] == "montbell"
+    assert out["size_type"] == "Regular"
+    assert out["weight_g"] == "300"
+
+
+# ============================================================================
 # disp_fo (廃盤 endpoint) — 2026-05-04 追加
 # ============================================================================
 def test_discontinued_url_template_format():
@@ -321,6 +388,13 @@ if __name__ == "__main__":
         ("disp_fo URL template",               test_discontinued_url_template_format),
         ("og: HTML entity decode",             test_og_decodes_html_entities),
         ("spec block 素材 single-line fallback", test_parse_spec_block_simple_material_fallback),
+        ("merge_specs keeps existing real",     test_merge_specs_keeps_existing_real_value),
+        ("merge_specs overwrites Not Specified", test_merge_specs_overwrites_not_specified),
+        ("merge_specs overwrites empty",        test_merge_specs_overwrites_empty),
+        ("merge_specs features union",          test_merge_specs_features_union),
+        ("merge_specs image_urls disp_fo",      test_merge_specs_image_urls_disp_fo_priority),
+        ("merge_specs colors disp_fo",          test_merge_specs_color_variants_disp_fo_priority),
+        ("merge_specs preserves unrelated",     test_merge_specs_preserves_unrelated_keys),
     ]
     fails = 0
     for name, fn in cases:
