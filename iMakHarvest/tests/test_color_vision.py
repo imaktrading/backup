@@ -25,40 +25,61 @@ pytestmark = pytest.mark.offline
 # parse_color_response: 出力テキスト → 色名抽出 (純粋関数)
 # --------------------------------------------------------------------------
 class TestParseColorResponseValid:
+    """Phase 1d-2: katakana 表記の色名は透過する (カタカナ強制ポリシー)."""
+
     @pytest.mark.parametrize("text,expected", [
-        ("黒", "黒"),
-        ("白", "白"),
-        ("赤", "赤"),
+        ("ブラック", "ブラック"),
+        ("ホワイト", "ホワイト"),
+        ("レッド", "レッド"),
+        ("ブルー", "ブルー"),
+        ("グリーン", "グリーン"),
         ("ネイビー", "ネイビー"),
         ("ベージュ", "ベージュ"),
-        ("水色", "水色"),
         ("ピンク", "ピンク"),
         ("オレンジ", "オレンジ"),
         ("グレー", "グレー"),
         ("アイボリー", "アイボリー"),
+        ("ライトグリーン", "ライトグリーン"),
+        ("ダークブルー", "ダークブルー"),
+        ("ペールピンク", "ペールピンク"),
     ])
     def test_simple_color_passes_through(self, text, expected):
         assert parse_color_response(text) == expected
 
     def test_strips_whitespace(self):
-        assert parse_color_response("  黒\n") == "黒"
+        assert parse_color_response("  ブラック\n") == "ブラック"
 
     def test_strips_quotation_marks(self):
-        assert parse_color_response("「黒」") == "黒"
-        assert parse_color_response('"赤"') == "赤"
+        assert parse_color_response("「ブラック」") == "ブラック"
+        assert parse_color_response('"レッド"') == "レッド"
 
     def test_color_suffix_passes_through_unchanged(self):
-        # 「黒色」「ブラックカラー」のような接尾辞付きは AI 側プロンプトで禁止指示済。
-        # parse 側は剥がさず透過する (「水色」「ローズピンク」等を壊さないため)。
-        # AI が指示を破って suffix 付きを返した場合も、HQ 側 listing スクリプトで正規化する。
-        assert parse_color_response("黒色") == "黒色"
+        # 「ブラックカラー」のような接尾辞付きは AI 側プロンプトで禁止指示済。
+        # parse 側は剥がさず透過する (「ローズピンク」等の compound を壊さないため)。
+        # AI が指示を破った場合も HQ 側 listing スクリプトで正規化される前提。
         assert parse_color_response("ブラックカラー") == "ブラックカラー"
 
     def test_compound_color_names_preserved(self):
-        # 「色」「カラー」を語の一部として含む有効な色名はそのまま透過
-        assert parse_color_response("水色") == "水色"
+        # 「カラー」を語の一部として含む有効な色名はそのまま透過
         assert parse_color_response("ローズピンク") == "ローズピンク"
         assert parse_color_response("マルチカラー") == "マルチカラー"
+
+
+class TestParseColorResponseRejectsKanji:
+    """Phase 1d-2: 漢字のみの色名は reject (catalog カタカナ統一のため)."""
+
+    @pytest.mark.parametrize("text", [
+        "黒", "白", "赤", "青", "緑", "黄", "紫", "茶",  # 単漢字色
+        "黒色", "赤色", "緑色", "深緑色",                    # 漢字 + 「色」サフィックス
+        "水色",                                             # 慣用 純漢字色名 (catalog はカタカナ統一なので reject)
+    ])
+    def test_kanji_only_returns_empty(self, text):
+        assert parse_color_response(text) == ""
+
+    def test_kanji_with_color_suffix_returns_empty(self):
+        # 漢字 + 「色」 → reject
+        assert parse_color_response("黒色") == ""
+        assert parse_color_response("赤色") == ""
 
 
 class TestParseColorResponseUncertain:
@@ -139,11 +160,19 @@ class TestJudgeColorWithMockClient:
         reset_client_cache()
 
     def test_returns_color_on_simple_response(self):
+        client = _MockAnthropicClient(response_text="ブラック")
+        result = judge_color_from_image_url(
+            "https://example.com/image.jpg", client=client,
+        )
+        assert result == "ブラック"
+
+    def test_returns_empty_when_ai_responds_with_kanji(self):
+        # AI が katakana mandate を破って漢字を返した → reject (空文字)
         client = _MockAnthropicClient(response_text="黒")
         result = judge_color_from_image_url(
             "https://example.com/image.jpg", client=client,
         )
-        assert result == "黒"
+        assert result == ""
 
     def test_returns_empty_on_uncertain_response(self):
         client = _MockAnthropicClient(response_text="不明")
@@ -210,6 +239,94 @@ class TestJudgeColorWithMockClient:
         # Haiku 4.5 であることを確認
         assert "haiku" in kwargs["model"].lower()
 
+    def test_passes_title_in_prompt_when_provided(self):
+        client = _MockAnthropicClient(response_text="グリーン")
+        judge_color_from_image_url(
+            "https://example.com/image.jpg",
+            title="モンベル ウィンドブラスト L グリーン",
+            client=client,
+        )
+        kwargs = client.messages.calls[0]
+        prompt_text = kwargs["messages"][0]["content"][1]["text"]
+        # context あり版 prompt が使われ、タイトルが埋め込まれている
+        assert "モンベル ウィンドブラスト L グリーン" in prompt_text
+        assert "原文表記" in prompt_text  # context あり版の特徴語
+
+    def test_passes_description_in_prompt_when_provided(self):
+        client = _MockAnthropicClient(response_text="ネイビー")
+        judge_color_from_image_url(
+            "https://example.com/image.jpg",
+            description="商品説明: 色はネイビーです",
+            client=client,
+        )
+        kwargs = client.messages.calls[0]
+        prompt_text = kwargs["messages"][0]["content"][1]["text"]
+        assert "色はネイビーです" in prompt_text
+
+    def test_no_context_uses_simple_prompt(self):
+        # title / description 両方空 → シンプル版 prompt
+        client = _MockAnthropicClient(response_text="黒")
+        judge_color_from_image_url(
+            "https://example.com/image.jpg", client=client,
+        )
+        kwargs = client.messages.calls[0]
+        prompt_text = kwargs["messages"][0]["content"][1]["text"]
+        # シンプル版 prompt: 「商品情報」セクションが無い
+        assert "【商品情報】" not in prompt_text
+        assert "原文表記" not in prompt_text
+
+    def test_long_description_is_truncated(self):
+        # description が DESCRIPTION_CONTEXT_MAX_CHARS を超える → truncate される
+        long_desc = "x" * 1000
+        client = _MockAnthropicClient(response_text="黒")
+        judge_color_from_image_url(
+            "https://example.com/image.jpg",
+            description=long_desc,
+            client=client,
+        )
+        kwargs = client.messages.calls[0]
+        prompt_text = kwargs["messages"][0]["content"][1]["text"]
+        # truncate されて末尾に "..." が付いている
+        assert "..." in prompt_text
+        # 全 1000 字は含まれていない
+        assert "x" * 500 not in prompt_text
+
+
+# --------------------------------------------------------------------------
+# _build_prompt: title/description の context あり/なしの分岐
+# --------------------------------------------------------------------------
+class TestBuildPrompt:
+    def test_no_context_returns_simple_prompt(self):
+        from scrapers.color_vision import _build_prompt, COLOR_PROMPT_NO_CONTEXT  # noqa: PLC0415
+        assert _build_prompt(title="", description="") == COLOR_PROMPT_NO_CONTEXT
+
+    def test_whitespace_only_treated_as_no_context(self):
+        from scrapers.color_vision import _build_prompt, COLOR_PROMPT_NO_CONTEXT  # noqa: PLC0415
+        assert _build_prompt(title="   ", description="\n\t") == COLOR_PROMPT_NO_CONTEXT
+
+    def test_title_only_uses_context_prompt(self):
+        from scrapers.color_vision import _build_prompt  # noqa: PLC0415
+        prompt = _build_prompt(title="グリーン Tシャツ", description="")
+        assert "【商品情報】" in prompt
+        assert "グリーン Tシャツ" in prompt
+        # description が空なので "(なし)" になる
+        assert "(なし)" in prompt
+
+    def test_description_only_uses_context_prompt(self):
+        from scrapers.color_vision import _build_prompt  # noqa: PLC0415
+        prompt = _build_prompt(title="", description="赤いセーター、サイズ M")
+        assert "【商品情報】" in prompt
+        assert "赤いセーター、サイズ M" in prompt
+
+    def test_both_provided_includes_both(self):
+        from scrapers.color_vision import _build_prompt  # noqa: PLC0415
+        prompt = _build_prompt(
+            title="モンベル ウィンドブラスト L グリーン",
+            description="色はグリーン、サイズLです",
+        )
+        assert "モンベル ウィンドブラスト L グリーン" in prompt
+        assert "色はグリーン、サイズLです" in prompt
+
 
 # --------------------------------------------------------------------------
 # _load_api_key: 環境変数 / ファイル / 未設定 のフォールバック順
@@ -249,12 +366,211 @@ class TestMercariJudgeColorWrapper:
 
     def test_empty_image_urls_returns_empty(self):
         from scrapers.mercari_item_detail import _judge_color  # noqa: PLC0415
+        # title / description も空 → AI fallback も Step 1 も空 → 空文字
         assert _judge_color([]) == ""
 
     def test_none_image_urls_returns_empty(self):
         from scrapers.mercari_item_detail import _judge_color  # noqa: PLC0415
-        # None は image_urls=None として渡された場合
         assert _judge_color(None) == ""
+
+    def test_step1_text_extraction_short_circuits_ai(self):
+        # title に whitelist 一致 katakana 色名 → AI 呼ばずに即返却
+        # image_urls 空でも title から抽出できれば値が返る
+        from scrapers.mercari_item_detail import _judge_color  # noqa: PLC0415
+        assert _judge_color(
+            image_urls=[],
+            title="モンベル ウィンドブラスト L グリーン",
+        ) == "グリーン"
+
+    def test_step1_compound_color_preserved(self):
+        # description に「ライトグリーン」→ そのまま (グリーンに丸めない)
+        from scrapers.mercari_item_detail import _judge_color  # noqa: PLC0415
+        assert _judge_color(
+            image_urls=[],
+            description="色: ライトグリーン系のセーター",
+        ) == "ライトグリーン"
+
+    def test_step1_title_priority_over_description(self):
+        # title と description の両方に色がある → title 優先
+        from scrapers.mercari_item_detail import _judge_color  # noqa: PLC0415
+        assert _judge_color(
+            image_urls=[],
+            title="ブラック T シャツ",
+            description="参考: 過去出品はネイビーでした",
+        ) == "ブラック"
+
+
+# --------------------------------------------------------------------------
+# extract_katakana_color_from_text: whitelist 抽出ロジック
+# --------------------------------------------------------------------------
+class TestExtractKatakanaColorFromText:
+    """Phase 1d-2: 確定的なテキスト抽出 (AI 不要、出品者表記を尊重)."""
+
+    @pytest.mark.parametrize("title,expected", [
+        # 基本 15 色
+        ("ブラック T シャツ", "ブラック"),
+        ("ホワイト パンツ", "ホワイト"),
+        ("レッド スカーフ", "レッド"),
+        ("ブルー ジャケット", "ブルー"),
+        ("グリーン ハット", "グリーン"),
+        ("イエロー シャツ", "イエロー"),
+        ("オレンジ パーカー", "オレンジ"),
+        ("ピンク カーディガン", "ピンク"),
+        ("パープル ニット", "パープル"),
+        ("ブラウン ベルト", "ブラウン"),
+        ("グレー スウェット", "グレー"),
+        ("ベージュ コート", "ベージュ"),
+        ("シルバー リング", "シルバー"),
+        ("ゴールド ブレスレット", "ゴールド"),
+        ("アイボリー シルク", "アイボリー"),
+        # 追加 12 色
+        ("ネイビー ジャケット", "ネイビー"),
+        ("カーキ パンツ", "カーキ"),
+        ("マスタード スカーフ", "マスタード"),
+        ("ターコイズ ピアス", "ターコイズ"),
+        ("ワインレッド ドレス", "ワインレッド"),
+        ("ボルドー ニット", "ボルドー"),
+        ("チャコール スーツ", "チャコール"),
+        ("モスグリーン パーカー", "モスグリーン"),
+        ("オリーブ シャツ", "オリーブ"),
+        ("バーガンディ コート", "バーガンディ"),
+        ("セージ T シャツ", "セージ"),
+        ("ガーネット ストール", "ガーネット"),
+    ])
+    def test_basic_color_extraction_from_title(self, title, expected):
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(title=title, description="") == expected
+
+    @pytest.mark.parametrize("title,expected", [
+        ("ライトグリーン Tシャツ", "ライトグリーン"),
+        ("ダークブルー ジャケット", "ダークブルー"),
+        ("ペールピンク カーディガン", "ペールピンク"),
+        ("ディープレッド スカーフ", "ディープレッド"),
+        ("ライトベージュ コート", "ライトベージュ"),
+        ("ダークネイビー パンツ", "ダークネイビー"),
+    ])
+    def test_compound_colors_preserved(self, title, expected):
+        # 複合色 (ライト/ダーク/ペール/ディープ + base) は丸めず詳細表記のまま
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(title=title, description="") == expected
+
+    def test_compound_takes_priority_over_base(self):
+        # 「ライトグリーン」を「グリーン」より優先 (longest match first)
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        result = extract_katakana_color_from_text(
+            title="ライトグリーン Tシャツ", description="",
+        )
+        assert result == "ライトグリーン"
+        # 「グリーン」だけが返ってきてはならない
+        assert result != "グリーン"
+
+    def test_title_prioritized_over_description(self):
+        # title に色名あり → title 優先 (description の色は無視)
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(
+            title="ブラック ジャケット",
+            description="ネイビーも出品中",
+        ) == "ブラック"
+
+    def test_description_used_when_title_has_no_color(self):
+        # title に色名なし → description から抽出
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(
+            title="メンズシャツ",
+            description="色はライトブルーです",
+        ) == "ライトブルー"
+
+    def test_no_match_returns_empty(self):
+        # title / description どちらにもカタカナ色名なし → 空文字 (AI fallback すべし)
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(
+            title="メンズシャツ", description="サイズ M、新品",
+        ) == ""
+
+    def test_kanji_color_not_extracted(self):
+        # 漢字色名 (「赤」「緑」等) は whitelist 対象外、抽出しない
+        # AI fallback に委ねる (AI もカタカナで答える)
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(
+            title="赤いセーター", description="サイズ L",
+        ) == ""
+
+    def test_empty_inputs(self):
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(title="", description="") == ""
+        assert extract_katakana_color_from_text(title=None, description=None) == ""  # type: ignore[arg-type]
+
+    def test_real_world_montbell_examples(self):
+        # 実 backfill で観測されたケース
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        # row 478/479: title に「レッド」→ AI が「赤」に置換していた問題
+        assert extract_katakana_color_from_text(
+            title="モンベル ウィンドブラストパーカー レッド XL",
+            description="",
+        ) == "レッド"
+        # row 480: title「緑」、description「ライトグリーン系」→ description 優先で詳細表記
+        assert extract_katakana_color_from_text(
+            title="モンベル ウィンドブラスト 緑 XL",
+            description="色はライトグリーン系の明るめのグリーン",
+        ) == "ライトグリーン"
+        # row 481: title「グリーン」
+        assert extract_katakana_color_from_text(
+            title="モンベル ウィンドブラスト グリーン XL",
+            description="",
+        ) == "グリーン"
+
+    def test_whitelist_includes_all_required_colors(self):
+        # 仕様で指定された全 27 色 (15 base + 12 extended) が whitelist にある
+        from scrapers.color_vision import (  # noqa: PLC0415
+            BASE_KATAKANA_COLORS,
+            EXTENDED_KATAKANA_COLORS,
+            KATAKANA_COLOR_WHITELIST,
+        )
+        for color in BASE_KATAKANA_COLORS + EXTENDED_KATAKANA_COLORS:
+            assert color in KATAKANA_COLOR_WHITELIST, f"missing: {color}"
+
+    def test_whitelist_includes_compound_colors(self):
+        # ライト/ダーク/ペール/ディープ × 全 base = compound 色も whitelist にある
+        from scrapers.color_vision import (  # noqa: PLC0415
+            BASE_KATAKANA_COLORS,
+            COMPOUND_PREFIXES,
+            KATAKANA_COLOR_WHITELIST,
+        )
+        for prefix in COMPOUND_PREFIXES:
+            for base in BASE_KATAKANA_COLORS:
+                expected = f"{prefix}{base}"
+                assert expected in KATAKANA_COLOR_WHITELIST, f"missing: {expected}"
+
+    def test_whitelist_sorted_longest_first(self):
+        # longest-match-first 動作のため、whitelist は長い順
+        from scrapers.color_vision import KATAKANA_COLOR_WHITELIST  # noqa: PLC0415
+        prev_len = len(KATAKANA_COLOR_WHITELIST[0])
+        for color in KATAKANA_COLOR_WHITELIST[1:]:
+            assert len(color) <= prev_len, f"sort broken at: {color}"
+            prev_len = len(color)
+
+
+# --------------------------------------------------------------------------
+# _is_kanji_only: 漢字 reject 判定の純粋関数テスト
+# --------------------------------------------------------------------------
+class TestIsKanjiOnly:
+    @pytest.mark.parametrize("text", [
+        "黒", "白", "赤", "青", "緑", "黄",
+        "黒色", "赤色", "深緑色", "水色",
+    ])
+    def test_kanji_only_returns_true(self, text):
+        from scrapers.color_vision import _is_kanji_only  # noqa: PLC0415
+        assert _is_kanji_only(text) is True
+
+    @pytest.mark.parametrize("text", [
+        "ブラック", "ホワイト", "ライトグリーン", "ABC",
+        "黒レッド",  # 混在
+        "ブラックカラー",
+        "",
+    ])
+    def test_non_kanji_only_returns_false(self, text):
+        from scrapers.color_vision import _is_kanji_only  # noqa: PLC0415
+        assert _is_kanji_only(text) is False
 
 
 # --------------------------------------------------------------------------

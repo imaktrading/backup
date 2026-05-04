@@ -47,7 +47,9 @@ DELETION_KEYWORDS = (
 TITLE_TESTID_CANDIDATES = ("name", "item-name", "display-name")
 PRICE_TESTID_CANDIDATES = ("price", "product-price", "item-price")
 CONDITION_TESTID = "商品の状態"  # 日本語文字列
-SIZE_TESTID = "商品のサイズ"  # Mercari 構造化フィールド (出品者入力)
+# size の testid は "サイズ" (条件と命名規則が違う、2026-05-05 DOM 確認).
+# 旧: "商品のサイズ" は誤り。実 DOM は <span data-testid="サイズ">XL(LL)</span>.
+SIZE_TESTID = "サイズ"
 
 # Mercari 商品本体画像 URL パターン.
 # image_urls には出品者プロフィール画像 (thumb/members/) や関連商品サムネイル
@@ -150,7 +152,8 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
     description = _extract_description(driver)
     image_urls = _extract_image_urls(driver)
     size = _extract_size(driver)
-    color = _judge_color(image_urls)
+    # color 判定は title/description を context に渡す (出品者表記を優先)
+    color = _judge_color(image_urls, title=title, description=description)
 
     return {
         "title": title,
@@ -297,16 +300,39 @@ def _first_product_image_url(image_urls: list[str] | None) -> str:
     return ""
 
 
-def _judge_color(image_urls: list[str] | None) -> str:
-    """メイン商品画像から色を判定 (Claude Haiku Vision).
+def _judge_color(
+    image_urls: list[str] | None,
+    title: str = "",
+    description: str = "",
+) -> str:
+    """商品の色を 2 段階で判定 (Phase 1d-2 改訂):
+
+    Step 1: title / description から **whitelist 一致のカタカナ色名** を確定的に抽出
+            - longest-match-first (例: 「ライトグリーン」を「グリーン」より優先)
+            - 一致あれば原文表記そのまま即返却 (AI 不要、出品者表記を尊重)
+
+    Step 2: Step 1 該当なし → 商品画像を Claude Haiku Vision に投げる
+            - プロンプトでカタカナ強制 (漢字出力は parse 段階で reject)
+            - 出品者が明示してない色は AI が画像のみから判定
+
+    両ステップともカタカナ表記のみ返す (HQ catalog 照合のため)。
 
     fail-closed:
-      - image_urls 空 → 空文字
-      - 商品本体画像 URL が見つからない (DOM 仕様変更?) → 空文字
+      - image_urls 空 / 商品本体画像 URL が無い → 空文字
       - color_vision モジュールが API key 等の都合で動作不能 → 空文字
-      - AI 応答が「不明」/ 複数色 / 異常出力 → 空文字
+      - AI 応答が「不明」/ 複数色 / 異常出力 / 漢字 → 空文字
       - 例外発生 → 空文字 (harvest 全体は止めない)
     """
+    # Step 1: 確定的なテキスト抽出 (AI 不要、優先)
+    try:
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        text_color = extract_katakana_color_from_text(title, description)
+        if text_color:
+            return text_color
+    except Exception:
+        pass
+
+    # Step 2: AI Vision fallback
     product_url = _first_product_image_url(image_urls)
     if not product_url:
         return ""
@@ -315,7 +341,9 @@ def _judge_color(image_urls: list[str] | None) -> str:
     except Exception:
         return ""
     try:
-        return judge_color_from_image_url(product_url)
+        return judge_color_from_image_url(
+            product_url, title=title, description=description,
+        )
     except Exception:
         return ""
 

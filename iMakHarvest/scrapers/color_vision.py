@@ -62,15 +62,149 @@ SENTENCE_MARKERS = (
 # 色名以外の異常出力ガード上限文字数 (シャンパンゴールド = 9 字相当まで許容)
 MAX_COLOR_LEN = 12
 
-# プロンプト (出力フォーマットを厳格化)
-COLOR_PROMPT = """この商品画像から、商品本体の主要な色を判定してください。
+# プロンプト (出力フォーマットを厳格化、カタカナ強制)
+# Phase 1d-2 改訂: HQ catalog の color_variants["jp"] がカタカナ統一されているため、
+# 抽出くん出力もカタカナで揃える (漢字混在は HQ 側に正規化辞書を強要する負債になる)。
+COLOR_PROMPT_NO_CONTEXT = """この商品画像から、商品本体の主要な色を判定してください。
 
-ルール:
-- 確信できる単一色のみ答える (例: 黒、白、赤、青、緑、黄、グレー、ベージュ、茶、ピンク、紫、オレンジ、ネイビー、水色、アイボリー 等)
-- 複数色が混在し主要色を1つに決められない場合: 「不明」
-- 商品が判別できない / 画像不鮮明: 「不明」
-- 出力は色名 1 単語のみ。説明文・複数候補・記号・引用符は禁止
-- 「○○色」のような接尾辞も禁止 (× 「黒色」 → ○ 「黒」)"""
+【出力ルール (絶対遵守)】
+- 色名は **必ずカタカナ表記** で答える (漢字での出力禁止)
+  例: × 「赤」「緑」「青」「黄」「黒」「白」 → ○ 「レッド」「グリーン」「ブルー」「イエロー」「ブラック」「ホワイト」
+- 複合色は丸めず詳細表記のまま答える
+  例: ライトグリーン、ダークブルー、ペールピンク、ディープレッド 等は **そのまま**
+- 確信できる単一色のみ答える
+- 複数色が混在し主要色を 1 つに決められない / 商品判別不能: 「不明」
+- 出力は色名 1 単語のみ。説明文・複数候補・記号・引用符・色サフィックス禁止
+- 接尾辞「○○色」「○○カラー」も禁止 (× 「ブラック色」「レッドカラー」)"""
+
+COLOR_PROMPT_WITH_CONTEXT_TEMPLATE = """この商品の主要な色を判定してください。
+画像 + 出品者が記載した商品情報の両方を参考にします。
+
+【商品情報】
+タイトル: {title}
+商品説明 (抜粋): {description}
+
+【出力ルール (絶対遵守)】
+- 色名は **必ずカタカナ表記** で答える (漢字での出力禁止)
+  例: × 「赤」「緑」「青」「黄」 → ○ 「レッド」「グリーン」「ブルー」「イエロー」
+- タイトル / 商品説明に色名 (カタカナ) が明記されていれば、その **原文表記をそのまま** 使う
+  例: タイトルに「グリーン」 → 「グリーン」
+  例: 説明文に「ライトグリーン」 → 「ライトグリーン」(「グリーン」に丸めない)
+  例: 説明文に「ネイビー」 → 「ネイビー」(「ブルー」に丸めない)
+- 商品情報になく画像のみで判断する場合もカタカナで答える
+- 商品情報と画像で色が食い違う場合は **商品情報を優先**
+- 複数色混在で主色不明 / 判別不能: 「不明」
+- 出力は色名 1 単語のみ。説明文・複数候補・記号・引用符・色サフィックス禁止
+- 接尾辞「○○色」「○○カラー」も禁止"""
+
+# context あり版で含める description の最大文字数 (プロンプト肥大防止)
+DESCRIPTION_CONTEXT_MAX_CHARS = 300
+
+# ============================================================================
+# カタカナ色名 whitelist (Phase 1d-2: HQ catalog/eBay enum マッピング前段)
+# ============================================================================
+# 役割: Harvest 側は出品者の原文表記 (カタカナ) を S 列に保存。
+# catalog (color_variants["jp"]) との照合 + eBay 16 色 enum 正規化は HQ 側責務。
+# Harvest は誤判定リスクを避けるため、確定的に抽出できるカタカナ色名のみ採用、
+# 以外は AI Vision に任せる (AI もカタカナ強制プロンプト)。
+
+# 基本 15 色 (eBay enum と同じ概念体系)
+BASE_KATAKANA_COLORS = (
+    "ブラック",
+    "ホワイト",
+    "レッド",
+    "ブルー",
+    "グリーン",
+    "イエロー",
+    "オレンジ",
+    "ピンク",
+    "パープル",
+    "ブラウン",
+    "グレー",
+    "ベージュ",
+    "シルバー",
+    "ゴールド",
+    "アイボリー",
+)
+
+# 追加 12 色 (メルカリ慣用、catalog の詳細色とのマッチング用)
+EXTENDED_KATAKANA_COLORS = (
+    "ネイビー",
+    "カーキ",
+    "マスタード",
+    "ターコイズ",
+    "ワインレッド",
+    "ボルドー",
+    "ガーネット",
+    "チャコール",
+    "モスグリーン",
+    "オリーブ",
+    "バーガンディ",
+    "セージ",
+)
+
+# 複合色 prefix
+COMPOUND_PREFIXES = ("ライト", "ダーク", "ペール", "ディープ")
+
+
+def _build_color_whitelist() -> tuple[str, ...]:
+    """全 katakana 色名 whitelist (longest-match-first sort).
+
+    返り値:
+      - 複合色 ("ライトグリーン", "ダークブルー" 等) を base 色より先に検出するため
+        長い順に sort。
+      - 重複除去 (set)。
+    """
+    base_all = BASE_KATAKANA_COLORS + EXTENDED_KATAKANA_COLORS
+    compounds = tuple(
+        f"{prefix}{base}"
+        for prefix in COMPOUND_PREFIXES
+        for base in base_all
+    )
+    all_colors = compounds + base_all
+    # longest first (例: 「ライトグリーン」を「グリーン」より先に検出)
+    return tuple(sorted(set(all_colors), key=len, reverse=True))
+
+
+KATAKANA_COLOR_WHITELIST = _build_color_whitelist()
+
+
+def extract_katakana_color_from_text(title: str, description: str) -> str:
+    """title / description から最初に出現するカタカナ色名 (whitelist 一致) を抽出.
+
+    検索優先順:
+      1. title 内の whitelist 色名 (longest match first)
+      2. description 内の whitelist 色名 (longest match first)
+    どこにも該当なし → 空文字 (caller は AI fallback すべし)
+
+    longest-match-first により「ライトグリーン」「ダークブルー」のような複合色を
+    丸めずそのまま採用する (catalog の詳細色マッチング用)。
+    """
+    for source in (title or "", description or ""):
+        if not source:
+            continue
+        for color in KATAKANA_COLOR_WHITELIST:
+            if color in source:
+                return color
+    return ""
+
+
+# 漢字 reject 用: Han ideograph (CJK Unified Ideographs) range
+def _is_kanji_only(s: str) -> bool:
+    """文字列が漢字のみ (末尾「色」suffix も含む) かを判定.
+
+    True 例: "黒", "赤", "黒色", "深緑色"
+    False 例: "レッド", "ライトグリーン", "ABC", "黒レッド" (混在)
+    """
+    if not s:
+        return False
+    core = s[:-1] if s.endswith("色") else s
+    if not core:
+        return False
+    return all("一" <= c <= "鿿" for c in core)
+
+# 後方互換: COLOR_PROMPT は context 無し版の alias として残す
+COLOR_PROMPT = COLOR_PROMPT_NO_CONTEXT
 
 
 # anthropic クライアントは lazy 初期化 (anthropic 未インストール環境でも import エラー回避)
@@ -131,6 +265,8 @@ def parse_color_response(text: str) -> str:
       - 文章マーカー (です/ます/は/が 等) を含む → 空文字
       - 複数語 (空白区切り 2 語以上) → 空文字
       - 文字数 > MAX_COLOR_LEN → 空文字
+      - **漢字のみの出力は reject** (Phase 1d-2: katakana 強制プロンプトに違反した
+        AI 出力を排除。catalog 統一のため。例: "黒"/"赤色" → 空文字、"レッド" → OK)
       - 接尾辞「色」「カラー」は剥がさず透過 (「水色」「ローズピンク」等を壊さない)
     """
     if not text:
@@ -159,23 +295,55 @@ def parse_color_response(text: str) -> str:
     if len(s) > MAX_COLOR_LEN:
         return ""
 
+    # 漢字 reject (Phase 1d-2: katakana 強制プロンプトに違反した AI 出力を排除)
+    if _is_kanji_only(s):
+        return ""
+
     return s.strip()
+
+
+def _build_prompt(title: str, description: str) -> str:
+    """title / description から AI 用 prompt を構築.
+
+    - title と description の両方が空 → context 無し版の prompt
+    - どちらか有り → context あり版 (出品者表記を優先するルール付き)
+    description は MAX_CHARS で切り詰め (プロンプト肥大防止)。
+    """
+    title_clean = (title or "").strip()
+    desc_clean = (description or "").strip()
+    if not title_clean and not desc_clean:
+        return COLOR_PROMPT_NO_CONTEXT
+    desc_excerpt = desc_clean[:DESCRIPTION_CONTEXT_MAX_CHARS]
+    if len(desc_clean) > DESCRIPTION_CONTEXT_MAX_CHARS:
+        desc_excerpt += "..."
+    return COLOR_PROMPT_WITH_CONTEXT_TEMPLATE.format(
+        title=title_clean or "(なし)",
+        description=desc_excerpt or "(なし)",
+    )
 
 
 def judge_color_from_image_url(
     image_url: str,
+    title: str = "",
+    description: str = "",
     timeout: float = DEFAULT_TIMEOUT_SEC,
     client=None,
 ) -> str:
     """画像 URL から商品の主要色を判定 (fail-closed).
 
     Args:
-        image_url: 公開アクセス可能な商品画像 URL
-        timeout:   API タイムアウト秒
-        client:    テスト用 mock client (None なら _get_client() を使用)
+        image_url:   公開アクセス可能な商品画像 URL
+        title:       商品タイトル (空なら使わない)
+        description: 商品説明 (空なら使わない、長文は冒頭 N 字で切り詰め)
+        timeout:     API タイムアウト秒
+        client:      テスト用 mock client (None なら _get_client() を使用)
+
+    title / description が与えられた場合、AI は画像 + テキスト両方を見て判定する。
+    タイトル/説明文に色名 (「グリーン」「ネイビー」等) が明記されていれば、
+    その **原文表記をそのまま** 採用 (HQ 側 listing スクリプトで eBay 16 色 enum に正規化)。
 
     Returns:
-        確信できる単一色名 (詳細色名のまま、例: 「ネイビー」「ベージュ」) または "" (空文字)。
+        確信できる単一色名 (詳細色名のまま、例: 「ネイビー」「ベージュ」「グリーン」) または ""。
         以下のすべてのケースで空文字を返す (上位は無条件で空欄として扱える):
           - 画像 URL 空 / API key 無し / anthropic SDK 未インストール
           - API timeout / network error / rate limit / その他例外
@@ -188,6 +356,8 @@ def judge_color_from_image_url(
     cli = client if client is not None else _get_client()
     if cli is None:
         return ""
+
+    prompt = _build_prompt(title=title, description=description)
 
     try:
         msg = cli.messages.create(
@@ -202,7 +372,7 @@ def judge_color_from_image_url(
                             "type": "image",
                             "source": {"type": "url", "url": image_url},
                         },
-                        {"type": "text", "text": COLOR_PROMPT},
+                        {"type": "text", "text": prompt},
                     ],
                 },
             ],

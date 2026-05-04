@@ -29,6 +29,10 @@ debug/*_dump_*.html
 debug/*_dump_*.png
 debug/likes_no_anchor_*.html
 debug/likes_no_anchor_*.png
+debug/size_dom_*.html
+debug/size_dom_*.png
+debug/wishlist_*.html
+debug/wishlist_*.png
 
 # Claude session lock
 .claude/
