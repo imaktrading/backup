@@ -71,6 +71,60 @@ from listing_common import (
     fetch_amazon_title, extract_sku_from_url as _extract_sku,
     CONDITION_MASTER,
 )
+
+# iMakCatalog (2026-05-04 連携): 型番→公式 spec lookup
+# memory: catalog_separation_completed.md / category_specialization_principle.md
+sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "iMakCatalog"))
+try:
+    from api import lookup as _catalog_lookup
+except Exception:
+    _catalog_lookup = None
+
+
+# ============================================================================
+# iMakCatalog spec → eBay Item Specifics マッピング (2026-05-04)
+# ============================================================================
+# Color / Size は実物バリエーションなのでメルカリ/Vision 結果を優先 (catalog 上書きしない).
+# Brand / Type / Style / 素材 / 機能 / 用途 等は公式値 (catalog) で確定 → whitelist 違反ゼロ.
+_CATALOG_SPEC_MAP = {
+    "outer_shell_material": "Outer Shell Material",
+    "lining_material": "Lining Material",
+    "insulation_material": "Insulation Material",
+    "fabric_type": "Fabric Type",
+    "performance_activity": "Performance/Activity",
+    "garment_care": "Garment Care",
+    "jacket_coat_length": "Jacket/Coat Length",
+    "type": "Type",
+    "style": "Style",
+    "country_of_origin": "Country/Region of Manufacture",
+    "department": "Department",
+    "theme": "Theme",
+    "fit": "Fit",
+    "brand": "Brand",
+    "size_type": "Size Type",
+    "pattern": "Pattern",
+    "accents": "Accents",
+    "vintage": "Vintage",
+    "handmade": "Handmade",
+    "closure": "Closure",
+}
+
+
+def _merge_catalog_spec(specs, catalog_spec):
+    """iMakCatalog の specs (snake_case) を eBay Item Specifics (PascalCase) に変換して上書き.
+    catalog_spec は確証ある公式値なので、Claude Vision の推測値を上書きする.
+    Color / Size はメルカリ商品の実物バリエーションなので touch しない.
+    """
+    out = dict(specs)
+    for cat_key, ebay_key in _CATALOG_SPEC_MAP.items():
+        val = catalog_spec.get(cat_key)
+        if val:
+            out[ebay_key] = val
+    # Features (multi, list → カンマ区切り文字列)
+    features = catalog_spec.get("features")
+    if features:
+        out["Features"] = ", ".join(features) if isinstance(features, list) else features
+    return out
 PROFIT_CATEGORY = "Montbell(ジャケット)"
 PRICE_FLOOR_USD = 50
 EXCHANGE_RATE = get_exchange_rate()
@@ -524,6 +578,27 @@ def main():
         size_jp = result.get("size_jp", "")
         size_us = result.get("size_us", specs.get("Size", ""))
         waterproof = result.get("waterproof", False)
+
+        # === iMakCatalog 連携: 型番から公式 spec で Item Specifics 確定 (2026-05-04) ===
+        # I 列の型番 (target.model) があれば catalog lookup → 公式値で Vision 推測を上書き
+        # 取れなければ既存の Vision 結果を fallback として継続
+        catalog_model = target.get("model") or model
+        if catalog_model and _catalog_lookup is not None:
+            try:
+                catalog_result = _catalog_lookup("montbell", catalog_model)
+                if catalog_result and catalog_result.get("specs"):
+                    catalog_spec = catalog_result["specs"]
+                    specs = _merge_catalog_spec(specs, catalog_spec)
+                    cat_name = catalog_result.get("name_jp", "")
+                    print(f"    🎯 iMakCatalog hit: {catalog_model} ({cat_name}) - Item Specifics を公式値で確定")
+                    # MPN/Model 列も確実に
+                    if not model:
+                        model = catalog_model
+                else:
+                    print(f"    ⚠️ iMakCatalog miss: {catalog_model} (Vision 推測値で fallback)")
+            except Exception as e:
+                print(f"    ⚠️ iMakCatalog lookup failed: {type(e).__name__}: {e}")
+
         material = specs.get("Outer Shell Material", "Nylon")
 
         # 80字セーフガード
