@@ -295,7 +295,24 @@ GCENTRAL_SERIES_SLUG = {
     "MTG-B3000": "mtg-b3000",
     "GBA-900":   "gba-900",
     "GBD-200":   "gbd-200",
+    # HQ 拡充依頼 2026-05-05 (eBay sold + LOW スプシ突合発)
+    "GW-9400":   "gw-9400",   # 超優先 RANGEMAN
+    "GWG-1000":  "gwg-1000",  # MUDMASTER
+    "GA-2300":   "ga-2300",   # 超優先 新シリーズ
+    "GA-2000":   "ga-2000",   # 超優先 カーボン
+    "GBD-800":   "gbd-800",   # G-SQUAD
+    "GAW-100":   "gaw-100",   # 電波ソーラー
+    "GA-010":    "ga-010",    # 角型派生
+    "GWN-1000":  "gwn-1000",  # GULFMASTER
+    "GWG-2000":  "gwg-2000",  # MUDMASTER 後継
 }
+
+# casiofanmag 経由 (g-central に articles が無い series 用、補完)
+CASIOFANMAG_SERIES_SLUG = {
+    "GW-3000": "gw-3000",   # g-central なし、SKY COCKPIT 系
+    "BGD-10":  "bgd-10",    # 小規模
+}
+CASIOFANMAG_SERIES_URL_TEMPLATE = "https://casiofanmag.com/g-shock/{slug}/"
 
 
 def discover_models_via_gcentral(series_name: str) -> list:
@@ -412,6 +429,35 @@ def _build_specs_via_gcentral(data: dict, series_name: str,
     }
 
 
+def discover_models_via_casiofanmag(series_name: str) -> list:
+    """casiofanmag のシリーズ記事 page から model_number を抽出.
+
+    g-central に articles が無い series 用の補完経路.
+    """
+    import requests  # type: ignore
+
+    slug = CASIOFANMAG_SERIES_SLUG.get(series_name)
+    if not slug:
+        slug = series_name.lower()
+    url = CASIOFANMAG_SERIES_URL_TEMPLATE.format(slug=slug)
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if r.status_code != 200:
+            return []
+    except Exception:
+        return []
+    pattern = re.compile(rf"({re.escape(series_name)}[A-Z0-9-]+)", re.IGNORECASE)
+    valid_re = re.compile(
+        r"^[A-Z]{2,4}-\d{3,4}[A-Z]{0,4}-\d[A-Z][\dA-Z]{0,3}(?:JF|JR)?$"
+    )
+    found = set()
+    for m in pattern.finditer(r.text):
+        v = m.group(1).upper()
+        if valid_re.match(v):
+            found.add(v)
+    return sorted(found)
+
+
 def update_via_gcentral_only(only_new: bool = True,
                               series_filter: Optional[list] = None) -> dict:
     """g-central + casiofanmag のみで catalog 更新 (CASIO 公式完全 skip).
@@ -430,13 +476,20 @@ def update_via_gcentral_only(only_new: bool = True,
     sys.path.insert(0, str(_GSHOCK_DIR))
     from gshock_to_csv import scrape_gcentral, scrape_casiofanmag  # type: ignore
 
-    target_series = series_filter or list(GCENTRAL_SERIES_SLUG.keys())
+    target_series = series_filter or list(
+        GCENTRAL_SERIES_SLUG.keys() | CASIOFANMAG_SERIES_SLUG.keys()
+    )
     discovered_per_series: dict = {}
     upserted = 0
     skipped = 0
 
     for s in target_series:
         models = discover_models_via_gcentral(s)
+        # g-central で 0 件なら casiofanmag 補完
+        if not models and s in CASIOFANMAG_SERIES_SLUG:
+            models = discover_models_via_casiofanmag(s)
+            if models:
+                print(f"  (casiofanmag fallback for {s})")
         discovered_per_series[s] = models
         print(f"\n=== {s}: discovered {len(models)} models ===")
         for model in models:
