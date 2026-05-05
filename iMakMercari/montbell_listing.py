@@ -159,6 +159,7 @@ _KATAKANA_TO_EBAY_COLOR = {
     "ライトレッド": "Red", "ダークレッド": "Red",
     "マスタード": "Yellow", "ライトイエロー": "Yellow", "ダークイエロー": "Yellow",
     "チャコール": "Gray", "ライトグレー": "Gray", "ダークグレー": "Gray",
+    "ミスト": "Gray",  # montbell 独自 (catalog で en="Not Specified") → Gray 正規化
     "ライトブラウン": "Brown", "ダークブラウン": "Brown",
     "ライトピンク": "Pink", "ダークピンク": "Pink",
     "ライトパープル": "Purple", "ダークパープル": "Purple",

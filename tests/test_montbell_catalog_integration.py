@@ -36,10 +36,10 @@ def test_normalize_color_catalog_direct_hit():
 
 
 def test_normalize_color_catalog_not_specified_skip():
-    """catalog en="Not Specified" は採用しない (辞書 fallback へ)."""
-    cv = [{"suffix": "MIST", "jp": "ミスト", "en": "Not Specified"}]
-    # 辞書にも無いので空文字 (HQ 側で AI fallback)
-    assert _normalize_color_to_ebay("ミスト", cv) == ""
+    """catalog en="Not Specified" は採用しない (辞書 fallback へ落ちる)."""
+    # 辞書にも無い色名で Not Specified スキップ動作のみ検証
+    cv = [{"suffix": "FOO", "jp": "謎色XYZ", "en": "Not Specified"}]
+    assert _normalize_color_to_ebay("謎色XYZ", cv) == ""
 
 
 def test_normalize_color_dictionary_fallback():
@@ -47,6 +47,21 @@ def test_normalize_color_dictionary_fallback():
     assert _normalize_color_to_ebay("ネイビー", []) == "Blue"
     assert _normalize_color_to_ebay("カーキ", []) == "Green"
     assert _normalize_color_to_ebay("ワインレッド", []) == "Red"
+
+
+def test_normalize_color_montbell_mist_to_gray():
+    """montbell 独自「ミスト」(catalog en=Not Specified) → 辞書で Gray 正規化.
+
+    抽出くん Phase 1d-2 と HQ 辞書の二段防御:
+    - 抽出くん whitelist で Step 1 取得 → S列="ミスト"
+    - catalog 突き合わせは en="Not Specified" でスキップ
+    - HQ 辞書 _KATAKANA_TO_EBAY_COLOR["ミスト"]="Gray" で eBay enum 確定
+    """
+    # catalog で en="Not Specified" のケース (実 montbell データと同条件)
+    cv_not_specified = [{"suffix": "MIST", "jp": "ミスト", "en": "Not Specified"}]
+    assert _normalize_color_to_ebay("ミスト", cv_not_specified) == "Gray"
+    # catalog なしでも辞書 fallback で Gray
+    assert _normalize_color_to_ebay("ミスト", []) == "Gray"
 
 
 def test_normalize_color_compound_priority():
