@@ -409,6 +409,7 @@ SCRIPTS = [
     },
     {
         "label": "G-SHOCK",
+        "verified": True,  # 2026-05-06 ユーザーチェック合格 (catalog 連携 + LOW スプシ駆動 + 動的価格決定 + SKU URL ベース + 保証/マニュアル整備)
         "cwd": f"{WORKSPACE}/iMakG-shock",
         "cmd": ["python", "gshock_to_csv.py"],
         "urls_file": f"{WORKSPACE}/iMakG-shock/gshock_urls.txt",
