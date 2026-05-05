@@ -1127,7 +1127,7 @@ def main():
 
     driver.quit()
 
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
     from listing_core import get_csv_output_path
     output_file = get_csv_output_path("gshock", "upload")
     with open(output_file, "w", newline="", encoding="utf-8") as f:
