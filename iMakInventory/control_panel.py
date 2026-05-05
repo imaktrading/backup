@@ -166,6 +166,14 @@ class ControlPanel:
             summary_frame, text="", anchor="w", justify="left",
         )
         self.summary_errors_label.pack(fill="x", padx=4, pady=2)
+        # upload health バナー (事故 2026-05-05 再発防止: not_logged_in 等を即時可視化)
+        self.summary_health_label = tk.Label(
+            summary_frame, text="", anchor="w", justify="left",
+            font=("", 11, "bold"),
+        )
+        self.summary_health_label.pack(fill="x", padx=4, pady=2)
+        # 初期 bg を保存 (健康時に色なし状態に戻す用、ttk parent から取れない問題回避)
+        self._summary_health_default_bg = self.summary_health_label.cget("bg")
 
         # === Mode selector ===
         mode_frame = ttk.LabelFrame(self.root, text="スプシモード")
@@ -765,6 +773,72 @@ class ControlPanel:
 
         # cron 情報
         self._render_cron_info()
+
+        # upload health (事故 2026-05-05 再発防止)
+        self._render_upload_health()
+
+    def _render_upload_health(self):
+        """decision_log/upload_health.json を読んで control_panel 上に状態バナー表示.
+
+        状態優先度 (上から評価):
+          1. not_logged_in_streak >= 1   → 大文字赤 (即対応必要)
+          2. flaky_streak >= 3           → 黄色 (要確認、eBay 履歴目視推奨)
+          3. generic_failure_streak >= 2 → オレンジ (連続失敗)
+          4. last_failure 直近で last_success より新しい → うす赤 (回復未確認)
+          5. その他                       → 緑 OK or 表示なし
+
+        注: tk.Label.configure は指定しないキーを前回値で保持する仕様のため、
+        bg (背景色) は **すべての branch で明示的に設定** する (色残り bug 回避)。
+        """
+        # 健康時の「色なし」状態に戻す用の bg。__init__ で記録した tk.Label 初期色を使う
+        # (ttk.LabelFrame には bg オプションが無く master.cget("bg") は TclError になる)
+        default_bg = getattr(self, "_summary_health_default_bg", None) or "SystemButtonFace"
+
+        try:
+            health_path = SCRIPT_DIR / "decision_log" / "upload_health.json"
+            if not health_path.exists():
+                self.summary_health_label.configure(text="", fg="black", bg=default_bg)
+                return
+            import json as _json  # noqa: PLC0415
+            h = _json.loads(health_path.read_text(encoding="utf-8"))
+        except Exception:
+            self.summary_health_label.configure(text="", fg="black", bg=default_bg)
+            return
+
+        nli = int(h.get("not_logged_in_streak") or 0)
+        fls = int(h.get("flaky_streak") or 0)
+        gen = int(h.get("generic_failure_streak") or 0)
+        last_success = h.get("last_success_ts") or ""
+        last_failure = h.get("last_failure_ts") or ""
+        last_err = (h.get("last_failure_error") or "").strip()
+
+        if nli >= 1:
+            self.summary_health_label.configure(
+                text=f"  ⛔ eBay ログイン切れ: {nli} 回連続未送信  →  即「再ログイン」必要 (last_failure={last_failure[-19:]})",
+                fg="white", bg="red",
+            )
+        elif fls >= 3:
+            self.summary_health_label.configure(
+                text=f"  ⚠️ upload 検出 false negative {fls} 回連続  →  eBay 履歴目視推奨",
+                fg="black", bg="yellow",
+            )
+        elif gen >= 2:
+            self.summary_health_label.configure(
+                text=f"  ⚠️ upload 連続失敗 {gen} 回 (err={last_err[:40]})",
+                fg="white", bg="orange",
+            )
+        elif last_failure and last_failure > (last_success or ""):
+            self.summary_health_label.configure(
+                text=f"  ⚠️ 直近 upload 失敗 (回復未確認): {last_err[:60]} @ {last_failure[-19:]}",
+                fg="dark orange", bg=default_bg,
+            )
+        elif last_success:
+            self.summary_health_label.configure(
+                text=f"  🟢 upload OK (last success: {last_success[-19:]})",
+                fg="dark green", bg=default_bg,
+            )
+        else:
+            self.summary_health_label.configure(text="", fg="black", bg=default_bg)
 
     def _render_errors(self, errors: int, prefix: str = "errors="):
         if errors > self.ERRORS_WARN_THRESHOLD:

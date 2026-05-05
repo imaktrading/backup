@@ -49,6 +49,7 @@ from sheet_updater import (  # noqa: E402
 )
 from ebay_actions.revise_csv_generator import run as run_revise_csv  # noqa: E402
 from ebay_actions.sell_feed_uploader import upload_one_csv  # noqa: E402
+from upload_health import record_upload_result  # noqa: E402
 from ebay_actions.listing_verifier import verify_listings  # noqa: E402
 from audit import sample_and_append as audit_sample_and_append  # noqa: E402
 from backup import (  # noqa: E402
@@ -549,10 +550,20 @@ def run_cycle(
             # Phase 3: upload
             progress_writer.update(phase="upload", force=True)
             csv_path = r.get("csv_path") if isinstance(r, dict) else None
+            csv_lines_for_health = (r.get("allowed") if isinstance(r, dict) else None)
             if not csv_path or skip_upload:
                 _log(f"  upload skip (csv_path={csv_path}, skip_upload={skip_upload})", test_mode)
                 cycle_log["phases"]["upload"] = {"skipped": "csv_path none or skip_upload"}
                 cycle_log["status"] = "success_no_upload"
+                # health: skipped 記録 (streak 変えず履歴のみ)
+                try:
+                    record_upload_result(
+                        cycle_log["phases"]["upload"],
+                        csv_path=csv_path, csv_lines=csv_lines_for_health,
+                        cycle_ts=cycle_log["ts_start"],
+                    )
+                except Exception as e:
+                    _log(f"  ⚠️ upload_health record 失敗 (skipped path): {type(e).__name__}: {e}", test_mode)
             else:
                 u = _phase_upload(csv_path, test_mode)
                 cycle_log["phases"]["upload"] = u
@@ -560,6 +571,23 @@ def run_cycle(
                     cycle_log["status"] = "success"
                 else:
                     cycle_log["status"] = "upload_failed"
+                # health: 成否を記録 + 必要なら通知発火 (3 経路冗長)
+                try:
+                    health_res = record_upload_result(
+                        u, csv_path=csv_path, csv_lines=csv_lines_for_health,
+                        cycle_ts=cycle_log["ts_start"],
+                    )
+                    cycle_log["phases"]["upload_health"] = {
+                        "alert_fired": health_res.get("alert_fired"),
+                        "reason": health_res.get("reason"),
+                        "not_logged_in_streak": health_res["health"].get("not_logged_in_streak"),
+                        "flaky_streak": health_res["health"].get("flaky_streak"),
+                        "generic_failure_streak": health_res["health"].get("generic_failure_streak"),
+                    }
+                    if health_res.get("alert_fired"):
+                        _log(f"  🚨 upload_health ALERT 発火 (reason={health_res.get('reason')})", test_mode)
+                except Exception as e:
+                    _log(f"  ⚠️ upload_health record 失敗: {type(e).__name__}: {e}", test_mode)
 
         # Phase 4: audit sample (Phase 7d') — IN_STOCK から 5 件抜き取り → audit シート追記
         # cycle status に関わらず実行 (in_stock データがあれば audit する)
