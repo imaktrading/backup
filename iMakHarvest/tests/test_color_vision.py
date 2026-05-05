@@ -560,6 +560,35 @@ class TestExtractKatakanaColorFromText:
             description="",
         ) == "ライトグリーン"
 
+    def test_mist_extracted_when_in_title(self):
+        """2026-05-05 追加: row 464 で観測された「ミスト」を whitelist で確実取得.
+
+        HQ 辞書 (`_KATAKANA_TO_EBAY_COLOR`) と相補的に動作する想定:
+          - 抽出くん: title/desc に「ミスト」 → Step 1 で確実取得 (AI コスト 0)
+          - HQ: 「ミスト」→ Gray に正規化して eBay 16 色 enum に変換
+        """
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(
+            title="モンベル パーカー ミスト L",
+            description="",
+        ) == "ミスト"
+
+    def test_mist_word_boundary_skips_misuto_compound(self):
+        """ミスト + 直後カタカナ → word boundary 不一致 → AI fallback (false positive 回避).
+
+        例: 「ミストファン」「ミストサウナ」のような compound (商品の主機能) を
+        誤判定で「ミスト」と判定しないこと。
+        """
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(
+            title="ミストファン 携帯扇風機",
+            description="",
+        ) == ""
+        assert extract_katakana_color_from_text(
+            title="家庭用 ミストサウナ",
+            description="",
+        ) == ""
+
     def test_real_world_montbell_examples(self):
         # 実 backfill で観測されたケース
         from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415

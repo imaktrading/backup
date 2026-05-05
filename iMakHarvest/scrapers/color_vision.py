@@ -127,7 +127,11 @@ BASE_KATAKANA_COLORS = (
     "アイボリー",
 )
 
-# 追加 12 色 (メルカリ慣用、catalog の詳細色とのマッチング用)
+# 追加色 (メルカリ慣用、catalog の詳細色とのマッチング用)
+# 追加履歴:
+#   - Phase 1d-2 初版 12 色: ネイビー〜セージ
+#   - 2026-05-05 +ミスト (montbell row 464 で AI 判定発生 → Step 1 化で AI コスト 0)
+#     HQ 側 _KATAKANA_TO_EBAY_COLOR は "ミスト": "Gray" マッピングと相補的に動作
 EXTENDED_KATAKANA_COLORS = (
     "ネイビー",
     "カーキ",
@@ -141,6 +145,7 @@ EXTENDED_KATAKANA_COLORS = (
     "オリーブ",
     "バーガンディ",
     "セージ",
+    "ミスト",
 )
 
 # 複合色 prefix
