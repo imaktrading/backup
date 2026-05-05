@@ -89,6 +89,27 @@ class TestDedupeKey:
         k2 = dedupe_key("https://example.com/foo/bar")
         assert k1 == k2
 
+    def test_mercari_shops_url(self):
+        # Phase 1b: Mercari Shops は "shops:<slug>" prefix
+        assert dedupe_key(
+            "https://jp.mercari.com/shops/product/2JNysv3RcsZP37Dt8Zoaof"
+        ) == "shops:2JNysv3RcsZP37Dt8Zoaof"
+
+    def test_mercari_shops_with_query(self):
+        # query 違いを吸収
+        k1 = dedupe_key("https://jp.mercari.com/shops/product/2JNysv3RcsZP37Dt8Zoaof?ref=likes")
+        k2 = dedupe_key("https://jp.mercari.com/shops/product/2JNysv3RcsZP37Dt8Zoaof")
+        assert k1 == k2 == "shops:2JNysv3RcsZP37Dt8Zoaof"
+
+    def test_mercari_regular_and_shops_keys_never_collide(self):
+        # 通常 Mercari の m\d+ と Shops の "shops:<slug>" は prefix で衝突しない
+        regular = dedupe_key("https://jp.mercari.com/item/m12345678901")
+        shops = dedupe_key("https://jp.mercari.com/shops/product/m12345678901")
+        # たとえ slug が偶然 m\d+ 形式でも、prefix 「shops:」 で区別される
+        assert regular == "m12345678901"
+        assert shops == "shops:m12345678901"
+        assert regular != shops
+
 
 # --------------------------------------------------------------------------
 # read_existing_dedupe_keys

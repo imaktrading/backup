@@ -33,6 +33,12 @@ debug/size_dom_*.html
 debug/size_dom_*.png
 debug/wishlist_*.html
 debug/wishlist_*.png
+debug/shops_dom_*.html
+debug/shops_dom_*.png
+debug/shops_detail_dom_*.html
+debug/shops_detail_dom_*.png
+debug/shops_likes_no_anchor_*.html
+debug/shops_likes_no_anchor_*.png
 
 # Claude session lock
 .claude/

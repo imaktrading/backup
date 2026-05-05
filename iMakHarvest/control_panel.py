@@ -21,7 +21,7 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, scrolledtext
 
-from scrapers import amazon_wishlist, mercari_likes
+from scrapers import amazon_wishlist, mercari_likes, mercari_shops_likes
 from sheet_writer import HIGH_SHEET_ID, LISTINGS_GID, LOW_SHEET_ID, write_to_sheet
 from sheet_writer_amazon import write_to_sheet as write_to_sheet_amazon
 
@@ -108,7 +108,7 @@ SERVICE_DEFS = [
      False, "(Phase 2 実装予定)"),
     ("mercari_shops", "メルカリShops",
      "メルカリShopsのお気に入りに登録されている商品を元に情報を抽出します",
-     False, "(Phase 1b 実装予定)"),
+     True, ""),
 ]
 
 
@@ -259,6 +259,9 @@ class HarvestPanel(tk.Tk):
         if key == "mercari":
             self._dispatch_mercari()
             return
+        if key == "mercari_shops":
+            self._dispatch_mercari_shops()
+            return
         if key == "amazon":
             self._dispatch_amazon()
             return
@@ -277,6 +280,24 @@ class HarvestPanel(tk.Tk):
             return
         threading.Thread(
             target=self._run_mercari_thread,
+            args=(sheet_id, gid, label),
+            daemon=True,
+        ).start()
+
+    def _dispatch_mercari_shops(self) -> None:
+        try:
+            sheet_id, gid, label = self._resolve_sheet()
+        except ValueError as e:
+            messagebox.showerror("スプシ URL エラー", str(e))
+            return
+        if not messagebox.askyesno(
+            "確認",
+            f"メルカリShops のいいね一覧から URL を収集し、\n"
+            f"出力先スプシ「{label}」に追記します。\n\n実行しますか？",
+        ):
+            return
+        threading.Thread(
+            target=self._run_mercari_shops_thread,
             args=(sheet_id, gid, label),
             daemon=True,
         ).start()
@@ -345,6 +366,53 @@ class HarvestPanel(tk.Tk):
                 )
             else:
                 items = mercari_likes.collect_liked_urls(headless=headless)
+            self._log(f"  収集完了   : {len(items)} 件")
+            self._set_status(f"スプシ書込中... ({len(items)} 件)")
+            result = write_to_sheet(items, spreadsheet_id=sheet_id, gid=gid)
+            self._log(f"  書込結果   : appended={result['appended']}, "
+                      f"skipped_existing={result['skipped_existing']}, "
+                      f"input={result['input']}")
+            self._set_status(
+                f"完了: 新規 {result['appended']} 件 / 既出 skip {result['skipped_existing']} 件"
+            )
+            self._log("=== 完了 ===")
+            messagebox.showinfo("完了",
+                                f"収集 {len(items)} 件 → 新規追加 {result['appended']} 件 "
+                                f"(既出 skip {result['skipped_existing']} 件)")
+        except Exception as e:
+            self._log(f"!!! エラー: {e}")
+            self._set_status(f"失敗: {type(e).__name__}")
+            messagebox.showerror("エラー", str(e))
+        finally:
+            self._running = False
+            self._set_buttons_state(disabled=False)
+
+    def _run_mercari_shops_thread(self, sheet_id: str, gid: int, label: str) -> None:
+        self._running = True
+        self._set_buttons_state(disabled=True)
+        headless = not self.show_browser_var.get()
+        fetch_detail = self.fetch_detail_var.get()
+        exclude_sold = self.exclude_sold_var.get()
+
+        self._set_status("メルカリShops 収集中...")
+        self._log("=== メルカリShops いいね収集 開始 ===")
+        self._log(f"  出力先     : {label} (sheet_id={sheet_id[:14]}.., gid={gid})")
+        self._log(f"  headless   : {headless}")
+        self._log(f"  詳細取得   : {fetch_detail}")
+        self._log(f"  SOLD除外   : {exclude_sold}")
+        try:
+            if fetch_detail:
+                def progress(cur, total, msg):
+                    self._set_status(f"商品詳細取得中... [{cur}/{total}]")
+                    self._log(f"  [{cur}/{total}] {msg}")
+
+                items = mercari_shops_likes.collect_shops_likes_with_details(
+                    headless=headless,
+                    exclude_sold=exclude_sold,
+                    progress_callback=progress,
+                )
+            else:
+                items = mercari_shops_likes.collect_shops_liked_urls(headless=headless)
             self._log(f"  収集完了   : {len(items)} 件")
             self._set_status(f"スプシ書込中... ({len(items)} 件)")
             result = write_to_sheet(items, spreadsheet_id=sheet_id, gid=gid)

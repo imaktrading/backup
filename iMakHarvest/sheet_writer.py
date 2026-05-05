@@ -62,26 +62,36 @@ HARVEST_UNTOUCHED_COLS = (COL_EBAY_ITEM_ID, COL_INVENTORY_FLAG)
 # 書込み列数 default. A〜T (1-20) を含む 20 列構成.
 DEFAULT_COLUMN_COUNT = 20
 
-# デデュープ key 抽出: メルカリ /item/m12345 / /items/m12345 → m12345
+# デデュープ key 抽出
+# - メルカリ通常品: /item/m12345 / /items/m12345 → "m12345" (prefix なし、既存行との互換維持)
+# - メルカリ Shops: /shops/product/<slug22> → "shops:<slug>" (prefix で通常品と衝突回避)
 _MERCARI_ID_RE = re.compile(r"/items?/(m\d+)", re.IGNORECASE)
-# Phase 1b/1c で Amazon ASIN・他 supplier の正規表現を追加予定
+_MERCARI_SHOPS_ID_RE = re.compile(r"/shops/product/([A-Za-z0-9]+)")
 
 
 def dedupe_key(url: str) -> str:
     """URL からデデュープ用キーを生成.
 
-    - mercari item_id (m\\d+) が抽出できればそれを返す (?ref=likes 等の query 違いを吸収)
-    - 抽出できなければ URL の query/fragment を除いた正規化形を返す
-    - 空文字なら "" を返す (空 key は append しない側で弾く)
+    - mercari 通常品 (/item/m12345) → "m12345"
+      (既存スプシ行との互換のため prefix を付けない)
+    - mercari Shops (/shops/product/<slug>) → "shops:<slug>"
+      (通常品の m\\d+ と prefix で衝突回避)
+    - その他: URL 正規化 (query/fragment/末尾スラッシュ除去) + lowercase
+    - 空文字なら "" (空 key は append しない側で弾く)
     """
     if not url:
         return ""
     s = url.strip()
     if not s:
         return ""
+    # メルカリ通常品 (m\d+)
     m = _MERCARI_ID_RE.search(s)
     if m:
         return m.group(1)
+    # メルカリ Shops (slug)
+    m = _MERCARI_SHOPS_ID_RE.search(s)
+    if m:
+        return f"shops:{m.group(1)}"
     # 他 supplier 暫定対応: query / fragment / 末尾スラッシュを除去
     return s.split("?")[0].split("#")[0].rstrip("/").lower()
 
