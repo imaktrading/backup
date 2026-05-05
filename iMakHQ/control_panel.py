@@ -279,6 +279,7 @@ SCRIPTS = [
     },
     {
         "label": "Montbell",
+        "verified": True,  # 2026-05-05 ユーザーチェック合格 (catalog name_en 連携 + 抽出くん S/T 列 + ConditionDescription AI 改善)
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "montbell_listing.py"],
         "params": [],
