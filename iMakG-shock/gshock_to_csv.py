@@ -1059,11 +1059,13 @@ def main():
     errors = []
 
     # ホワイトリスト検証（Pythonマッピングのバグ検出用、Claude無いのでリトライ不可）
+    # 2026-05-05 専門化: 共有 whitelist_registry から gshock_whitelist (専用) に切替
+    # memory: category_specialization_principle.md / no_modification_chain.md
     try:
         import sys as _sys
         import os as _os
-        _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
-        from whitelist_registry import validate_and_normalize as _validate_specs
+        _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        from gshock_whitelist import validate_and_normalize as _validate_specs
     except Exception:
         _validate_specs = None
 
@@ -1096,7 +1098,7 @@ def main():
                 for h, v in zip(headers, row):
                     if h.startswith("C:"):
                         specs_dict[h[2:]] = v  # "C:Brand" → "Brand"
-                normalized, viol = _validate_specs(specs_dict, "gshock")
+                normalized, viol = _validate_specs(specs_dict)
                 if viol:
                     print(f"    ⚠️ ホワイトリスト違反{len(viol)}件:")
                     for f, o, _e, r in viol:
