@@ -711,7 +711,9 @@ def _catalog_record_to_scrape_dict(record, fallback_model):
         "weight":            specs.get("weight", ""),
         "year":              specs.get("year", ""),
         "display":           specs.get("display", ""),
-        "features":          specs.get("features", ""),
+        # catalog 側 features は list の場合あり (Catalog Phase 2026-05-05 拡充以降).
+        # build_row → trim_features() は string を期待 → list なら "," 結合で string 化.
+        "features":          ", ".join(specs["features"]) if isinstance(specs.get("features"), list) else specs.get("features", ""),
         "is_metal":          bool(specs.get("is_metal", False)),
     }
     # band_strap_override: scrape_casio は "Two-Piece Strap" 以外の時のみセット
