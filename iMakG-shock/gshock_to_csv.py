@@ -34,6 +34,11 @@ except Exception:
 URLS_FILE = "gshock_urls.txt"
 DESCRIPTION_FILE = "GSHOCK.txt"
 DEFAULT_PRICE = 100.00
+
+# 統合 LOW スプシ (抽出くん管理、R='G-shock' の行を取込)
+GSHOCK_SHEET_ID = "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0"
+GSHOCK_GID = 851100680
+GSHEET_CREDS = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "double-hold-421922-7c0d38d3f73d.json")
 RETURN_POLICY = "customer1"
 PAYMENT_POLICY = "SALE"
 LOCATION = "Japan"
@@ -366,6 +371,112 @@ SQUARE_MODELS = [
 def extract_model_from_url(url):
     m = re.search(r'product\.([A-Z0-9\-]+)', url)
     return m.group(1) if m else None
+
+
+def build_casio_url(model):
+    """型番から CASIO 公式 URL を生成 (scrape_casio fallback 用).
+
+    catalog MISS 時のみ scrape_casio が呼ばれるが、その入力に CASIO URL が必要.
+    スプシ駆動 (Amazon/メルカリ URL) の場合に本関数で CASIO URL を構築する.
+    """
+    return f"https://www.casio.com/jp/watches/gshock/product.{model}/"
+
+
+def extract_model_from_text(text):
+    """テキスト (タイトル/説明文) から CASIO 型番を抽出.
+
+    パターン: GA-2100-1A1JF / DW-5600AKA-4JR / GMW-B5000BT-1 / GA-B010BEG-1AJF 等
+    複数候補ある場合は最も長い (= 最も具体的な) フル型番を返す.
+
+    制約:
+    - 接頭 1-4 大文字 + ハイフン + 残りに数字を最低 1 文字含む
+    - 末尾 JF/JR は optional (国内モデルサフィックス)
+    - "G-SHOCK" 等の数字を含まない文字列を除外
+    """
+    if not text:
+        return None
+    # 接頭ハイフンの後に数字を 1 文字以上必須 ("G-SHOCK" を除外)
+    matches = re.findall(r'\b([A-Z]{1,4}-(?=[A-Z0-9-]*\d)[A-Z0-9-]{3,18}(?:JF|JR)?)\b', text)
+    # 最長 (= 最具体的) → ハイフン多 で優先
+    matches.sort(key=lambda m: (-len(m), -m.count('-')))
+    for m in matches:
+        if '-' in m and len(m) >= 6:
+            return m
+    return None
+
+
+def load_targets_from_low_sheet():
+    """統合 LOW スプシから R='G-shock' AND B 列空 AND D 列空 の行を取込.
+
+    Returns:
+        [(url, model), ...] のリスト
+        url: スプシ A 列の値 (Amazon/メルカリ等、build_row は無視するが scrape_casio
+             fallback 時に CASIO URL を build_casio_url で別生成して使う).
+        model: タイトル/説明から regex 抽出した CASIO 型番.
+
+    型番抽出失敗の行は SKIP (Precision 100% 原則).
+    """
+    if not _os.path.exists(GSHEET_CREDS):
+        print(f"⚠️ Google認証ファイルなし: {GSHEET_CREDS} → スプシ取込スキップ")
+        return []
+
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        creds = Credentials.from_service_account_file(
+            GSHEET_CREDS,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(GSHOCK_SHEET_ID)
+        ws = sh.get_worksheet_by_id(GSHOCK_GID)
+        all_values = ws.get_all_values()
+    except Exception as e:
+        print(f"⚠️ スプシ取込失敗: {type(e).__name__}: {e} → URL ファイル fallback")
+        return []
+
+    targets = []
+    skipped_no_model = 0
+    skipped_uncertain = 0
+    for row in all_values[1:]:
+        url      = (row[0]  if len(row) > 0  else '').strip()  # A
+        item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
+        title_jp = (row[2]  if len(row) > 2  else '').strip()  # C
+        sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ
+        desc     = (row[7]  if len(row) > 7  else '').strip()  # H 商品説明
+        title_en = (row[8]  if len(row) > 8  else '').strip()  # I Title
+        category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
+
+        if not url or item_id or sold:
+            continue
+        # R 列='G-shock' なら確実取込.
+        # R 列空 (抽出くんがカテゴリ未設定) でも catalog HIT すれば G-shock として救済.
+        # R 列='Tシャツ' 等の別カテゴリ確定は除外 (誤マッチ防止).
+        if category and category != 'G-shock':
+            continue
+        # タイトル/説明から CASIO 型番抽出
+        text = title_jp + ' ' + title_en + ' ' + desc
+        model = extract_model_from_text(text)
+        if not model:
+            skipped_no_model += 1
+            continue
+        # R 列空の場合: catalog HIT を必須にして誤マッチ (別ブランドの似た型番) を排除
+        if not category and _catalog_lookup is not None:
+            try:
+                _cat = _catalog_lookup(model)
+                if not _cat:
+                    skipped_uncertain += 1
+                    continue
+            except Exception:
+                skipped_uncertain += 1
+                continue
+        targets.append((url, model))
+
+    if skipped_no_model:
+        print(f"⚠️ {skipped_no_model} 件は型番抽出失敗で SKIP (Precision 100% 原則)")
+    if skipped_uncertain:
+        print(f"⚠️ {skipped_uncertain} 件は R列空 + catalog MISS で SKIP (G-shock 判定不確実)")
+    return targets
 
 def get_store_category(model):
     key = model.upper().replace("-", "")
@@ -1017,15 +1128,31 @@ def build_row(url, price, data, base_desc):
 
 def main():
     print("=== iMak Trading Japan - G-SHOCK CASIO URL → eBay CSV ===\n")
+    # 2026-05-05: 入力経路を LOW スプシ駆動 (主) + URL ファイル (fallback) に拡張
+    # memory: dropshipping_model_premise (抽出くん収集 → 出品くん自動連動)
+    print("📊 LOW スプシから R='G-shock' 行を取込中...")
+    sheet_targets = load_targets_from_low_sheet()  # [(url, model), ...]
+    print(f"  スプシ取込: {len(sheet_targets)} 件")
+
+    file_targets = []
     try:
         with open(URLS_FILE, "r") as f:
-            urls = [l.strip() for l in f if l.strip() and l.startswith("http")]
+            file_urls = [l.strip() for l in f if l.strip() and l.startswith("http")]
+        for u in file_urls:
+            m = extract_model_from_url(u)
+            if m:
+                file_targets.append((u, m))
+        print(f"  URL ファイル: {len(file_targets)} 件")
     except FileNotFoundError:
-        print(f"エラー: {URLS_FILE} が見つかりません。")
+        print(f"  URL ファイル ({URLS_FILE}) なし → スプシのみ")
+
+    targets = sheet_targets + file_targets
+    if not targets:
+        print(f"エラー: 処理対象なし (スプシも URL ファイルも空)")
         input("Enterで終了...")
         return
 
-    print(f"{len(urls)}件を処理します。\n")
+    print(f"\n合計 {len(targets)} 件を処理します。\n")
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
     driver = uc.Chrome(options=options, version_main=146)
@@ -1069,8 +1196,7 @@ def main():
     except Exception:
         _validate_specs = None
 
-    for url in urls:
-        model = extract_model_from_url(url)
+    for url, model in targets:
         print(f"取得中: {model}...", end="", flush=True)
         # Phase 3-B (2026-04-29): catalog hit 経路 — Selenium scrape を skip.
         # catalog miss / 未投入 / 例外 → 既存 scrape_casio フォールバック (byte 互換).
@@ -1087,7 +1213,9 @@ def main():
                 print(f" [catalog err: {type(_e).__name__}]", end="", flush=True)
                 data = None
         if data is None:
-            data = scrape_casio(driver, url)
+            # スプシ駆動の場合 url が CASIO 公式形式でない (Amazon 等) → CASIO URL に変換
+            scrape_url = url if 'casio.com' in url else build_casio_url(model)
+            data = scrape_casio(driver, scrape_url)
         if data:
             print(f" → {data.get('case_size','?')} / {data.get('crystal','?')} / StoreCat:{get_store_category(data['model_base'])} ✓")
             row = build_row(url, DEFAULT_PRICE, data, base_desc)
