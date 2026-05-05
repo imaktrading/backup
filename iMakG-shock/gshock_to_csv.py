@@ -20,6 +20,7 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from listing_common import (
     normalize_title, audit_csv_row, CONDITION_MASTER,
     get_default_condition_description,
+    extract_sku_from_url as _extract_sku_from_url,
 )
 # 動的価格決定 (2026-05-05 追加、Montbell パターン)
 from profit_params import compute_min_price_usd
@@ -1260,6 +1261,12 @@ def main():
                     pass
             print(f"    💲 ${price} (仕入¥{cost_jpy})")
             row = build_row(url, price, data, base_desc)
+            # SKU 上書き: 共通ルール (TCG/Tshirt/Montbell と同じ、URL 末尾 12 文字).
+            # CASIO 公式 URL の場合は build_row の model_official (型番) をそのまま維持.
+            if 'casio.com' not in url:
+                _sku = _extract_sku_from_url(url, category="gshock")
+                if _sku:
+                    row[6] = _sku  # CustomLabel
 
             # 検証＋正規化（C: プレフィックス列のみ抽出）
             if _validate_specs:
