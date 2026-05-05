@@ -124,7 +124,7 @@ def test_load_targets_filters_by_category_gshock():
             targets = gshock_to_csv.load_targets_from_low_sheet()
     # G-shock 2 件のみ
     assert len(targets) == 2
-    models = [m for _, m in targets]
+    models = [t[1] for t in targets]
     assert 'GA-2100-1A1JF' in models
     assert 'DW-5600AKA-4JR' in models
 

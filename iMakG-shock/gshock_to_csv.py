@@ -21,6 +21,16 @@ from listing_common import (
     normalize_title, audit_csv_row, CONDITION_MASTER,
     get_default_condition_description,
 )
+# 動的価格決定 (2026-05-05 追加、Montbell パターン)
+from profit_params import compute_min_price_usd
+try:
+    from pricing_engine import compute_listing_price as _compute_listing_price
+except Exception:
+    _compute_listing_price = None
+try:
+    from check_csv_core import fetch_ebay_market_median as _fetch_ebay_median
+except Exception:
+    _fetch_ebay_median = None
 
 # Phase 3-B (2026-04-29): iMakCatalog adapter — catalog hit 時に Selenium scrape を skip.
 # 失敗時 (iMakCatalog 未配置 / DB 未投入) は静かに None フォールバックして既存挙動を維持する.
@@ -33,7 +43,11 @@ except Exception:
 
 URLS_FILE = "gshock_urls.txt"
 DESCRIPTION_FILE = "GSHOCK.txt"
-DEFAULT_PRICE = 100.00
+DEFAULT_PRICE = 100.00     # F 列空 + URL ファイル駆動時の fallback
+PROFIT_CATEGORY = "G-SHOCK"  # profit_params.categories キー
+PRICE_FLOOR_USD = 50         # 最低価格保証 (Montbell と同じ運用)
+EBAY_CATEGORY_GSHOCK = "31387"  # eBay Wristwatches カテゴリ
+COST_JPY_FALLBACK = 5000     # 価格情報全空時の cost 推定値 (Montbell と同値)
 
 # 統合 LOW スプシ (抽出くん管理、R='G-shock' の行を取込)
 GSHOCK_SHEET_ID = "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0"
@@ -409,10 +423,12 @@ def load_targets_from_low_sheet():
     """統合 LOW スプシから R='G-shock' AND B 列空 AND D 列空 の行を取込.
 
     Returns:
-        [(url, model), ...] のリスト
+        [(url, model, price_jpy_str), ...] のリスト
         url: スプシ A 列の値 (Amazon/メルカリ等、build_row は無視するが scrape_casio
              fallback 時に CASIO URL を build_casio_url で別生成して使う).
         model: タイトル/説明から regex 抽出した CASIO 型番.
+        price_jpy_str: F 列 (商品価格円) の生文字列 (例: "17600", "¥17,600", "").
+                       空時は main() で COST_JPY_FALLBACK 適用.
 
     型番抽出失敗の行は SKIP (Precision 100% 原則).
     """
@@ -442,6 +458,7 @@ def load_targets_from_low_sheet():
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
         title_jp = (row[2]  if len(row) > 2  else '').strip()  # C
         sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ
+        price_f  = (row[5]  if len(row) > 5  else '').strip()  # F 商品価格 (仕入参考)
         desc     = (row[7]  if len(row) > 7  else '').strip()  # H 商品説明
         title_en = (row[8]  if len(row) > 8  else '').strip()  # I Title
         category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
@@ -456,7 +473,7 @@ def load_targets_from_low_sheet():
         if not model:
             skipped_no_model += 1
             continue
-        targets.append((url, model))
+        targets.append((url, model, price_f))
 
     if skipped_no_model:
         print(f"⚠️ {skipped_no_model} 件は型番抽出失敗で SKIP (Precision 100% 原則)")
@@ -1127,7 +1144,7 @@ def main():
         for u in file_urls:
             m = extract_model_from_url(u)
             if m:
-                file_targets.append((u, m))
+                file_targets.append((u, m, ""))  # URL ファイル経由は price_jpy 空 (cost fallback)
         print(f"  URL ファイル: {len(file_targets)} 件")
     except FileNotFoundError:
         print(f"  URL ファイル ({URLS_FILE}) なし → スプシのみ")
@@ -1182,7 +1199,7 @@ def main():
     except Exception:
         _validate_specs = None
 
-    for url, model in targets:
+    for url, model, price_jpy_str in targets:
         print(f"取得中: {model}...", end="", flush=True)
         # Phase 3-B (2026-04-29): catalog hit 経路 — Selenium scrape を skip.
         # catalog miss / 未投入 / 例外 → 既存 scrape_casio フォールバック (byte 互換).
@@ -1204,7 +1221,45 @@ def main():
             data = scrape_casio(driver, scrape_url)
         if data:
             print(f" → {data.get('case_size','?')} / {data.get('crystal','?')} / StoreCat:{get_store_category(data['model_base'])} ✓")
-            row = build_row(url, DEFAULT_PRICE, data, base_desc)
+            # 動的価格決定 (2026-05-05 Montbell パターン適用)
+            # F 列 (price_jpy_str) を仕入参考にして pricing_engine で算出
+            cost_jpy = COST_JPY_FALLBACK
+            if price_jpy_str:
+                _ps = re.sub(r"[^0-9]", "", price_jpy_str)
+                if _ps:
+                    cost_jpy = int(_ps)
+            try:
+                min_price = compute_min_price_usd(cost_jpy, PROFIT_CATEGORY)
+            except Exception:
+                min_price = DEFAULT_PRICE
+            price = max(min_price, PRICE_FLOOR_USD)
+            price = round(price, 2)
+            price = int(price) + 0.98 if price > 10 else price
+            # eBay 中央値取得 (pricing_engine ALERT 判定用)
+            ebay_median = 0.0
+            if _fetch_ebay_median is not None:
+                try:
+                    ebay_median, _ebay_hits = _fetch_ebay_median(
+                        keywords=f"Casio G-Shock {model}",
+                        category_ids=EBAY_CATEGORY_GSHOCK,
+                        condition_id="1000",
+                    )
+                    if ebay_median:
+                        print(f"    📊 eBay {_ebay_hits}件 中央値${ebay_median:.0f}")
+                except Exception as _eme:
+                    pass
+            # 価格 status 判定 (pricing_engine 相場乖離チェック)
+            _price_status = "GO"
+            if _compute_listing_price is not None:
+                try:
+                    _pr = _compute_listing_price(cost_jpy, ebay_median, PROFIT_CATEGORY)
+                    _price_status = _pr.get("status", "GO")
+                    if _price_status == "ALERT":
+                        print(f"    ⚠️ 価格ALERT: {_pr.get('alert_msg', '')}")
+                except Exception:
+                    pass
+            print(f"    💲 ${price} (仕入¥{cost_jpy})")
+            row = build_row(url, price, data, base_desc)
 
             # 検証＋正規化（C: プレフィックス列のみ抽出）
             if _validate_specs:
