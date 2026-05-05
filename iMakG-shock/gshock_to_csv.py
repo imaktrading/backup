@@ -437,7 +437,6 @@ def load_targets_from_low_sheet():
 
     targets = []
     skipped_no_model = 0
-    skipped_uncertain = 0
     for row in all_values[1:]:
         url      = (row[0]  if len(row) > 0  else '').strip()  # A
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
@@ -447,12 +446,9 @@ def load_targets_from_low_sheet():
         title_en = (row[8]  if len(row) > 8  else '').strip()  # I Title
         category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
 
-        if not url or item_id or sold:
-            continue
-        # R 列='G-shock' なら確実取込.
-        # R 列空 (抽出くんがカテゴリ未設定) でも catalog HIT すれば G-shock として救済.
-        # R 列='Tシャツ' 等の別カテゴリ確定は除外 (誤マッチ防止).
-        if category and category != 'G-shock':
+        # 仕様: R 列='G-shock' 必須 (抽出くん側で必ず埋める).
+        # 他 listing スクリプト (Montbell/Tシャツ 等) と同じ運用.
+        if not url or item_id or sold or category != 'G-shock':
             continue
         # タイトル/説明から CASIO 型番抽出
         text = title_jp + ' ' + title_en + ' ' + desc
@@ -460,22 +456,10 @@ def load_targets_from_low_sheet():
         if not model:
             skipped_no_model += 1
             continue
-        # R 列空の場合: catalog HIT を必須にして誤マッチ (別ブランドの似た型番) を排除
-        if not category and _catalog_lookup is not None:
-            try:
-                _cat = _catalog_lookup(model)
-                if not _cat:
-                    skipped_uncertain += 1
-                    continue
-            except Exception:
-                skipped_uncertain += 1
-                continue
         targets.append((url, model))
 
     if skipped_no_model:
         print(f"⚠️ {skipped_no_model} 件は型番抽出失敗で SKIP (Precision 100% 原則)")
-    if skipped_uncertain:
-        print(f"⚠️ {skipped_uncertain} 件は R列空 + catalog MISS で SKIP (G-shock 判定不確実)")
     return targets
 
 def get_store_category(model):
