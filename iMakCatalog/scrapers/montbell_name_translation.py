@@ -79,6 +79,7 @@ TRADEMARK_CANONICAL = {
     "エクセロフト":          "Exceloft",
     "サーマラップ":          "Thermarap",
     "スペリオダウン":        "Superior Down",  # HQ 確定 2026-05-05: 公式 montbell.com/us/en で "Superior Down" 16/16
+    "ロッシュ":              "Rosche",          # 海外未展開、HQ 既存翻訳の前例 (Roc は誤訳、神話の鳥扱い回避)
 }
 
 # DEPRECATED 表記 (既存出品にあったが今後採用しない、再翻訳時に検出)
@@ -95,6 +96,8 @@ DEPRECATED_PATTERNS = {
     "THERMARAP": "Thermarap",
     "Sperio Down": "Superior Down",    # 公式 = Superior、Sperio は DEPRECATED
     "Sperio": "Superior",
+    "Roc Parka": "Rosche Parka",       # ロッシュ → Roc は誤 (神話の鳥)、Rosche が正
+    "Roc Jacket": "Rosche Jacket",
 }
 
 
