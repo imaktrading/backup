@@ -1118,8 +1118,8 @@ def build_row(url, price, data, base_desc):
         "No",               # C:Vintage
         "No",               # C:Handmade
         "Yes",              # C:With Original Box/Packaging
-        "Yes",              # C:With Papers (新品なら説明書付属)
-        "1 Year",           # C:Manufacturer Warranty
+        "Yes",              # C:With Papers (新品 = 日本語マニュアル付属、英語版なしは Description に注記)
+        "",                 # C:Manufacturer Warranty (国内保証は海外履行不可、空欄で Defect Rate 回避)
         data.get('band_length', ''),
         case_thickness,     # 整数mmに丸め
         data.get('weight', ''),

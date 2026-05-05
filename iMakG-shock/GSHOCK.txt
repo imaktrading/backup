@@ -154,6 +154,7 @@
 <div class="secondary-color-text">
 <p><span style="text-decoration: underline;"><strong><span style="vertical-align: inherit;"><span style="vertical-align: inherit;">Description</span></span></strong></span></p>
 <p>This item is <b>Brand New</b>, meticulously inspected to ensure its pristine condition. You will receive a product in original, perfect condition, just as you'd find it in a retail store. All original packaging, tags, and included accessories are present and intact. Invest in quality with peace of mind.</p>
+<p><strong>Note:</strong> Manual is in Japanese only. No English version included.</p>
 <p><span style="text-decoration: underline;"><strong>Shipping &amp; Estimated Delivery</strong></span></p>
 <p>Handling time is based on our shipping policy. We will do our best to ship quickly and pack your item carefully.</p>
 <ul>
