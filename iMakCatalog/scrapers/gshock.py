@@ -317,6 +317,202 @@ CASIOFANMAG_SERIES_SLUG = {
 CASIOFANMAG_SERIES_URL_TEMPLATE = "https://casiofanmag.com/g-shock/{slug}/"
 
 
+# ============================================================================
+# Base series 仕様辞書 (eBay Item Specifics 必須フィルタ用、2026-05-05 追加)
+# ============================================================================
+# G-Shock は base series ごとに display / case_shape / features / water_resistance
+# 等が固定. 個別 model でこれらが varying するのは稀 (例: 限定版で素材変更).
+# catalog spec が薄い問題 (DW/GA 両方で display 等が空) を解消するため、
+# product_id の base series 部分から これらの field を機械的に補完する.
+#
+# 値は eBay Item Specifics の正規値 (バイヤーが絞込みで使う値).
+
+# 全 G-SHOCK 共通の Item Specifics 固定値 (例外稀)
+_GSHOCK_COMMON_SPECS = {
+    "display":          "Digital",       # 後で series ルールで上書き
+    "case_shape":       "Round",         # 〃
+    "watch_shape":      "Round",
+    "case_material":    "Resin",
+    "band_material":    "Resin",
+    "band_strap":       "Two-Piece Strap",
+    "movement":         "Quartz",
+    "crystal":          "Mineral Glass",
+    "water_resistance": "200 m (20 ATM)",
+    "bezel_type":       "Fixed",
+    "dial_pattern":     "Logo",
+    "indices":          "Arabic Numerals",
+    "closure":          "Buckle",
+    "caseback":         "Solid",
+}
+
+# Base series 別オーバーライド (display / case_shape / band_material 等 series 単位の差分)
+# Key: regex pattern matched against product_id prefix (case-insensitive)
+# 順序大事 (より具体的な pattern を先に置く)
+_SERIES_OVERRIDES = [
+    # === Square 型 ===
+    (r"^DW-5(?:600|700|900|000)",        {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^DW-D5",                           {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^DW-H5",                           {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^DW-B5",                           {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^DWE-5",                           {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^DWN-5",                           {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^GMW-B5000",                       {"case_shape": "Square", "watch_shape": "Square", "display": "Digital", "case_material": "Stainless Steel", "band_material": "Stainless Steel"}),
+    (r"^GMW-BZ5000",                      {"case_shape": "Square", "watch_shape": "Square", "display": "Digital", "case_material": "Stainless Steel", "band_material": "Stainless Steel"}),
+    (r"^GW-B5",                           {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^G-LIDE.*",                        {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^GA-B010",                         {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    # === Octagonal (CasiOak) ===
+    (r"^GA-2100",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),  # Casiowner uses 'Round' on eBay
+    (r"^GA-2110",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GM-2100",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital", "case_material": "Stainless Steel", "bezel_material": "Stainless Steel"}),
+    (r"^GM-2110",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital", "case_material": "Stainless Steel"}),
+    (r"^GMA-S2100",                       {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GMC-B2100",                       {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital", "case_material": "Carbon Fiber"}),
+    (r"^GA-B2100",                        {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    # === DW 円形 ===
+    (r"^DW-6",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^DW-9",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^DW-8",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^GW-69",                           {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^GW-M5",                           {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
+    (r"^GW-90",                           {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    # === Analog Digital 主系統 ===
+    (r"^GA-(?:100|110|120|200|300|400|500|700|800|900)",
+                                          {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GA-1000",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GA-2000",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital", "case_material": "Carbon Fiber"}),
+    (r"^GA-2300",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GA-010",                          {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GAW-1",                           {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GBA-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GBD-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^GBX-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^GD-",                             {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^GLX-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^GST-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^MTG-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital", "case_material": "Stainless Steel", "crystal": "Sapphire Glass"}),
+    (r"^MRG-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital", "case_material": "Titanium", "crystal": "Sapphire Glass"}),
+    # === Mudmaster / Rangeman / Frogman / Gulfmaster (大型 + 多機能) ===
+    (r"^GWG-(?:1000|2000)",               {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GG-1000",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GW-9400",                         {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^GWN-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GW-3",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GWF-A",                           {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital", "water_resistance": "200 m (20 ATM) ISO Diver"}),
+    (r"^GWF-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital", "water_resistance": "200 m (20 ATM) ISO Diver"}),
+    # === BABY-G ===
+    (r"^BGA-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^BGD-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^BA-",                             {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    # === GMA / GMB / GMW (Mid-size + Metal) ===
+    (r"^GMA-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GM-S",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    (r"^GM-",                             {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    # === GX (XL Big Case) ===
+    (r"^GX-",                             {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    (r"^GXW-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+]
+
+# 機能 features は base series で異なる. キーワード照合で抽出.
+# 戻り値は eBay Features フィルタ正規値の list.
+_FEATURE_RULES = [
+    # (model_no regex pattern, features list)
+    (r"^MTG-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Bluetooth", "Sapphire Crystal"]),
+    (r"^MRG-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Bluetooth", "Sapphire Crystal"]),
+    (r"^GMW-B",      ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Bluetooth"]),
+    (r"^GMW-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    (r"^GW-B",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Bluetooth"]),
+    (r"^GW-",        ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    (r"^GA-B",       ["Shock-Resistant", "Bluetooth"]),
+    (r"^GBA-",       ["Shock-Resistant", "Bluetooth"]),
+    (r"^GBD-",       ["Shock-Resistant", "Bluetooth", "Step Tracker"]),
+    (r"^GBX-",       ["Shock-Resistant", "Bluetooth", "Step Tracker", "Tide Graph"]),
+    (r"^GST-B",      ["Shock-Resistant", "Solar Powered", "Bluetooth"]),
+    (r"^GST-",       ["Shock-Resistant", "Solar Powered"]),
+    (r"^GWG-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Compass", "Thermometer"]),
+    (r"^GG-",        ["Shock-Resistant", "Compass", "Thermometer"]),
+    (r"^GWN-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Tide Graph"]),
+    (r"^GW-9400",    ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Compass", "Altimeter", "Barometer", "Thermometer"]),
+    (r"^GW-9",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    (r"^GWF-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Tide Graph"]),
+    (r"^GWA-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    (r"^GAW-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    # 単独 (no special features)
+    (r"^GA-",        ["Shock-Resistant"]),
+    (r"^DW-",        ["Shock-Resistant"]),
+    (r"^GD-",        ["Shock-Resistant"]),
+    (r"^GMA-",       ["Shock-Resistant"]),
+    (r"^GM-",        ["Shock-Resistant"]),
+    (r"^GX-",        ["Shock-Resistant"]),
+    (r"^GXW-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    (r"^GLX-",       ["Shock-Resistant"]),
+    (r"^BGA-",       ["Shock-Resistant"]),
+    (r"^BGD-",       ["Shock-Resistant"]),
+    (r"^BA-",        ["Shock-Resistant"]),
+]
+
+
+def _apply_series_base_specs(specs: dict, product_id: str) -> dict:
+    """既存 specs に common + series-specific overrides を上書き (空 field のみ).
+
+    catalog の spec が空 (display='', case_shape='' 等) を機械的に補完する.
+    実値が既に入っている field は touch しない (G-shock が一覧経由で取った
+    weight 等を保護).
+    """
+    out = dict(specs)
+    # common 適用
+    for k, v in _GSHOCK_COMMON_SPECS.items():
+        if not out.get(k):
+            out[k] = v
+    # series override 適用
+    for pattern, override in _SERIES_OVERRIDES:
+        if re.match(pattern, product_id, re.IGNORECASE):
+            for k, v in override.items():
+                # override は常に上書き (display 等 series 確定値)
+                out[k] = v
+            break
+    # features 適用
+    if not out.get("features"):
+        for pattern, feats in _FEATURE_RULES:
+            if re.match(pattern, product_id, re.IGNORECASE):
+                out["features"] = feats
+                break
+    return out
+
+
+def apply_base_specs_to_catalog() -> int:
+    """catalog 内全 G-Shock records に base specs を一括適用.
+
+    Returns:
+        更新件数
+    """
+    import sqlite3
+    import json as _json
+    import api  # type: ignore
+
+    conn = sqlite3.connect(str(api._DB_PATH))
+    cur = conn.cursor()
+    cur.execute("SELECT product_id, specs FROM products WHERE category = ?", (CATEGORY,))
+    rows = cur.fetchall()
+    updated = 0
+    for pid, specs_json in rows:
+        try:
+            s = _json.loads(specs_json or "{}")
+        except Exception:
+            continue
+        new_s = _apply_series_base_specs(s, pid)
+        if new_s != s:
+            cur.execute(
+                "UPDATE products SET specs = ? WHERE category = ? AND product_id = ?",
+                (_json.dumps(new_s, ensure_ascii=False), CATEGORY, pid),
+            )
+            updated += 1
+    conn.commit()
+    conn.close()
+    print(f"  base specs 適用: {updated} 件")
+    return updated
+
+
 def discover_models_via_gcentral(series_name: str) -> list:
     """g-central のシリーズ記事 page から全 model_number を抽出.
 
