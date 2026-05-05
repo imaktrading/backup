@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -480,6 +481,242 @@ def _apply_series_base_specs(specs: dict, product_id: str) -> dict:
     return out
 
 
+def _parse_official_spec(html_text: str) -> dict:
+    """www.casio.com の product page HTML から公式 spec を抽出.
+
+    HTML 内に JSON-encoded structured data (&quot; でエスケープ) で埋まってる:
+      ケースサイズ（縦×横×厚さ）:48.5 × 45.4 × 11.9 mm
+      質量:52 g
+      ケース・ベゼル材質:カーボン／樹脂（バイオマスプラスチック）
+      バンド:樹脂バンド（バイオマスプラスチック）
+      構造:耐衝撃構造（ショックレジスト）,カーボンコアガード構造
+      防水性:20気圧防水
+      メーカー希望小売価格:￥24,750
+
+    Returns:
+        catalog spec field に直接マージ可能な dict.
+    """
+    import html as _html_mod
+    decoded = _html_mod.unescape(html_text)
+
+    raw: dict = {}
+    patterns = {
+        "case_size_raw":     r"ケースサイズ[^:：]*[:：]\s*([^;<\n]+)",
+        "weight_raw":        r"質量[:：]\s*([\d\.]+\s*g)",
+        "case_material_jp":  r"ケース・ベゼル材質[:：]\s*([^;<\n]+?)(?=;|$)",
+        "band_material_jp":  r"バンド[:：]\s*([^;<\n]+?)(?=;|$)",
+        "structure_jp":      r"構造[:：]\s*([^;<\n]+?)(?=;|$)",
+        "water_resist_jp":   r"防水性[:：]\s*([^;<\n]+?)(?=;|$)",
+        "price_msrp_raw":    r"メーカー希望小売価格[^￥]*￥\s*([0-9,]+)",
+        "driving_jp":        r"駆動方式[:：]\s*([^;<\n]+?)(?=;|$)",
+    }
+    for k, p in patterns.items():
+        m = re.search(p, decoded)
+        if m:
+            raw[k] = m.group(1).strip().rstrip(";,")
+
+    out: dict = {}
+
+    # case_size / case_thickness: "48.5 × 45.4 × 11.9 mm" → 横 + 厚さ
+    if raw.get("case_size_raw"):
+        m = re.search(r"([\d\.]+)\s*[×x]\s*([\d\.]+)\s*[×x]\s*([\d\.]+)\s*mm",
+                      raw["case_size_raw"])
+        if m:
+            out["case_size"] = f"{m.group(2)} mm"        # 横
+            out["case_thickness"] = f"{m.group(3)} mm"   # 厚さ
+
+    # weight: "52 g"
+    if raw.get("weight_raw"):
+        m = re.search(r"([\d\.]+)\s*g", raw["weight_raw"])
+        if m:
+            out["weight"] = f"{m.group(1)} g"
+
+    # water_resistance: "20気圧防水" → "200 m (20 ATM)"
+    if raw.get("water_resist_jp"):
+        wr_text = raw["water_resist_jp"]
+        m = re.search(r"(\d+)\s*気圧", wr_text)
+        if m:
+            atm = int(m.group(1))
+            out["water_resistance"] = f"{atm * 10} m ({atm} ATM)"
+        elif "ISO" in wr_text or "ダイバー" in wr_text:
+            out["water_resistance"] = "200 m (20 ATM) ISO Diver"
+
+    # case_material 推定 (日本語 → eBay 正規値)
+    if raw.get("case_material_jp"):
+        cm = raw["case_material_jp"]
+        if "カーボン" in cm:
+            out["case_material"] = "Carbon Fiber"
+        elif "ステンレス" in cm or "SUS" in cm:
+            out["case_material"] = "Stainless Steel"
+        elif "チタン" in cm:
+            out["case_material"] = "Titanium"
+        elif "セラミック" in cm:
+            out["case_material"] = "Ceramic"
+        elif "樹脂" in cm:
+            out["case_material"] = "Resin"
+
+    # band_material 推定
+    if raw.get("band_material_jp"):
+        bm = raw["band_material_jp"]
+        if "ステンレス" in bm or "SUS" in bm:
+            out["band_material"] = "Stainless Steel"
+        elif "チタン" in bm:
+            out["band_material"] = "Titanium"
+        elif "ナイロン" in bm or "クロス" in bm:
+            out["band_material"] = "Nylon"
+        elif "革" in bm or "レザー" in bm:
+            out["band_material"] = "Leather"
+        elif "シリコン" in bm:
+            out["band_material"] = "Silicone"
+        elif "樹脂" in bm or "ウレタン" in bm:
+            out["band_material"] = "Resin"
+
+    # features: 構造から推定 (耐衝撃 / Solar / Bluetooth / etc.)
+    feat: list = []
+    if raw.get("structure_jp"):
+        st = raw["structure_jp"]
+        if "耐衝撃" in st or "ショックレジスト" in st:
+            feat.append("Shock-Resistant")
+        if "カーボンコアガード" in st:
+            feat.append("Carbon Core Guard")
+        if "クォーツ" not in st and "ハイブリッド" in st:
+            feat.append("Hybrid Movement")
+    if raw.get("driving_jp"):
+        dv = raw["driving_jp"]
+        if "ソーラー" in dv or "タフソーラー" in dv:
+            feat.append("Solar Powered")
+        if "Bluetooth" in dv or "モバイルリンク" in dv:
+            feat.append("Bluetooth")
+        if "電波" in dv or "マルチバンド" in dv:
+            feat.append("Multi-Band 6")
+    # 全 HTML 範囲で追加 features signal
+    if "Bluetooth" in decoded or "モバイルリンク" in decoded:
+        if "Bluetooth" not in feat:
+            feat.append("Bluetooth")
+    if "タフソーラー" in decoded or "ソーラー充電" in decoded:
+        if "Solar Powered" not in feat:
+            feat.append("Solar Powered")
+    if "マルチバンド6" in decoded or "電波受信" in decoded:
+        if "Multi-Band 6" not in feat:
+            feat.append("Multi-Band 6")
+    if feat:
+        out["features"] = feat
+
+    # price_jpy_msrp
+    if raw.get("price_msrp_raw"):
+        out["price_jpy_msrp"] = raw["price_msrp_raw"].replace(",", "")
+
+    return out
+
+
+def update_official_specs(only_missing: bool = False, limit: Optional[int] = None,
+                           pacing: float = 8.0) -> dict:
+    """全 G-Shock catalog records に対し www.casio.com 公式 spec page を fetch + 上書き.
+
+    Akamai 突破: gshock.casio.com で初回 challenge 通過 → session 維持で
+    www.casio.com を連続 driver.get 可能.
+
+    Args:
+        only_missing: True なら weight が空の records のみ対象.
+        limit: 上限 (smoke 用).
+        pacing: page 間 sleep.
+
+    Returns:
+        {"target": int, "fetched": int, "parsed_ok": int, "errors": int}
+    """
+    import api  # type: ignore
+    import json as _json
+    import sqlite3
+    import undetected_chromedriver as uc  # type: ignore
+
+    conn = sqlite3.connect(str(api._DB_PATH))
+    cur = conn.cursor()
+    # skip 既に公式 spec fetch 済 record (official_spec_fetched=True)
+    cur.execute(
+        "SELECT product_id, specs FROM products WHERE category = ? "
+        "AND (json_extract(specs, '$.official_spec_fetched') IS NULL "
+        "     OR json_extract(specs, '$.official_spec_fetched') != 1) "
+        "ORDER BY product_id",
+        (CATEGORY,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    if limit:
+        rows = rows[:limit]
+    print(f"=== update_official_specs target: {len(rows)} records ===")
+
+    opts = uc.ChromeOptions()
+    opts.add_argument("--lang=ja-JP")
+    opts.add_argument("--window-size=1400,900")
+    driver = uc.Chrome(options=opts, version_main=147)
+    fetched = 0
+    parsed_ok = 0
+    errors = 0
+    try:
+        # Akamai challenge 通過のため最初に gshock.casio.com を読む
+        driver.get("https://gshock.casio.com/jp/products/all-linup/")
+        time.sleep(8)
+        print("  Akamai challenge passed")
+
+        for i, (pid, specs_json) in enumerate(rows, 1):
+            # product page URL: model 番号は JF/JR suffix を剥がした base
+            base = re.sub(r"(?:JF|JR)$", "", pid)
+            url = f"https://www.casio.com/jp/watches/gshock/product.{base}/"
+            try:
+                driver.get(url)
+                time.sleep(pacing)
+                html = driver.page_source
+                fetched += 1
+                # Page Not Found 検出
+                if "Page Not Found" in html or "見つかりません" in html or len(html) < 100000:
+                    if i % 20 == 0 or i <= 5:
+                        print(f"  [{i}/{len(rows)}] {pid}: not found / blocked (len={len(html)})")
+                    continue
+                official = _parse_official_spec(html)
+                if not official:
+                    if i % 20 == 0 or i <= 5:
+                        print(f"  [{i}/{len(rows)}] {pid}: parse 0 fields")
+                    continue
+                # catalog 更新
+                existing = _json.loads(specs_json or "{}")
+                merged = dict(existing)
+                merged.update(official)  # 公式値で上書き
+                merged["official_spec_fetched"] = True
+                # api.upsert で書き込み
+                rec = api.lookup(CATEGORY, pid) or {}
+                api.upsert(
+                    category=CATEGORY,
+                    product_id=pid,
+                    name=rec.get("name") or f"Casio G-SHOCK {pid}",
+                    specs=merged,
+                    images=rec.get("images") or [],
+                    source=rec.get("source") or "casio_official_spec",
+                    source_url=url,
+                )
+                parsed_ok += 1
+                if i % 10 == 0 or i <= 5:
+                    print(f"  [{i}/{len(rows)}] {pid}: parsed {len(official)} fields "
+                          f"(weight={official.get('weight','-')}, "
+                          f"size={official.get('case_size','-')}, "
+                          f"price={official.get('price_jpy_msrp','-')})")
+            except Exception as e:
+                errors += 1
+                print(f"  [{i}/{len(rows)}] {pid}: ERR {type(e).__name__}: {str(e)[:80]}")
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+    print(f"\n=== 完了 ===")
+    print(f"  target: {len(rows)}")
+    print(f"  fetched: {fetched}")
+    print(f"  parsed_ok: {parsed_ok}")
+    print(f"  errors: {errors}")
+    return {"target": len(rows), "fetched": fetched,
+            "parsed_ok": parsed_ok, "errors": errors}
+
+
 def apply_base_specs_to_catalog() -> int:
     """catalog 内全 G-Shock records に base specs を一括適用.
 
@@ -926,6 +1163,10 @@ def _cli():
             update_via_gcentral_only(only_new=True)
     elif args[0] == "--casio-flags":
         update_casio_official_flags()
+    elif args[0] == "--casio-specs":
+        # 全件 公式 spec で上書き (Akamai 突破 + Selenium 連続 fetch)
+        lim = int(args[1]) if len(args) > 1 else None
+        update_official_specs(limit=lim)
     else:
         print(f"⚠️ 不明な引数: {args}")
         sys.exit(1)
