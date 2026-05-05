@@ -1883,6 +1883,14 @@ def main():
 
     print(f"✓ {len(cert_numbers)}件の PSA 対象行を抽出（B列 itemID 空）")
 
+    # 一回 10 件まで固定 (Cloudflare bot 検出回避、2026-05-06)
+    # 残りは時間を置いて次回再走で順次処理
+    PSA_BATCH_LIMIT = 10
+    if len(cert_numbers) > PSA_BATCH_LIMIT:
+        print(f"⚠️ {len(cert_numbers)}件中 先頭 {PSA_BATCH_LIMIT} 件のみ処理 (残 {len(cert_numbers)-PSA_BATCH_LIMIT} 件は次回再走)")
+        cert_numbers = cert_numbers[:PSA_BATCH_LIMIT]
+        cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
+
     if cost_map:
         print(f"{len(cert_numbers)}件を処理します。（仕入値あり: {len(cost_map)}件）\n")
     else:
