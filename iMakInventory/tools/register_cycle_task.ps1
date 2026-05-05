@@ -111,11 +111,47 @@ if ($Action -eq "Status") {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
         Write-Output "[OK] $TaskName 登録済み"
-        $task | Format-List TaskName, State, Triggers, Actions
-        Get-ScheduledTaskInfo -TaskName $TaskName | Format-List LastRunTime, NextRunTime, LastTaskResult
+        $info = Get-ScheduledTaskInfo -TaskName $TaskName
+        Write-Output ""
+        Write-Output "  State           : $($task.State)"
+        Write-Output "  LastRunTime     : $($info.LastRunTime)"
+        Write-Output "  NextRunTime     : $($info.NextRunTime)"
+        Write-Output ("  LastTaskResult  : 0x{0:X8} ({1})" -f $info.LastTaskResult, $info.LastTaskResult)
+        Write-Output ""
+        Write-Output "  --- 起動コマンド (= 対象スプシ判別) ---"
+        foreach ($a in $task.Actions) {
+            Write-Output "    Execute   : $($a.Execute)"
+            Write-Output "    Arguments : $($a.Arguments)"
+            # Arguments から sheet-id を抽出して表示
+            if ($a.Arguments -match '--sheet-id\s+(\S+)') {
+                $sid = $Matches[1]
+                $sname = ""
+                if ($sid -eq "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk") { $sname = " (= HIGH)" }
+                elseif ($sid -eq "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0") { $sname = " (= LOW)" }
+                elseif ($sid -eq "1oDjQC8WN_3WC2InPHAV-hPKmsa96rdNd4jxbGBzDimc") { $sname = " (= TEST_PARALLEL)" }
+                Write-Output "    → 対象スプシ ID: $sid$sname"
+            } elseif ($a.Arguments -match '--sheet\s+(both|high|low)') {
+                Write-Output "    → 対象スプシ: --sheet $($Matches[1]) (HIGH_SHEET_ID / LOW_SHEET_ID default)"
+            }
+        }
+        Write-Output ""
+        Write-Output "  --- 起動時刻 (1 日 N 回 daily) ---"
+        $timesArr = @()
+        foreach ($trg in $task.Triggers) {
+            if ($trg.StartBoundary) {
+                try {
+                    $timesArr += ([datetime]$trg.StartBoundary).ToString("HH:mm")
+                } catch {}
+            }
+        }
+        # @(...) で強制配列化 (PS5.1 で Sort-Object が単一文字列に collapse する仕様回避)
+        $timesSorted = @($timesArr | Sort-Object)
+        foreach ($tm in $timesSorted) { Write-Output "    $tm" }
+        Write-Output "    (計 $($timesSorted.Count) 回/日)"
         # Execute が絶対パスかチェック (bug 再発防止)
         $executePath = $task.Actions[0].Execute
         if ($executePath -and -not [System.IO.Path]::IsPathRooted($executePath)) {
+            Write-Output ""
             Write-Warning "Execute が絶対パスでない: '$executePath' → タスク起動時に ERROR_FILE_NOT_FOUND の可能性"
             Write-Warning "再登録推奨: -Action Unregister → Register でこのスクリプトが絶対パスを再設定する"
         }
