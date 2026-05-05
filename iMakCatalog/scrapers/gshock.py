@@ -311,6 +311,8 @@ GCENTRAL_SERIES_SLUG = {
 CASIOFANMAG_SERIES_SLUG = {
     "GW-3000": "gw-3000",   # g-central なし、SKY COCKPIT 系
     "BGD-10":  "bgd-10",    # 小規模
+    "GBX-100": "gbx-100",   # G-SQUAD smartwatch (HQ 依頼)
+    "GXW-56":  "gxw-56",    # 電波ソーラー (HQ 依頼)
 }
 CASIOFANMAG_SERIES_URL_TEMPLATE = "https://casiofanmag.com/g-shock/{slug}/"
 
@@ -433,6 +435,10 @@ def discover_models_via_casiofanmag(series_name: str) -> list:
     """casiofanmag のシリーズ記事 page から model_number を抽出.
 
     g-central に articles が無い series 用の補完経路.
+
+    casiofanmag の HTML 内文字列は画像 size suffix 付き
+    (例: 'GBX-100TT-2-1024', 'GXW-56-1A-1-300').
+    suffix '-NNNN' を最大 1 つ剥がしてから model 妥当性判定する.
     """
     import requests  # type: ignore
 
@@ -447,14 +453,22 @@ def discover_models_via_casiofanmag(series_name: str) -> list:
     except Exception:
         return []
     pattern = re.compile(rf"({re.escape(series_name)}[A-Z0-9-]+)", re.IGNORECASE)
+    # 緩い model 妥当性 (末尾英字必須は撤廃、casiofanmag では "GBX-100TT-2" 形式が出る)
     valid_re = re.compile(
-        r"^[A-Z]{2,4}-\d{3,4}[A-Z]{0,4}-\d[A-Z][\dA-Z]{0,3}(?:JF|JR)?$"
+        r"^[A-Z]{2,4}-\d{3,4}[A-Z]{0,4}(?:-[A-Z\d][\dA-Z]{0,3})*(?:JF|JR)?$"
     )
     found = set()
     for m in pattern.finditer(r.text):
-        v = m.group(1).upper()
-        if valid_re.match(v):
-            found.add(v)
+        raw = m.group(1).upper()
+        # 末尾の画像 size suffix '-NNN' を剥がす (3-4 桁数字、末尾位置)
+        cleaned = re.sub(r"-\d{2,4}$", "", raw)
+        # ノイズ除外: ハイフン分割した segment に 4 文字以上の純 alpha があれば
+        # 記事 keyword (NEWS / RIDE / WAVE / PRO 等) なので skip
+        parts = cleaned.split("-")
+        if any(p.isalpha() and len(p) >= 4 for p in parts):
+            continue
+        if valid_re.match(cleaned) and len(cleaned) >= len(series_name) + 2:
+            found.add(cleaned)
     return sorted(found)
 
 
