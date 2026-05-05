@@ -9,6 +9,7 @@ import re
 import sys
 import subprocess
 import threading
+import time
 import queue
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
@@ -118,11 +119,14 @@ def _run_excluder_for_latest_csv(append_log_func, captured_stdout: str):
 # から共通利用. 本体 listing script は無変更. orchestrator 側の 1 step 追加.
 # ロールバック: この関数 + 各 panel の呼出 1 行 をコメントアウトで完全復元.
 # ============================================================================
-def _run_rarara_for_latest_csv(append_log_func):
+def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
     """csv_output/ の最新 CSV に対して rarara を実行.
 
     Args:
         append_log_func: panel 固有のログ追記関数 (self.append_log 等)
+        since_ts: listing script 起動時刻 (time.time()). 指定時、最新 CSV の
+                  mtime が since_ts より古い (= 今回 listing で出力されていない)
+                  場合は skip. 古い CSV を誤って表示するのを防ぐ (2026-05-05).
     """
     try:
         csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
@@ -136,6 +140,10 @@ def _run_rarara_for_latest_csv(append_log_func):
         if not csvs:
             return
         latest_csv = max(csvs, key=os.path.getmtime)
+        # 今回 listing で新規 CSV が出力されていない (= listing 失敗 or 入力ゼロ) なら skip
+        if since_ts is not None and os.path.getmtime(latest_csv) < since_ts:
+            append_log_func("\n⚠️ rarara: 今回 listing で新規 CSV 出力なし → skip\n")
+            return
         rarara_path = os.path.join(WORKSPACE, "iMakeBayAPI", "rarara", "rarara.py")
         if not os.path.exists(rarara_path):
             return
@@ -1689,6 +1697,7 @@ class ListingPanel:
             creationflags = 0
             if sys.platform == "win32":
                 creationflags = subprocess.CREATE_NO_WINDOW
+            self._listing_start_ts = time.time()  # rarara が今回 CSV のみ対象にするための基準
             self.proc = subprocess.Popen(
                 cmd, cwd=cwd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1708,7 +1717,7 @@ class ListingPanel:
 
     def _run_rarara_after(self):
         """ListingPanel: rarara helper 呼出 (互換ラッパ)."""
-        _run_rarara_for_latest_csv(self.append_log)
+        _run_rarara_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
 
     def poll_queue(self):
         try:
@@ -1937,6 +1946,7 @@ class KujiWizardDialog(tk.Toplevel):
         env["PYTHONUNBUFFERED"] = "1"
         try:
             creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            self._listing_start_ts = time.time()  # rarara が今回 CSV のみ対象にするための基準
             self.proc = subprocess.Popen(
                 cmd, cwd=self.KUJI_DIR, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1967,7 +1977,7 @@ class KujiWizardDialog(tk.Toplevel):
                         _run_excluder_for_latest_csv(self._append_log, captured_log)
                     except Exception as _e:
                         self._append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
-                    _run_rarara_for_latest_csv(self._append_log)
+                    _run_rarara_for_latest_csv(self._append_log, since_ts=getattr(self, '_listing_start_ts', None))
                     cb = getattr(self, 'on_done_callback', None)
                     if cb:
                         self.on_done_callback = None
