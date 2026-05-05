@@ -169,6 +169,41 @@ def _build_color_whitelist() -> tuple[str, ...]:
 KATAKANA_COLOR_WHITELIST = _build_color_whitelist()
 
 
+def _is_katakana_char(c: str) -> bool:
+    """True if c is a katakana letter or 「ー」(long sound mark).
+
+    カタカナブロック U+30A0–U+30FF をカバー。
+    """
+    if not c:
+        return False
+    return "゠" <= c <= "ヿ"
+
+
+def _is_word_boundary_match(text: str, color: str, start_idx: int) -> bool:
+    """text の start_idx 位置で color が **word boundary 一致** しているか判定.
+
+    日本語には spaces による word 境界がないため、以下のヒューリスティクスで判定:
+      - 直前文字がカタカナ → 既存のより長いカタカナ語の一部の可能性 → 不一致扱い
+      - 直後文字がカタカナ → 続きがあって別の語を構成している可能性 → 不一致扱い
+      - それ以外 (英数字/漢字/記号/空白/text 端) → word boundary とみなす → 一致
+
+    例:
+      - "グレード" 内の "グレー" → 直後 "ド" がカタカナ → 不一致 (誤判定回避)
+      - "グレー T" 内の "グレー" → 直後 ' ' (空白) → 一致
+      - "ロイヤルブルー" 内の "ブルー" → 直前 "ル" がカタカナ → 不一致 (compound 色を避ける)
+      - "ライトブルー" の whitelist 一致は longest-first により先に "ライトブルー" 自体が
+        マッチするので、"ブルー" 単独マッチ判定はそもそも到達しない
+    """
+    end_idx = start_idx + len(color)
+    # 前境界
+    if start_idx > 0 and _is_katakana_char(text[start_idx - 1]):
+        return False
+    # 後境界
+    if end_idx < len(text) and _is_katakana_char(text[end_idx]):
+        return False
+    return True
+
+
 def extract_katakana_color_from_text(title: str, description: str) -> str:
     """title / description から最初に出現するカタカナ色名 (whitelist 一致) を抽出.
 
@@ -177,6 +212,13 @@ def extract_katakana_color_from_text(title: str, description: str) -> str:
       2. description 内の whitelist 色名 (longest match first)
     どこにも該当なし → 空文字 (caller は AI fallback すべし)
 
+    照合は **word boundary 厳密一致** (substring match のみではない):
+      - "グレード" 内の "グレー" は不一致扱い (直後にカタカナ「ド」がある)
+      - "ブルージーンズ" 内の "ブルー" も不一致扱い (直後カタカナ)
+      - 上記ケースは Step 2 (AI Vision) にフォールバックして商品実画像から判定
+      - Precision 100% を保つため (CLAUDE.md fail-closed 原則)、ambiguous case は
+        whitelist では拾わず AI に委ねる
+
     longest-match-first により「ライトグリーン」「ダークブルー」のような複合色を
     丸めずそのまま採用する (catalog の詳細色マッチング用)。
     """
@@ -184,8 +226,12 @@ def extract_katakana_color_from_text(title: str, description: str) -> str:
         if not source:
             continue
         for color in KATAKANA_COLOR_WHITELIST:
-            if color in source:
-                return color
+            idx = source.find(color)
+            while idx >= 0:
+                if _is_word_boundary_match(source, color, idx):
+                    return color
+                # 次の候補位置へ
+                idx = source.find(color, idx + 1)
     return ""
 
 

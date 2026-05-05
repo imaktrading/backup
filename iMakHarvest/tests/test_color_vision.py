@@ -500,6 +500,66 @@ class TestExtractKatakanaColorFromText:
         assert extract_katakana_color_from_text(title="", description="") == ""
         assert extract_katakana_color_from_text(title=None, description=None) == ""  # type: ignore[arg-type]
 
+    def test_substring_in_longer_katakana_word_not_matched(self):
+        """誤判定回避: カタカナ色名が他のカタカナ語の一部に substring match しないこと.
+
+        実 dry-run で観測されたケース (item #4 ルフィカード):
+          description に「グレード9」 → "グレー" が substring match してた bug
+          修正後: 直後にカタカナ「ド」があるので word boundary 不一致 → AI fallback
+        """
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        # グレー (gray) と グレード (grade) は別語
+        assert extract_katakana_color_from_text(
+            title="PSA10 ルフィ",
+            description="グレード9 の MINT 鑑定品",
+        ) == ""
+
+    def test_color_followed_by_kanji_or_space_matches(self):
+        """直後が空白・漢字・英数字等の非カタカナ → word boundary 一致 → match."""
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        # 空白
+        assert extract_katakana_color_from_text(title="ブラック T", description="") == "ブラック"
+        # 漢字
+        assert extract_katakana_color_from_text(title="ブラック色", description="") == "ブラック"
+        # 英数字
+        assert extract_katakana_color_from_text(title="ブラックXL", description="") == "ブラック"
+        # 句読点
+        assert extract_katakana_color_from_text(title="ブラック、新品", description="") == "ブラック"
+        # 文末
+        assert extract_katakana_color_from_text(title="新品 ブラック", description="") == "ブラック"
+
+    def test_color_preceded_by_katakana_not_matched(self):
+        """直前にカタカナがあるケース (より長い compound 色の一部の可能性) → 不一致."""
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        # ロイヤルブルー (whitelist にない compound) 内の ブルー → 不一致扱い
+        # → Step 2 (AI) で判定すべき
+        assert extract_katakana_color_from_text(
+            title="ロイヤルブルー Tシャツ",
+            description="",
+        ) == ""
+
+    def test_color_followed_by_katakana_not_matched(self):
+        """直後にカタカナがあるケース (compound 形成の可能性) → 不一致."""
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        # ブルージーンズ 内の ブルー → 直後 「ジ」がカタカナ → 不一致扱い
+        # 「ブルージーンズ」が真の青ジーンズだとしても、AI fallback で判定
+        assert extract_katakana_color_from_text(
+            title="ブルージーンズ",
+            description="",
+        ) == ""
+
+    def test_compound_color_still_matches_via_longest_first(self):
+        """word boundary 検査でも、whitelist の compound 色が先に検出されること.
+
+        ライトグリーン (whitelist) 内の グリーン は part だが、longest-first iteration
+        により先に ライトグリーン がマッチして返される。
+        """
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text(
+            title="ライトグリーン Tシャツ",
+            description="",
+        ) == "ライトグリーン"
+
     def test_real_world_montbell_examples(self):
         # 実 backfill で観測されたケース
         from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
