@@ -1835,14 +1835,23 @@ def load_targets_from_sheet_psa():
     url_map = {}
     title_map = {}
     for row in all_values[1:]:  # header 除外
-        url     = (row[0]  if len(row) > 0  else '').strip()  # A
-        item_id = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
-        title   = (row[2]  if len(row) > 2  else '').strip()  # C
-        price_f = (row[5]  if len(row) > 5  else '').strip()  # F "¥11,000"
-        cert    = (row[8]  if len(row) > 8  else '').strip()  # I cert#
-        cost_n  = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円)
+        url      = (row[0]  if len(row) > 0  else '').strip()  # A
+        item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
+        title    = (row[2]  if len(row) > 2  else '').strip()  # C
+        sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ ('○'=売切)
+        price_f  = (row[5]  if len(row) > 5  else '').strip()  # F "¥11,000"
+        cert     = (row[8]  if len(row) > 8  else '').strip()  # I cert#
+        cost_n   = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円)
+        category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
 
         if not cert or item_id or not url:
+            continue
+        # 統合シートは TCG / Tシャツ / 一番くじ / Montbell 等の混在。R列='TCG' のみ PSA 対象
+        # (他 listing スクリプトと同じ R 列フィルタ運用に合わせる)
+        if category != 'TCG':
+            continue
+        # D 列 売り切れ '○' は drop-shipping 不可 (仕入れ確実でないため出品 NG)
+        if sold:
             continue
         cert_numbers.append(cert)
         url_map[cert] = url
