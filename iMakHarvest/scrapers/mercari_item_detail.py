@@ -151,9 +151,15 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
     condition = _extract_condition(driver)
     description = _extract_description(driver)
     image_urls = _extract_image_urls(driver)
-    size = _extract_size(driver)
-    # color 判定は title/description を context に渡す (出品者表記を優先)
-    color = _judge_color(image_urls, title=title, description=description)
+
+    # 色/サイズ抽出: 不要カテゴリ (TCG 等) は skip して AI コスト + 遅延削減
+    from scrapers.extraction_filter import should_skip_color_size  # noqa: PLC0415
+    if should_skip_color_size(title, description):
+        size = ""
+        color = ""
+    else:
+        size = _extract_size(driver)
+        color = _judge_color(image_urls, title=title, description=description)
 
     return {
         "title": title,
