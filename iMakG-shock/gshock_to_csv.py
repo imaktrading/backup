@@ -1120,7 +1120,7 @@ def main():
 
     file_targets = []
     try:
-        with open(URLS_FILE, "r") as f:
+        with open(URLS_FILE, "r", encoding="utf-8") as f:
             file_urls = [l.strip() for l in f if l.strip() and l.startswith("http")]
         for u in file_urls:
             m = extract_model_from_url(u)
