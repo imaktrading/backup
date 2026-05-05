@@ -624,6 +624,181 @@ def sweep_historical(l1id_start: int, l1id_end: int,
     return {"scanned": scanned, "api_hits": api_hits, "ut_upserted": ut_upserted}
 
 
+def _DELETED_import_historical_from_ebay_csvs() -> dict:
+    """[DELETED 2026-05-05] eBay 出品 title から過去 UT を catalog 化する関数.
+
+    catalog 原則違反のため削除:
+    - 合成 product_id (HIST-<hash>) は公式 l1Id でない → ID-strict 違反
+    - eBay seller 記述 title からの parse → 推測ベース (非公式値)
+    - source='ebay_listing_history' を catalog に混在させると
+      "公式 source of truth" の役割が壊れる
+
+    過去 UT 情報を持ちたい場合は catalog 外 (iMakHQ sold history 等) で
+    metadata 層として管理する. 本関数は呼び出されると例外を上げる.
+    """
+    raise RuntimeError(
+        "import_historical_from_ebay_csvs は catalog 原則違反のため削除済 "
+        "(2026-05-05). 過去 UT 情報は catalog 外で管理する."
+    )
+    import csv as _csv
+    import glob
+    import hashlib
+    import api  # type: ignore
+    try:
+        import openpyxl  # type: ignore
+    except ImportError:
+        openpyxl = None
+
+    # === 収集 ===
+    titles: list = []
+    # 1. sold xlsx
+    if openpyxl:
+        sold_files = glob.glob(
+            "C:/dev/iMak/iMakeBayAPI/sold_data/UNIQLO UT_sold_*.xlsx"
+        )
+        for fp in sold_files:
+            try:
+                wb = openpyxl.load_workbook(fp, read_only=True)
+                ws = wb.active
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i == 0:
+                        continue
+                    if row and len(row) > 1 and row[1]:
+                        titles.append(str(row[1]))
+                wb.close()
+            except Exception:
+                pass
+    # 2. listing csvs
+    listing_files = sorted(
+        glob.glob("C:/dev/iMak/iMakHQ/csv_output/tshirt_upload_*.csv") +
+        glob.glob("C:/dev/iMak/iMakMercari/ebay_tshirt_*.csv")
+    )
+    for fp in listing_files:
+        try:
+            with open(fp, encoding="utf-8") as f:
+                for r in _csv.DictReader(f):
+                    t = r.get("*Title") or r.get("Title") or ""
+                    if t and ("UT" in t.upper() or "UNIQLO" in t.upper()):
+                        titles.append(t)
+        except Exception:
+            pass
+
+    unique_titles = sorted(set(titles))
+    print(f"=== historical UT titles: {len(unique_titles)} unique (raw {len(titles)}) ===")
+
+    # === Title parser ===
+    def parse_title(t: str) -> dict:
+        """eBay Title から catalog field を抽出.
+
+        Pattern 例:
+          "UNIQLO UT Pokemon Gardevoir T-Shirt White US L (JP XL) NWT Japan"
+          "Jujutsu Kaisen UNIQLO Manga UT T-Shirts Shueisha 100th Japan WHITE Pre Mid April"
+        """
+        # 商品 core 抽出: prefix 'UNIQLO ' / 'UT ' を剥がし、suffix " US X (JP Y) ..." を切る
+        core = t
+        # remove suffix: ' US <size> (JP <size>)' から末尾まで
+        m = re.search(r"\s+(?:Size\s+)?US\s+\d?[A-Z]+\s*\(JP\s+\d?[A-Z]+\)", core)
+        if m:
+            core = core[: m.start()]
+        # remove suffix: ' NWT', ' Pre-owned', ' NEW', ' JAPAN', ' Japan'
+        for suf in [r"\s+(?:NWT|Pre-owned|Brand new|Pre owned)\s*Japan?$",
+                    r"\s+Pre Mid.*$", r"\s+Japan$", r"\s+JAPAN.*$"]:
+            core = re.sub(suf, "", core, flags=re.IGNORECASE).strip()
+        # color 抽出 (末尾に Color or 末尾語が color)
+        color = ""
+        color_re = (r"\b(Black|White|Red|Blue|Green|Yellow|Orange|Pink|"
+                    r"Purple|Brown|Gray|Grey|Beige|Silver|Gold|Ivory|Navy|"
+                    r"Olive|Multicolor)\b")
+        cm = re.search(color_re, core, re.IGNORECASE)
+        if cm:
+            raw_c = cm.group(1).upper()
+            color = _normalize_color_filter(raw_c)
+            # name から color を削る
+            core = re.sub(rf"\s*{cm.group(1)}\s*", " ", core, flags=re.I).strip()
+
+        # size 抽出 (US X (JP Y) を以前消したけど、size 単独 'XL' や 'Size XL' もある)
+        size = ""
+        sm = re.search(r"\b(?:Size\s+)?(XS|S|M|L|XL|XXL|XXXL|2XL|3XL)\b\s*$", core)
+        if sm:
+            size = _normalize_size(sm.group(1))
+            core = re.sub(rf"\s*(?:Size\s+)?{sm.group(1)}\s*$", "", core).strip()
+
+        # core cleanup: remove "UNIQLO " "UT " "T-Shirt" etc.
+        clean = core
+        for kw in ["UNIQLO", "UT", "T-Shirt", "TShirt", "T Shirt", "T-Shirts",
+                  "Tee", "TEE", "Sweat Shirt", "Sweatshirt", "Shirt",
+                  "Graphic", "Manga", "Anime"]:
+            clean = re.sub(rf"\b{re.escape(kw)}\b", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"\s+", " ", clean).strip(" -|,")
+
+        return {
+            "name_en_raw": t,
+            "name_en":     clean,
+            "color":       color or "Multicolor",
+            "size":        size or "",
+        }
+
+    upserted = 0
+    for t in unique_titles:
+        parsed = parse_title(t)
+        # 合成 product_id: title の SHA1 先頭 8 文字 + HIST prefix
+        h = hashlib.sha1(t.encode("utf-8")).hexdigest()[:8].upper()
+        pid = f"HIST-{h}"
+
+        # character / family / theme は既存 helper 流用 (英語 + 日本語両対応)
+        themes = _derive_themes(t)
+        family = _derive_character_family(t)
+        character = _derive_character(t)
+
+        api.upsert(
+            category=CATEGORY,
+            product_id=pid,
+            name=parsed["name_en"],
+            name_jp="",
+            name_en=parsed["name_en"],
+            name_en_source="ebay_listing_history",
+            specs={
+                # === 固定値 (T-Shirt 共通) ===
+                "brand":               "Uniqlo",
+                "type":                "T-Shirt",
+                "size_type":           "Regular",
+                "closure":             "Pullover",
+                "neckline":            "Crew Neck",
+                "sleeve_length":       "Short Sleeve",
+                "fit":                 "Regular",
+                "vintage":             "No",
+                "personalize":         "No",
+                "handmade":            "No",
+                "style":               "Graphic Tee",
+                "pattern":             "Graphic Print",
+                "country_of_origin":   "Does not apply",
+                "category_line":       "UT",
+                "department":          "Unisex Adults",   # eBay listing は Unisex 扱いが多い
+                # === 変動 ===
+                "themes":              themes,
+                "character_family":    family,
+                "character":           character,
+                "ebay_colors":         [parsed["color"]],
+                "ebay_sizes":          [parsed["size"]] if parsed["size"] else [],
+                "color_variants":      [],
+                "size_variants":       [],
+                "image_urls":          [],
+                "price_jpy_base":      "",
+                "price_jpy_promo":     "",
+                # === Historical 由来マーカー ===
+                "is_historical":       True,
+                "source_title":        t[:200],
+            },
+            images=[],
+            source="ebay_listing_history",
+            source_url="",
+        )
+        upserted += 1
+
+    print(f"  upserted: {upserted}")
+    return {"unique_titles": len(unique_titles), "upserted": upserted}
+
+
 def reprocess_in_place() -> dict:
     """既存 catalog の spec を **API 再 fetch せず** に再 derive.
 
@@ -857,6 +1032,11 @@ def _cli():
         reprocess_all_active()
     elif args[0] == "--reprocess-inplace":
         reprocess_in_place()
+    elif args[0] == "--import-historical":
+        # [DELETED] catalog 原則違反、削除済
+        print("⚠️ --import-historical は削除済 (catalog 原則違反). "
+              "過去 UT 情報は catalog 外で管理してください.")
+        sys.exit(1)
     else:
         print(f"⚠️ 不明な引数: {args}")
         sys.exit(1)

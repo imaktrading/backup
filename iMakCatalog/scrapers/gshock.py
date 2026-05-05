@@ -481,6 +481,59 @@ def _apply_series_base_specs(specs: dict, product_id: str) -> dict:
     return out
 
 
+def import_remote_fetch_json(json_path: str) -> dict:
+    """別 PC fetcher が生成した output.json を catalog に取込む.
+
+    JSON 形式:
+        {"<product_id>": {"status": "ok"|"not_found"|"error", "spec": {...}}, ...}
+
+    main PC は ネット接続なしで完結する取込み処理.
+    """
+    import api  # type: ignore
+    import json as _json
+    import sqlite3
+
+    with open(json_path, encoding="utf-8") as f:
+        data = _json.load(f)
+    print(f"=== import_remote_fetch_json: {len(data)} entries ===")
+
+    imported = 0
+    not_found = 0
+    errors = 0
+    for pid, entry in data.items():
+        status = entry.get("status")
+        if status != "ok":
+            if status == "not_found":
+                not_found += 1
+            else:
+                errors += 1
+            continue
+        spec = entry.get("spec") or {}
+        if not spec:
+            continue
+        rec = api.lookup(CATEGORY, pid)
+        if not rec:
+            continue
+        merged = dict(rec.get("specs") or {})
+        merged.update(spec)
+        merged["official_spec_fetched"] = True
+        api.upsert(
+            category=CATEGORY,
+            product_id=pid,
+            name=rec.get("name") or f"Casio G-SHOCK {pid}",
+            specs=merged,
+            images=rec.get("images") or [],
+            source=rec.get("source"),
+            source_url=rec.get("source_url"),
+        )
+        imported += 1
+
+    print(f"  imported: {imported}")
+    print(f"  not_found: {not_found}")
+    print(f"  errors: {errors}")
+    return {"imported": imported, "not_found": not_found, "errors": errors}
+
+
 def _parse_official_spec(html_text: str) -> dict:
     """www.casio.com の product page HTML から公式 spec を抽出.
 
@@ -1167,6 +1220,8 @@ def _cli():
         # 全件 公式 spec で上書き (Akamai 突破 + Selenium 連続 fetch)
         lim = int(args[1]) if len(args) > 1 else None
         update_official_specs(limit=lim)
+    elif args[0] == "--import-remote-json" and len(args) >= 2:
+        import_remote_fetch_json(args[1])
     else:
         print(f"⚠️ 不明な引数: {args}")
         sys.exit(1)
