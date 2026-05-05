@@ -141,13 +141,112 @@ _MERCARI_CONDITION_MAP = {
 }
 
 
+# ============================================================================
+# カタカナ色名 → eBay 16色 enum マッピング (2026-05-05 抽出くん S 列連携)
+# ============================================================================
+# eBay 16色: Beige/Black/Blue/Brown/Gold/Gray/Green/Ivory/Multicolor/Orange/Pink/Purple/Red/Silver/White/Yellow
+_KATAKANA_TO_EBAY_COLOR = {
+    # 基本 16 色
+    "ブラック": "Black", "ホワイト": "White", "レッド": "Red", "ブルー": "Blue",
+    "グリーン": "Green", "イエロー": "Yellow", "オレンジ": "Orange", "ピンク": "Pink",
+    "パープル": "Purple", "ブラウン": "Brown", "グレー": "Gray", "ベージュ": "Beige",
+    "シルバー": "Silver", "ゴールド": "Gold", "アイボリー": "Ivory",
+    # 拡張 (eBay 16 色 enum に丸める)
+    "ネイビー": "Blue", "ライトブルー": "Blue", "ダークブルー": "Blue", "ターコイズ": "Blue",
+    "ライトグリーン": "Green", "ダークグリーン": "Green", "オリーブ": "Green",
+    "カーキ": "Green", "セージ": "Green", "モスグリーン": "Green",
+    "ワインレッド": "Red", "ボルドー": "Red", "ガーネット": "Red", "バーガンディ": "Red",
+    "ライトレッド": "Red", "ダークレッド": "Red",
+    "マスタード": "Yellow", "ライトイエロー": "Yellow", "ダークイエロー": "Yellow",
+    "チャコール": "Gray", "ライトグレー": "Gray", "ダークグレー": "Gray",
+    "ライトブラウン": "Brown", "ダークブラウン": "Brown",
+    "ライトピンク": "Pink", "ダークピンク": "Pink",
+    "ライトパープル": "Purple", "ダークパープル": "Purple",
+    "ライトオレンジ": "Orange", "ダークオレンジ": "Orange",
+    # 漢字も保険 (抽出くん側 fail-closed で空欄になるはず、念のため)
+    "黒": "Black", "白": "White", "赤": "Red", "青": "Blue",
+    "緑": "Green", "黄": "Yellow", "茶": "Brown", "灰": "Gray", "紫": "Purple",
+}
+
+
+def _normalize_color_to_ebay(katakana_color: str, catalog_color_variants: list) -> str:
+    """カタカナ色名 → eBay 16 色 enum 正規化 (catalog 突き合わせ + 辞書 fallback).
+
+    優先順:
+    1. catalog の color_variants["jp"] と直接一致 → catalog "en" 採用
+    2. 辞書 _KATAKANA_TO_EBAY_COLOR で直接一致
+    3. 部分一致 (辞書 key が katakana_color に含まれる、長いもの優先)
+    4. 不一致 → 空文字 (HQ 側で AI 推測 fallback)
+    """
+    if not katakana_color:
+        return ""
+    color = katakana_color.strip()
+
+    # 1. catalog 直接一致
+    for cv in (catalog_color_variants or []):
+        if cv.get("jp") and cv["jp"].strip() == color:
+            en = (cv.get("en") or "").strip()
+            if en and en != "Not Specified":
+                return en
+
+    # 2. 辞書 直接一致
+    if color in _KATAKANA_TO_EBAY_COLOR:
+        return _KATAKANA_TO_EBAY_COLOR[color]
+
+    # 3. 部分一致 (長いキー優先で誤マッチ回避: "ライトグリーン" を "グリーン" より先に判定)
+    for key in sorted(_KATAKANA_TO_EBAY_COLOR.keys(), key=len, reverse=True):
+        if key in color:
+            return _KATAKANA_TO_EBAY_COLOR[key]
+
+    # 4. 不一致
+    return ""
+
+
+# ============================================================================
+# JP サイズ → US サイズ 変換 (2026-05-05 抽出くん T 列連携)
+# ============================================================================
+# 既存ロジック (JP→US: S→XS, M→S, L→M, XL→L, XXL→XL) をテーブル化
+_JP_TO_US_SIZE = {
+    "XS": "XXS", "S": "XS", "M": "S", "L": "M", "XL": "L", "XXL": "XL", "XXXL": "XXL",
+    "S/M": "XS", "M/L": "S", "L/XL": "M",  # メルカリ慣用
+}
+
+
+def _normalize_size_jp(mercari_size: str) -> tuple:
+    """メルカリサイズ表記 → (size_jp, size_us). 不明なら ("", "").
+
+    メルカリ「商品のサイズ」フィールドは多様: "M" / "メンズM" / "Lサイズ" / "L (90-100cm)" 等
+    JP サイズ抽出 → US サイズ変換テーブル参照.
+    """
+    if not mercari_size:
+        return ("", "")
+    s = mercari_size.strip().upper()
+    # 末尾の "サイズ" や前置の "メンズ"/"レディース" 等を除去
+    s = re.sub(r"^(メンズ|レディース|ユニセックス|キッズ)", "", s)
+    s = re.sub(r"サイズ$", "", s)
+    # 括弧内の cm/inch 表記を除去 (例: "L (90-100cm)" → "L")
+    s = re.sub(r"\s*\([^)]*\)", "", s).strip()
+    # 直接マッチ
+    if s in _JP_TO_US_SIZE:
+        return (s, _JP_TO_US_SIZE[s])
+    # X+S/M/L パターン抽出 (例: "XL", "XXL")
+    m = re.search(r"\b(X{0,3}[SML])\b", s)
+    if m:
+        jp = m.group(1)
+        us = _JP_TO_US_SIZE.get(jp, "")
+        if us:
+            return (jp, us)
+    return ("", "")
+
+
 def _extract_via_short_ai(target: dict, name_jp: str, anthropic_api_key: str) -> dict:
-    """短文 AI で商品名英訳 + 色 + サイズを抽出 (1回の short JSON タスク).
+    """短文 AI で 色 + サイズ + condition_description を抽出 (1回の short JSON タスク).
 
-    catalog の name_jp は AI に「公式商品名」として渡す.
-    メルカリのタイトル/説明文から色・サイズ表記を抽出.
+    商品名 (name_en) は catalog から取得するため AI には依頼しない (2026-05-05 廃止).
+    catalog の name_jp は AI への文脈情報として渡す.
+    メルカリのタイトル/説明文から色・サイズ・状態を抽出.
 
-    Returns: {"name_en": str, "color": str, "size_jp": str, "size_us": str} or None
+    Returns: {"color": str, "size_jp": str, "size_us": str, "condition_description": str} or None
     """
     import anthropic
     client = anthropic.Anthropic(api_key=anthropic_api_key)
@@ -156,21 +255,22 @@ def _extract_via_short_ai(target: dict, name_jp: str, anthropic_api_key: str) ->
 
 【公式商品名 (JP)】: {name_jp}
 【メルカリのタイトル】: {target.get("title_jp", "")}
-【メルカリの商品説明】: {target.get("description", "")[:500]}
+【メルカリの商品説明】: {target.get("description", "")[:1500]}
+【メルカリの商品の状態】: {target.get("condition", "")}
 
 返却 JSON:
 {{
-  "name_en": "公式商品名の英訳 (例: 'U.L. Stretch Wind Jacket', 'Storm Cruiser Jacket')",
   "color": "色 (eBay 16色 enum: Beige/Black/Blue/Brown/Gold/Gray/Green/Ivory/Multicolor/Orange/Pink/Purple/Red/Silver/White/Yellow から選択)",
   "size_jp": "JP サイズ (S/M/L/XL/XXL 等、メルカリ表記から)",
-  "size_us": "US サイズ (JP→US 変換: S→XS, M→S, L→M, XL→L, XXL→XL)"
+  "size_us": "US サイズ (JP→US 変換: S→XS, M→S, L→M, XL→L, XXL→XL)",
+  "condition_description": "メルカリ商品説明から具体的な状態を英訳。中古は 'Pre-owned. [使用頻度/傷の有無/付属品など具体的状態を 1-2 文]. Please review all photos carefully before purchasing. Sold as-is.' 形式。新品(新品、未使用)は 'Brand new, never used. Shipped directly from Japan.' 固定。説明文に状態記述が無い場合のみ ENUM ベースの汎用文 (例: 中古・目立った傷や汚れなし → 'Pre-owned. Excellent condition with very minor signs of use if any. Please review all photos carefully before purchasing. Sold as-is.')"
 }}
 
 JSON のみ返してください。説明文不要。"""
 
     try:
         msg = client.messages.create(
-            model=MODEL, max_tokens=300,
+            model=MODEL, max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text.strip()
@@ -194,18 +294,42 @@ def _build_listing_from_catalog(target: dict, catalog_result: dict, anthropic_ap
     if not extracted:
         return None
 
-    # AI が JSON 値 null で返してくる可能性があるので or "" で正規化
-    name_en = (extracted.get("name_en") or "").strip()
-    color = (extracted.get("color") or "").strip()
-    size_jp = (extracted.get("size_jp") or "").strip()
-    size_us = (extracted.get("size_us") or "").strip()
+    # name_en は catalog から取得 (2026-05-05 AI 翻訳廃止、Catalog 完成済 全 2052 件設定済)
+    name_en = (catalog_result.get("name_en") or "").strip()
+    if not name_en:
+        # NULL は理論上発生しないが、保険として SKIP (Precision 100% 原則)
+        print(f"    ⚠️ catalog name_en が NULL → SKIP")
+        return None
 
-    # メルカリ「商品の状態」 → 英文テンプレ + ConditionID
+    # 色: 抽出くん S 列 (mercari_color) を優先、空なら AI fallback (2026-05-05)
+    catalog_color_variants = (catalog_result.get("specs") or {}).get("color_variants", [])
+    mercari_color = (target.get("mercari_color") or "").strip()
+    color = _normalize_color_to_ebay(mercari_color, catalog_color_variants) if mercari_color else ""
+    if not color:
+        # 抽出くん S 列空 or マッピング不一致 → AI 推測 fallback
+        color = (extracted.get("color") or "").strip()
+
+    # サイズ: 抽出くん T 列 (mercari_size) を優先、空なら AI fallback (2026-05-05)
+    mercari_size = (target.get("mercari_size") or "").strip()
+    if mercari_size:
+        size_jp, size_us = _normalize_size_jp(mercari_size)
+    else:
+        size_jp, size_us = "", ""
+    if not size_jp:
+        size_jp = (extracted.get("size_jp") or "").strip()
+    if not size_us:
+        size_us = (extracted.get("size_us") or "").strip()
+
+    ai_cond_desc = (extracted.get("condition_description") or "").strip()
+
+    # メルカリ「商品の状態」 → ConditionID と状態ラベル (テンプレは fallback 用)
     condition_jp = (target.get("condition") or "").strip()
-    cond_desc, cond_id, state_label = _MERCARI_CONDITION_MAP.get(
+    fallback_desc, cond_id, state_label = _MERCARI_CONDITION_MAP.get(
         condition_jp,
         ("Pre-owned. Please review photos carefully before purchase.", 3000, "Pre-owned"),
     )
+    # AI が説明文を読んで生成した具体的な condition_description を優先、空なら ENUM fallback
+    cond_desc = ai_cond_desc if ai_cond_desc else fallback_desc
 
     # タイトル組立 (テンプレ)
     title_parts = ["montbell", name_en, color, f"US {size_us}", f"(JP {size_jp})", state_label, "Japan"]
@@ -420,12 +544,17 @@ def get_listing_targets():
         model = row[8].strip() if len(row) > 8 else ""  # I列: 型番 (ユーザー手動入力, 7桁数字)
 
         category = row[17] if len(row) > 17 else ""  # R列
+        # 抽出くん (Phase 1d-2) が S 列に色 / T 列にサイズを書込む (空のままの場合あり)
+        mercari_color = row[18].strip() if len(row) > 18 else ""  # S列: 色 (カタカナ)
+        mercari_size = row[19].strip() if len(row) > 19 else ""   # T列: サイズ
         if url and not item_id and not sold and category == CATEGORY_FILTER:
             targets.append({
                 "row": i, "url": url, "title_jp": title_jp,
                 "condition": condition, "price_jpy": price,
                 "photo_urls": photo_urls, "description": description,
                 "model": model,
+                "mercari_color": mercari_color,
+                "mercari_size": mercari_size,
             })
     return targets
 
