@@ -1261,10 +1261,22 @@ def main():
                     pass
             print(f"    💲 ${price} (仕入¥{cost_jpy})")
             row = build_row(url, price, data, base_desc)
-            # SKU 上書き: 共通ルール (TCG/Tshirt/Montbell と同じ、URL 末尾 12 文字).
+            # SKU 上書き: 共通ルール (TCG/Tshirt/Montbell と同じ、URL ベース).
             # CASIO 公式 URL の場合は build_row の model_official (型番) をそのまま維持.
+            # Amazon ASIN: /dp/XXXXXXXXXX (10 文字)
+            # Mercari itemID: /item/m+数字
+            # それ以外は extract_sku_from_url の末尾 12 文字 fallback
             if 'casio.com' not in url:
-                _sku = _extract_sku_from_url(url, category="gshock")
+                _sku = None
+                _am = re.search(r'/dp/([A-Z0-9]{10})', url)
+                if _am:
+                    _sku = _am.group(1)
+                else:
+                    _mm = re.search(r'/item/(m\d+)', url)
+                    if _mm:
+                        _sku = _mm.group(1)
+                    else:
+                        _sku = _extract_sku_from_url(url, category="gshock")
                 if _sku:
                     row[6] = _sku  # CustomLabel
 
