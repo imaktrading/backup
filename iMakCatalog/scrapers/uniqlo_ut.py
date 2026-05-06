@@ -820,10 +820,12 @@ def reprocess_in_place() -> dict:
     updated = 0
     for pid, name_jp, specs_json in rows:
         try:
-            old = _json.loads(specs_json or "{}")
+            old_json = specs_json or "{}"
+            old = _json.loads(old_json)
         except Exception:
             continue
-        new_spec = dict(old)
+        # 深いコピー (color_variants 等の nested dict を独立化)
+        new_spec = _json.loads(old_json)
 
         # 固定値 (商品共通)
         new_spec.setdefault("brand", "Uniqlo")
@@ -844,14 +846,35 @@ def reprocess_in_place() -> dict:
         new_spec.setdefault("year_manufactured", "")
 
         # ebay_colors: 既存 color_variants から filter → 16色 enum
+        # 同時に image_url も color_variant に紐付け
+        l1id = new_spec.get("l1_id", "")
+        existing_urls = new_spec.get("image_urls") or []
         color_ebay_set: list = []
         for c in (new_spec.get("color_variants") or []):
             ebay = _normalize_color_filter(c.get("filter") or "")
             if ebay not in color_ebay_set:
                 color_ebay_set.append(ebay)
-            # 各 variant に ebay_color 追加 (なければ)
             if "ebay_color" not in c:
                 c["ebay_color"] = ebay
+            # 各 color の主画像 URL を予測構築 (color displayCode から)
+            if "image_url" not in c and l1id:
+                disp = c.get("displayCode") or "00"
+                # 既存 image_urls から color 一致するもの探す
+                matched = next((u for u in existing_urls if f"_{disp}_" in u), None)
+                if matched:
+                    c["image_url"] = matched
+                else:
+                    # AsianCommon vs jp 系で URL pattern 違う、既存 list の最初 URL から判別
+                    base_template = ""
+                    if existing_urls:
+                        first = existing_urls[0]
+                        # URL pattern 抽出: 'goods_XX_{l1id}_3x4.jpg' or 'jpgoods_XX_{l1id}_3x4.jpg'
+                        import re as _re
+                        m = _re.match(r"(.+/imagesgoods/\d+/item/)((?:jp)?goods)_\d+_(\d+_3x4\.jpg)", first)
+                        if m:
+                            base_template = f"{m.group(1)}{m.group(2)}_{disp}_{m.group(3)}"
+                    if base_template:
+                        c["image_url"] = base_template
         new_spec["ebay_colors"] = color_ebay_set
 
         # ebay_sizes: 既存 size_variants から正規化
@@ -962,6 +985,245 @@ def reprocess_all_active() -> dict:
     return {"target": len(rows), "reprocessed": reprocessed, "errors": errors}
 
 
+def import_fashion_press_article(article_url: str) -> bool:
+    """fashion-press 記事から UT collab info 抽出 → catalog に collab 単位で投入.
+
+    記事は個別 T-shirt の Uniqlo l1Id を持たないため、product_id は
+    `FP-{article_id}` の合成で source='fashion_press_{article_id}' を明示.
+    listing 側で source 見て trust 度判断する設計 (catalog_official_only.md 改訂版).
+
+    抽出 field:
+      - chapters: <h3> 章タイトル list
+      - characters: 主要 IP の キャラ list (記事本文に出現したもの)
+      - approx_year: 記事公開日
+      - publication_date: 記事内日付
+
+    Returns:
+        True (upsert 成功) / False
+    """
+    import requests  # type: ignore
+    import api  # type: ignore
+
+    m = re.search(r'/news/(\d+)', article_url)
+    if not m:
+        print(f"  ⚠️ article_id 抽出失敗: {article_url}")
+        return False
+    article_id = m.group(1)
+
+    try:
+        r = requests.get(article_url,
+                         headers={"User-Agent": "Mozilla/5.0",
+                                  "Accept-Language": "ja-JP"},
+                         timeout=20)
+        if r.status_code != 200:
+            print(f"  ⚠️ HTTP {r.status_code}: {article_url}")
+            return False
+        html = r.text
+    except Exception as e:
+        print(f"  ⚠️ fetch 失敗: {e}")
+        return False
+
+    # title (公式の collab 名)
+    title_m = re.search(r"<title>([^<]+)</title>", html)
+    title = title_m.group(1) if title_m else ""
+    title = title.replace(" - ファッションプレス", "").strip()
+
+    # 章 (h3 タグ、本文関連だけ抽出)
+    chapters_raw = re.findall(r"<h3[^>]*>([^<]+)</h3>", html)
+    skip_chapter_kw = ["関連", "Photos", "キーワード", "取り扱い", "ピックアップ"]
+    chapters = [c for c in chapters_raw
+                if not any(kw in c for kw in skip_chapter_kw)]
+
+    # 公開日
+    date_m = re.search(r"(\d{4})\.(\d{1,2})\.(\d{1,2})", html)
+    pub_date = date_m.group(0) if date_m else ""
+
+    # IP / character family 推定 (既存 mapping 流用)
+    family = _derive_character_family(title)
+    themes = _derive_themes(title)
+
+    # IP 別の主要キャラ list (記事内に出現したもの抽出)
+    family_character_dict = {
+        "Dragon Ball": ["孫悟空", "ベジータ", "ピッコロ", "クリリン", "悟飯", "悟天",
+                        "トランクス", "フリーザ", "セル", "魔人ブウ", "ヤムチャ",
+                        "天津飯", "チャオズ", "ブロリー", "ベジット", "ゴジータ",
+                        "ミスター・サタン", "ブルマ", "チチ", "ビーデル", "パン"],
+        "Pokemon":     ["ピカチュウ", "イーブイ", "ゲンガー", "ミュウツー", "ミュウ",
+                        "リザードン", "フシギダネ", "ゼニガメ", "ヒトカゲ", "プリン",
+                        "コイキング", "ゲッコウガ"],
+        "One Piece":   ["ルフィ", "ゾロ", "ナミ", "サンジ", "ウソップ", "チョッパー",
+                        "ロビン", "フランキー", "ブルック", "ジンベエ", "エース",
+                        "シャンクス", "白ひげ"],
+        "Naruto":      ["ナルト", "サスケ", "サクラ", "カカシ", "ヒナタ", "ガアラ",
+                        "イタチ", "綱手", "自来也", "オロチマル"],
+        "Demon Slayer":["炭治郎", "禰豆子", "善逸", "伊之助", "義勇", "煉獄",
+                        "蜜璃", "無一郎", "実弥", "行冥"],
+        "Disney":      ["ミッキー", "ミニー", "ドナルド", "デイジー", "プルート",
+                        "グーフィー", "アナ", "エルサ", "シンデレラ", "白雪姫"],
+        "Marvel":      ["スパイダーマン", "アイアンマン", "キャプテン・アメリカ",
+                        "ハルク", "ソー", "ブラックパンサー", "ウルヴァリン", "デッドプール"],
+        "Star Wars":   ["ルーク", "レイア", "ハン・ソロ", "ヨーダ", "ダース・ベイダー",
+                        "C-3PO", "R2-D2", "BB-8", "レイ"],
+    }
+    char_pool = family_character_dict.get(family, [])
+    found_chars = sorted([c for c in char_pool if c in html])
+
+    pid = f"FP-{article_id}"
+    api.upsert(
+        category=CATEGORY,
+        product_id=pid,
+        name=title,
+        name_jp=title,
+        name_en="",
+        specs={
+            "brand":               "Uniqlo",
+            "type":                "T-Shirt",
+            "size_type":           "Regular",
+            "closure":             "Pullover",
+            "neckline":            "Crew Neck",
+            "sleeve_length":       "Short Sleeve",
+            "fit":                 "Regular",
+            "vintage":             "No",
+            "personalize":         "No",
+            "handmade":            "No",
+            "style":               "Graphic Tee",
+            "pattern":             "Graphic Print",
+            "country_of_origin":   "Does not apply",
+            "category_line":       "UT",
+            "department":          "Unisex Adults",  # 記事ベースだと正確不明
+            "themes":              themes,
+            "character_family":    family,
+            "character":           "",  # 個別 character は characters list に
+            "characters":          found_chars,     # 記事に出現する主要 character (複数)
+            "chapters":            chapters,        # 記事の章構成 (例: 孫悟空少年編)
+            "publication_date":    pub_date,
+            "is_collab_overview":  True,            # 個別 T-shirt じゃなく collab 全体
+            "ebay_colors":         [],
+            "ebay_sizes":          [],
+            "color_variants":      [],
+            "size_variants":       [],
+            "image_urls":          [],
+            "price_jpy_base":      "",
+            "price_jpy_promo":     "",
+        },
+        images=[],
+        source=f"fashion_press_{article_id}",
+        source_url=article_url,
+    )
+    print(f"  ✅ {pid}: {title[:60]}")
+    print(f"     family={family} themes={themes}")
+    print(f"     chapters={chapters}")
+    print(f"     characters ({len(found_chars)}): {found_chars[:8]}")
+    return True
+
+
+def crawl_fashion_press_ut_articles(
+    seeds: Optional[list] = None,
+    max_articles: int = 200,
+    pacing: float = 2.0,
+    retries: int = 3,
+) -> dict:
+    """fashion-press から UT 関連記事を再帰 crawl して catalog 投入.
+
+    Seeds (初期 URL) から start, 各記事の outbound link で UT/ユニクロ 含む
+    タイトルなら次の crawl 対象に追加. visited で重複回避.
+
+    Args:
+        seeds: 初期 URL list. None なら Uniqlo brand page + 既知 article から開始.
+        max_articles: 最大投入件数 (上限).
+        pacing: 各 fetch 間 sleep.
+        retries: DNS / 一時エラー時の retry 回数.
+
+    Returns:
+        {"visited": int, "imported": int, "errors": int}
+    """
+    import requests  # type: ignore
+    import api  # type: ignore
+
+    if seeds is None:
+        seeds = [
+            "https://www.fashion-press.net/brands/244",  # Uniqlo brand
+            "https://www.fashion-press.net/news/102598",  # Dragon Ball UT (既存 seed)
+        ]
+
+    visited: set = set()
+    queue: list = list(seeds)
+    imported = 0
+    errors = 0
+
+    def _fetch(url):
+        for i in range(retries):
+            try:
+                r = requests.get(url,
+                                 headers={"User-Agent": "Mozilla/5.0",
+                                          "Accept-Language": "ja-JP"},
+                                 timeout=20)
+                if r.status_code == 200:
+                    return r.text
+            except Exception:
+                if i < retries - 1:
+                    time.sleep(3 * (i + 1))  # backoff
+                continue
+        return None
+
+    while queue and imported < max_articles:
+        url = queue.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+        time.sleep(pacing)
+
+        html = _fetch(url)
+        if not html:
+            errors += 1
+            continue
+
+        # title 抽出
+        title_m = re.search(r"<title>([^<]+)</title>", html)
+        title = title_m.group(1).replace(" - ファッションプレス", "").strip() if title_m else ""
+
+        # UT 純粋 article を識別 (Uniqlo の他 sub-brand collab を除外)
+        # 排除: ユニクロ U / ユニクロ アンド / ユニクロ＆ / ユニクロ：シー / +J 等
+        exclude_terms = [
+            "ユニクロ ユー", "ユニクロ U ", "ユニクロ U／", "ユニクロ：U",
+            "ユニクロ アンド", "ユニクロ＆", "ユニクロ ＆", "ユニクロ：シー",
+            "Uniqlo U ", "ユニクロ プラスジェイ", "ユニクロ +J", "ユニクロ／プラスジェイ",
+            "ユニクロ プラス・ジェイ", "ユニクロ：C",
+        ]
+        is_ut_article = (
+            "/news/" in url and
+            "UT" in title and
+            not any(ex in title for ex in exclude_terms)
+        )
+        if is_ut_article:
+            article_id_m = re.search(r"/news/(\d+)", url)
+            if article_id_m:
+                pid = f"FP-{article_id_m.group(1)}"
+                existing = api.lookup(CATEGORY, pid)
+                if not existing:
+                    try:
+                        if import_fashion_press_article(url):
+                            imported += 1
+                    except Exception as e:
+                        print(f"  ⚠️ import fail {url}: {type(e).__name__}: {str(e)[:100]}")
+                        errors += 1
+
+        # outbound link 抽出 (UT 含むタイトル のみ、sub-brand 除外)
+        for href, t in re.findall(
+            r'<a[^>]+href="(/news/\d+)"[^>]*title="([^"]+)"', html
+        ):
+            if "UT" in t and not any(ex in t for ex in exclude_terms):
+                full_url = f"https://www.fashion-press.net{href}"
+                if full_url not in visited:
+                    queue.append(full_url)
+
+    print(f"\n=== crawl 完了 ===")
+    print(f"  visited: {len(visited)}")
+    print(f"  imported: {imported}")
+    print(f"  errors: {errors}")
+    return {"visited": len(visited), "imported": imported, "errors": errors}
+
+
 def lookup_by_l1id(l1id: str) -> bool:
     """個別 l1Id を API lookup → catalog upsert (廃盤救済).
 
@@ -1032,6 +1294,26 @@ def _cli():
         reprocess_all_active()
     elif args[0] == "--reprocess-inplace":
         reprocess_in_place()
+    elif args[0] == "--import-fp" and len(args) >= 2:
+        import_fashion_press_article(args[1])
+    elif args[0] == "--crawl-fp":
+        # 自動 crawl で UT 関連 article を発見 + 投入
+        max_n = int(args[1]) if len(args) > 1 else 200
+        crawl_fashion_press_ut_articles(max_articles=max_n)
+    elif args[0] == "--import-fp-list" and len(args) >= 2:
+        # URL list (text file、1 行 1 URL) を batch import
+        with open(args[1], encoding="utf-8") as f:
+            urls = [line.strip() for line in f if line.strip() and "/news/" in line]
+        print(f"=== batch import: {len(urls)} URLs ===")
+        ok = 0
+        for u in urls:
+            try:
+                if import_fashion_press_article(u):
+                    ok += 1
+                time.sleep(2)
+            except Exception as e:
+                print(f"  ⚠️ {u}: {e}")
+        print(f"\n=== 完了: {ok}/{len(urls)} ===")
     elif args[0] == "--import-historical":
         # [DELETED] catalog 原則違反、削除済
         print("⚠️ --import-historical は削除済 (catalog 原則違反). "
