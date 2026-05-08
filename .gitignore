@@ -96,3 +96,7 @@ psa_run_*.log
 
 # control_panel GUI 運用状態 (ローカル運用ファイル、git track しない)
 iMakInventory/.gui_state.json
+
+# DPAPI 暗号化された eBay credentials (絶対に commit しない)
+**/.encrypted_passwd.dat
+**/encrypted_passwd.dat

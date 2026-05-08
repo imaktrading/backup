@@ -144,10 +144,42 @@ def is_logged_in(driver) -> bool:
 
 
 def manual_login(driver) -> bool:
-    """ブラウザを開いてユーザーが手動ログイン → cookie 保存 → 完了確認."""
+    """ブラウザを開いて eBay にログイン → cookie 保存 → 完了確認。
+
+    モード:
+    1. **自動 (opt-in)**: auth/encrypted_passwd の DPAPI 暗号化 credentials が
+       存在すれば、email/password を Selenium で自動入力 + Stay signed in 自動 ON
+       → Submit → 2FA だけ人間操作 (or 不要)。trabajo 同等。
+    2. **手動 (default)**: credentials ファイル無しなら従来通り全部手動 + Enter 待ち。
+
+    どちらでも login 確定するまでに失敗したら旧 path (= 手動) に fallback。
+    既存挙動 (credentials 無しの状態) は完全保持。
+    """
     print("=" * 60)
-    print("eBay 手動ログイン")
+    print("eBay ログイン")
     print("=" * 60)
+
+    # opt-in: credentials があれば自動 login 試行
+    try:
+        from auth.encrypted_passwd import load_credentials  # noqa: PLC0415
+        creds = load_credentials()
+    except Exception as e:
+        creds = None
+        print(f"  (credentials load 失敗: {type(e).__name__}、手動 mode に fallback)")
+
+    if creds is not None:
+        email, password = creds
+        print(f"  ✅ encrypted_passwd 検出 (email={email}) → 自動入力 mode")
+        if _auto_login(driver, email, password):
+            return True
+        print("  ⚠️ 自動 login 失敗 → 手動 mode に fallback")
+
+    # 手動 mode (= 従来通り、既存挙動完全保持)
+    return _manual_login_legacy(driver)
+
+
+def _manual_login_legacy(driver) -> bool:
+    """従来の全部手動 manual_login (Enter 待ち)。"""
     print("ブラウザが開きます。以下の手順でログインしてください:")
     print("  1. 開いたブラウザで eBay にログイン (2FA も含む)")
     print("  2. ホームに戻ったら、このターミナルに戻る")
@@ -167,6 +199,97 @@ def manual_login(driver) -> bool:
         return True
     else:
         print("⚠️ ログイン確認 NG、再度お試しください")
+        return False
+
+
+def _auto_login(driver, email: str, password: str) -> bool:
+    """credentials を Selenium で自動入力 + Stay signed in 自動 ON + Submit。
+
+    eBay の signin form 仕様 (2026 時点想定):
+    - email: input#userid
+    - 「Continue」: button#signin-continue-btn
+    - password: input#pass
+    - 「Stay signed in」: input#remember-me (永続 cookie 焼く)
+    - 「Sign in」: button#sgnBt
+
+    どこかで例外出たら False を返して fallback 先に投げる (既存挙動保持)。
+
+    2FA は eBay 仕様で人間操作必須。submit 後 60 秒待って is_logged_in を polling、
+    その間に人間が 2FA 入力すれば login 完了。
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+    from selenium.webdriver.support.ui import WebDriverWait  # noqa: PLC0415
+    from selenium.webdriver.support import expected_conditions as EC  # noqa: PLC0415
+
+    try:
+        driver.get(EBAY_SIGNIN_URL)
+        time.sleep(2)
+
+        # 1. email 入力
+        email_field = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "userid"))
+        )
+        email_field.clear()
+        email_field.send_keys(email)
+        print("    email 入力 OK")
+
+        # 2. Continue button (= 1 ページ目で email + Continue → 2 ページ目で password の flow)
+        try:
+            continue_btn = driver.find_element(By.ID, "signin-continue-btn")
+            continue_btn.click()
+            time.sleep(2)
+            print("    Continue OK")
+        except Exception:
+            print("    (Continue 不要、1 ページ完結 form の可能性)")
+
+        # 3. password 入力
+        try:
+            passwd_field = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "pass"))
+            )
+            passwd_field.clear()
+            passwd_field.send_keys(password)
+            print("    password 入力 OK")
+        except Exception as e:
+            print(f"    ⚠️ password field 不在: {e}")
+            return False
+
+        # 4. Stay signed in 自動 ON (Remember Me cookie 焼く、1 年級寿命期待)
+        try:
+            chk = driver.find_element(By.ID, "remember-me")
+            if not chk.is_selected():
+                chk.click()
+                print("    Stay signed in: ON")
+            else:
+                print("    Stay signed in: 既に ON")
+        except Exception:
+            print("    (Stay signed in chk 見当たらず、続行)")
+
+        # 5. Sign in button click
+        try:
+            submit_btn = driver.find_element(By.ID, "sgnBt")
+            submit_btn.click()
+            print("    Sign in click OK")
+        except Exception:
+            try:
+                passwd_field.submit()
+                print("    Sign in (form.submit fallback) OK")
+            except Exception as e:
+                print(f"    ⚠️ Sign in click 失敗: {e}")
+                return False
+
+        # 6. 2FA / login 確定待ち (60 秒 polling)
+        print("    2FA が必要な場合は手動入力してください (最大 60 秒待ち)")
+        for i in range(30):
+            time.sleep(2)
+            if is_logged_in(driver):
+                print(f"  ✅ 自動ログイン完了 ({i*2}s 経過)")
+                return True
+        print("  ⚠️ 60 秒経過して login 完了確認できず")
+        return False
+
+    except Exception as e:
+        print(f"  ⚠️ 自動 login 例外: {type(e).__name__}: {e}")
         return False
 
 
@@ -469,10 +592,20 @@ def upload_one_csv(
                     pass
 
             if not login_ok:
-                print("  ⚠️ 未ログイン (login retry 尽きた)。--login で再度手動ログインしてください")
-                result = {"success": False, "error": "not_logged_in",
-                          "result_text": "", "popup_text": "", "page_url": "", "screenshot": None}
-                break  # 全体ループも抜ける
+                # 自動再ログイン試行 (encrypted_passwd opt-in、無ければ legacy 手動 prompt)
+                # cron 経由 (pythonw.exe / stdin 無し) でも legacy path は EOFError を catch
+                # して False を返すため安全 (= 旧挙動と同等)
+                print("  ⚠️ 未ログイン、manual_login 自動 trigger")
+                print("     (encrypted_passwd 有 → 自動入力 + Stay signed in / 無 → 手動 prompt)")
+                if manual_login(driver):
+                    if is_logged_in(driver):
+                        login_ok = True
+                        print("  ✅ 再ログイン成功、upload 再開")
+                if not login_ok:
+                    print("  ⚠️ 再ログイン失敗、not_logged_in 確定")
+                    result = {"success": False, "error": "not_logged_in",
+                              "result_text": "", "popup_text": "", "page_url": "", "screenshot": None}
+                    break  # 全体ループも抜ける
 
             print("  ✅ ログイン状態 OK")
             result = upload_csv_via_form(driver, csv_path, dry_run=dry_run)
