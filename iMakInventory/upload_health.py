@@ -34,11 +34,14 @@ HEALTH_FILE = DECISION_LOG_DIR / "upload_health.json"
 DESKTOP_DIR = Path(os.environ.get("USERPROFILE", "")) / "OneDrive" / "デスクトップ"
 DESKTOP_DIR_FALLBACK = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
 
-# 「即時通知」する error 種別 (1 回目で発火)
+# 「即時通知」する error 種別 (1 回目で発火、substring match)
 CRITICAL_ERRORS = {
     "not_logged_in",
     "session_expired",
     "session_expired_and_relogin_failed",
+    # 2026-05-08 flaky 撲滅改造で追加:
+    "result_not_in_history",   # eBay 履歴に出てこない = 真の未送信 (= ネット障害 / Submit 不達)
+    "action_needed_failure",   # 写真要件 / invalid ItemID 等の手動対応必要 Failure (substring)
 }
 
 # 「連続検知」する error と発火閾値
