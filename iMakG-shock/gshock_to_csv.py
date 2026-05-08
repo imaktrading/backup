@@ -1188,6 +1188,7 @@ def main():
 
     rows = [headers]
     errors = []
+    missing_models = []  # catalog 未登録 (要 Catalog Claude 拡充依頼)
 
     # ホワイトリスト検証（Pythonマッピングのバグ検出用、Claude無いのでリトライ不可）
     # 2026-05-05 専門化: 共有 whitelist_registry から gshock_whitelist (専用) に切替
@@ -1217,9 +1218,13 @@ def main():
                 print(f" [catalog err: {type(_e).__name__}]", end="", flush=True)
                 data = None
         if data is None:
-            # スプシ駆動の場合 url が CASIO 公式形式でない (Amazon 等) → CASIO URL に変換
-            scrape_url = url if 'casio.com' in url else build_casio_url(model)
-            data = scrape_casio(driver, scrape_url)
+            # 2026-05-08: catalog 未登録 = SKIP + Catalog Claude 拡充依頼通知
+            # 旧経路 (scrape_casio fallback) は CASIO 公式 404 で空データ出品事故が発生
+            # → catalog SSOT 強化、出品の正確性原則 (CLAUDE.md 大原則) 死守
+            print(f" → ⏭️ SKIP (catalog 未登録、Catalog Claude に拡充依頼)", flush=True)
+            missing_models.append(model)
+            errors.append(url)
+            continue
         if data:
             print(f" → {data.get('case_size','?')} / {data.get('crystal','?')} / StoreCat:{get_store_category(data['model_base'])} ✓")
             # 動的価格決定 (2026-05-05 Montbell パターン適用)
@@ -1340,6 +1345,32 @@ def main():
         print(f"  {s} ({len(t)}字) {t}")
 
     print("\n⚠️ 要手動確認：Case Color / Band Color / Department / Style")
+
+    # Catalog 未登録モデル一覧 + 共有通知ファイル追記 (2026-05-08)
+    if missing_models:
+        # 共有領域に追記 (Catalog Claude が読込)
+        from datetime import datetime as _dt
+        notify_dir = "C:/dev/iMak_data/catalog"
+        notify_path = f"{notify_dir}/missing_models.csv"
+        try:
+            _os.makedirs(notify_dir, exist_ok=True)
+            file_exists = _os.path.exists(notify_path)
+            with open(notify_path, "a", encoding="utf-8") as f:
+                if not file_exists:
+                    f.write("category,model,detected_at\n")
+                ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                for m in missing_models:
+                    f.write(f"gshock,{m},{ts}\n")
+        except Exception as _e:
+            print(f"⚠️ missing_models.csv 書込失敗: {type(_e).__name__}: {_e}")
+
+        print("\n" + "=" * 70)
+        print(f"⚠️ Catalog 未登録モデル {len(missing_models)} 件 (Catalog Claude に追加依頼してください)")
+        print("=" * 70)
+        for m in missing_models:
+            print(f"  - {m}")
+        print(f"\n通知ファイル: {notify_path}")
+
     input("\nEnterで終了...")
 
 if __name__ == "__main__":

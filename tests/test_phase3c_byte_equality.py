@@ -192,56 +192,38 @@ def test_catalog_hit_path_byte_equal_to_scrape_path_bracelet_model():
 
 
 # ============================================================================
-# (A) catalog miss → 既存 scrape 経路に fallthrough (構造保証)
+# (A) catalog miss → SKIP + missing_models 通知 (2026-05-08 設計変更)
+# 旧: scrape_casio fallthrough (Phase 3-B 4/29)
+# 新: catalog 未登録 = SKIP + Catalog Claude 拡充依頼通知 (CASIO 公式 404 空データ事故防止)
 # ============================================================================
-def test_catalog_miss_path_data_dict_unchanged():
-    """catalog miss 時、main() の data 変数は scrape_casio 戻り値そのもの.
-
-    main() コード:
-        data = None
-        if _catalog_lookup is not None:
-            _cat_rec = _catalog_lookup(model)  # → None on miss
-            if _cat_rec:                       # → False
-                data = ...
-        if data is None:                       # → True
-            data = scrape_casio(driver, url)   # ← 既存呼出
-
-    本テストでは、_catalog_lookup を None 返却に固定し、データ取得 path が
-    scrape_casio に到達することを構造的に確認.
-    """
-    # _catalog_lookup を「常に None 返却」にパッチ
-    orig_lookup = gshock_to_csv._catalog_lookup
-
-    def _stub_lookup(_model):
-        return None
-
-    gshock_to_csv._catalog_lookup = _stub_lookup
-    try:
-        # main() のロジックを部分再現:
-        data = None
-        cat_rec = gshock_to_csv._catalog_lookup("GM-5600YRA-8")
-        assert cat_rec is None, "stub が None 返さない (テスト環境異常)"
-        if cat_rec:
-            data = gshock_to_csv._catalog_record_to_scrape_dict(cat_rec, "GM-5600YRA-8")
-        # `if data is None:` → True → scrape_casio に fallthrough
-        assert data is None, (
-            "catalog miss 時に data が None でない (= 既存 scrape 経路に行かない)"
-        )
-        # この後 main() では data = scrape_casio(driver, url) が呼ばれる.
-        # → 本テストでは Selenium を起動しない (構造的に既存経路に到達することの確認のみ).
-    finally:
-        gshock_to_csv._catalog_lookup = orig_lookup
+def test_catalog_miss_path_skip():
+    """catalog miss 時、main() ソース上で SKIP + missing_models.append が発生する構造確認."""
+    import inspect
+    src = inspect.getsource(gshock_to_csv.main)
+    # `if data is None:` 配下に SKIP / missing_models / continue があること
+    assert "missing_models.append" in src, (
+        "catalog miss 時に missing_models 蓄積していない (SKIP 設計が壊れている)"
+    )
+    assert "Catalog Claude" in src, (
+        "catalog miss SKIP 時の Catalog Claude 拡充依頼メッセージが見当たらない"
+    )
+    # scrape_casio が `if data is None:` 配下から呼ばれていないこと (旧 fallthrough 廃止)
+    idx_data_none = src.find("if data is None:")
+    idx_skip = src.find("missing_models.append")
+    assert 0 <= idx_data_none < idx_skip, (
+        "missing_models.append が `if data is None:` 配下に無い"
+    )
 
 
 def test_catalog_lookup_none_when_adapter_unavailable():
-    """iMakCatalog 配置なし環境のシミュレーション: _catalog_lookup is None なら if-block 全 skip."""
+    """iMakCatalog 配置なし環境: _catalog_lookup is None なら data 未取得 → SKIP に流れる."""
     orig_lookup = gshock_to_csv._catalog_lookup
     gshock_to_csv._catalog_lookup = None
     try:
         # main() の if 評価:
         if gshock_to_csv._catalog_lookup is not None:
             assert False, "adapter なし環境で if-block に入ってはいけない"
-        # → 即 fallthrough、data は scrape_casio で埋まる.
+        # 新設計: data is None のまま `if data is None:` 配下で SKIP + missing_models.append.
     finally:
         gshock_to_csv._catalog_lookup = orig_lookup
 
@@ -252,15 +234,12 @@ def test_catalog_lookup_none_when_adapter_unavailable():
 def test_no_extra_print_on_catalog_miss():
     """catalog miss 時、print('[catalog hit]') が発火しない (= byte 互換 stdout).
 
-    sphinx 構造的: print は `if _cat_rec:` guard 配下にあるので、
-    cat_rec is None なら fire しない.  ソース上の if 条件を確認.
+    構造: print は `if _cat_rec:` guard 配下にあるので、
+    cat_rec is None なら fire しない. ソース上の if 条件を確認.
     """
     import inspect
     src = inspect.getsource(gshock_to_csv.main)
-    # main() ソース内、'[catalog hit]' は cat_rec の if 配下にあること
     assert "[catalog hit]" in src
-    # 構造確認: '[catalog hit]' が if _cat_rec: 配下にあること
-    # (簡易: '[catalog hit]' の前に 'if _cat_rec' が出現)
     idx_if = src.find("if _cat_rec")
     idx_print = src.find("[catalog hit]")
     assert 0 <= idx_if < idx_print, (
@@ -275,7 +254,7 @@ if __name__ == "__main__":
     except Exception:
         pass
     cases = [
-        ("(A1) catalog miss → data is None", test_catalog_miss_path_data_dict_unchanged),
+        ("(A1) catalog miss → SKIP 構造", test_catalog_miss_path_skip),
         ("(A2) adapter 不在時 if-block skip",  test_catalog_lookup_none_when_adapter_unavailable),
         ("(B1) catalog hit byte 一致 (GM-5600)", test_catalog_hit_path_byte_equal_to_scrape_path_simple_model),
         ("(B2) catalog hit byte 一致 (GMW Bracelet)", test_catalog_hit_path_byte_equal_to_scrape_path_bracelet_model),
