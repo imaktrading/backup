@@ -128,3 +128,8 @@ iMakHQ/rarara_reports/
 # 注意: 新 worktree は別 path (C:/dev/iMak_inventory etc) で管理、元 monorepo の同名フォルダは古いものなので ignore
 iMakInventory/
 iMakHarvest/
+
+# === VSCode workspace ファイル (各 worktree のローカル設定) ===
+# 2026-05-09: branch 切替で workspace JSON が書き換わり iMakCatalog 行が消失した同型事故対策
+# uncommitted な workspace 編集が branch 切替で消える問題を構造的に解決するため untracked 化
+*.code-workspace
