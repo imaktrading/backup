@@ -1157,9 +1157,9 @@ def main():
         return
 
     print(f"\n合計 {len(targets)} 件を処理します。\n")
-    options = uc.ChromeOptions()
-    options.add_argument("--no-sandbox")
-    driver = uc.Chrome(options=options, version_main=146)
+    # 2026-05-08: catalog 未登録 = SKIP 設計に変更したため scrape_casio 不要、Chrome 起動廃止
+    # scrape_casio 関数自体は残置 (将来再利用の可能性、driver 引数のまま)
+    driver = None
     base_desc = load_base_description()
 
     headers = [
@@ -1318,7 +1318,8 @@ def main():
             print(f" → 失敗")
             errors.append(url)
 
-    driver.quit()
+    if driver is not None:
+        driver.quit()
 
     _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
     from listing_core import get_csv_output_path
