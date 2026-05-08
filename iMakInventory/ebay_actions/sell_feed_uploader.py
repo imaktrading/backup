@@ -195,9 +195,13 @@ def _manual_login_legacy(driver) -> bool:
     driver.get(EBAY_SIGNIN_URL)
     time.sleep(2)
     print("(ブラウザでログインを完了してから Enter を押してください...)")
+    # cron 経由 (pythonw.exe) では sys.stdin が無いため input() で
+    # RuntimeError "input(): lost sys.stdin" or EOFError or OSError が発生。
+    # 全部 catch して例外漏れを防ぎ、is_logged_in 確認に進む (= cron 環境で
+    # 自動 login 失敗時に従来同等の "not_logged_in" 確定動作になる)。
     try:
         input(">>> Enter to continue: ")
-    except EOFError:
+    except (EOFError, RuntimeError, OSError, AttributeError):
         pass
 
     if is_logged_in(driver):
