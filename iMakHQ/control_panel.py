@@ -20,7 +20,6 @@ except Exception:
     pass
 
 WORKSPACE = r"c:/dev/iMak"
-KEYWORDS_DIR = f"{WORKSPACE}/iMakKeywords"
 EBAY_SELLER = "imax-64"
 EBAY_KEYS_FILE = f"{WORKSPACE}/iMakeBayAPI/ebay keys.txt"
 
@@ -59,20 +58,6 @@ CONSOLIDATED_SHEETS = {
 # SHEET_CATEGORY_MAP は廃止（自動取得に変更）
 GSHEET_CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
 
-# ============ 参考リンク（最新売れ筋 / キーワード調査用） ============
-# 四半期更新されるeBayキーワードPDFへのリンク（iMakKeywords/）
-KEYWORD_PDF = {
-    "clothing": f"{KEYWORDS_DIR}/Clothing_Shoes_Accessories_2026Q1.pdf",
-    "toys":     f"{KEYWORDS_DIR}/Toys_Hobbies_2026Q1.pdf",
-    "collect":  f"{KEYWORDS_DIR}/Collectibles_2026Q1.pdf",
-    "watches":  f"{KEYWORDS_DIR}/Jewelry_Watches_2026Q1.pdf",
-    "sports":   f"{KEYWORDS_DIR}/Sporting_goods_2026Q1.pdf",
-    "cameras":  f"{KEYWORDS_DIR}/Cameras_Photo_2026Q1.pdf",
-    "home":     f"{KEYWORDS_DIR}/Home_Garden_2026Q1.pdf",
-    "video":    f"{KEYWORDS_DIR}/Video_Games_2026Q1.pdf",
-}
-
-# ============ トレンド/相場リサーチ リンク集 ============
 # ============================================================================
 # csv_postprocess_excluder helper (check_csv NO-GO 行を CSV から物理除外)
 # 2026-04-28 追加: dual_gate_disagreement.md CRITICAL 問題の応急対処.
@@ -165,161 +150,21 @@ def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
         # 失敗しても listing 出力には影響なし
 
 
-# 全商品共通のリサーチサイト
-COMMON_TREND_LINKS = [
-    ("Google Trends（日本）", "https://trends.google.co.jp/trends/trendingsearches/daily?geo=JP"),
-    ("Google Trends（US）",   "https://trends.google.com/trends/trendingsearches/daily?geo=US"),
-    ("ヤフオク 落札相場検索",   "https://aucfan.com/"),
-    ("駿河屋 相場検索",        "https://www.suruga-ya.jp/"),
-    ("eBay Trending",         "https://pages.ebay.com/trends/"),
-    ("eBay Terapeak（有料）",  "https://www.ebay.com/sh/research"),
-]
-
-# カテゴリ別リサーチリンク
-TREND_LINKS = {
-    "tshirt": [
-        ("メルカリ UT人気順",    "https://jp.mercari.com/search?keyword=UT&sort=num_likes&order=desc&status=sold_out"),
-        ("メルカリ UT SOLD",     "https://jp.mercari.com/search?keyword=UT&sort=created_time&order=desc&status=sold_out"),
-        ("UNIQLO 公式コラボ",    "https://www.uniqlo.com/jp/ja/contents/feature/ut/"),
-        ("Grailed (海外)",       "https://www.grailed.com/shop/uniqlo"),
-        ("StockX Tシャツ",       "https://stockx.com/tees"),
-        ("Stock Keeping (Rakuten) eBay売れ筋", "https://www.worthpoint.com/"),
-    ],
-    "montbell": [
-        ("メルカリ montbell 人気順", "https://jp.mercari.com/search?keyword=montbell&sort=num_likes&order=desc"),
-        ("メルカリ montbell SOLD",  "https://jp.mercari.com/search?keyword=montbell&status=sold_out&sort=created_time&order=desc"),
-        ("Montbell 公式アウトレット", "https://www.montbell.jp/products/list.php?category_id=1040"),
-        ("Yamap 人気ギア",         "https://yamap.com/shop"),
-        ("Grailed Montbell",       "https://www.grailed.com/shop/montbell"),
-    ],
-    "porter": [
-        ("メルカリ PORTER 人気順", "https://jp.mercari.com/search?keyword=PORTER&sort=num_likes&order=desc"),
-        ("メルカリ PORTER SOLD",  "https://jp.mercari.com/search?keyword=PORTER&status=sold_out&sort=created_time&order=desc"),
-        ("吉田カバン 公式新作",    "https://www.yoshidakaban.com/"),
-        ("Grailed Porter",        "https://www.grailed.com/shop/porter-yoshida-co"),
-        ("BEAMS別注検索",         "https://www.beams.co.jp/search/?keyword=porter"),
-    ],
-    "tomica": [
-        ("メルカリ トミカ 人気順", "https://jp.mercari.com/search?keyword=%E3%83%88%E3%83%9F%E3%82%AB&sort=num_likes&order=desc"),
-        ("メルカリ トミカ SOLD",  "https://jp.mercari.com/search?keyword=%E3%83%88%E3%83%9F%E3%82%AB&status=sold_out&sort=created_time&order=desc"),
-        ("ヤフオク トミカ落札相場", "https://aucfan.com/search1/q-~e3~83~88~e3~83~9f~e3~82~ab/"),
-        ("駿河屋 トミカ",         "https://www.suruga-ya.jp/search?category=&search_word=%E3%83%88%E3%83%9F%E3%82%AB"),
-        ("トミカランド情報",      "https://www.takaratomymall.jp/shop/contents2/tomicaland.aspx"),
-        ("まんだらけ トミカ",     "https://order.mandarake.co.jp/order/listPage/list?keyword=%E3%83%88%E3%83%9F%E3%82%AB&lang=ja"),
-    ],
-    "tcg": [
-        ("メルカリ PSA10 人気順",  "https://jp.mercari.com/search?keyword=PSA10&sort=num_likes&order=desc"),
-        ("メルカリ PSA10 SOLD",   "https://jp.mercari.com/search?keyword=PSA10&status=sold_out&sort=created_time&order=desc"),
-        ("PriceCharting TCG",     "https://www.pricecharting.com/category/trading-cards"),
-        ("TCGplayer",             "https://www.tcgplayer.com/"),
-        ("Cardmarket (EU)",       "https://www.cardmarket.com/"),
-        ("One Piece TCG Meta",    "https://onepiecetopdecks.com/"),
-        ("Pokemon Prices",        "https://www.pokeprice.io/"),
-        ("PSA Cert Pop Report",   "https://www.psacard.com/pop"),
-    ],
-    "gshock": [
-        ("メルカリ G-SHOCK人気順", "https://jp.mercari.com/search?keyword=G-SHOCK&sort=num_likes&order=desc"),
-        ("メルカリ G-SHOCK SOLD", "https://jp.mercari.com/search?keyword=G-SHOCK&status=sold_out&sort=created_time&order=desc"),
-        ("Chrono24 G-SHOCK",      "https://www.chrono24.com/casio/index.htm"),
-        ("WatchCharts G-SHOCK",   "https://watchcharts.com/watches/brand/casio"),
-        ("G-Central (海外ブログ)", "https://www.g-central.com/"),
-        ("CasioFanMag",          "https://casiofanmag.com/"),
-        ("CASIO 公式新作",        "https://gshock.casio.com/jp/products/new-arrivals/"),
-    ],
-    "kuji": [
-        ("メルカリ 一番くじ人気順", "https://jp.mercari.com/search?keyword=%E4%B8%80%E7%95%AA%E3%81%8F%E3%81%98&sort=num_likes&order=desc"),
-        ("メルカリ ラストワン賞",  "https://jp.mercari.com/search?keyword=%E3%83%A9%E3%82%B9%E3%83%88%E3%83%AF%E3%83%B3&sort=num_likes&order=desc"),
-        ("メルカリ 一番くじSOLD", "https://jp.mercari.com/search?keyword=%E4%B8%80%E7%95%AA%E3%81%8F%E3%81%98&status=sold_out&sort=created_time&order=desc"),
-        ("1kuji.com 公式",       "https://1kuji.com/"),
-        ("駿河屋 一番くじ",       "https://www.suruga-ya.jp/search?category=&search_word=%E4%B8%80%E7%95%AA%E3%81%8F%E3%81%98"),
-        ("まんだらけ フィギュア",  "https://order.mandarake.co.jp/order/"),
-    ],
-    "scout": [
-        ("メルカリ 新着（カテゴリ指定）", "https://jp.mercari.com/"),
-        ("Mercari Shops",         "https://mercari-shops.com/"),
-    ],
-}
-
 # ============ スクリプト登録 ============
 SCRIPTS = [
     {
-        "label": "Tシャツ (UNIQLO UT)",
+        "label": "Tシャツ",
         "verified": True,  # 2026-04-19 ユーザーチェック合格
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "tshirt_listing.py"],
-        "params": [{"name": "--limit", "label": "件数", "default": "5"}],
-        "desc": "スプシのItemIDブランク行から N件をeBay CSV化",
-        "trend_key": "tshirt",
-        "keyword_pdf": KEYWORD_PDF["clothing"],
-        "flow": """【商品選定】ユーザー、抽出はトラバホ
-
-【スプシ】TSHIRT_SHEET_ID = "1QI0-L1A1DfTEi8Hl1-EFuRl9oTw9QPFe3X85stnaOD4" (gid 851100680)
-  - 列: A=URL / B=ItemID / C=JPタイトル / D=Sold / E=状態 / F=価格 / G=写真URL / N=仕入価格(優先)
-  - 処理対象: ItemID空 & Sold空 の行
-  - スルー: ItemIDに値あり（出品済 or 「9999」見送り済）/ Sold
-
-【スプシ書込】
-  - GU商品 / 乖離超ALERT見送り → 「9999」をitemID列に自動書込
-  - 永久ループ防止（次回以降スルーされる）
-  - 復活させたい場合は手動で「9999」削除
-
-【パイソン処理】
-  1. 【個別】メルカリ/ラクマ写真URLの先頭1枚をBase64化
-  2. 【個別】Claude API(sonnet-4) → 英タイトル / コラボ名 / Item Specifics
-  3. 【個別】UNIQLO公式API → 公式画像URL（任意）
-  4. 【個別】eBay TOPセラー検索 → 中央値・参考Item Specifics取得
-  5. 【共通】価格決定: pricing_engine.compute_listing_price
-       - PROFIT_CATEGORY = "Tシャツ(UT)" (FVF 15.3%, 送料 ¥2,000)
-       - コストプラス + 価格帯別利益率上限 + 乖離率TBL判定
-       - ALERT時: itemID列に「9999」セット → CSV除外
-  6. 【個別】ストアカテゴリ = コラボ名で自動マッチ(34種登録、PDF最新版同期済)
-  7. 【個別】SKU = メルカリ商品ID(m...) / ラクマは末尾8桁
-  8. 【共通】listing_validator.py で禁止語/必須項目チェック (3AI議論方式)
-  9. 【個別】GU(ジーユー)商品は自動スキップ→「9999」マーク
-  10. 【個別】Country/Region = "Does not apply" 固定 (海外製造のため)
-  11. 【個別】タイトルに型番(MPN)を含めない (Item Specs Modelには記入)
-  12. 【個別】Location = "Japan, Osaka"
-
-【出力CSV】iMakHQ/csv_output/tshirt_upload_YYYYMMDD_HHMMSS.csv
-【eBay取込】手動 FileExchange アップロード
-【売れたら】SKUからメルカリ商品IDで仕入元即特定
-""",
+        "params": [],
     },
     {
         "label": "Montbell",
-        "verified": True,  # 2026-05-05 ユーザーチェック合格 (catalog name_en 連携 + 抽出くん S/T 列 + ConditionDescription AI 改善)
+        "verified": True,  # 2026-05-05 ユーザーチェック合格
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "montbell_listing.py"],
         "params": [],
-        "desc": "Montbellスプシから全件CSV化",
-        "trend_key": "montbell",
-        "keyword_pdf": KEYWORD_PDF["clothing"],
-        "flow": """【商品選定】ユーザー、抽出はトラバホ
-
-【スプシ】MONTBELL_SHEET_ID
-  - 処理対象: ItemID空 & Sold空 の行
-  - スルー: ItemIDに値あり（出品済 or 「9999」見送り済）
-
-【スプシ書込】
-  - 乖離超ALERT見送り → 「9999」をitemID列に自動書込
-  - 永久ループ防止（次回以降スルー）
-  - 復活させたい場合は手動で「9999」削除
-
-【パイソン処理】
-  1. 【個別】メルカリ写真DL + montbell公式画像取得(型番から)
-  2. 【個別】Claude API → 英タイトル / Item Specifics
-  3. 【個別】eBay TOPセラー参照（中央値取得）
-  4. 【共通】価格決定: pricing_engine.compute_listing_price
-       - コストプラス + 価格帯別利益率上限 + 乖離率TBL判定
-       - ALERT時: itemID列に「9999」セット → CSV除外
-  5. 【個別】SKU = メルカリ商品ID
-  6. 【個別】ストアカテゴリ: Outdoor Jackets (41828939010)
-  7. 【共通】listing_validator.py
-
-【出力CSV】iMakHQ/csv_output/montbell_*.csv
-【テンプレ】USED.txt(中古)
-【ConditionID】3000 (Pre-owned)
-""",
     },
     {
         "label": "Porter",
@@ -327,337 +172,75 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "porter"],
         "params": [],
-        "desc": "Porter専用スプシから直読 → eBayアップロード可能なCSV生成",
-        "trend_key": "porter",
-        "keyword_pdf": KEYWORD_PDF["clothing"],
-        "flow": """【商品選定】ユーザー、抽出はトラバホ
-
-【スプシ】1ZbgF5cT-S726DKPI7iMsnX2PPxMjLh3w7GzsDf8OWEk (gid=0)
-  - 列: A=URL / B=ItemID / C=タイトル / D=Sold / E=状態 / F=価格(仕入) / G=写真URL / H=説明
-  - 処理対象: ItemID空 & Sold空 の行
-  - スルー: ItemIDに値あり（出品済 or 「9999」見送り済）
-
-【パイソン処理】
-  1. 【共通】メルカリ写真DL + Claude API解析（英タイトル/Item Specifics/Condition Description）
-  2. 【共通】価格決定: pricing_engine.compute_listing_price
-       - PROFIT_CATEGORY = "Porter" (FVF 15.3%, 送料 ¥2,500)
-       - コストプラス + 価格帯別利益率上限
-       - 中央値取得なし → NO_MEDIAN (乖離判定スキップ)
-  3. 【個別】SKU = メルカリ商品ID(m...) / shopsはハッシュ末尾12桁
-  4. 【個別】Description = USED.txt テンプレ + Item Specs挿入
-  5. 【個別】eBay リーフカテゴリ = 52357 (過去成功実績、Type必須なし)
-  6. 【個別】Store カテゴリ = 41828940010 (Backpacks & Bags)
-  7. 【個別】ConditionID = 3000 (Used)
-  8. 【個別】Location = "Japan, Osaka"
-  9. 【個別】Country of Origin = Japan (Made in Japan確定)
-
-【出力CSV】iMakHQ/csv_output/mercari_upload_YYYYMMDD_HHMMSS.csv
-【eBay取込】手動 FileExchange アップロード可能な完全形式
-【売れたら】SKUからメルカリ商品IDで仕入元即特定
-""",
+    },
+    {
+        "label": "G-SHOCK",
+        "verified": True,  # 2026-05-06 ユーザーチェック合格
+        "cwd": f"{WORKSPACE}/iMakG-shock",
+        "cmd": ["python", "gshock_to_csv.py"],
+        "params": [],
+    },
+    {
+        "label": "G-SHOCK 未出品モデル発見",
+        "cwd": f"{WORKSPACE}/iMakG-shock/casio_finder",
+        "cmd": ["python", "casio_finder.py"],
+        "params": [],
+    },
+    {
+        "label": "PSA TCG",
+        "verified": True,  # 2026-04-24 及第点到達
+        "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須
+        "cwd": f"{WORKSPACE}/iMakTCG",
+        "cmd": ["python", "psa_to_csv.py"],
+        "params": [],
+    },
+    {
+        "label": "リール",
+        "verified": True,  # 2026-04-24 実戦検証合格
+        "cwd": f"{WORKSPACE}/iMakMercari",
+        "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "reel"],
+        "params": [],
+    },
+    {
+        "label": "一番くじ",
+        "verified": True,
+        "cwd": f"{WORKSPACE}/iMak_ichibankuji",
+        "cmd": ["python", "ichibankuji_to_csv.py"],
+        "params": [],
+        "custom_buttons": "ichibankuji",
     },
     {
         "label": "Tomica",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "tomica"],
         "params": [],
-        "desc": "Tomica専用スプシから直読 → CSV化",
-        "trend_key": "tomica",
-        "keyword_pdf": KEYWORD_PDF["toys"],
-        "flow": """【商品選定】ユーザー、抽出はトラバホ
-
-【スプシ】1DVTQlpK5cemEbZ_NNDkwXZDWslNb7T4veNIuMH1_9Nc (gid=851100680)
-  - 列構成同上（Tshirt/Montbellと同じ）
-  - 処理対象: ItemID空 & Sold空 の行
-  - スルー: ItemIDに値あり（出品済 or 「9999」見送り済）
-  - カテゴリ強制: Tomica（Claude判定スキップ）
-
-【スプシ書込】スキップ時に自動「9999」マーク
-  - 画像取得失敗 / Claude API失敗 / validator失敗 → 9999
-  - 一時エラーで再試行したい場合は手動で9999削除
-
-【パイソン処理】
-  1. 【共通】メルカリ写真DL + Claude API解析
-  2. 【共通】価格決定: pricing_engine.compute_listing_price
-       - 中央値取得なし → 乖離判定スキップ
-  3. 【個別】Tomica固有のItem Specifics生成
-  4. 【共通】listing_validator.py
-
-【出力CSV】iMakHQ/csv_output/mercari_generic_*.csv
-""",
     },
     {
         "label": "その他混在シート (CSV運用)",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_to_ebay_csv.py"],
         "params": [],
-        "desc": "Vintage/Fishing/Other 等を商品管理シート.csv から処理",
-        "trend_key": "tomica",  # とりあえずtomica系を暫定適用（Vintage/Collectibles系）
-        "flow": """【入力】商品管理シート.csv (ローカル)
-  - 専用スプシがないカテゴリ用（Vintage/Fishing/Other）
-  - 共有シートをCSVエクスポートして配置
-
-【パイソン処理】
-  1. 【個別】メルカリ写真DL + Claude APIでカテゴリ判定
-  2. 【個別】カテゴリ別の処理分岐
-  3. 【共通】価格決定: pricing_engine.compute_listing_price
-  4. 【共通】listing_validator.py
-
-【出力CSV】iMakHQ/csv_output/mercari_generic_*.csv
-※ 共有シートのSheet ID提供で gspread直読化可能
-""",
     },
     {
-        "label": "G-SHOCK",
-        "verified": True,  # 2026-05-06 ユーザーチェック合格 (catalog 連携 + LOW スプシ駆動 + 動的価格決定 + SKU URL ベース + 保証/マニュアル整備)
-        "cwd": f"{WORKSPACE}/iMakG-shock",
-        "cmd": ["python", "gshock_to_csv.py"],
-        "urls_file": f"{WORKSPACE}/iMakG-shock/gshock_urls.txt",
-        "params": [],
-        "desc": "URLs.txtからCSV生成",
-        "trend_key": "gshock",
-        "keyword_pdf": KEYWORD_PDF["watches"],
-        "flow": """【入力】gshock_urls.txt (1行1URL) もしくはスプシGSHOCK_SHEET_ID
-
-【パイソン処理】
-  1. 【個別】Casio公式から型番でスペック取得(Selenium)
-  2. 【個別】公式画像 + g-central + casiofanmag 参照
-  3. 【個別】Claude API + キーワードPDF参照でタイトル生成
-  4. 【共通】価格決定: pricing_engine.compute_listing_price
-       - コストプラス + 価格帯別利益率上限
-       - 中央値取得なし → 乖離判定スキップ（NO_MEDIAN）
-  5. 【共通】listing_validator.py
-
-【出力CSV】iMakHQ/csv_output/gshock_*.csv
-【ConditionID】1000 (新品)
-※ 中央値取得追加で乖離判定も発動可能
-""",
-    },
-    {
-        "label": "PSA TCG (One Piece / Dragon Ball)",
-        "verified": True,  # 2026-04-24 及第点到達（スプシ駆動、Claude推測全廃、Bandai辞書/fetch_card/Gundam補正、プロモ二重国籍許容、pipeline 二重基準解消、eBay入稿8件実績）
-        "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須 (3AI 非決定論性 / Bandai 名前検索の誤マッチ / Energy Marker Color 補完)
-        "cwd": f"{WORKSPACE}/iMakTCG",
-        "cmd": ["python", "psa_to_csv.py"],
-        "urls_file": f"{WORKSPACE}/iMakTCG/certs.txt",
-        "params": [],
-        "desc": "スプシ駆動（I列=cert#, B列itemID空が処理対象）→CSV生成→check_csv自動連鎖→【入稿前ダブルチェック必須】",
-        "trend_key": "tcg",
-        "keyword_pdf": KEYWORD_PDF["toys"],
-        "flow": """━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  📥  INPUT  ｜  入力ソース
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ▸ 共通スプシ  Hight: 19kj8…  /  Low: 1jF9…  ( gid=851100680 )
-      • I列 = PSA cert#
-      • B列 = itemID  ( 空が処理対象 )
-      • 仕入値 = N列優先  +  F列 "¥XXX,XXX" パース fallback
-  ✗ certs.txt 駆動は廃止  ( 2026-04-24 追補3 )
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ⚙️   PIPELINE  ｜  パイソン処理
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  ① 🔍 PSA cert# → psacard.com Selenium → Brand / Subject / CardNumber
-
-  ② 📚 公式DB lookup  ( フランチャイズ別 )
-      ├─ One Piece                bandai_jp.py        ( Selenium + 名前検索フォールバック )
-      ├─ Dragon Ball Fusion World bandai_tcg_plus.py  ( game="dragonball" )
-      │     └─ Energy Marker E01-XX  →  ENERGY_MARKER_DB  ( ハードコード )
-      ├─ Gundam                   bandai_tcg_plus.py  ( game="gundam" )
-      └─ Pokemon                  pokemon_card_jp.py
-
-  ③ 🤖 Claude API + キーワードPDF参照でタイトル生成
-      └─ card# 短縮 / Subject 改変を検出  →  ルールベース自動切替
-
-  ④ 🛡️  Item Specifics 全6フィールド  ( rarity / card_type / cost / power / attribute / finish )
-      └─ 公式DB由来のみ採用、Claude fallback 物理除去  ( 2026-04-24 追補6 )
-
-  ⑤ 🔧 AUTO-FIX Canonical Map  ( eBay フィルタ正規値へ無言整形 )
-      ├─ Card Type    "Character Card" → "Character" / "Leader Card" → "Leader"
-      ├─ Rarity OP    SEC→Secret Rare, SR→Super Rare, R→Rare, C→Common, L→Leader …
-      ├─ Rarity DB    SR→Super Rare, UC→Uncommon, PR★→Promo …  ( 2026-04-26 )
-      ├─ Set OP       "OP-01"→"Romance Dawn" 等 23セット網羅
-      ├─ Set DB       "BOOSTER PACK -AWAKENED PULSE- [FB01]"→"Awakened Pulse" …  ( 2026-04-26 )
-      ├─ Leader Cost  強制空欄化  ( Leader はコスト持たない仕様 )
-      └─ Features     "Alternate Art" → "Alternative Art"
-
-  ⑥ 🚫 Finish欄は常に空欄  ( 確証なき推測禁止、SNAD クレーム回避 )
-
-  ⑦ 🏷️  SKU = メルカリ商品ID
-
-  ⑧ 🧹 同一カード番号の重複は最安1件のみ採用
-
-  ⑨ 🤝 listing_validator.py  +  3AI 合議  ( Claude / Gemini / Groq )
-      ├─ プロモ二重国籍ケース  ( PSA封入セット ≠ Bandai 元セット ) の許容パターン搭載
-      └─ 不一致時はラウンド最大4回まで議論
-
-  ⑩ 💰 価格決定  ( 内蔵 TIER_PARAMS + DDP反復計算 )
-      ├─ 設計思想は共通エンジン  ( コストプラス + ティア利益率 + 乖離判定 )
-      ├─ GO 時のみ「中央値 × 0.95」で市場連動価格に切替  ( 2026-04-23 Phase 3 ⑤ )
-      └─ 物理ゲート: ALERT 行は CSV 物理除外  +  csv_hold_queue.jsonl 隔離
-
-  ⑪ 🧬 SSOT  ｜  tier_params は  profit_params.get_tier_params  ( yaml SSOT ) 経由  ( 2026-04-25 Step 7 )
-
-  ⑫ 📝 記録  ｜  decision_log に config_version + 使用値を刻印  ( Step 8 )
-
-  ⑬ 📤 スプシ追記  ｜  cert / title / price / cost / GATE 等を結果スプシに自動記録
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🔄  AUTO CHAIN  ｜  check_csv 自動連鎖
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  psa_to_csv 完了直後に check_csv.py が自動実行され以下を再検証:
-      ▸ 市場中央値・乖離率・利益率の再計算  ( psa_to_csv と SSOT 共有 )
-      ▸ Item Specs  ( TOPセラーとの差分 ) ハイライト
-      ▸ GATE 判定の最終確認  +  AI 総合レビュー  ( Claude )
-
-╔═══════════════════════════════════════════════════════════════════╗
-║  🛑  ダブルチェック  ｜  入稿前  ［人手必須］                        ║
-╚═══════════════════════════════════════════════════════════════════╝
-  3AI 判定の非決定論性  ／  Bandai 名前検索の誤マッチ  ／  薄商いカードの価格暴走
-  に対する最後の防衛線。CSV を eBay 入稿する前に必ず以下を目視確認:
-
-  ☐  💴  価格妥当性  ｜  TOPセラー価格を超えていないか
-                       出品N件未満の薄商いで強気価格になっていないか
-  ☐  🆔  PSA Brand prefix と Card Number 一致
-            └─ Luffy ST16 / PRB02 事故  ( cert #143570665 系 ) の物理確認
-  ☐  🎯  Bandai 名前検索フォールバックで  「同名キャラの別カード」  誤マッチ無し
-  ☐  🌈  Energy Marker  ( E01-XX )  は Color を物理カード確認後に手動補完
-  ☐  ✨  Finish は確証あるカードのみ手動補完  ( 空欄が原則、Holo 推測禁止 )
-  ☐  🔁  Title 内の重複語  ( 'frieza' 等 ) を check_csv 警告でチェック
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  📤  OUTPUT  ｜  出力
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  📁  CSV         iMakHQ/csv_output/tcg_upload_<timestamp>.csv
-  📁  サイドカー   *_cost.json  ( 仕入値、check_csv が参照 )
-  📄  テンプレ     PSA10.txt    ( Description HTML、全カード共通 )
-
-  🔢  ConditionID    2750  ( Graded - Gem Mint )
-  🔄  ReturnPolicy   No return
-""",
-    },
-    {
-        "label": "リール",
-        "verified": True,  # 2026-04-24 実戦検証合格（市場連動ゲート稼働、4件中1件GO出力/3件ALERT隔離）
-        "cwd": f"{WORKSPACE}/iMakMercari",
-        "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "reel"],
-        "params": [],
-        "desc": "統合Low(R=リール,ItemID空) → Claude → eBay CSV (Bait/Spinning自動判定)",
-        "trend_key": "reel",
-        "keyword_pdf": KEYWORD_PDF["sports"],
-        "flow": """【リール出品】
-
-  ▶実行: 統合Low (R=リール, B=ItemID空, D=売り切れ空) を読込
-    → Mercariスクレイプ + Claude API
-    → reel_type 判定 (bait/spinning)
-       - bait → eBayカテゴリ 32885 (Bait Casting Reels)
-       - spinning → eBayカテゴリ 36147 (Spinning Reels)
-    → pricing_engine(リール: FVF 13.3%, 送料¥3,000)
-    → eBay CSV 出力
-
-【設定】
-  - StoreCategoryID 41828943010 (Fishing Gear)
-  - ConditionID 2750 (Used)
-  - Description テンプレ: USED.txt + Mercari商品説明差込
-  - 出品完了後、統合Low B列に ItemID 入力で「処理済」化
-""",
-    },
-    {
-        "label": "一番くじ",
-        "cwd": f"{WORKSPACE}/iMak_ichibankuji",
-        "cmd": ["python", "ichibankuji_to_csv.py"],
-        "verified": True,
-        "params": [],
-        "desc": "1kuji→中間CSV→eBay CSV+統合Hight転記",
-        "trend_key": "kuji",
-        "keyword_pdf": KEYWORD_PDF["collect"],
-        "urls_file": f"{WORKSPACE}/iMak_ichibankuji/kuji_urls.txt",
-        "custom_buttons": "ichibankuji",
-        "flow": """▶実行ボタン押すとウィザードが起動。Step 1〜4 を順に案内。
-
-  Step 1/4: 1kuji.com URL を貼り付け（既存kuji_urls.txt自動読込）
-  Step 2/4: Phase1 実行（1kuji スクレイプ→中間CSV生成）
-  Step 3/4: 中間CSVを Excel で編集（mercari_url / cost_jpy 手入力）→ 編集完了ボタン
-  Step 4/4: Phase2(統合Hight転記) + Phase3(Claude→eBay CSV) を自動連続実行
-
-【ItemID ベースの再処理】
-  統合Hight B列に ItemID 入 = 処理済、空 = 次回再処理対象。
-  出品完了後、B列に ItemID を手入力して「処理済」化してください。
-
-【統合Hight 列マッピング】
-  A=URL  B=itemID  C=タイトル  D=売り切れ  E=状態  F=価格
-  G=写真URL  H=商品説明  R=カテゴリ
-  U=kuji_url  V=series_name  W=prize_code  X=prize_title
-  Y=release_year  Z=kuji_price_jpy
-
-【出力CSV】iMakHQ/csv_output/ichibankuji_upload_*.csv
-
-【設定】
-  - PROFIT_CATEGORY = "一番くじ" (FVF 13.25%, 送料 ¥2,500)
-  - eBayカテゴリ 261055 / ConditionID 1000 (New) / Location "Osaka"
-""",
-    },
-    {
-        "label": "🏔 モンベル公式アウトレット 巡回",
+        "label": "モンベル公式アウトレット 巡回",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "montbell_outlet_scraper.py"],
         "params": [
             {"name": "--categories", "label": "カテゴリID(カンマ区切り)", "default": ""},
             {"name": "--limit", "label": "各cat件数上限", "default": ""},
         ],
-        "desc": "モンベル公式アウトレット巡回→管理シート更新（在庫監視）",
-        "trend_key": "montbell",
     },
     {
-        "label": "🔚 モンベル 取下げCSV生成",
+        "label": "モンベル 取下げCSV生成",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "montbell_end_items.py"],
         "params": [],
-        "desc": "管理シートから売切れ/取下げ推奨の行を抽出→EndItem CSV生成",
     },
     {
         "label": "Mercari スカウト",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_scout.py"],
         "params": [],
-        "desc": "保存検索URLを巡回 → GO/HOLD/NOGO判定",
-        "urls_file": f"{WORKSPACE}/iMakMercari/search_urls.txt",
-        "trend_key": "scout",
-        "flow": """【入力】search_urls.txt
-  ファイル: c:/dev/iMak/iMakMercari/search_urls.txt
-  → 「📄 URLファイル開く」ボタンで編集可
-
-【現在スカウト対象カテゴリ】
-  ✅ PSA10 TCG (category_id=10861)
-      - 価格帯 ¥1,000〜¥50,000
-      - 送料込み・販売中・新着順
-      - PSA関連フィルタ（grade=10 etc.）
-  ❌ その他（UT, Montbell, Porter, G-SHOCK, 一番くじ等）は対象外
-      → 追加したい場合、search_urls.txtに行追加
-
-【パイソン処理】
-  1. 【個別】メルカリ検索結果を巡回（Selenium）
-  2. 【個別】各商品の利益試算: 仕入¥ + 送料 vs eBay中央値
-  3. 【個別→共通同等】価格決定: 内蔵 TIER_PARAMS + GO/HOLD/NOGO判定
-       - 設計思想は共通エンジン(pricing_engine)と一致
-       - スカウトはHOLD(保留)の3段階分類が必要 → 共通エンジン2段階(GO/ALERT)と差異
-  4. 【個別】GO候補のみ出力
-
-【出力】GOリスト（仕入候補、コンソール表示）
-""",
-    },
-    {
-        "label": "利益計算シート クリア",
-        "cwd": f"{WORKSPACE}/iMakHQ/sheets",
-        "cmd": ["python", "clear_calc_inputs.py"],
-        "params": [],
-        "desc": "利益計算v2の入力欄をクリアして再オープン",
-        "flow": """【対象】iMakHQ/sheets/【NEW】利益計算シート_v2.xlsx
-【処理】
-  - US計算/UK計算/AU計算 シートの F1, C4, E4, F4, H4 をクリア
-  - ファイル開いてたら閉じるまで待機(最大2分)
-  - クリア後、自動で再オープン
-""",
     },
 ]
 
@@ -1010,125 +593,6 @@ class DashboardDialog(tk.Toplevel):
             else:
                 self.reco_label.config(text="全カテゴリ目標達成🎉 新しいカテゴリ展開を検討", fg="#006600")
         self.after(0, apply)
-
-
-def _decorate_flow(text):
-    """既存の flow テキストを自動装飾 (TCG パターンに統一).
-
-    既装飾 (━ 罫線あり) のテキストはそのまま返す (二重装飾防止)。
-    未装飾なら以下を施す:
-      - 行頭インデントなしの【見出し】 → 罫線囲み + 📌 アイコン
-        (インデント付きの【個別】【共通】等のインラインラベルは触らない)
-      - 数字リスト 1. 2. ... → 丸囲み数字 ①②③ (最大⑳)
-    """
-    import re as _re
-    if "━━━━" in text or "╔═" in text:
-        return text  # 既装飾
-    bar = "━" * 64
-    def _repl_heading(m):
-        title = m.group(1).strip()
-        rest = m.group(2).strip()
-        if rest:
-            return f"\n{bar}\n  📌  {title}  ｜  {rest}\n{bar}"
-        return f"\n{bar}\n  📌  {title}\n{bar}"
-    # ^ 直後 (インデントなし) に【】がある行のみ見出し扱い
-    text = _re.sub(r"^【([^】]+)】(.*)$", _repl_heading, text, flags=_re.MULTILINE)
-    # 数字リスト → 丸囲み数字
-    circles = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
-    def _repl_num(m):
-        n = int(m.group(2))
-        if 1 <= n <= 20:
-            return f"{m.group(1)}{circles[n-1]}  "
-        return m.group(0)
-    text = _re.sub(r"^(\s*)(\d+)\.\s", _repl_num, text, flags=_re.MULTILINE)
-    return text
-
-
-class FlowDialog(tk.Toplevel):
-    def __init__(self, parent, label, flow_text, trend_key="", keyword_pdf="", urls_file=""):
-        super().__init__(parent)
-        self.title(f"フロー: {label}")
-        self.geometry("880x720")
-
-        # タブ構成
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=8, pady=(8, 4))
-
-        # ===== タブ1: 処理フロー =====
-        tab_flow = ttk.Frame(nb)
-        nb.add(tab_flow, text="📋 処理フロー")
-
-        if urls_file:
-            urlf = ttk.Frame(tab_flow)
-            urlf.pack(fill="x", padx=6, pady=6)
-            ttk.Label(urlf, text=f"📄 URLファイル: {os.path.basename(urls_file)}", foreground="#0066cc").pack(side="left")
-            ttk.Button(urlf, text="開く",
-                       command=lambda: self._open_file(urls_file)).pack(side="right")
-
-        txt = scrolledtext.ScrolledText(tab_flow, wrap="word", font=("Yu Gothic UI", 10))
-        txt.pack(fill="both", expand=True, padx=6, pady=6)
-        txt.insert("1.0", _decorate_flow(flow_text))
-        txt.config(state="disabled")
-
-        # ===== タブ2: トレンド/相場リサーチ =====
-        tab_trend = ttk.Frame(nb)
-        nb.add(tab_trend, text="🔥 トレンド/相場調査")
-
-        # スクロール可能フレーム
-        canvas = tk.Canvas(tab_trend)
-        sb = ttk.Scrollbar(tab_trend, orient="vertical", command=canvas.yview)
-        content = ttk.Frame(canvas)
-        content.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=content, anchor="nw")
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-
-        # eBayキーワードPDF
-        if keyword_pdf:
-            pdf_frame = ttk.LabelFrame(content, text="📊 eBayキーワードPDF（四半期更新）", padding=6)
-            pdf_frame.pack(fill="x", padx=6, pady=(6, 2))
-            inner = ttk.Frame(pdf_frame)
-            inner.pack(fill="x")
-            ttk.Label(inner, text=os.path.basename(keyword_pdf), foreground="#0066cc").pack(side="left")
-            ttk.Button(inner, text="開く",
-                       command=lambda: self._open_file(keyword_pdf)).pack(side="right")
-
-        # カテゴリ別トレンドリンク
-        if trend_key and trend_key in TREND_LINKS:
-            cat_frame = ttk.LabelFrame(content, text=f"🎯 {label} 専用リサーチ（メルカリ人気順/SOLD/専門サイト）", padding=6)
-            cat_frame.pack(fill="x", padx=6, pady=2)
-            for name, url in TREND_LINKS[trend_key]:
-                row = ttk.Frame(cat_frame)
-                row.pack(fill="x", pady=1)
-                ttk.Label(row, text=f"• {name}", width=30).pack(side="left")
-                ttk.Button(row, text="🔗 開く", width=10,
-                           command=lambda u=url: self._open_url(u)).pack(side="right")
-
-        # 共通リサーチリンク
-        common_frame = ttk.LabelFrame(content, text="🌐 共通リサーチ（全カテゴリで使える）", padding=6)
-        common_frame.pack(fill="x", padx=6, pady=2)
-        for name, url in COMMON_TREND_LINKS:
-            row = ttk.Frame(common_frame)
-            row.pack(fill="x", pady=1)
-            ttk.Label(row, text=f"• {name}", width=30).pack(side="left")
-            ttk.Button(row, text="🔗 開く", width=10,
-                       command=lambda u=url: self._open_url(u)).pack(side="right")
-
-        ttk.Button(self, text="閉じる", command=self.destroy).pack(pady=6)
-
-    def _open_file(self, path):
-        try:
-            os.startfile(path)
-        except Exception as e:
-            messagebox.showerror("エラー", f"ファイル開けませんでした: {e}")
-
-    def _open_url(self, url):
-        import webbrowser
-        try:
-            webbrowser.open(url)
-        except Exception as e:
-            messagebox.showerror("エラー", f"URL開けませんでした: {e}")
 
 
 class URLInputDialog(tk.Toplevel):
@@ -1566,8 +1030,14 @@ class ListingPanel:
     def __init__(self, root):
         self.root = root
 
+        # ツールバー (共有 🛑 停止)
+        toolbar = ttk.Frame(root, padding=(8, 4))
+        toolbar.pack(fill="x")
+        ttk.Button(toolbar, text="🛑 実行中を停止", width=18,
+                   command=self.stop_script).pack(side="right")
+
         top_frame = ttk.LabelFrame(root, text="スクリプト一覧", padding=8)
-        top_frame.pack(fill="x", padx=8, pady=(8, 4))
+        top_frame.pack(fill="x", padx=8, pady=(0, 4))
 
         canvas = tk.Canvas(top_frame, height=320)
         scrollbar = ttk.Scrollbar(top_frame, orient="vertical", command=canvas.yview)
@@ -1582,16 +1052,10 @@ class ListingPanel:
         for i, script in enumerate(SCRIPTS):
             row = ttk.Frame(scroll_frame, padding=4, relief="ridge")
             row.pack(fill="x", pady=2)
-            # ユーザーチェック合格スクリプトは青色表示
-            # double_check=True は入稿前に人手ダブルチェック必須のカテゴリ (✓ を2つ表示)
-            verified = script.get("verified", False)
-            double_check = script.get("double_check", False)
-            prefix = "✓✓ " if double_check else ("✓ " if verified else "")
-            label_text = prefix + script["label"]
-            label_color = "#0066cc" if verified else "black"
-            tk.Label(row, text=label_text, width=32, font=("", 10, "bold"),
+            # verified=True は青色、それ以外は黒 (prefix 記号は廃止、色だけで区別)
+            label_color = "#0066cc" if script.get("verified", False) else "black"
+            tk.Label(row, text=script["label"], width=32, font=("", 10, "bold"),
                      fg=label_color, anchor="w").pack(side="left")
-            ttk.Label(row, text=script.get("desc", ""), foreground="gray", width=42).pack(side="left", padx=4)
 
             self.param_entries[i] = {}
             for p in script.get("params", []):
@@ -1601,13 +1065,8 @@ class ListingPanel:
                 entry.pack(side="left")
                 self.param_entries[i][p["name"]] = entry
 
-            ttk.Button(row, text="ℹ️ フロー", width=10,
-                       command=lambda idx=i: self.show_flow(idx)).pack(side="right", padx=2)
-            ttk.Button(row, text="🛑", width=4, command=self.stop_script).pack(side="right", padx=2)
             ttk.Button(row, text="▶ 実行", width=8,
                        command=lambda idx=i: self.run_script(idx)).pack(side="right", padx=2)
-
-            # 一番くじ: ▶実行 のみ（ウィザード式に集約済）
 
         # 状態ライン
         status_frame = ttk.Frame(root)
@@ -1632,17 +1091,6 @@ class ListingPanel:
         self.proc = None
         self.queue = queue.Queue()
         self.root.after(100, self.poll_queue)
-
-    def show_flow(self, idx):
-        script = SCRIPTS[idx]
-        FlowDialog(
-            self.root,
-            script["label"],
-            script.get("flow", "(フロー情報未登録)"),
-            trend_key=script.get("trend_key", ""),
-            keyword_pdf=script.get("keyword_pdf", ""),
-            urls_file=script.get("urls_file", ""),
-        )
 
     def append_log(self, text):
         # tag判定
