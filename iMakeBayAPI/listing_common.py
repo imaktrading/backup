@@ -324,6 +324,17 @@ PRICE_CHECK_CONFIG = {
 
 
 # ===================================================================
+# eBay Item Specifics フィールド長制限 (2026-05-10 追加)
+# eBay 側で長さ超過すると入稿失敗 (例 ErrorCode 21919308 "Series's value is too long").
+# 新たに別 field で長さエラーが出たら、本 dict に 1 行追記するだけで物理ゲート発火.
+# (= 修正連鎖を生まないデータ駆動型バリデータ)
+# ===================================================================
+EBAY_FIELD_MAX_LEN = {
+    "C:Series": 65,  # 一番くじ入稿失敗 (2026-05-10) を契機に追加
+}
+
+
+# ===================================================================
 # CSV行の最終監査 (機能統合版)
 # ===================================================================
 def audit_csv_row(row_data: dict, category: str = None, mercari_state: str = "",
@@ -357,6 +368,17 @@ def audit_csv_row(row_data: dict, category: str = None, mercari_state: str = "",
         msg = (f"Price ${current_price:.2f} exceeds market tier limit "
                f"vs median ${median_usd:.2f} (pricing_engine ALERT)")
         violations.append(("*StartPrice", msg, "error"))
+
+    # 0b. eBay Item Specifics フィールド長制限チェック (Error)
+    #     eBay 側で超過すると入稿失敗 (ErrorCode 21919308 等) → 物理ゲート
+    for field, max_len in EBAY_FIELD_MAX_LEN.items():
+        v = str(row_data.get(field, ""))
+        if len(v) > max_len:
+            violations.append((
+                field,
+                f"値が {max_len} 文字超 (現在 {len(v)} 文字): {v[:60]}...",
+                "error",
+            ))
 
     # 1. 必須項目欠落 (Error)
     for f in ["*Title", "*Category", "*StartPrice", "ConditionID"]:

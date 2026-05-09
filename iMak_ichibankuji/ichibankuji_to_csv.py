@@ -3,6 +3,7 @@
 # 必要: pip install anthropic undetected-chromedriver beautifulsoup4
 
 import csv
+import os
 import re
 import json
 import time
@@ -13,14 +14,16 @@ import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 
 # ===== 設定 =====
-# API key.txt から読み込む（同じフォルダに置いてください）
+# API key.txt から読み込む（スクリプトと同じフォルダ、絶対パス参照）
+# import 時に fail させない (CWD 依存 / test 環境耐性).
+# 実行時に ANTHROPIC_API_KEY が空のまま Claude API 呼出されると失敗する.
+_API_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "API key.txt")
+ANTHROPIC_API_KEY = ""
 try:
-    with open("API key.txt", "r", encoding="utf-8") as f:
+    with open(_API_KEY_FILE, "r", encoding="utf-8") as f:
         ANTHROPIC_API_KEY = f.read().strip()
 except FileNotFoundError:
-    print("エラー: 'API key.txt' が見つかりません。スクリプトと同じフォルダに置いてください。")
-    input("Enterで終了...")
-    exit()
+    print(f"⚠️ '{_API_KEY_FILE}' が見つかりません. Claude API 呼出時に失敗します.")
 URLS_FILE = "kuji_urls.txt"
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
@@ -68,6 +71,22 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept-Language": "ja-JP,ja;q=0.9",
 }
+
+def _truncate_at_word_boundary(text, max_len):
+    """text を word 境界で max_len 以内に短縮.
+
+    eBay Item Specifics の文字数制限 (Series=65 等) 超過による入稿失敗を防ぐ.
+    word 境界で切ることで「途中切れ」を回避. 7 割以上保てる位置に空白がある場合は
+    word 境界、無い場合は max_len で hard cut.
+    """
+    if not text or len(text) <= max_len:
+        return text
+    truncated = text[:max_len]
+    last_space = truncated.rfind(' ')
+    if last_space > max_len * 0.7:
+        return truncated[:last_space].rstrip()
+    return truncated.rstrip()
+
 
 def get_schedule_time():
     future = datetime.utcnow() + timedelta(weeks=SCHEDULE_WEEKS)
@@ -546,6 +565,9 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
     # C:Series：Claudeの結果を優先、なければフォールバック
     if not series_name_en:
         series_name_en = f"Ichiban Kuji {franchise}"
+    # eBay Series field は 65 文字制限. 超過すると入稿失敗 (ErrorCode 21919308).
+    # word 境界で安全に短縮 (= eBay 仕様への上流防衛、listing_common 検証は二段防御).
+    series_name_en = _truncate_at_word_boundary(series_name_en, max_len=65)
     print(f"    → C:Series に設定: {series_name_en}")
 
     # Description生成
