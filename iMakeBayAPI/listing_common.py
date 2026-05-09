@@ -309,11 +309,13 @@ def normalize_title(title: str, is_new: bool, item_specifics: dict, category: st
 # 市場価格チェック有効化マップ（pricing_engine の status="ALERT" を物理 HOLD する対象）
 # Porter等の1点ものは enabled=False で除外（相場無視のコストプラス維持）
 # 倍率/閾値は SSOT である pricing_engine.TIER_PARAMS に一任。ここでは ON/OFF のみ管理。
+# 2026-05-10: 一番くじ collectibles は新発売時 eBay 市場未成熟で median 信頼性が低く、
+# 全 HOLD 化する構造的問題があり ichibankuji=False に変更 (warning は print 継続).
 # ===================================================================
 PRICE_CHECK_CONFIG = {
     "reel":        {"enabled": True},
     "tshirt":      {"enabled": True},
-    "ichibankuji": {"enabled": True},
+    "ichibankuji": {"enabled": False},  # 2026-05-10: collectibles 特性で median gate 無効化
     "tomica":      {"enabled": True},
     "gshock":      {"enabled": False},  # スクリプト未結線。price_status を渡す実装が入るまで False で統一
     "montbell":    {"enabled": True},
