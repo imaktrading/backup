@@ -1213,7 +1213,7 @@ def _load_cert_overrides():
         return {}
 
 
-def build_row(cert_number, price, data, description, driver=None):
+def build_row(cert_number, price, data, description, driver=None, catalog_misses=None):
     subject = data.get('Subject', 'Unknown')
     card_number = data.get('CardNumber', '')
     brand = data.get('Brand', '')
@@ -1335,6 +1335,8 @@ def build_row(cert_number, price, data, description, driver=None):
             # Set: adapter が ebay_filter_map で変換済み
             if bandai.get("set_name_ebay"):
                 set_name = bandai["set_name_ebay"]
+        elif catalog_misses is not None:
+            catalog_misses.append(("one_piece_tcg", f"{brand}-{card_number}"))
         # iMakCatalog miss → Vision に委ねる (fallback 構築は廃止、PSA Brand "P" + 番号
         # で誤った P-XXX を作ってしまい Vision の正値を遮断していた問題を解消)
 
@@ -1360,6 +1362,8 @@ def build_row(cert_number, price, data, description, driver=None):
             # set: adapter が ebay_filter_map で変換済み
             if pokemon.get("set_name_ebay"):
                 set_name = pokemon["set_name_ebay"]
+        elif catalog_misses is not None:
+            catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}"))
 
     elif franchise == "Dragon Ball":
         # Dragon Ball Fusion World — iMakCatalog DB lookup (Phase 2: bandai_tcg_plus から移行).
@@ -1400,6 +1404,8 @@ def build_row(cert_number, price, data, description, driver=None):
                     set_name = db_card["set_name_ebay"]
                 if db_card.get("card_name"):
                     character = db_card["card_name"]
+            elif catalog_misses is not None:
+                catalog_misses.append(("dragonball_scg", f"{brand}-{card_number}"))
 
     elif franchise == "Gundam":
         # iMakCatalog DB lookup (Phase 2: bandai_tcg_plus.fetch_card から移行).
@@ -1419,6 +1425,8 @@ def build_row(cert_number, price, data, description, driver=None):
                 set_name = gd_card["set_name_ebay"]
             if gd_card.get("card_name"):
                 character = gd_card["card_name"]
+        elif catalog_misses is not None:
+            catalog_misses.append(("gundam_tcg", f"{brand}-{card_number}"))
 
     # ===== 画像主導カード特定の結果を反映 (新ルーチン由来) =====
     # confidence high/medium の場合、既存 lookup 結果より優先で official_* を上書き。
@@ -1926,6 +1934,7 @@ def main():
 
     rows = [headers]
     errors = []
+    catalog_misses = []  # iMakCatalog 未登録 (要 Catalog Claude 拡充依頼) — gshock_to_csv と同パターン
     # PSAデータ取得 → build_row（価格はデフォルト$100で仮生成）
     card_info = []  # (cert, data) を保持して後で価格更新
     for cert in cert_numbers:
@@ -1938,7 +1947,7 @@ def main():
             print(f" → #{card_number} {subject} ✓")
             # SKU にメルカリ item ID を使うため、URL を data に注入（tshirt_listing_rules 準拠）
             data['_mercari_url'] = mercari_url_map.get(cert, '')
-            row = build_row(cert, DEFAULT_PRICE, data, description, driver=driver)
+            row = build_row(cert, DEFAULT_PRICE, data, description, driver=driver, catalog_misses=catalog_misses)
             if row is None:
                 # selfcheck弾かれ → rows/card_info の後段ループで None参照クラッシュを防ぐためスキップ
                 print(f"    ⚠️ Skipping #{cert}: selfcheck failed in build_row")
@@ -2191,6 +2200,29 @@ def main():
             print(f"⚠️ チェッカー実行エラー: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
+
+    # Catalog 未登録カード一覧 + 共有通知ファイル追記 (2026-05-09、gshock_to_csv と同パターン)
+    if catalog_misses:
+        notify_dir = "C:/dev/iMak_data/catalog"
+        notify_path = f"{notify_dir}/missing_models.csv"
+        try:
+            os.makedirs(notify_dir, exist_ok=True)
+            file_exists = os.path.exists(notify_path)
+            with open(notify_path, "a", encoding="utf-8") as f:
+                if not file_exists:
+                    f.write("category,model,detected_at\n")
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                for category, model in catalog_misses:
+                    f.write(f"{category},{model},{ts}\n")
+        except Exception as _e:
+            print(f"⚠️ missing_models.csv 書込失敗: {type(_e).__name__}: {_e}")
+
+        print("\n" + "=" * 70)
+        print(f"⚠️ Catalog 未登録カード {len(catalog_misses)} 件 (Catalog Claude に追加依頼してください)")
+        print("=" * 70)
+        for category, model in catalog_misses:
+            print(f"  - [{category}] {model}")
+        print(f"\n通知ファイル: {notify_path}")
 
     input("\nEnterで終了...")
 
