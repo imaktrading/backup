@@ -66,7 +66,6 @@ EBAY_FILEEXCHANGE_RESULTS_URL = "https://www.ebay.com/sh/reports/uploads"
 LOGIN_WAIT_SEC = 300            # 手動ログイン猶予 (5分)
 UPLOAD_WAIT_SEC = 120           # アップロード後の結果ページ表示待ち
 PAGE_LOAD_WAIT_SEC = 10         # 通常ページロード待ち
-CHROME_VERSION_MAIN = 146
 
 # 2026-05-08 flaky 撲滅改造: popup 監視 + 履歴 refresh ロジック → CSV DL + Status パース
 # (旧仕様: trabajo __UploadCSVwithSoldedWithRetry 踏襲)
@@ -118,7 +117,7 @@ def create_ebay_driver(headless: bool = False, use_profile: bool = True):
     if headless:
         options.add_argument("--headless=new")
 
-    return uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
+    return uc.Chrome(options=options)
 
 
 # ============================================================================
@@ -175,7 +174,7 @@ def manual_login(driver) -> bool:
 
     if creds is not None:
         email, password = creds
-        print(f"  ✅ encrypted_passwd 検出 (email={email}) → 自動入力 mode")
+        print(f"  [OK] encrypted_passwd 検出 (email={email}) → 自動入力 mode")
         if _auto_login(driver, email, password):
             return True
         print("  ⚠️ 自動 login 失敗 → 手動 mode に fallback")
@@ -205,7 +204,7 @@ def _manual_login_legacy(driver) -> bool:
         pass
 
     if is_logged_in(driver):
-        print("✅ ログイン確認 OK、cookie 保存済 (永続プロファイルに記録)")
+        print("[OK] ログイン確認 OK、cookie 保存済 (永続プロファイルに記録)")
         return True
     else:
         print("⚠️ ログイン確認 NG、再度お試しください")
@@ -293,7 +292,7 @@ def _auto_login(driver, email: str, password: str) -> bool:
         for i in range(30):
             time.sleep(2)
             if is_logged_in(driver):
-                print(f"  ✅ 自動ログイン完了 ({i*2}s 経過)")
+                print(f"  [OK] 自動ログイン完了 ({i*2}s 経過)")
                 return True
         print("  ⚠️ 60 秒経過して login 完了確認できず")
         return False
@@ -694,14 +693,14 @@ def upload_one_csv(
                 if manual_login(driver):
                     if is_logged_in(driver):
                         login_ok = True
-                        print("  ✅ 再ログイン成功、upload 再開")
+                        print("  [OK] 再ログイン成功、upload 再開")
                 if not login_ok:
                     print("  ⚠️ 再ログイン失敗、not_logged_in 確定")
                     result = {"success": False, "error": "not_logged_in",
                               "result_text": "", "popup_text": "", "page_url": "", "screenshot": None}
                     break  # 全体ループも抜ける
 
-            print("  ✅ ログイン状態 OK")
+            print("  [OK] ログイン状態 OK")
             result = upload_csv_via_form(driver, csv_path, dry_run=dry_run)
 
             if result.get("success"):
