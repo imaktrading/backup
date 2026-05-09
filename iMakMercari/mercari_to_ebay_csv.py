@@ -798,7 +798,7 @@ def main():
             opts = uc.ChromeOptions()
             opts.add_argument("--no-sandbox")
             opts.add_argument("--headless=new")
-            spec_driver = uc.Chrome(options=opts, version_main=146)
+            spec_driver = uc.Chrome(options=opts)
             print("✅ 公式スペック取得用 driver 起動完了\n")
         except Exception as e:
             print(f"⚠️ spec_driver 起動失敗 (Claude推測のみで続行): {e}\n")

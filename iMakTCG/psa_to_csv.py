@@ -1867,7 +1867,7 @@ def main():
     # 2026-04-26: バックグラウンド動作化 (目障り回避、機能には影響なし)
     options.add_argument("--window-size=800,600")
     options.add_argument("--window-position=100,100")
-    driver = uc.Chrome(options=options, version_main=146)
+    driver = uc.Chrome(options=options)
     try:
         driver.minimize_window()  # 起動後即最小化
     except Exception:

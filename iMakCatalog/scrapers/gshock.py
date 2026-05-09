@@ -211,7 +211,7 @@ def _start_driver():
     import undetected_chromedriver as uc  # type: ignore
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
-    return uc.Chrome(options=options, version_main=146)
+    return uc.Chrome(options=options)
 
 
 # ============================================================================

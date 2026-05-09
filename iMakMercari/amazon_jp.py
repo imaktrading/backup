@@ -166,7 +166,7 @@ if __name__ == "__main__":
     opts = uc.ChromeOptions()
     opts.add_argument("--no-sandbox")
     opts.add_argument("--headless=new")
-    drv = uc.Chrome(options=opts, version_main=146)
+    drv = uc.Chrome(options=opts)
     try:
         for model in ["ダイワ 24 バスX 100H", "ダイワ 21 タトゥーラTW 300XHL"]:
             print(f"\n=== {model} ===")

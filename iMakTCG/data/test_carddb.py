@@ -7,7 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 options = uc.ChromeOptions()
 options.add_argument("--no-sandbox")
-driver = uc.Chrome(options=options, version_main=146)
+driver = uc.Chrome(options=options)
 
 print("exburst.devにアクセスします...")
 driver.get("https://exburst.dev/gundam/cardlist?set=GD02")

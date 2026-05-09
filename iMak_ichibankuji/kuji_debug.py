@@ -7,7 +7,7 @@ url = "https://1kuji.com/products/hololive-vs"
 
 options = uc.ChromeOptions()
 options.add_argument("--no-sandbox")
-driver = uc.Chrome(options=options, version_main=146)
+driver = uc.Chrome(options=options)
 
 try:
     print("ページ読み込み開始...")

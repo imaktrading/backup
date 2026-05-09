@@ -906,7 +906,7 @@ def _process_sheet_to_ebay_csv():
         try:
             options = uc.ChromeOptions()
             options.add_argument("--no-sandbox")
-            driver = uc.Chrome(options=options, version_main=146)
+            driver = uc.Chrome(options=options)
             try:
                 for url, ts in by_url.items():
                     sd = scrape_1kuji(driver, url)
@@ -1055,7 +1055,7 @@ def main():
             return
         options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
-        driver = uc.Chrome(options=options, version_main=146)
+        driver = uc.Chrome(options=options)
         try:
             phase1_extract_intermediate(driver, urls)
         finally:

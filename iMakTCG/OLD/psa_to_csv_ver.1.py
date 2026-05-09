@@ -181,7 +181,7 @@ def main():
 
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
-    driver = uc.Chrome(options=options, version_main=146)
+    driver = uc.Chrome(options=options)
 
     description = load_description()
 

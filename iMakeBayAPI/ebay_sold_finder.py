@@ -135,7 +135,7 @@ def scrape_sold_listings(keywords, min_price=50, max_price=1000, max_pages=10):
 
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
-    driver = uc.Chrome(options=options, version_main=146)
+    driver = uc.Chrome(options=options)
     all_items = []
 
     try:

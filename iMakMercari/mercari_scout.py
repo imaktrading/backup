@@ -76,7 +76,7 @@ def create_driver(headless=False):
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR}")
-    driver = uc.Chrome(options=options, version_main=146)
+    driver = uc.Chrome(options=options)
     return driver
 
 

@@ -119,7 +119,7 @@ def main():
     # Selenium起動
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
-    driver = uc.Chrome(options=options, version_main=146)
+    driver = uc.Chrome(options=options)
     
     results = []
     
