@@ -993,7 +993,14 @@ def _process_sheet_to_ebay_csv():
                             print(f"    📊 eBay median ${_ebay_median:.2f} (hits={_hits})")
                 except Exception as _me:
                     pass
-                pricing = compute_listing_price(_cost, _ebay_median, PROFIT_CATEGORY)
+                # 一番くじ専用: 新発売時の eBay median 信頼性が低い (出品 16-30 件
+                # 程度で median が下方歪む) ため gap_limit を 10.0 (= 中央値の 11 倍
+                # まで OK) に緩和. 全カテゴリ共通 tier (50%) では新発売プレミア仕入
+                # (¥4,500-6,500) が市場 ($7-15) と乖離して全件 ALERT になる構造的問題.
+                pricing = compute_listing_price(
+                    _cost, _ebay_median, PROFIT_CATEGORY,
+                    gap_limit_override=10.0,
+                )
                 listing_price = max(pricing.get('price', DEFAULT_PRICE), 9.98)
                 _price_status = pricing.get('status', 'GO')
                 print(f"    💰 cost ¥{_cost} → eBay ${listing_price} [{_price_status}]")

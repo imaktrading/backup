@@ -88,13 +88,17 @@ def _round_98(price_usd):
     return p
 
 
-def compute_listing_price(cost_jpy, median_usd, category):
+def compute_listing_price(cost_jpy, median_usd, category, gap_limit_override=None):
     """出品価格を決定する（全プロジェクト共通SSOT）。
 
     Args:
       cost_jpy: 仕入価格（円）
       median_usd: eBay市場中央値（USD）。0 or None なら中央値なしモード
       category: 利益計算v2のカテゴリ名（例: "Tシャツ(UT)"）
+      gap_limit_override: 乖離許容率の category 別上書き値 (float, 比率).
+        None なら従来通り価格帯 tier から取得.
+        例: 一番くじ等の collectibles は新発売 median が信頼薄いため override で緩和.
+        2026-05-10: 一番くじ専用に gap_limit_override=10.0 (=中央値の 11 倍まで OK)
 
     Returns:
       dict {
@@ -140,6 +144,8 @@ def compute_listing_price(cost_jpy, median_usd, category):
         }
 
     _, gap_limit = get_tier_params(price)
+    if gap_limit_override is not None:
+        gap_limit = gap_limit_override
     gap_pct = (target_usd - median_usd) / median_usd * 100
     gap_limit_pct = gap_limit * 100
 
