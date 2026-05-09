@@ -1486,7 +1486,16 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     card_image_url = data.get('CardImageUrl')
     # card_number（PSA生値="004"）ではなく official_card_number（Bandai DB等で補完済="ST16-004"）を渡す。
     # セットprefix欠落→selfcheck弾きを防止（全ブランチ共通でofficial_card_numberは適切に設定済）
-    claude_result = generate_title_with_claude(game, set_name, official_card_number, subject, franchise, card_image_url)
+    # subject の variant suffix (BCGF World Tour 等) を Title 経路でも剥離.
+    # Card Name/Character 経路 (line 1697 周辺) と同じ正規化を Title 入口にも適用し、
+    # Subject → Claude prompt / build_title の二経路で suffix が混入する事故を防ぐ.
+    try:
+        from card_name_normalizer import normalize_card_name as _normalize
+        subject_clean = _normalize(subject, franchise)
+    except Exception as _e:
+        print(f"    ⚠️ subject 正規化失敗、生 subject 使用: {type(_e).__name__}: {_e}")
+        subject_clean = subject
+    claude_result = generate_title_with_claude(game, set_name, official_card_number, subject_clean, franchise, card_image_url)
     claude_result = claude_result or {}
 
     # Item Specifics: 公式DB のみ採用 (2026-04-24 物理強制化、Claude フォールバック全廃)
@@ -1605,19 +1614,19 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         title = pad_title(title, card_type=card_type, set_name=set_name)
         title = strip_banned_words(title)
         # PSA Subjectのトークン保持を検証; 欠落があればルールベースに強制切替
-        if not title_preserves_subject(title, subject):
+        if not title_preserves_subject(title, subject_clean):
             print(f"    ⚠️ Claudeタイトルが PSA Subject を改変 → ルールベースに切替")
             print(f"       Claude: {title}")
-            title = build_title(game, set_name, card_number, subject)
+            title = build_title(game, set_name, card_number, subject_clean)
         # 公式カード番号の保持を検証; Claudeが短縮した時（例: ST16-004 → 004）はルールベースに切替
         # Claudeはテンプレート"#[Num]"を番号だけと解釈することがあるため、物理的な文字列 contains で検証
         elif official_card_number and official_card_number not in title:
             print(f"    ⚠️ Claudeタイトルが card# {official_card_number} を短縮 → ルールベースに切替")
             print(f"       Claude: {title}")
-            title = build_title(game, set_name, card_number, subject)
+            title = build_title(game, set_name, card_number, subject_clean)
         print(f"    ✨ Title: {title} ({len(title)}字)")
     else:
-        title = build_title(game, set_name, card_number, subject)
+        title = build_title(game, set_name, card_number, subject_clean)
         print(f"    📐 Rule title: {title} ({len(title)}字)")
 
     # ===== タイトル生成エージェント (新ルーチン、独立) =====

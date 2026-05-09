@@ -17,6 +17,7 @@
   - データ追加のみ (CLAUDE.md spell #1 "その修正、YAML でできないか？" 準拠)
 """
 from __future__ import annotations
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -24,6 +25,18 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TCG = _REPO_ROOT / "iMakTCG"
 if str(_TCG) not in sys.path:
     sys.path.insert(0, str(_TCG))
+
+
+def _load_psa_to_csv_tcg():
+    """sys.modules キャッシュ汚染回避用、絶対パスから iMakTCG/psa_to_csv.py を load.
+    別 test (iMakCatalog/integrations/psa_to_csv.py を import する) の影響で
+    full suite 走行時に同名 module 名衝突する事故を防ぐ.
+    """
+    path = _TCG / "psa_to_csv.py"
+    spec = importlib.util.spec_from_file_location("_test_psa_to_csv_tcg_dragonball", str(path))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
 
 
 def test_strips_bcgf_world_tour_5_9_case():
@@ -68,3 +81,47 @@ def test_no_overstrip_when_no_variant():
     from card_name_normalizer import normalize_card_name
     assert normalize_card_name("Son Goku", "Dragon Ball") == "Son Goku"
     assert normalize_card_name("Vegeta", "Dragon Ball") == "Vegeta"
+
+
+# ============================================================================
+# Title 経路 (build_title 入口) でも subject pre-normalization が効くこと
+# 5/9 17:43 再送で発覚: card_name_normalizer は Card Name/Character には効くが、
+# build_title が raw subject を直接使うため Title に BCGF 残留していた事故対応.
+# ============================================================================
+def test_build_title_with_normalized_subject_strips_bcgf():
+    """psa_to_csv の subject_clean = normalize_card_name(...) → build_title 経路で
+    BCGF World Tour suffix が title に混入しないこと.
+    """
+    from card_name_normalizer import normalize_card_name
+    _psa_tcg = _load_psa_to_csv_tcg()
+
+    subject_clean = normalize_card_name("SON GOKU BCGF23-24 WORLD TOUR", "Dragon Ball")
+    assert subject_clean == "Son Goku"
+
+    title = _psa_tcg.build_title(
+        "Dragon Ball Super Card Game",
+        "Bandai Card Games Fest23-24 World Tour Promo",
+        "FS02-04",
+        subject_clean,
+    )
+    # 主要回帰目標: Subject 由来の "BCGF23-24" は title に出ない
+    assert "BCGF" not in title, f"BCGF should not appear in title, got: {title!r}"
+    # Son Goku は残る
+    assert "Son Goku" in title
+
+
+def test_build_title_with_normalized_subject_no_change_for_clean_input():
+    """副作用ゼロ: variant 無しの subject はそのまま title に組込まれる."""
+    from card_name_normalizer import normalize_card_name
+    _psa_tcg = _load_psa_to_csv_tcg()
+
+    subject_clean = normalize_card_name("VEGETA", "Dragon Ball")
+    assert subject_clean.lower() == "vegeta"
+
+    title = _psa_tcg.build_title(
+        "Dragon Ball Super Card Game",
+        "STARTER DECK VEGETA",
+        "FS02-01",
+        subject_clean,
+    )
+    assert "Vegeta" in title
