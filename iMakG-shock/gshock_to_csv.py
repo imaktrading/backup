@@ -397,6 +397,25 @@ def build_casio_url(model):
     return f"https://www.casio.com/jp/watches/gshock/product.{model}/"
 
 
+def is_complete_gshock_model(model):
+    """G-SHOCK 完全 product_id か検証.
+
+    catalog (604 件全件) の構造的不変性: ≥3 ハイフン区切りセグメント、最終セグメントが
+    数字始まり (color suffix). partial (例: 'GW-2320FP') は catalog の lookup ID と
+    一致しないため fail-closed で SKIP する.
+
+    完全形例: 'GW-2320FP-1A4JR', 'GA-2100-1A1JF', 'GMW-B5000BT-1', 'AW-500BB-1E'
+    不完全例: 'GW-2320FP' (color suffix 欠落、Mercari title 略記由来)
+
+    Mercari セラーが title に色番抜きで書く場合 (= 同型番の複数色を一括出品) に
+    Precision 100% 原則 (出品の正確性) 維持のため SKIP する.
+    """
+    if not model:
+        return False
+    parts = model.split('-')
+    return len(parts) >= 3 and bool(parts[-1]) and parts[-1][0].isdigit()
+
+
 def extract_model_from_text(text):
     """テキスト (タイトル/説明文) から CASIO 型番を抽出.
 
@@ -454,6 +473,7 @@ def load_targets_from_low_sheet():
 
     targets = []
     skipped_no_model = 0
+    skipped_partial_model = 0
     for row in all_values[1:]:
         url      = (row[0]  if len(row) > 0  else '').strip()  # A
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
@@ -474,10 +494,20 @@ def load_targets_from_low_sheet():
         if not model:
             skipped_no_model += 1
             continue
+        # color suffix 欠落 (例: GW-2320FP) は catalog の完全 ID と不一致 → SKIP.
+        # Mercari title に色番抜きで書かれているケース (一括出品セラー等) で発生.
+        if not is_complete_gshock_model(model):
+            skipped_partial_model += 1
+            print(f"⚠️ partial model_id (color suffix 欠落): {model!r} → SKIP "
+                  f"(Mercari title/desc に完全型番 (例: {model}-1A4JR) が無い)")
+            continue
         targets.append((url, model, price_f))
 
     if skipped_no_model:
         print(f"⚠️ {skipped_no_model} 件は型番抽出失敗で SKIP (Precision 100% 原則)")
+    if skipped_partial_model:
+        print(f"⚠️ {skipped_partial_model} 件は color suffix 欠落で SKIP "
+              f"(Mercari セラーが略記、Precision 100% 原則)")
     return targets
 
 def get_store_category(model):
