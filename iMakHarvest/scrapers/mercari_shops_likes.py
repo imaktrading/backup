@@ -27,7 +27,7 @@ from typing import Optional
 
 # 通常 Mercari と同じ chrome profile を再利用 (ログインセッション共有)
 CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHarvest\chrome_profile_mercari"
-CHROME_VERSION_MAIN = 146
+CHROME_VERSION_MAIN = 148  # Chrome 自動更新追従 (2026-05-09: 146 → 148)
 
 # 通常 Mercari と同じいいねページ (Shops も混在)
 MERCARI_LIKES_URL = "https://jp.mercari.com/mypage/favorites"

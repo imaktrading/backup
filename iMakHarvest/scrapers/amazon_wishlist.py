@@ -23,7 +23,7 @@ import time
 from typing import Optional
 
 CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHarvest\chrome_profile_amazon"
-CHROME_VERSION_MAIN = 146
+CHROME_VERSION_MAIN = 148  # Chrome 自動更新追従 (2026-05-09: 146 → 148)
 
 # 公開ウィッシュリスト URL: https://www.amazon.co.jp/hz/wishlist/ls/<LIST_ID>(?ref=...)
 WISHLIST_URL_RE = re.compile(r"/hz/wishlist/ls/([A-Z0-9]+)", re.IGNORECASE)

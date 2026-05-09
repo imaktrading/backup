@@ -29,7 +29,7 @@ import time
 from typing import Optional
 
 CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHarvest\chrome_profile_mercari"
-CHROME_VERSION_MAIN = 146
+CHROME_VERSION_MAIN = 148  # Chrome 自動更新追従 (2026-05-09: 146 → 148)
 
 # 2026-04-30: Mercari Web 版で /mypage/likes は廃止 (404 fallback)、
 # 新 URL は /mypage/favorites (複数形). trabajo decompile 当時とは異なる.
