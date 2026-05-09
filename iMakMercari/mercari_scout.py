@@ -35,10 +35,13 @@ SCOUT_LOG_FILE = os.path.join(SCRIPT_DIR, "data", "scout_log.csv")
 PSA_CERT_CACHE_FILE = os.path.join(SCRIPT_DIR, "data", "mercari_psa_cache.json")
 GO_LIST_FILE = os.path.join(SCRIPT_DIR, "data", "go_list.csv")
 
-# Google Sheets（在庫管理スプシ）
-INVENTORY_SHEET_IDS = [
-    "1RbGaiQxhYDd7s8nqT0jHeh7sQ6FJNCVnVxkEJLFmz9s",  # TCG在庫管理
-    "1QI0-L1A1DfTEi8Hl1-EFuRl9oTw9QPFe3X85stnaOD4",   # Tシャツ管理
+# Google Sheets（在庫管理スプシ） — 出品済み URL の dedup ソース
+# (sheet_id, gid) tuples for export URL. gid は商品管理シート tab の gid を明示指定.
+INVENTORY_SHEETS = [
+    # 統合Hight (TCG / 一番くじ / Montbell / G-shock 統合、2026-05-04 移行完了)
+    ("19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk", 851100680),
+    # Tシャツ管理 (UNIQLO UT、未統合)
+    ("1QI0-L1A1DfTEi8Hl1-EFuRl9oTw9QPFe3X85stnaOD4", 851100680),
 ]
 
 # eBay API
@@ -365,9 +368,9 @@ def build_ebay_query_from_product(product_info, category, mercari_title=""):
 def load_inventory_urls():
     """全スプシからメルカリURLリストを取得。出品済み商品の重複除外用。"""
     all_urls = set()
-    for sheet_id in INVENTORY_SHEET_IDS:
+    for sheet_id, gid in INVENTORY_SHEETS:
         try:
-            url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
+            url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
             resp = requests.get(url, timeout=30)
             if resp.status_code != 200:
                 continue

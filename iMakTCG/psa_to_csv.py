@@ -1753,57 +1753,6 @@ GSHEET_CREDS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..",
     "double-hold-421922-7c0d38d3f73d.json"
 )
-GSHEET_TCG_ID = "1RbGaiQxhYDd7s8nqT0jHeh7sQ6FJNCVnVxkEJLFmz9s"
-
-
-def _append_to_spreadsheet(cert_numbers, url_map, title_map, skip_certs):
-    """出品したカードのメルカリURL+タイトルをスプシに追記"""
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-    except ImportError:
-        print("⚠️ gspread未インストール。スプシ追記スキップ。")
-        return
-
-    if not os.path.exists(GSHEET_CREDS_FILE):
-        print("⚠️ Google認証ファイルなし。スプシ追記スキップ。")
-        return
-
-    # 出品されたカード（NO-GO除外・失敗除外）のみ
-    items_to_add = []
-    for cert in cert_numbers:
-        if cert in skip_certs:
-            continue
-        url = url_map.get(cert, "")
-        title = title_map.get(cert, "")
-        if url:
-            items_to_add.append((url, title))
-
-    if not items_to_add:
-        return
-
-    try:
-        creds = Credentials.from_service_account_file(
-            GSHEET_CREDS_FILE,
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-        gc = gspread.authorize(creds)
-        sh = gc.open_by_key(GSHEET_TCG_ID)
-        ws = sh.sheet1
-
-        # 最終行を取得
-        all_values = ws.get_all_values()
-        next_row = len(all_values) + 1
-
-        for i, (url, title) in enumerate(items_to_add):
-            row = next_row + i
-            ws.update(values=[[url]], range_name=f"A{row}")
-            if title:
-                ws.update(values=[[title]], range_name=f"C{row}")
-
-        print(f"📝 スプシ追記: {len(items_to_add)}件 (行{next_row}〜)")
-    except Exception as e:
-        print(f"⚠️ スプシ追記エラー: {e}")
 
 
 def load_targets_from_sheet_psa():
@@ -2180,10 +2129,6 @@ def main():
     print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")
     if errors:
         print(f"失敗: {', '.join(errors)}")
-
-    # スプシに自動追記（メルカリURL + タイトル）
-    if mercari_url_map:
-        _append_to_spreadsheet(cert_numbers, mercari_url_map, mercari_title_map, skip_certs)
 
     # CSVチェッカー自動実行
     # Phase D (2026-04-29): subprocess.run → 関数呼出. 同一プロセスにすることで
