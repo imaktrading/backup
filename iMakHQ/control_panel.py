@@ -1054,8 +1054,12 @@ class ListingPanel:
             row.pack(fill="x", pady=2)
             # verified=True は青色、それ以外は黒 (prefix 記号は廃止、色だけで区別)
             label_color = "#0066cc" if script.get("verified", False) else "black"
-            tk.Label(row, text=script["label"], width=32, font=("", 10, "bold"),
+            # width=22 で「モンベル公式アウトレット 巡回」(全角14字) まで収まる + 短い label でも空白部分小さい
+            tk.Label(row, text=script["label"], width=22, font=("", 10, "bold"),
                      fg=label_color, anchor="w").pack(side="left")
+
+            ttk.Button(row, text="▶ 実行", width=8,
+                       command=lambda idx=i: self.run_script(idx)).pack(side="left", padx=8)
 
             self.param_entries[i] = {}
             for p in script.get("params", []):
@@ -1064,9 +1068,6 @@ class ListingPanel:
                 entry.insert(0, p.get("default", ""))
                 entry.pack(side="left")
                 self.param_entries[i][p["name"]] = entry
-
-            ttk.Button(row, text="▶ 実行", width=8,
-                       command=lambda idx=i: self.run_script(idx)).pack(side="right", padx=2)
 
         # 状態ライン
         status_frame = ttk.Frame(root)
