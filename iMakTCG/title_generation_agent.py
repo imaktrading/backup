@@ -102,6 +102,11 @@ def refine_title(
         v_phase1 = _apply_ng_filter(title)
         # Phase 1-B: card# 以外の '#NN' 剥がし (Bonney "WEEKLY SHONEN JUMP '24-#35" 事故)
         v_phase1 = _strip_non_card_hashes(v_phase1, card_number)
+        # Phase 1-C-pre: 重複 phrase (bigram/trigram) dedupe
+        # set 名と card name で同じ phrase が両方出る場合 (例 "All Stars" が
+        # set "Tag All Stars" と card "Greninja & Zoroark Gx Tag Team Gx All Stars"
+        # の両方に出現) の片側除去. 単一語 dedup より先に実行 (5/9 Tag All Stars 事故対応).
+        v_phase1 = _dedupe_phrases(v_phase1)
         # Phase 1-D: 連続/近接重複語の dedupe (Anniversary Coll. Collection Card 二重重複)
         v_phase1 = _dedupe_consecutive_words(v_phase1)
         # Phase 1-E: 末尾孤立記号 trim (#35 剥がした残骸 '24-, 末尾ハイフン)
@@ -210,6 +215,64 @@ def _trim_trailing_orphans(title: str) -> str:
     # 末尾の孤立 filler 語 ("Card" / "Cards") は残してよい (UNIQLO 等で使う場合あり)
     # ただし「Card Card」「Coll. Collection」等の重複は除去
     return result
+
+
+def _dedupe_phrases(title: str) -> str:
+    """重複 phrase (bigram/trigram) を片側除去.
+
+    set 名と card name の重複を片付けるための helper. 例:
+      "Tag All Stars #072 Greninja & Zoroark Gx Tag Team Gx All Stars"
+      → "Tag All Stars #072 Greninja & Zoroark Gx Tag Team Gx"
+      ("All Stars" bigram が 2 回出現 → 後出を除去)
+
+    安全策:
+      - phrase 中に少なくとも 1 トークンが len >= 4 の場合のみ dedup 対象
+        (機能語のみ "of the" 等の偽陽性回避)
+      - phrase 内に '#' 始まりトークン (card#) を含まない
+      - bigram (2 トークン) と trigram (3 トークン) を長い順に試行
+      - 最大 4 イテレーション (多重重複対応、無限ループ防止)
+    """
+    if not title:
+        return title
+
+    def _is_meaningful_token(t: str) -> bool:
+        """4 字以上の英数字トークンか"""
+        clean = t.strip(".,;:'\"")
+        return len(clean) >= 4 and not clean.startswith("#")
+
+    for _ in range(4):
+        tokens = title.split()
+        if len(tokens) < 4:
+            return title  # 重複の余地なし
+
+        # trigram → bigram の順 (長い phrase を先に処理)
+        removed = False
+        for n in (3, 2):
+            if removed:
+                break
+            seen: dict = {}
+            i = 0
+            while i <= len(tokens) - n:
+                phrase = tuple(t.lower().strip(".,;:'\"") for t in tokens[i:i + n])
+                # phrase 内に意味語が 1 つ以上 + card# 含まず
+                meaningful = any(_is_meaningful_token(t) for t in tokens[i:i + n])
+                has_hash = any(t.startswith("#") for t in tokens[i:i + n])
+                if not meaningful or has_hash:
+                    i += 1
+                    continue
+                if phrase in seen:
+                    # 後出を除去 (前出は保護)
+                    tokens = tokens[:i] + tokens[i + n:]
+                    removed = True
+                    break
+                seen[phrase] = i
+                i += 1
+
+        if not removed:
+            break
+        title = " ".join(tokens)
+
+    return title
 
 
 def _dedupe_consecutive_words(title: str) -> str:
