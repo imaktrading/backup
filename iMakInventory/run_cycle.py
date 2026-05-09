@@ -649,6 +649,19 @@ def run_cycle(
         title = f"iMakInventory: {cycle_log['status']}{' (TEST)' if test_mode else ''}"
         _notify_toast(title, summary)
 
+    # cycle 完了メール送信 (opt-in: encrypted_gmail.dat が無ければ skip)
+    # fail-safe: 送信失敗しても cycle 全体を落とさない
+    try:
+        from email_notifier import send_cycle_report  # noqa: PLC0415
+        mail_res = send_cycle_report(cycle_log)
+        if mail_res.get("sent"):
+            _log("  📧 cycle report mail 送信完了", test_mode)
+        elif mail_res.get("error"):
+            _log(f"  ⚠️ cycle report mail 失敗: {mail_res['error']}", test_mode)
+        # skipped_reason のみ (= opt-in 未有効化) は無音 (毎 cycle ログ汚染防止)
+    except Exception as e:
+        _log(f"  ⚠️ email_notifier 例外: {type(e).__name__}: {e}", test_mode)
+
     return cycle_log
 
 
