@@ -1048,26 +1048,29 @@ class ListingPanel:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        # 4 列グリッドで大きめボタン配置 (抽出くん風)
+        # ボタン自体に script label を表示、verified=True は青文字、それ以外は黒
+        n_cols = 4
+        for col in range(n_cols):
+            scroll_frame.columnconfigure(col, weight=1, uniform="col")
+
         self.param_entries = {}
         for i, script in enumerate(SCRIPTS):
-            row = ttk.Frame(scroll_frame, padding=4, relief="ridge")
-            row.pack(fill="x", pady=2)
-            # verified=True は青色、それ以外は黒 (prefix 記号は廃止、色だけで区別)
+            r, c = divmod(i, n_cols)
             label_color = "#0066cc" if script.get("verified", False) else "black"
-            # width=22 で「モンベル公式アウトレット 巡回」(全角14字) まで収まる + 短い label でも空白部分小さい
-            tk.Label(row, text=script["label"], width=22, font=("", 10, "bold"),
-                     fg=label_color, anchor="w").pack(side="left")
-
-            ttk.Button(row, text="▶ 実行", width=8,
-                       command=lambda idx=i: self.run_script(idx)).pack(side="left", padx=8)
-
+            btn = tk.Button(
+                scroll_frame,
+                text=script["label"],
+                font=("", 10, "bold"),
+                fg=label_color,
+                width=20, height=2,
+                wraplength=180,
+                justify="center",
+                command=lambda idx=i: self.run_script(idx),
+            )
+            btn.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            # params 入力 UI は廃止 (大半が default 空欄。必要時はコード側で edit)
             self.param_entries[i] = {}
-            for p in script.get("params", []):
-                ttk.Label(row, text=p["label"]).pack(side="left", padx=(8, 2))
-                entry = ttk.Entry(row, width=6)
-                entry.insert(0, p.get("default", ""))
-                entry.pack(side="left")
-                self.param_entries[i][p["name"]] = entry
 
         # 状態ライン
         status_frame = ttk.Frame(root)
