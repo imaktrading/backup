@@ -813,6 +813,17 @@ def lookup_dragonball(
     """Dragon Ball SCG カードを iMakCatalog DB から ID 完全一致で lookup."""
     if not card_number:
         return None
+    # card_number が既に set_code prefix を含む場合 (e.g. 'FS02-04', 'FB02-001') は
+    # それ自体が完全 product_id. PSA の CardNumber 欄に "FS02-04" 等の full pid が
+    # 入っているケース (BANDAI CARD GAMES FEST23-24 promo 等).
+    if re.match(r"^(FB|FS|SB|FP)\d+-", card_number, re.IGNORECASE):
+        record = api.lookup(DRAGONBALL_CATEGORY, card_number)
+        if record and _record_name_matches_subject(record, subject):
+            if verbose:
+                print(f"    🎯 iMakCatalog (DBSCG) hit (full pid in card_number): {card_number}")
+            return _to_legacy_dict_dragonball(record)
+        # fall through to normal logic for further attempts
+
     set_code = extract_set_code_from_brand_dragonball(brand)
     if not set_code:
         if verbose:
@@ -939,16 +950,27 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     if not brand:
         return None
     b = brand.upper()
-    # 0) PSA promo brand 表記 (dash 抜き) → catalog の dash 入り set_code に正規化
+    # 0) PSA promo brand 表記 → catalog の set_code に正規化
     #    PSA は規制ロゴ (e.g. 'MP1.gif', 'SP1.gif') から brand 生成しているため
     #    catalog の image_url 由来 set_code (M-P / S-P / SV-P) と乖離.
     #    例: PSA brand 'MP1' → catalog set_code 'M-P' (Mega Promo, ピカチュウex 49592 等)
     #    実証: 2026-05-09 missing_models.csv に MP1-006 (Pikachu ex コロチャオ) 通知 →
     #          catalog 内 M-P-006 (=card 49592) と確認済
+    #    順序大事: より具体的な pattern を先に置く (SVP1 が SP1 と SV1 に matches を防ぐ)
     psa_promo_to_catalog = [
-        (r"\bMP\d+\b",   "M-P"),    # Mega Promo (M-P-001 〜)
-        (r"\bSP\d+\b",   "S-P"),    # Sword & Shield Promo (S-P-001 〜)
-        (r"\bSVP\d+\b",  "SV-P"),   # Scarlet & Violet Promo (SV-P-001 〜)
+        # --- dash 抜き連番 (規制ロゴ filename 由来) ---
+        (r"\bSVP\d+\b",       "SV-P"),  # Scarlet & Violet Promo
+        (r"\bSP\d+\b",        "S-P"),   # Sword & Shield Promo
+        (r"\bMP\d+\b",        "M-P"),   # Mega Promo
+        # --- dash 入り直接表記 (PSA brand に "M-P" / "S-P" / "SV-P" がそのまま含まれる) ---
+        (r"\bSV-P\b",         "SV-P"),
+        (r"\bS-P\b",          "S-P"),
+        (r"\bM-P\b",          "M-P"),
+        # --- set 名キーワード ---
+        (r"\bSM\s+PROMOS?\b", "SMP"),   # Sun & Moon Promo (PSA: 'SM PROMO' / 'SM PROMOS')
+        (r"\bXY\s+PROMOS?\b", "XYP"),   # X & Y Promo
+        (r"\bBW\s+PROMOS?\b", "BWP"),   # Black & White Promo
+        (r"\bDP\s+PROMOS?\b", "DPP"),   # Diamond & Pearl Promo
     ]
     for pattern, code in psa_promo_to_catalog:
         if re.search(pattern, b):
