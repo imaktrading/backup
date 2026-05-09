@@ -939,6 +939,20 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     if not brand:
         return None
     b = brand.upper()
+    # 0) PSA promo brand 表記 (dash 抜き) → catalog の dash 入り set_code に正規化
+    #    PSA は規制ロゴ (e.g. 'MP1.gif', 'SP1.gif') から brand 生成しているため
+    #    catalog の image_url 由来 set_code (M-P / S-P / SV-P) と乖離.
+    #    例: PSA brand 'MP1' → catalog set_code 'M-P' (Mega Promo, ピカチュウex 49592 等)
+    #    実証: 2026-05-09 missing_models.csv に MP1-006 (Pikachu ex コロチャオ) 通知 →
+    #          catalog 内 M-P-006 (=card 49592) と確認済
+    psa_promo_to_catalog = [
+        (r"\bMP\d+\b",   "M-P"),    # Mega Promo (M-P-001 〜)
+        (r"\bSP\d+\b",   "S-P"),    # Sword & Shield Promo (S-P-001 〜)
+        (r"\bSVP\d+\b",  "SV-P"),   # Scarlet & Violet Promo (SV-P-001 〜)
+    ]
+    for pattern, code in psa_promo_to_catalog:
+        if re.search(pattern, b):
+            return code
     # 1) Standard alphanumeric set codes
     m = re.search(r"\b(SV[0-9]+[A-Z]?|S[0-9]+[A-Z]?|M[0-9]+[A-Z]?|SM[0-9]+|XY[0-9]+|BW[0-9]+|HGSS[0-9]?|DP[0-9]+)\b", b)
     if m:
@@ -964,8 +978,16 @@ def _to_legacy_dict_pokemon(record: dict) -> dict:
     """
     specs = record.get("specs") or {}
     # variant suffix を剥がした card_number (e.g., 'M2a-240' → '240')
+    # multi-segment set_code 対応 (M-P-006 / SV-P-XXX / S-P-XXX) — 末尾 -<digits> で分割
     pid = record.get("product_id", "")
-    card_number_only = pid.split("-", 1)[1] if "-" in pid else pid
+    _parts = pid.rsplit("-", 1)
+    if len(_parts) == 2 and _parts[1].isdigit():
+        set_code_part = _parts[0]
+        card_number_only = _parts[1]
+    elif "-" in pid:
+        set_code_part, card_number_only = pid.split("-", 1)
+    else:
+        set_code_part, card_number_only = "", pid
 
     return {
         # 旧 pokemon_card_jp 互換
@@ -974,7 +996,7 @@ def _to_legacy_dict_pokemon(record: dict) -> dict:
         "card_number":        card_number_only,
         "card_number_full":   specs.get("card_number_text", card_number_only),
         "card_number_total":  specs.get("card_number_total", ""),
-        "set_code":           pid.split("-", 1)[0] if "-" in pid else "",
+        "set_code":           set_code_part,
         "rarity_jp":          specs.get("rarity", ""),
         "rarity_en":          specs.get("rarity", ""),
         "rarity":             specs.get("rarity", ""),
