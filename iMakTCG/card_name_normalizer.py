@@ -69,6 +69,18 @@ _POKEMON_SUFFIXES = [
     r"SUPER",  # 単独 'SUPER' rarity 残骸 (Gengar Ex Super case)
 ]
 
+# Dragon Ball SCG event/tournament variant 略号 (2026-05-09 追加)
+# 観測例: "Son Goku BCGF23-24 World Tour" (FS02-04 promo print)
+_DRAGONBALL_SUFFIXES = [
+    r"BCGF\d{2}(?:-\d{2})?\s+WORLD\s+TOUR\s+PROMO",
+    r"BCGF\d{2}(?:-\d{2})?\s+WORLD\s+TOUR",
+    r"BCGF\d{2}(?:-\d{2})?",
+    r"BANDAI\s+CARD\s+GAMES\s+FEST[\s\-\dA-Z]*",
+    r"CARD\s+GAMES\s+FEST[\s\-\dA-Z]*",
+    r"WORLD\s+TOUR\s+PROMO",
+    r"WORLD\s+TOUR",
+]
+
 # One Piece event/promo variant 略号
 _ONEPIECE_SUFFIXES = [
     r"ICHIBAN\s+KUJI\s+PURCHASE\s+BONUS",
@@ -126,7 +138,7 @@ def normalize_card_name(raw: Optional[str], franchise: str = "") -> str:
         s = re.sub(prefix_pattern, "", s, flags=re.IGNORECASE)
 
         # 末尾 suffix 剥がし (繰り返し: 多重 suffix 対応)
-        all_suffixes = _POKEMON_SUFFIXES + _ONEPIECE_SUFFIXES
+        all_suffixes = _POKEMON_SUFFIXES + _ONEPIECE_SUFFIXES + _DRAGONBALL_SUFFIXES
         changed = True
         max_iter = 8
         while changed and max_iter > 0:
@@ -201,6 +213,10 @@ if __name__ == "__main__":
         ("Monkey D. Luffy", "One Piece", "Monkey D. Luffy"),
         # Hancock 技名 (これは TitleAgent / Identification Agent で別途処理)
         ("PERFUME FEMUR", "One Piece", "Perfume Femur"),
+        # Dragon Ball BCGF World Tour promo (2026-05-09 追加、FS02-04 Son Goku 事例)
+        ("Son Goku BCGF23-24 World Tour", "Dragon Ball", "Son Goku"),
+        ("SON GOKU BCGF23-24 WORLD TOUR", "Dragon Ball", "Son Goku"),
+        ("VEGETA BCGF24-25 WORLD TOUR PROMO", "Dragon Ball", "Vegeta"),
         # 空入力
         ("", "", ""),
     ]
