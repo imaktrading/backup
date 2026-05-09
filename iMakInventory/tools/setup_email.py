@@ -54,7 +54,7 @@ def cmd_setup():
 
     if has_gmail_config():
         old = load_gmail_config()
-        print(f"⚠️ 既に保存済 (address={old[0]}, to={old[2]})。上書きしますか? [y/N]: ", end="")
+        print(f"[!] 既に保存済 (address={old[0]}, to={old[2]})。上書きしますか? [y/N]: ", end="")
         ans = input().strip().lower()
         if ans != "y":
             print("中止しました")
@@ -63,18 +63,18 @@ def cmd_setup():
     print()
     address = input("送信元 Gmail アドレス (例: imax2303@gmail.com): ").strip()
     if not address:
-        print("⚠️ address が空、中止")
+        print("[!] address が空、中止")
         return
     if "@" not in address:
-        print(f"⚠️ Gmail アドレス形式不正: {address}、中止")
+        print(f"[!] Gmail アドレス形式不正: {address}、中止")
         return
 
     app_password = getpass.getpass("Gmail App Password (16 文字、非表示): ").strip()
     if not app_password:
-        print("⚠️ app_password が空、中止")
+        print("[!] app_password が空、中止")
         return
     if len(app_password.replace(" ", "")) != 16:
-        print(f"⚠️ App Password は 16 文字 (スペース除く) のはず、入力長={len(app_password.replace(' ', ''))}")
+        print(f"[!] App Password は 16 文字 (スペース除く) のはず、入力長={len(app_password.replace(' ', ''))}")
         print("  続行しますか? [y/N]: ", end="")
         if input().strip().lower() != "y":
             print("中止しました")
@@ -86,7 +86,7 @@ def cmd_setup():
 
     save_gmail_config(address, app_password, to)
     print()
-    print(f"✅ 保存完了: {ENCRYPTED_GMAIL_FILE}")
+    print(f"[OK] 保存完了: {ENCRYPTED_GMAIL_FILE}")
     print(f"   address = {address}")
     print(f"   to      = {to}")
     print()
@@ -97,19 +97,19 @@ def cmd_setup():
 def cmd_check():
     print(f"保存先: {ENCRYPTED_GMAIL_FILE}")
     if not ENCRYPTED_GMAIL_FILE.exists():
-        print("❌ ファイル不在 (= opt-in 未有効化、cycle メールは送信されない)")
+        print("[NG] ファイル不在 (= opt-in 未有効化、cycle メールは送信されない)")
         sys.exit(1)
     cfg = load_gmail_config()
     if cfg is None:
-        print("❌ ファイル存在するが復号失敗 (別ユーザー/別マシン or 破損)")
+        print("[NG] ファイル存在するが復号失敗 (別ユーザー/別マシン or 破損)")
         sys.exit(2)
     address, _pw, to = cfg
-    print(f"✅ 復号成功: address={address}, to={to} (app_password は非表示)")
+    print(f"[OK] 復号成功: address={address}, to={to} (app_password は非表示)")
 
 
 def cmd_delete():
     if delete_gmail_config():
-        print(f"✅ 削除完了: {ENCRYPTED_GMAIL_FILE}")
+        print(f"[OK] 削除完了: {ENCRYPTED_GMAIL_FILE}")
         print("  → cycle 完了メールは送信されなくなります")
     else:
         print(f"ファイル不在: {ENCRYPTED_GMAIL_FILE}")
@@ -118,7 +118,7 @@ def cmd_delete():
 def cmd_test():
     """ダミー cycle_log で 1 通送信 (smoke test)."""
     if not has_gmail_config():
-        print("❌ credentials 未保存。先に `python tools/setup_email.py` を実行してください")
+        print("[NG] credentials 未保存。先に `python tools/setup_email.py` を実行してください")
         sys.exit(1)
 
     print("ダミー cycle_log で送信テスト中...")
@@ -142,9 +142,9 @@ def cmd_test():
     }
     res = send_cycle_report(dummy_log)
     if res.get("sent"):
-        print("✅ 送信成功 (受信箱を確認してください)")
+        print("[OK] 送信成功 (受信箱を確認してください)")
     else:
-        print(f"❌ 送信失敗: {res}")
+        print(f"[NG] 送信失敗: {res}")
         sys.exit(3)
 
 
@@ -156,7 +156,7 @@ def main():
     args = p.parse_args()
 
     if sum([args.check, args.delete, args.test]) > 1:
-        print("❌ --check / --delete / --test は排他")
+        print("[NG] --check / --delete / --test は排他")
         sys.exit(2)
 
     if args.check:
