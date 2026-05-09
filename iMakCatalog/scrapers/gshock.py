@@ -306,6 +306,9 @@ GCENTRAL_SERIES_SLUG = {
     "GA-010":    "ga-010",    # 角型派生
     "GWN-1000":  "gwn-1000",  # GULFMASTER
     "GWG-2000":  "gwg-2000",  # MUDMASTER 後継
+    "AW-500":    "aw-500",    # Analog-Digital classic
+    "GG-1000":   "gg-1000",   # MUDMASTER analog
+    "DW-5750":   "dw-5750",   # 5600 派生
 }
 
 # casiofanmag 経由 (g-central に articles が無い series 用、補完)
@@ -377,6 +380,8 @@ _SERIES_OVERRIDES = [
     (r"^GW-69",                           {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
     (r"^GW-M5",                           {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
     (r"^GW-90",                           {"case_shape": "Round", "watch_shape": "Round", "display": "Digital"}),
+    # GW-2310 / GW-2320 (Fire Package) は square digital (基盤 GW-2310)
+    (r"^GW-23(?:10|20)",                  {"case_shape": "Square", "watch_shape": "Square", "display": "Digital"}),
     # === Analog Digital 主系統 ===
     (r"^GA-(?:100|110|120|200|300|400|500|700|800|900)",
                                           {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
@@ -407,6 +412,8 @@ _SERIES_OVERRIDES = [
     (r"^BA-",                             {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
     # === GMA / GMB / GMW (Mid-size + Metal) ===
     (r"^GMA-",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
+    # GM-5600 / GM-5640 series は square digital (metal版 DW-5600)
+    (r"^GM-5(?:600|640)",                 {"case_shape": "Square", "watch_shape": "Square", "display": "Digital", "case_material": "Stainless Steel"}),
     (r"^GM-S",                            {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
     (r"^GM-",                             {"case_shape": "Round", "watch_shape": "Round", "display": "Analog & Digital"}),
     # === GX (XL Big Case) ===
