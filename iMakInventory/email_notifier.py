@@ -20,158 +20,219 @@ from email.utils import formatdate
 from typing import Any, Dict, Optional
 
 
+def _summarize_result_text(result_text: str) -> str:
+    """eBay 上の result_text を日本語サマリに変換.
+
+    eBay FileExchange の result_text 例:
+        "Warning 4 + safe Failure 0 + action-needed Failure 0"
+    分類:
+        - Warning N      : 受理されたが軽微指摘あり (= 取下げ成功扱い)
+        - safe Failure N : eBay 側の都合 (画像要件等)、当方の処理は問題なし
+        - action-needed Failure N : 要対応の失敗 (実害あり)
+    """
+    if not result_text:
+        return ""
+    import re
+    w = re.search(r"Warning\s*(\d+)", result_text)
+    sf = re.search(r"safe\s*Failure\s*(\d+)", result_text)
+    af = re.search(r"action-needed\s*Failure\s*(\d+)", result_text)
+    parts = []
+    if w:
+        parts.append(f"受理 {w.group(1)} 件")
+    if sf and sf.group(1) != "0":
+        parts.append(f"画像要件等 {sf.group(1)} 件")
+    if af and af.group(1) != "0":
+        parts.append(f"要対応失敗 {af.group(1)} 件")
+    return " / ".join(parts) if parts else result_text
+
+
+def _translate_error(err: str) -> str:
+    """よくあるエラー文字列を日本語に簡訳."""
+    if not err:
+        return ""
+    head = err.split("\n", 1)[0]
+    low = head.lower()
+    if "not_logged_in" in low or "not logged in" in low:
+        return "eBay ログイン切れ"
+    if "sessionnotcreated" in low or "this version of chromedriver" in low:
+        return "Chrome バージョン不一致 (driver 更新待ち)"
+    if "lost sys.stdin" in low:
+        return "cron 環境で input() 失敗 (旧版 hotfix で対処済)"
+    if "upload result not detected" in low:
+        return "判定不安定 (eBay 側受理済みの可能性大、要 eBay 履歴目視)"
+    if "timeout" in low:
+        return "タイムアウト (一時的)"
+    return head[:120]
+
+
 def _format_subject(cycle_log: Dict[str, Any]) -> str:
-    """[OK]/[NG]/[SKIP] の prefix + 結果サマリ 1 行."""
+    """件名: [OK]/[NG]/[SKIP] + 巡回時刻 + 結果 1 行サマリ."""
     status = cycle_log.get("status", "unknown")
     ts_start = cycle_log.get("ts_start", "")[:16].replace("T", " ")
     upload = cycle_log["phases"].get("upload", {}) if "phases" in cycle_log else {}
 
     if status == "success":
         prefix = "[OK]"
-        result_text = upload.get("result_text", "")
-        tail = f" {result_text}" if result_text else ""
+        summary = _summarize_result_text(upload.get("result_text", ""))
+        tail = f" 取下げ {summary}" if summary else ""
     elif status in ("success_no_upload", "success_no_changes"):
         prefix = "[SKIP]"
-        tail = ""
+        tail = " 取下げ対象なし"
     elif status == "upload_failed":
         prefix = "[NG]"
-        err = upload.get("error", "")
-        # error の 1 行目だけ取り、長すぎる場合は切り詰め
-        err_head = err.split("\n", 1)[0][:80] if err else "unknown"
-        tail = f" {err_head}"
+        tail = f" 取下げ失敗: {_translate_error(upload.get('error', ''))}"
     elif status == "error":
         prefix = "[NG]"
-        tail = f" cycle 例外: {cycle_log.get('error', '')[:80]}"
+        tail = f" 巡回中に例外: {_translate_error(cycle_log.get('error', ''))}"
     else:
         prefix = "[?]"
-        tail = ""
+        tail = f" 不明な状態: {status}"
 
-    return f"{prefix} iMakInventory cycle {ts_start}{tail}"
+    return f"{prefix} iMakInventory 巡回 {ts_start}{tail}"
+
+
+def _fmt_ts(iso_ts: str) -> str:
+    """ISO 形式 (2026-05-09T17:30:02) → '2026-05-09 17:30' に短縮."""
+    if not iso_ts:
+        return "?"
+    return iso_ts[:16].replace("T", " ")
+
+
+def _fmt_duration(start_iso: str, end_iso: str) -> str:
+    """所要時間を '35分' / '1時間2分' で返す."""
+    try:
+        from datetime import datetime  # noqa: PLC0415
+        s = datetime.fromisoformat(start_iso)
+        e = datetime.fromisoformat(end_iso)
+        sec = int((e - s).total_seconds())
+        if sec < 60:
+            return f"{sec}秒"
+        m, s = divmod(sec, 60)
+        if m < 60:
+            return f"{m}分{s:02d}秒" if s else f"{m}分"
+        h, m = divmod(m, 60)
+        return f"{h}時間{m:02d}分"
+    except Exception:
+        return "?"
+
+
+_STATUS_JP = {
+    "success": "正常 (取下げ実施)",
+    "success_no_upload": "正常 (取下げ対象なし)",
+    "success_no_changes": "正常 (在庫変動なし)",
+    "upload_failed": "異常: 取下げ失敗",
+    "error": "異常: 巡回中に例外",
+}
 
 
 def _format_body(cycle_log: Dict[str, Any]) -> str:
-    """cycle_log を human-readable に整形。全 phase の内訳."""
+    """cycle_log を日本語の読みやすいレポートに整形."""
     lines = []
-    lines.append("=" * 60)
-    lines.append(f"status   : {cycle_log.get('status', 'unknown')}")
-    lines.append(f"ts_start : {cycle_log.get('ts_start', '')}")
-    lines.append(f"ts_end   : {cycle_log.get('ts_end', '')}")
-    lines.append(f"sheet    : {cycle_log.get('sheet', '?')}")
-    lines.append(f"test_mode: {cycle_log.get('test_mode', False)}")
+    status = cycle_log.get("status", "unknown")
+    status_jp = _STATUS_JP.get(status, status)
+
+    lines.append("=" * 50)
+    lines.append("iMakInventory 巡回レポート")
+    lines.append("=" * 50)
+    lines.append(f"結果      : {status_jp}")
+    lines.append(f"開始時刻   : {_fmt_ts(cycle_log.get('ts_start', ''))}")
+    lines.append(f"終了時刻   : {_fmt_ts(cycle_log.get('ts_end', ''))}")
+    lines.append(f"所要時間   : {_fmt_duration(cycle_log.get('ts_start', ''), cycle_log.get('ts_end', ''))}")
+    sheet_lbl = {"both": "HIGH + LOW 両方", "high": "HIGH のみ", "low": "LOW のみ"}.get(
+        cycle_log.get("sheet", ""), cycle_log.get("sheet", "?"))
+    lines.append(f"対象スプシ  : {sheet_lbl}")
+    if cycle_log.get("test_mode"):
+        lines.append("注意      : テストモード (本番運用ではない)")
     lines.append("")
 
     phases = cycle_log.get("phases", {}) or {}
 
-    # pytest_precheck
-    pp = phases.get("pytest_precheck", {})
-    if pp:
-        lines.append(f"[pytest_precheck] status={pp.get('status', '?')} elapsed={pp.get('elapsed_sec', '?')}s")
-
-    # listing_verify
-    lv = phases.get("listing_verify", {})
-    if lv:
-        if lv.get("error"):
-            lines.append(f"[listing_verify] ERROR: {lv['error'].split(chr(10), 1)[0][:120]}")
-        else:
-            lines.append(f"[listing_verify] verified={lv.get('verified', '?')}")
-
-    # backup
-    bk = phases.get("backup", {}) or {}
-    for sheet_label, info in bk.items():
-        if isinstance(info, dict):
-            b = info.get("backup", {}) or {}
-            lines.append(f"[backup/{sheet_label}] tab={b.get('backup_tab_name', '?')} rows={b.get('row_count', '?')}")
-
-    # monitor
+    # 在庫監視 (monitor) — 一番大事なところ
     mon = phases.get("monitor", {}) or {}
     if mon:
-        lines.append(
-            f"[monitor] processed={mon.get('processed', '?')} "
-            f"newly_sold={mon.get('newly_sold', '?')} "
-            f"newly_in_stock={mon.get('newly_in_stock', '?')} "
-            f"errors={mon.get('errors', '?')}"
-        )
-        by_sheet = mon.get("by_sheet", {}) or {}
-        for label, s in by_sheet.items():
-            if isinstance(s, dict):
-                lines.append(
-                    f"  {label}: processed={s.get('processed', '?')} "
-                    f"newly_sold={s.get('newly_sold', '?')} "
-                    f"newly_in_stock={s.get('newly_in_stock', '?')} "
-                    f"errors={s.get('errors', '?')}"
-                )
-
-    # d_diff
-    dd = phases.get("d_diff", {}) or {}
-    for label, d in dd.items():
-        if isinstance(d, dict):
-            lines.append(
-                f"[d_diff/{label}] newly_sold={d.get('newly_sold', '?')} "
-                f"newly_in_stock={d.get('newly_in_stock', '?')} "
-                f"unchanged={d.get('unchanged_count', '?')}"
-            )
-
-    # revise_csv
-    rc = phases.get("revise_csv", {}) or {}
-    if rc:
-        lines.append(
-            f"[revise_csv] candidates={rc.get('candidates', '?')} "
-            f"allowed={rc.get('allowed', '?')} "
-            f"deferred={rc.get('deferred', '?')} "
-            f"reason={rc.get('reason', '?')}"
-        )
-
-    # upload
-    up = phases.get("upload", {}) or {}
-    if up:
-        if "skipped" in up:
-            lines.append(f"[upload] SKIPPED ({up['skipped']})")
+        lines.append("【在庫監視】(仕入元サイトのページを巡回)")
+        lines.append(f"  チェック件数  : {mon.get('processed', '?')} 件")
+        lines.append(f"  新規売切検知  : {mon.get('newly_sold', '?')} 件 ← eBay から取下げ対象")
+        lines.append(f"  在庫復活検知  : {mon.get('newly_in_stock', '?')} 件")
+        errors = mon.get("errors", 0) or 0
+        if errors:
+            lines.append(f"  通信エラー    : {errors} 件 (一時的、次 cycle で再試行)")
         else:
-            success = up.get("success")
-            mark = "OK" if success else "NG"
-            lines.append(f"[upload] {mark} csv_lines={up.get('csv_lines', '?')}")
-            rt = up.get("result_text") or ""
-            if rt:
-                lines.append(f"  result : {rt}")
-            if up.get("popup_text"):
-                lines.append(f"  popup  : {up['popup_text'][:200]}")
-            if up.get("error"):
-                err_first = up["error"].split("\n", 1)[0]
-                lines.append(f"  error  : {err_first[:200]}")
-            if up.get("page_url"):
-                lines.append(f"  page   : {up['page_url']}")
+            lines.append(f"  通信エラー    : 0 件")
+        lines.append("")
 
-    # upload_health
+    # eBay 取下げ (revise + upload)
+    rc = phases.get("revise_csv", {}) or {}
+    up = phases.get("upload", {}) or {}
+    if rc or up:
+        lines.append("【eBay 取下げ】")
+        if rc:
+            lines.append(f"  CSV 生成     : {rc.get('allowed', '?')} 件 (条件 OK で対象化)")
+            deferred = rc.get("deferred", 0) or 0
+            if deferred:
+                lines.append(f"  保留         : {deferred} 件 (条件未達、次 cycle 持越)")
+
+        if up.get("skipped"):
+            lines.append("  upload      : スキップ (取下げ対象が無いため)")
+        elif up:
+            success = up.get("success")
+            csv_lines = up.get("csv_lines", "?")
+            if success:
+                summary = _summarize_result_text(up.get("result_text", ""))
+                lines.append(f"  upload結果   : 成功 ({csv_lines} 件処理) → {summary}")
+            else:
+                lines.append(f"  upload結果   : 失敗 ({csv_lines} 件未送信)")
+                lines.append(f"  失敗内容     : {_translate_error(up.get('error', ''))}")
+                if up.get("page_url"):
+                    lines.append(f"  確認 URL     : {up['page_url']}")
+        lines.append("")
+
+    # ヘルス (upload_health)
     uh = phases.get("upload_health", {}) or {}
     if uh:
-        lines.append(
-            f"[upload_health] alert={uh.get('alert_fired')} "
-            f"reason={uh.get('reason', '')} "
-            f"streaks: not_logged_in={uh.get('not_logged_in_streak', 0)} "
-            f"flaky={uh.get('flaky_streak', 0)} "
-            f"generic={uh.get('generic_failure_streak', 0)}"
-        )
+        lines.append("【ヘルス】(連続失敗の検知)")
+        nl = uh.get("not_logged_in_streak", 0) or 0
+        fl = uh.get("flaky_streak", 0) or 0
+        gn = uh.get("generic_failure_streak", 0) or 0
+        lines.append(f"  ログイン切れ : 連続 {nl} 回 {'← 即時アラート対象' if nl > 0 else '(正常)'}")
+        lines.append(f"  判定不安定   : 連続 {fl} 回 {'← 3回でアラート' if fl >= 3 else ''}")
+        lines.append(f"  汎用エラー   : 連続 {gn} 回 {'← 2回でアラート' if gn >= 2 else ''}")
+        if uh.get("alert_fired"):
+            lines.append(f"  → アラート発火 ({uh.get('reason', '')})")
+        lines.append("")
 
-    # audit_sample
+    # 補助情報 (折りたたみ的扱い)
+    aux = []
+    pp = phases.get("pytest_precheck", {}) or {}
+    if pp:
+        aux.append(f"テスト事前実行 : {pp.get('status', '?')} ({pp.get('elapsed_sec', '?')}秒)")
+    bk = phases.get("backup", {}) or {}
+    for label, info in bk.items():
+        if isinstance(info, dict):
+            b = info.get("backup", {}) or {}
+            aux.append(f"スプシ backup : {label} → {b.get('row_count', '?')} 行")
     aud = phases.get("audit_sample", {}) or {}
     for label, a in aud.items():
         if isinstance(a, dict):
-            lines.append(
-                f"[audit_sample/{label}] sampled={a.get('sampled', '?')} "
-                f"appended={a.get('appended', '?')}"
-            )
-
-    # cycle 例外
-    if cycle_log.get("error"):
+            aux.append(f"抜取監査     : {label} → {a.get('appended', '?')} 件 audit タブに追記")
+    if aux:
+        lines.append("【補助】")
+        for x in aux:
+            lines.append(f"  {x}")
         lines.append("")
-        lines.append(f"!!! CYCLE 例外: {cycle_log['error']}")
+
+    # cycle 全体の例外
+    if cycle_log.get("error"):
+        lines.append("【巡回中に例外発生】")
+        lines.append(f"  {_translate_error(cycle_log['error'])}")
         tb = cycle_log.get("traceback", "")
         if tb:
+            lines.append("--- traceback (debug 用) ---")
             lines.append(tb[:1500])
+        lines.append("")
 
-    lines.append("")
-    lines.append("=" * 60)
-    lines.append("(automated by iMakInventory.email_notifier)")
+    lines.append("=" * 50)
+    lines.append("（このメールは iMakInventory が自動送信しています）")
     return "\n".join(lines)
 
 

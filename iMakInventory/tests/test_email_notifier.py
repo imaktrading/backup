@@ -54,42 +54,59 @@ def _skip_log():
     return log
 
 
-def test_subject_success_includes_OK_and_result_text():
+def test_subject_success_uses_japanese_summary():
     from email_notifier import _format_subject
     s = _format_subject(_success_log())
     assert s.startswith("[OK]")
-    assert "Warning 4" in s
+    assert "巡回" in s
+    assert "受理 4 件" in s   # "Warning 4" の和訳
 
 
-def test_subject_failure_includes_NG_and_error_head():
+def test_subject_failure_uses_japanese_error():
     from email_notifier import _format_subject
     s = _format_subject(_failure_log("not_logged_in"))
     assert s.startswith("[NG]")
-    assert "not_logged_in" in s
+    assert "ログイン切れ" in s   # "not_logged_in" の和訳
 
 
-def test_subject_skip_includes_SKIP():
+def test_subject_skip_uses_japanese():
     from email_notifier import _format_subject
     s = _format_subject(_skip_log())
     assert s.startswith("[SKIP]")
+    assert "取下げ対象なし" in s
 
 
-def test_body_contains_all_phase_summaries():
+def test_body_uses_japanese_section_headers():
     from email_notifier import _format_body
     body = _format_body(_success_log())
-    assert "[monitor]" in body
-    assert "[d_diff/SHEET]" in body
-    assert "[revise_csv]" in body
-    assert "[upload]" in body
-    assert "Warning 4" in body
-    assert "[upload_health]" in body
+    assert "在庫監視" in body
+    assert "eBay 取下げ" in body
+    assert "ヘルス" in body
+    assert "新規売切検知" in body
+    assert "受理 4 件" in body
 
 
-def test_body_failure_includes_error_line():
+def test_body_failure_translates_error():
     from email_notifier import _format_body
     body = _format_body(_failure_log("SessionNotCreatedException: foo"))
-    assert "NG" in body
-    assert "SessionNotCreatedException" in body
+    assert "失敗" in body
+    assert "Chrome" in body  # SessionNotCreated → Chrome バージョン不一致
+
+
+def test_translate_error_known_patterns():
+    from email_notifier import _translate_error
+    assert "ログイン切れ" in _translate_error("not_logged_in")
+    assert "Chrome" in _translate_error("SessionNotCreatedException: ...")
+    assert "input" in _translate_error("RuntimeError: input(): lost sys.stdin")
+    assert "判定不安定" in _translate_error("upload result not detected (popup + history both inconclusive)")
+
+
+def test_summarize_result_text():
+    from email_notifier import _summarize_result_text
+    assert _summarize_result_text("Warning 4 + safe Failure 0 + action-needed Failure 0") == "受理 4 件"
+    assert "受理 1 件" in _summarize_result_text("Warning 1 + safe Failure 2 + action-needed Failure 0")
+    assert "画像要件等 2 件" in _summarize_result_text("Warning 1 + safe Failure 2 + action-needed Failure 0")
+    assert "要対応失敗 3 件" in _summarize_result_text("Warning 0 + safe Failure 0 + action-needed Failure 3")
 
 
 def test_send_skips_when_no_config(monkeypatch, tmp_path):
@@ -123,7 +140,7 @@ def test_send_calls_smtp_when_config_present(monkeypatch, tmp_path):
     assert sent_args["address"] == "a@example.com"
     assert sent_args["to"] == "b@example.com"
     assert sent_args["subject"].startswith("[OK]")
-    assert "[upload]" in sent_args["body"]
+    assert "eBay 取下げ" in sent_args["body"]
 
 
 def test_send_swallows_smtp_error(monkeypatch, tmp_path):
