@@ -173,13 +173,11 @@ def fix_title(title, language, rarity, rescues):
 def process_csv(csv_path, rescues, log_func=print):
     """CSV を読み、全行のタイトルを補強して書き戻し.
 
+    書換え発生時のみ backup + 書戻しを行う (no-op 時はディスク無駄を回避).
+
     Returns:
         stats dict {'rescued': N, 'padded': N, 'pokemon_dedup': N, 'unchanged': N}
     """
-    bak = csv_path + f'.bak_post_title_{int(time.time())}'
-    shutil.copy2(csv_path, bak)
-    log_func(f"  📦 backup: {os.path.basename(bak)}")
-
     with open(csv_path, encoding='utf-8', newline='') as f:
         rows = list(csv.reader(f))
 
@@ -217,9 +215,13 @@ def process_csv(csv_path, rescues, log_func=print):
         else:
             stats['unchanged'] += 1
 
-    with open(csv_path, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
-        writer.writerows(rows)
+    if stats['rescued'] or stats['padded'] or stats['pokemon_dedup']:
+        bak = csv_path + f'.bak_post_title_{int(time.time())}'
+        shutil.copy2(csv_path, bak)
+        log_func(f"  📦 backup: {os.path.basename(bak)}")
+        with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+            writer.writerows(rows)
 
     return stats
 

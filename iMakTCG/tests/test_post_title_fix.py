@@ -133,3 +133,47 @@ def test_fix_title_no_change_for_already_good():
     # rescue 不要、pokemon_dedup 不要、pad で Japanese 等追加される可能性
     assert log['rescue'] == []
     assert not log['pokemon_dedup']
+
+
+# ----- process_csv backup behavior (2026-05-09: 無修正時の backup 抑止) -----
+def _write_min_csv(path, title):
+    """最小 CSV を書き出すヘルパー (header + 1 row)."""
+    import csv as _csv
+    headers = ['*Title', 'C:Rarity', 'C:Language']
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        w = _csv.writer(f, quoting=_csv.QUOTE_NONNUMERIC)
+        w.writerow(headers)
+        w.writerow([title, 'Common', 'Japanese'])
+
+
+def test_process_csv_no_backup_when_unchanged(tmp_path):
+    """書換え発生しなかったら backup ファイルを作らない (リソース節約)."""
+    from post_title_fix import process_csv
+    csv_path = str(tmp_path / "tcg_upload_unchanged.csv")
+    # 既に十分長い綺麗なタイトル → fix_title は no-op
+    _write_min_csv(csv_path, "PSA 10 Pokemon SV9a #080 Cynthia's Garchomp ex Heat Wave Card")
+    stats = process_csv(csv_path, RESCUES, log_func=lambda m: None)
+    # 書換えなしを確認
+    assert stats['rescued'] == 0
+    assert stats['padded'] == 0
+    assert stats['pokemon_dedup'] == 0
+    assert stats['unchanged'] == 1
+    # backup ファイルが作られていないこと
+    bak_files = list(tmp_path.glob("*.bak_post_title_*"))
+    assert bak_files == [], f"unexpected backup created: {bak_files}"
+
+
+def test_process_csv_backup_when_modified(tmp_path):
+    """書換え発生時は backup を作成 (安全策維持)."""
+    from post_title_fix import process_csv
+    csv_path = str(tmp_path / "tcg_upload_modified.csv")
+    # rescue 対象 (Mlmtl.GX → Melmetal GX)
+    _write_min_csv(
+        csv_path,
+        "PSA 10 Pokemon Sun & Moon Tag Team GX All Stars #224 Lucario & Mlmtl.GX",
+    )
+    stats = process_csv(csv_path, RESCUES, log_func=lambda m: None)
+    assert stats['rescued'] == 1
+    # backup ファイルが作成されたこと
+    bak_files = list(tmp_path.glob("*.bak_post_title_*"))
+    assert len(bak_files) == 1, f"expected 1 backup, got: {bak_files}"
