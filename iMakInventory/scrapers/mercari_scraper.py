@@ -63,7 +63,6 @@ SELENIUM_WAIT_SEC = 30     # ハイドレーション完了待ちの最大秒数
 SELENIUM_POLL_INTERVAL = 0.5
 
 CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakMercari\chrome_profile"
-CHROME_VERSION_MAIN = 146
 
 # 削除済 / 取下げ済 page の body text マーカー (trabajo 解析 + 実検体で確認した活用形)
 # selenium WebElement.text は visible text のみ取得するため、script タグ内の i18n bundle
@@ -166,7 +165,7 @@ def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
     if headless:
         options.add_argument("--headless=new")
 
-    driver = uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
+    driver = uc.Chrome(options=options)
     return driver
 
 

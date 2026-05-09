@@ -101,6 +101,40 @@ def test_translate_error_known_patterns():
     assert "判定不安定" in _translate_error("upload result not detected (popup + history both inconclusive)")
 
 
+def test_body_high_error_rate_shows_warning():
+    """error_rate >= 50% は「異常高率」警告を出す (1/30 事故型対策)."""
+    from email_notifier import _format_body
+    log = _success_log()
+    log["phases"]["monitor"]["errors"] = 441
+    log["phases"]["monitor"]["processed"] = 514
+    body = _format_body(log)
+    assert "異常高率" in body
+    assert "85%" in body or "86%" in body
+
+
+def test_body_low_error_rate_says_temporary():
+    """error_rate < 10% は「一時的」と表示."""
+    from email_notifier import _format_body
+    log = _success_log()
+    log["phases"]["monitor"]["errors"] = 12
+    log["phases"]["monitor"]["processed"] = 503
+    body = _format_body(log)
+    assert "一時的" in body
+
+
+def test_body_revise_skipped_shows_no_target():
+    """revise_csv が skipped の場合は「対象なし」表示 (CSV 生成 ? を出さない)."""
+    from email_notifier import _format_body
+    log = _success_log()
+    log["status"] = "success_no_changes"
+    log["phases"]["revise_csv"] = {"skipped": "no newly_sold"}
+    log["phases"]["upload"] = {"skipped": "no csv"}
+    body = _format_body(log)
+    assert "取下げ対象   : なし" in body
+    assert "CSV 生成" not in body
+    assert "?" not in body  # `?` 出ない
+
+
 def test_summarize_result_text():
     from email_notifier import _summarize_result_text
     assert _summarize_result_text("Warning 4 + safe Failure 0 + action-needed Failure 0") == "受理 4 件"

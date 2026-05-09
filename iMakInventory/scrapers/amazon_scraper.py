@@ -63,7 +63,6 @@ UNQUALIFIED_BUYBOX_PATTERN = 'id="unqualifiedBuyBox_feature_div"'
 
 # Amazon ログイン用 Chrome profile (Mercari profile と分離、Takaaki さんが手動 login)
 EBAY_AMAZON_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_amazon"
-CHROME_VERSION_MAIN = 146
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -202,7 +201,7 @@ def create_amazon_driver(headless: bool = True, use_login_profile: bool = True):
     if headless:
         options.add_argument("--headless=new")
 
-    return uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
+    return uc.Chrome(options=options)
 
 
 def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optional[dict]:

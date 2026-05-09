@@ -151,14 +151,20 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
     mon = phases.get("monitor", {}) or {}
     if mon:
         lines.append("【在庫監視】(仕入元サイトのページを巡回)")
-        lines.append(f"  チェック件数  : {mon.get('processed', '?')} 件")
+        processed = mon.get("processed", 0) or 0
+        errors = mon.get("errors", 0) or 0
+        lines.append(f"  チェック件数  : {processed} 件")
         lines.append(f"  新規売切検知  : {mon.get('newly_sold', '?')} 件 ← eBay から取下げ対象")
         lines.append(f"  在庫復活検知  : {mon.get('newly_in_stock', '?')} 件")
-        errors = mon.get("errors", 0) or 0
-        if errors:
-            lines.append(f"  通信エラー    : {errors} 件 (一時的、次 cycle で再試行)")
+        rate = (errors / processed) if processed else 0
+        if errors == 0:
+            lines.append("  通信エラー    : 0 件")
+        elif rate >= 0.5:
+            lines.append(f"  通信エラー    : {errors} 件 / {processed} 件中 ({rate*100:.0f}%) ★★ 異常高率、scraper or anti-bot 要確認")
+        elif rate >= 0.1:
+            lines.append(f"  通信エラー    : {errors} 件 / {processed} 件中 ({rate*100:.0f}%) ★ やや多い、傾向監視")
         else:
-            lines.append(f"  通信エラー    : 0 件")
+            lines.append(f"  通信エラー    : {errors} 件 (一時的、次 cycle で再試行)")
         lines.append("")
 
     # eBay 取下げ (revise + upload)
@@ -166,14 +172,18 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
     up = phases.get("upload", {}) or {}
     if rc or up:
         lines.append("【eBay 取下げ】")
-        if rc:
+        if rc.get("skipped"):
+            lines.append("  取下げ対象   : なし (新規売切なし)")
+        elif rc:
             lines.append(f"  CSV 生成     : {rc.get('allowed', '?')} 件 (条件 OK で対象化)")
             deferred = rc.get("deferred", 0) or 0
             if deferred:
                 lines.append(f"  保留         : {deferred} 件 (条件未達、次 cycle 持越)")
 
         if up.get("skipped"):
-            lines.append("  upload      : スキップ (取下げ対象が無いため)")
+            # rc 側で既に「対象なし」表示済みなら upload 行は省略
+            if not rc.get("skipped"):
+                lines.append("  upload      : スキップ (取下げ対象が無いため)")
         elif up:
             success = up.get("success")
             csv_lines = up.get("csv_lines", "?")
