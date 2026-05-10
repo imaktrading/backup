@@ -91,92 +91,165 @@ def log(msg: str):
 # ============================================================================
 # 1 行 (1 listing) の在庫チェック
 # ============================================================================
-def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
-                  mercari_driver=None, amazon_driver=None) -> dict:
-    """1 listing 行の在庫状況を取得し判定結果を返す.
+def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
+                      mercari_driver=None, amazon_driver=None) -> dict:
+    """1 URL に対する scraper 呼出 + 結果 dict 返却 (純粋 helper).
 
-    Args:
-        row:            sheet row dict (read_listings_rows の出力)
-        sleep_sec:      1 リクエストごとの sleep 秒 (pacing)
-        mercari_driver: Selenium driver の再利用 (None なら都度生成)
-
-    Returns: {row_index, url, item_id, supplier, is_sold, raw_status, current_sold, delta, error, price_jpy}
-
-    price_jpy: scraper が現在の仕入元価格 (¥) を取得できた場合のみ int、
-               取得失敗 / 価格欄なし / scrape 失敗 → None (N 列既存値維持のため上書きしない)
+    Returns: {url, supplier, is_sold (True/False/None), raw_status, error, price_jpy}
+        - is_sold=False: 在庫あり (= 取下げ対象外)
+        - is_sold=True : 売切 (= 取下げ候補)
+        - is_sold=None : 不確定 (scraper 失敗等、error 必ず非 None)
     """
-    url = row["url"]
     domain = _domain_of(url)
     supplier = detect_supplier(domain)
-
-    result = {
-        "row_index":    row["row_index"],
-        "url":          url,
-        "item_id":      row.get("item_id", ""),
-        "title":        row.get("title", ""),
-        "supplier":     supplier,
-        "is_sold":      None,
-        "raw_status":   "",
-        "current_sold": row.get("current_sold", ""),
-        "delta":        "uncertain",
-        "error":        None,
-        "price_jpy":    None,
-    }
+    out = {"url": url, "supplier": supplier, "is_sold": None,
+           "raw_status": "", "error": None, "price_jpy": None}
 
     if supplier == "mercari":
         try:
             info = fetch_mercari(url, driver=mercari_driver, use_selenium_fallback=False)
         except Exception as e:
-            result["error"] = f"{type(e).__name__}: {e}"
-            return result
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
     elif supplier == "amazon":
         try:
-            # Selenium fallback 有効: unqualifiedBuyBox 検出時に login profile で
-            # personalized buy box (Featured Offer) を再評価する。
-            # amazon_driver が None なら fallback path で都度 driver 起動 (遅い)。
             info = fetch_amazon(url, driver=amazon_driver, use_selenium_fallback=True)
         except Exception as e:
-            result["error"] = f"{type(e).__name__}: {e}"
-            return result
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
     elif supplier == "fril":
         try:
             info = fetch_fril(url)
         except Exception as e:
-            result["error"] = f"{type(e).__name__}: {e}"
-            return result
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
     else:
-        result["error"] = f"unsupported supplier: {supplier} ({domain})"
-        return result
+        out["error"] = f"unsupported supplier: {supplier} ({domain})"
+        return out
 
-    # pacing
     time.sleep(sleep_sec)
 
     if info is None:
-        result["error"] = "scraper returned None (fail-closed)"
-        return result
-
+        out["error"] = "scraper returned None (fail-closed)"
+        return out
     skus = info.get("skus") or []
     if not skus:
-        result["error"] = "no skus returned"
-        return result
+        out["error"] = "no skus returned"
+        return out
 
     in_stock = bool(skus[0].get("in_stock", False))
-    result["is_sold"] = not in_stock
-    result["raw_status"] = info.get("status") or ("in_stock" if in_stock else "out_of_stock")
+    out["is_sold"] = not in_stock
+    out["raw_status"] = info.get("status") or ("in_stock" if in_stock else "out_of_stock")
 
-    # 現在価格 (N 列用): scraper が int で取れていれば乗せる、それ以外は None で維持
     raw_price = skus[0].get("price_jpy")
     if isinstance(raw_price, int) and not isinstance(raw_price, bool) and raw_price >= 0:
-        result["price_jpy"] = raw_price
+        out["price_jpy"] = raw_price
+
+    return out
+
+
+def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
+                  mercari_driver=None, amazon_driver=None) -> dict:
+    """1 listing 行の在庫状況を取得し判定結果を返す (主 URL のみ、後方互換 API).
+
+    補仕入URL を含む短絡評価が必要な場合は check_one_row_with_fallback を使うこと。
+    """
+    sub = _check_single_url(row["url"], sleep_sec, mercari_driver, amazon_driver)
+    return _build_row_result(row, [sub], hit_index=(0 if sub["is_sold"] is False else -1))
+
+
+def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
+                                 mercari_driver=None, amazon_driver=None) -> dict:
+    """主 URL + 補仕入URL 1〜5 で短絡評価.
+
+    判定ルール (出品の正確性原則: Precision 100%):
+        - 1 候補でも明確に在庫あり (is_sold=False) → 即 return (in_stock 確定、残り skip)
+        - 全候補チェック完了で全部 is_sold=True かつ error 無し → newly_sold 判定
+        - error が 1 件でも残ると → uncertain (= 取下げ skip、安全側)
+
+    Returns: 既存 check_one_row と同じ形式 (row_index, url, item_id, supplier,
+             is_sold, raw_status, current_sold, delta, error, price_jpy, candidates_checked)
+    """
+    backup_urls = row.get("backup_urls", []) or []
+    candidates = [row["url"]] + backup_urls
+    sub_results = []
+    for idx, url in enumerate(candidates):
+        sub = _check_single_url(url, sleep_sec, mercari_driver, amazon_driver)
+        sub_results.append(sub)
+        if sub["is_sold"] is False:
+            # 短絡: 在庫あり確定、残り skip
+            return _build_row_result(row, sub_results, hit_index=idx)
+    # 短絡無しで全候補チェック完了
+    return _build_row_result(row, sub_results, hit_index=-1)
+
+
+def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
+    """sub_results 群から row 単位の最終結果 dict を組み立てる.
+
+    Args:
+        sub_results: _check_single_url の出力 list (1 件以上)
+        hit_index:   短絡 hit した sub の index (= 在庫あり)、-1 なら短絡なし
+    """
+    main_sub = sub_results[0]
+    if hit_index >= 0:
+        # 在庫あり確定 (短絡 hit)
+        hit = sub_results[hit_index]
+        is_sold = False
+        error = None
+        if hit_index == 0:
+            raw_status = hit["raw_status"] or "in_stock"
+        else:
+            raw_status = f"in_stock@backup#{hit_index} ({hit['raw_status'] or 'in_stock'})"
+        price_jpy = hit["price_jpy"]   # 在庫ありの URL の価格を採用
+    else:
+        # 短絡 hit なし: 全候補 is_sold=True (全部売切) or error 含む
+        has_error = any(s["error"] for s in sub_results)
+        all_sold_clean = all(s["is_sold"] is True for s in sub_results)
+        if all_sold_clean and not has_error:
+            is_sold = True
+            error = None
+            n = len(sub_results)
+            raw_status = f"all_sold ({n}/{n})" if n > 1 else (main_sub["raw_status"] or "out_of_stock")
+            # 全部売切 → 価格は意味ないが、主 URL の最終価格を残す
+            price_jpy = main_sub["price_jpy"]
+        else:
+            # error 含む → 不確定 (Precision 100%、取下げ skip)
+            is_sold = None
+            err_count = sum(1 for s in sub_results if s["error"])
+            n = len(sub_results)
+            if n == 1:
+                error = main_sub["error"] or "unknown"
+            else:
+                # 複数候補で 1 つ以上エラー → 主 URL のエラーを優先表示
+                first_err = next((s["error"] for s in sub_results if s["error"]), None)
+                error = f"uncertain: {err_count}/{n} candidates errored ({first_err})"
+            raw_status = ""
+            price_jpy = None
+
+    result = {
+        "row_index":         row["row_index"],
+        "url":               row["url"],
+        "item_id":           row.get("item_id", ""),
+        "title":             row.get("title", ""),
+        "supplier":          main_sub["supplier"],
+        "is_sold":           is_sold,
+        "raw_status":        raw_status,
+        "current_sold":      row.get("current_sold", ""),
+        "delta":             "uncertain",
+        "error":             error,
+        "price_jpy":         price_jpy,
+        "candidates_checked": len(sub_results),
+    }
 
     # delta 判定
     cur_marked_sold = result["current_sold"] in ("○", "〇")
-    if result["is_sold"] and not cur_marked_sold:
+    if is_sold is True and not cur_marked_sold:
         result["delta"] = "newly_sold"
-    elif (not result["is_sold"]) and cur_marked_sold:
+    elif is_sold is False and cur_marked_sold:
         result["delta"] = "newly_in_stock"
-    else:
+    elif is_sold in (True, False):
         result["delta"] = "unchanged"
+    # is_sold=None (error) は uncertain のまま
 
     return result
 
@@ -306,9 +379,10 @@ def process_sheet(
     for i, row in enumerate(rows, start=1):
         prefix = f"  [{i}/{total_rows}] row{row['row_index']:>4} "
         try:
-            res = check_one_row(row, sleep_sec=sleep_sec,
-                                mercari_driver=mercari_driver,
-                                amazon_driver=amazon_driver)
+            res = check_one_row_with_fallback(
+                row, sleep_sec=sleep_sec,
+                mercari_driver=mercari_driver,
+                amazon_driver=amazon_driver)
         except Exception as e:
             res = {
                 "row_index": row["row_index"],
