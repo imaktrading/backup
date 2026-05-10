@@ -255,6 +255,12 @@ SCRIPTS = [
         "cmd": ["python", "mercari_scout.py"],
         "params": [],
     },
+    {
+        "label": "📊 月次レポート生成",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "monthly_report.py"],
+        "params": [],
+    },
 ]
 
 
