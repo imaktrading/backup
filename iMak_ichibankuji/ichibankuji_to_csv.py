@@ -658,7 +658,13 @@ NON_FIGURE_KEYWORDS = [
 ]
 
 
-INTERMEDIATE_FIELDS = ['kuji_url','series_name','prize','prize_title','size_cm','image_url','release_year','kuji_price_jpy','mercari_url','cost_jpy']
+INTERMEDIATE_FIELDS = [
+    'kuji_url','series_name','prize','prize_title','size_cm','image_url',
+    'release_year','kuji_price_jpy','mercari_url','cost_jpy',
+    # 補仕入URL 1〜5: ユーザー手入力. 統合Hight AC-AG (#29-33) に転記される.
+    # inventory monitor が A + AC-AG 全候補を巡回し、全売切れで取下げ判定 (Inventory Claude 領域).
+    '補仕入URL1','補仕入URL2','補仕入URL3','補仕入URL4','補仕入URL5',
+]
 
 def phase1_extract_intermediate(driver, urls):
     """1kuji.com スクレイプ → 中間CSV (タイトル日本語、Mercari URL/cost空欄)"""
@@ -701,6 +707,11 @@ def phase1_extract_intermediate(driver, urls):
                 'kuji_price_jpy': kuji_price_jpy,
                 'mercari_url': '',
                 'cost_jpy': '',
+                '補仕入URL1': '',
+                '補仕入URL2': '',
+                '補仕入URL3': '',
+                '補仕入URL4': '',
+                '補仕入URL5': '',
             })
     # 書出
     _os.makedirs(PENDING_DIR, exist_ok=True)
@@ -783,32 +794,56 @@ def phase2_transfer_to_sheet(intermediate_path):
     all_values = ws.get_all_values()
     next_row = len(all_values) + 1
 
-    # 28列まで書く（A-AB）。A-R=既存スキーマ、U=追加日(全スクリプト共通)、V-AB=一番くじメタデータ
+    # grid 拡張 (補仕入URL 1-5 用に AC-AG = #29-33 まで確保、不足時のみ実行)
+    if ws.col_count < 33:
+        ws.add_cols(33 - ws.col_count)
+        print(f"📐 grid 拡張: {ws.col_count - (33 - ws.col_count)} → 33 cols (AC-AG 補仕入URL 用)")
+
+    # ヘッダー Row 1 に補仕入URL 列名追加 (1 度限り、未設定時のみ)
+    header_cells = ws.row_values(1)
+    if len(header_cells) < 33 or not header_cells[28]:
+        # AC-AG (index 28-32) に列名セット
+        ws.update(
+            range_name='AC1:AG1',
+            values=[['補仕入URL1','補仕入URL2','補仕入URL3','補仕入URL4','補仕入URL5']],
+            value_input_option='USER_ENTERED',
+        )
+        print("📋 ヘッダー追加: AC-AG = 補仕入URL1〜5")
+
+    # 33列まで書く（A-AG）。A-R=既存スキーマ、U=追加日、V-AB=一番くじメタ、AC-AG=補仕入URL 1-5
     today_str = datetime.now().strftime('%Y-%m-%d')
     new_rows = []
     for r in filled:
         title_jp = f"{r.get('prize','')} {r.get('prize_title','')}".strip()
-        row_26 = [''] * 28
-        row_26[0]  = r.get('mercari_url', '').strip()                       # A: URL
-        row_26[2]  = title_jp                                                # C: タイトル
-        row_26[4]  = '新品、未使用'                                          # E: 状態
-        row_26[5]  = f"¥{r.get('cost_jpy','')}" if r.get('cost_jpy','').strip() else ''  # F: 価格
-        row_26[6]  = r.get('image_url', '')                                  # G: 写真URL (1kuji OGP)
-        row_26[17] = '一番くじ'                                              # R: カテゴリ
-        row_26[20] = today_str                                               # U: 追加日 (全スクリプト共通)
+        row_33 = [''] * 33
+        row_33[0]  = r.get('mercari_url', '').strip()                       # A: URL (本)
+        row_33[2]  = title_jp                                                # C: タイトル
+        row_33[4]  = '新品、未使用'                                          # E: 状態
+        row_33[5]  = f"¥{r.get('cost_jpy','')}" if r.get('cost_jpy','').strip() else ''  # F: 価格
+        row_33[6]  = r.get('image_url', '')                                  # G: 写真URL (1kuji OGP)
+        row_33[17] = '一番くじ'                                              # R: カテゴリ
+        row_33[20] = today_str                                               # U: 追加日 (全スクリプト共通)
         # V-AB: 一番くじ専用メタデータ（▶実行で Claude プロンプト再構成に使用）
-        row_26[21] = r.get('kuji_url', '')                                   # V: kuji_url
-        row_26[22] = r.get('series_name', '')                                # W: series_name
-        row_26[23] = r.get('prize', '')                                      # X: prize_code
-        row_26[24] = r.get('prize_title', '')                                # Y: prize_title
-        row_26[25] = r.get('release_year', '')                               # Z: release_year
-        row_26[26] = r.get('kuji_price_jpy', '')                             # AA: kuji_price_jpy
-        row_26[27] = r.get('size_cm', '')                                    # AB: size_cm (Item Height計算用)
-        new_rows.append(row_26)
-        print(f"  {r.get('prize','')} {r.get('prize_title','')[:25]} → 価格 ¥{r.get('cost_jpy','-')}")
+        row_33[21] = r.get('kuji_url', '')                                   # V: kuji_url
+        row_33[22] = r.get('series_name', '')                                # W: series_name
+        row_33[23] = r.get('prize', '')                                      # X: prize_code
+        row_33[24] = r.get('prize_title', '')                                # Y: prize_title
+        row_33[25] = r.get('release_year', '')                               # Z: release_year
+        row_33[26] = r.get('kuji_price_jpy', '')                             # AA: kuji_price_jpy
+        row_33[27] = r.get('size_cm', '')                                    # AB: size_cm (Item Height計算用)
+        # AC-AG: 補仕入URL 1〜5 (inventory monitor が A + AC-AG 全候補巡回で売切判定)
+        row_33[28] = r.get('補仕入URL1', '').strip()                         # AC: 補仕入URL1
+        row_33[29] = r.get('補仕入URL2', '').strip()                         # AD: 補仕入URL2
+        row_33[30] = r.get('補仕入URL3', '').strip()                         # AE: 補仕入URL3
+        row_33[31] = r.get('補仕入URL4', '').strip()                         # AF: 補仕入URL4
+        row_33[32] = r.get('補仕入URL5', '').strip()                         # AG: 補仕入URL5
+        new_rows.append(row_33)
+        sub_n = sum(1 for k in ('補仕入URL1','補仕入URL2','補仕入URL3','補仕入URL4','補仕入URL5') if r.get(k,'').strip())
+        sub_info = f" (補URL {sub_n} 件)" if sub_n else ""
+        print(f"  {r.get('prize','')} {r.get('prize_title','')[:25]} → 価格 ¥{r.get('cost_jpy','-')}{sub_info}")
 
     ws.update(
-        range_name=f"A{next_row}:AB{next_row + len(new_rows) - 1}",
+        range_name=f"A{next_row}:AG{next_row + len(new_rows) - 1}",
         values=new_rows,
         value_input_option='USER_ENTERED',
     )
