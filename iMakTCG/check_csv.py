@@ -64,6 +64,10 @@ from profit_params import get_tier_params  # noqa: F401
 TOP_SELLER_MIN_FEEDBACK = 500       # 取引実績500件以上
 TOP_SELLER_MIN_PERCENTAGE = 98.0    # ポジティブ率98%以上
 
+# 薄商い market gate skip 閾値 (psa_to_csv.py と SSOT)
+# 出品数 ≤ MARKET_GATE_MIN_LISTINGS → median 不安定、gate skip でコストプラス価格採用
+MARKET_GATE_MIN_LISTINGS = 10
+
 # CSV列名 → インデックスのマッピング（ヘッダーから動的に構築）
 HEADER_MAP = {}
 
@@ -469,7 +473,14 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
             "gap_limit_pct": gap_limit_pct,
         }
 
-        if gap_pct <= 0:
+        if total_count <= MARKET_GATE_MIN_LISTINGS:
+            # 薄商い: psa_to_csv.py と同条件、median 不安定 → gate skip
+            # コストプラス価格 (target_usd) で出品継続、機会損失回避
+            gate_status = "RELAX"
+            gate_msg = (f"🔓 緩和 — 仕入¥{cost_jpy:,} → "
+                        f"出品{total_count}件≤{MARKET_GATE_MIN_LISTINGS} (median 不安定→gate skip) → "
+                        f"${target_usd:.0f}で出品")
+        elif gap_pct <= 0:
             gate_status = "GO"
             gate_msg = (f"✅ GO — 仕入¥{cost_jpy:,} → "
                         f"全体中央値${ref_median:.0f} → "
@@ -570,7 +581,7 @@ LISTINGS:
 
 Review each listing for:
 1. TITLE QUALITY: Is it keyword-optimized? Does it include the most searchable terms? Max 80 chars.
-2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at or slightly below TOP seller median. For NO-GO items, recommend not listing.
+2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at or slightly below TOP seller median. For RELAX items (薄商い: 出品≤10件, median 不安定で gate skip 適用), recommend cost-plus listing as-is (機会損失回避). For NO-GO items, recommend not listing.
 3. ITEM SPECIFICS: Are important fields missing that competitors typically fill?
 4. OVERALL: Any patterns or systematic issues across all listings?
 
@@ -708,6 +719,7 @@ def main(csv_path: str | None = None):
     print(f"{'═'*60}")
 
     go_count = 0
+    relax_count = 0
     hold_count = 0
     nogo_count = 0
     no_data_count = 0
@@ -721,6 +733,10 @@ def main(csv_path: str | None = None):
             go_count += 1
             c = gate["calc"]
             print(f"  [{i+1}] {title_short}... → ✅ GO  出品{gate['total']}件 ${c['market_usd']:.0f} 利益¥{c['profit_jpy']:,.0f} ({c['profit_rate']:.0%}) [目標{c['tier_profit']:.0%}]")
+        elif gate["status"] == "RELAX":
+            relax_count += 1
+            c = gate["calc"]
+            print(f"  [{i+1}] {title_short}... → 🔓 緩和 出品{gate['total']}件≤{MARKET_GATE_MIN_LISTINGS} → ${c['target_usd']:.0f}で出品")
         elif gate["status"] == "HOLD":
             hold_count += 1
             c = gate["calc"]
@@ -730,7 +746,7 @@ def main(csv_path: str | None = None):
             c = gate["calc"]
             print(f"  [{i+1}] {title_short}... → ❌ NO-GO 出品{gate['total']}件 ${c['market_usd']:.0f} 乖離{c['gap_pct']:.0f}% > 許容{c['gap_limit_pct']:.0f}%")
 
-    print(f"\n  結果: ✅ GO {go_count} / 🟡 保留 {hold_count} / ❌ NO-GO {nogo_count} / ⬜ 不明 {no_data_count}")
+    print(f"\n  結果: ✅ GO {go_count} / 🔓 緩和 {relax_count} / 🟡 保留 {hold_count} / ❌ NO-GO {nogo_count} / ⬜ 不明 {no_data_count}")
 
     # === チェックサマリー ===
     print(f"\n{'═'*60}")
