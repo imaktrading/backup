@@ -55,6 +55,7 @@ from sheet_updater import (  # noqa: E402
     get_listings_worksheet,
     read_listings_rows,
     update_listings_sold_marks,
+    paint_backup_url_cells,
     detect_supplier,
     _domain_of,
 )
@@ -160,27 +161,29 @@ def check_one_row(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
 
 def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
                                  mercari_driver=None, amazon_driver=None) -> dict:
-    """主 URL + 補仕入URL 1〜5 で短絡評価.
+    """主 URL + 補仕入URL 1〜5 を全候補チェック.
 
     判定ルール (出品の正確性原則: Precision 100%):
-        - 1 候補でも明確に在庫あり (is_sold=False) → 即 return (in_stock 確定、残り skip)
-        - 全候補チェック完了で全部 is_sold=True かつ error 無し → newly_sold 判定
-        - error が 1 件でも残ると → uncertain (= 取下げ skip、安全側)
+        - 1 候補でも明確に在庫あり (is_sold=False) → 在庫あり判定 (最初の hit を採用)
+        - 全候補売切 + error 無し → newly_sold 判定
+        - error が 1 件でも残る + 全候補 in_stock=False 確認できず → uncertain (取下げ skip)
 
-    Returns: 既存 check_one_row と同じ形式 (row_index, url, item_id, supplier,
-             is_sold, raw_status, current_sold, delta, error, price_jpy, candidates_checked)
+    補設定 row でも全候補を毎 cycle scrape する (= 短絡しない)。理由は AC-AG セルの色塗り
+    のために各補 URL の状態を可視化するため。性能影響: backup_urls 空の row は 1 候補のまま。
+
+    Returns: 既存 check_one_row と同じ形式 + sub_results (色塗り用、各候補の state list)
     """
     backup_urls = row.get("backup_urls", []) or []
     candidates = [row["url"]] + backup_urls
     sub_results = []
+    hit_index = -1
     for idx, url in enumerate(candidates):
         sub = _check_single_url(url, sleep_sec, mercari_driver, amazon_driver)
         sub_results.append(sub)
-        if sub["is_sold"] is False:
-            # 短絡: 在庫あり確定、残り skip
-            return _build_row_result(row, sub_results, hit_index=idx)
-    # 短絡無しで全候補チェック完了
-    return _build_row_result(row, sub_results, hit_index=-1)
+        # 最初の in_stock を hit_index として記録 (短絡せず全候補チェック)
+        if sub["is_sold"] is False and hit_index < 0:
+            hit_index = idx
+    return _build_row_result(row, sub_results, hit_index=hit_index)
 
 
 def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
@@ -241,6 +244,8 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
         "candidates_checked": len(sub_results),
         # AH 列 (前期 N) 用: read 時に取得した N 列値を引き継ぐ。書込時にここを AH へコピー
         "current_n_jpy_str": row.get("current_n_jpy_str", ""),
+        # AC-AG (補 URL) セル色塗り用: 各候補の state を保存 (主は index=0)
+        "sub_results":       sub_results,
     }
 
     # delta 判定
@@ -556,6 +561,36 @@ def process_sheet(
         except Exception as e:
             log(f"  ❌ スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())
+
+        # AC-AG (補 URL) 色塗り: 補 URL 設定 row のみ paint。売切は赤字、それ以外は黒字。
+        # results の sub_results は主 URL を index=0 とするため、補は index 1〜5。
+        paints = []
+        for r in results:
+            sub = r.get("sub_results") or []
+            if len(sub) <= 1:
+                continue   # 補 URL なし (= sub は主のみ) → スキップ
+            states = []
+            for backup_idx in range(1, 6):  # 補 1〜5 (sub_results index 1-5)
+                if backup_idx < len(sub):
+                    s = sub[backup_idx]
+                    if s.get("is_sold") is True:
+                        states.append("sold")
+                    elif s.get("is_sold") is False:
+                        states.append("in_stock")
+                    elif s.get("error"):
+                        states.append("error")
+                    else:
+                        states.append("unknown")
+                else:
+                    states.append("unknown")   # 補 URL 空欄
+            paints.append({"row_index": r["row_index"], "states": states})
+        if paints:
+            log(f"  AC-AG セル色塗り中... {len(paints)} 行")
+            try:
+                pres = paint_backup_url_cells(ws, paints)
+                log(f"  ✅ 色塗り完了 (赤={pres['red_cells']} / 黒={pres['default_cells']})")
+            except Exception as e:
+                log(f"  ⚠️ 色塗り失敗 (本筋に影響なし): {type(e).__name__}: {e}")
     else:
         log("  書込対象なし")
 

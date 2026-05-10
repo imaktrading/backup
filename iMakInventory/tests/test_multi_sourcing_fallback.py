@@ -54,21 +54,21 @@ def _row(main_url, backup_urls=(), current_sold=""):
 # ============================================================================
 # 短絡評価の core ロジック
 # ============================================================================
-def test_main_in_stock_short_circuits():
-    """主 URL 在庫あり → 補は呼ばれず即 return (短絡)."""
+def test_main_in_stock_all_candidates_checked():
+    """主 URL 在庫あり → 在庫あり判定。短絡解除済 (B 案) なので補も全部 scrape する."""
     from monitor_listings import check_one_row_with_fallback
     stub = _stub_check_single_url({"main": "in_stock", "b1": "sold", "b2": "sold"})
     with patch("monitor_listings._check_single_url", side_effect=stub) as mock:
         res = check_one_row_with_fallback(_row("main", ["b1", "b2"]))
     assert res["is_sold"] is False
     assert res["error"] is None
-    assert res["candidates_checked"] == 1   # 短絡 = 主のみ
+    assert res["candidates_checked"] == 3   # 主 + 補1 + 補2 全部チェック
     assert res["raw_status"] == "in_stock"
-    assert mock.call_count == 1   # 短絡で 1 回のみ呼ばれた
+    assert mock.call_count == 3
 
 
 def test_main_sold_backup_in_stock_returns_in_stock():
-    """主売切 + 補1在庫あり → in_stock 確定 (取下げ skip)、補2は呼ばれない."""
+    """主売切 + 補1在庫あり → in_stock 確定。補2 もチェックされる (色塗り用)."""
     from monitor_listings import check_one_row_with_fallback
     stub = _stub_check_single_url({"main": "sold", "b1": "in_stock", "b2": "sold"})
     with patch("monitor_listings._check_single_url", side_effect=stub) as mock:
@@ -76,8 +76,8 @@ def test_main_sold_backup_in_stock_returns_in_stock():
     assert res["is_sold"] is False
     assert res["error"] is None
     assert "backup#1" in res["raw_status"]
-    assert res["candidates_checked"] == 2   # 主 + 補1 で短絡
-    assert mock.call_count == 2
+    assert res["candidates_checked"] == 3   # 全候補チェック
+    assert mock.call_count == 3
 
 
 def test_all_candidates_sold_returns_newly_sold():
@@ -106,17 +106,16 @@ def test_partial_error_yields_uncertain_not_sold():
     assert res["delta"] == "uncertain"
 
 
-def test_main_error_with_backup_in_stock_short_circuits_safe():
-    """主 error → 補1在庫あり (= 同型品在庫確認できた) → in_stock 確定."""
+def test_main_error_with_backup_in_stock_returns_in_stock_safe():
+    """主 error + 補1 在庫あり → in_stock 確定 (主の error は無視)、補2 もチェック."""
     from monitor_listings import check_one_row_with_fallback
     stub = _stub_check_single_url({"main": "error", "b1": "in_stock", "b2": "sold"})
     with patch("monitor_listings._check_single_url", side_effect=stub) as mock:
         res = check_one_row_with_fallback(_row("main", ["b1", "b2"]))
-    # 補1 在庫ありで短絡 hit、error は無視
     assert res["is_sold"] is False
     assert res["error"] is None
     assert "backup#1" in res["raw_status"]
-    assert mock.call_count == 2
+    assert mock.call_count == 3   # 全候補チェック
 
 
 def test_all_errors_yields_uncertain():
@@ -288,3 +287,86 @@ def test_check_one_row_with_fallback_propagates_current_n():
     with patch("monitor_listings._check_single_url", side_effect=stub):
         res = check_one_row_with_fallback(row)
     assert res["current_n_jpy_str"] == "1500"
+
+
+def test_check_one_row_with_fallback_returns_sub_results():
+    """色塗り用に sub_results が result に含まれる (各候補の状態 list)."""
+    from monitor_listings import check_one_row_with_fallback
+    stub = _stub_check_single_url({"main": "in_stock", "b1": "sold", "b2": "error"})
+    with patch("monitor_listings._check_single_url", side_effect=stub):
+        res = check_one_row_with_fallback(_row("main", ["b1", "b2"]))
+    sub = res.get("sub_results")
+    assert sub is not None
+    assert len(sub) == 3
+    assert sub[0]["is_sold"] is False     # 主 in_stock
+    assert sub[1]["is_sold"] is True      # 補1 sold
+    assert sub[2]["error"] is not None     # 補2 error
+
+
+# ============================================================================
+# paint_backup_url_cells: AC-AG セル色塗り API
+# ============================================================================
+class _FakeWSWithSpreadsheet:
+    """paint_backup_url_cells 用 mock。spreadsheet.batch_update をキャプチャ."""
+    def __init__(self):
+        self.id = 851100680
+        self.spreadsheet = self
+        self.batch_calls = []
+
+    def batch_update(self, body):
+        self.batch_calls.append(body)
+
+
+def test_paint_sold_cell_red():
+    """sold 状態のセルは red (1.0, 0, 0) で塗る."""
+    from sheet_updater import paint_backup_url_cells
+    ws = _FakeWSWithSpreadsheet()
+    res = paint_backup_url_cells(ws, [{
+        "row_index": 100,
+        "states": ["sold", "in_stock", "error", "unknown", "unknown"],
+    }])
+    assert res["painted"] == 1
+    assert res["red_cells"] == 1
+    assert res["default_cells"] == 4
+    reqs = ws.batch_calls[0]["requests"]
+    assert len(reqs) == 5   # AC-AG の 5 セル
+    # 最初 (AC = sold) は赤
+    fmt0 = reqs[0]["repeatCell"]["cell"]["userEnteredFormat"]["textFormat"]["foregroundColor"]
+    assert fmt0 == {"red": 1.0, "green": 0.0, "blue": 0.0}
+    # 2 番目 (AD = in_stock) は黒
+    fmt1 = reqs[1]["repeatCell"]["cell"]["userEnteredFormat"]["textFormat"]["foregroundColor"]
+    assert fmt1 == {"red": 0.0, "green": 0.0, "blue": 0.0}
+
+
+def test_paint_empty_states_treats_as_unknown():
+    """states が短い場合、不足分は unknown 扱い (= 黒字)."""
+    from sheet_updater import paint_backup_url_cells
+    ws = _FakeWSWithSpreadsheet()
+    res = paint_backup_url_cells(ws, [{
+        "row_index": 100,
+        "states": ["sold"],   # 1 件のみ、残り 4 件は unknown
+    }])
+    assert res["red_cells"] == 1
+    assert res["default_cells"] == 4
+
+
+def test_paint_no_paints_returns_zero():
+    """空 list → API 呼ばれず 0 返却."""
+    from sheet_updater import paint_backup_url_cells
+    ws = _FakeWSWithSpreadsheet()
+    res = paint_backup_url_cells(ws, [])
+    assert res == {"painted": 0, "red_cells": 0, "default_cells": 0}
+    assert ws.batch_calls == []
+
+
+def test_paint_targets_correct_columns():
+    """各補 URL のセルが AC-AG (column index 28-32, 0-based) に対応."""
+    from sheet_updater import paint_backup_url_cells
+    ws = _FakeWSWithSpreadsheet()
+    paint_backup_url_cells(ws, [{
+        "row_index": 100,
+        "states": ["sold", "sold", "sold", "sold", "sold"],
+    }])
+    reqs = ws.batch_calls[0]["requests"]
+    cols = [r["repeatCell"]["range"]["startColumnIndex"] for r in reqs]
+    assert cols == [28, 29, 30, 31, 32]   # AC, AD, AE, AF, AG

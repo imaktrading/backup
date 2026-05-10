@@ -277,6 +277,88 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
 
 
 # ============================================================================
+# 補 URL セル (AC-AG) の色塗り
+# ============================================================================
+# AC-AG (#29-33) のセル列レター
+_BACKUP_URL_COLUMN_LETTERS = ("AC", "AD", "AE", "AF", "AG")
+
+# 売切 URL = 赤字 (default 黒に対する明示的な color override)
+_RED_RGB = {"red": 1.0, "green": 0.0, "blue": 0.0}
+_DEFAULT_RGB = {"red": 0.0, "green": 0.0, "blue": 0.0}   # 黒 (= clear と同等)
+
+
+def paint_backup_url_cells(ws, paints: list) -> dict:
+    """補 URL セル (AC-AG) のフォント色を batch 更新.
+
+    Args:
+        ws: gspread worksheet
+        paints: [
+            {
+                "row_index": 100 (1-based シート行),
+                "states":    ["sold", "in_stock", "sold", "unknown", "in_stock"],
+                # 各補 URL の状態。長さ 5 (= AC-AG)。空欄 row や未確認は "unknown"
+                # "sold"     → 赤字
+                # "in_stock" → 黒字 (default)
+                # "error"    → 黒字 (default、不確定なので赤字にしない)
+                # "unknown"  → 黒字 (default、補 URL 空欄 or 未 scrape)
+            },
+            ...
+        ]
+
+    Returns: {"painted": N, "red_cells": N, "default_cells": N}
+
+    実装メモ: Sheets API の repeatCell リクエストで cell range を batch 更新。
+    既存 batch_update API ではなく Spreadsheet 直 batchUpdate を使う必要がある
+    (ws.format() は 1 range / 呼出だが、複数 range の batch を 1 call にまとめる)。
+    """
+    if not paints:
+        return {"painted": 0, "red_cells": 0, "default_cells": 0}
+
+    requests = []
+    red_cells = 0
+    default_cells = 0
+    sheet_id = ws.id
+
+    for p in paints:
+        row_idx = p["row_index"]
+        states = p.get("states") or []
+        for col_offset, col_letter in enumerate(_BACKUP_URL_COLUMN_LETTERS):
+            state = states[col_offset] if col_offset < len(states) else "unknown"
+            if state == "sold":
+                rgb = _RED_RGB
+                red_cells += 1
+            else:
+                rgb = _DEFAULT_RGB   # 黒字 (in_stock / error / unknown)
+                default_cells += 1
+            # AC-AG = column index 28-32 (0-based)
+            col_index_0based = 28 + col_offset
+            requests.append({
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": row_idx - 1,    # 0-based
+                        "endRowIndex": row_idx,
+                        "startColumnIndex": col_index_0based,
+                        "endColumnIndex": col_index_0based + 1,
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "textFormat": {
+                                "foregroundColor": rgb,
+                            }
+                        }
+                    },
+                    "fields": "userEnteredFormat.textFormat.foregroundColor",
+                }
+            })
+
+    if requests:
+        ws.spreadsheet.batch_update({"requests": requests})
+
+    return {"painted": len(paints), "red_cells": red_cells, "default_cells": default_cells}
+
+
+# ============================================================================
 # メインシート読込
 # ============================================================================
 def _domain_of(url: str) -> str:
