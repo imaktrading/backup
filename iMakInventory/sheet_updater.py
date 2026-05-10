@@ -85,6 +85,7 @@ LISTINGS_COL_BACKUP_URLS = (
     LISTINGS_COL_BACKUP_URL_3, LISTINGS_COL_BACKUP_URL_4,
     LISTINGS_COL_BACKUP_URL_5,
 )
+LISTINGS_COL_PRICE_PREV = 34  # AH: 前期 N (毎 cycle で旧 N がコピーされる、Revise が短期 trend に利用)
 
 
 # ============================================================================
@@ -191,6 +192,8 @@ def read_listings_rows(
             "price":        (row[LISTINGS_COL_PRICE - 1] if len(row) >= LISTINGS_COL_PRICE else "").strip(),
             "checked_at":   (row[LISTINGS_COL_CHECKED_AT - 1] if len(row) >= LISTINGS_COL_CHECKED_AT else "").strip(),
             "backup_urls":  backup_urls,  # AC-AG (#29-33) のうち空でないものだけ
+            # 現在の N 列値 (生文字列、空欄も含む)。次 cycle で AH (前期 N) にコピーされる
+            "current_n_jpy_str": (row[LISTINGS_COL_PRICE_NOW - 1] if len(row) >= LISTINGS_COL_PRICE_NOW else "").strip(),
         })
     return rows
 
@@ -219,16 +222,20 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
       - N 列: price_jpy が int (>=0) で渡された行のみ書込。None / 省略 → 既存値維持
         (一時的取得失敗で価値情報を消すリスク回避、trabajo SheetRow.cs n_nowPrice 同等仕様)
         ※ D/O 列のロジックには一切影響しない (purely additive)
+      - AH 列 (前期 N): N 列を書く前に prev_n_jpy_str (= 旧 N 値の生文字列) を AH にコピー。
+        prev_n_jpy_str が空なら touch しない (= 初回 cycle の AH は空のまま、Revise 側で考慮)。
+        このコピーは "N 列 を新値で上書きする時のみ" 走る = N の動きに連動した historical snapshot。
 
-    Returns: {"updated": N, "d_writes": N, "o_writes": N, "n_writes": N}
+    Returns: {"updated": N, "d_writes": N, "o_writes": N, "n_writes": N, "ah_writes": N}
     """
     if not updates:
-        return {"updated": 0, "d_writes": 0, "o_writes": 0, "n_writes": 0}
+        return {"updated": 0, "d_writes": 0, "o_writes": 0, "n_writes": 0, "ah_writes": 0}
 
     cell_updates = []
     d_writes = 0
     o_writes = 0
     n_writes = 0
+    ah_writes = 0
     for u in updates:
         row_idx = u["row_index"]
         checked_at = u.get("checked_at") or datetime.now().strftime("%Y/%m/%d %H:%M:%S")
@@ -250,6 +257,14 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
         # N 列 (現在価格): price_jpy が int で渡された場合のみ書込。None / 不在 / 非 int は触らない。
         price_jpy = u.get("price_jpy")
         if isinstance(price_jpy, int) and not isinstance(price_jpy, bool) and price_jpy >= 0:
+            # AH 列 (前期 N): N を上書きする前に旧 N をコピー (= "前 cycle の N" を保存)
+            prev_n_str = u.get("prev_n_jpy_str", "")
+            if prev_n_str:
+                cell_updates.append({
+                    "range": f"AH{row_idx}",
+                    "values": [[prev_n_str]],
+                })
+                ah_writes += 1
             cell_updates.append({
                 "range": f"N{row_idx}",
                 "values": [[price_jpy]],
@@ -257,7 +272,8 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
             n_writes += 1
 
     ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
-    return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes, "n_writes": n_writes}
+    return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes,
+            "n_writes": n_writes, "ah_writes": ah_writes}
 
 
 # ============================================================================

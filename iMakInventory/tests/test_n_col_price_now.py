@@ -184,7 +184,7 @@ def test_empty_returns_n_writes_zero():
     from sheet_updater import update_listings_sold_marks
     ws = MagicMock()
     res = update_listings_sold_marks(ws, [])
-    assert res == {"updated": 0, "d_writes": 0, "o_writes": 0, "n_writes": 0}
+    assert res == {"updated": 0, "d_writes": 0, "o_writes": 0, "n_writes": 0, "ah_writes": 0}
 
 
 # ============================================================================

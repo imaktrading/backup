@@ -178,13 +178,14 @@ def test_read_listings_rows_extracts_backup_urls():
     class FakeWS:
         def get_all_values(self):
             # row 1: header (ignored), row 2: data row
-            empty = [""] * 33
+            empty = [""] * 34
             row1 = empty[:]
             row2 = empty[:]
             row2[0] = "https://main.example/x"
             row2[1] = "356"
             row2[2] = "title"
             row2[3] = ""           # D 列空
+            row2[13] = "1500"      # N 列 (現在 N) → list index 13
             row2[14] = "2026/01/01"
             # AC-AG (#29-33) → list index 28-32
             row2[28] = "https://b1.example/x"
@@ -203,3 +204,87 @@ def test_read_listings_rows_extracts_backup_urls():
         "https://b3.example/x",
         "https://b5.example/x",
     ]
+    assert r["current_n_jpy_str"] == "1500"
+
+
+# ============================================================================
+# AH 列 (前期 N) 書込テスト: update_listings_sold_marks
+# ============================================================================
+class _FakeWS:
+    """update_listings_sold_marks 用の最小 mock."""
+    def __init__(self):
+        self.batch_calls = []
+
+    def batch_update(self, updates, value_input_option=None):
+        self.batch_calls.append(list(updates))
+
+
+def test_ah_written_when_n_is_updated():
+    """N 列を更新する時、AH に旧 N (prev_n_jpy_str) もコピーされる."""
+    from sheet_updater import update_listings_sold_marks
+    ws = _FakeWS()
+    res = update_listings_sold_marks(ws, [{
+        "row_index":       100,
+        "is_sold":         False,
+        "checked_at":      "2026/05/10 10:00:00",
+        "price_jpy":       3000,           # 新 N
+        "prev_n_jpy_str":  "1500",         # 旧 N (= AH に書く)
+    }])
+    assert res["n_writes"] == 1
+    assert res["ah_writes"] == 1
+    # 1 batch_update 内に AH と N が両方含まれる
+    cells = ws.batch_calls[0]
+    ranges = {c["range"]: c["values"][0][0] for c in cells}
+    assert ranges.get("AH100") == "1500"
+    assert ranges.get("N100") == 3000
+
+
+def test_ah_not_written_when_prev_n_empty():
+    """初回 cycle (= AH に書く前期 N が無い) は AH に touch しない."""
+    from sheet_updater import update_listings_sold_marks
+    ws = _FakeWS()
+    res = update_listings_sold_marks(ws, [{
+        "row_index":       100,
+        "is_sold":         False,
+        "checked_at":      "2026/05/10 10:00:00",
+        "price_jpy":       3000,
+        "prev_n_jpy_str":  "",     # 旧 N が空
+    }])
+    assert res["n_writes"] == 1
+    assert res["ah_writes"] == 0
+    cells = ws.batch_calls[0]
+    ranges = [c["range"] for c in cells]
+    assert "AH100" not in ranges
+    assert "N100" in ranges
+
+
+def test_ah_not_written_when_n_skipped():
+    """price_jpy=None (scrape 失敗) で N も AH も touch しない."""
+    from sheet_updater import update_listings_sold_marks
+    ws = _FakeWS()
+    res = update_listings_sold_marks(ws, [{
+        "row_index":       100,
+        "checked_at":      "2026/05/10 10:00:00",
+        "o_only":          True,
+        # price_jpy なし → N も AH も触らない
+    }])
+    assert res["n_writes"] == 0
+    assert res["ah_writes"] == 0
+    cells = ws.batch_calls[0]
+    ranges = [c["range"] for c in cells]
+    assert "AH100" not in ranges
+    assert "N100" not in ranges
+
+
+def test_check_one_row_with_fallback_propagates_current_n():
+    """row dict の current_n_jpy_str が result まで引き継がれる."""
+    from monitor_listings import check_one_row_with_fallback
+    stub = _stub_check_single_url({"main": "in_stock"})
+    row = {
+        "row_index": 100, "url": "main", "item_id": "356", "title": "t",
+        "current_sold": "", "backup_urls": [],
+        "current_n_jpy_str": "1500",
+    }
+    with patch("monitor_listings._check_single_url", side_effect=stub):
+        res = check_one_row_with_fallback(row)
+    assert res["current_n_jpy_str"] == "1500"

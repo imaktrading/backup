@@ -239,6 +239,8 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
         "error":             error,
         "price_jpy":         price_jpy,
         "candidates_checked": len(sub_results),
+        # AH 列 (前期 N) 用: read 時に取得した N 列値を引き継ぐ。書込時にここを AH へコピー
+        "current_n_jpy_str": row.get("current_n_jpy_str", ""),
     }
 
     # delta 判定
@@ -499,6 +501,7 @@ def process_sheet(
     updates = []
     for r in results:
         price_jpy = r.get("price_jpy")  # None の場合 update dict には乗せない (= N 列触らない)
+        prev_n = r.get("current_n_jpy_str", "")  # AH 列用 (= read 時の N 列値)
         if r["error"] or r["is_sold"] is None:
             # 取得不能 → O 列だけ更新 (D 列は既存維持、fail-closed 維持)
             #          N 列は price_jpy=None なので触らない (既存値維持)
@@ -509,6 +512,7 @@ def process_sheet(
             }
             if price_jpy is not None:
                 upd["price_jpy"] = price_jpy
+                upd["prev_n_jpy_str"] = prev_n
             updates.append(upd)
             continue
         # D 列に変化があるかどうか判定
@@ -523,6 +527,7 @@ def process_sheet(
             }
             if price_jpy is not None:
                 upd["price_jpy"] = price_jpy
+                upd["prev_n_jpy_str"] = prev_n
             updates.append(upd)
         else:
             # 変化あり → D + O 両方更新
@@ -533,6 +538,7 @@ def process_sheet(
             }
             if price_jpy is not None:
                 upd["price_jpy"] = price_jpy
+                upd["prev_n_jpy_str"] = prev_n
             updates.append(upd)
 
     if dry_run:
