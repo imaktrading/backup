@@ -124,13 +124,17 @@ def scrape_1kuji(driver, url):
             if title:
                 series_name = title.get_text(strip=True).replace('｜一番くじ倶楽部｜BANDAI SPIRITS公式 一番くじ情報サイト', '').strip()
 
-        # 発売年・価格取得
+        # 発売年・価格取得 (raw HTML から regex 抽出、Selenium body.text の不安定性回避)
+        # 2026-05-10: body.text 経由だと run によって取得失敗 (16:03 run で 12/12 空欄事故).
+        # raw HTML には <dt>発売日</dt><dd>...2026年05月02日...</dd> 等が常に存在するため
+        # driver.page_source (= raw HTML) から抽出.
         release_date = ""
         price_jpy = ""
-        date_m = re.search(r'(\d{4})年(\d{1,2})月', page_text)
+        raw_html = driver.page_source
+        date_m = re.search(r'(\d{4})年(\d{1,2})月', raw_html)
         if date_m:
             release_date = date_m.group(1)
-        price_m = re.search(r'1回(\d+)円', page_text)
+        price_m = re.search(r'1回(\d+)円', raw_html)
         if price_m:
             price_jpy = price_m.group(1)
 

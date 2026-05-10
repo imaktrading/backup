@@ -144,3 +144,38 @@ def test_empty_html_no_crash():
     assert _extract_prizes_from_html("") == []
     assert _extract_prizes_from_html("<html><body></body></html>") == []
     assert _extract_prizes_from_html("<html><body><div>noise</div></body></html>") == []
+
+
+# ============================================================================
+# release_year / price 抽出: raw HTML から regex (2026-05-10 16:03 事故対応)
+# 旧実装は Selenium body.text 経由で run によって失敗 (12/12 空欄事故あり).
+# raw HTML から抽出に変更した regex の正当性を pin.
+# ============================================================================
+def test_release_year_regex_matches_html_format():
+    """raw HTML には <dt>発売日</dt><dd>...2026年05月02日...</dd> 等の形式で存在."""
+    sample = '<dt>発売日</dt><dd>店頭販売：2026年05月02日(土)より順次発売予定</dd>'
+    m = re.search(r'(\d{4})年(\d{1,2})月', sample)
+    assert m is not None
+    assert m.group(1) == "2026"
+    assert m.group(2) == "05"
+
+
+def test_price_regex_matches_html_format():
+    """raw HTML には ■メーカー希望小売価格：1回790円(税10％込) 等の形式."""
+    sample = '<li>■メーカー希望小売価格：1回790円(税10％込)</li>'
+    m = re.search(r'1回(\d+)円', sample)
+    assert m is not None
+    assert m.group(1) == "790"
+
+
+def test_year_regex_picks_first_match_release_date():
+    """同 HTML に複数年月 (発売日 + ダブルチャンス期間) ある場合、最初は発売日."""
+    # 実 onep101 raw HTML 抜粋風:
+    sample = '''
+        <dt>発売日</dt><dd>2026年05月02日(土)より順次発売予定</dd>
+        <li>■ダブルチャンスキャンペーン期間：発売日～2026年08月末日</li>
+    '''
+    matches = re.findall(r'(\d{4})年(\d{1,2})月', sample)
+    assert len(matches) >= 2
+    # findall は出現順、最初は発売日
+    assert matches[0] == ("2026", "05")
