@@ -39,6 +39,12 @@ DESCRIPTION_FILE = "PSA10.txt"
 DEFAULT_PRICE = 100.00
 SCHEDULE_WEEKS = 2
 
+# 市場 median による gate 判定の最小出品数閾値.
+# 出品数 ≤ 閾値 = 薄商い、median 不安定 → gate skip でコストプラス価格出品.
+# 出品数 > 閾値 = 市場成熟、median 信頼度高 → 通常 GO/保留/NO-GO 判定.
+# 2026-05-11 ユーザー判断で 10 件閾値導入 (TCG カード市場特性に合わせ).
+MARKET_GATE_MIN_LISTINGS = 10
+
 # API key読み込み
 try:
     with open("API key.txt", "r", encoding="utf-8") as f:
@@ -2038,7 +2044,15 @@ def main():
                 gap_pct = (target_usd - all_median) / all_median * 100 if all_median > 0 else 999
                 gap_limit_pct = tier_gap_limit * 100
 
-                if gap_pct <= 0:
+                if total <= MARKET_GATE_MIN_LISTINGS:
+                    # 薄商い: 出品数 ≤ MARKET_GATE_MIN_LISTINGS → median 信頼度低
+                    # → gate skip、コストプラス価格で出品 (機会損失回避)
+                    price = round(target_usd, 2)
+                    price = int(price) + 0.98 if price > 10 else price
+                    gate_label = "緩和 (薄商い)"
+                    gate = (f"🔓 緩和 ${price} (出品{total}件≤{MARKET_GATE_MIN_LISTINGS}、"
+                            f"median 不安定→gate skip)")
+                elif gap_pct <= 0:
                     # GO: 市場が目標を上回る → 中央値×95%で出品
                     price = round(all_median * 0.95, 2)
                     price = int(price) + 0.98 if price > 10 else price
