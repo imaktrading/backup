@@ -950,7 +950,13 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     if not brand:
         return None
     b = brand.upper()
-    # 0) PSA promo brand 表記 → catalog の set_code に正規化
+    # 0a) McDONALD'S Promo は番号衝突のため M-P/SMP-* 等の通常 promo lookup を skip.
+    #     catalog に McDONALD'S 専用 set_code (MCD-*) 投入は未対応のため None 返却.
+    #     誤マッチ防止: 例 M-P-020 = ウエートレス を Pikachu McDonald's #020 と
+    #     誤って結びつけることを防ぐ.
+    if re.search(r"\bMC?DONALDS?(?:'?S)?\b", b):
+        return None
+    # 0b) PSA promo brand 表記 → catalog の set_code に正規化
     #    PSA は規制ロゴ (e.g. 'MP1.gif', 'SP1.gif') から brand 生成しているため
     #    catalog の image_url 由来 set_code (M-P / S-P / SV-P) と乖離.
     #    例: PSA brand 'MP1' → catalog set_code 'M-P' (Mega Promo, ピカチュウex 49592 等)
