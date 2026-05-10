@@ -138,14 +138,18 @@ def scrape_1kuji(driver, url):
         current_prizes = []
 
         # 「各等賞一覧」セクションから賞を抽出
-        # パターン：「賞名 アイテム名\n■全X種\n■サイズ：約XXcm」
+        # パターン：「賞名 アイテム名 ...任意テキスト... ■全X種 ... ■サイズ：約XXcm」
+        # 2026-05-10: 「賞名 アイテム名」と「■全X種」の間に改行や中間要素 (画像 alt 等)
+        # が入るケースに対応. アイテム名 group は \n も許容、■ 直前で停止 (lazy).
+        # post-process でアイテム名の最初の行のみ採用 (中間テキスト除外).
         prize_pattern = re.compile(
-            r'([^\n]+?賞)\s+([^\n]+?)\n■全(\d+)種.*?■サイズ：約([\d.]+)cm',
+            r'([^\n]+?賞)\s+([^■]+?)\s*■全(\d+)種.*?■サイズ[:：]?\s*約([\d.]+)\s*cm',
             re.DOTALL
         )
         for match in prize_pattern.finditer(page_text):
             prize_label = match.group(1).strip()
-            item_name = match.group(2).strip()
+            # 複数行に渡る場合 (body.text の中間要素) は最初の行のみ採用
+            item_name = match.group(2).strip().split('\n')[0].strip()
             varieties = match.group(3)
             size_cm = match.group(4)
             # ダブルチャンスキャンペーンの重複を除外
