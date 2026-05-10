@@ -23,6 +23,19 @@ WORKSPACE = r"c:/dev/iMak"
 EBAY_SELLER = "imax-64"
 EBAY_KEYS_FILE = f"{WORKSPACE}/iMakeBayAPI/ebay keys.txt"
 
+# 各 listing run の subprocess stdout を永続化する log dir
+# (ListingPanel / KujiWizardDialog から共通利用、ウィザード閉じても残る)
+RUN_LOGS_DIR = f"{WORKSPACE}/iMakHQ/run_logs"
+
+
+def _open_run_log(category):
+    """timestamped run log を開く. 呼出側は close() 責任."""
+    os.makedirs(RUN_LOGS_DIR, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    safe_cat = re.sub(r"[^A-Za-z0-9_\-]", "_", category)[:30]
+    log_path = os.path.join(RUN_LOGS_DIR, f"{safe_cat}_{ts}.log")
+    return open(log_path, "w", encoding="utf-8"), log_path
+
 # ============ 進捗ダッシュボード: カテゴリ定義 ============
 # (ラベル, 検索キーワード, eBayカテゴリID, 目標出品数, 月次追加目標)
 # ※ eBay Browse APIは q=* を受け付けないため、カテゴリ特定キーワードで絞る
@@ -1055,6 +1068,7 @@ class ListingPanel:
             scroll_frame.columnconfigure(col, weight=1, uniform="col")
 
         self.param_entries = {}
+        self._run_log = None  # subprocess stdout の永続 log file (run_script で open)
         for i, script in enumerate(SCRIPTS):
             r, c = divmod(i, n_cols)
             label_color = "#0066cc" if script.get("verified", False) else "black"
@@ -1145,6 +1159,16 @@ class ListingPanel:
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
+        # subprocess stdout を永続化 (UI 閉じても残る、後追い解析可能)
+        try:
+            self._run_log, log_path = _open_run_log(script["label"])
+            self.append_log(f"📝 run log: {log_path}\n")
+            self._run_log.write(f"=== {script['label']} ({time.strftime('%Y-%m-%d %H:%M:%S')}) ===\n")
+            self._run_log.write(f"cwd: {cwd}\ncmd: {' '.join(cmd)}\n\n")
+            self._run_log.flush()
+        except Exception as _e:
+            self._run_log = None
+            self.append_log(f"⚠️ run log 開けず (無視して続行): {_e}\n")
         try:
             # Windows: コンソール窓を出さない
             creationflags = 0
@@ -1166,6 +1190,18 @@ class ListingPanel:
     def _reader(self):
         for line in self.proc.stdout:
             self.queue.put(line)
+            if self._run_log:
+                try:
+                    self._run_log.write(line)
+                    self._run_log.flush()
+                except Exception:
+                    pass
+        if self._run_log:
+            try:
+                self._run_log.close()
+            except Exception:
+                pass
+            self._run_log = None
         self.queue.put(("__done__", self.proc.returncode))
 
     def _run_rarara_after(self):
@@ -1226,6 +1262,7 @@ class KujiWizardDialog(tk.Toplevel):
         self.listing_panel = listing_panel
         self.proc = None
         self.queue = queue.Queue()
+        self._run_log = None  # subprocess stdout の永続 log file (_run_phase で open)
         self.step = 1
 
         self.step_label = ttk.Label(self, text="", font=("Yu Gothic UI", 12, "bold"), foreground="#0066cc")
@@ -1397,6 +1434,18 @@ class KujiWizardDialog(tk.Toplevel):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
+        # ウィザード閉じても残る subprocess stdout file logging
+        # (Phase 1/2/3 各 phase 起動ごとに新規 log file 作成)
+        try:
+            phase_label = "ichibankuji_" + ("phase1" if "1" in cmd else "phase2" if "2" in cmd else "csv")
+            self._run_log, log_path = _open_run_log(phase_label)
+            self._append_log(f"📝 run log: {log_path}\n")
+            self._run_log.write(f"=== {phase_label} ({time.strftime('%Y-%m-%d %H:%M:%S')}) ===\n")
+            self._run_log.write(f"cwd: {self.KUJI_DIR}\ncmd: {' '.join(cmd)}\n\n")
+            self._run_log.flush()
+        except Exception as _e:
+            self._run_log = None
+            self._append_log(f"⚠️ run log 開けず (無視して続行): {_e}\n")
         try:
             creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self._listing_start_ts = time.time()  # rarara が今回 CSV のみ対象にするための基準
@@ -1413,10 +1462,22 @@ class KujiWizardDialog(tk.Toplevel):
     def _reader(self):
         for line in self.proc.stdout:
             self.queue.put(line)
+            if self._run_log:
+                try:
+                    self._run_log.write(line)
+                    self._run_log.flush()
+                except Exception:
+                    pass
         try:
             self.proc.wait(timeout=10)  # stdout閉じた後、プロセス終了を待つ（returncode確定）
         except subprocess.TimeoutExpired:
             pass
+        if self._run_log:
+            try:
+                self._run_log.close()
+            except Exception:
+                pass
+            self._run_log = None
         self.queue.put(("__done__", self.proc.returncode))
 
     def _poll_queue(self):
