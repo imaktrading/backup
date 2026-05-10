@@ -135,6 +135,35 @@ def test_body_revise_skipped_shows_no_target():
     assert "?" not in body  # `?` 出ない
 
 
+def test_sheet_label_high_when_sheet_id_matches_high():
+    """sheet_id = HIGH の ID なら 'HIGH のみ' (sheet=both 指定でも単一指定優先)."""
+    from email_notifier import _format_sheet_label
+    from sheet_updater import HIGH_SHEET_ID
+    log = {"sheet": "both", "sheet_id": HIGH_SHEET_ID, "sheet_label": "SHEET"}
+    assert _format_sheet_label(log) == "HIGH のみ"
+
+
+def test_sheet_label_low_when_sheet_id_matches_low():
+    from email_notifier import _format_sheet_label
+    from sheet_updater import LOW_SHEET_ID
+    log = {"sheet": "both", "sheet_id": LOW_SHEET_ID, "sheet_label": "SHEET"}
+    assert _format_sheet_label(log) == "LOW のみ"
+
+
+def test_sheet_label_both_when_no_sheet_id():
+    """sheet_id 未指定 + sheet=both → 'HIGH + LOW 両方'."""
+    from email_notifier import _format_sheet_label
+    log = {"sheet": "both", "sheet_id": None}
+    assert _format_sheet_label(log) == "HIGH + LOW 両方"
+
+
+def test_sheet_label_unknown_id():
+    """sheet_id が HIGH/LOW どちらでもない → '単一スプシ (label)'."""
+    from email_notifier import _format_sheet_label
+    log = {"sheet": "both", "sheet_id": "unknown_id_xxx", "sheet_label": "TEST_SHEET"}
+    assert _format_sheet_label(log) == "単一スプシ (TEST_SHEET)"
+
+
 def test_summarize_result_text():
     from email_notifier import _summarize_result_text
     assert _summarize_result_text("Warning 4 + safe Failure 0 + action-needed Failure 0") == "受理 4 件"

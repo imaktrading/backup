@@ -125,6 +125,36 @@ _STATUS_JP = {
 }
 
 
+def _format_sheet_label(cycle_log: Dict[str, Any]) -> str:
+    """対象スプシの表示文字列を作る.
+
+    sheet_id 単一指定 (= cron の通常運用) を最優先で判定し、HIGH / LOW を当てる。
+    sheet_id 未指定の場合のみ sheet 引数 (high/low/both) で判定。
+    """
+    # 遅延 import (循環回避 + import コスト削減)
+    try:
+        from sheet_updater import HIGH_SHEET_ID, LOW_SHEET_ID  # noqa: PLC0415
+    except Exception:
+        HIGH_SHEET_ID = LOW_SHEET_ID = None
+
+    sheet_id = cycle_log.get("sheet_id")
+    if sheet_id:
+        if sheet_id == HIGH_SHEET_ID:
+            return "HIGH のみ"
+        if sheet_id == LOW_SHEET_ID:
+            return "LOW のみ"
+        label = cycle_log.get("sheet_label") or "?"
+        return f"単一スプシ ({label})"
+
+    # sheet_id 未指定: sheet 引数 (high/low/both) で判定
+    sheet_arg = cycle_log.get("sheet", "")
+    return {
+        "both": "HIGH + LOW 両方",
+        "high": "HIGH のみ",
+        "low":  "LOW のみ",
+    }.get(sheet_arg, sheet_arg or "?")
+
+
 def _format_body(cycle_log: Dict[str, Any]) -> str:
     """cycle_log を日本語の読みやすいレポートに整形."""
     lines = []
@@ -138,9 +168,7 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
     lines.append(f"開始時刻   : {_fmt_ts(cycle_log.get('ts_start', ''))}")
     lines.append(f"終了時刻   : {_fmt_ts(cycle_log.get('ts_end', ''))}")
     lines.append(f"所要時間   : {_fmt_duration(cycle_log.get('ts_start', ''), cycle_log.get('ts_end', ''))}")
-    sheet_lbl = {"both": "HIGH + LOW 両方", "high": "HIGH のみ", "low": "LOW のみ"}.get(
-        cycle_log.get("sheet", ""), cycle_log.get("sheet", "?"))
-    lines.append(f"対象スプシ  : {sheet_lbl}")
+    lines.append(f"対象スプシ  : {_format_sheet_label(cycle_log)}")
     if cycle_log.get("test_mode"):
         lines.append("注意      : テストモード (本番運用ではない)")
     lines.append("")
