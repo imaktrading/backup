@@ -356,9 +356,10 @@ ITEM SPECIFICS — TOPセラー(fb>900) 標準構成 (2026-04-22調査:nippon_ja
 - Material: **Plastic** (eBayフィルタ正規値。"PVC, ABS"/"PVC, MABS"はリストに無いので無効)
   ※ Plushの場合は"Plush"、Acrylicの場合は"Acrylic"等、フィギュア素材で適切なものを選択
 - Color: Multicolor (17K件主流)
-- Country of Origin: Japan (24K件主流)
+- Country of Origin: "Does not apply" (BANDAI SPIRITS は日本企業だが製造国は中国が
+  多く確証なし、CLAUDE.md 大原則 = 確証なきは Does not apply で空欄補完防止)
 - Year Manufactured: [series release year]
-- Item Height: "X.X in" (TOPセラーは inch表記、cm併記不要)
+- Item Height: "X.X in (Y cm)" (inch + cm 併記、buyer 視認性のため双方明示)
 推奨:
 - Series: "Ichiban Kuji [Full Series Name]" (例: "Ichiban Kuji My Hero Academia Held Cultural Festival")
 - Features: figure_type名 (例: "MASTERLISE", "EXPIECE")
@@ -629,14 +630,21 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
         "C:Theme": "Anime & Manga",
         "C:MPN": "Does Not Apply",
         "C:Animation Studio": claude_result.get('animation_studio', "Does Not Apply"),
-        "C:Country of Origin": "Japan",
+        "C:Country of Origin": "Does not apply",
         "C:Year Manufactured": year,
         "C:Type": "Figure",
         "C:Features": figure_type if figure_type and figure_type.upper() not in ('FIGURE','') else "",
         "C:Original/Licensed Reproduction": "Original",
         "C:Signed": "No",
         "C:Vintage": "No",
-        "C:Item Height": f"{height_in} in" if height_in else "",
+        # Item Height: "X.X in (Y cm)" 併記. inch + cm 双方ある時のみ括弧付き、
+        # 片方のみなら単独表示、両方無ければ空欄.
+        "C:Item Height": (
+            f"{height_in} in ({height_cm} cm)" if height_in and height_cm
+            else f"{height_in} in" if height_in
+            else f"{height_cm} cm" if height_cm
+            else ""
+        ),
         "C:Series": series_name_en,
         "StoreCategoryID": 42133037010,
         "StoreCategoryID2": STORE_CATEGORY2.get(franchise.lower(), STORE_CATEGORY2_DEFAULT),
