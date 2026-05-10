@@ -110,9 +110,14 @@ def scrape_1kuji(driver, url):
         driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(2)
 
-        body = driver.find_element(By.TAG_NAME, "body").text
+        # Selenium body.text は run によって取得不完全になる事故あり (2026-05-10
+        # 16:03 release_year 12/12 空欄事故). raw HTML を BS パース → get_text で
+        # 統一安定 source に. 全 text 抽出 (release_year/price/ラストワン賞 fallback 等)
+        # が同じ source 経由で動作 → 修正連鎖を構造的に解消.
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-        page_text = body  # Seleniumで取得したテキスト（JS描画済み）
+        page_text = soup.get_text(separator='\n', strip=True)
+        # body (= Selenium body.text) は将来 debug 比較用に残置 (現コードでは未使用)
+        body = driver.find_element(By.TAG_NAME, "body").text  # noqa: F841 (reserved)
 
         # シリーズ名取得
         series_name = ""
@@ -124,17 +129,13 @@ def scrape_1kuji(driver, url):
             if title:
                 series_name = title.get_text(strip=True).replace('｜一番くじ倶楽部｜BANDAI SPIRITS公式 一番くじ情報サイト', '').strip()
 
-        # 発売年・価格取得 (raw HTML から regex 抽出、Selenium body.text の不安定性回避)
-        # 2026-05-10: body.text 経由だと run によって取得失敗 (16:03 run で 12/12 空欄事故).
-        # raw HTML には <dt>発売日</dt><dd>...2026年05月02日...</dd> 等が常に存在するため
-        # driver.page_source (= raw HTML) から抽出.
+        # 発売年・価格取得 (page_text = BS get_text 経由で安定 source)
         release_date = ""
         price_jpy = ""
-        raw_html = driver.page_source
-        date_m = re.search(r'(\d{4})年(\d{1,2})月', raw_html)
+        date_m = re.search(r'(\d{4})年(\d{1,2})月', page_text)
         if date_m:
             release_date = date_m.group(1)
-        price_m = re.search(r'1回(\d+)円', raw_html)
+        price_m = re.search(r'1回(\d+)円', page_text)
         if price_m:
             price_jpy = price_m.group(1)
 

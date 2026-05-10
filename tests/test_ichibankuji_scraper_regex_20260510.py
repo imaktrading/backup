@@ -179,3 +179,34 @@ def test_year_regex_picks_first_match_release_date():
     assert len(matches) >= 2
     # findall は出現順、最初は発売日
     assert matches[0] == ("2026", "05")
+
+
+def test_page_text_via_bs_get_text_is_stable():
+    """page_text source 統一: BS get_text 経由なら release_year/price/ラストワン賞
+    全部同じ stable source から取得可能 (修正連鎖を構造的に解消)."""
+    from bs4 import BeautifulSoup
+    sample_html = '''
+    <html><body>
+    <h1>一番くじ テスト</h1>
+    <dl><dt>発売日</dt><dd>2026年05月02日(土)より順次発売予定</dd></dl>
+    <li>■メーカー希望小売価格：1回790円(税10％込)</li>
+    <div class="itemColList">
+      <h4 class="name sp">A賞 テスト</h4>
+      <ul><li>■全1種</li><li>■サイズ：約25cm</li></ul>
+    </div>
+    <div class="itemColList">
+      <h4 class="name sp">ラストワン賞 ラストキャラ</h4>
+      <ul><li>■全1種</li><li>■サイズ：約20cm</li></ul>
+    </div>
+    </body></html>
+    '''
+    soup = BeautifulSoup(sample_html, 'html.parser')
+    page_text = soup.get_text(separator='\n', strip=True)
+    # release_year
+    date_m = re.search(r'(\d{4})年(\d{1,2})月', page_text)
+    assert date_m and date_m.group(1) == "2026"
+    # price
+    price_m = re.search(r'1回(\d+)円', page_text)
+    assert price_m and price_m.group(1) == "790"
+    # ラストワン賞 fallback (BS extraction で取れる前提だが、page_text にも存在確認)
+    assert "ラストワン賞" in page_text
