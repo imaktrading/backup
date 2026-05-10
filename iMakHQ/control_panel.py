@@ -1507,6 +1507,12 @@ class KujiWizardDialog(tk.Toplevel):
         if hasattr(self, 'log') and self.log.winfo_exists():
             self.log.insert("end", text)
             self.log.see("end")
+        # ListingPanel の実行ログにもミラー表示 (Wizard 閉じても親窓で確認可能)
+        if getattr(self, 'listing_panel', None):
+            try:
+                self.listing_panel.append_log(text)
+            except Exception:
+                pass
 
     def _cancel_proc(self):
         if self.proc and self.proc.poll() is None:
