@@ -134,27 +134,33 @@ def scrape_1kuji(driver, url):
         if price_m:
             price_jpy = price_m.group(1)
 
-        # 賞別データ取得
+        # 賞別データ取得 (BeautifulSoup CSS selector ベース、2026-05-10 構造化抽出)
+        # 設計: 1kuji.com の DOM 構造 <div class="itemColList"><h4 class="name">賞名 アイテム名</h4>...
+        #       <li>■全X種</li><li>■サイズ：約Xcm</li>...</div> を直接ナビゲート.
+        # text regex 経由 (旧実装) は header 部の ■発売日:/■メーカー希望小売価格: 等の干渉
+        # で誤マッチ/早期停止が頻発したため、HTML 構造ベースに切替.
         current_prizes = []
-
-        # 「各等賞一覧」セクションから賞を抽出
-        # パターン：「賞名 アイテム名 ...任意テキスト... ■全X種 ... ■サイズ：約XXcm」
-        # 2026-05-10: 「賞名 アイテム名」と「■全X種」の間に改行や中間要素 (画像 alt 等)
-        # が入るケースに対応. アイテム名 group は \n も許容、■ 直前で停止 (lazy).
-        # post-process でアイテム名の最初の行のみ採用 (中間テキスト除外).
-        prize_pattern = re.compile(
-            r'([^\n]+?賞)\s+([^■]+?)\s*■全(\d+)種.*?■サイズ[:：]?\s*約([\d.]+)\s*cm',
-            re.DOTALL
-        )
-        for match in prize_pattern.finditer(page_text):
-            prize_label = match.group(1).strip()
-            # 複数行に渡る場合 (body.text の中間要素) は最初の行のみ採用
-            item_name = match.group(2).strip().split('\n')[0].strip()
-            varieties = match.group(3)
-            size_cm = match.group(4)
-            # ダブルチャンスキャンペーンの重複を除外
-            if '■当選数' in page_text[match.start():match.start()+200]:
+        prize_label_re = re.compile(r'^(ラストワン賞|[^\s]+?賞)\s+(.+)$')
+        size_re = re.compile(r'■サイズ[:：]?\s*(?:全高)?\s*約?\s*([\d.]+)\s*cm')
+        varieties_re = re.compile(r'■全(\d+)種')
+        for item_col in soup.select('.itemColList'):
+            h4 = item_col.select_one('h4.name')
+            if not h4:
                 continue
+            full_label = h4.get_text(strip=True)
+            m = prize_label_re.match(full_label)
+            if not m:
+                continue
+            prize_label = m.group(1).strip()
+            item_name = m.group(2).strip()
+            block_text = item_col.get_text(separator='\n', strip=True)
+            # ダブルチャンスキャンペーン枠は除外
+            if '■当選数' in block_text:
+                continue
+            v_m = varieties_re.search(block_text)
+            s_m = size_re.search(block_text)
+            varieties = v_m.group(1) if v_m else "1"
+            size_cm = s_m.group(1) if s_m else ""
             current_prizes.append({
                 'prize': prize_label,
                 'name': item_name,

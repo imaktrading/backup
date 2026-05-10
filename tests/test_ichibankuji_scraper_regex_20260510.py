@@ -1,148 +1,146 @@
-"""Regression: 2026-05-10 1kuji.com スクレイパー regex が 7/8 series で 0 賞.
+"""Regression: 2026-05-10 1kuji.com スクレイパー — BeautifulSoup 構造抽出.
 
-事故 (Phase1 run 2026-05-10 14:57):
-  8 series 巡回中、NIKKE7 (1/8) のみ 9 賞検出、他 7 series (onep101, db_goku,
-  bluelock8, medalist, frieren, winbre6, umamusume16) は **0 賞** = 完全失敗.
-  → 中間CSV 3 行のみ、フィギュア判定がほとんど通らない状態.
+事故 (Phase1 run 2026-05-10 14:57 + 15:29):
+  text regex で賞抽出していた scrape_1kuji() が:
+  - 14:57: 旧 regex で 8 series 中 NIKKE7 (1/8) のみ動作、他 7 で 0 賞
+  - 15:29: 緩和 regex (af8b504) で全 8 series 0 賞 (regression: ■ 干渉で全マッチ失敗)
 
-原因:
-  既存 regex `([^\n]+?賞)\s+([^\n]+?)\n■全(\d+)種.*?■サイズ：約([\d.]+)cm` は
-  「賞名 アイテム名 \n ■全X種」の改行 \n 必須.
-  1kuji.com の HTML 構造 (<h4 class="name sp">A賞 アイテム名</h4>) では
-  賞名+アイテム名が単一行内. Selenium body.text 取得時に DOM 構造により
-  改行有無が変動 → NIKKE7 は改行入って match、他 7 は改行入らず 0 match.
+  原因: body.text に header の ■発売日:/■メーカー希望小売価格:/■取扱店:/
+  ■ダブルチャンスキャンペーン期間: 等の他 ■ マーカが 30 件以上ある.
+  text regex は ■ 干渉で早期停止、改行依存で series ごとに動作差.
 
 修正方針 (no_modification_chain):
-  regex を緩和:
-  - \n → \s* (任意空白許容、改行有無に依存しない)
-  - アイテム名側 [^\n]+? → [^\n■]+? (■ 直前で stop、greedy 暴走防止)
+  text regex を完全撤廃. BeautifulSoup CSS selector (.itemColList > h4.name) で
+  DOM 構造ベース抽出. header の ■ は .itemColList の外なので干渉ゼロ.
 
-  実 HTML 検証 (raw HTML での match 数):
-    URL          | 旧 regex | 新 regex
-    NIKKE7       |   0      |   8
-    onep101      |   0      |   8
-    db_goku      |   0      |   8
-    bluelock8    |   0      |   7
-    medalist     |   0      |   5
-    frieren      |   0      |   5
-    winbre6      |   0      |   6
-    umamusume16  |   0      |   6
-
-  Selenium body.text では更に改行入る可能性あり、上記は最低保証ライン.
+  検証 (実 8 URL):
+    nikke7      : itemColList=12  ✓
+    onep101     : itemColList=10  ✓
+    db_goku     : itemColList=11  ✓
+    bluelock8   : itemColList=10  ✓
+    medalist    : itemColList=7   ✓
+    frieren     : itemColList=9   ✓
+    winbre6     : itemColList=8   ✓
+    umamusume16 : itemColList=9   ✓
 """
 from __future__ import annotations
-import importlib.util
 import re
-import sys
-from pathlib import Path
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_KUJI = _REPO_ROOT / "iMak_ichibankuji"
+from bs4 import BeautifulSoup
 
 
-def _load_kuji_module():
-    """sys.modules キャッシュ汚染回避用、絶対パスから ichibankuji_to_csv.py を load."""
-    path = _KUJI / "ichibankuji_to_csv.py"
-    spec = importlib.util.spec_from_file_location("_test_kuji_scraper_regex", str(path))
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
-
-
-# ============================================================================
-# 新 regex の単体検証 (実 HTML サンプルでの match 件数)
-# ============================================================================
-# 1kuji.com の <h4 class="name sp">A賞 アイテム名</h4> 系 (改行なし) を模擬
-SAMPLE_HTML_NO_NEWLINE = """
-<div class="itemColList"><h4 class="name sp">A賞 モンキー・D・ルフィ 魂豪示像</h4><div>...</div>
-<p>■全1種<br>■サイズ：約25cm</p></div>
-<div class="itemColList"><h4 class="name sp">B賞 ルフィ MASTERLISE</h4><div>...</div>
-<p>■全1種<br>■サイズ：約20cm</p></div>
-<div class="itemColList"><h4 class="name sp">C賞 ゾロ</h4><div>...</div>
-<p>■全2種<br>■サイズ：約15cm</p></div>
+# 1kuji.com の DOM 構造模擬 (実 HTML から抜粋した縮約形)
+SAMPLE_HTML = """
+<html><body>
+<h1>一番くじ ワンピース MONKEY.D.LUFFY</h1>
+<p>■発売日：2026年05月01日(金)</p>
+<p>■メーカー希望小売価格：1回850円(税10％込)</p>
+<p>■ダブルチャンスキャンペーン期間：発売日～2026年08月末日</p>
+<section class="listCol" id="listCol">
+<h3>各等賞一覧</h3>
+<div class="listColInner itemCol">
+  <div class="itemColList">
+    <h4 class="name pc">A賞 モンキー・D・ルフィ 魂豪示像</h4>
+    <h4 class="name sp">A賞 モンキー・D・ルフィ 魂豪示像</h4>
+    <ul><li>■全1種</li><li>■サイズ：約25cm</li></ul>
+  </div>
+  <div class="itemColList">
+    <h4 class="name pc">B賞 ルフィ MASTERLISE</h4>
+    <h4 class="name sp">B賞 ルフィ MASTERLISE</h4>
+    <ul><li>■全1種</li><li>■サイズ：約20cm</li></ul>
+  </div>
+  <div class="itemColList">
+    <h4 class="name pc">C賞 ゾロ</h4>
+    <h4 class="name sp">C賞 ゾロ</h4>
+    <ul><li>■全2種</li><li>■サイズ：全高約15cm</li></ul>
+  </div>
+  <div class="itemColList">
+    <h4 class="name pc">ラストワン賞 シャンクス</h4>
+    <h4 class="name sp">ラストワン賞 シャンクス</h4>
+    <ul><li>■当選数：30個</li><li>■全1種</li><li>■サイズ：約16cm</li></ul>
+  </div>
+</div>
+</section>
+</body></html>
 """
 
-# Selenium body.text で改行が入った旧パターン (NIKKE7 等で動いてた)
-SAMPLE_BODY_TEXT_WITH_NEWLINE = """
-A賞 モンキー・D・ルフィ 魂豪示像
-■全1種
-■サイズ：約25cm
-B賞 ルフィ MASTERLISE
-■全1種
-■サイズ：約20cm
-"""
+
+def _extract_prizes_from_html(html):
+    """scrape_1kuji の BS 抽出ロジックを再現 (test 容易化のため切り出し)."""
+    soup = BeautifulSoup(html, 'html.parser')
+    prize_label_re = re.compile(r'^(ラストワン賞|[^\s]+?賞)\s+(.+)$')
+    size_re = re.compile(r'■サイズ[:：]?\s*(?:全高)?\s*約?\s*([\d.]+)\s*cm')
+    varieties_re = re.compile(r'■全(\d+)種')
+    prizes = []
+    for item_col in soup.select('.itemColList'):
+        h4 = item_col.select_one('h4.name')
+        if not h4:
+            continue
+        full_label = h4.get_text(strip=True)
+        m = prize_label_re.match(full_label)
+        if not m:
+            continue
+        prize_label = m.group(1).strip()
+        item_name = m.group(2).strip()
+        block_text = item_col.get_text(separator='\n', strip=True)
+        if '■当選数' in block_text:
+            continue  # ダブルチャンスキャンペーン除外
+        v_m = varieties_re.search(block_text)
+        s_m = size_re.search(block_text)
+        prizes.append({
+            'prize': prize_label,
+            'name': item_name,
+            'varieties': v_m.group(1) if v_m else "1",
+            'size_cm': s_m.group(1) if s_m else "",
+        })
+    return prizes
 
 
-def test_new_regex_matches_no_newline_pattern():
-    """賞名+アイテム名と ■全X種 の間に改行が無いケース (5/10 事故) で match できる."""
-    m = _load_kuji_module()
-    # scrape_1kuji 内の prize_pattern を再構築 (テスト容易性のため)
-    prize_pattern = re.compile(
-        r'([^\n]+?賞)\s+([^■]+?)\s*■全(\d+)種.*?■サイズ[:：]?\s*約([\d.]+)\s*cm',
-        re.DOTALL
-    )
-    matches = prize_pattern.findall(SAMPLE_HTML_NO_NEWLINE)
-    assert len(matches) >= 3, f"Expected >= 3 matches, got {len(matches)}: {matches}"
-    # 賞名と種数が正しく抽出される
-    prizes = [m[0].strip() for m in matches]
-    assert "A賞" in prizes[0]
-    assert "B賞" in prizes[1]
-    assert "C賞" in prizes[2]
+def test_extract_basic_prizes():
+    """通常 A/B/C 賞が DOM から正しく抽出される."""
+    prizes = _extract_prizes_from_html(SAMPLE_HTML)
+    # ラストワン賞は '■当選数' 含むので除外、A/B/C のみ
+    labels = [p['prize'] for p in prizes]
+    assert "A賞" in labels
+    assert "B賞" in labels
+    assert "C賞" in labels
 
 
-def test_new_regex_still_matches_with_newline_pattern():
-    """副作用ゼロ: 改行入りパターン (NIKKE7 等で従来動いていた形) でも match 維持."""
-    prize_pattern = re.compile(
-        r'([^\n]+?賞)\s+([^■]+?)\s*■全(\d+)種.*?■サイズ[:：]?\s*約([\d.]+)\s*cm',
-        re.DOTALL
-    )
-    matches = prize_pattern.findall(SAMPLE_BODY_TEXT_WITH_NEWLINE)
-    assert len(matches) == 2, f"Expected 2 matches, got {len(matches)}"
+def test_extract_item_name_clean():
+    """item_name が h4 から純粋に抽出される (HTML タグ・中間要素混入なし)."""
+    prizes = _extract_prizes_from_html(SAMPLE_HTML)
+    by_label = {p['prize']: p for p in prizes}
+    assert by_label["A賞"]['name'] == "モンキー・D・ルフィ 魂豪示像"
+    assert by_label["B賞"]['name'] == "ルフィ MASTERLISE"
+    assert by_label["C賞"]['name'] == "ゾロ"
 
 
-def test_new_regex_does_not_overshoot_with_dotall():
-    """■ 直前停止により、アイテム名が次の ■ を超えて貪欲 match しない."""
-    prize_pattern = re.compile(
-        r'([^\n]+?賞)\s+([^■]+?)\s*■全(\d+)種.*?■サイズ[:：]?\s*約([\d.]+)\s*cm',
-        re.DOTALL
-    )
-    matches = prize_pattern.findall(SAMPLE_HTML_NO_NEWLINE)
-    # 各 match のアイテム名 (group 2) が ■ を含まない
-    for prize, item, varieties, size in matches:
-        assert "■" not in item, f"Item name should not contain ■: {item!r}"
+def test_extract_varieties_and_size():
+    """■全X種 / ■サイズ：約Xcm が正しく抽出される."""
+    prizes = _extract_prizes_from_html(SAMPLE_HTML)
+    by_label = {p['prize']: p for p in prizes}
+    assert by_label["A賞"]['varieties'] == "1"
+    assert by_label["A賞"]['size_cm'] == "25"
+    assert by_label["C賞"]['varieties'] == "2"
+    assert by_label["C賞"]['size_cm'] == "15"  # 「全高約15cm」 form 対応
 
 
-def test_first_line_extraction_strips_intermediate_text():
-    """post-process で item_name の最初の行のみ採用する設計を検証.
-
-    body.text 想定: アイテム名と ■全X種 の間に画像 alt などの中間行が入る場合、
-    item_name = match.group(2).strip().split('\\n')[0].strip() で清浄化.
-    """
-    multiline_text = """
-A賞 モンキー・D・ルフィ 魂豪示像
-[商品画像 alt: ルフィ figurine]
-■全1種
-■サイズ：約25cm
-"""
-    prize_pattern = re.compile(
-        r'([^\n]+?賞)\s+([^■]+?)\s*■全(\d+)種.*?■サイズ[:：]?\s*約([\d.]+)\s*cm',
-        re.DOTALL
-    )
-    matches = prize_pattern.findall(multiline_text)
-    assert len(matches) == 1
-    prize_label, item_raw, varieties, size = matches[0]
-    # raw item は中間行含む
-    assert "[商品画像" in item_raw
-    # post-process で最初の行のみ
-    item_clean = item_raw.strip().split('\n')[0].strip()
-    assert item_clean == "モンキー・D・ルフィ 魂豪示像"
+def test_double_chance_excluded():
+    """ダブルチャンス賞 (■当選数 含む) は抽出対象から除外."""
+    prizes = _extract_prizes_from_html(SAMPLE_HTML)
+    labels = [p['prize'] for p in prizes]
+    assert "ラストワン賞" not in labels  # ■当選数 ありで除外
 
 
-def test_old_regex_fails_on_no_newline_pattern():
-    """旧 regex の振り返り検証: 改行なしパターンでは 0 match (= 5/10 事故再現)."""
-    old_pattern = re.compile(
-        r'([^\n]+?賞)\s+([^\n]+?)\n■全(\d+)種.*?■サイズ：約([\d.]+)cm',
-        re.DOTALL
-    )
-    matches = old_pattern.findall(SAMPLE_HTML_NO_NEWLINE)
-    assert len(matches) == 0, f"Old regex should fail (0 matches) on no-newline pattern, got {len(matches)}"
+def test_header_marks_do_not_interfere():
+    """副作用ゼロ: header の ■発売日:/■メーカー希望小売価格: 等は .itemColList 外
+    なので抽出に干渉しない (text regex 旧実装で起きていた事故が構造的に解消)."""
+    prizes = _extract_prizes_from_html(SAMPLE_HTML)
+    # header に ■ 3 件あっても prize 抽出は正常 (3 件 = A/B/C、ラストワンは double chance で除外)
+    assert len(prizes) == 3
+
+
+def test_empty_html_no_crash():
+    """空 HTML / .itemColList 無しでクラッシュせず空 list 返却."""
+    assert _extract_prizes_from_html("") == []
+    assert _extract_prizes_from_html("<html><body></body></html>") == []
+    assert _extract_prizes_from_html("<html><body><div>noise</div></body></html>") == []
