@@ -288,7 +288,7 @@ def _to_legacy_dict(record: dict) -> dict:
     return {
         # 旧 bandai_jp 互換フィールド
         "card_id":       record.get("product_id", ""),
-        "name_en":       record.get("name", ""),
+        "name_en":       record.get("name_en") or record.get("name", ""),
         "name_jp":       record.get("name_jp"),
         "type_en":       specs.get("Card Type", ""),
         "rarity_en":     specs.get("Rarity", ""),
@@ -621,7 +621,7 @@ def _to_legacy_dict_gundam(record: dict) -> dict:
         "card_name":     record.get("name", ""),
         "card_id":       record.get("product_id", ""),
         "card_number":   record.get("product_id", "").split("_")[0],  # variant 剥がし
-        "name_en":       record.get("name", ""),
+        "name_en":       record.get("name_en") or record.get("name", ""),
         "name_jp":       record.get("name_jp"),
         "card_type":     specs.get("Card Type", ""),
         "type_en":       specs.get("Card Type", ""),
@@ -775,7 +775,7 @@ def _to_legacy_dict_dragonball(record: dict) -> dict:
         "card_name":     record.get("name", ""),
         "card_id":       record.get("product_id", ""),
         "card_number":   record.get("product_id", "").split("_")[0],
-        "name_en":       record.get("name", ""),
+        "name_en":       record.get("name_en") or record.get("name", ""),
         "name_jp":       record.get("name_jp"),
         "card_type":     specs.get("Type", ""),         # DBSCG: 'Type' = card type
         "type_en":       specs.get("Type", ""),
@@ -1020,7 +1020,9 @@ def _to_legacy_dict_pokemon(record: dict) -> dict:
     return {
         # 旧 pokemon_card_jp 互換
         "name_jp":            record.get("name", ""),
-        "name_en":            record.get("name", ""),  # サイト JA のみなので同値
+        # 2026-05-11: name_en バルク翻訳 (21,855 件) 投入後、catalog 側 name_en を優先.
+        # なければ name (日本語) にフォールバック.
+        "name_en":            record.get("name_en") or record.get("name", ""),
         "card_number":        card_number_only,
         "card_number_full":   specs.get("card_number_text", card_number_only),
         "card_number_total":  specs.get("card_number_total", ""),
