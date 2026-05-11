@@ -226,7 +226,9 @@ WHITELISTS = {
             "normalize": {"Multi": "Multicolor", "Mixed": "Multicolor"},
         },
         "Country of Origin": {
-            "values": ["Australia", "Azerbaijan", "Canada", "China", "Hong Kong", "Japan", "Malaysia", "Philippines", "Singapore", "Spain", "Thailand", "United Kingdom", "United States", "Vietnam"],
+            # "Does not apply" は eBay 公式正規エスケープ値 (画像から製造国確証取れない時に明示)
+            # 2026-05-10 listing_common 側で "Japan → Does not apply" 切替時の片手落ち修正
+            "values": ["Australia", "Azerbaijan", "Canada", "China", "Hong Kong", "Japan", "Malaysia", "Philippines", "Singapore", "Spain", "Thailand", "United Kingdom", "United States", "Vietnam", "Does not apply"],
             "strict": True,
             "normalize": {"USA": "United States", "UK": "United Kingdom"},
         },
