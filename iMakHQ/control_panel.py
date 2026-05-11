@@ -200,6 +200,12 @@ SCRIPTS = [
         "params": [],
     },
     {
+        "label": "G-SHOCK 未出品モデル (catalog)",
+        "cwd": f"{WORKSPACE}/iMakG-shock/casio_finder",
+        "cmd": ["python", "casio_finder_from_catalog.py"],
+        "params": [],
+    },
+    {
         "label": "PSA TCG",
         "verified": True,  # 2026-04-24 及第点到達
         "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須
