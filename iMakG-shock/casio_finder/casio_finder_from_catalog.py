@@ -134,7 +134,6 @@ def main() -> int:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = os.path.join(script_dir, f"{OUTPUT_PREFIX}_{ts}.csv")
     write_output(unlisted, out_path)
-    print(f"\n✅ 出力: {out_path}")
 
     # 5. ハイライト: 限定 / 新作モデル優先表示
     limited = [r for r in unlisted if (r.get("is_limited") or "").lower() in ("yes", "true", "1")]
@@ -142,6 +141,21 @@ def main() -> int:
         print(f"\n⭐ うち 限定モデル {len(limited)} 件 (出品候補優先度高):")
         for r in limited[:10]:
             print(f"  - {r['product_id']:20s} ¥{r.get('price_jpy_msrp','')} {r.get('source_url','')}")
+
+    # 6. 出力場所を目立たせる + フォルダを自動オープン
+    print("\n" + "=" * 70)
+    print(f"✅ 出力ファイル: {out_path}")
+    print(f"📁 フォルダ:    {script_dir}")
+    print("=" * 70)
+    try:
+        if sys.platform == "win32":
+            # ファイルを Excel で開く + フォルダもエクスプローラで開く
+            os.startfile(out_path)
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", out_path])
+    except Exception as e:
+        print(f"⚠️ 自動オープン失敗: {e} — 上記パスを手動で開いてください")
 
     return 0
 
