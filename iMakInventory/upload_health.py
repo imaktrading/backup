@@ -90,6 +90,65 @@ def _save_health(health: dict) -> None:
 
 
 # ===========================================================================
+# error 種別に応じたアラート文言の生成
+# ===========================================================================
+def _critical_alert_message(error: str, csv_path: str, csv_lines: int,
+                            cycle_ts: str, streak: int) -> tuple:
+    """CRITICAL_ERRORS のうち、どの error 種別かで title / body を切替.
+
+    Returns: (title, body)
+    """
+    err = (error or "").lower()
+    common_footer = (
+        f"\ncsv: {csv_path} ({csv_lines} 件未送信)\n"
+        f"cycle_ts: {cycle_ts}\n"
+    )
+
+    if "session_expired" in err or "not_logged_in" in err or "not logged in" in err:
+        title = f"⛔ iMakInventory: 真のログイン切れ ({streak} 回目)"
+        body = (
+            f"eBay 専用 chrome profile のセッションが切れました。\n"
+            f"error: {error}"
+            + common_footer
+            + f"対応: control_panel で 'eBay 再ログイン' or "
+              f"`python -m ebay_actions.sell_feed_uploader login`\n"
+            + f"放置すると Defect Rate 直撃 (eBay で売れる → 仕入失敗 → キャンセル)。"
+        )
+    elif "action_needed_failure" in err:
+        title = f"⚠️ iMakInventory: eBay 側で取下げ拒否 ({streak} 回目、要 listing 個別対応)"
+        body = (
+            f"eBay が listing 単体で取下げを拒否しました (画像要件 / Item Specifics 不備等)。\n"
+            f"chrome profile のログインは生きてる可能性大、再ログインでは解消しません。\n"
+            f"error: {error}"
+            + common_footer
+            + f"対応: cycle_log の failure_details で error_code を確認 → \n"
+            + f"  ・該当 listing を eBay UI で手動 End Item\n"
+            + f"  ・listing 単体の問題なので自動 retry では解決しない\n"
+            + f"放置すると Defect Rate 直撃 (該当 item が売れる → 仕入失敗 → キャンセル)。"
+        )
+    elif "result_not_in_history" in err:
+        title = f"⚠️ iMakInventory: eBay 履歴に upload 結果が出てこない ({streak} 回目)"
+        body = (
+            f"upload は submit したが eBay 履歴に表示されていない (ネット障害 / Submit 不達)。\n"
+            f"error: {error}"
+            + common_footer
+            + f"対応: https://www.ebay.com/sh/reports/uploads を目視確認\n"
+            + f"  ・履歴にあれば eBay 側は受理済 (= flaky 検出 false negative)\n"
+            + f"  ・履歴になければ未送信、手動 upload 必要"
+        )
+    else:
+        # 想定外の CRITICAL error: generic message
+        title = f"⛔ iMakInventory: 重大エラー ({streak} 回目)"
+        body = (
+            f"upload phase で CRITICAL error が発生しました。\n"
+            f"error: {error}"
+            + common_footer
+            + f"対応: cycle_log を確認して原因を特定してください。"
+        )
+    return title, body
+
+
+# ===========================================================================
 # 通知 (3 経路冗長)
 # ===========================================================================
 def _toast(title: str, body: str) -> None:
@@ -209,15 +268,9 @@ def record_upload_result(
     if is_critical:
         # 即時通知 (1 回目で発火)
         health["not_logged_in_streak"] += 1
-        title = f"⛔ iMakInventory: 真のログイン切れ ({health['not_logged_in_streak']} 回目)"
-        body = (
-            f"eBay 専用 chrome profile のセッションが切れました。\n"
-            f"error: {error}\n"
-            f"csv: {csv_path} ({csv_lines} 件未送信)\n"
-            f"cycle_ts: {cycle_ts}\n"
-            f"対応: control_panel で 'eBay 再ログイン' or `python -m ebay_actions.sell_feed_uploader login`\n"
-            f"放置すると Defect Rate 直撃 (eBay で売れる → 仕入失敗 → キャンセル)。"
-        )
+        # error 種別で title / body / 対応文言を切替 (= 「ログイン切れ」誤誘導の防止)
+        title, body = _critical_alert_message(
+            error, csv_path, csv_lines, cycle_ts, health['not_logged_in_streak'])
         alert_info = _fire_alert(title, body)
         health["last_alert_ts"] = alert_info["ts"]
         alert_fired = True

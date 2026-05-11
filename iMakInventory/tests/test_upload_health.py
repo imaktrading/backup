@@ -203,5 +203,47 @@ def test_assess_recent_cycles_warn_on_consecutive_failures(tmp_path, monkeypatch
     assert res["warn"] is True
 
 
+def test_action_needed_failure_uses_distinct_title(isolated_health):
+    """action_needed_failure は「ログイン切れ」と誤誘導しない (= 別 title)."""
+    uh, fired = isolated_health
+    uh.record_upload_result(
+        {"success": False, "error": "action_needed_failure: 1 件 (safe=0, warning=0)"},
+        csv_path="x.csv", csv_lines=1, cycle_ts="2026-05-11T22:21:00",
+    )
+    assert len(fired) == 1
+    title, body = fired[0]
+    # 「ログイン切れ」が title に含まれないこと
+    assert "ログイン切れ" not in title
+    # 適切な title (= eBay 拒否 / listing 個別対応)
+    assert "取下げ拒否" in title or "個別対応" in title
+    # body に listing 個別問題の説明があること
+    assert "再ログイン" in body and "解消しません" in body
+
+
+def test_not_logged_in_uses_login_title(isolated_health):
+    """not_logged_in は「真のログイン切れ」title (= 既存挙動維持)."""
+    uh, fired = isolated_health
+    uh.record_upload_result(
+        {"success": False, "error": "not_logged_in"},
+        csv_path="x.csv", csv_lines=1, cycle_ts="2026-05-11T22:21:00",
+    )
+    assert len(fired) == 1
+    title, _ = fired[0]
+    assert "真のログイン切れ" in title
+
+
+def test_result_not_in_history_uses_distinct_title(isolated_health):
+    """result_not_in_history は別 title (= 履歴確認誘導)."""
+    uh, fired = isolated_health
+    uh.record_upload_result(
+        {"success": False, "error": "result_not_in_history"},
+        csv_path="x.csv", csv_lines=1, cycle_ts="2026-05-11T22:21:00",
+    )
+    assert len(fired) == 1
+    title, _ = fired[0]
+    assert "ログイン切れ" not in title
+    assert "履歴" in title
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
