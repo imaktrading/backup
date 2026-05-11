@@ -129,7 +129,12 @@ def _pokemon_context(catalog, brand, card_number, subject) -> Optional[str]:
         or ""
     ).strip()
     catalog_card_id = (record.get("card_id") or "").strip()
-    catalog_name = (record.get("name_jp") or record.get("name_en") or "").strip()
+    # name_en は pokemon-card.com 公式 → eBay 正規英名のマッピング (Catalog 側 fact-check 済).
+    # 3AI が name_jp だけ見て直訳すると誤訳 BLOCK が発生するため、両方提示し name_en を権威とする.
+    # 例: ピジョン (JP) → 直訳 'Pidgeot' は誤、正解 name_en='Pidgeotto' (1進化).
+    #     ナンジャモのカイデン (JP) → 直訳 'Iono's Kaiden' は誤、正解 name_en='Iono's Wattrel'.
+    catalog_name_jp = (record.get("name_jp") or "").strip()
+    catalog_name_en = (record.get("name_en") or "").strip()
     catalog_type = (record.get("type_en") or "").strip()
     catalog_rarity = (record.get("rarity") or record.get("rarity_en") or "").strip()
 
@@ -140,23 +145,29 @@ def _pokemon_context(catalog, brand, card_number, subject) -> Optional[str]:
         "=== iMakCatalog AUTHORITY (Pokemon) ===\n"
         f"iMakCatalog (pokemon-card.com 公式DBを集約した内部マスター) が ID 完全一致で hit:\n"
         f"  card_id:       {catalog_card_id}\n"
-        f"  card_name(JP): {catalog_name}\n"
+        f"  card_name(JP): {catalog_name_jp}\n"
+        f"  card_name(EN): {catalog_name_en}  ← eBay 正規英名 (公式マッピング、直訳と異なる場合あり)\n"
         f"  set_name(EN):  '{catalog_set_name}'  ← eBay 正規セット名\n"
         f"  type(EN):      '{catalog_type}'      ← Pokemon タイプ (Psychic/Fire/Grass 等)\n"
         f"  rarity:        '{catalog_rarity}'    ← Pokemon 公式ラリリティ short code\n\n"
         f"PSA Brand 文字列: '{brand}'\n"
         f"PSA Subject:      '{subject}'\n\n"
         "判定ルール (Pokemon TCG eBay 出品の慣習):\n"
-        " 1. **C:Attribute/MTG:Color 列**: Pokemon TCG では eBay の慣習として\n"
+        " 1. **card_name(EN) は公式マッピング、直訳しない**: name_jp から直訳して name_en と異なる\n"
+        "    結果になっても、catalog の name_en を正規とする (BLOCK しない).\n"
+        "    例: ピジョン → 直訳 'Pidgeot' (誤) ⇔ 公式 name_en 'Pidgeotto' (正、1進化).\n"
+        "    例: ナンジャモのカイデン → 直訳 'Iono's Kaiden' (誤) ⇔ 公式 name_en 'Iono's Wattrel' (正).\n"
+        "    PSA Subject / Title が name_en と一致していれば商品同一と判断.\n\n"
+        " 2. **C:Attribute/MTG:Color 列**: Pokemon TCG では eBay の慣習として\n"
         "    Pokemon タイプ (Psychic/Fire/Water/Lightning/Grass/Fighting/Darkness/Metal\n"
         "    /Fairy/Dragon/Colorless) を入れる. 'Psychic' 等が入っていても矛盾扱い禁止.\n"
         "    (列名に 'Color' とあっても、TCG/MTG 共通フィールドのため Pokemon タイプ可)\n\n"
-        " 2. **rarity short code**: 公式 image filename 由来 (SAR/SR/AR/RR/UR/HR/MA/L 等).\n"
+        " 3. **rarity short code**: 公式 image filename 由来 (SAR/SR/AR/RR/UR/HR/MA/L 等).\n"
         "    eBay の rarity フィルタ値と一致するので、'SAR' = 'Special Art Rare', 'AR' = 'Art Rare'\n"
         "    等の表記揺れ (省略形 vs 展開形) で BLOCK しない.\n\n"
-        " 3. **set_name 表記揺れ**: PSA Brand が省略形で書く場合 (例: 'SV9-BATTLE PARTNERS' →\n"
+        " 4. **set_name 表記揺れ**: PSA Brand が省略形で書く場合 (例: 'SV9-BATTLE PARTNERS' →\n"
         "    catalog '拡張パック「バトルパートナーズ」'), iMakCatalog の set_name(EN) を正規とする.\n\n"
-        " 4. **card_number 一致 + ID hit がある場合、catalog 値を信頼**.\n"
+        " 5. **card_number 一致 + ID hit がある場合、catalog 値を信頼**.\n"
         "    検証は Subject/character/image 整合性に集中する.\n"
     )
 
