@@ -64,9 +64,12 @@ from profit_params import get_tier_params  # noqa: F401
 TOP_SELLER_MIN_FEEDBACK = 500       # 取引実績500件以上
 TOP_SELLER_MIN_PERCENTAGE = 98.0    # ポジティブ率98%以上
 
-# 薄商い market gate skip 閾値 (psa_to_csv.py と SSOT)
-# 出品数 ≤ MARKET_GATE_MIN_LISTINGS → median 不安定、gate skip でコストプラス価格採用
+# 市場 median gate skip 条件 (psa_to_csv.py と SSOT、OR で評価):
+#  (a) 出品数 ≤ MARKET_GATE_MIN_LISTINGS = 薄商い、median 不安定
+#  (b) target_usd ≤ MARKET_GATE_MAX_TARGET_USD = 低額帯、焦付きリスク低
+# どちらか満たせば 緩和 (gate skip でコストプラス価格採用、機会損失回避)
 MARKET_GATE_MIN_LISTINGS = 10
+MARKET_GATE_MAX_TARGET_USD = 250.0
 
 # CSV列名 → インデックスのマッピング（ヘッダーから動的に構築）
 HEADER_MAP = {}
@@ -473,12 +476,21 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
             "gap_limit_pct": gap_limit_pct,
         }
 
-        if total_count <= MARKET_GATE_MIN_LISTINGS:
-            # 薄商い: psa_to_csv.py と同条件、median 不安定 → gate skip
+        if total_count <= MARKET_GATE_MIN_LISTINGS or target_usd <= MARKET_GATE_MAX_TARGET_USD:
+            # 緩和条件 (OR、psa_to_csv.py と SSOT):
+            #  (a) 薄商い: 出品数 ≤ MARKET_GATE_MIN_LISTINGS → median 信頼度低
+            #  (b) 低額帯: target_usd ≤ MARKET_GATE_MAX_TARGET_USD → 焦付きリスク低
             # コストプラス価格 (target_usd) で出品継続、機会損失回避
             gate_status = "RELAX"
+            if total_count <= MARKET_GATE_MIN_LISTINGS and target_usd <= MARKET_GATE_MAX_TARGET_USD:
+                relax_reason = (f"出品{total_count}件≤{MARKET_GATE_MIN_LISTINGS}+"
+                                f"target≤${MARKET_GATE_MAX_TARGET_USD:.0f}")
+            elif total_count <= MARKET_GATE_MIN_LISTINGS:
+                relax_reason = f"出品{total_count}件≤{MARKET_GATE_MIN_LISTINGS} (median 不安定)"
+            else:
+                relax_reason = f"target ${target_usd:.0f}≤${MARKET_GATE_MAX_TARGET_USD:.0f} (低額帯)"
             gate_msg = (f"🔓 緩和 — 仕入¥{cost_jpy:,} → "
-                        f"出品{total_count}件≤{MARKET_GATE_MIN_LISTINGS} (median 不安定→gate skip) → "
+                        f"{relax_reason}→gate skip → "
                         f"${target_usd:.0f}で出品")
         elif gap_pct <= 0:
             gate_status = "GO"
@@ -736,7 +748,14 @@ def main(csv_path: str | None = None):
         elif gate["status"] == "RELAX":
             relax_count += 1
             c = gate["calc"]
-            print(f"  [{i+1}] {title_short}... → 🔓 緩和 出品{gate['total']}件≤{MARKET_GATE_MIN_LISTINGS} → ${c['target_usd']:.0f}で出品")
+            # 緩和理由 (出品数 / target_usd / 両方)
+            if gate['total'] <= MARKET_GATE_MIN_LISTINGS and c['target_usd'] <= MARKET_GATE_MAX_TARGET_USD:
+                tag = f"出品{gate['total']}件+target≤${MARKET_GATE_MAX_TARGET_USD:.0f}"
+            elif gate['total'] <= MARKET_GATE_MIN_LISTINGS:
+                tag = f"出品{gate['total']}件≤{MARKET_GATE_MIN_LISTINGS}"
+            else:
+                tag = f"target ${c['target_usd']:.0f}≤${MARKET_GATE_MAX_TARGET_USD:.0f}"
+            print(f"  [{i+1}] {title_short}... → 🔓 緩和 {tag} → ${c['target_usd']:.0f}で出品")
         elif gate["status"] == "HOLD":
             hold_count += 1
             c = gate["calc"]

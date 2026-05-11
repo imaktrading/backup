@@ -25,11 +25,12 @@ def test_threshold_constant_is_10():
 
 
 def test_source_has_threshold_skip_logic():
-    """source 内に 出品数 ≤ MARKET_GATE_MIN_LISTINGS の skip 分岐が存在."""
+    """source 内に 出品数 ≤ MARKET_GATE_MIN_LISTINGS の skip 分岐が存在 (OR 条件で target_usd と組合せ)."""
     src = (_TCG / "psa_to_csv.py").read_text(encoding='utf-8')
-    assert "if total <= MARKET_GATE_MIN_LISTINGS:" in src
+    # 5/11 PT2 で OR 条件化: target_usd ≤ MARKET_GATE_MAX_TARGET_USD も同時評価
+    assert "if total <= MARKET_GATE_MIN_LISTINGS or target_usd <= MARKET_GATE_MAX_TARGET_USD:" in src
     # 緩和ラベル、コストプラス価格採用
-    assert '"緩和 (薄商い)"' in src
+    assert '"緩和"' in src
     assert "🔓 緩和" in src
 
 
