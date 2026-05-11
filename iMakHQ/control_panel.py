@@ -267,6 +267,12 @@ SCRIPTS = [
         "cmd": ["python", "monthly_report.py"],
         "params": [],
     },
+    {
+        "label": "📊 今、見る (Seller Hub 分析)",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_view.py", "--analyze"],
+        "custom_buttons": "seller_hub_view",
+    },
 ]
 
 
@@ -1156,6 +1162,10 @@ class ListingPanel:
         if script.get("custom_buttons") == "ichibankuji":
             KujiWizardDialog(self.root, self)
             return
+        # Seller Hub 分析: カテゴリ選択ダイアログ
+        if script.get("custom_buttons") == "seller_hub_view":
+            SellerHubCategoryDialog(self.root, self, idx)
+            return
         if self.proc and self.proc.poll() is None:
             messagebox.showwarning("実行中", "他のスクリプトが実行中です。停止してから実行してください。")
             return
@@ -1258,6 +1268,77 @@ class ListingPanel:
             self.status_var.set("停止処理中")
         else:
             self.append_log("実行中のスクリプトはありません\n")
+
+
+class SellerHubCategoryDialog(tk.Toplevel):
+    """Seller Hub 分析: カテゴリ選択ダイアログ.
+
+    seller_hub_view.py --category <key> --analyze を起動するためのダイアログ.
+    選択肢: Porter / G-Shock / TCG / 一番くじ / Reel / 全件
+    """
+    CATEGORIES = [
+        ("porter",      "Porter (吉田カバン)"),
+        ("gshock",      "G-Shock"),
+        ("tcg",         "PSA 10 TCG"),
+        ("ichibankuji", "一番くじ"),
+        ("reel",        "釣具リール (Shimano/Daiwa)"),
+        ("",            "全件 (絞込なし)"),
+    ]
+
+    def __init__(self, parent, panel, script_idx):
+        super().__init__(parent)
+        self.panel = panel
+        self.script_idx = script_idx
+        self.title("📊 Seller Hub 分析 — カテゴリ選択")
+        self.geometry("420x320")
+        self.resizable(False, False)
+        self.transient(parent)
+
+        tk.Label(self, text="どのカテゴリの Active Listings を分析しますか？",
+                 font=("Yu Gothic UI", 11, "bold")).pack(pady=(12, 6))
+        tk.Label(self, text="View / Watchers / 死蔵候補 / 購買意欲を集計します。",
+                 font=("Yu Gothic UI", 9), fg="#666").pack(pady=(0, 10))
+
+        self.selected = tk.StringVar(value="porter")
+        radio_frame = ttk.Frame(self)
+        radio_frame.pack(fill="both", expand=True, padx=20)
+        for key, label in self.CATEGORIES:
+            ttk.Radiobutton(radio_frame, text=label, value=key,
+                            variable=self.selected).pack(anchor="w", pady=2)
+
+        button_frame = ttk.Frame(self)
+        button_frame.pack(fill="x", padx=20, pady=(8, 12))
+        ttk.Button(button_frame, text="キャンセル",
+                   command=self.destroy).pack(side="left")
+        ttk.Button(button_frame, text="▶ 実行",
+                   command=self._on_run).pack(side="right")
+
+    def _on_run(self):
+        category = self.selected.get()
+        script = SCRIPTS[self.script_idx]
+        cmd = list(script["cmd"])
+        if category:
+            cmd += ["--category", category]
+        self.destroy()
+        # ListingPanel の run_script フロー (subprocess + log) を流用
+        if self.panel.proc and self.panel.proc.poll() is None:
+            messagebox.showwarning("実行中", "他のスクリプトが実行中です。")
+            return
+        self.panel.clear_log()
+        cwd = script.get("cwd", os.getcwd())
+        self.panel.append_log(f"▶ Seller Hub 分析 [{category or '全件'}]\n  cwd: {cwd}\n  cmd: {' '.join(cmd)}\n\n")
+        try:
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            self.panel.proc = subprocess.Popen(
+                cmd, cwd=cwd,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                creationflags=creationflags,
+            )
+            self.panel.status_var.set("Seller Hub 分析中…")
+            threading.Thread(target=self.panel._reader, daemon=True).start()
+        except Exception as e:
+            self.panel.append_log(f"\n❌ 起動失敗: {e}\n")
 
 
 class KujiWizardDialog(tk.Toplevel):
