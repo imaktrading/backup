@@ -98,6 +98,31 @@ def extract_set_code_from_brand(brand: str) -> Optional[str]:
     m = re.search(r"\b(OP\d+|ST\d+|EB\d+|PRB\d+)\b", b)
     if m:
         return m.group(1)
+    # Bandai 海外 (US/EU) 限定 marketing 名 → Bandai 公式 set_code 正規化.
+    # PSA brand に set_code 番号 (OP12 等) が含まれず marketing 名のみのケースを救済.
+    # 2026-05-11: PSA cert #156485701 Vinsmoke Reiju #063 'ONE PIECE JAPANESE
+    # ADMIRABLE COLLECTION VOL 1 ...' が catalog miss → OP12-063 (Legacy of the
+    # Master 同名 SR 既存) と照合できず.
+    marketing_name_to_set = [
+        # (PSA brand regex, Bandai 公式 set_code)
+        (r"\bADMIRABLE COLLECTION VOL\.?\s*1\b",  "OP12"),  # Bandai NA 2025/2026 release
+        (r"\bLEGACY OF THE MASTER\b",             "OP12"),  # OP-12 英語公式名
+        (r"\bA FIST OF DIVINE SPEED\b",           "OP11"),  # OP-11 英語公式名
+        (r"\bROYAL BLOOD\b",                      "OP10"),  # OP-10
+        (r"\bTWO LEGENDS\b",                      "OP08"),
+        (r"\bWINGS OF THE CAPTAIN\b",             "OP06"),
+        (r"\b500 YEARS IN THE FUTURE\b",          "OP07"),
+        (r"\bNEW EMPEROR\b",                      "OP09"),  # OP-09 新たなる皇帝
+        (r"\bONE PIECE HEROINES EDITION\b",       "EB03"),
+        (r"\bANIME 25TH COLLECTION\b",            "EB02"),
+        (r"\bMEMORIAL COLLECTION\b",              "EB01"),
+        (r"\bEGGHEAD CRISIS\b",                   "EB04"),
+        (r"\bONE PIECE CARD THE BEST VOL\.?\s*2\b","PRB02"),
+        (r"\bONE PIECE CARD THE BEST\b",          "PRB01"),
+    ]
+    for pat, code in marketing_name_to_set:
+        if re.search(pat, b):
+            return code
     promo_keywords = [
         "PROMOS", "PROMO", "ONE PIECE DAY", "BANDAI CARD GAME FEST",
         "ANNIVERSARY", "PREMIUM CARD COLLECTION", "CHAMPIONSHIP",
