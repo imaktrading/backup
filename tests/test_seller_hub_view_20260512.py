@@ -207,12 +207,14 @@ def test_monthly_snapshot_readme_exists():
 
 
 def test_monthly_snapshot_alert_script_exists():
-    """通知 script monthly_snapshot_alert.py が存在し、toast 通知を実装."""
+    """通知 script monthly_snapshot_alert.py が存在し、modal 通知を実装 (OK 押すまで永続)."""
     alert = _HQ / "tools" / "monthly_snapshot_alert.py"
     assert alert.exists()
     src = alert.read_text(encoding="utf-8")
-    # win10toast or PowerShell フォールバック実装
-    assert "win10toast" in src or "ToastNotifier" in src
-    assert "NotifyIcon" in src  # フォールバック
+    # Tkinter MessageBox (modal、OK 押すまで永続)
+    assert "tkinter" in src.lower() or "messagebox" in src.lower()
+    assert "showinfo" in src  # modal で OK 押すまで残る
+    # PowerShell フォールバック
+    assert "MessageBox" in src
     # 通知タイトルに iMak Seller Hub
     assert "Seller Hub" in src

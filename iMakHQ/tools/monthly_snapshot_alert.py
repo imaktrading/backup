@@ -1,18 +1,17 @@
 """iMak Trading Japan - 月次 Seller Hub snapshot リマインダー通知.
 
 Windows タスクスケジューラから毎月 1 日 04:00 に呼ばれ、デスクトップに
-toast 通知を表示する。ユーザーが通知を見て手動で以下を実行:
+modal メッセージボックスを表示する (OK 押すまで永続)。
 
+通知方式: Tkinter MessageBox (modal)
+  - 朝 PC 触った瞬間に必ず気付く
+  - OK 押すまで画面中央に表示
+  - Python 標準 (追加 install 不要)
+
+ユーザーが OK を押した後、以下を手動実行:
   1. eBay Seller Hub > Reports > Unsold listings CSV を DL
      → C:\\dev\\iMak_data\\seller_hub\\official_unsold_YYYYMMDD.csv に rename 保存
   2. tools/monthly_seller_hub_snapshot.bat を実行 (scrape + View data 取得)
-
-自動実行ではなく通知のみにする理由:
-  - cookie 切れ等の失敗を人間が認識できる
-  - 公式 CSV DL とセットで人手介入の方が確実
-  - Profile lock 衝突回避 (Inventory cron 並走考慮)
-
-依存: pip install win10toast
 """
 from __future__ import annotations
 
@@ -26,48 +25,53 @@ except Exception:
 
 TITLE = "📊 iMak Seller Hub 月次 snapshot"
 MESSAGE = (
-    "eBay データ 90 日消失防止のリマインダー\n"
-    "1. Seller Hub > Reports > Unsold CSV を DL\n"
-    "2. monthly_seller_hub_snapshot.bat を実行"
+    "eBay データ 90 日消失防止のリマインダーです。\n\n"
+    "以下を順番に実行してください:\n\n"
+    "  1. Seller Hub > Reports > Unsold CSV をダウンロード\n"
+    "     https://www.ebay.com/sh/reports/downloads\n"
+    "     → iMak_data/seller_hub/ にリネーム保存\n\n"
+    "  2. tools/monthly_seller_hub_snapshot.bat を実行\n"
+    "     (Active/Ended 全件 scrape、約 10 分)\n\n"
+    "OK を押すと閉じます。"
 )
 
 
-def show_toast(title: str, message: str, duration: int = 30) -> bool:
-    """Windows toast 通知を表示. win10toast が無ければ msg.exe にフォールバック."""
-    # win10toast を優先 (Python 製、確実)
+def show_modal_alert(title: str, message: str) -> bool:
+    """Tkinter MessageBox で modal 通知. OK 押すまで永続."""
     try:
-        from win10toast import ToastNotifier  # type: ignore
-        toaster = ToastNotifier()
-        toaster.show_toast(title, message, duration=duration, threaded=False)
-        return True
-    except ImportError:
-        pass
-
-    # フォールバック: PowerShell の標準通知 (Windows.UI.Notifications)
-    import subprocess
-    ps_script = f'''
-Add-Type -AssemblyName System.Windows.Forms
-$notify = New-Object System.Windows.Forms.NotifyIcon
-$notify.Icon = [System.Drawing.SystemIcons]::Information
-$notify.Visible = $true
-$notify.ShowBalloonTip({duration * 1000}, "{title}", "{message}", [System.Windows.Forms.ToolTipIcon]::Info)
-Start-Sleep -Seconds {duration}
-'''
-    try:
-        subprocess.Popen([
-            "powershell", "-NoProfile", "-Command", ps_script
-        ], creationflags=subprocess.CREATE_NO_WINDOW)
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()  # メインウィンドウ隠す
+        root.attributes("-topmost", True)  # 最前面固定
+        messagebox.showinfo(title, message, parent=root)
+        root.destroy()
         return True
     except Exception as e:
-        print(f"[ERROR] 通知失敗: {e}")
-        return False
+        print(f"[ERROR] Tkinter messagebox 失敗: {e}")
+        # フォールバック: PowerShell MessageBox
+        try:
+            import subprocess
+            ps = (
+                f'Add-Type -AssemblyName PresentationFramework;'
+                f'[System.Windows.MessageBox]::Show('
+                f'"{message}", "{title}", "OK", "Information")'
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps],
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            return True
+        except Exception as e2:
+            print(f"[ERROR] PowerShell MessageBox も失敗: {e2}")
+            return False
 
 
 def main() -> int:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    print(f"[INFO] {timestamp} - 月次 Seller Hub snapshot リマインダー通知発火")
-    ok = show_toast(TITLE, MESSAGE)
-    print("[OK] 通知表示成功" if ok else "[WARN] 通知表示失敗")
+    print(f"[INFO] {timestamp} - 月次 Seller Hub snapshot リマインダー発火")
+    ok = show_modal_alert(TITLE, MESSAGE)
+    print("[OK] modal 通知表示完了" if ok else "[WARN] 通知表示失敗")
     return 0 if ok else 1
 
 
