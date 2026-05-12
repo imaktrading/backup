@@ -77,9 +77,22 @@ CATEGORY_LISTING_CMD = {
 
 
 def _sku_from_url(url: str) -> str:
-    """URL末尾12文字を SKU 抽出 (listing_common.extract_sku_from_url と同規約)."""
+    """URL から SKU 抽出 (Amazon ASIN / Mercari itemID / URL末尾12文字 の順で試行).
+
+    listing スクリプト側 (gshock_to_csv 等) の SKU 生成と整合させる:
+      Amazon: /dp/XXXXXXXXXX (10 文字)
+      Mercari: /item/m\\d+
+      その他: URL末尾12文字
+    """
     if not url:
         return ""
+    import re
+    m = re.search(r"/dp/([A-Z0-9]{10})", url)
+    if m:
+        return m.group(1)
+    m = re.search(r"/item/(m\d+)", url)
+    if m:
+        return m.group(1)
     return url.split("?")[0].split("#")[0].rstrip("/")[-12:].lstrip("/")
 
 
@@ -180,9 +193,7 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
 
     # mapping 用 SKU 計算 (results.url 末尾12文字)
     def _sku(u: str) -> str:
-        if not u:
-            return ""
-        return u.split("?")[0].split("#")[0].rstrip("/")[-12:].lstrip("/")
+        return _sku_from_url(u)
 
     pairs = []
     for r in results:
