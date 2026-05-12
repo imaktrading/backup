@@ -219,54 +219,161 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
                 spec_keys.add(k[2:])
     spec_cols = sorted(spec_keys)
 
-    # 1 listing = 1 行、OLD と NEW を列で並べる (Excel で見やすい)
-    base_cols = ["old_item_id", "sku", "status",
-                 "title_old", "title_new",
-                 "price_old", "price_new",
-                 "qty_old", "qty_new",
-                 "cond_old", "cond_new"]
-    spec_pair_cols = []
-    for k in spec_cols:
-        spec_pair_cols.extend([f"{k}_old", f"{k}_new"])
-    all_cols = base_cols + spec_pair_cols
+    # xlsx 出力 (Excel 条件付き書式で差分を赤ハイライト)
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import PatternFill, Font, Alignment
+    except ImportError:
+        print("[WARN] openpyxl 未インストール、CSV にフォールバック")
+        return _generate_diff_csv_fallback(pairs, spec_cols, DESKTOP_DIR)
 
     os.makedirs(DESKTOP_DIR, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = os.path.join(DESKTOP_DIR, f"relist_diff_{ts}.csv")
+    out_path = os.path.join(DESKTOP_DIR, f"relist_diff_{ts}.xlsx")
 
-    with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=all_cols, quoting=csv.QUOTE_NONNUMERIC,
-                           extrasaction="ignore")
-        w.writeheader()
-        for p in pairs:
-            old = p["old"]
-            new = p["new"]
-            specs_old = old.get("_specs") or {}
-            new_title = new.get("*Title", "")
-            row = {
-                "old_item_id": p["item_id"],
-                "sku": p["sku"],
-                "status": "出品" if new_title else "見送り",
-                "title_old": old.get("title", ""),
-                "title_new": new_title,
-                "price_old": old.get("price_usd", ""),
-                "price_new": new.get("*StartPrice", ""),
-                "qty_old": old.get("quantity", ""),
-                "qty_new": new.get("*Quantity", ""),
-                "cond_old": old.get("condition", ""),
-                "cond_new": new.get("ConditionID", ""),
-            }
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "diff"
+    base_pairs = [("title", "Title"), ("price_usd", "Price"),
+                  ("quantity", "Qty"), ("condition", "Condition")]
+
+    # ヘッダー: 1行目「項目」、2行目「OLD/NEW」
+    headers_top = ["ItemID", "SKU", "判定", "差分"]
+    headers_sub = ["",       "",    "",   ""]
+    for fld, label in base_pairs:
+        headers_top.extend([label, ""])
+        headers_sub.extend(["OLD", "NEW"])
+    for k in spec_cols:
+        headers_top.extend([k, ""])
+        headers_sub.extend(["OLD", "NEW"])
+    ws.append(headers_top)
+    ws.append(headers_sub)
+
+    # 2行ヘッダーのマージ
+    col = 5  # 5列目から base_pairs 開始
+    for _ in base_pairs:
+        ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + 1)
+        col += 2
+    for _ in spec_cols:
+        ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + 1)
+        col += 2
+
+    # スタイル
+    diff_fill = PatternFill(start_color="FFE699", end_color="FFE699", fill_type="solid")
+    skip_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    bold = Font(bold=True)
+    for c in ws[1]:
+        c.font = bold
+        c.alignment = Alignment(horizontal="center")
+    for c in ws[2]:
+        c.font = bold
+        c.alignment = Alignment(horizontal="center")
+
+    # データ行
+    for p in pairs:
+        old = p["old"]
+        new = p["new"]
+        specs_old = old.get("_specs") or {}
+        new_title = new.get("*Title", "")
+        is_skip = not new_title
+
+        # 差分検出 (どの項目が変わったか)
+        diffs = []
+        def _norm(v): return str(v or "").strip()
+        old_v = {
+            "title":     _norm(old.get("title")),
+            "price_usd": _norm(old.get("price_usd")),
+            "quantity":  _norm(old.get("quantity")),
+            "condition": _norm(old.get("condition")),
+        }
+        new_v = {
+            "title":     _norm(new.get("*Title")),
+            "price_usd": _norm(new.get("*StartPrice")),
+            "quantity":  _norm(new.get("*Quantity")),
+            "condition": _norm(new.get("ConditionID")),
+        }
+        for fld, label in base_pairs:
+            if not is_skip and old_v[fld] != new_v[fld]:
+                diffs.append(label)
+        for k in spec_cols:
+            ov = _norm(specs_old.get(k))
+            nv = _norm(new.get(f"C:{k}"))
+            if not is_skip and ov != nv and (ov or nv):
+                diffs.append(k)
+
+        row_vals = [p["item_id"], p["sku"], "見送り" if is_skip else "出品",
+                    ", ".join(diffs) if diffs else ("" if is_skip else "変更なし")]
+        # base pairs
+        row_vals.extend([old_v["title"],     new_v["title"]])
+        row_vals.extend([old_v["price_usd"], new_v["price_usd"]])
+        row_vals.extend([old_v["quantity"],  new_v["quantity"]])
+        row_vals.extend([old_v["condition"], new_v["condition"]])
+        # specs
+        for k in spec_cols:
+            row_vals.extend([_norm(specs_old.get(k)), _norm(new.get(f"C:{k}"))])
+        ws.append(row_vals)
+
+        # 差分セルをハイライト
+        row_idx = ws.max_row
+        if is_skip:
+            for c in ws[row_idx]:
+                c.fill = skip_fill
+        else:
+            # base pairs
+            col_idx = 5  # E 列から
+            for fld, _ in base_pairs:
+                if old_v[fld] != new_v[fld]:
+                    ws.cell(row=row_idx, column=col_idx).fill = diff_fill
+                    ws.cell(row=row_idx, column=col_idx + 1).fill = diff_fill
+                col_idx += 2
             for k in spec_cols:
-                row[f"{k}_old"] = specs_old.get(k, "")
-                row[f"{k}_new"] = new.get(f"C:{k}", "")
-            w.writerow(row)
+                ov = _norm(specs_old.get(k))
+                nv = _norm(new.get(f"C:{k}"))
+                if ov != nv and (ov or nv):
+                    ws.cell(row=row_idx, column=col_idx).fill = diff_fill
+                    ws.cell(row=row_idx, column=col_idx + 1).fill = diff_fill
+                col_idx += 2
 
-    print(f"\n📋 ビフォーアフター CSV: {out_path}")
+    # 列幅自動調整 (簡易)
+    for col_cells in ws.columns:
+        try:
+            col_letter = col_cells[0].column_letter
+            max_len = max((len(str(c.value or "")) for c in col_cells), default=10)
+            ws.column_dimensions[col_letter].width = min(max(max_len + 2, 8), 40)
+        except Exception:
+            continue
+    ws.freeze_panes = "E3"  # 1-2 行ヘッダー + A-D 列固定
+    wb.save(out_path)
+
+    print(f"\n📋 ビフォーアフター xlsx: {out_path}")
     try:
         os.startfile(out_path)
         print(f"   → Excel 自動 open")
     except Exception as e:
         print(f"   [WARN] auto-open 失敗: {e}")
+    return out_path
+
+
+def _generate_diff_csv_fallback(pairs, spec_cols, desktop_dir):
+    """openpyxl 未インストール時のフォールバック (CSV)."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(desktop_dir, f"relist_diff_{ts}.csv")
+    cols = ["item_id", "sku", "status",
+            "title_old", "title_new", "price_old", "price_new"]
+    with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=cols, quoting=csv.QUOTE_NONNUMERIC,
+                           extrasaction="ignore")
+        w.writeheader()
+        for p in pairs:
+            new_title = p["new"].get("*Title", "")
+            w.writerow({
+                "item_id": p["item_id"], "sku": p["sku"],
+                "status": "出品" if new_title else "見送り",
+                "title_old": p["old"].get("title", ""),
+                "title_new": new_title,
+                "price_old": p["old"].get("price_usd", ""),
+                "price_new": p["new"].get("*StartPrice", ""),
+            })
     return out_path
 
 
