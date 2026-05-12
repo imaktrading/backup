@@ -392,13 +392,14 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
         print("[INFO] OLD/NEW pair 生成対象なし、diff CSV skip")
         return ""
 
-    # spec keys union
+    # spec keys union (base 列と重複する "Condition" は除外)
     spec_keys = set()
     for p in pairs:
         spec_keys.update((p["old"].get("_specs") or {}).keys())
         for k in p["new"].keys():
             if k.startswith("C:") and p["new"].get(k):
                 spec_keys.add(k[2:])
+    spec_keys.discard("Condition")  # base 列と重複
     spec_cols = sorted(spec_keys)
 
     # xlsx 出力 (1 listing = 1 行、変更項目のみ表示)
