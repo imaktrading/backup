@@ -70,6 +70,9 @@ def save_old_state_csv(item_ids: list[str], results: list[dict]) -> str:
 
     NEW state (= Add CSV) と pair して relist_diff_*.csv を生成するための土台。
     Selenium 利用、1 listing 約 5-10 秒、N 件で N*10 秒。
+
+    NB: スプシ A列 URL は Mercari (仕入元) なので scrape しない。eBay item_id から
+        公開 URL https://www.ebay.com/itm/<id> を生成して scrape する。
     """
     import json
     sys.path.insert(0, os.path.normpath(os.path.join(
@@ -80,22 +83,25 @@ def save_old_state_csv(item_ids: list[str], results: list[dict]) -> str:
         print(f"[WARN] ebay_listing_scraper import 失敗: {e} → OLD state scrape skip")
         return ""
 
-    # OK のみ scrape (NOT_FOUND は URL 不明)
-    ok_results = [r for r in results if r.get("status") == "OK" and r.get("url")]
-    urls = [r["url"] for r in ok_results]
-    if not urls:
+    # OK の eBay ItemID から公開 URL を生成 (スプシ A列 = Mercari URL は使わない)
+    ok_results = [r for r in results if r.get("status") == "OK" and r.get("item_id")]
+    ebay_urls = [f"https://www.ebay.com/itm/{r['item_id']}" for r in ok_results]
+    if not ebay_urls:
         print("[INFO] OLD state scrape 対象なし")
         return ""
 
-    print(f"\n=== OLD state scrape: {len(urls)} listings (約 {len(urls) * 8} 秒) ===")
+    print(f"\n=== OLD state scrape: {len(ebay_urls)} listings (約 {len(ebay_urls) * 8} 秒) ===")
 
     def _progress(i, total, r):
         title_short = (r.get("title") or "")[:50]
         err = r.get("scrape_error", "")
-        marker = "✗" if err else "✓"
-        print(f"  [{i}/{total}] {marker} {r.get('item_id', '?')} {title_short}{' err=' + err if err else ''}")
+        marker = "✗" if err or not r.get("title") else "✓"
+        spec_count = len(r.get("specifics") or {})
+        print(f"  [{i}/{total}] {marker} {r.get('item_id', '?')} "
+              f"title={title_short!r} specs={spec_count}"
+              f"{' err=' + err if err else ''}")
 
-    scraped = scrape_listings_batch(urls, wait_seconds=5, progress_callback=_progress)
+    scraped = scrape_listings_batch(ebay_urls, wait_seconds=5, progress_callback=_progress)
 
     # CSV 保存
     os.makedirs(OUTPUT_DIR, exist_ok=True)
