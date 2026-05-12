@@ -74,6 +74,56 @@ def load_sample_item_ids(sample_csv: str) -> list[str]:
     return ids
 
 
+def auto_extract_targets(category: str, max_listings: int) -> list[str]:
+    """最新 snapshot から指定カテゴリの改善対象 item_id を抽出 (US-only).
+
+    条件: 14日超 + views=0 + watchers=0 + qty>=1 + listing_site=US + categorize 一致
+    """
+    import sys
+    import glob
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from seller_hub_tier import filter_improvement_targets, categorize_by_keyword
+
+    # 最新 snapshot 自動選択
+    snapshots = sorted(glob.glob(r"C:\dev\iMak_data\seller_hub\snapshot_active_all_*.csv"))
+    if not snapshots:
+        print("[ERROR] snapshot CSV が見つかりません")
+        return []
+    snap_path = snapshots[-1]
+    print(f"📂 snapshot: {os.path.basename(snap_path)}")
+
+    with open(snap_path, "r", encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+
+    # filter: 14日超 + views=0 + watchers=0 + qty>=1 + US
+    targets = filter_improvement_targets(
+        rows, min_days=14, max_views_for_zero_watch=5, site="US",
+    )
+    targets = [t for t in targets
+               if int(t.get("views", "0") or 0) == 0
+               and int(t.get("watchers", "0") or 0) == 0
+               and int(t.get("quantity_available", "0") or 0) >= 1]
+
+    # category map: CLI category → categorize_by_keyword の返り値
+    CAT_MAP = {
+        "tshirt": "UNIQLO UT",
+        "porter": "Porter",
+        "gshock": "G-Shock",
+        "tcg": "PSA10 TCG",
+        "reel": "Reel",
+        "ichibankuji": "Ichiban Kuji",
+        "tomica": "Tomica",
+        "montbell": "Montbell",  # categorize にないが今後追加可
+        "other": "Other",
+    }
+    target_cat = CAT_MAP.get(category.lower(), category)
+    filtered = [t for t in targets if categorize_by_keyword(t.get("title", "")) == target_cat]
+
+    # max_listings 上限
+    filtered = filtered[:max_listings]
+    return [t["item_id"] for t in filtered if t.get("item_id")]
+
+
 def find_and_update_row(ws, item_id: str, dry_run: bool = True) -> dict | None:
     """スプシ ws で item_id を B 列で検索、見つかれば B 列のみ空欄化.
 
@@ -159,21 +209,35 @@ def generate_end_csv(item_ids: list[str]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sample", required=True, help="改善対象 sample CSV path")
+    parser.add_argument("--sample", help="改善対象 sample CSV path (省略時は --category から自動抽出)")
+    parser.add_argument("--category", help="カテゴリ指定で snapshot から自動抽出 (tshirt/porter/gshock/tcg/reel/ichibankuji/tomica/montbell/other)")
+    parser.add_argument("--max-listings", type=int, default=50, help="1 回処理上限 (default: 50)")
     parser.add_argument("--execute", action="store_true",
                         help="本書込実行 (default: dry-run)")
     parser.add_argument("--skip-end-csv", action="store_true",
                         help="End CSV 生成を skip (Step 1 のみ実行)")
     args = parser.parse_args()
 
+    if not args.sample and not args.category:
+        print("[ERROR] --sample <path> or --category <name> のいずれか必須")
+        return 1
+
     dry_run = not args.execute
 
-    # サンプル item_id list 取得
-    item_ids = load_sample_item_ids(args.sample)
-    print(f"📂 sample: {args.sample}")
+    # サンプル item_id 取得 (--sample CSV or --category 自動抽出)
+    if args.sample:
+        item_ids = load_sample_item_ids(args.sample)
+        print(f"📂 sample: {args.sample}")
+    else:
+        item_ids = auto_extract_targets(args.category, args.max_listings)
+        print(f"📂 自動抽出: category={args.category}, max={args.max_listings}")
     print(f"   対象 item_id: {len(item_ids)} 件")
     print(f"   mode: {'DRY-RUN' if dry_run else 'EXECUTE'}")
     print()
+
+    if not item_ids:
+        print("[INFO] 対象 0 件、終了")
+        return 0
 
     # gspread 接続
     import gspread

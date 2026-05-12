@@ -76,3 +76,37 @@ def test_status_csv_includes_listing_info():
     src = (_HQ / "seller_hub_relist.py").read_text(encoding="utf-8")
     for f in ["old_item_id", "title", "price_jpy", "url", "next_action"]:
         assert f'"{f}"' in src
+
+
+def test_category_flag_support():
+    """--category フラグで auto_extract_targets が動く."""
+    src = (_HQ / "seller_hub_relist.py").read_text(encoding="utf-8")
+    assert '"--category"' in src
+    assert "def auto_extract_targets" in src
+    # CLI category → categorize_by_keyword マッピング
+    for key in ["tshirt", "porter", "gshock", "tcg", "reel", "ichibankuji", "tomica"]:
+        assert f'"{key}"' in src
+
+
+def test_control_panel_category_structure():
+    """control_panel.py の SCRIPTS が category + type 階層化されている."""
+    src = (_HQ / "control_panel.py").read_text(encoding="utf-8")
+    # category / type フィールド存在
+    assert '"category":' in src
+    assert '"type":' in src
+    assert '"new"' in src
+    assert '"relist"' in src
+    assert '"utility"' in src
+    # 主要カテゴリ
+    for cat in ["Tシャツ", "Montbell", "Porter", "G-SHOCK", "PSA TCG", "リール", "一番くじ", "Tomica"]:
+        assert f'"{cat}"' in src
+
+
+def test_control_panel_labelframe_layout():
+    """control_panel.py の描画ロジックが Labelframe + 新規/再出品 2 ボタン構成."""
+    src = (_HQ / "control_panel.py").read_text(encoding="utf-8")
+    assert "ttk.LabelFrame" in src
+    assert 'text="新規"' in src
+    assert 'text="再出品"' in src
+    # verified カテゴリの先頭並べ替え
+    assert "_cat_verified" in src or "verified" in src

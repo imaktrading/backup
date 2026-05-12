@@ -164,49 +164,66 @@ def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
 
 
 # ============ スクリプト登録 ============
+# 5/12: カテゴリ別に「新規 / 再出品」2ボタン構成 (パネル UI で Labelframe グループ化)
+# - category: グループ枠名 (None = utility 単独ボタン)
+# - type: "new" / "relist" / "utility"
+# - 再出品 ボタンは seller_hub_relist.py --category <key> で対象抽出 + B 列空欄化 + End CSV 生成
 SCRIPTS = [
+    # ===== カテゴリ別 listing (新規/再出品 ペア) =====
     {
-        "label": "Tシャツ",
+        "category": "Tシャツ", "type": "new", "label": "新規",
         "verified": True,  # 2026-04-19 ユーザーチェック合格
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "tshirt_listing.py"],
         "params": [],
     },
     {
-        "label": "Montbell",
+        "category": "Tシャツ", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "tshirt", "--execute"],
+        "params": [],
+    },
+    {
+        "category": "Montbell", "type": "new", "label": "新規",
         "verified": True,  # 2026-05-05 ユーザーチェック合格
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "montbell_listing.py"],
         "params": [],
     },
     {
-        "label": "Porter",
+        "category": "Montbell", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "montbell", "--execute"],
+        "params": [],
+    },
+    {
+        "category": "Porter", "type": "new", "label": "新規",
         "verified": True,  # 2026-04-19 ユーザーチェック合格
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "porter"],
         "params": [],
     },
     {
-        "label": "G-SHOCK",
+        "category": "Porter", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "porter", "--execute"],
+        "params": [],
+    },
+    {
+        "category": "G-SHOCK", "type": "new", "label": "新規",
         "verified": True,  # 2026-05-06 ユーザーチェック合格
         "cwd": f"{WORKSPACE}/iMakG-shock",
         "cmd": ["python", "gshock_to_csv.py"],
         "params": [],
     },
     {
-        "label": "G-SHOCK 未出品モデル発見",
-        "cwd": f"{WORKSPACE}/iMakG-shock/casio_finder",
-        "cmd": ["python", "casio_finder.py"],
+        "category": "G-SHOCK", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "gshock", "--execute"],
         "params": [],
     },
     {
-        "label": "G-SHOCK 未出品モデル (catalog)",
-        "cwd": f"{WORKSPACE}/iMakG-shock/casio_finder",
-        "cmd": ["python", "casio_finder_from_catalog.py"],
-        "params": [],
-    },
-    {
-        "label": "PSA TCG",
+        "category": "PSA TCG", "type": "new", "label": "新規",
         "verified": True,  # 2026-04-24 及第点到達
         "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須
         "cwd": f"{WORKSPACE}/iMakTCG",
@@ -214,14 +231,26 @@ SCRIPTS = [
         "params": [],
     },
     {
-        "label": "リール",
+        "category": "PSA TCG", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "tcg", "--execute"],
+        "params": [],
+    },
+    {
+        "category": "リール", "type": "new", "label": "新規",
         "verified": True,  # 2026-04-24 実戦検証合格
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "reel"],
         "params": [],
     },
     {
-        "label": "一番くじ",
+        "category": "リール", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "reel", "--execute"],
+        "params": [],
+    },
+    {
+        "category": "一番くじ", "type": "new", "label": "新規",
         "verified": True,
         "cwd": f"{WORKSPACE}/iMak_ichibankuji",
         "cmd": ["python", "ichibankuji_to_csv.py"],
@@ -229,18 +258,52 @@ SCRIPTS = [
         "custom_buttons": "ichibankuji",
     },
     {
-        "label": "Tomica",
+        "category": "一番くじ", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "ichibankuji", "--execute"],
+        "params": [],
+    },
+    {
+        "category": "Tomica", "type": "new", "label": "新規",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "tomica"],
         "params": [],
     },
     {
-        "label": "その他混在シート (CSV運用)",
+        "category": "Tomica", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "tomica", "--execute"],
+        "params": [],
+    },
+    {
+        "category": "その他混在", "type": "new", "label": "新規",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_to_ebay_csv.py"],
         "params": [],
     },
     {
+        "category": "その他混在", "type": "relist", "label": "再出品",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_relist.py", "--category", "other", "--execute"],
+        "params": [],
+    },
+    # ===== Utility 単独ボタン (カテゴリなし) =====
+    {
+        "category": None, "type": "utility",
+        "label": "G-SHOCK 未出品モデル発見",
+        "cwd": f"{WORKSPACE}/iMakG-shock/casio_finder",
+        "cmd": ["python", "casio_finder.py"],
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "G-SHOCK 未出品モデル (catalog)",
+        "cwd": f"{WORKSPACE}/iMakG-shock/casio_finder",
+        "cmd": ["python", "casio_finder_from_catalog.py"],
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
         "label": "モンベル公式アウトレット 巡回",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "montbell_outlet_scraper.py"],
@@ -250,24 +313,28 @@ SCRIPTS = [
         ],
     },
     {
+        "category": None, "type": "utility",
         "label": "モンベル 取下げCSV生成",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "montbell_end_items.py"],
         "params": [],
     },
     {
+        "category": None, "type": "utility",
         "label": "Mercari スカウト",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_scout.py"],
         "params": [],
     },
     {
+        "category": None, "type": "utility",
         "label": "📊 月次レポート生成",
         "cwd": f"{WORKSPACE}/iMakHQ",
         "cmd": ["python", "monthly_report.py"],
         "params": [],
     },
     {
+        "category": None, "type": "utility",
         "label": "📊 今、見る (Seller Hub 分析)",
         "cwd": f"{WORKSPACE}/iMakHQ",
         "cmd": ["python", "seller_hub_view.py", "--analyze"],
@@ -1079,30 +1146,77 @@ class ListingPanel:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # 4 列グリッドで大きめボタン配置 (抽出くん風)
-        # ボタン自体に script label を表示、verified=True は青文字、それ以外は黒
-        n_cols = 4
-        for col in range(n_cols):
-            scroll_frame.columnconfigure(col, weight=1, uniform="col")
-
+        # 5/12 構成変更: カテゴリ別 Labelframe + 新規/再出品 2ボタン + Utility 単独ボタン
+        # - 新規ボタン: verified=True → 青、それ以外 → 黒 (既存ルール維持)
+        # - 再出品ボタン: 黒
+        # - verified カテゴリを先頭にまとめる (ユーザー要望)
         self.param_entries = {}
-        self._run_log = None  # subprocess stdout の永続 log file (run_script で open)
+        self._run_log = None
+
+        # 1) SCRIPTS をカテゴリ別に分類
+        categories: dict[str, dict[str, int]] = {}  # {category: {type: script_idx}}
+        utilities: list[int] = []
         for i, script in enumerate(SCRIPTS):
-            r, c = divmod(i, n_cols)
-            label_color = "#0066cc" if script.get("verified", False) else "black"
-            btn = tk.Button(
-                scroll_frame,
-                text=script["label"],
-                font=("", 10, "bold"),
-                fg=label_color,
-                width=20, height=2,
-                wraplength=180,
-                justify="center",
-                command=lambda idx=i: self.run_script(idx),
-            )
-            btn.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
-            # params 入力 UI は廃止 (大半が default 空欄。必要時はコード側で edit)
+            cat = script.get("category")
+            typ = script.get("type", "new")
+            if cat is None or typ == "utility":
+                utilities.append(i)
+            else:
+                categories.setdefault(cat, {})[typ] = i
             self.param_entries[i] = {}
+
+        # verified=True カテゴリ (= 新規が青文字) を先頭にソート
+        def _cat_verified(cat_name: str) -> int:
+            new_idx = categories[cat_name].get("new")
+            if new_idx is None:
+                return 1
+            return 0 if SCRIPTS[new_idx].get("verified", False) else 1
+        cat_order = sorted(categories.keys(), key=_cat_verified)
+
+        # 2) カテゴリ別 Labelframe を 3 列で配置 (verified 先頭)
+        cat_outer = ttk.Frame(scroll_frame)
+        cat_outer.pack(fill="x", padx=4, pady=4)
+        n_cat_cols = 3
+        for col in range(n_cat_cols):
+            cat_outer.columnconfigure(col, weight=1, uniform="catcol")
+        for ci, cat_name in enumerate(cat_order):
+            actions = categories[cat_name]
+            r, c = divmod(ci, n_cat_cols)
+            frame = ttk.LabelFrame(cat_outer, text=cat_name, padding=4)
+            frame.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+            # 「新規」ボタン (verified=True → 青、それ以外 → 黒)
+            new_idx = actions.get("new")
+            if new_idx is not None:
+                new_color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
+                tk.Button(
+                    frame, text="新規", font=("", 10, "bold"),
+                    fg=new_color, width=10, height=1,
+                    command=lambda idx=new_idx: self.run_script(idx),
+                ).pack(side="left", padx=4, pady=2)
+            # 「再出品」ボタン (黒)
+            relist_idx = actions.get("relist")
+            if relist_idx is not None:
+                tk.Button(
+                    frame, text="再出品", font=("", 10, "bold"),
+                    fg="black", width=10, height=1,
+                    command=lambda idx=relist_idx: self.run_script(idx),
+                ).pack(side="left", padx=4, pady=2)
+
+        # 3) Utility 単独ボタンは 4 列 grid で別枠
+        util_outer = ttk.LabelFrame(scroll_frame, text="Utility / 分析", padding=4)
+        util_outer.pack(fill="x", padx=4, pady=8)
+        n_util_cols = 4
+        for col in range(n_util_cols):
+            util_outer.columnconfigure(col, weight=1, uniform="utilcol")
+        for ui, idx in enumerate(utilities):
+            script = SCRIPTS[idx]
+            r, c = divmod(ui, n_util_cols)
+            label_color = "#0066cc" if script.get("verified", False) else "black"
+            tk.Button(
+                util_outer, text=script["label"], font=("", 10, "bold"),
+                fg=label_color, width=20, height=2, wraplength=180, justify="center",
+                command=lambda i=idx: self.run_script(i),
+            ).grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
 
         # 状態ライン
         status_frame = ttk.Frame(root)
