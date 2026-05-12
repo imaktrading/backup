@@ -128,10 +128,13 @@ def load_sample_item_ids(sample_csv: str) -> list[str]:
     return ids
 
 
-def auto_extract_targets(category: str, max_listings: int) -> list[str]:
+def auto_extract_targets(category: str, max_listings: int = 0) -> list[str]:
     """最新 snapshot から指定カテゴリの改善対象 item_id を抽出 (US-only).
 
     条件: 14日超 + views=0 + watchers=0 + qty>=1 + listing_site=US + categorize 一致
+
+    max_listings: 0 or None = キャップなし (スプシ在 filter 後に適用するため、
+                  ここでは制限しないのが推奨)。
     """
     import sys
     import glob
@@ -173,8 +176,9 @@ def auto_extract_targets(category: str, max_listings: int) -> list[str]:
     target_cat = CAT_MAP.get(category.lower(), category)
     filtered = [t for t in targets if categorize_by_keyword(t.get("title", "")) == target_cat]
 
-    # max_listings 上限
-    filtered = filtered[:max_listings]
+    # max_listings 上限 (caller 側で再制限可、0/None でキャップなし)
+    if max_listings and max_listings > 0:
+        filtered = filtered[:max_listings]
     return [t["item_id"] for t in filtered if t.get("item_id")]
 
 
@@ -309,13 +313,14 @@ def main() -> int:
     dry_run = not args.execute
 
     # サンプル item_id 取得 (--sample CSV or --category 自動抽出)
+    # max_listings はスプシ在 filter 後 (main 内) で適用するため、ここでは 0 で全件取得
     if args.sample:
         item_ids = load_sample_item_ids(args.sample)
         print(f"📂 sample: {args.sample}")
     else:
-        item_ids = auto_extract_targets(args.category, args.max_listings)
-        print(f"📂 自動抽出: category={args.category}, max={args.max_listings}")
-    print(f"   対象 item_id: {len(item_ids)} 件")
+        item_ids = auto_extract_targets(args.category, max_listings=0)
+        print(f"📂 自動抽出: category={args.category} (snapshot 一致全件、max={args.max_listings} はスプシ在 filter 後に適用)")
+    print(f"   候補 item_id: {len(item_ids)} 件")
     print(f"   mode: {'DRY-RUN' if dry_run else 'EXECUTE'}")
     print()
 
@@ -346,7 +351,29 @@ def main() -> int:
             print(f"  [ERROR] sheet {sheet_cfg['label']} 取得失敗 (retry 後): {e}")
             sheet_caches[sheet_cfg["id"]] = None
 
-    # 2. 検索 phase (in-memory、API 不要)
+    # 2. スプシ B 列に存在する item_id を抽出 (5/12 ユーザー判断: スプシ未登録は除外)
+    sheet_item_ids: set[str] = set()
+    for cache in sheet_caches.values():
+        if cache is None:
+            continue
+        for row in cache["rows"][1:]:  # skip header
+            iid = row[COL_ITEM_ID - 1].strip() if len(row) > COL_ITEM_ID - 1 else ""
+            if iid and iid.isdigit():
+                sheet_item_ids.add(iid)
+    before_filter = len(item_ids)
+    item_ids = [iid for iid in item_ids if iid in sheet_item_ids]
+    skipped_orphan = before_filter - len(item_ids)
+    if skipped_orphan:
+        print(f"  🚫 スプシ未登録 (在庫持ち等) を除外: {skipped_orphan} 件")
+    # max_listings 適用 (filter 後)
+    if args.max_listings and args.max_listings > 0:
+        item_ids = item_ids[:args.max_listings]
+    print(f"   処理対象: {len(item_ids)} 件 (max-listings={args.max_listings} 適用後)")
+    if not item_ids:
+        print("[INFO] スプシ在 filter 後 0 件、終了")
+        return 0
+
+    # 3. 検索 phase (in-memory、API 不要)
     results = []
     for iid in item_ids:
         found = False
