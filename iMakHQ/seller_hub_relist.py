@@ -61,6 +61,45 @@ END_CSV_HEADER = [
 END_CODE = "OtherListingError"  # Cassini reset 目的、汎用 code 使用 (NotAvailable は売切専用)
 OUTPUT_DIR = r"c:\dev\iMak_data\revise"
 
+# カテゴリ → listing スクリプト の mapping (再出品 1 ボタン完結用)
+_WORKSPACE = r"c:\dev\iMak"
+CATEGORY_LISTING_CMD = {
+    "tshirt":      {"cwd": f"{_WORKSPACE}/iMakMercari",     "cmd": ["python", "tshirt_listing.py"]},
+    "montbell":    {"cwd": f"{_WORKSPACE}/iMakMercari",     "cmd": ["python", "montbell_listing.py"]},
+    "porter":      {"cwd": f"{_WORKSPACE}/iMakMercari",     "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "porter"]},
+    "gshock":      {"cwd": f"{_WORKSPACE}/iMakG-shock",     "cmd": ["python", "gshock_to_csv.py"]},
+    "tcg":         {"cwd": f"{_WORKSPACE}/iMakTCG",          "cmd": ["python", "psa_to_csv.py"]},
+    "reel":        {"cwd": f"{_WORKSPACE}/iMakMercari",     "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "reel"]},
+    "ichibankuji": {"cwd": f"{_WORKSPACE}/iMak_ichibankuji", "cmd": ["python", "ichibankuji_to_csv.py"]},
+    "tomica":      {"cwd": f"{_WORKSPACE}/iMakMercari",     "cmd": ["python", "mercari_to_ebay_csv.py", "--sheet", "tomica"]},
+    "other":       {"cwd": f"{_WORKSPACE}/iMakMercari",     "cmd": ["python", "mercari_to_ebay_csv.py"]},
+}
+
+
+def invoke_listing_script(category: str) -> int:
+    """End CSV 生成後に listing スクリプトを subprocess で起動して Add CSV まで生成.
+
+    Returns: subprocess return code (0=success)
+    """
+    import subprocess
+    cfg = CATEGORY_LISTING_CMD.get(category.lower())
+    if not cfg:
+        print(f"[INFO] {category} は listing スクリプト未定義、Add CSV 自動生成 skip")
+        return 0
+    print(f"\n=== Step 3: Add CSV 生成 ({category}) ===")
+    print(f"  cwd: {cfg['cwd']}")
+    print(f"  cmd: {' '.join(cfg['cmd'])}")
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
+    try:
+        p = subprocess.run(cfg["cmd"], cwd=cfg["cwd"], env=env,
+                           stdout=sys.stdout, stderr=subprocess.STDOUT)
+        return p.returncode
+    except Exception as e:
+        print(f"  [ERROR] listing スクリプト起動失敗: {e}")
+        return 1
+
 
 # ============================================================================
 # OLD listing scrape (5/12 追加: ビフォーアフター CSV 用)
@@ -458,6 +497,10 @@ def main() -> int:
             print(f"=== Step 2: End CSV 生成 ===")
             print(f"  ✅ 出力: {end_csv_path}")
             print(f"  件数: {len(ok_ids)}")
+
+    # Step 3: Add CSV 生成 (listing スクリプト自動起動) - execute かつ OK 件数 > 0 の時のみ
+    if not dry_run and ok_count > 0 and args.category:
+        invoke_listing_script(args.category)
 
     print()
     if dry_run:
