@@ -188,12 +188,22 @@ def _extract_item_specifics(driver) -> dict[str, str]:
 
 
 def _extract_condition(driver) -> str:
+    """listing 状態を抽出. Item Specifics の Condition 値が一番信頼できるので
+    後段 (scrape_listing_detail) で specifics 取得後に上書きする想定。
+    ここでは明示的に condition セクション をピンポイント検索。"""
     elem = _find_first(driver, [
-        (By.CSS_SELECTOR, "[data-testid='ux-textual-display'] .ux-textspans"),
+        (By.CSS_SELECTOR, ".x-item-condition-text .ux-textspans-positive"),
         (By.CSS_SELECTOR, ".x-item-condition-text .ux-textspans"),
         (By.CSS_SELECTOR, ".condText"),
     ])
-    return _safe_text(elem) if elem else ""
+    if not elem:
+        return ""
+    txt = _safe_text(elem)
+    # "or Best Offer" / "Best Offer" は condition でなく価格オプションなので除外
+    if "Best Offer" in txt and ("New" not in txt and "Used" not in txt
+                                 and "Pre-owned" not in txt and "Refurbished" not in txt):
+        return ""
+    return txt
 
 
 def _extract_seller_status(driver) -> str:
@@ -242,6 +252,11 @@ def scrape_listing_detail(driver, url_or_id: str, wait_seconds: int = 5) -> dict
         out["condition"] = _extract_condition(driver)
         out["specifics"] = _extract_item_specifics(driver)
         out["status"] = _extract_seller_status(driver)
+        # specifics 内の Condition 値があれば最終値として上書き (最も信頼性高い)
+        spec_cond = (out["specifics"].get("Condition") or "").strip()
+        if spec_cond:
+            # 「Pre-owned - Good: This item has...」のような長文は : 前で切る
+            out["condition"] = spec_cond.split(":")[0].strip()
     except Exception as e:
         out["scrape_error"] = f"parse failed: {e}"
 

@@ -297,6 +297,31 @@ def restore_old_item_ids_for_skipped(results: list[dict], add_csv_skus: set[str]
             print(f"  ✗ {r['item_id']} 復元失敗: {e}")
 
 
+# eBay ConditionID → 表示ラベル mapping (FileExchange 公式値)
+_CONDITION_ID_LABEL = {
+    "1000": "New",
+    "1500": "New other",
+    "1750": "New with defects",
+    "2000": "Manufacturer refurbished",
+    "2010": "Seller refurbished",
+    "2020": "Like New",
+    "2030": "Excellent - Refurbished",
+    "2500": "Seller refurbished",
+    "2750": "Like New",
+    "3000": "Used",
+    "4000": "Very Good",
+    "5000": "Good",
+    "6000": "Acceptable",
+    "7000": "For parts or not working",
+}
+
+
+def _condition_label(v: str) -> str:
+    """ConditionID (数字) を short label に変換、そのままなら return."""
+    v = (v or "").strip()
+    return _CONDITION_ID_LABEL.get(v, v)
+
+
 def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
                                   start_ts: float,
                                   skip_reasons: dict[str, str] = None) -> str:
@@ -406,6 +431,11 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
         old_title = _norm(old.get("title"))
         old_price = _norm(old.get("price_usd"))
         new_price = _norm(new.get("*StartPrice"))
+        # OLD condition: specifics["Condition"] 優先 (": " 前のみ)
+        old_cond = (specs_old.get("Condition") or old.get("condition") or "").strip()
+        if ":" in old_cond:
+            old_cond = old_cond.split(":")[0].strip()
+        old["condition"] = old_cond  # 後段で再参照される値を正す
         diff_pct = None
         if not is_skip and old_price and new_price:
             try:
@@ -535,7 +565,7 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
         all_keys = [("Title", x["old_title"], _norm(x["new_title"])),
                     ("Price", x["old_price"], x["new_price"]),
                     ("Quantity", _norm(x["old"].get("quantity")), _norm(x["new"].get("*Quantity"))),
-                    ("Condition", _norm(x["old"].get("condition")), _norm(x["new"].get("ConditionID")))]
+                    ("Condition", _norm(x["old"].get("condition")), _condition_label(x["new"].get("ConditionID", "")))]
         for k in spec_cols:
             all_keys.append((k, _norm(x["specs_old"].get(k)),
                               _norm(x["new"].get(f"C:{k}"))))
