@@ -404,6 +404,15 @@ def get_listing_targets():
     all_values = ws.get_all_values()
     header = all_values[0]
 
+    # 再出品ボタン経由時の SKU filter (env var)
+    only_skus = set(
+        s.strip() for s in os.environ.get("SELLER_HUB_RELIST_ONLY_SKUS", "").split(",")
+        if s.strip()
+    )
+
+    def _sku_of(u: str) -> str:
+        return u.split("?")[0].split("#")[0].rstrip("/")[-12:].lstrip("/") if u else ""
+
     targets = []
     for i, row in enumerate(all_values[1:], start=2):
         url = row[0] if row[0] else ""
@@ -415,6 +424,10 @@ def get_listing_targets():
         photo_urls = row[6] if len(row) > 6 else ""
         description = row[7] if len(row) > 7 else ""
         category = row[17] if len(row) > 17 else ""  # R列
+
+        # 再出品 SKU filter 適用時は URL末尾12文字一致のみ通す
+        if only_skus and _sku_of(url) not in only_skus:
+            continue
 
         # カテゴリフィルタ + ItemIDブランク & 売り切れでない = リスティング対象
         if url and not item_id and not sold and category == CATEGORY_FILTER:

@@ -76,22 +76,27 @@ CATEGORY_LISTING_CMD = {
 }
 
 
-def invoke_listing_script(category: str) -> int:
-    """End CSV 生成後に listing スクリプトを subprocess で起動して Add CSV まで生成.
+def _sku_from_url(url: str) -> str:
+    """URL末尾12文字を SKU 抽出 (listing_common.extract_sku_from_url と同規約)."""
+    if not url:
+        return ""
+    return url.split("?")[0].split("#")[0].rstrip("/")[-12:].lstrip("/")
 
-    Returns: subprocess return code (0=success)
-    """
+
+def invoke_listing_script(category: str, only_skus: set[str] = None) -> int:
+    """listing スクリプト起動。only_skus 指定で対象 SKU だけ処理させる (env var)."""
     import subprocess
     cfg = CATEGORY_LISTING_CMD.get(category.lower())
     if not cfg:
-        print(f"[INFO] {category} は listing スクリプト未定義、Add CSV 自動生成 skip")
+        print(f"[INFO] {category} は listing スクリプト未定義")
         return 0
     print(f"\n=== Step 3: Add CSV 生成 ({category}) ===")
-    print(f"  cwd: {cfg['cwd']}")
-    print(f"  cmd: {' '.join(cfg['cmd'])}")
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
+    if only_skus:
+        env["SELLER_HUB_RELIST_ONLY_SKUS"] = ",".join(only_skus)
+        print(f"  📌 SKU filter: {len(only_skus)} 件")
     try:
         p = subprocess.run(cfg["cmd"], cwd=cfg["cwd"], env=env,
                            stdout=sys.stdout, stderr=subprocess.STDOUT)
@@ -99,6 +104,34 @@ def invoke_listing_script(category: str) -> int:
     except Exception as e:
         print(f"  [ERROR] listing スクリプト起動失敗: {e}")
         return 1
+
+
+def restore_old_item_ids_for_skipped(results: list[dict], add_csv_skus: set[str],
+                                       gc) -> None:
+    """Add CSV にない (= 見送り判定された) item の B 列に旧 ItemID を復元."""
+    sheets_by_label = {s["label"]: s for s in SHEETS}
+    skipped = [r for r in results
+               if r.get("status") == "OK"
+               and _sku_from_url(r.get("url", "")) not in add_csv_skus]
+    if not skipped:
+        return
+    print(f"\n=== Step 4.5: 見送り行の B 列復元 ({len(skipped)} 件) ===")
+    sh_cache = {}
+    for r in skipped:
+        cfg = sheets_by_label.get(r["sheet"])
+        if not cfg:
+            continue
+        if cfg["id"] not in sh_cache:
+            sh_cache[cfg["id"]] = gc.open_by_key(cfg["id"])
+        ws = sh_cache[cfg["id"]].get_worksheet_by_id(cfg["gid"])
+        try:
+            _gspread_with_retry(
+                lambda w=ws, idx=r["row_idx"], iid=r["item_id"]:
+                    w.update_acell(f"B{idx}", iid)
+            )
+            print(f"  ✓ {r['item_id']} → 行 {r['row_idx']} 復元")
+        except Exception as e:
+            print(f"  ✗ {r['item_id']} 復元失敗: {e}")
 
 
 def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
@@ -671,14 +704,33 @@ def main() -> int:
             print(f"  ✅ 出力: {end_csv_path}")
             print(f"  件数: {len(ok_ids)}")
 
-    # Step 3: Add CSV 生成 (listing スクリプト自動起動) - execute かつ OK 件数 > 0 の時のみ
-    # Step 4: ビフォーアフター CSV (Add CSV upload 前に内容確認用)
+    # Step 3: listing スクリプト起動 (SKU filter で再出品対象だけ処理)
+    # Step 4: 見送り判定行の B 列復元
+    # Step 5: ビフォーアフター CSV
     if not dry_run and ok_count > 0 and args.category:
         import time
         listing_start = time.time()
-        invoke_listing_script(args.category)
-        # OLD state CSV (= save_old_state_csv の最新出力) を auto-detect
+        target_skus = {_sku_from_url(r["url"]) for r in results
+                       if r["status"] == "OK" and r.get("url")}
+        target_skus.discard("")
+        invoke_listing_script(args.category, only_skus=target_skus)
+        # 直近 Add CSV から SKU 抽出 (= 実際に出品された SKU)
         import glob
+        ADD_CSV_DIR = r"c:\dev\iMak\iMakHQ\csv_output"
+        listed_skus = set()
+        for p in glob.glob(os.path.join(ADD_CSV_DIR, "*_upload_*.csv")):
+            try:
+                if os.path.getmtime(p) < listing_start:
+                    continue
+                with open(p, "r", encoding="utf-8-sig", newline="") as f:
+                    for row in csv.DictReader(f):
+                        sku = (row.get("CustomLabel") or "").strip()
+                        if sku:
+                            listed_skus.add(sku)
+            except Exception:
+                continue
+        restore_old_item_ids_for_skipped(results, listed_skus, gc)
+        # OLD state CSV path
         old_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "relist_old_state_*.csv")))
         old_path = old_files[-1] if old_files else ""
         generate_pre_upload_diff_csv(results, old_path, listing_start)
