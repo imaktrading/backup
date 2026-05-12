@@ -1271,10 +1271,10 @@ class ListingPanel:
 
 
 class SellerHubCategoryDialog(tk.Toplevel):
-    """Seller Hub 分析: カテゴリ選択ダイアログ.
+    """Seller Hub 分析: カテゴリ + Status + Snapshot 選択ダイアログ.
 
-    seller_hub_view.py --category <key> --analyze を起動するためのダイアログ.
-    選択肢: Porter / G-Shock / TCG / 一番くじ / Reel / 全件
+    seller_hub_view.py --category <key> [--status <s>] [--save] [--analyze]
+    を起動するためのダイアログ.
     """
     CATEGORIES = [
         ("porter",      "Porter (吉田カバン)"),
@@ -1289,23 +1289,41 @@ class SellerHubCategoryDialog(tk.Toplevel):
         super().__init__(parent)
         self.panel = panel
         self.script_idx = script_idx
-        self.title("📊 Seller Hub 分析 — カテゴリ選択")
-        self.geometry("420x320")
+        self.title("📊 Seller Hub 分析")
+        self.geometry("440x440")
         self.resizable(False, False)
         self.transient(parent)
 
-        tk.Label(self, text="どのカテゴリの Active Listings を分析しますか？",
+        tk.Label(self, text="Seller Hub Active / Ended Listings を分析・保存",
                  font=("Yu Gothic UI", 11, "bold")).pack(pady=(12, 6))
-        tk.Label(self, text="View / Watchers / 死蔵候補 / 購買意欲を集計します。",
-                 font=("Yu Gothic UI", 9), fg="#666").pack(pady=(0, 10))
+        tk.Label(self, text="View / Watchers / 死蔵候補 / 購買意欲を集計。--save で永続蓄積。",
+                 font=("Yu Gothic UI", 9), fg="#666").pack(pady=(0, 8))
 
+        # カテゴリ選択
+        ttk.Label(self, text="カテゴリ:", font=("Yu Gothic UI", 10, "bold")).pack(anchor="w", padx=20)
         self.selected = tk.StringVar(value="porter")
-        radio_frame = ttk.Frame(self)
-        radio_frame.pack(fill="both", expand=True, padx=20)
+        cat_frame = ttk.Frame(self)
+        cat_frame.pack(fill="x", padx=30, pady=(2, 8))
         for key, label in self.CATEGORIES:
-            ttk.Radiobutton(radio_frame, text=label, value=key,
-                            variable=self.selected).pack(anchor="w", pady=2)
+            ttk.Radiobutton(cat_frame, text=label, value=key,
+                            variable=self.selected).pack(anchor="w", pady=1)
 
+        # Status 選択
+        ttk.Label(self, text="Status:", font=("Yu Gothic UI", 10, "bold")).pack(anchor="w", padx=20, pady=(4, 0))
+        self.status = tk.StringVar(value="active")
+        st_frame = ttk.Frame(self)
+        st_frame.pack(fill="x", padx=30, pady=(2, 8))
+        ttk.Radiobutton(st_frame, text="Active (出品中)", value="active",
+                        variable=self.status).pack(anchor="w")
+        ttk.Radiobutton(st_frame, text="Ended (90日以内、データ消失前)", value="ended",
+                        variable=self.status).pack(anchor="w")
+
+        # Snapshot 保存
+        self.do_save = tk.BooleanVar(value=False)
+        ttk.Checkbutton(self, text="📥 snapshot CSV 保存 (iMak_data/seller_hub/)",
+                        variable=self.do_save).pack(anchor="w", padx=20, pady=(4, 8))
+
+        # 実行ボタン
         button_frame = ttk.Frame(self)
         button_frame.pack(fill="x", padx=20, pady=(8, 12))
         ttk.Button(button_frame, text="キャンセル",
@@ -1315,10 +1333,16 @@ class SellerHubCategoryDialog(tk.Toplevel):
 
     def _on_run(self):
         category = self.selected.get()
+        status = self.status.get()
+        do_save = self.do_save.get()
         script = SCRIPTS[self.script_idx]
-        cmd = list(script["cmd"])
+        cmd = list(script["cmd"])  # python seller_hub_view.py --analyze
         if category:
             cmd += ["--category", category]
+        if status != "active":
+            cmd += ["--status", status]
+        if do_save:
+            cmd += ["--save"]
         self.destroy()
         # ListingPanel の run_script フロー (subprocess + log) を流用
         if self.panel.proc and self.panel.proc.poll() is None:

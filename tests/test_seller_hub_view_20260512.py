@@ -63,8 +63,8 @@ JPY 27,243.00
 リンク。ビュー数210。トラフィック歴を見ます。"""
     result = mod.parse_listing_row(sample)
     assert result["item_id"] == "358545495042"
-    assert result["price"] == "173.98"
-    assert result["views"] == 210
+    assert result["price_usd"] == "173.98"
+    assert result["views"] == "210"
     assert "Porter Tanker" in result["title"] or "PORTER Tanker" in result["title"]
 
 
@@ -95,3 +95,71 @@ def test_control_panel_has_seller_hub_dialog_class():
         assert f'"{key}"' in src or f"'{key}'" in src, f"radio key '{key}' missing"
     # 全件 (絞込なし) 選択肢
     assert "全件" in src
+
+
+def test_csv_fields_includes_all_15_columns():
+    """CSV_FIELDS に 15 項目が定義され、画像系は含まれない."""
+    mod = _load_seller_hub_view()
+    if not hasattr(mod, "CSV_FIELDS"):
+        return
+    expected = [
+        "snapshot_date", "status", "item_id", "sku", "title",
+        "price_usd", "views", "watchers", "quantity_available",
+        "listed_date", "ended_date", "promoted_rate",
+        "format", "best_offer_enabled", "search_keyword",
+    ]
+    for f in expected:
+        assert f in mod.CSV_FIELDS, f"missing field: {f}"
+    # 画像系は意図的に含めない (無在庫モデルで仕入元出品者所有のため)
+    assert "first_image_url" not in mod.CSV_FIELDS
+    assert "listing_url" not in mod.CSV_FIELDS
+
+
+def test_parse_listing_row_extracts_format_and_best_offer():
+    """parse_listing_row が format / best_offer / promoted_rate を抽出."""
+    mod = _load_seller_hub_view()
+    if not hasattr(mod, "parse_listing_row"):
+        return
+    sample = """編集
+Porter Tanker Shoulder Bag Black
+今すぐ買う · 358545495042
+ABCD12345678
+3
+US $189.98
+JPY 29,755.00
+今すぐ買う
+またはベストオファー
+価格を調査
+1
+0
+リンク。ビュー数76。
+一般： 広告掲載
+お客様の広告費率： 7%"""
+    result = mod.parse_listing_row(sample, status="active", search_keyword="Porter")
+    assert result["format"] == "BIN"
+    assert result["best_offer_enabled"] == "yes"
+    assert result["promoted_rate"] == "7"
+    assert result["status"] == "active"
+    assert result["search_keyword"] == "Porter"
+    assert result["item_id"] == "358545495042"
+    assert result["views"] == "76"
+    # watchers は num_lines[0] = 3
+    assert result["watchers"] == "3"
+    # quantity_available は num_lines[-2] = 1
+    assert result["quantity_available"] == "1"
+
+
+def test_seller_hub_view_has_save_function():
+    """save_to_csv が存在し、保存先が iMak_data/seller_hub."""
+    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    assert "def save_to_csv" in src
+    assert "iMak_data" in src and "seller_hub" in src
+    assert "QUOTE_NONNUMERIC" in src  # eBay CSV 規約準拠
+
+
+def test_seller_hub_view_supports_ended_status():
+    """--status active|ended の URL 切替が実装されてる."""
+    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    assert "URL_BASE" in src
+    assert '"active":' in src and '"ended":' in src
+    assert "/sh/lst/active" in src and "/sh/lst/ended" in src
