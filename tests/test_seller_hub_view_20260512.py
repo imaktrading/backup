@@ -180,3 +180,24 @@ def test_main_supports_all_pages_flag():
     src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
     assert '"--all-pages"' in src
     assert "fetch_all_pages" in src
+
+
+def test_monthly_snapshot_batch_exists():
+    """Windows タスクスケジューラ用 batch が存在し、Ended+Active 両方走らせる."""
+    batch_path = _HQ / "tools" / "monthly_seller_hub_snapshot.bat"
+    assert batch_path.exists(), "monthly_seller_hub_snapshot.bat 不在"
+    src = batch_path.read_text(encoding="utf-8", errors="replace")
+    assert "--status ended" in src and "--all-pages" in src
+    assert "--status active" in src
+    assert "--save" in src
+    # ログ出力先
+    assert "logs" in src.lower()
+
+
+def test_monthly_snapshot_readme_exists():
+    """タスクスケジューラ登録手順 README が存在."""
+    readme = _HQ / "tools" / "README_monthly_snapshot.md"
+    assert readme.exists()
+    src = readme.read_text(encoding="utf-8")
+    assert "タスクスケジューラ" in src
+    assert "monthly_seller_hub_snapshot.bat" in src
