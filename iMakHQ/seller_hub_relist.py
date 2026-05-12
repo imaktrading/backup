@@ -187,6 +187,14 @@ def find_and_update_row(ws, item_id: str, dry_run: bool = True) -> dict | None:
         dict (row_idx, old_item_id, row_data) if found, None if not found
     """
     rows = ws.get_all_values()
+    return _find_in_rows(rows, item_id)
+
+
+def _find_in_rows(rows: list[list[str]], item_id: str) -> dict | None:
+    """get_all_values 済の rows 配列から item_id を検索 (API 不要、in-memory).
+
+    5/12 429 rate limit 対策: 各 spreadsheet を 1 回だけ読込 → 全 item_id を in-memory 照合.
+    """
     for idx, row in enumerate(rows[1:], start=2):  # row 1 は header
         if len(row) > COL_ITEM_ID - 1 and row[COL_ITEM_ID - 1].strip() == item_id:
             row_data = {
@@ -199,11 +207,30 @@ def find_and_update_row(ws, item_id: str, dry_run: bool = True) -> dict | None:
                 "category": row[17] if len(row) > 17 else "",
                 "listed_date": row[20] if len(row) > 20 else "",
             }
-            if not dry_run:
-                # B 列空欄化のみ (退避列なし、mapping CSV で管理)
-                ws.update_acell(f"B{idx}", "")
             return {"row_idx": idx, "old_item_id": item_id, "row_data": row_data}
     return None
+
+
+def _gspread_with_retry(func, max_retries: int = 4, base_delay: float = 30.0):
+    """gspread call を 429 backoff retry でラップ.
+
+    429 Quota exceeded は分単位 reset なので、base_delay は 30s 推奨.
+    """
+    import time
+    last_err = None
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except Exception as e:
+            err_str = str(e)
+            last_err = e
+            if "429" not in err_str and "Quota exceeded" not in err_str:
+                raise  # 非 429 は即 raise
+            if attempt < max_retries:
+                wait = base_delay * (1 + attempt * 0.5)  # 30, 45, 60, 75 秒
+                print(f"  [429] {err_str[:80]} → {wait:.0f}s 待機して retry ({attempt+1}/{max_retries})")
+                time.sleep(wait)
+    raise last_err
 
 
 def save_mapping_csv(results: list[dict]) -> str:
@@ -265,7 +292,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sample", help="改善対象 sample CSV path (省略時は --category から自動抽出)")
     parser.add_argument("--category", help="カテゴリ指定で snapshot から自動抽出 (tshirt/porter/gshock/tcg/reel/ichibankuji/tomica/montbell/other)")
-    parser.add_argument("--max-listings", type=int, default=50, help="1 回処理上限 (default: 50)")
+    parser.add_argument("--max-listings", type=int, default=10,
+                        help="1 回処理上限 (default: 10, 5/12 429 rate limit 対策で 50→10 に縮小)")
     parser.add_argument("--execute", action="store_true",
                         help="本書込実行 (default: dry-run)")
     parser.add_argument("--skip-end-csv", action="store_true",
@@ -303,47 +331,65 @@ def main() -> int:
     )
     gc = gspread.authorize(creds)
 
-    # 1. 検索 phase (dry-run 相当の find のみ、書込なし) — scrape 用 URL 確保のため先行
+    # 1. 各 spreadsheet の全行を 1 回だけ読込 (429 rate limit 対策)
+    #    旧: get_all_values を item_id 毎 × 2 sheet = 48 reads → 429
+    #    新: get_all_values を sheet 毎 1 回のみ = 2 reads
+    sheet_caches: dict[str, dict] = {}  # sheet_id → {"rows": [...], "ws": ws, "cfg": sheet_cfg}
+    for sheet_cfg in SHEETS:
+        try:
+            sh = _gspread_with_retry(lambda c=sheet_cfg: gc.open_by_key(c["id"]))
+            ws = _gspread_with_retry(lambda s=sh, c=sheet_cfg: s.get_worksheet_by_id(c["gid"]))
+            rows = _gspread_with_retry(lambda w=ws: w.get_all_values())
+            sheet_caches[sheet_cfg["id"]] = {"rows": rows, "ws": ws, "cfg": sheet_cfg}
+            print(f"  📥 {sheet_cfg['label']}: {len(rows)} 行キャッシュ")
+        except Exception as e:
+            print(f"  [ERROR] sheet {sheet_cfg['label']} 取得失敗 (retry 後): {e}")
+            sheet_caches[sheet_cfg["id"]] = None
+
+    # 2. 検索 phase (in-memory、API 不要)
     results = []
     for iid in item_ids:
         found = False
         for sheet_cfg in SHEETS:
-            try:
-                sh = gc.open_by_key(sheet_cfg["id"])
-                ws = sh.get_worksheet_by_id(sheet_cfg["gid"])
-                result = find_and_update_row(ws, iid, dry_run=True)  # find のみ
-                if result:
-                    results.append({
-                        "item_id": iid,
-                        "sheet": sheet_cfg["label"],
-                        "sheet_id": sheet_cfg["id"],
-                        "gid": sheet_cfg["gid"],
-                        "row_idx": result["row_idx"],
-                        "status": "OK",
-                        **result.get("row_data", {}),
-                    })
-                    found = True
-                    break
-            except Exception as e:
-                print(f"  [WARN] sheet {sheet_cfg['label']} アクセス失敗: {e}")
+            cache = sheet_caches.get(sheet_cfg["id"])
+            if cache is None:
+                continue
+            result = _find_in_rows(cache["rows"], iid)
+            if result:
+                results.append({
+                    "item_id": iid,
+                    "sheet": sheet_cfg["label"],
+                    "sheet_id": sheet_cfg["id"],
+                    "gid": sheet_cfg["gid"],
+                    "row_idx": result["row_idx"],
+                    "status": "OK",
+                    **result.get("row_data", {}),
+                })
+                found = True
+                break
         if not found:
             results.append({"item_id": iid, "sheet": "-", "row_idx": None, "status": "NOT_FOUND"})
 
-    # 2. OLD state scrape (execute かつ skip-scrape なしの時のみ、空欄化前に保存)
+    # 3. OLD state scrape (execute かつ skip-scrape なしの時のみ、空欄化前に保存)
     if not dry_run and not args.skip_scrape:
         save_old_state_csv(item_ids, results)
 
-    # 3. B 列空欄化 (execute 時のみ実書込)
+    # 4. B 列空欄化 (execute 時のみ実書込、retry 付き)
     if not dry_run:
         for r in results:
             if r["status"] != "OK":
                 continue
+            cache = sheet_caches.get(r["sheet_id"])
+            if not cache:
+                r["status"] = "WRITE_FAILED"
+                continue
+            ws = cache["ws"]
             try:
-                sh = gc.open_by_key(r["sheet_id"])
-                ws = sh.get_worksheet_by_id(r["gid"])
-                ws.update_acell(f"B{r['row_idx']}", "")
+                _gspread_with_retry(
+                    lambda w=ws, idx=r["row_idx"]: w.update_acell(f"B{idx}", "")
+                )
             except Exception as e:
-                print(f"  [WARN] {r['item_id']} B列空欄化失敗: {e}")
+                print(f"  [WARN] {r['item_id']} B列空欄化失敗 (retry 後): {e}")
                 r["status"] = "WRITE_FAILED"
 
     # 結果サマリー
