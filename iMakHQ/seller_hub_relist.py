@@ -101,6 +101,132 @@ def invoke_listing_script(category: str) -> int:
         return 1
 
 
+def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
+                                  start_ts: float) -> str:
+    """Add CSV upload 前にビフォーアフター CSV を生成 + auto-open.
+
+    OLD scrape (eBay 旧 listing) vs NEW (Add CSV 新 listing 内容) を pair 表示。
+    upload 前に内容確認するための画面。
+    """
+    import glob
+    import json
+    import time
+    DESKTOP_DIR = r"C:\Users\imax2\OneDrive\デスクトップ"
+    ADD_CSV_DIR = r"c:\dev\iMak\iMakHQ\csv_output"
+
+    # OLD state CSV 読込
+    if not old_state_path or not os.path.exists(old_state_path):
+        print("[INFO] OLD state CSV なし、diff CSV skip")
+        return ""
+    with open(old_state_path, "r", encoding="utf-8-sig", newline="") as f:
+        old_rows = list(csv.DictReader(f))
+    # item_id → OLD scrape data
+    old_by_iid = {}
+    for r in old_rows:
+        iid = (r.get("item_id") or "").strip()
+        if iid:
+            try:
+                r["_specs"] = json.loads(r.get("specifics_json", "{}"))
+            except Exception:
+                r["_specs"] = {}
+            old_by_iid[iid] = r
+
+    # 直近 (start_ts 以降) の Add CSV 全件読込 → SKU 別 mapping
+    add_by_sku = {}
+    for p in glob.glob(os.path.join(ADD_CSV_DIR, "*_upload_*.csv")):
+        try:
+            if os.path.getmtime(p) < start_ts:
+                continue
+            with open(p, "r", encoding="utf-8-sig", newline="") as f:
+                for row in csv.DictReader(f):
+                    sku = (row.get("CustomLabel") or "").strip()
+                    if sku:
+                        add_by_sku[sku] = row
+        except Exception:
+            continue
+
+    # mapping 用 SKU 計算 (results.url 末尾12文字)
+    def _sku(u: str) -> str:
+        if not u:
+            return ""
+        return u.split("?")[0].split("#")[0].rstrip("/")[-12:].lstrip("/")
+
+    pairs = []
+    for r in results:
+        if r.get("status") != "OK":
+            continue
+        iid = r.get("item_id", "")
+        url = r.get("url", "")
+        sku = _sku(url)
+        old = old_by_iid.get(iid, {})
+        new = add_by_sku.get(sku, {})
+        pairs.append({"item_id": iid, "sku": sku, "old": old, "new": new})
+
+    if not pairs:
+        print("[INFO] OLD/NEW pair 生成対象なし、diff CSV skip")
+        return ""
+
+    # spec keys union
+    spec_keys = set()
+    for p in pairs:
+        spec_keys.update((p["old"].get("_specs") or {}).keys())
+        for k in p["new"].keys():
+            if k.startswith("C:") and p["new"].get(k):
+                spec_keys.add(k[2:])
+    spec_cols = sorted(spec_keys)
+
+    base_cols = ["marker", "old_item_id", "sku", "title", "price_usd",
+                 "quantity", "condition"]
+    all_cols = base_cols + spec_cols
+
+    os.makedirs(DESKTOP_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(DESKTOP_DIR, f"relist_diff_{ts}.csv")
+
+    with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=all_cols, quoting=csv.QUOTE_NONNUMERIC,
+                           extrasaction="ignore")
+        w.writeheader()
+        for p in pairs:
+            old = p["old"]
+            new = p["new"]
+            specs_old = old.get("_specs") or {}
+            # OLD 行
+            row_old = {
+                "marker": "OLD",
+                "old_item_id": p["item_id"],
+                "sku": p["sku"],
+                "title": old.get("title", ""),
+                "price_usd": old.get("price_usd", ""),
+                "quantity": old.get("quantity", ""),
+                "condition": old.get("condition", ""),
+            }
+            for k in spec_cols:
+                row_old[k] = specs_old.get(k, "")
+            w.writerow(row_old)
+            # NEW 行
+            row_new = {
+                "marker": "NEW",
+                "old_item_id": p["item_id"],
+                "sku": p["sku"],
+                "title": new.get("*Title", ""),
+                "price_usd": new.get("*StartPrice", ""),
+                "quantity": new.get("*Quantity", ""),
+                "condition": new.get("ConditionID", ""),
+            }
+            for k in spec_cols:
+                row_new[k] = new.get(f"C:{k}", "")
+            w.writerow(row_new)
+
+    print(f"\n📋 ビフォーアフター CSV: {out_path}")
+    try:
+        os.startfile(out_path)
+        print(f"   → Excel 自動 open")
+    except Exception as e:
+        print(f"   [WARN] auto-open 失敗: {e}")
+    return out_path
+
+
 # ============================================================================
 # OLD listing scrape (5/12 追加: ビフォーアフター CSV 用)
 # ============================================================================
@@ -499,8 +625,16 @@ def main() -> int:
             print(f"  件数: {len(ok_ids)}")
 
     # Step 3: Add CSV 生成 (listing スクリプト自動起動) - execute かつ OK 件数 > 0 の時のみ
+    # Step 4: ビフォーアフター CSV (Add CSV upload 前に内容確認用)
     if not dry_run and ok_count > 0 and args.category:
+        import time
+        listing_start = time.time()
         invoke_listing_script(args.category)
+        # OLD state CSV (= save_old_state_csv の最新出力) を auto-detect
+        import glob
+        old_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "relist_old_state_*.csv")))
+        old_path = old_files[-1] if old_files else ""
+        generate_pre_upload_diff_csv(results, old_path, listing_start)
 
     print()
     if dry_run:
