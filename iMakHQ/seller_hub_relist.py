@@ -463,6 +463,48 @@ def generate_end_csv(item_ids: list[str]) -> str:
     return out_path
 
 
+def _undo_from_mapping(mapping_path: str) -> int:
+    """mapping CSV から B 列空欄化を巻き戻し (= 旧 ItemID を再書込).
+
+    再出品ボタン誤押下 / フロー中断時の正式 undo 手段。
+    """
+    if not os.path.exists(mapping_path):
+        print(f"[ERROR] mapping CSV が見つかりません: {mapping_path}")
+        return 1
+    import gspread
+    from google.oauth2.service_account import Credentials
+    creds = Credentials.from_service_account_file(
+        CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    gc = gspread.authorize(creds)
+    sheets_by_label = {s["label"]: s for s in SHEETS}
+    with open(mapping_path, "r", encoding="utf-8-sig", newline="") as f:
+        rows = [r for r in csv.DictReader(f) if r.get("status") == "OK"]
+    print(f"=== UNDO: B 列復元 ({len(rows)} 件) ===")
+    print(f"  mapping: {mapping_path}")
+    sh_cache = {}
+    ok = 0
+    for r in rows:
+        cfg = sheets_by_label.get(r["sheet"])
+        if not cfg:
+            print(f"  ✗ {r['old_item_id']} sheet 不明: {r['sheet']}")
+            continue
+        if cfg["id"] not in sh_cache:
+            sh_cache[cfg["id"]] = gc.open_by_key(cfg["id"])
+        ws = sh_cache[cfg["id"]].get_worksheet_by_id(cfg["gid"])
+        try:
+            _gspread_with_retry(
+                lambda w=ws, idx=r["row_idx"], iid=r["old_item_id"]:
+                    w.update_acell(f"B{idx}", iid)
+            )
+            print(f"  ✓ {r['old_item_id']} → 行 {r['row_idx']} 復元")
+            ok += 1
+        except Exception as e:
+            print(f"  ✗ {r['old_item_id']} 復元失敗: {e}")
+    print(f"\n復元: {ok} / {len(rows)} 件")
+    return 0 if ok == len(rows) else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sample", help="改善対象 sample CSV path (省略時は --category から自動抽出)")
@@ -475,7 +517,12 @@ def main() -> int:
                         help="End CSV 生成を skip (Step 1 のみ実行)")
     parser.add_argument("--skip-scrape", action="store_true",
                         help="OLD state scrape を skip (--execute 時のみ scrape する)")
+    parser.add_argument("--undo", help="mapping CSV 指定で B 列空欄化を巻き戻し (= 旧 ItemID を再書込)")
     args = parser.parse_args()
+
+    # --undo mode (再現可能な巻き戻し)
+    if args.undo:
+        return _undo_from_mapping(args.undo)
 
     if not args.sample and not args.category:
         print("[ERROR] --sample <path> or --category <name> のいずれか必須")
