@@ -96,13 +96,16 @@ def _sku_from_url(url: str) -> str:
     return url.split("?")[0].split("#")[0].rstrip("/")[-12:].lstrip("/")
 
 
-def invoke_listing_script(category: str, only_skus: set[str] = None) -> int:
-    """listing スクリプト起動。only_skus 指定で対象 SKU だけ処理させる (env var)."""
+def invoke_listing_script(category: str, only_skus: set[str] = None) -> tuple[int, str]:
+    """listing スクリプト起動。stdout を画面+buffer に tee して見送り理由抽出に渡す.
+
+    Returns: (returncode, captured_stdout)
+    """
     import subprocess
     cfg = CATEGORY_LISTING_CMD.get(category.lower())
     if not cfg:
         print(f"[INFO] {category} は listing スクリプト未定義")
-        return 0
+        return 0, ""
     print(f"\n=== Step 3: Add CSV 生成 ({category}) ===")
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -110,13 +113,98 @@ def invoke_listing_script(category: str, only_skus: set[str] = None) -> int:
     if only_skus:
         env["SELLER_HUB_RELIST_ONLY_SKUS"] = ",".join(only_skus)
         print(f"  📌 SKU filter: {len(only_skus)} 件")
+    captured: list[str] = []
     try:
-        p = subprocess.run(cfg["cmd"], cwd=cfg["cwd"], env=env,
-                           stdout=sys.stdout, stderr=subprocess.STDOUT)
-        return p.returncode
+        p = subprocess.Popen(cfg["cmd"], cwd=cfg["cwd"], env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True, encoding="utf-8", errors="replace",
+                              bufsize=1)
+        for line in p.stdout:
+            print(line, end="")
+            captured.append(line)
+        p.wait()
+        return p.returncode, "".join(captured)
     except Exception as e:
         print(f"  [ERROR] listing スクリプト起動失敗: {e}")
-        return 1
+        return 1, "".join(captured)
+
+
+def parse_listing_stdout_for_reasons(stdout_text: str) -> dict[str, str]:
+    """listing スクリプト stdout から見送り理由を SKU 別に抽出.
+
+    パターン:
+      - `[N/M] <title>` でセクション開始、その範囲内のメッセージを集約
+      - `⚠️ 価格 ALERT: <reason>` → 価格 ALERT
+      - `❌ 3AI 合意: BLOCK` + 後続 BLOCK 行 → 3AI BLOCK 理由
+      - `⚠️ 画像取得失敗 → スキップ` → 画像取得失敗
+      - `🟠 HOLD: <sku> → [<reasons>]` → SKU 明示 HOLD
+      - URL 行から SKU 抽出 (Amazon /dp/ or Mercari /item/m)
+    """
+    import re
+    lines = stdout_text.splitlines()
+    skip_reasons: dict[str, str] = {}
+    current_sku = ""
+    current_reasons: list[str] = []
+
+    def _flush():
+        if current_sku and current_reasons:
+            existing = skip_reasons.get(current_sku, "")
+            new_reason = "; ".join(current_reasons)
+            skip_reasons[current_sku] = (existing + "; " + new_reason) if existing else new_reason
+
+    for line in lines:
+        # 新 listing セクション開始 = [N/M] で始まる行
+        m_section = re.match(r"^\[\d+/\d+\]", line)
+        if m_section:
+            _flush()
+            current_sku = ""
+            current_reasons = []
+            continue
+        # URL 行 → SKU 抽出
+        m_url = re.search(r"URL:\s*(\S+)", line)
+        if m_url:
+            url = m_url.group(1)
+            m_am = re.search(r"/dp/([A-Z0-9]{10})", url)
+            m_mm = re.search(r"/item/(m\d+)", url)
+            if m_am:
+                current_sku = m_am.group(1)
+            elif m_mm:
+                current_sku = m_mm.group(1)
+            else:
+                current_sku = url.split("?")[0].rstrip("/")[-12:].lstrip("/")
+            continue
+        # HOLD 行 (SKU 明示) — そのまま使う
+        m_hold = re.search(r"🟠 HOLD:\s*(\S+)\s*→\s*\[(.+?)\]", line)
+        if m_hold:
+            sku = m_hold.group(1)
+            reason = m_hold.group(2)
+            existing = skip_reasons.get(sku, "")
+            skip_reasons[sku] = (existing + "; " + reason) if existing else reason
+            continue
+        # 価格 ALERT
+        m_price = re.search(r"⚠️ 価格ALERT:\s*(.+)", line)
+        if m_price:
+            current_reasons.append(f"価格ALERT: {m_price.group(1).strip()}")
+            continue
+        # 3AI BLOCK
+        if "3AI 合意: BLOCK" in line or "3AI合意: BLOCK" in line:
+            current_reasons.append("3AI BLOCK")
+            continue
+        if re.search(r"(Claude|Gemini|Groq):\s*BLOCK\s*\|", line):
+            m_b = re.search(r"\b(Claude|Gemini|Groq):\s*BLOCK\s*\|\s*(.+)", line)
+            if m_b:
+                current_reasons.append(f"{m_b.group(1)}: {m_b.group(2).strip()[:120]}")
+            continue
+        # 画像取得失敗
+        if "画像取得失敗" in line:
+            current_reasons.append("画像取得失敗")
+            continue
+        # この商品はCSVに含めません
+        if "CSVに含めません" in line or "CSV に含めません" in line:
+            current_reasons.append("除外確定")
+            continue
+    _flush()
+    return skip_reasons
 
 
 def _prompt_approve_or_rollback(mapping_path: str, end_csv_path: str,
@@ -210,12 +298,19 @@ def restore_old_item_ids_for_skipped(results: list[dict], add_csv_skus: set[str]
 
 
 def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
-                                  start_ts: float) -> str:
-    """Add CSV upload 前にビフォーアフター CSV を生成 + auto-open.
+                                  start_ts: float,
+                                  skip_reasons: dict[str, str] = None) -> str:
+    """Add CSV upload 前にビフォーアフター xlsx を生成 + auto-open.
 
-    OLD scrape (eBay 旧 listing) vs NEW (Add CSV 新 listing 内容) を pair 表示。
-    upload 前に内容確認するための画面。
+    4 sheet 構成:
+      - サマリー: 全体集計
+      - 要注意リスト: 見送り + 大幅変動 (真っ先に見る所)
+      - 全 listing 一覧: 1 行/listing
+      - 項目詳細: 全項目別 OLD/NEW
+    skip_reasons: SKU → 見送り理由 (listing スクリプト stdout から抽出)
     """
+    if skip_reasons is None:
+        skip_reasons = {}
     import glob
     import json
     import time
@@ -293,96 +388,165 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
     out_path = os.path.join(DESKTOP_DIR, f"relist_diff_{ts}.xlsx")
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "diff"
-
-    # 6 列のみ: ItemID, 判定, Title(OLD), Title(NEW), Price(OLD→NEW), 変更項目
-    headers = ["ItemID", "判定", "Title (OLD)", "Title (NEW)", "Price", "変更項目"]
-    ws.append(headers)
     bold = Font(bold=True)
-    for c in ws[1]:
-        c.font = bold
-
     skip_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
     chg_fill = PatternFill(start_color="FFE699", end_color="FFE699", fill_type="solid")
+    alert_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
     def _norm(v): return str(v or "").strip()
 
+    # 各 listing の差分情報を事前計算 (各 sheet で共通利用)
+    listings = []
     for p in pairs:
         old = p["old"]
         new = p["new"]
         specs_old = old.get("_specs") or {}
         new_title = new.get("*Title", "")
         is_skip = not new_title
-
         old_title = _norm(old.get("title"))
         old_price = _norm(old.get("price_usd"))
         new_price = _norm(new.get("*StartPrice"))
-
-        # 変更項目集約
+        diff_pct = None
+        if not is_skip and old_price and new_price:
+            try:
+                diff_pct = (float(new_price) - float(old_price)) / float(old_price) * 100
+            except Exception:
+                pass
         diffs = []
         if not is_skip:
             if old_title != _norm(new_title):
                 diffs.append("Title")
             if old_price != new_price:
-                # 価格は数値で示す
-                try:
-                    diff_pct = (float(new_price) - float(old_price)) / float(old_price) * 100
-                    diffs.append(f"Price ({diff_pct:+.0f}%)")
-                except Exception:
-                    diffs.append("Price")
+                diffs.append(f"Price ({diff_pct:+.0f}%)" if diff_pct is not None else "Price")
             for k in spec_cols:
                 ov = _norm(specs_old.get(k))
                 nv = _norm(new.get(f"C:{k}"))
                 if ov != nv and (ov or nv):
                     diffs.append(k)
+        reason = skip_reasons.get(p["sku"], "") if is_skip else ""
+        # 大幅価格変動 (±20% 超) = 要注意
+        is_alert = (diff_pct is not None and abs(diff_pct) > 20)
+        listings.append({
+            "p": p, "old": old, "new": new, "specs_old": specs_old,
+            "is_skip": is_skip, "old_title": old_title, "new_title": new_title,
+            "old_price": old_price, "new_price": new_price, "diff_pct": diff_pct,
+            "diffs": diffs, "reason": reason, "is_alert": is_alert,
+        })
 
-        price_cell = (f"${old_price} → ${new_price}" if not is_skip and old_price and new_price
-                      else f"${old_price}")
-        ws.append([
-            p["item_id"],
-            "見送り" if is_skip else "出品",
-            old_title,
-            new_title or "",
-            price_cell,
-            ", ".join(diffs) if diffs else ("" if is_skip else "変更なし"),
+    # === Sheet 1: サマリー ===
+    ws_sum = wb.active
+    ws_sum.title = "サマリー"
+    total = len(listings)
+    n_list = sum(1 for x in listings if not x["is_skip"])
+    n_skip = sum(1 for x in listings if x["is_skip"])
+    n_alert = sum(1 for x in listings if x["is_alert"])
+    n_title_chg = sum(1 for x in listings if not x["is_skip"] and "Title" in x["diffs"])
+    summary_rows = [
+        ["📊 再出品 ビフォーアフター サマリー", ""],
+        ["", ""],
+        ["対象 listing 数", total],
+        ["  ✅ 出品 (Add CSV 生成済)", n_list],
+        ["  ❌ 見送り (listing スクリプト判定)", n_skip],
+        ["", ""],
+        ["要注意項目", ""],
+        ["  ⚠️ 価格 ±20% 超 変動", n_alert],
+        ["  📝 Title 変更あり", n_title_chg],
+        ["", ""],
+        ["📌 推奨アクション",
+         "「要注意リスト」シートで内容確認 → 問題なければ eBay にアップ"],
+    ]
+    for row in summary_rows:
+        ws_sum.append(row)
+    ws_sum.cell(row=1, column=1).font = Font(bold=True, size=14)
+    for r in [3, 7]:
+        ws_sum.cell(row=r, column=1).font = bold
+    ws_sum.column_dimensions["A"].width = 35
+    ws_sum.column_dimensions["B"].width = 60
+
+    # === Sheet 2: 要注意リスト ===
+    ws_alert = wb.create_sheet("要注意リスト")
+    ws_alert.append(["ItemID", "SKU", "判定", "要注意理由",
+                      "Title (OLD)", "Title (NEW)", "Price (OLD→NEW)"])
+    for c in ws_alert[1]:
+        c.font = bold
+    # 見送り + 大幅変動 を抽出
+    notable = [x for x in listings if x["is_skip"] or x["is_alert"]]
+    for x in notable:
+        if x["is_skip"]:
+            reason = x["reason"] or "(理由不明)"
+        else:
+            reason = f"価格 {x['diff_pct']:+.0f}%"
+        price_cell = (f"${x['old_price']} → ${x['new_price']}"
+                      if not x["is_skip"] and x["old_price"] and x["new_price"]
+                      else f"${x['old_price']}")
+        ws_alert.append([
+            x["p"]["item_id"], x["p"]["sku"],
+            "見送り" if x["is_skip"] else "出品",
+            reason,
+            x["old_title"], x["new_title"], price_cell,
         ])
-        row_idx = ws.max_row
-        if is_skip:
-            for c in ws[row_idx]:
-                c.fill = skip_fill
-        elif diffs:
-            ws.cell(row=row_idx, column=6).fill = chg_fill
+        r = ws_alert.max_row
+        if x["is_skip"]:
+            for c in ws_alert[r]:
+                c.fill = alert_fill
+        else:
+            for c in ws_alert[r]:
+                c.fill = chg_fill
+    for col, w in {"A": 14, "B": 14, "C": 8, "D": 50, "E": 40, "F": 40, "G": 22}.items():
+        ws_alert.column_dimensions[col].width = w
+    ws_alert.freeze_panes = "A2"
 
-    # 列幅
-    widths = {"A": 14, "B": 8, "C": 50, "D": 50, "E": 22, "F": 40}
-    for col, w in widths.items():
+    # === Sheet 3: 全 listing 一覧 ===
+    ws = wb.create_sheet("全listing")
+    headers = ["ItemID", "SKU", "判定", "Title (OLD)", "Title (NEW)", "Price", "変更項目", "見送り理由"]
+    ws.append(headers)
+    for c in ws[1]:
+        c.font = bold
+    for x in listings:
+        price_cell = (f"${x['old_price']} → ${x['new_price']}"
+                      if not x["is_skip"] and x["old_price"] and x["new_price"]
+                      else f"${x['old_price']}")
+        ws.append([
+            x["p"]["item_id"], x["p"]["sku"],
+            "見送り" if x["is_skip"] else "出品",
+            x["old_title"], x["new_title"] or "", price_cell,
+            ", ".join(x["diffs"]) if x["diffs"] else ("" if x["is_skip"] else "変更なし"),
+            x["reason"],
+        ])
+        r = ws.max_row
+        if x["is_skip"]:
+            for c in ws[r]:
+                c.fill = skip_fill
+        elif x["is_alert"]:
+            ws.cell(row=r, column=6).fill = alert_fill
+        elif x["diffs"]:
+            ws.cell(row=r, column=7).fill = chg_fill
+    for col, w in {"A": 14, "B": 14, "C": 8, "D": 40, "E": 40, "F": 22, "G": 35, "H": 40}.items():
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
 
-    # 2 枚目: Item Specifics 詳細 (見たい時用)
-    ws2 = wb.create_sheet("specifics")
-    spec_headers = ["ItemID", "判定", "項目", "OLD", "NEW"]
-    ws2.append(spec_headers)
+    # === Sheet 4: 項目詳細 ===
+    ws2 = wb.create_sheet("項目詳細")
+    ws2.append(["ItemID", "判定", "項目", "OLD", "NEW"])
     for c in ws2[1]:
         c.font = bold
-    for p in pairs:
-        new = p["new"]
-        specs_old = p["old"].get("_specs") or {}
-        is_skip = not new.get("*Title")
-        # Title / Price / Qty / Condition + 全 spec
-        all_keys = [("Title", _norm(p["old"].get("title")), _norm(new.get("*Title"))),
-                    ("Price", _norm(p["old"].get("price_usd")), _norm(new.get("*StartPrice"))),
-                    ("Quantity", _norm(p["old"].get("quantity")), _norm(new.get("*Quantity"))),
-                    ("Condition", _norm(p["old"].get("condition")), _norm(new.get("ConditionID")))]
+    for x in listings:
+        is_skip = x["is_skip"]
+        all_keys = [("Title", x["old_title"], _norm(x["new_title"])),
+                    ("Price", x["old_price"], x["new_price"]),
+                    ("Quantity", _norm(x["old"].get("quantity")), _norm(x["new"].get("*Quantity"))),
+                    ("Condition", _norm(x["old"].get("condition")), _norm(x["new"].get("ConditionID")))]
         for k in spec_cols:
-            all_keys.append((k, _norm(specs_old.get(k)), _norm(new.get(f"C:{k}"))))
+            all_keys.append((k, _norm(x["specs_old"].get(k)),
+                              _norm(x["new"].get(f"C:{k}"))))
         for label, ov, nv in all_keys:
             if not ov and not nv:
                 continue
             if is_skip and not ov:
                 continue
-            ws2.append([p["item_id"], "見送り" if is_skip else "出品", label, ov, nv])
+            ws2.append([x["p"]["item_id"],
+                         "見送り" if is_skip else "出品",
+                         label, ov, nv])
             r = ws2.max_row
             if not is_skip and ov != nv and (ov or nv):
                 for c in ws2[r]:
@@ -882,7 +1046,8 @@ def main() -> int:
         target_skus = {_sku_from_url(r["url"]) for r in results
                        if r["status"] == "OK" and r.get("url")}
         target_skus.discard("")
-        invoke_listing_script(args.category, only_skus=target_skus)
+        _, listing_stdout = invoke_listing_script(args.category, only_skus=target_skus)
+        skip_reasons = parse_listing_stdout_for_reasons(listing_stdout)
         # 直近 Add CSV を mtime で特定
         import glob
         ADD_CSV_DIR = r"c:\dev\iMak\iMakHQ\csv_output"
@@ -908,7 +1073,8 @@ def main() -> int:
         mapping_path = mapping_files[-1] if mapping_files else ""
         end_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "relist_end_*.csv")))
         end_path = end_files[-1] if end_files else ""
-        generate_pre_upload_diff_csv(results, old_path, listing_start)
+        generate_pre_upload_diff_csv(results, old_path, listing_start,
+                                      skip_reasons=skip_reasons)
         # 確認 dialog (却下が default、却下で自動 rollback)
         _prompt_approve_or_rollback(mapping_path, end_path, add_csv_paths, gc)
 
