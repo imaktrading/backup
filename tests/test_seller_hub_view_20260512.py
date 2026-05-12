@@ -163,3 +163,20 @@ def test_seller_hub_view_supports_ended_status():
     assert "URL_BASE" in src
     assert '"active":' in src and '"ended":' in src
     assert "/sh/lst/active" in src and "/sh/lst/ended" in src
+
+
+def test_fetch_all_pages_function_exists():
+    """fetch_all_pages がページ送りで全件取得する関数として実装されてる."""
+    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    assert "def fetch_all_pages" in src
+    # Next ボタン selector
+    assert ".pagination__next" in src
+    # ItemID デドゥープ
+    assert "seen" in src and "uniq" in src
+
+
+def test_main_supports_all_pages_flag():
+    """--all-pages CLI フラグが実装されてる."""
+    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    assert '"--all-pages"' in src
+    assert "fetch_all_pages" in src

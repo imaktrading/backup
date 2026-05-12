@@ -185,8 +185,10 @@ def parse_listing_row(row_text: str, status: str = "active",
 
 
 def extract_listings(driver, status: str = "active",
-                      search_keyword: str = "") -> list[dict]:
-    snapshot_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+                      search_keyword: str = "",
+                      snapshot_date: str | None = None) -> list[dict]:
+    if snapshot_date is None:
+        snapshot_date = datetime.now().strftime("%Y-%m-%d %H:%M")
     rows = driver.find_elements(By.CSS_SELECTOR, "tr.grid-row")
     items = []
     for r in rows:
@@ -203,12 +205,56 @@ def extract_listings(driver, status: str = "active",
                 items.append(parsed)
         except Exception:
             continue
+    return items
+
+
+def fetch_all_pages(driver, status: str = "active",
+                    search_keyword: str = "",
+                    page_wait: int = 8,
+                    max_pages: int = 50) -> list[dict]:
+    """`.pagination__next` をクリックしながら全ページ取得 + item_id デドゥープ.
+
+    各ページで:
+      1. extract_listings で grid-row を parse
+      2. Next ボタン find → enabled なら click → wait → 次 page
+      3. Next なし / disabled で break
+    """
+    snapshot_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+    all_items: list[dict] = []
+    page = 1
+    while page <= max_pages:
+        items = extract_listings(driver, status=status,
+                                  search_keyword=search_keyword,
+                                  snapshot_date=snapshot_date)
+        all_items.extend(items)
+        print(f"[INFO] page {page}: {len(items)} items, cumulative {len(all_items)}")
+
+        # Next ボタン 試行
+        try:
+            next_btns = driver.find_elements(By.CSS_SELECTOR, ".pagination__next")
+            if not next_btns:
+                print("[INFO] Next button なし → 最終ページ")
+                break
+            next_btn = next_btns[0]
+            if not next_btn.is_enabled() or next_btn.get_attribute("aria-disabled") == "true":
+                print("[INFO] Next button disabled → 最終ページ")
+                break
+            # Click via JavaScript で安定化 (重なり Element ハック回避)
+            driver.execute_script("arguments[0].click();", next_btn)
+            time.sleep(page_wait)
+            page += 1
+        except Exception as e:
+            print(f"[WARN] Next click 失敗: {e}")
+            break
+
+    # ItemID 単位デドゥープ (同 listing が複数 page で出る可能性低だが念のため)
     seen = set()
     uniq = []
-    for it in items:
+    for it in all_items:
         if it["item_id"] not in seen:
             seen.add(it["item_id"])
             uniq.append(it)
+    print(f"[INFO] 全 {page} page 処理完了、unique {len(uniq)} listings")
     return uniq
 
 
@@ -281,6 +327,8 @@ def main():
                         help="分析モード (TOP Views/Watchers/死蔵候補/購買意欲)")
     parser.add_argument("--save", action="store_true",
                         help=f"snapshot CSV を {SNAPSHOT_DIR} に保存")
+    parser.add_argument("--all-pages", action="store_true",
+                        help="ページ送りで全件取得 (Ended 1011件等の全 page 取得)")
     parser.add_argument("--limit", type=int, default=20,
                         help="生 dump 時の表示件数上限 (--analyze なし時)")
     args = parser.parse_args()
@@ -304,8 +352,12 @@ def main():
             print("[ERROR] eBay ログイン未完了 → iMakInventory --login で再ログイン")
             return 1
 
-        items = extract_listings(driver, status=args.status,
-                                 search_keyword=keyword or "")
+        if args.all_pages:
+            items = fetch_all_pages(driver, status=args.status,
+                                     search_keyword=keyword or "")
+        else:
+            items = extract_listings(driver, status=args.status,
+                                     search_keyword=keyword or "")
 
         if args.analyze:
             analyze(items, label=label)
