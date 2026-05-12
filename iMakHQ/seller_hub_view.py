@@ -168,16 +168,19 @@ def parse_listing_row(row_text: str, status: str = "active",
         out["promoted_rate"] = m.group(1)
 
     # Listed date / Ended date
-    # 例: "5 11, 2026, 14:55 PDT" or "2026/02/11"
-    m = re.search(r"(\d{1,2})\s*(\d{1,2}),?\s*(20\d{2})", row_text)
+    # 例: "5 11, 2026, 14:55 PDT" (eBay Seller Hub の日付表示)
+    # 厳密 match: 時刻 + PDT/PST が後続する形のみ
+    m = re.search(r"\b(\d{1,2})\s+(\d{1,2}),\s+(20\d{2}),\s+\d{1,2}:\d{2}\s+P[DS]T", row_text)
     if m:
         try:
             mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            date_str = f"{y:04d}-{mo:02d}-{d:02d}"
-            if status == "ended":
-                out["ended_date"] = date_str
-            else:
-                out["listed_date"] = date_str
+            # 月 1-12 / 日 1-31 範囲チェック (validation)
+            if 1 <= mo <= 12 and 1 <= d <= 31:
+                date_str = f"{y:04d}-{mo:02d}-{d:02d}"
+                if status == "ended":
+                    out["ended_date"] = date_str
+                else:
+                    out["listed_date"] = date_str
         except Exception:
             pass
 
