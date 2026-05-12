@@ -144,6 +144,31 @@ def summarize(targets: list[dict]) -> dict:
     return summary
 
 
+def select_sample(targets: list[dict], n: int = 100) -> list[dict]:
+    """改善対象から sample N 件を抽出 (カテゴリ別比例、各カテゴリ内は経過日数長い順).
+
+    全カテゴリの効果検証を 1 サイクルで取れるよう比例配分。
+    最小 1 件は確保 (極小カテゴリも sample に含める)。
+    """
+    by_cat: dict[str, list[dict]] = {}
+    for r in targets:
+        cat = categorize_by_keyword(r.get("title", ""))
+        by_cat.setdefault(cat, []).append(r)
+    # 各カテゴリ内は経過日数長い順
+    for cat in by_cat:
+        by_cat[cat].sort(key=lambda r: -r.get("_days_listed", 0))
+
+    total = len(targets)
+    sample: list[dict] = []
+    for cat, lst in sorted(by_cat.items(), key=lambda x: -len(x[1])):
+        # 比例配分、最小 1 件
+        quota = max(1, round(len(lst) * n / total))
+        sample.extend(lst[:quota])
+        if len(sample) >= n:
+            break
+    return sample[:n]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--snapshot", type=str, default=None,
@@ -152,6 +177,8 @@ def main() -> int:
                         help="出品からの最低経過日数 (default: 30)")
     parser.add_argument("--max-views", type=int, default=5,
                         help="watcher=0 時の views 上限 (default: 5)")
+    parser.add_argument("--sample", type=int, default=None,
+                        help="効果検証用 sample N 件抽出 (カテゴリ別比例)")
     args = parser.parse_args()
 
     snapshot_path = args.snapshot or find_latest_active_snapshot()
@@ -178,11 +205,23 @@ def main() -> int:
         for cat, info in sorted(summary.items(), key=lambda x: -x[1]["count"]):
             print(f"  {cat:>14s}: {info['count']:>4} 件 (avg {info['avg_days']}日経過)")
 
-    # 出力
+    # 出力 (全件)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = os.path.join(SNAPSHOT_DIR, f"improvement_targets_{ts}.csv")
     save_targets(targets, out_path)
-    print(f"\n💾 保存: {out_path}")
+    print(f"\n💾 全件保存: {out_path}")
+
+    # Sample 抽出 (--sample 指定時)
+    if args.sample:
+        sample = select_sample(targets, n=args.sample)
+        sample_path = os.path.join(SNAPSHOT_DIR, f"improvement_sample_{args.sample}_{ts}.csv")
+        save_targets(sample, sample_path)
+        print(f"💾 sample {len(sample)} 件保存: {sample_path}")
+        # sample カテゴリ別内訳
+        sample_summary = summarize(sample)
+        print(f"\n--- sample {len(sample)} 件 カテゴリ別内訳 ---")
+        for cat, info in sorted(sample_summary.items(), key=lambda x: -x[1]["count"]):
+            print(f"  {cat:>14s}: {info['count']:>3} 件 (avg {info['avg_days']}日経過)")
 
     # 上位 10 件サンプル (経過日数長い順)
     targets.sort(key=lambda r: -r.get("_days_listed", 0))

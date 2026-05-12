@@ -112,3 +112,39 @@ def test_summarize_returns_category_counts():
     assert summary["Porter"]["count"] == 2
     assert summary["Porter"]["avg_days"] == 80
     assert summary["G-Shock"]["count"] == 1
+
+
+def test_select_sample_proportional():
+    """select_sample がカテゴリ別比例で抽出、各カテゴリ最低 1 件確保."""
+    mod = _load_tier()
+    targets = (
+        [{"title": "Porter Bag", "_days_listed": 100}] * 50
+        + [{"title": "G-Shock W", "_days_listed": 50}] * 30
+        + [{"title": "PSA 10 X", "_days_listed": 40}] * 20
+    )
+    # 合計 100 件、sample=10 要求
+    sample = mod.select_sample(targets, n=10)
+    cat_counts = {}
+    for r in sample:
+        cat = mod.categorize_by_keyword(r["title"])
+        cat_counts[cat] = cat_counts.get(cat, 0) + 1
+    # 全カテゴリ最低 1 件
+    assert cat_counts.get("Porter", 0) >= 1
+    assert cat_counts.get("G-Shock", 0) >= 1
+    assert cat_counts.get("PSA10 TCG", 0) >= 1
+    # 比例度: Porter (50件) が最多含まれる
+    assert cat_counts["Porter"] >= cat_counts["G-Shock"]
+
+
+def test_select_sample_sorts_by_days():
+    """select_sample がカテゴリ内で経過日数長い順に取る (改善優先度)."""
+    mod = _load_tier()
+    targets = [
+        {"title": "Porter Old", "_days_listed": 300},
+        {"title": "Porter New", "_days_listed": 30},
+        {"title": "Porter Mid", "_days_listed": 100},
+    ]
+    sample = mod.select_sample(targets, n=2)
+    # 最初の 2 件は経過日数長い順 (300 → 100)
+    assert sample[0]["_days_listed"] == 300
+    assert sample[1]["_days_listed"] == 100
