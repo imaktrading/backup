@@ -22,22 +22,43 @@ import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException, WebDriverException
 
+# Seller Hub 用 (login 必須、iMakInventory と共有)
 EBAY_CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_ebay"
+# 公開 listing scrape 用 (login 不要、専用 dir → JP 翻訳が account 設定で
+# 強制されないよう未ログイン状態を維持)
+PUBLIC_SCRAPE_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_ebay_public"
 
 
 @contextmanager
-def scrape_session(headless: bool = False):
-    """eBay 用 Selenium session (seller_hub_view と同 profile で 2FA 共有).
+def scrape_session(headless: bool = False, use_login_profile: bool = False):
+    """eBay listing detail 公開 scrape 用 Selenium session.
 
-    headless=True にすると顔出さず実行 (検証完了後の本番運用向け)。
+    use_login_profile=False (default): 専用未ログイン profile → eBay の翻訳が
+        account 設定 (JP) に引きずられず、原文 (英語) で Title 取得できる。
+    use_login_profile=True: iMakInventory 共有 profile (seller_hub_view 等)。
+        Seller Hub のような login 必要なページ用、listing detail scrape では非推奨。
+
+    headless=True: 顔出さず実行 (検証完了後の本番向け)。
     """
+    profile_dir = (EBAY_CHROME_PROFILE_DIR if use_login_profile
+                   else PUBLIC_SCRAPE_PROFILE_DIR)
     options = uc.ChromeOptions()
-    options.add_argument(f"--user-data-dir={EBAY_CHROME_PROFILE_DIR}")
+    options.add_argument(f"--user-data-dir={profile_dir}")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--lang=en-US")
+    options.add_argument("--accept-lang=en-US,en;q=0.9")
     if headless:
         options.add_argument("--headless=new")
     drv = uc.Chrome(options=options)
+    # CDP で Accept-Language ヘッダーを強制上書き
+    try:
+        drv.execute_cdp_cmd("Network.enable", {})
+        drv.execute_cdp_cmd("Network.setExtraHTTPHeaders", {
+            "headers": {"Accept-Language": "en-US,en;q=0.9"}
+        })
+    except Exception:
+        pass
     try:
         yield drv
     finally:
@@ -51,10 +72,19 @@ _ITEM_ID_RE = re.compile(r"/itm/(?:[^/]+/)?(\d{10,15})")
 
 
 def normalize_listing_url(url_or_id: str) -> str:
-    """URL or ItemID を eBay 公開 listing URL に正規化."""
+    """URL or ItemID を eBay 公開 listing URL (英語強制) に正規化.
+
+    `?_culture=en-US` パラメータで eBay UI 言語を URL 単位で英語固定。
+    """
     if url_or_id.isdigit():
-        return f"https://www.ebay.com/itm/{url_or_id}"
-    return url_or_id
+        url = f"https://www.ebay.com/itm/{url_or_id}"
+    else:
+        url = url_or_id
+    # culture param 追加 (既存 query があれば & で連結)
+    if "_culture=" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}_culture=en-US"
+    return url
 
 
 def _safe_text(elem) -> str:
