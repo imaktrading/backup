@@ -145,7 +145,7 @@ JPY 29,755.00
     assert result["views"] == "76"
     # watchers は num_lines[0] = 3
     assert result["watchers"] == "3"
-    # quantity_available は num_lines[-2] = 1
+    # quantity_available は num_lines[1] = 1 (固定 index、5/12 Revise くん指摘で再修正)
     assert result["quantity_available"] == "1"
 
 

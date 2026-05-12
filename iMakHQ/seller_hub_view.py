@@ -139,16 +139,17 @@ def parse_listing_row(row_text: str, status: str = "active",
     if m:
         out["views"] = m.group(1)
 
-    # 数字 line: watchers / available / sold の順序判定
-    # row 構造: ... SKU / Watchers / Price / ... / Available / Sold / Views ...
+    # 数字 line の位置 (固定 index、Revise くん 5/12 報告で num_lines[-2] = Sold だったため再修正):
+    # row 構造 (Active): SKU / [num0=Watchers] / Price / ... / [num1=Available] / [num2=Sold] / Views (regex)
+    #                  + Promoted 領域に追加で [num3=impressions(views と同値)]
+    # = available は固定 index 1 (num_lines[1]) で取る、末尾は views と同値の noise
     num_lines = [l.strip() for l in lines if re.fullmatch(r"\d+", l.strip())]
     if len(num_lines) >= 3:
-        # 5/12 ユーザー指摘により再評価: num[0]=Watchers, num[-2]=Available, num[-1]=Sold
         out["watchers"] = num_lines[0]
-        out["quantity_available"] = num_lines[-2]
+        out["quantity_available"] = num_lines[1]  # 固定 index、末尾参照は views と衝突
     elif len(num_lines) == 2:
-        out["quantity_available"] = num_lines[0]
-        out["watchers"] = num_lines[1]
+        out["watchers"] = num_lines[0]
+        out["quantity_available"] = num_lines[1]
 
     # Format (今すぐ買う / オークション / Best Offer)
     if "今すぐ買う" in row_text:
