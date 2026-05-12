@@ -64,6 +64,7 @@ def _int(v: str) -> int:
 def filter_improvement_targets(rows: list[dict],
                                  min_days: int = 30,
                                  max_views_for_zero_watch: int = 5,
+                                 site: str | None = None,
                                  today: datetime | None = None) -> list[dict]:
     """5/12 判定軸でフィルタ.
 
@@ -79,6 +80,9 @@ def filter_improvement_targets(rows: list[dict],
     threshold_date = today - timedelta(days=min_days)
     targets = []
     for r in rows:
+        # site filter (5/12 cross-listing 拡大対応): site 指定時は一致のみ
+        if site and r.get("listing_site", "") != site:
+            continue
         # listed_date がない or parse 失敗 → skip
         listed = parse_date(r.get("listed_date", ""))
         if listed is None:
@@ -179,6 +183,8 @@ def main() -> int:
                         help="watcher=0 時の views 上限 (default: 5)")
     parser.add_argument("--sample", type=int, default=None,
                         help="効果検証用 sample N 件抽出 (カテゴリ別比例)")
+    parser.add_argument("--site", type=str, default=None,
+                        help="listing_site で絞込 (US/AU/UK/EU/CA/JP/HK)")
     args = parser.parse_args()
 
     snapshot_path = args.snapshot or find_latest_active_snapshot()
@@ -194,7 +200,8 @@ def main() -> int:
 
     targets = filter_improvement_targets(rows,
                                           min_days=args.min_days,
-                                          max_views_for_zero_watch=args.max_views)
+                                          max_views_for_zero_watch=args.max_views,
+                                          site=args.site)
     print(f"\n🔍 改善対象: {len(targets)} 件 / 全 {len(rows)} 件 = {len(targets)*100//max(len(rows),1)}%")
     print(f"   条件: 出品 {args.min_days} 日超 + (views=0 OR (views<{args.max_views} AND watchers=0))")
 

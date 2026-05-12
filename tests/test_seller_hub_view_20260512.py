@@ -97,14 +97,15 @@ def test_control_panel_has_seller_hub_dialog_class():
     assert "全件" in src
 
 
-def test_csv_fields_includes_all_15_columns():
-    """CSV_FIELDS に 15 項目が定義され、画像系は含まれない."""
+def test_csv_fields_includes_required_columns():
+    """CSV_FIELDS に必須項目 + 5/12 追加の listing_site / price_raw が定義され、画像系は含まれない."""
     mod = _load_seller_hub_view()
     if not hasattr(mod, "CSV_FIELDS"):
         return
     expected = [
         "snapshot_date", "status", "item_id", "sku", "title",
-        "price_usd", "views", "watchers", "quantity_available",
+        "price_usd", "price_raw", "listing_site",  # 5/12 cross-listing 対応で追加
+        "views", "watchers", "quantity_available",
         "listed_date", "ended_date", "promoted_rate",
         "format", "best_offer_enabled", "search_keyword",
     ]
@@ -113,6 +114,27 @@ def test_csv_fields_includes_all_15_columns():
     # 画像系は意図的に含めない (無在庫モデルで仕入元出品者所有のため)
     assert "first_image_url" not in mod.CSV_FIELDS
     assert "listing_url" not in mod.CSV_FIELDS
+
+
+def test_parse_listing_row_extracts_listing_site():
+    """parse_listing_row が通貨表記から listing_site を抽出 (US/AU/UK/EU)."""
+    mod = _load_seller_hub_view()
+    if not hasattr(mod, "parse_listing_row"):
+        return
+    # US
+    us_sample = "編集\nTest\n今すぐ買う · 358545495042\nSKU1\n0\nUS $189.98\nJPY 29,755.00\n1\n0\nリンク。ビュー数1。"
+    r = mod.parse_listing_row(us_sample, status="active")
+    assert r["listing_site"] == "US"
+    assert r["price_usd"] == "189.98"
+    # AU
+    au_sample = "編集\nTest\n今すぐ買う · 358545495043\nSKU2\n0\nAU $200.00\nJPY 30,000.00\n1\n0\nリンク。ビュー数1。"
+    r = mod.parse_listing_row(au_sample, status="active")
+    assert r["listing_site"] == "AU"
+    assert r["price_usd"] == ""  # AUD なので USD 列は空
+    # GBP
+    gbp_sample = "編集\nTest\n今すぐ買う · 358545495044\nSKU3\n0\n£50.00\nJPY 9,500.00\n1\n0\nリンク。ビュー数1。"
+    r = mod.parse_listing_row(gbp_sample, status="active")
+    assert r["listing_site"] == "UK"
 
 
 def test_parse_listing_row_extracts_format_and_best_offer():

@@ -62,6 +62,8 @@ CSV_FIELDS = [
     "sku",
     "title",
     "price_usd",
+    "price_raw",        # 元通貨表記 (US $189 / AU $200 / EUR €100 等)
+    "listing_site",     # US / AU / UK / DE / FR / IT / ES / JP / EU / unknown (5/12 cross-listing 拡大想定)
     "views",
     "watchers",
     "quantity_available",
@@ -72,6 +74,18 @@ CSV_FIELDS = [
     "best_offer_enabled",
     "search_keyword",
 ]
+
+
+# 通貨表記 → site code マッピング
+CURRENCY_TO_SITE = {
+    "US": "US",
+    "AU": "AU",
+    "C": "CA",     # CA $
+    "GBP": "UK",
+    "EUR": "EU",   # DE/FR/IT/ES/NL... 個別判定は別 source 必要
+    "JPY": "JP",
+    "HK": "HK",
+}
 
 
 def open_listing_page(status: str, keyword: str | None, wait_seconds: int = 18):
@@ -118,12 +132,43 @@ def parse_listing_row(row_text: str, status: str = "active",
             out["item_id"] = m.group(1)
             break
 
-    # Price USD
+    # Price 抽出: 通貨記号から site 判定 + price_usd は USD のみ
+    # eBay Seller Hub の表示: "US $189.98" / "AU $200" / "EUR €100" / "£50" / "JPY 1500" 等
     for L in lines:
+        # USD
         m = re.search(r"US\s*\$([0-9,.]+)", L)
         if m:
             out["price_usd"] = m.group(1)
+            out["price_raw"] = L.strip()
+            out["listing_site"] = "US"
             break
+        # AUD
+        m = re.search(r"AU\s*\$([0-9,.]+)", L)
+        if m:
+            out["price_raw"] = L.strip()
+            out["listing_site"] = "AU"
+            break
+        # CAD
+        m = re.search(r"C\s*\$([0-9,.]+)", L)
+        if m:
+            out["price_raw"] = L.strip()
+            out["listing_site"] = "CA"
+            break
+        # GBP
+        m = re.search(r"£([0-9,.]+)", L)
+        if m:
+            out["price_raw"] = L.strip()
+            out["listing_site"] = "UK"
+            break
+        # EUR
+        m = re.search(r"(?:EUR|€)\s*([0-9,.]+)", L)
+        if m:
+            out["price_raw"] = L.strip()
+            out["listing_site"] = "EU"
+            break
+        # その他通貨 (HK $/SGD/etc) は後で拡張可
+    if not out["listing_site"]:
+        out["listing_site"] = "unknown"
 
     # SKU: ItemID 行の次行 (英数字 12 字程度、数字単独除く)
     for i, L in enumerate(lines):
