@@ -62,6 +62,60 @@ END_CODE = "OtherListingError"  # Cassini reset 目的、汎用 code 使用 (Not
 OUTPUT_DIR = r"c:\dev\iMak_data\revise"
 
 
+# ============================================================================
+# OLD listing scrape (5/12 追加: ビフォーアフター CSV 用)
+# ============================================================================
+def save_old_state_csv(item_ids: list[str], results: list[dict]) -> str:
+    """B 列空欄化 直前に eBay 公開ページを scrape して旧 listing 全情報を保存.
+
+    NEW state (= Add CSV) と pair して relist_diff_*.csv を生成するための土台。
+    Selenium 利用、1 listing 約 5-10 秒、N 件で N*10 秒。
+    """
+    import json
+    sys.path.insert(0, os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI")))
+    try:
+        from ebay_listing_scraper import scrape_listings_batch
+    except ImportError as e:
+        print(f"[WARN] ebay_listing_scraper import 失敗: {e} → OLD state scrape skip")
+        return ""
+
+    # OK のみ scrape (NOT_FOUND は URL 不明)
+    ok_results = [r for r in results if r.get("status") == "OK" and r.get("url")]
+    urls = [r["url"] for r in ok_results]
+    if not urls:
+        print("[INFO] OLD state scrape 対象なし")
+        return ""
+
+    print(f"\n=== OLD state scrape: {len(urls)} listings (約 {len(urls) * 8} 秒) ===")
+
+    def _progress(i, total, r):
+        title_short = (r.get("title") or "")[:50]
+        err = r.get("scrape_error", "")
+        marker = "✗" if err else "✓"
+        print(f"  [{i}/{total}] {marker} {r.get('item_id', '?')} {title_short}{' err=' + err if err else ''}")
+
+    scraped = scrape_listings_batch(urls, wait_seconds=5, progress_callback=_progress)
+
+    # CSV 保存
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(OUTPUT_DIR, f"relist_old_state_{ts}.csv")
+    fields = ["item_id", "url", "status", "title", "price_usd", "price_raw",
+              "quantity", "condition", "specifics_json", "scrape_error"]
+    with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=fields, quoting=csv.QUOTE_NONNUMERIC,
+                           extrasaction="ignore")
+        w.writeheader()
+        for r in scraped:
+            row = dict(r)
+            row["specifics_json"] = json.dumps(r.get("specifics", {}),
+                                                ensure_ascii=False)
+            w.writerow(row)
+    print(f"💾 OLD state CSV: {out_path}")
+    return out_path
+
+
 def load_sample_item_ids(sample_csv: str) -> list[str]:
     """sample CSV から item_id 一覧を抽出."""
     ids = []
@@ -216,6 +270,8 @@ def main() -> int:
                         help="本書込実行 (default: dry-run)")
     parser.add_argument("--skip-end-csv", action="store_true",
                         help="End CSV 生成を skip (Step 1 のみ実行)")
+    parser.add_argument("--skip-scrape", action="store_true",
+                        help="OLD state scrape を skip (--execute 時のみ scrape する)")
     args = parser.parse_args()
 
     if not args.sample and not args.category:
@@ -247,7 +303,7 @@ def main() -> int:
     )
     gc = gspread.authorize(creds)
 
-    # 各 item_id を 両スプシで検索
+    # 1. 検索 phase (dry-run 相当の find のみ、書込なし) — scrape 用 URL 確保のため先行
     results = []
     for iid in item_ids:
         found = False
@@ -255,11 +311,13 @@ def main() -> int:
             try:
                 sh = gc.open_by_key(sheet_cfg["id"])
                 ws = sh.get_worksheet_by_id(sheet_cfg["gid"])
-                result = find_and_update_row(ws, iid, dry_run=dry_run)
+                result = find_and_update_row(ws, iid, dry_run=True)  # find のみ
                 if result:
                     results.append({
                         "item_id": iid,
                         "sheet": sheet_cfg["label"],
+                        "sheet_id": sheet_cfg["id"],
+                        "gid": sheet_cfg["gid"],
                         "row_idx": result["row_idx"],
                         "status": "OK",
                         **result.get("row_data", {}),
@@ -270,6 +328,23 @@ def main() -> int:
                 print(f"  [WARN] sheet {sheet_cfg['label']} アクセス失敗: {e}")
         if not found:
             results.append({"item_id": iid, "sheet": "-", "row_idx": None, "status": "NOT_FOUND"})
+
+    # 2. OLD state scrape (execute かつ skip-scrape なしの時のみ、空欄化前に保存)
+    if not dry_run and not args.skip_scrape:
+        save_old_state_csv(item_ids, results)
+
+    # 3. B 列空欄化 (execute 時のみ実書込)
+    if not dry_run:
+        for r in results:
+            if r["status"] != "OK":
+                continue
+            try:
+                sh = gc.open_by_key(r["sheet_id"])
+                ws = sh.get_worksheet_by_id(r["gid"])
+                ws.update_acell(f"B{r['row_idx']}", "")
+            except Exception as e:
+                print(f"  [WARN] {r['item_id']} B列空欄化失敗: {e}")
+                r["status"] = "WRITE_FAILED"
 
     # 結果サマリー
     print("=== Step 1: スプシ B 列空欄化 結果 ===")

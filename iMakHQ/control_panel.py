@@ -340,6 +340,13 @@ SCRIPTS = [
         "cmd": ["python", "seller_hub_view.py", "--analyze"],
         "custom_buttons": "seller_hub_view",
     },
+    {
+        "category": None, "type": "utility",
+        "label": "再出品結果反映",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "seller_hub_writeback.py"],
+        "custom_buttons": "writeback_file_dialog",
+    },
 ]
 
 
@@ -1280,6 +1287,10 @@ class ListingPanel:
         if script.get("custom_buttons") == "seller_hub_view":
             SellerHubCategoryDialog(self.root, self, idx)
             return
+        # 再出品結果反映: Active Listings Report ファイル選択ダイアログ
+        if script.get("custom_buttons") == "writeback_file_dialog":
+            self._launch_writeback_dialog(idx)
+            return
         if self.proc and self.proc.poll() is None:
             messagebox.showwarning("実行中", "他のスクリプトが実行中です。停止してから実行してください。")
             return
@@ -1382,6 +1393,61 @@ class ListingPanel:
             self.status_var.set("停止処理中")
         else:
             self.append_log("実行中のスクリプトはありません\n")
+
+    def _launch_writeback_dialog(self, idx):
+        """再出品結果反映: Active Listings Report ファイルダイアログを開いて seller_hub_writeback.py 起動."""
+        from tkinter import filedialog
+        initialdir = os.path.join(os.path.expanduser("~"), "Downloads")
+        if not os.path.isdir(initialdir):
+            initialdir = os.path.join(os.path.expanduser("~"),
+                                       "OneDrive", "デスクトップ")
+        path = filedialog.askopenfilename(
+            title="eBay Active Listings Report CSV を選択",
+            initialdir=initialdir,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            self.append_log("再出品結果反映: キャンセル\n")
+            return
+        # dry-run / execute 確認
+        do_exec = messagebox.askyesno(
+            "再出品結果反映",
+            f"選択: {os.path.basename(path)}\n\n本書込を実行しますか？\n"
+            "「いいえ」= dry-run (書込なし、結果 CSV のみ出力)",
+        )
+        if self.proc and self.proc.poll() is None:
+            messagebox.showwarning("実行中", "他のスクリプトが実行中です。停止してから実行してください。")
+            return
+        cmd = list(SCRIPTS[idx]["cmd"]) + ["--active-report", path]
+        if do_exec:
+            cmd.append("--execute")
+        cwd = SCRIPTS[idx]["cwd"]
+        self.append_log(f"\n{'='*70}\n▶ 再出品結果反映 ({'EXECUTE' if do_exec else 'DRY-RUN'})\n"
+                        f"  cwd: {cwd}\n  cmd: {' '.join(cmd)}\n{'='*70}\n")
+        self.status_var.set("実行中: 再出品結果反映")
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUNBUFFERED"] = "1"
+        try:
+            self._run_log, log_path = _open_run_log("relist_writeback")
+            self.append_log(f"📝 run log: {log_path}\n")
+        except Exception:
+            self._run_log = None
+        try:
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NO_WINDOW
+            self.proc = subprocess.Popen(
+                cmd, cwd=cwd, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                bufsize=1,
+                creationflags=creationflags,
+            )
+            threading.Thread(target=self._reader, daemon=True).start()
+        except Exception as e:
+            self.append_log(f"❌ 起動失敗: {e}\n")
+            self.status_var.set("待機中")
 
 
 class SellerHubCategoryDialog(tk.Toplevel):
