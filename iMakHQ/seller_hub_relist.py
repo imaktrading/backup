@@ -219,9 +219,16 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
                 spec_keys.add(k[2:])
     spec_cols = sorted(spec_keys)
 
-    base_cols = ["marker", "old_item_id", "sku", "title", "price_usd",
-                 "quantity", "condition"]
-    all_cols = base_cols + spec_cols
+    # 1 listing = 1 行、OLD と NEW を列で並べる (Excel で見やすい)
+    base_cols = ["old_item_id", "sku", "status",
+                 "title_old", "title_new",
+                 "price_old", "price_new",
+                 "qty_old", "qty_new",
+                 "cond_old", "cond_new"]
+    spec_pair_cols = []
+    for k in spec_cols:
+        spec_pair_cols.extend([f"{k}_old", f"{k}_new"])
+    all_cols = base_cols + spec_pair_cols
 
     os.makedirs(DESKTOP_DIR, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -235,32 +242,24 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
             old = p["old"]
             new = p["new"]
             specs_old = old.get("_specs") or {}
-            # OLD 行
-            row_old = {
-                "marker": "OLD",
+            new_title = new.get("*Title", "")
+            row = {
                 "old_item_id": p["item_id"],
                 "sku": p["sku"],
-                "title": old.get("title", ""),
-                "price_usd": old.get("price_usd", ""),
-                "quantity": old.get("quantity", ""),
-                "condition": old.get("condition", ""),
+                "status": "出品" if new_title else "見送り",
+                "title_old": old.get("title", ""),
+                "title_new": new_title,
+                "price_old": old.get("price_usd", ""),
+                "price_new": new.get("*StartPrice", ""),
+                "qty_old": old.get("quantity", ""),
+                "qty_new": new.get("*Quantity", ""),
+                "cond_old": old.get("condition", ""),
+                "cond_new": new.get("ConditionID", ""),
             }
             for k in spec_cols:
-                row_old[k] = specs_old.get(k, "")
-            w.writerow(row_old)
-            # NEW 行
-            row_new = {
-                "marker": "NEW",
-                "old_item_id": p["item_id"],
-                "sku": p["sku"],
-                "title": new.get("*Title", ""),
-                "price_usd": new.get("*StartPrice", ""),
-                "quantity": new.get("*Quantity", ""),
-                "condition": new.get("ConditionID", ""),
-            }
-            for k in spec_cols:
-                row_new[k] = new.get(f"C:{k}", "")
-            w.writerow(row_new)
+                row[f"{k}_old"] = specs_old.get(k, "")
+                row[f"{k}_new"] = new.get(f"C:{k}", "")
+            w.writerow(row)
 
     print(f"\n📋 ビフォーアフター CSV: {out_path}")
     try:
