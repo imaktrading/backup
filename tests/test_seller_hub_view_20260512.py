@@ -13,10 +13,12 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _HQ = _REPO_ROOT / "iMakHQ"
+_EBAY_API = _REPO_ROOT / "iMakeBayAPI"
 
 
 def _load_seller_hub_view():
-    path = _HQ / "seller_hub_view.py"
+    # 5/12 移行: iMakeBayAPI/seller_hub_view.py が本体 (HQ にも shim あり)
+    path = _EBAY_API / "seller_hub_view.py"
     spec = importlib.util.spec_from_file_location("_test_shv", str(path))
     m = importlib.util.module_from_spec(spec)
     # selenium/uc 重い → import 時例外でも attribute は使える: 例外なら skip
@@ -29,7 +31,7 @@ def _load_seller_hub_view():
 
 def test_seller_hub_view_has_category_config():
     """seller_hub_view.py に CATEGORY_KEYWORDS が定義され、想定カテゴリが含まれる."""
-    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    src = (_EBAY_API / "seller_hub_view.py").read_text(encoding="utf-8")
     assert "CATEGORY_KEYWORDS" in src
     for key in ("porter", "gshock", "tcg", "ichibankuji", "reel"):
         assert f'"{key}":' in src, f"category '{key}' missing"
@@ -37,7 +39,7 @@ def test_seller_hub_view_has_category_config():
 
 def test_seller_hub_view_has_parse_function():
     """parse_listing_row が定義されている (row text → dict 変換)."""
-    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    src = (_EBAY_API / "seller_hub_view.py").read_text(encoding="utf-8")
     assert "def parse_listing_row" in src
     assert "def extract_listings" in src
     assert "def analyze" in src
@@ -173,7 +175,7 @@ JPY 29,755.00
 
 def test_seller_hub_view_has_save_function():
     """save_to_csv が存在し、保存先が iMak_data/seller_hub."""
-    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    src = (_EBAY_API / "seller_hub_view.py").read_text(encoding="utf-8")
     assert "def save_to_csv" in src
     assert "iMak_data" in src and "seller_hub" in src
     assert "QUOTE_NONNUMERIC" in src  # eBay CSV 規約準拠
@@ -181,7 +183,7 @@ def test_seller_hub_view_has_save_function():
 
 def test_seller_hub_view_supports_ended_status():
     """--status active|ended の URL 切替が実装されてる."""
-    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    src = (_EBAY_API / "seller_hub_view.py").read_text(encoding="utf-8")
     assert "URL_BASE" in src
     assert '"active":' in src and '"ended":' in src
     assert "/sh/lst/active" in src and "/sh/lst/ended" in src
@@ -189,7 +191,7 @@ def test_seller_hub_view_supports_ended_status():
 
 def test_fetch_all_pages_function_exists():
     """fetch_all_pages がページ送りで全件取得する関数として実装されてる."""
-    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    src = (_EBAY_API / "seller_hub_view.py").read_text(encoding="utf-8")
     assert "def fetch_all_pages" in src
     # Next ボタン selector
     assert ".pagination__next" in src
@@ -199,7 +201,7 @@ def test_fetch_all_pages_function_exists():
 
 def test_main_supports_all_pages_flag():
     """--all-pages CLI フラグが実装されてる."""
-    src = (_HQ / "seller_hub_view.py").read_text(encoding="utf-8")
+    src = (_EBAY_API / "seller_hub_view.py").read_text(encoding="utf-8")
     assert '"--all-pages"' in src
     assert "fetch_all_pages" in src
 
