@@ -111,6 +111,8 @@ def categorize_by_keyword(title: str) -> str:
         return "PSA10 TCG"
     if "ichiban kuji" in t or "kuji" in t:
         return "Ichiban Kuji"
+    if "montbell" in t or "mont-bell" in t or "mont bell" in t:
+        return "Montbell"
     if any(k in t for k in ("shimano", "daiwa", "reel", "spinning", "baitcast")):
         return "Reel"
     if "tomica" in t:

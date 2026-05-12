@@ -167,7 +167,7 @@ def auto_extract_targets(category: str, max_listings: int) -> list[str]:
         "reel": "Reel",
         "ichibankuji": "Ichiban Kuji",
         "tomica": "Tomica",
-        "montbell": "Montbell",  # categorize にないが今後追加可
+        "montbell": "Montbell",
         "other": "Other",
     }
     target_cat = CAT_MAP.get(category.lower(), category)
