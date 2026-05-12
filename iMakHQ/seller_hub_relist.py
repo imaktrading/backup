@@ -119,6 +119,68 @@ def invoke_listing_script(category: str, only_skus: set[str] = None) -> int:
         return 1
 
 
+def _prompt_approve_or_rollback(mapping_path: str, end_csv_path: str,
+                                 add_csv_paths: list[str], gc) -> None:
+    """ビフォーアフター xlsx 確認後の承認/却下 dialog. 却下時は全件 rollback."""
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        answer = messagebox.askyesno(
+            "再出品 内容確認",
+            "ビフォーアフター xlsx を確認してください。\n\n"
+            "この内容で eBay にアップロードしますか?\n\n"
+            "[はい] = CSV 保持 (ユーザーが手動で eBay upload)\n"
+            "[いいえ] = 却下: B 列に旧 ItemID 復元 + 生成 CSV 削除",
+            default=messagebox.NO,
+            parent=root,
+        )
+        root.destroy()
+    except Exception as e:
+        print(f"[WARN] 確認 dialog 表示失敗: {e}")
+        return
+
+    if answer:
+        print("\n✅ 承認: CSV 保持、ユーザー手動 upload に進む")
+        return
+
+    # 却下: rollback
+    print("\n❌ 却下: rollback 開始")
+    # 1. B 列復元 (mapping CSV 起点)
+    if mapping_path and os.path.exists(mapping_path):
+        sheets_by_label = {s["label"]: s for s in SHEETS}
+        with open(mapping_path, "r", encoding="utf-8-sig", newline="") as f:
+            mrows = [r for r in csv.DictReader(f) if r.get("status") == "OK"]
+        sh_cache = {}
+        for r in mrows:
+            cfg = sheets_by_label.get(r["sheet"])
+            if not cfg:
+                continue
+            if cfg["id"] not in sh_cache:
+                sh_cache[cfg["id"]] = gc.open_by_key(cfg["id"])
+            ws = sh_cache[cfg["id"]].get_worksheet_by_id(cfg["gid"])
+            try:
+                _gspread_with_retry(
+                    lambda w=ws, idx=r["row_idx"], iid=r["old_item_id"]:
+                        w.update_acell(f"B{idx}", iid)
+                )
+            except Exception as e:
+                print(f"  [WARN] {r['old_item_id']} B列復元失敗: {e}")
+        print(f"  ✓ B列復元: {len(mrows)} 件")
+    # 2. End CSV 削除
+    if end_csv_path and os.path.exists(end_csv_path):
+        os.remove(end_csv_path)
+        print(f"  🗑️ End CSV 削除: {os.path.basename(end_csv_path)}")
+    # 3. Add CSV 削除
+    for p in add_csv_paths:
+        if os.path.exists(p):
+            os.remove(p)
+            print(f"  🗑️ Add CSV 削除: {os.path.basename(p)}")
+    print("却下 rollback 完了")
+
+
 def restore_old_item_ids_for_skipped(results: list[dict], add_csv_skus: set[str],
                                        gc) -> None:
     """Add CSV にない (= 見送り判定された) item の B 列に旧 ItemID を復元."""
@@ -219,12 +281,11 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
                 spec_keys.add(k[2:])
     spec_cols = sorted(spec_keys)
 
-    # xlsx 出力 (Excel 条件付き書式で差分を赤ハイライト)
+    # xlsx 出力 (1 listing = 1 行、変更項目のみ表示)
     try:
         from openpyxl import Workbook
         from openpyxl.styles import PatternFill, Font, Alignment
     except ImportError:
-        print("[WARN] openpyxl 未インストール、CSV にフォールバック")
         return _generate_diff_csv_fallback(pairs, spec_cols, DESKTOP_DIR)
 
     os.makedirs(DESKTOP_DIR, exist_ok=True)
@@ -234,42 +295,19 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
     wb = Workbook()
     ws = wb.active
     ws.title = "diff"
-    base_pairs = [("title", "Title"), ("price_usd", "Price"),
-                  ("quantity", "Qty"), ("condition", "Condition")]
 
-    # ヘッダー: 1行目「項目」、2行目「OLD/NEW」
-    headers_top = ["ItemID", "SKU", "判定", "差分"]
-    headers_sub = ["",       "",    "",   ""]
-    for fld, label in base_pairs:
-        headers_top.extend([label, ""])
-        headers_sub.extend(["OLD", "NEW"])
-    for k in spec_cols:
-        headers_top.extend([k, ""])
-        headers_sub.extend(["OLD", "NEW"])
-    ws.append(headers_top)
-    ws.append(headers_sub)
-
-    # 2行ヘッダーのマージ
-    col = 5  # 5列目から base_pairs 開始
-    for _ in base_pairs:
-        ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + 1)
-        col += 2
-    for _ in spec_cols:
-        ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + 1)
-        col += 2
-
-    # スタイル
-    diff_fill = PatternFill(start_color="FFE699", end_color="FFE699", fill_type="solid")
-    skip_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    # 6 列のみ: ItemID, 判定, Title(OLD), Title(NEW), Price(OLD→NEW), 変更項目
+    headers = ["ItemID", "判定", "Title (OLD)", "Title (NEW)", "Price", "変更項目"]
+    ws.append(headers)
     bold = Font(bold=True)
     for c in ws[1]:
         c.font = bold
-        c.alignment = Alignment(horizontal="center")
-    for c in ws[2]:
-        c.font = bold
-        c.alignment = Alignment(horizontal="center")
 
-    # データ行
+    skip_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    chg_fill = PatternFill(start_color="FFE699", end_color="FFE699", fill_type="solid")
+
+    def _norm(v): return str(v or "").strip()
+
     for p in pairs:
         old = p["old"]
         new = p["new"]
@@ -277,72 +315,85 @@ def generate_pre_upload_diff_csv(results: list[dict], old_state_path: str,
         new_title = new.get("*Title", "")
         is_skip = not new_title
 
-        # 差分検出 (どの項目が変わったか)
+        old_title = _norm(old.get("title"))
+        old_price = _norm(old.get("price_usd"))
+        new_price = _norm(new.get("*StartPrice"))
+
+        # 変更項目集約
         diffs = []
-        def _norm(v): return str(v or "").strip()
-        old_v = {
-            "title":     _norm(old.get("title")),
-            "price_usd": _norm(old.get("price_usd")),
-            "quantity":  _norm(old.get("quantity")),
-            "condition": _norm(old.get("condition")),
-        }
-        new_v = {
-            "title":     _norm(new.get("*Title")),
-            "price_usd": _norm(new.get("*StartPrice")),
-            "quantity":  _norm(new.get("*Quantity")),
-            "condition": _norm(new.get("ConditionID")),
-        }
-        for fld, label in base_pairs:
-            if not is_skip and old_v[fld] != new_v[fld]:
-                diffs.append(label)
-        for k in spec_cols:
-            ov = _norm(specs_old.get(k))
-            nv = _norm(new.get(f"C:{k}"))
-            if not is_skip and ov != nv and (ov or nv):
-                diffs.append(k)
-
-        row_vals = [p["item_id"], p["sku"], "見送り" if is_skip else "出品",
-                    ", ".join(diffs) if diffs else ("" if is_skip else "変更なし")]
-        # base pairs
-        row_vals.extend([old_v["title"],     new_v["title"]])
-        row_vals.extend([old_v["price_usd"], new_v["price_usd"]])
-        row_vals.extend([old_v["quantity"],  new_v["quantity"]])
-        row_vals.extend([old_v["condition"], new_v["condition"]])
-        # specs
-        for k in spec_cols:
-            row_vals.extend([_norm(specs_old.get(k)), _norm(new.get(f"C:{k}"))])
-        ws.append(row_vals)
-
-        # 差分セルをハイライト
-        row_idx = ws.max_row
-        if is_skip:
-            for c in ws[row_idx]:
-                c.fill = skip_fill
-        else:
-            # base pairs
-            col_idx = 5  # E 列から
-            for fld, _ in base_pairs:
-                if old_v[fld] != new_v[fld]:
-                    ws.cell(row=row_idx, column=col_idx).fill = diff_fill
-                    ws.cell(row=row_idx, column=col_idx + 1).fill = diff_fill
-                col_idx += 2
+        if not is_skip:
+            if old_title != _norm(new_title):
+                diffs.append("Title")
+            if old_price != new_price:
+                # 価格は数値で示す
+                try:
+                    diff_pct = (float(new_price) - float(old_price)) / float(old_price) * 100
+                    diffs.append(f"Price ({diff_pct:+.0f}%)")
+                except Exception:
+                    diffs.append("Price")
             for k in spec_cols:
                 ov = _norm(specs_old.get(k))
                 nv = _norm(new.get(f"C:{k}"))
                 if ov != nv and (ov or nv):
-                    ws.cell(row=row_idx, column=col_idx).fill = diff_fill
-                    ws.cell(row=row_idx, column=col_idx + 1).fill = diff_fill
-                col_idx += 2
+                    diffs.append(k)
 
-    # 列幅自動調整 (簡易)
-    for col_cells in ws.columns:
-        try:
-            col_letter = col_cells[0].column_letter
-            max_len = max((len(str(c.value or "")) for c in col_cells), default=10)
-            ws.column_dimensions[col_letter].width = min(max(max_len + 2, 8), 40)
-        except Exception:
-            continue
-    ws.freeze_panes = "E3"  # 1-2 行ヘッダー + A-D 列固定
+        price_cell = (f"${old_price} → ${new_price}" if not is_skip and old_price and new_price
+                      else f"${old_price}")
+        ws.append([
+            p["item_id"],
+            "見送り" if is_skip else "出品",
+            old_title,
+            new_title or "",
+            price_cell,
+            ", ".join(diffs) if diffs else ("" if is_skip else "変更なし"),
+        ])
+        row_idx = ws.max_row
+        if is_skip:
+            for c in ws[row_idx]:
+                c.fill = skip_fill
+        elif diffs:
+            ws.cell(row=row_idx, column=6).fill = chg_fill
+
+    # 列幅
+    widths = {"A": 14, "B": 8, "C": 50, "D": 50, "E": 22, "F": 40}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+
+    # 2 枚目: Item Specifics 詳細 (見たい時用)
+    ws2 = wb.create_sheet("specifics")
+    spec_headers = ["ItemID", "判定", "項目", "OLD", "NEW"]
+    ws2.append(spec_headers)
+    for c in ws2[1]:
+        c.font = bold
+    for p in pairs:
+        new = p["new"]
+        specs_old = p["old"].get("_specs") or {}
+        is_skip = not new.get("*Title")
+        # Title / Price / Qty / Condition + 全 spec
+        all_keys = [("Title", _norm(p["old"].get("title")), _norm(new.get("*Title"))),
+                    ("Price", _norm(p["old"].get("price_usd")), _norm(new.get("*StartPrice"))),
+                    ("Quantity", _norm(p["old"].get("quantity")), _norm(new.get("*Quantity"))),
+                    ("Condition", _norm(p["old"].get("condition")), _norm(new.get("ConditionID")))]
+        for k in spec_cols:
+            all_keys.append((k, _norm(specs_old.get(k)), _norm(new.get(f"C:{k}"))))
+        for label, ov, nv in all_keys:
+            if not ov and not nv:
+                continue
+            if is_skip and not ov:
+                continue
+            ws2.append([p["item_id"], "見送り" if is_skip else "出品", label, ov, nv])
+            r = ws2.max_row
+            if not is_skip and ov != nv and (ov or nv):
+                for c in ws2[r]:
+                    c.fill = chg_fill
+            elif is_skip:
+                for c in ws2[r]:
+                    c.fill = skip_fill
+    for col, w in {"A": 14, "B": 8, "C": 24, "D": 40, "E": 40}.items():
+        ws2.column_dimensions[col].width = w
+    ws2.freeze_panes = "A2"
+
     wb.save(out_path)
 
     print(f"\n📋 ビフォーアフター xlsx: {out_path}")
@@ -823,7 +874,8 @@ def main() -> int:
 
     # Step 3: listing スクリプト起動 (SKU filter で再出品対象だけ処理)
     # Step 4: 見送り判定行の B 列復元
-    # Step 5: ビフォーアフター CSV
+    # Step 5: ビフォーアフター xlsx
+    # Step 6: 確認ダイアログ (却下選択時は全件 rollback)
     if not dry_run and ok_count > 0 and args.category:
         import time
         listing_start = time.time()
@@ -831,14 +883,16 @@ def main() -> int:
                        if r["status"] == "OK" and r.get("url")}
         target_skus.discard("")
         invoke_listing_script(args.category, only_skus=target_skus)
-        # 直近 Add CSV から SKU 抽出 (= 実際に出品された SKU)
+        # 直近 Add CSV を mtime で特定
         import glob
         ADD_CSV_DIR = r"c:\dev\iMak\iMakHQ\csv_output"
+        add_csv_paths = []
         listed_skus = set()
         for p in glob.glob(os.path.join(ADD_CSV_DIR, "*_upload_*.csv")):
             try:
                 if os.path.getmtime(p) < listing_start:
                     continue
+                add_csv_paths.append(p)
                 with open(p, "r", encoding="utf-8-sig", newline="") as f:
                     for row in csv.DictReader(f):
                         sku = (row.get("CustomLabel") or "").strip()
@@ -847,10 +901,16 @@ def main() -> int:
             except Exception:
                 continue
         restore_old_item_ids_for_skipped(results, listed_skus, gc)
-        # OLD state CSV path
+        # OLD state CSV path + 直近 mapping/end CSV path
         old_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "relist_old_state_*.csv")))
         old_path = old_files[-1] if old_files else ""
+        mapping_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "relist_mapping_*.csv")))
+        mapping_path = mapping_files[-1] if mapping_files else ""
+        end_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "relist_end_*.csv")))
+        end_path = end_files[-1] if end_files else ""
         generate_pre_upload_diff_csv(results, old_path, listing_start)
+        # 確認 dialog (却下が default、却下で自動 rollback)
+        _prompt_approve_or_rollback(mapping_path, end_path, add_csv_paths, gc)
 
     print()
     if dry_run:
