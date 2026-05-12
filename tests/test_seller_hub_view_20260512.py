@@ -201,3 +201,18 @@ def test_monthly_snapshot_readme_exists():
     src = readme.read_text(encoding="utf-8")
     assert "タスクスケジューラ" in src
     assert "monthly_seller_hub_snapshot.bat" in src
+    # 通知 → 手動実行フローへの書換確認
+    assert "通知" in src
+    assert "monthly_snapshot_alert.py" in src
+
+
+def test_monthly_snapshot_alert_script_exists():
+    """通知 script monthly_snapshot_alert.py が存在し、toast 通知を実装."""
+    alert = _HQ / "tools" / "monthly_snapshot_alert.py"
+    assert alert.exists()
+    src = alert.read_text(encoding="utf-8")
+    # win10toast or PowerShell フォールバック実装
+    assert "win10toast" in src or "ToastNotifier" in src
+    assert "NotifyIcon" in src  # フォールバック
+    # 通知タイトルに iMak Seller Hub
+    assert "Seller Hub" in src

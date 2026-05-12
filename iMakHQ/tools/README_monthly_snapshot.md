@@ -1,92 +1,106 @@
-# Seller Hub 月次 snapshot — タスクスケジューラ登録手順
+# Seller Hub 月次 snapshot 運用
 
 ## 目的
 
-eBay は Ended listing データを **90日で消失** させる。月次で自動 scrape して
+eBay は Ended listing データを **90日で消失** させる。月次で snapshot を取って
 `C:\dev\iMak_data\seller_hub\` に永続保存することで、View/Watchers 等の時系列分析が可能になる。
 
-## 自動取得対象
+## 運用方針: 通知 → 手動実行
 
-- **Ended 全件 (--all-pages)**: 21 page 全件、約 9 分
-- **Active 全件 (--all-pages)**: 数 page、約 1-2 分
-- 取得項目 15列: snapshot_date / status / item_id / sku / title / price_usd
-  / views / watchers / quantity_available / listed_date / ended_date
-  / promoted_rate / format / best_offer_enabled / search_keyword
+自動実行ではなく **通知 → 人手で確実に実行** する設計:
+- 通知だけ自動 (Windows タスクスケジューラ + Toast 通知)
+- 公式 CSV DL + scrape 実行は **ユーザー手動**
+- 理由: cookie 切れ・bot 検出等の失敗を即時認識できる、Profile lock 衝突回避
 
-## 手動取得が必要なもの (補完)
+## 月次実行フロー (ユーザー側 5 分)
 
-公式 CSV (Sold/Relist status を含むがVies は含まない) は eBay 認証で自動化困難:
-1. https://www.ebay.com/sh/reports/downloads にアクセス
+### 通知が来たら
+
+毎月 1 日 04:00 (or 設定時刻) にデスクトップ通知が出る:
+```
+📊 iMak Seller Hub 月次 snapshot
+1. Seller Hub > Reports > Unsold CSV を DL
+2. monthly_seller_hub_snapshot.bat を実行
+```
+
+### Step 1: 公式 CSV ダウンロード (1-2 分)
+
+1. ブラウザで https://www.ebay.com/sh/reports/downloads
 2. 「Unsold listings」レポート > Download
-3. DL 後、`C:\dev\iMak_data\seller_hub\official_unsold_YYYYMMDD.csv` にリネーム保存
+3. DL された file (`eBay-unsold-listings-report-YYYY-MM-DD-*.csv`) を
+   `C:\dev\iMak_data\seller_hub\official_unsold_YYYYMMDD.csv` にリネーム保存
 
-## Windows タスクスケジューラ登録手順
+### Step 2: scrape 実行 (約 10 分)
+
+エクスプローラーで `C:\dev\iMak\iMakHQ\tools\monthly_seller_hub_snapshot.bat` を
+ダブルクリック実行。
+
+または出品くんの「📊 今、見る」ボタン → Status=Ended + Save チェック + 実行
+(--all-pages フラグ追加の UI 実装は今後の課題、現状は batch 直叩きが楽)。
+
+### 完了確認
+
+- `C:\dev\iMak\iMakHQ\logs\monthly_snapshot_YYYYMMDD.log` を確認
+- `C:\dev\iMak_data\seller_hub\snapshot_*_YYYYMMDD_*.csv` が増えてれば成功
+
+## 通知タスクの登録 (初回 1 回のみ)
 
 ### 1. タスクスケジューラを開く
 
 `Win + R` → `taskschd.msc` → Enter
 
-### 2. 新規タスク作成
+### 2. タスクの作成 (基本タスクではなく)
 
-右ペイン「タスクの作成…」(基本タスクではなく) クリック
-
-### 3. 全般タブ
-
-- **名前**: `iMak Seller Hub Monthly Snapshot`
-- **説明**: `eBay 90日消失防止のため月次で Ended/Active 全件 scrape`
+- **名前**: `iMak Seller Hub Monthly Alert`
+- **説明**: `月初に Seller Hub snapshot のリマインダー通知`
 - **セキュリティオプション**:
-  - 「ユーザーがログオンしているときのみ実行する」を選択 (Chrome profile 共有のため)
+  - 「ユーザーがログオンしているときのみ実行する」を選択
   - 「最上位の特権で実行する」は OFF
 
-### 4. トリガータブ
+### 3. トリガータブ
 
-「新規…」 → 以下設定:
 - 開始: 「スケジュールに従う」
 - 設定: 「毎月」
-- 開始時刻: **04:00** (Inventory cron と衝突回避、深夜帯)
+- 開始時刻: **04:00** (or 任意)
 - 月: 全月
 - 日: 「1」 (毎月 1 日)
-- 有効: ON
 
-### 5. 操作タブ
+### 4. 操作タブ
 
-「新規…」 → 以下設定:
 - 操作: 「プログラムの開始」
-- プログラム/スクリプト: `C:\dev\iMak\iMakHQ\tools\monthly_seller_hub_snapshot.bat`
-- 開始: `C:\dev\iMak\iMakHQ\tools` (省略可)
+- プログラム/スクリプト: `python`
+- 引数の追加: `C:\dev\iMak\iMakHQ\tools\monthly_snapshot_alert.py`
+- 開始: `C:\dev\iMak\iMakHQ\tools`
 
-### 6. 条件タブ
+### 5. 条件タブ
 
-- 「コンピューターをAC電源で使用している場合のみタスクを開始する」: 任意
-- 「タスクを実行するためにスリープを解除する」: **ON 推奨** (PC sleep 中でも起動)
-- 「次のネットワーク接続が利用可能な場合のみタスクを開始する」: 「任意の接続」
+- 「タスクを実行するためにスリープを解除する」: ON 推奨
 
-### 7. 設定タブ
+### 6. OK → ログオンパスワード入力
 
-- 「タスクを要求時に実行する」: ON
-- 「タスクが失敗した場合の再起動の間隔」: 30分、再試行回数 3 回
-- 「タスクが次の時間より長く実行されている場合は停止する」: 30分
+### 動作確認
 
-### 8. OK → ログオンパスワード入力
+タスク右クリック → 「実行する」 → デスクトップ右下に通知が出れば成功。
 
-## 動作確認
+## 依存
 
-1. タスクを右クリック → 「実行する」 で手動起動
-2. `C:\dev\iMak\iMakHQ\logs\monthly_snapshot_YYYYMMDD.log` を確認
-3. `C:\dev\iMak_data\seller_hub\snapshot_*_YYYYMMDD_*.csv` が増えてれば成功
+通知 script (`monthly_snapshot_alert.py`) は以下のいずれかで通知を表示:
+1. **win10toast** (推奨、Python製 Toast): `pip install win10toast`
+2. **PowerShell NotifyIcon** (フォールバック、追加 install 不要)
 
 ## トラブルシューティング
 
-### Chrome profile lock 衝突
+### Chrome profile lock 衝突 (batch 実行時)
 
-Inventory cron (4h 周期) と Active なタイミングが重なる可能性:
-- Inventory cron は通常 00:00, 04:00, 08:00, 12:00, 16:00, 20:00
-- = 04:00 は Inventory 走行時刻と被る
-- 衝突回避: タスク時刻を 03:30 (Inventory 直前) or 04:15 (直後) に調整
+Inventory cron (4h 周期) と batch を同時実行すると profile lock 衝突。
+batch 実行前に Inventory が走ってないか確認:
+```cmd
+tasklist | findstr chrome
+```
 
 ### eBay 再ログイン要求
 
-cookie 切れた場合は手動でログイン:
+cookie 切れた場合:
 ```cmd
 cd C:\dev\iMak_inventory\iMakInventory
 python -m ebay_actions.sell_feed_uploader --login
