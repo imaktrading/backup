@@ -777,6 +777,10 @@ def _catalog_record_to_scrape_dict(record, fallback_model):
     band_strap = specs.get("band_strap")
     if band_strap and band_strap != "Two-Piece Strap":
         data["band_strap_override"] = band_strap
+    # 5/13 fix: catalog が band_color 未提供 (空) の場合、モデル番号末尾の color code から判定
+    # (catalog 経路は line 913 の get_band_color() を通らないため別途必要)
+    if not data.get("band_color"):
+        data["band_color"] = get_band_color(product_id)
     return data
 
 
