@@ -322,6 +322,57 @@ CASIOFANMAG_SERIES_URL_TEMPLATE = "https://casiofanmag.com/g-shock/{slug}/"
 
 
 # ============================================================================
+# BAND_COLOR_MAP (CASIO 公式 convention、2026-05-13 catalog 側内蔵)
+# ============================================================================
+# モデル番号末尾 color code → 色名. HQ gshock_to_csv.py の同名 dict と同期.
+# 過去事故: 2026-05-13 HQ 旧 get_band_color() bug で 7A*/8A* suffix が解析失敗 →
+# "Black" fallback で 17 件 catalog 投入された. HQ commit 7bd780a で関数修正済
+# だが catalog 値は再投入されてなかった. 本辞書を catalog 側に内蔵することで
+# HQ 関数の変更影響を解消 (catalog は HQ 関数に依存しない).
+_BAND_COLOR_MAP = {
+    "1": "Black", "1A": "Black", "1B": "Black", "1C": "Black", "1D": "Black",
+    "2": "Blue",  "2A": "Blue",  "2B": "Blue",
+    "3": "Green", "3A": "Green",
+    "4": "Red",   "4A": "Red",   "4B": "Red",
+    "5": "White", "5A": "White",
+    "6": "Gold",  "6A": "Gold",
+    "7": "White", "7A": "White", "7B": "White",
+    "8": "Orange","8A": "Orange",
+    "9": "Yellow","9A": "Yellow",
+}
+
+
+def get_band_color_from_pid(model: str) -> str:
+    """G-shock model number 末尾 suffix から band_color を導出.
+
+    例:
+      GA-2100-7A7JF → suffix "7A7" → prefix match "7A" = White
+      DW-5600GL-9JR → suffix "9" (JR strip) = Yellow
+      GA-100-1A1JF → suffix "1A1" → prefix match "1A" = Black
+
+    Returns:
+        eBay フィルタ正規色名. unmatched は空文字 (= 推測しない、Black fallback 廃止).
+    """
+    if not model:
+        return ""
+    model_clean = re.sub(r'J[FRL][A-Z]?$', '', model)
+    m = re.search(r'-([0-9A-Z]+)$', model_clean)
+    if not m:
+        return ""
+    code = m.group(1).upper()
+    # 完全一致 → 短い prefix match の順 (例: "7A7" → "7A" → "7")
+    for length in range(len(code), 0, -1):
+        prefix = code[:length]
+        if prefix in _BAND_COLOR_MAP:
+            return _BAND_COLOR_MAP[prefix]
+    # 先頭数字のみで再試行
+    digits_m = re.match(r'(\d+)', code)
+    if digits_m and digits_m.group(1) in _BAND_COLOR_MAP:
+        return _BAND_COLOR_MAP[digits_m.group(1)]
+    return ""  # 未知の suffix は空 ("Black" fallback 廃止 = precision 優先)
+
+
+# ============================================================================
 # Base series 仕様辞書 (eBay Item Specifics 必須フィルタ用、2026-05-05 追加)
 # ============================================================================
 # G-Shock は base series ごとに display / case_shape / features / water_resistance
@@ -485,6 +536,15 @@ def _apply_series_base_specs(specs: dict, product_id: str) -> dict:
             if re.match(pattern, product_id, re.IGNORECASE):
                 out["features"] = feats
                 break
+    # band_color: model suffix から導出 (空欄時のみ補完)
+    # 既存値が _BAND_COLOR_MAP の値と矛盾している場合 (旧 bug の遺物) も上書きする.
+    inferred_color = get_band_color_from_pid(product_id)
+    if inferred_color:
+        cur_color = out.get("band_color") or ""
+        # 推定値と異なる + 推定値が確実 (BAND_COLOR_MAP 内) なら上書き.
+        # 空欄補完も同パス.
+        if cur_color != inferred_color:
+            out["band_color"] = inferred_color
     return out
 
 
