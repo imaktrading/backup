@@ -54,6 +54,11 @@ def _translate_error(err: str) -> str:
     low = head.lower()
     if "not_logged_in" in low or "not logged in" in low:
         return "eBay ログイン切れ"
+    if "ebay_status_failed" in low:
+        # Status fallback で「N failed, M completed」を捕まえたケース
+        return f"eBay 側で一部失敗 ({head.split(':', 1)[1].strip() if ':' in head else head})"
+    if "ebay_status_pending" in low:
+        return "eBay 側で処理中 (In progress / Pending、次 cycle で確定)"
     if "result_csv_download_failed" in low and "503" in low:
         return "結果 CSV 取得失敗 (eBay サーバ 503、Submit は届いている可能性大)"
     if "result_csv_download_failed" in low:

@@ -519,6 +519,27 @@ def upload_csv_via_form(driver, csv_path: Path, dry_run: bool = False) -> dict:
     try:
         csv_text = _download_result_csv(driver, href)
     except Exception as e:
+        # 503 等で取得失敗 → 履歴ページの Status text を fallback で取得
+        status_text = _extract_status_from_history(driver, csv_path.stem)
+        if status_text:
+            result["page_url"] = driver.current_url
+            result["result_text"] = f"eBay Status: {status_text} (詳細 CSV 取得不能、Status のみ)"
+            low = status_text.lower()
+            if low == "completed":
+                # 全件 Completed = 受理 (Warning も含めて成功)
+                result["success"] = True
+                result["error"] = None
+                return result
+            if "failed" in low:
+                # N failed, M completed = 一部失敗
+                result["success"] = False
+                result["error"] = f"ebay_status_failed: {status_text} (詳細 CSV は 503 で取得不能)"
+                return result
+            # In progress / Pending 等
+            result["success"] = False
+            result["error"] = f"ebay_status_pending: {status_text}"
+            return result
+        # Status も取れない場合のみ true な failure
         result["error"] = f"result_csv_download_failed: {type(e).__name__}: {e}"
         result["page_url"] = driver.current_url
         return result
@@ -591,6 +612,31 @@ def _download_result_csv(driver, url: str) -> str:
     resp = requests.get(url, cookies=cookies, headers=headers, timeout=60)
     resp.raise_for_status()
     return resp.content.decode("utf-8-sig", errors="replace")
+
+
+def _extract_status_from_history(driver, target_stem: str) -> Optional[str]:
+    """eBay 履歴ページの page_source から target_stem 一致 row の Status text を抽出.
+
+    eBay UI で各 row に Status カラム (Completed / 1 failed, 0 completed / In progress)
+    が表示される。getfiledetails が 503 を返すような場面の fallback として、
+    page_source 全体を regex で取って Status text を返す。
+
+    Returns: Status text (例: "Completed", "1 failed, 0 completed") or None
+    """
+    import re  # noqa: PLC0415
+    src = driver.page_source or ""
+    idx = src.find(target_stem)
+    if idx < 0:
+        return None
+    # filename 言及位置の後 ~5000 文字内に Status text が並ぶ (UI レイアウト依存)
+    window = src[idx:idx + 5000]
+    m = re.search(
+        r"(\d+\s+failed,\s+\d+\s+completed|Completed|Failed|In\s+progress|Pending)",
+        window,
+    )
+    if m:
+        return m.group(1).strip()
+    return None
 
 
 def _classify_result_csv(csv_text: str) -> dict:
