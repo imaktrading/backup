@@ -232,6 +232,46 @@ def test_not_logged_in_uses_login_title(isolated_health):
     assert "真のログイン切れ" in title
 
 
+def test_not_logged_in_streak_resets_on_other_errors(isolated_health):
+    """真のログイン切れの後に別 error (503 等) が来たら not_logged_in_streak リセット.
+
+    bug fix (2026-05-14): 旧版は generic_failure や action_needed_failure でも
+    not_logged_in_streak が増分されないまま「2」のまま固定 → メールで「ログイン切れ
+    連続 2 回」と誤誘導された。
+    """
+    uh, _ = isolated_health
+    # 1. 真のログイン切れ 2 連発で streak=2
+    uh.record_upload_result(
+        {"success": False, "error": "not_logged_in"},
+        csv_path="x.csv", csv_lines=1, cycle_ts="2026-05-12T21:30:00",
+    )
+    uh.record_upload_result(
+        {"success": False, "error": "not_logged_in"},
+        csv_path="x.csv", csv_lines=1, cycle_ts="2026-05-13T01:30:00",
+    )
+    health = uh._load_health()
+    assert health["not_logged_in_streak"] == 2
+
+    # 2. 503 (= result_csv_download_failed、login とは無関係) で streak リセット
+    uh.record_upload_result(
+        {"success": False, "error": "result_csv_download_failed: HTTPError: 503"},
+        csv_path="x.csv", csv_lines=1, cycle_ts="2026-05-13T13:30:00",
+    )
+    health = uh._load_health()
+    assert health["not_logged_in_streak"] == 0   # ← bug fix の核心
+
+
+def test_action_needed_failure_does_not_increment_login_streak(isolated_health):
+    """action_needed_failure (= 画像要件等) は CRITICAL だが not_logged_in_streak は増えない."""
+    uh, _ = isolated_health
+    uh.record_upload_result(
+        {"success": False, "error": "action_needed_failure: 1 件"},
+        csv_path="x.csv", csv_lines=1, cycle_ts="2026-05-14T01:30:00",
+    )
+    health = uh._load_health()
+    assert health["not_logged_in_streak"] == 0   # action_needed では増えない
+
+
 def test_result_not_in_history_uses_distinct_title(isolated_health):
     """result_not_in_history は別 title (= 履歴確認誘導)."""
     uh, fired = isolated_health

@@ -261,16 +261,30 @@ def record_upload_result(
 
     is_critical = any(c in error for c in CRITICAL_ERRORS)
     is_flaky = "upload result not detected" in error or "popup + history both inconclusive" in error
+    # ログイン切れ系 error の正確判定 (= not_logged_in_streak の正確化、
+    # 5/14 bug fix: 他 CRITICAL や generic failure で streak がリセットされない問題)
+    err_lower = error.lower()
+    is_login_lost = ("not_logged_in" in err_lower or "session_expired" in err_lower
+                     or "not logged in" in err_lower)
+
+    # not_logged_in_streak は「真のログイン切れ系」のみ増分、それ以外ではリセット
+    # (= メールで「ログイン切れ 連続 N 回」と誤誘導されないように)
+    if is_login_lost:
+        health["not_logged_in_streak"] += 1
+    else:
+        health["not_logged_in_streak"] = 0
 
     alert_fired = False
     alert_reason = ""
 
     if is_critical:
-        # 即時通知 (1 回目で発火)
-        health["not_logged_in_streak"] += 1
+        # 即時通知 (1 回目で発火)。streak は上で is_login_lost のときだけ増えてる
+        # その他の CRITICAL (action_needed_failure / result_not_in_history) は
+        # streak=0 のままで個別 alert を投げる
+        streak_for_msg = health["not_logged_in_streak"] if is_login_lost else 1
         # error 種別で title / body / 対応文言を切替 (= 「ログイン切れ」誤誘導の防止)
         title, body = _critical_alert_message(
-            error, csv_path, csv_lines, cycle_ts, health['not_logged_in_streak'])
+            error, csv_path, csv_lines, cycle_ts, streak_for_msg)
         alert_info = _fire_alert(title, body)
         health["last_alert_ts"] = alert_info["ts"]
         alert_fired = True
