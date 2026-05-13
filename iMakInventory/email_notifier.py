@@ -54,15 +54,37 @@ def _translate_error(err: str) -> str:
     low = head.lower()
     if "not_logged_in" in low or "not logged in" in low:
         return "eBay ログイン切れ"
+    if "result_csv_download_failed" in low and "503" in low:
+        return "結果 CSV 取得失敗 (eBay サーバ 503、Submit は届いている可能性大)"
+    if "result_csv_download_failed" in low:
+        return "結果 CSV 取得失敗 (Submit は届いている可能性大、要 eBay 履歴目視)"
+    if "chrome not reachable" in low:
+        return "Chrome 起動失敗 (profile lock 残存 等)"
     if "sessionnotcreated" in low or "this version of chromedriver" in low:
         return "Chrome バージョン不一致 (driver 更新待ち)"
     if "lost sys.stdin" in low:
         return "cron 環境で input() 失敗 (旧版 hotfix で対処済)"
     if "upload result not detected" in low:
         return "判定不安定 (eBay 側受理済みの可能性大、要 eBay 履歴目視)"
+    if "action_needed_failure" in low:
+        return "eBay 側で取下げ拒否 (画像要件 / Item Specifics 不備等、listing 個別対応必要)"
     if "timeout" in low:
         return "タイムアウト (一時的)"
     return head[:120]
+
+
+def _is_submit_likely_succeeded(err: str) -> bool:
+    """error 文字列から「Submit は実は届いている」が推定できるか判定.
+
+    503 / 判定不安定 / 履歴に出てこない 等は「結果取得失敗だけで Submit は届いている」
+    可能性が高い → 「異常」ではなく「警告」と表現する。
+    """
+    if not err:
+        return False
+    low = err.lower()
+    return ("result_csv_download_failed" in low
+            or "upload result not detected" in low
+            or "result_not_in_history" in low)
 
 
 def _format_subject(cycle_log: Dict[str, Any]) -> str:
@@ -79,8 +101,13 @@ def _format_subject(cycle_log: Dict[str, Any]) -> str:
         prefix = "[SKIP]"
         tail = " 取下げ対象なし"
     elif status == "upload_failed":
-        prefix = "[NG]"
-        tail = f" 取下げ失敗: {_translate_error(upload.get('error', ''))}"
+        err = upload.get('error', '')
+        if _is_submit_likely_succeeded(err):
+            prefix = "[警告]"
+            tail = f" 結果取得不能 (Submit 届いた可能性大): {_translate_error(err)}"
+        else:
+            prefix = "[NG]"
+            tail = f" 取下げ失敗: {_translate_error(err)}"
     elif status == "error":
         prefix = "[NG]"
         tail = f" 巡回中に例外: {_translate_error(cycle_log.get('error', ''))}"
@@ -125,6 +152,20 @@ _STATUS_JP = {
 }
 
 
+def _status_label(cycle_log: Dict[str, Any]) -> str:
+    """status を見て「結果」表示の日本語を返す.
+
+    upload_failed の中でも「Submit 届いた可能性大」のときは「警告」と表現.
+    """
+    status = cycle_log.get("status", "unknown")
+    if status == "upload_failed":
+        up = cycle_log.get("phases", {}).get("upload", {}) or {}
+        err = up.get("error", "")
+        if _is_submit_likely_succeeded(err):
+            return "警告: 結果取得不能 (Submit 届いた可能性大、要 eBay 履歴目視)"
+    return _STATUS_JP.get(status, status)
+
+
 def _format_sheet_label(cycle_log: Dict[str, Any]) -> str:
     """対象スプシの表示文字列を作る.
 
@@ -159,7 +200,7 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
     """cycle_log を日本語の読みやすいレポートに整形."""
     lines = []
     status = cycle_log.get("status", "unknown")
-    status_jp = _STATUS_JP.get(status, status)
+    status_jp = _status_label(cycle_log)
 
     lines.append("=" * 50)
     lines.append("iMakInventory 巡回レポート")
@@ -203,7 +244,14 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
         if rc.get("skipped"):
             lines.append("  取下げ対象   : なし (新規売切なし)")
         elif rc:
-            lines.append(f"  CSV 生成     : {rc.get('allowed', '?')} 件 (条件 OK で対象化)")
+            candidates = rc.get("candidates", 0) or 0
+            allowed = rc.get("allowed", 0) or 0
+            mon_newly_sold = mon.get("newly_sold", 0) or 0 if mon else 0
+            excluded = mon_newly_sold - candidates
+            if excluded > 0:
+                lines.append(f"  CSV 生成     : {allowed} 件 (売切 {mon_newly_sold} 件中、item_id 空欄等で {excluded} 件除外)")
+            else:
+                lines.append(f"  CSV 生成     : {allowed} 件 (条件 OK で対象化)")
             deferred = rc.get("deferred", 0) or 0
             if deferred:
                 lines.append(f"  保留         : {deferred} 件 (条件未達、次 cycle 持越)")
@@ -215,12 +263,20 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
         elif up:
             success = up.get("success")
             csv_lines = up.get("csv_lines", "?")
+            err_text = up.get("error", "")
+            submit_likely_ok = _is_submit_likely_succeeded(err_text)
             if success:
                 summary = _summarize_result_text(up.get("result_text", ""))
                 lines.append(f"  upload結果   : 成功 ({csv_lines} 件処理) → {summary}")
+            elif submit_likely_ok:
+                # Submit は届いている可能性大、結果取得だけ失敗
+                lines.append(f"  upload結果   : Submit OK / 結果取得失敗 ({csv_lines} 件、要 eBay 履歴目視)")
+                lines.append(f"  失敗内容     : {_translate_error(err_text)}")
+                if up.get("page_url"):
+                    lines.append(f"  確認 URL     : {up['page_url']}")
             else:
                 lines.append(f"  upload結果   : 失敗 ({csv_lines} 件未送信)")
-                lines.append(f"  失敗内容     : {_translate_error(up.get('error', ''))}")
+                lines.append(f"  失敗内容     : {_translate_error(err_text)}")
                 if up.get("page_url"):
                     lines.append(f"  確認 URL     : {up['page_url']}")
         lines.append("")
@@ -232,9 +288,20 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
         nl = uh.get("not_logged_in_streak", 0) or 0
         fl = uh.get("flaky_streak", 0) or 0
         gn = uh.get("generic_failure_streak", 0) or 0
+        # 「汎用エラー」の中身を直近 error から推定して詳細表示
+        last_err = uh.get("last_failure_error") or up.get("error") or ""
+        gn_detail = ""
+        if gn > 0 and last_err:
+            low = last_err.lower()
+            if "result_csv_download_failed" in low:
+                gn_detail = " (= 結果 CSV 取得 503 が継続)"
+            elif "chrome not reachable" in low:
+                gn_detail = " (= Chrome 起動失敗が継続)"
+            else:
+                gn_detail = f" (= {_translate_error(last_err)[:40]})"
         lines.append(f"  ログイン切れ : 連続 {nl} 回 {'← 即時アラート対象' if nl > 0 else '(正常)'}")
         lines.append(f"  判定不安定   : 連続 {fl} 回 {'← 3回でアラート' if fl >= 3 else ''}")
-        lines.append(f"  汎用エラー   : 連続 {gn} 回 {'← 2回でアラート' if gn >= 2 else ''}")
+        lines.append(f"  汎用エラー   : 連続 {gn} 回{gn_detail} {'← 2回でアラート' if gn >= 2 else ''}")
         if uh.get("alert_fired"):
             lines.append(f"  → アラート発火 ({uh.get('reason', '')})")
         lines.append("")

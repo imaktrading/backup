@@ -96,9 +96,76 @@ def test_body_failure_translates_error():
 def test_translate_error_known_patterns():
     from email_notifier import _translate_error
     assert "ログイン切れ" in _translate_error("not_logged_in")
-    assert "Chrome" in _translate_error("SessionNotCreatedException: ...")
+    assert "Chrome バージョン" in _translate_error("SessionNotCreatedException: This version of ChromeDriver only supports Chrome version 148")
+    assert "Chrome 起動失敗" in _translate_error("SessionNotCreatedException: chrome not reachable")
     assert "input" in _translate_error("RuntimeError: input(): lost sys.stdin")
     assert "判定不安定" in _translate_error("upload result not detected (popup + history both inconclusive)")
+    # 503 結果取得失敗
+    err503 = "result_csv_download_failed: HTTPError: 503 Server Error"
+    assert "結果 CSV 取得失敗" in _translate_error(err503)
+    assert "503" in _translate_error(err503)
+    assert "Submit は届いている" in _translate_error(err503)
+    # action_needed
+    assert "取下げ拒否" in _translate_error("action_needed_failure: 1 件")
+
+
+def test_submit_likely_succeeded_detection():
+    """Submit 届いた可能性が高い error を「警告」扱いするための判定."""
+    from email_notifier import _is_submit_likely_succeeded
+    assert _is_submit_likely_succeeded("result_csv_download_failed: HTTPError: 503")
+    assert _is_submit_likely_succeeded("upload result not detected")
+    assert _is_submit_likely_succeeded("result_not_in_history")
+    # NG パターン
+    assert not _is_submit_likely_succeeded("not_logged_in")
+    assert not _is_submit_likely_succeeded("chrome not reachable")
+    assert not _is_submit_likely_succeeded("action_needed_failure: 1 件")
+    assert not _is_submit_likely_succeeded("")
+
+
+def test_subject_503_uses_warning_not_ng():
+    """503 系 (= Submit 届いた可能性大) は [警告] prefix で「異常」扱いしない."""
+    from email_notifier import _format_subject
+    log = _failure_log("result_csv_download_failed: HTTPError: 503 Server Error")
+    s = _format_subject(log)
+    assert "[警告]" in s
+    assert "[NG]" not in s
+    assert "Submit 届いた" in s
+
+
+def test_body_503_shows_submit_ok_status():
+    """503 のときの本文「結果」「upload結果」表記が「Submit OK / 結果取得失敗」になる."""
+    from email_notifier import _format_body
+    log = _failure_log("result_csv_download_failed: HTTPError: 503")
+    body = _format_body(log)
+    # 結果欄
+    assert "警告: 結果取得不能" in body
+    # upload結果欄
+    assert "Submit OK / 結果取得失敗" in body
+
+
+def test_body_csv_generation_shows_excluded_count():
+    """売切件数 > CSV 生成件数 のとき「除外 N 件」を本文に出す."""
+    from email_notifier import _format_body
+    log = _success_log()
+    log["phases"]["monitor"]["newly_sold"] = 7   # 売切 7 件
+    log["phases"]["revise_csv"]["candidates"] = 1   # CSV 1 件のみ
+    log["phases"]["revise_csv"]["allowed"] = 1
+    body = _format_body(log)
+    assert "売切 7 件中" in body
+    assert "6 件除外" in body
+    assert "item_id 空欄等" in body
+
+
+def test_body_generic_streak_shows_detail():
+    """汎用エラー連続時に「= 結果 CSV 取得 503 が継続」のような詳細を出す."""
+    from email_notifier import _format_body
+    log = _failure_log("result_csv_download_failed: HTTPError: 503")
+    log["phases"]["upload_health"]["generic_failure_streak"] = 5
+    body = _format_body(log)
+    # 汎用エラー行に詳細が付く
+    assert "汎用エラー" in body
+    assert "連続 5 回" in body
+    assert "結果 CSV 取得 503 が継続" in body
 
 
 def test_body_high_error_rate_shows_warning():
