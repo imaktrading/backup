@@ -339,19 +339,28 @@ def get_band_material_by_model(model):
     return ""  # ブランクの場合はCASIOページから取得した値を使用
 
 def get_band_color(model):
-    """モデル番号末尾からBand Colorを判定"""
-    # 末尾のカラーコードを抽出（例：GWX-5600C-4JF → 4、GBX-100-1 → 1）
-    model_no_jf = re.sub(r'JF$', '', model)
-    m = re.search(r'-(\w+)$', model_no_jf)
-    if m:
-        code = m.group(1).upper()
-        for key, color in BAND_COLOR_MAP.items():
-            if code == key.upper():
-                return color
-        # 数字部分だけで判定
-        digits = re.sub(r'[A-Z]', '', code)
-        if digits in BAND_COLOR_MAP:
-            return BAND_COLOR_MAP[digits]
+    """モデル番号末尾からBand Colorを判定.
+
+    例:
+      GA-2100-7A7JF → suffix "7A7" → prefix match "7A" = White
+      DW-5600GL-9JR → suffix "9" (JR strip) = Yellow
+      GA-100-1A1JF → suffix "1A1" → prefix match "1A" = Black
+    """
+    # JF/JR/JFL/JRA 等 (Japan domestic) suffix を除去
+    model_clean = re.sub(r'J[FRL][A-Z]?$', '', model)
+    m = re.search(r'-([0-9A-Z]+)$', model_clean)
+    if not m:
+        return "Black"
+    code = m.group(1).upper()
+    # 完全一致 → 短い prefix match の順 (例: "7A7" → "7A" → "7")
+    for length in range(len(code), 0, -1):
+        prefix = code[:length]
+        if prefix in BAND_COLOR_MAP:
+            return BAND_COLOR_MAP[prefix]
+    # fallback: 先頭数字のみ
+    digits_m = re.match(r'(\d+)', code)
+    if digits_m and digits_m.group(1) in BAND_COLOR_MAP:
+        return BAND_COLOR_MAP[digits_m.group(1)]
     return "Black"
 
 def is_tough_solar(model):
@@ -1120,7 +1129,7 @@ def build_row(url, price, data, base_desc):
         "Casio", model_official,  # Brand=Casio (50K件、多数派プール)。Brand=G-SHOCK(9K)も独立値として存在するが少数派なのでCasio維持
         "Men", "Wristwatch", style,       # Department = Men, Style=シリーズ別判定
         data.get('display', 'Digital'),
-        "Black",        # C:Case Color
+        band_color,     # C:Case Color (G-SHOCK は Case と Band 同色が大半)
         band_color,     # C:Band Color
         dial_color,     # C:Dial Color
         bezel_color,    # C:Bezel Color
