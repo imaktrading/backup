@@ -435,9 +435,15 @@ def extract_model_from_text(text):
     - 接頭 1-4 大文字 + ハイフン + 残りに数字を最低 1 文字含む
     - 末尾 JF/JR は optional (国内モデルサフィックス)
     - "G-SHOCK" 等の数字を含まない文字列を除外
+
+    前処理: 型番中の半角スペースを除去 (例: 'GW-2320FP -1A1JR' → 'GW-2320FP-1A1JR').
+    Mercari/Amazon セラーが略記で半角スペース入れるケース対応 (5/13).
     """
     if not text:
         return None
+    # 半角スペース除去 (英数大文字/数字 と ハイフン の間に空白がある場合)
+    text = re.sub(r'(?<=[A-Z0-9])\s+-', '-', text)
+    text = re.sub(r'-\s+(?=[A-Z0-9])', '-', text)
     # 接頭ハイフンの後に数字を 1 文字以上必須 ("G-SHOCK" を除外)
     matches = re.findall(r'\b([A-Z]{1,4}-(?=[A-Z0-9-]*\d)[A-Z0-9-]{3,18}(?:JF|JR)?)\b', text)
     # 最長 (= 最具体的) → ハイフン多 で優先
