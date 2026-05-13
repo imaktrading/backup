@@ -175,11 +175,11 @@ def process_listing(sh, main_row: dict, dry_run: bool = False) -> dict:
     try:
         info = fetch_supplier_inventory(supplier, url, title)
     except Exception as e:
-        log(f"    ⚠️ {supplier} scrape 失敗: {type(e).__name__}: {e}")
+        log(f"    [!] {supplier} scrape 失敗: {type(e).__name__}: {e}")
         return {"updates": [], "needs_action_count": 0, "error": str(e)}
 
     if info is None:
-        log(f"    ⚠️ {supplier} scrape: 取得不能 (None 返却)")
+        log(f"    [!] {supplier} scrape: 取得不能 (None 返却)")
         return {"updates": [], "needs_action_count": 0, "error": "scraper returned None"}
 
     log(f"    {supplier}: {info.get('name', '?')[:40]} / {info.get('color', '')} / {len(info.get('skus', []))} skus")
@@ -245,7 +245,7 @@ def alert_if_increased(current: int) -> None:
     if current > last:
         diff = current - last
         log("=" * 60)
-        log(f"⚠️ 要対処件数 増加: 前回 {last} → 今回 {current} (+{diff})")
+        log(f"[!] 要対処件数 増加: 前回 {last} → 今回 {current} (+{diff})")
         log(f"   SKU シート確認: https://docs.google.com/spreadsheets/d/{(__import__('sheet_updater').SPREADSHEET_ID)}/edit")
         log("=" * 60)
     else:
@@ -276,7 +276,7 @@ def main():
         sh = open_sheet()
         log(f"スプシ open: {sh.title}")
     except Exception as e:
-        log(f"❌ スプシ認証失敗: {type(e).__name__}: {e}")
+        log(f"[NG] スプシ認証失敗: {type(e).__name__}: {e}")
         log(traceback.format_exc())
         sys.exit(1)
 
@@ -306,7 +306,7 @@ def main():
                 errors.append((row["listing_id"], result["error"]))
         except Exception as e:
             errors.append((row["listing_id"], f"{type(e).__name__}: {e}"))
-            log(f"    ❌ listing {row['listing_id']} 例外: {e}")
+            log(f"    [NG] listing {row['listing_id']} 例外: {e}")
             log(traceback.format_exc())
 
     log("")
@@ -326,9 +326,9 @@ def main():
         log(f"\nスプシ書込中... ({len(all_updates)} 件)")
         try:
             r = update_sku_rows(sh, all_updates)
-            log(f"  ✅ updated={r['updated']}, appended={r['appended']}")
+            log(f"  [OK] updated={r['updated']}, appended={r['appended']}")
         except Exception as e:
-            log(f"  ❌ スプシ書込失敗: {type(e).__name__}: {e}")
+            log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())
             sys.exit(1)
 

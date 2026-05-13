@@ -202,7 +202,7 @@ def collect_from_pending_queue(
                 for s in sold:
                     sheet_state[(label, s["row_index"])] = s
             except Exception as e:
-                print(f"  ⚠️ [{label}] 現状取得失敗: {type(e).__name__}: {e}")
+                print(f"  [!] [{label}] 現状取得失敗: {type(e).__name__}: {e}")
                 return [], queue
 
     candidates = []
@@ -471,11 +471,11 @@ def run(
     print(f"=== Revise CSV 生成 (sheet={sheet}, mode={mode}, dry_run={dry_run}, "
           f"force={force}, max_per_run={max_per_run}) ===")
     if is_single_mode:
-        print(f"  ⚠️ 単一スプシ mode: label={single_sheet_label or 'SHEET'} id={single_sheet_id[:25]}...")
+        print(f"  [!] 単一スプシ mode: label={single_sheet_label or 'SHEET'} id={single_sheet_id[:25]}...")
     elif high_sheet_id or low_sheet_id:
         h_id = high_sheet_id or HIGH_SHEET_ID
         l_id = low_sheet_id or LOW_SHEET_ID
-        print(f"  ⚠️ TEST モード: HIGH={h_id[:25]}... LOW={l_id[:25]}...")
+        print(f"  [!] TEST モード: HIGH={h_id[:25]}... LOW={l_id[:25]}...")
 
     candidates = []
     pending_skipped = []
@@ -496,7 +496,7 @@ def run(
                 print(f"  [{label}] D=○ 全件 (mode=all): {len(sold)} 件")
                 candidates.extend(sold)
             except Exception as e:
-                print(f"  ❌ [{label}] 読込失敗: {type(e).__name__}: {e}")
+                print(f"  [NG] [{label}] 読込失敗: {type(e).__name__}: {e}")
     else:
         raise ValueError(f"unsupported mode: {mode}")
 
@@ -511,7 +511,7 @@ def run(
     print(f"  許可: {len(allowed)} / 保留: {len(deferred)} / reason: {reason}")
 
     if reason == "PER_RUN_CAP_EXCEEDED":
-        print(f"  ⚠️  per-run cap ({max_per_run}件) 超過。構造異常疑い。")
+        print(f"  [!]  per-run cap ({max_per_run}件) 超過。構造異常疑い。")
         print(f"      --force で override 可能 (manual approval)。確認なしの実行は推奨しない。")
 
     # CSV 出力
@@ -521,7 +521,7 @@ def run(
         sheet_part = sheet.upper() if sheet != "both" else "BOTH"
         csv_path = CSV_OUTPUT_DIR / f"revise_{sheet_part}_{ts}.csv"
         n = write_revise_csv(allowed, csv_path)
-        print(f"  ✅ CSV 出力: {csv_path} ({n} 行)")
+        print(f"  [OK] CSV 出力: {csv_path} ({n} 行)")
 
         # state update (記録のみ)
         state["count"] += n
@@ -594,7 +594,7 @@ def main():
     args = parser.parse_args()
 
     if args.sheet_id and (args.high_sheet_id or args.low_sheet_id):
-        print("❌ --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
+        print("[NG] --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
         sys.exit(2)
 
     result = run(

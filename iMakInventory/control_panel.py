@@ -569,7 +569,7 @@ class ControlPanel:
                         extra_args: list[str] | None = None) -> str:
         ps = TOOLS_DIR / script
         if not ps.exists():
-            return f"❌ {ps} not found"
+            return f"[NG] {ps} not found"
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps),
                "-Action", action]
         if extra_args:
@@ -583,9 +583,9 @@ class ControlPanel:
             )
             return r.stdout + r.stderr
         except subprocess.TimeoutExpired:
-            return "❌ powershell timeout"
+            return "[NG] powershell timeout"
         except Exception as e:
-            return f"❌ {type(e).__name__}: {e}"
+            return f"[NG] {type(e).__name__}: {e}"
 
     def _task_status(self):
         out = ""
@@ -697,7 +697,7 @@ class ControlPanel:
         except Exception as e:
             try:
                 self.summary_status_label.configure(
-                    text=f"⚠️ summary refresh 例外: {type(e).__name__}: {e}",
+                    text=f"[!] summary refresh 例外: {type(e).__name__}: {e}",
                     fg="orange",
                 )
             except Exception:
@@ -814,22 +814,22 @@ class ControlPanel:
 
         if nli >= 1:
             self.summary_health_label.configure(
-                text=f"  ⛔ eBay ログイン切れ: {nli} 回連続未送信  →  即「再ログイン」必要 (last_failure={last_failure[-19:]})",
+                text=f"  [STOP] eBay ログイン切れ: {nli} 回連続未送信  →  即「再ログイン」必要 (last_failure={last_failure[-19:]})",
                 fg="white", bg="red",
             )
         elif fls >= 3:
             self.summary_health_label.configure(
-                text=f"  ⚠️ upload 検出 false negative {fls} 回連続  →  eBay 履歴目視推奨",
+                text=f"  [!] upload 検出 false negative {fls} 回連続  →  eBay 履歴目視推奨",
                 fg="black", bg="yellow",
             )
         elif gen >= 2:
             self.summary_health_label.configure(
-                text=f"  ⚠️ upload 連続失敗 {gen} 回 (err={last_err[:40]})",
+                text=f"  [!] upload 連続失敗 {gen} 回 (err={last_err[:40]})",
                 fg="white", bg="orange",
             )
         elif last_failure and last_failure > (last_success or ""):
             self.summary_health_label.configure(
-                text=f"  ⚠️ 直近 upload 失敗 (回復未確認): {last_err[:60]} @ {last_failure[-19:]}",
+                text=f"  [!] 直近 upload 失敗 (回復未確認): {last_err[:60]} @ {last_failure[-19:]}",
                 fg="dark orange", bg=default_bg,
             )
         elif last_success:
@@ -843,7 +843,7 @@ class ControlPanel:
     def _render_errors(self, errors: int, prefix: str = "errors="):
         if errors > self.ERRORS_WARN_THRESHOLD:
             self.summary_errors_label.configure(
-                text=f"  ⚠️ {prefix}{errors} (>{self.ERRORS_WARN_THRESHOLD}): 異常多発、cycle log 参照",
+                text=f"  [!] {prefix}{errors} (>{self.ERRORS_WARN_THRESHOLD}): 異常多発、cycle log 参照",
                 fg="red",
             )
         elif errors > 0:
@@ -993,7 +993,7 @@ class ControlPanel:
         n = r.get("to_restore", 0)
         preview = r.get("diff_preview", [])
         lines = []
-        lines.append(("✅ 復元完了" if applied else "📋 プレビュー (未適用)"))
+        lines.append(("[OK] 復元完了" if applied else "📋 プレビュー (未適用)"))
         lines.append(f"  backup_tab: {r.get('backup_tab')}")
         lines.append(f"  to_restore: {n} 件")
         lines.append("")

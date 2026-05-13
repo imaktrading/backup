@@ -265,10 +265,10 @@ def manual_login(headless: bool = False) -> bool:
         try:
             page = driver.page_source.lower()
             if "hi," in page or "こんにちは" in page or "/gp/your-account" in page:
-                print("✅ ログイン確認、cookie 保存完了 (永続 profile に記録)")
+                print("[OK] ログイン確認、cookie 保存完了 (永続 profile に記録)")
                 return True
             else:
-                print("⚠️ ログイン確認できず。再度お試しください。")
+                print("[!] ログイン確認できず。再度お試しください。")
                 return False
         finally:
             pass
@@ -358,7 +358,7 @@ if __name__ == "__main__":
     print(f"--- Amazon scrape: {test_url} ---")
     info = fetch_product_inventory(test_url)
     if info is None:
-        print("  ⚠️ 取得不能 (None) — Selenium fallback を試すか URL を確認してください")
+        print("  [!] 取得不能 (None) — Selenium fallback を試すか URL を確認してください")
         sys.exit(1)
     print(f"  Name:    {info['name'][:60]}")
     print(f"  ASIN:    {info['product_id']}")

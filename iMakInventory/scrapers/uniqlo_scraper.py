@@ -226,12 +226,12 @@ def fetch_product_inventory(
             in_stock = False
         else:
             # 未知 statusCode → 警告ログ出して安全側 (✕)
-            print(f"    ⚠️ uniqlo_scraper: 未知 statusCode={status_code!r} "
+            print(f"    [!] uniqlo_scraper: 未知 statusCode={status_code!r} "
                   f"l2Id={l2id} → ✕扱い (要コード対応)")
             in_stock = False
         # 販売停止中は在庫があっても ✕
         if not sales_active:
-            print(f"    ⚠️ uniqlo_scraper: sales=False l2Id={l2id} → ✕扱い (販売停止中)")
+            print(f"    [!] uniqlo_scraper: sales=False l2Id={l2id} → ✕扱い (販売停止中)")
             in_stock = False
         # quantity が「在庫数」だが UNIQLO は概算 (0/2/5/11 等の段階値)
         qty = int(stock_info.get("quantity", 0) or 0)

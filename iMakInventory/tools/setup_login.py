@@ -44,7 +44,7 @@ def cmd_setup():
 
     if has_credentials():
         old = load_credentials()
-        print(f"⚠️ 既に credentials 保存済 (email={old[0]})。上書きしますか? [y/N]: ", end="")
+        print(f"[!] 既に credentials 保存済 (email={old[0]})。上書きしますか? [y/N]: ", end="")
         ans = input().strip().lower()
         if ans != "y":
             print("中止しました")
@@ -53,20 +53,20 @@ def cmd_setup():
     print()
     email = input("eBay email: ").strip()
     if not email:
-        print("⚠️ email が空、中止")
+        print("[!] email が空、中止")
         return
     password = getpass.getpass("eBay password (非表示): ")
     if not password:
-        print("⚠️ password が空、中止")
+        print("[!] password が空、中止")
         return
     password2 = getpass.getpass("もう一度 (確認): ")
     if password != password2:
-        print("⚠️ password 不一致、中止")
+        print("[!] password 不一致、中止")
         return
 
     path = save_credentials(email, password)
     print()
-    print(f"✅ 保存完了: {path}")
+    print(f"[OK] 保存完了: {path}")
     print()
     print("動作確認:")
     creds = load_credentials()
@@ -74,7 +74,7 @@ def cmd_setup():
         print(f"  email roundtrip: {creds[0]}")
         print(f"  password roundtrip: {'*' * len(creds[1])} ({len(creds[1])} chars)")
     else:
-        print("  ⚠️ load 失敗、save 失敗の可能性")
+        print("  [!] load 失敗、save 失敗の可能性")
 
 
 def cmd_delete():
@@ -82,7 +82,7 @@ def cmd_delete():
     print("eBay credentials 削除 (= 旧挙動に戻す)")
     print("=" * 60)
     if not has_credentials():
-        print("⚠️ credentials 未設定 (削除対象なし)")
+        print("[!] credentials 未設定 (削除対象なし)")
         return
     creds = load_credentials()
     print(f"対象: email={creds[0]}")
@@ -93,10 +93,10 @@ def cmd_delete():
         return
     deleted = delete_credentials()
     if deleted:
-        print(f"✅ 削除完了: {ENCRYPTED_PASSWD_FILE}")
+        print(f"[OK] 削除完了: {ENCRYPTED_PASSWD_FILE}")
         print("  以後 manual_login は手動 prompt mode (= 旧挙動) で動作")
     else:
-        print("⚠️ 削除失敗")
+        print("[!] 削除失敗")
 
 
 def cmd_check():

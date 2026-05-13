@@ -120,7 +120,7 @@ def fetch_one(driver, label, url, log):
     except WebDriverException as e:
         log.append({"label": label, "item_id": item_id, "url": url,
                     "status": "real_err", "error": f"driver.get: {e}"})
-        print(f"  ❌ driver.get failed: {e}")
+        print(f"  [NG] driver.get failed: {e}")
         return
 
     hydrate_testid = wait_hydration(driver, url)
@@ -130,7 +130,7 @@ def fetch_one(driver, label, url, log):
                     "status": "real_err",
                     "error": f"hydration timeout after {WAIT_SEC}s",
                     "elapsed": elapsed})
-        print(f"  ❌ hydration timeout ({WAIT_SEC}s)")
+        print(f"  [NG] hydration timeout ({WAIT_SEC}s)")
         return
 
     # Hydration が「商品本体」と「広告」「related」とで非同期な可能性
@@ -141,14 +141,14 @@ def fetch_one(driver, label, url, log):
     except WebDriverException as e:
         log.append({"label": label, "item_id": item_id, "url": url,
                     "status": "real_err", "error": f"page_source: {e}"})
-        print(f"  ❌ page_source failed: {e}")
+        print(f"  [NG] page_source failed: {e}")
         return
 
     target_html.write_text(html, encoding="utf-8")
     try:
         driver.save_screenshot(str(target_png))
     except WebDriverException as e:
-        print(f"  ⚠️ screenshot failed (HTML 保存は成功): {e}")
+        print(f"  [!] screenshot failed (HTML 保存は成功): {e}")
 
     log.append({
         "label": label, "item_id": item_id, "url": url,
@@ -159,7 +159,7 @@ def fetch_one(driver, label, url, log):
         "html_path": str(target_html),
         "png_path": str(target_png),
     })
-    print(f"  ✅ saved (testid={hydrate_testid}, {elapsed:.1f}s, {len(html)//1024}KB)")
+    print(f"  [OK] saved (testid={hydrate_testid}, {elapsed:.1f}s, {len(html)//1024}KB)")
 
 
 def main():

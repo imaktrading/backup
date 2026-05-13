@@ -33,7 +33,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 # stdout/stderr を UTF-8 に強制 (Windows pythonw 経由起動時に cp932 fallback で
-# 絵文字 ✅/❌ 等が UnicodeEncodeError になるのを防ぐ)。
+# 絵文字 [OK]/[NG] 等が UnicodeEncodeError になるのを防ぐ)。
 for _stream_name in ("stdout", "stderr"):
     _s = getattr(sys, _stream_name, None)
     if _s is not None and hasattr(_s, "reconfigure"):
@@ -114,13 +114,13 @@ def _acquire_lock(test_mode: bool = False) -> bool:
             age = time.time() - LOCK_FILE.stat().st_mtime
             if age < LOCK_STALE_HOURS * 3600:
                 content = LOCK_FILE.read_text(encoding="utf-8", errors="replace")[:200]
-                _log(f"⚠️ lock 保持中 (age {age/60:.1f} min < {LOCK_STALE_HOURS}h, content: {content})", test_mode)
+                _log(f"[!] lock 保持中 (age {age/60:.1f} min < {LOCK_STALE_HOURS}h, content: {content})", test_mode)
                 return False
             else:
-                _log(f"⚠️ stale lock 検出 ({age/3600:.1f}h > {LOCK_STALE_HOURS}h)、削除して続行", test_mode)
+                _log(f"[!] stale lock 検出 ({age/3600:.1f}h > {LOCK_STALE_HOURS}h)、削除して続行", test_mode)
                 LOCK_FILE.unlink(missing_ok=True)
         except Exception as e:
-            _log(f"⚠️ lock check 失敗: {e}", test_mode)
+            _log(f"[!] lock check 失敗: {e}", test_mode)
             return False
     LOCK_FILE.write_text(
         f"pid={os.getpid()} host={socket.gethostname()} ts={datetime.now().isoformat()}\n",
@@ -133,7 +133,7 @@ def _release_lock(test_mode: bool = False):
     try:
         LOCK_FILE.unlink(missing_ok=True)
     except Exception as e:
-        _log(f"⚠️ lock release 失敗: {e}", test_mode)
+        _log(f"[!] lock release 失敗: {e}", test_mode)
 
 
 # ============================================================================
@@ -174,14 +174,14 @@ def _phase_pytest_precheck(test_mode: bool) -> dict:
         )
         elapsed = time.time() - t0
         if result.returncode == 0:
-            _log(f"  ✅ pytest precheck pass ({elapsed:.1f}s)", test_mode)
+            _log(f"  [OK] pytest precheck pass ({elapsed:.1f}s)", test_mode)
             return {
                 "status": "passed",
                 "elapsed_sec": round(elapsed, 2),
                 "stdout_tail": (result.stdout or "")[-500:],
             }
         else:
-            _log(f"  ❌ pytest precheck FAILED rc={result.returncode} ({elapsed:.1f}s)", test_mode)
+            _log(f"  [NG] pytest precheck FAILED rc={result.returncode} ({elapsed:.1f}s)", test_mode)
             return {
                 "status": "failed",
                 "returncode": result.returncode,
@@ -241,7 +241,7 @@ def _phase_monitor(
                 grand[k] = grand[k] + stats.get(k, 0)
             grand["url_alerts_count"] += len(stats.get("url_alerts") or [])
         except Exception as e:
-            _log(f"  ❌ [{label}] 例外: {type(e).__name__}: {e}", test_mode)
+            _log(f"  [NG] [{label}] 例外: {type(e).__name__}: {e}", test_mode)
             grand["by_sheet"][label] = {"error": f"{type(e).__name__}: {e}"}
     return grand
 
@@ -264,7 +264,7 @@ def _phase_revise_csv(
         )
         return result
     except Exception as e:
-        _log(f"  ❌ revise_csv 例外: {type(e).__name__}: {e}", test_mode)
+        _log(f"  [NG] revise_csv 例外: {type(e).__name__}: {e}", test_mode)
         return {"error": f"{type(e).__name__}: {e}"}
 
 
@@ -295,7 +295,7 @@ def _phase_audit_sample(
                  f"{' err=' + r['error'] if r.get('error') else ''}", test_mode)
             results[label] = r
         except Exception as e:
-            _log(f"  ❌ [{label}] audit 例外: {type(e).__name__}: {e}", test_mode)
+            _log(f"  [NG] [{label}] audit 例外: {type(e).__name__}: {e}", test_mode)
             results[label] = {"error": f"{type(e).__name__}: {e}"}
     return results
 
@@ -307,7 +307,7 @@ def _phase_upload(csv_path_str: str, test_mode: bool) -> dict:
         result = upload_one_csv(Path(csv_path_str), dry_run=False)
         return result
     except Exception as e:
-        _log(f"  ❌ upload 例外: {type(e).__name__}: {e}", test_mode)
+        _log(f"  [NG] upload 例外: {type(e).__name__}: {e}", test_mode)
         return {"error": f"{type(e).__name__}: {e}", "success": False}
 
 
@@ -459,14 +459,14 @@ def run_cycle(
                 "error": verify_summary.get("error"),
             }
             if verify_summary.get("alerts"):
-                _log(f"  ⚠️ verify alert: {len(verify_summary['alerts'])} 件 qty != 0", test_mode)
+                _log(f"  [!] verify alert: {len(verify_summary['alerts'])} 件 qty != 0", test_mode)
                 _notify_toast(
                     "iMakInventory verify ALERT",
                     f"前回 upload {len(verify_summary['alerts'])} 件で qty != 0 (取下げ失敗?)。"
                     f"decision_log/verify_*.jsonl 確認"
                 )
         except Exception as e:
-            _log(f"  ⚠️ verify 例外 (続行): {type(e).__name__}: {e}", test_mode)
+            _log(f"  [!] verify 例外 (続行): {type(e).__name__}: {e}", test_mode)
             cycle_log["phases"]["listing_verify"] = {"error": f"{type(e).__name__}: {e}"}
 
         # Phase 0.7: D 列バックアップ + 古い backup 削除 (Phase 8a)
@@ -490,15 +490,15 @@ def run_cycle(
                 pr = prune_old_backups(sh)
                 backup_results[label] = {"backup": br, "prune": pr}
                 if br.get("error"):
-                    _log(f"  ⚠️ backup 失敗 [{label}]: {br['error']}", test_mode)
+                    _log(f"  [!] backup 失敗 [{label}]: {br['error']}", test_mode)
                 else:
                     _log(
-                        f"  ✅ backup 完了 [{label}]: tab={br['backup_tab_name']} "
+                        f"  [OK] backup 完了 [{label}]: tab={br['backup_tab_name']} "
                         f"rows={br['row_count']} prune.deleted={pr['deleted']}",
                         test_mode,
                     )
             except Exception as e:
-                _log(f"  ⚠️ backup 例外 (続行) [{label}]: {type(e).__name__}: {e}", test_mode)
+                _log(f"  [!] backup 例外 (続行) [{label}]: {type(e).__name__}: {e}", test_mode)
                 backup_results[label] = {"error": f"{type(e).__name__}: {e}"}
         cycle_log["phases"]["backup"] = backup_results
 
@@ -522,7 +522,7 @@ def run_cycle(
             )
             cycle_log["phases"]["d_diff"] = diff_summary
         except Exception as e:
-            _log(f"  ⚠️ diff 計算例外 (続行): {type(e).__name__}: {e}", test_mode)
+            _log(f"  [!] diff 計算例外 (続行): {type(e).__name__}: {e}", test_mode)
             cycle_log["phases"]["d_diff"] = {"error": f"{type(e).__name__}: {e}"}
 
         # Phase 2: revise CSV
@@ -563,7 +563,7 @@ def run_cycle(
                         cycle_ts=cycle_log["ts_start"],
                     )
                 except Exception as e:
-                    _log(f"  ⚠️ upload_health record 失敗 (skipped path): {type(e).__name__}: {e}", test_mode)
+                    _log(f"  [!] upload_health record 失敗 (skipped path): {type(e).__name__}: {e}", test_mode)
             else:
                 u = _phase_upload(csv_path, test_mode)
                 cycle_log["phases"]["upload"] = u
@@ -585,9 +585,9 @@ def run_cycle(
                         "generic_failure_streak": health_res["health"].get("generic_failure_streak"),
                     }
                     if health_res.get("alert_fired"):
-                        _log(f"  🚨 upload_health ALERT 発火 (reason={health_res.get('reason')})", test_mode)
+                        _log(f"  [ALERT] upload_health ALERT 発火 (reason={health_res.get('reason')})", test_mode)
                 except Exception as e:
-                    _log(f"  ⚠️ upload_health record 失敗: {type(e).__name__}: {e}", test_mode)
+                    _log(f"  [!] upload_health record 失敗: {type(e).__name__}: {e}", test_mode)
 
         # Phase 4: audit sample (Phase 7d') — IN_STOCK から 5 件抜き取り → audit シート追記
         # cycle status に関わらず実行 (in_stock データがあれば audit する)
@@ -611,13 +611,13 @@ def run_cycle(
             )
             cycle_log["phases"]["audit_sample"] = audit_result
         except Exception as e:
-            _log(f"  ❌ audit sample 例外: {type(e).__name__}: {e}", test_mode)
+            _log(f"  [NG] audit sample 例外: {type(e).__name__}: {e}", test_mode)
             cycle_log["phases"]["audit_sample"] = {"error": f"{type(e).__name__}: {e}"}
     except Exception as e:
         cycle_log["status"] = "error"
         cycle_log["error"] = f"{type(e).__name__}: {e}"
         cycle_log["traceback"] = traceback.format_exc()
-        _log(f"  ❌ cycle 例外: {cycle_log['error']}", test_mode)
+        _log(f"  [NG] cycle 例外: {cycle_log['error']}", test_mode)
     finally:
         _release_lock(test_mode)
         cycle_log["ts_end"] = datetime.now().isoformat(timespec="seconds")
@@ -655,12 +655,12 @@ def run_cycle(
         from email_notifier import send_cycle_report  # noqa: PLC0415
         mail_res = send_cycle_report(cycle_log)
         if mail_res.get("sent"):
-            _log("  📧 cycle report mail 送信完了", test_mode)
+            _log("  [mail] cycle report mail 送信完了", test_mode)
         elif mail_res.get("error"):
-            _log(f"  ⚠️ cycle report mail 失敗: {mail_res['error']}", test_mode)
+            _log(f"  [!] cycle report mail 失敗: {mail_res['error']}", test_mode)
         # skipped_reason のみ (= opt-in 未有効化) は無音 (毎 cycle ログ汚染防止)
     except Exception as e:
-        _log(f"  ⚠️ email_notifier 例外: {type(e).__name__}: {e}", test_mode)
+        _log(f"  [!] email_notifier 例外: {type(e).__name__}: {e}", test_mode)
 
     return cycle_log
 
@@ -689,7 +689,7 @@ def main():
     args = parser.parse_args()
 
     if args.sheet_id and (args.high_sheet_id or args.low_sheet_id):
-        print("❌ --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
+        print("[NG] --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
         sys.exit(2)
 
     result = run_cycle(

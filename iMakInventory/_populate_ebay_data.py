@@ -147,7 +147,7 @@ def populate(listing_filter: str = None, dry_run: bool = False):
             in_stock_n = sum(1 for v in vars_list if v["in_stock"])
             print(f"  {lid}: {len(vars_list)} variations, {in_stock_n} in_stock")
         except Exception as e:
-            print(f"  ❌ {lid}: {type(e).__name__}: {e}")
+            print(f"  [NG] {lid}: {type(e).__name__}: {e}")
             listing_variations[lid] = []
 
     # シート行を listing_id × (JP size, color) compound key でマッチして F/K 更新
@@ -217,7 +217,7 @@ def populate(listing_filter: str = None, dry_run: bool = False):
     if cell_updates:
         print(f"\nスプシ書込中... ({len(cell_updates)} cell)")
         sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
-        print("  ✅ 完了")
+        print("  [OK] 完了")
 
 
 if __name__ == "__main__":

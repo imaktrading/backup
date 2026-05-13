@@ -59,14 +59,14 @@ def main():
     print(f"=== Phase 6: 抜き取り検査シート構築 ===\n")
     print(f"  decision_log: {LATEST_LOG}")
     if not LATEST_LOG.exists():
-        print(f"  ❌ log not found")
+        print(f"  [NG] log not found")
         sys.exit(1)
 
     in_stock_rows = collect_in_stock_rows(LATEST_LOG)
     print(f"  in_stock 判定 (Mercari): {len(in_stock_rows)} 件")
 
     if len(in_stock_rows) < SAMPLE_N:
-        print(f"  ⚠️ 候補 {len(in_stock_rows)} < SAMPLE_N {SAMPLE_N}、全件採用")
+        print(f"  [!] 候補 {len(in_stock_rows)} < SAMPLE_N {SAMPLE_N}、全件採用")
         sample = in_stock_rows
     else:
         rng = random.Random(SEED)
@@ -92,7 +92,7 @@ def main():
             listings_ws = ws
             break
     if listings_ws is None:
-        print(f"  ❌ 商品管理シート (gid={LISTINGS_GID}) 見つかりません")
+        print(f"  [NG] 商品管理シート (gid={LISTINGS_GID}) 見つかりません")
         sys.exit(1)
     print(f"  商品管理シート: {listings_ws.title} (id={listings_ws.id})")
 

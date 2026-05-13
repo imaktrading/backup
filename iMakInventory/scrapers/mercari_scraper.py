@@ -520,7 +520,7 @@ if __name__ == "__main__":
     print(f"--- メルカリ scrape: {test_url} ---")
     info = fetch_product_inventory(test_url)
     if info is None:
-        print("  ⚠️ 判定不能 (None)")
+        print("  [!] 判定不能 (None)")
         sys.exit(1)
     print(f"  Name:    {info['name'][:60]}")
     print(f"  ItemID:  {info['product_id']}")

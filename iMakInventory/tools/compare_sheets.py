@@ -154,7 +154,7 @@ def render_md(diff: dict, a: dict, b: dict, label_a: str, label_b: str,
     lines.append("")
 
     if diff['a_only_sold']:
-        lines.append(f"## ⚠️ {label_b} 漏れ (= 致命、在庫切れ検知できてない)")
+        lines.append(f"## [!] {label_b} 漏れ (= 致命、在庫切れ検知できてない)")
         lines.append(f"({label_a} は ○ なのに {label_b} は空欄)")
         lines.append("")
         lines.append(f"| {label_a}_row | {label_b}_row | item_id | url | title |")
@@ -222,7 +222,7 @@ def main():
     print(f"共通 URL: {diff['common_count']}")
     print(f"  一致 ○○: {len(diff['both_sold'])}")
     print(f"  一致 --:  {len(diff['both_blank'])}")
-    print(f"  ⚠️ {args.label_a}=○ {args.label_b}=-: {len(diff['a_only_sold'])} 件 ({args.label_b} 漏れ)")
+    print(f"  [!] {args.label_a}=○ {args.label_b}=-: {len(diff['a_only_sold'])} 件 ({args.label_b} 漏れ)")
     print(f"  {args.label_a}=- {args.label_b}=○:    {len(diff['b_only_sold'])} 件 ({args.label_b} 過剰)")
     print(f"  {args.label_a} のみ: {len(diff['only_in_a'])} / {args.label_b} のみ: {len(diff['only_in_b'])}")
     print(f"saved: {out}")

@@ -323,7 +323,7 @@ def send_cycle_report(cycle_log: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         msg = f"send failed: {type(e).__name__}: {e}"
         # cycle を止めないため stderr に warning のみ
-        print(f"  ⚠️ email_notifier: {msg}", file=sys.stderr)
+        print(f"  [!] email_notifier: {msg}", file=sys.stderr)
         return {"sent": False, "skipped_reason": None, "error": msg}
 
 

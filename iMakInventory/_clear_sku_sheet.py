@@ -24,12 +24,12 @@ def main():
     last_row = ws.row_count
     if last_row > 1:
         ws.batch_clear([f"A2:L{last_row}"])
-        print(f"✅ A2:L{last_row} をクリア")
+        print(f"[OK] A2:L{last_row} をクリア")
 
     # 行数を 100 に縮小 (条件付き書式の範囲に合わせる)
     if ws.row_count > 100:
         ws.resize(rows=100)
-        print(f"✅ 行数を 100 に縮小")
+        print(f"[OK] 行数を 100 に縮小")
 
     print("完了")
 

@@ -5,7 +5,7 @@
     そのまま参照 (本ファイルは薄い wrapper)
   - 認証は app-level (client_credentials)。Browse API のみ呼出可能。
 
-⚠️ Phase 1 の制約 (重要):
+[!] Phase 1 の制約 (重要):
   Sell API / Trading API (listing の SKU/Qty を直接取得・変更) には
   user-OAuth (Authorization Code grant) が必要だが、現状未整備。
   本モジュールは現時点では「stub + シート参照」モードで動作する:
@@ -100,7 +100,7 @@ def get_listing_topline(listing_id: str) -> Optional[dict]:
     try:
         token = get_oauth_token(app_id, app_secret)
     except Exception as e:
-        print(f"  ⚠️ ebay_sku_fetcher: token 取得失敗 {type(e).__name__}: {e}")
+        print(f"  [!] ebay_sku_fetcher: token 取得失敗 {type(e).__name__}: {e}")
         return None
 
     import requests  # noqa: PLC0415
@@ -121,7 +121,7 @@ def get_listing_topline(listing_id: str) -> Optional[dict]:
             "raw": data,
         }
     except Exception as e:
-        print(f"  ⚠️ ebay_sku_fetcher: API 呼出失敗 {type(e).__name__}: {e}")
+        print(f"  [!] ebay_sku_fetcher: API 呼出失敗 {type(e).__name__}: {e}")
         return None
 
 

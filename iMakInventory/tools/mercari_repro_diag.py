@@ -60,7 +60,7 @@ def diagnose(urls: list[str], headless: bool = True) -> dict:
                 if info is None:
                     none_returned += 1
                     entry["status"] = "None"
-                    print(f"  ❌ None 返却 ({elapsed:.1f}s)")
+                    print(f"  [NG] None 返却 ({elapsed:.1f}s)")
                     # page snapshot
                     try:
                         entry["current_url"] = driver.current_url
@@ -77,7 +77,7 @@ def diagnose(urls: list[str], headless: bool = True) -> dict:
                                 bot_signals.append(kw)
                         entry["bot_block_signals"] = bot_signals
                         if bot_signals:
-                            print(f"  ⚠️ bot 疑い signals: {bot_signals}")
+                            print(f"  [!] bot 疑い signals: {bot_signals}")
                         # checkout-button-container 探索
                         try:
                             from selenium.webdriver.common.by import By  # noqa: PLC0415
@@ -101,7 +101,7 @@ def diagnose(urls: list[str], headless: bool = True) -> dict:
                     entry["status"] = info.get("status", "?")
                     entry["in_stock"] = sku.get("in_stock")
                     entry["price_jpy"] = sku.get("price_jpy")
-                    print(f"  ✅ 成功 ({elapsed:.1f}s) status={entry['status']} in_stock={entry['in_stock']}")
+                    print(f"  [OK] 成功 ({elapsed:.1f}s) status={entry['status']} in_stock={entry['in_stock']}")
             except Exception as e:
                 entry["error"] = f"{type(e).__name__}: {e}"
                 print(f"  💥 例外: {entry['error']}")
@@ -156,12 +156,12 @@ def main():
     args = parser.parse_args()
 
     if not args.listings_log.exists():
-        print(f"❌ listings log 不在: {args.listings_log}")
+        print(f"[NG] listings log 不在: {args.listings_log}")
         sys.exit(1)
 
     urls = extract_failed_urls_from_log(args.listings_log)
     if not urls:
-        print(f"⚠️ failed mercari URL が見つからない (log: {args.listings_log})")
+        print(f"[!] failed mercari URL が見つからない (log: {args.listings_log})")
         sys.exit(0)
     urls = urls[:args.max]
     print(f"対象 URL: {len(urls)} 件 (log {args.listings_log.name} から抽出)")

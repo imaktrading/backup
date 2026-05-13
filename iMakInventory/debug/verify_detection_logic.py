@@ -60,7 +60,7 @@ def main():
 
         expected = "IN_STOCK" if label == "in_stock" else "SOLD"
         ok = verdict == expected
-        mark = "✅" if ok else "❌"
+        mark = "[OK]" if ok else "[NG]"
         print(f"  {mark} {label:>8} {item_id}  → {verdict:>9}  ({reason})")
         if ok:
             n_correct += 1

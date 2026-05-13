@@ -91,8 +91,50 @@ UPLOAD_STATE_FILE = DECISION_LOG_DIR / "upload_state.json"
 # ============================================================================
 # Driver factory
 # ============================================================================
+CHROMIUM_PORTABLE_PATH = r"C:\トラバホセット\BoostListing（出品・在庫管理一体型ツール）\BoostListing\BoostListing\chrome\chromep.exe"
+CHROMIUM_PORTABLE_VERSION = 136   # chromep.exe 136.0.7103.93 同梱
+TRABAJO_CHROMEDRIVER_PATH = r"C:\トラバホセット\BoostListing（出品・在庫管理一体型ツール）\BoostListing\BoostListing\dll\chromedriver.exe"   # v136.0.7103.92
+
+
+def _cleanup_stale_chrome_locks(profile_dir: str) -> int:
+    """profile dir の stale lock 系ファイルを削除 (chrome 異常終了の残骸).
+
+    chrome が異常終了 (= driver.quit() なしで kill / crash) すると Singleton* /
+    LOCK 系のファイルが残り、次回起動時に「別 process が使用中」と誤判定して
+    "chrome not reachable" で起動失敗する。
+    本関数は chrome process が動いてない時のみ呼出され、stale lock を片付ける。
+
+    Returns: 削除したファイル数
+    """
+    if not os.path.exists(profile_dir):
+        return 0
+    removed = 0
+    # profile dir 直下
+    for fname in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        p = os.path.join(profile_dir, fname)
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+                removed += 1
+            except Exception:
+                pass
+    # Default 配下の LOCK
+    default_lock = os.path.join(profile_dir, "Default", "LOCK")
+    if os.path.exists(default_lock):
+        try:
+            os.remove(default_lock)
+            removed += 1
+        except Exception:
+            pass
+    return removed
+
+
 def create_ebay_driver(headless: bool = False, use_profile: bool = True):
     """eBay 用 ChromeDriver を生成.
+
+    2026-05-13: Chrome (Google Chrome) では eBay CAPTCHA が通らず anti-bot 検出
+    される問題 → trabajo の Chromium portable (chromep.exe 136) に切替。
+    chromep.exe があればそれを使い、無ければ通常の uc.Chrome (Google Chrome) で fallback。
 
     Args:
         headless: True で headless mode (初回ログインは headless 不可、--login は headful)
@@ -113,10 +155,30 @@ def create_ebay_driver(headless: bool = False, use_profile: bool = True):
     options.add_argument("--start-maximized")  # 最小化禁止 (Selenium が拒否)
     if use_profile:
         os.makedirs(EBAY_CHROME_PROFILE_DIR, exist_ok=True)
+        # 異常終了後の stale lock を起動前に削除 (= chrome not reachable 回避)
+        removed = _cleanup_stale_chrome_locks(EBAY_CHROME_PROFILE_DIR)
+        if removed > 0:
+            print(f"  [INFO] stale chrome lock 削除: {removed} 件")
         options.add_argument(f"--user-data-dir={EBAY_CHROME_PROFILE_DIR}")
     if headless:
         options.add_argument("--headless=new")
 
+    # Chromium portable + 同梱 chromedriver があれば優先 (anti-bot 回避 + download 不要)
+    if os.path.exists(CHROMIUM_PORTABLE_PATH) and os.path.exists(TRABAJO_CHROMEDRIVER_PATH):
+        return uc.Chrome(
+            options=options,
+            browser_executable_path=CHROMIUM_PORTABLE_PATH,
+            driver_executable_path=TRABAJO_CHROMEDRIVER_PATH,
+            version_main=CHROMIUM_PORTABLE_VERSION,
+        )
+    # fallback: Chromium のみあれば uc に driver download させる
+    if os.path.exists(CHROMIUM_PORTABLE_PATH):
+        return uc.Chrome(
+            options=options,
+            browser_executable_path=CHROMIUM_PORTABLE_PATH,
+            version_main=CHROMIUM_PORTABLE_VERSION,
+        )
+    # fallback: 通常の Google Chrome (uc 自動追従)
     return uc.Chrome(options=options)
 
 
@@ -177,7 +239,7 @@ def manual_login(driver) -> bool:
         print(f"  [OK] encrypted_passwd 検出 (email={email}) → 自動入力 mode")
         if _auto_login(driver, email, password):
             return True
-        print("  ⚠️ 自動 login 失敗 → 手動 mode に fallback")
+        print("  [!] 自動 login 失敗 → 手動 mode に fallback")
 
     # 手動 mode (= 従来通り、既存挙動完全保持)
     return _manual_login_legacy(driver)
@@ -207,7 +269,7 @@ def _manual_login_legacy(driver) -> bool:
         print("[OK] ログイン確認 OK、cookie 保存済 (永続プロファイルに記録)")
         return True
     else:
-        print("⚠️ ログイン確認 NG、再度お試しください")
+        print("[!] ログイン確認 NG、再度お試しください")
         return False
 
 
@@ -260,7 +322,7 @@ def _auto_login(driver, email: str, password: str) -> bool:
             passwd_field.send_keys(password)
             print("    password 入力 OK")
         except Exception as e:
-            print(f"    ⚠️ password field 不在: {e}")
+            print(f"    [!] password field 不在: {e}")
             return False
 
         # 4. Stay signed in 自動 ON (Remember Me cookie 焼く、1 年級寿命期待)
@@ -284,7 +346,7 @@ def _auto_login(driver, email: str, password: str) -> bool:
                 passwd_field.submit()
                 print("    Sign in (form.submit fallback) OK")
             except Exception as e:
-                print(f"    ⚠️ Sign in click 失敗: {e}")
+                print(f"    [!] Sign in click 失敗: {e}")
                 return False
 
         # 6. 2FA / login 確定待ち (60 秒 polling)
@@ -294,11 +356,11 @@ def _auto_login(driver, email: str, password: str) -> bool:
             if is_logged_in(driver):
                 print(f"  [OK] 自動ログイン完了 ({i*2}s 経過)")
                 return True
-        print("  ⚠️ 60 秒経過して login 完了確認できず")
+        print("  [!] 60 秒経過して login 完了確認できず")
         return False
 
     except Exception as e:
-        print(f"  ⚠️ 自動 login 例外: {type(e).__name__}: {e}")
+        print(f"  [!] 自動 login 例外: {type(e).__name__}: {e}")
         return False
 
 
@@ -654,7 +716,7 @@ def upload_one_csv(
     print(f"  CSV 行数 (header 除く): {csv_lines}")
 
     if csv_lines == 0:
-        print("  ⚠️ CSV が空、upload skip")
+        print("  [!] CSV が空、upload skip")
         result = {"success": False, "error": "csv_empty",
                   "result_text": "", "popup_text": "", "page_url": "", "screenshot": None}
         log_path = append_upload_log(csv_path, result, dry_run, csv_lines)
@@ -688,14 +750,14 @@ def upload_one_csv(
                 # 自動再ログイン試行 (encrypted_passwd opt-in、無ければ legacy 手動 prompt)
                 # cron 経由 (pythonw.exe / stdin 無し) でも legacy path は EOFError を catch
                 # して False を返すため安全 (= 旧挙動と同等)
-                print("  ⚠️ 未ログイン、manual_login 自動 trigger")
+                print("  [!] 未ログイン、manual_login 自動 trigger")
                 print("     (encrypted_passwd 有 → 自動入力 + Stay signed in / 無 → 手動 prompt)")
                 if manual_login(driver):
                     if is_logged_in(driver):
                         login_ok = True
                         print("  [OK] 再ログイン成功、upload 再開")
                 if not login_ok:
-                    print("  ⚠️ 再ログイン失敗、not_logged_in 確定")
+                    print("  [!] 再ログイン失敗、not_logged_in 確定")
                     result = {"success": False, "error": "not_logged_in",
                               "result_text": "", "popup_text": "", "page_url": "", "screenshot": None}
                     break  # 全体ループも抜ける
@@ -708,7 +770,7 @@ def upload_one_csv(
 
             # session_expired は relogin で復帰可能性
             if result.get("error") == "session_expired" and max_login_retries > 0:
-                print("  ⚠️ session 切れ検知、再ログインを促します")
+                print("  [!] session 切れ検知、再ログインを促します")
                 if manual_login(driver):
                     continue  # 次の attempt で再 upload
                 else:
@@ -770,7 +832,7 @@ def cmd_login():
 
 def cmd_upload(csv_path: Path, dry_run: bool):
     if not csv_path.exists():
-        print(f"❌ CSV not found: {csv_path}")
+        print(f"[NG] CSV not found: {csv_path}")
         return 1
     result = upload_one_csv(csv_path, dry_run=dry_run)
     print()
@@ -796,7 +858,7 @@ def cmd_queue(dry_run: bool):
         result = upload_one_csv(p, dry_run=dry_run)
         if not result.get("success"):
             overall_ok = False
-            print(f"  ⚠️ {p.name}: 失敗 → 後続停止")
+            print(f"  [!] {p.name}: 失敗 → 後続停止")
             break
     return 0 if overall_ok else 1
 

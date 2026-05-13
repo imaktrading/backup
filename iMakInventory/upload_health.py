@@ -105,7 +105,7 @@ def _critical_alert_message(error: str, csv_path: str, csv_lines: int,
     )
 
     if "session_expired" in err or "not_logged_in" in err or "not logged in" in err:
-        title = f"⛔ iMakInventory: 真のログイン切れ ({streak} 回目)"
+        title = f"[STOP] iMakInventory: 真のログイン切れ ({streak} 回目)"
         body = (
             f"eBay 専用 chrome profile のセッションが切れました。\n"
             f"error: {error}"
@@ -115,7 +115,7 @@ def _critical_alert_message(error: str, csv_path: str, csv_lines: int,
             + f"放置すると Defect Rate 直撃 (eBay で売れる → 仕入失敗 → キャンセル)。"
         )
     elif "action_needed_failure" in err:
-        title = f"⚠️ iMakInventory: eBay 側で取下げ拒否 ({streak} 回目、要 listing 個別対応)"
+        title = f"[!] iMakInventory: eBay 側で取下げ拒否 ({streak} 回目、要 listing 個別対応)"
         body = (
             f"eBay が listing 単体で取下げを拒否しました (画像要件 / Item Specifics 不備等)。\n"
             f"chrome profile のログインは生きてる可能性大、再ログインでは解消しません。\n"
@@ -127,7 +127,7 @@ def _critical_alert_message(error: str, csv_path: str, csv_lines: int,
             + f"放置すると Defect Rate 直撃 (該当 item が売れる → 仕入失敗 → キャンセル)。"
         )
     elif "result_not_in_history" in err:
-        title = f"⚠️ iMakInventory: eBay 履歴に upload 結果が出てこない ({streak} 回目)"
+        title = f"[!] iMakInventory: eBay 履歴に upload 結果が出てこない ({streak} 回目)"
         body = (
             f"upload は submit したが eBay 履歴に表示されていない (ネット障害 / Submit 不達)。\n"
             f"error: {error}"
@@ -138,7 +138,7 @@ def _critical_alert_message(error: str, csv_path: str, csv_lines: int,
         )
     else:
         # 想定外の CRITICAL error: generic message
-        title = f"⛔ iMakInventory: 重大エラー ({streak} 回目)"
+        title = f"[STOP] iMakInventory: 重大エラー ({streak} 回目)"
         body = (
             f"upload phase で CRITICAL error が発生しました。\n"
             f"error: {error}"
@@ -286,7 +286,7 @@ def record_upload_result(
     elif is_flaky:
         health["flaky_streak"] += 1
         if health["flaky_streak"] >= FLAKY_THRESHOLD:
-            title = f"⚠️ iMakInventory: upload 検出 false negative {health['flaky_streak']} 回連続"
+            title = f"[!] iMakInventory: upload 検出 false negative {health['flaky_streak']} 回連続"
             body = (
                 f"upload phase の popup/履歴検出が失敗 (= flaky の継続)。\n"
                 f"eBay 側は受理されている可能性大だが、要 eBay 履歴目視確認。\n"
@@ -310,7 +310,7 @@ def record_upload_result(
     else:
         health["generic_failure_streak"] += 1
         if health["generic_failure_streak"] >= GENERIC_THRESHOLD:
-            title = f"⚠️ iMakInventory: upload 失敗 {health['generic_failure_streak']} 回連続"
+            title = f"[!] iMakInventory: upload 失敗 {health['generic_failure_streak']} 回連続"
             body = (
                 f"upload phase が連続して失敗中。\n"
                 f"error: {error}\n"

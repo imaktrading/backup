@@ -257,5 +257,5 @@ if __name__ == "__main__":
     print(f"=== 結果 ===")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary.get("alerts"):
-        print(f"\n⚠️ ALERT: {len(summary['alerts'])} 件 qty != 0 (取り下げ失敗の可能性)")
+        print(f"\n[!] ALERT: {len(summary['alerts'])} 件 qty != 0 (取り下げ失敗の可能性)")
         sys.exit(1)

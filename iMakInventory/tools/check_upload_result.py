@@ -110,7 +110,7 @@ def find_result_link(driver, target_filename: str, max_history_rows: int = 10) -
     href = html.unescape(href)
     if href.startswith("/"):
         href = "https://www.ebay.com" + href
-    print(f"  ✅ 採用: {fname}")
+    print(f"  [OK] 採用: {fname}")
     print(f"     href[:100]: {href[:100]}")
     return href
 
@@ -170,7 +170,7 @@ def main():
 
     try:
         if not is_logged_in(driver):
-            print("  ⚠️ ログイン未確認、続行試行")
+            print("  [!] ログイン未確認、続行試行")
 
         href = find_result_link(driver, target_filename, max_history_rows=args.history_rows)
         if href is None:
@@ -188,7 +188,7 @@ def main():
         non_warning = [r for r in rows if r.get("Status") != "Warning"]
         if non_warning:
             print()
-            print(f"  ⚠️ Warning 以外 {len(non_warning)} 件:")
+            print(f"  [!] Warning 以外 {len(non_warning)} 件:")
             for r in non_warning:
                 print(f"    item={r.get('ItemID')} status={r.get('Status')} "
                       f"err={(r.get('ErrorMessage') or '')[:60]!r}")

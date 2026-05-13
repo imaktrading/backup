@@ -355,9 +355,9 @@ def process_sheet(
         log("  Mercari driver 起動中...")
         try:
             mercari_driver = create_mercari_driver(headless=True)
-            log("  ✅ Mercari driver 起動完了 (再利用 mode)")
+            log("  [OK] Mercari driver 起動完了 (再利用 mode)")
         except Exception as e:
-            log(f"  ⚠️ Mercari driver 起動失敗: {type(e).__name__}: {e}")
+            log(f"  [!] Mercari driver 起動失敗: {type(e).__name__}: {e}")
             log("     → 各 row で都度 driver 生成に fallback (遅い)")
             mercari_driver = None
 
@@ -368,9 +368,9 @@ def process_sheet(
         log("  Amazon driver 起動中 (login profile)...")
         try:
             amazon_driver = create_amazon_driver(headless=True, use_login_profile=True)
-            log("  ✅ Amazon driver 起動完了 (login profile 再利用)")
+            log("  [OK] Amazon driver 起動完了 (login profile 再利用)")
         except Exception as e:
-            log(f"  ⚠️ Amazon driver 起動失敗: {type(e).__name__}: {e}")
+            log(f"  [!] Amazon driver 起動失敗: {type(e).__name__}: {e}")
             log("     → unqualifiedBuyBox 検出時の Selenium 再判定が無効")
             amazon_driver = None
 
@@ -411,7 +411,7 @@ def process_sheet(
                     and "scraper returned None" in (res["error"] or "")):
                 mercari_consec_none += 1
                 if mercari_consec_none >= MERCARI_RESTART_THRESHOLD:
-                    log(f"  ⚠️ mercari 連続 None {mercari_consec_none} 件 → driver 再起動を試行")
+                    log(f"  [!] mercari 連続 None {mercari_consec_none} 件 → driver 再起動を試行")
                     if mercari_driver is not None:
                         try:
                             mercari_driver.quit()
@@ -419,24 +419,24 @@ def process_sheet(
                             pass
                     try:
                         mercari_driver = create_mercari_driver(headless=True)
-                        log("    ✅ mercari driver 再起動完了 (続行)")
+                        log("    [OK] mercari driver 再起動完了 (続行)")
                         mercari_consec_none = 0
                     except Exception as re:
-                        log(f"    ❌ mercari driver 再起動失敗: {re} (mercari は失敗継続、他 supplier は処理する)")
+                        log(f"    [NG] mercari driver 再起動失敗: {re} (mercari は失敗継続、他 supplier は処理する)")
                         mercari_driver = None
                         mercari_consec_none = 0  # 再起動失敗を loop しないようリセット
             if (res["error"] or "").startswith("unsupported supplier"):
                 log(f"{prefix}{sup} - skip ({res['error'][:60]})")
             else:
-                log(f"{prefix}{sup} ⚠️ {res['error'][:60]}")
+                log(f"{prefix}{sup} [!] {res['error'][:60]}")
         else:
             # 成功した supplier に対応するカウンタをリセット
             if res["supplier"] == "mercari":
                 mercari_consec_none = 0
             mark = "○" if res["is_sold"] else "·"
             delta_emoji = {
-                "newly_sold":      "🔻",
-                "newly_in_stock":  "🔺",
+                "newly_sold":      "[v]",
+                "newly_in_stock":  "[^]",
                 "unchanged":       " ",
                 "uncertain":       "?",
             }.get(res["delta"], "?")
@@ -492,7 +492,7 @@ def process_sheet(
     log(f"    処理: {len(results)} / 対象 {len(rows)}")
     log(f"    新規売切: {newly_sold} / 新規復活: {newly_in_stock} / 変化なし: {len(results) - newly_sold - newly_in_stock - errors} / エラー: {errors}")
     if url_alerts:
-        log(f"  ⚠️ URL 不正で在庫検出スキップ: {len(url_alerts)} 件 (スプシ修正必要)")
+        log(f"  [!] URL 不正で在庫検出スキップ: {len(url_alerts)} 件 (スプシ修正必要)")
         for a in url_alerts[:10]:
             log(f"    row{a['row_index']:>4} {a['url'][:80]}  ← {a['error'][:60]}")
         if len(url_alerts) > 10:
@@ -557,9 +557,9 @@ def process_sheet(
         log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + N 列価格 {n_count} 件 + O 列 {o_count} 件)")
         try:
             res = update_listings_sold_marks(ws, updates)
-            log(f"  ✅ updated={res['updated']} (d_writes={res.get('d_writes', '?')} / n_writes={res.get('n_writes', '?')} / o_writes={res.get('o_writes', '?')})")
+            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / n_writes={res.get('n_writes', '?')} / o_writes={res.get('o_writes', '?')})")
         except Exception as e:
-            log(f"  ❌ スプシ書込失敗: {type(e).__name__}: {e}")
+            log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())
 
         # AC-AG (補 URL) 色塗り: 補 URL 設定 row のみ paint。売切は赤字、それ以外は黒字。
@@ -588,9 +588,9 @@ def process_sheet(
             log(f"  AC-AG セル色塗り中... {len(paints)} 行")
             try:
                 pres = paint_backup_url_cells(ws, paints)
-                log(f"  ✅ 色塗り完了 (赤={pres['red_cells']} / 黒={pres['default_cells']})")
+                log(f"  [OK] 色塗り完了 (赤={pres['red_cells']} / 黒={pres['default_cells']})")
             except Exception as e:
-                log(f"  ⚠️ 色塗り失敗 (本筋に影響なし): {type(e).__name__}: {e}")
+                log(f"  [!] 色塗り失敗 (本筋に影響なし): {type(e).__name__}: {e}")
     else:
         log("  書込対象なし")
 
@@ -636,7 +636,7 @@ def main():
     # 単一スプシ mode (Phase 6a)
     if args.sheet_id:
         if args.high_sheet_id or args.low_sheet_id:
-            log("❌ --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
+            log("[NG] --sheet-id と --high-sheet-id/--low-sheet-id は併用不可")
             sys.exit(2)
         log(f"  単一スプシ mode: label={args.sheet_label} id={args.sheet_id[:25]}...")
         targets = [(args.sheet_label, args.sheet_id)]
@@ -645,7 +645,7 @@ def main():
         high_id = args.high_sheet_id or HIGH_SHEET_ID
         low_id = args.low_sheet_id or LOW_SHEET_ID
         if args.high_sheet_id or args.low_sheet_id:
-            log(f"  ⚠️ TEST モード: HIGH={high_id[:25]}... LOW={low_id[:25]}...")
+            log(f"  [!] TEST モード: HIGH={high_id[:25]}... LOW={low_id[:25]}...")
         targets = []
         if args.sheet in ("high", "both"):
             targets.append(("HIGH", high_id))
@@ -667,7 +667,7 @@ def main():
             for k, v in stats.items():
                 grand[k] = grand[k] + v
         except Exception as e:
-            log(f"❌ [{label}] 例外: {type(e).__name__}: {e}")
+            log(f"[NG] [{label}] 例外: {type(e).__name__}: {e}")
             log(traceback.format_exc())
 
     log("=" * 60)
