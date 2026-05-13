@@ -777,10 +777,11 @@ def _catalog_record_to_scrape_dict(record, fallback_model):
     band_strap = specs.get("band_strap")
     if band_strap and band_strap != "Two-Piece Strap":
         data["band_strap_override"] = band_strap
-    # 5/13 fix: catalog の band_color は誤登録多数 (例: GA-2100-7A7JF "Black" 等、
-    # 実際は "7" = White)。モデル番号末尾 color code (CASIO 公式 convention) が
-    # SSOT として最も信頼できるため、catalog 値より優先で上書き。
-    data["band_color"] = get_band_color(product_id)
+    # 5/13 fix: catalog が band_color 未提供 (空) の場合、モデル番号末尾の color code から判定
+    # (catalog 経路は line 913 の get_band_color() を通らないため別途必要)
+    # catalog 値が間違っている場合は catalog 側で修正 (SSOT 維持)
+    if not data.get("band_color"):
+        data["band_color"] = get_band_color(product_id)
     return data
 
 
