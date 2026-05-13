@@ -65,6 +65,13 @@ class TestCatalogBandColorIntegrity(unittest.TestCase):
     """
 
     def test_all_band_colors_consistent(self):
+        """heuristic 由来の entry のみ整合性 check.
+
+        2026-05-13 改訂: band_color の優先順は 公式 > heuristic.
+        band_color_source='casio_official_description' の entry は heuristic と
+        乖離していて当然 (例: GA-2300FL-4AJF = Biomass Orange、heuristic Red).
+        この test は **heuristic 由来 entry の suffix 整合性のみ** を保証する.
+        """
         conn = sqlite3.connect(str(api._DB_PATH))
         cur = conn.cursor()
         cur.execute("SELECT product_id, specs FROM products WHERE category='gshock'")
@@ -72,16 +79,21 @@ class TestCatalogBandColorIntegrity(unittest.TestCase):
         for pid, specs_json in cur.fetchall():
             specs = json.loads(specs_json) if specs_json else {}
             cat_color = (specs.get("band_color") or "").strip()
+            src = specs.get("band_color_source")
+            # HQ 確証 override は heuristic と異なって OK
+            # (例: GA-2300FL-4AJF Biomass Orange=Red heuristic に対し HQ 確証 Orange)
+            if src == "hq_confirmed":
+                continue
             inferred = gshock.get_band_color_from_pid(pid)
             if not inferred:
                 continue  # suffix 解析不能なものは skip
             if cat_color and cat_color != inferred:
-                mismatches.append((pid, cat_color, inferred))
+                mismatches.append((pid, cat_color, inferred, src))
         conn.close()
         if mismatches:
-            msg = "band_color mismatches:\n"
-            for pid, cur_c, exp in mismatches:
-                msg += f"  {pid}: catalog={cur_c!r} != inferred={exp!r}\n"
+            msg = "heuristic-source band_color mismatches:\n"
+            for pid, cur_c, exp, src in mismatches:
+                msg += f"  {pid}: catalog={cur_c!r} != inferred={exp!r} (source={src!r})\n"
             self.fail(msg)
 
 

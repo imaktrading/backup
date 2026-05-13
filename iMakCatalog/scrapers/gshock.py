@@ -536,15 +536,25 @@ def _apply_series_base_specs(specs: dict, product_id: str) -> dict:
             if re.match(pattern, product_id, re.IGNORECASE):
                 out["features"] = feats
                 break
-    # band_color: model suffix から導出 (空欄時のみ補完)
-    # 既存値が _BAND_COLOR_MAP の値と矛盾している場合 (旧 bug の遺物) も上書きする.
-    inferred_color = get_band_color_from_pid(product_id)
-    if inferred_color:
-        cur_color = out.get("band_color") or ""
-        # 推定値と異なる + 推定値が確実 (BAND_COLOR_MAP 内) なら上書き.
-        # 空欄補完も同パス.
-        if cur_color != inferred_color:
+    # band_color の優先順 (2026-05-13 教訓反映):
+    #   1) HQ 確証 (band_color_source='hq_confirmed'): 不変 (人間が公式 page / Amazon
+    #      等で実色 verify 済の override). 例: GA-2300FL-4AJF=Orange, GA-100B-7AJF=White
+    #   2) heuristic (model suffix 由来 BAND_COLOR_MAP): 既存値と矛盾なら上書き
+    #   3) 導出不能 (未知 suffix) なら空欄据置
+    # NOTE: description hint (band_color_description_hint) は **band_color に
+    #       auto-apply しない** (theme contrast 色で frequency が誤判定するため).
+    cur_color = (out.get("band_color") or "").strip()
+    cur_source = out.get("band_color_source")
+    if cur_source == "hq_confirmed":
+        # HQ 確証は触らない (SSOT)
+        pass
+    else:
+        inferred_color = get_band_color_from_pid(product_id)
+        if inferred_color and cur_color != inferred_color:
             out["band_color"] = inferred_color
+            out["band_color_source"] = "model_suffix_heuristic"
+        elif inferred_color and not cur_source:
+            out["band_color_source"] = "model_suffix_heuristic"
     return out
 
 
@@ -726,7 +736,88 @@ def _parse_official_spec(html_text: str) -> dict:
     if raw.get("price_msrp_raw"):
         out["price_jpy_msrp"] = raw["price_msrp_raw"].replace(",", "")
 
+    # band_color の og:description hint (auto-apply はしない、参考値として保持).
+    # 2026-05-13 教訓: description は marketing copy で theme contrast 色が
+    # 頻出するため frequency 解析だけでは誤判定する (例: GA-100B-7AJF White モデルで
+    # description に "ブラック" 多数 → 誤って Black に分類).
+    # → band_color は **suffix heuristic を primary** とし、description hint は
+    #    "band_color_description_hint" として記録のみ (HQ 側で照合判断).
+    desc_hint = _extract_band_color_from_description(decoded)
+    if desc_hint:
+        out["band_color_description_hint"] = desc_hint
+
     return out
+
+
+# 日本語色名 → eBay 正規英語 mapping (band_color 抽出用)
+# 順序: より具体的 / 長い文字列を先 (短い "黒" が "ブラック" にマッチして衝突しないよう
+# string contain で count するため重複しても OK).
+_JP_COLOR_TO_EN = [
+    # カタカナ表記 (CASIO 公式 description で主流)
+    ("ブラック", "Black"),
+    ("ホワイト", "White"),
+    ("ネイビー", "Blue"),    # Navy → eBay enum では Blue に統合 (Navy 独立 enum なし)
+    ("ブルー",   "Blue"),
+    ("グリーン", "Green"),
+    ("オレンジ", "Orange"),
+    ("イエロー", "Yellow"),
+    ("ゴールド", "Gold"),
+    ("シルバー", "Silver"),
+    ("ブラウン", "Brown"),
+    ("ベージュ", "Beige"),
+    ("ピンク",   "Pink"),
+    ("パープル", "Purple"),
+    ("グレー",   "Gray"),
+    ("グレイ",   "Gray"),
+    ("レッド",   "Red"),
+    # 漢字 (補助)
+    ("黒",       "Black"),
+    ("白",       "White"),
+    ("青",       "Blue"),
+    ("緑",       "Green"),
+    ("赤",       "Red"),
+    ("黄",       "Yellow"),
+    ("金",       "Gold"),
+    ("銀",       "Silver"),
+]
+
+
+def _extract_band_color_from_description(html_decoded: str) -> str:
+    """CASIO 公式 page の og:description / og:title から band_color を頻度ベース抽出.
+
+    実証 (2026-05-13):
+      GA-2300FL-4AJF: "ビビッドなオレンジカラー" + "オレンジのカラーリング" → Orange
+      GA-B2100BEG-1AJF: "基調色であるブラック" + "BLACK AND ELECTRO GREEN" → Black
+    """
+    # og:description / og:title / title を結合 (title に theme 名が入る case 対応)
+    parts = []
+    for pat in [r'og:description[^>]*content="([^"]+)"',
+                r'og:title[^>]*content="([^"]+)"',
+                r'<title>([^<]+)</title>']:
+        m = re.search(pat, html_decoded, re.IGNORECASE)
+        if m:
+            parts.append(m.group(1))
+    if not parts:
+        return ""
+    text = " ".join(parts)
+
+    counts: dict = {}
+    for jp, en in _JP_COLOR_TO_EN:
+        n = text.count(jp)
+        if n > 0:
+            counts[en] = counts.get(en, 0) + n
+    if not counts:
+        return ""
+    # 「基調色である<X>」は primary とみなして大幅加点 (アクセント色との誤認 防止)
+    m_kicho = re.search(r"基調色である?([ぁ-んァ-ン一-龥]+?)を", text)
+    if m_kicho:
+        kicho_jp = m_kicho.group(1)
+        for jp, en in _JP_COLOR_TO_EN:
+            if kicho_jp.startswith(jp) or jp in kicho_jp:
+                counts[en] = counts.get(en, 0) + 100  # 強い priority
+                break
+    best = max(counts.items(), key=lambda x: x[1])
+    return best[0]
 
 
 def update_official_specs(only_missing: bool = False, limit: Optional[int] = None,
