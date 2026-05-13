@@ -147,6 +147,8 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
             "image_urls": [],
             "in_stock": None,
             "status": "CAPTCHA",
+            "color": "",
+            "size": "",
         }
     if deleted:
         return {
@@ -157,6 +159,8 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
             "image_urls": [],
             "in_stock": False,
             "status": "DELETED",
+            "color": "",
+            "size": "",
         }
     if not title_found:
         return None
@@ -167,6 +171,15 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
     image_urls = _extract_image_urls(driver)
     in_stock, status = _judge_stock(driver)
 
+    # 色/サイズ抽出: TCG 等 skip 対象は両方空文字 (extraction_filter で判定)
+    from scrapers.extraction_filter import should_skip_color_size  # noqa: PLC0415
+    if should_skip_color_size(title, description):
+        color = ""
+        size = ""
+    else:
+        color = _judge_amazon_color(driver, image_urls, title=title, description=description)
+        size = _extract_amazon_size(driver)
+
     return {
         "title": title,
         "price_jpy": price_jpy,
@@ -175,7 +188,110 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
         "image_urls": image_urls,
         "in_stock": in_stock,
         "status": status,
+        "color": color,
+        "size": size,
     }
+
+
+# ============================================================================
+# Amazon 色判定 (3-stage、2026-05-13 Phase 1c-color)
+# ============================================================================
+# Amazon variant selectors (variant 商品時のみ存在、構造化された出品者表記)
+_VARIANT_COLOR_SELECTORS = (
+    "#variation_color_name .selection",
+    "#variation_color_name span.selection",
+    "#inline-twister-expanded-dimension-text-color_name",
+)
+_VARIANT_SIZE_SELECTORS = (
+    "#variation_size_name .selection",
+    "#variation_size_name span.selection",
+    "#inline-twister-expanded-dimension-text-size_name",
+)
+
+
+def _extract_amazon_variant_color(driver) -> str:
+    """Amazon variant selector から現在選択色名を取得.
+
+    Amazon variant 商品 (色違い展開あり) で `#variation_color_name .selection` 等が存在。
+    返値は出品者表記そのまま (例: "ネイビー", "ブラック", "Black"). 後段で validation。
+    variant なし商品 → 空文字。
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    for sel in _VARIANT_COLOR_SELECTORS:
+        try:
+            elem = driver.find_element(By.CSS_SELECTOR, sel)
+            text = (elem.text or "").strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    return ""
+
+
+def _extract_amazon_size(driver) -> str:
+    """Amazon variant selector から現在選択サイズを取得.
+
+    variant 商品 (サイズ違い展開あり、衣類・靴等) で取れる。それ以外は空文字。
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    for sel in _VARIANT_SIZE_SELECTORS:
+        try:
+            elem = driver.find_element(By.CSS_SELECTOR, sel)
+            text = (elem.text or "").strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    return ""
+
+
+def _judge_amazon_color(
+    driver,
+    image_urls: list[str] | None,
+    title: str = "",
+    description: str = "",
+) -> str:
+    """Amazon 色判定 (3-stage、Precision 100% / fail-closed).
+
+    Step 1: variant selector (#variation_color_name) — 出品者明示の構造化フィールド
+            parse_color_response で validation (漢字 reject / 不確実キーワード除外)
+    Step 2: title / description から whitelist 一致のカタカナ色名 (Mercari と共通関数)
+    Step 3: Claude Haiku Vision で画像 + テキスト判定 (image_urls[0])
+
+    fail-closed: いずれも該当なし or AI 例外 → 空文字 (HQ catalog fallback 委ね)
+    """
+    # Step 1: variant selector (Amazon 固有)
+    try:
+        from scrapers.color_vision import parse_color_response  # noqa: PLC0415
+        variant_color = _extract_amazon_variant_color(driver)
+        if variant_color:
+            validated = parse_color_response(variant_color)
+            if validated:
+                return validated
+    except Exception:
+        pass
+
+    # Step 2: title / description から確定的にカタカナ色名抽出 (AI 不要、Mercari と共通)
+    try:
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        text_color = extract_katakana_color_from_text(title or "", description or "")
+        if text_color:
+            return text_color
+    except Exception:
+        pass
+
+    # Step 3: Vision AI fallback (image_urls[0] = 商品メイン画像)
+    if not image_urls:
+        return ""
+    try:
+        from scrapers.color_vision import judge_color_from_image_url  # noqa: PLC0415
+        return judge_color_from_image_url(
+            image_urls[0], title=title, description=description,
+        )
+    except Exception:
+        return ""
 
 
 # ============================================================================
