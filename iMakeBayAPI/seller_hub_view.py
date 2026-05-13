@@ -170,12 +170,13 @@ def parse_listing_row(row_text: str, status: str = "active",
     if not out["listing_site"]:
         out["listing_site"] = "unknown"
 
-    # SKU: ItemID 行の次行 (英数字 12 字程度、数字単独除く)
+    # SKU: ItemID 行の次行 (英数字、数字単独除く、長さ制限なし)
+    # zaiko / m12345 / 短い custom label 等も拾うため文字数制限を撤廃 (5/13)
     for i, L in enumerate(lines):
         if re.search(r"\d{12}", L):
             if i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
-                if re.fullmatch(r"[A-Za-z0-9]{8,16}", next_line) and not next_line.isdigit():
+                if re.fullmatch(r"[A-Za-z0-9_-]+", next_line) and not next_line.isdigit():
                     out["sku"] = next_line
             break
 
