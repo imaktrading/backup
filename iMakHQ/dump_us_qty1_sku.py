@@ -42,12 +42,13 @@ SHEET_GID = 851100680
 
 def take_fresh_snapshot() -> None:
     """seller_hub_view.py を --save --all-pages で起動 (約 10 分)."""
-    print("=== 新 snapshot 取得開始 (約 10 分) ===")
+    print("=== 新 snapshot 取得開始 (約 10 分、Selenium で eBay scrape) ===")
     hq_dir = os.path.dirname(os.path.abspath(__file__))
     subprocess.run(
         ["python", "seller_hub_view.py", "--status", "active", "--save", "--all-pages"],
         cwd=hq_dir, check=False,
     )
+    print("=== snapshot 取得完了 ===\n")
 
 
 def load_sheet_item_ids(gc) -> set[str]:
@@ -65,11 +66,11 @@ def load_sheet_item_ids(gc) -> set[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fresh-snapshot", action="store_true",
-                        help="実行前に新 snapshot 取得 (約 10 分)")
+    parser.add_argument("--no-fresh-snapshot", action="store_true",
+                        help="新 snapshot 取得を skip し最新の既存 snapshot を使う")
     args = parser.parse_args()
 
-    if args.fresh_snapshot:
+    if not args.no_fresh_snapshot:
         take_fresh_snapshot()
 
     # 最新 snapshot

@@ -1409,7 +1409,7 @@ class SellerHubCategoryDialog(tk.Toplevel):
         if status != "active":
             cmd += ["--status", status]
         if do_save:
-            cmd += ["--save"]
+            cmd += ["--save", "--all-pages"]  # 保存時は必ず全件 (--all-pages なしだと 200 件で打切)
         self.destroy()
         # ListingPanel の run_script フロー (subprocess + log) を流用
         if self.panel.proc and self.panel.proc.poll() is None:
