@@ -288,7 +288,8 @@ SCRIPTS = [
     },
     {
         "category": None, "type": "utility",
-        "label": "📋 US 在庫一覧 CSV",
+        "label": "取下再出品",
+        "label_fg": "red",  # ボタンラベル赤文字 (取下→再出品のフロー起点を強調)
         "cwd": f"{WORKSPACE}/iMakHQ",
         "cmd": ["python", "dump_us_qty1_sku.py"],
         "params": [],
@@ -1164,7 +1165,8 @@ class ListingPanel:
         for ui, idx in enumerate(utilities):
             script = SCRIPTS[idx]
             r, c = divmod(ui, n_util_cols)
-            label_color = "#0066cc" if script.get("verified", False) else "black"
+            # label_fg 指定優先 > verified の青 > black
+            label_color = script.get("label_fg") or ("#0066cc" if script.get("verified", False) else "black")
             tk.Button(
                 util_outer, text=script["label"], font=("", 10, "bold"),
                 fg=label_color, width=20, height=2, wraplength=180, justify="center",
