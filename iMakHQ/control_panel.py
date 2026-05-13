@@ -286,6 +286,13 @@ SCRIPTS = [
         "cmd": ["python", "seller_hub_view.py", "--analyze"],
         "custom_buttons": "seller_hub_view",
     },
+    {
+        "category": None, "type": "utility",
+        "label": "📋 US 在庫一覧 CSV",
+        "cwd": f"{WORKSPACE}/iMakHQ",
+        "cmd": ["python", "dump_us_qty1_sku.py"],
+        "params": [],
+    },
 ]
 
 
