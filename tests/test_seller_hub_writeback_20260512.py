@@ -139,13 +139,10 @@ def test_ebay_listing_scraper_module_exists():
     assert "_extract_item_specifics" in src
 
 
-def test_control_panel_has_writeback_button():
-    """control_panel.py に「再出品結果反映」ボタン + custom_buttons handler."""
+def test_control_panel_no_writeback_button():
+    """5/13: 再出品系ボタンは panel から廃止 (snapshot CSV 手動運用に切替)."""
     src = (_HQ / "control_panel.py").read_text(encoding="utf-8")
-    assert "再出品結果反映" in src
-    assert "writeback_file_dialog" in src
-    assert "_launch_writeback_dialog" in src
-    # file dialog 起動
-    assert "filedialog.askopenfilename" in src
-    # dry-run / execute 確認 dialog
-    assert "messagebox.askyesno" in src
+    assert "writeback_file_dialog" not in src
+    assert "_launch_writeback_dialog" not in src
+    # 再出品 type の entry も削除済
+    assert '"type": "relist"' not in src
