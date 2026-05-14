@@ -53,6 +53,7 @@ if str(ROOT_DIR) not in sys.path:
 # ============================================================================
 # Chrome プロファイル (Mercari と分離、eBay 専用)
 EBAY_CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_ebay"
+EBAY_RESULT_DL_DIR = r"C:\Users\imax2\local_data\iMakInventory\ebay_result_dl"   # 結果 CSV download 用
 
 # eBay URLs
 EBAY_SIGNIN_URL = "https://signin.ebay.com/ws/eBayISAPI.dll?SignIn"
@@ -162,6 +163,17 @@ def create_ebay_driver(headless: bool = False, use_profile: bool = True):
         options.add_argument(f"--user-data-dir={EBAY_CHROME_PROFILE_DIR}")
     if headless:
         options.add_argument("--headless=new")
+
+    # 結果 CSV を直接 download するための prefs 設定 (Gemini 推奨、503 回避)
+    # = requests で叩くと TLS fingerprint 不一致で 503 になるので driver.get で
+    #   download bar dialog 出さず自動保存に切り替える
+    os.makedirs(EBAY_RESULT_DL_DIR, exist_ok=True)
+    options.add_experimental_option("prefs", {
+        "download.default_directory":   EBAY_RESULT_DL_DIR,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade":   True,
+        "safebrowsing.enabled":         True,
+    })
 
     # Chromium portable + 同梱 chromedriver があれば優先 (anti-bot 回避 + download 不要)
     if os.path.exists(CHROMIUM_PORTABLE_PATH) and os.path.exists(TRABAJO_CHROMEDRIVER_PATH):
@@ -515,9 +527,9 @@ def upload_csv_via_form(driver, csv_path: Path, dry_run: bool = False) -> dict:
         result["page_url"] = driver.current_url
         return result
 
-    # 結果 CSV ダウンロード
+    # 結果 CSV ダウンロード (driver.get で実 ブラウザ経由、503 回避)
     try:
-        csv_text = _download_result_csv(driver, href)
+        csv_text = _download_result_csv(driver, href, target_fname_hint=csv_path.stem)
     except Exception as e:
         # 503 等で取得失敗 → 履歴ページの Status text を fallback で取得
         status_text = _extract_status_from_history(driver, csv_path.stem)
@@ -603,15 +615,74 @@ def _find_result_link(driver, target_filename_stem: str):
     return None
 
 
-def _download_result_csv(driver, url: str) -> str:
-    """driver の cookie を流用して requests で結果 CSV をダウンロード."""
-    import requests  # noqa: PLC0415
+def _download_result_csv(driver, url: str, target_fname_hint: str = "",
+                          timeout_sec: int = 30) -> str:
+    """driver.get(url) でブラウザ自身に download させて CSV テキストを返す.
 
-    cookies = {c["name"]: c["value"] for c in driver.get_cookies()}
-    headers = {"User-Agent": driver.execute_script("return navigator.userAgent;")}
-    resp = requests.get(url, cookies=cookies, headers=headers, timeout=60)
-    resp.raise_for_status()
-    return resp.content.decode("utf-8-sig", errors="replace")
+    Gemini 推奨 (2026-05-14):
+    - requests で別 session を作ると TLS fingerprint 不一致で eBay が 503 を返す
+    - driver.get(url) で同じブラウザインスタンスに踏ませると 200 OK + 自動 download
+      (= ChromeOptions の prefs で download dir / no prompt が設定済)
+
+    Args:
+        driver: Chromium portable で起動済 driver (login 済)
+        url: 結果 CSV の getfiledetails URL
+        target_fname_hint: 期待するファイル名のヒント (stem 一致で見つける)。空なら最新を取る
+        timeout_sec: 出現待ちのタイムアウト
+
+    Returns: CSV テキスト (utf-8-sig 解釈)
+    """
+    import os  # noqa: PLC0415 (top でも import 済だが明示)
+    import time  # noqa: PLC0415
+
+    dl_dir = EBAY_RESULT_DL_DIR
+    os.makedirs(dl_dir, exist_ok=True)
+
+    # 既存ファイル mtime の最大値を「download 前」として記録 (新規ファイル検出用)
+    before_mtimes = {}
+    for f in os.listdir(dl_dir):
+        p = os.path.join(dl_dir, f)
+        if os.path.isfile(p):
+            before_mtimes[f] = os.path.getmtime(p)
+
+    # driver にダウンロード実行させる
+    driver.get(url)
+
+    # download 完了 polling: target_fname_hint を含み .crdownload が消えるまで
+    deadline = time.time() + timeout_sec
+    found_path = None
+    while time.time() < deadline:
+        time.sleep(1)
+        candidates = []
+        for f in os.listdir(dl_dir):
+            if f.endswith(".crdownload") or f.endswith(".tmp"):
+                continue   # 進行中
+            p = os.path.join(dl_dir, f)
+            if not os.path.isfile(p):
+                continue
+            mt = os.path.getmtime(p)
+            # 既存ファイルで mtime も変わってないもの = 別物 → skip
+            if f in before_mtimes and before_mtimes[f] == mt:
+                continue
+            # hint 一致優先
+            if target_fname_hint and target_fname_hint not in f:
+                continue
+            candidates.append((mt, p))
+        if candidates:
+            # 最新 mtime を採用
+            candidates.sort(reverse=True)
+            found_path = candidates[0][1]
+            break
+
+    if not found_path:
+        raise TimeoutError(
+            f"download timeout: {timeout_sec}s 待ったが target ファイル "
+            f"(hint={target_fname_hint!r}) が {dl_dir} に出現しなかった"
+        )
+
+    with open(found_path, "rb") as f:
+        raw = f.read()
+    return raw.decode("utf-8-sig", errors="replace")
 
 
 def _extract_status_from_history(driver, target_stem: str) -> Optional[str]:
