@@ -161,6 +161,69 @@ def read_sku_rows(sh) -> list:
     return all_values[1:]
 
 
+def write_phase4_status(sh, status_updates: list) -> int:
+    """Phase 4 (= 自動 qty=0 化) の試行状態を SKU シート M/N/O 列に書込.
+
+    既存 12 列 (A-L) は touch せず、末尾 3 列を追加で更新する。
+
+    SKU シート Phase 4 拡張列:
+      M(13) = Phase4 状態 (= "dry-run 候補" / "Submit OK" / "Submit 失敗" /
+              "rollback 済" / "未試行")
+      N(14) = 試行時刻 (= "2026-05-14 18:50")
+      O(15) = eBay 結果 Status (= "Completed" / "1 failed, 0 completed" /
+              "503" / "")
+
+    Args:
+        status_updates: [
+            {"row_index": N, "phase4_status": "...", "tried_at": "...",
+             "ebay_status": "..."}, ...
+        ]
+
+    Returns: 書込 cell 数
+    """
+    if not status_updates:
+        return 0
+    sku_ws = get_sku_worksheet(sh)
+    # grid 拡張: O 列 (= 15 列目) まで必須
+    if sku_ws.col_count < 15:
+        sku_ws.add_cols(15 - sku_ws.col_count)
+    cell_updates = []
+    for u in status_updates:
+        row_idx = u.get("row_index")
+        if not row_idx:
+            continue
+        cell_updates.append({
+            "range": f"M{row_idx}:O{row_idx}",
+            "values": [[
+                str(u.get("phase4_status", "")),
+                str(u.get("tried_at", "")),
+                str(u.get("ebay_status", "")),
+            ]],
+        })
+    if cell_updates:
+        sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+    return len(cell_updates)
+
+
+def ensure_phase4_header(sh) -> bool:
+    """SKU シート 1 行目に Phase 4 ヘッダー (M/N/O) があるか確認、無ければ書く.
+
+    Returns: 書込実行したら True、既存なら False
+    """
+    sku_ws = get_sku_worksheet(sh)
+    if sku_ws.col_count < 15:
+        sku_ws.add_cols(15 - sku_ws.col_count)
+    header_row = sku_ws.row_values(1)
+    # 13-15 列 (= M/N/O) を空 or 異なる値の時のみ書く
+    expected = ["Phase4 状態", "試行時刻", "eBay Status"]
+    current = (header_row + [""] * 15)[12:15]
+    if current == expected:
+        return False
+    sku_ws.update(values=[expected], range_name="M1:O1",
+                  value_input_option="USER_ENTERED")
+    return True
+
+
 def update_sku_rows(sh, updates: list) -> dict:
     """SKU 詳細シートに update を適用.
 

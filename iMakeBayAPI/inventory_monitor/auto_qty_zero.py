@@ -39,20 +39,29 @@ for _s in (sys.stdout, sys.stderr):
             pass
 
 # 既存 iMakInventory の sell_feed_uploader を流用
-_inv_root = SCRIPT_DIR.parent.parent / "iMakInventory"
-if str(_inv_root) not in sys.path:
-    sys.path.insert(0, str(_inv_root))
-_ebay_actions_dir = _inv_root / "ebay_actions"
-if str(_ebay_actions_dir) not in sys.path:
-    sys.path.insert(0, str(_ebay_actions_dir))
+# inventory_monitor 側の sheet_updater を先に解決させるため、
+# SCRIPT_DIR を sys.path 先頭に再挿入してから iMakInventory 系を末尾追加
+if str(SCRIPT_DIR) in sys.path:
+    sys.path.remove(str(SCRIPT_DIR))
+sys.path.insert(0, str(SCRIPT_DIR))
 
-# inventory_monitor の Phase 4a-5 で作った generator を流用
+# inventory_monitor の Phase 4a-5 で作った generator を流用 (= SCRIPT_DIR 配下)
 from revise_qty_csv_generator import (  # noqa: E402
     read_sheet_needs_action, is_valid_uuid, save_qty_snapshot,
     generate_revise_csv, DEFAULT_MAX_SKUS, SNAPSHOT_DIR, CSV_OUT_DIR,
 )
 from main import filter_two_cycle_confirmed, _send_alert_email  # noqa: E402
-from sheet_updater import open_sheet, get_sku_worksheet  # noqa: E402
+from sheet_updater import (  # noqa: E402
+    open_sheet, get_sku_worksheet,
+    write_phase4_status, ensure_phase4_header,
+)
+
+# iMakInventory の sell_feed_uploader を末尾に追加 (= SCRIPT_DIR の解決を優先)
+_inv_root = SCRIPT_DIR.parent.parent / "iMakInventory"
+_ebay_actions_dir = _inv_root / "ebay_actions"
+for p in (_inv_root, _ebay_actions_dir):
+    if str(p) not in sys.path:
+        sys.path.append(str(p))   # append: 末尾 = inventory_monitor の解決を優先
 
 
 def _log(msg: str):
@@ -154,6 +163,29 @@ def rollback_from_snapshot(snapshot_id: str) -> None:
     res = upload_one_csv(rollback_csv, dry_run=False)
     _log(f"rollback 結果: success={res.get('success')}, result={res.get('result_text', '')[:80]}")
 
+    # M 列を「rollback 済」に更新 (row_index は snapshot に保存してないので listing_id+sku で match)
+    if res.get("success"):
+        sh = open_sheet()
+        # SKU シート全行読込 → snapshot 内の (listing_id, sku_id) と match で row_index 取得
+        from sheet_updater import read_sku_rows  # noqa: PLC0415
+        sheet_rows = read_sku_rows(sh)
+        snap_key = {(s["listing_id"], s["sku_id"]): s for s in skus}
+        ts_now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        status_updates = []
+        for sheet_idx, row in enumerate(sheet_rows, start=2):
+            r = list(row) + [""] * max(0, 12 - len(row))
+            key = (r[3].strip(), r[5].strip())
+            if key in snap_key:
+                status_updates.append({
+                    "row_index": sheet_idx,
+                    "phase4_status": "rollback 済",
+                    "tried_at": ts_now,
+                    "ebay_status": res.get("result_text", "")[:80],
+                })
+        from sheet_updater import write_phase4_status  # noqa: PLC0415
+        write_phase4_status(sh, status_updates)
+        _log(f"  M 列「rollback 済」反映: {len(status_updates)} 件")
+
 
 def main():
     parser = argparse.ArgumentParser(description="inventory_monitor 自動 qty=0 化 (Phase 4b)")
@@ -204,7 +236,21 @@ def main():
     csv_path = generate_revise_csv(confirmed)
     _log(f"  CSV: {csv_path}")
 
+    # SKU シートに Phase 4 状態反映 (M/N/O 列、ヘッダー含む)
+    sh = open_sheet()
+    ensure_phase4_header(sh)
+    tried_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     if is_dry_run:
+        # dry-run: 候補リストを「dry-run 候補」状態で M 列に記録
+        status_updates = [
+            {"row_index": s.get("row_index"),
+             "phase4_status": "dry-run 候補",
+             "tried_at": tried_at,
+             "ebay_status": ""}
+            for s in confirmed if s.get("row_index")
+        ]
+        write_phase4_status(sh, status_updates)
+        _log(f"  SKU シート M/N 列に「dry-run 候補」反映: {len(status_updates)} 件")
         _log("[5/5] dry-run、upload スキップ")
         _log(f"  実 upload するには --execute を付けて再実行")
         return
@@ -216,12 +262,25 @@ def main():
     _log(f"  upload 結果: success={upload_result.get('success')}")
     _log(f"  result_text: {upload_result.get('result_text', '')[:120]}")
 
-    # 5. 成功なら SKU シート更新
-    if upload_result.get("success"):
-        sh = open_sheet()
-        exec_ts = datetime.now().strftime("%Y/%m/%d %H:%M")
+    # 5. 成功なら SKU シート更新 (B/C 列 + M/N/O 列)
+    success = bool(upload_result.get("success"))
+    exec_ts = datetime.now().strftime("%Y/%m/%d %H:%M")
+    if success:
         n_cells = update_sku_sheet_after_success(sh, confirmed, exec_ts)
-        _log(f"  SKU シート反映: {n_cells} cells (= B/C 列 = 対処済/対処日)")
+        _log(f"  SKU シート反映 (B/C 列): {n_cells} cells")
+
+    # Phase 4 状態 (M/N/O 列) は成功失敗問わず反映
+    ebay_status_text = upload_result.get("result_text", "")[:80]
+    status_label = "Submit OK" if success else f"Submit 失敗 ({upload_result.get('error', '')[:40]})"
+    status_updates = [
+        {"row_index": s.get("row_index"),
+         "phase4_status": status_label,
+         "tried_at": tried_at,
+         "ebay_status": ebay_status_text}
+        for s in confirmed if s.get("row_index")
+    ]
+    write_phase4_status(sh, status_updates)
+    _log(f"  SKU シート反映 (M/N/O 列): {len(status_updates)} 件")
 
     # 6. アラート発火 (= 必須、成功失敗問わず)
     sent = send_qty_zero_alert(confirmed, upload_result, str(snap_path))
