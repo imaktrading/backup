@@ -44,6 +44,43 @@ OUTPUT_DIR = r"C:\dev\iMak_data\seller_analysis"
 BROWSE_ENDPOINT = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 
 
+def resolve_seller_id(input_str: str) -> str:
+    """seller_id (例: 'pesa_japan') / store URL / display 名 を実 username に解決.
+
+    判定:
+      - http で始まる → store URL → /str/<x> or /usr/<x> 抽出 → 必要なら HTML から実 user_id 取得
+      - そのまま seller_id らしい (snake_case 等) → そのまま返す
+    """
+    import re
+    s = input_str.strip()
+    if s.startswith("http"):
+        m = re.search(r"/(?:str|usr)/([^/?#]+)", s)
+        if m:
+            slug = m.group(1)
+            # store URL の slug は表示名 (= 実 user_id と異なる場合あり、例: snahop → qbks_89)
+            # 試行: store ページを scrape して _ssn=<実 username> を取得
+            try:
+                import time
+                _here = os.path.dirname(os.path.abspath(__file__))
+                if _here not in sys.path:
+                    sys.path.insert(0, _here)
+                from ebay_listing_scraper import scrape_session
+                with scrape_session() as drv:
+                    drv.get(f"https://www.ebay.com/str/{slug}")
+                    time.sleep(6)
+                    html = drv.page_source
+                    matches = re.findall(r"_ssn=([a-zA-Z0-9._-]+)", html)
+                    if matches:
+                        real_id = list(set(matches))[0]
+                        if real_id != slug:
+                            print(f"  ✓ slug '{slug}' → real user_id '{real_id}'")
+                        return real_id
+            except Exception as e:
+                print(f"  [WARN] real user_id 解決失敗: {e}、slug 使用")
+            return slug
+    return s
+
+
 def search_seller_listings(token: str, seller_id: str,
                             max_total: int = 200,
                             marketplace: str = "EBAY_US",
@@ -246,8 +283,11 @@ def main() -> int:
                         help="PicClick 取得 page 数 (default: 3)")
     args = parser.parse_args()
 
+    # URL 入力対応: store URL / display name → 実 user_id 解決
+    seller_id = resolve_seller_id(args.seller)
+    args.seller = seller_id
     print(f"=== eBay seller listings via Browse API ===")
-    print(f"  seller: {args.seller}")
+    print(f"  seller: {seller_id}")
     print(f"  max: {args.max}  details: {args.details}")
     print(f"  marketplace: {args.marketplace}  ship_to: {args.ship_to}/{args.ship_zip}")
 
