@@ -31,6 +31,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# stdout/stderr を UTF-8 化 (Windows cp932 console で 絵文字 (▶/✅/◎/✕ 等) print
+# 時の UnicodeEncodeError 連鎖を防ぐ。spreadsheet 書込用の ◎ ✕ はそのまま残す。)
+for _stream_name in ("stdout", "stderr"):
+    _s = getattr(sys, _stream_name, None)
+    if _s is not None and hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
 # 同階層モジュール import
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -70,8 +80,15 @@ def log(msg: str):
 # montbell カラー推測: listing title から color code 抽出
 # ============================================================================
 # 暫定マップ (実運用で発生したものから蓄積). 大文字比較.
+# 2026-05-14 修正: サンダーパス系で title→code が montbell 実 code と乖離していた bug fix.
+# montbell の実 color code は単純 2 文字でなく "RDBR" "NV/PB" "HN/MA" "GP/OC" のような
+# 複合 code が混在する。Takaaki さん確認 (2026-05-14):
+#   RED   → RDBR  (Red/Brown)
+#   BLUE  → NV/PB (Navy/Powder Blue)
+#   ORANGE→ HN/MA (Honey/Marine?)
+#   BROWN → GP/OC (Grape/Ocher?)
 MONTBELL_COLOR_MAP = {
-    "RED": "RD", "BLUE": "BL", "ORANGE": "OG", "BROWN": "BR",
+    "RED": "RDBR", "BLUE": "NV/PB", "ORANGE": "HN/MA", "BROWN": "GP/OC",
     "BLACK": "BK", "NAVY": "NV", "YELLOW": "YL", "GREEN": "DGN",
     "TURQUOISE": "TQ", "WHITE": "WH",
     # 略号そのまま入ってる場合も
