@@ -368,7 +368,13 @@ def alert_if_increased(current: int, all_updates: Optional[list] = None) -> None
 
 
 def save_needs_action_state(all_updates: list) -> None:
-    """今 cycle の 対処要 SKU を state file に保存 (二段確認用、Phase 4 で利用)."""
+    """今 cycle の **qty=0 化対象** SKU を state file に保存 (二段確認用、Phase 4 で利用).
+
+    determine_needs_action は 2 種類の対処要を返す:
+      - 仕入元 ✕ × eBay Qty > 0 → qty=0 化対象 ← 本 state file の対象
+      - 仕入元 ◎ × eBay Qty = 0 → qty 増やす対象 (= Phase 4 とは別)
+    state file は前者だけ保存 (= auto_qty_zero.py が拾う想定)。
+    """
     needs = [
         {
             "listing_id": u.get("listing_id", ""),
@@ -376,7 +382,9 @@ def save_needs_action_state(all_updates: list) -> None:
             "size":       u.get("size", ""),
             "color":      u.get("color", ""),
         }
-        for u in all_updates if u.get("needs_action")
+        for u in all_updates
+        if u.get("needs_action")
+        and u.get("supplier_stock_mark") == "✕"   # = 仕入元 ✕ のみ (qty=0 化対象)
     ]
     TWO_CYCLE_STATE.write_text(
         json.dumps({

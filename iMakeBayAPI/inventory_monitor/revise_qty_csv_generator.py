@@ -74,6 +74,11 @@ def read_sheet_needs_action() -> list:
             ebay_qty = int(r[10]) if r[10].strip() not in ("", "-") else 0
         except ValueError:
             ebay_qty = 0
+        # qty=0 化対象は 仕入元 ✕ かつ eBay Qty > 0 のみ
+        # (仕入元 ◎ × eBay Qty=0 は「qty 増やす対象」で別件)
+        supplier_mark = r[8].strip()   # I 列 = 仕入元在庫
+        if supplier_mark != "✕" or ebay_qty <= 0:
+            continue
         needs.append({
             "row_index":  sheet_idx,
             "listing_id": r[3].strip(),
