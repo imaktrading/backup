@@ -44,16 +44,29 @@ def latest_listings_csv(seller_id: str) -> str:
     return files[-1] if files else ""
 
 
-def fetch_seller_if_missing(seller_id: str, max_listings: int) -> str:
-    """既存 CSV がなければ scraper 起動して取得."""
+def resolve_input_to_seller_id(s: str) -> str:
+    """URL or display 名 を実 user_id に解決 (= ebay_seller_store_scraper の helper 流用)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from ebay_seller_store_scraper import resolve_seller_id
+    return resolve_seller_id(s)
+
+
+def fetch_seller_if_missing(seller_id: str, max_listings: int,
+                              with_watch: bool = False) -> str:
+    """既存 CSV がなければ scraper 起動して取得 (= 中間 CSV、auto-open しない)."""
     p = latest_listings_csv(seller_id)
     if p:
         return p
-    print(f"  📡 {seller_id} の CSV なし、scrape 起動")
+    print(f"  📡 {seller_id} の CSV なし、scrape 起動 (auto-open なし)")
     import subprocess
+    cmd = ["python", "ebay_seller_store_scraper.py", seller_id,
+           "--max", str(max_listings), "--no-open"]
+    if with_watch:
+        cmd.append("--with-watch")
     subprocess.run(
-        ["python", "ebay_seller_store_scraper.py", seller_id,
-         "--max", str(max_listings)],
+        cmd,
         cwd=os.path.dirname(os.path.abspath(__file__)),
         check=False,
     )
@@ -121,7 +134,7 @@ def listing_in_my_store(rival_title: str, my_keys_list: list[set], my_certs: set
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rivals", nargs="+", required=True,
-                        help="ライバル seller ID 一覧 (例: pesa_japan qbks_89)")
+                        help="ライバル seller ID または store URL 一覧 (例: pesa_japan https://www.ebay.com/str/snahop)")
     parser.add_argument("--my-seller", default="imax-64",
                         help="自店 seller ID (default: imax-64)")
     parser.add_argument("--watch-threshold", type=int, default=3,
@@ -131,6 +144,15 @@ def main() -> int:
     parser.add_argument("--no-fetch", action="store_true",
                         help="既存 CSV だけ使う (新規 scrape skip)")
     args = parser.parse_args()
+
+    # URL 入力対応: 各 rival を実 user_id に解決
+    resolved_rivals = []
+    for s in args.rivals:
+        rid = resolve_input_to_seller_id(s)
+        if rid != s:
+            print(f"  ✓ '{s}' → '{rid}'")
+        resolved_rivals.append(rid)
+    args.rivals = resolved_rivals
 
     # 自店 listing 読込
     print(f"=== competitor gap finder ===")

@@ -281,6 +281,8 @@ def main() -> int:
                         help="PicClick から watch 数を取得して watch_count 列を埋める")
     parser.add_argument("--watch-pages", type=int, default=3,
                         help="PicClick 取得 page 数 (default: 3)")
+    parser.add_argument("--no-open", action="store_true",
+                        help="出力 CSV の auto-open を skip")
     args = parser.parse_args()
 
     # URL 入力対応: store URL / display name → 実 user_id 解決
@@ -365,10 +367,11 @@ def main() -> int:
     if details_path:
         print(f"💾 details:  {details_path}")
     print(f"💾 summary:  {summary_path}")
-    try:
-        os.startfile(list_path)
-    except Exception:
-        pass
+    if not args.no_open:
+        try:
+            os.startfile(list_path)
+        except Exception:
+            pass
     return 0
 
 
