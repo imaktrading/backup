@@ -115,16 +115,18 @@ def find_result_link(driver, target_filename: str, max_history_rows: int = 10) -
     return href
 
 
-def download_result_csv(driver, url: str) -> str:
-    """driver の cookie を流用して requests で結果ファイルをダウンロード、CSV テキスト返却."""
-    print(f"  [2/3] 結果 CSV download: {url[:80]}...")
-    cookies = {c["name"]: c["value"] for c in driver.get_cookies()}
-    headers = {
-        "User-Agent": driver.execute_script("return navigator.userAgent;"),
-    }
-    resp = requests.get(url, cookies=cookies, headers=headers, timeout=60)
-    resp.raise_for_status()
-    text = resp.content.decode("utf-8-sig", errors="replace")
+def download_result_csv(driver, url: str, target_hint: str = "") -> str:
+    """driver.get で結果ファイルをダウンロード (Gemini 推奨、503 回避).
+
+    Args:
+        driver: 既に EBAY_RESULT_DL_DIR を download dir に設定済の driver
+        url: 結果 CSV の getfiledetails URL
+        target_hint: 期待ファイル名のヒント
+    """
+    print(f"  [2/3] 結果 CSV download (driver.get): {url[:80]}...")
+    # sell_feed_uploader 側の実装を流用
+    from ebay_actions.sell_feed_uploader import _download_result_csv  # noqa: PLC0415
+    text = _download_result_csv(driver, url, target_fname_hint=target_hint, timeout_sec=30)
     print(f"  download OK: {len(text)} chars")
     return text
 
@@ -178,7 +180,9 @@ def main():
             print("  → 真に未受理 or 履歴更新遅延 or DOM 構造変更")
             sys.exit(2)
 
-        csv_text = download_result_csv(driver, href)
+        # csv stem を hint として渡す (= 正しいファイルを特定するため)
+        target_stem = target_filename[:-4] if target_filename.endswith(".csv") else target_filename
+        csv_text = download_result_csv(driver, href, target_hint=target_stem)
         counter, rows = parse_csv(csv_text)
 
         print()
