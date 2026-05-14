@@ -255,8 +255,39 @@ def process_listing(sh, main_row: dict, dry_run: bool = False) -> dict:
 # ============================================================================
 # アラート (Phase 1: console 出力のみ。1.5 でメール)
 # ============================================================================
-def alert_if_increased(current: int) -> None:
-    """前回比較で要対処件数が増えてればコンソール強調."""
+def _send_alert_email(subject: str, body: str) -> bool:
+    """iMakInventory の既存 email_notifier を流用してアラートメール送信.
+
+    既存実績流用主義 (memory: reuse_existing_proven_solution.md):
+    - 同マシン内 `iMakInventory/email_notifier.py` (5/9 commit 90e7773 から本番稼働)
+    - 同じ DPAPI 暗号化 Gmail credentials を流用
+    - opt-in (encrypted_gmail.dat 不在なら送信 skip)、fail-safe (失敗しても止まらない)
+
+    Returns: True=送信、False=skip/失敗
+    """
+    try:
+        # iMakInventory 配下を sys.path に追加 (= 同 worktree 内)
+        # SCRIPT_DIR = .../iMakInventory_root/iMakeBayAPI/inventory_monitor
+        # → parent.parent = iMakInventory_root → / "iMakInventory" = 本体 dir
+        inv_root = SCRIPT_DIR.parent.parent / "iMakInventory"
+        if str(inv_root) not in sys.path:
+            sys.path.insert(0, str(inv_root))
+        from email_notifier import _send_via_gmail  # noqa: PLC0415
+        from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
+
+        cfg = load_gmail_config()
+        if cfg is None:
+            return False  # opt-in 未有効化
+        addr, pw, to = cfg
+        _send_via_gmail(addr, pw, to, subject, body)
+        return True
+    except Exception as e:
+        log(f"  [!] アラートメール送信失敗 (cycle 全体は続行): {type(e).__name__}: {e}")
+        return False
+
+
+def alert_if_increased(current: int, all_updates: Optional[list] = None) -> None:
+    """前回比較で要対処件数が増えてればコンソール強調 + メール送信 (Phase 5)."""
     last = 0
     if NEEDS_ACTION_STATE.exists():
         try:
@@ -266,10 +297,46 @@ def alert_if_increased(current: int) -> None:
 
     if current > last:
         diff = current - last
+        sku_url = f"https://docs.google.com/spreadsheets/d/{(__import__('sheet_updater').SPREADSHEET_ID)}/edit"
         log("=" * 60)
         log(f"⚠️ 要対処件数 増加: 前回 {last} → 今回 {current} (+{diff})")
-        log(f"   SKU シート確認: https://docs.google.com/spreadsheets/d/{(__import__('sheet_updater').SPREADSHEET_ID)}/edit")
+        log(f"   SKU シート確認: {sku_url}")
         log("=" * 60)
+
+        # Phase 5: メール送信 (= console alert と同時)
+        subject = f"[ALERT] inventory_monitor: 要対処 +{diff} 件増加 (合計 {current} 件)"
+        body_lines = [
+            "=" * 50,
+            "inventory_monitor アラート: 要対処 SKU 増加検知",
+            "=" * 50,
+            f"前回 (= 最後の実行): {last} 件",
+            f"今回 (= 現在の実行): {current} 件",
+            f"差分 (+ 新規追加): +{diff} 件",
+            "",
+            f"SKU シート: {sku_url}",
+            "",
+            f"検知時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+        ]
+        # 直近 update の要対処サンプル (= title + size + color + listing_id)
+        if all_updates:
+            needs_action_updates = [u for u in all_updates if u.get("needs_action")]
+            if needs_action_updates:
+                body_lines.append(f"【要対処サンプル (max 10 件、計 {len(needs_action_updates)} 件)】")
+                for u in needs_action_updates[:10]:
+                    body_lines.append(
+                        f"  - listing {u.get('listing_id', '?')} "
+                        f"{u.get('title', '')[:30]} "
+                        f"size={u.get('size', '')} color={u.get('color', '')}"
+                    )
+                body_lines.append("")
+        body_lines.append("=" * 50)
+        body_lines.append("（このメールは inventory_monitor が自動送信）")
+        body = "\n".join(body_lines)
+
+        sent = _send_alert_email(subject, body)
+        if sent:
+            log(f"  [mail] アラートメール送信完了")
     else:
         log(f"  要対処件数: 前回 {last} → 今回 {current} (増加なし)")
 
@@ -355,7 +422,7 @@ def main():
             log(traceback.format_exc())
             sys.exit(1)
 
-    alert_if_increased(total_needs_action)
+    alert_if_increased(total_needs_action, all_updates=all_updates)
 
     log("=" * 60)
     log("完了")
