@@ -123,6 +123,8 @@ def read_main_active_rows(sh, supplier_filter: str = "all") -> list:
             supplier = "uniqlo"
         elif "montbell.jp" in domain:
             supplier = "montbell"
+        elif "amazon.co.jp" in domain or "amazon.com" in domain:
+            supplier = "amazon"
         else:
             supplier = "other"
 

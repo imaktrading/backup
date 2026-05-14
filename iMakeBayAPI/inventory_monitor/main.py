@@ -57,6 +57,15 @@ from sheet_updater import (                          # noqa: E402
     determine_needs_action,
 )
 
+# Phase 3 (2026-05-14): iMakInventory の本番稼働中 amazon_scraper を流用
+# (memory: reuse_existing_proven_solution.md = 既存実績流用主義)
+# SCRIPT_DIR = .../iMakInventory_root/iMakeBayAPI/inventory_monitor
+# → parent.parent = iMakInventory_root → / "iMakInventory/scrapers" = 既存 scraper dir
+_amazon_scrapers_dir = SCRIPT_DIR.parent.parent / "iMakInventory" / "scrapers"
+if _amazon_scrapers_dir.exists() and str(_amazon_scrapers_dir) not in sys.path:
+    sys.path.insert(0, str(_amazon_scrapers_dir))
+from amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
+
 LOG_DIR = SCRIPT_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 NEEDS_ACTION_STATE = SCRIPT_DIR / "logs" / "_last_needs_action_count.json"
@@ -119,6 +128,11 @@ def fetch_supplier_inventory(supplier: str, url: str, title: str) -> Optional[di
     elif supplier == "montbell":
         color_hint = guess_montbell_color(title)
         return fetch_montbell(url, target_color_code=color_hint)
+    elif supplier == "amazon":
+        # Amazon は variation なし、listing 全体で 1 SKU 判定
+        # use_selenium_fallback=False で軽量 (requests のみ)、unqualifiedBuyBox 検出時は
+        # fail-closed (= in_stock=False) で安全側に倒す
+        return fetch_amazon(url, use_selenium_fallback=False)
     else:
         raise ValueError(f"未対応 supplier: {supplier}")
 
@@ -352,7 +366,7 @@ def alert_if_increased(current: int, all_updates: Optional[list] = None) -> None
 def main():
     parser = argparse.ArgumentParser(description="仕入元在庫監視 (Phase 1+2: UNIQLO + montbell)")
     parser.add_argument("--listing", help="特定 listing ID のみ処理")
-    parser.add_argument("--supplier", choices=["all", "uniqlo", "montbell"], default="all",
+    parser.add_argument("--supplier", choices=["all", "uniqlo", "montbell", "amazon"], default="all",
                         help="特定仕入元のみ処理 (default: all)")
     parser.add_argument("--dry-run", action="store_true", help="スプシ書込なし")
     args = parser.parse_args()
