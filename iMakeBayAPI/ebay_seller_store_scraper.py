@@ -240,6 +240,10 @@ def main() -> int:
                         help="ship_to country code (default: US)")
     parser.add_argument("--ship-zip", default="10001",
                         help="ship_to zip code (default: 10001 NYC)")
+    parser.add_argument("--with-watch", action="store_true",
+                        help="PicClick から watch 数を取得して watch_count 列を埋める")
+    parser.add_argument("--watch-pages", type=int, default=3,
+                        help="PicClick 取得 page 数 (default: 3)")
     args = parser.parse_args()
 
     print(f"=== eBay seller listings via Browse API ===")
@@ -265,6 +269,23 @@ def main() -> int:
     print(f"  ✓ {len(raw_items)} 件取得 (API 報告 total={total})")
 
     listings = [normalize_listing(x) for x in raw_items]
+
+    # PicClick から watch 数を取得して merge
+    if args.with_watch and listings:
+        print(f"\n👀 PicClick から watch 数取得中 (pages={args.watch_pages})...")
+        try:
+            from picclick_watch_finder import fetch_picclick_seller
+            picclick_items = fetch_picclick_seller(args.seller, pages=args.watch_pages)
+            watch_map = {x["ebay_item_id"]: x["watch_count"] for x in picclick_items}
+            n_filled = 0
+            for L in listings:
+                w = watch_map.get(L["item_id"])
+                if w is not None:
+                    L["watch_count"] = w
+                    n_filled += 1
+            print(f"  ✓ {n_filled}/{len(listings)} 件に watch 数を反映 (PicClick で発見した分のみ)")
+        except Exception as e:
+            print(f"  [WARN] PicClick 取得失敗: {e}")
 
     # 詳細取得
     details = []
