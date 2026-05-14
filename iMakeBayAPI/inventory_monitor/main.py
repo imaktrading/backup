@@ -69,6 +69,9 @@ from amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
 LOG_DIR = SCRIPT_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 NEEDS_ACTION_STATE = SCRIPT_DIR / "logs" / "_last_needs_action_count.json"
+# Phase 4a-3: 二段確認 state file (= 前 cycle で対処要だった SKU の集合)
+# 今 cycle で対処要 + 前 cycle でも対処要 → qty=0 化対象 (1 cycle 誤検知で発動防止)
+TWO_CYCLE_STATE = SCRIPT_DIR / "logs" / "_last_needs_action_skus.json"
 
 
 # ============================================================================
@@ -358,6 +361,65 @@ def alert_if_increased(current: int, all_updates: Optional[list] = None) -> None
         json.dumps({"count": current, "checked_at": datetime.now().isoformat()}, ensure_ascii=False),
         encoding="utf-8",
     )
+
+    # Phase 4a-3: 二段確認用に 対処要 SKU の集合を保存 (Phase 4 で利用)
+    if all_updates is not None:
+        save_needs_action_state(all_updates)
+
+
+def save_needs_action_state(all_updates: list) -> None:
+    """今 cycle の 対処要 SKU を state file に保存 (二段確認用、Phase 4 で利用)."""
+    needs = [
+        {
+            "listing_id": u.get("listing_id", ""),
+            "sku_id":     u.get("sku_id", ""),
+            "size":       u.get("size", ""),
+            "color":      u.get("color", ""),
+        }
+        for u in all_updates if u.get("needs_action")
+    ]
+    TWO_CYCLE_STATE.write_text(
+        json.dumps({
+            "checked_at": datetime.now().isoformat(),
+            "count":      len(needs),
+            "skus":       needs,
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_previous_needs_action_skus() -> list:
+    """前 cycle の 対処要 SKU 集合を load (Phase 4 で二段確認に利用).
+
+    Returns: [(listing_id, size, color), ...] の set (= 比較用 tuple)
+    """
+    if not TWO_CYCLE_STATE.exists():
+        return []
+    try:
+        data = json.loads(TWO_CYCLE_STATE.read_text(encoding="utf-8"))
+        return data.get("skus", [])
+    except Exception:
+        return []
+
+
+def filter_two_cycle_confirmed(current_updates: list) -> list:
+    """二段確認: 今 cycle + 前 cycle の両方で対処要だった SKU だけ採用.
+
+    Args:
+        current_updates: 今 cycle の all_updates (= main.py の 生成 update list)
+
+    Returns: 二段確認 pass した update のみ (= qty=0 化候補)
+    """
+    prev = load_previous_needs_action_skus()
+    prev_keys = {(p["listing_id"], p["size"], p["color"]) for p in prev}
+    confirmed = []
+    for u in current_updates:
+        if not u.get("needs_action"):
+            continue
+        key = (u.get("listing_id", ""), u.get("size", ""), u.get("color", ""))
+        if key in prev_keys:
+            confirmed.append(u)
+    return confirmed
 
 
 # ============================================================================
