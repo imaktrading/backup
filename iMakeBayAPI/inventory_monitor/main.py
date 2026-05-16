@@ -321,6 +321,24 @@ def process_listing(sh, main_row: dict, dry_run: bool = False) -> dict:
     in_stock_count = sum(1 for m in matched if m["supplier_in_stock"])
     log(f"    在庫: {in_stock_count}/{len(matched)} あり, 要対処: {needs_action_count}")
 
+    # Workman 廃番判定 (= 全 variant no-stock 連続 7 日 → catalog 廃番通知)
+    if supplier == "workman" and matched:
+        try:
+            from workman_dead_counter import update_workman_dead_counter, notify_catalog_dead  # noqa: PLC0415
+            from workman_scraper import _extract_parent_mpn  # noqa: PLC0415
+            parent_mpn = _extract_parent_mpn(url)
+            all_nostock = (in_stock_count == 0)
+            dr = update_workman_dead_counter(parent_mpn, all_nostock)
+            if dr.get("should_notify_catalog"):
+                log(f"    [workman 廃番] parent_mpn={parent_mpn} 連続 "
+                    f"{dr['consecutive_days']} 日 全 no-stock → catalog 通知")
+                notify_catalog_dead(parent_mpn)
+            elif dr.get("consecutive_days", 0) >= 3:
+                log(f"    [workman 廃番候補] parent_mpn={parent_mpn} 連続 "
+                    f"{dr['consecutive_days']} 日 全 no-stock (= 7 日で廃番扱い)")
+        except Exception as e:
+            log(f"    [!] workman 廃番カウンター失敗 (cycle 続行): {type(e).__name__}: {e}")
+
     return {"updates": updates, "needs_action_count": needs_action_count}
 
 
