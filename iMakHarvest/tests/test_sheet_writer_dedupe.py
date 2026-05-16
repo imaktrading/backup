@@ -110,6 +110,31 @@ class TestDedupeKey:
         assert shops == "shops:m12345678901"
         assert regular != shops
 
+    def test_workman_url(self):
+        # Workman 公式: /shop/g/g<13桁mpn>/ → "workman:<mpn>"
+        assert dedupe_key(
+            "https://workman.jp/shop/g/g2300011882014/"
+        ) == "workman:2300011882014"
+
+    def test_workman_url_with_query(self):
+        k1 = dedupe_key("https://workman.jp/shop/g/g2300011882014/?ref=foo")
+        k2 = dedupe_key("https://workman.jp/shop/g/g2300011882014/")
+        assert k1 == k2 == "workman:2300011882014"
+
+    def test_workman_url_without_trailing_slash(self):
+        assert dedupe_key(
+            "https://workman.jp/shop/g/g2300011882014"
+        ) == "workman:2300011882014"
+
+    def test_workman_does_not_collide_with_mercari_or_shops(self):
+        workman = dedupe_key("https://workman.jp/shop/g/g2300011882014/")
+        mercari = dedupe_key("https://jp.mercari.com/item/m12345678901")
+        shops = dedupe_key("https://jp.mercari.com/shops/product/abcDEF123")
+        assert workman == "workman:2300011882014"
+        assert workman != mercari
+        assert workman != shops
+        assert workman.startswith("workman:")
+
 
 # --------------------------------------------------------------------------
 # read_existing_dedupe_keys

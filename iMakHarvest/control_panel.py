@@ -21,7 +21,7 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, scrolledtext
 
-from scrapers import amazon_wishlist, mercari_likes, mercari_shops_likes
+from scrapers import amazon_wishlist, mercari_likes, mercari_shops_likes, workman_official
 from sheet_writer import HIGH_SHEET_ID, LISTINGS_GID, LOW_SHEET_ID, write_to_sheet
 from sheet_writer_amazon import write_to_sheet as write_to_sheet_amazon
 
@@ -109,6 +109,9 @@ SERVICE_DEFS = [
     ("mercari_shops", "メルカリShops",
      "メルカリShopsのお気に入りに登録されている商品を元に情報を抽出します",
      True, ""),
+    ("workman", "ワークマン",
+     "ワークマン公式商品 URL から商品情報を抽出 (改行区切りで複数 URL 可)",
+     True, ""),
 ]
 
 
@@ -149,6 +152,18 @@ class HarvestPanel(tk.Tk):
         tk.Label(amzn,
                  text="※ 例: https://www.amazon.co.jp/hz/wishlist/ls/XXXXXXXXXXXXX  "
                       "(リストを「公開」設定にしておくこと)",
+                 fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
+
+        # ワークマン公式商品 URL 入力欄 (multiline、改行区切りで複数 URL)
+        wm = tk.LabelFrame(self, text="ワークマン公式商品 URL (1 行 1 URL、改行区切りで複数可)",
+                           padx=10, pady=8, font=("Meiryo UI", 10))
+        wm.pack(fill="x", padx=12, pady=4)
+        self.workman_urls_text = scrolledtext.ScrolledText(wm, height=4,
+                                                            font=("Consolas", 9))
+        self.workman_urls_text.pack(fill="x")
+        tk.Label(wm,
+                 text="※ 例: https://workman.jp/shop/g/g2300011882014/  "
+                      "(空欄なら「ワークマン」ボタン無効)",
                  fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
 
         # 出力先スプシ
@@ -262,6 +277,9 @@ class HarvestPanel(tk.Tk):
         if key == "mercari_shops":
             self._dispatch_mercari_shops()
             return
+        if key == "workman":
+            self._dispatch_workman()
+            return
         if key == "amazon":
             self._dispatch_amazon()
             return
@@ -299,6 +317,46 @@ class HarvestPanel(tk.Tk):
         threading.Thread(
             target=self._run_mercari_shops_thread,
             args=(sheet_id, gid, label),
+            daemon=True,
+        ).start()
+
+    def _dispatch_workman(self) -> None:
+        # multiline Text widget から URL list を取得
+        raw_text = self.workman_urls_text.get("1.0", "end").strip()
+        urls = [
+            ln.strip() for ln in raw_text.splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+        if not urls:
+            messagebox.showerror(
+                "URL 未入力",
+                "ワークマン公式商品 URL を入力してください (改行区切りで複数可)。\n"
+                "例: https://workman.jp/shop/g/g2300011882014/",
+            )
+            return
+        # 簡易バリデーション: workman.jp/shop/g/ を含むか
+        invalid = [u for u in urls if "workman.jp/shop/g/" not in u]
+        if invalid:
+            messagebox.showerror(
+                "URL 形式エラー",
+                f"以下の URL は形式が不正です:\n" + "\n".join(invalid[:5])
+                + ("\n..." if len(invalid) > 5 else ""),
+            )
+            return
+        try:
+            sheet_id, gid, label = self._resolve_sheet()
+        except ValueError as e:
+            messagebox.showerror("スプシ URL エラー", str(e))
+            return
+        if not messagebox.askyesno(
+            "確認",
+            f"ワークマン公式商品 {len(urls)} 件 を harvest し、\n"
+            f"出力先スプシ「{label}」に追記します。\n\n実行しますか？",
+        ):
+            return
+        threading.Thread(
+            target=self._run_workman_thread,
+            args=(urls, sheet_id, gid, label),
             daemon=True,
         ).start()
 
@@ -414,6 +472,45 @@ class HarvestPanel(tk.Tk):
             else:
                 items = mercari_shops_likes.collect_shops_liked_urls(headless=headless)
             self._log(f"  収集完了   : {len(items)} 件")
+            self._set_status(f"スプシ書込中... ({len(items)} 件)")
+            result = write_to_sheet(items, spreadsheet_id=sheet_id, gid=gid)
+            self._log(f"  書込結果   : appended={result['appended']}, "
+                      f"skipped_existing={result['skipped_existing']}, "
+                      f"input={result['input']}")
+            self._set_status(
+                f"完了: 新規 {result['appended']} 件 / 既出 skip {result['skipped_existing']} 件"
+            )
+            self._log("=== 完了 ===")
+            messagebox.showinfo("完了",
+                                f"収集 {len(items)} 件 → 新規追加 {result['appended']} 件 "
+                                f"(既出 skip {result['skipped_existing']} 件)")
+        except Exception as e:
+            self._log(f"!!! エラー: {e}")
+            self._set_status(f"失敗: {type(e).__name__}")
+            messagebox.showerror("エラー", str(e))
+        finally:
+            self._running = False
+            self._set_buttons_state(disabled=False)
+
+    def _run_workman_thread(self, urls: list[str], sheet_id: str, gid: int, label: str) -> None:
+        self._running = True
+        self._set_buttons_state(disabled=True)
+
+        self._set_status(f"ワークマン {len(urls)} 件取得中...")
+        self._log("=== ワークマン公式 harvest 開始 ===")
+        self._log(f"  出力先     : {label} (sheet_id={sheet_id[:14]}.., gid={gid})")
+        self._log(f"  対象 URL   : {len(urls)} 件")
+        try:
+            def progress(cur, total, url):
+                self._set_status(f"取得中... [{cur}/{total}]")
+                self._log(f"  [{cur}/{total}] {url}")
+
+            items = workman_official.fetch_products(urls, progress_callback=progress)
+            self._log(f"  収集完了   : {len(items)} / {len(urls)} 件")
+            if not items:
+                self._set_status("収集 0 件、スプシ書込スキップ")
+                messagebox.showwarning("収集 0 件", "Workman 商品データが 1 件も取得できませんでした。")
+                return
             self._set_status(f"スプシ書込中... ({len(items)} 件)")
             result = write_to_sheet(items, spreadsheet_id=sheet_id, gid=gid)
             self._log(f"  書込結果   : appended={result['appended']}, "

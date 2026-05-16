@@ -65,8 +65,10 @@ DEFAULT_COLUMN_COUNT = 20
 # デデュープ key 抽出
 # - メルカリ通常品: /item/m12345 / /items/m12345 → "m12345" (prefix なし、既存行との互換維持)
 # - メルカリ Shops: /shops/product/<slug22> → "shops:<slug>" (prefix で通常品と衝突回避)
+# - ワークマン公式: /shop/g/g<13桁mpn>/ → "workman:<mpn>"
 _MERCARI_ID_RE = re.compile(r"/items?/(m\d+)", re.IGNORECASE)
 _MERCARI_SHOPS_ID_RE = re.compile(r"/shops/product/([A-Za-z0-9]+)")
+_WORKMAN_MPN_RE = re.compile(r"workman\.jp/shop/g/g(\d{13})", re.IGNORECASE)
 
 
 def dedupe_key(url: str) -> str:
@@ -92,6 +94,10 @@ def dedupe_key(url: str) -> str:
     m = _MERCARI_SHOPS_ID_RE.search(s)
     if m:
         return f"shops:{m.group(1)}"
+    # ワークマン公式 (mpn 13 桁)
+    m = _WORKMAN_MPN_RE.search(s)
+    if m:
+        return f"workman:{m.group(1)}"
     # 他 supplier 暫定対応: query / fragment / 末尾スラッシュを除去
     return s.split("?")[0].split("#")[0].rstrip("/").lower()
 
