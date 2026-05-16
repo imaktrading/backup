@@ -229,6 +229,59 @@ def register_filter_map(
 
 
 # ============================================================================
+# Atomic 部分 update (specs 内 field のみ、他 field を保護)
+# ============================================================================
+def update_active_status(category: str, product_id: str,
+                          is_active: bool, reason: str = "") -> bool:
+    """specs.is_active_msrp + specs.deactivation_reason + specs.last_active_check を atomic 更新.
+
+    背景 (HQ Phase 2):
+        Inventory が AJAX 連敗 / 全 variant 7 日連続 no-stock で廃番検知した時に
+        catalog 側へ通知する経路. api.upsert() は specs 全体上書きで他 field を壊す
+        ので、専用 update API を用意.
+
+    Args:
+        category: 'workman' 等
+        product_id: 'workman:series:67335' 等
+        is_active: True=active / False=廃番
+        reason: 廃番理由 (任意、log 用)
+
+    Returns:
+        True: 更新成功, False: 該当 record なし
+    """
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT specs FROM products WHERE category = ? AND product_id = ?",
+            (category, product_id),
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            specs = json.loads(row["specs"]) if row["specs"] else {}
+        except Exception:
+            specs = {}
+        specs["is_active_msrp"] = bool(is_active)
+        specs["last_active_check"] = datetime.now().isoformat(timespec="seconds")
+        if reason:
+            specs["deactivation_reason"] = reason
+        elif "deactivation_reason" in specs and is_active:
+            # active に戻ったら理由 clear
+            specs.pop("deactivation_reason", None)
+        conn.execute(
+            "UPDATE products SET specs = ?, updated_at = ? "
+            "WHERE category = ? AND product_id = ?",
+            (json.dumps(specs, ensure_ascii=False),
+             datetime.now().isoformat(timespec="seconds"),
+             category, product_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+# ============================================================================
 # 内部ヘルパー
 # ============================================================================
 def _row_to_dict(row: sqlite3.Row) -> dict:
