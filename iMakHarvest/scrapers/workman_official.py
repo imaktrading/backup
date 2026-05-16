@@ -219,7 +219,7 @@ def fetch_products(
     rate_limit_sec: float = DEFAULT_RATE_LIMIT_SEC,
     progress_callback=None,
 ) -> list[dict]:
-    """複数 URL を順次 fetch (rate limited).
+    """複数 URL を順次 fetch (rate limited、fail-closed)。
 
     Args:
         urls: Workman 商品 URL list
@@ -227,11 +227,14 @@ def fetch_products(
         progress_callback: callable(current, total, message) | None
 
     Returns:
-        成功した商品データのみ list (失敗は warning log のみで結果から除外)
+        成功した商品データのみ list (失敗は warning log のみで結果から除外、fail-closed)。
+        title または url が空欄なら skip (= シート1 投入に最低限必要な 2 field、Phase 2 v2 仕様)。
     """
     sess = requests.Session()
     results: list[dict] = []
     total = len(urls)
+    skipped_failed: list[str] = []
+    skipped_invalid_title: list[str] = []
     for i, url in enumerate(urls, start=1):
         if progress_callback:
             try:
@@ -243,12 +246,29 @@ def fetch_products(
         except (requests.RequestException, ValueError) as e:
             print(f"  ⚠️ [workman] fetch 失敗 ({type(e).__name__}): {url}")
             data = None
-        if data:
-            results.append(data)
-        else:
+        if data is None:
             print(f"  ⚠️ [workman] JSON-LD parse 失敗 or 商品不在: {url}")
+            skipped_failed.append(url)
+        elif not (data.get("title") or "").strip():
+            # title 空欄 → fail-closed skip (v2 仕様確定、CLAUDE.md fail-closed 準拠)
+            print(f"  ⚠️ [workman] title 取得失敗で skip: {url}")
+            skipped_invalid_title.append(url)
+        else:
+            results.append(data)
         if rate_limit_sec > 0 and i < total:
             time.sleep(rate_limit_sec)
+
+    # アラートサマリー (fail-closed 集計、v2 仕様 section 7)
+    if skipped_failed or skipped_invalid_title:
+        print(
+            f"\n  ⚠️ [workman ALERT] fail-closed skip: "
+            f"fetch_failed={len(skipped_failed)}, title_missing={len(skipped_invalid_title)}, "
+            f"total_attempted={total}"
+        )
+        if skipped_failed:
+            print(f"    fetch 失敗 URL: {skipped_failed[:5]}{' ...' if len(skipped_failed) > 5 else ''}")
+        if skipped_invalid_title:
+            print(f"    title 空 URL: {skipped_invalid_title[:5]}{' ...' if len(skipped_invalid_title) > 5 else ''}")
     return results
 
 

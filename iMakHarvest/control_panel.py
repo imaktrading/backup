@@ -24,6 +24,10 @@ from tkinter import messagebox, scrolledtext
 from scrapers import amazon_wishlist, mercari_likes, mercari_shops_likes, workman_official
 from sheet_writer import HIGH_SHEET_ID, LISTINGS_GID, LOW_SHEET_ID, write_to_sheet
 from sheet_writer_amazon import write_to_sheet as write_to_sheet_amazon
+from sheet_writer_workman_official import (
+    OFFICIAL_SHEET_ID as WORKMAN_OFFICIAL_SHEET_ID,
+    write_to_official_sheet as write_to_workman_official_sheet,
+)
 
 # Amazon ウィッシュリスト URL 保存先 (Mercari の chrome_profile と同じ親ディレクトリ)
 AMAZON_URL_FILE = r"C:\Users\imax2\local_data\iMakHarvest\amazon_wishlist_url.txt"
@@ -343,20 +347,18 @@ class HarvestPanel(tk.Tk):
                 + ("\n..." if len(invalid) > 5 else ""),
             )
             return
-        try:
-            sheet_id, gid, label = self._resolve_sheet()
-        except ValueError as e:
-            messagebox.showerror("スプシ URL エラー", str(e))
-            return
+        # Phase 2 v2: 出力先は★公式在庫要チェック シート1 固定 (HIGH/LOW 選択は無視)
         if not messagebox.askyesno(
             "確認",
             f"ワークマン公式商品 {len(urls)} 件 を harvest し、\n"
-            f"出力先スプシ「{label}」に追記します。\n\n実行しますか？",
+            f"★公式在庫要チェック シート1 に B 列 (title) + F 列 (URL) を追記します。\n\n"
+            f"※ 出力先スプシ選択 (HIGH/LOW/任意 URL) は Workman では無視されます。\n\n"
+            f"実行しますか？",
         ):
             return
         threading.Thread(
             target=self._run_workman_thread,
-            args=(urls, sheet_id, gid, label),
+            args=(urls,),
             daemon=True,
         ).start()
 
@@ -492,13 +494,15 @@ class HarvestPanel(tk.Tk):
             self._running = False
             self._set_buttons_state(disabled=False)
 
-    def _run_workman_thread(self, urls: list[str], sheet_id: str, gid: int, label: str) -> None:
+    def _run_workman_thread(self, urls: list[str]) -> None:
+        """Phase 2 v2: ★公式在庫要チェック シート1 固定投入、B 列 + F 列のみ."""
         self._running = True
         self._set_buttons_state(disabled=True)
 
         self._set_status(f"ワークマン {len(urls)} 件取得中...")
-        self._log("=== ワークマン公式 harvest 開始 ===")
-        self._log(f"  出力先     : {label} (sheet_id={sheet_id[:14]}.., gid={gid})")
+        self._log("=== ワークマン公式 harvest 開始 (Phase 2 v2) ===")
+        self._log(f"  投入先     : ★公式在庫要チェック シート1 "
+                  f"(sheet_id={WORKMAN_OFFICIAL_SHEET_ID[:14]}.., gid=0)")
         self._log(f"  対象 URL   : {len(urls)} 件")
         try:
             def progress(cur, total, url):
@@ -506,23 +510,35 @@ class HarvestPanel(tk.Tk):
                 self._log(f"  [{cur}/{total}] {url}")
 
             items = workman_official.fetch_products(urls, progress_callback=progress)
-            self._log(f"  収集完了   : {len(items)} / {len(urls)} 件")
+            self._log(f"  title 取得成功: {len(items)} / {len(urls)} 件")
             if not items:
                 self._set_status("収集 0 件、スプシ書込スキップ")
-                messagebox.showwarning("収集 0 件", "Workman 商品データが 1 件も取得できませんでした。")
+                messagebox.showwarning(
+                    "収集 0 件",
+                    "Workman 商品データが 1 件も取得できませんでした。\n"
+                    "(title が JSON-LD から取れない URL は fail-closed で skip)"
+                )
                 return
             self._set_status(f"スプシ書込中... ({len(items)} 件)")
-            result = write_to_sheet(items, spreadsheet_id=sheet_id, gid=gid)
-            self._log(f"  書込結果   : appended={result['appended']}, "
-                      f"skipped_existing={result['skipped_existing']}, "
-                      f"input={result['input']}")
+            result = write_to_workman_official_sheet(items)
+            self._log(
+                f"  書込結果   : appended={result['appended']}, "
+                f"skipped_existing={result['skipped_existing']}, "
+                f"skipped_invalid={result['skipped_invalid']}, "
+                f"input={result['input']}"
+            )
             self._set_status(
-                f"完了: 新規 {result['appended']} 件 / 既出 skip {result['skipped_existing']} 件"
+                f"完了: 新規 {result['appended']} 件 / "
+                f"既出 skip {result['skipped_existing']} 件 / "
+                f"無効 skip {result['skipped_invalid']} 件"
             )
             self._log("=== 完了 ===")
-            messagebox.showinfo("完了",
-                                f"収集 {len(items)} 件 → 新規追加 {result['appended']} 件 "
-                                f"(既出 skip {result['skipped_existing']} 件)")
+            messagebox.showinfo(
+                "完了",
+                f"title 取得 {len(items)} 件 → 新規追加 {result['appended']} 件\n"
+                f"(既出 skip {result['skipped_existing']} 件、"
+                f"無効 skip {result['skipped_invalid']} 件)"
+            )
         except Exception as e:
             self._log(f"!!! エラー: {e}")
             self._set_status(f"失敗: {type(e).__name__}")
