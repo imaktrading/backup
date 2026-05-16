@@ -233,6 +233,12 @@ SCRIPTS = [
         "cmd": ["python", "mercari_to_ebay_csv.py"],
         "params": [],
     },
+    {
+        "category": "Workman", "type": "new", "label": "新規",
+        "cwd": f"{WORKSPACE}/iMakMercari",
+        "cmd": ["python", "workman_listing.py"],
+        "params": [],
+    },
     # ===== Utility 単独ボタン (カテゴリなし) =====
     {
         "category": None, "type": "utility",
