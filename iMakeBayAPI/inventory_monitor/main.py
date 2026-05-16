@@ -47,6 +47,8 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from uniqlo_scraper import fetch_product_inventory as fetch_uniqlo  # noqa: E402
+from gu_scraper import fetch_product_inventory as fetch_gu  # noqa: E402
+from workman_scraper import fetch_product_inventory as fetch_workman  # noqa: E402
 from montbell_scraper import fetch_product_inventory as fetch_montbell  # noqa: E402
 from ebay_sku_fetcher import get_skus_for_listing   # noqa: E402
 from sheet_updater import (                          # noqa: E402
@@ -72,6 +74,8 @@ NEEDS_ACTION_STATE = SCRIPT_DIR / "logs" / "_last_needs_action_count.json"
 # Phase 4a-3: 二段確認 state file (= 前 cycle で対処要だった SKU の集合)
 # 今 cycle で対処要 + 前 cycle でも対処要 → qty=0 化対象 (1 cycle 誤検知で発動防止)
 TWO_CYCLE_STATE = SCRIPT_DIR / "logs" / "_last_needs_action_skus.json"
+# Phase 4 restore mode: 仕入元 ◎ × eBay Qty = 0 の SKU 集合 (qty 復活対象)
+RESTORE_TWO_CYCLE_STATE = SCRIPT_DIR / "logs" / "_last_restore_target_skus.json"
 
 
 # ============================================================================
@@ -128,6 +132,11 @@ def fetch_supplier_inventory(supplier: str, url: str, title: str) -> Optional[di
     """supplier に応じて適切な scraper を呼ぶ."""
     if supplier == "uniqlo":
         return fetch_uniqlo(url)
+    elif supplier == "gu":
+        return fetch_gu(url)
+    elif supplier == "workman":
+        # Workman は variation なし、listing 全体で 1 SKU 判定 (= amazon と同 pattern)
+        return fetch_workman(url)
     elif supplier == "montbell":
         color_hint = guess_montbell_color(title)
         return fetch_montbell(url, target_color_code=color_hint)
@@ -227,6 +236,52 @@ def process_listing(sh, main_row: dict, dry_run: bool = False) -> dict:
     listing_default_color = info.get("color", "") if info.get("color", "") not in ("ALL", "") else ""
     matched = match_supplier_skus_with_sheet(info["skus"], sheet_skus, listing_default_color)
 
+    # eBay variation filter (= eBay 出品にない size/color は SKU シートに書かない)
+    # ebay_valid_set は main() 冒頭で eBay listing report から構築 (= 全 listing 共通)
+    ebay_valid = globals().get("_EBAY_VALID_VARIATIONS")
+    if ebay_valid is not None:
+        from sku_uuid_sync import normalize_size_for_match  # noqa: PLC0415
+        if listing_id in ebay_valid.get("listings_with_var", set()):
+            # variation listing: size+color で eBay valid set と照合
+            listing_colors = {c for (l, s, c) in ebay_valid["set"] if l == listing_id}
+            has_color = len(listing_colors - {""}) >= 2
+            listing_sizes = {s for (l, s, c) in ebay_valid["set"] if l == listing_id}
+            before = len(matched)
+            def _is_valid(m):
+                sz = normalize_size_for_match(m.get("size", ""))
+                cl_raw = m.get("color", "") or listing_default_color or ""
+                cl = normalize_size_for_match(cl_raw)
+                if has_color:
+                    return (listing_id, sz, cl) in ebay_valid["set"]
+                return sz in listing_sizes
+            matched = [m for m in matched if _is_valid(m)]
+            if len(matched) < before:
+                log(f"    eBay 不在 variation filter: {before} → {len(matched)} 件 ({before - len(matched)} 件 skip)")
+        elif listing_id in ebay_valid.get("single_listings", {}):
+            # 単独 listing (= variation なし): 1 row に集約、size は eBay title 由来
+            single = ebay_valid["single_listings"][listing_id]
+            ebay_size = single.get("size", "")
+            ebay_sku = single.get("sku", "")
+            before = len(matched)
+            # eBay title の size に最も近い scraper row を 1 件選ぶ (= 残りは捨てる)
+            picked = None
+            for m in matched:
+                sz = normalize_size_for_match(m.get("size", ""))
+                if ebay_size and sz == ebay_size:
+                    picked = m
+                    break
+            if picked is None and matched:
+                picked = matched[0]   # fallback: 任意 1 行
+            if picked is not None:
+                # eBay title 由来の size + SKU を採用
+                if ebay_size: picked["size"] = ebay_size
+                if ebay_sku:  picked["sku_id"] = ebay_sku
+                matched = [picked]
+            else:
+                matched = []
+            if before != len(matched):
+                log(f"    単独 listing 集約: {before} → {len(matched)} 件 (eBay size={ebay_size!r})")
+
     updates = []
     needs_action_count = 0
     auto_check_at = datetime.now().strftime("%Y/%m/%d %H:%M")
@@ -273,6 +328,14 @@ def process_listing(sh, main_row: dict, dry_run: bool = False) -> dict:
 # アラート (Phase 1: console 出力のみ。1.5 でメール)
 # ============================================================================
 def _send_alert_email(subject: str, body: str) -> bool:
+    # run_daily.py の統合 report で 1 通にまとめる時は個別メールを抑制
+    if os.environ.get("INVENTORY_MONITOR_SUPPRESS_EMAIL") == "1":
+        log(f"  [mail] suppress (INVENTORY_MONITOR_SUPPRESS_EMAIL=1): {subject[:50]}")
+        return False
+    return __send_alert_email_real(subject, body)
+
+
+def __send_alert_email_real(subject: str, body: str) -> bool:
     """iMakInventory の既存 email_notifier を流用してアラートメール送信.
 
     既存実績流用主義 (memory: reuse_existing_proven_solution.md):
@@ -365,6 +428,7 @@ def alert_if_increased(current: int, all_updates: Optional[list] = None) -> None
     # Phase 4a-3: 二段確認用に 対処要 SKU の集合を保存 (Phase 4 で利用)
     if all_updates is not None:
         save_needs_action_state(all_updates)
+        save_restore_state(all_updates)
 
 
 def save_needs_action_state(all_updates: list) -> None:
@@ -430,15 +494,78 @@ def filter_two_cycle_confirmed(current_updates: list) -> list:
     return confirmed
 
 
+# ----------------------------------------------------------------------------
+# Phase 4 restore mode: 仕入元 ◎ × eBay Qty = 0 の二段確認 (qty 復活用)
+# ----------------------------------------------------------------------------
+def save_restore_state(all_updates: list) -> None:
+    """今 cycle の **qty 復活対象** SKU を state file に保存 (二段確認用).
+
+    qty=0 化と対の機能: 仕入元 ◎ × eBay Qty = 0 → qty 増やす対象。
+    無在庫運用前提なので qty=1 で復活させる (= 1 件売れたら 1 件仕入れ可能)。
+    """
+    restore = [
+        {
+            "listing_id": u.get("listing_id", ""),
+            "sku_id":     u.get("sku_id", ""),
+            "size":       u.get("size", ""),
+            "color":      u.get("color", ""),
+        }
+        for u in all_updates
+        if u.get("needs_action")
+        and u.get("supplier_stock_mark") == "◎"   # 仕入元 ◎ のみ (qty 復活対象)
+    ]
+    RESTORE_TWO_CYCLE_STATE.write_text(
+        json.dumps({
+            "checked_at": datetime.now().isoformat(),
+            "count":      len(restore),
+            "skus":       restore,
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_previous_restore_skus() -> list:
+    """前 cycle の qty 復活対象 SKU 集合を load."""
+    if not RESTORE_TWO_CYCLE_STATE.exists():
+        return []
+    try:
+        data = json.loads(RESTORE_TWO_CYCLE_STATE.read_text(encoding="utf-8"))
+        return data.get("skus", [])
+    except Exception:
+        return []
+
+
+def filter_restore_two_cycle_confirmed(current_updates: list) -> list:
+    """二段確認 (restore): 今 cycle + 前 cycle の両方で「仕入元 ◎ × Qty=0」だった SKU."""
+    prev = load_previous_restore_skus()
+    prev_keys = {(p["listing_id"], p["size"], p["color"]) for p in prev}
+    confirmed = []
+    for u in current_updates:
+        if not u.get("needs_action"):
+            continue
+        if u.get("supplier_stock_mark") != "◎":
+            continue
+        key = (u.get("listing_id", ""), u.get("size", ""), u.get("color", ""))
+        if key in prev_keys:
+            confirmed.append(u)
+    return confirmed
+
+
 # ============================================================================
 # main
 # ============================================================================
 def main():
     parser = argparse.ArgumentParser(description="仕入元在庫監視 (Phase 1+2: UNIQLO + montbell)")
     parser.add_argument("--listing", help="特定 listing ID のみ処理")
-    parser.add_argument("--supplier", choices=["all", "uniqlo", "montbell", "amazon"], default="all",
+    parser.add_argument("--supplier", choices=["all", "uniqlo", "gu", "workman", "montbell", "amazon"], default="all",
                         help="特定仕入元のみ処理 (default: all)")
     parser.add_argument("--dry-run", action="store_true", help="スプシ書込なし")
+    parser.add_argument("--ebay-report",
+                        help="eBay active listing report CSV path (= K 列同期に使う)。"
+                             "'auto' を指定すると Selenium 自動 DL。"
+                             "なければ K 列同期 skip = 古いままで動く")
+    parser.add_argument("--auto-dl-max-wait-min", type=int, default=30,
+                        help="--ebay-report=auto 時の生成完了待ち最大 (分、default 30)")
     args = parser.parse_args()
 
     log("=" * 60)
@@ -452,6 +579,83 @@ def main():
         log(f"❌ スプシ認証失敗: {type(e).__name__}: {e}")
         log(traceback.format_exc())
         sys.exit(1)
+
+    # Step 0: eBay listing report があれば K 列 (eBay 現Qty) を最新化
+    # K 列が古いと auto_qty_zero (zero/restore) の判定が誤動作するため、
+    # cycle 開始時に必ず最新化する。
+    #   --ebay-report <path>   = 指定 CSV を使う
+    #   --ebay-report auto     = Selenium 自動 DL → 使う
+    #   引数なし               = K 列同期 skip (= 旧運用継続)
+    if args.ebay_report:
+        from pathlib import Path  # noqa: PLC0415
+        report_path: Path | None = None
+        if args.ebay_report.lower() == "auto":
+            try:
+                from ebay_active_listing_dl import download_active_listing_report  # noqa: PLC0415
+                log(f"[Active Listing DL] Selenium 自動 DL 開始 "
+                    f"(最大待機 {args.auto_dl_max_wait_min} 分)")
+                report_path = download_active_listing_report(
+                    max_wait_min=args.auto_dl_max_wait_min)
+                log(f"  DL 完了: {report_path}")
+            except Exception as e:
+                log(f"❌ Active Listing 自動 DL 失敗: {type(e).__name__}: {e}")
+                log(traceback.format_exc())
+        else:
+            report_path = Path(args.ebay_report)
+            if not report_path.exists():
+                log(f"⚠️ ebay-report 指定 {report_path} が存在しない、K 列同期 skip")
+                report_path = None
+
+        if report_path is not None:
+            try:
+                from ebay_qty_sync import sync_from_csv  # noqa: PLC0415
+                log(f"[K 列同期] {report_path.name} 取込中...")
+                res = sync_from_csv(report_path, execute=not args.dry_run)
+                log(f"  match {res['checked']} 件、K 列乖離 {res['changed']} 件、"
+                    f"{'書込' if res['executed'] else 'dry-run'}")
+                # eBay valid variation set 構築 (= scraper filter で使う、global stash)
+                from sku_uuid_sync import (  # noqa: PLC0415
+                    parse_ebay_report, extract_jp_size, extract_color, normalize_size_for_match,
+                )
+                ebay_data = parse_ebay_report(report_path)
+                valid_set = set()
+                listings_with_var = set()
+                for lid, vars_ in ebay_data.items():
+                    listings_with_var.add(lid)
+                    for v in vars_:
+                        sz = normalize_size_for_match(extract_jp_size(v["variation_details"]))
+                        cl = normalize_size_for_match(extract_color(v["variation_details"]))
+                        valid_set.add((lid, sz, cl))
+                # 単独 listing 情報 (= variation なし listing の size + SKU)
+                # raw CSV を再走査して title から size 抽出
+                single_listings = {}
+                import csv as _csv  # noqa: PLC0415
+                import re as _re  # noqa: PLC0415
+                _jp_re = _re.compile(r"JP\s+([A-Z0-9]+)", _re.IGNORECASE)
+                with open(report_path, encoding="utf-8-sig") as _f:
+                    _rdr = _csv.reader(_f)
+                    next(_rdr, None)
+                    for _row in _rdr:
+                        if len(_row) < 5: continue
+                        _lid = _row[0].strip()
+                        _title = _row[1].strip()
+                        _var = _row[2].strip()
+                        _sku = _row[3].strip()
+                        if _var or not _title or _lid in single_listings: continue
+                        _m = _jp_re.search(_title)
+                        single_listings[_lid] = {
+                            "size": normalize_size_for_match(_m.group(1)) if _m else "",
+                            "sku":  _sku,
+                        }
+                globals()["_EBAY_VALID_VARIATIONS"] = {
+                    "set": valid_set, "listings_with_var": listings_with_var,
+                    "single_listings": single_listings,
+                }
+                log(f"  eBay valid variation: {len(valid_set)} 件 / "
+                    f"{len(listings_with_var)} variation listings、{len(single_listings)} 単独 listings")
+            except Exception as e:
+                log(f"❌ K 列同期失敗: {type(e).__name__}: {e}")
+                log(traceback.format_exc())
 
     main_rows = read_main_active_rows(sh, supplier_filter=args.supplier)
     by_sup = {}
