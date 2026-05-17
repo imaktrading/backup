@@ -208,22 +208,42 @@ def parse_listing_row(row_text: str, status: str = "active",
                     out["sku"] = next_line
             break
 
-    # Views (regex 確実マッチ)
-    m = re.search(r"ビュー数(\d+)", row_text)
+    # Views (regex 確実マッチ、日本語 + 英語 両対応)
+    # 5/17 観測: eBay UI 英語化で「ビュー数」label 消失、Views N or N Views 等
+    m = re.search(r"(?:ビュー数|Views?)\s*[:\s]*(\d+)", row_text, re.IGNORECASE)
+    if not m:
+        m = re.search(r"(\d+)\s+Views?\b", row_text, re.IGNORECASE)
     if m:
         out["views"] = m.group(1)
 
-    # 数字 line の位置 (固定 index、Revise くん 5/12 報告で num_lines[-2] = Sold だったため再修正):
-    # row 構造 (Active): SKU / [num0=Watchers] / Price / ... / [num1=Available] / [num2=Sold] / Views (regex)
-    #                  + Promoted 領域に追加で [num3=impressions(views と同値)]
-    # = available は固定 index 1 (num_lines[1]) で取る、末尾は views と同値の noise
-    num_lines = [l.strip() for l in lines if re.fullmatch(r"\d+", l.strip())]
-    if len(num_lines) >= 3:
-        out["watchers"] = num_lines[0]
-        out["quantity_available"] = num_lines[1]  # 固定 index、末尾参照は views と衝突
-    elif len(num_lines) == 2:
-        out["watchers"] = num_lines[0]
-        out["quantity_available"] = num_lines[1]
+    # 数字 line 配置 (UI 言語で異なる、item_id 12桁は除外):
+    # - 日本語 UI: [0]=Watchers, [1]=qty (views は "ビュー数N" regex で取得済)
+    # - 英語 UI (5/17 確認): [0]=Offer, [1]=qty, [2]=Views, [3]=Watchers
+    # 判別: 日本語 UI なら regex で views 既に取得済 → out["views"] not empty
+    num_lines = [l.strip() for l in lines if re.fullmatch(r"\d{1,5}", l.strip())]
+    if out.get("views"):
+        # 日本語 UI (= "ビュー数N" regex hit)
+        if len(num_lines) >= 2:
+            out["watchers"] = num_lines[0]
+            out["quantity_available"] = num_lines[1]
+        elif len(num_lines) == 1:
+            out["watchers"] = num_lines[0]
+    else:
+        # 英語 UI (= ラベルなし、数字単独で 4 件並ぶ)
+        if len(num_lines) >= 4:
+            out["quantity_available"] = num_lines[1]
+            out["views"] = num_lines[2]
+            out["watchers"] = num_lines[3]
+        elif len(num_lines) == 3:
+            out["quantity_available"] = num_lines[1]
+            out["views"] = num_lines[2]
+            out["watchers"] = "0"
+        elif len(num_lines) == 2:
+            out["quantity_available"] = num_lines[1]
+            out["watchers"] = "0"
+        elif len(num_lines) == 1:
+            out["quantity_available"] = num_lines[0]
+            out["watchers"] = "0"
 
     # Format (今すぐ買う / オークション / Best Offer)
     if "今すぐ買う" in row_text:
@@ -277,8 +297,15 @@ def extract_listings(driver, status: str = "active",
         snapshot_date = datetime.now().strftime("%Y-%m-%d %H:%M")
     rows = driver.find_elements(By.CSS_SELECTOR, "tr.grid-row")
     items = []
+    dump_count = 0
     for r in rows:
         try:
+            # DEBUG: 最初の 3 row の raw text を console 出力
+            if dump_count < 3 and os.environ.get("SELLER_HUB_DUMP_ROW") == "1":
+                print(f"\n===== row {dump_count} raw text =====")
+                print(repr(r.text))
+                print("===== row end =====\n")
+                dump_count += 1
             parsed = parse_listing_row(r.text, status=status,
                                        search_keyword=search_keyword,
                                        snapshot_date=snapshot_date)
