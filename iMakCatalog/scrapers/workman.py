@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -253,51 +254,52 @@ def _parse_ajax_response(body: str, parent_mpn: str, fetched_at: str) -> dict:
             seen_sizes.add(sz_norm)
             size_set.append(sz_norm)
 
-    # 3) sku_matrix 抽出: 各 block-pattern (= 1 size) 内の sku param + in_stock
-    # block-pattern は per-size、color 切替時に block-select-size-detail が複数 = color 別 group
+    # 3) sku_matrix 抽出: block-select-size-detail group ごと (= color 単位) に
+    #    各 block-pattern (= 1 size) の sku param + 在庫を取得.
+    #    group i (0-indexed) → color_variants[i] と対応 (= AJAX response 順序).
+    #    2026-05-17 fix: 以前は全 sku を flat 抽出 + 完全マトリクス前提で
+    #    div / mod 紐付けしていたが、color によって取扱 size 数が違う場合に
+    #    同 (color, size) 重複が大量発生 (35840 = ErrorCode 21916585 で発覚).
     sku_matrix: list[dict] = []
-    # 各 block-pattern を抽出
-    for bp_m in re.finditer(
-        r'<div\s+class="block-select-size-detail--item\s+block-pattern([^"]*)"[\s\S]+?'
-        r'(?=<div\s+class="block-select-size-detail--item|</div>\s*</div>\s*</div>)',
-        body,
-    ):
-        block_classes = bp_m.group(1)
-        block_html = bp_m.group(0)
-        in_stock = "no-stock" not in block_classes
-        # size
-        sz_m = re.search(r'block-pattern--size-text">([^<]+)<', block_html)
-        size_jp = sz_m.group(1).strip() if sz_m else ""
-        size_norm = _normalize_size(size_jp)
-        # sku mpn (?sku=2300... or &sku=2300...)
-        sku_m = re.search(r"[?&]sku=(\d{13})", block_html)
-        sku_mpn = sku_m.group(1) if sku_m else ""
-        if not sku_mpn:
-            continue
-        sku_matrix.append({
-            "variant_sku_mpn": sku_mpn,
-            "size_normalized": size_norm,
-            "in_stock": in_stock,
-            "last_no_stock_seen_at": fetched_at if not in_stock else "",
-        })
-
-    # 4) color_jp を sku_matrix に紐付け (= AJAX response は color 単位 group なので
-    #    block-color の選択中 indicator から取得)
-    # 簡易: color_variants が 1 種なら全 sku_matrix にその color 紐付け、
-    # 複数 color なら sku_mpn 順序で対応 (= AJAX response 順序 ≈ color order × size order)
-    if color_variants and sku_matrix:
-        n_colors = len(color_variants)
-        n_per_color = len(sku_matrix) // n_colors if n_colors else len(sku_matrix)
-        if n_per_color * n_colors == len(sku_matrix):
-            # 完全マトリクス: color 0 が前半、color 1 が中盤...
-            for i, sm in enumerate(sku_matrix):
-                ci = i // n_per_color if n_per_color > 0 else 0
-                if ci < n_colors:
-                    sm["color_jp"] = color_variants[ci]["color_jp"]
-        else:
-            # 不完全: 全 sku に最初の color (= 1 色のみ商品)
-            for sm in sku_matrix:
-                sm["color_jp"] = color_variants[0]["color_jp"]
+    group_pat = re.compile(
+        r'<div\s+class="block-select-size-detail\s+js-variation-size">'
+        r'([\s\S]+?)'
+        r'(?=<div\s+class="block-select-size-detail\s+js-variation-size">|$)',
+    )
+    seen_combos: set = set()  # (color_jp, size_normalized) の dedup
+    for group_idx, group_m in enumerate(group_pat.finditer(body)):
+        group_html = group_m.group(1)
+        color_jp = ""
+        if group_idx < len(color_variants):
+            color_jp = color_variants[group_idx]["color_jp"]
+        # 各 block-pattern (= 1 size) 抽出
+        for bp_m in re.finditer(
+            r'<div\s+class="block-select-size-detail--item\s+block-pattern([^"]*)"([\s\S]+?)'
+            r'(?=<div\s+class="block-select-size-detail--item|$)',
+            group_html,
+        ):
+            block_classes = bp_m.group(1)
+            block_html = bp_m.group(2)
+            in_stock = "no-stock" not in block_classes
+            sz_m = re.search(r'block-pattern--size-text">([^<]+)<', block_html)
+            size_jp = sz_m.group(1).strip() if sz_m else ""
+            size_norm = _normalize_size(size_jp)
+            sku_m = re.search(r"[?&]sku=(\d{13})", block_html)
+            sku_mpn = sku_m.group(1) if sku_m else ""
+            if not sku_mpn:
+                continue
+            combo = (color_jp, size_norm)
+            if combo in seen_combos:
+                # 同 (color, size) 重複は skip (= 旧 mpn 退避は extra_skus に)
+                continue
+            seen_combos.add(combo)
+            sku_matrix.append({
+                "variant_sku_mpn": sku_mpn,
+                "color_jp": color_jp,
+                "size_normalized": size_norm,
+                "in_stock": in_stock,
+                "last_no_stock_seen_at": fetched_at if not in_stock else "",
+            })
 
     # hinban fallback: image filename から取れない場合 parent_mpn の中央部分
     if hinban is None and len(parent_mpn) == 13:
@@ -774,6 +776,255 @@ def reorganize_phase1_to_series() -> dict:
     return stats
 
 
+# ============================================================================
+# size_chart parser (HQ Phase 2 spec 追加、2026-05-17)
+# ============================================================================
+# 日本語 size chart label → そのまま catalog 保存 (英訳は HQ 側 _SIZE_CHART_LABEL_EN)
+_SIZE_CHART_ROW_LABELS = [
+    "ウエスト", "ヒップ", "わたり巾", "わたり幅", "股下", "総丈",
+    "胸囲", "肩幅", "袖丈", "着丈", "首回り", "裄丈",
+    "対応身長", "対応胸囲", "対応ウエスト",
+]
+
+
+def fetch_size_chart(parent_mpn: str, timeout: int = 15) -> dict:
+    """Workman 個別商品 page の「サイズ・スペック」table を parse して size_chart dict 返却.
+
+    Returns:
+        {label: {size: value}}.
+        例: {"ウエスト": {"M": "76-84", "L": "84-92"}, ...}
+        size chart 取得不能なら {} (空 dict).
+
+    全角 → 半角、`〜` → `-`、`cm` 等の単位除去 で値正規化.
+    """
+    import requests as _req, html as _html_mod
+
+    url = PRODUCT_URL_TEMPLATE.format(full_id=f"g{parent_mpn}")
+    try:
+        r = _req.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
+    except Exception:
+        return {}
+    if r.status_code != 200:
+        return {}
+
+    text = _html_mod.unescape(r.text)
+    # 「サイズ・スペック」section を切出し
+    sec_m = re.search(r"サイズ・スペック[\s\S]{0,5000}?(?=注意事項|商品説明|お取扱|使用上のご注意|機能|$)", text)
+    section = sec_m.group(0) if sec_m else text
+
+    # <table>...<tr>...</tr>...</table> を抽出
+    table_m = re.search(r"<table[^>]*>([\s\S]+?)</table>", section)
+    if not table_m:
+        return {}
+    table_html = table_m.group(1)
+
+    # 各 <tr> を行として処理
+    rows = re.findall(r"<tr[^>]*>([\s\S]+?)</tr>", table_html)
+    if not rows:
+        return {}
+
+    # 1 行目 = header (size labels)
+    header_cells = _extract_cells(rows[0])
+    if not header_cells:
+        return {}
+    # 先頭セル (空 or 「サイズ」) を除外
+    if header_cells and (not header_cells[0] or "サイズ" in header_cells[0]):
+        size_headers = [_normalize_size(c.strip()) for c in header_cells[1:] if c.strip()]
+    else:
+        size_headers = [_normalize_size(c.strip()) for c in header_cells if c.strip()]
+
+    out: dict = {}
+    for row in rows[1:]:
+        cells = _extract_cells(row)
+        if len(cells) < 2:
+            continue
+        label = cells[0].strip()
+        # 既知 label のみ採用
+        if not any(label.startswith(lbl) or lbl in label for lbl in _SIZE_CHART_ROW_LABELS):
+            continue
+        values = cells[1:]
+        if len(values) < len(size_headers):
+            continue
+        row_dict = {}
+        for i, sz in enumerate(size_headers):
+            if i >= len(values):
+                break
+            v = _normalize_chart_value(values[i])
+            if v:
+                row_dict[sz] = v
+        if row_dict:
+            out[label] = row_dict
+    return out
+
+
+def _extract_cells(row_html: str) -> list[str]:
+    """<tr> 内の <td> / <th> を順番に text 抽出."""
+    cells = []
+    for c_m in re.finditer(r"<t[dh][^>]*>([\s\S]+?)</t[dh]>", row_html):
+        raw = c_m.group(1)
+        plain = re.sub(r"<[^>]+>", " ", raw)
+        plain = re.sub(r"\s+", " ", plain).strip()
+        cells.append(plain)
+    return cells
+
+
+def _normalize_chart_value(v: str) -> str:
+    """size chart value 正規化: 全角数字 → 半角、〜→ -、単位 'cm' 除去."""
+    if not v or v == "-" or v == "ー":
+        return ""
+    s = v.strip()
+    # 全角数字 / 全角ハイフン / 全角チルダ → 半角
+    full2half = str.maketrans("０１２３４５６７８９－〜.",
+                               "0123456789-~.")
+    s = s.translate(full2half)
+    # チルダ → ハイフン
+    s = s.replace("~", "-").replace("～", "-")
+    # 単位 / 空白除去
+    s = re.sub(r"\s*cm\s*$", "", s)
+    s = re.sub(r"\s*センチ\s*$", "", s)
+    s = re.sub(r"\s+", "", s)
+    return s
+
+
+def backfill_size_chart() -> dict:
+    """全 workman:series:* 集約 entry に specs.size_chart 投入.
+
+    Rate limit 配慮: 各 fetch 間 0.5s sleep.
+    """
+    import sqlite3 as _sql
+    conn = _sql.connect(str(api._DB_PATH))
+    conn.row_factory = _sql.Row
+    cur = conn.cursor()
+    cur.execute("""SELECT product_id, specs FROM products WHERE category=?
+                   AND product_id LIKE 'workman:series:%'""", (CATEGORY,))
+    rows = cur.fetchall()
+    stats = {"total": len(rows), "fetched": 0, "with_chart": 0, "empty": 0, "errors": 0}
+    for r in rows:
+        s = json.loads(r["specs"]) if r["specs"] else {}
+        parent_mpn = s.get("parent_mpn", "")
+        if not parent_mpn:
+            stats["errors"] += 1
+            continue
+        chart = fetch_size_chart(parent_mpn)
+        stats["fetched"] += 1
+        if chart:
+            stats["with_chart"] += 1
+        else:
+            stats["empty"] += 1
+        s["size_chart"] = chart
+        cur.execute("UPDATE products SET specs=? WHERE category=? AND product_id=?",
+                    (json.dumps(s, ensure_ascii=False), CATEGORY, r["product_id"]))
+        time.sleep(0.5)
+    conn.commit()
+    conn.close()
+    return stats
+
+
+# ============================================================================
+# color_en 英訳 (sku_matrix dedup 後の修正用、HQ 2026-05-17 依頼)
+# ============================================================================
+def backfill_color_en_via_api() -> dict:
+    """全 集約 entry の color_variants で color_en が日本語残のものを Claude API 英訳.
+
+    例: 'Ｒブルー：トレッキング' → 'R Blue: Trekking'
+        'Ｏホワイト：スタンダード' → 'O White: Standard'
+    """
+    import anthropic
+    import sqlite3 as _sql
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        for p in (Path("C:/dev/iMak_data/credentials/api_key.txt"),
+                  Path("C:/dev/iMak/iMakTCG/API key.txt")):
+            if p.exists():
+                api_key = p.read_text(encoding="utf-8").strip()
+                break
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # 1) 翻訳対象の distinct color_jp 抽出 (color_en が ja 残 = 同値 or 空)
+    conn = _sql.connect(str(api._DB_PATH))
+    conn.row_factory = _sql.Row
+    rows = conn.execute("""SELECT product_id, specs FROM products WHERE category=?
+                            AND product_id LIKE 'workman:series:%'""", (CATEGORY,)).fetchall()
+
+    needs_translate: set[str] = set()
+    for r in rows:
+        s = json.loads(r["specs"]) if r["specs"] else {}
+        for cv in s.get("color_variants", []):
+            cj = cv.get("color_jp", "")
+            ce = cv.get("color_en", "")
+            # ja 残判定: color_en が空 or color_jp と完全同値 or ASCII 文字 0
+            if not ce or ce == cj or not any(c.isascii() and c.isalpha() for c in ce):
+                needs_translate.add(cj)
+    needs_translate.discard("")
+    print(f"distinct color_jp to translate: {len(needs_translate)}")
+
+    # 2) Claude API batch (50/batch)
+    translation_map: dict[str, str] = {}
+    name_list = sorted(needs_translate)
+    SYSTEM = """You are translating Japanese Workman product color names to natural English.
+
+CONVENTIONS:
+1. Compound color "<color>：<model>" pattern → "<English color>: <English model>"
+   例: Ｒブルー：トレッキング → "R Blue: Trekking"
+       Ｏホワイト：スタンダード → "O White: Standard"
+       Ｄグリーン：スタンダード → "D Green: Standard"
+2. Color prefix (Ｒ Ｏ Ｄ Ｓ Ｂ 等 半角化) is brand-internal code → keep as English letter
+   Ｒ → R, Ｏ → O, Ｄ → D, Ｂ → B, Ｓ → S
+3. Simple color (ブラック / ホワイト / ネイビー etc) → "Black", "White", "Navy"
+4. Full-width letters → half-width (Ｒ → R, "：" → ":")
+5. Title Case
+
+OUTPUT: JSON only, no markdown.
+Format: {"japanese_name_1": "english_name_1", ...}"""
+    BATCH = 50
+    for i in range(0, len(name_list), BATCH):
+        batch = name_list[i:i+BATCH]
+        prompt = f"Translate {len(batch)} Japanese Workman color names to English (eBay-ready):\n\n" + \
+                 "\n".join(f"  - {n}" for n in batch) + \
+                 "\n\nReturn JSON only: {name_jp: name_en, ...}"
+        try:
+            resp = client.messages.create(
+                model="claude-sonnet-4-6", max_tokens=4000, system=SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            txt = resp.content[0].text.strip()
+            m = re.search(r"\{[\s\S]*\}", txt)
+            if m:
+                txt = m.group(0)
+            d = json.loads(txt)
+            for k, v in d.items():
+                if isinstance(v, str) and v.strip():
+                    translation_map[k] = v.strip()
+            print(f"  [{i+len(batch)}/{len(name_list)}] translated {len(d)}")
+        except Exception as e:
+            print(f"  ERR: {type(e).__name__}: {str(e)[:120]}")
+        time.sleep(0.3)
+
+    # 3) DB 反映: 集約 entry の color_variants[].color_en 更新
+    cur = conn.cursor()
+    updated_entries = 0
+    for r in rows:
+        s = json.loads(r["specs"]) if r["specs"] else {}
+        changed = False
+        for cv in s.get("color_variants", []):
+            cj = cv.get("color_jp", "")
+            new_en = translation_map.get(cj)
+            if new_en and cv.get("color_en") != new_en:
+                cv["color_en"] = new_en
+                changed = True
+        if changed:
+            cur.execute("UPDATE products SET specs=? WHERE category=? AND product_id=?",
+                        (json.dumps(s, ensure_ascii=False), CATEGORY, r["product_id"]))
+            updated_entries += 1
+    conn.commit()
+    conn.close()
+    return {"distinct_translated": len(translation_map),
+            "entries_updated": updated_entries,
+            "total_aggregate_entries": len(rows)}
+
+
 def update_priority_categories(limit_per_cat: Optional[int] = None) -> dict:
     """優先カテゴリを一括 fetch + upsert."""
     driver = _start_driver()
@@ -831,6 +1082,10 @@ if __name__ == "__main__":
                     help="Phase 1 既存 100 SKU を集約 entry に re-organize + parent_series_id backfill")
     p.add_argument("--backfill-psid", action="store_true",
                     help="individual entry の parent_series_id のみ backfill (集約 entry 投入なし)")
+    p.add_argument("--backfill-size-chart", action="store_true",
+                    help="全 集約 entry に specs.size_chart 投入 (個別商品 page parse)")
+    p.add_argument("--backfill-color-en", action="store_true",
+                    help="集約 entry の color_variants 各 color_en を Claude API で英訳")
     args = p.parse_args()
 
     if args.discover:
@@ -851,6 +1106,12 @@ if __name__ == "__main__":
         print(json.dumps(stats, ensure_ascii=False, indent=2))
     elif args.backfill_psid:
         stats = backfill_parent_series_id()
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+    elif args.backfill_size_chart:
+        stats = backfill_size_chart()
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+    elif args.backfill_color_en:
+        stats = backfill_color_en_via_api()
         print(json.dumps(stats, ensure_ascii=False, indent=2))
     else:
         p.print_help()

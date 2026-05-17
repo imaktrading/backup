@@ -271,5 +271,133 @@ class TestUpdateActiveStatus(unittest.TestCase):
         self.assertGreater(len(rec2["specs"]["color_variants"]), 0)
 
 
+# ============================================================================
+# 2026-05-17 追加: sku_matrix dedup / size_chart parser / color_en 英訳
+# ============================================================================
+class TestAjaxParserMultiGroupColor(unittest.TestCase):
+    """AJAX response の block-select-size-detail group が複数 (= color 別) の場合、
+    各 group の色を正確に紐付け + (color,size) 重複なし.
+    """
+
+    def test_group_based_color_attribution(self):
+        # 2 colors × 違う size 数 (color 0 = 2 sizes, color 1 = 3 sizes)
+        fixture = """
+<div class="block-variation block-color">
+  <div class="block-variation--item-list block-color--item-list js-color-select">
+    <dl class="block-variation--item block-color--item" title="ブラック">
+      <dt><figure><img src="/img/goods/C/35840_c1.jpg" alt="ブラック"></figure></dt>
+      <dd><span>ブラック</span></dd>
+    </dl>
+    <dl class="block-variation--item block-color--item" title="グリーン">
+      <dt><figure><img src="/img/goods/C/35840_c2.jpg" alt="グリーン"></figure></dt>
+      <dd><span>グリーン</span></dd>
+    </dl>
+  </div>
+</div>
+<div class="block-select-size js-select-size">
+  <div class="block-select-size-detail js-variation-size">
+    <div class="block-select-size-detail--item block-pattern">
+      <div class="block-pattern--size-text">Ｓ</div>
+      <a href="?sku=2300035840014">stock</a>
+    </div>
+    <div class="block-select-size-detail--item block-pattern no-stock">
+      <div class="block-pattern--size-text">Ｍ</div>
+      <a href="?sku=2300035840021">stock</a>
+    </div>
+  </div>
+  <div class="block-select-size-detail js-variation-size">
+    <div class="block-select-size-detail--item block-pattern">
+      <div class="block-pattern--size-text">Ｓ</div>
+      <a href="?sku=2300035840151">stock</a>
+    </div>
+    <div class="block-select-size-detail--item block-pattern">
+      <div class="block-pattern--size-text">Ｍ</div>
+      <a href="?sku=2300035840168">stock</a>
+    </div>
+    <div class="block-select-size-detail--item block-pattern">
+      <div class="block-pattern--size-text">Ｌ</div>
+      <a href="?sku=2300035840175">stock</a>
+    </div>
+  </div>
+</div>
+"""
+        result = workman._parse_ajax_response(fixture, "2300035840090", "T0")
+        # color 紐付け確認: 最初の 2 件は ブラック、後 3 件は グリーン
+        sm = result["sku_matrix"]
+        self.assertEqual(len(sm), 5)
+        self.assertEqual(sm[0]["color_jp"], "ブラック")
+        self.assertEqual(sm[1]["color_jp"], "ブラック")
+        self.assertEqual(sm[2]["color_jp"], "グリーン")
+        self.assertEqual(sm[3]["color_jp"], "グリーン")
+        self.assertEqual(sm[4]["color_jp"], "グリーン")
+        # dedup: 同 (color, size) なし
+        combos = set((m["color_jp"], m["size_normalized"]) for m in sm)
+        self.assertEqual(len(combos), 5)
+
+
+class TestSizeChartParser(unittest.TestCase):
+    """fetch_size_chart parser + 正規化."""
+
+    def test_normalize_chart_value(self):
+        self.assertEqual(workman._normalize_chart_value("76-84"), "76-84")
+        self.assertEqual(workman._normalize_chart_value("７６〜８４"), "76-84")  # 全角
+        self.assertEqual(workman._normalize_chart_value("100 cm"), "100")
+        self.assertEqual(workman._normalize_chart_value("100センチ"), "100")
+        self.assertEqual(workman._normalize_chart_value("-"), "")
+        self.assertEqual(workman._normalize_chart_value(""), "")
+
+    def test_extract_cells(self):
+        row = "<tr><th>ウエスト</th><td>76-84</td><td>84-92</td></tr>"
+        cells = workman._extract_cells(row)
+        self.assertEqual(cells, ["ウエスト", "76-84", "84-92"])
+
+
+class TestColorEnglishCoverage(unittest.TestCase):
+    """全 集約 entry の color_variants で color_en が英訳済か (= ja 残ゼロ)."""
+
+    def test_color_en_no_jp_residual(self):
+        conn = sqlite3.connect(str(api._DB_PATH))
+        conn.row_factory = sqlite3.Row
+        bad = []
+        for r in conn.execute("""SELECT product_id, specs FROM products WHERE category='workman'
+                                 AND product_id LIKE 'workman:series:%'""").fetchall():
+            s = json.loads(r["specs"] or "{}")
+            for cv in s.get("color_variants", []):
+                ce = cv.get("color_en", "")
+                # ASCII alpha 含まない (= 英訳されてない)
+                if not any(c.isascii() and c.isalpha() for c in ce):
+                    bad.append((r["product_id"], cv.get("color_jp"), ce))
+        conn.close()
+        if bad:
+            msg = f"color_en untranslated: {len(bad)} 件\n"
+            for pid, cj, ce in bad[:10]:
+                msg += f"  {pid}: jp={cj!r} en={ce!r}\n"
+            self.fail(msg)
+
+
+class TestSkuMatrixDedup(unittest.TestCase):
+    """catalog 内 集約 entry で同 (color_jp, size_normalized) 重複なしを保証."""
+
+    def test_no_duplicate_combos(self):
+        conn = sqlite3.connect(str(api._DB_PATH))
+        conn.row_factory = sqlite3.Row
+        bad = []
+        for r in conn.execute("""SELECT product_id, specs FROM products WHERE category='workman'
+                                 AND product_id LIKE 'workman:series:%'""").fetchall():
+            s = json.loads(r["specs"] or "{}")
+            seen = set()
+            for m in s.get("sku_matrix", []):
+                key = (m.get("color_jp", ""), m.get("size_normalized", ""))
+                if key in seen:
+                    bad.append((r["product_id"], key, m.get("variant_sku_mpn")))
+                seen.add(key)
+        conn.close()
+        if bad:
+            msg = f"sku_matrix duplicates: {len(bad)} 件\n"
+            for pid, key, mpn in bad[:10]:
+                msg += f"  {pid}: {key} mpn={mpn}\n"
+            self.fail(msg)
+
+
 if __name__ == "__main__":
     unittest.main()
