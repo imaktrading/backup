@@ -88,10 +88,23 @@ CURRENCY_TO_SITE = {
 }
 
 
-def open_listing_page(status: str, keyword: str | None, wait_seconds: int = 18):
+def open_listing_page(status: str, keyword: str | None, wait_seconds: int = 18,
+                       site: str | None = None):
+    """site: 'US' or None (= 全 site).
+
+    eBay Seller Hub の Marketplaces filter URL パラメータ:
+      sites=0 → US, sites=3 → UK, sites=15 → AU, sites=77 → DE, etc.
+    """
     url = URL_BASE[status]
+    params = []
     if keyword:
-        url = f"{url}?keyword={keyword.replace(' ', '+')}"
+        params.append(f"keyword={keyword.replace(' ', '+')}")
+    if site == "US":
+        params.append("sites=0")
+        params.append("source=filterbar")
+        params.append("action=search")
+    if params:
+        url = f"{url}?{'&'.join(params)}"
     options = uc.ChromeOptions()
     options.add_argument(f"--user-data-dir={EBAY_CHROME_PROFILE_DIR}")
     options.add_argument("--no-sandbox")
@@ -167,6 +180,21 @@ def parse_listing_row(row_text: str, status: str = "active",
             out["listing_site"] = "EU"
             break
         # その他通貨 (HK $/SGD/etc) は後で拡張可
+    # US fallback (5/17 追加): 既存 prefix 判定で unknown だった listing を救済.
+    # eBay US listing で "US " prefix なし "$XX.XX" or 範囲表示 "$XX.XX to $YY.YY"
+    # 形式の listing を US と判定 (= 他通貨記号が一切ない行のみ).
+    if not out["listing_site"]:
+        for L in lines:
+            if "$" not in L:
+                continue
+            if any(c in L for c in ("AU", "C$", "£", "€", "EUR", "JPY", "HK", "SGD")):
+                continue
+            m = re.search(r"\$\s*([0-9,.]+)", L)
+            if m:
+                out["price_usd"] = m.group(1)
+                out["price_raw"] = L.strip()
+                out["listing_site"] = "US"
+                break
     if not out["listing_site"]:
         out["listing_site"] = "unknown"
 
@@ -215,21 +243,29 @@ def parse_listing_row(row_text: str, status: str = "active",
         out["promoted_rate"] = m.group(1)
 
     # Listed date / Ended date
-    # 例: "5 11, 2026, 14:55 PDT" (eBay Seller Hub の日付表示)
-    # 厳密 match: 時刻 + PDT/PST が後続する形のみ
-    m = re.search(r"\b(\d{1,2})\s+(\d{1,2}),\s+(20\d{2}),\s+\d{1,2}:\d{2}\s+P[DS]T", row_text)
+    # 旧形式: "5 11, 2026, 14:55 PDT"
+    # 新形式 (5/17 観測): "May 11, 2026" / "May 10, 2025, 14:55 PDT" 等の月名表記
+    _MONTH = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+              "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+    mo = d = y = None
+    # 新形式 (= 月名)
+    m = re.search(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(20\d{2})", row_text)
     if m:
-        try:
-            mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            # 月 1-12 / 日 1-31 範囲チェック (validation)
-            if 1 <= mo <= 12 and 1 <= d <= 31:
-                date_str = f"{y:04d}-{mo:02d}-{d:02d}"
-                if status == "ended":
-                    out["ended_date"] = date_str
-                else:
-                    out["listed_date"] = date_str
-        except Exception:
-            pass
+        mo, d, y = _MONTH[m.group(1)], int(m.group(2)), int(m.group(3))
+    else:
+        # 旧形式 fallback (= 数字 数字)
+        m = re.search(r"\b(\d{1,2})\s+(\d{1,2}),\s+(20\d{2}),\s+\d{1,2}:\d{2}\s+P[DS]T", row_text)
+        if m:
+            try:
+                mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            except Exception:
+                pass
+    if mo and d and y and 1 <= mo <= 12 and 1 <= d <= 31:
+        date_str = f"{y:04d}-{mo:02d}-{d:02d}"
+        if status == "ended":
+            out["ended_date"] = date_str
+        else:
+            out["listed_date"] = date_str
 
     return out
 
@@ -381,6 +417,8 @@ def main():
                         help="ページ送りで全件取得 (Ended 1011件等の全 page 取得)")
     parser.add_argument("--limit", type=int, default=20,
                         help="生 dump 時の表示件数上限 (--analyze なし時)")
+    parser.add_argument("--site", choices=["US"], default=None,
+                        help="Marketplaces filter (= US 指定で sites=0 → US 限定 scrape)")
     args = parser.parse_args()
 
     keyword = None
@@ -394,7 +432,8 @@ def main():
 
     driver = None
     try:
-        driver = open_listing_page(args.status, keyword, wait_seconds=args.wait)
+        driver = open_listing_page(args.status, keyword, wait_seconds=args.wait,
+                                     site=args.site)
         print(f"[INFO] page title: {driver.title}")
         print(f"[INFO] current url: {driver.current_url}")
 

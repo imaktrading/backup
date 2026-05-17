@@ -45,7 +45,8 @@ def take_fresh_snapshot() -> None:
     print("=== 新 snapshot 取得開始 (約 10 分、Selenium で eBay scrape) ===")
     hq_dir = os.path.dirname(os.path.abspath(__file__))
     subprocess.run(
-        ["python", "seller_hub_view.py", "--status", "active", "--save", "--all-pages"],
+        ["python", "seller_hub_view.py", "--status", "active", "--save", "--all-pages",
+         "--site", "US"],
         cwd=hq_dir, check=False,
     )
     print("=== snapshot 取得完了 ===\n")
