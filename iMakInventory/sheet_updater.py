@@ -395,6 +395,8 @@ def detect_supplier(domain: str) -> str:
         return "amazon"
     if "fril.jp" in d:
         return "fril"
+    if "snkrdunk.com" in d:
+        return "snkrdunk"
     return "other"
 
 

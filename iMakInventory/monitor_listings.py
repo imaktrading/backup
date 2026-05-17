@@ -64,6 +64,7 @@ from scrapers.mercari_scraper import create_driver as create_mercari_driver  # n
 from scrapers.amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
 from scrapers.amazon_scraper import create_amazon_driver  # noqa: E402
 from scrapers.fril_scraper import fetch_product_inventory as fetch_fril  # noqa: E402
+from scrapers.snkrdunk_scraper import fetch_product_inventory as fetch_snkrdunk  # noqa: E402
 
 LOG_DIR = SCRIPT_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -121,6 +122,12 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
     elif supplier == "fril":
         try:
             info = fetch_fril(url)
+        except Exception as e:
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
+    elif supplier == "snkrdunk":
+        try:
+            info = fetch_snkrdunk(url)
         except Exception as e:
             out["error"] = f"{type(e).__name__}: {e}"
             return out
