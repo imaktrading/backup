@@ -37,8 +37,10 @@ from scrapers.snkrdunk_official import (
     SELENIUM_HYDRATION_WAIT_SEC,
     SNKRDUNK_BASE,
     create_driver,
+    extract_tcg_card_id,
     fetch_apparel_aggregate,
     fetch_apparel_used_instance,
+    find_psa10_urls_for_card,
 )
 
 
@@ -338,31 +340,90 @@ def collect_favorites_with_details(
     load_more_scrolls: int = DEFAULT_LOAD_MORE_SCROLLS,
     favorites_url: Optional[str] = None,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    enable_auxiliary: bool = False,
+    aux_max_per_item: int = 5,
 ) -> list[dict]:
     """お気に入り URL + 詳細 (title/price/image/condition) を取得.
 
+    Args:
+        enable_auxiliary: True で「補仕入連携」 ON
+            - 各お気に入り item の title から card_id 抽出 (= OP/ST/EB/P 系)
+            - SNKRDUNK 内で同 card_id の PSA10 出品検索
+            - 価格 ≤ 元 price のみ採用 (= 同価格 or 安い)
+            - 元 instance_id は除外 (= 自分自身は補に出さない)
+            - 結果は item dict の "auxiliary_urls" key に list[str] で格納
+              (= sheet_writer 経由で AC-AG 列に投入される運用)
+        aux_max_per_item: 補仕入 1 item あたりの最大件数 (= AC-AG 5 列なので default 5)
+
     progress_callback(cur, total, msg): GUI 進捗用 (省略可).
     """
-    urls = collect_favorite_urls(
-        driver=driver,
-        headless=headless,
-        max_items=max_items,
-        load_more_scrolls=load_more_scrolls,
-        favorites_url=favorites_url,
-    )
-    items: list[dict] = []
-    total = len(urls)
-    for i, url in enumerate(urls, start=1):
-        parsed = parse_apparel_used_url(url)
-        if not parsed:
-            continue
-        model_id, instance_id = parsed
-        if progress_callback:
-            progress_callback(i, total, url)
-        d = _build_item_dict(model_id, instance_id)
-        if d:
+    # 補仕入連携時は Selenium driver 必須 (= find_psa10_urls_for_card が要)、
+    # driver なし起動なら create_driver する
+    owns_driver = driver is None
+    if owns_driver:
+        driver = create_driver(headless=headless)
+
+    try:
+        urls = collect_favorite_urls(
+            driver=driver,
+            headless=headless,
+            max_items=max_items,
+            load_more_scrolls=load_more_scrolls,
+            favorites_url=favorites_url,
+        )
+        items: list[dict] = []
+        total = len(urls)
+        for i, url in enumerate(urls, start=1):
+            parsed = parse_apparel_used_url(url)
+            if not parsed:
+                continue
+            model_id, instance_id = parsed
+            if progress_callback:
+                progress_callback(i, total, url)
+            d = _build_item_dict(model_id, instance_id)
+            if not d:
+                continue
+            if enable_auxiliary:
+                d["auxiliary_urls"] = _collect_auxiliary_for_item(
+                    d, driver, max_results=aux_max_per_item,
+                )
             items.append(d)
-    return items
+        return items
+    finally:
+        if owns_driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
+def _collect_auxiliary_for_item(item: dict, driver, max_results: int = 5) -> list[str]:
+    """1 お気に入り item に対して同 card_id の PSA10 補仕入 URL list を取得.
+
+    元のお気に入り の model_id を force_model_id として渡す = 検索 step skip して
+    same packaging の他出品のみ取得 (= packaging ブレ回避)。
+
+    Returns: 価格 ≤ 元 price の PSA10 URL list (= 元 instance 除外)、card_id 抽出失敗時は []。
+    """
+    title = (item.get("title") or "").strip()
+    card_id = extract_tcg_card_id(title)
+    if not card_id:
+        return []
+    self_iid = item.get("instance_id")
+    self_price = item.get("price_jpy")
+    self_model = item.get("model_id")
+    exclude_ids: set[int] = {int(self_iid)} if isinstance(self_iid, int) else set()
+    max_price = self_price if isinstance(self_price, int) else None
+    force_model = int(self_model) if isinstance(self_model, int) else None
+    info = find_psa10_urls_for_card(
+        card_id,
+        driver,
+        max_results=max_results,
+        max_price=max_price,
+        exclude_instance_ids=exclude_ids,
+        force_model_id=force_model,
+    )
+    return list(info.get("psa10_urls") or [])
 
 
 # ============================================================================
@@ -386,6 +447,9 @@ if __name__ == "__main__":
     ap.add_argument("--load-more", type=int, default=DEFAULT_LOAD_MORE_SCROLLS)
     ap.add_argument("--urls-only", action="store_true", help="URL list のみ出力 (= 詳細取得スキップ)")
     ap.add_argument("--favorites-url", default=None, help="お気に入り page URL を強制指定 (= POC 用)")
+    ap.add_argument("--with-aux", action="store_true",
+                    help="補仕入連携 ON (= 各お気に入り item に同 card_id PSA10 URL list を auxiliary_urls に追加)")
+    ap.add_argument("--aux-max", type=int, default=5, help="補仕入 1 item あたり最大件数 (default 5)")
     args = ap.parse_args()
 
     if args.login:
@@ -412,6 +476,8 @@ if __name__ == "__main__":
         load_more_scrolls=args.load_more,
         favorites_url=args.favorites_url,
         progress_callback=lambda i, t, u: print(f"  [{i}/{t}] {u}"),
+        enable_auxiliary=args.with_aux,
+        aux_max_per_item=args.aux_max,
     )
     json.dump(items, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")

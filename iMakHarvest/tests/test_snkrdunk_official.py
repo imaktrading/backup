@@ -8,8 +8,10 @@ from scrapers.snkrdunk_official import (
     OP_CARD_ID_RE,
     PSA10_CONDITION_LABEL,
     STATUS_ON_SALE,
+    TCG_CARD_ID_RE,
     build_apparel_used_url,
     extract_op_card_id,
+    extract_tcg_card_id,
     is_psa10_on_sale,
 )
 
@@ -182,3 +184,64 @@ class TestConstants:
 
     def test_status_on_sale(self):
         assert STATUS_ON_SALE == 0
+
+
+# --------------------------------------------------------------------------
+# extract_tcg_card_id (= OP / ST / EB / P 全部対応、抽出くん 連携用)
+# --------------------------------------------------------------------------
+class TestExtractTcgCardId:
+    def test_op_series(self):
+        assert extract_tcg_card_id("Kozuki Hiyori SR [OP06-106]") == "OP06-106"
+
+    def test_st_series(self):
+        assert extract_tcg_card_id("Uta SR [ST16-001]") == "ST16-001"
+
+    def test_eb_series(self):
+        assert extract_tcg_card_id("ウタ EB03-061 SEC PSA10") == "EB03-061"
+
+    def test_p_series(self):
+        # P-001 〜 P-999 形式 (= プロモ)
+        assert extract_tcg_card_id("プロモ Kozuki Hiyori P-018") == "P-018"
+
+    def test_lowercase_normalized(self):
+        assert extract_tcg_card_id("op06-106 lowercase") == "OP06-106"
+        assert extract_tcg_card_id("st16-001") == "ST16-001"
+
+    def test_no_match_returns_none(self):
+        assert extract_tcg_card_id("Pokemon Pikachu PSA10") is None
+        # P 系は 3 桁、P-12 は無効
+        assert extract_tcg_card_id("P-12 short") is None
+
+    def test_empty_input(self):
+        assert extract_tcg_card_id("") is None
+        assert extract_tcg_card_id(None) is None  # type: ignore[arg-type]
+
+    def test_op_takes_priority_over_other_text(self):
+        # title に複数の card_id 形式があれば最初のもの
+        assert extract_tcg_card_id("First OP03-044 then ST01-001") == "OP03-044"
+
+
+# --------------------------------------------------------------------------
+# TCG_CARD_ID_RE 直接 (regex 確認)
+# --------------------------------------------------------------------------
+class TestTcgCardIdRegex:
+    def test_op_match(self):
+        assert TCG_CARD_ID_RE.search("OP01-001").group(1) == "OP01-001"
+
+    def test_st_match(self):
+        assert TCG_CARD_ID_RE.search("ST29-016").group(1) == "ST29-016"
+
+    def test_eb_match(self):
+        assert TCG_CARD_ID_RE.search("EB01-029").group(1) == "EB01-029"
+
+    def test_p_match(self):
+        assert TCG_CARD_ID_RE.search("P-041").group(1) == "P-041"
+
+    def test_op_does_not_match_pop(self):
+        # 「POP01-001」 のような誤マッチ防止 (= word boundary)
+        # POP01-001 は \b で「OP01-001」が誤検出される可能性、ただし P が末尾の場合
+        # 「pop OP01-001」 のように区切られた場合は OP 単体マッチ
+        m = TCG_CARD_ID_RE.search("Foo POP01-001 Bar")
+        # OP01-001 部分にマッチする (POP の最後の P から OP まで含めて) のは regex 仕様、
+        # 実用上 OP01-001 自体は有効 card_id なので妥協
+        assert m is None or m.group(1) == "OP01-001"

@@ -260,9 +260,16 @@ class HarvestPanel(tk.Tk):
         tk.Entry(row1, textvariable=self.snkrdunk_target_row_var, width=8,
                  font=("Consolas", 9)).pack(side="left", padx=4)
         tk.Label(snk,
-                 text="※ 出力先スプシ選択 (HIGH/LOW/任意 URL) は SNKRDUNK では HIGH 固定。"
+                 text="※ 出力先スプシ選択 (HIGH/LOW/任意 URL) は SNKRDUNK 補仕入では HIGH 固定。"
                       "1 件あたり 約 60-100 秒 (= Selenium UI 操作 + hydration 待機)。",
                  fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
+        # 抽出くん 補仕入連携 option (= snkrdunk_fav button 用)
+        self.snkrdunk_fav_with_aux_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(snk,
+                       text="SNKRDUNK 抽出 で同 card_id の PSA10 補仕入も併せて取得 "
+                            "(= 価格 ≤ 元価格、AC-AG 列に同時投入。1 件あたり +60-100 秒)",
+                       variable=self.snkrdunk_fav_with_aux_var,
+                       font=("Meiryo UI", 9)).pack(anchor="w", pady=(4, 0))
 
         # 出力先スプシ
         out = tk.LabelFrame(parent, text="出力先スプシ", padx=10, pady=8, font=("Meiryo UI", 10))
@@ -773,11 +780,14 @@ class HarvestPanel(tk.Tk):
         headless = not self.show_browser_var.get()
         fetch_detail = self.fetch_detail_var.get()
 
+        with_aux = self.snkrdunk_fav_with_aux_var.get()
+
         self._set_status("SNKRDUNK お気に入り収集中...")
         self._log("=== SNKRDUNK お気に入り収集 開始 ===")
         self._log(f"  出力先     : {label} (sheet_id={sheet_id[:14]}.., gid={gid})")
         self._log(f"  headless   : {headless}")
         self._log(f"  詳細取得   : {fetch_detail}")
+        self._log(f"  補仕入連携 : {with_aux} (= 同 card_id PSA10 を AC-AG 列に併せて投入)")
         try:
             if fetch_detail:
                 def progress(cur, total, msg):
@@ -787,6 +797,7 @@ class HarvestPanel(tk.Tk):
                 items = snkrdunk_favorites.collect_favorites_with_details(
                     headless=headless,
                     progress_callback=progress,
+                    enable_auxiliary=with_aux,
                 )
             else:
                 urls = snkrdunk_favorites.collect_favorite_urls(headless=headless)

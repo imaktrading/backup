@@ -10,6 +10,11 @@ from __future__ import annotations
 import pytest
 
 from sheet_writer import (
+    COL_AUX_URL_1,
+    COL_AUX_URL_5,
+    DEFAULT_COLUMN_COUNT,
+    WITH_AUX_COLUMN_COUNT,
+    _build_row,
     append_new_urls,
     dedupe_key,
     read_existing_dedupe_keys,
@@ -361,3 +366,103 @@ class TestAppendNewUrls:
         assert result["appended"] == 0
         assert result["skipped_existing"] == 2
         assert ws.append_calls == []
+
+
+# --------------------------------------------------------------------------
+# _build_row + auxiliary_urls (= SNKRDUNK 抽出くん 補仕入連携用)
+# --------------------------------------------------------------------------
+class TestBuildRowAuxiliary:
+    def test_no_aux_returns_default_width(self):
+        # auxiliary_urls なし → 20 列
+        row = _build_row({"url": "https://x.com/1", "title": "T"})
+        assert len(row) == DEFAULT_COLUMN_COUNT
+        assert row[0] == "https://x.com/1"
+        assert row[2] == "T"
+
+    def test_aux_extends_to_33_columns(self):
+        item = {
+            "url": "https://snkrdunk.com/apparels/100/used/200",
+            "title": "Test card",
+            "auxiliary_urls": ["https://snkrdunk.com/apparels/100/used/300"],
+        }
+        row = _build_row(item)
+        assert len(row) == WITH_AUX_COLUMN_COUNT
+        # A 列 (1) と AC 列 (29) に値
+        assert row[0] == "https://snkrdunk.com/apparels/100/used/200"
+        assert row[COL_AUX_URL_1 - 1] == "https://snkrdunk.com/apparels/100/used/300"
+        # AD-AG (30-33) は空欄
+        for col in range(COL_AUX_URL_1, COL_AUX_URL_5 + 1):
+            if col == COL_AUX_URL_1:
+                continue
+            assert row[col - 1] == ""
+
+    def test_aux_left_packed_max_5(self):
+        # auxiliary_urls 6 件 → 最大 5 件まで採用 (= AC-AG 満杯)
+        urls = [f"https://snkrdunk.com/apparels/1/used/{i}" for i in range(10, 16)]
+        item = {"url": "https://snkrdunk.com/apparels/1/used/1", "auxiliary_urls": urls}
+        row = _build_row(item)
+        assert len(row) == WITH_AUX_COLUMN_COUNT
+        # AC-AG に最初の 5 件
+        for i in range(5):
+            assert row[COL_AUX_URL_1 - 1 + i] == urls[i]
+
+    def test_aux_empty_list_treated_as_no_aux(self):
+        # auxiliary_urls = [] → 20 列 (= 拡張しない)
+        item = {"url": "https://x.com/1", "auxiliary_urls": []}
+        row = _build_row(item)
+        assert len(row) == DEFAULT_COLUMN_COUNT
+
+    def test_aux_filters_falsy(self):
+        # None や空文字は除外
+        item = {
+            "url": "https://x.com/1",
+            "auxiliary_urls": ["https://a.com/1", "", None, "https://a.com/2"],
+        }
+        row = _build_row(item)
+        assert len(row) == WITH_AUX_COLUMN_COUNT
+        assert row[COL_AUX_URL_1 - 1] == "https://a.com/1"
+        assert row[COL_AUX_URL_1] == "https://a.com/2"  # AD
+        assert row[COL_AUX_URL_1 + 1] == ""  # AE
+
+
+class TestAppendWithAuxiliary:
+    def test_append_extends_column_count_when_aux(self):
+        ws = _ws_with_existing_urls([])
+        items = [
+            {
+                "url": "https://snkrdunk.com/apparels/100/used/200",
+                "title": "card A",
+                "auxiliary_urls": ["https://snkrdunk.com/apparels/100/used/300"],
+            }
+        ]
+        result = append_new_urls(ws, items)
+        assert result["appended"] == 1
+        # appended row が 33 列で append されている
+        assert len(ws.append_calls) == 1
+        appended_rows = ws.append_calls[0]
+        assert len(appended_rows) == 1
+        assert len(appended_rows[0]) == WITH_AUX_COLUMN_COUNT
+        assert appended_rows[0][COL_AUX_URL_1 - 1] == "https://snkrdunk.com/apparels/100/used/300"
+
+    def test_append_mixed_aux_and_non_aux(self):
+        # batch 内に aux ありと なし が混在 → 全部 33 列で append (= width 揃える)
+        ws = _ws_with_existing_urls([])
+        items = [
+            {"url": "https://x.com/1", "title": "no aux"},
+            {
+                "url": "https://snkrdunk.com/apparels/1/used/2",
+                "title": "with aux",
+                "auxiliary_urls": ["https://snkrdunk.com/apparels/1/used/3"],
+            },
+        ]
+        result = append_new_urls(ws, items)
+        assert result["appended"] == 2
+        appended_rows = ws.append_calls[0]
+        assert len(appended_rows) == 2
+        # 両 row とも 33 列
+        for r in appended_rows:
+            assert len(r) == WITH_AUX_COLUMN_COUNT
+        # aux なし row の AC-AG は空欄
+        assert appended_rows[0][COL_AUX_URL_1 - 1] == ""
+        # aux あり row の AC に URL
+        assert appended_rows[1][COL_AUX_URL_1 - 1] == "https://snkrdunk.com/apparels/1/used/3"

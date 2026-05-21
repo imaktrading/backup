@@ -39,6 +39,10 @@ import requests
 # card_id 抽出: OP01-001 〜 OP99-999 形式 (本シリーズブースターパック)
 OP_CARD_ID_RE = re.compile(r"\b(OP\d{2}-\d{3})\b", re.IGNORECASE)
 
+# 拡張 card_id 抽出: ワンピース TCG OP / ST (スターター) / EB (extra) / P (プロモ) 系全部
+# 例: OP03-044, ST16-001, EB01-029, P-018 等
+TCG_CARD_ID_RE = re.compile(r"\b((?:OP|ST|EB)\d{2}-\d{3}|P-\d{3})\b", re.IGNORECASE)
+
 # SNKRDUNK 個別 used URL pattern (= 補仕入 URL として AC-AG 列に投入)
 APPAREL_USED_URL_RE = re.compile(
     r"https?://snkrdunk\.com/apparels/(\d+)/used/(\d+)",
@@ -84,6 +88,17 @@ def extract_op_card_id(text: str) -> Optional[str]:
     if not text:
         return None
     m = OP_CARD_ID_RE.search(text)
+    return m.group(1).upper() if m else None
+
+
+def extract_tcg_card_id(text: str) -> Optional[str]:
+    """ワンピース TCG card_id 抽出 (= OP / ST / EB / P 系すべて).
+
+    抽出くん 連携 (= お気に入り title から card_id 取って同 card_id 検索) で使用。
+    """
+    if not text:
+        return None
+    m = TCG_CARD_ID_RE.search(text)
     return m.group(1).upper() if m else None
 
 
@@ -288,6 +303,9 @@ def find_psa10_urls_for_card(
     max_results: int = 5,
     session: Optional[requests.Session] = None,
     rate_limit_sec: float = DEFAULT_RATE_LIMIT_SEC,
+    max_price: Optional[int] = None,
+    exclude_instance_ids: Optional[set[int]] = None,
+    force_model_id: Optional[int] = None,
 ) -> dict:
     """card_id (例: OP03-044) → PSA10 出品中の補仕入 URL 一覧を取得.
 
@@ -297,6 +315,9 @@ def find_psa10_urls_for_card(
         max_results: 最大取得件数 (= AC-AG 5 列分なので default 5)
         session: requests.Session (API 呼出再利用、optional)
         rate_limit_sec: 各 API 呼出間の sleep
+        max_price: 価格上限 (= price <= max_price のみ採用、None なら制限なし、抽出くん 連携用)
+        exclude_instance_ids: 除外する instance_id set (= 自身の出品 instance を補に出さない用)
+        force_model_id: 検索 step を skip して直接この model_id を使う (= 抽出くん 連携で、お気に入りの実 model_id を渡すことで packaging ブレを回避)
 
     Returns:
         {
@@ -305,26 +326,35 @@ def find_psa10_urls_for_card(
             "name_en": "...",
             "name_jp": "...",
             "psa10_urls": ["https://snkrdunk.com/apparels/159278/used/...", ...],
+            "psa10_details": [
+                {"url": "...", "instance_id": 12345, "price": 8900},
+                ...
+            ],
             "psa10_count": N,
             "search_failed": bool,
         }
     """
     sess = session or requests.Session()
+    exclude_ids = exclude_instance_ids or set()
     result = {
         "card_id": card_id,
         "model_id": None,
         "name_en": "",
         "name_jp": "",
         "psa10_urls": [],
+        "psa10_details": [],
         "psa10_count": 0,
         "search_failed": False,
     }
 
-    # Step 1: card_id でスニダン検索 → model_id 取得
-    model_id = search_card_to_model_id(driver, card_id)
-    if not model_id:
-        result["search_failed"] = True
-        return result
+    # Step 1: card_id でスニダン検索 → model_id 取得 (force_model_id 指定時は skip)
+    if force_model_id is not None:
+        model_id = force_model_id
+    else:
+        model_id = search_card_to_model_id(driver, card_id)
+        if not model_id:
+            result["search_failed"] = True
+            return result
     result["model_id"] = model_id
 
     # Step 2: 集約 API で productNumber 確認 (= 完全一致検証、フェイル時 skip)
@@ -345,19 +375,34 @@ def find_psa10_urls_for_card(
     if not instance_ids:
         return result  # PSA10 含む used 出品ゼロ、空リスト返却
 
-    # Step 4: 各 instance を API で fetch、PSA10 + status=0 filter
+    # Step 4: 各 instance を API で fetch、PSA10 + status=0 + price filter
     psa10_urls: list[str] = []
+    psa10_details: list[dict] = []
     for iid in instance_ids:
         if len(psa10_urls) >= max_results:
             break
+        if iid in exclude_ids:
+            continue
         used_item = fetch_apparel_used_instance(model_id, iid, session=sess)
         if rate_limit_sec > 0:
             time.sleep(rate_limit_sec)
         if not is_psa10_on_sale(used_item):
             continue
-        psa10_urls.append(build_apparel_used_url(model_id, iid))
+        # price filter (= max_price 指定時のみ、price 取得失敗は fail-closed skip)
+        if max_price is not None:
+            price = used_item.get("price") if isinstance(used_item, dict) else None
+            if not isinstance(price, int) or price > max_price:
+                continue
+        url = build_apparel_used_url(model_id, iid)
+        psa10_urls.append(url)
+        psa10_details.append({
+            "url": url,
+            "instance_id": iid,
+            "price": (used_item.get("price") if isinstance(used_item, dict) else None),
+        })
 
     result["psa10_urls"] = psa10_urls
+    result["psa10_details"] = psa10_details
     result["psa10_count"] = len(psa10_urls)
     return result
 
