@@ -476,26 +476,26 @@ _SERIES_OVERRIDES = [
 # 戻り値は eBay Features フィルタ正規値の list.
 _FEATURE_RULES = [
     # (model_no regex pattern, features list)
-    (r"^MTG-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Bluetooth", "Sapphire Crystal"]),
-    (r"^MRG-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Bluetooth", "Sapphire Crystal"]),
-    (r"^GMW-B",      ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Bluetooth"]),
-    (r"^GMW-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
-    (r"^GW-B",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Bluetooth"]),
-    (r"^GW-",        ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    (r"^MTG-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled", "Bluetooth", "Sapphire Crystal"]),
+    (r"^MRG-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled", "Bluetooth", "Sapphire Crystal"]),
+    (r"^GMW-B",      ["Shock-Resistant", "Solar Powered", "Radio Controlled", "Bluetooth"]),
+    (r"^GMW-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled"]),
+    (r"^GW-B",       ["Shock-Resistant", "Solar Powered", "Radio Controlled", "Bluetooth"]),
+    (r"^GW-",        ["Shock-Resistant", "Solar Powered", "Radio Controlled"]),
     (r"^GA-B",       ["Shock-Resistant", "Bluetooth"]),
     (r"^GBA-",       ["Shock-Resistant", "Bluetooth"]),
     (r"^GBD-",       ["Shock-Resistant", "Bluetooth", "Step Tracker"]),
     (r"^GBX-",       ["Shock-Resistant", "Bluetooth", "Step Tracker", "Tide Graph"]),
     (r"^GST-B",      ["Shock-Resistant", "Solar Powered", "Bluetooth"]),
     (r"^GST-",       ["Shock-Resistant", "Solar Powered"]),
-    (r"^GWG-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Compass", "Thermometer"]),
+    (r"^GWG-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled", "Compass", "Thermometer"]),
     (r"^GG-",        ["Shock-Resistant", "Compass", "Thermometer"]),
-    (r"^GWN-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Tide Graph"]),
-    (r"^GW-9400",    ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Compass", "Altimeter", "Barometer", "Thermometer"]),
-    (r"^GW-9",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
-    (r"^GWF-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6", "Tide Graph"]),
-    (r"^GWA-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
-    (r"^GAW-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    (r"^GWN-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled", "Tide Graph"]),
+    (r"^GW-9400",    ["Shock-Resistant", "Solar Powered", "Radio Controlled", "Compass", "Altimeter", "Barometer", "Thermometer"]),
+    (r"^GW-9",       ["Shock-Resistant", "Solar Powered", "Radio Controlled"]),
+    (r"^GWF-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled", "Tide Graph"]),
+    (r"^GWA-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled"]),
+    (r"^GAW-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled"]),
     # 単独 (no special features)
     (r"^GA-",        ["Shock-Resistant"]),
     (r"^DW-",        ["Shock-Resistant"]),
@@ -503,7 +503,7 @@ _FEATURE_RULES = [
     (r"^GMA-",       ["Shock-Resistant"]),
     (r"^GM-",        ["Shock-Resistant"]),
     (r"^GX-",        ["Shock-Resistant"]),
-    (r"^GXW-",       ["Shock-Resistant", "Solar Powered", "Multi-Band 6"]),
+    (r"^GXW-",       ["Shock-Resistant", "Solar Powered", "Radio Controlled"]),
     (r"^GLX-",       ["Shock-Resistant"]),
     (r"^BGA-",       ["Shock-Resistant"]),
     (r"^BGD-",       ["Shock-Resistant"]),
@@ -718,7 +718,7 @@ def _parse_official_spec(html_text: str) -> dict:
         if "Bluetooth" in dv or "モバイルリンク" in dv:
             feat.append("Bluetooth")
         if "電波" in dv or "マルチバンド" in dv:
-            feat.append("Multi-Band 6")
+            feat.append("Radio Controlled")
     # 全 HTML 範囲で追加 features signal
     if "Bluetooth" in decoded or "モバイルリンク" in decoded:
         if "Bluetooth" not in feat:
@@ -727,8 +727,8 @@ def _parse_official_spec(html_text: str) -> dict:
         if "Solar Powered" not in feat:
             feat.append("Solar Powered")
     if "マルチバンド6" in decoded or "電波受信" in decoded:
-        if "Multi-Band 6" not in feat:
-            feat.append("Multi-Band 6")
+        if "Radio Controlled" not in feat:
+            feat.append("Radio Controlled")
     if feat:
         out["features"] = feat
 
