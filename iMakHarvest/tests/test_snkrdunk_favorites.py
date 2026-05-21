@@ -7,7 +7,10 @@ from scrapers.snkrdunk_favorites import (
     FAVORITES_URL_CANDIDATES,
     HOME_URL,
     SNKRDUNK_AUTH_COOKIE_NAME,
+    SNKRDUNK_AUX_PRICE_TOLERANCE_MULTIPLIER,
+    _compute_max_price,
     _extract_image_urls,
+    _get_price_tolerance_multiplier,
     normalize_apparel_used_url,
     parse_apparel_used_url,
 )
@@ -166,3 +169,91 @@ class TestExtractImageUrls:
             "primaryPhoto": {"imageUrl": "https://cdn/pp.jpeg"},
         }
         assert _extract_image_urls(None, instance) == ["https://cdn/pp.jpeg"]
+
+
+# --------------------------------------------------------------------------
+# 補仕入 価格幅緩和 (= × 1.2 標準、5/22 HQ 確定)
+# --------------------------------------------------------------------------
+class TestPriceToleranceMultiplier:
+    def test_default_multiplier_is_1_2(self):
+        assert SNKRDUNK_AUX_PRICE_TOLERANCE_MULTIPLIER == 1.2
+
+    def test_get_multiplier_default(self, monkeypatch):
+        # 環境変数未設定 → default
+        monkeypatch.delenv("SNKRDUNK_AUX_PRICE_TOLERANCE", raising=False)
+        assert _get_price_tolerance_multiplier() == 1.2
+
+    def test_get_multiplier_env_override(self, monkeypatch):
+        monkeypatch.setenv("SNKRDUNK_AUX_PRICE_TOLERANCE", "1.5")
+        assert _get_price_tolerance_multiplier() == 1.5
+
+    def test_get_multiplier_invalid_env_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("SNKRDUNK_AUX_PRICE_TOLERANCE", "not-a-number")
+        assert _get_price_tolerance_multiplier() == 1.2
+
+    def test_get_multiplier_zero_env_falls_back(self, monkeypatch):
+        # 0 以下は無効として default 採用
+        monkeypatch.setenv("SNKRDUNK_AUX_PRICE_TOLERANCE", "0")
+        assert _get_price_tolerance_multiplier() == 1.2
+
+    def test_get_multiplier_negative_env_falls_back(self, monkeypatch):
+        monkeypatch.setenv("SNKRDUNK_AUX_PRICE_TOLERANCE", "-1.5")
+        assert _get_price_tolerance_multiplier() == 1.2
+
+
+class TestComputeMaxPrice:
+    def test_at_multiplier_returns_floor(self, monkeypatch):
+        # default × 1.2: 10000 → 12000
+        monkeypatch.delenv("SNKRDUNK_AUX_PRICE_TOLERANCE", raising=False)
+        assert _compute_max_price(10000) == 12000
+
+    def test_non_round_floor(self, monkeypatch):
+        monkeypatch.delenv("SNKRDUNK_AUX_PRICE_TOLERANCE", raising=False)
+        # 7333 × 1.2 = 8799.6 → floor 8799
+        assert _compute_max_price(7333) == 8799
+
+    def test_env_override_1_5(self, monkeypatch):
+        monkeypatch.setenv("SNKRDUNK_AUX_PRICE_TOLERANCE", "1.5")
+        assert _compute_max_price(10000) == 15000
+
+    def test_zero_price_returns_none(self):
+        assert _compute_max_price(0) is None
+
+    def test_negative_price_returns_none(self):
+        assert _compute_max_price(-100) is None
+
+    def test_none_returns_none(self):
+        assert _compute_max_price(None) is None
+
+    def test_non_int_returns_none(self):
+        # str や float が渡された場合 (= API 戻り値想定外) は None で fail-closed
+        assert _compute_max_price("12000") is None  # type: ignore[arg-type]
+        assert _compute_max_price(12000.5) is None  # type: ignore[arg-type]
+
+
+class TestAuxPriceFilterScenarios:
+    """5/22 依頼書 sec 2 で指定された 4 シナリオ + 端ケース."""
+
+    def test_candidate_within_1_1(self, monkeypatch):
+        # 元 ¥10,000 / 候補 ¥11,000 → 採用 (= ×1.1 で許容内)
+        monkeypatch.delenv("SNKRDUNK_AUX_PRICE_TOLERANCE", raising=False)
+        max_p = _compute_max_price(10000)
+        assert 11000 <= max_p  # 11000 ≤ 12000 = 採用
+
+    def test_candidate_at_1_2_boundary(self, monkeypatch):
+        # 元 ¥10,000 / 候補 ¥12,000 → 採用 (= ×1.2 上限ぎり)
+        monkeypatch.delenv("SNKRDUNK_AUX_PRICE_TOLERANCE", raising=False)
+        max_p = _compute_max_price(10000)
+        assert 12000 <= max_p  # 12000 ≤ 12000 = 採用
+
+    def test_candidate_just_over_1_2(self, monkeypatch):
+        # 元 ¥10,000 / 候補 ¥12,001 → 不採用 (= 上限超)
+        monkeypatch.delenv("SNKRDUNK_AUX_PRICE_TOLERANCE", raising=False)
+        max_p = _compute_max_price(10000)
+        assert 12001 > max_p  # 12001 > 12000 = 不採用
+
+    def test_candidate_below_base(self, monkeypatch):
+        # 元 ¥10,000 / 候補 ¥9,000 → 採用 (= 元価格以下は無条件採用)
+        monkeypatch.delenv("SNKRDUNK_AUX_PRICE_TOLERANCE", raising=False)
+        max_p = _compute_max_price(10000)
+        assert 9000 <= max_p  # 9000 ≤ 12000 = 採用

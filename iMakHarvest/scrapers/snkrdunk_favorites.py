@@ -24,6 +24,7 @@ iMakTCG (or 他カテゴリ) の新規仕入候補として、ユーザーが SN
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from typing import Callable, Optional
@@ -61,6 +62,36 @@ HOME_URL = SNKRDUNK_BASE + "/"
 
 DEFAULT_MAX_ITEMS = 200
 DEFAULT_LOAD_MORE_SCROLLS = 8
+
+# 補仕入 価格幅緩和率 (= 元価格 × N 倍まで採用、5/22 HQ 確定で × 1.2 標準)
+# 環境変数 SNKRDUNK_AUX_PRICE_TOLERANCE で override 可能 (= 再起動不要、起動毎に読込)
+# 例: SNKRDUNK_AUX_PRICE_TOLERANCE=1.3 → ×1.3 まで
+SNKRDUNK_AUX_PRICE_TOLERANCE_MULTIPLIER = 1.2
+
+
+def _get_price_tolerance_multiplier() -> float:
+    """環境変数 SNKRDUNK_AUX_PRICE_TOLERANCE が設定されていれば override、なければ default 1.2."""
+    raw = os.environ.get("SNKRDUNK_AUX_PRICE_TOLERANCE", "").strip()
+    if raw:
+        try:
+            v = float(raw)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return SNKRDUNK_AUX_PRICE_TOLERANCE_MULTIPLIER
+
+
+def _compute_max_price(base_price: Optional[int]) -> Optional[int]:
+    """元価格 × 価格幅緩和率 = 補仕入候補の価格上限 (= max_price filter 用).
+
+    元価格が int でない or 0 以下 → None (= 価格 filter なし扱い)
+    元価格 × multiplier を int に floor (= 端数切り捨て、上限を厳密に)
+    """
+    if not isinstance(base_price, int) or base_price <= 0:
+        return None
+    multiplier = _get_price_tolerance_multiplier()
+    return int(base_price * multiplier)
 
 
 # ============================================================================
@@ -413,7 +444,8 @@ def _collect_auxiliary_for_item(item: dict, driver, max_results: int = 5) -> lis
     self_price = item.get("price_jpy")
     self_model = item.get("model_id")
     exclude_ids: set[int] = {int(self_iid)} if isinstance(self_iid, int) else set()
-    max_price = self_price if isinstance(self_price, int) else None
+    # 5/22 確定: 元価格 × 1.2 (= SNKRDUNK_AUX_PRICE_TOLERANCE_MULTIPLIER) を上限
+    max_price = _compute_max_price(self_price if isinstance(self_price, int) else None)
     force_model = int(self_model) if isinstance(self_model, int) else None
     info = find_psa10_urls_for_card(
         card_id,
