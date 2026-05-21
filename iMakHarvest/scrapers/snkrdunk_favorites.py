@@ -273,6 +273,34 @@ def collect_favorite_urls(
 # ============================================================================
 # 詳細取得
 # ============================================================================
+def _extract_image_urls(agg: Optional[dict], instance: Optional[dict]) -> list[str]:
+    """instance / aggregate から画像 URL list を抽出 (= 1 枚以上、order 保持).
+
+    優先順:
+      1. instance.imageUrls (= 出品者の実物写真 list、6 枚程度)
+      2. instance.primaryPhoto.imageUrl (= 単体 fallback)
+      3. aggregate.primaryMedia.imageUrl (= カード本体公式画像、instance なし時)
+    """
+    image_urls: list[str] = []
+    if instance:
+        inst_imgs = instance.get("imageUrls")
+        if isinstance(inst_imgs, list):
+            image_urls = [u for u in inst_imgs if isinstance(u, str) and u]
+        if not image_urls:
+            pp = instance.get("primaryPhoto")
+            if isinstance(pp, dict):
+                img = pp.get("imageUrl")
+                if isinstance(img, str) and img:
+                    image_urls.append(img)
+    if not image_urls and agg:
+        pm = agg.get("primaryMedia")
+        if isinstance(pm, dict):
+            img = pm.get("imageUrl")
+            if isinstance(img, str) and img:
+                image_urls.append(img)
+    return image_urls
+
+
 def _build_item_dict(model_id: int, instance_id: int) -> Optional[dict]:
     """API 2 つで title / price / image / condition を取得して item dict にまとめる.
 
@@ -286,16 +314,10 @@ def _build_item_dict(model_id: int, instance_id: int) -> Optional[dict]:
     title = (agg.get("name") or agg.get("localizedName") or "").strip()
     price = None
     condition = ""
-    image_urls: list[str] = []
     if instance:
         price = instance.get("price")
         condition = (instance.get("displayShortConditionTitle") or "").strip()
-        # instance に image が無い場合は aggregate の image
-        img = instance.get("imageUrl") or agg.get("imageUrl")
-        if img:
-            image_urls.append(img)
-    elif agg.get("imageUrl"):
-        image_urls.append(agg["imageUrl"])
+    image_urls = _extract_image_urls(agg, instance)
 
     return {
         "url": f"https://snkrdunk.com/apparels/{model_id}/used/{instance_id}",

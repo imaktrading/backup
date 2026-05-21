@@ -7,6 +7,7 @@ from scrapers.snkrdunk_favorites import (
     FAVORITES_URL_CANDIDATES,
     HOME_URL,
     SNKRDUNK_AUTH_COOKIE_NAME,
+    _extract_image_urls,
     normalize_apparel_used_url,
     parse_apparel_used_url,
 )
@@ -92,3 +93,76 @@ class TestConstants:
 
     def test_auth_cookie_name(self):
         assert SNKRDUNK_AUTH_COOKIE_NAME == "auth_session"
+
+
+# --------------------------------------------------------------------------
+# _extract_image_urls
+# --------------------------------------------------------------------------
+class TestExtractImageUrls:
+    def test_instance_image_urls_list_primary(self):
+        # instance.imageUrls (= list) があれば最優先で使う
+        agg = {"primaryMedia": {"imageUrl": "https://cdn/agg.webp"}}
+        instance = {
+            "imageUrls": [
+                "https://cdn/inst-1.jpeg",
+                "https://cdn/inst-2.jpeg",
+                "https://cdn/inst-3.jpeg",
+            ],
+            "primaryPhoto": {"imageUrl": "https://cdn/pp.jpeg"},
+        }
+        urls = _extract_image_urls(agg, instance)
+        assert urls == [
+            "https://cdn/inst-1.jpeg",
+            "https://cdn/inst-2.jpeg",
+            "https://cdn/inst-3.jpeg",
+        ]
+
+    def test_instance_image_urls_filters_non_string(self):
+        # list に str 以外混じり → str だけ採用
+        instance = {"imageUrls": ["https://cdn/1.jpeg", None, 42, "https://cdn/2.jpeg", ""]}
+        assert _extract_image_urls(None, instance) == [
+            "https://cdn/1.jpeg",
+            "https://cdn/2.jpeg",
+        ]
+
+    def test_instance_primary_photo_fallback(self):
+        # imageUrls なし or 空 → primaryPhoto.imageUrl 単体
+        instance = {"primaryPhoto": {"imageUrl": "https://cdn/pp.jpeg"}, "imageUrls": []}
+        urls = _extract_image_urls(None, instance)
+        assert urls == ["https://cdn/pp.jpeg"]
+
+    def test_aggregate_primary_media_when_no_instance(self):
+        # instance なし → aggregate.primaryMedia.imageUrl
+        agg = {"primaryMedia": {"imageUrl": "https://cdn/agg.webp"}}
+        urls = _extract_image_urls(agg, None)
+        assert urls == ["https://cdn/agg.webp"]
+
+    def test_aggregate_primary_media_fallback_when_instance_empty(self):
+        # instance あるが imageUrls / primaryPhoto 両方なし → aggregate を使う
+        agg = {"primaryMedia": {"imageUrl": "https://cdn/agg.webp"}}
+        instance = {"id": 1}  # 画像 field なし
+        urls = _extract_image_urls(agg, instance)
+        assert urls == ["https://cdn/agg.webp"]
+
+    def test_both_none(self):
+        assert _extract_image_urls(None, None) == []
+
+    def test_empty_dicts(self):
+        assert _extract_image_urls({}, {}) == []
+
+    def test_primary_media_non_dict_ignored(self):
+        # primaryMedia が str や list の場合 → ignore (= fail-closed)
+        agg = {"primaryMedia": "https://cdn/raw.jpg"}
+        assert _extract_image_urls(agg, None) == []
+
+    def test_primary_photo_missing_image_url(self):
+        instance = {"primaryPhoto": {"id": 1}}  # imageUrl key なし
+        assert _extract_image_urls(None, instance) == []
+
+    def test_image_urls_not_list_ignored(self):
+        # imageUrls が dict 等 list 以外 → 無視して primaryPhoto fallback
+        instance = {
+            "imageUrls": {"weird": "shape"},
+            "primaryPhoto": {"imageUrl": "https://cdn/pp.jpeg"},
+        }
+        assert _extract_image_urls(None, instance) == ["https://cdn/pp.jpeg"]
