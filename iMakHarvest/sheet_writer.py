@@ -66,9 +66,13 @@ DEFAULT_COLUMN_COUNT = 20
 # - メルカリ通常品: /item/m12345 / /items/m12345 → "m12345" (prefix なし、既存行との互換維持)
 # - メルカリ Shops: /shops/product/<slug22> → "shops:<slug>" (prefix で通常品と衝突回避)
 # - ワークマン公式: /shop/g/g<13桁mpn>/ → "workman:<mpn>"
+# - SNKRDUNK 個別出品: /apparels/<m>/used/<i> → "snkrdunk:<m>/<i>"
+# - SNKRDUNK カード本体ページ: /apparels/<m> → "snkrdunk:<m>"
 _MERCARI_ID_RE = re.compile(r"/items?/(m\d+)", re.IGNORECASE)
 _MERCARI_SHOPS_ID_RE = re.compile(r"/shops/product/([A-Za-z0-9]+)")
 _WORKMAN_MPN_RE = re.compile(r"workman\.jp/shop/g/g(\d{13})", re.IGNORECASE)
+_SNKRDUNK_USED_RE = re.compile(r"snkrdunk\.com/apparels/(\d+)/used/(\d+)", re.IGNORECASE)
+_SNKRDUNK_APPAREL_RE = re.compile(r"snkrdunk\.com/apparels/(\d+)(?:/|$|\?|#)", re.IGNORECASE)
 
 
 def dedupe_key(url: str) -> str:
@@ -78,6 +82,9 @@ def dedupe_key(url: str) -> str:
       (既存スプシ行との互換のため prefix を付けない)
     - mercari Shops (/shops/product/<slug>) → "shops:<slug>"
       (通常品の m\\d+ と prefix で衝突回避)
+    - workman 公式 (/shop/g/g<mpn>/) → "workman:<mpn>"
+    - SNKRDUNK 個別出品 (/apparels/<m>/used/<i>) → "snkrdunk:<m>/<i>"
+    - SNKRDUNK カード本体 (/apparels/<m>) → "snkrdunk:<m>"
     - その他: URL 正規化 (query/fragment/末尾スラッシュ除去) + lowercase
     - 空文字なら "" (空 key は append しない側で弾く)
     """
@@ -98,6 +105,14 @@ def dedupe_key(url: str) -> str:
     m = _WORKMAN_MPN_RE.search(s)
     if m:
         return f"workman:{m.group(1)}"
+    # SNKRDUNK 個別出品 (= /apparels/<m>/used/<i>、より specific なので先)
+    m = _SNKRDUNK_USED_RE.search(s)
+    if m:
+        return f"snkrdunk:{m.group(1)}/{m.group(2)}"
+    # SNKRDUNK カード本体 (= /apparels/<m>、末尾 or query 区切り)
+    m = _SNKRDUNK_APPAREL_RE.search(s)
+    if m:
+        return f"snkrdunk:{m.group(1)}"
     # 他 supplier 暫定対応: query / fragment / 末尾スラッシュを除去
     return s.split("?")[0].split("#")[0].rstrip("/").lower()
 

@@ -21,7 +21,14 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, scrolledtext
 
-from scrapers import amazon_wishlist, mercari_likes, mercari_shops_likes, snkrdunk_official, workman_official
+from scrapers import (
+    amazon_wishlist,
+    mercari_likes,
+    mercari_shops_likes,
+    snkrdunk_favorites,
+    snkrdunk_official,
+    workman_official,
+)
 from sheet_writer import HIGH_SHEET_ID, LISTINGS_GID, LOW_SHEET_ID, write_to_sheet
 from sheet_writer_amazon import write_to_sheet as write_to_sheet_amazon
 from sheet_writer_snkrdunk_aux import (
@@ -121,9 +128,12 @@ SERVICE_DEFS = [
     ("workman", "ワークマン",
      "ワークマン公式商品 URL から商品情報を抽出 (改行区切りで複数 URL 可)",
      True, ""),
-    ("snkrdunk", "SNKRDUNK",
+    ("snkrdunk", "SNKRDUNK 補仕入",
      "既存 OP listing (= ワンピース TCG OP\\d{2}-\\d{3}) に PSA10 補仕入 URL を投入 "
      "(AC-AG 列、出力先 = HIGH スプシ固定)",
+     True, ""),
+    ("snkrdunk_fav", "SNKRDUNK 抽出",
+     "SNKRDUNK のお気に入り商品 (= login 必須) から URL を収集してスプシ A 列に append",
      True, ""),
 ]
 
@@ -325,6 +335,9 @@ class HarvestPanel(tk.Tk):
         if key == "snkrdunk":
             self._dispatch_snkrdunk()
             return
+        if key == "snkrdunk_fav":
+            self._dispatch_snkrdunk_favorites()
+            return
         messagebox.showinfo("未実装", f"{key} は未実装です。")
 
     def _dispatch_mercari(self) -> None:
@@ -432,6 +445,28 @@ class HarvestPanel(tk.Tk):
         threading.Thread(
             target=self._run_amazon_thread,
             args=(normalized_url, sheet_id, gid, label),
+            daemon=True,
+        ).start()
+
+    def _dispatch_snkrdunk_favorites(self) -> None:
+        try:
+            sheet_id, gid, label = self._resolve_sheet()
+        except ValueError as e:
+            messagebox.showerror("スプシ URL エラー", str(e))
+            return
+        if not messagebox.askyesno(
+            "確認",
+            f"SNKRDUNK のお気に入り商品 URL を収集し、\n"
+            f"出力先スプシ「{label}」に追記します。\n\n"
+            f"※ SNKRDUNK login 必須 (= 未 login なら error)。初回は\n"
+            f"   python -m scrapers.snkrdunk_favorites --login\n"
+            f"で手動ログイン後に再実行してください。\n\n"
+            f"実行しますか？",
+        ):
+            return
+        threading.Thread(
+            target=self._run_snkrdunk_favorites_thread,
+            args=(sheet_id, gid, label),
             daemon=True,
         ).start()
 
@@ -687,6 +722,65 @@ class HarvestPanel(tk.Tk):
             messagebox.showinfo("完了",
                                 f"収集 {len(items)} 件 → 新規追加 {result['appended']} 件 "
                                 f"(既出 skip {result['skipped_existing']} 件)")
+        except Exception as e:
+            self._log(f"!!! エラー: {e}")
+            self._set_status(f"失敗: {type(e).__name__}")
+            messagebox.showerror("エラー", str(e))
+        finally:
+            self._running = False
+            self._set_buttons_state(disabled=False)
+
+    def _run_snkrdunk_favorites_thread(self, sheet_id: str, gid: int, label: str) -> None:
+        """SNKRDUNK お気に入り → スプシ append (= メルカリ いいねと同等パターン)."""
+        self._running = True
+        self._set_buttons_state(disabled=True)
+        headless = not self.show_browser_var.get()
+        fetch_detail = self.fetch_detail_var.get()
+
+        self._set_status("SNKRDUNK お気に入り収集中...")
+        self._log("=== SNKRDUNK お気に入り収集 開始 ===")
+        self._log(f"  出力先     : {label} (sheet_id={sheet_id[:14]}.., gid={gid})")
+        self._log(f"  headless   : {headless}")
+        self._log(f"  詳細取得   : {fetch_detail}")
+        try:
+            if fetch_detail:
+                def progress(cur, total, msg):
+                    self._set_status(f"商品詳細取得中... [{cur}/{total}]")
+                    self._log(f"  [{cur}/{total}] {msg}")
+
+                items = snkrdunk_favorites.collect_favorites_with_details(
+                    headless=headless,
+                    progress_callback=progress,
+                )
+            else:
+                urls = snkrdunk_favorites.collect_favorite_urls(headless=headless)
+                # 詳細なし時は url だけ持つ item dict を作る
+                items = [{"url": u} for u in urls]
+            self._log(f"  収集完了   : {len(items)} 件")
+            if not items:
+                self._set_status("収集 0 件、スプシ書込スキップ")
+                messagebox.showwarning(
+                    "収集 0 件",
+                    "SNKRDUNK お気に入りが 1 件も取れませんでした。\n"
+                    "(login 状態 / お気に入り 0 件 / URL pattern 変更 を確認してください)"
+                )
+                return
+            self._set_status(f"スプシ書込中... ({len(items)} 件)")
+            result = write_to_sheet(items, spreadsheet_id=sheet_id, gid=gid)
+            self._log(
+                f"  書込結果   : appended={result['appended']}, "
+                f"skipped_existing={result['skipped_existing']}, "
+                f"input={result['input']}"
+            )
+            self._set_status(
+                f"完了: 新規 {result['appended']} 件 / 既出 skip {result['skipped_existing']} 件"
+            )
+            self._log("=== 完了 ===")
+            messagebox.showinfo(
+                "完了",
+                f"収集 {len(items)} 件 → 新規追加 {result['appended']} 件 "
+                f"(既出 skip {result['skipped_existing']} 件)"
+            )
         except Exception as e:
             self._log(f"!!! エラー: {e}")
             self._set_status(f"失敗: {type(e).__name__}")

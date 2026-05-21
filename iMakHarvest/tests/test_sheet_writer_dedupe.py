@@ -135,6 +135,41 @@ class TestDedupeKey:
         assert workman != shops
         assert workman.startswith("workman:")
 
+    def test_snkrdunk_used_url(self):
+        # SNKRDUNK 個別出品: /apparels/<m>/used/<i> → "snkrdunk:<m>/<i>"
+        assert dedupe_key(
+            "https://snkrdunk.com/apparels/158327/used/45549454"
+        ) == "snkrdunk:158327/45549454"
+
+    def test_snkrdunk_used_url_with_query(self):
+        k1 = dedupe_key("https://snkrdunk.com/apparels/158327/used/45549454?ref=likes")
+        k2 = dedupe_key("https://snkrdunk.com/apparels/158327/used/45549454")
+        assert k1 == k2 == "snkrdunk:158327/45549454"
+
+    def test_snkrdunk_apparel_url_only(self):
+        # 個別 used 部分なし (= カード本体 page) → "snkrdunk:<m>"
+        assert dedupe_key("https://snkrdunk.com/apparels/158327") == "snkrdunk:158327"
+        assert dedupe_key("https://snkrdunk.com/apparels/158327/") == "snkrdunk:158327"
+
+    def test_snkrdunk_does_not_collide(self):
+        snk = dedupe_key("https://snkrdunk.com/apparels/158327/used/45549454")
+        mercari = dedupe_key("https://jp.mercari.com/item/m12345678901")
+        shops = dedupe_key("https://jp.mercari.com/shops/product/abcDEF")
+        workman = dedupe_key("https://workman.jp/shop/g/g2300011882014/")
+        assert snk == "snkrdunk:158327/45549454"
+        assert snk != mercari
+        assert snk != shops
+        assert snk != workman
+        assert snk.startswith("snkrdunk:")
+
+    def test_snkrdunk_used_takes_priority_over_apparel(self):
+        # /used/ が含まれていれば snkrdunk:<m>/<i>、含まれなければ snkrdunk:<m>
+        with_used = dedupe_key("https://snkrdunk.com/apparels/158327/used/45549454")
+        only_apparel = dedupe_key("https://snkrdunk.com/apparels/158327")
+        assert with_used == "snkrdunk:158327/45549454"
+        assert only_apparel == "snkrdunk:158327"
+        assert with_used != only_apparel
+
 
 # --------------------------------------------------------------------------
 # read_existing_dedupe_keys
