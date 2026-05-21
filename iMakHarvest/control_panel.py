@@ -21,9 +21,14 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, scrolledtext
 
-from scrapers import amazon_wishlist, mercari_likes, mercari_shops_likes, workman_official
+from scrapers import amazon_wishlist, mercari_likes, mercari_shops_likes, snkrdunk_official, workman_official
 from sheet_writer import HIGH_SHEET_ID, LISTINGS_GID, LOW_SHEET_ID, write_to_sheet
 from sheet_writer_amazon import write_to_sheet as write_to_sheet_amazon
+from sheet_writer_snkrdunk_aux import (
+    get_listings_worksheet as get_snkrdunk_listings_ws,
+    insert_aux_urls_for_row,
+    open_sheet_by_id as open_snkrdunk_sheet,
+)
 from sheet_writer_workman_official import (
     OFFICIAL_SHEET_ID as WORKMAN_OFFICIAL_SHEET_ID,
     write_to_official_sheet as write_to_workman_official_sheet,
@@ -116,6 +121,10 @@ SERVICE_DEFS = [
     ("workman", "ワークマン",
      "ワークマン公式商品 URL から商品情報を抽出 (改行区切りで複数 URL 可)",
      True, ""),
+    ("snkrdunk", "SNKRDUNK",
+     "既存 OP listing (= ワンピース TCG OP\\d{2}-\\d{3}) に PSA10 補仕入 URL を投入 "
+     "(AC-AG 列、出力先 = HIGH スプシ固定)",
+     True, ""),
 ]
 
 
@@ -168,6 +177,32 @@ class HarvestPanel(tk.Tk):
         tk.Label(wm,
                  text="※ 例: https://workman.jp/shop/g/g2300011882014/  "
                       "(空欄なら「ワークマン」ボタン無効)",
+                 fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
+
+        # SNKRDUNK オプション (PSA10 補仕入 URL 投入)
+        snk = tk.LabelFrame(self, text="SNKRDUNK オプション (PSA10 補仕入 URL 投入)",
+                            padx=10, pady=8, font=("Meiryo UI", 10))
+        snk.pack(fill="x", padx=12, pady=4)
+        self.snkrdunk_dry_run_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(snk,
+                       text="dry-run (= スプシ書込なし、収集 URL を c:/tmp/snkrdunk_dryrun_<ts>.json に出力)",
+                       variable=self.snkrdunk_dry_run_var,
+                       font=("Meiryo UI", 9)).pack(anchor="w")
+        row1 = tk.Frame(snk)
+        row1.pack(fill="x", pady=(4, 0))
+        tk.Label(row1, text="max-rows (空欄=全件):",
+                 font=("Meiryo UI", 9)).pack(side="left")
+        self.snkrdunk_max_rows_var = tk.StringVar()
+        tk.Entry(row1, textvariable=self.snkrdunk_max_rows_var, width=8,
+                 font=("Consolas", 9)).pack(side="left", padx=(4, 16))
+        tk.Label(row1, text="target-row (1 行のみ、空欄=全件、例: 266):",
+                 font=("Meiryo UI", 9)).pack(side="left")
+        self.snkrdunk_target_row_var = tk.StringVar()
+        tk.Entry(row1, textvariable=self.snkrdunk_target_row_var, width=8,
+                 font=("Consolas", 9)).pack(side="left", padx=4)
+        tk.Label(snk,
+                 text="※ 出力先スプシ選択 (HIGH/LOW/任意 URL) は SNKRDUNK では HIGH 固定。"
+                      "1 件あたり 約 60-100 秒 (= Selenium UI 操作 + hydration 待機)。",
                  fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
 
         # 出力先スプシ
@@ -287,6 +322,9 @@ class HarvestPanel(tk.Tk):
         if key == "amazon":
             self._dispatch_amazon()
             return
+        if key == "snkrdunk":
+            self._dispatch_snkrdunk()
+            return
         messagebox.showinfo("未実装", f"{key} は未実装です。")
 
     def _dispatch_mercari(self) -> None:
@@ -394,6 +432,63 @@ class HarvestPanel(tk.Tk):
         threading.Thread(
             target=self._run_amazon_thread,
             args=(normalized_url, sheet_id, gid, label),
+            daemon=True,
+        ).start()
+
+    def _dispatch_snkrdunk(self) -> None:
+        # オプション値の入力検証 (= max-rows / target-row が数値か)
+        max_rows: int | None = None
+        target_row: int | None = None
+        raw_mr = (self.snkrdunk_max_rows_var.get() or "").strip()
+        if raw_mr:
+            try:
+                max_rows = int(raw_mr)
+                if max_rows <= 0:
+                    raise ValueError("max-rows は 1 以上の整数")
+            except ValueError:
+                messagebox.showerror(
+                    "max-rows 不正",
+                    f"max-rows は 1 以上の整数で指定してください (入力値: {raw_mr!r})\n空欄なら全件処理。",
+                )
+                return
+        raw_tr = (self.snkrdunk_target_row_var.get() or "").strip()
+        if raw_tr:
+            try:
+                target_row = int(raw_tr)
+                if target_row <= 1:
+                    raise ValueError("target-row は 2 以上の整数 (1=ヘッダー)")
+            except ValueError:
+                messagebox.showerror(
+                    "target-row 不正",
+                    f"target-row は 2 以上の整数で指定してください (入力値: {raw_tr!r})\n"
+                    "空欄なら全件処理。1 はヘッダー行で対象外。",
+                )
+                return
+
+        dry_run = self.snkrdunk_dry_run_var.get()
+        mode = "dry-run (= 書込なし)" if dry_run else "本投入 (= AC-AG 列書込)"
+        scope_parts = []
+        if target_row is not None:
+            scope_parts.append(f"target-row={target_row} 1 行のみ")
+        elif max_rows is not None:
+            scope_parts.append(f"先頭 {max_rows} 件")
+        else:
+            scope_parts.append("HIGH 全行 (OP card_id 抽出可 + 出品済)")
+        scope_txt = ", ".join(scope_parts)
+
+        if not messagebox.askyesno(
+            "確認",
+            f"SNKRDUNK PSA10 補仕入 URL 投入を実行します。\n\n"
+            f"モード: {mode}\n"
+            f"対象  : {scope_txt}\n"
+            f"出力先: HIGH 商品管理シート (= sheet_id 末尾 ..2J10HCjk)\n\n"
+            f"※ Selenium 起動、1 件約 60-100 秒。GUI は別 thread で進捗を流します。\n\n"
+            f"実行しますか？",
+        ):
+            return
+        threading.Thread(
+            target=self._run_snkrdunk_thread,
+            args=(max_rows, target_row, dry_run),
             daemon=True,
         ).start()
 
@@ -597,6 +692,153 @@ class HarvestPanel(tk.Tk):
             self._set_status(f"失敗: {type(e).__name__}")
             messagebox.showerror("エラー", str(e))
         finally:
+            self._running = False
+            self._set_buttons_state(disabled=False)
+
+    def _run_snkrdunk_thread(
+        self,
+        max_rows: int | None,
+        target_row: int | None,
+        dry_run: bool,
+    ) -> None:
+        """SNKRDUNK PSA10 補仕入 URL 投入 thread.
+
+        既存 run_harvest_snkrdunk.py の main を踏襲、GUI log/status に流すよう書き換え。
+        """
+        import json as _json
+        import os as _os
+        from datetime import datetime as _dt
+
+        self._running = True
+        self._set_buttons_state(disabled=True)
+        headless = not self.show_browser_var.get()
+
+        self._set_status("SNKRDUNK PSA10 抽出開始...")
+        self._log("=== SNKRDUNK PSA10 補仕入 URL 投入 開始 ===")
+        self._log(f"  モード     : {'dry-run' if dry_run else '本投入'}")
+        self._log(f"  max-rows   : {max_rows if max_rows is not None else '全件'}")
+        self._log(f"  target-row : {target_row if target_row is not None else '全件'}")
+        self._log(f"  headless   : {headless}")
+        self._log(f"  投入先     : HIGH 商品管理シート (= AC-AG 列、dry-run なら書込なし)")
+
+        driver = None
+        try:
+            # 既存 sheet_writer の列定数を再利用 (= COL_EBAY_ITEM_ID=2, COL_TITLE=3)
+            from sheet_writer import COL_EBAY_ITEM_ID, COL_TITLE
+
+            self._set_status("HIGH スプシ全行 fetch 中...")
+            sh = open_snkrdunk_sheet(HIGH_SHEET_ID)
+            ws = get_snkrdunk_listings_ws(sh, gid=LISTINGS_GID)
+            all_values = ws.get_all_values()
+            self._log(f"  全行数     : {len(all_values)} (ヘッダー含む)")
+
+            # 対象行選定 (= run_harvest_snkrdunk._select_target_rows と同等)
+            targets: list[tuple[int, str, str]] = []
+            for idx, row in enumerate(all_values, start=1):
+                if idx == 1:
+                    continue
+                if target_row is not None and idx != target_row:
+                    continue
+                title = (row[COL_TITLE - 1] if len(row) >= COL_TITLE else "") or ""
+                item_id = (row[COL_EBAY_ITEM_ID - 1] if len(row) >= COL_EBAY_ITEM_ID else "") or ""
+                title = title.strip()
+                item_id = item_id.strip()
+                if not item_id or not title:
+                    continue
+                card_id = snkrdunk_official.extract_op_card_id(title)
+                if not card_id:
+                    continue
+                targets.append((idx, card_id, title))
+                if max_rows is not None and len(targets) >= max_rows:
+                    break
+
+            self._log(f"  対象行     : {len(targets)} 件")
+            if not targets:
+                self._set_status("対象 0 件、終了")
+                messagebox.showinfo("完了", "対象 0 件で終了しました (= OP card_id 抽出可 + 出品済 行なし)。")
+                return
+
+            self._set_status("Selenium 起動中...")
+            driver = snkrdunk_official.create_driver(headless=headless)
+
+            results: list[dict] = []
+            total_inserted = 0
+            for i, (row_idx, card_id, title) in enumerate(targets, start=1):
+                self._set_status(f"取得中... [{i}/{len(targets)}] row={row_idx} {card_id}")
+                self._log(f"  [{i}/{len(targets)}] row={row_idx} card={card_id!r}")
+                self._log(f"           title: {title[:80]}")
+
+                info = snkrdunk_official.find_psa10_urls_for_card(card_id, driver, max_results=5)
+                self._log(
+                    f"           model_id={info['model_id']!r}, "
+                    f"PSA10 candidates={info['psa10_count']}, "
+                    f"search_failed={info['search_failed']}"
+                )
+                for url in info["psa10_urls"]:
+                    self._log(f"             → {url}")
+
+                row_result = {
+                    "row_index": row_idx,
+                    "card_id": card_id,
+                    "title": title,
+                    "snkrdunk": info,
+                    "insertion": None,
+                }
+
+                if dry_run:
+                    results.append(row_result)
+                    continue
+
+                if not info["psa10_urls"]:
+                    row_result["insertion"] = {"inserted": 0, "reason": "no PSA10 urls"}
+                    results.append(row_result)
+                    continue
+
+                row_values = ws.row_values(row_idx)
+                ins = insert_aux_urls_for_row(ws, row_idx, row_values, info["psa10_urls"])
+                self._log(
+                    f"           AC-AG 投入: inserted={ins['inserted']}, "
+                    f"skipped_existing={ins['skipped_existing']}, "
+                    f"skipped_overflow={ins['skipped_overflow']}"
+                )
+                for col_letter, url in ins["plans"]:
+                    self._log(f"             {col_letter}{row_idx} = {url}")
+                row_result["insertion"] = ins
+                total_inserted += ins["inserted"]
+                results.append(row_result)
+
+            self._log("=== 完了 ===")
+            if dry_run:
+                ts = _dt.now().strftime("%Y-%m-%dT%H-%M-%S")
+                out_dir = r"c:\tmp"
+                _os.makedirs(out_dir, exist_ok=True)
+                out_path = _os.path.join(out_dir, f"snkrdunk_dryrun_{ts}.json")
+                with open(out_path, "w", encoding="utf-8") as f:
+                    _json.dump(results, f, ensure_ascii=False, indent=2)
+                self._log(f"dry-run 結果 JSON: {out_path}")
+                self._set_status(f"dry-run 完了: {len(results)} 行収集 → {out_path}")
+                messagebox.showinfo(
+                    "完了 (dry-run)",
+                    f"dry-run 完了: {len(results)} 行収集\n\nJSON 出力:\n{out_path}",
+                )
+            else:
+                self._set_status(f"完了: スプシ投入 {total_inserted} セル ({len(results)} 行処理)")
+                messagebox.showinfo(
+                    "完了",
+                    f"SNKRDUNK PSA10 投入完了\n\n"
+                    f"処理行数: {len(results)}\n"
+                    f"投入セル: {total_inserted}",
+                )
+        except Exception as e:
+            self._log(f"!!! エラー: {e}")
+            self._set_status(f"失敗: {type(e).__name__}")
+            messagebox.showerror("エラー", str(e))
+        finally:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
             self._running = False
             self._set_buttons_state(disabled=False)
 
