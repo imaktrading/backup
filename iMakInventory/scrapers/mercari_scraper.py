@@ -165,7 +165,9 @@ def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
     if headless:
         options.add_argument("--headless=new")
 
-    driver = uc.Chrome(options=options)
+    # 2026-05-21: uc が v149 driver を取得するが Chrome 本体が v148 のまま
+    # → version_main=148 強制で v148 driver 取得指示
+    driver = uc.Chrome(options=options, version_main=148)
     return driver
 
 

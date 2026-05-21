@@ -201,7 +201,8 @@ def create_amazon_driver(headless: bool = True, use_login_profile: bool = True):
     if headless:
         options.add_argument("--headless=new")
 
-    return uc.Chrome(options=options)
+    # 2026-05-21: Chrome 本体 v148 と uc default driver v149 の mismatch 対策
+    return uc.Chrome(options=options, version_main=148)
 
 
 def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optional[dict]:
