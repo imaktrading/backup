@@ -152,12 +152,61 @@ class HarvestPanel(tk.Tk):
     # build
     # ----------------------------------------------------------------
     def _build_ui(self) -> None:
+        # 下部 (= ログ + ステータス) を先に side="bottom" で確保、
+        # 残り中央領域を Canvas + Scrollbar で scrollable にする。
+
+        # === ログ (= 最下、ScrolledText 内蔵 scroll、固定) ===
+        log_frame = tk.LabelFrame(self, text="ログ", padx=4, pady=4, font=("Meiryo UI", 10))
+        log_frame.pack(side="bottom", fill="both", expand=False, padx=12, pady=(4, 12))
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=10,
+                                                    font=("Consolas", 9))
+        self.log_text.pack(fill="both", expand=True)
+        self.log_text.configure(state="disabled")
+
+        # === ステータス (= ログの直上、固定) ===
+        status_frame = tk.Frame(self)
+        status_frame.pack(side="bottom", fill="x", padx=12, pady=(0, 4))
+        self.status_var = tk.StringVar(value="ステータス: 待機中")
+        tk.Label(status_frame, textvariable=self.status_var, anchor="w",
+                 font=("Meiryo UI", 10, "bold")).pack(side="left", fill="x", expand=True)
+
+        # === 上部 scrollable container ===
+        scroll_container = tk.Frame(self)
+        scroll_container.pack(side="top", fill="both", expand=True)
+        canvas = tk.Canvas(scroll_container, highlightthickness=0, borderwidth=0)
+        vbar = tk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+        vbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # scrollable Frame (= 既存 widgets の親、self の代わり)
+        scroll_frame = tk.Frame(canvas)
+        canvas_window = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+
+        def _on_frame_configure(_e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        scroll_frame.bind("<Configure>", _on_frame_configure)
+
+        def _on_canvas_configure(e):
+            # inner Frame を canvas 幅にフィット (= 水平 scroll は出さない)
+            canvas.itemconfig(canvas_window, width=e.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(e):
+            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        # mainloop 中の全ての MouseWheel イベントを canvas に流す
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # 既存 _scroll_frame を後続の widgets の親として使う
+        self._scroll_frame = scroll_frame
+        parent = scroll_frame
+
         # ヘッダー
-        header = tk.Label(self, text="抽出", font=("Meiryo UI", 14, "bold"), anchor="w")
+        header = tk.Label(parent, text="抽出", font=("Meiryo UI", 14, "bold"), anchor="w")
         header.pack(fill="x", padx=12, pady=(10, 4))
 
         # サービス選択
-        svc = tk.LabelFrame(self, text="サービスを選択してね", padx=10, pady=8,
+        svc = tk.LabelFrame(parent, text="サービスを選択してね", padx=10, pady=8,
                             font=("Meiryo UI", 10))
         svc.pack(fill="x", padx=12, pady=4)
         self._service_buttons: dict[str, tk.Button] = {}
@@ -165,7 +214,7 @@ class HarvestPanel(tk.Tk):
             self._service_buttons[key] = self._make_service_row(svc, key, label, desc, enabled, note)
 
         # Amazon ウィッシュリスト URL 入力欄
-        amzn = tk.LabelFrame(self, text="Amazon ウィッシュリスト URL (公開リスト)",
+        amzn = tk.LabelFrame(parent, text="Amazon ウィッシュリスト URL (公開リスト)",
                              padx=10, pady=8, font=("Meiryo UI", 10))
         amzn.pack(fill="x", padx=12, pady=4)
         self.amazon_url_var = tk.StringVar(value=_load_amazon_url())
@@ -178,7 +227,7 @@ class HarvestPanel(tk.Tk):
                  fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
 
         # ワークマン公式商品 URL 入力欄 (multiline、改行区切りで複数 URL)
-        wm = tk.LabelFrame(self, text="ワークマン公式商品 URL (1 行 1 URL、改行区切りで複数可)",
+        wm = tk.LabelFrame(parent, text="ワークマン公式商品 URL (1 行 1 URL、改行区切りで複数可)",
                            padx=10, pady=8, font=("Meiryo UI", 10))
         wm.pack(fill="x", padx=12, pady=4)
         self.workman_urls_text = scrolledtext.ScrolledText(wm, height=4,
@@ -190,7 +239,7 @@ class HarvestPanel(tk.Tk):
                  fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
 
         # SNKRDUNK オプション (PSA10 補仕入 URL 投入)
-        snk = tk.LabelFrame(self, text="SNKRDUNK オプション (PSA10 補仕入 URL 投入)",
+        snk = tk.LabelFrame(parent, text="SNKRDUNK オプション (PSA10 補仕入 URL 投入)",
                             padx=10, pady=8, font=("Meiryo UI", 10))
         snk.pack(fill="x", padx=12, pady=4)
         self.snkrdunk_dry_run_var = tk.BooleanVar(value=False)
@@ -216,7 +265,7 @@ class HarvestPanel(tk.Tk):
                  fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
 
         # 出力先スプシ
-        out = tk.LabelFrame(self, text="出力先スプシ", padx=10, pady=8, font=("Meiryo UI", 10))
+        out = tk.LabelFrame(parent, text="出力先スプシ", padx=10, pady=8, font=("Meiryo UI", 10))
         out.pack(fill="x", padx=12, pady=4)
 
         self.sheet_var = tk.StringVar(value="high")
@@ -243,7 +292,7 @@ class HarvestPanel(tk.Tk):
         hint.grid(row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
         # オプション
-        opt = tk.LabelFrame(self, text="オプション", padx=10, pady=8, font=("Meiryo UI", 10))
+        opt = tk.LabelFrame(parent, text="オプション", padx=10, pady=8, font=("Meiryo UI", 10))
         opt.pack(fill="x", padx=12, pady=4)
         # 既定 ON: Mercari は headless Chrome を bot 検出で弾く (2026-04-30 確認)
         # → 画面表示モードでないと /mypage/likes が「未対応ブラウザ」フォールバックされる
@@ -265,20 +314,7 @@ class HarvestPanel(tk.Tk):
                        variable=self.exclude_sold_var,
                        font=("Meiryo UI", 10)).pack(anchor="w")
 
-        # ステータス
-        status_frame = tk.Frame(self)
-        status_frame.pack(fill="x", padx=12, pady=(8, 4))
-        self.status_var = tk.StringVar(value="ステータス: 待機中")
-        tk.Label(status_frame, textvariable=self.status_var, anchor="w",
-                 font=("Meiryo UI", 10, "bold")).pack(side="left", fill="x", expand=True)
-
-        # ログ
-        log_frame = tk.LabelFrame(self, text="ログ", padx=4, pady=4, font=("Meiryo UI", 10))
-        log_frame.pack(fill="both", expand=True, padx=12, pady=(4, 12))
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=16,
-                                                    font=("Consolas", 9))
-        self.log_text.pack(fill="both", expand=True)
-        self.log_text.configure(state="disabled")
+        # ステータス + ログ は _build_ui 冒頭で side="bottom" で既に確保済
 
     def _make_service_row(self, parent: tk.Widget, key: str, label: str, desc: str,
                           enabled: bool, scope_note: str) -> tk.Button:
