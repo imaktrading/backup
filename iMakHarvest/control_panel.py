@@ -781,6 +781,7 @@ class HarvestPanel(tk.Tk):
         fetch_detail = self.fetch_detail_var.get()
 
         with_aux = self.snkrdunk_fav_with_aux_var.get()
+        exclude_sold = self.exclude_sold_var.get()
 
         self._set_status("SNKRDUNK お気に入り収集中...")
         self._log("=== SNKRDUNK お気に入り収集 開始 ===")
@@ -788,6 +789,7 @@ class HarvestPanel(tk.Tk):
         self._log(f"  headless   : {headless}")
         self._log(f"  詳細取得   : {fetch_detail}")
         self._log(f"  補仕入連携 : {with_aux} (= 同 card_id PSA10 を AC-AG 列に併せて投入)")
+        self._log(f"  SOLD除外   : {exclude_sold} (= API status != 0 を skip、メルカリと同仕様)")
         try:
             if fetch_detail:
                 def progress(cur, total, msg):
@@ -798,6 +800,7 @@ class HarvestPanel(tk.Tk):
                     headless=headless,
                     progress_callback=progress,
                     enable_auxiliary=with_aux,
+                    exclude_sold=exclude_sold,
                 )
             else:
                 urls = snkrdunk_favorites.collect_favorite_urls(headless=headless)

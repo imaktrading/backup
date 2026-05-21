@@ -335,9 +335,13 @@ def _extract_image_urls(agg: Optional[dict], instance: Optional[dict]) -> list[s
 
 
 def _build_item_dict(model_id: int, instance_id: int) -> Optional[dict]:
-    """API 2 つで title / price / image / condition を取得して item dict にまとめる.
+    """API 2 つで title / price / image / condition / in_stock を取得して item dict にまとめる.
 
     aggregate 取得失敗 (= 404 等) なら None。
+    in_stock の値:
+      - True:  instance.status == 0 (= 出品中)
+      - False: instance.status != 0 (= 売切等、status が int で 0 以外)
+      - None:  instance 取得失敗 or status field 欠落 (= 不明、メルカリと同様 安全側で含める)
     """
     agg = fetch_apparel_aggregate(model_id)
     if not agg:
@@ -347,9 +351,13 @@ def _build_item_dict(model_id: int, instance_id: int) -> Optional[dict]:
     title = (agg.get("name") or agg.get("localizedName") or "").strip()
     price = None
     condition = ""
+    in_stock: Optional[bool] = None
     if instance:
         price = instance.get("price")
         condition = (instance.get("displayShortConditionTitle") or "").strip()
+        status = instance.get("status")
+        if isinstance(status, int):
+            in_stock = (status == 0)
     image_urls = _extract_image_urls(agg, instance)
 
     return {
@@ -361,6 +369,7 @@ def _build_item_dict(model_id: int, instance_id: int) -> Optional[dict]:
         "image_urls": image_urls,
         "condition": condition,
         "description": "",  # SNKRDUNK 個別出品に説明欄なし
+        "in_stock": in_stock,
     }
 
 
@@ -373,6 +382,7 @@ def collect_favorites_with_details(
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
     enable_auxiliary: bool = False,
     aux_max_per_item: int = 5,
+    exclude_sold: bool = True,
 ) -> list[dict]:
     """お気に入り URL + 詳細 (title/price/image/condition) を取得.
 
@@ -385,6 +395,8 @@ def collect_favorites_with_details(
             - 結果は item dict の "auxiliary_urls" key に list[str] で格納
               (= sheet_writer 経由で AC-AG 列に投入される運用)
         aux_max_per_item: 補仕入 1 item あたりの最大件数 (= AC-AG 5 列なので default 5)
+        exclude_sold: True で SOLD 商品 (= in_stock=False) を除外
+            (メルカリと同パターン、in_stock=None は安全側で含める)
 
     progress_callback(cur, total, msg): GUI 進捗用 (省略可).
     """
@@ -413,6 +425,9 @@ def collect_favorites_with_details(
                 progress_callback(i, total, url)
             d = _build_item_dict(model_id, instance_id)
             if not d:
+                continue
+            # SOLD 除外 (= メルカリと同パターン、in_stock=None は安全側で含める)
+            if exclude_sold and d.get("in_stock") is False:
                 continue
             if enable_auxiliary:
                 d["auxiliary_urls"] = _collect_auxiliary_for_item(
@@ -482,6 +497,8 @@ if __name__ == "__main__":
     ap.add_argument("--with-aux", action="store_true",
                     help="補仕入連携 ON (= 各お気に入り item に同 card_id PSA10 URL list を auxiliary_urls に追加)")
     ap.add_argument("--aux-max", type=int, default=5, help="補仕入 1 item あたり最大件数 (default 5)")
+    ap.add_argument("--no-exclude-sold", dest="exclude_sold", action="store_false", default=True,
+                    help="SOLD 商品も含める (default は SOLD 除外、メルカリと同仕様)")
     args = ap.parse_args()
 
     if args.login:
@@ -510,6 +527,7 @@ if __name__ == "__main__":
         progress_callback=lambda i, t, u: print(f"  [{i}/{t}] {u}"),
         enable_auxiliary=args.with_aux,
         aux_max_per_item=args.aux_max,
+        exclude_sold=args.exclude_sold,
     )
     json.dump(items, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")

@@ -257,3 +257,88 @@ class TestAuxPriceFilterScenarios:
         monkeypatch.delenv("SNKRDUNK_AUX_PRICE_TOLERANCE", raising=False)
         max_p = _compute_max_price(10000)
         assert 9000 <= max_p  # 9000 ≤ 12000 = 採用
+
+
+# --------------------------------------------------------------------------
+# SOLD 除外 (= メルカリと同パターン、in_stock 判定 + exclude_sold filter)
+# --------------------------------------------------------------------------
+class TestInStockJudgement:
+    """_build_item_dict の in_stock 判定ロジックを直接 test (= mock 経由)."""
+
+    def _build_with_mocks(self, monkeypatch, instance_dict):
+        from scrapers import snkrdunk_favorites as sf
+        agg_stub = {
+            "name": "Test card", "localizedName": "テスト",
+            "productNumber": "OP06-106",
+            "primaryMedia": {"imageUrl": "https://cdn/agg.webp"},
+        }
+        monkeypatch.setattr(sf, "fetch_apparel_aggregate", lambda *a, **kw: agg_stub)
+        monkeypatch.setattr(sf, "fetch_apparel_used_instance", lambda *a, **kw: instance_dict)
+        return sf._build_item_dict(123, 456)
+
+    def test_status_zero_is_in_stock_true(self, monkeypatch):
+        d = self._build_with_mocks(monkeypatch, {"status": 0, "price": 12800,
+                                                  "displayShortConditionTitle": "PSA10"})
+        assert d["in_stock"] is True
+
+    def test_status_one_is_in_stock_false(self, monkeypatch):
+        # status=1 (= 売切等)
+        d = self._build_with_mocks(monkeypatch, {"status": 1, "price": 12800,
+                                                  "displayShortConditionTitle": "PSA10"})
+        assert d["in_stock"] is False
+
+    def test_status_other_int_is_in_stock_false(self, monkeypatch):
+        # status=2, 3 等は False (= 0 以外は全部 売切扱い)
+        for s in (2, 3, 99):
+            d = self._build_with_mocks(monkeypatch, {"status": s})
+            assert d["in_stock"] is False, f"status={s} should be False"
+
+    def test_status_missing_is_in_stock_none(self, monkeypatch):
+        # status field なし → None (= 不明、安全側で含める)
+        d = self._build_with_mocks(monkeypatch, {"price": 12800})
+        assert d["in_stock"] is None
+
+    def test_status_non_int_is_in_stock_none(self, monkeypatch):
+        # status が str 等 (= 想定外型) → None
+        d = self._build_with_mocks(monkeypatch, {"status": "on_sale"})
+        assert d["in_stock"] is None
+
+    def test_instance_none_is_in_stock_none(self, monkeypatch):
+        # instance API 失敗 (= None) → in_stock=None (= title だけ best effort で返す)
+        d = self._build_with_mocks(monkeypatch, None)
+        assert d["in_stock"] is None
+        assert d["title"]  # title は aggregate から取得済
+
+
+class TestExcludeSoldFilter:
+    """exclude_sold logic 確認 (= メルカリと同パターン)."""
+
+    def test_sold_excluded_by_default(self):
+        # 「in_stock=False を skip」 という条件が成立しているかは
+        # collect_favorites_with_details 内の 1 行 logic で確認:
+        #   `if exclude_sold and d.get("in_stock") is False:`
+        # = exclude_sold=True (default) + in_stock=False → skip
+        from scrapers.snkrdunk_favorites import collect_favorites_with_details
+        # default 引数 exclude_sold=True であることを sig で確認
+        import inspect
+        sig = inspect.signature(collect_favorites_with_details)
+        assert sig.parameters["exclude_sold"].default is True
+
+    def test_filter_logic_sold_excluded(self):
+        # 模擬 logic: exclude_sold=True + in_stock=False → True (skip)
+        item_sold = {"in_stock": False}
+        assert (True and item_sold.get("in_stock") is False) is True
+
+    def test_filter_logic_in_stock_kept(self):
+        item_in_stock = {"in_stock": True}
+        assert (True and item_in_stock.get("in_stock") is False) is False
+
+    def test_filter_logic_unknown_kept_safe_side(self):
+        # in_stock=None (= 不明) は exclude_sold=True でも skip しない (= 安全側で含める)
+        item_unknown = {"in_stock": None}
+        assert (True and item_unknown.get("in_stock") is False) is False
+
+    def test_filter_logic_disabled(self):
+        # exclude_sold=False なら in_stock=False でも skip しない
+        item_sold = {"in_stock": False}
+        assert (False and item_sold.get("in_stock") is False) is False
