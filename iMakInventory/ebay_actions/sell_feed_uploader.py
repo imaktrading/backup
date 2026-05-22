@@ -97,6 +97,36 @@ CHROMIUM_PORTABLE_VERSION = 136   # chromep.exe 136.0.7103.93 同梱
 TRABAJO_CHROMEDRIVER_PATH = r"C:\トラバホセット\BoostListing（出品・在庫管理一体型ツール）\BoostListing\BoostListing\dll\chromedriver.exe"   # v136.0.7103.92
 
 
+def _cleanup_uc_patched_driver_cache() -> bool:
+    """undetected_chromedriver の patched driver cache を削除.
+
+    2026-05-22 事故対策: uc が自動 download した v149 driver (= Chrome 本体追従)
+    が cache 残ってると、明示指定の trabajo chromedriver v136 と内部的に衝突して
+    "cannot connect to chrome" エラーになる。
+    cycle ごとに毎回 cache を破棄して strict に明示指定 driver のみ使う。
+    """
+    import shutil  # noqa: PLC0415
+    cache_dir = os.path.join(
+        os.environ.get("APPDATA", ""), "undetected_chromedriver"
+    )
+    # Microsoft Store Python の場合 APPDATA が Packages 配下にリダイレクトされる
+    if not os.path.exists(cache_dir):
+        alt = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            "Packages\\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0",
+            "LocalCache\\Roaming\\undetected_chromedriver"
+        )
+        if os.path.exists(alt):
+            cache_dir = alt
+    if os.path.exists(cache_dir):
+        try:
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            return True
+        except Exception:
+            return False
+    return False
+
+
 def _cleanup_stale_chrome_locks(profile_dir: str) -> int:
     """profile dir の stale lock 系ファイルを削除 (chrome 異常終了の残骸).
 
@@ -154,9 +184,12 @@ def create_ebay_driver(headless: bool = False, use_profile: bool = True):
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=en-US")
     options.add_argument("--start-maximized")  # 最小化禁止 (Selenium が拒否)
+    # 2026-05-22: uc cache の v149 driver と trabajo v136 driver の衝突対策
+    if _cleanup_uc_patched_driver_cache():
+        print(f"  [INFO] uc patched driver cache 削除")
+
     if use_profile:
         os.makedirs(EBAY_CHROME_PROFILE_DIR, exist_ok=True)
-        # 異常終了後の stale lock を起動前に削除 (= chrome not reachable 回避)
         removed = _cleanup_stale_chrome_locks(EBAY_CHROME_PROFILE_DIR)
         if removed > 0:
             print(f"  [INFO] stale chrome lock 削除: {removed} 件")
