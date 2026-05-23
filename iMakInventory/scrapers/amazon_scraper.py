@@ -120,22 +120,67 @@ def _extract_name(html: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+_AMAZON_PRICE_NOISE_KEYWORDS = (
+    "無料体験", "Audible", "Kindle Unlimited", "Prime Video",
+    "30日間", "初月無料", "サブスクリプション", "定期おトク便",
+)
+
+
+def _amazon_extract_from_text(txt: str) -> Optional[int]:
+    """element text から amazon price 抽出 (= trabajo logic 流用).
+
+    trabajo logic 反映 (HQ 回答 2026-05-23):
+    1. 「無料体験」「Audible」等 ノイズ keyword 含む text は skip
+    2. range 表記 "¥1,000 - ¥2,000" / "1000-2000" は **後者採用**
+       (= 一般に「from-to」表記で to を商品本体価格と扱う前提)
+    3. ¥ prefix 必須 (= PRICE_RE)
+    """
+    if not txt:
+        return None
+    # ノイズ keyword skip
+    for kw in _AMAZON_PRICE_NOISE_KEYWORDS:
+        if kw in txt:
+            return None
+    # range 後者採用: "¥1,000 - ¥2,000" → "¥2,000" 部分のみ評価
+    if "-" in txt or "ー" in txt or "〜" in txt:
+        # 区切り文字で split、最後の片を採用
+        for sep in ("-", "ー", "〜"):
+            if sep in txt:
+                txt = txt.split(sep)[-1].strip()
+                break
+    m = PRICE_RE.search(txt)
+    if not m:
+        return None
+    raw = m.group(1) or m.group(2)
+    try:
+        return int(raw.replace(",", ""))
+    except (ValueError, AttributeError):
+        return None
+
+
 def _extract_price_jpy(html: str) -> Optional[int]:
     """HTML から価格 (¥) を抽出.
 
-    2026-05-23 改修: 旧仕様は PRICE_RE.search(html) で「HTML 全体最初の ¥XXX」を
-    採用していたが、amazon は関連商品 / バンドル / 配送料等の多数の ¥ が並ぶ
-    ため、最初の数字が商品本体価格とは限らず誤値多発 (Takaaki さん指摘 3 件)。
+    2026-05-23 改修 (HQ 回答 trabajo logic 反映):
+    旧仕様 = HTML 全体最初の ¥XXX、関連商品の値拾う事故多発 (Takaaki さん指摘 3 件)。
 
-    改修方針: BeautifulSoup + amazon 標準 price selector で商品本体価格を pinpoint。
+    新仕様 = BS4 で商品本体価格 selector を pinpoint + trabajo の noise skip /
+    range 処理を text 抽出層に追加 (= trabajo StockChecker.cs:159-238 反映)。
+
     selector 優先順位 (上から試行、最初に取れた値を採用):
-      1. #corePriceDisplay_desktop_feature_div .a-price .a-offscreen
-         (= 現行 amazon page の main price box)
-      2. #corePrice_feature_div .a-price .a-offscreen
-         (= 別 layout の main price box)
-      3. #priceblock_ourprice / #priceblock_dealprice / #priceblock_saleprice
-         (= 旧 layout)
-      4. fallback: PRICE_RE.search(html) (= 旧仕様、最後の手段)
+      1. #priceblock_ourprice                                        (旧 Amazon)
+      2. #buyNewSection                                              (新品 buy box)
+      3. #unqualified-buybox-olp .a-color-price                      (= unqualified)
+      4. #corePrice_feature_div span.a-price span.a-offscreen        (= 現行 main)
+      5. #priceblock_dealprice                                       (= deal)
+      6. #price_inside_buybox                                        (= old buy box)
+      7. #newBuyBoxPrice                                             (= new buy box)
+      8. .a-declarative .a-size-base.a-color-price                   (= declarative)
+      9. #corePriceDisplay_desktop_feature_div span.aok-offscreen    (= 旧 selector)
+      10. #priceblock_saleprice                                      (= sale)
+    各 selector の text には _amazon_extract_from_text() で noise skip + range 処理。
+
+    fallback: PRICE_RE.search(html) (= 旧仕様、最後の手段)
     """
     try:
         from bs4 import BeautifulSoup  # noqa: PLC0415
@@ -145,26 +190,26 @@ def _extract_price_jpy(html: str) -> Optional[int]:
     if BeautifulSoup is not None:
         try:
             soup = BeautifulSoup(html, "html.parser")
+            # trabajo 8 段階 + 旧版を統合した 10 段階 fallback
             selectors = [
-                "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
-                "#corePrice_feature_div .a-price .a-offscreen",
                 "#priceblock_ourprice",
+                "#buyNewSection",
+                "#unqualified-buybox-olp .a-color-price",
+                "#corePrice_feature_div span.a-price span.a-offscreen",
                 "#priceblock_dealprice",
+                "#price_inside_buybox",
+                "#newBuyBoxPrice",
+                ".a-declarative .a-size-base.a-color-price",
+                "#corePriceDisplay_desktop_feature_div span.aok-offscreen",
+                "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
                 "#priceblock_saleprice",
             ]
             for sel in selectors:
-                el = soup.select_one(sel)
-                if el is None:
-                    continue
-                txt = el.get_text(strip=True)
-                m = PRICE_RE.search(txt)
-                if not m:
-                    continue
-                raw = m.group(1) or m.group(2)
-                try:
-                    return int(raw.replace(",", ""))
-                except (ValueError, AttributeError):
-                    continue
+                for el in soup.select(sel):
+                    txt = el.get_text(strip=True)
+                    val = _amazon_extract_from_text(txt)
+                    if val is not None:
+                        return val
         except Exception:
             pass  # fallback to regex
 
