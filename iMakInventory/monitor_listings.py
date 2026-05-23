@@ -517,14 +517,17 @@ def process_sheet(
         price_jpy = r.get("price_jpy")  # None の場合 update dict には乗せない (= N 列触らない)
         prev_n = r.get("current_n_jpy_str", "")  # AH 列用 (= read 時の N 列値)
 
-        # 2026-05-23 異常値ガード: 旧 N と比較して ±50% 以上乖離なら採用せず (Revise への悪影響防止)
-        # scraper 誤値 (= amazon の関連商品価格を拾った等) で N 列が大幅変動するのを block
+        # 2026-05-23 異常値ガード (Gemini 提案の非対称固定ルール):
+        # 旧 N と比較して下方向 0.5x 未満 (= 半額以下) or 上方向 3x 以上 (= 3 倍以上)
+        # → 採用せず N 列前値維持。
+        # 非対称理由: 下方向は値下げで 50% までは普通、上方向はプレミア化で 2-3 倍は許容、
+        # それ以上の乖離は scraper 誤値 (関連商品拾った等) の確度高い。
         if price_jpy is not None and prev_n:
             try:
                 _prev_int = int(re.sub(r"[^\d]", "", prev_n))
                 if _prev_int > 0:
                     _ratio = price_jpy / _prev_int
-                    if _ratio < 0.5 or _ratio > 1.5:
+                    if _ratio < 0.5 or _ratio >= 3.0:
                         log(f"  [!] 価格 異常値 reject: row{r['row_index']} "
                             f"prev={_prev_int} new={price_jpy} ratio={_ratio:.2f} url={r['url'][:50]}")
                         price_outliers.append({
