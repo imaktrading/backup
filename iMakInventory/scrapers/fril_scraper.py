@@ -102,7 +102,55 @@ def _extract_name(html: str) -> str:
 
 
 def _extract_price_jpy(html: str) -> Optional[int]:
-    """HTML から価格抽出 (商品価格 ¥xxx)."""
+    """HTML から価格抽出.
+
+    2026-05-23 改修: 旧仕様は ¥XXX prefix の最初の数字を採用していたが、fril の
+    現 HTML には `¥XXX` 形式 text が含まれず、JSON-LD `offers.price` のみが
+    商品価格を保持している (Takaaki さん指摘 2 件、N 列が古い値で固定)。
+
+    改修方針:
+      1. JSON-LD `<script type="application/ld+json">` 内の Product.offers.price
+      2. fallback: HTML 内 `"price":XXX` (= JSON-embedded)
+      3. fallback: ¥XXX prefix の最初の数字 (= 旧仕様、最後の手段)
+    """
+    # 1. JSON-LD parse
+    try:
+        import json  # noqa: PLC0415
+        for m_ld in re.finditer(
+            r'<script[^>]*application/ld\+json[^>]*>(.+?)</script>',
+            html, re.S | re.I,
+        ):
+            try:
+                data = json.loads(m_ld.group(1))
+            except Exception:
+                continue
+            candidates = data if isinstance(data, list) else [data]
+            for c in candidates:
+                if not isinstance(c, dict):
+                    continue
+                # @type=Product or 単体 price field
+                offers = c.get("offers")
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else None
+                if isinstance(offers, dict):
+                    p = offers.get("price")
+                    if p is not None:
+                        try:
+                            return int(str(p).replace(",", ""))
+                        except (ValueError, AttributeError):
+                            pass
+    except Exception:
+        pass
+
+    # 2. HTML 内 "price":XXX
+    m_p = re.search(r'"price"\s*:\s*"?(\d+)"?', html)
+    if m_p:
+        try:
+            return int(m_p.group(1))
+        except ValueError:
+            pass
+
+    # 3. fallback: ¥XXX prefix
     m = re.search(r"￥\s*([\d,]+)|¥\s*([\d,]+)", html)
     if not m:
         return None

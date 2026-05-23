@@ -121,7 +121,54 @@ def _extract_name(html: str) -> str:
 
 
 def _extract_price_jpy(html: str) -> Optional[int]:
-    """HTML から価格 (¥) を抽出。複数候補のうち最初の数値を返す."""
+    """HTML から価格 (¥) を抽出.
+
+    2026-05-23 改修: 旧仕様は PRICE_RE.search(html) で「HTML 全体最初の ¥XXX」を
+    採用していたが、amazon は関連商品 / バンドル / 配送料等の多数の ¥ が並ぶ
+    ため、最初の数字が商品本体価格とは限らず誤値多発 (Takaaki さん指摘 3 件)。
+
+    改修方針: BeautifulSoup + amazon 標準 price selector で商品本体価格を pinpoint。
+    selector 優先順位 (上から試行、最初に取れた値を採用):
+      1. #corePriceDisplay_desktop_feature_div .a-price .a-offscreen
+         (= 現行 amazon page の main price box)
+      2. #corePrice_feature_div .a-price .a-offscreen
+         (= 別 layout の main price box)
+      3. #priceblock_ourprice / #priceblock_dealprice / #priceblock_saleprice
+         (= 旧 layout)
+      4. fallback: PRICE_RE.search(html) (= 旧仕様、最後の手段)
+    """
+    try:
+        from bs4 import BeautifulSoup  # noqa: PLC0415
+    except ImportError:
+        BeautifulSoup = None  # type: ignore
+
+    if BeautifulSoup is not None:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            selectors = [
+                "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+                "#corePrice_feature_div .a-price .a-offscreen",
+                "#priceblock_ourprice",
+                "#priceblock_dealprice",
+                "#priceblock_saleprice",
+            ]
+            for sel in selectors:
+                el = soup.select_one(sel)
+                if el is None:
+                    continue
+                txt = el.get_text(strip=True)
+                m = PRICE_RE.search(txt)
+                if not m:
+                    continue
+                raw = m.group(1) or m.group(2)
+                try:
+                    return int(raw.replace(",", ""))
+                except (ValueError, AttributeError):
+                    continue
+        except Exception:
+            pass  # fallback to regex
+
+    # fallback: 旧仕様 (HTML 全体最初の ¥)
     m = PRICE_RE.search(html)
     if not m:
         return None
