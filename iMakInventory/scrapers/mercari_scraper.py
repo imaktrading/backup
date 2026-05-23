@@ -419,11 +419,15 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
                 continue
 
     # price testid
+    # 2026-05-23: regex 厳密化 ([\d,]+ → ¥([\d,]+))。
+    # 旧 regex は要素内に複数数字 (= ¥9,555 と ¥6,719 の割引価格等) があると
+    # 最初の数字を取るが、render タイミングや DOM 変動で誤値を拾うリスクあり。
+    # mercari の price element は必ず ¥ prefix 付き ("¥9,555") なので prefix 必須化。
     for tid in ["price", "product-price", "item-price"]:
         try:
             elem = driver.find_element(By.CSS_SELECTOR, f'[data-testid="{tid}"]')
             txt = elem.text.strip()
-            m = re.search(r"([\d,]+)", txt)
+            m = re.search(r"[¥￥]\s*([\d,]+)", txt)
             if m:
                 try:
                     price_jpy = int(m.group(1).replace(",", ""))
