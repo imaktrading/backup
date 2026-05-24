@@ -414,9 +414,21 @@ def process_sheet(
         # ログ表示
         sup = res["supplier"][:7].ljust(7)
         if res["error"]:
-            # mercari の連続 None → driver 再起動を試行 (anti-bot recovery)
-            if (res["supplier"] == "mercari"
-                    and "scraper returned None" in (res["error"] or "")):
+            # mercari の連続失敗 → driver 再起動を試行
+            # 2026-05-24: trigger 拡張. 旧 "scraper returned None" のみ → driver crash
+            # (MaxRetryError / HTTPConnectionPool / WebDriverException) も catch.
+            # 5/24 cycle で 18:04 driver 死亡後 297 連続 MaxRetryError、再起動 0 回事故。
+            err_s = res["error"] or ""
+            mercari_driver_dead = (
+                "scraper returned None" in err_s
+                or "MaxRetryError" in err_s
+                or "HTTPConnectionPool" in err_s
+                or "WebDriverException" in err_s
+                or "chrome not reachable" in err_s.lower()
+                or "no such window" in err_s.lower()
+                or "session deleted" in err_s.lower()
+            )
+            if res["supplier"] == "mercari" and mercari_driver_dead:
                 mercari_consec_none += 1
                 if mercari_consec_none >= MERCARI_RESTART_THRESHOLD:
                     log(f"  [!] mercari 連続 None {mercari_consec_none} 件 → driver 再起動を試行")
@@ -429,8 +441,8 @@ def process_sheet(
                         mercari_driver = create_mercari_driver(headless=True)
                         log("    [OK] mercari driver 再起動完了 (続行)")
                         mercari_consec_none = 0
-                    except Exception as re:
-                        log(f"    [NG] mercari driver 再起動失敗: {re} (mercari は失敗継続、他 supplier は処理する)")
+                    except Exception as _restart_err:
+                        log(f"    [NG] mercari driver 再起動失敗: {_restart_err} (mercari は失敗継続、他 supplier は処理する)")
                         mercari_driver = None
                         mercari_consec_none = 0  # 再起動失敗を loop しないようリセット
             if (res["error"] or "").startswith("unsupported supplier"):
@@ -524,9 +536,9 @@ def process_sheet(
         # それ以上の乖離は scraper 誤値 (関連商品拾った等) の確度高い。
         if price_jpy is not None and prev_n:
             try:
-                # re shadow 回避 (line 432 `except Exception as re:` で関数内 re が
-                # local 扱いになるため、re.sub は使わず str 操作で数字抽出)
-                _prev_int = int("".join(c for c in prev_n if c.isdigit()) or "0")
+                # 2026-05-24: re shadow 解消 (旧 line 432 `except Exception as re:` を
+                # `except Exception as _restart_err:` に rename 済) → re.sub() 使用可
+                _prev_int = int(re.sub(r"[^\d]", "", prev_n) or "0")
                 if _prev_int > 0:
                     _ratio = price_jpy / _prev_int
                     if _ratio < 0.5 or _ratio >= 3.0:
