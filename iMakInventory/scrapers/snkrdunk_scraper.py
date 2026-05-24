@@ -104,7 +104,20 @@ def _fetch_via_requests(url: str) -> dict:
         offers = offers[0] if offers else {}
     out["price_jpy"] = offers.get("price") if offers else None
     availability = (offers.get("availability") or "") if isinstance(offers, dict) else ""
-    if "InStock" in availability:
+
+    # 2026-05-25 SOLD 判定 強化:
+    # JSON-LD `availability` は SNKRDUNK 側で売却後も `InStock` 維持されるバグあり
+    # (= 358589046154 ケース、 5/24 売却済でも JSON-LD InStock 返却)。
+    # HTML 内 `<div id="app" class="content used-item-detail sold">` が実 SOLD signal。
+    # JSON-LD InStock + HTML class `sold` あれば SOLD_OUT 優先 (= HTML 真値)。
+    html_sold = bool(re.search(
+        r'<div\s+id=["\']app["\'][^>]*class=["\'][^"\']*\bsold\b[^"\']*["\']',
+        r.text, re.I,
+    ))
+    if html_sold:
+        out["in_stock"] = False
+        out["_reason"] = "html_class_sold"
+    elif "InStock" in availability:
         out["in_stock"] = True
         out["_reason"] = "instock"
     else:
@@ -137,7 +150,9 @@ def fetch_product_inventory(
         status = "DELETED"
     elif in_stock:
         status = "IN_STOCK"
-    elif reason.startswith("availability:"):
+    elif reason == "html_class_sold" or reason.startswith("availability:"):
+        # 2026-05-25: HTML class `sold` 検出 も SOLD_OUT に分類
+        # (= JSON-LD InStock + HTML sold の場合、 HTML 真値を採用)
         status = "SOLD_OUT"
     else:
         status = "UNKNOWN"
