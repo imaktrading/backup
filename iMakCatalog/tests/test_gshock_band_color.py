@@ -32,9 +32,10 @@ class TestGetBandColorFromPid(unittest.TestCase):
         self.assertEqual(gshock.get_band_color_from_pid("GA-2100BM-7A2JF"), "White")
         self.assertEqual(gshock.get_band_color_from_pid("BA-110X-7A1"), "White")
 
-    def test_orange_8a(self):
-        # 2026-05-13 事故ケース: 8A2 が "Black" になっていた
-        self.assertEqual(gshock.get_band_color_from_pid("DW-5600MNC-8A2JF"), "Orange")
+    def test_silver_8a(self):
+        # 2026-05-13 事故ケース: 8A2 が "Black" になっていた → 修正で 'Orange' 採用
+        # 2026-05-25 修正 (HQ 5/21 依頼): -8/-8A は Silver/Gray (旧 Orange は誤り).
+        self.assertEqual(gshock.get_band_color_from_pid("DW-5600MNC-8A2JF"), "Silver")
 
     def test_red_4(self):
         self.assertEqual(gshock.get_band_color_from_pid("GA-2300FL-4AJF"), "Red")
@@ -47,9 +48,18 @@ class TestGetBandColorFromPid(unittest.TestCase):
         self.assertEqual(gshock.get_band_color_from_pid("GA-2100-1A1JF"),
                          gshock.get_band_color_from_pid("GA-2100-1A1"))
 
-    def test_gold_6(self):
-        # CASIO 公式 convention: 6 = Gold
-        self.assertEqual(gshock.get_band_color_from_pid("BA-110AH-6A"), "Gold")
+    def test_red_6(self):
+        # 2026-05-25 修正 (HQ 5/21 依頼): -6/-6A は Red (旧 Gold).
+        # Casio 慣例で -6 系は Red/Orange、Gold ではない.
+        self.assertEqual(gshock.get_band_color_from_pid("BA-110AH-6A"), "Red")
+
+    def test_silver_8(self):
+        # 2026-05-25 修正: -8/-8A は Silver/Gray (旧 Orange).
+        self.assertEqual(gshock.get_band_color_from_pid("GD-B500S-8"), "Silver")
+
+    def test_beige_5(self):
+        # 2026-05-25 修正: -5/-5A は Beige (Sand/Tan/Khaki、旧 White).
+        self.assertEqual(gshock.get_band_color_from_pid("GM-2100CL-5A"), "Beige")
 
     def test_unknown_returns_empty(self):
         # 未知 suffix は空 (Black fallback 廃止 = precision 優先)

@@ -329,15 +329,21 @@ CASIOFANMAG_SERIES_URL_TEMPLATE = "https://casiofanmag.com/g-shock/{slug}/"
 # "Black" fallback で 17 件 catalog 投入された. HQ commit 7bd780a で関数修正済
 # だが catalog 値は再投入されてなかった. 本辞書を catalog 側に内蔵することで
 # HQ 関数の変更影響を解消 (catalog は HQ 関数に依存しない).
+# 2026-05-25 修正 (HQ 2026-05-21 依頼 + 公式 page description 検証):
+# - 5/5A: White → Beige (= Sand/Tan/Khaki 系、eBay 16 enum で Beige マッピング)
+#   実例 GM-2100CL-5AJF: 公式 desc 「バンドにはアースカラーのマットスケルトン」
+# - 6/6A: Gold → Red (CASIO 慣例 -6 = Red/Orange、Gold は -8 や別 suffix で表現)
+# - 8/8A: Orange → Silver (= Silver/Gray metallic 系)
+#   実例 GD-B500S-8JF: ミニマル / 近未来 design = silver/metallic 色
 _BAND_COLOR_MAP = {
     "1": "Black", "1A": "Black", "1B": "Black", "1C": "Black", "1D": "Black",
     "2": "Blue",  "2A": "Blue",  "2B": "Blue",
     "3": "Green", "3A": "Green",
     "4": "Red",   "4A": "Red",   "4B": "Red",
-    "5": "White", "5A": "White",
-    "6": "Gold",  "6A": "Gold",
+    "5": "Beige", "5A": "Beige",       # 旧 White (5/21 依頼で修正)
+    "6": "Red",   "6A": "Red",         # 旧 Gold (5/21 依頼で修正)
     "7": "White", "7A": "White", "7B": "White",
-    "8": "Orange","8A": "Orange",
+    "8": "Silver","8A": "Silver",      # 旧 Orange (5/21 依頼で修正)
     "9": "Yellow","9A": "Yellow",
 }
 
