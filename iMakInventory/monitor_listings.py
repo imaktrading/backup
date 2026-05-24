@@ -524,34 +524,14 @@ def process_sheet(
     #   - N 列: scrape で価格取得できた行のみ更新 (None なら触らない、purely additive)
     checked_at_now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     updates = []
-    price_outliers = []   # 2026-05-23: 異常値ガードで reject した row 記録 (= 警告 log + decision_log)
+    # 2026-05-25 純粋抽出化 (依頼: monitor_pure_extract_implementation): 異常値ガード撤廃
+    # 監視くんは scrape 値そのまま N列書込、 異常値判定 / warning / alert は全て下流
+    # (リバイスくん / 出品くん / 別 logger worker) に委譲。 1 機能 1 worker 原則。
+    # 旧 placeholder 残置 listing (= ¥22,222 vs ¥9,999 で ratio 0.45) で逆作動した
+    # 反省から、 採用判断の責任を分離。 関連: [[scraper_price_vulnerability]]
     for r in results:
         price_jpy = r.get("price_jpy")  # None の場合 update dict には乗せない (= N 列触らない)
         prev_n = r.get("current_n_jpy_str", "")  # AH 列用 (= read 時の N 列値)
-
-        # 2026-05-23 異常値ガード (Gemini 提案の非対称固定ルール):
-        # 旧 N と比較して下方向 0.5x 未満 (= 半額以下) or 上方向 3x 以上 (= 3 倍以上)
-        # → 採用せず N 列前値維持。
-        # 非対称理由: 下方向は値下げで 50% までは普通、上方向はプレミア化で 2-3 倍は許容、
-        # それ以上の乖離は scraper 誤値 (関連商品拾った等) の確度高い。
-        if price_jpy is not None and prev_n:
-            try:
-                # 2026-05-24: re shadow 解消 (旧 line 432 `except Exception as re:` を
-                # `except Exception as _restart_err:` に rename 済) → re.sub() 使用可
-                _prev_int = int(re.sub(r"[^\d]", "", prev_n) or "0")
-                if _prev_int > 0:
-                    _ratio = price_jpy / _prev_int
-                    if _ratio < 0.5 or _ratio >= 3.0:
-                        log(f"  [!] 価格 異常値 reject: row{r['row_index']} "
-                            f"prev={_prev_int} new={price_jpy} ratio={_ratio:.2f} url={r['url'][:50]}")
-                        price_outliers.append({
-                            "row_index": r["row_index"], "url": r["url"],
-                            "prev": _prev_int, "new": price_jpy, "ratio": round(_ratio, 2),
-                            "supplier": r.get("supplier", ""),
-                        })
-                        price_jpy = None   # N 列触らない、前値維持
-            except (ValueError, ZeroDivisionError):
-                pass   # parse 失敗 = ガード skip、新値採用
         if r["error"] or r["is_sold"] is None:
             # 取得不能 → O 列だけ更新 (D 列は既存維持、fail-closed 維持)
             #          N 列は price_jpy=None なので触らない (既存値維持)
@@ -600,8 +580,6 @@ def process_sheet(
         n_count = sum(1 for u in updates if u.get("price_jpy") is not None)
         o_count = len(updates)
         log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + N 列価格 {n_count} 件 + O 列 {o_count} 件)")
-        if price_outliers:
-            log(f"  [!] 価格異常値 reject: {len(price_outliers)} 件 (N 列前値維持、要確認)")
         try:
             res = update_listings_sold_marks(ws, updates)
             log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / n_writes={res.get('n_writes', '?')} / o_writes={res.get('o_writes', '?')})")
