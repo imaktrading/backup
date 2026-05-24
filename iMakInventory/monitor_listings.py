@@ -524,7 +524,9 @@ def process_sheet(
         # それ以上の乖離は scraper 誤値 (関連商品拾った等) の確度高い。
         if price_jpy is not None and prev_n:
             try:
-                _prev_int = int(re.sub(r"[^\d]", "", prev_n))
+                # re shadow 回避 (line 432 `except Exception as re:` で関数内 re が
+                # local 扱いになるため、re.sub は使わず str 操作で数字抽出)
+                _prev_int = int("".join(c for c in prev_n if c.isdigit()) or "0")
                 if _prev_int > 0:
                     _ratio = price_jpy / _prev_int
                     if _ratio < 0.5 or _ratio >= 3.0:
