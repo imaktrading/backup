@@ -393,6 +393,33 @@ def process_sheet(
             pass
     for i, row in enumerate(rows, start=1):
         prefix = f"  [{i}/{total_rows}] row{row['row_index']:>4} "
+        # 2026-05-25 mercari D=○ skip (= 監視くん最適化):
+        # 主 URL が mercari + D=○ = 主補全 sold 確定 + 復活機能なし → scrape 完全 skip
+        # 1 点もの中心の mercari は売切後に同 URL から復活しない、 scrape する実益ゼロ。
+        # HIGH 295 + LOW 23 = 318 件 削減 (mercari 全 645 中 49%)、 cycle 時間 半減効果。
+        # 関連: [[amazon_restore_after_scrape_reliability]] (= amazon は別途継続 chk)
+        row_supplier = detect_supplier(_domain_of(row["url"]))
+        cur_sold = (row.get("current_sold") or "").strip()
+        if row_supplier == "mercari" and cur_sold in ("○", "〇"):
+            log(f"{prefix}mercari  - skip (D=○、 mercari 復活機会なし)")
+            results.append({
+                "row_index":         row["row_index"],
+                "url":               row["url"],
+                "item_id":           row.get("item_id", ""),
+                "title":             row.get("title", ""),
+                "supplier":          "mercari",
+                "is_sold":           True,
+                "raw_status":        "skipped_mercari_sold",
+                "current_sold":      cur_sold,
+                "delta":             "unchanged",
+                "error":             None,
+                "price_jpy":         None,    # 価格 chk もしない → N列触らない
+                "candidates_checked": 0,
+                "current_n_jpy_str": row.get("current_n_jpy_str", ""),
+                "sub_results":       [],
+            })
+            continue
+
         try:
             res = check_one_row_with_fallback(
                 row, sleep_sec=sleep_sec,
@@ -530,6 +557,10 @@ def process_sheet(
     # 旧 placeholder 残置 listing (= ¥22,222 vs ¥9,999 で ratio 0.45) で逆作動した
     # 反省から、 採用判断の責任を分離。 関連: [[scraper_price_vulnerability]]
     for r in results:
+        # 2026-05-25 mercari D=○ skip 行は scrape していないので sheet 書込 完全 skip
+        # (= O 列 checked_at も更新しない、 触らない方針)
+        if r.get("raw_status") == "skipped_mercari_sold":
+            continue
         price_jpy = r.get("price_jpy")  # None の場合 update dict には乗せない (= N 列触らない)
         prev_n = r.get("current_n_jpy_str", "")  # AH 列用 (= read 時の N 列値)
         if r["error"] or r["is_sold"] is None:
