@@ -328,6 +328,7 @@ def process_sheet(
     dry_run: bool = False,
     sleep_sec: float = DEFAULT_SLEEP_SEC,
     progress_callback=None,
+    supplier_filter: str = "all",
 ):
     log("=" * 60)
     log(f"商品管理シート [{sheet_label}] 開始 (sheet_id={sheet_id[:20]}..., dry_run={dry_run})")
@@ -340,6 +341,11 @@ def process_sheet(
 
     rows = read_listings_rows(ws, start_row=start_row, end_row=end_row, only_with_url=True)
     log(f"  active rows (URL あり): {len(rows)}")
+
+    if supplier_filter != "all":
+        before = len(rows)
+        rows = [r for r in rows if detect_supplier(_domain_of(r["url"])) == supplier_filter]
+        log(f"  --supplier {supplier_filter} で絞込: {before} → {len(rows)} 件")
 
     if limit is not None:
         rows = rows[:limit]
@@ -676,6 +682,10 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="スプシ書込なし、判定のみ")
     parser.add_argument("--sleep", type=float, default=DEFAULT_SLEEP_SEC,
                         help=f"1リクエストごとの sleep 秒 (default: {DEFAULT_SLEEP_SEC})")
+    parser.add_argument("--supplier",
+                        choices=["all", "mercari", "amazon", "fril", "snkrdunk"],
+                        default="all",
+                        help="特定 supplier のみ処理 (default: all)")
     # TEST スプシ向けの sheet ID 上書き (env var fallback)
     parser.add_argument("--high-sheet-id", default=os.environ.get("INVENTORY_HIGH_SHEET_ID"),
                         help="HIGH 用 spreadsheet ID 上書き (env: INVENTORY_HIGH_SHEET_ID)")
@@ -719,6 +729,7 @@ def main():
                 limit=args.limit,
                 dry_run=args.dry_run,
                 sleep_sec=args.sleep,
+                supplier_filter=args.supplier,
             )
             for k, v in stats.items():
                 grand[k] = grand[k] + v
