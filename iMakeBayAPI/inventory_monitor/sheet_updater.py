@@ -18,6 +18,8 @@
   J: 仕入元価格
   K: eBay 現Qty
   L: 自動CHK日
+  M-P: Phase4 状態 / 試行時刻 / eBay Status / カテゴリ
+  Q: 前期仕入元価格 (= delta 比較用、 2026-05-25 追加、 HIGH/LOW の AH 同型)
 
 メインシート構造 (本ファイルが参照):
   A: FLG (1 で除外、それ以外は active)
@@ -296,16 +298,26 @@ def update_sku_rows(sh, updates: list) -> dict:
         ]
 
         # 既存行 update 時は B/C 列 (対処済/対処日) を上書きしない (人手判断を尊重)
+        prev_supplier_price = ""
         if u.get("row_index") is not None:
             existing = all_values[row_idx - 1] if row_idx - 1 < len(all_values) else []
             existing_b = (existing[1] if len(existing) >= 2 else "").strip()
             existing_c = (existing[2] if len(existing) >= 3 else "").strip()
             row_values[1] = existing_b == "TRUE" or existing_b == "True"
             row_values[2] = existing_c
+            # 2026-05-25: 前期仕入元価格 (= Q列 / col17) 用に旧 J 値を保持
+            # 新 J 書込前の値を Q 列に移す = HIGH/LOW の N→AH 同型 (= delta 比較 baseline)
+            prev_supplier_price = (existing[9] if len(existing) >= 10 else "").strip()
 
         cell_updates.append({
             "range": f"A{row_idx}:L{row_idx}",
             "values": [row_values],
+        })
+        # 2026-05-25: Q 列 (= 前期仕入元価格) は別 batch_update entry で書込
+        # 既存 J 値があれば その値を Q に、 なければ空欄維持
+        cell_updates.append({
+            "range": f"Q{row_idx}",
+            "values": [[prev_supplier_price]],
         })
 
     sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
