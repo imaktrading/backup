@@ -24,11 +24,13 @@ from tkinter import messagebox, scrolledtext
 from scrapers import (
     amazon_wishlist,
     mercari_likes,
+    mercari_seller,
     mercari_shops_likes,
     snkrdunk_favorites,
     snkrdunk_official,
     workman_official,
 )
+from sheet_writer_mercari_seller import append_seller_items
 from sheet_writer import HIGH_SHEET_ID, LISTINGS_GID, LOW_SHEET_ID, write_to_sheet
 from sheet_writer_amazon import write_to_sheet as write_to_sheet_amazon
 from sheet_writer_snkrdunk_aux import (
@@ -135,6 +137,10 @@ SERVICE_DEFS = [
     ("snkrdunk_fav", "SNKRDUNK 抽出",
      "SNKRDUNK のお気に入り商品 (= login 必須) から URL を収集してスプシ A 列に append",
      True, ""),
+    ("mercari_seller", "メルカリセラー",
+     "メルカリ user profile URL (= /user/profile/<id>) から出品中商品を収集 "
+     "→ 中間スプシ seller_<id> タブに append (= 同 card_id は AC-AG 補配置)",
+     True, ""),
 ]
 
 
@@ -236,6 +242,29 @@ class HarvestPanel(tk.Tk):
         tk.Label(wm,
                  text="※ 例: https://workman.jp/shop/g/g2300011882014/  "
                       "(空欄なら「ワークマン」ボタン無効)",
+                 fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
+
+        # メルカリセラー (= user profile URL 抽出) の入力欄
+        msel = tk.LabelFrame(parent, text="メルカリセラー (= /user/profile/<id> URL から出品抽出)",
+                             padx=10, pady=8, font=("Meiryo UI", 10))
+        msel.pack(fill="x", padx=12, pady=4)
+        self.mercari_seller_url_var = tk.StringVar()
+        tk.Entry(msel, textvariable=self.mercari_seller_url_var,
+                 font=("Consolas", 9)).pack(fill="x")
+        msel_row = tk.Frame(msel)
+        msel_row.pack(fill="x", pady=(4, 0))
+        tk.Label(msel_row,
+                 text=f"最大抽出件数 (空欄/0 で無制限希望 → ハード CAP "
+                      f"{mercari_seller.HARD_CAP_PER_SESSION} で打切):",
+                 font=("Meiryo UI", 9)).pack(side="left")
+        self.mercari_seller_limit_var = tk.StringVar(
+            value=str(mercari_seller.DEFAULT_USER_LIMIT)
+        )
+        tk.Entry(msel_row, textvariable=self.mercari_seller_limit_var, width=8,
+                 font=("Consolas", 9)).pack(side="left", padx=(4, 0))
+        tk.Label(msel,
+                 text="※ 例: https://jp.mercari.com/user/profile/623636774  "
+                      "出力先 = 中間スプシ seller_<id> タブ (= 自動 create、 タブ単位 dedup)",
                  fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
 
         # SNKRDUNK オプション (PSA10 補仕入 URL 投入)
@@ -381,6 +410,9 @@ class HarvestPanel(tk.Tk):
         if key == "snkrdunk_fav":
             self._dispatch_snkrdunk_favorites()
             return
+        if key == "mercari_seller":
+            self._dispatch_mercari_seller()
+            return
         messagebox.showinfo("未実装", f"{key} は未実装です。")
 
     def _dispatch_mercari(self) -> None:
@@ -488,6 +520,56 @@ class HarvestPanel(tk.Tk):
         threading.Thread(
             target=self._run_amazon_thread,
             args=(normalized_url, sheet_id, gid, label),
+            daemon=True,
+        ).start()
+
+    def _dispatch_mercari_seller(self) -> None:
+        url = (self.mercari_seller_url_var.get() or "").strip()
+        if not url:
+            messagebox.showerror(
+                "URL 未入力",
+                "メルカリセラー URL を入力してください。\n"
+                "例: https://jp.mercari.com/user/profile/623636774",
+            )
+            return
+        seller_id = mercari_seller.parse_seller_id(url)
+        if not seller_id:
+            messagebox.showerror(
+                "URL 不正",
+                "メルカリセラー URL の形式が不正です。\n"
+                "正しい形式: https://jp.mercari.com/user/profile/<id>\n\n"
+                "(Shops の URL は Phase 1 では未対応です)"
+            )
+            return
+        # 件数 entry 検証 (= 空/0 で無制限希望 = None 渡し)
+        raw_limit = (self.mercari_seller_limit_var.get() or "").strip()
+        user_limit: Optional[int] = None
+        if raw_limit:
+            try:
+                v = int(raw_limit)
+                if v > 0:
+                    user_limit = v
+            except ValueError:
+                messagebox.showerror(
+                    "件数 不正",
+                    f"最大抽出件数は 1 以上の整数で指定してください (入力値: {raw_limit!r})\n"
+                    f"空欄 / 0 なら ハード CAP ({mercari_seller.HARD_CAP_PER_SESSION}) で打切。",
+                )
+                return
+        effective = mercari_seller.resolve_effective_cap(user_limit)
+        if not messagebox.askyesno(
+            "確認",
+            f"メルカリセラー {seller_id} の出品中商品を最大 {effective} 件まで収集し、\n"
+            f"中間スプシ seller_{seller_id} タブに追記します。\n\n"
+            f"※ 出力先スプシ選択 (HIGH/LOW/任意 URL) はメルカリセラーでは無視されます。\n"
+            f"※ 同 card_id (= OP/ST/EB/P 系) は最安を主、 残りを AC-AG 補に group 化。\n"
+            f"※ ハード CAP {mercari_seller.HARD_CAP_PER_SESSION} 件を超えるセラーは複数セッションで取得してください。\n\n"
+            f"実行しますか？",
+        ):
+            return
+        threading.Thread(
+            target=self._run_mercari_seller_thread,
+            args=(seller_id, user_limit),
             daemon=True,
         ).start()
 
@@ -765,6 +847,97 @@ class HarvestPanel(tk.Tk):
             messagebox.showinfo("完了",
                                 f"収集 {len(items)} 件 → 新規追加 {result['appended']} 件 "
                                 f"(既出 skip {result['skipped_existing']} 件)")
+        except Exception as e:
+            self._log(f"!!! エラー: {e}")
+            self._set_status(f"失敗: {type(e).__name__}")
+            messagebox.showerror("エラー", str(e))
+        finally:
+            self._running = False
+            self._set_buttons_state(disabled=False)
+
+    def _run_mercari_seller_thread(
+        self,
+        seller_id: str,
+        user_limit: Optional[int],
+    ) -> None:
+        """メルカリセラー出品 → 中間スプシ seller_<id> タブに append."""
+        self._running = True
+        self._set_buttons_state(disabled=True)
+        headless = not self.show_browser_var.get()
+        exclude_sold = self.exclude_sold_var.get()
+        effective_cap = mercari_seller.resolve_effective_cap(user_limit)
+
+        self._set_status(f"メルカリセラー {seller_id} 出品収集中...")
+        self._log("=== メルカリセラー 抽出 開始 ===")
+        self._log(f"  seller_id  : {seller_id}")
+        self._log(f"  ユーザー上限: {user_limit if user_limit else '(無制限希望)'}")
+        self._log(f"  effective  : {effective_cap} (= min(ユーザー上限, HARD_CAP {mercari_seller.HARD_CAP_PER_SESSION}))")
+        self._log(f"  headless   : {headless}")
+        self._log(f"  SOLD除外   : {exclude_sold}")
+        self._log(f"  投入先     : 中間スプシ seller_{seller_id} タブ")
+        try:
+            def progress(cur, total, msg):
+                self._set_status(f"商品詳細取得中... [{cur}/{total}]")
+                self._log(f"  [{cur}/{total}] {msg}")
+
+            result = mercari_seller.collect_seller_with_details(
+                seller_id=seller_id,
+                headless=headless,
+                user_limit=user_limit,
+                exclude_sold=exclude_sold,
+                progress_callback=progress,
+            )
+            items = result["items"]
+            self._log(
+                f"  収集結果   : 出現 {result['total_seen']} 件 / "
+                f"取得 {len(items)} 件 / SOLD skip {result['skipped_sold']} / "
+                f"CAP到達 {result['cap_hit']}"
+            )
+            if result["cap_hit"]:
+                self._log(
+                    f"  ⚠ ハード CAP {mercari_seller.HARD_CAP_PER_SESSION} 件 到達 = "
+                    f"残り未取得 {max(0, result['total_seen'] - effective_cap)} 件、 "
+                    f"続きは時間空けて別セッションで取得してください (bot 検出回避)"
+                )
+
+            # card_id で group 化 (= 同 card_id 主 + 補)
+            grouped_rows = mercari_seller.group_items_by_card_id(items)
+            aux_rows = sum(1 for r in grouped_rows if r.get("auxiliary_urls"))
+            aux_urls = sum(len(r.get("auxiliary_urls") or []) for r in grouped_rows)
+            self._log(
+                f"  group 化   : {len(items)} listings → {len(grouped_rows)} rows "
+                f"(= aux あり {aux_rows} rows, aux URL 計 {aux_urls})"
+            )
+
+            if not grouped_rows:
+                self._set_status("収集 0 件、スプシ書込スキップ")
+                messagebox.showwarning(
+                    "収集 0 件",
+                    "メルカリセラー出品が 1 件も取得できませんでした。\n"
+                    "(セラー出品ゼロ / 全件 SOLD / DOM 構造変更 を確認してください)"
+                )
+                return
+
+            self._set_status(f"スプシ書込中... ({len(grouped_rows)} rows)")
+            ws_result = append_seller_items(seller_id, grouped_rows)
+            self._log(
+                f"  書込結果   : tab={ws_result['tab']} "
+                f"appended={ws_result['appended']} "
+                f"skipped_existing={ws_result['skipped_existing']} "
+                f"input={ws_result['input']}"
+            )
+            self._set_status(
+                f"完了: 新規 {ws_result['appended']} rows / 既出 skip {ws_result['skipped_existing']} rows"
+            )
+            self._log("=== 完了 ===")
+            messagebox.showinfo(
+                "完了",
+                f"メルカリセラー {seller_id}\n\n"
+                f"listing 取得: {len(items)} 件 (SOLD skip {result['skipped_sold']})\n"
+                f"group 化:    {len(grouped_rows)} rows (aux あり {aux_rows})\n"
+                f"スプシ書込:   新規 {ws_result['appended']} / 既出 skip {ws_result['skipped_existing']}\n"
+                f"CAP 到達:    {result['cap_hit']}",
+            )
         except Exception as e:
             self._log(f"!!! エラー: {e}")
             self._set_status(f"失敗: {type(e).__name__}")
