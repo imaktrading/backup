@@ -97,5 +97,80 @@ class TestCatalogIntegrity(unittest.TestCase):
             self.fail(f"non-numeric product_id: {bad[:5]}")
 
 
+class TestLookupYugioh(unittest.TestCase):
+    """lookup_yugioh adapter (PSA subject → catalog Konami ID)."""
+
+    @classmethod
+    def setUpClass(cls):
+        from integrations import psa_to_csv as cat_psa  # noqa
+        cls.cat_psa = cat_psa
+
+    def test_blue_eyes_white_dragon(self):
+        r = self.cat_psa.lookup_yugioh(
+            brand="YU-GI-OH! JAPANESE",
+            card_number="001",
+            subject="BLUE-EYES WHITE DRAGON",
+            verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertEqual(r["product_id"], "89631139")
+
+    def test_dark_magician(self):
+        r = self.cat_psa.lookup_yugioh(
+            brand="YU-GI-OH! JAPANESE",
+            card_number="001",
+            subject="DARK MAGICIAN",
+            verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertEqual(r["product_id"], "46986414")
+
+    def test_exodia_forbidden_one(self):
+        """stopword 'THE' を含む subject でも 完全 token set 一致できる."""
+        r = self.cat_psa.lookup_yugioh(
+            brand="YU-GI-OH! JAPANESE",
+            card_number="001",
+            subject="EXODIA THE FORBIDDEN ONE",
+            verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertEqual(r["product_id"], "33396948")
+
+    def test_derivative_not_matched(self):
+        """派生カード (Malefic / Alternative) は subject に keyword 無いので
+        完全 token set 一致しない → base card のみ採用される.
+        ここでは subject 'BLUE-EYES WHITE DRAGON' → 'Malefic Blue-Eyes White
+        Dragon' (= subject に MALEFIC 無し) を選ばないことを確認."""
+        r = self.cat_psa.lookup_yugioh(
+            brand="YU-GI-OH! JAPANESE",
+            card_number="001",
+            subject="BLUE-EYES WHITE DRAGON",
+            verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertNotIn("Malefic", r["name_en"])
+        self.assertNotIn("Alternative", r["name_en"])
+
+    def test_unknown_card_fail_closed(self):
+        """未登録 card → None (= missing_models.csv 通知 path に流れる)."""
+        r = self.cat_psa.lookup_yugioh(
+            brand="YU-GI-OH! JAPANESE FAKE",
+            card_number="XXX-001",
+            subject="FAKE CARD XYZ NONEXISTENT",
+            verbose=False,
+        )
+        self.assertIsNone(r)
+
+    def test_empty_subject_skips(self):
+        """subject 空 → fuzzy match 不可で None."""
+        r = self.cat_psa.lookup_yugioh(
+            brand="YU-GI-OH! JAPANESE",
+            card_number="001",
+            subject="",
+            verbose=False,
+        )
+        self.assertIsNone(r)
+
+
 if __name__ == "__main__":
     unittest.main()

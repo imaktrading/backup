@@ -31,6 +31,7 @@ iMakTCG/psa_to_csv.py への適用例:
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -1330,3 +1331,127 @@ _JA_CHAR_TO_EN_TOKENS.update({
     "フリーダムガンダム":    {"FREEDOM"},
     "キラ・ヤマト":          {"KIRA", "YAMATO"},
 })
+
+
+# ============================================================================
+# ============================================================================
+# Yu-Gi-Oh! TCG (game = yugioh_tcg, source = ygoprodeck)
+# ============================================================================
+# ============================================================================
+YUGIOH_CATEGORY = "yugioh_tcg"
+
+
+def lookup_yugioh(
+    brand: str,
+    card_number: str,
+    subject: str = "",
+    verbose: bool = True,
+) -> Optional[dict]:
+    """Yu-Gi-Oh! card を catalog から名前 fuzzy match で lookup.
+
+    YGO は Konami official ID が numeric (= 例 '89631139' Blue-Eyes WD).
+    catalog の product_id は Konami ID だが、 PSA brand には Konami ID 含まれず、
+    JP set code + JP card number 表記 (= 'MAGO-JP001' 等).
+
+    戦略 (= 2026-05-26 設計):
+      C 案 primary: PSA subject 名で catalog name_en LIKE 検索 → token 一致 verify
+      A 案 secondary: PSA brand に set keyword (Legend of Blue Eyes 等) 含む時
+                       → catalog primary_set_name 部分一致で絞り込み
+      同名複数 hit → fail-closed reject (= missing_models.csv 通知)
+
+    YGO は同名カード = 同 Konami ID (errata 除く) のため fuzzy match の信頼性高い.
+
+    Args:
+        brand: PSA brand 文字列 (例: 'YU-GI-OH! JAPANESE LB-01 LEGEND OF BLUE EYES')
+        card_number: PSA card number (例: '001', 'LB-01-J001')
+        subject: PSA Subject (例: 'BLUE-EYES WHITE DRAGON')
+        verbose: True で stdout 進捗.
+
+    Returns:
+        catalog record dict (api.lookup() 戻り値) | None.
+    """
+    if not subject or not subject.strip():
+        if verbose:
+            print(f"    ⚠️ YGO: PSA subject 空、 fuzzy match 不可 → Skip")
+        return None
+
+    # subject 正規化: 大文字、 noise 除去 (= 'PSA 10' / 'ALT ART' 等)
+    subj_upper = subject.upper().strip()
+    # PSA 修飾語除去
+    subj_clean = re.sub(r"\b(PSA|GEM|MINT|ALT|ART|ALTERNATE|SECRET|ULTRA|RARE|COMMON|UNCOMMON|FOIL|HOLO|PROMO|JAPANESE|JP|EN|ENGLISH)\b", " ", subj_upper)
+    subj_clean = re.sub(r"\s+", " ", subj_clean).strip()
+    if not subj_clean:
+        if verbose:
+            print(f"    ⚠️ YGO: subject 正規化後 空、 fuzzy match 不可 → Skip")
+        return None
+
+    # name_en LIKE 検索 (= catalog の全 YGO entry をスキャン、 token 一致)
+    conn = api._connect()
+    try:
+        # tokens 抽出 (= 3 文字以上の単語)
+        tokens = [t for t in re.split(r"[\s\-,.:'\"\(\)\[\]]+", subj_clean) if len(t) >= 3]
+        if not tokens:
+            return None
+        # SQL LIKE で 最も特徴的な token (= 最長) で 1 次絞り込み
+        anchor = sorted(tokens, key=len, reverse=True)[0]
+        rows = conn.execute(
+            "SELECT * FROM products WHERE category = ? AND UPPER(name_en) LIKE ?",
+            (YUGIOH_CATEGORY, f"%{anchor}%"),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        if verbose:
+            print(f"    ⚠️ YGO: catalog name_en に {anchor!r} を含む entry なし → Skip")
+        return None
+
+    # name_en と subject の **完全 token set 一致** のみ採用
+    # (= 派生カード 'Malefic Blue-Eyes...' / 'Alternative...' を除外).
+    # stopword (THE / OF / AND / 等) 除去後の set 等価で判定.
+    _stopwords = {"THE", "OF", "AND", "A", "AN", "TO", "IN", "ON", "FOR", "WITH",
+                   "OR", "AT", "BY"}
+    def _name_token_set(s: str) -> set:
+        return {t for t in re.findall(r"[A-Z0-9]+", (s or "").upper())
+                if len(t) >= 2 and t not in _stopwords}
+    subj_tokens_set = _name_token_set(subj_clean)
+    matches: list = []
+    for r in rows:
+        name_tokens = _name_token_set(r["name_en"])
+        if name_tokens and name_tokens == subj_tokens_set:
+            matches.append(r)
+
+    if not matches:
+        if verbose:
+            print(f"    ⚠️ YGO: subject tokens {sorted(subj_tokens_set)} と完全一致する "
+                  f"name_en なし (anchor={anchor!r} candidates={len(rows)}) → Skip")
+        return None
+
+    # 同名複数 hit の場合: PSA brand に primary_set_name 部分一致あるか試行
+    if len(matches) > 1:
+        brand_upper = (brand or "").upper()
+        narrow: list = []
+        for r in matches:
+            s = json.loads(r["specs"]) if r["specs"] else {}
+            primary_set = (s.get("primary_set_name") or "").upper()
+            if primary_set and primary_set in brand_upper:
+                narrow.append(r)
+        if len(narrow) == 1:
+            matches = narrow
+        elif len(narrow) > 1:
+            matches = narrow  # まだ複数 → 下で fail-closed
+
+    if len(matches) == 1:
+        record = api._row_to_dict(matches[0])
+        if verbose:
+            print(f"    🎯 iMakCatalog (YGO) hit: {record['product_id']} "
+                  f"{record['name_en']!r} (Subject={subject!r} fuzzy match)")
+        return record
+
+    # 同名複数 (= errata 等) → fail-closed reject
+    if verbose:
+        print(f"    ⚠️ YGO: 同名 hit {len(matches)} 件、 fail-closed reject "
+              f"(brand={brand!r}, subject={subject!r})")
+        for r in matches[:5]:
+            print(f"        - {r['product_id']}: {r['name_en']!r}")
+    return None
