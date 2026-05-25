@@ -430,7 +430,12 @@ def fetch_product_inventory(
                 "size": "",
                 "in_stock": bool(raw.get("in_stock", False)),
                 "quantity": 1 if raw.get("in_stock") else 0,
-                "price_jpy": raw.get("price_jpy"),
+                # 2026-05-25 売切時は price_jpy=None 強制 (= N列触らない、 既存値維持)
+                # 売切時の amazon page では「新品 from」 / 中古最安 / 関連価格 等が表示され、
+                # 仕入できない (= 現実の販売価格でない) のに scraper が拾うと N列が
+                # 異常値 (= 旧値の数十倍 等) に上書きされる事例あり (= row 500 案件:
+                # 2599 → 39600、 売切時の「新品 from」 fallback)。
+                "price_jpy": raw.get("price_jpy") if raw.get("in_stock") else None,
             }
         ],
     }
