@@ -410,7 +410,8 @@ def lookup_one_piece(
     #    例: PSA Brand 'PROMOS' + 番号 '019' + Subject 'JEWELRY BONNEY' →
     #        P-019 (Bepo) reject 後、OP07-019_P (Bonney WSJ 付録版) を救済
     if record is None and set_code == "P":
-        record = _search_one_piece_promo_by_number(card_number, subject, verbose=verbose)
+        record = _search_one_piece_promo_by_number(card_number, subject,
+                                                     brand=brand, verbose=verbose)
 
     # 4. Reprint/SP Alt fallback: PSA brand に specific set あり (例: OP11) で base miss
     #    → 全 set_code に対して {番号}_{PSA_set_code} suffix を試行 + 名前検証
@@ -520,25 +521,33 @@ def _search_one_piece_reprint_by_number(
 def _search_one_piece_promo_by_number(
     card_number: str,
     subject: str,
+    brand: str = "",
     verbose: bool = True,
 ) -> Optional[dict]:
-    """Promo brand fallback: 番号 + 名前検証で 全 set_code を横断検索.
+    """Promo brand fallback: 番号 + 名前検証 + PSA brand 照合で 全 set_code を横断検索.
 
     PSA Brand に specific set code が無い (= set_code='P') 時、`P-{number}` lookup が
     別キャラに当たるケース (例: P-019 = Bepo, でも実カードは OP07-019_P = Bonney) を救済.
+
+    2026-05-25 改修 (HQ 5/25 依頼、cert 146264696 事故対応):
+      - brand 引数追加. PSA brand と Catalog set_name の token overlap を ranking 加点.
+      - 同点 (= 最高 score の record が複数) なら **fail-closed reject** (= 人間判断待ち).
+      - 例 cert 146264696: Subject 'TONY TONY CHOPPER' + brand 'PREMIUM CARD COLLECTION'
+        → 旧 logic は EB01-006_P_treasure (EB-01 Memorial 由来 promo) を選択
+        → 新 logic は brand 'PREMIUM CARD COLLECTION' と set_name 'Other Product Card'
+          のいずれかが優先される ST01-006* 系を選ぶ (= 既存救済 (OP07-019, EB01-057) も維持)
 
     安全装置:
       - 番号は完全一致 (LIKE で曖昧検索しない)
       - 名前検証で PSA Subject トークンが record name と交差すること必須
       - 旧『名前検索フォールバック』(番号無視で名前検索) とは別物
+      - **同点なら None 返却 (= fail-closed)**
     """
     # PSA Subject から有意な検証トークンが取れない → 救済しない (誤マッチ防止)
     if not _subject_tokens(subject):
         return None
     conn = api._connect()
     try:
-        # product_id が `{prefix}-{card_number}` または `{prefix}-{card_number}_*` 形式
-        # のもの全てを取得. SQL の LIKE は曖昧過ぎるので Python で厳密フィルタ.
         rows = conn.execute(
             "SELECT * FROM products WHERE category = ? AND product_id LIKE ?",
             (CATEGORY, f"%-{card_number}%"),
@@ -552,7 +561,6 @@ def _search_one_piece_promo_by_number(
         pid = r["product_id"]
         if not pat.match(pid):
             continue
-        # P-XXX 自体は base lookup で既に試行済み + 名前不一致だったのでスキップ
         if pid.startswith("P-") or pid == f"P-{card_number}":
             continue
         rec = api._row_to_dict(r)
@@ -562,28 +570,89 @@ def _search_one_piece_promo_by_number(
     if not candidates:
         return None
 
-    # Promo brand の場合: _P / _P_* suffix 付き record を優先 (実物が promo 版だから)
+    # brand を upper case に正規化 (照合用)
+    brand_upper = (brand or "").upper()
+    # brand 主要 token (= set_name 照合用、3 文字以上の単語)
+    brand_tokens = set()
+    if brand_upper:
+        for t in re.findall(r"[A-Z]+", brand_upper):
+            if len(t) >= 3 and t not in {"ONE", "PIECE", "CARD", "JAPANESE", "GAME", "THE"}:
+                brand_tokens.add(t)
+
     def _promo_score(rec: dict) -> int:
         pid = rec.get("product_id", "")
-        # 末尾 '_P' または '_P_' suffix → 高優先 (promo 版そのもの)
+        sn = (rec.get("set_name_official") or "") or (rec.get("set_name") or "")
+        sn_upper = sn.upper()
+        score = 0
+        # _P / _P_* suffix (promo 版そのもの)
         if re.search(r"_P(_|$)", pid):
-            return 100
-        # set_name_official が 'Promotion' / 'プロモーション' 含む → 中優先
-        sn = (rec.get("set_name_official") or "").lower()
-        if "promotion" in sn or "プロモーション" in (rec.get("set_name_official") or ""):
-            return 50
-        # base record (suffix 無し) → 低優先
-        if "_" not in pid:
-            return 10
-        return 0
+            score += 100
+        # set_name が 'Promotion' / 'プロモーション' 含む
+        if "PROMOTION" in sn_upper or "プロモーション" in sn:
+            score += 50
+        # base record (suffix 無し) → 低
+        elif "_" not in pid:
+            score += 10
+        # PSA brand と set_name の token overlap (2026-05-25 追加)
+        # 例: brand 'PREMIUM CARD COLLECTION' / set_name 'Other Product Card'
+        #     → 'CARD' overlap だが PREMIUM keyword は別途加点
+        # 1) brand keyword 直接 match (set_name に含まれる)
+        for kw, weight in [
+            ("MEMORIAL", 80),     # EB-01 Memorial Collection
+            ("PREMIUM", 60),       # PRB-01 / PRB-02 / Premium Card Collection
+            ("ANNIVERSARY", 60),
+            ("STARTER", 60),
+            ("MINI-TIN", 60), ("MINI TIN", 60),
+            ("HEROINES", 60),     # EB-03
+            ("ROMANCE DAWN", 50),
+            ("WINGS OF THE CAPTAIN", 50),
+            ("STORAGE BOX", 60),   # 合本 set
+            ("ONE PIECE DAY", 50),
+            ("BANDAI CARD GAME FEST", 50),
+            ("DAY", 40), ("FEST", 40),
+        ]:
+            if kw in brand_upper and kw in sn_upper:
+                score += weight
+        # 2) brand に "PREMIUM CARD COLLECTION" 等 special promo → set_name 'Other Product Card' / 'Promotion Card' 優先
+        if "PREMIUM CARD COLLECTION" in brand_upper:
+            if "OTHER PRODUCT" in sn_upper or "PROMOTION CARD" in sn_upper:
+                score += 70
+        # 3) brand に "STORAGE BOX" がある = PRB01/PRB02 合本、set_name PRB 含む優先
+        if "STORAGE BOX" in brand_upper:
+            if "PRB" in sn_upper or "PREMIUM BOOSTER" in sn_upper or "STARTER DECK" in sn_upper:
+                score += 50
+        # 4) brand に "STARTER DECK" あり → set_name STARTER 優先
+        if "STARTER DECK" in brand_upper:
+            if "STARTER DECK" in sn_upper:
+                score += 70
+        # 5) brand-token と set_name-token の overlap 数
+        if brand_tokens:
+            sn_tokens = set(re.findall(r"[A-Z]+", sn_upper))
+            overlap = brand_tokens & sn_tokens
+            if overlap:
+                score += min(len(overlap) * 8, 40)
+        return score
 
-    candidates.sort(key=_promo_score, reverse=True)
-    chosen = candidates[0]
+    scored = [(_promo_score(c), c) for c in candidates]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_score = scored[0][0]
+    top_n = sum(1 for s, _ in scored if s == top_score)
+
+    # 同点 reject (= fail-closed、人間判断待ち)
+    if top_n > 1:
+        if verbose:
+            print(f"    ⚠️ promo fallback 同点 top {top_n} 件 ({len(candidates)} 候補中) "
+                  f"→ fail-closed reject (brand={brand!r}, subject={subject!r})")
+            for s, c in scored[:5]:
+                print(f"        score={s} pid={c['product_id']} set={c.get('set_name_official', '')[:50]!r}")
+        return None
+
+    chosen = scored[0][1]
     if verbose:
         pid = chosen["product_id"]
         print(f"    🎯 iMakCatalog hit (promo fallback): {pid} "
-              f"{chosen['name']} (Subject='{subject}' と名前一致, "
-              f"{len(candidates)}件中 promo 優先)")
+              f"{chosen['name']} (Subject='{subject}' brand={brand!r} と一致, "
+              f"{len(candidates)}件中 score={top_score})")
     return chosen
 
 

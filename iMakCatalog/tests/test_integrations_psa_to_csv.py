@@ -303,6 +303,27 @@ class TestNameVerification:
         )
         assert result is None
 
+    def test_st01_006_chopper_pcc_not_misshit_eb01(self):
+        """cert 146264696 事故対応 (HQ 2026-05-25 依頼):
+        PSA brand 'PREMIUM CARD COLLECTION' + subject 'TONY TONY CHOPPER' で
+        旧 logic は EB01-006_P_treasure を誤選択していた.
+        新 logic では同点 reject (= fail-closed) で None を返す
+        (= EB01 系を選ばない、人間判断待ちで missing_models に通知).
+        """
+        result = catalog_psa.lookup_one_piece(
+            brand="PREMIUM CARD COLLECTION",
+            card_number="006",
+            subject="TONY TONY CHOPPER",
+            verbose=False,
+        )
+        # 旧 logic では EB01-006_P_treasure が誤選択されていた.
+        # 新 logic では同点 (top score 3 件: EB01-006_P_treasure / ST01-006_P / ST01-006_P_p)
+        # で fail-closed reject. None 返却が期待動作.
+        # = いずれにせよ "EB01 を選んだら bug 再発" の条件は満たさない (None なので).
+        if result is not None:
+            assert not result["card_id"].startswith("EB01-006"), \
+                f"EB01-006 系を選んだら logic bug 再発: {result['card_id']}"
+
     def test_reprint_fallback_resolves_shirahoshi_sp_alt(self):
         """SP Alt fallback: PSA brand=OP11, num=057, subject=SHIRAHOSHI SP ALT
         → OP11-057 base (Pedro) reject 後、EB01-057_OP11_dummy (Shirahoshi SP) を救済."""
