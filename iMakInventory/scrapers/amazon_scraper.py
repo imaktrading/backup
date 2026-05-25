@@ -380,40 +380,42 @@ def fetch_product_inventory(
 ) -> Optional[dict]:
     """Amazon.co.jp 商品 URL から在庫・価格情報を取得.
 
-    判定戦略 (2026-04-30 personalized buy box 対応版):
-      1. requests で素早く判定:
-         - cart-button あり → IN_STOCK 確定 (高速 path)
-         - outOfStock div あり → SOLD 確定
-         - unqualifiedBuyBox あり → ★Selenium fallback で再判定 (login cookie で
-                                     personalized buy box が見える可能性)
-         - 何もなし / CAPTCHA → Selenium fallback
-      2. Selenium fallback (Amazon login profile 経由):
-         - 同じ判定軸を再評価
-         - cart-button があれば IN_STOCK
-         - outOfStock / unqualifiedBuyBox なら SOLD
-         - その他 → None (real_err)
+    判定戦略 (2026-05-25 ログイン状態優先版):
+      Amazon の価格は **ログイン状態で見ると personalized 価格** (= clipped coupon,
+      member discount, prime price 等) が反映され、 ユーザーが ブラウザで実際に
+      見る値 と一致する。 unlogged-in requests では default 価格しか取れず、
+      ユーザー認識と乖離 (= 195 案件 ¥6,480 vs 実 ¥5,600)。
+      → driver (= login profile 持ち) が利用可能なら **常に Selenium 優先**。
+      requests は fallback (= driver なし時の最後の手段)。
 
     Args:
         url:                   Amazon 商品 URL
         driver:                外部から渡された Selenium driver (再利用、推奨)
-        use_selenium_fallback: True で Selenium fallback 有効
+                              None なら requests path のみ (= login なし、 default 価格)
+        use_selenium_fallback: True で Selenium fallback 有効 (= driver=None 時に新規生成)
     """
     asin = parse_asin(url) or ""
 
-    raw = _fetch_via_requests(url)
+    raw = None
 
-    # unqualifiedBuyBox 検出時 = personalized buy box が見えていない可能性
-    # → Selenium で login profile 経由で再取得
-    needs_selenium_recheck = (
-        raw is not None
-        and raw.get("in_stock") is False
-        and raw.get("_reason") == "unqualifiedBuyBox"
-    )
+    # driver 利用可能 → 最初から Selenium ログイン状態で価格取得 (= personalized 価格)
+    if driver is not None:
+        raw = _fetch_via_selenium(url, driver=driver)
 
-    if (raw is None or needs_selenium_recheck) and use_selenium_fallback:
-        sel_raw = _fetch_via_selenium(url, driver=driver)
-        if sel_raw is not None:
-            raw = sel_raw
+    # Selenium 失敗 or driver なし → requests に fallback
+    if raw is None:
+        raw = _fetch_via_requests(url)
+        # requests でも 旧 fallback trigger (= unqualifiedBuyBox) で Selenium 再試行
+        # ただし driver=None 時は use_selenium_fallback で新規生成
+        needs_selenium_recheck = (
+            raw is not None
+            and raw.get("in_stock") is False
+            and raw.get("_reason") == "unqualifiedBuyBox"
+        )
+        if (raw is None or needs_selenium_recheck) and use_selenium_fallback and driver is None:
+            sel_raw = _fetch_via_selenium(url, driver=None)
+            if sel_raw is not None:
+                raw = sel_raw
 
     if raw is None:
         return None
