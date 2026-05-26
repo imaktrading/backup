@@ -262,6 +262,14 @@ class HarvestPanel(tk.Tk):
         )
         tk.Entry(msel_row, textvariable=self.mercari_seller_limit_var, width=8,
                  font=("Consolas", 9)).pack(side="left", padx=(4, 0))
+        # Phase 2: Vision API で画像から card_id 認識
+        self.mercari_seller_vision_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            msel,
+            text="Vision で画像から card_id 認識 (= title 取れない時の補強、 1 件 ¥0.15 程度の API コスト)",
+            variable=self.mercari_seller_vision_var,
+            font=("Meiryo UI", 9)
+        ).pack(anchor="w", pady=(4, 0))
         tk.Label(msel,
                  text="※ 例: https://jp.mercari.com/user/profile/623636774  "
                       "出力先 = 中間スプシ seller_<id> タブ (= 自動 create、 タブ単位 dedup)",
@@ -867,6 +875,7 @@ class HarvestPanel(tk.Tk):
         exclude_sold = self.exclude_sold_var.get()
         effective_cap = mercari_seller.resolve_effective_cap(user_limit)
 
+        use_vision = self.mercari_seller_vision_var.get()
         self._set_status(f"メルカリセラー {seller_id} 出品収集中...")
         self._log("=== メルカリセラー 抽出 開始 ===")
         self._log(f"  seller_id  : {seller_id}")
@@ -874,6 +883,7 @@ class HarvestPanel(tk.Tk):
         self._log(f"  effective  : {effective_cap} (= min(ユーザー上限, HARD_CAP {mercari_seller.HARD_CAP_PER_SESSION}))")
         self._log(f"  headless   : {headless}")
         self._log(f"  SOLD除外   : {exclude_sold}")
+        self._log(f"  Vision 補強: {use_vision} (= 画像から card_id 認識、 title × Vision 合議)")
         self._log(f"  投入先     : 中間スプシ seller_{seller_id} タブ")
         try:
             def progress(cur, total, msg):
@@ -900,14 +910,25 @@ class HarvestPanel(tk.Tk):
                     f"続きは時間空けて別セッションで取得してください (bot 検出回避)"
                 )
 
-            # card_id で group 化 (= 同 card_id 主 + 補)
-            grouped_rows = mercari_seller.group_items_by_card_id(items)
+            # card_id で group 化 (= 同 card_id 主 + 補、 Vision 補強 任意)
+            vision_stats: dict = {}
+            if use_vision:
+                self._set_status(f"Vision で card_id 認識中... ({len(items)} 件)")
+            grouped_rows = mercari_seller.group_items_by_card_id(
+                items, use_vision=use_vision, vision_stats=vision_stats,
+            )
             aux_rows = sum(1 for r in grouped_rows if r.get("auxiliary_urls"))
             aux_urls = sum(len(r.get("auxiliary_urls") or []) for r in grouped_rows)
             self._log(
                 f"  group 化   : {len(items)} listings → {len(grouped_rows)} rows "
                 f"(= aux あり {aux_rows} rows, aux URL 計 {aux_urls})"
             )
+            if use_vision:
+                self._log(
+                    f"  Vision 統計: calls={vision_stats.get('vision_calls', 0)} "
+                    f"hits={vision_stats.get('vision_hits', 0)} "
+                    f"title_vs_vision_disagree={vision_stats.get('title_vs_vision_disagree', 0)}"
+                )
 
             if not grouped_rows:
                 self._set_status("収集 0 件、スプシ書込スキップ")

@@ -34,6 +34,10 @@ from scrapers.mercari_likes import (
     parse_item_id,
 )
 from scrapers.snkrdunk_official import extract_tcg_card_id
+from scrapers.vision_card_id import (
+    judge_card_id_from_image_url,
+    reconcile_title_and_vision,
+)
 
 
 # ============================================================================
@@ -290,12 +294,95 @@ def collect_seller_with_details(
 # ============================================================================
 # card_id group 化 (= 案 D、 同 card_id 主 + 補)
 # ============================================================================
-def group_items_by_card_id(items: list[dict]) -> list[dict]:
-    """items を title 由来 card_id でグループ化、 各 group を 1 row に変換.
+def pick_card_image_url(image_urls: list[str]) -> Optional[str]:
+    """画像 URL list から「カード本体画像」 と思われるものを選択.
+
+    メルカリ商品 page から取得した image_urls は **プロフィール画像が先頭に入る** ケース
+    があるため、 単純に [0] を採用すると Vision が誤判定する (= 「これはユーザーアバター
+    です」 NONE 返却)。 以下の優先順で 商品本体画像 を選ぶ:
+
+      1. URL に `/item/detail/` を含むもの (= 確実に商品画像)
+      2. URL に `/item/` を含むもの (= 商品系画像、 thumb 等)
+      3. `/thumb/members/` 以外の何か (= プロフィール画像でない、 best effort)
+      4. それ以外 (= 全部プロフィール画像) → None
+
+    Returns: 候補 URL (= str) または None
+    """
+    if not image_urls:
+        return None
+    valid = [u for u in image_urls if isinstance(u, str) and u]
+    if not valid:
+        return None
+    # 第一優先: /item/detail/
+    for url in valid:
+        if "/item/detail/" in url:
+            return url
+    # 第二優先: /item/
+    for url in valid:
+        if "/item/" in url:
+            return url
+    # 第三優先: /thumb/members/ 以外 (= プロフィール画像でない)
+    for url in valid:
+        if "/thumb/members/" not in url:
+            return url
+    # 全部プロフィール画像 → None (= Vision 呼出さない)
+    return None
+
+
+def _resolve_card_id_for_item(
+    item: dict,
+    use_vision: bool = False,
+    vision_stats: Optional[dict] = None,
+) -> Optional[str]:
+    """1 item に対し card_id を確定 (= title 抽出 + Vision 合議).
+
+    Args:
+        use_vision: True で Vision API による画像認識を併用 (= title が取れなくても
+            画像から取得を試みる、 title 取れた場合も Vision で 二重確認 + 不一致時 Vision 優先)
+        vision_stats: 統計用 dict (任意):
+            - "vision_calls": Vision API 呼出数
+            - "vision_hits": Vision で card_id 取れた数
+            - "title_vs_vision_disagree": title と Vision で 一致しなかった数
+
+    Returns: card_id (= "OP01-001" 等 大文字) or None
+    """
+    title = (item.get("title") or "").strip()
+    title_card_id = extract_tcg_card_id(title) if title else None
+    if not use_vision:
+        return title_card_id
+
+    # Vision 補強 (= カード本体画像を Claude Haiku Vision で識別、
+    # プロフィール画像 / 不適切画像 は pick_card_image_url で除外)
+    image_urls = item.get("image_urls") or []
+    image_url = pick_card_image_url(image_urls) or ""
+    vision_card_id = ""
+    if image_url:
+        if vision_stats is not None:
+            vision_stats["vision_calls"] = vision_stats.get("vision_calls", 0) + 1
+        vision_card_id = judge_card_id_from_image_url(image_url)
+        if vision_card_id and vision_stats is not None:
+            vision_stats["vision_hits"] = vision_stats.get("vision_hits", 0) + 1
+    if vision_stats is not None and title_card_id and vision_card_id and title_card_id.upper() != vision_card_id.upper():
+        vision_stats["title_vs_vision_disagree"] = vision_stats.get("title_vs_vision_disagree", 0) + 1
+
+    resolved = reconcile_title_and_vision(title_card_id or "", vision_card_id)
+    return resolved or None
+
+
+def group_items_by_card_id(
+    items: list[dict],
+    use_vision: bool = False,
+    vision_stats: Optional[dict] = None,
+) -> list[dict]:
+    """items を card_id (= title 抽出 + 任意で Vision 合議) でグループ化、 各 group を 1 row に変換.
+
+    Args:
+        use_vision: True で Vision API による画像 card_id 認識を併用 (Phase 2)
+        vision_stats: Vision 統計を入れる dict (= "vision_calls"/"vision_hits"/
+            "title_vs_vision_disagree" keys)
 
     各 row dict:
-      - card_id 取れた group: 主 (= 最安) + auxiliary_urls (= 残り 価格昇順、 最大 4 件、
-        AC-AG 5 列のうち AC は主以外なので AD-AG = 4 件まで)
+      - card_id 取れた group: 主 (= 最安) + auxiliary_urls (= 残り 価格昇順、 最大 5 件)
       - card_id 取れなかった item: 単独 row (= auxiliary_urls なし)
 
     入力 items は collect_seller_with_details の "items" 想定 (= mercari_likes 同 schema)。
@@ -305,8 +392,7 @@ def group_items_by_card_id(items: list[dict]) -> list[dict]:
     # 1) card_id でグループ化、 card_id 取れない item は None キーに集める
     groups: dict[Optional[str], list[dict]] = {}
     for item in items:
-        title = (item.get("title") or "").strip()
-        card_id = extract_tcg_card_id(title) if title else None
+        card_id = _resolve_card_id_for_item(item, use_vision=use_vision, vision_stats=vision_stats)
         groups.setdefault(card_id, []).append(item)
 
     # 2) 各 group を 1 row に変換
