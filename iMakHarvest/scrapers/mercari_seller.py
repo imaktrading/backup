@@ -56,8 +56,13 @@ HARD_CAP_PER_SESSION = 150
 DEFAULT_USER_LIMIT = 25
 
 # scroll 関連
-DEFAULT_LOAD_MORE_SCROLLS = 30  # profile page は scroll 主体 (= 1 scroll ≒ 5-10 件)
-DEFAULT_SCROLL_INTERVAL_SEC = 1.5
+# 5/26 user GUI 実行で「6 件で打切 + total_seen=6 (= 実際は 30+ 件)」 が発生 →
+# lazy load が初期 hydration 直後だと不安定、 scroll 間隔 / no_progress 閾値 / 初期待機
+# 全て延長して堅牢化。
+DEFAULT_LOAD_MORE_SCROLLS = 40  # profile page は scroll 主体 (= 1 scroll ≒ 5-10 件)
+DEFAULT_SCROLL_INTERVAL_SEC = 2.5  # 1.5s → 2.5s (lazy load 完了待ち)
+DEFAULT_INITIAL_PROFILE_WAIT_SEC = 18  # 初期 hydration、 12s → 18s (= profile page は重め)
+DEFAULT_NO_PROGRESS_THRESHOLD = 6  # 連続で listing 数増えなくても scroll 継続する回数
 
 
 # ============================================================================
@@ -125,8 +130,12 @@ def _scroll_until_enough(
     target_count: int,
     max_scrolls: int = DEFAULT_LOAD_MORE_SCROLLS,
     scroll_interval: float = DEFAULT_SCROLL_INTERVAL_SEC,
+    no_progress_threshold: int = DEFAULT_NO_PROGRESS_THRESHOLD,
 ) -> int:
     """profile page で target_count 件以上 listing が取れるまで scroll を続ける.
+
+    no_progress_threshold 連続で listing 数が増えなければ break (= page 末端 or lazy load 停止)。
+    閾値が低すぎると初期 hydration 直後の遅延を「停止」と誤認 → 5/26 fix で 3 → 6 に拡大。
 
     Returns: 取得件数 (= 最後の scroll 後の listing 件数)
     """
@@ -138,8 +147,7 @@ def _scroll_until_enough(
             return current
         if current == last_count:
             no_progress += 1
-            if no_progress >= 3:
-                # 3 連続で増えない → これ以上 scroll しても無駄 (= page 末端 or lazy load 停止)
+            if no_progress >= no_progress_threshold:
                 break
         else:
             no_progress = 0
@@ -155,7 +163,7 @@ def collect_seller_listing_urls(
     headless: bool = False,
     user_limit: Optional[int] = DEFAULT_USER_LIMIT,
     max_scrolls: int = DEFAULT_LOAD_MORE_SCROLLS,
-    initial_wait_sec: int = DEFAULT_INITIAL_WAIT_SEC,
+    initial_wait_sec: int = DEFAULT_INITIAL_PROFILE_WAIT_SEC,
 ) -> dict:
     """seller profile page から listing URL 一覧取得.
 
@@ -175,8 +183,8 @@ def collect_seller_listing_urls(
         effective_cap = resolve_effective_cap(user_limit)
         profile_url = build_seller_profile_url(seller_id)
         driver.get(profile_url)
-        # 初期 hydration 待機 (= mercari_likes と同パターン)
-        time.sleep(min(initial_wait_sec, 12))
+        # 初期 hydration 待機 (= profile page は重め、 5/26 fix で 12s → 18s 延長)
+        time.sleep(max(initial_wait_sec, DEFAULT_INITIAL_PROFILE_WAIT_SEC))
         # CAP + 1 件取れるまで scroll (= CAP 到達判定のため 1 件余分に取得を試みる)
         total_seen = _scroll_until_enough(
             driver,
@@ -209,7 +217,7 @@ def collect_seller_with_details(
     headless: bool = False,
     user_limit: Optional[int] = DEFAULT_USER_LIMIT,
     max_scrolls: int = DEFAULT_LOAD_MORE_SCROLLS,
-    initial_wait_sec: int = DEFAULT_INITIAL_WAIT_SEC,
+    initial_wait_sec: int = DEFAULT_INITIAL_PROFILE_WAIT_SEC,
     exclude_sold: bool = True,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> dict:
