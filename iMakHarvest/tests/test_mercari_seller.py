@@ -489,23 +489,50 @@ def _make_mock_button(displayed=True, enabled=True, raise_on_click=False):
 
 
 class TestClickLoadMoreIfExists:
-    """5/26 実機調査で `button[class*='showMoreButton']` は「自己紹介文 展開」 button
-    と判明 (= listing 用ではない、 parent class `merShowMore`)。
-    listing 用 button 未発見につき常に False を返す disabled 状態の確認。
+    """5/26 実機確定 (= フリマアシスト 拡張機能 + iMakHarvest chrome 検証):
+    listing 拡張 button = 「もっと見る(N)」 (= フリマアシスト 注入)
+    XPath `//button[contains(text(), 'もっと見る(')]` で「(」 付きに限定。
     """
 
-    def test_always_returns_false_when_disabled(self):
-        # listing 用 button 未発見、 click 試行せず False
+    def test_no_button_found(self):
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        drv = _make_mock_driver(found_elements=[])
+        assert _click_load_more_if_exists(drv) is False
+
+    def test_furima_assist_button_clicked(self):
+        # フリマアシスト button が発見されたら click 実行
         from scrapers.mercari_seller import _click_load_more_if_exists
         btn = _make_mock_button(displayed=True, enabled=True)
         drv = _make_mock_driver(found_elements=[btn])
+        assert _click_load_more_if_exists(drv) is True
+        btn.click.assert_called_once()
+
+    def test_button_not_displayed_skipped(self):
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        btn = _make_mock_button(displayed=False, enabled=True)
+        drv = _make_mock_driver(found_elements=[btn])
         assert _click_load_more_if_exists(drv) is False
-        # button.click は呼ばれない (= 「自己紹介展開」 を誤 click しない)
         btn.click.assert_not_called()
 
-    def test_no_button_no_click(self):
+    def test_button_disabled_skipped(self):
         from scrapers.mercari_seller import _click_load_more_if_exists
-        drv = _make_mock_driver(found_elements=[])
+        btn = _make_mock_button(displayed=True, enabled=False)
+        drv = _make_mock_driver(found_elements=[btn])
+        assert _click_load_more_if_exists(drv) is False
+
+    def test_click_exception_continues_to_next(self):
+        # 1 個目 click 失敗、 2 個目 success → True
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        btn_fail = _make_mock_button(displayed=True, enabled=True, raise_on_click=True)
+        btn_ok = _make_mock_button(displayed=True, enabled=True)
+        drv = _make_mock_driver(found_elements=[btn_fail, btn_ok])
+        assert _click_load_more_if_exists(drv) is True
+        btn_ok.click.assert_called_once()
+
+    def test_find_elements_exception_returns_false(self):
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        drv = MagicMock()
+        drv.find_elements = MagicMock(side_effect=RuntimeError("dom error"))
         assert _click_load_more_if_exists(drv) is False
 
 

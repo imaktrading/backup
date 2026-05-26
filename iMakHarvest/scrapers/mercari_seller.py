@@ -134,19 +134,64 @@ def _collect_listing_urls_from_page(driver) -> list[str]:
 
 
 def _click_load_more_if_exists(driver) -> bool:
-    """profile page の listing 用「もっとみる」 button があれば click、 成功なら True.
+    """profile page の listing 用「もっと見る(N)」 button があれば click、 成功なら True.
 
-    5/26 実機調査で発覚: `button[class*='showMoreButton']` (= class `showMoreButton__*`)
-    は **「自己紹介文 展開」 button** で listing 用ではない (= parent class `merShowMore`)。
-    click すると text が「もっとみる」 → 「閉じる」 に変わるだけで listing 増えない。
+    5/26 実機調査で確定 (= フリマアシスト 拡張機能 + iMakHarvest chrome 検証):
 
-    現状 メルカリ profile page の listing は **scroll で lazy load** する設計、
-    listing 用 button は存在しないか別 selector で未発見。 本関数は将来 listing 用
-    button が発見されるまで **常に False 返却** で disable 状態。
+    | button | 提供元 | 用途 | text | class | 親 |
+    |--------|--------|------|------|-------|-----|
+    | 自己紹介展開 | メルカリ ネイティブ | プロフィール文 折りたたみ展開 | 「もっとみる」 | `showMoreButton__*` | `merShowMore` |
+    | **listing 拡張** | **フリマアシスト** | listing 5 倍 (150 件) 展開 | **「もっと見る(N)」** | (なし) | `merCheckboxLabel` |
+    | フォロワー等 | メルカリ ネイティブ | 別セクション | 「もっと見る」 | (なし) | `merButton secondary__*` |
 
-    今後 listing 用 button の selector が見つかったらここに実装。
+    数字 (N) 付き「もっと見る(N)」 = フリマアシスト が DOM 注入した button、 click で
+    listing 拡張。 N は「あと何回 click 可能か」 の表示。
+    数字なし「もっと見る」 / 「もっとみる」 は listing 関係ないので除外する。
+
+    selector: XPath で `contains(text(), 'もっと見る(')` (= "(" 付きに限定)。
     """
-    return False  # listing 用 button 未発見、 scroll 主軸 logic に委ねる
+    try:
+        xpath = "//button[contains(text(), 'もっと見る(')]"
+        candidates = driver.find_elements(By.XPATH, xpath)
+    except Exception:
+        candidates = []
+    if not candidates:
+        return False
+    for btn in candidates:
+        try:
+            if not btn.is_displayed():
+                continue
+            if not btn.is_enabled():
+                continue
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+            time.sleep(0.3)
+            btn.click()
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _dismiss_alert_if_present(driver) -> Optional[str]:
+    """page に alert dialog があれば accept で dismiss、 dismiss した text を返す.
+
+    フリマアシスト が listing 全件 lazy load 完了時に「読込完了」 alert を出す挙動を
+    検出して、 dismiss + 完了 signal として扱う。
+    """
+    try:
+        alert = driver.switch_to.alert
+        text = alert.text
+        try:
+            alert.accept()
+        except Exception:
+            pass
+        return text
+    except Exception:
+        return None
+
+
+# フリマアシスト 完了 signal の alert text
+FURIMA_ASSIST_COMPLETE_ALERT_TEXT = "読込完了"
 
 
 def _load_until_enough(
@@ -175,6 +220,12 @@ def _load_until_enough(
     last_count = 0
     no_progress = 0
     for i in range(max_iterations):
+        # フリマアシスト「読込完了」 alert あれば dismiss + 全件 完了 signal で 即 return
+        alert_text = _dismiss_alert_if_present(driver)
+        if alert_text and FURIMA_ASSIST_COMPLETE_ALERT_TEXT in alert_text:
+            # フリマアシスト が listing 全件 fetch 完了通知 → loop 終了
+            return len(_collect_listing_urls_from_page(driver))
+
         current = len(_collect_listing_urls_from_page(driver))
         if current >= target_count:
             return current
@@ -193,6 +244,8 @@ def _load_until_enough(
             except Exception:
                 pass
         time.sleep(interval)
+    # 最終 alert dismiss + listing 数
+    _dismiss_alert_if_present(driver)
     return len(_collect_listing_urls_from_page(driver))
 
 
