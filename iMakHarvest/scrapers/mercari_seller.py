@@ -134,43 +134,19 @@ def _collect_listing_urls_from_page(driver) -> list[str]:
 
 
 def _click_load_more_if_exists(driver) -> bool:
-    """profile page の「もっとみる」 button があれば click、 成功なら True.
+    """profile page の listing 用「もっとみる」 button があれば click、 成功なら True.
 
-    1. CSS selector `button[class*='showMoreButton']` で第一試行
-    2. text contains 「もっとみる」 / 「もっと見る」 で fallback
-    button が見つからない or click 失敗時は False (= scroll fallback の signal)。
+    5/26 実機調査で発覚: `button[class*='showMoreButton']` (= class `showMoreButton__*`)
+    は **「自己紹介文 展開」 button** で listing 用ではない (= parent class `merShowMore`)。
+    click すると text が「もっとみる」 → 「閉じる」 に変わるだけで listing 増えない。
+
+    現状 メルカリ profile page の listing は **scroll で lazy load** する設計、
+    listing 用 button は存在しないか別 selector で未発見。 本関数は将来 listing 用
+    button が発見されるまで **常に False 返却** で disable 状態。
+
+    今後 listing 用 button の selector が見つかったらここに実装。
     """
-    candidates = []
-    try:
-        candidates = driver.find_elements(By.CSS_SELECTOR, SHOW_MORE_BUTTON_CSS)
-    except Exception:
-        candidates = []
-    if not candidates:
-        # XPath fallback (= text contains 検索)
-        for keyword in SHOW_MORE_BUTTON_TEXT_KEYWORDS:
-            try:
-                xpath = f"//button[contains(text(), '{keyword}')]"
-                candidates = driver.find_elements(By.XPATH, xpath)
-                if candidates:
-                    break
-            except Exception:
-                continue
-    if not candidates:
-        return False
-    for btn in candidates:
-        try:
-            if not btn.is_displayed():
-                continue
-            if not btn.is_enabled():
-                continue
-            # scrollIntoView で button を viewport 中央に → click 安定化
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-            time.sleep(0.3)
-            btn.click()
-            return True
-        except Exception:
-            continue
-    return False
+    return False  # listing 用 button 未発見、 scroll 主軸 logic に委ねる
 
 
 def _load_until_enough(
