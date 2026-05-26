@@ -303,9 +303,10 @@ class HarvestPanel(tk.Tk):
         mss_row = tk.Frame(mss)
         mss_row.pack(fill="x", pady=(4, 0))
         tk.Label(mss_row,
-                 text=f"最大抽出件数 (空欄/0 → HARD_CAP {mercari_shops_search.HARD_CAP_PER_SESSION} で打切):",
+                 text=f"最大抽出件数 (default {mercari_shops_search.DEFAULT_USER_LIMIT}、"
+                      f" 上限 HARD_CAP {mercari_shops_search.HARD_CAP_PER_SESSION}):",
                  font=("Meiryo UI", 9)).pack(side="left")
-        self.mss_limit_var = tk.StringVar(value="0")
+        self.mss_limit_var = tk.StringVar(value=str(mercari_shops_search.DEFAULT_USER_LIMIT))
         tk.Entry(mss_row, textvariable=self.mss_limit_var, width=8,
                  font=("Consolas", 9)).pack(side="left", padx=(4, 0))
         tk.Label(mss,
@@ -655,9 +656,11 @@ class HarvestPanel(tk.Tk):
                 messagebox.showerror(
                     "件数 不正",
                     f"最大抽出件数は 1 以上の整数で指定してください (入力値: {raw_limit!r})\n"
-                    f"空欄 / 0 = HARD_CAP {mercari_shops_search.HARD_CAP_PER_SESSION} で打切。",
+                    f"空欄/0 → DEFAULT {mercari_shops_search.DEFAULT_USER_LIMIT} 件、 "
+                    f"上限 HARD_CAP {mercari_shops_search.HARD_CAP_PER_SESSION}。",
                 )
                 return
+        # resolve_effective_cap 側で空欄/0 → DEFAULT_USER_LIMIT に解決される
         effective = mercari_shops_search.resolve_effective_cap(user_limit)
         if not messagebox.askyesno(
             "確認",

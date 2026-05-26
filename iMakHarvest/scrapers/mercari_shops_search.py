@@ -55,7 +55,10 @@ DEFAULT_INITIAL_WAIT_SEC = 15  # 初期 hydration
 
 # HARD CAP (= POC 実機で 759 件取れた、 1000 件で安全マージン)
 HARD_CAP_PER_SESSION = 1000
-DEFAULT_USER_LIMIT = 0  # = 上限なし (= HARD_CAP まで)
+# default user 上限 (= 件数 空欄/未指定時の値、 5/26 user 判断で 200 件採用)
+# 自動 scroll が際限なく取得するので default に明示 cap を入れて事故防止、
+# 1000 件 まで取りたい場合は user が明示的に件数 entry に入力する運用。
+DEFAULT_USER_LIMIT = 200
 
 # rate limit (= 詳細取得時、 mercari_seller と同値)
 DEFAULT_DETAIL_RATE_LIMIT_MIN_SEC = 2.0
@@ -186,8 +189,17 @@ def _scroll_until_done(
 
 
 def resolve_effective_cap(user_limit: Optional[int]) -> int:
+    """件数 → 実効 cap.
+
+    - user_limit が None / 0 以下 → DEFAULT_USER_LIMIT (= 200、 5/26 user 判断)
+    - 正の int → min(user_limit, HARD_CAP_PER_SESSION)
+
+    seller 版と異なる: shops は default が **DEFAULT_USER_LIMIT** (= 上限なし不可)、
+    seller は default が HARD_CAP_PER_SESSION。 shops は scroll 自動展開のため
+    暴走防止 default を意図的に低めに設定。
+    """
     if user_limit is None or not isinstance(user_limit, int) or user_limit <= 0:
-        return HARD_CAP_PER_SESSION
+        return min(DEFAULT_USER_LIMIT, HARD_CAP_PER_SESSION)
     return min(user_limit, HARD_CAP_PER_SESSION)
 
 

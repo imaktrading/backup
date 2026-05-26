@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from scrapers.mercari_shops_search import (
+    DEFAULT_USER_LIMIT,
     HARD_CAP_PER_SESSION,
     parse_product_id,
     parse_search_url,
@@ -73,17 +74,25 @@ class TestParseProductId:
 
 
 class TestResolveEffectiveCap:
-    def test_none(self):
-        assert resolve_effective_cap(None) == HARD_CAP_PER_SESSION
+    def test_none_returns_default(self):
+        # shops は自動 scroll 暴走防止のため None → DEFAULT_USER_LIMIT (= 200)
+        assert resolve_effective_cap(None) == min(DEFAULT_USER_LIMIT, HARD_CAP_PER_SESSION)
 
-    def test_zero(self):
-        assert resolve_effective_cap(0) == HARD_CAP_PER_SESSION
+    def test_zero_returns_default(self):
+        assert resolve_effective_cap(0) == min(DEFAULT_USER_LIMIT, HARD_CAP_PER_SESSION)
+
+    def test_negative_returns_default(self):
+        assert resolve_effective_cap(-5) == min(DEFAULT_USER_LIMIT, HARD_CAP_PER_SESSION)
 
     def test_under_cap(self):
         assert resolve_effective_cap(50) == 50
 
     def test_over_cap(self):
         assert resolve_effective_cap(HARD_CAP_PER_SESSION + 500) == HARD_CAP_PER_SESSION
+
+    def test_default_is_200(self):
+        # ユーザー判断 (= 5/26、 自動 scroll 暴走防止)
+        assert DEFAULT_USER_LIMIT == 200
 
 
 class TestBuildShopsTabName:
