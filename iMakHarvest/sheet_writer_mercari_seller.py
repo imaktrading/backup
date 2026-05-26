@@ -198,7 +198,18 @@ def append_seller_items(
         new_rows.append(row[:column_count])
 
     if new_rows:
-        ws.append_rows(new_rows, value_input_option="USER_ENTERED")
+        # ws.append_rows() はスプシのテーブル範囲検出で誤った col に書き込むケースが
+        # ある (= 5/26 ユーザー GUI 実行で AC 列から書込発生)。 明示的に "A<next_row>"
+        # を起点とした update で A 列から書込を強制する (fail-safe)。
+        last_row = len(ws.get_all_values())
+        next_row = last_row + 1
+        end_col_letter = _col_to_letter(column_count)
+        end_row = next_row + len(new_rows) - 1
+        ws.update(
+            range_name=f"A{next_row}:{end_col_letter}{end_row}",
+            values=new_rows,
+            value_input_option="USER_ENTERED",
+        )
 
     return {
         "tab": f"seller_{seller_id}",
