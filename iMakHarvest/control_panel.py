@@ -904,9 +904,15 @@ class HarvestPanel(tk.Tk):
                 f"CAP到達 {result['cap_hit']}"
             )
             if result["cap_hit"]:
+                hard_cap = mercari_seller.HARD_CAP_PER_SESSION
+                cap_label = (
+                    f"ハード CAP {hard_cap} 件"
+                    if effective_cap >= hard_cap
+                    else f"ユーザー上限 {effective_cap} 件"
+                )
                 self._log(
-                    f"  ⚠ ハード CAP {mercari_seller.HARD_CAP_PER_SESSION} 件 到達 = "
-                    f"残り未取得 {max(0, result['total_seen'] - effective_cap)} 件、 "
+                    f"  ⚠ {cap_label} 到達 = 残り未取得 "
+                    f"{max(0, result['total_seen'] - effective_cap)} 件、 "
                     f"続きは時間空けて別セッションで取得してください (bot 検出回避)"
                 )
 
