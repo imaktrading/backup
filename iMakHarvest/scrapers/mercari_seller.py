@@ -353,7 +353,12 @@ def collect_seller_listing_urls(
     if own_driver:
         driver = create_driver(headless=headless)
     try:
-        effective_cap = resolve_effective_cap(user_limit)
+        # manual mode は user 手動 click = bot 検出リスク 低 → HARD_CAP 撤廃
+        # (= user が visible にした全件 scrape、 通常 user 行動範囲内)
+        if wait_for_manual_load:
+            effective_cap = user_limit if (isinstance(user_limit, int) and user_limit > 0) else 10000
+        else:
+            effective_cap = resolve_effective_cap(user_limit)
         profile_url = build_seller_profile_url(seller_id)
         driver.get(profile_url)
         # 5/26 fix (= HQ 推奨 A 案): GUI subprocess 経由で chrome が background 化すると
