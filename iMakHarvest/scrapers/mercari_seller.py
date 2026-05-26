@@ -183,6 +183,18 @@ def collect_seller_listing_urls(
         effective_cap = resolve_effective_cap(user_limit)
         profile_url = build_seller_profile_url(seller_id)
         driver.get(profile_url)
+        # 5/26 fix (= HQ 推奨 A 案): GUI subprocess 経由で chrome が background 化すると
+        # メルカリ profile page の lazy load トリガーが発火しない問題対策。
+        # window.focus() + maximize_window() で chrome を強制 active 化、
+        # render 計算 + scroll event を foreground 条件に近づける。
+        try:
+            driver.maximize_window()
+        except Exception:
+            pass
+        try:
+            driver.execute_script("window.focus();")
+        except Exception:
+            pass
         # 初期 hydration 待機 (= profile page は重め、 5/26 fix で 12s → 18s 延長)
         time.sleep(max(initial_wait_sec, DEFAULT_INITIAL_PROFILE_WAIT_SEC))
         # CAP + 1 件取れるまで scroll (= CAP 到達判定のため 1 件余分に取得を試みる)
