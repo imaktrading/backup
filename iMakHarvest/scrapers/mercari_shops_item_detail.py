@@ -35,7 +35,14 @@ from scrapers.mercari_item_detail import (  # noqa: F401
 # ============================================================================
 # Shops 専用 selector / 定数
 # ============================================================================
-# 購入ボタン (在庫判定の主要マーカー、通常 Mercari の checkout-button-container 相当)
+# title testid (= ハイドレーション 完了 検出に最も安定。 旧 variant-purchase-button
+# は 5/26 DOM 変更で testid 属性が削除されたため使用不可)
+SHOPS_TITLE_TESTID_SELECTOR = '[data-testid="display-name"]'
+
+# 「購入手続きへ」 button (= 在庫判定用、 testid 属性 無し → text で XPath 探索)
+SHOPS_PURCHASE_BUTTON_XPATH = "//button[contains(text(), '購入手続き')]"
+
+# 旧 互換 (= 5/6 まで存在した testid、 5/26 削除確認、 fallback として保持)
 SHOPS_PURCHASE_BUTTON_SELECTOR = '[data-testid="variant-purchase-button"]'
 
 # 商品画像 testid: image-0, image-1, ... 連番 (DOM 確認では image-0..image-8)
@@ -80,14 +87,22 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
     except WebDriverException:
         return None
 
-    # ハイドレーション待ち: variant-purchase-button 出現 or 削除キーワード
-    button_found = False
+    # ハイドレーション待ち: display-name (= title testid) 出現 or 削除キーワード
+    # (= 旧 variant-purchase-button は 5/26 DOM 変更で testid 削除、 display-name は安定)
+    title_found = False
     deleted = False
     end_at = time.time() + DETAIL_WAIT_SEC
     while time.time() < end_at:
         try:
+            driver.find_element(By.CSS_SELECTOR, SHOPS_TITLE_TESTID_SELECTOR)
+            title_found = True
+            break
+        except NoSuchElementException:
+            pass
+        # 旧 testid fallback (= 互換維持、 もし戻ったら hit する)
+        try:
             driver.find_element(By.CSS_SELECTOR, SHOPS_PURCHASE_BUTTON_SELECTOR)
-            button_found = True
+            title_found = True
             break
         except NoSuchElementException:
             pass
@@ -112,16 +127,28 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
             "size": "",
             "color": "",
         }
-    if not button_found:
+    if not title_found:
         return None
 
-    # 在庫判定: button 出現済 + 売切れキーワードの有無
+    # 在庫判定:
+    #   - 売切れキーワード (= "売り切れ" / "在庫切れ" 等) があれば False
+    #   - 「購入手続きへ」 button (XPath text 探索) があれば True
+    #   - どちらも無ければ True (= search?in_stock=true で絞り済前提、 安全側 True)
     try:
         body_text = driver.find_element(By.TAG_NAME, "body").text or ""
     except Exception:
         body_text = ""
     is_out_of_stock = any(kw in body_text for kw in SHOPS_OUT_OF_STOCK_KEYWORDS)
-    in_stock = not is_out_of_stock
+    if is_out_of_stock:
+        in_stock = False
+    else:
+        try:
+            driver.find_element(By.XPATH, SHOPS_PURCHASE_BUTTON_XPATH)
+            in_stock = True
+        except NoSuchElementException:
+            # button text 探索失敗、 売切れ text もなし → 安全側 True
+            # (= mercari-shops.com search?in_stock=true で絞り済、 詳細 page 表示できてるなら現役)
+            in_stock = True
     status = "ON_SALE" if in_stock else "SOLD_OUT"
 
     # 通常 Mercari と共通の field 抽出 (testid fallback により Shops でも動作)

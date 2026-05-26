@@ -26,11 +26,13 @@ from scrapers import (
     mercari_likes,
     mercari_seller,
     mercari_shops_likes,
+    mercari_shops_search,
     snkrdunk_favorites,
     snkrdunk_official,
     workman_official,
 )
 from sheet_writer_mercari_seller import append_seller_items
+from sheet_writer_mercari_shops import append_shops_items
 from sheet_writer import HIGH_SHEET_ID, LISTINGS_GID, LOW_SHEET_ID, write_to_sheet
 from sheet_writer_amazon import write_to_sheet as write_to_sheet_amazon
 from sheet_writer_snkrdunk_aux import (
@@ -140,6 +142,10 @@ SERVICE_DEFS = [
     ("mercari_seller", "メルカリセラー",
      "メルカリ user profile URL (= /user/profile/<id>) から出品中商品を収集 "
      "→ 中間スプシ seller_<id> タブに append (= 同 card_id は AC-AG 補配置)",
+     True, ""),
+    ("mercari_shops_search", "メルカリShop検索",
+     "mercari-shops.com/search?shop_ids=...&keyword=... から listing 収集 "
+     "→ 中間スプシ shops_<shop_id>_<kw> タブに append (= scroll で全件、 ログアウト匿名)",
      True, ""),
 ]
 
@@ -282,6 +288,32 @@ class HarvestPanel(tk.Tk):
         tk.Label(msel,
                  text="※ 例: https://jp.mercari.com/user/profile/623636774  "
                       "出力先 = 中間スプシ seller_<id> タブ (= 自動 create、 タブ単位 dedup)",
+                 fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
+
+        # メルカリShop検索 (= mercari-shops.com search URL から listing 抽出)
+        mss = tk.LabelFrame(
+            parent,
+            text="メルカリShop検索 (= mercari-shops.com/search URL から listing 抽出)",
+            padx=10, pady=8, font=("Meiryo UI", 10),
+        )
+        mss.pack(fill="x", padx=12, pady=4)
+        self.mss_url_var = tk.StringVar()
+        tk.Entry(mss, textvariable=self.mss_url_var,
+                 font=("Consolas", 9)).pack(fill="x")
+        mss_row = tk.Frame(mss)
+        mss_row.pack(fill="x", pady=(4, 0))
+        tk.Label(mss_row,
+                 text=f"最大抽出件数 (空欄/0 → HARD_CAP {mercari_shops_search.HARD_CAP_PER_SESSION} で打切):",
+                 font=("Meiryo UI", 9)).pack(side="left")
+        self.mss_limit_var = tk.StringVar(value="0")
+        tk.Entry(mss_row, textvariable=self.mss_limit_var, width=8,
+                 font=("Consolas", 9)).pack(side="left", padx=(4, 0))
+        tk.Label(mss,
+                 text="※ 例: https://mercari-shops.com/search?shop_ids=acTx9sbekaEzMoj8WRF8EJ"
+                      "&keyword=サンリオ&in_stock=true\n"
+                      "出力先 = 中間スプシ shops_<shop_id>_<kw> タブ (= 自動 create + 列幅継承、 タブ単位 dedup)\n"
+                      "scroll lazy load (= 「もっと見る」 button 不要、 フリマアシスト install 不要)、 "
+                      f"ハード CAP {mercari_shops_search.HARD_CAP_PER_SESSION} 件",
                  fg="#666", font=("Meiryo UI", 8)).pack(anchor="w", pady=(4, 0))
 
         # SNKRDUNK オプション (PSA10 補仕入 URL 投入)
@@ -429,6 +461,9 @@ class HarvestPanel(tk.Tk):
             return
         if key == "mercari_seller":
             self._dispatch_mercari_seller()
+            return
+        if key == "mercari_shops_search":
+            self._dispatch_mercari_shops_search()
             return
         messagebox.showinfo("未実装", f"{key} は未実装です。")
 
@@ -588,6 +623,56 @@ class HarvestPanel(tk.Tk):
         threading.Thread(
             target=self._run_mercari_seller_thread,
             args=(seller_id, user_limit),
+            daemon=True,
+        ).start()
+
+    def _dispatch_mercari_shops_search(self) -> None:
+        url = (self.mss_url_var.get() or "").strip()
+        if not url:
+            messagebox.showerror(
+                "URL 未入力",
+                "メルカリShop検索 URL を入力してください。\n"
+                "例: https://mercari-shops.com/search?shop_ids=...&keyword=...&in_stock=true",
+            )
+            return
+        parsed = mercari_shops_search.parse_search_url(url)
+        if parsed is None:
+            messagebox.showerror(
+                "URL 不正",
+                "メルカリShop検索 URL の形式が不正です。\n"
+                "正しい domain は mercari-shops.com/search で、 query に "
+                "shop_ids / keyword / in_stock を含むこと。",
+            )
+            return
+        raw_limit = (self.mss_limit_var.get() or "").strip()
+        user_limit: Optional[int] = None
+        if raw_limit:
+            try:
+                v = int(raw_limit)
+                if v > 0:
+                    user_limit = v
+            except ValueError:
+                messagebox.showerror(
+                    "件数 不正",
+                    f"最大抽出件数は 1 以上の整数で指定してください (入力値: {raw_limit!r})\n"
+                    f"空欄 / 0 = HARD_CAP {mercari_shops_search.HARD_CAP_PER_SESSION} で打切。",
+                )
+                return
+        effective = mercari_shops_search.resolve_effective_cap(user_limit)
+        if not messagebox.askyesno(
+            "確認",
+            f"メルカリShop検索を最大 {effective} 件まで収集し、\n"
+            f"shop_id={parsed.get('shop_id') or '(なし)'}, "
+            f"keyword={parsed.get('keyword') or '(なし)'}\n"
+            f"中間スプシ shops_* タブに追記します。\n\n"
+            f"※ ログアウト匿名 + scroll lazy load (= フリマアシスト 不要)\n"
+            f"※ ハード CAP {mercari_shops_search.HARD_CAP_PER_SESSION} 件\n\n"
+            f"実行しますか？",
+        ):
+            return
+        threading.Thread(
+            target=self._run_mercari_shops_search_thread,
+            args=(url, user_limit),
             daemon=True,
         ).start()
 
@@ -980,6 +1065,93 @@ class HarvestPanel(tk.Tk):
                 f"メルカリセラー {seller_id}\n\n"
                 f"listing 取得: {len(items)} 件 (SOLD skip {result['skipped_sold']})\n"
                 f"group 化:    {len(grouped_rows)} rows (aux あり {aux_rows})\n"
+                f"スプシ書込:   新規 {ws_result['appended']} / 既出 skip {ws_result['skipped_existing']}\n"
+                f"CAP 到達:    {result['cap_hit']}",
+            )
+        except Exception as e:
+            self._log(f"!!! エラー: {e}")
+            self._set_status(f"失敗: {type(e).__name__}")
+            messagebox.showerror("エラー", str(e))
+        finally:
+            self._running = False
+            self._set_buttons_state(disabled=False)
+
+    def _run_mercari_shops_search_thread(
+        self,
+        search_url: str,
+        user_limit: Optional[int],
+    ) -> None:
+        """メルカリShop検索 → 中間スプシ shops_* タブに append."""
+        self._running = True
+        self._set_buttons_state(disabled=True)
+        headless = not self.show_browser_var.get()
+        effective_cap = mercari_shops_search.resolve_effective_cap(user_limit)
+        parsed = mercari_shops_search.parse_search_url(search_url) or {}
+        self._set_status("メルカリShop検索 listing 収集中...")
+        self._log("=== メルカリShop検索 抽出 開始 ===")
+        self._log(f"  URL        : {search_url}")
+        self._log(f"  shop_id    : {parsed.get('shop_id') or '(なし)'}")
+        self._log(f"  keyword    : {parsed.get('keyword') or '(なし)'}")
+        self._log(f"  ユーザー上限: {user_limit if user_limit else '(無制限希望)'}")
+        self._log(f"  effective  : {effective_cap} (= min(ユーザー上限, HARD_CAP {mercari_shops_search.HARD_CAP_PER_SESSION}))")
+        self._log(f"  headless   : {headless}")
+        try:
+            def progress(cur, total, msg):
+                self._set_status(f"商品詳細取得中... [{cur}/{total}]")
+                self._log(f"  [{cur}/{total}] {msg}")
+
+            def listing_progress(scroll_idx, count, msg):
+                self._set_status(f"listing scroll 中... ({count} 件)")
+                self._log(f"  [scroll] {msg}")
+
+            result = mercari_shops_search.collect_shops_search_with_details(
+                search_url=search_url,
+                headless=headless,
+                user_limit=user_limit,
+                progress_callback=progress,
+                listing_progress_callback=listing_progress,
+            )
+            items = result["items"]
+            self._log(
+                f"  収集結果   : 出現 {result['total_seen']} 件 / "
+                f"取得 {len(items)} 件 / "
+                f"詳細fail {result['skipped_detail_failed']} / "
+                f"CAP到達 {result['cap_hit']}"
+            )
+            if result["cap_hit"]:
+                self._log(
+                    f"  ⚠ HARD CAP {mercari_shops_search.HARD_CAP_PER_SESSION} 件 到達 = "
+                    f"残り未取得 {max(0, result['total_seen'] - effective_cap)} 件"
+                )
+            if not items:
+                self._set_status("収集 0 件、スプシ書込スキップ")
+                messagebox.showwarning(
+                    "収集 0 件",
+                    "メルカリShop検索 listing が 1 件も取得できませんでした。\n"
+                    "(検索結果ゼロ / 全件 fetch 失敗 / DOM 構造変更 を確認してください)"
+                )
+                return
+
+            self._set_status(f"スプシ書込中... ({len(items)} rows)")
+            ws_result = append_shops_items(
+                items=items,
+                shop_id=result.get("shop_id"),
+                keyword=result.get("keyword"),
+            )
+            self._log(
+                f"  書込結果   : tab={ws_result['tab']} "
+                f"appended={ws_result['appended']} "
+                f"skipped_existing={ws_result['skipped_existing']} "
+                f"input={ws_result['input']}"
+            )
+            self._set_status(
+                f"完了: 新規 {ws_result['appended']} rows / 既出 skip {ws_result['skipped_existing']} rows"
+            )
+            self._log("=== 完了 ===")
+            messagebox.showinfo(
+                "完了",
+                f"メルカリShop検索\n\n"
+                f"listing 取得: {len(items)} 件 (詳細fail {result['skipped_detail_failed']})\n"
                 f"スプシ書込:   新規 {ws_result['appended']} / 既出 skip {ws_result['skipped_existing']}\n"
                 f"CAP 到達:    {result['cap_hit']}",
             )
