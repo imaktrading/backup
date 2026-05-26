@@ -29,6 +29,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+import os
+import random
+
 from scrapers import mercari_likes
 from scrapers.mercari_likes import (
     DEFAULT_AFTER_CLICK_SLEEP,
@@ -79,6 +82,25 @@ DEFAULT_AFTER_CLICK_WAIT_SEC = 2.0  # button click 後の lazy load 完了待ち
 DEFAULT_MANUAL_WAIT_POLL_SEC = 3.0  # polling 間隔
 DEFAULT_MANUAL_WAIT_STABLE_SEC = 15.0  # 連続 N 秒 listing 増えなければ完了とみなす
 DEFAULT_MANUAL_WAIT_MAX_SEC = 600  # 最大待機時間 (= 10 分)
+
+# 5/26 user 確認: メルカリは ログアウト state でも seller profile 見れる
+# → mercari_seller 専用 anonymous chrome profile で運用 (= 本アカ紐付けなし、 ban リスク本アカ無事)
+# 既存 chrome_profile_mercari (= login + いいね用) と完全分離
+CHROME_PROFILE_DIR_ANON = r"C:\Users\imax2\local_data\iMakHarvest\chrome_profile_mercari_seller_anon"
+
+# rate limit (= 詳細取得時の bot 検出回避、 人間っぽい間隔)
+DEFAULT_DETAIL_RATE_LIMIT_MIN_SEC = 2.0  # 各 item 詳細取得後の最小 sleep
+DEFAULT_DETAIL_RATE_LIMIT_MAX_SEC = 4.0  # 同 最大 sleep (= jitter 上限)
+
+
+def create_anonymous_driver(headless: bool = False):
+    """mercari_seller 専用 anonymous chrome driver 起動 (= 既存 login profile と分離).
+
+    chrome_profile_mercari_seller_anon を使用、 メルカリは未 login state で運用。
+    フリマアシスト 拡張機能は初回 user 操作で install (= --install-extension-anon mode)。
+    """
+    os.makedirs(CHROME_PROFILE_DIR_ANON, exist_ok=True)
+    return mercari_likes.create_driver(headless=headless, profile_dir=CHROME_PROFILE_DIR_ANON)
 
 
 # ============================================================================
@@ -351,7 +373,8 @@ def collect_seller_listing_urls(
     """
     own_driver = driver is None
     if own_driver:
-        driver = create_driver(headless=headless)
+        # mercari_seller は anonymous profile (= ログアウト、 本アカ紐付けなし) で運用
+        driver = create_anonymous_driver(headless=headless)
     try:
         # manual mode は user 手動 click = bot 検出リスク 低 → HARD_CAP 撤廃
         # (= user が visible にした全件 scrape、 通常 user 行動範囲内)
@@ -425,6 +448,8 @@ def collect_seller_with_details(
     manual_wait_stable_sec: float = DEFAULT_MANUAL_WAIT_STABLE_SEC,
     manual_wait_max_sec: int = DEFAULT_MANUAL_WAIT_MAX_SEC,
     manual_progress_callback: Optional[Callable[[int, str], None]] = None,
+    rate_limit_min_sec: float = DEFAULT_DETAIL_RATE_LIMIT_MIN_SEC,
+    rate_limit_max_sec: float = DEFAULT_DETAIL_RATE_LIMIT_MAX_SEC,
 ) -> dict:
     """seller listing 全件 + 詳細 (title/price/image/condition/in_stock) を取得.
 
@@ -443,7 +468,8 @@ def collect_seller_with_details(
 
     own_driver = driver is None
     if own_driver:
-        driver = create_driver(headless=headless)
+        # mercari_seller は anonymous profile (= ログアウト、 本アカ紐付けなし) で運用
+        driver = create_anonymous_driver(headless=headless)
     try:
         url_result = collect_seller_listing_urls(
             seller_id=seller_id,
@@ -489,8 +515,14 @@ def collect_seller_with_details(
             # SOLD 除外 (= in_stock=False のみ skip、 None=不明 は安全側で含める)
             if exclude_sold and merged.get("in_stock") is False:
                 skipped_sold += 1
+                # SOLD 除外時も rate limit (= 連続アクセス回避)
+                if i < total and rate_limit_max_sec > 0:
+                    time.sleep(random.uniform(rate_limit_min_sec, rate_limit_max_sec))
                 continue
             items.append(merged)
+            # rate limit (= bot 検出回避、 人間っぽい間隔)
+            if i < total and rate_limit_max_sec > 0:
+                time.sleep(random.uniform(rate_limit_min_sec, rate_limit_max_sec))
         return {
             "seller_id": seller_id,
             "items": items,
@@ -635,3 +667,46 @@ def group_items_by_card_id(
         main_row["auxiliary_urls"] = [it["url"] for it in aux_items if it.get("url")]
         result.append(main_row)
     return result
+
+
+def setup_anonymous_chrome(timeout_sec: int = 600) -> None:
+    """初回 setup: anonymous chrome 起動 → user が chrome web store で フリマアシスト install.
+
+    使い方:
+        python -m scrapers.mercari_seller --setup-anonymous
+
+    chrome 起動後 timeout_sec 秒待機、 user が install + chrome 閉じるか timeout で自動 quit。
+    """
+    driver = create_anonymous_driver(headless=False)
+    try:
+        driver.get("https://chromewebstore.google.com/search/%E3%83%95%E3%83%AA%E3%83%9E%E3%82%A2%E3%82%B7%E3%82%B9%E3%83%88")
+        print("=== mercari_seller 専用 anonymous chrome 起動 ===")
+        print("1. フリマアシスト を chrome web store から install してください。")
+        print("2. install 完了後、 メルカリには login しないでください (= 匿名 mode で運用)。")
+        print(f"3. chrome を閉じれば即終了、 または {timeout_sec}s 後 自動 quit。")
+        for i in range(timeout_sec // 10):
+            time.sleep(10)
+            try:
+                _ = driver.current_url
+            except Exception:
+                print("chrome 閉じられました、 exit")
+                return
+        print(f"=== {timeout_sec}s 経過、 自動 quit ===")
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--setup-anonymous", action="store_true",
+                    help="anonymous chrome 起動 + フリマアシスト install workflow")
+    ap.add_argument("--timeout", type=int, default=600,
+                    help="--setup-anonymous の待機秒数 (default 600)")
+    args = ap.parse_args()
+
+    if args.setup_anonymous:
+        setup_anonymous_chrome(timeout_sec=args.timeout)
