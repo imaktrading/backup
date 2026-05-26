@@ -75,6 +75,11 @@ SHOW_MORE_BUTTON_CSS = "button[class*='showMoreButton']"
 SHOW_MORE_BUTTON_TEXT_KEYWORDS = ("もっとみる", "もっと見る")  # text fallback 検索用
 DEFAULT_AFTER_CLICK_WAIT_SEC = 2.0  # button click 後の lazy load 完了待ち
 
+# manual click 待機 mode (= user 手動「もっと見る (5)」 click 完了待ち)
+DEFAULT_MANUAL_WAIT_POLL_SEC = 3.0  # polling 間隔
+DEFAULT_MANUAL_WAIT_STABLE_SEC = 15.0  # 連続 N 秒 listing 増えなければ完了とみなす
+DEFAULT_MANUAL_WAIT_MAX_SEC = 600  # 最大待機時間 (= 10 分)
+
 
 # ============================================================================
 # URL parse
@@ -275,6 +280,52 @@ def _load_until_enough(
 _scroll_until_enough = _load_until_enough
 
 
+def _wait_for_manual_load(
+    driver,
+    poll_interval: float = DEFAULT_MANUAL_WAIT_POLL_SEC,
+    stable_sec: float = DEFAULT_MANUAL_WAIT_STABLE_SEC,
+    max_wait_sec: int = DEFAULT_MANUAL_WAIT_MAX_SEC,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> int:
+    """user の手動 「もっと見る (N)」 click 完了を待つ.
+
+    listing 数を polling し、 連続 `stable_sec` 秒 増加しなければ
+    user click 完了とみなして scrape 開始。
+    最大 `max_wait_sec` 秒で打切 (= timeout)。
+
+    progress_callback(count, msg): GUI 進捗表示用 (optional)。
+
+    Returns: 最終 listing 数
+    """
+    elapsed = 0.0
+    last_count = len(_collect_listing_urls_from_page(driver))
+    last_change_time = elapsed
+    if progress_callback:
+        progress_callback(last_count, f"初期 {last_count} 件、 user click 待機開始")
+
+    while elapsed < max_wait_sec:
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+        # alert dismiss (= フリマアシスト 「読込完了」 alert があれば accept)
+        _dismiss_alert_if_present(driver)
+        current = len(_collect_listing_urls_from_page(driver))
+        if current > last_count:
+            last_count = current
+            last_change_time = elapsed
+            if progress_callback:
+                progress_callback(current, f"{current} 件 (user click 検出)")
+        else:
+            # 増えてない時間
+            stable_elapsed = elapsed - last_change_time
+            if stable_elapsed >= stable_sec:
+                if progress_callback:
+                    progress_callback(current, f"{current} 件で {stable_sec:.0f}s 安定、 完了とみなす")
+                return current
+    if progress_callback:
+        progress_callback(last_count, f"{max_wait_sec}s timeout、 {last_count} 件で打切")
+    return last_count
+
+
 def collect_seller_listing_urls(
     seller_id: str,
     driver=None,
@@ -282,6 +333,10 @@ def collect_seller_listing_urls(
     user_limit: Optional[int] = DEFAULT_USER_LIMIT,
     max_scrolls: int = DEFAULT_LOAD_MORE_SCROLLS,
     initial_wait_sec: int = DEFAULT_INITIAL_PROFILE_WAIT_SEC,
+    wait_for_manual_load: bool = False,
+    manual_wait_stable_sec: float = DEFAULT_MANUAL_WAIT_STABLE_SEC,
+    manual_wait_max_sec: int = DEFAULT_MANUAL_WAIT_MAX_SEC,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """seller profile page から listing URL 一覧取得.
 
@@ -315,13 +370,23 @@ def collect_seller_listing_urls(
             pass
         # 初期 hydration 待機 (= profile page は重め、 5/26 fix で 12s → 18s 延長)
         time.sleep(max(initial_wait_sec, DEFAULT_INITIAL_PROFILE_WAIT_SEC))
-        # CAP + 1 件取れるまで「もっとみる」 button click + scroll fallback
-        # (= CAP 到達判定のため 1 件余分に取得を試みる)
-        total_seen = _load_until_enough(
-            driver,
-            target_count=effective_cap + 1,
-            max_iterations=max_scrolls,
-        )
+        if wait_for_manual_load:
+            # user 手動「もっと見る (5)」 click 完了待ち mode
+            # (= 自動 click の不安定問題回避、 user が手動で全件展開してから scrape)
+            total_seen = _wait_for_manual_load(
+                driver,
+                stable_sec=manual_wait_stable_sec,
+                max_wait_sec=manual_wait_max_sec,
+                progress_callback=progress_callback,
+            )
+        else:
+            # CAP + 1 件取れるまで「もっとみる」 button click + scroll fallback
+            # (= CAP 到達判定のため 1 件余分に取得を試みる)
+            total_seen = _load_until_enough(
+                driver,
+                target_count=effective_cap + 1,
+                max_iterations=max_scrolls,
+            )
         all_urls = _collect_listing_urls_from_page(driver)
         cap_hit = total_seen > effective_cap
         return {
@@ -351,6 +416,10 @@ def collect_seller_with_details(
     initial_wait_sec: int = DEFAULT_INITIAL_PROFILE_WAIT_SEC,
     exclude_sold: bool = True,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    wait_for_manual_load: bool = False,
+    manual_wait_stable_sec: float = DEFAULT_MANUAL_WAIT_STABLE_SEC,
+    manual_wait_max_sec: int = DEFAULT_MANUAL_WAIT_MAX_SEC,
+    manual_progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """seller listing 全件 + 詳細 (title/price/image/condition/in_stock) を取得.
 
@@ -378,6 +447,10 @@ def collect_seller_with_details(
             user_limit=user_limit,
             max_scrolls=max_scrolls,
             initial_wait_sec=initial_wait_sec,
+            wait_for_manual_load=wait_for_manual_load,
+            manual_wait_stable_sec=manual_wait_stable_sec,
+            manual_wait_max_sec=manual_wait_max_sec,
+            progress_callback=manual_progress_callback,
         )
         urls = url_result["urls"]
         items: list[dict] = []

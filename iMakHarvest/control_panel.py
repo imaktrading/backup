@@ -270,6 +270,15 @@ class HarvestPanel(tk.Tk):
             variable=self.mercari_seller_vision_var,
             font=("Meiryo UI", 9)
         ).pack(anchor="w", pady=(4, 0))
+        # 手動 click 待機 mode (= フリマアシスト「もっと見る (5)」 を user 手動 click)
+        self.mercari_seller_manual_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            msel,
+            text="手動 click 待機 mode (= chrome 開いたら user が「もっと見る (5)」 click、 "
+                 "増加停止で自動 scrape 開始。 全件取得用)",
+            variable=self.mercari_seller_manual_var,
+            font=("Meiryo UI", 9)
+        ).pack(anchor="w", pady=(4, 0))
         tk.Label(msel,
                  text="※ 例: https://jp.mercari.com/user/profile/623636774  "
                       "出力先 = 中間スプシ seller_<id> タブ (= 自動 create、 タブ単位 dedup)",
@@ -876,6 +885,7 @@ class HarvestPanel(tk.Tk):
         effective_cap = mercari_seller.resolve_effective_cap(user_limit)
 
         use_vision = self.mercari_seller_vision_var.get()
+        manual_mode = self.mercari_seller_manual_var.get()
         self._set_status(f"メルカリセラー {seller_id} 出品収集中...")
         self._log("=== メルカリセラー 抽出 開始 ===")
         self._log(f"  seller_id  : {seller_id}")
@@ -884,11 +894,16 @@ class HarvestPanel(tk.Tk):
         self._log(f"  headless   : {headless}")
         self._log(f"  SOLD除外   : {exclude_sold}")
         self._log(f"  Vision 補強: {use_vision} (= 画像から card_id 認識、 title × Vision 合議)")
+        self._log(f"  手動 click : {manual_mode} (= ON で chrome 開いたら user が「もっと見る (5)」 click 待ち)")
         self._log(f"  投入先     : 中間スプシ seller_{seller_id} タブ")
         try:
             def progress(cur, total, msg):
                 self._set_status(f"商品詳細取得中... [{cur}/{total}]")
                 self._log(f"  [{cur}/{total}] {msg}")
+
+            def manual_progress(count, msg):
+                self._set_status(f"手動 click 待機... {count} 件")
+                self._log(f"  [manual] {msg}")
 
             result = mercari_seller.collect_seller_with_details(
                 seller_id=seller_id,
@@ -896,6 +911,8 @@ class HarvestPanel(tk.Tk):
                 user_limit=user_limit,
                 exclude_sold=exclude_sold,
                 progress_callback=progress,
+                wait_for_manual_load=manual_mode,
+                manual_progress_callback=manual_progress if manual_mode else None,
             )
             items = result["items"]
             self._log(
