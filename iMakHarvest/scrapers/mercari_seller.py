@@ -59,10 +59,18 @@ DEFAULT_USER_LIMIT = 25
 # 5/26 user GUI 実行で「6 件で打切 + total_seen=6 (= 実際は 30+ 件)」 が発生 →
 # lazy load が初期 hydration 直後だと不安定、 scroll 間隔 / no_progress 閾値 / 初期待機
 # 全て延長して堅牢化。
-DEFAULT_LOAD_MORE_SCROLLS = 40  # profile page は scroll 主体 (= 1 scroll ≒ 5-10 件)
+DEFAULT_LOAD_MORE_SCROLLS = 40  # 「もっと見る」 button click + fallback scroll の総 iteration 数
 DEFAULT_SCROLL_INTERVAL_SEC = 2.5  # 1.5s → 2.5s (lazy load 完了待ち)
 DEFAULT_INITIAL_PROFILE_WAIT_SEC = 18  # 初期 hydration、 12s → 18s (= profile page は重め)
 DEFAULT_NO_PROGRESS_THRESHOLD = 6  # 連続で listing 数増えなくても scroll 継続する回数
+
+# 5/26 user 指摘 + 実機調査:
+# メルカリ profile page には「もっとみる」 button (= `button.showMoreButton__*`) があり、
+# 1 click で ~30-50 件 lazy load される (= フリマアシスト拡張機能で 5 click ≒ 全件 確認済)。
+# 単純 scroll より bot 検出回避効果が高く + 効率的なので、 button click を主軸にする。
+SHOW_MORE_BUTTON_CSS = "button[class*='showMoreButton']"
+SHOW_MORE_BUTTON_TEXT_KEYWORDS = ("もっとみる", "もっと見る")  # text fallback 検索用
+DEFAULT_AFTER_CLICK_WAIT_SEC = 2.0  # button click 後の lazy load 完了待ち
 
 
 # ============================================================================
@@ -125,23 +133,72 @@ def _collect_listing_urls_from_page(driver) -> list[str]:
     return urls
 
 
-def _scroll_until_enough(
+def _click_load_more_if_exists(driver) -> bool:
+    """profile page の「もっとみる」 button があれば click、 成功なら True.
+
+    1. CSS selector `button[class*='showMoreButton']` で第一試行
+    2. text contains 「もっとみる」 / 「もっと見る」 で fallback
+    button が見つからない or click 失敗時は False (= scroll fallback の signal)。
+    """
+    candidates = []
+    try:
+        candidates = driver.find_elements(By.CSS_SELECTOR, SHOW_MORE_BUTTON_CSS)
+    except Exception:
+        candidates = []
+    if not candidates:
+        # XPath fallback (= text contains 検索)
+        for keyword in SHOW_MORE_BUTTON_TEXT_KEYWORDS:
+            try:
+                xpath = f"//button[contains(text(), '{keyword}')]"
+                candidates = driver.find_elements(By.XPATH, xpath)
+                if candidates:
+                    break
+            except Exception:
+                continue
+    if not candidates:
+        return False
+    for btn in candidates:
+        try:
+            if not btn.is_displayed():
+                continue
+            if not btn.is_enabled():
+                continue
+            # scrollIntoView で button を viewport 中央に → click 安定化
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+            time.sleep(0.3)
+            btn.click()
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _load_until_enough(
     driver,
     target_count: int,
-    max_scrolls: int = DEFAULT_LOAD_MORE_SCROLLS,
-    scroll_interval: float = DEFAULT_SCROLL_INTERVAL_SEC,
+    max_iterations: int = DEFAULT_LOAD_MORE_SCROLLS,
+    interval: float = DEFAULT_AFTER_CLICK_WAIT_SEC,
     no_progress_threshold: int = DEFAULT_NO_PROGRESS_THRESHOLD,
 ) -> int:
-    """profile page で target_count 件以上 listing が取れるまで scroll を続ける.
+    """profile page で target_count 件以上 listing が取れるまで「もっとみる」 button click
+    + scroll fallback を続ける.
 
-    no_progress_threshold 連続で listing 数が増えなければ break (= page 末端 or lazy load 停止)。
-    閾値が低すぎると初期 hydration 直後の遅延を「停止」と誤認 → 5/26 fix で 3 → 6 に拡大。
+    動作:
+      1. button click を試行、 成功なら click 後 interval 秒待機 (= lazy load 完了)
+      2. button なければ scroll (= window.scrollTo end)
+      3. listing 数が target に達するか、 no_progress_threshold 連続で増えなければ stop
 
-    Returns: 取得件数 (= 最後の scroll 後の listing 件数)
+    button click 主軸の理由 (= 5/26 実機調査 + フリマアシスト拡張機能観察):
+      - 1 click ≒ 30-50 件 lazy load (= scroll より効率的)
+      - bot 検出回避 (= 通常 user 操作)
+      - 5 click ≒ 100-300 件全件 (= 普通の seller 完結)
+      - 1000 件 seller でも 20-30 click で 1 セッション全件
+
+    Returns: 取得件数 (= 最後の iteration 後の listing 件数)
     """
     last_count = 0
     no_progress = 0
-    for i in range(max_scrolls):
+    for i in range(max_iterations):
         current = len(_collect_listing_urls_from_page(driver))
         if current >= target_count:
             return current
@@ -152,9 +209,19 @@ def _scroll_until_enough(
         else:
             no_progress = 0
         last_count = current
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(scroll_interval)
+        # button click を優先試行、 失敗時のみ scroll
+        clicked = _click_load_more_if_exists(driver)
+        if not clicked:
+            try:
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            except Exception:
+                pass
+        time.sleep(interval)
     return len(_collect_listing_urls_from_page(driver))
+
+
+# 後方互換: 既存呼出 (= _scroll_until_enough) は _load_until_enough の alias
+_scroll_until_enough = _load_until_enough
 
 
 def collect_seller_listing_urls(
@@ -197,11 +264,12 @@ def collect_seller_listing_urls(
             pass
         # 初期 hydration 待機 (= profile page は重め、 5/26 fix で 12s → 18s 延長)
         time.sleep(max(initial_wait_sec, DEFAULT_INITIAL_PROFILE_WAIT_SEC))
-        # CAP + 1 件取れるまで scroll (= CAP 到達判定のため 1 件余分に取得を試みる)
-        total_seen = _scroll_until_enough(
+        # CAP + 1 件取れるまで「もっとみる」 button click + scroll fallback
+        # (= CAP 到達判定のため 1 件余分に取得を試みる)
+        total_seen = _load_until_enough(
             driver,
             target_count=effective_cap + 1,
-            max_scrolls=max_scrolls,
+            max_iterations=max_scrolls,
         )
         all_urls = _collect_listing_urls_from_page(driver)
         cap_hit = total_seen > effective_cap

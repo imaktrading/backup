@@ -454,3 +454,151 @@ class TestPickCardImageUrl:
         ]
         result = pick_card_image_url(urls)
         assert result == "https://static.mercdn.net/item/detail/orig/photos/m12743012686_1.jpg"
+
+
+# --------------------------------------------------------------------------
+# _click_load_more_if_exists (= 「もっとみる」 button click)
+# --------------------------------------------------------------------------
+from unittest.mock import MagicMock
+
+
+def _make_mock_driver(found_elements=None, raise_on_click=False, displayed=True, enabled=True):
+    """Selenium driver の mock。 find_elements / execute_script を持つ.
+
+    found_elements:
+      - None or []: 第一試行 (CSS) は空、 fallback XPath も同じ list 返却
+      - [mock_btn, ...]: 見つかった button list
+    """
+    drv = MagicMock()
+    if found_elements is None:
+        found_elements = []
+    drv.find_elements = MagicMock(return_value=found_elements)
+    drv.execute_script = MagicMock()
+    return drv
+
+
+def _make_mock_button(displayed=True, enabled=True, raise_on_click=False):
+    btn = MagicMock()
+    btn.is_displayed = MagicMock(return_value=displayed)
+    btn.is_enabled = MagicMock(return_value=enabled)
+    if raise_on_click:
+        btn.click = MagicMock(side_effect=RuntimeError("click failed"))
+    else:
+        btn.click = MagicMock()
+    return btn
+
+
+class TestClickLoadMoreIfExists:
+    def test_no_button_found(self):
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        drv = _make_mock_driver(found_elements=[])
+        assert _click_load_more_if_exists(drv) is False
+
+    def test_button_found_clicked(self):
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        btn = _make_mock_button(displayed=True, enabled=True)
+        drv = _make_mock_driver(found_elements=[btn])
+        assert _click_load_more_if_exists(drv) is True
+        btn.click.assert_called_once()
+
+    def test_button_not_displayed_skipped(self):
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        btn = _make_mock_button(displayed=False, enabled=True)
+        drv = _make_mock_driver(found_elements=[btn])
+        assert _click_load_more_if_exists(drv) is False
+        btn.click.assert_not_called()
+
+    def test_button_disabled_skipped(self):
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        btn = _make_mock_button(displayed=True, enabled=False)
+        drv = _make_mock_driver(found_elements=[btn])
+        assert _click_load_more_if_exists(drv) is False
+
+    def test_click_exception_continues_to_next(self):
+        # 1 個目 click 失敗、 2 個目 success → True
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        btn_fail = _make_mock_button(displayed=True, enabled=True, raise_on_click=True)
+        btn_ok = _make_mock_button(displayed=True, enabled=True)
+        drv = _make_mock_driver(found_elements=[btn_fail, btn_ok])
+        assert _click_load_more_if_exists(drv) is True
+        btn_ok.click.assert_called_once()
+
+    def test_find_elements_exception_returns_false(self):
+        from scrapers.mercari_seller import _click_load_more_if_exists
+        drv = MagicMock()
+        drv.find_elements = MagicMock(side_effect=RuntimeError("dom error"))
+        # CSS + XPath fallback 両方 raise → False
+        assert _click_load_more_if_exists(drv) is False
+
+
+class TestLoadUntilEnough:
+    """_load_until_enough (= button click 主軸の総合 loop)."""
+
+    def test_target_reached_immediately(self, monkeypatch):
+        from scrapers import mercari_seller as ms
+        # 最初の find で既に 10 件 → target=5 で即 return
+        monkeypatch.setattr(
+            ms, "_collect_listing_urls_from_page",
+            lambda d: ["https://jp.mercari.com/item/m%02d" % i for i in range(10)],
+        )
+        drv = _make_mock_driver()
+        result = ms._load_until_enough(drv, target_count=5, max_iterations=10)
+        assert result == 10
+
+    def test_button_click_attempted_each_iteration(self, monkeypatch):
+        # button あり → click 続けて listing 数増える
+        from scrapers import mercari_seller as ms
+        counter = {"n": 5}
+        def get_urls(d):
+            return ["https://jp.mercari.com/item/m%02d" % i for i in range(counter["n"])]
+        monkeypatch.setattr(ms, "_collect_listing_urls_from_page", get_urls)
+        click_calls = []
+        def fake_click(d):
+            counter["n"] += 5
+            click_calls.append(True)
+            return True
+        monkeypatch.setattr(ms, "_click_load_more_if_exists", fake_click)
+        drv = _make_mock_driver()
+        result = ms._load_until_enough(drv, target_count=15, max_iterations=10, interval=0)
+        # 5 → 10 → 15 で停止 (= 2 click)
+        assert result >= 15
+        assert len(click_calls) >= 2
+
+    def test_scroll_fallback_when_no_button(self, monkeypatch):
+        # button なし → scroll で listing 数増える
+        from scrapers import mercari_seller as ms
+        counter = {"n": 3}
+        def get_urls(d):
+            return ["https://jp.mercari.com/item/m%02d" % i for i in range(counter["n"])]
+        monkeypatch.setattr(ms, "_collect_listing_urls_from_page", get_urls)
+        monkeypatch.setattr(ms, "_click_load_more_if_exists", lambda d: False)
+        scroll_calls = []
+        drv = _make_mock_driver()
+        def fake_exec(*args, **kwargs):
+            counter["n"] += 3
+            scroll_calls.append(True)
+        drv.execute_script = MagicMock(side_effect=fake_exec)
+        result = ms._load_until_enough(drv, target_count=10, max_iterations=10, interval=0)
+        assert result >= 10
+        assert len(scroll_calls) >= 1  # scroll fallback 実行
+
+    def test_no_progress_breaks(self, monkeypatch):
+        # listing 数増えず → no_progress_threshold で break
+        from scrapers import mercari_seller as ms
+        monkeypatch.setattr(
+            ms, "_collect_listing_urls_from_page",
+            lambda d: ["https://jp.mercari.com/item/m01", "https://jp.mercari.com/item/m02"],
+        )
+        monkeypatch.setattr(ms, "_click_load_more_if_exists", lambda d: True)
+        drv = _make_mock_driver()
+        result = ms._load_until_enough(
+            drv, target_count=100, max_iterations=20, interval=0,
+            no_progress_threshold=3,
+        )
+        # 2 件のまま break
+        assert result == 2
+
+    def test_alias_scroll_until_enough_still_works(self):
+        # 後方互換 alias の確認
+        from scrapers.mercari_seller import _scroll_until_enough, _load_until_enough
+        assert _scroll_until_enough is _load_until_enough
