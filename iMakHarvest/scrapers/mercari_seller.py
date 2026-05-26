@@ -24,7 +24,10 @@ import re
 import time
 from typing import Callable, Optional
 
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 from scrapers import mercari_likes
 from scrapers.mercari_likes import (
@@ -133,43 +136,41 @@ def _collect_listing_urls_from_page(driver) -> list[str]:
     return urls
 
 
-def _click_load_more_if_exists(driver) -> bool:
+def _click_load_more_if_exists(driver, wait_sec: int = 5) -> bool:
     """profile page の listing 用「もっと見る(N)」 button があれば click、 成功なら True.
 
-    5/26 実機調査で確定 (= フリマアシスト 拡張機能 + iMakHarvest chrome 検証):
+    5/26 Gemini 相談で確定:
+    - フリマアシスト button click は selenium native click だと不安定 (= UserActivation
+      `event.isTrusted` チェックで弾かれる可能性)
+    - **ActionChains.move_to_element().click()** で 物理マウス操作模倣
+      → ブラウザ側で「ユーザー操作」 として認識されやすい
+    - **WebDriverWait** で button が clickable になるまで明示待ち (= 拡張機能 DOM
+      注入の timing 不安定対策)
 
-    | button | 提供元 | 用途 | text | class | 親 |
-    |--------|--------|------|------|-------|-----|
-    | 自己紹介展開 | メルカリ ネイティブ | プロフィール文 折りたたみ展開 | 「もっとみる」 | `showMoreButton__*` | `merShowMore` |
-    | **listing 拡張** | **フリマアシスト** | listing 5 倍 (150 件) 展開 | **「もっと見る(N)」** | (なし) | `merCheckboxLabel` |
-    | フォロワー等 | メルカリ ネイティブ | 別セクション | 「もっと見る」 | (なし) | `merButton secondary__*` |
+    button 区別 (= 5/26 実機調査):
+    | button | 提供元 | text | 親 |
+    |--------|--------|------|-----|
+    | 自己紹介展開 | メルカリ ネイティブ | 「もっとみる」 | `merShowMore` |
+    | **listing 拡張** | **フリマアシスト** | **「もっと見る(N)」** | `merCheckboxLabel` |
+    | フォロワー等 | メルカリ ネイティブ | 「もっと見る」 | `merButton secondary__*` |
 
-    数字 (N) 付き「もっと見る(N)」 = フリマアシスト が DOM 注入した button、 click で
-    listing 拡張。 N は「あと何回 click 可能か」 の表示。
-    数字なし「もっと見る」 / 「もっとみる」 は listing 関係ないので除外する。
-
-    selector: XPath で `contains(text(), 'もっと見る(')` (= "(" 付きに限定)。
+    selector: XPath `contains(text(), 'もっと見る(')` (= 「(」 付きで listing 拡張のみ)
     """
+    xpath = "//button[contains(text(), 'もっと見る(')]"
     try:
-        xpath = "//button[contains(text(), 'もっと見る(')]"
-        candidates = driver.find_elements(By.XPATH, xpath)
+        btn = WebDriverWait(driver, wait_sec).until(
+            EC.element_to_be_clickable((By.XPATH, xpath))
+        )
     except Exception:
-        candidates = []
-    if not candidates:
         return False
-    for btn in candidates:
-        try:
-            if not btn.is_displayed():
-                continue
-            if not btn.is_enabled():
-                continue
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-            time.sleep(0.3)
-            btn.click()
-            return True
-        except Exception:
-            continue
-    return False
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+        time.sleep(0.5)  # scroll animation 完了待ち
+        # ActionChains で物理マウス操作 模倣 (= UserActivation 対策、 Gemini 5/26 推奨)
+        ActionChains(driver).move_to_element(btn).click().perform()
+        return True
+    except Exception:
+        return False
 
 
 def _dismiss_alert_if_present(driver) -> Optional[str]:
@@ -223,7 +224,6 @@ def _load_until_enough(
         # フリマアシスト「読込完了」 alert あれば dismiss + 全件 完了 signal で 即 return
         alert_text = _dismiss_alert_if_present(driver)
         if alert_text and FURIMA_ASSIST_COMPLETE_ALERT_TEXT in alert_text:
-            # フリマアシスト が listing 全件 fetch 完了通知 → loop 終了
             return len(_collect_listing_urls_from_page(driver))
 
         current = len(_collect_listing_urls_from_page(driver))
@@ -238,12 +238,34 @@ def _load_until_enough(
         last_count = current
         # button click を優先試行、 失敗時のみ scroll
         clicked = _click_load_more_if_exists(driver)
-        if not clicked:
+        if clicked:
+            # フリマアシスト は 1 click で内部連続 fetch (= 30 → 60 → 90 → 120 → 150)、
+            # listing 数が増え続ける間 wait 継続。 増加停止 or 完了 alert で次の iteration へ。
+            inner_last = current
+            inner_no_progress = 0
+            for j in range(30):  # 最大 30 * interval = 75s wait
+                time.sleep(interval)
+                # alert check
+                alert_text = _dismiss_alert_if_present(driver)
+                if alert_text and FURIMA_ASSIST_COMPLETE_ALERT_TEXT in alert_text:
+                    return len(_collect_listing_urls_from_page(driver))
+                new_count = len(_collect_listing_urls_from_page(driver))
+                if new_count >= target_count:
+                    return new_count
+                if new_count > inner_last:
+                    inner_last = new_count
+                    inner_no_progress = 0
+                else:
+                    inner_no_progress += 1
+                    if inner_no_progress >= 3:
+                        # 3 iteration (= ~7.5s) 増えなくなった → fetch 完了
+                        break
+        else:
             try:
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             except Exception:
                 pass
-        time.sleep(interval)
+            time.sleep(interval)
     # 最終 alert dismiss + listing 数
     _dismiss_alert_if_present(driver)
     return len(_collect_listing_urls_from_page(driver))
