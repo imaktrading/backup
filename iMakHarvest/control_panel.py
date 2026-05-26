@@ -254,8 +254,8 @@ class HarvestPanel(tk.Tk):
         msel_row = tk.Frame(msel)
         msel_row.pack(fill="x", pady=(4, 0))
         tk.Label(msel_row,
-                 text=f"最大抽出件数 (空欄/0 で無制限希望 → ハード CAP "
-                      f"{mercari_seller.HARD_CAP_PER_SESSION} で打切):",
+                 text=f"最大抽出件数 (空欄/0 → 自動 mode は HARD_CAP {mercari_seller.HARD_CAP_PER_SESSION} で打切、 "
+                      f"手動 click mode は CAP なし):",
                  font=("Meiryo UI", 9)).pack(side="left")
         self.mercari_seller_limit_var = tk.StringVar(
             value=str(mercari_seller.DEFAULT_USER_LIMIT)
@@ -570,7 +570,8 @@ class HarvestPanel(tk.Tk):
                 messagebox.showerror(
                     "件数 不正",
                     f"最大抽出件数は 1 以上の整数で指定してください (入力値: {raw_limit!r})\n"
-                    f"空欄 / 0 なら ハード CAP ({mercari_seller.HARD_CAP_PER_SESSION}) で打切。",
+                    f"空欄 / 0 = 自動 mode は HARD_CAP {mercari_seller.HARD_CAP_PER_SESSION} で打切、 "
+                    f"手動 click mode は CAP なし。",
                 )
                 return
         effective = mercari_seller.resolve_effective_cap(user_limit)
