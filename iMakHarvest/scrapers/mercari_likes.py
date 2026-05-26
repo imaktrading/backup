@@ -134,6 +134,10 @@ def create_driver(
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=ja-JP")
     options.add_argument(f"--user-data-dir={profile}")
+    # 5/26 fix: 非 active window で render 停止する Chrome 既知問題 (= CalculateNativeWinOcclusion)
+    # を無効化、 GUI subprocess 経由で chrome が背景化したケースでも lazy load が継続する。
+    # mercari_seller の GUI 実行で「6 件で打切」 問題の根本治療 (HQ 相談回答 推奨 B 案)。
+    options.add_argument("--disable-features=CalculateNativeWinOcclusion")
     # --user-agent は意図的に指定しない (Chrome 本体の UA を使う、上部コメント参照)
     if headless:
         options.add_argument("--headless=new")
