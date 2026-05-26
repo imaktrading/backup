@@ -143,8 +143,20 @@ def resolve_effective_cap(user_limit: Optional[int]) -> int:
 # Listing 抽出
 # ============================================================================
 def _collect_listing_urls_from_page(driver) -> list[str]:
-    """現在 driver が開いている page から `/item/m\\d+` 全 link 抽出 (= dedupe + 順序保持)."""
-    anchors = driver.find_elements(By.TAG_NAME, "a")
+    """現在 driver が開いている page から `/item/m\\d+` 全 link 抽出 (= dedupe + 順序保持).
+
+    フリマアシスト の「読込完了」 alert が立ち上がっていると find_elements で
+    UnexpectedAlertPresentException が出る → drain して 1 回 retry。
+    """
+    try:
+        anchors = driver.find_elements(By.TAG_NAME, "a")
+    except Exception:
+        # alert 残骸 を drain して 1 回 retry (= フリマアシスト 「読込完了」 対策)
+        _drain_alerts(driver)
+        try:
+            anchors = driver.find_elements(By.TAG_NAME, "a")
+        except Exception:
+            return []
     seen: set[str] = set()
     urls: list[str] = []
     for a in anchors:
@@ -161,6 +173,21 @@ def _collect_listing_urls_from_page(driver) -> list[str]:
         seen.add(canon)
         urls.append(canon)
     return urls
+
+
+def _drain_alerts(driver, max_iterations: int = 5) -> int:
+    """driver に積まれた alert を順次 accept で全 dismiss、 dismiss した件数を返す.
+
+    フリマアシスト 「読込完了」 alert を含む、 race で残る alert を確実に消す。
+    """
+    drained = 0
+    for _ in range(max_iterations):
+        text = _dismiss_alert_if_present(driver)
+        if text is None:
+            break
+        drained += 1
+        time.sleep(0.2)
+    return drained
 
 
 def _click_load_more_if_exists(driver, wait_sec: int = 5) -> bool:
@@ -415,6 +442,10 @@ def collect_seller_listing_urls(
                 target_count=effective_cap + 1,
                 max_iterations=max_scrolls,
             )
+        # フリマアシスト 「読込完了」 alert 残骸 を確実に drain してから URL 取得
+        # (= manual mode の最終 click で alert が残り 詳細 phase の driver.get で
+        # UnexpectedAlertPresentException が出る race 対策)
+        _drain_alerts(driver)
         all_urls = _collect_listing_urls_from_page(driver)
         cap_hit = total_seen > effective_cap
         return {
@@ -484,6 +515,9 @@ def collect_seller_with_details(
             progress_callback=manual_progress_callback,
         )
         urls = url_result["urls"]
+        # 詳細取得 phase 移行直前 に再 drain (= manual mode の場合、 user click → alert → return
+        #  の race で alert が残り 最初の driver.get で crash する事象の保険)
+        _drain_alerts(driver)
         items: list[dict] = []
         skipped_sold = 0
         skipped_detail_failed = 0
