@@ -328,11 +328,16 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
 def derive_product_id(detail: dict) -> str:
     """detail dict から product_id を派生.
 
-    優先: '{set_code}-{card_number}' (PSA brand+card_number で lookup できる形)
-    fallback: 'cardID-{cardID}' (印刷番号が抽出できないプロモ等)
+    SSOT 原則 (= Catalog = 公式 = 正): 公式表記そのまま採用.
+      Promo:    '{card_number}/{promo_code}'     (= '001/SM-P', '047/S-P' 等)
+      Booster:  '{set_code}-{card_number}'        (= 'M2a-240' 等、 内部 unique 化のため dash)
+      Fallback: 'cardID-{cardID}'                 (印刷番号取れない場合)
     """
-    set_code = detail.get("set_code") or ""
     card_number = detail.get("card_number") or ""
+    promo_code = detail.get("card_number_promo_code") or ""
+    if promo_code and card_number:
+        return f"{card_number}/{promo_code}"
+    set_code = detail.get("set_code") or ""
     if set_code and card_number:
         return f"{set_code}-{card_number}"
     cid = detail.get("cardID") or ""
