@@ -347,6 +347,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "source": g("source"),
         "source_url": g("source_url"),
         "updated_at": g("updated_at"),
+        # variants: variant_meta.get_variant_meta() で利用、 旧 DB 互換で None
+        "variants": json.loads(g("variants")) if g("variants") else None,
     }
 
 
