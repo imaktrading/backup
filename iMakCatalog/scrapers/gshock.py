@@ -46,6 +46,9 @@ for p in (_GSHOCK_DIR, _CASIO_FINDER_DIR, _EBAY_API_DIR, _CATALOG_ROOT):
 CATEGORY = "gshock"
 SOURCE = "casio_official"
 PRODUCT_URL_TEMPLATE = "https://www.casio.com/jp/watches/gshock/product.{model}/"
+# AW 系 (= Analog Watch) は Casio standard ライン配下、 gshock URL 不存在のため fallback.
+# DWE 系 / G-5600 系の旧 model も gshock 配下になく casio 配下のことあり。
+PRODUCT_URL_TEMPLATE_FALLBACK = "https://www.casio.com/jp/watches/casio/product.{model}/"
 
 
 # ============================================================================
@@ -122,17 +125,30 @@ def update_single_model(model: str, series_name: str = "", driver=None) -> bool:
 # 内部処理 — scrape + upsert
 # ============================================================================
 def _upsert_one_model(driver, model: str, series_name: str = "") -> bool:
-    """1 モデル分: scrape_casio + check_new_flag + api.upsert."""
+    """1 モデル分: scrape_casio + check_new_flag + api.upsert.
+
+    URL fallback: gshock 配下 (= AW 系等で 404 の場合) は casio 配下を再試行.
+    """
     from gshock_to_csv import scrape_casio  # type: ignore
     from casio_finder import check_new_flag  # type: ignore
     import api  # type: ignore
 
-    product_url = PRODUCT_URL_TEMPLATE.format(model=model)
     print(f"  {model}...", end="", flush=True)
 
+    # 1. gshock 配下 (= 既存 281 件と同経路) 試行
+    product_url = PRODUCT_URL_TEMPLATE.format(model=model)
     data = scrape_casio(driver, product_url)
+
+    # 2. 404 / 空 result の場合 casio standard 配下にも fallback
     if not data:
-        print(" [scrape failed]")
+        fallback_url = PRODUCT_URL_TEMPLATE_FALLBACK.format(model=model)
+        print(f" [gshock url miss → casio fallback]...", end="", flush=True)
+        data = scrape_casio(driver, fallback_url)
+        if data:
+            product_url = fallback_url  # 採用 URL を更新
+
+    if not data:
+        print(" [scrape failed (both URLs)]")
         return False
 
     is_new, is_limited, price_jpy = check_new_flag(driver, model)
