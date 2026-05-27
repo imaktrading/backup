@@ -387,6 +387,32 @@ def lookup_one_piece(
 
     base_pid = f"{set_code}-{card_number}"
 
+    # === Promo brand 特別処理 (2026-05-28 拡張) ===
+    # set_code='P' (= PSA brand "PROMOS" 等) の場合、 step 2 (= variant suffix 試行) を
+    # skip する: `P-NNN_p1` 等の variant は実態として存在せず、 noise になるため。
+    # ただし step 1 (= base `P-NNN`) は維持: P-001 等の純 promo はそのまま hit。
+    # base 名前不一致時は step 3 で _search_one_piece_promo_by_number に fallback。
+    if set_code == "P":
+        record = api.lookup(CATEGORY, base_pid)
+        if record and not _record_name_matches_subject(record, subject):
+            if verbose:
+                print(f"    ⚠️ iMakCatalog ID hit {base_pid} ({record['name']}) "
+                      f"だが PSA Subject {subject!r} と名前不一致 → reject")
+            record = None
+        if record is None:
+            # step 3: 全 set 横断 _P_* variant 検索
+            record = _search_one_piece_promo_by_number(
+                card_number, subject, brand=brand, verbose=verbose
+            )
+        if record is None:
+            if verbose:
+                print(f"    ⚠️ iMakCatalog Promo 未一致: {base_pid} → Skip "
+                      f"(subject={subject!r})")
+            return None
+        if verbose and "_" not in record["product_id"]:
+            print(f"    🎯 iMakCatalog hit: {record['product_id']} {record['name']}")
+        return _to_legacy_dict(record)
+
     # 1. base lookup + 名前検証 (Bonney→Bepo 事件防止)
     record = api.lookup(CATEGORY, base_pid)
     if record and not _record_name_matches_subject(record, subject):
@@ -405,14 +431,6 @@ def lookup_one_piece(
                 if verbose:
                     print(f"    🎯 iMakCatalog hit (variant): {candidate_pid}")
                 break
-
-    # 3. Promo brand fallback: PSA brand に specific set 無し (set_code="P") で base miss
-    #    → 全 OP/ST/EB/PRB set_code に対して {番号} / {番号}_P / {番号}_p1 等を試行 + 名前検証
-    #    例: PSA Brand 'PROMOS' + 番号 '019' + Subject 'JEWELRY BONNEY' →
-    #        P-019 (Bepo) reject 後、OP07-019_P (Bonney WSJ 付録版) を救済
-    if record is None and set_code == "P":
-        record = _search_one_piece_promo_by_number(card_number, subject,
-                                                     brand=brand, verbose=verbose)
 
     # 4. Reprint/SP Alt fallback: PSA brand に specific set あり (例: OP11) で base miss
     #    → 全 set_code に対して {番号}_{PSA_set_code} suffix を試行 + 名前検証
@@ -1463,6 +1481,7 @@ def lookup_yugioh(
 def lookup_don(
     brand: str,
     subject: str,
+    image_url: Optional[str] = None,
     verbose: bool = True,
 ) -> Optional[dict]:
     """DON カードを catalog から psa_subject_hint match で lookup.
@@ -1472,17 +1491,19 @@ def lookup_don(
       - eBay `C:Card Number` 列には **送信しない** (= caller 責務)
       - スプシ AI 列 (= dedup index) で使用
 
-    戦略 (= 2026-05-27 設計):
+    戦略 (= 2026-05-27 設計、 2026-05-28 image_url 拡張):
       1) subject に 'DON' 含むか確認、 なければ None (= 非 DON card)
       2) brand から set_code 抽出 (= 例 'OP15') → catalog DON-OP15-* 候補絞り込み
       3) brand から抽出不能なら DON-* 全件を候補に
       4) 各候補の specs.psa_subject_hint keyword list を subject に対して scoring
       5) 最高 score の unique 1 件 → return
-      6) tie / score=0 → None (fail-closed)
+      6) tie + image_url あり → image hash disambiguate (= variants[].image_phash)
+      7) tie + image_url 無し OR image disambiguate 失敗 → None (fail-closed)
 
     Args:
         brand: PSA Brand (例: 'ONE PIECE JAPANESE OP-15 ADVENTURE ON KAMIS ISLAND')
         subject: PSA Subject (例: 'DON!! CARD ALTERNATE ART GOLD')
+        image_url: listing 画像 URL (= 2026-05-28 追加、 tie 時 disambiguate 用)
         verbose: True で stdout 進捗.
 
     Returns:
@@ -1551,13 +1572,24 @@ def lookup_don(
         elif score == best_score and score > 0:
             best_records.append(r)
 
-    # 4) unique 1 件のみ採用、 tie / score=0 → fail-closed
+    # 4) unique 1 件のみ採用、 tie / score=0 → step 5 image disambiguate
     if len(best_records) == 1 and best_score > 0:
         record = api._row_to_dict(best_records[0])
         if verbose:
             print(f"    🎯 iMakCatalog (DON) hit: {record['product_id']} "
                   f"(score={best_score}, brand={brand!r}, subject={subject!r})")
         return record
+
+    # 5) tie + image_url 提供 → image hash disambiguate (2026-05-28 拡張)
+    if image_url and len(best_records) > 1:
+        if verbose:
+            print(f"    ⏳ DON tie (= {len(best_records)} 件)、 image hash disambiguate 試行 "
+                  f"(image_url={image_url[:60]}...)")
+        disambiguated = _disambiguate_don_by_image(
+            best_records, image_url, threshold=10, verbose=verbose
+        )
+        if disambiguated is not None:
+            return disambiguated
 
     if verbose:
         print(f"    ⚠️ DON: 一意特定不能 (score={best_score}, "
@@ -1566,3 +1598,83 @@ def lookup_don(
         for r in best_records[:5]:
             print(f"        - {r['product_id']}")
     return None
+
+
+def _disambiguate_don_by_image(
+    candidates: list,
+    image_url: str,
+    threshold: int = 10,
+    verbose: bool = True,
+) -> Optional[dict]:
+    """tie 候補から listing 画像 hash で 1 件特定.
+
+    重複くん `dedupe/image_hash.py::compute_phash` / `identify_variant_by_image` と
+    同 logic (= imagehash.phash 4.3.2 + Pillow 12.2.0)。
+
+    Args:
+        candidates: tie 状態の sqlite Row list (= best_records)
+        image_url: listing 画像 URL
+        threshold: hamming distance 上限 (= 5/27 POC 確定 10 bits)
+        verbose: True で stdout 進捗
+
+    Returns:
+        unique 特定 record dict | None (= fail-closed)
+    """
+    try:
+        import imagehash  # type: ignore
+        from PIL import Image  # type: ignore
+        import io
+        # listing 画像 fetch + hash
+        resp = api._connect  # placeholder
+        import requests as _requests  # local import で起動時 import 影響軽減
+        r = _requests.get(image_url, timeout=15)
+        if r.status_code != 200:
+            if verbose:
+                print(f"    ⚠️ DON image_url fetch HTTP {r.status_code} → fail-closed")
+            return None
+        img = Image.open(io.BytesIO(r.content))
+        listing_hash = imagehash.phash(img)
+    except Exception as e:
+        if verbose:
+            print(f"    ⚠️ DON image_url fetch/parse 失敗: {e} → fail-closed")
+        return None
+
+    best_record, best_dist, tied = None, threshold + 1, False
+    for r in candidates:
+        try:
+            variants = json.loads(r["variants"]) if r["variants"] else None
+        except Exception:
+            continue
+        if not isinstance(variants, dict):
+            continue
+        # variants は {"default": {"image_phash": "..."}} 構造想定
+        # multi-variant 対応のため、 各 variant_code の image_phash を全部試す
+        for code, meta in variants.items():
+            if not isinstance(meta, dict):
+                continue
+            stored = meta.get("image_phash")
+            if not stored:
+                continue
+            try:
+                stored_hash = imagehash.hex_to_hash(stored)
+            except Exception:
+                continue
+            dist = listing_hash - stored_hash
+            if dist < best_dist:
+                best_dist = dist
+                best_record = r
+                tied = False
+            elif dist == best_dist and best_record is not None and best_record["id"] != r["id"]:
+                tied = True
+
+    if best_record is None or tied or best_dist > threshold:
+        if verbose:
+            print(f"    ⚠️ DON image hash disambiguate 不能 "
+                  f"(best_dist={best_dist}, tied={tied}, threshold={threshold})")
+        return None
+
+    record = api._row_to_dict(best_record)
+    if verbose:
+        print(f"    🎯 iMakCatalog (DON image) hit: {record['product_id']} "
+              f"(hamming={best_dist}, threshold={threshold})")
+    return record

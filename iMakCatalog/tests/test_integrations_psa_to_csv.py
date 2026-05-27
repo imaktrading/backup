@@ -364,6 +364,60 @@ class TestNameVerification:
 
 
 # ============================================================================
+# 2026-05-28: Promo brand 拡張 (= HIGH 615 Marco / set_code='P' 特別処理)
+# ============================================================================
+@REQUIRES_DB
+class TestPromoBrandExtension:
+    """set_code='P' (= 'PROMOS' brand) で base hit vs _P_ variant fallback の振分."""
+
+    def test_lookup_one_piece_promo_marco_op08_002(self):
+        """HIGH 615 ケース: PSA brand 'PROMOS' + card_number '002' + subject 'MARCO ...'
+        → P-002 (= 別キャラ '冒険のにおい') reject 後、 OP08-002_P_LF (= Marco WSJ) 確定."""
+        result = catalog_psa.lookup_one_piece(
+            brand="ONE PIECE JAPANESE PROMOS",
+            card_number="002",
+            subject="MARCO WEEKLY SHONEN JUMP-#8",
+            verbose=False,
+        )
+        assert result is not None
+        assert result["card_id"] == "OP08-002_P_LF"
+        # name_jp に Marco JA "マルコ" 含む
+        assert "マルコ" in (result.get("name_jp") or "")
+
+    def test_lookup_one_piece_promo_tie_returns_none(self):
+        """tie 想定: PSA subject に character name 含まない (= 旧 logic と同じ fail-closed)."""
+        result = catalog_psa.lookup_one_piece(
+            brand="ONE PIECE JAPANESE PROMOS",
+            card_number="002",
+            subject="",  # = subject トークン無し → 安全装置で None
+            verbose=False,
+        )
+        assert result is None
+
+    def test_lookup_one_piece_normal_set_unaffected(self):
+        """regression: 正常 set 'OP08' で既存 logic 動作維持 (= 別 set への影響なし)."""
+        result = catalog_psa.lookup_one_piece(
+            brand="ONE PIECE JAPANESE OP08-TWO LEGENDS",
+            card_number="001",
+            subject="TONY TONY CHOPPER",
+            verbose=False,
+        )
+        assert result is not None
+        assert result["card_id"] == "OP08-001"
+
+    def test_lookup_one_piece_promo_no_character_match(self):
+        """character 一致なし → None (= 名前検証 fail-closed)."""
+        result = catalog_psa.lookup_one_piece(
+            brand="ONE PIECE JAPANESE PROMOS",
+            card_number="002",
+            subject="NONEXISTENT CHARACTER FAKE",
+            verbose=False,
+        )
+        # P-002 (冒険のにおい) reject + _P_ variant でも該当キャラなし → None
+        assert result is None
+
+
+# ============================================================================
 # set_code_to_ebay_name (旧 _onepiece_set_code_to_name 置換)
 # ============================================================================
 @REQUIRES_DB

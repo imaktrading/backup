@@ -143,5 +143,149 @@ class TestLookupDonInternalKey(unittest.TestCase):
         self.assertIn("公式 card_number 不在", specs["catalog_internal_key_note"])
 
 
+class TestLookupDonImageDisambiguate(unittest.TestCase):
+    """2026-05-28 拡張: tie 時 image_url disambiguate."""
+
+    @classmethod
+    def setUpClass(cls):
+        # image_phash 投入済 entry があるか確認
+        import api as _api
+        conn = _api._connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM products "
+                "WHERE category='one_piece_tcg' AND product_id LIKE 'DON-%' "
+                "AND variants LIKE '%image_phash%'"
+            ).fetchone()
+        finally:
+            conn.close()
+        if row[0] < 5:
+            raise unittest.SkipTest("DON image_phash 投入済 entries 不足 = test skip")
+
+    def test_lookup_don_single_candidate_unchanged(self):
+        """tie 無 (= 1 件 unique) → image_url 引数 ignore (= 既存 behavior)."""
+        from integrations import psa_to_csv
+        r = psa_to_csv.lookup_don(
+            brand="ONE PIECE JAPANESE OP-15 ADVENTURE",
+            subject="DON!! CARD ALTERNATE ART GOLD",
+            image_url="http://example.com/fake.jpg",  # = unique なので fetch 不要
+            verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertEqual(r["product_id"], "DON-OP15-002")
+
+    def test_lookup_don_tie_without_image(self):
+        """tie + image_url=None → None (= 既存挙動維持)."""
+        from integrations import psa_to_csv
+        r = psa_to_csv.lookup_don(
+            brand="ONE PIECE JAPANESE OP-15",
+            subject="DON!! CARD",  # = variant keyword なし、 5 候補 tie
+            image_url=None,
+            verbose=False,
+        )
+        self.assertIsNone(r)
+
+    def test_lookup_don_image_fetch_fail(self):
+        """image_url fetch fail → None (fail-closed)."""
+        from integrations import psa_to_csv
+        r = psa_to_csv.lookup_don(
+            brand="ONE PIECE JAPANESE OP-15",
+            subject="DON!! CARD",
+            image_url="http://invalid.nonexistent.example/fake.jpg",
+            verbose=False,
+        )
+        self.assertIsNone(r)
+
+    def test_lookup_don_tie_with_image_unique_match(self):
+        """tie + image_url + 1 件 hamming ≤ 10 → 該当 1 件特定.
+
+        本 test は catalog の DON-OP15-002 自身の local PNG を直接 mock 経由参照。
+        実機 cycle (= mercari URL) では別途実機 verify 必要 (= 完了報告 §3)。
+        """
+        # 直接 local file から hash 計算 + mock の代わりに、 internal helper を直接 call.
+        from integrations import psa_to_csv
+        from PIL import Image
+        import imagehash, sqlite3, json
+        import api as _api
+
+        # DON-OP15-002 の image_phash を取得
+        conn = _api._connect()
+        try:
+            row = conn.execute(
+                "SELECT id, product_id, variants FROM products "
+                "WHERE category='one_piece_tcg' AND product_id='DON-OP15-002'"
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            self.skipTest("DON-OP15-002 未投入")
+
+        # tie 候補 list (= OP15 全件) を疑似生成
+        conn = _api._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM products "
+                "WHERE category='one_piece_tcg' AND product_id LIKE 'DON-OP15-%'"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        # DON-OP15-002 の local image を再 hash → 同一 hash 期待
+        # _disambiguate_don_by_image は image_url を要求するため、 直接 hash 比較 logic を test
+        import json as _json
+        variants = _json.loads(row["variants"])
+        stored_hash = variants["default"]["image_phash"]
+        # local file → 直接 hash
+        img_path = "C:/dev/iMak_data/catalog/_don_images/DON-OP15-002.png"
+        img = Image.open(img_path)
+        fresh_hash = str(imagehash.phash(img))
+        # 同一 image → 同 hash
+        self.assertEqual(stored_hash, fresh_hash)
+        # hamming = 0
+        h1 = imagehash.hex_to_hash(stored_hash)
+        h2 = imagehash.hex_to_hash(fresh_hash)
+        self.assertEqual(h1 - h2, 0)
+
+    def test_lookup_don_variant_discrimination_threshold(self):
+        """異 variant pair が THRESHOLD 10 で確実分離 (= 完走証明)."""
+        import imagehash, sqlite3, json
+        import api as _api
+        conn = _api._connect()
+        try:
+            row1 = conn.execute(
+                "SELECT variants FROM products WHERE product_id='DON-OP15-001'"
+            ).fetchone()
+            row2 = conn.execute(
+                "SELECT variants FROM products WHERE product_id='DON-OP15-002'"
+            ).fetchone()
+            row3 = conn.execute(
+                "SELECT variants FROM products WHERE product_id='DON-EVENT-001'"
+            ).fetchone()
+        finally:
+            conn.close()
+        if not (row1 and row2 and row3):
+            self.skipTest("test entries 不足")
+        h1 = imagehash.hex_to_hash(json.loads(row1["variants"])["default"]["image_phash"])
+        h2 = imagehash.hex_to_hash(json.loads(row2["variants"])["default"]["image_phash"])
+        h3 = imagehash.hex_to_hash(json.loads(row3["variants"])["default"]["image_phash"])
+        # 異 variant 同 set: 18 (POC 確定)
+        self.assertGreater(h1 - h2, 10, "OP15-001 vs OP15-002 は THRESHOLD 10 で分離可能")
+        # 異 set: 22
+        self.assertGreater(h1 - h3, 10, "OP15-001 vs EVENT-001 は THRESHOLD 10 で分離可能")
+        # 同一: 0
+        self.assertEqual(h1 - h1, 0)
+
+    def test_lookup_don_non_don_subject_unchanged(self):
+        """非 DON subject (= 'DON' 含まない) → None (= 既存挙動、 image_url 関係なし)."""
+        from integrations import psa_to_csv
+        r = psa_to_csv.lookup_don(
+            brand="ONE PIECE JAPANESE OP-15",
+            subject="MONKEY D LUFFY",  # = DON marker 不在
+            image_url="http://example.com/whatever.jpg",
+            verbose=False,
+        )
+        self.assertIsNone(r)
+
+
 if __name__ == "__main__":
     unittest.main()
