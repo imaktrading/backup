@@ -1455,3 +1455,114 @@ def lookup_yugioh(
         for r in matches[:5]:
             print(f"        - {r['product_id']}: {r['name_en']!r}")
     return None
+
+
+# ============================================================================
+# DON Card lookup (= ONE PIECE TCG special、 公式 card_number 不在)
+# ============================================================================
+def lookup_don(
+    brand: str,
+    subject: str,
+    verbose: bool = True,
+) -> Optional[dict]:
+    """DON カードを catalog から psa_subject_hint match で lookup.
+
+    重要 = 公式 card_number 不在のため product_id は **Catalog 内部 dedup KEY**:
+      - 形式: 'DON-{set_code}-{NNN}' (= 例 'DON-OP15-002')
+      - eBay `C:Card Number` 列には **送信しない** (= caller 責務)
+      - スプシ AI 列 (= dedup index) で使用
+
+    戦略 (= 2026-05-27 設計):
+      1) subject に 'DON' 含むか確認、 なければ None (= 非 DON card)
+      2) brand から set_code 抽出 (= 例 'OP15') → catalog DON-OP15-* 候補絞り込み
+      3) brand から抽出不能なら DON-* 全件を候補に
+      4) 各候補の specs.psa_subject_hint keyword list を subject に対して scoring
+      5) 最高 score の unique 1 件 → return
+      6) tie / score=0 → None (fail-closed)
+
+    Args:
+        brand: PSA Brand (例: 'ONE PIECE JAPANESE OP-15 ADVENTURE ON KAMIS ISLAND')
+        subject: PSA Subject (例: 'DON!! CARD ALTERNATE ART GOLD')
+        verbose: True で stdout 進捗.
+
+    Returns:
+        record dict (内部 KEY 含む) | None (= fail-closed)
+    """
+    subj_upper = (subject or "").upper()
+    if "DON" not in subj_upper:
+        return None  # 非 DON card
+
+    # 1) brand → set_code (= 'OP15' etc.)
+    set_code_brand = extract_set_code_from_brand(brand)
+    # extract_set_code_from_brand は 'OP-15' (dash 付) を取りこぼすため、 DON 専用 fallback:
+    if not set_code_brand:
+        m = re.search(r"\b(OP|ST|EB|PRB)\s*-\s*(\d+)\b", (brand or "").upper())
+        if m:
+            set_code_brand = f"{m.group(1)}{m.group(2)}"
+    # extract_set_code_from_brand は 'OP15' / 'PRB02' / 'P' / None を返す
+    # DON catalog の set_code は 'OP15' (booster), 'PRB01' (premium), 'STORAGE',
+    # 'EVENT', 'KUMAMON' 等. PSA brand から直接判明するのは booster/PRB のみ.
+
+    # 2) 候補絞り込み
+    conn = api._connect()
+    try:
+        if set_code_brand and set_code_brand != "P":
+            # 例 set_code_brand='OP15' → DON-OP15-* 候補
+            rows = conn.execute(
+                "SELECT id, product_id, name, name_jp, set_name, set_name_official, "
+                "specs, images, source, source_url, created_at, updated_at, "
+                "card_set_id, language, name_en, name_en_source "
+                "FROM products WHERE category=? AND product_id LIKE ?",
+                (CATEGORY, f"DON-{set_code_brand}-%"),
+            ).fetchall()
+        else:
+            # brand から set_code 取れない (= promo / event etc.) → 全 DON 候補
+            rows = conn.execute(
+                "SELECT id, product_id, name, name_jp, set_name, set_name_official, "
+                "specs, images, source, source_url, created_at, updated_at, "
+                "card_set_id, language, name_en, name_en_source "
+                "FROM products WHERE category=? AND product_id LIKE 'DON-%'",
+                (CATEGORY,),
+            ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        if verbose:
+            print(f"    ⚠️ DON: catalog 候補 0 件 "
+                  f"(brand={brand!r}, set_code_brand={set_code_brand!r})")
+        return None
+
+    # 3) 各候補を hint keyword で scoring
+    best_score = 0
+    best_records: list[dict] = []
+    for r in rows:
+        try:
+            specs = json.loads(r["specs"])
+        except Exception:
+            specs = {}
+        hints = specs.get("psa_subject_hint") or []
+        if not hints:
+            continue
+        score = sum(1 for h in hints if isinstance(h, str) and h.upper() in subj_upper)
+        if score > best_score:
+            best_score = score
+            best_records = [r]
+        elif score == best_score and score > 0:
+            best_records.append(r)
+
+    # 4) unique 1 件のみ採用、 tie / score=0 → fail-closed
+    if len(best_records) == 1 and best_score > 0:
+        record = api._row_to_dict(best_records[0])
+        if verbose:
+            print(f"    🎯 iMakCatalog (DON) hit: {record['product_id']} "
+                  f"(score={best_score}, brand={brand!r}, subject={subject!r})")
+        return record
+
+    if verbose:
+        print(f"    ⚠️ DON: 一意特定不能 (score={best_score}, "
+              f"tie={len(best_records)}, total_candidates={len(rows)}); "
+              f"brand={brand!r} subject={subject!r}")
+        for r in best_records[:5]:
+            print(f"        - {r['product_id']}")
+    return None
