@@ -314,6 +314,33 @@ def extract_legality(en_card: dict | None) -> dict:
 # ============================================================================
 # JA join key: (card_number, set_folder, leftover)
 # ============================================================================
+# 公開準備中 / 言語タグ marker (= OPCG / Gundam と同 logic 共有)
+# DragonBall URL 例:
+#   DBFW-EN/FB09/EN_FW_FB09-121_Battle_SCR_SUPERPARA_dummy-2.png
+#   DBFW-JA/FB09/JP_FW_FB09-121_Battle_SCR_SUPERPARA_dummy_s.png
+#   DBFW-EN/FB06/EN_FW_FB06-071_Leader_F_dummy_nonotforsale.png
+# EN/JA で `_dummy_s` / `_dummy_nonotforsale` 等 pre-release marker が
+# 片方しか付かないと leftover が異なり pair join 失敗する真因。
+_PRELIM_MARKERS = re.compile(
+    r"(_?(?:sample|dummy|pre|ol|sp\d*|en|jp|ja|s|nonotforsale|notforsale)(?:[-_]\d+)?)+$",
+    re.IGNORECASE,
+)
+
+
+def _strip_ja_prelim(leftover: str) -> str:
+    """pre-release / 言語 marker (= _sample / _dummy / _s / _nonotforsale 等) を除外.
+
+    parallel marker (= `_PARA` / `_SUPERPARA`) や variant identifier
+    (= `_SCR` / `_F` 等 rarity) は除外対象外で variant 識別性維持。
+    """
+    prev = None
+    cur = leftover
+    while cur != prev:
+        prev = cur
+        cur = _PRELIM_MARKERS.sub("", cur).rstrip("_")
+    return cur
+
+
 def _variant_key(card_number: str, image_url: str) -> tuple[str, str, str]:
     """EN/JA を join するための variant key. derive_product_id と同じロジックで揃える."""
     set_folder, base_name = _normalize_image_path(image_url)
@@ -326,7 +353,8 @@ def _variant_key(card_number: str, image_url: str) -> tuple[str, str, str]:
         leftover = base_name[len(card_number):].lstrip("_")
     elif card_number in base_name:
         leftover = base_name.split(card_number, 1)[1].lstrip("_")
-    leftover = re.sub(r"_?sample$", "", leftover, flags=re.IGNORECASE).rstrip("_")
+    # pre-release / 言語 marker 除外 (= EN/JA join 一致のため)
+    leftover = _strip_ja_prelim(leftover)
     return (card_number, canonical_tag, leftover.upper())
 
 
