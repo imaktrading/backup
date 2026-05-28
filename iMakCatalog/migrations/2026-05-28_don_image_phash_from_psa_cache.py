@@ -209,11 +209,11 @@ def main():
             variants = json.loads(row["variants"]) if row["variants"] else {}
         except Exception:
             variants = {}
-        # 旧 PDF 切出 phash を保存しつつ default を上書き
+        # 旧 PDF 切出 phash を保存しつつ default を上書き (= 冪等性確保、 既存 pdf_v1 は keep)
         if "default" in variants and isinstance(variants["default"], dict):
             old_phash = variants["default"].get("image_phash")
-            if old_phash:
-                variants["default"]["image_phash_pdf_v1"] = old_phash  # 旧 hash 保存
+            if old_phash and "image_phash_pdf_v1" not in variants["default"]:
+                variants["default"]["image_phash_pdf_v1"] = old_phash  # rollback 用 (= 初回のみ)
         variants["default"] = variants.get("default", {})
         variants["default"]["image_phash"] = phash
         variants["default"]["image_phash_source"] = "psa_cert_holder_2026-05-28"
