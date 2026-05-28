@@ -304,23 +304,34 @@ def extract_legality(en_card: dict | None) -> dict:
 # ============================================================================
 # JA join key: (card_number, set_folder, leftover)
 # ============================================================================
-# JA 公開準備中マーカー (= EN 側に無い「未完成 / プレビュー」 URL suffix)
-# 例: OP-JA/OP07/OP01-035_SP08_dummy.png / OP-JA/EB02/EB02-052_dummy_sample.png
-#     OP-JA/OP15/OPCG_OP15_SP_06_dummy_ol_sample.png (= 完全 sample)
-# これらは EN/JA join で leftover を別物にしてしまうため除外する。
-_JA_PRELIM_MARKERS = re.compile(
-    r"(_?(?:sample|dummy|pre|ol|sp\d*))+$",
+# 公開準備中 / 言語タグ marker (= EN/JA で片方しか付かない URL suffix)
+# Bandai TCG+ 3 カテゴリ (OPCG / Gundam / DragonBall) 共通の filename pattern。
+# 例:
+#   OPCG:       OP-JA/OP07/OP01-035_SP08_dummy.png
+#   OPCG:       OP-JA/EB02/EB02-052_dummy_sample.png
+#   Gundam:     GC-EN/GD04/GD04-081_para_dummy_EN.png
+#   Gundam:     GC-JA/GD04/GD04-081_para_dummy_JP.png
+#   DragonBall: DBFW-EN/FB09/EN_FW_FB09-121_Battle_SCR_SUPERPARA_dummy-2.png
+#   DragonBall: DBFW-JA/FB08/JP_FW_FB08-068_Battle_UC-_dummy_s.png
+# join 失敗の真因なため EN/JA で同じ leftover に正規化する。
+_PRELIM_MARKERS = re.compile(
+    r"(_?(?:sample|dummy|pre|ol|sp\d*|en|jp|ja|s|nonotforsale|notforsale)(?:[-_]\d+)?)+$",
     re.IGNORECASE,
 )
 
 
 def _strip_ja_prelim(leftover: str) -> str:
-    """JA pre-release marker (= _sample / _dummy / _SP\\d+ / _pre / _ol) を除外."""
+    """pre-release / 言語 marker (= _sample / _dummy / _SP\\d+ / _EN / _JP / _s 等) を除外.
+
+    EN/JA で片方しか付かない marker を leftover から取り除き、 variant key を一致させる。
+    parallel marker (= 'p' / 'p1' / 'p2') や variant identifier (= 'LR', 'SCR', 'PARA')
+    は除外対象外で variant 識別性維持。
+    """
     prev = None
     cur = leftover
     while cur != prev:
         prev = cur
-        cur = _JA_PRELIM_MARKERS.sub("", cur).rstrip("_")
+        cur = _PRELIM_MARKERS.sub("", cur).rstrip("_")
     return cur
 
 

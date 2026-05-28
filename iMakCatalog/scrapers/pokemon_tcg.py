@@ -173,10 +173,16 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
         out["name"] = m.group(1).strip()
 
     # Image URL → set_code, padded_id
-    m = re.search(r'src="(/assets/images/card_images/large/([^/]+)/(\d+)_[^"]+)"', html_decoded)
+    # 2026-05-28 fix:
+    #   (a) 空 set_code (= '/large//XXX_...') 対応 (= Energy/MC 等)
+    #   (b) 'legend/' path も対応 (= 古い XY-BREAK 等の旧 card)
+    m = re.search(
+        r'src="(/assets/images/card_images/(?:large|legend)/([^/]*)/(\d+)_[^"]+)"',
+        html_decoded,
+    )
     if m:
         out["image_url"] = "https://www.pokemon-card.com" + m.group(1)
-        out["set_code"] = m.group(2)
+        out["set_code"] = m.group(2)  # 空文字列もありうる (= set folder 不在 card)
         out["padded_id"] = m.group(3)
 
     # 印刷 card_number 抽出.
