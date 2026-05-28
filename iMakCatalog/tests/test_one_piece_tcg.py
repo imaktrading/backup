@@ -125,6 +125,61 @@ class TestVariantKey:
         )
         assert base != para
 
+    def test_ja_sp_dummy_suffix_stripped(self):
+        """5/28 bug fix: JA `_SP\\d+_dummy` suffix を leftover 比較から除外."""
+        en = ot._variant_key(
+            "OP01-035",
+            "https://files.bandai-tcg-plus.com/card_image/OP-EN/OP07/OP01-035.png",
+        )
+        ja = ot._variant_key(
+            "OP01-035",
+            "https://files.bandai-tcg-plus.com/card_image/OP-JA/OP07/OP01-035_SP08_dummy.png",
+        )
+        assert en == ja
+
+    def test_ja_dummy_sample_suffix_stripped(self):
+        """JA `_dummy_sample` 連続 marker も除外."""
+        en = ot._variant_key(
+            "EB02-052",
+            "https://files.bandai-tcg-plus.com/card_image/OP-EN/EB02/EB02-052.png",
+        )
+        ja = ot._variant_key(
+            "EB02-052",
+            "https://files.bandai-tcg-plus.com/card_image/OP-JA/EB02/EB02-052_dummy_sample.png",
+        )
+        assert en == ja
+
+    def test_ja_pre_marker_stripped(self):
+        """JA `_pre` (= 先行公開) marker 除外."""
+        en = ot._variant_key(
+            "ST01-001",
+            "https://files.bandai-tcg-plus.com/card_image/OP-EN/ST01/ST01-001.png",
+        )
+        ja = ot._variant_key(
+            "ST01-001",
+            "https://files.bandai-tcg-plus.com/card_image/OP-JA/ST01/ST01-001_pre.png",
+        )
+        assert en == ja
+
+    def test_parallel_marker_preserved_after_strip(self):
+        """parallel `p` は dummy 除外で消えない (= variant 識別性維持)."""
+        en_p = ot._variant_key(
+            "EB02-052",
+            "https://files.bandai-tcg-plus.com/card_image/OP-EN/EB02/EB02-052p.png",
+        )
+        ja_p_dummy = ot._variant_key(
+            "EB02-052",
+            "https://files.bandai-tcg-plus.com/card_image/OP-JA/EB02/EB02-052p_dummy.png",
+        )
+        # 両方 parallel ('P' leftover) で一致
+        assert en_p == ja_p_dummy
+        # base とは異なる
+        en_base = ot._variant_key(
+            "EB02-052",
+            "https://files.bandai-tcg-plus.com/card_image/OP-EN/EB02/EB02-052.png",
+        )
+        assert en_p != en_base
+
 
 class TestExtractSetTag:
     def test_native_simple(self):

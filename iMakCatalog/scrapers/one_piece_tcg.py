@@ -304,6 +304,26 @@ def extract_legality(en_card: dict | None) -> dict:
 # ============================================================================
 # JA join key: (card_number, set_folder, leftover)
 # ============================================================================
+# JA 公開準備中マーカー (= EN 側に無い「未完成 / プレビュー」 URL suffix)
+# 例: OP-JA/OP07/OP01-035_SP08_dummy.png / OP-JA/EB02/EB02-052_dummy_sample.png
+#     OP-JA/OP15/OPCG_OP15_SP_06_dummy_ol_sample.png (= 完全 sample)
+# これらは EN/JA join で leftover を別物にしてしまうため除外する。
+_JA_PRELIM_MARKERS = re.compile(
+    r"(_?(?:sample|dummy|pre|ol|sp\d*))+$",
+    re.IGNORECASE,
+)
+
+
+def _strip_ja_prelim(leftover: str) -> str:
+    """JA pre-release marker (= _sample / _dummy / _SP\\d+ / _pre / _ol) を除外."""
+    prev = None
+    cur = leftover
+    while cur != prev:
+        prev = cur
+        cur = _JA_PRELIM_MARKERS.sub("", cur).rstrip("_")
+    return cur
+
+
 def _variant_key(card_number: str, image_url: str) -> tuple[str, str, str]:
     """EN/JA を join するための variant key. derive_product_id と同じロジックで揃える."""
     set_folder, base_name = _normalize_image_path(image_url)
@@ -316,7 +336,9 @@ def _variant_key(card_number: str, image_url: str) -> tuple[str, str, str]:
         leftover = base_name[len(card_number):].lstrip("_")
     elif card_number in base_name:
         leftover = base_name.split(card_number, 1)[1].lstrip("_")
-    leftover = re.sub(r"_?sample$", "", leftover, flags=re.IGNORECASE).rstrip("_")
+    # JA pre-release マーカー (sample / dummy / SP\d+ / pre / ol) 除外
+    # EN/JA で片方しか付かないと variant 識別子が分かれてしまうため
+    leftover = _strip_ja_prelim(leftover)
     return (card_number, canonical_tag, leftover.upper())
 
 
