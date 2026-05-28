@@ -104,8 +104,16 @@ def _cleanup_uc_patched_driver_cache() -> bool:
     が cache 残ってると、明示指定の trabajo chromedriver v136 と内部的に衝突して
     "cannot connect to chrome" エラーになる。
     cycle ごとに毎回 cache を破棄して strict に明示指定 driver のみ使う。
+
+    2026-05-28 修正: 前 cycle 由来の chromedriver/chromep process が cache 内 file の
+    lock を握ったままだと rmtree が silent fail (= ignore_errors=True) → cache 残置
+    → 次 cycle で「cannot connect to chrome」 SessionNotCreatedException。
+    対策: rmtree 前に残骸 process kill + retry + 検証で完全削除を保証。
     """
-    import shutil  # noqa: PLC0415
+    import shutil   # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
+
     cache_dir = os.path.join(
         os.environ.get("APPDATA", ""), "undetected_chromedriver"
     )
@@ -118,13 +126,43 @@ def _cleanup_uc_patched_driver_cache() -> bool:
         )
         if os.path.exists(alt):
             cache_dir = alt
-    if os.path.exists(cache_dir):
+    if not os.path.exists(cache_dir):
+        return False
+
+    # 2026-05-28: cache 内 file lock を握りうる残骸 process を kill
+    for procname in ("undetected_chromedriver.exe", "chromedriver.exe", "chromep.exe"):
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", procname],
+                           capture_output=True, timeout=5)
+        except Exception:
+            pass
+    _time.sleep(1)   # process 終了待ち
+
+    # rmtree 試行 (= 最大 3 回 retry、 lock 解放待ち)
+    for attempt in range(3):
         try:
             shutil.rmtree(cache_dir, ignore_errors=True)
-            return True
+            if not os.path.exists(cache_dir):
+                return True   # 完全削除確認
         except Exception:
-            return False
-    return False
+            pass
+        _time.sleep(1)
+
+    # 全 retry 失敗 → 部分削除でも実害最小化、 cache 内 .exe 個別削除試行
+    try:
+        for fname in os.listdir(cache_dir):
+            fpath = os.path.join(cache_dir, fname)
+            if fname.endswith(".exe"):
+                try:
+                    os.remove(fpath)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return not os.path.exists(cache_dir) or not any(
+        f.endswith(".exe") for f in os.listdir(cache_dir) if os.path.exists(cache_dir)
+    )
 
 
 def _cleanup_stale_chrome_locks(profile_dir: str) -> int:
