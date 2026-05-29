@@ -56,7 +56,8 @@ UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 # Variation details から JP size 抽出 (例: "Sizes=US XS(JP S)" → "S")
 JP_SIZE_RE = re.compile(r"JP\s+([A-Z0-9]+)", re.IGNORECASE)
 # Variation details から Color 抽出 (例: "Sizes=...(JP S)|Color=BK" → "BK")
-COLOR_RE = re.compile(r"Color\s*=\s*([^|\s]+)", re.IGNORECASE)
+# `|` 区切りまで全部取って後で normalize (UNIQLO は "Color=32 BEIGE" 形式、montbell は "Color=BLACK(BK)")
+COLOR_RE = re.compile(r"Color\s*=\s*([^|]+)", re.IGNORECASE)
 
 
 def parse_ebay_report(csv_path: Path) -> dict:
@@ -102,9 +103,26 @@ def extract_jp_size(variation_details: str) -> str:
 
 
 def extract_color(variation_details: str) -> str:
-    """Variation details から Color code を抽出 (例: "...|Color=BK" → "BK")."""
+    """Variation details から Color code を抽出.
+
+    対応形式:
+      "Color=BK"            → "BK"
+      "Color=BLACK(BK)"     → "BK"      (括弧内 code 優先、montbell)
+      "Color=BLACK"         → "BLACK"
+      "Color=32 BEIGE"      → "BEIGE"   (数字 prefix 除去、UNIQLO)
+      "Color=09 OFF WHITE"  → "OFF WHITE"
+    """
     m = COLOR_RE.search(variation_details or "")
-    return m.group(1).upper() if m else ""
+    if not m:
+        return ""
+    val = m.group(1).strip().upper()
+    # 数字 prefix + space 除去 (UNIQLO 形式)
+    val = re.sub(r"^\d+\s+", "", val).strip()
+    # "BLACK(BK)" 形式なら括弧内を優先 (montbell 形式)
+    paren = re.search(r"\(([^)]+)\)", val)
+    if paren:
+        return paren.group(1).strip()
+    return val
 
 
 def normalize_size_for_match(s: str) -> str:
@@ -162,8 +180,12 @@ def match_sku_uuids(ebay_data: dict, sheet_skus: list) -> list:
             rec["match_status"] = "no_variation"
             results.append(rec)
             continue
-        # eBay 側に Color もあるか判定 (= montbell 系は size + color compound、UNIQLO 系は size のみ)
-        ebay_has_color = any(extract_color(ev["variation_details"]) for ev in ebay_variations)
+        # eBay 側に Color もあるか判定:
+        # - 全 variation が同じ color → size only match (= UNIQLO 系で全 variation 同色 code 1 つ)
+        # - color が複数種 → compound match (= montbell 系で size × color combination)
+        ebay_colors = {extract_color(ev["variation_details"]) for ev in ebay_variations}
+        ebay_colors.discard("")
+        ebay_has_color = len(ebay_colors) >= 2
 
         # match
         matched_uuid = ""
