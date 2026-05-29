@@ -41,54 +41,137 @@ CSV_OUT_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOT_DIR = SCRIPT_DIR / "logs" / "qty_snapshots"
 SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Phase 4 安全網 #2: max件数キャップ
-# Takaaki さん判断 (2026-05-14): 最初 1 週間は 5 SKU/日 → 安定確認後 10 に増やす
-DEFAULT_MAX_SKUS = 5
+# max件数キャップ撤廃 (Takaaki さん判断 2026-05-14 19:53 ↓):
+#   在庫管理として「順番待ちで売れる/機会損失」が許容不可。検出即全件処理が筋。
+#   0 = 無制限 (= 二段確認 pass した全件を 1 cycle で upload)。
+DEFAULT_MAX_SKUS = 0
 
 # CSV header (= iMakInventory 既存 listing 単位 format に SKU 列追加)
 CSV_HEADER = "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8),ItemID,SKU,*Quantity"
 
 
-def read_sheet_needs_action() -> list:
-    """SKU シートから「対処要 TRUE + 対処済 FALSE」の行を抽出.
+def _read_sku_sheet_filtered(mode: str) -> list:
+    """SKU シートから「対処要 TRUE + 対処済 FALSE」の行を mode 別に抽出.
 
     SKU シート列 (12 列):
       A(0)=対処要 (TRUE/FALSE), B(1)=対処済 (TRUE/FALSE), C(2)=対処日,
       D(3)=listing ID, E(4)=title, F(5)=eBay SKU ID (UUID), G(6)=サイズ,
       H(7)=色, I(8)=仕入元在庫, J(9)=仕入元価格, K(10)=eBay 現Qty, L(11)=自動CHK日
 
-    Returns: [{"listing_id", "sku_id", "size", "color", "ebay_qty",
-               "current_supplier_mark", "needs_action"}, ...]
+    mode:
+      "zero"    → 仕入元 ✕ × eBay Qty > 0 (qty=0 化対象)
+      "restore" → 仕入元 ◎ × eBay Qty = 0 (qty 復活対象)
     """
     sh = open_sheet()
     rows = read_sku_rows(sh)
-    needs = []
+    out = []
     for sheet_idx, r in enumerate(rows, start=2):
         r = list(r) + [""] * max(0, 12 - len(r))
         needs_action_flag = r[0].strip().upper() in ("TRUE", "✓", "○", "OK")
         already_done_flag = r[1].strip().upper() in ("TRUE", "✓", "○", "OK")
         if not needs_action_flag or already_done_flag:
             continue
-        # ebay_qty を int 化 (失敗時 0)
         try:
             ebay_qty = int(r[10]) if r[10].strip() not in ("", "-") else 0
         except ValueError:
             ebay_qty = 0
-        # qty=0 化対象は 仕入元 ✕ かつ eBay Qty > 0 のみ
-        # (仕入元 ◎ × eBay Qty=0 は「qty 増やす対象」で別件)
-        supplier_mark = r[8].strip()   # I 列 = 仕入元在庫
-        if supplier_mark != "✕" or ebay_qty <= 0:
-            continue
-        needs.append({
+        supplier_mark = r[8].strip()
+        if mode == "zero":
+            if supplier_mark != "✕" or ebay_qty <= 0:
+                continue
+        elif mode == "restore":
+            if supplier_mark != "◎" or ebay_qty > 0:
+                continue
+        else:
+            raise ValueError(f"unknown mode: {mode}")
+        out.append({
             "row_index":  sheet_idx,
             "listing_id": r[3].strip(),
             "sku_id":     r[5].strip(),
             "size":       r[6].strip(),
             "color":      r[7].strip(),
             "ebay_qty":   ebay_qty,
+            "supplier_stock_mark": supplier_mark,
             "needs_action": True,
         })
-    return needs
+    return out
+
+
+def read_sheet_needs_action() -> list:
+    """qty=0 化対象 (= 仕入元 ✕ × eBay Qty > 0) を抽出."""
+    return _read_sku_sheet_filtered("zero")
+
+
+def read_sheet_restore_target() -> list:
+    """qty 復活対象 (= 仕入元 ◎ × eBay Qty = 0) を抽出."""
+    return _read_sku_sheet_filtered("restore")
+
+
+def _read_sku_sheet_listing(mode: str) -> list:
+    """単独 listing (= F 列 非 UUID + main_active) の qty 変更候補を抽出.
+
+    variation Revise (SKU 列必須) の対象外。listing level Revise (3 列 format) で処理する。
+
+    mode: "zero" (✕×Qty>0) or "restore" (◎×Qty=0)
+    """
+    import re as _re   # noqa: PLC0415
+    _UUID = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    sh = open_sheet()
+    rows = read_sku_rows(sh)
+    # main_active listing ids
+    from sheet_updater import read_main_active_rows   # noqa: PLC0415
+    main_ids = {r["listing_id"] for r in read_main_active_rows(sh, supplier_filter="all")}
+    out = []
+    for sheet_idx, r in enumerate(rows, start=2):
+        r = list(r) + [""] * max(0, 12 - len(r))
+        if r[0].strip().upper() not in ("TRUE", "✓", "○", "OK"): continue
+        if r[1].strip().upper() in ("TRUE", "✓", "○", "OK"): continue
+        try: ebay_qty = int(r[10]) if r[10].strip() not in ("", "-") else 0
+        except ValueError: ebay_qty = 0
+        sup = r[8].strip()
+        f = r[5].strip()
+        d = r[3].strip()
+        if d not in main_ids: continue
+        if _UUID.match(f): continue   # variation Revise の対象 (除外)
+        if mode == "zero":
+            if sup != "✕" or ebay_qty <= 0: continue
+        elif mode == "restore":
+            if sup != "◎" or ebay_qty > 0: continue
+        else: continue
+        out.append({"row_index": sheet_idx, "listing_id": d, "sku_id": f,
+                    "size": r[6].strip(), "color": r[7].strip(),
+                    "ebay_qty": ebay_qty, "supplier_stock_mark": sup,
+                    "needs_action": True, "is_single_listing": True})
+    return out
+
+
+def read_sheet_listing_zero() -> list:
+    return _read_sku_sheet_listing("zero")
+
+
+def read_sheet_listing_restore() -> list:
+    return _read_sku_sheet_listing("restore")
+
+
+def generate_listing_revise_csv(items: list, target_qty: int = 0, mode: str = "zero") -> Path:
+    """単独 listing 用 Revise CSV (3 列 format、SKU 列なし)."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    prefix = "revise_listing_qty0" if mode == "zero" else f"revise_listing_qty{target_qty}_restore"
+    path = CSV_OUT_DIR / f"{prefix}_{ts}.csv"
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+        writer.writerow([
+            "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)",
+            "ItemID", "*Quantity",
+        ])
+        # 重複 listing_id を除外 (= 単独 listing は 1 listing 1 row)
+        seen = set()
+        for n in items:
+            lid = n["listing_id"]
+            if lid in seen: continue
+            seen.add(lid)
+            writer.writerow(["Revise", lid, target_qty])
+    return path
 
 
 def is_valid_uuid(s: str) -> bool:
@@ -97,30 +180,132 @@ def is_valid_uuid(s: str) -> bool:
     return bool(re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", s or ""))
 
 
-def save_qty_snapshot(needs_list: list) -> Path:
-    """qty=0 化前の snapshot 保存 (Phase 4 安全網 #3、rollback 用)."""
+def save_qty_snapshot(needs_list: list, mode: str = "zero") -> Path:
+    """qty 変更前の snapshot 保存 (Phase 4 安全網 #3、rollback 用).
+
+    mode は "zero"/"restore" を保存。rollback 時は snapshot 内の元 qty に戻す。
+    """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = SNAPSHOT_DIR / f"qty_snapshot_{ts}.json"
     path.write_text(json.dumps({
         "ts": datetime.now().isoformat(timespec="seconds"),
+        "mode": mode,
         "skus": needs_list,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
 
-def generate_revise_csv(needs_list: list) -> Path:
-    """variation Revise CSV を csv_output/ に出力."""
+def generate_revise_csv(needs_list: list, target_qty: int = 0, mode: str = "zero") -> Path:
+    """variation Revise CSV を csv_output/ に出力 (= リバイスくん format).
+
+    target_qty: 全 row を共通の qty に書き換える (zero=0, restore=1)
+    mode: file 名 prefix 用 ("zero" → revise_qty0_*, "restore" → revise_qtyN_*)
+
+    2026-05-29 重大 fix: 旧 format `Action, ItemID, SKU, *Quantity` は eBay 上で
+    Warning 21916619「Item level quantity will be ignored」 → variation qty 変更
+    されず silent fail。 数週間分の対処済 mark が実態反映されてなかった。
+    正規 format:
+      1. 親行: Revise, ItemID, "", VariationSpecificsSet 集約, "", ""
+      2. 子行: "", "", Variation, RelationshipDetails, qty, price
+    """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = CSV_OUT_DIR / f"revise_qty0_{ts}.csv"
+    prefix = "revise_qty0" if mode == "zero" else f"revise_qty{target_qty}_restore"
+    path = CSV_OUT_DIR / f"{prefix}_{ts}.csv"
+
+    # eBay listing report から VariationSpecificsSet + RelationshipDetails + price 構築
+    from collections import defaultdict   # noqa: PLC0415
+    import re   # noqa: PLC0415
+    _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+    # 最新 eBay report を見つける
+    report_dir = Path(r"C:\Users\imax2\local_data\iMakInventory\ebay_active_listing_dl")
+    reports = sorted(report_dir.glob("eBay-all-active-listings-report-*.csv"),
+                     key=lambda p: p.stat().st_mtime, reverse=True)
+    if not reports:
+        # fallback: 旧 SKU 単行 format (= 効かないが互換性のため)
+        with path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+            writer.writerow([
+                "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)",
+                "ItemID", "SKU", "*Quantity",
+            ])
+            for n in needs_list:
+                writer.writerow(["Revise", n["listing_id"], n["sku_id"], target_qty])
+        return path
+
+    # eBay report 読込
+    with reports[0].open(encoding="utf-8-sig", newline="") as f:
+        rep = list(csv.reader(f))
+    hdr_idx = next((i for i, r in enumerate(rep[:30]) if r and "Item number" in r[0]), None)
+    if hdr_idx is None:
+        # fallback
+        with path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+            writer.writerow([
+                "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)",
+                "ItemID", "SKU", "*Quantity",
+            ])
+            for n in needs_list:
+                writer.writerow(["Revise", n["listing_id"], n["sku_id"], target_qty])
+        return path
+
+    hdr_r = rep[hdr_idx]
+    sp_idx = hdr_r.index("Start price") if "Start price" in hdr_r else None
+    data = rep[hdr_idx+1:]
+
+    ebay_var = {}   # (iid, sku) -> {"var": str, "price": str}
+    for r in data:
+        if not r or len(r) < 5: continue
+        iid = r[0].strip()
+        sku = r[3].strip()
+        if not iid or not _UUID.match(sku): continue
+        var = r[2].strip()
+        price = r[sp_idx].strip() if sp_idx is not None and len(r) > sp_idx else "0.99"
+        ebay_var[(iid, sku)] = {"var": var, "price": price or "0.99"}
+
+    def build_spec_set(all_vars: list) -> str:
+        axis = {}
+        for v in all_vars:
+            for kv in v.split("|"):
+                if "=" not in kv: continue
+                k, val = kv.split("=", 1)
+                axis.setdefault(k.strip(), []).append(val.strip())
+        parts = []
+        for k, vals in axis.items():
+            seen, uniq = set(), []
+            for v in vals:
+                if v not in seen:
+                    seen.add(v)
+                    uniq.append(v)
+            parts.append(f'{k}={";".join(uniq)}')
+        return "|".join(parts)
+
+    # ItemID 単位で集約 + UUID dedup (= sheet データ品質 issue 対応)
+    by_item = defaultdict(dict)   # iid -> {sku: child_info}
+    for n in needs_list:
+        iid = n["listing_id"]
+        sku = n["sku_id"]
+        vi = ebay_var.get((iid, sku))
+        if vi is None:
+            continue   # eBay 上不在 = skip
+        if sku in by_item[iid]:
+            continue   # UUID 重複 dedup
+        by_item[iid][sku] = vi
+
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
-        # header
         writer.writerow([
             "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)",
-            "ItemID", "SKU", "*Quantity",
+            "ItemID", "Relationship", "RelationshipDetails", "*Quantity", "*StartPrice",
         ])
-        for n in needs_list:
-            writer.writerow(["Revise", n["listing_id"], n["sku_id"], 0])
+        for iid, skus_d in by_item.items():
+            # 親行: 全 variation set 集約
+            all_vars = [v["var"] for (id2, sku2), v in ebay_var.items() if id2 == iid]
+            spec_set = build_spec_set(all_vars)
+            writer.writerow(["Revise", iid, "", spec_set, "", ""])
+            # 子行: 各 variation を個別 qty 変更
+            for sku, info in skus_d.items():
+                writer.writerow(["", "", "Variation", info["var"], target_qty, info["price"]])
     return path
 
 
