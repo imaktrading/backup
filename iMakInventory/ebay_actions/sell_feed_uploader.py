@@ -176,6 +176,25 @@ def _cleanup_uc_patched_driver_cache() -> bool:
     )
 
 
+def _check_profile_age_warn(profile_dir: str, warn_days: int = 7) -> None:
+    """profile dir の作成日 (mtime 基準) が warn_days 経過してれば warning log.
+
+    chrome profile は時間経過で corrupt 傾向 (= 5/24/26/28/29 と複数回 観測)。
+    定期 rotation 推奨。
+    """
+    if not os.path.exists(profile_dir):
+        return
+    try:
+        from datetime import datetime as _dt   # noqa: PLC0415
+        mtime = _dt.fromtimestamp(os.path.getmtime(profile_dir))
+        age_days = (_dt.now() - mtime).days
+        if age_days >= warn_days:
+            print(f"  [WARN] chrome profile age {age_days}d >= {warn_days}d、 "
+                  f"rotation 推奨 (= rename + 新規 login)")
+    except Exception:
+        pass
+
+
 def _cleanup_stale_chrome_locks(profile_dir: str) -> int:
     """profile dir の stale lock 系ファイルを削除 (chrome 異常終了の残骸).
 
@@ -242,6 +261,8 @@ def create_ebay_driver(headless: bool = False, use_profile: bool = True):
         removed = _cleanup_stale_chrome_locks(EBAY_CHROME_PROFILE_DIR)
         if removed > 0:
             print(f"  [INFO] stale chrome lock 削除: {removed} 件")
+        # 2026-05-29 profile rotation 推奨 警告 (= 課題 #5)
+        _check_profile_age_warn(EBAY_CHROME_PROFILE_DIR, warn_days=7)
         options.add_argument(f"--user-data-dir={EBAY_CHROME_PROFILE_DIR}")
     if headless:
         options.add_argument("--headless=new")
