@@ -631,6 +631,20 @@ def main():
                 res = sync_from_csv(report_path, execute=not args.dry_run)
                 log(f"  match {res['checked']} 件、K 列乖離 {res['changed']} 件、"
                     f"{'書込' if res['executed'] else 'dry-run'}")
+                # 2026-05-29 stale report 検知 (= 課題 #4):
+                # 期待 listing 数 (main sheet active 行数) vs report の listing 数
+                # 大幅乖離 (= 5+ listings 不足) なら stale 疑い → 強制再 DL 推奨 log
+                # 警告で実害なし、 ただし後続 process が古い情報で動く危険性 通知
+                try:
+                    main_sheet_active_count = len(read_main_active_rows(
+                        sh, supplier_filter="all"))
+                    if res["checked"] + 5 < main_sheet_active_count:
+                        log(f"⚠️ stale report 疑い: main sheet active {main_sheet_active_count} 件 "
+                            f"vs report match {res['checked']} 件 "
+                            f"(= 差 {main_sheet_active_count - res['checked']} 件)。 "
+                            f"force_new=True で再 DL を強く推奨")
+                except Exception as _e:
+                    log(f"  [WARN] stale 判定 skip: {_e}")
                 # eBay valid variation set 構築 (= scraper filter で使う、global stash)
                 from sku_uuid_sync import (  # noqa: PLC0415
                     parse_ebay_report, extract_jp_size, extract_color, normalize_size_for_match,
