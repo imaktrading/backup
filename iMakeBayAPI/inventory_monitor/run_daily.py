@@ -218,6 +218,9 @@ def main():
     if latest_report:
         after_steps.append(("audit",
                             [PY, "audit_sheet_vs_ebay.py", "--report", latest_report]))
+    # 2026-05-29 scrape 精度 audit (= 10 件 sample re-scrape)
+    after_steps.append(("scrape_audit",
+                        [PY, "audit_scrape_accuracy.py", "--sample", "10"]))
 
     for name, cmd in after_steps:
         _log(f">>> step: {name}")
