@@ -214,10 +214,14 @@ def main():
         step_results.append(("uuid_sync", False))
     after_steps.append(("zero",    [PY, "auto_qty_zero.py", "--mode=zero", "--execute"]))
     after_steps.append(("restore", [PY, "auto_qty_zero.py", "--mode=restore", "--execute"]))
-    # 2026-05-29 cycle 末 audit (= sheet 対処済 vs eBay 実 qty 全件照合、 silent fail 検知)
+    # 2026-05-29 cycle 末 audit + 自動修復 (= silent fail 検知 + heal、 課題 #2 拡張版)
+    # 「ヘンだったら 自動で やり直す」 仕組み。 audit のみ → 不整合 0 件で silent、
+    # 1+ で 自動 revise CSV 生成 + upload + 15 分後 反映検証。
+    # --no-verify で 待機 skip も可能 (= cron 時間短縮)
     if latest_report:
-        after_steps.append(("audit",
-                            [PY, "audit_sheet_vs_ebay.py", "--report", latest_report]))
+        after_steps.append(("audit_heal",
+                            [PY, "audit_and_heal.py", "--report", latest_report,
+                             "--no-verify"]))   # daily 内では verify skip、 別 cron で
     # 2026-05-29 scrape 精度 audit (= 10 件 sample re-scrape)
     after_steps.append(("scrape_audit",
                         [PY, "audit_scrape_accuracy.py", "--sample", "10"]))
