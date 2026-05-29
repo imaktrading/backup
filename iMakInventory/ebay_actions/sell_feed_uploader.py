@@ -52,7 +52,10 @@ if str(ROOT_DIR) not in sys.path:
 # 設定
 # ============================================================================
 # Chrome プロファイル (Mercari と分離、eBay 専用)
-EBAY_CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_ebay"
+# 2026-05-29: 旧 chrome_profile_ebay が外部 process (= Windows search indexer 等)
+# の lock で rename / delete 不能になる事故あり。 新 path ebay2 に切替 + 旧 path
+# は backup として残置 (= 自然解放後に手動削除予定)。
+EBAY_CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_ebay2"
 EBAY_RESULT_DL_DIR = r"C:\Users\imax2\local_data\iMakInventory\ebay_result_dl"   # 結果 CSV download 用
 
 # eBay URLs
