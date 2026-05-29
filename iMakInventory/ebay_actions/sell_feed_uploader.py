@@ -87,6 +87,14 @@ SAFE_FAILURE_ERROR_CODES = {
     "17",   # "This item cannot be accessed because the listing has been deleted" = 削除済
 }
 
+# 2026-05-29: 致命的 Warning (= success 扱いだが実は qty/price 反映されてない)
+# これらが Warning に含まれてたら action_needed_failure として扱う = 「success と
+# 楽観的判定」 の盲点を塞ぐ。 数週間 silent fail した 21916619 が代表例。
+CRITICAL_WARNING_CODES = {
+    "21916619",  # "Item level quantity will be ignored" → variation qty 変更失敗 確定
+    "21916618",  # "Item level start price will be ignored" → variation price 変更失敗 確定
+}
+
 DECISION_LOG_DIR = ROOT_DIR / "decision_log"
 CSV_OUTPUT_DIR = ROOT_DIR / "csv_output"
 UPLOAD_STATE_FILE = DECISION_LOG_DIR / "upload_state.json"
@@ -809,7 +817,20 @@ def _classify_result_csv(csv_text: str) -> dict:
     for r in rows:
         status = (r.get("Status") or "").strip()
         if status == "Warning":
-            warning += 1
+            # 2026-05-29: 致命的 Warning (= 21916619 等) は実は qty/price 反映
+            # されてない silent fail。 action_needed_failure に再分類する。
+            wcodes = (r.get("WarningCode") or "").strip()
+            wcode_set = set(c.strip() for c in wcodes.split("|") if c.strip())
+            if wcode_set & CRITICAL_WARNING_CODES:
+                action_needed_failure += 1
+                failure_details.append({
+                    "item_id":       r.get("ItemID", ""),
+                    "error_code":    f"CRITICAL_WARNING:{','.join(sorted(wcode_set & CRITICAL_WARNING_CODES))}",
+                    "error_message": (r.get("WarningMessage") or "")[:200],
+                    "safe":          False,
+                })
+            else:
+                warning += 1
         elif status == "Failure":
             code = (r.get("ErrorCode") or "").strip()
             is_safe = code in SAFE_FAILURE_ERROR_CODES

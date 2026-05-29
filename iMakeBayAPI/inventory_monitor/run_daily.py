@@ -214,6 +214,10 @@ def main():
         step_results.append(("uuid_sync", False))
     after_steps.append(("zero",    [PY, "auto_qty_zero.py", "--mode=zero", "--execute"]))
     after_steps.append(("restore", [PY, "auto_qty_zero.py", "--mode=restore", "--execute"]))
+    # 2026-05-29 cycle 末 audit (= sheet 対処済 vs eBay 実 qty 全件照合、 silent fail 検知)
+    if latest_report:
+        after_steps.append(("audit",
+                            [PY, "audit_sheet_vs_ebay.py", "--report", latest_report]))
 
     for name, cmd in after_steps:
         _log(f">>> step: {name}")
