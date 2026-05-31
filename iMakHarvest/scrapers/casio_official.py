@@ -74,6 +74,15 @@ BLOCKED_MARKERS = (
 NOT_FOUND_MARKERS = (
     "404", "お探しのページは見つかりませんでした",
 )
+# chrome side protocol / connection error 検出 (= 6/1 MR-G 29 件 で頻発)
+CHROME_ERROR_MARKERS = (
+    "このサイトにアクセスできません",
+    "err_http",
+    "err_connection",
+    "err_name_not_resolved",
+    "this site can't be reached",
+    "this webpage is not available",
+)
 
 # 出力先 (= 依頼書 sec 3-2)
 DUMP_DIR = r"C:\dev\iMak_data\catalog\_casio_official_dumps"
@@ -92,11 +101,35 @@ ALL_LINUP_MAX_SCROLLS = 40
 # Driver
 # ============================================================================
 def create_casio_driver(headless: bool = False):
-    """casio 専用 anonymous chrome driver 起動 (= mercari_seller と同じ create_driver 流用)."""
+    """casio 専用 anonymous chrome driver 起動.
+
+    mercari_seller anti-detection (UCD + 永続 profile + ja lang) は流用、
+    casio 固有: HTTP2 protocol error 対策で **--disable-http2** flag 追加
+    (= 6/1 retry で MR-G / MT-G / MTG-B 系 page で ERR_HTTP2_PROTOCOL_ERROR
+    多発、 HTTP/1.1 強制で復旧確認)。
+    """
+    try:
+        import undetected_chromedriver as uc  # noqa: PLC0415
+    except ImportError as e:
+        raise RuntimeError(
+            "undetected_chromedriver 未インストール。 pip install undetected-chromedriver"
+        ) from e
+
     os.makedirs(CHROME_PROFILE_DIR_CASIO, exist_ok=True)
-    return mercari_likes.create_driver(
-        headless=headless, profile_dir=CHROME_PROFILE_DIR_CASIO,
-    )
+    options = uc.ChromeOptions()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--lang=ja-JP")
+    options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR_CASIO}")
+    # CalculateNativeWinOcclusion + Http2 を一括 disable (= MR-G/MT-G page で
+    # ERR_HTTP2_PROTOCOL_ERROR 多発、 HTTP/1.1 fallback で復旧確認 6/1)
+    options.add_argument("--disable-features=CalculateNativeWinOcclusion,Http2")
+    if headless:
+        options.add_argument("--headless=new")
+
+    # mercari_likes と同 Chrome version (= 148)
+    driver = uc.Chrome(options=options, version_main=148)
+    return driver
 
 
 # ============================================================================
@@ -146,6 +179,8 @@ def _classify_page(driver) -> str:
         return "blocked"
     if any(kw in text_lower for kw in NOT_FOUND_MARKERS):
         return "404"
+    if any(kw.lower() in text_lower for kw in CHROME_ERROR_MARKERS):
+        return "chrome_error"
     return "ok"
 
 
@@ -553,6 +588,233 @@ def fetch_detail_status(
         result["price_text"] = price_text
     except Exception:
         pass
+    return result
+
+
+# ============================================================================
+# Variant detail page から spec 抽出 (= 6/1 catalog merge 用 100 件 fetch)
+# ============================================================================
+# spec accordion の DOM 構造 (= 5/31 実機 dump で確定):
+#   <li class="p-product_detail-spec-accordion__panel-item">
+#     <div class="...panel-item-ttl"><h4>label</h4></div>
+#     <div class="...panel-item-cont">value</div>
+#   </li>
+# label の例 (= 公式 表記):
+#   "ケースサイズ（縦×横×厚さ）" / "質量" / "発売年月" / "使用電源・電池寿命"
+#   / "ケース・ベゼル材質" / "バンド" / "防水性" / "耐衝撃構造"
+SPEC_LI_SELECTOR = "li.p-product_detail-spec-accordion__panel-item"
+SPEC_LABEL_SELECTOR = ".p-product_detail-spec-accordion__panel-item-ttl h4"
+SPEC_VALUE_SELECTOR = ".p-product_detail-spec-accordion__panel-item-cont"
+
+# label → output field 名の mapping (= 依頼書 sec 3 の schema に合わせる)
+# fail-closed: mapping に無い label は無視 (= 推測で埋めない)
+SPEC_LABEL_TO_FIELD = {
+    "ケースサイズ（縦×横×厚さ）": "size",
+    "ケースサイズ": "size",
+    "質量": "weight",
+    "発売年月": "release_date",
+    "使用電源・電池寿命": "battery",
+    "ケース・ベゼル材質": "material_case_bezel",
+    "ケース材質": "material_case",
+    "ベゼル材質": "material_bezel",
+    "バンド": "material_band",
+    "ベルト": "material_band",
+    "防水性": "water_resistance",
+    "耐衝撃構造": "shock_resistance",
+    "構造": "shock_resistance",
+    "ガラス": "glass",
+    "モジュール": "module",
+    "ムーブメント": "module",
+    "電波受信機能": "radio_wave",
+    "ソーラー": "solar",
+    "Bluetooth": "bluetooth",
+}
+
+
+def fetch_detail_spec(
+    driver,
+    detail_url: str,
+    initial_wait_sec: int = 12,
+) -> dict:
+    """Casio variant detail page から spec 抽出 (= ShockBase 互換 schema).
+
+    DOM 構造: spec accordion (= li.p-product_detail-spec-accordion__panel-item)
+    抽出項目 (= 依頼書 2026-06-01_casio_official_100_detail_fetch sec 3):
+    - MSRP_JPY / RELEASE_DATE / MODULE / MATERIAL_* / WATER_RESISTANCE / WEIGHT / SIZE
+    - 主画像 + 追加画像 URL
+
+    Returns:
+        {
+            "url": str,
+            "status": "200" | "404" | "redirect" | "blocked" | "error",
+            "title": str,
+            "h1": str,
+            "msrp_jpy": str,
+            "release_date": str,
+            "module": str,
+            "material_band": str,
+            "material_bezel": str,
+            "material_case": str,
+            "material_case_bezel": str,
+            "water_resistance": str,
+            "weight": str,
+            "size": str,
+            "battery": str,
+            "shock_resistance": str,
+            "main_image": str,
+            "additional_images": list[str],
+            "raw_specs": dict[label, value],  # = 全 spec ペア (= mapping 漏れ調査用)
+            "fetched_at": ISO8601 str,
+        }
+    """
+    from selenium.common.exceptions import WebDriverException  # noqa: PLC0415
+
+    result = {
+        "url": detail_url,
+        "status": "error",
+        "title": "",
+        "h1": "",
+        "msrp_jpy": "",
+        "release_date": "",
+        "module": "",
+        "glass": "",
+        "material_band": "",
+        "material_bezel": "",
+        "material_case": "",
+        "material_case_bezel": "",
+        "water_resistance": "",
+        "weight": "",
+        "size": "",
+        "battery": "",
+        "shock_resistance": "",
+        "main_image": "",
+        "additional_images": [],
+        "raw_specs": {},
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
+    # chrome HTTP2 protocol error 等で初回 fetch 失敗するケースの retry (= 6/1 MR-G 系)
+    # 3 回 retry、 各 retry 間 5s/10s/15s で指数 backoff
+    status = "error"
+    backoff_secs = (5.0, 10.0, 15.0)
+    for retry_idx in range(3):
+        try:
+            driver.get(detail_url)
+        except WebDriverException as e:
+            result["error"] = str(e)
+            if retry_idx == 2:
+                return result
+            time.sleep(backoff_secs[retry_idx])
+            continue
+        time.sleep(initial_wait_sec)
+        status = _classify_page(driver)
+        if status != "chrome_error":
+            break
+        # chrome 側 protocol error 検出 → backoff 後 retry
+        if retry_idx < 2:
+            time.sleep(backoff_secs[retry_idx])
+    if status == "blocked":
+        result["status"] = "blocked"
+        return result
+    if status == "404":
+        result["status"] = "404"
+        return result
+    if status == "chrome_error":
+        result["status"] = "chrome_error"
+        return result
+    result["status"] = "200"
+
+    # title / h1
+    try:
+        result["title"] = driver.title or ""
+    except Exception:
+        pass
+    try:
+        h1 = driver.execute_script(
+            "return (document.querySelector('h1')?.textContent || '').trim();"
+        )
+        result["h1"] = h1 or ""
+    except Exception:
+        pass
+
+    # spec accordion 全件抽出 → label/value ペア
+    try:
+        pairs = driver.execute_script(f"""
+            const items = document.querySelectorAll({json.dumps(SPEC_LI_SELECTOR)});
+            const out = [];
+            items.forEach(li => {{
+                const lab = li.querySelector({json.dumps(SPEC_LABEL_SELECTOR)});
+                const val = li.querySelector({json.dumps(SPEC_VALUE_SELECTOR)});
+                const labText = lab ? (lab.textContent || '').trim() : '';
+                const valText = val ? (val.textContent || '').trim() : '';
+                if (labText) out.push({{label: labText, value: valText}});
+            }});
+            return out;
+        """) or []
+    except Exception:
+        pairs = []
+    for p in pairs:
+        label = p.get("label") or ""
+        value = (p.get("value") or "").strip()
+        result["raw_specs"][label] = value
+        field = SPEC_LABEL_TO_FIELD.get(label)
+        if field:
+            result[field] = value
+
+    # 価格 (= span.price-label の親要素から ¥ 表記抽出)
+    try:
+        msrp = driver.execute_script("""
+            const lab = document.querySelector('span.price-label');
+            if (!lab) return '';
+            // 親 / 親の親内の ¥/￥ 含む text
+            let node = lab.parentElement;
+            for (let i = 0; i < 4 && node; i++) {
+                const t = node.textContent || '';
+                const m = t.match(/[¥￥]\\s*([\\d,]+)\\s*円?/);
+                if (m) return m[0];
+                node = node.parentElement;
+            }
+            return '';
+        """) or ""
+        result["msrp_jpy"] = msrp
+    except Exception:
+        pass
+
+    # 画像: JSON-LD (= schema.org Product image) を主画像、 page 内 product 画像も追加
+    try:
+        ld_json = driver.execute_script("""
+            const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+            for (const s of scripts) {
+                try {
+                    const j = JSON.parse(s.textContent);
+                    if (j && j['@type'] === 'Product') return j;
+                } catch (e) {}
+            }
+            return null;
+        """)
+    except Exception:
+        ld_json = None
+    if ld_json and isinstance(ld_json, dict):
+        img = ld_json.get("image")
+        if isinstance(img, str):
+            result["main_image"] = img
+        elif isinstance(img, list) and img:
+            result["main_image"] = img[0]
+            result["additional_images"] = [u for u in img[1:] if isinstance(u, str)]
+    if not result["main_image"]:
+        # fallback: img.src で casio CDN を含むもの最初
+        try:
+            img = driver.execute_script("""
+                const imgs = Array.from(document.querySelectorAll('img'));
+                for (const i of imgs) {
+                    const s = i.src || i.getAttribute('data-src') || '';
+                    if (s && (s.includes('casio.com/content') || s.includes('static.casio'))) return s;
+                }
+                return imgs.length > 0 ? (imgs[0].src || '') : '';
+            """) or ""
+            result["main_image"] = img
+        except Exception:
+            pass
+
     return result
 
 
