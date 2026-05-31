@@ -78,6 +78,15 @@ NOT_FOUND_MARKERS = (
 # 出力先 (= 依頼書 sec 3-2)
 DUMP_DIR = r"C:\dev\iMak_data\catalog\_casio_official_dumps"
 
+# all-linup page (= 5/31 Option A discovery で判明、 G-shock 全 variant URL 集約 page)
+ALL_LINUP_URL = "https://gshock.casio.com/jp/products/all-linup/"
+
+# variant URL pattern (= www.casio.com/jp/watches/gshock/product.<MODEL>/ を all-linup から抽出)
+# all-linup 内に直接 product.MODEL/ link が含まれる
+ALL_LINUP_SCROLL_INTERVAL_SEC = 2.5
+ALL_LINUP_NO_PROGRESS_THRESHOLD = 3
+ALL_LINUP_MAX_SCROLLS = 40
+
 
 # ============================================================================
 # Driver
@@ -284,6 +293,158 @@ def dump_series_result(result: dict, output_dir: str = DUMP_DIR) -> str:
             "IMAGE_URL": v.get("image_url", ""),
             # MSRP_JPY / RELEASE_DATE / IMAGES / IS_LIMITED / IS_NEW / MODULE 等は
             # 詳細 page まで掘ったときに追記、 POC レベルでは空
+        })
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+    return file_path
+
+
+# ============================================================================
+# all-linup page から全 variant URL を scroll で抽出 (= Option A 採用 戦略)
+# ============================================================================
+def _collect_variant_urls_from_page(driver) -> list[dict]:
+    """現在 page から www.casio.com/jp/watches/gshock/product.<MODEL>/ URL 全件抽出.
+
+    Returns: [{model_id, url, badge, image_url}, ...] (= dedupe + 順序保持)
+    """
+    try:
+        anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/product.']")
+    except Exception:
+        return []
+    seen: set[str] = set()
+    variants: list[dict] = []
+    for a in anchors:
+        try:
+            href = a.get_attribute("href") or ""
+        except Exception:
+            continue
+        if "casio.com/jp/watches/gshock/product." not in href:
+            continue
+        model_id = parse_model_id(href)
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        try:
+            badge_text = (a.text or "").strip()
+        except Exception:
+            badge_text = ""
+        img_src = ""
+        try:
+            imgs = a.find_elements(By.TAG_NAME, "img")
+            for img in imgs:
+                src = img.get_attribute("src") or img.get_attribute("data-src") or ""
+                if src:
+                    img_src = src
+                    break
+        except Exception:
+            pass
+        canon_url = href.split("?")[0].split("#")[0].rstrip("/")
+        variants.append({
+            "model_id": model_id,
+            "url": canon_url,
+            "badge": badge_text,
+            "image_url": img_src,
+        })
+    return variants
+
+
+def fetch_all_linup(
+    driver,
+    initial_wait_sec: int = DEFAULT_INITIAL_WAIT_SEC,
+    scroll_interval_sec: float = ALL_LINUP_SCROLL_INTERVAL_SEC,
+    no_progress_threshold: int = ALL_LINUP_NO_PROGRESS_THRESHOLD,
+    max_scrolls: int = ALL_LINUP_MAX_SCROLLS,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> dict:
+    """all-linup page を開いて scroll で全 G-shock variant URL を取得.
+
+    5/31 Option A 戦略: TYPE 単位 loop 不要、 all-linup 1 page で完結。
+
+    Returns:
+        {
+            "url": ALL_LINUP_URL,
+            "status": "ok" | "blocked" | "error",
+            "variants": list[dict],
+            "scroll_progression": list[int],
+            "fetched_at": ISO8601 str,
+        }
+    """
+    try:
+        driver.get(ALL_LINUP_URL)
+    except Exception as e:
+        return {
+            "url": ALL_LINUP_URL,
+            "status": "error",
+            "error": str(e),
+            "variants": [],
+            "scroll_progression": [],
+            "fetched_at": datetime.utcnow().isoformat(),
+        }
+    time.sleep(initial_wait_sec)
+    status = _classify_page(driver)
+    if status != "ok":
+        return {
+            "url": ALL_LINUP_URL,
+            "status": status,
+            "variants": [],
+            "scroll_progression": [],
+            "fetched_at": datetime.utcnow().isoformat(),
+        }
+    # scroll loop = 増加停止まで
+    progression: list[int] = []
+    last_count = len(_collect_variant_urls_from_page(driver))
+    progression.append(last_count)
+    no_progress = 0
+    for i in range(max_scrolls):
+        try:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        except Exception:
+            pass
+        time.sleep(scroll_interval_sec)
+        current = len(_collect_variant_urls_from_page(driver))
+        progression.append(current)
+        if progress_callback:
+            try:
+                progress_callback(i + 1, current, f"scroll #{i+1}: {current} variants")
+            except Exception:
+                pass
+        if current == last_count:
+            no_progress += 1
+            if no_progress >= no_progress_threshold:
+                break
+        else:
+            no_progress = 0
+        last_count = current
+    variants = _collect_variant_urls_from_page(driver)
+    return {
+        "url": ALL_LINUP_URL,
+        "status": "ok",
+        "variants": variants,
+        "scroll_progression": progression,
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
+
+
+def dump_all_linup_result(result: dict, output_dir: str = DUMP_DIR) -> str:
+    """fetch_all_linup 結果を JSON ファイルに dump、 file path 返却.
+
+    ShockBase 互換 record 形式:
+        all_linup_<timestamp>.json
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    file_path = os.path.join(output_dir, f"all_linup_{ts}.json")
+    records: list[dict] = []
+    fetched_at = result.get("fetched_at")
+    for v in result.get("variants") or []:
+        records.append({
+            "__model__": v.get("model_id"),
+            "__series__": "",  # = all-linup から取れる範囲では未確定 (= TYPE 推定別途)
+            "__subseries__": "",
+            "__url__": v.get("url"),
+            "__fetched_at__": fetched_at,
+            "BADGE": v.get("badge", ""),
+            "IMAGE_URL": v.get("image_url", ""),
         })
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False, indent=2)
