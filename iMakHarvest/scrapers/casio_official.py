@@ -452,6 +452,111 @@ def dump_all_linup_result(result: dict, output_dir: str = DUMP_DIR) -> str:
 
 
 # ============================================================================
+# Variant detail page status check (= 5/31 unmatched 44 件 検証 用)
+# ============================================================================
+def fetch_detail_status(
+    driver,
+    detail_url: str,
+    initial_wait_sec: int = 8,
+) -> dict:
+    """1 variant detail URL を開いて status (= 200 / 404 / redirect / error) 判定.
+
+    200 OK 時は title + image_url + 価格 (= 取れれば) を抽出。
+
+    Returns:
+        {
+            "url": str,
+            "status": "200" | "404" | "redirect" | "blocked" | "error",
+            "current_url": str,
+            "title": str,
+            "image_url": str,
+            "price_text": str,
+            "fetched_at": ISO8601 str,
+        }
+    """
+    result = {
+        "url": detail_url,
+        "status": "error",
+        "current_url": "",
+        "title": "",
+        "image_url": "",
+        "price_text": "",
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
+    try:
+        driver.get(detail_url)
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+    time.sleep(initial_wait_sec)
+    try:
+        current_url = driver.current_url or ""
+    except Exception:
+        current_url = ""
+    result["current_url"] = current_url
+    status = _classify_page(driver)
+    if status == "blocked":
+        result["status"] = "blocked"
+        return result
+    if status == "404":
+        result["status"] = "404"
+        return result
+    # redirect 判定 (= 入力 URL と current_url の host/path 不一致)
+    try:
+        in_path = detail_url.split("?")[0].split("#")[0].rstrip("/")
+        cur_path = current_url.split("?")[0].split("#")[0].rstrip("/")
+        if in_path.lower() != cur_path.lower():
+            result["status"] = "redirect"
+            # redirect 先が 404 の可能性 → 中身 fetch しない
+            return result
+    except Exception:
+        pass
+    # 200 OK 想定 → title + image + 価格抽出
+    result["status"] = "200"
+    try:
+        title = driver.title or ""
+    except Exception:
+        title = ""
+    result["title"] = title
+    # h1 / 商品名
+    try:
+        h1_text = driver.execute_script("""
+            const h1 = document.querySelector('h1');
+            return h1 ? h1.textContent.trim().slice(0, 120) : '';
+        """) or ""
+        if h1_text:
+            result["h1"] = h1_text
+    except Exception:
+        pass
+    # 公式商品画像 (= 主 visual)
+    try:
+        img_src = driver.execute_script("""
+            const imgs = Array.from(document.querySelectorAll('img'));
+            for (const img of imgs) {
+                const src = img.src || img.getAttribute('data-src') || '';
+                if (src && (src.includes('casio.com/content') || src.includes('mercdn') || src.includes('static.casio') || src.includes('product'))) {
+                    return src;
+                }
+            }
+            return imgs.length > 0 ? (imgs[0].src || '') : '';
+        """) or ""
+        result["image_url"] = img_src
+    except Exception:
+        pass
+    # 価格 (= 円 表記 候補)
+    try:
+        price_text = driver.execute_script("""
+            const text = document.body.innerText || '';
+            const m = text.match(/[¥￥]\\s*[\\d,]+\\s*円?/);
+            return m ? m[0] : '';
+        """) or ""
+        result["price_text"] = price_text
+    except Exception:
+        pass
+    return result
+
+
+# ============================================================================
 # POC = 複数 series fetch + 統計集計
 # ============================================================================
 def run_poc(
