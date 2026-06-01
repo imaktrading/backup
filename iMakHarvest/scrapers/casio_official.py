@@ -67,8 +67,12 @@ DEFAULT_BACKOFF_SCHEDULE_SEC = (5.0, 10.0, 20.0)
 
 # bot 検出 / 429 判定 marker (= body innerText で検出)
 BLOCKED_MARKERS = (
-    "access denied", "429", "blocked", "too many", "captcha",
-    "rate limit", "forbidden",
+    # 6/1 fix: "429" 単独 は ￥429,000 等の高額商品 価格に部分一致 → "too many" で代替
+    # "blocked" / "forbidden" 単独も英文商品説明に false positive あり得る → 削除
+    "access denied",
+    "too many requests",
+    "captcha",
+    "rate limit exceeded",
 )
 # 404 判定 (= title or body)
 NOT_FOUND_MARKERS = (
