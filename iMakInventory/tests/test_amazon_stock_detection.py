@@ -146,6 +146,70 @@ def test_offline_amazon_seller_identity_gate(samples_available, filename, expect
     )
 
 
+# 2026-06-03 HQ § fail-closed bug fix 回帰テスト:
+# 判定不能 (None) / 取れない (raw に in_stock 無し) → is_sold=True に倒さない (= skip)。
+
+def test_fetch_product_inventory_returns_none_when_raw_in_stock_is_none():
+    """raw に in_stock=None (= bot 検知 / 判定不能 page) → fetch_product_inventory が
+    None 返却 (= 上流で is_sold=None で skip)。
+
+    旧 logic: bool(raw.get("in_stock", False)) で default False=売切 に倒れる致命バグ。
+    """
+    from scrapers import amazon_scraper  # noqa: PLC0415
+    # _fetch_via_requests を stub (= raw に in_stock 無い dict 返却 で 旧バグ再現条件)
+    original = amazon_scraper._fetch_via_requests
+    try:
+        amazon_scraper._fetch_via_requests = lambda url: {"name": "x", "price_jpy": None}
+        # use_selenium_fallback=False で Selenium path off (= requests のみで判定)
+        result = amazon_scraper.fetch_product_inventory(
+            "https://www.amazon.co.jp/dp/B0FAKE0001/",
+            driver=None, use_selenium_fallback=False,
+        )
+        assert result is None, (
+            f"raw に in_stock 無し → None 返却が正解 (= 上流 skip)、 got: {result!r}"
+        )
+    finally:
+        amazon_scraper._fetch_via_requests = original
+
+
+def test_fetch_product_inventory_returns_none_when_raw_in_stock_explicitly_none():
+    """raw["in_stock"] = None (= 明示判定不能) → None 返却."""
+    from scrapers import amazon_scraper  # noqa: PLC0415
+    original = amazon_scraper._fetch_via_requests
+    try:
+        amazon_scraper._fetch_via_requests = lambda url: {
+            "name": "x", "in_stock": None, "price_jpy": None,
+        }
+        result = amazon_scraper.fetch_product_inventory(
+            "https://www.amazon.co.jp/dp/B0FAKE0002/",
+            driver=None, use_selenium_fallback=False,
+        )
+        assert result is None, (
+            f"raw['in_stock']=None → None 返却が正解、 got: {result!r}"
+        )
+    finally:
+        amazon_scraper._fetch_via_requests = original
+
+
+def test_fetch_product_inventory_preserves_explicit_true_false():
+    """明示 True/False は dict 返却 (= 正常 path 維持)."""
+    from scrapers import amazon_scraper  # noqa: PLC0415
+    original = amazon_scraper._fetch_via_requests
+    try:
+        for in_stock_val in (True, False):
+            amazon_scraper._fetch_via_requests = lambda url, v=in_stock_val: {
+                "name": "x", "in_stock": v, "price_jpy": 100 if v else None,
+            }
+            result = amazon_scraper.fetch_product_inventory(
+                "https://www.amazon.co.jp/dp/B0FAKE0003/",
+                driver=None, use_selenium_fallback=False,
+            )
+            assert result is not None
+            assert result["skus"][0]["in_stock"] is in_stock_val
+    finally:
+        amazon_scraper._fetch_via_requests = original
+
+
 def test_amazon_constants_present():
     """新ロジックの判定軸定数が module に存在することを担保."""
     from scrapers.amazon_scraper import (

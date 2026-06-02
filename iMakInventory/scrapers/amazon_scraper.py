@@ -517,6 +517,13 @@ def fetch_product_inventory(
     if raw is None:
         return None
 
+    # HQ 2026-06-03 § fail-closed bug fix: in_stock が None or 欠落 → 明示 None 返却
+    # 旧 logic: bool(raw.get("in_stock", False)) で default False=売切 に倒れる致命バグ。
+    # 明示 True/False のみ受容、 判定不能 (= None / 欠落) は None 返却 (= 上流で skip)。
+    in_stock_val = raw.get("in_stock")
+    if in_stock_val is None:
+        return None
+
     return {
         "name": raw.get("name", ""),
         "product_id": asin,
@@ -525,14 +532,14 @@ def fetch_product_inventory(
         "skus": [
             {
                 "size": "",
-                "in_stock": bool(raw.get("in_stock", False)),
-                "quantity": 1 if raw.get("in_stock") else 0,
+                "in_stock": bool(in_stock_val),
+                "quantity": 1 if in_stock_val else 0,
                 # 2026-05-25 売切時は price_jpy=None 強制 (= N列触らない、 既存値維持)
                 # 売切時の amazon page では「新品 from」 / 中古最安 / 関連価格 等が表示され、
                 # 仕入できない (= 現実の販売価格でない) のに scraper が拾うと N列が
                 # 異常値 (= 旧値の数十倍 等) に上書きされる事例あり (= row 500 案件:
                 # 2599 → 39600、 売切時の「新品 from」 fallback)。
-                "price_jpy": raw.get("price_jpy") if raw.get("in_stock") else None,
+                "price_jpy": raw.get("price_jpy") if in_stock_val else None,
             }
         ],
     }

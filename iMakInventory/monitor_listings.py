@@ -146,7 +146,14 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
         out["error"] = "no skus returned"
         return out
 
-    in_stock = bool(skus[0].get("in_stock", False))
+    # HQ 2026-06-03 § fail-closed bug fix: skus[0]["in_stock"] が None / 欠落 →
+    # is_sold=None で skip (= D 触らない)。 旧 logic: bool(... or False) で default
+    # False=売切 に倒れる致命バグ (= LOW 152 件 偽 OOS の真因)。
+    raw_in_stock = skus[0].get("in_stock")
+    if raw_in_stock is None:
+        out["error"] = "in_stock indeterminate (scraper returned dict without resolved in_stock)"
+        return out
+    in_stock = bool(raw_in_stock)
     out["is_sold"] = not in_stock
     out["raw_status"] = info.get("status") or ("in_stock" if in_stock else "out_of_stock")
 
@@ -375,18 +382,44 @@ def process_sheet(
             log("     → 各 row で都度 driver 生成に fallback (遅い)")
             mercari_driver = None
 
-    # Amazon URL がある場合は login 済 profile で driver を 1 つ生成 (Selenium fallback 用)
+    # Amazon URL がある場合は login 済 profile で driver を 1 つ生成 (大量 run の robust path)
+    # HQ 2026-06-03 § (b) bot 検知対策: driver 起動失敗 → kill chrome process + retry。
+    # それでも失敗 → cycle abort (= driver 無しで burst すると bot 検知で偽 OOS 大量化、
+    # 致命的、 一旦止めて 人手で profile 復旧)。
     amazon_driver = None
     needs_amazon = by_sup.get("amazon", 0) > 0
     if needs_amazon:
         log("  Amazon driver 起動中 (login profile)...")
-        try:
-            amazon_driver = create_amazon_driver(headless=True, use_login_profile=True)
-            log("  [OK] Amazon driver 起動完了 (login profile 再利用)")
-        except Exception as e:
-            log(f"  [!] Amazon driver 起動失敗: {type(e).__name__}: {e}")
-            log("     → unqualifiedBuyBox 検出時の Selenium 再判定が無効")
-            amazon_driver = None
+        last_err = None
+        for attempt in (1, 2):
+            try:
+                amazon_driver = create_amazon_driver(headless=True, use_login_profile=True)
+                log(f"  [OK] Amazon driver 起動完了 (login profile 再利用、 attempt={attempt})")
+                break
+            except Exception as e:
+                last_err = e
+                log(f"  [!] Amazon driver 起動失敗 attempt={attempt}: {type(e).__name__}: {str(e)[:120]}")
+                if attempt == 1:
+                    # chrome process kill (= profile lock 解放)
+                    try:
+                        import subprocess  # noqa: PLC0415
+                        subprocess.run(["taskkill", "/F", "/IM", "chromedriver.exe"],
+                                       capture_output=True, timeout=10)
+                        subprocess.run(["taskkill", "/F", "/IM", "chrome.exe", "/FI", "WINDOWTITLE eq *iMakInventory*"],
+                                       capture_output=True, timeout=10)
+                        log("     → chrome/chromedriver process kill 実行、 5s wait で retry")
+                        time.sleep(5)
+                    except Exception as ke:
+                        log(f"     → kill 失敗 ({type(ke).__name__}): {ke}")
+        if amazon_driver is None:
+            # cycle abort: amazon が大量にある状態で driver なし = burst で bot 検知 →
+            # 大量偽 OOS = 主力誤取下げ。 一旦止めて 人手で profile 復旧を促す。
+            log(f"  [FATAL] Amazon driver 起動 2 回失敗、 cycle abort (= 大量偽 OOS 防止)")
+            log(f"  最終 error: {type(last_err).__name__}: {last_err}")
+            log(f"  対処: chrome process 全 kill + iMakInventory profile lock file 削除 + 再 cycle")
+            raise RuntimeError(
+                f"Amazon driver 起動失敗 (= bot 検知防止のため cycle abort): {last_err}"
+            )
 
     results = []
     mercari_consec_none = 0  # Phase 9: mercari driver 自動再起動用カウンタ
