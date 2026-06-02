@@ -64,7 +64,40 @@ def test_offline_amazon_in_stock(samples_available, filename):
     assert verdict is True, (
         f"{filename}: detection returned ({verdict}, {reason}), expected True (in_stock)."
     )
-    assert reason == "cart_button"
+    # 6/2 signal 拡張: cart_button / submit_buy_now / buy_now_text /
+    # availability_in_stock いずれかで in_stock 判定
+    assert reason in (
+        "cart_button", "submit_buy_now", "buy_now_text",
+    ) or reason.startswith("availability_in_stock"), (
+        f"{filename}: unexpected reason {reason!r}"
+    )
+
+
+# 2026-06-02 偽陰性回帰防止: ユーザー目視「在庫なし」 だが #availability text に
+# 「残り N 点」 が含まれる listing (= Marketplace 出品のみ、 Amazon 公式 から購入不可)。
+# 旧 logic で「残り」 を在庫あり signal にしてたため in_stock 誤判定。
+# fail-closed と整合させるため verdict が True でないこと (= False or None) のみ assert。
+FALSENEG_SOLD_HTML_FILES = [
+    "falseneg_B06XCDPKXG.html",
+    "falseneg_B09TFB192X.html",
+    "falseneg_B00RJJQE6Y.html",
+]
+
+
+@pytest.mark.parametrize("filename", FALSENEG_SOLD_HTML_FILES)
+def test_offline_amazon_falseneg_sold_is_not_in_stock(samples_available, filename):
+    """6/2 偽陰性 3 件: 「残り N 点」 表記の sold listing。 in_stock 判定しないことを担保."""
+    from scrapers.amazon_scraper import _detect_stock  # noqa: PLC0415
+    path = samples_available / filename
+    if not path.exists():
+        pytest.skip(f"sample missing: {path.name}")
+    html = path.read_text(encoding="utf-8", errors="replace")
+    verdict, reason = _detect_stock(html)
+    # fail-closed: False (= 明確 sold) も None (= 判定不能、 D列空欄維持) も許容
+    assert verdict is not True, (
+        f"{filename}: detection returned ({verdict}, {reason}), "
+        f"expected NOT True (sold or undetermined)."
+    )
 
 
 @pytest.mark.parametrize("filename", NO_BUYBOX_SOLD_HTML_FILES)

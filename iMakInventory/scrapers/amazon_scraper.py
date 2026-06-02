@@ -96,6 +96,27 @@ def _detect_stock(html: str) -> tuple[Optional[bool], str]:
     Returns:
         (verdict, reason) — verdict は True/False/None、reason は判定根拠
     """
+    import re as _re  # noqa: PLC0415
+    # 第一手段 (thunderbit blog 推奨): <div id="availability"> の text で判定
+    m = _re.search(r'<div[^>]*id="availability"[^>]*>(.*?)</div>', html, _re.DOTALL)
+    if m:
+        avail_text = _re.sub(r"<[^>]+>", "", m.group(1)).strip()
+        avail_low = avail_text.lower()
+        if ("在庫切れ" in avail_text or "currently unavailable" in avail_low
+                or "お取り扱いできません" in avail_text or "現在お取り扱い" in avail_text
+                or "入荷時期は未定" in avail_text):
+            return False, f"availability_sold: {avail_text[:30]}"
+        # 「残り N 点」 は Marketplace 出品 (= 別 seller) を含むため在庫あり signal
+        # にしない (= ユーザー目視「カートに入れるなし」 listing で偽陽性源、 6/2 検証)
+        if "在庫あり" in avail_text or "in stock" in avail_low:
+            return True, f"availability_in_stock: {avail_text[:30]}"
+    # 在庫あり signal (= sold 検体 6 件で偽陽性 0 件確認済):
+    # 削除済 (= 偽陽性源): "submit.add-to-cart" / "カートに追加"
+    # 残す signal は sold 全件で 0 ヒット保証:
+    if "submit.buy-now" in html:
+        return True, "submit_buy_now"
+    if "今すぐ買う" in html:
+        return True, "buy_now_text"
     if CART_BUTTON_PATTERN in html:
         return True, "cart_button"
     if OUT_OF_STOCK_DIV_PATTERN in html:
@@ -230,17 +251,26 @@ def _extract_price_jpy(html: str) -> Optional[int]:
 def _fetch_via_requests(url: str) -> Optional[dict]:
     """requests で Amazon 商品ページを取得。
 
+    curl_cffi (= chrome の TLS 偽装) を優先採用。 標準 requests は amazon の
+    bot 検知で簡易 page を返されて誤判定する (成功率 2%) ため、 curl_cffi
+    (chrome124 impersonation、 成功率 94%) を使う (thunderbit blog 推奨)。
+
     Returns: 抽出済 dict / None (HTTP 失敗時 or 在庫判定不能時)
     """
+    resp = None
     try:
-        import requests  # noqa: PLC0415
-    except ImportError:
-        return None
+        from curl_cffi import requests as _curl_req  # noqa: PLC0415
+        resp = _curl_req.get(url, headers=DEFAULT_HEADERS, timeout=TIMEOUT_SEC,
+                             impersonate="chrome124")
+    except Exception:
+        resp = None
 
-    try:
-        resp = requests.get(url, headers=DEFAULT_HEADERS, timeout=TIMEOUT_SEC)
-    except requests.RequestException:
-        return None
+    if resp is None:
+        try:
+            import requests  # noqa: PLC0415
+            resp = requests.get(url, headers=DEFAULT_HEADERS, timeout=TIMEOUT_SEC)
+        except Exception:
+            return None
 
     if resp.status_code == 404:
         return {"name": "(deleted)", "in_stock": False, "price_jpy": None}
@@ -300,11 +330,22 @@ def create_amazon_driver(headless: bool = True, use_login_profile: bool = True):
 def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optional[dict]:
     """Selenium (undetected_chromedriver + Amazon login profile) で取得.
 
+    判定: 抽出くん の _judge_stock 流用 (= element 検出ベース):
+      1. #availability text に在庫切れ keyword → in_stock=False
+      2. #add-to-cart-button 存在 → in_stock=True
+      3. #buy-now-button 存在 → in_stock=True
+      4. どれもなければ None (= 判定不能)
+
     Args:
         url: Amazon URL
         driver: 外部から渡された driver (再利用、推奨)。None なら内部で生成
         headless: driver=None 時の起動モード
     """
+    from selenium.webdriver.common.by import By   # noqa: PLC0415
+    UNAVAILABLE_KEYWORDS = (
+        "在庫切れ", "Currently unavailable", "お取り扱いできません",
+        "現在お取り扱い", "入荷時期は未定",
+    )
     own_driver = False
     if driver is None:
         driver = create_amazon_driver(headless=headless)
@@ -313,20 +354,42 @@ def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optiona
         driver.get(url)
         time.sleep(5)
         html = driver.page_source
+        name = _extract_name(html)
+        price = _extract_price_jpy(html)
+
+        # 1) availability text 確認
+        avail_text = ""
+        try:
+            elem = driver.find_element(By.CSS_SELECTOR, "#availability")
+            avail_text = (elem.text or "").strip()
+        except Exception:
+            pass
+        if avail_text and any(kw in avail_text for kw in UNAVAILABLE_KEYWORDS):
+            return {"name": name, "in_stock": False, "price_jpy": None,
+                    "_reason": f"availability_sold: {avail_text[:30]}"}
+
+        # 2) #add-to-cart-button element 存在
+        try:
+            driver.find_element(By.CSS_SELECTOR, "#add-to-cart-button")
+            return {"name": name, "in_stock": True, "price_jpy": price,
+                    "_reason": "add_to_cart_element"}
+        except Exception:
+            pass
+
+        # 3) #buy-now-button element 存在
+        try:
+            driver.find_element(By.CSS_SELECTOR, "#buy-now-button")
+            return {"name": name, "in_stock": True, "price_jpy": price,
+                    "_reason": "buy_now_element"}
+        except Exception:
+            pass
+
+        # 4) 判定不能 → None
+        return None
     finally:
         if own_driver:
             try: driver.quit()
             except Exception: pass
-
-    in_stock, reason = _detect_stock(html)
-    if in_stock is None:
-        return None
-    return {
-        "name": _extract_name(html),
-        "in_stock": in_stock,
-        "price_jpy": _extract_price_jpy(html),
-        "_reason": reason,
-    }
 
 
 # ============================================================================
