@@ -84,17 +84,26 @@ class TestCatalogIntegrity(unittest.TestCase):
             self.fail(f"yugioh_tcg entry without name: {len(bad)} 件 (sample: {bad[:5]})")
 
     def test_product_id_is_konami_id(self):
-        """product_id は Konami 公式 ID (= numeric string)."""
+        """product_id は Konami 公式 ID (= numeric string) or variant 形式 `{passcode}_{set_code}`.
+
+        2026-05-30 Phase G FULL expansion で variant 別 entry (= `{passcode}_{set_code}`、
+        例 '10000000_BP01-EN021') を追加投入。 base entry は依然 numeric のみ。
+        """
+        import re
         conn = sqlite3.connect(str(api._DB_PATH))
         bad = []
+        VARIANT_RE = re.compile(r"^\d+_[\w\-]+$")
         for (pid,) in conn.execute(
             "SELECT product_id FROM products WHERE category='yugioh_tcg' LIMIT 100"
         ).fetchall():
-            if not pid.isdigit():
-                bad.append(pid)
+            if pid.isdigit():
+                continue
+            if VARIANT_RE.match(pid):
+                continue  # variant entry OK
+            bad.append(pid)
         conn.close()
         if bad:
-            self.fail(f"non-numeric product_id: {bad[:5]}")
+            self.fail(f"non-numeric and non-variant product_id: {bad[:5]}")
 
 
 class TestLookupYugioh(unittest.TestCase):

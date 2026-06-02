@@ -78,25 +78,32 @@ class TestCatalogBandColorIntegrity(unittest.TestCase):
         """heuristic 由来の entry のみ整合性 check.
 
         2026-05-13 改訂: band_color の優先順は 公式 > heuristic.
-        band_color_source='casio_official_description' の entry は heuristic と
-        乖離していて当然 (例: GA-2300FL-4AJF = Biomass Orange、heuristic Red).
-        この test は **heuristic 由来 entry の suffix 整合性のみ** を保証する.
+        2026-05-30 改訂: ShockBase / g-central / 公式 import で投入された entry は
+          band_color_source 設定なしで公式 band_color 値 (= "Camouflage"/"Pink"/
+          "Transparent" 等)、 heuristic との乖離は正常。 entry の `source` 列で
+          公式系 (= shockbase / g-central / casio_official) 判定して skip。
         """
+        OFFICIAL_ENTRY_SOURCES = {
+            "shockbase", "casio_official", "casio_official_spec",
+            "casio_official_categorized", "g-central+casiofanmag",
+        }
         conn = sqlite3.connect(str(api._DB_PATH))
         cur = conn.cursor()
-        cur.execute("SELECT product_id, specs FROM products WHERE category='gshock'")
+        cur.execute("SELECT product_id, source, specs FROM products WHERE category='gshock'")
         mismatches = []
-        for pid, specs_json in cur.fetchall():
+        for pid, entry_source, specs_json in cur.fetchall():
             specs = json.loads(specs_json) if specs_json else {}
             cat_color = (specs.get("band_color") or "").strip()
             src = specs.get("band_color_source")
-            # HQ 確証 override は heuristic と異なって OK
-            # (例: GA-2300FL-4AJF Biomass Orange=Red heuristic に対し HQ 確証 Orange)
             if src == "hq_confirmed":
+                continue
+            # 公式系 entry (= ShockBase / g-central / casio 公式) は band_color 公式値、 skip
+            entry_src = (entry_source or "").lower()
+            if any(off in entry_src for off in ("shockbase", "g-central", "casio_official")):
                 continue
             inferred = gshock.get_band_color_from_pid(pid)
             if not inferred:
-                continue  # suffix 解析不能なものは skip
+                continue
             if cat_color and cat_color != inferred:
                 mismatches.append((pid, cat_color, inferred, src))
         conn.close()

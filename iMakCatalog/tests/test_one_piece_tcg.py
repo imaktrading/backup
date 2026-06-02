@@ -262,9 +262,10 @@ class TestDbLookup:
     def test_prb02_005_full_record(self):
         r = api.lookup("one_piece_tcg", "PRB02-005")
         assert r["name"] == "Monkey.D.Luffy"
-        assert r["specs"]["Rarity"] == "SR"
-        assert r["specs"]["Power"] == "5000"
-        assert r["specs"]["Cost/Life"] == "4"
+        # 2026-05-30 Phase B 正規化後 = 小文字 snake_case key
+        assert r["specs"]["rarity"] == "SR"
+        assert r["specs"]["power"] == "5000"
+        assert r["specs"]["cost"] == "4"
         assert "PRB-02" in (r["set_name_official"] or "")
         assert r["language"] == "both"
         assert r["specs"].get("card_text")
@@ -278,9 +279,10 @@ class TestDbLookup:
         prb = api.lookup("one_piece_tcg", "PRB02-005")
         st = api.lookup("one_piece_tcg", "ST16-005")
         assert prb["product_id"] != st["product_id"]
-        assert prb["specs"]["Rarity"] != st["specs"]["Rarity"]   # SR vs C
-        assert prb["specs"]["Power"] != st["specs"]["Power"]     # 5000 vs 3000
-        assert prb["specs"]["Cost/Life"] != st["specs"]["Cost/Life"]  # 4 vs 2
+        # 2026-05-30 Phase B 正規化後 = 小文字 key
+        assert prb["specs"]["rarity"] != st["specs"]["rarity"]   # SR vs C
+        assert prb["specs"]["power"] != st["specs"]["power"]     # 5000 vs 3000
+        assert prb["specs"]["cost"] != st["specs"]["cost"]  # 4 vs 2
 
     def test_unregistered_returns_none(self):
         """フォールバック禁止の保証: ID 不一致 = None."""
@@ -305,19 +307,20 @@ class TestDbLookup:
         assert st28["product_id"].startswith("OP06-022")
         assert base["set_name_official"] != st28["set_name_official"]
         # 中身 (Power/Rarity 等) は同じ印刷物
-        assert base["specs"]["Power"] == st28["specs"]["Power"]
-        assert base["specs"]["Rarity"] == st28["specs"]["Rarity"]
+        # 2026-05-30 Phase B 正規化後 = 小文字 key
+        assert base["specs"]["power"] == st28["specs"]["power"]
+        assert base["specs"]["rarity"] == st28["specs"]["rarity"]
 
     def test_ja_only_variant_has_normalized_keys(self):
-        """JA-only variant でも specs キーは EN 正規化されている."""
+        """JA-only variant でも specs キーは正規化されている."""
         r = api.lookup("one_piece_tcg", "OP06-022_P")
         if r is None:
             pytest.skip("OP06-022_P (JA-only promo) not in DB")
         assert r["language"] == "ja"
-        # 正規化された英語キー (値は raw 日本語のまま)
-        assert "Color" in r["specs"]
-        assert "Rarity" in r["specs"]
-        assert "Card Type" in r["specs"]
+        # 2026-05-30 Phase B 正規化後 = 小文字 snake_case key
+        assert "color" in r["specs"]
+        assert "rarity" in r["specs"]
+        assert "card_type" in r["specs"]
 
 
 @REQUIRES_TRIGGER_CARDS

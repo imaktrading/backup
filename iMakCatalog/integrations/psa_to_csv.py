@@ -299,6 +299,78 @@ def _variant_candidates(subject: str) -> list[str]:
 # ============================================================================
 # 旧 bandai_jp.fetch_card 形式に変換
 # ============================================================================
+def _apply_ebay_fields(legacy: dict, record: dict, category: str) -> dict:
+    """全 lookup helper 共通の eBay _ebay field 適用 (= Phase A-G 完了後 adapter 修正).
+
+    2026-05-30 追加: catalog の specs に投入された `_ebay` 系新 field を listing で優先採用。
+    既存 field との衝突は specs 値 > legacy/record 値 で resolve。
+
+    ★ 副次目的: field 正規化 (Phase B、 大文字 → 小文字) で legacy の旧 key (= "Rarity"/"Color"/
+    "Card Type") が空になった既存 field を、 新 lower-case key で fallback 補完。
+    """
+    specs = record.get("specs") or {}
+    # === eBay 新 field ===
+    # set_name_ebay 採用順位 (= category 別):
+    #   Pokemon: specs.set_name_ebay 優先、 fallback で "" (= JP set_name は eBay 認識不能、 fallback NG)
+    #   OPCG/Gundam/DBFW: record.set_name (= 既存 ebay_filter_map 経由で正規化済) 優先、 fallback で specs
+    #   YGO: specs.set_name_ebay (= ygoprodeck set_name 由来) 優先、 fallback で record.set_name
+    set_name_specs = specs.get("set_name_ebay")
+    if category == "pokemon_tcg":
+        legacy["set_name_ebay"] = set_name_specs or ""
+    elif category in ("one_piece_tcg", "gundam_tcg", "dragonball_scg"):
+        legacy["set_name_ebay"] = record.get("set_name") or set_name_specs or ""
+    else:  # yugioh_tcg etc
+        legacy["set_name_ebay"] = set_name_specs or record.get("set_name", "") or ""
+    legacy["rarity_ebay"] = specs.get("rarity_ebay") or specs.get("rarity") or legacy.get("rarity", "")
+    # 2026-05-30 Gemini 5/HQ ユーザー方針: character_name は 空欄 fallback (= 日本語混入禁止)
+    legacy["character_name"] = specs.get("character_name") or ""
+    legacy["features"] = specs.get("features") or []
+    legacy["finish"] = specs.get("finish") or ""
+    legacy["card_type_ebay"] = specs.get("card_type_ebay") or legacy.get("card_type", "") or legacy.get("type_en", "")
+    legacy["card_size_ebay"] = specs.get("card_size_ebay") or "Standard"
+    legacy["game_ebay"] = specs.get("game_ebay") or ""
+    legacy["release_year"] = specs.get("release_year") or ""
+    legacy["language_ebay"] = specs.get("language") or legacy.get("language") or ""
+
+    # === 既存 field fallback (= Phase B 正規化で大文字 key 消失への対応) ===
+    # 旧 specs.Rarity → specs.rarity に変わったので legacy.rarity_en も小文字経由で復旧
+    if not legacy.get("rarity_en"):
+        legacy["rarity_en"] = specs.get("rarity") or ""
+    if not legacy.get("rarity"):
+        legacy["rarity"] = specs.get("rarity") or ""
+    if not legacy.get("color_en") and "color_en" in legacy:
+        legacy["color_en"] = specs.get("color") or ""
+    if not legacy.get("color") and "color" in legacy:
+        legacy["color"] = specs.get("color") or ""
+    if not legacy.get("type_en") and "type_en" in legacy:
+        # specs.card_type or specs.type_en (= Bandai TCG+ 系) を fallback、 Title Case 正規化
+        ct = specs.get("card_type") or specs.get("type_en") or ""
+        legacy["type_en"] = ct.title() if ct.isupper() else ct
+    if not legacy.get("card_type") and "card_type" in legacy:
+        ct = specs.get("card_type") or specs.get("type_en") or ""
+        legacy["card_type"] = ct.title() if ct.isupper() else ct
+    if "power" in legacy and not legacy.get("power"):
+        legacy["power"] = specs.get("power") or ""
+    if "life_or_cost" in legacy and not legacy.get("life_or_cost"):
+        legacy["life_or_cost"] = specs.get("cost") or ""
+    if "cost" in legacy and not legacy.get("cost"):
+        legacy["cost"] = specs.get("cost") or specs.get("energy") or ""
+    if "counter" in legacy and not legacy.get("counter"):
+        legacy["counter"] = specs.get("counter") or ""
+    if "attribute_en" in legacy and not legacy.get("attribute_en"):
+        legacy["attribute_en"] = specs.get("attribute") or ""
+    if "feature_jp" in legacy and not legacy.get("feature_jp"):
+        legacy["feature_jp"] = specs.get("type_en") or specs.get("trait") or specs.get("special_trait") or ""
+
+    # 2026-05-31: build_row 既存 logic は legacy field 名 (= rarity / finish / game / card_size)
+    # を見るため、 新 _ebay 値で legacy 名も上書き (= build_row 触らず listing 反映)。
+    legacy["rarity"] = specs.get("rarity_ebay") or legacy.get("rarity") or ""
+    legacy["finish"] = specs.get("finish") or ""
+    legacy["game"] = specs.get("game_ebay") or legacy.get("game") or ""
+    legacy["card_size"] = specs.get("card_size_ebay") or "Standard"
+    return legacy
+
+
 def _to_legacy_dict(record: dict) -> dict:
     """iMakCatalog の lookup() result → 旧 bandai_jp 形式.
 
@@ -311,7 +383,7 @@ def _to_legacy_dict(record: dict) -> dict:
       - language        : 'en' / 'ja' / 'both'
     """
     specs = record.get("specs") or {}
-    return {
+    legacy = {
         # 旧 bandai_jp 互換フィールド
         "card_id":       record.get("product_id", ""),
         "name_en":       record.get("name_en") or record.get("name", ""),
@@ -327,7 +399,6 @@ def _to_legacy_dict(record: dict) -> dict:
         "get_info_jp":   record.get("set_name_official", ""),
         "image_file":    "",                          # 旧形式の互換用 (使われていない)
         # iMakCatalog 拡張フィールド (新規)
-        "set_name_ebay": record.get("set_name", ""),
         "set_name_official": record.get("set_name_official", ""),
         "card_text":     specs.get("card_text", ""),
         "card_text_jp":  specs.get("card_text_jp", ""),
@@ -338,6 +409,7 @@ def _to_legacy_dict(record: dict) -> dict:
         "illustrator":   specs.get("illustrator"),
         "images":        record.get("images", []),
     }
+    return _apply_ebay_fields(legacy, record, "one_piece_tcg")
 
 
 # ============================================================================
@@ -729,7 +801,7 @@ def _variant_candidates_gundam(subject: str) -> list[str]:
 def _to_legacy_dict_gundam(record: dict) -> dict:
     """Gundam 用 record → psa_to_csv 互換 dict."""
     specs = record.get("specs") or {}
-    return {
+    legacy = {
         # 旧 bandai_tcg_plus.fetch_card(game='gundam') 互換
         "card_name":     record.get("name", ""),
         "card_id":       record.get("product_id", ""),
@@ -752,7 +824,6 @@ def _to_legacy_dict_gundam(record: dict) -> dict:
         "source_title":  specs.get("Source Title", ""),
         "zone":          specs.get("Zone", ""),
         "set_name":      record.get("set_name", ""),
-        "set_name_ebay": record.get("set_name", ""),
         "set_name_official": record.get("set_name_official", ""),
         "get_info_jp":   record.get("set_name_official", ""),
         "card_text":     specs.get("card_text", ""),
@@ -764,6 +835,7 @@ def _to_legacy_dict_gundam(record: dict) -> dict:
         "illustrator":   specs.get("illustrator"),
         "images":        record.get("images", []),
     }
+    return _apply_ebay_fields(legacy, record, "gundam_tcg")
 
 
 def lookup_gundam(
@@ -883,7 +955,7 @@ def _variant_candidates_dragonball(subject: str) -> list[str]:
 def _to_legacy_dict_dragonball(record: dict) -> dict:
     """DBSCG 用 record → psa_to_csv 互換 dict."""
     specs = record.get("specs") or {}
-    return {
+    legacy = {
         # 旧 bandai_tcg_plus.fetch_card(game='dragonball') 互換
         "card_name":     record.get("name", ""),
         "card_id":       record.get("product_id", ""),
@@ -903,7 +975,6 @@ def _to_legacy_dict_dragonball(record: dict) -> dict:
         "special_trait": specs.get("Special Trait", ""),
         "feature_jp":    specs.get("Special Trait", ""),
         "set_name":      record.get("set_name", ""),
-        "set_name_ebay": record.get("set_name", ""),
         "set_name_official": record.get("set_name_official", ""),
         "get_info_jp":   record.get("set_name_official", ""),
         "card_text":     specs.get("card_text", ""),
@@ -915,6 +986,7 @@ def _to_legacy_dict_dragonball(record: dict) -> dict:
         "illustrator":   specs.get("illustrator"),
         "images":        record.get("images", []),
     }
+    return _apply_ebay_fields(legacy, record, "dragonball_scg")
 
 
 def lookup_dragonball(
@@ -1130,7 +1202,7 @@ def _to_legacy_dict_pokemon(record: dict) -> dict:
     else:
         set_code_part, card_number_only = "", pid
 
-    return {
+    legacy = {
         # 旧 pokemon_card_jp 互換
         "name_jp":            record.get("name", ""),
         # 2026-05-11: name_en バルク翻訳 (21,855 件) 投入後、catalog 側 name_en を優先.
@@ -1156,11 +1228,11 @@ def _to_legacy_dict_pokemon(record: dict) -> dict:
         # iMakCatalog 拡張
         "card_id":            pid,
         "set_name":           record.get("set_name", ""),
-        "set_name_ebay":      record.get("set_name", ""),
         "set_name_official":  record.get("set_name_official", ""),
         "language":           record.get("language"),
         "images":             record.get("images", []),
     }
+    return _apply_ebay_fields(legacy, record, "pokemon_tcg")
 
 
 # Pokemon Promo set codes (FA/Promo の hint で優先選択する候補)
@@ -1459,12 +1531,20 @@ def lookup_yugioh(
         elif len(narrow) > 1:
             matches = narrow  # まだ複数 → 下で fail-closed
 
+    # 2026-05-30 Phase G FULL expansion 対応: 同名 hit 多数 (= 1 passcode × 多 variant) の場合、
+    # base passcode (= numeric product_id) を優先採用。 variant 別 entry は別ロジックで対応。
+    if len(matches) > 1:
+        base_only = [m for m in matches if str(m["product_id"]).isdigit()]
+        if len(base_only) == 1:
+            matches = base_only
+
     if len(matches) == 1:
         record = api._row_to_dict(matches[0])
         if verbose:
             print(f"    🎯 iMakCatalog (YGO) hit: {record['product_id']} "
                   f"{record['name_en']!r} (Subject={subject!r} fuzzy match)")
-        return record
+        # eBay _ebay 系 field 適用 (= 2026-05-30 adapter 修正)
+        return _apply_ebay_fields(dict(record), record, "yugioh_tcg")
 
     # 同名複数 (= errata 等) → fail-closed reject
     if verbose:

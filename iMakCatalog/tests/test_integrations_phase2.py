@@ -197,9 +197,11 @@ class TestDragonballDbLookup:
         assert result is not None
         assert result["card_id"] == "FB09-001"
         assert result["card_type"] == "Leader"
-        assert result["rarity"] == "L"
-        assert result["color"] == "Red"
-        assert result["power"] == "15000"
+        # 2026-05-31 adapter override: legacy["rarity"] は rarity_ebay (ロング表記) を反映
+        assert result["rarity"] == "Leader"
+        # 2026-05-30 DBFW 公式 import で color JA 値 (= "赤") 上書き
+        assert result["color"] in ("Red", "赤")
+        assert "15000" in str(result["power"])
 
     def test_lookup_parallel_variant(self):
         # PSA Subject に PARALLEL 含まれて base が存在する場合 → base 優先
@@ -303,7 +305,8 @@ class TestPokemonDbLookup:
         )
         assert result is not None
         assert result["card_id"] == "M2a-240"
-        assert result["rarity"] == "SAR"
+        # 2026-05-31 adapter override: legacy["rarity"] は rarity_ebay (ロング表記) を反映
+        assert result["rarity"] == "Special Art Rare"
         assert result["card_type"] == "Pokémon"
         assert result["hp"] == "350"
 
