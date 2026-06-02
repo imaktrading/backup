@@ -288,7 +288,9 @@ def build_search_query(row):
     game_short = {
         "Dragon Ball Super Card Game": "Dragon Ball",
         "One Piece Card Game": "One Piece",
-        "Gundam CCG": "Gundam",
+        "One Piece CCG": "One Piece",  # 2026-05-31: eBay 正規値、 検索 query は短縮
+        "Gundam CCG": "Gundam",  # 旧 listing 互換
+        "Gundam Card Game": "Gundam",  # 2026-05-31: 当店 catalog 正規値
         "Pokemon": "Pokemon",
         "Pokémon TCG": "Pokemon",
     }.get(game, game)
@@ -383,19 +385,29 @@ def validate_row(row, row_idx):
     if condition != "2750":
         issues.append(("ERROR", f"ConditionID が 2750 でない: {condition}"))
 
-    # --- 価格・送料整合性 ---
+    # --- 価格・送料整合性 (V6 mode: DDP-{group}-P{tier} / V5 mode: tier 名) ---
     try:
         price_f = float(price)
-        expected_policies = [
-            (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
-            (300, "200-300"), (400, "300-400"), (500, "400-500"),
-            (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
-        ]
-        expected = "800-1000"
-        for threshold, policy in expected_policies:
-            if price_f <= threshold:
-                expected = policy
-                break
+        # listing_common.get_shipping_policy_name() 経由で期待値取得 (yaml v6_pricing.enabled で自動切替)
+        try:
+            import sys, os
+            _eb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI")
+            if _eb not in sys.path:
+                sys.path.insert(0, _eb)
+            from listing_common import get_shipping_policy_name
+            expected = get_shipping_policy_name(price_f, "TCG(PSA10)")
+        except Exception:
+            # fallback: 旧 V5 tier 名
+            expected_policies = [
+                (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+                (300, "200-300"), (400, "300-400"), (500, "400-500"),
+                (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+            ]
+            expected = "800-1000"
+            for threshold, policy in expected_policies:
+                if price_f <= threshold:
+                    expected = policy
+                    break
         if shipping != expected:
             issues.append(("WARN", f"送料ポリシー '{shipping}' が価格${price}に対して不一致（期待: {expected}）"))
     except ValueError:
@@ -600,7 +612,14 @@ Review each listing for:
 Rules to enforce:
 - "PSA 10" must be at the start of every title
 - No forbidden words: Japanese, GEM MT, Japan, Mint, Graded, L@@K
-- Game short names: One Piece TCG, Dragon Ball SCG, Gundam CCG, Pokemon
+- Game short names (= iMakKeywords PDF Q1 2026 Rank 準拠、 2026-05-31 改訂):
+  * Pokemon (Rank 1、 never "Pokemon TCG")
+  * Yugioh (Rank 19、 no hyphen)
+  * One Piece (Rank 13、 never "One Piece TCG")
+  * Dragon Ball SCG
+  * Gundam TCG (never "Gundam Card Game" in title)
+- Finish 追加禁止 ("Foil"/"Holo" 等 SNAD クレーム直結リスク)
+- C:Game (= Item Specifics) は eBay 正規値: Pokémon TCG / Yu-Gi-Oh! TCG / One Piece CCG / Dragon Ball Super Card Game / Gundam Card Game
 - Title should be 70-80 characters ideally
 
 Respond in Japanese. Be concise and actionable. Use bullet points.
@@ -645,6 +664,43 @@ def main(csv_path: str | None = None):
     print(f"対象: {csv_path}")
     headers, rows = load_csv(csv_path)
     print(f"件数: {len(rows)} リスティング")
+
+    # === 禁止 field 強制空欄化 (= W チェック gate、 2026-06-01 追加) ===
+    # memory:finish_only_blank_other_keep_processed
+    # variant_meta 等の別経路から finish 投入される事故防止 = 最終 gate で物理空欄化.
+    # 違反検出時: 警告 log + 自動空欄化 + CSV 上書き保存.
+    FORBIDDEN_BLANK_FIELDS = ["C:Finish"]
+    _forbidden_hits = []
+    for fld in FORBIDDEN_BLANK_FIELDS:
+        if fld not in headers:
+            continue
+        idx = headers.index(fld)
+        for i, r in enumerate(rows, 1):
+            if idx < len(r) and r[idx]:
+                _forbidden_hits.append((i, fld, r[idx]))
+                r[idx] = ""
+    if _forbidden_hits:
+        print()
+        print("=" * 60)
+        print(f"⚠️ 禁止 field 強制空欄化 ({len(_forbidden_hits)} 件、 SNAD リスク回避):")
+        for i, fld, val in _forbidden_hits[:10]:
+            print(f"  [{i}] {fld}={val!r} → \"\" 強制空欄化")
+        # CSV 上書き保存 (= 入稿前に物理修正、 入稿は空欄状態で行われる)
+        try:
+            import csv as _csv
+            _bak = csv_path + ".bak_forbidden_strip"
+            import shutil as _sh
+            _sh.copy(csv_path, _bak)
+            with open(csv_path, "w", newline="", encoding="utf-8") as _f:
+                _w = _csv.writer(_f, quoting=_csv.QUOTE_NONNUMERIC)
+                _w.writerow(headers)
+                _w.writerows(rows)
+            print(f"  📦 backup: {_bak}")
+            print(f"  ✏️ CSV 上書き済 (= 禁止 field 空欄化反映)")
+        except Exception as _e:
+            print(f"  ⚠️ CSV 上書き失敗: {type(_e).__name__}: {_e}")
+        print("=" * 60)
+        print()
 
     # 仕入値データ読み込み
     cost_data = load_cost_data(csv_path)

@@ -516,6 +516,136 @@ def gate_row_or_hold(row_data: dict, category: str = None,
 
 
 # ===================================================================
+# LOW スプシ 仕入値 抽出 (N列 優先 + F列 fallback、2026-05-18)
+# LOW スプシ には 2 つの仕入関連列があり:
+#   F (index 5) = 商品価格      (= supplier listing 価格、当初値)
+#   N (index 13) = 仕入れ価格(円) (= 実コスト、ポイント還元等 反映済の最新値)
+# 全 listing scripts 共通: N が非空なら N、空なら F を採用
+# ===================================================================
+def pick_cost_jpy(row, f_idx: int = 5, n_idx: int = 13) -> str:
+    """LOW スプシ row から仕入値を抽出 (N列 > F列 優先順)。
+    Returns: 数値のみ抽出した string ("¥24,750" → "24750")。空なら ""
+    """
+    def _clean(s):
+        import re as _re
+        return _re.sub(r"[^0-9]", "", str(s or ""))
+    if n_idx is not None and len(row) > n_idx:
+        n_val = _clean(row[n_idx])
+        if n_val:
+            return n_val
+    if f_idx is not None and len(row) > f_idx:
+        return _clean(row[f_idx])
+    return ""
+
+
+# ===================================================================
+# Free Shipping 移行 (2026-05-18)
+# 旧: item price + shipping cost (DDP profile 別行) → eBay 表示 = price + ship
+# 新: bundled price (item + DDP 加算) + Free Shipping profile → eBay 表示 = Free ship バッジ
+# eBay 公表 fee は (subtotal+ship+tax) 全てに乗るため買い手 total は実質変化なし、
+# Free Shipping バッジ表示で search 露出 + 転換率向上を狙う構造変更。
+# ===================================================================
+_DDP_TIERS_CACHE = None
+_FREE_SHIPPING_CFG_CACHE = None
+
+
+def _load_global_yaml() -> dict:
+    """global.yaml を 1 回ロードしてキャッシュ。"""
+    from pathlib import Path
+    import yaml
+    cfg_path = Path(__file__).resolve().parent / "config" / "global.yaml"
+    with cfg_path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def get_ddp_amount(base_price_usd: float) -> float:
+    """商品本体価格 ($) から DDP 加算額を返す (price tier 逆引き).
+    例: $45 → $20, $125 → $50, $700 → $210
+    """
+    global _DDP_TIERS_CACHE
+    if _DDP_TIERS_CACHE is None:
+        _DDP_TIERS_CACHE = _load_global_yaml().get("ddp_shipping_tiers", [])
+    for tier in _DDP_TIERS_CACHE:
+        if base_price_usd <= tier.get("max_usd", 0):
+            return float(tier.get("ddp_usd", 0))
+    # 範囲外 (>$1000) は最大 tier の ddp_usd を採用
+    return float(_DDP_TIERS_CACHE[-1].get("ddp_usd", 260)) if _DDP_TIERS_CACHE else 260.0
+
+
+def compute_free_shipping_price(base_price_usd: float) -> tuple:
+    """商品本体価格から Free Shipping 用 統合価格を計算.
+    Returns: (new_price_usd, ddp_amount_usd)
+    例: $45.00 → ($65.98, 20.0)  [= INT(45+20)+0.98, DDP $20]
+    """
+    ddp = get_ddp_amount(base_price_usd)
+    new_price = int(base_price_usd + ddp) + 0.98
+    return (new_price, ddp)
+
+
+def get_free_shipping_profile_name() -> str:
+    """global.yaml から Free Shipping policy 名を取得."""
+    global _FREE_SHIPPING_CFG_CACHE
+    if _FREE_SHIPPING_CFG_CACHE is None:
+        _FREE_SHIPPING_CFG_CACHE = _load_global_yaml()
+    return _FREE_SHIPPING_CFG_CACHE.get("free_shipping_profile", "Free")
+
+
+def is_free_shipping_mode() -> bool:
+    """Free Shipping mode が有効か (true = 新規 listing は Free Shipping)."""
+    global _FREE_SHIPPING_CFG_CACHE
+    if _FREE_SHIPPING_CFG_CACHE is None:
+        _FREE_SHIPPING_CFG_CACHE = _load_global_yaml()
+    return bool(_FREE_SHIPPING_CFG_CACHE.get("free_shipping_mode", True))
+
+
+def get_shipping_policy_name(price_usd: float, category: str) -> str:
+    """V6 / V5 / Free モード別に Shipping Profile 名を返す (listing scripts 共通).
+
+    優先順:
+      1. v6_pricing.enabled=true → "DDP-{group}-P{NN}" (= eBay Policy 名、B→A remap 適用)
+      2. free_shipping_mode=true → "Free" (= free_shipping_profile)
+      3. それ以外 → 旧 V5 価格帯 tier ("40-60" / "100-200" 等)
+
+    Args:
+      price_usd: listing 価格 (USD, INT+0.98 後)
+      category: v5_GS 設定 HTS_RATE のカテゴリ名 (例: "TCG(PSA10)", "Tシャツ(UT)")
+
+    Returns:
+      Shipping Profile 名 (eBay Business Policies に登録済の値)
+    """
+    import os, sys
+    _here = os.path.dirname(os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    import config_loader
+    # V6 mode
+    if config_loader.is_v6_pricing_enabled():
+        v6 = config_loader.get_v6_pricing()
+        group = v6.get("category_to_group", {}).get(category, "A")
+        uppers = v6.get("price_tier_uppers", [])
+        tier_name = "P31"
+        for i, upper in enumerate(uppers, 1):
+            if price_usd <= upper:
+                tier_name = f"P{i:02d}"
+                break
+        raw = v6.get("policy_name_format", "DDP-{group}-{tier}").format(group=group, tier=tier_name)
+        return v6.get("policy_remap", {}).get(raw, raw)
+    # Free Shipping mode (= V5 既存運用)
+    if is_free_shipping_mode():
+        return get_free_shipping_profile_name()
+    # 旧 V5 paid shipping tier (= fallback)
+    OLD_TIERS = [
+        (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+        (300, "200-300"), (400, "300-400"), (500, "400-500"),
+        (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+    ]
+    for threshold, name in OLD_TIERS:
+        if price_usd <= threshold:
+            return name
+    return "800-1000"
+
+
+# ===================================================================
 # Smoke tests (適用後の deterministic 動作確認)
 # ===================================================================
 if __name__ == "__main__":
@@ -595,5 +725,27 @@ if __name__ == "__main__":
     }
     allowed_bad, _ = gate_row_or_hold(row_fail, category="reel", mercari_state="新品", sku="TEST_FAIL")
     assert not allowed_bad, "Brand欠落の異常行が gate を通過した"
+
+    # 8. pick_cost_jpy (N列 優先 / F列 fallback)
+    # row: A=URL B=itemID C=title D=売切 E=状態 F=商品価格 G=写真URL H=説明 I=Title J=Desc K=未使用 L=ConditionID M=価格上昇 N=仕入れ価格
+    row_with_n = ["url","iid","title","","新品","￥24,750","","","","","","1000","","19,601"]
+    assert pick_cost_jpy(row_with_n) == "19601", pick_cost_jpy(row_with_n)
+    row_n_blank = ["url","iid","title","","新品","￥24,750","","","","","","1000","",""]
+    assert pick_cost_jpy(row_n_blank) == "24750", pick_cost_jpy(row_n_blank)
+    row_both_blank = ["url","iid","title","","新品","","","","","","","1000","",""]
+    assert pick_cost_jpy(row_both_blank) == ""
+    print(f"  [OK] pick_cost_jpy: N優先(19601) / F fallback(24750) / 両空(\"\") 全動作")
+
+    # 9. Free Shipping 関数 (2026-05-18 追加)
+    p1, d1 = compute_free_shipping_price(45.0)
+    assert p1 == 65.98 and d1 == 20.0, f"$45→$65.98 expected, got ({p1}, {d1})"
+    p2, d2 = compute_free_shipping_price(125.0)
+    assert p2 == 175.98 and d2 == 50.0, f"$125→$175.98 expected, got ({p2}, {d2})"
+    p3, d3 = compute_free_shipping_price(350.0)
+    assert p3 == 455.98 and d3 == 105.0, f"$350→$455.98 expected, got ({p3}, {d3})"
+    p4, d4 = compute_free_shipping_price(38.5)
+    assert p4 == 53.98 and d4 == 15.0, f"$38.5→$53.98 expected, got ({p4}, {d4})"
+    assert get_free_shipping_profile_name() == "Free"
+    assert is_free_shipping_mode() is True
 
     print("✅ All smoke tests passed. System is now deterministic.")

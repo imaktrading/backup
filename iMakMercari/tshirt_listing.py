@@ -354,10 +354,15 @@ def get_schedule_time():
 
 
 def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "400-500"
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由)."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, "Tシャツ(UT)")
+    except Exception:
+        for threshold, policy in SHIPPING_POLICIES:
+            if price <= threshold:
+                return policy
+        return "400-500"
 
 
 def load_description():
@@ -420,7 +425,10 @@ def get_listing_targets():
         title_jp = row[2] if len(row) > 2 else ""
         sold = row[3] if len(row) > 3 else ""
         condition = row[4] if len(row) > 4 else ""
-        price = row[5] if len(row) > 5 else ""
+        # 仕入参考: N列 (実コスト) 優先 / F列 (商品価格) fallback (2026-05-18)
+        sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI"))
+        from listing_common import pick_cost_jpy as _pick_cost
+        price = _pick_cost(row)  # 旧: row[5] (F商品価格のみ)
         photo_urls = row[6] if len(row) > 6 else ""
         description = row[7] if len(row) > 7 else ""
         category = row[17] if len(row) > 17 else ""  # R列
@@ -799,6 +807,12 @@ def main():
         with open(output_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
             writer.writerows(rows)
+        # Free Shipping 移行 (2026-05-18)
+        try:
+            from freeshipping_postprocess import transform_csv_to_freeshipping
+            transform_csv_to_freeshipping(output_file)
+        except Exception as _e:
+            print(f"⚠️ Free Shipping post-process 失敗 (Tshirt): {type(_e).__name__}: {_e}")
         print(f"\n完了！出力: {output_file}")
         print(f"成功: {len(rows)-1}件")
 

@@ -168,7 +168,15 @@ def _pokemon_context(catalog, brand, card_number, subject) -> Optional[str]:
         " 4. **set_name 表記揺れ**: PSA Brand が省略形で書く場合 (例: 'SV9-BATTLE PARTNERS' →\n"
         "    catalog '拡張パック「バトルパートナーズ」'), iMakCatalog の set_name(EN) を正規とする.\n\n"
         " 5. **card_number 一致 + ID hit がある場合、catalog 値を信頼**.\n"
-        "    検証は Subject/character/image 整合性に集中する.\n"
+        "    検証は Subject/character/image 整合性に集中する.\n\n"
+        " 6. **Secret Rare カードの分母表記 (= 業界標準、 矛盾扱い禁止)**:\n"
+        "    Pokemon TCG では Secret Rare / Special カードはメイン set total を\n"
+        "    超える番号で表記される (= eBay/PSA/公式 全て採用の慣習).\n"
+        "    例: M2a (Mega Dimension) メイン total=193、 Secret は 194-250 で\n"
+        "        '227/193' / '231/193' のような表記が正規.\n"
+        "    例: SV2P (Paldea Evolved) total=071、 Secret は 072-099 で '076/071'.\n"
+        "    例: SV9 (Journey Together) total=100、 Secret は 101-132 で '121/100'.\n"
+        "    Card Number の分子が分母を超えても、 catalog ID hit があれば矛盾ではない.\n"
     )
 
 

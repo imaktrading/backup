@@ -34,7 +34,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 import config_loader  # noqa: E402
 
-GSHEET_URL = "https://docs.google.com/spreadsheets/d/1ft91iIsJjbMVw3Gx4GmeO-DQ0A47jp6O1TbiZeTslag/edit"
+GSHEET_URL = "https://docs.google.com/spreadsheets/d/1P1yfzWogDr3aw4aB8Yy1PkJzp1rEGNt5s_bAeXW5Pl4/edit"  # 2026-05-18: V4 (利益計算シート_v4_GS) のコピー、pricing_engine 専用 (= V4 本体は触らない)
 CREDS_PATH = WORKSPACE_ROOT / "double-hold-421922-7c0d38d3f73d.json"
 GSCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
@@ -65,6 +65,7 @@ def _default_cache():
         "payo_fee": FALLBACK_PAYO_FEE,
         "target_profit": FALLBACK_TARGET_PROFIT,
         "categories": dict(FALLBACK_CATEGORIES),
+        "ddp_shipping_tiers": config_loader.get_ddp_shipping_tiers(),  # 2026-05-18 root fix
         "source": "fallback",
     }
 
@@ -102,7 +103,9 @@ def _load_from_gsheet():
         creds = Credentials.from_service_account_file(str(CREDS_PATH), scopes=GSCOPES)
         gc = gspread.authorize(creds)
         sh = gc.open_by_url(GSHEET_URL)
-        ranges = ['設定!B2:B5', '設定!F2', '設定!H2', '設定!J2', '設定!A17:C40']
+        # 2026-05-18: V4 copy spreadsheet 採用、categories は row 11-28 に配置 (= V4 layout)
+        # row 29+ は国別マスタ section なので 28 までに限定 (= category 18 件 + 余裕)
+        ranges = ['設定!B2:B5', '設定!F2', '設定!H2', '設定!J2', '設定!A11:C28']
         result = sh.values_batch_get(ranges, params={'valueRenderOption': 'UNFORMATTED_VALUE'})
         vals = result['valueRanges']
         b_vals = vals[0].get('values', [])
@@ -135,6 +138,7 @@ def _load_from_gsheet():
             "payo_fee": payo,
             "target_profit": tgt,
             "categories": categories if categories else dict(FALLBACK_CATEGORIES),
+            "ddp_shipping_tiers": config_loader.get_ddp_shipping_tiers(),  # yaml-only (2026-05-18 root fix)
             "source": "gsheet",
         }
         _save_local_cache(cache)

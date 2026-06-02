@@ -104,14 +104,17 @@ def pad_title(title, language='', rarity='',
               max_len=MAX_TITLE_LEN):
     """短タイトルに Item Specifics ベースで補強.
 
-    優先順位:
+    優先順位 (2026-05-31 改訂: 'TCG' filler 廃止 = PDF Rank 圏外 + game 表記重複リスク):
         1. Rarity (RARITY_TO_TITLE にマップあるもの)
         2. Language が Japanese なら "Japanese"
-        3. "TCG" (高ヒット PDF キーワード)
-        4. "Card" (TCG カードは事実)
+        3. "Card" (TCG カードは事実)
 
     既に title 内にある語はスキップ. max_len を超える追加もスキップ.
     target_len に達したら追加停止. min_len 未満のみ補強対象.
+
+    Why: 'TCG' を全 game に pad すると Yugioh/Pokemon/One Piece (= PDF Rank 1/13/19) 等
+    短縮表記方針と矛盾 (= 「TCG」 つけると Rank 圏外で SEO 損失)、 game 表記は
+    build_title の game_short mapping で確定済 (= memory:official_x_ebay_filter_max_activation).
     """
     if len(title) >= min_len:
         return title, []
@@ -125,9 +128,7 @@ def pad_title(title, language='', rarity='',
     # 2. Language
     if language and language.strip().lower() == 'japanese':
         candidates.append('Japanese')
-    # 3. TCG
-    candidates.append('TCG')
-    # 4. Card
+    # 3. Card (= TCG カードは事実)
     candidates.append('Card')
 
     title_lower = title.lower()

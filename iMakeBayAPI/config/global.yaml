@@ -9,7 +9,7 @@
 #   "2026-04-25-v1" -> "2026-04-25-v2" -> "2026-04-26-v1"
 # version は出力 CSV / ログに刻印され、後追いで「どの設定で生成されたか」が分かる。
 
-version: "2026-04-25-v2"
+version: "2026-05-20-v6"
 
 # ------------------------------------------------
 # eBay 共通定数（CLAUDE.md グローバル規約）
@@ -35,35 +35,152 @@ profit_fallback:
 # カテゴリ別 FVF/送料 fallback
 # ------------------------------------------------
 categories:
-  "TCG(PSA10)":     {fvf: 0.1325, shipping_jpy: 2000}
-  "G-SHOCK":        {fvf: 0.1325, shipping_jpy: 2000}
-  "Tシャツ(UT)":    {fvf: 0.153,  shipping_jpy: 2000}
-  "Montbell(一般)": {fvf: 0.153,  shipping_jpy: 2000}
-  "Montbell(ジャケット)": {fvf: 0.153, shipping_jpy: 4500}
-  "一番くじ":       {fvf: 0.1325, shipping_jpy: 2500}
-  "フィギュア":     {fvf: 0.1325, shipping_jpy: 3500}
-  "ユニクロ(非UT)": {fvf: 0.153,  shipping_jpy: 2000}
-  "ヴィンテージ玩具": {fvf: 0.1325, shipping_jpy: 2500}
-  "トミカ":         {fvf: 0.1325, shipping_jpy: 2000}
-  "POPMart":        {fvf: 0.1325, shipping_jpy: 2500}
-  "ガシャポン":     {fvf: 0.1325, shipping_jpy: 2000}
-  "ダイソー":       {fvf: 0.1325, shipping_jpy: 2000}
-  "バッグ(アネロ)": {fvf: 0.153,  shipping_jpy: 2500}
+  "TCG(PSA10)":     {fvf: 0.1325, shipping_jpy: 2000, hts_duty_rate: 0}      # HTS 9504 免税
+  "G-SHOCK":        {fvf: 0.1325, shipping_jpy: 2000, hts_duty_rate: 0.035}  # HTS 9102.12
+  "Tシャツ(UT)":    {fvf: 0.153,  shipping_jpy: 2000, hts_duty_rate: 0.27}   # HTS 6109 (混紡平均)
+  "Montbell(軽)":   {fvf: 0.153,  shipping_jpy: 2000, hts_duty_rate: 0.27}   # HTS 6109/6110 (= ウインド/ベスト/軽パーカ)
+  "Montbell(重)":   {fvf: 0.153,  shipping_jpy: 4500, hts_duty_rate: 0.27}   # ジャケット/ダウン
+  "一番くじ":       {fvf: 0.1325, shipping_jpy: 2500, hts_duty_rate: 0}      # HTS 9503 免税
+  "フィギュア":     {fvf: 0.1325, shipping_jpy: 3500, hts_duty_rate: 0}      # HTS 9503 免税
+  "ユニクロ(非UT)": {fvf: 0.153,  shipping_jpy: 2000, hts_duty_rate: 0.27}
+  "ヴィンテージ玩具": {fvf: 0.1325, shipping_jpy: 2500, hts_duty_rate: 0}
+  "トミカ":         {fvf: 0.1325, shipping_jpy: 2000, hts_duty_rate: 0}
+  "POPMart":        {fvf: 0.1325, shipping_jpy: 2500, hts_duty_rate: 0}
+  "ガシャポン":     {fvf: 0.1325, shipping_jpy: 2000, hts_duty_rate: 0}
+  "ダイソー":       {fvf: 0.1325, shipping_jpy: 2000, hts_duty_rate: 0}
+  "バッグ(アネロ)": {fvf: 0.153,  shipping_jpy: 2500, hts_duty_rate: 0.07}   # HTS 4202 革製品
+  "サンリオぬいぐるみ": {fvf: 0.14, shipping_jpy: 2500, hts_duty_rate: 0}
+  "Porter":         {fvf: 0.15,  shipping_jpy: 3500, hts_duty_rate: 0.07}
+  "リール":         {fvf: 0.14,  shipping_jpy: 3000, hts_duty_rate: 0}
+  "サンリオ文具":    {fvf: 0.14,  shipping_jpy: 2000, hts_duty_rate: 0}      # HTS 9608 ボールペン 免税
+  "スニーカー":      {fvf: 0.153, shipping_jpy: 4500, hts_duty_rate: 0.20}   # HTS 6404 textile athletic shoes
+  "ゴルフ":         {fvf: 0.1325, shipping_jpy: 4500, hts_duty_rate: 0}      # HTS 9506.31 golf 免税
 
 # ------------------------------------------------
-# DDP送料テーブル（CLAUDE.md より、価格帯→ShippingProfileName）
+# DDP送料テーブル
+# 旧: ShippingProfileName 紐付け用 (paid shipping 時代)
+# 新: Free Shipping 移行後は ddp_usd を base price に加算して 1 行統合
 # ------------------------------------------------
 ddp_shipping_tiers:
-  - {max_usd: 39,   profile: "DDP-39"}
-  - {max_usd: 60,   profile: "DDP-40-60"}
-  - {max_usd: 100,  profile: "DDP-60-100"}
-  - {max_usd: 200,  profile: "DDP-100-200"}
-  - {max_usd: 300,  profile: "DDP-200-300"}
-  - {max_usd: 400,  profile: "DDP-300-400"}
-  - {max_usd: 500,  profile: "DDP-400-500"}
-  - {max_usd: 600,  profile: "DDP-500-600"}
-  - {max_usd: 800,  profile: "DDP-600-800"}
-  - {max_usd: 1000, profile: "DDP-800-1000"}
+  - {max_usd: 39,   ddp_usd: 15,  profile: "Free"}
+  - {max_usd: 60,   ddp_usd: 20,  profile: "Free"}
+  - {max_usd: 100,  ddp_usd: 30,  profile: "Free"}
+  - {max_usd: 200,  ddp_usd: 50,  profile: "Free"}
+  - {max_usd: 300,  ddp_usd: 75,  profile: "Free"}
+  - {max_usd: 400,  ddp_usd: 105, profile: "Free"}
+  - {max_usd: 500,  ddp_usd: 130, profile: "Free"}
+  - {max_usd: 600,  ddp_usd: 155, profile: "Free"}
+  - {max_usd: 800,  ddp_usd: 210, profile: "Free"}
+  - {max_usd: 1000, ddp_usd: 260, profile: "Free"}
+
+# ------------------------------------------------
+# Free Shipping 移行設定 (2026-05-18 既存全 1420 listing 移行完了)
+# ------------------------------------------------
+free_shipping_mode: true           # true: 新規 listing は Free Shipping、false: 旧 paid shipping
+free_shipping_profile: "Free"      # eBay Account > Business policies > Shipping の名称
+
+# ------------------------------------------------
+# V5 価格決定 (2026-05-19 確定): 35% 一律 DDP markup + 仕入ベース IFS 利益率
+# 詳細: V5 spreadsheet 1dFU-0ZlBibEZWFcG73iKzlHezEk8v2cuXHo5Tro6nRk row 22
+# 旧 V4 tier table iteration から切替 (= 境界 tier 跨ぎバグ撲滅 + ebaymag 整合)
+# ------------------------------------------------
+v5_pricing:
+  enabled: true                    # V6 未実装まで V5 維持。pricing_engine.py 書換後に false 化
+  markup_rate_us: 0.35             # V5 のみで使用、V6 では使わない
+  markup_rate_other: 0.0           # 非US は DDP markup なし (= ebaymag 連携前提)
+  # 仕入¥ ベース 14 tier IFS 利益率 (= V5 row 22 確定値)
+  # cost_max 以下なら rate 適用、内訳: 低価格は薄利多売 / 高価格は競争力優先
+  profit_rate_ifs:
+    - {cost_max: 2000,    rate: 0.60}
+    - {cost_max: 3500,    rate: 0.50}
+    - {cost_max: 6000,    rate: 0.40}
+    - {cost_max: 10000,   rate: 0.32}
+    - {cost_max: 15000,   rate: 0.27}
+    - {cost_max: 20000,   rate: 0.25}
+    - {cost_max: 25000,   rate: 0.22}
+    - {cost_max: 30000,   rate: 0.20}
+    - {cost_max: 35000,   rate: 0.18}
+    - {cost_max: 40000,   rate: 0.17}
+    - {cost_max: 45000,   rate: 0.15}
+    - {cost_max: 50000,   rate: 0.14}
+    - {cost_max: 55000,   rate: 0.13}
+    - {cost_max: 60000,   rate: 0.12}
+    - {cost_max: 99999999, rate: 0.09}
+  # G-SHOCK 国別 FVF 上書き (= V5 設定 row 48-52、実測ベース)
+  gshock_country_fvf:
+    US: 0.155
+    UK: 0.1375
+    AU: 0.1375
+    DE: 0.118
+    その他: 0.1375
+  # 国別 VAT + Intl + Reg (= V5 設定 row 36-43)
+  country_fees:
+    US: {vat: 0.085, intl: 0.0165, reg: 0}
+    UK: {vat: 0.20,  intl: 0.0165, reg: 0.0045}
+    AU: {vat: 0.10,  intl: 0.0165, reg: 0.004}
+    DE: {vat: 0.19,  intl: 0.0165, reg: 0.0035}
+
+# ------------------------------------------------
+# V6 価格決定 (2026-05-20 改訂): paid shipping + Policy tier 化
+# 詳細: V5 spreadsheet 1dFU-0Zl... 設定!HTS_RATE (A11:F28) と完全一致
+# 仕入¥ × IFS で target 利益、Policy 送料 (tier_upper × hts × 1.021 × split + 1.5)
+# 商品本体 USD + Policy 送料 USD で listing
+# ------------------------------------------------
+v6_pricing:
+  last_synced_at: '2026-05-24T12:08:07+09:00'  # sync_sheet_to_yaml.py 自動更新
+  enabled: true                    # V6 paid shipping mode (2026-05-20 切替、V5 スプシ完全一致)
+  # グループ別 HTS率 (+5% buffer 込み) / Split (案A=1.0 / 案B=0.5)
+  groups:
+    A: {hts_rate: 0.18, split: 1.0}  # 低関税 (TCG/G-SHOCK/玩具/文具)
+    B: {hts_rate: 0.30, split: 1.0}  # 中関税 (バッグ/Porter/リール)
+    C: {hts_rate: 0.43, split: 1.0}  # 高関税 (アパレル) DDP半分商品+半分送料
+  # カテゴリ → グループ (= V5 設定 HTS_RATE と完全一致)
+  category_to_group:
+    "TCG(PSA10)":      A
+    "G-SHOCK":         A
+    "Tシャツ(UT)":     C
+    "Montbell(軽)":    C
+    "Montbell(重)":    C
+    "ユニクロ(非UT)":  C
+    "一番くじ":        A
+    "フィギュア":      A
+    "サンリオ文具":    A
+    "ヴィンテージ玩具": A
+    "トミカ":          A
+    "POPMart":         A
+    "ガシャポン":      A
+    "ダイソー":        A
+    "バッグ(アネロ)":  B
+    "サンリオぬいぐるみ": A
+    "Porter":          B
+    "リール":          B
+    "スニーカー":      C
+    "ゴルフ":          A
+  # 価格帯 P01-P31 上限 USD
+  price_tier_uppers: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+                      120, 140, 160, 180, 200, 220, 240, 260, 280, 300,
+                      350, 400, 450, 500, 550, 600,
+                      700, 800, 900, 1000, 1500]
+  # 通関固定費 / insertion
+  clearance_jpy: 245              # CPaSS 通関固定 (= $1.5)
+  insertion_usd: 0.4              # eBay insertion fee
+  policy_name_format: "DDP-{group}-{tier}"   # 例: DDP-A-P09
+  # B→A 重複 Policy remap (同送料額の Policy を A に統合)
+  policy_remap:
+    DDP-B-P03: DDP-A-P05
+    DDP-B-P06: DDP-A-P10
+    DDP-B-P11: DDP-A-P15
+    DDP-B-P14: DDP-A-P20
+    DDP-B-P17: DDP-A-P22
+    DDP-B-P20: DDP-A-P24
+    DDP-B-P26: DDP-A-P30
+    DDP-B-P29: DDP-A-P31
+  # title-based override (HIGHT/LOW R列が曖昧な場合の正規化)
+  title_overrides:
+    - {pattern: "porter|yoshida", category: "Porter"}
+    - {pattern: "anello|アネロ",  category: "バッグ(アネロ)"}
+    - {pattern: "montbell.*(jacket|coat|parka|wind|rain)", category: "Montbell(重)"}
+    - {pattern: "(plush|ぬいぐるみ|mascot).*(kuromi|sanrio|hello kitty|cinnamoroll|my melody|pompompurin|pochacco)", category: "サンリオぬいぐるみ"}
 
 # ------------------------------------------------
 # 価格帯別 GATE 判定パラメータ（GATE判定パラメータ検討.xlsx 確定値）

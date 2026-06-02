@@ -200,11 +200,17 @@ SHIPPING_POLICIES = [
 ]
 
 
-def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "800-1000"
+def get_shipping_policy(price, category="Porter"):
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由).
+    mercari_to_ebay_csv は動的 category なので 引数で受取り."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, category)
+    except Exception:
+        for threshold, policy in SHIPPING_POLICIES:
+            if price <= threshold:
+                return policy
+        return "800-1000"
 
 
 def get_schedule_time():
@@ -732,7 +738,11 @@ def load_targets_from_sheet(sheet_cfg):
         title_jp = row[2] if len(row) > 2 else ""
         sold = row[3] if len(row) > 3 else ""
         condition = row[4] if len(row) > 4 else ""
-        price = row[5] if len(row) > 5 else ""
+        # 仕入参考: N列 (実コスト) 優先 / F列 (商品価格) fallback (2026-05-18)
+        import sys as _sys_pc
+        _sys_pc.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+        from listing_common import pick_cost_jpy as _pick_cost
+        price = _pick_cost(row)  # 旧: row[5] (F商品価格のみ)
         photo_urls = row[6] if len(row) > 6 else ""
         description = row[7] if len(row) > 7 else ""
         condition_id = row[11] if len(row) > 11 else ""  # L列 ConditionID (1000=新品/3000=中古)
@@ -919,8 +929,8 @@ def main():
                 desc_template = "NEW.txt" if is_new else cfg.get('description_template', 'USED.txt')
                 tpl_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), desc_template)
                 desc_html = build_description_with_specs(tpl_path, item_specifics)
-                # 送料
-                ship_policy = get_shipping_policy(listing_price)
+                # 送料 (V6 mode: category 別 Policy 名)
+                ship_policy = get_shipping_policy(listing_price, cfg.get('profit_category', 'Porter'))
                 # 行構築
                 # リール: 既存imax-64出品も全て 261030 (Sporting Goods > Fishing > Reels)
                 # Claude reel_type は Item Specifics の Reel Type 用に保持
@@ -1029,6 +1039,15 @@ def main():
             writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction='ignore')
             writer.writeheader()
             writer.writerows(results)
+
+        # Free Shipping 移行 (2026-05-18)
+        try:
+            import sys as _sys_fs
+            _sys_fs.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            from freeshipping_postprocess import transform_csv_to_freeshipping
+            transform_csv_to_freeshipping(OUTPUT_CSV)
+        except Exception as _e:
+            print(f"⚠️ Free Shipping post-process 失敗 (mercari): {type(_e).__name__}: {_e}")
 
         # Step 8 拡張: decision_log に config_version + 使用値を刻印
         try:

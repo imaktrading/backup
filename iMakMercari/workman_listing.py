@@ -117,25 +117,22 @@ EBAY_COLOR_TO_SKU_CODE = {
 # DDP shipping policy (CLAUDE.md DDP 送料テーブル準拠)
 # ============================================================================
 def pick_shipping_profile(price_usd: float) -> str:
-    if price_usd < 39:
-        return "<39"
-    if price_usd < 60:
-        return "40-60"
-    if price_usd < 100:
-        return "60-100"
-    if price_usd < 200:
-        return "100-200"
-    if price_usd < 300:
-        return "200-300"
-    if price_usd < 400:
-        return "300-400"
-    if price_usd < 500:
-        return "400-500"
-    if price_usd < 600:
-        return "500-600"
-    if price_usd < 800:
-        return "600-800"
-    return "800-1000"
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由).
+    Workman = アパレル系 → Group C (= Tシャツ/Montbell と同 Policy 構造)."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price_usd, "Tシャツ(UT)")
+    except Exception:
+        if price_usd < 39:    return "<39"
+        if price_usd < 60:    return "40-60"
+        if price_usd < 100:   return "60-100"
+        if price_usd < 200:   return "100-200"
+        if price_usd < 300:   return "200-300"
+        if price_usd < 400:   return "300-400"
+        if price_usd < 500:   return "400-500"
+        if price_usd < 600:   return "500-600"
+        if price_usd < 800:   return "600-800"
+        return "800-1000"
 
 
 # ============================================================================
@@ -704,11 +701,13 @@ def lookup_series_entry(parent_mpn: str) -> Optional[dict]:
 # 価格計算 (= pricing_engine 流用 or fallback)
 # ============================================================================
 def compute_listing_price_usd(jpy: int) -> float:
+    """compute_listing_price() dispatcher (V6/V5/V4 自動切替) 経由.
+    Workman カテゴリは V5 HTS_RATE 未登録のため Tシャツ(UT) (Group C) で代替."""
     try:
         from pricing_engine import compute_listing_price
-        r = compute_listing_price(jpy, "Workman")
-        if isinstance(r, dict) and r.get("price_usd"):
-            return round(float(r["price_usd"]), 2)
+        r = compute_listing_price(jpy, 0, "Tシャツ(UT)")
+        if isinstance(r, dict) and r.get("price"):
+            return round(float(r["price"]), 2)
     except Exception:
         pass
     # fallback
@@ -1031,6 +1030,15 @@ def main():
     with open(out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
         w.writerows(rows)
+    # Free Shipping 移行 (2026-05-18)
+    # Workman は variation listing 主体、master 行のみ price 加算される (sub 行は price=0 で skip)
+    try:
+        import sys as _sys_fs
+        _sys_fs.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+        from freeshipping_postprocess import transform_csv_to_freeshipping
+        transform_csv_to_freeshipping(out)
+    except Exception as _e:
+        print(f"⚠️ Free Shipping post-process 失敗 (Workman): {type(_e).__name__}: {_e}")
     print(f"\n=== Workman Phase 2 出品 CSV ===")
     print(f"  出力: {out}")
     print(f"  parent listing: {success}件 / variation: {len(rows) - 1 - success}件")

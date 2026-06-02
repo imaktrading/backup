@@ -371,6 +371,21 @@ _KNOWN_ACCEPTABLE_PATTERNS = [
         ),
         "Energy Marker Token (Bandai公式分類) vs タイトル 'Card' 表記（許容）"
     ),
+    # 2026-05-27 追加: One Piece TCG DON!! Card (= 特殊カード、 card_number 持たない)
+    # cert 156219827 (OP15 DON!! Card Alternate Art Gold) で 3AI BLOCK 多発 (= Card# 空が原因)
+    # DON!! Card は ゲーム中の DON 数管理用 special、 通常 card_number 体系外、 識別は brand + subject
+    (
+        lambda title, specs, brand, num: (
+            ("ONE PIECE" in (brand or "").upper())
+            and (
+                "DON!!" in (title or "").upper()
+                or "DON CARD" in (title or "").upper()
+                or "DON!!" in (specs.get("Character") or "").upper()
+                or "DON CARD" in (specs.get("Character") or "").upper()
+            )
+        ),
+        "One Piece TCG DON!! Card (= special、 card_number 持たない、 識別は brand+subject)"
+    ),
 ]
 
 
@@ -384,6 +399,8 @@ _PROMO_BRAND_KEYWORDS = [
     "ANNIVERSARY",                   # 25TH ANNIVERSARY 等
     "BEST SELECTION",
     "WEEKLY SHONEN JUMP",            # 雑誌付録
+    "ONE PIECE CARD THE BEST",       # 2026-05-27 追加: ST16-001 Uta 等の Catalog 補完 経路 (= PCC 再録元)
+    "STORAGE BOX SET",               # 2026-05-27 追加: 同上
 ]
 
 # 2026-04-25 ザル判定修正: ケース1 で許容するのは「既知のプロモ封入セットコード」のみ。

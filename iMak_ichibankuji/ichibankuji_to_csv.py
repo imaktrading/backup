@@ -93,10 +93,15 @@ def get_schedule_time():
     return future.strftime("%Y-%m-%d %H:%M:%S")
 
 def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "800-1000"
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由)."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, "一番くじ")
+    except Exception:
+        for threshold, policy in SHIPPING_POLICIES:
+            if price <= threshold:
+                return policy
+        return "800-1000"
 
 def scrape_1kuji(driver, url):
     """1kuji.comから賞別データをSeleniumで取得"""
@@ -931,10 +936,14 @@ def _process_sheet_to_ebay_csv():
             continue
         if category != "一番くじ":
             continue
+        # 仕入参考: N列 (実コスト) 優先 / F列 (商品価格) fallback (2026-05-18)
+        import sys as _sys_pc
+        _sys_pc.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+        from listing_common import pick_cost_jpy as _pick_cost
         targets.append({
             'sheet_row': i,
             'mercari_url': url,
-            'cost_jpy': re.sub(r'[^0-9]', '', row[5]) if row[5] else '',
+            'cost_jpy': _pick_cost(row),
             'image_url': row[6],
             # V-AB (index 21-27) ※ U(20)は追加日で metadata ではない
             'kuji_url': row[21],
@@ -1107,6 +1116,14 @@ def _process_sheet_to_ebay_csv():
             writer.writeheader()
             writer.writerows(all_rows)
         print(f"\n✅ eBay CSV出力: {OUTPUT_CSV}  ({len(all_rows)}件)")
+        # Free Shipping 移行 (2026-05-18)
+        try:
+            import sys as _sys_fs
+            _sys_fs.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            from freeshipping_postprocess import transform_csv_to_freeshipping
+            transform_csv_to_freeshipping(OUTPUT_CSV)
+        except Exception as _e:
+            print(f"⚠️ Free Shipping post-process 失敗 (ichibankuji): {type(_e).__name__}: {_e}")
         # Step 8 拡張: decision_log に config_version + 使用値を刻印
         try:
             import sys as _sys_dl

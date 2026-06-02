@@ -163,11 +163,24 @@ def _ensure_character_in_title(
     既にタイトル中にあれば何もしない (大半のカードはこのケース)。
     キャラ名追加で 80字超なら、末尾の filler ("Card"/"Holo"/"Foil") 1個を犠牲にして確保。
     それでも収まらなければ追加せず元 title を返す (中途半端な切り落とし禁止)。
+
+    Romaji 揺れ対応 (= 2026-05-23 追加): Kozuki vs Kouzuki, Yujiro vs Yuujirou 等の
+    Hepburn/Kunrei 表記差を吸収して 重複追加を防ぐ。
     """
     if not character:
         return title
     if character.lower() in title.lower():
         return title
+
+    # Romaji 揺れ吸収 (= 'ou'→'o', 'uu'→'u' 正規化で比較)
+    def _normalize_romaji(s: str) -> str:
+        s = s.lower()
+        s = re.sub(r'ou', 'o', s)
+        s = re.sub(r'uu', 'u', s)
+        s = re.sub(r'oo', 'o', s)
+        return s
+    if _normalize_romaji(character) in _normalize_romaji(title):
+        return title  # Kouzuki Hiyori → Kozuki Hiyori 既存と判定 → skip
     candidate = f"{title} {character}"
     if len(candidate) <= target_max:
         return candidate

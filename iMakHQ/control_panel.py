@@ -163,6 +163,83 @@ def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
         # 失敗しても listing 出力には影響なし
 
 
+# ============================================================================
+# 重複くん dedupe_excluder helper (2026-05-27 追加)
+# 入稿前 CSV に対して (KEY1, KEY2) tuple 突合 + 真の重複行を物理除外.
+# - 既存 HIGH/LOW/公式 スプシの AI/AJ 列 (KEY1/KEY2) と突合
+# - variant 違い (= 通常版 vs Alt Art) は別商品扱いで残存 = false positive ゼロ
+# - 出品くん本体 (= psa_to_csv 等) 触らず、 chain 末尾 hook 追加で完結
+# ロールバック: この関数 + poll_queue 内呼出 1 行 をコメントアウトで完全復元.
+# ============================================================================
+DEDUPE_WORKTREE = r"C:\dev\iMak_dedupe\iMakDedupe"
+
+
+def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
+    """csv_output/ の最新 CSV に対して 重複くん --check-csv を実行 (= 物理除外)."""
+    csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
+    try:
+        csv_files = [
+            f for f in os.listdir(csv_dir)
+            if f.endswith(".csv") and not (".bak" in f) and not f.endswith("_cost.json")
+        ]
+        if not csv_files:
+            return
+        csv_files_with_mtime = [
+            (f, os.path.getmtime(os.path.join(csv_dir, f))) for f in csv_files
+        ]
+        csv_files_with_mtime.sort(key=lambda x: x[1], reverse=True)
+        latest_csv = os.path.join(csv_dir, csv_files_with_mtime[0][0])
+        if since_ts is not None and csv_files_with_mtime[0][1] < since_ts:
+            return  # listing script 起動前の古い CSV は skip
+    except Exception as e:
+        append_log_func(f"\n⚠️ dedupe hook CSV 探索失敗: {type(e).__name__}: {e}\n")
+        return
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    # Step 4a: 物理除外 (= Phase 1g、 真の重複 row を CSV から削除)
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 重複くん dedupe_excluder ((KEY1, KEY2) tuple 物理除外)\n")
+    append_log_func("======================================================================\n")
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "dedupe.checker", "--check-csv", latest_csv],
+            cwd=DEDUPE_WORKTREE,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=180, env=env,
+        )
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ dedupe excluder returncode={r.returncode}\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ dedupe hook (check-csv) 失敗: {type(e).__name__}: {e}\n")
+
+    # Step 4b: 入稿前 KEY 事前書込 (= Phase 1h、 HIGH I 列 cert 経由で AI/AJ 列補完)
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 重複くん write-keys-from-csv (HIGH I 列 cert 経由で KEY 事前書込)\n")
+    append_log_func("======================================================================\n")
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "dedupe.checker", "--write-keys-from-csv", latest_csv],
+            cwd=DEDUPE_WORKTREE,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=180, env=env,
+        )
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ dedupe write-keys returncode={r.returncode}\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ dedupe hook (write-keys) 失敗: {type(e).__name__}: {e}\n")
+        # 失敗しても listing 出力には影響なし
+
+
 # ============ スクリプト登録 ============
 # 5/12: カテゴリ別に「新規 / 再出品」2ボタン構成 (パネル UI で Labelframe グループ化)
 # - category: グループ枠名 (None = utility 単独ボタン)
@@ -1327,7 +1404,53 @@ class ListingPanel:
                         run_post_title_fix_for_latest_csv(self.append_log)
                     except Exception as _e:
                         self.append_log(f"\n⚠️ post_title_fix hook 失敗: {_e}\n")
-                    self._run_rarara_after()
+                    # rarara hook 削除 (= 5/28 ユーザー判断、 DON 仕様で WARN ばかり実害発見ゼロ)
+                    # 旧: self._run_rarara_after()
+                    # Step 4: dedupe_excluder (2026-05-27 追加、 重複くん (KEY1, KEY2) tuple 物理除外)
+                    try:
+                        _run_dedupe_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
+                    except Exception as _e:
+                        self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
+                    # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
+                    # 5/29 修正: 今 cycle で生成された tcg_upload_*.csv のみ対象 (= TCG 以外 cycle で毎回 HTML 出る問題対策)
+                    try:
+                        _tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
+                        if _tools_dir not in sys.path:
+                            sys.path.insert(0, _tools_dir)
+                        from post_psa_review import run_post_psa_review
+                        _latest_csv = None
+                        _listing_start = getattr(self, '_listing_start_ts', None)
+                        _csv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "csv_output")
+                        if os.path.isdir(_csv_dir):
+                            _candidates = sorted(
+                                [os.path.join(_csv_dir, f) for f in os.listdir(_csv_dir) if f.startswith("tcg_upload_") and f.endswith(".csv")],
+                                key=os.path.getmtime,
+                                reverse=True,
+                            )
+                            if _candidates and _listing_start:
+                                # 今 cycle (= listing_start 以降に生成) のみ対象
+                                if os.path.getmtime(_candidates[0]) >= _listing_start:
+                                    _latest_csv = _candidates[0]
+                        if _latest_csv:
+                            run_post_psa_review(_latest_csv, self.append_log)
+                    except Exception as _e:
+                        self.append_log(f"\n⚠️ post_psa_review hook 失敗: {_e}\n")
+                    # Step 6: post_no_go_sentinel (2026-05-28 追加、 NO-GO 除外 cert にスプシ K 列 sentinel 赤字書込)
+                    # 5/29: Step 5 と同 _latest_csv 使用 (= 今 cycle TCG のみ。 Porter 等は None で skip)
+                    try:
+                        from post_no_go_sentinel import run_post_no_go_sentinel
+                        if _latest_csv:
+                            run_post_no_go_sentinel(_latest_csv, self.append_log)
+                    except Exception as _e:
+                        self.append_log(f"\n⚠️ post_no_go_sentinel hook 失敗: {_e}\n")
+                    # 全 process 完了通知 (= ユーザー要望 2026-05-31)
+                    self.append_log("\n" + "=" * 70 + "\n")
+                    self.append_log("🎉 全 process 完了 — 入稿準備 OK\n")
+                    if _latest_csv:
+                        self.append_log(f"   出力 CSV: {_latest_csv}\n")
+                    from datetime import datetime as _dt
+                    self.append_log(f"   終了時刻: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    self.append_log("=" * 70 + "\n")
                     self.status_var.set("待機中")
                     self.now_processing.set("")
                 else:

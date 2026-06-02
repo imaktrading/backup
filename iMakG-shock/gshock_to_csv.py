@@ -42,6 +42,13 @@ try:
 except Exception:
     _catalog_lookup = None
 
+# 2026-05-31: ebay_filter_masters (= 公式 × eBay フィルタ 最大活用 設計)
+# memory:official_x_ebay_filter_max_activation, TCG 完成 patterns 流用.
+# 別 worktree (= C:/dev/iMak_catalog/iMakCatalog) を優先参照 (= Catalog Claude 5/31 構築).
+_CATALOG_SEPARATED = r"C:/dev/iMak_catalog/iMakCatalog"
+if _os.path.isdir(_CATALOG_SEPARATED) and _CATALOG_SEPARATED not in _sys.path:
+    _sys.path.insert(0, _CATALOG_SEPARATED)
+
 URLS_FILE = "gshock_urls.txt"
 DESCRIPTION_FILE = "GSHOCK.txt"
 DEFAULT_PRICE = 100.00     # F 列空 + URL ファイル駆動時の fallback
@@ -61,18 +68,24 @@ CATEGORY = 31387
 SCHEDULE_WEEKS = 2
 PIC_URL = "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main/999.png"
 
-# DDP送料テーブル（TCGと同じ）
-SHIPPING_POLICIES = [
-    (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
-    (300, "200-300"), (400, "300-400"), (500, "400-500"),
-    (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
-]
-
+# Shipping Profile 名 (= 価格 + カテゴリ から SSOT 経由で取得)
+# V6 mode: "DDP-A-P09" 等 / V5 Free mode: "Free" / fallback: 旧 V5 tier 名
+# 詳細: iMakeBayAPI/listing_common.get_shipping_policy_name()
 def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "800-1000"
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, "G-SHOCK")
+    except Exception:
+        # fallback: 旧 V5 tier 名 (= freeshipping_postprocess で "Free" に置換される運用)
+        OLD_TIERS = [
+            (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+            (300, "200-300"), (400, "300-400"), (500, "400-500"),
+            (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+        ]
+        for threshold, policy in OLD_TIERS:
+            if price <= threshold:
+                return policy
+        return "800-1000"
 
 STORE_CATEGORIES = {
     # DW-6900系（GM-6900含む）
@@ -494,7 +507,9 @@ def load_targets_from_low_sheet():
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
         title_jp = (row[2]  if len(row) > 2  else '').strip()  # C
         sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ
-        price_f  = (row[5]  if len(row) > 5  else '').strip()  # F 商品価格 (仕入参考)
+        # 仕入参考: N列 (実コスト、ポイント還元込) 優先 / F列 (商品価格) fallback (2026-05-18)
+        from listing_common import pick_cost_jpy as _pick_cost
+        price_f  = _pick_cost(row)  # 旧: row[5] (F商品価格)
         desc     = (row[7]  if len(row) > 7  else '').strip()  # H 商品説明
         title_en = (row[8]  if len(row) > 8  else '').strip()  # I Title
         category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
@@ -1094,6 +1109,168 @@ def build_description(data, base_html):
         return base_html.replace(marker, specs_html + '\n' + marker, 1)
     return base_html
 
+# 2026-05-31: eBay フィルタ validate (= TCG 完成 patterns 流用)
+# memory:official_x_ebay_filter_max_activation
+EBAY_SPEC_TO_CSV_GSHOCK = {
+    "Brand": "C:Brand",
+    "MPN": "C:MPN",
+    "Department": "C:Department",
+    "Type": "C:Type",
+    "Style": "C:Style",
+    "Display": "C:Display",
+    "Case Color": "C:Case Color",
+    "Band Color": "C:Band Color",
+    "Dial Color": "C:Dial Color",
+    "Bezel Color": "C:Bezel Color",
+    "Bezel Material": "C:Bezel Material",
+    "Bezel Type": "C:Bezel Type",
+    "Dial Pattern": "C:Dial Pattern",
+    "Band Material": "C:Band Material",
+    "Case Material": "C:Case Material",
+    "Features": "C:Features",
+    "Country of Origin": "C:Country of Origin",
+    "Movement": "C:Movement",
+    "Water Resistance": "C:Water Resistance",
+    "Model": "C:Model",
+    "Customized": "C:Customized",
+    "Case Size": "C:Case Size",
+    "Crystal": "C:Crystal",
+    "Year Manufactured": "C:Year Manufactured",
+    "Case Shape": "C:Case Shape",
+    "Watch Shape": "C:Watch Shape",
+    "Band/Strap": "C:Band/Strap",
+    "Closure": "C:Closure",
+    "Caseback": "C:Caseback",
+    "Indices": "C:Indices",
+    "Band Width": "C:Band Width",
+    "Lug Width": "C:Lug Width",
+    "Vintage": "C:Vintage",
+    "Handmade": "C:Handmade",
+    "With Original Box/Packaging": "C:With Original Box/Packaging",
+    "With Papers": "C:With Papers",
+    "Manufacturer Warranty": "C:Manufacturer Warranty",
+    "Band Length": "C:Band Length",
+    "Case Thickness": "C:Case Thickness",
+    "Item Weight": "C:Item Weight",
+}
+
+# SELECTION_ONLY だが eBay 受付ける特殊値 whitelist (= TCG 同パターン)
+EBAY_FILTER_SPECIAL_BYPASS_GSHOCK = {
+    "Country of Origin": {"does not apply"},
+}
+
+_EBAY_FILTER_AVAILABLE_GSHOCK = None
+_EBAY_FILTER_REPORT_GSHOCK = {
+    "validated": 0, "passthrough": 0, "blanked": 0, "truncated": 0, "required_blank": 0,
+    "blanked_samples": [], "truncated_samples": [], "required_blank_samples": [],
+}
+
+
+def _get_ebay_filter_gshock():
+    global _EBAY_FILTER_AVAILABLE_GSHOCK
+    if _EBAY_FILTER_AVAILABLE_GSHOCK is None:
+        try:
+            import ebay_filter_masters as _ef
+            _EBAY_FILTER_AVAILABLE_GSHOCK = _ef
+        except Exception as _e:
+            print(f"  ⚠️ ebay_filter_masters import 失敗 (= validate skip): {_e}")
+            _EBAY_FILTER_AVAILABLE_GSHOCK = False
+    return _EBAY_FILTER_AVAILABLE_GSHOCK if _EBAY_FILTER_AVAILABLE_GSHOCK else None
+
+
+def _sample_append_gshock(key, sample, cap=20):
+    if len(_EBAY_FILTER_REPORT_GSHOCK[key]) < cap:
+        _EBAY_FILTER_REPORT_GSHOCK[key].append(sample)
+
+
+def apply_ebay_filter_to_row_gshock(row, headers, category="gshock"):
+    """row 内 C:<aspect> 値を eBay 正規値 validate (= TCG psa_to_csv 同パターン).
+
+    3 ケース処理:
+      - 一致              → eBay 正規値 (= NFKC 正規化済 return)
+      - FREE_TEXT 不在    → catalog 値そのまま
+      - SELECTION_ONLY 不在 → 空欄 + whitelist bypass (= Country "Does not apply" 救済)
+
+    Gemini 改善 B 同梱:
+      - aspect_required + 空欄 → 警告 log
+      - 文字数制限超          → truncation
+    """
+    ef = _get_ebay_filter_gshock()
+    if ef is None:
+        return row
+    for aspect, csv_col in EBAY_SPEC_TO_CSV_GSHOCK.items():
+        if csv_col not in headers:
+            continue
+        idx = headers.index(csv_col)
+        if idx >= len(row):
+            continue
+        raw = str(row[idx] or "").strip()
+
+        if not raw:
+            try:
+                if ef.is_required(category, aspect):
+                    _EBAY_FILTER_REPORT_GSHOCK["required_blank"] += 1
+                    _sample_append_gshock("required_blank_samples", aspect)
+            except Exception:
+                pass
+            continue
+
+        try:
+            max_len = ef.get_max_length(category, aspect)
+        except Exception:
+            max_len = None
+        if max_len and len(raw) > max_len:
+            _EBAY_FILTER_REPORT_GSHOCK["truncated"] += 1
+            _sample_append_gshock("truncated_samples", f"{aspect}: {len(raw)}→{max_len}")
+            raw = raw[:max_len]
+
+        validated = ef.validate_value(category, aspect, raw)
+        if validated is None:
+            bypass_set = EBAY_FILTER_SPECIAL_BYPASS_GSHOCK.get(aspect, set())
+            if raw.lower() in bypass_set:
+                _EBAY_FILTER_REPORT_GSHOCK["passthrough"] += 1
+                row[idx] = raw
+            else:
+                _EBAY_FILTER_REPORT_GSHOCK["blanked"] += 1
+                _sample_append_gshock("blanked_samples", f"{aspect}={raw}")
+                row[idx] = ""
+        elif validated == raw:
+            _EBAY_FILTER_REPORT_GSHOCK["passthrough"] += 1
+            row[idx] = raw
+        else:
+            _EBAY_FILTER_REPORT_GSHOCK["validated"] += 1
+            row[idx] = validated
+    return row
+
+
+def print_ebay_filter_report_gshock():
+    r = _EBAY_FILTER_REPORT_GSHOCK
+    total = r["validated"] + r["passthrough"] + r["blanked"]
+    if total == 0 and r["required_blank"] == 0 and r["truncated"] == 0:
+        return
+    print()
+    print("=" * 60)
+    print("eBay フィルタ validate サマリー (G-shock = 3 ケース処理 + 改善 B)")
+    print("=" * 60)
+    print(f"  ✅ passthrough  (= 一致 or FREE_TEXT B 案 そのまま): {r['passthrough']}")
+    print(f"  🔧 validated    (= NFKC 正規化で eBay 正規表記に書換)  : {r['validated']}")
+    print(f"  ⬜ blanked      (= SELECTION_ONLY 不在で空欄)         : {r['blanked']}")
+    print(f"  ✂  truncated    (= 文字数制限超で切詰)                : {r['truncated']}")
+    print(f"  ⚠️ required_blank (= 必須 field が空欄 = 出品エラーリスク): {r['required_blank']}")
+    if r["blanked_samples"]:
+        print(f"  blanked samples (max 20):")
+        for s in r["blanked_samples"]:
+            print(f"    - {s}")
+    if r["truncated_samples"]:
+        print(f"  truncated samples:")
+        for s in r["truncated_samples"]:
+            print(f"    - {s}")
+    if r["required_blank_samples"]:
+        print(f"  required_blank samples:")
+        for s in r["required_blank_samples"]:
+            print(f"    - {s}")
+
+
 def build_row(url, price, data, base_desc):
     model_full = data.get('model_base', data.get('model', ''))
     model_official = data.get('model_official', model_full)
@@ -1206,7 +1383,13 @@ def main():
         input("Enterで終了...")
         return
 
-    print(f"\n合計 {len(targets)} 件を処理します。\n")
+    # 1回の実行で MAX 10件 (= 10件づつバッチ運用、2026-05-18)
+    MAX_PER_RUN = 10
+    if len(targets) > MAX_PER_RUN:
+        print(f"\n合計 {len(targets)} 件中、先頭 {MAX_PER_RUN} 件のみ処理します (残 {len(targets)-MAX_PER_RUN} 件は次回実行で)。\n")
+        targets = targets[:MAX_PER_RUN]
+    else:
+        print(f"\n合計 {len(targets)} 件を処理します。\n")
     # 2026-05-08: catalog 未登録 = SKIP 設計に変更したため scrape_casio 不要、Chrome 起動廃止
     # scrape_casio 関数自体は残置 (将来再利用の可能性、driver 引数のまま)
     driver = None
@@ -1260,6 +1443,9 @@ def main():
             try:
                 _cat_rec = _catalog_lookup(model)
                 if _cat_rec:
+                    # 2026-06-01: is_active_msrp による skip は REVERT 済.
+                    # 廃盤も Amazon 等で仕入可能、 listing 対象から勝手に外さない.
+                    # memory: no_listing_filter_without_user_instruction
                     data = _catalog_record_to_scrape_dict(_cat_rec, model)
                     if data:
                         print(" [catalog hit]", end="", flush=True)
@@ -1284,14 +1470,7 @@ def main():
                 _ps = re.sub(r"[^0-9]", "", price_jpy_str)
                 if _ps:
                     cost_jpy = int(_ps)
-            try:
-                min_price = compute_min_price_usd(cost_jpy, PROFIT_CATEGORY)
-            except Exception:
-                min_price = DEFAULT_PRICE
-            price = max(min_price, PRICE_FLOOR_USD)
-            price = round(price, 2)
-            price = int(price) + 0.98 if price > 10 else price
-            # eBay 中央値取得 (pricing_engine ALERT 判定用)
+            # eBay 中央値取得 (pricing_engine ALERT 判定 + V6 dispatcher で使用)
             ebay_median = 0.0
             if _fetch_ebay_median is not None:
                 try:
@@ -1304,16 +1483,28 @@ def main():
                         print(f"    📊 eBay {_ebay_hits}件 中央値${ebay_median:.0f}")
                 except Exception as _eme:
                     pass
-            # 価格 status 判定 (pricing_engine 相場乖離チェック)
+            # 価格決定: compute_listing_price() dispatcher (V6/V5/V4 自動切替) + status 判定
             _price_status = "GO"
+            price = None
             if _compute_listing_price is not None:
                 try:
                     _pr = _compute_listing_price(cost_jpy, ebay_median, PROFIT_CATEGORY)
+                    price = _pr.get("price")
                     _price_status = _pr.get("status", "GO")
                     if _price_status == "ALERT":
                         print(f"    ⚠️ 価格ALERT: {_pr.get('alert_msg', '')}")
                 except Exception:
-                    pass
+                    price = None
+            if price is None:
+                # fallback (= compute_listing_price 失敗時)
+                try:
+                    min_price = compute_min_price_usd(cost_jpy, PROFIT_CATEGORY)
+                except Exception:
+                    min_price = DEFAULT_PRICE
+                price = max(min_price, PRICE_FLOOR_USD)
+                price = int(round(price, 2)) + 0.98 if price > 10 else round(price, 2)
+            # floor 保証
+            price = max(price, PRICE_FLOOR_USD)
             print(f"    💲 ${price} (仕入¥{cost_jpy})")
             row = build_row(url, price, data, base_desc)
             # SKU 上書き: 共通ルール (TCG/Tshirt/Montbell と同じ、URL ベース).
@@ -1363,6 +1554,8 @@ def main():
                 print(f"    🟠 HOLD: {data.get('model_official','')} → {_errs}")
                 errors.append(url)
                 continue
+            # eBay フィルタ validate (= TCG 完成 patterns 流用、 2026-05-31)
+            apply_ebay_filter_to_row_gshock(row, headers, category="gshock")
             rows.append(row)
         else:
             print(f" → 失敗")
@@ -1377,6 +1570,16 @@ def main():
     with open(output_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
         writer.writerows(rows)
+
+    # eBay フィルタ validate サマリー (= 3 ケース処理 + Gemini 改善 B レポート)
+    print_ebay_filter_report_gshock()
+
+    # Free Shipping 移行 (2026-05-18)
+    try:
+        from freeshipping_postprocess import transform_csv_to_freeshipping
+        transform_csv_to_freeshipping(output_file)
+    except Exception as _e:
+        print(f"⚠️ Free Shipping post-process 失敗 (G-shock): {type(_e).__name__}: {_e}")
 
     # Step 8 拡張: decision_log に config_version + 使用値を刻印
     try:
