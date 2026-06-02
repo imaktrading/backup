@@ -50,6 +50,13 @@ env/
 *.swp
 *.swo
 
+# === VSCode workspace (branch 切替で消失する data-loss 事故予防、2026-05-09 同型) ===
+# 行追加だけでは既存 tracked 分は守られない → tracked 分は git rm --cached も必須.
+*.code-workspace
+
+# === scrape デバッグ検体 (再取得可) ===
+**/_*_sample.html
+
 # === OS ===
 desktop.ini
 Thumbs.db
