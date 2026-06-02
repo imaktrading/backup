@@ -767,6 +767,10 @@ def extract_set_code_from_brand_gundam(brand: str) -> Optional[str]:
     m = re.search(r"\b(GD\d+|ST\d+|EX\d+)\b", b)
     if m:
         return m.group(1)
+    # Resource Promo は専用 prefix 'RP' (= catalog product_id 'RP-009' 等).
+    # PSA brand 'GUNDAM JAPANESE RESOURCE PROMOS' → 'P' に潰すと P-009 を探して miss するため先に分岐.
+    if "RESOURCE" in b:
+        return "RP"
     if any(k in b for k in ("PROMO", "PROMOS", "ANNIVERSARY", "CHAMPIONSHIP")):
         return "P"
     return None
@@ -1114,6 +1118,7 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     # Sun & Moon
     "TAG ALL STARS":               "SM12a",
     "TAG TEAM":                    "SM12a",
+    "ALTER GENESIS":               "SM12",   # オルタージェネシス (PSA: 'SUN & MOON ALTER GENESIS')
     "GX ULTRA SHINY":              "SM8b",
     "GX BATTLE BOOST":             "SM4p",
     "THE BEST OF XY":              "XY",
@@ -1420,6 +1425,7 @@ _JA_CHAR_TO_EN_TOKENS.update({
     "ストライクガンダム":    {"STRIKE"},
     "フリーダムガンダム":    {"FREEDOM"},
     "キラ・ヤマト":          {"KIRA", "YAMATO"},
+    "リソース":              {"RESOURCE"},   # Resource Promo (RP-009 等、PSA Subject 'RESOURCE ...')
 })
 
 

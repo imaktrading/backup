@@ -45,6 +45,13 @@ class TestGundamExtractSetCode:
             "GUNDAM PROMOS"
         ) == "P"
 
+    def test_resource_promo_maps_to_rp(self):
+        # 'RESOURCE PROMOS' は generic 'P' ではなく専用 prefix 'RP' (catalog: RP-009 等).
+        # 2026-06-02: cert 146362163 が P-009 を探して miss していた回帰防止.
+        assert catalog_psa.extract_set_code_from_brand_gundam(
+            "GUNDAM JAPANESE RESOURCE PROMOS"
+        ) == "RP"
+
     def test_no_match(self):
         assert catalog_psa.extract_set_code_from_brand_gundam("RANDOM") is None
         assert catalog_psa.extract_set_code_from_brand_gundam("") is None
@@ -175,6 +182,18 @@ class TestGundamDbLookup:
         assert result["card_id"] == "GD04-001"
         assert result["card_number"] == "GD04-001"
 
+    def test_lookup_resource_promo_rp009(self):
+        # cert 146362163: PSA brand 'RESOURCE PROMOS' → RP-009 (リソース).
+        # 旧挙動は P-009 を探して miss していた.
+        result = catalog_psa.lookup_gundam(
+            "GUNDAM JAPANESE RESOURCE PROMOS",
+            "009",
+            subject="RESOURCE V JUMP-SEPTEMBER",
+            verbose=False,
+        )
+        assert result is not None
+        assert result["card_id"] == "RP-009"
+
     def test_unregistered_returns_none(self):
         result = catalog_psa.lookup_gundam(
             "GUNDAM JAPANESE GD99",
@@ -260,6 +279,14 @@ class TestPokemonExtractSetCode:
             "POKEMON JAPANESE PROMOS"
         ) == "P"
 
+    def test_alter_genesis_set_name(self):
+        # PSA brand に set_code 数字を含まず set 名のみ ('SUN & MOON ALTER GENESIS')
+        # → keyword 逆引きで SM12 (= オルタージェネシス = EN Cosmic Eclipse).
+        # 2026-06-02: cert 143657562 Oricorio GX が抽出失敗していた回帰防止.
+        assert catalog_psa.extract_set_code_from_brand_pokemon(
+            "POKEMON JAPANESE SUN & MOON ALTER GENESIS"
+        ) == "SM12"
+
     def test_no_match(self):
         assert catalog_psa.extract_set_code_from_brand_pokemon("RANDOM TEXT") is None
 
@@ -309,6 +336,19 @@ class TestPokemonDbLookup:
         assert result["rarity"] == "Special Art Rare"
         assert result["card_type"] == "Pokémon"
         assert result["hp"] == "350"
+
+    def test_lookup_alter_genesis_oricorio(self):
+        # cert 143657562: PSA brand 'SUN & MOON ALTER GENESIS' → SM12-035 (オドリドリGX).
+        # 旧挙動は set_code 抽出失敗で Skip していた.
+        result = catalog_psa.lookup_pokemon(
+            "POKEMON JAPANESE SUN & MOON ALTER GENESIS",
+            "035",
+            subject="ORICORIO GX ALTER GENESIS",
+            verbose=False,
+        )
+        assert result is not None
+        assert result["card_number_full"] == "035/095"
+        assert result["rarity"] == "Double Rare"
 
     def test_unregistered_returns_none(self):
         result = catalog_psa.lookup_pokemon(
