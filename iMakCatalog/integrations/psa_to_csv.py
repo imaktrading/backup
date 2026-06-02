@@ -299,6 +299,27 @@ def _variant_candidates(subject: str) -> list[str]:
 # ============================================================================
 # 旧 bandai_jp.fetch_card 形式に変換
 # ============================================================================
+# Bandai TCG 共通 color JA→EN (One Piece / Dragon Ball で同一漢字).
+# DB の specs.color は scrape 時期により JA/EN 混在 (緑 975件 / Green 370件 等) のため、
+# eBay 出力 (color_en) は必ず英語へ正規化する. 既に英語の値は pass-through.
+_TCG_COLOR_JA_TO_EN = {
+    "赤": "Red", "緑": "Green", "青": "Blue",
+    "紫": "Purple", "黒": "Black", "黄": "Yellow",
+}
+
+
+def _normalize_color_en(value: str) -> str:
+    """specs.color (JA or EN, 複合は '/' or '／' 区切り) → eBay 英語表記.
+
+    例: '緑' → 'Green' / '緑/黄' → 'Green/Yellow' / 'Green' → 'Green' (pass-through).
+    map に無いトークンはそのまま残す (= 既存英語 or 未知値を壊さない fail-safe).
+    """
+    if not value:
+        return ""
+    parts = re.split(r"[/／]", value)
+    return "/".join(_TCG_COLOR_JA_TO_EN.get(p.strip(), p.strip()) for p in parts if p.strip())
+
+
 def _apply_ebay_fields(legacy: dict, record: dict, category: str) -> dict:
     """全 lookup helper 共通の eBay _ebay field 適用 (= Phase A-G 完了後 adapter 修正).
 
@@ -339,7 +360,8 @@ def _apply_ebay_fields(legacy: dict, record: dict, category: str) -> dict:
     if not legacy.get("rarity"):
         legacy["rarity"] = specs.get("rarity") or ""
     if not legacy.get("color_en") and "color_en" in legacy:
-        legacy["color_en"] = specs.get("color") or ""
+        # specs.color は JA/EN 混在 → eBay 出力は英語へ正規化 (緑→Green 等)
+        legacy["color_en"] = _normalize_color_en(specs.get("color_en") or specs.get("color") or "")
     if not legacy.get("color") and "color" in legacy:
         legacy["color"] = specs.get("color") or ""
     if not legacy.get("type_en") and "type_en" in legacy:

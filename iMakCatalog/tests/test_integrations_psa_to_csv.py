@@ -74,6 +74,32 @@ class TestVariantCandidates:
 
 
 # ============================================================================
+# _normalize_color_en — specs.color (JA/EN 混在) → eBay 英語
+# ============================================================================
+class TestNormalizeColorEn:
+    def test_single_ja(self):
+        assert catalog_psa._normalize_color_en("緑") == "Green"
+        assert catalog_psa._normalize_color_en("赤") == "Red"
+        assert catalog_psa._normalize_color_en("紫") == "Purple"
+
+    def test_compound_ja(self):
+        assert catalog_psa._normalize_color_en("緑/黄") == "Green/Yellow"
+        assert (
+            catalog_psa._normalize_color_en("赤/緑/青/紫/黒/黄")
+            == "Red/Green/Blue/Purple/Black/Yellow"
+        )
+
+    def test_already_english_passthrough(self):
+        # 既に英語の値は壊さない (DB に Green/Red 等が混在しているため)
+        assert catalog_psa._normalize_color_en("Green") == "Green"
+        assert catalog_psa._normalize_color_en("Green/Yellow") == "Green/Yellow"
+
+    def test_empty(self):
+        assert catalog_psa._normalize_color_en("") == ""
+        assert catalog_psa._normalize_color_en(None) == ""
+
+
+# ============================================================================
 # lookup_one_piece (DB roundtrip — 前提: PRB02-005 / ST16-005 / OP06-022 in DB)
 # ============================================================================
 def _trigger_cards_in_db() -> bool:
@@ -154,6 +180,12 @@ class TestLookupOnePiece:
         assert result["rarity_en"] == "L"
         # set_name_ebay は yaml ロード後 "Wings of the Captain"
         assert result["set_name_ebay"] == "Wings of the Captain"
+        # 2026-06-02: enrichment が空でない + color_en は英語へ正規化される (緑/黄 → Green/Yellow)
+        assert result["life_or_cost"] == "4"
+        assert result["power"] == "5000"
+        assert result["color_en"] and all(
+            ord(ch) < 128 for ch in result["color_en"]
+        ), f"color_en は英語であるべき: {result['color_en']!r}"
 
     def test_alt_art_variant_resolution(self):
         """PSA Subject に 'ALTERNATE ART' 含まれる + base が見つかる場合、base を返す
