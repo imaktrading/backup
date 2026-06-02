@@ -114,6 +114,38 @@ def test_offline_amazon_no_buybox_is_sold_via_unqualified(samples_available, fil
     assert reason == "unqualifiedBuyBox"
 
 
+# 2026-06-02 HQ § Rule 0 検体: 販売元 identity gate.
+# 「販売元 = Amazon.co.jp」 のみ in_stock=True。 第三者販売 (FBA 含む) は取下げ対象。
+SELLER_GATE_SAMPLES = [
+    # (filename, expected_in_stock, expected_reason_prefix, note)
+    ("newincart_B0F9JP4JX5_row440.html",     True,  "submit_buy_now",       "Amazon 直販 NEW"),
+    ("usedonly_B07XGKZTRF_row549.html",      False, "third_party_seller",   "中古化 FBA 第三者"),
+    ("usedonly_B0C6LMYHJT_row594.html",      None,  "no_signal",            "中古化 buy box 不在"),
+    ("soldout_B018LSERHE_row554.html",       False, "unqualifiedBuyBox",    "真の売切"),
+    ("soldout_B09MKCQKNV_row689.html",       False, "unqualifiedBuyBox",    "真の売切"),
+]
+
+
+@pytest.mark.parametrize("filename,expected,reason_prefix,note", SELLER_GATE_SAMPLES)
+def test_offline_amazon_seller_identity_gate(samples_available, filename, expected, reason_prefix, note):
+    """HQ 2026-06-02 § Rule 0: 販売元 = Amazon.co.jp のみ in_stock=True。
+
+    第三者販売 (FBA 含む) は 中古化 / 価格不安定 / 出品消滅 の発生源 → 取下げ対象。
+    """
+    from scrapers.amazon_scraper import _detect_stock  # noqa: PLC0415
+    path = samples_available / filename
+    if not path.exists():
+        pytest.skip(f"sample missing: {path.name}")
+    html = path.read_text(encoding="utf-8", errors="replace")
+    verdict, reason = _detect_stock(html)
+    assert verdict is expected, (
+        f"{filename} ({note}): got ({verdict!r}, {reason!r}), expected {expected!r}"
+    )
+    assert reason.startswith(reason_prefix), (
+        f"{filename} ({note}): reason {reason!r} does not start with {reason_prefix!r}"
+    )
+
+
 def test_amazon_constants_present():
     """新ロジックの判定軸定数が module に存在することを担保."""
     from scrapers.amazon_scraper import (

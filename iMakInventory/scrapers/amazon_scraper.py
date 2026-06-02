@@ -61,6 +61,30 @@ OUT_OF_STOCK_DIV_PATTERN = 'id="outOfStock"'
 # → unqualifiedBuyBox 検出時は Selenium + Amazon ログイン profile で再判定する 2-stage 方式。
 UNQUALIFIED_BUYBOX_PATTERN = 'id="unqualifiedBuyBox_feature_div"'
 
+# HQ 2026-06-02 仕様 § Rule 0: 販売元 = Amazon.co.jp のみ in_stock=True。
+# 第三者販売 (Amazon.co.jp 以外) = 中古化 / 価格不安定 / 出品消滅 の発生源 → 仕入不可 (= 取下げ対象)。
+# 出荷元 が Amazon (= FBA) でも 販売元 が 第三者 なら 取下げ対象。
+_SELLER_AMAZON_DIRECT_RE = re.compile(r'販売元\s*Amazon\.co\.jp')
+_SELLER_THIRD_PARTY_RE = re.compile(r'販売元\s+(\S{2,40})')
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+_WS_RE = re.compile(r'\s+')
+
+
+def _detect_seller(html: str) -> tuple[str, str]:
+    """販売元 identity 判定.
+
+    Returns:
+        (seller_kind, raw_text) — seller_kind は 'amazon' / 'third_party' / 'unknown'
+    """
+    notag = _WS_RE.sub(' ', _HTML_TAG_RE.sub(' ', html))
+    if _SELLER_AMAZON_DIRECT_RE.search(notag):
+        return 'amazon', 'Amazon.co.jp'
+    m = _SELLER_THIRD_PARTY_RE.search(notag)
+    if m:
+        seller_name = m.group(1).strip('（(:：')[:30]
+        return 'third_party', seller_name
+    return 'unknown', ''
+
 # Amazon ログイン用 Chrome profile (Mercari profile と分離、Takaaki さんが手動 login)
 EBAY_AMAZON_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_amazon"
 USER_AGENT = (
@@ -97,6 +121,11 @@ def _detect_stock(html: str) -> tuple[Optional[bool], str]:
         (verdict, reason) — verdict は True/False/None、reason は判定根拠
     """
     import re as _re  # noqa: PLC0415
+    # HQ 2026-06-02 仕様 § Rule 0: 販売元 identity gate (最上位)
+    seller_kind, seller_name = _detect_seller(html)
+    if seller_kind == 'third_party':
+        return False, f"third_party_seller: {seller_name}"
+
     # 第一手段 (thunderbit blog 推奨): <div id="availability"> の text で判定
     m = _re.search(r'<div[^>]*id="availability"[^>]*>(.*?)</div>', html, _re.DOTALL)
     if m:
@@ -109,16 +138,21 @@ def _detect_stock(html: str) -> tuple[Optional[bool], str]:
         # 「残り N 点」 は Marketplace 出品 (= 別 seller) を含むため在庫あり signal
         # にしない (= ユーザー目視「カートに入れるなし」 listing で偽陽性源、 6/2 検証)
         if "在庫あり" in avail_text or "in stock" in avail_low:
-            return True, f"availability_in_stock: {avail_text[:30]}"
+            # HQ § Rule 0 厳格: 在庫あり signal は 販売元 = Amazon.co.jp のみ信頼
+            if seller_kind == 'amazon':
+                return True, f"availability_in_stock: {avail_text[:30]}"
+            # seller_kind == 'unknown' → fail-closed (= 第三者 hit は上で除外済)
     # 在庫あり signal (= sold 検体 6 件で偽陽性 0 件確認済):
     # 削除済 (= 偽陽性源): "submit.add-to-cart" / "カートに追加"
     # 残す signal は sold 全件で 0 ヒット保証:
-    if "submit.buy-now" in html:
-        return True, "submit_buy_now"
-    if "今すぐ買う" in html:
-        return True, "buy_now_text"
-    if CART_BUTTON_PATTERN in html:
-        return True, "cart_button"
+    # HQ § Rule 0 厳格: in_stock signal も 販売元 = Amazon.co.jp のみ信頼
+    if seller_kind == 'amazon':
+        if "submit.buy-now" in html:
+            return True, "submit_buy_now"
+        if "今すぐ買う" in html:
+            return True, "buy_now_text"
+        if CART_BUTTON_PATTERN in html:
+            return True, "cart_button"
     if OUT_OF_STOCK_DIV_PATTERN in html:
         return False, "outOfStock"
     if UNQUALIFIED_BUYBOX_PATTERN in html:
