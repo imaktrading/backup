@@ -133,3 +133,10 @@ iMakHarvest/
 # 2026-05-09: branch 切替で workspace JSON が書き換わり iMakCatalog 行が消失した同型事故対策
 # uncommitted な workspace 編集が branch 切替で消える問題を構造的に解決するため untracked 化
 *.code-workspace
+
+# === Secrets / credentials (絶対コミット禁止・2026-06-02) ===
+# eBay OAuth トークン等の認証情報。git に入れると流出 = アカウント乗っ取りリスク
+ebay_oauth_token.json
+*oauth_token*.json
+*_token.json
+*.pem
