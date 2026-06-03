@@ -132,18 +132,44 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
     results = []
     ok_count = ng_count = 0
 
-    print(f"  Trading API ReviseInventoryStatus ({len(rows)} 件、 pacing {pacing_sec}s)...",
-          flush=True)
-    for i, item in enumerate(rows, 1):
+    def _call_one(item):
         if item["kind"] == "variation":
-            res = revise_inventory_status_variation(
+            return revise_inventory_status_variation(
                 item["item_id"], item["specifics"], item["quantity"],
                 start_price=item.get("start_price"), access_token=token)
+        return revise_inventory_status(item["item_id"], item["quantity"],
+                                        access_token=token)
+
+    def _is_transient_failure(res: dict) -> bool:
+        """DNS / ConnectionError / Timeout 系は 偶発失敗 → 同 cycle 内 retry 対象."""
+        if res["success"] or res.get("ack") is not None:
+            return False
+        msg = (res.get("error_message") or "")
+        return any(kw in msg for kw in (
+            "ConnectionError", "Timeout", "NameResolutionError",
+            "getaddrinfo failed", "Max retries exceeded",
+        ))
+
+    # run_daily.py の _parse_qty_output で 「CSV 行数」 文言を regex match させるため
+    # 件数を 明示出力 (= sell_feed_uploader stdout 互換)。
+    # 「listing」 keyword で single CSV 認識、 含まれない場合は variation 集計に倒す
+    has_variation = any(r["kind"] == "variation" for r in rows)
+    kind_label = "variation" if has_variation else "single listing"
+    print(f"  Trading API ReviseInventoryStatus ({kind_label}): CSV 行数 {len(rows)} 件 "
+          f"(pacing {pacing_sec}s)...", flush=True)
+    for i, item in enumerate(rows, 1):
+        if item["kind"] == "variation":
             label = f"iid={item['item_id']} var={item['specifics']} qty={item['quantity']}"
         else:
-            res = revise_inventory_status(item["item_id"], item["quantity"],
-                                           access_token=token)
             label = f"iid={item['item_id']} qty={item['quantity']}"
+        # 1 回目 call
+        res = _call_one(item)
+        # DNS / ConnectionError 系は 1 回だけ retry (= 偶発失敗救済、 同 cycle 内)
+        if _is_transient_failure(res):
+            print(f"  [{i}/{len(rows)}] transient fail (DNS/Timeout) → 2s sleep + retry",
+                  flush=True)
+            time.sleep(2.0)
+            res = _call_one(item)
         # eBay Trading API の 「既に取下げ済 / listing 不在」 系は safe failure (= 既に
         # 目的達成、 監視くんとしては 取下げ完了扱い)。 互換性のため sell_feed_uploader
         # 系の code 17 も同列で扱う。
@@ -184,14 +210,23 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
                 ensure_ascii=False) + "\n")
 
     # sell_feed_uploader 互換 field (= 既存 cycle log / inventory_monitor から読まれる)
+    success_count = sum(1 for r in results if r["ack"] == "Success")
     warning_count = sum(1 for r in results if r["ack"] == "Warning")
     safe_failure_count = sum(1 for r in results if r.get("safe_failure"))
     action_needed_failure = sum(
         1 for r in results
         if r["ack"] == "Failure" and not r.get("safe_failure")
     )
-    result_text = (f"Warning {warning_count} + safe Failure {safe_failure_count} "
-                   f"+ action-needed Failure {action_needed_failure}")
+    transient_failure = sum(
+        1 for r in results
+        if r.get("ack") is None and not r.get("safe_failure") and not r["success"]
+    )
+    # 旧 sell_feed_uploader 互換: 「Warning N + safe Failure M + action-needed Failure J」
+    # + Trading API 拡張: Success N (= 成功) + Transient K (= DNS/Timeout 系)
+    result_text = (f"Success {success_count} + Warning {warning_count} "
+                   f"+ safe Failure {safe_failure_count} "
+                   f"+ action-needed Failure {action_needed_failure} "
+                   f"+ Transient {transient_failure}")
     failure_details = [
         {"item_id": r["item_id"], "error_code": r["error_code"],
          "error_message": r["error_message"], "safe": r.get("safe_failure", False)}

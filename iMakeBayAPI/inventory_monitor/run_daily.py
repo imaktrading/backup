@@ -71,17 +71,26 @@ def _parse_monitor_output(out: str) -> dict:
 
 
 def _parse_qty_output(out: str) -> dict:
-    """auto_qty_zero.py の stdout から処理結果を抽出."""
+    """auto_qty_zero.py の stdout から処理結果を抽出.
+
+    Trading API 移行後 (2026-06-03) は trading_api_uploader が
+    'CSV 行数 N 件 (variation / single listing)' + 'upload 件数: ok=N ng=M / 計 K' +
+    'result_text: Success S + Warning W + safe Failure F + action-needed Failure A + Transient T'
+    を出力する。 旧 sell_feed_uploader 文言とも互換維持。
+    """
     info = {"variation_executed": 0, "variation_success": None,
             "single_executed": 0, "single_success": None,
-            "candidates": 0, "two_cycle_pass": 0}
+            "candidates": 0, "two_cycle_pass": 0,
+            "ok": 0, "ng": 0, "total": 0,
+            "success": 0, "warning": 0,
+            "safe_failure": 0, "action_needed_failure": 0, "transient": 0}
     for line in out.splitlines():
         m = re.search(r"候補.*?(\d+)\s*件", line)
         if m and info["candidates"] == 0:
             info["candidates"] = int(m.group(1))
         m = re.search(r"二段確認 pass[:：]\s*(\d+)\s*件", line)
         if m: info["two_cycle_pass"] = int(m.group(1))
-        m = re.search(r"CSV 行数 .*?[:：]\s*(\d+)", line)
+        m = re.search(r"CSV 行数 .*?[:：]?\s*(\d+)", line)
         if m:
             if "listing" in line.lower() or "単独" in line:
                 info["single_executed"] = int(m.group(1))
@@ -92,6 +101,20 @@ def _parse_qty_output(out: str) -> dict:
             ok = m.group(1) == "True"
             if info["variation_success"] is None: info["variation_success"] = ok
             else: info["single_success"] = ok
+        # Trading API 件数内訳 (= 'upload 件数: ok=N ng=M / 計 K')
+        m = re.search(r"upload 件数[:：]\s*ok=(\d+)\s+ng=(\d+)\s*/\s*計\s*(\d+)", line)
+        if m:
+            info["ok"] += int(m.group(1))
+            info["ng"] += int(m.group(2))
+            info["total"] += int(m.group(3))
+        # result_text 内訳 (= 'Success S + Warning W + safe Failure F + action-needed Failure A + Transient T')
+        m = re.search(r"Success\s+(\d+)\s*\+\s*Warning\s+(\d+)\s*\+\s*safe Failure\s+(\d+)\s*\+\s*action-needed Failure\s+(\d+)(?:\s*\+\s*Transient\s+(\d+))?", line)
+        if m:
+            info["success"] += int(m.group(1))
+            info["warning"] += int(m.group(2))
+            info["safe_failure"] += int(m.group(3))
+            info["action_needed_failure"] += int(m.group(4))
+            info["transient"] += int(m.group(5) or 0)
     return info
 
 
@@ -134,17 +157,32 @@ def _format_report(start: datetime, end: datetime,
     if monitor.get("k_sync_changed") is not None:
         lines.append(f"  K 列同期      : {monitor['k_sync_changed']} 件 更新")
     lines.append("")
+    def _detail(info: dict) -> str:
+        """件数 内訳: 'ok=N / ng=M (transient=T)' (= Trading API output 由来、 件数あり時のみ)."""
+        if info.get("total", 0) == 0 and info.get("ok", 0) == 0 and info.get("ng", 0) == 0:
+            return ""
+        parts = [f"ok={info.get('ok', 0)}", f"ng={info.get('ng', 0)}"]
+        if info.get("transient", 0) > 0:
+            parts.append(f"transient={info['transient']}")
+        if info.get("safe_failure", 0) > 0:
+            parts.append(f"safe={info['safe_failure']}")
+        return " (" + " / ".join(parts) + ")"
+
     lines.append("【eBay qty=0 化 (= 仕入元切れ × 出品中)】")
     lines.append(f"  variation Revise : {zero['variation_executed']} 件 "
-                 f"({'成功' if zero['variation_success'] else 'なし/失敗'})")
+                 f"({'成功' if zero['variation_success'] else 'なし/失敗'})"
+                 + (_detail(zero) if zero['variation_executed'] else ""))
     lines.append(f"  listing Revise   : {zero['single_executed']} 件 "
-                 f"({'成功' if zero['single_success'] else 'なし/失敗'})")
+                 f"({'成功' if zero['single_success'] else 'なし/失敗'})"
+                 + (_detail(zero) if zero['single_executed'] else ""))
     lines.append("")
     lines.append("【eBay qty=1 復活 (= 仕入元復活 × 出品停止中)】")
     lines.append(f"  variation Revise : {restore['variation_executed']} 件 "
-                 f"({'成功' if restore['variation_success'] else 'なし/失敗'})")
+                 f"({'成功' if restore['variation_success'] else 'なし/失敗'})"
+                 + (_detail(restore) if restore['variation_executed'] else ""))
     lines.append(f"  listing Revise   : {restore['single_executed']} 件 "
-                 f"({'成功' if restore['single_success'] else 'なし/失敗'})")
+                 f"({'成功' if restore['single_success'] else 'なし/失敗'})"
+                 + (_detail(restore) if restore['single_executed'] else ""))
     lines.append("")
     lines.append("【step 結果】")
     for name, ok in step_results:

@@ -109,6 +109,27 @@ def test_parse_csv_rows_single(tmp_path):
     assert all(r["quantity"] == 0 for r in rows)
 
 
+def test_is_transient_failure_dns():
+    """DNS / ConnectionError 系 → retry 対象判定."""
+    from ebay_actions.trading_api_uploader import upload_csv_via_trading_api  # noqa: PLC0415
+    import inspect  # noqa: PLC0415
+    src = inspect.getsource(upload_csv_via_trading_api)
+    # _is_transient_failure ヘルパが 関数内に定義されてる
+    assert "_is_transient_failure" in src
+    assert "ConnectionError" in src
+    assert "NameResolutionError" in src or "getaddrinfo" in src
+
+
+def test_result_text_includes_success_and_transient_counts():
+    """result_text format = 'Success N + Warning M + safe Failure F + action-needed Failure A + Transient T'."""
+    from ebay_actions import trading_api_uploader  # noqa: PLC0415
+    src = (Path(trading_api_uploader.__file__)).read_text(encoding="utf-8")
+    assert "Success {success_count}" in src
+    assert "Warning {warning_count}" in src
+    assert "safe Failure {safe_failure_count}" in src
+    assert "Transient {transient_failure}" in src
+
+
 def test_parse_csv_rows_variation(tmp_path):
     """6 col variation CSV → 親行 (qty 無) skip、 子行 kind=variation."""
     from ebay_actions.trading_api_uploader import _parse_csv_rows  # noqa: PLC0415

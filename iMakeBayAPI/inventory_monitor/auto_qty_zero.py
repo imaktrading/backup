@@ -307,6 +307,12 @@ def main():
     upload_result = upload_one_csv(csv_path, dry_run=False)
     _log(f"  upload 結果: success={upload_result.get('success')}")
     _log(f"  result_text: {upload_result.get('result_text', '')[:120]}")
+    # run_daily.py 集計用に件数を明示出力 (= 巡回レポートで「N 件 OK / M 件 NG」表示)
+    _ok = upload_result.get("ok")
+    _ng = upload_result.get("ng")
+    _total = upload_result.get("total")
+    if _ok is not None and _ng is not None:
+        _log(f"  upload 件数: ok={_ok} ng={_ng} / 計 {_total}")
 
     # 5. 成功なら SKU シート更新 (B/C 列 + M/N/O 列)
     success = bool(upload_result.get("success"))
