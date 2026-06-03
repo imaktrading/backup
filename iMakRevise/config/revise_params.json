@@ -1,0 +1,10 @@
+{
+  "safety": {
+    "min_jpy": 100,
+    "max_jpy": 500000,
+    "abnormal_delta_pct_threshold": 200
+  },
+  "snapshot": {
+    "keep_count": 5
+  }
+}

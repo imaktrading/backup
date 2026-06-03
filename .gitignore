@@ -111,6 +111,7 @@ iMakAdvisor/.decompile_tmp/
 
 # === 個人 window geometry / settings ===
 **/.window_geometry.json
+**/.gui_state.json
 
 # === 一時 scripts (アンダースコア始まり Python) ===
 **/_*.py
@@ -140,3 +141,9 @@ ebay_oauth_token.json
 *oauth_token*.json
 *_token.json
 *.pem
+
+# Worktree marker (各 worktree のローカル、git track しない)
+.PROJECT_LOCKED.md
+
+# review xlsx (= 運用データ、再生成可)
+**/csv_output/*.xlsx
