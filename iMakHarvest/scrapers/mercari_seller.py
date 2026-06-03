@@ -337,14 +337,19 @@ def _wait_for_manual_load(
     stable_sec: float = DEFAULT_MANUAL_WAIT_STABLE_SEC,
     max_wait_sec: int = DEFAULT_MANUAL_WAIT_MAX_SEC,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    done_event=None,
 ) -> int:
     """user の手動 「もっと見る (N)」 click 完了を待つ.
 
-    listing 数を polling し、 連続 `stable_sec` 秒 増加しなければ
-    user click 完了とみなして scrape 開始。
-    最大 `max_wait_sec` 秒で打切 (= timeout)。
+    listing 数を polling し、 以下のいずれかで完了:
+      1. done_event (= threading.Event 想定) が set されたら 即完了 (= user 明示 signal、 6/3 追加)
+      2. 連続 `stable_sec` 秒 listing 数が増加しなければ 自動完了 (= 既存)
+      3. 最大 `max_wait_sec` 秒で打切 (= timeout)
 
     progress_callback(count, msg): GUI 進捗表示用 (optional)。
+    done_event: threading.Event (= None なら 既存の stable_sec 判定のみ)。
+        control_panel の 「click 完了!」 button から set される想定、
+        user click タイミング ずれ で 早期完了 する問題の解決。
 
     Returns: 最終 listing 数
     """
@@ -365,8 +370,17 @@ def _wait_for_manual_load(
             last_change_time = elapsed
             if progress_callback:
                 progress_callback(current, f"{current} 件 (user click 検出)")
-        else:
-            # 増えてない時間
+        # done_event 優先判定 (= user 明示 signal、 6/3 追加)
+        if done_event is not None:
+            try:
+                if done_event.is_set():
+                    if progress_callback:
+                        progress_callback(current, f"{current} 件、 user 「やり切った」 button 押下、 即完了")
+                    return current
+            except Exception:
+                pass
+        # stable_sec 判定 (= 既存、 done_event 無い or 未 set 時の自動 fallback)
+        if current <= last_count:
             stable_elapsed = elapsed - last_change_time
             if stable_elapsed >= stable_sec:
                 if progress_callback:
@@ -388,6 +402,7 @@ def collect_seller_listing_urls(
     manual_wait_stable_sec: float = DEFAULT_MANUAL_WAIT_STABLE_SEC,
     manual_wait_max_sec: int = DEFAULT_MANUAL_WAIT_MAX_SEC,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    manual_done_event=None,
 ) -> dict:
     """seller profile page から listing URL 一覧取得.
 
@@ -435,6 +450,7 @@ def collect_seller_listing_urls(
                 stable_sec=manual_wait_stable_sec,
                 max_wait_sec=manual_wait_max_sec,
                 progress_callback=progress_callback,
+                done_event=manual_done_event,
             )
         else:
             # CAP + 1 件取れるまで「もっとみる」 button click + scroll fallback
@@ -481,6 +497,7 @@ def collect_seller_with_details(
     manual_wait_stable_sec: float = DEFAULT_MANUAL_WAIT_STABLE_SEC,
     manual_wait_max_sec: int = DEFAULT_MANUAL_WAIT_MAX_SEC,
     manual_progress_callback: Optional[Callable[[int, str], None]] = None,
+    manual_done_event=None,
     rate_limit_min_sec: float = DEFAULT_DETAIL_RATE_LIMIT_MIN_SEC,
     rate_limit_max_sec: float = DEFAULT_DETAIL_RATE_LIMIT_MAX_SEC,
 ) -> dict:
@@ -515,6 +532,7 @@ def collect_seller_with_details(
             manual_wait_stable_sec=manual_wait_stable_sec,
             manual_wait_max_sec=manual_wait_max_sec,
             progress_callback=manual_progress_callback,
+            manual_done_event=manual_done_event,
         )
         urls = url_result["urls"]
         # 詳細取得 phase 移行直前 に再 drain (= manual mode の場合、 user click → alert → return

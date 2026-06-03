@@ -281,10 +281,23 @@ class HarvestPanel(tk.Tk):
         tk.Checkbutton(
             msel,
             text="手動 click 待機 mode (= chrome 開いたら user が「もっと見る (5)」 click、 "
-                 "増加停止で自動 scrape 開始。 全件取得用)",
+                 "増加停止 or「click 完了!」 button で scrape 開始)",
             variable=self.mercari_seller_manual_var,
             font=("Meiryo UI", 9)
         ).pack(anchor="w", pady=(4, 0))
+        # 6/3 追加: user 明示 完了 signal (= タイミングずれで早期完了する問題対策)
+        self.mercari_seller_manual_done_event = threading.Event()
+        manual_done_row = tk.Frame(msel)
+        manual_done_row.pack(fill="x", pady=(4, 0))
+        self.mercari_seller_manual_done_btn = tk.Button(
+            manual_done_row,
+            text="✓ click 完了! (= manual mode 中の即完了 signal)",
+            command=self._on_mercari_seller_manual_done,
+            bg="#4CAF50", fg="white", font=("Meiryo UI", 10, "bold"),
+            state="disabled",
+            relief="raised", bd=2,
+        )
+        self.mercari_seller_manual_done_btn.pack(fill="x", padx=4)
         tk.Label(msel,
                  text="※ 例: https://jp.mercari.com/user/profile/623636774  "
                       "出力先 = 中間スプシ seller_<id> タブ (= 自動 create、 タブ単位 dedup)",
@@ -961,6 +974,15 @@ class HarvestPanel(tk.Tk):
             self._running = False
             self._set_buttons_state(disabled=False)
 
+    def _on_mercari_seller_manual_done(self) -> None:
+        """『click 完了!』 button 押下 → manual_done_event.set() で mercari_seller を即進める."""
+        self.mercari_seller_manual_done_event.set()
+        try:
+            self.mercari_seller_manual_done_btn.configure(state="disabled", text="✓ 完了 signal 送信済")
+        except Exception:
+            pass
+        self._log("  [manual] user が『click 完了!』 button 押下 → 詳細取得 phase へ移行")
+
     def _run_mercari_seller_thread(
         self,
         seller_id: str,
@@ -969,6 +991,17 @@ class HarvestPanel(tk.Tk):
         """メルカリセラー出品 → 中間スプシ seller_<id> タブに append."""
         self._running = True
         self._set_buttons_state(disabled=True)
+        # manual mode 時は 「click 完了!」 button を enable + event reset
+        manual_mode_now = self.mercari_seller_manual_var.get()
+        if manual_mode_now:
+            self.mercari_seller_manual_done_event.clear()
+            try:
+                self.mercari_seller_manual_done_btn.configure(
+                    state="normal",
+                    text="✓ click 完了! (= manual mode 中の即完了 signal)",
+                )
+            except Exception:
+                pass
         headless = not self.show_browser_var.get()
         exclude_sold = self.exclude_sold_var.get()
         effective_cap = mercari_seller.resolve_effective_cap(user_limit)
@@ -1002,6 +1035,7 @@ class HarvestPanel(tk.Tk):
                 progress_callback=progress,
                 wait_for_manual_load=manual_mode,
                 manual_progress_callback=manual_progress if manual_mode else None,
+                manual_done_event=self.mercari_seller_manual_done_event if manual_mode else None,
             )
             items = result["items"]
             self._log(
@@ -1078,6 +1112,14 @@ class HarvestPanel(tk.Tk):
         finally:
             self._running = False
             self._set_buttons_state(disabled=False)
+            # manual done button を disabled に戻す (= 次回 run まで disable)
+            try:
+                self.mercari_seller_manual_done_btn.configure(
+                    state="disabled",
+                    text="✓ click 完了! (= manual mode 中の即完了 signal)",
+                )
+            except Exception:
+                pass
 
     def _run_mercari_shops_search_thread(
         self,
