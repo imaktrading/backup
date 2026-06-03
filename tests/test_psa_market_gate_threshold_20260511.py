@@ -14,8 +14,20 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TCG = _REPO_ROOT / "iMakTCG"
+
+# 2026-06-03: psa_to_csv は 2026-05-23 V7 移行で market gate を全面刷新
+# (cost-plus always-list、ラベル=薄商い/市場高/適正/⚠️乖離大)。旧 GO/保留/NO-GO +
+# OR 緩和 契約は廃止。check_csv は旧 OR-gate のまま = dual_gate_disagreement 未解決。
+# 下記テストは旧契約を source grep で検証しており現行と乖離。ゲート SSOT 統一後に書換/復活。
+_V7_GATE_XFAIL = pytest.mark.xfail(
+    reason="psa_to_csv が V7 cost-plus gate へ移行済 (旧 GO/NO-GO/緩和 契約は廃止)。"
+           "dual_gate_disagreement 統一後に書換予定",
+    strict=False,
+)
 
 
 def test_threshold_constant_is_10():
@@ -24,6 +36,7 @@ def test_threshold_constant_is_10():
     assert "MARKET_GATE_MIN_LISTINGS = 10" in src
 
 
+@_V7_GATE_XFAIL
 def test_source_has_threshold_skip_logic():
     """source 内に 出品数 ≤ MARKET_GATE_MIN_LISTINGS の skip 分岐が存在 (OR 条件で target_usd と組合せ)."""
     src = (_TCG / "psa_to_csv.py").read_text(encoding='utf-8')
@@ -34,6 +47,7 @@ def test_source_has_threshold_skip_logic():
     assert "🔓 緩和" in src
 
 
+@_V7_GATE_XFAIL
 def test_source_preserves_existing_gate_branches():
     """副作用ゼロ: 既存の GO/保留/NO-GO ロジックは維持 (出品 11+ 件で動く)."""
     src = (_TCG / "psa_to_csv.py").read_text(encoding='utf-8')
@@ -46,6 +60,7 @@ def test_source_preserves_existing_gate_branches():
     assert 'skip_certs.add(cert)' in src
 
 
+@_V7_GATE_XFAIL
 def test_threshold_skip_branches_evaluated_first():
     """source 内で 出品数閾値 skip が GO/保留/NO-GO 分岐より前 (= 優先評価)."""
     src = (_TCG / "psa_to_csv.py").read_text(encoding='utf-8')
