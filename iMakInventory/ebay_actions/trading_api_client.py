@@ -184,31 +184,39 @@ def revise_inventory_status_variation(item_id: str,
                                         quantity: int,
                                         start_price: Optional[float] = None,
                                         access_token: Optional[str] = None) -> dict:
-    """variation 単位の qty 改訂 (= 公式監視くん用、 variation listing 対応).
+    """variation 単位の qty/price 改訂 (= 公式監視くん用、 multi-SKU listing 対応).
+
+    eBay 仕様: ReviseInventoryStatus は SKU 文字列ベース、 VariationSpecifics 不可。
+    VariationSpecifics で identification するには ReviseFixedPriceItem の
+    <Item><Variations><Variation>...</Variation></Variations> 構造を使う必要あり。
+    本 wrapper は ReviseFixedPriceItem 経路で 1 variation 単位の改訂を 実行。
 
     variation_specifics: {"Sizes": "US M(JP L)", "Color": "BL"} 等の identity dict。
-    start_price 指定時は price も同時改訂 (= eBay 仕様: variation level)。
     """
+    def _esc(s):
+        return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
     spec_xml = ""
     for name, value in variation_specifics.items():
-        # XML escape 最低限 (= 既存 token は ASCII 想定、 「<>&」 のみ手動 escape)
-        n = (str(name).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-        v = (str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-        spec_xml += f"<NameValueList><Name>{n}</Name><Value>{v}</Value></NameValueList>"
+        spec_xml += (f"<NameValueList><Name>{_esc(name)}</Name>"
+                     f"<Value>{_esc(value)}</Value></NameValueList>")
     price_xml = (f"<StartPrice>{start_price}</StartPrice>"
                  if start_price is not None else "")
     body = (
         '<?xml version="1.0" encoding="utf-8"?>'
-        '<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-        '<InventoryStatus>'
+        '<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        '<Item>'
         f'<ItemID>{item_id}</ItemID>'
+        '<Variations>'
+        '<Variation>'
         f'<VariationSpecifics>{spec_xml}</VariationSpecifics>'
         f'<Quantity>{quantity}</Quantity>'
         f'{price_xml}'
-        '</InventoryStatus>'
-        '</ReviseInventoryStatusRequest>'
+        '</Variation>'
+        '</Variations>'
+        '</Item>'
+        '</ReviseFixedPriceItemRequest>'
     )
-    return _call_trading("ReviseInventoryStatus", body, access_token=access_token)
+    return _call_trading("ReviseFixedPriceItem", body, access_token=access_token)
 
 
 def end_fixed_price_item(item_id: str, ending_reason: str = "NotAvailable",
