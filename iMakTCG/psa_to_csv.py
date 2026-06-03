@@ -290,10 +290,21 @@ _EBAY_FILTER_REPORT = {
     "blanked": 0,             # SELECTION_ONLY で不在 → 空欄
     "truncated": 0,           # 文字数制限超 → 切詰
     "required_blank": 0,      # 必須 field が空欄 (= 出品エラーリスク警告)
+    "jp_blanked": 0,          # Item Specifics に日本語混入 → fail-closed 空欄化
     "blanked_samples": [],
     "truncated_samples": [],
     "required_blank_samples": [],
+    "jp_blanked_samples": [],
 }
+
+# 日本語 codepoint (ひらがな/カタカナ/CJK/半角カナ)。英単語 "Japanese" や em-dash(—)
+# は含まれないので影響なし。
+_JP_CHAR_RE = re.compile(r'[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]')
+
+
+def _contains_japanese(s):
+    """文字列に日本語 codepoint が含まれるか (Item Specifics fail-closed ガード用)."""
+    return bool(_JP_CHAR_RE.search(str(s or "")))
 
 
 def _get_ebay_filter():
@@ -334,6 +345,22 @@ def apply_ebay_filter_to_row(row, headers, category="tcg"):
       - aspect_required + 空欄 → 警告 log (= 出品エラーリスク)
       - 文字数制限超          → truncation
     """
+    # 2026-06-03 fail-closed 日本語ガード (ef 有無に関わらず最優先で実行 = validate skip 時も
+    # 日本語を出さない)。Item Specifics に日本語 codepoint が混入したら空欄化。
+    # eBay US 出品の C:* は英語必須。catalog の name_en 欠落等で日本語 (name_jp) が漏れた場合、
+    # 誤値で出すより空欄が安全 (= 出品の正確性原則 / 空欄 > 誤り)。英単語 "Japanese" や
+    # em-dash(—) は日本語 codepoint を含まないため無影響。
+    for aspect, csv_col in EBAY_SPEC_TO_CSV.items():
+        if csv_col not in headers:
+            continue
+        idx = headers.index(csv_col)
+        if idx >= len(row):
+            continue
+        if _contains_japanese(row[idx]):
+            _EBAY_FILTER_REPORT["jp_blanked"] += 1
+            _sample_append("jp_blanked_samples", f"{aspect}={str(row[idx]).strip()}")
+            row[idx] = ""
+
     ef = _get_ebay_filter()
     if ef is None:
         return row
@@ -393,7 +420,7 @@ def print_ebay_filter_report():
     """cycle 終了時に呼出 = listing CSV 全行 validate 後のサマリー."""
     r = _EBAY_FILTER_REPORT
     total = r["validated"] + r["passthrough"] + r["blanked"]
-    if total == 0 and r["required_blank"] == 0 and r["truncated"] == 0:
+    if total == 0 and r["required_blank"] == 0 and r["truncated"] == 0 and r["jp_blanked"] == 0:
         return
     print()
     print("=" * 60)
@@ -404,6 +431,11 @@ def print_ebay_filter_report():
     print(f"  ⬜ blanked      (= SELECTION_ONLY 不在で空欄)         : {r['blanked']}")
     print(f"  ✂  truncated    (= 文字数制限超で切詰)                : {r['truncated']}")
     print(f"  ⚠️ required_blank (= 必須 field が空欄 = 出品エラーリスク): {r['required_blank']}")
+    print(f"  🚫 jp_blanked    (= Item Specifics 日本語混入で空欄化)   : {r['jp_blanked']}")
+    if r["jp_blanked_samples"]:
+        print(f"  jp_blanked samples (max 20):")
+        for s in r["jp_blanked_samples"]:
+            print(f"    - {s}")
     if r["blanked_samples"]:
         print(f"  blanked samples (max 20):")
         for s in r["blanked_samples"]:
