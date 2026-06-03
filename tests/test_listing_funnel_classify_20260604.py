@@ -1,6 +1,7 @@
 """listing_funnel.classify() の分類ロジック回帰テスト (2026-06-04)。
 
-4 切り口 (DEAD / STALE / WEAK_TITLE / WATCHED) が想定通り振り分けられることを固定する。
+在庫(qty)を踏まえた分類: qty==0(在庫切れ)は OUT_OF_STOCK に隔離し改善対象から外す。
+改善 4 切り口 (DEAD / STALE / WEAK_TITLE / WATCHED) は在庫あり listing に限定される。
 ネットワークには触れない (classify は純関数)。
 """
 import importlib.util
@@ -17,23 +18,42 @@ _spec.loader.exec_module(listing_funnel)
 classify = listing_funnel.classify
 
 
-def _row(item_id, impr=0, views=0, sold=0, watch=0, age=10):
+def _row(item_id, impr=0, views=0, sold=0, watch=0, age=10, qty=1):
     vr = round(views / impr, 4) if impr else 0.0
-    return {"item_id": item_id, "title": item_id, "price": 100.0, "watch": watch,
+    return {"item_id": item_id, "title": item_id, "price": 100.0, "watch": watch, "qty": qty,
             "start": "", "age_days": age, "url": "", "impr": impr, "views": views,
             "txn": 0, "ctr": 0, "conv": 0, "vr": vr, "sold_qty": sold, "revenue": 0.0}
 
 
-def test_dead_is_zero_impression_unsold():
-    """30d impression ほぼゼロ + 無販売 → DEAD。impr が立てば DEAD でない。"""
+def test_dead_is_zero_impression_unsold_in_stock():
+    """在庫あり + 30d impression ほぼゼロ + 無販売 → DEAD。impr が立てば DEAD でない。"""
     rows = [
-        _row("dead", impr=0, sold=0),          # 露出ゼロ = 死蔵
+        _row("dead", impr=0, sold=0),          # 在庫あり 露出ゼロ = 死蔵
         _row("dead_lo", impr=5, sold=0),       # 閾値内 = 死蔵
         _row("has_impr", impr=500, sold=0),    # 露出あり → DEAD でない
         _row("sold", impr=0, sold=1),          # 売れた → DEAD でない
     ]
     ids = {r["item_id"] for r in classify(rows)["DEAD"]}
     assert ids == {"dead", "dead_lo"}
+
+
+def test_out_of_stock_excluded_from_dead():
+    """qty==0(在庫切れ)は impression ゼロでも DEAD ではなく OUT_OF_STOCK に隔離。"""
+    rows = [
+        _row("oos", impr=0, sold=0, qty=0),    # 在庫切れ → OUT_OF_STOCK (DEAD でない)
+        _row("dead", impr=0, sold=0, qty=1),   # 在庫あり露出ゼロ → DEAD
+    ]
+    c = classify(rows)
+    assert {r["item_id"] for r in c["DEAD"]} == {"dead"}
+    assert {r["item_id"] for r in c["OUT_OF_STOCK"]} == {"oos"}
+
+
+def test_unknown_qty_treated_as_in_stock():
+    """qty==-1(不明)は安全側で在庫あり扱い → DEAD 判定に乗る。"""
+    rows = [_row("unknown", impr=0, sold=0, qty=-1)]
+    c = classify(rows)
+    assert {r["item_id"] for r in c["DEAD"]} == {"unknown"}
+    assert c["OUT_OF_STOCK"] == []
 
 
 def test_dead_sorted_oldest_first():

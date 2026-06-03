@@ -144,12 +144,17 @@ def fetch_active(token):
             price = re.search(r'<CurrentPrice currencyID="[^"]*">([\d.]+)</CurrentPrice>', blk)
             start = re.search(r"<StartTime>(.*?)</StartTime>", blk)
             url = re.search(r"<ViewItemURL>(.*?)</ViewItemURL>", blk)
+            qa = re.search(r"<QuantityAvailable>(\d+)</QuantityAvailable>", blk)
+            qq = re.search(r"<Quantity>(\d+)</Quantity>", blk)
+            # QuantityAvailable 優先、無ければ Quantity、どちらも無ければ -1(不明)
+            qty = int(qa.group(1)) if qa else (int(qq.group(1)) if qq else -1)
             out[iid] = {
                 "title": (title.group(1) if title else "").replace("&amp;", "&"),
                 "watch": int(watch.group(1)) if watch else 0,
                 "price": float(price.group(1)) if price else 0.0,
                 "start": start.group(1)[:10] if start else "",
                 "url": url.group(1) if url else "",
+                "qty": qty,
             }
         total = re.search(r"<TotalNumberOfEntries>(\d+)</TotalNumberOfEntries>", txt)
         total = int(total.group(1)) if total else len(out)
@@ -159,9 +164,16 @@ def fetch_active(token):
     return out
 
 
+class QuotaError(RuntimeError):
+    """Analytics API の日次クォータ枯渇 (HTTP 429 / errorId 2001)。"""
+
+
 def fetch_traffic(token, item_ids, days):
     """getTrafficReport を listing_ids で200件ずつ照会 → {item_id: {impr,views,txn,ctr,conv}}。
-    traffic に出ない id = impression ゼロ (= 戻り値に含まれない)。"""
+
+    ⚠️ 5 metric 要求時は要求した全 id にゼロ行が返る (= 無データも impr=0 として返る)。
+    1 metric だと無データ id は省略される。本関数は5 metric を使い「impr=0 = 露出なし」として扱う。
+    429 (クォータ枯渇) は QuotaError で送出 (途中まで取れた分は破棄: 偽の死蔵を作らないため)。"""
     H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
          "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE}
     end = datetime.date.today() - datetime.timedelta(days=1)  # 当日=未来エラー
@@ -175,6 +187,9 @@ def fetch_traffic(token, item_ids, days):
             "dimension": "LISTING",
             "metric": "LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,TRANSACTION,CLICK_THROUGH_RATE,SALES_CONVERSION_RATE",
             "filter": flt})
+        if r.status_code == 429:
+            raise QuotaError("getTrafficReport が 429 (Too many requests)。Analytics API の日次クォータ枯渇。"
+                             "リセット後に再実行するか、キャッシュ (--cache) を使用してください。")
         if r.status_code != 200:
             sys.exit(f"getTrafficReport 失敗: {r.status_code} {r.text}")
         j = r.json()
@@ -233,13 +248,22 @@ def _age_days(start_str):
 
 
 def classify(rows):
-    """4 切り口に分類。WEAK_TITLE は view_rate(=views/impr) 下位25%で弁別
-    (API CTR は小数2桁丸めで 0.00 に潰れるため自前計算を使う)。"""
-    vrs = sorted([r["vr"] for r in rows if r["impr"] >= TH_WEAK_IMPR])
+    """在庫(qty)を踏まえ分類。
+
+    重要: qty==0 (在庫切れ) は eBay が検索から外すため impression ゼロは「正常」。
+    無在庫運用で監視くんが仕入れ不可品を qty=0 にした結果であり、タイトル改善の対象ではない。
+    よって qty==0 は OUT_OF_STOCK バケツに隔離し、改善対象 (DEAD/STALE/WEAK/WATCHED) は
+    在庫あり (qty!=0) listing に限定する。
+    WEAK_TITLE は view_rate(=views/impr) 下位25%で弁別 (API CTR は丸めで0.00に潰れるため自前計算)。
+    """
+    in_stock = [r for r in rows if r["qty"] != 0]   # qty==-1(不明) は安全側で in_stock 扱い
+    oos = [r for r in rows if r["qty"] == 0]
+
+    vrs = sorted([r["vr"] for r in in_stock if r["impr"] >= TH_WEAK_IMPR])
     vr_q1 = statistics.quantiles(vrs, n=4)[0] if len(vrs) >= 4 else (vrs[0] if vrs else 0)
 
     dead, stale, weak, watched = [], [], [], []
-    for r in rows:
+    for r in in_stock:
         sold = r["sold_qty"]
         if sold == 0 and r["impr"] <= TH_DEAD_IMPR:
             dead.append(r)
@@ -253,7 +277,8 @@ def classify(rows):
     stale.sort(key=lambda x: -x["views"])
     weak.sort(key=lambda x: x["vr"])
     watched.sort(key=lambda x: -x["watch"])
-    return {"DEAD": dead, "STALE": stale, "WEAK_TITLE": weak, "WATCHED": watched, "vr_q1": vr_q1}
+    return {"DEAD": dead, "STALE": stale, "WEAK_TITLE": weak, "WATCHED": watched,
+            "OUT_OF_STOCK": oos, "vr_q1": vr_q1}
 
 
 def _print_section(title, note, items, cols, limit=20):
@@ -269,21 +294,47 @@ def _print_section(title, note, items, cols, limit=20):
         print(f"   ... 他 {len(items) - limit} 件 (CSV 参照)")
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--days", type=int, default=30, help="traffic 集計日数 (default 30)")
-    ap.add_argument("--sales-days", type=int, default=90, help="実売集計日数 (default 90)")
-    ap.add_argument("--no-csv", action="store_true")
-    args = ap.parse_args()
+def _cache_path(days, sales_days):
+    stamp = datetime.date.today().strftime("%Y%m%d")
+    return os.path.join(OUT_DIR, f"raw_cache_{stamp}_{days}_{sales_days}.json")
 
-    token = get_access_token()
+
+def gather(token, days, sales_days, use_cache):
+    """active/traffic/sales を取得 (or 当日キャッシュから復元)。
+    クォータを焼かないため、当日キャッシュがあれば既定で再利用する。"""
+    os.makedirs(OUT_DIR, exist_ok=True)
+    cpath = _cache_path(days, sales_days)
+    if use_cache and os.path.exists(cpath):
+        print(f"キャッシュ再利用: {cpath}", flush=True)
+        d = json.load(open(cpath, encoding="utf-8"))
+        return d["active"], d["traffic"], d["sales"]
+
     print("active listing 取得中 (GetMyeBaySelling)...", flush=True)
     active = fetch_active(token)
     print(f"  active = {len(active)}件", flush=True)
     print(f"traffic 取得中 (listing_ids 200件ずつ, {-(-len(active) // TRAFFIC_CHUNK)}回)...", flush=True)
-    traffic = fetch_traffic(token, list(active.keys()), args.days)
-    print(f"  traffic 出現 (impr>0含む) = {len(traffic)}件", flush=True)
-    sales = fetch_sales(token, args.sales_days)
+    traffic = fetch_traffic(token, list(active.keys()), days)  # 429 は QuotaError で送出
+    print(f"  traffic 取得 = {len(traffic)}件", flush=True)
+    sales = fetch_sales(token, sales_days)
+    json.dump({"active": active, "traffic": traffic, "sales": sales},
+              open(cpath, "w", encoding="utf-8"), ensure_ascii=False)
+    print(f"キャッシュ保存: {cpath}", flush=True)
+    return active, traffic, sales
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--days", type=int, default=30, help="traffic 集計日数 (default 30)")
+    ap.add_argument("--sales-days", type=int, default=90, help="実売集計日数 (default 90)")
+    ap.add_argument("--refresh", action="store_true", help="当日キャッシュを無視して再取得 (クォータ消費)")
+    ap.add_argument("--no-csv", action="store_true")
+    args = ap.parse_args()
+
+    token = get_access_token()
+    try:
+        active, traffic, sales = gather(token, args.days, args.sales_days, use_cache=not args.refresh)
+    except QuotaError as e:
+        sys.exit(f"\n⚠️ {e}\n  (当日キャッシュが無いため取得できません。クォータ回復後に再実行してください)")
 
     rows = []
     for iid, a in active.items():
@@ -292,52 +343,58 @@ def main():
         vr = round(t["views"] / t["impr"], 4) if t["impr"] else 0.0
         rows.append({
             "item_id": iid, "title": a["title"], "price": a["price"], "watch": a["watch"],
-            "start": a["start"], "age_days": _age_days(a["start"]), "url": a["url"],
+            "qty": a.get("qty", -1), "start": a["start"], "age_days": _age_days(a["start"]), "url": a["url"],
             "impr": t["impr"], "views": t["views"], "txn": t["txn"], "ctr": t["ctr"], "conv": t["conv"],
             "vr": vr, "sold_qty": s["sold_qty"], "revenue": round(s["revenue"], 2),
         })
 
-    no_impr = sum(1 for r in rows if r["impr"] == 0)
+    in_stock = [r for r in rows if r["qty"] != 0]
+    oos_n = sum(1 for r in rows if r["qty"] == 0)
+    instock_no_impr = sum(1 for r in in_stock if r["impr"] == 0)
     total_sold = sum(r["sold_qty"] for r in rows)
+    n = max(len(rows), 1)
     print(f"\n出品物フルファネル分析  traffic={args.days}d / sales={args.sales_days}d")
-    print(f"   active listing={len(rows)}件 / うち 30d impression ゼロ={no_impr}件 ({no_impr*100//max(len(rows),1)}%) / 90d実売={total_sold}件")
+    print(f"   active={len(rows)}件  在庫切れqty0={oos_n}件({oos_n*100//n}%)  在庫あり={len(in_stock)}件  90d実売={total_sold}件")
+    print(f"   ※在庫切れは検索非表示=impressionゼロが正常 (改善対象外)。下記は在庫あり listing のみ。")
+    print(f"   在庫ありで30d impressionゼロ={instock_no_impr}件 = 在庫あるのに露出されていない真の課題")
 
     c = classify(rows)
 
     def cols_dead(r, header=False):
         if header:
-            return f"{'item_id':<14} {'impr':>5} {'age日':>5} {'watch':>5} {'$':>7}  title"
-        return f"{r['item_id']:<14} {r['impr']:>5} {r['age_days']:>5} {r['watch']:>5} {r['price']:>7.0f}  {r['title'][:46]}"
+            return f"{'item_id':<14} {'impr':>5} {'age日':>5} {'qty':>3} {'watch':>5} {'$':>6}  title"
+        return f"{r['item_id']:<14} {r['impr']:>5} {r['age_days']:>5} {r['qty']:>3} {r['watch']:>5} {r['price']:>6.0f}  {r['title'][:44]}"
 
     def cols_view(r, header=False):
         if header:
             return f"{'item_id':<14} {'impr':>6} {'views':>6} {'view%':>6} {'watch':>5} {'$':>6}  title"
         return f"{r['item_id']:<14} {r['impr']:>6} {r['views']:>6} {r['vr']*100:>5.1f}% {r['watch']:>5} {r['price']:>6.0f}  {r['title'][:42]}"
 
-    _print_section("① 死蔵 DEAD", f"30d impr<={TH_DEAD_IMPR} & {args.sales_days}d無販売 → 検索露出なし (古い順)", c["DEAD"], cols_dead)
-    _print_section("② 見られて売れない STALE", f"30d views>={TH_STALE_VIEWS} & {args.sales_days}d無販売 → 価格/競合", c["STALE"], cols_view)
-    _print_section("③ タイトル弱い WEAK_TITLE", f"impr>={TH_WEAK_IMPR} & view率<=下位25%({c['vr_q1']*100:.1f}%) → タイトル/サムネ", c["WEAK_TITLE"], cols_view)
-    _print_section("④ ウォッチ無販売 WATCHED", f"WatchCount>={TH_WATCH} & {args.sales_days}d無販売 → あと一押し(価格/送料)", c["WATCHED"], cols_view)
+    _print_section("① 死蔵 DEAD (在庫あり)", f"在庫あり & 30d impr<={TH_DEAD_IMPR} & {args.sales_days}d無販売 → 在庫あるのに検索露出なし (古い順)", c["DEAD"], cols_dead)
+    _print_section("② 見られて売れない STALE", f"在庫あり & 30d views>={TH_STALE_VIEWS} & {args.sales_days}d無販売 → 価格/競合", c["STALE"], cols_view)
+    _print_section("③ タイトル弱い WEAK_TITLE", f"在庫あり & impr>={TH_WEAK_IMPR} & view率<=下位25%({c['vr_q1']*100:.1f}%) → タイトル/サムネ", c["WEAK_TITLE"], cols_view)
+    _print_section("④ ウォッチ無販売 WATCHED", f"在庫あり & WatchCount>={TH_WATCH} & {args.sales_days}d無販売 → あと一押し(価格/送料)", c["WATCHED"], cols_view)
+    print(f"\n(参考) 在庫切れ OUT_OF_STOCK = {len(c['OUT_OF_STOCK'])}件 — 仕入れ不可で取下げ済。改善対象外だが多すぎれば仕入れ網の課題")
 
     if not args.no_csv:
-        os.makedirs(OUT_DIR, exist_ok=True)
         stamp = datetime.date.today().strftime("%Y%m%d")
         path = os.path.join(OUT_DIR, f"funnel_{stamp}.csv")
         for r in rows:
             tags = []
+            if r["qty"] == 0: tags.append("OUT_OF_STOCK")
             if r in c["DEAD"]: tags.append("DEAD")
             if r in c["STALE"]: tags.append("STALE")
             if r in c["WEAK_TITLE"]: tags.append("WEAK_TITLE")
             if r in c["WATCHED"]: tags.append("WATCHED")
             r["flags"] = "|".join(tags)
         with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["item_id", "title", "price", "watch", "start", "age_days",
+            w = csv.DictWriter(f, fieldnames=["item_id", "title", "price", "qty", "watch", "start", "age_days",
                                               "impr", "views", "vr", "txn", "ctr", "conv",
                                               "sold_qty", "revenue", "flags", "url"])
             w.writeheader()
             for r in sorted(rows, key=lambda x: (-x["impr"], -x["watch"])):
                 w.writerow(r)
-        print(f"\nCSV 出力: {path}")
+        print(f"CSV 出力: {path}")
 
 
 if __name__ == "__main__":
