@@ -184,12 +184,13 @@ def fix_title(title, language, rarity, rescues):
     title, deduped = remove_redundant_pokemon(title)
     log['pokemon_dedup'] = deduped
 
-    title, pad_applied = pad_title(title, language=language, rarity=rarity)
-    log['pad'] = pad_applied
-
-    # 最終ガード: 日本語混入を除去 (eBay タイトルは英語必須)
+    # 日本語混入を pad の「前」に除去 (TitleAgent が JP名でパディングした分)。
+    # 先に英語のみにしてから pad することで、除去後に短くならず英語キーワードで補強される。
     title, jp_stripped = strip_japanese(title)
     log['jp_strip'] = jp_stripped
+
+    title, pad_applied = pad_title(title, language=language, rarity=rarity)
+    log['pad'] = pad_applied
 
     return title, log
 
