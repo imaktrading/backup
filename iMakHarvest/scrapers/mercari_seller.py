@@ -89,8 +89,10 @@ DEFAULT_MANUAL_WAIT_MAX_SEC = 600  # 最大待機時間 (= 10 分)
 CHROME_PROFILE_DIR_ANON = r"C:\Users\imax2\local_data\iMakHarvest\chrome_profile_mercari_seller_anon"
 
 # rate limit (= 詳細取得時の bot 検出回避、 人間っぽい間隔)
-DEFAULT_DETAIL_RATE_LIMIT_MIN_SEC = 2.0  # 各 item 詳細取得後の最小 sleep
-DEFAULT_DETAIL_RATE_LIMIT_MAX_SEC = 4.0  # 同 最大 sleep (= jitter 上限)
+# 6/3 緩和: 2-4s → 5-10s (= 800k seller で 15 件目接続切断 多発、 Casio 大量 fetch 後の
+# IP 評判低下と推定。 2.5 倍緩和で「人間の閲覧速度」 にさらに近づける)
+DEFAULT_DETAIL_RATE_LIMIT_MIN_SEC = 5.0  # 各 item 詳細取得後の最小 sleep
+DEFAULT_DETAIL_RATE_LIMIT_MAX_SEC = 10.0  # 同 最大 sleep (= jitter 上限)
 
 
 def create_anonymous_driver(headless: bool = False):
