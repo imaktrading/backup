@@ -1193,6 +1193,16 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     for pattern, code in psa_promo_to_catalog:
         if re.search(pattern, b):
             return code
+    # 0c) 数字を持たない starter/special set code (= digit 正規表現で取れない).
+    #    PSA brand に code が dash 付きで明示されるパターンのみ安全に拾う.
+    #    例: 'POKEMON JAPANESE MBD-MEGA STARTER SET MEGA DIANCIE EX' → 'MBD' (catalog: MBD-022 メロエッタ等)
+    #    新 starter set 追加時はここに 1 行追記 (誤マッチ防止に \b...\b で token 限定)。
+    letter_only_codes = [
+        (r"\bMBD\b", "MBD"),   # メガブレイブ Mega Diancie EX スターターセット
+    ]
+    for pattern, code in letter_only_codes:
+        if re.search(pattern, b):
+            return code
     # 1) Standard alphanumeric set codes
     m = re.search(r"\b(SV[0-9]+[A-Z]?|S[0-9]+[A-Z]?|M[0-9]+[A-Z]?|SM[0-9]+|XY[0-9]+|BW[0-9]+|HGSS[0-9]?|DP[0-9]+)\b", b)
     if m:

@@ -279,6 +279,13 @@ class TestPokemonExtractSetCode:
             "POKEMON JAPANESE PROMOS"
         ) == "P"
 
+    def test_mbd_starter_set_letter_only_code(self):
+        # 数字を持たない starter set code 'MBD' (PSA: 'MBD-MEGA STARTER SET ...').
+        # 2026-06-03: cert 139060795 (#022 メロエッタ) が抽出失敗していた回帰防止。
+        assert catalog_psa.extract_set_code_from_brand_pokemon(
+            "POKEMON JAPANESE MBD-MEGA STARTER SET MEGA DIANCIE EX"
+        ) == "MBD"
+
     def test_alter_genesis_set_name(self):
         # PSA brand に set_code 数字を含まず set 名のみ ('SUN & MOON ALTER GENESIS')
         # → keyword 逆引きで SM12 (= オルタージェネシス = EN Cosmic Eclipse).
@@ -336,6 +343,18 @@ class TestPokemonDbLookup:
         assert result["rarity"] == "Special Art Rare"
         assert result["card_type"] == "Pokémon"
         assert result["hp"] == "350"
+
+    def test_lookup_mbd_meloetta_022(self):
+        # cert 139060795: MBD-MEGA STARTER SET → MBD-022 (メロエッタ/Meloetta).
+        # #022 は Diancie ではなく Meloetta (Diancie は MBD-005) = 公式 catalog で確定。
+        result = catalog_psa.lookup_pokemon(
+            "POKEMON JAPANESE MBD-MEGA STARTER SET MEGA DIANCIE EX",
+            "022",
+            subject="MELOETTA",
+            verbose=False,
+        )
+        assert result is not None
+        assert result["card_number_full"] == "022/021"
 
     def test_lookup_alter_genesis_oricorio(self):
         # cert 143657562: PSA brand 'SUN & MOON ALTER GENESIS' → SM12-035 (オドリドリGX).
