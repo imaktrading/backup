@@ -276,6 +276,14 @@ class HarvestPanel(tk.Tk):
             variable=self.mercari_seller_vision_var,
             font=("Meiryo UI", 9)
         ).pack(anchor="w", pady=(4, 0))
+        # 6/3 追加: 既存タブの URL を skip して 差分のみ詳細取得 (= 再実行高速化)
+        self.mercari_seller_skip_known_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            msel,
+            text="差分のみ詳細取得 (= 既存タブの URL を詳細 fetch から skip、 再実行高速化、 default ON)",
+            variable=self.mercari_seller_skip_known_var,
+            font=("Meiryo UI", 9)
+        ).pack(anchor="w", pady=(4, 0))
         # 手動 click 待機 mode (= フリマアシスト「もっと見る (5)」 を user 手動 click)
         self.mercari_seller_manual_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
@@ -1008,6 +1016,25 @@ class HarvestPanel(tk.Tk):
 
         use_vision = self.mercari_seller_vision_var.get()
         manual_mode = self.mercari_seller_manual_var.get()
+        skip_known = self.mercari_seller_skip_known_var.get()
+        # 既存タブの dedup key set を取得 (= skip_known ON 時のみ、 タブ無ければ空 set)
+        known_item_ids: set[str] = set()
+        if skip_known:
+            try:
+                from sheet_writer_mercari_seller import (  # noqa: PLC0415
+                    open_seller_staging_sheet,
+                )
+                import gspread  # noqa: PLC0415
+                _sh = open_seller_staging_sheet()
+                try:
+                    _ws = _sh.worksheet(f"seller_{seller_id}")
+                    from sheet_writer_mercari_seller import read_existing_dedupe_keys_in_tab  # noqa: PLC0415
+                    known_item_ids = read_existing_dedupe_keys_in_tab(_ws)
+                except gspread.WorksheetNotFound:
+                    known_item_ids = set()
+            except Exception as e:
+                self._log(f"  ⚠ 既存タブ読込失敗: {e} (= 全件詳細取得 fallback)")
+                known_item_ids = set()
         self._set_status(f"メルカリセラー {seller_id} 出品収集中...")
         self._log("=== メルカリセラー 抽出 開始 ===")
         self._log(f"  seller_id  : {seller_id}")
@@ -1017,6 +1044,7 @@ class HarvestPanel(tk.Tk):
         self._log(f"  SOLD除外   : {exclude_sold}")
         self._log(f"  Vision 補強: {use_vision} (= 画像から card_id 認識、 title × Vision 合議)")
         self._log(f"  手動 click : {manual_mode} (= ON で chrome 開いたら user が「もっと見る (5)」 click 待ち)")
+        self._log(f"  差分のみ   : {skip_known} (= 既知 {len(known_item_ids)} 件 を詳細取得から skip)")
         self._log(f"  投入先     : 中間スプシ seller_{seller_id} タブ")
         try:
             def progress(cur, total, msg):
@@ -1036,11 +1064,13 @@ class HarvestPanel(tk.Tk):
                 wait_for_manual_load=manual_mode,
                 manual_progress_callback=manual_progress if manual_mode else None,
                 manual_done_event=self.mercari_seller_manual_done_event if manual_mode else None,
+                known_item_ids=known_item_ids if skip_known else None,
             )
             items = result["items"]
             self._log(
                 f"  収集結果   : 出現 {result['total_seen']} 件 / "
                 f"取得 {len(items)} 件 / SOLD skip {result['skipped_sold']} / "
+                f"既知 skip {result.get('skipped_known', 0)} / "
                 f"CAP到達 {result['cap_hit']}"
             )
             if result["cap_hit"]:

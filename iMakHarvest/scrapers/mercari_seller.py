@@ -500,8 +500,15 @@ def collect_seller_with_details(
     manual_done_event=None,
     rate_limit_min_sec: float = DEFAULT_DETAIL_RATE_LIMIT_MIN_SEC,
     rate_limit_max_sec: float = DEFAULT_DETAIL_RATE_LIMIT_MAX_SEC,
+    known_item_ids: Optional[set] = None,
 ) -> dict:
     """seller listing 全件 + 詳細 (title/price/image/condition/in_stock) を取得.
+
+    Args:
+        known_item_ids: 既に取得済の mercari item_id 集合 (= 例: スプシ既存 row の
+            URL から抽出した `m\\d+`)。 渡すと **詳細取得 phase 前に URL を filter**
+            して既知分の詳細取得を skip → 差分のみ fetch (= 再実行時の高速化)。
+            None なら 既存挙動 (= 全 URL 詳細取得) 維持 (= backwards compatible)。
 
     Returns:
         {
@@ -512,6 +519,7 @@ def collect_seller_with_details(
             "total_seen": int,
             "skipped_sold": int,  # = SOLD 除外で skip した件数
             "skipped_detail_failed": int,  # = 詳細取得 fail で skip した件数 (現状: 含める方針)
+            "skipped_known": int,  # = known_item_ids で skip した件数 (= 差分 fetch 効果計測)
         }
     """
     from scrapers import mercari_item_detail  # noqa: PLC0415
@@ -535,6 +543,17 @@ def collect_seller_with_details(
             manual_done_event=manual_done_event,
         )
         urls = url_result["urls"]
+        # known_item_ids filter (= 6/3 差分 fetch 機能): 既知 URL を詳細取得対象から除外
+        skipped_known = 0
+        if known_item_ids:
+            filtered_urls: list[str] = []
+            for u in urls:
+                iid = parse_item_id(u)
+                if iid and iid in known_item_ids:
+                    skipped_known += 1
+                    continue
+                filtered_urls.append(u)
+            urls = filtered_urls
         # 詳細取得 phase 移行直前 に再 drain (= manual mode の場合、 user click → alert → return
         #  の race で alert が残り 最初の driver.get で crash する事象の保険)
         _drain_alerts(driver)
@@ -585,6 +604,7 @@ def collect_seller_with_details(
             "total_seen": url_result["total_seen"],
             "skipped_sold": skipped_sold,
             "skipped_detail_failed": skipped_detail_failed,
+            "skipped_known": skipped_known,
         }
     finally:
         if own_driver:
