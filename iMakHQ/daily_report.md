@@ -346,3 +346,41 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - **優先度低**: response_processor.py 拡張設計（HOLD理由分類の学習データ化）
 
 ---
+
+## 2026-06-03 — Catalog セッション（TCG lookup 修正 / backlog保全 / name_en補完 / Casio detail merge / サブPC調整）
+
+### 決定事項
+- 決定1: TCG lookup 失敗の連続事例（Oricorio/Gundam Resource/MBD Meloetta）は **いずれも catalog 欠落ではなく brand→set_code 導出漏れ** と判明 → adapter のマッピング追加で解決（手動 INSERT せず、既収録レコードを引けるようにする方針）
+- 決定2: name_en 空 → Item Specifics 日本語漏れ（RP-009 'リソース' 事件）は **公式由来のみで補完**（推測翻訳禁止）。曖昧（複数EN=データ破損）・no-match は空のまま（誤出品 < 空欄）
+- 決定3: 2週間滞留していた 5/29-5/30 未 commit 作業を最優先で保全（branch切替 data-loss 温床）。adapter fix と分離して論理単位で commit
+- 決定4: `*.code-workspace` は feature/uniqlo-ut の .gitignore 未登録 + tracked だった → gitignore + `git rm --cached`（行追加だけでは既存tracked分は守られない）
+- 決定5: One Piece color_en は DB の `color`(JA/EN混在) を adapter層で英語正規化（DB値は公式SSOTとしてJA温存、migration で英語上書きしない）
+- 決定6: サブPC Casio fetch の 20分スリープは無駄（Akamai は時間では解除されず別IP=再テザリングが唯一有効と実証済）→ block検知時は寝ずに終了し再テザを促す設計に変更
+
+### 変更
+- 変更: iMakCatalog/integrations/psa_to_csv.py `_POKEMON_SET_NAME_TO_CODE` に 'ALTER GENESIS'→'SM12' / `extract_set_code_from_brand_gundam` に 'RESOURCE'→'RP' / `_JA_CHAR_TO_EN_TOKENS` に 'リソース'→{RESOURCE}（commit 2a05c64）
+- 変更: iMakCatalog/integrations/psa_to_csv.py `extract_set_code_from_brand_pokemon` に letter-only code 'MBD' 追加（commit 493b278、#022=Meloetta が hit）
+- 変更: iMakCatalog/integrations/psa_to_csv.py `_normalize_color_en()` 追加 + `_apply_ebay_fields` で color_en を英語化（commit 0f05b55）
+- 変更: iMakCatalog/scripts/casio_parse_local_html.py 新規（サブPC保存 view-source HTML → 公式detail を union 同一スキーマで DB merge、commit f5e7563）
+- 変更: iMakCatalog/migrations/2026-06-03_name_en_backfill.py 新規（name_en 1810件補完、commit 0a03a49）
+- 変更: .gitignore に *.code-workspace / **/_*_sample.html 追加 + iMakCatalog/iMakCatalog.code-workspace を untrack（commit 499650e）
+- 変更: casio_subpc/casio_autosave_viewsource.py（OneDrive、git外）BURST_SIZE 15→6 / BLOCK 20分スリープ撤廃→終了+再テザ案内
+- 変更: 5/29-5/30 backlog 保全（migrations 14本 + casio_auto_dl + ebay_filter_masters、commit c1401e0）+ eBay-fields enrichment adapter/test（commit b40cbc0）
+- 未実装: uniqlo_ut name_en(1304件) = 公式英名 source が無く方針相談中（response 投函済、HQ判断待ち）。TCG残空(gundam6/op5/dbscg290/pkmn110)= 公式未確定で空のまま温存
+
+### 検証
+- 検証✅: lookup_pokemon('...ALTER GENESIS','035') → SM12-035 オドリドリGX / lookup_gundam('...RESOURCE PROMOS','009') → RP-009 / lookup_pokemon('...MBD...','022') → MBD-022 Meloetta(022/021)、'005'→Mega Diancie 別物 を実機確認
+- 検証✅: name_en backfill dry-run → 公式英名サンプル全件正確（Gundam/Sabo/Bardock/Hau）、曖昧（マスキッパ→{Carnivine,Sableye}）は skip。--commit 後 RP-009 name_en='Resource' を実機確認。計1810件、残空(gundam6/op5/dbscg290/pkmn110)
+- 検証✅: Casio local merge dry-run 127HTML→98 unique→DB一致98/98、後続11件追加で **gshock detail 充足 114→212→223**（msrp_jpy/release_date/size/glass 等14field、before_msrp全件None=新規充足）。backup 取得
+- 検証✅: pytest tests/ = 212 passed（回帰テスト追加: Alter Genesis/Resource/MBD の extract+lookup 計6本）。各 commit で pre-commit hook 228 passed/1 skipped
+- 検証✅: git check-ignore で iMakCatalog.code-workspace（2箇所）+ _*_sample.html が ignore 化、commit後 working copy 残存を確認
+- 検証✅: サブPC修正後の実走で _run_log に「完了:11/93 → block検知→終了+再テザ案内」を確認（新ロジック発火、旧20分ループ消滅）
+
+### 残タスク（次セッション候補）
+- **優先度中**: uniqlo_ut name_en 方針（A:公式UT英名scrape / B:UTはCard Name不要 / C:空運用）の HQ 回答待ち
+- **優先度中**: サブPC Casio 残スプシ~108 を再テザリングで消化 → 母艦で casio_parse_local_html.py --commit（現行detail 223/690、残ギャップ ~467）
+- **優先度中**: One Piece adapter fix (b40cbc0+0f05b55) の master 反映（cherry-pick or merge、[[open_items_2026_06_02]]）
+- **優先度低**: MBD セットの set_name/rarity 欠落補完（listing は出るが該当 Item Specifics 空）
+- **優先度低**: 残TCG空(gundam6/op5/dbscg290/pkmn110)の公式source指定での追補
+
+---
