@@ -184,7 +184,8 @@ def rollback_from_snapshot(snapshot_id: str) -> None:
     _log(f"rollback CSV: {rollback_csv}")
 
     # upload
-    from sell_feed_uploader import upload_one_csv  # noqa: PLC0415
+    # HQ 2026-06-03: Trading API 化 (= sell_feed_uploader Selenium 脆弱性回避)
+    from ebay_actions.trading_api_uploader import upload_csv_via_trading_api as upload_one_csv  # noqa: PLC0415
     _log("rollback upload 実行...")
     res = upload_one_csv(rollback_csv, dry_run=False)
     _log(f"rollback 結果: success={res.get('success')}, result={res.get('result_text', '')[:80]}")
@@ -301,7 +302,8 @@ def main():
 
     # 4. upload (本番)
     _log("[5/5] upload 実行")
-    from sell_feed_uploader import upload_one_csv  # noqa: PLC0415
+    # HQ 2026-06-03: Trading API 化 (= sell_feed_uploader Selenium 脆弱性回避)
+    from ebay_actions.trading_api_uploader import upload_csv_via_trading_api as upload_one_csv  # noqa: PLC0415
     upload_result = upload_one_csv(csv_path, dry_run=False)
     _log(f"  upload 結果: success={upload_result.get('success')}")
     _log(f"  result_text: {upload_result.get('result_text', '')[:120]}")
@@ -360,7 +362,8 @@ def _process_single_listings(sh, mode: str, target_qty: int, max_skus: int) -> N
     csv_path = generate_listing_revise_csv(deduped, target_qty=target_qty, mode=mode)
     _log(f"  CSV: {csv_path}")
 
-    from sell_feed_uploader import upload_one_csv  # noqa: PLC0415
+    # HQ 2026-06-03: Trading API 化 (= sell_feed_uploader Selenium 脆弱性回避)
+    from ebay_actions.trading_api_uploader import upload_csv_via_trading_api as upload_one_csv  # noqa: PLC0415
     res = upload_one_csv(csv_path, dry_run=False)
     _log(f"  upload: success={res.get('success')} result={res.get('result_text', '')[:80]}")
 

@@ -156,10 +156,10 @@ def generate_heal_csv(target_records: list, target_qty: int, ebay_var: dict,
 
 
 def upload_csv(csv_path: Path) -> dict:
-    """sell_feed_uploader 経由で upload."""
+    """Trading API ReviseInventoryStatus 経由で upload (HQ 2026-06-03 Trading API 化)."""
     sys.path.insert(0, r"C:\dev\iMak_inventory\iMakInventory")
-    from ebay_actions.sell_feed_uploader import upload_one_csv  # noqa: PLC0415
-    return upload_one_csv(csv_path, dry_run=False)
+    from ebay_actions.trading_api_uploader import upload_csv_via_trading_api  # noqa: PLC0415
+    return upload_csv_via_trading_api(csv_path, dry_run=False)
 
 
 def verify_after_upload(report_path_new: Path, target_records: list,

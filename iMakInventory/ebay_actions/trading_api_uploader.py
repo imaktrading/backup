@@ -18,8 +18,79 @@ from pathlib import Path
 
 from ebay_actions.trading_api_client import (
     revise_inventory_status,
+    revise_inventory_status_variation,
     load_access_token,
 )
+
+
+def _parse_variation_specifics(details_str: str) -> dict:
+    """RelationshipDetails 'Sizes=US M(JP L)|Color=BL' → {'Sizes': 'US M(JP L)', 'Color': 'BL'}."""
+    out = {}
+    for part in (details_str or "").split("|"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _parse_csv_rows(csv_path: Path) -> list:
+    """CSV 自動判定: 3 col (single) or 6 col (variation) 両対応.
+
+    Returns: list of dict
+      single: {"kind": "single", "item_id": str, "quantity": int}
+      variation: {"kind": "variation", "item_id": str, "specifics": dict,
+                  "quantity": int, "start_price": float|None}
+    """
+    rows = []
+    parent_iid = None
+    with open(csv_path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        # 6 col CSV か判定 (= Relationship 列 存在)
+        is_variation_csv = "Relationship" in (reader.fieldnames or [])
+        for row in reader:
+            iid = (row.get("ItemID") or "").strip().strip('"')
+            qty_raw = (row.get("*Quantity") or "").strip().strip('"')
+            relationship = (row.get("Relationship") or "").strip().strip('"') if is_variation_csv else ""
+
+            if not is_variation_csv:
+                # 3 col (single listing)
+                if iid:
+                    try:
+                        qty = int(qty_raw or "0")
+                    except (ValueError, TypeError):
+                        qty = 0
+                    rows.append({"kind": "single", "item_id": iid, "quantity": qty})
+                continue
+
+            # 6 col (variation)
+            if iid and not relationship:
+                # 親行: ItemID + variation structure 定義。 親 qty 指定があれば single 扱い
+                parent_iid = iid
+                if qty_raw:
+                    try:
+                        qty = int(qty_raw)
+                    except (ValueError, TypeError):
+                        qty = 0
+                    rows.append({"kind": "single", "item_id": iid, "quantity": qty})
+            elif relationship == "Variation" and parent_iid:
+                # 子行: variation 単位 qty 改訂
+                details = (row.get("RelationshipDetails") or "").strip().strip('"')
+                specifics = _parse_variation_specifics(details)
+                try:
+                    qty = int(qty_raw or "0")
+                except (ValueError, TypeError):
+                    qty = 0
+                price_raw = (row.get("*StartPrice") or "").strip().strip('"')
+                try:
+                    price = float(price_raw) if price_raw else None
+                except (ValueError, TypeError):
+                    price = None
+                if specifics:
+                    rows.append({
+                        "kind": "variation", "item_id": parent_iid,
+                        "specifics": specifics, "quantity": qty, "start_price": price,
+                    })
+    return rows
 
 
 def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
@@ -41,25 +112,18 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
       }
     """
     csv_path = Path(csv_path)
-    rows = []
-    with open(csv_path, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            iid = (row.get("ItemID") or "").strip().strip('"')
-            qty_raw = (row.get("*Quantity") or "0").strip().strip('"')
-            try:
-                qty = int(qty_raw)
-            except (ValueError, TypeError):
-                qty = 0
-            if iid:
-                rows.append({"item_id": iid, "quantity": qty})
+    rows = _parse_csv_rows(csv_path)
 
     if not rows:
         return {"success": True, "total": 0, "ok": 0, "ng": 0,
                 "results": [], "decision_log": None}
 
     if dry_run:
-        print(f"  [dry-run] Trading API revise {len(rows)} 件 / CSV: {csv_path.name}")
+        kinds = {}
+        for r in rows:
+            kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
+        print(f"  [dry-run] Trading API revise {len(rows)} 件 / CSV: {csv_path.name} "
+              f"({kinds})")
         return {"success": True, "total": len(rows), "ok": 0, "ng": 0,
                 "results": rows, "decision_log": None, "dry_run": True}
 
@@ -71,15 +135,20 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
     print(f"  Trading API ReviseInventoryStatus ({len(rows)} 件、 pacing {pacing_sec}s)...",
           flush=True)
     for i, item in enumerate(rows, 1):
-        res = revise_inventory_status(item["item_id"], item["quantity"],
-                                       access_token=token)
+        if item["kind"] == "variation":
+            res = revise_inventory_status_variation(
+                item["item_id"], item["specifics"], item["quantity"],
+                start_price=item.get("start_price"), access_token=token)
+            label = f"iid={item['item_id']} var={item['specifics']} qty={item['quantity']}"
+        else:
+            res = revise_inventory_status(item["item_id"], item["quantity"],
+                                           access_token=token)
+            label = f"iid={item['item_id']} qty={item['quantity']}"
         # eBay Trading API の 「既に取下げ済 / listing 不在」 系は safe failure (= 既に
         # 目的達成、 監視くんとしては 取下げ完了扱い)。 互換性のため sell_feed_uploader
         # 系の code 17 も同列で扱う。
         # - 231 "Item not found" (= ended/削除済 listing に Revise 投げた)
         # - 17 "listing has been deleted or you are not the seller" (= FileExchange 系の旧 code)
-        # - 21916719 "ended" 系 / 21916786 "qty 改訂不可" 系も追加候補だが現状未観測のため
-        #   実例検出時に追加 (= 過度の wildcard 化 回避)
         is_safe_failure = res["error_code"] in ("17", "231")
         success = res["success"] or is_safe_failure
         entry = {
@@ -97,8 +166,8 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             ng_count += 1
         flag = "OK" if success else "NG"
         suffix = " (safe: 既取下げ済)" if is_safe_failure else ""
-        print(f"  [{i}/{len(rows)}] {flag} iid={item['item_id']} qty={item['quantity']} "
-              f"ack={res['ack']} err={res['error_code']}{suffix}", flush=True)
+        print(f"  [{i}/{len(rows)}] {flag} {label} ack={res['ack']} "
+              f"err={res['error_code']}{suffix}", flush=True)
         if i < len(rows):
             time.sleep(pacing_sec)
 
@@ -114,6 +183,21 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
                  "csv_path": str(csv_path)},
                 ensure_ascii=False) + "\n")
 
+    # sell_feed_uploader 互換 field (= 既存 cycle log / inventory_monitor から読まれる)
+    warning_count = sum(1 for r in results if r["ack"] == "Warning")
+    safe_failure_count = sum(1 for r in results if r.get("safe_failure"))
+    action_needed_failure = sum(
+        1 for r in results
+        if r["ack"] == "Failure" and not r.get("safe_failure")
+    )
+    result_text = (f"Warning {warning_count} + safe Failure {safe_failure_count} "
+                   f"+ action-needed Failure {action_needed_failure}")
+    failure_details = [
+        {"item_id": r["item_id"], "error_code": r["error_code"],
+         "error_message": r["error_message"], "safe": r.get("safe_failure", False)}
+        for r in results
+        if r["ack"] == "Failure" or not r["success"]
+    ]
     return {
         "success": ng_count == 0,
         "total": len(rows),
@@ -121,6 +205,19 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
         "ng": ng_count,
         "results": results,
         "decision_log": str(log_path),
+        # sell_feed_uploader 互換
+        "result_text": result_text,
+        "warning": warning_count,
+        "safe_failure": safe_failure_count,
+        "action_needed_failure": action_needed_failure,
+        "failure_details": failure_details,
+        "csv_lines": len(rows),
+        "log_path": str(log_path),
+        # 旧 path で参照されてた field (= 既存 logic 互換)
+        "popup_text": "",
+        "page_url": "",
+        "screenshot": None,
+        "error": None if ng_count == 0 else f"Trading API: {ng_count}/{len(rows)} failures",
     }
 
 

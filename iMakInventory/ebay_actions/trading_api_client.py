@@ -179,6 +179,38 @@ def revise_inventory_status(item_id: str, quantity: int,
     return _call_trading("ReviseInventoryStatus", body, access_token=access_token)
 
 
+def revise_inventory_status_variation(item_id: str,
+                                        variation_specifics: dict,
+                                        quantity: int,
+                                        start_price: Optional[float] = None,
+                                        access_token: Optional[str] = None) -> dict:
+    """variation 単位の qty 改訂 (= 公式監視くん用、 variation listing 対応).
+
+    variation_specifics: {"Sizes": "US M(JP L)", "Color": "BL"} 等の identity dict。
+    start_price 指定時は price も同時改訂 (= eBay 仕様: variation level)。
+    """
+    spec_xml = ""
+    for name, value in variation_specifics.items():
+        # XML escape 最低限 (= 既存 token は ASCII 想定、 「<>&」 のみ手動 escape)
+        n = (str(name).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        v = (str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        spec_xml += f"<NameValueList><Name>{n}</Name><Value>{v}</Value></NameValueList>"
+    price_xml = (f"<StartPrice>{start_price}</StartPrice>"
+                 if start_price is not None else "")
+    body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        '<InventoryStatus>'
+        f'<ItemID>{item_id}</ItemID>'
+        f'<VariationSpecifics>{spec_xml}</VariationSpecifics>'
+        f'<Quantity>{quantity}</Quantity>'
+        f'{price_xml}'
+        '</InventoryStatus>'
+        '</ReviseInventoryStatusRequest>'
+    )
+    return _call_trading("ReviseInventoryStatus", body, access_token=access_token)
+
+
 def end_fixed_price_item(item_id: str, ending_reason: str = "NotAvailable",
                           access_token: Optional[str] = None) -> dict:
     """listing 終了 (qty=0 保持と違い、 active から完全消失)。
