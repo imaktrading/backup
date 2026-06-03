@@ -204,3 +204,92 @@ upload attempt 2/3: ✅ 成功
 ### 次のアクション
 
 - なし (現行ロジック維持)。次回 cycle 後に再突合して傾向継続確認
+
+
+## 2026-06-03 — Trading API 統一 + amazon scraper 構造修正
+
+5 commit 集約 (d23ad99 / 7b20adc / 2f5a268 / 7663102 / 4351d8e)。 朝の dry-run で
+LOW amazon 152 件 偽 OOS が判明 → 順次潰し込み + HQ § 統一指示で監視くん全体を
+Selenium FileExchange UI から Trading API direct に統一。
+
+### 決定
+
+- **(d23ad99) amazon scraper fail-closed 致命バグ 2 重 safety net**:
+  scrape 失敗 / no_signal → False=取下げ に倒れる構造 (= LOW 152 件 偽 OOS の真因) を
+  「raw に in_stock 無し / None → 強制 skip」 + 「Amazon driver 起動失敗 → cycle 即 abort」
+  の 2 重 safety net で 構造的再発防止 (Takaaki さん § dont_declare_complete_after_one_cycle)
+- **(7b20adc) HIGH/LOW 監視くん の取下げ path = Trading API 統一**:
+  sell_feed_uploader (Selenium FileExchange UI) は chromedriver DevTools 2GB
+  JSONDecodeError 等で 13:30 cycle 6 件 upload 失敗 = 構造的脆弱性。
+  ReviseInventoryStatus direct call に切替、 sell_feed_uploader は緊急時 fallback 残置
+- **(2f5a268) 公式監視くん (inventory_monitor) も同じく Trading API 化**:
+  HQ § Trading API 統一を scope 拡張。 variation listing 対応のため
+  `revise_inventory_status_variation` (= 当初 ReviseInventoryStatus 経路で実装) +
+  CSV 自動判定 (3 col single / 6 col variation) を追加
+- **(7663102) variation revise は ReviseFixedPriceItem の `<Variations>` 構造**:
+  ReviseInventoryStatus は SKU 文字列ベースで VariationSpecifics 不可
+  (= err 21916736 "Cannot revise a Multi-SKU item when ItemID alone is supplied")。
+  ReviseFixedPriceItem の `<Item><Variations><Variation>` 経路 に修正
+- **(4351d8e) 巡回レポート 集計 + DNS 自動 retry**:
+  Trading API stdout が旧 sell_feed_uploader 文言と integrated せず
+  「variation Revise: 0 件 なし/失敗」 誤表示 (= 実際は eBay 上 反映済)。
+  result_text に Success / Transient 追加 + CSV 行数 + ok/ng 件数 明示出力 +
+  run_daily 集計 logic 拡張 + DNS/Timeout 系は 同 cycle 内 1 回 自動 retry
+- **(運用) cron 全 3 task Enable + LOW スプシ自動化 復活**:
+  iMakInventory_Cycle / Cycle_BothDaily0930 / Monitor_Daily を Enable。
+  memory `low_sheet_manual_only.md` は事実誤認のため削除
+- **(運用) スプシ D=○ 一括同期 291 件 (片方向)**:
+  D=空欄 + eBay qty=0/ended の不整合を D=○ 化 (= HIGH 79 + LOW 212)。
+  逆方向 audit (D=○ + eBay active qty>0) は DNS fail で pending
+- **(運用) ユーザー目視 force_revise 18 件**:
+  G-SHOCK 第三者 FBA 11 件 + HIGH mercari/snkrdunk 7 件 = 計 18 件 qty=0 化 (HQ upload)
+- **(運用) Profile 復旧 (Amazon + eBay)**:
+  Amazon 7.7GB / eBay 2.34GB 巨大化で driver 起動不能。 rename 退避 + 新 profile +
+  手動 re-login で復旧。 旧 profile は `*.broken_20260603` に保持 (rollback 用)
+
+### 変更
+
+- `scrapers/amazon_scraper.py:62-89,100-138` (= 販売元 identity gate + fail-closed)
+- `monitor_listings.py:141-160,378-410` (= None ハンドリング + driver 起動 retry/abort)
+- `ebay_actions/trading_api_client.py` 新規 (= self-contained、 token + revise + variation + GetSellerList)
+- `ebay_actions/trading_api_uploader.py` 新規 (= CSV 自動判定 + DNS retry + result_text 拡張)
+- `run_cycle.py:51,303-321` (= _phase_upload を Trading API に切替、 sell_feed_uploader は fallback 残置)
+- `../iMakeBayAPI/inventory_monitor/auto_qty_zero.py:187,304-309` (= upload_one_csv → trading_api_uploader、 件数 log 追加)
+- `../iMakeBayAPI/inventory_monitor/audit_and_heal.py:158-162` (= upload_csv wrapper を Trading API 化)
+- `../iMakeBayAPI/inventory_monitor/run_daily.py:73-118,160-185` (= _parse_qty_output + _detail() helper)
+- `tests/test_amazon_stock_detection.py:117-148,149-210` (= 販売元 gate 5 検体 + fail-closed 3 件)
+- `tests/test_trading_api_client.py` 新規 (= 11 件: Ack 解析 / IAF expired / CSV parse / DNS retry / result_text format)
+- スプシ HIGH 79 + LOW 212 行 D=○ batch_update (= 永続)
+- cron: iMakInventory_Cycle / Cycle_BothDaily0930 / Monitor_Daily Enable
+
+### 検証
+
+- amazon fail-closed bug fix:
+  - HIGH/LOW dry-run pre-fix: LOW newly_sold 152 件 (= 主力 G-SHOCK 多数の偽 OOS)
+  - post-fix LOW 再 scan: **newly_sold 152→7 (= -95%)** / 判定不能 (skip) 4/603 = 0.7% (= mass-skip 否)
+  - 在庫あり 4 ASIN (B0BQHK77MZ/B0CQP1J8MD/B07VHSZ17W/B0CLR9NNJL) GetItem で in_stock=True ¥12K-32K 確認
+- token refresh:
+  - mtime 6/2 17:01:51 (HQ findings の 21h 停止) → 6/3 14:56:20 (= IAF expired 自動 retry で 更新)
+- HIGH/LOW Trading API 化 E2E:
+  - 13:30 cycle 失敗 6 件 CSV を ReviseInventoryStatus で再実行 → 5/6 ack=Warning redundant + 1/6 safe failure 231 = 全 OK
+  - GetItem で status=Active available_qty=0 確認
+- 公式監視くん variation E2E:
+  - 16:42 cycle 全 31 件 失敗 (err 21916736) → 17:34 retry script で 28 件 即 OK + DNS fail 3 件 個別 retry で 全 OK = **31/31 ack=Success**
+  - eBay 実機 GetItem 6 検体 (取下げ 4 + 補充 2): variation 単位 qty 全件 期待通り (`Sizes` 単軸 / `Sizes × Color` 多軸 両方)
+  - 17:34 単独実行 5/5 ack=Success + result_text "Success 5 + Warning 0 + Transient 0" 出力確認
+- 回帰テスト: pre-commit 全 115 件 / commit 別 検体 17→20 件 / Trading API client 6→11 件 全 pass
+- スプシ D=○ 同期: ws.batch_update 2 call (HIGH 79 + LOW 212) で 「✓ done」 log 確認
+- 18 件 force_revise: HQ upload で Warning 5 + safe Failure 1 + Warning 7 (= 朝 G-SHOCK 11 + HIGH 7) 確認
+
+### 次のアクション
+
+- **明朝 8:00 公式 cycle (= 自動)**: 集計表示 「variation Revise: N 件 (成功) (ok=N / ng=M)」
+  へ format 整合確認 + DNS retry 自動発火確認 (= cycle 内 1 件でも fail があれば log で見える)
+- **17:30 HIGH cycle (= 自動)**: Trading API path 経由 で qty=0 化が走るか確認、
+  巡回レポート format 確認
+- **逆方向 audit (= D=○ + eBay active qty>0)** pending: DNS resolver fail で延期、
+  `c:/tmp/reverse_audit.py` script 残置、 次回 DNS 復旧後実行
+- **HQ 依頼 2 フィギュア棚卸し** pending: amazon scraper bug fix 終結後着手、
+  販売元抽出 logic 再利用 (= commit 24a6699 朝の販売元 identity gate + d23ad99 の `_detect_seller`)
+- **process 反省**: 7663102 (= variation API 間違い) は memory `reuse_existing_proven_solution.md` 違反 = リバイス君の sell_feed_uploader 経由 variation_upload.py を 先に確認していれば API 仕様検討の trigger になっていた。 次回 worktree 跨ぎ logic 実装時は **既存 worktree で 同種実装の有無を 必ず先に grep** する
+
