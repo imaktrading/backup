@@ -1,269 +1,262 @@
 #!/usr/bin/env python3
 """
-出品物フルファネル分析 (iMakHQ / 出品くんドメイン)
+出品物フルファネル分析 (iMakHQ / 出品くんドメイン) — Seller Hub レポート版
 
-データ源 = 出品くん「今、見る」が保存する Seller Hub snapshot
-  (C:/dev/iMak_data/seller_hub/snapshot_active_all_*.csv)。
-  → 全4サイト(US/EU/UK/AU)・views/watchers/quantity/price/listed_date を listing 単位で網羅済。
-  Selenium scrape 由来なので eBay API クォータ不要。「今見る」と同じ母集団を保証する。
+eBay API を一切使わず、Seller Hub から DL する 4 レポートだけでファネルを組む。
+(Analytics getTrafficReport の 100/日 クォータ問題を完全回避。bulk は eBay 公式も
+ レポート DL を想定している = これが正規ルート)。
 
-ここに分析層を乗せて「今見る」超えにする:
-  + getOrders(90d) で実売を join (snapshot に無い「売れたか」を補完)
-  + 在庫(qty=0)を分離 → 「今見る」の views=0 死蔵に混入していた在庫切れ品を除外
-  + サイト別 / 在庫あり限定の actionable バケツ
+データ源 (--data-dir 配下、ファイル名 glob で自動検出):
+  1. all-active   : eBay-all-active-listings-report-*.csv  … 全4サイト母集団 (qty/watchers/sold/price/site)
+  2. quality      : Listing quality report*.xlsx            … US per-listing 深いファネル
+                    (Daily impressions / CTR / Sales conversion / 適正価格 / item specifics 欠落 / 写真数 …)
+  3. unsold       : eBay-unsold-listings-report-*.csv        … 売れ残り (Sold status / Relist status)
+  4. orders       : *orders-report-*.csv                     … 実売 (Item Number 別に集計)
 
-⚠️ Analytics の impressions/CTR/転換率は別レイヤ(US-only/クォータ)。本スクリプトは触れない。
+「今見る」snapshot より上位互換: impressions/CTR/転換率/適正価格 を per-listing で持つ。
+これにより「views=0」の症状を「検索に出てない/クリックされない/買われない」の3原因に分解できる。
 
 切り口 (在庫あり=qty!=0 に限定):
-  1. 死蔵 DEAD     : views==0 → 一度も見られていない (在庫切れは除外済の真の死蔵)
-  2. 見られて売れない STALE : views多いが 90d無販売 → 価格/競合/説明
-  3. ウォッチ無販売 WATCHED : watchers付くのに 90d無販売 → あと一押し
-  + 購買意欲 BUY_INTENT     : watch/view 比率上位 (「今見る」再現)
+  - NO_SEARCH  : impressions ほぼ0 → 検索に出ていない (キーワード/カテゴリ)
+  - NO_CLICK   : impr有るが CTR下位 → タイトル/サムネ/価格
+  - NO_CONVERT : CTR有るが無販売   → 価格(適正価格比)/説明
+  - OVERPRICED : 価格 > eBay trending price → 値付け
+  (LQR 非対象=非US等は views/watchers ベースの簡易判定 DEAD_SIMPLE)
 
 使い方:
-  python listing_funnel.py                # 最新 snapshot + 実売、コンソール + CSV
-  python listing_funnel.py --no-sales     # snapshot のみ (API 一切なし)
-  python listing_funnel.py --site US      # 特定サイトに絞る
+  python listing_funnel.py                          # 既定 data-dir
+  python listing_funnel.py --data-dir "C:/path/to/reports"
 """
 import argparse
-import base64
 import csv
 import datetime
 import glob
-import json
 import os
+import statistics
 import sys
-import time
-
-import requests
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
-EBAY_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakeBayAPI"))
-SELL_TOKEN_FILE = os.path.join(EBAY_DIR, "ebay_oauth_token_sell.json")
-KEYS_FILE = os.path.join(EBAY_DIR, "ebay keys.txt")
-SNAPSHOT_DIR = r"C:\dev\iMak_data\seller_hub"
+DEFAULT_DATA_DIR = r"C:\dev\iMak_data\seller_hub\reports"
+FALLBACK_DATA_DIR = r"C:\Users\imax2\OneDrive\デスクトップ\新しいフォルダー (2)"
 OUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
 
-OAUTH_TOKEN = "https://api.ebay.com/identity/v1/oauth2/token"
-ORDERS_URL = "https://api.ebay.com/sell/fulfillment/v1/order"
-MARKETPLACE = "EBAY_US"
-SCOPES = ["https://api.ebay.com/oauth/api_scope",
-          "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
-          "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly"]
-
-TH_STALE_VIEWS = 50   # 累計 view がこれ以上 = 十分見られている
-TH_WATCH = 3          # watchers がこれ以上 = 購買シグナル
+# 分類しきい値
+TH_IMPR_NONE = 3        # 1日あたり impression がこれ以下 = 検索に出ていない
+TH_IMPR_SHOWN = 8       # これ以上 impression があれば「露出はある」
 
 
-def _req(method, url, **kw):
-    kw.setdefault("timeout", 90)
-    last = None
-    for _ in range(5):
-        try:
-            return method(url, **kw)
-        except requests.exceptions.ConnectionError as e:
-            last = e
-            time.sleep(2)
-    raise last
-
-
-def _int(v):
+def _f(v):
     try:
-        return int(str(v).strip().replace(",", ""))
-    except (ValueError, AttributeError):
-        return 0
-
-
-def _float(v):
-    try:
-        return float(str(v).strip().replace(",", ""))
+        return float(str(v).strip().replace(",", "").replace("$", ""))
     except (ValueError, AttributeError):
         return 0.0
 
 
-def latest_snapshot():
-    files = glob.glob(os.path.join(SNAPSHOT_DIR, "snapshot_active_all_*.csv"))
-    if not files:
-        sys.exit(f"snapshot がありません: {SNAPSHOT_DIR}\n出品くん『今、見る』を実行して snapshot を作ってください。")
-    return max(files, key=os.path.getmtime)
+def _i(v):
+    try:
+        return int(float(str(v).strip().replace(",", "")))
+    except (ValueError, AttributeError):
+        return 0
 
 
-def load_snapshot(path, site=None):
-    """Seller Hub snapshot → listing rows。site 指定で絞り込み。"""
-    rows = []
+def find_file(data_dir, pattern):
+    hits = glob.glob(os.path.join(data_dir, pattern))
+    return max(hits, key=os.path.getmtime) if hits else None
+
+
+def load_active(path):
+    """all-active CSV → {item_id: {...}}。全4サイト母集団。"""
+    out = {}
     with open(path, encoding="utf-8-sig", newline="") as f:
         for r in csv.DictReader(f):
-            s = (r.get("listing_site") or "").strip()
-            if site and s.upper() != site.upper():
+            iid = (r.get("Item number") or "").strip().strip('"')
+            if not iid:
                 continue
-            qa = (r.get("quantity_available") or "").strip()
-            rows.append({
-                "item_id": (r.get("item_id") or "").strip(),
-                "title": (r.get("title") or "").strip(),
-                "price": _float(r.get("price_usd")),
-                "site": s,
-                "views": _int(r.get("views")),
-                "watch": _int(r.get("watchers")),
-                "qty": _int(qa) if qa != "" else -1,
-                "listed": (r.get("listed_date") or "").strip(),
-            })
-    return rows
+            out[iid] = {
+                "item_id": iid,
+                "title": (r.get("Title") or "").strip(),
+                "sku": (r.get("Custom label (SKU)") or "").strip(),
+                "site": (r.get("Listing site") or "").strip(),
+                "qty": _i(r.get("Available quantity")),
+                "sold_qty": _i(r.get("Sold quantity")),
+                "watch": _i(r.get("Watchers")),
+                "price": _f(r.get("Current price") or r.get("Start price")),
+                "category": (r.get("eBay category 1 name") or "").strip(),
+                "start": (r.get("Start date") or "").strip(),
+            }
+    return out
 
 
-def get_access_token():
-    if not os.path.exists(SELL_TOKEN_FILE):
-        sys.exit(f"sell token がありません: {SELL_TOKEN_FILE}")
-    tok = json.load(open(SELL_TOKEN_FILE, encoding="utf-8"))
-    keys = {}
-    with open(KEYS_FILE, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            if "=" in line:
-                k, v = line.split("=", 1)
-                keys[k.strip()] = v.strip()
-    auth = base64.b64encode(f"{keys.get('AppID')}:{keys.get('AppSecret')}".encode()).decode()
-    resp = _req(requests.post, OAUTH_TOKEN, timeout=20,
-                headers={"Content-Type": "application/x-www-form-urlencoded", "Authorization": f"Basic {auth}"},
-                data={"grant_type": "refresh_token", "refresh_token": tok["refresh_token"], "scope": " ".join(SCOPES)})
-    if resp.status_code != 200:
-        sys.exit(f"token refresh 失敗: {resp.status_code} {resp.text}")
-    tok["access_token"] = resp.json()["access_token"]
-    with open(SELL_TOKEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(tok, f, ensure_ascii=False, indent=2)
-    return tok["access_token"]
-
-
-def fetch_sales(token, days):
-    """getOrders (90d) → {item_id: {sold_qty, revenue}} (legacyItemId で集計)。"""
-    H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-         "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE}
-    start = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    sales, offset = {}, 0
-    while True:
-        r = _req(requests.get, ORDERS_URL, headers=H,
-                 params={"filter": f"creationdate:[{start}..]", "limit": "200", "offset": str(offset)})
-        if r.status_code != 200:
-            raise RuntimeError(f"getOrders 失敗: {r.status_code} {r.text[:200]}")
-        j = r.json()
-        for o in j.get("orders", []):
-            for li in o.get("lineItems", []):
-                iid = str(li.get("legacyItemId") or "")
-                if not iid:
-                    continue
-                cost = (li.get("lineItemCost") or {}).get("value") or 0
-                s = sales.setdefault(iid, {"sold_qty": 0, "revenue": 0.0})
-                s["sold_qty"] += _int(li.get("quantity"))
-                s["revenue"] += float(cost)
-        total = j.get("total", 0)
-        offset += 200
-        if offset >= total:
-            break
-    return sales
-
-
-def _age_days(listed):
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d"):
-        try:
-            d = datetime.datetime.strptime(listed[:10], fmt).date()
-            return (datetime.date.today() - d).days
-        except (ValueError, TypeError):
+def load_quality(path):
+    """Listing quality report xlsx の全カテゴリシートを集約 → {item_id: {funnel...}} (US)。"""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    skip = {"Summary", "Guide", "Google Shopping Rejections"}
+    want = {
+        "Item Id": "item_id", "Daily impressions per listing": "impr",
+        "Click-through rate": "ctr", "Sales conversion rate": "conv",
+        "eBay trending price": "trend_price", "Number of photos": "photos",
+        "Number of keywords in title": "keywords", "Sales count in last 90 days": "sales90",
+        "Quantity available": "qty_q", "Item age in days": "age_days",
+    }
+    out = {}
+    for sn in wb.sheetnames:
+        if sn in skip:
             continue
-    return 0
+        ws = wb[sn]
+        hdr_row, cols = None, {}
+        for i, row in enumerate(ws.iter_rows(min_row=1, max_row=60, values_only=True)):
+            if any(c == "Item title" for c in row if isinstance(c, str)):
+                hdr_row = i + 1
+                cols = {(c.strip() if isinstance(c, str) else c): j for j, c in enumerate(row) if c}
+                break
+        if not hdr_row or "Item Id" not in cols:
+            continue
+        # 'Sales count in last N days' は日数が可変 → 部分一致で拾う
+        sales_col = next((j for k, j in cols.items() if isinstance(k, str) and k.startswith("Sales count")), None)
+        for row in ws.iter_rows(min_row=hdr_row + 1, max_row=ws.max_row, values_only=True):
+            iid = row[cols["Item Id"]] if cols["Item Id"] < len(row) else None
+            if iid is None or not str(iid).strip():
+                continue
+            iid = str(iid).strip().strip('"')
+            def g(key):
+                j = cols.get(key)
+                return row[j] if j is not None and j < len(row) else None
+            out[iid] = {
+                "impr": _f(g("Daily impressions per listing")),
+                "ctr": _f(g("Click-through rate")),
+                "conv_raw": g("Sales conversion rate"),
+                "trend_price": _f(g("eBay trending price")),
+                "photos": _f(g("Number of photos")),
+                "keywords": _f(g("Number of keywords in title")),
+                "sales90": _i(row[sales_col]) if sales_col is not None and sales_col < len(row) else 0,
+                "category": sn,
+            }
+    return out
+
+
+def load_unsold(path):
+    """unsold CSV → {item_id: {sold_status, relist_status}}。"""
+    out = {}
+    if not path:
+        return out
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            iid = (r.get("Item number") or "").strip().strip('"')
+            if iid:
+                out[iid] = {"sold_status": (r.get("Sold status") or "").strip(),
+                            "relist_status": (r.get("Relist status") or "").strip()}
+    return out
 
 
 def classify(rows):
-    """在庫(qty)を踏まえ分類。qty==0(在庫切れ)は OUT_OF_STOCK に隔離 (eBay が検索非表示=views0が正常)。
-    改善対象は在庫あり(qty!=0)に限定。qty==-1(不明)は安全側で在庫あり扱い。"""
+    """在庫(qty!=0)限定でファネル段階別に分類。LQR データ有り=詳細、無し=簡易。"""
     in_stock = [r for r in rows if r["qty"] != 0]
     oos = [r for r in rows if r["qty"] == 0]
+    has_lqr = [r for r in in_stock if r.get("has_lqr")]
 
-    dead, stale, watched = [], [], []
+    # CTR 下位四分位 (impression がある listing で算出)
+    ctrs = sorted([r["ctr"] for r in has_lqr if r["impr"] >= TH_IMPR_SHOWN])
+    ctr_q1 = statistics.quantiles(ctrs, n=4)[0] if len(ctrs) >= 4 else (ctrs[0] if ctrs else 0)
+
+    no_search, no_click, no_convert, overpriced, dead_simple = [], [], [], [], []
     for r in in_stock:
-        sold = r.get("sold_qty", 0)
-        if r["views"] == 0:
-            dead.append(r)
-        if sold == 0 and r["views"] >= TH_STALE_VIEWS:
-            stale.append(r)
-        if sold == 0 and r["watch"] >= TH_WATCH:
-            watched.append(r)
-    dead.sort(key=lambda x: -x["age_days"])       # 古い死蔵ほど深刻
-    stale.sort(key=lambda x: -x["views"])
-    watched.sort(key=lambda x: -x["watch"])
-    # 購買意欲: views>=10 で watch/view 比率上位
-    intent = [r for r in in_stock if r["views"] >= 10 and r["watch"] > 0]
-    intent.sort(key=lambda x: x["watch"] / x["views"], reverse=True)
-    return {"DEAD": dead, "STALE": stale, "WATCHED": watched, "BUY_INTENT": intent, "OUT_OF_STOCK": oos}
+        sold = r["sold_qty"] + r.get("sales90", 0)
+        if r.get("has_lqr"):
+            if r["impr"] <= TH_IMPR_NONE:
+                no_search.append(r)
+            elif r["impr"] >= TH_IMPR_SHOWN and r["ctr"] <= ctr_q1:
+                no_click.append(r)
+            elif sold == 0 and r["ctr"] > ctr_q1:
+                no_convert.append(r)
+            if r["trend_price"] > 0 and r["price"] > r["trend_price"] * 1.05:
+                overpriced.append(r)
+        else:
+            # LQR 非対象 (非US等): views 系が無いので watch/sold で簡易判定
+            if sold == 0 and r["watch"] == 0:
+                dead_simple.append(r)
+    no_search.sort(key=lambda x: -x.get("age_days", 0))
+    no_click.sort(key=lambda x: x["ctr"])
+    no_convert.sort(key=lambda x: -x["impr"])
+    overpriced.sort(key=lambda x: -(x["price"] - x["trend_price"]))
+    return {"NO_SEARCH": no_search, "NO_CLICK": no_click, "NO_CONVERT": no_convert,
+            "OVERPRICED": overpriced, "DEAD_SIMPLE": dead_simple, "OUT_OF_STOCK": oos, "ctr_q1": ctr_q1}
 
 
-def _section(title, note, items, limit=20):
-    print(f"\n=== {title} ({len(items)}件) ===")
-    print(f"   {note}")
+def _sec(title, note, items, limit=20):
+    print(f"\n=== {title} ({len(items)}件) ===\n   {note}")
     if not items:
         print("   (該当なし)")
         return
-    print(f"   {'item_id':<13}{'site':>4} {'views':>6} {'watch':>5} {'age日':>5} {'sold':>4} {'$':>6}  title")
+    print(f"   {'item_id':<13}{'site':>4}{'impr/d':>7}{'CTR%':>6}{'sold':>5}{'$':>7}{'trend':>7}  title")
     for r in items[:limit]:
-        print(f"   {r['item_id']:<13}{r['site']:>4} {r['views']:>6} {r['watch']:>5} {r['age_days']:>5} "
-              f"{r.get('sold_qty',0):>4} {r['price']:>6.0f}  {r['title'][:40]}")
+        print(f"   {r['item_id']:<13}{r['site']:>4}{r['impr']:>7.0f}{r['ctr']*100:>6.2f}"
+              f"{r['sold_qty']+r.get('sales90',0):>5}{r['price']:>7.0f}{r['trend_price']:>7.0f}  {r['title'][:36]}")
     if len(items) > limit:
         print(f"   ... 他 {len(items) - limit} 件 (CSV 参照)")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--no-sales", action="store_true", help="実売 join をスキップ (API 一切なし)")
-    ap.add_argument("--sales-days", type=int, default=90)
-    ap.add_argument("--site", help="サイト絞り込み (US/EU/UK/AU)")
+    ap.add_argument("--data-dir", default=None, help="4レポートを置いたフォルダ")
     ap.add_argument("--no-csv", action="store_true")
     args = ap.parse_args()
 
-    snap = latest_snapshot()
-    rows = load_snapshot(snap, site=args.site)
-    print(f"snapshot: {os.path.basename(snap)}  listing={len(rows)}件" + (f" (site={args.site})" if args.site else ""))
+    data_dir = args.data_dir or (DEFAULT_DATA_DIR if os.path.isdir(DEFAULT_DATA_DIR)
+                                 and glob.glob(os.path.join(DEFAULT_DATA_DIR, "*active*")) else FALLBACK_DATA_DIR)
+    if not os.path.isdir(data_dir):
+        sys.exit(f"data-dir が見つかりません: {data_dir}\n--data-dir で4レポートのフォルダを指定してください。")
 
-    sales_ok = False
-    if not args.no_sales:
-        try:
-            sales = fetch_sales(get_access_token(), args.sales_days)
-            sales_ok = True
-            print(f"実売 join: getOrders {args.sales_days}d → {sum(s['sold_qty'] for s in sales.values())}件 / {len(sales)} listing")
-        except Exception as e:
-            sales = {}
-            print(f"⚠️ 実売取得失敗 ({e}) → sold=0 扱いで継続 (「無販売」系は参考値)")
-    else:
-        sales = {}
+    f_active = find_file(data_dir, "*all-active-listings*.csv")
+    f_quality = find_file(data_dir, "Listing quality report*.xlsx")
+    f_unsold = find_file(data_dir, "*unsold-listings*.csv")
+    if not f_active:
+        sys.exit(f"all-active CSV が {data_dir} に見つかりません。")
+    print(f"data-dir: {data_dir}")
+    print(f"  active : {os.path.basename(f_active)}")
+    print(f"  quality: {os.path.basename(f_quality) if f_quality else '(なし=簡易判定)'}")
+    print(f"  unsold : {os.path.basename(f_unsold) if f_unsold else '(なし)'}")
 
-    for r in rows:
-        s = sales.get(r["item_id"], {"sold_qty": 0, "revenue": 0.0})
-        r["sold_qty"] = s["sold_qty"]
-        r["revenue"] = round(s["revenue"], 2)
-        r["age_days"] = _age_days(r["listed"])
+    active = load_active(f_active)
+    quality = load_quality(f_quality) if f_quality else {}
+    unsold = load_unsold(f_unsold)
 
-    # サマリー
+    rows = []
+    for iid, a in active.items():
+        q = quality.get(iid)
+        r = dict(a)
+        r["has_lqr"] = bool(q)
+        r["impr"] = q["impr"] if q else 0.0
+        r["ctr"] = q["ctr"] if q else 0.0
+        r["trend_price"] = q["trend_price"] if q else 0.0
+        r["sales90"] = q["sales90"] if q else 0
+        r["age_days"] = q.get("age_days", 0) if q else 0
+        r["photos"] = q["photos"] if q else 0
+        r["keywords"] = q["keywords"] if q else 0
+        u = unsold.get(iid, {})
+        r["relist_status"] = u.get("relist_status", "")
+        rows.append(r)
+
     from collections import Counter
     site_c = Counter(r["site"] for r in rows)
     oos = sum(1 for r in rows if r["qty"] == 0)
     in_stock = [r for r in rows if r["qty"] != 0]
-    instock_v0 = sum(1 for r in in_stock if r["views"] == 0)
+    lqr_n = sum(1 for r in rows if r["has_lqr"])
     n = max(len(rows), 1)
-    print(f"\n出品物フルファネル分析 (snapshot ベース)")
+    print(f"\n出品物フルファネル分析 (Seller Hub レポート版・API不使用)")
     print(f"   listing={len(rows)}  サイト別={dict(site_c)}")
-    print(f"   在庫切れqty0={oos}件({oos*100//n}%)  在庫あり={len(in_stock)}件")
-    print(f"   ※在庫切れは検索非表示=views0が正常 (改善対象外)。下記は在庫あり限定。")
-    print(f"   在庫ありで views=0 = {instock_v0}件 = 在庫あるのに一度も見られていない真の死蔵")
-    if sales_ok:
-        print(f"   実売(90d)= {sum(r['sold_qty'] for r in rows)}件")
+    print(f"   在庫切れqty0={oos}件({oos*100//n}%)  在庫あり={len(in_stock)}件  LQR深掘り対象(US)={lqr_n}件")
 
     c = classify(rows)
-    sale_note = "" if sales_ok else " ※実売未取得につき参考値"
-    _section("① 死蔵 DEAD (在庫あり)", "在庫あり & views==0 → 在庫あるのに一度も見られていない (古い順)", c["DEAD"])
-    _section("② 見られて売れない STALE", f"在庫あり & 累計views>={TH_STALE_VIEWS} & 90d無販売 → 価格/競合{sale_note}", c["STALE"])
-    _section("③ ウォッチ無販売 WATCHED", f"在庫あり & watchers>={TH_WATCH} & 90d無販売 → あと一押し{sale_note}", c["WATCHED"])
-    _section("④ 購買意欲 BUY_INTENT", "在庫あり & views>=10 & watch/view比率上位 → 売れる寸前(「今見る」再現)", c["BUY_INTENT"], limit=10)
-    print(f"\n(参考) 在庫切れ OUT_OF_STOCK = {len(c['OUT_OF_STOCK'])}件 — 仕入れ不可で取下げ済 (改善対象外)")
+    _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & impr/日<={TH_IMPR_NONE} → キーワード/カテゴリ不適合 (古い順)", c["NO_SEARCH"])
+    _sec("② クリックされない NO_CLICK", f"在庫あり & impr/日>={TH_IMPR_SHOWN} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
+    _sec("③ 買われない NO_CONVERT", "在庫あり & CTR有 & 無販売 → 価格(適正価格比)/説明", c["NO_CONVERT"])
+    _sec("④ 高すぎ OVERPRICED", "在庫あり & 価格 > eBay適正価格×1.05 → 値下げ余地 (差額大きい順)", c["OVERPRICED"])
+    print(f"\n(参考) DEAD_SIMPLE(非US等・view無): {len(c['DEAD_SIMPLE'])}件 / OUT_OF_STOCK: {len(c['OUT_OF_STOCK'])}件")
 
     if not args.no_csv:
         os.makedirs(OUT_DIR, exist_ok=True)
@@ -271,16 +264,16 @@ def main():
         for r in rows:
             tags = []
             if r["qty"] == 0: tags.append("OUT_OF_STOCK")
-            if r in c["DEAD"]: tags.append("DEAD")
-            if r in c["STALE"]: tags.append("STALE")
-            if r in c["WATCHED"]: tags.append("WATCHED")
+            for k in ("NO_SEARCH", "NO_CLICK", "NO_CONVERT", "OVERPRICED", "DEAD_SIMPLE"):
+                if r in c[k]: tags.append(k)
             r["flags"] = "|".join(tags)
+        fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",
+                  "sales90", "watch", "impr", "ctr", "photos", "keywords", "has_lqr", "relist_status", "flags"]
         with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["item_id", "title", "site", "price", "qty", "views", "watch",
-                                              "listed", "age_days", "sold_qty", "revenue", "flags"])
+            w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()
-            for r in sorted(rows, key=lambda x: (-x["views"], -x["watch"])):
-                w.writerow({k: r.get(k) for k in w.fieldnames})
+            for r in sorted(rows, key=lambda x: (-x["impr"], -x["watch"])):
+                w.writerow(r)
         print(f"CSV 出力: {path}")
 
 
