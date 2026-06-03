@@ -48,7 +48,8 @@ from sheet_updater import (  # noqa: E402
     get_listings_worksheet, read_listings_rows, LISTINGS_GID,
 )
 from ebay_actions.revise_csv_generator import run as run_revise_csv  # noqa: E402
-from ebay_actions.sell_feed_uploader import upload_one_csv  # noqa: E402
+from ebay_actions.sell_feed_uploader import upload_one_csv  # noqa: E402 (= legacy fallback、 緊急時 手動 path)
+from ebay_actions.trading_api_uploader import upload_csv_via_trading_api  # noqa: E402
 from upload_health import record_upload_result  # noqa: E402
 from ebay_actions.listing_verifier import verify_listings  # noqa: E402
 from audit import sample_and_append as audit_sample_and_append  # noqa: E402
@@ -301,13 +302,25 @@ def _phase_audit_sample(
 
 
 def _phase_upload(csv_path_str: str, test_mode: bool) -> dict:
-    """sell_feed_uploader.upload_one_csv で eBay FileExchange へ upload."""
-    _log(f"=== Phase 3/3: sell_feed_uploader.upload (csv={csv_path_str}) ===", test_mode)
+    """Trading API ReviseInventoryStatus で qty 改訂 (= HQ 2026-06-03 指示).
+
+    旧 path (= sell_feed_uploader / Selenium FileExchange UI) は緊急時 手動 fallback
+    として import は残すが、 cycle phase からは直接呼ばない。
+    Selenium path の脆さ (chromedriver DevTools 2GB JSONDecodeError 等) を回避し、
+    OAuth token refresh + Trading API direct call で完結。
+    """
+    _log(f"=== Phase 3/3: trading_api_uploader.upload (csv={csv_path_str}) ===", test_mode)
     try:
-        result = upload_one_csv(Path(csv_path_str), dry_run=False)
+        result = upload_csv_via_trading_api(Path(csv_path_str), dry_run=False)
+        # 既存 cycle log schema 互換: success + error フィールド
+        if not result.get("success"):
+            result["error"] = (
+                f"Trading API revise: total={result.get('total')} "
+                f"ok={result.get('ok')} ng={result.get('ng')}"
+            )
         return result
     except Exception as e:
-        _log(f"  [NG] upload 例外: {type(e).__name__}: {e}", test_mode)
+        _log(f"  [NG] Trading API upload 例外: {type(e).__name__}: {e}", test_mode)
         return {"error": f"{type(e).__name__}: {e}", "success": False}
 
 
