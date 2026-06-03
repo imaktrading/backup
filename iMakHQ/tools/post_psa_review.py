@@ -573,8 +573,10 @@ def _record_verified(results: list[dict]) -> None:
         if not cert:
             continue
         choice = r.get("choice", "")
-        if choice in ("OK", "CHOSEN", "NONE"):
-            pid = r.get("selected_pid") if choice == "CHOSEN" else (r.get("expected") if choice == "OK" else "")
+        # NONE/NG は「確認済」ではなく「catalog で解決すべき未解決」→ verified に入れない。
+        # verified に入れると HTML viewer で二度と表示されず宿題が埋もれる。OK/CHOSEN のみ確定。
+        if choice in ("OK", "CHOSEN"):
+            pid = r.get("selected_pid") if choice == "CHOSEN" else r.get("expected")
             verified[cert] = {
                 "verified_at": now,
                 "choice": choice,
@@ -645,6 +647,61 @@ def _remove_certs_from_csv(csv_path, certs_to_remove) -> int:
     return removed
 
 
+_MISSING_MODELS_PATH = Path("C:/dev/iMak_data/catalog/missing_models.csv")
+
+
+def _route_none_to_catalog(none_records: list[dict], missing_path=None,
+                           trigger_request: bool = True) -> int:
+    """NONE/NG (= catalog 一致無し) cert を missing_models.csv に流し catalog 追加依頼を自動生成.
+
+    NONE は『解決済』でなく『catalog で解決すべき宿題』。build_row の catalog-miss と同経路で
+    auto_catalog_add_request watcher が依頼書を自動投入する。これにより HTML から消えても
+    宿題は catalog 依頼として surface し続ける。
+    Returns: missing_models.csv に書いた行数。
+    """
+    if not none_records:
+        return 0
+    path = Path(missing_path) if missing_path else _MISSING_MODELS_PATH
+    written = 0
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        new_file = not path.exists()
+        with path.open("a", encoding="utf-8") as f:
+            if new_file:
+                f.write("category,model,detected_at\n")
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for rec in none_records:
+                cert = str(rec.get("cert", "")).strip()
+                if not cert:
+                    continue
+                category = (rec.get("category") or "unknown").strip()
+                expected = (rec.get("expected") or "無").strip()
+                meta = _get_psa_cache(cert) or {}
+                brand = (meta.get("Brand") or "").strip()
+                subject = (meta.get("Subject") or "").strip()
+                cardno = (meta.get("CardNumber") or "").strip()
+                model = (f"cert{cert} {brand} [{subject}] #{cardno} "
+                         f"(auto候補{expected}=該当なし 要調査)").replace(",", " ")
+                model = " ".join(model.split())  # 連続空白圧縮
+                f.write(f"{category},{model},{ts}\n")
+                written += 1
+    except Exception:
+        return written
+    # auto_catalog_add_request watcher を即実行 = 依頼書まで自動生成
+    if trigger_request and written:
+        try:
+            import importlib.util as _ilu
+            _wspec = _ilu.spec_from_file_location(
+                "auto_catalog_add_request",
+                str(Path(__file__).parent / "auto_catalog_add_request.py"))
+            _wmod = _ilu.module_from_spec(_wspec)
+            _wspec.loader.exec_module(_wmod)
+            _wmod.main()
+        except Exception:
+            pass
+    return written
+
+
 def _apply_user_judgments(results: list[dict]) -> dict:
     """ユーザー判定結果を catalog + スプシに適用.
 
@@ -655,8 +712,8 @@ def _apply_user_judgments(results: list[dict]) -> dict:
     OK/CHOSEN → KEY1 をスプシ書込。NONE/NG (= 識別不能) → 入稿 CSV から行除外 (fail-closed)。
     """
     summary = {"processed": 0, "spreadsheet_writes": 0, "catalog_updates": 0,
-               "skipped": 0, "csv_excluded": 0, "errors": []}
-    reject_certs = set()
+               "skipped": 0, "csv_excluded": 0, "catalog_routed": 0, "errors": []}
+    reject_records = []
     try:
         import gspread
         from google.oauth2.service_account import Credentials
@@ -677,9 +734,9 @@ def _apply_user_judgments(results: list[dict]) -> dict:
         elif choice == "CHOSEN":
             target_pid = r.get("selected_pid", "")
         else:
-            # NONE (該当なし) / NG (違う) = identity 未確定 → 入稿 CSV から除外 (fail-closed)
+            # NONE (該当なし) / NG (違う) = identity 未確定 → 入稿 CSV 除外 + catalog 宿題化
             if choice in ("NONE", "NG") and cert:
-                reject_certs.add(cert)
+                reject_records.append(r)
             summary["skipped"] += 1
             continue
         if not target_pid:
@@ -700,12 +757,17 @@ def _apply_user_judgments(results: list[dict]) -> dict:
         # catalog hash 蓄積 (= optional、 PSA cache image hash → catalog variants 上書き)
         # 既存 5/28 logic 流用、 ただし簡略化のため本 phase では skip (= 別 phase で蓄積)
 
-    # NONE/NG = 識別不能カードを入稿 CSV から物理除外 (= 出品の正確性原則 / fail-closed)
-    if reject_certs:
+    # NONE/NG = 識別不能カード → (1) 入稿 CSV から物理除外 (2) catalog 追加依頼に自動ルーティング
+    if reject_records:
+        reject_certs = {str(r.get("cert", "")).strip() for r in reject_records if r.get("cert")}
         try:
             summary["csv_excluded"] = _remove_certs_from_csv(_CURRENT_CSV_PATH, reject_certs)
         except Exception as e:
             summary["errors"].append(f"csv exclude: {type(e).__name__}: {e}")
+        try:
+            summary["catalog_routed"] = _route_none_to_catalog(reject_records)
+        except Exception as e:
+            summary["errors"].append(f"catalog route: {type(e).__name__}: {e}")
     return summary
 
 

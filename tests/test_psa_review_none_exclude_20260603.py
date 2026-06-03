@@ -81,3 +81,42 @@ def test_empty_inputs_safe(tmp_path):
     _write_csv(p, [["Add", "A", "111111111", "x"]])
     assert ppr._remove_certs_from_csv(str(p), set()) == 0
     assert ppr._remove_certs_from_csv(None, {"111111111"}) == 0
+
+
+# ===== NONE → catalog 宿題化 (= surface し続ける) =====
+
+def test_route_none_writes_missing_models(tmp_path):
+    """NONE cert が missing_models.csv に (category, model, detected_at) で書かれる."""
+    missing = tmp_path / "missing_models.csv"
+    recs = [{"cert": "999000111", "expected": "S-P-001",
+             "category": "pokemon_tcg", "choice": "NONE"}]
+    n = ppr._route_none_to_catalog(recs, missing_path=str(missing), trigger_request=False)
+    assert n == 1
+    lines = missing.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "category,model,detected_at"
+    rows = list(csv.DictReader(missing.open(encoding="utf-8")))
+    assert rows[0]["category"] == "pokemon_tcg"
+    assert "999000111" in rows[0]["model"]
+    assert "該当なし" in rows[0]["model"]
+    assert "S-P-001" in rows[0]["model"]
+    assert "," not in rows[0]["model"]  # CSV 健全性 (model にカンマ無し)
+
+
+def test_route_none_empty_noop(tmp_path):
+    missing = tmp_path / "missing_models.csv"
+    assert ppr._route_none_to_catalog([], missing_path=str(missing), trigger_request=False) == 0
+    assert not missing.exists()
+
+
+def test_record_verified_excludes_none(tmp_path, monkeypatch):
+    """NONE は verified_certs に入らない (= HTML で再 surface)。OK/CHOSEN は入る."""
+    vfile = tmp_path / "verified_certs.json"
+    monkeypatch.setattr(ppr, "VERIFIED_CERTS_FILE", vfile)
+    ppr._record_verified([
+        {"cert": "111", "expected": "A-1", "choice": "OK"},
+        {"cert": "222", "expected": "B-2", "choice": "NONE"},
+        {"cert": "333", "selected_pid": "C-3", "choice": "CHOSEN"},
+    ])
+    saved = ppr._load_verified_certs()
+    assert "111" in saved and "333" in saved   # OK/CHOSEN は記録
+    assert "222" not in saved                  # NONE は記録しない (= surface し続ける)
