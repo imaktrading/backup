@@ -273,6 +273,13 @@ def _variant_candidates(subject: str) -> list[str]:
 # ============================================================================
 # 旧 bandai_jp.fetch_card 形式に変換
 # ============================================================================
+# Bandai TCG の color JA→EN (One Piece / Dragon Ball 共通)。eBay 出力は英語必須。
+_OP_COLOR_JA_TO_EN = {
+    "赤": "Red", "緑": "Green", "青": "Blue",
+    "紫": "Purple", "黒": "Black", "黄": "Yellow",
+}
+
+
 def _to_legacy_dict(record: dict) -> dict:
     """iMakCatalog の lookup() result → 旧 bandai_jp 形式.
 
@@ -285,19 +292,36 @@ def _to_legacy_dict(record: dict) -> dict:
       - language        : 'en' / 'ja' / 'both'
     """
     specs = record.get("specs") or {}
+
+    # 2026-06-03: DB specs スキーマが旧大文字キー ("Card Type"/"Color"/"Power"/
+    # "Cost/Life" 等) から小文字キー (card_type/color/power/cost 等) へ移行済。
+    # 新キー優先・旧キー fallback で両対応。color は JA→EN 正規化、type は Title Case 化。
+    def _norm_color(v):
+        v = (v or "").strip()
+        if not v:
+            return ""
+        parts = re.split(r"[/／]", v)
+        return "/".join(_OP_COLOR_JA_TO_EN.get(p.strip(), p.strip()) for p in parts if p.strip())
+
+    def _norm_type(v):
+        v = (v or "").strip()
+        return v.title() if v.isupper() else v
+
+    _type_raw = specs.get("card_type_ebay") or specs.get("card_type") or specs.get("Card Type", "")
+    _color_raw = specs.get("color_en") or specs.get("color") or specs.get("Color", "")
     return {
         # 旧 bandai_jp 互換フィールド
         "card_id":       record.get("product_id", ""),
         "name_en":       record.get("name_en") or record.get("name", ""),
         "name_jp":       record.get("name_jp"),
-        "type_en":       specs.get("Card Type", ""),
-        "rarity_en":     specs.get("Rarity", ""),
-        "color_en":      specs.get("Color", ""),
-        "power":         specs.get("Power", ""),
-        "life_or_cost":  specs.get("Cost/Life", ""),
-        "counter":       specs.get("Counter+", ""),
-        "attribute_en":  specs.get("Attribute", ""),
-        "feature_jp":    specs.get("Type", ""),     # Bandai の "Type" = キャラ特徴 (例: "麦わらの一味")
+        "type_en":       _norm_type(_type_raw),
+        "rarity_en":     specs.get("rarity_ebay") or specs.get("rarity") or specs.get("Rarity", ""),
+        "color_en":      _norm_color(_color_raw),
+        "power":         specs.get("power") or specs.get("Power", ""),
+        "life_or_cost":  specs.get("cost") or specs.get("Cost/Life", ""),
+        "counter":       specs.get("counter") or specs.get("Counter+", ""),
+        "attribute_en":  specs.get("attribute") or specs.get("Attribute", ""),
+        "feature_jp":    specs.get("card_characteristics") or specs.get("Type", ""),  # キャラ特徴 (例: "麦わらの一味")
         "get_info_jp":   record.get("set_name_official", ""),
         "image_file":    "",                          # 旧形式の互換用 (使われていない)
         # iMakCatalog 拡張フィールド (新規)
