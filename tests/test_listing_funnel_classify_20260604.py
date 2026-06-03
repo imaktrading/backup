@@ -1,7 +1,8 @@
-"""listing_funnel.classify() の分類ロジック回帰テスト (2026-06-04)。
+"""listing_funnel.classify() の分類ロジック回帰テスト (2026-06-04, snapshot ベース)。
 
-在庫(qty)を踏まえた分類: qty==0(在庫切れ)は OUT_OF_STOCK に隔離し改善対象から外す。
-改善 4 切り口 (DEAD / STALE / WEAK_TITLE / WATCHED) は在庫あり listing に限定される。
+データ源 = Seller Hub snapshot (views/watchers/qty)。
+qty==0(在庫切れ)は OUT_OF_STOCK に隔離し改善対象から外す。
+改善切り口 (DEAD=views0 / STALE=多view無販売 / WATCHED=watch無販売) は在庫ありに限定。
 ネットワークには触れない (classify は純関数)。
 """
 import importlib.util
@@ -18,30 +19,26 @@ _spec.loader.exec_module(listing_funnel)
 classify = listing_funnel.classify
 
 
-def _row(item_id, impr=0, views=0, sold=0, watch=0, age=10, qty=1):
-    vr = round(views / impr, 4) if impr else 0.0
-    return {"item_id": item_id, "title": item_id, "price": 100.0, "watch": watch, "qty": qty,
-            "start": "", "age_days": age, "url": "", "impr": impr, "views": views,
-            "txn": 0, "ctr": 0, "conv": 0, "vr": vr, "sold_qty": sold, "revenue": 0.0}
+def _row(item_id, views=0, watch=0, sold=0, qty=1, age=10, site="US"):
+    return {"item_id": item_id, "title": item_id, "price": 100.0, "site": site,
+            "views": views, "watch": watch, "qty": qty, "listed": "",
+            "age_days": age, "sold_qty": sold, "revenue": 0.0}
 
 
-def test_dead_is_zero_impression_unsold_in_stock():
-    """在庫あり + 30d impression ほぼゼロ + 無販売 → DEAD。impr が立てば DEAD でない。"""
+def test_dead_is_zero_views_in_stock():
+    """在庫あり & views==0 → DEAD。views が付けば DEAD でない。"""
     rows = [
-        _row("dead", impr=0, sold=0),          # 在庫あり 露出ゼロ = 死蔵
-        _row("dead_lo", impr=5, sold=0),       # 閾値内 = 死蔵
-        _row("has_impr", impr=500, sold=0),    # 露出あり → DEAD でない
-        _row("sold", impr=0, sold=1),          # 売れた → DEAD でない
+        _row("dead", views=0),
+        _row("seen", views=5),     # 見られている → DEAD でない
     ]
-    ids = {r["item_id"] for r in classify(rows)["DEAD"]}
-    assert ids == {"dead", "dead_lo"}
+    assert {r["item_id"] for r in classify(rows)["DEAD"]} == {"dead"}
 
 
 def test_out_of_stock_excluded_from_dead():
-    """qty==0(在庫切れ)は impression ゼロでも DEAD ではなく OUT_OF_STOCK に隔離。"""
+    """qty==0(在庫切れ)は views==0 でも DEAD でなく OUT_OF_STOCK に隔離。"""
     rows = [
-        _row("oos", impr=0, sold=0, qty=0),    # 在庫切れ → OUT_OF_STOCK (DEAD でない)
-        _row("dead", impr=0, sold=0, qty=1),   # 在庫あり露出ゼロ → DEAD
+        _row("oos", views=0, qty=0),
+        _row("dead", views=0, qty=1),
     ]
     c = classify(rows)
     assert {r["item_id"] for r in c["DEAD"]} == {"dead"}
@@ -49,64 +46,48 @@ def test_out_of_stock_excluded_from_dead():
 
 
 def test_unknown_qty_treated_as_in_stock():
-    """qty==-1(不明)は安全側で在庫あり扱い → DEAD 判定に乗る。"""
-    rows = [_row("unknown", impr=0, sold=0, qty=-1)]
-    c = classify(rows)
-    assert {r["item_id"] for r in c["DEAD"]} == {"unknown"}
+    """qty==-1(不明)は在庫あり扱い → DEAD 判定に乗る。"""
+    c = classify([_row("u", views=0, qty=-1)])
+    assert {r["item_id"] for r in c["DEAD"]} == {"u"}
     assert c["OUT_OF_STOCK"] == []
 
 
 def test_dead_sorted_oldest_first():
-    """死蔵は出品日が古い (age_days 大) 順に並ぶ。"""
-    rows = [_row("new", impr=0, age=10), _row("old", impr=0, age=300), _row("mid", impr=0, age=100)]
-    order = [r["item_id"] for r in classify(rows)["DEAD"]]
-    assert order == ["old", "mid", "new"]
+    rows = [_row("new", views=0, age=10), _row("old", views=0, age=300), _row("mid", views=0, age=100)]
+    assert [r["item_id"] for r in classify(rows)["DEAD"]] == ["old", "mid", "new"]
 
 
-def test_stale_is_viewed_but_unsold():
-    """view が付く (>=30) のに無販売 → STALE。売れていれば除外。"""
+def test_stale_is_high_view_no_sale():
+    """在庫あり & 累計views>=50 & 無販売 → STALE。売れていれば除外。"""
     rows = [
-        _row("stale", impr=1000, views=80, sold=0),
-        _row("sold_well", impr=1000, views=80, sold=3),
-        _row("low_view", impr=1000, views=10, sold=0),
+        _row("stale", views=200, sold=0),
+        _row("sold", views=200, sold=2),     # 売れた → 除外
+        _row("lowview", views=10, sold=0),   # view 不足 → 除外
     ]
-    ids = {r["item_id"] for r in classify(rows)["STALE"]}
-    assert ids == {"stale"}
+    assert {r["item_id"] for r in classify(rows)["STALE"]} == {"stale"}
 
 
-def test_weak_title_is_low_view_rate_among_high_impression():
-    """impr は多い (>=200) が view 率が下位25% → WEAK_TITLE。views/impr で弁別。"""
+def test_watched_is_watch_no_sale():
+    """在庫あり & watchers>=3 & 無販売 → WATCHED (watch 多い順)。"""
     rows = [
-        _row("strong", impr=1000, views=100),  # 10%
-        _row("ok1", impr=1000, views=80),
-        _row("ok2", impr=1000, views=60),
-        _row("weak", impr=1000, views=2),       # 0.2% → 下位
-        _row("low_impr", impr=50, views=0),     # impr 不足 → 対象外
+        _row("hot", views=100, watch=12, sold=0),
+        _row("warm", views=100, watch=4, sold=0),
+        _row("sold", views=100, watch=9, sold=2),    # 売れた → 除外
+        _row("nowatch", views=100, watch=1, sold=0),  # watch 不足 → 除外
     ]
-    ids = {r["item_id"] for r in classify(rows)["WEAK_TITLE"]}
-    assert "weak" in ids
-    assert "strong" not in ids
-    assert "low_impr" not in ids
+    assert [r["item_id"] for r in classify(rows)["WATCHED"]] == ["hot", "warm"]
 
 
-def test_weak_title_not_collapsed_when_all_ctr_rounds_to_zero():
-    """API CTR が全て 0.00 に丸まっても、view 率で弁別され全件 flag にはならない。"""
-    rows = [_row(f"i{i}", impr=1000, views=v) for i, v in enumerate([2, 5, 9, 30, 60, 100, 150, 200])]
-    weak = classify(rows)["WEAK_TITLE"]
-    assert 0 < len(weak) < len(rows)
-    assert "i0" in {r["item_id"] for r in weak}
-
-
-def test_watched_is_watchcount_without_sale():
-    """WatchCount>=3 なのに無販売 → WATCHED。売れていれば除外。watch 多い順。"""
+def test_buy_intent_ratio_order_and_oos_excluded():
+    """在庫あり & views>=10 & watch>0 を watch/view 比率順。在庫切れは除外。"""
     rows = [
-        _row("hot", impr=500, views=50, sold=0, watch=12),
-        _row("warm", impr=500, views=50, sold=0, watch=4),
-        _row("sold", impr=500, views=50, sold=2, watch=9),   # 売れた → 除外
-        _row("no_watch", impr=500, views=50, sold=0, watch=1),  # watch 不足 → 除外
+        _row("hi", views=20, watch=10),      # 0.50
+        _row("lo", views=100, watch=10),     # 0.10
+        _row("oos", views=20, watch=20, qty=0),  # 在庫切れ → 除外
+        _row("noview", views=5, watch=5),    # views<10 → 除外
     ]
-    watched = classify(rows)["WATCHED"]
-    assert [r["item_id"] for r in watched] == ["hot", "warm"]
+    intent = classify(rows)["BUY_INTENT"]
+    assert [r["item_id"] for r in intent] == ["hi", "lo"]
 
 
 if __name__ == "__main__":
