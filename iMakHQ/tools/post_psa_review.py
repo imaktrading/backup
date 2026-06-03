@@ -583,15 +583,80 @@ def _record_verified(results: list[dict]) -> None:
     _save_verified_certs(verified)
 
 
+# run_post_psa_review が受け取る「最終入稿 CSV」パス (= .bak ではなく実 CSV)。
+# do_POST → _apply_user_judgments から NONE/NG 判定 cert の行除外に使う。
+_CURRENT_CSV_PATH: "str | None" = None
+
+
+def _remove_certs_from_csv(csv_path, certs_to_remove) -> int:
+    """NONE/NG 判定 (= 識別不能) の cert 行を入稿 CSV から物理除外する.
+
+    出品の正確性原則: 該当なし/違う = カード identity 未確定 → 出品しない (fail-closed)。
+    Description が HTML で複数物理行に跨るため、行単位でなく「"Add", で始まる論理行」
+    境界で分割し、cert 列 (CDA:Certification Number) が一致する論理行を丸ごと除外。
+    残す行はバイト不変なのでフォーマット (QUOTE_NONNUMERIC 等) を保持する。
+    Returns: 除外した行数。
+    """
+    if not csv_path or not certs_to_remove:
+        return 0
+    import io
+    certs = {str(c).strip() for c in certs_to_remove if str(c).strip()}
+    if not certs:
+        return 0
+    p = Path(csv_path)
+    if not p.exists():
+        return 0
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    if len(lines) < 2:
+        return 0
+    header_line = lines[0]
+    try:
+        header_fields = next(csv.reader([header_line]))
+    except Exception:
+        return 0
+    cert_idx = next((i for i, h in enumerate(header_fields)
+                     if "Certification Number" in h), None)
+    if cert_idx is None:
+        return 0
+    ROW_START = '"Add",'  # 各論理行の先頭物理行 (= *Action 値 "Add")
+    blocks = []
+    cur = ""
+    for ln in lines[1:]:
+        if ln.startswith(ROW_START) and cur:
+            blocks.append(cur)
+            cur = ""
+        cur += ln
+    if cur:
+        blocks.append(cur)
+    kept = []
+    removed = 0
+    for block in blocks:
+        try:
+            fields = next(csv.reader(io.StringIO(block)))
+            cval = fields[cert_idx].strip() if cert_idx < len(fields) else ""
+        except Exception:
+            cval = ""
+        if cval and cval in certs:
+            removed += 1
+            continue
+        kept.append(block)
+    if removed:
+        p.write_text(header_line + "".join(kept), encoding="utf-8")
+    return removed
+
+
 def _apply_user_judgments(results: list[dict]) -> dict:
     """ユーザー判定結果を catalog + スプシに適用.
 
     Args:
         results: [{cert, expected, category, choice, selected_pid?}, ...]
     Returns:
-        {processed: N, spreadsheet_writes: N, catalog_updates: N, skipped: N, errors: [...]}
+        {processed, spreadsheet_writes, catalog_updates, skipped, csv_excluded, errors}
+    OK/CHOSEN → KEY1 をスプシ書込。NONE/NG (= 識別不能) → 入稿 CSV から行除外 (fail-closed)。
     """
-    summary = {"processed": 0, "spreadsheet_writes": 0, "catalog_updates": 0, "skipped": 0, "errors": []}
+    summary = {"processed": 0, "spreadsheet_writes": 0, "catalog_updates": 0,
+               "skipped": 0, "csv_excluded": 0, "errors": []}
+    reject_certs = set()
     try:
         import gspread
         from google.oauth2.service_account import Credentials
@@ -612,6 +677,9 @@ def _apply_user_judgments(results: list[dict]) -> dict:
         elif choice == "CHOSEN":
             target_pid = r.get("selected_pid", "")
         else:
+            # NONE (該当なし) / NG (違う) = identity 未確定 → 入稿 CSV から除外 (fail-closed)
+            if choice in ("NONE", "NG") and cert:
+                reject_certs.add(cert)
             summary["skipped"] += 1
             continue
         if not target_pid:
@@ -631,6 +699,13 @@ def _apply_user_judgments(results: list[dict]) -> dict:
             summary["errors"].append(f"cert {cert} spreadsheet write: {type(e).__name__}: {e}")
         # catalog hash 蓄積 (= optional、 PSA cache image hash → catalog variants 上書き)
         # 既存 5/28 logic 流用、 ただし簡略化のため本 phase では skip (= 別 phase で蓄積)
+
+    # NONE/NG = 識別不能カードを入稿 CSV から物理除外 (= 出品の正確性原則 / fail-closed)
+    if reject_certs:
+        try:
+            summary["csv_excluded"] = _remove_certs_from_csv(_CURRENT_CSV_PATH, reject_certs)
+        except Exception as e:
+            summary["errors"].append(f"csv exclude: {type(e).__name__}: {e}")
     return summary
 
 
@@ -652,6 +727,10 @@ def run_post_psa_review(csv_path: str, append_log_func) -> None:
     if not csv_p.exists():
         append_log_func(f"  ⚠️ CSV not found: {csv_path}\n")
         return
+
+    # NONE/NG 判定時の行除外は「最終入稿 CSV」(= bak 差替前) に対して行う
+    global _CURRENT_CSV_PATH
+    _CURRENT_CSV_PATH = str(csv_p)
 
     # .bak (= excluder 除外前の 元 CSV) があれば優先 (= NO-GO 除外件も教師データ判定対象に)
     bak = csv_p.with_suffix(".csv.bak")
