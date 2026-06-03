@@ -13,6 +13,7 @@ from post_title_fix import (
     remove_redundant_pokemon,
     pad_title,
     fix_title,
+    strip_japanese,
 )
 
 RESCUES = [
@@ -21,6 +22,43 @@ RESCUES = [
     {'from': 'Mlmtl', 'to': 'Melmetal'},
     {'from': 'Tony Chopper Tony Tony.Chopper', 'to': 'Tony Tony Chopper'},
 ]
+
+
+# ----- strip_japanese (2026-06-03 Gundam リソース 混入再発を受けて追加) -----
+def test_strip_japanese_gundam_resource():
+    """TitleAgent が JP 名でパディングした 'リソース' が除去されること."""
+    title = "PSA 10 Gundam TCG Promo Cards #RP-009 Resource リソース Japanese"
+    new, changed = strip_japanese(title)
+    assert changed is True
+    assert "リソース" not in new
+    assert new == "PSA 10 Gundam TCG Promo Cards #RP-009 Resource Japanese"
+
+
+def test_strip_japanese_english_untouched():
+    """英語のみのタイトルは無傷 (over-strip しない)."""
+    title = "PSA 10 Pokemon Mega Dimension #229/193 Hawlucha Ex Card"
+    new, changed = strip_japanese(title)
+    assert changed is False
+    assert new == title
+
+
+def test_strip_japanese_all_kinds():
+    """ひらがな/カタカナ/漢字すべて除去 + 連続スペース整理."""
+    new, changed = strip_japanese("PSA 10 Test あ カ 漢 End")
+    assert changed is True
+    assert new == "PSA 10 Test End"  # 日本語消えて連続スペースも整理
+
+
+def test_fix_title_strips_japanese_final_guard():
+    """fix_title 全パイプラインで最終的に日本語が残らないこと."""
+    new, log = fix_title(
+        "PSA 10 Gundam TCG Promo Cards #RP-009 Resource リソース",
+        language='', rarity='', rescues=[],
+    )
+    assert "リソース" not in new
+    assert log['jp_strip'] is True
+    import re
+    assert not re.search(r'[぀-ヿ一-鿿]', new)
 
 
 # ----- apply_rescue -----
@@ -69,7 +107,8 @@ def test_pad_short_japanese_pokemon():
     new, applied = pad_title(title, language="Japanese", rarity="RR")
     assert len(new) >= 60
     assert "Japanese" in new
-    assert "TCG" in new
+    # 2026-05-31: 'TCG' filler 廃止 (PDF Rank 圏外 + game 表記重複) → TCG は追加しない
+    assert "TCG" not in new
 
 
 def test_pad_with_secret_rare():

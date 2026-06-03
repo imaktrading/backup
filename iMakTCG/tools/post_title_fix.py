@@ -99,6 +99,28 @@ def remove_redundant_pokemon(title):
     return new, new != title
 
 
+# 日本語文字 (ひらがな/カタカナ/漢字/半角カナ). eBay タイトルは英語必須。
+_JP_CHAR_RE = re.compile(r'[぀-ヿ一-鿿ｦ-ﾟ]')
+
+
+def strip_japanese(title):
+    """eBay タイトルから日本語文字を除去する最終ガード.
+
+    TitleAgent 等が catalog の JP 名 (例: Gundam RP-009 の 'リソース') で
+    短タイトルをパディングして混入させる事故への防壁. eBay タイトルに日本語が
+    入ると検索ヒットせず + 不格好 (= SNAD/品質低下). 混入経路を問わず最終 CSV
+    から消す (no_modification_chain: 既存ロジックは触らず後処理で防御).
+
+    Returns:
+        (新タイトル, 除去したか bool)
+    """
+    if not _JP_CHAR_RE.search(title):
+        return title, False
+    new = _JP_CHAR_RE.sub('', title)
+    new = re.sub(r'\s+', ' ', new).strip()  # 除去で生じた連続/末尾スペース整理
+    return new, new != title
+
+
 def pad_title(title, language='', rarity='',
               min_len=SHORT_TITLE_THRESHOLD, target_len=TARGET_TITLE_LEN,
               max_len=MAX_TITLE_LEN):
@@ -154,7 +176,7 @@ def fix_title(title, language, rarity, rescues):
     Returns:
         (新タイトル, 操作ログ dict)
     """
-    log = {'rescue': [], 'pokemon_dedup': False, 'pad': []}
+    log = {'rescue': [], 'pokemon_dedup': False, 'pad': [], 'jp_strip': False}
 
     title, rescue_applied = apply_rescue(title, rescues)
     log['rescue'] = rescue_applied
@@ -164,6 +186,10 @@ def fix_title(title, language, rarity, rescues):
 
     title, pad_applied = pad_title(title, language=language, rarity=rarity)
     log['pad'] = pad_applied
+
+    # 最終ガード: 日本語混入を除去 (eBay タイトルは英語必須)
+    title, jp_stripped = strip_japanese(title)
+    log['jp_strip'] = jp_stripped
 
     return title, log
 
@@ -189,9 +215,9 @@ def process_csv(csv_path, rescues, log_func=print):
         lang_idx = header.index('C:Language')
     except ValueError as e:
         log_func(f"  ⚠️ ヘッダ列不足、skip: {e}")
-        return {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'unchanged': 0}
+        return {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'jp_stripped': 0, 'unchanged': 0}
 
-    stats = {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'unchanged': 0}
+    stats = {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'jp_stripped': 0, 'unchanged': 0}
     for i, row in enumerate(rows[1:], start=1):
         original = row[title_idx]
         new_title, log = fix_title(
@@ -210,13 +236,16 @@ def process_csv(csv_path, rescues, log_func=print):
         if log['pad']:
             stats['padded'] += 1
             log_func(f"  [#{i}] +pad: {', '.join(log['pad'])} ({len(original)}→{len(new_title)}字)")
+        if log['jp_strip']:
+            stats['jp_stripped'] += 1
+            log_func(f"  [#{i}] 🚫 日本語除去: {original[:50]!r} → {new_title[:50]!r}")
 
         if new_title != original:
             row[title_idx] = new_title
         else:
             stats['unchanged'] += 1
 
-    if stats['rescued'] or stats['padded'] or stats['pokemon_dedup']:
+    if stats['rescued'] or stats['padded'] or stats['pokemon_dedup'] or stats['jp_stripped']:
         bak = csv_path + f'.bak_post_title_{int(time.time())}'
         shutil.copy2(csv_path, bak)
         log_func(f"  📦 backup: {os.path.basename(bak)}")
@@ -262,7 +291,8 @@ def run_post_title_fix_for_latest_csv(append_log_func=print):
     )
     append_log_func(
         f"  完了: rescue={stats['rescued']} pad={stats['padded']} "
-        f"pokemon_dedup={stats['pokemon_dedup']} unchanged={stats['unchanged']}\n"
+        f"pokemon_dedup={stats['pokemon_dedup']} jp_strip={stats['jp_stripped']} "
+        f"unchanged={stats['unchanged']}\n"
     )
 
 
