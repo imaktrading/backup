@@ -361,20 +361,7 @@ SCRIPTS = [
         "cmd": ["python", "mercari_scout.py"],
         "params": [],
     },
-    {
-        "category": None, "type": "utility",
-        "label": "📊 月次レポート生成",
-        "cwd": f"{WORKSPACE}/iMakHQ",
-        "cmd": ["python", "monthly_report.py"],
-        "params": [],
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "📊 今、見る (Seller Hub 分析)",
-        "cwd": f"{WORKSPACE}/iMakHQ",
-        "cmd": ["python", "seller_hub_view.py", "--analyze"],
-        "custom_buttons": "seller_hub_view",
-    },
+    # 2026-06-04: 月次レポート生成 / 今、見る はパネルから削除 (ファネル分析が上位互換。.py は残置)
     {
         "category": None, "type": "utility",
         "label": "取下再出品",
@@ -1166,16 +1153,17 @@ class ListingPanel:
         for idx in utilities:
             ug[_ugroup(idx)].append(idx)
 
-        # 共通: (label, idx) のリストを ncol 列グリッドで描画
-        def _grid_named(parent, items, ncol=4):
+        # 共通: (label, idx) のリストを ncol 列グリッドで描画 (compact=詰めた配置)
+        def _grid_named(parent, items, ncol=4, compact=False):
+            w, h, pad, wl = (15, 1, 2, 130) if compact else (20, 2, 4, 180)
             for col in range(ncol):
                 parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
             for k, (text, idx) in enumerate(items):
                 color = SCRIPTS[idx].get("label_fg") or ("#0066cc" if SCRIPTS[idx].get("verified", False) else "black")
-                tk.Button(parent, text=text, font=("", 10, "bold"), fg=color,
-                          width=20, height=2, wraplength=180, justify="center",
+                tk.Button(parent, text=text, font=("", 9, "bold"), fg=color,
+                          width=w, height=h, wraplength=wl, justify="center",
                           command=lambda i=idx: self.run_script(i)).grid(
-                    row=k // ncol, column=k % ncol, padx=4, pady=4, sticky="nsew")
+                    row=k // ncol, column=k % ncol, padx=pad, pady=pad, sticky="nsew")
 
         if self.mode == "new":
             # ===== 🆕 新規出品 (カテゴリ名ラベルの大ボタン・間隔詰め) =====
@@ -1236,20 +1224,20 @@ class ListingPanel:
             ana.pack(fill="x", padx=4, pady=(4, 0))
             _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
 
-            # 🔧 在庫あり / 📦 在庫なし を横並び
+            # 🔧 在庫あり / 📦 在庫なし を横並び (詰めて配置)
             stock_row = ttk.Frame(scroll_frame)
-            stock_row.pack(fill="x", padx=4, pady=(8, 0))
+            stock_row.pack(fill="x", padx=4, pady=(6, 0))
             stock_row.columnconfigure(0, weight=1, uniform="stk")
             stock_row.columnconfigure(1, weight=1, uniform="stk")
             relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
             relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
                              for cat in cat_order if categories[cat].get("relist") is not None]
-            d1 = ttk.LabelFrame(stock_row, text="🔧 在庫あり — 取り下げ再出品", padding=4)
-            d1.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-            _grid_named(d1, relist_items, ncol=2)
-            d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ", padding=4)
-            d2.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
-            _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=2)
+            d1 = ttk.LabelFrame(stock_row, text="🔧 在庫あり — 取り下げ再出品", padding=2)
+            d1.grid(row=0, column=0, sticky="nsew", padx=(0, 3))
+            _grid_named(d1, relist_items, ncol=3, compact=True)
+            d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ", padding=2)
+            d2.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
+            _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=2, compact=True)
 
             if ug["report"]:
                 rep = ttk.LabelFrame(scroll_frame, text="📈 レポート", padding=4)

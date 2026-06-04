@@ -82,12 +82,11 @@ def test_parse_listing_row_handles_short_input():
     assert result["item_id"] == ""
 
 
-def test_control_panel_has_seller_hub_button():
-    """control_panel に「📊 今、見る (Seller Hub 分析)」ボタン定義 + custom_buttons='seller_hub_view'."""
+def test_control_panel_seller_hub_button_removed():
+    """2026-06-04: 今見るボタンはパネルから削除 (ファネル分析が上位互換)。
+    custom_buttons ハンドラ/SellerHubCategoryDialog は残置 (戻せる) が SCRIPTS ボタン定義は無い。"""
     src = (_HQ / "control_panel.py").read_text(encoding="utf-8")
-    assert "📊 今、見る (Seller Hub 分析)" in src
-    assert '"custom_buttons": "seller_hub_view"' in src
-    assert "seller_hub_view.py" in src
+    assert "📊 今、見る (Seller Hub 分析)" not in src  # ボタンは削除済
 
 
 def test_control_panel_has_seller_hub_dialog_class():
