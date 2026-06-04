@@ -17,7 +17,7 @@ classify = mod.classify
 
 
 def _row(item_id, impr=0.0, ctr=0.0, sold=0, sales90=0, watch=0, qty=1,
-         price=100.0, trend=0.0, has_lqr=True, age=10, site="US"):
+         price=100.0, trend=0.0, has_lqr=True, age=60, site="US"):
     return {"item_id": item_id, "title": item_id, "site": site, "category": "X",
             "qty": qty, "sold_qty": sold, "sales90": sales90, "watch": watch,
             "price": price, "trend_price": trend, "impr": impr, "ctr": ctr,
@@ -25,12 +25,31 @@ def _row(item_id, impr=0.0, ctr=0.0, sold=0, sales90=0, watch=0, qty=1,
 
 
 def test_no_search_is_zero_impressions_in_stock():
-    """在庫あり & impr/日<=3 → NO_SEARCH(検索に出ていない)。"""
+    """在庫あり & 出品>=21日 & impr/日<=3 → NO_SEARCH(検索に出ていない)。"""
     rows = [
-        _row("dark", impr=1),
+        _row("dark", impr=1, age=60),
         _row("shown", impr=50, ctr=0.05),
     ]
     assert {r["item_id"] for r in classify(rows)["NO_SEARCH"]} == {"dark"}
+
+
+def test_new_listing_excluded_from_no_search():
+    """適正化: 新規出品(<21日)でimpr低は時間不足 → NEW_WAIT に隔離、NO_SEARCH に入れない。"""
+    rows = [
+        _row("new", impr=1, age=5),    # 新規 → NEW_WAIT
+        _row("old", impr=1, age=90),   # 古い → NO_SEARCH
+        _row("unknown", impr=1, age=0),  # age不明 → 安全側で NO_SEARCH に残す
+    ]
+    c = classify(rows)
+    assert {r["item_id"] for r in c["NEW_WAIT"]} == {"new"}
+    assert {r["item_id"] for r in c["NO_SEARCH"]} == {"old", "unknown"}
+
+
+def test_buckets_sorted_by_price():
+    """適正化: NO_SEARCH は利益額(価格)高い順。"""
+    rows = [_row("cheap", impr=1, age=60, price=50), _row("rich", impr=1, age=60, price=500)]
+    order = [r["item_id"] for r in classify(rows)["NO_SEARCH"]]
+    assert order == ["rich", "cheap"]
 
 
 def test_out_of_stock_excluded():

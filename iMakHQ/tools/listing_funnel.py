@@ -49,6 +49,21 @@ DESKTOP = r"C:\Users\imax2\OneDrive\デスクトップ"
 # 分類しきい値
 TH_IMPR_NONE = 3        # 1日あたり impression がこれ以下 = 検索に出ていない
 TH_IMPR_SHOWN = 8       # これ以上 impression があれば「露出はある」
+TH_AGE_MIN = 21         # 出品からこれ未満(日) = 新規 → impr低は時間不足なので NO_SEARCH 除外
+
+
+def start_to_age(start):
+    """active CSV の Start date ('Mar-06-25 ...') → 経過日数。不明は 0。"""
+    if not start:
+        return 0
+    m = re.match(r"([A-Za-z]{3}-\d{2}-\d{2})", start.strip())
+    if not m:
+        return 0
+    try:
+        d = datetime.datetime.strptime(m.group(1), "%b-%d-%y").date()
+        return max((datetime.date.today() - d).days, 0)
+    except ValueError:
+        return 0
 
 
 def _f(v):
@@ -188,12 +203,14 @@ def classify(rows):
     ctrs = sorted([r["ctr"] for r in has_lqr if r["impr"] >= TH_IMPR_SHOWN])
     ctr_q1 = statistics.quantiles(ctrs, n=4)[0] if len(ctrs) >= 4 else (ctrs[0] if ctrs else 0)
 
-    no_search, no_click, no_convert, overpriced, dead_simple = [], [], [], [], []
+    no_search, no_click, no_convert, overpriced, dead_simple, new_wait = [], [], [], [], [], []
     for r in in_stock:
         sold = r["sold_qty"] + r.get("sales90", 0)
+        age = r.get("age_days", 0)
         if r.get("has_lqr"):
             if r["impr"] <= TH_IMPR_NONE:
-                no_search.append(r)
+                # 適正化: 新規出品(時間不足)は誤検出 → NEW_WAIT に隔離 (age不明0は対象に残す)
+                (new_wait if 0 < age < TH_AGE_MIN else no_search).append(r)
             elif r["impr"] >= TH_IMPR_SHOWN and r["ctr"] <= ctr_q1:
                 no_click.append(r)
             elif sold == 0 and r["ctr"] > ctr_q1:
@@ -204,13 +221,13 @@ def classify(rows):
             # LQR 非対象 (非US等): views 系が無いので watch/sold で簡易判定
             if sold == 0 and r["watch"] == 0:
                 dead_simple.append(r)
-    no_search.sort(key=lambda x: -x.get("age_days", 0))
-    no_click.sort(key=lambda x: x["ctr"])
-    no_convert.sort(key=lambda x: -x["impr"])
+    # 適正化: 各バケツを利益額(価格)優先で並べる → 直す価値の高い順
+    for b in (no_search, no_click, no_convert):
+        b.sort(key=lambda x: -x["price"])
     overpriced.sort(key=lambda x: -(x["price"] - x["trend_price"]))
     return {"NO_SEARCH": no_search, "NO_CLICK": no_click, "NO_CONVERT": no_convert,
-            "OVERPRICED": overpriced, "DEAD_SIMPLE": dead_simple, "OUT_OF_STOCK": oos,
-            "RESTOCK": restock, "CULL": cull, "ctr_q1": ctr_q1}
+            "OVERPRICED": overpriced, "DEAD_SIMPLE": dead_simple, "NEW_WAIT": new_wait,
+            "OUT_OF_STOCK": oos, "RESTOCK": restock, "CULL": cull, "ctr_q1": ctr_q1}
 
 
 def write_xlsx(path, rows, c, summary_lines):
@@ -230,6 +247,7 @@ def write_xlsx(path, rows, c, summary_lines):
         ("NO_CLICK", "クリックされない (サムネ/タイトル/価格)"),
         ("NO_CONVERT", "買われない (価格/説明)"),
         ("OVERPRICED", "適正価格より高い (値下げ余地)"),
+        ("NEW_WAIT", "新規出品でimpr低 (時間不足=様子見・改修対象外)"),
         ("RESTOCK", "在庫切れだが需要実証済 (再仕入れ優先)"),
         ("CULL", "在庫切れ&需要皆無 (出品停止候補)"),
         ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)"),
@@ -321,7 +339,7 @@ def main():
         r["ctr"] = q["ctr"] if q else 0.0
         r["trend_price"] = q["trend_price"] if q else 0.0
         r["sales90"] = q["sales90"] if q else 0
-        r["age_days"] = q.get("age_days", 0) if q else 0
+        r["age_days"] = start_to_age(a.get("start", "")) or (q.get("age_days", 0) if q else 0)
         r["photos"] = q["photos"] if q else 0
         r["keywords"] = q["keywords"] if q else 0
         u = unsold.get(iid, {})
@@ -344,7 +362,8 @@ def main():
         print("   " + ln)
 
     c = classify(rows)
-    _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & impr/日<={TH_IMPR_NONE} → キーワード/カテゴリ不適合 (古い順)", c["NO_SEARCH"])
+    print(f"   (適正化) 新規出品<{TH_AGE_MIN}日でimpr低=時間不足は NEW_WAIT に隔離={len(c['NEW_WAIT'])}件 / 各バケツは利益額(価格)順")
+    _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & 出品>={TH_AGE_MIN}日 & impr/日<={TH_IMPR_NONE} → キーワード (価格高い順)", c["NO_SEARCH"])
     _sec("② クリックされない NO_CLICK", f"在庫あり & impr/日>={TH_IMPR_SHOWN} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
     _sec("③ 買われない NO_CONVERT", "在庫あり & CTR有 & 無販売 → 価格(適正価格比)/説明", c["NO_CONVERT"])
     _sec("④ 高すぎ OVERPRICED", "在庫あり & 価格 > eBay適正価格×1.05 → 値下げ余地 (差額大きい順)", c["OVERPRICED"])
@@ -370,7 +389,7 @@ def main():
         for r in rows:
             tags = []
             if r["qty"] == 0: tags.append("OUT_OF_STOCK")
-            for k in ("NO_SEARCH", "NO_CLICK", "NO_CONVERT", "OVERPRICED", "DEAD_SIMPLE", "RESTOCK", "CULL"):
+            for k in ("NO_SEARCH", "NO_CLICK", "NO_CONVERT", "OVERPRICED", "DEAD_SIMPLE", "NEW_WAIT", "RESTOCK", "CULL"):
                 if r in c[k]: tags.append(k)
             r["flags"] = "|".join(tags)
         fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",
