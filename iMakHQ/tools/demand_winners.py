@@ -97,25 +97,88 @@ def brand_key(title):
     return "その他"
 
 
-_NOISE_RE = re.compile(
-    r"\b(PSA\s*10|GEM\s*MT|GEM\s*MINT|MINT|Japanese|Japan|Pre-?owned|Card\s*Game|"
-    r"20\d{2}|NM|N/?M)\b", re.I)
+# token集計から除外する常套句・汎用語 (グレード/状態/サイズ/数量/つなぎ語など)。
+# キャラ名・バリエーション(Alt/Art/SAR/Parallel/2Way/色)・型番は残す。
+_STOP = {
+    "psa", "10", "gem", "mt", "mint", "nm", "card", "cards", "game", "tcg", "the", "and", "with",
+    "for", "of", "a", "an", "in", "by", "to", "vol", "ver", "version", "edition", "collection",
+    "coll", "promo", "promotion", "set", "pack", "booster", "series", "high", "class", "rare",
+    "common", "japanese", "japan", "jp", "us", "usa", "new", "used", "pre", "owned", "preowned",
+    "men", "mens", "women", "womens", "size", "sizes", "small", "medium", "large", "no",
+    "watch", "watches", "digital", "analog", "mens", "men's", "bag", "tee", "tshirt", "shirt",
+    "t-shirt", "official", "authentic", "genuine", "from", "limited", "exclusive", "anime", "manga",
+    # ブランド名 (= グループ自体の説明語。何を仕入れるかの distill には不要)
+    "casio", "yoshida", "uniqlo", "gu", "montbell", "porter", "sanrio", "bandai", "shimano",
+    "daiwa", "g-shock", "gshock", "ut", "brand",
+    # 素材・品種・汎用形状語
+    "nylon", "resin", "leather", "cotton", "polyester", "steel", "metal", "plush", "mascot",
+    "keychain", "stuffed", "doll", "figure", "parka", "jacket", "hoodie", "wallet", "tote",
+    "mini", "color", "colour", "strap", "band", "case", "box",
+    # 独語タイトル(eBay DE)由来のノイズ・状態語
+    "schwarz", "gebraucht", "herren", "damen", "tasche", "businesstasche", "digitaluhr",
+    "herrenuhr", "größe", "grosse", "neu", "uhr", "mit",
+    # サイズ・一番くじ等のグループ説明語
+    "pre-owned", "ichiban", "kuji", "prize", "xl", "xxl", "xs", "x-large",
+}
+_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-]*")
 
 
-def short_label(title, maxlen=52):
-    """具体商品名を短く: 採点に効かない常套句(PSA10/GEM MT/Japanese/年号等)を削って要点を残す。"""
-    t = _NOISE_RE.sub(" ", title)
-    t = re.sub(r"\s{2,}", " ", t).strip(" -|")
-    return t[:maxlen]
+def _group_words(group):
+    """グループ名(フランチャイズ/ライン)由来の語 = 集計から除外 (既知=自明なので)。"""
+    g = re.sub(r"[×系()]", " ", group.lower())
+    return {w for w in _TOKEN_RE.findall(g) if len(w) >= 2}
 
 
-def top_concrete(members, n=3):
-    """グループ内の具体 listing 上位n。実売(proven)を最優先 → score 順。"""
-    ranked = sorted(members, key=lambda r: (-(_f(r["sold_qty"]) + _f(r.get("sales90", 0))), -r["score"]))
+def _title_tokens(title):
+    seen, out = set(), []
+    for tok in _TOKEN_RE.findall(title):
+        low = tok.lower()
+        if low in seen or low in _STOP or low.isdigit() or len(low) < 2:
+            continue
+        seen.add(low)
+        out.append((low, tok))
+    return out
+
+
+def global_df(members_all):
+    """全 winner listing 横断の token 出現 listing 数 (df)。汎用語(CASIO/Black等)の減点用。"""
+    df = defaultdict(int)
+    for r in members_all:
+        for low, _ in _title_tokens(r["title"]):
+            df[low] += 1
+    return df, len(members_all)
+
+
+def top_attributes(members, group, df, total, n=6):
+    """グループ内で『売れている属性』を distill。実需(実売)×希少性(idf)で重み付け、
+    全体で頻出の汎用語(CASIO/Black/Nylon等)を自動で減点しキャラ/型番/バリエを浮かせる。"""
+    import math
+    gw = _group_words(group)
+    agg = {}  # key=lower, val={"disp","sold","watch","score","n"}
+    for r in members:
+        sold = _f(r["sold_qty"]) + _f(r.get("sales90", 0))
+        for low, tok in _title_tokens(r["title"]):
+            if low in gw:
+                continue
+            d = agg.setdefault(low, {"disp": tok, "sold": 0.0, "watch": 0.0, "score": 0.0, "n": 0})
+            d["sold"] += sold
+            d["watch"] += _f(r["watch"])
+            d["score"] += r["score"]
+            d["n"] += 1
+    has_sold = any(d["sold"] > 0 for d in agg.values())
+    for d in agg.values():
+        idf = math.log((total + 1) / (df.get(d["disp"].lower(), 1) + 1)) + 1  # 全体頻出ほど小
+        base = d["sold"] if has_sold else d["watch"] * 0.3  # 実売が有る群は実売、無ければwatch
+        d["w"] = base * idf
+    ranked = sorted(agg.values(), key=lambda d: (-d["w"], -d["n"]))
     out = []
-    for r in ranked[:n]:
-        sold = int(_f(r["sold_qty"]) + _f(r.get("sales90", 0)))
-        out.append(f"{short_label(r['title'])} (実売{sold}/W{int(_f(r['watch']))})")
+    for d in ranked:
+        if d["w"] <= 0 or (d["n"] < 2 and d["sold"] == 0 and d["watch"] < 3):
+            continue
+        tag = f"実売{int(d['sold'])}" if has_sold else f"W{int(d['watch'])}"
+        out.append(f"{d['disp']}({tag}/{d['n']}件)")
+        if len(out) >= n:
+            break
     return out
 
 
@@ -155,6 +218,7 @@ def main():
 
     # 需要実証 = スコア>0 (= 実売 or watch or 表示 が有る)
     winners = sorted([r for r in rows if r["score"] > 0], key=lambda x: -x["score"])
+    df, total = global_df(winners)  # 売れ筋属性の希少性(idf)算出用
 
     # 商品別リスト出力
     f, path = _open_w(os.path.join(DESK, f"需要実証リスト_{datetime.date.today():%Y%m%d}.csv"))
@@ -191,12 +255,12 @@ def main():
     with f:
         w = csv.writer(f)
         w.writerow(["グループ", "仕入れ適性", "件数", "実売", "watch", "売れ筋listing数", "スコア",
-                    "具体例1(実売/W)", "具体例2", "具体例3", "近しい商品の調達", "パイプライン", "判定"])
+                    "売れ筋属性(実需順: キャラ/型番/バリエ)", "近しい商品の調達", "パイプライン", "判定"])
         for grp, d in summary:
             mark, reason, pipe = feas(grp)
-            ex = top_concrete(d["members"], 3) + ["", "", ""]
+            attrs = " / ".join(top_attributes(d["members"], grp, df, total, 6))
             w.writerow([grp, mark, d["n"], d["sold"], d["watch"], d["sold_listings"],
-                        f"{d['score']:.0f}", ex[0], ex[1], ex[2], reason, pipe, verdict(mark, d)])
+                        f"{d['score']:.0f}", attrs, reason, pipe, verdict(mark, d)])
 
     print(f"需要実証(スコア>0) listing: {len(winners)}件 / 全{len(rows)}件")
     print(f"\n=== 新規出品強化: グループ別 (需要 × 近しい商品を出せるか) ===")
@@ -209,8 +273,8 @@ def main():
         mark, reason, pipe = feas(grp)
         if verdict(mark, d) == "★拡大推奨":
             print(f"  ▼ {grp}: {reason} [{pipe}]  (実売{d['sold']}/watch{d['watch']}/売れ筋{d['sold_listings']}listing)")
-            for ex in top_concrete(d["members"], 3):
-                print(f"      ・{ex}")
+            attrs = top_attributes(d["members"], grp, df, total, 6)
+            print(f"      売れ筋属性: {' / '.join(attrs) if attrs else '(なし)'}")
     print(f"\nCSV出力: {path}")
     print(f"グループ別判定: {gpath}")
     print("▶ ★拡大推奨 = 需要実証 ∩ 近しい商品をタイムリーに出せる → 新規出品で面で増やす本命。")
