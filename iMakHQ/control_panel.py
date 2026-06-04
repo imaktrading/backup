@@ -366,9 +366,10 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "取下再出品",
         "label_fg": "red",  # ボタンラベル赤文字 (取下→再出品のフロー起点を強調)
-        "cwd": f"{WORKSPACE}/iMakHQ",
-        "cmd": ["python", "dump_us_qty1_sku.py"],
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "relist_from_funnel.py"],  # ファネルRELIST候補→End CSV (snapshot不要)
         "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/取下再出品候補_*.csv",
     },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
@@ -1184,18 +1185,20 @@ class ListingPanel:
         for idx in utilities:
             ug[_ugroup(idx)].append(idx)
 
-        # 共通: (label, idx) のリストを ncol 列グリッドで描画 (compact=詰めた配置)
+        # 共通: (label, idx) のリストを ncol 列グリッドで描画。ボタンは全画面で同一サイズ
+        # (左右=狭め width / 上下=広め height、中央寄せ=ストレッチさせず統一見た目)。
+        BTN_W, BTN_H, BTN_WL = 13, 3, 110
+
         def _grid_named(parent, items, ncol=4, compact=False):
-            w, h, pad, wl = (15, 1, 2, 130) if compact else (20, 2, 4, 180)
-            ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない (右の空セル防止)
+            ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない
             for col in range(ncol):
                 parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
             for k, (text, idx) in enumerate(items):
                 color = SCRIPTS[idx].get("label_fg") or ("#0066cc" if SCRIPTS[idx].get("verified", False) else "black")
                 tk.Button(parent, text=text, font=("", 9, "bold"), fg=color,
-                          width=w, height=h, wraplength=wl, justify="center",
+                          width=BTN_W, height=BTN_H, wraplength=BTN_WL, justify="center",
                           command=lambda i=idx: self.run_script(i)).grid(
-                    row=k // ncol, column=k % ncol, padx=pad, pady=pad, sticky="nsew")
+                    row=k // ncol, column=k % ncol, padx=3, pady=3)  # sticky無し=中央寄せ・統一サイズ
 
         if self.mode == "new":
             # ===== 🆕 新規出品 (カテゴリ名ラベルの大ボタン・間隔詰め) =====
@@ -1212,10 +1215,10 @@ class ListingPanel:
                 if new_idx is None:
                     continue
                 color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
-                tk.Button(cat_grid, text=cat_name, font=("", 12, "bold"), fg=color,
-                          width=15, height=2, wraplength=150, justify="center",
+                tk.Button(cat_grid, text=cat_name, font=("", 11, "bold"), fg=color,
+                          width=BTN_W, height=BTN_H, wraplength=BTN_WL, justify="center",
                           command=lambda idx=new_idx: self.run_script(idx)).grid(
-                    row=gi // n_cat_cols, column=gi % n_cat_cols, padx=2, pady=2, sticky="nsew")
+                    row=gi // n_cat_cols, column=gi % n_cat_cols, padx=3, pady=3)  # 統一サイズ・中央寄せ
                 gi += 1
             if ug["discover"]:
                 disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)
