@@ -1214,23 +1214,22 @@ class ListingPanel:
                 os.startfile(REPORTS_DIR)
 
             # 手順ガイド
-            guide = ttk.LabelFrame(scroll_frame, text="📋 進め方 (月次PDCA)", padding=6)
+            guide = ttk.LabelFrame(scroll_frame, text="📋 レポート準備", padding=6)
             guide.pack(fill="x", padx=4, pady=(4, 6))
-            tk.Label(
-                guide, justify="left", anchor="w", font=("Yu Gothic UI", 10),
-                text=("① eBay Seller Hub で4レポートを手動DL → 下の「📁reportsフォルダ」に置く\n"
-                      "    (全アクティブ出品 / Listing quality report / 売れ残り / 注文)\n"
-                      "② 「📊ファネル分析」→ デスクトップに分析Excel(在庫あり/なし・5バケツ)\n"
-                      "③ 「📈需要・新規強化」で勝ち筋カテゴリを確認\n"
-                      "④ 在庫あり→取り下げ再出品 / 在庫なし→再仕入れ で対応\n"
-                      "⑤ 翌月また②→ 件数の増減で効果測定 (Check)"),
-            ).pack(anchor="w")
             hb = ttk.Frame(guide)
-            hb.pack(anchor="w", pady=(4, 0))
-            tk.Button(hb, text="🌐 Seller Hub を開く (①レポDL)", font=("", 10, "bold"),
+            hb.pack(anchor="w")
+            tk.Button(hb, text="🌐 レポートDL", font=("", 10, "bold"),
                       command=_open_sellerhub).pack(side="left", padx=(0, 6))
             tk.Button(hb, text="📁 reports フォルダを開く", font=("", 10, "bold"),
                       command=_open_reports).pack(side="left")
+            tk.Label(
+                guide, justify="left", anchor="w", font=("Yu Gothic UI", 10),
+                text=("Seller Hub で下記4レポートをDL → 📁reports フォルダに置く:\n"
+                      "  ・eBay-all-active-listings\n"
+                      "  ・ebay-all-orders-report\n"
+                      "  ・eBay-unsold-listings-report\n"
+                      "  ・Listing quality report"),
+            ).pack(anchor="w", pady=(4, 0))
 
             # 📊 分析 (押すと結果ファイルが開く)
             ana = ttk.LabelFrame(scroll_frame, text="📊 分析 (押すと結果ファイルが開く)", padding=4)
