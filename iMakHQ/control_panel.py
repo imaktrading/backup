@@ -377,6 +377,60 @@ SCRIPTS = [
         "cmd": ["python", "dump_us_qty1_sku.py"],
         "params": [],
     },
+    # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
+    # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
+    #       C:/dev/iMak_data/seller_hub/reports/ に置く (無ければデスクトップの所定フォルダ)
+    {
+        "category": None, "type": "utility",
+        "label": "📊 P/C: ファネル分析(Excel)",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "listing_funnel.py"],
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "📈 P: 需要・新規強化リスト",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "demand_winners.py"],
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "✏️ D①: タイトル改修案",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "title_keyword_proposal.py"],
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "💴 D③: Amazon原価→V8(G-SHOCK)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "amazon_v8_check.py"],
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "🃏 D⑤: PSA再仕入れ照合(メルカリ)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "mercari_psa_resource.py"],
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "⌚ D③: G-SHOCK代替仕入れ(メルカリ)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "mercari_gshock_resource.py"],
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "⏱ APIレート残量確認",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ebay_rate_limits.py"],
+        "params": [],
+    },
 ]
 
 
