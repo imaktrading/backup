@@ -170,12 +170,15 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
                   flush=True)
             time.sleep(2.0)
             res = _call_one(item)
-        # eBay Trading API の 「既に取下げ済 / listing 不在」 系は safe failure (= 既に
-        # 目的達成、 監視くんとしては 取下げ完了扱い)。 互換性のため sell_feed_uploader
-        # 系の code 17 も同列で扱う。
+        # eBay Trading API の 「既に取下げ済 / listing 不在 / ended」 系は safe failure
+        # (= 既に 目的達成、 監視くんとしては 取下げ完了扱い)。 互換性のため
+        # sell_feed_uploader 系の code 17 も同列で扱う。
         # - 231 "Item not found" (= ended/削除済 listing に Revise 投げた)
         # - 17 "listing has been deleted or you are not the seller" (= FileExchange 系の旧 code)
-        is_safe_failure = res["error_code"] in ("17", "231")
+        # - 21916750 "FixedPrice item ended" (= sold/expired/manual end で既に inactive、
+        #   取下げ無用、 dropshipping_model 前提だと売れた item は別経路で処理される、
+        #   2026-06-04 追加: 3 cycle 連続 ng=1 で汎用エラー閾値超アラート対策)
+        is_safe_failure = res["error_code"] in ("17", "231", "21916750")
         success = res["success"] or is_safe_failure
         entry = {
             **item,

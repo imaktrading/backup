@@ -84,6 +84,18 @@ def test_uploader_safe_failure_code_231_treated_as_ok():
     assert '"231"' in src or "'231'" in src
 
 
+def test_uploader_safe_failure_code_21916750_treated_as_ok():
+    """trading_api_uploader: err 21916750 (FixedPrice item ended) は safe failure 扱い.
+
+    listing が sold / expired / manual end で既に inactive → 取下げ無用 (= 監視くん
+    としては 目的達成済)。 2026-06-04 cycle で 3 cycle 連続 ng=1 アラート 発火、
+    本 code を safe failure に追加で 解消。
+    """
+    from ebay_actions import trading_api_uploader  # noqa: PLC0415
+    src = Path(trading_api_uploader.__file__).read_text(encoding="utf-8")
+    assert '"21916750"' in src or "'21916750'" in src
+
+
 def test_parse_variation_specifics():
     """RelationshipDetails 'Sizes=A|Color=B' → dict 解析."""
     from ebay_actions.trading_api_uploader import _parse_variation_specifics  # noqa: PLC0415
