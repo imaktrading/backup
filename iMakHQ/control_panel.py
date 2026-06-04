@@ -1272,6 +1272,49 @@ class ListingPanel:
                       "  ・Listing quality report"),
             ).pack(anchor="w", pady=(4, 0))
 
+            # ② レポート鮮度: 各レポートの「内容の日付」が何日前か。古いまま判断する事故を防ぐ。
+            #   日付はファイル名から読む(eBay が report 生成日を埋める)。mtime はフォルダに
+            #   置き直すと更新され実態より新しく見えるので使わない。
+            def _file_report_date(path):
+                import datetime as _dt
+                b = os.path.basename(path)
+                m = re.search(r"(\d{4})-(\d{2})-(\d{2})", b)            # YYYY-MM-DD (active/orders/unsold)
+                if m:
+                    return _dt.date(int(m[1]), int(m[2]), int(m[3]))
+                m = re.search(r"(\d{2})_(\d{2})_(\d{4})", b)            # MM_DD_YYYY (quality)
+                if m:
+                    return _dt.date(int(m[3]), int(m[1]), int(m[2]))
+                return _dt.date.fromtimestamp(os.path.getmtime(path))   # fallback: mtime
+
+            def _report_freshness():
+                import glob as _glob
+                import datetime as _dt
+                pats = [("active", "eBay-all-active-listings-report*"),
+                        ("orders", "ebay-all-orders-report*"),
+                        ("unsold", "eBay-unsold-listings-report*"),
+                        ("quality", "Listing quality report*")]
+                today = _dt.date.today()
+                parts, worst = [], 0
+                for nm, pat in pats:
+                    fs = _glob.glob(os.path.join(REPORTS_DIR, pat))
+                    if not fs:
+                        parts.append(f"{nm} ✗無し")
+                        worst = 999
+                        continue
+                    newest = max(_file_report_date(p) for p in fs)
+                    ago = (today - newest).days
+                    parts.append(f"{nm} {ago}日前")
+                    worst = max(worst, ago)
+                return "📅 レポート鮮度:  " + "  /  ".join(parts), worst
+            try:
+                _fresh_txt, _worst = _report_freshness()
+                _fg = "red" if _worst >= 4 else "#0a0"
+                _tip = "  ← 古い。再DL推奨" if _worst >= 4 else ""
+                tk.Label(guide, anchor="w", font=("Yu Gothic UI", 9, "bold"),
+                         fg=_fg, text=_fresh_txt + _tip).pack(anchor="w", pady=(4, 0))
+            except Exception:
+                pass
+
             # 📊 分析 (押すと結果ファイルが開く)
             ana = ttk.LabelFrame(scroll_frame, text="📊 分析 (押すと結果ファイルが開く)", padding=4)
             ana.pack(fill="x", padx=4, pady=(4, 0))
@@ -1291,6 +1334,39 @@ class ListingPanel:
             d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ / 整理", padding=2)
             d2.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
             _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=2, compact=True)
+
+            # ③ 在庫なし進捗: CULL停止の残件数(約何回分) と RESTOCK再仕入れ(US)商品数。
+            def _oos_progress():
+                import glob as _glob
+                import csv as _csv
+                fs = _glob.glob(os.path.join(WORKSPACE, "iMakHQ", "funnel_output", "funnel_*.csv"))
+                if not fs:
+                    return None
+                rows = list(_csv.DictReader(open(max(fs, key=os.path.getmtime), encoding="utf-8")))
+
+                def _fl(r):
+                    return (r.get("flags") or "").split("|")
+
+                def _ai(x):
+                    try:
+                        return int(float(x))
+                    except (ValueError, TypeError):
+                        return 0
+                cull = sum(1 for r in rows if "CULL" in _fl(r) and _ai(r.get("age_days")) >= 21)
+                restock = len({(r.get("title") or "").lower() for r in rows
+                               if "RESTOCK" in _fl(r) and r.get("site") == "US"})
+                return cull, restock
+            try:
+                _prog = _oos_progress()
+                if _prog:
+                    _cull_n, _rs_n = _prog
+                    _runs = -(-_cull_n // 50)  # ceil
+                    tk.Label(scroll_frame, anchor="w", font=("Yu Gothic UI", 9, "bold"),
+                             fg="#444", text=(f"   🛒 RESTOCK再仕入れ(US) {_rs_n}商品   "
+                                              f"｜   🧹 CULL停止 残 {_cull_n}件 (50件/回 = 約{_runs}回分)")
+                             ).pack(anchor="w", padx=4, pady=(2, 0))
+            except Exception:
+                pass
 
             if ug["report"]:
                 rep = ttk.LabelFrame(scroll_frame, text="📈 レポート", padding=4)
