@@ -897,12 +897,8 @@ class HomePanel:
         ttk.Label(nav, text=" v2", font=("", 16, "bold"), foreground="#cc0000").pack(side="left")
         ttk.Label(nav, text=" [C:\\dev\\iMak]", font=("", 10, "bold"), foreground="#008000").pack(side="left")
         ttk.Label(nav, text="  ©iMak Trading", font=("", 10), foreground="gray").pack(side="left")
-        pending_count, _ = _read_pending_tasks()
-        task_label = f"📝 宿題 ({pending_count}件)" if pending_count else "📝 宿題"
+        # 宿題 / URL入力 ボタンは 2026-06-04 撤去 (機能コード=URLInputDialog/open_tasks は残置=戻せる)
         ttk.Button(nav, text="📜 リスティングスクリプト一覧", command=self.open_listing).pack(side="right", padx=2)
-        ttk.Button(nav, text="📥 URL入力", command=self.open_url_input).pack(side="right", padx=2)
-        self.tasks_btn = ttk.Button(nav, text=task_label, command=self.open_tasks)
-        self.tasks_btn.pack(side="right", padx=2)
         ttk.Button(nav, text="🔄 更新", command=self.refresh_dashboard).pack(side="right", padx=2)
 
         # ストア概要
@@ -1264,51 +1260,80 @@ class ListingPanel:
             return 0 if SCRIPTS[new_idx].get("verified", False) else 1
         cat_order = sorted(categories.keys(), key=_cat_verified)
 
-        # 2) カテゴリ別 Labelframe を 3 列で配置 (verified 先頭)
-        cat_outer = ttk.Frame(scroll_frame)
-        cat_outer.pack(fill="x", padx=4, pady=4)
+        # 2) utility をグループ分類 (cmd のスクリプト名で判定)
+        def _ugroup(idx):
+            cmd = " ".join(SCRIPTS[idx].get("cmd", []))
+            if any(s in cmd for s in ("listing_funnel", "demand_winners", "title_keyword_proposal",
+                                      "amazon_v8_check", "mercari_psa_resource", "mercari_gshock_resource",
+                                      "ebay_rate_limits")):
+                return "pdca"
+            if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
+                return "discover"
+            if any(s in cmd for s in ("dump_us_qty1_sku", "montbell_end_items")):
+                return "relist"
+            return "report"
+        ug = {"pdca": [], "discover": [], "relist": [], "report": []}
+        for idx in utilities:
+            ug[_ugroup(idx)].append(idx)
+
+        # 共通: (label, idx) のリストを ncol 列グリッドで描画
+        def _grid_named(parent, items, ncol=4):
+            for col in range(ncol):
+                parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
+            for k, (text, idx) in enumerate(items):
+                color = SCRIPTS[idx].get("label_fg") or ("#0066cc" if SCRIPTS[idx].get("verified", False) else "black")
+                tk.Button(parent, text=text, font=("", 10, "bold"), fg=color,
+                          width=20, height=2, wraplength=180, justify="center",
+                          command=lambda i=idx: self.run_script(i)).grid(
+                    row=k // ncol, column=k % ncol, padx=4, pady=4, sticky="nsew")
+
+        # ===== 🆕 新規出品 =====
+        new_sec = ttk.LabelFrame(scroll_frame, text="🆕 新規出品", padding=6)
+        new_sec.pack(fill="x", padx=4, pady=(4, 8))
+        cat_outer = ttk.Frame(new_sec)
+        cat_outer.pack(fill="x")
         n_cat_cols = 3
         for col in range(n_cat_cols):
             cat_outer.columnconfigure(col, weight=1, uniform="catcol")
-        for ci, cat_name in enumerate(cat_order):
-            actions = categories[cat_name]
-            r, c = divmod(ci, n_cat_cols)
+        gi = 0
+        for cat_name in cat_order:
+            new_idx = categories[cat_name].get("new")
+            if new_idx is None:
+                continue
+            r, c = divmod(gi, n_cat_cols)
+            gi += 1
             frame = ttk.LabelFrame(cat_outer, text=cat_name, padding=4)
             frame.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
-            # 「新規」ボタン (verified=True → 青、それ以外 → 黒)
-            new_idx = actions.get("new")
-            if new_idx is not None:
-                new_color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
-                tk.Button(
-                    frame, text="新規", font=("", 10, "bold"),
-                    fg=new_color, width=10, height=1,
-                    command=lambda idx=new_idx: self.run_script(idx),
-                ).pack(side="left", padx=4, pady=2)
-            # 「再出品」ボタン (黒)
-            relist_idx = actions.get("relist")
-            if relist_idx is not None:
-                tk.Button(
-                    frame, text="再出品", font=("", 10, "bold"),
-                    fg="black", width=10, height=1,
-                    command=lambda idx=relist_idx: self.run_script(idx),
-                ).pack(side="left", padx=4, pady=2)
+            color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
+            tk.Button(frame, text="新規", font=("", 10, "bold"), fg=color, width=12, height=1,
+                      command=lambda idx=new_idx: self.run_script(idx)).pack(padx=4, pady=2)
+            # PSA TCG は cert/URL 入力が新規の入口 → 同じ枠に移設 (nav から撤去した分)
+            if cat_name == "PSA TCG":
+                tk.Button(frame, text="📥 URL入力", font=("", 9), fg="black", width=12, height=1,
+                          command=self.open_url_input).pack(padx=4, pady=2)
+        if ug["discover"]:
+            disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)
+            disc.pack(fill="x", pady=(6, 0))
+            _grid_named(disc, [(SCRIPTS[i]["label"], i) for i in ug["discover"]])
 
-        # 3) Utility 単独ボタンは 4 列 grid で別枠
-        util_outer = ttk.LabelFrame(scroll_frame, text="Utility / 分析", padding=4)
-        util_outer.pack(fill="x", padx=4, pady=8)
-        n_util_cols = 4
-        for col in range(n_util_cols):
-            util_outer.columnconfigure(col, weight=1, uniform="utilcol")
-        for ui, idx in enumerate(utilities):
-            script = SCRIPTS[idx]
-            r, c = divmod(ui, n_util_cols)
-            # label_fg 指定優先 > verified の青 > black
-            label_color = script.get("label_fg") or ("#0066cc" if script.get("verified", False) else "black")
-            tk.Button(
-                util_outer, text=script["label"], font=("", 10, "bold"),
-                fg=label_color, width=20, height=2, wraplength=180, justify="center",
-                command=lambda i=idx: self.run_script(i),
-            ).grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+        # ===== 🔧 既存メンテ =====
+        mnt_sec = ttk.LabelFrame(scroll_frame, text="🔧 既存メンテ", padding=6)
+        mnt_sec.pack(fill="x", padx=4, pady=8)
+        pdca = ttk.LabelFrame(mnt_sec, text="📊 出品改善 PDCA (4レポート → ファネル分析)", padding=4)
+        pdca.pack(fill="x")
+        _grid_named(pdca, [(SCRIPTS[i]["label"], i) for i in ug["pdca"]])
+        # 再出品・取下げ: カテゴリ別「再出品」+ relist utility をまとめて
+        relist_items = [(f"{cat} 再出品", categories[cat]["relist"])
+                        for cat in cat_order if categories[cat].get("relist") is not None]
+        relist_items += [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
+        if relist_items:
+            rel = ttk.LabelFrame(mnt_sec, text="🔁 再出品・取下げ", padding=4)
+            rel.pack(fill="x", pady=(6, 0))
+            _grid_named(rel, relist_items)
+        if ug["report"]:
+            rep = ttk.LabelFrame(mnt_sec, text="📈 レポート・分析", padding=4)
+            rep.pack(fill="x", pady=(6, 0))
+            _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]])
 
         # 状態ライン
         status_frame = ttk.Frame(root)
