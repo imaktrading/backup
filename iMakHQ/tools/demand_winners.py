@@ -201,7 +201,7 @@ def facets(vein, title):
         out.append(("サブ", "UT " + (_first(t, _FRANCHISE) or "他"), "UNIQLO UT " + (_first(t, _FRANCHISE) or "")))
         sz = size_of(title)
         if sz:
-            out.append(("サイズ", sz, None))
+            out.append(("サイズ", f"US {sz}", None))
         col = color_of(title)
         if col:
             out.append(("色", col, None))
@@ -216,7 +216,7 @@ def facets(vein, title):
         out.append(("ライン", f"Montbell {ln}", f"モンベル {ln}"))
         sz = size_of(title)
         if sz:
-            out.append(("サイズ", sz, None))
+            out.append(("サイズ", f"US {sz}", None))
         col = color_of(title)
         if col:
             out.append(("色", col, None))
