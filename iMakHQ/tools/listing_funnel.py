@@ -248,11 +248,10 @@ def write_xlsx(path, rows, c, summary_lines):
     cols = [("item_id", 13), ("title", 46), ("site", 6), ("category", 20), ("price", 8),
             ("trend_price", 10), ("qty", 5), ("sold_qty", 6), ("sales90", 8), ("watch", 7),
             ("impr", 7), ("ctr%", 7), ("photos", 7), ("keywords", 9), ("relist_status", 14), ("ebay_url", 32)]
-    for name, _ in buckets:
-        items = c.get(name, [])
+    def write_sheet(sh_name, items):
         if not items:
-            continue
-        sh = wb.create_sheet(name[:31])
+            return
+        sh = wb.create_sheet(sh_name[:31])
         for j, (h, w) in enumerate(cols, start=1):
             sh.cell(row=1, column=j, value=h).font = Font(bold=True)
             sh.column_dimensions[sh.cell(row=1, column=j).column_letter].width = w
@@ -263,6 +262,13 @@ def write_xlsx(path, rows, c, summary_lines):
                     r.get("relist_status", ""), r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
             for j, v in enumerate(vals, start=1):
                 sh.cell(row=i, column=j, value=v)
+
+    # 在庫あり全件 / 在庫なし全件 (Summary の次に配置 = 一覧の起点)
+    if rows:
+        write_sheet("在庫あり", sorted([r for r in rows if r["qty"] != 0], key=lambda x: (-x["impr"], -x["watch"])))
+        write_sheet("在庫なし", sorted([r for r in rows if r["qty"] == 0], key=lambda x: -(x["sold_qty"] + x["watch"])))
+    for name, _ in buckets:
+        write_sheet(name, c.get(name, []))
     wb.save(path)
 
 
