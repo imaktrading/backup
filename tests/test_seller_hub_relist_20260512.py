@@ -112,6 +112,8 @@ def test_control_panel_labelframe_layout():
     # 2026-06-04 再構成: 新規出品 / 既存メンテ を mode で分割 (2ボタン化)
     assert 'mode="new"' in src and 'self.mode' in src
     assert "新規出品" in src and "既存メンテ" in src
-    assert "出品改善 PDCA" in src
     # 新規はカテゴリ名ラベルの大ボタン (text="新規" 固定でなく cat_name)
     assert "text=cat_name" in src
+    # 既存メンテ: 分析 / D①在庫あり / D②在庫なし に分類、分析は open_after で結果ファイルを開く
+    assert "D① 在庫あり" in src and "D② 在庫なし" in src
+    assert "open_after" in src

@@ -395,19 +395,21 @@ SCRIPTS = [
     #       C:/dev/iMak_data/seller_hub/reports/ に置く (無ければデスクトップの所定フォルダ)
     {
         "category": None, "type": "utility",
-        "label": "📊 P/C: ファネル分析(Excel)",
+        "label": "📊 ファネル分析",
         "label_fg": "blue",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "listing_funnel.py"],
         "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/出品ファネル分析_*.xlsx",
     },
     {
         "category": None, "type": "utility",
-        "label": "📈 P: 需要・新規強化リスト",
+        "label": "📈 需要・新規強化リスト",
         "label_fg": "blue",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "demand_winners.py"],
         "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/新規出品強化_グループ別_*.csv",
     },
     {
         "category": None, "type": "utility",
@@ -1177,16 +1179,18 @@ class ListingPanel:
         # 2) utility をグループ分類 (cmd のスクリプト名で判定)
         def _ugroup(idx):
             cmd = " ".join(SCRIPTS[idx].get("cmd", []))
-            if any(s in cmd for s in ("listing_funnel", "demand_winners", "title_keyword_proposal",
-                                      "amazon_v8_check", "mercari_psa_resource", "mercari_gshock_resource",
-                                      "ebay_rate_limits")):
-                return "pdca"
+            if any(s in cmd for s in ("listing_funnel", "demand_winners")):
+                return "analyze"   # 📊 分析 (Plan/Check)
+            if any(s in cmd for s in ("title_keyword_proposal", "amazon_v8_check", "mercari_gshock_resource")):
+                return "do1"       # D① 在庫あり (タイトル/価格/代替仕入れ)
+            if "mercari_psa_resource" in cmd:
+                return "do2"       # D② 在庫なし (再仕入れ)
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
                 return "discover"
             if any(s in cmd for s in ("dump_us_qty1_sku", "montbell_end_items")):
-                return "relist"
+                return "relist"    # 取り下げ再出品 → D① に統合
             return "report"
-        ug = {"pdca": [], "discover": [], "relist": [], "report": []}
+        ug = {"analyze": [], "do1": [], "do2": [], "discover": [], "relist": [], "report": []}
         for idx in utilities:
             ug[_ugroup(idx)].append(idx)
 
@@ -1256,19 +1260,28 @@ class ListingPanel:
             tk.Button(hb, text="📁 reports フォルダを開く", font=("", 10, "bold"),
                       command=_open_reports).pack(side="left")
 
-            pdca = ttk.LabelFrame(scroll_frame, text="② 分析 / ③ 需要 — 出品改善 PDCA", padding=4)
-            pdca.pack(fill="x", padx=4, pady=(4, 0))
-            _grid_named(pdca, [(SCRIPTS[i]["label"], i) for i in ug["pdca"]])
-            # 再出品・取下げ: カテゴリ別「再出品」+ relist utility をまとめて
-            relist_items = [(f"{cat} 再出品", categories[cat]["relist"])
-                            for cat in cat_order if categories[cat].get("relist") is not None]
-            relist_items += [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
-            if relist_items:
-                rel = ttk.LabelFrame(scroll_frame, text="🔁 再出品・取下げ", padding=4)
-                rel.pack(fill="x", padx=4, pady=(8, 0))
-                _grid_named(rel, relist_items)
+            # 📊 分析 (押すと結果ファイルが開く)
+            ana = ttk.LabelFrame(scroll_frame, text="📊 ②分析 / ③需要 (押すと結果ファイルが開く)", padding=4)
+            ana.pack(fill="x", padx=4, pady=(4, 0))
+            _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
+
+            # D① 在庫あり (直す＋取り下げ再出品を統合)
+            do1_items = [(SCRIPTS[i]["label"], i) for i in ug["do1"]]
+            do1_items += [(f"{cat} 再出品", categories[cat]["relist"])
+                          for cat in cat_order if categories[cat].get("relist") is not None]
+            do1_items += [(SCRIPTS[i]["label"], i) for i in ug["relist"]]  # 取り下げ再出品
+            d1 = ttk.LabelFrame(scroll_frame, text="🔧 D① 在庫あり — 直す/再出品 (タイトル・価格・取り下げ再出品)", padding=4)
+            d1.pack(fill="x", padx=4, pady=(8, 0))
+            _grid_named(d1, do1_items)
+
+            # D② 在庫なし (再仕入れ)
+            if ug["do2"]:
+                d2 = ttk.LabelFrame(scroll_frame, text="📦 D② 在庫なし — 再仕入れ (同カード/型番をメルカリ等で)", padding=4)
+                d2.pack(fill="x", padx=4, pady=(8, 0))
+                _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["do2"]])
+
             if ug["report"]:
-                rep = ttk.LabelFrame(scroll_frame, text="📈 レポート・分析", padding=4)
+                rep = ttk.LabelFrame(scroll_frame, text="📈 レポート", padding=4)
                 rep.pack(fill="x", padx=4, pady=(8, 0))
                 _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]])
 
@@ -1337,6 +1350,7 @@ class ListingPanel:
         if self.proc and self.proc.poll() is None:
             messagebox.showwarning("実行中", "他のスクリプトが実行中です。停止してから実行してください。")
             return
+        self._current_idx = idx  # 完了時 open_after 用
         cmd = list(script["cmd"])
         for pname, entry in self.param_entries[idx].items():
             v = entry.get().strip()
@@ -1404,6 +1418,20 @@ class ListingPanel:
                 item = self.queue.get_nowait()
                 if isinstance(item, tuple) and item[0] == "__done__":
                     self.append_log(f"\n--- 終了 (returncode={item[1]}) ---\n")
+                    # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
+                    _oa = SCRIPTS[getattr(self, "_current_idx", -1)].get("open_after") if getattr(self, "_current_idx", -1) >= 0 else None
+                    if _oa and item[1] == 0:
+                        try:
+                            import glob as _g
+                            hits = _g.glob(_oa)
+                            if hits:
+                                latest = max(hits, key=os.path.getmtime)
+                                os.startfile(latest)
+                                self.append_log(f"📂 開く: {os.path.basename(latest)}\n")
+                            else:
+                                self.append_log(f"⚠️ 出力ファイルが見つかりません: {_oa}\n")
+                        except Exception as _e:
+                            self.append_log(f"⚠️ ファイル起動失敗: {_e}\n")
                     # Step 2: csv_postprocess_excluder (check_csv NO-GO 行を CSV 物理除外)
                     # Step 2.5: post_title_fix (TCG タイトル長補強・PSA 名前正規化, 2026-05-02 追加)
                     # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
