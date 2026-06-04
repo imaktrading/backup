@@ -1105,7 +1105,9 @@ class ListingPanel:
         scrollbar = ttk.Scrollbar(top_frame, orient="vertical", command=canvas.yview)
         scroll_frame = ttk.Frame(canvas)
         scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        _win_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        # 内側フレームを canvas 幅いっぱいに広げる (= 右側の空白を無くし全幅レイアウトに)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(_win_id, width=e.width))
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -1156,6 +1158,7 @@ class ListingPanel:
         # 共通: (label, idx) のリストを ncol 列グリッドで描画 (compact=詰めた配置)
         def _grid_named(parent, items, ncol=4, compact=False):
             w, h, pad, wl = (15, 1, 2, 130) if compact else (20, 2, 4, 180)
+            ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない (右の空セル防止)
             for col in range(ncol):
                 parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
             for k, (text, idx) in enumerate(items):
