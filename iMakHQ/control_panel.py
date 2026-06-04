@@ -356,13 +356,6 @@ SCRIPTS = [
     },
     {
         "category": None, "type": "utility",
-        "label": "モンベル 取下げCSV生成",
-        "cwd": f"{WORKSPACE}/iMakMercari",
-        "cmd": ["python", "montbell_end_items.py"],
-        "params": [],
-    },
-    {
-        "category": None, "type": "utility",
         "label": "Mercari スカウト",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_scout.py"],
@@ -1187,8 +1180,8 @@ class ListingPanel:
                 return "do2"       # D② 在庫なし (再仕入れ)
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
                 return "discover"
-            if any(s in cmd for s in ("dump_us_qty1_sku", "montbell_end_items")):
-                return "relist"    # 取り下げ再出品 → D① に統合
+            if "dump_us_qty1_sku" in cmd:
+                return "relist"    # 取り下げ再出品(view0死蔵) → D① に統合
             return "report"
         ug = {"analyze": [], "do1": [], "do2": [], "discover": [], "relist": [], "report": []}
         for idx in utilities:
@@ -1270,7 +1263,10 @@ class ListingPanel:
             do1_items += [(f"{cat} 再出品", categories[cat]["relist"])
                           for cat in cat_order if categories[cat].get("relist") is not None]
             do1_items += [(SCRIPTS[i]["label"], i) for i in ug["relist"]]  # 取り下げ再出品
-            d1 = ttk.LabelFrame(scroll_frame, text="🔧 D① 在庫あり — 直す/再出品 (タイトル・価格・取り下げ再出品)", padding=4)
+            d1 = ttk.LabelFrame(
+                scroll_frame,
+                text="🔧 D① 在庫あり — NO_SEARCH→取下げ再出品(watcher無)/タイトル ・ NO_CONVERT→価格 ・ NO_CLICK→画像(⑤)",
+                padding=4)
             d1.pack(fill="x", padx=4, pady=(8, 0))
             _grid_named(d1, do1_items)
 
