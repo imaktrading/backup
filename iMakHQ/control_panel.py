@@ -404,32 +404,13 @@ SCRIPTS = [
         "params": [],
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/新規出品強化_グループ別_*.csv",
     },
+    # 2026-06-04: G-SHOCK価格調査(amazon_v8_check/mercari_gshock_resource)とタイトル改修(title_keyword_proposal)は
+    #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
     {
         "category": None, "type": "utility",
-        "label": "✏️ D①: タイトル改修案",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "title_keyword_proposal.py"],
-        "params": [],
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "💴 D③: Amazon原価→V8(G-SHOCK)",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "amazon_v8_check.py"],
-        "params": [],
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "🃏 D⑤: PSA再仕入れ照合(メルカリ)",
+        "label": "🃏 PSA再仕入れ照合(メルカリ)",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "mercari_psa_resource.py"],
-        "params": [],
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "⌚ D③: G-SHOCK代替仕入れ(メルカリ)",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "mercari_gshock_resource.py"],
         "params": [],
     },
 ]
@@ -1174,16 +1155,14 @@ class ListingPanel:
             cmd = " ".join(SCRIPTS[idx].get("cmd", []))
             if any(s in cmd for s in ("listing_funnel", "demand_winners")):
                 return "analyze"   # 📊 分析 (Plan/Check)
-            if any(s in cmd for s in ("title_keyword_proposal", "amazon_v8_check", "mercari_gshock_resource")):
-                return "do1"       # D① 在庫あり (タイトル/価格/代替仕入れ)
             if "mercari_psa_resource" in cmd:
-                return "do2"       # D② 在庫なし (再仕入れ)
+                return "oos"       # 在庫なし 再仕入れ
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
-                return "discover"
+                return "discover"  # 新規ネタ探し
             if "dump_us_qty1_sku" in cmd:
-                return "relist"    # 取り下げ再出品(view0死蔵) → D① に統合
+                return "relist"    # 在庫あり 取り下げ再出品(view0死蔵)
             return "report"
-        ug = {"analyze": [], "do1": [], "do2": [], "discover": [], "relist": [], "report": []}
+        ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": []}
         for idx in utilities:
             ug[_ugroup(idx)].append(idx)
 
@@ -1243,7 +1222,7 @@ class ListingPanel:
                       "    (全アクティブ出品 / Listing quality report / 売れ残り / 注文)\n"
                       "② 「📊ファネル分析」→ デスクトップに分析Excel(在庫あり/なし・5バケツ)\n"
                       "③ 「📈需要・新規強化」で勝ち筋カテゴリを確認\n"
-                      "④ D①〜⑤ ボタンで個別判断 (タイトル/価格/再仕入れ)\n"
+                      "④ 在庫あり→取り下げ再出品 / 在庫なし→再仕入れ で対応\n"
                       "⑤ 翌月また②→ 件数の増減で効果測定 (Check)"),
             ).pack(anchor="w")
             hb = ttk.Frame(guide)
@@ -1254,27 +1233,24 @@ class ListingPanel:
                       command=_open_reports).pack(side="left")
 
             # 📊 分析 (押すと結果ファイルが開く)
-            ana = ttk.LabelFrame(scroll_frame, text="📊 ②分析 / ③需要 (押すと結果ファイルが開く)", padding=4)
+            ana = ttk.LabelFrame(scroll_frame, text="📊 分析 (押すと結果ファイルが開く)", padding=4)
             ana.pack(fill="x", padx=4, pady=(4, 0))
             _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
 
-            # D① 在庫あり (直す＋取り下げ再出品を統合)
-            do1_items = [(SCRIPTS[i]["label"], i) for i in ug["do1"]]
-            do1_items += [(f"{cat} 再出品", categories[cat]["relist"])
-                          for cat in cat_order if categories[cat].get("relist") is not None]
-            do1_items += [(SCRIPTS[i]["label"], i) for i in ug["relist"]]  # 取り下げ再出品
-            d1 = ttk.LabelFrame(
-                scroll_frame,
-                text="🔧 D① 在庫あり — NO_SEARCH→取下げ再出品(watcher無)/タイトル ・ NO_CONVERT→価格 ・ NO_CLICK→画像(⑤)",
-                padding=4)
-            d1.pack(fill="x", padx=4, pady=(8, 0))
-            _grid_named(d1, do1_items)
+            # 🔧 在庫あり 再出品 (取り下げ再出品 + カテゴリ別再出品)
+            relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
+            relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
+                             for cat in cat_order if categories[cat].get("relist") is not None]
+            if relist_items:
+                d1 = ttk.LabelFrame(scroll_frame, text="🔧 在庫あり — 取り下げ再出品 (検索リフレッシュ)", padding=4)
+                d1.pack(fill="x", padx=4, pady=(8, 0))
+                _grid_named(d1, relist_items)
 
-            # D② 在庫なし (再仕入れ)
-            if ug["do2"]:
-                d2 = ttk.LabelFrame(scroll_frame, text="📦 D② 在庫なし — 再仕入れ (同カード/型番をメルカリ等で)", padding=4)
+            # 📦 在庫なし 再仕入れ
+            if ug["oos"]:
+                d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ (同カード/型番を再入手)", padding=4)
                 d2.pack(fill="x", padx=4, pady=(8, 0))
-                _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["do2"]])
+                _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]])
 
             if ug["report"]:
                 rep = ttk.LabelFrame(scroll_frame, text="📈 レポート", padding=4)
