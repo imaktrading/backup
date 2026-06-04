@@ -1236,20 +1236,20 @@ class ListingPanel:
             ana.pack(fill="x", padx=4, pady=(4, 0))
             _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
 
-            # 🔧 在庫あり 再出品 (取り下げ再出品 + カテゴリ別再出品)
+            # 🔧 在庫あり / 📦 在庫なし を横並び
+            stock_row = ttk.Frame(scroll_frame)
+            stock_row.pack(fill="x", padx=4, pady=(8, 0))
+            stock_row.columnconfigure(0, weight=1, uniform="stk")
+            stock_row.columnconfigure(1, weight=1, uniform="stk")
             relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
             relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
                              for cat in cat_order if categories[cat].get("relist") is not None]
-            if relist_items:
-                d1 = ttk.LabelFrame(scroll_frame, text="🔧 在庫あり — 取り下げ再出品 (検索リフレッシュ)", padding=4)
-                d1.pack(fill="x", padx=4, pady=(8, 0))
-                _grid_named(d1, relist_items)
-
-            # 📦 在庫なし 再仕入れ
-            if ug["oos"]:
-                d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ (同カード/型番を再入手)", padding=4)
-                d2.pack(fill="x", padx=4, pady=(8, 0))
-                _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]])
+            d1 = ttk.LabelFrame(stock_row, text="🔧 在庫あり — 取り下げ再出品", padding=4)
+            d1.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+            _grid_named(d1, relist_items, ncol=2)
+            d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ", padding=4)
+            d2.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+            _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=2)
 
             if ug["report"]:
                 rep = ttk.LabelFrame(scroll_frame, text="📈 レポート", padding=4)
