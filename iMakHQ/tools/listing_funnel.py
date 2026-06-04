@@ -159,6 +159,13 @@ def classify(rows):
     oos = [r for r in rows if r["qty"] == 0]
     has_lqr = [r for r in in_stock if r.get("has_lqr")]
 
+    # 在庫切れも分析: 需要シグナル(過去販売/watch/90d販売)があれば再仕入れ価値、皆無なら出品停止候補
+    def _demand(r):
+        return r["sold_qty"] + r["watch"] + r.get("sales90", 0)
+    restock = [r for r in oos if _demand(r) > 0]
+    cull = [r for r in oos if _demand(r) == 0]
+    restock.sort(key=lambda x: -_demand(x))
+
     # CTR 下位四分位 (impression がある listing で算出)
     ctrs = sorted([r["ctr"] for r in has_lqr if r["impr"] >= TH_IMPR_SHOWN])
     ctr_q1 = statistics.quantiles(ctrs, n=4)[0] if len(ctrs) >= 4 else (ctrs[0] if ctrs else 0)
@@ -184,7 +191,8 @@ def classify(rows):
     no_convert.sort(key=lambda x: -x["impr"])
     overpriced.sort(key=lambda x: -(x["price"] - x["trend_price"]))
     return {"NO_SEARCH": no_search, "NO_CLICK": no_click, "NO_CONVERT": no_convert,
-            "OVERPRICED": overpriced, "DEAD_SIMPLE": dead_simple, "OUT_OF_STOCK": oos, "ctr_q1": ctr_q1}
+            "OVERPRICED": overpriced, "DEAD_SIMPLE": dead_simple, "OUT_OF_STOCK": oos,
+            "RESTOCK": restock, "CULL": cull, "ctr_q1": ctr_q1}
 
 
 def _sec(title, note, items, limit=20):
@@ -256,7 +264,21 @@ def main():
     _sec("② クリックされない NO_CLICK", f"在庫あり & impr/日>={TH_IMPR_SHOWN} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
     _sec("③ 買われない NO_CONVERT", "在庫あり & CTR有 & 無販売 → 価格(適正価格比)/説明", c["NO_CONVERT"])
     _sec("④ 高すぎ OVERPRICED", "在庫あり & 価格 > eBay適正価格×1.05 → 値下げ余地 (差額大きい順)", c["OVERPRICED"])
-    print(f"\n(参考) DEAD_SIMPLE(非US等・view無): {len(c['DEAD_SIMPLE'])}件 / OUT_OF_STOCK: {len(c['OUT_OF_STOCK'])}件")
+
+    def _sec_oos(title, note, items, limit=20):
+        print(f"\n=== {title} ({len(items)}件) ===\n   {note}")
+        if not items:
+            print("   (該当なし)"); return
+        print(f"   {'item_id':<13}{'site':>4}{'sold':>5}{'watch':>6}{'$':>7}  title")
+        for r in items[:limit]:
+            print(f"   {r['item_id']:<13}{r['site']:>4}{r['sold_qty']+r.get('sales90',0):>5}{r['watch']:>6}{r['price']:>7.0f}  {r['title'][:38]}")
+        if len(items) > limit:
+            print(f"   ... 他 {len(items) - limit} 件 (CSV 参照)")
+
+    print("\n--- 在庫切れ(qty0)の分析 ---")
+    _sec_oos("⑤ 再仕入れ優先 RESTOCK", "在庫切れ & 過去販売 or watcher 有 → 需要実証済、仕入れ先を再確保 (需要大きい順)", c["RESTOCK"])
+    print(f"\n(参考) CULL(在庫切れ&需要皆無=出品停止候補): {len(c['CULL'])}件 — 一度も売れず watcher も付かず。整理対象")
+    print(f"(参考) DEAD_SIMPLE(非US等・LQR無): {len(c['DEAD_SIMPLE'])}件")
 
     if not args.no_csv:
         os.makedirs(OUT_DIR, exist_ok=True)
@@ -264,7 +286,7 @@ def main():
         for r in rows:
             tags = []
             if r["qty"] == 0: tags.append("OUT_OF_STOCK")
-            for k in ("NO_SEARCH", "NO_CLICK", "NO_CONVERT", "OVERPRICED", "DEAD_SIMPLE"):
+            for k in ("NO_SEARCH", "NO_CLICK", "NO_CONVERT", "OVERPRICED", "DEAD_SIMPLE", "RESTOCK", "CULL"):
                 if r in c[k]: tags.append(k)
             r["flags"] = "|".join(tags)
         fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",

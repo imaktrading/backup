@@ -77,6 +77,28 @@ def test_overpriced_vs_trend():
     assert {r["item_id"] for r in classify(rows)["OVERPRICED"]} == {"over"}
 
 
+def test_out_of_stock_split_restock_vs_cull():
+    """在庫切れは需要シグナルで分岐: 過去販売/watch/90d販売 有=RESTOCK, 皆無=CULL。需要大きい順。"""
+    rows = [
+        _row("sold_oos", qty=0, sold=3, watch=0),     # 過去販売 → RESTOCK
+        _row("watch_oos", qty=0, sold=0, watch=5),    # watcher → RESTOCK
+        _row("s90_oos", qty=0, sold=0, watch=0, sales90=2),  # 90d販売 → RESTOCK
+        _row("dead_oos", qty=0, sold=0, watch=0, sales90=0),  # 需要皆無 → CULL
+    ]
+    c = classify(rows)
+    assert {r["item_id"] for r in c["RESTOCK"]} == {"sold_oos", "watch_oos", "s90_oos"}
+    assert {r["item_id"] for r in c["CULL"]} == {"dead_oos"}
+    # 需要大きい順: sold_oos(3)+? ... watch_oos(5) が先頭
+    assert c["RESTOCK"][0]["item_id"] == "watch_oos"
+
+
+def test_in_stock_not_in_restock_or_cull():
+    """在庫あり listing は RESTOCK/CULL に入らない (在庫切れ専用)。"""
+    rows = [_row("instock", qty=1, watch=9, sold=0, impr=50, ctr=0.04)]
+    c = classify(rows)
+    assert c["RESTOCK"] == [] and c["CULL"] == []
+
+
 def test_non_lqr_falls_back_to_simple():
     """LQR 非対象(非US等)は impr/CTR が無いので watch/sold ベースの DEAD_SIMPLE。"""
     rows = [
