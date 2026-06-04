@@ -43,6 +43,7 @@ except Exception:
 DEFAULT_DATA_DIR = r"C:\dev\iMak_data\seller_hub\reports"
 FALLBACK_DATA_DIR = r"C:\Users\imax2\OneDrive\デスクトップ\新しいフォルダー (2)"
 OUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
+DESKTOP = r"C:\Users\imax2\OneDrive\デスクトップ"
 
 # 分類しきい値
 TH_IMPR_NONE = 3        # 1日あたり impression がこれ以下 = 検索に出ていない
@@ -195,6 +196,59 @@ def classify(rows):
             "RESTOCK": restock, "CULL": cull, "ctr_q1": ctr_q1}
 
 
+def write_xlsx(path, rows, c, summary_lines):
+    """バケツ別シートの Excel を出力 (Summary + 各バケツ + eBayリンク)。"""
+    import openpyxl
+    from openpyxl.styles import Font
+    wb = openpyxl.Workbook()
+    # Summary
+    ws = wb.active
+    ws.title = "Summary"
+    ws["A1"] = "出品物フルファネル分析 (Seller Hub レポート版)"
+    ws["A1"].font = Font(bold=True, size=13)
+    for i, line in enumerate(summary_lines, start=3):
+        ws.cell(row=i, column=1, value=line)
+    buckets = [
+        ("NO_SEARCH", "検索に出ていない (キーワード/カテゴリ)"),
+        ("NO_CLICK", "クリックされない (サムネ/タイトル/価格)"),
+        ("NO_CONVERT", "買われない (価格/説明)"),
+        ("OVERPRICED", "適正価格より高い (値下げ余地)"),
+        ("RESTOCK", "在庫切れだが需要実証済 (再仕入れ優先)"),
+        ("CULL", "在庫切れ&需要皆無 (出品停止候補)"),
+        ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)"),
+    ]
+    r0 = 3 + len(summary_lines) + 1
+    ws.cell(row=r0, column=1, value="バケツ").font = Font(bold=True)
+    ws.cell(row=r0, column=2, value="件数").font = Font(bold=True)
+    ws.cell(row=r0, column=3, value="意味/アクション").font = Font(bold=True)
+    for k, (name, desc) in enumerate(buckets, start=r0 + 1):
+        ws.cell(row=k, column=1, value=name)
+        ws.cell(row=k, column=2, value=len(c.get(name, [])))
+        ws.cell(row=k, column=3, value=desc)
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["C"].width = 44
+
+    cols = [("item_id", 13), ("title", 46), ("site", 6), ("category", 20), ("price", 8),
+            ("trend_price", 10), ("qty", 5), ("sold_qty", 6), ("sales90", 8), ("watch", 7),
+            ("impr", 7), ("ctr%", 7), ("photos", 7), ("keywords", 9), ("relist_status", 14), ("ebay_url", 32)]
+    for name, _ in buckets:
+        items = c.get(name, [])
+        if not items:
+            continue
+        sh = wb.create_sheet(name[:31])
+        for j, (h, w) in enumerate(cols, start=1):
+            sh.cell(row=1, column=j, value=h).font = Font(bold=True)
+            sh.column_dimensions[sh.cell(row=1, column=j).column_letter].width = w
+        for i, r in enumerate(items, start=2):
+            vals = [r["item_id"], r["title"], r["site"], r.get("category", ""), r["price"],
+                    r["trend_price"], r["qty"], r["sold_qty"], r.get("sales90", 0), r["watch"],
+                    round(r["impr"], 1), round(r["ctr"] * 100, 2), r.get("photos", 0), r.get("keywords", 0),
+                    r.get("relist_status", ""), f"https://www.ebay.com/itm/{r['item_id']}"]
+            for j, v in enumerate(vals, start=1):
+                sh.cell(row=i, column=j, value=v)
+    wb.save(path)
+
+
 def _sec(title, note, items, limit=20):
     print(f"\n=== {title} ({len(items)}件) ===\n   {note}")
     if not items:
@@ -255,9 +309,14 @@ def main():
     in_stock = [r for r in rows if r["qty"] != 0]
     lqr_n = sum(1 for r in rows if r["has_lqr"])
     n = max(len(rows), 1)
+    summary_lines = [
+        f"対象レポート: {os.path.basename(f_active)} 他",
+        f"listing={len(rows)}  サイト別={dict(site_c)}",
+        f"在庫切れqty0={oos}件({oos*100//n}%)  在庫あり={len(in_stock)}件  LQR深掘り対象(US)={lqr_n}件",
+    ]
     print(f"\n出品物フルファネル分析 (Seller Hub レポート版・API不使用)")
-    print(f"   listing={len(rows)}  サイト別={dict(site_c)}")
-    print(f"   在庫切れqty0={oos}件({oos*100//n}%)  在庫あり={len(in_stock)}件  LQR深掘り対象(US)={lqr_n}件")
+    for ln in summary_lines[1:]:
+        print("   " + ln)
 
     c = classify(rows)
     _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & impr/日<={TH_IMPR_NONE} → キーワード/カテゴリ不適合 (古い順)", c["NO_SEARCH"])
@@ -297,6 +356,12 @@ def main():
             for r in sorted(rows, key=lambda x: (-x["impr"], -x["watch"])):
                 w.writerow(r)
         print(f"CSV 出力: {path}")
+
+    # 見やすいバケツ別 Excel をデスクトップに出力
+    out_dir = DESKTOP if os.path.isdir(DESKTOP) else OUT_DIR
+    xlsx_path = os.path.join(out_dir, f"出品ファネル分析_{datetime.date.today():%Y%m%d}.xlsx")
+    write_xlsx(xlsx_path, rows, c, summary_lines)
+    print(f"Excel 出力: {xlsx_path}")
 
 
 if __name__ == "__main__":
