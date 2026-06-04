@@ -246,7 +246,24 @@ def download_active_listing_report(max_wait_min: int = 30,
         # Step 2: 新規スケジュール
         _log(f"[2] 新規 report スケジュール")
         if not _schedule_new_report(driver):
-            raise RuntimeError("Active Listing Report のスケジュール失敗 (UI 構造変更?)")
+            # 2026-06-04 追加: UI 構造変更で _schedule_new_report 失敗時の救済。
+            # 既存 link があれば再利用 (= 古いが「7日間 K 列更新ゼロ」よりマシ)。
+            # 「新規 listing 未反映」リスクは main.py:642 の stale 警告で気付ける。
+            # 根本対応 = _schedule_new_report の XPath 修正、 完了まで暫定。
+            _log("  [WARN] 新規 schedule 失敗 → 既存 link fallback 試行")
+            driver.get(REPORTS_URL)
+            time.sleep(8)
+            link = _find_recent_active_listing_link(driver)
+            if link:
+                _log(f"  fallback link 発見: {link[:80]}...")
+                driver.get(link)
+                csv_path = _wait_for_download(DL_DIR, before, max_wait_sec=180)
+                if csv_path:
+                    _log(f"  [OK] DL 完了 (fallback): {csv_path}")
+                    return csv_path
+            raise RuntimeError(
+                "Active Listing Report のスケジュール失敗 + fallback 既存 link なし "
+                "(UI 構造変更?)")
 
         # Step 3: 生成完了 polling (downloads ページを refresh しつつ確認)
         _log(f"[3] 生成完了 polling (最大 {max_wait_min} 分)")
