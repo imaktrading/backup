@@ -818,51 +818,37 @@ class HomePanel:
                   foreground="#333333", justify="left").pack(anchor="w")
         self._update_clocks()
 
-        # === 総合進捗テーブル ===
-        dash_frame = ttk.LabelFrame(root, text="📊 総合進捗（カテゴリ別アクティブ出品数 vs 目標）", padding=6)
-        dash_frame.pack(fill="x", padx=10, pady=(6, 4))
+        # === 進捗テーブル (総合 / 今月 を横並び・各半幅) ===  推奨アクション枠は撤去
+        prog_row = ttk.Frame(root)
+        prog_row.pack(fill="x", padx=10, pady=(6, 8))
+        prog_row.columnconfigure(0, weight=1, uniform="prog")
+        prog_row.columnconfigure(1, weight=1, uniform="prog")
 
+        def _tags(tree):
+            for tag, bg, fg in (("done", "#d4ffd4", "#006600"), ("blue", "#d4e6ff", "#003366"),
+                                ("yel", "#fff4c4", "#806600"), ("red", "#ffd4d4", "#800000")):
+                tree.tag_configure(tag, background=bg, foreground=fg)
+            tree.tag_configure("total", background="#e0e0ff", foreground="#000066", font=("", 10, "bold"))
+
+        dash_frame = ttk.LabelFrame(prog_row, text="📊 総合進捗 (vs 目標)", padding=6)
+        dash_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         cols = ("カテゴリ", "目標", "現在", "不足", "進捗", "優先度")
-        self.tree = ttk.Treeview(dash_frame, columns=cols, show="headings", height=8)
-        widths = (200, 60, 60, 60, 360, 80)
-        for c, w in zip(cols, widths):
+        self.tree = ttk.Treeview(dash_frame, columns=cols, show="headings", height=9)
+        for c, w in zip(cols, (130, 44, 44, 44, 130, 50)):
             self.tree.heading(c, text=c)
             self.tree.column(c, width=w, anchor="w" if c in ("カテゴリ", "進捗") else "center")
-        self.tree.pack(fill="x")
-        # 進捗率による色分け（背景＋フォアグラウンド）
-        self.tree.tag_configure("done",  background="#d4ffd4", foreground="#006600")  # 100% 緑
-        self.tree.tag_configure("blue",  background="#d4e6ff", foreground="#003366")  # >66% 青
-        self.tree.tag_configure("yel",   background="#fff4c4", foreground="#806600")  # 33-66% 黄
-        self.tree.tag_configure("red",   background="#ffd4d4", foreground="#800000")  # <33% 赤
-        self.tree.tag_configure("total", background="#e0e0ff", foreground="#000066", font=("", 10, "bold"))
+        self.tree.pack(fill="both", expand=True)
+        _tags(self.tree)
 
-        # === 月次進捗テーブル ===
-        month_frame = ttk.LabelFrame(root, text="📅 今月の出品進捗（月次目標に対して）", padding=6)
-        month_frame.pack(fill="x", padx=10, pady=4)
-
+        month_frame = ttk.LabelFrame(prog_row, text="📅 今月の進捗 (月次目標)", padding=6)
+        month_frame.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
         mcols = ("カテゴリ", "目標", "現在", "不足", "進捗")
-        self.month_tree = ttk.Treeview(month_frame, columns=mcols, show="headings", height=8)
-        mwidths = (200, 80, 80, 60, 400)
-        for c, w in zip(mcols, mwidths):
+        self.month_tree = ttk.Treeview(month_frame, columns=mcols, show="headings", height=9)
+        for c, w in zip(mcols, (130, 54, 54, 44, 130)):
             self.month_tree.heading(c, text=c)
             self.month_tree.column(c, width=w, anchor="w" if c in ("カテゴリ", "進捗") else "center")
-        self.month_tree.pack(fill="x")
-        self.month_tree.tag_configure("done",  background="#d4ffd4", foreground="#006600")
-        self.month_tree.tag_configure("blue",  background="#d4e6ff", foreground="#003366")
-        self.month_tree.tag_configure("yel",   background="#fff4c4", foreground="#806600")
-        self.month_tree.tag_configure("red",   background="#ffd4d4", foreground="#800000")
-        self.month_tree.tag_configure("total", background="#e0e0ff", foreground="#000066", font=("", 10, "bold"))
-
-        # 推奨メッセージ (スクロール対応 ScrolledText)
-        reco_frame = ttk.LabelFrame(root, text="💡 推奨アクション", padding=6)
-        reco_frame.pack(fill="x", padx=10, pady=(0, 10))
-        self.reco_text = scrolledtext.ScrolledText(
-            reco_frame, height=6, wrap="word",
-            font=("Yu Gothic UI", 10, "bold"),
-            fg="#cc5500", relief="flat", borderwidth=0,
-        )
-        self.reco_text.pack(fill="both", expand=True)
-        self.reco_text.config(state="disabled")
+        self.month_tree.pack(fill="both", expand=True)
+        _tags(self.month_tree)
 
         self.listing_windows = {}  # mode("new"/"maint") → リスティング別ウィンドウ (遅延生成)
         self.root.after(300, self.refresh_dashboard)
@@ -872,11 +858,8 @@ class HomePanel:
         self.root.destroy()
 
     def _set_reco(self, text, fg="#cc5500"):
-        """推奨アクション欄に文字列をセット (Text widget なので state 切替必要)。"""
-        self.reco_text.config(state="normal", fg=fg)
-        self.reco_text.delete("1.0", "end")
-        self.reco_text.insert("1.0", text)
-        self.reco_text.config(state="disabled")
+        """推奨アクション枠は 2026-06-04 撤去 (no-op。呼び出し側は残置)。"""
+        return
 
     def _update_clocks(self):
         """主要市場の現地時刻 + バイヤー活発時間カウントダウンを1秒ごと更新。
