@@ -3,16 +3,19 @@
 """需要・新規強化リスト — 実売(orders)ベースで「次に何を出すか」を出す。
 
 【設計思想】(2026-06-04 全面刷新)
-旧版は自店 listing の view/watch を並べるだけ＝既に出してる物の再掲で「新規強化」にならなかった。
-新版は **orders レポート(=実際に売れた取引・去年+今年の全ファイル)** を真実データとし、
-売れた商品を vein(系統) ごとに集約して「コピペ検索キー＋実売実績＋メルカリURL」で出す。
+需要は SOLD だけでなく **SOLD(実証) + WATCH(潜在) + impression(露出)** を合算して見る。
+SOLD のみだと「売れてないが超 watch=潜在需要」(例 PORTER Tanker) を取りこぼす。
+
+需要シグナル: funnel CSV (sold/watch/impr を 4サイト合算・商品単位) の合算スコア
+  需要スコア = 実売*100 + watch*8 + impr*0.05   (信頼度: 実売 >> watch > impr)
+$ 文脈      : orders レポート(去年+今年) から vein 別の売上/AOV を併用
 
 種別:
-  - 伸ばす(実証) : 実売した主要系統。同系の未出品を出す本命 (高単価優先)
-  - 入る(未開拓) : 体系化してないが実売が出た untapped (Tomica/POP MART/ブリキ/ガシャポン等)
-  - 避ける(薄利) : AOV が低く量を追っても薄利な系統 (UT/Sanrio 等) ← 注意喚起
+  - 伸ばす(実証) : 需要シグナルが立つ主要系統。同系の未出品を出す本命
+  - 入る(未開拓) : 体系化してないが需要が出た untapped (Tomica/POP MART/ブリキ/ガシャポン等)
+  - 避ける(薄利) : AOV が低く量を追っても薄利な系統 ← 注意喚起
 
-入力: C:/dev/iMak_data/seller_hub/reports/*orders*.csv (全ファイル結合・Order Number 重複除去)
+入力: funnel CSV (../funnel_output/funnel_*.csv = 先に『ファネル分析』を実行) + *orders*.csv
 出力: デスクトップ 新規強化リスト_YYYYMMDD.csv (1行=1候補) + コンソール要約
 
 ※ 送料無料は DDP 複雑で不採用(既定方針)。露出より「何を売るか」に寄せる前提。
@@ -32,6 +35,7 @@ except Exception:
     pass
 
 REPORTS_DIR = r"C:\dev\iMak_data\seller_hub\reports"
+FUNNEL_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
 DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 
 # AOV がこれ未満の系統 = 薄利。量を追わない (避ける)
@@ -168,80 +172,119 @@ def mercari_url(key, vein):
     return "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw) + "&status=on_sale"
 
 
-def main():
-    orders = load_orders()
-    if not orders:
-        sys.exit(f"orders レポートが {REPORTS_DIR} にありません。Seller Hub から DL してください。")
-
-    # vein -> {n, rev, keys{key:{n,rev,title}}}
-    veins = defaultdict(lambda: {"n": 0, "rev": 0.0, "keys": defaultdict(lambda: {"n": 0, "rev": 0.0, "title": ""})})
-    for o in orders:
-        title = o.get("Item Title", "")
-        if not title.strip():
+def load_funnel():
+    """funnel CSV (sold/watch/impr を持つ商品母集団)。商品単位(title)に 4サイト合算。"""
+    fs = glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv"))
+    if not fs:
+        sys.exit("funnel_*.csv がありません。先に『ファネル分析』を実行してください。")
+    rows = list(csv.DictReader(open(max(fs, key=os.path.getmtime), encoding="utf-8")))
+    prod = {}
+    for r in rows:
+        k = (r.get("title") or "").strip()
+        if not k:
             continue
-        v = vein_of(title)
-        sf = _f(o.get("Sold For"))
-        d = veins[v]
-        d["n"] += 1
-        d["rev"] += sf
-        k = search_key(title, v)
-        kd = d["keys"][k]
-        kd["n"] += 1
-        kd["rev"] += sf
-        kd["title"] = title
+        p = prod.setdefault(k.lower(), {"title": k, "sold": 0.0, "watch": 0.0, "impr": 0.0, "price": 0.0})
+        p["sold"] += _f(r.get("sold_qty")) + _f(r.get("sales90"))
+        p["watch"] += _f(r.get("watch"))
+        p["impr"] += _f(r.get("impr"))
+        p["price"] = _f(r.get("price")) or p["price"]
+    return list(prod.values())
 
-    # vein を 件数優先で並べ、種別判定
-    def kind(v, d):
+
+def demand_score(p):
+    """需要 = 実売*100 + watch*8 + impr*0.05 (信頼度: 実売 >> watch > impr)。"""
+    return p["sold"] * 100 + p["watch"] * 8 + p["impr"] * 0.05
+
+
+def main():
+    products = load_funnel()           # 需要シグナル源 (sold+watch+impr)
+    orders = load_orders()             # $ 文脈 (vein別 売上/AOV)
+
+    # vein別の $ 文脈 (orders)
+    vrev = defaultdict(lambda: {"n": 0, "rev": 0.0})
+    for o in orders:
+        t = o.get("Item Title", "")
+        if not t.strip():
+            continue
+        d = vrev[vein_of(t)]
+        d["n"] += 1
+        d["rev"] += _f(o.get("Sold For"))
+
+    def aov(v):
+        d = vrev.get(v)
+        return d["rev"] / max(d["n"], 1) if d and d["n"] else 0.0
+
+    # 商品を vein に束ね、需要スコアで評価
+    veins = defaultdict(list)
+    for p in products:
+        p["score"] = demand_score(p)
+        p["vein"] = vein_of(p["title"])
+        if p["score"] > 0:
+            veins[p["vein"]].append(p)
+
+    def kind(v):
         if v in _UNTAPPED:
             return "入る(未開拓)"
-        aov = d["rev"] / max(d["n"], 1)
-        if aov < TH_LOW_AOV:
+        if 0 < aov(v) < TH_LOW_AOV:
             return "避ける(薄利)"
         return "伸ばす(実証)"
 
-    ordered = sorted(veins.items(), key=lambda kv: -kv[1]["n"])
+    # vein を 合計需要スコアで並べ
+    ordered = sorted(veins.items(), key=lambda kv: -sum(p["score"] for p in kv[1]))
 
     # ---- CSV (1行=1候補) ----
     f, path = _open_w(os.path.join(DESK, f"新規強化リスト_{datetime.date.today():%Y%m%d}.csv"))
     with f:
         w = csv.writer(f)
-        w.writerow(["種別", "系統", "コピペ検索キー", "実売件数", "売上", "系統AOV", "仕入適性",
-                    "pipeline", "メルカリ検索URL"])
-        for v, d in ordered:
+        w.writerow(["種別", "系統", "コピペ検索キー", "需要スコア", "実売", "watch", "impr",
+                    "系統AOV", "仕入適性", "pipeline", "メルカリ検索URL"])
+        for v, ps in ordered:
             if v == "other":
                 continue
-            k = kind(v, d)
+            k = kind(v)
             mark, pipe = _FEAS.get(v, ("?", "-"))
-            aov = d["rev"] / max(d["n"], 1)
+            a = aov(v)
             if k == "避ける(薄利)":
-                # 薄利は注意喚起の1行だけ (個別キーは出さない)
-                w.writerow([k, v, "(量を追わない・薄利)", d["n"], f"${d['rev']:.0f}", f"${aov:.0f}", mark, pipe, ""])
+                tot = sum(p["score"] for p in ps)
+                w.writerow([k, v, "(量を追わない・薄利)", f"{tot:.0f}", int(sum(p['sold'] for p in ps)),
+                            int(sum(p['watch'] for p in ps)), int(sum(p['impr'] for p in ps)),
+                            f"${a:.0f}", mark, pipe, ""])
                 continue
-            # 伸ばす / 入る = 売れたキーを実売件数→売上で
-            for key, kd in sorted(d["keys"].items(), key=lambda x: (-x[1]["n"], -x[1]["rev"])):
-                w.writerow([k, v, key, kd["n"], f"${kd['rev']:.0f}", f"${aov:.0f}", mark, pipe,
-                            mercari_url(key, v)])
+            # 需要スコア順に商品(=コピペ検索キー)を出す。同一キーは集約
+            agg = defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0, "impr": 0.0})
+            for p in ps:
+                key = search_key(p["title"], v)
+                ad = agg[key]
+                ad["score"] += p["score"]; ad["sold"] += p["sold"]
+                ad["watch"] += p["watch"]; ad["impr"] += p["impr"]
+            for key, ad in sorted(agg.items(), key=lambda x: -x[1]["score"]):
+                w.writerow([k, v, key, f"{ad['score']:.0f}", int(ad['sold']), int(ad['watch']),
+                            int(ad['impr']), f"${a:.0f}", mark, pipe, mercari_url(key, v)])
 
     # ---- コンソール要約 ----
-    print(f"実売取引: {len(orders)}件 (orders 全ファイル結合) → vein {len(veins)} 系統")
-    print(f"\n{'種別':<12}{'系統':<14}{'件数':>4}{'売上':>8}{'AOV':>6}  適性")
-    for v, d in ordered:
+    print(f"需要シグナル: funnel {len(products)}商品 / 実売文脈: orders {len(orders)}件")
+    print(f"\n{'種別':<12}{'系統':<14}{'需要計':>7}{'実売':>5}{'watch':>6}{'AOV':>6}  適性")
+    for v, ps in ordered:
         if v == "other":
             continue
-        aov = d["rev"] / max(d["n"], 1)
-        mark, _ = _FEAS.get(v, ("?", "-"))
-        print(f"{kind(v,d):<12}{v:<14}{d['n']:>4}{'$'+format(d['rev'],'.0f'):>8}{'$'+format(aov,'.0f'):>6}  {mark}")
-    print(f"\n▼ 伸ばす/入る の具体候補 (コピペ検索キー・実売順)")
-    for v, d in ordered:
-        if v == "other" or kind(v, d) == "避ける(薄利)":
+        tot = sum(p["score"] for p in ps)
+        print(f"{kind(v):<12}{v:<14}{tot:>7.0f}{int(sum(p['sold'] for p in ps)):>5}"
+              f"{int(sum(p['watch'] for p in ps)):>6}{'$'+format(aov(v),'.0f'):>6}  {_FEAS.get(v,('?',''))[0]}")
+    print(f"\n▼ 伸ばす/入る の具体候補 (需要スコア順 = 実売+watch+impr 合算)")
+    for v, ps in ordered:
+        if v == "other" or kind(v) == "避ける(薄利)":
             continue
-        top = sorted(d["keys"].items(), key=lambda x: (-x[1]["n"], -x[1]["rev"]))[:4]
-        print(f"  ▼ {v} [{kind(v,d)}]")
-        for key, kd in top:
-            print(f"      {key:<38} 実売{kd['n']}/{'$'+format(kd['rev'],'.0f')}")
+        agg = defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0})
+        for p in ps:
+            key = search_key(p["title"], v)
+            agg[key]["score"] += p["score"]; agg[key]["sold"] += p["sold"]; agg[key]["watch"] += p["watch"]
+        top = sorted(agg.items(), key=lambda x: -x[1]["score"])[:4]
+        print(f"  ▼ {v} [{kind(v)}]")
+        for key, ad in top:
+            print(f"      {key:<38} 需要{ad['score']:.0f}(実売{int(ad['sold'])}/W{int(ad['watch'])})")
     print(f"\nCSV出力: {path}")
-    print("▶ 伸ばす=実証系統の未出品を出す / 入る=未開拓だが実売あり / 避ける=薄利で量を追わない")
-    print("※ 売上の$0は DE/UK の外貨取引(未換算)。件数は正。")
+    print("▶ 需要スコア = 実売*100 + watch*8 + impr*0.05。SOLD だけでなく潜在(watch)も込み。")
+    print("▶ 伸ばす=実証系統の未出品 / 入る=未開拓だが需要あり / 避ける=薄利で量を追わない")
 
 
 if __name__ == "__main__":
