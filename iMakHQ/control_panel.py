@@ -1396,6 +1396,10 @@ class ListingPanel:
                     self._run_log.flush()
                 except Exception:
                     pass
+        try:
+            self.proc.wait(timeout=10)  # stdout 閉じた後にプロセス終了を待つ → returncode 確定 (None防止)
+        except subprocess.TimeoutExpired:
+            pass
         if self._run_log:
             try:
                 self._run_log.close()
@@ -1416,7 +1420,7 @@ class ListingPanel:
                     self.append_log(f"\n--- 終了 (returncode={item[1]}) ---\n")
                     # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
                     _oa = SCRIPTS[getattr(self, "_current_idx", -1)].get("open_after") if getattr(self, "_current_idx", -1) >= 0 else None
-                    if _oa and item[1] == 0:
+                    if _oa and item[1] in (0, None):  # None=returncode未確定でも完走時は開く
                         try:
                             import glob as _g
                             hits = _g.glob(_oa)
