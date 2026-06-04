@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""需要・新規強化リスト — 実売(orders)ベースで「次に何を出すか」を出す。
+"""需要・新規強化リスト (B版) — 「実証系統で、まだ出していない商品(=売れそう)」を出す。
 
-【設計思想】(2026-06-04 全面刷新)
-需要は SOLD だけでなく **SOLD(実証) + WATCH(潜在) + impression(露出)** を合算して見る。
-SOLD のみだと「売れてないが超 watch=潜在需要」(例 PORTER Tanker) を取りこぼす。
+【設計思想】(2026-06-04 B版)
+過去ランキング(売れた/watch多い羅列)ではなく、**新規未出品で売れそうな商品**を出す。
+= 実証系統(需要シグナルが立つ系統) × その系統で catalog にあるが未出品の商品。
 
-需要シグナル: funnel CSV (sold/watch/impr を 4サイト合算・商品単位) の合算スコア
-  需要スコア = 実売*100 + watch*8 + impr*0.05   (信頼度: 実売 >> watch > impr)
-$ 文脈      : orders レポート(去年+今年) から vein 別の売上/AOV を併用
+需要シグナル(系統の実証度): funnel CSV (sold + watch + impr を4サイト合算)
+  需要スコア = 実売*100 + watch*8 + impr*0.05  (信頼度: 実売 >> watch > impr)
+$ 文脈                  : orders(去年+今年) の vein 別 AOV
+未出品の母集団           : catalog − active
 
-種別:
-  - 伸ばす(実証) : 需要シグナルが立つ主要系統。同系の未出品を出す本命
-  - 入る(未開拓) : 体系化してないが需要が出た untapped (Tomica/POP MART/ブリキ/ガシャポン等)
-  - 避ける(薄利) : AOV が低く量を追っても薄利な系統 ← 注意喚起
+【B が deterministic に出せる範囲 (2026-06-04 時点)】
+  - G-SHOCK : catalog 型番 = active タイトルの型番でマッチ成立 → casio_finder の
+              unlisted_from_catalog_*.csv を母集団に使う。◎ 即可。
+  - Montbell: catalog 型番(数字)が active タイトルに無い物が多く型番マッチ不成立 → 名前マッチ要(未対応)
+  - UNIQLO/UT: catalog 未完 → 除外
+  - TCG/PSA : set code マッチ可だが variant 煩雑(未対応)
+  - PORTER/Tomica/POP MART: catalog 無し → AI/手動候補
+  誤マッチで嘘の「未出品」を出さない(精度原則)。確実な G-SHOCK のみ候補化し、他は明示。
 
-入力: funnel CSV (../funnel_output/funnel_*.csv = 先に『ファネル分析』を実行) + *orders*.csv
+入力: ../funnel_output/funnel_*.csv + *orders*.csv + iMakG-shock/casio_finder/unlisted_from_catalog_*.csv
 出力: デスクトップ 新規強化リスト_YYYYMMDD.csv (1行=1候補) + コンソール要約
 
 ※ 送料無料は DDP 複雑で不採用(既定方針)。露出より「何を売るか」に寄せる前提。
@@ -36,19 +41,22 @@ except Exception:
 
 REPORTS_DIR = r"C:\dev\iMak_data\seller_hub\reports"
 FUNNEL_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
+CASIO_UNLISTED_DIR = r"C:\dev\iMak\iMakG-shock\casio_finder"
 DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 
-# AOV がこれ未満の系統 = 薄利。量を追わない (避ける)
-TH_LOW_AOV = 30
-
-_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-]*")
-_CARD_RE = re.compile(r"\b([A-Z]{1,3}\d{2}-\d{2,3}|P-\d{2,4}|EB\d{2}-\d{2,3}|LV-N?\d{2,4}[a-z]?)\b")
-_MODEL_RE = re.compile(r"\b([A-Z]{2,4}-?[A-Z]?\d{2,4}[A-Z]{0,4}(?:-\d{1,2}[A-Z]{0,4})?)\b")
-_STOP = {"the", "and", "with", "for", "of", "a", "an", "in", "by", "to", "new", "used", "japan",
-         "japanese", "pre-owned", "pre", "owned", "mens", "men", "women", "womens", "size",
-         "us", "jp", "digital", "watch", "card", "game", "tcg", "psa", "10", "gem", "mt", "vol",
-         "set", "full", "limited", "edition", "casio", "uniqlo", "ut", "sanrio", "yoshida",
-         "porter", "montbell", "tomica", "bag", "shirt", "t-shirt", "plush", "figure"}
+# catalog 由来の deterministic B が出せる vein → 母集団ソース種別
+_B_READY = {"G-SHOCK": "casio_unlisted"}
+# catalog 保有だが未対応(理由)
+_B_PENDING = {
+    "Montbell": "catalog型番がactiveタイトルに無い物多→名前(JP↔EN)マッチ要",
+    "UNIQLO/UT": "catalog未完",
+    "PSA card": "set codeマッチ可だがvariant煩雑(未対応)",
+    "一番くじ": "catalog無(弾ごと)→AI/手動",
+    "PORTER": "catalog無→AI/手動", "Tomica": "catalog無→AI/手動",
+    "POP MART": "catalog無→AI/手動", "ブリキ玩具": "catalog無→AI/手動",
+    "ガシャポン": "catalog無→AI/手動", "Sanrio": "catalog無→AI/手動",
+    "Figure": "catalog無→AI/手動", "Reel": "catalog無→AI/手動",
+}
 
 
 def _f(v):
@@ -59,7 +67,6 @@ def _f(v):
 
 
 def _open_w(path):
-    """書込オープン。Excel等でロック中なら _2,_3... に退避して落ちない。"""
     base, ext = os.path.splitext(path)
     for i in range(0, 20):
         p = path if i == 0 else f"{base}_{i+1}{ext}"
@@ -70,8 +77,48 @@ def _open_w(path):
     raise PermissionError(f"書込先がすべてロック中: {path}")
 
 
+def vein_of(title):
+    t = (title or "").lower()
+    if "g-shock" in t or "casio" in t:
+        return "G-SHOCK"
+    if "porter" in t or "tanker" in t:
+        return "PORTER"
+    if "montbell" in t or "mont-bell" in t:
+        return "Montbell"
+    if "psa 10" in t or "psa10" in t:
+        return "PSA card"
+    if "ichiban" in t:
+        return "一番くじ"
+    if "pop mart" in t or "popmart" in t:
+        return "POP MART"
+    if "tomica" in t:
+        return "Tomica"
+    if "tin " in t or "wind-up" in t or "pop pop" in t:
+        return "ブリキ玩具"
+    if "gashapon" in t or "gacha" in t or "capsule" in t:
+        return "ガシャポン"
+    if "reel" in t or "shimano" in t or "daiwa" in t:
+        return "Reel"
+    if any(k in t for k in ("sanrio", "kuromi", "hello kitty", "cinnamoroll", "pochacco", "my melody")):
+        return "Sanrio"
+    if "figuarts" in t or "figurizma" in t or "figure" in t or "statue" in t:
+        return "Figure"
+    if "uniqlo" in t or " ut " in t or t.startswith("ut ") or "t-shirt" in t or "airism" in t:
+        return "UNIQLO/UT"
+    return "other"
+
+
+def series_of(s):
+    """型番から系統prefix。'DW-6900UMS-1JF' → 'DW-6900' / 'GA-2100SB-1AJF' → 'GA-2100'。"""
+    m = re.search(r"\b([A-Z]{2,4})-?(\d{3,4})", s or "")
+    return f"{m.group(1)}-{m.group(2)}" if m else None
+
+
+def mercari_url(kw):
+    return "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw) + "&status=on_sale"
+
+
 def load_orders():
-    """*orders*.csv 全ファイル(去年+今年)を結合。row0空/row1ヘッダ/row2+データ。Order Number で重複除去。"""
     out, seen = [], set()
     for p in sorted(glob.glob(os.path.join(REPORTS_DIR, "*orders*.csv"))):
         rows = list(csv.reader(open(p, encoding="utf-8-sig", errors="replace")))
@@ -91,89 +138,7 @@ def load_orders():
     return out
 
 
-# vein(系統) 判定 = 仕入れ単位。untapped も明示的に拾う。
-def vein_of(title):
-    t = (title or "").lower()
-    if "g-shock" in t or "casio" in t:
-        return "G-SHOCK"
-    if "porter" in t or "tanker" in t:
-        return "PORTER"
-    if "montbell" in t or "mont-bell" in t:
-        return "Montbell"
-    if "psa 10" in t or "psa10" in t:
-        return "PSA card"
-    if "ichiban" in t:
-        return "一番くじ"
-    if "pop mart" in t or "popmart" in t:
-        return "POP MART"
-    if "tomica" in t:
-        return "Tomica"
-    if "tin " in t or "wind-up" in t or "pop pop" in t or "buriki" in t:
-        return "ブリキ玩具"
-    if "gashapon" in t or "gacha" in t or "capsule" in t:
-        return "ガシャポン"
-    if "onitsuka" in t:
-        return "Onitsuka Tiger"
-    if "anello" in t:
-        return "Anello"
-    if "reel" in t or "shimano" in t or "daiwa" in t:
-        return "Reel"
-    if any(k in t for k in ("sanrio", "kuromi", "hello kitty", "cinnamoroll", "pochacco", "my melody")):
-        return "Sanrio"
-    if "figuarts" in t or "figurizma" in t or "figure" in t or "statue" in t:
-        return "Figure"
-    if "uniqlo" in t or " ut " in t or t.startswith("ut ") or "t-shirt" in t or "airism" in t or "pufftech" in t:
-        return "UNIQLO/UT"
-    return "other"
-
-
-# untapped = 体系化してない (= 新規参入の空白)
-_UNTAPPED = {"POP MART", "Tomica", "ブリキ玩具", "ガシャポン", "Onitsuka Tiger", "Anello"}
-
-# 仕入れ適性 (近しい商品をタイムリーに調達できるか) と pipeline
-_FEAS = {
-    "G-SHOCK": ("◎", "gshock_to_csv"), "Montbell": ("◎", "montbell_listing"),
-    "UNIQLO/UT": ("◎", "tshirt_listing"), "PORTER": ("△", "-"), "PSA card": ("△", "-"),
-    "一番くじ": ("△", "ichibankuji_to_csv"), "Sanrio": ("◎", "メルカリ"), "Figure": ("△", "メルカリ"),
-    "Reel": ("△", "daiwa_jp/shimano_jp"), "POP MART": ("◎", "メルカリ"), "Tomica": ("◎", "メルカリ"),
-    "ブリキ玩具": ("◎", "メルカリ"), "ガシャポン": ("◎", "メルカリ"), "Onitsuka Tiger": ("△", "メルカリ"),
-    "Anello": ("△", "メルカリ"), "other": ("?", "-"),
-}
-
-# メルカリ検索を Japanese 寄りにできる vein はシード語を持つ
-_MERCARI_SEED = {"ブリキ玩具": "ブリキ おもちゃ 昭和", "ガシャポン": "ガシャポン", "一番くじ": "一番くじ"}
-
-
-def search_key(title, vein):
-    """コピペ検索キー = vein + 型番/カード番号、無ければ vein + タイトル識別語3つ。"""
-    pre = re.sub(r"[/×]", " ", vein).strip()
-    pre_toks = pre.split()
-    mc = _CARD_RE.search(title) or _MODEL_RE.search(title)
-    if mc:
-        code = mc.group(1)
-        kept = [t for t in pre_toks if not code.upper().startswith(t.upper())]
-        return " ".join(kept + [code]).strip()
-    pre_low = {t.lower() for t in pre_toks}
-    toks, seen = [], set()
-    for tok in _TOKEN_RE.findall(title):
-        low = tok.lower()
-        if low in seen or low in _STOP or low in pre_low or low.isdigit() or len(low) < 2:
-            continue
-        seen.add(low)
-        toks.append(tok)
-        if len(toks) >= 3:
-            break
-    return " ".join(pre_toks + toks).strip()
-
-
-def mercari_url(key, vein):
-    seed = _MERCARI_SEED.get(vein)
-    kw = seed if seed else key
-    return "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw) + "&status=on_sale"
-
-
 def load_funnel():
-    """funnel CSV (sold/watch/impr を持つ商品母集団)。商品単位(title)に 4サイト合算。"""
     fs = glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv"))
     if not fs:
         sys.exit("funnel_*.csv がありません。先に『ファネル分析』を実行してください。")
@@ -183,108 +148,115 @@ def load_funnel():
         k = (r.get("title") or "").strip()
         if not k:
             continue
-        p = prod.setdefault(k.lower(), {"title": k, "sold": 0.0, "watch": 0.0, "impr": 0.0, "price": 0.0})
+        p = prod.setdefault(k.lower(), {"title": k, "sold": 0.0, "watch": 0.0, "impr": 0.0})
         p["sold"] += _f(r.get("sold_qty")) + _f(r.get("sales90"))
         p["watch"] += _f(r.get("watch"))
         p["impr"] += _f(r.get("impr"))
-        p["price"] = _f(r.get("price")) or p["price"]
     return list(prod.values())
 
 
+def load_unlisted_gshock():
+    """casio_finder の未出品catalog (catalog − active) を読む。"""
+    fs = glob.glob(os.path.join(CASIO_UNLISTED_DIR, "unlisted_from_catalog_*.csv"))
+    if not fs:
+        return None, []
+    p = max(fs, key=os.path.getmtime)
+    rows = list(csv.DictReader(open(p, encoding="utf-8-sig", errors="replace")))
+    return p, [r.get("product_id", "").strip() for r in rows if r.get("product_id", "").strip()]
+
+
 def demand_score(p):
-    """需要 = 実売*100 + watch*8 + impr*0.05 (信頼度: 実売 >> watch > impr)。"""
     return p["sold"] * 100 + p["watch"] * 8 + p["impr"] * 0.05
 
 
 def main():
-    products = load_funnel()           # 需要シグナル源 (sold+watch+impr)
-    orders = load_orders()             # $ 文脈 (vein別 売上/AOV)
+    products = load_funnel()
+    orders = load_orders()
 
-    # vein別の $ 文脈 (orders)
+    # vein別 AOV ($文脈)
     vrev = defaultdict(lambda: {"n": 0, "rev": 0.0})
     for o in orders:
         t = o.get("Item Title", "")
-        if not t.strip():
-            continue
-        d = vrev[vein_of(t)]
-        d["n"] += 1
-        d["rev"] += _f(o.get("Sold For"))
+        if t.strip():
+            d = vrev[vein_of(t)]
+            d["n"] += 1
+            d["rev"] += _f(o.get("Sold For"))
 
     def aov(v):
         d = vrev.get(v)
         return d["rev"] / max(d["n"], 1) if d and d["n"] else 0.0
 
-    # 商品を vein に束ね、需要スコアで評価
-    veins = defaultdict(list)
+    # vein別 需要、G-SHOCK は系統別需要も
+    vein_dem = defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0})
+    gs_series = defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0})
     for p in products:
-        p["score"] = demand_score(p)
-        p["vein"] = vein_of(p["title"])
-        if p["score"] > 0:
-            veins[p["vein"]].append(p)
+        v = vein_of(p["title"])
+        sc = demand_score(p)
+        vein_dem[v]["score"] += sc
+        vein_dem[v]["sold"] += p["sold"]
+        vein_dem[v]["watch"] += p["watch"]
+        if v == "G-SHOCK" and sc > 0:
+            s = series_of(p["title"])
+            if s:
+                gs_series[s]["score"] += sc
+                gs_series[s]["sold"] += p["sold"]
+                gs_series[s]["watch"] += p["watch"]
 
-    def kind(v):
-        if v in _UNTAPPED:
-            return "入る(未開拓)"
-        if 0 < aov(v) < TH_LOW_AOV:
-            return "避ける(薄利)"
-        return "伸ばす(実証)"
+    # G-SHOCK B候補 = 未出品catalog × 実証系統(需要>0)
+    upath, unlisted = load_unlisted_gshock()
+    proven = {s for s, d in gs_series.items() if d["score"] > 0}
+    gs_candidates = defaultdict(list)  # series -> [model_id]
+    for mid in unlisted:
+        s = series_of(mid)
+        if s and s in proven:
+            gs_candidates[s].append(mid)
+    # series を需要順
+    series_ranked = sorted(gs_candidates.keys(), key=lambda s: -gs_series[s]["score"])
 
-    # vein を 合計需要スコアで並べ
-    ordered = sorted(veins.items(), key=lambda kv: -sum(p["score"] for p in kv[1]))
-
-    # ---- CSV (1行=1候補) ----
+    # ---- CSV ----
     f, path = _open_w(os.path.join(DESK, f"新規強化リスト_{datetime.date.today():%Y%m%d}.csv"))
     with f:
         w = csv.writer(f)
-        w.writerow(["種別", "系統", "コピペ検索キー", "需要スコア", "実売", "watch", "impr",
-                    "系統AOV", "仕入適性", "pipeline", "メルカリ検索URL"])
-        for v, ps in ordered:
-            if v == "other":
+        w.writerow(["種別", "系統", "コピペ検索キー(未出品型番)", "系統需要スコア", "系統実売",
+                    "系統watch", "系統AOV", "仕入適性", "メルカリ検索URL", "備考"])
+        # G-SHOCK 未出品候補 (deterministic)
+        a = aov("G-SHOCK")
+        for s in series_ranked:
+            d = gs_series[s]
+            for mid in sorted(gs_candidates[s]):
+                w.writerow(["新規候補(B)", f"G-SHOCK {s}", f"G-SHOCK {mid}", f"{d['score']:.0f}",
+                            int(d["sold"]), int(d["watch"]), f"${a:.0f}", "◎",
+                            mercari_url(mid), "catalogにあり未出品=出せば売れそう"])
+        # 他の実証 vein は候補生成不可を明示
+        for v, d in sorted(vein_dem.items(), key=lambda kv: -kv[1]["score"]):
+            if v in ("other", "G-SHOCK") or d["score"] <= 0:
                 continue
-            k = kind(v)
-            mark, pipe = _FEAS.get(v, ("?", "-"))
-            a = aov(v)
-            if k == "避ける(薄利)":
-                tot = sum(p["score"] for p in ps)
-                w.writerow([k, v, "(量を追わない・薄利)", f"{tot:.0f}", int(sum(p['sold'] for p in ps)),
-                            int(sum(p['watch'] for p in ps)), int(sum(p['impr'] for p in ps)),
-                            f"${a:.0f}", mark, pipe, ""])
-                continue
-            # 需要スコア順に商品(=コピペ検索キー)を出す。同一キーは集約
-            agg = defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0, "impr": 0.0})
-            for p in ps:
-                key = search_key(p["title"], v)
-                ad = agg[key]
-                ad["score"] += p["score"]; ad["sold"] += p["sold"]
-                ad["watch"] += p["watch"]; ad["impr"] += p["impr"]
-            for key, ad in sorted(agg.items(), key=lambda x: -x[1]["score"]):
-                w.writerow([k, v, key, f"{ad['score']:.0f}", int(ad['sold']), int(ad['watch']),
-                            int(ad['impr']), f"${a:.0f}", mark, pipe, mercari_url(key, v)])
+            w.writerow(["要・候補生成", v, "", f"{d['score']:.0f}", int(d["sold"]), int(d["watch"]),
+                        f"${aov(v):.0f}", "-", "", _B_PENDING.get(v, "未対応")])
 
-    # ---- コンソール要約 ----
-    print(f"需要シグナル: funnel {len(products)}商品 / 実売文脈: orders {len(orders)}件")
-    print(f"\n{'種別':<12}{'系統':<14}{'需要計':>7}{'実売':>5}{'watch':>6}{'AOV':>6}  適性")
-    for v, ps in ordered:
-        if v == "other":
+    # ---- コンソール ----
+    ncand = sum(len(v) for v in gs_candidates.values())
+    print(f"需要: funnel {len(products)}商品 / orders {len(orders)}件")
+    print(f"\n★ G-SHOCK 新規候補(B) = 実証系統 × 未出品 = {ncand}件")
+    if upath:
+        print(f"  (未出品母集団: {os.path.basename(upath)} = catalog − active)")
+    print(f"  {'系統':<10}{'未出品数':>6}{'系統需要':>8}{'実売':>5}{'watch':>6}")
+    for s in series_ranked:
+        d = gs_series[s]
+        print(f"  {s:<10}{len(gs_candidates[s]):>6}{d['score']:>8.0f}{int(d['sold']):>5}{int(d['watch']):>6}")
+    print(f"\n  ▼ 上位系統の未出品型番(例)")
+    for s in series_ranked[:6]:
+        print(f"    {s} ({len(gs_candidates[s])}件): " + ", ".join(sorted(gs_candidates[s])[:6]))
+    print(f"\n他の実証 vein (B候補は catalog 整備/AI が前提):")
+    for v, d in sorted(vein_dem.items(), key=lambda kv: -kv[1]["score"]):
+        if v in ("other", "G-SHOCK") or d["score"] <= 0:
             continue
-        tot = sum(p["score"] for p in ps)
-        print(f"{kind(v):<12}{v:<14}{tot:>7.0f}{int(sum(p['sold'] for p in ps)):>5}"
-              f"{int(sum(p['watch'] for p in ps)):>6}{'$'+format(aov(v),'.0f'):>6}  {_FEAS.get(v,('?',''))[0]}")
-    print(f"\n▼ 伸ばす/入る の具体候補 (需要スコア順 = 実売+watch+impr 合算)")
-    for v, ps in ordered:
-        if v == "other" or kind(v) == "避ける(薄利)":
-            continue
-        agg = defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0})
-        for p in ps:
-            key = search_key(p["title"], v)
-            agg[key]["score"] += p["score"]; agg[key]["sold"] += p["sold"]; agg[key]["watch"] += p["watch"]
-        top = sorted(agg.items(), key=lambda x: -x[1]["score"])[:4]
-        print(f"  ▼ {v} [{kind(v)}]")
-        for key, ad in top:
-            print(f"      {key:<38} 需要{ad['score']:.0f}(実売{int(ad['sold'])}/W{int(ad['watch'])})")
+        print(f"  {v:<12} 需要{d['score']:.0f}/実売{int(d['sold'])}/W{int(d['watch'])}  → {_B_PENDING.get(v,'未対応')}")
     print(f"\nCSV出力: {path}")
-    print("▶ 需要スコア = 実売*100 + watch*8 + impr*0.05。SOLD だけでなく潜在(watch)も込み。")
-    print("▶ 伸ばす=実証系統の未出品 / 入る=未開拓だが需要あり / 避ける=薄利で量を追わない")
+    print("▶ B = 実証系統で catalog にあるが未出品 = 出せば売れそうな新規候補。")
+    print("▶ G-SHOCK 以外の候補化には各カテゴリの catalog 整備 or AI 候補生成が要る。")
+    if not upath:
+        print("⚠ 未出品catalogが無い。先に『G-SHOCK 未出品モデル(catalog)』ボタンを実行してください。")
 
 
 if __name__ == "__main__":
