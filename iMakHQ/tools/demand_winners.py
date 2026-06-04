@@ -146,6 +146,12 @@ _COLORS = ["Black", "White", "Red", "Blue", "Green", "Yellow", "Navy", "Gray", "
            "Purple", "Orange", "Brown", "Olive", "Beige", "Gold", "Silver", "Khaki"]
 
 
+# 色語を含むが「商品の色」ではない固有名詞 (フランチャイズ/キャラ)。color_of の前に除去。
+_COLOR_NOISE = ["Blue Lock", "Blue Period", "Black Clover", "Black Butler", "Black Lagoon",
+                "Red Hair", "Red-Haired", "Red Comet", "White Album", "Green Ranger",
+                "Pink Panther", "Orange Range", "Golden Kamuy", "Silver Fang", "Blue Exorcist"]
+
+
 def _first(t, kws):
     for k in kws:
         if k.lower() in t:
@@ -154,17 +160,28 @@ def _first(t, kws):
 
 
 def color_of(title):
+    # フランチャイズ名の色語 (Blue Lock 等) を除去してから、タイトル中で最初に出る色を採る。
+    t = title
+    for ph in _COLOR_NOISE:
+        t = re.sub(re.escape(ph), " ", t, flags=re.I)
+    best, pos = None, None
     for c in _COLORS:
-        if re.search(r"\b" + c + r"\b", title, re.I):
-            return "Gray" if c == "Grey" else c
-    return None
+        m = re.search(r"\b" + c + r"\b", t, re.I)
+        if m and (pos is None or m.start() < pos):
+            pos, best = m.start(), ("Gray" if c == "Grey" else c)
+    return best
 
 
 def size_of(title):
-    m = re.search(r"\b(XXL|3XL|2XL|XL|XXS|XS)\b", title)
+    # eBay バイヤーが検索するのは US サイズ。"US L (JP XL)" で JP(XL)を拾わないよう US 優先。
+    m = re.search(r"\bUS\s*(?:Size\s*)?\(?\s*(XXS|XS|3XL|2XL|XXL|XL|S|M|L)\b", title, re.I)
     if m:
         return m.group(1).upper()
-    m = re.search(r"\b(?:US|JP|Size|size)\s*\(?\s*(S|M|L)\b", title)
+    # US 表記が無い (Montbell 旧型/PORTER 等) → 単独サイズ語。多文字を先に評価。
+    m = re.search(r"\b(3XL|2XL|XXL|XL|XXS|XS)\b", title)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r"\b(?:Size|size)\s*\(?\s*(S|M|L)\b", title)
     return m.group(1).upper() if m else None
 
 
