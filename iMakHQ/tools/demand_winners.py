@@ -253,14 +253,14 @@ def main():
     # グループ別サマリー CSV (新規出品の指針)
     f, gpath = _open_w(os.path.join(DESK, f"新規出品強化_グループ別_{datetime.date.today():%Y%m%d}.csv"))
     with f:
+        # グループ別 = 集計サマリーのみ (個別の検索キーは下の『仕入れ候補』CSVに1行1商品で出す)
         w = csv.writer(f)
         w.writerow(["グループ", "仕入れ適性", "件数", "実売", "watch", "売れ筋listing数", "スコア",
-                    "売れ筋(コピペ検索キー・実需順)", "近しい商品の調達", "パイプライン", "判定"])
+                    "近しい商品の調達", "パイプライン", "判定"])
         for grp, d in summary:
             mark, reason, pipe = feas(grp)
-            keys = " / ".join(k for k, *_ in top_products(d["members"], grp, 5))
             w.writerow([grp, mark, d["n"], d["sold"], d["watch"], d["sold_listings"],
-                        f"{d['score']:.0f}", keys, reason, pipe, verdict(mark, d)])
+                        f"{d['score']:.0f}", reason, pipe, verdict(mark, d)])
 
     # 仕入れ候補リスト (1行=1商品: コピペ検索キー + メルカリ検索URL)。これがソーシングの作業表。
     f2, spath = _open_w(os.path.join(DESK, f"仕入れ候補_コピペ検索_{datetime.date.today():%Y%m%d}.csv"))
