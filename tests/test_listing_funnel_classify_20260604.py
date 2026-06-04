@@ -96,6 +96,18 @@ def test_overpriced_vs_trend():
     assert {r["item_id"] for r in classify(rows)["OVERPRICED"]} == {"over"}
 
 
+def test_relist_candidate_is_no_search_without_watchers():
+    """取下げ再出品候補 = NO_SEARCH ∩ watcher無 (relistで失うもの無)。watcher有は除外。"""
+    rows = [
+        _row("relist_ok", impr=1, age=60, watch=0),   # NO_SEARCH & watch0 → RELIST
+        _row("keep", impr=1, age=60, watch=4),         # NO_SEARCH だが watcher有 → RELIST 除外
+        _row("seen", impr=50, ctr=0.05, watch=0),      # 露出有 → NO_SEARCH でない
+    ]
+    c = classify(rows)
+    assert {r["item_id"] for r in c["RELIST"]} == {"relist_ok"}
+    assert {r["item_id"] for r in c["NO_SEARCH"]} == {"relist_ok", "keep"}
+
+
 def test_out_of_stock_split_restock_vs_cull():
     """在庫切れは需要シグナルで分岐: 過去販売/watch/90d販売 有=RESTOCK, 皆無=CULL。需要大きい順。"""
     rows = [

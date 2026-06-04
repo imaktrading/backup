@@ -87,18 +87,18 @@ box(s, 0.8, 6.6, 11.7, 0.5, f"iMak Trading Japan  /  {datetime.date.today():%Y-%
 
 # ── Slide 2: 3状態 × アクション ──
 s = slide(); header(s, "3状態それぞれの効果的アクション")
-column(s, 0.4, C_S1, "① 出品済・在庫あり\n＝直す", "2,605件", "小〜中",
-       "• NO_CONVERT 高額\n   → 価格点検（値下げ/撤退）\n"
-       "• NO_CLICK 高impr\n   → 画像/サムネ改善\n"
-       "• NO_SEARCH（21日↑）\n   → タイトル front-load\n\n"
-       "※ 低需要は何しても売れない\n   = 深追いしない（damage control）",
-       "listing_funnel / amazon_v8_check / title_keyword_proposal")
+column(s, 0.4, C_S1, "① 出品済・在庫あり\n＝直す / 再出品", "2,605件", "小〜中",
+       "• NO_SEARCH（露出ゼロ）\n   → 取下げ再出品(relist)で検索refresh\n     ※watcher無76件=失うもの無\n"
+       "• NO_CLICK → 画像/サムネ改善\n"
+       "• NO_CONVERT 高額 → 価格点検\n"
+       "※ 低需要は深追いしない / watcher有は\n   relistせずタイトル編集(in-place)",
+       "listing_funnel / seller_hub_relist / amazon_v8_check")
 column(s, 4.65, C_S2, "② 出品済・在庫なし\n＝戻す or 畳む", "1,992件", "中（実銭回収）",
-       "• RESTOCK 再仕入れ\n   PSA13枚・G-SHOCK19件は黒字確定\n"
+       "• RESTOCK 再仕入れ → 再出品(relist)\n   旧End→新Add で在庫復活\n   PSA13枚・G-SHOCK19件は黒字確定\n"
        "• 戻す前に ①タイトル ③価格 を準備\n"
-       "• CULL 1,755\n   → 出品終了（アカウント健全化）\n\n"
+       "• CULL 1,755 → 出品終了（健全化）\n"
        "※ 畳むは増収でなく衛生",
-       "mercari_psa_resource / mercari_gshock_resource")
+       "mercari_psa_resource / mercari_gshock_resource / seller_hub_relist")
 column(s, 8.9, C_S3, "③ 新規出品\n＝増やす（本丸）", "—", "大",
        "• 需要∩仕入れ可能∩自動化 の3つ\n   = UNIQLO-T / G-SHOCK定番 / Montbell\n"
        "• 既存パイプラインで面で量産\n"

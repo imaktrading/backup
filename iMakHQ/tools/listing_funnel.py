@@ -225,9 +225,13 @@ def classify(rows):
     for b in (no_search, no_click, no_convert):
         b.sort(key=lambda x: -x["price"])
     overpriced.sort(key=lambda x: -(x["price"] - x["trend_price"]))
+    # 取下げ再出品(relist)候補 = NO_SEARCH のうち watcher 無し (= relist で失うものが無い)。
+    # watcher 有りは relist すると watcher を失う → タイトル編集など in-place 対応に回す。
+    relist = [r for r in no_search if r["watch"] == 0]
+    relist.sort(key=lambda x: -x["price"])
     return {"NO_SEARCH": no_search, "NO_CLICK": no_click, "NO_CONVERT": no_convert,
             "OVERPRICED": overpriced, "DEAD_SIMPLE": dead_simple, "NEW_WAIT": new_wait,
-            "OUT_OF_STOCK": oos, "RESTOCK": restock, "CULL": cull, "ctr_q1": ctr_q1}
+            "RELIST": relist, "OUT_OF_STOCK": oos, "RESTOCK": restock, "CULL": cull, "ctr_q1": ctr_q1}
 
 
 def write_xlsx(path, rows, c, summary_lines):
@@ -248,6 +252,7 @@ def write_xlsx(path, rows, c, summary_lines):
         ("NO_CONVERT", "買われない (価格/説明)"),
         ("OVERPRICED", "適正価格より高い (値下げ余地)"),
         ("NEW_WAIT", "新規出品でimpr低 (時間不足=様子見・改修対象外)"),
+        ("RELIST", "取下げ再出品候補 (在庫あり・検索露出ゼロ・watcher無)"),
         ("RESTOCK", "在庫切れだが需要実証済 (再仕入れ優先)"),
         ("CULL", "在庫切れ&需要皆無 (出品停止候補)"),
         ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)"),
@@ -363,7 +368,8 @@ def main():
 
     c = classify(rows)
     print(f"   (適正化) 新規出品<{TH_AGE_MIN}日でimpr低=時間不足は NEW_WAIT に隔離={len(c['NEW_WAIT'])}件 / 各バケツは利益額(価格)順")
-    _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & 出品>={TH_AGE_MIN}日 & impr/日<={TH_IMPR_NONE} → キーワード (価格高い順)", c["NO_SEARCH"])
+    _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & 出品>={TH_AGE_MIN}日 & impr/日<={TH_IMPR_NONE} → キーワード or 取下げ再出品 (価格高い順)", c["NO_SEARCH"])
+    print(f"   └ うち取下げ再出品(relist)候補(watcher無=失うもの無): {len(c['RELIST'])}件 → seller_hub_relist.py で検索リフレッシュ")
     _sec("② クリックされない NO_CLICK", f"在庫あり & impr/日>={TH_IMPR_SHOWN} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
     _sec("③ 買われない NO_CONVERT", "在庫あり & CTR有 & 無販売 → 価格(適正価格比)/説明", c["NO_CONVERT"])
     _sec("④ 高すぎ OVERPRICED", "在庫あり & 価格 > eBay適正価格×1.05 → 値下げ余地 (差額大きい順)", c["OVERPRICED"])
@@ -389,7 +395,7 @@ def main():
         for r in rows:
             tags = []
             if r["qty"] == 0: tags.append("OUT_OF_STOCK")
-            for k in ("NO_SEARCH", "NO_CLICK", "NO_CONVERT", "OVERPRICED", "DEAD_SIMPLE", "NEW_WAIT", "RESTOCK", "CULL"):
+            for k in ("NO_SEARCH", "NO_CLICK", "NO_CONVERT", "OVERPRICED", "DEAD_SIMPLE", "NEW_WAIT", "RELIST", "RESTOCK", "CULL"):
                 if r in c[k]: tags.append(k)
             r["flags"] = "|".join(tags)
         fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",
