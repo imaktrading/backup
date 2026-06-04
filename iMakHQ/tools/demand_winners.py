@@ -27,6 +27,18 @@ DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 FUNNEL_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
 
 
+def _open_w(path):
+    """書込オープン。Excel等でロック中なら _2,_3... に退避して落ちない。"""
+    base, ext = os.path.splitext(path)
+    for i in range(0, 20):
+        p = path if i == 0 else f"{base}_{i+1}{ext}"
+        try:
+            return open(p, "w", newline="", encoding="utf-8-sig"), p
+        except PermissionError:
+            continue
+    raise PermissionError(f"書込先がすべてロック中: {path}")
+
+
 def _f(v):
     try:
         return float(v)
@@ -85,6 +97,28 @@ def brand_key(title):
     return "その他"
 
 
+_NOISE_RE = re.compile(
+    r"\b(PSA\s*10|GEM\s*MT|GEM\s*MINT|MINT|Japanese|Japan|Pre-?owned|Card\s*Game|"
+    r"20\d{2}|NM|N/?M)\b", re.I)
+
+
+def short_label(title, maxlen=52):
+    """具体商品名を短く: 採点に効かない常套句(PSA10/GEM MT/Japanese/年号等)を削って要点を残す。"""
+    t = _NOISE_RE.sub(" ", title)
+    t = re.sub(r"\s{2,}", " ", t).strip(" -|")
+    return t[:maxlen]
+
+
+def top_concrete(members, n=3):
+    """グループ内の具体 listing 上位n。実売(proven)を最優先 → score 順。"""
+    ranked = sorted(members, key=lambda r: (-(_f(r["sold_qty"]) + _f(r.get("sales90", 0))), -r["score"]))
+    out = []
+    for r in ranked[:n]:
+        sold = int(_f(r["sold_qty"]) + _f(r.get("sales90", 0)))
+        out.append(f"{short_label(r['title'])} (実売{sold}/W{int(_f(r['watch']))})")
+    return out
+
+
 def feas(group):
     """近しい商品(同ライン/同フランチャイズの別商品)をタイムリーに調達できるか。
     ◎=定番継続容易 / △=可だが個別の市場/時期チェック要 / ✕=近しい品でも困難 / ?=個別。"""
@@ -123,8 +157,8 @@ def main():
     winners = sorted([r for r in rows if r["score"] > 0], key=lambda x: -x["score"])
 
     # 商品別リスト出力
-    path = os.path.join(DESK, f"需要実証リスト_{datetime.date.today():%Y%m%d}.csv")
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+    f, path = _open_w(os.path.join(DESK, f"需要実証リスト_{datetime.date.today():%Y%m%d}.csv"))
+    with f:
         w = csv.DictWriter(f, fieldnames=["score", "group", "instock", "category", "price",
                                           "sold_qty", "sales90", "watch", "impr", "ctr", "title", "ebay_url"],
                            extrasaction="ignore")
@@ -133,12 +167,13 @@ def main():
             w.writerow(r)
 
     # グループ別サマリー (= 新規出品で伸ばすべき単位)
-    g = defaultdict(lambda: {"n": 0, "score": 0.0, "sold": 0, "watch": 0, "sold_listings": 0})
+    g = defaultdict(lambda: {"n": 0, "score": 0.0, "sold": 0, "watch": 0, "sold_listings": 0, "members": []})
     for r in winners:
         d = g[r["group"]]
         d["n"] += 1; d["score"] += r["score"]
         d["sold"] += int(_f(r["sold_qty"]) + _f(r.get("sales90", 0)))
         d["watch"] += int(_f(r["watch"]))
+        d["members"].append(r)
         if _f(r["sold_qty"]) + _f(r.get("sales90", 0)) > 0:
             d["sold_listings"] += 1
     summary = sorted(g.items(), key=lambda kv: -kv[1]["score"])
@@ -152,14 +187,16 @@ def main():
         return "様子見"
 
     # グループ別サマリー CSV (新規出品の指針)
-    gpath = os.path.join(DESK, f"新規出品強化_グループ別_{datetime.date.today():%Y%m%d}.csv")
-    with open(gpath, "w", newline="", encoding="utf-8-sig") as f:
+    f, gpath = _open_w(os.path.join(DESK, f"新規出品強化_グループ別_{datetime.date.today():%Y%m%d}.csv"))
+    with f:
         w = csv.writer(f)
-        w.writerow(["グループ", "仕入れ適性", "件数", "実売", "watch", "売れ筋listing数", "スコア", "近しい商品の調達", "パイプライン", "判定"])
+        w.writerow(["グループ", "仕入れ適性", "件数", "実売", "watch", "売れ筋listing数", "スコア",
+                    "具体例1(実売/W)", "具体例2", "具体例3", "近しい商品の調達", "パイプライン", "判定"])
         for grp, d in summary:
             mark, reason, pipe = feas(grp)
+            ex = top_concrete(d["members"], 3) + ["", "", ""]
             w.writerow([grp, mark, d["n"], d["sold"], d["watch"], d["sold_listings"],
-                        f"{d['score']:.0f}", reason, pipe, verdict(mark, d)])
+                        f"{d['score']:.0f}", ex[0], ex[1], ex[2], reason, pipe, verdict(mark, d)])
 
     print(f"需要実証(スコア>0) listing: {len(winners)}件 / 全{len(rows)}件")
     print(f"\n=== 新規出品強化: グループ別 (需要 × 近しい商品を出せるか) ===")
@@ -167,11 +204,13 @@ def main():
     for grp, d in summary[:18]:
         mark, reason, pipe = feas(grp)
         print(f"  {grp:<20}{mark:>4}{d['n']:>5}{d['sold']:>5}{d['watch']:>6}{d['score']:>6.0f}  {verdict(mark, d)}")
-    print(f"\n=== ★拡大推奨グループ (需要実証 × 近しい商品を継続調達◎) ===")
+    print(f"\n=== ★拡大推奨グループ (需要実証 × 近しい商品を継続調達◎) — 具体的に何を仕入れるか ===")
     for grp, d in summary:
         mark, reason, pipe = feas(grp)
         if verdict(mark, d) == "★拡大推奨":
-            print(f"  {grp}: {reason} [{pipe}]  (実売{d['sold']}/watch{d['watch']}/売れ筋{d['sold_listings']}listing)")
+            print(f"  ▼ {grp}: {reason} [{pipe}]  (実売{d['sold']}/watch{d['watch']}/売れ筋{d['sold_listings']}listing)")
+            for ex in top_concrete(d["members"], 3):
+                print(f"      ・{ex}")
     print(f"\nCSV出力: {path}")
     print(f"グループ別判定: {gpath}")
     print("▶ ★拡大推奨 = 需要実証 ∩ 近しい商品をタイムリーに出せる → 新規出品で面で増やす本命。")
