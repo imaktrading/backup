@@ -16,6 +16,7 @@ import glob
 import os
 import re
 import sys
+import urllib.parse
 from collections import defaultdict
 
 try:
@@ -123,12 +124,6 @@ _STOP = {
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-]*")
 
 
-def _group_words(group):
-    """グループ名(フランチャイズ/ライン)由来の語 = 集計から除外 (既知=自明なので)。"""
-    g = re.sub(r"[×系()]", " ", group.lower())
-    return {w for w in _TOKEN_RE.findall(g) if len(w) >= 2}
-
-
 def _title_tokens(title):
     seen, out = set(), []
     for tok in _TOKEN_RE.findall(title):
@@ -140,46 +135,52 @@ def _title_tokens(title):
     return out
 
 
-def global_df(members_all):
-    """全 winner listing 横断の token 出現 listing 数 (df)。汎用語(CASIO/Black等)の減点用。"""
-    df = defaultdict(int)
-    for r in members_all:
-        for low, _ in _title_tokens(r["title"]):
-            df[low] += 1
-    return df, len(members_all)
+# 型番 / カード番号 = そのまま貼れる最良の検索キー
+_CARD_RE = re.compile(r"\b([A-Z]{1,3}\d{2}-\d{2,3}|P-\d{2,4}|EB\d{2}-\d{2,3}|SB\d{2}-\d{2,3})\b")
+_MODEL_RE = re.compile(r"\b([A-Z]{2,4}-?[A-Z]?\d{2,4}[A-Z]{0,4}(?:-\d{1,2}[A-Z]{0,4})?)\b")
 
 
-def top_attributes(members, group, df, total, n=6):
-    """グループ内で『売れている属性』を distill。実需(実売)×希少性(idf)で重み付け、
-    全体で頻出の汎用語(CASIO/Black/Nylon等)を自動で減点しキャラ/型番/バリエを浮かせる。"""
-    import math
-    gw = _group_words(group)
-    agg = {}  # key=lower, val={"disp","sold","watch","score","n"}
+def _group_prefix(group):
+    """グループ名 → 検索キーの接頭ブランド。×/系/他/その他 を除去。"""
+    g = re.sub(r"\s*[×x]\s*", " ", group)
+    g = re.sub(r"(系|他|その他)", "", g).strip()
+    return g
+
+
+def search_key(title, group):
+    """コピペ検索用キーを1本にして返す。型番/カード番号があればブランド+型番、無ければ
+    ブランド+タイトル先頭の識別語3つ。接頭ブランドとの重複語は落とす。"""
+    pre = _group_prefix(group)
+    pre_toks = pre.split()
+    mc = _CARD_RE.search(title) or _MODEL_RE.search(title)
+    if mc:
+        code = mc.group(1)
+        kept = [t for t in pre_toks if not code.upper().startswith(t.upper())]  # DW系→DW等の重複除去
+        return " ".join(kept + [code]).strip()
+    pre_low = {t.lower() for t in pre_toks}
+    toks = [t for _, t in _title_tokens(title) if t.lower() not in pre_low][:3]
+    return " ".join(pre_toks + toks).strip()
+
+
+def mercari_url(key):
+    return "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(key) + "&status=on_sale"
+
+
+def top_products(members, group, n=6):
+    """グループ内の売れ筋を『コピペ検索キー』単位に集約 (同型番=同仕入対象)。実需順。
+    返り値: [(key, sold, watch, n_listings), ...]"""
+    agg = {}
     for r in members:
-        sold = _f(r["sold_qty"]) + _f(r.get("sales90", 0))
-        for low, tok in _title_tokens(r["title"]):
-            if low in gw:
-                continue
-            d = agg.setdefault(low, {"disp": tok, "sold": 0.0, "watch": 0.0, "score": 0.0, "n": 0})
-            d["sold"] += sold
-            d["watch"] += _f(r["watch"])
-            d["score"] += r["score"]
-            d["n"] += 1
-    has_sold = any(d["sold"] > 0 for d in agg.values())
-    for d in agg.values():
-        idf = math.log((total + 1) / (df.get(d["disp"].lower(), 1) + 1)) + 1  # 全体頻出ほど小
-        base = d["sold"] if has_sold else d["watch"] * 0.3  # 実売が有る群は実売、無ければwatch
-        d["w"] = base * idf
-    ranked = sorted(agg.values(), key=lambda d: (-d["w"], -d["n"]))
-    out = []
-    for d in ranked:
-        if d["w"] <= 0 or (d["n"] < 2 and d["sold"] == 0 and d["watch"] < 3):
+        k = search_key(r["title"], group)
+        if not k:
             continue
-        tag = f"実売{int(d['sold'])}" if has_sold else f"W{int(d['watch'])}"
-        out.append(f"{d['disp']}({tag}/{d['n']}件)")
-        if len(out) >= n:
-            break
-    return out
+        sold = _f(r["sold_qty"]) + _f(r.get("sales90", 0))
+        d = agg.setdefault(k, {"sold": 0.0, "watch": 0.0, "n": 0})
+        d["sold"] += sold
+        d["watch"] += _f(r["watch"])
+        d["n"] += 1
+    ranked = sorted(agg.items(), key=lambda kv: (-kv[1]["sold"], -kv[1]["watch"], -kv[1]["n"]))
+    return [(k, int(d["sold"]), int(d["watch"]), d["n"]) for k, d in ranked[:n]]
 
 
 def feas(group):
@@ -218,7 +219,6 @@ def main():
 
     # 需要実証 = スコア>0 (= 実売 or watch or 表示 が有る)
     winners = sorted([r for r in rows if r["score"] > 0], key=lambda x: -x["score"])
-    df, total = global_df(winners)  # 売れ筋属性の希少性(idf)算出用
 
     # 商品別リスト出力
     f, path = _open_w(os.path.join(DESK, f"需要実証リスト_{datetime.date.today():%Y%m%d}.csv"))
@@ -255,12 +255,25 @@ def main():
     with f:
         w = csv.writer(f)
         w.writerow(["グループ", "仕入れ適性", "件数", "実売", "watch", "売れ筋listing数", "スコア",
-                    "売れ筋属性(実需順: キャラ/型番/バリエ)", "近しい商品の調達", "パイプライン", "判定"])
+                    "売れ筋(コピペ検索キー・実需順)", "近しい商品の調達", "パイプライン", "判定"])
         for grp, d in summary:
             mark, reason, pipe = feas(grp)
-            attrs = " / ".join(top_attributes(d["members"], grp, df, total, 6))
+            keys = " / ".join(k for k, *_ in top_products(d["members"], grp, 5))
             w.writerow([grp, mark, d["n"], d["sold"], d["watch"], d["sold_listings"],
-                        f"{d['score']:.0f}", attrs, reason, pipe, verdict(mark, d)])
+                        f"{d['score']:.0f}", keys, reason, pipe, verdict(mark, d)])
+
+    # 仕入れ候補リスト (1行=1商品: コピペ検索キー + メルカリ検索URL)。これがソーシングの作業表。
+    f2, spath = _open_w(os.path.join(DESK, f"仕入れ候補_コピペ検索_{datetime.date.today():%Y%m%d}.csv"))
+    with f2:
+        w = csv.writer(f2)
+        w.writerow(["グループ", "仕入れ適性", "判定", "コピペ検索キー", "実売", "watch", "listing数", "メルカリ検索URL"])
+        for grp, d in summary:
+            mark, _reason, _pipe = feas(grp)
+            vd = verdict(mark, d)
+            if vd == "様子見":
+                continue  # 拡大推奨/候補 のみ作業表に載せる
+            for key, sold, watch, nl in top_products(d["members"], grp, 6):
+                w.writerow([grp, mark, vd, key, sold, watch, nl, mercari_url(key)])
 
     print(f"需要実証(スコア>0) listing: {len(winners)}件 / 全{len(rows)}件")
     print(f"\n=== 新規出品強化: グループ別 (需要 × 近しい商品を出せるか) ===")
@@ -273,12 +286,13 @@ def main():
         mark, reason, pipe = feas(grp)
         if verdict(mark, d) == "★拡大推奨":
             print(f"  ▼ {grp}: {reason} [{pipe}]  (実売{d['sold']}/watch{d['watch']}/売れ筋{d['sold_listings']}listing)")
-            attrs = top_attributes(d["members"], grp, df, total, 6)
-            print(f"      売れ筋属性: {' / '.join(attrs) if attrs else '(なし)'}")
+            for key, sold, watch, nl in top_products(d["members"], grp, 5):
+                print(f"      ・{key:<40} 実売{sold}/W{watch}/{nl}件")
     print(f"\nCSV出力: {path}")
     print(f"グループ別判定: {gpath}")
+    print(f"★仕入れ候補(コピペ検索キー+メルカリURL): {spath}")
     print("▶ ★拡大推奨 = 需要実証 ∩ 近しい商品をタイムリーに出せる → 新規出品で面で増やす本命。")
-    print("▶ △候補 = 需要はあるが個別の市場/時期チェックが要る (PSA は別カードの相場確認など)。")
+    print("▶ 検索キーをコピペ or メルカリURLをクリックして仕入れ元を探す。")
 
 
 if __name__ == "__main__":
