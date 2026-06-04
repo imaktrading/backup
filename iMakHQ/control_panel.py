@@ -390,7 +390,7 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "demand_winners.py"],
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/仕入れ候補_コピペ検索_*.csv",
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/新規強化リスト_*.csv",
     },
     # 2026-06-04: G-SHOCK価格調査(amazon_v8_check/mercari_gshock_resource)とタイトル改修(title_keyword_proposal)は
     #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
