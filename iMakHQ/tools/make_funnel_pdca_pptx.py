@@ -112,13 +112,13 @@ s = slide(); header(s, "② ファネル分析：症状を「原因」に分解"
 box(s, 0.5, 1.1, 12.3, 0.5, "在庫あり listing は3段階のどこで脱落したか / 在庫切れは需要で2分（今月の実数）",
     size=15, bold=True, color=C_ACCENT)
 table(s, 0.5, 1.75, 12.3, [
-    ["バケツ", "状態", "原因＝打つ手", "今月"],
-    ["NO_SEARCH", "検索にほぼ出ない", "タイトルのキーワードが弱い", "84"],
-    ["NO_CLICK", "表示有るがクリック0%", "サムネ/タイトル/価格", "114"],
-    ["NO_CONVERT", "見られるが売れない", "価格/競合/説明", "280"],
-    ["RESTOCK（在庫切れ）", "過去販売 or watcher 有", "需要実証済 → 再仕入れ", "237"],
-    ["CULL（在庫切れ）", "一度も需要ゼロ", "出品停止を検討", "1,755"],
-], [2.6, 3.2, 4.7, 1.8], row_h=0.62, fs=13)
+    ["№", "バケツ", "状態", "原因＝打つ手", "今月"],
+    ["①", "NO_SEARCH", "検索にほぼ出ない", "タイトルのキーワードが弱い", "84"],
+    ["②", "NO_CLICK", "表示有るがクリック0%", "サムネ/タイトル/価格", "114"],
+    ["③", "NO_CONVERT", "見られるが売れない", "価格/競合/仕入れ原価", "280"],
+    ["④", "RESTOCK（在庫切れ）", "過去販売 or watcher 有", "需要実証済 → 再仕入れ", "237"],
+    ["⑤", "CULL（在庫切れ）", "一度も需要ゼロ", "出品停止 or 同カード救出", "1,755"],
+], [0.7, 2.4, 3.0, 4.4, 1.8], row_h=0.62, fs=13)
 box(s, 0.5, 6.05, 12.3, 1.0,
     "全 4,597 listing / 在庫切れ 1,992(43%) / 在庫あり 2,605 / US 深掘り対象 628。\n"
     "▶ 無在庫運用では『リピート可(G-SHOCK/Montbell)＝攻め』『1点もの(PSA/Porter)＝畳むか同カード再入手』で読み分ける。",
@@ -127,13 +127,13 @@ box(s, 0.5, 6.05, 12.3, 1.0,
 # ── Slide 4: 役割分担 ──
 s = slide(); header(s, "③ 誰が・何を・どの技で（役割分担）")
 table(s, 0.5, 1.2, 12.3, [
-    ["バケツ", "対策", "担当システム", "技/ツール"],
-    ["NO_SEARCH", "タイトル改修（検索語注入）", "Revise + キーワード", "iMakKeywords PDF 上位語"],
-    ["NO_CLICK", "サムネ/画像の改善", "出品くん（HQ）", "実写サムネ / Vision 確認"],
-    ["NO_CONVERT", "価格見直し → 値下げ/撤退", "抽出くん + HQ", "amazon_jp（原価）→ V8(US計算)"],
-    ["RESTOCK", "仕入れ先を再確保", "抽出くん / 監視くん", "mercari_scout / Amazon在庫監視"],
-    ["CULL", "出品停止 or 同カード再入手", "出品くん / 抽出くん", "end処理 / Mercari・スニダン照合"],
-], [2.2, 3.6, 3.2, 3.3], row_h=0.66, fs=12)
+    ["№", "バケツ", "対策", "担当システム", "技/ツール"],
+    ["①", "NO_SEARCH", "タイトル改修（真の検索語を先頭へ）", "Revise + キーワード", "iMakKeywords PDF 上位語"],
+    ["②", "NO_CLICK", "サムネ/画像の改善", "出品くん（HQ）", "実写サムネ / Vision 確認"],
+    ["③", "NO_CONVERT", "価格見直し → 値下げ/代替仕入れ/撤退", "抽出くん + HQ", "amazon_jp（原価）→ V8"],
+    ["④", "RESTOCK", "仕入れ先を再確保", "抽出くん / 監視くん", "mercari_scout / Amazon在庫"],
+    ["⑤", "CULL", "出品停止 or 同カード再入手", "出品くん / 抽出くん", "end処理 / Mercari照合"],
+], [0.6, 2.0, 3.8, 2.9, 3.0], row_h=0.66, fs=12)
 box(s, 0.5, 5.9, 12.3, 1.1,
     "▶ 分析（出品くん=listing_funnel）が司令塔。各バケツを担当システムに割り振る。\n"
     "▶ 新規スクレイプは作らず “既存の技を借りる”（amazon_jp / mercari_scout / market_gate / Revise）。",
@@ -160,20 +160,28 @@ for title, col, x, y, body in quad:
 box(s, 0.5, 7.0, 12.3, 0.4, "→ 同じレポートを毎月DLするだけで Check が自動で取れる＝改善が定量で回る",
     size=13, bold=True, color=C_PRIMARY, align=PP_ALIGN.CENTER)
 
-# ── Slide 6: 今月のアクション ──
-s = slide(); header(s, "⑤ 今月の優先アクション")
-table(s, 0.5, 1.2, 12.3, [
-    ["優先", "アクション", "対象", "効果/リスク"],
-    ["1", "RESTOCK 再仕入れ（G-SHOCK35 / Montbell13）", "定番・需要実証済", "◎無在庫向き・即効・低リスク"],
-    ["2", "NO_CONVERT 価格点検（Amazon原価→V8→値下げ/撤退）", "G-SHOCK 150", "売上直結・撤退判断も"],
-    ["3", "CULL 整理（PSAは同カード再入手なら救出）", "1,755", "アカウント衛生・救出"],
-    ["4", "NO_SEARCH タイトル改修（PDF→Revise）", "84", "中労力・検索流入"],
-    ["5", "NO_CLICK 画像改善（高impr型番のサムネ）", "G-SHOCK 52", "クリック率改善"],
-], [1.0, 6.2, 2.7, 2.4], row_h=0.62, fs=12)
-box(s, 0.5, 5.95, 12.3, 1.0,
-    "▶ 一推し: ①の再仕入れリスト（デスクトップ出力済）から着手。\n"
-    "▶ 次回レポートで NO_CONVERT/在庫切れ件数が減れば施策が効いた証拠（=Check）。",
-    size=14, bold=True, color=C_ACCENT, fill=RGBColor(0xEF, 0xEF, 0xEF))
+# ── Slide 6: 番号別 やること & 進捗 ──
+s = slide(); header(s, "⑤ 番号別 やること & 進捗（どこまでできたか）")
+DONE = RGBColor(0x2E, 0x7D, 0x32); PART = RGBColor(0xC0, 0x50, 0x2B); TODO = RGBColor(0x99, 0x99, 0x99)
+gt = table(s, 0.4, 1.15, 12.5, [
+    ["№", "やること", "進捗（今回どこまで）", "状態", "成果物"],
+    ["①", "NO_SEARCH: タイトル改修", "改修案ツール完成。front-load改善38件/救えない37件", "一部", "04_タイトル改修案.csv"],
+    ["②", "NO_CLICK: 画像改善", "未着手（出品画像をVision分析する段階）", "未", "—"],
+    ["③", "NO_CONVERT: 価格/仕入れ", "Amazon原価→V8で撤退寄り30。メルカリ代替で19復活可", "完了", "02_V8判定/メルカリ代替仕入.csv"],
+    ["④", "RESTOCK: 再仕入れ", "G-SHOCK35+Montbell13 のリスト出力（実仕入れは人手）", "一部", "再仕入れリスト.csv"],
+    ["⑤", "CULL: 整理 or 救出", "PSA 同カードをメルカリ照合→再仕入れGO 13枚", "一部", "03_メルカリ判定.csv"],
+], [0.6, 3.4, 5.2, 1.1, 2.2], row_h=0.78, fs=11, hfs=12)
+# 状態セルを色分け
+state_col = 3
+state_color = {"完了": DONE, "一部": PART, "未": TODO}
+for i in range(1, 6):
+    txt = gt.cell(i, state_col).text_frame.paragraphs[0].runs[0].text
+    gt.cell(i, state_col).text_frame.paragraphs[0].runs[0].font.color.rgb = state_color.get(txt, C_DARK)
+    gt.cell(i, state_col).text_frame.paragraphs[0].runs[0].font.bold = True
+box(s, 0.4, 6.35, 12.5, 0.95,
+    "▶ 完了=分析/判断まで自動化済（実行＝買う/値下げ/出品は人手）。基盤(ファネル本体/Excel/US リンク統一)も整備済。\n"
+    "▶ 次回レポートで各バケツ件数が減れば施策が効いた証拠（=PDCAのCheck）。残り: ②画像 / 各実行。",
+    size=12, bold=True, color=C_PRIMARY, fill=RGBColor(0xE8, 0xEF, 0xD8))
 
 out = os.path.join(DESK if os.path.isdir(DESK) else ".", f"eBayレポート活用_PDCAサイクル_{datetime.date.today():%Y%m%d}.pptx")
 prs.save(out)
