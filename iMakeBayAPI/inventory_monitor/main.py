@@ -212,8 +212,14 @@ def match_uniqlo_with_sheet(uniqlo_skus: list, sheet_skus: list) -> list:
 # ============================================================================
 # 1 listing 処理
 # ============================================================================
-def process_listing(sh, main_row: dict, dry_run: bool = False) -> dict:
-    """1 listing 分の処理. Returns: {"updates": [...], "needs_action_count": N}"""
+def process_listing(sh, main_row: dict, dry_run: bool = False,
+                    all_sku_rows: list | None = None) -> dict:
+    """1 listing 分の処理. Returns: {"updates": [...], "needs_action_count": N}
+
+    all_sku_rows: 呼出側で 1 回読込みキャッシュした SKU シート全行。 None なら従来動作
+    (= listing 毎に read_sku_rows)。 listing 数 ×  Sheets API read で 429 quota 超
+    の事故 (2026-06-04 06:00 cycle 末尾 8 listing 取りこぼし) 対策。
+    """
     listing_id = main_row["listing_id"]
     title = main_row["title"]
     url = main_row["url"]
@@ -229,8 +235,9 @@ def process_listing(sh, main_row: dict, dry_run: bool = False) -> dict:
 
     log(f"    {supplier}: {info['name'][:40]} / {info.get('color', '')} / {len(info['skus'])} skus")
 
-    # SKU シート読込 (1回だけで全 listing の rows 持つ → 呼出側でキャッシュした方が効率的)
-    all_sku_rows = read_sku_rows(sh)
+    # SKU シート読込 (呼出側キャッシュがあればそれを使う、 なければ従来通り都度読込)
+    if all_sku_rows is None:
+        all_sku_rows = read_sku_rows(sh)
     sheet_skus = get_skus_for_listing(listing_id, mode="stub_from_sheet", sheet_rows=all_sku_rows)
 
     listing_default_color = info.get("color", "") if info.get("color", "") not in ("ALL", "") else ""
@@ -703,12 +710,22 @@ def main():
         log("対象 0 件、終了")
         return
 
+    # SKU シート全行を cycle 開始時に 1 回だけ読込 (= listing 毎の Sheets API
+    # 429 quota 超 防止、 2026-06-04 cycle で末尾 8 listing 取りこぼし発覚)
+    try:
+        cycle_sku_rows = read_sku_rows(sh)
+        log(f"SKU シート 全行キャッシュ: {len(cycle_sku_rows)} 行")
+    except Exception as e:
+        log(f"⚠️ SKU シート事前読込失敗 ({type(e).__name__}: {e})、 listing 毎 fallback")
+        cycle_sku_rows = None
+
     all_updates = []
     total_needs_action = 0
     errors = []
     for row in main_rows:
         try:
-            result = process_listing(sh, row, dry_run=args.dry_run)
+            result = process_listing(sh, row, dry_run=args.dry_run,
+                                     all_sku_rows=cycle_sku_rows)
             all_updates.extend(result["updates"])
             total_needs_action += result["needs_action_count"]
             if result.get("error"):
