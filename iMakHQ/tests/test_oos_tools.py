@@ -24,6 +24,7 @@ def _load(name):
 
 cull_end = _load("cull_end")
 restock = _load("restock_worklist")
+noclick = _load("noclick_targets")
 
 
 def _row(item_id, flags="CULL", age=100, price=10.0, **kw):
@@ -104,6 +105,32 @@ def test_restock_dedup_aggregates_sites_and_demand():
     assert same["sites"] == {"US", "UK"}
     assert same["sold"] == 1 and same["watch"] == 5
     assert len(items) == 2
+
+
+# ---------- ④: noclick_targets ----------
+def test_noclick_only_watcher_bearing():
+    rows = [
+        {"flags": "NO_CLICK", "watch": "3", "price": "50", "title": "a"},   # OK
+        {"flags": "NO_CLICK", "watch": "0", "price": "99", "title": "b"},   # watcher無 → 除外
+        {"flags": "NO_SEARCH", "watch": "5", "price": "10", "title": "c"},  # NO_CLICKでない → 除外
+    ]
+    sel = noclick.select(rows)
+    assert [r["title"] for r in sel] == ["a"]
+
+
+def test_noclick_order_watcher_then_price():
+    rows = [
+        {"flags": "NO_CLICK", "watch": "1", "price": "300", "title": "w1_hi"},
+        {"flags": "NO_CLICK", "watch": "3", "price": "10", "title": "w3_lo"},
+        {"flags": "NO_CLICK", "watch": "3", "price": "200", "title": "w3_hi"},
+    ]
+    assert [r["title"] for r in noclick.select(rows)] == ["w3_hi", "w3_lo", "w1_hi"]
+
+
+def test_noclick_fix_hint():
+    assert "語数" in noclick.fix_hint(5, 10)        # 語数不足
+    assert "写真" in noclick.fix_hint(15, 3)        # 写真不足
+    assert "見直し" in noclick.fix_hint(15, 10)     # 両方足りてる → 一般ヒント
 
 
 if __name__ == "__main__":

@@ -403,6 +403,15 @@ SCRIPTS = [
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/03_PSA再仕入れ候補_*_メルカリ判定.csv",
     },
     {
+        # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "✏️ タイトル改修対象(NO_CLICK)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "noclick_targets.py"],
+        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/タイトル改修対象_*.csv",
+    },
+    {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
         "category": None, "type": "utility",
         "label": "🛒 在庫切れ再仕入れ(RESTOCK)",
@@ -1192,7 +1201,7 @@ class ListingPanel:
         # 2) utility をグループ分類 (cmd のスクリプト名で判定)
         def _ugroup(idx):
             cmd = " ".join(SCRIPTS[idx].get("cmd", []))
-            if any(s in cmd for s in ("listing_funnel", "demand_winners")):
+            if any(s in cmd for s in ("listing_funnel", "demand_winners", "noclick_targets")):
                 return "analyze"   # 📊 分析 (Plan/Check)
             if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
                 return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
