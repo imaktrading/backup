@@ -437,13 +437,6 @@ SCRIPTS = [
         "cmd": ["python", "mercari_gshock_resource.py"],
         "params": [],
     },
-    {
-        "category": None, "type": "utility",
-        "label": "⏱ APIレート残量確認",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "ebay_rate_limits.py"],
-        "params": [],
-    },
 ]
 
 
@@ -1234,7 +1227,36 @@ class ListingPanel:
                 _grid_named(disc, [(SCRIPTS[i]["label"], i) for i in ug["discover"]])
         else:
             # ===== 🔧 既存メンテ =====
-            pdca = ttk.LabelFrame(scroll_frame, text="📊 出品改善 PDCA (4レポート → ファネル分析)", padding=4)
+            REPORTS_DIR = r"C:/dev/iMak_data/seller_hub/reports"
+
+            def _open_sellerhub():
+                import webbrowser
+                webbrowser.open("https://www.ebay.com/sh/ovw")
+
+            def _open_reports():
+                os.makedirs(REPORTS_DIR, exist_ok=True)
+                os.startfile(REPORTS_DIR)
+
+            # 手順ガイド
+            guide = ttk.LabelFrame(scroll_frame, text="📋 進め方 (月次PDCA)", padding=6)
+            guide.pack(fill="x", padx=4, pady=(4, 6))
+            tk.Label(
+                guide, justify="left", anchor="w", font=("Yu Gothic UI", 10),
+                text=("① eBay Seller Hub で4レポートを手動DL → 下の「📁reportsフォルダ」に置く\n"
+                      "    (全アクティブ出品 / Listing quality report / 売れ残り / 注文)\n"
+                      "② 「📊ファネル分析」→ デスクトップに分析Excel(在庫あり/なし・5バケツ)\n"
+                      "③ 「📈需要・新規強化」で勝ち筋カテゴリを確認\n"
+                      "④ D①〜⑤ ボタンで個別判断 (タイトル/価格/再仕入れ)\n"
+                      "⑤ 翌月また②→ 件数の増減で効果測定 (Check)"),
+            ).pack(anchor="w")
+            hb = ttk.Frame(guide)
+            hb.pack(anchor="w", pady=(4, 0))
+            tk.Button(hb, text="🌐 Seller Hub を開く (①レポDL)", font=("", 10, "bold"),
+                      command=_open_sellerhub).pack(side="left", padx=(0, 6))
+            tk.Button(hb, text="📁 reports フォルダを開く", font=("", 10, "bold"),
+                      command=_open_reports).pack(side="left")
+
+            pdca = ttk.LabelFrame(scroll_frame, text="② 分析 / ③ 需要 — 出品改善 PDCA", padding=4)
             pdca.pack(fill="x", padx=4, pady=(4, 0))
             _grid_named(pdca, [(SCRIPTS[i]["label"], i) for i in ug["pdca"]])
             # 再出品・取下げ: カテゴリ別「再出品」+ relist utility をまとめて
