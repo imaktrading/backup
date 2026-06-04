@@ -8,12 +8,14 @@
   - V8計算: iMakeBayAPI/pricing_engine.compute_listing_price (category=TCG(PSA10))
 
 入力: デスクトップの 03_PSA再仕入れ候補_*.csv (set_no / ebay_price / title)
+      ※ 手動CSVが無ければ最新 funnel_*.csv の RESTOCK∩PSA10 行から自動生成 (set_noはtitleから抽出)
 出力: 同ディレクトリに ..._メルカリ判定.csv + コンソール要約
 
 判定: 同カードPSA10 の最安(メルカリ on_sale) を仕入れ原価とし、V8推奨eBay価格 <= 現eBay価格 なら
       「再仕入れGO」(畳むはずの死蔵を救出可)。
 """
 import csv
+import datetime
 import glob
 import os
 import re
@@ -28,6 +30,7 @@ except Exception:
     pass
 
 DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
+FUNNEL_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
 CATEGORY = "TCG(PSA10)"
 SETNO_RE = re.compile(r"\b([A-Z]{2,3}\d{2}-\d{2,3}|P-\d{2,3}|SB\d{2}-\d{2,3}|#\d{3}/[A-Z0-9]+|#\d{2,3})\b")
 
@@ -45,6 +48,33 @@ def is_psa10(name):
     if any(b in n for b in ("PSA9", "PSA8", "PSA7", "BGS", "ARS")):
         return False
     return "PSA10" in n
+
+
+def build_input_from_funnel():
+    """手動CSVが無いとき、最新 funnel_*.csv の RESTOCK∩PSA10 から入力CSVを生成。
+
+    funnel 列(title/price/ebay_url) を 03_PSA再仕入れ候補_<日付>.csv (set_no空/ebay_price/title/ebay_url)
+    に落とす。set_no は title から SETNO_RE で後段が自動抽出する。生成パスを返す(無ければ None)。
+    """
+    ffiles = glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv"))
+    if not ffiles:
+        return None
+    fsrc = max(ffiles, key=os.path.getmtime)
+    frows = list(csv.DictReader(open(fsrc, encoding="utf-8")))
+    cands = [r for r in frows
+             if "RESTOCK" in (r.get("flags") or "").split("|") and is_psa10(r.get("title", ""))]
+    if not cands:
+        return None
+    out = os.path.join(DESK, f"03_PSA再仕入れ候補_{datetime.date.today():%Y%m%d}.csv")
+    with open(out, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=["set_no", "ebay_price", "title", "ebay_url"])
+        w.writeheader()
+        for r in cands:
+            w.writerow({"set_no": "", "ebay_price": r.get("price", ""),
+                        "title": r.get("title", ""), "ebay_url": r.get("ebay_url", "")})
+    print(f"手動CSVが無いため funnel から自動生成: {os.path.basename(out)} "
+          f"(RESTOCK∩PSA10 = {len(cands)}枚, 元: {os.path.basename(fsrc)})", flush=True)
+    return out
 
 
 def fetch_mercari_cheapest(cards):
@@ -93,10 +123,15 @@ def fetch_mercari_cheapest(cards):
 
 def main():
     import pricing_engine
-    files = glob.glob(os.path.join(DESK, "03_PSA再仕入れ候補_*.csv"))
-    if not files:
-        sys.exit("03_PSA再仕入れ候補_*.csv が見つかりません。")
-    src = max(files, key=os.path.getmtime)
+    files = [p for p in glob.glob(os.path.join(DESK, "03_PSA再仕入れ候補_*.csv"))
+             if "_メルカリ判定" not in os.path.basename(p)]
+    if files:
+        src = max(files, key=os.path.getmtime)
+    else:
+        src = build_input_from_funnel()
+        if not src:
+            sys.exit("03_PSA再仕入れ候補_*.csv が無く、funnel_*.csv にも RESTOCK∩PSA10 がありません。"
+                     "先に『ファネル分析』を実行してください。")
     rows = list(csv.DictReader(open(src, encoding="utf-8-sig")))
     kws = [(search_keyword(r.get("title", ""), r.get("set_no", "")),) for r in rows]
     print(f"対象: {src}\nPSA {len(rows)}枚 のメルカリ最安(PSA10)を取得中...", flush=True)

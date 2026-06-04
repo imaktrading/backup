@@ -366,9 +366,10 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "取下再出品",
         "label_fg": "red",  # ボタンラベル赤文字 (取下→再出品のフロー起点を強調)
-        "cwd": f"{WORKSPACE}/iMakHQ",
-        "cmd": ["python", "dump_us_qty1_sku.py"],
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "relist_from_funnel.py"],  # ファネルRELIST候補→End CSV (snapshot不要)
         "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/取下再出品候補_*.csv",
     },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
@@ -399,6 +400,7 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "mercari_psa_resource.py"],
         "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/03_PSA再仕入れ候補_*_メルカリ判定.csv",
     },
 ]
 
@@ -1177,8 +1179,8 @@ class ListingPanel:
                 return "oos"       # 在庫なし 再仕入れ
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
                 return "discover"  # 新規ネタ探し
-            if "dump_us_qty1_sku" in cmd:
-                return "relist"    # 在庫あり 取り下げ再出品(view0死蔵)
+            if "relist_from_funnel" in cmd or "dump_us_qty1_sku" in cmd:
+                return "relist"    # 在庫あり 取り下げ再出品(ファネルRELIST候補)
             return "report"
         ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": []}
         for idx in utilities:
