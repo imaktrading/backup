@@ -784,104 +784,6 @@ class DashboardDialog(tk.Toplevel):
         self.after(0, apply)
 
 
-class URLInputDialog(tk.Toplevel):
-    """PSA TCG の URL 入力 GUI。
-    paste box 形式で複数URL一括登録、説明書き付き。
-    （一番くじは『一番くじ』枠内の専用ボタンに移設済み）"""
-
-    PSA_FILE = r"c:\dev\iMak\iMakTCG\certs.txt"
-    PSA_SCRIPT = r"c:\dev\iMak\iMakTCG\psa_to_csv.py"
-
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.title("📥 URL入力 - PSA TCG")
-        self.geometry("780x680")
-
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=8, pady=8)
-
-        # ===== PSA TCGタブ =====
-        psa_tab = ttk.Frame(nb)
-        nb.add(psa_tab, text="🃏 PSA TCG")
-        self._build_psa_tab(psa_tab)
-
-        ttk.Button(self, text="閉じる", command=self.destroy).pack(pady=4)
-
-    def _build_psa_tab(self, parent):
-        info = (
-            "【PSA TCG URL入力】\n"
-            "・1行に1件、以下の形式で入力（カンマ区切り）:\n"
-            "    PSA証明番号,仕入価格(円),メルカリURL,メルカリタイトル\n"
-            "・例: 148226751,23200,https://jp.mercari.com/item/m12345,Luffy 2nd Anniv\n"
-            "・最小入力: PSA証明番号 のみ（仕入値・URL・タイトルは省略可）\n"
-            "・「ファイルに追記」で certs.txt に保存\n"
-            "・「処理開始」で psa_to_csv.py を起動 → eBay CSV生成\n"
-            "・既にスプシに登録済みのURLを持つ証明番号は自動スキップ\n"
-            "・3AI議論方式（Claude/Gemini/Groq）でタイトル整合性検証"
-        )
-        info_frame = ttk.LabelFrame(parent, text="📖 説明書き", padding=6)
-        info_frame.pack(fill="x", padx=4, pady=4)
-        ttk.Label(info_frame, text=info, justify="left", foreground="#0066cc",
-                  font=("Yu Gothic UI", 9)).pack(anchor="w")
-
-        input_frame = ttk.LabelFrame(parent,
-                                      text="📝 cert,cost,url,title（カンマ区切り、1行1件）",
-                                      padding=6)
-        input_frame.pack(fill="both", expand=True, padx=4, pady=4)
-        self.psa_text = scrolledtext.ScrolledText(input_frame, wrap="word", height=12,
-                                                   font=("Consolas", 10))
-        self.psa_text.pack(fill="both", expand=True)
-
-        btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill="x", padx=4, pady=6)
-        ttk.Button(btn_frame, text=f"📂 既存ファイルを開く ({os.path.basename(self.PSA_FILE)})",
-                   command=lambda: self._open_file(self.PSA_FILE)).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="💾 ファイルに追記",
-                   command=self._psa_save).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="▶ 処理開始（CSV生成）",
-                   command=self._psa_run).pack(side="right", padx=2)
-
-    def _psa_save(self):
-        text = self.psa_text.get("1.0", "end").strip()
-        if not text:
-            messagebox.showwarning("入力なし", "データを貼り付けてください")
-            return
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        # 最低限cert番号が含まれてる行だけ
-        valid = [ln for ln in lines if ln.split(",")[0].strip().isdigit()]
-        if not valid:
-            messagebox.showwarning("無効", "1列目がPSA証明番号(数字)の行が見つかりません")
-            return
-        try:
-            with open(self.PSA_FILE, "a", encoding="utf-8") as f:
-                f.write("\n" + "\n".join(valid) + "\n")
-            messagebox.showinfo("追記完了", f"{len(valid)}件 を {self.PSA_FILE} に追記しました")
-            self.psa_text.delete("1.0", "end")
-        except Exception as e:
-            messagebox.showerror("エラー", f"ファイル書込失敗: {e}")
-
-    def _psa_run(self):
-        if not os.path.exists(self.PSA_SCRIPT):
-            messagebox.showerror("エラー", f"スクリプトなし: {self.PSA_SCRIPT}")
-            return
-        try:
-            subprocess.Popen(["python", self.PSA_SCRIPT],
-                              cwd=os.path.dirname(self.PSA_SCRIPT),
-                              creationflags=subprocess.CREATE_NEW_CONSOLE)
-            messagebox.showinfo("起動", "psa_to_csv.py を起動しました（別コンソール）")
-        except Exception as e:
-            messagebox.showerror("エラー", f"起動失敗: {e}")
-
-    def _open_file(self, path):
-        try:
-            if not os.path.exists(path):
-                # ファイルなければ空ファイル作成
-                open(path, "a", encoding="utf-8").close()
-            os.startfile(path)
-        except Exception as e:
-            messagebox.showerror("エラー", f"ファイル開けませんでした: {e}")
-
-
 class HomePanel:
     """トップページ: 進捗ダッシュボード中心。リスティング実行は別ウィンドウへ。"""
     def __init__(self, root):
@@ -897,9 +799,12 @@ class HomePanel:
         ttk.Label(nav, text=" v2", font=("", 16, "bold"), foreground="#cc0000").pack(side="left")
         ttk.Label(nav, text=" [C:\\dev\\iMak]", font=("", 10, "bold"), foreground="#008000").pack(side="left")
         ttk.Label(nav, text="  ©iMak Trading", font=("", 10), foreground="gray").pack(side="left")
-        # 宿題 / URL入力 ボタンは 2026-06-04 撤去 (機能コード=URLInputDialog/open_tasks は残置=戻せる)
-        ttk.Button(nav, text="📜 リスティングスクリプト一覧", command=self.open_listing).pack(side="right", padx=2)
+        # 2026-06-04: 宿題ボタン撤去(open_tasks/TasksDialog は残置=戻せる)。
+        #   URL入力(TCG)は仕組みのレベルアップで不要化 → URLInputDialog/open_url_input ごと削除。
+        #   リスティングを 新規出品 / 既存メンテ の2ボタンに分割。
         ttk.Button(nav, text="🔄 更新", command=self.refresh_dashboard).pack(side="right", padx=2)
+        ttk.Button(nav, text="🔧 既存メンテ", command=lambda: self.open_listing("maint")).pack(side="right", padx=2)
+        ttk.Button(nav, text="🆕 新規出品", command=lambda: self.open_listing("new")).pack(side="right", padx=2)
 
         # ストア概要
         self.store_info_var = tk.StringVar(value="データ取得中...")
@@ -959,7 +864,7 @@ class HomePanel:
         self.reco_text.pack(fill="both", expand=True)
         self.reco_text.config(state="disabled")
 
-        self.listing_window = None  # リスティング画面（別ウィンドウ、遅延生成）
+        self.listing_windows = {}  # mode("new"/"maint") → リスティング別ウィンドウ (遅延生成)
         self.root.after(300, self.refresh_dashboard)
 
     def _on_close(self):
@@ -1060,25 +965,27 @@ class HomePanel:
     def open_tasks(self):
         TasksDialog(self.root)
 
-    def open_url_input(self):
-        URLInputDialog(self.root)
-
-    def open_listing(self):
-        """リスティングスクリプト一覧を別ウィンドウで開く（既にあれば前面表示）。"""
-        if self.listing_window is not None and tk.Toplevel.winfo_exists(self.listing_window):
-            self.listing_window.lift()
-            self.listing_window.focus_force()
+    def open_listing(self, mode="new"):
+        """新規出品 / 既存メンテ を別ウィンドウで開く（既にあれば前面表示）。"""
+        win = self.listing_windows.get(mode)
+        if win is not None and tk.Toplevel.winfo_exists(win):
+            win.lift()
+            win.focus_force()
             return
-        self.listing_window = tk.Toplevel(self.root)
-        self.listing_window.title("📜 リスティングスクリプト一覧")
-        self.listing_window.geometry(_load_geometry("listing", "1100x780"))
-        self.listing_window.protocol("WM_DELETE_WINDOW", self._on_close_listing)
-        ListingPanel(self.listing_window)
+        title = "🆕 新規出品" if mode == "new" else "🔧 既存メンテ"
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.geometry(_load_geometry(f"listing_{mode}", "1000x760"))
+        win.protocol("WM_DELETE_WINDOW", lambda: self._on_close_listing(mode))
+        self.listing_windows[mode] = win
+        ListingPanel(win, mode=mode)
 
-    def _on_close_listing(self):
-        _save_geometry("listing", self.listing_window.geometry())
-        self.listing_window.destroy()
-        self.listing_window = None
+    def _on_close_listing(self, mode):
+        win = self.listing_windows.get(mode)
+        if win is not None:
+            _save_geometry(f"listing_{mode}", win.geometry())
+            win.destroy()
+            self.listing_windows[mode] = None
 
     def refresh_dashboard(self):
         self.store_info_var.set("取得中...")
@@ -1212,8 +1119,9 @@ class HomePanel:
 
 class ListingPanel:
     """従来の ControlPanel 相当（スクリプト一覧）。HomePanel から呼び出される。"""
-    def __init__(self, root):
+    def __init__(self, root, mode="new"):
         self.root = root
+        self.mode = mode  # "new"=新規出品 / "maint"=既存メンテ
 
         # ツールバー (共有 🛑 停止)
         toolbar = ttk.Frame(root, padding=(8, 4))
@@ -1287,55 +1195,47 @@ class ListingPanel:
                           command=lambda i=idx: self.run_script(i)).grid(
                     row=k // ncol, column=k % ncol, padx=4, pady=4, sticky="nsew")
 
-        # ===== 🆕 新規出品 =====
-        new_sec = ttk.LabelFrame(scroll_frame, text="🆕 新規出品", padding=6)
-        new_sec.pack(fill="x", padx=4, pady=(4, 8))
-        cat_outer = ttk.Frame(new_sec)
-        cat_outer.pack(fill="x")
-        n_cat_cols = 3
-        for col in range(n_cat_cols):
-            cat_outer.columnconfigure(col, weight=1, uniform="catcol")
-        gi = 0
-        for cat_name in cat_order:
-            new_idx = categories[cat_name].get("new")
-            if new_idx is None:
-                continue
-            r, c = divmod(gi, n_cat_cols)
-            gi += 1
-            frame = ttk.LabelFrame(cat_outer, text=cat_name, padding=4)
-            frame.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
-            color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
-            tk.Button(frame, text="新規", font=("", 10, "bold"), fg=color, width=12, height=1,
-                      command=lambda idx=new_idx: self.run_script(idx)).pack(padx=4, pady=2)
-            # PSA TCG は cert/URL 入力が新規の入口 → 同じ枠に移設 (nav から撤去した分)
-            # 注: 描画は ListingPanel。open_url_input は HomePanel のメソッドなので
-            #     URLInputDialog を直接起動する (self.open_url_input は ListingPanel に無い)。
-            if cat_name == "PSA TCG":
-                tk.Button(frame, text="📥 URL入力", font=("", 9), fg="black", width=12, height=1,
-                          command=lambda: URLInputDialog(self.root)).pack(padx=4, pady=2)
-        if ug["discover"]:
-            disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)
-            disc.pack(fill="x", pady=(6, 0))
-            _grid_named(disc, [(SCRIPTS[i]["label"], i) for i in ug["discover"]])
-
-        # ===== 🔧 既存メンテ =====
-        mnt_sec = ttk.LabelFrame(scroll_frame, text="🔧 既存メンテ", padding=6)
-        mnt_sec.pack(fill="x", padx=4, pady=8)
-        pdca = ttk.LabelFrame(mnt_sec, text="📊 出品改善 PDCA (4レポート → ファネル分析)", padding=4)
-        pdca.pack(fill="x")
-        _grid_named(pdca, [(SCRIPTS[i]["label"], i) for i in ug["pdca"]])
-        # 再出品・取下げ: カテゴリ別「再出品」+ relist utility をまとめて
-        relist_items = [(f"{cat} 再出品", categories[cat]["relist"])
-                        for cat in cat_order if categories[cat].get("relist") is not None]
-        relist_items += [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
-        if relist_items:
-            rel = ttk.LabelFrame(mnt_sec, text="🔁 再出品・取下げ", padding=4)
-            rel.pack(fill="x", pady=(6, 0))
-            _grid_named(rel, relist_items)
-        if ug["report"]:
-            rep = ttk.LabelFrame(mnt_sec, text="📈 レポート・分析", padding=4)
-            rep.pack(fill="x", pady=(6, 0))
-            _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]])
+        if self.mode == "new":
+            # ===== 🆕 新規出品 (カテゴリ名ラベルの大ボタン・間隔詰め) =====
+            new_sec = ttk.LabelFrame(scroll_frame, text="🆕 新規出品 — カテゴリを選んで出品", padding=6)
+            new_sec.pack(fill="x", padx=4, pady=(4, 8))
+            cat_grid = ttk.Frame(new_sec)
+            cat_grid.pack(fill="x")
+            n_cat_cols = 4
+            for col in range(n_cat_cols):
+                cat_grid.columnconfigure(col, weight=1, uniform="catcol")
+            gi = 0
+            for cat_name in cat_order:
+                new_idx = categories[cat_name].get("new")
+                if new_idx is None:
+                    continue
+                color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
+                tk.Button(cat_grid, text=cat_name, font=("", 12, "bold"), fg=color,
+                          width=15, height=2, wraplength=150, justify="center",
+                          command=lambda idx=new_idx: self.run_script(idx)).grid(
+                    row=gi // n_cat_cols, column=gi % n_cat_cols, padx=2, pady=2, sticky="nsew")
+                gi += 1
+            if ug["discover"]:
+                disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)
+                disc.pack(fill="x", pady=(8, 0))
+                _grid_named(disc, [(SCRIPTS[i]["label"], i) for i in ug["discover"]])
+        else:
+            # ===== 🔧 既存メンテ =====
+            pdca = ttk.LabelFrame(scroll_frame, text="📊 出品改善 PDCA (4レポート → ファネル分析)", padding=4)
+            pdca.pack(fill="x", padx=4, pady=(4, 0))
+            _grid_named(pdca, [(SCRIPTS[i]["label"], i) for i in ug["pdca"]])
+            # 再出品・取下げ: カテゴリ別「再出品」+ relist utility をまとめて
+            relist_items = [(f"{cat} 再出品", categories[cat]["relist"])
+                            for cat in cat_order if categories[cat].get("relist") is not None]
+            relist_items += [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
+            if relist_items:
+                rel = ttk.LabelFrame(scroll_frame, text="🔁 再出品・取下げ", padding=4)
+                rel.pack(fill="x", padx=4, pady=(8, 0))
+                _grid_named(rel, relist_items)
+            if ug["report"]:
+                rep = ttk.LabelFrame(scroll_frame, text="📈 レポート・分析", padding=4)
+                rep.pack(fill="x", padx=4, pady=(8, 0))
+                _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]])
 
         # 状態ライン
         status_frame = ttk.Frame(root)

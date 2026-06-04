@@ -106,10 +106,12 @@ def test_control_panel_labelframe_layout():
     """control_panel.py の描画ロジックが Labelframe + 新規/再出品 構成 (2026-06-04 2セクション化)."""
     src = (_HQ / "control_panel.py").read_text(encoding="utf-8")
     assert "ttk.LabelFrame" in src
-    assert 'text="新規"' in src
-    assert "再出品" in src  # 2026-06-04: f"{cat} 再出品" 形式に変更 (既存メンテ section)
+    assert "再出品" in src  # f"{cat} 再出品" 形式 (既存メンテ section)
     # verified カテゴリの先頭並べ替え
     assert "_cat_verified" in src or "verified" in src
-    # 2026-06-04 再構成: 新規出品 / 既存メンテ の2セクション + PDCA グループ
+    # 2026-06-04 再構成: 新規出品 / 既存メンテ を mode で分割 (2ボタン化)
+    assert 'mode="new"' in src and 'self.mode' in src
     assert "新規出品" in src and "既存メンテ" in src
     assert "出品改善 PDCA" in src
+    # 新規はカテゴリ名ラベルの大ボタン (text="新規" 固定でなく cat_name)
+    assert "text=cat_name" in src
