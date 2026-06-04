@@ -376,7 +376,7 @@ SCRIPTS = [
     #       C:/dev/iMak_data/seller_hub/reports/ に置く (無ければデスクトップの所定フォルダ)
     {
         "category": None, "type": "utility",
-        "label": "ファネル分析",
+        "label": "📊 ファネル分析",
         "label_fg": "blue",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "listing_funnel.py"],
@@ -385,7 +385,7 @@ SCRIPTS = [
     },
     {
         "category": None, "type": "utility",
-        "label": "需要強化",
+        "label": "📈 需要・新規強化リスト",
         "label_fg": "blue",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "demand_winners.py"],
@@ -396,7 +396,7 @@ SCRIPTS = [
     #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
     {
         "category": None, "type": "utility",
-        "label": "PSA再仕入れ",
+        "label": "🃏 PSA再仕入れ照合(メルカリ)",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "mercari_psa_resource.py"],
         "params": [],
@@ -1178,42 +1178,47 @@ class ListingPanel:
                 return "oos"       # 在庫なし 再仕入れ
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
                 return "discover"  # 新規ネタ探し
-            if "relist_from_funnel" in cmd or "dump_us_qty1_sku" in cmd:
-                return "relist"    # 在庫あり 取り下げ再出品(ファネルRELIST候補)
+            if "dump_us_qty1_sku" in cmd:
+                return "relist"    # 在庫あり 取り下げ再出品(view0死蔵)
             return "report"
         ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": []}
         for idx in utilities:
             ug[_ugroup(idx)].append(idx)
 
-        # 共通: (label, idx) を左詰めグリッドで描画。ボタンは全画面で同一サイズ
-        # (左右=狭め width=14 / 上下=広め height=3)。セルは weight 付けず左詰め=見切れ防止。
-        BTN_W, BTN_H, BTN_WL = 14, 3, 120
+        # 共通: (label, idx) のリストを ncol 列グリッドで描画。ボタンは全画面で同一サイズ
+        # (左右=狭め width / 上下=広め height、中央寄せ=ストレッチさせず統一見た目)。
+        BTN_W, BTN_H, BTN_WL = 13, 3, 110
 
         def _grid_named(parent, items, ncol=4, compact=False):
+            ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない
+            for col in range(ncol):
+                parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
             for k, (text, idx) in enumerate(items):
                 color = SCRIPTS[idx].get("label_fg") or ("#0066cc" if SCRIPTS[idx].get("verified", False) else "black")
                 tk.Button(parent, text=text, font=("", 9, "bold"), fg=color,
                           width=BTN_W, height=BTN_H, wraplength=BTN_WL, justify="center",
                           command=lambda i=idx: self.run_script(i)).grid(
-                    row=k // ncol, column=k % ncol, padx=3, pady=3, sticky="w")
+                    row=k // ncol, column=k % ncol, padx=3, pady=3)  # sticky無し=中央寄せ・統一サイズ
 
         if self.mode == "new":
             # ===== 🆕 新規出品 (カテゴリ名ラベルの大ボタン・間隔詰め) =====
-            new_sec = ttk.LabelFrame(scroll_frame, text="新規出品 — カテゴリを選んで出品", padding=6)
+            new_sec = ttk.LabelFrame(scroll_frame, text="🆕 新規出品 — カテゴリを選んで出品", padding=6)
             new_sec.pack(fill="x", padx=4, pady=(4, 8))
             cat_grid = ttk.Frame(new_sec)
             cat_grid.pack(fill="x")
-            n_cat_cols = 5
+            n_cat_cols = 4
+            for col in range(n_cat_cols):
+                cat_grid.columnconfigure(col, weight=1, uniform="catcol")
             gi = 0
             for cat_name in cat_order:
                 new_idx = categories[cat_name].get("new")
                 if new_idx is None:
                     continue
                 color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
-                tk.Button(cat_grid, text=cat_name, font=("", 10, "bold"), fg=color,
+                tk.Button(cat_grid, text=cat_name, font=("", 11, "bold"), fg=color,
                           width=BTN_W, height=BTN_H, wraplength=BTN_WL, justify="center",
                           command=lambda idx=new_idx: self.run_script(idx)).grid(
-                    row=gi // n_cat_cols, column=gi % n_cat_cols, padx=3, pady=3, sticky="w")
+                    row=gi // n_cat_cols, column=gi % n_cat_cols, padx=3, pady=3)  # 統一サイズ・中央寄せ
                 gi += 1
             if ug["discover"]:
                 disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)
@@ -1232,17 +1237,17 @@ class ListingPanel:
                 os.startfile(REPORTS_DIR)
 
             # 手順ガイド
-            guide = ttk.LabelFrame(scroll_frame, text="レポート準備", padding=6)
+            guide = ttk.LabelFrame(scroll_frame, text="📋 レポート準備", padding=6)
             guide.pack(fill="x", padx=4, pady=(4, 6))
             hb = ttk.Frame(guide)
             hb.pack(anchor="w")
-            tk.Button(hb, text="レポートDL", font=("", 10, "bold"),
+            tk.Button(hb, text="🌐 レポートDL", font=("", 10, "bold"),
                       command=_open_sellerhub).pack(side="left", padx=(0, 6))
-            tk.Button(hb, text="reports フォルダを開く", font=("", 10, "bold"),
+            tk.Button(hb, text="📁 reports フォルダを開く", font=("", 10, "bold"),
                       command=_open_reports).pack(side="left")
             tk.Label(
                 guide, justify="left", anchor="w", font=("Yu Gothic UI", 10),
-                text=("Seller Hub で下記4レポートをDL → reports フォルダに置く:\n"
+                text=("Seller Hub で下記4レポートをDL → 📁reports フォルダに置く:\n"
                       "  ・eBay-all-active-listings\n"
                       "  ・ebay-all-orders-report\n"
                       "  ・eBay-unsold-listings-report\n"
@@ -1250,7 +1255,7 @@ class ListingPanel:
             ).pack(anchor="w", pady=(4, 0))
 
             # 📊 分析 (押すと結果ファイルが開く)
-            ana = ttk.LabelFrame(scroll_frame, text="分析 (押すと結果ファイルが開く)", padding=4)
+            ana = ttk.LabelFrame(scroll_frame, text="📊 分析 (押すと結果ファイルが開く)", padding=4)
             ana.pack(fill="x", padx=4, pady=(4, 0))
             _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
 
@@ -1262,10 +1267,10 @@ class ListingPanel:
             relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
             relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
                              for cat in cat_order if categories[cat].get("relist") is not None]
-            d1 = ttk.LabelFrame(stock_row, text="在庫あり — 取り下げ再出品", padding=2)
+            d1 = ttk.LabelFrame(stock_row, text="🔧 在庫あり — 取り下げ再出品", padding=2)
             d1.grid(row=0, column=0, sticky="nsew", padx=(0, 3))
             _grid_named(d1, relist_items, ncol=3, compact=True)
-            d2 = ttk.LabelFrame(stock_row, text="在庫なし — 再仕入れ", padding=2)
+            d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ", padding=2)
             d2.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
             _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=2, compact=True)
 
