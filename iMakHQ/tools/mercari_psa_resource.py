@@ -123,6 +123,17 @@ def fetch_mercari_cheapest(cards):
 
 def main():
     import pricing_engine
+
+    # キャッシュ: 当日中に既に判定結果があれば再スクレイプしない (連打=数分スクレイプ→BANリスク回避)。
+    # 価格再取得したいときは --force を付けて実行。
+    done = glob.glob(os.path.join(DESK, "03_PSA再仕入れ候補_*_メルカリ判定.csv"))
+    if done and "--force" not in sys.argv:
+        latest = max(done, key=os.path.getmtime)
+        if datetime.date.fromtimestamp(os.path.getmtime(latest)) == datetime.date.today():
+            print(f"当日の判定結果が既にあります（再スクレイプしません）: {os.path.basename(latest)}")
+            print("価格を取り直す場合は --force を付けて実行してください。")
+            return  # returncode 0 → 既存の判定CSVが自動で開く
+
     files = [p for p in glob.glob(os.path.join(DESK, "03_PSA再仕入れ候補_*.csv"))
              if "_メルカリ判定" not in os.path.basename(p)]
     if files:
