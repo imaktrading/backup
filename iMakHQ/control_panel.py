@@ -1308,9 +1308,11 @@ class ListingPanel:
             tk.Button(frame, text="新規", font=("", 10, "bold"), fg=color, width=12, height=1,
                       command=lambda idx=new_idx: self.run_script(idx)).pack(padx=4, pady=2)
             # PSA TCG は cert/URL 入力が新規の入口 → 同じ枠に移設 (nav から撤去した分)
+            # 注: 描画は ListingPanel。open_url_input は HomePanel のメソッドなので
+            #     URLInputDialog を直接起動する (self.open_url_input は ListingPanel に無い)。
             if cat_name == "PSA TCG":
                 tk.Button(frame, text="📥 URL入力", font=("", 9), fg="black", width=12, height=1,
-                          command=self.open_url_input).pack(padx=4, pady=2)
+                          command=lambda: URLInputDialog(self.root)).pack(padx=4, pady=2)
         if ug["discover"]:
             disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)
             disc.pack(fill="x", pady=(6, 0))
