@@ -38,6 +38,33 @@ def demand_score(r):
     return (_f(r["sold_qty"]) + _f(r.get("sales90", 0))) * 10 + _f(r["watch"]) * 3 + _f(r["impr"]) * 0.05
 
 
+# 「近しい商品（同ライン/同カテゴリの別商品）を継続調達できるか」基準の仕入れ適性。
+# ◎=近しい新品を継続入手しやすい / △=可だが個別の市場/時期チェック要 / ✕=近しい品でも困難。
+FEASIBILITY = {
+    "UNIQLO/Tシャツ": ("◎", "公式の新作Tを継続出品", "tshirt_listing"),
+    "Montbell (アウター)": ("◎", "定番アウターを継続", "montbell_listing"),
+    "PORTER (バッグ)": ("△", "Tanker等の定番ラインは可/ヴィンテージ個体は不可", "-"),
+    "一番くじ": ("△", "新弾の景品を都度", "ichibankuji_to_csv"),
+    "S.H.Figuarts": ("△", "新作figureを都度", "-"),
+    "釣具リール": ("△", "同系の別型番を継続", "daiwa_jp/shimano_jp"),
+    "Sanrio": ("△", "供給は可だがUS需要低", "-"),
+    "Anello (バッグ)": ("△", "供給は可だがUS需要低", "-"),
+    "PSA10 One Piece": ("△", "同フランチャイズの別PSA10をメルカリ/スニダンで継続", "-"),
+    "PSA10 Pokemon": ("△", "同上(別カードを継続入手)", "-"),
+    "PSA10 Dragon Ball": ("△", "同上(別カードを継続入手)", "-"),
+    "PSA10 Gundam": ("△", "同上(別カードを継続入手)", "-"),
+    "PSA10 TCG (他)": ("△", "同上(別カードを継続入手)", "-"),
+    "その他": ("?", "個別判断", "-"),
+}
+
+
+def feas(group):
+    """グループの仕入れ適性 (近しい商品の継続調達)。G-SHOCK 系は同系の別型番=◎。"""
+    if group.startswith("G-SHOCK"):
+        return ("◎", "同系の別型番を継続(Amazon/メルカリ)", "gshock_to_csv")
+    return FEASIBILITY.get(group, ("?", "個別判断", "-"))
+
+
 def brand_key(title):
     """商品グループ判定 (新規出品の単位)。"""
     t = title.lower()
@@ -98,17 +125,35 @@ def main():
             d["sold_listings"] += 1
     summary = sorted(g.items(), key=lambda kv: -kv[1]["score"])
 
+    # グループ別サマリー CSV (新規出品の指針)
+    gpath = os.path.join(DESK, f"新規出品強化_グループ別_{datetime.date.today():%Y%m%d}.csv")
+    with open(gpath, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["グループ", "仕入れ適性", "件数", "実売", "watch", "売れ筋listing数", "スコア", "近しい商品の調達", "パイプライン", "判定"])
+        for grp, d in summary:
+            mark, reason, pipe = feas(grp)
+            verdict = "拡大推奨" if (mark == "◎" and d["score"] >= 100) else \
+                      ("候補(個別確認)" if mark in ("◎", "△") and d["score"] >= 80 else "様子見")
+            w.writerow([grp, mark, d["n"], d["sold"], d["watch"], d["sold_listings"],
+                        f"{d['score']:.0f}", reason, pipe, verdict])
+
     print(f"需要実証(スコア>0) listing: {len(winners)}件 / 全{len(rows)}件")
-    print(f"\n=== 伸ばすべきグループ TOP (実売/watch/表示の合計スコア順) ===")
-    print(f"  {'グループ':<22}{'件数':>5}{'実売':>5}{'watch':>7}{'売れ筋listing':>13}  スコア")
-    for grp, d in summary[:15]:
-        print(f"  {grp:<22}{d['n']:>5}{d['sold']:>5}{d['watch']:>7}{d['sold_listings']:>13}  {d['score']:.0f}")
-    print(f"\n=== 個別 勝ち筋 TOP15 (新規出品で同種を狙う) ===")
-    for r in winners[:15]:
-        print(f"  [{r['group'][:16]:<16}] score{r['score']:>6} 実売{int(_f(r['sold_qty'])+_f(r.get('sales90',0)))} watch{r['watch']} {r['instock']} ${_f(r['price']):.0f}  {r['title'][:34]}")
+    print(f"\n=== 新規出品強化: グループ別 (需要 × 近しい商品を出せるか) ===")
+    print(f"  {'グループ':<20}{'適性':>4}{'件数':>5}{'実売':>5}{'watch':>6}{'スコア':>6}  判定")
+    for grp, d in summary[:16]:
+        mark, reason, pipe = feas(grp)
+        verdict = "★拡大推奨" if (mark == "◎" and d["score"] >= 100) else \
+                  ("候補(要確認)" if mark in ("◎", "△") and d["score"] >= 80 else "様子見")
+        print(f"  {grp:<20}{mark:>4}{d['n']:>5}{d['sold']:>5}{d['watch']:>6}{d['score']:>6.0f}  {verdict}")
+    print(f"\n=== ★拡大推奨グループ (需要◎ × 定番で継続調達◎) ===")
+    for grp, d in summary:
+        mark, reason, pipe = feas(grp)
+        if mark == "◎" and d["score"] >= 100:
+            print(f"  {grp}: {reason} [{pipe}]  (実売{d['sold']}/watch{d['watch']}/売れ筋{d['sold_listings']}listing)")
     print(f"\nCSV出力: {path}")
-    print("▶ 使い方: スコア上位グループ = 需要実証済 → 同種の新規商品を仕入れ・出品。")
-    print("▶ '売れ筋listing数'が多いグループ = 単発でなく面で売れてる = 最優先で拡大。")
+    print(f"グループ別判定: {gpath}")
+    print("▶ ★拡大推奨 = 需要実証 ∩ 近しい商品をタイムリーに出せる → 新規出品で面で増やす本命。")
+    print("▶ △候補 = 需要はあるが個別の市場/時期チェックが要る (PSA は別カードの相場確認など)。")
 
 
 if __name__ == "__main__":
