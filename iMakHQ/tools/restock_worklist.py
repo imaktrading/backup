@@ -5,7 +5,10 @@
 
 設計思想 (2026-06-05):
   在庫切れ1992件のうち、ファネルが「需要実証済(過去販売 or watcher 有)」と仕分けた
-  RESTOCK だけを攻める。商品ごとに需要・eBay URL・メルカリ検索URL・GO/NO列を出す。
+  RESTOCK だけを攻める。さらに **US 出品分に限定** (US=売上半分/高AOV=実需の本丸。
+  同一SKUは4サイト同時出品なので US 起点で再仕入れすれば全サイトで復活する。US にすら
+  出してない=非US watcher だけの商品は優先度最低なので除外)。
+  商品ごとに需要・eBay URL・メルカリ検索URL・GO/NO列を出す。
   **自動仕入れはしない** (Precision 100%原則: 人がメルカリで現物が同一か確認して GO/NO)。
   メルカリ検索キーワード:
     - G-SHOCK : 型番 (タイトルから抽出。型番=完全一致で確実)
@@ -79,6 +82,16 @@ def load_restock():
     return [r for r in rows if "RESTOCK" in (r.get("flags") or "").split("|")]
 
 
+def keep_us(rs):
+    """US 出品行のみ残す。US=実需の本丸(売上半分/高AOV)で、再仕入れすれば同一SKUは
+    全サイトで復活する。US にすら出してない=非US watcher だけの商品は優先度最低なので除外。
+    戻り: (us_rows, 除外した商品数)。"""
+    all_t = {(r.get("title") or "").lower() for r in rs}
+    us = [r for r in rs if (r.get("site") or "") == "US"]
+    us_t = {(r.get("title") or "").lower() for r in us}
+    return us, len(all_t - us_t)
+
+
 def dedup_by_title(rows):
     """同一商品(title)が複数サイトに在る → 1商品に集約。需要は合算、サイト列挙。"""
     agg = {}
@@ -103,7 +116,8 @@ def dedup_by_title(rows):
 
 
 def main():
-    items = dedup_by_title(load_restock())
+    us_rows, dropped = keep_us(load_restock())
+    items = dedup_by_title(us_rows)
     for d in items:
         d["demand"] = d["sold"] * 100 + d["watch"] * 8
     items.sort(key=lambda d: -d["demand"])
@@ -134,7 +148,9 @@ def main():
         v["n"] += 1
         v["sold"] += d["sold"]
         v["watch"] += d["watch"]
-    print(f"RESTOCK 再仕入れ候補 = 在庫切れ ∩ 需要実証済 = {len(items)}商品")
+    print(f"RESTOCK 再仕入れ候補 (US出品のみ) = 在庫切れ ∩ 需要実証済 = {len(items)}商品")
+    if dropped:
+        print(f"  ※ US未出品(非US watcherのみ)で除外 = {dropped}商品 (再仕入れ優先度 最低)")
     print(f"  {'系統':<12}{'商品数':>6}{'実売':>6}{'watch':>7}")
     for v, x in sorted(by_vein.items(), key=lambda kv: -kv[1]["n"]):
         print(f"  {v:<12}{x['n']:>6}{int(x['sold']):>6}{int(x['watch']):>7}")

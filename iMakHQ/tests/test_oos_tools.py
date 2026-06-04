@@ -82,6 +82,17 @@ def test_restock_jp_vein_uses_facet_seed():
     assert restock.mercari_kw("一番くじ", "Ichiban Kuji Jujutsu Kaisen I Prize Figure") == "一番くじ Jujutsu"
 
 
+def test_restock_keep_us_only():
+    rows = [
+        _row("1", flags="RESTOCK", title="On US", site="US", watch=2),
+        _row("2", flags="RESTOCK", title="On US", site="UK", watch=1),   # 同商品の非US行
+        _row("3", flags="RESTOCK", title="NonUS only", site="DE", watch=3),  # US無 → 除外
+    ]
+    us, dropped = restock.keep_us(rows)
+    assert {r["item_id"] for r in us} == {"1"}   # US 行のみ
+    assert dropped == 1                          # "NonUS only" 1商品が落ちる
+
+
 def test_restock_dedup_aggregates_sites_and_demand():
     rows = [
         _row("1", flags="RESTOCK", title="Same Item", site="US", sold=1, watch=2),
