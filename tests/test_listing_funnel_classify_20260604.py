@@ -110,5 +110,21 @@ def test_non_lqr_falls_back_to_simple():
     assert c["NO_SEARCH"] == []  # LQR 無は funnel 段階に入らない
 
 
+def test_us_ebay_url_prefers_us_listing():
+    """eBayリンクは同タイトルの US 出品(USD)に解決。US無ければ自サイト item_id。"""
+    active = {
+        "111": {"title": "PSA 10 One Piece OP09-061 Luffy", "site": "US"},
+        "222": {"title": "PSA 10 One Piece OP09-061 Luffy", "site": "AU"},
+        "333": {"title": "G-SHOCK GA-2100 (UK only)", "site": "UK"},
+    }
+    us_map = mod.build_us_title_map(active)
+    # AU 行 → US(111) に解決
+    au_row = {"item_id": "222", "title": "PSA 10 One Piece OP09-061 Luffy"}
+    assert mod.us_ebay_url(au_row, us_map) == "https://www.ebay.com/itm/111"
+    # US 出品が無いカード → 自分の item_id
+    uk_row = {"item_id": "333", "title": "G-SHOCK GA-2100 (UK only)"}
+    assert mod.us_ebay_url(uk_row, us_map) == "https://www.ebay.com/itm/333"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

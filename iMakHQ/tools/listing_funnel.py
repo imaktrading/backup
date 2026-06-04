@@ -32,6 +32,7 @@ import csv
 import datetime
 import glob
 import os
+import re
 import statistics
 import sys
 
@@ -67,6 +68,22 @@ def _i(v):
 def find_file(data_dir, pattern):
     hits = glob.glob(os.path.join(data_dir, pattern))
     return max(hits, key=os.path.getmtime) if hits else None
+
+
+def _norm_title(t):
+    return re.sub(r"\s+", " ", (t or "").lower()).strip()
+
+
+def build_us_title_map(active):
+    """US出品の title→item_id。eBayリンクを常に US版(USD表示)にするための解決表。
+    同カードは全サイト同一タイトルで出品されるため title 完全一致で US版に紐付く。"""
+    return {_norm_title(a["title"]): iid for iid, a in active.items() if a.get("site") == "US"}
+
+
+def us_ebay_url(row, us_by_title):
+    """row の eBayリンクを US版優先で返す (US出品が無ければ自サイト)。"""
+    iid = us_by_title.get(_norm_title(row.get("title", ""))) or row["item_id"]
+    return f"https://www.ebay.com/itm/{iid}"
 
 
 def load_active(path):
@@ -243,7 +260,7 @@ def write_xlsx(path, rows, c, summary_lines):
             vals = [r["item_id"], r["title"], r["site"], r.get("category", ""), r["price"],
                     r["trend_price"], r["qty"], r["sold_qty"], r.get("sales90", 0), r["watch"],
                     round(r["impr"], 1), round(r["ctr"] * 100, 2), r.get("photos", 0), r.get("keywords", 0),
-                    r.get("relist_status", ""), f"https://www.ebay.com/itm/{r['item_id']}"]
+                    r.get("relist_status", ""), r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
             for j, v in enumerate(vals, start=1):
                 sh.cell(row=i, column=j, value=v)
     wb.save(path)
@@ -286,11 +303,13 @@ def main():
     active = load_active(f_active)
     quality = load_quality(f_quality) if f_quality else {}
     unsold = load_unsold(f_unsold)
+    us_by_title = build_us_title_map(active)  # eBayリンクを常に US版(USD)に解決
 
     rows = []
     for iid, a in active.items():
         q = quality.get(iid)
         r = dict(a)
+        r["ebay_url"] = us_ebay_url(a, us_by_title)
         r["has_lqr"] = bool(q)
         r["impr"] = q["impr"] if q else 0.0
         r["ctr"] = q["ctr"] if q else 0.0
@@ -349,7 +368,8 @@ def main():
                 if r in c[k]: tags.append(k)
             r["flags"] = "|".join(tags)
         fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",
-                  "sales90", "watch", "impr", "ctr", "photos", "keywords", "has_lqr", "relist_status", "flags"]
+                  "sales90", "watch", "impr", "ctr", "photos", "keywords", "has_lqr", "relist_status",
+                  "flags", "ebay_url"]
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()
