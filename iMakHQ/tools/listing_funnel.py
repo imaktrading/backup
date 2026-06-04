@@ -400,7 +400,7 @@ def main():
             r["flags"] = "|".join(tags)
         fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",
                   "sales90", "watch", "impr", "ctr", "photos", "keywords", "has_lqr", "relist_status",
-                  "flags", "ebay_url"]
+                  "age_days", "flags", "ebay_url"]
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()

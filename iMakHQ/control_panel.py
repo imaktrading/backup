@@ -402,6 +402,25 @@ SCRIPTS = [
         "params": [],
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/03_PSA再仕入れ候補_*_メルカリ判定.csv",
     },
+    {
+        # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "🛒 在庫切れ再仕入れ(RESTOCK)",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "restock_worklist.py"],
+        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/在庫切れ再仕入れ_*.csv",
+    },
+    {
+        # B: CULL(在庫切れ&需要皆無) を age>=21・CAP50/回 で段階 End CSV 化 (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "🧹 CULL出品停止(50件/回)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "cull_end.py"],
+        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/CULL出品停止候補_*.csv",
+    },
 ]
 
 
@@ -1175,8 +1194,8 @@ class ListingPanel:
             cmd = " ".join(SCRIPTS[idx].get("cmd", []))
             if any(s in cmd for s in ("listing_funnel", "demand_winners")):
                 return "analyze"   # 📊 分析 (Plan/Check)
-            if "mercari_psa_resource" in cmd:
-                return "oos"       # 在庫なし 再仕入れ
+            if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
+                return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
                 return "discover"  # 新規ネタ探し
             if "relist_from_funnel" in cmd or "dump_us_qty1_sku" in cmd:
@@ -1269,7 +1288,7 @@ class ListingPanel:
             d1 = ttk.LabelFrame(stock_row, text="🔧 在庫あり — 取り下げ再出品", padding=2)
             d1.grid(row=0, column=0, sticky="nsew", padx=(0, 3))
             _grid_named(d1, relist_items, ncol=3, compact=True)
-            d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ", padding=2)
+            d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ / 整理", padding=2)
             d2.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
             _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=2, compact=True)
 
