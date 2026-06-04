@@ -68,8 +68,21 @@ CONSOLIDATED_SHEETS = {
     "hight": ("19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk", 851100680),  # 統合Hight
     "low":   ("1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0", 851100680),  # 統合Low
 }
+# ★公式在庫要チェック シート1 (UT/Montbell/GU 等の公式在庫listing。統合と別管理→現在数に合算)
+#   構造: col1=title, col2=item ID, col5=仕入元URL。カテゴリは URL ドメインで判定。
+OFFICIAL_STOCK_SHEET_ID = "101KL6KxMugKqZeSp2W5L2ykTvT0Zwd3RzlfsHgiJsg0"
 # SHEET_CATEGORY_MAP は廃止（自動取得に変更）
 GSHEET_CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
+
+
+def _official_stock_category(url):
+    """公式在庫シートの仕入元URLから dashboard カテゴリを推定。"""
+    u = (url or "").lower()
+    if "montbell" in u:
+        return "アウトドア・ジャケット"
+    if "uniqlo" in u or "gu-global" in u or "gu.com" in u:
+        return "Tシャツ"
+    return "その他"
 
 # ============================================================================
 # csv_postprocess_excluder helper (check_csv NO-GO 行を CSV から物理除外)
@@ -627,6 +640,7 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
 
     # R列で自動グルーピング
     result = {}  # category → {current, monthly}
+    seen_ids = set()  # 公式在庫シートとの重複排除用
     for sheet_key, rows in sheet_data.items():
         for row in rows:
             row = list(row) + [''] * (21 - len(row))
@@ -641,8 +655,24 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
                 result[cat] = {'current': 0, 'monthly': 0}
             if item_id and not sold:
                 result[cat]['current'] += 1
+                seen_ids.add(item_id)
             if added.startswith(month_yyyymm):
                 result[cat]['monthly'] += 1
+
+    # ★公式在庫要チェック シート1 を現在数に合算 (item ID で重複排除)
+    try:
+        ws2 = gc.open_by_key(OFFICIAL_STOCK_SHEET_ID).get_worksheet(0)  # シート1
+        for row in ws2.get_all_values()[1:]:
+            row = list(row) + [''] * 8
+            item_id = row[2].strip()
+            src_url = row[5].strip()
+            if not item_id or item_id in seen_ids:
+                continue
+            cat = _official_stock_category(src_url)
+            result.setdefault(cat, {'current': 0, 'monthly': 0})['current'] += 1
+            seen_ids.add(item_id)
+    except Exception as e:
+        print(f"⚠️ 公式在庫シート読込失敗: {e}")
 
     _CACHED_SHEET_COUNTS["data"] = result
     _CACHED_SHEET_COUNTS["ts"] = now
