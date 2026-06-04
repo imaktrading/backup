@@ -1086,6 +1086,35 @@ class HomePanel:
         self.root.after(0, apply)
 
 
+def _kill_process_tree(proc, log=None):
+    """proc とその子孫を確実に終了 (Windows: taskkill /T で子=seller_hub_view/chromedriver も殺す)。
+    + 孤児化した Selenium(chromedriver) も停止 (取下再出品 --fresh-snapshot が止まらない対策)。
+    注: 監視くん cron 等が同時に Selenium 巡回中だとその chromedriver も止まる (停止ボタン押下時のみ)。"""
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    if proc and proc.poll() is None:
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                               capture_output=True, creationflags=flags)
+            else:
+                proc.terminate()
+        except Exception:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        if log:
+            log("\n🛑 停止 (プロセスツリー終了)\n")
+    else:
+        if log:
+            log("実行中スクリプトなし (Selenium が残っていれば下記で停止)\n")
+    if sys.platform == "win32":
+        r = subprocess.run(["taskkill", "/F", "/T", "/IM", "chromedriver.exe"],
+                           capture_output=True, creationflags=flags)
+        if r.returncode == 0 and log:
+            log("🛑 残存 Selenium(chromedriver) も停止\n")
+
+
 class ListingPanel:
     """従来の ControlPanel 相当（スクリプト一覧）。HomePanel から呼び出される。"""
     def __init__(self, root, mode="new"):
@@ -1470,12 +1499,8 @@ class ListingPanel:
         self.root.after(100, self.poll_queue)
 
     def stop_script(self):
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
-            self.append_log("\n🛑 停止要求送信\n")
-            self.status_var.set("停止処理中")
-        else:
-            self.append_log("実行中のスクリプトはありません\n")
+        _kill_process_tree(self.proc, self.append_log)
+        self.status_var.set("停止処理中")
 
 
 class SellerHubCategoryDialog(tk.Toplevel):
@@ -1840,9 +1865,7 @@ class KujiWizardDialog(tk.Toplevel):
                 pass
 
     def _cancel_proc(self):
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
-            self._append_log("\n🛑 中止要求送信\n")
+        _kill_process_tree(self.proc, self._append_log)
 
 
 _SINGLE_INSTANCE_LOCK = None  # ソケットを参照保持してプロセス終了まで占有
