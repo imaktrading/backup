@@ -46,6 +46,10 @@ DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 
 # catalog 由来の deterministic B が出せる vein → 母集団ソース種別
 _B_READY = {"G-SHOCK": "casio_unlisted"}
+# vein 別 仕入れ適性マーク
+_FEAS_MARK = {"G-SHOCK": "◎", "Montbell": "◎", "UNIQLO/UT": "◎", "Sanrio": "◎", "Tomica": "◎",
+              "POP MART": "◎", "ブリキ玩具": "◎", "ガシャポン": "◎", "PORTER": "△", "PSA card": "△",
+              "一番くじ": "△", "Figure": "△", "Reel": "△"}
 # catalog 保有だが未対応(理由)
 _B_PENDING = {
     "Montbell": "catalog型番がactiveタイトルに無い物多→名前(JP↔EN)マッチ要",
@@ -118,6 +122,102 @@ def mercari_url(kw):
     return "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw) + "&status=on_sale"
 
 
+# ---- facet 分解用の語彙 (需要を サブ系統/タイプ/ライン/サイズ/色 で割る。advisory用途) ----
+_FRANCHISE = ["One Piece", "Pokemon", "Pok mon", "Dragon Ball", "Yu-Gi-Oh", "Yugioh", "Gundam",
+              "Weiss", "Digimon", "Demon Slayer", "Jujutsu", "Naruto", "Evangelion", "KAWS",
+              "Kenshi Yonezu", "Mamoru Hosoda", "Mario", "Hello Kitty", "Peanuts", "Chainsaw",
+              "Hatsune Miku", "Mickey", "Snoopy", "Sanrio"]
+_CHARS = {
+    "One Piece": ["Luffy", "Zoro", "Nami", "Nico Robin", "Robin", "Sanji", "Chopper", "Yamato",
+                  "Uta", "Shanks", "Ace", "Law", "Kid", "Boa", "Nico"],
+    "Pokemon": ["Pikachu", "Eevee", "Charizard", "Umbreon", "Mewtwo", "Mew", "Lugia", "Rayquaza",
+                "Gengar", "Snorlax", "Greninja", "Slowpoke", "Sylveon", "Glaceon"],
+    "Dragon Ball": ["Goku", "Vegeta", "Gohan", "Frieza", "Broly", "Piccolo"],
+}
+_PORTER_TYPE = ["2Way", "2-Way", "2-Wege", "Shoulder", "Tote", "Waist", "Body", "Briefcase",
+                "Helmet", "Backpack", "Wallet", "Boston", "Daypack", "Pouch"]
+_MONTBELL_LINE = ["Wind Blast", "Versalite", "Thunder Pass", "Storm Cruiser", "EX Light", "Plasma",
+                  "Permafrost", "Tachyon", "Rain Trekker", "Peak Shell", "Cosmic", "Torrent Flyer",
+                  "Light Shell", "Rain Dancer", "Tensilite", "Mountain Parka"]
+_SANRIO_CHAR = ["Kuromi", "Pochacco", "Cinnamoroll", "My Melody", "Hello Kitty", "Pompompurin",
+                "Keroppi", "Badtz", "Tuxedosam"]
+_REEL_BRAND = ["Shimano", "Daiwa", "Abu", "Stradic", "Stella", "Vanford", "Twin Power"]
+_COLORS = ["Black", "White", "Red", "Blue", "Green", "Yellow", "Navy", "Gray", "Grey", "Pink",
+           "Purple", "Orange", "Brown", "Olive", "Beige", "Gold", "Silver", "Khaki"]
+
+
+def _first(t, kws):
+    for k in kws:
+        if k.lower() in t:
+            return k
+    return None
+
+
+def color_of(title):
+    for c in _COLORS:
+        if re.search(r"\b" + c + r"\b", title, re.I):
+            return "Gray" if c == "Grey" else c
+    return None
+
+
+def size_of(title):
+    m = re.search(r"\b(XXL|3XL|2XL|XL|XXS|XS)\b", title)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r"\b(?:US|JP|Size|size)\s*\(?\s*(S|M|L)\b", title)
+    return m.group(1).upper() if m else None
+
+
+def facets(vein, title):
+    """vein 別に title を facet 分解 → [(観点, 値, mercari種), ...]。mercari種が None なら検索URL無し。"""
+    t = title.lower()
+    out = []
+    if vein == "PSA card":
+        fr = _first(t, _FRANCHISE)
+        sub = fr or "?"
+        if fr in _CHARS:
+            ch = _first(t, _CHARS[fr])
+            if ch:
+                sub = f"{fr} {ch}"
+        out.append(("サブ", f"PSA {sub}", f"PSA10 {sub}"))
+    elif vein == "UNIQLO/UT":
+        out.append(("サブ", "UT " + (_first(t, _FRANCHISE) or "他"), "UNIQLO UT " + (_first(t, _FRANCHISE) or "")))
+        sz = size_of(title)
+        if sz:
+            out.append(("サイズ", sz, None))
+        col = color_of(title)
+        if col:
+            out.append(("色", col, None))
+    elif vein == "PORTER":
+        typ = _first(t, _PORTER_TYPE) or "他"
+        out.append(("タイプ", f"PORTER {typ}", f"PORTER タンカー {typ}"))
+        col = color_of(title)
+        if col:
+            out.append(("色", col, None))
+    elif vein == "Montbell":
+        ln = _first(t, _MONTBELL_LINE) or "他"
+        out.append(("ライン", f"Montbell {ln}", f"モンベル {ln}"))
+        sz = size_of(title)
+        if sz:
+            out.append(("サイズ", sz, None))
+        col = color_of(title)
+        if col:
+            out.append(("色", col, None))
+    elif vein == "一番くじ":
+        fr = _first(t, _FRANCHISE) or "他"
+        out.append(("サブ", f"一番くじ {fr}", f"一番くじ {fr}"))
+    elif vein == "Sanrio":
+        ch = _first(t, _SANRIO_CHAR) or "他"
+        out.append(("サブ", f"Sanrio {ch}", ch))
+    elif vein == "Figure":
+        fr = _first(t, _FRANCHISE) or "他"
+        out.append(("サブ", f"Figure {fr}", fr))
+    elif vein == "Reel":
+        br = _first(t, _REEL_BRAND) or "他"
+        out.append(("サブ", f"Reel {br}", br))
+    return out
+
+
 def load_orders():
     out, seen = [], set()
     for p in sorted(glob.glob(os.path.join(REPORTS_DIR, "*orders*.csv"))):
@@ -186,21 +286,33 @@ def main():
         d = vrev.get(v)
         return d["rev"] / max(d["n"], 1) if d and d["n"] else 0.0
 
-    # vein別 需要、G-SHOCK は系統別需要も
+    # vein別 需要、G-SHOCK は系統別需要も、他 vein は facet(サブ/タイプ/ライン/サイズ/色)分解
     vein_dem = defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0})
     gs_series = defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0})
+    # facet[vein][dim][value] = {score, sold, watch, seed}
+    facet = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {"score": 0.0, "sold": 0.0, "watch": 0.0, "seed": None})))
     for p in products:
         v = vein_of(p["title"])
         sc = demand_score(p)
         vein_dem[v]["score"] += sc
         vein_dem[v]["sold"] += p["sold"]
         vein_dem[v]["watch"] += p["watch"]
-        if v == "G-SHOCK" and sc > 0:
+        if sc <= 0:
+            continue
+        if v == "G-SHOCK":
             s = series_of(p["title"])
             if s:
                 gs_series[s]["score"] += sc
                 gs_series[s]["sold"] += p["sold"]
                 gs_series[s]["watch"] += p["watch"]
+        else:
+            for dim, val, seed in facets(v, p["title"]):
+                fd = facet[v][dim][val]
+                fd["score"] += sc
+                fd["sold"] += p["sold"]
+                fd["watch"] += p["watch"]
+                if seed:
+                    fd["seed"] = seed
 
     # G-SHOCK B候補 = 未出品catalog × 実証系統(需要>0)
     upath, unlisted = load_unlisted_gshock()
@@ -217,22 +329,30 @@ def main():
     f, path = _open_w(os.path.join(DESK, f"新規強化リスト_{datetime.date.today():%Y%m%d}.csv"))
     with f:
         w = csv.writer(f)
-        w.writerow(["種別", "系統", "コピペ検索キー(未出品型番)", "系統需要スコア", "系統実売",
-                    "系統watch", "系統AOV", "仕入適性", "メルカリ検索URL", "備考"])
-        # G-SHOCK 未出品候補 (deterministic)
+        w.writerow(["種別", "系統", "観点", "値(コピペ検索)", "需要スコア", "実売",
+                    "watch", "系統AOV", "仕入適性", "メルカリ検索URL", "備考"])
+        # G-SHOCK 未出品候補 (deterministic = 実在の未出品型番)
         a = aov("G-SHOCK")
         for s in series_ranked:
             d = gs_series[s]
             for mid in sorted(gs_candidates[s]):
-                w.writerow(["新規候補(B)", f"G-SHOCK {s}", f"G-SHOCK {mid}", f"{d['score']:.0f}",
-                            int(d["sold"]), int(d["watch"]), f"${a:.0f}", "◎",
+                w.writerow(["新規候補(B)", f"G-SHOCK {s}", "未出品型番", f"G-SHOCK {mid}",
+                            f"{d['score']:.0f}", int(d["sold"]), int(d["watch"]), f"${a:.0f}", "◎",
                             mercari_url(mid), "catalogにあり未出品=出せば売れそう"])
-        # 他の実証 vein は候補生成不可を明示
+        # 他の実証 vein = facet 別 需要分解 (どのサブ/サイズ/色に需要があるか)
         for v, d in sorted(vein_dem.items(), key=lambda kv: -kv[1]["score"]):
-            if v in ("other", "G-SHOCK") or d["score"] <= 0:
+            if v in ("other", "G-SHOCK") or d["score"] <= 0 or v not in facet:
                 continue
-            w.writerow(["要・候補生成", v, "", f"{d['score']:.0f}", int(d["sold"]), int(d["watch"]),
-                        f"${aov(v):.0f}", "-", "", _B_PENDING.get(v, "未対応")])
+            av = aov(v)
+            for dim in ("サブ", "タイプ", "ライン", "サイズ", "色"):
+                if dim not in facet[v]:
+                    continue
+                top = sorted(facet[v][dim].items(), key=lambda x: -x[1]["score"])[:6]
+                for val, fd in top:
+                    url = mercari_url(fd["seed"]) if fd["seed"] else ""
+                    w.writerow(["需要分解", v, dim, val, f"{fd['score']:.0f}", int(fd["sold"]),
+                                int(fd["watch"]), f"${av:.0f}", _FEAS_MARK.get(v, "?"), url,
+                                _B_PENDING.get(v, "")])
 
     # ---- コンソール ----
     ncand = sum(len(v) for v in gs_candidates.values())
@@ -247,14 +367,19 @@ def main():
     print(f"\n  ▼ 上位系統の未出品型番(例)")
     for s in series_ranked[:6]:
         print(f"    {s} ({len(gs_candidates[s])}件): " + ", ".join(sorted(gs_candidates[s])[:6]))
-    print(f"\n他の実証 vein (B候補は catalog 整備/AI が前提):")
+    print(f"\n他の実証 vein = facet 別 需要分解 (どのサブ/ライン/サイズ/色に需要があるか):")
     for v, d in sorted(vein_dem.items(), key=lambda kv: -kv[1]["score"]):
-        if v in ("other", "G-SHOCK") or d["score"] <= 0:
+        if v in ("other", "G-SHOCK") or d["score"] <= 0 or v not in facet:
             continue
-        print(f"  {v:<12} 需要{d['score']:.0f}/実売{int(d['sold'])}/W{int(d['watch'])}  → {_B_PENDING.get(v,'未対応')}")
+        print(f"  ▼ {v} (需要{d['score']:.0f}/実売{int(d['sold'])}/W{int(d['watch'])})")
+        for dim in ("サブ", "タイプ", "ライン", "サイズ", "色"):
+            if dim not in facet[v]:
+                continue
+            top = sorted(facet[v][dim].items(), key=lambda x: -x[1]["score"])[:5]
+            print(f"      {dim}: " + " / ".join(f"{val}({d2['score']:.0f})" for val, d2 in top))
     print(f"\nCSV出力: {path}")
-    print("▶ B = 実証系統で catalog にあるが未出品 = 出せば売れそうな新規候補。")
-    print("▶ G-SHOCK 以外の候補化には各カテゴリの catalog 整備 or AI 候補生成が要る。")
+    print("▶ B = 実証系統で catalog にあるが未出品 = 出せば売れそうな新規候補 (G-SHOCK)。")
+    print("▶ 他 vein は facet 別需要分解 (サブ/ライン/サイズ/色) → その属性で仕入れ先を探す。")
     if not upath:
         print("⚠ 未出品catalogが無い。先に『G-SHOCK 未出品モデル(catalog)』ボタンを実行してください。")
 
