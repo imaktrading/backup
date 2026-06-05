@@ -1182,7 +1182,12 @@ class ListingPanel:
         canvas = tk.Canvas(top_frame, height=470, highlightthickness=0)
         scrollbar = ttk.Scrollbar(top_frame, orient="vertical", command=canvas.yview)
         scroll_frame = ttk.Frame(canvas)
-        scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        def _fit_canvas(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # 内容が canvas(470) より低い場合(新規モード等)は内容高さまで縮め、下の空白を詰めて上段寄せ。
+            # 高い場合(既存メンテ)は 470 でクリップしスクロール。
+            canvas.configure(height=min(scroll_frame.winfo_reqheight(), 470))
+        scroll_frame.bind("<Configure>", _fit_canvas)
         _win_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
         # 内側フレームを canvas 幅いっぱいに広げる (= 右側の空白を無くし全幅レイアウトに)
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(_win_id, width=e.width))
