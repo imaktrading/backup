@@ -385,7 +385,7 @@ SCRIPTS = [
     },
     {
         "category": None, "type": "utility",
-        "label": "📈 需要・新規強化リスト",
+        "label": "📈 需要・新規強化",
         "label_fg": "blue",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "demand_winners.py"],
@@ -396,7 +396,7 @@ SCRIPTS = [
     #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
     {
         "category": None, "type": "utility",
-        "label": "🃏 PSA再仕入れ照合(メルカリ)",
+        "label": "🃏 PSA再仕入れ照合",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "mercari_psa_resource.py"],
         "params": [],
@@ -405,7 +405,7 @@ SCRIPTS = [
     {
         # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)
         "category": None, "type": "utility",
-        "label": "✏️ タイトル改修対象(NO_CLICK)",
+        "label": "✏️ タイトル改修",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "noclick_targets.py"],
         "params": [],
@@ -414,7 +414,7 @@ SCRIPTS = [
     {
         # NO_CONVERT: 高クリック無販売を自分の実売(proven)と照合=価格抵抗 (2026-06-05)
         "category": None, "type": "utility",
-        "label": "💲 価格抵抗(NO_CONVERT)",
+        "label": "💲 価格抵抗",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "price_resistance.py"],
         "params": [],
@@ -423,7 +423,7 @@ SCRIPTS = [
     {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
         "category": None, "type": "utility",
-        "label": "🛒 在庫切れ再仕入れ(RESTOCK)",
+        "label": "🛒 在庫切れ再仕入れ",
         "label_fg": "blue",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "restock_worklist.py"],
@@ -433,7 +433,7 @@ SCRIPTS = [
     {
         # B: CULL(在庫切れ&需要皆無) を age>=21・CAP50/回 で段階 End CSV 化 (2026-06-05)
         "category": None, "type": "utility",
-        "label": "🧹 CULL出品停止(50件/回)",
+        "label": "🧹 CULL停止 (50件/回)",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "cull_end.py"],
         "params": [],
@@ -1169,7 +1169,7 @@ class ListingPanel:
         top_frame = ttk.LabelFrame(root, text="スクリプト一覧", padding=8)
         top_frame.pack(fill="x", padx=8, pady=(0, 4))
 
-        canvas = tk.Canvas(top_frame, height=320)
+        canvas = tk.Canvas(top_frame, height=470, highlightthickness=0)
         scrollbar = ttk.Scrollbar(top_frame, orient="vertical", command=canvas.yview)
         scroll_frame = ttk.Frame(canvas)
         scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -1179,6 +1179,11 @@ class ListingPanel:
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        # マウスホイールでスクロール (カーソルが領域内のときだけ)
+        def _on_wheel(e):
+            canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         # 5/12 構成変更: カテゴリ別 Labelframe + 新規/再出品 2ボタン + Utility 単独ボタン
         # - 新規ボタン: verified=True → 青、それ以外 → 黒 (既存ルール維持)
@@ -1227,7 +1232,9 @@ class ListingPanel:
 
         # 共通: (label, idx) のリストを ncol 列グリッドで描画 (compact=詰めた配置)
         def _grid_named(parent, items, ncol=4, compact=False):
-            w, h, pad, wl = (15, 1, 2, 130) if compact else (20, 2, 4, 180)
+            # height=2 で2行ぶんの高さを確保 (ラベルが折返しても見切れない)。width は最小値=
+            # columnconfigure(weight) と sticky="nsew" で実幅は親いっぱいに伸びる。
+            w, h, pad, wl = (14, 2, 2, 150) if compact else (16, 2, 4, 230)
             ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない (右の空セル防止)
             for col in range(ncol):
                 parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
@@ -1341,20 +1348,16 @@ class ListingPanel:
             ana.pack(fill="x", padx=4, pady=(4, 0))
             _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
 
-            # 🔧 在庫あり / 📦 在庫なし を横並び (詰めて配置)
-            stock_row = ttk.Frame(scroll_frame)
-            stock_row.pack(fill="x", padx=4, pady=(6, 0))
-            stock_row.columnconfigure(0, weight=1, uniform="stk")
-            stock_row.columnconfigure(1, weight=1, uniform="stk")
+            # 🔧 在庫あり / 📦 在庫なし を全幅で縦積み (横2分割の窮屈・ラベル見切れを解消)
             relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
             relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
                              for cat in cat_order if categories[cat].get("relist") is not None]
-            d1 = ttk.LabelFrame(stock_row, text="🔧 在庫あり — 直す (再出品/タイトル/価格)", padding=2)
-            d1.grid(row=0, column=0, sticky="nsew", padx=(0, 3))
-            _grid_named(d1, relist_items, ncol=3, compact=True)
-            d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ / 整理", padding=2)
-            d2.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
-            _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=2, compact=True)
+            d1 = ttk.LabelFrame(scroll_frame, text="🔧 在庫あり — 直す (検索/タイトル/価格)", padding=4)
+            d1.pack(fill="x", padx=4, pady=(6, 0))
+            _grid_named(d1, relist_items, ncol=4)
+            d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ / 整理", padding=4)
+            d2.pack(fill="x", padx=4, pady=(6, 0))
+            _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=4)
 
             # ③ 在庫なし進捗: CULL停止の残件数(約何回分) と RESTOCK再仕入れ(US)商品数。
             def _oos_progress():
