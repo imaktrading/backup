@@ -384,6 +384,16 @@ SCRIPTS = [
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/出品ファネル分析_*.xlsx",
     },
     {
+        # ①効果測定ループ: 直近2世代の funnel を突合し「直した結果が効いたか」を測る (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "📉 効果測定",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "funnel_diff.py"],
+        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/効果測定_*.csv",
+    },
+    {
         "category": None, "type": "utility",
         "label": "📈 需要・新規強化",
         "label_fg": "blue",
@@ -1215,7 +1225,7 @@ class ListingPanel:
         # 2) utility をグループ分類 (cmd のスクリプト名で判定)
         def _ugroup(idx):
             cmd = " ".join(SCRIPTS[idx].get("cmd", []))
-            if any(s in cmd for s in ("listing_funnel", "demand_winners")):
+            if any(s in cmd for s in ("listing_funnel", "demand_winners", "funnel_diff")):
                 return "analyze"   # 📊 分析 (Plan/Check)
             if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
                 return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
