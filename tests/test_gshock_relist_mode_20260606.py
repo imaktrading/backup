@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""取下再出品② — gshock_to_csv --relist モードの targets/価格据置ロジック。
+"""取下再出品② — gshock_to_csv --relist モードの行選択ロジック。
 
 2026-06-06: B空欄キュー(61件)を無視し保留リストの指定URLだけ即live再出品する
---relist モードを gshock_to_csv に追加。本テストはそのコア (load_relist_targets +
-元価格維持 _RELIST_FORCE_PRICE) を検証。
+--relist モードを追加。価格/タイトル/item specifics は管理スプシの実コストから
+最新ロジックで再生成する(据置しない)。本テストはその純粋行選択 _select_gshock_row
+と即liveスケジュールを検証 (network無し)。
 """
-import csv
 import importlib.util
 import os
 
@@ -22,48 +22,46 @@ def g():
     return mod
 
 
-def _write_pending(tmp_path, rows):
-    p = tmp_path / "pending.csv"
-    with open(p, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=["sku", "old_item_id", "category", "supply_url", "price", "title"])
-        w.writeheader()
-        w.writerows(rows)
-    return str(p)
+def _row(url="", item_id="", title_jp="", sold="", cost_n="", desc="", title_en="", cat="G-shock"):
+    """スプシ行を列位置で組む。A0 url / B1 itemid / C2 title_jp / D3 sold / ... H7 desc / I8 title_en
+    / N13 実コスト / R17 category。pick_cost_jpy は N列(13)優先。"""
+    r = [""] * 18
+    r[0], r[1], r[2], r[3], r[7], r[8], r[13], r[17] = url, item_id, title_jp, sold, desc, title_en, cost_n, cat
+    return r
 
 
-def test_relist_targets_gshock_only_and_force_price(g, tmp_path):
-    g._RELIST_FORCE_PRICE.clear()
-    pending = _write_pending(tmp_path, [
-        {"sku": "B0DDS4Z29W", "old_item_id": "357370826397", "category": "Wristwatches",
-         "supply_url": "https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=I29", "price": "525.98",
-         "title": "CASIO G-SHOCK GM-2110D-2AJF Metal Bezel Band Silver Watch"},
-        {"sku": "ZP37Dt8Zoaof", "old_item_id": "358545495042", "category": "Reels",  # reel → 除外
-         "supply_url": "https://jp.mercari.com/shops/product/2JNysv3RcsZP37Dt8Zoaof", "price": "410.98",
-         "title": "Shimano 17 Calcutta Conquest BFS HG Reel"},
-    ])
-    targets = g.load_relist_targets(pending)
-    # G-shock(Wristwatches) 1件のみ、reel は除外
-    assert len(targets) == 1
-    url, model, price_jpy = targets[0]
-    assert model == "GM-2110D-2AJF"          # URLでなく title から型番抽出
-    assert price_jpy == ""                    # JPYコストは空(USD価格は別途強制)
-    # 元の出品価格が強制維持dictに載る (¥5000 fallback の $90.98 誤価格を防ぐ)
-    assert g._RELIST_FORCE_PRICE[url] == 525.98
+def test_relist_only_urls_ignores_filled_b(g):
+    # 取下再出品②: 指定URLは B(itemID)埋まり・売切れでも採用 (取下げ済を再出品)
+    row = _row(url="https://www.amazon.co.jp/dp/B0DDS4Z29W", item_id="357370826397",
+               title_en="CASIO G-SHOCK GM-2110D-2AJF Metal", cost_n="43500")
+    target, reason = g._select_gshock_row(row, only_urls={"https://www.amazon.co.jp/dp/B0DDS4Z29W"})
+    assert reason is None
+    url, model, cost = target
+    assert model == "GM-2110D-2AJF"
+    assert str(cost).replace("¥", "").replace(",", "") == "43500"  # スプシ実コスト → 最新pricingが再算出
 
 
-def test_relist_targets_skips_partial_model(g, tmp_path):
-    g._RELIST_FORCE_PRICE.clear()
-    pending = _write_pending(tmp_path, [
-        {"sku": "X", "old_item_id": "1", "category": "Wristwatches",
-         "supply_url": "https://www.amazon.co.jp/dp/B0XXXXXXXX", "price": "200",
-         "title": "CASIO G-Shock with no parseable model here"},
-    ])
-    targets = g.load_relist_targets(pending)
-    assert targets == []                       # 型番抽出不可 → 除外 (Precision 100%)
+def test_relist_only_urls_excludes_other(g):
+    row = _row(url="https://www.amazon.co.jp/dp/OTHER00000", title_en="CASIO G-SHOCK GA-2100-1A1", cost_n="20000")
+    target, reason = g._select_gshock_row(row, only_urls={"https://www.amazon.co.jp/dp/B0DDS4Z29W"})
+    assert target is None and reason == 'not_target'
+
+
+def test_normal_mode_requires_b_empty(g):
+    # 通常モード(only_urls=None): B埋まり = 出品済 → 除外
+    filled = _row(url="u1", item_id="123", title_en="CASIO G-SHOCK GA-2100-1A1", cost_n="20000")
+    assert g._select_gshock_row(filled, only_urls=None)[1] == 'not_target'
+    empty = _row(url="u2", item_id="", title_en="CASIO G-SHOCK GA-2100-1A1", cost_n="20000")
+    target, reason = g._select_gshock_row(empty, only_urls=None)
+    assert reason is None and target[1] == "GA-2100-1A1"
+
+
+def test_partial_and_no_model_skipped(g):
+    no_model = _row(url="u3", title_en="CASIO watch no model", cost_n="10000")
+    assert g._select_gshock_row(no_model, only_urls={"u3"})[1] == 'no_model'
 
 
 def test_immediate_schedule_flag(g):
-    # _IMMEDIATE_SCHEDULE True で get_schedule_time が即時(現在以前)を返す
     g._IMMEDIATE_SCHEDULE = True
     try:
         imm = g.get_schedule_time()
@@ -71,5 +69,4 @@ def test_immediate_schedule_flag(g):
         future = g.get_schedule_time()
     finally:
         g._IMMEDIATE_SCHEDULE = False
-    # 即時 < 通常(2週間後)
-    assert imm < future
+    assert imm < future   # 即live(現在) < 通常(2週間後)

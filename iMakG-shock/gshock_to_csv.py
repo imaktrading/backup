@@ -10,12 +10,9 @@ from datetime import datetime, timedelta
 
 # --relist (取下再出品②) 時 True: ScheduleTime を即時(now)にして即live。
 # 通常出品は2週間後 scheduleだが、relist は live 後でないと③書戻し(新ItemID取得)が回らないため即時。
+# 価格/タイトル/item specifics は通常出品と同じ最新ロジックで再生成する(relistの狙い)。
+# コストは管理スプシの実コストを引くので正しく再算出される(据置はしない)。
 _IMMEDIATE_SCHEDULE = False
-
-# --relist 時 {supply_url: 元の出品価格USD}。relist は Cassini reset(露出刷新)が目的で価格は据置。
-# 空にすると price_jpy_str="" → cost ¥5000 fallback → $90.98 の大幅赤字誤価格になる
-# (memory: mass_price_change_requires_v4_preverify)。元価格を強制維持して事故を防ぐ。
-_RELIST_FORCE_PRICE = {}
 
 def get_schedule_time():
     if _IMMEDIATE_SCHEDULE:
@@ -479,8 +476,48 @@ def extract_model_from_text(text):
     return None
 
 
-def load_targets_from_low_sheet():
-    """統合 LOW スプシから R='G-shock' AND B 列空 AND D 列空 の行を取込.
+def _select_gshock_row(row, only_urls=None):
+    """1 スプシ行 → ((url, model, price_jpy_str), None) 採用 / (None, reason) 除外。
+
+    純粋関数 (network無し) — load_targets_from_low_sheet とテスト両方が使う。
+    reason: 'not_gshock'(URL無/R≠G-shock) | 'not_target'(B/D or only_urls不一致)
+            | 'no_model'(型番抽出失敗) | 'partial_model'(color suffix欠落)
+    """
+    from listing_common import pick_cost_jpy as _pick_cost
+    url      = (row[0]  if len(row) > 0  else '').strip()  # A
+    item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
+    title_jp = (row[2]  if len(row) > 2  else '').strip()  # C
+    sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ
+    price_f  = _pick_cost(row)                             # N列(実コスト)優先/F列fallback
+    desc     = (row[7]  if len(row) > 7  else '').strip()  # H 商品説明
+    title_en = (row[8]  if len(row) > 8  else '').strip()  # I Title
+    category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
+
+    if not url or category != 'G-shock':
+        return None, 'not_gshock'
+    if only_urls is not None:
+        # 取下再出品②: 指定URLのみ、B(itemID)/D(sold) フィルタは無視 (取下げ済を再出品)
+        if url not in only_urls:
+            return None, 'not_target'
+    elif item_id or sold:
+        # 通常: 未出品(B空)かつ売切れでない行のみ
+        return None, 'not_target'
+    model = extract_model_from_text(title_jp + ' ' + title_en + ' ' + desc)
+    if not model:
+        return None, 'no_model'
+    # color suffix 欠落 (例: GW-2320FP) は catalog の完全 ID と不一致 → SKIP (Precision 100%).
+    if not is_complete_gshock_model(model):
+        return None, 'partial_model'
+    return (url, model, price_f), None
+
+
+def load_targets_from_low_sheet(only_urls=None):
+    """統合 LOW スプシから R='G-shock' 行を取込 (model/コストを抽出).
+
+    通常: B列空 AND D列空 (=未出品キュー) の行のみ。
+    only_urls 指定時 (取下再出品②): A列が only_urls に含まれる行だけを、B/D に
+      関係なく取込む (取下げ済の特定URLを再出品。コストは sheet から引くので
+      最新 pricing が正しく再計算される)。
 
     Returns:
         [(url, model, price_jpy_str), ...] のリスト
@@ -515,35 +552,19 @@ def load_targets_from_low_sheet():
     skipped_no_model = 0
     skipped_partial_model = 0
     for row in all_values[1:]:
-        url      = (row[0]  if len(row) > 0  else '').strip()  # A
-        item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
-        title_jp = (row[2]  if len(row) > 2  else '').strip()  # C
-        sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ
-        # 仕入参考: N列 (実コスト、ポイント還元込) 優先 / F列 (商品価格) fallback (2026-05-18)
-        from listing_common import pick_cost_jpy as _pick_cost
-        price_f  = _pick_cost(row)  # 旧: row[5] (F商品価格)
-        desc     = (row[7]  if len(row) > 7  else '').strip()  # H 商品説明
-        title_en = (row[8]  if len(row) > 8  else '').strip()  # I Title
-        category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
-
-        # 仕様: R 列='G-shock' 必須 (抽出くん側で必ず埋める).
-        # 他 listing スクリプト (Montbell/Tシャツ 等) と同じ運用.
-        if not url or item_id or sold or category != 'G-shock':
-            continue
-        # タイトル/説明から CASIO 型番抽出
-        text = title_jp + ' ' + title_en + ' ' + desc
-        model = extract_model_from_text(text)
-        if not model:
+        target, reason = _select_gshock_row(row, only_urls=only_urls)
+        if target:
+            targets.append(target)
+        elif reason == 'no_model':
             skipped_no_model += 1
-            continue
-        # color suffix 欠落 (例: GW-2320FP) は catalog の完全 ID と不一致 → SKIP.
-        # Mercari title に色番抜きで書かれているケース (一括出品セラー等) で発生.
-        if not is_complete_gshock_model(model):
+        elif reason == 'partial_model':
+            model = extract_model_from_text(
+                (row[2] if len(row) > 2 else '') + ' '
+                + (row[8] if len(row) > 8 else '') + ' '
+                + (row[7] if len(row) > 7 else ''))
             skipped_partial_model += 1
             print(f"⚠️ partial model_id (color suffix 欠落): {model!r} → SKIP "
                   f"(Mercari title/desc に完全型番 (例: {model}-1A4JR) が無い)")
-            continue
-        targets.append((url, model, price_f))
 
     if skipped_no_model:
         print(f"⚠️ {skipped_no_model} 件は型番抽出失敗で SKIP (Precision 100% 原則)")
@@ -1370,43 +1391,33 @@ def build_row(url, price, data, base_desc):
     ]
 
 def load_relist_targets(pending_csv):
-    """取下再出品② — 保留リストCSV(supply_url/title列)から G-shock 行のみ targets 化。
+    """取下再出品② — 保留リストCSV(supply_url列)の G-shock 行を狙い撃ちで targets 化。
 
-    既存のスプシ未出品キュー(B空欄行)を一切無視し、指定された supply_url だけを
-    狙い撃ちで再出品する(category='Wristwatches' でフィルタ=reel等を除外)。
-    model は sheet 経路と同じく title 文字列から抽出(Amazon URLには型番が無いため)。
-    戻り: [(url, model, ""), ...]
+    保留リストは「どのURLを再出品するか」の選定のみに使う。model/コストは管理スプシ
+    (load_targets_from_low_sheet) から通常出品と同じロジックで取得 → title/価格/item
+    specifics を全項目「最新ロジック」で再生成する (relistの狙い)。コストもスプシの
+    実コストを引くので最新 pricing が正しく算出される (¥5000 fallback の誤価格を回避)。
+
+    戻り: [(url, model, price_jpy_str), ...]
     """
-    targets = []
-    skipped = []
+    only_urls = set()
     with open(pending_csv, "r", encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             if (row.get("category") or "").strip() != "Wristwatches":
                 continue  # G-shock(Wristwatches)以外はこのスクリプト対象外
             url = (row.get("supply_url") or "").strip()
-            title = (row.get("title") or "").strip()
-            if not url:
-                continue
-            model = extract_model_from_text(title)
-            # color suffix 欠落 (例 GW-2320FP) は catalog 完全ID と不一致 → SKIP (sheet経路と同基準)
-            if model and not is_complete_gshock_model(model):
-                print(f"  ⚠️ partial model (color suffix欠落) → SKIP: {model!r} ({title[:40]})")
-                model = None
-            if model:
-                targets.append((url, model, ""))
-                # 元の出品価格を維持 (relistは価格据置)。pending price 欠落時は据置せず通常算出に委ねる
-                try:
-                    p = float((row.get("price") or "").strip())
-                    if p > 0:
-                        _RELIST_FORCE_PRICE[url] = p
-                except (ValueError, TypeError):
-                    pass
-            else:
-                skipped.append(title or url)
-    if skipped:
-        print(f"  ⚠️ model 抽出不可で除外 {len(skipped)}件:")
-        for s in skipped:
-            print(f"     - {s[:60]}")
+            if url:
+                only_urls.add(url)
+    if not only_urls:
+        return []
+    targets = load_targets_from_low_sheet(only_urls=only_urls)
+    found = {t[0] for t in targets}
+    missing = only_urls - found
+    if missing:
+        # スプシに無い/型番抽出不可で取れなかったURL (silent cap禁止)
+        print(f"  ⚠️ スプシ照合/型番抽出で取れず除外 {len(missing)}件:")
+        for u in missing:
+            print(f"     - {u[:70]}")
     return targets
 
 
@@ -1579,11 +1590,6 @@ def main():
                 price = int(round(price, 2)) + 0.98 if price > 10 else round(price, 2)
             # floor 保証
             price = max(price, PRICE_FLOOR_USD)
-            # 取下再出品② — 元の出品価格を維持 (Cassini reset目的で価格据置、算出値を破棄)
-            if url in _RELIST_FORCE_PRICE:
-                _computed = price
-                price = _RELIST_FORCE_PRICE[url]
-                print(f"    🔁 relist: 元価格 ${price} 維持 (算出 ${_computed} は破棄)")
             print(f"    💲 ${price} (仕入¥{cost_jpy})")
             row = build_row(url, price, data, base_desc)
             # SKU 上書き: 共通ルール (TCG/Tshirt/Montbell と同じ、URL ベース).
