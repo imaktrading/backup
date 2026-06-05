@@ -609,22 +609,37 @@ def main():
     # K 列が古いと auto_qty_zero (zero/restore) の判定が誤動作するため、
     # cycle 開始時に必ず最新化する。
     #   --ebay-report <path>   = 指定 CSV を使う
-    #   --ebay-report auto     = Selenium 自動 DL → 使う
+    #   --ebay-report auto     = Trading API (GetSellerList Fine) で取得 → 使う
+    #                           失敗時は Selenium UI scrape (旧経路) に fallback
     #   引数なし               = K 列同期 skip (= 旧運用継続)
     if args.ebay_report:
         from pathlib import Path  # noqa: PLC0415
         report_path: Path | None = None
         if args.ebay_report.lower() == "auto":
+            # 2026-06-05 Trading API 化 (= ebay_active_listing_dl の UI 構造変更で
+            # 5/29 から DL 失敗継続事案 解消)。 GetSellerList Fine で 全 active
+            # listing 取得 + Active Listing Report CSV 互換 format で出力。
             try:
-                from ebay_active_listing_dl import download_active_listing_report  # noqa: PLC0415
-                log(f"[Active Listing DL] Selenium 自動 DL 開始 "
-                    f"(最大待機 {args.auto_dl_max_wait_min} 分)")
-                report_path = download_active_listing_report(
-                    max_wait_min=args.auto_dl_max_wait_min)
+                from ebay_active_listing_via_trading_api import (  # noqa: PLC0415
+                    download_active_listing_via_trading_api,
+                )
+                log("[Active Listing DL] Trading API (GetSellerList Fine) 開始")
+                report_path = download_active_listing_via_trading_api()
                 log(f"  DL 完了: {report_path}")
             except Exception as e:
-                log(f"❌ Active Listing 自動 DL 失敗: {type(e).__name__}: {e}")
+                log(f"⚠️ Trading API 経路失敗: {type(e).__name__}: {e}")
                 log(traceback.format_exc())
+                # safety net: 旧 Selenium 経路 fallback (= cookie 健全なら動く)
+                try:
+                    from ebay_active_listing_dl import download_active_listing_report  # noqa: PLC0415
+                    log(f"[Active Listing DL] Selenium fallback "
+                        f"(最大待機 {args.auto_dl_max_wait_min} 分)")
+                    report_path = download_active_listing_report(
+                        max_wait_min=args.auto_dl_max_wait_min)
+                    log(f"  DL 完了 (fallback): {report_path}")
+                except Exception as e2:
+                    log(f"❌ Selenium fallback も失敗: {type(e2).__name__}: {e2}")
+                    log(traceback.format_exc())
         else:
             report_path = Path(args.ebay_report)
             if not report_path.exists():
