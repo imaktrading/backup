@@ -269,12 +269,18 @@ MODEL = "claude-sonnet-4-20250514"
 MAX_IMAGES = 4
 SCHEDULE_WEEKS = 2
 
+# 取下再出品② --relist 時 True: ScheduleTime を即時(now)にして即live。
+# relist は live 後でないと③書戻し(新ItemID取得)が回らないため2週間scheduleでなく即時。
+_IMMEDIATE_SCHEDULE = False
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://jp.mercari.com/",
 }
 
 def get_schedule_time():
+    if _IMMEDIATE_SCHEDULE:
+        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")  # now(=upload時には過去)=即list
     future = datetime.utcnow() + timedelta(weeks=SCHEDULE_WEEKS)
     return future.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -728,8 +734,30 @@ If OFFICIAL SPECS section is provided, those values are authoritative for Item S
 
     return last_result
 
-def load_targets_from_sheet(sheet_cfg):
-    """統合Hight/Low スプシから R列カテゴリで絞り込み + ItemIDブランク行を取得"""
+def append_skumap(pending_csv, sku, supply_url, category):
+    """取下再出品② — {supply_url → 実際に付与した sku} を skumap CSV に追記。
+
+    出品くんが付けた CustomLabel が ③書戻しで ACTIVEレポートと照合する権威ある実値。
+    pending と同 dir に relist_skumap_<stamp>.csv として各カテゴリの --relist 実行が追記。
+    ③ は sku をキーに ACTIVE(新ItemID) と supply_url(スプシ行) を橋渡しする。
+    """
+    if not pending_csv:
+        return
+    path = pending_csv.replace("relist_pending_", "relist_skumap_")
+    new = not _os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+        if new:
+            w.writerow(["sku", "supply_url", "category"])
+        w.writerow([sku, supply_url, category])
+
+
+def load_targets_from_sheet(sheet_cfg, only_urls=None):
+    """統合Hight/Low スプシから R列カテゴリで絞り込み + ItemIDブランク行を取得.
+
+    only_urls 指定時 (取下再出品②): A列が only_urls に含まれる行だけを、ItemID/sold に
+    関係なく取込む (取下げ済の特定URLを再出品。コストはスプシから引くので最新pricingが再算出)。
+    """
     import gspread
     from google.oauth2.service_account import Credentials
     creds = Credentials.from_service_account_file(
@@ -756,8 +784,16 @@ def load_targets_from_sheet(sheet_cfg):
         description = row[7] if len(row) > 7 else ""
         condition_id = row[11] if len(row) > 11 else ""  # L列 ConditionID (1000=新品/3000=中古)
         category = row[17] if len(row) > 17 else ""  # R列
-        # カテゴリフィルタ + ItemIDブランク & 売り切れでない
-        if url and not item_id and not sold and (not cat_filter or category == cat_filter):
+        if not url or (cat_filter and category != cat_filter):
+            continue
+        if only_urls is not None:
+            # 取下再出品②: 指定URLのみ、ItemID/sold フィルタは無視 (取下げ済を再出品)
+            if url not in only_urls:
+                continue
+        elif item_id or sold:
+            # 通常: 未出品(ItemID空)かつ売切れでない行のみ
+            continue
+        if True:
             targets.append({
                 "URL": url,
                 "タイトル": title_jp,
@@ -778,12 +814,29 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sheet", choices=list(SHEET_REGISTRY.keys()),
                         help="読込スプシ (porter/tomica)。指定なしは商品管理シート.csv (ローカル)")
+    parser.add_argument("--relist", default="",
+                        help="取下再出品②: 保留リストCSV(supply_url列) → 指定URLのみ即live再出品(既存キュー無視)")
     args, _ = parser.parse_known_args()
+    relist_mode = bool(args.relist)
+    global _IMMEDIATE_SCHEDULE
+    if relist_mode:
+        _IMMEDIATE_SCHEDULE = True
 
     # --sheet 指定時はカテゴリ別ファイル名に変更（例: reel_upload_*.csv, porter_upload_*.csv）
     global OUTPUT_CSV
     if args.sheet:
         OUTPUT_CSV = _gcop(args.sheet, "upload")
+
+    # 取下再出品②: 保留リストから対象 supply_url を集約 (cat_filter で当該シート分のみ自然に絞られる)
+    relist_only_urls = None
+    if relist_mode:
+        relist_only_urls = set()
+        with open(args.relist, "r", encoding="utf-8-sig", newline="") as _f:
+            for _r in csv.DictReader(_f):
+                _u = (_r.get("supply_url") or "").strip()
+                if _u:
+                    relist_only_urls.add(_u)
+        print(f"🔁 取下再出品②モード: {len(relist_only_urls)}件のURL → cat_filter で当シート分のみ即live再出品")
 
     rows = []
     if args.sheet:
@@ -792,10 +845,11 @@ def main():
         _validate_research_metadata(args.sheet, cfg)
         print(f"📊 スプシ読込: {cfg['label']} ({cfg['sheet_id'][:12]}...)\n")
         try:
-            rows = load_targets_from_sheet(cfg)
+            rows = load_targets_from_sheet(cfg, only_urls=relist_only_urls)
         except Exception as e:
             print(f"エラー: スプシ読込失敗: {e}")
-            input("Enterで終了...")
+            if not relist_mode:
+                input("Enterで終了...")
             return
     else:
         try:
@@ -1014,10 +1068,17 @@ def main():
                         pass
 
                 # === 物理ゲート: listing_common.audit_csv_row でerror検出 → HOLDへ ===
+                # 取下再出品②: 無在庫モデルでは「価格が高い→出品しない」判定はしない(在庫リスク0、
+                # 売れたら仕入れる)。元の10件も市場超えで出ていた。よって relist時は価格ALERTのHOLDを
+                # bypass(price_status=GO)。Item Specifics 等 他の物理ゲートは維持。ALERTは可視化継続。
+                _gate_price_status = _price_status
+                if relist_mode and _price_status == "ALERT":
+                    print(f"    🔁 relist: 価格ALERT(median ${_ebay_median:.2f}乖離)だが無在庫方針で出品継続")
+                    _gate_price_status = "GO"
                 from listing_common import gate_row_or_hold as _gate
                 _allowed, _viol = _gate(row_data, category=validate_category,
                                          mercari_state=condition_jp, sku=sku,
-                                         price_status=_price_status, median_usd=_ebay_median)
+                                         price_status=_gate_price_status, median_usd=_ebay_median)
                 if not _allowed:
                     _err_msgs = [f"{f}={i}" for f, i, s in _viol if s == "error"]
                     hold_reasons.extend(_err_msgs)
@@ -1031,6 +1092,8 @@ def main():
                     continue
 
                 results.append(row_data)
+                if relist_mode:
+                    append_skumap(args.relist, sku, url, args.sheet)
                 t_ok = "OK" if len(title_en) <= 80 else f"WARN:{len(title_en)}chars"
                 print(f"    {t_ok} ({len(title_en)}字) ${listing_price} SKU={sku} {title_en}")
             else:
@@ -1109,10 +1172,11 @@ def main():
         except Exception:
             pass
 
-    try:
-        input("\nEnterで終了...")
-    except EOFError:
-        pass  # subprocess 実行時(stdin無し)は何もせず終了
+    if not relist_mode:
+        try:
+            input("\nEnterで終了...")
+        except EOFError:
+            pass  # subprocess 実行時(stdin無し)は何もせず終了
 
 if __name__ == "__main__":
     main()

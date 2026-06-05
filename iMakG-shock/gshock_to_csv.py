@@ -1390,6 +1390,24 @@ def build_row(url, price, data, base_desc):
         get_store_category(model_full),
     ]
 
+def append_skumap(pending_csv, sku, supply_url, category):
+    """取下再出品② — {supply_url → 実際に付与した sku} を skumap CSV に追記。
+
+    出品くんが付けた CustomLabel が ③書戻しで ACTIVEレポートと照合する権威ある実値。
+    pending と同 dir に relist_skumap_<stamp>.csv として各カテゴリの --relist 実行が追記。
+    (mercari_to_ebay_csv.append_skumap と同仕様)。
+    """
+    if not pending_csv:
+        return
+    path = pending_csv.replace("relist_pending_", "relist_skumap_")
+    new = not _os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+        if new:
+            w.writerow(["sku", "supply_url", "category"])
+        w.writerow([sku, supply_url, category])
+
+
 def load_relist_targets(pending_csv):
     """取下再出品② — 保留リストCSV(supply_url列)の G-shock 行を狙い撃ちで targets 化。
 
@@ -1642,6 +1660,9 @@ def main():
             # eBay フィルタ validate (= TCG 完成 patterns 流用、 2026-05-31)
             apply_ebay_filter_to_row_gshock(row, headers, category="gshock")
             rows.append(row)
+            if relist_mode:
+                # 出品くんが付けた CustomLabel(row[6]) を skumap に記録 (③書戻しの照合キー)
+                append_skumap(args.relist, row[6], url, "Wristwatches")
         else:
             print(f" → 失敗")
             errors.append(url)
