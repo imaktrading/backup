@@ -14,6 +14,10 @@ from datetime import datetime, timedelta
 # コストは管理スプシの実コストを引くので正しく再算出される(据置はしない)。
 _IMMEDIATE_SCHEDULE = False
 
+# --relist 時 {supply_url: 元の old_item_id}。元listingの画像を GetItem で取得し PicURL に流用する
+# (999.png ダミーは新規出品用。relistは元の実画像を引き継ぐ=「画像現状流用」。2026-06-06 画像消失で新設)。
+_RELIST_OLD_ITEMID = {}
+
 def get_schedule_time():
     if _IMMEDIATE_SCHEDULE:
         # 即live = ScheduleTime 空欄 (アップ時に即出品)。
@@ -1428,6 +1432,10 @@ def load_relist_targets(pending_csv):
             url = (row.get("supply_url") or "").strip()
             if url:
                 only_urls.add(url)
+                # 元listingの画像流用用に old_item_id を控える
+                oid = (row.get("old_item_id") or "").strip()
+                if oid:
+                    _RELIST_OLD_ITEMID[url] = oid
     if not only_urls:
         return []
     targets = load_targets_from_low_sheet(only_urls=only_urls)
@@ -1630,6 +1638,23 @@ def main():
                         _sku = _extract_sku_from_url(url, category="gshock")
                 if _sku:
                     row[6] = _sku  # CustomLabel
+
+            # 取下再出品② — 元listingの画像を流用 (PicURL=row[3])。
+            # 999.png ダミーは新規出品用。relistは元の実画像(eBay EPS)を引き継ぐ=「画像現状流用」。
+            if relist_mode:
+                _oldid = _RELIST_OLD_ITEMID.get(url, "")
+                _imgs = []
+                if _oldid:
+                    try:
+                        from ebay_getitem_images import fetch_listing_images
+                        _imgs = fetch_listing_images(_oldid)
+                    except Exception as _ie:
+                        print(f"    ⚠ 画像取得失敗({type(_ie).__name__})", end="")
+                if _imgs:
+                    row[3] = "|".join(_imgs[:24])  # FileExchange は PicURL を | 区切りで複数可
+                    print(f"    🖼 元画像 {len(_imgs)}枚 流用 (itemID {_oldid})")
+                else:
+                    print(f"    ⚠ 元画像取得不可(itemID {_oldid or '不明'}) → 999.png のまま")
 
             # 検証＋正規化（C: プレフィックス列のみ抽出）
             if _validate_specs:
