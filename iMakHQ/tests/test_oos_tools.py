@@ -162,13 +162,20 @@ def test_proven_ref_falls_back_to_vein_then_none():
 
 
 # ---------- 取下再出品: relist_from_funnel ----------
-def test_relist_all_and_price_order():
-    rows = [{"flags": "RELIST", "item_id": str(i), "price": str(i)} for i in range(70)]
-    rows.append({"flags": "NO_CLICK", "item_id": "x", "price": "999"})  # RELIST フラグ無 → 除外
-    picked = relist_tool.select(rows)
-    assert len(picked) == 70                         # 全件 (CAP撤廃)
+def test_relist_cap10_price_order_supply_required():
+    # 2026-06-06: 半自動化で CAP=10 復活 + supply_url(行固定キー)必須に変更
+    rows = [{"flags": "RELIST", "item_id": str(i), "price": str(i),
+             "supply_url": f"https://jp.mercari.com/item/m{i:011d}"} for i in range(70)]
+    rows.append({"flags": "NO_CLICK", "item_id": "x", "price": "999",
+                 "supply_url": "https://jp.mercari.com/item/m99999999999"})  # RELIST 無 → 除外
+    rows.append({"flags": "RELIST", "item_id": "nosup", "price": "999",
+                 "supply_url": ""})  # supply_url 欠落 → 除外
+    picked, total, skipped = relist_tool.select(rows)
+    assert total == 71                               # RELIST フラグ総数 (70 + nosup)
+    assert skipped == 1                              # supply_url 欠落 1 件
+    assert len(picked) == 10                         # CAP=10
     assert picked[0]["item_id"] == "69"              # 価格(利益)降順
-    assert all(r["item_id"] != "x" for r in picked)  # RELIST フラグのみ
+    assert all(r["item_id"] not in ("x", "nosup") for r in picked)
 
 
 if __name__ == "__main__":
