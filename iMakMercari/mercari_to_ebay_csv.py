@@ -340,7 +340,9 @@ Generate eBay listing content based on Mercari product data and images provided.
 - Size: Mini / Small / Medium(416) / Large / **Extra Large**（"XL"でなく"Extra Large"）
 - Department: **"Men"(1,826)** または "Unisex Adults"(1,321) — Porterは男性ユース多数派なので基本"Men"、ハンドバッグ系のみ"Unisex Adults"
 - Country of Origin: "Japan" 固定（eBayフィルタ自体は機能薄いが検索インデックス用）
-- Bag Width / Bag Height / Bag Depth: cm 数値のみ
+- Bag Width / Bag Height / Bag Depth: cm 値に必ず "cm" 単位を付ける（例: "5 cm", "40 cm"）。
+  ※裸数値だと spec_normalizer が 6 未満を曖昧扱いで変換できず "5" のまま残る（マチ 5cm 等が in(cm) 化されない）。
+  単位を付ければ大小に関係なく "2.0 in (5.0 cm)" 形式に正規化される。
 推奨（フィルタヒット率高）:
 - Closure: **"Zip"(901)圧倒的** / Buckle(95) / Drawstring(49) / Snap(42) / Push Lock(8)
 - Pattern: **"Solid"(819)圧倒的** / Camouflage(84) / Striped(7)
@@ -882,6 +884,14 @@ def main():
             # ロールバック: この try/except ブロックをコメントアウトで完全復元.
             try:
                 from spec_normalizer import normalize_specs, enforce_brand_prefix
+                # 寸法が裸数値(例 "5")だと normalize_specs が <6 を曖昧扱いで dual化できず "5" のまま残る
+                # (= マチ5cm が "2.0 in (5.0 cm)" にならない既知欠陥)。本パイプラインは cm 出力指示なので、
+                # 裸数値の寸法には "cm" を補い、大小に関係なく確実に dual化させる (プロンプト指示の二重保険)。
+                import re as _re_dim
+                for _dk in ("Bag Width", "Bag Height", "Bag Depth"):
+                    _dv = str(item_specifics.get(_dk, "")).strip()
+                    if _re_dim.fullmatch(r"[\d.]+", _dv):
+                        item_specifics[_dk] = f"{_dv} cm"
                 item_specifics = normalize_specs(item_specifics, brand_hint=args.sheet or "")
                 title_en = enforce_brand_prefix(title_en, brand_hint=args.sheet or "")
             except Exception as _e:
