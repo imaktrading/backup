@@ -71,15 +71,15 @@ def test_age_guard_applies_to_noconvert():
     assert "NEW_WAIT" in f and "NO_CONVERT" not in f
 
 
-def test_relist_includes_watcherless_noclick():
-    """取下再出品(RELIST)候補に watcher無 NO_CLICK が入る。watcher有は in-place なので入らない。"""
+def test_relist_includes_all_noclick():
+    """取下再出品(RELIST) = NO_SEARCH+NO_CLICK 全件 (watcher有無問わず=ブースト+全項目再生成優先)。"""
     rows = [
         _row("nc_nw", has_pl=True, impr_total=500, ctr_total=0.0, watch=0),   # NO_CLICK watcher無
         _row("nc_w", has_pl=True, impr_total=500, ctr_total=0.0, watch=3),    # NO_CLICK watcher有
     ]
     rows += [_row(f"hi{i}", has_pl=True, impr_total=400, ctr_total=0.02) for i in range(4)]
     relist_ids = {r["item_id"] for r in lf.classify(rows)["RELIST"]}
-    assert "nc_nw" in relist_ids and "nc_w" not in relist_ids
+    assert "nc_nw" in relist_ids and "nc_w" in relist_ids
 
 
 def test_fallback_to_lqr_when_no_promoted():

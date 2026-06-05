@@ -275,11 +275,11 @@ def classify(rows):
     for b in (no_search, no_click, no_convert):
         b.sort(key=lambda x: -x["price"])
     overpriced.sort(key=lambda x: -(x["price"] - x["trend_price"]))
-    # 取下げ再出品(=新規ブースト)候補 = watcher無の NO_SEARCH + NO_CLICK。
-    #   NO_SEARCH=露出ゼロを検索リフレッシュ / NO_CLICK=新規ブースト+低CTR履歴の一掃+タイトル再生成。
-    #   watcher有は relist すると watcher 消失 → in-place(✏️タイトル改修)へ回す。
-    relist = [r for r in (no_search + no_click) if r["watch"] == 0]
-    relist.sort(key=lambda x: -x["price"])
+    # 取下げ再出品(=新規ブースト) 候補 = NO_SEARCH + NO_CLICK 全件。
+    #   relist は End+再Add で タイトル/価格/item specifics を現catalog/keyword で全項目再生成
+    #   + 新規出品ブースト + 低CTR履歴の一掃 = 個別のtitle編集より包括的に効く。
+    #   watcher有も含む (ユーザー判断: ブースト+全項目刷新 > 少数 watcher 保持)。
+    relist = sorted(no_search + no_click, key=lambda x: -x["price"])
     return {"NO_SEARCH": no_search, "NO_CLICK": no_click, "NO_CONVERT": no_convert,
             "OVERPRICED": overpriced, "DEAD_SIMPLE": dead_simple, "NEW_WAIT": new_wait,
             "RELIST": relist, "OUT_OF_STOCK": oos, "RESTOCK": restock, "CULL": cull, "ctr_q1": ctr_q1}
@@ -431,7 +431,7 @@ def main():
     print(f"   (適正化) 露出基盤={_basis} (PLレポート{'有' if _pl_on else '無'}) / 新規<{TH_AGE_MIN}日は NEW_WAIT 隔離={len(c['NEW_WAIT'])}件 / 各バケツ価格順")
     _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & 出品>={TH_AGE_MIN}日 & 露出({_basis})<={_none} → 真の検索不可。キーワード or 取下げ再出品 (価格高い順)", c["NO_SEARCH"])
     _sec("② クリックされない NO_CLICK", f"在庫あり & 出品>={TH_AGE_MIN}日 & 露出({_basis})>={_shown} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
-    print(f"   ▷ 取下げ再出品(=新規ブースト)候補 = watcher無の NO_SEARCH+NO_CLICK = {len(c['RELIST'])}件 (watcher有はin-place✏️へ)")
+    print(f"   ▷ 取下げ再出品(=新規ブースト・全項目再生成)候補 = NO_SEARCH+NO_CLICK = {len(c['RELIST'])}件")
     _sec("③ 買われない NO_CONVERT", f"在庫あり & 出品>={TH_AGE_MIN}日 & CTR有 & 無販売 → 価格(適正価格比)/説明", c["NO_CONVERT"])
     _sec("④ 高すぎ OVERPRICED", "在庫あり & 価格 > eBay適正価格×1.05 → 値下げ余地 (差額大きい順)", c["OVERPRICED"])
 

@@ -110,23 +110,26 @@ def test_restock_dedup_aggregates_sites_and_demand():
 
 
 # ---------- ④: noclick_targets ----------
-def test_noclick_only_watcher_bearing():
+def test_noclick_returns_all_noclick():
     rows = [
-        {"flags": "NO_CLICK", "watch": "3", "price": "50", "title": "a"},   # OK
-        {"flags": "NO_CLICK", "watch": "0", "price": "99", "title": "b"},   # watcher無 → 除外
+        {"flags": "NO_CLICK", "watch": "3", "price": "50", "title": "a"},   # watcher有
+        {"flags": "NO_CLICK", "watch": "0", "price": "99", "title": "b"},   # watcher無 も対象
         {"flags": "NO_SEARCH", "watch": "5", "price": "10", "title": "c"},  # NO_CLICKでない → 除外
     ]
-    sel = noclick.select(rows)
-    assert [r["title"] for r in sel] == ["a"]
+    assert {r["title"] for r in noclick.select(rows)} == {"a", "b"}
 
 
-def test_noclick_order_watcher_then_price():
+def test_noclick_order_by_price():
     rows = [
-        {"flags": "NO_CLICK", "watch": "1", "price": "300", "title": "w1_hi"},
-        {"flags": "NO_CLICK", "watch": "3", "price": "10", "title": "w3_lo"},
-        {"flags": "NO_CLICK", "watch": "3", "price": "200", "title": "w3_hi"},
+        {"flags": "NO_CLICK", "watch": "1", "price": "10", "title": "lo"},
+        {"flags": "NO_CLICK", "watch": "3", "price": "300", "title": "hi"},
     ]
-    assert [r["title"] for r in noclick.select(rows)] == ["w3_hi", "w3_lo", "w1_hi"]
+    assert [r["title"] for r in noclick.select(rows)] == ["hi", "lo"]   # 価格降順
+
+
+def test_noclick_fix_method_by_watcher():
+    assert "in-place" in noclick.fix_method(3)     # watcher有 → in-place推奨
+    assert "relist" in noclick.fix_method(0)       # watcher無 → relist可
 
 
 def test_noclick_fix_hint():
@@ -159,13 +162,13 @@ def test_proven_ref_falls_back_to_vein_then_none():
 
 
 # ---------- 取下再出品: relist_from_funnel ----------
-def test_relist_cap_and_price_order():
+def test_relist_all_and_price_order():
     rows = [{"flags": "RELIST", "item_id": str(i), "price": str(i)} for i in range(70)]
     rows.append({"flags": "NO_CLICK", "item_id": "x", "price": "999"})  # RELIST フラグ無 → 除外
-    cands, picked = relist_tool.select(rows, cap=50)
-    assert len(cands) == 70 and len(picked) == 50   # CAP 50
-    assert picked[0]["item_id"] == "69"             # 価格(利益)降順
-    assert all(r["item_id"] != "x" for r in cands)  # RELIST フラグのみ
+    picked = relist_tool.select(rows)
+    assert len(picked) == 70                         # 全件 (CAP撤廃)
+    assert picked[0]["item_id"] == "69"              # 価格(利益)降順
+    assert all(r["item_id"] != "x" for r in picked)  # RELIST フラグのみ
 
 
 if __name__ == "__main__":

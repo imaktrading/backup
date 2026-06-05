@@ -33,7 +33,6 @@ except Exception:
 _HERE = os.path.dirname(os.path.abspath(__file__))
 FUNNEL_DIR = os.path.normpath(os.path.join(_HERE, "..", "funnel_output"))
 DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
-CLICK_MIN = 10   # 高クリック=この数以上 (基底率ノイズを除き「関心はあるのに買われない」本命)
 
 
 def _load(name):
@@ -94,8 +93,7 @@ def load_targets():
     if not fs:
         sys.exit("funnel_*.csv がありません。先に『📊 ファネル分析』を実行してください。")
     rows = list(csv.DictReader(open(max(fs, key=os.path.getmtime), encoding="utf-8")))
-    return [r for r in rows
-            if "NO_CONVERT" in (r.get("flags") or "").split("|") and clicks_of(r) >= CLICK_MIN]
+    return [r for r in rows if "NO_CONVERT" in (r.get("flags") or "").split("|")]
 
 
 def main():
@@ -113,8 +111,8 @@ def main():
                      "med": med, "mx": mx, "ratio": ratio,
                      "clicks": int(round(clicks_of(r))), "watch": int(_f(r.get("watch"))),
                      "kw": rw.mercari_kw(vein, title), "ebay": r.get("ebay_url", "")})
-    # 実績超え(ratio>1) を乖離大きい順 → 実績内 → 実績なし、の順
-    recs.sort(key=lambda d: (0 if d["kind"] != "なし" else 1, -(d["ratio"] or 0)))
+    # 優先順位: 実績比較可(割高ほど上=乖離大) → 実績なし、同条件はクリック多い(=関心大)順
+    recs.sort(key=lambda d: (1 if d["kind"] == "なし" else 0, -(d["ratio"] or 0), -d["clicks"]))
 
     stamp = datetime.date.today().strftime("%Y%m%d")
     path = os.path.join(DESK, f"価格抵抗_{stamp}.csv")
@@ -138,7 +136,7 @@ def main():
 
     over = [d for d in recs if d["ratio"] and d["ratio"] > 1]
     none = [d for d in recs if d["kind"] == "なし"]
-    print(f"NO_CONVERT 高クリック(>={CLICK_MIN})無販売 = {len(recs)}件")
+    print(f"NO_CONVERT (CTR有・無販売) = {len(recs)}件 (全件・優先順位順)")
     print(f"  ① 自分の実売最高を超える価格(倍率>1)=割高で価格抵抗 = {len(over)}件 → 原価見て値下で寄せる候補")
     print(f"  ② 過去一度も売れてない系統/vein(実績なし) = {len(none)}件 → 原価高なら撤退寄り/プレミアムは様子見")
     print(f"  ③ 実績内に収まる(倍率<=1) = {len(recs)-len(over)-len(none)}件 → 価格以外(条件/需要)を疑う")

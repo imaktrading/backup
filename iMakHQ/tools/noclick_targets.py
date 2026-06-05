@@ -56,11 +56,15 @@ def fix_hint(keywords, photos):
 
 
 def select(rows):
-    """NO_CLICK ∩ watcher有 を watcher有→価格 の順 (=in-place必須・高額優先)。"""
-    out = [r for r in rows
-           if "NO_CLICK" in (r.get("flags") or "").split("|") and _f(r.get("watch")) > 0]
-    out.sort(key=lambda r: (-_f(r.get("watch")), -_f(r.get("price"))))
+    """NO_CLICK 全件を価格(利益額)降順。"""
+    out = [r for r in rows if "NO_CLICK" in (r.get("flags") or "").split("|")]
+    out.sort(key=lambda r: -_f(r.get("price")))
     return out
+
+
+def fix_method(watch):
+    """relist で watcher を失うか否かで対応を示す。"""
+    return "in-place(watcher保持)" if watch > 0 else "relist可 or in-place"
 
 
 def main():
@@ -83,23 +87,24 @@ def main():
             continue
     with f:
         w = csv.writer(f)
-        w.writerow(["済", "系統", "商品名", "watch", "CTR", "語数", "写真",
-                    "価格", "改修ヒント", "eBay URL(ここを開いて手revise)"])
+        w.writerow(["済", "系統", "商品名", "watch", "対応", "CTR", "語数", "写真",
+                    "価格", "改修ヒント", "eBay URL"])
         for r in targets:
             kw, ph = _f(r.get("keywords")), _f(r.get("photos"))
+            watch = int(_f(r.get("watch")))
             # CTR は判定基盤(organic+PL累計)の ctr_total を優先表示 (無ければ旧 ctr)
             ctr_disp = r.get("ctr_total") or r.get("ctr", "")
             w.writerow(["", dw.vein_of(r.get("title") or ""), r.get("title", ""),
-                        int(_f(r.get("watch"))), ctr_disp, int(kw) if kw else "",
+                        watch, fix_method(watch), ctr_disp, int(kw) if kw else "",
                         int(ph) if ph else "", f"${_f(r.get('price')):.0f}",
                         fix_hint(kw, ph), r.get("ebay_url", "")])
 
-    print(f"④ タイトル改修対象 (NO_CLICK ∩ watcher有) = {len(targets)}件")
-    print(f"  (参考) NO_CLICK 全体 = {n_all_noclick}件 / うち watcher有 = {len(targets)}件")
-    print("  watcher有は取下再出品で watcher 消失 → eBay で in-place 手 revise 必須。")
+    n_w = sum(1 for r in targets if _f(r.get("watch")) > 0)
+    print(f"タイトル改修対象 (NO_CLICK 全件) = {len(targets)}件 (価格高い順)")
+    print(f"  対応の目安: watcher無 {len(targets)-n_w}件=取下再出品でも可(ブースト+再生成) / watcher有 {n_w}件=in-place推奨(watcher保持)")
     print(f"\nCSV出力: {path}")
-    print("▶ 各行の eBay URL を開き、改修ヒントを見てタイトルを直す → 済列にチェック。")
-    print("※ 改修案の自動生成はしない (推測KW注入=誤タイトル防止)。盛る語は人が判断。")
+    print("▶ relistで一括ブースト＋再生成 か、個別に in-place で考えたタイトルに直すか。watcher有はin-place推奨。")
+    print("※ 本気のCTR改善は出品くんのタイトル生成改善(別PDCA)。本リストはその対象把握も兼ねる。")
 
 
 if __name__ == "__main__":

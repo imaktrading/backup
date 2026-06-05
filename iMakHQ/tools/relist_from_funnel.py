@@ -28,19 +28,16 @@ DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 END_DIR = r"C:\dev\iMak_data\revise"
 END_HEADER = ["*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)", "ItemID", "EndCode"]
 END_CODE = "OtherListingError"  # Cassini reset 目的の汎用 code (seller_hub_relist と統一)
-CAP = 50   # 1回あたりの上限 (一気に End+再Add は burst リスク+ブースト希釈 → 段階実行)
 
 
 def relist_candidates(rows):
-    """funnel CSV rows から RELIST フラグ行 (watcher無の NO_SEARCH+NO_CLICK) を抽出。"""
+    """funnel CSV rows から RELIST フラグ行 (NO_SEARCH+NO_CLICK) を抽出。"""
     return [r for r in rows if "RELIST" in (r.get("flags") or "").split("|")]
 
 
-def select(rows, cap=CAP):
-    """RELIST 候補を価格(利益額)降順で並べ、先頭 cap 件。戻り: (全候補, 今回分)。"""
-    cands = relist_candidates(rows)
-    cands.sort(key=lambda x: -float(x.get("price") or 0))
-    return cands, cands[:cap]
+def select(rows):
+    """RELIST 候補を価格(利益額)降順で全件。戻り: 候補 list。"""
+    return sorted(relist_candidates(rows), key=lambda x: -float(x.get("price") or 0))
 
 
 def main():
@@ -49,12 +46,9 @@ def main():
         sys.exit("funnel_*.csv がありません。先に『📊 ファネル分析』を実行してください。")
     src = max(files, key=os.path.getmtime)
     rows = list(csv.DictReader(open(src, encoding="utf-8")))
-    cands, picked = select(rows)
+    picked = select(rows)
     print(f"対象 funnel: {os.path.basename(src)}")
-    print(f"取下再出品(=新規ブースト)候補 = watcher無の NO_SEARCH+NO_CLICK = {len(cands)}件")
-    print(f"  今回分 (CAP {CAP}/回, 価格高い順) = {len(picked)}件")
-    if len(cands) > CAP:
-        print(f"  ※ 残り {len(cands) - CAP}件は レポート再DL→ファネル再実行→本ツール再走 で段階的に")
+    print(f"取下再出品(=新規ブースト・全項目再生成)候補 = NO_SEARCH+NO_CLICK = {len(picked)}件 (価格高い順・全件)")
     if not picked:
         print("候補なし。処理終了。")
         return
@@ -70,7 +64,8 @@ def main():
             w.writerow(["End", r["item_id"], END_CODE])
     # 2) 候補一覧 (デスクトップ・確認用)
     cand_path = os.path.join(DESK, f"取下再出品候補_{stamp}.csv")
-    fields = ["item_id", "title", "site", "category", "price", "watch", "impr", "ebay_url"]
+    # watch 列で「relistするとこのwatcherを失う」を可視化、flags で NO_SEARCH/NO_CLICK の別を表示
+    fields = ["item_id", "title", "site", "category", "price", "watch", "flags", "ebay_url"]
     with open(cand_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
