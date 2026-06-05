@@ -1210,14 +1210,16 @@ class ListingPanel:
         # 2) utility をグループ分類 (cmd のスクリプト名で判定)
         def _ugroup(idx):
             cmd = " ".join(SCRIPTS[idx].get("cmd", []))
-            if any(s in cmd for s in ("listing_funnel", "demand_winners", "noclick_targets", "price_resistance")):
+            if any(s in cmd for s in ("listing_funnel", "demand_winners")):
                 return "analyze"   # 📊 分析 (Plan/Check)
             if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
                 return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
                 return "discover"  # 新規ネタ探し
-            if "relist_from_funnel" in cmd or "dump_us_qty1_sku" in cmd:
-                return "relist"    # 在庫あり 取り下げ再出品(ファネルRELIST候補)
+            # 在庫あり listing を直す: 取下再出品(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
+            if any(s in cmd for s in ("relist_from_funnel", "dump_us_qty1_sku",
+                                      "noclick_targets", "price_resistance")):
+                return "relist"
             return "report"
         ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": []}
         for idx in utilities:
@@ -1347,7 +1349,7 @@ class ListingPanel:
             relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
             relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
                              for cat in cat_order if categories[cat].get("relist") is not None]
-            d1 = ttk.LabelFrame(stock_row, text="🔧 在庫あり — 取り下げ再出品", padding=2)
+            d1 = ttk.LabelFrame(stock_row, text="🔧 在庫あり — 直す (再出品/タイトル/価格)", padding=2)
             d1.grid(row=0, column=0, sticky="nsew", padx=(0, 3))
             _grid_named(d1, relist_items, ncol=3, compact=True)
             d2 = ttk.LabelFrame(stock_row, text="📦 在庫なし — 再仕入れ / 整理", padding=2)

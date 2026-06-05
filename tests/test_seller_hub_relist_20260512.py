@@ -114,6 +114,7 @@ def test_control_panel_labelframe_layout():
     assert "新規出品" in src and "既存メンテ" in src
     # 新規はカテゴリ名ラベルの大ボタン (text="新規" 固定でなく cat_name)
     assert "text=cat_name" in src
-    # 既存メンテ: 分析 / 在庫あり再出品 / 在庫なし再仕入れ に分類、分析は open_after で結果ファイルを開く
-    assert "在庫あり — 取り下げ再出品" in src and "在庫なし — 再仕入れ" in src
+    # 既存メンテ: 分析 / 在庫あり(再出品/タイトル/価格) / 在庫なし(再仕入れ/整理) に分類
+    # (2026-06-05 在庫あり3ボタン集約で枠名「在庫あり — 直す」に変更)
+    assert "在庫あり — 直す" in src and "在庫なし — 再仕入れ" in src
     assert "open_after" in src
