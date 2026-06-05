@@ -8,7 +8,19 @@ import time
 import requests
 from datetime import datetime, timedelta
 
+# --relist (取下再出品②) 時 True: ScheduleTime を即時(now)にして即live。
+# 通常出品は2週間後 scheduleだが、relist は live 後でないと③書戻し(新ItemID取得)が回らないため即時。
+_IMMEDIATE_SCHEDULE = False
+
+# --relist 時 {supply_url: 元の出品価格USD}。relist は Cassini reset(露出刷新)が目的で価格は据置。
+# 空にすると price_jpy_str="" → cost ¥5000 fallback → $90.98 の大幅赤字誤価格になる
+# (memory: mass_price_change_requires_v4_preverify)。元価格を強制維持して事故を防ぐ。
+_RELIST_FORCE_PRICE = {}
+
 def get_schedule_time():
+    if _IMMEDIATE_SCHEDULE:
+        # now(=upload時には過去) を入れると eBay は即時 list する
+        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     future = datetime.utcnow() + timedelta(weeks=SCHEDULE_WEEKS)
     return future.strftime("%Y-%m-%d %H:%M:%S")
 import undetected_chromedriver as uc
@@ -1357,39 +1369,101 @@ def build_row(url, price, data, base_desc):
         get_store_category(model_full),
     ]
 
+def load_relist_targets(pending_csv):
+    """取下再出品② — 保留リストCSV(supply_url/title列)から G-shock 行のみ targets 化。
+
+    既存のスプシ未出品キュー(B空欄行)を一切無視し、指定された supply_url だけを
+    狙い撃ちで再出品する(category='Wristwatches' でフィルタ=reel等を除外)。
+    model は sheet 経路と同じく title 文字列から抽出(Amazon URLには型番が無いため)。
+    戻り: [(url, model, ""), ...]
+    """
+    targets = []
+    skipped = []
+    with open(pending_csv, "r", encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            if (row.get("category") or "").strip() != "Wristwatches":
+                continue  # G-shock(Wristwatches)以外はこのスクリプト対象外
+            url = (row.get("supply_url") or "").strip()
+            title = (row.get("title") or "").strip()
+            if not url:
+                continue
+            model = extract_model_from_text(title)
+            # color suffix 欠落 (例 GW-2320FP) は catalog 完全ID と不一致 → SKIP (sheet経路と同基準)
+            if model and not is_complete_gshock_model(model):
+                print(f"  ⚠️ partial model (color suffix欠落) → SKIP: {model!r} ({title[:40]})")
+                model = None
+            if model:
+                targets.append((url, model, ""))
+                # 元の出品価格を維持 (relistは価格据置)。pending price 欠落時は据置せず通常算出に委ねる
+                try:
+                    p = float((row.get("price") or "").strip())
+                    if p > 0:
+                        _RELIST_FORCE_PRICE[url] = p
+                except (ValueError, TypeError):
+                    pass
+            else:
+                skipped.append(title or url)
+    if skipped:
+        print(f"  ⚠️ model 抽出不可で除外 {len(skipped)}件:")
+        for s in skipped:
+            print(f"     - {s[:60]}")
+    return targets
+
+
 def main():
+    import argparse
+    global _IMMEDIATE_SCHEDULE
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--relist", default="",
+                    help="保留リストCSV(supply_url列) → 指定URLのみ即live再出品(既存キュー無視)")
+    args, _ = ap.parse_known_args()
+    relist_mode = bool(args.relist)
+
     print("=== iMak Trading Japan - G-SHOCK CASIO URL → eBay CSV ===\n")
-    # 2026-05-05: 入力経路を LOW スプシ駆動 (主) + URL ファイル (fallback) に拡張
-    # memory: dropshipping_model_premise (抽出くん収集 → 出品くん自動連動)
-    print("📊 LOW スプシから R='G-shock' 行を取込中...")
-    sheet_targets = load_targets_from_low_sheet()  # [(url, model), ...]
-    print(f"  スプシ取込: {len(sheet_targets)} 件")
 
-    file_targets = []
-    try:
-        with open(URLS_FILE, "r", encoding="utf-8") as f:
-            file_urls = [l.strip() for l in f if l.strip() and l.startswith("http")]
-        for u in file_urls:
-            m = extract_model_from_url(u)
-            if m:
-                file_targets.append((u, m, ""))  # URL ファイル経由は price_jpy 空 (cost fallback)
-        print(f"  URL ファイル: {len(file_targets)} 件")
-    except FileNotFoundError:
-        print(f"  URL ファイル ({URLS_FILE}) なし → スプシのみ")
-
-    targets = sheet_targets + file_targets
-    if not targets:
-        print(f"エラー: 処理対象なし (スプシも URL ファイルも空)")
-        input("Enterで終了...")
-        return
-
-    # 1回の実行で MAX 10件 (= 10件づつバッチ運用、2026-05-18)
-    MAX_PER_RUN = 10
-    if len(targets) > MAX_PER_RUN:
-        print(f"\n合計 {len(targets)} 件中、先頭 {MAX_PER_RUN} 件のみ処理します (残 {len(targets)-MAX_PER_RUN} 件は次回実行で)。\n")
-        targets = targets[:MAX_PER_RUN]
+    if relist_mode:
+        # 取下再出品② — 既存キュー無視・指定URLのみ・ScheduleTime即live
+        _IMMEDIATE_SCHEDULE = True
+        _pending_name = args.relist.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        print(f"🔁 取下再出品②モード: {_pending_name} → 指定URLのみ即live再出品")
+        targets = load_relist_targets(args.relist)
+        print(f"  対象 G-shock = {len(targets)} 件 (既存スプシキューは無視)")
+        if not targets:
+            print("エラー: 保留リストに G-shock(Wristwatches) 対象なし")
+            return
+        print(f"\n合計 {len(targets)} 件を処理します (即live)。\n")
     else:
-        print(f"\n合計 {len(targets)} 件を処理します。\n")
+        # 2026-05-05: 入力経路を LOW スプシ駆動 (主) + URL ファイル (fallback) に拡張
+        # memory: dropshipping_model_premise (抽出くん収集 → 出品くん自動連動)
+        print("📊 LOW スプシから R='G-shock' 行を取込中...")
+        sheet_targets = load_targets_from_low_sheet()  # [(url, model), ...]
+        print(f"  スプシ取込: {len(sheet_targets)} 件")
+
+        file_targets = []
+        try:
+            with open(URLS_FILE, "r", encoding="utf-8") as f:
+                file_urls = [l.strip() for l in f if l.strip() and l.startswith("http")]
+            for u in file_urls:
+                m = extract_model_from_url(u)
+                if m:
+                    file_targets.append((u, m, ""))  # URL ファイル経由は price_jpy 空 (cost fallback)
+            print(f"  URL ファイル: {len(file_targets)} 件")
+        except FileNotFoundError:
+            print(f"  URL ファイル ({URLS_FILE}) なし → スプシのみ")
+
+        targets = sheet_targets + file_targets
+        if not targets:
+            print(f"エラー: 処理対象なし (スプシも URL ファイルも空)")
+            input("Enterで終了...")
+            return
+
+        # 1回の実行で MAX 10件 (= 10件づつバッチ運用、2026-05-18)
+        MAX_PER_RUN = 10
+        if len(targets) > MAX_PER_RUN:
+            print(f"\n合計 {len(targets)} 件中、先頭 {MAX_PER_RUN} 件のみ処理します (残 {len(targets)-MAX_PER_RUN} 件は次回実行で)。\n")
+            targets = targets[:MAX_PER_RUN]
+        else:
+            print(f"\n合計 {len(targets)} 件を処理します。\n")
     # 2026-05-08: catalog 未登録 = SKIP 設計に変更したため scrape_casio 不要、Chrome 起動廃止
     # scrape_casio 関数自体は残置 (将来再利用の可能性、driver 引数のまま)
     driver = None
@@ -1505,6 +1579,11 @@ def main():
                 price = int(round(price, 2)) + 0.98 if price > 10 else round(price, 2)
             # floor 保証
             price = max(price, PRICE_FLOOR_USD)
+            # 取下再出品② — 元の出品価格を維持 (Cassini reset目的で価格据置、算出値を破棄)
+            if url in _RELIST_FORCE_PRICE:
+                _computed = price
+                price = _RELIST_FORCE_PRICE[url]
+                print(f"    🔁 relist: 元価格 ${price} 維持 (算出 ${_computed} は破棄)")
             print(f"    💲 ${price} (仕入¥{cost_jpy})")
             row = build_row(url, price, data, base_desc)
             # SKU 上書き: 共通ルール (TCG/Tshirt/Montbell と同じ、URL ベース).
@@ -1625,7 +1704,8 @@ def main():
             print(f"  - {m}")
         print(f"\n通知ファイル: {notify_path}")
 
-    input("\nEnterで終了...")
+    if not relist_mode:
+        input("\nEnterで終了...")
 
 if __name__ == "__main__":
     main()
