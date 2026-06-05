@@ -364,7 +364,7 @@ SCRIPTS = [
     # 2026-06-04: 月次レポート生成 / 今、見る はパネルから削除 (ファネル分析が上位互換。.py は残置)
     {
         "category": None, "type": "utility",
-        "label": "取下再出品",
+        "label": "取下再出品（タイトル改修再掲）",
         "label_fg": "red",  # ボタンラベル赤文字 (取下→再出品のフロー起点を強調)
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "relist_from_funnel.py"],  # ファネルRELIST候補→End CSV (snapshot不要)
@@ -1352,7 +1352,7 @@ class ListingPanel:
             relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
             relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
                              for cat in cat_order if categories[cat].get("relist") is not None]
-            d1 = ttk.LabelFrame(scroll_frame, text="🔧 在庫あり — 直す (検索/タイトル/価格)", padding=4)
+            d1 = ttk.LabelFrame(scroll_frame, text="🔧 在庫あり — 直す (検索/タイトル/価格) 出品≥21日", padding=4)
             d1.pack(fill="x", padx=4, pady=(6, 0))
             _grid_named(d1, relist_items, ncol=4)
             d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ / 整理", padding=4)
