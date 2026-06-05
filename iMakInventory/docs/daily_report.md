@@ -293,3 +293,92 @@ Selenium FileExchange UI から Trading API direct に統一。
   販売元抽出 logic 再利用 (= commit 24a6699 朝の販売元 identity gate + d23ad99 の `_detect_seller`)
 - **process 反省**: 7663102 (= variation API 間違い) は memory `reuse_existing_proven_solution.md` 違反 = リバイス君の sell_feed_uploader 経由 variation_upload.py を 先に確認していれば API 仕様検討の trigger になっていた。 次回 worktree 跨ぎ logic 実装時は **既存 worktree で 同種実装の有無を 必ず先に grep** する
 
+## 2026-06-04..05 — 公式監視くん 修復 + Active Listing 取得を Trading API 化
+
+### 決定
+
+- **6/4 朝 cycle 補完を即実行**: 8:00 cycle が 3 step NG (restore / audit_heal / scrape_audit) で
+  終わったため、 取下げ未反映 7 件 (= 仕入元切れ × eBay qty>0、 Defect Rate 直撃) を放置
+  しないため uuid_sync / K 列同期 / audit_and_heal / scrape_audit を手動再実行で補完。
+  Trading API 経由で 12 件 (取下げ 7 + 復活 5) を heal、 GetItem 8 variation で qty 直接確認
+- **`_schedule_new_report` UI 失敗時の既存 link fallback 実装** (= 5/29 以降 7 日連続失敗の
+  延命): 真因 = eBay reports/schedule の DOM 構造変更で XPath 当たらず。 fallback で
+  6/3 dated 既存 link を再利用、 「永遠に DL ゼロ」 を回避
+- **SKU シート全行 cycle 内 1 回 cache 化** (= Sheets API 429 防止): 6/4 08:00 cycle 末尾
+  8 listing が `Read requests per minute per user` quota 超で取りこぼし発覚。 process_listing
+  毎の `read_sku_rows` 連発を main loop 前 1 回読込に集約 (= API read 74 → 1)
+- **ErrorCode 21916750 (FixedPrice item ended) を safe_failure 化**: 6/4 09:30 メルカリ
+  cycle で ng=1 → 3 cycle 連続 (= 6/2 ConnectionError, 6/3 JSONDecodeError, 6/4 21916750) で
+  generic_failure_threshold アラート発火。 sold/expired listing への qty=0 化は dropshipping
+  前提では「目的達成済」、 safe codes に追加
+- **Active Listing CSV 取得を Trading API GetSellerList Fine に置換** (= 根本対策):
+  上記 fallback は短期延命、 根本問題 = Selenium UI scrape の脆弱性 + 「fallback で同 CSV を
+  使い続け → 新規 listing が監視対象外になる」 構造。 GetSellerList Fine + IncludeVariations
+  で全 active listing を取得 + 既存 CSV column 互換で出力 → 既存 sync_from_csv / audit_and_heal
+  無修正で動く。 Selenium 経路は safety net 残置 (= memory `reuse_existing_proven_solution`)
+- **17:30 メルカリ cycle DNS failure を手動 Revise で即解消**: 1 件 (358571988843) が
+  DNS resolver 一時失敗で transient retry 1 回でも復活せず ng=1。 4h 待たず手動 revise で
+  qty=0 化 (= memory `ebay_first_always` Defect Rate 防衛)
+- **「正式完了」 宣言を引込め、 145 件大量復活を verify**: 6/5 08:00 cycle で 145 件
+  qty=1 復活が走った時、 サンプル 1 件 verify のみで「健全」 と断言したのは
+  memory `full_check_before_report` 違反。 10 listing × 28 variation を仕入元 API で再 verify
+  → 100% in_stock=True で復活妥当性確定
+
+### 変更
+
+- `iMakeBayAPI/inventory_monitor/ebay_active_listing_dl.py:248-267`
+  (= `_schedule_new_report` 失敗時の既存 link fallback、 commit f07788c)
+- `iMakeBayAPI/inventory_monitor/main.py:215-235,706-714` (= SKU シート全行 cycle 内
+  cache + process_listing の all_sku_rows 引数追加、 commit a891745)
+- `iMakInventory/ebay_actions/trading_api_uploader.py:178` (= safe codes に "21916750"
+  追加、 commit 292b297)
+- `iMakInventory/tests/test_trading_api_client.py:87-95` 新規 (= 21916750 source 検査
+  test、 commit 292b297)
+- `iMakeBayAPI/inventory_monitor/ebay_active_listing_via_trading_api.py` **新規**
+  (= GetSellerList Fine paging + Active Listing CSV 互換 8 column 出力 + DNS retry 5 回
+  + IAF auto refresh、 commit 8711aa3)
+- `iMakeBayAPI/inventory_monitor/main.py:608-643` (= --ebay-report auto 分岐を Trading
+  API 優先 + Selenium fallback に、 commit 8711aa3)
+
+### 検証
+
+- **6/4 補完 cycle**: uuid_sync 70 cells 書換、 K 列同期 159 件補正 (= 5/29 以降ずっと
+  古かった K)、 audit_heal Trading API で取下げ 7 + 復活 5 = 12 件全件 ack=Success
+- **8/8 variation direct verify (GetItem)**: 取下げ済 7 件 (358381852914 L/XL,
+  358359355028 S, 358359565422 XL, 358275199203 BL/S, 358560250231 XXS, 358278977272
+  Brown/L) + 復活 5 件 (358275199203 DGN-XL, NV/OG/TQ/YL-S) = 100% qty 期待値一致
+- **6/5 08:00 公式 cycle 全 step OK**: monitor (= Sheets 429 エラー 0 件、 a891745 効果)
+  / uuid_sync / zero (11 件) / restore (141+4=145 件) / audit_heal (zero 9 + restore 11)
+  / scrape_audit (100%、 昨日 90% アラート解消)
+- **6/5 13:30 メルカリ cycle 正常**: 取下げ 2 件 ack=Success、 streak 0 維持
+  (= 292b297 効果、 21916750 → safe 扱いで ng 化されない)
+- **大量復活 sample verify**: random 10 listing (= 50 中 20%) × 28 variation を
+  uniqlo / gu API で実 fetch → 100% in_stock=True qty=11 (= scraper 判定 健全)
+- **昨日朝 heal_zero 7 件 巻き戻し非発生 verify**: 6/5 08:00 cycle 後に再度 GetItem、
+  全 7 件 qty=0 維持確認 (= 復活 145 件に巻き込まれてない)
+- **Trading API CSV 互換性 verify**: 19:53 全 24 page fetch (7500 rows)、 既存 6/3 dated CSV
+  と diff = 共通 290 variation listings (互換 100%) / 削除 0 / **新規 3 listings
+  (358639572937, 358639652237, 358640199261 = 計 21 variations) が 6/3 以降 監視対象外
+  だった事実確定**
+- **手動 Revise (17:30 救済)**: 358571988843 qty=0 化 ack=Warning (= 23015 Best Offer 警告
+  だが qty=0 化 success)
+- **pre-commit**: 4 commits 全て 115 tests pass
+
+### 次のアクション
+
+- **明日 8:00 公式 cycle (= 自動)**: Trading API path (= 8711aa3 効果) の log 確認、
+  「[Active Listing DL] Trading API (GetSellerList Fine) 開始」 が出るはず + 監視対象に
+  新規 3 listings (358639572937 等) が含まれることを確認
+- **#7 監査 (= Claude implementation-auditor + Gemini 二次)**: 本セッション 4 commits
+  + 実 eBay Revise ~201 件 + スプシ書込 (UUID 70 + K 列 159) の 独立検証。
+  HQ 自己申告との乖離 chk
+- **DNS retry 増強 (trading_api_uploader)**: 17:30 cycle failure の根本対策。 現状
+  retry 1 回 → ebay_active_listing_via_trading_api._post_with_retry と同じ 5 回 + 10s sleep
+  パターン展開 (= memory `reuse_existing_proven_solution`)
+- **過去 restore NG 真因調査** (緊急度低): 6/2 6/3 6/4 で connectionError / JSONDecodeError /
+  21916750 ng と毎回違う原因、 今は self-correct 済
+- **K 列同期 「dry-run」 ログ表示** (cosmetic): execute=True で乖離 0 件のとき
+  「乖離 0 件、 dry-run」 と紛らわしい文言、 後で確認
+- **process 教訓**: Selenium UI scrape は eBay UI 構造変更で永続的に壊れる。 Trading API
+  で代替可能なところは API 化 を優先する (= 今回 GetSellerList Fine で完全代替できた)
+
