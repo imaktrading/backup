@@ -25,6 +25,7 @@ def _load(name):
 cull_end = _load("cull_end")
 restock = _load("restock_worklist")
 noclick = _load("noclick_targets")
+price_res = _load("price_resistance")
 
 
 def _row(item_id, flags="CULL", age=100, price=10.0, **kw):
@@ -131,6 +132,29 @@ def test_noclick_fix_hint():
     assert "語数" in noclick.fix_hint(5, 10)        # 語数不足
     assert "写真" in noclick.fix_hint(15, 3)        # 写真不足
     assert "見直し" in noclick.fix_hint(15, 10)     # 両方足りてる → 一般ヒント
+
+
+# ---------- 価格抵抗: price_resistance ----------
+def test_clicks_reconstructed_from_ctr_times_impr():
+    # clicks = ctr_total × impr_total
+    assert round(price_res.clicks_of({"ctr_total": "0.02", "impr_total": "500"})) == 10
+
+
+def test_proven_ref_prefers_gshock_series():
+    vein_sold = {"G-SHOCK": [100, 200, 300]}
+    series_sold = {"DW-5600": [150, 165]}
+    # G-SHOCK DW-5600 → 系統基準(中央157.5/最高165) を vein より優先
+    kind, med, mx = price_res.proven_ref("G-SHOCK", "Casio G-Shock DW-5600MNC-8A2JF", vein_sold, series_sold)
+    assert kind == "系統" and mx == 165
+
+
+def test_proven_ref_falls_back_to_vein_then_none():
+    vein_sold = {"Montbell": [100, 139]}
+    k1, _, mx1 = price_res.proven_ref("Montbell", "Montbell Plasma 1000", vein_sold, {})
+    assert k1 == "vein" and mx1 == 139
+    # 実績 vein が無い/1件のみ → なし
+    k2, m2, mx2 = price_res.proven_ref("PORTER", "PORTER Tanker", {"PORTER": [200]}, {})
+    assert k2 == "なし" and m2 is None
 
 
 if __name__ == "__main__":

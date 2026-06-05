@@ -412,6 +412,15 @@ SCRIPTS = [
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/タイトル改修対象_*.csv",
     },
     {
+        # NO_CONVERT: 高クリック無販売を自分の実売(proven)と照合=価格抵抗 (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "💲 価格抵抗(NO_CONVERT)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "price_resistance.py"],
+        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/価格抵抗_*.csv",
+    },
+    {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
         "category": None, "type": "utility",
         "label": "🛒 在庫切れ再仕入れ(RESTOCK)",
@@ -1201,7 +1210,7 @@ class ListingPanel:
         # 2) utility をグループ分類 (cmd のスクリプト名で判定)
         def _ugroup(idx):
             cmd = " ".join(SCRIPTS[idx].get("cmd", []))
-            if any(s in cmd for s in ("listing_funnel", "demand_winners", "noclick_targets")):
+            if any(s in cmd for s in ("listing_funnel", "demand_winners", "noclick_targets", "price_resistance")):
                 return "analyze"   # 📊 分析 (Plan/Check)
             if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
                 return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
