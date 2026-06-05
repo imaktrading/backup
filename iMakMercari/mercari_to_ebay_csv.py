@@ -910,9 +910,20 @@ def main():
                     # L列空欄 → E列(状態)から推定
                     is_new = is_new_condition(condition_jp)
                     final_condition_id = 1000 if is_new else cfg['condition_id']
-                # ピックURL (実写 max 12枚 + cfg の固定追加画像)。実写を先頭に置きサムネを維持。
-                pic_urls = [u.strip() for u in (photo_urls or '').split('|') if u.strip()][:12]
-                pic_urls += cfg.get("extra_pics", [])   # Porter: 999.png + preowned banner を末尾追加
+                # ピックURL: 写真URL列には別商品の写真や出品者プロフ画像(thumb/members)が大量に混在し、
+                # かつ旧[:12]キャップで自商品の写真(14〜20枚)が11枚に削れていた。SKU(m<id>)で自商品の
+                # 写真だけを連番順に抽出し、商品1枚目をギャラリーサムネにする。取れなければ従来挙動に fallback。
+                _allp = [u.strip() for u in (photo_urls or '').split('|') if u.strip()]
+                _mid = re.search(r'm\d{11,12}', url or '')
+                _own = []
+                if _mid:
+                    _pat = re.compile(re.escape(_mid.group(0)) + r'_(\d+)\.')
+                    _own = sorted((u for u in _allp if _pat.search(u)),
+                                  key=lambda u: int(_pat.search(u).group(1)))
+                # eBay PicURL 上限 24。cfg の追加画像分の余白を残して自商品写真を採用。
+                _extra = cfg.get("extra_pics", [])
+                pic_urls = (_own or _allp)[:24 - len(_extra)]
+                pic_urls += _extra            # Porter: 999.png + preowned banner を末尾追加
                 pic_url = '|'.join(pic_urls)
                 # 価格決定 (pricing_engine 共通) — eBay市場中央値を取得して反映
                 price_str = re.sub(r"[^0-9]", "", str(price_jpy))
