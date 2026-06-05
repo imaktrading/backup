@@ -96,16 +96,21 @@ def test_overpriced_vs_trend():
     assert {r["item_id"] for r in classify(rows)["OVERPRICED"]} == {"over"}
 
 
-def test_relist_candidate_is_no_search_without_watchers():
-    """取下げ再出品候補 = NO_SEARCH ∩ watcher無 (relistで失うもの無)。watcher有は除外。"""
+def test_relist_is_watcherless_nosearch_and_noclick():
+    """取下げ再出品候補 = watcher無の NO_SEARCH+NO_CLICK (新規ブースト)。watcher有は in-place なので除外。
+
+    2026-06-05: 旧定義(NO_SEARCH のみ)から NO_CLICK(watcher無)も含むよう拡張。
+    """
     rows = [
-        _row("relist_ok", impr=1, age=60, watch=0),   # NO_SEARCH & watch0 → RELIST
-        _row("keep", impr=1, age=60, watch=4),         # NO_SEARCH だが watcher有 → RELIST 除外
-        _row("seen", impr=50, ctr=0.05, watch=0),      # 露出有 → NO_SEARCH でない
+        _row("ns_nw", impr=1, age=60, watch=0),               # NO_SEARCH watcher無 → RELIST
+        _row("ns_w", impr=1, age=60, watch=4),                # NO_SEARCH watcher有 → 除外
+        _row("nc_nw", impr=50, ctr=0.001, age=60, watch=0),   # NO_CLICK watcher無 → RELIST
+        _row("nc_w", impr=50, ctr=0.001, age=60, watch=4),    # NO_CLICK watcher有 → 除外
+        _row("good", impr=50, ctr=0.5, age=60, sold=2),       # 高CTR・販売有 → 問題バケツ外
     ]
     c = classify(rows)
-    assert {r["item_id"] for r in c["RELIST"]} == {"relist_ok"}
-    assert {r["item_id"] for r in c["NO_SEARCH"]} == {"relist_ok", "keep"}
+    assert {r["item_id"] for r in c["RELIST"]} == {"ns_nw", "nc_nw"}
+    assert {r["item_id"] for r in c["NO_SEARCH"]} == {"ns_nw", "ns_w"}
 
 
 def test_out_of_stock_split_restock_vs_cull():

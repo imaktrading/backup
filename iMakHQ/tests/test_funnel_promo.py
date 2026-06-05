@@ -37,9 +37,8 @@ def test_pl_high_impr_zero_click_is_noclick_not_nosearch():
     rows += [_row(f"hi{i}", has_pl=True, impr_total=400, ctr_total=0.02) for i in range(4)]
     c = lf.classify(rows)
     f = _flags(c, "a")
-    assert "NO_CLICK" in f
-    assert "NO_SEARCH" not in f
-    assert all(r["item_id"] != "a" for r in c["RELIST"])  # relist 空振りを起こさない
+    assert "NO_CLICK" in f          # 広告で表示有・クリック0 = NO_CLICK
+    assert "NO_SEARCH" not in f     # organic-only 時代の偽 NO_SEARCH を起こさない
 
 
 def test_pl_near_zero_impr_is_nosearch():
@@ -54,6 +53,33 @@ def test_pl_new_listing_excluded_to_newwait():
     rows = [_row("new", has_pl=True, impr_total=5, ctr_total=0.0, age_days=10)]
     f = _flags(lf.classify(rows), "new")
     assert "NEW_WAIT" in f and "NO_SEARCH" not in f
+
+
+def test_age_guard_applies_to_noclick():
+    """高impr×低CTRでも出品<21日は NEW_WAIT (NO_CLICK にしない) — 3バケツ共通の時間ガード。"""
+    rows = [_row("new", has_pl=True, impr_total=500, ctr_total=0.0, age_days=10)]
+    rows += [_row(f"hi{i}", has_pl=True, impr_total=400, ctr_total=0.02) for i in range(4)]
+    f = _flags(lf.classify(rows), "new")
+    assert "NEW_WAIT" in f and "NO_CLICK" not in f
+
+
+def test_age_guard_applies_to_noconvert():
+    """CTR有・無販売でも出品<21日は NEW_WAIT (NO_CONVERT にしない)。"""
+    rows = [_row("new", has_pl=True, impr_total=500, ctr_total=0.05, age_days=5)]
+    rows += [_row(f"lo{i}", has_pl=True, impr_total=400, ctr_total=0.001) for i in range(4)]
+    f = _flags(lf.classify(rows), "new")
+    assert "NEW_WAIT" in f and "NO_CONVERT" not in f
+
+
+def test_relist_includes_watcherless_noclick():
+    """取下再出品(RELIST)候補に watcher無 NO_CLICK が入る。watcher有は in-place なので入らない。"""
+    rows = [
+        _row("nc_nw", has_pl=True, impr_total=500, ctr_total=0.0, watch=0),   # NO_CLICK watcher無
+        _row("nc_w", has_pl=True, impr_total=500, ctr_total=0.0, watch=3),    # NO_CLICK watcher有
+    ]
+    rows += [_row(f"hi{i}", has_pl=True, impr_total=400, ctr_total=0.02) for i in range(4)]
+    relist_ids = {r["item_id"] for r in lf.classify(rows)["RELIST"]}
+    assert "nc_nw" in relist_ids and "nc_w" not in relist_ids
 
 
 def test_fallback_to_lqr_when_no_promoted():

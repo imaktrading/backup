@@ -26,6 +26,7 @@ cull_end = _load("cull_end")
 restock = _load("restock_worklist")
 noclick = _load("noclick_targets")
 price_res = _load("price_resistance")
+relist_tool = _load("relist_from_funnel")
 
 
 def _row(item_id, flags="CULL", age=100, price=10.0, **kw):
@@ -155,6 +156,16 @@ def test_proven_ref_falls_back_to_vein_then_none():
     # 実績 vein が無い/1件のみ → なし
     k2, m2, mx2 = price_res.proven_ref("PORTER", "PORTER Tanker", {"PORTER": [200]}, {})
     assert k2 == "なし" and m2 is None
+
+
+# ---------- 取下再出品: relist_from_funnel ----------
+def test_relist_cap_and_price_order():
+    rows = [{"flags": "RELIST", "item_id": str(i), "price": str(i)} for i in range(70)]
+    rows.append({"flags": "NO_CLICK", "item_id": "x", "price": "999"})  # RELIST フラグ無 → 除外
+    cands, picked = relist_tool.select(rows, cap=50)
+    assert len(cands) == 70 and len(picked) == 50   # CAP 50
+    assert picked[0]["item_id"] == "69"             # 価格(利益)降順
+    assert all(r["item_id"] != "x" for r in cands)  # RELIST フラグのみ
 
 
 if __name__ == "__main__":

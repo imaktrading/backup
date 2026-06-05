@@ -255,9 +255,12 @@ def classify(rows):
         sold = r["sold_qty"] + r.get("sales90", 0)
         age = r.get("age_days", 0)
         if gate(r):
-            if imp(r) <= th_none:
-                # 適正化: 新規出品(時間不足)は誤検出 → NEW_WAIT に隔離 (age不明0は対象に残す)
-                (new_wait if 0 < age < TH_AGE_MIN else no_search).append(r)
+            if 0 < age < TH_AGE_MIN:
+                # 出品<21日=時間不足 → 露出/CTR/転換とも判定しない (3バケツ共通の時間ガード。
+                # age不明0は判定対象に残す)
+                new_wait.append(r)
+            elif imp(r) <= th_none:
+                no_search.append(r)
             elif imp(r) >= th_shown and ctr(r) <= ctr_q1:
                 no_click.append(r)
             elif sold == 0 and ctr(r) > ctr_q1:
@@ -272,9 +275,10 @@ def classify(rows):
     for b in (no_search, no_click, no_convert):
         b.sort(key=lambda x: -x["price"])
     overpriced.sort(key=lambda x: -(x["price"] - x["trend_price"]))
-    # 取下げ再出品(relist)候補 = NO_SEARCH のうち watcher 無し (= relist で失うものが無い)。
-    # watcher 有りは relist すると watcher を失う → タイトル編集など in-place 対応に回す。
-    relist = [r for r in no_search if r["watch"] == 0]
+    # 取下げ再出品(=新規ブースト)候補 = watcher無の NO_SEARCH + NO_CLICK。
+    #   NO_SEARCH=露出ゼロを検索リフレッシュ / NO_CLICK=新規ブースト+低CTR履歴の一掃+タイトル再生成。
+    #   watcher有は relist すると watcher 消失 → in-place(✏️タイトル改修)へ回す。
+    relist = [r for r in (no_search + no_click) if r["watch"] == 0]
     relist.sort(key=lambda x: -x["price"])
     return {"NO_SEARCH": no_search, "NO_CLICK": no_click, "NO_CONVERT": no_convert,
             "OVERPRICED": overpriced, "DEAD_SIMPLE": dead_simple, "NEW_WAIT": new_wait,
@@ -426,9 +430,9 @@ def main():
     _basis = "organic+PL累計" if _pl_on else "organic日次"
     print(f"   (適正化) 露出基盤={_basis} (PLレポート{'有' if _pl_on else '無'}) / 新規<{TH_AGE_MIN}日は NEW_WAIT 隔離={len(c['NEW_WAIT'])}件 / 各バケツ価格順")
     _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & 出品>={TH_AGE_MIN}日 & 露出({_basis})<={_none} → 真の検索不可。キーワード or 取下げ再出品 (価格高い順)", c["NO_SEARCH"])
-    print(f"   └ うち取下げ再出品(relist)候補(watcher無=失うもの無): {len(c['RELIST'])}件 → seller_hub_relist.py で検索リフレッシュ")
-    _sec("② クリックされない NO_CLICK", f"在庫あり & 露出({_basis})>={_shown} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
-    _sec("③ 買われない NO_CONVERT", "在庫あり & CTR有 & 無販売 → 価格(適正価格比)/説明", c["NO_CONVERT"])
+    _sec("② クリックされない NO_CLICK", f"在庫あり & 出品>={TH_AGE_MIN}日 & 露出({_basis})>={_shown} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
+    print(f"   ▷ 取下げ再出品(=新規ブースト)候補 = watcher無の NO_SEARCH+NO_CLICK = {len(c['RELIST'])}件 (watcher有はin-place✏️へ)")
+    _sec("③ 買われない NO_CONVERT", f"在庫あり & 出品>={TH_AGE_MIN}日 & CTR有 & 無販売 → 価格(適正価格比)/説明", c["NO_CONVERT"])
     _sec("④ 高すぎ OVERPRICED", "在庫あり & 価格 > eBay適正価格×1.05 → 値下げ余地 (差額大きい順)", c["OVERPRICED"])
 
     def _sec_oos(title, note, items, limit=20):
