@@ -47,8 +47,13 @@ OUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__
 DESKTOP = r"C:\Users\imax2\OneDrive\デスクトップ"
 
 # 分類しきい値
-TH_IMPR_NONE = 3        # 1日あたり impression がこれ以下 = 検索に出ていない
-TH_IMPR_SHOWN = 8       # これ以上 impression があれば「露出はある」
+TH_IMPR_NONE = 3        # 【fallback: PLレポート無し時】1日あたり organic impr がこれ以下 = 検索に出ていない
+TH_IMPR_SHOWN = 8       # 【fallback】これ以上 = 露出あり
+# 全件プロモ運用では露出の主成分は PL(広告) impressions。LQR の Daily impr は organic のみで
+# PL を見落とす → NO_SEARCH 偽陽性 (実は広告で表示されてるがクリックされてない=NO_CLICK) を生む。
+# PLレポート有り時は organic+PL の累計 impr で判定 (累計=CTRを判定できるサンプル数の意味)。
+TH_PL_NONE = 30         # organic+PL 累計 impr がこれ以下 = ほぼ表示されてない (=真の NO_SEARCH)
+TH_PL_SHOWN = 100       # 累計 impr がこれ以上 = CTR を判定できるサンプル十分
 TH_AGE_MIN = 21         # 出品からこれ未満(日) = 新規 → impr低は時間不足なので NO_SEARCH 除外
 
 
@@ -186,11 +191,39 @@ def load_unsold(path):
     return out
 
 
+def load_promoted(path):
+    """Promoted Listings general listing report → {item_id: (total_impr, total_clicks)}。
+    total = PL(via eBay placements) + organic。全件プロモ運用では露出の主成分が PL なので、
+    organic のみの LQR Daily impr を補正する。先頭に注記行があるためヘッダ行を探す。"""
+    out = {}
+    if not path:
+        return out
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.reader(f))
+    hi = next((i for i, r in enumerate(rows) if "Item ID" in [c.strip() for c in r]), None)
+    if hi is None:
+        return out
+    idx = {c.strip(): i for i, c in enumerate(rows[hi])}
+
+    def g(r, c):
+        j = idx.get(c)
+        return r[j] if j is not None and j < len(r) else ""
+    KI = "Promoted Listings Impressions (via eBay Placements)"
+    KC = "Total Promoted Listings Clicks"
+    for r in rows[hi + 1:]:
+        iid = (g(r, "Item ID") or "").strip()
+        if not iid:
+            continue
+        ti = _f(g(r, KI)) + _f(g(r, "Organic Impressions"))
+        tc = _f(g(r, KC)) + _f(g(r, "Organic Clicks"))
+        out[iid] = (ti, tc)
+    return out
+
+
 def classify(rows):
     """在庫(qty!=0)限定でファネル段階別に分類。LQR データ有り=詳細、無し=簡易。"""
     in_stock = [r for r in rows if r["qty"] != 0]
     oos = [r for r in rows if r["qty"] == 0]
-    has_lqr = [r for r in in_stock if r.get("has_lqr")]
 
     # 在庫切れも分析: 需要シグナル(過去販売/watch/90d販売)があれば再仕入れ価値、皆無なら出品停止候補
     def _demand(r):
@@ -199,26 +232,40 @@ def classify(rows):
     cull = [r for r in oos if _demand(r) == 0]
     restock.sort(key=lambda x: -_demand(x))
 
-    # CTR 下位四分位 (impression がある listing で算出)
-    ctrs = sorted([r["ctr"] for r in has_lqr if r["impr"] >= TH_IMPR_SHOWN])
+    # 露出/CTR の判定基盤を選ぶ: PLレポート有り → organic+PL 累計 impr/ctr + 累計閾値 (正しい)。
+    # 無し → 旧 LQR organic-daily + 旧閾値 (後方互換)。
+    use_pl = any(r.get("has_pl") for r in in_stock)
+    if use_pl:
+        def imp(r): return r.get("impr_total", 0.0)
+        def ctr(r): return r.get("ctr_total", 0.0)
+        def gate(r): return r.get("has_pl")
+        th_none, th_shown = TH_PL_NONE, TH_PL_SHOWN
+    else:
+        def imp(r): return r["impr"]
+        def ctr(r): return r["ctr"]
+        def gate(r): return r.get("has_lqr")
+        th_none, th_shown = TH_IMPR_NONE, TH_IMPR_SHOWN
+
+    # CTR 下位四分位 (露出十分な listing で算出)
+    ctrs = sorted([ctr(r) for r in in_stock if gate(r) and imp(r) >= th_shown])
     ctr_q1 = statistics.quantiles(ctrs, n=4)[0] if len(ctrs) >= 4 else (ctrs[0] if ctrs else 0)
 
     no_search, no_click, no_convert, overpriced, dead_simple, new_wait = [], [], [], [], [], []
     for r in in_stock:
         sold = r["sold_qty"] + r.get("sales90", 0)
         age = r.get("age_days", 0)
-        if r.get("has_lqr"):
-            if r["impr"] <= TH_IMPR_NONE:
+        if gate(r):
+            if imp(r) <= th_none:
                 # 適正化: 新規出品(時間不足)は誤検出 → NEW_WAIT に隔離 (age不明0は対象に残す)
                 (new_wait if 0 < age < TH_AGE_MIN else no_search).append(r)
-            elif r["impr"] >= TH_IMPR_SHOWN and r["ctr"] <= ctr_q1:
+            elif imp(r) >= th_shown and ctr(r) <= ctr_q1:
                 no_click.append(r)
-            elif sold == 0 and r["ctr"] > ctr_q1:
+            elif sold == 0 and ctr(r) > ctr_q1:
                 no_convert.append(r)
             if r["trend_price"] > 0 and r["price"] > r["trend_price"] * 1.05:
                 overpriced.append(r)
         else:
-            # LQR 非対象 (非US等): views 系が無いので watch/sold で簡易判定
+            # 判定基盤なし (非US等): views 系が無いので watch/sold で簡易判定
             if sold == 0 and r["watch"] == 0:
                 dead_simple.append(r)
     # 適正化: 各バケツを利益額(価格)優先で並べる → 直す価値の高い順
@@ -322,16 +369,19 @@ def main():
     f_active = find_file(data_dir, "*all-active-listings*.csv")
     f_quality = find_file(data_dir, "Listing quality report*.xlsx")
     f_unsold = find_file(data_dir, "*unsold-listings*.csv")
+    f_promoted = find_file(data_dir, "*promoted-listing*report*.csv")
     if not f_active:
         sys.exit(f"all-active CSV が {data_dir} に見つかりません。")
     print(f"data-dir: {data_dir}")
-    print(f"  active : {os.path.basename(f_active)}")
-    print(f"  quality: {os.path.basename(f_quality) if f_quality else '(なし=簡易判定)'}")
-    print(f"  unsold : {os.path.basename(f_unsold) if f_unsold else '(なし)'}")
+    print(f"  active  : {os.path.basename(f_active)}")
+    print(f"  quality : {os.path.basename(f_quality) if f_quality else '(なし=簡易判定)'}")
+    print(f"  unsold  : {os.path.basename(f_unsold) if f_unsold else '(なし)'}")
+    print(f"  promoted: {os.path.basename(f_promoted) if f_promoted else '(なし=organic限定の旧判定)'}")
 
     active = load_active(f_active)
     quality = load_quality(f_quality) if f_quality else {}
     unsold = load_unsold(f_unsold)
+    promoted = load_promoted(f_promoted)
     us_by_title = build_us_title_map(active)  # eBayリンクを常に US版(USD)に解決
 
     rows = []
@@ -340,8 +390,12 @@ def main():
         r = dict(a)
         r["ebay_url"] = us_ebay_url(a, us_by_title)
         r["has_lqr"] = bool(q)
-        r["impr"] = q["impr"] if q else 0.0
+        r["impr"] = q["impr"] if q else 0.0          # organic 日次 (LQR・CSV/demand_winners 互換用に温存)
         r["ctr"] = q["ctr"] if q else 0.0
+        pl = promoted.get(iid)
+        r["has_pl"] = bool(pl)
+        r["impr_total"] = pl[0] if pl else 0.0        # organic+PL 累計 (分類の正しい露出指標)
+        r["ctr_total"] = (pl[1] / pl[0]) if pl and pl[0] else 0.0
         r["trend_price"] = q["trend_price"] if q else 0.0
         r["sales90"] = q["sales90"] if q else 0
         r["age_days"] = start_to_age(a.get("start", "")) or (q.get("age_days", 0) if q else 0)
@@ -367,10 +421,13 @@ def main():
         print("   " + ln)
 
     c = classify(rows)
-    print(f"   (適正化) 新規出品<{TH_AGE_MIN}日でimpr低=時間不足は NEW_WAIT に隔離={len(c['NEW_WAIT'])}件 / 各バケツは利益額(価格)順")
-    _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & 出品>={TH_AGE_MIN}日 & impr/日<={TH_IMPR_NONE} → キーワード or 取下げ再出品 (価格高い順)", c["NO_SEARCH"])
+    _pl_on = any(r.get("has_pl") for r in rows)
+    _none, _shown = (TH_PL_NONE, TH_PL_SHOWN) if _pl_on else (TH_IMPR_NONE, TH_IMPR_SHOWN)
+    _basis = "organic+PL累計" if _pl_on else "organic日次"
+    print(f"   (適正化) 露出基盤={_basis} (PLレポート{'有' if _pl_on else '無'}) / 新規<{TH_AGE_MIN}日は NEW_WAIT 隔離={len(c['NEW_WAIT'])}件 / 各バケツ価格順")
+    _sec("① 検索に出ていない NO_SEARCH", f"在庫あり & 出品>={TH_AGE_MIN}日 & 露出({_basis})<={_none} → 真の検索不可。キーワード or 取下げ再出品 (価格高い順)", c["NO_SEARCH"])
     print(f"   └ うち取下げ再出品(relist)候補(watcher無=失うもの無): {len(c['RELIST'])}件 → seller_hub_relist.py で検索リフレッシュ")
-    _sec("② クリックされない NO_CLICK", f"在庫あり & impr/日>={TH_IMPR_SHOWN} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
+    _sec("② クリックされない NO_CLICK", f"在庫あり & 露出({_basis})>={_shown} & CTR下位25%({c['ctr_q1']*100:.2f}%) → タイトル/サムネ/価格", c["NO_CLICK"])
     _sec("③ 買われない NO_CONVERT", "在庫あり & CTR有 & 無販売 → 価格(適正価格比)/説明", c["NO_CONVERT"])
     _sec("④ 高すぎ OVERPRICED", "在庫あり & 価格 > eBay適正価格×1.05 → 値下げ余地 (差額大きい順)", c["OVERPRICED"])
 
@@ -399,8 +456,8 @@ def main():
                 if r in c[k]: tags.append(k)
             r["flags"] = "|".join(tags)
         fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",
-                  "sales90", "watch", "impr", "ctr", "photos", "keywords", "has_lqr", "relist_status",
-                  "age_days", "flags", "ebay_url"]
+                  "sales90", "watch", "impr", "ctr", "impr_total", "ctr_total", "photos", "keywords",
+                  "has_lqr", "relist_status", "age_days", "flags", "ebay_url"]
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()

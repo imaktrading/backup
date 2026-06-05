@@ -1274,11 +1274,12 @@ class ListingPanel:
                       command=_open_reports).pack(side="left")
             tk.Label(
                 guide, justify="left", anchor="w", font=("Yu Gothic UI", 10),
-                text=("Seller Hub で下記4レポートをDL → 📁reports フォルダに置く:\n"
+                text=("Seller Hub で下記5レポートをDL → 📁reports フォルダに置く:\n"
                       "  ・eBay-all-active-listings\n"
                       "  ・ebay-all-orders-report\n"
                       "  ・eBay-unsold-listings-report\n"
-                      "  ・Listing quality report"),
+                      "  ・Listing quality report\n"
+                      "  ・eBay-promoted-listing-general-listing-report (露出をorganic+PL累計で正す)"),
             ).pack(anchor="w", pady=(4, 0))
 
             # ② レポート鮮度: 各レポートの「内容の日付」が何日前か。古いまま判断する事故を防ぐ。

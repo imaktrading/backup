@@ -87,8 +87,10 @@ def main():
                     "価格", "改修ヒント", "eBay URL(ここを開いて手revise)"])
         for r in targets:
             kw, ph = _f(r.get("keywords")), _f(r.get("photos"))
+            # CTR は判定基盤(organic+PL累計)の ctr_total を優先表示 (無ければ旧 ctr)
+            ctr_disp = r.get("ctr_total") or r.get("ctr", "")
             w.writerow(["", dw.vein_of(r.get("title") or ""), r.get("title", ""),
-                        int(_f(r.get("watch"))), r.get("ctr", ""), int(kw) if kw else "",
+                        int(_f(r.get("watch"))), ctr_disp, int(kw) if kw else "",
                         int(ph) if ph else "", f"${_f(r.get('price')):.0f}",
                         fix_hint(kw, ph), r.get("ebay_url", "")])
 
