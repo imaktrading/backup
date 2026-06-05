@@ -1358,6 +1358,49 @@ class ListingPanel:
             ana.pack(fill="x", padx=4, pady=(4, 0))
             _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
 
+            # ファネル世代 + 効果測定の準備状況: 「前回いつファネルを回したか」「URL突合できる2世代が
+            #   揃ったか」を可視化。次にいつ押せばいいか分からない問題への対策。supply_url が両世代に
+            #   入って初めて relist(取下再出品=id/title変) 効果が📉効果測定で測れる。
+            def _funnel_generations():
+                import glob as _glob
+                import csv as _csv
+                import datetime as _dt
+                fs = _glob.glob(os.path.join(WORKSPACE, "iMakHQ", "funnel_output", "funnel_*.csv"))
+                gens = []
+                for p in fs:
+                    m = re.search(r"funnel_(\d{4})(\d{2})(\d{2})", os.path.basename(p))
+                    if m:
+                        gens.append((_dt.date(int(m[1]), int(m[2]), int(m[3])), p))
+                gens.sort(key=lambda x: x[0])
+
+                def _has_url(path):
+                    try:
+                        with open(path, encoding="utf-8") as f:
+                            rd = _csv.DictReader(f)
+                            if "supply_url" not in (rd.fieldnames or []):
+                                return False
+                            return any((r.get("supply_url") or "").strip() for r in rd)
+                    except Exception:
+                        return False
+                return [(d, _has_url(p)) for d, p in gens[-2:]]
+            try:
+                _g = _funnel_generations()
+                if not _g:
+                    _ftxt, _ffg = "📉 ファネル世代: まだ無し → ファネル分析を実行", "#444"
+                else:
+                    _ds = "  ←  ".join(f"{d:%m/%d}({'URL✓' if u else 'URL✗'})" for d, u in reversed(_g))
+                    if len(_g) >= 2 and _g[-1][1] and _g[-2][1]:
+                        _msg, _ffg = "効果測定OK (両世代URL✓=relist突合可)", "#0a0"
+                    elif _g[-1][1]:
+                        _msg, _ffg = "あと1回でペア成立 (次回ファネルから relist効果測定が有効)", "#c80"
+                    else:
+                        _msg, _ffg = "最新にURL無 → ネット接続環境でファネル再実行を", "red"
+                    _ftxt = f"📉 ファネル世代:  {_ds}   {_msg}"
+                tk.Label(ana, anchor="w", font=("Yu Gothic UI", 9, "bold"),
+                         fg=_ffg, text=_ftxt).pack(anchor="w", pady=(4, 0))
+            except Exception:
+                pass
+
             # 🔧 在庫あり / 📦 在庫なし を全幅で縦積み (横2分割の窮屈・ラベル見切れを解消)
             relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
             relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
