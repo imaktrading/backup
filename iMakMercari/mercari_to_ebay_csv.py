@@ -25,6 +25,12 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from listing_core import get_csv_output_path as _gcop
 OUTPUT_CSV = _gcop("mercari", "upload")
 
+# 追加固定画像 (Mercari実写の後に末尾追加 = 先頭の実写=ギャラリーサムネは維持)。
+# imaktrading.github.io でホスト (G-shock/TCG の 999.png と同じ運用)。カテゴリ cfg の
+# "extra_pics" に注入し、共通の PicURL 生成が cfg.get("extra_pics") を末尾連結する (if分岐を避けデータ注入)。
+_IMG_HOST = "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main"
+PORTER_EXTRA_PICS = [f"{_IMG_HOST}/999.png", f"{_IMG_HOST}/preowned_banner_logo.png"]
+
 # ===== 専用スプシ ===== (Tシャツと同じ列構成: A=URL/B=ItemID/C=タイトル/D=売り切れ/E=状態/F=価格/G=写真URL/H=説明)
 SHEET_REGISTRY = {
     "porter": {
@@ -37,6 +43,7 @@ SHEET_REGISTRY = {
         "profit_category": "Porter",
         "condition_id": 3000,
         "description_template": "USED.txt",
+        "extra_pics": PORTER_EXTRA_PICS,   # 実写の後に 999.png + preowned banner を末尾追加
         "keyword_pdf": "Clothing_Shoes_Accessories_2026Q1.pdf",
         "research_metadata": {
             "last_updated": "2026-04-22",
@@ -893,8 +900,9 @@ def main():
                     # L列空欄 → E列(状態)から推定
                     is_new = is_new_condition(condition_jp)
                     final_condition_id = 1000 if is_new else cfg['condition_id']
-                # ピックURL (max 12枚)
+                # ピックURL (実写 max 12枚 + cfg の固定追加画像)。実写を先頭に置きサムネを維持。
                 pic_urls = [u.strip() for u in (photo_urls or '').split('|') if u.strip()][:12]
+                pic_urls += cfg.get("extra_pics", [])   # Porter: 999.png + preowned banner を末尾追加
                 pic_url = '|'.join(pic_urls)
                 # 価格決定 (pricing_engine 共通) — eBay市場中央値を取得して反映
                 price_str = re.sub(r"[^0-9]", "", str(price_jpy))
