@@ -1396,8 +1396,10 @@ class ListingPanel:
                     else:
                         _msg, _ffg = "最新にURL無 → ネット接続環境でファネル再実行を", "red"
                     _ftxt = f"📉 ファネル世代:  {_ds}   {_msg}"
-                tk.Label(ana, anchor="w", font=("Yu Gothic UI", 9, "bold"),
-                         fg=_ffg, text=_ftxt).pack(anchor="w", pady=(4, 0))
+                # ana は _grid_named で grid 配置 → 同フレームに pack 不可 (混在TclError)。
+                # ③進捗行と同様 scroll_frame に直接 pack する。
+                tk.Label(scroll_frame, anchor="w", font=("Yu Gothic UI", 9, "bold"),
+                         fg=_ffg, text=_ftxt).pack(anchor="w", padx=4, pady=(2, 0))
             except Exception:
                 pass
 
