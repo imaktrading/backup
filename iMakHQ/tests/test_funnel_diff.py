@@ -78,6 +78,23 @@ def test_verdict_sold_takes_priority_even_if_stuck():
     assert vd == "SOLD" and gain == 1
 
 
+def test_verdict_relisted_item_sale_detected_despite_fresh_listing():
+    # relist個体は新listing=sold_qty 0 から。旧listingが過去2件売れてても、relist後に売れた数で判定。
+    # (旧バグ: sold_of差分だと 0+0 - (2+1) = 負 で検出漏れしていた)
+    old = _row("a", flags="NO_CLICK", sold=2, sales90=1, supply_url="u1")
+    new = _row("b", flags="NO_CLICK", sold=1, sales90=1, supply_url="u1")  # relist後に1件売れた
+    vd, gain = fd.verdict(old, new, "relisted", comparable=True)
+    assert vd == "SOLD" and gain == 1
+
+
+def test_verdict_sales90_aging_does_not_falsely_flag_sold():
+    # in_place で sold_qty は不変・sales90 だけ減る(古い販売が窓外)→ SOLD と誤判定しない
+    old = _row("a", flags="NO_CLICK", sold=3, sales90=2)
+    new = _row("a", flags="NO_CLICK", sold=3, sales90=0)  # 新規販売なし、sales90 だけ減
+    vd, _ = fd.verdict(old, new, "in_place", comparable=True)
+    assert vd != "SOLD"
+
+
 def test_verdict_basis_diff_blocks_bucket_interpretation():
     # 基準差あり = バケツ移動を効果と見なさない (0604→0605 のロジック変更ケース)
     old = _row("a", flags="NO_SEARCH", sold=0)

@@ -83,7 +83,14 @@ def exposure(r, use_total):
     return _f(r.get("impr_total")) if use_total else _f(r.get("impr"))
 
 
+def sold_qty_of(r):
+    """その listing の累計販売数 (active report の Sold quantity = GTC で単調増加)。
+    sales90 は 90日ローリングで非単調(古い販売が窓から外れる)ため SOLD 判定には使わない。"""
+    return _f(r.get("sold_qty"))
+
+
 def sold_of(r):
+    """表示・集計用の販売シグナル (累計 + 直近90日)。SOLD 判定には使わない (sold_qty_of を使う)。"""
     return _f(r.get("sold_qty")) + _f(r.get("sales90"))
 
 
@@ -107,7 +114,13 @@ def verdict(old_row, new_row, state, comparable):
     comparable=False(基準差あり) のときバケツ移動は効果と見なさない。"""
     old_b = _flags(old_row) & set(FIX_BUCKETS)
     new_b = _flags(new_row) & set(FIX_BUCKETS)
-    sold_gain = sold_of(new_row) - sold_of(old_row)
+    # SOLD 判定は累計 sold_qty で。relist は新listing=sold_qty 0 から始まるので、旧listingの実績を
+    # 引くと「relist後に売れても負」になり検出漏れする。relisted は新listingの売れ数そのもの、
+    # in_place は同一listingの増分(単調)で見る。
+    if state == "relisted":
+        sold_gain = sold_qty_of(new_row)
+    else:
+        sold_gain = sold_qty_of(new_row) - sold_qty_of(old_row)
     if sold_gain > 0:
         return "SOLD", sold_gain
     if not comparable:
@@ -130,14 +143,14 @@ def main():
     if args.old and args.new:
         f_old, f_new = args.old, args.new
     else:
-        fs = sorted(glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv")), key=os.path.getmtime)
+        # ファイル名の日付で並べる (mtime はコピー/置き直しで化けるため。パネルの世代表示と基準を統一)。
+        fs = sorted(glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv")), key=date_of)
         if len(fs) < 2:
             sys.exit("funnel_*.csv が2世代以上ありません。『📊 ファネル分析』を別日に2回以上実行してください。")
         f_old, f_new = fs[-2], fs[-1]
 
     old_rows, new_rows = load(f_old), load(f_new)
     d_old, d_new = date_of(f_old), date_of(f_new)
-    old_by_id = {r["item_id"]: r for r in old_rows}
     new_by_id = {r["item_id"]: r for r in new_rows}
     # 仕入元URL → row (新世代側。relist で item_id が変わった個体を不変キーで追う)
     new_by_supply = {}
@@ -199,8 +212,8 @@ def main():
             "new_露出": round(exposure(nr, pl_new), 1) if nr else "",
             "old_CTR": r.get("ctr_total") or r.get("ctr", ""),
             "new_CTR": (nr.get("ctr_total") or nr.get("ctr", "")) if nr else "",
-            "old_sold": int(sold_of(r)),
-            "new_sold": int(sold_of(nr)) if nr else "",
+            "old_sold": int(sold_qty_of(r)),
+            "new_sold": int(sold_qty_of(nr)) if nr else "",
             "old_$": f"{_f(r.get('price')):.0f}",
             "new_$": f"{_f(nr.get('price')):.0f}" if nr else "",
             "eBay URL": (nr or r).get("ebay_url", ""),
