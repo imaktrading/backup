@@ -61,7 +61,8 @@ def test_partial_and_no_model_skipped(g):
     assert g._select_gshock_row(no_model, only_urls={"u3"})[1] == 'no_model'
 
 
-def test_immediate_schedule_flag(g):
+def test_immediate_schedule_blank(g):
+    # 即live = ScheduleTime 空欄 (過去時刻は eBay が reject する=2026-06-06 実機判明)
     g._IMMEDIATE_SCHEDULE = True
     try:
         imm = g.get_schedule_time()
@@ -69,4 +70,5 @@ def test_immediate_schedule_flag(g):
         future = g.get_schedule_time()
     finally:
         g._IMMEDIATE_SCHEDULE = False
-    assert imm < future   # 即live(現在) < 通常(2週間後)
+    assert imm == ""        # 空欄=即時出品
+    assert future != ""     # 通常は2週間後の日時

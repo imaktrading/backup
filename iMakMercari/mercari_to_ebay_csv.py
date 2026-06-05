@@ -280,7 +280,9 @@ HEADERS = {
 
 def get_schedule_time():
     if _IMMEDIATE_SCHEDULE:
-        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")  # now(=upload時には過去)=即list
+        # 即live = ScheduleTime 空欄 (アップ時に即出品)。過去時刻は eBay が
+        # "scheduled time occurs in the past" で reject する (2026-06-06 実機判明)。
+        return ""
     future = datetime.utcnow() + timedelta(weeks=SCHEDULE_WEEKS)
     return future.strftime("%Y-%m-%d %H:%M:%S")
 

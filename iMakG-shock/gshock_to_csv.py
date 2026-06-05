@@ -16,8 +16,10 @@ _IMMEDIATE_SCHEDULE = False
 
 def get_schedule_time():
     if _IMMEDIATE_SCHEDULE:
-        # now(=upload時には過去) を入れると eBay は即時 list する
-        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        # 即live = ScheduleTime 空欄 (アップ時に即出品)。
+        # ※過去時刻を入れると eBay は "scheduled time occurs in the past" で全件 reject する
+        #   (2026-06-06 実機で判明)。空欄が正しい即時出品。
+        return ""
     future = datetime.utcnow() + timedelta(weeks=SCHEDULE_WEEKS)
     return future.strftime("%Y-%m-%d %H:%M:%S")
 import undetected_chromedriver as uc

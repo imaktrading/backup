@@ -49,7 +49,8 @@ def test_append_skumap_noop_without_pending(m, tmp_path):
     assert not list(tmp_path.glob("relist_skumap_*.csv"))
 
 
-def test_immediate_schedule_flag(m):
+def test_immediate_schedule_blank(m):
+    # 即live = ScheduleTime 空欄 (過去時刻は eBay が reject=2026-06-06 実機判明)
     m._IMMEDIATE_SCHEDULE = True
     try:
         imm = m.get_schedule_time()
@@ -57,4 +58,5 @@ def test_immediate_schedule_flag(m):
         future = m.get_schedule_time()
     finally:
         m._IMMEDIATE_SCHEDULE = False
-    assert imm < future   # 即live(現在) < 通常(2週間後)
+    assert imm == ""        # 空欄=即時出品
+    assert future != ""
