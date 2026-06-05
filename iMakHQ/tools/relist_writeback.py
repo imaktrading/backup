@@ -42,14 +42,17 @@ SHEETS = [
 
 
 def parse_add_report(path):
-    """FileExchange Add結果レポート → [(custom_label, item_id), ...] (Success かつ ItemID有)。"""
+    """FileExchange Add結果レポート → [(custom_label, item_id), ...]。
+
+    ItemID が入った行のみ採用 (Failure は ItemID 空)。Status は Success だけでなく
+    Warning(例: Best Offer の IMMEDIATE_PAY 注意) も出品成功なので ItemID 有れば採用。
+    """
     out = []
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
-            status = (row.get("Status") or "").strip()
             item_id = (row.get("ItemID") or "").strip()
             sku = (row.get("CustomLabel") or "").strip()
-            if item_id and sku and status.lower() in ("success", ""):
+            if item_id and sku:
                 out.append((sku, item_id))
     return out
 

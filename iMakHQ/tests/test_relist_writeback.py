@@ -56,9 +56,11 @@ def test_parse_add_report_and_skumap(tmp_path):
         w = csv.writer(f)
         w.writerow(["Line Number", "Action", "Status", "ItemID", "CustomLabel"])
         w.writerow(["2", "Add", "Success", "111222333444", "B0DDS4Z29W"])
-        w.writerow(["3", "Add", "Failure", "", "B0F9JP4JX5"])   # 失敗行 → 除外
+        # Warning(Best Offer IMMEDIATE_PAY 等)も出品成功=ItemID有→採用 (2026-06-06 実機)
+        w.writerow(["3", "Add", "Warning", "358643384676", "B0F9JP4JX5"])
+        w.writerow(["4", "Add", "Failure", "", "B0DTYF33TF"])   # 失敗行(ItemID空) → 除外
     pairs = rw.parse_add_report(str(rep))
-    assert pairs == [("B0DDS4Z29W", "111222333444")]
+    assert pairs == [("B0DDS4Z29W", "111222333444"), ("B0F9JP4JX5", "358643384676")]
 
     sk = tmp_path / "relist_skumap_x.csv"
     with open(sk, "w", newline="", encoding="utf-8-sig") as f:
