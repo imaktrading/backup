@@ -11,9 +11,11 @@
   - ✏️タイトル改修(NO_CLICK)            → CTR が上がったか / NO_CLICK を抜けたか
   - 💲価格抵抗(NO_CONVERT)               → 売れたか / 値下げされたか / NO_CONVERT を抜けたか
 
-突合のキー (relist で item_id が変わる点に対応):
+突合のキー (relist で item_id **も title も** 変わる点に対応):
   1. item_id 一致 = in-place (値下げ・タイトル in-place revise・据え置き)
-  2. item_id 消滅 & 同 (正規化title, site) が新 item_id で再出現 = **取下再出品された** 個体
+  2. item_id 消滅 & 同 supply_url(=仕入元URL) が新 item_id で再出現 = **取下再出品された** 個体
+     (relist は出品くんが title を再生成するので title 突合は破綻する。仕入元URL は不変なのでこれを使う。
+      supply_url は listing_funnel が生成時にスプシ A列から焼き込む。旧世代CSVに無ければ relist 追跡不可)
   3. どちらも無し = End / 売れ切れ / CULL で消えた
 
 ⚠ 正直な注意 (誤読防止):
@@ -58,10 +60,6 @@ def _f(v):
         return 0.0
 
 
-def _norm_title(t):
-    return re.sub(r"\s+", " ", (t or "").lower()).strip()
-
-
 def _flags(r):
     return set(f for f in (r.get("flags") or "").split("|") if f)
 
@@ -89,16 +87,18 @@ def sold_of(r):
     return _f(r.get("sold_qty")) + _f(r.get("sales90"))
 
 
-def match_new(old_row, new_by_id, new_by_title):
+def match_new(old_row, new_by_id, new_by_supply):
     """old_row の追跡先を new 世代から返す → (new_row, 状態)。
-    in-place / relisted(新id) / gone を判定。"""
+    in-place / relisted(新id・同仕入元URL) / gone を判定。
+    relist は title も変わるので title では突合しない。仕入元URL(不変)のみで relist を追う。"""
     iid = old_row["item_id"]
     if iid in new_by_id:
         return new_by_id[iid], "in_place"
-    key = (_norm_title(old_row.get("title")), old_row.get("site"))
-    cand = new_by_title.get(key)
-    if cand:
-        return cand, "relisted"   # title+site 一致だが item_id 変化 = 取下再出品された個体
+    su = (old_row.get("supply_url") or "").strip()
+    if su:
+        cand = new_by_supply.get(su)
+        if cand and cand["item_id"] != iid:
+            return cand, "relisted"   # item_id 変化 & 同仕入元URL = 取下再出品された個体
     return None, "gone"
 
 
@@ -139,10 +139,13 @@ def main():
     d_old, d_new = date_of(f_old), date_of(f_new)
     old_by_id = {r["item_id"]: r for r in old_rows}
     new_by_id = {r["item_id"]: r for r in new_rows}
-    # title+site → row (新世代側に複数あれば最初。relist 追跡用)
-    new_by_title = {}
+    # 仕入元URL → row (新世代側。relist で item_id が変わった個体を不変キーで追う)
+    new_by_supply = {}
     for r in new_rows:
-        new_by_title.setdefault((_norm_title(r.get("title")), r.get("site")), r)
+        su = (r.get("supply_url") or "").strip()
+        if su:
+            new_by_supply.setdefault(su, r)
+    old_has_su = sum(1 for r in old_rows if (r.get("supply_url") or "").strip())
 
     # 世代間隔と判定方式の整合をチェック (誤読防止の核)
     try:
@@ -154,7 +157,7 @@ def main():
     comparable = (pl_old == pl_new)   # 同じ露出基準どうしのみバケツ移動を効果と見なせる
 
     print(f"効果測定ループ: {d_old} → {d_new}" + (f"  (間隔 {interval}日)" if interval is not None else ""))
-    print(f"  母数: old={len(old_rows)} / new={len(new_rows)}  突合キー=item_id + (title,site)")
+    print(f"  母数: old={len(old_rows)} / new={len(new_rows)}  突合キー=item_id(in-place) + 仕入元URL(relist)")
     print(f"  露出基準: old={'PL累計' if pl_old else 'organic'} / new={'PL累計' if pl_new else 'organic'}", end="")
     if not comparable:
         print("  ⚠ 基準が違う = バケツ移動は分類ロジック変更による疑い。効果と解釈しない(SALES/価格のみ信頼)")
@@ -162,6 +165,11 @@ def main():
         print("  ✓ 同基準")
     if interval is not None and interval <= 2:
         print(f"  ⚠ 間隔 {interval}日 = 短い。eBay impression 蓄積が追いつかず露出系は誤差含み。")
+    if old_has_su == 0:
+        print("  ⚠ 旧世代に supply_url 無し = relist追跡(取下再出品の前後紐付け)は不可。in-place のみ追える。"
+              "\n    → supply_url を焼き込んだ funnel が2世代揃ってから relist 効果が測れる。")
+    else:
+        print(f"  仕入元URL紐付け: old={old_has_su}件 / new={len(new_by_supply)}件 = relist個体(id変・title変)を追跡可")
 
     # コホート追跡: 前世代で「直す対象」だった listing が今どうなったか
     cohorts = {b: [] for b in FIX_BUCKETS}
@@ -170,7 +178,7 @@ def main():
         bs = _flags(r) & set(FIX_BUCKETS)
         if not bs:
             continue
-        nr, state = match_new(r, new_by_id, new_by_title)
+        nr, state = match_new(r, new_by_id, new_by_supply)
         if state == "gone":
             vd, gain = "消滅(End/売切)", 0
             for b in bs:

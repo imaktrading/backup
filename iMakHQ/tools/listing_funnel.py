@@ -46,6 +46,40 @@ FALLBACK_DATA_DIR = r"C:\Users\imax2\OneDrive\デスクトップ\新しいフォ
 OUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
 DESKTOP = r"C:\Users\imax2\OneDrive\デスクトップ"
 
+# 出品管理スプシ (2枚で全カテゴリ。A列=仕入元URL=relistをまたぐ不変キー / B列=現ItemID)。
+# 効果測定(funnel_diff)用に、生成時の ItemID→仕入元URL を CSV に焼き込む。relist で ItemID/title が
+# 変わっても 仕入元URL は不変なので、これが世代をまたぐ商品キーになる。
+SHEET_IDS = ["19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk",
+             "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0"]
+SHEET_GID = 851100680
+CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
+
+
+def load_supply_urls():
+    """2スプシの {現ItemID(B列) → 仕入元URL(A列)}。
+    失敗時は空 dict を返し supply_url 無しで継続 (funnel は診断用=非破壊なので fail-open。
+    効果測定の relist 追跡は次回以降に持ち越すだけで、本体は壊さない)。"""
+    out = {}
+    if not os.path.isfile(CREDS_PATH):
+        print("  [WARN] スプシ creds 無し → supply_url 列は空 (relist 追跡は無効)")
+        return out
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        scopes = ["https://www.googleapis.com/auth/spreadsheets",
+                  "https://www.googleapis.com/auth/drive"]
+        gc = gspread.authorize(Credentials.from_service_account_file(CREDS_PATH, scopes=scopes))
+        for sid in SHEET_IDS:
+            ws = gc.open_by_key(sid).get_worksheet_by_id(SHEET_GID)
+            for r in ws.get_all_values()[1:]:
+                url = r[0].strip() if len(r) > 0 else ""
+                iid = r[1].strip() if len(r) > 1 else ""
+                if iid.isdigit() and url:
+                    out[iid] = url
+    except Exception as e:
+        print(f"  [WARN] スプシ読込失敗 → supply_url 無しで継続: {e}")
+    return out
+
 # 分類しきい値
 TH_IMPR_NONE = 3        # 【fallback: PLレポート無し時】1日あたり organic impr がこれ以下 = 検索に出ていない
 TH_IMPR_SHOWN = 8       # 【fallback】これ以上 = 露出あり
@@ -387,6 +421,8 @@ def main():
     unsold = load_unsold(f_unsold)
     promoted = load_promoted(f_promoted)
     us_by_title = build_us_title_map(active)  # eBayリンクを常に US版(USD)に解決
+    supply = load_supply_urls()               # ItemID→仕入元URL (効果測定の世代またぎキー)
+    print(f"  仕入元URL: スプシから {len(supply)} 件 (supply_url 列に焼き込み=relist追跡キー)")
 
     rows = []
     for iid, a in active.items():
@@ -407,6 +443,7 @@ def main():
         r["keywords"] = q["keywords"] if q else 0
         u = unsold.get(iid, {})
         r["relist_status"] = u.get("relist_status", "")
+        r["supply_url"] = supply.get(iid, "")     # relist で ItemID/title が変わっても不変の商品キー
         rows.append(r)
 
     from collections import Counter
@@ -461,7 +498,7 @@ def main():
             r["flags"] = "|".join(tags)
         fields = ["item_id", "title", "site", "category", "price", "trend_price", "qty", "sold_qty",
                   "sales90", "watch", "impr", "ctr", "impr_total", "ctr_total", "photos", "keywords",
-                  "has_lqr", "relist_status", "age_days", "flags", "ebay_url"]
+                  "has_lqr", "relist_status", "age_days", "supply_url", "flags", "ebay_url"]
         with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()

@@ -25,11 +25,11 @@ fd = _load("funnel_diff")
 
 
 def _row(item_id, flags="NO_CLICK", title="g-shock dw-5600", site="US",
-         sold=0, sales90=0, price=50.0, impr=5.0, impr_total=0.0, ctr=0.01):
+         sold=0, sales90=0, price=50.0, impr=5.0, impr_total=0.0, ctr=0.01, supply_url=""):
     return {"item_id": item_id, "flags": flags, "title": title, "site": site,
             "sold_qty": str(sold), "sales90": str(sales90), "price": str(price),
             "impr": str(impr), "impr_total": str(impr_total), "ctr": str(ctr),
-            "ctr_total": "", "ebay_url": ""}
+            "ctr_total": "", "ebay_url": "", "supply_url": supply_url}
 
 
 # ---------- pl_based ----------
@@ -45,16 +45,28 @@ def test_match_in_place_by_item_id():
     assert state == "in_place" and nr is new
 
 
-def test_match_relisted_by_title_when_id_changed():
-    # old "a" が消え、同じ title+site が新 id "b" で再出現 = 取下再出品された個体
-    new = _row("b", title="g-shock dw-5600", site="US")
-    by_title = {(fd._norm_title("g-shock dw-5600"), "US"): new}
-    nr, state = fd.match_new(_row("a", title="g-shock dw-5600", site="US"), {"b": new}, by_title)
+def test_match_relisted_by_supply_url_when_id_and_title_change():
+    # old "a" が消え、title も変わったが 同じ仕入元URL が新 id "b" で再出現 = 取下再出品された個体。
+    # (relist は出品くんが title 再生成 → title 突合では追えない。仕入元URL=不変キーで追う)
+    new = _row("b", title="completely different title", site="US", supply_url="https://m.jp/item/m111")
+    by_supply = {"https://m.jp/item/m111": new}
+    old = _row("a", title="g-shock dw-5600", site="US", supply_url="https://m.jp/item/m111")
+    nr, state = fd.match_new(old, {"b": new}, by_supply)
     assert state == "relisted" and nr is new
 
 
-def test_match_gone_when_no_id_and_no_title():
-    nr, state = fd.match_new(_row("a", title="x"), {}, {})
+def test_match_gone_when_no_id_and_no_supply_url():
+    # supply_url 無し(旧世代CSV) で item_id も消滅 → relist 追跡不可 = gone
+    nr, state = fd.match_new(_row("a", title="x", supply_url=""), {}, {})
+    assert state == "gone" and nr is None
+
+
+def test_match_no_false_relist_across_different_supply_urls():
+    # 別商品(別仕入元URL)には絶対に誤マッチしない (title 偶然一致の偽陽性を防ぐ)
+    new = _row("b", title="g-shock dw-5600", site="US", supply_url="https://m.jp/item/m999")
+    by_supply = {"https://m.jp/item/m999": new}
+    old = _row("a", title="g-shock dw-5600", site="US", supply_url="https://m.jp/item/m111")
+    nr, state = fd.match_new(old, {"b": new}, by_supply)
     assert state == "gone" and nr is None
 
 
