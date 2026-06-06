@@ -1255,8 +1255,9 @@ class ListingPanel:
                 return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
                 return "discover"  # 新規ネタ探し
-            # 在庫あり listing を直す: 取下再出品(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
-            if any(s in cmd for s in ("relist_from_funnel", "dump_us_qty1_sku",
+            # 在庫あり listing を直す: 取下再出品①②③(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
+            if any(s in cmd for s in ("relist_from_funnel", "relist_add_from_pending",
+                                      "relist_writeback", "dump_us_qty1_sku",
                                       "noclick_targets", "price_resistance")):
                 return "relist"
             return "report"
