@@ -243,21 +243,10 @@ def main():
         write_pending(end_only_picks, stop_path)
         print(f"停止リスト (2回目以降・記録): {stop_path}")
 
-    # 3) 候補一覧 (デスクトップ・確認用) — ロック中(Excel/OneDrive)でも End/pending は死守
-    cand_path = os.path.join(DESK, f"取下再出品候補_{stamp}.csv")
-    fields = ["item_id", "title", "site", "category", "price", "watch", "flags", "supply_url", "ebay_url"]
-    try:
-        with open(cand_path, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-            w.writeheader()
-            for r in picked:
-                w.writerow(r)
-    except PermissionError:
-        cand_path = "(スキップ: デスクトップの同名ファイルがロック中。End/保留リストは出力済)"
+    # 候補確認はスプシ「取下再出品」タブで見る (デスクトップCSV出力は廃止 2026-06-07)
 
     print(f"\nEnd CSV (eBayアップで取下げ・{len(picked)}件): {end_path}")
     print(f"保留リスト (②再出品・初回{len(relist_picks)}件): {pending_path}")
-    print(f"候補一覧(確認用): {cand_path}")
     print(f"\n▶ ① 取下げ: End CSV を eBay FileExchange にアップ → {len(picked)}件 終了")
     if relist_picks:
         print(f"▶ ② 再出品: ②ボタンで 初回 {len(relist_picks)}件 を即live再出品 (2回目以降{len(end_only_picks)}件は再出品しない=停止)")

@@ -367,28 +367,18 @@ SCRIPTS = [
         "label": "取下再出品① 取下げ(End)",
         "label_fg": "red",  # ボタンラベル赤文字 (取下→再出品のフロー起点を強調)
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "relist_from_funnel.py"],  # ファネルRELIST候補→End CSV+保留リスト (再出品済は自動除外)
+        # ファネルRELIST候補→End CSV+保留リスト (再出品済は自動除外/初回・2回目END振分)。候補確認はスプシ「取下再出品」タブ
+        "cmd": ["python", "relist_from_funnel.py"],
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/取下再出品候補_*.csv",
     },
     {
+        # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)
         "category": None, "type": "utility",
-        "label": "取下再出品② Add生成(即live)",
-        "label_fg": "red",
+        "label": "✏️ タイトル改修",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "relist_add_from_pending.py"],  # 保留リスト→カテゴリ振り分け→各--relist→Add CSV+skumap
+        "cmd": ["python", "noclick_targets.py"],
         "params": [],
-        # relist は同型番を意図的に再出品 → excluder/重複くん が「重複」誤判定で削除するのを防ぐ
-        "skip_postprocess": True,
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "取下再出品③ 書戻し(B列)",
-        "label_fg": "red",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        # デスクトップの最新Add結果レポート自動検出→スプシB列に新ItemID上書き+ダッシュボード更新
-        "cmd": ["python", "relist_writeback.py", "--auto", "--execute"],
-        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/タイトル改修対象_*.csv",
     },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
@@ -432,13 +422,14 @@ SCRIPTS = [
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/03_PSA再仕入れ候補_*_メルカリ判定.csv",
     },
     {
-        # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)
         "category": None, "type": "utility",
-        "label": "✏️ タイトル改修",
+        "label": "取下再出品② Add生成(即live)",
+        "label_fg": "red",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "noclick_targets.py"],
+        "cmd": ["python", "relist_add_from_pending.py"],  # 保留リスト→カテゴリ振り分け→各--relist→Add CSV+skumap
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/タイトル改修対象_*.csv",
+        # relist は同型番を意図的に再出品 → excluder/重複くん が「重複」誤判定で削除するのを防ぐ
+        "skip_postprocess": True,
     },
     {
         # NO_CONVERT: 高クリック無販売を自分の実売(proven)と照合=価格抵抗 (2026-06-05)
@@ -448,6 +439,15 @@ SCRIPTS = [
         "cmd": ["python", "price_resistance.py"],
         "params": [],
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/価格抵抗_*.csv",
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "取下再出品③ 書戻し(B列)",
+        "label_fg": "red",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # デスクトップの最新Add結果レポート自動検出→スプシB列に新ItemID上書き+ダッシュボード更新
+        "cmd": ["python", "relist_writeback.py", "--auto", "--execute"],
+        "params": [],
     },
     {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
