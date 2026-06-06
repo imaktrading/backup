@@ -382,3 +382,42 @@ Selenium FileExchange UI から Trading API direct に統一。
 - **process 教訓**: Selenium UI scrape は eBay UI 構造変更で永続的に壊れる。 Trading API
   で代替可能なところは API 化 を優先する (= 今回 GetSellerList Fine で完全代替できた)
 
+---
+
+## 2026-06-06 — pending drain 後置化 (transient failure sliver loss bug 修正)
+
+### 決定
+
+- `drain_pending_queue` の呼出位置を **CSV 生成時 → upload 完了後** に移動
+- 成功 item (= ack=Success/Warning or safe_failure) のみ drain、 失敗 item は pending 残置
+- 失敗 item は次 cycle で sheet D=○ verify を経て自動 re-enqueue (= 構造的に retry)
+- 17:30 cycle の 1 件 sliver loss は **手動 revise (358624006440 qty=0、 ack=Warning err=23015) で復旧済**
+
+### 変更
+
+- `ebay_actions/revise_csv_generator.py:538`: drain call 削除 + 説明 comment
+- `ebay_actions/revise_csv_generator.py:567` return dict に `mode` / `allowed_item_ids` 追加
+- `run_cycle.py:50` import に `drain_pending_queue` 追加
+- `run_cycle.py:586` 付近 upload 完了後に `successful_ids = [r["item_id"] for r in u["results"] if r["success"]]`
+  → `drain_pending_queue(successful_ids)` 呼出 + 失敗件数 log 出力
+- `tests/test_run_cycle.py` に `test_drain_pending_only_on_success` 追加 (Regression guard)
+
+### 検証
+
+- ✅ 全 282 tests pass (新規 1 件含む)
+- ✅ Grep 確認: `drain_pending_queue` 呼出は 2 箇所 (`revise_csv_generator.py:260` def + `run_cycle.py` の post-upload call) のみ
+- ✅ revise_csv_generator return に新 field 追加、 既存 caller (`run_cycle.py`) は `mode == "pending"` で gating
+- ✅ 旧 bug の再現条件 (transient failure → pending から即消滅) は新実装で発生不能
+  - new test で `[iid_ok, iid_safe]` の 2 件のみ drain、 `iid_fail` は pending に残る ことを物理担保
+- ✅ 手動 revise 実行: `358624006440` qty=0 ack=Warning success=True (err 23015 = informational Best Offer 警告)
+
+### 次のアクション
+
+- **明日 cycle 観察**: 17:30 cycle 後の `decision_log/trading_api_upload_*.jsonl` で
+  ng>0 のとき pending に該当 item が残ってるか実機確認
+- **DNS retry 増強 (元 TODO)**: trading_api_uploader._is_transient_failure 用 1-時 retry を
+  ebay_active_listing_via_trading_api._post_with_retry と同等 (5 回 + 10s) に展開
+  → 今回の drain 後置 化で sliver loss 不能化したため緊急度は下がった、 別 turn で着手
+- **reverse_audit (memory `reverse_audit_pending`)**: 別系統の補完監査として残置、 D=○ +
+  eBay active qty>0 検出 logic は cycle 末尾 phase 化検討
+
