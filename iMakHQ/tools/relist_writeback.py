@@ -31,6 +31,7 @@ except Exception:
 
 REVISE_DIR = r"c:\dev\iMak_data\revise"
 CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
+DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 
 # 管理スプシ (seller_hub_writeback.SHEETS と同一)。supply_url は どちらかに在る → 両方探索。
 SHEETS = [
@@ -118,8 +119,10 @@ def _read_sheets(gc):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--add-report", action="append", required=True,
+    ap.add_argument("--add-report", action="append", default=[],
                     help="FileExchange Add結果レポートCSV (複数カテゴリ分は複数指定可)")
+    ap.add_argument("--auto", action="store_true",
+                    help="デスクトップの Add結果レポートを自動検出 (skumap生成より新しい *_upload_*-*.csv)")
     ap.add_argument("--skumap", default="", help="relist_skumap CSV (省略時最新)")
     ap.add_argument("--execute", action="store_true", help="本書込 (既定: dry-run)")
     args = ap.parse_args()
@@ -132,12 +135,29 @@ def main():
     skumap = load_skumap(args.skumap)
     print(f"📂 skumap: {os.path.basename(args.skumap)} → {len(skumap)} sku")
 
+    # --auto: デスクトップの Add結果レポートを自動検出 (skumap より新しい = 今バッチの分)
+    if args.auto:
+        sku_mtime = os.path.getmtime(args.skumap)
+        # 結果レポートは末尾に -Mon-YYYY-... が付く。アップ元CSV(csv_output)と区別され、
+        # End結果(relist_end_*)は *_upload_* に該当しないので自然に除外。
+        found = [p for p in glob.glob(os.path.join(DESK, "*_upload_*-*.csv"))
+                 if os.path.getmtime(p) > sku_mtime]
+        found.sort(key=os.path.getmtime)
+        if not found:
+            sys.exit("デスクトップに skumap より新しい Add結果レポートが見つかりません。\n"
+                     "  ②再出品→Add CSVアップ→結果レポートDL の順で実行してください。")
+        print(f"🔍 --auto 検出: {len(found)} 件の結果レポート (skumap より新しい)")
+        args.add_report = found
+
+    if not args.add_report:
+        sys.exit("--add-report も --auto も指定されていません。")
+
     add_pairs = []
     for p in args.add_report:
         if not os.path.exists(p):
             sys.exit(f"Add結果レポートが見つかりません: {p}")
         pairs = parse_add_report(p)
-        print(f"📂 Add結果: {os.path.basename(p)} → {len(pairs)} 行 (Success+ItemID)")
+        print(f"📂 Add結果: {os.path.basename(p)} → {len(pairs)} 行 (ItemID有)")
         add_pairs.extend(pairs)
 
     print(f"\n=== モード: {'EXECUTE(本書込)' if args.execute else 'DRY-RUN'} ===")
@@ -174,6 +194,16 @@ def main():
 
     print(f"\n=== サマリー === WRITE={summary['WRITE']} / SKIP_SAME={summary['SKIP_SAME']} "
           f"/ NO_SKUMAP={summary['NO_SKUMAP']} / NO_ROW={summary['NO_ROW']}")
+
+    # 書込後はダッシュボードの済/未が変わるので「取下再出品」タブを即更新 (stale防止)
+    if args.execute and summary["WRITE"] > 0:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import relist_dashboard as rd
+            rd.main()
+            print("📋 「既存メンテ」取下再出品タブも更新 (済/未を最新化)")
+        except Exception as _e:  # noqa: BLE001
+            print(f"⚠ ダッシュボード更新スキップ: {type(_e).__name__}: {_e}")
     return 0
 
 

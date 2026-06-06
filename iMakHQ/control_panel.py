@@ -364,12 +364,29 @@ SCRIPTS = [
     # 2026-06-04: 月次レポート生成 / 今、見る はパネルから削除 (ファネル分析が上位互換。.py は残置)
     {
         "category": None, "type": "utility",
-        "label": "取下再出品（タイトル改修再掲）",
+        "label": "取下再出品① 取下げ(End)",
         "label_fg": "red",  # ボタンラベル赤文字 (取下→再出品のフロー起点を強調)
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "relist_from_funnel.py"],  # ファネルRELIST候補→End CSV (snapshot不要)
+        "cmd": ["python", "relist_from_funnel.py"],  # ファネルRELIST候補→End CSV+保留リスト (再出品済は自動除外)
         "params": [],
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/取下再出品候補_*.csv",
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "取下再出品② Add生成(即live)",
+        "label_fg": "red",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "relist_add_from_pending.py"],  # 保留リスト→カテゴリ振り分け→各--relist→Add CSV+skumap
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "取下再出品③ 書戻し(B列)",
+        "label_fg": "red",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # デスクトップの最新Add結果レポート自動検出→スプシB列に新ItemID上書き+ダッシュボード更新
+        "cmd": ["python", "relist_writeback.py", "--auto", "--execute"],
+        "params": [],
     },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
