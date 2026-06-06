@@ -47,7 +47,10 @@ from sheet_updater import (  # noqa: E402
     HIGH_SHEET_ID, LOW_SHEET_ID, open_sheet_by_id,
     get_listings_worksheet, read_listings_rows, LISTINGS_GID,
 )
-from ebay_actions.revise_csv_generator import run as run_revise_csv  # noqa: E402
+from ebay_actions.revise_csv_generator import (  # noqa: E402
+    run as run_revise_csv,
+    drain_pending_queue,
+)
 from ebay_actions.sell_feed_uploader import upload_one_csv  # noqa: E402 (= legacy fallback、 緊急時 手動 path)
 from ebay_actions.trading_api_uploader import upload_csv_via_trading_api  # noqa: E402
 from upload_health import record_upload_result  # noqa: E402
@@ -584,6 +587,27 @@ def run_cycle(
                     cycle_log["status"] = "success"
                 else:
                     cycle_log["status"] = "upload_failed"
+                # pending → processed drain (= upload 成功 item のみ)。
+                # Phase 2 (CSV 生成) で drain せず ここで drain することで、
+                # transient 失敗 (DNS/Timeout 等) の item を pending に残し
+                # 次 cycle で自動 retry させる。 success には safe_failure
+                # (= eBay 上で 既 ended) も含む (= trading_api_uploader 内で
+                # success=True 化済)。
+                if r.get("mode") == "pending":
+                    successful_ids = [
+                        res["item_id"]
+                        for res in (u.get("results") or [])
+                        if res.get("success")
+                    ]
+                    try:
+                        moved = drain_pending_queue(successful_ids)
+                        failed_kept = len(r.get("allowed_item_ids") or []) - len(successful_ids)
+                        _log(f"  pending → processed archive: {moved} 件 "
+                             f"(失敗 {failed_kept} 件は pending 残置 → 次 cycle で retry)",
+                             test_mode)
+                    except Exception as e:
+                        _log(f"  [!] drain_pending_queue 失敗: {type(e).__name__}: {e}",
+                             test_mode)
                 # health: 成否を記録 + 必要なら通知発火 (3 経路冗長)
                 try:
                     health_res = record_upload_result(

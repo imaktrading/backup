@@ -535,11 +535,11 @@ def run(
         save_state(state)
         print(f"  state 更新 (運用記録): 本日合計 {state['count']}")
 
-        # mode=pending: 消費した entries を queue から drain → processed へ archive
-        if mode == "pending" and allowed:
-            consumed_ids = [c["item_id"] for c in allowed]
-            moved = drain_pending_queue(consumed_ids)
-            print(f"  pending → processed archive: {moved} 件")
+        # NOTE: pending → processed drain は upload 完了後に caller (run_cycle.py) が
+        # 成功 item のみを drain する (= 失敗 item を次 cycle で retry させる)。
+        # 旧 実装は ここで一律 drain → DNS/Timeout 等 transient 失敗で eBay revise 不能の
+        # 場合も pending から消えて、 次 cycle で再 enqueue 不能になる sliver loss bug
+        # があった (2026-06-06 17:30 cycle で 1 件 silent 喪失、 手動 revise で復旧)。
     elif dry_run and allowed:
         print(f"  [DRY RUN] CSV 出力 skip ({len(allowed)} 行が出力対象だった)")
         print(f"  サンプル先頭 5 件:")
@@ -565,6 +565,9 @@ def run(
         "reason":      reason,
         "csv_path":    str(csv_path) if csv_path else None,
         "daily_count": state["count"],
+        # upload 後の drain 用 (run_cycle.py が成功 item のみ drain)
+        "mode":             mode,
+        "allowed_item_ids": [c["item_id"] for c in allowed],
     }
 
 

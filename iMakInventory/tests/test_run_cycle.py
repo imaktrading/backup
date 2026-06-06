@@ -87,5 +87,53 @@ def test_notify_toast_no_throw():
     _notify_toast("test title", "test body")  # no assertion, just no-throw
 
 
+def test_drain_pending_only_on_success(tmp_path, monkeypatch):
+    """drain_pending_queue は upload 成功 item のみ archive する.
+
+    Regression guard: 2026-06-06 17:30 cycle で DNS fail → 1 件 silent 喪失。
+    旧実装は CSV 生成時点で drain → transient failure 救済不能だった。
+    新実装: revise_csv_generator は drain せず、 run_cycle が upload 結果を
+    見て成功 item のみ drain。 失敗 item は pending に残る → 次 cycle で retry。
+    """
+    import json
+    from ebay_actions import revise_csv_generator as gen
+    pending_file = tmp_path / "pending_revise.jsonl"
+    processed_file = tmp_path / "processed_revise.jsonl"
+    monkeypatch.setattr(gen, "PENDING_REVISE_FILE", pending_file)
+    monkeypatch.setattr(gen, "PROCESSED_REVISE_FILE", processed_file)
+
+    # pending に 3 件 (ok / safe_failure / transient_fail を simulate)
+    rows = [
+        {"sheet": "SHEET", "row_index": 1, "item_id": "iid_ok",
+         "url": "u1", "title": "t1", "supplier": "mercari",
+         "raw_status": "SOLD_OUT", "dry_run": False, "ts": "2026-06-06T17:00:00"},
+        {"sheet": "SHEET", "row_index": 2, "item_id": "iid_safe",
+         "url": "u2", "title": "t2", "supplier": "mercari",
+         "raw_status": "SOLD_OUT", "dry_run": False, "ts": "2026-06-06T17:00:00"},
+        {"sheet": "SHEET", "row_index": 3, "item_id": "iid_fail",
+         "url": "u3", "title": "t3", "supplier": "mercari",
+         "raw_status": "SOLD_OUT", "dry_run": False, "ts": "2026-06-06T17:00:00"},
+    ]
+    with open(pending_file, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+    # success+safe_failure のみ drain (= trading_api_uploader が success=True を
+    # 立てる対象。 transient/action-needed failure は success=False で残る)
+    moved = gen.drain_pending_queue(["iid_ok", "iid_safe"])
+    assert moved == 2
+
+    # pending には iid_fail だけ残る
+    remaining = pending_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(remaining) == 1
+    assert json.loads(remaining[0])["item_id"] == "iid_fail"
+
+    # processed には 2 件 archive
+    processed = processed_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(processed) == 2
+    archived_ids = {json.loads(line)["item_id"] for line in processed}
+    assert archived_ids == {"iid_ok", "iid_safe"}
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
