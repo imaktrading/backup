@@ -420,7 +420,8 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "listing_funnel.py"],
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/出品ファネル分析_*.xlsx",
+        # 結果は「ファネル分析」スプシに集約 (xlsx廃止)。実行後そのスプシを開く
+        "open_url": "https://docs.google.com/spreadsheets/d/1UkaI4W6YCJgUbjgF7LLNN9_fHeVuz5qB4r9RqImElwg/edit",
     },
     {
         # ①効果測定ループ: 直近2世代の funnel を突合し「直した結果が効いたか」を測る (2026-06-05)
@@ -1618,7 +1619,8 @@ class ListingPanel:
                 if isinstance(item, tuple) and item[0] == "__done__":
                     self.append_log(f"\n--- 終了 (returncode={item[1]}) ---\n")
                     # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
-                    _oa = SCRIPTS[getattr(self, "_current_idx", -1)].get("open_after") if getattr(self, "_current_idx", -1) >= 0 else None
+                    _cur = SCRIPTS[getattr(self, "_current_idx", -1)] if getattr(self, "_current_idx", -1) >= 0 else {}
+                    _oa = _cur.get("open_after")
                     if _oa and item[1] in (0, None):  # None=returncode未確定でも完走時は開く
                         try:
                             import glob as _g
@@ -1631,6 +1633,15 @@ class ListingPanel:
                                 self.append_log(f"⚠️ 出力ファイルが見つかりません: {_oa}\n")
                         except Exception as _e:
                             self.append_log(f"⚠️ ファイル起動失敗: {_e}\n")
+                    # open_url: 結果スプシ(URL)を自動で開く (集約方針=結果はスプシ。2026-06-07)
+                    _ou = _cur.get("open_url")
+                    if _ou and item[1] in (0, None):
+                        try:
+                            import webbrowser as _wb
+                            _wb.open(_ou)
+                            self.append_log(f"🌐 開く: {_ou}\n")
+                        except Exception as _e:
+                            self.append_log(f"⚠️ スプシ起動失敗: {_e}\n")
                     # 取下再出品②(relist)は CSV破壊系の後処理をスキップ。
                     # 理由: relist は「同じ型番を意図的に再出品」。重複くん/excluder は通常出品用で、
                     #       取下げ前(=管理シート上はまだACTIVE)の同型番を「重複」と誤判定し CSV から物理削除する。

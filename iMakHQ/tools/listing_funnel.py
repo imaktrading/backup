@@ -380,6 +380,80 @@ def write_xlsx(path, rows, c, summary_lines):
     wb.save(path)
 
 
+# 「ファネル分析」スプシ (2026-06-07 集約: デスクトップxlsx置換)。eBayアップCSV以外はスプシに集約。
+FUNNEL_SHEET_ID = "1UkaI4W6YCJgUbjgF7LLNN9_fHeVuz5qB4r9RqImElwg"
+FUNNEL_BUCKETS = [
+    ("NO_SEARCH", "検索に出ていない (キーワード/カテゴリ)"),
+    ("NO_CLICK", "クリックされない (サムネ/タイトル/価格)"),
+    ("NO_CONVERT", "買われない (価格/説明)"),
+    ("OVERPRICED", "適正価格より高い (値下げ余地)"),
+    ("NEW_WAIT", "新規出品でimpr低 (時間不足=様子見)"),
+    ("RELIST", "取下げ再出品候補 (露出ゼロ)"),
+    ("RESTOCK", "在庫切れだが需要実証済 (再仕入れ)"),
+    ("CULL", "在庫切れ&需要皆無 (出品停止候補)"),
+    ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)"),
+]
+FUNNEL_COLS = ["item_id", "title", "site", "category", "price", "trend_price", "qty",
+               "sold_qty", "sales90", "watch", "impr", "ctr%", "photos", "keywords",
+               "relist_status", "ebay_url"]
+
+
+def _funnel_vals(r):
+    return [r["item_id"], r["title"], r["site"], r.get("category", ""), r["price"],
+            r["trend_price"], r["qty"], r["sold_qty"], r.get("sales90", 0), r["watch"],
+            round(r["impr"], 1), round(r["ctr"] * 100, 2), r.get("photos", 0),
+            r.get("keywords", 0), r.get("relist_status", ""),
+            r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
+
+
+def write_funnel_to_sheet(rows, c, summary_lines):
+    """ファネル全結果を「ファネル分析」スプシのタブに書く (Summary + 在庫あり/なし + 全9バケツ)。
+
+    デスクトップ xlsx の置換。失敗しても funnel_*.csv は別途出力済なのでデータは失われない。
+    戻り: 書込タブ数 (失敗時は例外)。
+    """
+    import gspread
+    from google.oauth2.service_account import Credentials
+    creds = Credentials.from_service_account_file(
+        CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(FUNNEL_SHEET_ID)
+
+    def write_tab(name, data2d):
+        try:
+            ws = sh.worksheet(name)
+            ws.clear()
+        except gspread.WorksheetNotFound:
+            ws = sh.add_worksheet(title=name, rows=max(10, len(data2d) + 5),
+                                  cols=max(8, len(data2d[0]) if data2d else 8))
+        ws.update(range_name="A1", values=data2d, value_input_option="RAW")
+
+    # Summary タブ
+    summ = [["出品物フルファネル分析 (Seller Hub版)"]]
+    summ += [[ln] for ln in summary_lines]
+    summ += [[""], ["バケツ", "件数", "意味/アクション"]]
+    for name, desc in FUNNEL_BUCKETS:
+        summ.append([name, len(c.get(name, [])), desc])
+    write_tab("Summary", summ)
+
+    # 在庫あり / 在庫なし
+    instock = sorted([r for r in rows if r["qty"] != 0], key=lambda x: (-x["impr"], -x["watch"]))
+    oos = sorted([r for r in rows if r["qty"] == 0], key=lambda x: -(x["sold_qty"] + x["watch"]))
+    write_tab("在庫あり", [FUNNEL_COLS] + [_funnel_vals(r) for r in instock])
+    write_tab("在庫なし", [FUNNEL_COLS] + [_funnel_vals(r) for r in oos])
+
+    # 9 バケツ (空でもヘッダのみ書いてタブを安定させる)
+    for name, _ in FUNNEL_BUCKETS:
+        write_tab(name, [FUNNEL_COLS] + [_funnel_vals(r) for r in c.get(name, [])])
+
+    # 既定の空タブ「シート1」を掃除
+    try:
+        sh.del_worksheet(sh.worksheet("シート1"))
+    except Exception:
+        pass
+    return 3 + len(FUNNEL_BUCKETS)  # Summary+在庫あり+在庫なし + 9
+
+
 def _sec(title, note, items, limit=20):
     print(f"\n=== {title} ({len(items)}件) ===\n   {note}")
     if not items:
@@ -506,13 +580,16 @@ def main():
                 w.writerow(r)
         print(f"CSV 出力: {path}")
 
-    # 見やすいバケツ別 Excel をデスクトップに出力
-    out_dir = DESKTOP if os.path.isdir(DESKTOP) else OUT_DIR
-    xlsx_path = os.path.join(out_dir, f"出品ファネル分析_{datetime.date.today():%Y%m%d}.xlsx")
-    write_xlsx(xlsx_path, rows, c, summary_lines)
-    print(f"Excel 出力: {xlsx_path}")
+    # ファネル全結果を「ファネル分析」スプシに集約 (Summary+在庫あり/なし+全9バケツ)。
+    # デスクトップ xlsx は廃止 (2026-06-07 集約方針=eBayアップCSV以外はスプシ)。
+    try:
+        n = write_funnel_to_sheet(rows, c, summary_lines)
+        print(f"📊 「ファネル分析」スプシ更新: {n}タブ "
+              f"https://docs.google.com/spreadsheets/d/{FUNNEL_SHEET_ID}/edit")
+    except Exception as _e:  # noqa: BLE001
+        print(f"⚠ 「ファネル分析」スプシ更新失敗 (funnel_*.csv は出力済): {type(_e).__name__}: {_e}")
 
-    # 「既存メンテ」スプシ 3タブ (ファネル分析/需要・新規強化/取下再出品) を更新 (非致命)
+    # 「既存メンテ」スプシ 行動系タブ (取下再出品/需要・新規強化) を更新 (非致命)
     try:
         import existing_maint_dashboard as emd
         emd.main()
