@@ -211,6 +211,16 @@ def main():
     print("▶ ③ 書戻し: 再出品が live 後、ACTIVEレポートDL → seller_hub_writeback でスプシB列に新ItemID")
     print("※ watcher有は候補外 (relistするとwatcher消失→✏️タイトル改修で in-place)")
 
+    # 進捗ダッシュボード更新 (全体像可視化・非致命)。読込済の rows/b_map を再利用
+    try:
+        import relist_dashboard as rd
+        drows, dsummary = rd.build_rows(rows, b_map)
+        rd.write_dashboard(drows, dsummary, os.path.basename(src))
+        print(f"\n📋 進捗スプシ更新: タブ「{rd.DASH_TAB}」"
+              f"(総数{dsummary['total']}/✅済{dsummary['done']}/⏳未{dsummary['todo']}・あと{-(-dsummary['todo']//CAP)}バッチ)")
+    except Exception as _e:  # noqa: BLE001
+        print(f"\n⚠ 進捗スプシ更新スキップ: {type(_e).__name__}: {_e}")
+
 
 if __name__ == "__main__":
     main()

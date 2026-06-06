@@ -512,6 +512,15 @@ def main():
     write_xlsx(xlsx_path, rows, c, summary_lines)
     print(f"Excel 出力: {xlsx_path}")
 
+    # 「既存メンテ」スプシ 3タブ (ファネル分析/需要・新規強化/取下再出品) を更新 (非致命)
+    try:
+        import existing_maint_dashboard as emd
+        emd.main()
+    except SystemExit:
+        pass
+    except Exception as _e:  # noqa: BLE001
+        print(f"⚠ 「既存メンテ」スプシ更新スキップ: {type(_e).__name__}: {_e}")
+
 
 if __name__ == "__main__":
     main()
