@@ -35,9 +35,10 @@ def test_sku_from_url_mercari_shops_fallback_tail12():
 def test_select_caps_to_10_by_price_desc():
     rows = [_row(f"i{i}", price=i, supply_url=f"https://jp.mercari.com/item/m{i:011d}")
             for i in range(20)]
-    picked, total, skipped = rf.select(rows, cap=10)
+    picked, total, skipped, already = rf.select(rows, cap=10)
     assert total == 20
     assert skipped == 0
+    assert already == 0
     assert len(picked) == 10
     # 価格降順 (19,18,...,10)
     assert [r["item_id"] for r in picked] == [f"i{i}" for i in range(19, 9, -1)]
@@ -49,7 +50,7 @@ def test_select_excludes_missing_supply_url():
         _row("b", 90, supply_url=""),          # 除外
         _row("c", 80, supply_url="   "),       # 空白のみ → 除外
     ]
-    picked, total, skipped = rf.select(rows, cap=10)
+    picked, total, skipped, already = rf.select(rows, cap=10)
     assert total == 3
     assert skipped == 2
     assert [r["item_id"] for r in picked] == ["a"]
@@ -61,15 +62,36 @@ def test_select_only_relist_flag():
         _row("b", 90, flags="NO_CONVERT"),     # RELIST でない → 除外
         _row("c", 80, flags=""),
     ]
-    picked, total, skipped = rf.select(rows, cap=10)
+    picked, total, skipped, already = rf.select(rows, cap=10)
     assert total == 1
     assert [r["item_id"] for r in picked] == ["a"]
+
+
+def test_select_excludes_already_relisted_by_b_diff():
+    # funnel再分析せず「次の10件」を出す核: B列がfunnel itemIDのまま=未着手のみ対象
+    rows = [
+        _row("done1", 100, supply_url="https://x/u1"),   # B列が新itemIDに変化済=再出品済
+        _row("todo1", 90, supply_url="https://x/u2"),    # B列=funnel itemID のまま=未着手
+        _row("gone", 80, supply_url="https://x/u3"),     # B列空=除外
+        _row("nomatch", 70, supply_url="https://x/u4"),  # sheetに無い=除外
+    ]
+    b_map = {
+        "https://x/u1": "999NEW999",   # ≠ funnel item_id 'done1' → 再出品済
+        "https://x/u2": "todo1",        # == funnel item_id → 未着手
+        "https://x/u3": "",             # 空 → 除外
+        # u4 は b_map に無い
+    }
+    picked, total, skipped_no_supply, already = rf.select(rows, sheet_b_map=b_map, cap=10)
+    assert total == 4
+    assert skipped_no_supply == 0
+    assert already == 3                              # done1 / gone / nomatch
+    assert [r["item_id"] for r in picked] == ["todo1"]
 
 
 def test_write_pending_columns_and_sku(tmp_path):
     rows = [_row("itm1", 100, supply_url="https://jp.mercari.com/item/m22222222222",
                  category="Reels", title="Daiwa Reel")]
-    picked, _, _ = rf.select(rows, cap=10)
+    picked, _, _, _ = rf.select(rows, cap=10)
     out = tmp_path / "pending.csv"
     rf.write_pending(picked, str(out))
     got = list(csv.DictReader(open(out, encoding="utf-8-sig")))
