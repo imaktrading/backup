@@ -362,6 +362,8 @@ SCRIPTS = [
         "params": [],
     },
     # 2026-06-04: 月次レポート生成 / 今、見る はパネルから削除 (ファネル分析が上位互換。.py は残置)
+    # 取下再出品 ①②③ を上段、✏️タイトル改修/💲価格抵抗 を下段に並べる (3列グリッド=d1)。
+    # 表示順は _ugroup "relist" 群の SCRIPTS 出現順なので ①②③→タイトル改修→価格抵抗 の順で置く。
     {
         "category": None, "type": "utility",
         "label": "取下再出品① 取下げ(End)",
@@ -372,13 +374,41 @@ SCRIPTS = [
         "params": [],
     },
     {
-        # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "取下再出品② Add生成(即live)",
+        "label_fg": "red",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "relist_add_from_pending.py"],  # 保留リスト→カテゴリ振り分け→各--relist→Add CSV+skumap
+        "params": [],
+        # relist は同型番を意図的に再出品 → excluder/重複くん が「重複」誤判定で削除するのを防ぐ
+        "skip_postprocess": True,
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "取下再出品③ 書戻し(B列)",
+        "label_fg": "red",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # デスクトップの最新Add結果レポート自動検出→スプシB列に新ItemID上書き+ダッシュボード更新
+        "cmd": ["python", "relist_writeback.py", "--auto", "--execute"],
+        "params": [],
+    },
+    {
+        # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)。①の下段
         "category": None, "type": "utility",
         "label": "✏️ タイトル改修",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "noclick_targets.py"],
         "params": [],
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/タイトル改修対象_*.csv",
+    },
+    {
+        # NO_CONVERT: 高クリック無販売を自分の実売(proven)と照合=価格抵抗 (2026-06-05)。②の下段
+        "category": None, "type": "utility",
+        "label": "💲 価格抵抗",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "price_resistance.py"],
+        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/価格抵抗_*.csv",
     },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
@@ -420,34 +450,6 @@ SCRIPTS = [
         "cmd": ["python", "mercari_psa_resource.py"],
         "params": [],
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/03_PSA再仕入れ候補_*_メルカリ判定.csv",
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "取下再出品② Add生成(即live)",
-        "label_fg": "red",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "relist_add_from_pending.py"],  # 保留リスト→カテゴリ振り分け→各--relist→Add CSV+skumap
-        "params": [],
-        # relist は同型番を意図的に再出品 → excluder/重複くん が「重複」誤判定で削除するのを防ぐ
-        "skip_postprocess": True,
-    },
-    {
-        # NO_CONVERT: 高クリック無販売を自分の実売(proven)と照合=価格抵抗 (2026-06-05)
-        "category": None, "type": "utility",
-        "label": "💲 価格抵抗",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "price_resistance.py"],
-        "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/価格抵抗_*.csv",
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "取下再出品③ 書戻し(B列)",
-        "label_fg": "red",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        # デスクトップの最新Add結果レポート自動検出→スプシB列に新ItemID上書き+ダッシュボード更新
-        "cmd": ["python", "relist_writeback.py", "--auto", "--execute"],
-        "params": [],
     },
     {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
@@ -1434,7 +1436,8 @@ class ListingPanel:
                              for cat in cat_order if categories[cat].get("relist") is not None]
             d1 = ttk.LabelFrame(scroll_frame, text="🔧 在庫あり — 直す (検索/タイトル/価格) 出品≥21日", padding=4)
             d1.pack(fill="x", padx=4, pady=(6, 0))
-            _grid_named(d1, relist_items, ncol=4)
+            # 3列: 上段①②③ / 下段✏️タイトル改修(①下)・💲価格抵抗(②下) が縦に揃う
+            _grid_named(d1, relist_items, ncol=3)
             d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ / 整理", padding=4)
             d2.pack(fill="x", padx=4, pady=(6, 0))
             _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=4)
