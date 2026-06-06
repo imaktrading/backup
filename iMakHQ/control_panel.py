@@ -378,6 +378,8 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "relist_add_from_pending.py"],  # 保留リスト→カテゴリ振り分け→各--relist→Add CSV+skumap
         "params": [],
+        # relist は同型番を意図的に再出品 → excluder/重複くん が「重複」誤判定で削除するのを防ぐ
+        "skip_postprocess": True,
     },
     {
         "category": None, "type": "utility",
@@ -1625,29 +1627,43 @@ class ListingPanel:
                                 self.append_log(f"⚠️ 出力ファイルが見つかりません: {_oa}\n")
                         except Exception as _e:
                             self.append_log(f"⚠️ ファイル起動失敗: {_e}\n")
+                    # 取下再出品②(relist)は CSV破壊系の後処理をスキップ。
+                    # 理由: relist は「同じ型番を意図的に再出品」。重複くん/excluder は通常出品用で、
+                    #       取下げ前(=管理シート上はまだACTIVE)の同型番を「重複」と誤判定し CSV から物理削除する。
+                    _skip_pp = False
+                    try:
+                        _idx = getattr(self, "_current_idx", -1)
+                        _skip_pp = bool(_idx >= 0 and SCRIPTS[_idx].get("skip_postprocess"))
+                    except Exception:
+                        _skip_pp = False
+                    if _skip_pp:
+                        self.append_log("\n(取下再出品②: excluder/title-fix/重複くん の後処理をスキップ — 同型番の意図的再出品)\n")
                     # Step 2: csv_postprocess_excluder (check_csv NO-GO 行を CSV 物理除外)
                     # Step 2.5: post_title_fix (TCG タイトル長補強・PSA 名前正規化, 2026-05-02 追加)
                     # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
-                    try:
-                        captured_log = self.log.get("1.0", "end") if hasattr(self, 'log') else ""
-                        _run_excluder_for_latest_csv(self.append_log, captured_log)
-                    except Exception as _e:
-                        self.append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
-                    try:
-                        _ptf_dir = os.path.join(WORKSPACE, "iMakTCG", "tools")
-                        if _ptf_dir not in sys.path:
-                            sys.path.insert(0, _ptf_dir)
-                        from post_title_fix import run_post_title_fix_for_latest_csv
-                        run_post_title_fix_for_latest_csv(self.append_log)
-                    except Exception as _e:
-                        self.append_log(f"\n⚠️ post_title_fix hook 失敗: {_e}\n")
+                    if not _skip_pp:
+                        try:
+                            captured_log = self.log.get("1.0", "end") if hasattr(self, 'log') else ""
+                            _run_excluder_for_latest_csv(self.append_log, captured_log)
+                        except Exception as _e:
+                            self.append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
+                    if not _skip_pp:
+                        try:
+                            _ptf_dir = os.path.join(WORKSPACE, "iMakTCG", "tools")
+                            if _ptf_dir not in sys.path:
+                                sys.path.insert(0, _ptf_dir)
+                            from post_title_fix import run_post_title_fix_for_latest_csv
+                            run_post_title_fix_for_latest_csv(self.append_log)
+                        except Exception as _e:
+                            self.append_log(f"\n⚠️ post_title_fix hook 失敗: {_e}\n")
                     # rarara hook 削除 (= 5/28 ユーザー判断、 DON 仕様で WARN ばかり実害発見ゼロ)
                     # 旧: self._run_rarara_after()
                     # Step 4: dedupe_excluder (2026-05-27 追加、 重複くん (KEY1, KEY2) tuple 物理除外)
-                    try:
-                        _run_dedupe_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
-                    except Exception as _e:
-                        self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
+                    if not _skip_pp:
+                        try:
+                            _run_dedupe_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
+                        except Exception as _e:
+                            self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
                     # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
                     # 5/29 修正: 今 cycle で生成された tcg_upload_*.csv のみ対象 (= TCG 以外 cycle で毎回 HTML 出る問題対策)
                     try:
