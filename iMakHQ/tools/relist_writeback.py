@@ -180,6 +180,7 @@ def main():
 
     if args.execute:
         wrote = 0
+        written = []
         for e in plan:
             if e["status"] != "WRITE":
                 continue
@@ -188,7 +189,21 @@ def main():
                 continue
             ws.update_acell(f"B{e['row']}", e["new_item_id"])
             wrote += 1
+            written.append(e)
         print(f"\n✅ {wrote} 件 B列書込完了 (旧→新)")
+        # 再出品履歴を追記 (①の「2回目以降はEND」判定の唯一の正本=実際に完了したものだけ)
+        if written:
+            import datetime as _dt
+            hist = os.path.join(REVISE_DIR, "relist_history.csv")
+            new = not os.path.exists(hist)
+            with open(hist, "a", newline="", encoding="utf-8-sig") as hf:
+                w = csv.writer(hf)
+                if new:
+                    w.writerow(["supply_url", "new_item_id", "date"])
+                today = _dt.date.today().strftime("%Y-%m-%d")
+                for e in written:
+                    w.writerow([e["supply_url"], e["new_item_id"], today])
+            print(f"📜 再出品履歴に {len(written)} 件追記: relist_history.csv")
     else:
         print(f"\n[DRY-RUN] 実書込なし。--execute で {summary['WRITE']} 件を書込")
 

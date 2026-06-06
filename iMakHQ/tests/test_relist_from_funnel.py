@@ -88,6 +88,24 @@ def test_select_excludes_already_relisted_by_b_diff():
     assert [r["item_id"] for r in picked] == ["todo1"]
 
 
+def test_split_by_history_first_vs_second():
+    # 一度relistした(=skumap履歴に有る) supply_url は2回目→END停止、無いものは初回→relist
+    picked = [
+        _row("a", 100, supply_url="https://x/first"),    # 履歴に無い → 初回
+        _row("b", 90, supply_url="https://x/again"),     # 履歴に有る → 2回目=END
+    ]
+    history = {"https://x/again"}
+    relist_picks, end_only = rf.split_by_history(picked, history)
+    assert [r["item_id"] for r in relist_picks] == ["a"]
+    assert [r["item_id"] for r in end_only] == ["b"]
+
+
+def test_split_by_history_empty_history_all_first():
+    picked = [_row("a", 100, supply_url="https://x/u1"), _row("b", 90, supply_url="https://x/u2")]
+    relist_picks, end_only = rf.split_by_history(picked, set())
+    assert len(relist_picks) == 2 and end_only == []
+
+
 def test_write_pending_columns_and_sku(tmp_path):
     rows = [_row("itm1", 100, supply_url="https://jp.mercari.com/item/m22222222222",
                  category="Reels", title="Daiwa Reel")]

@@ -71,6 +71,42 @@ def relist_candidates(rows):
     return [r for r in rows if "RELIST" in (r.get("flags") or "").split("|")]
 
 
+def load_relisted_history():
+    """過去に**実際に再出品が完了した** supply_url の集合 = relist_history.csv。
+
+    履歴は③書戻し(relist_writeback)成功時に追記される(=実際にlive化し新itemID書込が
+    確定したものだけ)。skumapは②(Add生成)時点で書かれ「やった」止まりなので履歴源に
+    しない(②だけ回して未アップ=未relistを誤って2回目扱いする事故を防ぐ)。
+    """
+    history = set()
+    path = os.path.join(END_DIR, "relist_history.csv")
+    if not os.path.exists(path):
+        return history
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as fp:
+            for r in csv.DictReader(fp):
+                u = (r.get("supply_url") or "").strip()
+                if u:
+                    history.add(u)
+    except Exception:
+        pass
+    return history
+
+
+def split_by_history(picked, history):
+    """取下げ候補を「初回(relist)」と「2回目以降(END停止)」に分ける。
+
+    一度 relist しても再び RELIST に出る = 露出やり直しが効かなかった実証 → 出品停止。
+    (仕入過高で打ち手なしのケースを、当てにならない市場中央値でなく実績で切る)
+    戻り: (relist_picks 初回, end_only_picks 2回目)
+    """
+    relist_picks, end_only_picks = [], []
+    for r in picked:
+        u = (r.get("supply_url") or "").strip()
+        (end_only_picks if u in history else relist_picks).append(r)
+    return relist_picks, end_only_picks
+
+
 def load_current_b_map():
     """両管理スプシの {supply_url(A列): 現在のB列(itemID)} を返す (再出品済み除外用)。
 
@@ -176,10 +212,20 @@ def main():
         print("候補なし(未着手の supply_url 有 RELIST が0件)。全消化済 or ファネル再分析が必要。")
         return
 
+    # 初回(relist) と 2回目以降(END停止) に振り分け。
+    # 一度relistしても再びRELISTに出る = 露出やり直しが効かなかった = 仕入過高等で打ち手なし → END。
+    history = load_relisted_history()
+    relist_picks, end_only_picks = split_by_history(picked, history)
+    print(f"  内訳: 初回(relist) {len(relist_picks)}件 / 2回目以降(END停止) {len(end_only_picks)}件")
+    if end_only_picks:
+        print("  ⛔ 2回目以降 (relist済だが再度RELIST → 効果なし → 出品停止):")
+        for r in end_only_picks:
+            print(f"     - {r.get('item_id','')}  {(r.get('title','') or '')[:45]}")
+
     stamp = datetime.date.today().strftime("%Y%m%d")
     os.makedirs(END_DIR, exist_ok=True)
 
-    # 1) End CSV (eBay FileExchange)
+    # 1) End CSV (eBay FileExchange) = 初回+2回目 すべて取下げ
     end_path = os.path.join(END_DIR, f"relist_end_{stamp}.csv")
     with open(end_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -187,9 +233,15 @@ def main():
         for r in picked:
             w.writerow(["End", r["item_id"], END_CODE])
 
-    # 2) 保留リスト (②③の参照元・行固定キー)
+    # 2) 保留リスト (②③の参照元) = 初回のみ (2回目は再出品しない=停止)
     pending_path = os.path.join(END_DIR, f"relist_pending_{stamp}.csv")
-    write_pending(picked, pending_path)
+    write_pending(relist_picks, pending_path)
+
+    # 2b) 停止リスト (2回目以降=relist打ち切り。記録用)
+    if end_only_picks:
+        stop_path = os.path.join(END_DIR, f"relist_stopped_{stamp}.csv")
+        write_pending(end_only_picks, stop_path)
+        print(f"停止リスト (2回目以降・記録): {stop_path}")
 
     # 3) 候補一覧 (デスクトップ・確認用) — ロック中(Excel/OneDrive)でも End/pending は死守
     cand_path = os.path.join(DESK, f"取下再出品候補_{stamp}.csv")
@@ -203,13 +255,16 @@ def main():
     except PermissionError:
         cand_path = "(スキップ: デスクトップの同名ファイルがロック中。End/保留リストは出力済)"
 
-    print(f"\nEnd CSV (eBayアップで取下げ): {end_path}")
-    print(f"保留リスト (②再出品/③書戻しが参照): {pending_path}")
+    print(f"\nEnd CSV (eBayアップで取下げ・{len(picked)}件): {end_path}")
+    print(f"保留リスト (②再出品・初回{len(relist_picks)}件): {pending_path}")
     print(f"候補一覧(確認用): {cand_path}")
-    print(f"\n▶ ① 取下げ: End CSV を eBay FileExchange にアップ → 該当 {len(picked)} listing が終了(Cassini reset)")
-    print("▶ ② 再出品: 保留リストを relist_add_from_pending で出品くん即live → Add CSV (次コマンド)")
-    print("▶ ③ 書戻し: 再出品が live 後、ACTIVEレポートDL → seller_hub_writeback でスプシB列に新ItemID")
-    print("※ watcher有は候補外 (relistするとwatcher消失→✏️タイトル改修で in-place)")
+    print(f"\n▶ ① 取下げ: End CSV を eBay FileExchange にアップ → {len(picked)}件 終了")
+    if relist_picks:
+        print(f"▶ ② 再出品: ②ボタンで 初回 {len(relist_picks)}件 を即live再出品 (2回目以降{len(end_only_picks)}件は再出品しない=停止)")
+    else:
+        print(f"▶ ② 再出品: 今回は初回0件 → 再出品なし (全{len(end_only_picks)}件が2回目以降=停止のみ)")
+    print("▶ ③ 書戻し: ③ボタンで Add結果→スプシB列に新ItemID")
+    print("※ watcher有は候補外 / 2回目以降は relist打ち切り(効果なし実証)")
 
     # 進捗ダッシュボード更新 (全体像可視化・非致命)。読込済の rows/b_map を再利用
     try:
