@@ -124,6 +124,32 @@ def find_file(data_dir, pattern):
     return max(hits, key=os.path.getmtime) if hits else None
 
 
+STALE_REPORT_DAYS = 4   # 主要レポートがこれ以上古い → ファネル分析を中断 (古いと世代/効果測定が無意味)
+
+
+def _report_age_days(path):
+    """レポートの「内容の日付」(ファイル名から) → 経過日数。mtime は置き直しで更新され
+    実態より新しく見えるので使わない (panel と同方針)。"""
+    import datetime as _dt
+    b = os.path.basename(path)
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", b)              # YYYY-MM-DD (active/orders/unsold/promoted)
+    if m:
+        d = _dt.date(int(m[1]), int(m[2]), int(m[3]))
+    else:
+        m = re.search(r"(\d{2})_(\d{2})_(\d{4})", b)          # MM_DD_YYYY (quality)
+        if m:
+            d = _dt.date(int(m[3]), int(m[1]), int(m[2]))
+        else:
+            d = _dt.date.fromtimestamp(os.path.getmtime(path))
+    return (_dt.date.today() - d).days
+
+
+def worst_report_age(paths):
+    """与えられたレポート群の最古経過日数 (None は無視)。"""
+    ages = [_report_age_days(p) for p in paths if p]
+    return max(ages) if ages else 999
+
+
 def _norm_title(t):
     return re.sub(r"\s+", " ", (t or "").lower()).strip()
 
@@ -471,6 +497,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default=None, help="4レポートを置いたフォルダ")
     ap.add_argument("--no-csv", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="レポートが古くても強制実行 (既定: 古いと中断)")
     args = ap.parse_args()
 
     data_dir = args.data_dir or (DEFAULT_DATA_DIR if os.path.isdir(DEFAULT_DATA_DIR)
@@ -482,9 +510,19 @@ def main():
     f_quality = find_file(data_dir, "Listing quality report*.xlsx")
     f_unsold = find_file(data_dir, "*unsold-listings*.csv")
     f_promoted = find_file(data_dir, "*promoted-listing*report*.csv")
+    f_orders = find_file(data_dir, "*orders-report*.csv")
     if not f_active:
         sys.exit(f"all-active CSV が {data_dir} に見つかりません。")
-    print(f"data-dir: {data_dir}")
+
+    # レポート鮮度ガード: 古いまま走らせると funnel世代/効果測定が無意味になる → 中断 (2026-06-07)
+    _worst = worst_report_age([f_active, f_quality, f_unsold, f_promoted, f_orders])
+    if _worst >= STALE_REPORT_DAYS and not args.force:
+        sys.exit(
+            f"⛔ 中断: レポートが古いです (最古 {_worst}日前 ≥ {STALE_REPORT_DAYS}日)。\n"
+            f"   古いレポートで走らせると funnel世代が更新されず効果測定も無意味になります。\n"
+            f"   → Seller Hub で4-5レポートを再DL → {data_dir} に置き直してから再実行。\n"
+            f"   (どうしても古いまま実行する場合は --force)")
+    print(f"data-dir: {data_dir}  (レポート最古 {_worst}日前)")
     print(f"  active  : {os.path.basename(f_active)}")
     print(f"  quality : {os.path.basename(f_quality) if f_quality else '(なし=簡易判定)'}")
     print(f"  unsold  : {os.path.basename(f_unsold) if f_unsold else '(なし)'}")
