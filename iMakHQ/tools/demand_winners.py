@@ -342,34 +342,37 @@ def main():
     # series を需要順
     series_ranked = sorted(gs_candidates.keys(), key=lambda s: -gs_series[s]["score"])
 
-    # ---- CSV ----
-    f, path = _open_w(os.path.join(DESK, f"新規強化リスト_{datetime.date.today():%Y%m%d}.csv"))
-    with f:
-        w = csv.writer(f)
-        w.writerow(["種別", "系統", "観点", "値(コピペ検索)", "需要スコア", "実売",
-                    "watch", "系統AOV", "仕入適性", "メルカリ検索URL", "備考"])
-        # G-SHOCK 未出品候補 (deterministic = 実在の未出品型番)
-        a = aov("G-SHOCK")
-        for s in series_ranked:
-            d = gs_series[s]
-            for mid in sorted(gs_candidates[s]):
-                w.writerow(["新規候補(B)", f"G-SHOCK {s}", "未出品型番", f"G-SHOCK {mid}",
-                            f"{d['score']:.0f}", int(d["sold"]), int(d["watch"]), f"${a:.0f}", "◎",
-                            mercari_url(mid), "catalogにあり未出品=出せば売れそう"])
-        # 他の実証 vein = facet 別 需要分解 (どのサブ/サイズ/色に需要があるか)
-        for v, d in sorted(vein_dem.items(), key=lambda kv: -kv[1]["score"]):
-            if v in ("other", "G-SHOCK") or d["score"] <= 0 or v not in facet:
+    # ---- スプシ「需要・新規強化」タブに集約 (デスクトップCSV廃止 2026-06-07) ----
+    out_rows = [["種別", "系統", "観点", "値(コピペ検索)", "需要スコア", "実売",
+                 "watch", "系統AOV", "仕入適性", "メルカリ検索URL", "備考"]]
+    # G-SHOCK 未出品候補 (deterministic = 実在の未出品型番)
+    a = aov("G-SHOCK")
+    for s in series_ranked:
+        d = gs_series[s]
+        for mid in sorted(gs_candidates[s]):
+            out_rows.append(["新規候補(B)", f"G-SHOCK {s}", "未出品型番", f"G-SHOCK {mid}",
+                             f"{d['score']:.0f}", int(d["sold"]), int(d["watch"]), f"${a:.0f}", "◎",
+                             mercari_url(mid), "catalogにあり未出品=出せば売れそう"])
+    # 他の実証 vein = facet 別 需要分解 (どのサブ/サイズ/色に需要があるか)
+    for v, d in sorted(vein_dem.items(), key=lambda kv: -kv[1]["score"]):
+        if v in ("other", "G-SHOCK") or d["score"] <= 0 or v not in facet:
+            continue
+        av = aov(v)
+        for dim in ("サブ", "タイプ", "ライン", "サイズ", "色"):
+            if dim not in facet[v]:
                 continue
-            av = aov(v)
-            for dim in ("サブ", "タイプ", "ライン", "サイズ", "色"):
-                if dim not in facet[v]:
-                    continue
-                top = sorted(facet[v][dim].items(), key=lambda x: -x[1]["score"])[:6]
-                for val, fd in top:
-                    url = mercari_url(fd["seed"]) if fd["seed"] else ""
-                    w.writerow(["需要分解", v, dim, val, f"{fd['score']:.0f}", int(fd["sold"]),
-                                int(fd["watch"]), f"${av:.0f}", _FEAS_MARK.get(v, "?"), url,
-                                _B_PENDING.get(v, "")])
+            top = sorted(facet[v][dim].items(), key=lambda x: -x[1]["score"])[:6]
+            for val, fd in top:
+                url = mercari_url(fd["seed"]) if fd["seed"] else ""
+                out_rows.append(["需要分解", v, dim, val, f"{fd['score']:.0f}", int(fd["sold"]),
+                                 int(fd["watch"]), f"${av:.0f}", _FEAS_MARK.get(v, "?"), url,
+                                 _B_PENDING.get(v, "")])
+    try:
+        from sheet_io import write_rows_to_tab, MAINT_URL
+        write_rows_to_tab("需要・新規強化", out_rows)
+        print(f"📈 「需要・新規強化」タブ更新: {len(out_rows)-1}件 → {MAINT_URL}")
+    except Exception as _e:
+        print(f"⚠ 「需要・新規強化」タブ更新失敗: {type(_e).__name__}: {_e}")
 
     # ---- コンソール ----
     ncand = sum(len(v) for v in gs_candidates.values())
@@ -394,7 +397,7 @@ def main():
                 continue
             top = sorted(facet[v][dim].items(), key=lambda x: -x[1]["score"])[:5]
             print(f"      {dim}: " + " / ".join(f"{val}({d2['score']:.0f})" for val, d2 in top))
-    print(f"\nCSV出力: {path}")
+    # 出力はスプシ「需要・新規強化」タブ (上で更新済)
     print("▶ B = 実証系統で catalog にあるが未出品 = 出せば売れそうな新規候補 (G-SHOCK)。")
     print("▶ 他 vein は facet 別需要分解 (サブ/ライン/サイズ/色) → その属性で仕入れ先を探す。")
     if not upath:

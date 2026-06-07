@@ -440,7 +440,8 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "demand_winners.py"],
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/新規強化リスト_*.csv",
+        # 結果は「既存メンテ」スプシ 需要・新規強化タブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     # 2026-06-04: G-SHOCK価格調査(amazon_v8_check/mercari_gshock_resource)とタイトル改修(title_keyword_proposal)は
     #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
@@ -460,7 +461,8 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "restock_worklist.py"],
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/在庫切れ再仕入れ_*.csv",
+        # 結果は「既存メンテ」スプシ 再仕入れタブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     {
         # B: CULL(在庫切れ&需要皆無) を age>=21・CAP50/回 で段階 End CSV 化 (2026-06-05)

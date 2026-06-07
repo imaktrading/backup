@@ -122,25 +122,20 @@ def main():
         d["demand"] = d["sold"] * 100 + d["watch"] * 8
     items.sort(key=lambda d: -d["demand"])
 
-    stamp = datetime.date.today().strftime("%Y%m%d")
-    path = os.path.join(DESK, f"在庫切れ再仕入れ_{stamp}.csv")
-    base, ext = os.path.splitext(path)
-    for i in range(20):
-        try:
-            f = open(path if i == 0 else f"{base}_{i+1}{ext}", "w", newline="", encoding="utf-8-sig")
-            path = f.name
-            break
-        except PermissionError:
-            continue
-    with f:
-        w = csv.writer(f)
-        w.writerow(["GO/NO", "系統", "商品名", "実売", "watch", "サイト", "価格",
-                    "メルカリ検索URL", "メルカリ検索語", "eBay URL"])
-        for d in items:
-            kw = mercari_kw(d["vein"], d["title"])
-            w.writerow(["", d["vein"], d["title"], int(d["sold"]), int(d["watch"]),
-                        "/".join(sorted(d["sites"])), f"${d['price']:.0f}",
-                        dw.mercari_url(kw), kw, d["ebay_url"]])
+    # スプシ「再仕入れ」タブに集約 (デスクトップCSV廃止 2026-06-07)
+    out_rows = [["GO/NO", "系統", "商品名", "実売", "watch", "サイト", "価格",
+                 "メルカリ検索URL", "メルカリ検索語", "eBay URL"]]
+    for d in items:
+        kw = mercari_kw(d["vein"], d["title"])
+        out_rows.append(["", d["vein"], d["title"], int(d["sold"]), int(d["watch"]),
+                         "/".join(sorted(d["sites"])), f"${d['price']:.0f}",
+                         dw.mercari_url(kw), kw, d["ebay_url"]])
+    try:
+        from sheet_io import write_rows_to_tab, MAINT_URL
+        write_rows_to_tab("再仕入れ", out_rows)
+        print(f"🛒 「再仕入れ」タブ更新: {len(out_rows)-1}件 → {MAINT_URL}")
+    except Exception as _e:
+        print(f"⚠ 「再仕入れ」タブ更新失敗: {type(_e).__name__}: {_e}")
 
     by_vein = defaultdict(lambda: {"n": 0, "sold": 0.0, "watch": 0.0})
     for d in items:
@@ -154,7 +149,7 @@ def main():
     print(f"  {'系統':<12}{'商品数':>6}{'実売':>6}{'watch':>7}")
     for v, x in sorted(by_vein.items(), key=lambda kv: -kv[1]["n"]):
         print(f"  {v:<12}{x['n']:>6}{int(x['sold']):>6}{int(x['watch']):>7}")
-    print(f"\nCSV出力: {path}")
+    # 出力はスプシ「再仕入れ」タブ (上で更新済)
     print("▶ 各行のメルカリ検索URLを開き、現物が同一か確認 → GO/NO列を埋める (自動仕入れはしない)")
     print("▶ G-SHOCK は型番=完全一致で確実。他vein はカテゴリ寄せ検索なので現物照合必須。")
 

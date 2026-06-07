@@ -107,17 +107,13 @@ def main():
         CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
     gc = gspread.authorize(creds)
 
-    # ファネル分析(サマリー)は「ファネル分析」スプシ(別)に集約済 → ここでは書かない (2026-06-07)
-    # 2) 需要・新規強化 (RESTOCK) ※Stage2で demand_winners(新規未出品)に置換予定
-    restock_data, n_restock = build_restock(funnel_rows)
-    write_tab(gc, "需要・新規強化", restock_data)
-    # 3) 取下再出品 (relist_dashboard が担当)
+    # ファネル分析(サマリー)=別「ファネル分析」スプシ / 需要・新規強化=demand_winners /
+    # 再仕入れ=restock_worklist が各々担当 (Stage1-2)。ここは 取下再出品 タブのみ refresh。
     drows, dsummary = rd.build_rows(funnel_rows, b_map)
     rd.write_dashboard(drows, dsummary, os.path.basename(src))
 
-    print(f"✅ 「既存メンテ」タブ更新完了")
-    print(f"   需要・新規強化 : RESTOCK {n_restock}件")
-    print(f"   取下再出品     : 総{dsummary['total']}/✅済{dsummary['done']}/⏳未{dsummary['todo']} (あと{-(-dsummary['todo']//10)}バッチ)")
+    print(f"✅ 「既存メンテ」取下再出品タブ更新完了")
+    print(f"   取下再出品 : 総{dsummary['total']}/✅済{dsummary['done']}/⏳未{dsummary['todo']} (あと{-(-dsummary['todo']//10)}バッチ)")
 
 
 if __name__ == "__main__":
