@@ -1,0 +1,8 @@
+ItemID,Title,Category,cost_jpy,actual_price,expected_price,actual_policy,expected_policy,price_diff,reason
+357358440216,UNIQLO UT Demon Slayer Akaza Snowflake Tee Blue Movie Mugen ,Tシャツ(UT),1800,69.98,54.98,DDP-C-P07,DDP-C-P06,15.0,price+policy
+357358563233,UNIQLO UT Demon Slayer Hashira Tee White Mugen Castle Limite,Tシャツ(UT),1999,74.98,58.98,DDP-C-P06,DDP-C-P06,16.0,price
+356876766464,UNIQLO UT Pokemon T-Shirt Graphic Short Sleeve Tee XL Black ,Tシャツ(UT),1200,54.98,44.98,DDP-C-P06,DDP-C-P05,10.0,price+policy
+357448285020,UNIQLO UT Pokemon No.138 Omanyte Ocean Graphic White T-Shirt,Tシャツ(UT),1950,73.98,57.98,DDP-C-P04,DDP-C-P06,16.0,price+policy
+358214398953,Uniqlo Dragon Ball Z UT T-Shirt Blue Men Size XL Attack of t,ユニクロ(非UT),2000,69.98,56.98,DDP-C-P07,DDP-C-P06,13.0,price+policy
+358459012221,UNIQLO UT Gundam MS-06 Zaku Anime Graphic T-Shirt Navy Size ,Tシャツ(UT),1100,52.98,42.98,DDP-C-P06,DDP-C-P05,10.0,price+policy
+358466694676,UNIQLO UT Dragon Ball Goku Bulma T-Shirt White US XL (JP 2XL,Tシャツ(UT),2500,79.98,64.98,DDP-C-P08,DDP-C-P07,15.0,price+policy
