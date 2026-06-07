@@ -167,9 +167,16 @@ def main():
                         "ebay_now_usd": cur, "mercari_jpy": cost, "v8_recommended_usd": rec,
                         "判定": judge, "mercari_url": murl, "ebay_url": r.get("ebay_url"), "title": r.get("title")})
 
-    out = os.path.join(DESK, os.path.basename(src).replace(".csv", "_メルカリ判定.csv"))
-    with open(out, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=list(results[0].keys())); w.writeheader(); w.writerows(results)
+    # スプシ「PSA再仕入れ」タブに集約 (デスクトップCSV廃止 2026-06-07。再仕入れ系をシートに統一)
+    if results:
+        header = list(results[0].keys())
+        rows2d = [header] + [[r.get(k, "") for k in header] for r in results]
+        try:
+            from sheet_io import write_rows_to_tab, MAINT_URL
+            write_rows_to_tab("PSA再仕入れ", rows2d)
+            print(f"🃏 「PSA再仕入れ」タブ更新: {len(results)}件 → {MAINT_URL}")
+        except Exception as _e:
+            print(f"⚠ 「PSA再仕入れ」タブ更新失敗: {type(_e).__name__}: {_e}")
 
     go = [x for x in results if x["判定"] == "再仕入れGO"]
     nost = [x for x in results if x["判定"] == "メルカリにPSA10在庫なし"]
@@ -181,7 +188,7 @@ def main():
     print(f"\n再仕入れGO 上位(eBay価格高い順):")
     for x in sorted(go, key=lambda v: -v["ebay_now_usd"])[:12]:
         print(f"  {x['set_no']:<12} メルカリ¥{x['mercari_jpy']} → eBay現${x['ebay_now_usd']:.0f} (V8推奨${x['v8_recommended_usd']:.0f})")
-    print(f"\nCSV出力: {out}")
+    # 出力はスプシ「PSA再仕入れ」タブ (上で更新済)
 
 
 if __name__ == "__main__":
