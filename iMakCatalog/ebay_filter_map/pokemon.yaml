@@ -228,21 +228,21 @@ set_code:
 
   # ----- Mega Series (M / Mx) — newer Mega Evolution era -----
   - source: M2a
-    ebay: Mega Dream ex
-    note: ハイクラスパック「MEGAドリームex」 — REVIEW eBay 値
-    year: 2024
+    ebay: MEGA Dream ex
+    note: ハイクラスパック「MEGAドリームex」 — HQ web確定 2026-06-07 (JPセット名)
+    year: 2025
   - source: M2
     ebay: Inferno X
-    note: 拡張パック「インフェルノX」 — REVIEW eBay 値
-    year: 2024
+    note: 拡張パック「インフェルノX」 — HQ web確定 2026-06-07 (JPセット名)
+    year: 2025
   - source: M3
-    ebay: Munigus Zero
-    note: 拡張パック「ムニキスゼロ」 — REVIEW eBay 値
-    year: 2024
+    ebay: Nihil Zero
+    note: 拡張パック「ムニキスゼロ」 — HQ web確定 2026-06-07 (buyer指摘=Nihil Zero。旧"Munigus Zero"も誤り→訂正)
+    year: 2025
   - source: M4
     ebay: Ninja Spinner
-    note: 拡張パック「ニンジャスピナー」 — REVIEW eBay 値
-    year: 2024
+    note: 拡張パック「ニンジャスピナー」 — HQ web確定 2026-06-07 (JPセット名)
+    year: 2025
 
   # ----- Black & White / X & Y / Diamond & Pearl Platinum (旧) -----
   - source: XY

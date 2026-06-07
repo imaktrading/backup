@@ -1,4 +1,12 @@
-"""Pokemon set_name_ebay 投入 Step C: JP set_name → EN hardcode mapping (= 主要 80+ set).
+"""[DEPRECATED 2026-06-07 — 再実行禁止] JP_TO_EN は誤りを含む (SNAD 発生源)。
+
+  英語版の無い新弾JP set を無関係な旧ENセットに割当てる fail-closed 違反:
+    インフェルノX→Burning Shadows / ムニキスゼロ→Ultra Prism / ニンジャスピナー→Steam Siege。
+  live出品で SNAD 発生 (requests/2026-06-07_pokemon_mega_set_name_ebay_fix.md)。
+  HQ裁定: set_name_ebay の SSOT は ebay_filter_map/pokemon.yaml に一本化。
+  以後 set_name_ebay 修正は yaml 編集 + 再導出で行う。歴史的記録として残置 (削除しない)。
+
+Pokemon set_name_ebay 投入 Step C: JP set_name → EN hardcode mapping (= 主要 80+ set).
 
 依頼: 2026-05-30_phase_g2_pokemon_c_plus_b_go.md (= C + B GO 確定)
 

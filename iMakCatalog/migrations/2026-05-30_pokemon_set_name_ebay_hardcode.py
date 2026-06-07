@@ -1,4 +1,10 @@
-"""Pokemon set_name_ebay 投入 Step 1: 主要 set hardcode mapping.
+"""[DEPRECATED 2026-06-07 — 再実行禁止] PREFIX_TO_SET_EN は誤りを含む。
+
+  SV1V↔SV1S 取り違え等の誤マッピングあり。HQ裁定で set_name_ebay の SSOT は
+  ebay_filter_map/pokemon.yaml に一本化 (requests/2026-06-07_pokemon_mega_set_name_ebay_fix.md)。
+  以後 set_name_ebay 修正は yaml 編集 + 再導出で行う。歴史的記録として残置 (削除しない)。
+
+Pokemon set_name_ebay 投入 Step 1: 主要 set hardcode mapping.
 
 依頼: 2026-05-30_phase_g2_pokemon_local_fetch_b_auto_expansion.md
 
