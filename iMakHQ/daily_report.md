@@ -451,3 +451,20 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: disputed 67→3(残=trainer SA-021ビート/XY-036 N/362-SM-P エリカ のみ) / verified_auto 15,233→15,297(+64)
 - 検証✅: backup products.sqlite.pre_nameenfix_20260608_045839 取得確認
 - 検証✅: 抜粋10件 補正確認 — 020/M-P ピカチュウ Waitress→Pikachu / 022/M-P リオル Judge→Riolu / 017/M-P ニャオハ Pokémon Catcher→Sprigatito / SCS-003 Zweilous→Victini / 064/XY-P None→Pikachu、全て verified_auto
+
+## 2026-06-08 (続) — Catalog: set_name_ebay ⚠️2値空欄化 + cardID promo feasibility回答
+
+### 決定事項
+- 決定1: HQ回答(flagged2)を受け、Movie Commemoration/Special Item は誤ラベルでeBay facet該当なし → 両方 fail-closed 空欄化(remap不可、可逆な空欄が正)
+- 決定2: 残73値(標準英語セット名)はHQ保留指示を遵守、昇格migration非実行(JP↔英語セット1対1でなく機械承認は誤認リスク)
+- 決定3(feasibility回答): cardID promo の 'Japanese Promo' 判定は regulation_mark がDB未保存のため再fetch必須。energy/prize 519件は is_non_card フラグ推奨、Trainer 120は機械promo付与せず(汎用札の誤ラベルリスク)
+
+### 変更
+- 変更: iMakCatalog/migrations/2026-06-08_pokemon_void_mc_si_set_name_ebay.py 新規 + --commit適用(MC766/SI293=1059件 specs.set_name_ebay→"" / source=hq_voided_flagged2_20260608、b_layer unverified据え置き)
+- 変更: requests/2026-06-07_set_name_ebay_unverified_audit_poc_hq_reply_flagged2_done.md 新規(空欄化完了報告)
+- 変更: requests/2026-06-08_pokemon_cardid_promo_set_name_feasibility_response.md 新規(4問回答、実装着手NG了解)
+
+### 検証
+- 検証✅: void dry-run 1059件(MC766+SI293)=HQ申告一致 → --commit後 残存MC/SI値=0 / MC-001,SI-001 set_name_ebay='' source='hq_voided_flagged2_20260608' / b_layer=unverified維持
+- 検証✅: backup products.sqlite.pre_voidmcsi_20260608_052729 取得確認
+- 検証✅: cardID-NNNNN 実測 1,560件 / set_name_ebay空831 = energy390+prize129+その他312(Pokémon192+Trainer120) / regulation_mark 全件specs未保存を確認(feasibility根拠)
