@@ -29,6 +29,23 @@ ERA_YEARS = {
     "Scarlet & Violet": (2022, 2026),
 }
 
+# [3] 同一set複数total の whitelist (= verified-legit な多total。誤マップではない)。
+# 明示列挙のみ (logic を緩めない=未知の誤マップは引き続き検出)。各エントリに正当理由必須。
+_KNOWN_MULTI_TOTAL_OK = {
+    # 拡張パック「サン＆ムーン」(SM1p /051) と コレクションサン/ムーン (SM1S/SM1M /060) が
+    # 公式EN同名 "Sun & Moon"・別total で正当 (異なるJPセットだが英語名が同一)。2026-06-07 HQ確認。
+    "Sun & Moon",
+}
+
+
+def _is_excluded_pid(pid):
+    """[3] 整合チェックから除外する不正 product_id (= set_name_ebay 以前の別案件)。
+
+    'cardID...' は product_id 自体が不正なレコードで、total 整合の対象外
+    (= set誤マップでなく product_id 不正。別途 product_id 調査案件)。
+    """
+    return (pid or "").startswith("cardID")
+
 
 def pid_era(pid):
     """product_id プレフィックス → 世代。"""
@@ -85,14 +102,17 @@ def audit(db=DB):
             y = int(m.group(1)); lo, hi = ERA_YEARS[ee]
             if not (lo <= y <= hi):
                 year_viol.append((pid, eb, y, ee, (lo, hi)))
-        # 3) total収集 (同一set内の複数total検出用)
+        # 3) total収集 (同一set内の複数total検出用)。不正product_id(cardID)は除外。
         tot = str(sp.get("card_number_total", "")).strip()
-        if tot:
+        if tot and not _is_excluded_pid(pid):
             set_totals[eb][tot] += 1
             set_pids[eb][tot].append(pid.split("-")[0])
-    # 3) 同一 set_name_ebay に複数 card_number_total が混在 = 誤マップ (1セット=1total が原則)
+    # 3) 同一 set_name_ebay に複数 card_number_total が混在 = 誤マップ (1セット=1total が原則)。
+    #    ただし verified-legit な多total (_KNOWN_MULTI_TOTAL_OK) は除外 (異なるJPセットの公式EN同名等)。
     total_viol = []
     for eb, tots in set_totals.items():
+        if eb in _KNOWN_MULTI_TOTAL_OK:
+            continue
         if len(tots) > 1:
             # 最多totalを正、少数派を誤マップ候補
             major = tots.most_common(1)[0][0]
@@ -140,6 +160,10 @@ def row_set_issue(set_name, card_number, ref):
     set_name = (set_name or "").strip()
     t = card_total(card_number)
     if not set_name or not t or set_name not in ref:
+        return None
+    # verified-legit な多totalセット (異なるJPセットの公式EN同名等) は total 照合しない
+    # (= 少数派totalを誤ブロックしない。例 Sun & Moon の SM1p/051 を SM1S/060基準で弾かない)
+    if set_name in _KNOWN_MULTI_TOTAL_OK:
         return None
     exp = ref[set_name]
     if t != exp:

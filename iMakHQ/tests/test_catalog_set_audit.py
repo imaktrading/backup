@@ -60,3 +60,52 @@ def test_cross_era_is_detectable():
     assert a.pid_era("DPt3-100") != a.eb_era("Scarlet & Violet—Destined Rivals")
     # M3(MEGA) が Sun & Moon = 不一致 (buyer指摘の型)。MEGAはbare運用なので era!=eb で検出
     assert a.pid_era("M3-097") != a.eb_era("Sun & Moon—Ultra Prism")
+
+
+def test_excluded_pid():
+    a = _load()
+    # cardID-prefix は不正product_id=整合チェック対象外
+    assert a._is_excluded_pid("cardID12345-080") is True
+    assert a._is_excluded_pid("SM9-001") is False
+    assert a._is_excluded_pid("") is False
+
+
+def test_multi_total_whitelist_in_row_issue():
+    a = _load()
+    # "Sun & Moon" は verified-legit な多total (SM1p/051 と SM1S/060 が公式EN同名)
+    assert "Sun & Moon" in a._KNOWN_MULTI_TOTAL_OK
+    ref = {"Sun & Moon": "060"}
+    # 少数派 /051 (SM1p) を /060基準で誤ブロックしない (whitelist で None)
+    assert a.row_set_issue("Sun & Moon", "045/051", ref) is None
+    # whitelist外の本物の誤マップは従来どおり検出 (回帰防止)
+    ref2 = {"Sun & Moon—Ultra Prism": "156"}
+    assert a.row_set_issue("Sun & Moon—Ultra Prism", "097/080", ref2) is not None
+
+
+def test_audit_whitelist_and_cardid_skip(tmp_path):
+    a = _load()
+    import json
+    import sqlite3
+    db = str(tmp_path / "t.sqlite")
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE products(product_id TEXT, set_name TEXT, specs TEXT, category TEXT)")
+    rows = [
+        # Sun & Moon 多total (whitelist) → [3] に出ない
+        ("SM1p-045", "サン＆ムーン", {"set_name_ebay": "Sun & Moon", "card_number_total": "051"}),
+        ("SM1S-010", "コレクションサン", {"set_name_ebay": "Sun & Moon", "card_number_total": "060"}),
+        # cardID 不正レコード → [3] 対象外
+        ("cardID999-080", "x", {"set_name_ebay": "Sword & Shield—Lost Origin", "card_number_total": "080"}),
+        ("S11-050", "ロストアビス", {"set_name_ebay": "Sword & Shield—Lost Origin", "card_number_total": "100"}),
+        # 本物の多total誤マップ (whitelist外) → [3] に出る (回帰防止)
+        ("SM12-035", "オルタージェネシス", {"set_name_ebay": "Alter Genesis", "card_number_total": "095"}),
+        ("M3-097", "ムニキスゼロ", {"set_name_ebay": "Alter Genesis", "card_number_total": "080"}),
+    ]
+    for pid, sn, sp in rows:
+        con.execute("INSERT INTO products VALUES(?,?,?,'pokemon_tcg')", (pid, sn, json.dumps(sp, ensure_ascii=False)))
+    con.commit()
+    con.close()
+    _, _, total_viol = a.audit(db)
+    sets_flagged = {v[0] for v in total_viol}
+    assert "Sun & Moon" not in sets_flagged          # whitelist
+    assert "Sword & Shield—Lost Origin" not in sets_flagged  # cardID除外で単一total化
+    assert "Alter Genesis" in sets_flagged            # 本物の誤マップは検出 (回帰防止)
