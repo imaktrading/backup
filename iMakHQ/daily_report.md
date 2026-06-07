@@ -384,3 +384,37 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - **優先度低**: 残TCG空(gundam6/op5/dbscg290/pkmn110)の公式source指定での追補
 
 ---
+
+## 2026-06-07 — Catalog セッション（Pokemon set_name_ebay 根治 / B層 verified 基盤 / adapter修正）
+
+### 決定事項
+- 決定1: Pokemon set_name_ebay 誤マッピング(buyer SNAD指摘 M3=Ultra Prism)の真因は **5/30 `2026-05-30_pokemon_set_name_ebay_jp_mapping.py` の手動 JP_TO_EN 辞書**（自動fetch失敗後に英語版の無い新弾JPセットを旧ENセットへ流用=fail-closed違反）→ **yaml SSOT化 + 5/30 migration 2本 DEPRECATED** で根治。HQの card_number_total 推定は外れ、手動辞書が犯人
+- 決定2: 広域cleanup の正値は **日本語カード=JPセットの英語名**を採用（英語版合本名 Perfect Order/Ascended Heroes 等は不使用）。確定値なし=空欄(fail-closed)。eBay正規値はネット可のHQが確認、Catalogは候補提示→HQ確定の2段(Megaで"Munigus Zero"→正"Nihil Zero"を捕捉した方式)
+- 決定3: B層 verified status は **4状態**(unverified/verified_auto/verified_manual/disputed)。独立性(B-2)厳守で **pokeapi系(direct/suffix/form)のみ verified_auto**、trainer dict一致は生成元と循環の恐れで留保
+- 決定4: disputed name_en 補正は **2源(pokeapi name_jp直引き=番号バグ経路でない + HQ多数決suspect)** 一致を根拠に、HQ greenlight後に適用（pokeapi単独で値を決めない=B-2）
+- 決定5: 6/4-6/6 auto-add で「未登録/要スクレイプ」とした Legendary Heartbeat(S3a)/Peerless Fighters(S5a)/Alter Genesis(SM12) は **全て catalog 実在(投入不要)**。検索ミスの自己訂正。真因は PSA→product_id adapter
+
+### 変更
+- 変更: migrations/2026-06-07_pokemon_mega_set_name_ebay_fix.py 新規（Mega系 M2/M2a/M3/M4 = 603件、commit d08ac95）+ ebay_filter_map/pokemon.yaml SSOT訂正 + 5/30 migration 2本 DEPRECATED
+- 変更: migrations/2026-06-07_pokemon_broad_set_name_ebay_cleanup.py + _round2/_round3_blank/_round4_ds_xy（広域cleanup 33→+18→+blank→DS/XY、commit 15b6110/4f386e5/5194f8f）。クロス世代1058→0/subset取違46→0/監査[1][2][3]=0
+- 変更: ebay_filter_map/{one_piece,dragonball}.yaml に OP-16="The Time of Battle"/FB10="Cross Force" 追記+loader反映（新弾保守、commit 4f386e5）
+- 変更: integrations/psa_to_csv.py `_POKEMON_SET_NAME_TO_CODE` に ALTER GENESIS→SM12 等19キーワード追加（既存カードの未収録誤判定根治、commit 4f386e5）
+- 変更: migrations/2026-06-07_b_layer_status_schema.py 新規＝`b_layer_status` テーブル(4状態) + pokemon backfill（commit e53371d）。api.py に field_status()/is_listable() 追加
+- 変更: migrations/2026-06-07_b_layer_status_name_en_v2_rule.py＝name_en を Tier1-3 rule oracle で再分類（commit 9b6c523）
+- 未実装(greenlight待ち): migrations/2026-06-07_pokemon_name_en_disputed_fix.py（dry-run既定、disputed 64件補正、commit d193a5e）
+
+### 検証
+- 検証✅: 監査 `iMakHQ/tools/catalog_set_audit.py` → **[1]0 / [2]0 / [3]0**（cross-gen/subset 完全解消。Sun&Moon=HQ whitelist, cardID=HQ skip）
+- 検証✅: api.lookup（listing経路）で M3-097='Nihil Zero' / DS-001='Dragon Vault' / XY-003='The Best of XY' total='171' / 各値一致
+- 検証✅: lookup_pokemon('SUN & MOON ALTER GENESIS','035') → SM12-035 オドリドリGX hit / FAIRY RISE→SM7b
+- 検証✅: b_layer_status backfill — name_en verified_auto 15,233 / disputed 67 / unverified 6,693、set_name_ebay verified_manual 4,482 / unverified 11,421
+- 検証✅: Q4 name_en POC（独立Oracle=ローカルpokeapi種族1025、ネット不要）→ 種族exact 12,727中不一致48、systematic-by-species=0、誤りは SA/DPs/MG/XY/SCS の5セット番号オフセット+M-P壊滅に集中。チコリータ=12 Chikorita+1 Durant で検証
+- 検証✅: 各commit pre-commit hook 228 passed/1 skipped。work tree clean（uncommitted ゼロ）
+
+### 残タスク（次セッション）
+- **HQ greenlight待ち**: disputed 64件 name_en 補正（ピカチュウ→"Waitress" 等の壊滅corruption根治、migration準備済→--commitで即適用）
+- **HQ側**: name_en multi-Oracle(suspect132)突合 / ゲート強制(新規・relist穴)配線=昇格後に有効化
+- **Catalog自走候補**: trainer/Tier3 独立Oracle設計（残 unverified name_en 6,693昇格）/ set_name_ebay unverified 11,421 の独立監査（SV系正規値PJと同根）/ adapter長期データ駆動化(B層整備度依存=統合)
+- 既存保留: uniqlo_ut name_en / One Piece adapter fix master反映 / サブPC Casio 残スクレイプ
+
+---
