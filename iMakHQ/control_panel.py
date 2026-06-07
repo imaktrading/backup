@@ -431,7 +431,8 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "funnel_diff.py"],
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/効果測定_*.csv",
+        # 結果は「既存メンテ」スプシ 効果測定タブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     {
         "category": None, "type": "utility",

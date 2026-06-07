@@ -254,25 +254,20 @@ def main():
     order = {"SOLD": 0, "改善(バケツ脱出)": 1, "停滞(同バケツ残)": 2, "悪化/横ばい": 3,
              "基準差(判定不能)": 4, "消滅(End/売切)": 5}
     detail.sort(key=lambda d: (order.get(d["判定"], 9), -_f(d["old_$"])))
-    stamp = f"{d_old}_to_{d_new}"
-    path = os.path.join(DESK, f"効果測定_{stamp}.csv")
-    base, ext = os.path.splitext(path)
-    f = None
-    for i in range(20):
-        try:
-            f = open(path if i == 0 else f"{base}_{i+1}{ext}", "w", newline="", encoding="utf-8-sig")
-            path = f.name
-            break
-        except PermissionError:
-            continue
-    if f is None:
-        sys.exit("CSV を開けません (既存ファイルがロック中?)。")
-    with f:
-        w = csv.DictWriter(f, fieldnames=list(detail[0].keys()) if detail else ["(対象なし)"])
-        w.writeheader()
-        for d in detail:
-            w.writerow(d)
-    print(f"\nCSV出力: {path}")
+    # スプシ「効果測定」タブに集約 (デスクトップCSV廃止 2026-06-07)
+    if detail:
+        header = list(detail[0].keys())
+        body = [[d.get(k, "") for k in header] for d in detail]
+    else:
+        header, body = ["(対象なし)"], []
+    title = f"効果測定 {d_old} → {d_new}" + (f" (間隔{interval}日)" if interval is not None else "")
+    rows2d = [[title] + [""] * (len(header) - 1), header] + body
+    try:
+        from sheet_io import write_rows_to_tab, MAINT_URL
+        write_rows_to_tab("効果測定", rows2d)
+        print(f"\n📉 「効果測定」タブ更新: {len(body)}件 → {MAINT_URL}")
+    except Exception as _e:
+        print(f"\n⚠ 「効果測定」タブ更新失敗: {type(_e).__name__}: {_e}")
     print("▶ 『✅売れた / 改善』が多ければ打ち手は効いている。『停滞』が多い系統=より深い改修(出品くんタイトル生成)へ。")
 
 
