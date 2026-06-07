@@ -418,3 +418,21 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 既存保留: uniqlo_ut name_en / One Piece adapter fix master反映 / サブPC Casio 残スクレイプ
 
 ---
+
+## 2026-06-07 (続) — Catalog: disputed 64件 HQ突合資料化 / set_name_ebay 独立監査POC
+
+### 決定事項
+- 決定1: disputed name_en 64件補正は HQ greenlight 必須(B-2)。HQ の suspect132 突合用に全64件リスト(name_jp｜現値誤｜提案正｜product_id)を materialize して相談文書化(ユーザー指示=「HQに相談」)
+- 決定2: set_name_ebay unverified 11,421 の独立監査 = Catalogは候補提示まで、eBay正規値確定はネット可のHQ(CLAUDE.md 2段規約)。yamlは72/75値が対象外で2源にならず → HQ突合が唯一の昇格経路
+- 決定3: set_name_ebay 'Special Item'(SI-xxx,293件)/'Movie Commemoration'(MC-xxx,766件)はJPセット名直訳でeBay Setフィルタに無い疑い → 要精査フラグ(空欄化 or 再マップをHQ判断)
+
+### 変更
+- 変更: requests/2026-06-07_name_en_disputed_64_fixlist_for_hq_crosscheck.md 新規(全64件表+greenlight依頼、共有data領域)
+- 変更: requests/2026-06-07_set_name_ebay_unverified_audit_poc.md 新規(75 distinct値の監査結果+HQ確認依頼、共有data領域)
+- 変更: iMakCatalog/migrations/2026-06-07_pokemon_set_name_ebay_promote.py 新規(HQ承認値リスト駆動でunverified→verified_manual昇格、dry-run既定・typo検出付き)
+- 未適用(greenlight待ち): disputed 64件補正(d193a5e) / set_name_ebay 昇格(承認リスト待ち)
+
+### 検証
+- 検証✅: disputed fix dry-run → pokeapi系64/対象外3(trainer)。全64件をDBから抽出しmaterialize(ピカチュウ→Waitress等M-P壊滅corruption含む)
+- 検証✅: set_name_ebay 三分類 — unverified 11,421=75 distinct値/空欄0/HQ確認済53値と重複0(transitivity不可)/72値がyaml SSOT外
+- 検証✅: 昇格migration dry-run(承認2値+typo1)→ 593件一致(Lost Thunder426+Best of XY167)/typo'NONEXISTENT VALUE'検出/DB無変更
