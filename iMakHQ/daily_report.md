@@ -485,3 +485,20 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: --commit後 verified_manual 4,482→12,480(+7,998) / unverified 11,421→3,423
 - 検証✅: backup products.sqlite.pre_sneapply_20260608_060654 取得確認
 - 検証✅: SM8b(GXウルトラシャイニー)現値'Lost Thunder'が誤=correct対象として保留され昇格対象外(誤値の昇格阻止を確認)
+
+## 2026-06-08 (続3) — Catalog: set_name_ebay 修正24セット適用 → 検証完結
+
+### 決定事項
+- 決定1: HQ確定 eBay facet 完全形(em-dash era接頭辞統一、略記撤回)で修正24セット+UNCOVERED確定分を訂正昇格。接頭辞conventionはem-dash era prefixで内部統一
+- 決定2: stray promo 5件(real set下のpromo値)+リミックスバウト(JP限定)は据置(fail-closed)。光を喰らう闇はDB該当0件
+- 決定3: set_name_ebay検証完結。残unverified 1,516は全て正当なfail-closed対象(void1059+JP限定421+端数特殊~36)
+
+### 変更
+- 変更: iMakCatalog/migrations/2026-06-08_pokemon_set_name_ebay_corrections.py 新規 + --commit(1,907件訂正+verified_manual昇格、oracle=hq_confirmed_facet_20260608)
+- 変更: requests/..._round6_final_done_hq_facet_strings_done.md 新規(完了報告)
+
+### 検証
+- 検証✅: dry-run 1907件/25(set,old,new) stray promo5除外 → --commit後 verified_manual 12,480→14,387(+1,907)/unverified 3,423→1,516
+- 検証✅: 破天の怒り 'Sword & Shield—Battle Styles'(大誤)→XY—BREAKpoint / GXウルトラシャイニー Lost Thunder→Hidden Fates 等の誤facet訂正を確認
+- 検証✅: backup products.sqlite.pre_snecorr_20260608_061708 取得確認
+- 検証✅: 残unverified内訳=void1059+TAG TEAM193+THE BEST OF XY173+ウルトラフォース55+端数 を実機確認(全てfail-closed正当)
