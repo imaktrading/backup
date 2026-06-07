@@ -540,3 +540,18 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: name_en disputed 0(SA-021 Bede/XY-036 N/362-SM-P Erika をverified_manual、実機COUNT=0)
 - 検証✅: pytest tests/test_dragonball_filter_map.py 3 passed(upsert動作=TEST_SENTINEL更新→復元 含む)
 - 検証✅: backup pre_fsfix/pre_trainerfix 取得確認
+
+## 2026-06-08 (続6) — Catalog: set_name_ebay literal twin残(XY11/BW8/BW3) 訂正
+
+### 決定事項
+- 決定1: XY11/BW8/BW3 の literal twin直訳→確定em-dash値に訂正(XY—Steam Siege/Black & White—Plasma Freeze/Black & White—Next Destinies)。既verified_manualでround1-6(unverified駆動)が取りこぼした別経路分
+- 決定2: 監査ツールはHQ worktree側で参照不可→自前全走査。set_code割れ(twin signature)はこの3つのみ、修正後0。単一値literal~4000(Eevee Heroes/Star Birth等JP限定英名)は割れでなく対象外(eBay facet正当の可能性、HQ判断で別タスク)
+
+### 変更
+- 変更: iMakCatalog/migrations/2026-06-08_pokemon_set_name_ebay_literal_twin_fix.py 新規+--commit(312件 specs.set_name_ebay訂正、verified_manual維持)
+- 変更: requests/2026-06-08_set_name_ebay_literal_residual_xy11_bw8_bw3_done.md 新規(完了報告+単一literal気づき)
+
+### 検証
+- 検証✅: XY11→XY—Steam Siege(106)/BW8→Black & White—Plasma Freeze(102)/BW3→Black & White—Next Destinies(104) 単一収束
+- 検証✅: 全verified set_name_ebay の set_code割れ=0(cardID疑似割れ除く)を自前走査で確認
+- 検証✅: backup pre_twinfix_20260608_* 取得確認
