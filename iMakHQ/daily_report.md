@@ -502,3 +502,21 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: 破天の怒り 'Sword & Shield—Battle Styles'(大誤)→XY—BREAKpoint / GXウルトラシャイニー Lost Thunder→Hidden Fates 等の誤facet訂正を確認
 - 検証✅: backup products.sqlite.pre_snecorr_20260608_061708 取得確認
 - 検証✅: 残unverified内訳=void1059+TAG TEAM193+THE BEST OF XY173+ウルトラフォース55+端数 を実機確認(全てfail-closed正当)
+
+## 2026-06-08 (続4) — Catalog: Dragonball filter_map FB04-08 誤set名 根治
+
+### 決定事項
+- 決定1: api.lookup set_name誤値の真因=DB表ebay_filter_map set_code FB04-08が誤。一段深い真因=yaml(正)修正後にloader.py未実行でDB表が古いまま=yaml↔DB乖離。DB表をyaml同期で根治
+- 決定2: product行書換不要(api.lookupはlive変換、map修正で約600件自動正値化)。dead/誤setエントリ6件削除+実在英語raw5件追加
+- 決定3: FS系はraw mismatchあるが「JP↔EN名称差」の可能性(FS04 FRIEZA=Frieza一致/FS01 SON GOKU=Saiyan Genesis)で誤判定回避のため未修正。HQに英語スターター正式名を確認依頼
+
+### 変更
+- 変更: iMakCatalog/migrations/2026-06-08_dragonball_filter_map_fb04_08_fix.py 新規 + --commit(set_code FB04-08訂正 + set表 dead6削除/raw5追加)
+- 変更: iMakCatalog/ebay_filter_map/dragonball.yaml に EN raw set エントリ5件追記(SSOT同期)
+- 変更: requests/2026-06-08_dragonball_filter_map_fb04_08_wrong_names_done.md 新規(完了報告+FS確認依頼+loader運用提起)
+
+### 検証
+- 検証✅: 修正前 api.lookup FB04-001=Fusion Surge等の誤値を再現 → 修正後 FB04=Ultra Limit/FB05=New Adventure/FB06=Rivals Clash/FB07=Wish for Shenron/FB08=Saiyan's Pride
+- 検証✅: 純粋FBxx-NNN(variant無) 全コード単一正値に収束(FB04 Ultra Limit 130件 等)
+- 検証✅: 各コード内の少数他値=正当な再録variant(product_id=FB06-010_SB02_dummy_s1 は set_official=SB02=正)+promo を実機確認(誤りでない)
+- 検証✅: backup products.sqlite.pre_dbfmfix_20260608_* 取得確認

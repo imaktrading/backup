@@ -41,6 +41,23 @@ set:
     note: REVIEW eBay 値
     year: 2025
 
+  # EN 公式原文ベタ一致 (HQ確定 2026-06-08, FB04-08 誤set名根治の英語raw)
+  - source: BOOSTER PACK -ULTRA LIMIT- [FB04]
+    ebay: Ultra Limit
+    note: HQ確定 2026-06-08 (旧 'Fusion Surge' 誤)
+  - source: BOOSTER PACK -NEW ADVENTURE- [FB05]
+    ebay: New Adventure
+    note: HQ確定 2026-06-08 (旧 'Rising Spark' 誤)
+  - source: BOOSTER PACK -RIVALS CLASH- [FB06]
+    ebay: Rivals Clash
+    note: HQ確定 2026-06-08 (旧 'Perfect Combination' 誤)
+  - source: BOOSTER PACK -WISH FOR SHENRON- [FB07]
+    ebay: Wish for Shenron
+    note: HQ確定 2026-06-08 (旧 'Ultra Limit' 誤配置)
+  - source: BOOSTER PACK -SAIYAN’S PRIDE- [FB08]
+    ebay: "Saiyan's Pride"
+    note: HQ確定 2026-06-08 (旧 'Secret of Evolution' 誤; 生は curly apostrophe)
+
 # ============================================================================
 # Set code (公式原文の角括弧内コードからの fallback)
 # 注: 弾名は実際の DB から取得した正規値. 旧 psa_to_csv の値とは異なる可能性あり.
