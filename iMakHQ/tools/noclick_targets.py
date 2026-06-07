@@ -75,34 +75,27 @@ def main():
     targets = select(rows)
     n_all_noclick = sum(1 for r in rows if "NO_CLICK" in (r.get("flags") or "").split("|"))
 
-    stamp = datetime.date.today().strftime("%Y%m%d")
-    path = os.path.join(DESK, f"タイトル改修対象_{stamp}.csv")
-    base, ext = os.path.splitext(path)
-    for i in range(20):
-        try:
-            f = open(path if i == 0 else f"{base}_{i+1}{ext}", "w", newline="", encoding="utf-8-sig")
-            path = f.name
-            break
-        except PermissionError:
-            continue
-    with f:
-        w = csv.writer(f)
-        w.writerow(["済", "系統", "商品名", "watch", "対応", "CTR", "語数", "写真",
-                    "価格", "改修ヒント", "eBay URL"])
-        for r in targets:
-            kw, ph = _f(r.get("keywords")), _f(r.get("photos"))
-            watch = int(_f(r.get("watch")))
-            # CTR は判定基盤(organic+PL累計)の ctr_total を優先表示 (無ければ旧 ctr)
-            ctr_disp = r.get("ctr_total") or r.get("ctr", "")
-            w.writerow(["", dw.vein_of(r.get("title") or ""), r.get("title", ""),
-                        watch, fix_method(watch), ctr_disp, int(kw) if kw else "",
-                        int(ph) if ph else "", f"${_f(r.get('price')):.0f}",
-                        fix_hint(kw, ph), r.get("ebay_url", "")])
+    # スプシ「タイトル改修」タブに集約 (デスクトップCSV廃止 2026-06-07)
+    out_rows = [["済", "系統", "商品名", "watch", "対応", "CTR", "語数", "写真",
+                 "価格", "改修ヒント", "eBay URL"]]
+    for r in targets:
+        kw, ph = _f(r.get("keywords")), _f(r.get("photos"))
+        watch = int(_f(r.get("watch")))
+        ctr_disp = r.get("ctr_total") or r.get("ctr", "")   # 判定基盤(organic+PL累計)優先
+        out_rows.append(["", dw.vein_of(r.get("title") or ""), r.get("title", ""),
+                         watch, fix_method(watch), ctr_disp, int(kw) if kw else "",
+                         int(ph) if ph else "", f"${_f(r.get('price')):.0f}",
+                         fix_hint(kw, ph), r.get("ebay_url", "")])
+    try:
+        from sheet_io import write_rows_to_tab, MAINT_URL
+        write_rows_to_tab("タイトル改修", out_rows)
+        print(f"✏️ 「タイトル改修」タブ更新: {len(out_rows)-1}件 → {MAINT_URL}")
+    except Exception as _e:
+        print(f"⚠ 「タイトル改修」タブ更新失敗: {type(_e).__name__}: {_e}")
 
     n_w = sum(1 for r in targets if _f(r.get("watch")) > 0)
     print(f"タイトル改修対象 (NO_CLICK 全件) = {len(targets)}件 (価格高い順)")
     print(f"  対応の目安: watcher無 {len(targets)-n_w}件=取下再出品でも可(ブースト+再生成) / watcher有 {n_w}件=in-place推奨(watcher保持)")
-    print(f"\nCSV出力: {path}")
     print("▶ relistで一括ブースト＋再生成 か、個別に in-place で考えたタイトルに直すか。watcher有はin-place推奨。")
     print("※ 本気のCTR改善は出品くんのタイトル生成改善(別PDCA)。本リストはその対象把握も兼ねる。")
 

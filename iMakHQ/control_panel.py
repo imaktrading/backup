@@ -399,7 +399,8 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "noclick_targets.py"],
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/タイトル改修対象_*.csv",
+        # 結果は「既存メンテ」スプシ タイトル改修タブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     {
         # NO_CONVERT: 高クリック無販売を自分の実売(proven)と照合=価格抵抗 (2026-06-05)。②の下段
@@ -408,7 +409,8 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "price_resistance.py"],
         "params": [],
-        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/価格抵抗_*.csv",
+        # 結果は「既存メンテ」スプシ 価格抵抗タブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を

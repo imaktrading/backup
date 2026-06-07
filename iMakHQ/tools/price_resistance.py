@@ -114,25 +114,20 @@ def main():
     # 優先順位: 実績比較可(割高ほど上=乖離大) → 実績なし、同条件はクリック多い(=関心大)順
     recs.sort(key=lambda d: (1 if d["kind"] == "なし" else 0, -(d["ratio"] or 0), -d["clicks"]))
 
-    stamp = datetime.date.today().strftime("%Y%m%d")
-    path = os.path.join(DESK, f"価格抵抗_{stamp}.csv")
-    base, ext = os.path.splitext(path)
-    for i in range(20):
-        try:
-            f = open(path if i == 0 else f"{base}_{i+1}{ext}", "w", newline="", encoding="utf-8-sig")
-            path = f.name
-            break
-        except PermissionError:
-            continue
-    with f:
-        w = csv.writer(f)
-        w.writerow(["判断(値下/撤退/様子見)", "系統", "商品名", "現価格", "実売中央", "実売最高",
-                    "倍率(現/最高)", "実績基準", "クリック", "watch", "メルカリ原価URL", "eBay URL"])
-        for d in recs:
-            w.writerow(["", d["vein"], d["title"], f"${d['price']:.0f}",
-                        f"${d['med']:.0f}" if d["med"] else "-", f"${d['mx']:.0f}" if d["mx"] else "-",
-                        f"{d['ratio']:.2f}" if d["ratio"] else "-", d["kind"],
-                        d["clicks"], d["watch"], dw.mercari_url(d["kw"]), d["ebay"]])
+    # スプシ「価格抵抗」タブに集約 (デスクトップCSV廃止 2026-06-07)
+    out_rows = [["判断(値下/撤退/様子見)", "系統", "商品名", "現価格", "実売中央", "実売最高",
+                 "倍率(現/最高)", "実績基準", "クリック", "watch", "メルカリ原価URL", "eBay URL"]]
+    for d in recs:
+        out_rows.append(["", d["vein"], d["title"], f"${d['price']:.0f}",
+                         f"${d['med']:.0f}" if d["med"] else "-", f"${d['mx']:.0f}" if d["mx"] else "-",
+                         f"{d['ratio']:.2f}" if d["ratio"] else "-", d["kind"],
+                         d["clicks"], d["watch"], dw.mercari_url(d["kw"]), d["ebay"]])
+    try:
+        from sheet_io import write_rows_to_tab, MAINT_URL
+        write_rows_to_tab("価格抵抗", out_rows)
+        print(f"💲 「価格抵抗」タブ更新: {len(out_rows)-1}件 → {MAINT_URL}")
+    except Exception as _e:
+        print(f"⚠ 「価格抵抗」タブ更新失敗: {type(_e).__name__}: {_e}")
 
     over = [d for d in recs if d["ratio"] and d["ratio"] > 1]
     none = [d for d in recs if d["kind"] == "なし"]
@@ -143,7 +138,7 @@ def main():
     print("\n  ▼ 割高 top (現価格 vs 自分の実売最高):")
     for d in over[:10]:
         print(f"    ${d['price']:>4.0f} vs 最高${d['mx']:>4.0f} (x{d['ratio']:.1f}) [{d['kind']}] {d['title'][:40]}")
-    print(f"\nCSV出力: {path}")
+    # 出力はスプシ「価格抵抗」タブ (上で更新済)
     print("▶ 各行のメルカリ原価URLで仕入値を確認 → 実売価格まで下げられるなら値下、原価高なら撤退寄り。")
     print("※ 自動値下げはしない。drop-ship は価格=原価+マージンなので原価を見て人が判断。")
 
