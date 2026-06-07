@@ -263,14 +263,22 @@ def register_filter_map(
     ebay_value: str,
     note: Optional[str] = None,
 ) -> None:
-    """eBay フィルタ値マッピングを 1件登録 (重複時は何もしない)."""
+    """eBay フィルタ値マッピングを 1件 upsert.
+
+    重複 (同 category/field/source_value) 時は ebay_value / note を **更新** する
+    (yaml = SSOT。旧実装の INSERT OR IGNORE は yaml 修正後 loader を回しても
+    既存行を更新せず yaml↔DB 乖離を招いた=2026-06-08 Dragonball FB/FS 誤set名の真因)。
+    created_at は初回値を保持。
+    """
     now = datetime.now().isoformat(timespec="seconds")
     conn = _connect()
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO ebay_filter_map "
+            "INSERT INTO ebay_filter_map "
             "(category, field, source_value, ebay_value, note, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(category, field, source_value) DO UPDATE SET "
+            "ebay_value=excluded.ebay_value, note=excluded.note",
             (category, field, source_value, ebay_value, note, now),
         )
         conn.commit()

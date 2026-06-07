@@ -520,3 +520,23 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: 純粋FBxx-NNN(variant無) 全コード単一正値に収束(FB04 Ultra Limit 130件 等)
 - 検証✅: 各コード内の少数他値=正当な再録variant(product_id=FB06-010_SB02_dummy_s1 は set_official=SB02=正)+promo を実機確認(誤りでない)
 - 検証✅: backup products.sqlite.pre_dbfmfix_20260608_* 取得確認
+
+## 2026-06-08 (続5) — Catalog: DBSCG FS訂正 + loader真因(IGNORE)修正 + name_en disputed 0達成
+
+### 決定事項
+- 決定1: FS01/02/03/05/06/07/08 をrawキャラ名へ訂正(FBと同型、map theme名は誤)。FS04/09-12は正で維持
+- 決定2: yaml↔DB乖離の真因は loader未実行でなく api.register_filter_map が INSERT OR IGNORE(既存キー更新せず)。upsert化で実効化=FB/FS両バグの根本対策
+- 決定3: name_en disputed残3 trainer(ビート→Bede/N→N/エリカ→Erika)をverified_manual昇格、disputed 3→0達成
+
+### 変更
+- 変更: iMakCatalog/migrations/2026-06-08_dragonball_filter_map_fs_fix.py 新規+--commit(FS set_code 7訂正+dead set7削除)
+- 変更: iMakCatalog/migrations/2026-06-08_pokemon_name_en_disputed_trainers_fix.py 新規+--commit(trainer3件)
+- 変更: iMakCatalog/api.py register_filter_map を INSERT OR IGNORE → ON CONFLICT DO UPDATE(upsert、created_at保持)
+- 変更: iMakCatalog/tests/test_dragonball_filter_map.py 新規(set_code公式名一致/旧誤値逆戻り防止/upsert検証 3件)
+- 変更: requests/ に FS done / trainer done 報告2件
+
+### 検証
+- 検証✅: FS純粋FSxx-NNN全コード単一正値収束(FS01 Son Goku/FS05 Bardock/FS06 Son Goku (Mini)/FS08 Vegeta (Mini) Super Saiyan 3)
+- 検証✅: name_en disputed 0(SA-021 Bede/XY-036 N/362-SM-P Erika をverified_manual、実機COUNT=0)
+- 検証✅: pytest tests/test_dragonball_filter_map.py 3 passed(upsert動作=TEST_SENTINEL更新→復元 含む)
+- 検証✅: backup pre_fsfix/pre_trainerfix 取得確認
