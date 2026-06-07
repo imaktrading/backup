@@ -103,6 +103,51 @@ def audit(db=DB):
     return era_viol, year_viol, total_viol
 
 
+def set_total_reference(db=DB):
+    """{set_name_ebay: 主流(最多) card_number_total} を返す。出品時の整合チェック用参照。
+
+    1セット=1total が原則なので、最多totalを「正」とする。check_csv が CSV各行の
+    C:Set ↔ カード番号total を照合して矛盾(誤マップ)を出品前に弾くのに使う。
+    """
+    import collections
+    con = sqlite3.connect(db)
+    con.row_factory = sqlite3.Row
+    tots = collections.defaultdict(collections.Counter)
+    for r in con.execute("SELECT specs FROM products WHERE category='pokemon_tcg'"):
+        try:
+            sp = json.loads(r["specs"]) if r["specs"] else {}
+        except Exception:
+            continue
+        eb = sp.get("set_name_ebay", "")
+        t = str(sp.get("card_number_total", "")).strip()
+        if eb and t:
+            tots[eb][t] += 1
+    return {eb: c.most_common(1)[0][0] for eb, c in tots.items()}
+
+
+def card_total(card_number):
+    """'097/080' → '080' (分母=セット総数, 先頭0保持でcatalog値と一致)。取れなければ ''。"""
+    m = re.search(r"/\s*(\d+)", str(card_number or ""))
+    return m.group(1) if m else ""
+
+
+def row_set_issue(set_name, card_number, ref):
+    """CSV1行の C:Set ↔ カード番号total 整合チェック。矛盾なら理由文字列、OKなら None。
+
+    ref = set_total_reference()。set が参照に無い/番号取れない場合は判定不能で None
+    (fail-closedは呼出側で「不明はskip」運用)。
+    """
+    set_name = (set_name or "").strip()
+    t = card_total(card_number)
+    if not set_name or not t or set_name not in ref:
+        return None
+    exp = ref[set_name]
+    if t != exp:
+        return (f"Set↔カード番号 不整合: Set='{set_name}'(総数/{exp}) なのに カード/{t} "
+                f"→ set_name_ebay 誤マップ疑い (catalog要確認)")
+    return None
+
+
 def main():
     era_viol, year_viol, total_viol = audit()
     import collections

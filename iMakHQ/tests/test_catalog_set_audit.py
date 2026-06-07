@@ -35,6 +35,25 @@ def test_eb_era():
     assert a.eb_era("Nihil Zero") == "bare/other"      # 新弾(prefix無)は世代判定対象外
 
 
+def test_card_total_extract():
+    a = _load()
+    assert a.card_total("097/080") == "080"
+    assert a.card_total("050/156") == "156"
+    assert a.card_total("") == ""
+
+
+def test_row_set_issue_total_mismatch():
+    a = _load()
+    ref = {"Sun & Moon—Ultra Prism": "156", "Nihil Zero": "080"}
+    # Ultra Prism(総数156)なのに /080 → 誤マップ検出 (今日のbuyer指摘の型)
+    assert a.row_set_issue("Sun & Moon—Ultra Prism", "097/080", ref) is not None
+    # 正: Nihil Zero /080 → None
+    assert a.row_set_issue("Nihil Zero", "097/080", ref) is None
+    # 参照に無いset / 番号不明 → 判定不能 None
+    assert a.row_set_issue("Unknown Set", "001/100", ref) is None
+    assert a.row_set_issue("Nihil Zero", "", ref) is None
+
+
 def test_cross_era_is_detectable():
     a = _load()
     # DPt3(Legacy) が Scarlet & Violet set名 = 世代不一致 (今日の実バグ型)

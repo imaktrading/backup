@@ -346,6 +346,42 @@ def load_cost_data(csv_path):
 
 
 # ===== 内部バリデーション =====
+_CATALOG_SET_REF = None  # {set_name_ebay: 主流total} を一度だけ catalog から構築・cache
+
+
+def _catalog_set_consistency(set_name, card_number, year=""):
+    """C:Set の整合チェック2種 (2026-06-07 set誤マップ事故対策)。矛盾なら理由、OK/判定不能は None。
+
+    (A) Set ↔ カード番号total: catalog多数派total と食い違い (cross-era/total違いを検出)
+    (B) Set世代 ↔ Year: set名の世代と Year が年代レンジ外 (catalog汚染に依存せず堅い)
+    """
+    global _CATALOG_SET_REF
+    try:
+        import sys as _sys, os as _os
+        _t = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakHQ", "tools")
+        if _t not in _sys.path:
+            _sys.path.insert(0, _t)
+        from catalog_set_audit import set_total_reference, row_set_issue, eb_era, ERA_YEARS
+        if _CATALOG_SET_REF is None:
+            _CATALOG_SET_REF = set_total_reference()
+        # (A) total 整合
+        issue = row_set_issue(set_name, card_number, _CATALOG_SET_REF)
+        if issue:
+            return issue
+        # (B) 世代×Year 整合 (catalog参照に依存しない)
+        import re as _re
+        ee = eb_era(set_name or "")
+        m = _re.search(r"(20\d\d)", str(year or ""))
+        if ee in ERA_YEARS and m:
+            y = int(m.group(1)); lo, hi = ERA_YEARS[ee]
+            if not (lo <= y <= hi):
+                return (f"Set世代↔Year 不整合: Set='{set_name}'(世代 {ee}:{lo}-{hi}) なのに Year={y} "
+                        f"→ set_name_ebay 誤マップ疑い")
+        return None
+    except Exception:
+        return None
+
+
 def validate_row(row, row_idx):
     """1行のCSVデータをバリデーション。問題リストを返す"""
     issues = []
@@ -428,6 +464,12 @@ def validate_row(row, row_idx):
     # --- PSA鑑定番号 ---
     if not cert or not cert.isdigit():
         issues.append(("ERROR", f"PSA鑑定番号が不正: {cert}"))
+
+    # --- カタログ内部整合: Set↔カード番号total / Set世代↔Year (2026-06-07 set誤マップ事故対策) ---
+    _setissue = _catalog_set_consistency(get_col(row, "C:Set"), get_col(row, "C:Card Number"),
+                                         get_col(row, "C:Year Manufactured"))
+    if _setissue:
+        issues.append(("ERROR", _setissue))
 
     return issues
 
