@@ -1101,6 +1101,29 @@ POKEMON_CATEGORY = "pokemon_tcg"
 # 出典: 各 set の公式日本語名 + 対応 set_code (image_url 由来).
 # 新弾追加時は本マップにも追記.
 _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
+    # --- 2026-06-07 追加: PSA英語セット名→code 解決漏れ (既存カードを未収録誤判定していた根治) ---
+    #     HQ依頼 requests/2026-06-07_psa_adapter_pokemon_setcode_resolution.md
+    #     キーワード in 判定なので英語セット名そのままで可。BW3/BW8/XY11 は2デッキ混在で
+    #     code 一意でない (番号で本体に当たればOK、外れたら subject 名照合に委ねる)。
+    "ALTER GENESIS":               "SM12",
+    "VMAX RISING":                 "S1a",
+    "REMIX BOUT":                  "SM11a",
+    "DREAM LEAGUE":                "SM11b",
+    "FACING A NEW TRIAL":          "SM2p",
+    "DARKNESS THAT CONSUMES LIGHT": "SM3N",
+    "AWAKENED HEROES":             "SM4S",
+    "DRAGON STORM":                "SM6a",
+    "THUNDERCLAP SPARK":           "SM7a",
+    "FAIRY RISE":                  "SM7b",
+    "DARK ORDER":                  "SM8a",
+    "NIGHT UNISON":                "SM9a",
+    "FULL METAL WALL":             "SM9b",
+    "PSYCHO DRIVE":                "BW3",
+    "HAIL BLIZZARD":               "BW3",
+    "SPIRAL FORCE":                "BW8",
+    "THUNDER KNUCKLE":             "BW8",
+    "FEVER-BURST FIGHTER":         "XY11",
+    "CRUEL TRAITOR":               "XY11",
     # Sword & Shield
     "25TH ANNIVERSARY COLLECTION": "S8a",
     "VSTAR UNIVERSE":              "S12a",

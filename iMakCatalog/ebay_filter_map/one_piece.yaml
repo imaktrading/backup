@@ -103,6 +103,10 @@ set_code:
     ebay: Adventure on Kami's Island
     note: REVIEW — eBay 実値要確認
     year: 2026
+  - source: OP-16
+    ebay: The Time of Battle
+    note: HQ web確定 2026-06-07 (公式 en.onepiece-cardgame.com 英語版 2026-06-12)
+    year: 2026
 
   # ----- Compound Booster (OP × EB combined releases for EN market) -----
   - source: OP14-EB04

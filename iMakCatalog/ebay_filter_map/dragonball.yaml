@@ -80,6 +80,10 @@ set_code:
     ebay: Dual Evolution
     note: 旧 psa_to_csv 'Destined Rivals' は誤
     year: 2026
+  - source: FB10
+    ebay: Cross Force
+    note: HQ web確定 2026-06-07 (公式 dbs-cardgame.com 英語版 2026-06-19)
+    year: 2026
 
   # ----- Manga Booster -----
   - source: SB01
