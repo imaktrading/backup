@@ -468,3 +468,20 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: void dry-run 1059件(MC766+SI293)=HQ申告一致 → --commit後 残存MC/SI値=0 / MC-001,SI-001 set_name_ebay='' source='hq_voided_flagged2_20260608' / b_layer=unverified維持
 - 検証✅: backup products.sqlite.pre_voidmcsi_20260608_052729 取得確認
 - 検証✅: cardID-NNNNN 実測 1,560件 / set_name_ebay空831 = energy390+prize129+その他312(Pokémon192+Trainer120) / regulation_mark 全件specs未保存を確認(feasibility根拠)
+
+## 2026-06-08 (続2) — Catalog: set_name_ebay round1-6 反映 (承認7,998昇格 / 修正24はHQ確認待ち)
+
+### 決定事項
+- 決定1: HQ round1-6検証を JPセット名(set_name「」内core)キーで分類反映。承認(現値正=HQ確認済)+era-promo=7,998件を verified_manual 昇格
+- 決定2: 修正24セット(1,908件)は適用保留。理由=HQ目標値が略記で eBay facet接頭辞の有無(例 Ultra Prism vs Sun & Moon—Ultra Prism)が私には検証不可。round3で"Prismatic Evolutions"接頭辞なし確定の一方DB承認値はem-dash接頭辞ありで、セット毎に異なる→推測適用は誤facet化リスク=fail-closed保留しHQに正確文字列を確認依頼
+- 決定3: JP限定427(TAG TEAM/THE BEST OF XY/ウルトラフォース等)はunverified据置。UNCOVERED18(verdict未割当の旧期小セット)も据置
+
+### 変更
+- 変更: iMakCatalog/migrations/2026-06-08_pokemon_set_name_ebay_apply_rounds.py 新規 + --commit(承認+promo 7,998件 verified_manual昇格、oracle=hq_confirmed_rounds_20260608)
+- 変更: requests/2026-06-08_set_name_ebay_jp_en_mapping_corrections_round6_final_done.md 新規(完了報告+修正24セットのeBay正確文字列確認依頼)
+
+### 検証
+- 検証✅: dry-run分類 approve7001+promo997+correct1908+failclosed427+skip1070+uncovered18 → 昇格対象7998
+- 検証✅: --commit後 verified_manual 4,482→12,480(+7,998) / unverified 11,421→3,423
+- 検証✅: backup products.sqlite.pre_sneapply_20260608_060654 取得確認
+- 検証✅: SM8b(GXウルトラシャイニー)現値'Lost Thunder'が誤=correct対象として保留され昇格対象外(誤値の昇格阻止を確認)
