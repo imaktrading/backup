@@ -572,3 +572,18 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: 純粋code-NNNで set_code単一clean値収束(割れは短prefix/再録由来の見かけのみ)
 - 検証✅: blankは全てnon-facet JP限定品(ファミリーデッキ/エナジーマーカー/限定商品)=fail-closed正当
 - 検証✅: b_layer set_name_ebay = pokemon14387/1516 + op8175/447 + db5414/163 + gundam2180/39
+
+## 2026-06-08 (続8) — Catalog: Pokemon name_en 取り込み fail-closed resolver (arch2)
+
+### 決定事項
+- 決定1: name_enはscraper upsertでなく翻訳/backfillで付与。Durant/Waitressの真因は旧図鑑番号計算で、translate_by_rule(name_jp直引き)は正→「番号計算廃止、rule独立一致+自己整合のみ採用、確証なし空欄」が解
+- 決定2: resolve_name_en()を実装(源参照→自己整合→fail-closed)。call-site配線(backfill/run該当~10-20行)は残・次段
+
+### 変更
+- 変更: iMakCatalog/scrapers/pokemon_name_translation.py に resolve_name_en() 追加(verified_en_by_jp源参照 + rule独立一致 + disputed/blank fail-closed)
+- 変更: iMakCatalog/tests/test_name_en_failclosed_resolve.py 新規(5件、Durant/Waitressクラス阻止を実証)
+- 変更: requests/2026-06-08_arch2_..._response.md 新規(設計+feasibility回答)
+
+### 検証
+- 検証✅: pytest tests/test_name_en_failclosed_resolve.py 5 passed
+- 検証✅: ピカチュウ verified=Waitress(誤) vs rule=Pikachu → disputed(None)=番号バグ混入を構造的に遮断 / ビート(非独立)→空欄 / チコリータ→Chikorita(独立採用)

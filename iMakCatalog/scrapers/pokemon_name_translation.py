@@ -276,6 +276,48 @@ def translate_by_rule(name_jp: str, poke_dict: dict[str, str],
     return None, "none"
 
 
+_INDEP_MATCH = {"pokeapi_direct", "pokeapi_suffix", "pokeapi_form"}
+
+
+def resolve_name_en(name_jp: str, poke_dict: dict[str, str],
+                    api_dict: dict[str, str] | None = None,
+                    verified_en_by_jp: dict[str, str] | None = None
+                    ) -> tuple[Optional[str], str, str]:
+    """取り込み時 fail-closed な name_en 解決 (arch2: 番号計算→源参照+自己整合).
+
+    旧来の「pokeapi 図鑑番号で機械計算」は番号ズレ/product_id破損で別種に化けた
+    (チコリータ→Durant 等)。本関数は **canonical な name_jp 直引き(translate_by_rule)
+    のみ採用 + 既存 verified との自己整合** を強制し、確証なければ空欄(fail-closed)。
+
+    Args:
+      verified_en_by_jp: {name_jp: 確定済 name_en}。同一 species は同一英名=源参照。
+                         (b_layer verified_auto/manual から構築して渡す)
+    Returns:
+      (name_en | None, status, reason)
+      status: 'verified_auto'(rule独立一致) | 'reuse_verified'(既存再利用)
+            | 'disputed'(ruleと既存が不一致=番号バグの疑い) | 'blank'(確証なし=空欄)
+    """
+    verified_en_by_jp = verified_en_by_jp or {}
+    api_dict = api_dict or {}
+    existing = verified_en_by_jp.get(name_jp)
+    cand, mt = translate_by_rule(name_jp, poke_dict, api_dict)
+    cand_indep = bool(cand) and mt in _INDEP_MATCH
+
+    if existing:
+        if cand_indep and cand == existing:
+            return existing, "verified_auto", f"rule({mt})+verified 一致"
+        if cand_indep and cand != existing:
+            # 独立 rule と既存 verified が食い違う = 番号/コード破損の疑い → 採らない
+            return None, "disputed", f"rule={cand!r} != verified={existing!r}"
+        # 候補が非独立 or 不能 → 既存 verified を源参照で再利用
+        return existing, "reuse_verified", "既存 verified 再利用"
+
+    # 既存なし: 独立 rule のみ採用、それ以外は fail-closed(空欄)
+    if cand_indep:
+        return cand, "verified_auto", f"rule {mt}"
+    return None, "blank", f"非独立(mt={mt}) → fail-closed"
+
+
 def _english_suffix(jp_suffix: str) -> str:
     """suffix の英語表記 (TCG English convention)."""
     mapping = {
