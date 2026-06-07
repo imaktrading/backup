@@ -2,9 +2,17 @@
 
 設計 (= 5/28 ユーザー指示 「グダグダしない」 + 「download + paste 不要」):
 - 出品くん cycle 後、 CSV 内 全 cert を catalog hit 状況 inspect
-- 怪しい cert (= hit 不能 / 複数候補 / DON 系) を HTML viewer + ローカル http.server で表示
+- ユーザー目視 verify 済 (verified_certs) と cache miss / category 不明 を除く
+  **全 cert を HTML viewer + ローカル http.server で表示** (= ユーザー指示「全件表示」)
+  ※ 旧設計は「怪しい cert (hit 不能/複数候補/DON 系) だけ表示」だったが、機械が
+    怪しさを判定 = ユーザーを経ない不正確判断になるため撤廃。全件をユーザー目視に回す。
 - ユーザー browser click + 「✉️ HQ に送信」 → POST → JSON 保存 → server auto stop
 - HQ が保存 file 読込 → catalog 投入 + スプシ書込
+
+注意 (= 2026-06-07 確認): 本 viewer の目視は「同定」(スキャン画像 ⇔ どの product_id か)
+を担う。catalog 行内の英語フィールド (set_name_ebay 等) の正誤は JP カード画像から
+人が検証不能なので、ここでは捕まらない。フィールド整合は catalog_set_audit.py /
+check_csv の機械ゲート (Set↔番号↔世代) で別途担保する。役割分担: 人=同定 / 機械=フィールド整合。
 """
 import os
 import sys
