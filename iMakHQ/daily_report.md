@@ -555,3 +555,20 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: XY11→XY—Steam Siege(106)/BW8→Black & White—Plasma Freeze(102)/BW3→Black & White—Next Destinies(104) 単一収束
 - 検証✅: 全verified set_name_ebay の set_code割れ=0(cardID疑似割れ除く)を自前走査で確認
 - 検証✅: backup pre_twinfix_20260608_* 取得確認
+
+## 2026-06-08 (続7) — Catalog: OP/DB/Gundam clean set_name_ebay保存 + b_layer拡張 (arch1)
+
+### 決定事項
+- 決定1: SSOT方針に沿い OP/DB/Gundam の specs.set_name_ebay に clean eBay facet名を確定保存(filter_mapで一度だけ変換、出品は参照のみへ)。導出順=api._row_to_dictと同一
+- 決定2: filter_map miss=空欄(fail-closed)、raw degradeさせない。b_layer_status を OP/DB/Gundam に拡張(clean=verified_manual/miss=unverified)
+- 決定3: 再録は set_official が再録先booster名のため①一致で自動的に再録先clean名(suffix専用パース不要)
+
+### 変更
+- 変更: iMakCatalog/migrations/2026-06-08_opdbgundam_clean_set_name_ebay.py 新規+--commit(16,418件 specs.set_name_ebay clean化 + b_layer INSERT/upsert)
+- 変更: requests/2026-06-08_arch1_..._done.md 新規(完了報告+scraper側別途のfeasibility回答)
+
+### 検証
+- 検証✅: OP clean8175/blank447, DB clean5414/blank163, Gundam clean2180/blank39。OP01-001='Romance Dawn'(旧raw)を実機確認
+- 検証✅: 純粋code-NNNで set_code単一clean値収束(割れは短prefix/再録由来の見かけのみ)
+- 検証✅: blankは全てnon-facet JP限定品(ファミリーデッキ/エナジーマーカー/限定商品)=fail-closed正当
+- 検証✅: b_layer set_name_ebay = pokemon14387/1516 + op8175/447 + db5414/163 + gundam2180/39
