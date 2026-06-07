@@ -206,6 +206,56 @@ def to_ebay_value(category: str, field: str, source_value: str) -> Optional[str]
         conn.close()
 
 
+# B層 verified status (= b_layer_status テーブル. 2026-06-07 新設)
+#   4状態: unverified / verified_auto / verified_manual / disputed
+#   出品ゲートは "強制" を listing/HQ 側が担い、ここは status の "参照" を提供する。
+_BLOCKING_STATUS = {"unverified", "disputed"}
+
+
+def field_status(category: str, product_id: str, field: str) -> Optional[str]:
+    """B層フィールドの検証 status を返す. 未記録なら None.
+
+    field: 'name_en' | 'set_name_ebay' 等.
+    """
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT status FROM b_layer_status "
+            "WHERE category = ? AND product_code = ? AND field = ?",
+            (category, product_id, field),
+        ).fetchone()
+        return row["status"] if row else None
+    except sqlite3.OperationalError:
+        # テーブル未作成環境 (migration 未適用) では None
+        return None
+    finally:
+        conn.close()
+
+
+def is_listable(category: str, product_id: str,
+                fields: tuple[str, ...] = ("name_en", "set_name_ebay")) -> bool:
+    """出品可否の "参照" 判定. 対象 B層フィールドが unverified / disputed を含めば False.
+
+    注: ゲートの "強制" は listing/HQ 側 (新規・relist 両経路) の責務.
+        昇格 (verified_auto/verified_manual) 完了前に強制すると大量ブロックになるため、
+        本ヘルパーは判定材料の提供のみ (呼び出し側がゲート有効化時期を制御する).
+        status 未記録(None)のフィールドは判定対象外 (= ブロックしない).
+    """
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT status FROM b_layer_status "
+            "WHERE category = ? AND product_code = ? AND field IN (%s)"
+            % ",".join("?" * len(fields)),
+            (category, product_id, *fields),
+        ).fetchall()
+        return not any(r["status"] in _BLOCKING_STATUS for r in rows)
+    except sqlite3.OperationalError:
+        return True  # テーブル未作成 = ゲート無効 (従来動作)
+    finally:
+        conn.close()
+
+
 def register_filter_map(
     category: str,
     field: str,
