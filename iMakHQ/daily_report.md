@@ -436,3 +436,18 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: disputed fix dry-run → pokeapi系64/対象外3(trainer)。全64件をDBから抽出しmaterialize(ピカチュウ→Waitress等M-P壊滅corruption含む)
 - 検証✅: set_name_ebay 三分類 — unverified 11,421=75 distinct値/空欄0/HQ確認済53値と重複0(transitivity不可)/72値がyaml SSOT外
 - 検証✅: 昇格migration dry-run(承認2値+typo1)→ 593件一致(Lost Thunder426+Best of XY167)/typo'NONEXISTENT VALUE'検出/DB無変更
+
+## 2026-06-08 — Catalog: disputed 64件 name_en 補正 適用(HQ greenlight後)
+
+### 決定事項
+- 決定1: HQ greenlight(suspect132突合=60件完全2源一致+6件空欄fill安全+trainer1除外済)を受け、disputed 64件 name_en 補正を --commit で適用
+- 決定2: is_listable ゲート有効化は未着手のまま据え置き(set_name_ebay unverified 11,421未昇格で全ブロック回避、⑤sequencing=HQ指示遵守)
+
+### 変更
+- 変更: products.sqlite name_en 64件補正 + b_layer_status status verified_auto 昇格(migration 2026-06-07_pokemon_name_en_disputed_fix.py --commit、DB変更=git外)
+- 変更: requests/2026-06-07_name_en_tier23_poc_and_disputed_fix_proposal_greenlight_done.md 新規(完了報告+before/after10件、共有data領域)
+
+### 検証
+- 検証✅: disputed 67→3(残=trainer SA-021ビート/XY-036 N/362-SM-P エリカ のみ) / verified_auto 15,233→15,297(+64)
+- 検証✅: backup products.sqlite.pre_nameenfix_20260608_045839 取得確認
+- 検証✅: 抜粋10件 補正確認 — 020/M-P ピカチュウ Waitress→Pikachu / 022/M-P リオル Judge→Riolu / 017/M-P ニャオハ Pokémon Catcher→Sprigatito / SCS-003 Zweilous→Victini / 064/XY-P None→Pikachu、全て verified_auto
