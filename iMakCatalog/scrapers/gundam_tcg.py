@@ -449,6 +449,11 @@ def build_and_upsert(
     images = [u for u in [image_url_en, image_url_ja] if u]
     language = detect_language(en_card, ja_card)
 
+    # clean set_name_ebay を取り込み時に確定保存 (SSOT: 出品は参照のみ・無ければ空欄fail-closed)
+    specs["set_name_ebay"] = api.derive_set_name_ebay(CATEGORY, set_official or None, product_id) or ""
+    specs["set_name_ebay_source"] = (
+        "filter_map_clean_ingest" if specs["set_name_ebay"] else "fail_closed_no_map")
+
     record = dict(
         category=CATEGORY,
         product_id=product_id,

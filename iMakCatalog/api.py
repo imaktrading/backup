@@ -206,6 +206,37 @@ def to_ebay_value(category: str, field: str, source_value: str) -> Optional[str]
         conn.close()
 
 
+_SET_CODE_RE = re.compile(r"[\[【]([A-Z][A-Z0-9-]*)[\]】]")
+
+
+def derive_set_name_ebay(category: str, set_name_official: Optional[str],
+                         product_id: Optional[str]) -> Optional[str]:
+    """clean な eBay facet set 名を導出 (filter_map で一度だけ変換). 無ければ None=空欄.
+
+    SSOT(出品は参照のみ)用。_row_to_dict と同順:
+      ①set_official 完全一致 → ②[CODE]→set_code → ③product_id prefix
+    再録は set_official が再録先 booster 名のため ① で再録先 clean 名になる。
+    filter_map miss は **None(fail-closed)**. raw に degrade させない。
+    scraper の取り込み + migration の両方から呼ぶ共通 helper.
+    """
+    if set_name_official:
+        v = to_ebay_value(category, "set", set_name_official)
+        if v:
+            return v
+        m = _SET_CODE_RE.search(set_name_official)
+        if m:
+            v = to_ebay_value(category, "set_code", m.group(1))
+            if v:
+                return v
+    if product_id and "-" in product_id:
+        pref = product_id.split("-", 1)[0]
+        for cand in {pref, pref.upper(), pref.lower()}:
+            v = to_ebay_value(category, "set_code", cand)
+            if v:
+                return v
+    return None
+
+
 # B層 verified status (= b_layer_status テーブル. 2026-06-07 新設)
 #   4状態: unverified / verified_auto / verified_manual / disputed
 #   出品ゲートは "強制" を listing/HQ 側が担い、ここは status の "参照" を提供する。

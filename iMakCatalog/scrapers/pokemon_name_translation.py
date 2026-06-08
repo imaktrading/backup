@@ -501,6 +501,21 @@ def run(smoke: int = 0, rule_only: bool = False, dry_run: bool = False) -> None:
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
+    # arch2 fail-closed: 既存 verified name_en を name_jp→en の源として構築 (同species同英名)
+    verified_en_by_jp: dict[str, str] = {}
+    try:
+        for vr in cur.execute(
+            """SELECT p.name_jp, p.name_en FROM products p
+               JOIN b_layer_status b ON b.product_id_ref = p.id
+               WHERE p.category = ? AND b.field = 'name_en'
+                 AND b.status IN ('verified_auto','verified_manual')
+                 AND p.name_jp IS NOT NULL AND p.name_en IS NOT NULL AND p.name_en != ''""",
+            (CATEGORY,)):
+            verified_en_by_jp.setdefault(vr["name_jp"], vr["name_en"])
+    except sqlite3.OperationalError:
+        pass  # b_layer_status 未作成環境
+    print(f"verified 源 (name_jp→en): {len(verified_en_by_jp):,} 件")
+
     # 対象 (name_en 未投入のみ)
     cur.execute("""SELECT product_id, name, name_jp, specs FROM products
                    WHERE category = ? AND (name_en IS NULL OR name_en = '')""",
@@ -516,24 +531,28 @@ def run(smoke: int = 0, rule_only: bool = False, dry_run: bool = False) -> None:
              "trainer_owned": 0, "trainer_standalone": 0, "api_cache": 0, "none": 0}
     pending_api: dict[str, dict] = {}  # name_jp -> context dict
     results: list[tuple[str, str, str]] = []  # (pid, name_en, match_type)
+    disputed: list[tuple[str, str]] = []      # (pid, reason) ← fail-closed(空欄)
 
     for r in rows:
         jp = r['name_jp'] or r['name']
-        en, mt = translate_by_rule(jp, poke_dict, api_dict)
+        # arch2: 番号計算でなく resolve_name_en(独立rule一致+自己整合+fail-closed)
+        en, status, reason = resolve_name_en(jp, poke_dict, api_dict, verified_en_by_jp)
+        _, mt = translate_by_rule(jp, poke_dict, api_dict)  # stats 用 match_type
         stats[mt] += 1
-        if en:
-            results.append((r['product_id'], en, mt))
+        if status in ("verified_auto", "reuse_verified") and en:
+            results.append((r['product_id'], en, status))
+        elif status == "disputed":
+            disputed.append((r['product_id'], reason))  # 番号バグ疑い→空欄(fail-closed)
         else:
-            # API 候補 (unique). context (set_name / card_type) 添付.
+            # 確証なし: API 候補 (unique) へ。API結果は unverified で保存(=ゲートで弾く)
             if jp not in pending_api:
                 try:
                     specs = json.loads(r['specs']) if r['specs'] else {}
                 except Exception:
                     specs = {}
-                pending_api[jp] = {
-                    "card_type": specs.get("card_type", ""),
-                    # set_name は products 列か specs 内かに分散しているので簡易省略
-                }
+                pending_api[jp] = {"card_type": specs.get("card_type", "")}
+    if disputed:
+        print(f"  ⚠️ disputed(fail-closed=空欄): {len(disputed):,} 件")
 
     print(f"\n=== Rule 適用結果 ===")
     for k, v in stats.items():
@@ -560,26 +579,44 @@ def run(smoke: int = 0, rule_only: bool = False, dry_run: bool = False) -> None:
             if en:
                 results.append((pid, en, "claude_api"))
 
-    # 3) DB backfill
+    # 3) DB backfill (arch2: b_layer status も同時付与。API単独=unverified, disputed=空欄)
+    _NOW = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    def _set_status(pid, status, oracle, note):
+        rr = cur.execute("SELECT id FROM products WHERE category=? AND product_id=?",
+                         (CATEGORY, pid)).fetchone()
+        if not rr:
+            return
+        try:
+            cur.execute(
+                "INSERT INTO b_layer_status (product_id_ref, category, product_code, field, "
+                "status, oracle, checked_at, note) VALUES (?,?,?,'name_en',?,?,?,?) "
+                "ON CONFLICT(product_id_ref, field) DO UPDATE SET status=excluded.status, "
+                "oracle=excluded.oracle, checked_at=excluded.checked_at, note=excluded.note",
+                (rr["id"], CATEGORY, pid, status, oracle, _NOW, note))
+        except sqlite3.OperationalError:
+            pass  # b_layer_status 未作成環境
+
     if dry_run:
-        print(f"\n[dry-run] DB 更新スキップ. 結果 {len(results):,} 件 (適用なし)")
+        print(f"\n[dry-run] DB 更新スキップ. accept {len(results):,} / disputed {len(disputed):,} (適用なし)")
     else:
-        print(f"\n=== DB backfill ===")
-        for pid, en, mt in results:
-            src = {
-                "pokeapi_direct":     "pokeapi_official",
-                "pokeapi_suffix":     "pokeapi_official_suffix",
-                "pokeapi_form":       "pokeapi_official_form",
-                "trainer_owned":      "rule_trainer_owned",
-                "trainer_standalone": "rule_trainer_dict",
-                "api_cache":          "claude_api_cache",
-                "claude_api":         "claude_api",
-            }.get(mt, "rule")
+        print(f"\n=== DB backfill (arch2 fail-closed) ===")
+        for pid, en, status in results:
+            # status: verified_auto(独立rule) / reuse_verified(既存再利用) / claude_api(単独=unverified)
+            if status == "claude_api":
+                src, bstatus = "claude_api", "unverified"   # 単独Oracle→ゲートで弾く
+            elif status == "reuse_verified":
+                src, bstatus = "reuse_verified", "verified_manual"
+            else:
+                src, bstatus = "rule_resolve_independent", "verified_auto"
             cur.execute("""UPDATE products SET name_en = ?, name_en_source = ?
                            WHERE category = ? AND product_id = ?""",
                         (en, src, CATEGORY, pid))
+            _set_status(pid, bstatus, src, f"ingest resolve ({status})")
+        for pid, reason in disputed:
+            _set_status(pid, "disputed", "rule_resolve", reason)  # name_en は空欄維持
         conn.commit()
-        print(f"  backfilled: {len(results):,} 件")
+        print(f"  backfilled: {len(results):,} 件 / disputed(空欄): {len(disputed):,} 件")
 
     conn.close()
 

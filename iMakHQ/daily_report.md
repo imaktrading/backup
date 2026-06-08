@@ -587,3 +587,22 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 ### 検証
 - 検証✅: pytest tests/test_name_en_failclosed_resolve.py 5 passed
 - 検証✅: ピカチュウ verified=Waitress(誤) vs rule=Pikachu → disputed(None)=番号バグ混入を構造的に遮断 / ビート(非独立)→空欄 / チコリータ→Chikorita(独立採用)
+
+## 2026-06-08 (続9) — Catalog: name_en 32件訂正 + arch2配線 + arch1 scraper配線
+
+### 決定事項
+- 決定1: name_en散発誤り32件(item/trainer Durant型残)を確定値に訂正→verified_manual。name_en自己整合suspectほぼ0へ
+- 決定2: ~4,000単一literal set名はHQ判定どおり現状維持(JP限定の正当findable名、set_code割れでない)。em-dash寄せは別タスク低優先
+- 決定3: arch2=pokemon_name_translation.run()をresolve_name_en経由に配線(verified源参照/disputed空欄/API単独=unverified)。arch1=api.derive_set_name_ebay共通helper新設+3 scraper配線
+
+### 変更
+- 変更: migrations/2026-06-08_pokemon_name_en_tier3_singlecard_fix.py 新規+--commit(32件)
+- 変更: api.py derive_set_name_ebay() 新設(filter_map clean導出 共通helper)
+- 変更: scrapers/{one_piece_tcg,dragonball_scg,gundam_tcg}.py build_and_upsert に clean set_name_ebay保存配線
+- 変更: scrapers/pokemon_name_translation.py run() を resolve_name_en経由に(verified源構築+disputed/unverified b_layer書込)
+
+### 検証
+- 検証✅: name_en 32/32訂正(ポケモンいれかえ→Switch等)、verified_manual昇格
+- 検証✅: derive_set_name_ebay smoke(OP-01→Romance Dawn/FB04→Ultra Limit/miss→空欄)、3 scraper import OK
+- 検証✅: run() dry-run smoke(rule_only) 成功=verified源1,866構築・独立rule一致のみaccept(fail-closed発火)
+- 検証✅: pytest 220 passed(回帰なし)
