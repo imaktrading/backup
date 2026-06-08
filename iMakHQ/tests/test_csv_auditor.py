@@ -97,6 +97,30 @@ def test_detect_category():
     assert A.detect_category([], []) is None
 
 
+def test_ebay_aspect_findings():
+    # 公式フィルタ(Aspects)照合: SELECTION_ONLY値の許容外検出 / 特殊値は許容 / 推奨未充足
+    fake = {
+        "Rarity": {"constraint": {"aspect_mode": "SELECTION_ONLY", "aspect_usage": "RECOMMENDED"},
+                   "values": ["Common", "Rare", "Secret Rare"]},
+        "Speciality": {"constraint": {"aspect_mode": "FREE_TEXT", "aspect_usage": "RECOMMENDED"},
+                       "values": []},
+        "Country of Origin": {"constraint": {"aspect_mode": "SELECTION_ONLY", "aspect_usage": "OPTIONAL"},
+                              "values": ["Japan", "United States"]},
+    }
+    A._ASPECT_CACHE[A.CATEGORY_MAP["tcg"]["aspect_json"]] = fake
+    headers = ["*Title", "C:Rarity", "C:Country of Origin"]
+    rows = [
+        ["x", "Ultra Rare", "Does not apply"],   # Rarity 許容外 / CoO は特殊値=許容
+        ["y", "Rare", "Japan"],                  # 両方OK
+    ]
+    notes = A.ebay_aspect_findings(headers, rows, "tcg")
+    msgs = " ".join(m for _, m in notes)
+    assert "'Rarity'='Ultra Rare'" in msgs and "許容値外" in msgs       # SELECTION_ONLY違反検出
+    assert "Does not apply" not in msgs                                  # 特殊値は誤検出しない
+    assert "Speciality" in msgs and "列が無い" in msgs                   # eBay推奨aspect未設定=SEO機会
+    del A._ASPECT_CACHE[A.CATEGORY_MAP["tcg"]["aspect_json"]]
+
+
 def test_generic_findings_title_safety():
     # 汎用監査: 日本語混入 + 80字超 を捕捉、分類は除外/報告に倒れる
     headers = ["*Title", "*Category"]

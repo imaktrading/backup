@@ -28,6 +28,7 @@ import csv as _csv
 import datetime
 import glob
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -51,16 +52,19 @@ CATEGORY_MAP = {
         "lc_category": "TCG(PSA10)", "ebay_categories": ["183454"],
         "sig_cols": ["C:Game", "C:Card Name", "C:Rarity"], "fix_shipping": True,
         "cost_key": "CDA:Certification Number - (ID: 27503)",
+        "aspect_json": r"C:/dev/iMak_data/catalog/_input/ebay_tcg_filter_lists_api.json",
     },
     "gshock": {
         "check_csv": os.path.join(WORKSPACE, "iMakG-shock", "check_csv.py"),
         "lc_category": "G-SHOCK", "ebay_categories": ["31387"],
         "sig_cols": ["C:Model", "C:Movement"], "fix_shipping": True, "cost_key": "*Title",
+        "aspect_json": r"C:/dev/iMak_data/catalog/_input/ebay_gshock_filter_lists_api.json",
     },
     "ichibankuji": {
         "check_csv": os.path.join(WORKSPACE, "iMak_ichibankuji", "check_csv.py"),
         "lc_category": "一番くじ", "ebay_categories": ["261055"],
         "sig_cols": ["C:Franchise", "C:Character"], "fix_shipping": True, "cost_key": "*Title",
+        "aspect_json": r"C:/dev/iMak_data/catalog/_input/ebay_ichibankuji_filter_lists_api.json",
     },
     # Mercari系 apparel (uniqlo/montbell/porter)。check_csv は apparel共通(category受理=下記4つ)。
     # ⚠️ shipping は check_csv 内で "Tシャツ(UT)" ハードコード → porter/montbell に誤適用しうるので
@@ -476,6 +480,64 @@ def _scan_log(log_path):
     return sig
 
 
+_ASPECT_CACHE = {}
+
+
+def load_aspects(project):
+    """取得済 eBay公式 Aspects JSON (fetch_ebay_category_aspects 出力) をロード。"""
+    path = CATEGORY_MAP.get(project, {}).get("aspect_json")
+    if not path or not os.path.exists(path):
+        return None
+    if path not in _ASPECT_CACHE:
+        try:
+            _ASPECT_CACHE[path] = json.load(open(path, encoding="utf-8")).get("aspects", {})
+        except Exception:
+            _ASPECT_CACHE[path] = None
+    return _ASPECT_CACHE[path]
+
+
+def ebay_aspect_findings(headers, rows, project):
+    """取得済 eBay公式フィルタ(Aspects)と Item Specifics を照合 = 武器の活用。API不要(offline)。
+      ① SELECTION_ONLY の値が許容リスト外 → eBayフィルタ不ヒット (findability欠損)
+      ② eBayが required/RECOMMENDED の aspect が「列無し or 全行空」 → SEO機会 (eBay自身が推奨)
+    返り: [(sku, msg)] (SEO_NOTE 扱い・報告のみ。CSVは触らない)。"""
+    asp = load_aspects(project)
+    if not asp:
+        return []
+    hm = {h: i for i, h in enumerate(headers)}
+    notes = []
+    # ① RECOMMENDED/required aspect の未充足 (CSV全体で集約=1回)
+    for name, a in asp.items():
+        c = a.get("constraint", {})
+        if not (c.get("aspect_required") or c.get("aspect_usage") == "RECOMMENDED"):
+            continue
+        idx = hm.get("C:" + name)
+        req = "必須" if c.get("aspect_required") else "推奨"
+        if idx is None:
+            notes.append(("(CSV全体)", f"eBay{req}aspect '{name}' の列が無い → 追加で検索性UP"))
+        elif rows and sum(1 for r in rows if idx < len(r) and str(r[idx]).strip()) == 0:
+            notes.append(("(CSV全体)", f"eBay{req}aspect '{name}' が全行空 → 埋めると検索性UP"))
+    # ② SELECTION_ONLY の値が許容外 (行ごと・上限30)
+    # eBay 普遍の特殊値 (values配列に載らないが eBay が許容する opt-out) は許容扱い。
+    _SPECIAL_OK = {"does not apply", "does not apply.", "n/a", "na", "unbranded", "no", "none"}
+    sel = {n: set(a.get("values", [])) for n, a in asp.items()
+           if a.get("constraint", {}).get("aspect_mode") == "SELECTION_ONLY"}
+    capped = 0
+    for row in rows:
+        for name, allowed in sel.items():
+            idx = hm.get("C:" + name)
+            if idx is None or idx >= len(row):
+                continue
+            v = str(row[idx]).strip()
+            if v and v.lower() not in _SPECIAL_OK and v not in allowed:
+                notes.append((_row_sku(headers, row),
+                              f"'{name}'='{v}' が公式フィルタ許容値外(SELECTION_ONLY)→フィルタ不ヒット"))
+                capped += 1
+        if capped >= 30:
+            break
+    return notes
+
+
 def deep_checks(mod, headers, rows, all_vr, project, csv_path):
     """出品時チェックと同じ深い検査を check_csv の関数を再利用して実行:
       ① 市場ゲート (build_search_query→search_ebay_active→compare_with_competitors)
@@ -488,6 +550,8 @@ def deep_checks(mod, headers, rows, all_vr, project, csv_path):
     out = {"price_exclude": [], "seo": [], "gate_summary": [], "claude": ""}
     if mod is None:
         return out
+    # 武器の活用: 取得済 eBay公式フィルタ(Aspects)照合 (API不要・offline)
+    out["seo"].extend(ebay_aspect_findings(headers, rows, project))
     try:
         keys = mod.load_ebay_keys()
         token = mod.get_oauth_token(keys["AppID"], keys["AppSecret"]) if keys.get("AppID") else None
