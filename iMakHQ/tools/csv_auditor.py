@@ -23,6 +23,7 @@
   python csv_auditor.py --log run.log    # 生成ログも参照(補助証拠)
 """
 import argparse
+import collections
 import csv as _csv
 import datetime
 import glob
@@ -49,16 +50,17 @@ CATEGORY_MAP = {
         "check_csv": os.path.join(WORKSPACE, "iMakTCG", "check_csv.py"),
         "lc_category": "TCG(PSA10)", "ebay_categories": ["183454"],
         "sig_cols": ["C:Game", "C:Card Name", "C:Rarity"], "fix_shipping": True,
+        "cost_key": "CDA:Certification Number - (ID: 27503)",
     },
     "gshock": {
         "check_csv": os.path.join(WORKSPACE, "iMakG-shock", "check_csv.py"),
         "lc_category": "G-SHOCK", "ebay_categories": ["31387"],
-        "sig_cols": ["C:Model", "C:Movement"], "fix_shipping": True,
+        "sig_cols": ["C:Model", "C:Movement"], "fix_shipping": True, "cost_key": "*Title",
     },
     "ichibankuji": {
         "check_csv": os.path.join(WORKSPACE, "iMak_ichibankuji", "check_csv.py"),
         "lc_category": "一番くじ", "ebay_categories": ["261055"],
-        "sig_cols": ["C:Franchise", "C:Character"], "fix_shipping": True,
+        "sig_cols": ["C:Franchise", "C:Character"], "fix_shipping": True, "cost_key": "*Title",
     },
     # Mercari系 apparel (uniqlo/montbell/porter)。check_csv は apparel共通(category受理=下記4つ)。
     # ⚠️ shipping は check_csv 内で "Tシャツ(UT)" ハードコード → porter/montbell に誤適用しうるので
@@ -67,7 +69,7 @@ CATEGORY_MAP = {
         "check_csv": os.path.join(WORKSPACE, "iMakMercari", "check_csv.py"),
         "lc_category": "Tシャツ(UT)",
         "ebay_categories": ["57988", "52357", "11450", "15687"],
-        "sig_cols": ["C:Department"], "fix_shipping": False,
+        "sig_cols": ["C:Department"], "fix_shipping": False, "cost_key": "*Title",
         # apparel必須spec(Size/Department)がporter等に合わず全滅するので、spec空は除外せず報告のみ。
         "spec_empty_excludes": False,
     },
@@ -363,11 +365,15 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     exclude_idx = []          # 1-based 除外行
     catalog_items, program_items = [], []
     seo_notes = []
+    all_vr = []               # 各行 validate_row 結果 (Claude総合レビュー文脈用)
     for i, row in enumerate(rows, 1):
         if is_generic:
             findings = generic_findings(headers, row)
+            all_vr.append([])
         else:
-            findings = list(mod.validate_row(row, i)) + native_findings(headers, row)
+            vr = list(mod.validate_row(row, i))
+            all_vr.append(vr)
+            findings = vr + native_findings(headers, row)
         disps = [classify_finding(sev, msg) for sev, msg in findings]
         sku = _row_sku(headers, row)
         eff = []   # 除外判定用 (spec_empty_excludes=False のカテゴリは spec空を除外に倒さない)
@@ -387,6 +393,16 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
         if should_exclude(eff):
             exclude_idx.append(i)
 
+    # --- 深い検査 (出品時チェックと同等: 市場ゲート / TOPセラーSEO / Claude AI総合レビュー) ---
+    deep = with_market and not is_generic
+    dc = (deep_checks(mod, headers, rows, all_vr, project, csv_path) if deep
+          else {"price_exclude": [], "seo": [], "gate_summary": [], "claude": ""})
+    for idx in dc["price_exclude"]:          # 価格 NO-GO を除外に合流
+        if idx not in exclude_idx:
+            exclude_idx.append(idx)
+    exclude_idx.sort()
+    seo_notes = seo_notes + dc["seo"]
+
     # --- 機械的修正: 送料ポリシー (fix_shipping=True のカテゴリのみ。Mercari/genericは無効=報告のみ) ---
     if not is_generic and CATEGORY_MAP[project].get("fix_shipping", True):
         ship_fixes = fix_shipping_policies(headers, rows, lc_category)
@@ -397,26 +413,18 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     if ship_fixes and not dry_run:
         _backup(csv_path, "shipfix")
         _write_csv(csv_path, headers, rows)
-    # 除外は excluder へ委譲 (backup付・物理削除)
     excl_result = None
     if exclude_idx and not dry_run:
-        excl_result = _exclude(csv_path, exclude_idx)
+        excl_result = _exclude(csv_path, exclude_idx)   # 物理除外+backup
 
-    # --- 依頼書 ---
+    # --- 依頼書 / 生成ログ ---
     cat_req = write_catalog_request(project, catalog_items, dry_run)
     prog_req = write_program_request(project, program_items, dry_run)
-
-    # --- 生成ログ補助 (任意) ---
     log_signals = _scan_log(log_path) if log_path else []
 
-    # --- 市場/SEO (任意) ---
-    seo_market = []
-    if with_market:
-        seo_market = _market_seo(mod, headers, rows, project)
-
     _report(project, csv_path, dry_run, len(rows), exclude_idx, ship_fixes,
-            catalog_items, program_items, seo_notes + seo_market, cat_req, prog_req,
-            log_signals, excl_result)
+            catalog_items, program_items, seo_notes, cat_req, prog_req,
+            log_signals, excl_result, dc["gate_summary"], dc["claude"])
     return 1 if (exclude_idx or program_items or catalog_items) else 0
 
 
@@ -468,21 +476,67 @@ def _scan_log(log_path):
     return sig
 
 
-def _market_seo(mod, headers, rows, project):
-    """TOPセラーが持つ未対応spec(SEO穴)を best-effort で拾う。失敗は無害にskip。"""
+def deep_checks(mod, headers, rows, all_vr, project, csv_path):
+    """出品時チェックと同じ深い検査を check_csv の関数を再利用して実行:
+      ① 市場ゲート (build_search_query→search_ebay_active→compare_with_competitors)
+         = 価格 GO/RELAX/HOLD/NO-GO + 利益計算。NO-GO は価格除外候補。
+      ② TOPセラー Item Specifics 比較 (fetch_top_seller_specs→compare_item_specifics) = SEO。
+      ③ Claude AI 総合レビュー (claude_review) = バッチ全体の品質所見。
+    API/key 無い環境では静かに degrade (deep skip)。all_vr=各行のvalidate_row結果(claude文脈用)。
+    返り: {price_exclude:[1based], seo:[(sku,msg)], gate_summary:[(i,status)], claude:str}
+    """
+    out = {"price_exclude": [], "seo": [], "gate_summary": [], "claude": ""}
+    if mod is None:
+        return out
     try:
-        # 1商品のキーワードで TOP セラー spec を取得 (代表)
-        notes = []
-        # mod 側の関数を流用 (build_search_query / fetch_top_seller_specs)
-        # 失敗時は静かにskip (API/keyなし環境を壊さない)
-        return notes
+        keys = mod.load_ebay_keys()
+        token = mod.get_oauth_token(keys["AppID"], keys["AppSecret"]) if keys.get("AppID") else None
+    except Exception as e:
+        print(f"  ⚠️ eBay API 認証失敗 → 市場ゲート/SEO skip: {e}")
+        token = None
+    # 仕入値 (サイドカーJSON) を読む = 市場ゲートの GO/HOLD/NO-GO 判定に必須
+    cost_data, cost_key = {}, CATEGORY_MAP.get(project, {}).get("cost_key")
+    try:
+        cost_data = mod.load_cost_data(csv_path) or {}
     except Exception:
-        return []
+        cost_data = {}
+    all_comp, all_gates = [], []
+    if token:
+        print("  ✓ eBay API 接続OK (市場ゲート/SEO 実行)")
+        for i, row in enumerate(rows):
+            comp, gate = [], None
+            try:
+                query = mod.build_search_query(row)
+                comps, total = mod.search_ebay_active(token, query, limit=50)
+                cost_jpy = cost_data.get(mod.get_col(row, cost_key)) if cost_key else None
+                comp, gate = mod.compare_with_competitors(row, comps, total, cost_jpy)
+                if comps:
+                    top = mod.fetch_top_seller_specs(token, comps)
+                    if top:
+                        for sev, msg in mod.compare_item_specifics(row, top):
+                            out["seo"].append((_row_sku(headers, row), msg))
+            except Exception as e:
+                comp, gate = [], None
+                print(f"  ⚠️ 行{i+1} 市場検査 skip: {type(e).__name__}")
+            all_comp.append(comp); all_gates.append(gate)
+            if gate:
+                st = gate.get("status")
+                out["gate_summary"].append((i + 1, st))
+                if st == "NO-GO":
+                    out["price_exclude"].append(i + 1)
+    # ③ Claude AI 総合レビュー (key 無ければ内部で skip)
+    try:
+        out["claude"] = mod.claude_review(rows, all_vr, all_comp, all_gates) or ""
+    except Exception as e:
+        out["claude"] = f"(Claude review skip: {type(e).__name__})"
+    return out
 
 
 def _report(project, csv_path, dry_run, n_rows, exclude_idx, ship_fixes,
             catalog_items, program_items, seo_notes, cat_req, prog_req,
-            log_signals, excl_result):
+            log_signals, excl_result, gate_summary=None, claude="" ):
+    gate_summary = gate_summary or []
+    gc = collections.Counter(st for _, st in gate_summary)
     print("\n" + "=" * 64)
     print(f"📋 CSV監査くん レポート ({project}) {'[DRY-RUN]' if dry_run else ''}")
     print("=" * 64)
@@ -491,11 +545,17 @@ def _report(project, csv_path, dry_run, n_rows, exclude_idx, ship_fixes,
     for i, old, new, price in ship_fixes[:10]:
         print(f"     [行{i}] '{old}' → '{new}' (${price})")
     print(f"  ❌ 除外(出品しない): {len(exclude_idx)}件 (行 {exclude_idx[:15]}{'...' if len(exclude_idx) > 15 else ''})")
+    if gate_summary:
+        print(f"  🏁 市場ゲート: GO {gc.get('GO',0)} / RELAX {gc.get('RELAX',0)} / 保留HOLD {gc.get('HOLD',0)} / ❌NO-GO {gc.get('NO-GO',0)}")
     print(f"  📨 カタログ修正依頼: {len(catalog_items)}件{' → ' + cat_req if cat_req else ''}")
     print(f"  🛠 プログラム修正依頼: {len(program_items)}件{' → ' + prog_req if prog_req else ''}")
     print(f"  💡 SEO改善メモ: {len(seo_notes)}件")
     for sku, msg in seo_notes[:10]:
         print(f"     {sku}: {msg}")
+    if claude:
+        print("\n  🤖 Claude AI 総合レビュー:")
+        for ln in claude.strip().splitlines()[:40]:
+            print(f"     {ln}")
     if log_signals:
         print(f"  📄 生成ログ signal: {', '.join(log_signals)}")
     if excl_result:
@@ -509,6 +569,10 @@ def _report(project, csv_path, dry_run, n_rows, exclude_idx, ship_fixes,
             f.write(f"- 対象: {csv_path} / 行 {n_rows}\n")
             f.write(f"- 送料修正 {len(ship_fixes)} / 除外 {len(exclude_idx)} / "
                     f"カタログ依頼 {len(catalog_items)} / プログラム依頼 {len(program_items)} / SEO {len(seo_notes)}\n")
+            if gate_summary:
+                f.write(f"- 市場ゲート: GO {gc.get('GO',0)} / RELAX {gc.get('RELAX',0)} / HOLD {gc.get('HOLD',0)} / NO-GO {gc.get('NO-GO',0)}\n")
+            if claude:
+                f.write(f"\n## 🤖 Claude AI 総合レビュー\n\n{claude}\n")
         print(f"\n  レポート: {rp}")
 
 
@@ -516,14 +580,16 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default="")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--with-market", action="store_true")
+    # 既定で出品時チェックと同等の深い検査(市場ゲート/SEO/Claude AIレビュー)を実行。
+    # --quick で機械ルールのみ(API不要・高速)に。
+    ap.add_argument("--quick", action="store_true", help="市場ゲート/SEO/Claude を省く(高速)")
     ap.add_argument("--log", default="")
     args = ap.parse_args(argv)
     csv_path = args.csv or find_latest_csv()
     if not csv_path or not os.path.exists(csv_path):
         print("❌ 監査対象CSVが見つかりません (--csv で指定)")
         return 2
-    return audit(csv_path, dry_run=args.dry_run, with_market=args.with_market,
+    return audit(csv_path, dry_run=args.dry_run, with_market=(not args.quick),
                  log_path=args.log or None)
 
 
