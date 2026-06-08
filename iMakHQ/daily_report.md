@@ -606,3 +606,22 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: derive_set_name_ebay smoke(OP-01→Romance Dawn/FB04→Ultra Limit/miss→空欄)、3 scraper import OK
 - 検証✅: run() dry-run smoke(rule_only) 成功=verified源1,866構築・独立rule一致のみaccept(fail-closed発火)
 - 検証✅: pytest 220 passed(回帰なし)
+
+## 2026-06-09 — Catalog: PSA catalog miss 2件 = mapping/scoring 修正
+
+### 決定事項
+- 決定1: S5a-024 set_name_ebay は2026-06-08 round反映で既に'Sword & Shield—Battle Styles'充足済=追加不要。PSA brand 'PEERLESS FIGHTERS'→set_code S5a 認識を追加
+- 決定2: OP10-049 Sabo は promo scoring が日本語set_name'ベストセレクション vol.4'を拾えず _P('Promotion Card')に負けて fail-closed reject。BEST SELECTION vol JP一致に+250でrule6追加し本命_p1を最優先化
+- 決定3: OP premium ベストセレクション vol.1-6(72件)の set_name_ebay を free-text findability 値で充足(vol.4=HQ確定、他vol同パターン外挿、eBay facet無=CLAUDE.md自由文字列規約)
+
+### 変更
+- 変更: integrations/psa_to_csv.py `_POKEMON_SET_NAME_TO_CODE` に PEERLESS FIGHTERS→S5a / `_promo_score` rule6(BEST SELECTION vol JP一致+250)
+- 変更: migrations/2026-06-09_op_premium_best_selection_set_name_ebay.py 新規+--commit(72件 re-derive + filter_map 6登録、backup取得)
+- 変更: tests/test_psa_setmap_promo_scoring.py 新規(3件)
+- 変更: requests/2026-06-09_psa_miss_setmap_promo_scoring_done.md
+
+### 検証
+- 検証✅: extract_set_code_from_brand_pokemon('...PEERLESS FIGHTERS')→S5a
+- 検証✅: _search_one_piece_promo_by_number('049','SABO',brand='...BEST SELECTION VOL.4-')→OP10-049_p1(score=258、従来220同点reject是正)
+- 検証✅: api.lookup('OP10-049_p1').set_name='Premium Card Collection - Best Selection vol.4'(72件充足)
+- 検証✅: pytest 新規3 passed + 全体 pass

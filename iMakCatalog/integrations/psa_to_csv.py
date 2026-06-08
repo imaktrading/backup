@@ -744,6 +744,15 @@ def _search_one_piece_promo_by_number(
             overlap = brand_tokens & sn_tokens
             if overlap:
                 score += min(len(overlap) * 8, 40)
+        # 6) brand "BEST SELECTION VOL.N" → 日本語 set_name 'ベストセレクション vol.N' を最優先
+        #    (premium card collection は set_name が日本語のため英keyword照合で拾えず、
+        #     _P/_P_* 系 'Promotion Card' に負けて本命が最下位になる問題を是正)
+        #    HQ依頼 2026-06-09_psa_miss_setmap_promo_scoring.md (OP10-049 Sabo)
+        m_bs = re.search(r"BEST\s*SELECTION\s*VOL\.?\s*(\d+)", brand_upper)
+        if m_bs and "ベストセレクション" in sn:
+            voln = m_bs.group(1)
+            if re.search(rf"vol\.?\s*{voln}\b", sn, re.IGNORECASE):
+                score += 250  # 正確な collection+vol 一致 = 汎用promo(_P 220)を上回る最優先
         return score
 
     scored = [(_promo_score(c), c) for c in candidates]
@@ -1124,6 +1133,8 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "THUNDER KNUCKLE":             "BW8",
     "FEVER-BURST FIGHTER":         "XY11",
     "CRUEL TRAITOR":               "XY11",
+    "PEERLESS FIGHTERS":           "S5a",   # 双璧のファイター(英 Battle Styles)の PSA literal表記
+    "PEERLESS FIGHTER":            "S5a",
     # Sword & Shield
     "25TH ANNIVERSARY COLLECTION": "S8a",
     "VSTAR UNIVERSE":              "S12a",
