@@ -88,5 +88,21 @@ def test_detect_category():
     # *Category 値優先
     h2 = ["*Title", "*Category", "C:Model", "C:Movement"]
     assert A.detect_category(h2, [["x", "31387", "GA-100", "Quartz"]]) == "gshock"
-    # 判定不能 (Mercari系等) → None
-    assert A.detect_category(["*Title", "C:Department"], [["x", "Men"]]) is None
+    # Mercari apparel (eBay cat or C:Department)
+    assert A.detect_category(["*Title", "*Category"], [["x", "57988"]]) == "mercari"
+    assert A.detect_category(["*Title", "C:Department"], [["x", "Men"]]) == "mercari"
+    # check_csv 無しカテゴリ (reel 261030 等) → generic (汎用監査は通す)
+    assert A.detect_category(["*Title", "*Category"], [["x", "261030"]]) == "generic"
+    # 空CSV → None
+    assert A.detect_category([], []) is None
+
+
+def test_generic_findings_title_safety():
+    # 汎用監査: 日本語混入 + 80字超 を捕捉、分類は除外/報告に倒れる
+    headers = ["*Title", "*Category"]
+    jp = A.generic_findings(headers, ["リール 新品 Japan", "261030"])
+    assert any("日本語" in m for _, m in jp)
+    long = A.generic_findings(headers, ["A" * 90, "261030"])
+    assert any("上限" in m for _, m in long)
+    # 正常タイトルは findings 0
+    assert A.generic_findings(headers, ["Daiwa Zillion SV TW 1000 Baitcast Reel New Japan", "261030"]) == []

@@ -43,22 +43,33 @@ CSV_DIR = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
 REVIEW_DIR = os.path.join(WORKSPACE, "iMakHQ", "review_logs")
 CATALOG_REQ_DIR = r"C:\dev\iMak_data\catalog\requests"
 
-# project → (check_csv.py パス, listing_common カテゴリ名, *Category 値)
+# project → check_csv.py / listing_commonカテゴリ / *Category値 / 固有列 / 送料自動修正可否
 CATEGORY_MAP = {
     "tcg": {
         "check_csv": os.path.join(WORKSPACE, "iMakTCG", "check_csv.py"),
-        "lc_category": "TCG(PSA10)", "ebay_category": "183454",
-        "sig_cols": ["C:Game", "C:Card Name", "C:Rarity"],
+        "lc_category": "TCG(PSA10)", "ebay_categories": ["183454"],
+        "sig_cols": ["C:Game", "C:Card Name", "C:Rarity"], "fix_shipping": True,
     },
     "gshock": {
         "check_csv": os.path.join(WORKSPACE, "iMakG-shock", "check_csv.py"),
-        "lc_category": "G-SHOCK", "ebay_category": "31387",
-        "sig_cols": ["C:Model", "C:Movement"],
+        "lc_category": "G-SHOCK", "ebay_categories": ["31387"],
+        "sig_cols": ["C:Model", "C:Movement"], "fix_shipping": True,
     },
     "ichibankuji": {
         "check_csv": os.path.join(WORKSPACE, "iMak_ichibankuji", "check_csv.py"),
-        "lc_category": "一番くじ", "ebay_category": "261055",
-        "sig_cols": ["C:Franchise", "C:Character"],
+        "lc_category": "一番くじ", "ebay_categories": ["261055"],
+        "sig_cols": ["C:Franchise", "C:Character"], "fix_shipping": True,
+    },
+    # Mercari系 apparel (uniqlo/montbell/porter)。check_csv は apparel共通(category受理=下記4つ)。
+    # ⚠️ shipping は check_csv 内で "Tシャツ(UT)" ハードコード → porter/montbell に誤適用しうるので
+    #    送料自動修正は無効(fix_shipping=False, 報告のみ)。title/spec/cert/除外は有効。
+    "mercari": {
+        "check_csv": os.path.join(WORKSPACE, "iMakMercari", "check_csv.py"),
+        "lc_category": "Tシャツ(UT)",
+        "ebay_categories": ["57988", "52357", "11450", "15687"],
+        "sig_cols": ["C:Department"], "fix_shipping": False,
+        # apparel必須spec(Size/Department)がporter等に合わず全滅するので、spec空は除外せず報告のみ。
+        "spec_empty_excludes": False,
     },
 }
 # importlib ロード時に sys.path へ足す共有 dir
@@ -138,20 +149,28 @@ def should_exclude(dispositions):
 # カテゴリ判定 / check_csv 動的ロード
 # ============================================================================
 def detect_category(headers, rows):
-    """CSVヘッダ + *Category 値から project を判定。不明なら None。"""
+    """CSVヘッダ + *Category 値から project を判定。
+    check_csv を持つ既知カテゴリ → project名。持たない(reel/tomica等) → 'generic'
+    (汎用の最低限監査=タイトル安全のみ)。空CSV等 → None。"""
+    if not headers:
+        return None
     hset = set(headers)
     cat_val = ""
     if rows and "*Category" in headers:
         idx = headers.index("*Category")
         cat_val = str(rows[0][idx]).strip() if idx < len(rows[0]) else ""
-    for proj, meta in CATEGORY_MAP.items():
-        if cat_val and cat_val == meta["ebay_category"]:
-            return proj
-    # fallback: 固有列シグネチャ
+    # *Category 値が有ればそれを権威にする (一致=そのカテゴリ / 不一致=generic)。
+    # C:Model 等は reel/watch で被るので sig_cols フォールバックは *Category 空の時のみ。
+    if cat_val:
+        for proj, meta in CATEGORY_MAP.items():
+            if cat_val in meta["ebay_categories"]:
+                return proj
+        return "generic"   # 既知カテゴリ外 (reel 261030 等) → 汎用監査
+    # *Category 無し → 固有列シグネチャで推定
     for proj, meta in CATEGORY_MAP.items():
         if any(c in hset for c in meta["sig_cols"]):
             return proj
-    return None
+    return "generic"
 
 
 def load_check_csv_module(project):
@@ -181,14 +200,30 @@ COL_SHIP = "ShippingProfileName"
 _JP_RE = re.compile(r"[ぁ-んァ-ヶ一-龠]")
 
 
+_MAX_TITLE = 80
+
+
 def native_findings(headers, row):
-    """check_csv に無い csv_auditor 独自検査 (日本語混入)。"""
+    """check_csv に無い csv_auditor 独自検査 (日本語混入)。check_csv 経路で validate_row に上乗せ。"""
     out = []
     hm = {h: i for i, h in enumerate(headers)}
     ti = hm.get(COL_TITLE)
     title = str(row[ti]).strip() if ti is not None and ti < len(row) else ""
     if _JP_RE.search(title):
         out.append(("ERROR", f"タイトルに日本語文字が混入: {title!r}"))
+    return out
+
+
+def generic_findings(headers, row):
+    """check_csv を持たないカテゴリ(reel/tomica/workman等)向けの最低限監査。
+    誤出品に直結する普遍的なタイトル安全のみ: 日本語混入 + 80字超。
+    spec/価格/送料はカテゴリ別ルールが要るので generic では見ない(報告に明記)。"""
+    out = list(native_findings(headers, row))
+    hm = {h: i for i, h in enumerate(headers)}
+    ti = hm.get(COL_TITLE)
+    title = str(row[ti]).strip() if ti is not None and ti < len(row) else ""
+    if len(title) > _MAX_TITLE:
+        out.append(("ERROR", f"タイトル{len(title)}字 > 上限{_MAX_TITLE}字"))
     return out
 
 
@@ -306,34 +341,57 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     headers0, rows0 = _peek_csv(csv_path)
     project = detect_category(headers0, rows0)
     if project is None:
-        print(f"❌ カテゴリ判定不能 (TCG/G-shock/一番くじ以外 or check_csv無): {csv_path}")
-        print("   → 監査スキップ (Mercari系等は対象外)")
+        print(f"❌ CSVが空/読込不能: {csv_path}")
         return 2
-    print(f"▶ カテゴリ: {project} / 対象: {os.path.basename(csv_path)}{'  [DRY-RUN]' if dry_run else ''}")
-    mod = load_check_csv_module(project)
-    headers, rows = mod.load_csv(csv_path)   # mod.HEADER_MAP も設定される
-    lc_category = CATEGORY_MAP[project]["lc_category"]
+    is_generic = project == "generic"
+    print(f"▶ カテゴリ: {project}{' (汎用=タイトル安全のみ)' if is_generic else ''} / "
+          f"対象: {os.path.basename(csv_path)}{'  [DRY-RUN]' if dry_run else ''}")
 
-    # --- 行ごとに validate_row + native → disposition 集約 ---
+    if is_generic:
+        headers, rows = _peek_csv(csv_path)
+        mod = None
+        lc_category = None
+    else:
+        mod = load_check_csv_module(project)
+        headers, rows = mod.load_csv(csv_path)   # mod.HEADER_MAP も設定される
+        lc_category = CATEGORY_MAP[project]["lc_category"]
+
+    # 必須spec空で除外するか (apparel系は specが商品に合わず全滅するので False=報告のみ)
+    spec_excl = (not is_generic) and CATEGORY_MAP.get(project, {}).get("spec_empty_excludes", True)
+
+    # --- 行ごとに findings → disposition 集約 ---
     exclude_idx = []          # 1-based 除外行
     catalog_items, program_items = [], []
     seo_notes = []
     for i, row in enumerate(rows, 1):
-        findings = list(mod.validate_row(row, i)) + native_findings(headers, row)
+        if is_generic:
+            findings = generic_findings(headers, row)
+        else:
+            findings = list(mod.validate_row(row, i)) + native_findings(headers, row)
         disps = [classify_finding(sev, msg) for sev, msg in findings]
         sku = _row_sku(headers, row)
+        eff = []   # 除外判定用 (spec_empty_excludes=False のカテゴリは spec空を除外に倒さない)
         for (sev, msg), d in zip(findings, disps):
+            if d == SPEC_EMPTY and not spec_excl:
+                catalog_items.append((sku, msg))
+                seo_notes.append((sku, "(必須spec空・要確認) " + msg))
+                eff.append(SEO_NOTE)
+                continue
             if d in (EXCLUDE_CATALOG, SPEC_EMPTY):
                 catalog_items.append((sku, msg))
             elif d == REPORT_PROGRAM:
                 program_items.append((sku, msg))
             elif d == SEO_NOTE:
                 seo_notes.append((sku, msg))
-        if should_exclude(disps):
+            eff.append(d)
+        if should_exclude(eff):
             exclude_idx.append(i)
 
-    # --- 機械的修正: 送料ポリシー (除外しない行のみ意味があるが全行再計算でOK) ---
-    ship_fixes = fix_shipping_policies(headers, rows, lc_category)
+    # --- 機械的修正: 送料ポリシー (fix_shipping=True のカテゴリのみ。Mercari/genericは無効=報告のみ) ---
+    if not is_generic and CATEGORY_MAP[project].get("fix_shipping", True):
+        ship_fixes = fix_shipping_policies(headers, rows, lc_category)
+    else:
+        ship_fixes = []
 
     # --- CSV 書込 (送料修正を反映) → その後 除外 ---
     if ship_fixes and not dry_run:
