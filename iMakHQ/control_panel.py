@@ -332,6 +332,13 @@ SCRIPTS = [
     # ===== Utility 単独ボタン (カテゴリなし) =====
     {
         "category": None, "type": "utility",
+        "label": "🔍 CSV監査くん",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "csv_auditor.py"],  # 引数なし=最新CSV自動。4軸監査+機械修正+依頼
+        "params": [],
+    },
+    {
+        "category": None, "type": "utility",
         "label": "G-SHOCK 未出品モデル発見",
         "cwd": f"{WORKSPACE}/iMakG-shock/casio_finder",
         "cmd": ["python", "casio_finder.py"],
