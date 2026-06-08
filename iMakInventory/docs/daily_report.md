@@ -421,3 +421,46 @@ Selenium FileExchange UI から Trading API direct に統一。
 - **reverse_audit (memory `reverse_audit_pending`)**: 別系統の補完監査として残置、 D=○ +
   eBay active qty>0 検出 logic は cycle 末尾 phase 化検討
 
+---
+
+## 2026-06-09 — pending queue auto-prune (肥大化防止)
+
+### 決定
+
+- `collect_from_pending_queue` の verify で `no_longer_sold_or_id_changed` 判定された
+  entry を pending file から物理削除し、 `discarded_revise.jsonl` に archive する
+  構造修正 (= 「2026-06-02 amazon scraper bug 由来の 158 件等が永続蓄積」 問題)
+- 削除は **sheet verify 成功** 時のみ。 sheet 読込失敗 (skip_reason 無し) / 別 sheet の
+  filter_* skip は誤削除しない安全側設計
+
+### 変更
+
+- `ebay_actions/revise_csv_generator.py:79` `DISCARDED_REVISE_FILE` 定数追加
+- `ebay_actions/revise_csv_generator.py:260` `prune_discarded_entries(skipped)` 追加
+  - skip_reason="no_longer_sold_or_id_changed" のみ対象、 archive に
+    `discarded_at` / `discard_reason` field 付与
+- `ebay_actions/revise_csv_generator.py:485` `run()` 内、 `collect_from_pending_queue` 直後で
+  prune 呼出 + 件数 log 出力
+- `tests/test_run_cycle.py::test_prune_discarded_entries_only_no_longer_sold` 追加
+- 既存 167 件 (LOW 166 + SHEET 1) を実機 sheet verify 経由で全件 archive 実行 →
+  pending file 0 件 / discarded file 167 件
+
+### 検証
+
+- ✅ 全 283 tests pass (新規 1 件含む)
+- ✅ 4 種の skip 状況 (no_longer_sold / filter_low / sheet_read_fail / valid) で
+  no_longer_sold のみ削除されることを test で物理担保
+- ✅ live sheet verify 実走で 167 件全てが `no_longer_sold_or_id_changed` と判定 →
+  全件 archive 安全と確認 (sheet 上で ○ 残存ゼロ)
+- ✅ 実機 prune 実行: pending 167 → 0、 discarded 0 → 167
+- ✅ 主因 (158 件) は 2026-06-02 amazon scraper fail-closed bug 由来 (= memory
+  `amazon_scraper_fail_closed_bug` で 解決済の偽 OOS 残骸)
+
+### 次のアクション
+
+- **明日 09:30 `--sheet both` cycle 観察**: 新 prune 経路の log
+  「pending prune (sheet で ○ 解除済): N 件 → discarded_revise.jsonl」 が 0 件出力
+  (= 新規蓄積なし) になっているか確認
+- **discarded_revise.jsonl size 監視**: 蓄積 file なので backup_inventory.ps1 の
+  rotation 対象に含めるか検討 (= 緊急度低、 当面 167 件で size 微小)
+
