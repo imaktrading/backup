@@ -76,6 +76,9 @@ DECISION_LOG_DIR = ROOT_DIR / "decision_log"
 STATE_FILE = DECISION_LOG_DIR / "revise_state.json"
 PENDING_REVISE_FILE = DECISION_LOG_DIR / "pending_revise.jsonl"
 PROCESSED_REVISE_FILE = DECISION_LOG_DIR / "processed_revise.jsonl"
+# verify_against_sheet で「sheet で D が ○ でなくなった/itemID が変わった」と
+# 判定された entry の archive 先 (= pending 肥大化防止、 traceability 維持)
+DISCARDED_REVISE_FILE = DECISION_LOG_DIR / "discarded_revise.jsonl"
 
 # 売り切れマーカー (○ U+25CB / 〇 U+3007 両対応)
 SOLD_MARKERS = ("○", "〇")
@@ -255,6 +258,66 @@ def collect_from_pending_queue(
                 "queue_ts":    q.get("ts", ""),
             })
     return candidates, skipped
+
+
+def prune_discarded_entries(skipped: list[dict]) -> int:
+    """verify で「sheet で D が ○ でなくなった/itemID が変わった」と判定された
+    pending entry を physical 削除し、 discarded_revise.jsonl に archive.
+
+    Args:
+        skipped: collect_from_pending_queue が返す skipped list。
+                 skip_reason == "no_longer_sold_or_id_changed" の entry のみ対象。
+                 filter_* (= 別 sheet の cycle で verify される) や sheet 読込失敗 (=
+                 skip_reason 無し) は対象外 = pending に残す。
+
+    Returns: archive した件数
+
+    Why: 偽 OOS 等で sheet が ○ → 空 に reset された後、 pending に entry が
+    残り続けて queue 肥大化する問題への構造修正 (2026-06-02 amazon scraper bug 由来の
+    158 件残存等)。 sheet verify が成功している (= skip_reason="no_longer_sold...")
+    場合のみ削除するので、 sheet 読込失敗で誤削除する事故は構造的に発生しない。
+    """
+    if not PENDING_REVISE_FILE.exists():
+        return 0
+    # 削除対象 entry の identifier set を作る (sheet, row_index, item_id) で同定
+    targets = set()
+    for s in skipped:
+        if s.get("skip_reason") != "no_longer_sold_or_id_changed":
+            continue
+        key = (s.get("sheet", ""), s.get("row_index", -1), s.get("item_id", ""))
+        targets.add(key)
+    if not targets:
+        return 0
+
+    archived = 0
+    keep = []
+    with open(PENDING_REVISE_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                # 壊れた行は維持 (debug 可能にする)
+                keep.append(line)
+                continue
+            key = (entry.get("sheet", ""), entry.get("row_index", -1),
+                   entry.get("item_id", ""))
+            if key in targets:
+                entry["discarded_at"] = datetime.now().isoformat(timespec="seconds")
+                entry["discard_reason"] = "no_longer_sold_or_id_changed"
+                with open(DISCARDED_REVISE_FILE, "a", encoding="utf-8") as af:
+                    af.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                archived += 1
+            else:
+                keep.append(line)
+
+    PENDING_REVISE_FILE.write_text(
+        ("\n".join(keep) + "\n") if keep else "",
+        encoding="utf-8",
+    )
+    return archived
 
 
 def drain_pending_queue(consumed_item_ids: list[str]) -> int:
@@ -488,6 +551,14 @@ def run(
             single_sheet_label=single_sheet_label,
         )
         print(f"  pending queue から: {len(candidates)} 件 (skip {len(pending_skipped)} 件)")
+        # 偽 OOS 由来等で sheet 側が ○ → 空 に reset された entry を物理削除
+        # (= pending 肥大化防止)。 sheet 読込失敗時は skip_reason 無しで触らない。
+        try:
+            pruned = prune_discarded_entries(pending_skipped)
+            if pruned:
+                print(f"  pending prune (sheet で ○ 解除済): {pruned} 件 → discarded_revise.jsonl")
+        except Exception as e:
+            print(f"  [!] prune_discarded_entries 失敗: {type(e).__name__}: {e}")
     elif mode == "all":
         # 全 D="○" 行を対象 (緊急時、過去未処理の一括処理用)
         for label, sid in targets:

@@ -135,5 +135,67 @@ def test_drain_pending_only_on_success(tmp_path, monkeypatch):
     assert archived_ids == {"iid_ok", "iid_safe"}
 
 
+def test_prune_discarded_entries_only_no_longer_sold(tmp_path, monkeypatch):
+    """prune_discarded_entries は no_longer_sold_or_id_changed のみ削除する.
+
+    Regression guard: 2026-06-02 amazon scraper bug の偽 OOS 由来 158 件等で
+    pending が肥大化していた問題への構造修正。 sheet 読込失敗時 (skip_reason 無し) や
+    filter_* skip は誤削除しない。
+    """
+    import json
+    from ebay_actions import revise_csv_generator as gen
+    pending_file = tmp_path / "pending_revise.jsonl"
+    discarded_file = tmp_path / "discarded_revise.jsonl"
+    monkeypatch.setattr(gen, "PENDING_REVISE_FILE", pending_file)
+    monkeypatch.setattr(gen, "DISCARDED_REVISE_FILE", discarded_file)
+
+    # pending に 4 件 (削除対象 1 / filter skip 1 / 残置すべき 2)
+    rows = [
+        {"sheet": "LOW", "row_index": 10, "item_id": "iid_invalid",
+         "url": "u1", "title": "t1", "supplier": "amazon",
+         "raw_status": "out_of_stock", "ts": "2026-06-02T08:00:00"},
+        {"sheet": "HIGH", "row_index": 20, "item_id": "iid_filter_skip",
+         "url": "u2", "title": "t2", "supplier": "mercari",
+         "raw_status": "SOLD_OUT", "ts": "2026-06-02T09:00:00"},
+        {"sheet": "LOW", "row_index": 30, "item_id": "iid_valid",
+         "url": "u3", "title": "t3", "supplier": "mercari",
+         "raw_status": "SOLD_OUT", "ts": "2026-06-02T10:00:00"},
+        {"sheet": "LOW", "row_index": 40, "item_id": "iid_sheet_read_fail",
+         "url": "u4", "title": "t4", "supplier": "mercari",
+         "raw_status": "SOLD_OUT", "ts": "2026-06-02T11:00:00"},
+    ]
+    with open(pending_file, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+    # collect_from_pending_queue が返した skipped (= 各種 skip_reason の混在)
+    skipped = [
+        # 削除対象: sheet で ○ が外れた
+        {"sheet": "LOW", "row_index": 10, "item_id": "iid_invalid",
+         "skip_reason": "no_longer_sold_or_id_changed"},
+        # 残置: 別 sheet の filter で skip (= 次 cycle で verify される)
+        {"sheet": "HIGH", "row_index": 20, "item_id": "iid_filter_skip",
+         "skip_reason": "filter_low"},
+        # 残置: skip_reason 無し (= sheet 読込失敗等、 verify 未完了)
+        {"sheet": "LOW", "row_index": 40, "item_id": "iid_sheet_read_fail"},
+    ]
+
+    archived = gen.prune_discarded_entries(skipped)
+    assert archived == 1
+
+    # pending には 3 件残る (filter_skip / valid / sheet_read_fail)
+    remaining = pending_file.read_text(encoding="utf-8").strip().splitlines()
+    remaining_ids = {json.loads(line)["item_id"] for line in remaining}
+    assert remaining_ids == {"iid_filter_skip", "iid_valid", "iid_sheet_read_fail"}
+
+    # discarded には 1 件 + discard_reason/discarded_at field 付与
+    discarded = discarded_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(discarded) == 1
+    entry = json.loads(discarded[0])
+    assert entry["item_id"] == "iid_invalid"
+    assert entry["discard_reason"] == "no_longer_sold_or_id_changed"
+    assert "discarded_at" in entry
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
