@@ -1265,6 +1265,8 @@ class ListingPanel:
         # 2) utility をグループ分類 (cmd のスクリプト名で判定)
         def _ugroup(idx):
             cmd = " ".join(SCRIPTS[idx].get("cmd", []))
+            if "csv_auditor" in cmd:
+                return "audit"     # 🔍 出品前チェック (新規パネルに表示)
             if any(s in cmd for s in ("listing_funnel", "demand_winners", "funnel_diff")):
                 return "analyze"   # 📊 分析 (Plan/Check)
             if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
@@ -1277,7 +1279,7 @@ class ListingPanel:
                                       "noclick_targets", "price_resistance")):
                 return "relist"
             return "report"
-        ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": []}
+        ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": [], "audit": []}
         for idx in utilities:
             ug[_ugroup(idx)].append(idx)
 
@@ -1320,6 +1322,10 @@ class ListingPanel:
                 disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)
                 disc.pack(fill="x", pady=(8, 0))
                 _grid_named(disc, [(SCRIPTS[i]["label"], i) for i in ug["discover"]])
+            if ug["audit"]:
+                aud = ttk.LabelFrame(new_sec, text="🔍 出品前チェック (CSV生成後に実行)", padding=4)
+                aud.pack(fill="x", pady=(8, 0))
+                _grid_named(aud, [(SCRIPTS[i]["label"], i) for i in ug["audit"]])
         else:
             # ===== 🔧 既存メンテ =====
             REPORTS_DIR = r"C:/dev/iMak_data/seller_hub/reports"
