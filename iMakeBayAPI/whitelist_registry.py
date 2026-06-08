@@ -133,8 +133,11 @@ WHITELISTS = {
             "normalize": {"XL": "Extra Large", "S": "Small", "M": "Medium", "L": "Large", "XS": "Mini"},
         },
         "Department": {
-            "values": ["Men", "Women", "Unisex Adults"],
+            # 公式 porter(bags 52357) SELECTION_ONLY = [Men, Unisex Adults]。Women は許容外
+            # → Unisex Adults へ正規化 (2026-06-08 whitelist_official_drift 検出)
+            "values": ["Men", "Unisex Adults"],
             "strict": True,
+            "normalize": {"Women": "Unisex Adults", "Unisex Adult": "Unisex Adults"},
         },
         "Occasion": {
             "values": ["Business", "Casual", "Formal", "Travel", "Workwear"],
@@ -378,7 +381,9 @@ WHITELISTS = {
         "Vintage": {"values": ["Yes", "No"], "strict": True},
         "Signed": {"values": ["Yes", "No"], "strict": True},
         "Original/Licensed Reproduction": {
-            "values": ["Original", "Licensed Reproduction", "Unauthorized Reproduction"],
+            # 公式 SELECTION_ONLY = [Original, Licensed Reproduction]。"Unauthorized Reproduction"
+            # は許容外かつ偽造示唆の悪値 → 削除 (2026-06-08 whitelist_official_drift 検出)
+            "values": ["Original", "Licensed Reproduction"],
             "strict": True,
         },
     },
