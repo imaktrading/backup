@@ -1779,26 +1779,10 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_card_number = v["card_number"]
         if v.get("character") and not character:
             character = v["character"]
-        if v.get("set_name") and not set_name:
-            # 既存 Canonical Map (iMakCatalog ebay_filter_map) に通して正規化
-            # 例: "OP13" → ハイフン補完で "OP-13" → "Carrying On His Will"
-            #     "ROMANCE DAWN" → 大文字検出で "Romance Dawn"
-            _raw_set = v["set_name"]
-            _normalized = catalog_psa.set_code_to_ebay_name(_raw_set)
-            if _normalized == _raw_set:
-                # マップヒット失敗 → ハイフン補完で再試行
-                _m_set = re.match(r'^(OP|ST|EB|PRB)(\d+)$', _raw_set, re.IGNORECASE)
-                if _m_set:
-                    _normalized = catalog_psa.set_code_to_ebay_name(
-                        f"{_m_set.group(1).upper()}-{_m_set.group(2)}"
-                    )
-            if _normalized != _raw_set:
-                set_name = _normalized
-            elif _raw_set.isupper():
-                # 全大文字 → Title Case 化 (例: "ROMANCE DAWN" → "Romance Dawn")
-                set_name = _raw_set.title()
-            else:
-                set_name = _raw_set
+        # 2026-06-08: set_name は Vision で生成しない (fail-closed / SSOT)。
+        # catalog lookup の set_name_ebay が SSOT。catalog miss は catalog_misses で
+        # skip + 自動依頼される。Vision の raw set 名を変換して埋めると
+        # ①「参照のみ」に反する ②catalog 意図的空欄(JP限定)を上書きしてしまう → 廃止。
         if v.get("rarity") and not official_rarity:
             official_rarity = v["rarity"]
         if v.get("color") and not official_color:
@@ -1919,19 +1903,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             print(f"    [AUTO-FIX] Leader Cost: {cost!r} -> '' (Leader はコスト持たない仕様)")
             cost = ""
 
-    # 2026-04-25: ONE PIECE Set コード → 公式名称（eBay フィルタヒット率向上）
-    # 2026-04-26: iMakCatalog ebay_filter_map 経由に切替
-    if franchise == "One Piece" and set_name:
-        _new_set = catalog_psa.set_code_to_ebay_name(set_name)
-        if _new_set != set_name:
-            print(f"    [AUTO-FIX] Set: {set_name!r} -> {_new_set!r} (iMakCatalog ebay_filter_map)")
-            set_name = _new_set
-    # 2026-04-26: DRAGON BALL Set 名 → eBay フィルタ表示用クリーンアップ
-    elif franchise == "Dragon Ball" and set_name:
-        _new_set = _dragonball_set_name_to_ebay(set_name)
-        if _new_set != set_name:
-            print(f"    [AUTO-FIX] Set: {set_name!r} -> {_new_set!r} (公式名称マップ)")
-            set_name = _new_set
+    # 2026-06-08: 出品は「参照のみ」化 (SSOT)。set_name は catalog lookup の
+    # set_name_ebay (Catalog #1a で clean な eBay facet 名を確定保存済) をそのまま使う。
+    # 旧: 出品の度に set_code_to_ebay_name / _dragonball_set_name_to_ebay で再変換していたが、
+    #     保存値が既に clean なので no-op + 変換層のバグ伝播源 → 撤去。
+    #     カタログに無い (=set_name_ebay 空) なら空欄のまま (fail-closed)。変換で埋め直さない。
 
     # One Piece Leader の rarity 空欄補完 (Canonical Map 適用後の値で判定)
     if not rarity and card_type == "Leader" and franchise == "One Piece":
