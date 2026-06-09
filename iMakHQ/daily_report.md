@@ -688,3 +688,20 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 ### 検証
 - 検証✅: A実brand(25TH)→ST01-006_p1 / A generic→None / A暴発guard(_p4選ばず) / B=OP08-002_P_LF / C=OP10-049_p1
 - 検証✅: pytest Step2 5件 + adapter4件 pass、全体229 passed(回帰なし)
+
+## 2026-06-10 (続3) — Catalog: KEY再設計 Step3 resolver facade 新設
+
+### 決定事項
+- 決定1: iMakCatalog/resolver.py 新設。resolve(context)→canonical product_id | 正規化URL | ""(fail-closed)。既存33関数(lookup_*/promo-scoring)を内部dispatch集約(新規ロジックなし)
+- 決定2: lookup API key不統一(card_id vs product_id)を facade内で吸収し戻り値product_id統一。判別不能/未対応/名前不一致→""。category alias対応。G-shockは別phase(現状"")
+- 決定3: psa_to_csv は未改変(shim併存・循環import無し)。呼び出し側のresolve()切替は順次(無停止移行、HQ協調)
+
+### 変更
+- 変更: iMakCatalog/resolver.py 新規(resolve facade)
+- 変更: tests/test_resolver_facade.py 新規(8件)
+- 変更: requests/2026-06-09_..._step3_done.md
+
+### 検証
+- 検証✅: resolve OP Sabo→OP10-049_p1 / Chopper25TH→ST01-006_p1 / Chopper generic→"" / Pokemon FUSION ARTS→S8-035 / alias op→OP01-001 / gshock→"" / 不足signal→"" / mercari url→item:/shops:
+- 検証✅: pytest resolver 8件 pass、全体237 passed(回帰なし)
+- 検証✅: catalog先行フェーズ Step1(POC)/Step2(lookup bug根治)/Step3(facade) 完了
