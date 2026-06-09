@@ -1150,6 +1150,20 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "PEERLESS FIGHTER":            "S5a",
     "FUSION ARTS":                 "S8",    # フュージョンアーツ(英 Fusion Strike)の PSA表記
     "REBELLION CRASH":             "S2",    # 反逆クラッシュ(英 Rebel Clash)の PSA表記
+    # --- SwSh全弾 体系整備 (2026-06-10, HQ依頼: もぐら叩き終了。日本語セット名の PSA literal英名) ---
+    #     真値: Bulbapedia/PSA/StockX 裏取り。SWORD/SHIELD(S1W/S1H)は era名"SWORD & SHIELD"と
+    #     衝突する(全SwSh brandが含む)ため意図的に除外 → base Sword/Shield は別手段で。
+    "INFINITY ZONE":               "S3",    # ムゲンゾーン (英 Darkness Ablaze)
+    "EXPLOSIVE WALKER":            "S2a",   # 爆炎ウォーカー
+    "LEGENDARY HEARTBEAT":         "S3a",   # 伝説の鼓動
+    "ASTONISHING VOLT TACKLE":     "S4",    # 仰天のボルテッカー (英 Vivid Voltage)
+    "SINGLE STRIKE MASTER":        "S5I",   # 一撃マスター (英 Battle Styles 系)
+    "RAPID STRIKE MASTER":         "S5R",   # 連撃マスター
+    "SILVER LANCE":                "S6H",   # 白銀のランス (英 Chilling Reign 系)
+    "JET-BLACK SPIRIT":            "S6K",   # 漆黒のガイスト (英 Chilling Reign) ※HQ実機確定 cert143730283
+    "SKYSCRAPING PERFECT":         "S7D",   # 摩天パーフェクト (PERFECT/PERFECTION 両表記を包含)
+    "BLUE SKY STREAM":             "S7R",   # 蒼空ストリーム (英 Evolving Skies)
+    "POKEMON GO":                  "S10b",  # Pokémon GO
     # Sword & Shield
     "25TH ANNIVERSARY COLLECTION": "S8a",
     "VSTAR UNIVERSE":              "S12a",

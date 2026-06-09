@@ -705,3 +705,19 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: resolve OP Sabo→OP10-049_p1 / Chopper25TH→ST01-006_p1 / Chopper generic→"" / Pokemon FUSION ARTS→S8-035 / alias op→OP01-001 / gshock→"" / 不足signal→"" / mercari url→item:/shops:
 - 検証✅: pytest resolver 8件 pass、全体237 passed(回帰なし)
 - 検証✅: catalog先行フェーズ Step1(POC)/Step2(lookup bug根治)/Step3(facade) 完了
+
+## 2026-06-10 (続4) — Catalog: JET-BLACK SPIRIT→S6K + SwSh全弾 体系整備
+
+### 決定事項
+- 決定1: JET-BLACK SPIRIT→S6K(4件目)追加。S6K-037=こくばバドレックスVMAX確認。3AI誤BLOCK(037=Shadow Lugia幻覚)も解消
+- 決定2: もぐら叩き終了。SwSh S系 set_code 全棚卸し→未収録11件をPSA literal英名で一括追加(Bulbapedia/PSA/StockX裏取り)
+- 決定3: S1W/S1H(ソード/シールド)は era名"SWORD & SHIELD"衝突で意図的除外(別手段要、該当出たら相談)
+
+### 変更
+- 変更: integrations/psa_to_csv.py _POKEMON_SET_NAME_TO_CODE に SwSh 11件追加(INFINITY ZONE/EXPLOSIVE WALKER/LEGENDARY HEARTBEAT/ASTONISHING VOLT TACKLE/SINGLE STRIKE MASTER/RAPID STRIKE MASTER/SILVER LANCE/JET-BLACK SPIRIT/SKYSCRAPING PERFECT/BLUE SKY STREAM/POKEMON GO)
+- 変更: tests/test_pokemon_swsh_setmap.py 新規(3件)
+
+### 検証
+- 検証✅: 全15(既出4+新11)brand→set_code 正解 + catalog存在 + 衝突なし(EEVEE HEROES=S6a/STAR BIRTH=S9不変)
+- 検証✅: SKYSCRAPING PERFECT/PERFECTION 両表記hit
+- 検証✅: pytest SwSh 3件 + 全体240 passed(回帰なし)
