@@ -69,7 +69,7 @@ def test_snkrdunk_urls_all_returned_sorted():
 def test_http_shape_snkrdunk_available():
     """HTTP shape (check_by_keyword): available=True → snkrdunk channel + 最安 + カードページ補URL。"""
     http = {"available": True, "psa10_price_jpy": 22000,
-            "card_url": "https://snkrdunk.com/en/trading-cards/129628"}
+            "card_url": "https://snkrdunk.com/trading-cards/129628"}
     c = g.combine(None, http)
     assert c["resourceable"] is True and c["channels"] == ["snkrdunk"]
     assert c["cheapest_jpy"] == 22000
@@ -85,7 +85,7 @@ def test_http_shape_snkrdunk_unavailable():
 
 def test_http_shape_both_channels():
     http = {"available": True, "psa10_price_jpy": 63333,
-            "card_url": "https://snkrdunk.com/en/trading-cards/520553"}
+            "card_url": "https://snkrdunk.com/trading-cards/520553"}
     c = g.combine((158888, "m", "x"), http)
     assert set(c["channels"]) == {"mercari", "snkrdunk"}
     assert c["cheapest_jpy"] == 63333 and c["cheapest_channel"] == "snkrdunk"

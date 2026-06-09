@@ -47,7 +47,35 @@ def is_psa10(name):
     n = name.replace(" ", "").upper()
     if any(b in n for b in ("PSA9", "PSA8", "PSA7", "BGS", "ARS")):
         return False
+    # 「PSA10相当」= 未鑑定の同等品 (生カード)。本物のPSA10 slabではないので除外
+    # (2026-06-09 ユーザー指摘: 相当は除外)。原文の 相当 で判定 (upper非影響)。
+    if "相当" in name:
+        return False
     return "PSA10" in n
+
+
+def _norm_alnum(s):
+    """英数字のみに正規化 (大文字, ハイフン/空白/全角記号除去)。"""
+    return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+
+
+def _card_token(kw):
+    """検索語 'PSA10 OP11-106' から対象カード番号トークンを抽出・正規化 ('OP11106')。"""
+    t = re.sub(r"^PSA\s*10\s*", "", (kw or "").strip(), flags=re.IGNORECASE)
+    return _norm_alnum(t)
+
+
+def _name_matches_card(name, token):
+    """商品名が対象カード番号を含むか (id-strict)。
+
+    SNKRDUNK 側 (parse_search_for_card) と同じ fail-closed 思想。メルカリのキーワード検索は
+    relevance が緩く別カードを返すことがある (2026-06-09 ユーザー指摘: 2行目が違うカード)。
+    商品名に対象カード番号が無ければ採用しない (= 誤った最安を拾わない)。
+    token が空/極短 (<3) は誤マッチ源なので不採用。
+    """
+    if not token or len(token) < 3:
+        return False
+    return token in _norm_alnum(name)
 
 
 def build_input_from_funnel():
@@ -98,6 +126,49 @@ def _chrome_major():
     return None
 
 
+# 通常出品のみ採用 (個人=MERCARI / メルカリShops=BEYOND)。
+# オークション等それ以外の itemtype は除外 = 確定価格でなく即仕入れ不可 (fail-closed)。
+# 2026-06-09 実機ダンプ(c:/tmp/mercari_dump.html)で itemtype が個人/Shops の判別子と確認。
+_ALLOWED_ITEM_TYPES = ("ITEM_TYPE_MERCARI", "ITEM_TYPE_BEYOND")
+
+
+def parse_mercari_items(src):
+    """検索結果HTMLを item-cell 単位で {type,name,price,href} に分解する純関数。
+
+    各 item-cell ブロック内の itemtype / aria-label('<名前>の画像 <価格>円') / href を
+    同一ブロックから取るので name·price·href が必ず対応する
+    (旧実装は names/prices/urls を別々の findall で取得→添字ズレで別カードの価格を拾う事故源。
+     2026-06-09 ユーザー指摘『2行目が違うカード』の構造的原因)。
+
+    通常出品 (_ALLOWED_ITEM_TYPES) のみ返す。オークション/不明 itemtype は除外 (fail-closed,
+     2026-06-09 ユーザー指摘『オークションもある→通常出品のみに』)。返り値は DOM順 (=価格昇順)。
+    """
+    items = []
+    for b in re.split(r'data-testid="item-cell"', src)[1:]:
+        it = re.search(r'itemtype="([A-Z_]+)"', b)
+        if not it or it.group(1) not in _ALLOWED_ITEM_TYPES:
+            continue
+        al = re.search(r'aria-label="(.+?)の画像\s*([\d,]+)円"', b)
+        if not al:
+            continue
+        hr = re.search(r'href="(/(?:item/m\w+|shops/product/\w+))"', b)
+        items.append({
+            "type": it.group(1),
+            "name": al.group(1).strip(),
+            "price": int(al.group(2).replace(",", "")),
+            "href": f"https://jp.mercari.com{hr.group(1)}" if hr else "",
+        })
+    return items
+
+
+def pick_cheapest_psa10(items, token):
+    """価格昇順 items から PSA10 かつ対象カード番号一致の最安を選ぶ (純関数)。"""
+    for it in items:  # DOM順 = 価格昇順
+        if it["price"] > 0 and is_psa10(it["name"]) and _name_matches_card(it["name"], token):
+            return (it["price"], it["href"], it["name"])
+    return None
+
+
 def fetch_mercari_cheapest(cards):
     """各カードの メルカリ on_sale 最安(PSA10) を取得 → {idx: (price, url, name)}。"""
     import undetected_chromedriver as uc
@@ -118,18 +189,9 @@ def fetch_mercari_cheapest(cards):
             try:
                 drv.get(url); time.sleep(8)
                 src = drv.page_source
-                names = re.findall(r'data-testid="thumbnail-item-name"[^>]*>([^<]+)<', src)
-                urls = list(dict.fromkeys(re.findall(r'href="(/item/m\w+)"', src)))
-                blocks = re.split(r'data-testid="item-cell"', src)
-                prices = []
-                for b in blocks[1:]:
-                    m = re.search(r'class="number__\w+"[^>]*>([\d,]+)<', b) or re.search(r'[¥￥]([\d,]+)', b)
-                    prices.append(int(m.group(1).replace(",", "")) if m else 0)
-                best = None
-                for j in range(min(len(names), len(prices))):
-                    if prices[j] > 0 and is_psa10(names[j]):
-                        best = (prices[j], f"https://jp.mercari.com{urls[j]}" if j < len(urls) else "", names[j].strip())
-                        break  # on_sale 価格昇順なので最初の PSA10 が最安
+                # item-cell 単位で抽出 (name·price·href 対応保証 + 通常出品のみ=オークション除外)
+                items = parse_mercari_items(src)
+                best = pick_cheapest_psa10(items, _card_token(kw))
                 out[i] = best
                 print(f"  [{i+1}/{len(cards)}] {kw}: {('¥'+str(best[0])) if best else 'PSA10在庫なし'}", flush=True)
             except Exception as e:
