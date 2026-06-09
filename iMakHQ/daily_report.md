@@ -642,3 +642,18 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 ### 検証
 - 検証✅: extract_set_code_from_brand_pokemon FUSION ARTS→S8 / REBELLION CRASH→S2、lookup hit
 - 検証✅: pytest tests/test_psa_setmap_promo_scoring.py 4 passed
+
+## 2026-06-10 — Catalog: KEY再設計 Step1 POC (go) + 着手可否GO
+
+### 決定事項
+- 決定1: KEY再設計 phase1 着手可否=GO、ユーザー判断1-4(iMakCatalog配置/KEY2 ARCHIVED/ハイブリッドbackfill/strict義務化)異議なし
+- 決定2: Step1 POC=GO(resolver_poc.py 4/4)。固有variant→OP10-049_p1 / bare→base(誤除外なし) / 判別不能→"" を実証
+- 決定3(設計判断浮上): (a)bare policy=base解決推奨(base実在時、""でなく。誤除外なし)。(b)variant scoring網羅はStep3で拡充要(_p2=3周年treasure未到達)
+- 決定4: Step2(lookup_one_piece brand bug 5/28/614同型)を独立POC再現→修正してからStep3 facade(順序厳守)
+
+### 変更
+- 変更: iMakCatalog/resolver_poc.py 新規(Step1 POC、再走可・committed証跡)
+- 変更: requests/2026-06-09_key_redesign_BUILD_greenlight_phase1_step1_poc.md(POC結果+着手可否+設計判断2点)
+
+### 検証
+- 検証✅: python resolver_poc.py → 4/4 OK (① OP10-049_p1 / ② OP10-049 base / ③ "" / ④ "")
