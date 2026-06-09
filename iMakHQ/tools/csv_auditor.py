@@ -40,6 +40,9 @@ except Exception:
     pass
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+import audit_ledger  # PDCA 台帳 (蓄積/前回比/再発検知)  # noqa: E402
 WORKSPACE = os.path.normpath(os.path.join(_HERE, "..", ".."))  # c:/dev/iMak
 CSV_DIR = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
 REVIEW_DIR = os.path.join(WORKSPACE, "iMakHQ", "review_logs")
@@ -207,6 +210,7 @@ _JP_RE = re.compile(r"[ぁ-んァ-ヶ一-龠]")
 
 
 _MAX_TITLE = 80
+IDEAL_TITLE_LEN = 70   # これ未満は「80字を活かしきれてない」= 短タイトル (PDCA KPI)
 
 
 def native_findings(headers, row):
@@ -218,6 +222,253 @@ def native_findings(headers, row):
     if _JP_RE.search(title):
         out.append(("ERROR", f"タイトルに日本語文字が混入: {title!r}"))
     return out
+
+
+# タイトル↔Item Specifics 整合 (生成ロジック準拠の検証):
+# 生成ロジックは catalog の事実から「タイトル」と「Item Specifics」の両方を作る。
+# = 両者は同じ事実を語るはず。食い違い = 生成のミス (これを見逃すと誤出品)。
+# 各カテゴリで「この spec の値はタイトルに反映されてるべき」列を (列, 照合mode) で定義。
+#   "whole"      : 値全体(区切りで分割した各part)がタイトルに含まれること
+#                  例 gshock C:Model='G-SHOCK G-LIDE' は全体一致を要求 → シリーズ名混入を検出
+#   "first_token": 値の先頭語がタイトルに含まれること
+#                  例 tcg C:Character='Togekiss V Legendary Heartbeat'(セット名混入で汚染) でも
+#                     先頭語 'Togekiss' がタイトルに在れば一致扱い → フィールド汚染で誤検出しない
+CONSISTENCY_COLS = {
+    "tcg": [("C:Character", "first_token")],
+    # C:Model は意図的に eBay の「シリーズ」フィルタ正規値 (例 'G-SHOCK 5600' / 'G-SHOCK G-LIDE')。
+    # タイトルの実型番 (GW-M5610 等) と異なって当然 → 整合チェック対象から除外 (誤検出防止、2026-06-08)。
+    "gshock": [("C:Display", "whole"), ("C:Band Color", "whole")],
+    "ichibankuji": [("C:Character", "first_token")],
+    "mercari": [("C:Color", "whole")],
+}
+
+
+def title_spec_consistency(headers, row, project):
+    """タイトルが Item Specifics の重要ファクトを反映してるか検証。
+    spec に値が在るのにタイトルに反映されてない → 生成ロジック逸脱の疑い (報告)。"""
+    cols = CONSISTENCY_COLS.get(project)
+    if not cols:
+        return []
+    hm = {h: i for i, h in enumerate(headers)}
+    ti = hm.get(COL_TITLE)
+    title = (str(row[ti]).strip() if ti is not None and ti < len(row) else "").lower()
+    if not title:
+        return []
+    # リールはタイトルが型番中心で色を入れない慣習 → C:Color 整合は対象外 (誤検出防止)。
+    _bi = hm.get("C:Brand")
+    _brand = (str(row[_bi]).strip().lower() if _bi is not None and _bi < len(row) else "")
+    _is_reel = any(b in _brand for b in _REEL_BRANDS)
+    out = []
+    for col, mode in cols:
+        if col == "C:Color" and _is_reel:
+            continue
+        i = hm.get(col)
+        if i is None or i >= len(row):
+            continue
+        val = str(row[i]).strip()
+        if not val:
+            continue
+        if mode == "first_token":
+            tok = val.split()[0] if val.split() else val
+            hit = tok.lower() in title
+        else:  # whole: 複数値 "A, B / C" は各 part で判定。1つでも在れば一致。
+            parts = [p.strip() for p in re.split(r"[,/&]", val) if p.strip()]
+            hit = any(p.lower() in title for p in parts)
+        if not hit:
+            out.append(f"タイトル↔spec不一致: {col}='{val}' がタイトルに反映されてない(生成ロジック逸脱疑い)")
+    return out
+
+
+# タイトル形式準拠 (生成ロジックから抽出した各カテゴリ/商品のタイトルの「形」):
+# 生成ロジックは決まった型でタイトルを作る。型から外れる = 生成のミス (報告)。
+#   prefix: 先頭一致必須 / contains: 全て含む必須 / contains_any: いずれか1つ必須 /
+#   brand_exact: C:Brand が eBay公式ブランド名と一致必須 (フィルタ不ヒット防止)。
+TITLE_FORMAT = {
+    # TCG の PSA 10 先頭は validate_row が既に検査 → ここは番号 # のみ
+    "tcg": {"contains": ["#"]},
+    "gshock": {"prefix": "CASIO G-Shock", "contains": ["Watch"]},
+    "ichibankuji": {"prefix": "Ichiban Kuji"},
+}
+# eBay 公式ブランド名 (フィルタ主戦場)。リールは brand 多数 → ブランド種別判定にも使う
+_REEL_BRANDS = {"shimano", "daiwa", "abu garcia", "megabass", "lews", "abel", "penn", "okuma"}
+# mercari は商品混在 (porter/tomica/uniqlo/montbell/workman/reel) → C:Brand で sub-detect
+MERCARI_TITLE_FORMAT = [
+    # (C:Brand に含まれる語, ルール)
+    (("porter",), {"contains": ["PORTER"], "contains_any": ["Used", "Pre-owned", "Preowned"],
+                   "brand_exact": {"Porter", "HEAD PORTER"}}),
+    (("tomica",), {"contains_any": ["Tomica", "TOMICA"], "brand_exact": {"Tomica"}}),
+    (("uniqlo",), {"contains_any": ["T-Shirt", "T Shirt", "Tee"], "brand_exact": {"Uniqlo"}}),
+    (("montbell", "mont-bell"), {"prefix": "montbell"}),
+    (("workman",), {"contains_any": ["Workman"]}),
+    (tuple(_REEL_BRANDS), {"contains_any": ["Reel"]}),
+]
+
+
+def _check_title_format(title, brand_raw, rule):
+    """1 タイトルを1ルールで検査 → 逸脱メッセージ list。"""
+    out = []
+    tl = title.lower()
+    p = rule.get("prefix")
+    if p and not title.startswith(p):
+        out.append(f"タイトル形式逸脱: '{p}' で始まっていない(生成ロジック規定の形)")
+    for c in rule.get("contains", []):
+        if c.lower() not in tl:
+            out.append(f"タイトル形式逸脱: 必須語 '{c}' がタイトルに無い")
+    ca = rule.get("contains_any")
+    if ca and not any(c.lower() in tl for c in ca):
+        out.append(f"タイトル形式逸脱: {ca} のいずれもタイトルに無い")
+    exp = rule.get("brand_exact")
+    if exp and brand_raw and brand_raw not in exp:
+        out.append(f"Brand='{brand_raw}' は eBay公式ブランド名でない(期待:{sorted(exp)} / フィルタ不ヒット)")
+    return out
+
+
+def title_format_checks(headers, row, project):
+    """カテゴリ別タイトル生成フォーマットへの準拠を検証。"""
+    hm = {h: i for i, h in enumerate(headers)}
+    ti = hm.get(COL_TITLE)
+    title = (str(row[ti]).strip() if ti is not None and ti < len(row) else "")
+    if not title:
+        return []
+    if project in TITLE_FORMAT:
+        return _check_title_format(title, "", TITLE_FORMAT[project])
+    if project == "mercari":
+        bi = hm.get("C:Brand")
+        brand_raw = (str(row[bi]).strip() if bi is not None and bi < len(row) else "")
+        brand = brand_raw.lower()
+        if not brand:
+            return []
+        for brands, rule in MERCARI_TITLE_FORMAT:
+            if any(b in brand for b in brands):
+                return _check_title_format(title, brand_raw, rule)
+    return []
+
+
+# タイトル SEO 監査 (iMakKeywords PDF 参照):
+# 生成は PDF 上位検索語でタイトルを最適化する建前 → 監査でも「PDF上位語を活かせてるか」を見る。
+# PDF は pdftotext で .txt 化済 (C:/dev/iMak_data/keywords/)。csv_auditor は別 python 実行のため
+# 実行時 pdftotext は呼ばず静的 txt を読む。PDF 更新時は再変換が必要。
+# 安全設計: PDF上位語には他ブランド名 (rolex 等) が混ざる → 個別語の「足せ」提案はしない (誤キーワード=捏造)。
+# 代わりに PDF プールでタイトルを採点し「同じ CSV 内で SEO が相対的に弱い行」を報告 (report-only)。
+KEYWORD_DIR = r"C:/dev/iMak_data/keywords"
+_TXT_TOYS = "toys_hobbies_2026q1.txt"
+_TXT_JEWEL = "jewelry_watches_2026q1.txt"
+_TXT_COLLECT = "collectibles_2026q1.txt"
+_TXT_CLOTHING = "clothing_shoes_accessories_2026q1.txt"
+_TXT_SPORTING = "sporting_goods_2026q1.txt"
+KEYWORD_TXT = {
+    "tcg": _TXT_TOYS,
+    "gshock": _TXT_JEWEL,
+    "ichibankuji": _TXT_COLLECT,
+}
+# Mercari は商品混在 → C:Brand で商品判定して PDF を出し分け (反射的に1PDFにしない)
+MERCARI_BRAND_TXT = [
+    (("porter", "uniqlo", "montbell", "mont-bell", "workman"), _TXT_CLOTHING),
+    (("tomica",), _TXT_TOYS),
+    (tuple(_REEL_BRANDS), _TXT_SPORTING),
+]
+_KW_LINE_RE = re.compile(r"^\s*(\d+)\s+(?:\d+|NEW)\s+(?:\d+|-|NEW)\s+(.+?)\s*$")
+_KW_POOL_CACHE = {}
+
+
+def _load_pool_file(fn):
+    """PDF txt(ファイル名) → {keyword_lower: score}. score = max(0, 1 - rank/200). ファイル名でキャッシュ。"""
+    if fn in _KW_POOL_CACHE:
+        return _KW_POOL_CACHE[fn]
+    pool = {}
+    path = os.path.join(KEYWORD_DIR, fn) if fn else None
+    if path and os.path.exists(path):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = _KW_LINE_RE.match(line)
+                if not m:
+                    continue
+                rank = int(m.group(1))
+                kw = m.group(2).strip().lower()
+                if not kw or kw.isdigit() or len(kw) < 3 or kw in ("rank", "prev rank", "keyword"):
+                    continue
+                sc = max(0.0, 1.0 - rank / 200.0)
+                if kw not in pool or pool[kw] < sc:
+                    pool[kw] = sc
+    _KW_POOL_CACHE[fn] = pool
+    return pool
+
+
+def _load_keyword_pool(project):
+    """project → pool (単一PDFカテゴリ用)。"""
+    fn = KEYWORD_TXT.get(project)
+    return _load_pool_file(fn) if fn else {}
+
+
+def _mercari_pdf_for_brand(brand_lower):
+    """Mercari の C:Brand から対応 PDF txt を判定 (porter/uniqlo→衣料, tomica→toys, リール→sporting)。"""
+    if not brand_lower:
+        return None
+    for brands, fn in MERCARI_BRAND_TXT:
+        if any(b in brand_lower for b in brands):
+            return fn
+    return None
+
+
+def _title_seo_score(title, pool):
+    """タイトルに含まれる PDF上位語の score 合計 (= SEO の効き具合)。"""
+    tl = " " + title.lower() + " "
+    return round(sum(sc for kw, sc in pool.items() if kw in tl), 3)
+
+
+def _flag_weak_seo(scored, headers):
+    """[(title,row,score)] → 中央値の0.6未満を SEO弱として報告。3行未満は相対比較せず空。"""
+    if len(scored) < 3:
+        return []
+    vals = sorted(s for _, _, s in scored)
+    thr = vals[len(vals) // 2] * 0.6
+    return [(_row_sku(headers, row),
+             f"SEO弱: PDF上位語の活用が他行比で低い (score={s} < 閾値{round(thr, 2)}) 「{t[:45]}」")
+            for t, row, s in scored if s < thr]
+
+
+def _title_check_project(project, is_generic):
+    """タイトル検査(整合/形式/SEO)で使う実効 project。
+    generic(reel/tomica/workman 等=check_csv 無し)は C:Brand 判定で mercari ルールを適用 → 取りこぼし防止。"""
+    return "mercari" if is_generic else project
+
+
+def title_seo_findings(headers, rows, project):
+    """PDF 上位語でタイトルを採点 → 同 CSV 内で SEO が相対的に弱い行を報告 (SEO_NOTE)。
+    Mercari は商品混在のため C:Brand で PDF を出し分け、商品グループごとに相対比較する。"""
+    hm = {h: i for i, h in enumerate(headers)}
+    ti = hm.get(COL_TITLE)
+    if ti is None:
+        return []
+
+    def _score(row, pool):
+        t = str(row[ti]).strip() if ti < len(row) else ""
+        return (t, row, _title_seo_score(t, pool)) if t else None
+
+    if project == "mercari":
+        bi = hm.get("C:Brand")
+        groups = {}  # txt → [(t,row,score)]
+        for row in rows:
+            brand = (str(row[bi]).strip().lower() if bi is not None and bi < len(row) else "")
+            fn = _mercari_pdf_for_brand(brand)
+            if not fn:
+                continue
+            pool = _load_pool_file(fn)
+            if not pool:
+                continue
+            sc = _score(row, pool)
+            if sc:
+                groups.setdefault(fn, []).append(sc)
+        out = []
+        for grp in groups.values():
+            out.extend(_flag_weak_seo(grp, headers))
+        return out
+
+    pool = _load_keyword_pool(project)
+    if not pool:
+        return []  # PDF 未整備カテゴリ → skip
+    scored = [s for s in (_score(row, pool) for row in rows) if s]
+    return _flag_weak_seo(scored, headers)
 
 
 def generic_findings(headers, row):
@@ -350,7 +601,7 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
         print(f"❌ CSVが空/読込不能: {csv_path}")
         return 2
     is_generic = project == "generic"
-    print(f"▶ カテゴリ: {project}{' (汎用=タイトル安全のみ)' if is_generic else ''} / "
+    print(f"▶ カテゴリ: {project}{' (汎用+C:Brand判定でタイトル形式/SEO検査)' if is_generic else ''} / "
           f"対象: {os.path.basename(csv_path)}{'  [DRY-RUN]' if dry_run else ''}")
 
     if is_generic:
@@ -394,6 +645,15 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
             elif d == SEO_NOTE:
                 seo_notes.append((sku, msg))
             eff.append(d)
+        # タイトル↔Item Specifics 整合 (生成ロジック準拠の検証):
+        # 生成ロジックが catalog の事実からタイトルと spec の両方を作る → 食い違い = 生成のミス。
+        # 報告のみ (phrasing差で誤除外しないよう exclude には倒さない) → プログラム修正依頼へ。
+        # generic(reel/tomica/workman 等)でも C:Brand で商品判定して mercari ルールを適用 → 取りこぼし無し
+        _tproj = _title_check_project(project, is_generic)
+        for cmsg in title_spec_consistency(headers, row, _tproj):
+            program_items.append((sku, cmsg))
+        for fmsg in title_format_checks(headers, row, _tproj):
+            program_items.append((sku, fmsg))
         if should_exclude(eff):
             exclude_idx.append(i)
 
@@ -406,6 +666,8 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
             exclude_idx.append(idx)
     exclude_idx.sort()
     seo_notes = seo_notes + dc["seo"]
+    # タイトル SEO 監査 (PDF上位語の活用度。generic でも C:Brand で商品判定して適用)
+    seo_notes = seo_notes + title_seo_findings(headers, rows, _title_check_project(project, is_generic))
 
     # --- 機械的修正: 送料ポリシー (fix_shipping=True のカテゴリのみ。Mercari/genericは無効=報告のみ) ---
     if not is_generic and CATEGORY_MAP[project].get("fix_shipping", True):
@@ -429,7 +691,63 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     _report(project, csv_path, dry_run, len(rows), exclude_idx, ship_fixes,
             catalog_items, program_items, seo_notes, cat_req, prog_req,
             log_signals, excl_result, dc["gate_summary"], dc["claude"])
+    # --- PDCA: 台帳に蓄積 + 前回比トレンド + 再発検知 (dry-run は追記しない) ---
+    _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
     return 1 if (exclude_idx or program_items or catalog_items) else 0
+
+
+def _finding_tag(msg):
+    """finding メッセージ → 短い種別タグ (再発キー/集計用)。"""
+    for t in ("形式逸脱", "タイトル↔spec不一致", "SEO弱", "禁止ワード", "日本語",
+              "上限", "推奨", "必須Item Specific", "不整合", "誤マップ"):
+        if t in msg:
+            return t
+    return "other"
+
+
+def _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run):
+    """KPI を算出 → audit_ledger に記録 → 前回比トレンド/再発/解消 を表示 (PDCA の蓄積・測定)。"""
+    hm = {h: i for i, h in enumerate(headers)}
+    ti = hm.get(COL_TITLE)
+    lens = []
+    if ti is not None:
+        for r in rows:
+            t = str(r[ti]).strip() if ti < len(r) else ""
+            if t:
+                lens.append(len(t))
+    n = len(lens) or 1
+    summary = {
+        "rows": len(rows),
+        "excluded": len(exclude_idx),
+        "program": len(program_items),
+        "seo_weak": sum(1 for _, m in seo_notes if "SEO弱" in m),
+        "short_titles": sum(1 for L in lens if L < IDEAL_TITLE_LEN),
+        "format_violations": sum(1 for _, m in program_items if "形式逸脱" in m),
+        "consistency_mismatch": sum(1 for _, m in program_items if "不一致" in m),
+        "avg_title_len": round(sum(lens) / n, 1),
+    }
+    # 再発キー = item(SKU) × 種別。次回同じものが残ってれば「まだ直ってない」。
+    keys = [f"{sku}|{_finding_tag(m)}" for sku, m in (program_items + seo_notes)]
+    res = audit_ledger.record_run(project, summary, keys, write=not dry_run)
+
+    print("\n📈 PDCA 台帳 (前回比トレンド / 再発検知):")
+    prev = res["previous"]
+    if not prev:
+        print("   (このカテゴリ初回 → 次回からトレンド比較)")
+    else:
+        print(f"   前回: {prev.get('date', '?')}")
+        for k, v in summary.items():
+            d = res["trend"].get(k)
+            arrow = audit_ledger.trend_arrow(k, d) if d is not None else "—"
+            dtxt = f"{d:+g}" if isinstance(d, (int, float)) else "—"
+            print(f"     {k}: {v} ({dtxt} {arrow})")
+        if res["recurring"]:
+            print(f"   ⚠️ 未解消(再発) {len(res['recurring'])}件 (前回も同じ item×種別が残存)")
+        if res["resolved"]:
+            print(f"   ✅ 解消 {len(res['resolved'])}件 (前回の指摘が消えた)")
+    if dry_run:
+        print("   (DRY-RUN: 台帳には記録していません)")
+    print(f"   台帳: {audit_ledger.LEDGER_PATH}")
 
 
 def _peek_csv(path):

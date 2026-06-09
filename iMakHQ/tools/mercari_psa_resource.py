@@ -77,13 +77,35 @@ def build_input_from_funnel():
     return out
 
 
+def _chrome_major():
+    """インストール済 Chrome のメジャー版を取得 (失敗時 None = uc自動検出に委ねる)。
+
+    uc.Chrome の自動検出が driver 版を取り違える事故 (2026-06-09: driver149 vs Chrome148)
+    を防ぐため、レジストリ BLBeacon から実機の Chrome 版を読んで version_main に渡す。
+    """
+    try:
+        import winreg
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                k = winreg.OpenKey(hive, r"Software\Google\Chrome\BLBeacon")
+                v, _ = winreg.QueryValueEx(k, "version")
+                winreg.CloseKey(k)
+                return int(str(v).split(".")[0])
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return None
+
+
 def fetch_mercari_cheapest(cards):
     """各カードの メルカリ on_sale 最安(PSA10) を取得 → {idx: (price, url, name)}。"""
     import undetected_chromedriver as uc
     opts = uc.ChromeOptions()
     opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
     opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1400")
-    drv = uc.Chrome(options=opts)
+    _maj = _chrome_major()
+    drv = uc.Chrome(options=opts, version_main=_maj) if _maj else uc.Chrome(options=opts)
     out = {}
     try:
         drv.set_page_load_timeout(50)

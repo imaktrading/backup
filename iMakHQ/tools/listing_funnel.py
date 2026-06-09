@@ -285,11 +285,17 @@ def classify(rows):
     in_stock = [r for r in rows if r["qty"] != 0]
     oos = [r for r in rows if r["qty"] == 0]
 
-    # 在庫切れも分析: 需要シグナル(過去販売/watch/90d販売)があれば再仕入れ価値、皆無なら出品停止候補
+    # 在庫切れも分析: 需要シグナルがあれば再仕入れ価値、皆無なら出品停止候補。
+    # 2026-06-09: OOS品は買えない=販売もクリックも露出も抑制される(検索から隠れる)。よって
+    # 「売れてない/クリック0/impr少」は不人気の証拠にならない。eBayが少しでも表示した(impr_total>0)
+    # =関連性あり=再仕入れ候補(RESTOCK)。完全に表示ゼロ(impr_total==0)かつ販売/watch/90d=0 だけが
+    # 真の死筋=CULL。End可否は最終的に再仕入れ可否ゲートで決める(eBay指標では死筋を確定できない)。
     def _demand(r):
-        return r["sold_qty"] + r["watch"] + r.get("sales90", 0)
-    restock = [r for r in oos if _demand(r) > 0]
-    cull = [r for r in oos if _demand(r) == 0]
+        return r["sold_qty"] + r["watch"] + r.get("sales90", 0)   # 並び順用 (実需を上位に)
+    def _worth_restock(r):
+        return _demand(r) > 0 or r.get("impr_total", 0) > 0
+    restock = [r for r in oos if _worth_restock(r)]
+    cull = [r for r in oos if not _worth_restock(r)]
     restock.sort(key=lambda x: -_demand(x))
 
     # 露出/CTR の判定基盤を選ぶ: PLレポート有り → organic+PL 累計 impr/ctr + 累計閾値 (正しい)。
@@ -408,27 +414,29 @@ def write_xlsx(path, rows, c, summary_lines):
 
 # 「ファネル分析」スプシ (2026-06-07 集約: デスクトップxlsx置換)。eBayアップCSV以外はスプシに集約。
 FUNNEL_SHEET_ID = "1UkaI4W6YCJgUbjgF7LLNN9_fHeVuz5qB4r9RqImElwg"
+# (flag, 意味/アクション, 要件) — 要件は classify() の実判定条件を転記 (2026-06-09 追加)
 FUNNEL_BUCKETS = [
-    ("NO_SEARCH", "検索に出ていない (キーワード/カテゴリ)"),
-    ("NO_CLICK", "クリックされない (サムネ/タイトル/価格)"),
-    ("NO_CONVERT", "買われない (価格/説明)"),
-    ("OVERPRICED", "適正価格より高い (値下げ余地)"),
-    ("NEW_WAIT", "新規出品でimpr低 (時間不足=様子見)"),
-    ("RELIST", "取下げ再出品候補 (露出ゼロ)"),
-    ("RESTOCK", "在庫切れだが需要実証済 (再仕入れ)"),
-    ("CULL", "在庫切れ&需要皆無 (出品停止候補)"),
-    ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)"),
+    ("NO_SEARCH", "検索に出ていない (キーワード/カテゴリ)", "在庫>0 ∩ 露出ほぼ0 (impr≤無閾値)"),
+    ("NO_CLICK", "クリックされない (サムネ/タイトル/価格)", "在庫>0 ∩ 露出十分 ∩ CTR下位25%以下"),
+    ("NO_CONVERT", "買われない (価格/説明)", "在庫>0 ∩ CTR下位超 ∩ 販売0(sold+90d)"),
+    ("OVERPRICED", "適正価格より高い (値下げ余地)", "在庫>0 ∩ 価格>適正価格×1.05"),
+    ("NEW_WAIT", "新規出品でimpr低 (時間不足=様子見)", "在庫>0 ∩ 出品 0<age<21日"),
+    ("RELIST", "取下げ再出品候補 (露出ゼロ)", "NO_SEARCH ∪ NO_CLICK"),
+    ("RESTOCK", "在庫切れだが需要実証済 (再仕入れ)", "在庫=0 ∩ 需要>0 (生涯販売+watch+90d)"),
+    ("CULL", "在庫切れ&需要皆無 (出品停止候補)", "在庫=0 ∩ 需要=0 (+End時 age≥21)"),
+    ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)", "判定基盤無 ∩ 販売0 ∩ watch0"),
 ]
 FUNNEL_COLS = ["item_id", "title", "site", "category", "price", "trend_price", "qty",
-               "sold_qty", "sales90", "watch", "impr", "ctr%", "photos", "keywords",
-               "relist_status", "ebay_url"]
+               "sold_qty", "sales90", "watch", "impr", "ctr%", "impr_total", "ctr_total%",
+               "photos", "keywords", "relist_status", "ebay_url"]
 
 
 def _funnel_vals(r):
     return [r["item_id"], r["title"], r["site"], r.get("category", ""), r["price"],
             r["trend_price"], r["qty"], r["sold_qty"], r.get("sales90", 0), r["watch"],
-            round(r["impr"], 1), round(r["ctr"] * 100, 2), r.get("photos", 0),
-            r.get("keywords", 0), r.get("relist_status", ""),
+            round(r["impr"], 1), round(r["ctr"] * 100, 2),
+            round(r.get("impr_total", 0), 1), round(r.get("ctr_total", 0) * 100, 2),
+            r.get("photos", 0), r.get("keywords", 0), r.get("relist_status", ""),
             r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
 
 
@@ -457,9 +465,9 @@ def write_funnel_to_sheet(rows, c, summary_lines):
     # Summary タブ
     summ = [["出品物フルファネル分析 (Seller Hub版)"]]
     summ += [[ln] for ln in summary_lines]
-    summ += [[""], ["バケツ", "件数", "意味/アクション"]]
-    for name, desc in FUNNEL_BUCKETS:
-        summ.append([name, len(c.get(name, [])), desc])
+    summ += [[""], ["バケツ", "件数", "意味/アクション", "要件"]]
+    for name, desc, req in FUNNEL_BUCKETS:
+        summ.append([name, len(c.get(name, [])), desc, req])
     write_tab("Summary", summ)
 
     # 在庫あり / 在庫なし
@@ -469,7 +477,7 @@ def write_funnel_to_sheet(rows, c, summary_lines):
     write_tab("在庫なし", [FUNNEL_COLS] + [_funnel_vals(r) for r in oos])
 
     # 9 バケツ (空でもヘッダのみ書いてタブを安定させる)
-    for name, _ in FUNNEL_BUCKETS:
+    for name, _, _ in FUNNEL_BUCKETS:
         write_tab(name, [FUNNEL_COLS] + [_funnel_vals(r) for r in c.get(name, [])])
 
     # 既定の空タブ「シート1」を掃除

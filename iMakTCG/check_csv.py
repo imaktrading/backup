@@ -34,7 +34,10 @@ API_KEY_FILE = "API key.txt"
 MAX_TITLE_LEN = 80
 IDEAL_TITLE_MIN = 70
 BANNED_TITLE_WORDS = [
-    "japanese", "japan", "gem mt", "gem-mt", "gemmt",
+    # 2026-06-08: psa_to_csv.py:721 と同期。"japanese"/"japan" は削除 (生成側は 2026-05-01 に既に削除済)。
+    # JP 印刷版を eBay US で売る運用で事実情報・SEO価値高 (TOP競合多数が使用)。spam語のみ残す。
+    # 生成 (psa_to_csv) が SSOT。post_title_fix が "Japanese" pad しても誤検出しないようになる。
+    "gem mt", "gem-mt", "gemmt",
     "mint", "graded", "l@@k", "look", "wow", "nr",
 ]
 

@@ -63,7 +63,8 @@ def _extract_set_code(brand: str, category: str) -> str | None:
 
 
 def _get_candidates(category: str, set_code: str | None, card_number: str | None,
-                    brand: str = "", expected_product_id: str | None = None) -> list[tuple[str, str]]:
+                    brand: str = "", expected_product_id: str | None = None,
+                    subject: str = "") -> list[tuple[str, str]]:
     """catalog 候補 list 取得. (product_id, image_path) tuple.
 
     2026-05-31 改訂: Gemini 推奨 3 段階フォールバック logic.
@@ -97,7 +98,8 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
                 else:
                     # PROMOS / EVENT は全 DON + 全 promo
                     cur.execute(
-                        "SELECT product_id FROM products WHERE category=? AND (product_id LIKE 'DON-%' OR product_id LIKE '%_P%') ORDER BY product_id LIMIT 50",
+                        # '_' は LIKE ワイルドカードなので escape (literal '_P' promo suffix のみ狙う。'OP##' 誤マッチ防止)
+                        r"SELECT product_id FROM products WHERE category=? AND (product_id LIKE 'DON-%' OR product_id LIKE '%\_P%' ESCAPE '\') ORDER BY product_id LIMIT 50",
                         (category,)
                     )
             elif category == "pokemon_tcg" and set_code:
@@ -113,7 +115,36 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
                 )
             rows = cur.fetchall()
 
-        # === 優先度 3: category 全件 (= 最終 safety net) ===
+        # === 優先度 3: character 名 (subject) で候補を surface ===
+        # set_code 抽出漏れ・promo・新セット・ID lookup 失敗 (= miss) でも、catalog に
+        # そのキャラが在れば必ず候補に出す。HTML の本来目的 (人が候補から選ぶ) を担保。
+        # subject 例 'SABO' / 'MONKEY D LUFFY ALTERNATE ART' → name_en LIKE で引く。
+        if subject and not expected_product_id:
+            import re
+            _NOISE = {"ALTERNATE", "ALT", "ART", "RARE", "FOIL", "PARALLEL", "SPECIAL", "FULL",
+                      "MANGA", "COMIC", "LEADER", "SUPER", "SECRET", "PROMO", "CARD", "THE", "AND",
+                      "SAR", "VMAX", "VSTAR", "GX", "EX"}
+            toks = [t for t in re.split(r"[^A-Za-z]+", subject)
+                    if len(t) >= 3 and t.upper() not in _NOISE][:3]
+            char_rows: list = []
+            if toks:
+                like = " OR ".join(["name_en LIKE ?"] * len(toks))
+                base = f"SELECT DISTINCT product_id FROM products WHERE category=? AND ({like})"
+                # card_number があれば番号末尾一致で pinpoint (例 Sabo + -049 → OP10-049)
+                if card_number:
+                    cur.execute(base + " AND product_id LIKE ? ORDER BY product_id LIMIT 40",
+                                [category] + [f"%{t}%" for t in toks] + [f"%-{card_number}"])
+                    char_rows = cur.fetchall()
+                if not char_rows:  # 番号一致なし → キャラ名のみで広く
+                    cur.execute(base + " ORDER BY product_id LIMIT 40",
+                                [category] + [f"%{t}%" for t in toks])
+                    char_rows = cur.fetchall()
+            if char_rows:
+                # キャラ候補を先頭に (人が選びやすい)。既存 rows は dedup して後ろに残す。
+                seen = {p for (p,) in char_rows}
+                rows = char_rows + [r for r in rows if r[0] not in seen]
+
+        # === 優先度 4: category 全件 (= 最終 safety net) ===
         if not rows:
             cur.execute(
                 "SELECT product_id FROM products WHERE category=? ORDER BY product_id LIMIT 30",
@@ -862,7 +893,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> None:
         # 2026-05-31: 候補生成は expected_product_id 優先 (= Gemini 推奨 3 段階フォールバック)
         candidates = _get_candidates(
             category, set_code, card_number, brand=brand,
-            expected_product_id=csv_expected,
+            expected_product_id=csv_expected, subject=subject,
         )
         targets.append({
             "cert": cert,

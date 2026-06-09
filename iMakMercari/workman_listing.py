@@ -812,6 +812,20 @@ def build_parent_row(rec: dict, ajax_data: Optional[dict]) -> Optional[list]:
     style = derive_style(cat_code, rec.get("name_en", ""), s.get("features", []))
     department = _gender_to_department(s.get("gender", "Men"))
 
+    # === 70字パディング (listing_common.normalize_title) ===
+    # Workman は Multi-Variation = 親タイトルに単色を入れない → Color は pad 材料から除外。
+    # 実ファクト (Type/Material/Style/Activity/Season) で 70-80字をバイヤー検索語で埋める。
+    try:
+        from listing_common import normalize_title as _wk_normalize
+        _wk_pad_specs = {
+            "Type": type_str, "Material": material, "Style": style,
+            "Activity": activity, "Season": season,
+        }
+        title = _wk_normalize(title, is_new=True, item_specifics=_wk_pad_specs,
+                              category="workman", target_min=70, max_chars=80)
+    except Exception:
+        pass  # pad 失敗時は build_title 結果をそのまま使う (出品は止めない)
+
     # 親 PicURL = 全 color 画像 pipe 連結 (= listing 全体の画像群、URL のみ)
     # (color別画像の dropdown 切替対応は別途 VariationSpecificsSet 列要、Phase 2.5)
     pic_url = "|".join(
@@ -1043,6 +1057,15 @@ def main():
     print(f"  出力: {out}")
     print(f"  parent listing: {success}件 / variation: {len(rows) - 1 - success}件")
     print(f"  skipped: {skipped}件 / failed: {failed}件")
+
+    # 生成時セルフ監査 (CSV監査くん) — 監査を待たず生成で品質確認
+    try:
+        import sys as _sys_sa
+        _sys_sa.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+        from listing_common import run_self_audit
+        run_self_audit(out)
+    except Exception as _e:
+        print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
 
 
 if __name__ == "__main__":

@@ -829,6 +829,13 @@ def main():
         except Exception as e:
             print(f"⚠️ チェッカー実行エラー: {e}")
 
+        # 生成時セルフ監査 (CSV監査くん) — check_csv に加え 4観点(整合/形式/SEO/文字数) を確認
+        try:
+            from listing_common import run_self_audit
+            run_self_audit(output_file)
+        except Exception as _e:
+            print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
+
         # スプシにメルカリURL追記（A列にURL, C列にタイトルは既にスプシにある）
         # → スプシは既にトラバホで管理。追記不要。
         print(f"\n出品後、スプシのB列にItemIDを手動入力してください。")

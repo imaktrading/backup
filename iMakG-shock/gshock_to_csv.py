@@ -1333,16 +1333,22 @@ def build_row(url, price, data, base_desc):
 
     # === Title整合性 + 70字パディング (listing_common.normalize_title) ===
     # G-Shock は新品扱い (CASIO公式仕入)
+    style = get_style_by_model(model_base)  # シリーズ別: Mudmaster→Military / Frogman→Diver / MR-G→Luxury / 他→Sport
+    # pad 材料は実ファクトのみ (捏造禁止)。Color/Material は既にタイトルに在ること多 →
+    # Style / Water Resistance / Movement を足して 70-80字をバイヤー検索語で埋める。
+    _wr = re.search(r'(\d+)\s*m', str(data.get('water_resistance', '')))
     _gs_specs = {
-        'Color': band_color, 'Material': data.get('case_material', ''),
+        'Color': band_color,
+        'Material': data.get('case_material', ''),
+        'Style': style,                                              # Sport/Diver/Military/Luxury
+        'Water Resistance': f"{_wr.group(1)}M Water Resistant" if _wr else '',
+        'Movement': data.get('movement', ''),                       # Quartz 等 (eBay有効値)
         'Year Manufactured': year,
     }
     title = normalize_title(
         title, is_new=True, item_specifics=_gs_specs,
         category="gshock", target_min=70, max_chars=80,
     )
-
-    style = get_style_by_model(model_base)  # シリーズ別: Mudmaster→Military / Frogman→Diver / MR-G→Luxury / 他→Sport
     # Case Thickness: eBay フィルタは整数mm（5-20）。"12.4 mm" → "12 mm" に丸め
     case_thickness_raw = data.get('case_thickness', '')
     m_th = re.search(r'(\d+\.?\d*)', case_thickness_raw)
@@ -1724,6 +1730,13 @@ def main():
 
     print(f"\n完了！出力: {output_file}")
     print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")
+
+    # 生成時セルフ監査 (CSV監査くん) — 監査を待たず生成で品質確認
+    try:
+        from listing_common import run_self_audit
+        run_self_audit(output_file)
+    except Exception as _e:
+        print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
 
     print("\n=== タイトル確認 ===")
     for row in rows[1:]:

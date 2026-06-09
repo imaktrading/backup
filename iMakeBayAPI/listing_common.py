@@ -269,6 +269,9 @@ def pad_title_to_target(title: str, item_specifics: dict, category: str = None,
     pad_keys_priority = [
         'Item Weight', 'Gear Ratio', 'Maximum Drag',  # リール系
         'Color', 'Material', 'Size', 'Style',  # 全カテゴリ
+        'Water Resistance', 'Movement',  # 時計系 (G-SHOCK 等。検索語: water resistant / quartz)
+        'Theme', 'Franchise',  # フィギュア系 (一番くじ。検索語: anime & manga / 作品名)
+        'Type', 'Activity', 'Season',  # アパレル系 (Workman/montbell。検索語: jacket / outdoor 等)
         'Year Manufactured', 'Series',
     ]
     for key in pad_keys_priority:
@@ -303,6 +306,26 @@ def normalize_title(title: str, is_new: bool, item_specifics: dict, category: st
     title = pad_title_to_target(title, item_specifics, category=category,
                                  target_min=target_min, max_chars=max_chars)
     return title
+
+
+def run_self_audit(csv_path):
+    """生成直後に CSV監査くん(csv_auditor)を自動実行し結果を表示する (報告のみ・非致命)。
+
+    監査を「待たず」生成時に品質確認する共通フック。全 listing 生成スクリプトの末尾から呼ぶ。
+    dry-run なので生成物は書き換えない。with_market=False で offline/高速 (eBay API を叩かない)。
+    """
+    import os as _os
+    import sys as _sys
+    try:
+        _tools = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                               "iMakHQ", "tools")
+        if _tools not in _sys.path:
+            _sys.path.insert(0, _tools)
+        import csv_auditor as _auditor
+        print("\n🔍 生成時セルフ監査 (CSV監査くん) ──────────")
+        _auditor.audit(csv_path, dry_run=True, with_market=False)
+    except Exception as _e:
+        print(f"⚠️ セルフ監査 失敗 (非致命): {type(_e).__name__}: {_e}")
 
 
 # ===================================================================

@@ -1155,6 +1155,12 @@ def main():
 
         print(f"\n[OK] 完了! 出力: {OUTPUT_CSV}")
         print(f"成功: {len(results)}件 / 失敗・HOLD: {len(errors)}件")
+        # 生成時セルフ監査 (CSV監査くん) — 監査を待たず生成で品質確認
+        try:
+            from listing_common import run_self_audit
+            run_self_audit(OUTPUT_CSV)
+        except Exception as _e:
+            print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
     else:
         print("\n[NG] 出力データなし")
 

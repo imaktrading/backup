@@ -28,7 +28,7 @@ def test_funnel_vals_matches_cols_length():
 
 def test_funnel_buckets_are_nine():
     lf = _load()
-    keys = [k for k, _ in lf.FUNNEL_BUCKETS]
+    keys = [t[0] for t in lf.FUNNEL_BUCKETS]   # FUNNEL_BUCKETS=(flag,意味,要件)の3要素 (2026-06-09)
     for must in ("NO_SEARCH", "NO_CLICK", "NO_CONVERT", "OVERPRICED", "NEW_WAIT",
                  "RELIST", "RESTOCK", "CULL", "DEAD_SIMPLE"):
         assert must in keys

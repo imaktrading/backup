@@ -518,11 +518,12 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
 
     # === Title整合性 + 70字パディング (listing_common.normalize_title) ===
     # 一番くじは新品扱い (ConditionID=1000)
-    _is_specs = {  # build_row 内で参照可能な item_specifics 雛形
+    _is_specs = {  # build_row 内で参照可能な item_specifics 雛形 (pad 材料は実ファクトのみ)
         'Character': claude_result.get('character', ''),
         'Theme': 'Anime & Manga',
         'Type': 'Figure',
         'Franchise': claude_result.get('franchise', ''),
+        'Year Manufactured': claude_result.get('year', series_data.get('release_year', '')),
     }
     title = normalize_title(
         title, is_new=True, item_specifics=_is_specs,
@@ -1134,6 +1135,14 @@ def _process_sheet_to_ebay_csv():
         except Exception as _e:
             print(f"⚠️ decision_log 失敗 (ichibankuji): {type(_e).__name__}: {_e}")
         print(f"   ※ 出品完了後、統合Hight B列にItemIDを手入力で「処理済」化")
+        # 生成時セルフ監査 (CSV監査くん) — 監査を待たず生成で品質確認
+        try:
+            import sys as _sys_sa
+            _sys_sa.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            from listing_common import run_self_audit
+            run_self_audit(OUTPUT_CSV)
+        except Exception as _e:
+            print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
     else:
         print("\n❌ eBay CSV対象行なし")
 

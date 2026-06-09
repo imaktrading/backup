@@ -656,14 +656,23 @@ def _append_hold_log(idx, title, deliberation):
     return _HOLD_LOG_PATH
 
 
+# 2026-06-08: catalog ID完全一致 hit / 人手verify済 のカードは身元が SSOT で確定済 →
+# flaky な 3AI 合議 (API障害で誤BLOCT する) を通さず、決定論チェック(validate_row)のみで判定する。
+# rollback: この定数を False にすれば従来の「全カード 3AI 合議」に戻る。
+DETERMINISTIC_ON_CONFIRMED = True
+
+
 def validate_and_report(idx, title, specs, model, category, condition_id, price, pic_url, condition_desc="",
                         psa_brand=None, psa_card_number=None,
                         use_gemini=True, use_groq=True, intermediate=False,
-                        use_deliberation=True, override_context=None):
+                        use_deliberation=True, override_context=None,
+                        catalog_confirmed=False):
     """セルフチェック実行＋表示。
     - intermediate=True: 中間段階バリデーション（category/pic_url未確定OK）
     - use_deliberation=True: 3AI議論方式（Claude/Gemini/Groq、最大5R、HOLDで人間判断）
     - override_context: cert_overrides 適用時の人手検証コンテキスト (3AI への追加プロンプト)
+    - catalog_confirmed=True: catalog ID hit/人手verify済 → 3AI を skip し決定論のみで判定
+      (DETERMINISTIC_ON_CONFIRMED=True の時。誤出品しない: validate_row の error は依然 reject)
     Returns: bool (False=CSV除外、True=CSV出力)
     """
     errors, warnings = validate_row(
@@ -682,6 +691,15 @@ def validate_and_report(idx, title, specs, model, category, condition_id, price,
                 print(f"       ⚠️ {w}")
         print(f"    → この商品はCSVに含めません")
         return False
+
+    # catalog ID-hit / 人手verify済 → 身元は SSOT で確定。決定論チェック(validate_row)を通った時点で PASS。
+    # flaky な 3AI 合議は通さない (API障害による誤BLOCK を排除)。誤出品はしない: error は上で reject 済。
+    if catalog_confirmed and DETERMINISTIC_ON_CONFIRMED:
+        if warnings:
+            for w in warnings:
+                print(f"       ⚠️ {w}")
+        print(f"    ✅ catalog確定 → 決定論PASS (3AI skip)")
+        return True
 
     # 既知の許容パターンチェック（議論前のショートカット）
     if use_deliberation:

@@ -1297,6 +1297,22 @@ def _strip_variant_from_character(name):
     return clean.strip()
 
 
+def _strip_known_set_suffix(name, set_name):
+    """character/card_name 末尾に残った「既知の set 名」を実 set 名で決定論的に除去する。
+
+    Pokemon の character/card_name は PSA Subject を denylist で削って作るため、未登録の
+    新 set 名が末尾に残る (例 'Togekiss V Legendary Heartbeat' / 'Corviknight Vmax Vmax Climax')。
+    set 名は別途 catalog から確定済 (C:Set 列が持つ) ので、それを末尾から剥がせば denylist 漏れを根絶できる。
+    例: ('Togekiss V Legendary Heartbeat', 'Legendary Heartbeat') → 'Togekiss V'
+        ('Corviknight Vmax Vmax Climax',   'VMAX Climax')        → 'Corviknight Vmax'
+    """
+    if not name or not set_name:
+        return name
+    pat = r"\s+" + re.escape(set_name.strip()) + r"\s*$"
+    cleaned = re.sub(pat, "", name, flags=re.IGNORECASE).strip()
+    return cleaned or name  # 全消え (set名=name 異常) は元を維持
+
+
 def _build_card_name(character_clean, subject, original_name=""):
     """eBay C:Card Name 値を構築 (キャラ名 + Subject 派生バリアント識別子).
 
@@ -1491,6 +1507,43 @@ def _build_pic_url(data):
     return "|".join(parts)
 
 
+# 2026-06-09: 短タイトル(<70)を catalog の実ファクトだけで補強 (year/rarity/set code)。
+# 捏造しない: facts が無ければ伸ばさない。refine_title の後 (= 短縮されない最終段) で適用。
+_RARITY_FULL_FOR_TITLE = {"AR": "Art Rare", "SR": "Super Rare", "SAR": "Special Art Rare"}
+# catalog rarity short code → eBay Features 値 (TOPセラーは rarity descriptor を Features に入れる慣習)。
+# Features が variant/PSA Subject から取れない時のフォールバック (= 実属性、捏造でない)。
+_RARITY_TO_FEATURES = {
+    "AR": "Art Rare", "SR": "Super Rare", "SAR": "Special Art Rare",
+    "UR": "Ultra Rare", "HR": "Hyper Rare", "MA": "Mega Attack Rare",
+    "RR": "Double Rare", "RRR": "Triple Rare", "SSR": "Shiny Super Rare",
+}
+
+
+def _pad_title_with_facts(title, year, rarity_short, set_code, target_min=70, max_chars=80):
+    """short title を catalog 実ファクト (年/レアリティ全名/set code) で補強。
+    TOPセラー頻出語 (2025 / Super Rare / M1S 等) と一致。値が無ければ足さない (捏造なし)。"""
+    if not title or len(title) >= target_min:
+        return title
+    tl = title.lower()
+    facts = []
+    y = str(year).strip() if year is not None else ""
+    if y.isdigit() and len(y) == 4 and y not in title:   # 実 PSA Year のみ (default 補完はしない)
+        facts.append(y)
+    rf = _RARITY_FULL_FOR_TITLE.get((rarity_short or "").upper().strip())
+    if rf and rf.lower() not in tl:
+        facts.append(rf)
+    if set_code and set_code.lower() not in tl:
+        facts.append(set_code)
+    for f in facts:
+        cand = f"{title} {f}"
+        if len(cand) <= max_chars:
+            title = cand
+            tl = title.lower()
+        if len(title) >= target_min:
+            break
+    return title
+
+
 def build_row(cert_number, price, data, description, driver=None, catalog_misses=None):
     subject = data.get('Subject', 'Unknown')
     card_number = data.get('CardNumber', '')
@@ -1657,6 +1710,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             _catalog_category_for_variant = "pokemon_tcg"
         elif catalog_misses is not None:
             catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}"))
+
+        # 整合(先手): 確定した set 名を character/card_name 末尾から除去。
+        # denylist 漏れ (Togekiss V Legendary Heartbeat / Corviknight Vmax Vmax Climax 型) の根本対策。
+        character = _strip_known_set_suffix(character, set_name)
+        card_name = _strip_known_set_suffix(card_name, set_name)
 
     elif franchise == "Dragon Ball":
         # Dragon Ball Fusion World — iMakCatalog DB lookup (Phase 2: bandai_tcg_plus から移行).
@@ -1985,6 +2043,15 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         print(f"    ⚠️ title_generation_agent 失敗: {type(_e).__name__}: {_e}")
         # title は元のまま、既存挙動継続
 
+    # 2026-06-09: 短タイトル(<70)を catalog 実ファクト(年/レアリティ/set code)で補強 (捏造なし、最終段)
+    _pid_for_sc = _catalog_pid_for_variant or official_card_number or ""
+    _m_sc = re.match(r"^([A-Za-z]+\d*[A-Za-z]?)-", str(_pid_for_sc))
+    _set_code_title = _m_sc.group(1) if _m_sc else ""
+    _title_before = title
+    title = _pad_title_with_facts(title, data.get('Year'), official_rarity, _set_code_title)
+    if title != _title_before:
+        print(f"    🔧 タイトル補強(catalog事実): {len(_title_before)}字→{len(title)}字: {title}")
+
     # SKU (CustomLabel): A列 仕入元 URL から item ID 抽出 (tshirt_listing_rules 準拠)
     # 優先順: Mercari (m\d+) → SNKRDUNK (apparels/.*/used/\d+) → PSA cert# フォールバック
     # 無在庫運用で元ページへの即時逆引きと二重出品防止を両立するキー設計
@@ -2041,10 +2108,13 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             )
         except Exception:
             _override_context = None
+    # catalog ID hit (authority context 生成済) or 人手override = 身元確定 → 3AI skip し決定論判定
+    _catalog_confirmed = _override_context is not None
     if not validate_and_report(
         cert_number, title, tcg_specs, "", 183454, 2750, price, PIC_URL,
         psa_brand=brand, psa_card_number=data.get('CardNumber', ''),
         override_context=_override_context,
+        catalog_confirmed=_catalog_confirmed,
     ):
         return None
 
@@ -2105,6 +2175,14 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                     print(f"    🎨 variant_meta 連動: {_variant_code} → features={features!r} rarity={rarity!r}")
         except Exception as _e:
             print(f"    ⚠️ variant_meta 連動失敗: {type(_e).__name__}: {_e}")
+
+    # 2026-06-09: Features がまだ空なら catalog rarity から導出 (TOPセラーは rarity を Features に入れる)。
+    # 実属性なので捏造でない。variant (Alt Art 等) が取れてる時は上書きしない。
+    if not features:
+        _feat = _RARITY_TO_FEATURES.get((official_rarity or "").upper().strip(), "")
+        if _feat:
+            features = _feat
+            print(f"    🔧 Features 補完(catalog rarity {official_rarity!r}→{features!r})")
 
     return [
         "Add", 183454, title, _build_pic_url(data), price, 2750,
@@ -2572,6 +2650,13 @@ def main():
         print(f"仕入値データ: {cost_file}")
 
     print(f"\n完了！出力: {output_file}")
+
+    # 生成時セルフ監査 (CSV監査くんを自動実行) — 監査項目を「待たず」生成で確認する。
+    try:
+        from listing_common import run_self_audit
+        run_self_audit(output_file)
+    except Exception as _e:
+        print(f"⚠️ セルフ監査 失敗 (非致命): {type(_e).__name__}: {_e}")
     print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")
     if errors:
         print(f"失敗: {', '.join(errors)}")

@@ -130,3 +130,175 @@ def test_generic_findings_title_safety():
     assert any("上限" in m for _, m in long)
     # 正常タイトルは findings 0
     assert A.generic_findings(headers, ["Daiwa Zillion SV TW 1000 Baitcast Reel New Japan", "261030"]) == []
+
+
+# --- タイトル↔Item Specifics 整合 (生成ロジック準拠の検証) ---
+def test_consistency_gshock_model_series_NOT_flagged():
+    """C:Model は eBay の『シリーズ』正規値 (G-SHOCK 5600 / G-SHOCK G-LIDE)。
+    タイトルの実型番と異なって当然 → 整合チェックの対象外 = 誤検出しない (2026-06-08 訂正)。
+    以前は『defect検出』としていたが、公式フィルタJSONで両方とも正規値と確認され誤検出と判明。"""
+    h = ["*Title", "C:Model", "C:Display", "C:Band Color"]
+    row = ["CASIO G-Shock GBX-100NS-1JF Mens Digital Watch Black New",
+           "G-SHOCK G-LIDE", "Digital", "Black"]
+    out = A.title_spec_consistency(h, row, "gshock")
+    assert not any("C:Model" in m for m in out)        # Model は不一致として出さない
+    assert A.title_spec_consistency(h, row, "gshock") == []  # Display/Band Color は一致
+
+
+def test_consistency_gshock_display_mismatch_flagged():
+    """C:Display がタイトルに反映されてない場合は検出 (Display/Band Color は正当な整合対象)。"""
+    h = ["*Title", "C:Model", "C:Display", "C:Band Color"]
+    row = ["CASIO G-Shock GA-2100 Mens Watch Black New", "G-SHOCK 2100", "Analog", "Black"]
+    out = A.title_spec_consistency(h, row, "gshock")
+    assert any("C:Display" in m for m in out)           # 'Analog' がタイトルに無い → 検出
+
+
+def test_consistency_empty_spec_no_finding():
+    """spec が空なら整合判定しない (空欄は別ゲートの責務)。"""
+    h = ["*Title", "C:Model", "C:Display", "C:Band Color"]
+    row = ["CASIO G-Shock GA-2100 Mens Digital Watch Black New", "", "", ""]
+    assert A.title_spec_consistency(h, row, "gshock") == []
+
+
+def test_consistency_unknown_project_skip():
+    h = ["*Title", "C:Model"]
+    assert A.title_spec_consistency(h, ["x", "y"], "generic") == []
+
+
+def test_consistency_tcg_character_missing_flagged():
+    h = ["*Title", "C:Character"]
+    row = ["PSA 10 Pokemon Crown Zenith #200 Mewtwo VSTAR", "Pikachu"]
+    out = A.title_spec_consistency(h, row, "tcg")
+    assert any("C:Character" in m for m in out)
+    # キャラがタイトルに在れば検出しない
+    row2 = ["PSA 10 Pokemon Crown Zenith #025 Pikachu", "Pikachu"]
+    assert A.title_spec_consistency(h, row2, "tcg") == []
+
+
+# --- タイトル形式準拠 (生成ロジックのフォーマット) ---
+def test_format_gshock_prefix_and_watch():
+    h = ["*Title", "C:Brand"]
+    assert A.title_format_checks(h, ["Casio GA-2100 Black New", ""], "gshock")  # prefix違反検出
+    ok = ["CASIO G-Shock GA-2100-1A1 Mens Digital Watch Black New", ""]
+    assert A.title_format_checks(h, ok, "gshock") == []
+
+
+def test_format_ichibankuji_prefix():
+    h = ["*Title"]
+    assert A.title_format_checks(h, ["My Hero Academia A Prize Figure"], "ichibankuji")
+    assert A.title_format_checks(h, ["Ichiban Kuji One Piece A Prize Luffy Figure New"], "ichibankuji") == []
+
+
+def test_format_mercari_uniqlo_brand_must_be_uniqlo():
+    h = ["*Title", "C:Brand"]
+    # Brand='UNIQLO UT' は公式名でない → 検出
+    bad = ["UNIQLO UT Doraemon T-Shirt Black US M Japan", "UNIQLO UT"]
+    out = A.title_format_checks(h, bad, "mercari")
+    assert any("eBay公式ブランド名でない" in m for m in out)
+    # Brand='Uniqlo' + T-Shirt 有り → OK
+    good = ["UNIQLO UT Doraemon T-Shirt Black US M Japan", "Uniqlo"]
+    assert A.title_format_checks(h, good, "mercari") == []
+
+
+def test_format_mercari_porter_requires_porter_and_condition():
+    h = ["*Title", "C:Brand"]
+    good = ["YOSHIDA PORTER Tanker Shoulder Bag S Black Used Japan", "Porter"]
+    assert A.title_format_checks(h, good, "mercari") == []
+    bad = ["Yoshida Tanker Bag Black Japan", "Porter"]  # PORTER語/Used無し
+    assert A.title_format_checks(h, bad, "mercari")
+
+
+def test_format_mercari_unknown_brand_skips():
+    h = ["*Title", "C:Brand"]
+    assert A.title_format_checks(h, ["Some Random Title", "NoSuchBrand"], "mercari") == []
+
+
+# --- タイトル SEO 監査 (iMakKeywords PDF 参照) ---
+def test_title_seo_score_counts_pdf_terms():
+    pool = {"casio g shock": 0.9, "watch": 0.5, "mens watches": 0.4}
+    s_hi = A._title_seo_score("CASIO G Shock Mens Watch Black New", pool)
+    s_lo = A._title_seo_score("Black Resin Accessory New", pool)
+    assert s_hi > s_lo
+
+
+def test_title_seo_findings_flags_relative_weak():
+    """同 CSV 内で PDF上位語の活用が他行比で著しく低い行を報告 (実ファイル非依存=cacheに注入)。"""
+    pool = {"pokemon": 0.9, "card": 0.6, "psa": 0.5, "vstar": 0.3}
+    A._KW_POOL_CACHE[A.KEYWORD_TXT["tcg"]] = pool  # PDF読込を差し替え (キーはファイル名)
+    h = ["*Title"]
+    rows = [
+        ["PSA 10 Pokemon Card VSTAR strong"],   # 高 score
+        ["PSA 10 Pokemon Card VSTAR strong"],   # 高 score
+        ["PSA 10 Pokemon Card VSTAR strong"],   # 高 score
+        ["Random Item No Keywords Here"],        # 0 score → 弱フラグ
+    ]
+    out = A.title_seo_findings(h, rows, "tcg")
+    assert any("SEO弱" in m for _, m in out)
+    A._KW_POOL_CACHE.pop(A.KEYWORD_TXT["tcg"], None)
+
+
+def test_title_seo_findings_skip_when_no_pool():
+    """KEYWORD_TXT に無い project (PDF未整備) は skip。"""
+    assert A.title_seo_findings(["*Title"], [["x"], ["y"], ["z"]], "nopdf_project") == []
+
+
+def test_mercari_seo_groups_by_brand_pdf():
+    """Mercari は C:Brand で PDF を出し分け、商品グループごとに相対比較する (未対応を残さない)。"""
+    A._KW_POOL_CACHE[A._TXT_CLOTHING] = {"bag": 0.8, "porter": 0.7, "nylon": 0.5}
+    A._KW_POOL_CACHE[A._TXT_SPORTING] = {"reel": 0.8, "fishing": 0.7, "baitcast": 0.5}
+    h = ["*Title", "C:Brand"]
+    rows = [
+        ["YOSHIDA PORTER Tanker Bag Nylon Japan", "Porter"],   # 衣料 高
+        ["YOSHIDA PORTER Tanker Bag Nylon Japan", "Porter"],   # 衣料 高
+        ["Plain Item No Match", "Porter"],                      # 衣料 0 → 弱
+        ["Daiwa Fishing Reel Baitcast Japan", "Daiwa"],        # sporting 高
+        ["Daiwa Fishing Reel Baitcast Japan", "Daiwa"],        # sporting 高
+        ["Nothing Useful Title", "Shimano"],                   # sporting 0 → 弱
+    ]
+    out = A.title_seo_findings(h, rows, "mercari")
+    msgs = " ".join(m for _, m in out)
+    assert "Plain Item No Match" in msgs       # 衣料グループの弱行
+    assert "Nothing Useful Title" in msgs      # sportingグループの弱行
+    A._KW_POOL_CACHE.pop(A._TXT_CLOTHING, None)
+    A._KW_POOL_CACHE.pop(A._TXT_SPORTING, None)
+
+
+def test_mercari_pdf_for_brand_mapping():
+    """全 Mercari 商品が PDF にマップされる (porter/uniqlo/montbell/workman→衣料, tomica→toys, リール→sporting)。"""
+    assert A._mercari_pdf_for_brand("porter") == A._TXT_CLOTHING
+    assert A._mercari_pdf_for_brand("uniqlo") == A._TXT_CLOTHING
+    assert A._mercari_pdf_for_brand("montbell") == A._TXT_CLOTHING
+    assert A._mercari_pdf_for_brand("workman") == A._TXT_CLOTHING
+    assert A._mercari_pdf_for_brand("tomica") == A._TXT_TOYS
+    assert A._mercari_pdf_for_brand("daiwa") == A._TXT_SPORTING
+    assert A._mercari_pdf_for_brand("shimano") == A._TXT_SPORTING
+
+
+# --- generic(reel/tomica/workman) も新タイトル検査を受ける (carve-out 撲滅) ---
+def test_reel_detected_as_generic_but_routed_to_mercari():
+    """reel(261030) は generic 判定だが、タイトル検査は mercari ルールへ routing される。"""
+    assert A.detect_category(["*Category", "*Title"], [["261030", "x"]]) == "generic"
+    assert A._title_check_project("generic", True) == "mercari"
+    assert A._title_check_project("tcg", False) == "tcg"
+
+
+def test_generic_reel_gets_format_and_seo_via_routing():
+    """generic 経路の reel/tomica/workman が形式・SEO検査の対象になる (取りこぼし無し)。"""
+    proj = A._title_check_project("generic", True)  # = "mercari"
+    # 形式: リールは "Reel" 必須 → 無ければ検出
+    h = ["*Title", "C:Brand"]
+    bad = ["Daiwa Zillion SV TW 1000 Baitcast Japan", "Daiwa"]  # "Reel" 無し
+    assert A.title_format_checks(h, bad, proj)
+    # SEO: reel ブランドは sporting PDF にマップ
+    assert A._mercari_pdf_for_brand("daiwa") == A._TXT_SPORTING
+
+
+def test_reel_color_not_consistency_checked():
+    """リールは型番中心でタイトルに色を入れない慣習 → C:Color整合は対象外(誤検出防止)。
+    一方 porter(バッグ/衣料)は色がタイトルに入るので検出を維持。"""
+    h = ["*Title", "C:Brand", "C:Color"]
+    # reel: 色がタイトルに無くてもOK (検出しない)
+    assert A.title_spec_consistency(h, ["Daiwa Zillion SV TW 1000 Reel Japan", "Daiwa", "Silver"], "mercari") == []
+    # porter: 色がタイトルに無ければ検出 (維持)
+    out = A.title_spec_consistency(h, ["YOSHIDA PORTER Tanker Bag Used Japan", "Porter", "Red"], "mercari")
+    assert any("C:Color" in m for m in out)

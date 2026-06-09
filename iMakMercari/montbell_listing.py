@@ -850,8 +850,11 @@ def main():
         # === Title整合性 + 70字パディング (listing_common.normalize_title) ===
         # Mont-bell は条件混在 (新品/中古)、condition_jp から判定
         is_new_montbell = is_new_condition(target.get("condition", ""))
+        # pad 材料: 公式 spec の 'Outer Shell Material'(GORE-TEX/Nylon 等=強い検索語) を
+        # pad の汎用キー 'Material' にエイリアスして渡す (specs 本体は汚さない、捏造しない)。
+        _mb_pad_specs = {**specs, "Material": material}
         title_en = normalize_title(
-            title_en, is_new=is_new_montbell, item_specifics=specs,
+            title_en, is_new=is_new_montbell, item_specifics=_mb_pad_specs,
             category="montbell", target_min=70, max_chars=80,
         )
         print(f"    ✨ {title_en} ({len(title_en)}字)")
@@ -996,6 +999,13 @@ def main():
             )
         except Exception as e:
             print(f"⚠️ チェッカー実行エラー: {e}")
+
+        # 生成時セルフ監査 (CSV監査くん) — check_csv に加え 4観点(整合/形式/SEO/文字数) を確認
+        try:
+            from listing_common import run_self_audit
+            run_self_audit(output_file)
+        except Exception as _e:
+            print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
 
         print(f"\n出品後、スプシのB列にItemIDを手動入力してください。")
     else:
