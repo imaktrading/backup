@@ -753,6 +753,22 @@ def _search_one_piece_promo_by_number(
             voln = m_bs.group(1)
             if re.search(rf"vol\.?\s*{voln}\b", sn, re.IGNORECASE):
                 score += 250  # 正確な collection+vol 一致 = 汎用promo(_P 220)を上回る最優先
+        # 7) brand 英語 collection 語 ↔ 日本語 set_name 照合 (英keyが日本語setに当たらない盲点)
+        #    HQ Step2: brand全文を set_name と照合して加点 (2026-06-09 lookup_one_piece bug class)
+        for en, jp, w in (
+            ("PREMIUM CARD COLLECTION", "プレミアムカードコレクション", 40),
+            ("FILM RED", "FILM RED", 60),
+            ("25TH", "25周年", 60), ("ANNIVERSARY", "周年", 30),
+            ("TREASURE", "トレジャー", 50), ("TREASURE", "宝", 30),
+            ("FAMILY DECK", "ファミリーデッキ", 50),
+        ):
+            if en in brand_upper and jp in sn:
+                score += w
+        # 8) cross-set 誤選択防止: brand が MEMORIAL/EB を明示しないのに EB(Memorial由来)
+        #    promo が原典set(ST/OP)の promo と同点になる誤マッチ (Chopper EB01-006_P_treasure)
+        #    → EB由来 promo を減点し原典set promo を優先 (誤マッチ防止、原典優先)
+        if "MEMORIAL" not in brand_upper and re.match(r"^EB\d", pid) and "_P" in pid:
+            score -= 40
         return score
 
     scored = [(_promo_score(c), c) for c in candidates]

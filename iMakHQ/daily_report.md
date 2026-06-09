@@ -657,3 +657,19 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 
 ### 検証
 - 検証✅: python resolver_poc.py → 4/4 OK (① OP10-049_p1 / ② OP10-049 base / ③ "" / ④ "")
+
+## 2026-06-10 (続) — Catalog: KEY再設計 Step2 lookup_one_piece promo brand-class bug修正
+
+### 決定事項
+- 決定1: HQ 3再現ケースで現状確認 — B Marco(OP08-002_P_LF)/C Sabo(OP10-049_p1)は既存修正で既にPASS。残差はA Chopperのみ(EB01-006_P_treasureとST01-006_P/_P_pが220同点reject)
+- 決定2: _promo_score に rule7(brand英語↔日本語set_name照合 PREMIUM CARD COLLECTION↔プレミアムカードコレクション等) + rule8(cross-set防止: MEMORIAL非明示時EB由来promo-40)追加。報告された誤マッチ(EB01 cross-set)を根治
+- 決定3: A は generic brand で ST01-006_P vs _P_p 判別不能→None(fail-closed=誤出品せず)。正hit化はedition語有無/canonical指定をHQ確認(無理に当てない=大前提順守)
+
+### 変更
+- 変更: integrations/psa_to_csv.py _promo_score に rule7/rule8 追加
+- 変更: tests/test_lookup_one_piece_promo_scoring.py 新規(A=EB01選ばない+ST01系orNone / B=OP08-002_P_LF / C=OP10-049_p1)
+- 変更: requests/2026-06-09_key_redesign_BUILD_greenlight_phase1_step2_done.md
+
+### 検証
+- 検証✅: 修正後 A=EB01-006_P_treasure 220→180降格(top排除)、top=ST01-006系220同点→None / B=OP08-002_P_LF / C=OP10-049_p1(298)
+- 検証✅: pytest Step2 3件 + adapter4件 pass、全体224 passed(回帰なし)
