@@ -748,22 +748,19 @@ def _search_one_piece_promo_by_number(
         #    (premium card collection は set_name が日本語のため英keyword照合で拾えず、
         #     _P/_P_* 系 'Promotion Card' に負けて本命が最下位になる問題を是正)
         #    HQ依頼 2026-06-09_psa_miss_setmap_promo_scoring.md (OP10-049 Sabo)
+        #    HQ Step2 確定(2026-06-10): brand edition句 ↔ set_name_official edition句 の一般照合。
+        #    「両方一致」必須 = 同番号の別edition(_p4=FILM RED 等)への暴発防止。ハードコード非依存。
+        #    例: BEST SELECTION VOL.4↔ベストセレクション vol.4(Sabo) / 25TH ANNIVERSARY↔25周年(Chopper ST01-006_p1)
+        edition_hit = False
         m_bs = re.search(r"BEST\s*SELECTION\s*VOL\.?\s*(\d+)", brand_upper)
-        if m_bs and "ベストセレクション" in sn:
-            voln = m_bs.group(1)
-            if re.search(rf"vol\.?\s*{voln}\b", sn, re.IGNORECASE):
-                score += 250  # 正確な collection+vol 一致 = 汎用promo(_P 220)を上回る最優先
-        # 7) brand 英語 collection 語 ↔ 日本語 set_name 照合 (英keyが日本語setに当たらない盲点)
-        #    HQ Step2: brand全文を set_name と照合して加点 (2026-06-09 lookup_one_piece bug class)
-        for en, jp, w in (
-            ("PREMIUM CARD COLLECTION", "プレミアムカードコレクション", 40),
-            ("FILM RED", "FILM RED", 60),
-            ("25TH", "25周年", 60), ("ANNIVERSARY", "周年", 30),
-            ("TREASURE", "トレジャー", 50), ("TREASURE", "宝", 30),
-            ("FAMILY DECK", "ファミリーデッキ", 50),
-        ):
-            if en in brand_upper and jp in sn:
-                score += w
+        if m_bs and "ベストセレクション" in sn and re.search(rf"vol\.?\s*{m_bs.group(1)}\b", sn, re.IGNORECASE):
+            edition_hit = True
+        if re.search(r"25TH|25\s*周年", brand_upper) and "25周年" in sn:
+            edition_hit = True
+        if "FILM RED" in brand_upper and "FILM RED" in sn_upper:
+            edition_hit = True
+        if edition_hit:
+            score += 250  # edition 一意特定 = 汎用promo(_P 220)を上回る最優先
         # 8) cross-set 誤選択防止: brand が MEMORIAL/EB を明示しないのに EB(Memorial由来)
         #    promo が原典set(ST/OP)の promo と同点になる誤マッチ (Chopper EB01-006_P_treasure)
         #    → EB由来 promo を減点し原典set promo を優先 (誤マッチ防止、原典優先)

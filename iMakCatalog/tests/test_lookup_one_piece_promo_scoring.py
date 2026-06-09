@@ -21,12 +21,25 @@ def _pid(card_no, subject, brand):
     return r["product_id"] if r else None
 
 
-def test_caseA_chopper_never_mispicks_eb01_memorial():
-    # 誤マッチアンカー: generic 'PREMIUM CARD COLLECTION' で EB01-006_P_treasure を選ばない
+def test_caseA_chopper_real_brand_resolves_p1():
+    # HQ実機確定(2026-06-10): 実 brand に 25TH ANNIVERSARY → ST01-006_p1(25周年エディション)に一意解決
+    pid = _pid("006", "TONY TONY CHOPPER",
+               "ONE PIECE JAPANESE 25TH ANNIVERSARY PREMIUM CARD COLLECTION")
+    assert pid == "ST01-006_p1", pid
+
+
+def test_caseA_chopper_generic_brand_failclosed():
+    # edition句無しの generic brand → 判別不能(ST01-006_P vs _P_p) → None(fail-closed)。EB01は選ばない
     pid = _pid("006", "TONY TONY CHOPPER", "ONE PIECE JAPANESE PREMIUM CARD COLLECTION")
     assert pid != "EB01-006_P_treasure", "cross-set Memorial promo を誤選択"
-    # 拾えた場合は原典 ST01-006 系であること (EB01等 別setでない)。tie→None も許容(fail-closed)
     assert pid is None or pid.startswith("ST01-006"), pid
+
+
+def test_caseA_edition_no_overfire_to_other_edition():
+    # 暴発防止: 25TH brand が別edition _p4(FILM RED) を誤選択しない
+    pid = _pid("006", "TONY TONY CHOPPER",
+               "ONE PIECE JAPANESE 25TH ANNIVERSARY PREMIUM CARD COLLECTION")
+    assert pid != "ST01-006_p4", "別edition(FILM RED)に暴発"
 
 
 def test_caseB_marco_promos_resolves_op08_lf():

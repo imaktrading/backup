@@ -673,3 +673,18 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 ### 検証
 - 検証✅: 修正後 A=EB01-006_P_treasure 220→180降格(top排除)、top=ST01-006系220同点→None / B=OP08-002_P_LF / C=OP10-049_p1(298)
 - 検証✅: pytest Step2 3件 + adapter4件 pass、全体224 passed(回帰なし)
+
+## 2026-06-10 (続2) — Catalog: Step2 tiebreak反映 A Chopper=ST01-006_p1 一意解決
+
+### 決定事項
+- 決定1: HQ実機確定(実brand=25TH ANNIVERSARY)で A は tie でなく一意解。ST01-006_p1は候補に居たがscore130で_P220に負けていた(索引が正項目に届いてなかった)
+- 決定2: _promo_score を edition双方一致(brand↔official)の一般照合+250に統一(BEST SELECTION VOL.N/25TH↔25周年/FILM RED)。両方一致必須で別edition暴発防止。rule8(EB cross-set減点)維持
+
+### 変更
+- 変更: integrations/psa_to_csv.py _promo_score 統一(旧rule6/loose rule7→edition双方一致+250)
+- 変更: tests/test_lookup_one_piece_promo_scoring.py 更新(A実brand=p1/A generic=fail-closed/A暴発guard/B/C=5件)
+- 変更: requests/2026-06-09_..._step2_tiebreak_done.md
+
+### 検証
+- 検証✅: A実brand(25TH)→ST01-006_p1 / A generic→None / A暴発guard(_p4選ばず) / B=OP08-002_P_LF / C=OP10-049_p1
+- 検証✅: pytest Step2 5件 + adapter4件 pass、全体229 passed(回帰なし)
