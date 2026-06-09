@@ -17,6 +17,16 @@ def test_peerless_fighters_maps_to_s5a():
         "POKEMON JAPANESE SWORD & SHIELD PEERLESS FIGHTERS") == "S5a"
 
 
+def test_swsh_brand_set_code_mappings():
+    # 2026-06-09 HQ: SwSh PSA英語セット名→set_code 欠落の補完
+    cases = [
+        ("POKEMON JAPANESE SWORD & SHIELD FUSION ARTS", "S8"),
+        ("POKEMON JAPANESE SWORD & SHIELD REBELLION CRASH", "S2"),
+    ]
+    for brand, exp in cases:
+        assert P.extract_set_code_from_brand_pokemon(brand) == exp, brand
+
+
 def test_best_selection_vol4_promo_picks_p1():
     # Sabo: 汎用 _P/_P_BS4('Promotion Card', 220点)でなく _p1(日本語'ベストセレクション vol.4')を選ぶ
     r = P._search_one_piece_promo_by_number(

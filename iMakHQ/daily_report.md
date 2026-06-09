@@ -625,3 +625,20 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: _search_one_piece_promo_by_number('049','SABO',brand='...BEST SELECTION VOL.4-')→OP10-049_p1(score=258、従来220同点reject是正)
 - 検証✅: api.lookup('OP10-049_p1').set_name='Premium Card Collection - Best Selection vol.4'(72件充足)
 - 検証✅: pytest 新規3 passed + 全体 pass
+
+## 2026-06-09 (続) — Catalog: PSA SwSh setmap 2件 + auto-add投入不要 + KEY再設計feasibility
+
+### 決定事項
+- 決定1: PSA brand "FUSION ARTS"→S8 / "REBELLION CRASH"→S2 を _POKEMON_SET_NAME_TO_CODE に追加(PEERLESSと同型、両カードS8-035/S2-076は既存・set_name_ebay充足済)
+- 決定2: auto_catalog_add 2件=同一カードで既存=投入不要。真因はadapter mapping欠落(決定1で解消)
+- 決定3: SwSh全弾一括整備はfeasible だが PSA brand実文字列(Fusion Arts≠公式Fusion Strike)の確証source前提=データ駆動で都度追加を推奨
+- 決定4(KEY再設計feasibility): resolver集約は新規開発でなくリファクタ(lookup_*/extract_*/promo-scoring は既にpsa_to_csv 33関数に在る)→catalog coreにfacade移設。中2-4日。前提=lookup_one_piece brand bug(5/28)先行修正+variant網羅真値source。配置はiMakCatalog(SSOT)賛成
+
+### 変更
+- 変更: integrations/psa_to_csv.py _POKEMON_SET_NAME_TO_CODE に FUSION ARTS→S8 / REBELLION CRASH→S2
+- 変更: tests/test_psa_setmap_promo_scoring.py に test_swsh_brand_set_code_mappings 追加
+- 変更: requests/ に psa_setmap done / auto-add processed / KEY再設計 feasibility回答
+
+### 検証
+- 検証✅: extract_set_code_from_brand_pokemon FUSION ARTS→S8 / REBELLION CRASH→S2、lookup hit
+- 検証✅: pytest tests/test_psa_setmap_promo_scoring.py 4 passed

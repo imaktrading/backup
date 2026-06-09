@@ -1135,6 +1135,8 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "CRUEL TRAITOR":               "XY11",
     "PEERLESS FIGHTERS":           "S5a",   # 双璧のファイター(英 Battle Styles)の PSA literal表記
     "PEERLESS FIGHTER":            "S5a",
+    "FUSION ARTS":                 "S8",    # フュージョンアーツ(英 Fusion Strike)の PSA表記
+    "REBELLION CRASH":             "S2",    # 反逆クラッシュ(英 Rebel Clash)の PSA表記
     # Sword & Shield
     "25TH ANNIVERSARY COLLECTION": "S8a",
     "VSTAR UNIVERSE":              "S12a",
