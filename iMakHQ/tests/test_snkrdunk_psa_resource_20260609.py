@@ -75,3 +75,34 @@ def test_malformed_safe():
     assert r["available"] is False
     r2 = sp.parse_min_prices({"conditionPrices": [{"conditionName": "PSA 10"}]})  # minPrice欠落
     assert r2["available"] is False and r2["psa10_price_jpy"] is None
+
+
+# ---- PSA10 出品一覧パース (2026-06-09: 補URL を PSA10最安出品に直リンク) ----
+# 実APIレスポンス構造 (card 129628 ST07-008 の実観測値ベース)
+_LISTINGS = {"apparelUsedItems": [
+    {"id": 46591166, "price": 22000, "displayShortConditionTitle": "PSA10", "isDisplaySold": False},
+    {"id": 46511230, "price": 2980, "displayShortConditionTitle": "B", "isDisplaySold": False},
+    {"id": 46472583, "price": 23000, "displayShortConditionTitle": "PSA10", "isDisplaySold": False},
+    {"id": 46262683, "price": 4480, "displayShortConditionTitle": "B", "isDisplaySold": False},
+    {"id": 11111111, "price": 19000, "displayShortConditionTitle": "PSA10", "isDisplaySold": True},  # 売切除外
+]}
+
+
+def test_parse_psa10_listings_filters_and_sorts():
+    lst = sp.parse_psa10_listings(_LISTINGS)
+    # PSA10 かつ販売中のみ (生カードB / 売切 を除外)、価格昇順
+    assert [x["price"] for x in lst] == [22000, 23000]
+    assert lst[0]["listing_id"] == 46591166
+
+
+def test_parse_psa10_listings_none_when_only_raw():
+    data = {"apparelUsedItems": [
+        {"id": 1, "price": 2980, "displayShortConditionTitle": "B", "isDisplaySold": False},
+        {"id": 2, "price": 4480, "displayShortConditionTitle": "A", "isDisplaySold": False},
+    ]}
+    assert sp.parse_psa10_listings(data) == []
+
+
+def test_parse_psa10_listings_malformed_safe():
+    assert sp.parse_psa10_listings({}) == []
+    assert sp.parse_psa10_listings({"apparelUsedItems": [{"price": "x", "displayShortConditionTitle": "PSA10"}]}) == []

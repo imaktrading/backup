@@ -25,9 +25,14 @@ import requests
 
 API_TMPL = "https://snkrdunk.com/en/v1/trading-cards/{card_id}/min-prices-by-conditions"
 SEARCH_URL = "https://snkrdunk.com/en/v1/search"      # productNumber→id 解決 (type=trading-card)
-# 補URL(全PSA10出品が並ぶ日本語カードページ)。snkrdunk はトレカも内部的に "apparels" パスで
-# 扱う (2026-06-09 ユーザー提供URLで判明)。card_id は /en/v1 API が返す id と同一。
-# 実機確認: /apparels/{id}=日本語表示(¥/PSA) ／ /trading-cards/{id}=空404 ／ /en/trading-cards/{id}=英語表示。
+# 出品一覧API (condition別の実出品が取れる)。displayShortConditionTitle で 'PSA10' を判別。
+# (2026-06-09 CDPで apparelesページのXHRから特定。/v1/ で /en/ 不要)。
+LISTINGS_TMPL = "https://snkrdunk.com/v1/apparels/{card_id}/used?perPage=100&page=1&sizeId=0&isSaleOnly=true"
+# 補URL: PSA10最安"出品"に直リンク (apparelesカードページは全condition混在で生カードが目立ち
+# 「PSA10じゃない」と見える問題への対処。2026-06-09 ユーザー指摘)。listing_id 付きで PSA10 を直接開く。
+LISTING_PAGE_TMPL = "https://snkrdunk.com/apparels/{card_id}/used/{listing_id}"
+# フォールバック用カードページ (全PSA10出品が並ぶ日本語ページ)。snkrdunk はトレカも内部 "apparels"
+# パスで扱う。実機確認: /apparels/{id}=JP表示 / /trading-cards/{id}=空404 / /en/trading-cards/{id}=英語。
 CARD_PAGE_TMPL = "https://snkrdunk.com/apparels/{card_id}"
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -108,14 +113,67 @@ def resolve_card_id(card_number, timeout=_TIMEOUT_SEC):
         return None
 
 
-def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC):
-    """productNumber から HTTP-only で PSA10 再仕入れ可否を判定 (resolve→min-prices)。
+def parse_psa10_listings(data, short_cond="PSA10"):
+    """used listings JSON → PSA10 かつ販売中の [{listing_id, price}] を価格昇順で返す純関数。
 
+    displayShortConditionTitle が 'PSA10' の出品のみ採用 (生カードB/A等を除外)。
+    isDisplaySold=True は除外。これで「PSA10じゃない」混入を根絶 (2026-06-09 ユーザー指摘)。
+    """
+    items = data.get("apparelUsedItems", []) if isinstance(data, dict) else []
+    want = short_cond.upper().replace(" ", "")
+    out = []
+    for it in items:
+        if not isinstance(it, dict) or it.get("isDisplaySold"):
+            continue
+        cond = (it.get("displayShortConditionTitle") or "").upper().replace(" ", "")
+        if cond != want:
+            continue
+        try:
+            price = int(it.get("price"))
+        except (TypeError, ValueError):
+            continue
+        lid = it.get("id")
+        if price > 0 and lid:
+            out.append({"listing_id": lid, "price": price})
+    out.sort(key=lambda x: x["price"])
+    return out
+
+
+def fetch_psa10_listings(card_id, timeout=_TIMEOUT_SEC):
+    """card_id の PSA10販売中出品を価格昇順で返す。API失敗時は None (= min-prices へフォールバック)。"""
+    if not card_id or not str(card_id).strip():
+        return None
+    try:
+        r = requests.get(LISTINGS_TMPL.format(card_id=str(card_id).strip()),
+                         headers=HEADERS, timeout=timeout)
+        if r.status_code != 200:
+            return None
+        return parse_psa10_listings(r.json())
+    except Exception:
+        return None
+
+
+def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC):
+    """productNumber から HTTP-only で PSA10 再仕入れ可否を判定。
+
+    出品一覧API(displayShortConditionTitle='PSA10')で実PSA10出品の最安を取り、補URLは
+    その PSA10最安"出品"に直リンク (混在カードページでなく直接PSA10)。出品API不調時のみ
+    min-prices へフォールバック (補URL=カードページ)。
     Returns: {available, psa10_price_jpy, conditions, card_id, card_url} or {"_error":...}
     """
     cid = resolve_card_id(card_number, timeout=timeout)
     if cid is None:
         return {"_error": "card_not_found", "available": False, "psa10_price_jpy": None}
+    listings = fetch_psa10_listings(cid, timeout=timeout)
+    if listings is not None:                         # 出品API成功 = これを正とする
+        if listings:
+            top = listings[0]
+            return {"available": True, "psa10_price_jpy": top["price"],
+                    "conditions": {}, "card_id": cid,
+                    "card_url": LISTING_PAGE_TMPL.format(card_id=cid, listing_id=top["listing_id"])}
+        return {"available": False, "psa10_price_jpy": None, "conditions": {},
+                "card_id": cid, "card_url": CARD_PAGE_TMPL.format(card_id=cid)}
+    # 出品API不調 → min-prices フォールバック
     res = check_resource(cid, condition=condition, timeout=timeout)
     if "_error" not in res:
         res["card_id"] = cid
