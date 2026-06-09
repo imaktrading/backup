@@ -133,12 +133,13 @@ def main():
         rows = rows[:limit]
     print(f"対象 PSA10: {len(rows)}枚 (2チャネル: メルカリ＆SNKRDUNK)")
 
-    # --- メルカリ (一括 Selenium) ---
-    print("▶ メルカリ最安取得中...")
+    # --- メルカリ (一括 Selenium, name_jp検索 + 画像検索フォールバック) ---
+    print("▶ メルカリ最安取得中 (name_jp検索+画像検索フォールバック)...")
     mercari_res = {}
     try:
-        kws = [(mp.search_keyword(r.get("title", ""), r.get("set_no", "")),) for r in rows]
-        mercari_res = mp.fetch_mercari_cheapest(kws)
+        cards = [{**mp.build_card_query(r.get("title", ""), r.get("set_no", "")),
+                  "ebay_item_id": mp._ebay_item_id(r.get("ebay_url", ""))} for r in rows]
+        mercari_res = mp.fetch_mercari_cheapest(cards)
     except Exception as e:
         print(f"  ⚠ メルカリ skip ({type(e).__name__}: {e}) — SNKRDUNKのみで判定")
 

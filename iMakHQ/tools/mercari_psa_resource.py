@@ -54,28 +54,87 @@ def is_psa10(name):
     return "PSA10" in n
 
 
-def _norm_alnum(s):
-    """英数字のみに正規化 (大文字, ハイフン/空白/全角記号除去)。"""
-    return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+def _card_tokens(card_no):
+    """カード番号を英数トークン列に分解 ('OP11-106'→['OP11','106'] / 'P-041'→['P','041'])。"""
+    return [t for t in re.split(r"[^A-Za-z0-9]", (card_no or "").upper()) if t]
 
 
-def _card_token(kw):
-    """検索語 'PSA10 OP11-106' から対象カード番号トークンを抽出・正規化 ('OP11106')。"""
-    t = re.sub(r"^PSA\s*10\s*", "", (kw or "").strip(), flags=re.IGNORECASE)
-    return _norm_alnum(t)
+def _name_matches_card(name, card_no):
+    """商品名が対象カード番号を『トークン連続一致』で含むか (id-strict, fail-closed)。
 
+    番号をハイフン区切りでトークン化し、商品名のトークン列に連続部分列として現れるか判定。
+    単純な部分文字列照合だと promo の短い番号 'P-041' が遊戯王 'FOTB-JP041'(=JP041) 等に
+    誤マッチする (2026-06-09 実機: P-041 検索が遊戯王スラブ¥23,100を拾った)。トークン連続
+    一致なら 'P','041' が分離して並ぶ正規表記のみ拾い、'JP041'(1トークン) を弾く。
 
-def _name_matches_card(name, token):
-    """商品名が対象カード番号を含むか (id-strict)。
-
-    SNKRDUNK 側 (parse_search_for_card) と同じ fail-closed 思想。メルカリのキーワード検索は
-    relevance が緩く別カードを返すことがある (2026-06-09 ユーザー指摘: 2行目が違うカード)。
-    商品名に対象カード番号が無ければ採用しない (= 誤った最安を拾わない)。
-    token が空/極短 (<3) は誤マッチ源なので不採用。
+    SNKRDUNK 側 (parse_search_for_card) と同じ fail-closed 思想。番号が無ければ採用しない。
     """
-    if not token or len(token) < 3:
+    parts = _card_tokens(card_no)
+    if not parts:
         return False
-    return token in _norm_alnum(name)
+    tokens = [t for t in re.split(r"[^A-Za-z0-9]", (name or "").upper()) if t]
+    m = len(parts)
+    for i in range(len(tokens) - m + 1):
+        if tokens[i:i + m] == parts:
+            return True
+    return False
+
+
+def _ebay_item_id(url):
+    """eBay URL から item id を抽出 ('.../itm/358596483319' → '358596483319')。"""
+    mt = re.search(r"/itm/(\d+)", url or "")
+    return mt.group(1) if mt else ""
+
+
+def _extract_card_no(title, set_no):
+    """set_no か title からカード番号を取り出す (ハイフン保持, 例 'OP11-106' / 'P-041')。"""
+    sn = (set_no or "").strip()
+    if not sn:
+        mt = SETNO_RE.search(title or "")
+        sn = mt.group(1) if mt else ""
+    return sn
+
+
+def name_jp_for_card(card_no, _cache={}):
+    """カタログ(共有DB)から card_no の日本語カード名を引く (無ければ None)。
+
+    検索語に日本語名を足すと番号だけの曖昧検索より精度が上がる (promo の他カード誤マッチ低減)。
+    カテゴリは番号書式から一意でないので主要TCGを順に試す。lookup は ID完全一致のみ (fail-closed)。
+    """
+    if not card_no:
+        return None
+    if card_no in _cache:
+        return _cache[card_no]
+    nj = None
+    try:
+        if r"C:/dev/iMak" not in sys.path:
+            sys.path.insert(0, r"C:/dev/iMak")
+        from iMakCatalog import api
+        for cat in ("one_piece_tcg", "pokemon_tcg", "dragonball_scg", "gundam_tcg"):
+            try:
+                rec = api.lookup(cat, card_no)
+            except Exception:
+                rec = None
+            if rec and rec.get("name_jp"):
+                nj = rec["name_jp"]
+                break
+    except Exception:
+        nj = None
+    _cache[card_no] = nj
+    return nj
+
+
+def build_card_query(title, set_no):
+    """1カード分の検索情報を作る → {kw, card_no, name_jp}。
+
+    kw = 'PSA10 <name_jp> <card_no>' (name_jp が引ければ付ける)。card_no は照合用。
+    """
+    card_no = _extract_card_no(title, set_no)
+    if not card_no:
+        return {"kw": "", "card_no": "", "name_jp": None}
+    nj = name_jp_for_card(card_no)
+    kw = f"PSA10 {nj} {card_no}" if nj else f"PSA10 {card_no}"
+    return {"kw": kw, "card_no": card_no, "name_jp": nj}
 
 
 def build_input_from_funnel():
@@ -126,10 +185,13 @@ def _chrome_major():
     return None
 
 
-# 通常出品のみ採用 (個人=MERCARI / メルカリShops=BEYOND)。
-# オークション等それ以外の itemtype は除外 = 確定価格でなく即仕入れ不可 (fail-closed)。
-# 2026-06-09 実機ダンプ(c:/tmp/mercari_dump.html)で itemtype が個人/Shops の判別子と確認。
+# 通常出品のみ採用 (個人=MERCARI / メルカリShops=BEYOND)。不明 itemtype は除外 (fail-closed)。
 _ALLOWED_ITEM_TYPES = ("ITEM_TYPE_MERCARI", "ITEM_TYPE_BEYOND")
+# オークション item の cell内マーカー。itemtype は auction でも ITEM_TYPE_MERCARI のため
+# 判別不可 (2026-06-09 実機: EB02-015 のオークションが itemtype=MERCARI で混入)。
+# これらは rendered auction cell のみに出現 (i18n JSON は item-cell ブロック外なので汚染なし、
+# 実機4ダンプで cell内出現=実auctionのみ・現在価格/残り時間は全体でも1回確認済)。
+_AUCTION_MARKERS = ("オークション", "入札", "現在価格", "残り時間")
 
 
 def parse_mercari_items(src):
@@ -140,13 +202,16 @@ def parse_mercari_items(src):
     (旧実装は names/prices/urls を別々の findall で取得→添字ズレで別カードの価格を拾う事故源。
      2026-06-09 ユーザー指摘『2行目が違うカード』の構造的原因)。
 
-    通常出品 (_ALLOWED_ITEM_TYPES) のみ返す。オークション/不明 itemtype は除外 (fail-closed,
-     2026-06-09 ユーザー指摘『オークションもある→通常出品のみに』)。返り値は DOM順 (=価格昇順)。
+    通常出品のみ返す。①itemtype が _ALLOWED_ITEM_TYPES 以外を除外 ②cell内に _AUCTION_MARKERS が
+    あればオークションとして除外 (2026-06-09 ユーザー指摘『オークションは確定価格でなく仕入不可』)。
+    返り値は DOM順 (=価格昇順)。
     """
     items = []
     for b in re.split(r'data-testid="item-cell"', src)[1:]:
         it = re.search(r'itemtype="([A-Z_]+)"', b)
         if not it or it.group(1) not in _ALLOWED_ITEM_TYPES:
+            continue
+        if any(mk in b for mk in _AUCTION_MARKERS):   # オークション cell を除外
             continue
         al = re.search(r'aria-label="(.+?)の画像\s*([\d,]+)円"', b)
         if not al:
@@ -161,16 +226,97 @@ def parse_mercari_items(src):
     return items
 
 
-def pick_cheapest_psa10(items, token):
+def pick_cheapest_psa10(items, card_no):
     """価格昇順 items から PSA10 かつ対象カード番号一致の最安を選ぶ (純関数)。"""
     for it in items:  # DOM順 = 価格昇順
-        if it["price"] > 0 and is_psa10(it["name"]) and _name_matches_card(it["name"], token):
+        if it["price"] > 0 and is_psa10(it["name"]) and _name_matches_card(it["name"], card_no):
             return (it["price"], it["href"], it["name"])
     return None
 
 
+def parse_image_search_results(src):
+    """画像検索モーダル(image-grid)の結果を [{price,sold,href}] に分解する純関数。
+
+    モーダル結果は商品名を持たない (サムネ＋価格のみ)。番号照合は別途 item ページを開いて行う。
+    各 result anchor は data-location='image_search:similar_looks_modal:item_thumbnail'、
+    aria-label='[売り切れ ]<価格>円'、href=/item/m… or /shops/product/… (2026-06-09 実機確認)。
+    """
+    out = []
+    for a in re.split(r'data-location="image_search:similar_looks_modal:item_thumbnail"', src)[1:]:
+        seg = a[:600]
+        hr = re.search(r'href="(/(?:item/m\w+|shops/product/\w+))"', seg)
+        al = re.search(r'aria-label="(売り切れ\s*)?([\d,]+)円"', seg)
+        if hr and al:
+            out.append({"href": "https://jp.mercari.com" + hr.group(1),
+                        "sold": bool(al.group(1)),
+                        "price": int(al.group(2).replace(",", ""))})
+    return out
+
+
+def image_search_fallback(drv, ebay_item_id, card_no, max_open=12):
+    """キーワードで0件のとき、自社eBay出品のPSAスラブ画像でメルカリ画像検索 → 番号+PSA10検証 → 最安。
+
+    画像検索は『似ている商品』(視覚類似)なので別カード/別ジャンルのスラブも混ざる。結果に名前が
+    無いため、販売中候補を価格昇順で開き og:title で番号(token連続一致)+PSA10 を検証、最初に通った
+    =最安を返す (2026-06-09 POCで EB02-015 を ¥14,500 で正しく取得・キーワード版と一致を確認)。
+    返り値 (price, url, name) or None。
+    """
+    if not ebay_item_id or not card_no:
+        return None
+    try:
+        from ebay_getitem_images import fetch_listing_images
+    except Exception:
+        return None
+    pics = fetch_listing_images(ebay_item_id)
+    if not pics:
+        return None
+    import requests
+    img_path = os.path.join(os.environ.get("TEMP", "."), f"slab_{ebay_item_id}.jpg")
+    try:
+        ir = requests.get(pics[0], timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        with open(img_path, "wb") as f:
+            f.write(ir.content)
+    except Exception:
+        return None
+    from selenium.webdriver.common.by import By
+    try:
+        drv.get("https://jp.mercari.com/search?keyword=%20"); time.sleep(7)
+        btn = drv.find_elements(By.CSS_SELECTOR, '[data-testid="image-search-button"]')
+        if not btn:
+            return None
+        btn[0].click(); time.sleep(2)
+        fin = drv.find_elements(By.CSS_SELECTOR, 'input[type="file"]')
+        if not fin:
+            return None
+        fin[0].send_keys(img_path); time.sleep(11)
+        res = parse_image_search_results(drv.page_source)
+    except Exception:
+        return None
+    onsale = sorted([r for r in res if not r["sold"]], key=lambda x: x["price"])
+    for r in onsale[:max_open]:
+        try:
+            drv.get(r["href"]); time.sleep(4)
+            ps = drv.page_source
+            # オークション除外: 詳細ページの bid-button(=入札) で判別 (通常は checkout-button)。
+            # テキスト(入札する/現在価格)は i18n にも入り使えず、ボタンの testid が確実な鑑別子
+            # (2026-06-09 実機: auction=bid-button / normal=checkout-button)。
+            if 'data-testid="bid-button"' in ps or 'data-testid="checkout-button"' not in ps:
+                continue
+            mt = re.search(r'<meta property="og:title" content="([^"]+)"', ps)
+            title = mt.group(1) if mt else ""
+            if is_psa10(title) and _name_matches_card(title, card_no):
+                return (r["price"], r["href"], title)
+        except Exception:
+            continue
+    return None
+
+
 def fetch_mercari_cheapest(cards):
-    """各カードの メルカリ on_sale 最安(PSA10) を取得 → {idx: (price, url, name)}。"""
+    """各カードの メルカリ on_sale 最安(PSA10) を取得 → {idx: (price, url, name)}。
+
+    cards: [{"kw":検索語, "card_no":照合番号, "ebay_item_id":フォールバック用}] のリスト。
+    キーワード検索で0件なら、ebay_item_id があれば画像検索フォールバックを試す。
+    """
     import undetected_chromedriver as uc
     opts = uc.ChromeOptions()
     opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
@@ -180,7 +326,8 @@ def fetch_mercari_cheapest(cards):
     out = {}
     try:
         drv.set_page_load_timeout(50)
-        for i, (kw,) in enumerate(cards):
+        for i, c in enumerate(cards):
+            kw = c.get("kw"); card_no = c.get("card_no"); eid = c.get("ebay_item_id")
             if not kw:
                 out[i] = None
                 print(f"  [{i+1}/{len(cards)}] (検索語なし) skip", flush=True)
@@ -188,15 +335,18 @@ def fetch_mercari_cheapest(cards):
             url = "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw) + "&status=on_sale&order=asc&sort=price"
             try:
                 drv.get(url); time.sleep(8)
-                src = drv.page_source
                 # item-cell 単位で抽出 (name·price·href 対応保証 + 通常出品のみ=オークション除外)
-                items = parse_mercari_items(src)
-                best = pick_cheapest_psa10(items, _card_token(kw))
+                best = pick_cheapest_psa10(parse_mercari_items(drv.page_source), card_no)
+                via = "kw"
+                if best is None and eid:           # キーワード0件→画像検索フォールバック
+                    best = image_search_fallback(drv, eid, card_no)
+                    via = "画像検索" if best else "kw"
                 out[i] = best
-                print(f"  [{i+1}/{len(cards)}] {kw}: {('¥'+str(best[0])) if best else 'PSA10在庫なし'}", flush=True)
+                tag = f"¥{best[0]} ({via})" if best else "PSA10在庫なし"
+                print(f"  [{i+1}/{len(cards)}] {card_no or kw}: {tag}", flush=True)
             except Exception as e:
                 out[i] = None
-                print(f"  [{i+1}/{len(cards)}] {kw}: ERR {str(e)[:30]}", flush=True)
+                print(f"  [{i+1}/{len(cards)}] {card_no or kw}: ERR {str(e)[:30]}", flush=True)
     finally:
         try:
             drv.quit()
@@ -228,9 +378,10 @@ def main():
             sys.exit("03_PSA再仕入れ候補_*.csv が無く、funnel_*.csv にも RESTOCK∩PSA10 がありません。"
                      "先に『ファネル分析』を実行してください。")
     rows = list(csv.DictReader(open(src, encoding="utf-8-sig")))
-    kws = [(search_keyword(r.get("title", ""), r.get("set_no", "")),) for r in rows]
-    print(f"対象: {src}\nPSA {len(rows)}枚 のメルカリ最安(PSA10)を取得中...", flush=True)
-    found = fetch_mercari_cheapest(kws)
+    cards = [{**build_card_query(r.get("title", ""), r.get("set_no", "")),
+              "ebay_item_id": _ebay_item_id(r.get("ebay_url", ""))} for r in rows]
+    print(f"対象: {src}\nPSA {len(rows)}枚 のメルカリ最安(PSA10)を取得中 (name_jp検索+画像検索フォールバック)...", flush=True)
+    found = fetch_mercari_cheapest(cards)
 
     results = []
     for i, r in enumerate(rows):
