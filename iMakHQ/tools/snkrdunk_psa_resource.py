@@ -25,9 +25,10 @@ import requests
 
 API_TMPL = "https://snkrdunk.com/en/v1/trading-cards/{card_id}/min-prices-by-conditions"
 SEARCH_URL = "https://snkrdunk.com/en/v1/search"      # productNumber→id 解決 (type=trading-card)
-# 補URL(全PSA10出品が並ぶページ)。JP系パス(/ , /ja/)は全て404、/en/ のみ200 と実機確認
-# (2026-06-09)。UIは英語だが中身は同じ日本市場・価格はJPY。日本語化は不可なので /en/ を維持。
-CARD_PAGE_TMPL = "https://snkrdunk.com/en/trading-cards/{card_id}"
+# 補URL(全PSA10出品が並ぶ日本語カードページ)。snkrdunk はトレカも内部的に "apparels" パスで
+# 扱う (2026-06-09 ユーザー提供URLで判明)。card_id は /en/v1 API が返す id と同一。
+# 実機確認: /apparels/{id}=日本語表示(¥/PSA) ／ /trading-cards/{id}=空404 ／ /en/trading-cards/{id}=英語表示。
+CARD_PAGE_TMPL = "https://snkrdunk.com/apparels/{card_id}"
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"),
