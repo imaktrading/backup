@@ -64,24 +64,31 @@ def _detect_supplier(url: str) -> str:
 def _fetch_ebay_qty_map() -> dict:
     """eBay GetSellerList で active listing 全件取得 → {item_id: qty} map.
 
-    iMakeBayAPI/inventory_monitor/ebay_active_listing_via_trading_api を流用。
+    iMakeBayAPI/inventory_monitor/ebay_active_listing_via_trading_api の
+    download_active_listing_via_trading_api() を流用 (= CSV 出力 + 互換 column)。
     """
     monitor_path = ROOT_DIR.parent / "iMakeBayAPI" / "inventory_monitor"
     if str(monitor_path) not in sys.path:
         sys.path.insert(0, str(monitor_path))
-    from ebay_active_listing_via_trading_api import fetch_all_active_via_trading_api  # noqa: PLC0415
+    from ebay_active_listing_via_trading_api import (  # noqa: PLC0415
+        download_active_listing_via_trading_api,
+    )
+    import csv as _csv  # noqa: PLC0415
 
-    items = fetch_all_active_via_trading_api()
+    csv_path = download_active_listing_via_trading_api()
     qty_map = {}
-    for it in items:
-        iid = str(it.get("item_number") or it.get("item_id") or "").strip()
-        if not iid:
-            continue
-        try:
-            qty = int(it.get("available_qty") or 0)
-        except (TypeError, ValueError):
-            qty = 0
-        qty_map[iid] = qty
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        reader = _csv.DictReader(f)
+        for row in reader:
+            iid = (row.get("Item number") or "").strip()
+            if not iid:
+                continue
+            try:
+                qty = int(row.get("Available quantity") or 0)
+            except (TypeError, ValueError):
+                qty = 0
+            # variation listing は同 item_id で複数行、 合計 qty で集計
+            qty_map[iid] = qty_map.get(iid, 0) + qty
     return qty_map
 
 
