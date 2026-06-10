@@ -280,6 +280,43 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
     if cycle_log.get("test_mode"):
         lines.append("注意      : テストモード (本番運用ではない)")
 
+    # 仕入元在庫監視で error/異常がある場合の対応手順 (= ユーザー指示 2026-06-10 load-bearing 化)
+    if has_action_summary:
+        scrape_issue = (mon.get("errors", 0) or 0) > 0
+        # 急増ガード発火状況は scrape_status に含まれる
+        if scrape_issue or "急増ガード" in (locals().get("scrape_status") or ""):
+            lines.append("")
+            lines.append(f"【★仕入元在庫監視 要対応】 該当行と対応手順")
+            error_rows = (mon.get("error_rows") or [])
+            if error_rows:
+                lines.append(f"  エラー row 詳細 (上位 {min(len(error_rows), 10)} 件):")
+                for er in error_rows[:10]:
+                    short_err = (er.get("error") or "")[:80]
+                    lines.append(f"  - {er.get('sheet','?')} row{er.get('row_index','?')} "
+                                  f"iid={er.get('item_id') or '(空)'} sup={er.get('supplier','?')}")
+                    lines.append(f"      url: {er.get('url','')[:100]}")
+                    lines.append(f"      err: {short_err}")
+                if (mon.get("errors", 0) or 0) > 10:
+                    lines.append(f"  ... 他 {(mon.get('errors', 0) or 0) - 10} 件 (全件: logs/listings_<date>.log)")
+                # 対応手順
+                lines.append("")
+                lines.append("  対応手順 (= 漏れ 0 最優先、 該当 row の在庫状況不明):")
+                lines.append("  1. err 内容を確認:")
+                lines.append("     - 'ConnectionError' / 'getaddrinfo failed' / 'Timeout' = transient → 次 cycle で auto retry、 待つで OK")
+                lines.append("     - 'unsupported supplier' = URL 不正 → スプシ A 列 URL を手動修正")
+                lines.append("     - '404' / 'page not found' = listing 削除済 → 仕入元側で確認、 必要なら手動 D=○ 化")
+                lines.append("     - その他 = scraper 構造変更疑い → log 詳細 chk + 修正依頼")
+                lines.append("  2. transient なら待つ。 持続的に同 row で error → 手動 chk")
+                lines.append(f"  対応期限: 4 時間以内 (次 cycle 開始前)、 ただし 該当 row 売れたら履行不能 risk あり")
+            else:
+                # 急増ガード発火 or scrape phase 全断
+                lines.append(f"  全断疑い (詳細 row 取得不能):")
+                lines.append("  対応手順:")
+                lines.append("  1. logs/listings_<date>.log の末尾を確認 → どこで詰まったか")
+                lines.append("  2. chromedriver / Selenium UI 構造変更 / login 切れ を chk")
+                lines.append("  3. 復旧後、 手動 cycle 再実行: `python run_cycle.py --sheet both`")
+                lines.append(f"  対応期限: **即時** (= scrape 動作不能、 全 row 在庫不明)")
+
     # 未取下げ詳細を冒頭近くに (= 詳細はその後で OK の原則だが、 要対応は即明示)
     if action_count > 0:
         lines.append("")
@@ -307,6 +344,22 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
                 lines.append("    python -m tools.release_holdouts --reason reinclude_burst_guard_holdout --execute")
         else:
             lines.append("  対応期限    : 4 時間以内 (= 次 cycle 開始前、 自然 retry も並行発火)")
+        # reason 別 対応手順
+        has_item_id_empty = "item_id_empty" in reasons_in_actions
+        has_verify_giveup = "verify_qty_gt0_giveup" in reasons_in_actions
+        if has_item_id_empty or has_verify_giveup:
+            lines.append("  対応手順 (reason 別):")
+            if has_item_id_empty:
+                lines.append("    item_id_empty:")
+                lines.append("      1. スプシ B 列 (itemID) を確認 → 空欄なら eBay で title 検索 → ID 引き直し → スプシ手動入力")
+                lines.append("      2. 入力後、 次 cycle で auto 検知 + revise")
+                lines.append("      3. eBay 出品がない場合 → スプシ B 列に「NONE」 記入 (= 監視除外)")
+            if has_verify_giveup:
+                lines.append("    verify_qty_gt0_giveup (= revise 後 in-cycle 65s で qty=0 反映確認できず):")
+                lines.append("      1. 該当 itemID を手動で eBay 確認 → 既に qty=0 なら eventual consistency 由来 (false positive)")
+                lines.append("      2. qty>0 残存なら release CLI で 再 revise:")
+                lines.append("         python -m tools.release_holdouts --reason verify_qty_gt0_giveup --execute")
+                lines.append("      3. 持続的に出る itemID → variation specifics の mismatch 疑い、 手動 chk 要")
         for it in (ar.get("items") or [])[:10]:
             iid = it.get("item_id") or "(item_id 空欄)"
             lines.append(f"  - {it.get('sheet','?')} row{it.get('row','?')} iid={iid} reason={it.get('reason','')}")
@@ -382,6 +435,20 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
                 lines.append(f"  失敗内容     : {_translate_error(err_text)}")
                 if up.get("page_url"):
                     lines.append(f"  確認 URL     : {up['page_url']}")
+                # upload phase 全断時の対応手順 (ユーザー指示 2026-06-10 load-bearing 化)
+                lines.append(f"  対応手順 (= upload phase 全断、 取下げ送信ゼロ → 漏れ全件):")
+                err_low = (err_text or "").lower()
+                if "connectionerror" in err_low or "getaddrinfo" in err_low or "timeout" in err_low:
+                    lines.append("    1. transient (DNS/Connection/Timeout) → 数分待つ + 次 cycle で auto retry 想定")
+                    lines.append("    2. 連続失敗なら network 自体 chk: `Test-NetConnection api.ebay.com -Port 443`")
+                elif "oauth" in err_low or "token" in err_low or "iaftoken" in err_low or "invalid" in err_low:
+                    lines.append("    1. OAuth token 切れ疑い → ユーザー認証画面で再 OAuth 取得")
+                    lines.append("    2. credentials/api_key.txt の token 更新 → 手動 cycle 再実行")
+                else:
+                    lines.append(f"    1. logs/cycle_<ts>.jsonl の upload phase 詳細を chk")
+                    lines.append("    2. eBay Developer dashboard で API 障害情報 chk")
+                    lines.append("    3. 復旧後、 手動 cycle 再実行: `python run_cycle.py --sheet both`")
+                lines.append(f"    対応期限: **即時** (= 取下げ漏れ全件 → 全 BAN risk)")
         lines.append("")
 
     # ヘルス (upload_health)

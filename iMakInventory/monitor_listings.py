@@ -612,6 +612,19 @@ def process_sheet(
         for r in results
         if (r.get("error") or "").startswith("unsupported supplier")
     ]
+    # ユーザー指示 2026-06-10: ⚠️/❌ のとき何を確認すべきか load-bearing に。
+    # error 詳細 row を email で出す用 (上位 20 件)。
+    error_rows = [
+        {
+            "row_index":  r["row_index"],
+            "item_id":    r.get("item_id", ""),
+            "url":        (r.get("url") or "")[:120],
+            "title":      (r.get("title") or "")[:50],
+            "error":      (r.get("error") or "")[:150],
+            "supplier":   r.get("supplier", ""),
+        }
+        for r in results if r.get("error")
+    ][:20]
     log("")
     log(f"  === 集計 [{sheet_label}] ===")
     log(f"    処理: {len(results)} / 対象 {len(rows)}")
@@ -738,6 +751,7 @@ def process_sheet(
         "newly_in_stock": newly_in_stock,
         "errors":         errors,
         "url_alerts":     url_alerts,
+        "error_rows":     error_rows,
     }
 
 

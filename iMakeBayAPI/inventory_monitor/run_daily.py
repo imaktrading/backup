@@ -193,6 +193,45 @@ def _format_report(start: datetime, end: datetime,
         f"終了時刻   : {end.strftime('%Y-%m-%d %H:%M')}",
         f"所要時間   : {dur_str}",
         f"対象スプシ  : ★公式在庫要チェック",
+    ]
+    # ⚠️ / ❌ のときの対応手順 (= ユーザー指示 2026-06-10 load-bearing 化)
+    if scrape_step_failed:
+        lines.append("")
+        lines.append("【★仕入元在庫監視 要対応】")
+        lines.append("  対応手順 (= scrape phase 自体停止、 全 listing 在庫不明):")
+        lines.append("  1. logs/2026-XX-XX.log の末尾を確認 → 何で詰まったか")
+        lines.append("  2. UNIQLO/GU 公式 API 障害 / chromedriver / login 切れ を chk")
+        lines.append("  3. 復旧後、 手動 cycle 再実行: `python iMakeBayAPI/inventory_monitor/run_daily.py`")
+        lines.append("  対応期限: **即時** (= 全 listing 在庫状況不明)")
+    elif scrape_errors > 0:
+        lines.append("")
+        lines.append("【★仕入元在庫監視 要対応】")
+        lines.append(f"  該当 listing は logs/2026-XX-XX.log の \"⚠️\" or \"scrape 失敗\" を grep")
+        lines.append("  対応手順 (= 漏れ 0 最優先):")
+        lines.append("  1. error 内容を確認:")
+        lines.append("     - 'ConnectionError' / 'getaddrinfo' = transient → 次 cycle (翌 08:00) で auto retry、 待つで OK")
+        lines.append("     - 公式 API 404 / 構造変更 = supplier 側の変更 → scraper 修正依頼")
+        lines.append("     - login 失敗 = 認証切れ → 手動 login 再実施")
+        lines.append("  2. 持続的に同 listing で error → 手動 chk")
+        lines.append("  対応期限: 24 時間以内 (翌日 08:00 cycle 前)")
+    if revise_step_failed:
+        lines.append("")
+        lines.append("【★eBay 在庫調整 要対応】")
+        lines.append("  対応手順 (= revise step 失敗、 動作不能):")
+        lines.append("  1. logs/2026-XX-XX.log の zero / restore / audit_heal step 詳細 chk")
+        lines.append("  2. eBay Trading API 障害 / OAuth token 切れ / quota 超過 を chk")
+        lines.append("  3. 復旧後、 手動再実行")
+        lines.append("  対応期限: **即時** (= 取下げ/復活全件 漏れ)")
+    elif total_ng > 0:
+        lines.append("")
+        lines.append("【★eBay 在庫調整 要対応】")
+        lines.append(f"  ng {total_ng} 件 (= variation 個別 revise 失敗、 csv_output/ の最新 CSV で詳細確認)")
+        lines.append("  対応手順:")
+        lines.append("  1. csv_output/heal_zero_<ts>.csv or revise_qty0_<ts>.csv で 失敗 itemID + variation specifics chk")
+        lines.append("  2. eBay で手動 qty 確認 (= eventual consistency なら既に qty=0 化済 = false positive)")
+        lines.append("  3. qty>0 残存なら 手動 ReviseInventoryStatus or 翌 cycle で audit_heal phase が自動再 revise")
+        lines.append("  対応期限: 24 時間以内")
+    lines.extend([
         "",
         "【在庫監視】(uniqlo / gu / montbell / amazon 公式サイト巡回)",
         f"  処理 listing  : {monitor['listings']} 件",
