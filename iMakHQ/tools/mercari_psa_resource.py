@@ -124,17 +124,75 @@ def name_jp_for_card(card_no, _cache={}):
     return nj
 
 
-def build_card_query(title, set_no):
-    """1カード分の検索情報を作る → {kw, card_no, name_jp}。
+def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sqlite"):
+    """canonical product_id(固有KEY) → {name_jp, image, set, get_info, variant_type, rarity, hint}。
 
-    kw = 'PSA10 <name_jp> <card_no>' (name_jp が引ければ付ける)。card_no は照合用。
+    Step6 P2/P3: KEY が指す**その1枚の変種**の識別属性を catalog 共有DB から厳密引き。
+    変種の text 識別子は set_name 列だけでなく **specs.get_info(入手元セット) / variant_type(alt_art等)
+    / rarity** に在る(_p1 と _p2 は set_name=None でも get_info=神速の拳 vs EGGHEAD で区別可)。
+    hint = これらを束ねた照合トークン source(メルカリ/SNKRDUNK 両チャネルで variant pin に使う=画像不要)。
+    KEY 無 / catalog 未収録 → None (呼出側は bare fallback)。
+    """
+    if not key:
+        return None
+    if key in _cache:
+        return _cache[key]
+    import json
+    import sqlite3
+    out = None
+    try:
+        con = sqlite3.connect(_db)
+        r = con.execute(
+            "SELECT name_jp, images, set_name, specs FROM products WHERE product_id=?", (key,)
+        ).fetchone()
+        con.close()
+        if r:
+            try:
+                imgs = json.loads(r[1]) if r[1] else []
+            except Exception:
+                imgs = []
+            imgs = sorted(imgs, key=lambda u: (0 if ("OP-JA" in u or "onepiece-cardgame" in u or "JP" in u) else 1))
+            sp = {}
+            try:
+                sp = json.loads(r[3]) if r[3] else {}
+            except Exception:
+                sp = {}
+            get_info = (sp.get("get_info") or "").strip()         # 入手元set(日本語) → メルカリ用
+            set_name_ebay = (sp.get("set_name_ebay") or "").strip()  # set名(英語) → SNKRDUNK用
+            variant_type = (sp.get("variant_type") or "").strip()
+            rarity = (sp.get("rarity") or "").strip()
+            out = {
+                "name_jp": r[0], "image": imgs[0] if imgs else "", "set": r[2] or "",
+                "get_info": get_info, "set_name_ebay": set_name_ebay,
+                "variant_type": variant_type, "rarity": rarity,
+                # hint = 変種識別トークン source。set名は **日本語(get_info)とブー英語(set_name_ebay)両方**
+                # 入れる: メルカリ=JP名 / SNKRDUNK=EN名 と marketplace で言語が違うため(E2Eで判明)。
+                # set列がNoneでも get_info/set_name_ebay が入手元セットを持つ → 両 marketplace と突合可。
+                # key(suffix _p1 等)は marketplace に出ず部分一致雑音になるため hint に入れない。
+                "hint": [r[2] or "", get_info, set_name_ebay, variant_type, rarity, r[0] or ""],
+            }
+    except Exception:
+        out = None
+    _cache[key] = out
+    return out
+
+
+def build_card_query(title, set_no, key=None):
+    """1カード分の検索情報を作る → {kw, card_no, name_jp, key, image}。
+
+    Step6 P2: canonical KEY があれば catalog 厳密引きの name_jp + 変種画像を使う(bare曖昧回避)。
+    kw = 'PSA10 <name_jp> <card_no>'。card_no は照合用、image は P3 画像pin用。
+    key 無 / catalog 未収録 → 従来の bare card_no 経路に fallback (後方互換)。
     """
     card_no = _extract_card_no(title, set_no)
+    meta = card_meta_for_key(key) if key else None
+    nj = (meta.get("name_jp") if meta else None) or name_jp_for_card(card_no)
+    image = meta.get("image") if meta else ""
+    hint = meta.get("hint") if meta else []
     if not card_no:
-        return {"kw": "", "card_no": "", "name_jp": None}
-    nj = name_jp_for_card(card_no)
+        return {"kw": "", "card_no": "", "name_jp": nj, "key": key or "", "image": image or "", "hint": hint}
     kw = f"PSA10 {nj} {card_no}" if nj else f"PSA10 {card_no}"
-    return {"kw": kw, "card_no": card_no, "name_jp": nj}
+    return {"kw": kw, "card_no": card_no, "name_jp": nj, "key": key or "", "image": image or "", "hint": hint}
 
 
 def build_input_from_funnel():
@@ -226,12 +284,38 @@ def parse_mercari_items(src):
     return items
 
 
-def pick_cheapest_psa10(items, card_no):
-    """価格昇順 items から PSA10 かつ対象カード番号一致の最安を選ぶ (純関数)。"""
-    for it in items:  # DOM順 = 価格昇順
-        if it["price"] > 0 and is_psa10(it["name"]) and _name_matches_card(it["name"], card_no):
-            return (it["price"], it["href"], it["name"])
-    return None
+def pick_cheapest_psa10(items, card_no, variant_hint=None):
+    """価格昇順 items から PSA10 かつ対象カード番号一致の最安を選ぶ (純関数)。
+
+    Step6 P3: variant_hint(canonical変種の get_info=入手元set 等)があれば、番号一致の中で
+    hint(セット名/コード)に一致する**正変種**に絞ってから最安。SNKRDUNK と同じ思想・画像不要。
+    - hint一致あり → その最安 (正変種)
+    - hint一致無し + 候補単一 → 採用 (変種曖昧なし。seller がset未記載なだけ)
+    - hint一致無し + 候補複数 → None (誤variant買わない fail-closed)
+    - hint無 (KEY未解決) → 従来どおり番号一致の最安
+    """
+    matches = [it for it in items  # DOM順 = 価格昇順
+               if it["price"] > 0 and is_psa10(it["name"]) and _name_matches_card(it["name"], card_no)]
+    if not matches:
+        return None
+
+    def _ret(it):
+        return (it["price"], it["href"], it["name"])
+    if not variant_hint:
+        return _ret(matches[0])
+    from snkrdunk_psa_resource import _hint_tokens
+    toks = _hint_tokens(variant_hint)
+    if not toks:
+        return _ret(matches[0])           # hint からトークン取れず → 従来最安
+    # 各候補を hint トークン一致数で採点。最高スコア群(=正変種)の中で最安を採る。
+    # character(name_jp)は全候補に当たるので底上げ、discriminating な set トークンが上位を決める。
+    scored = [(sum(1 for t in toks if t in (it["name"] or "").upper().replace(" ", "").replace("-", "")), it)
+              for it in matches]   # matches は価格昇順を保持
+    top = max(s for s, _ in scored)
+    if top == 0:
+        return _ret(matches[0]) if len(matches) == 1 else None   # 決め手無+複数 → fail-closed
+    topgroup = [it for s, it in scored if s == top]              # 価格昇順保持
+    return _ret(topgroup[0])                                     # 正変種の最安
 
 
 def parse_image_search_results(src):
@@ -336,7 +420,7 @@ def fetch_mercari_cheapest(cards):
             try:
                 drv.get(url); time.sleep(8)
                 # item-cell 単位で抽出 (name·price·href 対応保証 + 通常出品のみ=オークション除外)
-                best = pick_cheapest_psa10(parse_mercari_items(drv.page_source), card_no)
+                best = pick_cheapest_psa10(parse_mercari_items(drv.page_source), card_no, c.get("hint"))
                 via = "kw"
                 if best is None and eid:           # キーワード0件→画像検索フォールバック
                     best = image_search_fallback(drv, eid, card_no)

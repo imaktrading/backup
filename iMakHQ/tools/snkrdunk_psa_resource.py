@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import re
 import sys
 
 import requests
@@ -69,11 +70,41 @@ def parse_min_prices(data, condition=PSA10):
     }
 
 
-def parse_search_for_card(data, card_number):
+def _hint_tokens(variant_hint):
+    """variant_hint(canonical変種の set/name 文字列 or list) → 照合トークン list。
+
+    kanji / katakana / set-code を**分離抽出**(混在連結を防ぐ=「神速」を単独トークンに)。
+    set-code は [A-Z]{2,}+数字 (P1 等の suffix 雑音を除外)。short/単字は採らない(部分一致誤爆回避)。
+    """
+    if not variant_hint:
+        return []
+    parts = variant_hint if isinstance(variant_hint, (list, tuple)) else [variant_hint]
+    toks = []
+
+    def _add(t):
+        if t and len(t) >= 2 and t not in toks:
+            toks.append(t)
+    for p in parts:
+        s = (p or "").upper().replace(" ", "")
+        for m in re.findall(r"[A-Z]{2,}-?\d{1,3}", s):   # set code: OP-11 / EB04 / PRB-02
+            _add(m.replace("-", ""))
+        for m in re.findall(r"[A-Z]{3,}", s):             # Latin set語 (EGGHEAD / CRISIS 等)
+            _add(m)
+        for m in re.findall(r"[一-龥]{2,}", s):           # 漢字ラン (神速 等)
+            _add(m)
+        for m in re.findall(r"[ァ-ヴー]{2,}", s):          # カタカナラン (ゼウス 等、ー含む)
+            _add(m)
+    return toks
+
+
+def parse_search_for_card(data, card_number, variant_hint=None):
     """search レスポンスから card_number に一致する trading-card id を抽出 (純関数・id-strict)。
 
     SNKRDUNK は鑑定カードを streetwears/sneakers バケツに入れる。name 中の `[CARD_NUMBER]`
-    か productNumber 完全一致で突合。誤マッチ防止のため一致が無ければ None (fail-closed)。
+    か productNumber 完全一致で突合。
+    Step6 P3: **同番号に複数 print** がある時(変種非決定性)、variant_hint(canonical変種の
+    set/name トークン)で正しい product を選ぶ。決め手が無い複数一致は None (fail-closed=誤variant買わない)。
+    一致が無ければ None (fail-closed)。
     """
     if not isinstance(data, dict):
         return None
@@ -85,18 +116,42 @@ def parse_search_for_card(data, card_number):
         v = data.get(bucket)
         if isinstance(v, list):
             items.extend(v)
+    matches = []
     for it in items:
         if not isinstance(it, dict):
             continue
         pn = (it.get("productNumber") or "").upper().strip()
         name = (it.get("name") or "").upper()
         if pn == cn or f"[{cn}]" in name.replace(" ", ""):
-            return it.get("id")
-    return None
+            matches.append(it)
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0].get("id")           # 単一一致 = 確定
+    # 複数 print (変種非決定性): hint で絞る
+    toks = _hint_tokens(variant_hint)
+    if not toks:
+        return None                            # hint無で複数 = 曖昧 → fail-closed
+    scored = []
+    for it in matches:
+        nm = (it.get("name") or "").upper().replace(" ", "").replace("-", "")
+        scored.append((sum(1 for t in toks if t in nm), it.get("id")))
+    scored.sort(key=lambda x: -x[0])
+    top, top_score = scored[0], scored[0][0]
+    # 決め手(score>0 かつ 2位と差がある=一意)が無ければ fail-closed
+    if top_score <= 0:
+        return None
+    if len(scored) > 1 and scored[1][0] == top_score:
+        return None                            # 同点 = 一意でない → fail-closed
+    return top[1]
 
 
-def resolve_card_id(card_number, timeout=_TIMEOUT_SEC):
-    """productNumber(例 OP11-106) → SNKRDUNK trading-card id を HTTP 解決。Selenium不要・全シリーズ。"""
+def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None):
+    """productNumber(例 OP11-106) → SNKRDUNK trading-card id を HTTP 解決。Selenium不要・全シリーズ。
+
+    Step6 P3: variant_hint(canonical変種の set/name) を渡すと、同番号の複数 print から正しい
+    product を選ぶ(決め手無→fail-closed)。hint無は従来どおり(単一一致のみ確定)。
+    """
     if not card_number or not str(card_number).strip():
         return None
     try:
@@ -108,7 +163,7 @@ def resolve_card_id(card_number, timeout=_TIMEOUT_SEC):
     if r.status_code != 200:
         return None
     try:
-        return parse_search_for_card(r.json(), card_number)
+        return parse_search_for_card(r.json(), card_number, variant_hint=variant_hint)
     except Exception:
         return None
 
@@ -153,15 +208,16 @@ def fetch_psa10_listings(card_id, timeout=_TIMEOUT_SEC):
         return None
 
 
-def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC):
+def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant_hint=None):
     """productNumber から HTTP-only で PSA10 再仕入れ可否を判定。
 
     出品一覧API(displayShortConditionTitle='PSA10')で実PSA10出品の最安を取り、補URLは
     その PSA10最安"出品"に直リンク (混在カードページでなく直接PSA10)。出品API不調時のみ
     min-prices へフォールバック (補URL=カードページ)。
+    Step6 P3: variant_hint(canonical変種の set/name) で同番号の複数 print を正しく選ぶ。
     Returns: {available, psa10_price_jpy, conditions, card_id, card_url} or {"_error":...}
     """
-    cid = resolve_card_id(card_number, timeout=timeout)
+    cid = resolve_card_id(card_number, timeout=timeout, variant_hint=variant_hint)
     if cid is None:
         return {"_error": "card_not_found", "available": False, "psa10_price_jpy": None}
     listings = fetch_psa10_listings(cid, timeout=timeout)

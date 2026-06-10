@@ -133,11 +133,29 @@ def main():
         rows = rows[:limit]
     print(f"対象 PSA10: {len(rows)}枚 (2チャネル: メルカリ＆SNKRDUNK)")
 
+    # --- Step6 P1: canonical KEY を血統に通す (itemID で商品管理シートに join) ---
+    # 各行に r["key"] = canonical product_id (固有変種) を付与。bare番号でなく KEY で正確な変種を同定する土台。
+    # 取得失敗/未マッチ時は r["key"] 無し → 後段は従来の bare番号 fallback (fail-soft)。
+    keyed = 0
+    itemid_row = {}
+    try:
+        from sheet_io import product_index
+        keymap, itemid_row = product_index()
+        for r in rows:
+            iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+            k = keymap.get(iid) if iid else None
+            if k:
+                r["key"] = k
+                keyed += 1
+        print(f"  canonical KEY 付与: {keyed}/{len(rows)}枚 (商品管理シート itemID join)")
+    except Exception as e:
+        print(f"  ⚠ canonical KEY map 取得失敗 ({type(e).__name__}: {e}) — bare番号で続行")
+
     # --- メルカリ (一括 Selenium, name_jp検索 + 画像検索フォールバック) ---
     print("▶ メルカリ最安取得中 (name_jp検索+画像検索フォールバック)...")
     mercari_res = {}
     try:
-        cards = [{**mp.build_card_query(r.get("title", ""), r.get("set_no", "")),
+        cards = [{**mp.build_card_query(r.get("title", ""), r.get("set_no", ""), r.get("key")),
                   "ebay_item_id": mp._ebay_item_id(r.get("ebay_url", ""))} for r in rows]
         mercari_res = mp.fetch_mercari_cheapest(cards)
     except Exception as e:
@@ -155,7 +173,14 @@ def main():
             snkr_res[i] = None
             print(f"  [{i+1}/{len(rows)}] (card番号抽出不可) skip", flush=True)
             continue
-        res = sp.check_by_keyword(cn)
+        # Step6 P3: canonical KEY → catalog の set+name を variant_hint に。同番号の複数 print を正選択。
+        vhint = None
+        k = r.get("key")
+        if k:
+            meta = mp.card_meta_for_key(k)
+            if meta:
+                vhint = meta.get("hint")  # set + get_info(入手元set) + variant_type + rarity + name_jp + key
+        res = sp.check_by_keyword(cn, variant_hint=vhint)
         snkr_res[i] = res
         if res.get("_error") == "card_not_found":
             print(f"  [{i+1}/{len(rows)}] {cn}: SNKRDUNK未登録", flush=True)
@@ -171,12 +196,18 @@ def main():
                  "mercari¥", "mercari_URL", "snkrdunk¥", "snkrdunk件数",
                  *aux_cols, "ebay_url"]]
     go = 0
+    aux_writeback = {}   # {商品管理シート行番号: [補URL,...]} (itemID join できた行のみ)
     for i, r in enumerate(rows):
         c = combine(mercari_res.get(i), snkr_res.get(i))
         if c["resourceable"]:
             go += 1
         # SNKRDUNK 補URL: URLのみ(クリック可)。価格は snkrdunk¥ 列に既出。最大5件
         aux = [u["url"] for u in c["snkrdunk_urls"][:MAX_AUX] if u.get("url")]
+        # 商品管理シートの 補URL列(AC-AG)へ書戻し用に収集 (itemID で行特定)
+        iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+        rn = itemid_row.get(iid) if iid else None
+        if rn and aux:
+            aux_writeback[rn] = aux
         aux += [""] * (MAX_AUX - len(aux))
         out_rows.append([
             r.get("set_no") or mp.search_keyword(r.get("title", ""), "").replace("PSA10 ", ""),
@@ -196,6 +227,15 @@ def main():
         print(f"📊 「PSA再仕入れ」タブ更新: {len(out_rows)-1}件 → {MAINT_URL}")
     except Exception as e:
         print(f"⚠ スプシ更新失敗: {type(e).__name__}: {e}")
+
+    # 商品管理シートの 補URL列(AC-AG)へ SNKRDUNK PSA10 直リンクを書戻し
+    if aux_writeback:
+        try:
+            from sheet_io import write_aux_urls
+            n = write_aux_urls(aux_writeback)
+            print(f"🔗 商品管理シート 補URL(AC-AG) 書戻し: {n}行")
+        except Exception as e:
+            print(f"⚠ 補URL書戻し失敗: {type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":
