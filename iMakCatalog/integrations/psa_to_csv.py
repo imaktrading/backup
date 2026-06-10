@@ -1260,8 +1260,12 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "TAG TEAM":                    "SM12a",
     "ALTER GENESIS":               "SM12",   # オルタージェネシス (PSA: 'SUN & MOON ALTER GENESIS')
     "GX ULTRA SHINY":              "SM8b",
+    "ULTRA SHINY GX":              "SM8b",   # PSA 語順違い ('...ULTRA SHINY GX'), cert74118843 Articuno GX 214 (2026-06-10)
     "GX BATTLE BOOST":             "SM4p",
     "THE BEST OF XY":              "XY",
+    # --- 2026-06-10 PSA脱落6件 set-map (records 実在・索引のみ。真値=catalog set_name 裏取り) ---
+    "SKY LEGEND":                  "SM10b",  # スカイレジェンド (cert109940063 Lillie 053=SM10b-053 実在)
+    "START DECK 100":              "SI",     # スタートデッキ100 (cert139561995 Pikachu 127=SI-127 実在)
 }
 
 
@@ -1307,6 +1311,11 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
         (r"\bXY\s+PROMOS?\b", "XYP"),   # X & Y Promo
         (r"\bBW\s+PROMOS?\b", "BWP"),   # Black & White Promo
         (r"\bDP\s+PROMOS?\b", "DPP"),   # Diamond & Pearl Promo
+        # --- space区切り promo (dash/digit無し) 2026-06-10: 'S PROMO' が generic PROMO→'P' に落ち
+        #     P-288 を誤引きして脱落していた根治。SV を S より先に置く (語順衝突防止)。
+        #     SM/XY/BW は上で処理済 ('S\s+PROMO' は 'SM PROMO' に非マッチ=S直後がM) ので安全。
+        (r"\bSV\s+PROMOS?\b", "SV-P"),  # Scarlet & Violet Promo (PSA: 'SV PROMO')
+        (r"\bS\s+PROMOS?\b",  "S-P"),   # Sword & Shield Promo (PSA: 'S PROMO') cert131214875/126900241
     ]
     for pattern, code in psa_promo_to_catalog:
         if re.search(pattern, b):
