@@ -693,12 +693,22 @@ def run_cycle(
         if should_run_audit:
             progress_writer.update(phase="reverse_audit", force=True)
             _log(f"=== Phase 5: reverse_audit (= D=○ vs eBay qty>0 突合) ===", test_mode)
+            # eBay active map は両 audit で共有 (= 全件 DL を 1 回に集約、 二重 DL 回避)
+            shared_qty_map = None
+            try:
+                from reverse_audit import _fetch_ebay_qty_map  # noqa: PLC0415
+                shared_qty_map = _fetch_ebay_qty_map()
+                _log(f"  eBay active map: {len(shared_qty_map)} 件 (両 audit で共有)", test_mode)
+            except Exception as e:
+                _log(f"  [!] eBay active map 取得失敗、 audit は各自 fetch に fallback: {type(e).__name__}: {e}", test_mode)
+                shared_qty_map = None
             try:
                 from reverse_audit import run_reverse_audit  # noqa: PLC0415
                 ra_result = run_reverse_audit(
                     high_sheet_id=high_sheet_id,
                     low_sheet_id=low_sheet_id,
                     write_log=True,
+                    qty_map=shared_qty_map,
                 )
                 cycle_log["phases"]["reverse_audit"] = ra_result
                 # 乖離検出時の alert (HQ 条件 B 文言: 「初回 = 既存乖離鳥瞰、 fail-OPEN 隠ぺい禁止」)
@@ -717,6 +727,37 @@ def run_cycle(
             except Exception as e:
                 _log(f"  [NG] reverse_audit 例外: {type(e).__name__}: {e}", test_mode)
                 cycle_log["phases"]["reverse_audit"] = {
+                    "error": f"{type(e).__name__}: {e}",
+                }
+
+            # Phase 5b: ebay_down_audit (= 逆方向 #2、 D 空欄 + eBay qty=0/ended)
+            # user 指示 2026-06-10: eBay が勝手に / 手動で取下げ → eBay は qty=0 or ended
+            # だが sheet D 未売切 のものを 「在庫あり・eBay取下げ済」 review シートに書出。
+            # D 列は触らない (= 書き出すだけ、 自動売切化しない)。 reverse_audit の鏡像。
+            progress_writer.update(phase="ebay_down_audit", force=True)
+            _log(f"=== Phase 5b: ebay_down_audit (= D空欄 vs eBay qty=0/ended 突合) ===", test_mode)
+            try:
+                from reverse_audit import run_ebay_down_sheet_active_audit  # noqa: PLC0415
+                ed_result = run_ebay_down_sheet_active_audit(
+                    high_sheet_id=high_sheet_id,
+                    low_sheet_id=low_sheet_id,
+                    write_sheet=True,
+                    write_log=True,
+                    qty_map=shared_qty_map,
+                )
+                cycle_log["phases"]["ebay_down_audit"] = ed_result
+                oc = ed_result.get("orphan_count", 0)
+                if oc > 0:
+                    _log(f"  [info] ebay_down orphan {oc} 件 → review シート更新 "
+                         f"{ed_result.get('by_state')} (coverage {ed_result.get('coverage')})",
+                         test_mode)
+                elif oc == 0:
+                    _log(f"  ✓ ebay_down orphan 0 件", test_mode)
+                elif oc == -1:
+                    _log(f"  [!] ebay_down_audit 中断: {ed_result.get('error')}", test_mode)
+            except Exception as e:
+                _log(f"  [NG] ebay_down_audit 例外: {type(e).__name__}: {e}", test_mode)
+                cycle_log["phases"]["ebay_down_audit"] = {
                     "error": f"{type(e).__name__}: {e}",
                 }
         else:

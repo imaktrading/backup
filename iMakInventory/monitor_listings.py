@@ -471,6 +471,32 @@ def process_sheet(
         # 関連: [[amazon_restore_after_scrape_reliability]] (= amazon は別途継続 chk)
         row_supplier = detect_supplier(_domain_of(row["url"]))
         cur_sold = (row.get("current_sold") or "").strip()
+        # === item_id 空欄 = 未出品 skip (2026-06-10 制定) ===
+        # eBay listing ID (B列) 空欄 = まだ eBay に出品されていない (= 監視予定行)。
+        # 出品されていない以上 取下げ対象が存在しない → scrape する実益ゼロ。
+        # scraper が error/None を返しても 「要対応」 ではない (= 誤検知/エラー扱いの撲滅)。
+        # 出品されているのは item_id を持つ行のみ、 という user 指示 (2026-06-10) に基づく。
+        # 関連: [[itemid_late_input_no_action]] (= item_id 後入れは次 cycle で自然吸収)。
+        item_id_val = (row.get("item_id") or "").strip()
+        if not item_id_val:
+            log(f"{prefix}{row_supplier[:7].ljust(7)} - skip (item_id 空欄 = 未出品)")
+            results.append({
+                "row_index":         row["row_index"],
+                "url":               row["url"],
+                "item_id":           "",
+                "title":             row.get("title", ""),
+                "supplier":          row_supplier,
+                "is_sold":           None,
+                "raw_status":        "skipped_no_item_id",
+                "current_sold":      cur_sold,
+                "delta":             "unchanged",
+                "error":             None,
+                "price_jpy":         None,
+                "candidates_checked": 0,
+                "current_n_jpy_str": row.get("current_n_jpy_str", ""),
+                "sub_results":       [],
+            })
+            continue
         if row_supplier == "mercari" and cur_sold in ("○", "〇"):
             log(f"{prefix}mercari  - skip (D=○、 mercari 復活機会なし)")
             results.append({
@@ -650,7 +676,8 @@ def process_sheet(
     for r in results:
         # 2026-05-25 mercari D=○ skip 行は scrape していないので sheet 書込 完全 skip
         # (= O 列 checked_at も更新しない、 触らない方針)
-        if r.get("raw_status") == "skipped_mercari_sold":
+        # 2026-06-10 item_id 空欄 = 未出品 skip 行も同様に完全 skip (= 触らない)
+        if r.get("raw_status") in ("skipped_mercari_sold", "skipped_no_item_id"):
             continue
         price_jpy = r.get("price_jpy")  # None の場合 update dict には乗せない (= N 列触らない)
         prev_n = r.get("current_n_jpy_str", "")  # AH 列用 (= read 時の N 列値)

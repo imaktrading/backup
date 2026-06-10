@@ -96,6 +96,7 @@ def run_reverse_audit(
     high_sheet_id: Optional[str] = None,
     low_sheet_id: Optional[str] = None,
     write_log: bool = True,
+    qty_map: Optional[dict] = None,
 ) -> dict:
     """逆方向 reconciliation 実行 (= sheet D=○ + eBay active qty>0 検出).
 
@@ -118,7 +119,8 @@ def run_reverse_audit(
     l_id = low_sheet_id or LOW_SHEET_ID
 
     print("  [reverse_audit] Step 1: eBay active listing 全件取得...", flush=True)
-    qty_map = _fetch_ebay_qty_map()
+    if qty_map is None:
+        qty_map = _fetch_ebay_qty_map()
     print(f"  [reverse_audit] eBay active: {len(qty_map)} 件 ({time.time()-t0:.0f}s)", flush=True)
 
     print("  [reverse_audit] Step 2: HIGH/LOW スプシ D 列読込...", flush=True)
@@ -200,11 +202,212 @@ def run_reverse_audit(
     return result
 
 
+# ============================================================================
+# 逆方向 #2 (2026-06-10 user 指示): eBay qty=0/ended だが sheet 未売切 (D 空欄)
+#   → 「在庫あり・eBay取下げ済」 レビュー用シートに書き出す。
+#   背景: eBay が勝手に取下げ / ユーザー手動取下げ で eBay は qty=0 or ended だが
+#         スプシ D 列は未更新 (= まだ active 扱い) のものを、 人手レビュー用に列挙。
+#   方向: reverse_audit (D=○ + qty>0) の鏡像 (D 空欄 + qty=0/不在)。
+#   安全弁: active map が空 = eBay 取得失敗 → fail-closed (全件を誤って ended 扱いしない)。
+#   D 列は触らない (= 自動売切化しない、 user 指示で 「書き出すだけ」)。
+# ============================================================================
+ORPHAN_SHEET_TITLE = "在庫あり・eBay取下げ済"
+ORPHAN_HEADER = ["itemID", "eBay URL", "仕入元URL", "タイトル",
+                 "eBay状態", "sheet", "row", "検出日時"]
+
+
+def _get_or_create_worksheet(sh, title: str):
+    """worksheet を取得、 無ければ作成 (gspread)."""
+    try:
+        return sh.worksheet(title)
+    except Exception:  # gspread.WorksheetNotFound 等
+        return sh.add_worksheet(title=title, rows=200, cols=len(ORPHAN_HEADER))
+
+
+def _write_orphan_sheet(sh, label: str, items: list, ts_str: str) -> int:
+    """label (HIGH/LOW) の orphan items を当該 spreadsheet の review tab に上書き."""
+    ws = _get_or_create_worksheet(sh, ORPHAN_SHEET_TITLE)
+    data = [ORPHAN_HEADER]
+    for it in items:
+        ebay_url = f"https://www.ebay.com/itm/{it['item_id']}" if it["item_id"] else ""
+        data.append([
+            it["item_id"], ebay_url, it.get("url", ""), it.get("title", ""),
+            it["ebay_state"], it["sheet"], it["row_index"], ts_str,
+        ])
+    ws.clear()
+    last_col = chr(ord("A") + len(ORPHAN_HEADER) - 1)
+    ws.batch_update(
+        [{"range": f"A1:{last_col}{len(data)}", "values": data}],
+        value_input_option="USER_ENTERED",
+    )
+    return len(items)
+
+
+def run_ebay_down_sheet_active_audit(
+    high_sheet_id: Optional[str] = None,
+    low_sheet_id: Optional[str] = None,
+    write_sheet: bool = True,
+    write_log: bool = True,
+    qty_map: Optional[dict] = None,
+) -> dict:
+    """eBay qty=0/ended × sheet D 空欄 (未売切) を検出 → review シート出力.
+
+    Returns: {
+        "ts", "orphan_count", "by_sheet", "by_state" (qty0 / ended),
+        "active_total", "coverage" (D空欄 item の active map ヒット率),
+        "items": [...], "elapsed_sec", "log_path", "error" (任意),
+    }
+    """
+    t0 = time.time()
+    h_id = high_sheet_id or HIGH_SHEET_ID
+    l_id = low_sheet_id or LOW_SHEET_ID
+
+    print("  [ebay_down_audit] Step 1: eBay active listing 全件取得...", flush=True)
+    if qty_map is None:
+        qty_map = _fetch_ebay_qty_map()
+    print(f"  [ebay_down_audit] eBay active: {len(qty_map)} 件 ({time.time()-t0:.0f}s)", flush=True)
+
+    # 安全弁: active map が空 = eBay 取得失敗。 全 sheet 行を 「ended」 と誤判定して
+    # review シートを汚染するのを防ぐ → fail-closed で中断。
+    if not qty_map:
+        print("  [!] [ebay_down_audit] active map 空 = eBay 取得失敗、 fail-closed 中断", flush=True)
+        return {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "orphan_count": -1,
+            "error": "ebay_active_map_empty",
+            "elapsed_sec": time.time() - t0,
+            "log_path": None,
+        }
+
+    print("  [ebay_down_audit] Step 2: HIGH/LOW スプシ読込...", flush=True)
+    sheets = {}
+    all_rows = []
+    for label, sid in [("HIGH", h_id), ("LOW", l_id)]:
+        try:
+            sh = open_sheet_by_id(sid)
+            ws = get_listings_worksheet(sh)
+            rows = read_listings_rows(ws, only_with_url=False)
+            sheets[label] = sh
+            for r in rows:
+                all_rows.append({"sheet": label, **r})
+            print(f"  [ebay_down_audit] {label}: {len(rows)} 行", flush=True)
+        except Exception as e:
+            print(f"  [!] [ebay_down_audit] {label} 読込失敗: {type(e).__name__}: {e}", flush=True)
+            return {
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "orphan_count": -1,
+                "error": f"sheet_read_failed: {label} {type(e).__name__}",
+                "elapsed_sec": time.time() - t0,
+                "log_path": None,
+            }
+
+    print("  [ebay_down_audit] Step 3: 検出 (D空欄 + eBay qty=0/不在)...", flush=True)
+    items = []
+    d_empty_with_id = 0
+    found_in_active = 0
+    for r in all_rows:
+        iid = (r.get("item_id") or "").strip()
+        d_col = (r.get("current_sold") or "").strip()
+        if not iid:
+            continue            # item_id 空欄 = 未出品 (Req1)、 対象外
+        if d_col in SOLD_MARKERS:
+            continue            # 既に売切マーク済 = 対象外 (reverse_audit が別途扱う)
+        d_empty_with_id += 1
+        qty = qty_map.get(iid)
+        if qty is None:
+            ebay_state = "ended/未active(要確認)"   # active 一覧に不在 = 終了/削除
+        elif qty == 0:
+            found_in_active += 1
+            ebay_state = "qty=0"
+        else:
+            found_in_active += 1
+            continue            # qty>0 = eBay も active = 正常 (= orphan でない)
+        items.append({
+            "sheet":      r["sheet"],
+            "row_index":  r.get("row_index", -1),
+            "item_id":    iid,
+            "ebay_state": ebay_state,
+            "supplier":   _detect_supplier(r.get("url", "")),
+            "url":        r.get("url", "")[:200],
+            "title":      (r.get("title") or "")[:80],
+        })
+
+    from collections import Counter  # noqa: PLC0415
+    coverage = round(found_in_active / d_empty_with_id, 3) if d_empty_with_id else None
+    result = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "orphan_count": len(items),
+        "by_sheet":    dict(Counter(it["sheet"] for it in items)),
+        "by_state":    dict(Counter(it["ebay_state"] for it in items)),
+        "active_total": len(qty_map),
+        "coverage":    coverage,
+        "items":       items,
+        "elapsed_sec": time.time() - t0,
+        "log_path":    None,
+        "sheet_writes": {},
+    }
+
+    # review シート書込 (= HIGH/LOW それぞれの spreadsheet 内 tab に上書き)
+    if write_sheet:
+        ts_str = result["ts"]
+        for label, sh in sheets.items():
+            label_items = [it for it in items if it["sheet"] == label]
+            try:
+                n = _write_orphan_sheet(sh, label, label_items, ts_str)
+                result["sheet_writes"][label] = n
+                print(f"  [ebay_down_audit] {label} review シート書込: {n} 件", flush=True)
+            except Exception as e:
+                print(f"  [!] [ebay_down_audit] {label} シート書込失敗: {type(e).__name__}: {e}", flush=True)
+                result["sheet_writes"][label] = f"write_failed: {type(e).__name__}"
+
+    # jsonl log (機械可読 + 履歴)
+    if write_log:
+        DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = DECISION_LOG_DIR / f"ebay_down_audit_{ts}.jsonl"
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "kind": "summary", "ts": result["ts"],
+                "orphan_count": result["orphan_count"],
+                "by_sheet": result["by_sheet"], "by_state": result["by_state"],
+                "active_total": result["active_total"], "coverage": coverage,
+                "elapsed_sec": result["elapsed_sec"],
+            }, ensure_ascii=False) + "\n")
+            for it in items:
+                f.write(json.dumps({"kind": "orphan", **it}, ensure_ascii=False) + "\n")
+        result["log_path"] = str(log_path)
+
+    print(f"  [ebay_down_audit] orphan: {result['orphan_count']} 件 "
+          f"sheet 別 {result['by_sheet']} state 別 {result['by_state']} "
+          f"(active {result['active_total']} 件, coverage {coverage})", flush=True)
+    return result
+
+
 if __name__ == "__main__":
-    res = run_reverse_audit()
-    print(f"\n=== reverse_audit 結果 ===")
-    print(f"  乖離: {res['mismatch_count']} 件")
-    print(f"  by_sheet: {res['by_sheet']}")
-    print(f"  by_supplier: {res['by_supplier']}")
-    print(f"  log: {res.get('log_path')}")
-    print(f"  elapsed: {res.get('elapsed_sec', 0):.1f}s")
+    import argparse
+    ap = argparse.ArgumentParser(description="reverse_audit / ebay_down_audit")
+    ap.add_argument("--mode", choices=["reverse", "ebay_down"], default="reverse",
+                    help="reverse = D=○+qty>0 (取下げ漏れ) / ebay_down = D空欄+qty=0/ended")
+    ap.add_argument("--no-sheet-write", action="store_true",
+                    help="ebay_down mode で review シート書込を skip (dry)")
+    args = ap.parse_args()
+
+    if args.mode == "ebay_down":
+        res = run_ebay_down_sheet_active_audit(write_sheet=not args.no_sheet_write)
+        print(f"\n=== ebay_down_audit 結果 ===")
+        print(f"  orphan (D空欄+eBay取下げ済): {res.get('orphan_count')} 件")
+        print(f"  by_sheet: {res.get('by_sheet')}")
+        print(f"  by_state: {res.get('by_state')}")
+        print(f"  active_total: {res.get('active_total')} / coverage: {res.get('coverage')}")
+        print(f"  sheet_writes: {res.get('sheet_writes')}")
+        print(f"  log: {res.get('log_path')}")
+        if res.get("error"):
+            print(f"  [!] error: {res['error']}")
+    else:
+        res = run_reverse_audit()
+        print(f"\n=== reverse_audit 結果 ===")
+        print(f"  乖離: {res['mismatch_count']} 件")
+        print(f"  by_sheet: {res['by_sheet']}")
+        print(f"  by_supplier: {res['by_supplier']}")
+        print(f"  log: {res.get('log_path')}")
+        print(f"  elapsed: {res.get('elapsed_sec', 0):.1f}s")

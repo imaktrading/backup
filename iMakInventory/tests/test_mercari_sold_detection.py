@@ -36,8 +36,13 @@ def _detect_from_html(html: str) -> tuple[str, str]:
     """HTML 文字列から在庫状態を判定. Selenium ロジックと同じ判定軸。
 
     Returns: (verdict, reason)
-      verdict: "IN_STOCK" / "SOLD" / "real_err"
+      verdict: "IN_STOCK" / "SOLD" / "AUCTION" / "real_err"
     """
+    # オークション化検知 (2026-06-10): 通常出品のみ仕入対象。 auction listing は
+    # checkout-button-container 不在 + bid-button 存在 → 取下げ対象 (in_stock=False)。
+    # 旧 logic では container 不在 = real_err に倒れ取下げされず fail-OPEN だった。
+    if 'data-testid="bid-button"' in html:
+        return "AUCTION", "bid-button (auction listing, 仕入不可→取下げ)"
     if 'data-testid="checkout-button-container"' not in html:
         return "real_err", "checkout-button-container not found"
 
@@ -123,6 +128,40 @@ def test_offline_html_sold(samples_available, item_id):
 
 
 # ============================================================================
+# オークション化検知 (2026-06-10 制定): 通常出品 → auction 変更は取下げ対象
+# ============================================================================
+@pytest.mark.offline
+def test_offline_auction_is_takedown():
+    """auction listing (bid-button 存在 / container 不在) → AUCTION 判定."""
+    html = (
+        '<div><h1>商品名</h1>'
+        '<button data-testid="bid-button">入札する</button>'
+        '<div data-testid="price">¥12,000</div></div>'
+    )
+    verdict, reason = _detect_from_html(html)
+    assert verdict == "AUCTION", f"got {verdict} ({reason})"
+
+
+@pytest.mark.offline
+def test_offline_normal_not_misdetected_as_auction():
+    """通常出品 (checkout-button-container + purchase) は IN_STOCK のまま誤検知しない."""
+    html = (
+        '<div data-testid="checkout-button-container">'
+        '<div data-testid="checkout-button" name="purchase">購入手続きへ</div></div>'
+    )
+    verdict, reason = _detect_from_html(html)
+    assert verdict == "IN_STOCK", f"got {verdict} ({reason})"
+
+
+# Live: Takaaki さん目視確認の auction 化検体 (2026-06-10、 LOW/HIGH r468/r470)。
+# auction 終了で page が変わるため期限付き regression (KNOWN_SOLD_URLS と同性質)。
+KNOWN_AUCTION_URLS = [
+    ("r468", "https://jp.mercari.com/item/m18442750029"),
+    ("r470", "https://jp.mercari.com/item/m69534401329"),
+]
+
+
+# ============================================================================
 # Live tests (pytest -m live、ネット必須、時間がかかる)
 # ============================================================================
 @pytest.mark.live
@@ -134,6 +173,19 @@ def test_live_known_sold_urls(label, url):
     assert info is not None, f"{label}: scraper returned None"
     assert info["skus"][0]["in_stock"] is False, (
         f"{label}: false negative (scraper says in_stock=True for known-sold URL)"
+    )
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("label,url", KNOWN_AUCTION_URLS)
+def test_live_auction_is_takedown(label, url):
+    """Live: auction 化 listing が status=AUCTION / in_stock=False (= 取下げ対象) か."""
+    from scrapers.mercari_scraper import fetch_product_inventory  # noqa: PLC0415
+    info = fetch_product_inventory(url, use_selenium_fallback=True)
+    assert info is not None, f"{label}: scraper returned None (auction 未検知 = fail-OPEN)"
+    assert info["status"] == "AUCTION", f"{label}: got status={info['status']}"
+    assert info["skus"][0]["in_stock"] is False, (
+        f"{label}: auction なのに in_stock=True (取下げされない = fail-OPEN)"
     )
 
 

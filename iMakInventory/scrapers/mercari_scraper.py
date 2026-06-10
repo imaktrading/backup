@@ -352,6 +352,28 @@ def _detect_via_selenium(driver, url: str, is_shops: bool) -> Optional[dict]:
         deleted = False
         end_at = time.time() + SELENIUM_WAIT_SEC
         while time.time() < end_at:
+            # === オークション化検知 (2026-06-10 制定) ===
+            # メルカリは「通常出品」のみ仕入対象。 セラーが途中で listing を
+            # オークションに変更した場合、 仕入不可 (= 通常出品でない) → 取下げ対象。
+            # auction page は checkout-button-container 不在のため、 旧 logic では
+            # 30s timeout → None (= fail-OPEN: 取下げされず qty>0 維持 → BAN risk)。
+            # signal: [data-testid="bid-button"] (実検体 m18442750029 / m69534401329
+            # で確認、 通常出品には bid-button 不在)。 → in_stock=False で取下げに流す。
+            try:
+                driver.find_element(By.CSS_SELECTOR, '[data-testid="bid-button"]')
+                a_name = ""
+                for tid in name_testid_candidates:
+                    try:
+                        a_name = (driver.find_element(
+                            By.CSS_SELECTOR, f'[data-testid="{tid}"]').text or "").strip()
+                        if a_name:
+                            break
+                    except Exception:
+                        continue
+                return {"name": a_name, "status": "AUCTION",
+                        "in_stock": False, "price_jpy": None}
+            except NoSuchElementException:
+                pass
             try:
                 driver.find_element(By.CSS_SELECTOR, '[data-testid="checkout-button-container"]')
                 container_found = True
