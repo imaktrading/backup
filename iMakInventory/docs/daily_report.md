@@ -464,3 +464,80 @@ Selenium FileExchange UI から Trading API direct に統一。
 - **discarded_revise.jsonl size 監視**: 蓄積 file なので backup_inventory.ps1 の
   rotation 対象に含めるか検討 (= 緊急度低、 当面 167 件で size 微小)
 
+---
+
+## 2026-06-10 — sliver loss 根絶 Phase 1 (HQ FINAL 確定指示 A/B/C 実装)
+
+### 決定
+
+- 過去 5 週間に 156 件規模の silent sliver loss が発生していた事実発覚
+  (= ユーザーが 358596670518 を指摘 → reverse_audit で 11 件発見 + 全件 qty=0 化救済)
+- 真因 = (i) 旧 Selenium FileExchange UI 経路の脆性 (6/3 commit 8711aa3 で Trading API 化済)
+  + (ii) drain-before-upload bug (6/6 commit 5716879 で drain 後置化済)
+  + (iii) **私の 6/9 commit b4c238d の prune_discarded_entries が sheet D=空 だけで** archive
+  → 6/10 09:30 で sheet 書込 DNS fail 由来の偽 D=空 で 2 件 silent drop 発生
+- HQ FINAL 設計指示 (= `_FINAL_design_directive`) 確定:
+  - 「取り下げるべきもの」 はそのサイクル内で eBay qty=0 を確認するまで閉じる
+  - 「除外」 を silent でなく「未取下げ=要対応」 として明示
+  - 「正常」 は全件 qty=0 確認できた時のみ
+
+### 変更
+
+- `ebay_actions/revise_csv_generator.py:263` `prune_discarded_entries` を fail-CLOSED 改修
+  - sheet D=空 だけでは discard しない、 **eBay GetItem qty=0 確認後にのみ** discard
+  - eBay qty>0 残存 entry は pending 残置 + **再 include 候補に格上げ** (= sheet 状態誤と判定、 silent loss を逆に救済)
+  - GetItem 失敗時は保守的に pending 残置
+  - return 値: `int` → `{"discarded": N, "kept_qty_gt0": M, "reincluded": [..]}`
+- `ebay_actions/revise_csv_generator.py:619` 付近 `run()` で reincluded 候補を CSV 対象に追加
+- `ebay_actions/trading_api_uploader.py:96` `INCYCLE_RETRY_INTERVALS_SEC = [5.0, 15.0, 45.0]`
+  module-level 追加
+- `ebay_actions/trading_api_uploader.py:170` `_verify_qty_zero(item)` 関数追加
+  (= revise 後 GetItem で qty=0 確認、 err 17 は qty=0 同等扱い)
+- `ebay_actions/trading_api_uploader.py:175` 付近 in-cycle short retry loop 実装
+  (revise → verify → NG なら 5s/15s/45s で再 revise + 再 verify、 最大 4 試行 = 65s 上限)
+- 失敗時 entry に `verified` / `verify_qty` / `verify_msg` / `verify_attempts` field 追加
+- `monitor_listings.py:304` `ACTION_REQUIRED_FILE` + `append_action_required` 追加
+  (HQ 原則 B、 silent 除外禁止)
+- `monitor_listings.py:533` 付近 newly_sold + item_id 空欄 → silent 除外せず action_required 化
+- `run_cycle.py:50` `drain_pending_queue` import 修正
+- `run_cycle.py:610` 付近 upload 完了後 verify-failed item を action_required.jsonl に記録
+- `run_cycle.py:689` 付近 cycle 末尾で action_required の cycle 内集計 →
+  `cycle_log["phases"]["action_required_summary"]` 格納
+- `email_notifier.py:204` 付近 メール冒頭 1 行に
+  `取下げ: 売切検知 N → 完了 X / 未取下げ Y` + `結果: ⚠️ 要対応 (取下げ漏れ Y件)` or
+  `結果: ✅ 全件取下げ完了` (= HQ 原則 C)
+- 旧 cycle_log 形式との後方互換性確保 (= action_required_summary 未投入時は status_jp fallback)
+- `tests/test_run_cycle.py` 既存 test 1 件改修 (`test_prune_discarded_entries_requires_ebay_qty_zero`)
+  + 新規 2 件追加 (`test_email_header_shows_untaken_count_when_action_required` /
+  `test_in_cycle_verify_blocks_silent_success`)
+- HQ 依頼書 2 本 `_processed` リネーム + iMakRevise feasibility 依頼書投入
+  (`c:/dev/iMak_data/revise/requests/2026-06-10_price_revise_sliver_loss_feasibility.md`)
+
+### 検証
+
+- ✅ 全 185 tests pass (新規 2 件 + 既存改修 1 件含む、 live scraper test 除く)
+- ✅ Email format 模擬 cycle_log で動作確認:
+  - 要対応 2 件 → `売切検知 4 → 完了 2 / 未取下げ 2` + `⚠️ 要対応 (取下げ漏れ 2 件)` ヘッダ
+  - 全件完了 → `売切検知 3 → 完了 3 / 未取下げ 0` + `✅ 全件取下げ完了` ヘッダ
+- ✅ Regression test `test_in_cycle_verify_blocks_silent_success`:
+  revise が Ack=Success でも GetItem qty=5 なら success=False / verified=False / verify_attempts>=3
+- ✅ Regression test `test_prune_discarded_entries_requires_ebay_qty_zero`:
+  qty=0 → discard / qty>0 → 再 include / API 失敗 → 保守的に保持 / filter skip → 触らない
+- ✅ Reverse audit 6/10 実行で発見した 11 件全件 qty=0 化済 (= 156 件型の事後収束)
+- ✅ HQ 信頼回復 5 点 のうち 1 (失敗注入回帰テスト) 完了
+
+### 残課題 (= Phase 2 候補)
+
+- 案 B 自動 re-enqueue (= 定期 reverse_audit を cycle phase に組込) — Phase 1 効果観察後
+- Bulk Change Circuit Breaker (newly_sold 率異常検知) — commit d23ad99 既存実装の調査先行
+- グローバル CLAUDE.md 原則追記 (「1 回失敗 = 永久放置 禁止」) — HQ 側で別セッション
+- DLQ resurrection CLI (`cli.py resurrect-dlq <iid>`) — action_required.jsonl からの戻し経路
+- 公式監視くん audit_and_heal の reconciliation 網羅性 再監査 (HQ 横断指示)
+- iMakRevise feasibility 回答待ち (= 価格 revise の sliver loss 有無)
+
+### 次のアクション
+
+- 次 cycle (= 13:30 SHEET 単一 cycle) で新 logic 実走、 ログ + メール冒頭 1 行を実機確認
+- 明日 09:30 `--sheet both` cycle で 6/10 同型 (= sheet 書込 fail 発生時) の動作確認
+- iMakRevise 回答 / Phase 2 着手判断は 1-2 週間運用後
+
