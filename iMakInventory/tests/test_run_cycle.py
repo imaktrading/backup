@@ -279,6 +279,8 @@ def test_email_header_shows_untaken_count_when_action_required(tmp_path, monkeyp
     assert "verify_qty_gt0_giveup" in body
     # 旧 bug の「正常」 表記が出ないことを確認
     assert "正常 (取下げ実施)" not in body
+    # 仕入元在庫監視 errors=0 → ✅ 正常 (= 「漏れ 0 最優先」 原則: 1 件 error でも ⚠️)
+    assert "✅ 正常 (913 件全件 scrape 成功)" in body
 
     # case 2: 全件完了 (= 売切検知あり、 全 success)
     cycle_log_ok = {
@@ -300,6 +302,25 @@ def test_email_header_shows_untaken_count_when_action_required(tmp_path, monkeyp
     body_ok = _format_body(cycle_log_ok)
     assert "仕入元在庫監視 : ✅ 正常" in body_ok
     assert "eBay 在庫調整  : ✅ 全件取下げ完了 (売切検知 3 → 完了 3)" in body_ok
+
+    # case 3: 通信エラー 1 件あり → ⚠️ (= 漏れ 0 最優先原則、 「N% 以内 ✅」 思想禁止)
+    cycle_log_1err = {
+        "status": "success",
+        "ts_start": "2026-06-10T13:30:00",
+        "ts_end":   "2026-06-10T13:58:00",
+        "phases": {
+            "monitor": {"newly_sold": 0, "newly_in_stock": 0,
+                         "processed": 913, "errors": 1},
+            "revise_csv": {"skipped": "no newly_sold"},
+            "upload": {"skipped": "no csv"},
+            "action_required_summary": {"count": 0, "items": []},
+        },
+    }
+    body_1err = _format_body(cycle_log_1err)
+    assert "⚠️ 要対応 (913 件中 通信エラー 1 件" in body_1err
+    assert "在庫状況不明" in body_1err
+    # 旧 thresh ロジック (= 10% 以下 ✅) が消えていること
+    assert "✅ 正常 (913 件 scrape" not in body_1err
     assert "⚠️ 要対応" not in body_ok
 
 

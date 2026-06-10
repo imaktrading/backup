@@ -236,29 +236,33 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
 
     # ★最重要 2 行: 2 系統 (= 仕入元在庫監視 / eBay 在庫調整) の冒頭ステータス
     # (= 「うまくいったか」 を一目で判定可能、 ユーザー要件 2026-06-10)
+    #
+    # 判定方針 (ユーザー指示 2026-06-10、 = 漏れ 0 最優先原則):
+    # 「100% でなければ異常」。 1 件でも不確実 = 売れたら履行不能 = BAN risk。
+    # 「N% 以内なら正常」 は漏れ容認思想で禁止。
+    #   ✅: 完全成功 (= errors=0 / untaken=0 / 100%)
+    #   ⚠️: 1 件でも error / 未対応 (= 即対応要)
+    #   ❌: 系統的異常 (= scrape phase 全断 / step 失敗 / 急増ガード発火 = 大量誤判定疑い)
     if has_action_summary:
-        # 仕入元在庫監視ステータス: scrape 通信エラー率 + 急増ガード発火状況で判定
+        # 仕入元在庫監視ステータス
         processed = (mon.get("processed", 0) or 0) if mon else 0
         errors = (mon.get("errors", 0) or 0) if mon else 0
-        err_rate = (errors / processed) if processed else 0
-        # 急増ガード発火 (newly_sold_burst) = scraper 系異常疑い
         reasons_set = {it.get("reason", "") for it in (ar.get("items") or [])}
         scraper_burst = "newly_sold_burst_guard_holdout" in reasons_set
-        # sheet 書込系異常 (reinclude_burst) = monitoring 経路の上流脆性
         sheet_write_anomaly = "reinclude_burst_guard_holdout" in reasons_set
         if scraper_burst:
             scrape_status = f"❌ 異常 (scraper 系急増ガード発火、 偽 OOS or 本物大量売切の判別要)"
         elif sheet_write_anomaly:
             scrape_status = f"❌ 異常 (スプシ書込系の系統的失敗疑い、 監視結果の反映不完全)"
-        elif err_rate >= 0.5:
-            scrape_status = f"❌ 異常 ({processed} 件中 通信エラー {errors} 件 = {err_rate*100:.0f}%、 scraper / anti-bot 要確認)"
-        elif err_rate >= 0.1:
-            scrape_status = f"⚠️ 要確認 ({processed} 件中 通信エラー {errors} 件 = {err_rate*100:.0f}%、 傾向監視)"
+        elif errors == 0:
+            scrape_status = f"✅ 正常 ({processed} 件全件 scrape 成功)"
         else:
-            scrape_status = f"✅ 正常 ({processed} 件 scrape、 通信エラー {errors} 件)"
+            # 1 件でも error あれば ⚠️ (= その行の在庫状況不明 → 売れたら履行不能 risk)
+            err_rate = (errors / processed) if processed else 0
+            scrape_status = f"⚠️ 要対応 ({processed} 件中 通信エラー {errors} 件 ({err_rate*100:.1f}%) — 該当 row の在庫状況不明、 次 cycle で再試行)"
         lines.append(f"仕入元在庫監視 : {scrape_status}")
 
-        # eBay 在庫調整ステータス: 売切検知 → 完了 / 未取下げ
+        # eBay 在庫調整ステータス
         if newly_sold == 0 and action_count == 0:
             lines.append(f"eBay 在庫調整  : ✅ 対象なし (= 新規売切検知 0 件)")
         elif action_count > 0:

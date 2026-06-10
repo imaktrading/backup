@@ -134,26 +134,30 @@ def _format_report(start: datetime, end: datetime,
     total_processed = (zero["variation_executed"] + zero["single_executed"]
                        + restore["variation_executed"] + restore["single_executed"])
 
-    # 仕入元在庫監視ステータス (= scrape error 率 / step 失敗 判定)
+    # 判定方針 (ユーザー指示 2026-06-10、 = 漏れ 0 最優先原則):
+    # 「100% でなければ異常」。 1 件でも不確実 = 売れたら履行不能 = BAN risk。
+    # 「N% 以内なら正常」 は漏れ容認思想で禁止。
+    #   ✅: 完全成功 (= errors=0 / ng=0 / 100%)
+    #   ⚠️: 1 件でも error / ng (= 即対応要)
+    #   ❌: 系統的異常 (= step 失敗 = 動作不能)
+
+    # 仕入元在庫監視ステータス
     listings_count = monitor.get("listings", 0) or 0
     scrape_errors = monitor.get("errors", 0) or 0
-    err_rate = (scrape_errors / listings_count) if listings_count else 0
-    # step_results の中で scrape 系 step (= monitor) が NG なら異常
     scrape_step_failed = any(not ok for name, ok in step_results if "monitor" in name.lower())
     if scrape_step_failed:
         scrape_status = "❌ 異常 (monitor step 失敗、 scrape phase 自体が動作不能)"
-    elif err_rate >= 0.5:
-        scrape_status = f"❌ 異常 ({listings_count} listing 中 scrape error {scrape_errors} 件 = {err_rate*100:.0f}%、 公式サイト構造変更 or anti-bot 要確認)"
-    elif err_rate >= 0.1:
-        scrape_status = f"⚠️ 要確認 ({listings_count} listing 中 scrape error {scrape_errors} 件 = {err_rate*100:.0f}%、 傾向監視)"
+    elif scrape_errors == 0:
+        scrape_status = f"✅ 正常 ({listings_count} listing 全件 scrape 成功)"
     else:
-        scrape_status = f"✅ 正常 ({listings_count} listing scrape、 error {scrape_errors} 件)"
+        # 1 件でも error あれば ⚠️ (= その listing の variation 在庫状況不明 → 売れたら履行不能 risk)
+        err_rate = (scrape_errors / listings_count) if listings_count else 0
+        scrape_status = f"⚠️ 要対応 ({listings_count} listing 中 scrape error {scrape_errors} 件 ({err_rate*100:.1f}%) — 該当 listing の variation 在庫状況不明)"
 
-    # eBay 在庫調整ステータス (= variation/listing の qty=0/qty=1 revise 結果)
+    # eBay 在庫調整ステータス
     zero_ng = zero.get("ng", 0) or 0
     restore_ng = restore.get("ng", 0) or 0
     total_ng = zero_ng + restore_ng
-    # revise 系 step (= zero / restore phase) の失敗
     revise_step_failed = any(not ok for name, ok in step_results
                               if "qty_zero" in name.lower() or "restore" in name.lower()
                               or "audit" in name.lower())
@@ -162,7 +166,7 @@ def _format_report(start: datetime, end: datetime,
     elif total_processed == 0:
         ebay_status = "✅ 対象なし (= qty 変更要なし)"
     elif total_ng > 0:
-        ebay_status = f"⚠️ 要対応 (処理 {total_processed} 件 / 失敗 {total_ng} 件 — variation ng={zero_ng + restore_ng})"
+        ebay_status = f"⚠️ 要対応 (処理 {total_processed} 件 / 失敗 {total_ng} 件 — variation ng={zero_ng + restore_ng}、 1 件でも 漏れたら BAN risk)"
     else:
         ebay_status = f"✅ 全件 qty 変更完了 (処理 {total_processed} 件、 zero {zero['variation_executed']+zero['single_executed']} + restore {restore['variation_executed']+restore['single_executed']})"
 
