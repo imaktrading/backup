@@ -541,3 +541,69 @@ Selenium FileExchange UI から Trading API direct に統一。
 - 明日 09:30 `--sheet both` cycle で 6/10 同型 (= sheet 書込 fail 発生時) の動作確認
 - iMakRevise 回答 / Phase 2 着手判断は 1-2 週間運用後
 
+---
+
+## 2026-06-10 (続き) — Phase 1.5: 急増ガード + reverse_audit + HQ 3 条件反映
+
+### 決定
+
+HQ confirm 指示 (= `requests/2026-06-10_phase1_review_burstguard_and_reconciliation_deadline_processed.md`)
+の 3 条件を反映して Phase 1.5 着手:
+- **条件 A**: 急増ガード閾値 「20 件」 を盲決めせず実機データで校正、 env var で configurable 化
+- **条件 B**: reverse_audit 「6/12 乖離 0 件」 を成功条件にせず、 初回乖離鳥瞰を 「audit 動作の証拠」 と
+  位置付け。 0 件目標は隠ぺい圧力 = fail-OPEN 再発リスク
+- **条件 C**: auto-fix defer 中も検知→alert→人手 loop を回す、 手動 SLA 明記
+
+### 変更
+
+1. **急増ガード (`revise_csv_generator.py:99`)**:
+   - `DEFAULT_REINCLUDE_BURST_THRESHOLD = int(os.environ.get("INVENTORY_REINCLUDE_BURST_THRESHOLD", "10"))`
+   - 実機 校正データ: 通常 cycle 0-2 件 / 6/10 09:30 sheet 書込 fail 2 件 / 6/9 sweep 167 件 (= 一回限り)
+   - デフォルト 10 件 = 通常の 5 倍マージン
+2. **HOLD 経路 (`revise_csv_generator.py:644`)**:
+   - reinclude > 閾値 → 全件 HOLD + `action_required.jsonl` に reason=`reinclude_burst_guard_holdout` で記録
+   - silent化禁止 = HQ A 条件遵守
+3. **reverse_audit (`reverse_audit.py` 新規)**:
+   - `run_reverse_audit()`: HIGH/LOW sheet D=○ vs eBay GetSellerList qty>0 突合
+   - read-only 検知 + `decision_log/reverse_audit_<ts>.jsonl` 機械可読 log 出力
+   - sheet 読込失敗時は fail-CLOSED 中断 (= 「乖離 0 件」 と誤読される partial result を出さない)
+4. **cycle 統合 (`run_cycle.py:686`)**:
+   - Phase 5 として組込、 `--sheet both` cycle のみ実行 (= 4h 単一 cycle は API quota 考慮で skip)
+5. **email 文言 (`email_notifier.py`)**:
+   - reconciliation セクション追加: 乖離 > 0 → 「初回 = 既存乖離鳥瞰、 audit 機能の証拠 / 当日内に件数を減らす目標は不要、 人手で順次潰す」
+   - 乖離 = 0 → 「✅ 乖離 0 件 (継続証跡を 1 件積上げ)」
+   - action_required ブロックに対応期限明記: 通常 `4 時間以内` / 急増ガード発火時 `即時`
+6. **regression test (`tests/test_run_cycle.py`)**:
+   - `test_burst_guard_holds_mass_reinclude_to_action_required`: 閾値超で全件 HOLD + action_required 記録
+   - `test_reverse_audit_email_uses_hq_b_wording`: 「0 件目標」 文言禁止 + audit 機能の証拠表現確認
+
+### 検証
+
+- ✅ 全 187 tests pass (新規 2 件 + 既存全件)
+- ✅ 急増ガード閾値が env var INVENTORY_REINCLUDE_BURST_THRESHOLD で override 可能
+- ✅ HOLD entry が action_required.jsonl に記録される (= silent 化禁止条件遵守)
+- ✅ reverse_audit logic は sheet 読込失敗時 fail-CLOSED 中断 (= 「乖離 0」 と誤判定しない)
+- ✅ メール本文に対応期限明記 (HQ C 手動 SLA)
+
+### 信頼回復 5 点 進捗
+
+| # | 項目 | 状態 |
+|---|---|---|
+| 1 | 失敗注入回帰テスト | ✅ 完了 (commit 300dc8f + 本 commit で計 5 件) |
+| 2 | アラート実送テスト | ❌ 未実施 (6/11 中に手動発火実証予定) |
+| 3 | reverse_audit 継続乖離なしレポート | 🟡 phase 実装完了、 6/12 09:30 初回出力 (= 初回は既存乖離が出る前提) |
+| 4 | 156 件 qty=0 化証跡保全 | ✅ 完了 (6/10 sweep + reverse_audit xlsx 保全) |
+| 5 | 「動く証拠で示す」 | 🟡 #2/#3 で達成見込 (6/12 完了予定) |
+
+### 次のアクション
+
+- 13:30 SHEET 単一 cycle で Phase 1 logic 実走確認 (= ログ + メール冒頭 1 行)
+- 17:30 / 21:30 / 6/11 01:30 / 05:30 順次確認
+- **6/11 09:30 `--sheet both` cycle で reverse_audit phase 初回実走**
+  - 既存乖離 (= 5 週間分の積残 + 6/10 sweep で qty=0 化済の 11 件 + ユーザー手動 fix 済 145 件相当) が
+    出る想定、 HQ B 条件通り 「audit 動作の証拠」 として表示される
+- **6/12 09:30 cycle で 「継続乖離なし」 の初回証跡記録** (人手で 6/11 中に既存乖離を潰した前提)
+- 信頼回復 #2 (アラート実送テスト) を 6/11 中に並行実施
+- iMakRevise feasibility 回答待ち
+- Phase 2 (auto-re-enqueue / Bulk Change Circuit Breaker / DLQ resurrect CLI) は 1-2 週運用観察後判断
+
