@@ -100,10 +100,29 @@ DEFAULT_MAX_PER_RUN = 100  # 1回 (4時間サイクル) の上限
 # 1 cycle で reinclude (= prune が「eBay qty>0」 判定で CSV 再投入する entry) 件数が
 # 閾値を超えたら全件保留 + critical alert (= sheet 書込系の系統的異常を前兆検出)。
 # env var INVENTORY_REINCLUDE_BURST_THRESHOLD で override 可。
-# 実機データ校正 (= 通常 cycle 0-2 件 / 6/10 09:30 sheet 書込 fail 2 件 / 6/9 sweep 167 件)
-# から 通常の 5 倍マージン = 10 件 をデフォルト。
+#
+# 実機 reinclude 分布 (commit 300dc8f 以降の計測): 過去全て 0 件
+#   (= 6/9 sweep 167 件は全件 qty=0 → reinclude 0、 6/10 09:30 2 件も qty=0 化済 → reinclude 0)
+# 閾値 10 件は実機分布 0 件 + transient/レース由来 false positive 用 conservative マージン。
 DEFAULT_REINCLUDE_BURST_THRESHOLD = int(
     os.environ.get("INVENTORY_REINCLUDE_BURST_THRESHOLD", "10")
+)
+
+# HQ 2026-06-10 Phase 1.6 取下げ側急増ガード (= 6/3 偽 OOS 95 件型対策):
+# 1 cycle の newly_sold 起因 candidates (= 取下げ送信対象) が閾値を超えたら全件 HOLD。
+# scraper 系異常 (= 偽 OOS 大量発生) を早期検出、 per_run_cap=100 で素通る 30-99 件帯を守る。
+#
+# 実機 newly_sold 分布 (= 189 cycle 集計、 commit 直前):
+#   中央 2 件 / 平均 4.4 件 / 90 %tile 6 件 / 95 %tile 10 件 / 通常 max 21 件
+#   偽 OOS incident: 152 件 (6/2) / 50 件 (6/2) / 95 件 (6/3 memory) ← 全件 catch すべき
+# 閾値 30 件 = 95 %tile の 3 倍、 通常 max 21 + 50% マージン、 偽 OOS 100% catch。
+#
+# HQ affirm #1 ★重要: HOLD された entry は action_required.jsonl 記録 + email release CLI 手順明示。
+# burst HOLD が 「本物の大量売切」 だった場合 = 出品継続 = 新 fail-OPEN になるため、
+# 即時 SLA + 人手 release 経路 (= `tools/release_holdouts.py`) が load-bearing。
+# HQ affirm #2: 22-29 件帯の隙間は reverse_audit が backstop (= 翌 09:30 で D=○ vs qty>0 検知)。
+DEFAULT_NEWLY_SOLD_BURST_THRESHOLD = int(
+    os.environ.get("INVENTORY_NEWLY_SOLD_BURST_THRESHOLD", "30")
 )
 
 
@@ -702,6 +721,38 @@ def run(
         raise ValueError(f"unsupported mode: {mode}")
 
     print(f"  合計候補: {len(candidates)} 件 (dedup 前)")
+
+    # HQ 2026-06-10 Phase 1.6 取下げ側急増ガード (= 6/3 偽 OOS 95 件型対策):
+    # candidates 件数が閾値超なら scraper 系異常疑い → 全件 HOLD + action_required 記録 + alert。
+    # HQ affirm #1: HOLD 後の release 経路 (= tools/release_holdouts.py CLI) を email で誘導。
+    # HQ affirm #2: 22-29 件帯は reverse_audit が backstop (= 翌 09:30 で D=○ vs qty>0 検知)。
+    newly_sold_threshold = DEFAULT_NEWLY_SOLD_BURST_THRESHOLD
+    if mode == "pending" and len(candidates) > newly_sold_threshold:
+        print(f"  [★Phase 1.6 burst guard 発火] candidates {len(candidates)} 件 > 閾値 {newly_sold_threshold} 件")
+        print(f"      (= scraper 系異常疑い (例: 偽 OOS 大量発生)、 fail-CLOSED で全件 HOLD)")
+        # HOLD = silent 化禁止 → 全件 action_required.jsonl に記録
+        try:
+            from monitor_listings import append_action_required  # noqa: PLC0415
+            for c in candidates:
+                append_action_required(
+                    sheet_label=c.get("sheet_label", ""),
+                    result={
+                        "row_index": c.get("row_index", -1),
+                        "url":       c.get("url", ""),
+                        "item_id":   c.get("item_id", ""),
+                        "title":     c.get("title", ""),
+                        "supplier":  c.get("supplier", ""),
+                        "raw_status": "newly_sold_burst_holdout",
+                    },
+                    reason="newly_sold_burst_guard_holdout",
+                    dry_run=dry_run,
+                )
+            print(f"      → {len(candidates)} 件を action_required.jsonl に記録 (silent 化禁止)")
+            print(f"      release 手順: python -m tools.release_holdouts --reason newly_sold_burst_guard_holdout --execute")
+        except Exception as e:
+            print(f"  [!] action_required 記録失敗: {type(e).__name__}: {e}")
+        # candidates を空に倒して以降の CSV 生成 / upload を skip
+        candidates = []
 
     # state load (運用記録のみ、cap 判定には使わない)
     state = load_state()

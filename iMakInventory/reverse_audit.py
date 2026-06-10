@@ -12,6 +12,15 @@ HQ 2026-06-10 FINAL 指示 D + confirm 指示 B 準拠:
 出力:
 - `decision_log/reverse_audit_<ts>.jsonl`: 不整合 entry の機械可読 log
 - 返り値: {"mismatch_count": N, "by_sheet": {...}, "by_supplier": {...}, "items": [...]}
+
+★ HQ Phase 1.6 affirm #2 backstop 機能:
+- newly_sold burst HOLD (= 6/3 偽 OOS 95 件型対策) は閾値 30 件で発火、 22-29 件帯は通過
+- このとき burst guard が発火しなかった場合 (= 通過した取下げ漏れ) も、 sheet D は newly_sold で
+  ○ マーク済 → 取下げ未送なら eBay qty>0 が残る → **次 09:30 cycle の reverse_audit で必ず catch**
+- = burst guard (予防) + reverse_audit (検知) の 2 段防御で隙間を埋める設計
+- burst HOLD された entry (= 取下げ実行されず action_required.jsonl 残存) も同様に backstop:
+  sheet D=○ 維持、 eBay qty>0 残存 → reverse_audit が検出 → email alert で人手 release 誘導
+- 「予防が空振りした」 失敗モードも 「検知が catch」 する relationship を sheet+eBay 突合で物理担保
 """
 from __future__ import annotations
 

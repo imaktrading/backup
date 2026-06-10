@@ -259,11 +259,25 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
         lines.append(f"【★要対応 — 未取下げ {action_count} 件】 (手動対処 or 次 cycle で auto retry)")
         # HQ 2026-06-10 confirm 指示 C: 手動 SLA 明記
         # 通常 reason → 次 cycle (4h 後) で auto retry されるので 「4h 以内」
-        # reinclude_burst_guard_holdout → 急増ガード暴発、 sheet 書込系異常疑い → 「即時」
-        has_burst = any(it.get("reason") == "reinclude_burst_guard_holdout"
-                          for it in (ar.get("items") or []))
-        if has_burst:
-            lines.append("  対応期限    : **即時** (= 急増ガード発火、 sheet 書込系の系統的異常疑い)")
+        # reinclude_burst_guard_holdout → sheet 書込系異常疑い → 「即時」
+        # newly_sold_burst_guard_holdout → scraper 系異常疑い (= 偽 OOS or 本物大量売切) → 「即時」
+        # HQ Phase 1.6 affirm #1: burst HOLD は 「本物大量売切」 だと fail-OPEN なので 即時 release 経路 明示
+        reasons_in_actions = {it.get("reason", "") for it in (ar.get("items") or [])}
+        has_newly_sold_burst = "newly_sold_burst_guard_holdout" in reasons_in_actions
+        has_reinclude_burst = "reinclude_burst_guard_holdout" in reasons_in_actions
+        if has_newly_sold_burst or has_reinclude_burst:
+            lines.append("  対応期限    : **即時** (= 急増ガード発火、 系統的異常 or 本物大量売切の判別要)")
+            lines.append("  ★ load-bearing: HOLD のまま放置すると本物の売切時に fail-OPEN (= 出品継続→無在庫履行不能)")
+            lines.append("  release 手順:")
+            if has_newly_sold_burst:
+                lines.append("    # 1. dry-run で対象一覧確認")
+                lines.append("    python -m tools.release_holdouts --reason newly_sold_burst_guard_holdout")
+                lines.append("    # 2. eBay 検索や scraper 個別確認で 本物 vs 偽 OOS 判別")
+                lines.append("    # 3. 本物なら execute (= 取下げ実行 + verify)")
+                lines.append("    python -m tools.release_holdouts --reason newly_sold_burst_guard_holdout --execute")
+            if has_reinclude_burst:
+                lines.append("    # sheet 書込系の系統的異常確認 (= DNS / Sheets API quota / 認証切れ)")
+                lines.append("    python -m tools.release_holdouts --reason reinclude_burst_guard_holdout --execute")
         else:
             lines.append("  対応期限    : 4 時間以内 (= 次 cycle 開始前、 自然 retry も並行発火)")
         for it in (ar.get("items") or [])[:10]:
