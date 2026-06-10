@@ -1269,6 +1269,18 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     # --- 2026-06-11 High-Class Deck (SwSh ハイクラスデッキ) — records 実在・索引のみ ---
     "GENGAR VMAX HIGH-CLASS DECK":   "SGG",  # ゲンガーVMAXハイクラスデッキ (cert139761896 #002=SGG-002 実在)
     "INTELEON VMAX HIGH-CLASS DECK": "SGI",  # インテレオンVMAXハイクラスデッキ (SGI-* 実在・先回り)
+    # --- 2026-06-11 Gap-A 先回り: SM期拡張 (records実在・set_name裏取り。unique名のみ=誤マッチ非対称安全) ---
+    #     keyword は distinctive 一意名。最悪 PSA literal 相違でも no-op skip(誤set解決にならない)。
+    #     paired sub-set(Collection/Ultra の Sun/Moon)は Sun≠Moon で各々一意のため個別に可。
+    "SHINING LEGENDS":   "SM3p",   # ひかる伝説
+    "CHAMPION ROAD":     "SM6b",   # チャンピオンロード
+    "GG END":            "SM10a",  # ジージーエンド
+    "DETECTIVE PIKACHU": "SMP2",   # 名探偵ピカチュウ (スペシャルパック)
+    "ULTRA MOON":        "SM5M",   # ウルトラムーン
+    "ULTRA SUN":         "SM5S",   # ウルトラサン
+    "ULTRA FORCE":       "SM5p",   # ウルトラフォース
+    "COLLECTION MOON":   "SM1M",   # コレクション ムーン
+    "COLLECTION SUN":    "SM1S",   # コレクション サン
 }
 
 
