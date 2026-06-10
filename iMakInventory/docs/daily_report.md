@@ -1,5 +1,33 @@
 # iMakInventory daily_report
 
+## 2026-06-11 (続) — エラー重複の原因究明 + 構文 smoke テスト(A) + driver 堅牢化(B)
+
+### 決定
+- 01:30 / 05:30 cycle でエラー対象が重複する件を調査 → **localhost ReadTimeout (= 手元
+  chromedriver のハング) が巡回深度 ~740行で cluster** と判明。 mercari ブロックではない。
+  失敗5行 (747/751/753/756/757) は item_id 空欄 skip を除くと**実 scrape 5連続**で、 これが
+  「連続None5件→driver再起動」トリガーになり ~10分 + 5行 unknown を浪費していた。
+  シート順固定なので毎 cycle 同じ位置で再現 (= ユーザーの「シート順影響」の勘が正しい)。
+- 対策2本 (ユーザー承認「ABともに」):
+  - **A**: 全モジュール構文 smoke テスト追加 (= cda4126 型バグ再発防止)
+  - **B**: driver 堅牢化 (反応閾値 5→3 + 予防的再起動 150件ごと)
+
+### 変更
+- **A**: `tests/test_syntax_all_modules.py` 新規。 iMakInventory + 公式 inventory_monitor の
+  全 .py を py_compile (doraise) で検査。 run_daily.py / main.py 等 **どのテストも import
+  しないモジュール**の構文エラーを pre-commit で必ず捕捉。 54 ファイル検査。
+- **B**: `monitor_listings.py`
+  - `MERCARI_RESTART_THRESHOLD` 5→3 (反応的再起動を速め、 浪費を ~4分 + 2行に圧縮)
+  - `MERCARI_PREVENTIVE_RESTART_EVERY = 150` 新設 + loop 内に予防再起動ブロック
+    (mercari 実 scrape 150件ごとに driver refresh = 疲弊前リサイクル、 0で無効化)
+  - per-item Selenium timeout は誤判定(fail-closed)リスクのため**触らない**
+
+### 検証
+- ✅ offline 134件 pass (= 旧80 + 構文 smoke 54)、 回帰なし
+- ✅ test_syntax_all_modules が run_daily.py / main.py を検査対象に含むこと自体も assert
+- ⚠️ B は本番 scraper 挙動変更。 次 HIGH cycle 13:30 が初 live。 restart コスト ~10-20s ×
+  予防2回/cycle = 微小。 効果は cluster 解消の実 log で次 cycle 確認予定。
+
 ## 2026-06-11 — 巡回ERR FLG 列導入 (3スプシ) + run_daily.py 致命 SyntaxError 修正
 
 ### 決定

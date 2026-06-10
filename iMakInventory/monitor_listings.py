@@ -79,7 +79,15 @@ DEFAULT_SLEEP_SEC = 2
 # Mercari driver の連続 None で driver を再起動する閾値 (anti-bot 復帰試行)
 # Phase 9: 旧 MAX_CONSEC_FAILURES (=8) で全 supplier 早期 abort していたが、
 # 漏れ NG 原則のため abort 廃止し、driver 再起動 + ループ続行で全件処理する
-MERCARI_RESTART_THRESHOLD = 5
+# 2026-06-11: 5→3 に低下。 巡回深度で driver が疲弊し localhost ReadTimeout が cluster
+# する事象 (rows 747-757 等) で、 5 連続待ち = 約10分 + 5行 unknown を浪費していた。
+# 3 に下げて自己修復を速め、 浪費を約4分 + 2行に圧縮する。
+MERCARI_RESTART_THRESHOLD = 3
+
+# 予防的 driver 再起動: mercari の実 scrape をこの件数こなすごとに driver をリサイクルする
+# (= 疲弊する前に refresh)。 ReadTimeout cluster は「累積作業で driver がへたる」のが主因なので、
+# 反応的再起動 (連続失敗で復旧) より根本的。 0 で無効化。 1 件 ~10-20s の restart コスト。
+MERCARI_PREVENTIVE_RESTART_EVERY = 150
 
 
 def _log_path() -> Path:
@@ -465,6 +473,7 @@ def process_sheet(
 
     results = []
     mercari_consec_none = 0  # Phase 9: mercari driver 自動再起動用カウンタ
+    mercari_scrape_count = 0  # 2026-06-11: 予防的 driver 再起動用 (実 scrape 件数)
     total_rows = len(rows)
     if progress_callback is not None:
         try:
@@ -609,6 +618,27 @@ def process_sheet(
                     log(f"    [info] item_id 空欄 = 未出品扱い (newly_sold 検知のみ記録、 revise なし)")
 
         results.append(res)
+
+        # 予防的 driver 再起動: mercari の実 scrape を一定件数こなしたら driver を refresh。
+        # 巡回深度で driver が疲弊し ReadTimeout が cluster する事象 (rows 747-757 等) の根本対策。
+        # 反応的再起動 (連続失敗) を待たず、 疲弊する前にリサイクルする。
+        if res["supplier"] == "mercari":
+            mercari_scrape_count += 1
+            if (MERCARI_PREVENTIVE_RESTART_EVERY > 0
+                    and mercari_driver is not None
+                    and mercari_scrape_count % MERCARI_PREVENTIVE_RESTART_EVERY == 0):
+                log(f"  [i] mercari 予防再起動 ({mercari_scrape_count} 件 scrape 済 → driver refresh)")
+                try:
+                    mercari_driver.quit()
+                except Exception:
+                    pass
+                try:
+                    mercari_driver = create_mercari_driver(headless=True)
+                    mercari_consec_none = 0
+                    log("    [OK] mercari driver 予防再起動完了")
+                except Exception as _prev_err:
+                    log(f"    [NG] mercari driver 予防再起動失敗: {_prev_err} (継続)")
+                    mercari_driver = None
 
         # ライブ進捗通知 (callback は throttle を内部で管理)
         if progress_callback is not None:
