@@ -120,11 +120,14 @@ def resolve(context: dict) -> str:
     fn = _TCG_LOOKUP.get(cat)
     if fn is not None:
         rec = fn(brand, card_no, subject, verbose=False)
-        return (rec or {}).get("card_id") or ""
+        # key不統一(card_id vs product_id)を facade が吸収 (docstring §冒頭の契約).
+        # lookup_pokemon/one_piece 等は legacy dict で card_id、lookup_yugioh は
+        # 生 record で product_id を返すため、両対応 (2026-06-11 yugioh resolve→'' 修正)。
+        return (rec or {}).get("card_id") or (rec or {}).get("product_id") or ""
     # 2) DON (signature が異なる: brand, subject, image_url)
     if cat == "don":
         rec = _pc.lookup_don(brand, subject, image, verbose=False)
-        return (rec or {}).get("card_id") or ""
+        return (rec or {}).get("card_id") or (rec or {}).get("product_id") or ""
     # 3) non-catalog marketplace URL → 正規化 url-key
     if url:
         return _normalize_url_key(url)
