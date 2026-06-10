@@ -753,3 +753,21 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 ### 検証
 - 検証✅: B premium 5件(ST01-007_p5等)/405(OP01-016_p6)/453×3(OP03-044_p2)/252(ST04-013 gundam)/GD02-070/GD01-096/SB02-001/SB02-017/E01-03 全resolve。Chopper/Sabo回帰維持
 - 検証✅: pytest 新規7件 + 全体247 passed(回帰なし)
+
+## 2026-06-10 (続7) — Catalog: HQ差し戻し修正 (promo subject側照合 + Gundam starter)
+
+### 決定事項
+- 決定1(真因): 前回テストが_search直叩きmockで実signal配置未反映。PSAはedition/event語をsubject側に置く(brand=generic PROMOS)→_promo_scoreがbrandのみ照合で実lookup_one_pieceでNone
+- 決定2: _promo_score を brand+subject合成 hay で照合(rule1-8/edition/qualifier全)。EVENT PRIZE↔記念品追加。Gundam starter set-map(SEED STRIKE→ST04 + ST01-09公式英名)で252解決
+- 決定3: テストを実entry(lookup_one_piece/resolve)に書換(mock廃止)=HQ受入基準。367はDBSCG promo-variant scoring未実装でbare FP-024(正FP-024_p1=ダイマツリ)=follow-up低優先
+
+### 変更
+- 変更: integrations/psa_to_csv.py _promo_score(hay=brand+subject照合に統一、EVENT PRIZE↔記念品) / extract_set_code_from_brand_gundam(ST01-09 starter名)
+- 変更: tests/test_unresolved17_dbgundam_resolve.py 実entry書換
+- 変更: requests/..._followup_..._done.md(実出力添付)
+
+### 検証(実 lookup_one_piece/resolve 実出力)
+- 検証✅: 'PROMOS'+subj'KAYA STANDARD BATTLE WINNER'/044→OP03-044_p2 / 'NAMI PROMOTION CARD SET 1'/016→OP01-016_p6 / 'TASHIGI OFFICIAL EVENT PRIZE'/031→OP12-031_p2
+- 検証✅: B premium FILM RED/007→ST01-007_p5 (完全形brand) / 252 SEED STRIKE→ST04-013
+- 検証✅: Chopper/Sabo回帰維持、pytest 全体246 passed
+- 検証⚠️: 367 DB→bare FP-024(正FP-024_p1、DBSCG promo-scoring follow-up)

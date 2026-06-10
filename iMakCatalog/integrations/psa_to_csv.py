@@ -698,6 +698,10 @@ def _search_one_piece_promo_by_number(
         pid = rec.get("product_id", "")
         sn = (rec.get("set_name_official") or "") or (rec.get("set_name") or "")
         sn_upper = sn.upper()
+        # PSA は edition/event 語を brand と subject の **どちらにも** 置く
+        # (例 brand='ONE PIECE JAPANESE PROMOS' / subject='KAYA STANDARD BATTLE WINNER')。
+        # よって照合は brand+subject の合成 hay で行う (2026-06-10 HQ差し戻し: subject側未照合の是正)。
+        hay = brand_upper + " " + (subject or "").upper()
         score = 0
         # _P / _P_* suffix (promo 版そのもの)
         if re.search(r"_P(_|$)", pid):
@@ -726,18 +730,18 @@ def _search_one_piece_promo_by_number(
             ("BANDAI CARD GAME FEST", 50),
             ("DAY", 40), ("FEST", 40),
         ]:
-            if kw in brand_upper and kw in sn_upper:
+            if kw in hay and kw in sn_upper:
                 score += weight
-        # 2) brand に "PREMIUM CARD COLLECTION" 等 special promo → set_name 'Other Product Card' / 'Promotion Card' 優先
-        if "PREMIUM CARD COLLECTION" in brand_upper:
+        # 2) "PREMIUM CARD COLLECTION" 等 special promo → set_name 'Other Product Card' / 'Promotion Card' 優先
+        if "PREMIUM CARD COLLECTION" in hay:
             if "OTHER PRODUCT" in sn_upper or "PROMOTION CARD" in sn_upper:
                 score += 70
-        # 3) brand に "STORAGE BOX" がある = PRB01/PRB02 合本、set_name PRB 含む優先
-        if "STORAGE BOX" in brand_upper:
+        # 3) "STORAGE BOX" がある = PRB01/PRB02 合本、set_name PRB 含む優先
+        if "STORAGE BOX" in hay:
             if "PRB" in sn_upper or "PREMIUM BOOSTER" in sn_upper or "STARTER DECK" in sn_upper:
                 score += 50
-        # 4) brand に "STARTER DECK" あり → set_name STARTER 優先
-        if "STARTER DECK" in brand_upper:
+        # 4) "STARTER DECK" あり → set_name STARTER 優先
+        if "STARTER DECK" in hay:
             if "STARTER DECK" in sn_upper:
                 score += 70
         # 5) brand-token と set_name-token の overlap 数
@@ -754,36 +758,38 @@ def _search_one_piece_promo_by_number(
         #    「両方一致」必須 = 同番号の別edition(_p4=FILM RED 等)への暴発防止。ハードコード非依存。
         #    例: BEST SELECTION VOL.4↔ベストセレクション vol.4(Sabo) / 25TH ANNIVERSARY↔25周年(Chopper ST01-006_p1)
         #    2026-06-10 拡張(HQ greenlight unresolved17 (I)): edition/event の brand英↔official日 pair。
+        #    照合は hay(brand+subject) で行う(edition/event語は subject 側のことが多い)。
         edition_hit = False
-        m_bs = re.search(r"BEST\s*SELECTION\s*VOL\.?\s*(\d+)", brand_upper)
+        m_bs = re.search(r"BEST\s*SELECTION\s*VOL\.?\s*(\d+)", hay)
         if m_bs and "ベストセレクション" in sn and re.search(rf"vol\.?\s*{m_bs.group(1)}\b", sn, re.IGNORECASE):
             edition_hit = True
-        if re.search(r"25TH|25\s*周年", brand_upper) and "25周年" in sn:
+        if re.search(r"25TH|25\s*周年", hay) and "25周年" in sn:
             edition_hit = True
-        # edition/event pair (両方一致必須=暴発防止)。英keyword in brand かつ 日keyword in official。
+        # edition/event pair (両方一致必須=暴発防止)。英keyword in hay かつ 日keyword in official。
         for en, jp in (
             ("FILM RED", "FILM RED"),
             ("ONE PIECE DAY", "ONE PIECE DAY"),
             ("PROMOTION CARD SET", "プロモーションカードセット"),
             ("STANDARD BATTLE", "スタンダードバトル"),
+            ("EVENT PRIZE", "記念品"),
         ):
-            if en in brand_upper and (jp in sn or jp in sn_upper):
+            if en in hay and (jp in sn or jp in sn_upper):
                 edition_hit = True
         # UTA は短語のため \bUTA\b 限定 + official 'ウタ'
-        if re.search(r"\bUTA\b", brand_upper) and "ウタ" in sn:
+        if re.search(r"\bUTA\b", hay) and "ウタ" in sn:
             edition_hit = True
         if edition_hit:
             score += 250  # edition 一意特定 = 汎用promo(_P 220)を上回る最優先
         # qualifier: 同一edition内の別variantを分離(+30)。WINNER↔優勝 / PREMIUM CARD COLLECTION↔プレミアムカードコレクション
         #   (例 FILM RED で _p5=プレミアムカードコレクション と _p3=入場者特典 を分離)
-        if "WINNER" in brand_upper and "優勝" in sn:
+        if "WINNER" in hay and "優勝" in sn:
             score += 30
-        if "PREMIUM CARD COLL" in brand_upper and "プレミアムカードコレクション" in sn:
+        if "PREMIUM CARD COLL" in hay and "プレミアムカードコレクション" in sn:
             score += 30
         # 8) cross-set 誤選択防止: brand が MEMORIAL/EB を明示しないのに EB(Memorial由来)
         #    promo が原典set(ST/OP)の promo と同点になる誤マッチ (Chopper EB01-006_P_treasure)
         #    → EB由来 promo を減点し原典set promo を優先 (誤マッチ防止、原典優先)
-        if "MEMORIAL" not in brand_upper and re.match(r"^EB\d", pid) and "_P" in pid:
+        if "MEMORIAL" not in hay and re.match(r"^EB\d", pid) and "_P" in pid:
             score -= 40
         return score
 
@@ -833,10 +839,22 @@ def extract_set_code_from_brand_gundam(brand: str) -> Optional[str]:
     # set 名キーワード逆引き (PSA brand が code token を持たず literal英名のみのケース)
     #   2026-06-10 HQ依頼 db_gundam_setmap (SwSh set-map と同型)。真値=公式弾名。
     for kw, code in (
+        # Booster (GD)
         ("NEWTYPE RISING", "GD01"),
         ("DUAL IMPACT", "GD02"),
         ("STEEL REQUIEM", "GD03"),
         ("PHANTOM ARIA", "GD04"),
+        # Starter Deck (ST) — 公式英名(catalog set_name_official 一致)。番号衝突(OP ST04-013等)は
+        #   resolver の brand→category 検出で分離済。2026-06-10 HQ差し戻し(252 SEED STRIKE)。
+        ("HEROIC BEGINNINGS", "ST01"),
+        ("WINGS OF ADVANCE", "ST02"),
+        ("ZEON'S RUSH", "ST03"), ("ZEONS RUSH", "ST03"),
+        ("SEED STRIKE", "ST04"),
+        ("IRON BLOOM", "ST05"),
+        ("CLAN UNITY", "ST06"),
+        ("CELESTIAL DRIVE", "ST07"),
+        ("FLASH OF RADIANCE", "ST08"),
+        ("DESTINY IGNITION", "ST09"),
     ):
         if kw in b:
             return code
