@@ -1310,7 +1310,7 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
         (r"\bS-P\b",          "S-P"),
         (r"\bM-P\b",          "M-P"),
         # --- set 名キーワード ---
-        (r"\bSM\s+PROMOS?\b", "SMP"),   # Sun & Moon Promo (PSA: 'SM PROMO' / 'SM PROMOS')
+        (r"\bSM\s+PROMOS?\b", "SM-P"),  # Sun & Moon Promo (PSA: 'SM PROMO'). 2026-06-11 Gap-B: catalog を SM-P-NNN 正順統一したため SMP→SM-P
         (r"\bXY\s+PROMOS?\b", "XYP"),   # X & Y Promo
         (r"\bBW\s+PROMOS?\b", "BWP"),   # Black & White Promo
         (r"\bDP\s+PROMOS?\b", "DPP"),   # Diamond & Pearl Promo
@@ -1407,7 +1407,7 @@ def _to_legacy_dict_pokemon(record: dict) -> dict:
 #   S-P (Sword & Shield Promo), SV-P (Scarlet & Violet Promo), M-P (Mega Promo),
 #   SMP (Sun & Moon Promo), XYP (X & Y Promo), BWP (Black & White Promo),
 #   DPP (Diamond & Pearl Promo), SVD/SVM (SV special promo)
-_POKEMON_PROMO_SET_CODES = ("S-P", "SV-P", "M-P", "SMP", "XYP", "BWP", "DPP", "SVD", "SVM", "SC")
+_POKEMON_PROMO_SET_CODES = ("S-P", "SV-P", "M-P", "SM-P", "XYP", "BWP", "DPP", "SVD", "SVM", "SC")
 
 
 def _is_pokemon_promo_hint(subject: str) -> bool:

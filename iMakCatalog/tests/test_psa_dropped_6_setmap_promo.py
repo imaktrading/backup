@@ -46,9 +46,21 @@ def test_s_promo_no_longer_falls_to_generic_P():
 
 
 def test_new_promo_patterns_no_collision():
-    # SM/SV/XY PROMO は従来通り (S PROMO 追加で誤変化しない)
-    assert P.extract_set_code_from_brand_pokemon("POKEMON JAPANESE SM PROMO") == "SMP"
+    # SV/XY PROMO は従来通り (S PROMO 追加で誤変化しない)
     assert P.extract_set_code_from_brand_pokemon("POKEMON JAPANESE SV PROMO") == "SV-P"
     assert P.extract_set_code_from_brand_pokemon("POKEMON JAPANESE XY PROMO") == "XYP"
     # 素の 'PROMO' は引き続き generic 'P'
     assert P.extract_set_code_from_brand_pokemon("POKEMON JAPANESE PROMO") == "P"
+
+
+def test_gapB_sm_promo_maps_to_dash_form():
+    # 2026-06-11 Gap-B: catalog を SM-P-NNN 正順統一 → 'SM PROMO' は SM-P (旧 'SMP' は廃止)
+    assert P.extract_set_code_from_brand_pokemon("POKEMON JAPANESE SM PROMO") == "SM-P"
+
+
+def test_gapB_sm_mp_promo_resolve_after_migration():
+    # 逆順(001/SM-P) を正順(SM-P-001)へ migration 後、PSA brand から lookup hit すること
+    r = P.lookup_pokemon("POKEMON JAPANESE SM PROMO", "001", "", verbose=False)
+    assert r is not None and r["card_id"] == "SM-P-001", r
+    r2 = P.lookup_pokemon("POKEMON JAPANESE M-P PROMO", "001", "", verbose=False)
+    assert r2 is not None and r2["card_id"] == "M-P-001", r2
