@@ -79,12 +79,17 @@ def combine(mercari, snkrdunk):
     snkrdunk_urls = []          # 補URL一覧 (全PSA10出品、価格付)
     if isinstance(snkrdunk, dict):
         if "available" in snkrdunk:
-            # HTTP shape (snkrdunk_psa_resource.check_by_keyword): 在庫+最安+カードページURL
+            # HTTP shape (snkrdunk_psa_resource.check_by_keyword): 在庫+最安+PSA10出品一覧(補URL候補)
             if snkrdunk.get("available"):
                 s_price = snkrdunk.get("psa10_price_jpy")
-                s_count = 1
-                url = snkrdunk.get("card_url", "")
-                snkrdunk_urls = [{"price": s_price, "url": url}] if url else []
+                # psa10_listings = 価格昇順の全PSA10出品 → 補URL列(最安の代替候補)。
+                listings = snkrdunk.get("psa10_listings") or []
+                snkrdunk_urls = [{"price": d.get("price"), "url": d.get("url", "")}
+                                 for d in listings if d.get("url")]
+                if not snkrdunk_urls:                 # 後方互換 (psa10_listings 無→card_url 1件)
+                    url = snkrdunk.get("card_url", "")
+                    snkrdunk_urls = [{"price": s_price, "url": url}] if url else []
+                s_count = len(snkrdunk_urls) or 1
         else:
             # harvest shape (find_psa10_urls_for_card): 個別補URL一覧 (psa10_count/psa10_details)
             s_count = int(snkrdunk.get("psa10_count") or 0)

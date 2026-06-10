@@ -96,3 +96,46 @@ def test_resource_card_number_prefers_title_then_key():
     assert gate._resource_card_number("ポケモンカード ピカチュウ PSA10", "SV-P-291") == "SV-P-291"
     # 番号源が無い → None (fail-closed)
     assert gate._resource_card_number("ポケモンカード PSA10", "item:999") is None
+
+
+# ---- 補URL: SNKRDUNK PSA10出品を複数(最安の代替候補)返す ----
+def test_combine_fills_multiple_aux_urls_from_snkrdunk():
+    """check_by_keyword の psa10_listings (価格昇順 複数) が補URLに展開される。
+    最安1件だけだと最安値列と重複し補URLの意味が無い→2件目以降が代替候補として入る。"""
+    snk = {"available": True, "psa10_price_jpy": 22000, "card_id": 129628,
+           "card_url": "https://snkrdunk.com/apparels/129628/used/1",
+           "psa10_listings": [
+               {"price": 22000, "url": "https://snkrdunk.com/apparels/129628/used/1"},
+               {"price": 23000, "url": "https://snkrdunk.com/apparels/129628/used/2"},
+               {"price": 25000, "url": "https://snkrdunk.com/apparels/129628/used/3"},
+           ]}
+    c = gate.combine(None, snk)
+    assert c["resourceable"] is True
+    assert c["snkrdunk_jpy"] == 22000
+    assert c["snkrdunk_count"] == 3                    # 複数件カウント
+    assert len(c["snkrdunk_urls"]) == 3                # 補URLが3件 (最安+代替2)
+    assert [u["price"] for u in c["snkrdunk_urls"]] == [22000, 23000, 25000]
+
+
+def test_combine_backward_compat_single_card_url():
+    """psa10_listings 無 (旧shape) でも card_url 1件にフォールバック。"""
+    snk = {"available": True, "psa10_price_jpy": 30000, "card_id": 5,
+           "card_url": "https://snkrdunk.com/apparels/5"}
+    c = gate.combine(None, snk)
+    assert c["resourceable"] is True
+    assert len(c["snkrdunk_urls"]) == 1
+    assert c["snkrdunk_urls"][0]["url"] == "https://snkrdunk.com/apparels/5"
+
+
+def test_check_by_keyword_builds_multiple_listings(monkeypatch):
+    """check_by_keyword が PSA10出品を価格昇順で複数 psa10_listings に組む (最安だけにしない)。"""
+    monkeypatch.setattr(sp, "resolve_card_id", lambda *a, **k: 129628)
+    monkeypatch.setattr(sp, "fetch_psa10_listings", lambda *a, **k: [
+        {"listing_id": 1, "price": 22000},
+        {"listing_id": 2, "price": 23000},
+    ])
+    res = sp.check_by_keyword("ST07-008")
+    assert res["available"] is True
+    assert res["psa10_price_jpy"] == 22000
+    assert len(res["psa10_listings"]) == 2
+    assert res["psa10_listings"][1]["url"].endswith("/used/2")

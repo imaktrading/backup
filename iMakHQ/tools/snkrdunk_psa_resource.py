@@ -283,12 +283,20 @@ def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant
     listings = fetch_psa10_listings(cid, timeout=timeout)
     if listings is not None:                         # 出品API成功 = これを正とする
         if listings:
-            top = listings[0]
-            return {"available": True, "psa10_price_jpy": top["price"],
+            # 価格昇順の全PSA10出品を補URL候補に (最安が売切/状態相違時の代替=補URLの存在意義)。
+            # 各出品に listing_id 直リンク。最安以外も返すことで補URL列が機能する。
+            psa10_listings = [
+                {"price": x["price"],
+                 "url": LISTING_PAGE_TMPL.format(card_id=cid, listing_id=x["listing_id"])}
+                for x in listings
+            ]
+            return {"available": True, "psa10_price_jpy": psa10_listings[0]["price"],
                     "conditions": {}, "card_id": cid,
-                    "card_url": LISTING_PAGE_TMPL.format(card_id=cid, listing_id=top["listing_id"])}
+                    "card_url": psa10_listings[0]["url"],
+                    "psa10_listings": psa10_listings}
         return {"available": False, "psa10_price_jpy": None, "conditions": {},
-                "card_id": cid, "card_url": CARD_PAGE_TMPL.format(card_id=cid)}
+                "card_id": cid, "card_url": CARD_PAGE_TMPL.format(card_id=cid),
+                "psa10_listings": []}
     # 出品API不調 → min-prices フォールバック
     res = check_resource(cid, condition=condition, timeout=timeout)
     if "_error" not in res:
