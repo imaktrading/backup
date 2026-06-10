@@ -681,3 +681,97 @@ HQ confirm 指示 (= `_phase1_5_metrics_alignment_response`) で承認、 HQ Pha
 
 13:30 実走 + 6/12 初回 reverse_audit レポート まで 「対策進行中 (未解決)」 スタンス 維持 (= HQ 指示)。
 
+---
+
+## 2026-06-10 (続続続) — 3 sheet manual 巡回 残課題 (= BAN risk 残存)
+
+### 巡回結果
+
+- 公式監視くん (= variation 系) 15:39-15:59 完了
+- iMakInventory cycle (= --sheet both) 15:39-18:05 完了 (2h 26 min)
+
+### メール 2 行ステータス (= ユーザー要件 2026-06-10、 commit `5693dc8` 効果)
+
+```
+仕入元在庫監視 : ⚠️ 要対応 (1708 件中 通信エラー 23 件 (1.3%))
+eBay 在庫調整  : ⚠️ 要対応 (売切検知 14 → 完了 5 / 未取下げ 9)
+```
+
+### 既解決 case (= 今 session 内で対応完了)
+
+- LOW row 548 (= A 列 URL 不正 + ended listing) → ✅ 削除済
+- 356901158380 (verify NG) → ✅ false positive (= 私の verify ロジック bug、 commit `9d4794b`
+  で `available = Quantity - QuantitySold` 修正)、 release ledger 整理済
+- 8 件 PSA10 ポケモン (item_id 空欄) → ✅ 未出品扱い (= ユーザー指示、 commit `5ef4554`
+  で action_required 化やめる)
+
+### **★残課題 (= BAN risk 残存、 user 判断要)**
+
+| # | 件数 | 種別 | 状態 | BAN risk |
+|---|---|---|---|---|
+| 1 | 16 件 | **amazon fail-closed (= scraper returned None)** | **profile 由来の常態的失敗** | **顕在化前提** |
+| 2 | 1 件 | fril fail-closed (HIGH row 9) | 未着手 | 単発、 次 cycle 動向次第 |
+| 3 | 5 件 | mercari chromedriver ReadTimeout | 未着手 | chromedriver 状態次第 (= 半 transient) |
+
+### 最重要 — amazon 16 件
+
+amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon login profile 由来の
+常態的失敗** (= memory `amazon_scraper_fail_closed_bug` 同型再発の疑い)。
+
+**profile 修復しない限り、 次 cycle も同じ row で再失敗** = 「scrape 不能 + eBay qty>0 維持」
+が継続 = **BAN risk 顕在化前提**。
+
+判定不能 17 件 (amazon 16 + fril 1) の扱いは memory `dont_make_my_own_judgment.md` 制定により
+私 (Claude) が indirect 推論で決めない。 ルール直接 citation できない grey zone:
+- memory `precision_priority_over_recall.md` は 「判定誤差」 を対象 (= 判定不能はカバー外)
+- グローバル CLAUDE.md L201-205 「fail-OPEN を許さない」 は取下げ失敗 (= revise 投げて失敗) が
+  対象、 「判定不能で revise 試行すらしてない」 状態は直接 cover してない
+
+→ **user 判断仰ぐ**:
+- A. 17 件全件 qty=0 化 (= 過剰検知扱い、 在庫戻ったら復活、 BAN risk 即排除)
+- B. amazon profile 修復先行 (= scraper を信頼可能にしてから判定)
+- C. 17 件 manual 1 件ずつ確認
+
+### 該当 row 詳細 (= user 判断用)
+
+**fril 1 件**:
+- HIGH row 9 iid=356740464475 supplier=fril
+  URL: https://item.fril.jp/ff877496fe231fb8abec03d5c0f1eb50
+  title: ONEPIECE Tシャツ
+
+**amazon 16 件**:
+- LOW row 519 iid=357019640381 (TAMASHII 仮面ライダードライブ)
+- LOW row 520 iid=357019640383 (TAMASHII アイカツスターズ! 桜)
+- LOW row 533 iid=357026358233 (TAMASHII 仮面ライダーエグゼイド)
+- LOW row 535 iid=357026358239 (TAMASHII アベンジャーズ ドクター)
+- LOW row 537 iid=357056658663 (TAMASHII 仮面ライダーマッハ)
+- LOW row 539 iid=357056658669 (TAMASHII アイアンマン マーク4)
+- LOW row 547 iid=357063698234 (TAMASHII アントマン&ワスプ)
+- LOW row 549 iid=357063698239 (TAMASHII ウルトラマンオーブ)
+- LOW row 550 iid=357063698240 (S.H.Figuarts 仮面ライダー鎧武 バロン)
+- LOW row 557 iid=357106027062 (TAMASHII アベンジャーズ ドクター)
+- LOW row 559 iid=357106027065 (TAMASHII スター・ウォーズ)
+- LOW row 561 iid=357106066458 (TAMASHII ウルトラマンジード)
+- LOW row 610 iid=356777776711 (TAMASHII ドラゴンボールZ セル)
+- (+ 他 3 件、 詳細 logs/listings_LOW_20260610_180304.jsonl)
+
+### mercari chromedriver timeout 5 件 (= 半 transient、 次 cycle で動向確認)
+
+- HIGH row 731-733, 737 (PSA10 系)
+- LOW row 155
+
+### 構造的気づき (= 別 turn 着手候補)
+
+- amazon scraper 「判定不能 = 触らない」 設計が fail-OPEN になる case (= 取下げ漏れ) の判定基準が
+  ルールに未明示 = grey zone。 ルール拡充 (= 「判定不能 = 取下げ実行」 or 「判定不能 N 回連続で
+  アラート」 等) 要検討
+- amazon profile 復旧手順の標準化 (= 6/3 commit d23ad99 で fail-closed bug は修正済だが、 profile
+  自体の脆弱性は構造的)
+- 「次 cycle 待ち」 が grey zone の場合の暫定 SLA を rule 化 (= 何 cycle 持続したら escalate するか)
+
+### 次のアクション
+
+- amazon profile 修復 → 別 session or 手動 (= 私が指示せず、 user 判断 / 別 session 起動次第)
+- 17 件の扱い (qty=0 化 vs profile 修復先行 vs manual chk) は user 判断待ち
+- スケジュール再有効化は本 17 件の扱い確定後に判断
+
