@@ -121,18 +121,60 @@ def _parse_qty_output(out: str) -> dict:
 def _format_report(start: datetime, end: datetime,
                    monitor: dict, zero: dict, restore: dict,
                    step_results: list) -> tuple[str, str]:
-    """監視くん風の 1 通レポート (subject, body) を生成."""
+    """監視くん風の 1 通レポート (subject, body) を生成.
+
+    HQ 2026-06-10 ユーザー要件: メール冒頭 2 行で 2 系統判定可能化
+    - 仕入元在庫監視 (= UNIQLO/GU/montbell/workman/amazon の variation scrape)
+    - eBay 在庫調整 (= variation/listing の qty=0 化 + qty=1 復活)
+    """
     all_ok = all(ok for _, ok in step_results)
     dur = end - start
     dur_str = f"{int(dur.total_seconds() // 60)}分{int(dur.total_seconds() % 60)}秒"
 
     total_processed = (zero["variation_executed"] + zero["single_executed"]
                        + restore["variation_executed"] + restore["single_executed"])
-    overall = "正常" if all_ok else "異常"
-    if total_processed > 0 and all_ok:
-        overall = "正常 (qty 変更実施)"
-    elif not all_ok:
+
+    # 仕入元在庫監視ステータス (= scrape error 率 / step 失敗 判定)
+    listings_count = monitor.get("listings", 0) or 0
+    scrape_errors = monitor.get("errors", 0) or 0
+    err_rate = (scrape_errors / listings_count) if listings_count else 0
+    # step_results の中で scrape 系 step (= monitor) が NG なら異常
+    scrape_step_failed = any(not ok for name, ok in step_results if "monitor" in name.lower())
+    if scrape_step_failed:
+        scrape_status = "❌ 異常 (monitor step 失敗、 scrape phase 自体が動作不能)"
+    elif err_rate >= 0.5:
+        scrape_status = f"❌ 異常 ({listings_count} listing 中 scrape error {scrape_errors} 件 = {err_rate*100:.0f}%、 公式サイト構造変更 or anti-bot 要確認)"
+    elif err_rate >= 0.1:
+        scrape_status = f"⚠️ 要確認 ({listings_count} listing 中 scrape error {scrape_errors} 件 = {err_rate*100:.0f}%、 傾向監視)"
+    else:
+        scrape_status = f"✅ 正常 ({listings_count} listing scrape、 error {scrape_errors} 件)"
+
+    # eBay 在庫調整ステータス (= variation/listing の qty=0/qty=1 revise 結果)
+    zero_ng = zero.get("ng", 0) or 0
+    restore_ng = restore.get("ng", 0) or 0
+    total_ng = zero_ng + restore_ng
+    # revise 系 step (= zero / restore phase) の失敗
+    revise_step_failed = any(not ok for name, ok in step_results
+                              if "qty_zero" in name.lower() or "restore" in name.lower()
+                              or "audit" in name.lower())
+    if revise_step_failed:
+        ebay_status = f"❌ 異常 (revise step 失敗、 動作不能 or 部分実行) — 処理 {total_processed} 件 / 失敗 {total_ng} 件"
+    elif total_processed == 0:
+        ebay_status = "✅ 対象なし (= qty 変更要なし)"
+    elif total_ng > 0:
+        ebay_status = f"⚠️ 要対応 (処理 {total_processed} 件 / 失敗 {total_ng} 件 — variation ng={zero_ng + restore_ng})"
+    else:
+        ebay_status = f"✅ 全件 qty 変更完了 (処理 {total_processed} 件、 zero {zero['variation_executed']+zero['single_executed']} + restore {restore['variation_executed']+restore['single_executed']})"
+
+    # subject 用: 全体判定
+    if scrape_step_failed or revise_step_failed:
         overall = "異常: step 失敗あり"
+    elif total_ng > 0 or err_rate >= 0.1:
+        overall = "要確認 or 要対応"
+    elif total_processed > 0:
+        overall = "正常 (qty 変更実施)"
+    else:
+        overall = "正常"
 
     subject = f"[公式監視くん] 巡回レポート: {overall} (処理 {total_processed} 件)"
 
@@ -140,7 +182,9 @@ def _format_report(start: datetime, end: datetime,
         "=" * 50,
         "公式監視くん 巡回レポート",
         "=" * 50,
-        f"結果      : {overall}",
+        # ★ HQ 2026-06-10 ユーザー要件: 冒頭 2 行で 2 系統判定可能化
+        f"仕入元在庫監視 : {scrape_status}",
+        f"eBay 在庫調整  : {ebay_status}",
         f"開始時刻   : {start.strftime('%Y-%m-%d %H:%M')}",
         f"終了時刻   : {end.strftime('%Y-%m-%d %H:%M')}",
         f"所要時間   : {dur_str}",
