@@ -234,16 +234,39 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
     lines.append("iMakInventory 巡回レポート")
     lines.append("=" * 50)
 
-    # ★最重要 1 行: 取下げ漏れ有無を冒頭で明示 (= HQ FINAL 指示 C)
-    # ただし新形式 cycle_log (= action_required_summary phase 投入済) のみ。
-    # 旧形式 (= 既存 cycle log file 等) は status_jp で fallback。
-    if has_action_summary and (newly_sold > 0 or action_count > 0):
-        lines.append(f"取下げ     : 売切検知 {newly_sold} → 完了 {completed} / 未取下げ {untaken}")
-        if untaken > 0:
-            lines.append(f"結果      : ⚠️ 要対応 (取下げ漏れ {untaken} 件)")
+    # ★最重要 2 行: 2 系統 (= 仕入元在庫監視 / eBay 在庫調整) の冒頭ステータス
+    # (= 「うまくいったか」 を一目で判定可能、 ユーザー要件 2026-06-10)
+    if has_action_summary:
+        # 仕入元在庫監視ステータス: scrape 通信エラー率 + 急増ガード発火状況で判定
+        processed = (mon.get("processed", 0) or 0) if mon else 0
+        errors = (mon.get("errors", 0) or 0) if mon else 0
+        err_rate = (errors / processed) if processed else 0
+        # 急増ガード発火 (newly_sold_burst) = scraper 系異常疑い
+        reasons_set = {it.get("reason", "") for it in (ar.get("items") or [])}
+        scraper_burst = "newly_sold_burst_guard_holdout" in reasons_set
+        # sheet 書込系異常 (reinclude_burst) = monitoring 経路の上流脆性
+        sheet_write_anomaly = "reinclude_burst_guard_holdout" in reasons_set
+        if scraper_burst:
+            scrape_status = f"❌ 異常 (scraper 系急増ガード発火、 偽 OOS or 本物大量売切の判別要)"
+        elif sheet_write_anomaly:
+            scrape_status = f"❌ 異常 (スプシ書込系の系統的失敗疑い、 監視結果の反映不完全)"
+        elif err_rate >= 0.5:
+            scrape_status = f"❌ 異常 ({processed} 件中 通信エラー {errors} 件 = {err_rate*100:.0f}%、 scraper / anti-bot 要確認)"
+        elif err_rate >= 0.1:
+            scrape_status = f"⚠️ 要確認 ({processed} 件中 通信エラー {errors} 件 = {err_rate*100:.0f}%、 傾向監視)"
         else:
-            lines.append(f"結果      : ✅ 全件取下げ完了")
+            scrape_status = f"✅ 正常 ({processed} 件 scrape、 通信エラー {errors} 件)"
+        lines.append(f"仕入元在庫監視 : {scrape_status}")
+
+        # eBay 在庫調整ステータス: 売切検知 → 完了 / 未取下げ
+        if newly_sold == 0 and action_count == 0:
+            lines.append(f"eBay 在庫調整  : ✅ 対象なし (= 新規売切検知 0 件)")
+        elif action_count > 0:
+            lines.append(f"eBay 在庫調整  : ⚠️ 要対応 (売切検知 {newly_sold} → 完了 {completed} / 未取下げ {action_count})")
+        else:
+            lines.append(f"eBay 在庫調整  : ✅ 全件取下げ完了 (売切検知 {newly_sold} → 完了 {completed})")
     else:
+        # 旧形式 cycle log (= action_required_summary 未投入): fallback
         lines.append(f"結果      : {status_jp}")
 
     lines.append(f"開始時刻   : {_fmt_ts(cycle_log.get('ts_start', ''))}")

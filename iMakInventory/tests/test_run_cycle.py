@@ -271,8 +271,10 @@ def test_email_header_shows_untaken_count_when_action_required(tmp_path, monkeyp
         },
     }
     body = _format_body(cycle_log_action)
-    assert "売切検知 4 → 完了 2 / 未取下げ 2" in body
-    assert "⚠️ 要対応 (取下げ漏れ 2 件)" in body
+    # 2 系統冒頭ステータス (ユーザー要件 2026-06-10): 仕入元在庫監視 / eBay 在庫調整 を 一目で
+    assert "仕入元在庫監視 :" in body
+    assert "eBay 在庫調整  :" in body
+    assert "⚠️ 要対応 (売切検知 4 → 完了 2 / 未取下げ 2)" in body
     assert "item_id_empty" in body
     assert "verify_qty_gt0_giveup" in body
     # 旧 bug の「正常」 表記が出ないことを確認
@@ -296,8 +298,8 @@ def test_email_header_shows_untaken_count_when_action_required(tmp_path, monkeyp
         },
     }
     body_ok = _format_body(cycle_log_ok)
-    assert "売切検知 3 → 完了 3 / 未取下げ 0" in body_ok
-    assert "✅ 全件取下げ完了" in body_ok
+    assert "仕入元在庫監視 : ✅ 正常" in body_ok
+    assert "eBay 在庫調整  : ✅ 全件取下げ完了 (売切検知 3 → 完了 3)" in body_ok
     assert "⚠️ 要対応" not in body_ok
 
 
