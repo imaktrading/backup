@@ -791,16 +791,47 @@ def run_cycle(
 
     # cycle 完了メール送信 (opt-in: encrypted_gmail.dat が無ければ skip)
     # fail-safe: 送信失敗しても cycle 全体を落とさない
+    # ユーザー指示 2026-06-10 「放置禁止」: email 失敗 = silent 化 risk。
+    # 2 段 fallback: 1) 通常 email、 失敗 → 2) 最小 fallback email + desktop toast
+    mail_sent = False
     try:
         from email_notifier import send_cycle_report  # noqa: PLC0415
         mail_res = send_cycle_report(cycle_log)
         if mail_res.get("sent"):
             _log("  [mail] cycle report mail 送信完了", test_mode)
+            mail_sent = True
         elif mail_res.get("error"):
             _log(f"  [!] cycle report mail 失敗: {mail_res['error']}", test_mode)
         # skipped_reason のみ (= opt-in 未有効化) は無音 (毎 cycle ログ汚染防止)
+        elif mail_res.get("skipped_reason"):
+            mail_sent = True  # opt-in 未有効化は silent 化 risk ではない
     except Exception as e:
         _log(f"  [!] email_notifier 例外: {type(e).__name__}: {e}", test_mode)
+
+    # email 失敗時の最終手段: desktop toast + ファイル alert (= silent 化を絶対回避)
+    if not mail_sent:
+        try:
+            ar_count = (cycle_log.get("phases", {})
+                          .get("action_required_summary", {}) or {}).get("count", 0)
+            status = cycle_log.get("status", "?")
+            title = "[★iMakInventory] email 送信失敗、 cycle 結果未通知"
+            body = (
+                f"status={status} action_required={ar_count}\n"
+                f"ts_start={cycle_log.get('ts_start','?')}\n"
+                f"ts_end={cycle_log.get('ts_end','?')}\n"
+                f"\n★ ユーザー指示 「放置禁止」 違反 risk: メール経路全断、 cycle 結果を見落とすリスクあり。\n"
+                f"対応: logs/cycle_{cycle_log.get('ts_start','')[:13].replace('T','_')}*.jsonl を chk\n"
+            )
+            _notify_toast(title, body[:200])
+            # 物理ファイル alert (= desktop 通知も失敗時の最終 fallback)
+            try:
+                desk = Path.home() / "OneDrive" / "デスクトップ" / f"ALERT_iMakInventory_mail_failed_{cycle_log.get('ts_start','')[:13].replace(':','').replace('T','_')}.txt"
+                desk.write_text(title + "\n\n" + body, encoding="utf-8")
+                _log(f"  [!] mail 失敗 → desktop alert file 出力: {desk.name}", test_mode)
+            except Exception as e2:
+                _log(f"  [!] mail 失敗 + desktop alert 失敗: {type(e2).__name__}: {e2}", test_mode)
+        except Exception as e3:
+            _log(f"  [!] mail 失敗 fallback 自体も失敗: {type(e3).__name__}: {e3}", test_mode)
 
     return cycle_log
 

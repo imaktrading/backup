@@ -593,5 +593,32 @@ def test_email_includes_release_cli_for_burst_holdouts(tmp_path):
     assert "即時" in body
 
 
+def test_format_body_never_throws_silent_化禁止(tmp_path):
+    """ユーザー指示 2026-06-10 「放置禁止」:
+    _format_body は どんな壊れた入力でも 必ず非空文字列を返す (= silent 化 risk 不能化)。
+
+    Regression guard: format コード自体の例外で email が送信されなくなる risk を防ぐ。
+    """
+    from email_notifier import _format_body
+
+    # case 1: phases が文字列 (= dict 期待の場所に str)
+    body1 = _format_body({"phases": "broken"})
+    assert "format 例外" in body1
+    assert "fallback 表示" in body1
+
+    # case 2: cycle_log 自体が None
+    body2 = _format_body(None)
+    assert isinstance(body2, str) and len(body2) > 0
+
+    # case 3: 完全空 dict は通常 path で OK (例外なし)
+    body3 = _format_body({})
+    assert "iMakInventory 巡回レポート" in body3
+
+    # case 4: 完全に壊れた deep nested (= 例外チェイン test)
+    body4 = _format_body({"phases": {"monitor": "not a dict",
+                                       "upload": 42}})
+    assert isinstance(body4, str) and len(body4) > 0
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

@@ -206,7 +206,55 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
 
     HQ 2026-06-10 FINAL 指示 C: 冒頭 1 行で「⚠️ 要対応 Y件」 or 「✅ 全件完了」 を
     明示。 詳細はその後でよい。 「正常」 は全件 qty=0 確認時のみ。
+
+    ユーザー指示 2026-06-10 「放置禁止」: 本関数自体が例外で落ちると silent 化 risk。
+    例外時は最小 fallback body を返して必ず通知を出す。
     """
+    try:
+        return _format_body_inner(cycle_log)
+    except Exception as e:
+        # 「format 失敗 → email 出さない」 = silent 化、 絶対禁止。
+        # fallback 自体も例外で死なないよう、 全 access を try で保護した最小版。
+        try:
+            import traceback as _tb  # noqa: PLC0415
+            def _safe(getter):
+                try:
+                    return getter()
+                except Exception:
+                    return "?"
+            status = _safe(lambda: str(cycle_log.get("status", "?")))
+            ts_start = _safe(lambda: str(cycle_log.get("ts_start", "?")))
+            ts_end = _safe(lambda: str(cycle_log.get("ts_end", "?")))
+            phases_keys = _safe(lambda: str(list((cycle_log.get("phases") or {}).keys())))
+            tb_text = _safe(lambda: _tb.format_exc()[:1500])
+            return (
+                "=" * 50 + "\n"
+                "iMakInventory 巡回レポート (★ format 例外、 fallback 表示)\n"
+                + "=" * 50 + "\n"
+                "★ 注意: email format コード自体が例外。 cycle 結果は decision_log/cycle_*.jsonl 参照。\n"
+                "★ 対応期限: 即時 (= report 不完全 = 漏れ視認 困難)\n"
+                "\n"
+                f"format 例外: {type(e).__name__}: {str(e)[:200]}\n"
+                "\n--- traceback ---\n" + tb_text + "\n"
+                "\n--- cycle_log 抜粋 ---\n"
+                f"status: {status}\n"
+                f"ts_start: {ts_start}\n"
+                f"ts_end:   {ts_end}\n"
+                f"phases:   {phases_keys}\n"
+                + "=" * 50 + "\n"
+            )
+        except Exception as e2:
+            # fallback すら crash した最後の砦 (= 「気付き」 だけ最低限届ける)
+            return (
+                f"[★iMakInventory] email format 二重例外、 cycle 結果不明。\n"
+                f"format error: {type(e).__name__}\n"
+                f"fallback error: {type(e2).__name__}\n"
+                f"=> decision_log/cycle_*.jsonl の最新ファイルを目視 chk してください。\n"
+            )
+
+
+def _format_body_inner(cycle_log: Dict[str, Any]) -> str:
+    """旧 _format_body 本体 (= 通常ロジック)。 例外は外側 wrapper で fallback 処理。"""
     lines = []
     phases = cycle_log.get("phases", {}) or {}
 
