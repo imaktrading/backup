@@ -116,11 +116,16 @@ def _parse_ack_and_errors(xml: str) -> tuple:
 def _call_trading(call_name: str, body_xml: str,
                     access_token: Optional[str] = None,
                     timeout: int = 15,
-                    _allow_refresh: bool = True) -> dict:
+                    _allow_refresh: bool = True,
+                    raw_xml_cap: Optional[int] = 2000) -> dict:
     """Trading API 共通 call wrapper.
 
+    Args:
+        raw_xml_cap: raw_xml の最大文字数 (default 2000、 ログ肥大化防止用 cap)。
+                     None で cap 解除 (= GetItem の Variations 全件取得等、 全文必要時)。
+
     Returns: {"success": bool, "ack": str|None, "error_code": str|None,
-              "error_message": str|None, "raw_xml": str (= 1KB cap)}
+              "error_message": str|None, "raw_xml": str (= raw_xml_cap で cap)}
     """
     import requests  # noqa: PLC0415
     if access_token is None:
@@ -147,14 +152,16 @@ def _call_trading(call_name: str, body_xml: str,
             new_token = refresh_access_token()
             print(f"  [Trading API] {call_name}: IAF token expired → refresh OK")
             return _call_trading(call_name, body_xml, access_token=new_token,
-                                  timeout=timeout, _allow_refresh=False)
+                                  timeout=timeout, _allow_refresh=False,
+                                  raw_xml_cap=raw_xml_cap)
         except Exception as e:
             return {"success": False, "ack": None, "error_code": "refresh_failed",
                     "error_message": f"token refresh 失敗: {e}", "raw_xml": xml[:1000]}
     ack, code, msg = _parse_ack_and_errors(xml)
     success = ack in ("Success", "Warning")
     return {"success": success, "ack": ack, "error_code": code,
-            "error_message": msg, "raw_xml": xml[:2000]}
+            "error_message": msg,
+            "raw_xml": (xml if raw_xml_cap is None else xml[:raw_xml_cap])}
 
 
 # ============================================================================

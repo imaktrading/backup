@@ -34,6 +34,29 @@ def _parse_variation_specifics(details_str: str) -> dict:
     return out
 
 
+def _extract_variation_available(xml: str, specifics: dict):
+    """GetItem 全文 XML から specifics 完全一致 variation の available qty を返す.
+
+    available = Quantity - QuantitySold (= eBay の per-variation 実在庫)。
+    多 variation listing で 1 SKU だけ取下げた verify に使う (= top-level Quantity =
+    全 variation sum では他 SKU 在庫で永遠に >0 = false-NG になるため)。
+
+    Returns: int (available) / None (一致 variation が XML に無い)。
+    """
+    import re as _re  # noqa: PLC0415
+    for vb in _re.findall(r"<Variation>(.*?)</Variation>", xml, _re.DOTALL):
+        vspecs = dict(_re.findall(
+            r"<Name>(.*?)</Name>\s*<Value>(.*?)</Value>", vb))
+        if all(vspecs.get(k, "").strip() == str(v).strip()
+               for k, v in specifics.items()):
+            q_m = _re.search(r"<Quantity>(\d+)</Quantity>", vb)
+            sold_m = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", vb)
+            total_qty = int(q_m.group(1)) if q_m else 0
+            sold = int(sold_m.group(1)) if sold_m else 0
+            return max(0, total_qty - sold)
+    return None
+
+
 def _parse_csv_rows(csv_path: Path) -> list:
     """CSV 自動判定: 3 col (single) or 6 col (variation) 両対応.
 
@@ -161,26 +184,35 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
         """HQ 2026-06-10 FINAL 指示 A: in-cycle verify (= 即 GetItem で qty=0 確認).
 
         Returns: (verified: bool, observed_qty: int|None, err_msg: str)
-          - verified=True: qty=0 確認 or err 17 (Item not found = ended、 同等扱い)
-          - verified=False, observed_qty=N: qty>0 のまま (= revise が反映されてない)
-          - verified=False, observed_qty=None: API 失敗 (= 確認不能、 保守的に失敗扱い)
+          - verified=True: available=0 確認 or err 17 (Item not found = ended、 同等扱い)
+          - verified=False, observed_qty=N: available>0 のまま (= revise が反映されてない)
+          - verified=False, observed_qty=None: API 失敗 / 確認不能 (= 保守的に失敗扱い)
 
-        variation listing は ReviseFixedPriceItem 経路で全 variation の構造変更を要するため、
-        GetItem の Quantity tag だけでは個別 variation qty 取れない (= 全 variation の sum)。
-        現状は variation も top-level Quantity を chk、 全 variation qty=0 なら sum=0 で確認可能、
-        部分的な variation 残存は false-positive 可能性あり (= Phase 2 改善対象)。
+        ★ 2026-06-10 修正 (variation false-NG 撲滅):
+        旧 logic は variation listing でも top-level <Quantity> (= 全 variation の sum) を
+        読んでいた。 多 variation listing で 1 SKU だけ取下げると、 他 SKU 在庫で sum>0 が
+        残り 「取下げ失敗」 と永遠に false-NG → 無駄リトライ + 偽 ⚠️要対応 メール (実際は
+        取下げ成功済)。 → variation は specifics 一致の <Variation> ブロックを GetItem
+        全文 (DetailLevel=ReturnAll, raw_xml cap 解除) から取り、 per-SKU の
+        available = Quantity - QuantitySold で判定する。
         """
         import re as _re  # noqa: PLC0415
         iid = item.get("item_id", "")
         if not iid:
             return False, None, "item_id_empty"
+        specifics = item.get("specifics") or {}
+        is_variation = (item.get("kind") == "variation") or bool(specifics)
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f'<ItemID>{iid}</ItemID></GetItemRequest>'
+            f'<ItemID>{iid}</ItemID>'
+            + ('<DetailLevel>ReturnAll</DetailLevel>' if is_variation else '')
+            + '</GetItemRequest>'
         )
         try:
-            res = _call_trading("GetItem", body, access_token=token)
+            # variation は Variations ブロックが 2000 字 cap の外 → cap 解除で全文取得
+            res = _call_trading("GetItem", body, access_token=token,
+                                raw_xml_cap=(None if is_variation else 2000))
         except Exception as e:
             return False, None, f"verify_exception: {type(e).__name__}: {e}"
         if res.get("error_code") == "17":
@@ -188,11 +220,21 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             return True, 0, "err_17_safe"
         if not res.get("success"):
             return False, None, f"verify_failed_ack={res.get('ack')} err={res.get('error_code')}"
-        # ★ 修正 2026-06-10: eBay の <Quantity> tag は 「累計出品数」 で 「available qty」 ではない。
-        # 真の available = Quantity - QuantitySold で計算する。
-        # 旧 logic は <Quantity> をそのまま読んでて、 単品 listing で
-        # Quantity=1 sold=1 (= 実 available 0) の場合に verify NG → false positive 量産。
         xml = res.get("raw_xml", "")
+
+        if is_variation:
+            # specifics 完全一致の <Variation> の per-SKU available を読む
+            available = _extract_variation_available(xml, specifics)
+            if available is None:
+                # 一致 variation が無い = eBay が 0-qty variation を削除した可能性 (= 取下げ済)
+                # だが specifics format 不一致の取りこぼしと区別不能 → 保守的に未確認扱い。
+                return False, None, "var_not_found_in_getitem"
+            return (available == 0), available, (
+                "var_qty_zero" if available == 0 else f"var_available_{available}"
+            )
+
+        # single listing: top-level available = Quantity - QuantitySold
+        # (eBay <Quantity> は累計出品数。 Quantity=1 sold=1 = 実 available 0 を正しく扱う)
         q_m = _re.search(r"<Quantity>(\d+)</Quantity>", xml)
         sold_m = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", xml)
         if q_m:

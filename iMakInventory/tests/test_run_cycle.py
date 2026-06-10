@@ -154,7 +154,7 @@ def test_prune_discarded_entries_requires_ebay_qty_zero(tmp_path, monkeypatch):
     monkeypatch.setattr(tac, "load_access_token", lambda: "test_token")
 
     # eBay GetItem の応答を item_id 別に偽装
-    def fake_call_trading(call_name, body, access_token=None):
+    def fake_call_trading(call_name, body, access_token=None, **kwargs):
         # body から ItemID 抽出
         import re
         m = re.search(r"<ItemID>([^<]+)</ItemID>", body)
@@ -342,7 +342,7 @@ def test_in_cycle_verify_blocks_silent_success(tmp_path, monkeypatch):
     monkeypatch.setattr(tac, "load_access_token", lambda: "test_token")
 
     # GetItem は qty=5 (= revise が実際は反映されてない) を返し続ける
-    def fake_call_trading(call_name, body, access_token=None):
+    def fake_call_trading(call_name, body, access_token=None, **kwargs):
         return {"success": True, "ack": "Success", "error_code": None,
                 "error_message": None,
                 "raw_xml": "<Quantity>5</Quantity><QuantitySold>0</QuantitySold>"}
@@ -394,7 +394,7 @@ def test_burst_guard_holds_mass_reinclude_to_action_required(tmp_path, monkeypat
     monkeypatch.setattr(tac, "load_access_token", lambda: "test_token")
 
     # GetItem は常に qty=1 を返す (= reinclude 候補化)
-    def fake_call_trading(call_name, body, access_token=None):
+    def fake_call_trading(call_name, body, access_token=None, **kwargs):
         return {"success": True, "ack": "Success", "error_code": None,
                 "error_message": None,
                 "raw_xml": "<Quantity>1</Quantity><QuantitySold>0</QuantitySold>"}
@@ -636,7 +636,7 @@ def test_verify_uses_available_qty_not_total(monkeypatch):
     monkeypatch.setattr(tac, "load_access_token", lambda: "test_token")
 
     # Quantity=1 sold=1 → available=0、 verify は qty=0 と判定すべき
-    def fake_get_item(call_name, body, access_token=None):
+    def fake_get_item(call_name, body, access_token=None, **kwargs):
         return {"success": True, "ack": "Success", "error_code": None,
                 "error_message": None,
                 "raw_xml": "<Quantity>1</Quantity><QuantitySold>1</QuantitySold>"}
