@@ -50,6 +50,31 @@ def _norm_category(c: str | None) -> str:
     return _CATEGORY_ALIASES.get(c, c)
 
 
+# brand → category 検出 (PSA brand は game名を含む=game identity の権威).
+#   番号衝突(例 ST04-013 が OP=X.Drake と Gundam=Hawk of Endymion の両方に存在)を分離する。
+#   2026-06-10 HQ greenlight (II): "GUNDAM"→gundam / "DRAGON BALL"・"DB"→dragonball 等。
+#   ⚠️ fail-closed: brand から確信を持って判定できない時は None (= 呼び出し側 category を尊重)。
+import re as _re  # noqa: E402
+
+_BRAND_CATEGORY_RULES = [
+    (_re.compile(r"\bONE\s*PIECE\b"), "one_piece_tcg"),
+    (_re.compile(r"\bGUNDAM\b"), "gundam_tcg"),
+    (_re.compile(r"DRAGON\s*BALL|\bDBS?\b|FUSION\s*WORLD"), "dragonball_scg"),
+    (_re.compile(r"\bYU-?GI-?OH\b"), "yugioh"),
+    (_re.compile(r"\bPOKEMON\b|\bPOKÉMON\b"), "pokemon_tcg"),
+]
+
+
+def _detect_category_from_brand(brand: str) -> str | None:
+    if not brand:
+        return None
+    b = brand.upper()
+    hits = [cat for rx, cat in _BRAND_CATEGORY_RULES if rx.search(b)]
+    # 一意に1 game のみ該当 → それを採用。複数該当(曖昧)→ None(fail-closed、呼び出し側尊重)
+    uniq = set(hits)
+    return hits[0] if len(uniq) == 1 else None
+
+
 def _normalize_url_key(url: str) -> str:
     """non-catalog marketplace URL → 正規化 url-key (item:/shops: prefix). spec §2."""
     if not url:
@@ -81,6 +106,11 @@ def resolve(context: dict) -> str:
     signals = context.get("signals") or {}
     cat = _norm_category(context.get("category"))
     brand = signals.get("brand") or ""
+    # (II) brand→category 検出: PSA brand は game identity の権威。番号衝突(ST04-013 OP/Gundam,
+    #      P-024 OP/DB)を分離。確信ある時のみ override、曖昧/不明は呼び出し側 category を尊重(fail-closed)。
+    _detected = _detect_category_from_brand(brand)
+    if _detected:
+        cat = _detected
     subject = signals.get("subject") or ""
     card_no = signals.get("card_no") or ""
     url = signals.get("url")

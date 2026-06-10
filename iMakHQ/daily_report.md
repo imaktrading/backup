@@ -735,3 +735,21 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 
 ### 検証
 - 検証✅: 全17件のcert→在るべきproduct_id を実機照会(B5件_pN実在/A OP03-044×3=_p2同変種/252 gundam ST04-013実在/610 box topper未収録 確認)
+
+## 2026-06-10 (続6) — Catalog: unresolved17 (I)(II) + DB/Gundam set-map 実装
+
+### 決定事項
+- 決定1(I): _promo_score edition matcher拡張(FILM RED/UTA/ONE PIECE DAY/PROMOTION CARD SET/STANDARD BATTLE 双方一致 + WINNER↔優勝/PREMIUM CARD COLLECTION qualifier)。B5件+A(405/453×3)解決
+- 決定2(II): resolver brand→category検出(GUNDAM/DRAGON BALL/ONE PIECE/POKEMON/YGO)。番号衝突252 ST04-013→gundam解決。曖昧→呼出側尊重(fail-closed)
+- 決定3(②): gundam(DUAL IMPACT→GD02等)+dragonball(MANGA BOOSTER NN→SBNN/ENERGY MARKER PACK NN→E0N) keyword逆引き。25件解決
+- 決定4(副次): name matcher に record.name_en 追加(JP name record も romaji subject照合) + subject tokenizer に :／& 区切り(TRUNKS:FUTURE)。453 Kaya/SB02 解決に必須
+
+### 変更
+- 変更: integrations/psa_to_csv.py _promo_score(edition/qualifier拡張) / extract_set_code_from_brand_gundam(keyword逆引き) / extract_set_code_from_brand_dragonball(MANGA BOOSTER/ENERGY MARKER) / _record_name_matches_subject(name_en追加) / _subject_tokens(:／&区切り)
+- 変更: resolver.py brand→category検出(_detect_category_from_brand)
+- 変更: tests/test_unresolved17_dbgundam_resolve.py 新規(7件)
+- 変更: requests/ に unresolved17 done / db_gundam response
+
+### 検証
+- 検証✅: B premium 5件(ST01-007_p5等)/405(OP01-016_p6)/453×3(OP03-044_p2)/252(ST04-013 gundam)/GD02-070/GD01-096/SB02-001/SB02-017/E01-03 全resolve。Chopper/Sabo回帰維持
+- 検証✅: pytest 新規7件 + 全体247 passed(回帰なし)

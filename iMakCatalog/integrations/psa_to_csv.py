@@ -159,7 +159,7 @@ def _subject_tokens(subject: str) -> set[str]:
     """PSA Subject から名前検証に使う有意トークンを抽出 (3文字以上、stopword/数字除外)."""
     if not subject:
         return set()
-    raw = re.split(r"[\s/\-]+", subject.upper())
+    raw = re.split(r"[\s/\-:：&]+", subject.upper())  # :／& も区切り (例 'TRUNKS:FUTURE'→TRUNKS,FUTURE)
     out: set[str] = set()
     for w in raw:
         w = w.strip(".,;:'’\"")
@@ -253,8 +253,10 @@ def _record_name_matches_subject(record: dict, subject: str) -> bool:
         return True
     name_en = (record.get("name") or "").upper()
     name_jp = record.get("name_jp") or ""
-    # 1. EN/混在 name の直接一致
-    combined = name_en + " " + name_jp.upper()
+    # 1. EN/混在 name の直接一致 (record.name + record.name_en + name_jp を corpus に。
+    #    DBSCG/Gundam 等 name列が日本語の record でも name_en で romaji subject と照合可。
+    #    2026-06-10: SB02-001 トランクス:未来 / name_en='Trunks : Future' を 'TRUNKS' と照合)
+    combined = name_en + " " + (record.get("name_en") or "").upper() + " " + name_jp.upper()
     if any(t in combined for t in tokens):
         return True
     # 2. JA-only record: 日本語名 → 想定 EN tokens に変換して照合
@@ -751,16 +753,33 @@ def _search_one_piece_promo_by_number(
         #    HQ Step2 確定(2026-06-10): brand edition句 ↔ set_name_official edition句 の一般照合。
         #    「両方一致」必須 = 同番号の別edition(_p4=FILM RED 等)への暴発防止。ハードコード非依存。
         #    例: BEST SELECTION VOL.4↔ベストセレクション vol.4(Sabo) / 25TH ANNIVERSARY↔25周年(Chopper ST01-006_p1)
+        #    2026-06-10 拡張(HQ greenlight unresolved17 (I)): edition/event の brand英↔official日 pair。
         edition_hit = False
         m_bs = re.search(r"BEST\s*SELECTION\s*VOL\.?\s*(\d+)", brand_upper)
         if m_bs and "ベストセレクション" in sn and re.search(rf"vol\.?\s*{m_bs.group(1)}\b", sn, re.IGNORECASE):
             edition_hit = True
         if re.search(r"25TH|25\s*周年", brand_upper) and "25周年" in sn:
             edition_hit = True
-        if "FILM RED" in brand_upper and "FILM RED" in sn_upper:
+        # edition/event pair (両方一致必須=暴発防止)。英keyword in brand かつ 日keyword in official。
+        for en, jp in (
+            ("FILM RED", "FILM RED"),
+            ("ONE PIECE DAY", "ONE PIECE DAY"),
+            ("PROMOTION CARD SET", "プロモーションカードセット"),
+            ("STANDARD BATTLE", "スタンダードバトル"),
+        ):
+            if en in brand_upper and (jp in sn or jp in sn_upper):
+                edition_hit = True
+        # UTA は短語のため \bUTA\b 限定 + official 'ウタ'
+        if re.search(r"\bUTA\b", brand_upper) and "ウタ" in sn:
             edition_hit = True
         if edition_hit:
             score += 250  # edition 一意特定 = 汎用promo(_P 220)を上回る最優先
+        # qualifier: 同一edition内の別variantを分離(+30)。WINNER↔優勝 / PREMIUM CARD COLLECTION↔プレミアムカードコレクション
+        #   (例 FILM RED で _p5=プレミアムカードコレクション と _p3=入場者特典 を分離)
+        if "WINNER" in brand_upper and "優勝" in sn:
+            score += 30
+        if "PREMIUM CARD COLL" in brand_upper and "プレミアムカードコレクション" in sn:
+            score += 30
         # 8) cross-set 誤選択防止: brand が MEMORIAL/EB を明示しないのに EB(Memorial由来)
         #    promo が原典set(ST/OP)の promo と同点になる誤マッチ (Chopper EB01-006_P_treasure)
         #    → EB由来 promo を減点し原典set promo を優先 (誤マッチ防止、原典優先)
@@ -811,6 +830,16 @@ def extract_set_code_from_brand_gundam(brand: str) -> Optional[str]:
     m = re.search(r"\b(GD\d+|ST\d+|EX\d+)\b", b)
     if m:
         return m.group(1)
+    # set 名キーワード逆引き (PSA brand が code token を持たず literal英名のみのケース)
+    #   2026-06-10 HQ依頼 db_gundam_setmap (SwSh set-map と同型)。真値=公式弾名。
+    for kw, code in (
+        ("NEWTYPE RISING", "GD01"),
+        ("DUAL IMPACT", "GD02"),
+        ("STEEL REQUIEM", "GD03"),
+        ("PHANTOM ARIA", "GD04"),
+    ):
+        if kw in b:
+            return code
     # Resource Promo は専用 prefix 'RP' (= catalog product_id 'RP-009' 等).
     # PSA brand 'GUNDAM JAPANESE RESOURCE PROMOS' → 'P' に潰すと P-009 を探して miss するため先に分岐.
     if "RESOURCE" in b:
@@ -969,6 +998,14 @@ def extract_set_code_from_brand_dragonball(brand: str) -> Optional[str]:
     m = re.search(r"\b(FB\d+|FS\d+|SB\d+|FP\d+)\b", b)
     if m:
         return m.group(1)
+    # set 名キーワード逆引き (literal名のみで code token 無し)。2026-06-10 HQ依頼 db_gundam_setmap。
+    #   MANGA BOOSTER NN → SBNN / ENERGY MARKER PACK NN → E0N (catalog: SB01/SB02, E01-E03)。
+    m2 = re.search(r"MANGA\s*BOOSTER\s*(\d+)", b)
+    if m2:
+        return f"SB{int(m2.group(1)):02d}"
+    m3 = re.search(r"ENERGY\s*MARKER\s*PACK\s*(\d+)", b)
+    if m3:
+        return f"E{int(m3.group(1)):02d}"
     if any(k in b for k in ("PROMO", "PROMOS", "TOURNAMENT", "CHAMPIONSHIP")):
         return "FP"  # DBSCG promo prefix (要確認)
     return None
