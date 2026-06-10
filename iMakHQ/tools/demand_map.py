@@ -72,20 +72,57 @@ def _psa_char(title):
     return name or None
 
 
-def extra_facets(vein, title):
-    """demand_winners.facets() に無い軸を補う。G-SHOCK型番系統 / PSAカード番号・キャラ。"""
+def _ebay_item_id(url):
+    """ebay_url → itemID (mercari_psa_resource と同ロジック・KEY join 用)。"""
+    try:
+        import mercari_psa_resource as _mp
+        return _mp._ebay_item_id(url)
+    except Exception:
+        m = re.search(r"/(\d{10,})", url or "")
+        return m.group(1) if m else None
+
+
+def _name_jp_for_key(key, _cache={}):
+    """canonical KEY → catalog name_jp (demand_map キャラ軸用)。失敗時 None。"""
+    if key in _cache:
+        return _cache[key]
+    nj = None
+    try:
+        import mercari_psa_resource as _mp
+        meta = _mp.card_meta_for_key(key)
+        nj = meta.get("name_jp") if meta else None
+    except Exception:
+        nj = None
+    _cache[key] = nj
+    return nj
+
+
+def extra_facets(vein, title, key=None):
+    """demand_winners.facets() に無い軸を補う。G-SHOCK型番系統 / PSAカード番号・キャラ。
+
+    Step6 P4: PSA card は **canonical KEY(商品管理シート itemID join)** が解決できれば
+    番号regex/キャラheuristic でなく **canonical product_id + catalog name_jp** で集計
+    (番号衝突・heuristic誤りを排除 = コードTODO「要catalog化が本筋」を実行)。
+    KEY 未解決(管理外行)→ 従来の regex/heuristic に fallback(後方互換)。
+    """
     out = []
     if vein == "G-SHOCK":
         s = _gs_series(title)
         if s:
             out.append(("型番系統", s))
     elif vein == "PSA card":
-        c = _psa_char(title)
-        if c:
-            out.append(("キャラ", c))
-        n = _psa_cardnum(title)
-        if n:
-            out.append(("カード番号", n))
+        if key:
+            out.append(("KEY", key))             # canonical product_id (一意・番号衝突なし)
+            nj = _name_jp_for_key(key)
+            if nj:
+                out.append(("キャラ", nj))        # catalog 正名 (heuristic でない)
+        else:
+            c = _psa_char(title)
+            if c:
+                out.append(("キャラ", c))
+            n = _psa_cardnum(title)
+            if n:
+                out.append(("カード番号", n))
     return out
 
 try:
@@ -130,11 +167,26 @@ def aggregate(rows):
     """funnel 行を vein別 と facet別(観点,値) に集計。eBay需要と国内OOSを同じcellに別フィールドで持つ。"""
     vein_agg = defaultdict(_blank_cell)
     facet_agg = defaultdict(_blank_cell)
+    # Step6 P4: itemID→canonical KEY map を1回読む(PSA card facet を KEY集計に)。失敗時 fallback。
+    keymap = {}
+    try:
+        from sheet_io import product_index
+        keymap, _ = product_index()
+    except Exception:
+        keymap = {}
+    keyed = total_psa = 0
     for r in rows:
         title = (r.get("title") or "").strip()
         if not title:
             continue
         vein = dw.vein_of(title)
+        key = None
+        if keymap and vein == "PSA card":
+            total_psa += 1
+            iid = _ebay_item_id(r.get("ebay_url", "") or "")
+            key = keymap.get(iid) if iid else None
+            if key:
+                keyed += 1
         sold = _f(r.get("sold_qty")) + _f(r.get("sales90"))
         watch = _f(r.get("watch"))
         impr = _f(r.get("impr_total")) or _f(r.get("impr"))  # 累計(広告込)=真の露出。organicのみは過小
@@ -144,8 +196,11 @@ def aggregate(rows):
         _ingest(vein_agg[vein], score, sold, watch, impr, is_oos, flags)
         for kan, val, _m in dw.facets(vein, title):
             _ingest(facet_agg[(kan, val)], score, sold, watch, impr, is_oos, flags)
-        for kan, val in extra_facets(vein, title):   # G-SHOCK型番系統 / PSAキャラ・カード番号
+        for kan, val in extra_facets(vein, title, key):   # G-SHOCK型番系統 / PSA: KEY+catalog名 or fallback
             _ingest(facet_agg[(kan, val)], score, sold, watch, impr, is_oos, flags)
+    if total_psa:
+        print(f"[demand_map] PSA canonical KEY 集計: {keyed}/{total_psa} 行 "
+              f"(残 {total_psa-keyed} は番号regex fallback)", flush=True)
     return vein_agg, facet_agg
 
 
