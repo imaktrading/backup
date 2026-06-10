@@ -303,19 +303,24 @@ def pick_cheapest_psa10(items, card_no, variant_hint=None):
         return (it["price"], it["href"], it["name"])
     if not variant_hint:
         return _ret(matches[0])
-    from snkrdunk_psa_resource import _hint_tokens
+    from snkrdunk_psa_resource import _hint_tokens, _print_signal, _item_print
     toks = _hint_tokens(variant_hint)
     if not toks:
         return _ret(matches[0])           # hint からトークン取れず → 従来最安
-    # 各候補を hint トークン一致数で採点。最高スコア群(=正変種)の中で最安を採る。
-    # character(name_jp)は全候補に当たるので底上げ、discriminating な set トークンが上位を決める。
+    # ①set トークン採点で最高スコア群(=正set)に絞る → ②同setで複数なら print種別で tie-break → 最安。
     scored = [(sum(1 for t in toks if t in (it["name"] or "").upper().replace(" ", "").replace("-", "")), it)
               for it in matches]   # matches は価格昇順を保持
     top = max(s for s, _ in scored)
     if top == 0:
         return _ret(matches[0]) if len(matches) == 1 else None   # 決め手無+複数 → fail-closed
     topgroup = [it for s, it in scored if s == top]              # 価格昇順保持
-    return _ret(topgroup[0])                                     # 正変種の最安
+    if len(topgroup) == 1:
+        return _ret(topgroup[0])                                 # set で一意 → その最安
+    target = _print_signal(variant_hint)
+    matched = [it for it in topgroup if _item_print(it["name"]) == target]
+    if matched:
+        return _ret(matched[0])           # 正 print種別の最安 (価格昇順保持)
+    return None                           # 同set・print でも一意化できず → fail-closed
 
 
 def parse_image_search_results(src):

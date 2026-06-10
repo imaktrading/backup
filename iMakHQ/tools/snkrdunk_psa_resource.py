@@ -97,6 +97,37 @@ def _hint_tokens(variant_hint):
     return toks
 
 
+def _print_signal(variant_hint):
+    """canonical変種の print種別を返す: 'SPC'(SP/特別) / 'P'(パラレル/alt art) / ''(通常)。
+
+    hint(card_meta_for_key の list)に variant_type='alt_art' / rarity='SPカード' 等が入る。
+    同一set内の 通常 vs パラレル vs SP を marketplace の print マーカーと突合する基準。
+    """
+    parts = variant_hint if isinstance(variant_hint, (list, tuple)) else [variant_hint]
+    s = " ".join(str(p) for p in parts if p).upper()
+    if "SPカード".upper() in s or "SPC" in s or "スーパーパラレル".upper() in s:
+        return "SPC"
+    if "ALT_ART" in s or "PARALLEL" in s or "パラレル".upper() in s:
+        return "P"
+    return ""
+
+
+def _item_print(name):
+    """marketplace 商品名から print種別を判定: 'SPC' / 'P' / ''(通常)。
+
+    SNKRDUNK rarity-print コード(例 'R-P'/'SR-P'/'R-SPC')や 'パラレル'/'SP' 表記を検出。
+    """
+    n = (name or "").upper()
+    m = re.search(r"\b[A-Z]{1,3}-(SPC|SP|SEC|PR|P)\b", n)
+    if m:
+        return "SPC" if m.group(1) in ("SPC", "SP", "SEC") else "P"
+    if "パラレル" in (name or "") or "PARALLEL" in n:
+        return "P"
+    if "スーパーパラレル" in (name or "") or "SPカード" in (name or ""):
+        return "SPC"
+    return ""
+
+
 def parse_search_for_card(data, card_number, variant_hint=None):
     """search レスポンスから card_number に一致する trading-card id を抽出 (純関数・id-strict)。
 
@@ -128,22 +159,24 @@ def parse_search_for_card(data, card_number, variant_hint=None):
         return None
     if len(matches) == 1:
         return matches[0].get("id")           # 単一一致 = 確定
-    # 複数 print (変種非決定性): hint で絞る
+    # 複数 print (変種非決定性): ①set トークンで絞る → ②同setで残れば print種別で tie-break
     toks = _hint_tokens(variant_hint)
     if not toks:
         return None                            # hint無で複数 = 曖昧 → fail-closed
-    scored = []
-    for it in matches:
-        nm = (it.get("name") or "").upper().replace(" ", "").replace("-", "")
-        scored.append((sum(1 for t in toks if t in nm), it.get("id")))
-    scored.sort(key=lambda x: -x[0])
-    top, top_score = scored[0], scored[0][0]
-    # 決め手(score>0 かつ 2位と差がある=一意)が無ければ fail-closed
+    scored = [(sum(1 for t in toks if t in (it.get("name") or "").upper().replace(" ", "").replace("-", "")), it)
+              for it in matches]
+    top_score = max(s for s, _ in scored)
     if top_score <= 0:
-        return None
-    if len(scored) > 1 and scored[1][0] == top_score:
-        return None                            # 同点 = 一意でない → fail-closed
-    return top[1]
+        return None                            # set 決め手無 → fail-closed
+    topgroup = [it for s, it in scored if s == top_score]
+    if len(topgroup) == 1:
+        return topgroup[0].get("id")           # set で一意
+    # 同 set 内に複数 print → print種別(parallel/special/通常)で tie-break
+    target = _print_signal(variant_hint)
+    matched = [it for it in topgroup if _item_print(it.get("name", "")) == target]
+    if len(matched) == 1:
+        return matched[0].get("id")
+    return None                                # print でも一意化できず → fail-closed
 
 
 def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None):
