@@ -336,6 +336,11 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "csv_auditor.py"],  # 引数なし=最新CSV自動。4軸監査+機械修正+依頼
         "params": [],
+        # 監査=読取専用。後処理チェーン(excluder/dedupe/write-keys)を再実行させない。
+        # 再実行すると 直前 cycle で write-keys が書いた canonical KEY を dedupe が「既存」と
+        # 誤認し、未出品(itemID空)の自カードを自己重複として CSV から削除する (2026-06-10 発覚:
+        # 3件→1件に誤減。psa_to_csv の post-chain で既に1回処理済=2度目は不要)。
+        "skip_postprocess": True,
     },
     {
         "category": None, "type": "utility",
@@ -1671,7 +1676,8 @@ class ListingPanel:
                     except Exception:
                         _skip_pp = False
                     if _skip_pp:
-                        self.append_log("\n(取下再出品②: excluder/title-fix/重複くん の後処理をスキップ — 同型番の意図的再出品)\n")
+                        _skip_label = SCRIPTS[_idx].get("label", "") if _idx >= 0 else ""
+                        self.append_log(f"\n({_skip_label}: excluder/title-fix/重複くん の後処理をスキップ — skip_postprocess)\n")
                     # Step 2: csv_postprocess_excluder (check_csv NO-GO 行を CSV 物理除外)
                     # Step 2.5: post_title_fix (TCG タイトル長補強・PSA 名前正規化, 2026-05-02 追加)
                     # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
