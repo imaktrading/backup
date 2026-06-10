@@ -324,7 +324,7 @@ def _get_ebay_filter():
 #   eBay 公式 API list には未登録だが、 出品は通る。 空欄にすると eBay AI が
 #   勝手に Japan 等を補完するため、 明示的に "Does not apply" を入れる必要あり。
 EBAY_FILTER_SPECIAL_BYPASS = {
-    "Country of Origin": {"does not apply"},  # NFKC+lower 正規化済 で比較
+    "Country of Origin": {"does not apply", "japan"},  # NFKC+lower 正規化済 で比較
 }
 
 
@@ -2191,9 +2191,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         "FixedPrice", "GTC", 1, LOCATION, 1,
         shipping, RETURN_POLICY, PAYMENT_POLICY,
         game, set_name, card_type, card_name, character, card_number,
-        # Country of Origin: "Does not apply" 固定（tshirt_listing_rules 準拠）。
-        # 画像/公式DBで製造国を100%特定できない限り、eBay AI の勝手な Japan 補完を明示的に塞ぐ
-        rarity, features, manufacturer, "Japanese", year, "Does not apply", franchise,
+        # Country of Origin: One Piece は card に made in japan 印字で日本製造が確実 → "Japan"
+        # (2026-06-10 ユーザー指示・まず OP から)。他は "Does not apply"（製造国を特定できない
+        # 場合の eBay AI 勝手な Japan 補完を明示的に塞ぐ＝従来方針）。
+        rarity, features, manufacturer, "Japanese", year,
+        ("Japan" if franchise == "One Piece" else "Does not apply"), franchise,
         "6+", "No", "No", "Card Stock", card_size, "No",
         finish, attribute, illustrator, cost, power, "",
         "Near Mint or Better", "10",
