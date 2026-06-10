@@ -262,8 +262,10 @@ def test_email_header_shows_untaken_count_when_action_required(tmp_path, monkeyp
             "action_required_summary": {
                 "count": 2,
                 "items": [
-                    {"sheet": "LOW", "row": 637, "item_id": "",
-                     "title": "test1", "reason": "item_id_empty"},
+                    # ユーザー指示 2026-06-10: item_id 空欄 = 未出品扱い (= action_required 化禁止)。
+                    # 新実装は item_id 空欄では action_required に積まない。 test は別 reason を使う。
+                    {"sheet": "LOW", "row": 637, "item_id": "555",
+                     "title": "test1", "reason": "verify_qty_gt0_giveup"},
                     {"sheet": "HIGH", "row": 479, "item_id": "333",
                      "title": "test2", "reason": "verify_qty_gt0_giveup"},
                 ],
@@ -275,7 +277,6 @@ def test_email_header_shows_untaken_count_when_action_required(tmp_path, monkeyp
     assert "仕入元在庫監視 :" in body
     assert "eBay 在庫調整  :" in body
     assert "⚠️ 要対応 (売切検知 4 → 完了 2 / 未取下げ 2)" in body
-    assert "item_id_empty" in body
     assert "verify_qty_gt0_giveup" in body
     # 旧 bug の「正常」 表記が出ないことを確認
     assert "正常 (取下げ実施)" not in body

@@ -566,11 +566,11 @@ def process_sheet(
                 if res.get("item_id"):
                     append_pending_revise(sheet_label, res, dry_run=dry_run)
                 else:
-                    # HQ 2026-06-10 FINAL 指示 B: item_id 空欄 = silent 除外禁止
-                    # 「除外」 ではなく 「未取下げ=要対応」 として明示
-                    append_action_required(
-                        sheet_label, res, reason="item_id_empty", dry_run=dry_run)
-                    log(f"    [★要対応] item_id 空欄、 silent 除外せず action_required 化")
+                    # ユーザー指示 2026-06-10: itemID 空欄 = 未出品 (= 監視予定行)、 正常状態。
+                    # 旧実装は HQ 指示 B 「silent 除外禁止」 を誤適用して action_required に積んでいた。
+                    # 真の silent loss (= 出品済だが itemID 未記録) と 未出品 を区別不能なため、
+                    # ユーザー判断尊重 (= 「itemID 空欄なら未出品扱い」)。 log のみ記録、 alert なし。
+                    log(f"    [info] item_id 空欄 = 未出品扱い (newly_sold 検知のみ記録、 revise なし)")
 
         results.append(res)
 
