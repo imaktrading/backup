@@ -56,6 +56,17 @@ MAIN_COL_TITLE = 2       # B
 MAIN_COL_LISTING_ID = 3  # C
 MAIN_COL_URL = 6         # F (仕入元URL)
 
+# SKU詳細シート列マッピング (1-based)
+# header: A=対処要 B=対処済 C=対処日 D=listing ID E=title F=eBay SKU ID G=サイズ H=色
+#         I=仕入元在庫 J=仕入元価格 K=eBay現Qty L=自動CHK日 M=Phase4状態 N=試行時刻
+#         O=eBay Status P=カテゴリ Q=前期仕入元価格 R=KEY S=KEY2
+SKU_COL_LISTING_ID = 4   # D
+# T: 巡回ERR (scrape error の SKU 行マーカー、成功で clear)。2026-06-11 追加。
+# S=KEY2 の次の新設列 (grid 拡張要)。HIGH/LOW の AK 列 / per-SKU 版。
+# scrape は listing 単位で失敗するので、 該当 listing の全 SKU 行 (D列=listing_id) をマークする。
+SKU_COL_ERR_FLG = 20     # T
+SKU_ERR_FLG_HEADER = "巡回ERR"
+
 
 # ============================================================================
 # 認証 / スプシオープン
@@ -153,6 +164,84 @@ def read_main_active_rows(sh, supplier_filter: str = "all") -> list:
 def read_main_active_uniqlo_rows(sh) -> list:
     """[Deprecated] read_main_active_rows(sh, 'uniqlo') と同等."""
     return read_main_active_rows(sh, supplier_filter="uniqlo")
+
+
+# ============================================================================
+# SKU詳細シート T 列 (巡回ERR) 書込
+# ============================================================================
+def _col_letter(n: int) -> str:
+    """1-based 列番号 → A1 列文字 (例 20 -> 'T')."""
+    s = ""
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def build_sku_listing_map(sh, sku_rows: Optional[list] = None) -> dict:
+    """SKU詳細シートから listing_id → [{"row_index", "err_flag_prev"}] の map を構築.
+
+    scrape は listing 単位で失敗するので、 失敗 listing の全 SKU 行を逆引きするための索引。
+
+    Args:
+        sku_rows: read_sku_rows(sh) の結果 (= header 除く all_values[1:])。
+                  None なら内部で read_sku_rows する。
+    Returns: {listing_id: [{"row_index": int(1-based), "err_flag_prev": str}, ...]}
+    """
+    if sku_rows is None:
+        sku_rows = read_sku_rows(sh)
+    out: dict = {}
+    li = SKU_COL_LISTING_ID - 1
+    ti = SKU_COL_ERR_FLG - 1
+    for offset, row in enumerate(sku_rows):
+        row_index = offset + 2  # header=行1、 sku_rows は行2 から
+        listing_id = (row[li] if len(row) > li else "").strip()
+        if not listing_id:
+            continue
+        prev = (row[ti] if len(row) > ti else "").strip()
+        out.setdefault(listing_id, []).append({
+            "row_index": row_index, "err_flag_prev": prev,
+        })
+    return out
+
+
+def ensure_sku_err_header(sh) -> bool:
+    """SKU詳細シート T1 に「巡回ERR」ヘッダを設定 (未設定時のみ、 必要なら grid 拡張)."""
+    ws = get_sku_worksheet(sh)
+    col = SKU_COL_ERR_FLG
+    # grid が T 列に届いていなければ拡張 (S=19 までしか無い既存シート対策)
+    if ws.col_count < col:
+        ws.add_cols(col - ws.col_count)
+    try:
+        cur = ws.cell(1, col).value
+    except Exception:
+        cur = None
+    if (cur or "").strip() == SKU_ERR_FLG_HEADER:
+        return False
+    ws.update(values=[[SKU_ERR_FLG_HEADER]],
+              range_name=f"{_col_letter(col)}1",
+              value_input_option="USER_ENTERED")
+    return True
+
+
+def write_sku_err_flags(sh, flag_updates: list) -> int:
+    """SKU詳細シート T 列 (巡回ERR) を batch 書込.
+
+    Args:
+        flag_updates: [{"row_index": 2 (1-based), "err_flag": "⚠ ..." or ""}, ...]
+                      err_flag="" は clear (= 成功した listing の SKU 行)。
+    Returns: 書込セル数。
+    """
+    if not flag_updates:
+        return 0
+    ws = get_sku_worksheet(sh)
+    col_letter = _col_letter(SKU_COL_ERR_FLG)
+    cell_updates = [
+        {"range": f"{col_letter}{u['row_index']}", "values": [[u.get("err_flag", "")]]}
+        for u in flag_updates
+    ]
+    ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+    return len(cell_updates)
 
 
 # ============================================================================

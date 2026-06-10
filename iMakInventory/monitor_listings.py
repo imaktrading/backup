@@ -59,7 +59,9 @@ from sheet_updater import (  # noqa: E402
     paint_backup_url_cells,
     detect_supplier,
     _domain_of,
+    ensure_listings_err_header,
 )
+from err_flag import build_err_marker, marker_count, PERSISTENT_THRESHOLD  # noqa: E402
 from scrapers.mercari_scraper import fetch_product_inventory as fetch_mercari  # noqa: E402
 from scrapers.mercari_scraper import create_driver as create_mercari_driver  # noqa: E402
 from scrapers.amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
@@ -378,6 +380,14 @@ def process_sheet(
     ws = get_listings_worksheet(sh, gid=LISTINGS_GID)
     log(f"  worksheet: {ws.title} (id={ws.id}, total_rows={ws.row_count})")
 
+    # AK 列 (巡回ERR) ヘッダを一度だけ設定 (既存なら no-op)
+    if not dry_run:
+        try:
+            if ensure_listings_err_header(ws):
+                log("  AK1 に「巡回ERR」ヘッダを新規設定")
+        except Exception as e:
+            log(f"  [!] AK ヘッダ設定 skip ({type(e).__name__}: {e})")
+
     rows = read_listings_rows(ws, start_row=start_row, end_row=end_row, only_with_url=True)
     log(f"  active rows (URL あり): {len(rows)}")
 
@@ -667,7 +677,10 @@ def process_sheet(
     #   - D 列: 「変化があった行」のみ更新 (人手書込を尊重)
     #   - N 列: scrape で価格取得できた行のみ更新 (None なら触らない、purely additive)
     checked_at_now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    err_now = datetime.now()  # AK 列 marker 用 (= checked_at と同 cycle 時刻)
     updates = []
+    # AK 列 (巡回ERR) 連続エラー回数が PERSISTENT_THRESHOLD 以上の行 = 持続エラー (要手動 chk)
+    persistent_err_rows = []
     # 2026-05-25 純粋抽出化 (依頼: monitor_pure_extract_implementation): 異常値ガード撤廃
     # 監視くんは scrape 値そのまま N列書込、 異常値判定 / warning / alert は全て下流
     # (リバイスくん / 出品くん / 別 logger worker) に委譲。 1 機能 1 worker 原則。
@@ -684,37 +697,61 @@ def process_sheet(
         if r["error"] or r["is_sold"] is None:
             # 取得不能 → O 列だけ更新 (D 列は既存維持、fail-closed 維持)
             #          N 列は price_jpy=None なので触らない (既存値維持)
+            #          AK 列 = 連続エラー marker (前 cycle の marker から回数累積)
+            marker = build_err_marker(
+                r["error"] or "in_stock indeterminate",
+                r.get("err_flag_prev", ""),
+                now=err_now,
+            )
             upd = {
                 "row_index":  r["row_index"],
                 "checked_at": checked_at_now,
                 "o_only":     True,
+                "err_flag":   marker,
             }
             if price_jpy is not None:
                 upd["price_jpy"] = price_jpy
                 upd["prev_n_jpy_str"] = prev_n
             updates.append(upd)
+            if marker_count(marker) >= PERSISTENT_THRESHOLD:
+                persistent_err_rows.append({
+                    "row_index": r["row_index"],
+                    "item_id":   r.get("item_id", ""),
+                    "url":       (r.get("url") or "")[:120],
+                    "title":     (r.get("title") or "")[:50],
+                    "count":     marker_count(marker),
+                    "error":     (r.get("error") or "")[:150],
+                    "supplier":  r.get("supplier", ""),
+                })
             continue
         # D 列に変化があるかどうか判定
         new_d = "○" if r["is_sold"] else ""
         old_d = (r.get("current_sold") or "").strip()
+        # 成功行の AK clear は「前 cycle に marker があった行のみ」(= 無駄な全行書込を回避)
+        clear_err = bool((r.get("err_flag_prev") or "").strip())
         if new_d == old_d:
             # 変化なし → O 列のみ更新 (D 列はそのまま)
+            #   AK 列 = 成功したので clear ("") → 前 cycle のエラー marker を消す (自己修復)
             upd = {
                 "row_index":  r["row_index"],
                 "checked_at": checked_at_now,
                 "o_only":     True,
             }
+            if clear_err:
+                upd["err_flag"] = ""
             if price_jpy is not None:
                 upd["price_jpy"] = price_jpy
                 upd["prev_n_jpy_str"] = prev_n
             updates.append(upd)
         else:
-            # 変化あり → D + O 両方更新
+            # 変化あり → D + O 両方更新 (前 cycle marker あれば AK も clear)
             upd = {
                 "row_index":  r["row_index"],
                 "is_sold":    r["is_sold"],
                 "checked_at": checked_at_now,
             }
+            if clear_err:
+                upd["err_flag"] = ""
             if price_jpy is not None:
                 upd["price_jpy"] = price_jpy
                 upd["prev_n_jpy_str"] = prev_n
@@ -728,10 +765,11 @@ def process_sheet(
         d_count = sum(1 for u in updates if not u.get("o_only"))
         n_count = sum(1 for u in updates if u.get("price_jpy") is not None)
         o_count = len(updates)
-        log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + N 列価格 {n_count} 件 + O 列 {o_count} 件)")
+        e_count = sum(1 for u in updates if "err_flag" in u)
+        log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + N 列価格 {n_count} 件 + O 列 {o_count} 件 + AK巡回ERR {e_count} 件)")
         try:
             res = update_listings_sold_marks(ws, updates)
-            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / n_writes={res.get('n_writes', '?')} / o_writes={res.get('o_writes', '?')})")
+            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / n_writes={res.get('n_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
         except Exception as e:
             log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())
@@ -771,14 +809,20 @@ def process_sheet(
     # decision_log は dry_run でも記録
     append_decision_log(sheet_label, results, dry_run)
 
+    if persistent_err_rows:
+        log(f"  ⚠️ 持続エラー (連続{PERSISTENT_THRESHOLD}回以上、要手動 chk): {len(persistent_err_rows)} 件")
+        for er in persistent_err_rows[:10]:
+            log(f"     row{er['row_index']} ×{er['count']} {er['url'][:60]}")
+
     log(f"  完了 [{sheet_label}]")
     return {
-        "processed":      len(results),
-        "newly_sold":     newly_sold,
-        "newly_in_stock": newly_in_stock,
-        "errors":         errors,
-        "url_alerts":     url_alerts,
-        "error_rows":     error_rows,
+        "processed":            len(results),
+        "newly_sold":           newly_sold,
+        "newly_in_stock":       newly_in_stock,
+        "errors":               errors,
+        "url_alerts":           url_alerts,
+        "error_rows":           error_rows,
+        "persistent_err_rows":  persistent_err_rows,
     }
 
 

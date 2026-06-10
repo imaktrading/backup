@@ -1,5 +1,62 @@
 # iMakInventory daily_report
 
+## 2026-06-11 — 巡回ERR FLG 列導入 (3スプシ) + run_daily.py 致命 SyntaxError 修正
+
+### 決定
+- メール本文のエラー row 表示が上位10件 cap で、11件以上だと残り URL が拾えない取りこぼし
+  が判明 (Takaaki さん指摘)。→ **スプシに専用「巡回ERR」列を設け、件数無制限で全 error 行を
+  filter 可能にする**方針を採用。
+- 対象は **HIGH / LOW / 公式 の 3 スプシ全部** (Takaaki さん指示「公式にも追加を」)。
+  公式は別系統「公式監視くん」(iMakeBayAPI/inventory_monitor/run_daily.py, 毎日08:00) が巡回。
+- 書込先の列 (Takaaki さん確定):
+  - HIGH/LOW = 商品管理シート **AK 列** (per-listing、 D=売り切れの隣系統)
+  - 公式 = **SKU詳細シート T 列** (per-SKU)。理由: 公式の在庫ステータス(I=仕入元在庫)は
+    SKU詳細にあり、シート1は入力リストに過ぎない。scrape は listing 単位失敗なので
+    該当 listing の全 SKU 行 (D=listing_id 逆引き) を同 count でマーク。
+- marker は **連続エラー回数つき** (`⚠ ReadTimeout ×2 06/11 06:03`)。成功で自動 clear (自己修復)。
+  連続3回以上 = 持続エラーとしてメール別掲 (transient と区別、 手動 chk 促し)。
+- 関連 row747 (m48307094591): 22:08 / 02:03 と 2 cycle 連続 localhost ReadTimeout だが
+  在庫あり (Takaaki さん確認)。本機構はこの type の blind spot を炙り出すのが狙い。
+
+### 変更
+- 新規: `err_flag.py` (HIGH/LOW 側) / `iMakeBayAPI/inventory_monitor/err_flag.py` (公式側、同一複製)
+  - marker 生成/解析: build_err_marker / marker_count / is_persistent / PERSISTENT_THRESHOLD=3
+- HIGH/LOW 側:
+  - `sheet_updater.py`: LISTINGS_COL_ERR_FLG=37(AK) 追加、read_listings_rows に err_flag_prev、
+    update_listings_sold_marks に err_flag 書込、ensure_listings_err_header / _col_letter 追加
+  - `monitor_listings.py:686付近`: エラー行→連続回数 marker / 成功行(前marker有時のみ)→clear、
+    persistent_err_rows 集計、process_sheet start で AK ヘッダ ensure
+  - `run_cycle.py:226,248付近`: grand に persistent_err_rows 集約
+  - `email_notifier.py:347付近`: AK列誘導行 + 持続エラー別掲ブロック
+- 公式側 (SKU詳細 T 列、 per-SKU):
+  - `sheet_updater.py`: SKU_COL_ERR_FLG=20(T) / SKU_COL_LISTING_ID=4(D) 追加、
+    build_sku_listing_map (listing_id→SKU行逆引き) / write_sku_err_flags /
+    ensure_sku_err_header (grid 19→20 拡張込み) / _col_letter 追加
+  - `main.py:740付近`: cycle_sku_rows から listing_map 構築、 loop で listing 失敗時に
+    全 SKU 行を同 count マーク / 成功時 clear、 persistent 集計 + 「持続エラー : N」出力、
+    SKU status 書込後に T列書込 (独立 fail-safe)
+  - `run_daily.py:55,212付近`: _parse_monitor_output に persistent_errors (「持続エラー」を
+    「エラー」より先に判定し continue で衝突回避)、report に H列誘導 + 持続別掲
+- **致命バグ修正①**: `run_daily.py:254` `lines.extend([...]` が `])` でなく `]` で閉じられて
+  おり **SyntaxError** (commit cda4126 2026-06-10 16:18 で混入)。→ `])` に修正。
+- **件名を HIGH/LOW に整合 + バグ修正②**: `run_daily.py:182` 公式 subject の `overall` 判定が
+  `err_rate >= 0.1` (旧「N%以下なら正常」思想の残骸) → `scrape_errors > 0` に変更
+  (= 1件でもerror→要対応、 本文冒頭2行と一致、 HIGH/LOW と同思想)。同時に **`err_rate` は
+  scrape_errors=0 時 未定義** = error0・ng0 の clean cycle で件名生成が **NameError クラッシュ**
+  する潜在バグも解消 (render test で clean cycle 正常確認)。
+
+### 検証
+- ✅ `py_compile` 9ファイル全 OK (修正前は run_daily.py が SyntaxError)
+- ✅ HEAD の run_daily.py も SyntaxError 確認 (= 本番 08:00 cron は **今日 6/11 08:00 に初発火で
+  クラッシュ予定だった**。最後の成功 run は 6/10 15:59 = 混入 commit 16:18 の前)。
+- ✅ offline テスト: `tests/test_err_flag.py` 新規13件 pass + 既存80件 pass (回帰なし)
+- ✅ _col_letter(37)=AK / _col_letter(8)=H 確認
+- ✅ email_notifier 持続ブロック描画確認 (row747 ×3回 + AK列誘導行が出力)
+- ✅ 公式 _parse_monitor_output: errors=5/persistent=2/listings=100 を正しく分離 (衝突なし)
+- ⚠️ 未検証: 実 gspread への AK/H 列書込 (= 走行中 cycle と profile 競合回避のため live 実行は
+  次 cycle に委ねる。dry-run も selenium 起動で競合するため未実施)
+
+
 ## 2026-04-30 — Phase 4 Live smoke Step 1 (最小スコープ)
 
 ### 決定

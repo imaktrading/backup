@@ -224,7 +224,8 @@ def _phase_monitor(
         if sheet in ("low", "both"):
             targets.append(("LOW", l_id))
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0,
-             "url_alerts_count": 0, "by_sheet": {}, "error_rows": []}
+             "url_alerts_count": 0, "by_sheet": {}, "error_rows": [],
+             "persistent_err_rows": []}
 
     # ProgressWriter を monitor_listings の callback として食わせる
     progress_callback = None
@@ -247,6 +248,9 @@ def _phase_monitor(
             # error_rows を sheet 跨ぎで集約 (= 上位 20 件 / sheet × 2 sheet = 最大 40 件)
             for er in (stats.get("error_rows") or []):
                 grand["error_rows"].append({**er, "sheet": label})
+            # 持続エラー (連続3回以上) も sheet 跨ぎ集約 → メール別掲用
+            for pr in (stats.get("persistent_err_rows") or []):
+                grand["persistent_err_rows"].append({**pr, "sheet": label})
         except Exception as e:
             _log(f"  [NG] [{label}] 例外: {type(e).__name__}: {e}", test_mode)
             grand["by_sheet"][label] = {"error": f"{type(e).__name__}: {e}"}

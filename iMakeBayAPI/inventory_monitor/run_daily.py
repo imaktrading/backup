@@ -53,6 +53,7 @@ def _log(msg: str):
 def _parse_monitor_output(out: str) -> dict:
     """main.py の stdout から集計を抽出."""
     info = {"listings": 0, "updates": 0, "needs_action": 0, "errors": 0,
+            "persistent_errors": 0,
             "prev_needs_action": None, "k_sync_changed": None}
     for line in out.splitlines():
         m = re.search(r"処理 listing\s*[:：]\s*(\d+)", line)
@@ -61,6 +62,11 @@ def _parse_monitor_output(out: str) -> dict:
         if m: info["updates"] = int(m.group(1))
         m = re.search(r"要対処 SKU\s*[:：]\s*(\d+)", line)
         if m: info["needs_action"] = int(m.group(1))
+        # 「持続エラー」を「エラー」より先に判定 (「エラー」regex が部分一致するため continue で衝突回避)
+        m = re.search(r"持続エラー\s*[:：]\s*(\d+)", line)
+        if m:
+            info["persistent_errors"] = int(m.group(1))
+            continue
         m = re.search(r"エラー\s*[:：]\s*(\d+)", line)
         if m: info["errors"] = int(m.group(1))
         m = re.search(r"前回\s*(\d+)\s*→\s*今回\s*(\d+)", line)
@@ -170,11 +176,13 @@ def _format_report(start: datetime, end: datetime,
     else:
         ebay_status = f"✅ 全件 qty 変更完了 (処理 {total_processed} 件、 zero {zero['variation_executed']+zero['single_executed']} + restore {restore['variation_executed']+restore['single_executed']})"
 
-    # subject 用: 全体判定
+    # subject 用: 全体判定 (= 漏れ 0 最優先原則、 本文冒頭2行と一致させる)
+    # HIGH/LOW と同思想: 1 件でも error / ng → 要対応 (旧「N% 以下なら正常」= err_rate>=0.1
+    # 閾値は撤回。 err_rate は scrape_errors=0 時 未定義なので参照しない = NameError も解消)。
     if scrape_step_failed or revise_step_failed:
         overall = "異常: step 失敗あり"
-    elif total_ng > 0 or err_rate >= 0.1:
-        overall = "要確認 or 要対応"
+    elif total_ng > 0 or scrape_errors > 0:
+        overall = "要対応 (error/ng あり)"
     elif total_processed > 0:
         overall = "正常 (qty 変更実施)"
     else:
@@ -204,15 +212,20 @@ def _format_report(start: datetime, end: datetime,
         lines.append("  3. 復旧後、 手動 cycle 再実行: `python iMakeBayAPI/inventory_monitor/run_daily.py`")
         lines.append("  対応期限: **即時** (= 全 listing 在庫状況不明)")
     elif scrape_errors > 0:
+        persistent = monitor.get("persistent_errors", 0) or 0
         lines.append("")
         lines.append("【★仕入元在庫監視 要対応】")
-        lines.append(f"  該当 listing は logs/2026-XX-XX.log の \"⚠️\" or \"scrape 失敗\" を grep")
+        # ★ 全 error は SKU詳細シート T 列「巡回ERR」で filter (= ログ grep 不要、 件数無制限)
+        lines.append("  ★ 全 error は SKU詳細シート T 列「巡回ERR」を filter (= 該当 SKU 行が直接分かる)")
+        if persistent > 0:
+            lines.append(f"  ⚠️⚠️ 持続エラー {persistent} listing (連続3回以上 = transient でない、 要手動 chk)")
+            lines.append("       → SKU詳細 T 列を ×3 以上で filter、 該当 listing を手動確認")
         lines.append("  対応手順 (= 漏れ 0 最優先):")
         lines.append("  1. error 内容を確認:")
         lines.append("     - 'ConnectionError' / 'getaddrinfo' = transient → 次 cycle (翌 08:00) で auto retry、 待つで OK")
         lines.append("     - 公式 API 404 / 構造変更 = supplier 側の変更 → scraper 修正依頼")
         lines.append("     - login 失敗 = 認証切れ → 手動 login 再実施")
-        lines.append("  2. 持続的に同 listing で error → 手動 chk")
+        lines.append("  2. transient なら待つ (成功すれば T 列は自動 clear)。 持続 (×3以上) → 手動 chk")
         lines.append("  対応期限: 24 時間以内 (翌日 08:00 cycle 前)")
     if revise_step_failed:
         lines.append("")
@@ -240,7 +253,7 @@ def _format_report(start: datetime, end: datetime,
         f"{monitor['prev_needs_action'] if monitor['prev_needs_action'] is not None else '-'} → "
         f"{monitor['needs_action']})",
         f"  scrape error  : {monitor['errors']} 件",
-    ]
+    ])
     if monitor.get("k_sync_changed") is not None:
         lines.append(f"  K 列同期      : {monitor['k_sync_changed']} 件 更新")
     lines.append("")

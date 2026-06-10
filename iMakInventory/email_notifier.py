@@ -345,7 +345,20 @@ def _format_body_inner(cycle_log: Dict[str, Any]) -> str:
                     lines.append(f"      url: {er.get('url','')[:100]}")
                     lines.append(f"      err: {short_err}")
                 if (mon.get("errors", 0) or 0) > 10:
-                    lines.append(f"  ... 他 {(mon.get('errors', 0) or 0) - 10} 件 (全件: logs/listings_<date>.log)")
+                    lines.append(f"  ... 他 {(mon.get('errors', 0) or 0) - 10} 件")
+                # メール本文は上位 10 件で頭打ち → 全件はスプシ AK 列で filter (件数無制限)
+                lines.append("  ★ 全 error 行はスプシ AK 列「巡回ERR」を filter (= メール 10 件 cap の取りこぼし無し)")
+                # 持続エラー (連続3回以上) を別掲 → transient と区別して手動 chk を促す
+                persistent = (mon.get("persistent_err_rows") or [])
+                if persistent:
+                    lines.append("")
+                    lines.append(f"  ⚠️⚠️ 持続エラー {len(persistent)} 件 (連続3回以上 scrape 失敗 = transient でない、 要手動 chk):")
+                    for pr in persistent[:10]:
+                        lines.append(f"  - {pr.get('sheet','?')} row{pr.get('row_index','?')} ×{pr.get('count','?')}回 "
+                                      f"iid={pr.get('item_id') or '(空)'} sup={pr.get('supplier','?')}")
+                        lines.append(f"      url: {pr.get('url','')[:100]}")
+                    if len(persistent) > 10:
+                        lines.append(f"  ... 他 {len(persistent) - 10} 件 (全件: スプシ AK 列を ×3 以上で filter)")
                 # 対応手順
                 lines.append("")
                 lines.append("  対応手順 (= 漏れ 0 最優先、 該当 row の在庫状況不明):")

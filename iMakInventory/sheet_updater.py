@@ -86,6 +86,10 @@ LISTINGS_COL_BACKUP_URLS = (
     LISTINGS_COL_BACKUP_URL_5,
 )
 LISTINGS_COL_PRICE_PREV = 34  # AH: 前期 N (毎 cycle で旧 N がコピーされる、Revise が短期 trend に利用)
+# AK: 巡回ERR (scrape error / 在庫不能 row のマーカー、成功で clear)。2026-06-11 追加。
+# AJ=KEY2_ARCHIVED の次の空き列に append (= 既存列の挿入/ズレ無し、grid は BA=53 まで存在)。
+LISTINGS_COL_ERR_FLG = 37     # AK
+LISTINGS_ERR_FLG_HEADER = "巡回ERR"
 
 
 # ============================================================================
@@ -194,6 +198,8 @@ def read_listings_rows(
             "backup_urls":  backup_urls,  # AC-AG (#29-33) のうち空でないものだけ
             # 現在の N 列値 (生文字列、空欄も含む)。次 cycle で AH (前期 N) にコピーされる
             "current_n_jpy_str": (row[LISTINGS_COL_PRICE_NOW - 1] if len(row) >= LISTINGS_COL_PRICE_NOW else "").strip(),
+            # AK 列 (巡回ERR) の現状値 = 前 cycle までの連続エラー marker。re-mark 時の回数累積に使う
+            "err_flag_prev": (row[LISTINGS_COL_ERR_FLG - 1] if len(row) >= LISTINGS_COL_ERR_FLG else "").strip(),
         })
     return rows
 
@@ -225,17 +231,21 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
       - AH 列 (前期 N): N 列を書く前に prev_n_jpy_str (= 旧 N 値の生文字列) を AH にコピー。
         prev_n_jpy_str が空なら touch しない (= 初回 cycle の AH は空のまま、Revise 側で考慮)。
         このコピーは "N 列 を新値で上書きする時のみ" 走る = N の動きに連動した historical snapshot。
+      - AK 列 (巡回ERR): update dict に "err_flag" キーがあれば (空文字含む) AK 列に書込。
+        エラー行 → marker 文字列 / 成功行 → "" (clear)。キー不在の行は AK を touch しない。
 
-    Returns: {"updated": N, "d_writes": N, "o_writes": N, "n_writes": N, "ah_writes": N}
+    Returns: {"updated": N, "d_writes": N, "o_writes": N, "n_writes": N, "ah_writes": N, "err_writes": N}
     """
     if not updates:
-        return {"updated": 0, "d_writes": 0, "o_writes": 0, "n_writes": 0, "ah_writes": 0}
+        return {"updated": 0, "d_writes": 0, "o_writes": 0, "n_writes": 0, "ah_writes": 0,
+                "err_writes": 0}
 
     cell_updates = []
     d_writes = 0
     o_writes = 0
     n_writes = 0
     ah_writes = 0
+    err_writes = 0
     for u in updates:
         row_idx = u["row_index"]
         checked_at = u.get("checked_at") or datetime.now().strftime("%Y/%m/%d %H:%M:%S")
@@ -271,9 +281,45 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
             })
             n_writes += 1
 
+        # AK 列 (巡回ERR): "err_flag" キーがあれば書込 (空文字 = clear も明示書込)。
+        # キー不在 = AK 非対応 caller (= 既存呼出元) → AK を一切 touch しない (後方互換)。
+        if "err_flag" in u:
+            cell_updates.append({
+                "range": f"{_col_letter(LISTINGS_COL_ERR_FLG)}{row_idx}",
+                "values": [[u["err_flag"]]],
+            })
+            err_writes += 1
+
     ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
     return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes,
-            "n_writes": n_writes, "ah_writes": ah_writes}
+            "n_writes": n_writes, "ah_writes": ah_writes, "err_writes": err_writes}
+
+
+def _col_letter(n: int) -> str:
+    """1-based 列番号 → A1 列文字 (例 37 -> 'AK')."""
+    s = ""
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def ensure_listings_err_header(ws) -> bool:
+    """商品管理シート AK1 に「巡回ERR」ヘッダを設定 (未設定時のみ).
+
+    Returns: True なら新規書込、False なら既に設定済 (no-op)。
+    """
+    col = LISTINGS_COL_ERR_FLG
+    try:
+        cur = ws.cell(1, col).value
+    except Exception:
+        cur = None
+    if (cur or "").strip() == LISTINGS_ERR_FLG_HEADER:
+        return False
+    ws.update(values=[[LISTINGS_ERR_FLG_HEADER]],
+              range_name=f"{_col_letter(col)}1",
+              value_input_option="USER_ENTERED")
+    return True
 
 
 # ============================================================================

@@ -57,7 +57,11 @@ from sheet_updater import (                          # noqa: E402
     read_sku_rows,
     update_sku_rows,
     determine_needs_action,
+    build_sku_listing_map,
+    write_sku_err_flags,
+    ensure_sku_err_header,
 )
+from err_flag import build_err_marker, marker_count, PERSISTENT_THRESHOLD  # noqa: E402
 
 # Phase 3 (2026-05-14): iMakInventory の本番稼働中 amazon_scraper を流用
 # (memory: reuse_existing_proven_solution.md = 既存実績流用主義)
@@ -734,21 +738,57 @@ def main():
         log(f"⚠️ SKU シート事前読込失敗 ({type(e).__name__}: {e})、 listing 毎 fallback")
         cycle_sku_rows = None
 
+    # SKU詳細 T列 (巡回ERR) 用: listing_id → [{row_index, err_flag_prev}] の逆引き索引。
+    # scrape は listing 単位で失敗するので、 失敗 listing の全 SKU 行をマークする。
+    # cycle_sku_rows が None (事前読込失敗) のときは FLG 書込を skip (本筋に影響させない)。
+    sku_listing_map = build_sku_listing_map(sh, cycle_sku_rows) if cycle_sku_rows is not None else None
+
     all_updates = []
     total_needs_action = 0
     errors = []
+    err_now = datetime.now()        # T 列 marker 用 (cycle 時刻)
+    err_flag_updates = []           # SKU詳細 T 列 (巡回ERR) 書込
+    persistent_err_rows = []        # 連続 PERSISTENT_THRESHOLD 回以上 (要手動 chk)
     for row in main_rows:
+        err_msg = None
         try:
             result = process_listing(sh, row, dry_run=args.dry_run,
                                      all_sku_rows=cycle_sku_rows)
             all_updates.extend(result["updates"])
             total_needs_action += result["needs_action_count"]
             if result.get("error"):
+                err_msg = result["error"]
                 errors.append((row["listing_id"], result["error"]))
         except Exception as e:
-            errors.append((row["listing_id"], f"{type(e).__name__}: {e}"))
+            err_msg = f"{type(e).__name__}: {e}"
+            errors.append((row["listing_id"], err_msg))
             log(f"    ❌ listing {row['listing_id']} 例外: {e}")
             log(traceback.format_exc())
+
+        # SKU詳細 T 列 (巡回ERR): 該当 listing の全 SKU 行を一括マーク / clear。
+        if sku_listing_map is None:
+            continue
+        sku_rows = sku_listing_map.get(row["listing_id"], [])
+        if not sku_rows:
+            continue  # SKU詳細 未登録 listing (= マーク対象行なし)
+        if err_msg:
+            # listing の全 SKU 行を同 count で揃える (= 連続回数を listing 単位で管理)
+            prev_count = max((marker_count(s["err_flag_prev"]) for s in sku_rows), default=0)
+            marker = build_err_marker(err_msg, f"×{prev_count}" if prev_count else "", now=err_now)
+            for s in sku_rows:
+                err_flag_updates.append({"row_index": s["row_index"], "err_flag": marker})
+            if marker_count(marker) >= PERSISTENT_THRESHOLD:
+                persistent_err_rows.append({
+                    "listing_id": row["listing_id"],
+                    "url":        (row.get("url") or "")[:120],
+                    "count":      marker_count(marker),
+                    "sku_count":  len(sku_rows),
+                })
+        else:
+            # 成功 → 前 cycle に marker があった SKU 行のみ clear (自己修復、 無駄書込回避)
+            for s in sku_rows:
+                if s["err_flag_prev"]:
+                    err_flag_updates.append({"row_index": s["row_index"], "err_flag": ""})
 
     log("")
     log(f"=== 集計 ===")
@@ -756,23 +796,38 @@ def main():
     log(f"  生成 update : {len(all_updates)}")
     log(f"  要対処 SKU  : {total_needs_action}")
     log(f"  エラー       : {len(errors)}")
+    log(f"  持続エラー   : {len(persistent_err_rows)}")  # run_daily.py が regex 抽出
     for lid, msg in errors:
         log(f"    - {lid}: {msg}")
+    for pr in persistent_err_rows[:10]:
+        log(f"    ⚠️ 持続 listing {pr['listing_id']} ×{pr['count']} (SKU {pr['sku_count']}行) {pr['url'][:50]}")
 
     if args.dry_run:
         log("\n[DRY RUN] スプシ書込スキップ")
         # サンプル表示
         for u in all_updates[:5]:
             log(f"  サンプル update: {u}")
-    elif all_updates:
-        log(f"\nスプシ書込中... ({len(all_updates)} 件)")
-        try:
-            r = update_sku_rows(sh, all_updates)
-            log(f"  ✅ updated={r['updated']}, appended={r['appended']}")
-        except Exception as e:
-            log(f"  ❌ スプシ書込失敗: {type(e).__name__}: {e}")
-            log(traceback.format_exc())
-            sys.exit(1)
+        if err_flag_updates:
+            log(f"  [DRY RUN] T列 巡回ERR 書込予定: {len(err_flag_updates)} 件 (例: {err_flag_updates[:3]})")
+    else:
+        if all_updates:
+            log(f"\nスプシ書込中... ({len(all_updates)} 件)")
+            try:
+                r = update_sku_rows(sh, all_updates)
+                log(f"  ✅ updated={r['updated']}, appended={r['appended']}")
+            except Exception as e:
+                log(f"  ❌ スプシ書込失敗: {type(e).__name__}: {e}")
+                log(traceback.format_exc())
+                sys.exit(1)
+        # T 列 (巡回ERR) 書込 — SKU status 書込とは独立 (本筋に影響させない fail-safe)
+        if err_flag_updates:
+            try:
+                ensure_sku_err_header(sh)
+                n = write_sku_err_flags(sh, err_flag_updates)
+                cleared = sum(1 for u in err_flag_updates if not u["err_flag"])
+                log(f"  ✅ T列 巡回ERR 書込: {n} 件 (error={n - cleared} / clear={cleared})")
+            except Exception as e:
+                log(f"  [!] T列 巡回ERR 書込失敗 (本筋に影響なし): {type(e).__name__}: {e}")
 
     alert_if_increased(total_needs_action, all_updates=all_updates)
 
