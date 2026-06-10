@@ -225,8 +225,11 @@ def get_schedule_time():
     return future.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def build_description_with_specs(template_path, specs):
-    """USED.txtテンプレを読み込み、Shippingマーカー直前にSpecsブロック挿入"""
+def build_description_with_specs(template_path, specs, extra_note_html=""):
+    """USED.txtテンプレを読み込み、Shippingマーカー直前にSpecsブロック(+任意の追加注記)挿入。
+
+    extra_note_html: 商品固有の追加注記 (例: Tanker のballistic nylon色見え注記)。Specsの直後に挿入。
+    """
     try:
         with open(template_path, "r", encoding="utf-8") as f:
             template = f.read()
@@ -242,11 +245,27 @@ def build_description_with_specs(template_path, specs):
         '<p><span style="text-decoration: underline;"><strong>Specifications</strong></span></p>'
         '<ul>' + "".join(spec_lines) + '</ul>'
     )
+    block = specs_html + (extra_note_html or "")
     # Shippingマーカー直前に挿入
     marker = '<p><span style="text-decoration: underline;"><strong>Shipping'
     if marker in template:
-        return template.replace(marker, specs_html + marker, 1)
-    return template + specs_html
+        return template.replace(marker, block + marker, 1)
+    return template + block
+
+
+# Porter Tanker (バリスティックナイロン) の色見え注記。黒/濃色が光沢で灰色に見える誤認の予防。
+# 2026-06-09 Oskar (デンマーク) 色見えクレーム対応。汎用 About Color はテンプレ共通、これは Tanker 上乗せ。
+TANKER_COLOR_NOTE = (
+    '<p>Note: Porter Tanker uses ballistic nylon. Its sheen can make the dark/black color appear '
+    'grey in photos, but the actual color is exactly as stated in the title.</p>'
+)
+
+
+def tanker_color_note(profit_category, title_en):
+    """Porter Tanker のとき色見え注記 HTML を返す。それ以外は空文字 (= 注記なし)。"""
+    if profit_category == "Porter" and "tanker" in (title_en or "").lower():
+        return TANKER_COLOR_NOTE
+    return ""
 
 
 # === listing_common.py に集約済 → 共通ライブラリから import (2026-04-23) ===
@@ -1013,7 +1032,8 @@ def main():
                 # Description: 新品なら NEW.txt、中古なら cfg指定（USED.txt等）
                 desc_template = "NEW.txt" if is_new else cfg.get('description_template', 'USED.txt')
                 tpl_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), desc_template)
-                desc_html = build_description_with_specs(tpl_path, item_specifics)
+                _tanker_note = tanker_color_note(cfg.get('profit_category'), title_en)
+                desc_html = build_description_with_specs(tpl_path, item_specifics, extra_note_html=_tanker_note)
                 # 送料 (V6 mode: category 別 Policy 名)
                 ship_policy = get_shipping_policy(listing_price, cfg.get('profit_category', 'Porter'))
                 # 行構築
