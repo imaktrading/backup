@@ -15,7 +15,15 @@
 ### 変更
 - **A**: `tests/test_syntax_all_modules.py` 新規。 iMakInventory + 公式 inventory_monitor の
   全 .py を py_compile (doraise) で検査。 run_daily.py / main.py 等 **どのテストも import
-  しないモジュール**の構文エラーを pre-commit で必ず捕捉。 54 ファイル検査。
+  しないモジュール**の構文エラーを検出。 54 ファイル検査。
+  - ★ ゲート位置 (調査で判明・要注意): git commit フック (`tools/hooks/pre-commit`) は
+    モノレポ root の `pytest tests/ iMakHQ/tests/` を回すだけで **iMakInventory/tests/ は
+    走らせない**。 よって A が効くのは **commit 時ではなく run_cycle の Phase 0 pre-flight**
+    (`pytest tests/ -m offline`、 HIGH cycle 4h ごと、 失敗で cycle abort+通知: run_cycle.py:463)。
+  - 本テストは公式 .py も compile するので、 cda4126 型バグは **次 HIGH cycle pre-flight
+    (例 05:30) で abort+通知** = 公式 08:00 cron クラッシュ前に検知できる構図。
+  - commit 時ブロックが欲しければ共有フック改修が要るが、 これは HQ 管轄 (worktree 跨ぎ
+    共有 infra) なので requests/ 経由で提案する事項。 本 worktree から単独改変はしない。
 - **B**: `monitor_listings.py`
   - `MERCARI_RESTART_THRESHOLD` 5→3 (反応的再起動を速め、 浪費を ~4分 + 2行に圧縮)
   - `MERCARI_PREVENTIVE_RESTART_EVERY = 150` 新設 + loop 内に予防再起動ブロック
