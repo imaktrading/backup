@@ -721,3 +721,17 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: 全15(既出4+新11)brand→set_code 正解 + catalog存在 + 衝突なし(EEVEE HEROES=S6a/STAR BIRTH=S9不変)
 - 検証✅: SKYSCRAPING PERFECT/PERFECTION 両表記hit
 - 検証✅: pytest SwSh 3件 + 全体240 passed(回帰なし)
+
+## 2026-06-10 (続5) — Catalog: 解決不能17件 feasibility調査
+
+### 決定事項
+- 決定1(feasibility): 17件中14件は変種がcatalog実在(resolver""はpromo-scoring語彙不足)。2件=category番号衝突(別category実在)、1件(610 box topper)=未収録
+- 決定2: 主対応=edition/event matcher拡張(既存25周年/Best Selection双方一致の一般化)。B5件(FILM RED/UTA/ONE PIECE DAY)即解決、A数件(プロモカードセット/スタンダードバトル等)も
+- 決定3: category衝突(252 Gundam ST04-013=Hawk of Endymion実在/367 P-024=DB Son Goku)はresolver brand→category検出で分離。多変種ambiguity(Let's Start/Pikachu gym/Storage box)はfail-closed維持
+
+### 変更
+- 変更: requests/2026-06-10_op_pkmn_unresolved17_promo_premium_variants_response.md(全17件 解決マップ+実装提案I/II/III/IV)
+- ※コード変更なし(feasibility回答のみ、実装はgreenlight後)
+
+### 検証
+- 検証✅: 全17件のcert→在るべきproduct_id を実機照会(B5件_pN実在/A OP03-044×3=_p2同変種/252 gundam ST04-013実在/610 box topper未収録 確認)
