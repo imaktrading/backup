@@ -257,6 +257,15 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
     if action_count > 0:
         lines.append("")
         lines.append(f"【★要対応 — 未取下げ {action_count} 件】 (手動対処 or 次 cycle で auto retry)")
+        # HQ 2026-06-10 confirm 指示 C: 手動 SLA 明記
+        # 通常 reason → 次 cycle (4h 後) で auto retry されるので 「4h 以内」
+        # reinclude_burst_guard_holdout → 急増ガード暴発、 sheet 書込系異常疑い → 「即時」
+        has_burst = any(it.get("reason") == "reinclude_burst_guard_holdout"
+                          for it in (ar.get("items") or []))
+        if has_burst:
+            lines.append("  対応期限    : **即時** (= 急増ガード発火、 sheet 書込系の系統的異常疑い)")
+        else:
+            lines.append("  対応期限    : 4 時間以内 (= 次 cycle 開始前、 自然 retry も並行発火)")
         for it in (ar.get("items") or [])[:10]:
             iid = it.get("item_id") or "(item_id 空欄)"
             lines.append(f"  - {it.get('sheet','?')} row{it.get('row','?')} iid={iid} reason={it.get('reason','')}")
@@ -357,6 +366,30 @@ def _format_body(cycle_log: Dict[str, Any]) -> str:
         lines.append(f"  汎用エラー   : 連続 {gn} 回{gn_detail} {'← 2回でアラート' if gn >= 2 else ''}")
         if uh.get("alert_fired"):
             lines.append(f"  → アラート発火 ({uh.get('reason', '')})")
+        lines.append("")
+
+    # reverse_audit (HQ 2026-06-10 confirm 指示 B: 「再発しない」 の唯一の客観証拠)
+    ra = phases.get("reverse_audit", {}) or {}
+    if ra:
+        lines.append("【reconciliation】(意図 D=○ vs 実 eBay qty>0 突合)")
+        mc = ra.get("mismatch_count", 0) or 0
+        if mc == -1:
+            lines.append(f"  ★中断: {ra.get('error', '')}")
+            lines.append(f"  対応期限: **即時** (= sheet 読込系の異常、 audit 機能停止中)")
+        elif mc == 0:
+            lines.append(f"  ✅ 乖離 0 件 (= 継続証跡を 1 件積上げ)")
+        else:
+            lines.append(f"  ⚠️ 乖離 {mc} 件検出 ← 取下げ漏れの直接証拠")
+            by_sheet = ra.get("by_sheet", {}) or {}
+            by_supplier = ra.get("by_supplier", {}) or {}
+            if by_sheet:
+                lines.append(f"     sheet 別: {by_sheet}")
+            if by_supplier:
+                lines.append(f"     supplier 別: {by_supplier}")
+            lines.append(f"     log: {ra.get('log_path', '')}")
+            lines.append(f"  注意: 初回 (= 5 週間分の既存乖離) は鳥瞰として正常 = audit 機能の証拠")
+            lines.append(f"        当日内に件数を減らす目標は不要、 人手で順次潰す。 継続乖離なし状態 が「再発しない」 の証跡")
+            lines.append(f"  対応期限: **24 時間以内** (= 翌日 09:30 cycle 前に乖離 -1 件以上の進捗)")
         lines.append("")
 
     # 補助情報 (折りたたみ的扱い)

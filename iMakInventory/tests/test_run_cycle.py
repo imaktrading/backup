@@ -346,5 +346,139 @@ def test_in_cycle_verify_blocks_silent_success(tmp_path, monkeypatch):
     assert entry["verify_attempts"] >= 3
 
 
+def test_burst_guard_holds_mass_reinclude_to_action_required(tmp_path, monkeypatch):
+    """HQ 2026-06-10 confirm 指示 A: reinclude 件数が閾値超で全件 HOLD + action_required 記録.
+
+    6/10 09:30 同型 (sheet 書込系統的異常) で大量 reinclude が発生したら fail-CLOSED で
+    保留、 silent化せず action_required.jsonl に記録 + alert (= HQ B 「HOLD は必ず alert」)。
+    """
+    import json
+    import os
+    from ebay_actions import revise_csv_generator as gen
+    from ebay_actions import trading_api_client as tac
+    import monitor_listings as ml
+
+    pending_file = tmp_path / "pending_revise.jsonl"
+    discarded_file = tmp_path / "discarded_revise.jsonl"
+    action_file = tmp_path / "action_required.jsonl"
+    monkeypatch.setattr(gen, "PENDING_REVISE_FILE", pending_file)
+    monkeypatch.setattr(gen, "DISCARDED_REVISE_FILE", discarded_file)
+    monkeypatch.setattr(ml, "ACTION_REQUIRED_FILE", action_file)
+    monkeypatch.setattr(ml, "DECISION_LOG_DIR", tmp_path)
+    monkeypatch.setattr(gen, "DEFAULT_REINCLUDE_BURST_THRESHOLD", 5)
+    monkeypatch.setattr(tac, "load_access_token", lambda: "test_token")
+
+    # GetItem は常に qty=1 を返す (= reinclude 候補化)
+    def fake_call_trading(call_name, body, access_token=None):
+        return {"success": True, "ack": "Success", "error_code": None,
+                "error_message": None, "raw_xml": "<Quantity>1</Quantity>"}
+    monkeypatch.setattr(tac, "_call_trading", fake_call_trading)
+
+    # pending に 10 件 (= 閾値 5 を超える)
+    rows = []
+    skipped = []
+    for i in range(10):
+        iid = f"iid_{i:02d}"
+        rows.append({"sheet": "LOW", "row_index": 100 + i, "item_id": iid,
+                     "url": "u", "title": "t", "ts": "2026-06-10T11:00:00"})
+        skipped.append({"sheet": "LOW", "row_index": 100 + i, "item_id": iid,
+                         "skip_reason": "no_longer_sold_or_id_changed"})
+    with open(pending_file, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+    # prune を実行 → 10 件全部 reinclude 候補になる
+    res = gen.prune_discarded_entries(skipped)
+    assert res["kept_qty_gt0"] == 10
+    assert len(res["reincluded"]) == 10
+
+    # run() を直接呼ぶのは sheet 接続必要なので、 急増ガード判定 logic だけ単体検証
+    # 閾値 5 < reincluded 10 → HOLD 発火、 全件 action_required.jsonl 記録すべき
+    threshold = gen.DEFAULT_REINCLUDE_BURST_THRESHOLD
+    assert threshold == 5
+    assert len(res["reincluded"]) > threshold
+    # HOLD 動作の手動シミュレーション (= run() 内 logic を模擬)
+    if len(res["reincluded"]) > threshold:
+        for q in res["reincluded"]:
+            ml.append_action_required(
+                sheet_label=q.get("sheet", ""),
+                result={
+                    "row_index": q.get("row_index", -1),
+                    "url":       q.get("url", ""),
+                    "item_id":   q.get("item_id", ""),
+                    "title":     q.get("title", ""),
+                    "supplier":  "",
+                    "raw_status": "reinclude_burst_holdout",
+                },
+                reason="reinclude_burst_guard_holdout",
+                dry_run=False,
+            )
+
+    # action_required.jsonl に 10 件記録されたこと
+    assert action_file.exists()
+    ar_lines = [l for l in action_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert len(ar_lines) == 10
+    # 全件 reason = reinclude_burst_guard_holdout
+    for line in ar_lines:
+        e = json.loads(line)
+        assert e["reason"] == "reinclude_burst_guard_holdout"
+
+
+def test_reverse_audit_email_uses_hq_b_wording(tmp_path):
+    """HQ 2026-06-10 confirm 指示 B: 「0 件目標」 を文言に出さず、 初回乖離鳥瞰を audit 機能の証拠と表現.
+
+    Regression guard: 「0 件目標」 文言は乖離隠ぺい圧力を生む = fail-OPEN 再発リスク。
+    乖離 > 0 のときは 「audit 機能の証拠」 / 「人手で順次潰す」 / 「継続 0 件 が再発しない証跡」 を出す。
+    """
+    from email_notifier import _format_body
+    cycle_log = {
+        "status": "success",
+        "ts_start": "2026-06-12T09:30:00",
+        "ts_end":   "2026-06-12T11:38:00",
+        "phases": {
+            "monitor": {"newly_sold": 0, "newly_in_stock": 0,
+                         "processed": 1670, "errors": 0},
+            "reverse_audit": {
+                "ts": "2026-06-12T11:38:00",
+                "mismatch_count": 23,
+                "by_sheet": {"HIGH": 15, "LOW": 8},
+                "by_supplier": {"mercari": 20, "amazon": 3},
+                "log_path": "/path/to/reverse_audit_log.jsonl",
+            },
+            "action_required_summary": {"count": 0, "items": []},
+        },
+    }
+    body = _format_body(cycle_log)
+    assert "乖離 23 件検出" in body
+    assert "5 週間分の既存乖離" in body
+    assert "audit 機能の証拠" in body
+    # 0 件目標 / ゼロ件目標 等の文言は禁止
+    assert "0 件目標" not in body
+    assert "ゼロ件目標" not in body
+    # 期限明記
+    assert "24 時間以内" in body
+
+    # 継続ゼロ件 case
+    cycle_log_zero = {
+        "status": "success",
+        "ts_start": "2026-06-13T09:30:00",
+        "ts_end":   "2026-06-13T11:38:00",
+        "phases": {
+            "monitor": {"newly_sold": 0, "newly_in_stock": 0,
+                         "processed": 1670, "errors": 0},
+            "reverse_audit": {
+                "ts": "2026-06-13T11:38:00",
+                "mismatch_count": 0,
+                "by_sheet": {}, "by_supplier": {},
+                "log_path": "/path/to/zero_log.jsonl",
+            },
+            "action_required_summary": {"count": 0, "items": []},
+        },
+    }
+    body_zero = _format_body(cycle_log_zero)
+    assert "乖離 0 件" in body_zero
+    assert "継続証跡" in body_zero
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

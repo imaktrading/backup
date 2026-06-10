@@ -96,6 +96,16 @@ CSV_QUANTITY = "0"
 DEFAULT_MAX_PER_RUN = 100  # 1回 (4時間サイクル) の上限
                             # 通常想定 6-12 件、超過は構造異常 → manual approval (--force)
 
+# HQ 2026-06-10 confirm 指示 A 急増ガード (= mass-reinclude 暴発防止):
+# 1 cycle で reinclude (= prune が「eBay qty>0」 判定で CSV 再投入する entry) 件数が
+# 閾値を超えたら全件保留 + critical alert (= sheet 書込系の系統的異常を前兆検出)。
+# env var INVENTORY_REINCLUDE_BURST_THRESHOLD で override 可。
+# 実機データ校正 (= 通常 cycle 0-2 件 / 6/10 09:30 sheet 書込 fail 2 件 / 6/9 sweep 167 件)
+# から 通常の 5 倍マージン = 10 件 をデフォルト。
+DEFAULT_REINCLUDE_BURST_THRESHOLD = int(
+    os.environ.get("INVENTORY_REINCLUDE_BURST_THRESHOLD", "10")
+)
+
 
 # ============================================================================
 # 売切候補の収集
@@ -629,20 +639,54 @@ def run(
             if disc:
                 print(f"  pending prune (eBay qty=0 確認): {disc} 件 → discarded_revise.jsonl")
             if kept:
-                print(f"  [!] pending 残置 (eBay qty>0 → sheet 状態誤と判定): {kept} 件 → CSV 候補に再昇格")
-            # 再昇格 entry を candidates に追加 (= 取下げ義務 persist)
-            for q in reincluded:
-                candidates.append({
-                    "sheet_label": q.get("sheet", ""),
-                    "row_index":   q.get("row_index", -1),
-                    "item_id":     q.get("item_id", ""),
-                    "url":         q.get("url", ""),
-                    "title":       q.get("title", ""),
-                    "current_sold": "○",
-                    "checked_at":  "",
-                    "queue_ts":    q.get("ts", ""),
-                    "reincluded_reason": "sheet_d_empty_but_ebay_qty_gt0",
-                })
+                print(f"  [!] pending 残置 (eBay qty>0 → sheet 状態誤と判定): {kept} 件")
+            # HQ 2026-06-10 confirm A 急増ガード: reincluded 件数が閾値超 → 全件 HOLD
+            # 「6/10 09:30 のような sheet 書込系統的異常で偽 D=空 大量発生」 を前兆検出。
+            # HOLD = silent ではなく action_required.jsonl + critical alert に格納
+            # (= HQ 条件 「HOLD した分は必ず action_required + alert に記録」 遵守)。
+            burst_threshold = DEFAULT_REINCLUDE_BURST_THRESHOLD
+            if len(reincluded) > burst_threshold:
+                print(f"  [★急増ガード発火] reincluded {len(reincluded)} 件 > 閾値 {burst_threshold} 件 → 全件 HOLD")
+                print(f"      (= sheet 書込系の系統的異常疑い、 fail-CLOSED で発火を抑制)")
+                # HOLD 全件を action_required.jsonl に記録 + alert へ流す
+                # 循環 import 回避のため遅延 import
+                try:
+                    from monitor_listings import append_action_required  # noqa: PLC0415
+                    for q in reincluded:
+                        append_action_required(
+                            sheet_label=q.get("sheet", ""),
+                            result={
+                                "row_index": q.get("row_index", -1),
+                                "url":       q.get("url", ""),
+                                "item_id":   q.get("item_id", ""),
+                                "title":     q.get("title", ""),
+                                "supplier":  q.get("supplier", ""),
+                                "raw_status": "reinclude_burst_holdout",
+                            },
+                            reason="reinclude_burst_guard_holdout",
+                            dry_run=dry_run,
+                        )
+                    print(f"      → {len(reincluded)} 件を action_required.jsonl に記録 (silent化禁止)")
+                except Exception as e:
+                    print(f"  [!] action_required 記録失敗: {type(e).__name__}: {e}")
+                # reincluded を空に倒して CSV 対象外化
+                reincluded = []
+            else:
+                # 通常 path: 再昇格 entry を candidates に追加 (= 取下げ義務 persist)
+                if reincluded:
+                    print(f"      → {len(reincluded)} 件を CSV 候補に再昇格 (閾値 {burst_threshold} 件以下)")
+                for q in reincluded:
+                    candidates.append({
+                        "sheet_label": q.get("sheet", ""),
+                        "row_index":   q.get("row_index", -1),
+                        "item_id":     q.get("item_id", ""),
+                        "url":         q.get("url", ""),
+                        "title":       q.get("title", ""),
+                        "current_sold": "○",
+                        "checked_at":  "",
+                        "queue_ts":    q.get("ts", ""),
+                        "reincluded_reason": "sheet_d_empty_but_ebay_qty_gt0",
+                    })
         except Exception as e:
             print(f"  [!] prune_discarded_entries 失敗: {type(e).__name__}: {e}")
     elif mode == "all":

@@ -679,6 +679,46 @@ def run_cycle(
         except Exception as e:
             _log(f"  [NG] audit sample 例外: {type(e).__name__}: {e}", test_mode)
             cycle_log["phases"]["audit_sample"] = {"error": f"{type(e).__name__}: {e}"}
+
+        # Phase 5: reverse_audit (= 意図 D=○ vs 実 eBay qty>0 reconciliation)
+        # HQ 2026-06-10 confirm 指示 B 準拠:
+        # - 「再発しないこと」 の唯一の客観証拠 (= 継続乖離 0 件)
+        # - 初回は 5 週間分の既存乖離が出るのが正常 = audit が動作してる証拠
+        # - 09:30 `--sheet both` cycle のみ実行 (= 4h 単一 cycle ではコスト/API quota 考慮)
+        # - read-only 突合 + alert のみ、 auto-fix は Phase 2 で別検討
+        should_run_audit = (sheet == "both" and not sheet_id and not monitor_only)
+        if should_run_audit:
+            progress_writer.update(phase="reverse_audit", force=True)
+            _log(f"=== Phase 5: reverse_audit (= D=○ vs eBay qty>0 突合) ===", test_mode)
+            try:
+                from reverse_audit import run_reverse_audit  # noqa: PLC0415
+                ra_result = run_reverse_audit(
+                    high_sheet_id=high_sheet_id,
+                    low_sheet_id=low_sheet_id,
+                    write_log=True,
+                )
+                cycle_log["phases"]["reverse_audit"] = ra_result
+                # 乖離検出時の alert (HQ 条件 B 文言: 「初回 = 既存乖離鳥瞰、 fail-OPEN 隠ぺい禁止」)
+                mc = ra_result.get("mismatch_count", 0)
+                if mc > 0:
+                    _log(f"  [★critical] reverse_audit 乖離 {mc} 件検出", test_mode)
+                    _log(f"      初回実行は既存乖離の鳥瞰= audit が機能してる証拠。",
+                         test_mode)
+                    _log(f"      log: {ra_result.get('log_path')}", test_mode)
+                elif mc == 0:
+                    _log(f"  ✓ reverse_audit 乖離 0 件 (= 継続証跡を 1 件積上げ)",
+                         test_mode)
+                elif mc == -1:
+                    _log(f"  [!] reverse_audit 中断: {ra_result.get('error')}",
+                         test_mode)
+            except Exception as e:
+                _log(f"  [NG] reverse_audit 例外: {type(e).__name__}: {e}", test_mode)
+                cycle_log["phases"]["reverse_audit"] = {
+                    "error": f"{type(e).__name__}: {e}",
+                }
+        else:
+            _log(f"  reverse_audit skip (= 4h 単一 cycle、 09:30 両 sheet cycle で実行)",
+                 test_mode)
     except Exception as e:
         cycle_log["status"] = "error"
         cycle_log["error"] = f"{type(e).__name__}: {e}"
