@@ -771,3 +771,17 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: B premium FILM RED/007→ST01-007_p5 (完全形brand) / 252 SEED STRIKE→ST04-013
 - 検証✅: Chopper/Sabo回帰維持、pytest 全体246 passed
 - 検証⚠️: 367 DB→bare FP-024(正FP-024_p1、DBSCG promo-scoring follow-up)
+
+## 2026-06-10 (続8) — Catalog: SV-P-291 収録 + 367 DBSCG決定 受領
+
+### 決定事項
+- 決定1: SV-P-291=ピカチュウ(ジムイベントキャンペーンpromo, Championship Series 2026)を公式複数ソース裏取り→収録(name_en=Pikachu/set_name_ebay='Promo')。cert146003969一致、TCG固有化の最後の1枚
+- 決定2: 367 P-024 DBSCG = HQ決定どおり""維持(bare FP-024に解決させない)了解。DBSCG promo-scoringは低優先follow-up(DB出品本格化時)。現resolveはFP-024返すためHQ sweepで367除外周知。broad変更リスク回避で今回コード改変見送り
+
+### 変更
+- 変更: products.sqlite に SV-P-291 upsert(name=ピカチュウ/name_en=Pikachu/specs.set_name_ebay='Promo') + b_layer(name_en verified_auto / set_name_ebay verified_manual)。DB変更=git外
+- 変更: requests/ に svp291 done / 367 processed
+
+### 検証
+- 検証✅: lookup('SV-P-291')→ピカチュウ/Pikachu/Promo。resolve(cert 'SV-P PROMO'+'PIKACHU GYM EVENT CAMPAIGN'+291)→SV-P-291 end-to-end
+- 検証✅: 公式裏取り(GameStop PSA 291 Pikachu Gym Event Campaign / 公式campaign news 2025/10配布)
