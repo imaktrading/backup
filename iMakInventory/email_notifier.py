@@ -202,21 +202,69 @@ def _format_sheet_label(cycle_log: Dict[str, Any]) -> str:
 
 
 def _format_body(cycle_log: Dict[str, Any]) -> str:
-    """cycle_log を日本語の読みやすいレポートに整形."""
+    """cycle_log を日本語の読みやすいレポートに整形.
+
+    HQ 2026-06-10 FINAL 指示 C: 冒頭 1 行で「⚠️ 要対応 Y件」 or 「✅ 全件完了」 を
+    明示。 詳細はその後でよい。 「正常」 は全件 qty=0 確認時のみ。
+    """
     lines = []
-    status = cycle_log.get("status", "unknown")
+    phases = cycle_log.get("phases", {}) or {}
+
+    # HQ 2026-06-10 FINAL 指示 C: 取下げサマリ
+    # 売切検知 N → 完了 X / 未取下げ Y を1 行で。
+    # 後方互換性: action_required_summary 未投入 (= 旧形式 cycle_log) はスキップして status_jp 表示
+    mon = phases.get("monitor", {}) or {}
+    up = phases.get("upload", {}) or {}
+    rc = phases.get("revise_csv", {}) or {}
+    ar = phases.get("action_required_summary")
+    has_action_summary = ar is not None  # 新形式 cycle_log フラグ
+    ar = ar or {}
+    newly_sold = (mon.get("newly_sold", 0) or 0) if mon else 0
+    # 完了 = upload で success かつ verified、 または safe_failure (= 既 ended)
+    completed = 0
+    for res in (up.get("results") or []):
+        if res.get("success"):
+            completed += 1
+    action_count = ar.get("count", 0) or 0
+    untaken = action_count
+
     status_jp = _status_label(cycle_log)
 
     lines.append("=" * 50)
     lines.append("iMakInventory 巡回レポート")
     lines.append("=" * 50)
-    lines.append(f"結果      : {status_jp}")
+
+    # ★最重要 1 行: 取下げ漏れ有無を冒頭で明示 (= HQ FINAL 指示 C)
+    # ただし新形式 cycle_log (= action_required_summary phase 投入済) のみ。
+    # 旧形式 (= 既存 cycle log file 等) は status_jp で fallback。
+    if has_action_summary and (newly_sold > 0 or action_count > 0):
+        lines.append(f"取下げ     : 売切検知 {newly_sold} → 完了 {completed} / 未取下げ {untaken}")
+        if untaken > 0:
+            lines.append(f"結果      : ⚠️ 要対応 (取下げ漏れ {untaken} 件)")
+        else:
+            lines.append(f"結果      : ✅ 全件取下げ完了")
+    else:
+        lines.append(f"結果      : {status_jp}")
+
     lines.append(f"開始時刻   : {_fmt_ts(cycle_log.get('ts_start', ''))}")
     lines.append(f"終了時刻   : {_fmt_ts(cycle_log.get('ts_end', ''))}")
     lines.append(f"所要時間   : {_fmt_duration(cycle_log.get('ts_start', ''), cycle_log.get('ts_end', ''))}")
     lines.append(f"対象スプシ  : {_format_sheet_label(cycle_log)}")
     if cycle_log.get("test_mode"):
         lines.append("注意      : テストモード (本番運用ではない)")
+
+    # 未取下げ詳細を冒頭近くに (= 詳細はその後で OK の原則だが、 要対応は即明示)
+    if action_count > 0:
+        lines.append("")
+        lines.append(f"【★要対応 — 未取下げ {action_count} 件】 (手動対処 or 次 cycle で auto retry)")
+        for it in (ar.get("items") or [])[:10]:
+            iid = it.get("item_id") or "(item_id 空欄)"
+            lines.append(f"  - {it.get('sheet','?')} row{it.get('row','?')} iid={iid} reason={it.get('reason','')}")
+            t = it.get("title") or ""
+            if t:
+                lines.append(f"    \"{t}\"")
+        if action_count > 10:
+            lines.append(f"  ... 他 {action_count - 10} 件 (詳細: decision_log/action_required.jsonl)")
     lines.append("")
 
     phases = cycle_log.get("phases", {}) or {}

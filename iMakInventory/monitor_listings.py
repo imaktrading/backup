@@ -301,6 +301,9 @@ def append_decision_log(sheet_label: str, results: list, dry_run: bool):
 # スプシに既存していた手動 〇 や、過去の Inventory 処理で付与された 〇 は
 # このキューには入らない → Phase 3/4 で誤って取り下げ対象にしない。
 PENDING_REVISE_FILE = DECISION_LOG_DIR / "pending_revise.jsonl"
+# HQ 2026-06-10 FINAL 指示 B: silent 除外を禁止。 newly_sold だが item_id 空欄等で
+# revise 不能な entry は action_required.jsonl に記録、 cycle report で要対応として明示
+ACTION_REQUIRED_FILE = DECISION_LOG_DIR / "action_required.jsonl"
 
 
 def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None:
@@ -320,6 +323,35 @@ def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None
         "dry_run":      dry_run,
     }
     with open(PENDING_REVISE_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def append_action_required(sheet_label: str, result: dict, reason: str,
+                            dry_run: bool) -> None:
+    """HQ 2026-06-10 FINAL 指示 B: silent 除外禁止。
+
+    newly_sold だが revise 不能な entry (= item_id 空欄 / 引き直し不能 等) を
+    action_required.jsonl に記録。 cycle report 冒頭の 「⚠️ 要対応 Y件」 集計対象。
+
+    reason 値:
+      - "item_id_empty"           : sheet B 列 itemID 空欄、 引き直し未実装
+      - "verify_qty_gt0_giveup"   : revise + in-cycle retry 後も eBay qty>0 残存
+      - "supplier_not_supported"  : URL から supplier 判定不能
+    """
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "ts":           datetime.now().isoformat(timespec="seconds"),
+        "sheet":        sheet_label,
+        "row_index":    result["row_index"],
+        "url":          result["url"],
+        "item_id":      result.get("item_id") or "",
+        "title":        result.get("title", ""),
+        "supplier":     result.get("supplier", ""),
+        "raw_status":   result.get("raw_status", ""),
+        "reason":       reason,
+        "dry_run":      dry_run,
+    }
+    with open(ACTION_REQUIRED_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
@@ -530,8 +562,15 @@ def process_sheet(
 
             # Q2: 「今回新規に〇を付与した行」のみ pending queue に積む
             # → Phase 3 (Revise CSV) は queue から取る = 既存〇は対象外
-            if res["delta"] == "newly_sold" and res.get("item_id"):
-                append_pending_revise(sheet_label, res, dry_run=dry_run)
+            if res["delta"] == "newly_sold":
+                if res.get("item_id"):
+                    append_pending_revise(sheet_label, res, dry_run=dry_run)
+                else:
+                    # HQ 2026-06-10 FINAL 指示 B: item_id 空欄 = silent 除外禁止
+                    # 「除外」 ではなく 「未取下げ=要対応」 として明示
+                    append_action_required(
+                        sheet_label, res, reason="item_id_empty", dry_run=dry_run)
+                    log(f"    [★要対応] item_id 空欄、 silent 除外せず action_required 化")
 
         results.append(res)
 

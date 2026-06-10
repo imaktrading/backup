@@ -135,66 +135,215 @@ def test_drain_pending_only_on_success(tmp_path, monkeypatch):
     assert archived_ids == {"iid_ok", "iid_safe"}
 
 
-def test_prune_discarded_entries_only_no_longer_sold(tmp_path, monkeypatch):
-    """prune_discarded_entries は no_longer_sold_or_id_changed のみ削除する.
+def test_prune_discarded_entries_requires_ebay_qty_zero(tmp_path, monkeypatch):
+    """prune_discarded_entries は eBay GetItem qty=0 確認後にのみ discard。
 
-    Regression guard: 2026-06-02 amazon scraper bug の偽 OOS 由来 158 件等で
-    pending が肥大化していた問題への構造修正。 sheet 読込失敗時 (skip_reason 無し) や
-    filter_* skip は誤削除しない。
+    Regression guard (HQ 2026-06-10 FINAL 指示):
+    - 旧 b4c238d は sheet D=空 だけで discard → 6/10 09:30 で sheet 書込 DNS fail 由来の
+      偽 D=空 で 2 件 silent drop 発生
+    - 新実装: eBay qty=0 確認 → discard / qty>0 → pending 残置 + 再 include 候補 /
+      API fail → 保守的に pending 残置
     """
     import json
     from ebay_actions import revise_csv_generator as gen
+    from ebay_actions import trading_api_client as tac
     pending_file = tmp_path / "pending_revise.jsonl"
     discarded_file = tmp_path / "discarded_revise.jsonl"
     monkeypatch.setattr(gen, "PENDING_REVISE_FILE", pending_file)
     monkeypatch.setattr(gen, "DISCARDED_REVISE_FILE", discarded_file)
+    monkeypatch.setattr(tac, "load_access_token", lambda: "test_token")
 
-    # pending に 4 件 (削除対象 1 / filter skip 1 / 残置すべき 2)
+    # eBay GetItem の応答を item_id 別に偽装
+    def fake_call_trading(call_name, body, access_token=None):
+        # body から ItemID 抽出
+        import re
+        m = re.search(r"<ItemID>([^<]+)</ItemID>", body)
+        iid = m.group(1) if m else ""
+        if iid == "iid_qty_zero":
+            return {"success": True, "ack": "Success", "error_code": None,
+                    "error_message": None, "raw_xml": "<Quantity>0</Quantity>"}
+        if iid == "iid_qty_one":
+            return {"success": True, "ack": "Success", "error_code": None,
+                    "error_message": None, "raw_xml": "<Quantity>1</Quantity>"}
+        if iid == "iid_err_17":
+            return {"success": False, "ack": "Failure", "error_code": "17",
+                    "error_message": "Item cannot be accessed.", "raw_xml": ""}
+        if iid == "iid_api_fail":
+            return {"success": False, "ack": None, "error_code": None,
+                    "error_message": "ConnectionError: ...", "raw_xml": ""}
+        return {"success": False, "ack": None, "error_code": None,
+                "error_message": "unknown", "raw_xml": ""}
+    monkeypatch.setattr(tac, "_call_trading", fake_call_trading)
+
+    # pending に 6 件
     rows = [
-        {"sheet": "LOW", "row_index": 10, "item_id": "iid_invalid",
-         "url": "u1", "title": "t1", "supplier": "amazon",
-         "raw_status": "out_of_stock", "ts": "2026-06-02T08:00:00"},
-        {"sheet": "HIGH", "row_index": 20, "item_id": "iid_filter_skip",
-         "url": "u2", "title": "t2", "supplier": "mercari",
-         "raw_status": "SOLD_OUT", "ts": "2026-06-02T09:00:00"},
-        {"sheet": "LOW", "row_index": 30, "item_id": "iid_valid",
-         "url": "u3", "title": "t3", "supplier": "mercari",
-         "raw_status": "SOLD_OUT", "ts": "2026-06-02T10:00:00"},
-        {"sheet": "LOW", "row_index": 40, "item_id": "iid_sheet_read_fail",
-         "url": "u4", "title": "t4", "supplier": "mercari",
-         "raw_status": "SOLD_OUT", "ts": "2026-06-02T11:00:00"},
+        # ① 削除対象: sheet D=空 + eBay qty=0
+        {"sheet": "LOW", "row_index": 10, "item_id": "iid_qty_zero",
+         "url": "u1", "title": "t1", "ts": "2026-06-02T08:00:00"},
+        # ② 残置 (再 include 候補): sheet D=空 だが eBay qty=1 (= sheet が誤)
+        {"sheet": "LOW", "row_index": 20, "item_id": "iid_qty_one",
+         "url": "u2", "title": "t2", "ts": "2026-06-02T09:00:00"},
+        # ③ 削除対象: err 17 = Item not found (= 既 ended、 qty=0 同等)
+        {"sheet": "LOW", "row_index": 30, "item_id": "iid_err_17",
+         "url": "u3", "title": "t3", "ts": "2026-06-02T10:00:00"},
+        # ④ 残置: API 失敗 → 保守的に保持
+        {"sheet": "LOW", "row_index": 40, "item_id": "iid_api_fail",
+         "url": "u4", "title": "t4", "ts": "2026-06-02T11:00:00"},
+        # ⑤ 残置: filter skip (= eBay verify されない)
+        {"sheet": "HIGH", "row_index": 50, "item_id": "iid_filter_skip",
+         "url": "u5", "title": "t5", "ts": "2026-06-02T12:00:00"},
+        # ⑥ 残置: skip_reason 無し (= sheet 読込失敗等)
+        {"sheet": "LOW", "row_index": 60, "item_id": "iid_sheet_read_fail",
+         "url": "u6", "title": "t6", "ts": "2026-06-02T13:00:00"},
     ]
     with open(pending_file, "w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
 
-    # collect_from_pending_queue が返した skipped (= 各種 skip_reason の混在)
     skipped = [
-        # 削除対象: sheet で ○ が外れた
-        {"sheet": "LOW", "row_index": 10, "item_id": "iid_invalid",
+        {"sheet": "LOW", "row_index": 10, "item_id": "iid_qty_zero",
          "skip_reason": "no_longer_sold_or_id_changed"},
-        # 残置: 別 sheet の filter で skip (= 次 cycle で verify される)
-        {"sheet": "HIGH", "row_index": 20, "item_id": "iid_filter_skip",
+        {"sheet": "LOW", "row_index": 20, "item_id": "iid_qty_one",
+         "skip_reason": "no_longer_sold_or_id_changed"},
+        {"sheet": "LOW", "row_index": 30, "item_id": "iid_err_17",
+         "skip_reason": "no_longer_sold_or_id_changed"},
+        {"sheet": "LOW", "row_index": 40, "item_id": "iid_api_fail",
+         "skip_reason": "no_longer_sold_or_id_changed"},
+        {"sheet": "HIGH", "row_index": 50, "item_id": "iid_filter_skip",
          "skip_reason": "filter_low"},
-        # 残置: skip_reason 無し (= sheet 読込失敗等、 verify 未完了)
-        {"sheet": "LOW", "row_index": 40, "item_id": "iid_sheet_read_fail"},
+        {"sheet": "LOW", "row_index": 60, "item_id": "iid_sheet_read_fail"},
     ]
 
-    archived = gen.prune_discarded_entries(skipped)
-    assert archived == 1
+    res = gen.prune_discarded_entries(skipped)
+    assert res["discarded"] == 2  # qty=0 + err 17
+    assert res["kept_qty_gt0"] == 1  # qty=1 で再 include 候補
+    assert len(res["reincluded"]) == 1
+    assert res["reincluded"][0]["item_id"] == "iid_qty_one"
 
-    # pending には 3 件残る (filter_skip / valid / sheet_read_fail)
+    # pending には 4 件残る (qty_one / api_fail / filter_skip / sheet_read_fail)
     remaining = pending_file.read_text(encoding="utf-8").strip().splitlines()
     remaining_ids = {json.loads(line)["item_id"] for line in remaining}
-    assert remaining_ids == {"iid_filter_skip", "iid_valid", "iid_sheet_read_fail"}
+    assert remaining_ids == {
+        "iid_qty_one", "iid_api_fail", "iid_filter_skip", "iid_sheet_read_fail"
+    }
 
-    # discarded には 1 件 + discard_reason/discarded_at field 付与
+    # discarded には 2 件 (qty=0 + err 17)
     discarded = discarded_file.read_text(encoding="utf-8").strip().splitlines()
-    assert len(discarded) == 1
-    entry = json.loads(discarded[0])
-    assert entry["item_id"] == "iid_invalid"
-    assert entry["discard_reason"] == "no_longer_sold_or_id_changed"
-    assert "discarded_at" in entry
+    assert len(discarded) == 2
+    discarded_ids = {json.loads(line)["item_id"] for line in discarded}
+    assert discarded_ids == {"iid_qty_zero", "iid_err_17"}
+    for line in discarded:
+        e = json.loads(line)
+        assert e["discard_reason"] == "ebay_qty_zero_confirmed"
+        assert "discarded_at" in e
+
+
+def test_email_header_shows_untaken_count_when_action_required(tmp_path, monkeypatch):
+    """HQ 2026-06-10 FINAL 指示 C: cycle report 冒頭 1 行で取下げ漏れ件数明示.
+
+    Regression guard: 6/10 09:30 で「4 件中 1 件未取下げを「正常」表記していた bug」 是正。
+    action_required_summary.count > 0 → 「⚠️ 要対応 Y件」 ヘッダ、 = 0 → 「✅ 全件完了」。
+    """
+    from email_notifier import _format_body
+    # case 1: 要対応 2 件
+    cycle_log_action = {
+        "status": "success",
+        "ts_start": "2026-06-10T17:30:00",
+        "ts_end":   "2026-06-10T17:58:00",
+        "phases": {
+            "monitor": {"newly_sold": 4, "newly_in_stock": 0,
+                         "processed": 913, "errors": 0},
+            "revise_csv": {"allowed": 3},
+            "upload": {"success": False, "csv_lines": 3, "results": [
+                {"item_id": "111", "success": True, "verified": True, "verify_qty": 0},
+                {"item_id": "222", "success": True, "safe_failure": True},
+                {"item_id": "333", "success": False, "verified": False, "verify_qty": 1},
+            ]},
+            "action_required_summary": {
+                "count": 2,
+                "items": [
+                    {"sheet": "LOW", "row": 637, "item_id": "",
+                     "title": "test1", "reason": "item_id_empty"},
+                    {"sheet": "HIGH", "row": 479, "item_id": "333",
+                     "title": "test2", "reason": "verify_qty_gt0_giveup"},
+                ],
+            },
+        },
+    }
+    body = _format_body(cycle_log_action)
+    assert "売切検知 4 → 完了 2 / 未取下げ 2" in body
+    assert "⚠️ 要対応 (取下げ漏れ 2 件)" in body
+    assert "item_id_empty" in body
+    assert "verify_qty_gt0_giveup" in body
+    # 旧 bug の「正常」 表記が出ないことを確認
+    assert "正常 (取下げ実施)" not in body
+
+    # case 2: 全件完了 (= 売切検知あり、 全 success)
+    cycle_log_ok = {
+        "status": "success",
+        "ts_start": "2026-06-10T13:30:00",
+        "ts_end":   "2026-06-10T13:58:00",
+        "phases": {
+            "monitor": {"newly_sold": 3, "newly_in_stock": 0,
+                         "processed": 913, "errors": 0},
+            "revise_csv": {"allowed": 3},
+            "upload": {"success": True, "csv_lines": 3, "results": [
+                {"item_id": "111", "success": True, "verified": True, "verify_qty": 0},
+                {"item_id": "222", "success": True, "verified": True, "verify_qty": 0},
+                {"item_id": "333", "success": True, "safe_failure": True},
+            ]},
+            "action_required_summary": {"count": 0, "items": []},
+        },
+    }
+    body_ok = _format_body(cycle_log_ok)
+    assert "売切検知 3 → 完了 3 / 未取下げ 0" in body_ok
+    assert "✅ 全件取下げ完了" in body_ok
+    assert "⚠️ 要対応" not in body_ok
+
+
+def test_in_cycle_verify_blocks_silent_success(tmp_path, monkeypatch):
+    """HQ 2026-06-10 FINAL 指示 A: revise 後 GetItem qty=0 確認できない限り success=False.
+
+    Regression guard: revise 投げて Ack=Success でも、 実際に qty=0 になってない場合
+    (= eBay 反映遅延 / 部分失敗等) を silent success として扱わない。
+    """
+    from ebay_actions import trading_api_uploader as tau
+    from ebay_actions import trading_api_client as tac
+
+    # _call_one (revise) は常に Success ack を返す (= 表面 success)
+    def fake_revise(item_id, quantity, access_token=None):
+        return {"success": True, "ack": "Success", "error_code": None,
+                "error_message": None, "raw_xml": "<Ack>Success</Ack>"}
+    monkeypatch.setattr(tac, "revise_inventory_status", fake_revise)
+    monkeypatch.setattr(tac, "load_access_token", lambda: "test_token")
+
+    # GetItem は qty=5 (= revise が実際は反映されてない) を返し続ける
+    def fake_call_trading(call_name, body, access_token=None):
+        return {"success": True, "ack": "Success", "error_code": None,
+                "error_message": None, "raw_xml": "<Quantity>5</Quantity>"}
+    monkeypatch.setattr(tac, "_call_trading", fake_call_trading)
+    monkeypatch.setattr(tau, "_call_trading", fake_call_trading)
+    # in-cycle retry の sleep を抑制
+    monkeypatch.setattr(tau, "INCYCLE_RETRY_INTERVALS_SEC", [0.0, 0.0, 0.0])
+    monkeypatch.setattr(tau.time, "sleep", lambda _: None)
+
+    # CSV を tmp に作って upload を回す
+    csv_path = tmp_path / "fake_revise.csv"
+    csv_path.write_text(
+        '"*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)","ItemID","*Quantity"\n'
+        '"Revise","999111","0"\n',
+        encoding="utf-8",
+    )
+    result = tau.upload_csv_via_trading_api(csv_path, dry_run=False, pacing_sec=0.0)
+    # in-cycle verify NG (qty=5 残存) → success=False, verified=False
+    assert result["success"] is False, "verify NG なのに success=True"
+    assert result["ng"] == 1
+    entry = result["results"][0]
+    assert entry["success"] is False
+    assert entry["verified"] is False
+    assert entry["verify_qty"] == 5
+    # 最大 retry 回数走ったことを確認 (= 諦めずに retry した)
+    assert entry["verify_attempts"] >= 3
 
 
 if __name__ == "__main__":

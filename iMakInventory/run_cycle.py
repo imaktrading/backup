@@ -608,6 +608,35 @@ def run_cycle(
                     except Exception as e:
                         _log(f"  [!] drain_pending_queue 失敗: {type(e).__name__}: {e}",
                              test_mode)
+                # HQ 2026-06-10 FINAL 指示 B: upload で in-cycle verify NG (= qty>0 残存)
+                # の item を action_required.jsonl に記録 (= cycle report で「要対応 Y 件」 表示)
+                try:
+                    from monitor_listings import append_action_required  # noqa: PLC0415
+                    verify_failed = [
+                        res for res in (u.get("results") or [])
+                        if not res.get("success") and res.get("verified") is False
+                        and res.get("verify_qty") not in (None, 0)
+                    ]
+                    for res in verify_failed:
+                        append_action_required(
+                            sheet_label=res.get("sheet_label", ""),
+                            result={
+                                "row_index": res.get("row_index", -1),
+                                "url":       res.get("url", ""),
+                                "item_id":   res.get("item_id", ""),
+                                "title":     res.get("title", ""),
+                                "supplier":  res.get("supplier", ""),
+                                "raw_status": "verify_qty_gt0",
+                            },
+                            reason="verify_qty_gt0_giveup",
+                            dry_run=False,
+                        )
+                    if verify_failed:
+                        _log(f"  [★要対応] in-cycle verify 通過せず: {len(verify_failed)} 件 → action_required.jsonl",
+                             test_mode)
+                except Exception as e:
+                    _log(f"  [!] action_required 記録失敗: {type(e).__name__}: {e}",
+                         test_mode)
                 # health: 成否を記録 + 必要なら通知発火 (3 経路冗長)
                 try:
                     health_res = record_upload_result(
@@ -663,6 +692,37 @@ def run_cycle(
             progress_writer.finalize()
         except Exception:
             pass
+
+    # HQ 2026-06-10 FINAL 指示 B/C: action_required 集計を cycle_log に格納
+    # → email_notifier が冒頭 「⚠️ 要対応 Y件」 or 「✅ 全件取下げ完了」 ヘッダ描画に利用
+    try:
+        action_file = Path(__file__).resolve().parent / "decision_log" / "action_required.jsonl"
+        cycle_action_count = 0
+        cycle_action_items = []
+        cycle_start = cycle_log.get("ts_start", "")
+        if action_file.exists() and cycle_start:
+            for line in action_file.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if entry.get("ts", "") >= cycle_start:
+                    cycle_action_count += 1
+                    cycle_action_items.append({
+                        "sheet":    entry.get("sheet", ""),
+                        "row":      entry.get("row_index", -1),
+                        "item_id":  entry.get("item_id", ""),
+                        "title":    (entry.get("title") or "")[:50],
+                        "reason":   entry.get("reason", ""),
+                    })
+        cycle_log["phases"]["action_required_summary"] = {
+            "count": cycle_action_count,
+            "items": cycle_action_items[:20],  # メール表示用に上位 20 件
+        }
+    except Exception as e:
+        _log(f"  [!] action_required 集計失敗: {type(e).__name__}: {e}", test_mode)
 
     log_path = _record_cycle_log(cycle_log)
     _log(f"=== cycle 完了: status={cycle_log['status']} log={log_path.name} ===", test_mode)

@@ -260,9 +260,19 @@ def collect_from_pending_queue(
     return candidates, skipped
 
 
-def prune_discarded_entries(skipped: list[dict]) -> int:
+def prune_discarded_entries(skipped: list[dict]) -> dict:
     """verify で「sheet で D が ○ でなくなった/itemID が変わった」と判定された
-    pending entry を physical 削除し、 discarded_revise.jsonl に archive.
+    pending entry を **eBay GetItem qty=0 確認後にのみ** discard する。
+
+    HQ 2026-06-10 確定指示 (= `_FINAL_design_directive`) 「取下げ義務 persist /
+    取下げるべきものは eBay qty=0 を確認するまで閉じる」 に基づく fail-CLOSED 設計:
+
+    - sheet D=空 だけでは削除しない (= sheet 書込 fail 由来の偽 D=空 で silent drop
+      する 6/10 09:30 同型 bug を防ぐ)
+    - eBay GetItem で qty=0 確認できた entry のみ discarded_revise.jsonl に archive
+    - eBay qty>0 のまま entry = pending 残置 + 「sheet 不整合」 を逆検知 (= reverse audit
+      機能を内蔵) → re-include CSV 候補に格上げ
+    - GetItem call 失敗 / err 17 (Item not found = 既 ended) は qty=0 同等扱いで discard
 
     Args:
         skipped: collect_from_pending_queue が返す skipped list。
@@ -270,16 +280,14 @@ def prune_discarded_entries(skipped: list[dict]) -> int:
                  filter_* (= 別 sheet の cycle で verify される) や sheet 読込失敗 (=
                  skip_reason 無し) は対象外 = pending に残す。
 
-    Returns: archive した件数
-
-    Why: 偽 OOS 等で sheet が ○ → 空 に reset された後、 pending に entry が
-    残り続けて queue 肥大化する問題への構造修正 (2026-06-02 amazon scraper bug 由来の
-    158 件残存等)。 sheet verify が成功している (= skip_reason="no_longer_sold...")
-    場合のみ削除するので、 sheet 読込失敗で誤削除する事故は構造的に発生しない。
+    Returns: {"discarded": N, "kept_qty_gt0": M, "reincluded": [<entry>, ...]}
+      - discarded: eBay qty=0 確認で archive した件数
+      - kept_qty_gt0: eBay qty>0 残ってて pending 残置した件数 (= silent loss 候補)
+      - reincluded: 再度 CSV 候補に格上げすべき entry list (= sheet が壊れてただけ)
     """
     if not PENDING_REVISE_FILE.exists():
-        return 0
-    # 削除対象 entry の identifier set を作る (sheet, row_index, item_id) で同定
+        return {"discarded": 0, "kept_qty_gt0": 0, "reincluded": []}
+    # 削除候補 entry の identifier set を作る
     targets = set()
     for s in skipped:
         if s.get("skip_reason") != "no_longer_sold_or_id_changed":
@@ -287,10 +295,49 @@ def prune_discarded_entries(skipped: list[dict]) -> int:
         key = (s.get("sheet", ""), s.get("row_index", -1), s.get("item_id", ""))
         targets.add(key)
     if not targets:
-        return 0
+        return {"discarded": 0, "kept_qty_gt0": 0, "reincluded": []}
 
+    # eBay GetItem で qty 確認 (= pending 残置 / discard を判定)
+    # 循環 import 回避のため遅延 import
+    from ebay_actions.trading_api_client import (  # noqa: PLC0415
+        load_access_token, _call_trading,
+    )
+    import re as _re  # noqa: PLC0415
+    try:
+        token = load_access_token()
+    except Exception as e:
+        print(f"  [!] prune skip (token load 失敗): {type(e).__name__}: {e}")
+        return {"discarded": 0, "kept_qty_gt0": 0, "reincluded": []}
+
+    def _ebay_qty(iid: str) -> Optional[int]:
+        """eBay GetItem で現在 qty 取得。 None = API 失敗 / 不明 = 削除保留。"""
+        if not iid:
+            return None
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f'<ItemID>{iid}</ItemID></GetItemRequest>'
+        )
+        try:
+            res = _call_trading("GetItem", body, access_token=token)
+        except Exception as e:
+            print(f"    [!] GetItem 例外 iid={iid}: {type(e).__name__}: {e}")
+            return None
+        if res.get("error_code") == "17":
+            # Item not found / already ended → qty=0 同等
+            return 0
+        if not res.get("success"):
+            return None
+        m = _re.search(r"<Quantity>(\d+)</Quantity>", res.get("raw_xml", ""))
+        if m:
+            return int(m.group(1))
+        return None
+
+    # pending 全行を走査、 target 該当 entry のみ eBay qty 確認
     archived = 0
-    keep = []
+    kept_qty_gt0 = 0
+    reincluded = []
+    keep_lines = []
     with open(PENDING_REVISE_FILE, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -299,25 +346,41 @@ def prune_discarded_entries(skipped: list[dict]) -> int:
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError:
-                # 壊れた行は維持 (debug 可能にする)
-                keep.append(line)
+                keep_lines.append(line)
                 continue
             key = (entry.get("sheet", ""), entry.get("row_index", -1),
                    entry.get("item_id", ""))
-            if key in targets:
+            if key not in targets:
+                keep_lines.append(line)
+                continue
+            # eBay qty 確認 (= fail-CLOSED 設計の核)
+            iid = entry.get("item_id", "")
+            qty = _ebay_qty(iid)
+            if qty == 0:
+                # 既 qty=0 → 安全に discard
                 entry["discarded_at"] = datetime.now().isoformat(timespec="seconds")
-                entry["discard_reason"] = "no_longer_sold_or_id_changed"
+                entry["discard_reason"] = "ebay_qty_zero_confirmed"
                 with open(DISCARDED_REVISE_FILE, "a", encoding="utf-8") as af:
                     af.write(json.dumps(entry, ensure_ascii=False) + "\n")
                 archived += 1
+            elif qty is None:
+                # API 失敗 → 保守的に pending 残置
+                keep_lines.append(line)
             else:
-                keep.append(line)
+                # qty > 0 → sheet 状態が誤、 pending 残置 + 再 include 候補に格上げ
+                kept_qty_gt0 += 1
+                reincluded.append(entry)
+                keep_lines.append(line)
 
     PENDING_REVISE_FILE.write_text(
-        ("\n".join(keep) + "\n") if keep else "",
+        ("\n".join(keep_lines) + "\n") if keep_lines else "",
         encoding="utf-8",
     )
-    return archived
+    return {
+        "discarded": archived,
+        "kept_qty_gt0": kept_qty_gt0,
+        "reincluded": reincluded,
+    }
 
 
 def drain_pending_queue(consumed_item_ids: list[str]) -> int:
@@ -551,12 +614,35 @@ def run(
             single_sheet_label=single_sheet_label,
         )
         print(f"  pending queue から: {len(candidates)} 件 (skip {len(pending_skipped)} 件)")
-        # 偽 OOS 由来等で sheet 側が ○ → 空 に reset された entry を物理削除
-        # (= pending 肥大化防止)。 sheet 読込失敗時は skip_reason 無しで触らない。
+        # 「sheet で ○ 解除」 entry の処理 (= HQ 2026-06-10 FINAL 指示 D に基づく fail-CLOSED 設計):
+        # 1. eBay GetItem で qty=0 確認できた entry のみ discard
+        # 2. eBay qty>0 残ってる entry は pending 残置 + 「sheet 書込 fail 由来の偽 D=空」 として
+        #    再 include 候補に昇格 (= silent loss を逆に救済)
+        # 3. GetItem 失敗は保守的に pending 残置 (= 再判定機会を捨てない)
+        # 旧 b4c238d は sheet D=空 だけで discard → 6/10 09:30 で sheet 書込 DNS fail 由来の
+        # 偽 D=空 で 2 件 silent drop 発生、 本実装で構造的に修正。
         try:
-            pruned = prune_discarded_entries(pending_skipped)
-            if pruned:
-                print(f"  pending prune (sheet で ○ 解除済): {pruned} 件 → discarded_revise.jsonl")
+            prune_res = prune_discarded_entries(pending_skipped)
+            disc = prune_res.get("discarded", 0)
+            kept = prune_res.get("kept_qty_gt0", 0)
+            reincluded = prune_res.get("reincluded", [])
+            if disc:
+                print(f"  pending prune (eBay qty=0 確認): {disc} 件 → discarded_revise.jsonl")
+            if kept:
+                print(f"  [!] pending 残置 (eBay qty>0 → sheet 状態誤と判定): {kept} 件 → CSV 候補に再昇格")
+            # 再昇格 entry を candidates に追加 (= 取下げ義務 persist)
+            for q in reincluded:
+                candidates.append({
+                    "sheet_label": q.get("sheet", ""),
+                    "row_index":   q.get("row_index", -1),
+                    "item_id":     q.get("item_id", ""),
+                    "url":         q.get("url", ""),
+                    "title":       q.get("title", ""),
+                    "current_sold": "○",
+                    "checked_at":  "",
+                    "queue_ts":    q.get("ts", ""),
+                    "reincluded_reason": "sheet_d_empty_but_ebay_qty_gt0",
+                })
         except Exception as e:
             print(f"  [!] prune_discarded_entries 失敗: {type(e).__name__}: {e}")
     elif mode == "all":

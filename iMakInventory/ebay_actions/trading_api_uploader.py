@@ -20,6 +20,7 @@ from ebay_actions.trading_api_client import (
     revise_inventory_status,
     revise_inventory_status_variation,
     load_access_token,
+    _call_trading,
 )
 
 
@@ -93,6 +94,12 @@ def _parse_csv_rows(csv_path: Path) -> list:
     return rows
 
 
+# HQ 2026-06-10 FINAL 指示 A: in-cycle short retry intervals (= revise + verify NG 時の再試行)
+# 設計: 5s/15s/45s 計 3 回追加試行 = 65s 上限。 取下げ義務を「同 cycle 内で閉じる」 ため
+# 数十秒〜分単位のスパンで qty=0 確認まで諦めない。 数 cycle 越し (= 旧設計) は禁止。
+INCYCLE_RETRY_INTERVALS_SEC = [5.0, 15.0, 45.0]
+
+
 def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
                                 pacing_sec: float = 0.3) -> dict:
     """CSV (= eBay FileExchange format) を Trading API ReviseInventoryStatus で処理.
@@ -150,6 +157,45 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             "getaddrinfo failed", "Max retries exceeded",
         ))
 
+    def _verify_qty_zero(item) -> tuple:
+        """HQ 2026-06-10 FINAL 指示 A: in-cycle verify (= 即 GetItem で qty=0 確認).
+
+        Returns: (verified: bool, observed_qty: int|None, err_msg: str)
+          - verified=True: qty=0 確認 or err 17 (Item not found = ended、 同等扱い)
+          - verified=False, observed_qty=N: qty>0 のまま (= revise が反映されてない)
+          - verified=False, observed_qty=None: API 失敗 (= 確認不能、 保守的に失敗扱い)
+
+        variation listing は ReviseFixedPriceItem 経路で全 variation の構造変更を要するため、
+        GetItem の Quantity tag だけでは個別 variation qty 取れない (= 全 variation の sum)。
+        現状は variation も top-level Quantity を chk、 全 variation qty=0 なら sum=0 で確認可能、
+        部分的な variation 残存は false-positive 可能性あり (= Phase 2 改善対象)。
+        """
+        import re as _re  # noqa: PLC0415
+        iid = item.get("item_id", "")
+        if not iid:
+            return False, None, "item_id_empty"
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f'<ItemID>{iid}</ItemID></GetItemRequest>'
+        )
+        try:
+            res = _call_trading("GetItem", body, access_token=token)
+        except Exception as e:
+            return False, None, f"verify_exception: {type(e).__name__}: {e}"
+        if res.get("error_code") == "17":
+            # Item not found / already ended → qty=0 同等扱い
+            return True, 0, "err_17_safe"
+        if not res.get("success"):
+            return False, None, f"verify_failed_ack={res.get('ack')} err={res.get('error_code')}"
+        m = _re.search(r"<Quantity>(\d+)</Quantity>", res.get("raw_xml", ""))
+        if m:
+            q = int(m.group(1))
+            return (q == 0), q, ("qty_zero" if q == 0 else f"qty_{q}")
+        return False, None, "qty_tag_missing"
+
+    # in-cycle retry policy: module-level INCYCLE_RETRY_INTERVALS_SEC を使う
+
     # run_daily.py の _parse_qty_output で 「CSV 行数」 文言を regex match させるため
     # 件数を 明示出力 (= sell_feed_uploader stdout 互換)。
     # 「listing」 keyword で single CSV 認識、 含まれない場合は variation 集計に倒す
@@ -179,7 +225,44 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
         #   取下げ無用、 dropshipping_model 前提だと売れた item は別経路で処理される、
         #   2026-06-04 追加: 3 cycle 連続 ng=1 で汎用エラー閾値超アラート対策)
         is_safe_failure = res["error_code"] in ("17", "231", "21916750")
-        success = res["success"] or is_safe_failure
+        revise_success = res["success"] or is_safe_failure
+
+        # HQ 2026-06-10 FINAL 指示 A: in-cycle verify (= revise 後すぐ GetItem で qty=0 確認)
+        # + 失敗時 short retry。 verified=True が真の「取下げ完了」。
+        # qty=0 と仕入元の整合性を物理担保し、 silent loss 構造を根絶。
+        verified = False
+        verify_qty = None
+        verify_msg = "not_attempted"
+        verify_attempts = 0
+        if revise_success and item.get("quantity") == 0:
+            # qty=0 化が目的の場合のみ verify (= revise の qty 変更が反映されたか chk)
+            verified, verify_qty, verify_msg = _verify_qty_zero(item)
+            verify_attempts = 1
+            # in-cycle short retry: verify NG (qty>0 残存) なら再 Revise + 再 verify
+            for attempt_idx, sleep_sec in enumerate(INCYCLE_RETRY_INTERVALS_SEC, start=2):
+                if verified:
+                    break
+                if verify_qty is None:
+                    # API 失敗 = 確認不能、 retry しても同じ可能性、 1 回だけ追加試行
+                    if attempt_idx > 2:
+                        break
+                print(f"  [{i}/{len(rows)}] verify NG ({verify_msg}) → {sleep_sec}s sleep + 再 Revise + 再 verify",
+                      flush=True)
+                time.sleep(sleep_sec)
+                res = _call_one(item)
+                is_safe_failure = res["error_code"] in ("17", "231", "21916750")
+                revise_success = res["success"] or is_safe_failure
+                if revise_success:
+                    verified, verify_qty, verify_msg = _verify_qty_zero(item)
+                verify_attempts = attempt_idx
+
+        # 最終判定: verify 通過 or 元から verify 対象外 (qty != 0 等) なら success
+        # verify が必要だったのに通過しなかった → success=False (= action_required)
+        if item.get("quantity") == 0 and not verified:
+            # qty=0 化が目的だったが in-cycle verify 通過せず → 失敗確定 (= silent ではない)
+            success = False
+        else:
+            success = revise_success
         entry = {
             **item,
             "success": success,
@@ -187,6 +270,10 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             "error_code": res["error_code"],
             "error_message": res["error_message"],
             "safe_failure": is_safe_failure,
+            "verified": verified,
+            "verify_qty": verify_qty,
+            "verify_msg": verify_msg,
+            "verify_attempts": verify_attempts,
         }
         results.append(entry)
         if success:
@@ -194,7 +281,13 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
         else:
             ng_count += 1
         flag = "OK" if success else "NG"
-        suffix = " (safe: 既取下げ済)" if is_safe_failure else ""
+        suffix = ""
+        if is_safe_failure:
+            suffix = " (safe: 既取下げ済)"
+        elif verified:
+            suffix = f" (verified qty={verify_qty} attempts={verify_attempts})"
+        elif item.get("quantity") == 0:
+            suffix = f" (★verify 通過せず: {verify_msg} attempts={verify_attempts} → 要対応)"
         print(f"  [{i}/{len(rows)}] {flag} {label} ack={res['ack']} "
               f"err={res['error_code']}{suffix}", flush=True)
         if i < len(rows):
