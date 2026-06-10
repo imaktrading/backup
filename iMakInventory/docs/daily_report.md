@@ -607,3 +607,77 @@ HQ confirm 指示 (= `requests/2026-06-10_phase1_review_burstguard_and_reconcili
 - iMakRevise feasibility 回答待ち
 - Phase 2 (auto-re-enqueue / Bulk Change Circuit Breaker / DLQ resurrect CLI) は 1-2 週運用観察後判断
 
+---
+
+## 2026-06-10 (続続) — Phase 1.6: 取下げ側急増ガード + release CLI (HQ affirm 2 点)
+
+### 決定
+
+HQ confirm 指示 (= `_phase1_5_metrics_alignment_response`) で承認、 HQ Phase 1.6 GO 投入指示
+(= `_phase1_review_burstguard_and_reconciliation_deadline_processed` の続報) の 2 affirm 反映:
+- **affirm #1**: burst HOLD が新 fail-OPEN にならないこと、 即時 SLA + release 経路が load-bearing
+- **affirm #2**: 22-29 件帯の隙間は reverse_audit が backstop、 newly_sold 乖離も突合対象に含む
+
+加えて、 Phase 1.5 daily_report の **校正データ訂正**:
+- 私の記述 「実機校正データ: 通常 cycle 0-2 件」 は no_longer_sold (= prune 親集合) 分布で、
+  急増ガード発火メトリクス reincluded (= 子集合 = eBay qty>0 と判定された subset) ではなかった
+- 正しい reincluded 実機分布は 過去全て 0 件 (= 6/9 167 件も 6/10 2 件も全件 qty=0 で discard)
+- 閾値 10 件 は conservative マージンとして維持、 透明性確保のため明示訂正
+
+### 変更
+
+1. **取下げ側急増ガード (`revise_csv_generator.py:106`)**:
+   - `DEFAULT_NEWLY_SOLD_BURST_THRESHOLD = int(os.environ.get("INVENTORY_NEWLY_SOLD_BURST_THRESHOLD", "30"))`
+   - 実機 newly_sold 分布校正 (= 189 cycle 集計): 中央 2 / 平均 4.4 / 90 %tile 6 / 95 %tile 10 / 通常 max 21
+     / 偽 OOS incident 50/95/152 件
+   - 閾値 30 件 = 95 %tile の 3 倍、 通常 max 21 + 50% マージン、 偽 OOS 100% catch
+2. **HOLD 経路 (`revise_csv_generator.py:729`)**:
+   - candidates 件数 > 閾値 → 全件 `action_required.jsonl` に reason=`newly_sold_burst_guard_holdout` 記録
+   - candidates を空にして以降 CSV 生成 / upload を skip
+3. **release CLI (`tools/release_holdouts.py` 新規 ~250 行)**:
+   - `--reason` / `--item-id` でフィルタ、 `--execute` で本実行 (default dry-run)
+   - eBay 現状 qty 確認 → revise qty=0 投入 → verify → ledger 記録 (released_revise.jsonl + processed_revise.jsonl)
+   - action_required.jsonl から release 済 entry 物理削除
+4. **reverse_audit (`reverse_audit.py` 冒頭 docstring)**:
+   - HQ affirm #2 backstop 機能を明示: 22-29 件帯通過分 + burst HOLD 放置分も
+     「sheet D=○ vs eBay qty>0」 で必ず検出される relationship を 物理担保
+5. **email (`email_notifier.py`)**:
+   - burst HOLD (newly_sold/reinclude いずれか) 検出時:
+     - 「load-bearing: HOLD のまま放置 = 出品継続 → 無在庫履行不能」 警告
+     - release CLI コマンド (dry-run + execute) を本文記載
+     - 対応期限 「即時」
+6. **regression test (`tests/test_run_cycle.py`)**:
+   - `test_newly_sold_burst_guard_holds_to_action_required`: 6 件 candidates > 閾値 5 → 全件 HOLD
+   - `test_email_includes_release_cli_for_burst_holdouts`: release_holdouts CLI / `--execute` / 「即時」 が本文出現
+
+### 検証
+
+- ✅ 全 189 tests pass (新規 2 件)
+- ✅ release CLI が `--help` で help 表示、 dry-run 動作確認
+- ✅ 3 系統独立防護構造完成:
+
+| ガード | 検知対象 | 閾値 | env var |
+|---|---|---|---|
+| per_run_cap | CSV 行数 | 100 (--force 解除可) | --max-per-run |
+| **newly_sold burst** (Phase 1.6) | **scraper 系異常 (= 偽 OOS、 6/3 95件型)** | **30** | `INVENTORY_NEWLY_SOLD_BURST_THRESHOLD` |
+| reinclude burst (Phase 1.5) | sheet 書込系異常 (= 6/10 09:30 型) | 10 | `INVENTORY_REINCLUDE_BURST_THRESHOLD` |
+
+### Phase 1.5 校正データ訂正
+
+> 校正データの母集団 訂正: 「通常 cycle 0-2 件」 は no_longer_sold (= 親集合 = prune 入口) 分布で、
+> 急増ガード発火メトリクス reincluded (= 子集合 = eBay qty>0 と判定された entry) ではなかった。
+> reincluded 実機分布は 過去全て 0 件、 閾値 10 件は transient/レース由来 false positive 用 conservative
+> マージンとして維持。
+
+### 次のアクション
+
+- 13:30 SHEET 単一 cycle で Phase 1 logic 実走確認 (= Phase 1.5/1.6 のガード自体は両 sheet cycle 専用)
+- **17:30 / 21:30 / 6/11 01:30 / 05:30** 順次確認、 異常なしのまま継続
+- **6/11 09:30 `--sheet both` cycle で Phase 1.5/1.6 + reverse_audit phase 全部実走**
+- **6/12 09:30 cycle で 「継続乖離なし」 の初回証跡記録** (人手で 6/11 中に既存乖離を潰した前提)
+- 信頼回復 #2 (アラート実送テスト) を 6/11 中に並行実施
+- iMakRevise feasibility 回答待ち
+- Phase 2 (auto-re-enqueue / DLQ resurrect CLI) は 1-2 週運用観察後判断
+
+13:30 実走 + 6/12 初回 reverse_audit レポート まで 「対策進行中 (未解決)」 スタンス 維持 (= HQ 指示)。
+
