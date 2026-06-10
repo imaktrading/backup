@@ -528,6 +528,17 @@ def _format_body_inner(cycle_log: Dict[str, Any]) -> str:
     ra = phases.get("reverse_audit", {}) or {}
     if ra:
         lines.append("【reconciliation】(意図 D=○ vs 実 eBay qty>0 突合)")
+        # ユーザー指示 「放置禁止」: phase 自体 error の場合は「乖離 0」 と誤表示しない
+        # (= silent 化 risk、 嘘の安心)。 error key が立ってたら未実行を明示。
+        if ra.get("error"):
+            lines.append(f"  ❌ reverse_audit phase 失敗、 突合不能: {ra.get('error')[:120]}")
+            lines.append("  ★ 注意: 取下げ漏れ最後の砦が動作不能、 「乖離 0」 表記なし = 嘘の安心 排除")
+            lines.append("  対応期限: **即時** (= reconciliation 動かない = 漏れ検知不能)")
+            lines.append("")
+            ra = {}  # 以降の通常 path をスキップ
+        else:
+            pass  # 通常 path へ続く
+    if ra:
         mc = ra.get("mismatch_count", 0) or 0
         if mc == -1:
             lines.append(f"  ★中断: {ra.get('error', '')}")
