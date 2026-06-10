@@ -22,13 +22,32 @@ import re
 import sys
 
 # SNKRDUNK 突合用 card 番号 (ワンピース OP/ST/EB/P 系。SNKRDUNK name の [CARD] と突合)。
-# Pokemon等は番号フォーマット差で未対応(fail-closed→Mercariのみ)、拡張余地。
+# Pokemon は title が日本語で番号を持たない → canonical KEY から導出 (_key_card_number)。
 CARD_NUM_RE = re.compile(r"\b((?:OP|ST|EB)\d{2}-\d{3}|P-\d{2,3})\b", re.IGNORECASE)
 
 
 def _card_number(title):
     m = CARD_NUM_RE.search(title or "")
     return m.group(1).upper() if m else None
+
+
+def _key_card_number(key):
+    """canonical KEY (catalog product_id) → SNKRDUNK 検索/突合用 card番号 (変種suffix除去)。
+
+    Pokemon 等 title に番号が出ない場合の供給源。KEY='SV-P-291'→'SV-P-291' /
+    'OP11-106_p2'→'OP11-106'。url-key(item:/shops:)・数字を含まない値は None (fail-closed)。
+    SNKRDUNK 側は _norm_cardnum で set-code+番号を区切り非依存に突合 (SV系は一致、S系prefix差は
+    no-match=Mercariのみ=安全)。
+    """
+    if not key or str(key).startswith(("item:", "shops:")):
+        return None
+    base = str(key).split("_")[0].strip().upper()
+    return base if re.search(r"\d", base) else None
+
+
+def _resource_card_number(title, key):
+    """SNKRDUNK 突合用 card番号: title 由来(OP/ST/EB/P)優先、無ければ canonical KEY 由来。"""
+    return _card_number(title) or _key_card_number(key)
 
 
 def _min_price(prices):
@@ -168,7 +187,7 @@ def main():
     import snkrdunk_psa_resource as sp
     snkr_res = {}
     for i, r in enumerate(rows):
-        cn = _card_number(r.get("title", "") or "")
+        cn = _resource_card_number(r.get("title", "") or "", r.get("key"))
         if not cn:
             snkr_res[i] = None
             print(f"  [{i+1}/{len(rows)}] (card番号抽出不可) skip", flush=True)

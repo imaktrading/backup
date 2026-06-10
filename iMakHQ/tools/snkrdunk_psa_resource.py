@@ -128,11 +128,37 @@ def _item_print(name):
     return ""
 
 
+def _norm_cardnum(s):
+    """card番号を比較用に正規化: 英数字のみ・大文字・'/'以降(総数)除去。
+
+    'SV-P-291'→'SVP291' / 'SV2a 201/165'→'SV2A201' / 'OP11-106'→'OP11106'。
+    set-code+番号を区切り(空白/ハイフン)非依存で id-strict 突合するための正規形。
+    """
+    s = (s or "").upper().split("/")[0]
+    return re.sub(r"[^A-Z0-9]", "", s)
+
+
+def _bracket_matches(name_upper, cn_norm):
+    """name 内の `[...番号...]` を正規化して cn_norm と完全一致するか (Pokemon 等 productNumber 空 対応)。
+
+    Pokemon は productNumber が空で番号が name の `[SV-P 291]` `[SV2a 201/165]` に埋まる。
+    区切り差(空白/ハイフン)・総数(/165)を吸収しつつ **set-code+番号の完全一致のみ**採用
+    (部分一致を許さない=誤マッチ防止。'S8a'≠'SV8a' は弾く=fail-closed)。
+    """
+    if not cn_norm:
+        return False
+    for m in re.findall(r"\[([^\]]+)\]", name_upper or ""):
+        if _norm_cardnum(m) == cn_norm:
+            return True
+    return False
+
+
 def parse_search_for_card(data, card_number, variant_hint=None):
     """search レスポンスから card_number に一致する trading-card id を抽出 (純関数・id-strict)。
 
     SNKRDUNK は鑑定カードを streetwears/sneakers バケツに入れる。name 中の `[CARD_NUMBER]`
-    か productNumber 完全一致で突合。
+    か productNumber 完全一致で突合。Pokemon は productNumber が空+番号が name の
+    `[SV-P 291]`/`[SV2a 201/165]` に埋まるため、正規化(set-code+番号の完全一致)でも突合。
     Step6 P3: **同番号に複数 print** がある時(変種非決定性)、variant_hint(canonical変種の
     set/name トークン)で正しい product を選ぶ。決め手が無い複数一致は None (fail-closed=誤variant買わない)。
     一致が無ければ None (fail-closed)。
@@ -142,6 +168,7 @@ def parse_search_for_card(data, card_number, variant_hint=None):
     cn = (card_number or "").upper().strip()
     if not cn:
         return None
+    cn_norm = _norm_cardnum(cn)
     items = []
     for bucket in ("streetwears", "sneakers", "tradingCards"):
         v = data.get(bucket)
@@ -153,7 +180,7 @@ def parse_search_for_card(data, card_number, variant_hint=None):
             continue
         pn = (it.get("productNumber") or "").upper().strip()
         name = (it.get("name") or "").upper()
-        if pn == cn or f"[{cn}]" in name.replace(" ", ""):
+        if pn == cn or f"[{cn}]" in name.replace(" ", "") or _bracket_matches(name, cn_norm):
             matches.append(it)
     if not matches:
         return None
