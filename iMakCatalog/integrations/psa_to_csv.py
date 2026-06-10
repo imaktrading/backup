@@ -1266,6 +1266,9 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     # --- 2026-06-10 PSA脱落6件 set-map (records 実在・索引のみ。真値=catalog set_name 裏取り) ---
     "SKY LEGEND":                  "SM10b",  # スカイレジェンド (cert109940063 Lillie 053=SM10b-053 実在)
     "START DECK 100":              "SI",     # スタートデッキ100 (cert139561995 Pikachu 127=SI-127 実在)
+    # --- 2026-06-11 High-Class Deck (SwSh ハイクラスデッキ) — records 実在・索引のみ ---
+    "GENGAR VMAX HIGH-CLASS DECK":   "SGG",  # ゲンガーVMAXハイクラスデッキ (cert139761896 #002=SGG-002 実在)
+    "INTELEON VMAX HIGH-CLASS DECK": "SGI",  # インテレオンVMAXハイクラスデッキ (SGI-* 実在・先回り)
 }
 
 

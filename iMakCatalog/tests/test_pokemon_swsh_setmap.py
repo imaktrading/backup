@@ -41,3 +41,11 @@ def test_swsh_no_collision_existing_sets():
         "POKEMON JAPANESE SWORD & SHIELD EEVEE HEROES") == "S6a"
     assert P.extract_set_code_from_brand_pokemon(
         "POKEMON JAPANESE SWORD & SHIELD STAR BIRTH") == "S9"
+
+
+def test_swsh_high_class_decks():
+    # 2026-06-11: ハイクラスデッキ (records 実在・索引追加) cert139761896 等
+    assert P.extract_set_code_from_brand_pokemon(
+        "POKEMON JAPANESE SWORD & SHIELD GENGAR VMAX HIGH-CLASS DECK") == "SGG"
+    assert P.extract_set_code_from_brand_pokemon(
+        "POKEMON JAPANESE SWORD & SHIELD INTELEON VMAX HIGH-CLASS DECK") == "SGI"
