@@ -357,9 +357,15 @@ def prune_discarded_entries(skipped: list[dict]) -> dict:
             return 0
         if not res.get("success"):
             return None
-        m = _re.search(r"<Quantity>(\d+)</Quantity>", res.get("raw_xml", ""))
-        if m:
-            return int(m.group(1))
+        # ★ 修正 2026-06-10: <Quantity> は累計出品数、 available = Quantity - QuantitySold
+        # で計算する。 旧 logic は Quantity をそのまま読んでて false positive 発生。
+        xml = res.get("raw_xml", "")
+        q_m = _re.search(r"<Quantity>(\d+)</Quantity>", xml)
+        sold_m = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", xml)
+        if q_m:
+            total_qty = int(q_m.group(1))
+            sold = int(sold_m.group(1)) if sold_m else 0
+            return max(0, total_qty - sold)
         return None
 
     # pending 全行を走査、 target 該当 entry のみ eBay qty 確認

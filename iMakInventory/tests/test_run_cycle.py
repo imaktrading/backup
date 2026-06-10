@@ -161,10 +161,10 @@ def test_prune_discarded_entries_requires_ebay_qty_zero(tmp_path, monkeypatch):
         iid = m.group(1) if m else ""
         if iid == "iid_qty_zero":
             return {"success": True, "ack": "Success", "error_code": None,
-                    "error_message": None, "raw_xml": "<Quantity>0</Quantity>"}
+                    "error_message": None, "raw_xml": "<Quantity>0</Quantity><QuantitySold>0</QuantitySold>"}
         if iid == "iid_qty_one":
             return {"success": True, "ack": "Success", "error_code": None,
-                    "error_message": None, "raw_xml": "<Quantity>1</Quantity>"}
+                    "error_message": None, "raw_xml": "<Quantity>1</Quantity><QuantitySold>0</QuantitySold>"}
         if iid == "iid_err_17":
             return {"success": False, "ack": "Failure", "error_code": "17",
                     "error_message": "Item cannot be accessed.", "raw_xml": ""}
@@ -343,7 +343,8 @@ def test_in_cycle_verify_blocks_silent_success(tmp_path, monkeypatch):
     # GetItem は qty=5 (= revise が実際は反映されてない) を返し続ける
     def fake_call_trading(call_name, body, access_token=None):
         return {"success": True, "ack": "Success", "error_code": None,
-                "error_message": None, "raw_xml": "<Quantity>5</Quantity>"}
+                "error_message": None,
+                "raw_xml": "<Quantity>5</Quantity><QuantitySold>0</QuantitySold>"}
     monkeypatch.setattr(tac, "_call_trading", fake_call_trading)
     monkeypatch.setattr(tau, "_call_trading", fake_call_trading)
     # in-cycle retry の sleep を抑制
@@ -394,7 +395,8 @@ def test_burst_guard_holds_mass_reinclude_to_action_required(tmp_path, monkeypat
     # GetItem は常に qty=1 を返す (= reinclude 候補化)
     def fake_call_trading(call_name, body, access_token=None):
         return {"success": True, "ack": "Success", "error_code": None,
-                "error_message": None, "raw_xml": "<Quantity>1</Quantity>"}
+                "error_message": None,
+                "raw_xml": "<Quantity>1</Quantity><QuantitySold>0</QuantitySold>"}
     monkeypatch.setattr(tac, "_call_trading", fake_call_trading)
 
     # pending に 10 件 (= 閾値 5 を超える)
@@ -618,6 +620,53 @@ def test_format_body_never_throws_silent_化禁止(tmp_path):
     body4 = _format_body({"phases": {"monitor": "not a dict",
                                        "upload": 42}})
     assert isinstance(body4, str) and len(body4) > 0
+
+
+def test_verify_uses_available_qty_not_total(monkeypatch):
+    """ユーザー指示 2026-06-10 「放置禁止」:
+    verify は 「available qty = Quantity - QuantitySold」 で判定する。
+
+    Regression guard: 6/10 manual cycle で 356901158380 (single listing、
+    Quantity=1 sold=1 = 実 available 0) を verify NG 誤判定 (= false positive) し
+    action_required.jsonl に記録。 真の取下げ漏れと混同して user 混乱。
+    """
+    from ebay_actions import trading_api_uploader as tau
+    from ebay_actions import trading_api_client as tac
+    monkeypatch.setattr(tac, "load_access_token", lambda: "test_token")
+
+    # Quantity=1 sold=1 → available=0、 verify は qty=0 と判定すべき
+    def fake_get_item(call_name, body, access_token=None):
+        return {"success": True, "ack": "Success", "error_code": None,
+                "error_message": None,
+                "raw_xml": "<Quantity>1</Quantity><QuantitySold>1</QuantitySold>"}
+    monkeypatch.setattr(tac, "_call_trading", fake_get_item)
+    monkeypatch.setattr(tau, "_call_trading", fake_get_item)
+
+    # _verify_qty_zero を upload_csv_via_trading_api 経由で呼出は重いので、
+    # logic を 単独で再現 (= 直接 _verify_qty_zero ロジック検証)
+    # tau._verify_qty_zero は closure なので、 upload_csv 全体 を mini run。
+    def fake_revise(item_id, quantity, access_token=None):
+        return {"success": True, "ack": "Success", "error_code": None,
+                "error_message": None, "raw_xml": ""}
+    monkeypatch.setattr(tac, "revise_inventory_status", fake_revise)
+    monkeypatch.setattr(tau, "INCYCLE_RETRY_INTERVALS_SEC", [0.0])
+    monkeypatch.setattr(tau.time, "sleep", lambda _: None)
+
+    import tempfile
+    from pathlib import Path
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w", encoding="utf-8") as f:
+        f.write('"*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)","ItemID","*Quantity"\n')
+        f.write('"Revise","356901158380","0"\n')
+        csv_path = Path(f.name)
+    try:
+        result = tau.upload_csv_via_trading_api(csv_path, dry_run=False, pacing_sec=0.0)
+        # verify 通過すべき (= available = 1 - 1 = 0)
+        entry = result["results"][0]
+        assert entry["verified"] is True, f"verified should be True but got {entry}"
+        assert entry["verify_qty"] == 0, f"available qty should be 0 but got {entry['verify_qty']}"
+        assert entry["success"] is True
+    finally:
+        csv_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

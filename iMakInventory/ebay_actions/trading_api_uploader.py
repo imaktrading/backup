@@ -188,10 +188,20 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             return True, 0, "err_17_safe"
         if not res.get("success"):
             return False, None, f"verify_failed_ack={res.get('ack')} err={res.get('error_code')}"
-        m = _re.search(r"<Quantity>(\d+)</Quantity>", res.get("raw_xml", ""))
-        if m:
-            q = int(m.group(1))
-            return (q == 0), q, ("qty_zero" if q == 0 else f"qty_{q}")
+        # ★ 修正 2026-06-10: eBay の <Quantity> tag は 「累計出品数」 で 「available qty」 ではない。
+        # 真の available = Quantity - QuantitySold で計算する。
+        # 旧 logic は <Quantity> をそのまま読んでて、 単品 listing で
+        # Quantity=1 sold=1 (= 実 available 0) の場合に verify NG → false positive 量産。
+        xml = res.get("raw_xml", "")
+        q_m = _re.search(r"<Quantity>(\d+)</Quantity>", xml)
+        sold_m = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", xml)
+        if q_m:
+            total_qty = int(q_m.group(1))
+            sold = int(sold_m.group(1)) if sold_m else 0
+            available = max(0, total_qty - sold)
+            return (available == 0), available, (
+                "qty_zero" if available == 0 else f"available_{available}_(total_{total_qty}_sold_{sold})"
+            )
         return False, None, "qty_tag_missing"
 
     # in-cycle retry policy: module-level INCYCLE_RETRY_INTERVALS_SEC を使う
