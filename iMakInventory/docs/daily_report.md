@@ -775,3 +775,52 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 17 件の扱い (qty=0 化 vs profile 修復先行 vs manual chk) は user 判断待ち
 - スケジュール再有効化は本 17 件の扱い確定後に判断
 
+
+
+---
+
+## 2026-06-10 (続続続続) — 判定不能23件 再調査 + 3構造修正 + variation verify 修正
+
+### 判定不能23件 再調査 (= reflex/丸投げ禁止、再調査主義確立)
+
+- 決定: scraper None は「売れた」でない。実URL再scrape/WebFetchで真因分類してから処置。
+- 変更: <方針>（memory indeterminate_means_investigate_root_cause.md 制定）
+- 検証: 23件内訳 = mercari 6 在庫あり(transient) / mercari 2 auction / amazon 13 第三者のみ /
+  fril 1 OOS / 未出品 1。 17件は eBay取下げ確認済(active CSV照合)、6件正常。
+
+### 構造修正3点 (commit 3324cb7)
+
+- 決定/変更/検証 (1) mercari auction化 → 取下げ対象:
+  - scrapers/mercari_scraper.py _detect_via_selenium に bid-button検知追加 → AUCTION/in_stock=False
+  - 旧: container 30s timeout→None で取下げされず fail-OPEN。 live 2件で AUCTION/False 確認。
+- 決定/変更/検証 (2) item_id空欄 = 未出品 skip:
+  - monitor_listings.py process_sheet 冒頭で空欄行 skip (skipped_no_item_id、 sheet書込も触らない)
+  - scraper None/error でも errors計上しない。 test_blank_itemid_skip.py 追加。
+- 決定/変更/検証 (3) eBay取下げ済×sheet未売切 → review シート:
+  - reverse_audit.py run_ebay_down_sheet_active_audit 新設。 active map空=fail-closed。
+  - run_cycle.py 09:30 both cycle に Phase 5b 組込(qty_map共有)。
+  - 初回 live orphan 239件(qty=0:74/ended:165) を HIGH/LOW タブに書出済。 test 追加。
+
+### variation verify per-SKU化 (commit f0eb3a3)
+
+- 決定: 多variation listing の qty=0 verify は対象SKUの available(Quantity-QuantitySold)で判定。
+- 変更: trading_api_client.py _call_trading に raw_xml_cap引数(None=cap解除)。
+  trading_api_uploader.py _extract_variation_available新設 + _verify_qty_zero variation対応。
+- 検証: 公式の「qty=0失敗3件」は実は取下げ成功済。 verifyが listing合計(22/41/3)を読む false-NG。
+  実3件で per-SKU available=0 → verified=True 確認。 test_variation_verify.py 5件。 全293 pass。
+
+### reverse_audit 取下げ漏れ 0件 確認
+
+- 検証: sheet D=○ + eBay qty>0 = 0件 (= BAN risk 方向クリア、 最重要証跡)。
+
+### スケジュール再開
+
+- 決定: 全系統クリア確認後、 4タスク再有効化。
+- 変更: iMakInventory_Cycle(SHEET 4h, 次21:30) / _Backup(04:00) / _Monitor_Daily(公式 08:00) /
+  _Cycle_BothDaily0930(HIGH/LOW+audit 09:30) を Enable。
+- 検証: Get-ScheduledTask で State=Ready / NextRun 確認済。
+
+### 残課題 (user 対応 / 別タスク)
+
+- ebay_down orphan 239件 → 「在庫あり・eBay取下げ済」シートで user レビュー。
+- amazon 第三者のみ化 自動検知 → user 指示「今はいい」で見送り (検知シグナル=他の出品者あり+buybox無し は特定済)。
