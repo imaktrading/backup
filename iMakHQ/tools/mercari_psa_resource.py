@@ -284,43 +284,56 @@ def parse_mercari_items(src):
     return items
 
 
-def pick_cheapest_psa10(items, card_no, variant_hint=None):
-    """価格昇順 items から PSA10 かつ対象カード番号一致の最安を選ぶ (純関数)。
+def _variant_matches(items, card_no, variant_hint=None):
+    """価格昇順 items から PSA10 かつ対象カード番号一致の **正変種** 候補を昇順 list で返す(純関数)。
 
     Step6 P3: variant_hint(canonical変種の get_info=入手元set 等)があれば、番号一致の中で
-    hint(セット名/コード)に一致する**正変種**に絞ってから最安。SNKRDUNK と同じ思想・画像不要。
-    - hint一致あり → その最安 (正変種)
-    - hint一致無し + 候補単一 → 採用 (変種曖昧なし。seller がset未記載なだけ)
-    - hint一致無し + 候補複数 → None (誤variant買わない fail-closed)
-    - hint無 (KEY未解決) → 従来どおり番号一致の最安
+    hint(セット名/コード)に一致する正変種に絞る。SNKRDUNK と同じ思想・画像不要。
+    - hint一致あり → その候補群 (正変種, 価格昇順)
+    - hint一致無し + 候補単一 → その1件 (変種曖昧なし。seller がset未記載なだけ)
+    - hint一致無し + 候補複数 → [] (誤variant買わない fail-closed)
+    - hint無 (KEY未解決) → 番号一致の全候補 (価格昇順)
     """
     matches = [it for it in items  # DOM順 = 価格昇順
                if it["price"] > 0 and is_psa10(it["name"]) and _name_matches_card(it["name"], card_no)]
     if not matches:
-        return None
-
-    def _ret(it):
-        return (it["price"], it["href"], it["name"])
+        return []
     if not variant_hint:
-        return _ret(matches[0])
+        return matches
     from snkrdunk_psa_resource import _hint_tokens, _print_signal, _item_print
     toks = _hint_tokens(variant_hint)
     if not toks:
-        return _ret(matches[0])           # hint からトークン取れず → 従来最安
-    # ①set トークン採点で最高スコア群(=正set)に絞る → ②同setで複数なら print種別で tie-break → 最安。
+        return matches                    # hint からトークン取れず → 従来最安群
+    # ①set トークン採点で最高スコア群(=正set)に絞る → ②同setで複数なら print種別で tie-break。
     scored = [(sum(1 for t in toks if t in (it["name"] or "").upper().replace(" ", "").replace("-", "")), it)
               for it in matches]   # matches は価格昇順を保持
     top = max(s for s, _ in scored)
     if top == 0:
-        return _ret(matches[0]) if len(matches) == 1 else None   # 決め手無+複数 → fail-closed
-    topgroup = [it for s, it in scored if s == top]              # 価格昇順保持
+        return matches if len(matches) == 1 else []   # 決め手無+複数 → fail-closed
+    topgroup = [it for s, it in scored if s == top]    # 価格昇順保持
     if len(topgroup) == 1:
-        return _ret(topgroup[0])                                 # set で一意 → その最安
+        return topgroup                                # set で一意
     target = _print_signal(variant_hint)
     matched = [it for it in topgroup if _item_print(it["name"]) == target]
-    if matched:
-        return _ret(matched[0])           # 正 print種別の最安 (価格昇順保持)
-    return None                           # 同set・print でも一意化できず → fail-closed
+    return matched if matched else []     # 正 print種別の候補群 / 一意化不可は fail-closed
+
+
+def pick_cheapest_psa10(items, card_no, variant_hint=None):
+    """正変種 PSA10 の最安を1件返す (price, href, name) or None。_variant_matches の先頭。"""
+    cands = _variant_matches(items, card_no, variant_hint)
+    if not cands:
+        return None
+    it = cands[0]
+    return (it["price"], it["href"], it["name"])
+
+
+def pick_psa10_candidates(items, card_no, variant_hint=None, limit=5):
+    """正変種 PSA10 候補を価格昇順で最大 limit 件 [(price, href, name)] 返す。
+
+    補URL(メルカリ＆SNKRDUNK 混合の代替候補)用。最安が売切/状態相違時の次の手。fail-closed 時は []。
+    """
+    return [(it["price"], it["href"], it["name"])
+            for it in _variant_matches(items, card_no, variant_hint)[:limit]]
 
 
 def parse_image_search_results(src):
@@ -401,8 +414,9 @@ def image_search_fallback(drv, ebay_item_id, card_no, max_open=12):
 
 
 def fetch_mercari_cheapest(cards):
-    """各カードの メルカリ on_sale 最安(PSA10) を取得 → {idx: (price, url, name)}。
+    """各カードの メルカリ on_sale PSA10 を取得 → {idx: {"best":(price,url,name)|None, "cands":[(price,url,name),...]}}。
 
+    best = 最安(価格判定用)、cands = 正変種 PSA10 を価格昇順で最大5件(補URL=両ch混合の代替候補用)。
     cards: [{"kw":検索語, "card_no":照合番号, "ebay_item_id":フォールバック用}] のリスト。
     キーワード検索で0件なら、ebay_item_id があれば画像検索フォールバックを試す。
     """
@@ -425,16 +439,19 @@ def fetch_mercari_cheapest(cards):
             try:
                 drv.get(url); time.sleep(8)
                 # item-cell 単位で抽出 (name·price·href 対応保証 + 通常出品のみ=オークション除外)
-                best = pick_cheapest_psa10(parse_mercari_items(drv.page_source), card_no, c.get("hint"))
+                items = parse_mercari_items(drv.page_source)
+                cands = pick_psa10_candidates(items, card_no, c.get("hint"))   # 正変種 価格昇順 最大5
+                best = cands[0] if cands else None
                 via = "kw"
                 if best is None and eid:           # キーワード0件→画像検索フォールバック
                     best = image_search_fallback(drv, eid, card_no)
                     via = "画像検索" if best else "kw"
-                out[i] = best
-                tag = f"¥{best[0]} ({via})" if best else "PSA10在庫なし"
+                    cands = [best] if best else []
+                out[i] = {"best": best, "cands": cands}
+                tag = f"¥{best[0]} ({via}, 候補{len(cands)})" if best else "PSA10在庫なし"
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: {tag}", flush=True)
             except Exception as e:
-                out[i] = None
+                out[i] = {"best": None, "cands": []}
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: ERR {str(e)[:30]}", flush=True)
     finally:
         try:
@@ -475,7 +492,7 @@ def main():
     results = []
     for i, r in enumerate(rows):
         cur = float(r["ebay_price"]) if r.get("ebay_price") else 0
-        best = found.get(i)
+        best = (found.get(i) or {}).get("best")
         rec = judge = murl = None
         cost = best[0] if best else None
         if cost and cur:

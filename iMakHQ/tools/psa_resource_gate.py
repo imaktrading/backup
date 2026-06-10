@@ -55,16 +55,19 @@ def _min_price(prices):
     return min(vals) if vals else None
 
 
-def combine(mercari, snkrdunk):
+def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
     """2チャネル結果を束ねる純関数。
 
     Args:
-        mercari: (price_jpy:int, url:str, name:str) or None  (mercari_psa_resource の戻り)
-        snkrdunk: {"psa10_count":int, "psa10_details":[{"price":int,"url":str},...],
-                   "search_failed":bool} or None  (harvest find_psa10_urls_for_card の戻り)
+        mercari: (price_jpy:int, url:str, name:str) or None  (メルカリ最安)
+        snkrdunk: {"available":bool,"psa10_price_jpy":int,"psa10_listings":[{price,url}]} (HTTP shape)
+                  or {"psa10_count":int,"psa10_details":[...]} (harvest shape) or None
+        mercari_cands: [(price:int,url:str,name:str),...] メルカリ正変種の価格昇順候補 (補URL用)
+        max_aux: 補URL に載せる代替候補の最大数 (両ch混合の最安 max_aux 件)
     Returns:
         {resourceable, channels, cheapest_jpy, cheapest_channel, cheapest_url,
-         mercari_jpy, snkrdunk_jpy, snkrdunk_count}
+         mercari_jpy, mercari_url, snkrdunk_jpy, snkrdunk_count, snkrdunk_urls, aux_urls}
+        aux_urls = メルカリ＆SNKRDUNK 混合の最安 max_aux 件を **高い順** ([0]=高 … [-1]=最安)。
     """
     channels = []
     cand = []  # (channel, price, url)
@@ -112,6 +115,18 @@ def combine(mercari, snkrdunk):
     if priced_cand:
         cheapest = min(priced_cand, key=lambda x: x[1])
 
+    # --- 補URL: メルカリ＆SNKRDUNK 混合の最安 max_aux 件を 高い順 ([0]=高 … [-1]=最安) ---
+    # 「補」= 最安が売切/状態相違時の代替候補。両ch横断で安い順に拾い、列には高い順で並べる。
+    pool = []
+    for c in (mercari_cands or []):
+        if c and isinstance(c[0], int) and c[0] > 0 and len(c) > 1 and c[1]:
+            pool.append({"price": c[0], "url": c[1], "channel": "mercari"})
+    for u in snkrdunk_urls:
+        if u.get("url") and isinstance(u.get("price"), int) and u["price"] > 0:
+            pool.append({"price": u["price"], "url": u["url"], "channel": "snkrdunk"})
+    pool.sort(key=lambda x: x["price"])           # 安い順
+    aux_urls = list(reversed(pool[:max_aux]))      # 最安 max_aux 件 → 高い順
+
     return {
         "resourceable": len(channels) > 0,
         "channels": channels,
@@ -122,7 +137,8 @@ def combine(mercari, snkrdunk):
         "mercari_url": (mercari[1] if (mercari and len(mercari) > 1) else "") if m_price else "",
         "snkrdunk_jpy": s_price,
         "snkrdunk_count": s_count,
-        "snkrdunk_urls": snkrdunk_urls,   # 補URL一覧 (全PSA10出品、価格昇順)
+        "snkrdunk_urls": snkrdunk_urls,   # SNKRDUNK の PSA10出品一覧 (価格昇順)
+        "aux_urls": aux_urls,             # 補URL: 両ch混合の最安 max_aux 件 (高い順)
     }
 
 
@@ -222,11 +238,13 @@ def main():
     go = 0
     aux_writeback = {}   # {商品管理シート行番号: [補URL,...]} (itemID join できた行のみ)
     for i, r in enumerate(rows):
-        c = combine(mercari_res.get(i), snkr_res.get(i))
+        mr = mercari_res.get(i) or {}
+        c = combine(mr.get("best"), snkr_res.get(i),
+                    mercari_cands=mr.get("cands"), max_aux=MAX_AUX)
         if c["resourceable"]:
             go += 1
-        # SNKRDUNK 補URL: URLのみ(クリック可)。価格は snkrdunk¥ 列に既出。最大5件
-        aux = [u["url"] for u in c["snkrdunk_urls"][:MAX_AUX] if u.get("url")]
+        # 補URL: メルカリ＆SNKRDUNK 混合の最安 MAX_AUX 件を 高い順 (URLのみ、価格は各¥列に既出)。
+        aux = [u["url"] for u in c["aux_urls"] if u.get("url")]
         # 商品管理シートの 補URL列(AC-AG)へ書戻し用に収集 (itemID で行特定)
         iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
         rn = itemid_row.get(iid) if iid else None
