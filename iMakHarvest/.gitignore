@@ -19,6 +19,17 @@ __pycache__/
 # Probe / scratch
 tests/_probe_*.py
 debug/_probe_*.py
+debug/probe_*.py
+debug/probe_*.json
+debug/dry_run_*.py
+debug/dry_run_*.json
+debug/sniff_*.py
+debug/sniff_*.json
+debug/verify_*.py
+debug/verify_*.json
+debug/check_*.py
+debug/check_*.json
+debug/run_*.log
 debug/html_samples/*.html
 debug/html_samples/*.png
 

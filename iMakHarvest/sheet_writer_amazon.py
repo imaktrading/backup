@@ -48,9 +48,11 @@ COL_IMAGES = 7         # G: 画像 URL
 COL_DESCRIPTION = 8    # H: 商品説明
 COL_COLOR = 19         # S: 色                  - Phase 1d (Amazon は基本空欄)
 COL_SIZE = 20          # T: サイズ              - Phase 1d (Amazon は基本空欄)
+COL_KEY = 35           # AI: 型番 (canonical 候補) - 2026-06-11 HQ 規約: 生 verbatim
 
-# 書込み列数 default. A〜T (1-20) を含む 20 列構成 (sheet_writer.py と統一).
-DEFAULT_COLUMN_COUNT = 20
+# 書込み列数 default. A〜AI (1-35) を含む 35 列構成。
+# (= 2026-06-11 HQ 依頼書: Amazon G-shock 型番を AI 列に生で入れる)
+DEFAULT_COLUMN_COUNT = 35
 
 # dedupe 用 ASIN regex
 # /dp/<ASIN>, /gp/product/<ASIN>, /gp/aw/d/<ASIN> をカバー
@@ -134,7 +136,7 @@ def _build_row(item: dict) -> list:
     color = str(item.get("color") or "")
     size = str(item.get("size") or "")
 
-    row = [""] * DEFAULT_COLUMN_COUNT  # A〜T (20 列)
+    row = [""] * DEFAULT_COLUMN_COUNT  # A〜AI (35 列)
     row[COL_URL - 1] = (item.get("url") or "").strip()
     # COL_EBAY_ITEM_ID (B) は空欄
     row[COL_TITLE - 1] = title
@@ -146,6 +148,14 @@ def _build_row(item: dict) -> list:
     # I-R (9-18) は空欄
     row[COL_COLOR - 1] = color
     row[COL_SIZE - 1] = size
+    # U-AH (21-34) は空欄
+    # AI (35): 型番 (canonical 候補) を 生 verbatim で書込 (= 2026-06-11 HQ 規約)
+    raw_model = str(
+        item.get("model_number")
+        or item.get("product_id_estimated")
+        or ""
+    ).strip()
+    row[COL_KEY - 1] = raw_model
     return row
 
 
@@ -223,6 +233,134 @@ def write_to_sheet(
     sh = open_sheet_by_id(spreadsheet_id)
     ws = get_listings_worksheet(sh, gid=gid)
     return append_new_urls(ws, items)
+
+
+# ============================================================================
+# 中間スプシ append (= 2026-06-11 一石二鳥案 / amazon_search 経由用)
+# ============================================================================
+# mercari_seller / mercari_shops と同じ「中間 staging sheet」 に append。
+# tab 名: amazon_<label> (= 例 "amazon_gshock")。 同 label なら ASIN dedup で差分のみ。
+
+
+def build_amazon_tab_name(label: str) -> str:
+    """label から tab 名生成 (= amazon_<label>)."""
+    safe = re.sub(r"[^\w]", "_", (label or "").strip())
+    safe = re.sub(r"_+", "_", safe).strip("_")
+    return f"amazon_{safe}" if safe else "amazon_unknown"
+
+
+def _get_or_create_amazon_search_tab(sh, label: str):
+    """`amazon_<label>` タブを取得、 無ければ template 「商品管理シート」 複製 create.
+
+    mercari_seller の `_create_from_template` を借用 (= 既存 template 名 / 動作と整合)。
+    """
+    from sheet_writer_mercari_seller import (  # noqa: PLC0415
+        _create_from_template,
+        _ensure_header,
+    )
+
+    tab_name = build_amazon_tab_name(label)
+    try:
+        existing = sh.worksheet(tab_name)
+        _ensure_header(existing, sh)
+        return existing
+    except gspread.WorksheetNotFound:
+        return _create_from_template(sh, tab_name)
+
+
+def append_amazon_search_items(
+    items: list[dict],
+    label: str = "gshock",
+    column_count: int = DEFAULT_COLUMN_COUNT,
+) -> dict:
+    """amazon_search 結果を 中間 staging sheet の `amazon_<label>` タブに append.
+
+    Args:
+        items: amazon_item_detail.fetch_detail_full の dict list
+        label: tab suffix (= "gshock" 等)
+        column_count: 書込列数 (= 既存 wishlist 流用、 20 列)
+
+    Returns: {"tab": str, "appended": N, "skipped_existing": M, "input": K}
+    """
+    from sheet_writer_mercari_seller import (  # noqa: PLC0415
+        open_seller_staging_sheet,
+        read_existing_dedupe_keys_in_tab,
+    )
+
+    tab_name = build_amazon_tab_name(label)
+    if not items:
+        return {"tab": tab_name, "appended": 0, "skipped_existing": 0, "input": 0}
+
+    sh = open_seller_staging_sheet()
+    ws = _get_or_create_amazon_search_tab(sh, label)
+    # mercari の read_existing_dedupe_keys_in_tab は dedupe_key を sheet_writer から取る
+    # → 同 module の dedupe_key (Amazon ASIN) と互換性ある (= URL を渡せば ASIN 抽出)
+    # ただし mercari の dedupe_key は mercari item_id 形式なので、 ここでは独自実装で読む
+    existing: set[str] = set()
+    try:
+        all_values = ws.get_all_values()
+        if len(all_values) >= 2:
+            for row in all_values[1:]:
+                if len(row) >= COL_URL:
+                    url = (row[COL_URL - 1] or "").strip()
+                    k = dedupe_key(url)
+                    if k:
+                        existing.add(k)
+    except Exception:
+        pass
+
+    new_rows: list[list[str]] = []
+    skipped = 0
+    seen_in_batch: set[str] = set()
+    for it in items:
+        url = (it.get("url") or it.get("amazon_url") or "").strip()
+        if not url:
+            skipped += 1
+            continue
+        key = dedupe_key(url)
+        if not key:
+            skipped += 1
+            continue
+        if key in existing or key in seen_in_batch:
+            skipped += 1
+            continue
+        seen_in_batch.add(key)
+        # url が _build_row に渡るよう normalize
+        item_for_row = dict(it)
+        item_for_row.setdefault("url", url)
+        item_for_row.setdefault("condition", "New")  # Amazon 新品基準
+        row = _build_row(item_for_row)
+        if len(row) < column_count:
+            row += [""] * (column_count - len(row))
+        new_rows.append(row[:column_count])
+
+    if not new_rows:
+        return {
+            "tab": tab_name,
+            "appended": 0,
+            "skipped_existing": skipped,
+            "input": len(items),
+        }
+
+    # ws.append_rows() はスプシのテーブル範囲検出で誤った col に書込むケースあり
+    # (= 5/26 mercari_seller 同型事故、 6/11 amazon_gshock でも AC 列から書込発生)。
+    # 明示的に "A<next_row>" を起点とした update で A 列から書込を強制する (fail-safe)。
+    last_row = len(ws.get_all_values())
+    next_row = last_row + 1
+    from sheet_writer_mercari_seller import _col_to_letter  # noqa: PLC0415
+    end_col_letter = _col_to_letter(column_count)
+    end_row = next_row + len(new_rows) - 1
+    ws.update(
+        range_name=f"A{next_row}:{end_col_letter}{end_row}",
+        values=new_rows,
+        value_input_option="USER_ENTERED",
+    )
+    return {
+        "tab": tab_name,
+        "appended": len(new_rows),
+        "skipped_existing": skipped,
+        "input": len(items),
+    }
 
 
 # ============================================================================

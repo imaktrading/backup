@@ -202,15 +202,17 @@ class TestSheetWriterBuildRowColorSize:
 class TestSheetWriterAmazonBuildRowColorSize:
     def test_amazon_default_empty_color_size(self):
         # Amazon items は通常 color/size key を持たない → S/T 空欄
+        # 2026-06-11: AI 列 (= KEY) 追加で列数 20 → 35
         item = {
             "url": "https://www.amazon.co.jp/dp/B08N5WRWNW",
             "title": "Amazon 商品",
             "condition": "New",
         }
         row = sheet_writer_amazon._build_row(item)
-        assert len(row) == 20
+        assert len(row) == 35
         assert row[18] == ""  # S
         assert row[19] == ""  # T
+        assert row[34] == ""  # AI: model_number / product_id_estimated 未指定で空
 
     def test_amazon_writes_color_size_if_provided(self):
         # 将来 Amazon variant 抽出を実装した時の互換性確保

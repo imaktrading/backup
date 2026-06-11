@@ -169,13 +169,15 @@ class TestAppendNewUrls:
             "https://www.amazon.co.jp/dp/B098765432",
             "https://www.amazon.co.jp/dp/B0ABCDEFGH",
         ]
-        # 全行 20 列 (A〜T)、Harvest 不可侵列 (B/D, I-R) と Amazon 通常空 (S/T) は空欄
+        # 全行 35 列 (A〜AI)、Harvest 不可侵列 (B/D, I-R) と Amazon 通常空 (S/T) は空欄
+        # 2026-06-11: AI 列 (= col 35) 追加で format 20 → 35 列に拡張
         for r in appended:
-            assert len(r) == 20
+            assert len(r) == 35
             assert r[1] == ""   # B: eBay item ID
             assert r[3] == ""   # D: 売切フラグ
             assert r[18] == ""  # S: 色 (Amazon 通常空)
             assert r[19] == ""  # T: サイズ (Amazon 通常空)
+            assert r[34] == ""  # AI: KEY (= 型番)、 wishlist 経由は未指定 = 空
 
     def test_dp_and_gp_product_collide_correctly(self):
         # /dp/ASIN と /gp/product/ASIN は同じ商品 → 後者は skip される

@@ -512,6 +512,421 @@ def _judge_stock(driver) -> tuple[Optional[bool], str]:
 
 
 # ============================================================================
+# 拡張版 fetch_detail_full (= 2026-06-11 一石二鳥案 / 6 field 追加)
+# ============================================================================
+# Catalog Q3 回答 (2026-06-11): 型番は Harvest 側で正規化しない、 生 (verbatim) で記録。
+# `model_number` は spec block の生型番、 `product_id_estimated` は title からの参考抽出のみ。
+
+# 販売者 (= seller=Amazon.co.jp) 判別 markers (= 表記揺れに緩く対応)
+SELLER_AMAZON_JP_MARKERS = (
+    "販売: Amazon.co.jp",
+    "販売元: Amazon.co.jp",
+    "販売: Amazon",
+    "販売元: Amazon",
+    "販売・発送：Amazon.co.jp",
+    "販売・発送: Amazon",
+    "発送元 Amazon.co.jp",
+    "発送元: Amazon",
+    "Sold by Amazon.co.jp",
+    "Sold by Amazon",
+    "Ships from Amazon.co.jp",
+    "Ships from Amazon",
+    "Amazon.co.jp が販売",
+    "Amazon.co.jpが販売",
+)
+
+# seller 緩い判定 (= Amazon が販売 + 発送 双方 と書かれる: 「販売」 と「発送」 と「Amazon.co.jp」 が
+# detail page 内の merchant-info block に同居する強い signal)
+SELLER_AMAZON_BLOCK_SELECTORS = (
+    "#merchant-info",
+    "#merchantInfoFeature_feature_div",
+    "#tabular-buybox",
+    "#fulfillerInfoFeature_feature_div",
+)
+
+# spec block selectors (= 型番 / ブランド / 発売日 を含む)
+SPEC_TABLE_SELECTORS = (
+    "#productDetails_techSpec_section_1 tr",
+    "#productDetails_detailBullets_sections1 tr",
+    "#detailBullets_feature_div li",
+    "#productDetails_db_sections tr",
+)
+
+# 評価
+RATING_SELECTORS = (
+    "i[data-hook='average-star-rating'] span.a-icon-alt",
+    "#acrPopover span.a-icon-alt",
+    "#averageCustomerReviews span.a-icon-alt",
+)
+
+# review_count
+REVIEW_COUNT_SELECTORS = (
+    "#acrCustomerReviewText",
+    "[data-hook='total-review-count']",
+)
+
+# brand
+BRAND_SELECTORS = (
+    "#bylineInfo",
+    "tr.po-brand td.po-break-word span",
+)
+
+# title 内 G-shock 型番 regex (= 参考、 推測抽出。 catalog 側 lookup_gshock で正規化される)
+GSHOCK_MODEL_IN_TITLE_RE = re.compile(
+    r"\b([A-Z]{1,5}-[A-Z0-9]+-[A-Z0-9]+(?:[A-Z]{1,5})?)\b"
+)
+
+# Amazon inline twister variant container (= 2026 新 UI)
+VARIANT_CONTAINER_SELECTORS = (
+    "#inline-twister-row-color_name",
+    "#variation_color_name",  # 旧 UI
+)
+# 各 variant の子 ASIN を持つ li
+VARIANT_OPTION_LI_SELECTORS = (
+    "#inline-twister-row-color_name li[data-asin]",
+    "#variation_color_name li[data-defaultasin]",
+)
+
+
+def extract_variant_asins(driver) -> list[str]:
+    """detail page から color variant 全子 ASIN list 取得 (= 順序保持 + dedup).
+
+    新 UI (= inline-twister): li[data-asin] / data-csa-c-item-id
+    旧 UI (= variation_color_name): li[data-defaultasin]
+
+    variant が無い (= 単独商品) → 空 list。
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    asins: list[str] = []
+    seen: set[str] = set()
+    for sel in VARIANT_OPTION_LI_SELECTORS:
+        try:
+            els = driver.find_elements(By.CSS_SELECTOR, sel)
+        except Exception:
+            els = []
+        for el in els:
+            for attr in ("data-asin", "data-csa-c-item-id", "data-defaultasin"):
+                try:
+                    asin = (el.get_attribute(attr) or "").strip().upper()
+                except Exception:
+                    asin = ""
+                if asin and re.fullmatch(r"[A-Z0-9]{10}", asin) and asin not in seen:
+                    seen.add(asin)
+                    asins.append(asin)
+                    break
+        if asins:
+            break  # 1 つの selector で取れたら他は試さない (= 重複 li 回避)
+    return asins
+
+
+def extract_variant_count(driver) -> int:
+    """variant container の data-totalvariationcount から variant 総数取得.
+
+    取れなければ extract_variant_asins() の len() と一致するはず。
+    比較で「li が想定数より少ない (= scroll 必要)」 を検出する用。
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    for sel in (
+        "#inline-twister-expander-content-color_name",
+        "#twister_feature_div [data-totalvariationcount]",
+    ):
+        try:
+            el = driver.find_element(By.CSS_SELECTOR, sel)
+            v = el.get_attribute("data-totalvariationcount") or ""
+            if v.isdigit():
+                return int(v)
+        except Exception:
+            continue
+    return 0
+
+
+def _extract_seller(driver) -> str:
+    """販売者 / 発送元 を判定 → 「Amazon.co.jp」 / 第三者出品者名 / 空文字.
+
+    判定 cascade:
+      1. merchant-info / tabular-buybox block 内 text に Amazon.co.jp marker → "Amazon.co.jp"
+      2. body 全文 から marker → "Amazon.co.jp"
+      3. #sellerProfileTriggerId text → 第三者出品者名
+      4. tabular-buybox の row → Amazon / 第三者
+      5. 判定不能 → 空文字 (= 第三者として除外される)
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    # 1) merchant block 内 text に絞って Amazon 判定 (= 高精度)
+    for sel in SELLER_AMAZON_BLOCK_SELECTORS:
+        try:
+            els = driver.find_elements(By.CSS_SELECTOR, sel)
+        except Exception:
+            els = []
+        for el in els:
+            try:
+                t = (el.text or "").strip()
+            except Exception:
+                t = ""
+            if not t:
+                continue
+            # block 内に Amazon.co.jp が「販売」「発送」 と紐づいて存在 → 直販
+            has_amazon = "Amazon.co.jp" in t or "Amazon" in t
+            has_sale_or_ship = any(
+                kw in t for kw in ("販売", "発送", "Sold by", "Ships from", "が販売", "が発送")
+            )
+            if has_amazon and has_sale_or_ship:
+                # ただし block 内に第三者出品者名 (= "...が販売") のみで Amazon は発送のみ
+                # の場合があるので、 厳密に「Amazon.co.jp が販売」 / 「販売: Amazon」 で確認
+                if any(mk in t for mk in SELLER_AMAZON_JP_MARKERS):
+                    return "Amazon.co.jp"
+                # 「販売元 Amazon.co.jp」 のような line 形 → Amazon
+                if (
+                    "販売元" in t and "Amazon" in t
+                ) or (
+                    "Sold by" in t and "Amazon" in t
+                ):
+                    return "Amazon.co.jp"
+
+    # 2) body 全文 から marker
+    try:
+        body_text = driver.find_element(By.TAG_NAME, "body").text or ""
+    except Exception:
+        body_text = ""
+    if any(mk in body_text for mk in SELLER_AMAZON_JP_MARKERS):
+        return "Amazon.co.jp"
+
+    # 3) merchant link (= #sellerProfileTriggerId text、 第三者は通常ここに名前出る)
+    try:
+        elem = driver.find_element(By.CSS_SELECTOR, "#sellerProfileTriggerId")
+        seller_name = (elem.text or "").strip()
+        if seller_name:
+            if "Amazon" in seller_name:
+                return "Amazon.co.jp"
+            return seller_name
+    except Exception:
+        pass
+
+    # 4) tabular buybox 内 row 走査
+    try:
+        rows = driver.find_elements(
+            By.CSS_SELECTOR, "#tabular-buybox .tabular-buybox-text, "
+            "#tabular-buybox-truncated-1 .tabular-buybox-text",
+        )
+        for el in rows:
+            try:
+                t = (el.text or "").strip()
+            except Exception:
+                t = ""
+            if not t:
+                continue
+            if "Amazon" in t:
+                return "Amazon.co.jp"
+            return t  # 第三者出品者名
+
+    except Exception:
+        pass
+
+    return ""
+
+
+def _extract_spec_pairs(driver) -> dict[str, str]:
+    """spec table / detail bullets から key:value 辞書を構築."""
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    pairs: dict[str, str] = {}
+    for sel in SPEC_TABLE_SELECTORS:
+        try:
+            rows = driver.find_elements(By.CSS_SELECTOR, sel)
+        except Exception:
+            rows = []
+        for r in rows:
+            try:
+                txt = (r.text or "").strip()
+            except Exception:
+                txt = ""
+            if not txt:
+                continue
+            # tr 形式: 「キー 値」 / li 形式: 「キー : 値」
+            # split で 2 要素に分け、 key を normalize (= 余分な空白 / 全角コロン除去)
+            if "\n" in txt:
+                k, _, v = txt.partition("\n")
+            elif ":" in txt:
+                k, _, v = txt.partition(":")
+            elif "：" in txt:
+                k, _, v = txt.partition("：")
+            else:
+                continue
+            k = re.sub(r"\s+", "", k).strip()
+            v = v.strip()
+            if k and v and k not in pairs:
+                pairs[k] = v
+    return pairs
+
+
+def _extract_brand(driver, spec_pairs: dict[str, str]) -> str:
+    """ブランド名抽出 (= spec_pairs 優先、 fallback で bylineInfo)."""
+    for k in ("ブランド", "ブランド名", "メーカー", "Brand"):
+        v = spec_pairs.get(k, "").strip()
+        if v:
+            return v
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    for sel in BRAND_SELECTORS:
+        try:
+            elem = driver.find_element(By.CSS_SELECTOR, sel)
+            t = (elem.text or "").strip()
+        except Exception:
+            t = ""
+        if not t:
+            continue
+        # "ブランド: CASIO" のような prefix 除去
+        t = re.sub(r"^(ブランド|Brand|Visit the)[\s:：]*", "", t).strip()
+        # "の Store" / "ストア" 等 suffix 除去
+        t = re.sub(r"(の|を)?(ストア|Store|公式|の販売).*$", "", t).strip()
+        if t:
+            return t
+    return ""
+
+
+def _extract_model_number(driver, spec_pairs: dict[str, str]) -> str:
+    """型番抽出 (= spec_pairs 内 「型番」 / 「メーカー型番」 を verbatim).
+
+    Catalog Q3: Harvest 側で正規化しない、 生のまま record。
+    """
+    for k in ("型番", "メーカー型番", "ASIN", "ItemModelNumber", "型式", "モデル番号"):
+        v = spec_pairs.get(k, "").strip()
+        if v and k != "ASIN":
+            return v
+    return ""
+
+
+def _extract_release_date_amazon(driver, spec_pairs: dict[str, str]) -> str:
+    """Amazon 取扱開始日 / 発売日 (= verbatim)."""
+    for k in ("Amazon.co.jpでの取り扱い開始日", "発売日", "取り扱い開始日", "Date First Available"):
+        v = spec_pairs.get(k, "").strip()
+        if v:
+            return v
+    return ""
+
+
+def _extract_review_count(driver) -> Optional[int]:
+    """レビュー件数 (= 例 "1,234 件のレビュー" → 1234). 無ければ None."""
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    for sel in REVIEW_COUNT_SELECTORS:
+        try:
+            elem = driver.find_element(By.CSS_SELECTOR, sel)
+            txt = (elem.text or "").strip()
+        except Exception:
+            txt = ""
+        if not txt:
+            continue
+        m = re.search(r"([\d,]+)", txt)
+        if m:
+            try:
+                return int(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+    return None
+
+
+def _extract_rating(driver) -> Optional[float]:
+    """星評価 (= 例 "5つ星のうち4.3" → 4.3). 無ければ None.
+
+    "5つ星のうち" を先行 keyword として skip し、 その後の数値を取る。
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    rating_value_patterns = [
+        re.compile(r"5つ星のうち\s*([\d.]+)"),
+        re.compile(r"out of 5 stars[\s,]*([\d.]+)", re.IGNORECASE),
+        re.compile(r"([\d.]+)\s*out of 5", re.IGNORECASE),
+    ]
+    for sel in RATING_SELECTORS:
+        try:
+            elem = driver.find_element(By.CSS_SELECTOR, sel)
+            txt = (elem.get_attribute("textContent") or elem.text or "").strip()
+        except Exception:
+            txt = ""
+        if not txt:
+            continue
+        # rating value pattern を優先 (= "5つ星のうち X.X" 形)
+        for pat in rating_value_patterns:
+            m = pat.search(txt)
+            if m:
+                try:
+                    v = float(m.group(1))
+                    if 0.0 <= v <= 5.0:
+                        return v
+                except ValueError:
+                    continue
+        # fallback: 単独数値
+        m = re.search(r"\b([\d.]+)\b", txt)
+        if m:
+            try:
+                v = float(m.group(1))
+                if 0.0 <= v <= 5.0:
+                    return v
+            except ValueError:
+                continue
+    return None
+
+
+def _extract_product_id_estimated_from_title(title: str) -> str:
+    """title から G-shock 型番候補を regex 抽出 (= 参考値、 catalog 側で resolve)."""
+    if not title:
+        return ""
+    m = GSHOCK_MODEL_IN_TITLE_RE.search(title.upper())
+    return m.group(1) if m else ""
+
+
+def fetch_detail_full(driver, url: str) -> Optional[dict]:
+    """fetch_detail の拡張版 (= 14 field、 Amazon 直販 G-shock catalog 投入用).
+
+    返却 dict は fetch_detail の 9 field + 以下 6 field:
+      - seller (str)               : "Amazon.co.jp" / 第三者出品者名 / ""
+      - brand (str)                : ブランド名 (= 例 "CASIO")
+      - model_number (str)         : spec block 型番 (verbatim、 推測しない)
+      - release_date_amazon (str)  : Amazon 取扱開始日 / 発売日
+      - review_count (int | None)  : レビュー件数
+      - rating (float | None)      : 星評価 (= 0.0-5.0)
+      - product_id_estimated (str) : title 内 G-shock 型番 regex (= 参考値)
+      - amazon_url (str)           : url (引数そのまま)
+    """
+    base = fetch_detail(driver, url)
+    if base is None:
+        return None
+    if base.get("status") in ("CAPTCHA", "DELETED"):
+        # 中断系は 6 field 抽出 skip、 base + 空の 6 field を返す
+        extra = {
+            "seller": "",
+            "brand": "",
+            "model_number": "",
+            "release_date_amazon": "",
+            "review_count": None,
+            "rating": None,
+            "product_id_estimated": "",
+            "amazon_url": url,
+        }
+        return {**base, **extra}
+
+    spec_pairs = _extract_spec_pairs(driver)
+    variant_asins = extract_variant_asins(driver)
+    variant_total = extract_variant_count(driver)
+    return {
+        **base,
+        "seller": _extract_seller(driver),
+        "brand": _extract_brand(driver, spec_pairs),
+        "model_number": _extract_model_number(driver, spec_pairs),
+        "release_date_amazon": _extract_release_date_amazon(driver, spec_pairs),
+        "review_count": _extract_review_count(driver),
+        "rating": _extract_rating(driver),
+        "product_id_estimated": _extract_product_id_estimated_from_title(base.get("title", "")),
+        "amazon_url": url,
+        "variant_asins": variant_asins,
+        "variant_total": variant_total,
+    }
+
+
+# ============================================================================
 # CLI (動作確認用)
 # ============================================================================
 if __name__ == "__main__":
