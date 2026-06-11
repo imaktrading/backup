@@ -1,6 +1,76 @@
 # iMakHarvest daily_report
 
-## 2026-06-11 — Amazon G-shock 全件 scrape 新規実装 (= 4 番目 catalog source)
+## 2026-06-11 (= 後半) — Amazon G-shock メンズ全網羅完了 (= HTTP filter + variant 補完 + monthly_sales)
+
+### 決定
+
+- **Amazon メンズ G-shock 全抽出 完了** (= 中間スプシ 376 行、 catalog dump 4 file 375 件)
+  - 根拠: 6/11 終日 5 session 通し、 selenium / 拡張機能 / URL filter / attach / HTTP filter を順次検証 → 最終 HTTP filter で 100% 精度確立
+- **HTTP filter 戦略採用** (= Gemini 助言 + merchantId AN1VRQENFRJN5 検証で 100% 精度確認)
+  - selenium 環境では URL filter / 拡張機能ともに無効化される (= Amazon bot 検出) ことを実証
+  - `requests + bs4` + `merchantId="AN1VRQENFRJN5"` grep で代替実装、 selenium 介さず Amazon 直販判定
+- **拡張機能 (Amazon 3rd Party Seller Filter) 対応 + attach 方式** = 検証の結果 selenium 自動 navigate で効かないと判明 → HTTP に転換
+- **AI 列 (= col 35、 KEY 型番)** に生 verbatim (= HQ 規約 2026-06-11)
+- **V 列 (= col 22、 Amazon 月販売数)** に生 verbatim 「過去 1 ヶ月で N 点以上購入」 (= user 指示 2026-06-11)
+- **Amazon US 並行輸入 1 件 (= B000FPVUJA)** reject (= merchantId 検証で 国内仕入不可商品除外)
+- **variant 全展開 採用** (= 既存 119 ASIN seed → HTTP で variant 子 ASIN 取得 → 既存 dedup 後 selenium で 14 field 抽出)
+- **catalog 投入 schema 確定** (= 14 field + variant_asins、 catalog は identity/在庫hint/画像のみ使用、 動的データは sourcing 層 = 中間スプシ責務)
+
+### 変更
+
+- `scrapers/amazon_search_http.py` 新規作成 (= HTTP-based URL 収集 + seller/brand/variant filter)
+  - `create_session` / `fetch_search_page` / `parse_search_asins` / `collect_search_asins`
+  - `fetch_detail_page` / `detect_seller_amazon_jp` (= merchantId AN1VRQENFRJN5 100% 精度)
+  - `extract_brand_text` / `extract_title` / `extract_monthly_sales_text`
+  - `extract_variant_asins_http` (= regex `</ul>` end pattern で section 切り出し、 入れ子 div 問題回避)
+  - `is_gshock_brand_text` / `evaluate_detail_for_keep` (= 1 ASIN total 評価)
+  - `SELLER_AMAZON_PRIMARY_MARKER = '"merchantId":"AN1VRQENFRJN5"'` (= Amazon.co.jp 公式 ID)
+- `scrapers/amazon_search.py:_collect_asin_urls_from_search_page` 拡張
+  - `brand_prefilter=True` (= G-SHOCK title 含む card のみ採用)
+  - `card.is_displayed()` チェック追加 (= 拡張機能で hide された card 除外用、 ただし selenium で効かず判明)
+- `scrapers/amazon_item_detail.py` 拡張
+  - `_extract_seller` 強化 (= merchant block 内 厳格判定 + fallback)
+  - `_extract_rating` 修正 (= "5つ星のうち X.X" pattern 優先で 5.0 誤抽出 fix)
+  - `_extract_monthly_sales` 追加 (= V 列用、 「過去 1 ヶ月で N 点以上購入」 grep)
+  - `extract_variant_asins` / `extract_variant_count` (= inline-twister 新 UI 対応)
+  - `fetch_detail_full` に variant + monthly_sales 統合
+- `sheet_writer_amazon.py`
+  - `COL_MONTHLY_SALES = 22` (= V 列、 月販売数) 追加
+  - `_build_row` で V 列書込 logic 追加
+  - `append_amazon_search_items` を `ws.update(range_name)` pattern で fail-safe (= 既存)
+- `run_harvest_amazon_search.py` 大幅拡張
+  - `is_gshock_item` (= brand + title AND filter、 Baby-G / Edifice 除外)
+  - `_collect_urls_for_paths` / `_fetch_details` (= queue ベース + variant 展開 + pre_visited)
+  - `_load_existing_asins_from_tab` / `_http_prefilter_keep_asins`
+  - `_http_variant_supplement` (= seed ASIN → variant 子 ASIN 補完 + Amazon US 除外)
+  - `setup_extension_mode` / `launch_attach_chrome_mode` / `attach_to_existing_chrome`
+  - 新 options: `--use-http-prefilter` / `--supplement-variants-from-tab` /
+    `--skip-existing-tab` / `--launch-attach-chrome` / `--attach-port` / `--setup-extension`
+- 全 pytest **674 件 pass** (= regression なし)
+
+### 検証
+
+- ✅ session 1 (= 11:34-13:08): selenium 直、 200 scanned → 49→75 件 keep (= bug fix 後再 append)、 captcha 0
+- ✅ session 2' (= 14:50): brand pre-filter + 拡張機能、 200 scanned → 17 件 keep (= Amazon US 1 件混入後 16 件)、 captcha 0
+- ✅ session 4 (= 18:37-19:11): HTTP pre-filter + variant、 28 scanned → 27 件 keep (= 歩留り 96%)、 captcha 0
+- ✅ session 5 (= 19:54-22:07): variant supplement、 287 scanned → 257 件 keep、 captcha 0
+- ✅ Gemini 助言検証: merchantId AN1VRQENFRJN5 = 既存 keep 3 + reject 5 で **100% 精度** 実証
+- ✅ HTTP variant regex 修正: B0D9Y4QZQT で 6 件取得確認 (= 親 + 5 色 variant)
+- ✅ 中間スプシ実機: 376 行、 AI 列 96.8%、 V 列 9 件 (= Amazon 売れ筋表示の仕様通り)
+- ✅ catalog merge pre-flight: 119 件 → 既収録 97% (= 新規 catalog 追加 3 件)
+- ✅ Amazon US 並行輸入 B000FPVUJA: merchantId 検証で `A1EJGP084HULR` (= Amazon US) と判明 → reject
+- ✅ 完成報告投入: `harvest/requests/2026-06-01_amazon_gshock_full_scrape_processed.md`
+
+### 次のアクション
+
+- レディース 着手 (= user 判断「skip」 で保留)
+- Catalog Claude による catalog merge (= dump 4 file 受領済、 Catalog スケジュール)
+- 他カテゴリ展開 (= フィギュア / ねんどろ / 一番くじ) 時の `is_gshock_item` プラガブル化 refactor (= 30 分)
+- selenium 環境での Amazon URL filter / 拡張機能 有効化 (= Playwright / CDP 直接利用 / 別 task)
+
+---
+
+## 2026-06-11 (= 前半) — Amazon G-shock 全件 scrape 新規実装 (= 4 番目 catalog source)
 
 ### 決定
 

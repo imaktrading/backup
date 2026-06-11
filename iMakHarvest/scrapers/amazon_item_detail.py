@@ -911,6 +911,7 @@ def fetch_detail_full(driver, url: str) -> Optional[dict]:
     spec_pairs = _extract_spec_pairs(driver)
     variant_asins = extract_variant_asins(driver)
     variant_total = extract_variant_count(driver)
+    monthly_sales = _extract_monthly_sales(driver)
     return {
         **base,
         "seller": _extract_seller(driver),
@@ -923,7 +924,31 @@ def fetch_detail_full(driver, url: str) -> Optional[dict]:
         "amazon_url": url,
         "variant_asins": variant_asins,
         "variant_total": variant_total,
+        "monthly_sales_text": monthly_sales,
     }
+
+
+# 過去 1 ヶ月販売数 表記 (= 2026-06-11 user 指示、 V 列に生 verbatim で格納)
+MONTHLY_SALES_TEXT_RE = re.compile(
+    r"過去\s*1\s*[かヶケ]?月で\s*[\d,]+\s*点(?:以上)?\s*購入(?:され?ました)?"
+)
+
+
+def _extract_monthly_sales(driver) -> str:
+    """detail page から「過去 1 ヶ月で N 点以上購入」 表記抽出 (= V 列用).
+
+    user 指示 2026-06-11: 数値化せず文字列そのまま。 なし時は空文字。
+    """
+    from selenium.webdriver.common.by import By  # noqa: PLC0415
+
+    try:
+        body = driver.find_element(By.TAG_NAME, "body").text or ""
+    except Exception:
+        body = ""
+    m = MONTHLY_SALES_TEXT_RE.search(body)
+    if m:
+        return re.sub(r"\s+", "", m.group(0))
+    return ""
 
 
 # ============================================================================

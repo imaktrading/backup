@@ -35,10 +35,23 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from scrapers import amazon_search
+from scrapers import amazon_search, amazon_search_http
 from scrapers.amazon_item_detail import fetch_detail_full
-from scrapers.amazon_wishlist import create_driver
+from scrapers.amazon_wishlist import CHROME_VERSION_MAIN, create_driver
 from sheet_writer_amazon import append_amazon_search_items
+
+
+def attach_to_existing_chrome(port: int = 9222):
+    """既存 chrome (= remote-debugging-port=9222) に接続して driver 取得.
+
+    user が --launch-attach-chrome で起動した chrome に接続、
+    user 操作で開いた URL + 拡張機能効果反映済の DOM をそのまま取得可能。
+    """
+    import undetected_chromedriver as uc  # noqa: PLC0415
+
+    options = uc.ChromeOptions()
+    options.add_experimental_option("debuggerAddress", f"localhost:{port}")
+    return uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
 
 
 # ============================================================================
@@ -88,16 +101,18 @@ def is_gshock_item(brand: str, title: str) -> bool:
 DUMP_DIR = Path(r"C:\dev\iMak_data\catalog\_amazon_jp_dumps")
 
 # preset 検索 URL (= 6/11 sniff で確認、 メンズ 200-300 弱 / レディース 推定 100 弱)
+# URL filter `&rh=p_6%3AAN1VRQENFRJN5` = Amazon.co.jp 販売者絞込
+# (= 6/11 ユーザー指示、 拡張機能 selenium 環境で効かない代替策)
 PRESETS = {
     "gshock-all": [
-        ("mens", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011"),
-        ("ladies", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A338087011"),
+        ("mens", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011&rh=p_6%3AAN1VRQENFRJN5"),
+        ("ladies", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A338087011&rh=p_6%3AAN1VRQENFRJN5"),
     ],
     "gshock-mens": [
-        ("mens", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011"),
+        ("mens", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011&rh=p_6%3AAN1VRQENFRJN5"),
     ],
     "gshock-ladies": [
-        ("ladies", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A338087011"),
+        ("ladies", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A338087011&rh=p_6%3AAN1VRQENFRJN5"),
     ],
 }
 
@@ -112,6 +127,60 @@ EXTENSION_INSTALL_URL = (
     "https://chromewebstore.google.com/detail/amazon-3rd-party-seller-f/"
     "gmfbegokkdolaokghlfnohddllgbbohd"
 )
+
+
+def launch_attach_chrome_mode() -> int:
+    """普通の chrome (= selenium 起動でない) を 9222 port で起動して user 操作可能にする.
+
+    抽出くん python は chrome 起動コマンドを実行して即終了 (= chrome は detached process)。
+    以降 `--attach-port 9222` で接続することで user 操作 chrome の DOM を使える。
+    """
+    import os as _os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+
+    profile_dir = (
+        r"C:\Users\imax2\local_data\iMakHarvest\chrome_profile_amazon_attach"
+    )
+    _os.makedirs(profile_dir, exist_ok=True)
+    chrome_candidates = (
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    )
+    chrome_exe = None
+    for c in chrome_candidates:
+        if _os.path.isfile(c):
+            chrome_exe = c
+            break
+    if not chrome_exe:
+        _log("ERROR: chrome.exe 見つかりません (= " + ", ".join(chrome_candidates) + ")")
+        return 1
+
+    args = [
+        chrome_exe,
+        "--remote-debugging-port=9222",
+        f"--user-data-dir={profile_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        EXTENSION_INSTALL_URL,
+    ]
+    _log(f"chrome 起動 (= 新 profile = {profile_dir})")
+    _log(f"args: {args}")
+    flags = 0
+    if _os.name == "nt":
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0,
+        )
+    subprocess.Popen(args, creationflags=flags, close_fds=True)
+    _log("chrome 起動完了 (= detached、 python は即終了)")
+    _log("---")
+    _log("次のステップ (user 操作):")
+    _log("  1. 起動した chrome で「Chrome に追加」 で拡張機能 install")
+    _log("  2. Amazon 検索 URL filter を新タブで開く:")
+    _log("     https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011%2Cp_6%3AAN1VRQENFRJN5")
+    _log("  3. 画面に第三者除外 + Amazon 直販のみ表示 を確認")
+    _log("  4. user 操作完了したら 抽出くんに「準備 OK」 と通知")
+    _log("  5. 抽出くん: --preset gshock-mens --attach-port 9222 --skip-existing-tab gshock")
+    return 0
 
 
 def setup_extension_mode(headless: bool = False) -> int:
@@ -192,6 +261,160 @@ def _collect_urls_for_paths(driver, paths: list[tuple[str, str]]) -> dict:
         "by_path": by_path,
         "all_urls": all_urls,
         "captcha_hit": captcha_global,
+    }
+
+
+def _http_prefilter_keep_asins(
+    paths: list[tuple[str, str]],
+    pre_visited_asins: set[str],
+    max_pages: int = 15,
+    rate_min: float = 3.0,
+    rate_max: float = 5.0,
+) -> dict:
+    """HTTP で全 ASIN 取得 + seller=Amazon + brand=G-shock filter (= 2026-06-11 改善).
+
+    Returns: {
+        "url_keep_urls": list[str],    # keep ASIN を /dp/<ASIN> URL に変換した list
+        "url_collected_count": int,    # HTTP で取得した全 ASIN 数 (= 重複除外後)
+        "kept_asin_count": int,        # filter 通過 ASIN 数
+        "rejected_asin_count": int,
+        "skipped_pre_visited": int,
+        "captcha_hit": bool,
+        "session_obj": Session,         # 後段で keep_alive 流用
+    }
+    """
+    session = amazon_search_http.create_session()
+    all_asins: list[str] = []
+    seen: set[str] = set(pre_visited_asins)
+    captcha_url = False
+    for label, base_url in paths:
+        _log(f"[http-prefilter] URL 収集 path={label}: {base_url}")
+        r = amazon_search_http.collect_search_asins(
+            session=session, base_url=base_url, max_pages=max_pages,
+            rate_min=rate_min, rate_max=rate_max,
+            progress_callback=lambda i, n, m: _log(f"  {m}"),
+        )
+        if r["captcha_hit"]:
+            captcha_url = True
+            break
+        for a in r["asins"]:
+            if a not in seen:
+                seen.add(a)
+                all_asins.append(a)
+    _log(f"[http-prefilter] URL 収集完了: {len(all_asins)} 件 (pre_visited skip={len(pre_visited_asins)})")
+
+    # Phase B: seller/brand filter
+    keep_asins: list[str] = []
+    rejected = 0
+    captcha_detail = False
+    queue = list(all_asins)
+    queued_set: set[str] = set(all_asins)
+    processed = 0
+    while queue:
+        asin = queue.pop(0)
+        processed += 1
+        if processed % 20 == 0:
+            _log(f"[http-prefilter] detail {processed}/{len(queued_set)} (keep={len(keep_asins)} reject={rejected})")
+        r = amazon_search_http.evaluate_detail_for_keep(session, asin)
+        if r["captcha_hit"]:
+            captcha_detail = True
+            _log("[http-prefilter] CAPTCHA detected, abort")
+            break
+        if not r["fetch_ok"]:
+            rejected += 1
+        elif r["should_keep"]:
+            keep_asins.append(asin)
+            # variant 子 ASIN を queue に追加
+            for v in r["variant_asins"]:
+                if v and v not in seen:
+                    seen.add(v)
+                    if v not in queued_set:
+                        queued_set.add(v)
+                        queue.append(v)
+        else:
+            rejected += 1
+        time.sleep(random.uniform(rate_min, rate_max))
+
+    _log(f"[http-prefilter] filter 完了: keep={len(keep_asins)} reject={rejected} captcha={captcha_detail}")
+    return {
+        "url_keep_urls": [f"https://www.amazon.co.jp/dp/{a}" for a in keep_asins],
+        "url_collected_count": len(queued_set),
+        "kept_asin_count": len(keep_asins),
+        "rejected_asin_count": rejected,
+        "skipped_pre_visited": len(pre_visited_asins),
+        "captcha_hit": captcha_url or captcha_detail,
+    }
+
+
+def _http_variant_supplement(
+    seed_asins: list[str],
+    pre_visited_asins: set[str],
+    rate_min: float = 3.0,
+    rate_max: float = 5.0,
+) -> dict:
+    """seed ASIN を起点に variant 子 ASIN を HTTP で集めて seller=Amazon.co.jp filter.
+
+    既存 keep ASIN の color variant 取りこぼし補完用 (= 2026-06-11 user 指示)。
+    Amazon US (= merchantId 違い) は自動除外。
+
+    Returns: {
+        "url_keep_urls": list[str],   # 新規 keep ASIN を /dp/<ASIN> URL に
+        "supplement_seed_count": int,
+        "variant_candidates": int,    # variant 子 ASIN 候補 (= dedup 済)
+        "kept_count": int,
+        "rejected_count": int,
+        "captcha_hit": bool,
+    }
+    """
+    session = amazon_search_http.create_session()
+    # Phase A: seed ASIN を HTTP detail で variant 子 ASIN 抽出
+    variant_candidates: list[str] = []
+    seen: set[str] = set(pre_visited_asins) | set(seed_asins)
+    captcha_seed = False
+    for i, asin in enumerate(seed_asins, start=1):
+        if i % 20 == 0:
+            _log(f"[variant-supplement] seed {i}/{len(seed_asins)} (candidates={len(variant_candidates)})")
+        text, captcha = amazon_search_http.fetch_detail_page(session, asin)
+        if captcha:
+            captcha_seed = True
+            break
+        if not text:
+            continue
+        v_asins = amazon_search_http.extract_variant_asins_http(text)
+        for v in v_asins:
+            if v not in seen:
+                seen.add(v)
+                variant_candidates.append(v)
+        time.sleep(random.uniform(rate_min, rate_max))
+    _log(f"[variant-supplement] seed 完了: variant 子 ASIN 候補 {len(variant_candidates)} 件")
+
+    # Phase B: variant 候補を HTTP detail で seller=Amazon.co.jp + brand=G-shock filter
+    keep_asins: list[str] = []
+    rejected = 0
+    captcha_detail = False
+    for i, asin in enumerate(variant_candidates, start=1):
+        if i % 20 == 0:
+            _log(f"[variant-supplement] filter {i}/{len(variant_candidates)} (keep={len(keep_asins)} reject={rejected})")
+        r = amazon_search_http.evaluate_detail_for_keep(session, asin)
+        if r["captcha_hit"]:
+            captcha_detail = True
+            break
+        if not r["fetch_ok"]:
+            rejected += 1
+        elif r["should_keep"]:
+            keep_asins.append(asin)
+        else:
+            rejected += 1
+        time.sleep(random.uniform(rate_min, rate_max))
+    _log(f"[variant-supplement] filter 完了: keep={len(keep_asins)} reject={rejected}")
+
+    return {
+        "url_keep_urls": [f"https://www.amazon.co.jp/dp/{a}" for a in keep_asins],
+        "supplement_seed_count": len(seed_asins),
+        "variant_candidates": len(variant_candidates),
+        "kept_count": len(keep_asins),
+        "rejected_count": rejected,
+        "captcha_hit": captcha_seed or captcha_detail,
     }
 
 
@@ -345,6 +568,9 @@ def harvest_amazon_search(
     headless: bool = False,
     skip_sheet: bool = False,
     skip_existing_tab: str | None = None,
+    attach_port: int | None = None,
+    use_http_prefilter: bool = False,
+    supplement_variants_from_tab: str | None = None,
 ) -> dict:
     """1 session 内で URL 収集 + detail fetch + 2 出力 (= JSON dump + 中間スプシ append).
 
@@ -362,12 +588,88 @@ def harvest_amazon_search(
             f"[skip-existing] tab='{skip_existing_tab}' から既存 ASIN "
             f"{len(pre_visited)} 件 pre-load (= 重複 fetch skip)"
         )
-    driver = create_driver(headless=headless)
+    # HTTP pre-filter (= 2026-06-11 改善、 Gemini 助言 + merchantId 100% 精度実証)
+    # selenium で URL 収集 + seller filter する代わりに、 HTTP で 100% 精度 filter
+    # → keep ASIN list のみ selenium で 14 field detail fetch (= 効率最大化)
+    http_filter_result: dict | None = None
+    if use_http_prefilter:
+        _log("=== Phase 0: HTTP pre-filter (= URL 収集 + seller/brand filter) ===")
+        http_filter_result = _http_prefilter_keep_asins(
+            paths=paths,
+            pre_visited_asins=pre_visited,
+            max_pages=15,
+            rate_min=3.0,
+            rate_max=5.0,
+        )
+        if not http_filter_result["url_keep_urls"]:
+            _log("[http-prefilter] keep ASIN 0 件、 abort")
+            return {
+                "summary": {"label": label, "http_prefilter": http_filter_result},
+                "json_dump_path": None, "sheet_result": None,
+            }
+        _log(
+            f"[http-prefilter] selenium detail fetch 対象: "
+            f"{len(http_filter_result['url_keep_urls'])} 件"
+        )
+
+    # variant supplement (= 2026-06-11 user 指示: 既存 keep ASIN の color variant 補完)
+    variant_sup_result: dict | None = None
+    if supplement_variants_from_tab:
+        _log(
+            f"=== Phase 0v: variant supplement seed='{supplement_variants_from_tab}' ==="
+        )
+        seed_asins = sorted(_load_existing_asins_from_tab(supplement_variants_from_tab))
+        if not seed_asins:
+            _log(f"[variant-supplement] seed タブ {supplement_variants_from_tab!r} 空、 abort")
+            return {
+                "summary": {"label": label, "variant_supplement": "seed empty"},
+                "json_dump_path": None, "sheet_result": None,
+            }
+        _log(f"[variant-supplement] seed ASIN {len(seed_asins)} 件")
+        variant_sup_result = _http_variant_supplement(
+            seed_asins=seed_asins,
+            pre_visited_asins=pre_visited,
+            rate_min=3.0,
+            rate_max=5.0,
+        )
+        if not variant_sup_result["url_keep_urls"]:
+            _log("[variant-supplement] 新規 keep 子 ASIN 0 件、 abort")
+            return {
+                "summary": {"label": label, "variant_supplement": variant_sup_result},
+                "json_dump_path": None, "sheet_result": None,
+            }
+        _log(
+            f"[variant-supplement] selenium detail fetch 対象: "
+            f"{len(variant_sup_result['url_keep_urls'])} 件"
+        )
+
+    if attach_port:
+        _log(f"[attach] localhost:{attach_port} の既存 chrome に接続")
+        driver = attach_to_existing_chrome(port=attach_port)
+    else:
+        driver = create_driver(headless=headless)
     try:
-        _log(f"=== Phase 1: URL 収集 ({len(paths)} path) ===")
-        url_result = _collect_urls_for_paths(driver, paths)
-        all_urls = url_result["all_urls"]
-        _log(f"URL union total: {len(all_urls)} 件")
+        if supplement_variants_from_tab and variant_sup_result:
+            all_urls = variant_sup_result["url_keep_urls"]
+            _log(f"=== Phase 1: variant supplement keep URL = {len(all_urls)} 件 ===")
+            url_result = {
+                "by_path": {"variant_supplement": variant_sup_result},
+                "all_urls": all_urls,
+                "captcha_hit": variant_sup_result["captcha_hit"],
+            }
+        elif use_http_prefilter and http_filter_result:
+            all_urls = http_filter_result["url_keep_urls"]
+            _log(f"=== Phase 1: HTTP-prefilter 済 keep URL = {len(all_urls)} 件 ===")
+            url_result = {
+                "by_path": {"http_prefilter": http_filter_result},
+                "all_urls": all_urls,
+                "captcha_hit": http_filter_result["captcha_hit"],
+            }
+        else:
+            _log(f"=== Phase 1: URL 収集 ({len(paths)} path) ===")
+            url_result = _collect_urls_for_paths(driver, paths)
+            all_urls = url_result["all_urls"]
+            _log(f"URL union total: {len(all_urls)} 件")
 
         _log(f"=== Phase 2: detail fetch (= seller filter) ===")
         detail_result = _fetch_details(
@@ -459,10 +761,28 @@ def main(argv: list[str] | None = None) -> int:
         "--setup-extension", action="store_true",
         help="Amazon 3rd Party Seller Filter 拡張機能 install setup mode",
     )
+    ap.add_argument(
+        "--launch-attach-chrome", action="store_true",
+        help="普通の chrome を 9222 port で起動 (= user 操作 + attach 用、 新 profile)",
+    )
+    ap.add_argument(
+        "--attach-port", type=int, default=None,
+        help="既存 chrome (= --launch-attach-chrome 起動分) の port に接続して fetch",
+    )
+    ap.add_argument(
+        "--use-http-prefilter", action="store_true",
+        help="HTTP で URL 収集 + seller/brand filter (= 100% 精度、 selenium fetch 最小化)",
+    )
+    ap.add_argument(
+        "--supplement-variants-from-tab", default=None,
+        help="指定タブ既存 ASIN を seed に variant 子 ASIN を補完 fetch (= Amazon US 自動除外)",
+    )
     args = ap.parse_args(argv)
 
     if args.setup_extension:
         return setup_extension_mode(headless=args.headless)
+    if args.launch_attach_chrome:
+        return launch_attach_chrome_mode()
 
     if args.url:
         paths = [(f"custom_{i+1}", u) for i, u in enumerate(args.url)]
@@ -481,6 +801,9 @@ def main(argv: list[str] | None = None) -> int:
         headless=args.headless,
         skip_sheet=args.skip_sheet,
         skip_existing_tab=args.skip_existing_tab,
+        attach_port=args.attach_port,
+        use_http_prefilter=args.use_http_prefilter,
+        supplement_variants_from_tab=args.supplement_variants_from_tab,
     )
     _log("=== summary ===")
     _log(json.dumps(result["summary"], ensure_ascii=False, indent=2))

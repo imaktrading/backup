@@ -165,6 +165,14 @@ def _collect_asin_urls_from_search_page(
 
     # card 単位で走査 + 任意 pre-filter
     for card in cards:
+        # visible check (= 6/11 ユーザー指摘: 拡張機能で hide された card は除外)
+        # 「Amazon 3rd Party Seller Filter」 拡張機能は CSS display:none で第三者 card を
+        # hide する。 抽出くんは画面に見えているもの だけを採用 (= 拡張機能の絞込結果を反映)。
+        try:
+            if not card.is_displayed():
+                continue
+        except Exception:
+            continue
         if brand_prefilter:
             try:
                 card_text = (card.text or "")[:500]

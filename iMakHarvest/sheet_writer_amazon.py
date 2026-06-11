@@ -48,6 +48,7 @@ COL_IMAGES = 7         # G: 画像 URL
 COL_DESCRIPTION = 8    # H: 商品説明
 COL_COLOR = 19         # S: 色                  - Phase 1d (Amazon は基本空欄)
 COL_SIZE = 20          # T: サイズ              - Phase 1d (Amazon は基本空欄)
+COL_MONTHLY_SALES = 22 # V: Amazon 月販売数     - 2026-06-11 user 指示: 生 verbatim 「過去1ヶ月で N 点以上購入」
 COL_KEY = 35           # AI: 型番 (canonical 候補) - 2026-06-11 HQ 規約: 生 verbatim
 
 # 書込み列数 default. A〜AI (1-35) を含む 35 列構成。
@@ -148,7 +149,11 @@ def _build_row(item: dict) -> list:
     # I-R (9-18) は空欄
     row[COL_COLOR - 1] = color
     row[COL_SIZE - 1] = size
-    # U-AH (21-34) は空欄
+    # U (21): バナー価格 列 (= 既存 mercari format)、 Amazon は空
+    # V (22): Amazon 月販売数 (= 2026-06-11 user 指示、 生 verbatim 「過去1ヶ月で N 点以上購入」)
+    monthly_sales = str(item.get("monthly_sales_text") or "").strip()
+    row[COL_MONTHLY_SALES - 1] = monthly_sales
+    # W-AH (23-34) は空欄
     # AI (35): 型番 (canonical 候補) を 生 verbatim で書込 (= 2026-06-11 HQ 規約)
     raw_model = str(
         item.get("model_number")
