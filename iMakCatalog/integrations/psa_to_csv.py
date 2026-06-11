@@ -1455,6 +1455,34 @@ def _name_matches_pokemon_subject(record: dict, subject: str) -> bool:
     return True   # Pokemon は ID 一致を信頼、name 検証は将来の拡張
 
 
+def _set_code_lookup_variants(set_code: str) -> list[str]:
+    """Pokemon set_code の lookup 候補リスト (大文字小文字 + 0↔O 取り違え正規化).
+
+    PSA brand は数字0/英字O を取り違える (例 PSA「SV0M」=数字0、公式 catalog「SVOM」=英字O。
+    Marnie set 全体 SVOM-001〜020 に影響). ID 完全一致 lookup 専用なので、誤候補は単に
+    ヒットせず fail-closed. 元の set_code を最優先で試す (順序保持・重複除去).
+    """
+    if not set_code:
+        return []
+    seen: list[str] = []
+
+    def _add(c: str):
+        if c and c not in seen:
+            seen.append(c)
+
+    up = set_code.upper()
+    ordered_bases = [set_code, up]
+    if "0" in up:
+        ordered_bases.append(up.replace("0", "O"))   # 数字0 → 英字O (SV0M → SVOM)
+    if "O" in up:
+        ordered_bases.append(up.replace("O", "0"))   # 英字O → 数字0 (逆方向救済)
+    for b in ordered_bases:
+        _add(b)
+        _add(b.upper())
+        _add(b.lower())
+    return seen
+
+
 def lookup_pokemon(
     brand: str,
     card_number: str,
@@ -1479,12 +1507,14 @@ def lookup_pokemon(
 
     base_pid = f"{set_code}-{card_number}"
 
-    # 1. base lookup を先に行って、その record の name を「正しいキャラ」として確定
-    record = api.lookup(POKEMON_CATEGORY, base_pid)
-    if record is None and set_code != set_code.upper():
-        record = api.lookup(POKEMON_CATEGORY, f"{set_code.upper()}-{card_number}")
-    if record is None and set_code != set_code.lower():
-        record = api.lookup(POKEMON_CATEGORY, f"{set_code.lower()}-{card_number}")
+    # 1. base lookup を先に行って、その record の name を「正しいキャラ」として確定.
+    #    set_code は 大文字小文字 + 0↔O 取り違え (PSA brand「SV0M」=数字0 vs 公式 catalog
+    #    「SVOM」=英字O) を正規化候補で試行. ID 完全一致のみなので誤候補は無害 (fail-closed).
+    record = None
+    for sc in _set_code_lookup_variants(set_code):
+        record = api.lookup(POKEMON_CATEGORY, f"{sc}-{card_number}")
+        if record is not None:
+            break
 
     # 2. FA/Promo ヒントあり + base hit あり → promo set codes に **同名の record** があれば乗り換え
     #    (ANNIVERSARY の 'SAR' 部分一致や、無関係な S-P-XXX への誤マッチを防ぐ)
