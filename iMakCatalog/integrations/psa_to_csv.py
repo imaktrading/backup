@@ -772,6 +772,12 @@ def _search_one_piece_promo_by_number(
             ("PROMOTION CARD SET", "プロモーションカードセット"),
             ("STANDARD BATTLE", "スタンダードバトル"),
             ("EVENT PRIZE", "記念品"),
+            # 2026-06-12 REVIEW: nth ANNIVERSARY COMPLETE GUIDE 収録特典 promo.
+            #   official は英語表記 "Nth ANNIVERSARY COMPLETE GUIDE" を含むため en=jp 同句で
+            #   両側一致照合。PSA brand は "ANV." 略記なので distinctive token "COMPLETE GUIDE"
+            #   で照合する。例 cert 148642488 ZORO 2ND ANV. COMPLETE GUIDE #067 → OP05-067_p2
+            #   (#067 候補中 official に COMPLETE GUIDE を持つのは _p2 のみ = 一意特定)。
+            ("COMPLETE GUIDE", "COMPLETE GUIDE"),
         ):
             if en in hay and (jp in sn or jp in sn_upper):
                 edition_hit = True
@@ -1229,6 +1235,14 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "BLUE SKY STREAM":             "S7R",   # 蒼空ストリーム (英 Evolving Skies)
     "POKEMON GO":                  "S10b",  # Pokémon GO
     # Sword & Shield
+    # 2026-06-12 REVIEW (cert 142931332 PIKACHU V 25TH ANNIV GOLDEN BOX #005):
+    #   25周年ゴールデンボックスは S8a の通常弾でなく専用サブセット "S8a-G" (全15枚).
+    #   plain S8a-005=Lugia と衝突するため GOLDEN BOX は必ず S8a-G に振る。
+    #   "25TH ANNIVERSARY COLLECTION" (=S8a) より前に置き、both含む brand でも GOLDEN BOX を優先。
+    #   S8a-G prefix は golden box 専用のため番号一致=必ず golden box カード (over-fire 不能)。
+    #   注: PSA が "GOLDEN BOX" を subject 側に置く cert では brand 単独参照の本 path は no-op
+    #       (fail-closed)。その場合は raw cert で要確認。
+    "GOLDEN BOX":                  "S8a-G",
     "25TH ANNIVERSARY COLLECTION": "S8a",
     "VSTAR UNIVERSE":              "S12a",
     "VMAX CLIMAX":                 "S8b",
