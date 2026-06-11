@@ -117,12 +117,14 @@ def _call_trading(call_name: str, body_xml: str,
                     access_token: Optional[str] = None,
                     timeout: int = 15,
                     _allow_refresh: bool = True,
-                    raw_xml_cap: Optional[int] = 2000) -> dict:
+                    raw_xml_cap: Optional[int] = 2000,
+                    max_net_retries: int = 4) -> dict:
     """Trading API 共通 call wrapper.
 
     Args:
         raw_xml_cap: raw_xml の最大文字数 (default 2000、 ログ肥大化防止用 cap)。
                      None で cap 解除 (= GetItem の Variations 全件取得等、 全文必要時)。
+        max_net_retries: network 層 (DNS/接続/timeout) 瞬断時の再試行回数。
 
     Returns: {"success": bool, "ack": str|None, "error_code": str|None,
               "error_message": str|None, "raw_xml": str (= raw_xml_cap で cap)}
@@ -137,12 +139,25 @@ def _call_trading(call_name: str, body_xml: str,
         "X-EBAY-API-IAF-TOKEN": access_token,
         "Content-Type": "text/xml; charset=utf-8",
     }
-    try:
-        r = requests.post(TRADING_API_URL, headers=headers,
-                          data=body_xml.encode("utf-8"), timeout=timeout)
-    except Exception as e:
-        return {"success": False, "ack": None, "error_code": None,
-                "error_message": f"{type(e).__name__}: {e}", "raw_xml": ""}
+    # network 層リトライ (2026-06-11 追加): api.ebay.com への DNS/接続瞬断
+    # (getaddrinfo failed 等) は全 upload の ~12% で発生。 1 回で諦めると取下げ漏れ
+    # → 「サイクル内で完結・短間隔リトライ」原則違反。 transient な requests 例外を
+    # 指数 backoff (1/2/4/8s) で再試行する。 eBay の business error (Ack=Failure 等) は
+    # HTTP 200 応答なので下流で通常処理され、 ここでは retry しない (= 無駄打ち防止)。
+    r = None
+    for attempt in range(max_net_retries + 1):
+        try:
+            r = requests.post(TRADING_API_URL, headers=headers,
+                              data=body_xml.encode("utf-8"), timeout=timeout)
+            break
+        except Exception as e:
+            if attempt < max_net_retries:
+                time.sleep(min(2 ** attempt, 8))
+                continue
+            return {"success": False, "ack": None, "error_code": None,
+                    "error_message": f"{type(e).__name__}: {e} "
+                                     f"(network retry {max_net_retries + 1}回全滅)",
+                    "raw_xml": ""}
     if r.status_code != 200:
         return {"success": False, "ack": None, "error_code": str(r.status_code),
                 "error_message": f"HTTP {r.status_code}", "raw_xml": r.text[:1000]}
