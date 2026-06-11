@@ -1,5 +1,22 @@
 # iMakInventory daily_report
 
+## 2026-06-11 (続々々) — fril「scraper returned None」反復 → no_signal リトライ
+
+### 決定 → 変更 → 検証
+- **決定**: 17:30 cycle 等で fril 行 (row542 は 01:50/05:49/17:48 と 1日3回) が
+  「scraper returned None (fail-closed)」を反復。 調査で判明: 失敗 URL は HTTP200 の
+  実在商品ページ (UNIQLO UT、 在庫あり) だが、 cycle 中は負荷で **marker 無しページ
+  (anti-bot/rate-limit/部分ロード) を間欠返し** → `_detect_stock` が no_signal=None。
+  単独 re-fetch では 8/8 正常判定 (buy_button + JSON-LD availability=InStock) = 検出
+  ロジックは健全、 transient なページ不良が原因。
+- **変更**: `scrapers/fril_scraper.py:fetch_product_inventory` に no_signal/接続失敗
+  (=None) 時の再 fetch リトライ (2/4/6s 間隔、 max_retries=3) を追加。 404/sold/in_stock
+  の確定 dict は即 break (retry しない)。 eBay の network retry と同思想。
+- **検証**: offline test 3件 (`test_fril_retry.py`: transient回復 / 全滅fail-closed /
+  確定即break)。 offline 計 140 pass。 実 URL 連続 fetch 8/8 正常も確認。
+- **未対応 (別件)**: snkrdunk row575 「uncertain 1/3 candidates errored」は別 scraper の
+  partial。 単発なので今回は様子見 (反復したら同型 retry 検討)。
+
 ## 2026-06-11 (続々) — DNS瞬断起点の取下げ漏れ事故 → 多層防御4本 + 公式横断確認
 
 ### 事故の経緯

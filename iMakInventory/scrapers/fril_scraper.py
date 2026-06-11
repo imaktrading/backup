@@ -200,19 +200,32 @@ def _fetch_via_requests(url: str) -> Optional[dict]:
 def fetch_product_inventory(
     url: str,
     use_selenium_fallback: bool = False,  # 現状 requests で十分、Selenium 不要
+    max_retries: int = 3,
 ) -> Optional[dict]:
     """Fril 商品 URL から在庫情報を取得.
 
     Args:
         url: Fril 商品 URL (例: https://item.fril.jp/<random_id>)
         use_selenium_fallback: 現状 unused (requests path のみで動作)
+        max_retries: no_signal / 接続失敗 (= None) 時の再 fetch 回数。
 
     Returns:
         uniqlo_scraper と契約互換の dict、または None (取得不能・判定不能時)
     """
     pid = parse_product_id(url) or ""
 
-    raw = _fetch_via_requests(url)
+    # 再 fetch リトライ (2026-06-11): cycle 中の fril は負荷で marker 無しページ
+    # (anti-bot/rate-limit/部分ロード) を間欠的に返し、 _detect_stock が no_signal=None
+    # → 「scraper returned None」 が同一行で繰返す (row542 が 1日3回 等)。 単独 re-fetch
+    # では正常 (in_stock 判定可) なので、 間隔 (2/4/6s) を空けて再取得すれば大半復活する。
+    # 404/sold/in_stock の確定 dict が返れば即 break (= 確定済みは retry しない)。
+    raw = None
+    for attempt in range(max_retries + 1):
+        raw = _fetch_via_requests(url)
+        if raw is not None:
+            break
+        if attempt < max_retries:
+            time.sleep(2 * (attempt + 1))  # 2,4,6s: fril の rate-limit 回避間隔
     if raw is None:
         return None
 
