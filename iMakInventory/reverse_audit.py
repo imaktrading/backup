@@ -123,6 +123,23 @@ def run_reverse_audit(
         qty_map = _fetch_ebay_qty_map()
     print(f"  [reverse_audit] eBay active: {len(qty_map)} 件 ({time.time()-t0:.0f}s)", flush=True)
 
+    # 安全弁 (2026-06-11 追加): active map 空 = eBay 取得失敗 (DNS/API障害) → fail-closed。
+    # ガードが無いと、 空 map のまま突合して全 D=○ 行が「乖離なし」= 偽の mismatch 0 件
+    # (= fail-OPEN) になり、 取下げ漏れを見逃したまま「✅ 乖離0件」を継続証跡に積んでしまう。
+    # (2026-06-11 09:30 cycle で DNS flaky 時に elapsed 4.3s / mismatch 0 = 偽0 を実観測)。
+    # sibling run_ebay_down_sheet_active_audit と同じ防御。 この口座は常時 active 多数のため
+    # 空 = 取得失敗で確定 (真に 0 listing になることはない)。
+    if not qty_map:
+        print("  [!] [reverse_audit] active map 空 = eBay 取得失敗、 fail-closed 中断", flush=True)
+        return {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "mismatch_count": -1,
+            "error": "ebay_active_map_empty",
+            "by_sheet": {}, "by_supplier": {}, "items": [],
+            "elapsed_sec": time.time() - t0,
+            "log_path": None,
+        }
+
     print("  [reverse_audit] Step 2: HIGH/LOW スプシ D 列読込...", flush=True)
     all_rows = []
     for label, sid in [("HIGH", h_id), ("LOW", l_id)]:
