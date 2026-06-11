@@ -913,3 +913,22 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅(Pikachu Asia reject): extract('POKEMON ASIA 25TH ANNIVERSARY PROMO')→P / lookup #005→None
 - 検証✅(裏取り言語差): 25th Golden Box JP/繁中/韓/尼 同S8a-G番号・言語別(Bulbapedia/TCGplayer)
 - 検証✅(UTA別アート): ST16-001_p1.png/_p2.png 別画像(onepiece-cardgame.com series550801)
+
+
+## 2026-06-12 (続3) — Catalog: Amazon gshock dump 非直販17 ASIN 除外(Harvest依頼)
+
+### 決定事項
+- 決定1(遡及不要): 実機確認で catalog に amazon_available 列無・amazon_jp source 未投入・17 ASIN は catalog に0 hit。=Amazon dump は未merge(ロジック新規実装要のまま)。よって「取込済flag降格」は不要、本件は merge実装時の予防是正として固定。
+- 決定2(恒久リスト化・非破壊): _amazon_jp_dumps/exclude_asins.json 新設。将来merge が honor。2層: exclude_entirely(A band4+B AmazonUS4=8件・一切ingestせずvariant子もsourcing外) / exclude_amazon_available_only(C 国内3P 9件=identity可だが直販フラグ抑止)。dump JSON 本体は raw provenance+seller-bug証跡のため物理削除せず温存(可逆・fail-closed)。
+- 決定3(variant子): A/B は親の variant_asins 子でも sourcing除外、C は identity残・直販フラグのみ抑止。現dumpでは17 ASIN いずれも他ASINのvariant_asinsに不在=実害なし。
+
+### 変更
+- 変更(共有data・git外): C:/dev/iMak_data/catalog/_amazon_jp_dumps/exclude_asins.json 新設(17 ASIN/A-B-C区分/disposition)
+- 変更: requests/ に 2026-06-12_amazon_gshock_dump_nondirect_exclusion_response.md
+- コード変更: 無し(merge未実装のため。merge実装時に exclude_asins.json をload)
+
+### 検証(実機)
+- 検証✅: PRAGMA で amazon_available 列無。gshock source=shockbase/g-central/casiofanmag/casio_official のみ
+- 検証✅: 17 ASIN を specs/variants/source_url/source 全 grep → 0 hit(未投入)
+- 検証✅(dump裏取り): 4 dump 375件中 16/17 ASIN top-level実在。seller誤判定確認(B0CYLNCYRY等 seller='Amazon.co.jp'=FBA誤検出)。B000FPVUJA のみ現dump不在(no-op、再混入防止で登録)
+- 検証✅(JSON): exclude_asins.json valid・17 unique(entirely8+flag_only9)
