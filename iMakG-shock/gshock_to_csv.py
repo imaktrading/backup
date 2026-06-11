@@ -50,10 +50,48 @@ except Exception:
 
 # Phase 3-B (2026-04-29): iMakCatalog adapter — catalog hit 時に Selenium scrape を skip.
 # 失敗時 (iMakCatalog 未配置 / DB 未投入) は静かに None フォールバックして既存挙動を維持する.
+def _load_catalog_lookup():
+    """alias 対応 gshock_lookup を取得する.
+
+    2026-06-11: HQ側 c:/dev/iMak/iMakCatalog は alias_of 非対応の stale copy。
+    本番は別 worktree (C:/dev/iMak_catalog) の alias 対応版 (gshock_lookup + api) を
+    使う必要がある (短縮形→canonical を別名追跡しないと別名行をそのまま返す bug)。
+
+    ただし separated を global の 'gshock_lookup'/'api' 名で常駐させると、HQ側を
+    意図的に import する他コード/テスト (tests/test_gshock_lookup.py の
+    _generate_candidates 等) を壊す。よって separated を controlled-load し、
+    lookup 関数だけ捕捉して global cache / sys.path は元に戻す
+    (関数は load 時に separated api を捕捉済なので、復元後も正しく動く)。
+    """
+    sep_root = r"C:/dev/iMak_catalog/iMakCatalog"
+    sep_integ = sep_root + "/integrations"
+    if not _os.path.isdir(sep_integ):
+        # 別 worktree 不在環境: HQ側 (fallback)
+        _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                           "..", "iMakCatalog", "integrations"))
+        from gshock_lookup import lookup_gshock as _fn  # type: ignore
+        return _fn
+    import importlib
+    _saved = {_k: _sys.modules.get(_k) for _k in ("gshock_lookup", "api")}
+    _saved_path = list(_sys.path)
+    try:
+        for _p in (sep_root, sep_integ):
+            if _p not in _sys.path:
+                _sys.path.insert(0, _p)
+        for _k in ("gshock_lookup", "api"):
+            _sys.modules.pop(_k, None)
+        _mod = importlib.import_module("gshock_lookup")  # separated (+ separated api 捕捉)
+        return _mod.lookup_gshock
+    finally:
+        for _k in ("gshock_lookup", "api"):
+            _sys.modules.pop(_k, None)
+            if _saved[_k] is not None:
+                _sys.modules[_k] = _saved[_k]
+        _sys.path[:] = _saved_path
+
+
 try:
-    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
-                                       "..", "iMakCatalog", "integrations"))
-    from gshock_lookup import lookup_gshock as _catalog_lookup  # type: ignore
+    _catalog_lookup = _load_catalog_lookup()
 except Exception:
     _catalog_lookup = None
 

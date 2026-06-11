@@ -161,6 +161,51 @@ def test_empty_band_strap_omits_override():
 
 
 # ============================================================================
+# 4b. 回帰 (2026-06-11): 出品くんは alias 対応 resolver を読むこと
+#   旧bug: import順で HQ側 stale gshock_lookup (alias_of 非対応) を読み、
+#   短縮形(bare)→canonical を辿れず別名行をそのまま返していた。
+#   bare↔suffix dedupe B案 (短縮形=canonicalの別名) が出品段階で効くための保証。
+# ============================================================================
+def test_resolver_is_alias_aware():
+    """出品くんが読む resolver は alias_of 対応であること (stale版退行検知).
+
+    gshock_to_csv は別 worktree(alias対応) を controlled-load するため、suite の
+    import 順に依存せず _catalog_lookup は常に alias 対応版になる。
+    """
+    import inspect
+    import os
+    if not os.path.isdir(r"C:/dev/iMak_catalog/iMakCatalog/integrations"):
+        return  # 別 worktree 無い環境はスキップ
+    if gshock_to_csv._catalog_lookup is None:
+        return  # adapter 未配置はスキップ (フォールバック健全)
+    src = inspect.getsourcefile(gshock_to_csv._catalog_lookup)
+    with open(src, encoding="utf-8") as f:
+        assert "alias_of" in f.read(), (
+            f"出品くんが alias 非対応の stale resolver を読んでいる: {src}"
+        )
+
+
+def test_alias_bare_resolves_to_canonical():
+    """回帰の核: 短縮形(別名)が canonical(公式フル形) に解決すること.
+
+    旧bug では stale resolver が別名行をそのまま返していた。DB に該当 alias が
+    無い環境ではスキップ (=DB状態非依存)。
+    """
+    import os
+    if not os.path.isdir(r"C:/dev/iMak_catalog/iMakCatalog/integrations"):
+        return
+    if gshock_to_csv._catalog_lookup is None:
+        return
+    rec = gshock_to_csv._catalog_lookup("GM-700G-9A")  # 短縮形 (alias_of=GM-700G-9AJF)
+    if rec is None:
+        return  # この型番が DB に無い環境はスキップ
+    pid = rec.get("product_id", "")
+    assert pid.endswith("JF") or pid.endswith("JR"), (
+        f"短縮形 GM-700G-9A が canonical に解決されず {pid} を返した (alias 非追跡=退行)"
+    )
+
+
+# ============================================================================
 # 5. None / 不正入力のフォールバック
 # ============================================================================
 def test_none_record_returns_none():
