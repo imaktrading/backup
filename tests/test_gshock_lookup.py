@@ -82,6 +82,16 @@ def test_long_prefix_4_letters():
     assert "GMWB-5000D-1" in _normalize_forms("GMWB5000D-1")
 
 
+def test_internal_space_to_hyphen():
+    """型番内スペース (title 由来) をハイフン形で吸収."""
+    assert "GA-2100-1A1" in _normalize_forms("GA 2100-1A1")
+
+
+def test_internal_space_prefix_number():
+    """'DW 5600' (prefix と番号の間スペース) → 'DW-5600' 形を生成."""
+    assert "DW-5600" in _normalize_forms("DW 5600")
+
+
 def test_forms_no_duplicates():
     """同じ形が重複して返らない."""
     forms = _normalize_forms("GA-2100-1A1")

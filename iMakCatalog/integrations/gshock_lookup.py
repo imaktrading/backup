@@ -130,9 +130,17 @@ def _normalize_forms(model: str) -> list[str]:
         if c and c not in forms:
             forms.append(c)
 
-    _add(raw)
-    # 'GA2100-1A1' → 'GA-2100-1A1' (冒頭 PREFIX+NUMBER のみ、既存ハイフンは触らない)
-    _add(re.sub(r"^([A-Z]{2,4})(\d{3,4})", r"\1-\2", raw))
+    # 型番内スペース (title 由来: 'GA 2100-1A1' / 'DW 5600') の吸収。
+    # スペース→ハイフン と スペース→除去 の両形を候補化 (exact 一致のみ採るので
+    # 誤形は単にヒットしない = fail-closed を崩さない)。
+    bases = [raw]
+    if " " in raw:
+        bases.append(re.sub(r"\s+", "-", raw))   # 'GA 2100-1A1' → 'GA-2100-1A1'
+        bases.append(re.sub(r"\s+", "", raw))     # 'GA 2100' → 'GA2100'
+    for b in bases:
+        _add(b)
+        # 'GA2100-1A1' → 'GA-2100-1A1' (冒頭 PREFIX+NUMBER のみ、既存ハイフンは触らない)
+        _add(re.sub(r"^([A-Z]{2,4})(\d{3,4})", r"\1-\2", b))
     return forms
 
 
