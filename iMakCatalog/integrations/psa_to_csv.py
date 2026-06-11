@@ -1243,6 +1243,11 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     #   注: PSA が "GOLDEN BOX" を subject 側に置く cert では brand 単独参照の本 path は no-op
     #       (fail-closed)。その場合は raw cert で要確認。
     "GOLDEN BOX":                  "S8a-G",
+    # 2026-06-12 (cert 77429277 Shining Magikarp): プロモカードパック 25th ANNIVERSARY edition = S8a-P.
+    #   HQ raw dump 確認: brand = "POKEMON JAPANESE PROMO CARD PACK 25TH ANNIVERSARY EDITION"
+    #   (= brand 側にあるので本 brand-path で配線可。Pikachu Golden Box の subject 側問題とは別)。
+    #   "25TH ANNIVERSARY COLLECTION"(=S8a) より前に置き、長い方を優先 substring match。
+    "PROMO CARD PACK 25TH ANNIVERSARY EDITION": "S8a-P",
     "25TH ANNIVERSARY COLLECTION": "S8a",
     "VSTAR UNIVERSE":              "S12a",
     "VMAX CLIMAX":                 "S8b",

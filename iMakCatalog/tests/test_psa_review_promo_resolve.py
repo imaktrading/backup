@@ -76,7 +76,13 @@ class TestOnePieceAmbiguousStayReject(unittest.TestCase):
 
 
 class TestPokemonGoldenBox(unittest.TestCase):
-    """25th Anniversary Golden Box = S8a-G 専用サブセット (cert 142931332)."""
+    """25th Anniversary Golden Box = S8a-G 専用サブセット (brand-path).
+
+    ※ 元 cert 142931332 は実際には ASIA 版 (brand=POKEMON ASIA 25TH ANNIVERSARY PROMO /
+      GOLDEN BOX は subject 側) で、本 brand-path は no-op = reject。下の
+      TestPokemonGoldenBoxAsiaReject 参照。本 class は JP-brand(GOLDEN BOX が brand 側)
+      に対する brand-path 配線の正しさを固定する。
+    """
 
     def test_golden_box_set_code_is_s8ag(self):
         code = pc.extract_set_code_from_brand_pokemon(
@@ -84,7 +90,7 @@ class TestPokemonGoldenBox(unittest.TestCase):
         )
         self.assertEqual(code, "S8a-G")
 
-    def test_golden_box_pikachu_v_resolves(self):
+    def test_golden_box_pikachu_v_resolves_jp_brand(self):
         r = pc.lookup_pokemon(
             "POKEMON JAPANESE 25TH ANNIVERSARY GOLDEN BOX", "005",
             "PIKACHU V", verbose=False,
@@ -104,6 +110,47 @@ class TestPokemonGoldenBox(unittest.TestCase):
             "LUGIA", verbose=False,
         )
         self.assertEqual(r["card_id"], "S8a-005")
+
+
+class TestPokemonGoldenBoxAsiaReject(unittest.TestCase):
+    """cert 142931332 実物 = ASIA 版 Golden Box → reject が正 (HQ raw dump 2026-06-12).
+
+    brand=POKEMON ASIA 25TH ANNIVERSARY PROMO / subject に GOLDEN BOX。
+    25th Golden Box は JP/繁中/韓/尼版が同一 S8a-G 番号だが言語が異なる(Bulbapedia/TCGplayer)。
+    catalog S8a-G-005 は日本語 record のため、ASIA cert を解決すると Language 誤り
+    (出品の正確性違反)。GOLDEN BOX が brand 側に無いので brand-path は構造的に no-op =
+    言語誤りを回避する fail-closed。catalog に ASIA言語版が入るまで reject 維持が正。
+    """
+
+    def test_asia_golden_box_rejects(self):
+        r = pc.lookup_pokemon(
+            "POKEMON ASIA 25TH ANNIVERSARY PROMO", "005",
+            "PIKACHU V 25TH ANNIV-GOLDEN BOX", verbose=False,
+        )
+        self.assertIsNone(r)
+
+
+class TestPokemonPromoCardPack25th(unittest.TestCase):
+    """cert 77429277 Shining Magikarp = S8a-P (プロモカードパック25th, brand-path).
+
+    HQ raw dump: brand=POKEMON JAPANESE PROMO CARD PACK 25TH ANNIVERSARY EDITION
+    (GOLDEN BOX/Pikachu と違い set 句が brand 側 → brand-path で配線可)。
+    record S8a-P-010 は収録済(共有DB)。
+    """
+
+    def test_promo_card_pack_set_code_is_s8ap(self):
+        code = pc.extract_set_code_from_brand_pokemon(
+            "POKEMON JAPANESE PROMO CARD PACK 25TH ANNIVERSARY EDITION"
+        )
+        self.assertEqual(code, "S8a-P")
+
+    def test_shining_magikarp_resolves(self):
+        r = pc.lookup_pokemon(
+            "POKEMON JAPANESE PROMO CARD PACK 25TH ANNIVERSARY EDITION", "010",
+            "SHINING MAGIKARP-HOLO PCP 25TH ANNIVERSARY ED.", verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertEqual(r["card_id"], "S8a-P-010")
 
 
 if __name__ == "__main__":
