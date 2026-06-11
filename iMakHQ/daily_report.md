@@ -847,3 +847,24 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証⚠️(残・次セッション): promo resolver REVIEW4件(S8a-G-005/OP05-067/EB01-006/ST07-008=カード実在・fetch不要・推奨次着手) + 真の未収録fetch~6(Shining Magikarp/ASIA promo/UTA#001/DON×3/CP8)。SM3p-010は別カード(ひかるゲノセクト)
 - 検証⚠️(Amazon merge): session5(variant補完)完了後に1回merge予定(ロジック新規実装要)。29 gapはAmazon独立にShockBase backfill必要(Amazon待ちで埋まらない)
 - 全231 green(pre-commit)
+
+
+## 2026-06-12 — Catalog: PSA preflight REVIEW promo resolver 2件確定 / 2件 reject維持
+
+### 決定事項
+- 決定1(REVIEW triage): preflight REVIEW 5件を「ブランドで variant が一意に決まるか」で2分。確定2件のみ resolve、曖昧2件は fail-closed reject維持(誤出品防止)。Shining Magikarp #010 は SM3p-010=別カード(ひかるゲノセクト)で前回確定の真の未収録(fetch)。
+- 決定2(Zoro OP05-067_p2): edition pair に "COMPLETE GUIDE" 追加。#067候補中 official に "COMPLETE GUIDE" を持つのは _p2(2nd ANNIVERSARY COMPLETE GUIDE 収録特典)のみ=一意。両側一致必須=誤発火不能。
+- 決定3(Pikachu V S8a-G-005): GOLDEN BOX→S8a-G(25周年ゴールデンボックス専用15枚)を pokemon set名逆引きに追加。plain S8a-005=Lugia と衝突するため必須振り分け。S8a-G prefix は golden box 専用=over-fire不能。ただし PSA が GOLDEN BOX を subject 側に置く cert では brand単独参照の本pathは no-op(fail-closed・raw cert要確認)。
+- 決定4(Chopper EB01-006 / Pudding ST07-008): promo変種が _P/_P_P/_P_treasure・_P/_P_D/_p1/_p3 と複数あり brand で一意化不能 → reject維持が正(誤variant出品回避)。
+
+### 変更
+- 変更: integrations/psa_to_csv.py — _search_one_piece_promo_by_number の edition pair に ("COMPLETE GUIDE","COMPLETE GUIDE") 追加 / _POKEMON_SET_NAME_TO_CODE に "GOLDEN BOX":"S8a-G"(25TH ANNIVERSARY COLLECTION より前)追加
+- 変更: tests/test_psa_review_promo_resolve.py 新規(7件)。全288 green(pre-commit 231 green)
+- 変更: requests/ に preflight REVIEW 処理報告
+- commit: 9f51130 (feature/uniqlo-ut)
+
+### 検証(実 resolve 実出力)
+- 検証✅(Zoro): _search_one_piece_promo_by_number('067','ZORO JUUROU',brand=...COMPLETE GUIDE)→OP05-067_p2 / brand に COMPLETE GUIDE 無→None(over-fire無)
+- 検証✅(Pikachu V): extract(...GOLDEN BOX)→S8a-G / lookup_pokemon(#005)→S8a-G-005 'Pikachu V'。plain 25TH ANNIVERSARY COLLECTION #005→S8a-005 'Lugia'(回帰維持)
+- 検証✅(reject維持): Chopper LET'S START→None / Charlotte Pudding→None
+- 検証⚠️(残): 真の未収録 fetch ~6(Shining Magikarp#010/ASIA promo/UTA#001/DON×3/CP8)は別工数。Pikachu V Golden Box は PSA brand に GOLDEN BOX が乗っている前提=HQ の raw cert 142931332 で要最終確認(subject側なら no-op)。
