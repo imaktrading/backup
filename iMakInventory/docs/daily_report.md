@@ -1,5 +1,24 @@
 # iMakInventory daily_report
 
+## 2026-06-11 (続々々々) — snkrdunk「uncertain N/M candidates」誤アラート → 接続リトライ
+
+### 決定 → 変更 → 検証
+- **決定 (+ 自己反省)**: 21:30 cycle で snkrdunk row595「uncertain: 1/6 candidates errored」。
+  当初「様子見」と誤って軽視 → ユーザー指摘「仕入元売切 + eBay 出品中やぞ」。 調査で判明:
+  - 主URL(45481844) は 404 売切だが、 **補#4(45635003) が在庫あり (¥35,000 PSA10 レベッカ)**。
+    multi-sourcing で在庫あり = 取下げ不要が正解 (= 漏れではなかった)。
+  - cycle で uncertain になったのは、 **その在庫あり補#4 が transient 接続例外で None** に
+    なり「在庫あるのに見えず uncertain」 になったため。 = fril と同型の transient。
+  - snkrdunk が None を返すのは `requests.get` 例外時のみ ([snkrdunk_scraper.py:84])、
+    = 接続瞬断/rate-limit。 cycle 中は多数行×最大6候補で大量 fetch するため発生。
+- **変更**: `scrapers/snkrdunk_scraper.py:fetch_product_inventory` に http_status=None
+  (=接続例外) 時のリトライ (2/4/6s 間隔、 max_retries=3) を追加。 404/sold/in_stock の
+  確定結果は即採用 (retry しない)。 fril と同型。
+- **検証**: `test_snkrdunk_retry.py` 3件 (transient回復 / 全滅None / 404即確定)。 offline 143 pass。
+- **教訓**: 「uncertain」 を様子見にするのは取下げ軸では fail-OPEN 寄り。 transient 候補エラーは
+  retry で潰すのが正。 在庫ある補欠が transient で落ちると「在庫あるのに uncertain」 になり、
+  逆に「売切なのに見落とし」 とも誤認させる両刃。 → retry で根治。
+
 ## 2026-06-11 (続々々) — fril「scraper returned None」反復 → no_signal リトライ
 
 ### 決定 → 変更 → 検証

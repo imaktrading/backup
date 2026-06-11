@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -128,6 +129,7 @@ def _fetch_via_requests(url: str) -> dict:
 def fetch_product_inventory(
     url: str,
     use_selenium_fallback: bool = False,   # 互換: 未使用 (snkrdunk は HTTP-only)
+    max_retries: int = 3,
 ) -> Optional[dict]:
     """スニダン 商品 URL → uniqlo/fril scraper と契約互換の dict.
 
@@ -139,9 +141,20 @@ def fetch_product_inventory(
     } or None on fetch failure.
     """
     pid = parse_product_id(url) or ""
+    # 接続例外リトライ (2026-06-11): cycle 中は snkrdunk を大量に叩くため (多数行 × 各最大6候補)、
+    # rate-limit/接続瞬断で requests.get が例外→http_status=None→None を返し、 monitor 側で
+    # 「uncertain: N/M candidates errored」 の誤アラートになる (= fril と同型、 在庫ある補欠候補が
+    # transient で落ちると「在庫あるのに uncertain」 になり履行不能の見落とし誤認を招く)。
+    # http_status=None (= 接続例外) のときのみ間隔 (2/4/6s) を空けて再取得する。 404/sold/in_stock
+    # の確定結果 (http_status が立つ) は即採用 (= retry しない)。
     raw = _fetch_via_requests(url)
+    for attempt in range(max_retries):
+        if raw["http_status"] is not None:
+            break
+        time.sleep(2 * (attempt + 1))  # 2,4,6s: rate-limit 回避間隔
+        raw = _fetch_via_requests(url)
     if raw["http_status"] is None:
-        return None  # 通信失敗
+        return None  # 通信失敗 (retry 全滅)
 
     reason = raw.get("_reason", "")
     in_stock = bool(raw.get("in_stock", False))
