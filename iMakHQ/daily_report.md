@@ -816,3 +816,34 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅(HIGH7): R-008/010/013/018=Resource・EXBP-006=EX Base・SM-P-001=Snorlax-GX 既存確認 / SM12a-224収録+resolve(TAG ALL STARS,224)→SM12a-224
 - 検証⚠️(据置): pokemon長tail約8,600(旧-B期/deck-promo sub-code 61codes=brand実物待ち) / energy cardID 1,560(低優先)。出品ブロッカーなし
 - 検証⚠️(SM12a-224): UR固有画像は公式card id未特定で空欄(fail-closed、RR画像誤流用回避)
+
+---
+
+## 2026-06-11 (続) — Catalog: G-shock dedupe(B案) + pre-flight + Amazon方針 + PSA索引fix
+
+### 決定事項
+- 決定1(G-shock hybrid): 公式Akamai block頭打ち→非公式(shockbase/g-central/casiofanmag)hybridを拡充の主経路として正式容認(ユーザー「併用」)。breadthは1,553で停止=A案(人気埋め残しのみ)。ShockBaseが最網羅(721/887件・43年・CMD requests=軽量)
+- 決定2(dedupe B案): bare↔suffix同実物重複を「削除」→「別名紐づけ(alias_of)」に切替(HQ+ユーザー)。削除版(a838428)をsupersede。canonical=suffix形/bare=alias/243件alias化(復元+リンク)。round-1誤削除GBX-100-2復元
+- 決定3(resolver): lookup_gshock を alias対応fail-closed化。bare(1:1 alias)→canonical解決(recall維持)/真1:N(GW-9400J-1B)→""/海外suffixは除外せず照合。AJF/AJR=色A+JF(地域でない)の罠回避
+- 決定4(並行輸入): spec§2「海外SKU除外」緩和(HQ+ユーザー)。並行輸入=出品対象→catalog化可(source=amazon_jp_parallel)。Amazon US merchant出品(B000FPVUJA)は国内仕入不可でreject
+- 決定5(Amazon field): catalog=静的マスター。動的データ(価格/在庫数/販売数)は入れずsourcing層へ。catalogはidentity/在庫flag/画像/新規のみ
+- 決定6(PSA索引): GAP37の大半は真の未収録でなくresolver索引不備。3 fixで~30 fetch0解消。auto_add11→9投入不要
+
+### 変更
+- 変更: integrations/gshock_lookup.py — alias対応lookup(_resolve_alias) + 型番内スペース正規化。api.py — alias_of露出。db/schema.sql — alias_of列
+- 変更: integrations/psa_to_csv.py — lookup_pokemon: _set_code_lookup_variants(0↔O) + card_number 3桁0埋め。lookup_dragonball: 早期full-pidチェック ^[A-Z]{1,3}\d*-\w 拡張 + 二重接頭辞ガード(Energy Marker)
+- 変更: integrations/gshock_preflight.py 新規(HIT/MISSING/AMBIGUOUS 3分類)
+- 変更(共有DB・git外): gshock dedupe round2(104)→alias復元243 / dragonball エナジーマーカー257件 name_en='Energy Marker'投入。bak: baredupe/round2/aliasB/energymarker_nameen
+- 変更: tests/ — gshock_lookup_failclosed(alias) / pokemon_set_code_0o / dragonball_energy_marker_resolve 追加
+- commit: a838428/10d0d86/fe2f335/be40ff2/5ec6122/e1104ba/52b4da6 (feature/uniqlo-ut)
+
+### 検証(実 resolve/lookup 実出力)
+- 検証✅(dedupe B): gshock 1553(alias243含む)、正J-whitelistで bare↔suffix重複=0、dangling alias=0。lookup('GM-700G-9A')→GM-700G-9AJF(alias解決)/('GW-9400J-1B')→None(1:N)
+- 検証✅(pre-flight): HQ dump 349件→HIT320(91.7%)/MISSING29/AMBIGUOUS0。MISSING内訳=国内17+海外SKU11(投入対象)+不完全1
+- 検証✅(0/O): lookup_pokemon('SV0M-EX...','020')→SVOM-020。S8a等は回帰なし
+- 検証✅(Energy Marker): ('ENERGY MARKER','E01-02',ALT ART)→E01-02_p1 / 'E-04'→E-04 / 'E-73'→E-73 / 'FP-024'→FP-024。別キャラsubject→reject
+- 検証✅(0埋め): Charizard('SMP2','7')→SMP2-007
+- 検証✅(triage): auto_add11→9投入不要(既収録/索引fix済)。真の未収録2(ASIA25th#005/Shining Magikarp#010)
+- 検証⚠️(残・次セッション): promo resolver REVIEW4件(S8a-G-005/OP05-067/EB01-006/ST07-008=カード実在・fetch不要・推奨次着手) + 真の未収録fetch~6(Shining Magikarp/ASIA promo/UTA#001/DON×3/CP8)。SM3p-010は別カード(ひかるゲノセクト)
+- 検証⚠️(Amazon merge): session5(variant補完)完了後に1回merge予定(ロジック新規実装要)。29 gapはAmazon独立にShockBase backfill必要(Amazon待ちで埋まらない)
+- 全231 green(pre-commit)
