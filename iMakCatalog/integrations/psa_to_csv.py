@@ -1101,15 +1101,18 @@ def lookup_dragonball(
     """Dragon Ball SCG カードを iMakCatalog DB から ID 完全一致で lookup."""
     if not card_number:
         return None
-    # card_number が既に set_code prefix を含む場合 (e.g. 'FS02-04', 'FB02-001') は
-    # それ自体が完全 product_id. PSA の CardNumber 欄に "FS02-04" 等の full pid が
-    # 入っているケース (BANDAI CARD GAMES FEST23-24 promo 等).
-    if re.match(r"^(FB|FS|SB|FP)\d+-", card_number, re.IGNORECASE):
-        record = api.lookup(DRAGONBALL_CATEGORY, card_number)
-        if record and _record_name_matches_subject(record, subject):
-            if verbose:
-                print(f"    🎯 iMakCatalog (DBSCG) hit (full pid in card_number): {card_number}")
-            return _to_legacy_dict_dragonball(record)
+    # card_number が既に set-prefix 込みの full product_id 形 (e.g. 'FS02-04' / 'FB02-001' /
+    # 'E01-02'=Energy Marker / 'E-04' / 'FP-024') の場合、それ自体で exact lookup を試す.
+    # alt-art 等は _p1 variant を優先 (E01-02 ALTERNATE ART → E01-02_p1).
+    if re.match(r"^[A-Z]{1,3}\d*-\w", card_number, re.IGNORECASE):
+        full_candidates = [f"{card_number}_{suf}" for suf in _variant_candidates(subject)]
+        full_candidates.append(card_number)   # base は最後 (variant 優先)
+        for pid in full_candidates:
+            record = api.lookup(DRAGONBALL_CATEGORY, pid)
+            if record and _record_name_matches_subject(record, subject):
+                if verbose:
+                    print(f"    🎯 iMakCatalog (DBSCG) hit (full pid in card_number): {pid}")
+                return _to_legacy_dict_dragonball(record)
         # fall through to normal logic for further attempts
 
     set_code = extract_set_code_from_brand_dragonball(brand)
@@ -1118,7 +1121,13 @@ def lookup_dragonball(
             print(f"    ⚠️ DBSCG set_code 抽出失敗: brand={brand!r}")
         return None
 
-    base_pid = f"{set_code}-{card_number}"
+    # card_number が既に set_code prefix を含む場合の二重接頭辞回避.
+    #   例: set_code='E01', card_number='E01-02' → base_pid='E01-E01-02' (誤) を防ぐ.
+    #   PSA CardNumber 欄に "E01-02"/"E-04" 等の full pid 形が入る Energy Marker 系。
+    if card_number.upper().startswith(set_code.upper() + "-"):
+        base_pid = card_number
+    else:
+        base_pid = f"{set_code}-{card_number}"
 
     record = api.lookup(DRAGONBALL_CATEGORY, base_pid)
     if record and not _record_name_matches_subject(record, subject):
