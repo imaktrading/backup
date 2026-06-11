@@ -1,10 +1,11 @@
-"""G-shock lookup_gshock fail-closed 規約 test (2026-06-11 dedupe 後).
+"""G-shock lookup_gshock alias 対応規約 test (2026-06-11 dedupe B案).
 
-依頼: requests/2026-06-11_gshock_bare_dedupe_round2_HQ_verdict.md (HQ 承認ルール).
-保証する fail-closed 規約:
+依頼: requests/2026-06-11_gshock_dedupe_switch_to_alias_link_B.md (HQ B案承認).
+保証する alias 規約 (recall 重視・「曖昧な時だけ ''」):
   - suffix 形入力 → suffix canonical に exact 解決
-  - bare 形 + suffix twin 在り → "" (None) 返却 (1:N 曖昧、推測しない)
-  - bare 形 + suffix twin 無し → bare-only canonical → 解決
+  - bare 形 + alias_of 在り (1:1) → canonical に解決 ("" にしない = recall 維持)
+  - bare 形 + 独立 canonical (alias_of NULL・twin 無し) → その bare を解決
+  - bare 形 + 真の 1:N (alias_of NULL・twin 複数) → "" (None) 返却 (推測しない)
   - 末尾 A は色コード (AJF=色A+JF)。GBX-100-2(色2) を GBX-100-2AJF(色2A) の twin と
     誤判定しないこと (= round-1 誤削除事故の再発防止).
 """
@@ -57,24 +58,31 @@ class TestNormalizeForms(unittest.TestCase):
         self.assertTrue(all(f.endswith("JF") for f in forms))
 
 
-class TestLookupFailClosed(unittest.TestCase):
-    """実 catalog DB に対する fail-closed 挙動 (dedupe 後の実データ前提)."""
+class TestLookupAlias(unittest.TestCase):
+    """実 catalog DB に対する alias 対応挙動 (dedupe B案・実データ前提)."""
 
     def test_suffix_canonical_hit(self):
-        # bare が dedupe 削除済の suffix canonical → exact 解決
-        rec = lookup_gshock("DW-6900RCS-1JF")
+        # suffix canonical → exact 解決
+        rec = lookup_gshock("GM-700G-9AJF")
         self.assertIsNotNone(rec)
-        self.assertEqual(rec["product_id"], "DW-6900RCS-1JF")
+        self.assertEqual(rec["product_id"], "GM-700G-9AJF")
+        self.assertIsNone(rec.get("alias_of"))  # canonical 自身
 
-    def test_suffix_input_lowercase_hit(self):
-        rec = lookup_gshock("dw-6900rcs-1jf")
+    def test_bare_1to1_alias_resolves_to_canonical(self):
+        # ★B案の核心: bare(1:1 alias) は canonical へ解決 ("" にしない = recall 維持)
+        rec = lookup_gshock("GM-700G-9A")
         self.assertIsNotNone(rec)
-        self.assertEqual(rec["product_id"], "DW-6900RCS-1JF")
+        self.assertEqual(rec["product_id"], "GM-700G-9AJF")  # alias_of 先
 
-    def test_bare_with_twin_returns_none(self):
-        # bare 'DW-6900RCS-1' は suffix twin (DW-6900RCS-1JF) 在り → 1:N 曖昧 → None
-        self.assertTrue(_has_region_twin("DW-6900RCS-1"))
-        self.assertIsNone(lookup_gshock("DW-6900RCS-1"))
+    def test_bare_alias_lowercase_resolves(self):
+        rec = lookup_gshock("gm-700g-9a")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["product_id"], "GM-700G-9AJF")
+
+    def test_true_1toN_returns_none(self):
+        # bare 'GW-9400J-1B' は JF/JR 両 canonical = 真の 1:N・alias 一意化不可 → None
+        self.assertTrue(_has_region_twin("GW-9400J-1B"))
+        self.assertIsNone(lookup_gshock("GW-9400J-1B"))
 
     def test_bare_only_canonical_hit(self):
         # suffix twin 無しの bare-only canonical → 解決 (73% を壊さない)
@@ -83,14 +91,21 @@ class TestLookupFailClosed(unittest.TestCase):
         self.assertIsNotNone(rec)
         self.assertEqual(rec["product_id"], "G-7900A-4")
 
-    def test_gbx_100_2_restored_color2_not_twin_of_2AJF(self):
+    def test_gbx_100_2_independent_color2(self):
         # ★round-1 誤削除事故の再発防止:
-        # GBX-100-2(色2) は GBX-100-2AJF(色2A) の twin ではない (末尾A=色).
-        # よって bare 入力 GBX-100-2 は解決でき、None にならないこと.
+        # GBX-100-2(色2) は GBX-100-2AJF(色2A) の twin ではない (末尾A=色) →
+        # 独立 canonical として自身に解決 (alias 化しない).
         self.assertFalse(_has_region_twin("GBX-100-2"))
         rec = lookup_gshock("GBX-100-2")
         self.assertIsNotNone(rec)
         self.assertEqual(rec["product_id"], "GBX-100-2")
+        self.assertIsNone(rec.get("alias_of"))
+
+    def test_gbx_100_2A_alias_of_2AJF(self):
+        # GBX-100-2A(色2A) は GBX-100-2AJF の alias → canonical へ解決
+        rec = lookup_gshock("GBX-100-2A")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["product_id"], "GBX-100-2AJF")
 
     def test_gbx_100_2AJF_suffix_hit(self):
         rec = lookup_gshock("GBX-100-2AJF")

@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS products (
     source_url        TEXT,             -- 取得元 URL
     created_at        TEXT NOT NULL,    -- ISO 8601 (例: '2026-04-26T13:14:00')
     updated_at        TEXT NOT NULL,    -- ISO 8601
+    alias_of          TEXT,             -- 別名(短縮形)が指す canonical の product_id (gshock dedupe B案 / 2026-06-11)
+                                        -- NULL = canonical 自身 or 独立商品
+                                        -- 非NULL = この行は alias、本体は (category, alias_of) 行
+                                        -- ※ 後発追加列 (実DBは migrations/2026-06-11_gshock_dedupe_alias_link_B.py)
     UNIQUE(category, product_id)
 );
 

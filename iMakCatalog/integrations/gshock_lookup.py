@@ -5,16 +5,20 @@
   - PSA/eBay/CASIO 等で表記が揺れる (大文字小文字、ハイフン位置) ため正規化はする
   - 暗黙のフォールバック禁止 (id_strict_with_explicit_rescue.md 準拠)
 
-2026-06-11 dedupe 後の canonical 規約 (bare_dedupe_round2_HQ_verdict):
+2026-06-11 dedupe 後の canonical 規約 (dedupe_switch_to_alias_link_B = B案):
   - 同一物理商品は **suffix 込み完全形 (例 GM-6900YRA-8JF)** を canonical とする
-  - bare 形 (例 GM-6900YRA-8) は dedupe で削除済 (= suffix twin がある bare は存在しない)
-  - ただし catalog の 1,034 件 (73%) は **bare-only canonical** (suffix twin が無い唯一形)
+  - bare 形 (例 GM-6900YRA-8) は **削除せず alias として残す** (alias_of 列が canonical を指す)
+  - catalog の 1,034 件 (73%) は **bare-only canonical** (suffix twin が無い唯一形)
 
-  → fail-closed lookup ルール (HQ 2026-06-11 承認):
-    * suffix 形入力           → suffix canonical に exact 解決 (無ければ bare-only に限り fallback)
-    * bare 形入力 + suffix twin 在り → "" 返却 (1:N 曖昧、推測しない)
-    * bare 形入力 + suffix twin 無し → その bare が唯一 canonical → 解決
-    * 海外 suffix (E/V/ER 等)  → canonical 化しない (現状維持、剥がさない)
+  → alias 対応 lookup ルール (HQ 2026-06-11 B案承認、recall 重視):
+    * suffix 形入力               → suffix canonical に exact 解決 (無ければ bare-only に限り fallback)
+    * bare 形入力 + alias_of 在り (1:1) → canonical に解決 ("" にしない = recall 維持)
+    * bare 形入力 + 独立 canonical (alias_of NULL・twin 無し) → その bare を解決
+    * bare 形入力 + 真の 1:N (alias_of NULL・twin 複数) → "" 返却 (推測しない、例 GW-9400J-1B)
+    * 海外 suffix (E/V/ER 等)      → canonical 化しない (現状維持、剥がさない)
+
+  「一意に紐づく時は解決、本当に曖昧な時だけ ''」。先の削除版 verdict の
+  「bare+twin→全部 ''」より recall が良い (1:1 alias は解決できる)。
 
   末尾 A は **色コード** であって地域コードではない (AJF = 色A + JF)。
   地域 (region) suffix は **J 始まりのみ**: JF / JR / JFS / JRS / SPCBOX / PFCT / JTC.
@@ -22,7 +26,8 @@
 使用例:
     from iMakCatalog.integrations.gshock_lookup import lookup_gshock
     rec = lookup_gshock("GA-2100-1A1JF")  # suffix 形 → canonical exact
-    rec = lookup_gshock("DW-5600E-1")     # bare-only → 解決 / twin 在れば None
+    rec = lookup_gshock("GM-700G-9A")     # bare(1:1 alias) → canonical 解決
+    rec = lookup_gshock("GW-9400J-1B")    # bare(真の1:N) → None
 """
 from __future__ import annotations
 
@@ -49,18 +54,22 @@ REGION_SUFFIXES = ("JFS", "JRS", "SPCBOX", "PFCT", "JTC", "JF", "JR")
 # 公開 API
 # ============================================================================
 def lookup_gshock(model: str) -> Optional[dict]:
-    """G-SHOCK 型番 lookup (fail-closed, ID 完全一致のみ).
+    """G-SHOCK 型番 lookup (alias 対応 / ID 完全一致のみ).
 
     Args:
         model: PSA/eBay/CASIO URL/ユーザー入力など表記が揺れた型番.
 
     Returns:
-        api.lookup 互換 dict | None  (曖昧な bare 入力は None = 推測しない)
+        api.lookup 互換 dict | None
+        - bare(1:1 alias) は canonical へ解決して返す
+        - 真の 1:N 曖昧 bare は None (推測しない)
     """
     if not model:
         return None
 
     forms = _normalize_forms(model)          # 大文字化 + ハイフン補正 (剥がしはしない)
+    if not forms:
+        return None
     base, region = _split_region(forms[0])   # 正規化済の代表形で判定
 
     if region:
@@ -68,24 +77,40 @@ def lookup_gshock(model: str) -> Optional[dict]:
         for f in forms:
             rec = api.lookup(CATEGORY, f)
             if rec:
-                return rec
+                return _resolve_alias(rec)
         # suffix canonical が無い場合、bare が「唯一形 (twin 無し)」の時だけ fallback.
         # = bare-only canonical を suffix 形で引かれても拾う後方互換。
         if not _has_region_twin(base):
             rec = api.lookup(CATEGORY, base)
             if rec:
-                return rec
+                return _resolve_alias(rec)
         return None
 
     # --- bare 形入力 ---
     for f in forms:
-        if _has_region_twin(f):
-            # suffix twin が在る bare = 1:N 曖昧 → 推測せず None (fail-closed)
-            return None
         rec = api.lookup(CATEGORY, f)
-        if rec:
-            return rec
+        if not rec:
+            continue
+        if rec.get("alias_of"):
+            # 1:1 alias → canonical に解決 (recall 維持)
+            return _resolve_alias(rec)
+        # alias_of NULL = 独立 canonical or 真の 1:N
+        if _has_region_twin(f):
+            # 別名一意化不可な 1:N (例 GW-9400J-1B = JF/JR 両 canonical) → 推測せず None
+            return None
+        return rec   # 独立 canonical (例 GBX-100-2, bare-only)
     return None
+
+
+def _resolve_alias(rec: Optional[dict]) -> Optional[dict]:
+    """alias 行なら canonical 行を返す. canonical 自身ならそのまま.
+
+    canonical が万一欠落していれば alias 行をそのまま返す (取りこぼし回避).
+    """
+    if rec and rec.get("alias_of"):
+        canon = api.lookup(CATEGORY, rec["alias_of"])
+        return canon or rec
+    return rec
 
 
 # ============================================================================

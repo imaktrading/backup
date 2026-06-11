@@ -438,6 +438,9 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "updated_at": g("updated_at"),
         # variants: variant_meta.get_variant_meta() で利用、 旧 DB 互換で None
         "variants": json.loads(g("variants")) if g("variants") else None,
+        # alias_of: 別名(短縮形)が指す canonical product_id (gshock dedupe B案 / 2026-06-11)
+        #           NULL = canonical 自身 or 独立商品。旧 DB 互換で None。
+        "alias_of": g("alias_of"),
     }
 
 
