@@ -785,3 +785,34 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 ### 検証
 - 検証✅: lookup('SV-P-291')→ピカチュウ/Pikachu/Promo。resolve(cert 'SV-P PROMO'+'PIKACHU GYM EVENT CAMPAIGN'+291)→SV-P-291 end-to-end
 - 検証✅: 公式裏取り(GameStop PSA 291 Pikachu Gym Event Campaign / 公式campaign news 2025/10配布)
+
+## 2026-06-11 — Catalog: PSA索引 大規模整備（4ゲーム完走 + 脱落fix + HIGH orphan）
+
+### 決定事項
+- 決定1(PSA脱落6件): brand→set_code 索引追加で5件解決(records実在)。ULTRA SHINY GX→SM8b/SKY LEGEND→SM10b(依頼のSM7a推測は誤・DB値SM10b正)/START DECK 100→SI。真因=「S PROMO」がgeneric PROMO→Pに落ちP-288誤引き→S PROMO→S-P追加でS-P-288/265 hit。M-P-020(McDonald's Pikachu)のみ新規収録、公式card/48258=ハッピーセット**2025**(依頼の2021-22は誤・HQの"2025"が正)。コメント前提「M-P-020=ウエートレス」も誤(Waitress=MC-700)
+- 決定2(Gap-B promo逆順): 逆順product_id `NNN/SM-P`(407)/`NNN/M-P`(81)→正順`XX-P-NNN`に統一(HQ承認)。「promo未収録」の正体=誤キー。resolver `SM PROMO→SM-P`(旧SMP廃止)。489件reachable化
+- 決定3(遊戯王): 「resolver不在」はHQ誤認、真因=配線bug。resolve()がcard_idのみ読みlookup_yugioh はproduct_id返すため''落ち。docstring契約通り`card_id or product_id`両対応に修正。0%→94.5%
+- 決定4(Gap-A): set_name裏取りのunique名のみkeyword追加(誤マッチ非対称安全=最悪no-op)。High-Class Deck(SGG/SGI)+SM期拡張9件。paired/旧-B/PSA literal未確認は据置(recall-sacrifice許容)
+- 決定5(XY収束): outlier(XY-P-NNN5+逆順9)を稼働XYP-NNN(277)へ収束、14重複削除、resolver変更不要
+- 決定6(rarity空): M2a-127 Rayquaza=R補填(PSA"reverse holo"=基底弾+カードラッシュ"R仕様"の三角検証)。元SKU m99298510053はstaleでクローズ
+- 決定7(SV-P-196衝突): 衝突でなくingest番号誤記(HQ公式裏取り)。`196/SV-P`(Kariya版)→`SV-P-198`再キー。SV-P-196(Susumu Maeya)は維持
+- 決定8(HIGH orphan 7件): 6件は既存(正式キー不一致のみ)=GDRES-NNN→R-NNN(Resource)/GDBETA-006→EXBP-006(EX Base)/SM-P-001(Wave2で既収録)。実収録はSM12a-224(Lucario&Melmetal GX UR)1件のみ
+
+### 変更
+- 変更: integrations/psa_to_csv.py — _POKEMON_SET_NAME_TO_CODE(ULTRA SHINY GX/SKY LEGEND/START DECK 100/SGG/SGI/SM期拡張9件) + psa_promo_to_catalog(SV PROMO→SV-P, S PROMO→S-P, SM PROMO→SMP→SM-P) + _POKEMON_PROMO_SET_CODES(SMP→SM-P)
+- 変更: resolver.py — TCG/DON dispatch を `card_id or product_id` 両対応(yugioh resolve回復)
+- 変更(共有DB・git外): SM-P/M-P逆順488 rename+020/M-P重複削除 / XY outlier14削除 / M-P-020・SM12a-224収録 / M2a-127 rarity補填 / 196/SV-P→SV-P-198再キー
+- 変更: tests/ — test_psa_dropped_6_setmap_promo.py新規 / test_pokemon_swsh_setmap.py(HighClassDeck) 追加。全252 green
+- 変更: backup+対応表 — migrations/{gapB_promo_reorder,xy_promo_converge,svp198_rekey}_20260611.json + products.sqlite.bak_20260611_{gapB,xy,svp198}
+- commit: 0ae7531/989f618/9a45ce1/6a3d794/1d9dd5d (feature/uniqlo-ut, push済)
+
+### 検証(実 resolve/lookup 実出力)
+- 検証✅(脱落6): cert109940063→SM10b-053/74118843→SM8b-214/139561995→SI-127/131214875→S-P-288/126900241→S-P-265/127272109→M-P-020 全hit
+- 検証✅(Gap-B): lookup('SM PROMO','001')→SM-P-001(Snorlax-GX) / ('M-P PROMO','001')→M-P-001。reachable SM-P407+M-P82=489
+- 検証✅(遊戯王): synthetic n=201で hit94.5%/fail-closed4.0%/誤マッチ0%(50,098件)
+- 検証✅(4ゲーム実測・全誤マッチ0%): yugioh94.5%/one_piece94%/dragonball95%/gundam89%。OP/DB/Gundamは元々clean(HQ正)
+- 検証✅(Gap-A9件): SHINING LEGENDS→SM3p-001等9件 全実在レコードhit・回帰なし(約565cards)
+- 検証✅(SV-P-198): resolve(Eevee,198)→SV-P-198 / (Eevee,196)→SV-P-196 別キー分離
+- 検証✅(HIGH7): R-008/010/013/018=Resource・EXBP-006=EX Base・SM-P-001=Snorlax-GX 既存確認 / SM12a-224収録+resolve(TAG ALL STARS,224)→SM12a-224
+- 検証⚠️(据置): pokemon長tail約8,600(旧-B期/deck-promo sub-code 61codes=brand実物待ち) / energy cardID 1,560(低優先)。出品ブロッカーなし
+- 検証⚠️(SM12a-224): UR固有画像は公式card id未特定で空欄(fail-closed、RR画像誤流用回避)
