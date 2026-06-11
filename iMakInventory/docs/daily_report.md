@@ -1,5 +1,46 @@
 # iMakInventory daily_report
 
+## 2026-06-11 (続々) — DNS瞬断起点の取下げ漏れ事故 → 多層防御4本 + 公式横断確認
+
+### 事故の経緯
+09:30 both cycle で api.ebay.com への **DNS 瞬断 (getaddrinfo failed)** が発生。
+取下げ4件中1件 (G-SHOCK DW-6900 / itemID 356901158380 / LOW row214 / D=○売切) が
+送信失敗 → pending に 6-10 16:46 から **約19h silent 滞留**。 ユーザー手動UPで qty=0 化・解消。
+深掘りで以下の fail-OPEN を芋づる発見。
+
+### 決定 → 変更 → 検証 (4本)
+- **① 決定**: API client が network 瞬断で即諦め (DNS失敗は全uploadの~12%=105中13で発生)。
+  - **変更**: `ebay_actions/trading_api_client.py:_call_trading` に指数backoff(1/2/4/8s)
+    リトライ追加 (max_net_retries=4)。 commit **440c66a**。
+  - **検証**: モックで2回瞬断→3回目成功 / 全滅→False+明示。 offline 134 pass。
+- **② 決定**: `run_reverse_audit` に空map fail-closed ガード無し → eBay取得失敗時に
+  偽「✅乖離0件」を継続証跡に積む fail-OPEN (sibling にはあった)。
+  - **変更**: `reverse_audit.py` 空map→`mismatch_count=-1/error` で返し email の
+    「❌突合不能・嘘の安心排除・即時」path に乗せる。 commit **e835e9a**。
+  - **検証**: 空map注入→-1/error 確認。 ※調査で判明: 実 reconciliation fetch
+    (iMakeBayAPI download) は元々堅牢(_post_with_retry+raise+HasMoreItems)で、 先の
+    「✅0件は偽」断定は過剰だった = 多層防御として有効だが今回の主因ではない。
+- **③ 決定**: network失敗(qty不明)の取下げ失敗は action_required(verify_qty>0判明分のみ)
+  を素通り → pending に silent 滞留 (= 356901158380 が19h無通知の真因)。
+  - **変更**: `revise_csv_generator.get_stuck_pending_items()` (8h超pending検出) +
+    run_cycle で検知 + email「★取下げ滞留 要対応」別掲。 commit **083326d**。
+  - **検証**: offline test 3件 (境界/parse不能/空) + email レンダリング確認。
+- **④ 決定**: メール冒頭「✅全件取下げ完了」と本文「失敗・全断・全BAN risk」が矛盾
+  (header が upload_ng/滞留を無視 + 本文が success=False で無条件全断表記)。
+  - **変更**: `email_notifier.py` header に upload_ng/stuck算入(→⚠️)、 本文を
+    全断/部分失敗/action-needed で出し分け。 commit **fee3af4**。
+  - **検証**: 実09:30=「⚠️要対応(送信失敗1)」+「部分失敗3/4・監視」一致 / 全断=「即時」。
+
+### 公式監視くん 横断確認 (ユーザー指摘「公式も同様に修正できたの？」)
+公式 (iMakeBayAPI/inventory_monitor) は **追加修正不要**。実機確認の根拠:
+- ① retry: 公式取下げは iMakInventory の `trading_api_client` を流用(auto_qty_zero.py:188)
+  → retry を自動共有。
+- ② 監査: 公式の eBay取得は失敗時 raise(`_post_with_retry`+Ack chk) = 設計上 fail-closed。
+- ③ 滞留: 公式は pending queue でなく毎cycle「対処要+未対処済」をシート再導出 → 失敗は
+  次cycleで再surface + ng毎回計上 = silent 化しない。
+- ④ メール: run_daily は元々 `total_ng>0→⚠️`(164-177行) = 矛盾なし。 件名も整合済み。
+→ 今回の穴は HIGH/LOW 固有 (pending queue方式 + reverse_audit 空ガード欠落)。
+
 ## 2026-06-11 (続) — エラー重複の原因究明 + 構文 smoke テスト(A) + driver 堅牢化(B)
 
 ### 決定
