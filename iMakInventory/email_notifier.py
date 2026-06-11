@@ -572,6 +572,25 @@ def _format_body_inner(cycle_log: Dict[str, Any]) -> str:
             lines.append(f"  対応期限: **24 時間以内** (= 翌日 09:30 cycle 前に乖離 -1 件以上の進捗)")
         lines.append("")
 
+    # 滞留 pending (2026-06-11): 複数 cycle 取下げ失敗継続 = silent 漏れ継続疑い。
+    # network 失敗 (qty 不明) で in-cycle verify を素通りした item の最後の砦。
+    stuck = phases.get("pending_stuck", []) or []
+    if stuck:
+        lines.append("【★取下げ滞留 要対応】 (8h 以上 pending = 複数 cycle 取下げ失敗継続)")
+        lines.append(f"  滞留 {len(stuck)} 件 ← 在庫切れなのに eBay 取下げ未完 = 履行不能 risk 継続")
+        for s in stuck[:10]:
+            lines.append(f"  - {s.get('sheet','?')} row{s.get('row_index','?')} "
+                         f"iid={s.get('item_id','?')} {s.get('age_hours','?')}h滞留 "
+                         f"sup={s.get('supplier','?')}")
+            lines.append(f"      url: {(s.get('url') or '')[:90]}")
+        if len(stuck) > 10:
+            lines.append(f"  ... 他 {len(stuck) - 10} 件 (全件: decision_log/pending_revise.jsonl)")
+        lines.append("  対応手順: 1. eBay で該当 itemID の qty を目視 (= 既に0なら次 drain で消える)")
+        lines.append("           2. qty>0 残存なら手動取下げ (FileExchange Revise qty=0 / Seller Hub)")
+        lines.append("           3. 繰返すなら network/DNS or 該当 listing 個別問題を調査")
+        lines.append("  対応期限: **即時** (= 在庫切れ品が eBay live = 売れたら履行不能 → Defect/BAN)")
+        lines.append("")
+
     # 補助情報 (折りたたみ的扱い)
     aux = []
     pp = phases.get("pytest_precheck", {}) or {}

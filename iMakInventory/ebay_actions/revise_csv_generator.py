@@ -193,6 +193,34 @@ def read_pending_queue() -> list:
     return entries
 
 
+# 滞留 pending 検知 (2026-06-11): 取下げが複数 cycle 失敗し続ける item を炙り出す。
+# network 失敗 (qty 不明) の item は in-cycle verify (qty>0 判明分) を素通りして pending
+# に残るため、 「queued から N 時間以上経過 = 取下げ漏れ継続疑い」 を即時エスカレーション。
+# (2026-06-11 G-SHOCK 356901158380 が約19h pending 滞留・無通知だった事故が制定契機)。
+STUCK_PENDING_THRESHOLD_HOURS = 8.0  # HIGH cycle 4h × 2 回分。 これ超で滞留扱い
+
+
+def get_stuck_pending_items(threshold_hours: float = STUCK_PENDING_THRESHOLD_HOURS,
+                            now: Optional[datetime] = None) -> list:
+    """pending queue のうち queued から threshold_hours 以上経過した item を返す.
+
+    取下げが複数 cycle 失敗し続けている (= 漏れ継続疑い) item。 古い順。
+    Returns: [{..entry.., "age_hours": float}, ...]
+    """
+    now = now or datetime.now()
+    out = []
+    for e in read_pending_queue():
+        try:
+            queued = datetime.fromisoformat(e.get("ts") or "")
+        except ValueError:
+            continue
+        age_h = (now - queued).total_seconds() / 3600.0
+        if age_h >= threshold_hours:
+            out.append({**e, "age_hours": round(age_h, 1)})
+    out.sort(key=lambda x: x["age_hours"], reverse=True)
+    return out
+
+
 def collect_from_pending_queue(
     sheet_filter: str = "both",
     verify_against_sheet: bool = True,

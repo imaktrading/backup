@@ -644,6 +644,19 @@ def run_cycle(
                 except Exception as e:
                     _log(f"  [!] action_required 記録失敗: {type(e).__name__}: {e}",
                          test_mode)
+                # 滞留 pending 検知 (2026-06-11): network 失敗等で複数 cycle 取下げ
+                # 失敗し続ける item を即時エスカレーション (= silent 滞留 = 漏れ継続疑い)。
+                try:
+                    from ebay_actions.revise_csv_generator import get_stuck_pending_items  # noqa: PLC0415
+                    stuck = get_stuck_pending_items()
+                    cycle_log["phases"]["pending_stuck"] = stuck
+                    if stuck:
+                        _log(f"  [★要対応] 取下げ滞留 {len(stuck)} 件 "
+                             f"(最古 {stuck[0]['age_hours']}h pending) → email 別掲",
+                             test_mode)
+                except Exception as e:
+                    _log(f"  [!] stuck pending 検知失敗: {type(e).__name__}: {e}",
+                         test_mode)
                 # health: 成否を記録 + 必要なら通知発火 (3 経路冗長)
                 try:
                     health_res = record_upload_result(
