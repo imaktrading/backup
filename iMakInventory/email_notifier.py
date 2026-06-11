@@ -311,10 +311,24 @@ def _format_body_inner(cycle_log: Dict[str, Any]) -> str:
         lines.append(f"仕入元在庫監視 : {scrape_status}")
 
         # eBay 在庫調整ステータス
-        if newly_sold == 0 and action_count == 0:
+        # action_count (= verify で qty>0 判明分) だけでなく、 upload 送信失敗 (= network
+        # 等で qty 不明) と 滞留 pending も「未完」として ⚠️ に倒す (2026-06-11)。
+        # 旧実装は upload ng を無視して ✅ と本文「失敗」が矛盾していた。
+        upload_ng = sum(1 for res in (up.get("results") or []) if not res.get("success"))
+        stuck_count = len(phases.get("pending_stuck", []) or [])
+        ebay_issue = action_count > 0 or upload_ng > 0 or stuck_count > 0
+        if newly_sold == 0 and not ebay_issue:
             lines.append(f"eBay 在庫調整  : ✅ 対象なし (= 新規売切検知 0 件)")
-        elif action_count > 0:
-            lines.append(f"eBay 在庫調整  : ⚠️ 要対応 (売切検知 {newly_sold} → 完了 {completed} / 未取下げ {action_count})")
+        elif ebay_issue:
+            bits = []
+            if action_count > 0:
+                bits.append(f"未取下げ {action_count}")
+            if upload_ng > 0:
+                bits.append(f"送信失敗 {upload_ng}")
+            if stuck_count > 0:
+                bits.append(f"滞留 {stuck_count}")
+            lines.append(f"eBay 在庫調整  : ⚠️ 要対応 (売切検知 {newly_sold} → 完了 {completed} / "
+                         + " / ".join(bits) + ")")
         else:
             lines.append(f"eBay 在庫調整  : ✅ 全件取下げ完了 (売切検知 {newly_sold} → 完了 {completed})")
     else:
@@ -492,24 +506,52 @@ def _format_body_inner(cycle_log: Dict[str, Any]) -> str:
                 if up.get("page_url"):
                     lines.append(f"  確認 URL     : {up['page_url']}")
             else:
-                lines.append(f"  upload結果   : 失敗 ({csv_lines} 件未送信)")
+                # 全断 (= 1件も送れず) と 部分失敗 (= 一部成功) を区別する (2026-06-11)。
+                # 旧実装は success=False で無条件「全断・送信ゼロ・漏れ全件」 = 3/4 成功でも
+                # 嘘の全断表記 + 冒頭 ✅ と矛盾していた。 実数 (ok/ng) と失敗の性質で出し分ける。
+                import re as _re  # noqa: PLC0415
+                results = up.get("results") or []
+                ng_n = sum(1 for r in results if not r.get("success"))
+                ok_n = sum(1 for r in results if r.get("success"))
+                total_n = len(results) if results else csv_lines
+                af = _re.search(r"action-needed\s*Failure\s*(\d+)", up.get("result_text", "") or "")
+                action_needed = int(af.group(1)) if af else 0
+                total_blackout = ok_n == 0  # 1 件も成功していない = 全断
+                if total_blackout:
+                    lines.append(f"  upload結果   : 全断 ({csv_lines} 件 全て未送信)")
+                else:
+                    lines.append(f"  upload結果   : 部分失敗 (成功 {ok_n} / 失敗 {ng_n} / 計 {total_n})")
                 lines.append(f"  失敗内容     : {_translate_error(err_text)}")
                 if up.get("page_url"):
                     lines.append(f"  確認 URL     : {up['page_url']}")
-                # upload phase 全断時の対応手順 (ユーザー指示 2026-06-10 load-bearing 化)
-                lines.append(f"  対応手順 (= upload phase 全断、 取下げ送信ゼロ → 漏れ全件):")
                 err_low = (err_text or "").lower()
-                if "connectionerror" in err_low or "getaddrinfo" in err_low or "timeout" in err_low:
-                    lines.append("    1. transient (DNS/Connection/Timeout) → 数分待つ + 次 cycle で auto retry 想定")
-                    lines.append("    2. 連続失敗なら network 自体 chk: `Test-NetConnection api.ebay.com -Port 443`")
+                if action_needed > 0:
+                    # eBay が取下げ拒否 (= 実害確定) → 個別手動対応・即時
+                    lines.append(f"  対応手順 (= action-needed 失敗 {action_needed} 件、 eBay が取下げ拒否):")
+                    lines.append("    1. csv_output の最新 CSV + cycle_<ts>.jsonl で該当 itemID 特定")
+                    lines.append("    2. eBay で手動取下げ (FileExchange Revise qty=0 / Seller Hub)")
+                    lines.append(f"  対応期限: **即時** (= 在庫切れ品が eBay live = 履行不能 → BAN risk)")
+                elif not total_blackout:
+                    # 部分失敗 (= 大半は network transient)。 失敗分は pending 残置 → 自動追跡。
+                    lines.append(f"  対応 (= 部分失敗 {ng_n} 件、 pending 残置で自動追跡):")
+                    lines.append("    1. 自動: 次 cycle で auto retry (API リトライ 4 回 + pending)")
+                    lines.append("    2. 8h 超で取下げ未完なら『★取下げ滞留 要対応』で別掲 escalation")
+                    lines.append("  対応期限: 監視 (= 滞留別掲で追跡、 即時手動は不要)")
+                elif "connectionerror" in err_low or "getaddrinfo" in err_low or "timeout" in err_low:
+                    lines.append("  対応手順 (= 全断: DNS/接続障害で 1 件も送れず):")
+                    lines.append("    1. network chk: `Test-NetConnection api.ebay.com -Port 443`")
+                    lines.append("    2. 次 cycle で auto retry (API リトライ + pending)、 連続なら DNS 設定調査")
+                    lines.append(f"  対応期限: **即時** (= 全件未送信、 在庫切れ品 全て eBay live)")
                 elif "oauth" in err_low or "token" in err_low or "iaftoken" in err_low or "invalid" in err_low:
-                    lines.append("    1. OAuth token 切れ疑い → ユーザー認証画面で再 OAuth 取得")
-                    lines.append("    2. credentials/api_key.txt の token 更新 → 手動 cycle 再実行")
+                    lines.append("  対応手順 (= 全断: OAuth token 切れ疑い):")
+                    lines.append("    1. ユーザー認証画面で再 OAuth 取得 → token 更新 → 手動 cycle 再実行")
+                    lines.append(f"  対応期限: **即時** (= 全 upload 不能)")
                 else:
-                    lines.append(f"    1. logs/cycle_<ts>.jsonl の upload phase 詳細を chk")
+                    lines.append("  対応手順 (= 全断):")
+                    lines.append("    1. logs/cycle_<ts>.jsonl の upload phase 詳細を chk")
                     lines.append("    2. eBay Developer dashboard で API 障害情報 chk")
                     lines.append("    3. 復旧後、 手動 cycle 再実行: `python run_cycle.py --sheet both`")
-                lines.append(f"    対応期限: **即時** (= 取下げ漏れ全件 → 全 BAN risk)")
+                    lines.append(f"  対応期限: **即時** (= 取下げ送信ゼロ → 漏れ全件)")
         lines.append("")
 
     # ヘルス (upload_health)
