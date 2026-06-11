@@ -56,7 +56,10 @@
 - **catalog dump 4 file (375件)** に混入の非直販/バンド 17 ASIN 除外を Catalog Claude へ依頼。
   - 依頼書投入: `catalog/requests/2026-06-12_amazon_gshock_dump_nondirect_exclusion.md`
   - 17 ASIN を A(バンド4)/B(真Amazon US 4)/C(国内third-party 9) に分類し dump file map 付きで提示。
-  - Catalog 回答 (`_response.md`) 待ち。
+  - **Catalog 回答受領 (`_response.md`)・本件クローズ** (2026-06-12):
+    - Amazon dump は未 merge (= catalog に 17 ASIN 0 hit、 amazon_available 列も無し) → 遡及是正不要。
+    - `_amazon_jp_dumps/exclude_asins.json` 恒久リスト化で対応 (= 完全除外8 / 直販フラグ抑止9)。
+    - dump JSON は seller-bug 証跡として温存 (= 非破壊・可逆を採用、 user 同意でクローズ)。
 
 ### 残・別 task
 
