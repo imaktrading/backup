@@ -517,7 +517,15 @@ def _judge_stock(driver) -> tuple[Optional[bool], str]:
 # Catalog Q3 回答 (2026-06-11): 型番は Harvest 側で正規化しない、 生 (verbatim) で記録。
 # `model_number` は spec block の生型番、 `product_id_estimated` は title からの参考抽出のみ。
 
-# 販売者 (= seller=Amazon.co.jp) 判別 markers (= 表記揺れに緩く対応)
+# Amazon.co.jp 直販判定の authoritative signal (= HTTP detect_seller_amazon_jp と同一、 100% 精度)
+# 2026-06-12: buybox の merchantId を販売元判定の主軸に。 発送元(FBA)に左右されない。
+SELLER_AMAZON_MERCHANT_ID = "AN1VRQENFRJN5"
+SELLER_AMAZON_MERCHANT_MARKER = f'"merchantId":"{SELLER_AMAZON_MERCHANT_ID}"'
+
+# 販売者 (= seller=Amazon.co.jp) 判別 markers (= merchantId fallback、 表記揺れに緩く対応)
+# 2026-06-12 修正: 発送元(Ships from / 発送元) marker を削除。 これらは fulfillment(FBA) を
+# 示すもので販売元ではない。 第三者販売 + Amazon 発送(FBA) を直販と誤検出していたバグの根本対策。
+# → 「販売」 を伴う marker のみ残す。
 SELLER_AMAZON_JP_MARKERS = (
     "販売: Amazon.co.jp",
     "販売元: Amazon.co.jp",
@@ -525,12 +533,8 @@ SELLER_AMAZON_JP_MARKERS = (
     "販売元: Amazon",
     "販売・発送：Amazon.co.jp",
     "販売・発送: Amazon",
-    "発送元 Amazon.co.jp",
-    "発送元: Amazon",
     "Sold by Amazon.co.jp",
     "Sold by Amazon",
-    "Ships from Amazon.co.jp",
-    "Ships from Amazon",
     "Amazon.co.jp が販売",
     "Amazon.co.jpが販売",
 )
@@ -643,18 +647,34 @@ def extract_variant_count(driver) -> int:
 
 
 def _extract_seller(driver) -> str:
-    """販売者 / 発送元 を判定 → 「Amazon.co.jp」 / 第三者出品者名 / 空文字.
+    """販売者 (= 直販判定) → 「Amazon.co.jp」 / 第三者出品者名 / 空文字.
+
+    2026-06-12 修正 (= FBA 誤検出バグ根本対策):
+      旧実装は body 全文 / 発送元(Ships from) marker で判定していたため、
+      第三者販売 + Amazon 発送(FBA) の 国内 third-party を直販と誤検出し
+      32 件が中間スプシに混入した (= run_harvest seller!="Amazon.co.jp" gate すり抜け)。
+      → 販売元 = buybox merchantId="AN1VRQENFRJN5" を authoritative signal とする
+        (= HTTP detect_seller_amazon_jp と完全同一、 発送元に左右されない)。
 
     判定 cascade:
-      1. merchant-info / tabular-buybox block 内 text に Amazon.co.jp marker → "Amazon.co.jp"
-      2. body 全文 から marker → "Amazon.co.jp"
-      3. #sellerProfileTriggerId text → 第三者出品者名
-      4. tabular-buybox の row → Amazon / 第三者
+      1. page_source の merchantId="AN1VRQENFRJN5" → "Amazon.co.jp" (= 主軸)
+      2. merchant/buybox block 内の「販売」marker (= 発送除外) → "Amazon.co.jp" (= fallback)
+      3. #sellerProfileTriggerId text → 第三者出品者名 (= 記録用、 keep filter で reject)
+      4. tabular-buybox の row → 第三者出品者名
       5. 判定不能 → 空文字 (= 第三者として除外される)
     """
     from selenium.webdriver.common.by import By  # noqa: PLC0415
 
-    # 1) merchant block 内 text に絞って Amazon 判定 (= 高精度)
+    # 1) page_source の merchantId で 販売元判定 (= 発送元/FBA に左右されない authoritative)
+    try:
+        page = driver.page_source or ""
+    except Exception:
+        page = ""
+    if SELLER_AMAZON_MERCHANT_MARKER in page:
+        return "Amazon.co.jp"
+
+    # 2) merchant block 内に絞って「販売」marker 判定 (= merchantId 取れない場合の fallback)
+    #    発送元(FBA) marker は除外済 (SELLER_AMAZON_JP_MARKERS から削除)。
     for sel in SELLER_AMAZON_BLOCK_SELECTORS:
         try:
             els = driver.find_elements(By.CSS_SELECTOR, sel)
@@ -667,44 +687,20 @@ def _extract_seller(driver) -> str:
                 t = ""
             if not t:
                 continue
-            # block 内に Amazon.co.jp が「販売」「発送」 と紐づいて存在 → 直販
-            has_amazon = "Amazon.co.jp" in t or "Amazon" in t
-            has_sale_or_ship = any(
-                kw in t for kw in ("販売", "発送", "Sold by", "Ships from", "が販売", "が発送")
-            )
-            if has_amazon and has_sale_or_ship:
-                # ただし block 内に第三者出品者名 (= "...が販売") のみで Amazon は発送のみ
-                # の場合があるので、 厳密に「Amazon.co.jp が販売」 / 「販売: Amazon」 で確認
-                if any(mk in t for mk in SELLER_AMAZON_JP_MARKERS):
-                    return "Amazon.co.jp"
-                # 「販売元 Amazon.co.jp」 のような line 形 → Amazon
-                if (
-                    "販売元" in t and "Amazon" in t
-                ) or (
-                    "Sold by" in t and "Amazon" in t
-                ):
-                    return "Amazon.co.jp"
-
-    # 2) body 全文 から marker
-    try:
-        body_text = driver.find_element(By.TAG_NAME, "body").text or ""
-    except Exception:
-        body_text = ""
-    if any(mk in body_text for mk in SELLER_AMAZON_JP_MARKERS):
-        return "Amazon.co.jp"
+            if any(mk in t for mk in SELLER_AMAZON_JP_MARKERS):
+                return "Amazon.co.jp"
 
     # 3) merchant link (= #sellerProfileTriggerId text、 第三者は通常ここに名前出る)
     try:
         elem = driver.find_element(By.CSS_SELECTOR, "#sellerProfileTriggerId")
         seller_name = (elem.text or "").strip()
         if seller_name:
-            if "Amazon" in seller_name:
-                return "Amazon.co.jp"
+            # Amazon 名でも merchantId が直販でなければ直販と断定しない (= 並行輸入 "Amazon US" 等)
             return seller_name
     except Exception:
         pass
 
-    # 4) tabular buybox 内 row 走査
+    # 4) tabular buybox 内 row 走査 (= 第三者出品者名)
     try:
         rows = driver.find_elements(
             By.CSS_SELECTOR, "#tabular-buybox .tabular-buybox-text, "
@@ -717,9 +713,7 @@ def _extract_seller(driver) -> str:
                 t = ""
             if not t:
                 continue
-            if "Amazon" in t:
-                return "Amazon.co.jp"
-            return t  # 第三者出品者名
+            return t  # 第三者出品者名 (= Amazon でも merchantId 判定を通っていない時点で非直販)
 
     except Exception:
         pass
@@ -870,12 +864,37 @@ def _extract_rating(driver) -> Optional[float]:
     return None
 
 
+# KEY (型番) 抽出専用 regex (= _extract_product_id_estimated_from_title 用)。
+# 2026-06-12 修正: 型番が日本語に直接隣接する title ("GWG-B1000-1AJFメンズ" 等) で
+# \b 境界が効かず (カタカナ/漢字も Unicode word 文字) 抽出漏れしていた (= KEY 空欄 12件)。
+# → \b に依存せず ASCII 英数でない位置 を境界とする。 "G-SHOCK" 等の語を除外するため digit 必須。
+_KEY_MODEL_HYPHEN_RE = re.compile(
+    r"(?<![A-Z0-9])([A-Z]{1,5}-[A-Z0-9]+(?:-[A-Z0-9]+)?)(?![A-Z0-9])"
+)
+_KEY_MODEL_NOHYPHEN_RE = re.compile(
+    r"(?<![A-Z0-9])([A-Z]{2,4}[0-9]{3,}[A-Z0-9]{2,})(?![A-Z0-9])"
+)
+
+
 def _extract_product_id_estimated_from_title(title: str) -> str:
-    """title から G-shock 型番候補を regex 抽出 (= 参考値、 catalog 側で resolve)."""
+    """title から G-shock 型番候補を regex 抽出 (= 参考値、 catalog 側で resolve).
+
+    日本語直結 ("...1AJFメンズ") / ハイフン無し ("GWA11001A3JF") の title も拾う。
+    digit を含むトークンのみ採用 (= "G-SHOCK" "G-LIDE" 等の series 語を除外)。
+    """
     if not title:
         return ""
-    m = GSHOCK_MODEL_IN_TITLE_RE.search(title.upper())
-    return m.group(1) if m else ""
+    t = title.upper()
+    # 1) ハイフン付き標準型番 (= digit 必須で series 語を除外)
+    for m in _KEY_MODEL_HYPHEN_RE.finditer(t):
+        tok = m.group(1)
+        if any(c.isdigit() for c in tok):
+            return tok
+    # 2) ハイフン無し型番 ("GWA11001A3JF" 等)
+    m = _KEY_MODEL_NOHYPHEN_RE.search(t)
+    if m:
+        return m.group(1)
+    return ""
 
 
 def fetch_detail_full(driver, url: str) -> Optional[dict]:

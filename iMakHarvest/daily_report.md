@@ -1,5 +1,59 @@
 # iMakHarvest daily_report
 
+## 2026-06-12 — Amazon seller 判定 FBA 誤検出バグ修正 + 376件 merchantId 再精査 + KEY空欄是正
+
+### 決定
+
+- **そもそもの抽出方針は「Amazon.co.jp 直販のみ keep」が正** (= 国内 third-party / Amazon US は両方除外)。
+  user 指摘で再確認。 旧 flag_amazon_us_in_sheet.py の 'AMAZON_US' ラベルは誤り
+  (= merchantId≠直販 を一律 US 扱い、 実体は国内 third-party の国内正規品が多数)。
+- **selenium `_extract_seller` の FBA 誤検出が混入の根本原因** と特定。
+  発送元(Ships from / 発送元) marker + body 全文マッチで、 第三者販売+Amazon発送(FBA) の
+  国内 third-party を直販と誤判定 → run_harvest の seller!="Amazon.co.jp" gate をすり抜け。
+  → 販売元 = buybox merchantId="AN1VRQENFRJN5" を authoritative signal に統一 (= HTTP 経路と同一)。
+- **buybox rotation を新たに確認** (= Amazon の販売者は時間で入れ替わる)。
+  旧 39 flag のうち 25件は rotation による誤flag (= 今は直販)、 真の非直販は 15件のみ。
+  → 単発 snapshot flag は不安定。 再精査は merchantId + 非直販候補は確認 fetch 1回 で安定化。
+- **KEY 空欄 12件の根本原因 = 型番の日本語直結** ("GWG-B1000-1AJFメンズ")。
+  `\b` 境界が カタカナ/漢字も word 文字扱いで消え抽出漏れ。 → KEY抽出を ASCII境界+digit必須 に修正。
+- **Q列 FLG 値は '非直販'** に統一 (= 'AMAZON_US' 誤称を廃し、 国内third-party/US を区別せず除外マーク)。
+
+### 変更
+
+- `scrapers/amazon_item_detail.py:520-536` SELLER_AMAZON_JP_MARKERS から発送系(Ships from/発送元)削除。
+  `SELLER_AMAZON_MERCHANT_MARKER = '"merchantId":"AN1VRQENFRJN5"'` 追加。
+- `scrapers/amazon_item_detail.py:645` `_extract_seller` 全面改修
+  - step1: page_source の merchantId で直販判定 (= authoritative、 発送元に左右されない)
+  - 旧 step2 (body 全文マッチ) を削除 (= FBA 誤検出の元凶)
+  - fallback は buybox block 内「販売」marker のみ (= 発送 marker 除外済)
+- `scrapers/amazon_item_detail.py:867` `_extract_product_id_estimated_from_title` 改修
+  - `_KEY_MODEL_HYPHEN_RE` / `_KEY_MODEL_NOHYPHEN_RE` 新規 (= ASCII境界、 \b 非依存、 digit必須で series語除外)
+- `tests/test_amazon_seller.py` 新規 8件 (= FBA 誤検出回帰防止)
+- `tests/test_amazon_key_extract.py` 新規 11件 (= 日本語直結型番 / series語除外)
+- `tools/reaudit_amazon_seller.py` 新規 (= 376行 merchantId 再精査 + Q列是正、 rotation 確認fetch付)
+- `tools/backfill_key_from_title.py` 新規 (= 空欄KEY を修正済抽出で backfill、 Amazon fetch なし)
+- `tools/flag_amazon_us_in_sheet.py` は旧版 (= 'AMAZON_US' 誤ラベル)、 reaudit が上書き是正済。
+
+### 検証
+
+- ✅ 全 pytest **693件 pass** (= 旧674 + seller8 + key11、 regression なし)
+- ✅ 376件 再精査実機完走 (06:00-06:16): direct=361 / nondirect=15 / fetch失敗0 / captcha0
+  - Q列書込 40件 = 旧誤flagクリア 25 + 非直販マーク 15
+  - 非直販 15件の merchantId: A1EJGP084HULR(=真Amazon US: row74,83,91,92) + 国内third-party各種
+- ✅ buybox rotation 実証: B0H2CLW4T2 / B0F9K112T9 が 05:15非直販 → 05:40以降 3回連続 direct
+- ✅ KEY backfill 6件書込 (= row66 GWG-B1000-1AJF / 71 GWG-B1000-1A4JF / 87 GWA11001A3JF /
+  189 MTG-B3000-1AJF / 228 GWG-B1000-3AJF / 356 DW-6900NNJ-1JR)。 KEY空欄 12→6 に。
+
+### 次のアクション (= 要 user 判断)
+
+- **バンド類 4件** (= 85,89 非直販 / 93 BANDGS02P-1JR, 208 BANDGS02P-7JR 直販) は時計でない
+  アクセサリ。 watch listing sheet から除外推奨 (= user 判断待ち)。
+- **非直販 15件** は現状 Q='非直販' マークのみ (= 物理削除はしていない)。 物理削除 or 別タブ移動 は user 判断。
+- **catalog dump 4 file (375件)** に selenium 漏れの国内third-party/US が含まれる。 Catalog Claude へ
+  非直販 ASIN list を渡して除外依頼が必要 (= 下流是正)。
+
+---
+
 ## 2026-06-11 (= 後半) — Amazon G-shock メンズ全網羅完了 (= HTTP filter + variant 補完 + monthly_sales)
 
 ### 決定
