@@ -70,6 +70,37 @@
 
 ---
 
+## 2026-06-11 (= 終夜) — Amazon US (= 並行輸入) cleanup tooling + 39 件 flag
+
+### 決定
+
+- **中間スプシ既存 376 件 を全件 merchantId 検証 → Amazon US 商品 39 件 (= 10.4%) を Q 列 FLG=AMAZON_US で識別** (= user 後で削除 / 別タブ移動可能化)
+  - 根拠: session 1 / 2' (= selenium 直 + brand pre-filter) で selenium が seller="Amazon.co.jp" と誤判定し Amazon US 並行輸入が keep されていた
+  - HTTP merchantId 検証 (= AN1VRQENFRJN5 一致) を真実値として retroactive cleanup
+
+### 変更
+
+- `tools/flag_amazon_us_in_sheet.py` 新規作成 (= 中間スプシ全行を HTTP detail で merchantId 検証 + Q 列に FLG 書込)
+  - rate limit 2-3s (= Amazon ブロック対策)
+  - 既存 Q 列値あり 行は skip (= 上書き禁止、 安全)
+  - 完走 376 件、 captcha 0
+
+### 検証
+
+- ✅ 全 376 件 fetch 完走 (= captcha 0)
+- ✅ Amazon.co.jp 確定: **337 件** (= 89.6%)
+- ✅ Amazon US 検出 + Q 列書込: **39 件** (= 10.4%)
+- ✅ fetch_failed: 0 件
+- ✅ session 4 / 5 (= HTTP filter で keep した分) には Amazon US 混入 **0 件** (= merchantId 100% 精度実証通り)
+- ✅ 結果 dump: `debug/flag_amazon_us_result.json` (= 39 ASIN list + 行番号)
+
+### 次のアクション
+
+- user 手動で Q 列 = "AMAZON_US" 39 行の削除 / 別タブ移動 / 出品候補から除外
+- 国内 Amazon 直販 実質 **337 件** が catalog 投入 / listing 候補化対象
+
+---
+
 ## 2026-06-11 (= 前半) — Amazon G-shock 全件 scrape 新規実装 (= 4 番目 catalog source)
 
 ### 決定
