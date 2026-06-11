@@ -1519,9 +1519,16 @@ def lookup_pokemon(
     # 1. base lookup を先に行って、その record の name を「正しいキャラ」として確定.
     #    set_code は 大文字小文字 + 0↔O 取り違え (PSA brand「SV0M」=数字0 vs 公式 catalog
     #    「SVOM」=英字O) を正規化候補で試行. ID 完全一致のみなので誤候補は無害 (fail-closed).
+    # card_number は 0埋め揺れも吸収 (PSA「7」 vs catalog「007」。例 SMP2-7 → SMP2-007).
+    cn_variants = [card_number]
+    if card_number.isdigit() and len(card_number) < 3:
+        cn_variants.append(card_number.zfill(3))
     record = None
     for sc in _set_code_lookup_variants(set_code):
-        record = api.lookup(POKEMON_CATEGORY, f"{sc}-{card_number}")
+        for cn in cn_variants:
+            record = api.lookup(POKEMON_CATEGORY, f"{sc}-{cn}")
+            if record is not None:
+                break
         if record is not None:
             break
 

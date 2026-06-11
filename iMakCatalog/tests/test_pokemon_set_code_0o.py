@@ -56,6 +56,14 @@ class TestLookupPokemon0O(unittest.TestCase):
             "POKEMON JAPANESE SV0M-EX STARTER SET", "999", subject="", verbose=False)
         self.assertIsNone(r)
 
+    def test_card_number_zero_pad(self):
+        # PSA「7」 vs catalog「007」の 0埋め揺れ吸収 (SMP2-7 → SMP2-007)
+        r = pc.lookup_pokemon(
+            "POKEMON DETECTIVE PIKACHU SMP2", "7", subject="CHARIZARD GX", verbose=False)
+        self.assertIsNotNone(r)
+        self.assertEqual(r["set_code"], "SMP2")
+        self.assertEqual(r["card_number"], "007")
+
 
 if __name__ == "__main__":
     unittest.main()
