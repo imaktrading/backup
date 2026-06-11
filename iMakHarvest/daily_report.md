@@ -51,10 +51,17 @@
   - 削除後 実機検証: データ 376→**359行**、 残 非直販 0 / 残 バンド 0 / 残 KEY空欄 0。
   - → 中間スプシは「Amazon.co.jp 直販 G-shock 時計・全件KEYあり」のクリーン状態に。
 
-### 次のアクション (= 要 user 判断)
+### 下流是正 (= catalog dump、 user 指示 2026-06-12「そうした方がいい」)
 
-- **catalog dump 4 file (375件)** に selenium 漏れの国内third-party/US が含まれる。 Catalog Claude へ
-  削除済 ASIN list を渡して除外依頼が必要 (= 下流是正)。 user 判断待ち。
+- **catalog dump 4 file (375件)** に混入の非直販/バンド 17 ASIN 除外を Catalog Claude へ依頼。
+  - 依頼書投入: `catalog/requests/2026-06-12_amazon_gshock_dump_nondirect_exclusion.md`
+  - 17 ASIN を A(バンド4)/B(真Amazon US 4)/C(国内third-party 9) に分類し dump file map 付きで提示。
+  - Catalog 回答 (`_response.md`) 待ち。
+
+### 残・別 task
+
+- レディース skip (= user 判断保留、 6/11)
+- 他カテゴリ展開時の `is_gshock_item` プラガブル化 refactor
 
 ---
 
