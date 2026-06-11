@@ -890,3 +890,26 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅(DON 既収録): DON-OP13-001/002・DON-OP15-001/002 実在(name='DON!! Card')。PSA DON!! CARD は判別情報無
 - 検証⚠️(Magikarp resolve 未配線): extract_set_code_from_brand_pokemon が当該 brand を S8a-P に落とせる保証無→raw brand 待ち。record は存在させた(groundwork)
 - 検証⚠️(set_name_ebay): S8a-P は国際 Celebrations 非対応。'Promo' 暫定=最終 eBay Set 値は要確認
+
+
+## 2026-06-12 (続2) — Catalog: HQ raw cert dump 受領 → preflight backlog Catalog側 完了
+
+### 決定事項
+- 決定1(Magikarp RESOLVED): HQ raw brand=`POKEMON JAPANESE PROMO CARD PACK 25TH ANNIVERSARY EDITION`で set句が brand側と確認→ `_POKEMON_SET_NAME_TO_CODE` に "PROMO CARD PACK 25TH ANNIVERSARY EDITION":"S8a-P" 追加。cert77429277→S8a-P-010 end-to-end解決。
+- 決定2(Pikachu V=reject正): HQ指摘どおり ASIA版(brand=ASIA PROMO/GOLDEN BOX は subject側)。追加裏取り(Bulbapedia/TCGplayer/StockX): 25th Golden Boxは JP/繁中/韓/尼が同一S8a-G番号だが言語差。catalog S8a-G-005=日本語のためASIA cert解決はLanguage誤り=出品正確性違反→reject正。brand-path fix(9f51130)はGOLDEN BOXがbrand側に無い本certに構造的no-op=言語誤り回避。
+- 決定3(CELL CP8=対象外): brand=DRAGON BALL HEROES 2(2011アーケード)。catalog dragonball_scg(DBSCG2022〜)と別ゲーム→reject/category-unknown。
+- 決定4(DON×3=reject確定): 3件ともCardNumber/image_url=None。DON-OP13/OP15-001/002の variant判別材料がPSAに皆無。再scrapeしても不変。
+- 決定5(UTA#001=reject正): storage box set UTA=ST16-001_p1/_p2の別アート2枚(共SR/series550801)。cert に variety/画像無で判別不能→Chopper/Pudding同型 fail-closed。
+- 決定6(backlog完了): preflight 残の Catalog側対応は完了。解決1(Magikarp)・他4種は誤出品/誤言語/対象外回避でreject正。残ユーザー裁定2件(ASIA言語版収録要否/UTA再scrape要否)は優先度低で保留可。
+
+### 変更
+- 変更: integrations/psa_to_csv.py — _POKEMON_SET_NAME_TO_CODE に "PROMO CARD PACK 25TH ANNIVERSARY EDITION":"S8a-P"(brand-path)
+- 変更: tests/test_psa_review_promo_resolve.py — +3(PromoCardPack×2/GoldenBoxAsiaReject)。全291 green
+- 変更: requests/ に 2026-06-12_..._response_processed.md(7cert最終disposition)
+- commit: e08be80 (feature/uniqlo-ut)
+
+### 検証(実出力)
+- 検証✅(Magikarp): extract(brand)→S8a-P / lookup #010→S8a-P-010 'Shining Magikarp'。25TH ANNIVERSARY COLLECTION→S8a回帰維持
+- 検証✅(Pikachu Asia reject): extract('POKEMON ASIA 25TH ANNIVERSARY PROMO')→P / lookup #005→None
+- 検証✅(裏取り言語差): 25th Golden Box JP/繁中/韓/尼 同S8a-G番号・言語別(Bulbapedia/TCGplayer)
+- 検証✅(UTA別アート): ST16-001_p1.png/_p2.png 別画像(onepiece-cardgame.com series550801)
