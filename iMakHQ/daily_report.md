@@ -868,3 +868,25 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅(Pikachu V): extract(...GOLDEN BOX)→S8a-G / lookup_pokemon(#005)→S8a-G-005 'Pikachu V'。plain 25TH ANNIVERSARY COLLECTION #005→S8a-005 'Lugia'(回帰維持)
 - 検証✅(reject維持): Chopper LET'S START→None / Charlotte Pudding→None
 - 検証⚠️(残): 真の未収録 fetch ~6(Shining Magikarp#010/ASIA promo/UTA#001/DON×3/CP8)は別工数。Pikachu V Golden Box は PSA brand に GOLDEN BOX が乗っている前提=HQ の raw cert 142931332 で要最終確認(subject側なら no-op)。
+
+
+## 2026-06-12 (続) — Catalog: preflight 残「fetch ~6件」triage + Shining Magikarp 収録
+
+### 決定事項
+- 決定1(triage): 「真の未収録 ~6件」を実機調査。過半は未収録でなく **PSA cert に判別情報が無く resolve 不能**と判明。真の収録 fetch は Pokemon 2 + DBSCG 1 のみ。
+- 決定2(DON×3 = reject正): DON-OP13-001/002・DON-OP15-001/002 は **収録済**。PSA「DON!! CARD」に番号もキャラ art も無く variant 判別不能 → fail-closed reject が正(誤variant出品回避)。resolve には image-hash(lookup_don)=PSA image_url が必要。
+- 決定3(UTA #001/PRB01): PRB01-001=Sanji(別カード)。UTA promo 多数。対象特定に raw cert 画像/variety 要。
+- 決定4(Shining Magikarp 収録): cert77429277 = S8a-P 010/025(ひかるコイキング/プロモカードパック25th ANNIVERSARY edition)を複数ソース裏取り→収録。前回候補 SM3p-010=別カード(ひかるゲノセクト)誤を確定。
+- 決定5(raw cert 依頼): set_code 配線(Magikarp)・image照合(DON/UTA)・DBSCG CP8 ID には HQ の PSA raw データ(brand/subject/image_url)が必須(psacard.com 403 で当方取得不可)→ 依頼書起票。
+
+### 変更
+- 変更(共有DB・git外): products.sqlite に S8a-P-010 upsert(name=ひかるコイキング/name_en=Shining Magikarp/set_official='プロモカードパック 25th ANNIVERSARY edition'/specs.set_name_ebay='Promo'暫定)。bak: products.sqlite.bak_20260612_s8aP010
+- 変更: requests/ に 2026-06-12_psa_preflight_gap6_triage_and_raw_cert_request.md(triage結果+raw cert依頼)
+- コード変更: 無し(speculative 配線は raw brand 待ち=推測で入れない fail-closed)
+
+### 検証
+- 検証✅(裏取り): cardrush/snkrdunk/magi/amazon.co.jp 一致。S8a-P 010/025 ひかるコイキング(2021-10-22, Water/HP30/holo)
+- 検証✅(収録): api.lookup('pokemon_tcg','S8a-P-010')→ひかるコイキング/Shining Magikarp/set_ebay=Promo
+- 検証✅(DON 既収録): DON-OP13-001/002・DON-OP15-001/002 実在(name='DON!! Card')。PSA DON!! CARD は判別情報無
+- 検証⚠️(Magikarp resolve 未配線): extract_set_code_from_brand_pokemon が当該 brand を S8a-P に落とせる保証無→raw brand 待ち。record は存在させた(groundwork)
+- 検証⚠️(set_name_ebay): S8a-P は国際 Celebrations 非対応。'Promo' 暫定=最終 eBay Set 値は要確認
