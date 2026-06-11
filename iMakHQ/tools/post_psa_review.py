@@ -447,6 +447,13 @@ def _generate_html(targets: list[dict]) -> None:
         else:
             html.append('<div class="confirm no-expected">')
             html.append(f'<div class=label>⚠️ catalog 期待値特定不能 ({t.get("csv_expected") or "未取得"}) → 候補から選択してください</div>')
+            # 2026-06-11: no-expected 分岐でも PSA 実物画像を表示 (= 期待値不明時こそ実物↔候補の
+            # 見比べが要る。旧版は実物画像を出さず「元画像すらない」状態だった)
+            if t.get("cert_image_url"):
+                html.append('<div>')
+                html.append('<div class=label>📋 PSA cert (実物)</div>')
+                html.append(f'<img src="{_img_url(t["cert_image_url"])}">')
+                html.append('</div>')
             html.append('</div>')
 
         # 回答ボタン
