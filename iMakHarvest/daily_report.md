@@ -44,13 +44,17 @@
 - ✅ KEY backfill 6件書込 (= row66 GWG-B1000-1AJF / 71 GWG-B1000-1A4JF / 87 GWA11001A3JF /
   189 MTG-B3000-1AJF / 228 GWG-B1000-3AJF / 356 DW-6900NNJ-1JR)。 KEY空欄 12→6 に。
 
+### 物理削除 (= user 指示 2026-06-12「1,2 は削除」)
+
+- **非直販 + バンド類 17行を物理削除** (= `tools/delete_nondirect_and_bands.py`)。
+  - 非直販時計 13 + バンド類 4 (= 85,89,93,208)。 削除直前 rotation 再確認で直販復帰 0件 (= 全件安定)。
+  - 削除後 実機検証: データ 376→**359行**、 残 非直販 0 / 残 バンド 0 / 残 KEY空欄 0。
+  - → 中間スプシは「Amazon.co.jp 直販 G-shock 時計・全件KEYあり」のクリーン状態に。
+
 ### 次のアクション (= 要 user 判断)
 
-- **バンド類 4件** (= 85,89 非直販 / 93 BANDGS02P-1JR, 208 BANDGS02P-7JR 直販) は時計でない
-  アクセサリ。 watch listing sheet から除外推奨 (= user 判断待ち)。
-- **非直販 15件** は現状 Q='非直販' マークのみ (= 物理削除はしていない)。 物理削除 or 別タブ移動 は user 判断。
 - **catalog dump 4 file (375件)** に selenium 漏れの国内third-party/US が含まれる。 Catalog Claude へ
-  非直販 ASIN list を渡して除外依頼が必要 (= 下流是正)。
+  削除済 ASIN list を渡して除外依頼が必要 (= 下流是正)。 user 判断待ち。
 
 ---
 
