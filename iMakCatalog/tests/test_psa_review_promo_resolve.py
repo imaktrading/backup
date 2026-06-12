@@ -148,6 +148,17 @@ class TestPokemonGoldenBox(unittest.TestCase):
         self.assertEqual(r["card_id"], "S8a-G-005")
         self.assertEqual(r["name_en"], "Pikachu V")
 
+    def test_golden_box_subject_path_jp_brand(self):
+        # 2026-06-13 新 subject-path: GOLDEN BOX が **subject 側のみ**、 brand は JP 明示
+        # (= cert142931332 実物スラブ "2021 POKEMON JPN" + subject "...GOLDEN BOX")。
+        # brand-path は no-op だが subject-path が JP gate を通って S8a-G に振る。
+        r = pc.lookup_pokemon(
+            "2021 POKEMON JPN", "005",
+            "PIKACHU V 25TH ANNIV-GOLDEN BOX", verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertEqual(r["card_id"], "S8a-G-005")
+
     def test_plain_25th_collection_unaffected(self):
         # 通常弾 25TH ANNIVERSARY COLLECTION は S8a のまま (回帰防止)。S8a-005=Lugia
         code = pc.extract_set_code_from_brand_pokemon(
@@ -162,13 +173,17 @@ class TestPokemonGoldenBox(unittest.TestCase):
 
 
 class TestPokemonGoldenBoxAsiaReject(unittest.TestCase):
-    """cert 142931332 実物 = ASIA 版 Golden Box → reject が正 (HQ raw dump 2026-06-12).
+    """ASIA(非日本語) brand の Golden Box → reject が正 (fail-closed language gate).
 
-    brand=POKEMON ASIA 25TH ANNIVERSARY PROMO / subject に GOLDEN BOX。
-    25th Golden Box は JP/繁中/韓/尼版が同一 S8a-G 番号だが言語が異なる(Bulbapedia/TCGplayer)。
-    catalog S8a-G-005 は日本語 record のため、ASIA cert を解決すると Language 誤り
-    (出品の正確性違反)。GOLDEN BOX が brand 側に無いので brand-path は構造的に no-op =
-    言語誤りを回避する fail-closed。catalog に ASIA言語版が入るまで reject 維持が正。
+    ⚠️ 2026-06-13 訂正: cert 142931332 の **実物スラブは「2021 POKEMON JPN」+ 券面日本語**
+    (S8a-G 005/015, illust Ryota Murayama) = 日本語版で S8a-G-005 に一致。前回(2026-06-12)
+    「実物=ASIA版」とした判定は **HQ raw dump の brand="POKEMON ASIA..." が実物(JPN)と矛盾した
+    誤データ**が原因だった。→ 正しい JP brand で再scrape すれば subject-path で自動解決
+    (test_golden_box_subject_path_jp_brand 参照)。
+
+    本 test が守るのは「**brand が ASIA/非日本語と明示された入力**は日本語 record に解決させない」
+    という language gate (= ASIA/繁中/韓/尼 の同番号 S8a-G を日本語 S8a-G-005 へ誤解決させない)。
+    この挙動自体は引き続き正しい (2026-06-13 subject-path に JP gate を追加して維持)。
     """
 
     def test_asia_golden_box_rejects(self):

@@ -1537,6 +1537,22 @@ def lookup_pokemon(
     if not card_number:
         return None
     set_code = extract_set_code_from_brand_pokemon(brand)
+
+    # 2026-06-13: subject 側 "GOLDEN BOX" 検出 (cert142931332 PIKACHU V 25TH ANNIV-GOLDEN BOX #005).
+    #   25周年ゴールデンボックスは日本専用 subset S8a-G。PSA が "GOLDEN BOX" を **Subject 側**に
+    #   置く cert では brand-path (_POKEMON_SET_NAME_TO_CODE "GOLDEN BOX":"S8a-G") が no-op に
+    #   なり、brand からは "P"(promo) 等の別 set_code が出る。→ subject から直接 S8a-G に上書き。
+    #   言語 gate: catalog S8a-G-* は日本語 record のため、brand が日本語 (JAPANESE/JPN) と
+    #   明示されるときのみ適用。ASIA/KOREAN/CHINESE 版を日本語 record へ誤解決させない (fail-closed)。
+    #   S8a-G prefix は golden box 専用 = 番号一致なら必ず golden box カード (over-fire 不能)。
+    if "GOLDEN BOX" in (subject or "").upper() and re.search(
+        r"\b(JAPAN(?:ESE)?|JPN)\b", (brand or "").upper()
+    ):
+        if verbose and set_code != "S8a-G":
+            print(f"    🔁 Pokemon subject-path: 'GOLDEN BOX'+JP brand → set_code "
+                  f"{set_code!r}→'S8a-G' (brand={brand!r}, subject={subject!r})")
+        set_code = "S8a-G"
+
     if not set_code:
         if verbose:
             print(f"    ⚠️ Pokemon set_code 抽出失敗: brand={brand!r}")

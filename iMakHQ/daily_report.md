@@ -1035,3 +1035,24 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅ pytest: test_don_card_lookup 18 passed / 全 301 passed
 - 検証✅ 在庫表(service account経由): R列='カテゴリ'、HIGH=TCG603他/LOW=G-shock507他。montbell3番号=HIGH行440/442/445列I・R列アウトドア・ジャケット。147130900=HIGH/LOW不在
 - 検証✅ Pudding公式裏取り: Girls Edition=ジャンプGIGA 2023 Spring応募者全員サービス同一商品(one-piece.com news 61473 / tcg-fun)
+
+
+## 2026-06-13 (続) — Catalog: 残アクション1-2-3 着手 (Pikachu subject-path / DON variety上流依頼 / cert抽出カテゴリフィルタ)
+
+### 決定事項
+- 決定1(① Pikachu V subject-path 実装): lookup_pokemon に「subject に GOLDEN BOX + brand が JAPANESE/JPN」→ set_code を S8a-G に上書きする経路を追加 (日本語 gate)。ASIA/KOREAN/CHINESE brand は遮断=言語誤り防止 fail-closed。cert142931332 固有は scrape brand が誤(ASIA)のため、正しい JP brand で再scrape すれば自動解決 (依頼書化)。
+- 決定2(② DON variety = 上流fix): resolver/lookup_don (私側) は variety を含む subject で OP15→DON-OP15-002 / OP13→DON-OP13-002 / 1st anniv→DON-EVENT-003 と一意解決すると実証。真因は PSA scrape が Variety「ALTERNATE ART-GOLD」を subject に取り込んでいないこと(=上流/dedupe)。DON は parse_psa_page が#番号必須で listing pipeline では拾えず、解決は dedupe→resolver 経由のみ。→ HQ/Dedupe 依頼書で「signals['subject'] に Variety 連結」を依頼。
+- 決定3(③ cert抽出カテゴリフィルタ 実装): load_targets_from_sheet_psa (iMakTCG/psa_to_csv.py) に R列カテゴリ=='TCG' 限定を追加。montbell型番(列I)が cert誤認され PSA に流れる混入を構造的に遮断。
+
+### 変更
+- 変更: iMakCatalog/integrations/psa_to_csv.py — lookup_pokemon に GOLDEN BOX subject-path (日本語gate) 追加
+- 変更: iMakCatalog/tests/test_psa_review_promo_resolve.py — subject-path test +1 / ASIA reject docstring 訂正(実物=JPN)
+- 変更: iMakTCG/psa_to_csv.py — load_targets_from_sheet_psa に category=='TCG' フィルタ + 除外件数ログ
+- 変更: requests/ に 2026-06-13_psa_scrape_field_completeness_request.md (DON variety + Pikachu brand の上流依頼)
+- コード変更なし(②): variety連結の受け口は signals 契約に無く上流責務
+
+### 検証(実出力)
+- 検証✅ lookup_pokemon: JPN brand+GOLDEN BOX subj→S8a-G-005 / ASIA→None / KOREAN→None / 通常Lugia→S8a-024(回帰なし)
+- 検証✅ pytest: 全 305 passed (test_psa_review_promo_resolve 16 / test_don_card_lookup 18 含む)
+- 検証✅ cert抽出フィルタ(実シート再現): 抽出条件該当208行 → TCG 199抽出 / 非TCG(montbell) 9除外。montbell・147130900 混入ゼロ
+- 検証✅ 構文: iMakTCG/psa_to_csv.py ast.parse OK

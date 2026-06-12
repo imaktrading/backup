@@ -1834,15 +1834,26 @@ def load_targets_from_sheet_psa():
     cost_map = {}
     url_map = {}
     title_map = {}
+    _skipped_non_tcg = 0  # R列カテゴリ≠TCG で除外した件数
     for row in all_values[1:]:  # header 除外
-        url     = (row[0]  if len(row) > 0  else '').strip()  # A
-        item_id = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
-        title   = (row[2]  if len(row) > 2  else '').strip()  # C
-        price_f = (row[5]  if len(row) > 5  else '').strip()  # F "¥11,000"
-        cert    = (row[8]  if len(row) > 8  else '').strip()  # I cert#
-        cost_n  = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円)
+        url      = (row[0]  if len(row) > 0  else '').strip()  # A
+        item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
+        title    = (row[2]  if len(row) > 2  else '').strip()  # C
+        price_f  = (row[5]  if len(row) > 5  else '').strip()  # F "¥11,000"
+        cert     = (row[8]  if len(row) > 8  else '').strip()  # I cert#
+        cost_n   = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円)
+        category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
 
         if not cert or item_id or not url:
+            continue
+        # 2026-06-13: R列カテゴリ=TCG 限定 (混入の恒久遮断)。
+        #   montbell 型番 (例 1106686 Ultra Light Shell Parka) が I列に入り、I列非空=cert と
+        #   誤認されて PSA preflight に流れる事故を構造的に防ぐ。PSA grade 対象は TCG のみ。
+        #   実機確認 (2026-06-13): 抽出条件該当 208 行 = TCG 199 + アウトドア・ジャケット 9
+        #   (=montbell, 空欄カテゴリ無し) のため whitelist 'TCG' で legit cert を1件も落とさない。
+        #   非TCG (アウトドア・ジャケット/スポーツ等) は誤cert なので除外が正 (fail-closed)。
+        if category != "TCG":
+            _skipped_non_tcg += 1
             continue
         cert_numbers.append(cert)
         url_map[cert] = url
@@ -1856,6 +1867,9 @@ def load_targets_from_sheet_psa():
                     cost_map[cert] = int(m.group(1).replace(',', ''))
                 except ValueError:
                     pass
+    if _skipped_non_tcg:
+        print(f"  ⏭️ R列カテゴリ≠TCG で {_skipped_non_tcg} 行除外 "
+              f"(montbell型番/スポーツ等の cert 誤認混入を排除)")
     return cert_numbers, cost_map, url_map, title_map
 
 
