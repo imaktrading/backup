@@ -971,3 +971,21 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: resolver._gl.__file__=C:\dev\iMak_catalog\iMakCatalog\integrations\gshock_lookup.py(自worktree最新)
 - 検証✅: 既存 TCG/DON/URL resolve 回帰なし(296 green)
 - 検証⚠️(統合): dedupe側B/C(model抽出+gshock category検出)はDedupe担当。両揃って初めてG-shock CSV resolved。統合verifyはDedupe完了後(出品くんCSVで実件数)
+
+
+## 2026-06-12 (続6) — Catalog: 日本版遊戯王 収録 feasibility 回答(調査のみ)
+
+### 決定事項
+- 決定(feasibility 結論): 日本版遊戯王収録は feasible・追い風大。実装着手は再開 greenlight 後(本回答は調査のみ)。推奨=(b) on-demand 部分収録(無在庫+Precision100%最適、低工数)。
+
+### 調査結果(実機)
+- yugioh_tcg=50,098行。2層: base passcode 12,150件(日英名+スペック保持) + print variant 37,948件(`{passcode}_{setcode}`)。
+- print variant の言語は EN/PT/SE のみ=実質TCG(英語圏)。**JP(-JP) set code variant=0件**(HQ認識どおり)。distinct set code 610(全TCG)。
+- **追い風: base 12,150中 11,584件が variants.konami_id + konami_jp_db(JP画像)リンク済**=日本版print取得を konami_id 駆動で回せる下地あり。
+- lookup_yugioh は **set codeでなく名前fuzzy match**(subject→name_en LIKE+token一致、同名複数→fail-closed)。=JP set code(TDPP-JP018)を厳密に当てる経路が無い。
+- 不足=JP(OCG)print情報のみ。schema/base identity は100%流用可(EN と同じ `{passcode}_{JP-setcode}` 追加)。
+- 公式ソース裏取り: db.yugioh-card.com(遊戯王ニューロン)=Konami公式OCG DB、locale=ja・収録パック検索可=JP set codeの権威。YGOPRODeck はTCG専用でJP埋まらず別取得必須。
+- 本体作業=① db.yugioh-card.com JP print scraper ② lookup_yugioh に set-code 経路追加。段取り=POC(1-2日, cert140273536 BLUE-EYES TDPP-JP018 で検証)→(b)本実装→必要なら(a)全scrape。
+
+### 変更
+- 変更: requests/ に feasibility 回答 _response.md(Q1-Q3)。コード/データ変更なし。
