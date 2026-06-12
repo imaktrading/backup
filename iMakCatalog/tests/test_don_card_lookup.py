@@ -51,6 +51,44 @@ class TestLookupDonBasic(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(r["product_id"], "DON-OP15-002")
 
+    def test_op13_alt_art_gold(self):
+        """OP-13 DON Alt Art Gold → DON-OP13-002 (cert 146160803, 2026-06-13 image確認)."""
+        r = psa_to_csv.lookup_don(
+            brand="ONE PIECE JAPANESE OP-13 CARRYING ON HIS WILL",
+            subject="DON!! CARD ALTERNATE ART GOLD",
+            verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertEqual(r["product_id"], "DON-OP13-002")
+
+    def test_1st_anniversary_event_silhouette(self):
+        """1ST ANNIVERSARY EVENT (= silhouette ドンドットット) → DON-EVENT-003.
+
+        cert 146160792 (PSA '2023 ONE PIECE JP / DON!! CARD / 1ST ANNIVERSARY EVENT').
+        2026-06-13: 全11 DON-EVENT 画像目視で 003=唯一の silhouette と確認し、
+        psa_subject_hint に '1ST ANNIVERSARY' を追加 (003 のみ、 002 等は EVENT のまま)
+        → anniversary subject で 003 が一意 score 勝ち.
+        """
+        r = psa_to_csv.lookup_don(
+            brand="2023 ONE PIECE JP",
+            subject="DON!! CARD 1ST ANNIVERSARY EVENT",
+            verbose=False,
+        )
+        self.assertIsNotNone(r)
+        self.assertEqual(r["product_id"], "DON-EVENT-003")
+
+    def test_generic_event_no_anniversary_fail_closed(self):
+        """汎用 EVENT subject (anniversary keyword 無) → None (= 11件 tie で fail-closed 維持).
+
+        003 への '1ST ANNIVERSARY' 追加が generic EVENT cert を誤発火させないことの回帰防止.
+        """
+        r = psa_to_csv.lookup_don(
+            brand="2023 ONE PIECE JP",
+            subject="DON!! CARD EVENT",
+            verbose=False,
+        )
+        self.assertIsNone(r)
+
     def test_non_don_card_returns_none(self):
         """subject に 'DON' なし → None (= 非 DON、 早期 return)."""
         r = psa_to_csv.lookup_don(

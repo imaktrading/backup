@@ -1012,3 +1012,26 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅(Admirable): #068→OP06-068_AC01 / #063→OP12-063_AC01 / OP12 booster brand→OP12(回帰なし)
 - 検証✅(G-shock): lookup_gshock GA-V01CMG-6AJF→自身 / GM-2100LXB-1A9JF→自身。CASIO公式実在裏取り
 - 検証⚠️(残): Admirable vol.1 残promo2枚未識別(公式ac01.phpは「Promotion Card x4」のみ、cert無=低優先) / S8a-P #013英名空欄 / yugioh JP保留
+
+
+## 2026-06-13 — Catalog: PSA実物画像バッチ照合 (6cert確定/Pikachu reject撤回/DON再整備) + cert混入対策 + 在庫表突合
+
+### 決定事項
+- 決定1(UTA確定): cert143402937 → ST16-001_p1 (顔アップ紫=_p1、_p2全身緑と別物)。ユーザー提供スラブで再scrape不要解決。
+- 決定2(Pudding確定): cert86915908 → ST07-008_p3。スラブ set「PREMIUM CARD COLL -GIRLS ED-」は catalog _p3「ジャンプGIGA 2023 Spring応募者全員サービス」と**同一商品**(公式one-piece.com/tcg-fun裏取り)。gap/誤ラベルでなく別名。
+- 決定3(**Pikachu V reject撤回**): cert142931332 → S8a-G-005。前回(続2)はメタbrand="POKEMON ASIA"でASIA版→言語誤り→rejectだったが、**実物スラブ「2021 POKEMON JPN」+券面日本語**=catalog日本語S8a-G-005と一致。実物優先で出品可。メタ(ASIA)vs実物(JPN)矛盾はHQ照合推奨。
+- 決定4(DON×3解決): OP15gold→DON-OP15-002 / OP13gold→DON-OP13-002 (既存データ正、reject真因はメタがvariety「ALTERNATE ART-GOLD」をsubject未取込=入力欠落) / 1st anniv silhouette→DON-EVENT-003 (全11 DON-EVENT画像目視で唯一silhouette確認、hint追加で一意化)。
+- 決定5(CELL reject維持): cert95157623=Dragon Ball Heroes H2-CP8=catalog対象外(dragonball_scgと別ゲーム)。
+- 決定6(cert混入真因): preflight CATEGORY-UNKNOWN4件=全非TCGノイズ。1103264/1106551/1106686=montbell型番(在庫表HIGH列I・R列カテゴリ=アウトドア・ジャケット)、147130900=Ricky Pearsall(NFL・在庫表不在)。真因=cert抽出がR列カテゴリ未フィルタ。対策=cert抽出にWHERE R列カテゴリ='TCG' (HQ依頼書化)。
+
+### 変更
+- 変更(共有DB・git外): DON-EVENT-003 specs.psa_subject_hint に "1ST ANNIVERSARY" 追加。bak: _bak/DON-EVENT-003_specs_before_20260613.json
+- 変更: iMakCatalog/tests/test_don_card_lookup.py +3 (OP13gold/1st anniv silhouette/generic EVENT回帰)
+- 変更: requests/ に 2026-06-13_psa_image_batch_resolution_response.md / _cert_input_category_filter_request.md / uta001_rescrape_decision_response.md(解決追記)
+- コード変更(resolver/lookup): 無し (DON gold は既存lookup_donで解決可・入力欠落が真因)
+
+### 検証(実出力)
+- 検証✅ lookup_don: OP15→DON-OP15-002 / OP13→DON-OP13-002 / 1st anniv→DON-EVENT-003 / generic EVENT→None(fail-closed維持)
+- 検証✅ pytest: test_don_card_lookup 18 passed / 全 301 passed
+- 検証✅ 在庫表(service account経由): R列='カテゴリ'、HIGH=TCG603他/LOW=G-shock507他。montbell3番号=HIGH行440/442/445列I・R列アウトドア・ジャケット。147130900=HIGH/LOW不在
+- 検証✅ Pudding公式裏取り: Girls Edition=ジャンプGIGA 2023 Spring応募者全員サービス同一商品(one-piece.com news 61473 / tcg-fun)
