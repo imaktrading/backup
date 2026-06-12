@@ -106,7 +106,12 @@ def extract_set_code_from_brand(brand: str) -> Optional[str]:
     # Master 同名 SR 既存) と照合できず.
     marketing_name_to_set = [
         # (PSA brand regex, Bandai 公式 set_code)
-        (r"\bADMIRABLE COLLECTION VOL\.?\s*1\b",  "OP12"),  # Bandai NA 2025/2026 release
+        # Admirable Collection vol.1 = 原典番号を保持する多元再録 (4 promo card)。番号で原典set
+        # が変わる (#063→OP12-063 / #068→OP06-068) ため brand 一律 OP12 は誤り(#068→OP12-068=Gin)。
+        # → "P" にして promo fallback (番号+名前+ADMIRABLE edition keyword) に番号駆動で解決させる。
+        # (2026-06-12 cert 151477459 Reiju #068 対応。旧 OP12 固定は 2026-05-11 #063 用だったが
+        #  fallback でも #063→OP12-063 に解決するため回帰なし=実測確認済)
+        (r"\bADMIRABLE COLLECTION VOL\.?\s*1\b",  "P"),
         (r"\bLEGACY OF THE MASTER\b",             "OP12"),  # OP-12 英語公式名
         (r"\bA FIST OF DIVINE SPEED\b",           "OP11"),  # OP-11 英語公式名
         (r"\bROYAL BLOOD\b",                      "OP10"),  # OP-10
@@ -772,6 +777,10 @@ def _search_one_piece_promo_by_number(
             ("PROMOTION CARD SET", "プロモーションカードセット"),
             ("STANDARD BATTLE", "スタンダードバトル"),
             ("EVENT PRIZE", "記念品"),
+            # 2026-06-12 収録: ADMIRABLE COLLECTION vol.N 封入 promo (cert 151477459 Reiju #068
+            #   → OP06-068_AC01)。official set_name に "Admirable Collection" を持つ変種のみ +250。
+            #   両側一致必須なので別 #068 変種(PRB01/p1 等)には発火しない。
+            ("ADMIRABLE COLLECTION", "ADMIRABLE COLLECTION"),
             # 2026-06-12 REVIEW: nth ANNIVERSARY COMPLETE GUIDE 収録特典 promo.
             #   official は英語表記 "Nth ANNIVERSARY COMPLETE GUIDE" を含むため en=jp 同句で
             #   両側一致照合。PSA brand は "ANV." 略記なので distinctive token "COMPLETE GUIDE"

@@ -55,6 +55,55 @@ class TestOnePieceCompleteGuide(unittest.TestCase):
         self.assertIsNone(r)
 
 
+class TestAdmirableCollection(unittest.TestCase):
+    """Admirable Collection vol.1 = 原典番号保持の多元再録 (2026-06-12 収録).
+
+    番号で原典 set が変わる (#063→OP12-063_AC01 / #068→OP06-068_AC01)。brand は両者同一
+    のため "P"(promo fallback) + ADMIRABLE edition keyword で番号駆動解決。
+    """
+
+    def test_admirable_reiju_068(self):
+        # cert 151477459 (今回): #068 → OP06-068_AC01
+        r = pc.lookup_one_piece(
+            "ONE PIECE JAPANESE ADMIRABLE COLLECTION VOL 1 VINSMOKE REIJU",
+            "068", "VINSMOKE REIJU", verbose=False)
+        self.assertIsNotNone(r)
+        self.assertEqual(r["card_id"], "OP06-068_AC01")
+
+    def test_admirable_reiju_063(self):
+        # cert 156485701 (2026-05): #063 → OP12-063_AC01 (旧 OP12 固定から AC01 変種へ)
+        r = pc.lookup_one_piece(
+            "ONE PIECE JAPANESE ADMIRABLE COLLECTION VOL 1 VINSMOKE REIJU",
+            "063", "VINSMOKE REIJU", verbose=False)
+        self.assertIsNotNone(r)
+        self.assertEqual(r["card_id"], "OP12-063_AC01")
+
+    def test_op12_booster_not_affected(self):
+        # 通常 OP12 booster brand は OP12 のまま (Admirable→P 変更の影響を受けない)
+        self.assertEqual(
+            pc.extract_set_code_from_brand("ONE PIECE JAPANESE OP12-LEGACY OF THE MASTER"),
+            "OP12")
+
+
+class TestS8aPPromoCardPack(unittest.TestCase):
+    """S8a-P プロモカードパック25th = 全25枚収録 (2026-06-12, 公式 pokemon-card.com)."""
+
+    def test_mew_ex_014(self):
+        # cert 136946038: base弾#014=Bulbasaur と別体系。25周年promo #014=Mew ex
+        r = pc.lookup_pokemon(
+            "POKEMON JAPANESE PROMO CARD PACK 25TH ANNIVERSARY EDITION",
+            "014", "MEW EX", verbose=False)
+        self.assertIsNotNone(r)
+        self.assertEqual(r["card_id"], "S8a-P-014")
+        self.assertEqual(r["name_en"], "Mew ex")
+
+    def test_charizard_001(self):
+        r = pc.lookup_pokemon(
+            "POKEMON JAPANESE PROMO CARD PACK 25TH ANNIVERSARY EDITION",
+            "001", "CHARIZARD", verbose=False)
+        self.assertEqual(r["card_id"], "S8a-P-001")
+
+
 class TestOnePieceAmbiguousStayReject(unittest.TestCase):
     """曖昧 promo は fail-closed reject 維持 (誤出品防止)."""
 
