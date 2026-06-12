@@ -950,3 +950,24 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: 51 ASIN を md parse → 全51 が dump 4 file に実在
 - 検証✅(重複): exclude_entirely(A/B)と重複0。exclude_amazon_available_only(C)と1件(B0CQC3TLRZ)重複→annotate
 - 検証✅(JSON): gender_scope_tags.json valid・51 ASIN
+
+
+## 2026-06-12 (続5) — Catalog: resolver.py に G-shock dispatch 追加(本実装・売上直結)
+
+### 決定事項
+- 決定1(真因配線): G-shock CSV が dedupe で10/10解決不能→入稿0件の真因=resolver.py の G-shock 未配線(旧 line134-136「別phase」後回し)。lookup_gshock(alias対応)は正常動作・配線だけ未実施だった。HQ greenlight で本実装。
+- 決定2(実装): resolve() の _TCG_LOOKUP dispatch 直後に cat=="gshock" 分岐。signals["model"]→lookup_gshock→canonical product_id。model無/未収録/真1:N→""(fail-closed)。
+- 決定3(import stale罠回避): module-level `import gshock_lookup as _gl`。sys.path[0:2]=自worktree設定済で最新alias版を掴む。resolver._gl.__file__ で自worktree版確認。
+- 決定4(spec差分・無害): lookup_gshock は alias内部解決し canonical返す(GM-700G-9A→GM-700G-9AJF/alias_of=None)。spec の `alias_of or product_id` は防御維持だが実質product_id。
+
+### 変更
+- 変更: resolver.py:28-31(import _gl) / :128-142(gshock dispatch) / :150-151(旧コメント更新)
+- 変更: tests/test_resolver_facade.py +5(canonical自身/bare→alias canonical/真1:N→""/未収録→""/model空→"")。旧 test_unsupported_category→test_gshock_no_model に改名。全296 green
+- 変更: requests/ に 完了報告 _response.md
+- commit: 1209241 (feature/uniqlo-ut)
+
+### 検証(resolve() 実機出力)
+- 検証✅: DW-5600RL-1JF→自身 / GA-V01SKE-6A→自身 / GM-700G-9A→GM-700G-9AJF(alias) / GW-9400J-1B→"" / NONEXIST→"" / model空・キー無→""
+- 検証✅: resolver._gl.__file__=C:\dev\iMak_catalog\iMakCatalog\integrations\gshock_lookup.py(自worktree最新)
+- 検証✅: 既存 TCG/DON/URL resolve 回帰なし(296 green)
+- 検証⚠️(統合): dedupe側B/C(model抽出+gshock category検出)はDedupe担当。両揃って初めてG-shock CSV resolved。統合verifyはDedupe完了後(出品くんCSVで実件数)
