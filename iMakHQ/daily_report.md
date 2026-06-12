@@ -989,3 +989,26 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 
 ### 変更
 - 変更: requests/ に feasibility 回答 _response.md(Q1-Q3)。コード/データ変更なし。
+
+
+## 2026-06-12 (続7) — Catalog: PSA収録バッチ(S8a-P全25/Admirable Collection/G-shock2) + auto_catalog_add 4件
+
+### 決定事項
+- 決定1(S8a-P全25枚): HQ依頼+auto#014。公式pokemon-card.com で番号→名前確定→残24枚投入(010既存)で全25完成。#014=ミュウex/Mew ex(base弾#014=Bulbasaurと別体系)。name_en=catalog同名引き14枚+原典英名(Dark Gyarados等)、#013ロケット団の幹部のみ英名曖昧→空欄(fail-closed)。3AI誤BLOCKをcatalog解決で迂回。
+- 決定2(Admirable Collection=多元再録): 原典番号保持(#063→OP12-063 / #068→OP06-068)。旧brand一律OP12固定が#068→Gin誤の原因。OP06-068_AC01+OP12-063_AC01投入、extract を OP12固定→"P"(番号駆動)変更+edition pair に ADMIRABLE 追加。両側一致=誤発火不能。
+- 決定3(G-shock 2本): GA-V01CMG-6AJF(COLOR CAMO)/GM-2100LXB-1A9JF(LUXE BLACK)=CASIO公式裏取り(2026-06発売、1A9は実在色)。canonical suffix形で収録。
+- 決定4(yugioh TDPP-JP018 保留): 本日feasibility対象cert。JP(OCG)刷り情報0でscraper+resolver経路要=実装は再開greenlight後。推測収録せず保留=fail-closed正。
+- 決定5(missing_models.csv非改変): HQ所有pipeline artifact。解決済は今後resolveされ再検出されないため触らず、_processed報告で代替。
+
+### 変更
+- 変更: integrations/psa_to_csv.py — Admirable: marketing map OP12→"P" / promo edition pair に ("ADMIRABLE COLLECTION")
+- 変更: tests/test_psa_review_promo_resolve.py +6(Admirable#063/#068/OP12非回帰、S8a-P Mew ex/Charizard)。全301 green
+- 変更(共有DB・git外): S8a-P 24枚 / OP06-068_AC01・OP12-063_AC01 / GA-V01CMG-6AJF・GM-2100LXB-1A9JF。bak: s8aP_fullset / catalogadd_batch
+- 変更: requests/ 回答 psa_catalog_gap_..._response.md + auto 4件 _processed
+- commit: 7533644
+
+### 検証(実出力)
+- 検証✅(S8a-P): lookup_pokemon(brand,'014')→S8a-P-014/Mew ex。003→Blastoise/025→Tapu Lele-GX/010→Shining Magikarp
+- 検証✅(Admirable): #068→OP06-068_AC01 / #063→OP12-063_AC01 / OP12 booster brand→OP12(回帰なし)
+- 検証✅(G-shock): lookup_gshock GA-V01CMG-6AJF→自身 / GM-2100LXB-1A9JF→自身。CASIO公式実在裏取り
+- 検証⚠️(残): Admirable vol.1 残promo2枚未識別(公式ac01.phpは「Promotion Card x4」のみ、cert無=低優先) / S8a-P #013英名空欄 / yugioh JP保留
