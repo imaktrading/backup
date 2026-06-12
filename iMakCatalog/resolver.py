@@ -26,6 +26,9 @@ for _p in (str(_ROOT), str(_ROOT / "integrations")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 import psa_to_csv as _pc  # noqa: E402
+# G-shock lookup (alias 対応版)。sys.path[0:2] が自 worktree(_ROOT, _ROOT/integrations)に
+# 設定済のため bare import で **自 worktree の最新版**を掴む (HQ 警告の import順 stale 罠回避)。
+import gshock_lookup as _gl  # noqa: E402
 
 # category(正規化後) → lookup fn. TCGは統一 signature (brand, card_number, subject, verbose).
 _TCG_LOOKUP = {
@@ -124,6 +127,19 @@ def resolve(context: dict) -> str:
         # lookup_pokemon/one_piece 等は legacy dict で card_id、lookup_yugioh は
         # 生 record で product_id を返すため、両対応 (2026-06-11 yugioh resolve→'' 修正)。
         return (rec or {}).get("card_id") or (rec or {}).get("product_id") or ""
+    # 1b) G-shock (signature が TCG と違う: model のみ。_TCG_LOOKUP には入れない)
+    #     KEY_REDESIGN_SPEC §3「解決は resolver 1 箇所」の本道。dedupe が G-shock CSV を
+    #     全除外していた真因 = ここの未配線 (旧 line 134-136「G-shock等は別phase」)。
+    #     lookup_gshock は alias を内部解決して canonical record を返す (bare→canonical /
+    #     真1:N bare→None)。よって返る product_id は常に canonical。alias_of は防御的に優先。
+    if cat == "gshock":
+        model = signals.get("model") or ""
+        if not model:
+            return ""  # fail-closed: model 不明 (推測で埋めない)
+        rec = _gl.lookup_gshock(model)
+        if not rec:
+            return ""  # fail-closed: catalog 未収録 / 真1:N 曖昧
+        return rec.get("alias_of") or rec.get("product_id") or ""
     # 2) DON (signature が異なる: brand, subject, image_url)
     if cat == "don":
         rec = _pc.lookup_don(brand, subject, image, verbose=False)
@@ -132,7 +148,7 @@ def resolve(context: dict) -> str:
     if url:
         return _normalize_url_key(url)
     # 4) 未対応 category / signal不足 → fail-closed
-    #    (G-shock 等は別phaseで _TCG_LOOKUP 相当を追加。現状は "" を返す)
+    #    (G-shock は上の 1b で配線済 2026-06-12。新 category はここに dispatch 追加)
     return ""
 
 

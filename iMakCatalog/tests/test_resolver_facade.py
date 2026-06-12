@@ -45,8 +45,36 @@ def test_category_alias():
               subject="", card_no="001") == "OP01-001"
 
 
-def test_unsupported_category_failclosed():
+def test_gshock_no_model_failclosed():
+    # gshock は対応済だが model signal 無 → "" (brand だけでは解決しない)
     assert _r("gshock", brand="x") == ""
+    assert _r("gshock") == ""
+
+
+# === G-shock dispatch (2026-06-12 BUILD greenlight: dedupe 全除外の真因配線) ===
+def test_gshock_canonical_self():
+    # canonical suffix形 → 自身
+    assert _r("gshock", model="DW-5600RL-1JF") == "DW-5600RL-1JF"
+    assert _r("gshock", model="GA-V01SKE-6A") == "GA-V01SKE-6A"
+
+
+def test_gshock_bare_alias_to_canonical():
+    # 短縮形 bare (1:1 alias) → canonical suffix形に解決
+    assert _r("gshock", model="GM-700G-9A") == "GM-700G-9AJF"
+
+
+def test_gshock_true_1n_failclosed():
+    # 真の 1:N 曖昧 bare → "" (推測しない)
+    assert _r("gshock", model="GW-9400J-1B") == ""
+
+
+def test_gshock_unregistered_failclosed():
+    # catalog 未収録 → "" (誤出品せず skip)
+    assert _r("gshock", model="NONEXIST-9999-9Z") == ""
+
+
+def test_gshock_empty_model_failclosed():
+    assert _r("gshock", model="") == ""
 
 
 def test_missing_signals_failclosed():
