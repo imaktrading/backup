@@ -1056,3 +1056,24 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅ pytest: 全 305 passed (test_psa_review_promo_resolve 16 / test_don_card_lookup 18 含む)
 - 検証✅ cert抽出フィルタ(実シート再現): 抽出条件該当208行 → TCG 199抽出 / 非TCG(montbell) 9除外。montbell・147130900 混入ゼロ
 - 検証✅ 構文: iMakTCG/psa_to_csv.py ast.parse OK
+
+
+## 2026-06-13 (続2) — Catalog: S8a-G (25th Golden Box) 全15枚の誤set是正
+
+### 決定事項
+- 決定(誤set是正): S8a-G(25th Anniversary GOLDEN BOX)全15枚の specs.set_name_ebay が誤って
+  "25th Anniversary Collection"(=別product s8a の名)だった。Bulbapedia/eBay裏取りで Golden Box は
+  Collection(s8a→eBay "Celebrations")と別の premium product と確認 → "25th Anniversary Golden Box" に是正。
+  Pikachu V cert142931332 等が解決時に正しい set で出品される(誤set出品=出品の正確性違反 を予防)。
+- 色は Pokemon 全entry で未保持(convention無)のため追加せず。rarity は Golden Box 個別裏取り要で今回保留。
+
+### 変更
+- 変更(共有DB・git外): S8a-G-001〜015 の specs.set_name_ebay → "25th Anniversary Golden Box" /
+  set_name_official → "25th ANNIVERSARY GOLDEN BOX [S8a-G]"。bak: _bak/S8a-G_setname_before_20260613.json
+- 変更: iMakCatalog/tests/test_psa_review_promo_resolve.py +1 (Golden Box set_name 是正の lock)
+
+### 検証(実出力)
+- 検証✅ lookup_pokemon(S8a-G-005)→ set_name_ebay="25th Anniversary Golden Box"
+- 検証✅ 通常Collection 不変: lookup_pokemon(S8a-024 Lugia)→ "Celebrations" (S8a-G-% のみ更新、S8a-% は無変更)
+- 検証✅ pytest: test_psa_review_promo_resolve 17 passed
+- 検証✅ 裏取り: Bulbapedia "25th Anniversary Golden Box (TCG)" / eBay 実listing が "25th Anniversary Golden Box" 使用

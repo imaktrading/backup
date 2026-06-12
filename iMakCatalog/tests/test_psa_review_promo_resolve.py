@@ -148,6 +148,17 @@ class TestPokemonGoldenBox(unittest.TestCase):
         self.assertEqual(r["card_id"], "S8a-G-005")
         self.assertEqual(r["name_en"], "Pikachu V")
 
+    def test_golden_box_set_name_is_golden_box_not_collection(self):
+        # 2026-06-13: S8a-G (Golden Box) は s8a (Collection→eBay 'Celebrations') と別 product。
+        # 誤って set_name_ebay='25th Anniversary Collection' だったのを 'Golden Box' に是正
+        # (Bulbapedia/eBay 裏取り)。出品の正確性 (誤set 回避)。
+        r = pc.lookup_pokemon(
+            "2021 POKEMON JPN", "005",
+            "PIKACHU V 25TH ANNIV-GOLDEN BOX", verbose=False,
+        )
+        self.assertEqual(r["card_id"], "S8a-G-005")
+        self.assertEqual(r["set_name_ebay"], "25th Anniversary Golden Box")
+
     def test_golden_box_subject_path_jp_brand(self):
         # 2026-06-13 新 subject-path: GOLDEN BOX が **subject 側のみ**、 brand は JP 明示
         # (= cert142931332 実物スラブ "2021 POKEMON JPN" + subject "...GOLDEN BOX")。
