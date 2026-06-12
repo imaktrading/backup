@@ -1493,6 +1493,24 @@ def load_relist_targets(pending_csv):
     return targets
 
 
+MAX_PER_RUN = 10  # 1回の出品実行で処理する最大件数 (2026-05-18 batch運用 / 2026-06-12 ランダム抽出化)
+
+
+def select_run_targets(targets, *, no_shuffle=False, max_per_run=MAX_PER_RUN, rng=None):
+    """未出品キュー targets から 1 回分を選ぶ (ランダム抽出 + 件数上限).
+
+    no_shuffle=False (既定): シャッフル後に先頭 max_per_run 件 (上位行偏り防止。TCG psa_to_csv 同仕様)。
+    no_shuffle=True: 従来の上から順 (環境変数 GSHOCK_NO_SHUFFLE=1 用)。
+    rng: テスト用に random.Random を注入可 (再現性確保)。
+    元の targets は破壊しない (コピーを返す)。
+    """
+    picked = list(targets)
+    if not no_shuffle:
+        import random as _random
+        (rng or _random).shuffle(picked)
+    return picked[:max_per_run]
+
+
 def main():
     import argparse
     global _IMMEDIATE_SCHEDULE
@@ -1540,13 +1558,18 @@ def main():
             input("Enterで終了...")
             return
 
-        # 1回の実行で MAX 10件 (= 10件づつバッチ運用、2026-05-18)
-        MAX_PER_RUN = 10
-        if len(targets) > MAX_PER_RUN:
-            print(f"\n合計 {len(targets)} 件中、先頭 {MAX_PER_RUN} 件のみ処理します (残 {len(targets)-MAX_PER_RUN} 件は次回実行で)。\n")
-            targets = targets[:MAX_PER_RUN]
+        # 上から順でなくランダム抽出 + 10件キャップ (2026-06-12 ユーザー要望: 上位行に偏らず満遍なく出品。TCG psa_to_csv 同仕様)
+        # 環境変数 GSHOCK_NO_SHUFFLE=1 で従来の上から順に戻せる
+        # ※ _os は main() 後段 (whitelist 検証) で local import されるため、ここで先に local 束縛する
+        import os as _os
+        _no_shuffle = (_os.environ.get("GSHOCK_NO_SHUFFLE") == "1")
+        _total = len(targets)
+        targets = select_run_targets(targets, no_shuffle=_no_shuffle)
+        if _total > len(targets):
+            _how = "先頭" if _no_shuffle else "ランダム"
+            print(f"\n合計 {_total} 件中、{_how} {len(targets)} 件を処理します (残 {_total-len(targets)} 件は次回実行で)。\n")
         else:
-            print(f"\n合計 {len(targets)} 件を処理します。\n")
+            print(f"\n合計 {_total} 件を処理します。\n")
     # 2026-05-08: catalog 未登録 = SKIP 設計に変更したため scrape_casio 不要、Chrome 起動廃止
     # scrape_casio 関数自体は残置 (将来再利用の可能性、driver 引数のまま)
     driver = None
