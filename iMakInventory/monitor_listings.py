@@ -366,6 +366,37 @@ def append_action_required(sheet_label: str, result: dict, reason: str,
 
 
 # ============================================================================
+# orphan chrome 一掃 (cycle 開始時の clean slate 確保、2026-06-12)
+# ============================================================================
+def _kill_stale_scraper_chrome(log=print) -> None:
+    """scraper の orphan な headless chrome + undetected_chromedriver を kill.
+
+    ユーザーの通常ブラウザ (= 非 headless) は --headless filter で温存。
+    driver 生成"前"(並走 driver 皆無の安全な時点) でのみ呼ぶこと
+    (cycle 途中で呼ぶと並走中の他 supplier driver の chrome を巻き込む)。
+    """
+    if sys.platform != "win32":
+        return
+    ps = (
+        "Get-Process undetected_chromedriver -ErrorAction SilentlyContinue | "
+        "Stop-Process -Force -ErrorAction SilentlyContinue; "
+        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        "Where-Object { $_.CommandLine -match '--headless' } | "
+        "ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"
+    )
+    try:
+        import subprocess  # noqa: PLC0415
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        log("  [cleanup] 前 cycle の orphan chrome/driver を一掃 (clean slate)")
+    except Exception as e:
+        log(f"  [cleanup] orphan kill skip ({type(e).__name__}: {e})")
+
+
+# ============================================================================
 # 1 spreadsheet (HIGH or LOW) を処理
 # ============================================================================
 def process_sheet(
@@ -418,6 +449,17 @@ def process_sheet(
         sup = detect_supplier(_domain_of(r["url"]))
         by_sup[sup] = by_sup.get(sup, 0) + 1
     log(f"  supplier 内訳: {by_sup}")
+
+    # === cycle 開始時の orphan chrome 一掃 (2026-06-12 制定・再発防止) ===
+    # 前 cycle で driver 再起動が失敗すると headless chrome が orphan として残り、
+    # 累積すると新規 driver が「chrome not reachable」で起動不能になる
+    # (2026-06-12 21:30 cycle で mercari driver が 6分 blind → 累積で完全不動の事故)。
+    # 旧 kill (`taskkill /IM chromedriver.exe` + WINDOWTITLE filter) は (a) uc は
+    # undetected_chromedriver.exe で名前不一致 (b) headless chrome は window title 無し、
+    # の二重バグで一つも kill できていなかった。 driver 生成"前"(= 並走 driver 皆無の安全な
+    # 時点) に、 --headless chrome (= scraper 専用、 ユーザーの通常ブラウザは非 headless で温存)
+    # と undetected_chromedriver を確実に kill する。
+    _kill_stale_scraper_chrome(log)
 
     # Mercari URL がある場合は driver を 1 つ生成して再利用 (起動コスト削減)
     mercari_driver = None

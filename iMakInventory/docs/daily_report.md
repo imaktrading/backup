@@ -1,5 +1,34 @@
 # iMakInventory daily_report
 
+## 2026-06-12 — mercari driver「chrome not reachable」事故 → orphan chrome 一掃で再発防止
+
+### 事故
+21:30 cycle で mercari driver が 22:04 にクラッシュ → 再起動を3回試みるも
+`SessionNotCreatedException: cannot connect to chrome` で失敗 → 約6分(22:04-22:10) mercari
+全 None → row519-541 等 19行が blind。 その後 isolation でも driver 起動不能に悪化。
+
+### 根本原因 (調査で確定)
+- driver 再起動失敗のたびに **headless chrome が orphan として残留・累積** (cycle中 + 手動test
+  で 23→38→50)。 累積で新規 chrome 起動が「chrome not reachable」になり driver 完全不動。
+- 既存の kill 処理 (`monitor_listings.py:456`) は **二重バグで orphan を一つも kill できていなかった**:
+  (a) `taskkill /IM chromedriver.exe` ← uc は `undetected_chromedriver.exe` で名前不一致
+  (b) `taskkill /IM chrome.exe /FI "WINDOWTITLE eq *iMakInventory*"` ← headless chrome は
+      window title 無しで 0 ヒット。
+- Wi-Fi 無関係 (localhost の chrome 接続失敗)。 Chrome v149 / uc 3.5.5。
+
+### 対処
+- **即時**: scraper の orphan chrome (--headless で識別、 ユーザーブラウザ温存) + driver を
+  手動 kill → driver 即復活 (単発 scrape OK 確認、 再起動不要)。
+- **再発防止 (commit)**: `monitor_listings.py` に `_kill_stale_scraper_chrome()` 追加、
+  **process_sheet 開始時 (driver 生成前 = 並走 driver 皆無の安全点) に orphan を一掃**。
+  PowerShell で `undetected_chromedriver` + `--headless` chrome を kill (非headless=
+  ユーザーブラウザは温存)。 cycle 途中の kill は並走 driver を巻き込むため startup のみ。
+- test_kill_stale_chrome.py 3件 (非win32 no-op / powershell+headless filter / 例外 fail-safe)。
+
+### 漏れ検証
+- 19 blind 行: 404=0 (削除なし) + row729 実機 ON_SALE + **ユーザーが HIGH AK 全行を目視確認
+  → スプシ整合・漏れなし**。 売切で返った行ゼロ。 **取下げ漏れ: なし**。
+
 ## 2026-06-11 (続々々々) — snkrdunk「uncertain N/M candidates」誤アラート → 接続リトライ
 
 ### 決定 → 変更 → 検証
