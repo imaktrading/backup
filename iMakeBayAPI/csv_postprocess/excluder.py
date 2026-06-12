@@ -100,14 +100,14 @@ def exclude_rows_from_csv(csv_path: str, nogo_indices: List[int]) -> dict:
     """
     if not nogo_indices:
         return {"removed": 0, "kept": 0, "backup_path": "", "csv_path": csv_path,
-                "removed_titles": []}
+                "removed_titles": [], "removed_certs": []}
 
     # 元 CSV 読込
     with open(csv_path, encoding="utf-8") as f:
         rows = list(csv.reader(f))
     if not rows:
         return {"removed": 0, "kept": 0, "backup_path": "", "csv_path": csv_path,
-                "removed_titles": []}
+                "removed_titles": [], "removed_certs": []}
 
     header = rows[0]
     data = rows[1:]
@@ -119,12 +119,24 @@ def exclude_rows_from_csv(csv_path: str, nogo_indices: List[int]) -> dict:
     except ValueError:
         title_idx = 2  # eBay FileExchange の標準位置
 
+    # cert 列の index (= post_no_go_sentinel 用 NO-GO cert 収集。2026-06-12 追加)
+    cert_idx = -1
+    for _i, _h in enumerate(header):
+        if "Certification Number" in _h:
+            cert_idx = _i
+            break
+
     removed_titles = []
+    removed_certs = []
     kept_data = []
     for i, row in enumerate(data, start=1):  # 1-based
         if i in nogo_set:
             t = row[title_idx] if title_idx < len(row) else ""
             removed_titles.append(f"[{i}] {t[:60]}")
+            if 0 <= cert_idx < len(row):
+                _c = (row[cert_idx] or "").strip()
+                if _c:
+                    removed_certs.append(_c)
         else:
             kept_data.append(row)
 
@@ -144,6 +156,7 @@ def exclude_rows_from_csv(csv_path: str, nogo_indices: List[int]) -> dict:
         "backup_path": backup_path,
         "csv_path": csv_path,
         "removed_titles": removed_titles,
+        "removed_certs": removed_certs,
     }
 
 
@@ -155,6 +168,17 @@ def exclude_from_check_csv_stdout(csv_path: str, stdout_text: str) -> dict:
     indices = parse_nogo_indices(stdout_text)
     result = exclude_rows_from_csv(csv_path, indices)
     result["parsed_nogo_indices"] = indices
+    # 価格 NO-GO cert を sidecar に保存 → post_no_go_sentinel がこれを読む。
+    # 理由: post_no_go_sentinel は従来 `.csv.bak` 差分で NO-GO cert を求めていたが、
+    # `.csv.bak` は後段 dedupe が同名で上書きするため、差分が「dedupe 除外 cert」に化けて
+    # 価格 NO-GO cert を取りこぼしていた (2026-06-12 fix)。毎回上書き = 古い run の混入防止。
+    try:
+        import json as _json
+        sidecar = csv_path + ".nogo_certs.json"
+        with open(sidecar, "w", encoding="utf-8") as _f:
+            _json.dump(result.get("removed_certs", []), _f, ensure_ascii=False)
+    except Exception:
+        pass
     return result
 
 

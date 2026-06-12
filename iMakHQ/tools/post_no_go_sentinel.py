@@ -20,35 +20,25 @@ HIGH_K_COL = 11     # col K = 「未使用」 (= sentinel 用)
 GSHEET_CREDS = r"C:/dev/iMak/double-hold-421922-7c0d38d3f73d.json"
 
 
-def _get_no_go_certs_from_bak(csv_path: str) -> list[str]:
-    """元 CSV (= .bak、 NO-GO 除外前) と 現 CSV を比較、 除外された cert list 返却."""
-    csv_p = Path(csv_path)
-    bak = csv_p.with_suffix(".csv.bak")
-    if not bak.exists():
-        return []  # 除外なし or hook 動作前
-    # bak の全 cert
-    bak_certs = set()
+def _get_no_go_certs(csv_path: str) -> list[str]:
+    """価格 NO-GO 除外 cert を excluder の sidecar (`<csv>.nogo_certs.json`) から取得.
+
+    2026-06-12 修正: 従来は `.csv.bak` 差分で求めていたが、`.csv.bak` は後段 dedupe が
+    同名で上書きするため、差分が「dedupe 除外 cert (重複/解決不能)」に化けて、本来の価格
+    NO-GO cert を取りこぼし・誤 cert に sentinel 書込していた。
+    → excluder (= 価格 NO-GO を物理除外する張本人) が除外時に cert を sidecar 保存し、
+       ここではそれを読むだけにする (= dedupe 除外と混ざらない)。
+    """
+    sidecar = Path(csv_path + ".nogo_certs.json")
+    if not sidecar.exists():
+        return []  # excluder が NO-GO 0 件 or hook 動作前
     try:
-        with open(bak, encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                c = (row.get("CDA:Certification Number - (ID: 27503)") or "").strip()
-                if c:
-                    bak_certs.add(c)
+        import json
+        with open(sidecar, encoding="utf-8") as f:
+            certs = json.load(f)
+        return sorted({str(c).strip() for c in certs if str(c).strip()})
     except Exception:
         return []
-    # 現 CSV の残存 cert
-    now_certs = set()
-    if csv_p.exists():
-        try:
-            with open(csv_p, encoding="utf-8") as f:
-                for row in csv.DictReader(f):
-                    c = (row.get("CDA:Certification Number - (ID: 27503)") or "").strip()
-                    if c:
-                        now_certs.add(c)
-        except Exception:
-            pass
-    # 差分 = 除外 cert
-    return sorted(bak_certs - now_certs)
 
 
 def _write_sentinel_red(certs: list[str], append_log_func) -> dict:
@@ -101,7 +91,7 @@ def run_post_no_go_sentinel(csv_path: str, append_log_func) -> None:
     append_log_func("▶ post_no_go_sentinel (NO-GO 除外 cert に スプシ K 列 sentinel 書込)\n")
     append_log_func("======================================================================\n")
 
-    no_go_certs = _get_no_go_certs_from_bak(csv_path)
+    no_go_certs = _get_no_go_certs(csv_path)
     if not no_go_certs:
         append_log_func("  ✅ NO-GO 除外 cert なし、 skip\n")
         return
