@@ -44,9 +44,27 @@
 | pytest | 309 passed | **329 passed** (= +20 件、 regression-free) |
 | extract_gshock prefix カバレッジ | 固定 23 whitelist | 汎用 (= GMC 含む全 prefix) |
 
+### HIGH スプシ DUP マーク 追加 (= Phase 5、 夜の追加対応)
+
+- 決定: HIGH (= TCG) 同 canonical KEY × 異 cert で「既出品 ACTIVE あり + 未出品 B空 row」 を DUP マーク (= スプシ＝eBay 整合)
+- 変更: 未実装 (= dup_marker 既存 helper の ad-hoc 呼出で完結)
+- 検証: 6/6 PASS (= SV9-102 / SV9-105 / M2a-197 ×2 (= 依頼書事例 145954556/142643221) / M2a-202 / OP12-061_p1) + .bak 保存 (= 20260612_121159_dup_mark_HIGH.bak.json)
+
+### PSA cert 単位判定 依頼 → 撤回 (= 方針合意フェーズ)
+
+- 決定: HQ 撤回受領、 「PSA も無在庫 drop-ship」 前提で canonical KEY 単位 現状維持 (= 実装着手なし)
+- 変更: なし
+- 検証: 撤回理由 = memory `dropshipping_model_premise` 整合、 spec §1 「1 枚 = 1 固有 KEY」 維持
+
 ### 次のセッション持越し
 
 - TCG 解決不能 64 件 (= cert 無し 42 + cache 未投入 5 + resolver "" 17) → 別方針 (= cert 補完 / 手動、 HQ 判断)
 - `_dummy` 系 2 件 (= row 380/382) HQ 精査
 - catalog 未登録 (= GA-V01CMG-6AJF 型) → 現状維持 (= 収録後自然出品)
 - HQ 側で `_leader_cost_invariant` test 2 件 fail (= iMakTCG Leader cost logic、 重複くん責務外)
+
+### 本日 DUP マーク 累計 (= スプシ＝eBay 整合の総括)
+
+- LOW G-shock: 9 件 (= scope2 5 + scope3 4)
+- HIGH TCG: 6 件 (= Phase 5)
+- 合計: **15 件** → スプシ上の冗長 row 整理完了
