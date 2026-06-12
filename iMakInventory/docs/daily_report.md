@@ -1,5 +1,36 @@
 # iMakInventory daily_report
 
+## 2026-06-13 — driver「cannot connect to chrome」真因 = version_main=148 ハードコード陳腐化
+
+### 決定 (Gemini 相談 + コード調査で真因確定)
+- 05:30 cycle でも driver crash 継続 (mercari/amazon 10行 blind、 `MaxRetryError`/
+  `ConnectionReset(10054)` on localhost)。 ユーザー指示で Gemini (gemini-2.5-flash) に相談
+  → 「version mismatch が最有力」。 コード調査で **真因確定**:
+  - `mercari_scraper.py:170` / `amazon_scraper.py:361` が **`version_main=148` ハードコード**
+    (コメントも「2026-05-21 v148対策」のまま)。 だが **Chrome 本体は自動更新で v149**。
+  - → uc が chromedriver 148 を取得 → chrome 149 に接続できず
+    「SessionNotCreatedException: cannot connect to chrome」 を頻発。
+  - uc は 3.5.5 が PyPI 最新で更新不可 (uc 更新は手詰まり)。 真の問題は version 固定の陳腐化。
+
+### 変更 (Chrome 実 version を自動検出 → 自動追従で再発防止)
+- `scrapers/_chrome_util.py` 新規: `detect_chrome_major()` = レジストリ
+  `HKCU/HKLM\Software\Google\Chrome\BLBeacon\version` から Chrome major を検出 (キャッシュ、
+  失敗時 None=uc 自動検出)。
+- `mercari_scraper.py` / `amazon_scraper.py`: `version_main=148` →
+  `version_main=detect_chrome_major()`。 Chrome 自動更新 (149→150...) に構造的に追従。
+- `tests/test_chrome_util.py` 3件 (int/None・キャッシュ・例外fallback)。
+
+### 検証
+- ✅ `detect_chrome_major()` → 149 (Chrome 本体と一致)
+- ✅ mercari driver 起動成功 + scrape 成功 (version 一致で「cannot connect」解消)
+- ✅ offline 計 150 pass
+- 09:30 both-cycle が真の live proof (driver crash が消えるか)
+
+### Gemini 助言の他項目 (今回不採用/保留)
+- 画像読込OFF 等の chrome flag (リソース削減) = 低リスク高効果、 次の改善候補
+- driver 50-100件ごと再生成 = mercari は既に 150件ごと実装済
+- chrome downgrade = Gemini は「149はベータ」と誤認 (知識2024)、 2026 では安定版 → 不採用
+
 ## 2026-06-12 — mercari driver「chrome not reachable」事故 → orphan chrome 一掃で再発防止
 
 ### 事故

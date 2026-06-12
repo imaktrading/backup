@@ -357,8 +357,11 @@ def create_amazon_driver(headless: bool = True, use_login_profile: bool = True):
     if headless:
         options.add_argument("--headless=new")
 
-    # 2026-05-21: Chrome 本体 v148 と uc default driver v149 の mismatch 対策
-    return uc.Chrome(options=options, version_main=148)
+    # 2026-06-13: Chrome 本体の major version を自動検出して uc に渡す (None=uc 自動検出)。
+    # 旧 version_main=148 ハードコードは Chrome 自動更新 (→v149) で陳腐化し driver 接続不能
+    # 「cannot connect to chrome」 を頻発させた。 検出で自動追従させ再発防止。
+    from ._chrome_util import detect_chrome_major  # noqa: PLC0415
+    return uc.Chrome(options=options, version_main=detect_chrome_major())
 
 
 def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optional[dict]:
