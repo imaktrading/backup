@@ -1,5 +1,29 @@
 # iMakHarvest daily_report
 
+## 2026-06-12 (= 続2) — staging amazon_gshock → LOW へ重複しない分を転記 (= ASIN dedup 136件)
+
+### 決定
+
+- **staging amazon_gshock (309件) のうち LOW 未登録分を LOW に追記** (= user 指示)。
+- **重複判定は ASIN** (= URL から抽出)。 URL 完全一致は不可と判明:
+  LOW は Amazon を wishlist 形式 (`/dp/ASIN/?coliid=...&ref_=list_c_wl_...`) で保持するため、
+  staging のクリーン `/dp/ASIN` と文字列不一致 → URL 一致だと同一 ASIN 109件を二重登録してしまう。
+  - URL 完全一致 dedup → 245件 (= 109件が二重登録) ❌
+  - ASIN dedup → **136件** (= 正、 二重出品防止) ✅
+
+### 変更
+
+- `tools/transfer_amazon_gshock_to_low.py` 新規 (= staging→LOW 転記、 ASIN dedup、 37列行コピー)。
+
+### 検証
+
+- ✅ 転記実機: LOW 756→**892行** (+136)。 dup skip 173 / ASIN無し 0。
+- ✅ 私の追記 136件は **全て新規 ASIN、 二重登録 0件** (= collide 検証で確認)。
+- ⚠️ LOW には **元々 48 ASIN が重複登録** (= 転記前から存在、 本件と別の既存データ品質問題)。
+  → 必要なら別途 cleanup 提案 (= 今回は非干渉)。
+
+---
+
 ## 2026-06-12 (= 続) — メンズ scope にレディース50件混入を是正 (= 性別フィルタ追加 + 削除)
 
 ### 決定
