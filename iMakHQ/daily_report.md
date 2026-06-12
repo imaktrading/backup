@@ -932,3 +932,21 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅: 17 ASIN を specs/variants/source_url/source 全 grep → 0 hit(未投入)
 - 検証✅(dump裏取り): 4 dump 375件中 16/17 ASIN top-level実在。seller誤判定確認(B0CYLNCYRY等 seller='Amazon.co.jp'=FBA誤検出)。B000FPVUJA のみ現dump不在(no-op、再混入防止で登録)
 - 検証✅(JSON): exclude_asins.json valid・17 unique(entirely8+flag_only9)
+
+
+## 2026-06-12 (続4) — Catalog: Amazon dump レディース51 ASIN を gender タグ化(Harvest依頼)
+
+### 決定事項
+- 決定1(別軸管理): 前回の非直販除外(seller軸)と違い、レディース51は「除外でなく gender/scope タグ」。identity保持・amazon_available可・メンズ動線には流さない。依頼どおり exclude_asins.json と別 file で管理。
+- 決定2(重複1件の優先): B0CQC3TLRZ(GM-S5600UPG-1JF)は前回 C群(国内3P)にも在り。seller軸(非直販=直販フラグ立てない)が優先、本file は gender=ladies のみ付与。両軸直交で矛盾なく合成。
+- 決定3(merge挙動): 将来 Amazon merge は exclude_asins.json(seller軸) と gender_scope_tags.json(gender軸)の両方を読み合わせ、ASINごとに (除外/フラグ) ∧ (scope) を適用。
+
+### 変更
+- 変更(共有data・git外): _amazon_jp_dumps/gender_scope_tags.json 新設(51 ASIN/gender=ladies/identity可・amazon_available可・mens_sourcing除外)
+- 変更: requests/ に 2026-06-12_amazon_gshock_dump_ladies_tagging_response.md
+- コード変更: 無し(merge未実装。実装時に両 file load)
+
+### 検証(実機)
+- 検証✅: 51 ASIN を md parse → 全51 が dump 4 file に実在
+- 検証✅(重複): exclude_entirely(A/B)と重複0。exclude_amazon_available_only(C)と1件(B0CQC3TLRZ)重複→annotate
+- 検証✅(JSON): gender_scope_tags.json valid・51 ASIN
