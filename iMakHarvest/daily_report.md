@@ -29,7 +29,8 @@
 
 ### 次のアクション
 
-- catalog dump にもレディース 50 ASIN が含まれる → 既存 exclude_asins.json への追記を Catalog へ依頼可 (= 任意)。
+- catalog dump のレディース **51 ASIN** を Catalog へ依頼書投入済 (= 完全除外でなく gender タグ/scope外認識。
+  `catalog/requests/2026-06-12_amazon_gshock_dump_ladies_tagging.md`)。 Catalog `_response.md` 待ち。
 - 定期差分実行 (= `--use-http-prefilter --skip-existing-tab gshock`) の運用方式 (auto/手動) は user 判断保留。
 
 ---
