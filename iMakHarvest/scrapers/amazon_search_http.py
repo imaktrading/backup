@@ -336,6 +336,26 @@ def is_gshock_brand_text(brand: str, title: str) -> bool:
     return False
 
 
+# レディース (= 女性向け/midsize 専用) title marker。 メンズ scope では除外。
+# 2026-06-12: メンズ preset でも variant 展開等で GMA-P2100 / GMD-S5600 等の
+# レディース系が混入したため、 keep gate で除外する (= 性別フィルタ)。
+LADIES_ONLY_RE = re.compile(r"レディース|ウィメンズ|ウーマン|婦人|WOMEN'?S|LADIES")
+MENS_MARKER_RE = re.compile(r"メンズ|男性")
+
+
+def is_ladies_only(title: str) -> bool:
+    """title が レディース専用 (= メンズ表記なし) なら True (= メンズ scope で除外).
+
+    兼用 (= "メンズ" / "男性" を併記) は除外しない (= 男性も装用可、 fail-safe)。
+    """
+    t = title or ""
+    if not LADIES_ONLY_RE.search(t):
+        return False
+    if MENS_MARKER_RE.search(t):
+        return False  # 兼用表記 → 除外しない
+    return True
+
+
 def evaluate_detail_for_keep(
     session: requests.Session, asin: str,
 ) -> dict:
@@ -377,5 +397,6 @@ def evaluate_detail_for_keep(
         "seller_is_amazon": seller_ok, "brand": brand, "title": title,
         "is_gshock": is_gshock, "variant_asins": variant_asins,
         "monthly_sales_text": monthly_sales_text,
-        "should_keep": (seller_ok and is_gshock),
+        "ladies_only": is_ladies_only(title),
+        "should_keep": (seller_ok and is_gshock and not is_ladies_only(title)),
     }

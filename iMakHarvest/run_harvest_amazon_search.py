@@ -539,6 +539,16 @@ def _fetch_details(
                 "reason": "brand_not_gshock",
             })
             _log(f"  REJECT brand={brand!r} (not G-shock)")
+        elif amazon_search_http.is_ladies_only(title):
+            items_rejected.append({
+                "url": url,
+                "asin": asin,
+                "seller": seller,
+                "brand": brand,
+                "title": title[:80],
+                "reason": "ladies_only",
+            })
+            _log(f"  REJECT ladies-only title")
         else:
             merged = {
                 "asin": asin,

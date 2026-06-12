@@ -1,5 +1,39 @@
 # iMakHarvest daily_report
 
+## 2026-06-12 (= 続) — メンズ scope にレディース50件混入を是正 (= 性別フィルタ追加 + 削除)
+
+### 決定
+
+- **メンズ preset にレディース専用 50件が混入** していた (= 6/11「レディース skip」決定と矛盾)。
+  user 指示「削除してメンズのみに戻す」。
+  - 混入経路: メンズ検索で拾った midsize モデル起点に variant 展開が色違い family
+    (= GMA-P2100 29色 等) を丸ごと取込。 `is_gshock_item` に性別フィルタが無く素通り。
+- **keep gate に性別フィルタ追加** (= レディース専用 title を除外、 メンズ scope 維持)。
+  兼用 (= メンズ/男性 併記) と ユニセックス は除外しない (= fail-safe で keep)。
+
+### 変更
+
+- `scrapers/amazon_search_http.py`: `LADIES_ONLY_RE` / `MENS_MARKER_RE` / `is_ladies_only(title)` 追加。
+  `evaluate_detail_for_keep` の `should_keep` に `and not is_ladies_only(title)` 追加 (= HTTP keep gate)。
+- `run_harvest_amazon_search.py:_fetch_details`: seller/brand gate の後に `is_ladies_only` reject 追加
+  (= selenium keep gate、 reason="ladies_only")。
+- `tools/delete_ladies.py` 新規 (= 同 `is_ladies_only` 基準で既存行削除、 単一ソース)。
+- `tests/test_amazon_ladies_filter.py` 新規 8件 (= 純レディース除外 / 兼用・ユニセックス・メンズは keep)。
+
+### 検証
+
+- ✅ 全 pytest **701件 pass** (= 693 + ladies8、 regression なし)
+- ✅ レディース 50件 削除実機完走: 359→**309行**。 削除後検証: レディース明示 **0**。
+- ✅ fail-safe 確認: GMA-S2100-1AJF (= "ユニセックス・大人" 表記) は残存 (= 男性装用可で正しく keep)。
+- ✅ 性別フィルタは HTTP/selenium 両 keep gate に入ったため、 **今後の差分実行でレディース再混入しない**。
+
+### 次のアクション
+
+- catalog dump にもレディース 50 ASIN が含まれる → 既存 exclude_asins.json への追記を Catalog へ依頼可 (= 任意)。
+- 定期差分実行 (= `--use-http-prefilter --skip-existing-tab gshock`) の運用方式 (auto/手動) は user 判断保留。
+
+---
+
 ## 2026-06-12 — Amazon seller 判定 FBA 誤検出バグ修正 + 376件 merchantId 再精査 + KEY空欄是正
 
 ### 決定
