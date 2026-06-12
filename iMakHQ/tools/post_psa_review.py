@@ -891,6 +891,11 @@ def run_post_psa_review(csv_path: str, append_log_func) -> None:
         if not category:
             append_log_func(f"  ⚠️ cert {cert}: category 不明 (brand={brand[:30]})、 skip\n")
             continue
+        # 2026-06-12: 遊戯王は現在 出品対象外 (ユーザー指示で当面 SKIP)。catalog 日本版未収録のため
+        # review に出しても候補が英語版のみで選べない。準備が整ったら解除。psa_to_csv 側も build_row で SKIP 済。
+        if category == "yugioh_tcg":
+            append_log_func(f"  ⏭️ cert {cert}: 遊戯王は現在出品対象外、 skip\n")
+            continue
         set_code = _extract_set_code(brand, category)
         # 期待値 = catalog lookup 経由 (= 信頼性 ↑、 brand 推定より確実)
         csv_expected = _catalog_lookup_expected(brand, subject, card_number, category)

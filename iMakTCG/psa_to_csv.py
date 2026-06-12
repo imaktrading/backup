@@ -1599,6 +1599,14 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     _catalog_pid_for_variant = None
     _catalog_category_for_variant = None
     game, set_name, franchise = detect_game_info(brand)
+
+    # 2026-06-12: 遊戯王は現在 出品対象外 (ユーザー指示で当面 SKIP)。
+    # 理由: catalog が日本版遊戯王を未収録 (= 候補が英語版のみで正カードに当たらない)。
+    # 準備が整ったらユーザーが解除指示する。catalog 側の日本版収録は別途依頼済。
+    if franchise == "Yu-Gi-Oh!":
+        print(f"    ⏭️ Skip: 遊戯王は現在出品対象外 (cert {cert_number}, {subject})")
+        return None
+
     # Character欄はPSA Subjectから接尾辞を剥がして純キャラ名のみに (fallback)
     character = smart_titlecase(extract_character_name(subject))
 
