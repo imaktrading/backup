@@ -1093,3 +1093,20 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 ### 検証(実出力)
 - 検証✅ enrich: S8a-G-001 finish=Full Art Gold/type=Lightning, S8a-G-005 finish=Mirror Holofoil/type=Lightning, S8a-G-014 name=Poké Kid
 - 検証✅ Bulbapedia 全15枚 rarity/type 突合済
+
+
+## 2026-06-13 (続4) — Catalog: HQ依頼2件処理 (name_en romaji是正30件 / set_name_ebay誤map方針回答)
+
+### 決定事項
+- 決定1(依頼① name_en romaji是正): S10P-077 Kai→Irida。横展開で romaji転記 name_en を系統検出(katakana name_jp ↔ Hepburn romaji 一致)→5名30件是正: カイ→Irida(12)/トウコ→Hilda(6)/キハダ→Katy(5)/アズサ→Brigette(4)/シュウメイ→Ryme(3)。全て Bulbapedia/PSA 裏取り。ココ→Koko(映画キャラ=正の可能性)/グリ→Guri(不明)は fail-closed 保留。大半の katakana→ASCII(Drayton等)は正しい公式名のため誤検出回避。
+- 決定2(依頼② set_name_ebay 誤map = 方針回答のみ・実装は合意後): JP限定ハイクラスパックが英語版main set名に誤map(S8b VMAXクライマックス→"Brilliant Stars"=英S9 等)。proposal1(パック自前英名化)に同意。明確誤りA群3set(S8b/SM12a/S9a)+△英ハイクラス相当B群5set(S4a/S12a/SM8b/SV4a/SV8a)=計8set/約1,972件が対象。既に自前英名の前例あり(Eevee Heroes/Dream League等)+本日S8a-G是正が先行例。bulk実装はHQ承認後。
+
+### 変更
+- 変更(共有DB・git外): Pokemon name_en 30件 romaji→公式英名是正。bak: _bak/S10P-077_name_en_before_20260613.txt
+- 変更: requests/ に _pokemon_s10p_077_..._response.md / _catalog_set_name_ebay_for_tcg_feasibility_response.md
+- コード変更なし(②は方針回答のみ)
+
+### 検証(実出力)
+- 検証✅ name_en: カイ→Irida残0 / トウコ6・キハダ5・アズサ4・シュウメイ3 全件更新。romaji一致7名中5名是正/2名保留
+- 検証✅ 裏取り: トウコ=Hilda(White Flare) / キハダ=Katy(SV177) / アズサ=Brigette(BREAKthrough134) / シュウメイ=Ryme(Obsidian Flames194) 全Bulbapedia
+- 検証✅ set_name_ebay 棚卸し: 誤map 8 set_code 特定(S8b 271件等)。自前英名前例4set確認
