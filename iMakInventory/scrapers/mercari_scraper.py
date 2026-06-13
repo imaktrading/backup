@@ -476,6 +476,7 @@ def fetch_product_inventory(
     url: str,
     driver=None,
     use_selenium_fallback: bool = True,
+    max_retries: int = 2,
 ) -> Optional[dict]:
     """メルカリ / Shops 商品 URL から在庫・価格情報を取得.
 
@@ -485,6 +486,7 @@ def fetch_product_inventory(
                 None の場合は内部で生成 (1回呼出ごとに開閉=遅い)
         use_selenium_fallback: driver=None の場合の挙動制御。
                               False で 404 path のみ実行 (Selenium 起動を抑制)
+        max_retries: ReadTimeout 等 driver コマンド瞬断時の再取得回数。
 
     Returns:
         uniqlo_scraper と契約互換の dict、または None (判定不能時)。
@@ -504,20 +506,41 @@ def fetch_product_inventory(
             "skus": [{"size": "", "in_stock": False, "quantity": 0, "price_jpy": None}],
         }
 
-    # 2) Selenium で在庫判定
-    if driver is not None:
-        raw = _detect_via_selenium(driver, url, is_shops)
-    elif use_selenium_fallback:
-        d = create_driver(headless=True)
+    # 2) Selenium で在庫判定 (+ ReadTimeout 等 transient 再取得リトライ 2026-06-14)
+    # 特定の重い mercari ページで driver コマンドが「ReadTimeoutError on localhost」
+    # 「ProtocolError/ConnectionReset/MaxRetryError」 を間欠的に出す (= 在庫不明)。
+    # 「エラー除外」 は 実は売切れた行を silent 見逃す fail-OPEN なので禁止。 代わりに
+    # 同 row を間隔(2/4s)空けて再取得し、 transient を吸収する (= 読めれば判定確定、
+    # 読めなければ依然 error = 漏れにしない)。 fril/snkrdunk の retry と同思想。
+    def _is_transient_driver_err(e: Exception) -> bool:
+        es = str(e)
+        return any(k in es for k in (
+            "ReadTimeout", "timed out", "ConnectionReset",
+            "MaxRetryError", "ProtocolError", "Connection aborted",
+        ))
+
+    raw = None
+    for attempt in range(max_retries + 1):
         try:
-            raw = _detect_via_selenium(d, url, is_shops)
-        finally:
-            try:
-                d.quit()
-            except Exception:
-                pass
-    else:
-        return None
+            if driver is not None:
+                raw = _detect_via_selenium(driver, url, is_shops)
+            elif use_selenium_fallback:
+                d = create_driver(headless=True)
+                try:
+                    raw = _detect_via_selenium(d, url, is_shops)
+                finally:
+                    try:
+                        d.quit()
+                    except Exception:
+                        pass
+            else:
+                return None
+            break  # 例外なく完了 (raw は dict or None=no_signal)
+        except Exception as e:
+            if _is_transient_driver_err(e) and attempt < max_retries:
+                time.sleep(2 * (attempt + 1))  # 2,4s: driver 回復待ち
+                continue
+            raise  # 非transient / retry 尽きた → 呼出元で error 化 (漏れにしない)
 
     if raw is None:
         return None

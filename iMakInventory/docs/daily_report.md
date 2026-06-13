@@ -1,5 +1,28 @@
 # iMakInventory daily_report
 
+## 2026-06-14 — mercari ReadTimeout に再取得リトライ (「エラー除外」= fail-OPEN を回避)
+
+### 決定
+- driver version 修正後、 通信エラーは 0〜1件/cycle で安定。 残る間欠 ReadTimeout
+  (row729/m42155119753 等、 特定の重いページで driver コマンドが localhost timeout) について
+  ユーザーが「在庫あるのに読めなかっただけならエラーから外せないか」と提案。
+- **回答 = 除外は NG (fail-OPEN)**: ReadTimeout は「読めなかった=在庫不明」であって「在庫あり確定」
+  ではない。 除外すると "本当に売切れた行がたまたま ReadTimeout" を silent 見逃す → 取下げ漏れ
+  → Defect/BAN ([[indeterminate_means_investigate_root_cause]] / 状態同期の安全原則)。
+- **代替 = 再取得リトライ**: 同 row を間隔空けて再取得。 読めれば確定 (= noise 減)、 読めなければ
+  依然 error (= 漏れにしない)。 fril/snkrdunk と同思想。 ユーザー承認。
+
+### 変更
+- `scrapers/mercari_scraper.py:fetch_product_inventory` に max_retries=2 追加。
+  `_detect_via_selenium` が ReadTimeout/ProtocolError/ConnectionReset/MaxRetryError/
+  「Connection aborted」/「timed out」を投げたら 2/4s 空けて再取得。 transient でない例外
+  (DOM構造変更等) は即 raise (retry しない)。 全滅も raise (= 呼出元で error 化、 除外しない)。
+- `tests/test_mercari_readtimeout_retry.py` 3件 (回復 / 全滅raise / 非transient即raise)。
+
+### 検証
+- ✅ モックで 2回ReadTimeout→3回目確定 / 全滅raise / 非transient即raise。 offline 153 pass。
+- 漏れ安全性: 「除外でなく再取得」なので、 読めない行は依然 error に残り silent drop しない。
+
 ## 2026-06-13 — driver「cannot connect to chrome」真因 = version_main=148 ハードコード陳腐化
 
 ### 決定 (Gemini 相談 + コード調査で真因確定)
