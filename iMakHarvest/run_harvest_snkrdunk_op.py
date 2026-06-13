@@ -138,9 +138,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--price-cap", type=int, default=0,
                     help="価格上限(円)。 0=上限なし(既定、 販売中PSA10を全部。 価格はスプシ後処理)")
-    ap.add_argument("--keywords", default="ワンピース",
-                    help="カンマ区切り検索語 (= 完全性向上に弾コード OP12 等を足す)")
-    ap.add_argument("--max-pages", type=int, default=20, help="keyword あたり最大頁")
+    ap.add_argument("--keywords", default="ワンピース　PSA10",
+                    help="検索語 (既定 'ワンピース　PSA10'、 brandIds=onepiece+isSaleOnly=true と併用)")
+    ap.add_argument("--max-pages", type=int, default=40, help="最大頁 (= 全件取得まで頁送り)")
     ap.add_argument("--max-models", type=int, default=0, help="検証用 model 上限 (0=無制限)")
     ap.add_argument("--headless", action="store_true", default=True)
     ap.add_argument("--write-from-json", action="store_true",
@@ -187,13 +187,14 @@ def main(argv: list[str] | None = None) -> int:
         if not det:
             continue
         pn = (det.get("productNumber") or "").strip()
-        if not OP.is_one_piece_pn(pn):
-            continue
+        # brandIds=onepiece が One Piece を保証するので pn pattern では弾かない
+        # (= OPCD/OP-P/CS25 等の variant も正規 One Piece。 厳格 regex は取りこぼす)。
         op_models += 1
         psa10 = OP.extract_psa10_under(session, mid, price_cap)
-        if not psa10:
+        if not psa10:  # PSA10 販売中が無ければ除外 (= 実質フィルタ)
             continue
-        cards.append({"model_id": mid, "card_id": pn.upper(),
+        card_id = pn.upper() if pn else f"MODEL-{mid}"
+        cards.append({"model_id": mid, "card_id": card_id,
                       "name": (det.get("name") or "").strip(), "psa10": psa10})
         time.sleep(OP.RATE_SEC)
     cap_txt = f"<{price_cap}" if price_cap else "(価格cap無)"

@@ -145,11 +145,16 @@ def _scrape_model_ids_on_page(driver) -> list[str]:
 
 
 def enumerate_candidate_model_ids(
-    driver, keyword: str, category_ids: str = "6/33", max_pages: int = 15,
+    driver, keyword: str = "ワンピース　PSA10", brand_ids: str = "onepiece",
+    sale_only: bool = True, max_pages: int = 40,
 ) -> list[str]:
-    """検索 (keyword + category=トレカシングル) を頁送りして model_id を収集.
+    """SNKRDUNK 検索を頁送りして model_id を収集 (= One Piece 販売中 PSA10 を網羅).
 
-    返るのは One Piece 以外 (Pokemon 等) も含む候補。 呼び出し側で productNumber 判定する。
+    ★ 正しいパラメータ (2026-06-14 user 提供 URL):
+      `/search?keywords=<kw>&brandIds=onepiece&isSaleOnly=true&page=N`
+      (= keyword/brandId 単数は無視される罠。 複数形 keywords/brandIds + isSaleOnly が効く)
+    brandIds=onepiece で One Piece 限定、 isSaleOnly=true で販売中のみ。
+    返り値は念のため呼び出し側で productNumber が One Piece か再判定する (fail-closed)。
     """
     from urllib.parse import quote  # noqa: PLC0415
 
@@ -157,23 +162,23 @@ def enumerate_candidate_model_ids(
     seen: set[str] = set()
     empty_streak = 0
     for page in range(1, max_pages + 1):
-        url = (f"{SO.SNKRDUNK_BASE}/search?keyword={quote(keyword)}"
-               f"&searchCategoryIds={category_ids}&page={page}")
+        url = (f"{SO.SNKRDUNK_BASE}/search?keywords={quote(keyword)}"
+               f"&brandIds={brand_ids}"
+               f"&isSaleOnly={'true' if sale_only else 'false'}&page={page}")
         try:
             driver.get(url)
             time.sleep(6)
             ids = _scrape_model_ids_on_page(driver)
         except Exception as e:
             # driver/chrome 死亡 (= 接続拒否等)。 全体を落とさず収集済で打ち切る (fail-safe)。
-            print(f"  [enum] keyword={keyword!r} page{page} 失敗 → 収集済 {len(collected)} 件で打切: "
+            print(f"  [enum] page{page} 失敗 → 収集済 {len(collected)} 件で打切: "
                   f"{type(e).__name__}", flush=True)
             break
         new = [i for i in ids if i not in seen]
         for i in new:
             seen.add(i)
             collected.append(i)
-        print(f"  [enum] keyword={keyword!r} page{page}: +{len(new)} (累計 {len(collected)})",
-              flush=True)
+        print(f"  [enum] page{page}: +{len(new)} (累計 {len(collected)})", flush=True)
         if not new:
             empty_streak += 1
             if empty_streak >= 2:
