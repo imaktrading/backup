@@ -354,7 +354,14 @@ if __name__ == "__main__":
     opts = uc.ChromeOptions()
     opts.add_argument("--no-sandbox")
     opts.add_argument("--headless=new")
-    drv = uc.Chrome(options=opts, version_main=146)
+    try:
+        import os as _os
+        sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        from _chrome_util import detect_chrome_major as _dcm
+        _vm = _dcm() or 146
+    except Exception:
+        _vm = 146
+    drv = uc.Chrome(options=opts, version_main=_vm)
     try:
         for model in ["Shimano 23 Stradic C2000SHG", "Shimano 25 Ultegra C2000S", "Shimano 24 Vanford 4000XG"]:
             print(f"\n=== {model} ===")

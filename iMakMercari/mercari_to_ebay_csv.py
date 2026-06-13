@@ -798,7 +798,14 @@ def main():
             opts = uc.ChromeOptions()
             opts.add_argument("--no-sandbox")
             opts.add_argument("--headless=new")
-            spec_driver = uc.Chrome(options=opts, version_main=146)
+            try:
+                import os as _os, sys as _sys
+                _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+                from _chrome_util import detect_chrome_major as _dcm
+                _vm = _dcm() or 146
+            except Exception:
+                _vm = 146
+            spec_driver = uc.Chrome(options=opts, version_main=_vm)
             print("✅ 公式スペック取得用 driver 起動完了\n")
         except Exception as e:
             print(f"⚠️ spec_driver 起動失敗 (Claude推測のみで続行): {e}\n")

@@ -73,7 +73,14 @@ def create_driver(headless=False):
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR}")
-    driver = uc.Chrome(options=options, version_main=146)
+    try:
+        import os as _os, sys as _sys
+        _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        from _chrome_util import detect_chrome_major as _dcm
+        _vm = _dcm() or 146
+    except Exception:
+        _vm = 146
+    driver = uc.Chrome(options=options, version_main=_vm)
     return driver
 
 
