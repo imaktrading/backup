@@ -131,8 +131,9 @@ def create_casio_driver(headless: bool = False):
     if headless:
         options.add_argument("--headless=new")
 
-    # mercari_likes と同 Chrome version (= 148)
-    driver = uc.Chrome(options=options, version_main=148)
+    # Chrome 実バージョン自動検出 (= 固定値の陳腐化防止、 fallback 148)
+    from scrapers._chrome_util import detect_chrome_major  # noqa: PLC0415
+    driver = uc.Chrome(options=options, version_main=detect_chrome_major() or 148)
     return driver
 
 

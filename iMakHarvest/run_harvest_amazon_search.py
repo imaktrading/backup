@@ -49,9 +49,12 @@ def attach_to_existing_chrome(port: int = 9222):
     """
     import undetected_chromedriver as uc  # noqa: PLC0415
 
+    from scrapers._chrome_util import detect_chrome_major  # noqa: PLC0415
+
     options = uc.ChromeOptions()
     options.add_experimental_option("debuggerAddress", f"localhost:{port}")
-    return uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
+    return uc.Chrome(options=options,
+                     version_main=detect_chrome_major() or CHROME_VERSION_MAIN)
 
 
 # ============================================================================

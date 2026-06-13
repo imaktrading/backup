@@ -148,7 +148,9 @@ def create_driver(
         options.add_argument(f"--window-size={ws[0]},{ws[1]}")
         options.add_argument(f"--window-position={wp[0]},{wp[1]}")
 
-    driver = uc.Chrome(options=options, version_main=CHROME_VERSION_MAIN)
+    from scrapers._chrome_util import detect_chrome_major  # noqa: PLC0415
+    driver = uc.Chrome(options=options,
+                       version_main=detect_chrome_major() or CHROME_VERSION_MAIN)
     if not headless:
         # add_argument の window-size は起動時のみ反映され、UC が後で resize する場合があるので
         # 念のため明示で再設定 (画面右下じゃなく左上にしないと visible でも作業の邪魔にしにくい)

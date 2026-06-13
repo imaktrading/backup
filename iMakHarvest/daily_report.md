@@ -1,5 +1,34 @@
 # iMakHarvest daily_report
 
+## 2026-06-14 — Chrome version_main 全scraper 自動検出化 (= 横断展開、 版ズレ事故の構造的防止)
+
+### 決定
+
+- グローバル CLAUDE.md 新ルール (2026-06-14, Inventory caa659b 先行 + 全worktree展開)
+  「version_main を数値ハードコードするな・Chrome 実バージョンを自動検出せよ」に Harvest 対応。
+- 契機: スニダン run が Chrome 149 実機に対し `version_main=148` 固定で、 uc が起動時に
+  正しいドライバを fetch しに行き DNS 断で死亡 / 不安定化 (= 2026-06 の 2 日間事故と同型)。
+
+### 変更
+
+- `scrapers/_chrome_util.py` 新規 = `detect_chrome_major()` (registry BLBeacon → chrome.exe)。
+  iMakInventory/scrapers/_chrome_util.py:detect_chrome_major() と同方式。
+- 全 6 create_driver を `version_main = detect_chrome_major() or <fallback>` に変更:
+  - snkrdunk_official.py (= 共有 util に集約、 detect_chrome_major_version は後方互換 re-export)
+  - amazon_wishlist.py / mercari_likes.py / mercari_shops_likes.py / casio_official.py
+  - run_harvest_amazon_search.py (attach_to_existing_chrome)
+- `tests/test_chrome_util.py` 新規 2件。
+
+### 検証
+
+- ✅ detect_chrome_major() = **149** (実機一致)。 全 scraper import OK。
+- ✅ 全 pytest **719件 pass** (= 717 + chrome_util 2)。
+- ✅ 今後 Chrome が 150,151… に自動更新されても追従し、 版ズレエラーは構造的に出ない。
+- note: orphan chrome 一掃は Harvest は手動実行ツール + enumeration 硬化で driver.quit が確実に走る
+  ため、 ユーザーブラウザ巻込みリスクを避け自動kill は入れない (= Inventory cron とは事情が異なる)。
+
+---
+
 ## 2026-06-13 — スニダン ワンピPSA10 全件抽出 本実装 (= 新タブ snkrdunk_op_psa10、 16件)
 
 ### 決定

@@ -62,46 +62,9 @@ CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHarvest\chrome_profile_snkr
 CHROME_VERSION_MAIN = 148
 
 
-def detect_chrome_major_version() -> Optional[int]:
-    """実機 Chrome の major version を検出 (= registry / chrome.exe)。 失敗時 None.
-
-    Chrome 自動更新で固定 version_main が陳腐化 → uc が誤ったドライバを掴み不安定/
-    起動時 fetch で DNS 失敗、 を防ぐため毎回検出する。
-    """
-    # 1) registry (BLBeacon。 最も確実)
-    try:
-        import winreg  # noqa: PLC0415
-        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-            try:
-                k = winreg.OpenKey(hive, r"Software\Google\Chrome\BLBeacon")
-                ver, _ = winreg.QueryValueEx(k, "version")
-                winreg.CloseKey(k)
-                if ver:
-                    return int(str(ver).split(".")[0])
-            except OSError:
-                continue
-    except Exception:
-        pass
-    # 2) chrome.exe の ProductVersion
-    try:
-        import os  # noqa: PLC0415
-        for p in (
-            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
-            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
-            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-        ):
-            if os.path.exists(p):
-                import subprocess  # noqa: PLC0415
-                out = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command",
-                     f"(Get-Item '{p}').VersionInfo.ProductVersion"],
-                    capture_output=True, text=True, timeout=10,
-                ).stdout.strip()
-                if out:
-                    return int(out.split(".")[0])
-    except Exception:
-        pass
-    return None
+# Chrome 実バージョン検出は共有 util に集約 (= 全 scraper 共通)。 後方互換で別名 re-export。
+from scrapers._chrome_util import detect_chrome_major  # noqa: E402
+detect_chrome_major_version = detect_chrome_major
 
 DEFAULT_HEADERS = {
     "User-Agent": (
