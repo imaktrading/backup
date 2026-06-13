@@ -38,8 +38,11 @@ BANNED_TITLE_WORDS = [
     "mint", "l@@k", "look", "wow", "nr",
 ]
 
-# 必須Item Specifics（空欄だと品質低下）
-REQUIRED_SPECIFICS = ["C:Brand", "C:Model", "C:Type", "C:Color", "C:Movement"]
+# 必須Item Specifics（eBay cat 31387 で aspect_required=True のもの＝Brand/Type）。
+# C:Color は eBay に "Color" aspect が存在しない(あるのは Dial/Band/Bezel/Case Color)ため
+# phantom 必須として除去 (2026-06-14)。Model/Movement は aspect_required=False だが
+# 品質欄として保持 (catalog で充填済)。実機: ebay_gshock_filter_lists_api.json。
+REQUIRED_SPECIFICS = ["C:Brand", "C:Model", "C:Type", "C:Movement"]
 # あると望ましいItem Specifics
 RECOMMENDED_SPECIFICS = [
     "C:Case Size", "C:Band Color", "C:Band Material", "C:Display", "C:Features",
