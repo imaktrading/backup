@@ -1,0 +1,19 @@
+{
+  "sheet": "LOW(G-shock)",
+  "gid": 851100680,
+  "col": "AI(34)",
+  "date": "2026-06-11",
+  "note": "不完全KEX修正(DW-5600KH/NNJ)。GA-700SEは判別不能で据置",
+  "entries": [
+    {
+      "row": 179,
+      "old": "DW-5600KH",
+      "new": "DW-5600KH-1"
+    },
+    {
+      "row": 349,
+      "old": "DW-5600NNJ",
+      "new": "DW-5600NNJ-2JR"
+    }
+  ]
+}
