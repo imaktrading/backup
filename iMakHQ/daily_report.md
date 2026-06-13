@@ -1110,3 +1110,22 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅ name_en: カイ→Irida残0 / トウコ6・キハダ5・アズサ4・シュウメイ3 全件更新。romaji一致7名中5名是正/2名保留
 - 検証✅ 裏取り: トウコ=Hilda(White Flare) / キハダ=Katy(SV177) / アズサ=Brigette(BREAKthrough134) / シュウメイ=Ryme(Obsidian Flames194) 全Bulbapedia
 - 検証✅ set_name_ebay 棚卸し: 誤map 8 set_code 特定(S8b 271件等)。自前英名前例4set確認
+
+
+## 2026-06-13 (続5) — Catalog: set_name_ebay A群修正(BUILD) + 内部整合監査スクリプト新設
+
+### 決定事項
+- 決定1(A群bulk修正・HQ greenlight): JP限定パックの誤map3 set を自前英名に是正。S8b→VMAX Climax(271) / SM12a→Tag All Stars(194) / S9a→Battle Region(93)。各set_code内100%・旧値残0。残った旧英名は別の正当set(Astral Radiance残176=S10P/S10D=真のJP相当)で誤誘導でない。
+- 決定2(監査スクリプト新設): iMakCatalog/tools/set_name_integrity_audit.py 新設。検査=era整合/set_code内不統一/source=(none)棚卸し。pokemon実走: era不一致0・不統一8・source(none)9,364件/84setcode。
+- 決定3(新規エラー検出=HQ判断待ち): 監査が DPt3("Frontier's Pulse"vs"Beat of the Frontier") / DPt2 / DPt4 等 set_code内不統一8件を検出。greenlight範囲外のため未修正、正値指示待ち(順次つぶす方針)。
+- 決定4(B群現状維持): HQ keyword判断(英版カウンターパート高検索・1:1で誤りでない)を受け S4a/S12a/SM8b/SV4a/SV8a は変更せず。
+
+### 変更
+- 変更(共有DB・git外): S8b/SM12a/S9a の set_name_ebay 558件是正。source→hq_greenlight_Agroup_20260613。bak: _bak/setname_Agroup_before_20260613.json
+- 変更: iMakCatalog/tools/set_name_integrity_audit.py 新設(git tracked)
+- 変更: requests/ に _A_group_BUILD_greenlight_response.md + set_name_ebay_integrity_audit_20260613.md(共有)
+
+### 検証(実出力)
+- 検証✅ A群: S8b 271/271・SM12a 194/194・S9a 93/93 = 新値100%・set_code内旧値残0
+- 検証✅ 監査: era不一致0 / 不統一8(DPt2/3/4等) / source(none)84setcode 9364件。新規エラー検出を実証
+- 検証✅ pytest 306 passed(回帰なし)
