@@ -40,10 +40,11 @@ def test_no_subject_pollution_in_name_and_character():
 
 # features list → 連結
 def test_features_list_joined():
+    # 2026-06-14: features は eBay facet 正規化される。facet 値の list は ", " 連結。
     specs = {"_name_en": "Scrafty", "character_name": "Scrafty",
-             "rarity_ebay": "Art Rare", "features": ["Art Card"]}
+             "rarity_ebay": "Art Rare", "features": ["Full Art", "Promo"]}
     f = map_specs_to_fields(specs)
-    assert f["C:Features"] == "Art Card"
+    assert f["C:Features"] == "Full Art, Promo"
 
 
 # name_en ≠ character_name (romaji 修正漏れ) → そのまま出して可視化 (papering over しない)
@@ -98,3 +99,37 @@ def test_title_blank_set_skipped():
     t = build_title_from_fields(map_specs_to_fields(specs, "2025"))
     assert "  " not in t                       # 二重スペース無し
     assert t == "PSA 10 Pokemon Japanese #020/019 Marnie's Morpeko 2025"
+
+
+# --- Features 正規化 (2026-06-14): catalog生値 → eBay TCG facet 値 / 不明はdrop ---
+def test_features_normalize_maps_known_values():
+    from tcg_listing_fields import normalize_tcg_features
+    assert normalize_tcg_features(["Alt Art"]) == ["Alternative Art"]
+    assert normalize_tcg_features(["Promo"]) == ["Promo"]
+    assert normalize_tcg_features(["Full Art"]) == ["Full Art"]       # facet一致
+    assert normalize_tcg_features("Limited Edition") == ["Limited Edition"]
+
+
+def test_features_normalize_drops_rarity_and_unknown():
+    from tcg_listing_fields import normalize_tcg_features
+    # rarity語/type語/非facet生値は drop (推測で 'Full Art' 化しない)
+    assert normalize_tcg_features(["Ultra Rare"]) == []
+    assert normalize_tcg_features(["Secret"]) == []
+    assert normalize_tcg_features(["Leader Card"]) == []
+    assert normalize_tcg_features(["Art Card"]) == []
+
+
+def test_features_normalize_mixed_and_dedup():
+    from tcg_listing_fields import normalize_tcg_features
+    assert normalize_tcg_features(["Ultra Rare", "Alt Art", "Alt Art"]) == ["Alternative Art"]
+
+
+def test_map_specs_features_normalized_in_field():
+    specs = {"_name_en": "Scrafty", "character_name": "Scrafty",
+             "set_name_ebay": "Scarlet & Violet—White Flare", "rarity_ebay": "Art Rare",
+             "features": ["Art Card"], "_language": "ja"}
+    f = map_specs_to_fields(specs, "2025")
+    assert f["C:Features"] == ""              # 'Art Card' は drop → 空欄 (旧の非facet値を出さない)
+    specs["features"] = ["Alt Art"]
+    f2 = map_specs_to_fields(specs, "2025")
+    assert f2["C:Features"] == "Alternative Art"

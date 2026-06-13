@@ -82,13 +82,23 @@ def test_env_enabled(monkeypatch):
     assert OV.env_enabled() is True
 
 
-def test_features_not_overridden(monkeypatch):
-    # C:Features は catalog 生値が eBay facet 値でないため上書きしない (旧のまま)
-    fields = {"C:Set": "VMAX Climax", "C:Features": "Art Card", "_card_id": "x"}
+def test_features_overridden_when_new_has_value(monkeypatch):
+    # C:Features は新コアが正規化済 facet 値を持てば上書き (2026-06-14 以降)
+    fields = {"C:Set": "VMAX Climax", "C:Features": "Alternative Art", "_card_id": "x"}
     _patch(monkeypatch, fields)
     row = _row()
-    fi = HEADERS.index("C:Features")    # idx 6 (既存列)
+    fi = HEADERS.index("C:Features")
     row[fi] = "OldFeat"
     out = OV.apply_new_gen_override(row, HEADERS, "123", override_title=False)
-    assert out[HEADERS.index("C:Set")] == "VMAX Climax"   # Set は上書き
-    assert out[fi] == "OldFeat"                            # Features は旧のまま
+    assert out[fi] == "Alternative Art"      # 正規化値で上書き
+
+
+def test_features_kept_when_new_blank(monkeypatch):
+    # 新コアが drop して空なら value-only で旧値温存 (回帰なし)
+    fields = {"C:Set": "VMAX Climax", "C:Features": "", "_card_id": "x"}
+    _patch(monkeypatch, fields)
+    row = _row()
+    fi = HEADERS.index("C:Features")
+    row[fi] = "OldFeat"
+    out = OV.apply_new_gen_override(row, HEADERS, "123", override_title=False)
+    assert out[fi] == "OldFeat"              # 新コア空 → 旧のまま

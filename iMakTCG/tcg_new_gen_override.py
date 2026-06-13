@@ -24,11 +24,11 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 
-# 切替時に上書きしない列 (2026-06-13):
-#   C:Features = catalog の生値("Art Card"/"Alt Art" 等)が eBay TCG facet 正規値でない
-#   (正規は Full Art/Alternative Art/Promo…)。旧は空欄なので上書きすると非facet値で悪化。
-#   eBay正規化を入れるまでは旧挙動(空欄)を維持する (official_x_ebay_filter_max_activation)。
-_NO_OVERRIDE = {"C:Features"}
+# 切替時に上書きしない列 (現状なし)。
+#   C:Features は 2026-06-14 に新コア側で eBay TCG facet 正規化済 (normalize_tcg_features)
+#   = 'Art Card' 等の非facet生値は drop、'Alt Art'→'Alternative Art' 等のみ採用。value-only
+#   override なので新コアが空(drop)なら旧値を残す=回帰なし。よって除外不要。
+_NO_OVERRIDE = set()
 
 
 def _col_idx(headers, name):

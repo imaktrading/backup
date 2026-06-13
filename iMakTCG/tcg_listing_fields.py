@@ -38,6 +38,57 @@ _SPEC_TO_COL = {
     "finish":          "C:Finish",
     "illustrator":     "C:Illustrator",
 }
+# eBay TCG (cat 183454) Features 正規値 (公式フィルタ・2026-06-14 実機取得)。
+# FREE_TEXT だが正規値に絞ることで検索フィルタにヒットさせる (official_x_ebay_filter_max_activation)。
+_EBAY_TCG_FEATURES_VALID = frozenset([
+    "1st Edition", "Altered/Custom Art", "Alternative Art", "Borderless", "Box Topper",
+    "Chase", "Collectors Edition", "Demo Card", "Digital", "Duel Terminal Card",
+    "Duelist Pack", "Exclusive", "Extended Art", "Full Art", "Judge Gift", "Limited Edition",
+    "Miscut", "Misprint", "Participation Card", "Prerelease", "Prize Card", "Promo",
+    "Reprint", "Sell Sheet", "Serial Numbered", "Shadowless", "Showcase", "Sketch",
+    "Special Edition", "Speed Duel Starter Deck", "Split Card", "Stamped", "Starter Deck",
+    "Starter Pack", "Structure Deck", "Timeshifted", "Unique Art", "Unlimited", "Unreleased",
+])
+# catalog の生 feature 値 (小文字) → eBay TCG facet 値。None = drop。
+# rarity/type 語 (Ultra Rare/Secret/Leader Card) は feature でないので drop。
+# 'Art Card' は facet に無く意味が確証できないため drop (fail-closed=推測で 'Full Art' 化しない)。
+_TCG_FEATURE_MAP = {
+    "alt art": "Alternative Art", "alternative art": "Alternative Art",
+    "full art": "Full Art", "promo": "Promo", "limited edition": "Limited Edition",
+    "extended art": "Extended Art", "unique art": "Unique Art", "borderless": "Borderless",
+    "1st edition": "1st Edition",
+    # 明示 drop (feature でない / facet に無い)
+    "ultra rare": None, "secret": None, "leader card": None, "art card": None,
+    "special art": None, "rare": None, "common": None, "uncommon": None,
+}
+
+
+def normalize_tcg_features(feats):
+    """catalog の生 feature(list/str)を eBay TCG facet 正規値の list に正規化。
+
+    純関数。facet 一致はそのまま採用 / 既知の生値はマップ / 不明・rarity語は drop (推測しない)。
+    """
+    if isinstance(feats, str):
+        items = [feats]
+    elif isinstance(feats, list):
+        items = feats
+    else:
+        return []
+    out = []
+    for raw in items:
+        tok = str(raw).strip()
+        if not tok:
+            continue
+        if tok in _EBAY_TCG_FEATURES_VALID:        # 既に facet 正規値
+            if tok not in out:
+                out.append(tok)
+            continue
+        mapped = _TCG_FEATURE_MAP.get(tok.lower(), "")
+        if mapped and mapped not in out:           # None/"" は drop
+            out.append(mapped)
+    return out
+
+
 # Item Specifics 列 (空欄でも列は出す)
 _ALL_COLS = [
     "C:Game", "C:Set", "C:Card Type", "C:Card Name", "C:Character",
@@ -125,12 +176,10 @@ def map_specs_to_fields(specs: dict, year: str = ""):
     fields["C:Card Name"] = name_en or char_nm
     fields["C:Character"] = char_nm or name_en
 
-    # 3) Features (list → ", " 連結。無→空欄)
-    feats = specs.get("features")
-    if isinstance(feats, list) and feats:
-        fields["C:Features"] = ", ".join(str(f).strip() for f in feats if str(f).strip())
-    elif isinstance(feats, str) and feats.strip():
-        fields["C:Features"] = feats.strip()
+    # 3) Features は eBay TCG facet 正規値に正規化 (生値 'Art Card' 等は drop)。
+    norm_feats = normalize_tcg_features(specs.get("features"))
+    if norm_feats:
+        fields["C:Features"] = ", ".join(norm_feats)
 
     # 4) Language (catalog language=ja → eBay 'Japanese')
     lang = (specs.get("language") or specs.get("_language") or "").strip().lower()
