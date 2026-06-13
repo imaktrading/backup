@@ -71,9 +71,13 @@ def build_revise(report_path, out_path=None):
         return None
     item_i = _hi("Item number", "ItemID", "Item ID")
     title_i = _hi("Title")
+    site_i = _hi("Listing site")
     if item_i is None or title_i is None:
         print(f"❌ レポートに Item number / Title 列が無い: {list(h)[:8]}")
         return 2
+    # Revise Action は SiteID=US。UK/AU/DE 等の他サイト出品は US Action で revise 不可なので
+    # US サイトのみ対象 (site 列が無いレポートは全件=従来互換)。
+    n_nonus = 0
 
     revise = []           # [ItemID, clean_desc]
     skipped = []          # (ItemID, title, reason)
@@ -85,6 +89,10 @@ def build_revise(report_path, out_path=None):
         item_id = r[item_i].strip().strip('"')
         title = r[title_i].strip()
         if not _is_gshock(title):
+            continue
+        # US サイト出品のみ (Revise Action=SiteID=US のため)
+        if site_i is not None and site_i < len(r) and r[site_i].strip().upper() not in ("US", ""):
+            n_nonus += 1
             continue
         n_gshock += 1
         if not item_id or item_id in seen:
@@ -129,7 +137,7 @@ def build_revise(report_path, out_path=None):
     print("=" * 64)
     print(f"G-shock description 一括 Revise CSV 生成")
     print(f"  入力レポート : {os.path.basename(report_path)}")
-    print(f"  G-shock 出品 : {n_gshock} 件")
+    print(f"  G-shock US出品: {n_gshock} 件 (他サイト除外 {n_nonus} 件=UK/AU/DE 等)")
     print(f"  ✅ revise 行 : {len(revise)} (クリーン description 再生成)")
     print(f"  ⏭️ skip      : {len(skipped)} (型番未解決=誤revise回避でfail-closed)")
     print(f"  出力CSV      : {out_path}")
