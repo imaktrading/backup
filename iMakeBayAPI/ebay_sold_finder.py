@@ -19,6 +19,47 @@ try:
 except ImportError:
     HAS_UC = False
 
+
+def _detect_chrome_major():
+    """実機 Chrome の major version を検出 (= registry → chrome.exe)。 失敗時 None.
+
+    version_main を数値ハードコードしない (= Chrome 自動更新で陳腐化し uc 構築 crash を招く、
+    2026-06-14 横断ルール)。 呼び出し側は `_detect_chrome_major() or <fallback>` で使う。
+    """
+    import os  # noqa: PLC0415
+    try:
+        import winreg  # noqa: PLC0415
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                k = winreg.OpenKey(hive, r"Software\Google\Chrome\BLBeacon")
+                ver, _ = winreg.QueryValueEx(k, "version")
+                winreg.CloseKey(k)
+                if ver:
+                    return int(str(ver).split(".")[0])
+            except OSError:
+                continue
+    except Exception:
+        pass
+    import subprocess  # noqa: PLC0415
+    for p in (
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ):
+        try:
+            if os.path.exists(p):
+                out = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     f"(Get-Item '{p}').VersionInfo.ProductVersion"],
+                    capture_output=True, text=True, timeout=10,
+                ).stdout.strip()
+                if out:
+                    return int(out.split(".")[0])
+        except Exception:
+            continue
+    return None
+
+
 # --- 設定 ---
 KEYS_FILE = "ebay keys.txt"
 
@@ -135,7 +176,7 @@ def scrape_sold_listings(keywords, min_price=50, max_price=1000, max_pages=10):
 
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
-    driver = uc.Chrome(options=options, version_main=146)
+    driver = uc.Chrome(options=options, version_main=_detect_chrome_major() or 146)
     all_items = []
 
     try:
