@@ -15,13 +15,13 @@ import os
 import re
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
-_UTIL = os.path.join(_ROOT, "iMakeBayAPI", "_chrome_util.py")
+_UTIL = os.path.join(_ROOT, "iMakeBayAPI", "chrome_util.py")
 
 # numeric pin を持っていてはいけない master 上のファイル (相対パス)
 _GUARDED = [
     os.path.join("iMakTCG", "psa_to_csv.py"),
     os.path.join("iMakeBayAPI", "seller_hub_view.py"),
-    os.path.join("iMakeBayAPI", "_chrome_util.py"),
+    os.path.join("iMakeBayAPI", "chrome_util.py"),
 ]
 _NUMERIC_PIN = re.compile(r"version_main\s*=\s*\d+")
 

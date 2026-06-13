@@ -38,7 +38,7 @@ except Exception:
 # build_row() 等で動的 import されるため、モジュールロード時にパスを通しておく必要あり
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
 from listing_core import get_csv_output_path as _gcop  # CSV出力先の中央集約用 (iMakHQ/csv_output/<project>_upload_<ts>.csv)
-from _chrome_util import detect_chrome_major  # uc version_main を実Chromeから検出 (数値ハードコード禁止)
+from chrome_util import detect_chrome_major  # uc version_main を実Chromeから検出 (数値ハードコード禁止)
 
 # ===== 設定 =====
 CERTS_FILE = "certs.txt"

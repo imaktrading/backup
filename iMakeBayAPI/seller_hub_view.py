@@ -39,7 +39,7 @@ except Exception:
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 
-from _chrome_util import detect_chrome_major  # uc version_main を実Chromeから検出 (数値ハードコード禁止)
+from chrome_util import detect_chrome_major  # uc version_main を実Chromeから検出 (数値ハードコード禁止)
 
 EBAY_CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_ebay"
 SNAPSHOT_DIR = r"C:\dev\iMak_data\seller_hub"
