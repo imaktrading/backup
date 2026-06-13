@@ -1152,20 +1152,29 @@ def build_specs_html(data):
     year = data.get('year', '')
     display = data.get('display', 'Digital')
 
+    # 値が空の項目は行ごと出さない (2026-06-13: catalog 空欄が「Movement:」と裸で残る指摘)。
+    # 従来 Case Size 等だけ if ガードがあったのを全項目に統一。空欄=不足であって誤りでないが
+    # 見栄えが悪いので非表示にする (推測で埋めない=Precision 方針とも整合)。
     specs = []
-    specs.append(f"<li><b>Model:</b> {model}</li>")
-    specs.append(f"<li><b>Movement:</b> {movement}</li>")
-    specs.append(f"<li><b>Display:</b> {display}</li>")
-    specs.append(f"<li><b>Water Resistance:</b> {water}</li>")
-    specs.append(f"<li><b>Features:</b> {features}</li>")
-    if case_size: specs.append(f"<li><b>Case Size:</b> {case_size}</li>")
-    if thickness: specs.append(f"<li><b>Case Thickness:</b> {thickness}</li>")
-    if weight: specs.append(f"<li><b>Weight:</b> {weight}</li>")
-    specs.append(f"<li><b>Crystal:</b> {crystal}</li>")
-    specs.append(f"<li><b>Case Material:</b> {case_material}</li>")
-    specs.append(f"<li><b>Band Material:</b> {band_material}</li>")
-    if band_length: specs.append(f"<li><b>Band Length:</b> {band_length}</li>")
-    if year: specs.append(f"<li><b>Year:</b> {year}</li>")
+
+    def _add(label, val):
+        val = (str(val).strip() if val is not None else "")
+        if val:
+            specs.append(f"<li><b>{label}:</b> {val}</li>")
+
+    _add("Model", model)
+    _add("Movement", movement)
+    _add("Display", display)
+    _add("Water Resistance", water)
+    _add("Features", features)
+    _add("Case Size", case_size)
+    _add("Case Thickness", thickness)
+    _add("Weight", weight)
+    _add("Crystal", crystal)
+    _add("Case Material", case_material)
+    _add("Band Material", band_material)
+    _add("Band Length", band_length)
+    _add("Year", year)
 
     return f"""<p><span style="text-decoration: underline;"><strong><span style="vertical-align: inherit;"><span style="vertical-align: inherit;">Specifications</span></span></strong></span></p>
 <ul>
