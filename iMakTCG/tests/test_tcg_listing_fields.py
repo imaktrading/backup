@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tcg_listing_fields import map_specs_to_fields
+from tcg_listing_fields import map_specs_to_fields, build_title_from_fields
 
 
 # #1 SVOM-020 相当: rarity_ebay 無 → 空欄 (推測しない)
@@ -60,3 +60,41 @@ def test_all_columns_present():
     for col in ("C:Game", "C:Set", "C:Card Name", "C:Character", "C:Rarity",
                 "C:Features", "C:Language", "C:Year Manufactured"):
         assert col in f
+
+
+# --- タイトル生成 (catalog 由来・LLM/Subject 無し) ---
+def test_title_correct_set_no_pollution_japanese():
+    """#4 相当: 正しい set名・Subject汚染なし・Japanese明記・≤80字。"""
+    specs = {"_name_en": "Zamazenta V", "character_name": "Zamazenta V",
+             "set_name_ebay": "VMAX Climax", "rarity_ebay": "Double Rare",
+             "game_ebay": "Pokémon TCG", "card_type_ebay": "Pokémon",
+             "card_number_text": "118/184", "_language": "ja"}
+    f = map_specs_to_fields(specs, year="2021")
+    t = build_title_from_fields(f)
+    assert len(t) <= 80
+    assert t.startswith("PSA 10 Pokemon")
+    assert "Japanese" in t
+    assert "VMAX Climax" in t
+    assert "Brilliant Stars" not in t          # 旧の誤set名が出ない
+    assert "#118/184" in t
+    assert "Zamazenta V" in t
+    assert "Vmax Climax #118" not in t         # Subject汚染パターンが出ない
+
+
+def test_title_no_duplicate_words():
+    specs = {"_name_en": "Scrafty", "character_name": "Scrafty",
+             "set_name_ebay": "Scarlet & Violet—White Flare", "rarity_ebay": "Art Rare",
+             "game_ebay": "Pokémon TCG", "card_number_text": "137/086", "_language": "ja"}
+    t = build_title_from_fields(map_specs_to_fields(specs, "2025"))
+    words = [w.lower() for w in t.split() if len(w) >= 4]
+    assert len(words) == len(set(words)), f"重複語: {t}"
+    assert len(t) <= 80
+
+
+def test_title_blank_set_skipped():
+    """C:Set 空 (SVOM) でも空文字が紛れ込まない。"""
+    specs = {"_name_en": "Marnie's Morpeko", "character_name": "Marnie's Morpeko",
+             "game_ebay": "Pokémon TCG", "card_number_text": "020/019", "_language": "ja"}
+    t = build_title_from_fields(map_specs_to_fields(specs, "2025"))
+    assert "  " not in t                       # 二重スペース無し
+    assert t == "PSA 10 Pokemon Japanese #020/019 Marnie's Morpeko 2025"

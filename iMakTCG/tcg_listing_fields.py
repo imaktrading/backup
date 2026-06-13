@@ -148,6 +148,79 @@ def map_specs_to_fields(specs: dict, year: str = ""):
     return fields
 
 
+# ============================================================================
+# タイトル生成 (catalog 値から決定論で組む。LLM/Subject を混ぜない)
+# ============================================================================
+_GAME_TITLE_WORD = {
+    "Pokémon TCG": "Pokemon", "Pokemon TCG": "Pokemon",
+    "One Piece Card Game": "One Piece", "Yu-Gi-Oh! TCG": "Yu-Gi-Oh",
+    "Dragon Ball Super Card Game": "Dragon Ball", "Gundam Card Game": "Gundam",
+}
+_TITLE_MAX = 80
+
+
+def build_title_from_fields(fields: dict, grade: str = "10") -> str:
+    """catalog 由来 fields から eBay タイトルを決定論で組む (≤80字)。
+
+    方針: 公式事実のみを並べる。LLM/PSA Subject 由来の推測語を入れない。
+    日本版は 'Japanese' 明記 (= 正確性・検索性)。
+    優先度順に並べ、80字超は末尾の任意要素 (Year→Rarity→Features) から落とす
+    (Set/番号/Character/Japanese/PSA10 は死守 = カード同定に必須)。
+    """
+    game = _GAME_TITLE_WORD.get(fields.get("C:Game", ""), "")
+    core = ["PSA", str(grade)]
+    if game:
+        core.append(game)
+    if fields.get("C:Language") == "Japanese":
+        core.append("Japanese")
+    if fields.get("C:Set"):
+        core.append(fields["C:Set"])
+    num = fields.get("C:Card Number", "")
+    if num:
+        core.append(f"#{num}")
+    if fields.get("C:Character"):
+        core.append(fields["C:Character"])
+
+    # 任意 (末尾から落とせる) — 高情報順
+    optional = []
+    if fields.get("C:Rarity"):
+        optional.append(fields["C:Rarity"])
+    if fields.get("C:Features"):
+        # "Art Card" 等。Rarity と語が被るなら足さない
+        feat = fields["C:Features"]
+        if feat.lower() not in " ".join(core + optional).lower():
+            optional.append(feat)
+    if fields.get("C:Year Manufactured"):
+        optional.append(fields["C:Year Manufactured"])
+
+    def _assemble(opts):
+        toks = core + opts
+        # 重複語 dedupe (大小無視・既出 token は落とす)
+        seen, out = set(), []
+        for t in toks:
+            key = t.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(t)
+        return " ".join(out)
+
+    # Year→Features→Rarity の順に落として 80字に収める
+    for drop in range(len(optional) + 1):
+        opts = optional[: len(optional) - drop] if drop else optional
+        title = _assemble(opts)
+        if len(title) <= _TITLE_MAX:
+            return title
+    # core だけでも超える場合は素直に truncate (語境界)
+    title = _assemble([])
+    if len(title) > _TITLE_MAX:
+        parts = title.split()
+        while parts and len(" ".join(parts)) > _TITLE_MAX:
+            parts.pop()
+        title = " ".join(parts)
+    return title
+
+
 if __name__ == "__main__":
     # 動作確認: 今日の8 cert を catalog 決定論生成
     sys.stdout.reconfigure(encoding="utf-8")
@@ -158,6 +231,7 @@ if __name__ == "__main__":
         f, err = build_listing_fields(cert, "Pokémon TCG")
         if err:
             print(f"{cert} {label}: ERR {err}"); continue
+        title = build_title_from_fields(f)
         print(f"=== {cert} {label} → {f.get('_card_id')}")
-        for c in _ALL_COLS:
-            print(f"   {c}={f[c]!r}")
+        print(f"   TITLE({len(title)}字): {title}")
+        print(f"   C:Set={f['C:Set']!r} C:Character={f['C:Character']!r} C:Rarity={f['C:Rarity']!r}")
