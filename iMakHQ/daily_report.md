@@ -1129,3 +1129,22 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅ A群: S8b 271/271・SM12a 194/194・S9a 93/93 = 新値100%・set_code内旧値残0
 - 検証✅ 監査: era不一致0 / 不統一8(DPt2/3/4等) / source(none)84setcode 9364件。新規エラー検出を実証
 - 検証✅ pytest 306 passed(回帰なし)
+
+
+## 2026-06-13 (続6) — Catalog: character_name同期(30) + DPt dedupe + 監査が新規91件scramble検出
+
+### 決定事項
+- 決定1(① character_name 同期): 前回romaji name_en修正5名30件が specs.character_name 未同期(eBay C:Character が旧romajiのまま誤出品)→ character_name=name_en に同期。検証: name_en∈5名 で character_name≠name_en =0達成。
+- 決定2(② 監査に検査4追加): set_name_integrity_audit.py に name_en≠character_name(両非空・接頭辞除外)検査を追加=再発防止。
+- 決定3(③ DPt dedupe・低優先): HQ指示の多数派表記に統一。DPt2→Bonds to the End of Time(126) / DPt3→Beat of the Frontier(132) / DPt4→Advent of Arceus(124)。不統一 8→5。
+- 決定4(④ ⚠️新規重大エラー escalation): 検査4が character_name scramble 91件検出(name_en=Treecko だが character_name=Magnemite 等、別カード由来)。promo系集中(XY24/SA19/M-P17/DPs11/SCS10/MG9/S8a1)。eBay C:Character 誤出品。card_type別re-derive要(Pokémon→種名/Trainer→空)で盲目sync不可→HQ greenlight待ち。
+
+### 変更
+- 変更(共有DB・git外): character_name 同期30件 / DPt2-4 set_name_ebay 102件dedupe。bak: character_name_sync_/dpt_dedupe_before_20260613.json
+- 変更: iMakCatalog/tools/set_name_integrity_audit.py に検査4(name整合)追加
+- 変更: requests/ に _romaji_fix_sync_..._response.md + 監査レポート更新
+
+### 検証(実出力)
+- 検証✅ character_name: 5名 desync=0
+- 検証✅ DPt: 各set_code単一値。不統一8→5(残5はHQ triage済「正」)
+- 検証✅ 監査検査4: 接頭辞除外後 91件 真desync検出(M-P/DPs scramble)。pytest 306 passed

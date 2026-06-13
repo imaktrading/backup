@@ -11,6 +11,9 @@ HQ 照合ツール(出力CSV側) と二重で守る (= dual_gate)。
   2. set_code一貫性: 同一 set_code 内で set_name_ebay が複数値に割れている flag。
   3. source棚卸し  : set_name_ebay_source='(none)' (= 由来不明・未検証) を set_code 単位で
                     集計リスト化 (= S8b級の潜在誤りの母数。件数降順)。
+  4. name整合      : name_en ≠ specs.character_name (両方非空) を flag
+                    (= romaji name_en 修正時の character_name 同期漏れ等。eBay C:Character は
+                    character_name 由来のため不整合=誤出品。2026-06-13 HQ依頼で追加)。
 
 使い方:
   python iMakCatalog/tools/set_name_integrity_audit.py                # pokemon (既定)
@@ -59,7 +62,7 @@ def setcode_of(product_id: str, specs: dict) -> str:
 def audit(categories):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    q = "SELECT category, product_id, specs FROM products"
+    q = "SELECT category, product_id, name_en, specs FROM products"
     if categories:
         ph = ",".join("?" for _ in categories)
         q += f" WHERE category IN ({ph})"
@@ -74,6 +77,7 @@ def audit(categories):
     code_cat = {}
     none_src = defaultdict(lambda: defaultdict(int))  # source=(none) 棚卸し
     era_mismatch = []  # (set_code, ebay, sc_era, ebay_era, count)
+    name_desync = []  # (product_id, name_en, character_name)
 
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
@@ -88,6 +92,14 @@ def audit(categories):
             tmp_era[(sc, e)] += 1
             if src == "(none)":
                 none_src[sc][e] += 1
+        # 4. name_en ↔ character_name 整合 (両方非空で不一致)
+        #    接頭辞一致 ("Pikachu V" vs "Pikachu" の V/VMAX/ex 接尾差) は正当として除外し、
+        #    真の名前相違 (romaji 同期漏れ等) のみ flag。
+        cn = s.get("character_name")
+        ne = r["name_en"]
+        if ne and cn and ne != cn \
+                and not ne.startswith(cn) and not cn.startswith(ne):
+            name_desync.append((r["product_id"], ne, cn))
 
     # 1. era mismatch
     for (sc, e), cnt in tmp_era.items():
@@ -112,11 +124,12 @@ def audit(categories):
         val = max(d.items(), key=lambda kv: kv[1])[0] if d else ""
         none_list.append((sc, val, total, code_cat.get(sc, "")))
     none_list.sort(key=lambda x: -x[2])
+    name_desync.sort(key=lambda x: x[0])
 
-    return era_mismatch, inconsistent, none_list
+    return era_mismatch, inconsistent, none_list, name_desync
 
 
-def render(era_mismatch, inconsistent, none_list, categories):
+def render(era_mismatch, inconsistent, none_list, name_desync, categories):
     out = []
     cat_s = ",".join(categories) if categories else "all"
     out.append(f"# set_name_ebay integrity audit (cat={cat_s})\n")
@@ -139,6 +152,15 @@ def render(era_mismatch, inconsistent, none_list, categories):
     out.append("| set_code | set_name_ebay | 件数 | category |\n|---|---|---|---|\n")
     for sc, val, cnt, cat in none_list[:120]:
         out.append(f"| {sc} | {val} | {cnt} | {cat} |\n")
+
+    out.append(
+        f"\n## 4. name_en ≠ character_name (eBay C:Character 不整合) — "
+        f"{len(name_desync)} 件\n"
+    )
+    if not name_desync:
+        out.append("(なし)\n")
+    for pid, ne, cn in name_desync[:60]:
+        out.append(f"- `{pid}`: name_en=`{ne}` ≠ character_name=`{cn}`\n")
     return "".join(out)
 
 
@@ -150,14 +172,14 @@ def main():
     args = ap.parse_args()
     categories = None if args.cat == "all" else [args.cat]
 
-    era_mismatch, inconsistent, none_list = audit(categories)
-    report = render(era_mismatch, inconsistent, none_list, categories or [])
+    era_mismatch, inconsistent, none_list, name_desync = audit(categories)
+    report = render(era_mismatch, inconsistent, none_list, name_desync, categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)
         print(f"wrote {args.out}")
         print(f"era不一致={len(era_mismatch)} / 不統一={len(inconsistent)} / "
-              f"source=(none) set_code={len(none_list)}")
+              f"source=(none) set_code={len(none_list)} / name不整合={len(name_desync)}")
     else:
         sys.stdout.reconfigure(encoding="utf-8")
         print(report)
