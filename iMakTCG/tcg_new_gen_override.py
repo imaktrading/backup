@@ -24,6 +24,13 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 
+# 切替時に上書きしない列 (2026-06-13):
+#   C:Features = catalog の生値("Art Card"/"Alt Art" 等)が eBay TCG facet 正規値でない
+#   (正規は Full Art/Alternative Art/Promo…)。旧は空欄なので上書きすると非facet値で悪化。
+#   eBay正規化を入れるまでは旧挙動(空欄)を維持する (official_x_ebay_filter_max_activation)。
+_NO_OVERRIDE = {"C:Features"}
+
+
 def _col_idx(headers, name):
     """headers が dict(name→idx) でも list でも idx を返す。"""
     if isinstance(headers, dict):
@@ -64,6 +71,8 @@ def apply_new_gen_override(row, headers, cert, *, blank_missing=None,
     new = list(row)
     for col, val in fields.items():
         if col.startswith("_"):          # _card_id 等の内部キーは除外
+            continue
+        if col in _NO_OVERRIDE:          # 非facet値で悪化する列は旧のまま
             continue
         idx = _col_idx(headers, col)
         if idx is None or idx >= len(new):

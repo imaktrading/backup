@@ -80,3 +80,15 @@ def test_env_enabled(monkeypatch):
     assert OV.env_enabled() is False
     monkeypatch.setenv("TCG_USE_NEW_GEN", "1")
     assert OV.env_enabled() is True
+
+
+def test_features_not_overridden(monkeypatch):
+    # C:Features は catalog 生値が eBay facet 値でないため上書きしない (旧のまま)
+    fields = {"C:Set": "VMAX Climax", "C:Features": "Art Card", "_card_id": "x"}
+    _patch(monkeypatch, fields)
+    row = _row()
+    fi = HEADERS.index("C:Features")    # idx 6 (既存列)
+    row[fi] = "OldFeat"
+    out = OV.apply_new_gen_override(row, HEADERS, "123", override_title=False)
+    assert out[HEADERS.index("C:Set")] == "VMAX Climax"   # Set は上書き
+    assert out[fi] == "OldFeat"                            # Features は旧のまま
