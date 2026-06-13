@@ -361,7 +361,16 @@ def _start_driver():
     opts = uc.ChromeOptions()
     opts.add_argument("--lang=ja-JP")
     opts.add_argument("--window-size=1400,900")
-    return uc.Chrome(options=opts, version_main=147)
+    # 2026-06-14: version_main を実機 Chrome 自動検出 (旧 147 固定。Chrome更新で mismatch→orphan回避)。
+    try:
+        import os as _os, sys as _sys
+        _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        from _chrome_version import installed_chrome_major as _icm
+        _vm = _icm(147)
+    except Exception:
+        _vm = 147
+    return uc.Chrome(options=opts, version_main=_vm)
+
 
 
 # ============================================================================

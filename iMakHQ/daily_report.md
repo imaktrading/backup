@@ -1165,3 +1165,21 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 ### 検証(実出力)
 - 検証✅ movement: gshock 空831→Quartz・残0。lookup_gshock(GST-W310/DW-5900/MTG-B3000D)→Quartz
 - 検証✅ generator: gshock_to_csv.py L1040 出力列に"C:Color"不在(C:Band/Dial/Case/Bezel Colorのみ)確認
+
+
+## 2026-06-14 — Catalog: orphan chrome 点検 (version_main 自動検出化)
+
+### 決定事項
+- 決定1(点検結果): Catalog scraper は全て finally:driver.quit() 済(usage安全)。現 orphan 無し(検出された undetected_chromedriver 2個は Inventory稼働中cron run_cycle.py(PID30016)所属=worktree規約で不触)。
+- 決定2(真因=stale pin): 実機Chrome=149だが Catalog scraper の version_main が 146/147/148 に手動pin(全stale)。Chrome自動更新でpinがmismatch→uc.Chrome()構築crash→drv未代入でfinally無効→orphan の温床。
+- 決定3(硬化): version_main を実機Chrome自動検出に変更。scrapers/_chrome_version.py 新設(registry/exe からmajor検出、失敗時None=uc本体委譲)。各scraperは installed_chrome_major(旧pin) を使用(検出失敗時は旧pin fallback=無回帰)。auto-killは入れない(手動tool・ユーザーブラウザ巻込回避、Harvest方針と同じ)。
+
+### 変更
+- 変更: scrapers/_chrome_version.py 新設
+- 変更: scrapers/gshock.py(3) montbell.py(1) workman.py(1) _dbfw_official_local_fetch.py(1) _gundam_official_local_fetch.py(1) = version_main 7箇所 自動検出化
+- 注: iMakeBayAPI/ebay_sold_finder.py(146) は別プロジェクト=今回対象外(別途)
+
+### 検証(実出力)
+- 検証✅ 実機Chrome=149.0.7827.103 / installed_chrome_major()=149
+- 検証✅ 全5 scraper 構文OK・hardcoded version_main=14x 残0・pytest 306 passed
+- 検証✅ orphan 2個=Inventory cron(run_cycle.py)所属と確認し不触(kill前にCommandLine確認)

@@ -40,6 +40,16 @@ for p in (_GSHOCK_DIR, _CASIO_FINDER_DIR, _EBAY_API_DIR, _CATALOG_ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
+# 2026-06-14: version_main を実機 Chrome から自動検出 (orphan chrome 点検)。
+#   旧: 146/147 等の手動 pin。Chrome 自動更新で pin が stale → mismatch 構築crash → orphan。
+#   検出失敗時は引数の旧 pin に fallback (無回帰)。
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # scrapers/ (= _chrome_version)
+try:
+    from _chrome_version import installed_chrome_major as _chrome_major
+except Exception:
+    def _chrome_major(default=None):
+        return default
+
 # 遅延 import に統一して、CLI 以外の import 時に Selenium ドライバ起動コストを払わない
 
 
@@ -229,7 +239,7 @@ def _start_driver():
     import undetected_chromedriver as uc  # type: ignore
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
-    return uc.Chrome(options=options, version_main=146)
+    return uc.Chrome(options=options, version_main=_chrome_major(146))
 
 
 # ============================================================================
@@ -881,7 +891,7 @@ def update_official_specs(only_missing: bool = False, limit: Optional[int] = Non
     opts = uc.ChromeOptions()
     opts.add_argument("--lang=ja-JP")
     opts.add_argument("--window-size=1400,900")
-    driver = uc.Chrome(options=opts, version_main=147)
+    driver = uc.Chrome(options=opts, version_main=_chrome_major(147))
     fetched = 0
     parsed_ok = 0
     errors = 0
@@ -1231,7 +1241,7 @@ def _fetch_casio_skus_with_images(url: str, scroll_iter: int = 15) -> dict:
     opts = uc.ChromeOptions()
     opts.add_argument("--lang=ja-JP")
     opts.add_argument("--window-size=1400,900")
-    driver = uc.Chrome(options=opts, version_main=147)
+    driver = uc.Chrome(options=opts, version_main=_chrome_major(147))
     try:
         driver.get(url)
         import time as _t
