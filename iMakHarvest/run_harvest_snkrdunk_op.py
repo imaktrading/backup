@@ -136,7 +136,8 @@ def write_cards_to_tab(cards: list[dict], retries: int = 3) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--price-cap", type=int, default=OP.DEFAULT_PRICE_CAP)
+    ap.add_argument("--price-cap", type=int, default=0,
+                    help="価格上限(円)。 0=上限なし(既定、 販売中PSA10を全部。 価格はスプシ後処理)")
     ap.add_argument("--keywords", default="ワンピース",
                     help="カンマ区切り検索語 (= 完全性向上に弾コード OP12 等を足す)")
     ap.add_argument("--max-pages", type=int, default=20, help="keyword あたり最大頁")
@@ -155,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     keywords = [k.strip() for k in args.keywords.split(",") if k.strip()]
+    price_cap = args.price_cap or None  # 0 → None (= 価格cap無し)
 
     # 1) 候補 model_id 列挙 (Selenium)
     _log(f"列挙開始: keywords={keywords} max_pages={args.max_pages}")
@@ -188,13 +190,14 @@ def main(argv: list[str] | None = None) -> int:
         if not OP.is_one_piece_pn(pn):
             continue
         op_models += 1
-        psa10 = OP.extract_psa10_under(session, mid, args.price_cap)
+        psa10 = OP.extract_psa10_under(session, mid, price_cap)
         if not psa10:
             continue
         cards.append({"model_id": mid, "card_id": pn.upper(),
                       "name": (det.get("name") or "").strip(), "psa10": psa10})
         time.sleep(OP.RATE_SEC)
-    _log(f"One Piece model={op_models} / PSA10<{args.price_cap}あり card={len(cards)} "
+    cap_txt = f"<{price_cap}" if price_cap else "(価格cap無)"
+    _log(f"One Piece model={op_models} / PSA10{cap_txt}在庫 card={len(cards)} "
          f"/ 総PSA10出品={sum(len(c['psa10']) for c in cards)}")
 
     # 補仕入判定

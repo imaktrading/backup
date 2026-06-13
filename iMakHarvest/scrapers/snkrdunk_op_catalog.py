@@ -90,9 +90,12 @@ def fetch_used_items(session: requests.Session, model_id: int | str) -> list[dic
 
 
 def extract_psa10_under(
-    session: requests.Session, model_id: int | str, price_cap: int = DEFAULT_PRICE_CAP,
+    session: requests.Session, model_id: int | str, price_cap: int | None = None,
 ) -> list[dict]:
-    """1 model の PSA10 + 出品中 + price<cap の出品を price 昇順で返す.
+    """1 model の PSA10 + 出品中 の出品を price 昇順で返す.
+
+    price_cap=None (既定) なら価格上限なし (= 販売中の PSA10 を全部。 価格はスプシ後処理)。
+    price_cap に数値を渡すと price<cap のみ。
 
     Returns: [{"instance_id": int, "price": int, "url": str}, ...]
     """
@@ -101,7 +104,9 @@ def extract_psa10_under(
         if not SO.is_psa10_on_sale(it):  # status==0 AND displayShortConditionTitle=="PSA10"
             continue
         price = it.get("price")
-        if not isinstance(price, int) or price >= price_cap:
+        if not isinstance(price, int):
+            continue
+        if price_cap is not None and price >= price_cap:
             continue
         inst = it.get("id")
         out.append({
