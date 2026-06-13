@@ -1148,3 +1148,20 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅ character_name: 5名 desync=0
 - 検証✅ DPt: 各set_code単一値。不統一8→5(残5はHQ triage済「正」)
 - 検証✅ 監査検査4: 接頭辞除外後 91件 真desync検出(M-P/DPs scramble)。pytest 306 passed
+
+
+## 2026-06-14 — Catalog: gshock CSV監査15件 切り分け (C:Movement修正 / C:Color=generator側)
+
+### 決定事項
+- 決定1(切り分け): csv_auditor自動依頼の gshock 8ASIN(C:Color/C:Movement空)を ASIN→model→catalog(lookup_gshock)照合。movement=7/8空・8番目もSolar Quartz / dial-band color=4/8在4/8空。
+- 決定2(C:Movement修正=catalog gap・deterministic): 真因=catalog movement空(gshock 831/1555 systemic)+generator L893 Quartzデフォルトが adapter '' で無効化。全G-Shockはquartz(機械式不在=deterministic,推測でない)→catalog空movement 831件を"Quartz"補完。残0。将来flagも恒久解消。
+- 決定3(C:Color=catalog外・flag): generator(gshock_to_csv.py L1040)が C:Band/Dial/Case/Bezel Color は出すが単一"C:Color"列を出力せず=monitor必須との フィールド名不一致(真因A,generator側)。+ 4 model(GST-W310-1A/DW-5900-1/MTG-B2000B-1A2/MTG-B3000D-1A)はcatalog色gap(真因B,公式裏取り要)。推測補完せずHQ greenlight待ち。
+
+### 変更
+- 変更(共有DB・git外): gshock movement 空831件→"Quartz"(deterministic)。bak: gshock_movement_before_20260613.json
+- 変更: requests/ に _audit_catalog_fix_gshock_processed.md
+- コード変更なし(C:Colorは generator/monitor側=HQ)
+
+### 検証(実出力)
+- 検証✅ movement: gshock 空831→Quartz・残0。lookup_gshock(GST-W310/DW-5900/MTG-B3000D)→Quartz
+- 検証✅ generator: gshock_to_csv.py L1040 出力列に"C:Color"不在(C:Band/Dial/Case/Bezel Colorのみ)確認
