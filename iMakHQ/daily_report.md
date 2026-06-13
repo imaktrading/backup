@@ -1077,3 +1077,19 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅ 通常Collection 不変: lookup_pokemon(S8a-024 Lugia)→ "Celebrations" (S8a-G-% のみ更新、S8a-% は無変更)
 - 検証✅ pytest: test_psa_review_promo_resolve 17 passed
 - 検証✅ 裏取り: Bulbapedia "25th Anniversary Golden Box (TCG)" / eBay 実listing が "25th Anniversary Golden Box" 使用
+
+
+## 2026-06-13 (続3) — Catalog: S8a-G enrich(finish/type) + 名前是正 + Pikachu V override 不採用判断
+
+### 決定事項
+- 決定1(enrich): Bulbapedia裏取りで S8a-G 全15枚に finish(001/002=Full Art Gold, 003-015=Mirror Holofoil) + energy_type(Pokemon 5枚=Lightning) を記録。eBay rarity は「Mirror Holofoil/Full Art Gold」が標準フィルタ値外のため blank 維持(fail-closed, 空欄>誤値)。
+- 決定2(名前是正): S8a-G-014 name_en "Imitation Pokémon"(誤訳) → 公式英名 "Poké Kid" に是正(Bulbapedia)。
+- 決定3(Pikachu V override 不採用): cert142931332 を override で即出品化する案は**不採用**。理由=Pokemon override 前例ゼロで card_number 形式/title selfcheck の end-to-end 挙動を検証不能(PSA scrape/creds要)、未検証 override は誤出品リスク=fail-closed違反。Pikachu V は Catalog側完了(code fix+set是正+enrich)で、HQ が正しい brand で再scrape すれば subject-path で自動 resolve する(HQ 1動作)。
+
+### 変更
+- 変更(共有DB・git外): S8a-G-001〜015 specs に finish/energy_type 追加 + S8a-G-014 name_en→"Poké Kid"。bak: _bak/S8a-G_enrich_before_20260613.json
+- コード変更なし(override不採用)
+
+### 検証(実出力)
+- 検証✅ enrich: S8a-G-001 finish=Full Art Gold/type=Lightning, S8a-G-005 finish=Mirror Holofoil/type=Lightning, S8a-G-014 name=Poké Kid
+- 検証✅ Bulbapedia 全15枚 rarity/type 突合済
