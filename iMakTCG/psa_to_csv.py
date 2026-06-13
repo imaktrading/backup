@@ -2431,6 +2431,14 @@ def main():
                 errors.append(cert)
                 card_info.append((cert, None))
                 continue
+            # 並行ビルド切替 (strangler): TCG_USE_NEW_GEN=1 の時だけ catalog 決定論値で上書き。
+            # 既定 OFF=この分岐は no-op で旧挙動を完全維持 (本番不変)。
+            try:
+                from tcg_new_gen_override import env_enabled, apply_new_gen_override
+                if env_enabled():
+                    row = apply_new_gen_override(row, headers, cert)
+            except Exception as _e:
+                print(f"    ⚠️ new-gen override skip (#{cert}): {type(_e).__name__}: {_e}")
             apply_ebay_filter_to_row(row, headers, category="tcg")
             rows.append(row)
             card_info.append((cert, data))
