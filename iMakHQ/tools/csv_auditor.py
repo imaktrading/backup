@@ -62,6 +62,11 @@ CATEGORY_MAP = {
         "lc_category": "G-SHOCK", "ebay_categories": ["31387"],
         "sig_cols": ["C:Model", "C:Movement"], "fix_shipping": True, "cost_key": "*Title",
         "aspect_json": r"C:/dev/iMak_data/catalog/_input/ebay_gshock_filter_lists_api.json",
+        # 必須spec空でも除外しない=報告のみ (2026-06-13)。check_csv が Movement/Color 空を
+        # 必須扱いして全8行を誤除外→入稿0件になった。実機確認: cat 31387 で Movement は
+        # aspect_required=false(RECOMMENDED)、"Color" は aspect 自体が無い(Case/Band Color が正)。
+        # = eBay必須でない欄での fail-closed 全滅。apparel(mercari) と同型なので同じ扱いにする。
+        "spec_empty_excludes": False,
     },
     "ichibankuji": {
         "check_csv": os.path.join(WORKSPACE, "iMak_ichibankuji", "check_csv.py"),

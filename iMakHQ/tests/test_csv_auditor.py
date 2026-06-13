@@ -302,3 +302,31 @@ def test_reel_color_not_consistency_checked():
     # porter: 色がタイトルに無ければ検出 (維持)
     out = A.title_spec_consistency(h, ["YOSHIDA PORTER Tanker Bag Used Japan", "Porter", "Red"], "mercari")
     assert any("C:Color" in m for m in out)
+
+
+# --- G-shock 全滅 誤除外 防止 (2026-06-13) -------------------------------
+# check_csv が Movement/Color 空を必須扱いし全8行を誤除外→入稿0件になった件の回帰防止。
+# 実機確認: cat 31387 で Movement=RECOMMENDED(必須でない)・"Color" は aspect 自体が無い。
+# = eBay必須でない欄での fail-closed 全滅。apparel(mercari)同型なので spec空は報告のみにする。
+def test_gshock_spec_empty_does_not_exclude():
+    assert A.CATEGORY_MAP["gshock"].get("spec_empty_excludes") is False
+
+
+def test_mercari_spec_empty_precedent_intact():
+    assert A.CATEGORY_MAP["mercari"].get("spec_empty_excludes") is False
+
+
+def test_tcg_still_excludes_on_spec_empty():
+    # TCG は必須spec空を従来どおり除外 (誤って全カテゴリに緩和を広げていないこと)。
+    assert A.CATEGORY_MAP["tcg"].get("spec_empty_excludes", True) is not False
+
+
+def test_spec_empty_message_classified_as_spec_empty():
+    # 「必須Item Specific 'C:Color' が空」= SPEC_EMPTY 分類 (除外対象の disposition)。
+    assert A.classify_finding("WARN", "必須Item Specific 'C:Color' が空") == A.SPEC_EMPTY
+
+
+def test_seo_note_is_not_excluding():
+    # spec_empty_excludes=False のとき SPEC_EMPTY→SEO_NOTE に倒す。SEO_NOTE は除外しない。
+    assert A.should_exclude([A.SEO_NOTE]) is False
+    assert A.should_exclude([A.SPEC_EMPTY]) is True
