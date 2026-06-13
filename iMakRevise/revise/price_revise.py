@@ -40,7 +40,9 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -976,33 +978,103 @@ def write_abnormal_alert_log(abnormal: list, output_dir: Path = CSV_OUTPUT_DIR) 
 # ============================================================================
 SHARED_SNAPSHOT_DIR = Path(r"C:/dev/iMak_data/snapshots")
 SNAPSHOT_KEEP_COUNT = 5
+SNAPSHOT_DL_RETRIES = 3                       # 2026-06-12 R1: DL 失敗時 retry 回数
+SNAPSHOT_DL_RETRY_INTERVAL_SEC = 2.0           # retry 間隔
+SNAPSHOT_FRESHNESS_MAX_AGE_SEC = 6 * 3600      # mtime ガード = 6h (R1 二重防御)
+
+
+class SnapshotFetchError(RuntimeError):
+    """snapshot DL 失敗 / 鮮度切れで run 中止すべきことを示す例外 (R1 fresh-or-fail)."""
+
+
+def _flush_dns_cache(verbose: bool = True) -> None:
+    """Windows DNS cache を flush (= DNS hiccup の自動復旧試行)."""
+    try:
+        subprocess.run(
+            ["ipconfig", "/flushdns"],
+            capture_output=True, text=True, timeout=10,
+            encoding="cp932", errors="replace",
+        )
+        if verbose:
+            print(f"[snapshot]   DNS cache flush 完了 (= 自動復旧試行)")
+    except Exception as e:
+        if verbose:
+            print(f"[snapshot]   [WARN] DNS cache flush 失敗: {e} (= 続行)")
 
 
 def fetch_and_save_snapshot(output_dir: Path = SHARED_SNAPSHOT_DIR,
                               keep_count: int = SNAPSHOT_KEEP_COUNT,
-                              verbose: bool = True) -> Optional[Path]:
-    """Trading API で snapshot 自動取得 → 共有フォルダ保存 → rotation.
+                              verbose: bool = True,
+                              max_retries: int = SNAPSHOT_DL_RETRIES,
+                              fetch_fn=None) -> Path:
+    """Trading API で snapshot 自動取得 → 共有フォルダ保存 → rotation (R1 fresh-or-fail).
 
-    Returns: 保存した snapshot path (= 失敗時 None)
+    DL 失敗時の動作:
+      1. 1 回目失敗 → flushdns + retry (= DNS hiccup 自動復旧)
+      2. retry 尽きても失敗 → SnapshotFetchError 投げて run 中止 (= 古い snapshot で続行しない)
+
+    Returns: 保存した snapshot path (= 必ず fresh)
+    Raises : SnapshotFetchError (= DL 不可、 run 中止すべき)
+
+    Args:
+        fetch_fn: test 用 injection (= 通常は ebay_trading_api.fetch_all_active_listings)
     """
-    try:
-        from . import ebay_trading_api
-        if verbose:
-            print(f"[snapshot] eBay GetSellerList で active listing 取得 中...")
-        items = ebay_trading_api.fetch_all_active_listings(verbose=verbose)
-        if verbose:
-            print(f"[snapshot]   取得完了: {len(items)} listings")
-        path = ebay_trading_api.save_snapshot_csv(items, output_dir)
-        if verbose:
-            print(f"[snapshot]   保存: {path}")
-        deleted = ebay_trading_api.rotate_snapshots(output_dir, keep_count=keep_count)
-        if verbose and deleted:
-            print(f"[snapshot]   rotation: 削除 {len(deleted)} 件 (keep={keep_count})")
-        return path
-    except Exception as e:
-        if verbose:
-            print(f"[snapshot] [WARN] 自動取得失敗 → fallback (既存 snapshot 利用): {e}")
-        return None
+    from . import ebay_trading_api
+    if fetch_fn is None:
+        fetch_fn = ebay_trading_api.fetch_all_active_listings
+
+    last_err: Optional[Exception] = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            if verbose:
+                if attempt == 1:
+                    print(f"[snapshot] eBay GetSellerList で active listing 取得 中...")
+                else:
+                    print(f"[snapshot]   retry {attempt}/{max_retries} ...")
+            items = fetch_fn(verbose=verbose)
+            if verbose:
+                print(f"[snapshot]   取得完了: {len(items)} listings")
+            path = ebay_trading_api.save_snapshot_csv(items, output_dir)
+            if verbose:
+                print(f"[snapshot]   保存: {path}")
+            deleted = ebay_trading_api.rotate_snapshots(output_dir, keep_count=keep_count)
+            if verbose and deleted:
+                print(f"[snapshot]   rotation: 削除 {len(deleted)} 件 (keep={keep_count})")
+            return path
+        except Exception as e:
+            last_err = e
+            if verbose:
+                print(f"[snapshot]   [WARN] 取得失敗 (attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                _flush_dns_cache(verbose=verbose)
+                time.sleep(SNAPSHOT_DL_RETRY_INTERVAL_SEC)
+
+    # 全 retry 尽きた → fail-CLOSED で run 中止 (= 古い snapshot で続行しない)
+    raise SnapshotFetchError(
+        f"snapshot DL 失敗 ({max_retries} 回 retry 尽き、 最後 err: {last_err}). "
+        f"DNS/ネットワーク確認のうえ再実行してください。"
+    )
+
+
+def _check_snapshot_freshness(path: Path, max_age_sec: int = SNAPSHOT_FRESHNESS_MAX_AGE_SEC,
+                                verbose: bool = True) -> None:
+    """snapshot mtime が max_age_sec 超なら SnapshotFetchError (= 二重防御).
+
+    fetch_and_save_snapshot 経由は時刻保証されるが、 既存 snapshot 採用経路でも
+    stale を使わないようにする最終チェック。
+    """
+    if not path.exists():
+        raise SnapshotFetchError(f"snapshot not found: {path}")
+    age_sec = time.time() - path.stat().st_mtime
+    if age_sec > max_age_sec:
+        age_h = age_sec / 3600
+        raise SnapshotFetchError(
+            f"snapshot stale: {path.name} は {age_h:.1f}h 前 "
+            f"(許容 {max_age_sec/3600:.0f}h 以内). DNS/ネットワーク確認のうえ再実行してください。"
+        )
+    if verbose:
+        age_min = age_sec / 60
+        print(f"[snapshot]   鮮度 OK ({age_min:.0f} 分前 < 許容 {max_age_sec/3600:.0f}h)")
 
 
 def run_price_revise(
@@ -1121,13 +1193,18 @@ def run_price_revise(
         else:
             snapshot_path = snapshot_reader.find_latest_snapshot()
         if snapshot_path and snapshot_path.exists():
+            # R1 二重防御: mtime > 6h なら stale で中止 (skip_snapshot/snapshot_from 経由も同じ)
+            _check_snapshot_freshness(snapshot_path)
             print(f"[revise] snapshot 読込: {snapshot_path.name}")
             snapshot_map = snapshot_reader.load_snapshot(snapshot_path)
             variations_map = snapshot_reader.load_variations(snapshot_path)
             print(f"[revise]   snapshot {len(snapshot_map)} listings 取得 "
                   f"(うち variation listing {len(variations_map)} 件)")
         else:
-            print(f"[revise] [WARN] snapshot CSV 未検出 → 全件 no_snapshot で skip 想定")
+            raise SnapshotFetchError(
+                f"snapshot CSV 未検出: {snapshot_path}. "
+                f"DL 取得失敗 or skip_snapshot 指定で stale 想定。 run 中止。"
+            )
         try:
             policy_map = ebay_trading_api.get_items_cached(item_ids)
         except Exception as e:
