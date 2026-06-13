@@ -1,5 +1,36 @@
 # iMakHarvest daily_report
 
+## 2026-06-14 (= 続) — スニダン ワンピPSA10 抽出を正URL化 (= 17→233カード、 販売中網羅)
+
+### 決定
+
+- user 指摘「売切混入 / 在庫がもっとあるはず」を是正。 2 つの根本原因を解消:
+  1. **列挙の keyword/brandId (単数) が無視されていた** → 正解は **複数形 `keywords`/`brandIds`
+     + `isSaleOnly=true`** (= user 提供 URL 2026-06-14)。 旧方式は keyword 無視でトレカ人気上位の
+     One Piece 分 (152頭打ち) しか取れず。
+  2. **累積 dedup で売切listingが陳腐化** → リフレッシュ書込 (毎回クリア+最新で全置換) に変更。
+- 抽出スコープ: **販売中 (isSaleOnly + status==0) × One Piece (brandIds) × PSA10**、 価格 cap OFF
+  (= 価格はスプシ後処理、 user 方針)。 productNumber gate は brandIds 保証により撤廃。
+
+### 変更
+
+- `scrapers/snkrdunk_op_catalog.py`:
+  - `enumerate_candidate_model_ids` を `keywords/brandIds=onepiece/isSaleOnly=true` URL に修正。
+  - `extract_psa10_under` price_cap 既定 None (= 上限なし)。 HTTP fetch retry (既存)。
+- `run_harvest_snkrdunk_op.py`:
+  - `write_cards_to_tab` リフレッシュ化 (clear+rewrite, price昇順)。
+  - productNumber gate 撤廃 (= OPCD/OP-P/CS25 variant 取りこぼし防止)、 --price-cap 既定0(無制限)。
+
+### 検証
+
+- ✅ 新URL動作確認: 3頁69件 / 純度25/25 One Piece (旧は Pokemon 混在)。
+- ✅ 本実行 (user CMD): 候補233 → 販売中PSA10カード **233** (総出品3850) → 新タブ233行
+  (補仕入31 / 新規202)、 価格帯 ¥4,100〜2250万。 旧16カードから13.7倍に網羅。
+- ✅ 全 pytest 緑 (snkrdunk_op 16件含む)。
+- ✅ orphan chrome 7個 (失敗probe残骸) を kill して起動失敗を回復。
+
+---
+
 ## 2026-06-14 — Chrome version_main 全scraper 自動検出化 (= 横断展開、 版ズレ事故の構造的防止)
 
 ### 決定
