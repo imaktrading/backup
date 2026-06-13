@@ -205,6 +205,83 @@ DIGITAL_COMMON_FEATURES = [
     "Day Indicator", "LED Display", "Multifunction", "Timer",
     "World Time", "Chronograph",
 ]
+
+# eBay カテゴリ 31387 の Features 正規値 (公式 API フィルタ値・2026-06-13 実機取得)。
+# これ以外の文字列は検索フィルタにヒットしない → 出さない (official_x_ebay_filter_max_activation)。
+EBAY_FEATURES_VALID = frozenset([
+    "12-Hour Dial", "24-Hour Dial", "Acrylic Crystal", "Alarm", "Altimeter",
+    "Annual Calendar", "Atomic/Radio Controlled", "Backlight", "Bluetooth", "Calculator",
+    "Central Second", "Chronograph", "Chronometer", "Co-Axial", "Compass",
+    "Date Indicator", "Day Indicator", "Day/Date", "Day/Night Indicator", "Diamond Accent",
+    "Easy to Read/Large Numerals", "Fixed Bezel", "GPS", "Gemmed", "Heart Rate Monitor",
+    "Helium Valve", "LCD Display", "LED Display", "Leap Year Indicator", "Limited Edition",
+    "Luminous Dial", "Luminous Hands", "Luminous Indexes", "Magnetic-Resistant",
+    "Mineral Crystal", "Month Indicator", "Moon Phase", "Multi-Dial", "Multifunction",
+    "Multiple Hands", "Perpetual Calendar", "Power Reserve Indicator", "Pulsometer",
+    "Push/Pull Crown", "Repeater", "Retrograde Date", "Rotating Bezel", "Sapphire Crystal",
+    "Scratch-Resistant", "Screwdown Crown", "Seconds Hand", "Self-Winding", "Shock-Resistant",
+    "Small Second", "Solar Powered", "Splash Proof", "Stop-Seconds Function", "Swiss Made",
+    "Swiss Movement", "Tachymeter", "Telemeter", "Thermometer", "Timer", "Tourbillon",
+    "Triple Calendar", "Water Resistance", "Water-Resistant", "World Time",
+])
+
+# catalog の生 feature コード (snake_case / 末尾に :_N の数量) → eBay 正規値。
+# 値 None = 明示的に drop (eBay フィルタに無い機能 = 記入しても検索ヒットせず空欄同等)。
+# key は「:_数量」を除いた base を小文字化したもの。clean だが eBay 不一致な値もここで矯正/除外。
+RAW_FEATURE_MAP = {
+    "world_time": "World Time", "cities": "World Time", "time_zones": "World Time",
+    "alarms": "Alarm", "alarm": "Alarm",
+    "bluetooth": "Bluetooth",
+    "tough_solar": "Solar Powered", "solar": "Solar Powered", "solar_powered": "Solar Powered",
+    "auto_light": "Backlight", "led": "LED Display",
+    "magnetic_resistance": "Magnetic-Resistant",
+    "multi_band_6": "Atomic/Radio Controlled", "radio_controlled": "Atomic/Radio Controlled",
+    "multi_timer": "Timer", "timer": "Timer",
+    "moon_graph": "Moon Phase", "moon": "Moon Phase",
+    "thermometer": "Thermometer", "altimeter": "Altimeter", "compass": "Compass",
+    "water_resistance": "Water-Resistant",
+    "stopwatch": "Chronograph", "chronograph": "Chronograph",
+    "gps": "GPS", "heart_rate": "Heart Rate Monitor",
+    # 明示 drop (eBay フィルタに無い = 検索ヒットしない)
+    "carbon_guard_core": None, "carbon_core_guard": None, "casio_watches": None,
+    "multi_date_format": None, "multi_day_format": None, "step_tracker": None,
+    "sunrise_sunset": None, "alphagel": None, "screw_back": None, "vibration": None,
+    "tide_graph": None, "mud_resistance": None, "g_shock_move": None, "countdown": None,
+    "neon_illuminator": None, "super_illuminator": "Backlight", "carbon_core_guard": None,
+}
+
+
+def normalize_features(features_str):
+    """catalog 生 feature コードを eBay 正規値に正規化し、不正/不明は drop。
+
+    - "alarms:_5" / "cities:_+300" のような数量サフィックスを除去
+    - RAW_FEATURE_MAP で生コード→正規値 (None は drop)
+    - 既に eBay 正規値ならそのまま採用
+    - G-Shock 共通機能を必ず付与
+    返り値: eBay 正規値のみの list (順不同・dedupe 済)。FREE_TEXT だが正規値に絞ることで
+    検索フィルタにヒットさせる (official_x_ebay_filter_max_activation / 推測で埋めない)。
+    """
+    out = []
+
+    def _push(v):
+        if v and v not in out:
+            out.append(v)
+
+    for raw in str(features_str or "").split(","):
+        tok = raw.strip()
+        if not tok:
+            continue
+        base = re.sub(r":_.*$", "", tok).strip()       # "alarms:_5" → "alarms"
+        if base in EBAY_FEATURES_VALID:                  # 既に正規値
+            _push(base); continue
+        key = re.sub(r"[\s\-]+", "_", base.lower())      # "Radio Controlled"→"radio_controlled"
+        if key in RAW_FEATURE_MAP:
+            _push(RAW_FEATURE_MAP[key])                  # None なら _push が無視=drop
+            continue
+        # 未知 = drop (推測で埋めない)
+    for f in GSHOCK_COMMON_FEATURES:                     # 共通機能は必ず付与
+        _push(f)
+    return out
 MOVEMENT_MAP = {
     # eBay Movement フィルタは Mechanical Automatic / Mechanical Manual / Quartz の3択のみ
     # G-Shockは全部Quartz（Solar/Radio Controlled はFeatures側に記録）
@@ -443,7 +520,8 @@ def get_default_weight(model):
     return ""
 
 def trim_features(features_str, max_len=65):
-    parts = [f.strip() for f in features_str.split(",")]
+    # まず eBay 正規値へ正規化 (生コード alarms:_5 等を除去・不明は drop)。
+    parts = normalize_features(features_str)
     sorted_parts = sorted(parts, key=lambda x: FEATURES_PRIORITY.index(x) if x in FEATURES_PRIORITY else 99)
     result = []
     for p in sorted_parts:
