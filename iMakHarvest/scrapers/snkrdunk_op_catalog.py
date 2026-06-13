@@ -154,13 +154,21 @@ def enumerate_candidate_model_ids(
     for page in range(1, max_pages + 1):
         url = (f"{SO.SNKRDUNK_BASE}/search?keyword={quote(keyword)}"
                f"&searchCategoryIds={category_ids}&page={page}")
-        driver.get(url)
-        time.sleep(6)
-        ids = _scrape_model_ids_on_page(driver)
+        try:
+            driver.get(url)
+            time.sleep(6)
+            ids = _scrape_model_ids_on_page(driver)
+        except Exception as e:
+            # driver/chrome 死亡 (= 接続拒否等)。 全体を落とさず収集済で打ち切る (fail-safe)。
+            print(f"  [enum] keyword={keyword!r} page{page} 失敗 → 収集済 {len(collected)} 件で打切: "
+                  f"{type(e).__name__}", flush=True)
+            break
         new = [i for i in ids if i not in seen]
         for i in new:
             seen.add(i)
             collected.append(i)
+        print(f"  [enum] keyword={keyword!r} page{page}: +{len(new)} (累計 {len(collected)})",
+              flush=True)
         if not new:
             empty_streak += 1
             if empty_streak >= 2:
