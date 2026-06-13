@@ -408,3 +408,29 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - gshock_to_csv の is_active_msrp 廃盤 skip を **REVERT**（gshock_to_csv.py:1446、「廃盤も Amazon で仕入れるから勝手に外すな」のユーザー指摘対応）
 
 ---
+
+## 2026-05-22〜06-09 — ブリッジ要約2（横断進捗 + 5月実績）
+
+> 6/2 インシデント以降の実務進捗を事後再構成。日次の詳細は memory 側 daily_report に密に記録済、本欄は HQ 横断サマリ。
+
+### 決定 / 主な進捗（プロジェクト横断）
+
+- **取下げ再出品（relist）システム 大規模実装**: フルファネル分析（NO_SEARCH=露出されない / NO_CLICK=見られてクリックされない / NO_CONVERT=クリックされて売れない の3要因切り分け）+ `funnel_diff` 効果測定（改修前後の差分計測で PDCA クローズ）+ タイトル改修ループ。死蔵 listing を要因別に処置する基盤。
+- **在庫切れ対応 強化**: RESTOCK（再仕入れ可なら再出品）/ CULL（仕入れ不能は段階的に End）の2系統に整理。
+- **mercari fix**: 写真11枚化 / バッグ寸法抽出 / Porter 999.png（ダミー画像）対応。
+- **Catalog**: TCG 5カテゴリの公式画像 100% 化、name_en 1,810件補完。
+- **Inventory**: 公式監視くんを Trading API 化、SKU シート cache 導入。
+- **Harvest**: Casio 公式 G-shock scraper を新規実装。
+- **Revise**: 全 sheet の価格 + Policy revise を完全反映。
+
+### 検証 / 実績（KPI）
+
+- **5月実績: 12件 / ¥17,665**（目標 ¥100,000 に対し達成率 17.7% = 未達）。
+- **6月（1〜6日）: 1件 / ¥5,664**。
+
+### 未完了 / 残課題（次セッション以降）
+
+- **売上が目標比で大幅未達**（5月 17.7%）。露出天井が構造的に低い前提（送料無料DDP断念済）で「何を・どれだけ出すか」が課題。relist / ファネル分析はこの底上げ施策。
+- **6/9 受信: Oskar 色見えクレーム対応** — Porter Tanker の Description に色注記を追加する依頼が別途あり（要対応）。
+
+---
