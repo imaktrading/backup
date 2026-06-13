@@ -1,5 +1,44 @@
 # iMakHarvest daily_report
 
+## 2026-06-13 — スニダン ワンピPSA10 全件抽出 本実装 (= 新タブ snkrdunk_op_psa10、 16件)
+
+### 決定
+
+- **スニダンのワンピPSA10・price<10万 を catalog 横断で全件抽出** する新パイプラインを実装 (= user 指示)。
+  既存 snkrdunk_official.py (= 補仕入 lookup, card単位) と別物の「カタログ列挙」型。
+- 抽出方式 (= 2026-06-12 調査で確立):
+  - 列挙 = 検索結果ページ (CSR) を Selenium DOM scrape → /apparels/<model_id>
+  - One Piece 限定 = model 詳細 productNumber が OP/ST/EB/PRB/P (= Pokemon 等を fail-closed 除外)
+  - 出品 = `GET /v1/apparels/{id}/used?perPage=30` → PSA10 + status0 + price<cap (純HTTP)
+- 既存 iMakTCG 出品 (HIGH) と同 card_id = **補仕入扱い (Q列="補")**、 それ以外 = 新規候補。
+
+### 変更
+
+- `scrapers/snkrdunk_op_catalog.py` 新規 (= is_one_piece_pn / fetch_model_detail / fetch_used_items /
+  extract_psa10_under / enumerate_candidate_model_ids、 HTTP fetch に retry)。
+- `run_harvest_snkrdunk_op.py` 新規 (= 列挙→One Piece判定→PSA10<cap抽出→新タブ書込 + 補仕入flag、
+  --dry-run / --price-cap / --keywords / --max-pages / --write-from-json)。
+- `tests/test_snkrdunk_op.py` 新規 16件。
+- ★ 書込バグ修正: `_create_from_template`(duplicate) は テンプレ遠方列(CS)ジャンクを引継ぎ、
+  A列データ無し時 append_rows がCS列起点に誤書込 → `add_worksheet(cols=37)` + `ws.update("A..")` に。
+
+### 検証
+
+- ✅ 全 pytest **717件 pass** (= 701 + snkrdunk_op 16)。
+- ✅ dry-run (40 model): One Piece19 / PSA10<10万 4件 で end-to-end 動作確認。
+- ✅ 本実行 (keyword「ワンピース」25頁): 候補347 → One Piece model **159** → PSA10<10万 **カード16**
+  (総出品321) → 新タブ `snkrdunk_op_psa10` に16行書込、 A-AK列に正常着地を実機確認。
+- ✅ 補仕入照合: HIGH既出 62 card_id と照合 → **補仕入2 / 新規14**。
+- ⚠️ 環境 DNS が断続失敗 (getaddrinfo)。 HTTP/書込 retry + cards 先行保存 + --write-from-json で対処。
+  完全性は keyword「ワンピース」単独で159 model (= 末端カードは未surface)。 弾別keyword追加で拡張余地。
+
+### 次のアクション
+
+- 完全性向上 (= 弾別 keyword / 検索完全列挙) は別 task。 現状でも主要ワンピPSA10<10万 16件を抽出済。
+- DNS 安定時に再実行すれば差分追加 (= card_id dedup で重複しない)。
+
+---
+
 ## 2026-06-12 (= 続2) — staging amazon_gshock → LOW へ重複しない分を転記 (= ASIN dedup 136件)
 
 ### 決定
