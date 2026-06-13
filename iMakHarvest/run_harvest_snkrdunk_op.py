@@ -100,26 +100,29 @@ def _build_row(card: dict, is_supplement: bool) -> list:
 
 
 def write_cards_to_tab(cards: list[dict], retries: int = 3) -> int:
-    """cards を新タブに書込 (card_id dedup, A列起点 update, DNS 等の一過性失敗を retry)."""
+    """cards で新タブを **リフレッシュ書込** (= 毎回クリア+最新で全置換).
+
+    PSA10 は 1 点もの・売れ足が速いため累積 dedup だと売切listingが残り陳腐化する。
+    → 毎回 現在の在庫あり(status==0)スナップショットで全置換し、最安価格も更新する。
+    A列起点 update 強制 (= 遠方列ジャンク誤書込回避)。 DNS 等一過性失敗は retry。
+    """
     last_err = None
+    # price 昇順で安定表示 (= 仕入優先度が見やすい)
+    cards_sorted = sorted(cards, key=lambda c: c["psa10"][0]["price"] if c.get("psa10") else 1 << 30)
+    new_rows = [_build_row(c, c.get("is_supplement", False)) for c in cards_sorted]
     for attempt in range(1, retries + 1):
         try:
             sh = open_seller_staging_sheet()
             ws = _get_or_create_clean_tab(sh)
-            existing_keys = {(r[C_KEY - 1].strip().upper())
-                             for r in ws.get_all_values()[1:]
-                             if len(r) >= C_KEY and r[C_KEY - 1].strip()}
-            new_rows = [_build_row(c, c.get("is_supplement", False)) for c in cards
-                        if c["card_id"].upper() not in existing_keys]
-            if not new_rows:
-                _log(f"新タブ書込: 0 行 (全 {len(cards)} 件が既存)")
-                return 0
-            # append_rows は遠方列ジャンクで誤列書込するため A列起点 update 強制 (fail-safe)。
-            next_row = len(ws.col_values(C_URL)) + 1
-            end_row = next_row + len(new_rows) - 1
-            ws.update(range_name=f"A{next_row}:{_col_to_letter(NCOLS)}{end_row}",
-                      values=new_rows, value_input_option="USER_ENTERED")
-            _log(f"新タブ書込: {len(new_rows)} 行 (既存skip {len(cards)-len(new_rows)})")
+            prev_len = len(ws.get_all_values())  # header + 旧データ
+            end_col = _col_to_letter(NCOLS)
+            if new_rows:
+                ws.update(range_name=f"A2:{end_col}{1 + len(new_rows)}",
+                          values=new_rows, value_input_option="USER_ENTERED")
+            # 旧データが新データより多ければ余剰行をクリア (= 売切で減った分を消す)
+            if prev_len > 1 + len(new_rows):
+                ws.batch_clear([f"A{2 + len(new_rows)}:{end_col}{prev_len}"])
+            _log(f"新タブ リフレッシュ書込: {len(new_rows)} 行 (旧 {max(0, prev_len-1)} 行を置換)")
             return len(new_rows)
         except Exception as e:
             last_err = e
