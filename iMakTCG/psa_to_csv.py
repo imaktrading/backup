@@ -38,6 +38,7 @@ except Exception:
 # build_row() 等で動的 import されるため、モジュールロード時にパスを通しておく必要あり
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
 from listing_core import get_csv_output_path as _gcop  # CSV出力先の中央集約用 (iMakHQ/csv_output/<project>_upload_<ts>.csv)
+from _chrome_util import detect_chrome_major  # uc version_main を実Chromeから検出 (数値ハードコード禁止)
 
 # ===== 設定 =====
 CERTS_FILE = "certs.txt"
@@ -2316,7 +2317,7 @@ def _psa_cloudflare_warmup():
         options.add_argument("--disable-features=CalculateNativeWinOcclusion")
         options.add_argument("--no-first-run")
         options.add_argument("--no-default-browser-check")
-        _psa_warmup_driver = uc.Chrome(options=options, version_main=148)
+        _psa_warmup_driver = uc.Chrome(options=options, version_main=detect_chrome_major())
         _psa_warmup_driver.get(TEST_URL)
     except Exception as _e:
         print(f"⚠️ uc.Chrome 起動失敗: {_e}, warmup skip → 本処理が新規起動試行")
@@ -2386,7 +2387,7 @@ def main():
         options.add_argument("--disable-features=CalculateNativeWinOcclusion")
         options.add_argument("--window-size=800,600")
         options.add_argument("--window-position=100,100")
-        driver = uc.Chrome(options=options, version_main=148)
+        driver = uc.Chrome(options=options, version_main=detect_chrome_major())
     try:
         driver.minimize_window()  # 起動後即最小化
     except Exception:

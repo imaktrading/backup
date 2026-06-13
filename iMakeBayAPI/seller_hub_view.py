@@ -39,6 +39,8 @@ except Exception:
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 
+from _chrome_util import detect_chrome_major  # uc version_main を実Chromeから検出 (数値ハードコード禁止)
+
 EBAY_CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_ebay"
 SNAPSHOT_DIR = r"C:\dev\iMak_data\seller_hub"
 
@@ -109,7 +111,7 @@ def open_listing_page(status: str, keyword: str | None, wait_seconds: int = 18,
     options.add_argument(f"--user-data-dir={EBAY_CHROME_PROFILE_DIR}")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    driver = uc.Chrome(options=options, version_main=148)
+    driver = uc.Chrome(options=options, version_main=detect_chrome_major())
     print(f"[INFO] open: {url}")
     driver.get(url)
     time.sleep(wait_seconds)
