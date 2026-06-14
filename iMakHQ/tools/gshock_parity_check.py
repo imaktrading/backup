@@ -95,6 +95,18 @@ def _expected_row(model: str, headers: list):
         return None, f"build_row 失敗: {type(e).__name__}: {e}"
     if not isinstance(row, list) or len(row) != len(headers):
         return None, f"row 長不一致 (build_row={len(row) if isinstance(row,list) else '?'} vs headers={len(headers)})"
+    # 実パイプラインと同じ whitelist 正規化 (gshock_to_csv.py:1814) を期待行にも適用。
+    # 例: Movement 'Solar Quartz'→'Quartz' (eBay Movement 正規値は Quartz のみ=ソーラーは電源で
+    # movement type は Quartz)。これを省くと正規化済の正しい CSV を偽 DRIFT 検出する。
+    try:
+        from gshock_whitelist import validate_and_normalize as _vn
+        specs_dict = {h[2:]: row[i] for i, h in enumerate(headers) if h.startswith("C:")}
+        normalized, _viol = _vn(specs_dict)
+        for i, h in enumerate(headers):
+            if h.startswith("C:") and h[2:] in normalized:
+                row[i] = normalized[h[2:]]
+    except Exception:
+        pass  # whitelist 未ロードでも素の build_row で続行
     # 実パイプラインと同じ eBay フィルタ (SELECTION_ONLY不在→空欄等) を期待行にも適用。
     # これを省くと Item Weight 等「build_row は出すが eBay filter が blank する」値を
     # 偽 GAP_FILLABLE として誤検出する (= 狼少年化)。psa/gshock 本番と同じ後処理を踏む。
