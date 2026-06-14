@@ -95,6 +95,15 @@ def _expected_row(model: str, headers: list):
         return None, f"build_row 失敗: {type(e).__name__}: {e}"
     if not isinstance(row, list) or len(row) != len(headers):
         return None, f"row 長不一致 (build_row={len(row) if isinstance(row,list) else '?'} vs headers={len(headers)})"
+    # 実パイプラインと同じ eBay フィルタ (SELECTION_ONLY不在→空欄等) を期待行にも適用。
+    # これを省くと Item Weight 等「build_row は出すが eBay filter が blank する」値を
+    # 偽 GAP_FILLABLE として誤検出する (= 狼少年化)。psa/gshock 本番と同じ後処理を踏む。
+    try:
+        ret = G.apply_ebay_filter_to_row_gshock(row, headers, category="gshock")
+        if isinstance(ret, list) and len(ret) == len(headers):
+            row = ret
+    except Exception:
+        pass  # フィルタ未ロード等は素の build_row で続行 (verify不能で落とさない)
     return row, None
 
 
