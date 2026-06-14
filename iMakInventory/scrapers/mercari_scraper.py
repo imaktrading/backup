@@ -159,6 +159,14 @@ def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=ja-JP")
+    # 2026-06-14: page_load_strategy=eager で driver.get() を DOMContentLoaded で
+    # 返す (画像/サブリソースの load 完了を待たない)。 既定 "normal" は load イベント
+    # 待ちのため、 cycle 深部 (item ~750) で driver 疲弊 + 重いページ (PORTER 等) が
+    # 固まったサブリソース 1 つで load が来ず → localhost ReadTimeout を間欠多発させて
+    # いた (rows 754/757 が 3 cycle 連続 timeout = 偽の「在庫不明」)。 在庫判定は
+    # _detect_via_selenium の WebDriverWait(max 30s) がライブ DOM を polling するため
+    # eager でも壊れない (= load 完了に依存しない)。 関連: [[scraper_price_vulnerability]]
+    options.page_load_strategy = "eager"
     # 明示指定された場合のみ profile 共有 (Phase 6 までの旧動作互換)
     if use_iMakMercari_profile and os.path.isdir(CHROME_PROFILE_DIR):
         options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR}")
@@ -170,6 +178,14 @@ def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
     # 「cannot connect to chrome」 を頻発させた。 検出で自動追従させ再発防止。
     from ._chrome_util import detect_chrome_major  # noqa: PLC0415
     driver = uc.Chrome(options=options, version_main=detect_chrome_major())
+    # 2026-06-14: get() のハードリミット。 eager でも稀に DOMContentLoaded 前に固まる
+    # ケースを clean な TimeoutException (= WebDriverException → _detect_via_selenium で
+    # None=fail-closed) に落とし、 command channel を desync させる localhost ReadTimeout
+    # を回避する。 45s は SELENIUM_WAIT_SEC(30s) より余裕を持たせた値。
+    try:
+        driver.set_page_load_timeout(45)
+    except Exception:
+        pass
     return driver
 
 
