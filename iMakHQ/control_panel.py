@@ -294,6 +294,9 @@ SCRIPTS = [
         "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須
         "cwd": f"{WORKSPACE}/iMakTCG",
         "cmd": ["python", "psa_to_csv.py"],
+        # 2026-06-14 flip: catalog 決定論 新生成コアを本番有効化 (parity REGRESSION 0 確認済 +
+        # 91件 character_name scramble 是正完了)。OFF に戻すには本行削除 (psa_to_csv 側は無改変)。
+        "env": {"TCG_USE_NEW_GEN": "1"},
         "params": [],
     },
     {
@@ -1583,6 +1586,10 @@ class ListingPanel:
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
+        # script 固有 env (例: PSA TCG の TCG_USE_NEW_GEN=1 新生成コア切替・2026-06-14 flip)
+        for _k, _v in (script.get("env") or {}).items():
+            env[_k] = _v
+            self.append_log(f"  env: {_k}={_v}\n")
         # subprocess stdout を永続化 (UI 閉じても残る、後追い解析可能)
         try:
             self._run_log, log_path = _open_run_log(script["label"])
