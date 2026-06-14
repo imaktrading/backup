@@ -294,9 +294,8 @@ SCRIPTS = [
         "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須
         "cwd": f"{WORKSPACE}/iMakTCG",
         "cmd": ["python", "psa_to_csv.py"],
-        # 2026-06-14 flip: catalog 決定論 新生成コアを本番有効化 (parity REGRESSION 0 確認済 +
-        # 91件 character_name scramble 是正完了)。OFF に戻すには本行削除 (psa_to_csv 側は無改変)。
-        "env": {"TCG_USE_NEW_GEN": "1"},
+        # 新コア (TCG_USE_NEW_GEN) は既定 OFF = 本番は旧コア。flip はユーザー明示承認時のみ
+        # ここに "env": {"TCG_USE_NEW_GEN": "1"} を足す (2026-06-14 無断 flip を revert)。
         "params": [],
     },
     {
