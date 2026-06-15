@@ -1717,6 +1717,17 @@ class ListingPanel:
                             self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
                     # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
                     # 5/29 修正: 今 cycle で生成された tcg_upload_*.csv のみ対象 (= TCG 以外 cycle で毎回 HTML 出る問題対策)
+                    # 2026-06-15: verify→build (PSA_VERIFY_BEFORE_BUILD=1) の時は CSV 生成 **前** に
+                    #   目視確認済 → この後付け hook は二重なので skip (HTML が CSV 後に出る問題の解消)。
+                    _verify_before_build = False
+                    try:
+                        _vidx = getattr(self, "_current_idx", -1)
+                        _verify_before_build = bool(
+                            _vidx >= 0 and SCRIPTS[_vidx].get("env", {}).get("PSA_VERIFY_BEFORE_BUILD") == "1")
+                    except Exception:
+                        _verify_before_build = False
+                    if _verify_before_build:
+                        self.append_log("\n(post_psa_review: verify→build で生成前に確認済 — 後付け hook skip)\n")
                     try:
                         _tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
                         if _tools_dir not in sys.path:
@@ -1735,7 +1746,9 @@ class ListingPanel:
                                 # 今 cycle (= listing_start 以降に生成) のみ対象
                                 if os.path.getmtime(_candidates[0]) >= _listing_start:
                                     _latest_csv = _candidates[0]
-                        if _latest_csv:
+                        # verify→build は生成前に確認済 → 後付け viewer は出さない (二重防止)。
+                        # _latest_csv の算出は Step 6 (no_go_sentinel) が使うため残す。
+                        if _latest_csv and not _verify_before_build:
                             run_post_psa_review(_latest_csv, self.append_log)
                     except Exception as _e:
                         self.append_log(f"\n⚠️ post_psa_review hook 失敗: {_e}\n")
