@@ -269,6 +269,11 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
         "candidates_checked": len(sub_results),
         # AH 列 (前期 N) 用: read 時に取得した N 列値を引き継ぐ。書込時にここを AH へコピー
         "current_n_jpy_str": row.get("current_n_jpy_str", ""),
+        # AK 列 (巡回ERR) 前 cycle marker を引き継ぐ。2026-06-16 追加: これが欠落していたため
+        # 書込ループの clear_err が常に False = 成功してもクリア不発火 (古い marker が無限残留)、
+        # かつ error 再mark 時も count が常に ×1 (= PERSISTENT_THRESHOLD「要手動chk」永久不発火)。
+        # 両 bug の真因。 read_listings_rows が付ける err_flag_prev を result まで運ぶ。
+        "err_flag_prev": row.get("err_flag_prev", ""),
         # AC-AG (補 URL) セル色塗り用: 各候補の state を保存 (主は index=0)
         "sub_results":       sub_results,
     }
