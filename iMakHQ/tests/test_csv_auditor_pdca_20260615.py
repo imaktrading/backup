@@ -20,6 +20,7 @@ def test_pdca_accumulate_writes_queue_and_emits(tmp_path, monkeypatch):
     reqdir.mkdir()
     monkeypatch.setattr(P, "DB_PATH", db)
     monkeypatch.setattr(A, "CATALOG_REQ_DIR", str(reqdir))
+    monkeypatch.setattr(A, "MISSING_MODELS_PATH", str(tmp_path / "no_missing.csv"))  # 隔離(空)
 
     catalog_items = [("S8b-241", "必須Item Specific 'C:Rarity' が空"),
                      ("VOLTORB", "iMakCatalog 未登録")]
@@ -34,6 +35,28 @@ def test_pdca_accumulate_writes_queue_and_emits(tmp_path, monkeypatch):
     emitted = list(reqdir.glob("*_pdca_catalog_queue_tcg.md"))
     assert len(emitted) == 1
     assert "S8b-241" in emitted[0].read_text(encoding="utf-8")
+
+
+def test_import_missing_models_into_queue(tmp_path):
+    # missing_models.csv (catalog未登録) が改善キューに層A catalog_gap として乗る
+    mm = tmp_path / "missing_models.csv"
+    mm.write_text("category,model,detected_at\n"
+                  "pokemon_tcg,VOLTORB NATIONAL BEGINNING-014,2026-06-15\n"
+                  "pokemon_tcg,VOLTORB NATIONAL BEGINNING-014,2026-06-15\n"  # 重複→dedup
+                  "gundam_tcg,SOME GUNDAM-099,2026-06-15\n", encoding="utf-8")
+    con = P.connect(":memory:")
+    n = P.import_missing_models(con, str(mm), ts="2026-06-15")
+    assert n == 3                                    # 3行読む
+    rows = P.list_queue(con)
+    items = {r["item_id"] for r in rows}
+    assert items == {"VOLTORB NATIONAL BEGINNING-014", "SOME GUNDAM-099"}  # dedup で2件
+    for r in rows:
+        assert r["finding_type"] == "catalog_gap" and r["layer"] == "A"
+
+
+def test_import_missing_models_no_file(tmp_path):
+    con = P.connect(":memory:")
+    assert P.import_missing_models(con, str(tmp_path / "nope.csv")) == 0
 
 
 def test_pdca_accumulate_dry_run_noop(tmp_path, monkeypatch):

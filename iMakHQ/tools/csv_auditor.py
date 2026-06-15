@@ -47,6 +47,7 @@ WORKSPACE = os.path.normpath(os.path.join(_HERE, "..", ".."))  # c:/dev/iMak
 CSV_DIR = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
 REVIEW_DIR = os.path.join(WORKSPACE, "iMakHQ", "review_logs")
 CATALOG_REQ_DIR = r"C:\dev\iMak_data\catalog\requests"
+MISSING_MODELS_PATH = r"C:/dev/iMak_data/catalog/missing_models.csv"  # psa_to_csv 検出の catalog未登録
 
 # project → check_csv.py / listing_commonカテゴリ / *Category値 / 固有列 / 送料自動修正可否
 CATEGORY_MAP = {
@@ -729,6 +730,8 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run):
                                      finding_type=ft, ts=ts)
         for sku, msg in program_items:
             _pdca.record_finding(con, ts, project, sku, "program", str(msg)[:120], ts=ts)
+        # psa_to_csv 検出の catalog未登録 (missing_models.csv) も queue へ (= 入稿しない catalog-miss を還元)
+        _mm = _pdca.import_missing_models(con, MISSING_MODELS_PATH, ts=ts)
         synced = _pdca.sync_processed(con, CATALOG_REQ_DIR, ts=ts)        # ループ閉じ
         emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts)
         con.commit()

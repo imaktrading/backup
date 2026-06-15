@@ -256,6 +256,35 @@ def sync_processed(con, requests_dir, ts=""):
     return synced
 
 
+def import_missing_models(con, path, ts=""):
+    """psa_to_csv が書く missing_models.csv (catalog未登録カード) を改善キューに取込む。
+
+    形式: category,model,detected_at。1行=1未登録カード → 層A catalog_gap として upsert
+    (dedup で同カードは集約)。= 「入稿しない catalog-miss」が PDCA に乗り Catalog 依頼に流れる。
+    Returns: 取込件数。
+    """
+    p = Path(path)
+    if not p.is_file():
+        return 0
+    import csv as _csv
+    n = 0
+    try:
+        with p.open(encoding="utf-8") as f:
+            for row in _csv.DictReader(f):
+                model = (row.get("model") or "").strip()
+                category = (row.get("category") or "tcg").strip()
+                if not model:
+                    continue
+                upsert_improvement(con, category, model, "catalog_add", "",
+                                   evidence="missing_models (catalog未登録→入稿せず)",
+                                   source="missing_models", layer="A",
+                                   finding_type="catalog_gap", ts=ts)
+                n += 1
+    except Exception:
+        return n
+    return n
+
+
 def generate_report(con, out_path, limit=50):
     """改善キューを優先度順に markdown 可視化 (Phase1 簡易ビューア)。"""
     st = queue_stats(con)
