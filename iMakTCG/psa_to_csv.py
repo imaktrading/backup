@@ -251,6 +251,8 @@ EBAY_SPEC_TO_CSV = {
     "Cost": "C:Cost",
     "Attack/Power": "C:Attack/Power",
     "Defense/Toughness": "C:Defense/Toughness",
+    "HP": "C:HP",
+    "Stage": "C:Stage",
     "Card Condition": "C:Card Condition",
 }
 
@@ -2218,6 +2220,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         ("Japan" if franchise == "One Piece" else "Does not apply"), franchise,
         "6+", "No", "No", "Card Stock", card_size, "No",
         finish, attribute, illustrator, cost, power, "",
+        "", "",   # C:HP / C:Stage (旧コアは空・新コアが catalog hp_ebay/stage_ebay から充填)
         "Near Mint or Better", "10",
         "Professional Sports Authenticator (PSA)", "Yes",
         store_cat_id,
@@ -2418,6 +2421,9 @@ def main():
         "C:Country of Origin", "C:Franchise", "C:Age Level", "C:Autographed",
         "C:Vintage", "C:Material", "C:Card Size", "C:Customized",
         "C:Finish", "C:Attribute/MTG:Color", "C:Illustrator", "C:Cost", "C:Attack/Power", "C:Defense/Toughness",
+        # C:HP / C:Stage は新コアが catalog hp_ebay/stage_ebay から充填 (2026-06-15 最大活用)。
+        # 旧コアは空 (build_row が "" を出す)。catalog *_ebay 充填まで空欄 (回帰なし)。
+        "C:HP", "C:Stage",
         "C:Card Condition", "C:Grade", "C:Professional Grader", "C:Graded", "StoreCategoryID",
     ]
 

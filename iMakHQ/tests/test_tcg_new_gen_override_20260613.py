@@ -123,6 +123,16 @@ def test_headers_as_dict(monkeypatch):
     assert out[2] == "VMAX Climax"
 
 
+def test_hp_stage_columns_populated_when_present(monkeypatch):
+    # Phase3: psa_to_csv が C:HP/C:Stage 列を持てば override が catalog 由来値を書く。
+    hd = HEADERS + ["C:HP", "C:Stage"]
+    row = _row() + ["", ""]
+    _patch(monkeypatch, {"C:HP": "320", "C:Stage": "Basic", "_card_id": "x"})
+    out = OV.apply_new_gen_override(row, hd, "123", override_title=False)
+    assert out[hd.index("C:HP")] == "320"
+    assert out[hd.index("C:Stage")] == "Basic"
+
+
 def test_env_enabled(monkeypatch):
     monkeypatch.delenv("TCG_USE_NEW_GEN", raising=False)
     assert OV.env_enabled() is False
