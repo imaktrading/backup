@@ -316,9 +316,11 @@ def test_mercari_spec_empty_precedent_intact():
     assert A.CATEGORY_MAP["mercari"].get("spec_empty_excludes") is False
 
 
-def test_tcg_still_excludes_on_spec_empty():
-    # TCG は必須spec空を従来どおり除外 (誤って全カテゴリに緩和を広げていないこと)。
-    assert A.CATEGORY_MAP["tcg"].get("spec_empty_excludes", True) is not False
+def test_tcg_spec_empty_does_not_exclude():
+    # 2026-06-15: TCG も非必須spec空は除外しない (報告のみ)。実機 cat 183454: 必須aspectは
+    # Game のみ、Rarity/Card Name/Character は RECOMMENDED。catalog に rarity 無い正規カード
+    # (Gundam RP-022 等) を誤除外しない。G-shock/Mercari と同じ扱い。
+    assert A.CATEGORY_MAP["tcg"].get("spec_empty_excludes") is False
 
 
 def test_spec_empty_message_classified_as_spec_empty():

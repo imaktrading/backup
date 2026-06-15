@@ -56,6 +56,12 @@ CATEGORY_MAP = {
         "sig_cols": ["C:Game", "C:Card Name", "C:Rarity"], "fix_shipping": True,
         "cost_key": "CDA:Certification Number - (ID: 27503)",
         "aspect_json": r"C:/dev/iMak_data/catalog/_input/ebay_tcg_filter_lists_api.json",
+        # 必須spec空でも除外しない=報告のみ (2026-06-15)。実機確認 cat 183454: 必須aspectは
+        # Game のみ (aspect_required=True)、Rarity/Card Name/Character は RECOMMENDED(False)。
+        # 旧は Rarity 等空で fail-closed 除外→ catalog に rarity 無い正規カード(例 Gundam RP-022)が
+        # 出品できず recall 損。G-shock/Mercari と同型の非必須欄での誤除外なので同じ扱いにする。
+        # (Game 空は sig_cols 経由で別途検出。誤情報でなく欠落=空のまま出品が正・大前提に合致)
+        "spec_empty_excludes": False,
     },
     "gshock": {
         "check_csv": os.path.join(WORKSPACE, "iMakG-shock", "check_csv.py"),
