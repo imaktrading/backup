@@ -117,6 +117,41 @@ def test_title_blank_set_skipped():
     assert t == "PSA 10 Pokemon Japanese #020/019 Marnie's Morpeko 2025"
 
 
+# --- eBay 正規化フィールド (catalog *_ebay 由来・最大活用 2026-06-15) ---
+def test_cost_from_raw_clean_integer():
+    # cost はどのゲームも clean 整数 → raw 直結 (即活用)
+    f = map_specs_to_fields({"_name_en": "Yamato", "character_name": "Yamato", "cost": "4"})
+    assert f["C:Cost"] == "4"
+
+
+def test_attack_power_only_from_ebay_not_raw():
+    # power は DragonBall が不正値を持つ → raw は使わず catalog attack_power_ebay のみ
+    f = map_specs_to_fields({"_name_en": "X", "character_name": "X",
+                             "power": "15000 / (裏)20000", "attack_power_ebay": "15000"})
+    assert f["C:Attack/Power"] == "15000"        # 正規化済を採用
+    f2 = map_specs_to_fields({"_name_en": "X", "character_name": "X", "power": "15000 / (裏)20000"})
+    assert f2["C:Attack/Power"] == ""            # raw の不正値は入れない (catalog 正規化待ち)
+
+
+def test_color_only_from_ebay_not_raw_japanese():
+    # color は日本語 (緑/赤) → raw は使わず color_ebay のみ
+    f = map_specs_to_fields({"_name_en": "X", "character_name": "X", "color": "緑/黄"})
+    assert f["C:Attribute/MTG:Color"] == ""      # 日本語 raw は入れない
+    f2 = map_specs_to_fields({"_name_en": "X", "character_name": "X", "color_ebay": "Green"})
+    assert f2["C:Attribute/MTG:Color"] == "Green"
+
+
+def test_hp_stage_forward_compatible_from_ebay():
+    # HP/Stage は catalog *_ebay が来れば流れる (forward-compatible)
+    f = map_specs_to_fields({"_name_en": "X", "character_name": "X",
+                             "hp_ebay": "320", "stage_ebay": "Basic"})
+    assert f["C:HP"] == "320"
+    assert f["C:Stage"] == "Basic"
+    # 未充填なら空欄 (回帰なし)
+    f2 = map_specs_to_fields({"_name_en": "X", "character_name": "X"})
+    assert f2["C:HP"] == "" and f2["C:Stage"] == ""
+
+
 # --- Features 正規化 (2026-06-14): catalog生値 → eBay TCG facet 値 / 不明はdrop ---
 def test_features_normalize_maps_known_values():
     from tcg_listing_fields import normalize_tcg_features

@@ -40,6 +40,20 @@ _SPEC_TO_COL = {
     "illustrator":     "C:Illustrator",
     "card_size_ebay":  "C:Card Size",
 }
+# eBay 正規化フィールド (catalog SSOT)。col → 候補 spec key 優先順 (先頭の非空を採用)。
+# 方針: 値の正しさ・eBay語彙への正規化は **catalog 側 (`*_ebay`)** が持つ。generator は copy のみ。
+#   - color/attribute/stage は値が日本語 (緑/赤/たね) → catalog `*_ebay` でのみ供給 (raw は使わない)。
+#   - power は DragonBall が "15000 / (裏)20000" と不正 → catalog `attack_power_ebay` で正規化。
+#   - cost はどのゲームも clean な整数なので raw 直結も許容 (即活用)。
+# = catalog が *_ebay を埋めれば自動で流れる (forward-compatible)。未充填なら空欄 (回帰なし)。
+_MULTI_SPEC_TO_COL = {
+    "C:Cost":                 ["cost_ebay", "cost"],
+    "C:Attack/Power":         ["attack_power_ebay"],
+    "C:Defense/Toughness":    ["defense_toughness_ebay"],
+    "C:Attribute/MTG:Color":  ["color_ebay"],
+    "C:HP":                   ["hp_ebay"],
+    "C:Stage":                ["stage_ebay"],
+}
 # Card Size の fallback。catalog 全件 'Standard'(2026-06-15 実機: sample500/500=Standard)。
 # TOP セラー集計でも JP Pokemon PSA10 は Standard が市場標準 (Standard24/Japanese4)。
 # = 推測でなく確証ある既定値 (旧コアの "Japanese" ハードコード誤りを是正)。
@@ -100,6 +114,9 @@ _ALL_COLS = [
     "C:Game", "C:Set", "C:Card Type", "C:Card Name", "C:Character",
     "C:Card Number", "C:Rarity", "C:Features", "C:Finish", "C:Illustrator",
     "C:Language", "C:Year Manufactured", "C:Card Size",
+    # eBay 正規化フィールド (catalog *_ebay 由来。CSV列は既存 / C:HP・C:Stage は psa_to_csv 追加待ち)
+    "C:Cost", "C:Attack/Power", "C:Defense/Toughness", "C:Attribute/MTG:Color",
+    "C:HP", "C:Stage",
 ]
 
 
@@ -172,6 +189,16 @@ def map_specs_to_fields(specs: dict, year: str = ""):
         v = specs.get(skey)
         if v:
             fields[col] = str(v).strip()
+
+    # 1b) eBay 正規化フィールド (候補 key 優先順・先頭の非空を採用)。値は catalog が正規化済 (SSOT)。
+    for col, keys in _MULTI_SPEC_TO_COL.items():
+        if fields.get(col):
+            continue
+        for k in keys:
+            v = specs.get(k)
+            if v not in (None, "", [], {}):
+                fields[col] = str(v).strip()
+                break
 
     # 2) Card Name ← name_en (公式カード名SSOT) / Character ← character_name。
     #    旧 Subject 汚染は断つ (PSA Subject を混ぜない)。
