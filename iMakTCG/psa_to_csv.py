@@ -1008,6 +1008,36 @@ def load_description():
     except:
         return "PSA graded card shipped from Japan. Grade and cert number are as listed."
 
+
+# テンプレ内 "About Color" セクションの直前に個別 Specs ブロックを挿入するためのマーカー
+_TCG_SPECS_MARKER = '<p><span style="text-decoration: underline;"><strong>About Color</strong>'
+
+
+def build_tcg_specs_html(specs):
+    """カード個別の Specifications ブロックを HTML で組む (純関数=テスト可能)。
+
+    specs: [(label, value), ...] の順序付きリスト。**値が空の項目は出さない**
+    (G-shock build_specs_html と同方針)。値は listing の Item Specifics と同じものを
+    転記するだけ = 推測なし・出品の正確性原則に沿う。1 件も無ければ空文字を返す。
+    """
+    rows = []
+    for label, value in specs:
+        v = ("" if value is None else str(value)).strip()
+        if v:
+            rows.append(f"<li><b>{label}:</b> {v}</li>")
+    if not rows:
+        return ""
+    return ('<p><span style="text-decoration: underline;"><strong>Specifications</strong>'
+            "</span></p>\n<ul>\n" + "\n".join(rows) + "\n</ul>\n")
+
+
+def insert_tcg_specs(description, specs_html):
+    """description テンプレの About Color 直前に specs_html を挿入 (純関数)。
+    specs_html が空、またはマーカーが無ければ **description をそのまま返す** (fail-safe)。"""
+    if not specs_html or _TCG_SPECS_MARKER not in description:
+        return description
+    return description.replace(_TCG_SPECS_MARKER, specs_html + _TCG_SPECS_MARKER, 1)
+
 def parse_psa_page(text):
     data = {}
     lines = [l.strip() for l in text.split('\n') if l.strip()]
@@ -2192,6 +2222,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         if _feat:
             features = _feat
             print(f"    🔧 Features 補完(catalog rarity {official_rarity!r}→{features!r})")
+
+    # 商品説明に個別 Specifications ブロックを挿入 (listing の Item Specifics と同値を転記・空欄skip)
+    description = insert_tcg_specs(description, build_tcg_specs_html([
+        ("Card Name", card_name), ("Set", set_name), ("Card Number", card_number),
+        ("Rarity", rarity), ("Card Type", card_type), ("Year", year), ("Language", "Japanese"),
+    ]))
 
     return [
         "Add", 183454, title, _build_pic_url(data), price, 2750,
