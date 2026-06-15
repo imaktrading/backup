@@ -39,7 +39,7 @@ CATEGORY_FILTER = "アウトドア・ジャケット"  # R列(18)
 
 # 出力
 DESCRIPTION_FILE = os.path.join(SCRIPT_DIR, "USED.txt")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 SCHEDULE_WEEKS = 2
 
 # eBay固定値

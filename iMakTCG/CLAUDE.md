@@ -69,7 +69,7 @@ PSAラベルのBrandフィールドから自動判定:
 - 返却JSON: title, card_name, rarity, features, card_type, attribute, cost, power, finish
 - JSONパース失敗時は簡略プロンプトでリトライ（1回）
 - タイトル80文字超過時は title=null でフォールバックに切り替え
-- model: claude-sonnet-4-20250514
+- model: claude-sonnet-4-6 (card_identifier.CLAUDE_MODEL に SSOT 集約。旧 claude-sonnet-4-20250514 は 2026-06-15 retire)
 - system prompt: "You are a JSON-only response bot"（余計なテキストを防止）
 
 ## PSAラベル解析（parse_psa_page）

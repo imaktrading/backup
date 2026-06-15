@@ -36,7 +36,7 @@ from listing_common import (
     CONDITION_MASTER,
 )
 OUTPUT_CSV = _gcop("ichibankuji", "upload")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 SCHEDULE_WEEKS = 2
 DEFAULT_PRICE = 50.00  # 仕入不明時のフォールバック
 PROFIT_CATEGORY = "一番くじ"  # pricing_engine 用カテゴリ

@@ -322,7 +322,7 @@ def generate_condition_description(jotai, shohin):
         import anthropic
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=300,
             system="You extract condition-related information from Japanese Mercari listings and translate to concise English for eBay. Return ONLY the condition description text, no JSON, no quotes, no explanation.",
             messages=[{"role": "user", "content": f"""Extract condition-related descriptions from this Mercari listing and translate to English.

@@ -191,6 +191,6 @@
 ## 技術的注意事項
 
 - mercari_to_ebay_csv.py の画像取得: メルカリShopsとメルカリ通常でURL処理が異なる
-- Claude APIモデル: claude-sonnet-4-20250514
+- Claude APIモデル: claude-sonnet-4-6 (各スクリプトの MODEL 定数。旧 claude-sonnet-4-20250514 は 2026-06-15 retire)
 - print文にUnicode絵文字を使うとcp932ターミナルでUnicodeEncodeError → ASCII文字に置換すること
 - GitHub画像ホスティング: gh CLI (`gh auth login`) → imaktrading/ebay-images リポジトリ

@@ -232,7 +232,7 @@ def extract_product_info_from_image(api_key, image_b64, category):
     try:
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=200,
             system="You extract product information from images. Return ONLY the requested format, nothing else.",
             messages=[{
@@ -280,7 +280,7 @@ def extract_product_info_multi_image(api_key, image_b64_list, category, mercari_
     try:
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=200,
             system="You extract product information from images and listing text. Return ONLY valid JSON, no markdown formatting.",
             messages=[{"role": "user", "content": content}],
@@ -575,7 +575,7 @@ def extract_psa_cert_from_image(api_key, image_b64):
 
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=100,
             system="You extract PSA certification numbers from images. Return ONLY the number, nothing else. If no PSA label is visible, return 'NONE'.",
             messages=[{

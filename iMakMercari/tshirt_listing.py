@@ -38,7 +38,7 @@ CATEGORY_FILTER = "Tシャツ"  # R列(18) で絞り込み
 
 # 出力
 DESCRIPTION_FILE = os.path.join(SCRIPT_DIR, "NEW.txt")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 SCHEDULE_WEEKS = 2
 DEFAULT_PRICE = 100.00
 

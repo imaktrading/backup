@@ -284,7 +284,7 @@ from listing_common import (
     detect_condition_id_from_state,
     get_default_condition_description,
 )
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 MAX_IMAGES = 4
 SCHEDULE_WEEKS = 2
 
