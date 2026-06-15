@@ -1183,3 +1183,42 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅ 実機Chrome=149.0.7827.103 / installed_chrome_major()=149
 - 検証✅ 全5 scraper 構文OK・hardcoded version_main=14x 残0・pytest 306 passed
 - 検証✅ orphan 2個=Inventory cron(run_cycle.py)所属と確認し不触(kill前にCommandLine確認)
+
+
+## 2026-06-14 — Catalog: gshock 4model色(真因B) + character_name scramble 91是正
+
+### 決定事項
+- 決定1: gshock 色gap 4model を公式裏取りで投入(真因B解消)。GST-W310-1A/DW-5900-1=Black/Black, MTG-B2000B-1A2=Black/Black/bezel Blue, MTG-B3000D-1A=Silver/Black。source=sakurawatches正規店+g-central+casio europe+Amazon公式。fail-closed(公式確認色のみ・型番code/画像推測不採用)。
+- 決定2: character_name scramble 91件を Option A(character_name=name_en コピー)で是正。HQ greenlightの種名strip/trainer空 方針は撤回(新コア tcg_listing_fields が C:Character=character_name 無加工使用・character_name==name_en 前提と実機確認。実DB慣習も verbatim copy)。Pokémon57/Trainer23/Energy11。
+
+### 変更
+- 変更(共有DB・git外): gshock 4model band/dial/bezel color 投入。bak: gshock_color_4model_before_20260614.json
+- 変更(共有DB・git外): pokemon 91件 specs.character_name=name_en。bak: character_name_scramble_rederive_before_20260614.json
+- 変更: tools/gshock_color_4model_backfill_20260614.py / tools/character_name_scramble_fix_20260614.py 新設(commit 3dfd743, 3b03296)
+
+### 検証(実出力)
+- 検証✅ lookup_gshock 4model全て band/dial color+source 出力 / 監査検査4(name不整合) 91→0 / pytest 306 passed
+
+## 2026-06-15 — Catalog: MC-227誤resolve / *_ebay 32,659件 / gshock cron / resolver gap
+
+### 決定事項
+- 決定1(番号衝突): cert149832553 Pikachu ex #227 が SI-227(Hippowdon)に誤resolve。スタートデッキ100(SI,/414)と スタートデッキ100バトルコレクション(MC,/742)は別set・両者#227実在。brand索引に "START DECK 100 BATTLE COLLECTION"→MC を plain "START DECK 100"→SI より前に挿入(公式裏取り card/48943,48717)。
+- 決定2(*_ebay): generator無加工copy前提で TCG specs に eBay正規化フィールド投入。attack_power_ebay/defense_toughness_ebay/color_ebay/hp_ebay/stage_ebay。複数色=Multi-Color, DB power裏は表のみ, Gundam hp=defense分離, Pokemon stage(MEGA→Mega,基本/VMAX/VSTAR=空欄fail-closed)。Pokemon color/type raw無→color_ebay付与せず(HQ質問回答)。
+- 決定3(gshock cron): DWE-5600PR-2/LOV-25A-7A を公式裏取り投入(g-central slug未定義+公式Akamai+shockbase拒否で標準経路不可のため sakurawatches+公式Casio)。
+- 決定4(resolver gap): TCG取りこぼし39 brand triage。索引3追加(MIRACLE TWINS→SM11/SKY-SPLITTING CHARISMA→SM7/AMAZING VOLT TACKLE→S4)で解消。27件既RESOLVED。未収録/variant 8件分類(OP _AC01/_BS4 variant解決は別機構=HQ相談)。
+- 決定5(pdca gshock): 層A gshock ~37件は全件既収録(missing_models stale)。真の未収録0件。g-central scraper実走(GA-100 upserted=0/skipped=41)+lookup全resolveで二重確認。
+
+### 変更
+- 変更: integrations/psa_to_csv.py(_POKEMON_SET_NAME_TO_CODE 索引4追加: MC/MIRACLE TWINS/SKY-SPLITTING/AMAZING VOLT)
+- 変更: tests/test_psa_dropped_6_setmap_promo.py(回帰テスト2件追加)
+- 変更(共有DB・git外): TCG 32,659件 *_ebay 投入(bak: tcg_ebay_normalized_fields_before_20260615.json) / gshock 2model追加(tools/gshock_cron_add_20260615.py)
+- commit: b6c7345 / 116f9bf / ddd093b / 2e9ccde
+
+### 検証(実出力)
+- 検証✅ resolve KEY=MC-227(plain=SI-227回帰維持) / color_ebay・stage_ebay distinct全てeBay vocab内 / lookup_gshock 37件全resolve / pytest 307 passed
+- 検証✅ 未解決bare GW-2320FP は色曖昧の fail-closed正常(実商品-1A1/-1A2は既存)
+
+### 情報待ち(HQ)
+- audit m62564964167 C:Rarity空: SKU→cert はHQ側のみ→cert/KEY受領後に rarity投入(catalog rarity gap濃厚)
+- OP variant解決(_AC01/_BS4): set_code索引と別機構が必要=別依頼で設計相談
+- pdca queue: gshock 37件は既収録のため missing_models再生成でdone化
