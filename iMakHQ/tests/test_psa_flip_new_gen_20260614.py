@@ -25,6 +25,9 @@ def test_psa_tcg_button_new_gen_on():
     assert psa, "PSA TCG 新規ボタンが SCRIPTS に無い"
     assert psa[0].get("env", {}).get("TCG_USE_NEW_GEN") == "1", \
         "PSA TCG ボタンに TCG_USE_NEW_GEN=1 が無い (= flip が外れている)"
+    # 2026-06-15: verify→build (目視確認してから生成) も有効
+    assert psa[0].get("env", {}).get("PSA_VERIFY_BEFORE_BUILD") == "1", \
+        "PSA TCG ボタンに PSA_VERIFY_BEFORE_BUILD=1 が無い (= verify→build が外れている)"
 
 
 def test_runner_injects_script_env():

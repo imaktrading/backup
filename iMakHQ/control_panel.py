@@ -298,7 +298,9 @@ SCRIPTS = [
         # 2026-06-15 ユーザー明示 go で flip。根拠: Gemini 条件付きGO + parity REGRESSION 0 +
         #   旧コアが毎回再発させる defect (Character/Card Name 汚染・rarity 推測'Common'・
         #   Card Size 'Japanese') を構造的に解消。OFF 復帰は下行 "env" の削除のみ (psa_to_csv 無改変)。
-        "env": {"TCG_USE_NEW_GEN": "1"},
+        # PSA_VERIFY_BEFORE_BUILD=1: 先に HTML 目視確認 → 確定したカードだけ CSV 生成
+        # (2026-06-15 ユーザー指示「目視確認してからCSV作成にして」)。OFF 復帰= この key 削除のみ。
+        "env": {"TCG_USE_NEW_GEN": "1", "PSA_VERIFY_BEFORE_BUILD": "1"},
         "params": [],
     },
     {
