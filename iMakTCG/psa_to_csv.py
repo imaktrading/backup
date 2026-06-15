@@ -2271,7 +2271,11 @@ def load_targets_from_sheet_psa():
     cost_map = {}
     url_map = {}
     title_map = {}
+    existing_keys = set()  # AI列(col35)= 既存 canonical KEY (write-keys が書く) = 既出判定用
     for row in all_values[1:]:  # header 除外
+        _k = (row[34] if len(row) > 34 else '').strip()  # AI 列 = canonical KEY1
+        if _k:
+            existing_keys.add(_k)
         url      = (row[0]  if len(row) > 0  else '').strip()  # A
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
         title    = (row[2]  if len(row) > 2  else '').strip()  # C
@@ -2306,7 +2310,7 @@ def load_targets_from_sheet_psa():
                     cost_map[cert] = int(m.group(1).replace(',', ''))
                 except ValueError:
                     pass
-    return cert_numbers, cost_map, url_map, title_map
+    return cert_numbers, cost_map, url_map, title_map, existing_keys
 
 
 _PSA_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa"
@@ -2363,7 +2367,7 @@ def main():
     # 2026-04-24: certs.txt 廃止、スプシ駆動に完全移行
     # スプシ (19kj8... gid=851100680) の I列=cert# / B列=itemID空 / A列=URL で処理対象を抽出
     print("📊 スプシから PSA 出品対象を抽出中...")
-    cert_numbers, cost_map, mercari_url_map, mercari_title_map = load_targets_from_sheet_psa()
+    cert_numbers, cost_map, mercari_url_map, mercari_title_map, _existing_keys = load_targets_from_sheet_psa()
 
     if not cert_numbers:
         print("処理対象なし（スプシに I列=cert# ありの未処理行が見つかりません）")
@@ -2449,6 +2453,30 @@ def main():
             d = get_psa_data(driver, cert)
             _prescraped[cert] = d
             print(" ✓" if d else " 失敗")
+        # ★なんちゃって重複プレチェック (スプシ既存KEYベース・早期)。
+        #   解決した card_id が既出(AI列KEY)なら verify/build せず除外 = 既出に目視/生成/価格の無駄を使わない。
+        #   重複くん本体は無改変・後段でそのまま走る(権威ある安全網。LOW 等の取りこぼしは後段が確実に除外)。
+        if _existing_keys:
+            try:
+                from tcg_listing_fields import build_listing_fields as _blf_check
+            except Exception:
+                _blf_check = None
+            _kept, _dup = [], []
+            for _cert in cert_numbers:
+                _cid = ""
+                if _blf_check is not None:
+                    try:
+                        _ff, _fe = _blf_check(str(_cert))
+                        _cid = (_ff or {}).get("_card_id", "") if not _fe else ""
+                    except Exception:
+                        _cid = ""
+                if _cid and _cid in _existing_keys:
+                    _dup.append(_cert)
+                else:
+                    _kept.append(_cert)
+            if _dup:
+                print(f"🔁 既出(出品済)を verify前に除外: {len(_dup)} 件 {_dup} (重複くん本体は後段で温存)")
+                cert_numbers = _kept
         try:
             _tools = r"C:/dev/iMak/iMakHQ/tools"
             if _tools not in sys.path:
