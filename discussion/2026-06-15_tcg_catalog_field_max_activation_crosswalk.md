@@ -42,4 +42,4 @@ catalog が `*_ebay` を埋めた瞬間に自動で流れる(forward-compatible)
 ## フェーズ
 - **Phase 1 (generator・完了)**: `_MULTI_SPEC_TO_COL` 配線。Cost 即活用。他は `*_ebay` 待ちで forward-compatible。
 - **Phase 2 (Catalog 依頼)**: `color_ebay`/`attack_power_ebay`/`defense_toughness_ebay`/`stage_ebay`/`hp_ebay` を各ゲームで埋める(fail-closed=不明は空欄)。依頼書 `catalog/requests/2026-06-15_tcg_ebay_normalized_fields.md`。
-- **Phase 3 (psa_to_csv・要go)**: C:HP / C:Stage 列を CSV ヘッダに追加(現行は列自体が無い)。
+- **Phase 3 (psa_to_csv・✅完了 `a44d53b`)**: C:HP / C:Stage 列を CSV ヘッダ + build_row return に追加(alignment 52=52 検証済)。catalog `hp_ebay`/`stage_ebay` 充填で新コアが自動充填。
