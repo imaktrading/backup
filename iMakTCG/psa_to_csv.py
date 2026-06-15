@@ -1009,34 +1009,9 @@ def load_description():
         return "PSA graded card shipped from Japan. Grade and cert number are as listed."
 
 
-# テンプレ内 "About Color" セクションの直前に個別 Specs ブロックを挿入するためのマーカー
-_TCG_SPECS_MARKER = '<p><span style="text-decoration: underline;"><strong>About Color</strong>'
-
-
-def build_tcg_specs_html(specs):
-    """カード個別の Specifications ブロックを HTML で組む (純関数=テスト可能)。
-
-    specs: [(label, value), ...] の順序付きリスト。**値が空の項目は出さない**
-    (G-shock build_specs_html と同方針)。値は listing の Item Specifics と同じものを
-    転記するだけ = 推測なし・出品の正確性原則に沿う。1 件も無ければ空文字を返す。
-    """
-    rows = []
-    for label, value in specs:
-        v = ("" if value is None else str(value)).strip()
-        if v:
-            rows.append(f"<li><b>{label}:</b> {v}</li>")
-    if not rows:
-        return ""
-    return ('<p><span style="text-decoration: underline;"><strong>Specifications</strong>'
-            "</span></p>\n<ul>\n" + "\n".join(rows) + "\n</ul>\n")
-
-
-def insert_tcg_specs(description, specs_html):
-    """description テンプレの About Color 直前に specs_html を挿入 (純関数)。
-    specs_html が空、またはマーカーが無ければ **description をそのまま返す** (fail-safe)。"""
-    if not specs_html or _TCG_SPECS_MARKER not in description:
-        return description
-    return description.replace(_TCG_SPECS_MARKER, specs_html + _TCG_SPECS_MARKER, 1)
+# 商品説明 Specs ブロックのヘルパは新コア(tcg_listing_fields)に集約=SSOT。旧コアも同一を使う
+# (新コア override が新値で description を作り直す replace_tcg_specs も同モジュール)。
+from tcg_listing_fields import build_tcg_specs_html, insert_tcg_specs  # noqa: E402,F401
 
 def parse_psa_page(text):
     data = {}

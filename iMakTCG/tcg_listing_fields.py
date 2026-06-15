@@ -17,6 +17,7 @@
 from __future__ import annotations
 import json
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -268,6 +269,54 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
             parts.pop()
         title = " ".join(parts)
     return title
+
+
+# ============================================================================
+# 商品説明 個別 Specifications ブロック (旧コア build_row / 新コア override 共有 = SSOT)
+# ============================================================================
+_TCG_SPECS_MARKER = '<p><span style="text-decoration: underline;"><strong>About Color</strong>'
+_SPECS_BLOCK_RE = re.compile(
+    r'<p><span style="text-decoration: underline;"><strong>Specifications</strong>'
+    r"</span></p>\s*<ul>.*?</ul>\s*", re.DOTALL)
+
+
+def build_tcg_specs_html(specs):
+    """[(label, value)] → Specifications HTML。値が空の項目は出さない・全空なら空文字 (純関数)。
+    値は listing の Item Specifics と同じものを転記するだけ = 推測なし・出品の正確性原則。"""
+    rows = []
+    for label, value in specs:
+        v = ("" if value is None else str(value)).strip()
+        if v:
+            rows.append(f"<li><b>{label}:</b> {v}</li>")
+    if not rows:
+        return ""
+    return ('<p><span style="text-decoration: underline;"><strong>Specifications</strong>'
+            "</span></p>\n<ul>\n" + "\n".join(rows) + "\n</ul>\n")
+
+
+def insert_tcg_specs(description, specs_html):
+    """About Color セクション直前に挿入。specs空/マーカー無しは description 不変 (fail-safe)。"""
+    if not specs_html or _TCG_SPECS_MARKER not in description:
+        return description
+    return description.replace(_TCG_SPECS_MARKER, specs_html + _TCG_SPECS_MARKER, 1)
+
+
+def replace_tcg_specs(description, specs_html):
+    """既存 Specs ブロックを除去してから specs_html を挿入 (新コア override で旧値→新値に作り直す)。"""
+    return insert_tcg_specs(_SPECS_BLOCK_RE.sub("", description), specs_html)
+
+
+def specs_pairs_from_fields(fields):
+    """新コア fields(dict) から Specs の [(label, value)] を作る (旧コア build_row と同項目)。"""
+    return [
+        ("Card Name", fields.get("C:Card Name", "")),
+        ("Set", fields.get("C:Set", "")),
+        ("Card Number", fields.get("C:Card Number", "")),
+        ("Rarity", fields.get("C:Rarity", "")),
+        ("Card Type", fields.get("C:Card Type", "")),
+        ("Year", fields.get("C:Year Manufactured", "")),
+        ("Language", fields.get("C:Language", "") or "Japanese"),
+    ]
 
 
 if __name__ == "__main__":

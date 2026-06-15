@@ -40,7 +40,8 @@ def test_specs_empty_when_all_blank():
 def test_insert_before_about_color():
     P = _mod()
     # load_description() は cwd 依存(相対パス)なので、マーカー入り疑似テンプレで挿入を検証
-    tmpl = "<ul>...note...</ul>\n" + P._TCG_SPECS_MARKER + "...about color...</p>\n...shipping..."
+    marker = __import__("tcg_listing_fields")._TCG_SPECS_MARKER
+    tmpl = "<ul>...note...</ul>\n" + marker + "...about color...</p>\n...shipping..."
     html = P.build_tcg_specs_html([("Card Name", "Pikachu"), ("Set", "Team Up")])
     out = P.insert_tcg_specs(tmpl, html)
     assert "Specifications" in out
@@ -53,3 +54,29 @@ def test_insert_failsafe():
     assert P.insert_tcg_specs("xxx", "") == "xxx"
     # マーカー無し → 変更なし
     assert P.insert_tcg_specs("no marker here", "<p>Specs</p>") == "no marker here"
+
+
+def _tlf():
+    import tcg_listing_fields
+    return tcg_listing_fields
+
+
+def test_replace_tcg_specs_swaps_old_for_new():
+    # 新コア override が旧 Specs を除去して新値で作り直す
+    T = _tlf()
+    marker = T._TCG_SPECS_MARKER
+    old = "head" + T.build_tcg_specs_html([("Card Name", "OLD"), ("Set", "OLDSET")]) + marker + "tail"
+    new = T.replace_tcg_specs(old, T.build_tcg_specs_html([("Card Name", "Pikachu")]))
+    assert "OLD" not in new and "OLDSET" not in new   # 旧 Specs 除去
+    assert "Pikachu" in new                            # 新 Specs 挿入
+    assert new.count("Specifications") == 1            # 重複しない
+
+
+def test_specs_pairs_from_fields():
+    T = _tlf()
+    pairs = dict(T.specs_pairs_from_fields(
+        {"C:Card Name": "Pikachu", "C:Set": "Team Up", "C:Card Number": "307/SM-P", "C:Language": ""}))
+    assert pairs["Card Name"] == "Pikachu"
+    assert pairs["Set"] == "Team Up"
+    assert pairs["Card Number"] == "307/SM-P"
+    assert pairs["Language"] == "Japanese"  # 空なら Japanese 既定

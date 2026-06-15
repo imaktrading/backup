@@ -92,4 +92,13 @@ def apply_new_gen_override(row, headers, cert, *, blank_missing=None,
             if title:
                 new[ti] = title
 
+    # 商品説明の Specifications ブロックを新コア値で作り直す
+    # (旧コア build_row が入れた旧値の Specs を除去 → catalog 由来の新値で再挿入。
+    #  = description と Item Specifics を一致させる。マーカー無しは fail-safe で不変)。
+    di = _col_idx(headers, "*Description")
+    if di is not None and di < len(new) and new[di]:
+        from tcg_listing_fields import (build_tcg_specs_html, replace_tcg_specs,
+                                        specs_pairs_from_fields)
+        new[di] = replace_tcg_specs(new[di], build_tcg_specs_html(specs_pairs_from_fields(fields)))
+
     return new
