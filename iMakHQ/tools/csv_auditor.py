@@ -730,7 +730,7 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run):
         for sku, msg in program_items:
             _pdca.record_finding(con, ts, project, sku, "program", str(msg)[:120], ts=ts)
         synced = _pdca.sync_processed(con, CATALOG_REQ_DIR, ts=ts)        # ループ閉じ
-        emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts, layer="A")
+        emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts)
         con.commit()
         con.close()
         if emitted or synced:

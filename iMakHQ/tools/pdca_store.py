@@ -196,35 +196,43 @@ def queue_stats(con):
             "pending": by_status.get("pending", 0), "done": by_status.get("done", 0)}
 
 
-def emit_consolidated_request(con, category, out_dir, today, layer="A"):
-    """pending 改善候補を **1本の dedup済 catalog 依頼 .md** に集約発行 (Phase2・自動)。
+def _queue_table(items):
+    rows = ["| pri | item | field | 候補値 | 確信度 | 根拠 |", "|--:|---|---|---|--:|---|"]
+    for r in items:
+        rows.append(f"| {r['priority']} | {r['item_id']} | {r['target_field']} | "
+                    f"{(r['suggested_value'] or '')[:24]} | {r.get('confidence','')} | {(r['evidence'] or '')[:50]} |")
+    return rows
 
-    毎回新規 .md を量産せず、日付単位 1ファイルに上書き(滞留スパム停止)。
-    優先度順・証拠付き。catalog への反映は Catalog が裏取りして実施 (SSOT/fail-closed)。
-    Returns: 発行件数。
+
+def emit_consolidated_request(con, category, out_dir, today):
+    """pending 改善候補を **1本の dedup済 catalog 依頼 .md** に集約発行 (Phase2/3・自動)。
+
+    層A(客観ギャップ=即対応)と層B(競合intel候補=要裏取り)を分節で出力。
+    毎回新規 .md を量産せず日付単位1ファイルに上書き(滞留スパム停止)。
+    catalog 反映は Catalog が裏取りして実施 (SSOT/fail-closed)。Returns: 発行件数。
     """
-    items = [r for r in list_queue(con, status="pending", limit=10000)
-             if r.get("layer") == layer and r.get("source") != "md_import"]
-    out = Path(out_dir) / f"{today}_pdca_catalog_queue_{category}.md"
-    if not items:
+    pend = [r for r in list_queue(con, status="pending", limit=10000) if r.get("source") != "md_import"]
+    layer_a = [r for r in pend if r.get("layer") == "A"]
+    layer_b = [r for r in pend if r.get("layer") == "B"]
+    if not pend:
         return 0
     body = [
         f"# 自動依頼 (PDCA改善キュー → Catalog): {category}",
-        f"- 発行日: {today} / 発行者: HQ pdca_store / 緊急度: 優先度順 / フェーズ: 本実装",
-        "- これは改善キュー(pdca.db)からの**集約・重複排除済**の依頼。毎回の .md 量産を置換。",
-        "- 原則: fail-closed。推測候補(層B)は『要裏取り』。catalog 反映は Catalog が判断。",
-        "- 完了したら従来通り `_processed.md` 等にすると次回 sync で queue=done に同期されます。",
+        f"- 発行日: {today} / 発行者: HQ pdca_store / フェーズ: 本実装",
+        "- 改善キュー(pdca.db)からの**集約・重複排除済**依頼。毎回の .md 量産を置換。",
+        "- 完了したら `_processed.md` 等にリネーム → 次回 sync で queue=done に同期。",
         "",
-        f"## 対象 {len(items)} 件 (優先度降順)",
-        "| pri | item | field | 候補値 | 確信度 | 根拠 |",
-        "|--:|---|---|---|--:|---|",
+        f"## 層A 客観ギャップ(即対応) {len(layer_a)} 件",
+        "(catalog 事実と突合した確実な不足/誤り。優先度降順)",
+        *(_queue_table(layer_a) if layer_a else ["(なし)"]),
+        "",
+        f"## 層B 競合intel候補(★要裏取り・推測) {len(layer_b)} 件",
+        "(TOPセラー使用値。fail-closed=自動採用せず Catalog が裏取り後に判断。誤りなら却下可)",
+        *(_queue_table(layer_b) if layer_b else ["(なし)"]),
     ]
-    for r in items:
-        body.append(f"| {r['priority']} | {r['item_id']} | {r['target_field']} | "
-                    f"{(r['suggested_value'] or '')[:24]} | {r.get('confidence','')} | {(r['evidence'] or '')[:50]} |")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(body), encoding="utf-8")
-    return len(items)
+    (Path(out_dir) / f"{today}_pdca_catalog_queue_{category}.md").write_text("\n".join(body), encoding="utf-8")
+    return len(pend)
 
 
 def sync_processed(con, requests_dir, ts=""):
