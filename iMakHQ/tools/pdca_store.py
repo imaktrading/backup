@@ -67,8 +67,9 @@ def parse_request_md(path: str) -> dict:
     """
     name = Path(path).name
     stem = re.sub(r"\.md$", "", name)
-    status = "done" if re.search(r"_(processed|response|result)$", stem) else "pending"
-    topic = re.sub(r"_(processed|response|result)$", "", stem)
+    # processed/response/result/expired = 対応済/失効 → done として取込 (再発検知の基準)
+    status = "done" if re.search(r"_(processed|response|result|expired)$", stem) else "pending"
+    topic = re.sub(r"_(processed|response|result|expired)$", "", stem)
     m = re.match(r"(\d{4}-\d{2}-\d{2})_(.+)$", topic)
     date = m.group(1) if m else ""
     topic_only = m.group(2) if m else topic
@@ -190,6 +191,27 @@ def queue_stats(con):
     total = sum(by_status.values())
     return {"total": total, "by_status": by_status,
             "pending": by_status.get("pending", 0), "done": by_status.get("done", 0)}
+
+
+def generate_report(con, out_path, limit=50):
+    """改善キューを優先度順に markdown 可視化 (Phase1 簡易ビューア)。"""
+    st = queue_stats(con)
+    lines = [
+        "# PDCA 改善キュー (pdca.db)",
+        "",
+        f"- 合計: {st['total']} / pending: **{st['pending']}** / done: {st['done']}",
+        "- 優先度 = 重要度 × 再発回数 × 確信度 (高いほど先に対応)",
+        "",
+        f"## pending 優先度 TOP{limit}",
+        "| pri | item | field | 値 | seen | layer | source |",
+        "|--:|---|---|---|--:|---|---|",
+    ]
+    for r in list_queue(con, status="pending", limit=limit):
+        lines.append(f"| {r['priority']} | {r['item_id']} | {r['target_field']} | "
+                     f"{(r['suggested_value'] or '')[:20]} | {r['seen_count']} | {r['layer']} | {r['source']} |")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text("\n".join(lines), encoding="utf-8")
+    return st
 
 
 def import_request_dir(con, requests_dir, category, ts=""):

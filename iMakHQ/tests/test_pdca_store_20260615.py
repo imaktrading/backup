@@ -41,6 +41,8 @@ def test_parse_request_md_status_and_topic():
     assert a["status"] == "pending" and a["date"] == "2026-06-15" and a["topic"] == "gshock_color_fix"
     b = P.parse_request_md("2026-06-13_kai_irida_processed.md")
     assert b["status"] == "done" and b["topic"] == "kai_irida"
+    c = P.parse_request_md("2026-06-12_old_topic_expired.md")
+    assert c["status"] == "done" and c["topic"] == "old_topic"
 
 
 # ---- 蓄積/再発 ----
