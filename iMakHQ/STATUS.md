@@ -54,7 +54,6 @@
 - **`card_identifier.py`**: PSA cert 画像 → Vision で「特定」(推測禁止、Finish 決定論)
 - **`card_identification_agent.py`**: PSA / Vision / iMakCatalog の多角検証で card# 補正 (Phase 1-3)
 - **`title_generation_agent.py`** (2026-04-26): NG語フィルタ + character 補完 + SEO スコアリング (Phase 1+2+3)
-- **`catalog_authority_context.py`** (2026-04-26): iMakCatalog hit 時に 3AI へ catalog 信頼コンテキスト注入
 - **`cert_overrides.json`**: 物理確認 or webfetch 確定済の手動補完 (skip / value-fill 両対応、現在 14 件)
 
 ### 直近の Bug fix

@@ -2092,49 +2092,27 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     manufacturer = "The Pokémon Company" if franchise == "Pokemon" else "Bandai"
     illustrator = official_illustrator or ""
 
-    # セルフチェック（CSV出力前、PSA整合性 + 3AI議論）
-    from listing_validator import validate_and_report
+    # セルフチェック（CSV出力前、PSA整合性の決定論検証のみ）
+    # 3AI 合議は TCG では廃止 (2026-06-15 完全削除)。catalog 決定論コアで身元が確定済のため、
+    # flaky な 3AI(API障害で誤BLOCK する) を通す意味が無い。誤出品防止は validate_row の
+    # error reject が担保 (catalog-miss は main() の新コア解決ゲートで別途 skip し入稿しない)。
+    from listing_validator import validate_row
     tcg_specs = {"Brand": manufacturer, "Type": card_type, "Size": "N/A", "Color": attribute or "N/A",
                  "Game": game, "Set": set_name, "Rarity": rarity, "Card Number": card_number}
-    # psa_card_number は listing_validator の Rule 3 が「数字のみ」を前提にしているため、
+    # psa_card_number は validate_row の Rule 3 が「数字のみ」を前提にしているため、
     # line 1372 で official_card_number に上書き済の card_number ではなく PSA 生値を渡す。
     # （Bandai補完値を渡すと "ST16-004" vs "004" の false positive が発生する）
-    # overrides 適用時は3AIへ「人手検証済」コンテキストを追加
-    # (PSA cert# vs 公式 collection# の番号体系違いを許容、画像/Subject 整合性は引き続きチェック)
-    _override_context = None
-    if _override_applied:
-        _override_context = (
-            f"NOTE: This listing has manual overrides applied (cert_overrides.json).\n"
-            f"Reason: {_override.get('reason', '')}\n"
-            f"Reviewer: human-verified at {_override.get('applied_at', '')}\n"
-            f"PSA cert# may differ from any external DB collection# by design.\n"
-            f"Focus your validation on Subject/image consistency, NOT on cert# numerical match."
-        )
-    else:
-        # iMakCatalog (公式 DB) hit 時は authority context を 3AI に注入.
-        # set_name 表記揺れ / Pokemon の Attribute=Type 慣習 等を 3AI に説明し、
-        # 機械的 BLOCK を防ぐ. catalog miss の場合は None で通常判定継続.
-        try:
-            from catalog_authority_context import maybe_build_context as _cat_ctx
-            _override_context = _cat_ctx(
-                brand=brand,
-                card_number=data.get('CardNumber', ''),
-                subject=subject,
-                franchise=franchise,
-            )
-        except Exception:
-            _override_context = None
-    # 3AI 撤去 (2026-06-15): 新コア(catalog決定論)運用時は 3AI 合議を走らせない。
-    #   catalog確定→決定論検証 / catalog-miss→ main() の新コア解決ゲートで skip(入稿しない)。
-    #   理由: catalog参照生成では catalog確定は既に3AI skip、miss は入稿しないので 3AI の出番が無い。
-    #   env-off (legacy rollback) のみ従来の _override_context ベース判定(OP/Pokemon)を維持。
-    _catalog_confirmed = True if os.environ.get("TCG_USE_NEW_GEN") == "1" else (_override_context is not None)
-    if not validate_and_report(
-        cert_number, title, tcg_specs, "", 183454, 2750, price, PIC_URL,
+    _errors, _warnings = validate_row(
+        title, tcg_specs, "", 183454, 2750, price, PIC_URL,
         psa_brand=brand, psa_card_number=data.get('CardNumber', ''),
-        override_context=_override_context,
-        catalog_confirmed=_catalog_confirmed,
-    ):
+    )
+    for _w in _warnings:
+        print(f"       ⚠️ {_w}")
+    if _errors:
+        print(f"    ❌ セルフチェック失敗 (#{cert_number}):")
+        for _e in _errors:
+            print(f"       ❌ {_e}")
+        print(f"    → この商品はCSVに含めません")
         return None
 
     # ===== Card Name/Character の variant suffix 剥がし (新ルーチン、独立) =====
