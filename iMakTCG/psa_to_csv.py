@@ -2093,9 +2093,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     illustrator = official_illustrator or ""
 
     # セルフチェック（CSV出力前、PSA整合性の決定論検証のみ）
-    # 3AI 合議は TCG では廃止 (2026-06-15 完全削除)。catalog 決定論コアで身元が確定済のため、
-    # flaky な 3AI(API障害で誤BLOCK する) を通す意味が無い。誤出品防止は validate_row の
-    # error reject が担保 (catalog-miss は main() の新コア解決ゲートで別途 skip し入稿しない)。
+    # 誤出品防止は validate_row の error reject が担保
+    # (catalog-miss は main() の新コア解決ゲートで別途 skip し入稿しない)。
     from listing_validator import validate_row
     tcg_specs = {"Brand": manufacturer, "Type": card_type, "Size": "N/A", "Color": attribute or "N/A",
                  "Game": game, "Set": set_name, "Rarity": rarity, "Card Number": card_number}
@@ -2472,7 +2471,7 @@ def main():
                     _forced = _confirmed_pids.get(cert, "") if _verify_mode else ""
                     # ★catalog hit 判定 (新コア・全 franchise の決定論解決)。
                     #   miss = 公式データ無し → **入稿しない** (fail-closed / catalog_official_only)。
-                    #   3AI 撤去後、catalog-miss を弾く正規ゲートはここ1本。
+                    #   catalog-miss を弾く正規ゲートはここ1本。
                     from tcg_listing_fields import build_listing_fields as _blf
                     _gi = headers.index("C:Game") if "C:Game" in headers else None
                     _game = row[_gi] if (_gi is not None and _gi < len(row)) else ""
