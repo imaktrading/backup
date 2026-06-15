@@ -106,7 +106,10 @@ CREATE TABLE IF NOT EXISTS improvement_queue (
 """
 
 
-def connect(db_path: str = DB_PATH) -> sqlite3.Connection:
+def connect(db_path: str = None) -> sqlite3.Connection:
+    # 既定値は呼出時に DB_PATH を参照 (def時固定だと monkeypatch/再代入が効かない)
+    if db_path is None:
+        db_path = DB_PATH
     d = os.path.dirname(db_path)
     if d and db_path != ":memory:":
         os.makedirs(d, exist_ok=True)
@@ -191,6 +194,58 @@ def queue_stats(con):
     total = sum(by_status.values())
     return {"total": total, "by_status": by_status,
             "pending": by_status.get("pending", 0), "done": by_status.get("done", 0)}
+
+
+def emit_consolidated_request(con, category, out_dir, today, layer="A"):
+    """pending 改善候補を **1本の dedup済 catalog 依頼 .md** に集約発行 (Phase2・自動)。
+
+    毎回新規 .md を量産せず、日付単位 1ファイルに上書き(滞留スパム停止)。
+    優先度順・証拠付き。catalog への反映は Catalog が裏取りして実施 (SSOT/fail-closed)。
+    Returns: 発行件数。
+    """
+    items = [r for r in list_queue(con, status="pending", limit=10000)
+             if r.get("layer") == layer and r.get("source") != "md_import"]
+    out = Path(out_dir) / f"{today}_pdca_catalog_queue_{category}.md"
+    if not items:
+        return 0
+    body = [
+        f"# 自動依頼 (PDCA改善キュー → Catalog): {category}",
+        f"- 発行日: {today} / 発行者: HQ pdca_store / 緊急度: 優先度順 / フェーズ: 本実装",
+        "- これは改善キュー(pdca.db)からの**集約・重複排除済**の依頼。毎回の .md 量産を置換。",
+        "- 原則: fail-closed。推測候補(層B)は『要裏取り』。catalog 反映は Catalog が判断。",
+        "- 完了したら従来通り `_processed.md` 等にすると次回 sync で queue=done に同期されます。",
+        "",
+        f"## 対象 {len(items)} 件 (優先度降順)",
+        "| pri | item | field | 候補値 | 確信度 | 根拠 |",
+        "|--:|---|---|---|--:|---|",
+    ]
+    for r in items:
+        body.append(f"| {r['priority']} | {r['item_id']} | {r['target_field']} | "
+                    f"{(r['suggested_value'] or '')[:24]} | {r.get('confidence','')} | {(r['evidence'] or '')[:50]} |")
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(body), encoding="utf-8")
+    return len(items)
+
+
+def sync_processed(con, requests_dir, ts=""):
+    """requests_dir の処理済 .md (_processed/_response/_expired) を queue=done に同期 (ループ閉じ)。
+
+    Catalog が依頼を処理 → ファイル名が done を示す → 対応 topic の queue を done に。
+    Returns: done 同期した件数。
+    """
+    p = Path(requests_dir)
+    if not p.is_dir():
+        return 0
+    synced = 0
+    for md in p.glob("*.md"):
+        meta = parse_request_md(str(md))
+        if meta["status"] != "done":
+            continue
+        cur = con.execute(
+            "UPDATE improvement_queue SET status='done', reviewed_ts=?"
+            " WHERE item_id=? AND status='pending'", (ts, meta["topic"]))
+        synced += cur.rowcount
+    return synced
 
 
 def generate_report(con, out_path, limit=50):

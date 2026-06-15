@@ -90,6 +90,31 @@ def test_queue_stats_and_list_priority_order():
     assert st["total"] == 2 and st["pending"] == 2
 
 
+def test_emit_consolidated_request(tmp_path):
+    con = _con()
+    # 層A 候補2件 (auditor 由来) + md_import 由来1件 (発行対象外)
+    P.upsert_improvement(con, "tcg", "S8b-241", "C:Rarity", "CSR",
+                         evidence="catalog空", source="auditor", layer="A", finding_type="必須Item Specific")
+    P.upsert_improvement(con, "tcg", "VOLTORB", "catalog_add", "",
+                         evidence="未収録", source="auditor", layer="A", finding_type="catalog_gap")
+    P.upsert_improvement(con, "tcg", "old", "catalog_request", source="md_import", layer="A")
+    n = P.emit_consolidated_request(con, "tcg", str(tmp_path), "2026-06-15")
+    assert n == 2                          # md_import 由来は除外
+    out = (tmp_path / "2026-06-15_pdca_catalog_queue_tcg.md").read_text(encoding="utf-8")
+    assert "S8b-241" in out and "VOLTORB" in out and "old" not in out
+
+
+def test_sync_processed_closes_loop(tmp_path):
+    con = _con()
+    qid = P.upsert_improvement(con, "tcg", "mytopic", "catalog_request", finding_type="catalog_gap")
+    # Catalog が処理 → _processed.md 出現
+    (tmp_path / "2026-06-15_mytopic_processed.md").write_text("done", encoding="utf-8")
+    synced = P.sync_processed(con, str(tmp_path), ts="2026-06-15")
+    assert synced == 1
+    row = con.execute("SELECT status FROM improvement_queue WHERE queue_id=?", (qid,)).fetchone()
+    assert row["status"] == "done"
+
+
 def test_import_request_dir(tmp_path):
     con = _con()
     (tmp_path / "2026-06-10_a.md").write_text("x", encoding="utf-8")

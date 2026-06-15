@@ -704,7 +704,39 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
             log_signals, excl_result, dc["gate_summary"], dc["claude"])
     # --- PDCA: 台帳に蓄積 + 前回比トレンド + 再発検知 (dry-run は追記しない) ---
     _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
+    # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
+    _pdca_accumulate(project, catalog_items, program_items, dry_run)
     return 1 if (exclude_idx or program_items or catalog_items) else 0
+
+
+def _pdca_accumulate(project, catalog_items, program_items, dry_run):
+    """catalog/program 指摘を pdca.db 改善キューに蓄積し、dedup済 catalog 依頼を集約発行 +
+    処理済を done 同期 (PDCA spiral-up Phase1b+2)。dry-run は記録しない。
+    write-only・try/except で監査本体には一切影響させない。"""
+    if dry_run:
+        return
+    try:
+        import re as _re
+        import pdca_store as _pdca
+        con = _pdca.connect()
+        ts = _today()
+        for sku, msg in catalog_items:
+            ft = "必須Item Specific" if "必須" in msg else "catalog_gap"
+            m = _re.search(r"'(C:[^']+)'", msg)
+            field = m.group(1) if m else "catalog_request"
+            _pdca.upsert_improvement(con, project, sku, field, "",
+                                     evidence=str(msg)[:80], source="auditor", layer="A",
+                                     finding_type=ft, ts=ts)
+        for sku, msg in program_items:
+            _pdca.record_finding(con, ts, project, sku, "program", str(msg)[:120], ts=ts)
+        synced = _pdca.sync_processed(con, CATALOG_REQ_DIR, ts=ts)        # ループ閉じ
+        emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts, layer="A")
+        con.commit()
+        con.close()
+        if emitted or synced:
+            print(f"  📊 PDCA: 改善キュー集約発行 {emitted} 件 / 完了同期 {synced} 件 (dedup済)")
+    except Exception as _e:
+        print(f"  ⚠️ PDCA accumulate skip (監査は継続): {type(_e).__name__}: {_e}")
 
 
 def _finding_tag(msg):
