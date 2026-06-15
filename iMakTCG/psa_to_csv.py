@@ -2085,9 +2085,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     store_cat_id = get_store_category(franchise)
     shipping = get_shipping_policy(price)
 
-    # 2026-05-31: rollback (= "Japanese" は eBay 正規値該当判明、 日本版 catalog のため Japanese 正解)
-    # OPCG = "Standard" (= 国際版相当)、 他日本版 = "Japanese" (= eBay 正規値該当)
-    card_size = "Standard" if franchise == "One Piece" else "Japanese"
+    # Card Size = "Standard" (= 市場標準。seller分析 Standard 24 / Japanese 4、catalog も Standard)。
+    # 新コア(TCG_USE_NEW_GEN=1)は catalog card_size_ebay→Standard 既定で同値を出す。
+    card_size = "Standard"
     # Manufacturerはゲームにより異なる
     manufacturer = "The Pokémon Company" if franchise == "Pokemon" else "Bandai"
     illustrator = official_illustrator or ""
