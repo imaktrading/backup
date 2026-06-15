@@ -294,8 +294,11 @@ SCRIPTS = [
         "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須
         "cwd": f"{WORKSPACE}/iMakTCG",
         "cmd": ["python", "psa_to_csv.py"],
-        # 新コア (TCG_USE_NEW_GEN) は既定 OFF = 本番は旧コア。flip はユーザー明示承認時のみ
-        # ここに "env": {"TCG_USE_NEW_GEN": "1"} を足す (2026-06-14 無断 flip を revert)。
+        # 新コア ON = 本番が catalog 決定論コア (tcg_listing_fields/override) を使用。
+        # 2026-06-15 ユーザー明示 go で flip。根拠: Gemini 条件付きGO + parity REGRESSION 0 +
+        #   旧コアが毎回再発させる defect (Character/Card Name 汚染・rarity 推測'Common'・
+        #   Card Size 'Japanese') を構造的に解消。OFF 復帰は下行 "env" の削除のみ (psa_to_csv 無改変)。
+        "env": {"TCG_USE_NEW_GEN": "1"},
         "params": [],
     },
     {
