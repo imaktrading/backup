@@ -59,8 +59,24 @@ def test_name_en_character_name_divergence_surfaced():
 def test_all_columns_present():
     f = map_specs_to_fields({"_name_en": "Pikachu"})
     for col in ("C:Game", "C:Set", "C:Card Name", "C:Character", "C:Rarity",
-                "C:Features", "C:Language", "C:Year Manufactured"):
+                "C:Features", "C:Language", "C:Year Manufactured", "C:Card Size"):
         assert col in f
+
+
+# (C) Card Size: catalog card_size_ebay をコピー (旧 "Japanese" ハードコード是正)
+def test_card_size_from_catalog():
+    specs = {"_name_en": "Pikachu", "character_name": "Pikachu",
+             "card_size_ebay": "Standard", "_language": "ja"}
+    f = map_specs_to_fields(specs, "2025")
+    assert f["C:Card Size"] == "Standard"
+
+
+# (C) Card Size: catalog に無くても確証ある既定 'Standard' (旧の "Japanese" を出さない)
+def test_card_size_default_standard_when_missing():
+    specs = {"_name_en": "Pikachu", "character_name": "Pikachu", "_language": "ja"}
+    f = map_specs_to_fields(specs, "2025")
+    assert f["C:Card Size"] == "Standard"     # 推測でなく市場標準・catalog全件Standard
+    assert f["C:Card Size"] != "Japanese"     # 旧コアのハードコード誤りを是正
 
 
 # --- タイトル生成 (catalog 由来・LLM/Subject 無し) ---
@@ -122,6 +138,19 @@ def test_features_normalize_drops_rarity_and_unknown():
 def test_features_normalize_mixed_and_dedup():
     from tcg_listing_fields import normalize_tcg_features
     assert normalize_tcg_features(["Ultra Rare", "Alt Art", "Alt Art"]) == ["Alternative Art"]
+
+
+# (5a) description Specs の Language は C:Language をそのまま転記 (空→行省略・無条件Japanese禁止)
+def test_specs_pairs_language_not_forced_japanese():
+    from tcg_listing_fields import specs_pairs_from_fields, build_tcg_specs_html
+    # 英語/言語不明 (C:Language 空) → description に "Japanese" を出さない
+    pairs = specs_pairs_from_fields({"C:Card Name": "Pikachu", "C:Language": ""})
+    assert ("Language", "") in pairs
+    html = build_tcg_specs_html(pairs)
+    assert "Japanese" not in html           # 無条件 Japanese 埋め禁止 (誤表示防止)
+    # 日本語カードは C:Language='Japanese' が転記される
+    pairs2 = specs_pairs_from_fields({"C:Card Name": "Pikachu", "C:Language": "Japanese"})
+    assert ("Language", "Japanese") in pairs2
 
 
 def test_map_specs_features_normalized_in_field():

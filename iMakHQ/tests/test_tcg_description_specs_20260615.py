@@ -79,4 +79,8 @@ def test_specs_pairs_from_fields():
     assert pairs["Card Name"] == "Pikachu"
     assert pairs["Set"] == "Team Up"
     assert pairs["Card Number"] == "307/SM-P"
-    assert pairs["Language"] == "Japanese"  # 空なら Japanese 既定
+    # 2026-06-15 改訂: C:Language 空は空のまま (無条件 Japanese 埋め廃止・誤表示防止/fail-closed)。
+    assert pairs["Language"] == ""
+    # 日本語カードは C:Language='Japanese' をそのまま転記
+    pairs2 = dict(T.specs_pairs_from_fields({"C:Card Name": "X", "C:Language": "Japanese"}))
+    assert pairs2["Language"] == "Japanese"

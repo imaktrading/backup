@@ -38,7 +38,12 @@ _SPEC_TO_COL = {
     "rarity_ebay":     "C:Rarity",
     "finish":          "C:Finish",
     "illustrator":     "C:Illustrator",
+    "card_size_ebay":  "C:Card Size",
 }
+# Card Size の fallback。catalog 全件 'Standard'(2026-06-15 実機: sample500/500=Standard)。
+# TOP セラー集計でも JP Pokemon PSA10 は Standard が市場標準 (Standard24/Japanese4)。
+# = 推測でなく確証ある既定値 (旧コアの "Japanese" ハードコード誤りを是正)。
+_CARD_SIZE_DEFAULT = "Standard"
 # eBay TCG (cat 183454) Features 正規値 (公式フィルタ・2026-06-14 実機取得)。
 # FREE_TEXT だが正規値に絞ることで検索フィルタにヒットさせる (official_x_ebay_filter_max_activation)。
 _EBAY_TCG_FEATURES_VALID = frozenset([
@@ -94,7 +99,7 @@ def normalize_tcg_features(feats):
 _ALL_COLS = [
     "C:Game", "C:Set", "C:Card Type", "C:Card Name", "C:Character",
     "C:Card Number", "C:Rarity", "C:Features", "C:Finish", "C:Illustrator",
-    "C:Language", "C:Year Manufactured",
+    "C:Language", "C:Year Manufactured", "C:Card Size",
 ]
 
 
@@ -192,6 +197,11 @@ def map_specs_to_fields(specs: dict, year: str = ""):
     # 5) Year は PSA cert を信頼 (鑑定ラベルの発行年)。catalog に無くても PSA 由来は確証。
     if year:
         fields["C:Year Manufactured"] = str(year).strip()
+
+    # 6) Card Size: catalog card_size_ebay をコピー / 無ければ確証ある既定 'Standard'
+    #    (= 旧コアの "Japanese" ハードコード誤りを是正。推測でなく市場標準・catalog全件Standard)。
+    if not fields["C:Card Size"]:
+        fields["C:Card Size"] = _CARD_SIZE_DEFAULT
 
     # ★ rarity は rarity_ebay が無ければ空欄のまま (推測しない = #1 修正)
     # ★ Card Name/Character に PSA Subject を混ぜない (= #4 修正)
@@ -315,7 +325,10 @@ def specs_pairs_from_fields(fields):
         ("Rarity", fields.get("C:Rarity", "")),
         ("Card Type", fields.get("C:Card Type", "")),
         ("Year", fields.get("C:Year Manufactured", "")),
-        ("Language", fields.get("C:Language", "") or "Japanese"),
+        # Language は C:Language をそのまま転記 (空なら build_tcg_specs_html が行ごと省く)。
+        # 旧: `or "Japanese"` で無条件 Japanese 埋め → 英語カードで誤表示 (Gemini DISPUTE 2026-06-15)。
+        # fail-closed: 確証ない言語を Japanese と断定しない (Item Specifics の C:Language と一致)。
+        ("Language", fields.get("C:Language", "")),
     ]
 
 

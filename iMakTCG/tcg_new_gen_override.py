@@ -30,6 +30,17 @@ if _HERE not in sys.path:
 #   override なので新コアが空(drop)なら旧値を残す=回帰なし。よって除外不要。
 _NO_OVERRIDE = set()
 
+# 新コアが空でも **必ず**新値で上書きする列 (= 既定 value-only の例外)。
+#   C:Rarity: 旧コアは rarity 不明時に推測で 'Common' を埋める既知バグ (#1)。新コアは catalog
+#   rarity_ebay 無→空欄が正。value-only だと旧 'Common' が温存され #1 が直らない (Gemini DISPUTE
+#   2026-06-15) ため、rarity だけは新コアの判定 (空欄含む) を権威として常に反映する。
+_ALWAYS_OVERWRITE = {"C:Rarity"}
+
+
+def _log(msg):
+    """新コア override の動作を stderr に記録 (silent no-op 撲滅・運用観測性)。"""
+    print(f"[new_gen] {msg}", file=sys.stderr)
+
 
 def _col_idx(headers, name):
     """headers が dict(name→idx) でも list でも idx を返す。"""
@@ -66,7 +77,10 @@ def apply_new_gen_override(row, headers, cert, *, blank_missing=None,
 
     fields, err = build_listing_fields(str(cert), game or "")
     if err or not fields:
-        return row  # 解決不能 → 旧値温存 (fail-safe)
+        # 解決不能 → 旧値温存 (fail-safe)。但し **必ずログ** (silent no-op だと「新コアが
+        # 効いてる風で実は未適用=defect 温存」を検知できない。Gemini DISPUTE 2026-06-15)。
+        _log(f"cert={cert} override SKIP → 旧値温存: {err or 'fields空'}")
+        return row
 
     new = list(row)
     for col, val in fields.items():
@@ -80,15 +94,19 @@ def apply_new_gen_override(row, headers, cert, *, blank_missing=None,
         val = (val or "").strip()
         if val:
             new[idx] = val
-        elif blank_missing:
-            new[idx] = ""               # 厳格モードのみ空欄化 (rarity 推測除去等)
+        elif blank_missing or col in _ALWAYS_OVERWRITE:
+            new[idx] = ""               # 厳格モード or 常時上書き列 (rarity 推測除去 #1) は空欄化
         # 既定: 新コアが空 → 旧値を残す (回帰防止)
 
     if override_title:
         ti = _col_idx(headers, "*Title")
         if ti is not None and ti < len(new):
-            # grade はタイトル先頭 "PSA 10" が旧に入っている前提で 10 固定
-            title = build_title_from_fields(fields, grade="10")
+            # grade は行の C:Grade 列から取得 (旧は "10" ハードコード= PSA9 等で誤表示リスク・
+            # Gemini DISPUTE 2026-06-15)。現状 build_row は C:Grade="10" 固定 (PSA10限定運用) なので
+            # 実値は変わらないが、grade の SSOT を行に一本化してハードコード重複を除去。
+            gri = _col_idx(headers, "C:Grade")
+            grade = (new[gri].strip() if gri is not None and gri < len(new) and new[gri] else "") or "10"
+            title = build_title_from_fields(fields, grade=grade)
             if title:
                 new[ti] = title
 

@@ -42,8 +42,22 @@ def test_value_only_override_keeps_old_when_new_blank(monkeypatch):
     out = OV.apply_new_gen_override(_row(), HEADERS, "123", override_title=False)
     assert out[2] == "VMAX Climax"      # 上書き
     assert out[3] == "Zamazenta V"      # 汚染除去
-    assert out[5] == "Common"           # 新コア空 → 旧値温存 (回帰防止)
-    assert out[7] == "The Pokémon Company"  # 対象外列は不変
+    assert out[5] == ""                 # rarity は _ALWAYS_OVERWRITE: 新コア空→旧推測'Common'を空欄化 (#1)
+    assert out[7] == "The Pokémon Company"  # 対象外列は不変 (value-only 温存)
+
+
+def test_rarity_always_synced_blanks_old_guess(monkeypatch):
+    # (B) Gemini DISPUTE 修正: 既定モードでも rarity は新コア判定 (空欄含む) を権威として常に反映。
+    #     value-only 温存だと旧コアの推測 'Common' が残り #1 が直らないのを防ぐ。
+    fields = {"C:Set": "VMAX Climax", "C:Rarity": "", "C:Features": "", "_card_id": "x"}
+    _patch(monkeypatch, fields)
+    out = OV.apply_new_gen_override(_row(), HEADERS, "123", override_title=False)
+    assert out[5] == ""                 # 旧 'Common' (推測) を空欄化
+    # 新コアが rarity を持つ場合はその値で上書き
+    fields["C:Rarity"] = "Double Rare"
+    _patch(monkeypatch, fields)
+    out2 = OV.apply_new_gen_override(_row(), HEADERS, "123", override_title=False)
+    assert out2[5] == "Double Rare"
 
 
 def test_strict_mode_blanks_missing(monkeypatch):
@@ -60,12 +74,46 @@ def test_failsafe_on_resolve_error(monkeypatch):
     assert out == row                   # 解決不能 → 一切変更しない
 
 
+def test_failsafe_logs_on_resolve_error(monkeypatch, capsys):
+    # (4) Gemini DISPUTE 修正: 解決失敗時に silent no-op せず stderr にログ (検知可能に)。
+    _patch(monkeypatch, {}, err="catalog 解決不能 (xyz)")
+    OV.apply_new_gen_override(_row(), HEADERS, "999")
+    err = capsys.readouterr().err
+    assert "[new_gen]" in err
+    assert "999" in err                 # cert
+    assert "SKIP" in err
+
+
 def test_title_overridden_when_enabled(monkeypatch):
     _patch(monkeypatch, {"C:Set": "VMAX Climax", "_card_id": "x"}, title="PSA 10 ...")
     out = OV.apply_new_gen_override(_row(), HEADERS, "123", override_title=True)
     assert out[0] == "PSA 10 ..."
     out2 = OV.apply_new_gen_override(_row(), HEADERS, "123", override_title=False)
     assert out2[0] == "OLD TITLE"
+
+
+def test_title_grade_read_from_row_not_hardcoded(monkeypatch):
+    # (5b) grade はハードコード "10" でなく行の C:Grade 列から取る (Gemini DISPUTE 2026-06-15)。
+    captured = {}
+
+    def fake_title(f, grade="10"):
+        captured["grade"] = grade
+        return f"PSA {grade} TITLE"
+    monkeypatch.setattr(TLF, "build_listing_fields", lambda cert, hint="": ({"C:Set": "X", "_card_id": "x"}, None))
+    monkeypatch.setattr(TLF, "build_title_from_fields", fake_title)
+    hd = HEADERS + ["C:Grade"]
+    row = _row() + ["9"]
+    out = OV.apply_new_gen_override(row, hd, "123", override_title=True)
+    assert captured["grade"] == "9"          # C:Grade 列の値を使用
+    assert out[0] == "PSA 9 TITLE"
+
+
+def test_title_grade_defaults_10_when_no_column(monkeypatch):
+    # C:Grade 列が無い/空なら従来通り "10" (PSA10限定運用の既定)
+    monkeypatch.setattr(TLF, "build_listing_fields", lambda cert, hint="": ({"C:Set": "X", "_card_id": "x"}, None))
+    monkeypatch.setattr(TLF, "build_title_from_fields", lambda f, grade="10": f"PSA {grade} T")
+    out = OV.apply_new_gen_override(_row(), HEADERS, "123", override_title=True)
+    assert out[0] == "PSA 10 T"
 
 
 def test_headers_as_dict(monkeypatch):
