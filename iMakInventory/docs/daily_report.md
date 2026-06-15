@@ -1077,3 +1077,32 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 
 - ebay_down orphan 239件 → 「在庫あり・eBay取下げ済」シートで user レビュー。
 - amazon 第三者のみ化 自動検知 → user 指示「今はいい」で見送り (検知シグナル=他の出品者あり+buybox無し は特定済)。
+
+## 2026-06-16 — mercari ReadTimeout 真因解消 + AK巡回ERR 自己修復バグ修正
+
+### mercari driver eager 化 (commit bc91e03)
+
+- 決定: mercari driver を page_load_strategy=eager + set_page_load_timeout(45) 化。
+- 変更: scrapers/mercari_scraper.py create_driver。
+- 検証: 重い PORTER ページ(row754/757)が 3 cycle 連続 localhost ReadTimeout していた真因 =
+  既定 strategy="normal" が load イベント(画像/サブリソース全部)待ち。eager(DOMContentLoaded返却)で
+  load 依存除去、状態判定は WebDriverWait(30s)が担保。新 test 37件 pass + live ON_SALE 2/SOLD_OUT 2 確認。
+  本番効果: 翌日以降 mercari ReadTimeout 0件継続、HIGH cycle 43分→33分。
+
+### row728 reverse_audit 誤検知 → 過剰処置の反省 (コード変更なし)
+
+- 決定: reverse_audit 乖離 1件(row728 トゲキッスV: D=○ + eBay qty=1)を fail-OPEN と誤認し qty=0 化したが、
+  実態は user のキャンセル後 手動再販(正当な qty=1)。qty=1 に復元。コード修正は不要と確定。
+- 変更: <未実装> (row728 は巡回前に URL クリアし忘れ→cycle が D=○ 付与→手動 qty=1 と乖離しただけ)。
+- 検証: eBay GetItem で qty=1/Active 復元確認。reverse_audit は read-only 人手レビュー用で自動処置しない方針を再確認。
+  memory dont_act_on_audit_alert_without_human_review.md 制定。
+
+### AK巡回ERR 自己修復クリア + 連続カウント 永久不発火バグ修正 (commit 9e67374)
+
+- 決定: _build_row_result が結果 dict に err_flag_prev を含めていなかった真因を修正(1行追加)。
+- 変更: monitor_listings.py _build_row_result に "err_flag_prev": row.get("err_flag_prev","") 追加。
+- 検証: 旧バグで clear_err が常に False → (1)成功 scrape しても AK 列が永久にクリアされない(06/11からの×1 marker
+  48件堆積) (2)error 再mark の count が常に×1 → PERSISTENT_THRESHOLD「要手動chk」永久不発火。
+  新 test_err_flag_prev_propagation.py 5件(失敗注入で fix無し時 4件 fail 確認)、pre-commit 115件 pass。
+  公式監視くん(iMakeBayAPI/inventory_monitor/main.py)は別実装で err_flag_prev 直接使用=影響なしを確認。
+- 後処理: 堆積していた古い marker を一括クリア(HIGH 48件→0 / LOW 18件→0、verify 残0)。
