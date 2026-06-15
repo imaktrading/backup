@@ -871,14 +871,13 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
     """
     global _PRE_BUILD_MODE, _PRE_BUILD_RESULTS
     confirmed: dict = {}
-    verified = _load_verified_certs()
+    # ★verify→build ではバッチ全件を毎回 HTML に出し、その回に確認した cert だけを build 対象にする。
+    #  (2026-06-15 ユーザー指摘: verified キャッシュで過去確認済を勝手に確定扱いすると
+    #   「HTMLで6件 → なのに10件処理」という不透明なズレが出る。バッチ=確認=処理 を一致させる)。
     targets = []
     for cert in certs:
         cert = str(cert).strip()
         if not cert:
-            continue
-        if cert in verified and verified[cert].get("product_id"):
-            confirmed[cert] = verified[cert]["product_id"]   # 過去確定をそのまま採用
             continue
         t = _build_target_for_cert(cert)
         if t is None:
@@ -887,7 +886,7 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         targets.append(t)
 
     if not targets:
-        append_log_func(f"  ✅ 目視確認要 cert なし (確定済 {len(confirmed)} 件)、viewer skip\n")
+        append_log_func("  ✅ 目視確認対象 cert なし (全件 cache miss/対象外)、viewer skip\n")
         return confirmed
 
     _generate_html(targets)
