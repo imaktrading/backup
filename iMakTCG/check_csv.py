@@ -573,24 +573,8 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
             "total": total_count,
         }
 
-    # 競合タイトルからキーワード傾向を抽出
-    comp_words = {}
-    for item in competitors:
-        t = item.get("title", "").lower()
-        for w in t.split():
-            w = w.strip('.,;:!?()[]"\'')
-            if len(w) >= 3 and w not in {"psa", "the", "and", "for", "new"}:
-                comp_words[w] = comp_words.get(w, 0) + 1
-
-    my_words = set(my_title.lower().split())
-    frequent = sorted(comp_words.items(), key=lambda x: -x[1])
-    missing_keywords = []
-    for word, count in frequent[:20]:
-        if count >= 2 and word not in my_words and word not in {"card", "cards", "game"}:
-            missing_keywords.append(f"{word}({count}件)")
-    if missing_keywords:
-        findings.append(("INFO", f"競合で頻出だが自分のタイトルにない語: {', '.join(missing_keywords[:5])}"))
-
+    # 2026-06-15: 競合タイトルのキーワード傾向抽出は廃止。タイトルは catalog(SSOT)決定論生成なので
+    # 競合語の注入は推測(catalog-official-only/fail-closed 違反)。価格ゲートのみ残す。
     return findings, gate_result
 
 
@@ -806,16 +790,8 @@ def main(csv_path: str | None = None):
                 icon = {"ERROR": "❌", "WARN": "⚠️", "INFO": "ℹ️", "GATE": "🏁"}.get(sev, "•")
                 print(f"  {icon} {msg}")
 
-            # 3) TOPセラーItem Specifics比較
-            if competitors:
-                top_specs = fetch_top_seller_specs(token, competitors)
-                if top_specs:
-                    spec_findings = compare_item_specifics(row, top_specs)
-                    for sev, msg in spec_findings:
-                        icon = {"ERROR": "❌", "WARN": "⚠️", "INFO": "ℹ️"}.get(sev, "•")
-                        print(f"  {icon} {msg}")
-                    comp_findings.extend(spec_findings)
-
+            # 2026-06-15: TOPセラー Item Specifics 比較は廃止。生成は catalog(SSOT)決定論なので
+            # 競合値は使わない(取り込むと catalog-official-only/fail-closed 違反)。市場は価格ゲートのみ参照。
             time.sleep(0.5)  # API rate limit
         else:
             comp_findings.append(("INFO", "eBay API未接続のため競合比較スキップ"))

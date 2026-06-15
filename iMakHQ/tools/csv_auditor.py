@@ -903,7 +903,7 @@ def deep_checks(mod, headers, rows, all_vr, project, csv_path):
     """出品時チェックと同じ深い検査を check_csv の関数を再利用して実行:
       ① 市場ゲート (build_search_query→search_ebay_active→compare_with_competitors)
          = 価格 GO/RELAX/HOLD/NO-GO + 利益計算。NO-GO は価格除外候補。
-      ② TOPセラー Item Specifics 比較 (fetch_top_seller_specs→compare_item_specifics) = SEO。
+      ② (廃止 2026-06-15) TOPセラー Item Specifics 比較 = catalog決定論生成のため不使用。
       ③ Claude AI 総合レビュー (claude_review) = バッチ全体の品質所見。
     API/key 無い環境では静かに degrade (deep skip)。all_vr=各行のvalidate_row結果(claude文脈用)。
     返り: {price_exclude:[1based], seo:[(sku,msg)], gate_summary:[(i,status)], claude:str}
@@ -935,11 +935,8 @@ def deep_checks(mod, headers, rows, all_vr, project, csv_path):
                 comps, total = mod.search_ebay_active(token, query, limit=50)
                 cost_jpy = cost_data.get(mod.get_col(row, cost_key)) if cost_key else None
                 comp, gate = mod.compare_with_competitors(row, comps, total, cost_jpy)
-                if comps:
-                    top = mod.fetch_top_seller_specs(token, comps)
-                    if top:
-                        for sev, msg in mod.compare_item_specifics(row, top):
-                            out["seo"].append((_row_sku(headers, row), msg))
+                # 2026-06-15: TOPセラー Item Specifics 取得・比較は廃止 (catalog決定論生成 → 競合値不使用
+                # =catalog-official-only/fail-closed)。市場は価格ゲート(compare_with_competitors)のみ。
             except Exception as e:
                 comp, gate = [], None
                 print(f"  ⚠️ 行{i+1} 市場検査 skip: {type(e).__name__}")
