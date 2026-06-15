@@ -827,6 +827,32 @@ def _apply_user_judgments(results: list[dict]) -> dict:
     return summary
 
 
+def parse_confirmations(results):
+    """HTML 確認結果 list → (confirmed: {cert: product_id}, none_records: list)。純関数。
+
+    OK→expected pid / CHOSEN→selected_pid のみ confirmed に入れる (= build 対象)。
+    NONE/NG/PENDING/未確認 は confirmed に **入れない** (= 出品しない = fail-closed)。
+    → 「HTMLで確認(✅/選び直し)した数」だけが build に進む保証。
+    """
+    confirmed, none_records = {}, []
+    for r in (results or []):
+        cert = str(r.get("cert", "")).strip()
+        choice = r.get("choice", "")
+        if not cert:
+            continue
+        if choice == "OK":
+            pid = (r.get("expected") or "").strip()
+        elif choice == "CHOSEN":
+            pid = (r.get("selected_pid") or "").strip()
+        else:
+            pid = ""
+            if choice in ("NONE", "NG"):
+                none_records.append(r)
+        if pid:
+            confirmed[cert] = pid
+    return confirmed, none_records
+
+
 def _build_target_for_cert(cert: str):
     """cert (PSA cache 由来) から HTML viewer の target dict を作る。CSV 非依存。
 
@@ -929,22 +955,8 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         append_log_func("  ⚠️ 確認 timeout/未送信 → 確定済 cert のみ build (未確認は出品しない)\n")
         return confirmed
 
-    none_records = []
-    for r in _PRE_BUILD_RESULTS:
-        cert = str(r.get("cert", "")).strip()
-        choice = r.get("choice", "")
-        if not cert:
-            continue
-        if choice == "OK":
-            pid = (r.get("expected") or "").strip()
-        elif choice == "CHOSEN":
-            pid = (r.get("selected_pid") or "").strip()
-        else:
-            pid = ""   # NONE/NG/PENDING → build しない (fail-closed)
-            if choice in ("NONE", "NG"):
-                none_records.append(r)   # catalog 宿題化 (= 後段で追加依頼)
-        if pid:
-            confirmed[cert] = pid
+    parsed, none_records = parse_confirmations(_PRE_BUILD_RESULTS)
+    confirmed.update(parsed)
     # NONE/NG = identity 未確定 → catalog 追加依頼に自動ルーティング (build後 hook と同経路)
     if none_records:
         try:
