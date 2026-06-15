@@ -672,8 +672,9 @@ Return ONLY valid JSON:
         # メッセージ構築（画像あり/なし）
         user_content = image_content + [{"type": "text", "text": prompt_text}]
 
+        from card_identifier import CLAUDE_MODEL  # モデル名 SSOT (1箇所集約)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_MODEL,
             max_tokens=300,
             system="You are a JSON-only response bot. You must always respond with valid JSON only. Never include any explanation, preamble, or text outside the JSON object.",
             messages=[{"role": "user", "content": user_content}]
@@ -698,7 +699,7 @@ Game: {game}, Set: {set_name}, Card: #{card_number}, Label: {subject}
 "power":"number or blank","finish":"Foil or Non-Foil"}}"""
             }]
             retry_msg = client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=CLAUDE_MODEL,
                 max_tokens=300,
                 system="Respond with valid JSON only.",
                 messages=[{"role": "user", "content": retry_content}]

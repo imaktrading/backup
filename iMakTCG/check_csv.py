@@ -551,9 +551,10 @@ Respond in Japanese. Be concise and actionable. Use bullet points.
 Format: まず各リスティングの個別フィードバック、最後に全体の改善提案。"""
 
     try:
+        from card_identifier import CLAUDE_MODEL  # モデル名 SSOT (1箇所集約)
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_MODEL,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )

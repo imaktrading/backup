@@ -48,7 +48,7 @@ try:
 except FileNotFoundError:
     ANTHROPIC_API_KEY = None
 
-CLAUDE_MODEL = "claude-sonnet-4-20250514"  # psa_to_csv.py と統一
+CLAUDE_MODEL = "claude-sonnet-4-6"  # 全 TCG スクリプト共通の SSOT。モデル変更時はここ1箇所だけ直す
 
 
 # ============================================================================
