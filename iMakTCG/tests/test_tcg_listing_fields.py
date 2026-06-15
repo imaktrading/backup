@@ -117,6 +117,20 @@ def test_title_blank_set_skipped():
     assert t == "PSA 10 Pokemon Japanese #020/019 Marnie's Morpeko 2025"
 
 
+# --- verify→build: forced_card_id で指定カードから決定論生成 ---
+def test_forced_card_id_builds_from_given_id():
+    from tcg_listing_fields import build_listing_fields
+    # 人が確定した product_id を直接採用 (cert→card_id 自動解決をスキップ)。実 catalog 参照。
+    f, err = build_listing_fields("0000000", forced_card_id="S6K-037")
+    assert err is None
+    assert f["_card_id"] == "S6K-037"
+    assert f["C:Card Size"] == "Standard"
+    assert f["C:Set"]                      # set_name_ebay が入る
+    # 存在しない card_id は err
+    f2, err2 = build_listing_fields("0000000", forced_card_id="NOPE-999")
+    assert err2 and f2 == {}
+
+
 # --- eBay 正規化フィールド (catalog *_ebay 由来・最大活用 2026-06-15) ---
 def test_cost_from_raw_clean_integer():
     # cost はどのゲームも clean 整数 → raw 直結 (即活用)

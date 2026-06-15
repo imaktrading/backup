@@ -2432,9 +2432,42 @@ def main():
     catalog_misses = []  # iMakCatalog 未登録 (要 Catalog Claude 拡充依頼) — gshock_to_csv と同パターン
     # PSAデータ取得 → build_row（価格はデフォルト$100で仮生成）
     card_info = []  # (cert, data) を保持して後で価格更新
+
+    # ===== verify→build (PSA_VERIFY_BEFORE_BUILD=1): 先に全 cert scrape → HTML目視確認 →
+    #       確定したカードだけ CSV 生成 (= 確定してから作る)。既定 OFF=従来の build→確認。 =====
+    _verify_mode = os.environ.get("PSA_VERIFY_BEFORE_BUILD") == "1"
+    _prescraped = {}
+    _confirmed_pids = {}
+    _skipped_unconfirmed = []
+    if _verify_mode:
+        print("\n🔎 verify→build モード: 先に scrape → 目視確認 → 確定カードのみ生成")
+        for cert in cert_numbers:
+            print(f"取得中(確認用): #{cert}...", end="", flush=True)
+            d = get_psa_data(driver, cert)
+            _prescraped[cert] = d
+            print(" ✓" if d else " 失敗")
+        try:
+            _tools = r"C:/dev/iMak/iMakHQ/tools"
+            if _tools not in sys.path:
+                sys.path.insert(0, _tools)
+            from post_psa_review import run_pre_build_verify
+            _confirmed_pids = run_pre_build_verify(cert_numbers, print)
+        except Exception as _e:
+            print(f"⚠️ pre-build verify 失敗 → 確定不能のため build 中止(誤出品回避): {type(_e).__name__}: {_e}")
+            _confirmed_pids = {}
+
     for cert in cert_numbers:
-        print(f"取得中: #{cert}...", end="", flush=True)
-        data = get_psa_data(driver, cert)
+        if _verify_mode:
+            # 確定 (OK/CHOSEN) した cert のみ build。未確定/NONE/NG は出品しない (fail-closed)。
+            if cert not in _confirmed_pids:
+                print(f"スキップ(目視未確定): #{cert}")
+                _skipped_unconfirmed.append(cert)
+                card_info.append((cert, None))
+                continue
+            data = _prescraped.get(cert)
+        else:
+            print(f"取得中: #{cert}...", end="", flush=True)
+            data = get_psa_data(driver, cert)
 
         if data:
             subject = data.get('Subject', 'Unknown')
@@ -2451,10 +2484,13 @@ def main():
                 continue
             # 並行ビルド切替 (strangler): TCG_USE_NEW_GEN=1 の時だけ catalog 決定論値で上書き。
             # 既定 OFF=この分岐は no-op で旧挙動を完全維持 (本番不変)。
+            # verify_mode 時は確定 product_id (forced_card_id) で再生成 = 人が選んだカードを権威に。
             try:
                 from tcg_new_gen_override import env_enabled, apply_new_gen_override
                 if env_enabled():
-                    row = apply_new_gen_override(row, headers, cert)
+                    row = apply_new_gen_override(
+                        row, headers, cert,
+                        forced_card_id=(_confirmed_pids.get(cert, "") if _verify_mode else ""))
             except Exception as _e:
                 print(f"    ⚠️ new-gen override skip (#{cert}): {type(_e).__name__}: {_e}")
             apply_ebay_filter_to_row(row, headers, category="tcg")
@@ -2464,6 +2500,9 @@ def main():
             print(f" → 失敗")
             errors.append(cert)
             card_info.append((cert, None))
+
+    if _verify_mode and _skipped_unconfirmed:
+        print(f"\n🔎 目視未確定で出品見送り: {len(_skipped_unconfirmed)} 件 {_skipped_unconfirmed}")
 
     driver.quit()
 

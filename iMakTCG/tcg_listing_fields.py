@@ -147,11 +147,22 @@ def _psa_year(cert: str):
         return ""
 
 
-def build_listing_fields(cert: str, game_hint: str = ""):
+def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = ""):
     """cert → eBay Item Specifics dict (catalog 決定論コピー・未知は空欄)。
 
+    forced_card_id: 指定時は cert→card_id の自動解決を **スキップ**し、その card_id で生成する
+      (= 人が HTML 目視確認で確定/選び直した product_id を権威として採用。verify→build フロー用)。
     Returns: (fields: dict[C:列→値], err: str|None)。err 時 fields は {}。
     """
+    if forced_card_id:
+        # 人が確定した card_id を直接採用 (Vision/自動解決を経由しない)
+        specs = _catalog_specs(forced_card_id)
+        if specs is None:
+            return {}, f"forced card_id {forced_card_id} が catalog に無い"
+        fields = map_specs_to_fields(specs, _psa_year(cert))
+        fields["_card_id"] = forced_card_id
+        return fields, None
+
     franchise = _detect_franchise(game_hint, "")
     if not franchise:
         # game_hint 無→ PSA cache の Brand から判定

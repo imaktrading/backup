@@ -30,7 +30,8 @@ def _row():
 
 
 def _patch(monkeypatch, fields, err=None, title="NEW TITLE"):
-    monkeypatch.setattr(TLF, "build_listing_fields", lambda cert, hint="": (fields, err))
+    monkeypatch.setattr(TLF, "build_listing_fields",
+                        lambda cert, hint="", forced_card_id="": (fields, err))
     monkeypatch.setattr(TLF, "build_title_from_fields", lambda f, grade="10": title)
 
 
@@ -99,7 +100,7 @@ def test_title_grade_read_from_row_not_hardcoded(monkeypatch):
     def fake_title(f, grade="10"):
         captured["grade"] = grade
         return f"PSA {grade} TITLE"
-    monkeypatch.setattr(TLF, "build_listing_fields", lambda cert, hint="": ({"C:Set": "X", "_card_id": "x"}, None))
+    monkeypatch.setattr(TLF, "build_listing_fields", lambda cert, hint="", forced_card_id="": ({"C:Set": "X", "_card_id": "x"}, None))
     monkeypatch.setattr(TLF, "build_title_from_fields", fake_title)
     hd = HEADERS + ["C:Grade"]
     row = _row() + ["9"]
@@ -110,7 +111,7 @@ def test_title_grade_read_from_row_not_hardcoded(monkeypatch):
 
 def test_title_grade_defaults_10_when_no_column(monkeypatch):
     # C:Grade 列が無い/空なら従来通り "10" (PSA10限定運用の既定)
-    monkeypatch.setattr(TLF, "build_listing_fields", lambda cert, hint="": ({"C:Set": "X", "_card_id": "x"}, None))
+    monkeypatch.setattr(TLF, "build_listing_fields", lambda cert, hint="", forced_card_id="": ({"C:Set": "X", "_card_id": "x"}, None))
     monkeypatch.setattr(TLF, "build_title_from_fields", lambda f, grade="10": f"PSA {grade} T")
     out = OV.apply_new_gen_override(_row(), HEADERS, "123", override_title=True)
     assert out[0] == "PSA 10 T"
@@ -131,6 +132,22 @@ def test_hp_stage_columns_populated_when_present(monkeypatch):
     out = OV.apply_new_gen_override(row, hd, "123", override_title=False)
     assert out[hd.index("C:HP")] == "320"
     assert out[hd.index("C:Stage")] == "Basic"
+
+
+def test_forced_card_id_passed_through(monkeypatch):
+    # verify→build: 人が確定した product_id を build_listing_fields に forced_card_id で渡す。
+    captured = {}
+
+    def fake_blf(cert, hint="", forced_card_id=""):
+        captured["forced"] = forced_card_id
+        return ({"C:Set": "VMAX Climax", "_card_id": forced_card_id or "auto"}, None)
+    monkeypatch.setattr(TLF, "build_listing_fields", fake_blf)
+    monkeypatch.setattr(TLF, "build_title_from_fields", lambda f, grade="10": "T")
+    OV.apply_new_gen_override(_row(), HEADERS, "123", forced_card_id="S8b-241", override_title=False)
+    assert captured["forced"] == "S8b-241"      # 確定 pid が新コアに渡る
+    # 未指定時は空 (自動解決)
+    OV.apply_new_gen_override(_row(), HEADERS, "123", override_title=False)
+    assert captured["forced"] == ""
 
 
 def test_env_enabled(monkeypatch):

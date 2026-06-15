@@ -551,9 +551,19 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                 RESULT_DIR.mkdir(parents=True, exist_ok=True)
                 out = RESULT_DIR / f"psa_review_{ts}.json"
                 out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                # 自動処理 (= catalog/スプシ書込) + verified 記録
-                summary = _apply_user_judgments(data)
-                _record_verified(data)
+                if _PRE_BUILD_MODE:
+                    # verify→build: 結果を build 側に渡すだけ (CSV除外/スプシ書込は build 後に実施)。
+                    global _PRE_BUILD_RESULTS
+                    _PRE_BUILD_RESULTS = data
+                    _record_verified(data)
+                    # JS が参照する key を 0 で埋める (build 側で実処理するため此処では書込なし)
+                    summary = {"mode": "pre_build", "count": len(data),
+                               "spreadsheet_writes": 0, "skipped": 0}
+                    _PRE_BUILD_EVENT.set()
+                else:
+                    # 従来 (build後 hook): catalog/スプシ書込 + NONE/NG 行除外 + verified 記録
+                    summary = _apply_user_judgments(data)
+                    _record_verified(data)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -815,6 +825,136 @@ def _apply_user_judgments(results: list[dict]) -> dict:
         except Exception as e:
             summary["errors"].append(f"catalog route: {type(e).__name__}: {e}")
     return summary
+
+
+def _build_target_for_cert(cert: str):
+    """cert (PSA cache 由来) から HTML viewer の target dict を作る。CSV 非依存。
+
+    Returns: target dict / None (cache miss・category 不明・遊戯王 SKIP 時)。
+    """
+    meta = _get_psa_cache(cert)
+    if not meta:
+        return None
+    brand = meta.get("Brand", "")
+    subject = meta.get("Subject", "")
+    card_number = meta.get("CardNumber", "")
+    category = _detect_category(brand)
+    if not category or category == "yugioh_tcg":
+        return None
+    set_code = _extract_set_code(brand, category)
+    csv_expected = _catalog_lookup_expected(brand, subject, card_number, category)
+    if not csv_expected and set_code and card_number:
+        csv_expected = f"{set_code}-{card_number}"
+    candidates = _get_candidates(category, set_code, card_number, brand=brand,
+                                 expected_product_id=csv_expected, subject=subject)
+    return {
+        "cert": cert, "brand": brand, "subject": subject, "card_number": card_number,
+        "category": category, "set_code": set_code, "csv_expected": csv_expected,
+        "cert_image_url": meta.get("CardImageUrl", ""), "candidates": candidates,
+    }
+
+
+# verify→build フロー用: do_POST が結果を渡す Event + 受け皿 (pre-build モード時のみ使用)
+_PRE_BUILD_MODE = False
+_PRE_BUILD_EVENT = threading.Event()
+_PRE_BUILD_RESULTS: "list | None" = None
+
+
+def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_sec=1800) -> dict:
+    """【verify→build】CSV 生成の **前** に HTML 目視確認を回し、確定 product_id を返す。
+
+    certs: 対象 cert list (PSA cache に scrape 済前提)。
+    Returns: {cert: 確定 product_id}。OK→expected / CHOSEN→選択pid。
+             NONE/NG/PENDING/未確認 は **dict に含めない** (= build しない = fail-closed)。
+    既に verified 済の cert は viewer に出さず確定値をそのまま採用。
+    submit が来るまで blocking (timeout 時は確定分だけ返す)。
+    """
+    global _PRE_BUILD_MODE, _PRE_BUILD_RESULTS
+    confirmed: dict = {}
+    verified = _load_verified_certs()
+    targets = []
+    for cert in certs:
+        cert = str(cert).strip()
+        if not cert:
+            continue
+        if cert in verified and verified[cert].get("product_id"):
+            confirmed[cert] = verified[cert]["product_id"]   # 過去確定をそのまま採用
+            continue
+        t = _build_target_for_cert(cert)
+        if t is None:
+            append_log_func(f"  ⚠️ cert {cert}: cache miss/category不明/対象外 → 目視対象外 (build skip)\n")
+            continue
+        targets.append(t)
+
+    if not targets:
+        append_log_func(f"  ✅ 目視確認要 cert なし (確定済 {len(confirmed)} 件)、viewer skip\n")
+        return confirmed
+
+    _generate_html(targets)
+    append_log_func(f"  📄 HTML viewer 生成 (build前確認): {HTML_OUTPUT}\n")
+    _PRE_BUILD_MODE = True
+    _PRE_BUILD_RESULTS = None
+    _PRE_BUILD_EVENT.clear()
+
+    server = None
+    base_url = None
+    for p in range(SERVER_PORT, SERVER_PORT + 10):
+        try:
+            server, thread, base_url = _start_review_server(p)
+            append_log_func(f"  🌐 review server 起動: {base_url}\n")
+            break
+        except OSError:
+            continue
+    if not server:
+        append_log_func("  ⚠️ server 起動失敗 → build skip (確定 cert のみ)\n")
+        _PRE_BUILD_MODE = False
+        return confirmed
+
+    if open_browser:
+        try:
+            import subprocess
+            subprocess.run(["cmd", "/c", "start", "", base_url], check=False)
+            append_log_func(f"  🌐 browser 自動 open: {base_url}\n")
+        except Exception:
+            pass
+    append_log_func(f"\n  ⚠️ 目視確認要 {len(targets)} 件: browser で確認 → 「✉️ HQ に送信」 click\n")
+    append_log_func("     確認後に **確定したカードだけ** CSV 生成されます (verify→build)\n")
+
+    got = _PRE_BUILD_EVENT.wait(timeout=timeout_sec)
+    _PRE_BUILD_MODE = False
+    try:
+        server.shutdown()
+    except Exception:
+        pass
+    if not got or _PRE_BUILD_RESULTS is None:
+        append_log_func("  ⚠️ 確認 timeout/未送信 → 確定済 cert のみ build (未確認は出品しない)\n")
+        return confirmed
+
+    none_records = []
+    for r in _PRE_BUILD_RESULTS:
+        cert = str(r.get("cert", "")).strip()
+        choice = r.get("choice", "")
+        if not cert:
+            continue
+        if choice == "OK":
+            pid = (r.get("expected") or "").strip()
+        elif choice == "CHOSEN":
+            pid = (r.get("selected_pid") or "").strip()
+        else:
+            pid = ""   # NONE/NG/PENDING → build しない (fail-closed)
+            if choice in ("NONE", "NG"):
+                none_records.append(r)   # catalog 宿題化 (= 後段で追加依頼)
+        if pid:
+            confirmed[cert] = pid
+    # NONE/NG = identity 未確定 → catalog 追加依頼に自動ルーティング (build後 hook と同経路)
+    if none_records:
+        try:
+            routed = _route_none_to_catalog(none_records)
+            append_log_func(f"  📨 NONE/NG {len(none_records)} 件 → catalog 宿題化 ({routed} 件記録)\n")
+        except Exception as _e:
+            append_log_func(f"  ⚠️ catalog route 失敗: {type(_e).__name__}: {_e}\n")
+    append_log_func(f"  ✅ 目視確定: {len(confirmed)} 件を build へ (未確定は除外)\n")
+    return confirmed
 
 
 def _start_review_server(port: int = SERVER_PORT) -> tuple[HTTPServer, threading.Thread, str]:

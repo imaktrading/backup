@@ -58,10 +58,12 @@ def env_enabled():
 
 
 def apply_new_gen_override(row, headers, cert, *, blank_missing=None,
-                           override_title=True, game_hint=""):
+                           override_title=True, game_hint="", forced_card_id=""):
     """1 行を新コアの catalog 決定論値で上書きして返す (副作用なし=新 list を返す)。
 
     row: build_row が返した list / headers: 列名→idx の dict か 列名 list。
+    forced_card_id: 人が HTML 目視確認で確定/選び直した product_id。指定時は新コアが
+      その card_id で決定論再生成 (= verify→build フロー / CHOSEN 補正)。
     解決不能や行が短い等で失敗したら **元 row をそのまま返す** (fail-safe)。
     """
     from tcg_listing_fields import build_listing_fields, build_title_from_fields
@@ -75,7 +77,7 @@ def apply_new_gen_override(row, headers, cert, *, blank_missing=None,
     gi = _col_idx(headers, "C:Game")
     game = game_hint or (row[gi] if gi is not None and gi < len(row) else "")
 
-    fields, err = build_listing_fields(str(cert), game or "")
+    fields, err = build_listing_fields(str(cert), game or "", forced_card_id=forced_card_id)
     if err or not fields:
         # 解決不能 → 旧値温存 (fail-safe)。但し **必ずログ** (silent no-op だと「新コアが
         # 効いてる風で実は未適用=defect 温存」を検知できない。Gemini DISPUTE 2026-06-15)。
