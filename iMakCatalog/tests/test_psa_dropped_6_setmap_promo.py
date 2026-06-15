@@ -83,3 +83,18 @@ def test_start_deck_100_battle_collection_vs_plain_no_collision():
     # plain START DECK 100 #227 は従来どおり SI-227 (カバルドン) のまま回帰維持
     r2 = P.lookup_pokemon("POKEMON JAPANESE START DECK 100", "227", "", verbose=False)
     assert r2 is not None and r2["card_id"] == "SI-227", r2
+
+
+def test_resolver_gap_batch_20260615_index_additions():
+    """2026-06-15 TCG resolver gap batch: catalog 実在裏取り済の brand→set_code 索引追加。
+    これらは catalog にカードが在るのに brand から set_code 抽出できず取りこぼしていたもの。
+    """
+    cases = [
+        ("POKEMON JAPANESE SUN & MOON MIRACLE TWINS", "069", "SM11-069"),       # ミラクルツイン
+        ("POKEMON JAPANESE SUN & MOON SKY-SPLITTING CHARISMA", "103", "SM7-103"),  # 裂空のカリスマ
+        ("POKEMON JAPANESE SWORD & SHIELD AMAZING VOLT TACKLE", "030", "S4-030"),  # 仰天のボルテッカー
+        ("POKEMON JAPANESE SWORD & SHIELD AMAZING VOLT TACKLE", "108", "S4-108"),
+    ]
+    for brand, num, expected in cases:
+        r = P.lookup_pokemon(brand, num, "", verbose=False)
+        assert r is not None and r["card_id"] == expected, f"{brand} #{num}: {r}"

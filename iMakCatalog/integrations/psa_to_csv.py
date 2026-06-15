@@ -1300,6 +1300,10 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "ULTRA SHINY GX":              "SM8b",   # PSA 語順違い ('...ULTRA SHINY GX'), cert74118843 Articuno GX 214 (2026-06-10)
     "GX BATTLE BOOST":             "SM4p",
     "THE BEST OF XY":              "XY",
+    # --- 2026-06-15 TCG resolver gap batch (catalog 実在裏取り済・索引のみ追加) ---
+    "MIRACLE TWINS":               "SM11",   # ミラクルツイン (SM11-069=Dragonite-GX 実在)
+    "SKY-SPLITTING CHARISMA":      "SM7",    # 裂空のカリスマ (SM7-103=Tate & Liza 実在)
+    "AMAZING VOLT TACKLE":         "S4",     # 仰天のボルテッカー (S4-030=Pikachu V / S4-108=Aegislash V 実在)
     # --- 2026-06-10 PSA脱落6件 set-map (records 実在・索引のみ。真値=catalog set_name 裏取り) ---
     "SKY LEGEND":                  "SM10b",  # スカイレジェンド (cert109940063 Lillie 053=SM10b-053 実在)
     # ⚠️ 順序大事: より具体的な "...BATTLE COLLECTION" を plain "START DECK 100" より先に置く。
