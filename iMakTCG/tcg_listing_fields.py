@@ -279,14 +279,22 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     if fields.get("C:Character"):
         core.append(fields["C:Character"])
 
-    # 任意 (末尾から落とせる) — 高情報順
+    # 任意 (末尾から落とせる) — 高情報順。
+    # ★ワード単位の重複ガード: 任意要素(Rarity/Features)の有意語が既存タイトルに在れば足さない。
+    #   例: Set"Super Electric Breaker" + Rarity"Super Rare" → "super"被り → Rarity を足さない
+    #   (= 旧: フレーズ単位 dedup で語跨ぎ重複を取れず "Super" 2回になっていた)。
+    #   core(Set/Character/番号=同定語)は触らない (例 "Mega Brave"+"Mega Venusaur" は正当な重複)。
+    def _word_overlap(candidate, existing_text):
+        ex = set(existing_text.lower().split())
+        return any(len(w) >= 4 and w in ex for w in candidate.lower().split())
+
     optional = []
-    if fields.get("C:Rarity"):
+    core_text = " ".join(core)
+    if fields.get("C:Rarity") and not _word_overlap(fields["C:Rarity"], core_text):
         optional.append(fields["C:Rarity"])
     if fields.get("C:Features"):
-        # "Art Card" 等。Rarity と語が被るなら足さない
         feat = fields["C:Features"]
-        if feat.lower() not in " ".join(core + optional).lower():
+        if not _word_overlap(feat, " ".join(core + optional)):
             optional.append(feat)
     if fields.get("C:Year Manufactured"):
         optional.append(fields["C:Year Manufactured"])

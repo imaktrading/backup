@@ -98,6 +98,25 @@ def test_title_correct_set_no_pollution_japanese():
     assert "Vmax Climax #118" not in t         # Subject汚染パターンが出ない
 
 
+def test_title_no_cross_field_word_dup_super():
+    # Set"Super Electric Breaker" + Rarity"Super Rare" → "Super" 重複させない (Rarity を足さない)
+    specs = {"_name_en": "Pikachu Ex", "character_name": "Pikachu ex",
+             "set_name_ebay": "Super Electric Breaker", "rarity_ebay": "Super Rare",
+             "game_ebay": "Pokémon TCG", "card_number_text": "122/106", "_language": "ja"}
+    t = build_title_from_fields(map_specs_to_fields(specs, "2024"))
+    assert t.lower().split().count("super") == 1, f"'super' 重複: {t}"
+    assert "Super Electric Breaker" in t            # Set(同定)は死守
+
+
+def test_title_core_legit_word_repeat_kept():
+    # core 同士の正当な重複 (Set"Mega Brave" + Character"Mega Venusaur") は保持 (落とさない)
+    specs = {"_name_en": "Mega Venusaur ex", "character_name": "Mega Venusaur ex",
+             "set_name_ebay": "Scarlet & Violet—Mega Brave", "rarity_ebay": "",
+             "game_ebay": "Pokémon TCG", "card_number_text": "087/063", "_language": "ja"}
+    t = build_title_from_fields(map_specs_to_fields(specs, "2025"))
+    assert "Mega Brave" in t and "Mega Venusaur" in t   # 両方の Mega を死守
+
+
 def test_title_no_duplicate_words():
     specs = {"_name_en": "Scrafty", "character_name": "Scrafty",
              "set_name_ebay": "Scarlet & Violet—White Flare", "rarity_ebay": "Art Rare",
