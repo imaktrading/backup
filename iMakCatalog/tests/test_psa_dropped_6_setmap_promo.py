@@ -64,3 +64,22 @@ def test_gapB_sm_mp_promo_resolve_after_migration():
     assert r is not None and r["card_id"] == "SM-P-001", r
     r2 = P.lookup_pokemon("POKEMON JAPANESE M-P PROMO", "001", "", verbose=False)
     assert r2 is not None and r2["card_id"] == "M-P-001", r2
+
+
+def test_start_deck_100_battle_collection_vs_plain_no_collision():
+    """2026-06-15 番号衝突修正: スタートデッキ100(SI,/414) と
+    スタートデッキ100バトルコレクション(MC,/742) は別set。両者#227 が衝突する。
+    公式裏取り: card/48943 ピカチュウex 227/742 (MC), card/40705 カバルドン 227/414 (SI)。
+    """
+    # brand → set_code: BATTLE COLLECTION は MC, plain は SI (より具体的が先勝ち)
+    assert P.extract_set_code_from_brand_pokemon(
+        "POKEMON JAPANESE MC-START DECK 100 BATTLE COLLECTION") == "MC"
+    assert P.extract_set_code_from_brand_pokemon(
+        "POKEMON JAPANESE START DECK 100") == "SI"
+    # #227 が正しい set に解決する (cert149832553 = Pikachu ex)
+    r = P.lookup_pokemon(
+        "POKEMON JAPANESE MC-START DECK 100 BATTLE COLLECTION", "227", "", verbose=False)
+    assert r is not None and r["card_id"] == "MC-227", r
+    # plain START DECK 100 #227 は従来どおり SI-227 (カバルドン) のまま回帰維持
+    r2 = P.lookup_pokemon("POKEMON JAPANESE START DECK 100", "227", "", verbose=False)
+    assert r2 is not None and r2["card_id"] == "SI-227", r2

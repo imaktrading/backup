@@ -1302,6 +1302,12 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "THE BEST OF XY":              "XY",
     # --- 2026-06-10 PSA脱落6件 set-map (records 実在・索引のみ。真値=catalog set_name 裏取り) ---
     "SKY LEGEND":                  "SM10b",  # スカイレジェンド (cert109940063 Lillie 053=SM10b-053 実在)
+    # ⚠️ 順序大事: より具体的な "...BATTLE COLLECTION" を plain "START DECK 100" より先に置く。
+    #   スタートデッキ100(SI, /414) と スタートデッキ100バトルコレクション(MC, /742) は別set。
+    #   両者とも #227 が存在し番号衝突する (SI-227=カバルドン / MC-227=ピカチュウex)。
+    #   PSA brand "MC-START DECK 100 BATTLE COLLECTION" は MC に解決させる
+    #   (公式裏取り 2026-06-15 card/48943 ピカチュウex 227/742, card/48717 規制マーク=MC)。
+    "START DECK 100 BATTLE COLLECTION": "MC",  # スタートデッキ100バトルコレクション (cert149832553 Pikachu ex 227=MC-227)
     "START DECK 100":              "SI",     # スタートデッキ100 (cert139561995 Pikachu 127=SI-127 実在)
     # --- 2026-06-11 High-Class Deck (SwSh ハイクラスデッキ) — records 実在・索引のみ ---
     "GENGAR VMAX HIGH-CLASS DECK":   "SGG",  # ゲンガーVMAXハイクラスデッキ (cert139761896 #002=SGG-002 実在)
