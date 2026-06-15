@@ -2124,8 +2124,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             )
         except Exception:
             _override_context = None
-    # catalog ID hit (authority context 生成済) or 人手override = 身元確定 → 3AI skip し決定論判定
-    _catalog_confirmed = _override_context is not None
+    # 3AI 撤去 (2026-06-15): 新コア(catalog決定論)運用時は 3AI 合議を走らせない。
+    #   catalog確定→決定論検証 / catalog-miss→ main() の新コア解決ゲートで skip(入稿しない)。
+    #   理由: catalog参照生成では catalog確定は既に3AI skip、miss は入稿しないので 3AI の出番が無い。
+    #   env-off (legacy rollback) のみ従来の _override_context ベース判定(OP/Pokemon)を維持。
+    _catalog_confirmed = True if os.environ.get("TCG_USE_NEW_GEN") == "1" else (_override_context is not None)
     if not validate_and_report(
         cert_number, title, tcg_specs, "", 183454, 2750, price, PIC_URL,
         psa_brand=brand, psa_card_number=data.get('CardNumber', ''),
@@ -2488,9 +2491,20 @@ def main():
             try:
                 from tcg_new_gen_override import env_enabled, apply_new_gen_override
                 if env_enabled():
-                    row = apply_new_gen_override(
-                        row, headers, cert,
-                        forced_card_id=(_confirmed_pids.get(cert, "") if _verify_mode else ""))
+                    _forced = _confirmed_pids.get(cert, "") if _verify_mode else ""
+                    # ★catalog hit 判定 (新コア・全 franchise の決定論解決)。
+                    #   miss = 公式データ無し → **入稿しない** (fail-closed / catalog_official_only)。
+                    #   3AI 撤去後、catalog-miss を弾く正規ゲートはここ1本。
+                    from tcg_listing_fields import build_listing_fields as _blf
+                    _gi = headers.index("C:Game") if "C:Game" in headers else None
+                    _game = row[_gi] if (_gi is not None and _gi < len(row)) else ""
+                    _chk, _cerr = _blf(str(cert), _game or "", forced_card_id=_forced)
+                    if _cerr:
+                        print(f"    ⏭️ Skip (catalog未登録→入稿しない・catalog依頼): #{cert} ({_cerr})")
+                        errors.append(cert)
+                        card_info.append((cert, None))
+                        continue
+                    row = apply_new_gen_override(row, headers, cert, forced_card_id=_forced)
             except Exception as _e:
                 print(f"    ⚠️ new-gen override skip (#{cert}): {type(_e).__name__}: {_e}")
             apply_ebay_filter_to_row(row, headers, category="tcg")
