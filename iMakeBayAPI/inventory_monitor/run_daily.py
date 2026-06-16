@@ -1,4 +1,9 @@
-"""run_daily - 1 日 1 回 cycle の wrapper + 統合 cycle report メール送信.
+"""run_daily - 公式監視くん cycle の wrapper + 統合 cycle report メール送信.
+
+巡回頻度 (2026-06-16 改訂): 旧 1 日 1 回 (08:00) → **8h 毎 (03:00/11:00/19:00)**。
+理由: variation 在庫が日 1 回監視だと売切→取下げまで最大 24h = fail-OPEN 窓が長すぎ
+(LOW スプシも同時に 8h 毎へ)。 task 名 iMakInventory_Monitor_Daily は歴史的経緯で
+"Daily" のままだが実体は 8h 毎。
 
 実行内容:
   1. main.py --supplier all --ebay-report auto  (= DL + K 列同期 + 監視)
@@ -222,11 +227,11 @@ def _format_report(start: datetime, end: datetime,
             lines.append("       → SKU詳細 T 列を ×3 以上で filter、 該当 listing を手動確認")
         lines.append("  対応手順 (= 漏れ 0 最優先):")
         lines.append("  1. error 内容を確認:")
-        lines.append("     - 'ConnectionError' / 'getaddrinfo' = transient → 次 cycle (翌 08:00) で auto retry、 待つで OK")
+        lines.append("     - 'ConnectionError' / 'getaddrinfo' = transient → 次 cycle (8h 後) で auto retry、 待つで OK")
         lines.append("     - 公式 API 404 / 構造変更 = supplier 側の変更 → scraper 修正依頼")
         lines.append("     - login 失敗 = 認証切れ → 手動 login 再実施")
         lines.append("  2. transient なら待つ (成功すれば T 列は自動 clear)。 持続 (×3以上) → 手動 chk")
-        lines.append("  対応期限: 24 時間以内 (翌日 08:00 cycle 前)")
+        lines.append("  対応期限: 8 時間以内 (次 cycle 前。 巡回は 03:00/11:00/19:00 の 8h 毎)")
     if revise_step_failed:
         lines.append("")
         lines.append("【★eBay 在庫調整 要対応】")
@@ -242,8 +247,8 @@ def _format_report(start: datetime, end: datetime,
         lines.append("  対応手順:")
         lines.append("  1. csv_output/heal_zero_<ts>.csv or revise_qty0_<ts>.csv で 失敗 itemID + variation specifics chk")
         lines.append("  2. eBay で手動 qty 確認 (= eventual consistency なら既に qty=0 化済 = false positive)")
-        lines.append("  3. qty>0 残存なら 手動 ReviseInventoryStatus or 翌 cycle で audit_heal phase が自動再 revise")
-        lines.append("  対応期限: 24 時間以内")
+        lines.append("  3. qty>0 残存なら 手動 ReviseInventoryStatus or 次 cycle (8h 後) で audit_heal phase が自動再 revise")
+        lines.append("  対応期限: 8 時間以内 (次 cycle 前)")
     lines.extend([
         "",
         "【在庫監視】(uniqlo / gu / montbell / amazon 公式サイト巡回)",

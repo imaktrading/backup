@@ -57,6 +57,115 @@ def _extract_variation_available(xml: str, specifics: dict):
     return None
 
 
+def _enumerate_variations(xml: str) -> list:
+    """GetItem 全文 XML から全 variation の (specifics_dict, available) を列挙.
+
+    available = Quantity - QuantitySold。 Multi-SKU listing の qty>0 variation を
+    特定するのに使う (= 単行 Revise が 21916736 で弾かれた listing の救済用)。
+    """
+    import re as _re  # noqa: PLC0415
+    out = []
+    for vb in _re.findall(r"<Variation>(.*?)</Variation>", xml, _re.DOTALL):
+        vspecs = dict(_re.findall(
+            r"<Name>(.*?)</Name>\s*<Value>(.*?)</Value>", vb))
+        q_m = _re.search(r"<Quantity>(\d+)</Quantity>", vb)
+        sold_m = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", vb)
+        total_qty = int(q_m.group(1)) if q_m else 0
+        sold = int(sold_m.group(1)) if sold_m else 0
+        out.append((vspecs, max(0, total_qty - sold)))
+    return out
+
+
+def _revise_multisku_to_zero(item_id: str, token: str) -> dict:
+    """単行 Revise が 21916736 (Multi-SKU) で弾かれた listing を救済して qty=0 化.
+
+    背景: 通常 cycle の revise_csv_generator は単行 (3列) CSV のみ生成 = variation
+    非対応。 Multi-SKU listing に投げると eBay が 21916736 "Cannot revise a Multi-SKU
+    item when ItemID alone is supplied" で拒否 → pending 永久滞留 = fail-OPEN。
+    これが無いと variation 商材 (UT/GU Tシャツ等) が売切れても取り下がらない。
+
+    処置: GetItem (ReturnAll) で variation 列挙 → available>0 の variation を全て
+    ReviseFixedPriceItem 経路 (revise_inventory_status_variation) で qty=0 化 →
+    再 GetItem で全 variation available=0 を verify。
+
+    1 listing = 1 仕入元 (= mercari URL 1 行) モデル前提 (= HIGH/LOW シートは item_id
+    重複なし): 仕入元が売切なら その listing の在庫サイズ (= qty>0 variation) は全て
+    履行不能 → 全て qty=0 にするのが正しい。 title→size の脆い解析は不要。
+
+    Returns: {"success","ack","error_code","error_message",
+              "verified","verify_qty","verify_msg","zeroed","attempted"}
+    """
+    body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<ItemID>{item_id}</ItemID>'
+        '<DetailLevel>ReturnAll</DetailLevel>'
+        '</GetItemRequest>'
+    )
+    try:
+        g = _call_trading("GetItem", body, access_token=token, raw_xml_cap=None)
+    except Exception as e:
+        return {"success": False, "ack": None, "error_code": "multisku_getitem_exc",
+                "error_message": f"{type(e).__name__}: {e}",
+                "verified": False, "verify_qty": None,
+                "verify_msg": "getitem_exception", "zeroed": 0, "attempted": 0}
+    if g.get("error_code") == "17":
+        # Item not found / ended = qty=0 同等扱い (safe)
+        return {"success": True, "ack": "Success", "error_code": "17",
+                "error_message": "Item not found (ended)",
+                "verified": True, "verify_qty": 0, "verify_msg": "err_17_safe",
+                "zeroed": 0, "attempted": 0}
+    if not g.get("success"):
+        return {"success": False, "ack": g.get("ack"),
+                "error_code": g.get("error_code"),
+                "error_message": g.get("error_message"),
+                "verified": False, "verify_qty": None,
+                "verify_msg": "getitem_failed", "zeroed": 0, "attempted": 0}
+
+    active = [(sp, av) for sp, av in _enumerate_variations(g.get("raw_xml", "")) if av > 0]
+    if not active:
+        # 既に全 variation available=0 (= 取下げ済 or 別経路で 0 化済)
+        return {"success": True, "ack": "Success", "error_code": None,
+                "error_message": None, "verified": True, "verify_qty": 0,
+                "verify_msg": "already_all_zero", "zeroed": 0, "attempted": 0}
+
+    last_err = None
+    zeroed = 0
+    for sp, _av in active:
+        r = revise_inventory_status_variation(item_id, sp, 0, access_token=token)
+        if r.get("success"):
+            zeroed += 1
+        else:
+            last_err = r
+        time.sleep(1.0)  # pacing (= eBay API 連投回避)
+
+    # 再 GetItem で verify (= 全 variation available=0 を物理確認)
+    remaining = None
+    try:
+        g2 = _call_trading("GetItem", body, access_token=token, raw_xml_cap=None)
+        if g2.get("error_code") == "17":
+            remaining = 0
+        elif g2.get("success"):
+            remaining = sum(av for _sp, av in _enumerate_variations(g2.get("raw_xml", "")))
+    except Exception:
+        remaining = None
+
+    if remaining is None:
+        verified, verify_qty, verify_msg = False, None, "reverify_failed"
+    else:
+        verified = (remaining == 0)
+        verify_qty = remaining
+        verify_msg = "all_var_zero" if verified else f"var_remaining_{remaining}"
+
+    return {"success": verified,
+            "ack": "Success" if verified else (last_err.get("ack") if last_err else "Warning"),
+            "error_code": None if verified else (last_err.get("error_code") if last_err else None),
+            "error_message": None if verified else (
+                (last_err.get("error_message") if last_err else None) or verify_msg),
+            "verified": verified, "verify_qty": verify_qty, "verify_msg": verify_msg,
+            "zeroed": zeroed, "attempted": len(active)}
+
+
 def _parse_csv_rows(csv_path: Path) -> list:
     """CSV 自動判定: 3 col (single) or 6 col (variation) 両対応.
 
@@ -268,6 +377,28 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
                   flush=True)
             time.sleep(2.0)
             res = _call_one(item)
+
+        # Multi-SKU listing 救済 fallback (= 21916736 撲滅、 構造的 fail-OPEN 対策):
+        # 単行 Revise が 21916736 で弾かれた = variation listing。 単行 generator は
+        # variation 非対応なので、 GetItem で variation 列挙 → qty>0 variation を全て
+        # qty=0 化 + 再 GetItem verify まで本 fallback で完結させる。
+        multisku_handled = False
+        ms_verified = (False, None, "not_attempted")
+        if (item.get("kind") != "variation"
+                and item.get("quantity") == 0
+                and not res["success"]
+                and res.get("error_code") == "21916736"):
+            print(f"  [{i}/{len(rows)}] Multi-SKU 検出 (21916736) → "
+                  f"GetItem で variation 全 qty=0 化 fallback", flush=True)
+            ms = _revise_multisku_to_zero(item["item_id"], token)
+            res = {"success": ms["success"], "ack": ms["ack"],
+                   "error_code": ms["error_code"],
+                   "error_message": ms["error_message"]}
+            multisku_handled = True
+            ms_verified = (ms["verified"], ms["verify_qty"], ms["verify_msg"])
+            print(f"  [{i}/{len(rows)}] Multi-SKU fallback: zeroed "
+                  f"{ms['zeroed']}/{ms['attempted']} verified={ms['verified']} "
+                  f"({ms['verify_msg']})", flush=True)
         # eBay Trading API の 「既に取下げ済 / listing 不在 / ended」 系は safe failure
         # (= 既に 目的達成、 監視くんとしては 取下げ完了扱い)。 互換性のため
         # sell_feed_uploader 系の code 17 も同列で扱う。
@@ -286,7 +417,12 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
         verify_qty = None
         verify_msg = "not_attempted"
         verify_attempts = 0
-        if revise_success and item.get("quantity") == 0:
+        if multisku_handled:
+            # Multi-SKU fallback が GetItem 再確認まで実施済 → その verify 結果を採用
+            # (単行 _call_one を再投すると 21916736 が再発するので retry loop は回さない)
+            verified, verify_qty, verify_msg = ms_verified
+            verify_attempts = 1
+        elif revise_success and item.get("quantity") == 0:
             # qty=0 化が目的の場合のみ verify (= revise の qty 変更が反映されたか chk)
             verified, verify_qty, verify_msg = _verify_qty_zero(item)
             verify_attempts = 1
