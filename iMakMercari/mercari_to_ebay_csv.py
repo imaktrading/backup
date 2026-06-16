@@ -237,10 +237,14 @@ def build_description_with_specs(template_path, specs, extra_note_html=""):
         template = "<html><body><p>Item description</p></body></html>"
 
     # Specs HTML 構築
+    # 手測り中古品の寸法は説明文側に "approx." を明記 (SNAD 保護)。
+    # Item Specifics 本体(CSV C:列)は eBay フィルタ用に数値のままにし、Description だけ approx. を付ける。
+    _APPROX_KEYS = {"Bag Width", "Bag Height", "Bag Depth", "Item Weight"}
     spec_lines = []
     for k, v in (specs or {}).items():
         if v and str(v).strip():
-            spec_lines.append(f'<li><b>{k}:</b> {v}</li>')
+            disp = f"approx. {v}" if k in _APPROX_KEYS else v
+            spec_lines.append(f'<li><b>{k}:</b> {disp}</li>')
     specs_html = (
         '<p><span style="text-decoration: underline;"><strong>Specifications</strong></span></p>'
         '<ul>' + "".join(spec_lines) + '</ul>'
