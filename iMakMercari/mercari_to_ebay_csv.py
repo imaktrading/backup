@@ -617,7 +617,10 @@ Return ONLY valid JSON (no markdown, no explanation):
 
 def get_images_base64(photo_url_str, max_images=MAX_IMAGES):
     """写真URLから画像をbase64に変換"""
-    urls = [u.strip() for u in photo_url_str.split('|') if u.strip()]
+    # 出品者プロフ画像(thumb/members)は商品写真でない。スプシ写真列に全行混入しており
+    # 取りに行くと404でログを汚す(実商品写真は別途取得OK)。先頭で除外する。
+    urls = [u.strip() for u in photo_url_str.split('|')
+            if u.strip() and 'thumb/members' not in u]
     images = []
     for url in urls[:max_images]:
         # メルカリShops (assets.mercari-shops-static.com) はURLをそのまま使う

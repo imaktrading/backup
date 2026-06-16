@@ -208,6 +208,18 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         append_log_func(f"\n⚠️ dedupe hook CSV 探索失敗: {type(e).__name__}: {e}\n")
         return
 
+    # Mercari 系(porter/montbell/tshirt/reel)は1点もの = catalog canonical KEY を持たない。
+    # KEY-based dedupe では全件「解決不能」となり destructive に全除外される
+    # (2026-06-16 Porter 10件全消し事故)。catalog-keyed (tcg/gshock/ichibankuji) のみ dedupe 実行。
+    # 「判定不能は破壊的動作に倒さない」(failclosed_must_skip) に従い Mercari 系は skip。
+    _base = os.path.basename(latest_csv).lower()
+    if any(_base.startswith(p) for p in ("porter_", "montbell_", "tshirt_", "reel_", "mercari")):
+        append_log_func(
+            f"\n(重複くん: {os.path.basename(latest_csv)} は1点もの(catalog KEY無)"
+            f" → KEY-based dedupe skip)\n"
+        )
+        return
+
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
 
