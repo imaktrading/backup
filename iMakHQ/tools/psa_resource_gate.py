@@ -340,6 +340,25 @@ def main():
         rows = [r for i, r in enumerate(rows) if i in conf_idx]
         print(f"  ✅ 確定 {len(rows)}/{len(targets)}件 → 選択変種で Mercari/SNKRDUNK 探索")
 
+    # --- 再仕入れ待ち台帳の End候補 を再チェックに合流 ---
+    # 過去に「再仕入れ不能(End候補)」になった行を毎回再探索(供給は動的=後で出れば RESTOCK)。
+    # 目視確定済(KEY付与済)なので確認ゲートは通さず、探索だけ合流する。
+    try:
+        from sheet_io import read_tab
+        import psa_restock_wait as prw
+        wled = prw.ledger_from_rows(read_tab("再仕入れ待ち"))
+        have = {mp._ebay_item_id(r.get("ebay_url", "") or "") for r in rows}
+        merged = 0
+        for t in prw.recheck_targets(wled):
+            if t["itemID"] and t["itemID"] not in have:
+                rows.append({"title": t["title"], "ebay_url": t["ebay_url"],
+                             "key": t["key"], "set_no": ""})
+                merged += 1
+        if merged:
+            print(f"  ♻ 再仕入れ待ち台帳から {merged}件を再チェックに合流(目視済=skip)")
+    except Exception as e:
+        print(f"  ⚠ 待ち台帳読込skip ({type(e).__name__}: {e})")
+
     # --- メルカリ (一括 Selenium, name_jp検索 + 画像検索フォールバック) ---
     print("▶ メルカリ最安取得中 (name_jp検索+画像検索フォールバック)...")
     mercari_res = {}
@@ -386,12 +405,21 @@ def main():
                  *aux_cols, "ebay_url"]]
     go = 0
     aux_writeback = {}   # {商品管理シート行番号: [補URL,...]} (itemID join できた行のみ)
+    wait_end = []        # 再仕入れ不能(End候補) → 待ち台帳へ
+    wait_resourceable = set()   # 再仕入れ可 itemID → 待ち台帳で「復活可」に
     for i, r in enumerate(rows):
         mr = mercari_res.get(i) or {}
         c = combine(mr.get("best"), snkr_res.get(i),
                     mercari_cands=mr.get("cands"), max_aux=MAX_AUX)
+        _iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
         if c["resourceable"]:
             go += 1
+            if _iid:
+                wait_resourceable.add(_iid)
+        elif _iid:
+            wait_end.append({"itemID": _iid, "key": r.get("key", ""),
+                             "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
+                             "title": (r.get("title") or "")[:90], "ebay_url": r.get("ebay_url", "")})
         # 補URL: メルカリ＆SNKRDUNK 混合の最安 MAX_AUX 件を 高い順 (URLのみ、価格は各¥列に既出)。
         # 主URL(H列=mercari_URL)とは重複させない(= H列とK列が同じになるのを防ぐ)。
         aux = [u["url"] for u in c["aux_urls"]
@@ -414,6 +442,22 @@ def main():
         ])
     print(f"\n再仕入れ可: {go}/{len(rows)}  不能(End候補): {len(rows)-go}")
     # 探索後ビューアは廃止(探索前の確認ゲートで変種確認済 + 静的HTMLは画像プロキシ不可のため)。
+
+    # 再仕入れ待ち台帳を更新: End候補は蓄積(消さず毎回再チェック)、供給戻りは「復活可」に。
+    try:
+        import datetime
+        import psa_restock_wait as prw
+        from sheet_io import read_tab, write_rows_to_tab
+        today = datetime.date.today().isoformat()
+        prev = prw.ledger_from_rows(read_tab("再仕入れ待ち"))
+        wled, wst = prw.reconcile(prev, wait_end, wait_resourceable, today)
+        write_rows_to_tab("再仕入れ待ち", prw.to_tab_rows(wled))
+        print(f"♻ 再仕入れ待ち台帳: 新規{wst['new']} 継続{wst['still_waiting']} "
+              f"復活{wst['revived']} / 待ち計{wst['total_wait']}")
+        if wst["revived"]:
+            print(f"   → 復活可{wst['revived']}件(供給戻り)= RESTOCK対象。タブ「再仕入れ待ち」上段参照")
+    except Exception as e:
+        print(f"⚠ 再仕入れ待ち台帳更新skip ({type(e).__name__}: {e})")
 
     try:
         from sheet_io import write_rows_to_tab, MAINT_URL
