@@ -191,15 +191,19 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
     try:
         con = sqlite3.connect(_db)
         rows = con.execute(
-            "SELECT product_id, name_jp, set_name, images, specs FROM products "
+            "SELECT product_id, name_jp, set_name, images, specs, language FROM products "
             "WHERE product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE",
             (card_no, card_no + "_%")).fetchall()
         con.close()
     except Exception:
         return []
     out = []
-    for pid, nj, sn, imgs, specs in rows:
+    for pid, nj, sn, imgs, specs, lang in rows:
         if "dummy" in (pid or "").lower():     # catalog内部のダミー行は候補から除外(実在変種でない)
+            continue
+        # 英語版は別カード(=100%違う)。Japanese PSA再仕入れなので en / both(英語表記併合) を除外。
+        # ja / None(=onepiece-cardgame等 JP公式サイト由来) のみ残す。
+        if (lang or "").strip().lower() in ("en", "both"):
             continue
         try:
             a = json.loads(imgs) if imgs else []

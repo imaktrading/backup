@@ -133,6 +133,22 @@ def test_catalog_variants_excludes_dummy_rows():
         assert all("dummy" not in c["product_id"].lower() for c in v), f"{cn} に dummy 候補が残存"
 
 
+def test_catalog_variants_excludes_english_versions():
+    # 英語版は別カード(=100%違う)。Japanese PSA再仕入れなので en/both を候補から除外(2026-06-17)
+    mp = _load("mercari_psa_resource")
+    if not os.path.exists(r"C:/dev/iMak_data/catalog/products.sqlite"):
+        return
+    import sqlite3
+    con = sqlite3.connect(r"C:/dev/iMak_data/catalog/products.sqlite")
+    got = {c["product_id"] for c in mp.catalog_variants_for_cardno("OP01-016")}
+    # OP01-016_D は language='en' → 除外されているはず
+    en = con.execute("SELECT product_id FROM products WHERE product_id LIKE 'OP01-016%' "
+                     "AND language='en'").fetchall()
+    con.close()
+    for (pid,) in en:
+        assert pid not in got, f"英語版 {pid} が候補に残っている"
+
+
 def test_catalog_variants_return_variant_attrs_for_textual_id():
     # 画像が死んでても variant_type 等で変種を特定できるよう識別属性を返す(2026-06-17 E01-12)
     mp = _load("mercari_psa_resource")
@@ -164,8 +180,12 @@ def test_catalog_variants_for_cardno_exact_first():
         return  # DB無環境では skip
     v = mp.catalog_variants_for_cardno("P-041")
     assert len(v) >= 1
-    assert v[0]["product_id"] == "P-041"             # 完全一致が先頭
+    # 全候補が P-041 系(完全一致 or サフィックス)。※素体が en/both なら言語フィルタで除外され得る
     assert all(c["product_id"] == "P-041" or c["product_id"].startswith("P-041_") for c in v)
+    # 完全一致が候補内に在れば先頭(言語フィルタで残っている場合)
+    pids = [c["product_id"] for c in v]
+    if "P-041" in pids:
+        assert pids[0] == "P-041"
     assert mp.catalog_variants_for_cardno("") == []
 
 
