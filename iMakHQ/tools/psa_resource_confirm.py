@@ -81,7 +81,7 @@ def _fix_url(u):
     return (u or "").replace("dbs-cardgame.com/fw/jp/images/", "dbs-cardgame.com/fw/images/")
 
 
-def _fetch_image(url, retries=3):
+def _fetch_image(url, retries=4):
     """画像を取得して (bytes, content-type) を返す。成功のみキャッシュ(失敗は次回再試行)。失敗 (None,None)。"""
     if not url:
         return None, None
