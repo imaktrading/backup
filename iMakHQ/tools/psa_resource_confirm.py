@@ -86,6 +86,9 @@ def _fetch_image(url, retries=3):
     if not url:
         return None, None
     url = _fix_url(url)
+    # URLにスペース等が含まれると urllib が弾く(catalog の "Other Product Card" 等は実在するが
+    # 生スペース)。既存の %xx を壊さず空白等だけエンコード。
+    url = urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%~")
     if url in _IMG_CACHE:
         return _IMG_CACHE[url]
     for a in range(retries):

@@ -84,6 +84,27 @@ def test_v2_handles_list_label_and_none():
     assert "a / b" in h
 
 
+def test_fetch_image_encodes_spaces_in_url(monkeypatch):
+    # catalog の "Other Product Card" 等 生スペースURLは urllib が弾く → エンコードして取得(2026-06-17)
+    prc = _load("psa_resource_confirm")
+    captured = {}
+
+    class _R:
+        def read(self):
+            return b"IMG"
+        headers = {"Content-Type": "image/png"}
+
+    def fake_open(req, timeout=0):
+        captured["url"] = req.full_url if hasattr(req, "full_url") else req.get_full_url()
+        return _R()
+
+    monkeypatch.setattr(prc.urllib.request, "urlopen", fake_open)
+    prc._IMG_CACHE.clear()
+    d, ct = prc._fetch_image("https://files.bandai-tcg-plus.com/card_image/OP-EN/Other Product Card/x.png")
+    assert d == b"IMG"
+    assert " " not in captured["url"] and "%20" in captured["url"]   # スペースが%20に
+
+
 def test_fix_url_corrects_dbs_dead_path():
     # catalog の dbs-cardgame.com 画像が /fw/jp/images/ で404 → /fw/images/ に補正(2026-06-17)
     prc = _load("psa_resource_confirm")
