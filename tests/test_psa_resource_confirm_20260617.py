@@ -1,14 +1,13 @@
-"""Regression: 2026-06-17 — PSA再仕入れ pre-search 目視確認ゲート。
+"""Regression: 2026-06-17 — PSA再仕入れ pre-search 目視確認ゲート v2(②候補ピッカー)。
 
-探索の前に「正しいカードか」を目視確定 → 確定分だけ探索する。各カードは
-① 現物(出品に使ったPSA画像: cert#→psa_cache.json) と ② 解決先(catalog 正カード) を
-並べ、同じカード・同じ変種かを目視する。番号一致では弾けない変種取り違え(CHR/VMAX・
-JP/Asia)や KEY未解決を、探索に時間を使う前に人手で確定する(verify→build と同じ思想)。
+探索前に確定: ① 現物(eBay出品画像=GetItem、cert→psa_cache フォールバック)と
+② 候補(card番号の catalog 変種をラジオ表示)を並べ、同じ変種を選んで ON。
+選んだKEYが探索対象＋商品管理シートAI列へ書戻し(目視の資産化)。不一致は原因タグ→PDCA。
 
-併せて: psa_resource_gate が確認ゲートを「探索の前」に配線し、OUT_DIR 未定義の NameError
-(post-search HTML が一度も出てなかった bug)が解消されていることを source 固定。
+build_confirm_html / psa_image_for_cert / catalog_variants_for_cardno を固定 + gate配線。
 """
 import importlib.util
+import os
 from pathlib import Path
 
 _TOOLS = Path(__file__).resolve().parent.parent / "iMakHQ" / "tools"
@@ -17,81 +16,96 @@ _TOOLS = Path(__file__).resolve().parent.parent / "iMakHQ" / "tools"
 def _load(name):
     p = _TOOLS / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name + "_t", p)
+    import sys
+    sys.path.insert(0, str(_TOOLS))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
 
 
-def test_build_confirm_html_shows_two_images_and_flags_missing_genbutsu():
+def _item(idx, cands, resolved=None, psa="https://i.ebayimg/x.jpg", no_image=False):
+    return {"idx": idx, "title": "PSA10 P-041 Luffy", "card_no": "P-041", "psa_image": psa,
+            "candidates": cands, "resolved_key": resolved, "ebay_url": "https://e/1", "no_image": no_image}
+
+
+def test_v2_candidate_radio_and_default_selection():
     prc = _load("psa_resource_confirm")
-    items = [
-        {"idx": 0, "title": "PSA10 OP11-106 Luffy", "card_no": "OP11-106",
-         "psa_image": "https://p/a.jpg", "ref_image": "https://c/b.jpg",
-         "ref_label": "OP11 SR", "ebay_url": "https://e/1", "no_image": False},
-        {"idx": 1, "title": "PSA10 Charizard", "card_no": "SV-P-291",
-         "psa_image": "", "ref_image": "https://c/x.jpg",
-         "ref_label": "", "ebay_url": "https://e/2", "no_image": True},
-    ]
-    h = prc.build_confirm_html(items)
-    assert "type='checkbox' checked" in h            # 既定ON
-    assert "確定して探索開始" in h                    # 確定ボタン
-    assert "現物(出品PSA)" in h and "解決先(catalog)" in h  # 2画像の見出し
-    assert "p/a.jpg" in h and "c/b.jpg" in h          # ①現物 + ②catalog 両方描画
-    assert "OP11-106" in h and "data-idx='1'" in h    # 各カード
-    assert "card noimg" in h and "現物PSA画像なし" in h  # 現物なしは赤枠フラグ
-    assert "/confirm" in h                            # POST先
-    # OFF時の原因タグ(PDCA振り分け用)= catalog/cert/listing/unknown
-    for v in ("value='catalog'", "value='cert'", "value='listing'", "value='unknown'"):
-        assert v in h, f"原因selectに {v} が無い"
-    assert "rejected:rej" in h                        # 不一致も reason付きでPOST
-    # 全部ON/OFF は setAll (inline onclick 内で 'all' は document.all に衝突し効かない: 2026-06-17実機)
-    assert "setAll(true)" in h and "setAll(false)" in h
-    assert "onclick='all(" not in h
+    cands = [{"key": "P-041", "image": "https://c/a.jpg", "label": "[P-041] ルフィ / Promo"},
+             {"key": "P-041_D", "image": "https://c/b.jpg", "label": "[P-041_D] ルフィ / Promo"}]
+    h = prc.build_confirm_html([_item(0, cands, resolved="P-041_D")])
+    assert "① 現物(出品PSA)" in h and "② 候補(正しい変種を選択)" in h
+    assert "name='pick0'" in h                       # 候補ラジオ
+    assert "value='P-041_D' checked" in h            # 解決済KEYが既定選択
+    assert "i.ebayimg/x.jpg" in h                    # ①現物=eBay画像
+    assert "確定して探索開始" in h
 
 
-def test_build_confirm_html_handles_list_ref_label_and_none():
-    # catalog の hint は list で来る → html.escape が落ちないこと(2026-06-17 実機crash回帰)
+def test_v2_no_candidates_defaults_off_and_placeholder():
     prc = _load("psa_resource_confirm")
-    items = [
-        {"idx": 0, "title": "PSA10 OP11-106", "card_no": "OP11-106", "psa_image": "https://p/a.jpg",
-         "ref_image": "https://c/b.jpg", "ref_label": ["OP11", "SR", "Luffy"],
-         "ebay_url": "https://e/1", "no_image": False},
-        {"idx": 1, "title": "PSA10 X", "card_no": None, "psa_image": "", "ref_image": "",
-         "ref_label": None, "ebay_url": "", "no_image": True},
-    ]
-    h = prc.build_confirm_html(items)   # 例外で落ちない
-    assert "OP11 / SR / Luffy" in h     # list は ' / ' 連結
-    assert "data-idx='1'" in h
+    h = prc.build_confirm_html([_item(0, [], no_image=True)])
+    assert "catalog候補なし" in h                     # 候補なしプレースホルダ
+    assert "card noimg off" in h or "off'" in h       # 既定OFF
+    # 既定OFF = checkbox に checked が付かない
+    assert "type='checkbox'  onchange" in h or "type='checkbox' onchange" in h
 
 
-def test_build_cert_map_reads_column_I():
-    sio = _load("sheet_io")
-    # B列(1)=itemID, I列(8)=cert#
-    rows = [["url", "itemID"] + ["x"] * 6 + ["cert"],
-            ["u1", "111"] + [""] * 6 + ["142490884"],
-            ["u2", "222"] + [""] * 6 + [""],        # cert空 → 除外
-            ["u3", ""] + [""] * 6 + ["999"]]         # itemID空 → 除外
-    cm = sio.build_cert_map(rows)
-    assert cm == {"111": "142490884"}
+def test_v2_single_candidate_autoselected():
+    prc = _load("psa_resource_confirm")
+    h = prc.build_confirm_html([_item(0, [{"key": "OP11-106", "image": "https://c/o.jpg",
+                                           "label": "[OP11-106] ゼウス"}], resolved=None)])
+    assert "value='OP11-106' checked" in h           # 候補1つなら自動選択
+
+
+def test_v2_go_returns_selected_key_and_reason():
+    prc = _load("psa_resource_confirm")
+    h = prc.build_confirm_html([_item(0, [{"key": "P-041", "image": "i", "label": "l"}])])
+    assert "input[type=radio]:checked" in h          # 選択KEYを拾う
+    assert "conf.push({idx:i, key:pick.value})" in h
+    assert "rejected:rej" in h
+    assert "setAll(true)" in h and "onclick='all(" not in h   # document.all 衝突回避
+
+
+def test_v2_handles_list_label_and_none():
+    prc = _load("psa_resource_confirm")
+    h = prc.build_confirm_html([_item(0, [{"key": "K", "image": "", "label": ["a", "b"]}])])  # 落ちない
+    assert "a / b" in h
 
 
 def test_psa_image_for_cert_uses_cardimageurl():
     prc = _load("psa_resource_confirm")
     prc._PSA_CACHE = {"142490884": {"CardImageUrl": "https://cdn/cert/x/small/y.jpg"}}
     assert prc.psa_image_for_cert("142490884").startswith("https://cdn/")
-    assert prc.psa_image_for_cert("000") == ""   # 未登録cert
-    assert prc.psa_image_for_cert("") == ""       # cert無し
+    assert prc.psa_image_for_cert("000") == "" and prc.psa_image_for_cert("") == ""
 
 
-def test_gate_confirms_before_search_with_genbutsu_and_defines_out_dir():
+def test_catalog_variants_for_cardno_exact_first():
+    mp = _load("mercari_psa_resource")
+    if not os.path.exists(r"C:/dev/iMak_data/catalog/products.sqlite"):
+        return  # DB無環境では skip
+    v = mp.catalog_variants_for_cardno("P-041")
+    assert len(v) >= 1
+    assert v[0]["product_id"] == "P-041"             # 完全一致が先頭
+    assert all(c["product_id"] == "P-041" or c["product_id"].startswith("P-041_") for c in v)
+    assert mp.catalog_variants_for_cardno("") == []
+
+
+def test_build_cert_map_reads_column_I():
+    sio = _load("sheet_io")
+    rows = [["url", "itemID"] + ["x"] * 6 + ["cert"],
+            ["u1", "111"] + [""] * 6 + ["142490884"],
+            ["u2", "222"] + [""] * 6 + [""],
+            ["u3", ""] + [""] * 6 + ["999"]]
+    assert sio.build_cert_map(rows) == {"111": "142490884"}
+
+
+def test_gate_v2_wiring():
     src = (_TOOLS / "psa_resource_gate.py").read_text(encoding="utf-8")
     i_confirm = src.index("confirm_targets")
     i_mercari = src.index("メルカリ最安取得中")
-    assert i_confirm < i_mercari, "確認ゲートが探索より後にある(無意味)"
-    assert "psa_image_for_cert" in src, "現物PSA画像(cert→psa_cache)が確認ゲートに渡っていない"
-    assert "cert_map" in src
-    assert "OUT_DIR = mp.DESK" in src             # post-search HTML の NameError 回帰防止
+    assert i_confirm < i_mercari, "確認ゲートが探索より後(無意味)"
+    assert "ebay_listing_image" in src               # ①現物=eBay画像
+    assert "catalog_variants_for_cardno" in src       # ②候補
+    assert "write_keys" in src                        # 選択KEYをスプシ書戻し
+    assert "_run_mismatch_pdca" in src and "PSA不一致台帳" in src   # 不一致PDCA
+    assert "OUT_DIR = mp.DESK" in src
     assert "--no-confirm" in src
-    # 不一致は PDCA に回す(検出して終わりにしない)
-    assert "_run_mismatch_pdca" in src
-    assert "PSA不一致台帳" in src

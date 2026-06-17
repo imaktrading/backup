@@ -270,36 +270,58 @@ def main():
         print("  (--no-confirm) 確認ゲートskip、全件探索")
     else:
         import psa_resource_confirm as prc
+        print(f"▶ ①現物画像(eBay GetItem)取得中 {len(rows)}件...", flush=True)
         targets = []
         for i, r in enumerate(rows):
-            meta = mp.card_meta_for_key(r.get("key")) if r.get("key") else None
-            cat_img = (meta or {}).get("image", "")
             iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
-            cert = cert_map.get(iid) if iid else None
-            psa_img = prc.psa_image_for_cert(cert)   # 現物=出品に使ったPSA画像 (cert→psa_cache)
+            # ① 現物: eBay出品画像(必ず有る)→ 無ければ cert→psa_cache フォールバック
+            psa_img = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
+            # ② 候補: その card番号の catalog 変種(ユーザーが正しい変種を選ぶ)
+            card_no = _resource_card_number(r.get("title", "") or "", r.get("key")) or ""
+            candidates = [{"key": c["product_id"], "image": c["image"],
+                           "label": f'[{c["product_id"]}] {c["name_jp"]} / {c["set"]}'}
+                          for c in mp.catalog_variants_for_cardno(card_no)]
             targets.append({
-                "idx": i,
-                "title": (r.get("title") or "")[:90],
-                "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
-                "psa_image": psa_img,          # ① 現物 (出品PSA)
-                "ref_image": cat_img,          # ② 解決先 (catalog 正カード)
-                "ref_label": (meta or {}).get("hint", "") or (r.get("set_no") or ""),
-                "ebay_url": r.get("ebay_url", ""),
-                "no_image": not psa_img,       # 現物が引けない行は赤枠で要注意
+                "idx": i, "title": (r.get("title") or "")[:90], "card_no": card_no,
+                "psa_image": psa_img, "candidates": candidates,
+                "resolved_key": r.get("key"),          # 既定選択(itemID join 済なら)
+                "ebay_url": r.get("ebay_url", ""), "no_image": not psa_img,
             })
-        print(f"▶ 目視確認ゲート: {len(targets)}件をブラウザ表示。①現物=②catalog の一致を確認...")
+            if (i + 1) % 20 == 0:
+                print(f"   {i+1}/{len(rows)}", flush=True)
+        print(f"▶ 目視確認ゲート: {len(targets)}件をブラウザ表示。① 現物 と ② 候補(変種選択)の一致を確認...")
         res = prc.confirm_targets(targets)
         if res is None:
             sys.exit("確認がタイムアウト/未確定。探索せず終了(再実行してください)。")
-        confirmed_idx, rejected = res["confirmed"], res["rejected"]
+        confirmed, rejected = res["confirmed"], res["rejected"]
         idx_row = {i: r for i, r in enumerate(rows)}    # filter前に idx→row 固定
+        # 選択された変種KEYを各行に反映 + 商品管理シート書戻し(空欄補完/訂正)を収集
+        writeback = {}
+        for c in confirmed:
+            i, key = c["idx"], (c.get("key") or "")
+            r = idx_row.get(i)
+            if r is None or not key:
+                continue
+            old = r.get("key")
+            r["key"] = key
+            iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+            if iid and key != old:                      # 新規解決 or 訂正のみ書戻し
+                writeback[iid] = key
         # PDCA: 不一致(OFF)を台帳に蓄積 → 原因別振り分け → 再発/解決トレンド
-        _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp)
-        if not confirmed_idx:
-            sys.exit("確定0件(全件不一致)。探索せず終了。台帳「PSA不一致台帳」で原因対処を。")
-        sel = set(confirmed_idx)
-        rows = [r for i, r in enumerate(rows) if i in sel]
-        print(f"  ✅ 確定 {len(rows)}/{len(targets)}件 → これだけ Mercari/SNKRDUNK 探索")
+        _run_mismatch_pdca(rejected, [c["idx"] for c in confirmed], idx_row, targets, cert_map, mp)
+        # 確定した変種KEYを商品管理シートAI列に書戻し(目視を資産化=次回から解決済)
+        if writeback:
+            try:
+                from sheet_io import write_keys
+                n = write_keys(itemid_row, writeback)
+                print(f"🔑 商品管理シートAI列にKEY書戻し: {n}行 (目視確定を資産化=次回 itemID join で解決済)")
+            except Exception as e:
+                print(f"⚠ KEY書戻し失敗: {type(e).__name__}: {e}")
+        conf_idx = {c["idx"] for c in confirmed if c.get("key")}
+        if not conf_idx:
+            sys.exit("確定0件。探索せず終了。台帳「PSA不一致台帳」で原因対処を。")
+        rows = [r for i, r in enumerate(rows) if i in conf_idx]
+        print(f"  ✅ 確定 {len(rows)}/{len(targets)}件 → 選択変種で Mercari/SNKRDUNK 探索")
 
     # --- メルカリ (一括 Selenium, name_jp検索 + 画像検索フォールバック) ---
     print("▶ メルカリ最安取得中 (name_jp検索+画像検索フォールバック)...")

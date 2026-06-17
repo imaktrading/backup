@@ -177,6 +177,37 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
     return out
 
 
+def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite", limit=12):
+    """card番号 → その番号の catalog 変種候補 [{product_id,name_jp,set,image}]。
+
+    KEY未解決の行で「正しい変種をユーザーが選ぶ」ための候補(確認ゲート②)。完全一致を先頭、
+    以降 product_id 昇順。'P-041' は P-041 / P-041_D / P-041_ST18 … の様に suffix違いを束ねる
+    (P-0419 等の別番号を拾わないよう exact OR '<card_no>_%' に限定)。失敗/空は []。
+    """
+    if not card_no:
+        return []
+    import json
+    import sqlite3
+    try:
+        con = sqlite3.connect(_db)
+        rows = con.execute(
+            "SELECT product_id, name_jp, set_name, images FROM products "
+            "WHERE product_id=? OR product_id LIKE ?", (card_no, card_no + "_%")).fetchall()
+        con.close()
+    except Exception:
+        return []
+    out = []
+    for pid, nj, sn, imgs in rows:
+        try:
+            a = json.loads(imgs) if imgs else []
+        except Exception:
+            a = []
+        a = sorted(a, key=lambda u: (0 if ("OP-JA" in u or "onepiece-cardgame" in u or "JP" in u) else 1))
+        out.append({"product_id": pid, "name_jp": nj or "", "set": sn or "", "image": a[0] if a else ""})
+    out.sort(key=lambda d: (d["product_id"] != card_no, d["product_id"]))
+    return out[:limit]
+
+
 def build_card_query(title, set_no, key=None):
     """1カード分の検索情報を作る → {kw, card_no, name_jp, key, image}。
 

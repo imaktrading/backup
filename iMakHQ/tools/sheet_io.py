@@ -116,6 +116,27 @@ def write_aux_urls(row_to_urls):
     return len(reqs)
 
 
+def write_keys(itemid_to_row, itemid_to_key):
+    """{itemID: canonical_KEY} を 商品管理シート AI列(canonical KEY) に書く (I/O)。
+
+    PSA再仕入れ確認ゲートで目視確定した変種KEYを資産化(空欄補完/訂正)。itemid_to_row で
+    行特定し AI列のみ touch。戻り=書込行数。row 不明な itemID は skip。
+    """
+    if not itemid_to_key:
+        return 0
+    ws = _product_ws()
+    idx0 = PRODUCT_COL_KEY
+    col = chr(65 + idx0) if idx0 < 26 else "A" + chr(65 + idx0 - 26)   # 34 → AI
+    reqs = []
+    for iid, key in itemid_to_key.items():
+        row = itemid_to_row.get(iid)
+        if row and key:
+            reqs.append({"range": f"{col}{row}", "values": [[key]]})
+    if reqs:
+        ws.batch_update(reqs, value_input_option="RAW")
+    return len(reqs)
+
+
 def read_tab(tab, sheet_id=MAINT_SHEET_ID):
     """スプシ tab を 2d list で返す (I/O)。タブが無ければ []。PDCA台帳の前回値読込に使う。"""
     import gspread
