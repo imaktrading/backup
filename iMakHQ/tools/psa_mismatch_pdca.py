@@ -145,6 +145,9 @@ def build_catalog_request_md(rows, today, requester="HQ"):
             f"{r.get('現物PSA_URL','')} | {r.get('catalog_URL','')} | {r.get('title','')} |")
     lines += ["", "## 期待アクション",
               "- (A)未収録: catalog に product_id 追加(or 別名/番号体系を登録)。対象外シリーズなら明記",
-              "- (B)変種違い: KEY誤解決なら商品管理シートAI列のKEY是正 / catalog画像を①現物と同変種に差替",
+              "- (B)変種違い: catalog画像を①現物と同変種に差替",
+              "- **★必須(両ケース共通): 各 itemID → 正しい KEY(product_id) を商品管理シートAI列に記入。**",
+              "  これが gate の唯一のリンク。catalog追加だけでは PSA再仕入れ再走で②に出てこない",
+              "  (この18件は題名から card番号が取れずKEYも無いため、itemID→KEY 記入が再走で出す条件)。",
               "- 対応後、本依頼を `_processed.md` 化"]
     return "\n".join(lines) + "\n"
