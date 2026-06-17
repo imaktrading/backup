@@ -285,9 +285,18 @@ def main():
                 meta = mp.card_meta_for_key(rk)
                 if meta and meta.get("image"):
                     variants = [{"product_id": rk, "name_jp": meta.get("name_jp", ""),
-                                 "set": meta.get("set", ""), "image": meta.get("image", "")}] + variants
-            candidates = [{"key": c["product_id"], "image": c["image"],
-                           "label": f'[{c["product_id"]}] {c["name_jp"]} / {c["set"]}'}
+                                 "set": meta.get("set", ""), "image": meta.get("image", ""),
+                                 "variant_type": meta.get("variant_type", ""), "rarity": meta.get("rarity", ""),
+                                 "get_info": meta.get("get_info", "")}] + variants
+
+            def _label(c):
+                # 画像が死んでても変種を特定できるよう alt_art/rarity/set/入手元 をラベルに出す
+                extra = " / ".join(x for x in [c.get("variant_type", ""), c.get("rarity", ""),
+                                               c.get("set") or c.get("get_info", "")] if x)
+                base = f'[{c["product_id"]}] {c.get("name_jp", "")}'
+                return base + (f' ｜ {extra}' if extra else "")
+
+            candidates = [{"key": c["product_id"], "image": c["image"], "label": _label(c)}
                           for c in variants]
             targets.append({
                 "idx": i, "title": (r.get("title") or "")[:90], "card_no": card_no,

@@ -191,14 +191,14 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
     try:
         con = sqlite3.connect(_db)
         rows = con.execute(
-            "SELECT product_id, name_jp, set_name, images FROM products "
+            "SELECT product_id, name_jp, set_name, images, specs FROM products "
             "WHERE product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE",
             (card_no, card_no + "_%")).fetchall()
         con.close()
     except Exception:
         return []
     out = []
-    for pid, nj, sn, imgs in rows:
+    for pid, nj, sn, imgs, specs in rows:
         if "dummy" in (pid or "").lower():     # catalog内部のダミー行は候補から除外(実在変種でない)
             continue
         try:
@@ -209,7 +209,15 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
         a = sorted(a, key=lambda u: (
             0 if ("bandai-tcg-plus" in u or "OP-JA" in u or "onepiece-cardgame" in u or "JP" in u) else
             2 if "dbs-cardgame.com" in u else 1))
-        out.append({"product_id": pid, "name_jp": nj or "", "set": sn or "", "image": a[0] if a else ""})
+        try:
+            sp = json.loads(specs) if specs else {}
+        except Exception:
+            sp = {}
+        out.append({"product_id": pid, "name_jp": nj or "", "set": sn or "", "image": a[0] if a else "",
+                    # 画像が死んでても変種を text で特定できるよう識別属性も返す(alt_art/rarity/入手元)
+                    "variant_type": (sp.get("variant_type") or "").strip(),
+                    "rarity": (sp.get("rarity") or "").strip(),
+                    "get_info": (sp.get("get_info") or "").strip()})
     out.sort(key=lambda d: (d["product_id"] != card_no, d["product_id"]))
     return out[:limit]
 

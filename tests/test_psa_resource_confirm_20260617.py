@@ -102,6 +102,24 @@ def test_catalog_variants_excludes_dummy_rows():
         assert all("dummy" not in c["product_id"].lower() for c in v), f"{cn} に dummy 候補が残存"
 
 
+def test_catalog_variants_return_variant_attrs_for_textual_id():
+    # 画像が死んでても variant_type 等で変種を特定できるよう識別属性を返す(2026-06-17 E01-12)
+    mp = _load("mercari_psa_resource")
+    if not os.path.exists(r"C:/dev/iMak_data/catalog/products.sqlite"):
+        return
+    v = mp.catalog_variants_for_cardno("E01-12")
+    p1 = next((c for c in v if c["product_id"].lower() == "e01-12_p1"), None)
+    assert p1 is not None and p1.get("variant_type") == "alt_art"   # ①「ALTERNATE ART」と照合可
+    # 全候補に識別属性キーが在る
+    assert all("variant_type" in c and "rarity" in c and "get_info" in c for c in v)
+
+
+def test_gate_label_includes_variant_attrs():
+    src = (_TOOLS / "psa_resource_gate.py").read_text(encoding="utf-8")
+    # ラベルに variant_type/rarity/set/get_info を出す(画像無しでも特定可能に)
+    assert 'c.get("variant_type"' in src and 'c.get("rarity"' in src
+
+
 def test_psa_image_for_cert_uses_cardimageurl():
     prc = _load("psa_resource_confirm")
     prc._PSA_CACHE = {"142490884": {"CardImageUrl": "https://cdn/cert/x/small/y.jpg"}}
