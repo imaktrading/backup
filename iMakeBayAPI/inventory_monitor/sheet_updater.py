@@ -71,13 +71,47 @@ SKU_ERR_FLG_HEADER = "巡回ERR"
 # ============================================================================
 # 認証 / スプシオープン
 # ============================================================================
+# transient (DNS/接続) 失敗の判定キーワード
+_TRANSIENT_NET_KEYWORDS = (
+    "getaddrinfo failed", "NameResolutionError", "Max retries exceeded",
+    "ConnectionError", "Connection aborted", "RemoteDisconnected",
+    "Timeout", "timed out", "Temporary failure in name resolution",
+)
+# retry の backoff 秒 (= 0,5,15,30 → 計 ~50s。 数秒の DNS blip を救済、 長時間障害は諦めて raise)
+_OPEN_SHEET_BACKOFFS = (0, 5, 15, 30)
+
+
+def _is_transient_net_error(exc: Exception) -> bool:
+    msg = f"{type(exc).__name__}: {exc}"
+    return any(k in msg for k in _TRANSIENT_NET_KEYWORDS)
+
+
 def open_sheet():
-    """サービスアカウント認証 → spreadsheet オブジェクト返却."""
+    """サービスアカウント認証 → spreadsheet オブジェクト返却.
+
+    ★ 2026-06-18: transient な DNS/接続失敗 (getaddrinfo failed 等) で cycle 全体を
+    ❌ にしないよう short backoff retry を追加。 03:00 cycle が sheets.googleapis.com の
+    getaddrinfo failed 1 回で monitor step NG → 全 listing 在庫不明になった対策。
+    transient でない例外 (認証エラー等) は即 raise。
+    """
+    import time as _time  # noqa: PLC0415
     if not os.path.exists(CREDS_PATH):
         raise FileNotFoundError(f"サービスアカウント JSON が見つかりません: {CREDS_PATH}")
     creds = Credentials.from_service_account_file(CREDS_PATH, scopes=SCOPES)
-    gc = gspread.authorize(creds)
-    return gc.open_by_key(SPREADSHEET_ID)
+    last_exc = None
+    for attempt, backoff in enumerate(_OPEN_SHEET_BACKOFFS, start=1):
+        if backoff:
+            _time.sleep(backoff)
+        try:
+            gc = gspread.authorize(creds)
+            return gc.open_by_key(SPREADSHEET_ID)
+        except Exception as e:  # noqa: BLE001
+            last_exc = e
+            if not _is_transient_net_error(e) or attempt >= len(_OPEN_SHEET_BACKOFFS):
+                raise
+            print(f"[open_sheet] transient 失敗 (attempt {attempt}/{len(_OPEN_SHEET_BACKOFFS)}): "
+                  f"{type(e).__name__} → backoff retry", flush=True)
+    raise last_exc  # 到達しない (ループ内で return/raise) が保険
 
 
 def get_main_worksheet(sh):
