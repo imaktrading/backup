@@ -84,6 +84,24 @@ def test_v2_handles_list_label_and_none():
     assert "a / b" in h
 
 
+def test_images_have_onerror_fallback():
+    # 壊れ画像(404/DNS/ホットリンク何でも)は onerror で「画像なし」に差替え(2026-06-17)
+    prc = _load("psa_resource_confirm")
+    h = prc.build_confirm_html([_item(0, [{"key": "K", "image": "https://c/a.jpg", "label": "l"}])])
+    assert "onerror='imgFail(this,0)'" in h          # 候補
+    assert "onerror='imgFail(this,1)'" in h          # 現物
+    assert "function imgFail" in h
+
+
+def test_catalog_variants_excludes_dummy_rows():
+    mp = _load("mercari_psa_resource")
+    if not os.path.exists(r"C:/dev/iMak_data/catalog/products.sqlite"):
+        return
+    for cn in ("FS04-01", "SB02-053", "P-053"):
+        v = mp.catalog_variants_for_cardno(cn)
+        assert all("dummy" not in c["product_id"].lower() for c in v), f"{cn} に dummy 候補が残存"
+
+
 def test_psa_image_for_cert_uses_cardimageurl():
     prc = _load("psa_resource_confirm")
     prc._PSA_CACHE = {"142490884": {"CardImageUrl": "https://cdn/cert/x/small/y.jpg"}}

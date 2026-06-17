@@ -199,11 +199,16 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
         return []
     out = []
     for pid, nj, sn, imgs in rows:
+        if "dummy" in (pid or "").lower():     # catalog内部のダミー行は候補から除外(実在変種でない)
+            continue
         try:
             a = json.loads(imgs) if imgs else []
         except Exception:
             a = []
-        a = sorted(a, key=lambda u: (0 if ("OP-JA" in u or "onepiece-cardgame" in u or "JP" in u) else 1))
+        # bandai-tcg-plus(実画像)を優先し dbs-cardgame.com(死にURL多数=404)を後ろに回す
+        a = sorted(a, key=lambda u: (
+            0 if ("bandai-tcg-plus" in u or "OP-JA" in u or "onepiece-cardgame" in u or "JP" in u) else
+            2 if "dbs-cardgame.com" in u else 1))
         out.append({"product_id": pid, "name_jp": nj or "", "set": sn or "", "image": a[0] if a else ""})
     out.sort(key=lambda d: (d["product_id"] != card_no, d["product_id"]))
     return out[:limit]

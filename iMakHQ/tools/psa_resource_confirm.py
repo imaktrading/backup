@@ -131,6 +131,10 @@ a{font-size:12px;color:#06c}
 """
 
 _JS = """
+function imgFail(el,big){
+  var d=document.createElement('div'); d.className=big?'ph':'cph'; d.textContent='画像なし';
+  if(el.parentNode) el.parentNode.replaceChild(d,el);
+}
 function tog(i){var c=document.getElementById('c'+i);
   c.classList.toggle('off', !c.querySelector('input[type=checkbox]').checked);}
 function setAll(v){document.querySelectorAll('.card input[type=checkbox]').forEach(function(b){
@@ -174,7 +178,7 @@ def build_confirm_html(items):
         cardno = _html.escape(_s(it.get("card_no")))
 
         psa_img = it.get("psa_image") or ""
-        psa_tag = (f"<img src='{_proxied(psa_img)}' loading='lazy'>" if psa_img
+        psa_tag = (f"<img src='{_proxied(psa_img)}' loading='lazy' onerror='imgFail(this,1)'>" if psa_img
                    else "<div class='ph'>現物PSA画像なし<br>eBayで確認</div>")
         psa_col = f"<div class='col psa'><div class='cap'>① 現物(出品PSA)</div>{psa_tag}</div>"
 
@@ -187,7 +191,7 @@ def build_confirm_html(items):
                 ck = c.get("key", "")
                 chk = " checked" if ck == default else ""
                 cimg = c.get("image") or ""
-                ctag = (f"<img src='{_proxied(cimg)}' loading='lazy'>" if cimg
+                ctag = (f"<img src='{_proxied(cimg)}' loading='lazy' onerror='imgFail(this,0)'>" if cimg
                         else "<div class='cph'>画像なし</div>")
                 opts.append(
                     f"<label class='cand'><input type='radio' name='pick{idx}' value='{_html.escape(_s(ck))}'{chk}>"
