@@ -11,6 +11,7 @@
 """
 import os
 import re
+import time
 
 import requests
 
@@ -56,7 +57,18 @@ def fetch_listing_images(item_id, _cache={}):
             f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
             f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
         )
-        r = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30)
+        # DNS瞬断/接続エラーは数回リトライ(無いと画像が虫食いで欠落する。2026-06-17)。
+        # 成功 or リトライ尽きるまで _cache に [] を入れない(失敗を確定キャッシュしない)。
+        r = None
+        for attempt in range(4):
+            try:
+                r = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30)
+                break
+            except requests.exceptions.ConnectionError:
+                if attempt < 3:
+                    time.sleep(3)
+                    continue
+                raise
         # PictureDetails 内の PictureURL を順序保持で抽出
         pics = re.findall(r"<PictureURL>(.*?)</PictureURL>", r.text)
         # 重複除去 (順序保持)
@@ -69,7 +81,6 @@ def fetch_listing_images(item_id, _cache={}):
         _cache[item_id] = out
         return out
     except Exception:
-        _cache[item_id] = []
         return []
 
 
