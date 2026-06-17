@@ -84,6 +84,16 @@ def test_v2_handles_list_label_and_none():
     assert "a / b" in h
 
 
+def test_fix_url_corrects_dbs_dead_path():
+    # catalog の dbs-cardgame.com 画像が /fw/jp/images/ で404 → /fw/images/ に補正(2026-06-17)
+    prc = _load("psa_resource_confirm")
+    bad = "https://www.dbs-cardgame.com/fw/jp/images/cards/card/jp/E01-12.webp"
+    good = "https://www.dbs-cardgame.com/fw/images/cards/card/jp/E01-12.webp"
+    assert prc._fix_url(bad) == good
+    assert prc._fix_url("https://files.bandai-tcg-plus.com/x.png").endswith("x.png")  # 他は不変
+    assert prc._fix_url("") == ""
+
+
 def test_images_have_onerror_fallback():
     # 壊れ画像(404/DNS/ホットリンク何でも)は onerror で「画像なし」に差替え(2026-06-17)
     prc = _load("psa_resource_confirm")

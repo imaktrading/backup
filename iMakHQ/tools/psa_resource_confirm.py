@@ -75,10 +75,17 @@ def _proxied(url):
 _IMG_CACHE = {}
 
 
+def _fix_url(u):
+    """catalog の既知の壊れURLパターンを補正。
+    dbs-cardgame.com の画像が /fw/jp/images/ で 404(正: /fw/images/。余分な jp/)= DBS多数。"""
+    return (u or "").replace("dbs-cardgame.com/fw/jp/images/", "dbs-cardgame.com/fw/images/")
+
+
 def _fetch_image(url, retries=3):
     """画像を取得して (bytes, content-type) を返す。成功のみキャッシュ(失敗は次回再試行)。失敗 (None,None)。"""
     if not url:
         return None, None
+    url = _fix_url(url)
     if url in _IMG_CACHE:
         return _IMG_CACHE[url]
     for a in range(retries):
