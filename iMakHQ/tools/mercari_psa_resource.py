@@ -196,18 +196,42 @@ def build_card_query(title, set_no, key=None):
 
 
 def build_input_from_funnel():
-    """手動CSVが無いとき、最新 funnel_*.csv の RESTOCK∩PSA10 から入力CSVを生成。
+    """手動CSVが無いとき、最新 funnel_*.csv から PSA再仕入れ候補CSVを生成。
 
-    funnel 列(title/price/ebay_url) を 03_PSA再仕入れ候補_<日付>.csv (set_no空/ebay_price/title/ebay_url)
-    に落とす。set_no は title から SETNO_RE で後段が自動抽出する。生成パスを返す(無ければ None)。
+    === 既存メンテ PSA再仕入れ の絞り込み(明記) ===
+    分母 = funnel の各 listing に対し、次を **すべて満たす** 行:
+      ①flags 列に "RESTOCK"   … 在庫切れ かつ 需要シグナルあり(funnel 分類)
+      ②title が PSA10         … PSA10 鑑定TCG(One Piece/Pokemon 等。US "CCG Individual Cards" +
+                                 DE "TCG Einzelkarten" 相当)
+      ③実需フィルタ(本関数で追加, 2026-06-17)= 次の **いずれか1つ以上**:
+           sold_qty≥1  or  sales90≥1  or  watch≥1  or  impr≥1
+         ・狙い: RESTOCK は「impr_total>0(広告込み累計表示)だけでも入る」緩い基準のため
+           297件まで膨らみ処理が遅い。実需(実売/watch/自然表示=organic impr)が立つものだけに絞る。
+         ・除外されるのは「impr_total(広告)でしか表示されておらず、実売・watch・organic impr が全ゼロ」
+           = 見られても欲しがられていない薄い層(再仕入れ優先度ほぼゼロ)。
+         ・重要度: sold_qty/sales90(実売) >> watch > impr。impr_total は広告込みなので条件に使わない。
+    funnel 列(title/price/ebay_url) を 03_PSA再仕入れ候補_<日付>.csv に落とす。生成パス返却(無→None)。
     """
     ffiles = glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv"))
     if not ffiles:
         return None
     fsrc = max(ffiles, key=os.path.getmtime)
     frows = list(csv.DictReader(open(fsrc, encoding="utf-8")))
-    cands = [r for r in frows
-             if "RESTOCK" in (r.get("flags") or "").split("|") and is_psa10(r.get("title", ""))]
+
+    def _has_demand(r):
+        def _f(k):
+            try:
+                return float(r.get(k) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+        # 実需シグナル: 実売 or watch or organic impr が1以上(impr_total=広告込みは使わない)
+        return _f("sold_qty") >= 1 or _f("sales90") >= 1 or _f("watch") >= 1 or _f("impr") >= 1
+
+    restock_psa = [r for r in frows
+                   if "RESTOCK" in (r.get("flags") or "").split("|") and is_psa10(r.get("title", ""))]
+    cands = [r for r in restock_psa if _has_demand(r)]
+    print(f"  絞り込み: RESTOCK∩PSA10 {len(restock_psa)}件 → 実需フィルタ(実売/watch/organic impr≥1) "
+          f"{len(cands)}件 (impr_total のみの薄い層 {len(restock_psa)-len(cands)}件を除外)", flush=True)
     if not cands:
         return None
     out = os.path.join(DESK, f"03_PSA再仕入れ候補_{datetime.date.today():%Y%m%d}.csv")
