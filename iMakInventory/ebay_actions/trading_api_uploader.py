@@ -422,6 +422,15 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             # (単行 _call_one を再投すると 21916736 が再発するので retry loop は回さない)
             verified, verify_qty, verify_msg = ms_verified
             verify_attempts = 1
+        elif is_safe_failure and item.get("quantity") == 0:
+            # safe_failure (= ended/not-found/already-gone) は取下げ目的達成済。
+            # ★ 2026-06-17 修正: 終了 listing (Completed) でも eBay は元の <Quantity> を
+            # 残すため、 GetItem verify が available=Quantity-Sold>0 と誤読 → 永久 verify NG
+            # → 偽「未取下げ/滞留」spam になっていた (357181571869: 2026-05-18 終了済 Qty1 が
+            # 12.5h 滞留)。 revise が 21916750 "FixedPrice item ended" 等を返した時点で
+            # 購入不可 = fail-OPEN ではないので、 verify を通過扱いにする。
+            verified, verify_qty, verify_msg = True, 0, f"safe_failure_{res['error_code']}"
+            verify_attempts = 1
         elif revise_success and item.get("quantity") == 0:
             # qty=0 化が目的の場合のみ verify (= revise の qty 変更が反映されたか chk)
             verified, verify_qty, verify_msg = _verify_qty_zero(item)
