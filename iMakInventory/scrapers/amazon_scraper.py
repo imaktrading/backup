@@ -64,18 +64,40 @@ UNQUALIFIED_BUYBOX_PATTERN = 'id="unqualifiedBuyBox_feature_div"'
 # HQ 2026-06-02 仕様 § Rule 0: 販売元 = Amazon.co.jp のみ in_stock=True。
 # 第三者販売 (Amazon.co.jp 以外) = 中古化 / 価格不安定 / 出品消滅 の発生源 → 仕入不可 (= 取下げ対象)。
 # 出荷元 が Amazon (= FBA) でも 販売元 が 第三者 なら 取下げ対象。
+#
+# ★ 2026-06-17 改修: Amazon が buy-box を JS prose 化し、 旧ラベル「販売元 Amazon.co.jp」が
+# DOM から消滅 → _detect_seller が全件 unknown → 全件 fail-closed (None) で LOW amazon 15-19件
+# 持続エラー化。 実検体5件 (row506/535=直販, row115/118/524=3rd) の rendered DOM で確認した
+# 新 prose マーカーに更新。 旧ラベル regex は fallback として残す (旧 DOM が戻っても動く)。
 _SELLER_AMAZON_DIRECT_RE = re.compile(r'販売元\s*Amazon\.co\.jp')
 _SELLER_THIRD_PARTY_RE = re.compile(r'販売元\s+(\S{2,40})')
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
 _WS_RE = re.compile(r'\s+')
 
+# 新 DOM buy-box prose マーカー (2026-06-17 実検体確認):
+# - 第三者(FBM): "この商品は、出品者によって配送されます" (= 出品者が販売・発送 = 販売元≠Amazon)
+# - Amazon直販: "Amazon.co.jp が発送" (= 出荷元Amazon。 boilerplate「Amazon.co.jp が販売して
+#   いる商品と同様に」とは別文字列なので衝突しない)。
+# ※ 既知の限界: FBA第三者 (Amazon発送 × 販売元第三者) の判別検体が未採取。 現ロジックは
+#   "出品者によって配送" 不在 + "Amazon.co.jp が発送" 在 を 'amazon' とするため、 FBA第三者を
+#   直販と誤判定し得る (= fail-OPEN 方向)。 FBA第三者検体が出たら 販売元名の精査を追加すること。
+_SELLER_THIRD_PARTY_PROSE = "この商品は、出品者によって配送されます"
+_SELLER_AMAZON_PROSE = "Amazon.co.jp が発送"
+
 
 def _detect_seller(html: str) -> tuple[str, str]:
-    """販売元 identity 判定.
+    """販売元 identity 判定 (新 DOM prose マーカー優先、 旧ラベル regex fallback).
 
     Returns:
         (seller_kind, raw_text) — seller_kind は 'amazon' / 'third_party' / 'unknown'
     """
+    # 第三者 (出品者が販売・発送) を最優先で確定 (= 取下げ対象)。 reliable negative。
+    if _SELLER_THIRD_PARTY_PROSE in html:
+        return 'third_party', 'seller_fulfilled'
+    # Amazon直販 (新 DOM prose)
+    if _SELLER_AMAZON_PROSE in html:
+        return 'amazon', 'Amazon.co.jp'
+    # 旧 DOM ラベル fallback (amazon を third_party regex より先に判定する順序を維持)
     notag = _WS_RE.sub(' ', _HTML_TAG_RE.sub(' ', html))
     if _SELLER_AMAZON_DIRECT_RE.search(notag):
         return 'amazon', 'Amazon.co.jp'
@@ -135,9 +157,16 @@ def _detect_stock(html: str) -> tuple[Optional[bool], str]:
                 or "お取り扱いできません" in avail_text or "現在お取り扱い" in avail_text
                 or "入荷時期は未定" in avail_text):
             return False, f"availability_sold: {avail_text[:30]}"
-        # 「残り N 点」 は Marketplace 出品 (= 別 seller) を含むため在庫あり signal
-        # にしない (= ユーザー目視「カートに入れるなし」 listing で偽陽性源、 6/2 検証)
-        if "在庫あり" in avail_text or "in stock" in avail_low:
+        # 在庫あり signal (#availability div に scope 済 = boilerplate 誤検出を回避)。
+        # ★ 2026-06-17: 新 DOM の #availability は「残り N 点」「通常 X 日以内に発送します」も
+        # 在庫あり表示なので signal に追加 (実検体 row506/535/524 で確認)。 第三者は上の seller
+        # gate で除外済 + 下の Rule 0 厳格 (seller=amazon のみ True) なので Marketplace 偽陽性は出ない。
+        instock_signal = (
+            "在庫あり" in avail_text or "in stock" in avail_low
+            or _re.search(r"残り\d+点", avail_text)
+            or _re.search(r"通常.{0,6}日以内に発送", avail_text)
+        )
+        if instock_signal:
             # HQ § Rule 0 厳格: 在庫あり signal は 販売元 = Amazon.co.jp のみ信頼
             if seller_kind == 'amazon':
                 return True, f"availability_in_stock: {avail_text[:30]}"
