@@ -59,6 +59,14 @@
   - **価格** = 新規出品の `pricing_engine`(現行)で算出。最安¥(仕入想定)等を入力に新規と同じ式で価格決定。
 - 実体としては iMakTCG `psa_to_csv` の per-card 生成(title/specifics/desc/price)を cert/KEY 起点で呼び、
   CSVでなく revise payload に流す形が理想(新規生成のSSOTを一本流用)。
+- **★PSA再スクレイプ不要(2026-06-18 確認)**: KEY確定済なので `build_listing_fields(cert, game,
+  forced_card_id=KEY)` が **catalog から直接** Title/Item Specifics/Description を生成(cert→card解決を
+  スキップ、cert は psa_cache の年号にしか使わない=ローカル、**Selenium/PSAページ参照ゼロ**)。
+  価格=pricing_engine。画像=**Reviseは既存eBay画像維持(PicURL省略)** で生成不要。
+  → (B)は catalog駆動だけの軽量生成。入力 = KEY(確定) + cert#(商品管理シートI列) + itemID + 価格。
+- **(B)手動フロー(決定)**: RESTOCK確定 → 新コアで **Revise CSV生成(Action=Revise|ItemID|*Quantity=1|
+  新Title/itemsp/desc/price、PicURL省略)** → **check_csv 市場ゲート通過(入稿前必須)** → FileExchange 手動
+  アップロード → スプシ書戻し(RESTOCK実行済/待ち台帳解決/商品管理シート状態)。eBay API revise(POC-B)は後日。
 - **= 新コア(2026-06-18 確認)**: 「今の新規出品ロジック」= **新コア**で、PSA TCG新規は既に本番稼働
   (control_panel が PSA TCGボタンに `TCG_USE_NEW_GEN=1` を設定。`tcg_listing_fields` +
   `tcg_new_gen_override.apply_new_gen_override` の catalog決定論生成)。RESTOCK はこれを**そのまま流用**
