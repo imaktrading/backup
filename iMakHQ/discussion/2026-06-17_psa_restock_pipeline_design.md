@@ -46,14 +46,20 @@
 - スコープ: 探索した全件でなく **再仕入れ可だけ**(コストを確証に集中)。
 
 ### Phase 2: eBay revise (iMakRevise 領分 / 要POC)
-- API: Trading **ReviseFixedPriceItem**(feasibility済: qty+specifics+desc+title を1回で更新可。
+- API: Trading **ReviseFixedPriceItem**(feasibility済: qty+specifics+desc+title+price を1回で更新可。
   対象は Active/OOS(qty=0)/OutOfStockControl のライブ出品 = revise可。End/Relist不要)。認証は ebay keys.txt。
-- 更新内容(確定KEY起点):
+- **★大原則(2026-06-18): Title / Item Specifics / Description / 価格 は、すべて『今の新規出品で使っている
+  生成ロジックをそのまま流用』する。RESTOCK用の別ロジック・旧ロジックは作らない(ロジック一本化)。**
+  = 新規出品と RESTOCK で出力が完全一致し、生成側の改善が両方に効く。
+- 更新内容(確定KEY/cert起点、新規出品と同一生成):
   - **qty=1**(復活)
-  - **Item Specifics**: catalog値 / eBay正規値 / 空欄 の3択(既存方針)。生成は iMakTCG `tcg_listing_fields` 流用。
-  - **Description**: TCGテンプレ(PSA10.txt等)流用。
-  - **Title**: keyword PDF(Toys_Hobbies CCG)順守で再生成。iMakTCG `title_generation` 流用。
-- 要検討: revise で title変更が Cassini に与える影響 / specifics上書きで既存の良い値を消さないか(マージ方針)。
+  - **Title** = 新規出品の title 生成(iMakTCG `title_generation`、keyword PDF順守)を流用・再生成。
+  - **Item Specifics** = 新規出品の `tcg_listing_fields` 生成を流用(catalog値/eBay正規値/空欄の3択)。全面再生成。
+  - **Description** = 新規出品のテンプレ生成を流用(最新版)。
+  - **価格** = 新規出品の `pricing_engine`(現行)で算出。最安¥(仕入想定)等を入力に新規と同じ式で価格決定。
+- 実体としては iMakTCG `psa_to_csv` の per-card 生成(title/specifics/desc/price)を cert/KEY 起点で呼び、
+  CSVでなく revise payload に流す形が理想(新規生成のSSOTを一本流用)。
+- 要検討: revise で title変更が Cassini に与える影響(=(a)で受容済) / 生成入力(median/cost)の供給。
 
 ### Phase 3: スプシメンテ (HQ)
 - PSA再仕入れタブ: 「RESTOCK実行済(日付)」列を追加。
