@@ -483,7 +483,10 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "🃏 PSA再仕入れ照合",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "mercari_psa_resource.py"],
+        # 2チャネル(Mercari＆SNKRDUNK)ゲート。探索前に①現物(出品PSA)=②catalog の目視確認ゲートが
+        # ブラウザで開く→一致分だけ探索。不一致はPDCA台帳(原因別振り分け)。旧 mercari_psa_resource.py
+        # (Mercari単体・確認/PDCA無し)から張替 (2026-06-17)。
+        "cmd": ["python", "psa_resource_gate.py"],
         "params": [],
         # 結果は「既存メンテ」スプシ PSA再仕入れタブに集約 (CSV廃止。再仕入れ系をシート統一)
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
