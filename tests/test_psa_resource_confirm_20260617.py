@@ -89,6 +89,29 @@ def test_catalog_variants_for_cardno_exact_first():
     assert mp.catalog_variants_for_cardno("") == []
 
 
+def test_catalog_variants_nocase_matches_lowercase_product_id():
+    mp = _load("mercari_psa_resource")
+    if not os.path.exists(r"C:/dev/iMak_data/catalog/products.sqlite"):
+        return
+    # KEYは大文字化されるが catalog product_id は 'S8a-004' 等 小文字混じり → NOCASE で拾う
+    v = mp.catalog_variants_for_cardno("S8A-004")
+    assert any(c["product_id"].lower() == "s8a-004" for c in v), "NOCASEでヒットしていない"
+
+
+def test_card_number_regex_covers_dbs_gundam():
+    g = _load("psa_resource_gate")
+    assert g._resource_card_number("PSA 10 Frieza SB02-053 Alt Art", None) == "SB02-053"
+    assert g._resource_card_number("Gundam CCG #GD02-069 Zeta", None) == "GD02-069"
+    assert g._resource_card_number("One Piece OP11-106 Zeus", None) == "OP11-106"
+
+
+def test_gate_includes_resolved_key_as_candidate():
+    src = (_TOOLS / "psa_resource_gate.py").read_text(encoding="utf-8")
+    # 解決済KEYは card番号ヒット漏れでも②候補に必ず入れる(KEY自身のcatalog画像)
+    assert "解決済KEY自身は必ず候補に含める" in src
+    assert "card_meta_for_key(rk)" in src
+
+
 def test_build_cert_map_reads_column_I():
     sio = _load("sheet_io")
     rows = [["url", "itemID"] + ["x"] * 6 + ["cert"],

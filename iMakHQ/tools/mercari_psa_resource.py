@@ -192,7 +192,8 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
         con = sqlite3.connect(_db)
         rows = con.execute(
             "SELECT product_id, name_jp, set_name, images FROM products "
-            "WHERE product_id=? OR product_id LIKE ?", (card_no, card_no + "_%")).fetchall()
+            "WHERE product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE",
+            (card_no, card_no + "_%")).fetchall()
         con.close()
     except Exception:
         return []

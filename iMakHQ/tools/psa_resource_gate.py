@@ -23,7 +23,7 @@ import sys
 
 # SNKRDUNK 突合用 card 番号 (ワンピース OP/ST/EB/P 系。SNKRDUNK name の [CARD] と突合)。
 # Pokemon は title が日本語で番号を持たない → canonical KEY から導出 (_key_card_number)。
-CARD_NUM_RE = re.compile(r"\b((?:OP|ST|EB)\d{2}-\d{3}|P-\d{2,3})\b", re.IGNORECASE)
+CARD_NUM_RE = re.compile(r"\b((?:OP|ST|EB|SB|GD)\d{2}-\d{3}|P-\d{2,3})\b", re.IGNORECASE)
 
 
 def _card_number(title):
@@ -278,9 +278,17 @@ def main():
             psa_img = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
             # ② 候補: その card番号の catalog 変種(ユーザーが正しい変種を選ぶ)
             card_no = _resource_card_number(r.get("title", "") or "", r.get("key")) or ""
+            variants = mp.catalog_variants_for_cardno(card_no)
+            # 解決済KEY自身は必ず候補に含める(card番号ヒット漏れ/大小文字差でも②が出る・既定選択)
+            rk = r.get("key")
+            if rk and not any(c["product_id"] == rk for c in variants):
+                meta = mp.card_meta_for_key(rk)
+                if meta and meta.get("image"):
+                    variants = [{"product_id": rk, "name_jp": meta.get("name_jp", ""),
+                                 "set": meta.get("set", ""), "image": meta.get("image", "")}] + variants
             candidates = [{"key": c["product_id"], "image": c["image"],
                            "label": f'[{c["product_id"]}] {c["name_jp"]} / {c["set"]}'}
-                          for c in mp.catalog_variants_for_cardno(card_no)]
+                          for c in variants]
             targets.append({
                 "idx": i, "title": (r.get("title") or "")[:90], "card_no": card_no,
                 "psa_image": psa_img, "candidates": candidates,
