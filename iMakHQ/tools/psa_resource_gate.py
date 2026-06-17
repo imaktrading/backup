@@ -384,8 +384,6 @@ def main():
     out_rows = [["set_no", "title", "再仕入れ可否", "チャネル", "最安¥", "最安チャネル",
                  "mercari¥", "mercari_URL", "snkrdunk¥", "snkrdunk件数",
                  *aux_cols, "ebay_url"]]
-    import psa_resource_html as prh
-    html_items = []      # 目視ビューア用 (正カード + 仕入候補 + 補)
     go = 0
     aux_writeback = {}   # {商品管理シート行番号: [補URL,...]} (itemID join できた行のみ)
     for i, r in enumerate(rows):
@@ -395,33 +393,15 @@ def main():
         if c["resourceable"]:
             go += 1
         # 補URL: メルカリ＆SNKRDUNK 混合の最安 MAX_AUX 件を 高い順 (URLのみ、価格は各¥列に既出)。
-        aux = [u["url"] for u in c["aux_urls"] if u.get("url")]
+        # 主URL(H列=mercari_URL)とは重複させない(= H列とK列が同じになるのを防ぐ)。
+        aux = [u["url"] for u in c["aux_urls"]
+               if u.get("url") and u["url"] != c.get("mercari_url")]
         # 商品管理シートの 補URL列(AC-AG)へ書戻し用に収集 (itemID で行特定)
         iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
         rn = itemid_row.get(iid) if iid else None
         if rn and aux:
             aux_writeback[rn] = aux
         aux += [""] * (MAX_AUX - len(aux))
-        # 目視ビューア item: 仕入候補(main)+ SNKRDUNK候補(=補) を正カードと並べる。
-        # resourceable のみ画像取得(End候補は画像不要)。Mercari=CDN構成 / SNKRDUNK=og:image。
-        if c["resourceable"]:
-            _meta = mp.card_meta_for_key(r.get("key")) if r.get("key") else None
-            _cands = []
-            if c.get("mercari_url"):
-                _cands.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy"),
-                               "is_main": c.get("cheapest_url") == c["mercari_url"],
-                               "image": prh.candidate_image("mercari", c["mercari_url"])})
-            for d in (c.get("snkrdunk_urls") or [])[:MAX_AUX]:
-                _u = d.get("url")
-                if not _u:
-                    continue
-                _cands.append({"channel": "snkrdunk", "url": _u, "price": d.get("price"),
-                               "is_main": c.get("cheapest_url") == _u,
-                               "image": prh.candidate_image("snkrdunk", _u)})
-            html_items.append({"title": (r.get("title") or "")[:80],
-                               "ref_image": (_meta or {}).get("image", ""),
-                               "ref_label": (_meta or {}).get("hint", "") or (r.get("set_no") or ""),
-                               "ng": False, "candidates": _cands})
         out_rows.append([
             r.get("set_no") or mp.search_keyword(r.get("title", ""), "").replace("PSA10 ", ""),
             (r.get("title") or "")[:60],
@@ -433,22 +413,7 @@ def main():
             *aux, r.get("ebay_url", ""),
         ])
     print(f"\n再仕入れ可: {go}/{len(rows)}  不能(End候補): {len(rows)-go}")
-
-    # 探索後の最終確認ビューア (確定カードの 仕入候補 + 補 を正カードと並べる)。
-    # ※「正しいカードを探すか」は探索前の確認ゲート(prc.confirm_targets)で済。ここは結果の最終目視。
-    try:
-        OUT_DIR = mp.DESK  # デスクトップに出力(ユーザーがすぐ開ける)
-        os.makedirs(OUT_DIR, exist_ok=True)
-        _hp = os.path.join(OUT_DIR, "psa_resource_review.html")
-        prh.build_html(html_items, _hp)
-        print(f"🖼️ 目視ビューア: {_hp} ({len(html_items)}件)")
-        try:
-            os.startfile(_hp)
-        except Exception:
-            import webbrowser
-            webbrowser.open("file:///" + _hp.replace("\\", "/"))
-    except Exception as e:
-        print(f"⚠ 目視HTML生成失敗: {type(e).__name__}: {e}")
+    # 探索後ビューアは廃止(探索前の確認ゲートで変種確認済 + 静的HTMLは画像プロキシ不可のため)。
 
     try:
         from sheet_io import write_rows_to_tab, MAINT_URL

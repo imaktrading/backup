@@ -230,5 +230,8 @@ def test_gate_v2_wiring():
     assert "catalog_variants_for_cardno" in src       # ②候補
     assert "write_keys" in src                        # 選択KEYをスプシ書戻し
     assert "_run_mismatch_pdca" in src and "PSA不一致台帳" in src   # 不一致PDCA
-    assert "OUT_DIR = mp.DESK" in src
     assert "--no-confirm" in src
+    # 探索後ビューア(psa_resource_html)は撤去(確認ゲートで代替)
+    assert "import psa_resource_html" not in src
+    # 補URLは主URL(mercari_URL)と重複させない
+    assert 'u["url"] != c.get("mercari_url")' in src
