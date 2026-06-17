@@ -36,8 +36,21 @@ def test_v2_candidate_radio_and_default_selection():
     assert "① 現物(出品PSA)" in h and "② 候補(正しい変種を選択)" in h
     assert "name='pick0'" in h                       # 候補ラジオ
     assert "value='P-041_D' checked" in h            # 解決済KEYが既定選択
-    assert "i.ebayimg/x.jpg" in h                    # ①現物=eBay画像
     assert "確定して探索開始" in h
+
+
+def test_images_are_proxied_to_avoid_hotlink():
+    # 画像srcは /img?u= プロキシ経由(referer由来ホットリンク制限を回避: 2026-06-17 onepiece等)
+    prc = _load("psa_resource_confirm")
+    import urllib.parse
+    cands = [{"key": "OP01-016", "image": "https://www.onepiece-cardgame.com/images/cardlist/card/OP01-016.png",
+              "label": "ナミ"}]
+    h = prc.build_confirm_html([_item(0, cands, resolved="OP01-016", psa="https://i.ebayimg/x.jpg")])
+    assert "/img?u=" in h
+    # 直URLが src に生で出ていない(プロキシ化されている)
+    assert "src='https://" not in h
+    assert "/img?u=" + urllib.parse.quote("https://i.ebayimg/x.jpg", safe="") in h
+    assert prc._proxied("") == "" and prc._proxied(None) == ""
 
 
 def test_v2_no_candidates_defaults_off_and_placeholder():

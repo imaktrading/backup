@@ -16,7 +16,10 @@ import http.server
 import json
 import os
 import sys
+import threading
 import time
+import urllib.parse
+import urllib.request
 import webbrowser
 
 # 現物PSA画像フォールバック: iMakTCG/data/psa_cache.json (cert#→CardImageUrl=cloudfront)。
@@ -60,6 +63,38 @@ def _s(v):
     if isinstance(v, (list, tuple)):
         return " / ".join(str(x) for x in v if x not in (None, ""))
     return "" if v is None else str(v)
+
+
+def _proxied(url):
+    """画像URLをローカルプロキシ経由に。ブラウザのreferer由来ホットリンク制限(onepiece-cardgame等)
+    や DNS/CORS を回避(サーバ側で取得して渡す)。空は空。"""
+    u = _s(url)
+    return ("/img?u=" + urllib.parse.quote(u, safe="")) if u else ""
+
+
+_IMG_CACHE = {}
+
+
+def _fetch_image(url, retries=3):
+    """画像を取得して (bytes, content-type) を返す。成功のみキャッシュ(失敗は次回再試行)。失敗 (None,None)。"""
+    if not url:
+        return None, None
+    if url in _IMG_CACHE:
+        return _IMG_CACHE[url]
+    for a in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            r = urllib.request.urlopen(req, timeout=15)
+            data = r.read()
+            ctype = r.headers.get("Content-Type") or "image/jpeg"
+            _IMG_CACHE[url] = (data, ctype)
+            return data, ctype
+        except Exception as e:
+            if "getaddrinfo" in str(e) and a < retries - 1:
+                time.sleep(2)
+                continue
+            break
+    return None, None
 
 
 _CSS = """
@@ -139,7 +174,7 @@ def build_confirm_html(items):
         cardno = _html.escape(_s(it.get("card_no")))
 
         psa_img = it.get("psa_image") or ""
-        psa_tag = (f"<img src='{_html.escape(_s(psa_img))}' loading='lazy'>" if psa_img
+        psa_tag = (f"<img src='{_proxied(psa_img)}' loading='lazy'>" if psa_img
                    else "<div class='ph'>現物PSA画像なし<br>eBayで確認</div>")
         psa_col = f"<div class='col psa'><div class='cap'>① 現物(出品PSA)</div>{psa_tag}</div>"
 
@@ -152,7 +187,7 @@ def build_confirm_html(items):
                 ck = c.get("key", "")
                 chk = " checked" if ck == default else ""
                 cimg = c.get("image") or ""
-                ctag = (f"<img src='{_html.escape(_s(cimg))}' loading='lazy'>" if cimg
+                ctag = (f"<img src='{_proxied(cimg)}' loading='lazy'>" if cimg
                         else "<div class='cph'>画像なし</div>")
                 opts.append(
                     f"<label class='cand'><input type='radio' name='pick{idx}' value='{_html.escape(_s(ck))}'{chk}>"
@@ -205,6 +240,20 @@ def confirm_targets(items, timeout=1800):
             pass
 
         def do_GET(self):
+            # 画像プロキシ: ブラウザのreferer由来ホットリンク制限/DNS/CORS を回避(サーバ側取得)
+            if self.path.startswith("/img?"):
+                u = (urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("u") or [""])[0]
+                data, ctype = _fetch_image(u)
+                if data:
+                    self.send_response(200)
+                    self.send_header("Content-Type", ctype)
+                    self.send_header("Cache-Control", "max-age=3600")
+                    self.end_headers()
+                    self.wfile.write(data)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -226,9 +275,11 @@ def confirm_targets(items, timeout=1800):
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
 
-    httpd = http.server.HTTPServer(("127.0.0.1", 0), H)
-    httpd.timeout = 1
+    # 画像プロキシを多数並行配信するため Threading サーバ(単一スレッドだと画像で詰まる)
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
     print(f"  ブラウザで確認してください → {url}", flush=True)
     try:
         webbrowser.open(url)
@@ -236,7 +287,8 @@ def confirm_targets(items, timeout=1800):
         pass
     deadline = time.time() + timeout
     while not state["done"] and time.time() < deadline:
-        httpd.handle_request()
+        time.sleep(0.3)
+    httpd.shutdown()
     httpd.server_close()
     if not state["done"]:
         return None
