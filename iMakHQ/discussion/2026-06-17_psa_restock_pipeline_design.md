@@ -101,8 +101,16 @@
 | Phase4 状態同期安全(verify/reconcile/ガード) | iMakRevise + HQ |
 | catalog 値の正 | iMakCatalog |
 
-## 8. ユーザー判断ポイント(要回答)
-- (a) Title は RESTOCK時に再生成する? それとも据え置き(Cassini露出維持)?
-- (b) Item Specifics は catalog値で**上書き** or 既存とマージ(空欄のみ補完)?
-- (c) RESTOCK実行は **自動(視覚確証OK→即revise)** か **確定リストを人手で最終GO** か?
-- (d) 利益V8反映は自動チェックまで? それとも人手確認?
+## 8. ユーザー判断(2026-06-18 決定)
+- **(a) Title = 刷新(再生成)**。理由: 旧ロジックで間違っている可能性があるため据え置かず作り直す。
+  keyword PDF順守で再生成。Cassini露出リセットは受容(正確性優先)。
+- **(b) Item Specifics = 刷新(上書き)**。理由: 旧ロジック誤りの可能性 + Description テンプレも更新済。
+  既存値はマージ温存せず、確定KEYの catalog値 + eBay正規値で**全面再生成**(空欄は空欄=fail-closed)。
+- **(b') Description = 刷新**(テンプレ最新版で再生成)。
+- **(c) RESTOCK実行 = 手動(当面)**。視覚確証→**RESTOCK確定リスト**を出し、revise実行は人手GO。自動revise はしない。
+- **(d) 利益V8 = 自動**。最安¥(仕入想定)を V8 に自動反映して利益妥当性を自動チェック(赤字復活を自動検出)。
+
+### 決定の影響
+- Phase2 は title/specifics/description を **3点とも全面刷新**(旧値温存なし)。生成は iMakTCG 流用。
+- 実行は手動GOなので、Phase1ビューアの出力 = 「RESTOCK確定リスト(タブ)」。eBay書込は人手起動。
+- V8チェックは自動で確定リストに「利益OK/赤字警告」を付す。
