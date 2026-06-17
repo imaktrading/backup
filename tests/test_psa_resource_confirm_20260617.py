@@ -46,6 +46,21 @@ def test_build_confirm_html_shows_two_images_and_flags_missing_genbutsu():
     assert "rejected:rej" in h                        # 不一致も reason付きでPOST
 
 
+def test_build_confirm_html_handles_list_ref_label_and_none():
+    # catalog の hint は list で来る → html.escape が落ちないこと(2026-06-17 実機crash回帰)
+    prc = _load("psa_resource_confirm")
+    items = [
+        {"idx": 0, "title": "PSA10 OP11-106", "card_no": "OP11-106", "psa_image": "https://p/a.jpg",
+         "ref_image": "https://c/b.jpg", "ref_label": ["OP11", "SR", "Luffy"],
+         "ebay_url": "https://e/1", "no_image": False},
+        {"idx": 1, "title": "PSA10 X", "card_no": None, "psa_image": "", "ref_image": "",
+         "ref_label": None, "ebay_url": "", "no_image": True},
+    ]
+    h = prc.build_confirm_html(items)   # 例外で落ちない
+    assert "OP11 / SR / Luffy" in h     # list は ' / ' 連結
+    assert "data-idx='1'" in h
+
+
 def test_build_cert_map_reads_column_I():
     sio = _load("sheet_io")
     # B列(1)=itemID, I列(8)=cert#

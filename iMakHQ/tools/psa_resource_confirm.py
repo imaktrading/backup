@@ -70,13 +70,19 @@ def build_confirm_html(items):
     #done{display:none;padding:40px;font-size:20px;color:#2a7;text-align:center}
     """
     rows = []
+    def _s(v):
+        """list/tuple は ' / ' 連結、None は空、それ以外は str に正規化(catalog hint が list のため)。"""
+        if isinstance(v, (list, tuple)):
+            return " / ".join(str(x) for x in v if x not in (None, ""))
+        return "" if v is None else str(v)
+
     for it in items:
         idx = it.get("idx")
         cls = "card noimg" if it.get("no_image") else "card"
-        cardno = _html.escape(it.get("card_no") or "")
+        cardno = _html.escape(_s(it.get("card_no")))
 
         def _img(url, ph_text):
-            return (f"<img src='{_html.escape(url)}' loading='lazy'>" if url
+            return (f"<img src='{_html.escape(_s(url))}' loading='lazy'>" if url
                     else f"<div class='ph'>{ph_text}</div>")
         psa_col = (f"<div class='col psa'><div class='cap'>① 現物(出品PSA)</div>"
                    f"{_img(it.get('psa_image',''), '現物PSA画像なし<br>eBayで確認')}</div>")
@@ -93,9 +99,9 @@ def build_confirm_html(items):
             f"<label class='sel'><input type='checkbox' checked onchange=\"tog({idx})\"> 仕入れる(①=②なら)</label>"
             f"<div class='no'>{cardno}</div>"
             f"<div class='pair'>{psa_col}{cat_col}</div>"
-            f"<div class='t'>{_html.escape(it.get('title',''))}</div>"
-            f"<div class='lbl'>{_html.escape(it.get('ref_label',''))}</div>"
-            f"<a href='{_html.escape(it.get('ebay_url',''))}' target='_blank'>元eBay出品を見る</a>"
+            f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>"
+            f"<div class='lbl'>{_html.escape(_s(it.get('ref_label')))}</div>"
+            f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品を見る</a>"
             f"{rsn}"
             "</div>"
         )
