@@ -221,6 +221,17 @@ def test_build_cert_map_reads_column_I():
     assert sio.build_cert_map(rows) == {"111": "142490884"}
 
 
+def test_gate_skips_already_confirmed_on_rerun():
+    # 再走時、過去に目視確定した itemID は再目視スキップ(目視は資産・負担漸減)。--review-allで全件再目視
+    src = (_TOOLS / "psa_resource_gate.py").read_text(encoding="utf-8")
+    assert "PSA目視確定済" in src                      # 確定済の永続記録
+    assert "--review-all" in src                       # 全件再目視フラグ
+    assert "confirmed_prev" in src and "auto_idx" in src
+    assert 'r["key"] = confirmed_prev[iid]' in src     # 過去確定KEYを採用して目視skip
+    # 確定済skip は目視対象(targets)に入れない
+    assert "targets_by_idx" in src
+
+
 def test_gate_v2_wiring():
     src = (_TOOLS / "psa_resource_gate.py").read_text(encoding="utf-8")
     i_confirm = src.index("confirm_targets")

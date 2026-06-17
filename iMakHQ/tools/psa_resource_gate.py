@@ -189,7 +189,9 @@ def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):
     for rj in rejected:
         i = rj.get("idx")
         r = idx_row.get(i, {})
-        t = targets[i] if isinstance(i, int) and i < len(targets) else {}
+        # targets は {row index: target} の dict(目視対象のみ。確定済スキップ行は含まれない)
+        t = targets.get(i, {}) if isinstance(targets, dict) else (
+            targets[i] if isinstance(i, int) and i < len(targets) else {})
         iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
         recs.append({"itemID": iid, "cert": cert_map.get(iid, ""), "key": r.get("key", ""),
                      "card_no": t.get("card_no", ""), "title": t.get("title", ""),
@@ -270,9 +272,34 @@ def main():
         print("  (--no-confirm) 確認ゲートskip、全件探索")
     else:
         import psa_resource_confirm as prc
-        print(f"▶ ①現物画像(eBay GetItem)取得中 {len(rows)}件...", flush=True)
-        targets = []
+        # 目視確定済(過去に目視で確定した itemID→KEY)を読み、再目視をスキップ。
+        # = 一度確定したカードは再走で再目視しない(目視は資産・負担は使うほど減る)。--review-all で全件再目視。
+        confirmed_prev = {}
+        if "--review-all" not in sys.argv:
+            try:
+                from sheet_io import read_tab as _rt
+                for rr in _rt("PSA目視確定済")[1:]:
+                    if len(rr) >= 2 and rr[0] and rr[1]:
+                        confirmed_prev[rr[0].strip()] = rr[1].strip()
+            except Exception as e:
+                print(f"  ⚠ 目視確定済 読込skip ({type(e).__name__}: {e})")
+        total_rows = len(rows)
+        auto_idx = set()       # 確定済=再目視スキップ
+        todo = []              # (i, r) 今回目視する行
         for i, r in enumerate(rows):
+            iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+            if iid and iid in confirmed_prev:
+                r["key"] = confirmed_prev[iid]          # 過去の目視確定KEYを採用(再目視不要)
+                auto_idx.add(i)
+            else:
+                todo.append((i, r))
+        if auto_idx:
+            print(f"  ⏭ 目視確定済 {len(auto_idx)}件は再目視スキップ(過去確定KEY採用)")
+
+        targets_by_idx = {}    # {row index: target}
+        if todo:
+            print(f"▶ ①現物画像(eBay GetItem)取得中 {len(todo)}件...", flush=True)
+        for n, (i, r) in enumerate(todo):
             iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
             # ① 現物: eBay出品画像(必ず有る)→ 無ければ cert→psa_cache フォールバック
             psa_img = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
@@ -298,22 +325,29 @@ def main():
 
             candidates = [{"key": c["product_id"], "image": c["image"], "label": _label(c)}
                           for c in variants]
-            targets.append({
+            targets_by_idx[i] = {
                 "idx": i, "title": (r.get("title") or "")[:90], "card_no": card_no,
                 "psa_image": psa_img, "candidates": candidates,
                 "resolved_key": r.get("key"),          # 既定選択(itemID join 済なら)
                 "ebay_url": r.get("ebay_url", ""), "no_image": not psa_img,
-            })
-            if (i + 1) % 20 == 0:
-                print(f"   {i+1}/{len(rows)}", flush=True)
-        print(f"▶ 目視確認ゲート: {len(targets)}件をブラウザ表示。① 現物 と ② 候補(変種選択)の一致を確認...")
-        res = prc.confirm_targets(targets)
-        if res is None:
-            sys.exit("確認がタイムアウト/未確定。探索せず終了(再実行してください)。")
-        confirmed, rejected = res["confirmed"], res["rejected"]
+            }
+            if (n + 1) % 20 == 0:
+                print(f"   {n+1}/{len(todo)}", flush=True)
+
+        if targets_by_idx:
+            print(f"▶ 目視確認ゲート: {len(targets_by_idx)}件をブラウザ表示。① 現物 と ② 候補(変種選択)の一致を確認...")
+            res = prc.confirm_targets(list(targets_by_idx.values()))
+            if res is None:
+                sys.exit("確認がタイムアウト/未確定。探索せず終了(再実行してください)。")
+            confirmed, rejected = res["confirmed"], res["rejected"]
+        else:
+            confirmed, rejected = [], []
+            print("  目視対象なし(全件 確定済)→ 探索のみ")
+
         idx_row = {i: r for i, r in enumerate(rows)}    # filter前に idx→row 固定
-        # 選択された変種KEYを各行に反映 + 商品管理シート書戻し(空欄補完/訂正)を収集
+        # 選択された変種KEYを各行に反映 + 商品管理シート書戻し + 目視確定済 追記用に収集
         writeback = {}
+        new_confirmed = {}     # itemID→KEY 今回新規に目視確定(次回スキップ用)
         for c in confirmed:
             i, key = c["idx"], (c.get("key") or "")
             r = idx_row.get(i)
@@ -322,10 +356,12 @@ def main():
             old = r.get("key")
             r["key"] = key
             iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
-            if iid and key != old:                      # 新規解決 or 訂正のみ書戻し
-                writeback[iid] = key
+            if iid:
+                new_confirmed[iid] = key
+                if key != old:                          # 新規解決 or 訂正のみ書戻し
+                    writeback[iid] = key
         # PDCA: 不一致(OFF)を台帳に蓄積 → 原因別振り分け → 再発/解決トレンド
-        _run_mismatch_pdca(rejected, [c["idx"] for c in confirmed], idx_row, targets, cert_map, mp)
+        _run_mismatch_pdca(rejected, [c["idx"] for c in confirmed], idx_row, targets_by_idx, cert_map, mp)
         # 確定した変種KEYを商品管理シートAI列に書戻し(目視を資産化=次回から解決済)
         if writeback:
             try:
@@ -334,11 +370,25 @@ def main():
                 print(f"🔑 商品管理シートAI列にKEY書戻し: {n}行 (目視確定を資産化=次回 itemID join で解決済)")
             except Exception as e:
                 print(f"⚠ KEY書戻し失敗: {type(e).__name__}: {e}")
-        conf_idx = {c["idx"] for c in confirmed if c.get("key")}
+        # 目視確定済 を追記(次回の再目視スキップ用) — auto分は既存なので新規確定のみ追加
+        if new_confirmed:
+            try:
+                from sheet_io import read_tab as _rt2, write_rows_to_tab as _wt
+                rec = {}
+                for rr in _rt2("PSA目視確定済")[1:]:
+                    if len(rr) >= 2 and rr[0]:
+                        rec[rr[0].strip()] = rr[1].strip()
+                rec.update(new_confirmed)
+                _wt("PSA目視確定済", [["itemID", "KEY"]] + [[k, v] for k, v in rec.items()])
+                print(f"  📝 目視確定済 記録: +{len(new_confirmed)}件 (計{len(rec)})")
+            except Exception as e:
+                print(f"  ⚠ 目視確定済 記録skip ({type(e).__name__}: {e})")
+        conf_idx = auto_idx | {c["idx"] for c in confirmed if c.get("key")}
         if not conf_idx:
             sys.exit("確定0件。探索せず終了。台帳「PSA不一致台帳」で原因対処を。")
         rows = [r for i, r in enumerate(rows) if i in conf_idx]
-        print(f"  ✅ 確定 {len(rows)}/{len(targets)}件 → 選択変種で Mercari/SNKRDUNK 探索")
+        print(f"  ✅ 確定 {len(conf_idx)}/{total_rows}件 "
+              f"(確定済skip {len(auto_idx)} + 今回目視 {len(conf_idx) - len(auto_idx)}) → 選択変種で探索")
 
     # --- 再仕入れ待ち台帳の End候補 を再チェックに合流 ---
     # 過去に「再仕入れ不能(End候補)」になった行を毎回再探索(供給は動的=後で出れば RESTOCK)。
