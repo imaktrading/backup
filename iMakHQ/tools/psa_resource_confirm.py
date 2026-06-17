@@ -15,6 +15,7 @@ import html as _html
 import http.server
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -73,6 +74,45 @@ def _proxied(url):
 
 
 _IMG_CACHE = {}
+_OG_CACHE = {}
+
+
+def _fetch_og_image(url):
+    """商品ページ(SNKRDUNK等)の og:image を取得(キャッシュ)。失敗 ''。"""
+    if not url:
+        return ""
+    if url in _OG_CACHE:
+        return _OG_CACHE[url]
+    img = ""
+    for a in range(3):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            h = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
+            m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', h)
+            img = m.group(1) if m else ""
+            break
+        except Exception as e:
+            if "getaddrinfo" in str(e) and a < 2:
+                time.sleep(2)
+                continue
+            break
+    _OG_CACHE[url] = img
+    return img
+
+
+def _resolve_image_url(u):
+    """仕入候補のURL(出品ページ)→ 実画像URL。catalog/eBay画像はそのまま。
+    - mercari item (m<id>) → 静的CDN画像
+    - snkrdunk 商品ページ → og:image
+    """
+    u = u or ""
+    if "mercari" in u:
+        m = re.search(r"\b(m\d{9,})\b", u)
+        if m:
+            return f"https://static.mercdn.net/item/detail/orig/photos/{m.group(1)}_1.jpg"
+    if "snkrdunk.com" in u and "/images/" not in u:
+        return _fetch_og_image(u)
+    return u
 
 
 def _fix_url(u):
@@ -240,21 +280,19 @@ def build_confirm_html(items):
             f"<div id='done'></div><script>{_JS}</script></body></html>")
 
 
-def confirm_targets(items, timeout=1800):
-    """ブラウザで確認 → {"confirmed":[{idx,key}], "rejected":[{idx,reason}]}。
+def _serve_confirm(page_bytes, extract, timeout):
+    """page を /img プロキシ付きで配信し、POST(JSON)を extract(data)->result で受けて返す。
 
-    確定(ON+変種選択)= 選んだKEYで探索＋スプシ書戻し。不一致(OFF)= reason付きでPDCA台帳へ。
-    タイムアウト/未確定は None。
+    画像は多数並行のため ThreadingHTTPServer + サーバ側取得(ホットリンク/DNS/CORS回避)。
+    確定ボタンが押される(POST)まで待ち、extract の戻りを返す。タイムアウト/未確定は None。
     """
-    page = build_confirm_html(items).encode("utf-8")
-    state = {"done": False, "confirmed": [], "rejected": []}
+    state = {"done": False, "result": None}
 
     class H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
         def do_GET(self):
-            # 画像プロキシ: ブラウザのreferer由来ホットリンク制限/DNS/CORS を回避(サーバ側取得)
             if self.path.startswith("/img?"):
                 u = (urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("u") or [""])[0]
                 data, ctype = _fetch_image(u)
@@ -271,7 +309,7 @@ def confirm_targets(items, timeout=1800):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(page)
+            self.wfile.write(page_bytes)
 
         def do_POST(self):
             ln = int(self.headers.get("Content-Length", 0) or 0)
@@ -279,21 +317,16 @@ def confirm_targets(items, timeout=1800):
                 data = json.loads(self.rfile.read(ln) or b"{}")
             except Exception:
                 data = {}
-            state["confirmed"] = [{"idx": int(d["idx"]), "key": d.get("key") or ""}
-                                  for d in (data.get("confirmed") or []) if d.get("idx") is not None]
-            state["rejected"] = [{"idx": int(d["idx"]), "reason": d.get("reason") or "unknown"}
-                                 for d in (data.get("rejected") or []) if d.get("idx") is not None]
+            state["result"] = extract(data)
             state["done"] = True
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
 
-    # 画像プロキシを多数並行配信するため Threading サーバ(単一スレッドだと画像で詰まる)
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
     print(f"  ブラウザで確認してください → {url}", flush=True)
     try:
         webbrowser.open(url)
@@ -304,6 +337,86 @@ def confirm_targets(items, timeout=1800):
         time.sleep(0.3)
     httpd.shutdown()
     httpd.server_close()
-    if not state["done"]:
-        return None
-    return {"confirmed": state["confirmed"], "rejected": state["rejected"]}
+    return state["result"] if state["done"] else None
+
+
+def confirm_targets(items, timeout=1800):
+    """探索前 目視確認 → {"confirmed":[{idx,key}], "rejected":[{idx,reason}]}。未確定は None。"""
+    def _ex(data):
+        return {"confirmed": [{"idx": int(d["idx"]), "key": d.get("key") or ""}
+                              for d in (data.get("confirmed") or []) if d.get("idx") is not None],
+                "rejected": [{"idx": int(d["idx"]), "reason": d.get("reason") or "unknown"}
+                             for d in (data.get("rejected") or []) if d.get("idx") is not None]}
+    return _serve_confirm(build_confirm_html(items).encode("utf-8"), _ex, timeout)
+
+
+_JS_RESTOCK = """
+function imgFail(el,big){var d=document.createElement('div'); d.className=big?'ph':'cph';
+  d.textContent='画像なし'; if(el.parentNode) el.parentNode.replaceChild(d,el);}
+function tog(i){var c=document.getElementById('c'+i);
+  c.classList.toggle('off', !c.querySelector('input[type=checkbox]').checked);}
+function setAll(v){document.querySelectorAll('.card input[type=checkbox]').forEach(function(b){
+  b.checked=v; tog(b.closest('.card').dataset.idx);});}
+function go(){
+  var ids=[];
+  document.querySelectorAll('.card').forEach(function(c){
+    if(c.querySelector('input[type=checkbox]').checked) ids.push(parseInt(c.dataset.idx));});
+  fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({confirmed:ids})}).then(function(){
+    document.getElementById('main').style.display='none';
+    var d=document.getElementById('done'); d.style.display='block';
+    d.textContent='✅ RESTOCK確定 '+ids.length+'件。ターミナルに戻ってください。';});
+}
+"""
+
+
+def build_restock_html(items):
+    """RESTOCK視覚確証 HTML。items: [{idx, title, card_no, ebay_url, ref_image,
+    candidates:[{channel,url,price}], v8}]。① 現物 と 仕入候補(買う物の出品画像) を並べ目視一致。
+    候補のurl(出品ページ)はプロキシが画像へ解決(mercari→CDN / snkrdunk→og:image)。"""
+    rows = []
+    for it in items:
+        idx = it.get("idx")
+        ref = it.get("ref_image") or ""
+        ref_tag = (f"<img src='{_proxied(ref)}' loading='lazy' onerror='imgFail(this,1)'>" if ref
+                   else "<div class='ph'>現物画像なし</div>")
+        cand_html = []
+        for cd in (it.get("candidates") or []):
+            u = cd.get("url") or ""
+            img = (f"<img src='{_proxied(u)}' loading='lazy' onerror='imgFail(this,0)'>" if u
+                   else "<div class='cph'>画像なし</div>")
+            price = cd.get("price")
+            pstr = f"¥{price:,}" if isinstance(price, int) else (_s(price) if price else "")
+            cand_html.append(
+                f"<label class='cand'>{img}<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}"
+                f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a></span></label>")
+        if not cand_html:
+            cand_html = ["<div class='cph'>仕入候補なし</div>"]
+        v8 = _s(it.get("v8"))
+        v8_html = f"<div class='lbl'>{_html.escape(v8)}</div>" if v8 else ""
+        rows.append(
+            f"<div class='card' id='c{idx}' data-idx='{idx}'>"
+            f"<label class='sel'><input type='checkbox' checked onchange=\"tog({idx})\"> RESTOCKする(①=仕入候補なら)</label>"
+            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>"
+            f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
+            f"<div class='col cat'><div class='cap'>仕入候補(買う物)</div><div class='cands'>{''.join(cand_html)}</div></div></div>"
+            f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
+            f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品</a>"
+            "</div>")
+    head = (f"<h1>RESTOCK 視覚確証 — {len(items)}件。① 現物 と 仕入候補(実際に買う物)が同じカードなら"
+            " RESTOCKする ON → 確定。(確定分だけ RESTOCK実行待ちへ)</h1>")
+    bar = ("<div class='bar'><button class='go' onclick='go()'>✅ RESTOCK確定</button>"
+           "<button onclick='setAll(true)'>全部ON</button>"
+           "<button onclick='setAll(false)'>全部OFF</button>"
+           "<span style='color:#c33;font-size:13px'>※①と買う物が同じカード・同変種か必ず確認</span></div>")
+    return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>RESTOCK確証</title>"
+            f"<style>{_CSS}</style></head><body>"
+            f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
+            f"<div id='done'></div><script>{_JS_RESTOCK}</script></body></html>")
+
+
+def restock_confirm(items, timeout=1800):
+    """RESTOCK視覚確証 → 一致でONにした idx の list を返す。未確定は None。"""
+    def _ex(data):
+        return [int(x) for x in (data.get("confirmed") or [])]
+    return _serve_confirm(build_restock_html(items).encode("utf-8"), _ex, timeout)

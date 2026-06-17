@@ -457,6 +457,7 @@ def main():
     aux_writeback = {}   # {商品管理シート行番号: [補URL,...]} (itemID join できた行のみ)
     wait_end = []        # 再仕入れ不能(End候補) → 待ち台帳へ
     wait_resourceable = set()   # 再仕入れ可 itemID → 待ち台帳で「復活可」に
+    restock_cands = []   # POC-A: 再仕入れ可 → RESTOCK視覚確証ビューア用
     for i, r in enumerate(rows):
         mr = mercari_res.get(i) or {}
         c = combine(mr.get("best"), snkr_res.get(i),
@@ -466,6 +467,21 @@ def main():
             go += 1
             if _iid:
                 wait_resourceable.add(_iid)
+            _cands = []
+            if c.get("mercari_url"):
+                _cands.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
+            for d in (c.get("snkrdunk_urls") or [])[:5]:
+                if d.get("url"):
+                    _cands.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price")})
+            try:
+                _cur = float(r.get("ebay_price")) if r.get("ebay_price") else None
+            except (TypeError, ValueError):
+                _cur = None
+            restock_cands.append({
+                "itemID": _iid, "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
+                "title": (r.get("title") or "")[:90], "ebay_url": r.get("ebay_url", ""),
+                "candidates": _cands, "cost": c.get("cheapest_jpy"), "cur": _cur,
+                "channel": c.get("cheapest_channel"), "url": c.get("cheapest_url")})
         elif _iid:
             wait_end.append({"itemID": _iid, "key": r.get("key", ""),
                              "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
@@ -524,6 +540,60 @@ def main():
             print(f"🔗 商品管理シート 補URL(AC-AG) 書戻し: {n}行")
         except Exception as e:
             print(f"⚠ 補URL書戻し失敗: {type(e).__name__}: {e}")
+
+    # --- POC-A: RESTOCK視覚確証ビューア(再仕入れ可のみ)→ RESTOCK確定リスト + V8自動利益判定 ---
+    # 不可逆(RESTOCK=出品復活→売れたら仕入)の前に「① 現物 vs 仕入候補(買う物)」を視覚一致確認。
+    # 確定分を「RESTOCK確定」タブに出力(eBay書込はしない=手動GO。POC-B/iMakReviseで revise)。
+    if "--no-confirm" not in sys.argv and restock_cands:
+        _run_restock_confirm(restock_cands, mp, cert_map)
+
+
+def _v8_label(cost_jpy, cur_usd, mp):
+    """最安¥(仕入想定)+ eBay現$ から新規出品と同じ pricing_engine で利益判定(自動)。"""
+    if not cost_jpy or not cur_usd:
+        return ""
+    try:
+        import pricing_engine
+        cat = getattr(mp, "CATEGORY", "tcg")
+        rec = pricing_engine.compute_listing_price(cost_jpy=cost_jpy, median_usd=cur_usd, category=cat)["price"]
+        ok = rec <= cur_usd
+        return f"{'利益OK' if ok else '⚠赤字'} V8推奨${rec:.0f} (現${cur_usd:.0f} / 原価¥{cost_jpy})"
+    except Exception as e:
+        return f"V8計算不可({type(e).__name__})"
+
+
+def _run_restock_confirm(restock_cands, mp, cert_map):
+    """再仕入れ可を視覚確証(現物 vs 仕入候補)→ 確定分を「RESTOCK確定」タブへ。失敗は警告のみ。"""
+    import datetime
+    import psa_resource_confirm as prc
+    items = []
+    for n, rc in enumerate(restock_cands):
+        iid = rc.get("itemID")
+        ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
+        items.append({"idx": n, "title": rc["title"], "card_no": rc["card_no"],
+                      "ebay_url": rc["ebay_url"], "ref_image": ref,
+                      "candidates": rc["candidates"], "v8": _v8_label(rc.get("cost"), rc.get("cur"), mp)})
+    print(f"▶ RESTOCK視覚確証: 再仕入れ可 {len(items)}件をブラウザ表示。① 現物 と 仕入候補 の一致を確認...")
+    confirmed = prc.restock_confirm(items)
+    if confirmed is None:
+        print("⚠ RESTOCK確証 タイムアウト/未確定 — RESTOCK確定リストは未更新")
+        return
+    sel = set(confirmed)
+    today = datetime.date.today().isoformat()
+    out = [["itemID", "card_no", "title", "最安チャネル", "最安¥", "eBay現$", "V8判定",
+            "仕入URL", "ebay_url", "確証日"]]
+    for n, rc in enumerate(restock_cands):
+        if n in sel:
+            out.append([rc.get("itemID", ""), rc.get("card_no", ""), rc.get("title", ""),
+                        rc.get("channel", ""), rc.get("cost", ""), rc.get("cur", ""),
+                        _v8_label(rc.get("cost"), rc.get("cur"), mp),
+                        rc.get("url", ""), rc.get("ebay_url", ""), today])
+    try:
+        from sheet_io import write_rows_to_tab, MAINT_URL
+        write_rows_to_tab("RESTOCK確定", out)
+        print(f"🟢 RESTOCK確定: {len(out)-1}件 → タブ「RESTOCK確定」(手動で revise 実行 / POC-Bで自動化) {MAINT_URL}")
+    except Exception as e:
+        print(f"⚠ RESTOCK確定タブ更新skip ({type(e).__name__}: {e})")
 
 
 if __name__ == "__main__":
