@@ -391,6 +391,32 @@ def _variant_matches(items, card_no, variant_hint=None):
     return matched if matched else []     # 正 print種別の候補群 / 一意化不可は fail-closed
 
 
+def kw_variant_confident(name, variant_hint):
+    """keyword検索でヒットした候補名が hint の set語で『正変種』と確証できるか(純関数)。
+
+    確証できない=番号だけ一致で別変種/別カードを掴むリスク → 呼出側は画像検索に切替える。
+    - hint無(KEY未解決) → False(確証不能)
+    - hint のset語が候補名に1つでも在る → True(変種確証)
+    - 在らない → False(番号一致だけ=危険 → 画像検索へ)
+    """
+    if not variant_hint:
+        return False
+    # set語のみで確証(名前/番号/rarity は同名別setの誤variantを見逃すため使わない)。
+    # hint = [set_name, get_info, set_name_ebay, variant_type, rarity, name_jp, key] の前3つ=set。
+    set_part = list(variant_hint)[:3] if isinstance(variant_hint, (list, tuple)) else variant_hint
+    try:
+        from snkrdunk_psa_resource import _hint_tokens
+        toks = _hint_tokens(set_part)
+    except Exception:
+        return False
+    # set-code(OP11/EB04 等)はカード番号と重複し誤確証するので除外。set名の語(漢字/カナ/Latin)で確証。
+    toks = [t for t in toks if not re.fullmatch(r"[A-Z]{2,}\d{1,3}", t)]
+    if not toks:
+        return False
+    norm = (name or "").upper().replace(" ", "").replace("-", "")
+    return any(t in norm for t in toks)
+
+
 def pick_cheapest_psa10(items, card_no, variant_hint=None):
     """正変種 PSA10 の最安を1件返す (price, href, name) or None。_variant_matches の先頭。"""
     cands = _variant_matches(items, card_no, variant_hint)
@@ -516,10 +542,14 @@ def fetch_mercari_cheapest(cards):
                 cands = pick_psa10_candidates(items, card_no, c.get("hint"))   # 正変種 価格昇順 最大5
                 best = cands[0] if cands else None
                 via = "kw"
-                if best is None and eid:           # キーワード0件→画像検索フォールバック
-                    best = image_search_fallback(drv, eid, card_no)
-                    via = "画像検索" if best else "kw"
-                    cands = [best] if best else []
+                # keyword で変種を確証できない(0件 or set語不一致=違うカードを掴むリスク)→ 画像検索。
+                # 画像検索は自社PSAスラブ画像で視覚一致 → 番号+PSA10検証なので別カード混入を防ぐ。
+                if (best is None or not kw_variant_confident(best[2], c.get("hint"))) and eid:
+                    img = image_search_fallback(drv, eid, card_no)
+                    if img:
+                        best = img
+                        cands = [img]
+                        via = "画像検索"
                 out[i] = {"best": best, "cands": cands}
                 tag = f"¥{best[0]} ({via}, 候補{len(cands)})" if best else "PSA10在庫なし"
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: {tag}", flush=True)
