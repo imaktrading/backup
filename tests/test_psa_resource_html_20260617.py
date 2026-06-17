@@ -32,6 +32,17 @@ def test_candidate_image_routes_mercari_offline():
     assert img.endswith("m98765432109_1.jpg")
 
 
+def test_build_html_handles_list_ref_label():
+    # catalog hint は list で来る → _html.escape が落ちない(2026-06-17 実機crash回帰)
+    import os
+    import tempfile
+    out = os.path.join(tempfile.gettempdir(), "psa_resource_review_listlabel.html")
+    p = prh.build_html([{"title": ["A", "B"], "ref_image": "https://x/r.jpg",
+                         "ref_label": ["OP11", "SR"], "ng": False, "candidates": []}], out)
+    h = open(p, encoding="utf-8").read()
+    assert "OP11 / SR" in h and "A / B" in h
+
+
 def test_build_html_writes_ref_and_candidates():
     items = [{
         "title": "PSA 10 One Piece P-041 Luffy",

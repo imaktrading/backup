@@ -58,6 +58,13 @@ def candidate_image(channel, url):
     return ""
 
 
+def _s(v):
+    """list/tuple は ' / ' 連結、None は空、それ以外 str(catalog hint が list で来るため)。"""
+    if isinstance(v, (list, tuple)):
+        return " / ".join(str(x) for x in v if x not in (None, ""))
+    return "" if v is None else str(v)
+
+
 def build_html(items, out_path):
     """items: [{title, ref_image, ref_label, ng(bool), candidates:[{channel,url,price,image,is_main}]}]
     → out_path に HTML 書込。返り = out_path。"""
@@ -86,12 +93,12 @@ def build_html(items, out_path):
     for it in items:
         cls = "row ng" if it.get("ng") else "row"
         parts.append(f"<div class='{cls}'>")
-        parts.append(f"<div class='head'>{_html.escape(it.get('title',''))}</div>")
+        parts.append(f"<div class='head'>{_html.escape(_s(it.get('title')))}</div>")
         parts.append("<div class='body'>")
         # 正カード
-        ref_img = it.get("ref_image") or ""
+        ref_img = _s(it.get("ref_image"))
         img_tag = f"<img src='{_html.escape(ref_img)}' loading='lazy'>" if ref_img else "<div class='noimg'>正画像なし(KEY未解決)</div>"
-        parts.append(f"<div class='ref'>{img_tag}<div class='lbl'>{_html.escape(it.get('ref_label','') or '正カード')}</div></div>")
+        parts.append(f"<div class='ref'>{img_tag}<div class='lbl'>{_html.escape(_s(it.get('ref_label')) or '正カード')}</div></div>")
         # 候補
         parts.append("<div class='cands'>")
         cands = it.get("candidates") or []
