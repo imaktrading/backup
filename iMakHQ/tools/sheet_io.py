@@ -16,6 +16,7 @@ CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
 PRODUCT_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 PRODUCT_GID = 851100680
 PRODUCT_COL_ITEMID = 1   # B
+PRODUCT_COL_CERT = 8     # I (PSA cert#。psa_cache.json で CardImageUrl=現物PSA画像を引く)
 PRODUCT_COL_KEY = 34     # AI (canonical product_id)
 
 
@@ -58,14 +59,29 @@ def product_key_map():
     return build_key_map(_product_ws().get_all_values())
 
 
-def product_index():
-    """商品管理シートを1回読んで (key_map, itemid_to_row) を返す (I/O)。
+def build_cert_map(rows2d, itemid_col=PRODUCT_COL_ITEMID, cert_col=PRODUCT_COL_CERT):
+    """商品管理シート rows → {itemID(str): cert#(str)} (純関数, test可)。空itemID/空cert は除外。"""
+    out = {}
+    for r in rows2d[1:]:
+        if len(r) <= max(itemid_col, cert_col):
+            continue
+        iid = (r[itemid_col] or "").strip()
+        cert = (r[cert_col] or "").strip()
+        if iid and cert:
+            out[iid] = cert
+    return out
 
-    key_map = {itemID: canonical_KEY}、 itemid_to_row = {itemID: 1-indexed行番号}。
-    再仕入れゲートが KEY 解決 + 補URL書戻し の両方に使う(sheet読みを1回に集約)。
+
+def product_index():
+    """商品管理シートを1回読んで (key_map, itemid_to_row, cert_map) を返す (I/O)。
+
+    key_map = {itemID: canonical_KEY}、 itemid_to_row = {itemID: 1-indexed行番号}、
+    cert_map = {itemID: PSA cert#}(再仕入れの目視確認で 現物PSA画像 を引くのに使う)。
+    再仕入れゲートが KEY 解決 + 補URL書戻し + cert の全てに使う(sheet読みを1回に集約)。
     """
     vals = _product_ws().get_all_values()
     key_map = build_key_map(vals)
+    cert_map = build_cert_map(vals)
     itemid_to_row = {}
     for i, r in enumerate(vals):
         if i == 0:
@@ -74,7 +90,7 @@ def product_index():
             iid = (r[PRODUCT_COL_ITEMID] or "").strip()
             if iid:
                 itemid_to_row.setdefault(iid, i + 1)
-    return key_map, itemid_to_row
+    return key_map, itemid_to_row, cert_map
 
 
 def write_aux_urls(row_to_urls):

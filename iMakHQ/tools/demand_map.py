@@ -171,7 +171,7 @@ def aggregate(rows):
     keymap = {}
     try:
         from sheet_io import product_index
-        keymap, _ = product_index()
+        keymap, _, _ = product_index()
     except Exception:
         keymap = {}
     keyed = total_psa = 0

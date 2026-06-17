@@ -178,9 +178,10 @@ def main():
     # 取得失敗/未マッチ時は r["key"] 無し → 後段は従来の bare番号 fallback (fail-soft)。
     keyed = 0
     itemid_row = {}
+    cert_map = {}
     try:
         from sheet_io import product_index
-        keymap, itemid_row = product_index()
+        keymap, itemid_row, cert_map = product_index()
         for r in rows:
             iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
             k = keymap.get(iid) if iid else None
@@ -202,15 +203,19 @@ def main():
         targets = []
         for i, r in enumerate(rows):
             meta = mp.card_meta_for_key(r.get("key")) if r.get("key") else None
-            img = (meta or {}).get("image", "")
+            cat_img = (meta or {}).get("image", "")
+            iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+            cert = cert_map.get(iid) if iid else None
+            psa_img = prc.psa_image_for_cert(cert)   # 現物=出品に使ったPSA画像 (cert→psa_cache)
             targets.append({
                 "idx": i,
                 "title": (r.get("title") or "")[:90],
                 "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
-                "ref_image": img,
+                "psa_image": psa_img,          # ① 現物 (出品PSA)
+                "ref_image": cat_img,          # ② 解決先 (catalog 正カード)
                 "ref_label": (meta or {}).get("hint", "") or (r.get("set_no") or ""),
                 "ebay_url": r.get("ebay_url", ""),
-                "no_image": not img,
+                "no_image": not psa_img,       # 現物が引けない行は赤枠で要注意
             })
         print(f"▶ 目視確認ゲート: {len(targets)}件の正カードをブラウザ表示。確定分だけ探索します...")
         confirmed = prc.confirm_targets(targets)

@@ -13,13 +13,35 @@ confirm_targets(items) はローカル http サーバを立て、ブラウザで
 import html as _html
 import http.server
 import json
+import os
 import time
 import webbrowser
 
+# 現物PSA画像: iMakTCG/data/psa_cache.json (cert#→CardImageUrl=cloudfront)。出品に使った実画像。
+_PSA_CACHE = None
+_PSA_CACHE_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakTCG", "data", "psa_cache.json"))
+
+
+def psa_image_for_cert(cert):
+    """PSA cert# → 出品に使った現物PSA画像URL(psa_cache.json の CardImageUrl)。無ければ ''。"""
+    global _PSA_CACHE
+    if _PSA_CACHE is None:
+        try:
+            with open(_PSA_CACHE_PATH, encoding="utf-8") as f:
+                _PSA_CACHE = json.load(f)
+        except Exception:
+            _PSA_CACHE = {}
+    if not cert:
+        return ""
+    rec = _PSA_CACHE.get(str(cert).strip())
+    return (rec.get("CardImageUrl", "") if isinstance(rec, dict) else "") or ""
+
 
 def build_confirm_html(items):
-    """items: [{idx, title, card_no, ref_image, ref_label, ebay_url, no_image}]
-    → 確認用 HTML 文字列。各カードに checkbox(既定ON、正画像なしは赤枠)。"""
+    """items: [{idx, title, card_no, psa_image, ref_image, ref_label, ebay_url, no_image}]
+    → 確認用 HTML。各カードに 現物PSA画像(左)と catalog正カード(右)を並べ、同じカードか目視 →
+    checkbox(既定ON、現物PSA画像が引けない=赤枠で要注意)。"""
     css = """
     body{font-family:'Segoe UI',Meiryo,sans-serif;margin:0;background:#f4f4f4;font-size:15px}
     h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position:sticky;top:0;z-index:5}
@@ -27,12 +49,17 @@ def build_confirm_html(items):
     .bar button{font-size:14px;padding:6px 14px;margin-right:8px;cursor:pointer}
     .go{background:#2a7;color:#fff;border:none;border-radius:4px;font-weight:bold;padding:8px 20px}
     .grid{display:flex;flex-wrap:wrap;gap:10px;padding:12px}
-    .card{width:220px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
+    .card{width:340px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
     .card.noimg{border-color:#c33;border-width:2px}
     .card.off{opacity:.4}
-    .card img{max-width:200px;max-height:180px;display:block;margin:4px auto}
-    .ph{width:200px;height:180px;display:flex;align-items:center;justify-content:center;color:#c33;
-        font-size:13px;border:1px dashed #c33;margin:4px auto}
+    .pair{display:flex;gap:6px;justify-content:center;margin:4px 0}
+    .col{text-align:center;flex:1}
+    .col .cap{font-size:11px;color:#666}
+    .col.psa .cap{color:#06c;font-weight:bold}
+    .col.cat .cap{color:#2a7;font-weight:bold}
+    .card img{max-width:150px;max-height:170px;display:block;margin:2px auto;border:1px solid #eee}
+    .ph{width:150px;height:170px;display:flex;align-items:center;justify-content:center;color:#c33;
+        font-size:12px;border:1px dashed #c33;margin:2px auto;text-align:center}
     .t{font-size:13px;word-break:break-word;margin:4px 0}
     .lbl{font-size:12px;color:#060;word-break:break-word}
     .no{font-size:12px;color:#555}
@@ -44,15 +71,20 @@ def build_confirm_html(items):
     for it in items:
         idx = it.get("idx")
         cls = "card noimg" if it.get("no_image") else "card"
-        img = it.get("ref_image") or ""
-        img_tag = (f"<img src='{_html.escape(img)}' loading='lazy'>" if img
-                   else "<div class='ph'>正画像なし(KEY未解決)<br>↓eBayで確認</div>")
         cardno = _html.escape(it.get("card_no") or "")
+
+        def _img(url, ph_text):
+            return (f"<img src='{_html.escape(url)}' loading='lazy'>" if url
+                    else f"<div class='ph'>{ph_text}</div>")
+        psa_col = (f"<div class='col psa'><div class='cap'>① 現物(出品PSA)</div>"
+                   f"{_img(it.get('psa_image',''), '現物PSA画像なし<br>eBayで確認')}</div>")
+        cat_col = (f"<div class='col cat'><div class='cap'>② 解決先(catalog)</div>"
+                   f"{_img(it.get('ref_image',''), 'catalog画像なし<br>(KEY未解決)')}</div>")
         rows.append(
             f"<div class='{cls}' id='c{idx}' data-idx='{idx}'>"
-            f"<label class='sel'><input type='checkbox' checked onchange=\"tog({idx})\"> 仕入れる</label>"
+            f"<label class='sel'><input type='checkbox' checked onchange=\"tog({idx})\"> 仕入れる(①=②なら)</label>"
             f"<div class='no'>{cardno}</div>"
-            f"{img_tag}"
+            f"<div class='pair'>{psa_col}{cat_col}</div>"
             f"<div class='t'>{_html.escape(it.get('title',''))}</div>"
             f"<div class='lbl'>{_html.escape(it.get('ref_label',''))}</div>"
             f"<a href='{_html.escape(it.get('ebay_url',''))}' target='_blank'>元eBay出品を見る</a>"
@@ -74,12 +106,12 @@ def build_confirm_html(items):
       });
     }
     """
-    head = (f"<h1>PSA再仕入れ 目視確認 — {len(items)}件。仕入れる正カードだけチェックON → 確定。"
-            "(チェックしたものだけ Mercari/SNKRDUNK を探索します)</h1>")
+    head = (f"<h1>PSA再仕入れ 目視確認 — {len(items)}件。①現物(出品PSA) と ②解決先(catalog) が"
+            "同じカード・同じ変種ならチェックON → 確定。(チェックした分だけ Mercari/SNKRDUNK を探索)</h1>")
     bar = ("<div class='bar'><button class='go' onclick='go()'>✅ 確定して探索開始</button>"
            "<button onclick='all(true)'>全部ON</button>"
            "<button onclick='all(false)'>全部OFF</button>"
-           "<span style='color:#c33;font-size:13px'>※赤枠=正画像なし(eBayで現物確認してから判断)</span></div>")
+           "<span style='color:#c33;font-size:13px'>※赤枠=現物PSA画像なし(eBayで現物確認してから判断)</span></div>")
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>PSA再仕入れ 確認</title>"
             f"<style>{css}</style></head><body>"
             f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
