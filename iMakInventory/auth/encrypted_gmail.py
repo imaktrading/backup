@@ -43,7 +43,17 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent
 ENCRYPTED_GMAIL_FILE = ROOT / "decision_log" / ".encrypted_gmail.dat"
 
+# 共有領域 (2026-06-17 1本化): 全 worktree (監視くん / リバイスくん 等) が同一 Windows
+# ユーザーで同じ Gmail App Password を共有する。 DPAPI はユーザー紐づけ (ファイル場所非依存)
+# なので 暗号 blob をここに置けば 平文露出ゼロで 1 本化できる。 iMak_data は git 管理外。
+SHARED_GMAIL_FILE = Path(r"C:/dev/iMak_data/secrets/.encrypted_gmail.dat")
+
 DPAPI_DESCRIPTION = "iMakInventory Gmail SMTP credentials"
+
+
+def _resolve_read_file() -> Path:
+    """読取り元: 共有領域を優先、 無ければ local fallback (= 通知経路を壊さない)."""
+    return SHARED_GMAIL_FILE if SHARED_GMAIL_FILE.exists() else ENCRYPTED_GMAIL_FILE
 
 
 def _import_win32crypt():
@@ -82,9 +92,13 @@ def save_gmail_config(address: str, app_password: str, to: str) -> Path:
         DPAPI_DESCRIPTION,
         None, None, None, 0,
     )
+    # 共有領域を primary に書く (= App Password 再発行時、 全 worktree が新値を読む 1 本化)。
+    # local にも書いて fallback を維持 (共有領域が一時的に読めなくても通知が止まらない)。
+    SHARED_GMAIL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SHARED_GMAIL_FILE.write_bytes(blob)
     ENCRYPTED_GMAIL_FILE.parent.mkdir(parents=True, exist_ok=True)
     ENCRYPTED_GMAIL_FILE.write_bytes(blob)
-    return ENCRYPTED_GMAIL_FILE
+    return SHARED_GMAIL_FILE
 
 
 def load_gmail_config() -> Optional[Tuple[str, str, str]]:
@@ -93,11 +107,12 @@ def load_gmail_config() -> Optional[Tuple[str, str, str]]:
     Returns:
         (address, app_password, to) のタプル。ファイル不在 / 復号失敗時は None。
     """
-    if not ENCRYPTED_GMAIL_FILE.exists():
+    read_file = _resolve_read_file()
+    if not read_file.exists():
         return None
     try:
         win32crypt = _import_win32crypt()
-        blob = ENCRYPTED_GMAIL_FILE.read_bytes()
+        blob = read_file.read_bytes()
         _desc, payload = win32crypt.CryptUnprotectData(
             blob, None, None, None, 0,
         )
@@ -117,7 +132,10 @@ def has_gmail_config() -> bool:
 
 
 def delete_gmail_config() -> bool:
-    if ENCRYPTED_GMAIL_FILE.exists():
-        ENCRYPTED_GMAIL_FILE.unlink()
-        return True
-    return False
+    """共有 + local 両方の暗号ファイルを削除 (= 完全ロールバック)."""
+    deleted = False
+    for f in (SHARED_GMAIL_FILE, ENCRYPTED_GMAIL_FILE):
+        if f.exists():
+            f.unlink()
+            deleted = True
+    return deleted

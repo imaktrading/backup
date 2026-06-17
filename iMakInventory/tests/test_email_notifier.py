@@ -243,6 +243,7 @@ def test_send_skips_when_no_config(monkeypatch, tmp_path):
     """encrypted_gmail.dat 不在時は送信せず skip 返却 (= opt-in)."""
     from auth import encrypted_gmail
     monkeypatch.setattr(encrypted_gmail, "ENCRYPTED_GMAIL_FILE", tmp_path / ".no_such_file.dat")
+    monkeypatch.setattr(encrypted_gmail, "SHARED_GMAIL_FILE", tmp_path / "shared" / ".no_such_file.dat")
     from email_notifier import send_cycle_report
     res = send_cycle_report(_success_log())
     assert res["sent"] is False
@@ -254,6 +255,7 @@ def test_send_calls_smtp_when_config_present(monkeypatch, tmp_path):
     """config あれば _send_via_gmail が呼ばれる (実 SMTP は patch)."""
     from auth import encrypted_gmail
     monkeypatch.setattr(encrypted_gmail, "ENCRYPTED_GMAIL_FILE", tmp_path / ".encrypted_gmail.dat")
+    monkeypatch.setattr(encrypted_gmail, "SHARED_GMAIL_FILE", tmp_path / "shared" / ".encrypted_gmail.dat")
     encrypted_gmail.save_gmail_config("a@example.com", "abcdefghijklmnop", "b@example.com")
 
     sent_args = {}
@@ -277,6 +279,7 @@ def test_send_swallows_smtp_error(monkeypatch, tmp_path):
     """SMTP 例外でも raise せず error フィールドで返す (= cycle 全体を止めない)."""
     from auth import encrypted_gmail
     monkeypatch.setattr(encrypted_gmail, "ENCRYPTED_GMAIL_FILE", tmp_path / ".encrypted_gmail.dat")
+    monkeypatch.setattr(encrypted_gmail, "SHARED_GMAIL_FILE", tmp_path / "shared" / ".encrypted_gmail.dat")
     encrypted_gmail.save_gmail_config("a@example.com", "abcdefghijklmnop", "b@example.com")
 
     def boom(*a, **kw):

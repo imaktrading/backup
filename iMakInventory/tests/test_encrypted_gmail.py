@@ -14,7 +14,9 @@ if str(ROOT) not in sys.path:
 @pytest.fixture
 def isolated_gmail_file(tmp_path, monkeypatch):
     from auth import encrypted_gmail
+    # local + 共有 両方を tmp に隔離 (= 実共有 blob を上書きしない。 2026-06-17 1本化対応)
     monkeypatch.setattr(encrypted_gmail, "ENCRYPTED_GMAIL_FILE", tmp_path / ".encrypted_gmail.dat")
+    monkeypatch.setattr(encrypted_gmail, "SHARED_GMAIL_FILE", tmp_path / "shared" / ".encrypted_gmail.dat")
     return encrypted_gmail
 
 
