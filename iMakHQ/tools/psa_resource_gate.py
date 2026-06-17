@@ -142,6 +142,23 @@ def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
     }
 
 
+def dedupe_rows(rows, idfn):
+    """同一eBay出品の重複行を除去(順序保持)。idfn(row)=itemID。itemID無は url|title で代替キー。
+
+    funnel/CSV 由来で同じ listing が複数行になることがある(2026-06-17 実機: 81行中10重複)。
+    同じ現物を2回探索/2回目視するのは無駄なので入口で1本化する。純関数(test可)。
+    """
+    seen, out = set(), []
+    for r in rows:
+        iid = idfn(r)
+        k = iid or ((r.get("ebay_url", "") or "") + "|" + (r.get("title", "") or ""))
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(r)
+    return out
+
+
 def _load_restock_psa10():
     """funnel RESTOCK∩PSA10 を mercari_psa_resource 経由で取得 (rows: title/ebay_price/...)."""
     import csv
@@ -153,7 +170,11 @@ def _load_restock_psa10():
     src = max(files, key=os.path.getmtime) if files else mp.build_input_from_funnel()
     if not src:
         return [], mp
-    return list(csv.DictReader(open(src, encoding="utf-8-sig"))), mp
+    rows = list(csv.DictReader(open(src, encoding="utf-8-sig")))
+    deduped = dedupe_rows(rows, lambda r: mp._ebay_item_id(r.get("ebay_url", "") or ""))
+    if len(deduped) != len(rows):
+        print(f"  重複除去: {len(rows)}→{len(deduped)}行 (同一eBay出品の重複)")
+    return deduped, mp
 
 
 def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):
