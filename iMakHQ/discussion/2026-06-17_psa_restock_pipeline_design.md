@@ -59,6 +59,11 @@
   - **価格** = 新規出品の `pricing_engine`(現行)で算出。最安¥(仕入想定)等を入力に新規と同じ式で価格決定。
 - 実体としては iMakTCG `psa_to_csv` の per-card 生成(title/specifics/desc/price)を cert/KEY 起点で呼び、
   CSVでなく revise payload に流す形が理想(新規生成のSSOTを一本流用)。
+- **= 新コア(2026-06-18 確認)**: 「今の新規出品ロジック」= **新コア**で、PSA TCG新規は既に本番稼働
+  (control_panel が PSA TCGボタンに `TCG_USE_NEW_GEN=1` を設定。`tcg_listing_fields` +
+  `tcg_new_gen_override.apply_new_gen_override` の catalog決定論生成)。RESTOCK はこれを**そのまま流用**
+  すれば新規出品と完全一致。**別フラグ/別flip不要**(新規の本番経路を再利用するだけ)。
+  ※ 新コア自体の本番flipは既決事項に乗る。RESTOCK が新たに flip を要求するものではない。
 - 要検討: revise で title変更が Cassini に与える影響(=(a)で受容済) / 生成入力(median/cost)の供給。
 
 ### Phase 3: スプシメンテ (HQ)
