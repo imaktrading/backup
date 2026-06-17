@@ -129,9 +129,11 @@ def build_catalog_request_md(rows, today, requester="HQ"):
         "- フェーズ: 調査+修正",
         "",
         "## 事象",
-        "PSA再仕入れの目視確認ゲートで「①現物(出品PSA画像) と ②解決先(catalog正カード)が",
-        "別カード/別変種」と判定された行。KEY誤解決 or catalog登録画像の変種違いが疑われる。",
-        "①現物=出品に使った実PSA画像が正。②catalog を①に合わせて是正願う。",
+        "PSA再仕入れの目視確認ゲートで ②catalog を特定できなかった行。次のどちらか:",
+        "  (A) 未収録: その card番号/カードが catalog に無い(②候補ゼロ) → **catalog追加**を願う",
+        "      (例: プロモ/alt art/番号体系が標準外で product_id が無い、対象外シリーズ等)",
+        "  (B) 変種違い: catalog に在るが ①現物(出品PSA)と別変種/画像違い → ①に合わせ**是正**を願う",
+        "①現物=出品に使った実PSA画像が正。card_no/KEY が空の行は (A) 未収録の可能性が高い。",
         "",
         "## 対象",
         "| itemID | card_no | KEY | 現物PSA画像 | catalog画像 | title |",
@@ -142,7 +144,7 @@ def build_catalog_request_md(rows, today, requester="HQ"):
             f"| {r.get('itemID','')} | {r.get('card_no','')} | {r.get('KEY','')} | "
             f"{r.get('現物PSA_URL','')} | {r.get('catalog_URL','')} | {r.get('title','')} |")
     lines += ["", "## 期待アクション",
-              "- KEY誤解決なら 商品管理シートAI列のKEY是正(正しい変種id)",
-              "- catalog画像が変種違いなら catalog の image を①現物と同変種に差替",
-              "- 是正後、本依頼を `_processed.md` 化"]
+              "- (A)未収録: catalog に product_id 追加(or 別名/番号体系を登録)。対象外シリーズなら明記",
+              "- (B)変種違い: KEY誤解決なら商品管理シートAI列のKEY是正 / catalog画像を①現物と同変種に差替",
+              "- 対応後、本依頼を `_processed.md` 化"]
     return "\n".join(lines) + "\n"
