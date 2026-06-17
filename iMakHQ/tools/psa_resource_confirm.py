@@ -51,7 +51,9 @@ def build_confirm_html(items):
     .grid{display:flex;flex-wrap:wrap;gap:10px;padding:12px}
     .card{width:340px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
     .card.noimg{border-color:#c33;border-width:2px}
-    .card.off{opacity:.4}
+    .card.off{opacity:.5;background:#fff4f4}
+    .rsn{display:none;margin:4px 0;font-size:12px;width:100%}
+    .card.off .rsn{display:block}
     .pair{display:flex;gap:6px;justify-content:center;margin:4px 0}
     .col{text-align:center;flex:1}
     .col .cap{font-size:11px;color:#666}
@@ -80,6 +82,12 @@ def build_confirm_html(items):
                    f"{_img(it.get('psa_image',''), '現物PSA画像なし<br>eBayで確認')}</div>")
         cat_col = (f"<div class='col cat'><div class='cap'>② 解決先(catalog)</div>"
                    f"{_img(it.get('ref_image',''), 'catalog画像なし<br>(KEY未解決)')}</div>")
+        rsn = ("<select class='rsn'>"
+               "<option value='catalog'>②catalogが違う(KEY誤解決/画像違い)</option>"
+               "<option value='cert'>①現物が違う(商品管理シートcert#誤)</option>"
+               "<option value='listing'>①②一致だが売った物と違う(出品誤)</option>"
+               "<option value='unknown'>判断できない/その他</option>"
+               "</select>")
         rows.append(
             f"<div class='{cls}' id='c{idx}' data-idx='{idx}'>"
             f"<label class='sel'><input type='checkbox' checked onchange=\"tog({idx})\"> 仕入れる(①=②なら)</label>"
@@ -88,6 +96,7 @@ def build_confirm_html(items):
             f"<div class='t'>{_html.escape(it.get('title',''))}</div>"
             f"<div class='lbl'>{_html.escape(it.get('ref_label',''))}</div>"
             f"<a href='{_html.escape(it.get('ebay_url',''))}' target='_blank'>元eBay出品を見る</a>"
+            f"{rsn}"
             "</div>"
         )
     js = """
@@ -96,13 +105,18 @@ def build_confirm_html(items):
     function all(v){document.querySelectorAll('.card input').forEach(function(b){
       b.checked=v; tog(b.closest('.card').dataset.idx);});}
     function go(){
-      var ids=[]; document.querySelectorAll('.card').forEach(function(c){
-        if(c.querySelector('input').checked) ids.push(parseInt(c.dataset.idx));});
+      var ids=[], rej=[];
+      document.querySelectorAll('.card').forEach(function(c){
+        var i=parseInt(c.dataset.idx);
+        if(c.querySelector('input[type=checkbox]').checked){ ids.push(i); }
+        else { rej.push({idx:i, reason:c.querySelector('.rsn').value}); }
+      });
       fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({confirmed:ids})}).then(function(){
+        body:JSON.stringify({confirmed:ids, rejected:rej})}).then(function(){
         document.getElementById('main').style.display='none';
         var d=document.getElementById('done');
-        d.style.display='block'; d.textContent='✅ '+ids.length+'件を確定しました。ターミナルに戻って探索完了を待ってください。';
+        d.style.display='block';
+        d.textContent='✅ 確定'+ids.length+'件 / 不一致'+rej.length+'件。ターミナルに戻って探索完了を待ってください。';
       });
     }
     """
@@ -119,9 +133,13 @@ def build_confirm_html(items):
 
 
 def confirm_targets(items, timeout=1800):
-    """ブラウザで確認 → チェックされた idx の list を返す。タイムアウト/未確定は None。"""
+    """ブラウザで確認 → {"confirmed":[idx], "rejected":[{idx,reason}]} を返す。
+
+    確定(チェックON)= ①現物と②catalogが一致 → 探索対象。
+    不一致(OFF)= reason付きで返す(PDCA台帳へ)。タイムアウト/未確定は None。
+    """
     page = build_confirm_html(items).encode("utf-8")
-    state = {"confirmed": None}
+    state = {"done": False, "confirmed": [], "rejected": []}
 
     class H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -140,6 +158,9 @@ def confirm_targets(items, timeout=1800):
             except Exception:
                 data = {}
             state["confirmed"] = [int(x) for x in (data.get("confirmed") or [])]
+            state["rejected"] = [{"idx": int(d.get("idx")), "reason": d.get("reason") or "unknown"}
+                                 for d in (data.get("rejected") or []) if d.get("idx") is not None]
+            state["done"] = True
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -155,7 +176,9 @@ def confirm_targets(items, timeout=1800):
     except Exception:
         pass
     deadline = time.time() + timeout
-    while state["confirmed"] is None and time.time() < deadline:
+    while not state["done"] and time.time() < deadline:
         httpd.handle_request()
     httpd.server_close()
-    return state["confirmed"]
+    if not state["done"]:
+        return None
+    return {"confirmed": state["confirmed"], "rejected": state["rejected"]}

@@ -156,6 +156,55 @@ def _load_restock_psa10():
     return list(csv.DictReader(open(src, encoding="utf-8-sig"))), mp
 
 
+def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):
+    """確認ゲートの不一致(OFF)を PDCA で回す: read台帳→reconcile→write→原因別ルーティング→トレンド。
+
+    Check止まりにしない(pdca_spiral_up_expectation): 前回比 新規/再発/再燃/解決 を出し、
+    catalog誤は Catalog修正依頼書を自動生成、cert誤/出品誤は台帳に振り分けて再掲。失敗は警告のみ。
+    """
+    import datetime
+    today = datetime.date.today().isoformat()
+    recs = []
+    for rj in rejected:
+        i = rj.get("idx")
+        r = idx_row.get(i, {})
+        t = targets[i] if isinstance(i, int) and i < len(targets) else {}
+        iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+        recs.append({"itemID": iid, "cert": cert_map.get(iid, ""), "key": r.get("key", ""),
+                     "card_no": t.get("card_no", ""), "title": t.get("title", ""),
+                     "reason": rj.get("reason"), "psa_image": t.get("psa_image", ""),
+                     "catalog_image": t.get("ref_image", ""), "ebay_url": r.get("ebay_url", "")})
+    confirmed_iids = {mp._ebay_item_id(idx_row[i].get("ebay_url", "") or "")
+                      for i in confirmed_idx if i in idx_row}
+    confirmed_iids.discard("")
+    try:
+        import psa_mismatch_pdca as pdca
+        from sheet_io import read_tab, write_rows_to_tab
+        prev = pdca.ledger_from_rows(read_tab("PSA不一致台帳"))
+        ledger, st = pdca.reconcile(prev, recs, confirmed_iids, today)
+        write_rows_to_tab("PSA不一致台帳", pdca.to_tab_rows(ledger))
+        print(f"📒 不一致PDCA: 新規{st['new']} 再発{st['recurring']} 再燃{st['reopened']} "
+              f"解決{st['resolved']} / 未対処計{st['open']}")
+        if st["by_route"]:
+            print("   原因内訳: " + " ".join(
+                f"{pdca.ROUTE_LABEL.get(k, k)}={v}" for k, v in st["by_route"].items()))
+        buckets = pdca.route_buckets(ledger)
+        cat = buckets.get("catalog") or []
+        if cat:
+            reqdir = r"C:/dev/iMak_data/catalog/requests"
+            os.makedirs(reqdir, exist_ok=True)
+            p = os.path.join(reqdir, f"{today}_psa_mismatch_catalog.md")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(pdca.build_catalog_request_md(cat, today))
+            print(f"   → Catalog修正依頼書: {p} ({len(cat)}件)")
+        for k in ("cert", "listing"):
+            n = len(buckets.get(k) or [])
+            if n:
+                print(f"   → {pdca.ROUTE_LABEL[k]}: 未対処{n}件 (台帳「PSA不一致台帳」参照)")
+    except Exception as e:
+        print(f"⚠ 不一致PDCA skip ({type(e).__name__}: {e})")
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -217,13 +266,17 @@ def main():
                 "ebay_url": r.get("ebay_url", ""),
                 "no_image": not psa_img,       # 現物が引けない行は赤枠で要注意
             })
-        print(f"▶ 目視確認ゲート: {len(targets)}件の正カードをブラウザ表示。確定分だけ探索します...")
-        confirmed = prc.confirm_targets(targets)
-        if confirmed is None:
+        print(f"▶ 目視確認ゲート: {len(targets)}件をブラウザ表示。①現物=②catalog の一致を確認...")
+        res = prc.confirm_targets(targets)
+        if res is None:
             sys.exit("確認がタイムアウト/未確定。探索せず終了(再実行してください)。")
-        if not confirmed:
-            sys.exit("確定0件。探索せず終了。")
-        sel = set(confirmed)
+        confirmed_idx, rejected = res["confirmed"], res["rejected"]
+        idx_row = {i: r for i, r in enumerate(rows)}    # filter前に idx→row 固定
+        # PDCA: 不一致(OFF)を台帳に蓄積 → 原因別振り分け → 再発/解決トレンド
+        _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp)
+        if not confirmed_idx:
+            sys.exit("確定0件(全件不一致)。探索せず終了。台帳「PSA不一致台帳」で原因対処を。")
+        sel = set(confirmed_idx)
         rows = [r for i, r in enumerate(rows) if i in sel]
         print(f"  ✅ 確定 {len(rows)}/{len(targets)}件 → これだけ Mercari/SNKRDUNK 探索")
 

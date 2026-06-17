@@ -40,6 +40,10 @@ def test_build_confirm_html_shows_two_images_and_flags_missing_genbutsu():
     assert "OP11-106" in h and "data-idx='1'" in h    # 各カード
     assert "card noimg" in h and "現物PSA画像なし" in h  # 現物なしは赤枠フラグ
     assert "/confirm" in h                            # POST先
+    # OFF時の原因タグ(PDCA振り分け用)= catalog/cert/listing/unknown
+    for v in ("value='catalog'", "value='cert'", "value='listing'", "value='unknown'"):
+        assert v in h, f"原因selectに {v} が無い"
+    assert "rejected:rej" in h                        # 不一致も reason付きでPOST
 
 
 def test_build_cert_map_reads_column_I():
@@ -70,3 +74,6 @@ def test_gate_confirms_before_search_with_genbutsu_and_defines_out_dir():
     assert "cert_map" in src
     assert "OUT_DIR = mp.DESK" in src             # post-search HTML の NameError 回帰防止
     assert "--no-confirm" in src
+    # 不一致は PDCA に回す(検出して終わりにしない)
+    assert "_run_mismatch_pdca" in src
+    assert "PSA不一致台帳" in src

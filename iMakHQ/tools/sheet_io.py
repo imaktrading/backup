@@ -116,6 +116,20 @@ def write_aux_urls(row_to_urls):
     return len(reqs)
 
 
+def read_tab(tab, sheet_id=MAINT_SHEET_ID):
+    """スプシ tab を 2d list で返す (I/O)。タブが無ければ []。PDCA台帳の前回値読込に使う。"""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    creds = Credentials.from_service_account_file(
+        CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(sheet_id)
+    try:
+        return sh.worksheet(tab).get_all_values()
+    except gspread.WorksheetNotFound:
+        return []
+
+
 def write_rows_to_tab(tab, rows2d, sheet_id=MAINT_SHEET_ID):
     """rows2d ([[header...],[row...],...]) をスプシ tab に書く (clear+update, 無ければ作成)。
 
