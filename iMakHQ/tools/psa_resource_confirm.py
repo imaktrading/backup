@@ -108,7 +108,7 @@ def build_confirm_html(items):
     js = """
     function tog(i){var c=document.getElementById('c'+i);
       c.classList.toggle('off', !c.querySelector('input').checked);}
-    function all(v){document.querySelectorAll('.card input').forEach(function(b){
+    function setAll(v){document.querySelectorAll('.card input[type=checkbox]').forEach(function(b){
       b.checked=v; tog(b.closest('.card').dataset.idx);});}
     function go(){
       var ids=[], rej=[];
@@ -129,8 +129,8 @@ def build_confirm_html(items):
     head = (f"<h1>PSA再仕入れ 目視確認 — {len(items)}件。①現物(出品PSA) と ②解決先(catalog) が"
             "同じカード・同じ変種ならチェックON → 確定。(チェックした分だけ Mercari/SNKRDUNK を探索)</h1>")
     bar = ("<div class='bar'><button class='go' onclick='go()'>✅ 確定して探索開始</button>"
-           "<button onclick='all(true)'>全部ON</button>"
-           "<button onclick='all(false)'>全部OFF</button>"
+           "<button onclick='setAll(true)'>全部ON</button>"
+           "<button onclick='setAll(false)'>全部OFF</button>"
            "<span style='color:#c33;font-size:13px'>※赤枠=現物PSA画像なし(eBayで現物確認してから判断)</span></div>")
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>PSA再仕入れ 確認</title>"
             f"<style>{css}</style></head><body>"

@@ -44,6 +44,9 @@ def test_build_confirm_html_shows_two_images_and_flags_missing_genbutsu():
     for v in ("value='catalog'", "value='cert'", "value='listing'", "value='unknown'"):
         assert v in h, f"原因selectに {v} が無い"
     assert "rejected:rej" in h                        # 不一致も reason付きでPOST
+    # 全部ON/OFF は setAll (inline onclick 内で 'all' は document.all に衝突し効かない: 2026-06-17実機)
+    assert "setAll(true)" in h and "setAll(false)" in h
+    assert "onclick='all(" not in h
 
 
 def test_build_confirm_html_handles_list_ref_label_and_none():
