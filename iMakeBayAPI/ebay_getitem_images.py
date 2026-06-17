@@ -84,10 +84,55 @@ def fetch_listing_images(item_id, _cache={}):
         return []
 
 
+def fetch_listing_qty(item_id):
+    """item_id の listing の **販売可能数(Quantity - QuantitySold)** を返す。失敗/不明は None。
+
+    RESTOCK後の状態同期に使う: revise(qty=1)が実反映されたか実状態で verify(fail-OPEN防止)。
+    DNS/接続エラーはリトライ。
+    """
+    item_id = str(item_id).strip()
+    if not item_id:
+        return None
+    try:
+        k = _load_keys()
+        hdr = {
+            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
+            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
+            "Content-Type": "text/xml",
+        }
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
+            f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+        )
+        text = None
+        for attempt in range(4):
+            try:
+                text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                break
+            except requests.exceptions.ConnectionError:
+                if attempt < 3:
+                    time.sleep(3)
+                    continue
+                raise
+
+        def _g(tag):
+            m = re.search(rf"<{tag}>(\d+)</{tag}>", text)
+            return int(m.group(1)) if m else None
+        q, qs = _g("Quantity"), _g("QuantitySold")
+        if q is None:
+            return None
+        return q - (qs or 0)
+    except Exception:
+        return None
+
+
 if __name__ == "__main__":
     import sys
     for iid in sys.argv[1:]:
         urls = fetch_listing_images(iid)
-        print(f"{iid}: {len(urls)} pics")
+        print(f"{iid}: {len(urls)} pics / avail_qty={fetch_listing_qty(iid)}")
         for u in urls:
             print("  ", u)
