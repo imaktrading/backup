@@ -191,6 +191,37 @@ def main():
     except Exception as e:
         print(f"  ⚠ canonical KEY map 取得失敗 ({type(e).__name__}: {e}) — bare番号で続行")
 
+    # --- pre-search 目視確認ゲート (2026-06-17) ---
+    # 「探す前に、仕入れたい正カードが正しいか」を catalog 正カード画像で目視確認 → 確定分だけ探索。
+    # 番号一致では弾けない変種取り違え(CHR/VMAX・JP/Asia)や KEY未解決(正画像なし)を、探索に時間を
+    # 使う前に人手で確定する。--no-confirm で skip(全件探索, 非対話/test用)。
+    if "--no-confirm" in sys.argv:
+        print("  (--no-confirm) 確認ゲートskip、全件探索")
+    else:
+        import psa_resource_confirm as prc
+        targets = []
+        for i, r in enumerate(rows):
+            meta = mp.card_meta_for_key(r.get("key")) if r.get("key") else None
+            img = (meta or {}).get("image", "")
+            targets.append({
+                "idx": i,
+                "title": (r.get("title") or "")[:90],
+                "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
+                "ref_image": img,
+                "ref_label": (meta or {}).get("hint", "") or (r.get("set_no") or ""),
+                "ebay_url": r.get("ebay_url", ""),
+                "no_image": not img,
+            })
+        print(f"▶ 目視確認ゲート: {len(targets)}件の正カードをブラウザ表示。確定分だけ探索します...")
+        confirmed = prc.confirm_targets(targets)
+        if confirmed is None:
+            sys.exit("確認がタイムアウト/未確定。探索せず終了(再実行してください)。")
+        if not confirmed:
+            sys.exit("確定0件。探索せず終了。")
+        sel = set(confirmed)
+        rows = [r for i, r in enumerate(rows) if i in sel]
+        print(f"  ✅ 確定 {len(rows)}/{len(targets)}件 → これだけ Mercari/SNKRDUNK 探索")
+
     # --- メルカリ (一括 Selenium, name_jp検索 + 画像検索フォールバック) ---
     print("▶ メルカリ最安取得中 (name_jp検索+画像検索フォールバック)...")
     mercari_res = {}
@@ -285,8 +316,10 @@ def main():
         ])
     print(f"\n再仕入れ可: {go}/{len(rows)}  不能(End候補): {len(rows)-go}")
 
-    # 目視ビューア (仕入候補 + 補 を正カードと並べて変種確認 → 買う前に取り違え防止)
+    # 探索後の最終確認ビューア (確定カードの 仕入候補 + 補 を正カードと並べる)。
+    # ※「正しいカードを探すか」は探索前の確認ゲート(prc.confirm_targets)で済。ここは結果の最終目視。
     try:
+        OUT_DIR = mp.DESK  # デスクトップに出力(ユーザーがすぐ開ける)
         os.makedirs(OUT_DIR, exist_ok=True)
         _hp = os.path.join(OUT_DIR, "psa_resource_review.html")
         prh.build_html(html_items, _hp)
