@@ -396,22 +396,15 @@ def create_amazon_driver(headless: bool = True, use_login_profile: bool = True):
 def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optional[dict]:
     """Selenium (undetected_chromedriver + Amazon login profile) で取得.
 
-    判定: 抽出くん の _judge_stock 流用 (= element 検出ベース):
-      1. #availability text に在庫切れ keyword → in_stock=False
-      2. #add-to-cart-button 存在 → in_stock=True
-      3. #buy-now-button 存在 → in_stock=True
-      4. どれもなければ None (= 判定不能)
+    判定: rendered HTML を _detect_stock に通す (2026-06-17 統一)。
+    = requests 経路と同じ 販売元 Rule 0 (第三者→False/取下げ) + #availability の
+    在庫 prose 判定。 None は判定不能 (fail-closed)。
 
     Args:
         url: Amazon URL
         driver: 外部から渡された driver (再利用、推奨)。None なら内部で生成
         headless: driver=None 時の起動モード
     """
-    from selenium.webdriver.common.by import By   # noqa: PLC0415
-    UNAVAILABLE_KEYWORDS = (
-        "在庫切れ", "Currently unavailable", "お取り扱いできません",
-        "現在お取り扱い", "入荷時期は未定",
-    )
     own_driver = False
     if driver is None:
         driver = create_amazon_driver(headless=headless)
@@ -422,36 +415,16 @@ def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optiona
         html = driver.page_source
         name = _extract_name(html)
         price = _extract_price_jpy(html)
-
-        # 1) availability text 確認
-        avail_text = ""
-        try:
-            elem = driver.find_element(By.CSS_SELECTOR, "#availability")
-            avail_text = (elem.text or "").strip()
-        except Exception:
-            pass
-        if avail_text and any(kw in avail_text for kw in UNAVAILABLE_KEYWORDS):
-            return {"name": name, "in_stock": False, "price_jpy": None,
-                    "_reason": f"availability_sold: {avail_text[:30]}"}
-
-        # 2) #add-to-cart-button element 存在
-        try:
-            driver.find_element(By.CSS_SELECTOR, "#add-to-cart-button")
-            return {"name": name, "in_stock": True, "price_jpy": price,
-                    "_reason": "add_to_cart_element"}
-        except Exception:
-            pass
-
-        # 3) #buy-now-button element 存在
-        try:
-            driver.find_element(By.CSS_SELECTOR, "#buy-now-button")
-            return {"name": name, "in_stock": True, "price_jpy": price,
-                    "_reason": "buy_now_element"}
-        except Exception:
-            pass
-
-        # 4) 判定不能 → None
-        return None
+        # ★ 2026-06-17: 新 buy-box DOM 対応。 旧 element ベース (#add-to-cart-button /
+        # #buy-now-button は新 DOM で消滅、 seller gate も無かった) を廃し、 rendered HTML を
+        # _detect_stock に通す。 requests 経路と同一の 販売元 Rule 0 (第三者→取下げ) +
+        # prose 在庫判定 (#availability の 残りN点/在庫あり/通常X日発送) に統一。
+        verdict, reason = _detect_stock(html)
+        if verdict is None:
+            return None  # 判定不能 → fail-closed (取下げに流さない)
+        return {"name": name, "in_stock": verdict,
+                "price_jpy": price if verdict else None,
+                "_reason": f"selenium:{reason}"}
     finally:
         if own_driver:
             try: driver.quit()
