@@ -259,8 +259,12 @@ def append_new_urls(
     if not new_rows:
         return {"appended": 0, "skipped_existing": skipped, "input": len(items)}
 
-    # 末尾に append (既存行は触らない)
-    ws.append_rows(new_rows, value_input_option="USER_ENTERED")
+    # 末尾に append (既存行は触らない)。
+    # table_range="A1" で「表の検索起点を A1 に固定」する (= 既定 None だと Sheets API の
+    # 表検出が col A 以外のスパース列ブロックを表と誤認し、新行を右方向にずらして着地させる
+    # 事故が起きる。2026-06-17: HIGH の出品日列(U)に stray 値があり Porter 7 行が U 列起点に
+    # +20 列ずれて誤書込された)。A1 起点固定で必ず col A の本表末尾に左詰め append される。
+    ws.append_rows(new_rows, value_input_option="USER_ENTERED", table_range="A1")
 
     return {
         "appended": len(new_rows),

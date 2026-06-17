@@ -1,5 +1,38 @@
 # iMakHarvest daily_report
 
+## 2026-06-17 — sheet_writer append の列ズレ事故修正 (= HIGH Porter 7行が U列起点に +20列ずれ)
+
+### 決定
+
+- user 指摘「HIGH へのメルカリ/Porter 書込が U列に URL を書いている」を是正。
+- 真因: `append_new_urls` の `ws.append_rows()` が **table_range 未指定 (既定 None)** のため、
+  Sheets API の表検出が col A 本表でなく **出品日列(U)のスパースブロック** (legit な U列日付 +
+  stray な U1057="2026-06-16") を表と誤認 → 新7行を **U列起点・+20列ずれ** (A→U/C→W/F→Z/S→AM)
+  で row1058 に着地させた。snkrdunk_op の同型事故 (A列空タブで append が遠方列に誤書込) と同根。
+- 対処方針: **append の検索起点を A1 に固定** (`table_range="A1"`) して col A 本表末尾へ左詰め強制。
+  破損済データは再スクレイプ不要・既存シフト値から決定的に復元。
+
+### 変更
+
+- `sheet_writer.py:263` — `ws.append_rows(new_rows, value_input_option=..., table_range="A1")`
+  (table_range 追加 + 事故経緯コメント)。
+- `tests/test_sheet_writer_dedupe.py` — mock append_rows に table_range 受領 + `append_kwargs` 記録、
+  回帰テスト `test_append_anchors_table_range_at_a1` 追加 (= table_range=="A1" を担保)。
+- HIGH スプシ実データ修復: シフト済 7行(src 1058-1064 の U-AN)を A1054:T1060 に復元書込、
+  stray U1057 + 旧シフト領域 U1057:AN1064 を batch_clear。backup =
+  `debug/high_porter_shift_backup_20260617.json`。
+
+### 検証
+
+- ✅ 修復後 実機照合: last col-A row=1060、シフト行(no-A かつ U-AN data)=0件。
+  1054-1060 の 7 Porter が A=URL/C=タイトル/F=価格/S=色 で正列着地を確認。
+- ✅ 別 anomaly 行 [115,119,120,149,728] は **列ズレでなく** A列空の正常既存行 (C列にタイトル、
+  E/F/G 正列) と確認 → 今回バグ無関係、不触。
+- ✅ `tests/test_sheet_writer_dedupe.py` + `test_sheet_writer_snkrdunk_aux.py` = **73 passed** (-s)。
+  (全体 pytest は online/selenium テストの capture teardown で末尾クラッシュ＝既存環境ノイズ、本変更無関係)
+
+---
+
 ## 2026-06-14 (= 続) — スニダン ワンピPSA10 抽出を正URL化 (= 17→233カード、 販売中網羅)
 
 ### 決定

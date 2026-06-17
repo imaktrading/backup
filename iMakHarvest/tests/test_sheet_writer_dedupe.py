@@ -30,14 +30,17 @@ class _MockWorksheet:
     def __init__(self, existing_rows: list[list[str]]):
         self._values = existing_rows
         self.append_calls: list[list[list[str]]] = []
+        self.append_kwargs: list[dict] = []
         self.update_calls: list[tuple] = []
         self.batch_update_calls: list[list] = []
 
     def get_all_values(self):
         return self._values
 
-    def append_rows(self, rows, value_input_option=None):  # noqa: ARG002
+    def append_rows(self, rows, value_input_option=None, table_range=None):  # noqa: ARG002
         self.append_calls.append(rows)
+        self.append_kwargs.append({"value_input_option": value_input_option,
+                                   "table_range": table_range})
 
     def update(self, *args, **kwargs):  # noqa: ARG002
         self.update_calls.append((args, kwargs))
@@ -349,6 +352,17 @@ class TestAppendNewUrls:
         append_new_urls(ws, items)
         assert ws.update_calls == []
         assert ws.batch_update_calls == []
+
+    def test_append_anchors_table_range_at_a1(self):
+        # 回帰テスト (2026-06-17): append_rows は table_range="A1" 固定で呼ばれること。
+        # 既定 None だと Sheets API の表検出が col A 以外のスパース列を表と誤認し、
+        # 新行を右方向にずらして着地させる (HIGH 出品日列 U に stray 値があり Porter が
+        # U 列起点に +20 列ずれた事故)。A1 起点固定で col A 本表末尾に左詰め append される。
+        ws = _ws_with_existing_urls(["m11111111111"])
+        items = [{"url": "https://jp.mercari.com/item/m22222222222"}]
+        append_new_urls(ws, items)
+        assert len(ws.append_kwargs) == 1
+        assert ws.append_kwargs[0]["table_range"] == "A1"
 
     def test_empty_input(self):
         ws = _ws_with_existing_urls([])
