@@ -48,6 +48,16 @@ def test_itemid_inserted_right_after_action():
     assert rr[0][0] == "Revise" and rr[0][1] == "i1"
 
 
+def test_valid_cert_itemid_filters_pollution():
+    # 2026-06-18 試走で検出: 商品管理シート多カテゴリ混在で非TCG行が cert→itemID を汚染
+    # (cert='356700921169' → itemID='Cowes T-shirt XL')。形式検証で弾く。
+    assert rv._valid_cert_itemid("142490884", "358481165472")        # 正(9桁cert/12桁itemID)
+    assert not rv._valid_cert_itemid("356700921169", "Cowes T-shirt XL")  # 名前混入→弾く
+    assert not rv._valid_cert_itemid("142490884", "notnum")          # itemID非数字
+    assert not rv._valid_cert_itemid("abc", "358481165472")          # cert非数字
+    assert not rv._valid_cert_itemid("", "")
+
+
 def test_bad_format_raises():
     import pytest
     with pytest.raises(ValueError):

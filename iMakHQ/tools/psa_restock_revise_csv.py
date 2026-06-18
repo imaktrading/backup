@@ -76,15 +76,26 @@ def add_rows_to_revise(add_header, add_rows, cert_to_itemid):
     return revise_header, revise_rows, skipped
 
 
+def _valid_cert_itemid(cert, itemid):
+    """cert=PSA cert(数字8-9桁) / itemID=eBay itemID(数字11-12桁) の形式検証。
+
+    商品管理シートは多カテゴリ(TCG/Tシャツ/G-shock等)混在で、非TCG行は I列がcertでない
+    (= 商品名や別IDが入る)。形式で弾かないと cert→itemID が汚染される(2026-06-18 試走で
+    cert='356700921169' → itemID='Cowes T-shirt XL' のゴミ混入を検出)。
+    """
+    return (cert.isdigit() and 7 <= len(cert) <= 9
+            and itemid.isdigit() and 11 <= len(itemid) <= 12)
+
+
 def _cert_to_itemid_map():
-    """商品管理シート(I列=cert# / B列=itemID)の逆引き {cert: itemID} (I/O)。"""
+    """商品管理シート(I列=cert# / B列=itemID)の逆引き {cert: itemID} (I/O)。形式検証で汚染除去。"""
     from sheet_io import _product_ws, PRODUCT_COL_ITEMID, PRODUCT_COL_CERT
     out = {}
     for r in _product_ws().get_all_values()[1:]:
         if len(r) > max(PRODUCT_COL_ITEMID, PRODUCT_COL_CERT):
             iid = (r[PRODUCT_COL_ITEMID] or "").strip()
             cert = (r[PRODUCT_COL_CERT] or "").strip()
-            if iid and cert:
+            if iid and cert and _valid_cert_itemid(cert, iid):
                 out[cert] = iid
     return out
 
