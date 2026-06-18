@@ -177,6 +177,63 @@ def set_status(con, queue_id, status, ts=""):
     con.execute("UPDATE improvement_queue SET status=?, reviewed_ts=? WHERE queue_id=?", (status, ts, queue_id))
 
 
+def prune_resolved_gaps(con, resolve_fn, ts="", sources=("missing_models",)):
+    """解決済の catalog_gap を queue から落とす(status='done')= 「真の未解決のみ」に保つ。
+
+    catalog に後から収録/索引修正された model は、resolve_fn(category,item_id)→True を返す。
+    これを done 化しないと emit_consolidated_request が毎回 stale を再発行し、Catalog に同じ
+    依頼が積み続ける(2026-06-18 Catalog 指摘B: pending の約60%が解決済 stale)。
+
+    Args:
+        resolve_fn: (category, item_id) -> bool。catalog で解決可能(=もう gap でない)なら True。
+        sources: prune 対象の source(既定: psa_to_csv 由来の missing_models のみ。md_import 等は触らない)。
+    Returns:
+        {"pruned": n, "checked": m, "remaining_pending": k}
+    """
+    ph = ",".join("?" * len(sources))
+    rows = con.execute(
+        f"SELECT queue_id, category, item_id FROM improvement_queue "
+        f"WHERE status='pending' AND source IN ({ph})", tuple(sources)).fetchall()
+    pruned = 0
+    for r in rows:
+        try:
+            ok = resolve_fn(r["category"], r["item_id"])
+        except Exception:
+            ok = False                       # 解決判定失敗は触らない(fail-closed=残す)
+        if ok:
+            set_status(con, r["queue_id"], "done", ts)
+            pruned += 1
+    con.commit()
+    remaining = con.execute(
+        "SELECT COUNT(*) FROM improvement_queue WHERE status='pending'").fetchone()[0]
+    return {"pruned": pruned, "checked": len(rows), "remaining_pending": remaining}
+
+
+def make_catalog_resolver(catalog_db):
+    """catalog products.sqlite を引いて (category,item_id)->bool を返す resolve_fn を生成。
+
+    解決 = item_id が catalog の product_id(or alias_of)として実在。gshock 型番はこの exact 一致で
+    大半が落ちる(後から収録済 = stale)。TCG の崩れた model 文字列は exact で当たらず pending 維持
+    (= resolver/正規化 側の課題として残る。ここでは安全側に倒す)。接続は呼出側で使い回せるよう
+    クロージャに閉じる。
+    """
+    con = sqlite3.connect(catalog_db)
+    con.row_factory = sqlite3.Row
+    cache = {}
+
+    def _resolve(category, item_id):
+        key = (category, item_id)
+        if key in cache:
+            return cache[key]
+        hit = con.execute(
+            "SELECT 1 FROM products WHERE (product_id=? OR alias_of=?) LIMIT 1",
+            (item_id, item_id)).fetchone() is not None
+        cache[key] = hit
+        return hit
+
+    return _resolve
+
+
 def list_queue(con, status=None, limit=200):
     if status:
         rows = con.execute("SELECT * FROM improvement_queue WHERE status=? ORDER BY priority DESC, queue_id LIMIT ?",

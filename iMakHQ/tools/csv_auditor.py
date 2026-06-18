@@ -48,6 +48,7 @@ CSV_DIR = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
 REVIEW_DIR = os.path.join(WORKSPACE, "iMakHQ", "review_logs")
 CATALOG_REQ_DIR = r"C:\dev\iMak_data\catalog\requests"
 MISSING_MODELS_PATH = r"C:/dev/iMak_data/catalog/missing_models.csv"  # psa_to_csv 検出の catalog未登録
+CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"              # 解決済 prune の照合先
 
 # project → check_csv.py / listing_commonカテゴリ / *Category値 / 固有列 / 送料自動修正可否
 CATEGORY_MAP = {
@@ -732,12 +733,20 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run):
             _pdca.record_finding(con, ts, project, sku, "program", str(msg)[:120], ts=ts)
         # psa_to_csv 検出の catalog未登録 (missing_models.csv) も queue へ (= 入稿しない catalog-miss を還元)
         _mm = _pdca.import_missing_models(con, MISSING_MODELS_PATH, ts=ts)
+        # 解決済 prune: catalog に後から収録/索引修正された gap を done 化 → 真の未解決のみ emit
+        # (毎回 stale を再発行して Catalog に積むのを止める。Catalog 指摘B)。
+        pruned = 0
+        try:
+            pr = _pdca.prune_resolved_gaps(con, _pdca.make_catalog_resolver(CATALOG_DB), ts=ts)
+            pruned = pr["pruned"]
+        except Exception as _pe:
+            print(f"  ⚠️ PDCA prune skip: {type(_pe).__name__}: {_pe}")
         synced = _pdca.sync_processed(con, CATALOG_REQ_DIR, ts=ts)        # ループ閉じ
         emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts)
         con.commit()
         con.close()
-        if emitted or synced:
-            print(f"  📊 PDCA: 改善キュー集約発行 {emitted} 件 / 完了同期 {synced} 件 (dedup済)")
+        if emitted or synced or pruned:
+            print(f"  📊 PDCA: 集約発行 {emitted} 件 / 完了同期 {synced} 件 / 解決済prune {pruned} 件 (dedup済)")
     except Exception as _e:
         print(f"  ⚠️ PDCA accumulate skip (監査は継続): {type(_e).__name__}: {_e}")
 
