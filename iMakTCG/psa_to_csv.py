@@ -2287,7 +2287,9 @@ def load_targets_from_sheet_psa():
     return cert_numbers, cost_map, url_map, title_map
 
 
-_PSA_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa"
+# profile は env で上書き可(RESTOCK 並走時に新規出品と別 profile にして Chrome 競合を避ける)。
+# 未設定なら従来の本番 profile(新規出品は不変)。
+_PSA_PROFILE_DIR = os.environ.get("PSA_PROFILE_DIR") or r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa"
 _psa_warmup_driver = None  # warmup で起動した uc.Chrome、 main の本処理に流用
 
 

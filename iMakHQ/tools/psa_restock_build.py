@@ -107,16 +107,21 @@ def main():
         json.dump(inp, f, ensure_ascii=False, indent=2)
 
     # psa_to_csv を RESTOCK入力モードで実行(新コア生成・forced変種)。Selenium PSA scrape は新規と同じ。
-    env = dict(os.environ, PSA_RESTOCK_INPUT=json_path, TCG_USE_NEW_GEN="1", PSA_NO_SHUFFLE="1")
-    print("▶ psa_to_csv(RESTOCK入力モード)で Add CSV生成中...(Selenium・新規と同一生成)")
+    # 並走安全化: 新規出品と別 Chrome profile(PSA_PROFILE_DIR)→ profile競合回避。
+    restock_profile = os.path.join(os.path.dirname(_CSV_OUT_DIR.rstrip("/\\")), "chrome_profile_psa_restock")
+    env = dict(os.environ, PSA_RESTOCK_INPUT=json_path, TCG_USE_NEW_GEN="1", PSA_NO_SHUFFLE="1",
+               PSA_PROFILE_DIR=restock_profile)
+    # 並走安全化: 「最新」でなく **本実行で生成された** tcg_upload を差分で特定(新規出品の並走CSV誤掴み防止)
+    before = set(glob.glob(os.path.join(_CSV_OUT_DIR, "tcg_upload_*.csv")))
+    print("▶ psa_to_csv(RESTOCK入力モード)で Add CSV生成中...(Selenium・新規と同一生成・別profile)")
     r = subprocess.run([sys.executable, "psa_to_csv.py"], cwd=_TCG_DIR, env=env)
     if r.returncode != 0:
         sys.exit(f"psa_to_csv 異常終了(returncode={r.returncode})")
-
-    adds = sorted(glob.glob(os.path.join(_CSV_OUT_DIR, "tcg_upload_*.csv")), key=os.path.getmtime)
-    if not adds:
-        sys.exit("Add CSV(tcg_upload_*.csv)が見つからない")
-    add_csv = adds[-1]
+    new_files = sorted(set(glob.glob(os.path.join(_CSV_OUT_DIR, "tcg_upload_*.csv"))) - before,
+                       key=os.path.getmtime)
+    if not new_files:
+        sys.exit("本実行で生成された Add CSV(tcg_upload_*.csv)が見つからない")
+    add_csv = new_files[-1]   # 本実行で新規生成された分だけから選ぶ(並走の他CSVを掴まない)
     out_csv = os.path.join(_DESK, "RESTOCK_revise_" + os.path.basename(add_csv).replace("tcg_upload_", ""))
     n, sk = rv.convert_file(add_csv, out_csv)
     print(f"✅ Revise CSV生成: {out_csv} ({n}行 / 変換skip {len(sk)})")

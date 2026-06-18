@@ -58,6 +58,16 @@ def test_writeback_has_main_entry():
     assert "def main(" in src and '__name__ == "__main__"' in src
 
 
+def test_parallel_safe_with_new_listing():
+    # 新規出品と並走可: 別Chrome profile + 本実行で生成したCSVだけ掴む(2026-06-18)
+    gsrc = (Path(__file__).resolve().parent.parent / "iMakTCG" / "psa_to_csv.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("PSA_PROFILE_DIR")' in gsrc                  # profile env上書き(競合回避)
+    osrc = (_TOOLS / "psa_restock_build.py").read_text(encoding="utf-8")
+    assert "PSA_PROFILE_DIR=restock_profile" in osrc                    # RESTOCKは別profile
+    assert "before = set(glob.glob" in osrc and "- before" in osrc     # 本実行生成分のみ(誤掴み防止)
+    assert "adds[-1]" not in osrc                                       # 「最新」掴みは廃止
+
+
 def test_orchestrator_wires_psatocsv_then_revise():
     src = (_TOOLS / "psa_restock_build.py").read_text(encoding="utf-8")
     assert "PSA_RESTOCK_INPUT" in src and 'TCG_USE_NEW_GEN="1"' in src
