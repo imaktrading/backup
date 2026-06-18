@@ -240,7 +240,7 @@ def test_gate_skips_already_confirmed_on_rerun():
 def test_gate_v2_wiring():
     src = (_TOOLS / "psa_resource_gate.py").read_text(encoding="utf-8")
     i_confirm = src.index("confirm_targets")
-    i_mercari = src.index("メルカリ最安取得中")
+    i_mercari = src.index("メルカリ最安取得")
     assert i_confirm < i_mercari, "確認ゲートが探索より後(無意味)"
     assert "ebay_listing_image" in src               # ①現物=eBay画像
     assert "catalog_variants_for_cardno" in src       # ②候補

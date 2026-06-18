@@ -440,23 +440,51 @@ def main():
     except Exception as e:
         print(f"  ⚠ 待ち台帳読込skip ({type(e).__name__}: {e})")
 
-    # --- メルカリ (一括 Selenium, name_jp検索 + 画像検索フォールバック) ---
-    print("▶ メルカリ最安取得中 (name_jp検索+画像検索フォールバック)...")
-    mercari_res = {}
-    try:
-        cards = [{**mp.build_card_query(r.get("title", ""), r.get("set_no", ""), r.get("key")),
-                  "ebay_item_id": mp._ebay_item_id(r.get("ebay_url", ""))} for r in rows]
-        mercari_res = mp.fetch_mercari_cheapest(cards)
-    except Exception as e:
-        print(f"  ⚠ メルカリ skip ({type(e).__name__}: {e}) — SNKRDUNKのみで判定")
+    # --- 研究キャッシュ: 当日の Mercari/SNKRDUNK 結果を再利用(再走の再スクレイプ/BANリスク回避)。--fresh で無視 ---
+    import datetime as _dt
+    import json as _json
+    _today = _dt.date.today().isoformat()
+    _cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "psa_research_cache.json")
+    _rcache = {}
+    if "--fresh" not in sys.argv:
+        try:
+            with open(_cache_path, encoding="utf-8") as _f:
+                _rcache = _json.load(_f)
+        except Exception:
+            _rcache = {}
+    _iids = [mp._ebay_item_id(r.get("ebay_url", "") or "") for r in rows]
 
-    # --- SNKRDUNK (HTTP-only, 全シリーズ, Selenium不要) ---
-    # productNumber→id を /en/v1/search?type=trading-card で HTTP 解決→ min-prices で PSA10。
-    # 旧: harvest Selenium(CSR描画フレで0件多発)を廃止。HTTP化で安定+全シリーズ。
-    print("▶ SNKRDUNK PSA10 取得中 (HTTP, 全シリーズ)...")
+    def _cache_hit(iid):
+        c = _rcache.get(iid)
+        return c if (c and c.get("date") == _today) else None
+
+    # --- メルカリ (一括 Selenium。当日キャッシュ分は再利用、未キャッシュのみスクレイプ) ---
+    mercari_res = {}
+    _to_scrape = [i for i in range(len(rows)) if not (_cache_hit(_iids[i]) and "mercari" in _cache_hit(_iids[i]))]
+    for i in range(len(rows)):
+        c = _cache_hit(_iids[i])
+        if c and "mercari" in c:
+            mercari_res[i] = c["mercari"]
+    print(f"▶ メルカリ最安取得: 当日キャッシュ再利用 {len(rows)-len(_to_scrape)}件 / 新規スクレイプ {len(_to_scrape)}件")
+    if _to_scrape:
+        try:
+            cards = [{**mp.build_card_query(rows[i].get("title", ""), rows[i].get("set_no", ""), rows[i].get("key")),
+                      "ebay_item_id": _iids[i]} for i in _to_scrape]
+            scraped = mp.fetch_mercari_cheapest(cards)
+            for j, i in enumerate(_to_scrape):
+                mercari_res[i] = scraped.get(j)
+        except Exception as e:
+            print(f"  ⚠ メルカリ skip ({type(e).__name__}: {e}) — SNKRDUNKのみで判定")
+
+    # --- SNKRDUNK (HTTP-only。当日キャッシュ分は再利用) ---
+    print("▶ SNKRDUNK PSA10 取得中 (HTTP, 当日分はキャッシュ再利用)...")
     import snkrdunk_psa_resource as sp
     snkr_res = {}
     for i, r in enumerate(rows):
+        c = _cache_hit(_iids[i])
+        if c and "snkrdunk" in c:
+            snkr_res[i] = c["snkrdunk"]
+            continue
         cn = _resource_card_number(r.get("title", "") or "", r.get("key"))
         if not cn:
             snkr_res[i] = None
@@ -477,6 +505,16 @@ def main():
             print(f"  [{i+1}/{len(rows)}] {cn}: PSA10 ¥{res.get('psa10_price_jpy')}", flush=True)
         else:
             print(f"  [{i+1}/{len(rows)}] {cn}: PSA10在庫なし", flush=True)
+
+    # 研究キャッシュ更新(当日付き) — 次回の同日再走はスクレイプ不要に
+    for i in range(len(rows)):
+        if _iids[i]:
+            _rcache[_iids[i]] = {"mercari": mercari_res.get(i), "snkrdunk": snkr_res.get(i), "date": _today}
+    try:
+        with open(_cache_path, "w", encoding="utf-8") as _f:
+            _json.dump(_rcache, _f, ensure_ascii=False)
+    except Exception as e:
+        print(f"  ⚠ 研究キャッシュ保存skip ({type(e).__name__}: {e})")
 
     # --- 統合 + 出力 ---
     MAX_AUX = 5  # 補URL列数 (AC-AG 相当)

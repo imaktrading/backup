@@ -63,5 +63,5 @@ def test_gate_wires_restock_wait():
     assert 'write_rows_to_tab("再仕入れ待ち"' in src   # End候補を台帳に記録
     # 合流は確認ゲートの後・探索の前(目視skip)
     i_merge = src.index("再チェックに合流")
-    i_search = src.index("メルカリ最安取得中")
+    i_search = src.index("メルカリ最安取得")
     assert i_merge < i_search
