@@ -165,9 +165,15 @@ def _load_restock_psa10():
     import glob
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import mercari_psa_resource as mp
-    files = [p for p in glob.glob(os.path.join(mp.DESK, "03_PSA再仕入れ候補_*.csv"))
-             if "_メルカリ判定" not in os.path.basename(p)]
-    src = max(files, key=os.path.getmtime) if files else mp.build_input_from_funnel()
+    # 毎回 funnel から最新生成(実需フィルタ込み)→ 古い 03_CSV があっても無視(=手動削除不要)。
+    # funnel が無い時だけ既存の 03_CSV にfallback(手動入力の救済)。
+    src = mp.build_input_from_funnel()
+    if not src:
+        files = [p for p in glob.glob(os.path.join(mp.DESK, "03_PSA再仕入れ候補_*.csv"))
+                 if "_メルカリ判定" not in os.path.basename(p)]
+        if files:
+            src = max(files, key=os.path.getmtime)
+            print(f"  (funnel無 → 既存CSV使用: {os.path.basename(src)})", flush=True)
     if not src:
         return [], mp
     rows = list(csv.DictReader(open(src, encoding="utf-8-sig")))

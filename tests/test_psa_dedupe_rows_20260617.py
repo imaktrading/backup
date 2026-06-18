@@ -32,6 +32,16 @@ def test_dedupe_removes_duplicate_itemids_preserving_order():
     assert [_id(r) for r in out] == ["358481165472", "358441104504", "999"]
 
 
+def test_load_restock_prefers_funnel_over_stale_desktop_csv():
+    # 2026-06-18: 毎回 funnel から最新生成(実需フィルタ込み)→ 古い 03_CSV があっても無視
+    # (= 手動削除不要)。funnel無の時だけ既存CSVにfallback。
+    src = (Path(__file__).resolve().parent.parent / "iMakHQ" / "tools" / "psa_resource_gate.py").read_text(encoding="utf-8")
+    body = src[src.index("def _load_restock_psa10"):]
+    body = body[:body.index("\ndef ", 1)]
+    assert "src = mp.build_input_from_funnel()" in body            # funnelから生成
+    assert body.index("build_input_from_funnel()") < body.index("glob.glob")  # funnel優先 → CSVはfallback
+
+
 def test_dedupe_falls_back_to_url_title_when_no_itemid():
     rows = [
         {"ebay_url": "", "title": "X"},
