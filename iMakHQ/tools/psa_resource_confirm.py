@@ -297,6 +297,10 @@ def _serve_confirm(page_bytes, extract, timeout):
         def do_GET(self):
             if self.path.startswith("/img?"):
                 u = (urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("u") or [""])[0]
+                # 出品ページURL(mercari/snkrdunk)→実画像URLに解決してから取得。
+                # これが無いとRESTOCK仕入候補のページURLをそのままHTMLとして掴み画像が出ない
+                # (_resolve_image_url が定義only・未配線だった。2026-06-19 真因)。
+                u = _resolve_image_url(u)
                 data, ctype = _fetch_image(u)
                 if data:
                     self.send_response(200)
