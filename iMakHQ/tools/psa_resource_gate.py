@@ -284,17 +284,21 @@ def main():
             except Exception as e:
                 print(f"  ⚠ 目視確定済 読込skip ({type(e).__name__}: {e})")
         total_rows = len(rows)
-        auto_idx = set()       # 確定済=再目視スキップ
+        auto_idx = set()       # 変種確定済=再目視スキップ
         todo = []              # (i, r) 今回目視する行
         for i, r in enumerate(rows):
             iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
-            if iid and iid in confirmed_prev:
-                r["key"] = confirmed_prev[iid]          # 過去の目視確定KEYを採用(再目視不要)
+            # KEY解決済(itemID join or 過去目視で確定)= 変種が既に確定 → 再目視しない。
+            # 誤りの最終捕捉は RESTOCK視覚確証(現物 vs 仕入候補)で行う(= 二重に目視させない)。
+            if r.get("key"):
+                auto_idx.add(i)
+            elif iid and iid in confirmed_prev:
+                r["key"] = confirmed_prev[iid]
                 auto_idx.add(i)
             else:
                 todo.append((i, r))
         if auto_idx:
-            print(f"  ⏭ 目視確定済 {len(auto_idx)}件は再目視スキップ(過去確定KEY採用)")
+            print(f"  ⏭ 変種確定済(KEYあり) {len(auto_idx)}件は再目視スキップ。新規/未解決 {len(todo)}件のみ目視")
 
         targets_by_idx = {}    # {row index: target}
         if todo:

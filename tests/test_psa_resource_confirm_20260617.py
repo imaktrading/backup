@@ -228,6 +228,8 @@ def test_gate_skips_already_confirmed_on_rerun():
     assert "--review-all" in src                       # 全件再目視フラグ
     assert "confirmed_prev" in src and "auto_idx" in src
     assert 'r["key"] = confirmed_prev[iid]' in src     # 過去確定KEYを採用して目視skip
+    # KEY解決済(変種確定済)は再目視しない(2026-06-18: 一度目視した分の再表示をやめる)
+    assert "if r.get(\"key\"):" in src
     # 確定済skip は目視対象(targets)に入れない
     assert "targets_by_idx" in src
 
