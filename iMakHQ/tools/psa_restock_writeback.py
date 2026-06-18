@@ -90,3 +90,22 @@ def reconcile_and_write(today):
 
     return {"total": len(items), "done": len(cls["done"]),
             "pending": len(cls["pending"]), "unknown": len(cls["unknown"])}
+
+
+def main():
+    import sys
+    import datetime
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    today = datetime.date.today().isoformat()
+    st = reconcile_and_write(today)
+    print(f"🔄 RESTOCK状態同期: 計{st['total']} / 実行済{st['done']} / "
+          f"入稿待ち{st['pending']} / 不明{st['unknown']}")
+    if st["pending"] or st["unknown"]:
+        print("   ⚠ 入稿待ち/不明あり=要対応(silentに済化しない。反映後に再実行で解消)")
+
+
+if __name__ == "__main__":
+    main()

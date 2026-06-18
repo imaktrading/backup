@@ -45,6 +45,19 @@ def test_psatocsv_restock_mode_is_env_gated_and_uses_forced():
     assert "not _restock_input and len(cert_numbers)" in src
 
 
+def test_control_panel_has_restock_buttons():
+    src = (Path(__file__).resolve().parent.parent / "iMakHQ" / "control_panel.py").read_text(encoding="utf-8")
+    i1 = src.index("RESTOCK Revise CSV生成")
+    assert '"psa_restock_build.py"' in src[i1:i1 + 400]      # ①生成ボタン
+    i2 = src.index("RESTOCK状態同期")
+    assert '"psa_restock_writeback.py"' in src[i2:i2 + 400]  # ②書戻しボタン
+
+
+def test_writeback_has_main_entry():
+    src = (_TOOLS / "psa_restock_writeback.py").read_text(encoding="utf-8")
+    assert "def main(" in src and '__name__ == "__main__"' in src
+
+
 def test_orchestrator_wires_psatocsv_then_revise():
     src = (_TOOLS / "psa_restock_build.py").read_text(encoding="utf-8")
     assert "PSA_RESTOCK_INPUT" in src and 'TCG_USE_NEW_GEN="1"' in src

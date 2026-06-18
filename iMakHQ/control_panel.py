@@ -492,6 +492,24 @@ SCRIPTS = [
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     {
+        # RESTOCK後工程① 視覚確証で確定したカードを 新コア生成→Revise CSV化(手動UL用)。2026-06-18
+        "category": None, "type": "utility",
+        "label": "♻ RESTOCK Revise CSV生成",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_restock_build.py"],
+        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/RESTOCK_revise_*.csv",
+    },
+    {
+        # RESTOCK後工程② アップロード反映後、実eBay qty を verify してスプシ書戻し(状態同期)。2026-06-18
+        "category": None, "type": "utility",
+        "label": "🔄 RESTOCK状態同期(書戻し)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_restock_writeback.py"],
+        "params": [],
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
+    {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
         "category": None, "type": "utility",
         "label": "🛒 在庫切れ再仕入れ",
