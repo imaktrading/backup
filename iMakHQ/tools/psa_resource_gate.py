@@ -281,6 +281,7 @@ def main():
         # 目視確定済(過去に目視で確定した itemID→KEY)を読み、再目視をスキップ。
         # = 一度確定したカードは再走で再目視しない(目視は資産・負担は使うほど減る)。--review-all で全件再目視。
         confirmed_prev = {}
+        cardno_override = {}     # itemID→base card番号(題名から取れない△variant等。Catalog確定の権威値)
         if "--review-all" not in sys.argv:
             try:
                 from sheet_io import read_tab as _rt
@@ -289,6 +290,13 @@ def main():
                         confirmed_prev[rr[0].strip()] = rr[1].strip()
             except Exception as e:
                 print(f"  ⚠ 目視確定済 読込skip ({type(e).__name__}: {e})")
+        try:
+            from sheet_io import read_tab as _rt2
+            for rr in _rt2("PSA番号補完")[1:]:
+                if len(rr) >= 2 and rr[0] and rr[1]:
+                    cardno_override[rr[0].strip()] = rr[1].strip()
+        except Exception as e:
+            print(f"  ⚠ 番号補完 読込skip ({type(e).__name__}: {e})")
         total_rows = len(rows)
         auto_idx = set()       # 変種確定済=再目視スキップ
         todo = []              # (i, r) 今回目視する行
@@ -313,8 +321,9 @@ def main():
             iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
             # ① 現物: eBay出品画像(必ず有る)→ 無ければ cert→psa_cache フォールバック
             psa_img = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
-            # ② 候補: その card番号の catalog 変種(ユーザーが正しい変種を選ぶ)
-            card_no = _resource_card_number(r.get("title", "") or "", r.get("key")) or ""
+            # ② 候補: その card番号の catalog 変種(ユーザーが正しい変種を選ぶ)。
+            # 題名から取れない△variant等は「PSA番号補完」(Catalog確定のbase番号)で補う → ②候補が出る。
+            card_no = _resource_card_number(r.get("title", "") or "", r.get("key")) or cardno_override.get(iid, "")
             variants = mp.catalog_variants_for_cardno(card_no)
             # 解決済KEY自身は必ず候補に含める(card番号ヒット漏れ/大小文字差でも②が出る・既定選択)
             rk = r.get("key")
