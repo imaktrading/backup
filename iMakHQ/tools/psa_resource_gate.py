@@ -180,6 +180,18 @@ def _load_restock_psa10():
     deduped = dedupe_rows(rows, lambda r: mp._ebay_item_id(r.get("ebay_url", "") or ""))
     if len(deduped) != len(rows):
         print(f"  重複除去: {len(rows)}→{len(deduped)}行 (同一eBay出品の重複)")
+    # RESTOCK対象外(catalog非対応カテゴリ=正しく出品不能→fail-closed skip)を除外。
+    # = 毎回「候補なし→依頼」の無限ループを止める(Weiss Schwarz 等)。
+    try:
+        from sheet_io import read_tab
+        excl = {(rr[0] or "").strip() for rr in (read_tab("RESTOCK対象外")[1:] or []) if rr and (rr[0] or "").strip()}
+    except Exception:
+        excl = set()
+    if excl:
+        before = len(deduped)
+        deduped = [r for r in deduped if mp._ebay_item_id(r.get("ebay_url", "") or "") not in excl]
+        if len(deduped) != before:
+            print(f"  対象外除外: {before - len(deduped)}件 (catalog非対応カテゴリ等)")
     return deduped, mp
 
 

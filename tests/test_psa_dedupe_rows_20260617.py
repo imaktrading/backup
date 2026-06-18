@@ -42,6 +42,17 @@ def test_load_restock_prefers_funnel_over_stale_desktop_csv():
     assert body.index("build_input_from_funnel()") < body.index("glob.glob")  # funnel優先 → CSVはfallback
 
 
+def test_gate_excludes_restock_taisyougai():
+    # catalog非対応(Weiss Schwarz等)を「RESTOCK対象外」で除外=毎回候補なし→依頼の無限ループを止める
+    src = (Path(__file__).resolve().parent.parent / "iMakHQ" / "tools" / "psa_resource_gate.py").read_text(encoding="utf-8")
+    body = src[src.index("def _load_restock_psa10"):]
+    body = body[:body.index("\ndef ", 1)]
+    assert 'read_tab("RESTOCK対象外")' in body
+    assert "対象外除外" in body
+    # 除外は重複除去の後(両方適用)
+    assert body.index("dedupe_rows") < body.index("RESTOCK対象外")
+
+
 def test_dedupe_falls_back_to_url_title_when_no_itemid():
     rows = [
         {"ebay_url": "", "title": "X"},
