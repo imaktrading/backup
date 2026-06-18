@@ -392,7 +392,11 @@ def main():
                 if key != old:                          # 新規解決 or 訂正のみ書戻し
                     writeback[iid] = key
         # PDCA: 不一致(OFF)を台帳に蓄積 → 原因別振り分け → 再発/解決トレンド
-        _run_mismatch_pdca(rejected, [c["idx"] for c in confirmed], idx_row, targets_by_idx, cert_map, mp)
+        # auto_idx(itemID join / 過去目視で KEY 解決済=今回スキップ)も「確定」として渡す。
+        # これを渡さないと、KEY が入って解決済の行が台帳で永久に「未対処」のまま毎日再発行される
+        # (= Catalog への同一依頼の無限再発行。2026-06-18 真因)。
+        _run_mismatch_pdca(rejected, list(auto_idx) + [c["idx"] for c in confirmed],
+                           idx_row, targets_by_idx, cert_map, mp)
         # 確定した変種KEYを商品管理シートAI列に書戻し(目視を資産化=次回から解決済)
         if writeback:
             try:
