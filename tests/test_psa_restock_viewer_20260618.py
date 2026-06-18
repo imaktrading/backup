@@ -27,10 +27,13 @@ def test_build_restock_html_shows_genbutsu_candidates_v8():
         "candidates": [{"channel": "mercari", "url": "https://jp.mercari.com/item/m123456789", "price": 29400},
                        {"channel": "snkrdunk", "url": "https://snkrdunk.com/trading-cards/9", "price": 31000}],
         "v8": "利益OK V8推奨$45 (現$50)"}])
-    assert "RESTOCK確定" in h and "① 現物(出品)" in h and "仕入候補(買う物)" in h
+    assert "RESTOCK確定" in h and "① 現物(出品)" in h and "仕入候補" in h
     assert "/img?u=" in h                      # 画像はプロキシ経由
     assert "src='https://" not in h            # 直URLは src に出さない
-    assert "¥29,400" in h and "利益OK" in h
+    assert "¥29,400" in h
+    # 候補ごとに個別チェック(1つ違っても全部NGにならない)= ck が候補数ぶん
+    assert h.count("class='ck'") == 2 and "upd(0)" in h
+    assert "conf.push({idx:idx, urls:urls})" in h
     assert "imgFail" in h and "data-idx='0'" in h
 
 
@@ -51,13 +54,16 @@ def test_resolve_image_url_mercari_and_proxy():
     assert prc._resolve_image_url("https://files.bandai-tcg-plus.com/x.png").endswith("x.png")
 
 
-def test_v8_label_profit_judgement():
+def test_v8_label_costplus_not_loss():
+    # コストプラス運用: 出品価格=V8推奨にすれば赤字にならない。判定は「市場で売れるか」(2026-06-18)
     g = _load("psa_resource_gate")
     mp = _load("mercari_psa_resource")
-    lbl = g._v8_label(30000, 80.0, mp)
-    assert "V8" in lbl and ("赤字" in lbl or "利益OK" in lbl)
-    assert g._v8_label(None, 80.0, mp) == ""     # 入力欠けは空
-    assert g._v8_label(30000, None, mp) == ""
+    high = g._v8_label(30000, 80.0, mp)   # 仕入高 → 利益価格が市場超 → 売れにくい
+    assert "赤字" not in high              # 「赤字」とは言わない(コストプラス)
+    assert "市場で売れにくい" in high and "市場" in high
+    low = g._v8_label(3000, 154.0, mp)    # 仕入安 → 市場内
+    assert "市場内" in low
+    assert g._v8_label(None, 80.0, mp) == "" and g._v8_label(30000, None, mp) == ""
 
 
 def test_gate_wires_restock_poc_a():

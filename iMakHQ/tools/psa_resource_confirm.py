@@ -102,14 +102,16 @@ def _fetch_og_image(url):
 
 def _resolve_image_url(u):
     """仕入候補のURL(出品ページ)→ 実画像URL。catalog/eBay画像はそのまま。
-    - mercari item (m<id>) → 静的CDN画像
+    - mercari item (m<id>) → 静的CDN画像(ページ取得不要)
+    - mercari shops(/shops/product/ 等 m<id>無)→ og:image
     - snkrdunk 商品ページ → og:image
     """
     u = u or ""
-    if "mercari" in u:
+    if "mercari" in u and "/images/" not in u and "mercdn.net" not in u:
         m = re.search(r"\b(m\d{9,})\b", u)
         if m:
             return f"https://static.mercdn.net/item/detail/orig/photos/{m.group(1)}_1.jpg"
+        return _fetch_og_image(u)          # mercari shops 等は og:image
     if "snkrdunk.com" in u and "/images/" not in u:
         return _fetch_og_image(u)
     return u
@@ -353,19 +355,25 @@ def confirm_targets(items, timeout=1800):
 _JS_RESTOCK = """
 function imgFail(el,big){var d=document.createElement('div'); d.className=big?'ph':'cph';
   d.textContent='画像なし'; if(el.parentNode) el.parentNode.replaceChild(d,el);}
-function tog(i){var c=document.getElementById('c'+i);
-  c.classList.toggle('off', !c.querySelector('input[type=checkbox]').checked);}
-function setAll(v){document.querySelectorAll('.card input[type=checkbox]').forEach(function(b){
-  b.checked=v; tog(b.closest('.card').dataset.idx);});}
+function upd(i){var c=document.getElementById('c'+i);
+  var n=c.querySelectorAll('.ck:checked').length;
+  c.classList.toggle('off', n===0);
+  var b=document.getElementById('cnt'+i);
+  if(b) b.textContent = n? ('RESTOCK ✓ 仕入候補 '+n+'件') : 'RESTOCKしない(①と同じ候補なし)';}
+function setAll(v){document.querySelectorAll('.ck').forEach(function(b){b.checked=v;});
+  document.querySelectorAll('.card').forEach(function(c){upd(c.dataset.idx);});}
 function go(){
-  var ids=[];
+  var conf=[];
   document.querySelectorAll('.card').forEach(function(c){
-    if(c.querySelector('input[type=checkbox]').checked) ids.push(parseInt(c.dataset.idx));});
+    var idx=parseInt(c.dataset.idx); var urls=[];
+    c.querySelectorAll('.ck:checked').forEach(function(ck){urls.push(ck.dataset.url);});
+    if(urls.length) conf.push({idx:idx, urls:urls});
+  });
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({confirmed:ids})}).then(function(){
+    body:JSON.stringify({confirmed:conf})}).then(function(){
     document.getElementById('main').style.display='none';
     var d=document.getElementById('done'); d.style.display='block';
-    d.textContent='✅ RESTOCK確定 '+ids.length+'件。ターミナルに戻ってください。';});
+    d.textContent='✅ RESTOCK確定 '+conf.length+'件。ターミナルに戻ってください。';});
 }
 """
 
@@ -387,8 +395,11 @@ def build_restock_html(items):
                    else "<div class='cph'>画像なし</div>")
             price = cd.get("price")
             pstr = f"¥{price:,}" if isinstance(price, int) else (_s(price) if price else "")
+            # 候補ごとに個別チェック(既定ON)。①と違う候補だけ外せる(1つ違っても全部NGにならない)。
             cand_html.append(
-                f"<label class='cand'>{img}<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}"
+                f"<label class='cand'><input type='checkbox' class='ck' checked "
+                f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' onchange='upd({idx})'>{img}"
+                f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}"
                 f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a></span></label>")
         if not cand_html:
             cand_html = ["<div class='cph'>仕入候補なし</div>"]
@@ -396,19 +407,20 @@ def build_restock_html(items):
         v8_html = f"<div class='lbl'>{_html.escape(v8)}</div>" if v8 else ""
         rows.append(
             f"<div class='card' id='c{idx}' data-idx='{idx}'>"
-            f"<label class='sel'><input type='checkbox' checked onchange=\"tog({idx})\"> RESTOCKする(①=仕入候補なら)</label>"
+            f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(①と同じ候補のみ残す)</div>"
             f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>"
             f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
-            f"<div class='col cat'><div class='cap'>仕入候補(買う物)</div><div class='cands'>{''.join(cand_html)}</div></div></div>"
+            f"<div class='col cat'><div class='cap'>仕入候補(各々①と同じか確認・チェック=買う)</div>"
+            f"<div class='cands'>{''.join(cand_html)}</div></div></div>"
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
             f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品</a>"
             "</div>")
-    head = (f"<h1>RESTOCK 視覚確証 — {len(items)}件。① 現物 と 仕入候補(実際に買う物)が同じカードなら"
-            " RESTOCKする ON → 確定。(確定分だけ RESTOCK実行待ちへ)</h1>")
+    head = (f"<h1>RESTOCK 視覚確証 — {len(items)}件。各 仕入候補が ① 現物 と同じカードかを"
+            "<b>候補ごとにチェック</b>(違う候補だけ外す)。1つでも残ればRESTOCK確定 → 確定。</h1>")
     bar = ("<div class='bar'><button class='go' onclick='go()'>✅ RESTOCK確定</button>"
            "<button onclick='setAll(true)'>全部ON</button>"
            "<button onclick='setAll(false)'>全部OFF</button>"
-           "<span style='color:#c33;font-size:13px'>※①と買う物が同じカード・同変種か必ず確認</span></div>")
+           "<span style='color:#c33;font-size:13px'>※候補ごとに①と同変種か確認。違う候補のチェックを外す</span></div>")
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>RESTOCK確証</title>"
             f"<style>{_CSS}</style></head><body>"
             f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
@@ -416,7 +428,15 @@ def build_restock_html(items):
 
 
 def restock_confirm(items, timeout=1800):
-    """RESTOCK視覚確証 → 一致でONにした idx の list を返す。未確定は None。"""
+    """RESTOCK視覚確証 → [{idx, urls:[①と同じと確認した候補URL]}] を返す(候補1つでも残ればRESTOCK)。
+    未確定は None。"""
     def _ex(data):
-        return [int(x) for x in (data.get("confirmed") or [])]
+        out = []
+        for d in (data.get("confirmed") or []):
+            if d.get("idx") is None:
+                continue
+            urls = [u for u in (d.get("urls") or []) if u]
+            if urls:
+                out.append({"idx": int(d["idx"]), "urls": urls})
+        return out
     return _serve_confirm(build_restock_html(items).encode("utf-8"), _ex, timeout)

@@ -580,15 +580,22 @@ def main():
 
 
 def _v8_label(cost_jpy, cur_usd, mp):
-    """最安¥(仕入想定)+ eBay現$ から新規出品と同じ pricing_engine で利益判定(自動)。"""
+    """最安¥(仕入値)から新規と同じ pricing_engine で「利益が出る出品価格(cost-plus)」を算出し、市場と比較。
+
+    コストプラス運用なので出品価格=V8推奨にすれば売れる限り赤字にならない。判定するのは
+    『その cost-plus 価格が市場(現価格)で通るか=売れるか』:
+      - V8推奨 ≤ 市場 → ✅市場内(利益価格でも売れる)
+      - V8推奨 > 市場 → ⚠仕入高(利益出すには市場超の価格が必要=売れにくい / 旨味薄)
+    """
     if not cost_jpy or not cur_usd:
         return ""
     try:
         import pricing_engine
         cat = getattr(mp, "CATEGORY", "tcg")
         rec = pricing_engine.compute_listing_price(cost_jpy=cost_jpy, median_usd=cur_usd, category=cat)["price"]
-        ok = rec <= cur_usd
-        return f"{'利益OK' if ok else '⚠赤字'} V8推奨${rec:.0f} (現${cur_usd:.0f} / 原価¥{cost_jpy})"
+        if rec <= cur_usd:
+            return f"✅市場内 (V8出品${rec:.0f} ≤ 市場${cur_usd:.0f} / 原価¥{cost_jpy})"
+        return f"⚠仕入高:市場で売れにくい (利益には${rec:.0f}必要 > 市場${cur_usd:.0f} / 原価¥{cost_jpy})"
     except Exception as e:
         return f"V8計算不可({type(e).__name__})"
 
@@ -604,21 +611,23 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         items.append({"idx": n, "title": rc["title"], "card_no": rc["card_no"],
                       "ebay_url": rc["ebay_url"], "ref_image": ref,
                       "candidates": rc["candidates"], "v8": _v8_label(rc.get("cost"), rc.get("cur"), mp)})
-    print(f"▶ RESTOCK視覚確証: 再仕入れ可 {len(items)}件をブラウザ表示。① 現物 と 仕入候補 の一致を確認...")
+    print(f"▶ RESTOCK視覚確証: 再仕入れ可 {len(items)}件をブラウザ表示。候補ごとに①現物と同じか確認...")
     confirmed = prc.restock_confirm(items)
     if confirmed is None:
         print("⚠ RESTOCK確証 タイムアウト/未確定 — RESTOCK確定リストは未更新")
         return
-    sel = set(confirmed)
+    # confirmed = [{idx, urls:[①と同じと確認した候補URL]}]。候補ごと選択 → 確認済URLのみ記録。
+    sel = {c["idx"]: c["urls"] for c in confirmed}
     today = datetime.date.today().isoformat()
     out = [["itemID", "card_no", "title", "最安チャネル", "最安¥", "eBay現$", "V8判定",
-            "仕入URL", "ebay_url", "確証日"]]
+            "確認済仕入URL", "ebay_url", "確証日"]]
     for n, rc in enumerate(restock_cands):
         if n in sel:
+            urls = sel[n] or [rc.get("url", "")]
             out.append([rc.get("itemID", ""), rc.get("card_no", ""), rc.get("title", ""),
                         rc.get("channel", ""), rc.get("cost", ""), rc.get("cur", ""),
                         _v8_label(rc.get("cost"), rc.get("cur"), mp),
-                        rc.get("url", ""), rc.get("ebay_url", ""), today])
+                        " | ".join(u for u in urls if u), rc.get("ebay_url", ""), today])
     try:
         from sheet_io import write_rows_to_tab, MAINT_URL
         write_rows_to_tab("RESTOCK確定", out)
