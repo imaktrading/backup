@@ -39,6 +39,8 @@ from typing import Optional
 
 import requests
 
+from _http_util import get_with_retry  # transient DNS/接続 retry (2026-06-19)
+
 
 UNIQLO_API_TEMPLATE = (
     "https://www.uniqlo.com/jp/api/commerce/v5/ja/products/"
@@ -108,7 +110,7 @@ def parse_uniqlo_url(url: str) -> dict:
 def _call_l2s_api(product_id: str, price_group: str = "00") -> dict:
     """UNIQLO L2S API を呼出して result dict を返す."""
     url = UNIQLO_API_TEMPLATE.format(product_id=product_id, price_group=price_group)
-    resp = requests.get(url, headers=DEFAULT_HEADERS, timeout=TIMEOUT_SEC)
+    resp = get_with_retry(url, headers=DEFAULT_HEADERS, timeout=TIMEOUT_SEC)
     resp.raise_for_status()
     payload = resp.json()
     if payload.get("status") != "ok":
@@ -122,7 +124,7 @@ def _call_details_api(product_id: str, price_group: str = "00") -> dict:
         "https://www.uniqlo.com/jp/api/commerce/v5/ja/products/"
         f"{product_id}/price-groups/{price_group}/details?withPrices=true&withStocks=true"
     )
-    resp = requests.get(url, headers=DEFAULT_HEADERS, timeout=TIMEOUT_SEC)
+    resp = get_with_retry(url, headers=DEFAULT_HEADERS, timeout=TIMEOUT_SEC)
     resp.raise_for_status()
     payload = resp.json()
     if payload.get("status") != "ok":
