@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "商品画像ダウンローダー (Shopify/右クリ禁止対応)",
+  "version": "1.0",
+  "description": "商品ページの画像を一括ダウンロード。Shopify は高解像度の公開JSONを優先、その他は表示中の画像を収集。右クリック禁止サイトでも取得可。",
+  "permissions": ["downloads", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "このページの商品画像をDL"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
       "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 7)",
       "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 6)",
