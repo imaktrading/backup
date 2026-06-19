@@ -367,7 +367,7 @@ function upd(i){var c=document.getElementById('c'+i);
   var n=c.querySelectorAll('.ck:checked').length;
   c.classList.toggle('off', n===0);
   var b=document.getElementById('cnt'+i);
-  if(b) b.textContent = n? ('RESTOCK ✓ 仕入候補 '+n+'件') : 'RESTOCKしない(①と同じ候補なし)';}
+  if(b) b.textContent = n? ('RESTOCK ✓ 買う候補 '+n+'件') : 'RESTOCKしない(全候補 仕入見送り)';}
 function setAll(v){document.querySelectorAll('.ck').forEach(function(b){b.checked=v;});
   document.querySelectorAll('.card').forEach(function(c){upd(c.dataset.idx);});}
 function go(){
@@ -407,6 +407,8 @@ def build_restock_html(items):
             price = cd.get("price")
             pstr = f"¥{price:,}" if isinstance(price, int) else (_s(price) if price else "")
             # 候補ごとに個別チェック(既定ON)。①と違う候補だけ外せる(1つ違っても全部NGにならない)。
+            # チェック外す = その候補は「仕入見送り」(買わない)。理由は問わない(高い/出品者不安/
+            # 納期長/違うカード等まとめて見送り扱い)。残ったチェック分だけ RESTOCK の仕入元になる。
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' onchange='upd({idx})'>{img}"
@@ -418,20 +420,21 @@ def build_restock_html(items):
         v8_html = f"<div class='lbl'>{_html.escape(v8)}</div>" if v8 else ""
         rows.append(
             f"<div class='card' id='c{idx}' data-idx='{idx}'>"
-            f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(①と同じ候補のみ残す)</div>"
+            f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
             f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>"
             f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
-            f"<div class='col cat'><div class='cap'>仕入候補(各々①と同じか確認・チェック=買う)</div>"
+            f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
             f"<div class='cands'>{''.join(cand_html)}</div></div></div>"
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
             f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品</a>"
             "</div>")
-    head = (f"<h1>RESTOCK 視覚確証 — {len(items)}件。各 仕入候補が ① 現物 と同じカードかを"
-            "<b>候補ごとにチェック</b>(違う候補だけ外す)。1つでも残ればRESTOCK確定 → 確定。</h1>")
+    head = (f"<h1>RESTOCK 視覚確証 — {len(items)}件。① 現物 と見比べて<b>買う候補だけチェックを残す</b>。"
+            "買わない候補(違うカード / 高い / 出品者不安 / 納期長 等)は<b>仕入見送り=チェックを外す</b>。"
+            "1つでも残ればRESTOCK確定 → 確定。</h1>")
     bar = ("<div class='bar'><button class='go' onclick='go()'>✅ RESTOCK確定</button>"
            "<button onclick='setAll(true)'>全部ON</button>"
            "<button onclick='setAll(false)'>全部OFF</button>"
-           "<span style='color:#c33;font-size:13px'>※候補ごとに①と同変種か確認。違う候補のチェックを外す</span></div>")
+           "<span style='color:#c33;font-size:13px'>※チェック=買う / 外す=仕入見送り(理由は問わない)</span></div>")
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>RESTOCK確証</title>"
             f"<style>{_CSS}</style></head><body>"
             f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
