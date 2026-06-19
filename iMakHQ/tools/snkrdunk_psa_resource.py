@@ -107,8 +107,8 @@ def _print_signal(variant_hint):
     s = " ".join(str(p) for p in parts if p).upper()
     if "SPカード".upper() in s or "SPC" in s or "スーパーパラレル".upper() in s:
         return "SPC"
-    if "ALT_ART" in s or "PARALLEL" in s or "パラレル".upper() in s:
-        return "P"
+    if "ALT_ART" in s or "PARALLEL" in s or "パラレル".upper() in s or "*" in s:
+        return "P"               # rarity の * (Dragon Ball の L*/SR*/R* 等=パラレル)も検出
     return ""
 
 
@@ -121,6 +121,9 @@ def _item_print(name):
     m = re.search(r"\b[A-Z]{1,3}-(SPC|SP|SEC|PR|P)\b", n)
     if m:
         return "SPC" if m.group(1) in ("SPC", "SP", "SEC") else "P"
+    # Dragon Ball 等の rarity-asterisk(例 'L*'/'SR*'/'R*' [SB02-033])= パラレル。base(*無)と区別。
+    if re.search(r"[A-Z]{1,3}\*", n):
+        return "P"
     if "パラレル" in (name or "") or "PARALLEL" in n:
         return "P"
     if "スーパーパラレル" in (name or "") or "SPカード" in (name or ""):
@@ -181,6 +184,10 @@ def _match_item(data, card_number, variant_hint=None):
             continue
         pn = (it.get("productNumber") or "").upper().strip()
         name = (it.get("name") or "").upper()
+        # 英語版 [EN] は除外。日本語PSA再仕入れなので EN版は別カード(=JP と同番号で曖昧化し、
+        # JP「L」と EN「L」が両残り→fail-closed→card_not_found を招く。例 SB02-033 が毎回候補なしの真因)。
+        if "[EN]" in name.replace(" ", ""):
+            continue
         if pn == cn or f"[{cn}]" in name.replace(" ", "") or _bracket_matches(name, cn_norm):
             matches.append(it)
     if not matches:
