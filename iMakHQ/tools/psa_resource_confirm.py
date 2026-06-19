@@ -378,16 +378,18 @@ function setRsn(btn){var cand=btn.closest('.cand'); var ck=cand.querySelector('.
   ck.dataset.rsn=btn.dataset.r;
   cand.querySelectorAll('.rb').forEach(function(b){b.classList.toggle('sel', b.dataset.r===btn.dataset.r);});}
 function go(){
-  var conf=[]; var reasons={diff:0, skip:0}; var total=0;
+  var conf=[]; var diffs=[]; var skip=0;
   document.querySelectorAll('.card').forEach(function(c){
     var idx=parseInt(c.dataset.idx); var urls=[];
-    c.querySelectorAll('.ck').forEach(function(ck){total++;
+    c.querySelectorAll('.ck').forEach(function(ck){
       if(ck.checked){urls.push(ck.dataset.url);}
-      else{var r=ck.dataset.rsn||'skip'; reasons[r]=(reasons[r]||0)+1;}});
+      else if((ck.dataset.rsn||'skip')==='diff'){diffs.push({idx:idx, url:ck.dataset.url});}
+      else{skip++;}});
     if(urls.length) conf.push({idx:idx, urls:urls});
   });
+  if(diffs.length && !confirm('違う(別カード)が'+diffs.length+'件。検索の精度事故=即対応対象です。確定しますか?')) return;
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({confirmed:conf, reasons:reasons, total:total})}).then(function(){
+    body:JSON.stringify({confirmed:conf, diffs:diffs, skip:skip})}).then(function(){
     document.getElementById('main').style.display='none';
     var d=document.getElementById('done'); d.style.display='block';
     d.textContent='✅ RESTOCK確定 '+conf.length+'件。ターミナルに戻ってください。';});
@@ -456,10 +458,11 @@ def build_restock_html(items):
 
 
 def parse_restock_result(data):
-    """RESTOCK確証 POST(JSON)→ {confirmed:[{idx,urls}], reasons:{diff,skip}, total}。純関数(test可)。
+    """RESTOCK確証 POST(JSON)→ {confirmed:[{idx,urls}], diffs:[{idx,url}], skip}。純関数(test可)。
 
-    confirmed=買う候補(チェック残)。reasons=外した候補の理由カウント(diff=違うカード=検索誤検出の
-    改善信号 / skip=見送り=business判断)。違う率(diff/total)が生成(検索)を直すべきかの根拠。
+    confirmed=買う候補(チェック残)。diffs=「違う(別カード)」と判定された個別候補(=検索が別カードを
+    拾った精度事故)。**率を待たず1件でも即対応**するため、件数でなく個別(どのカードのどの候補が
+    別物か)を返す。skip=見送り(高い/出品者不安/納期長 等=business判断)の件数のみ(action不要)。
     """
     out = []
     for d in (data.get("confirmed") or []):
@@ -468,13 +471,12 @@ def parse_restock_result(data):
         urls = [u for u in (d.get("urls") or []) if u]
         if urls:
             out.append({"idx": int(d["idx"]), "urls": urls})
-    rs = data.get("reasons") or {}
-    return {"confirmed": out,
-            "reasons": {"diff": int(rs.get("diff") or 0), "skip": int(rs.get("skip") or 0)},
-            "total": int(data.get("total") or 0)}
+    diffs = [{"idx": int(d["idx"]), "url": d.get("url", "")}
+             for d in (data.get("diffs") or []) if d.get("idx") is not None]
+    return {"confirmed": out, "diffs": diffs, "skip": int(data.get("skip") or 0)}
 
 
 def restock_confirm(items, timeout=1800):
-    """RESTOCK視覚確証 → {confirmed:[{idx,urls}], reasons:{diff,skip}, total} を返す
+    """RESTOCK視覚確証 → {confirmed:[{idx,urls}], diffs:[{idx,url}], skip} を返す
     (候補1つでも残ればRESTOCK)。未確定は None。"""
     return _serve_confirm(build_restock_html(items).encode("utf-8"), parse_restock_result, timeout)

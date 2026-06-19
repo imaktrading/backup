@@ -707,27 +707,33 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         print(f"🟢 RESTOCK確定: {len(out)-1}件 → タブ「RESTOCK確定」(手動で revise 実行 / POC-Bで自動化) {MAINT_URL}")
     except Exception as e:
         print(f"⚠ RESTOCK確定タブ更新skip ({type(e).__name__}: {e})")
-    _record_restock_reasons(res.get("reasons") or {}, res.get("total") or 0, today)
+    _alert_restock_diffs(res.get("diffs") or [], res.get("skip") or 0, restock_cands, today)
 
 
-def _record_restock_reasons(reasons, total, today):
-    """外し理由トレンドを1行記録(墓場でなく率)。違う率(=検索が別カードを拾う頻度)が
-    生成(メルカリkeyword/スニダンmatch)を直すべきかの根拠。違う率が上がる→生成側の変種確証強化。
+def _alert_restock_diffs(diffs, skip, restock_cands, today):
+    """「違う(別カード)」=検索の精度事故。**率を待たず1件でも即対応**(悠長な閾値・トレンドは捨てる)。
+    どのカードのどの候補が別物かを個別に surface + 即対応リスト化(各サイクルで空が正=放置は精度事故)。
+    生成側(メルカリkeyword/スニダンvariant確証)を即修正する根拠。見送りは business判断で action 不要。
     """
-    diff = int(reasons.get("diff") or 0)
-    skip = int(reasons.get("skip") or 0)
-    rate = round(100 * diff / total, 1) if total else 0.0
-    print(f"📉 外し理由: 違う{diff} / 見送り{skip} / 候補総数{total}  → 違う率 {rate}%"
-          + ("  ⚠検索が別カードを拾い気味=生成の変種確証を要強化" if rate >= 15 else ""))
+    if not diffs:
+        print(f"  外し: 見送り{skip} / 違う0(検索の誤検出なし=精度OK)")
+        return
+    print(f"🚨 違う即対応 {len(diffs)}件(見送り{skip})— 検索が別カードを拾った=精度事故。生成(検索)を今すぐ直す:")
+    rows = [["日付", "card_no", "title", "チャネル", "誤候補URL", "状態"]]
+    for d in diffs:
+        i = d.get("idx")
+        rc = restock_cands[i] if isinstance(i, int) and 0 <= i < len(restock_cands) else {}
+        ch = next((c.get("channel") for c in (rc.get("candidates") or []) if c.get("url") == d.get("url")), "")
+        cn, title = rc.get("card_no", ""), rc.get("title", "")
+        print(f"   ⚠ {cn} [{ch}] が別カード候補を返した: {d.get('url')}  ({title})")
+        rows.append([today, cn, title, ch, d.get("url", ""), "未対応"])
     try:
-        from sheet_io import read_tab, write_rows_to_tab
-        hdr = ["日付", "候補総数", "違う", "見送り", "違う率%"]
-        prev = read_tab("RESTOCK外し理由") or []
-        body = prev[1:] if (prev and prev[0][:1] == ["日付"]) else [r for r in prev if r]
-        rows = [hdr] + body + [[today, total, diff, skip, rate]]
-        write_rows_to_tab("RESTOCK外し理由", rows)
+        from sheet_io import write_rows_to_tab
+        write_rows_to_tab("RESTOCK違う即対応", rows)
+        print("   → タブ「RESTOCK違う即対応」。**生成側の検索(keyword/variant確証)を即修正し空にすること**"
+              "(残存=精度事故の放置)。")
     except Exception as e:
-        print(f"⚠ 外し理由トレンド記録skip ({type(e).__name__}: {e})")
+        print(f"   ⚠ 即対応リスト記録skip ({type(e).__name__}: {e})")
 
 
 if __name__ == "__main__":
