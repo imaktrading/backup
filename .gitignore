@@ -156,3 +156,6 @@ iMak_ichibankuji/pending/intermediate_*.csv
 iMakG-shock/casio_finder/unlisted_from_catalog_*.csv
 # Advisor 生成 PPT (binary・再生成可)
 iMakAdvisor/*.pptx
+
+# RESTOCK 用 Chrome profile (runtime・再生成可)
+iMakHQ/chrome_profile_psa_restock/
