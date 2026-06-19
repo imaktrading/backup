@@ -198,6 +198,32 @@ def _load_restock_psa10():
     return deduped, mp
 
 
+def _backfill_snkr_card_image(cached, row, mp, sp):
+    """SNKRDUNK 当日キャッシュに card_image(実カード画像) が無ければ thumbnail だけ HTTP 補完。
+
+    画像配線(thumbnailUrl)導入より前にできたキャッシュは card_image を持たず、RESTOCK確証で
+    全候補がサイト既定ロゴになる。Mercari は再scrapeせず(遅い/BAN)、SNKRDUNK の軽い HTTP 検索
+    だけ再実行して card_image を後付けする。available でない/card番号不明/取得失敗は元のまま。
+    """
+    if not (isinstance(cached, dict) and cached.get("available") and not cached.get("card_image")):
+        return cached
+    cn = _resource_card_number(row.get("title", "") or "", row.get("key"))
+    if not cn:
+        return cached
+    vh = None
+    k = row.get("key")
+    if k:
+        m = mp.card_meta_for_key(k)
+        vh = m.get("hint") if m else None
+    try:
+        fresh = sp.check_by_keyword(cn, variant_hint=vh)
+    except Exception:
+        return cached
+    if isinstance(fresh, dict) and fresh.get("card_image"):
+        return dict(cached, card_image=fresh["card_image"])
+    return cached
+
+
 def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):
     """確認ゲートの不一致(OFF)を PDCA で回す: read台帳→reconcile→write→原因別ルーティング→トレンド。
 
@@ -490,7 +516,7 @@ def main():
     for i, r in enumerate(rows):
         c = _cache_hit(_iids[i])
         if c and "snkrdunk" in c:
-            snkr_res[i] = c["snkrdunk"]
+            snkr_res[i] = _backfill_snkr_card_image(c["snkrdunk"], r, mp, sp)
             continue
         cn = _resource_card_number(r.get("title", "") or "", r.get("key"))
         if not cn:

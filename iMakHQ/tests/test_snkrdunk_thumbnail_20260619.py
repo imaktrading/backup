@@ -45,6 +45,49 @@ def test_resolve_card_id_fills_meta_thumbnail(monkeypatch):
     assert meta["thumbnail"].endswith("zoro.webp?size=m")
 
 
+class _FakeMp:
+    def card_meta_for_key(self, k):
+        return {"hint": "EGGHEAD CRISIS"}
+
+
+class _FakeSp:
+    def __init__(self, image):
+        self.image = image
+        self.calls = 0
+    def check_by_keyword(self, cn, variant_hint=None):
+        self.calls += 1
+        return {"available": True, "card_image": self.image}
+
+
+def test_backfill_adds_card_image_to_stale_cache():
+    """card_image 無しの旧キャッシュ → HTTP補完で card_image が乗る(Mercariは触らない)。"""
+    cached = {"available": True, "psa10_price_jpy": 30000, "psa10_listings": [{"price": 30000, "url": "u"}]}
+    row = {"title": "PSA 10 One Piece #OP11-106", "key": "OP11-106"}
+    sp_fake = _FakeSp("https://cdn.snkrdunk.com/real.webp")
+    out = gate._backfill_snkr_card_image(cached, row, _FakeMp(), sp_fake)
+    assert out["card_image"] == "https://cdn.snkrdunk.com/real.webp"
+    assert out["psa10_price_jpy"] == 30000      # 既存データ保持
+    assert sp_fake.calls == 1
+
+
+def test_backfill_skips_when_card_image_present():
+    """既に card_image があれば再取得しない(無駄HTTPを避ける)。"""
+    cached = {"available": True, "card_image": "https://cdn.snkrdunk.com/already.webp"}
+    sp_fake = _FakeSp("https://cdn.snkrdunk.com/new.webp")
+    out = gate._backfill_snkr_card_image(cached, {"title": "x", "key": "OP11-106"}, _FakeMp(), sp_fake)
+    assert out["card_image"] == "https://cdn.snkrdunk.com/already.webp"
+    assert sp_fake.calls == 0
+
+
+def test_backfill_skips_unavailable():
+    """在庫なし(End候補)は補完対象外。"""
+    cached = {"available": False}
+    sp_fake = _FakeSp("https://cdn.snkrdunk.com/x.webp")
+    out = gate._backfill_snkr_card_image(cached, {"title": "x", "key": "k"}, _FakeMp(), sp_fake)
+    assert "card_image" not in out
+    assert sp_fake.calls == 0
+
+
 def test_combine_attaches_image_to_snkrdunk_urls():
     """check_by_keyword 形(card_image付き)→ combine の snkrdunk_urls 各entryに image が乗る。"""
     snkr = {
