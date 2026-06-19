@@ -175,7 +175,7 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
     font-size:12px;border:1px dashed #c33;margin:2px;text-align:center;padding:4px}
 .cands{display:flex;flex-direction:column;gap:5px;height:270px;overflow-y:scroll}
 .cand{display:flex;align-items:center;gap:6px;border:1px solid #eee;border-radius:4px;padding:3px 4px;cursor:pointer}
-.cand img{width:100px;height:135px;object-fit:contain;border:1px solid #eee;margin:0;background:#fafafa}
+.cand img{width:100px;height:135px;object-fit:cover;border:1px solid #eee;margin:0;background:#fafafa}
 .cand .cph{width:100px;height:135px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;border:1px dashed #ccc}
 .cand:has(input:checked){border-color:#2a7;background:#eafaf1}
 .clbl{font-size:11px;word-break:break-word;line-height:1.2}
