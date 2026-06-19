@@ -153,8 +153,9 @@ def _bracket_matches(name_upper, cn_norm):
     return False
 
 
-def parse_search_for_card(data, card_number, variant_hint=None):
-    """search レスポンスから card_number に一致する trading-card id を抽出 (純関数・id-strict)。
+def _match_item(data, card_number, variant_hint=None):
+    """search レスポンスから card_number に一致する trading-card の item dict を返す
+    (純関数・id-strict)。id だけ欲しい時は parse_search_for_card、画像も要る時は item.thumbnailUrl。
 
     SNKRDUNK は鑑定カードを streetwears/sneakers バケツに入れる。name 中の `[CARD_NUMBER]`
     か productNumber 完全一致で突合。Pokemon は productNumber が空+番号が name の
@@ -185,7 +186,7 @@ def parse_search_for_card(data, card_number, variant_hint=None):
     if not matches:
         return None
     if len(matches) == 1:
-        return matches[0].get("id")           # 単一一致 = 確定
+        return matches[0]                      # 単一一致 = 確定
     # 複数 print (変種非決定性): ①set トークンで絞る → ②同setで残れば print種別で tie-break
     toks = _hint_tokens(variant_hint)
     if not toks:
@@ -197,20 +198,28 @@ def parse_search_for_card(data, card_number, variant_hint=None):
         return None                            # set 決め手無 → fail-closed
     topgroup = [it for s, it in scored if s == top_score]
     if len(topgroup) == 1:
-        return topgroup[0].get("id")           # set で一意
+        return topgroup[0]                     # set で一意
     # 同 set 内に複数 print → print種別(parallel/special/通常)で tie-break
     target = _print_signal(variant_hint)
     matched = [it for it in topgroup if _item_print(it.get("name", "")) == target]
     if len(matched) == 1:
-        return matched[0].get("id")
+        return matched[0]
     return None                                # print でも一意化できず → fail-closed
 
 
-def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None):
+def parse_search_for_card(data, card_number, variant_hint=None):
+    """search レスポンス → card_number 一致の trading-card id (純関数・id-strict)。後方互換 wrapper。"""
+    it = _match_item(data, card_number, variant_hint=variant_hint)
+    return it.get("id") if isinstance(it, dict) else None
+
+
+def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None, _meta=None):
     """productNumber(例 OP11-106) → SNKRDUNK trading-card id を HTTP 解決。Selenium不要・全シリーズ。
 
     Step6 P3: variant_hint(canonical変種の set/name) を渡すと、同番号の複数 print から正しい
     product を選ぶ(決め手無→fail-closed)。hint無は従来どおり(単一一致のみ確定)。
+    _meta(dict) を渡すと _meta["thumbnail"] に商品画像URL(search の thumbnailUrl)を入れる
+    = RESTOCK確証で実カード画像を出すため(listing ページの og:image はサイト既定ロゴで不可)。
     """
     if not card_number or not str(card_number).strip():
         return None
@@ -223,9 +232,14 @@ def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None):
     if r.status_code != 200:
         return None
     try:
-        return parse_search_for_card(r.json(), card_number, variant_hint=variant_hint)
+        it = _match_item(r.json(), card_number, variant_hint=variant_hint)
     except Exception:
         return None
+    if not isinstance(it, dict):
+        return None
+    if _meta is not None:
+        _meta["thumbnail"] = it.get("thumbnailUrl") or ""
+    return it.get("id")
 
 
 def parse_psa10_listings(data, short_cond="PSA10"):
@@ -277,9 +291,11 @@ def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant
     Step6 P3: variant_hint(canonical変種の set/name) で同番号の複数 print を正しく選ぶ。
     Returns: {available, psa10_price_jpy, conditions, card_id, card_url} or {"_error":...}
     """
-    cid = resolve_card_id(card_number, timeout=timeout, variant_hint=variant_hint)
+    _meta = {}                                       # resolve_card_id が thumbnail(実カード画像)を入れる
+    cid = resolve_card_id(card_number, timeout=timeout, variant_hint=variant_hint, _meta=_meta)
     if cid is None:
         return {"_error": "card_not_found", "available": False, "psa10_price_jpy": None}
+    card_image = _meta.get("thumbnail", "")          # RESTOCK確証で出す実カード画像(全PSA10出品で共通)
     listings = fetch_psa10_listings(cid, timeout=timeout)
     if listings is not None:                         # 出品API成功 = これを正とする
         if listings:
@@ -291,16 +307,18 @@ def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant
                 for x in listings
             ]
             return {"available": True, "psa10_price_jpy": psa10_listings[0]["price"],
-                    "conditions": {}, "card_id": cid,
+                    "conditions": {}, "card_id": cid, "card_image": card_image,
                     "card_url": psa10_listings[0]["url"],
                     "psa10_listings": psa10_listings}
         return {"available": False, "psa10_price_jpy": None, "conditions": {},
-                "card_id": cid, "card_url": CARD_PAGE_TMPL.format(card_id=cid),
+                "card_id": cid, "card_image": card_image,
+                "card_url": CARD_PAGE_TMPL.format(card_id=cid),
                 "psa10_listings": []}
     # 出品API不調 → min-prices フォールバック
     res = check_resource(cid, condition=condition, timeout=timeout)
     if "_error" not in res:
         res["card_id"] = cid
+        res["card_image"] = card_image
         res["card_url"] = CARD_PAGE_TMPL.format(card_id=cid)
     return res
 

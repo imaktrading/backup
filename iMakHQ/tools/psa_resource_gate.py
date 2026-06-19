@@ -85,13 +85,16 @@ def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
             # HTTP shape (snkrdunk_psa_resource.check_by_keyword): 在庫+最安+PSA10出品一覧(補URL候補)
             if snkrdunk.get("available"):
                 s_price = snkrdunk.get("psa10_price_jpy")
+                # 実カード画像(thumbnailUrl)= 全PSA10出品で共通。RESTOCK確証はこれを出す
+                # (listing ページの og:image はサイト既定ロゴで全候補同一になるため不可)。
+                _simg = snkrdunk.get("card_image", "")
                 # psa10_listings = 価格昇順の全PSA10出品 → 補URL列(最安の代替候補)。
                 listings = snkrdunk.get("psa10_listings") or []
-                snkrdunk_urls = [{"price": d.get("price"), "url": d.get("url", "")}
+                snkrdunk_urls = [{"price": d.get("price"), "url": d.get("url", ""), "image": _simg}
                                  for d in listings if d.get("url")]
                 if not snkrdunk_urls:                 # 後方互換 (psa10_listings 無→card_url 1件)
                     url = snkrdunk.get("card_url", "")
-                    snkrdunk_urls = [{"price": s_price, "url": url}] if url else []
+                    snkrdunk_urls = [{"price": s_price, "url": url, "image": _simg}] if url else []
                 s_count = len(snkrdunk_urls) or 1
         else:
             # harvest shape (find_psa10_urls_for_card): 個別補URL一覧 (psa10_count/psa10_details)
@@ -545,7 +548,8 @@ def main():
                 _cands.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
             for d in (c.get("snkrdunk_urls") or [])[:5]:
                 if d.get("url"):
-                    _cands.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price")})
+                    _cands.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price"),
+                                   "image": d.get("image", "")})
             try:
                 _cur = float(r.get("ebay_price")) if r.get("ebay_price") else None
             except (TypeError, ValueError):

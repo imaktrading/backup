@@ -107,13 +107,17 @@ def _resolve_image_url(u):
     - snkrdunk 商品ページ → og:image
     """
     u = u or ""
+    # 既に直画像URL(CDN host / 画像拡張子)なら解決不要でそのまま(SNKRDUNK thumbnailUrl 等)。
+    if "cdn.snkrdunk.com" in u or u.lower().split("?", 1)[0].endswith(
+            (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return u
     if "mercari" in u and "/images/" not in u and "mercdn.net" not in u:
         m = re.search(r"\b(m\d{9,})\b", u)
         if m:
             return f"https://static.mercdn.net/item/detail/orig/photos/{m.group(1)}_1.jpg"
         return _fetch_og_image(u)          # mercari shops 等は og:image
     if "snkrdunk.com" in u and "/images/" not in u:
-        return _fetch_og_image(u)
+        return _fetch_og_image(u)          # snkrdunk の商品ページURL(画像でない)→ og:image
     return u
 
 
@@ -395,7 +399,10 @@ def build_restock_html(items):
         cand_html = []
         for cd in (it.get("candidates") or []):
             u = cd.get("url") or ""
-            img = (f"<img src='{_proxied(u)}' loading='lazy' onerror='imgFail(this,0)'>" if u
+            # 画像は cd.image(SNKRDUNK=実カードthumbnail)優先、無ければ url を解決(mercari=CDN直画像)。
+            # SNKRDUNK は listing ページの og:image がサイト既定ロゴで全候補同一になるため image を使う。
+            imgsrc = cd.get("image") or u
+            img = (f"<img src='{_proxied(imgsrc)}' loading='lazy' onerror='imgFail(this,0)'>" if imgsrc
                    else "<div class='cph'>画像なし</div>")
             price = cd.get("price")
             pstr = f"¥{price:,}" if isinstance(price, int) else (_s(price) if price else "")

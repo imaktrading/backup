@@ -47,6 +47,30 @@ def test_mercari_shops_no_itemid_uses_og(monkeypatch):
     assert prc._resolve_image_url(u) == "https://cdn.mercari/og.jpg"
 
 
+def test_snkrdunk_cdn_thumbnail_passthrough():
+    """SNKRDUNK 実カード画像(cdn.snkrdunk.com の thumbnailUrl)は og:image 解決せずそのまま。
+
+    回帰: listing ページの og:image はサイト既定ロゴで全候補同一になる → thumbnailUrl を直使い。
+    cdn URL を再度 og 解決すると壊れるため passthrough を固定。
+    """
+    u = "https://cdn.snkrdunk.com/upload_bg_removed/20260130065226-0.webp?size=m"
+    assert prc._resolve_image_url(u) == u
+
+
+def test_image_extension_passthrough_no_og(monkeypatch):
+    """画像拡張子で終わる URL は og:image 解決を呼ばずそのまま(誤って og を引かない)。"""
+    monkeypatch.setattr(prc, "_fetch_og_image", lambda url: "SHOULD_NOT_BE_CALLED")
+    assert prc._resolve_image_url("https://x.test/a/b.webp?size=m") == "https://x.test/a/b.webp?size=m"
+    assert prc._resolve_image_url("https://x.test/a/b.PNG") == "https://x.test/a/b.PNG"
+
+
+def test_snkrdunk_product_page_still_uses_og(monkeypatch):
+    """SNKRDUNK の商品ページURL(画像でない)は従来どおり og:image 解決(後方互換)。"""
+    monkeypatch.setattr(prc, "_fetch_og_image", lambda url: "https://cdn.snkrdunk.com/og/x.jpg")
+    assert prc._resolve_image_url("https://snkrdunk.com/trading-cards/12345") == \
+        "https://cdn.snkrdunk.com/og/x.jpg"
+
+
 def test_empty_url():
     assert prc._resolve_image_url("") == ""
     assert prc._resolve_image_url(None) == ""
