@@ -209,31 +209,38 @@ def _backfill_snkr_card_image(cached, row, mp, sp):
     if not (isinstance(cached, dict) and cached.get("available")):
         return cached
     # 旧キャッシュ判定: card_image 欠落 OR psa10_listings が per-listing 画像(image キー)を持たない
-    # (82dffc5 前のキャッシュ)。どちらかなら SNKRDUNK を再取得して出品個別の実スラブ写真を入れる。
+    # (82dffc5 前のキャッシュ)。どちらかなら SNKRDUNK を取り直して出品個別の実スラブ写真を入れる。
     _ls = cached.get("psa10_listings") or []
     _stale = (not cached.get("card_image")) or any("image" not in x for x in _ls)
     if not _stale:
         return cached
-    cn = _resource_card_number(row.get("title", "") or "", row.get("key"))
-    if not cn:
-        return cached
-    vh = None
-    k = row.get("key")
-    if k:
-        m = mp.card_meta_for_key(k)
-        vh = m.get("hint") if m else None
-    try:
-        fresh = sp.check_by_keyword(cn, variant_hint=vh)
-    except Exception:
-        return cached
-    if isinstance(fresh, dict) and fresh.get("card_image"):
-        updated = dict(cached, card_image=fresh["card_image"])
-        # 旧キャッシュの psa10_listings は per-listing 写真(image)を持たないので fresh で更新
-        # (= 出品個別の実スラブ写真を出すため。SNKRDUNK は軽いHTTPなので再取得は安価)。
-        if fresh.get("psa10_listings"):
-            updated["psa10_listings"] = fresh["psa10_listings"]
-        return updated
-    return cached
+    updated = dict(cached)
+    # per-listing 写真: **キャッシュ済の card_id をそのまま使って** listings だけ取り直す。
+    # 再 resolve しない = 変種ドリフト(別カードに解決し直す)を起こさない(2026-06-19 P-053型で発覚)。
+    cid = cached.get("card_id")
+    if cid:
+        try:
+            fresh_ls = sp.psa10_listings_for(cid)
+        except Exception:
+            fresh_ls = None
+        if fresh_ls:
+            updated["psa10_listings"] = fresh_ls
+    # card_image(thumbnail)欠落時のみ search で補完(これは card番号→variant の再 resolve が必要)。
+    if not cached.get("card_image"):
+        cn = _resource_card_number(row.get("title", "") or "", row.get("key"))
+        if cn:
+            vh = None
+            k = row.get("key")
+            if k:
+                m = mp.card_meta_for_key(k)
+                vh = m.get("hint") if m else None
+            try:
+                fresh = sp.check_by_keyword(cn, variant_hint=vh)
+                if isinstance(fresh, dict) and fresh.get("card_image"):
+                    updated["card_image"] = fresh["card_image"]
+            except Exception:
+                pass
+    return updated
 
 
 def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):

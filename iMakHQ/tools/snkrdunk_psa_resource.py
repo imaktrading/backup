@@ -277,6 +277,20 @@ def parse_psa10_listings(data, short_cond="PSA10"):
     return out
 
 
+def psa10_listings_for(card_id, timeout=_TIMEOUT_SEC):
+    """resolve 済の card_id の現在PSA10出品を [{price, image, url}] で返す(per-listing 実スラブ写真込み)。
+
+    既に正しく resolve された card_id を使うため **再 resolve しない**(= 変種ドリフトを起こさない)。
+    キャッシュ補完で「出品個別の実スラブ写真」を取り直す用途。出品無し/失敗は []。
+    """
+    ls = fetch_psa10_listings(card_id, timeout=timeout)
+    if not ls:
+        return []
+    return [{"price": x["price"], "image": x.get("image", ""),
+             "url": LISTING_PAGE_TMPL.format(card_id=card_id, listing_id=x["listing_id"])}
+            for x in ls]
+
+
 def fetch_psa10_listings(card_id, timeout=_TIMEOUT_SEC):
     """card_id の PSA10販売中出品を価格昇順で返す。API失敗時は None (= min-prices へフォールバック)。"""
     if not card_id or not str(card_id).strip():

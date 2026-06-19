@@ -80,35 +80,48 @@ def test_backfill_skips_when_card_image_present():
 
 
 class _SpListings:
+    """psa10_listings_for(cached card_id) で per-listing 写真を返す fake。再 resolve しない。"""
     def __init__(self):
-        self.calls = 0
+        self.list_calls = 0
+        self.kw_calls = 0
+    def psa10_listings_for(self, cid, timeout=None):
+        self.list_calls += 1
+        return [{"price": 30000, "image": "https://cdn.snkrdunk.com/apparel_used_listings/x.jpeg",
+                 "url": f"https://snkrdunk.com/apparels/{cid}/used/11"}]
     def check_by_keyword(self, cn, variant_hint=None):
-        self.calls += 1
-        return {"available": True, "card_image": "THUMB", "psa10_listings": [
-            {"price": 30000, "url": "u", "image": "https://cdn.snkrdunk.com/apparel_used_listings/x.jpeg"}]}
+        self.kw_calls += 1
+        return {"available": True, "card_image": "THUMB"}
 
 
 def test_backfill_refetches_when_listings_lack_image_key():
-    """旧キャッシュ: card_image は有るが psa10_listings に image キー無し → 再取得し per-listing写真を入れる。
-
-    真因: 候補画像がカードthumbnail のままで「開く」URL(個別出品)と違っていた。出品個別の
-    primaryPhoto を入れて URL と一致させる。
-    """
-    cached = {"available": True, "card_image": "THUMB",
+    """旧キャッシュ: card_image は有るが psa10_listings に image キー無し → cached card_id で listings
+    だけ取り直し per-listing写真を入れる。候補画像が「開く」URL(個別出品)と一致するようになる。"""
+    cached = {"available": True, "card_image": "THUMB", "card_id": 999,
               "psa10_listings": [{"price": 30000, "url": "u"}]}      # image キー無し=旧形式
     sp_fake = _SpListings()
     out = gate._backfill_snkr_card_image(cached, {"title": "x", "key": "OP11-106"}, _FakeMp(), sp_fake)
-    assert sp_fake.calls == 1
+    assert sp_fake.list_calls == 1                                  # cached card_id で listings 取得
+    assert sp_fake.kw_calls == 0                                    # card_image 有り→再resolveしない(ドリフト無し)
     assert out["psa10_listings"][0]["image"].endswith("x.jpeg")     # 出品個別写真が入った
+    assert "/used/11" in out["psa10_listings"][0]["url"]            # 同一listing由来(url↔image一致)
+
+
+def test_backfill_uses_cached_card_id_not_reresolve():
+    """補完は cached card_id をそのまま使い、check_by_keyword(再resolve)を呼ばない=変種ドリフト防止。"""
+    cached = {"available": True, "card_image": "THUMB", "card_id": 328650,
+              "psa10_listings": [{"price": 30000, "url": "u"}]}
+    sp_fake = _SpListings()
+    gate._backfill_snkr_card_image(cached, {"title": "x", "key": "P-053_PRB01"}, _FakeMp(), sp_fake)
+    assert sp_fake.kw_calls == 0                                    # 再resolveゼロ
 
 
 def test_backfill_skips_when_listings_have_image_key():
-    """新形式(image キー有り、空でも)+ card_image 有り → 再取得しない(自己修復後の無駄HTTP回避)。"""
-    cached = {"available": True, "card_image": "THUMB",
+    """新形式(image キー有り、空でも)+ card_image 有り → 取り直さない(自己修復後の無駄HTTP回避)。"""
+    cached = {"available": True, "card_image": "THUMB", "card_id": 999,
               "psa10_listings": [{"price": 30000, "url": "u", "image": ""}]}
     sp_fake = _SpListings()
     out = gate._backfill_snkr_card_image(cached, {"title": "x", "key": "k"}, _FakeMp(), sp_fake)
-    assert sp_fake.calls == 0
+    assert sp_fake.list_calls == 0 and sp_fake.kw_calls == 0
 
 
 def test_backfill_skips_unavailable():
