@@ -71,6 +71,34 @@ def test_snkrdunk_product_page_still_uses_og(monkeypatch):
         "https://cdn.snkrdunk.com/og/x.jpg"
 
 
+def test_parse_restock_result_confirmed_and_reasons():
+    """RESTOCK確証 POST → 買う候補(urls) + 外し理由カウント(違う/見送り) + total。"""
+    data = {
+        "confirmed": [{"idx": 0, "urls": ["u1", "", "u2"]}, {"idx": 1, "urls": []}],
+        "reasons": {"diff": 2, "skip": 5},
+        "total": 9,
+    }
+    r = prc.parse_restock_result(data)
+    assert r["confirmed"] == [{"idx": 0, "urls": ["u1", "u2"]}]   # 空url除去 / urls空のcardは落ちる
+    assert r["reasons"] == {"diff": 2, "skip": 5}
+    assert r["total"] == 9
+
+
+def test_parse_restock_result_missing_reasons():
+    """reasons/total 欠落でも 0 で安全(後方互換)。"""
+    r = prc.parse_restock_result({"confirmed": [{"idx": 3, "urls": ["x"]}]})
+    assert r["confirmed"] == [{"idx": 3, "urls": ["x"]}]
+    assert r["reasons"] == {"diff": 0, "skip": 0}
+    assert r["total"] == 0
+
+
+def test_parse_restock_result_empty():
+    r = prc.parse_restock_result({})
+    assert r["confirmed"] == []
+    assert r["reasons"] == {"diff": 0, "skip": 0}
+    assert r["total"] == 0
+
+
 def test_empty_url():
     assert prc._resolve_image_url("") == ""
     assert prc._resolve_image_url(None) == ""

@@ -684,11 +684,12 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
                       "ebay_url": rc["ebay_url"], "ref_image": ref,
                       "candidates": rc["candidates"], "v8": _v8_label(rc.get("cost"), rc.get("cur"), mp)})
     print(f"▶ RESTOCK視覚確証: 再仕入れ可 {len(items)}件をブラウザ表示。候補ごとに①現物と同じか確認...")
-    confirmed = prc.restock_confirm(items)
-    if confirmed is None:
+    res = prc.restock_confirm(items)
+    if res is None:
         print("⚠ RESTOCK確証 タイムアウト/未確定 — RESTOCK確定リストは未更新")
         return
-    # confirmed = [{idx, urls:[①と同じと確認した候補URL]}]。候補ごと選択 → 確認済URLのみ記録。
+    # res = {confirmed:[{idx,urls}], reasons:{diff,skip}, total}。confirmed=買う候補のみ記録。
+    confirmed = res["confirmed"]
     sel = {c["idx"]: c["urls"] for c in confirmed}
     today = datetime.date.today().isoformat()
     out = [["itemID", "card_no", "title", "最安チャネル", "最安¥", "eBay現$", "V8判定",
@@ -706,6 +707,27 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         print(f"🟢 RESTOCK確定: {len(out)-1}件 → タブ「RESTOCK確定」(手動で revise 実行 / POC-Bで自動化) {MAINT_URL}")
     except Exception as e:
         print(f"⚠ RESTOCK確定タブ更新skip ({type(e).__name__}: {e})")
+    _record_restock_reasons(res.get("reasons") or {}, res.get("total") or 0, today)
+
+
+def _record_restock_reasons(reasons, total, today):
+    """外し理由トレンドを1行記録(墓場でなく率)。違う率(=検索が別カードを拾う頻度)が
+    生成(メルカリkeyword/スニダンmatch)を直すべきかの根拠。違う率が上がる→生成側の変種確証強化。
+    """
+    diff = int(reasons.get("diff") or 0)
+    skip = int(reasons.get("skip") or 0)
+    rate = round(100 * diff / total, 1) if total else 0.0
+    print(f"📉 外し理由: 違う{diff} / 見送り{skip} / 候補総数{total}  → 違う率 {rate}%"
+          + ("  ⚠検索が別カードを拾い気味=生成の変種確証を要強化" if rate >= 15 else ""))
+    try:
+        from sheet_io import read_tab, write_rows_to_tab
+        hdr = ["日付", "候補総数", "違う", "見送り", "違う率%"]
+        prev = read_tab("RESTOCK外し理由") or []
+        body = prev[1:] if (prev and prev[0][:1] == ["日付"]) else [r for r in prev if r]
+        rows = [hdr] + body + [[today, total, diff, skip, rate]]
+        write_rows_to_tab("RESTOCK外し理由", rows)
+    except Exception as e:
+        print(f"⚠ 外し理由トレンド記録skip ({type(e).__name__}: {e})")
 
 
 if __name__ == "__main__":

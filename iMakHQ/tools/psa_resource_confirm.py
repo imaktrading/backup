@@ -179,6 +179,10 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .cand .cph{width:100px;height:135px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;border:1px dashed #ccc}
 .cand:has(input:checked){border-color:#2a7;background:#eafaf1}
 .clbl{font-size:11px;word-break:break-word;line-height:1.2}
+.rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px}
+.cand:has(.ck:not(:checked)) .rsn{display:inline-flex}
+.rb{font-size:10px;padding:1px 5px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:pointer}
+.rb.sel{background:#c33;color:#fff;border-color:#c33;font-weight:bold}
 .t{font-size:13px;word-break:break-word;margin:4px 0}
 .no{font-size:12px;color:#555}
 label.sel{display:flex;align-items:center;gap:6px;font-weight:bold;margin-bottom:4px}
@@ -370,15 +374,20 @@ function upd(i){var c=document.getElementById('c'+i);
   if(b) b.textContent = n? ('RESTOCK ✓ 買う候補 '+n+'件') : 'RESTOCKしない(全候補 仕入見送り)';}
 function setAll(v){document.querySelectorAll('.ck').forEach(function(b){b.checked=v;});
   document.querySelectorAll('.card').forEach(function(c){upd(c.dataset.idx);});}
+function setRsn(btn){var cand=btn.closest('.cand'); var ck=cand.querySelector('.ck');
+  ck.dataset.rsn=btn.dataset.r;
+  cand.querySelectorAll('.rb').forEach(function(b){b.classList.toggle('sel', b.dataset.r===btn.dataset.r);});}
 function go(){
-  var conf=[];
+  var conf=[]; var reasons={diff:0, skip:0}; var total=0;
   document.querySelectorAll('.card').forEach(function(c){
     var idx=parseInt(c.dataset.idx); var urls=[];
-    c.querySelectorAll('.ck:checked').forEach(function(ck){urls.push(ck.dataset.url);});
+    c.querySelectorAll('.ck').forEach(function(ck){total++;
+      if(ck.checked){urls.push(ck.dataset.url);}
+      else{var r=ck.dataset.rsn||'skip'; reasons[r]=(reasons[r]||0)+1;}});
     if(urls.length) conf.push({idx:idx, urls:urls});
   });
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({confirmed:conf})}).then(function(){
+    body:JSON.stringify({confirmed:conf, reasons:reasons, total:total})}).then(function(){
     document.getElementById('main').style.display='none';
     var d=document.getElementById('done'); d.style.display='block';
     d.textContent='✅ RESTOCK確定 '+conf.length+'件。ターミナルに戻ってください。';});
@@ -407,13 +416,18 @@ def build_restock_html(items):
             price = cd.get("price")
             pstr = f"¥{price:,}" if isinstance(price, int) else (_s(price) if price else "")
             # 候補ごとに個別チェック(既定ON)。①と違う候補だけ外せる(1つ違っても全部NGにならない)。
-            # チェック外す = その候補は「仕入見送り」(買わない)。理由は問わない(高い/出品者不安/
-            # 納期長/違うカード等まとめて見送り扱い)。残ったチェック分だけ RESTOCK の仕入元になる。
+            # チェック外す=買わない。理由は2択: 「見送り」(高い/出品者不安/納期長 等=business判断、
+            # 記録のみ)と「違う」(検索が別カードを拾った誤検出=生成への改善信号→違う率トレンド)。
+            # 既定 skip(外す多数は見送り)。違うカードの時だけ「違う」を押す。
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
-                f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' onchange='upd({idx})'>{img}"
+                f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='skip' onchange='upd({idx})'>{img}"
                 f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}"
-                f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a></span></label>")
+                f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a>"
+                f"<span class='rsn'>外す理由:"
+                f"<button type='button' class='rb sel' data-r='skip' onclick='setRsn(this)'>見送り</button>"
+                f"<button type='button' class='rb' data-r='diff' onclick='setRsn(this)'>違う</button>"
+                f"</span></span></label>")
         if not cand_html:
             cand_html = ["<div class='cph'>仕入候補なし</div>"]
         v8 = _s(it.get("v8"))
@@ -434,23 +448,33 @@ def build_restock_html(items):
     bar = ("<div class='bar'><button class='go' onclick='go()'>✅ RESTOCK確定</button>"
            "<button onclick='setAll(true)'>全部ON</button>"
            "<button onclick='setAll(false)'>全部OFF</button>"
-           "<span style='color:#c33;font-size:13px'>※チェック=買う / 外す=仕入見送り(理由は問わない)</span></div>")
+           "<span style='color:#c33;font-size:13px'>※チェック=買う / 外す=買わない(理由: 見送り or 違う を選択)</span></div>")
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>RESTOCK確証</title>"
             f"<style>{_CSS}</style></head><body>"
             f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
             f"<div id='done'></div><script>{_JS_RESTOCK}</script></body></html>")
 
 
+def parse_restock_result(data):
+    """RESTOCK確証 POST(JSON)→ {confirmed:[{idx,urls}], reasons:{diff,skip}, total}。純関数(test可)。
+
+    confirmed=買う候補(チェック残)。reasons=外した候補の理由カウント(diff=違うカード=検索誤検出の
+    改善信号 / skip=見送り=business判断)。違う率(diff/total)が生成(検索)を直すべきかの根拠。
+    """
+    out = []
+    for d in (data.get("confirmed") or []):
+        if d.get("idx") is None:
+            continue
+        urls = [u for u in (d.get("urls") or []) if u]
+        if urls:
+            out.append({"idx": int(d["idx"]), "urls": urls})
+    rs = data.get("reasons") or {}
+    return {"confirmed": out,
+            "reasons": {"diff": int(rs.get("diff") or 0), "skip": int(rs.get("skip") or 0)},
+            "total": int(data.get("total") or 0)}
+
+
 def restock_confirm(items, timeout=1800):
-    """RESTOCK視覚確証 → [{idx, urls:[①と同じと確認した候補URL]}] を返す(候補1つでも残ればRESTOCK)。
-    未確定は None。"""
-    def _ex(data):
-        out = []
-        for d in (data.get("confirmed") or []):
-            if d.get("idx") is None:
-                continue
-            urls = [u for u in (d.get("urls") or []) if u]
-            if urls:
-                out.append({"idx": int(d["idx"]), "urls": urls})
-        return out
-    return _serve_confirm(build_restock_html(items).encode("utf-8"), _ex, timeout)
+    """RESTOCK視覚確証 → {confirmed:[{idx,urls}], reasons:{diff,skip}, total} を返す
+    (候補1つでも残ればRESTOCK)。未確定は None。"""
+    return _serve_confirm(build_restock_html(items).encode("utf-8"), parse_restock_result, timeout)
