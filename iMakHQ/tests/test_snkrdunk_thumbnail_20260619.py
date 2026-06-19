@@ -71,11 +71,43 @@ def test_backfill_adds_card_image_to_stale_cache():
 
 
 def test_backfill_skips_when_card_image_present():
-    """既に card_image があれば再取得しない(無駄HTTPを避ける)。"""
+    """card_image あり + listings 無し → 再取得しない(補完するものが無い)。"""
     cached = {"available": True, "card_image": "https://cdn.snkrdunk.com/already.webp"}
     sp_fake = _FakeSp("https://cdn.snkrdunk.com/new.webp")
     out = gate._backfill_snkr_card_image(cached, {"title": "x", "key": "OP11-106"}, _FakeMp(), sp_fake)
     assert out["card_image"] == "https://cdn.snkrdunk.com/already.webp"
+    assert sp_fake.calls == 0
+
+
+class _SpListings:
+    def __init__(self):
+        self.calls = 0
+    def check_by_keyword(self, cn, variant_hint=None):
+        self.calls += 1
+        return {"available": True, "card_image": "THUMB", "psa10_listings": [
+            {"price": 30000, "url": "u", "image": "https://cdn.snkrdunk.com/apparel_used_listings/x.jpeg"}]}
+
+
+def test_backfill_refetches_when_listings_lack_image_key():
+    """旧キャッシュ: card_image は有るが psa10_listings に image キー無し → 再取得し per-listing写真を入れる。
+
+    真因: 候補画像がカードthumbnail のままで「開く」URL(個別出品)と違っていた。出品個別の
+    primaryPhoto を入れて URL と一致させる。
+    """
+    cached = {"available": True, "card_image": "THUMB",
+              "psa10_listings": [{"price": 30000, "url": "u"}]}      # image キー無し=旧形式
+    sp_fake = _SpListings()
+    out = gate._backfill_snkr_card_image(cached, {"title": "x", "key": "OP11-106"}, _FakeMp(), sp_fake)
+    assert sp_fake.calls == 1
+    assert out["psa10_listings"][0]["image"].endswith("x.jpeg")     # 出品個別写真が入った
+
+
+def test_backfill_skips_when_listings_have_image_key():
+    """新形式(image キー有り、空でも)+ card_image 有り → 再取得しない(自己修復後の無駄HTTP回避)。"""
+    cached = {"available": True, "card_image": "THUMB",
+              "psa10_listings": [{"price": 30000, "url": "u", "image": ""}]}
+    sp_fake = _SpListings()
+    out = gate._backfill_snkr_card_image(cached, {"title": "x", "key": "k"}, _FakeMp(), sp_fake)
     assert sp_fake.calls == 0
 
 

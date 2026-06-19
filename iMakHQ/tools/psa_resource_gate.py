@@ -206,7 +206,13 @@ def _backfill_snkr_card_image(cached, row, mp, sp):
     全候補がサイト既定ロゴになる。Mercari は再scrapeせず(遅い/BAN)、SNKRDUNK の軽い HTTP 検索
     だけ再実行して card_image を後付けする。available でない/card番号不明/取得失敗は元のまま。
     """
-    if not (isinstance(cached, dict) and cached.get("available") and not cached.get("card_image")):
+    if not (isinstance(cached, dict) and cached.get("available")):
+        return cached
+    # 旧キャッシュ判定: card_image 欠落 OR psa10_listings が per-listing 画像(image キー)を持たない
+    # (82dffc5 前のキャッシュ)。どちらかなら SNKRDUNK を再取得して出品個別の実スラブ写真を入れる。
+    _ls = cached.get("psa10_listings") or []
+    _stale = (not cached.get("card_image")) or any("image" not in x for x in _ls)
+    if not _stale:
         return cached
     cn = _resource_card_number(row.get("title", "") or "", row.get("key"))
     if not cn:
