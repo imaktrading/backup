@@ -1304,6 +1304,10 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "MIRACLE TWINS":               "SM11",   # ミラクルツイン (SM11-069=Dragonite-GX 実在)
     "SKY-SPLITTING CHARISMA":      "SM7",    # 裂空のカリスマ (SM7-103=Tate & Liza 実在)
     "AMAZING VOLT TACKLE":         "S4",     # 仰天のボルテッカー (S4-030=Pikachu V / S4-108=Aegislash V 実在)
+    # --- 2026-06-19 HQ cert dump 確証済 (psa_3unresolved_raw_cert_request_response) ---
+    "EXTRA REGULATION BOX":        "BW",     # エクストラレギュレーションBOX(2019). cert140362929 Zoroark 014=BW-014 実在(公式収録確認, BW-001..048=本BOX)
+    "EMERALD BREAK":               "XY6-B",  # エメラルドブレイク[XY6]. cert119816956 Gallade-EX 030=XY6-B-030 実在(base #001-078 は catalog で XY6-B-NNN 体系)。※高番EX #079+ は XY6-NNN のため本索引では解決せず=fail-closed(誤解決はしない)
+    "NATIONAL BEGINNING":          "HSZm",   # BLACK & WHITE NATIONAL BEGINNING=BWはじめてセット全国図鑑版. cert145542066 Voltorb 014=HSZm-014 実在
     # --- 2026-06-10 PSA脱落6件 set-map (records 実在・索引のみ。真値=catalog set_name 裏取り) ---
     "SKY LEGEND":                  "SM10b",  # スカイレジェンド (cert109940063 Lillie 053=SM10b-053 実在)
     # ⚠️ 順序大事: より具体的な "...BATTLE COLLECTION" を plain "START DECK 100" より先に置く。
