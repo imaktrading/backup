@@ -25,6 +25,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
+LOG_DIR = SCRIPT_DIR / "logs"  # date log / mail_send.log / reports/ の置き場
 
 for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
@@ -296,24 +297,75 @@ def _format_report(start: datetime, end: datetime,
     return subject, "\n".join(lines)
 
 
+def _record_mail_result(ok: bool, subject: str, err: str = "") -> None:
+    """メール送信結果を永続記録 (= pythonw で print が破棄されても残す)。
+    失敗時は desktop ALERT ファイルも出して 絶対 silent 化しない (HIGH/LOW と同思想)。
+    """
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {'OK' if ok else 'NG'} | {subject}" + (f" | {err}" if err else "")
+    try:
+        with (LOG_DIR / "mail_send.log").open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+    if not ok:
+        _log(f"[mail] ★送信失敗確定 → desktop ALERT 出力: {err}")
+        try:
+            tsf = datetime.now().strftime("%Y%m%d_%H%M%S")
+            desk = (Path.home() / "OneDrive" / "デスクトップ"
+                    / f"ALERT_公式監視くん_mail_failed_{tsf}.txt")
+            desk.write_text(
+                f"公式監視くん メール送信失敗 ({ts})\nsubject={subject}\nerror={err}\n\n"
+                f"★ メール経路全断: この cycle 結果はメール未着。\n"
+                f"  レポート本文は logs/reports/ に保存済。 mail_send.log も確認。\n",
+                encoding="utf-8")
+        except Exception as e:
+            _log(f"[mail] desktop ALERT 出力も失敗: {type(e).__name__}: {e}")
+
+
 def _send_report_email(subject: str, body: str) -> bool:
-    """iMakInventory の既存 email_notifier 流用."""
+    """iMakInventory の既存 email_notifier 流用 + transient retry + 失敗時 fallback alert.
+
+    ★ 2026-06-19: 従来は retry/fallback 無し + 結果が print (= Task Scheduler の pythonw で
+    破棄) のため、 DNS/SMTP blip で送信失敗すると メールも ログも 代替通知も無い完全 silent
+    だった (= cycle 結果見落とし)。 transient retry + 永続記録 + desktop ALERT を追加。
+    """
+    import time as _time  # noqa: PLC0415
     try:
         inv_root = SCRIPT_DIR.parent.parent / "iMakInventory"
         if str(inv_root) not in sys.path:
             sys.path.insert(0, str(inv_root))
         from email_notifier import _send_via_gmail  # noqa: PLC0415
         from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
-        cfg = load_gmail_config()
-        if cfg is None:
-            _log("[mail] DPAPI Gmail 未設定、メール送信 skip")
-            return False
-        addr, pw, to = cfg
-        _send_via_gmail(addr, pw, to, subject, body)
-        return True
     except Exception as e:
-        _log(f"[mail] 送信失敗: {type(e).__name__}: {e}")
+        _record_mail_result(False, subject, f"import 失敗: {type(e).__name__}: {e}")
         return False
+    cfg = load_gmail_config()
+    if cfg is None:
+        _log("[mail] DPAPI Gmail 未設定、メール送信 skip")
+        return False  # opt-in 未設定は silent 化 risk でない (記録しない)
+    addr, pw, to = cfg
+    last_err = None
+    for attempt, backoff in enumerate((0, 5, 15), start=1):
+        if backoff:
+            _time.sleep(backoff)
+        try:
+            _send_via_gmail(addr, pw, to, subject, body)
+            _record_mail_result(True, subject)
+            return True
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            msg = f"{type(e).__name__}: {e}"
+            _log(f"[mail] 送信失敗 attempt {attempt}/3 ({msg})")
+            transient = any(k in msg for k in (
+                "getaddrinfo failed", "NameResolutionError", "Failed to resolve",
+                "Connection", "Timeout", "timed out", "Max retries",
+                "SMTPServerDisconnected", "Temporarily",
+            ))
+            if not transient or attempt >= 3:
+                break
+    _record_mail_result(False, subject, f"{type(last_err).__name__}: {last_err}")
+    return False
 
 
 def main():
@@ -391,6 +443,14 @@ def main():
 
     subject, body = _format_report(start, end, monitor, zero, restore, step_results)
     _log("\n" + body)
+    # レポート本文を毎回ファイル保存 (= pythonw で print 破棄 + メール失敗 でも結果を失わない)
+    try:
+        rep_dir = LOG_DIR / "reports"
+        rep_dir.mkdir(parents=True, exist_ok=True)
+        (rep_dir / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt").write_text(
+            subject + "\n\n" + body, encoding="utf-8")
+    except Exception as e:
+        _log(f"[report] 本文ファイル保存失敗: {type(e).__name__}: {e}")
     sent = _send_report_email(subject, body)
     _log(f"[mail] 統合 report 送信: {'OK' if sent else 'NG'}")
 
