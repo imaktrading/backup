@@ -88,15 +88,33 @@ def test_backfill_skips_unavailable():
     assert sp_fake.calls == 0
 
 
-def test_combine_attaches_image_to_snkrdunk_urls():
-    """check_by_keyword 形(card_image付き)→ combine の snkrdunk_urls 各entryに image が乗る。"""
+def test_parse_psa10_listings_extracts_primary_photo():
+    """各PSA10出品の primaryPhoto.imageUrl(出品者の実スラブ写真)を抽出。価格昇順 / PSA10限定。"""
+    data = {"apparelUsedItems": [
+        {"id": 11, "price": 30000, "displayShortConditionTitle": "PSA 10", "isDisplaySold": False,
+         "primaryPhoto": {"imageUrl": "https://cdn.snkrdunk.com/apparel_used_listings/x/1.jpeg"}},
+        {"id": 12, "price": 28000, "displayShortConditionTitle": "PSA10", "isDisplaySold": False,
+         "primaryPhoto": {}},                                   # 写真無し
+        {"id": 13, "price": 5000, "displayShortConditionTitle": "PSA9", "isDisplaySold": False,
+         "primaryPhoto": {"imageUrl": "y"}},                    # PSA10でない→除外
+    ]}
+    out = sp.parse_psa10_listings(data)
+    assert [o["listing_id"] for o in out] == [12, 11]           # 価格昇順 / PSA9除外
+    assert out[0]["image"] == ""                                # 写真無しは空
+    assert out[1]["image"] == "https://cdn.snkrdunk.com/apparel_used_listings/x/1.jpeg"
+
+
+def test_combine_prefers_per_listing_photo_over_thumbnail():
+    """候補画像は **その出品個別の実スラブ写真** を最優先、無い時だけカードthumbnailにフォールバック。"""
     snkr = {
-        "available": True, "psa10_price_jpy": 30000, "card_image": "https://cdn.snkrdunk.com/x.webp",
+        "available": True, "psa10_price_jpy": 28000, "card_image": "THUMB_FALLBACK",
         "psa10_listings": [
-            {"price": 30000, "url": "https://snkrdunk.com/trading-cards/1/listings/11"},
-            {"price": 35000, "url": "https://snkrdunk.com/trading-cards/1/listings/22"},
+            {"price": 28000, "image": "https://cdn.snkrdunk.com/apparel_used_listings/a.jpeg",
+             "url": "https://snkrdunk.com/L/11"},
+            {"price": 30000, "image": "", "url": "https://snkrdunk.com/L/22"},   # 写真無し→fallback
         ],
     }
     c = gate.combine(None, snkr)
-    assert len(c["snkrdunk_urls"]) == 2
-    assert all(u["image"] == "https://cdn.snkrdunk.com/x.webp" for u in c["snkrdunk_urls"])
+    imgs = [u["image"] for u in c["snkrdunk_urls"]]
+    assert imgs[0] == "https://cdn.snkrdunk.com/apparel_used_listings/a.jpeg"    # per-listing 写真
+    assert imgs[1] == "THUMB_FALLBACK"                                          # 無い時だけthumbnail

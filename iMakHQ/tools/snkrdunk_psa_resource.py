@@ -270,7 +270,9 @@ def parse_psa10_listings(data, short_cond="PSA10"):
             continue
         lid = it.get("id")
         if price > 0 and lid:
-            out.append({"listing_id": lid, "price": price})
+            # primaryPhoto = 出品者の実スラブ写真(その出品個別)= RESTOCK確証で照合すべき実物画像。
+            img = ((it.get("primaryPhoto") or {}).get("imageUrl") or "")
+            out.append({"listing_id": lid, "price": price, "image": img})
     out.sort(key=lambda x: x["price"])
     return out
 
@@ -309,7 +311,7 @@ def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant
             # 価格昇順の全PSA10出品を補URL候補に (最安が売切/状態相違時の代替=補URLの存在意義)。
             # 各出品に listing_id 直リンク。最安以外も返すことで補URL列が機能する。
             psa10_listings = [
-                {"price": x["price"],
+                {"price": x["price"], "image": x.get("image", ""),
                  "url": LISTING_PAGE_TMPL.format(card_id=cid, listing_id=x["listing_id"])}
                 for x in listings
             ]

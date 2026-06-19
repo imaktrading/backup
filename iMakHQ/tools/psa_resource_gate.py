@@ -85,12 +85,13 @@ def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
             # HTTP shape (snkrdunk_psa_resource.check_by_keyword): 在庫+最安+PSA10出品一覧(補URL候補)
             if snkrdunk.get("available"):
                 s_price = snkrdunk.get("psa10_price_jpy")
-                # 実カード画像(thumbnailUrl)= 全PSA10出品で共通。RESTOCK確証はこれを出す
-                # (listing ページの og:image はサイト既定ロゴで全候補同一になるため不可)。
+                # 画像は **その出品個別の実スラブ写真**(primaryPhoto)を最優先。出品に写真が無い時だけ
+                # カード共通の thumbnailUrl にフォールバック(listing ページの og:image はロゴで不可)。
                 _simg = snkrdunk.get("card_image", "")
                 # psa10_listings = 価格昇順の全PSA10出品 → 補URL列(最安の代替候補)。
                 listings = snkrdunk.get("psa10_listings") or []
-                snkrdunk_urls = [{"price": d.get("price"), "url": d.get("url", ""), "image": _simg}
+                snkrdunk_urls = [{"price": d.get("price"), "url": d.get("url", ""),
+                                  "image": d.get("image") or _simg}
                                  for d in listings if d.get("url")]
                 if not snkrdunk_urls:                 # 後方互換 (psa10_listings 無→card_url 1件)
                     url = snkrdunk.get("card_url", "")
