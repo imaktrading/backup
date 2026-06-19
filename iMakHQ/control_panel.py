@@ -265,6 +265,50 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         # 失敗しても listing 出力には影響なし
 
 
+# ============================================================================
+# RESTOCK Add→Revise 変換 helper (2026-06-20 追加)
+# post-chain (excluder/title-fix/dedup) の **後** に最終クリーン Add CSV を Revise 化。
+# 旧: psa_restock_build が dedup の **前** に変換し、赤字(NO-GO)/重複/旧タイトルが Revise に
+#     混入していた (2026-06-19 194513 で 11行=赤字3+重複 になった)。順序を保証する。
+# ============================================================================
+def _run_restock_revise_for_latest_csv(append_log_func, since_ts=None):
+    try:
+        csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
+        if not os.path.isdir(csv_dir):
+            return
+        cands = [f for f in os.listdir(csv_dir)
+                 if f.startswith("tcg_upload_") and f.endswith(".csv") and ".bak" not in f]
+        if not cands:
+            return
+        cm = sorted([(f, os.path.getmtime(os.path.join(csv_dir, f))) for f in cands],
+                    key=lambda x: x[1], reverse=True)
+        latest_csv = os.path.join(csv_dir, cm[0][0])
+        if since_ts is not None and cm[0][1] < since_ts:
+            append_log_func("\n(♻ RESTOCK Revise: 今回 listing で新規 CSV 出力なし → skip)\n")
+            return
+    except Exception as e:
+        append_log_func(f"\n⚠️ RESTOCK Revise CSV 探索失敗: {type(e).__name__}: {e}\n")
+        return
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ ♻ RESTOCK Add→Revise 変換 (post-chain後=最終クリーンCSV)\n")
+    append_log_func("======================================================================\n")
+    try:
+        _tools = os.path.join(WORKSPACE, "iMakHQ", "tools")
+        if _tools not in sys.path:
+            sys.path.insert(0, _tools)
+        import psa_restock_revise_csv as rv
+        desk = os.path.join(os.path.expanduser("~"), "OneDrive", "デスクトップ")
+        out_csv = os.path.join(desk, "RESTOCK_revise_"
+                               + os.path.basename(latest_csv).replace("tcg_upload_", ""))
+        n, sk = rv.convert_file(latest_csv, out_csv)
+        append_log_func(f"✅ Revise CSV生成: {out_csv} ({n}行 / 変換skip {len(sk)})\n")
+        for s in sk[:10]:
+            append_log_func(f"  ⏭ {s}\n")
+        append_log_func("→ check後、FileExchange に手動アップロード → 反映後に writeback(qty verify)\n")
+    except Exception as e:
+        append_log_func(f"\n⚠️ RESTOCK Revise 変換失敗: {type(e).__name__}: {e}\n")
+
+
 # ============ スクリプト登録 ============
 # 5/12: カテゴリ別に「新規 / 再出品」2ボタン構成 (パネル UI で Labelframe グループ化)
 # - category: グループ枠名 (None = utility 単独ボタン)
@@ -498,6 +542,9 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_restock_build.py"],
         "params": [],
+        # post-chain(excluder/title-fix/dedup)の **後** に Add→Revise 変換する(順序保証)。
+        # psa_restock_build は Add CSV 生成までで、Revise 化は control_panel が最終CSVに対して実施。
+        "restock_revise": True,
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/RESTOCK_revise_*.csv",
     },
     {
@@ -1748,6 +1795,16 @@ class ListingPanel:
                             _run_dedupe_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
                         except Exception as _e:
                             self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
+                    # Step 4.5: RESTOCK Revise 変換 (2026-06-20)。excluder/title-fix/dedup の **後** に、
+                    # 最終クリーンな Add CSV を Add→Revise 化する(順序保証=赤字/重複/旧タイトルを含めない)。
+                    # ♻ ボタン (restock_revise=True) の時のみ。旧: psa_restock_build が dedup 前に変換→混入バグ。
+                    try:
+                        _ridx = getattr(self, "_current_idx", -1)
+                        if _ridx >= 0 and SCRIPTS[_ridx].get("restock_revise"):
+                            _run_restock_revise_for_latest_csv(
+                                self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
+                    except Exception as _e:
+                        self.append_log(f"\n⚠️ RESTOCK Revise hook 失敗: {_e}\n")
                     # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
                     # 5/29 修正: 今 cycle で生成された tcg_upload_*.csv のみ対象 (= TCG 以外 cycle で毎回 HTML 出る問題対策)
                     # 2026-06-15: verify→build (PSA_VERIFY_BEFORE_BUILD=1) の時は CSV 生成 **前** に

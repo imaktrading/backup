@@ -68,9 +68,20 @@ def test_parallel_safe_with_new_listing():
     assert "adds[-1]" not in osrc                                       # 「最新」掴みは廃止
 
 
-def test_orchestrator_wires_psatocsv_then_revise():
+def test_orchestrator_generates_add_csv_revise_delegated():
+    """psa_restock_build は Add CSV 生成までを駆動。Add→Revise 変換は 2026-06-20 から
+    control_panel の post-chain(除外/dedup後)に移動(順序保証=赤字/重複/旧タイトル非混入)。"""
     src = (_TOOLS / "psa_restock_build.py").read_text(encoding="utf-8")
     assert "PSA_RESTOCK_INPUT" in src and 'TCG_USE_NEW_GEN="1"' in src
     assert "psa_to_csv.py" in src                                # Add生成を駆動
-    assert "convert_file" in src                                 # Add→Revise変換
     assert 'read_tab("RESTOCK確定")' in src or "_read_restock_confirmed" in src
+    # convert_file は psa_restock_build では呼ばない(dedup前変換=混入バグの根治)
+    assert "convert_file" not in src
+
+
+def test_control_panel_does_revise_after_dedup():
+    """control_panel が post-chain(dedup)後に Add→Revise 変換する(restock_revise=True ボタン)。"""
+    cp = (Path(__file__).resolve().parent.parent / "iMakHQ" / "control_panel.py").read_text(encoding="utf-8")
+    assert "restock_revise" in cp                                # ♻ボタンのフラグ
+    assert "_run_restock_revise_for_latest_csv" in cp            # post-chain の変換ステップ
+    assert "convert_file" in cp                                  # 変換は control_panel 側

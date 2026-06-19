@@ -122,12 +122,11 @@ def main():
     if not new_files:
         sys.exit("本実行で生成された Add CSV(tcg_upload_*.csv)が見つからない")
     add_csv = new_files[-1]   # 本実行で新規生成された分だけから選ぶ(並走の他CSVを掴まない)
-    out_csv = os.path.join(_DESK, "RESTOCK_revise_" + os.path.basename(add_csv).replace("tcg_upload_", ""))
-    n, sk = rv.convert_file(add_csv, out_csv)
-    print(f"✅ Revise CSV生成: {out_csv} ({n}行 / 変換skip {len(sk)})")
-    for s in sk[:10]:
-        print("  ⏭", s)
-    print("→ check後、FileExchange に手動アップロード → 反映後に writeback(qty verify)")
+    print(f"✅ Add CSV生成: {add_csv}")
+    # Add→Revise 変換は **control_panel の post-chain (excluder/title-fix/dedup) の後** に実施する
+    # (control_panel が restock_revise=True を見て _run_restock_revise_for_latest_csv を呼ぶ)。
+    # ここで変換すると dedup 前=赤字/重複/旧タイトルが混入する(2026-06-19 バグ)→ 変換しない。
+    print("→ post-chain(除外/タイトル補強/重複除外)後に Revise CSV を自動生成します。")
 
 
 if __name__ == "__main__":
