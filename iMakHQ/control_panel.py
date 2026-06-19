@@ -116,8 +116,9 @@ def _run_excluder_for_latest_csv(append_log_func, captured_stdout: str):
             sys.path.insert(0, excluder_dir)
         from excluder import exclude_from_check_csv_stdout, render_report
         result = exclude_from_check_csv_stdout(latest_csv, captured_stdout)
-        if result["removed"] > 0:
-            append_log_func("\n" + "=" * 70 + "\n▶ csv_postprocess_excluder (NO-GO 行物理除外)\n" + "=" * 70 + "\n")
+        # 2026-06-20 価格NO-GO廃止: 高め(旧NO-GO)は除外せず出品 + 既存メンテ追跡。記録のみ。
+        if result.get("high_count", 0) > 0:
+            append_log_func("\n" + "=" * 70 + "\n▶ 価格高め記録 (除外せず出品・既存メンテ追跡)\n" + "=" * 70 + "\n")
             append_log_func(render_report(result) + "\n")
     except Exception as e:
         append_log_func(f"\n⚠️ excluder 実行失敗: {type(e).__name__}: {e}\n")

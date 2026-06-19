@@ -59,18 +59,32 @@ def _nogo_stdout():
     )
 
 
-def test_excluder_collects_nogo_certs_and_writes_sidecar(tmp_path):
+def test_excluder_records_high_certs_without_removing(tmp_path):
+    """2026-06-20 価格NO-GO廃止: 高め(旧NO-GO)は **除外せず** cert を記録(既存メンテ追跡用)。"""
     csv_p = _make_csv(tmp_path)
     result = excluder.exclude_from_check_csv_stdout(str(csv_p), _nogo_stdout())
-    # 除外された 価格NO-GO cert = row2,4 の cert (dedupe除外でなく価格除外の cert)
+    # 高め cert = row2,4 (記録のみ。removed_certs は後方互換alias)
     assert sorted(result["removed_certs"]) == ["222222", "444444"]
+    assert sorted(result["high_certs"]) == ["222222", "444444"]
+    assert result["removed"] == 0 and result["high_count"] == 2     # 物理除外しない
     sidecar = Path(str(csv_p) + ".nogo_certs.json")
     assert sidecar.exists()
     assert sorted(json.load(open(sidecar, encoding="utf-8"))) == ["222222", "444444"]
-    # 残存CSV = keep 2 行
+    # CSV は **全行残る**(高めも出品)= 価格で見送らない
     with open(csv_p, encoding="utf-8") as f:
         kept = sorted(r[CERT_COL] for r in csv.DictReader(f))
-    assert kept == ["111111", "333333"]
+    assert kept == ["111111", "222222", "333333", "444444"]
+
+
+def test_parse_matches_high_and_nogo_labels(tmp_path):
+    """parse は新ラベル「🔵 高め」も旧「❌ NO-GO」も両方検出(移行期互換)。"""
+    stdout = (
+        "🏁 GATE判定サマリー\n"
+        "  [2] Card B... → 🔵 高め 出品100件 $500 乖離68% > 許容15% → 出品(既存メンテ追跡)\n"
+        "  [3] Card C... → ❌ NO-GO 出品50件 $300 乖離63% > 許容40%\n"
+        "============================================================\n"
+    )
+    assert excluder.parse_nogo_indices(stdout) == [2, 3]
 
 
 def test_sentinel_reads_sidecar_not_bak_diff(tmp_path):

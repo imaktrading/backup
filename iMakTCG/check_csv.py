@@ -456,10 +456,11 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
                         f"全体中央値${ref_median:.0f} (乖離{gap_pct:.0f}%/許容{gap_limit_pct:.0f}%) → "
                         f"${target_usd:.0f}で出品")
         else:
-            gate_status = "NOGO"
-            gate_msg = (f"❌ NO-GO — 仕入¥{cost_jpy:,} → "
+            gate_status = "NOGO"   # 内部status名は維持(market_log/集計の互換)。表示は「高め(出品)」。
+            # 2026-06-20 価格NO-GO廃止: コストプラス(損なし)+無在庫+既存メンテ追跡 → 価格で見送らない。
+            gate_msg = (f"🔵 高め — 仕入¥{cost_jpy:,} → "
                         f"全体中央値${ref_median:.0f} (乖離{gap_pct:.0f}% > 許容{gap_limit_pct:.0f}%) → "
-                        f"CSV除外済")
+                        f"出品(既存メンテ追跡)")
 
         findings.append(("GATE", gate_msg))
         gate_result = {
@@ -530,7 +531,7 @@ LISTINGS:
 
 Review each listing for:
 1. TITLE QUALITY: Is it keyword-optimized? Does it include the most searchable terms? Max 80 chars.
-2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at or slightly below TOP seller median. For RELAX items (薄商い: 出品≤10件, median 不安定で gate skip 適用), recommend cost-plus listing as-is (機会損失回避). For NO-GO items, recommend not listing.
+2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at or slightly below TOP seller median. For RELAX items (薄商い: 出品≤10件, median 不安定で gate skip 適用), recommend cost-plus listing as-is (機会損失回避). For 高め/HIGH items (旧NO-GO, target>median 乖離超過): **DO list at the cost-plus price** — cost-plus means no loss and no-stock means no inventory cost, so listing is a free option (upside if it sells, no downside). Do NOT recommend skipping. Flag it for 既存メンテ tracking (sell-through monitor / re-source cheaper / price-revise when median rises).
 3. ITEM SPECIFICS: Are important fields missing that competitors typically fill?
 4. OVERALL: Any patterns or systematic issues across all listings?
 
@@ -737,9 +738,10 @@ def main(csv_path: str | None = None):
         else:
             nogo_count += 1
             c = gate["calc"]
-            print(f"  [{i+1}] {title_short}... → ❌ NO-GO 出品{gate['total']}件 ${c['market_usd']:.0f} 乖離{c['gap_pct']:.0f}% > 許容{c['gap_limit_pct']:.0f}%")
+            # 2026-06-20 価格NO-GO廃止: 高めは除外せず出品 + 既存メンテ追跡(excluder が高めとして記録)。
+            print(f"  [{i+1}] {title_short}... → 🔵 高め 出品{gate['total']}件 ${c['market_usd']:.0f} 乖離{c['gap_pct']:.0f}% > 許容{c['gap_limit_pct']:.0f}% → 出品(既存メンテ追跡)")
 
-    print(f"\n  結果: ✅ GO {go_count} / 🔓 緩和 {relax_count} / 🟡 保留 {hold_count} / ❌ NO-GO {nogo_count} / ⬜ 不明 {no_data_count}")
+    print(f"\n  結果: ✅ GO {go_count} / 🔓 緩和 {relax_count} / 🟡 保留 {hold_count} / 🔵 高め(出品) {nogo_count} / ⬜ 不明 {no_data_count}")
 
     # === チェックサマリー ===
     print(f"\n{'═'*60}")

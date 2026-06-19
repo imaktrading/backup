@@ -49,8 +49,10 @@ from typing import List, Tuple
 # (パイプ + card_seq) で `→` 無し → このパターンに hit しない.
 # 2026-04-29 fix: psa_to_csv の card_seq を CSV row として誤解釈し、無関係な CSV 行が
 # 削除される事故を解消.
+# 2026-06-20: 価格NO-GO廃止に伴い、新ラベル「🔵 高め / 価格高め」も検出(移行期は両対応)。
+# 旧「❌ NO-GO」も引き続き検出(G-shock/Mercari 等 未移行 check_csv との互換)。
 _NOGO_LINE_RE = re.compile(
-    r"^\s*\[(\d+)\].*→\s*❌\s*NO[-\s]?GO",
+    r"^\s*\[(\d+)\].*→\s*(?:❌\s*NO[-\s]?GO|🔵?\s*(?:価格)?高め)",
     re.IGNORECASE,
 )
 
@@ -160,15 +162,65 @@ def exclude_rows_from_csv(csv_path: str, nogo_indices: List[int]) -> dict:
     }
 
 
-def exclude_from_check_csv_stdout(csv_path: str, stdout_text: str) -> dict:
-    """check_csv の stdout text から NO-GO 抽出 → CSV 物理除外.
+def peek_rows_from_csv(csv_path: str, indices: List[int]) -> dict:
+    """指定 row index (1-based) の title/cert を **CSVを変更せず** 取得(read-only).
 
-    Returns: exclude_rows_from_csv の結果 + parsed_indices
+    2026-06-20 価格NO-GO廃止方針: 高め(旧NO-GO)は除外せず出品 + 既存メンテで追跡する。
+    物理除外(exclude_rows_from_csv)の代わりに、高め行の title/cert だけ記録するため。
+    Returns: {"high_count", "high_titles", "high_certs", "total"}.
+    """
+    if not indices:
+        return {"high_count": 0, "high_titles": [], "high_certs": [], "total": 0}
+    try:
+        with open(csv_path, encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+    except Exception:
+        return {"high_count": 0, "high_titles": [], "high_certs": [], "total": 0}
+    if not rows:
+        return {"high_count": 0, "high_titles": [], "high_certs": [], "total": 0}
+    header, data = rows[0], rows[1:]
+    idx_set = set(indices)
+    try:
+        title_idx = header.index("*Title")
+    except ValueError:
+        title_idx = 2
+    cert_idx = next((i for i, h in enumerate(header) if "Certification Number" in h), -1)
+    high_titles, high_certs = [], []
+    for i, row in enumerate(data, start=1):
+        if i in idx_set:
+            t = row[title_idx] if title_idx < len(row) else ""
+            high_titles.append(f"[{i}] {t[:60]}")
+            if 0 <= cert_idx < len(row):
+                c = (row[cert_idx] or "").strip()
+                if c:
+                    high_certs.append(c)
+    return {"high_count": len(high_titles), "high_titles": high_titles,
+            "high_certs": high_certs, "total": len(data)}
+
+
+def exclude_from_check_csv_stdout(csv_path: str, stdout_text: str) -> dict:
+    """check_csv の stdout text から 価格高め(旧NO-GO)を抽出 → **除外せず記録**(2026-06-20方針).
+
+    価格NO-GO廃止: コストプラス(損なし)+無在庫+既存メンテ追跡 → 価格を理由に出品見送りしない。
+    高め行は CSV に残して出品し、title/cert を記録して既存メンテ「高めレーン」で追跡する。
+    Returns: {removed:0, high_count, high_titles, high_certs(=removed_certs後方互換), ...}.
     """
     indices = parse_nogo_indices(stdout_text)
-    result = exclude_rows_from_csv(csv_path, indices)
-    result["parsed_nogo_indices"] = indices
-    # 価格 NO-GO cert を sidecar に保存 → post_no_go_sentinel がこれを読む。
+    peek = peek_rows_from_csv(csv_path, indices)
+    result = {
+        "removed": 0,                                   # 物理除外しない
+        "kept": peek["total"],
+        "backup_path": "",
+        "csv_path": csv_path,
+        "high_count": peek["high_count"],
+        "high_titles": peek["high_titles"],
+        "high_certs": peek["high_certs"],
+        # 後方互換: post_no_go_sentinel / sidecar が removed_certs を読む → 高め cert を渡す
+        "removed_titles": [],
+        "removed_certs": peek["high_certs"],
+        "parsed_nogo_indices": indices,
+    }
+    # 高め cert を sidecar に保存 → post_no_go_sentinel が既存メンテ(スプシ K列)に追跡マーク。
     # 理由: post_no_go_sentinel は従来 `.csv.bak` 差分で NO-GO cert を求めていたが、
     # `.csv.bak` は後段 dedupe が同名で上書きするため、差分が「dedupe 除外 cert」に化けて
     # 価格 NO-GO cert を取りこぼしていた (2026-06-12 fix)。毎回上書き = 古い run の混入防止。
@@ -185,19 +237,20 @@ def exclude_from_check_csv_stdout(csv_path: str, stdout_text: str) -> dict:
 def render_report(result: dict) -> str:
     lines = []
     lines.append("=" * 60)
-    lines.append("  🪚 csv_postprocess_excluder report")
+    lines.append("  🔵 価格高め(出品・既存メンテ追跡) report")
     lines.append("=" * 60)
     lines.append(f"  CSV          : {result.get('csv_path')}")
     indices = result.get("parsed_nogo_indices", [])
     if indices:
-        lines.append(f"  NO-GO 検出行 : {indices}")
-    if result["removed"] == 0:
-        lines.append("  → 除外対象なし (NO-GO 行ゼロ or 既に除外済)")
+        lines.append(f"  高め検出行   : {indices}")
+    high = result.get("high_count", 0)
+    if high == 0:
+        lines.append("  → 高め行なし(全件 市場内)")
     else:
-        lines.append(f"  ✂️  除外 {result['removed']} 行 / 残存 {result['kept']} 行")
-        lines.append(f"  バックアップ : {result['backup_path']}")
-        lines.append("  除外内容:")
-        for t in result["removed_titles"]:
+        # 2026-06-20: 価格を理由に除外しない。高めは出品し既存メンテ「高めレーン」で追跡。
+        lines.append(f"  🔵 価格高め {high} 行(**除外せず出品** + 既存メンテ追跡)/ 全 {result.get('kept', 0)} 行")
+        lines.append("  高め内容(sell-through監視/再探索/価格revise 対象):")
+        for t in result.get("high_titles", []):
             lines.append(f"    {t}")
     lines.append("=" * 60)
     return "\n".join(lines)
