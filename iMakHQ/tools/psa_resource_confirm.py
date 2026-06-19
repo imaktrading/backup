@@ -156,7 +156,7 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .bar button{font-size:14px;padding:6px 14px;margin-right:8px;cursor:pointer}
 .go{background:#2a7;color:#fff;border:none;border-radius:4px;font-weight:bold;padding:8px 20px}
 .grid{display:flex;flex-wrap:wrap;gap:10px;padding:12px}
-.card{width:360px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
+.card{width:480px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
 .card.noimg{border-color:#c33;border-width:2px}
 .card.off{opacity:.55;background:#fff4f4}
 .rsn{display:none;margin:4px 0;font-size:12px;width:100%}
@@ -166,13 +166,13 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .col .cap{font-size:11px;color:#666;text-align:center}
 .col.psa .cap{color:#06c;font-weight:bold}
 .col.cat .cap{color:#2a7;font-weight:bold}
-.col.psa img{max-width:150px;max-height:180px;display:block;margin:2px auto;border:1px solid #eee}
+.col.psa img{max-width:210px;max-height:270px;display:block;margin:2px auto;border:1px solid #eee}
 .ph{min-height:120px;display:flex;align-items:center;justify-content:center;color:#c33;
     font-size:12px;border:1px dashed #c33;margin:2px;text-align:center;padding:4px}
-.cands{display:flex;flex-direction:column;gap:3px;max-height:260px;overflow:auto}
-.cand{display:flex;align-items:center;gap:5px;border:1px solid #eee;border-radius:4px;padding:2px 3px;cursor:pointer}
-.cand img{max-width:48px;max-height:64px;border:1px solid #eee;margin:0}
-.cand .cph{width:48px;height:64px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#999;border:1px dashed #ccc}
+.cands{display:flex;flex-direction:column;gap:5px;max-height:600px;overflow:auto}
+.cand{display:flex;align-items:center;gap:6px;border:1px solid #eee;border-radius:4px;padding:3px 4px;cursor:pointer}
+.cand img{max-width:170px;max-height:220px;border:1px solid #eee;margin:0}
+.cand .cph{width:170px;height:220px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#999;border:1px dashed #ccc}
 .cand:has(input:checked){border-color:#2a7;background:#eafaf1}
 .clbl{font-size:11px;word-break:break-word;line-height:1.2}
 .t{font-size:13px;word-break:break-word;margin:4px 0}
