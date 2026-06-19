@@ -462,11 +462,34 @@ def run_cycle(
         cycle_log["phases"]["pytest_precheck"] = precheck
         if precheck["status"] != "passed":
             cycle_log["status"] = "aborted_pytest_precheck_failed"
-            _notify_toast(
-                "iMakInventory 巡回中止",
-                f"pytest 検体 失敗 = 仕様変更の可能性 (status={precheck['status']})。"
-                f"巡回 skip、検体追加 / scraper 修正 が必要。"
-            )
+            # ★ 2026-06-20: 旧実装は toast のみ → pythonw (Task Scheduler) 下で誰も見ず、
+            # precheck 失敗で HIGH/LOW 監視が 3 日 silent 停止した (a12b776 の検体 fail 由来)。
+            # desktop ALERT file + email で必ず気づけるようにする (= silent 停止を絶対回避)。
+            msg = (f"pytest precheck 失敗 (status={precheck['status']}) → 巡回 abort。"
+                   f" 在庫監視が停止 = fail-OPEN 露出。 検体 DOM 仕様変更 / scraper 修正が必要。")
+            _log(f"  [★ABORT] {msg}", test_mode)
+            _notify_toast("iMakInventory 巡回中止 (precheck失敗)", msg)
+            _tail = (precheck.get("stdout_tail") or precheck.get("error") or "")[-1500:]
+            try:
+                desk = (Path.home() / "OneDrive" / "デスクトップ"
+                        / f"ALERT_iMakInventory_precheck_failed_"
+                          f"{cycle_log.get('ts_start','')[:13].replace(':','').replace('T','_')}.txt")
+                desk.write_text(msg + "\n\n" + _tail, encoding="utf-8")
+                _log(f"  [★ABORT] desktop ALERT 出力: {desk.name}", test_mode)
+            except Exception as e:
+                _log(f"  [!] precheck abort desktop alert 失敗: {type(e).__name__}: {e}", test_mode)
+            try:
+                from email_notifier import _send_via_gmail  # noqa: PLC0415
+                from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
+                _cfg = load_gmail_config()
+                if _cfg:
+                    _a, _p, _t = _cfg
+                    _send_via_gmail(_a, _p, _t,
+                                    "[★iMakInventory] 巡回中止: precheck失敗 (在庫監視停止)",
+                                    msg + "\n\n" + _tail)
+                    _log("  [★ABORT] precheck 失敗 alert mail 送信", test_mode)
+            except Exception as e:
+                _log(f"  [!] precheck abort mail 失敗: {type(e).__name__}: {e}", test_mode)
             return cycle_log  # finally で lock release される
 
         # Phase 0.5: listing verifier (Phase 7e) — 前回 upload の eBay 反映確認 (4h ずらし)
