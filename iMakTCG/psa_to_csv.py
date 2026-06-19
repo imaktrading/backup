@@ -2796,7 +2796,14 @@ def main():
             print(f"  - [{category}] {model}")
         print(f"\n通知ファイル: {notify_path}")
 
-    input("\nEnterで終了...")
+    # 対話実行(出品くんパネル)では Enter 待ち。非対話(psa_restock_build 等の subprocess)では
+    # stdin が無く EOFError → 以前は returncode=1 で落ち、RESTOCK の Add→Revise 変換が中断していた。
+    # 非対話時は待たずに正常終了する。
+    try:
+        if sys.stdin and sys.stdin.isatty():
+            input("\nEnterで終了...")
+    except (EOFError, OSError):
+        pass
 
 if __name__ == "__main__":
     main()
