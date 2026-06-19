@@ -136,9 +136,15 @@ def parse_asin(url: str) -> Optional[str]:
 # ============================================================================
 # 在庫判定 (HTML body 解析)
 # ============================================================================
-def _detect_stock(html: str) -> tuple[Optional[bool], str]:
+def _detect_stock(html: str, rendered: bool = False) -> tuple[Optional[bool], str]:
     """HTML から在庫状態を判定.
 
+    Args:
+        rendered: True = Selenium レンダリング後の新 buy-box DOM。 "残りN点"/"通常X日発送" を
+                  在庫あり signal に採用 (新 DOM の Amazon直販 在庫表示)。
+                  False (default) = requests 静的 HTML / 旧 DOM 検体。 "残りN点" は Marketplace/
+                  中古 offer を含み誤陽性源 (中古化 buy box で在庫あり誤判定) なので採用しない =
+                  旧来の保守判定 (在庫あり/cart-button のみ) を維持。
     Returns:
         (verdict, reason) — verdict は True/False/None、reason は判定根拠
     """
@@ -163,8 +169,10 @@ def _detect_stock(html: str) -> tuple[Optional[bool], str]:
         # gate で除外済 + 下の Rule 0 厳格 (seller=amazon のみ True) なので Marketplace 偽陽性は出ない。
         instock_signal = (
             "在庫あり" in avail_text or "in stock" in avail_low
-            or _re.search(r"残り\d+点", avail_text)
-            or _re.search(r"通常.{0,6}日以内に発送", avail_text)
+            # ★ 残りN点/通常発送 は新 buy-box DOM (rendered) のみ。 旧 DOM 静的 HTML では
+            # 中古/Marketplace offer を含み誤陽性源なので採用しない (usedonly 検体対策)。
+            or (rendered and bool(_re.search(r"残り\d+点", avail_text)))
+            or (rendered and bool(_re.search(r"通常.{0,6}日以内に発送", avail_text)))
         )
         if instock_signal:
             # HQ § Rule 0 厳格: 在庫あり signal は 販売元 = Amazon.co.jp のみ信頼
@@ -419,7 +427,7 @@ def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optiona
         # #buy-now-button は新 DOM で消滅、 seller gate も無かった) を廃し、 rendered HTML を
         # _detect_stock に通す。 requests 経路と同一の 販売元 Rule 0 (第三者→取下げ) +
         # prose 在庫判定 (#availability の 残りN点/在庫あり/通常X日発送) に統一。
-        verdict, reason = _detect_stock(html)
+        verdict, reason = _detect_stock(html, rendered=True)  # Selenium = 新 buy-box DOM
         if verdict is None:
             return None  # 判定不能 → fail-closed (取下げに流さない)
         return {"name": name, "in_stock": verdict,

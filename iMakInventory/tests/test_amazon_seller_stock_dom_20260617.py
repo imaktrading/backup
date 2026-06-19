@@ -55,31 +55,31 @@ def test_seller_unknown_when_no_marker():
 
 def test_stock_amazon_direct_zaiko_ari():
     html = _avail('在庫あり。') + 'Amazon.co.jp が発送'
-    verdict, _ = _detect_stock(html)
+    verdict, _ = _detect_stock(html, rendered=True)
     assert verdict is True
 
 
 def test_stock_amazon_direct_nokori_n_ten():
     """新 DOM: #availability "残りN点" + Amazon発送 → in_stock=True。"""
     html = _avail('残り1点 ご注文はお早めに') + 'Amazon.co.jp が発送'
-    verdict, _ = _detect_stock(html)
+    verdict, _ = _detect_stock(html, rendered=True)
     assert verdict is True
 
 
 def test_stock_amazon_direct_tsujo_hassou():
     html = _avail('通常2～3日以内に発送します。') + 'Amazon.co.jp が発送'
-    assert _detect_stock(html)[0] is True
+    assert _detect_stock(html, rendered=True)[0] is True
 
 
 def test_stock_third_party_is_false_takedown():
     """出品者配送 = 第三者 → 在庫あり表示でも取下げ対象 (Rule 0)。"""
     html = _avail('在庫あり。') + 'この商品は、出品者によって配送されます。'
-    assert _detect_stock(html)[0] is False
+    assert _detect_stock(html, rendered=True)[0] is False
 
 
 def test_stock_soldout_in_availability():
     html = _avail('現在在庫切れです。') + 'Amazon.co.jp が発送'
-    assert _detect_stock(html)[0] is False
+    assert _detect_stock(html, rendered=True)[0] is False
 
 
 def test_stock_boilerplate_soldout_phrase_ignored():
@@ -87,11 +87,11 @@ def test_stock_boilerplate_soldout_phrase_ignored():
     #availability の在庫あり + Amazon発送 で True (= boilerplate 誤検出しない)。"""
     html = (_avail('残り3点') + 'Amazon.co.jp が発送'
             + '<div id="productDescription">Amazon専売品なので在庫切れの心配もありません</div>')
-    assert _detect_stock(html)[0] is True
+    assert _detect_stock(html, rendered=True)[0] is True
 
 
 def test_stock_unknown_seller_failclosed():
     """seller 不明 + 在庫あり → fail-closed (None)。 誤って True にしない (Rule 0 厳格)。"""
     html = _avail('残り3点')  # seller マーカーなし
-    verdict, reason = _detect_stock(html)
+    verdict, reason = _detect_stock(html, rendered=True)
     assert verdict is None
