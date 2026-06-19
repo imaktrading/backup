@@ -80,31 +80,119 @@ def _log(msg: str):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def _actual_ebay_qty_by_sku(listing_ids: list) -> dict:
+    """listing_id ごとに GetItem して {listing_id: {sku_uuid: available_qty}} を返す.
+
+    available = Quantity - QuantitySold (per-variation 実在庫)。 ended/取得失敗は
+    それぞれ "ended" / None を値に入れる。 取下げの実 eBay 反映確認に使う。
+    """
+    import re as _re  # noqa: PLC0415
+    from ebay_actions.trading_api_client import _call_trading, load_access_token  # noqa: PLC0415
+    tok = load_access_token()
+    out = {}
+    for iid in {x for x in listing_ids if x}:
+        try:
+            body = ('<?xml version="1.0" encoding="utf-8"?>'
+                    '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+                    '<DetailLevel>ReturnAll</DetailLevel>'
+                    f'<ItemID>{iid}</ItemID></GetItemRequest>')
+            g = _call_trading("GetItem", body, access_token=tok, raw_xml_cap=None)
+            if g.get("error_code") == "17":
+                out[iid] = "ended"  # listing 不在 = qty=0 同等
+                continue
+            if not g.get("success"):
+                out[iid] = None  # 取得失敗 = 確認不能
+                continue
+            m = {}
+            for v in _re.findall(r"<Variation>(.*?)</Variation>", g["raw_xml"], _re.DOTALL):
+                sku = _re.search(r"<SKU>(.*?)</SKU>", v)
+                if not sku:
+                    continue
+                q = _re.search(r"<Quantity>(\d+)</Quantity>", v)
+                s = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", v)
+                tq = int(q.group(1)) if q else 0
+                sd = int(s.group(1)) if s else 0
+                m[sku.group(1)] = max(0, tq - sd)
+            out[iid] = m
+        except Exception:
+            out[iid] = None
+    return out
+
+
+def _actual_ebay_listing_qty(listing_ids: list) -> dict:
+    """単独 listing の top-level available qty を GetItem で取得.
+
+    {listing_id: available_int | "ended" | None}。 single listing 用 (variation でない)。
+    """
+    import re as _re  # noqa: PLC0415
+    from ebay_actions.trading_api_client import _call_trading, load_access_token  # noqa: PLC0415
+    tok = load_access_token()
+    out = {}
+    for iid in {x for x in listing_ids if x}:
+        try:
+            body = ('<?xml version="1.0" encoding="utf-8"?>'
+                    '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+                    f'<ItemID>{iid}</ItemID></GetItemRequest>')
+            g = _call_trading("GetItem", body, access_token=tok, raw_xml_cap=2000)
+            if g.get("error_code") == "17":
+                out[iid] = "ended"
+                continue
+            if not g.get("success"):
+                out[iid] = None
+                continue
+            x = g["raw_xml"]
+            q = _re.search(r"<Quantity>(\d+)</Quantity>", x)
+            s = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", x)
+            out[iid] = max(0, int(q.group(1)) - (int(s.group(1)) if s else 0)) if q else None
+        except Exception:
+            out[iid] = None
+    return out
+
+
 def update_sku_sheet_after_success(sh, applied_skus: list, exec_ts: str,
-                                   new_qty: int = 0) -> int:
-    """upload 成功した SKU について SKU シートに反映.
+                                   new_qty: int = 0) -> tuple:
+    """upload 後、 実 eBay qty を GetItem で再確認して SKU シートに反映.
 
-    更新列:
-      A (対処要) = FALSE  ← 処理済 = もう対処不要
-      B (対処済) = TRUE
-      C (対処日) = exec_ts
-      K (eBay 現Qty) = new_qty   ← upload で eBay 側 qty 変わるので即時反映
+    ★ 2026-06-19 改修 (silent fail-OPEN 撲滅): 旧実装は K に new_qty (目標値) を楽観的に書き、
+    対処済 (A=False/B=True) も無条件に立てていた → eBay に取下げが届かなくても K=0/対処済 に
+    なり、 取下げ失敗が silent (montbell M 5件 実害: ✕×eBay qty=1 で放置)。 取下げ後に実 qty を読み:
+      - 実 qty == 目標 (= 取下げ反映確認)  → A=False/B=True/C/K=実qty (対処済)
+      - 実 qty != 目標 (= 未反映)          → A/B/C は触らず対処要のまま + K=実qty + unresolved に収集
+      - 確認不能 (GetItem 失敗/SKU不在)    → 触らず対処要のまま + unresolved (= 次cycle再試行、 silent化しない)
 
-    Returns: 書込 cell 数
+    Returns: (書込cell数, unresolved list)  unresolved = 取下げ未反映/未確認の SKU (= 要追跡)
     """
     ws = get_sku_worksheet(sh)
+    qty_map = _actual_ebay_qty_by_sku([s.get("listing_id") for s in applied_skus])
     cell_updates = []
+    unresolved = []
     for s in applied_skus:
         row_idx = s.get("row_index")
         if not row_idx:
             continue
-        cell_updates.append({"range": f"A{row_idx}", "values": [[False]]})
-        cell_updates.append({"range": f"B{row_idx}", "values": [[True]]})
-        cell_updates.append({"range": f"C{row_idx}", "values": [[exec_ts]]})
-        cell_updates.append({"range": f"K{row_idx}", "values": [[new_qty]]})
+        iid = s.get("listing_id")
+        sku = s.get("sku_id")
+        m = qty_map.get(iid)
+        if m == "ended":
+            actual = 0
+        elif isinstance(m, dict):
+            actual = m.get(sku)  # SKU が eBay variations に無ければ None
+        else:
+            actual = None  # GetItem 失敗
+        if actual == new_qty:
+            # 取下げ(復活)が eBay に反映確認できた → 対処済
+            cell_updates.append({"range": f"A{row_idx}", "values": [[False]]})
+            cell_updates.append({"range": f"B{row_idx}", "values": [[True]]})
+            cell_updates.append({"range": f"C{row_idx}", "values": [[exec_ts]]})
+            cell_updates.append({"range": f"K{row_idx}", "values": [[new_qty]]})
+        else:
+            # 未反映 or 確認不能 → 対処要のまま (silent化しない)。 K は実値があれば reality 反映。
+            if isinstance(actual, int):
+                cell_updates.append({"range": f"K{row_idx}", "values": [[actual]]})
+            unresolved.append({**s, "actual_qty": actual if actual is not None else "unknown"})
     if cell_updates:
         ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
-    return len(cell_updates)
+    return len(cell_updates), unresolved
 
 
 def send_qty_change_alert(applied_skus: list, upload_result: dict, snapshot_path: str,
@@ -318,8 +406,15 @@ def main():
     success = bool(upload_result.get("success"))
     exec_ts = datetime.now().strftime("%Y/%m/%d %H:%M")
     if success:
-        n_cells = update_sku_sheet_after_success(sh, confirmed, exec_ts, new_qty=target_qty)
+        n_cells, unresolved = update_sku_sheet_after_success(
+            sh, confirmed, exec_ts, new_qty=target_qty)
         _log(f"  SKU シート反映 (B/C/K 列): {n_cells} cells")
+        # ★ 取下げ未反映/未確認 = silent fail-OPEN 候補 → 対処要のまま残し明示警告
+        if unresolved:
+            _log(f"  ⚠️⚠️ 取下げ後 実eBay未反映/未確認 {len(unresolved)} 件 (= 対処要のまま継続追跡):")
+            for u in unresolved[:20]:
+                _log(f"     iid={u.get('listing_id')} sku={str(u.get('sku_id'))[:8]} "
+                     f"size={u.get('size')} color={u.get('color')} actual_qty={u.get('actual_qty')}")
 
     # Phase 4 状態 (M/N/O 列) は成功失敗問わず反映
     ebay_status_text = upload_result.get("result_text", "")[:80]
@@ -382,17 +477,32 @@ def _process_single_listings(sh, mode: str, target_qty: int, max_skus: int) -> N
         from sheet_updater import read_sku_rows  # noqa: PLC0415
         rows = read_sku_rows(sh)
         target_lids = {it["listing_id"] for it in deduped}
+        # ★ 2026-06-19: 単独 listing も実 eBay top-level qty を再確認してから反映 (silent fail-OPEN 防止)
+        qmap = _actual_ebay_listing_qty(list(target_lids))
         cell_updates = []
+        unresolved = []
         for sheet_idx, r in enumerate(rows, start=2):
             r = list(r) + [""] * max(0, 12 - len(r))
-            if r[3].strip() not in target_lids: continue
-            cell_updates.append({"range": f"A{sheet_idx}", "values": [[False]]})
-            cell_updates.append({"range": f"B{sheet_idx}", "values": [[True]]})
-            cell_updates.append({"range": f"C{sheet_idx}", "values": [[exec_ts]]})
-            cell_updates.append({"range": f"K{sheet_idx}", "values": [[target_qty]]})
+            lid = r[3].strip()
+            if lid not in target_lids: continue
+            m = qmap.get(lid)
+            actual = 0 if m == "ended" else (m if isinstance(m, int) else None)
+            if actual == target_qty:
+                cell_updates.append({"range": f"A{sheet_idx}", "values": [[False]]})
+                cell_updates.append({"range": f"B{sheet_idx}", "values": [[True]]})
+                cell_updates.append({"range": f"C{sheet_idx}", "values": [[exec_ts]]})
+                cell_updates.append({"range": f"K{sheet_idx}", "values": [[target_qty]]})
+            else:
+                if isinstance(actual, int):
+                    cell_updates.append({"range": f"K{sheet_idx}", "values": [[actual]]})
+                unresolved.append((lid, sheet_idx, actual if actual is not None else "unknown"))
         if cell_updates:
             ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
             _log(f"  SKU シート反映 (A/B/C/K): {len(cell_updates)} cells")
+        if unresolved:
+            _log(f"  ⚠️⚠️ 単独listing 取下げ後 実eBay未反映/未確認 {len(unresolved)} 件 (対処要のまま継続追跡):")
+            for lid, idx, aq in unresolved[:20]:
+                _log(f"     row{idx} iid={lid} actual_qty={aq}")
     send_qty_change_alert(deduped, res, str(snap), mode=f"{mode}_listing", target_qty=target_qty)
 
 
