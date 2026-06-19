@@ -374,15 +374,22 @@ def _variant_matches(items, card_no, variant_hint=None):
     if not variant_hint:
         return matches
     from snkrdunk_psa_resource import _hint_tokens, _print_signal, _item_print
-    toks = _hint_tokens(variant_hint)
+    # set 確証は **set 部分(hint先頭3=set_name/get_info/set_ebay)のみ**で行う。キャラ名(name_jp)を
+    # 含めると同キャラ別変種を誤確証する(2026-06-19 ゼウス/ナミ等)。set-code(OP11等)は番号と被るので除外。
+    # kw_variant_confident と同一基準に揃える。
+    set_part = list(variant_hint)[:3] if isinstance(variant_hint, (list, tuple)) else variant_hint
+    toks = [t for t in _hint_tokens(set_part) if not re.fullmatch(r"[A-Z]{2,}\d{1,3}", t)]
     if not toks:
-        return matches                    # hint からトークン取れず → 従来最安群
+        return matches                    # set トークン取れず → 従来最安群
     # ①set トークン採点で最高スコア群(=正set)に絞る → ②同setで複数なら print種別で tie-break。
     scored = [(sum(1 for t in toks if t in (it["name"] or "").upper().replace(" ", "").replace("-", "")), it)
               for it in matches]   # matches は価格昇順を保持
     top = max(s for s, _ in scored)
     if top == 0:
-        return matches if len(matches) == 1 else []   # 決め手無+複数 → fail-closed
+        # set を確証できない = 別変種(パラレル/SP/別プロモ)を掴むリスク → 不採用(呼出側で画像検索へ)。
+        # 旧: 単一候補は「sellerがset未記載なだけ」と採用していたが、これが番号一致・別変種の誤掴みの
+        # 主因だった(2026-06-19 OP02-036パラレル/OP05-091 SP/P-066別プロモ 等)。精度優先で fail-closed。
+        return []
     topgroup = [it for s, it in scored if s == top]    # 価格昇順保持
     if len(topgroup) == 1:
         return topgroup                                # set で一意

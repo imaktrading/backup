@@ -43,10 +43,33 @@ def test_multi_variant_hint_no_match_failclosed():
     assert got is None
 
 
-def test_single_match_with_unmatched_hint_still_returns():
-    """候補単一なら hint未一致でも採用(seller がset未記載なだけ=変種曖昧なし)。"""
+def test_single_match_unconfirmed_set_failclosed():
+    """[2026-06-19 改訂] 単一候補でも set を確証できなければ採用しない(→画像検索へ)。
+
+    旧挙動は「sellerがset未記載なだけ」と採用していたが、番号一致・別変種(パラレル/SP/別プロモ)を
+    誤掴みする主因だった。精度優先で fail-closed。
+    """
     items = [_it(45000, "PSA10 ゼウス OP11-106")]
     got = mp.pick_cheapest_psa10(items, "OP11-106", variant_hint=HINT_EGGHEAD)
+    assert got is None
+
+
+def test_real_wrong_variant_cases_rejected():
+    """実際に誤掴みした4件型: 番号一致だが別変種(set語が候補名に無い)→ 不採用。"""
+    # OP02-036 パラレル(target=通常 Paramount War)
+    assert mp.pick_cheapest_psa10(
+        [_it(30000, "ナミ OP02-036 パラレル Alternate Art")], "OP02-036",
+        variant_hint=["PARAMOUNT WAR [OP02]", "", "Paramount War", "", "R", "ナミ"]) is None
+    # P-066 別プロモ(target=Promo Pack EX、候補=最強ジャンプ付録)
+    assert mp.pick_cheapest_psa10(
+        [_it(20000, "ボア・ハンコック [P-066] 最強ジャンプ 2024年4月号付録")], "P-066",
+        variant_hint=["PROMO PACK EX VOL.2 [PRB-02]", "", "Promo Pack EX", "", "P", "ボア・ハンコック"]) is None
+
+
+def test_set_word_present_single_still_accepted():
+    """単一候補でも set 語が候補名に在れば確証OK=採用(recall維持)。"""
+    items = [_it(45000, "PSA10 ゼウス OP11-106 神速の拳")]
+    got = mp.pick_cheapest_psa10(items, "OP11-106", variant_hint=HINT_SHINSOKU)
     assert got is not None and got[0] == 45000
 
 
