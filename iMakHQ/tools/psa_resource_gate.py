@@ -691,18 +691,42 @@ def _v8_label(cost_jpy, cur_usd, mp):
         return f"V8計算不可({type(e).__name__})"
 
 
+def _is_high_cost(v8_label):
+    """V8ラベルが「仕入高(売れにくい)」か(純関数)。照合で間引く判定。
+
+    _v8_label は「✅市場内 ...」/「⚠仕入高:市場で売れにくい ...」/「」(判定不能)/「V8計算不可」を返す。
+    仕入高 = ⚠仕入高 で始まる時のみ True。判定不能・市場内・計算不可は False(=照合に出す)。
+    """
+    return bool(v8_label) and v8_label.startswith("⚠仕入高")
+
+
 def _run_restock_confirm(restock_cands, mp, cert_map):
     """再仕入れ可を視覚確証(現物 vs 仕入候補)→ 確定分を「RESTOCK確定」タブへ。失敗は警告のみ。"""
     import datetime
     import psa_resource_confirm as prc
     items = []
+    skipped_high = []
     for n, rc in enumerate(restock_cands):
+        v8 = _v8_label(rc.get("cost"), rc.get("cur"), mp)
+        # 仕入高(V8コストプラス価格 > 市場=売れにくい)は照合に出さず除外(先手・前段で間引く)。
+        # = 「買うと決めた後に後段check_csvで消える」二重判定を回避。RESTOCKはその商品が実際に
+        #   売れた価格(cur)を基準にするので「仕入高=売れにくい」の判定が特に妥当。
+        if _is_high_cost(v8):
+            skipped_high.append((rc.get("card_no", ""), rc.get("title", ""), v8))
+            continue
         iid = rc.get("itemID")
         ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
         items.append({"idx": n, "title": rc["title"], "card_no": rc["card_no"],
                       "ebay_url": rc["ebay_url"], "ref_image": ref,
-                      "candidates": rc["candidates"], "v8": _v8_label(rc.get("cost"), rc.get("cur"), mp)})
-    print(f"▶ RESTOCK視覚確証: 再仕入れ可 {len(items)}件をブラウザ表示。候補ごとに①現物と同じか確認...")
+                      "candidates": rc["candidates"], "v8": v8})
+    if skipped_high:
+        print(f"  ⏭ 仕入高で照合スキップ {len(skipped_high)}件(売れにくい=見送り。後段の二重価格除外を回避):")
+        for cn, t, _v in skipped_high[:10]:
+            print(f"     - {cn} {t[:48]}")
+    if not items:
+        print("  照合対象なし(全件 仕入高 or 候補なし)→ RESTOCK確定なし")
+        return
+    print(f"▶ RESTOCK視覚確証: 再仕入れ可(市場内) {len(items)}件をブラウザ表示。候補ごとに①現物と同じか確認...")
     res = prc.restock_confirm(items)
     if res is None:
         print("⚠ RESTOCK確証 タイムアウト/未確定 — RESTOCK確定リストは未更新")
