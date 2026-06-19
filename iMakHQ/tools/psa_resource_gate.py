@@ -221,7 +221,12 @@ def _backfill_snkr_card_image(cached, row, mp, sp):
     except Exception:
         return cached
     if isinstance(fresh, dict) and fresh.get("card_image"):
-        return dict(cached, card_image=fresh["card_image"])
+        updated = dict(cached, card_image=fresh["card_image"])
+        # 旧キャッシュの psa10_listings は per-listing 写真(image)を持たないので fresh で更新
+        # (= 出品個別の実スラブ写真を出すため。SNKRDUNK は軽いHTTPなので再取得は安価)。
+        if fresh.get("psa10_listings"):
+            updated["psa10_listings"] = fresh["psa10_listings"]
+        return updated
     return cached
 
 
