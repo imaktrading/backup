@@ -74,27 +74,34 @@ def reconcile_and_write(today):
     header = rows[0]
     iid_i = header.index("itemID") if "itemID" in header else 0
     url_i = header.index("確認済仕入URL") if "確認済仕入URL" in header else None
+    cost_i = header.index("最安¥") if "最安¥" in header else None
     body = [r for r in rows[1:] if any(r)]
     items = [{"itemID": (r[iid_i] if iid_i < len(r) else "")} for r in body]
     qty_map = {it["itemID"]: fetch_listing_qty(it["itemID"]) for it in items if it["itemID"]}
     cls = classify_restock(items, qty_map)
 
-    # 復活分(qty>=1)の商品管理シート master 同期: A列(供給URL)更新 + D列(売り切れ)クリア。
+    # 復活分(qty>=1)の商品管理シート master 同期: A列(供給URL)更新 + D列(売り切れ)クリア
+    # + N列(仕入れ価格=新コスト最安¥)。Revise出品価格は新コスト基準のV8なので master コストも揃える。
     # 在庫監視が「売り切れ」を見て復活出品を取り下げ直すのを防ぐ(state_sync_safety)。
     done_set = set(cls["done"])
     master_synced = 0
     if done_set:
         try:
             itemid_to_url = {}
+            itemid_to_cost = {}
             for r, it in zip(body, items):
                 iid = it["itemID"]
-                if iid in done_set and url_i is not None and url_i < len(r):
+                if iid not in done_set:
+                    continue
+                if url_i is not None and url_i < len(r):
                     u = first_supply_url(r[url_i])
                     if u:
                         itemid_to_url[iid] = u
+                if cost_i is not None and cost_i < len(r) and r[cost_i].strip():
+                    itemid_to_cost[iid] = r[cost_i]
             _km, itemid_row, _cm = product_index()
             itemid_to_row = {iid: itemid_row.get(iid) for iid in done_set if itemid_row.get(iid)}
-            master_synced = restock_reactivate_master(itemid_to_row, itemid_to_url)
+            master_synced = restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost)
         except Exception as e:
             print(f"⚠ master(A/D列)同期skip: {type(e).__name__}: {e}")
 
@@ -133,7 +140,7 @@ def main():
     st = reconcile_and_write(today)
     print(f"🔄 RESTOCK状態同期: 計{st['total']} / 実行済{st['done']} / "
           f"入稿待ち{st['pending']} / 不明{st['unknown']}")
-    print(f"   🔗 master同期(復活分): A列(供給URL)更新 + D列(売り切れ)クリア = {st.get('master_synced', 0)}行")
+    print(f"   🔗 master同期(復活分): A列(供給URL)+D列(売り切れ解除)+N列(仕入れ価格=新コスト) = {st.get('master_synced', 0)}行")
     if st["pending"] or st["unknown"]:
         print("   ⚠ 入稿待ち/不明あり=要対応(silentに済化しない。反映後に再実行で解消)")
 

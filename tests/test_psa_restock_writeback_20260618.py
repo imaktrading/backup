@@ -43,3 +43,17 @@ def test_first_supply_url():
     assert wb.first_supply_url("  | https://b/2") == "https://b/2"   # 空要素skip
     assert wb.first_supply_url("") == ""
     assert wb.first_supply_url(None) == ""
+
+
+def test_to_yen_int():
+    """2026-06-20 master N列同期: 最安¥(¥/カンマ混在)→ 数字のみ。V8コスト本体を揃える。"""
+    import importlib.util as _u
+    _sp = Path(__file__).resolve().parent.parent / "iMakHQ" / "tools" / "sheet_io.py"
+    _s = _u.spec_from_file_location("sheet_io_t", _sp)
+    sio = _u.module_from_spec(_s)
+    _s.loader.exec_module(sio)
+    assert sio._to_yen_int("45000") == "45000"
+    assert sio._to_yen_int("¥45,000") == "45000"
+    assert sio._to_yen_int("21,500") == "21500"
+    assert sio._to_yen_int("") == ""
+    assert sio._to_yen_int(None) == ""

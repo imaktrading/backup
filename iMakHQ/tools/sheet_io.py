@@ -17,6 +17,7 @@ PRODUCT_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 PRODUCT_GID = 851100680
 PRODUCT_COL_ITEMID = 1   # B
 PRODUCT_COL_CERT = 8     # I (PSA cert#。psa_cache.json で CardImageUrl=現物PSA画像を引く)
+PRODUCT_COL_COST = 13    # N (仕入れ価格（円）。V8価格計算のコスト本体。v6_fetch_costs が参照)
 PRODUCT_COL_KEY = 34     # AI (canonical product_id)
 
 
@@ -137,18 +138,28 @@ def write_keys(itemid_to_row, itemid_to_key):
     return len(reqs)
 
 
-def restock_reactivate_master(itemid_to_row, itemid_to_url):
+def _to_yen_int(v):
+    """'45000' / '¥45,000' / '21,500' → '45000' (純関数)。数字以外を除去。空/非数は ''。"""
+    s = "".join(ch for ch in str(v or "") if ch.isdigit())
+    return s
+
+
+def restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost=None):
     """RESTOCK で qty 復活させた出品の **商品管理シート master** を実状態に同期 (I/O)。
 
     - A列(URL=供給先)を最新の仕入URLに更新(売れたらここから買う)。
     - D列(売り切れ)をクリア(空)= 供給が戻った=売り切れ解除。
+    - N列(仕入れ価格・円)を RESTOCK 確定の新仕入値(最安¥)に更新。Revise の V8 出品価格は
+      この新コスト基準で算出済 → master のコストも揃えないと、次に v6_fetch_costs が旧コストを
+      拾って価格再計算 → 出品価格と不整合 (= 価格の意図 vs 実状態 乖離)。
     在庫監視くんが D列「売り切れ」を見て、RESTOCK で復活させた出品を取り下げ直すのを防ぐ
-    (状態同期の安全原則: 意図(復活) と 実状態(master) の乖離をゼロに)。touch は A列/D列のみ。
+    (状態同期の安全原則: 意図(復活) と 実状態(master) の乖離をゼロに)。touch は A/D/N列のみ。
     戻り: 更新行数。row 不明な itemID は skip。
     """
     if not itemid_to_row:
         return 0
     ws = _product_ws()
+    n_col = chr(65 + PRODUCT_COL_COST) if PRODUCT_COL_COST < 26 else "A" + chr(65 + PRODUCT_COL_COST - 26)  # 13→N
     reqs = []
     n = 0
     for iid, row in itemid_to_row.items():
@@ -158,6 +169,9 @@ def restock_reactivate_master(itemid_to_row, itemid_to_url):
         if url:
             reqs.append({"range": f"A{row}", "values": [[url]]})    # A列(idx0)=URL(供給先)
         reqs.append({"range": f"D{row}", "values": [[""]]})          # D列(idx3)=売り切れクリア
+        cost = _to_yen_int((itemid_to_cost or {}).get(iid, ""))
+        if cost:
+            reqs.append({"range": f"{n_col}{row}", "values": [[cost]]})  # N列(idx13)=仕入れ価格(円)
         n += 1
     if reqs:
         ws.batch_update(reqs, value_input_option="RAW")
