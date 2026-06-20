@@ -137,6 +137,33 @@ def write_keys(itemid_to_row, itemid_to_key):
     return len(reqs)
 
 
+def restock_reactivate_master(itemid_to_row, itemid_to_url):
+    """RESTOCK で qty 復活させた出品の **商品管理シート master** を実状態に同期 (I/O)。
+
+    - A列(URL=供給先)を最新の仕入URLに更新(売れたらここから買う)。
+    - D列(売り切れ)をクリア(空)= 供給が戻った=売り切れ解除。
+    在庫監視くんが D列「売り切れ」を見て、RESTOCK で復活させた出品を取り下げ直すのを防ぐ
+    (状態同期の安全原則: 意図(復活) と 実状態(master) の乖離をゼロに)。touch は A列/D列のみ。
+    戻り: 更新行数。row 不明な itemID は skip。
+    """
+    if not itemid_to_row:
+        return 0
+    ws = _product_ws()
+    reqs = []
+    n = 0
+    for iid, row in itemid_to_row.items():
+        if not row:
+            continue
+        url = (itemid_to_url or {}).get(iid, "")
+        if url:
+            reqs.append({"range": f"A{row}", "values": [[url]]})    # A列(idx0)=URL(供給先)
+        reqs.append({"range": f"D{row}", "values": [[""]]})          # D列(idx3)=売り切れクリア
+        n += 1
+    if reqs:
+        ws.batch_update(reqs, value_input_option="RAW")
+    return n
+
+
 def read_tab(tab, sheet_id=MAINT_SHEET_ID):
     """スプシ tab を 2d list で返す (I/O)。タブが無ければ []。PDCA台帳の前回値読込に使う。"""
     import gspread

@@ -35,3 +35,11 @@ def test_qty_zero_never_marked_done():
     # fail-OPEN防止: qty=0 は絶対 done にしない(未反映を済と書かない)
     c = wb.classify_restock([{"itemID": "a"}], {"a": 0})
     assert c["done"] == [] and c["pending"] == ["a"]
+
+
+def test_first_supply_url():
+    """2026-06-20 master同期: 確認済仕入URL(" | "連結)の先頭=主供給先 を取り出す。"""
+    assert wb.first_supply_url("https://a/1 | https://a/2 | https://a/3") == "https://a/1"
+    assert wb.first_supply_url("  | https://b/2") == "https://b/2"   # 空要素skip
+    assert wb.first_supply_url("") == ""
+    assert wb.first_supply_url(None) == ""

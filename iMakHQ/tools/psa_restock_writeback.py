@@ -16,6 +16,15 @@ ST_PENDING = "入稿待ち(qty=0)"
 ST_UNKNOWN = "状態不明(要確認)"
 
 
+def first_supply_url(joined):
+    """確認済仕入URL(" | " 連結)から先頭(最安=主供給先)を取り出す。純関数。"""
+    for u in (joined or "").split(" | "):
+        u = u.strip()
+        if u:
+            return u
+    return ""
+
+
 def classify_restock(confirmed_items, qty_map):
     """RESTOCK確定 items を実eBay qty で分類(純関数)。
 
@@ -55,19 +64,39 @@ def reconcile_and_write(today):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                      "..", "..", "iMakeBayAPI")))
-    from sheet_io import read_tab, write_rows_to_tab
+    from sheet_io import read_tab, write_rows_to_tab, product_index, restock_reactivate_master
     from ebay_getitem_images import fetch_listing_qty
     import psa_restock_wait as prw
 
     rows = read_tab("RESTOCK確定")
     if not rows or len(rows) < 2:
-        return {"total": 0, "done": 0, "pending": 0, "unknown": 0}
+        return {"total": 0, "done": 0, "pending": 0, "unknown": 0, "master_synced": 0}
     header = rows[0]
     iid_i = header.index("itemID") if "itemID" in header else 0
+    url_i = header.index("確認済仕入URL") if "確認済仕入URL" in header else None
     body = [r for r in rows[1:] if any(r)]
     items = [{"itemID": (r[iid_i] if iid_i < len(r) else "")} for r in body]
     qty_map = {it["itemID"]: fetch_listing_qty(it["itemID"]) for it in items if it["itemID"]}
     cls = classify_restock(items, qty_map)
+
+    # 復活分(qty>=1)の商品管理シート master 同期: A列(供給URL)更新 + D列(売り切れ)クリア。
+    # 在庫監視が「売り切れ」を見て復活出品を取り下げ直すのを防ぐ(state_sync_safety)。
+    done_set = set(cls["done"])
+    master_synced = 0
+    if done_set:
+        try:
+            itemid_to_url = {}
+            for r, it in zip(body, items):
+                iid = it["itemID"]
+                if iid in done_set and url_i is not None and url_i < len(r):
+                    u = first_supply_url(r[url_i])
+                    if u:
+                        itemid_to_url[iid] = u
+            _km, itemid_row, _cm = product_index()
+            itemid_to_row = {iid: itemid_row.get(iid) for iid in done_set if itemid_row.get(iid)}
+            master_synced = restock_reactivate_master(itemid_to_row, itemid_to_url)
+        except Exception as e:
+            print(f"⚠ master(A/D列)同期skip: {type(e).__name__}: {e}")
 
     # RESTOCK確定タブに状態列を付与(既存末尾に「RESTOCK状態」「状態確認日」を上書き)
     if "RESTOCK状態" not in header:
@@ -89,7 +118,8 @@ def reconcile_and_write(today):
         write_rows_to_tab("再仕入れ待ち", prw.to_tab_rows(wled2))
 
     return {"total": len(items), "done": len(cls["done"]),
-            "pending": len(cls["pending"]), "unknown": len(cls["unknown"])}
+            "pending": len(cls["pending"]), "unknown": len(cls["unknown"]),
+            "master_synced": master_synced}
 
 
 def main():
@@ -103,6 +133,7 @@ def main():
     st = reconcile_and_write(today)
     print(f"🔄 RESTOCK状態同期: 計{st['total']} / 実行済{st['done']} / "
           f"入稿待ち{st['pending']} / 不明{st['unknown']}")
+    print(f"   🔗 master同期(復活分): A列(供給URL)更新 + D列(売り切れ)クリア = {st.get('master_synced', 0)}行")
     if st["pending"] or st["unknown"]:
         print("   ⚠ 入稿待ち/不明あり=要対応(silentに済化しない。反映後に再実行で解消)")
 
