@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 # iMak Trading Japan - PSA Cert → eBay CSV 自動生成スクリプト
+#
+# ⚠️ これは psa_to_csv.py の **RESTOCK専用 fork** (2026-06-21 新設)。
+#    経緯: PSA再仕入れ(RESTOCK)が新規 psa_to_csv.py を編集していたため、ユーザー指示
+#    「新規は触るな」で psa_to_csv.py を pristine に戻し、RESTOCK 差分をこちらに隔離した。
+#    fork が持つ RESTOCK 差分: ①PSA_RESTOCK_INPUT入力モード ②別profile(PSA_PROFILE_DIR)
+#    ③非対話input() isatty guard。
+#    ⚠️ drift注意: 新規 psa_to_csv.py の改善はこちらに自動伝播しない。生成ロジックを変えたら
+#    両方に反映するか、必要差分のみ手で取り込むこと。呼出元: iMakHQ/tools/psa_restock_build.py。
 # 必要: pip install selenium undetected-chromedriver anthropic
 
 import csv
@@ -2287,7 +2295,9 @@ def load_targets_from_sheet_psa():
     return cert_numbers, cost_map, url_map, title_map
 
 
-_PSA_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa"
+# profile は env で上書き可(RESTOCK 並走時に新規出品と別 profile にして Chrome 競合を避ける)。
+# 未設定なら従来の本番 profile(新規出品は不変)。
+_PSA_PROFILE_DIR = os.environ.get("PSA_PROFILE_DIR") or r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa"
 _psa_warmup_driver = None  # warmup で起動した uc.Chrome、 main の本処理に流用
 
 
@@ -2338,28 +2348,45 @@ def main():
     print("=== iMak Trading Japan - PSA → eBay CSV Generator ===\n")
     _psa_cloudflare_warmup()
 
-    # 2026-04-24: certs.txt 廃止、スプシ駆動に完全移行
-    # スプシ (19kj8... gid=851100680) の I列=cert# / B列=itemID空 / A列=URL で処理対象を抽出
-    print("📊 スプシから PSA 出品対象を抽出中...")
-    cert_numbers, cost_map, mercari_url_map, mercari_title_map = load_targets_from_sheet_psa()
+    # RESTOCK入力モード (2026-06-18): env PSA_RESTOCK_INPUT=<json> 指定時は、新規スプシ抽出でなく
+    # RESTOCK対象(出品済=B列itemID埋まり)の cert を json から取る。{certs:[..], cost:{cert:¥},
+    # supply_url:{cert:url}, forced:{cert:KEY}}。生成は新規と完全同一(後段で Revise化)。
+    # 未設定なら従来通り(本番不変)。
+    _restock_input = os.environ.get("PSA_RESTOCK_INPUT")
+    _restock_forced = {}
+    if _restock_input:
+        import json as _json
+        _ri = _json.load(open(_restock_input, encoding="utf-8"))
+        cert_numbers = [str(c).strip() for c in (_ri.get("certs") or []) if str(c).strip()]
+        cost_map = {str(c): float(v) for c, v in (_ri.get("cost") or {}).items() if v}
+        mercari_url_map = {str(c): u for c, u in (_ri.get("supply_url") or {}).items()}
+        mercari_title_map = {}
+        _restock_forced = {str(c): str(k) for c, k in (_ri.get("forced") or {}).items() if k}
+        print(f"♻ RESTOCKモード: {len(cert_numbers)}件 Add生成 (forced KEY {len(_restock_forced)}件)")
+    else:
+        # 2026-04-24: certs.txt 廃止、スプシ駆動に完全移行
+        # スプシ (19kj8... gid=851100680) の I列=cert# / B列=itemID空 / A列=URL で処理対象を抽出
+        print("📊 スプシから PSA 出品対象を抽出中...")
+        cert_numbers, cost_map, mercari_url_map, mercari_title_map = load_targets_from_sheet_psa()
 
     if not cert_numbers:
         print("処理対象なし（スプシに I列=cert# ありの未処理行が見つかりません）")
-        input("Enterで終了...")
+        if not _restock_input:
+            input("Enterで終了...")
         return
 
     print(f"✓ {len(cert_numbers)}件の PSA 対象行を抽出（B列 itemID 空）")
 
     # 上から順でなくランダム抽出 (2026-06-10 ユーザー要望: 上位行に偏らず満遍なく出品)
-    # 環境変数 PSA_NO_SHUFFLE=1 で従来の上から順に戻せる
-    if os.environ.get("PSA_NO_SHUFFLE") != "1":
+    # 環境変数 PSA_NO_SHUFFLE=1 で従来の上から順に戻せる。RESTOCKは確定順を保つのでshuffleしない。
+    if not _restock_input and os.environ.get("PSA_NO_SHUFFLE") != "1":
         import random
         random.shuffle(cert_numbers)
 
-    # 一回 10 件まで固定 (Cloudflare bot 検出回避、2026-05-06)
+    # 一回 10 件まで固定 (Cloudflare bot 検出回避、2026-05-06)。RESTOCKは確定分を全部処理(制限skip)。
     # 残りは時間を置いて次回再走で順次処理
     PSA_BATCH_LIMIT = 10
-    if len(cert_numbers) > PSA_BATCH_LIMIT:
+    if not _restock_input and len(cert_numbers) > PSA_BATCH_LIMIT:
         print(f"⚠️ {len(cert_numbers)}件中 ランダム {PSA_BATCH_LIMIT} 件を処理 (残 {len(cert_numbers)-PSA_BATCH_LIMIT} 件は次回再走)")
         cert_numbers = cert_numbers[:PSA_BATCH_LIMIT]
         cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
@@ -2469,7 +2496,8 @@ def main():
             try:
                 from tcg_new_gen_override import env_enabled, apply_new_gen_override
                 if env_enabled():
-                    _forced = _confirmed_pids.get(cert, "") if _verify_mode else ""
+                    # RESTOCK は目視確定済の変種KEYを forced で権威採用(新規の verify→build と同思想)
+                    _forced = _restock_forced.get(cert, "") or (_confirmed_pids.get(cert, "") if _verify_mode else "")
                     # ★catalog hit 判定 (新コア・全 franchise の決定論解決)。
                     #   miss = 公式データ無し → **入稿しない** (fail-closed / catalog_official_only)。
                     #   catalog-miss を弾く正規ゲートはここ1本。
@@ -2776,7 +2804,14 @@ def main():
             print(f"  - [{category}] {model}")
         print(f"\n通知ファイル: {notify_path}")
 
-    input("\nEnterで終了...")
+    # 対話実行(出品くんパネル)では Enter 待ち。非対話(psa_restock_build 等の subprocess)では
+    # stdin が無く EOFError → 以前は returncode=1 で落ち、RESTOCK の Add→Revise 変換が中断していた。
+    # 非対話時は待たずに正常終了する。
+    try:
+        if sys.stdin and sys.stdin.isatty():
+            input("\nEnterで終了...")
+    except (EOFError, OSError):
+        pass
 
 if __name__ == "__main__":
     main()

@@ -113,10 +113,12 @@ def main():
                PSA_PROFILE_DIR=restock_profile)
     # 並走安全化: 「最新」でなく **本実行で生成された** tcg_upload を差分で特定(新規出品の並走CSV誤掴み防止)
     before = set(glob.glob(os.path.join(_CSV_OUT_DIR, "tcg_upload_*.csv")))
-    print("▶ psa_to_csv(RESTOCK入力モード)で Add CSV生成中...(Selenium・新規と同一生成・別profile)")
-    r = subprocess.run([sys.executable, "psa_to_csv.py"], cwd=_TCG_DIR, env=env)
+    # 新規 psa_to_csv.py は「触らない」(ユーザー指示 2026-06-20)。RESTOCK は psa_to_csv の fork
+    # (psa_restock_csv.py) を使う。fork = psa_to_csv のコピー + RESTOCK入力モード/別profile/isatty。
+    print("▶ psa_restock_csv(RESTOCK fork)で Add CSV生成中...(Selenium・新規と同一生成・別profile)")
+    r = subprocess.run([sys.executable, "psa_restock_csv.py"], cwd=_TCG_DIR, env=env)
     if r.returncode != 0:
-        sys.exit(f"psa_to_csv 異常終了(returncode={r.returncode})")
+        sys.exit(f"psa_restock_csv 異常終了(returncode={r.returncode})")
     new_files = sorted(set(glob.glob(os.path.join(_CSV_OUT_DIR, "tcg_upload_*.csv"))) - before,
                        key=os.path.getmtime)
     if not new_files:
