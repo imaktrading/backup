@@ -199,6 +199,20 @@ def fetch_amazon_title(url: str) -> str:
 # ===================================================================
 # Title 整合性保証 (ConditionID ↔ Title)
 # ===================================================================
+def _truncate_at_word(s: str, n: int) -> str:
+    """n文字以内に **語境界** で切り詰める(語を途中で割らない)。純関数。
+
+    2026-06-21: title[:80] の文字切断が 'Japan New' を 'Ja New' に割る defect の是正。
+    n以内に収まる最後の空白で切る。空白が無ければやむなく文字切り(極端な長語のみ)。
+    """
+    s = (s or "").strip()
+    if len(s) <= n:
+        return s
+    cut = s[:n].rstrip()
+    sp = cut.rfind(" ")
+    return (cut[:sp].rstrip() if sp > 0 else cut)
+
+
 def enforce_title_coherence(title: str, is_new: bool = None, condition_id: int = None,
                              max_chars: int = 80) -> str:
     """旧シグネチャ(is_new)と新シグネチャ(condition_id)の両方に対応。
@@ -208,11 +222,11 @@ def enforce_title_coherence(title: str, is_new: bool = None, condition_id: int =
     if condition_id is None and is_new is not None:
         condition_id = 1000 if is_new else 3000
     if condition_id is None:
-        return title[:max_chars].strip()
+        return _truncate_at_word(title, max_chars)
 
     master = CONDITION_MASTER.get(condition_id)
     if not master:
-        return title[:max_chars].strip()
+        return _truncate_at_word(title, max_chars)
 
     # 反対側の marker を除去（新品なら Pre-owned系除去、中古なら Brand New系除去）
     if condition_id == 1000:
@@ -235,17 +249,19 @@ def enforce_title_coherence(title: str, is_new: bool = None, condition_id: int =
             has_marker = True
             break
     if has_marker:
-        return title[:max_chars].strip()
+        return _truncate_at_word(title, max_chars)
 
     # マーカーがない場合、最適なものを末尾付与
     current_len = len(title)
     best_marker = get_title_marker_for_condition(condition_id, max_chars - current_len)
     if best_marker:
-        return f"{title.strip()} {best_marker}"[:max_chars].strip()
+        # base を語境界で切り詰めてから marker 付与(marker は必ず残す。'Ja New' 切断を防ぐ)
+        base = _truncate_at_word(title.strip(), max_chars - len(best_marker) - 1)
+        return f"{base} {best_marker}".strip()
 
-    # スペース不足時の強制ねじ込み（最短 marker をねじ込み、タイトル末尾を削る）
+    # スペース不足時の強制ねじ込み（最短 marker をねじ込み、タイトル末尾を語境界で削る）
     shortest_marker = master["title_markers"][-1]
-    truncated_title = title[:(max_chars - len(shortest_marker) - 1)].strip()
+    truncated_title = _truncate_at_word(title, max_chars - len(shortest_marker) - 1)
     return f"{truncated_title} {shortest_marker}"
 
 

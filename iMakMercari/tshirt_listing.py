@@ -486,6 +486,44 @@ def download_image_b64(url):
     return None
 
 
+def _detect_media_type(b64_data):
+    """base64画像データの magic bytes から media_type を判定(2026-06-21)。
+
+    mercari は webp 配信があり、image/jpeg 固定だと Claude API が
+    'image appears to be a image/webp' で 400 拒否 → 生成失敗。実形式を渡して回避。
+    Claude は jpeg/png/gif/webp 全対応。判定不能時は jpeg。
+    """
+    try:
+        head = base64.b64decode(b64_data[:64])
+    except Exception:
+        return "image/jpeg"
+    if head[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return "image/jpeg"
+
+
+def _parse_json_lenient(text):
+    """Claude応答 → dict。JSON の後に説明文が付く場合(Extra data error)に堅牢化(2026-06-21)。
+
+    まず素直に loads、失敗したら先頭の '{' から raw_decode で 1個目の JSON value だけ取る
+    (末尾の余分なテキストを無視)。
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        if start < 0:
+            raise
+        obj, _ = json.JSONDecoder().raw_decode(text[start:])
+        return obj
+
+
 def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b64, max_retries=2):
     """Claude APIでリスティング情報生成 + ホワイトリスト検証 + 違反時リトライ.
     違反があればフィードバックを添えて再リクエスト（最大max_retries回）。
@@ -499,7 +537,7 @@ def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b6
     for img in images_b64:
         content.append({
             "type": "image",
-            "source": {"type": "base64", "media_type": "image/jpeg", "data": img},
+            "source": {"type": "base64", "media_type": _detect_media_type(img), "data": img},
         })
     content.append({
         "type": "text",
@@ -523,7 +561,7 @@ Generate an eBay listing for this UNIQLO UT T-shirt.""",
             text = message.content[0].text.strip()
             text = re.sub(r"^```json\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
-            result = json.loads(text)
+            result = _parse_json_lenient(text)
         except Exception as e:
             print(f"    ⚠️ Claude API attempt {attempt+1}: {e}")
             return last_result  # 直前成功結果があればそれを返す
