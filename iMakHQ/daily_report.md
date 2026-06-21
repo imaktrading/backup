@@ -1222,3 +1222,34 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - audit m62564964167 C:Rarity空: SKU→cert はHQ側のみ→cert/KEY受領後に rarity投入(catalog rarity gap濃厚)
 - OP variant解決(_AC01/_BS4): set_code索引と別機構が必要=別依頼で設計相談
 - pdca queue: gshock 37件は既収録のため missing_models再生成でdone化
+
+## 2026-06-16〜06-21 — Catalog: PSA再仕入gap対応 / card_number_text / HQ8問 / 構造案件発見
+
+### 決定事項
+- 決定1(cert4件索引・公式裏取り): HQ cert dump+pokemon-card.com 照合で resolver索引3追加。EXTRA REGULATION BOX→BW(Zoroark=BW-014)/EMERALD BREAK→XY6-B(Gallade-EX=XY6-B-030)/NATIONAL BEGINNING→HSZm(Voltorb=HSZm-014)。
+- 決定2(card_number_text): OP/Gundam/DBFW全件で specs.card_number_text空→出品タイトル#番号欠落。base=product_id.split("_")[0] で backfill + scraper3件恒久化。
+- 決定3(HQ Q1 prune): missing_models の解決済を resolver.resolve()で除去。prune_missing_models.py 新設・実行(78除去/10keep)。
+- 決定4(HQ Q6 SWORD): "SWORD & SHIELD SWORD"→S1W/"...SHIELD SHIELD"→S1H 限定フレーズ索引(era名衝突回避)。
+- 決定5(Q8-I S1W/S1H是正): filter_map が S1W→Shield/S1H→Sword と逆だった既存bug是正(catalog set_name裏取り)。
+- 決定6(THE BEST OF XY #030): HQ PSAキャッシュで name_en=Raichu が正と確定→一括再導出は却下(危険)、catalog変更なし。
+- 決定7(構造案件・実装NG): 残backlog は2根に収束=①set_code overload(THE BEST OF XY/Q8-J cardID 1,122/Q5)②DBFW dual-source(1,415)。HQ承認で根①設計ドラフトのみ作成、実装はDedupe/HQレビュー後。
+- 判定(空が正常): OP DON 265/Gundam Resource-Token-EXBase 206/DBFW EnergyMarker 257 は rarity無が正。cardID 438=Basic Energy は番号無で fallback正。
+
+### 変更
+- 変更: integrations/psa_to_csv.py(resolver索引: EXTRA REGULATION BOX/EMERALD BREAK/NATIONAL BEGINNING/SWORD&SHIELD SWORD・SHIELD)
+- 変更: scrapers/one_piece_tcg.py・gundam_tcg.py・dragonball_scg.py(card_number_text 設定追加)
+- 変更: ebay_filter_map/pokemon.yaml(S1W/S1H swap是正)
+- 変更: prune_missing_models.py 新設
+- 変更(共有DB・git外): card_number_text 16,420件 backfill / S1W-S1H set_name_ebay 136件再計算 / gshock WR正規化7+case_material1 / missing_models prune 78除去(bak: missing_models.csv.bak_prune)
+- commit: cdd334d / 03201c3 / d2e78b2 / d1cbf05
+
+### 検証(実出力)
+- 検証✅ pre-commit pytest 231 passed(全commit) / resolver: EXTRA REGULATION→BW-014・EMERALD BREAK→XY6-B-030・NATIONAL BEGINNING→HSZm-014・SWORD-066→S1W-066 解決、FUSION ARTS→S8/AMAZING VOLT→S4 誤爆なし
+- 検証✅ card_number_text 残空0(OP/Gundam/DBFW) / S1W→Sword・S1H→Shield 再計算後正値 / prune後 missing_models=10行(真backlog)
+- 検証✅ DBFW二重ソース: dry-run で _dummy_s1 重複生成を検出→単純再ingest不可と実証 / Q8-J: cardID-33580→XY-028 が Xerosic と衝突=再ingest不可を実証
+
+### 情報待ち/レビュー待ち(HQ/Dedupe)
+- 根①設計ドラフト(`2026-06-21_root1_setcode_separation_design_draft.md`)→ Dedupe レビュー(live影響/rollback/alias配線)→ POC可否
+- Q8-I set_name_ebay tail(4,217 set_name本体欠落・promo中心)= 件数順 (a) 他セラー調査で低優先
+- PSA cert C:Rarity(S-P-071/M-P-020 等 rarity空)= Pokemon rarity 9,599 PDCA に集約
+- psa_mismatch itemID→KEY シート記入 = HQ域 / missing_models auto-prune 恒久化 = 並行
