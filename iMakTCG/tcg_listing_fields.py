@@ -257,6 +257,26 @@ _GAME_TITLE_WORD = {
 _TITLE_MAX = 80
 
 
+def _game_word(c_game):
+    """C:Game(catalog値, 表記揺れあり)→ タイトル用ゲーム名。完全一致→部分一致で頑健化。
+
+    2026-06-21 是正: catalog の C:Game が 'One Piece CCG' なのに _GAME_TITLE_WORD のキーは
+    'One Piece Card Game' のみで照合空振り → タイトルからゲーム名 'One Piece' が落ちる bug。
+    完全一致で取れなければゲーム名の部分一致で拾う(Pokemon 等の既存挙動は不変)。
+    """
+    exact = _GAME_TITLE_WORD.get(c_game or "", "")
+    if exact:
+        return exact
+    g = (c_game or "").lower()
+    for needle, word in (("pokémon", "Pokemon"), ("pokemon", "Pokemon"),
+                         ("one piece", "One Piece"), ("yu-gi-oh", "Yu-Gi-Oh"),
+                         ("yugioh", "Yu-Gi-Oh"), ("dragon ball", "Dragon Ball"),
+                         ("gundam", "Gundam")):
+        if needle in g:
+            return word
+    return ""
+
+
 def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     """catalog 由来 fields から eBay タイトルを決定論で組む (≤80字)。
 
@@ -265,7 +285,7 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     優先度順に並べ、80字超は末尾の任意要素 (Year→Rarity→Features) から落とす
     (Set/番号/Character/Japanese/PSA10 は死守 = カード同定に必須)。
     """
-    game = _GAME_TITLE_WORD.get(fields.get("C:Game", ""), "")
+    game = _game_word(fields.get("C:Game", ""))
     core = ["PSA", str(grade)]
     if game:
         core.append(game)

@@ -244,6 +244,24 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     except Exception as e:
         append_log_func(f"\n⚠️ dedupe hook (check-csv) 失敗: {type(e).__name__}: {e}\n")
 
+    # Step 4a-2: CSV内 同design重複の間引き (2026-06-21)。重複くんは「既出品」としか照合せず
+    # 同一CSV内の同design複数コピー(別cert)を間引かない → 同じカードが複数枚出る。ここで
+    # (Game,Set,番号)が同一の行を1枚に絞る。KEY書込(4b)の前なので間引いた分は orphan にならない。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ CSV内 同design重複の間引き (同じカードは1枚のみ出品)\n")
+    append_log_func("======================================================================\n")
+    try:
+        idd = os.path.join(WORKSPACE, "iMakHQ", "tools", "tcg_intra_csv_dedup.py")
+        r = subprocess.run([sys.executable, idd, latest_csv, "--execute"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ 同design間引き returncode={r.returncode}(続行)\n")
+    except Exception as e:
+        append_log_func(f"\n⚠️ 同design間引き 失敗(続行): {type(e).__name__}: {e}\n")
+
     # Step 4b: 入稿前 KEY 事前書込 (= Phase 1h、 HIGH I 列 cert 経由で AI/AJ 列補完)
     append_log_func("\n======================================================================\n")
     append_log_func("▶ 重複くん write-keys-from-csv (HIGH I 列 cert 経由で KEY 事前書込)\n")
