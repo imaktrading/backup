@@ -289,9 +289,29 @@ set_code:
   - source: MC
     ebay: Movie Promo
     note: 映画特典プロモ系 — REVIEW eBay 値
+  - source: CP1
+    ebay: Double Crisis
+    note: コンセプトパック マグマ団VSアクア団 ダブルクライシス — eBay/TCGplayer慣行値 (2026-06-21 web確証)
+    year: 2014
+  - source: CP2
+    ebay: Legendary Shine Collection
+    note: コンセプトパック レジェンドキラコレクション — eBay/TCGplayer慣行値 (2026-06-21 web確証)
+    year: 2015
+  - source: CP3
+    ebay: PokeKyun Collection
+    note: コンセプトパック ポケキュンコレクション — eBay/TCGplayer慣行値 (2026-06-21 web確証)
+    year: 2015
   - source: CP4
     ebay: Premium Champion Pack
     note: REVIEW eBay 値
+  - source: CP5
+    ebay: Mythical & Legendary Dream Shine Collection
+    note: コンセプトパック 幻・伝説ドリームキラコレクション — eBay/TCGplayer慣行値 (2026-06-21 web確証)
+    year: 2016
+  - source: CP6
+    ebay: 20th Anniversary
+    note: 拡張パック 20th Anniversary (XY Evolutions JP) — eBay慣行値 (2026-06-21 web確証)
+    year: 2016
   - source: P
     ebay: Promo
     note: 一般プロモ
