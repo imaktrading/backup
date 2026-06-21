@@ -453,6 +453,9 @@ def build_and_upsert(
     specs["set_name_ebay"] = api.derive_set_name_ebay(CATEGORY, set_official or None, product_id) or ""
     specs["set_name_ebay_source"] = (
         "filter_map_clean_ingest" if specs["set_name_ebay"] else "fail_closed_no_map")
+    # card_number_text: 出品タイトル C:Card Number 用 (= 番号 base, reprint suffix 前)。
+    # OP/Gundam/DBFW は printed number = code (例 GD02-038)。2026-06-21 HQ依頼で scraper 補完。
+    specs["card_number_text"] = product_id.split("_")[0]
 
     record = dict(
         category=CATEGORY,
