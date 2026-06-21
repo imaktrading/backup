@@ -1645,6 +1645,28 @@ class ListingPanel:
         self.log.delete("1.0", "end")
         self.now_processing.set("")
 
+    def _run_psa_orphan_clean(self):
+        """PSA新規生成の前に orphan canonical KEY を掃除(歩留まり激減の恒久対策, 2026-06-21)。
+
+        未出品(B列空)なのに KEY が付いて dedup に誤ブロックされた在庫を出品対象に戻す。同期実行。
+        失敗しても新規生成は続行(掃除は best-effort)。dedupe/psa_to_csv は触らずスプシ AI列のみ。
+        """
+        self.append_log("\n🧹 orphan KEY 掃除(未出品なのに誤ブロックされた在庫を出品対象へ戻す)...\n")
+        try:
+            tool = os.path.join(WORKSPACE, "iMakHQ", "tools", "psa_orphan_key_clean.py")
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            r = subprocess.run([sys.executable, tool, "--execute"],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=180, creationflags=flags)
+            if r.stdout:
+                self.append_log(r.stdout)
+            if r.returncode != 0:
+                self.append_log(f"⚠️ orphan掃除 returncode={r.returncode}(新規生成は続行)\n")
+                if r.stderr:
+                    self.append_log(r.stderr[-500:] + "\n")
+        except Exception as e:
+            self.append_log(f"⚠️ orphan掃除 skip(新規生成は続行): {type(e).__name__}: {e}\n")
+
     def run_script(self, idx):
         script = SCRIPTS[idx]
         # 一番くじ: ウィザード式ダイアログを起動
@@ -1659,6 +1681,11 @@ class ListingPanel:
             messagebox.showwarning("実行中", "他のスクリプトが実行中です。停止してから実行してください。")
             return
         self._current_idx = idx  # 完了時 open_after 用
+        # PSA新規: 生成の前に orphan canonical KEY を自動掃除(2026-06-21 恒久対策)。
+        # write-keys が出品確定前に KEY を書く → 未出品在庫を dedup が誤ブロックし歩留まり激減する
+        # 問題を、毎回 生成前に掃除して再発防止。control_panel のみ・dedupe/psa_to_csv は不変。
+        if script.get("category") == "PSA TCG" and script.get("type") == "new":
+            self._run_psa_orphan_clean()
         cmd = list(script["cmd"])
         for pname, entry in self.param_entries[idx].items():
             v = entry.get().strip()
