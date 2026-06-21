@@ -250,3 +250,126 @@ class TestSaboScenarioIntegration:
         assert result["removed"] == 0
         assert result["kept"] == 1
         assert result["unknown"] == 0
+
+
+# ============================================================================
+# 2026-06-16 回帰: unresolved を物理除外しない (= failclosed_must_skip)
+# 依頼書: dedupe/requests/2026-06-16_unresolved_must_not_be_removed.md
+# 背景: Mercari (Porter/montbell/tshirt/reel) は catalog KEY 無し = 全 unresolved。
+#       strict 除外だと全 10 件削除 → CSV 0 行 (= Porter 全除外事故)。
+# ============================================================================
+
+class TestUnresolvedNotRemoved:
+    def test_all_unresolved_mercari_kept_not_removed(self, tmp_path):
+        """Porter 再現: 全 row が catalog KEY 無し (unresolved) → removed=0 / kept=all."""
+        path = tmp_path / "porter.csv"
+        _write_csv(
+            path,
+            [
+                {"*Title": "Porter bag A", "C:Card Number": ""},
+                {"*Title": "Porter bag B", "C:Card Number": ""},
+                {"*Title": "Porter bag C", "C:Card Number": ""},
+            ],
+        )
+        # Mercari 1 点もの = catalog 突合不能 = 全 unresolved ("")
+        with patch(
+            "dedupe.resolver_io.resolve_csv_row", side_effect=["", "", ""]
+        ):
+            result = csv_check.check_csv_canonical(
+                csv_path=path,
+                existing_canonical_keys=frozenset(),
+                dry_run=True,
+                # 既定挙動 (strict_mode 省略 = False) で確認
+            )
+        assert result["removed"] == 0  # 真の重複ゼロ = 除外ゼロ
+        assert result["kept"] == 3  # 全件保持 (= Porter 全除外事故の防止)
+        assert result["unknown"] == 3  # unresolved は unknown 計上のみ
+        assert result["skipped_unresolved"] == 0  # 除外していない
+
+    def test_check_csv_canonical_default_is_keep_unresolved(self, tmp_path):
+        """check_csv_canonical の strict_mode 省略時デフォルト = keep (= 6/16 是正)."""
+        path = tmp_path / "in.csv"
+        _write_csv(path, [{"*Title": "x", "C:Card Number": ""}])
+        with patch("dedupe.resolver_io.resolve_csv_row", side_effect=[""]):
+            result = csv_check.check_csv_canonical(
+                csv_path=path,
+                existing_canonical_keys=frozenset(),
+                dry_run=True,
+            )
+        assert result["removed"] == 0
+        assert result["kept"] == 1
+
+    def test_catalog_keyed_removes_only_true_dup_keeps_unresolved(self, tmp_path):
+        """catalog-keyed 混在: 真の重複は除外 / 新規 + unresolved は保持."""
+        path = tmp_path / "mix.csv"
+        _write_csv(
+            path,
+            [
+                {"*Title": "dup", "C:Card Number": "001"},       # 既存と一致 → 除外
+                {"*Title": "new", "C:Card Number": "002"},       # 新規 → 保持
+                {"*Title": "unresolved", "C:Card Number": ""},   # 解決不能 → 保持
+            ],
+        )
+        with patch(
+            "dedupe.resolver_io.resolve_csv_row",
+            side_effect=["OP01-001", "OP01-002", ""],
+        ):
+            result = csv_check.check_csv_canonical(
+                csv_path=path,
+                existing_canonical_keys=frozenset({"OP01-001"}),
+                dry_run=True,
+            )
+        assert result["removed"] == 1  # 真の重複のみ
+        assert result["kept"] == 2  # 新規 + unresolved
+        assert result["unknown"] == 1
+        assert result["skipped_unresolved"] == 0
+
+    def test_run_check_csv_canonical_forwards_strict_mode_default_false(self, tmp_path):
+        """CLI 経路 run_check_csv_canonical の既定が strict_mode=False を渡すこと.
+
+        sheet_io を mock し、 check_csv_canonical に渡る strict_mode を捕捉して検証.
+        """
+        path = tmp_path / "in.csv"
+        _write_csv(path, [{"*Title": "x", "C:Card Number": "001"}])
+
+        captured = {}
+
+        def _spy(**kwargs):
+            captured["strict_mode"] = kwargs.get("strict_mode")
+            return {
+                "total": 1, "removed": 0, "kept": 1, "unknown": 0,
+                "skipped_unresolved": 0, "removed_titles": [],
+                "removed_canonical_keys": [], "backup_path": "", "csv_path": str(path),
+            }
+
+        with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
+             patch("dedupe.sheet_io.open_spreadsheet", return_value=MagicMock()), \
+             patch("dedupe.sheet_io.find_canonical_key_column", return_value=None), \
+             patch("dedupe.csv_check.check_csv_canonical", side_effect=_spy):
+            # 既定 (= strict_mode 省略)
+            checker.run_check_csv_canonical(csv_path=str(path), dry_run=True)
+        assert captured["strict_mode"] is False  # 既定 = keep-unresolved
+
+    def test_run_check_csv_canonical_forwards_strict_mode_true_optin(self, tmp_path):
+        """CLI 経路: strict_mode=True を明示すると check_csv_canonical に True が渡る (opt-in)."""
+        path = tmp_path / "in.csv"
+        _write_csv(path, [{"*Title": "x", "C:Card Number": "001"}])
+
+        captured = {}
+
+        def _spy(**kwargs):
+            captured["strict_mode"] = kwargs.get("strict_mode")
+            return {
+                "total": 1, "removed": 0, "kept": 1, "unknown": 0,
+                "skipped_unresolved": 0, "removed_titles": [],
+                "removed_canonical_keys": [], "backup_path": "", "csv_path": str(path),
+            }
+
+        with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
+             patch("dedupe.sheet_io.open_spreadsheet", return_value=MagicMock()), \
+             patch("dedupe.sheet_io.find_canonical_key_column", return_value=None), \
+             patch("dedupe.csv_check.check_csv_canonical", side_effect=_spy):
+            checker.run_check_csv_canonical(
+                csv_path=str(path), dry_run=True, strict_mode=True
+            )
+        assert captured["strict_mode"] is True

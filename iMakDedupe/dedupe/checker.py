@@ -1297,6 +1297,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             "に 'DUP' 自動書込 (= scope1 都度)。 --dry-run で件数のみ。"
         ),
     )
+    parser.add_argument(
+        "--strict-skip-unresolved",
+        action="store_true",
+        help=(
+            "2026-06-16: --check-csv の opt-in。 解決不能 (unresolved) row も物理除外する "
+            "(= 旧 strict_mode=True 挙動、 listing-safety 用途)。 既定は keep-unresolved "
+            "(= unresolved は残し、 除外は真の重複のみ。 failclosed_must_skip 準拠)。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.archive_key2:
@@ -1326,6 +1335,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             csv_path=args.check_csv,
             dry_run=args.dry_run,
             mark_dups=args.mark_dups,
+            strict_mode=args.strict_skip_unresolved,
         )
     if args.write_keys_from_csv:
         # Step 4: --legacy-tuple-mode 明示なしなら single-key (= resolver 経由) で実行
@@ -1366,11 +1376,23 @@ def run_check_csv_canonical(
     csv_path: str,
     dry_run: bool = False,
     mark_dups: bool = False,
+    strict_mode: bool = False,
 ) -> int:
     """Step 4 single-key check_csv: resolver 経由 canonical KEY 突合 + 表示/実体 SSOT.
 
     mark_dups (= 2026-06-12 scope1): 重複除外 row に対応する LOW B空 row の D列に
     "DUP" 自動書込。 dry-run=True なら件数のみ、 False なら本書込 + .bak 保存。
+
+    strict_mode (= 2026-06-16 デフォルト False に是正):
+    - **False (デフォルト)**: 解決不能 (unresolved) row は **keep**。 物理除外するのは
+      既存 KEY 完全一致の **真の重複だけ**。 これがグローバル原則
+      `failclosed_must_skip_not_destructive` (= 判定不能は skip、 破壊的動作に倒さない)
+      の正。 6/16 Mercari (Porter/montbell/tshirt/reel) 全除外事故の根本対応:
+      catalog KEY を持たない 1 点もの商品が全 unresolved → 全除外 → CSV 0 行、 を防ぐ。
+    - True (opt-in、 `--strict-skip-unresolved`): 解決不能 row も物理除外 (= 出品 skip)。
+      「dedup で解決できない = 出品もしない」 を明示的に選ぶ listing-safety 用途のみ。
+      ※ 出品可否の fail-closed は listing script (psa_to_csv) が既に identity で担保済の
+        ため、 dedup 段で unresolved を消すのは原則 over-reach。 既定では使わない。
     """
     from pathlib import Path
     from . import csv_check, sheet_io
@@ -1403,15 +1425,16 @@ def run_check_csv_canonical(
         csv_path=Path(csv_path),
         existing_canonical_keys=frozenset(existing_keys),
         dry_run=dry_run,
-        strict_mode=True,
+        strict_mode=strict_mode,
     )
 
     print()
+    print(f"  mode            : {'strict (unresolved も除外)' if strict_mode else 'keep-unresolved (= 既定、 除外は真の重複のみ)'}")
     print(f"  total           : {result['total']}")
-    print(f"  removed (重複)  : {result['removed']}")
-    print(f"  kept (残存)     : {result['kept']}")
-    print(f"  unknown (解決不能): {result['unknown']}")
-    print(f"  skipped_unresolved: {result['skipped_unresolved']}")
+    print(f"  removed (真の重複): {result['removed']}")
+    print(f"  kept (残存)     : {result['kept']}  (= unresolved {result['unknown']} 件を含む)" if not strict_mode else f"  kept (残存)     : {result['kept']}")
+    print(f"  unknown (解決不能・keep): {result['unknown']}")
+    print(f"  skipped_unresolved (= strict 除外): {result['skipped_unresolved']}")
     if result["backup_path"]:
         print(f"  backup_path     : {result['backup_path']}")
     if result["removed_titles"][:5]:

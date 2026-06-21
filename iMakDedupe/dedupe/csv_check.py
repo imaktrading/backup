@@ -325,21 +325,25 @@ def check_csv_canonical(
     csv_path: Path,
     existing_canonical_keys: "frozenset[str]",
     dry_run: bool = False,
-    strict_mode: bool = True,
+    strict_mode: bool = False,
 ) -> Dict[str, Any]:
     """CSV を resolver 経由で canonical KEY 化 → 既存 set と単一突合 → 重複物理除外.
 
     spec §3, §4, §6:
     - 各 row を resolve() で canonical KEY 解決 (= 再 parse 禁止)
     - existing_canonical_keys に完全一致 → 物理除外
-    - 解決不能 ("") → unknown 計上 + strict_mode=True なら除外 (= 出品 skip)
+    - 解決不能 ("") → unknown 計上 (= 既定では keep。 strict_mode=True 時のみ除外)
 
     spec §5 仮説対応: 表示用 statistics と 物理 kept_rows を **同一 indices set** から導出 (= SSOT).
     呼出側で結果 dict と 書込 file を見比べたとき件数一致を保証.
 
-    strict_mode (= 6/10 ユーザー判断デフォルト True):
-    - True: 解決不能 row も物理除外 (= 出品 skip、 fail-closed for listing)
-    - False: 解決不能 row は keep (= 旧 dedupe 互換、 unknown 計上のみ)
+    strict_mode (= 2026-06-16 デフォルト False に是正):
+    - **False (デフォルト)**: 解決不能 row は keep。 物理除外は既存 KEY 完全一致の真の重複だけ。
+      = グローバル原則 failclosed_must_skip_not_destructive (判定不能は破壊側に倒さない) の正。
+      6/16 Mercari (Porter 等 catalog KEY 無し 1 点もの) 全除外事故の根本対応。
+    - True (opt-in): 解決不能 row も物理除外 (= 出品 skip、 listing-safety 用途)。
+      ※ 旧 6/10 既定。 出品可否の fail-closed は listing script 側で担保済のため dedup 段の
+        unresolved 除外は原則 over-reach。 明示時のみ使う。
 
     Returns:
         {
