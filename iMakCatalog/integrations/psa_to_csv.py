@@ -1231,7 +1231,11 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "REBELLION CRASH":             "S2",    # 反逆クラッシュ(英 Rebel Clash)の PSA表記
     # --- SwSh全弾 体系整備 (2026-06-10, HQ依頼: もぐら叩き終了。日本語セット名の PSA literal英名) ---
     #     真値: Bulbapedia/PSA/StockX 裏取り。SWORD/SHIELD(S1W/S1H)は era名"SWORD & SHIELD"と
-    #     衝突する(全SwSh brandが含む)ため意図的に除外 → base Sword/Shield は別手段で。
+    #     衝突する(全SwSh brandが含む)ため bare "SWORD"/"SHIELD" 単独 key は禁止。
+    #     2026-06-21 HQ承認: base Sword/Shield は **era名込みの限定フレーズ** key で安全に解決
+    #     (他SwSh brand "SWORD & SHIELD <expansion>" には部分一致しない)。cert S1W-066 ウッウV 実在。
+    "SWORD & SHIELD SWORD":        "S1W",   # 拡張パック「ソード」 base set
+    "SWORD & SHIELD SHIELD":       "S1H",   # 拡張パック「シールド」 base set
     "INFINITY ZONE":               "S3",    # ムゲンゾーン (英 Darkness Ablaze)
     "EXPLOSIVE WALKER":            "S2a",   # 爆炎ウォーカー
     "LEGENDARY HEARTBEAT":         "S3a",   # 伝説の鼓動
