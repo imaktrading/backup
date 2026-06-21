@@ -537,15 +537,17 @@ Review each listing for:
 
 Rules to enforce:
 - "PSA 10" must be at the start of every title
-- No forbidden words: Japanese, GEM MT, Japan, Mint, Graded, L@@K
-- Game short names (= iMakKeywords PDF Q1 2026 Rank 準拠、 2026-05-31 改訂):
-  * Pokemon (Rank 1、 never "Pokemon TCG")
-  * Yugioh (Rank 19、 no hyphen)
-  * One Piece (Rank 13、 never "One Piece TCG")
-  * Dragon Ball SCG
-  * Gundam TCG (never "Gundam Card Game" in title)
+- Forbidden words in TITLE (spam/redundant): GEM MT, Mint, Graded, L@@K
+  ★ "Japanese" は **日本版カードの必須言語表記 = 有効な検索語**。禁止語ではない。
+    タイトルに "Japanese" が在っても **絶対に flag/削除助言しないこと**(意図的に入れている)。
+- Game short names in TITLE (= iMakKeywords PDF Q1 2026 Rank 準拠):
+  * Pokemon (never "Pokemon TCG") / Yugioh (no hyphen) / One Piece (never "One Piece TCG") /
+    Dragon Ball SCG / Gundam TCG (never "Gundam Card Game" in title)
+  ★ タイトルが既に "Pokemon"(= "Pokemon TCG" でない)なら **正しい**。下の C:Game (Item Specifics)
+    が "Pokémon TCG" でも、それは eBay 正規値で **タイトルとは別物**。タイトルを
+    "Pokemon TCG → Pokemon" に直せ等と助言してはいけない(タイトルは既に正しい)。
 - Finish 追加禁止 ("Foil"/"Holo" 等 SNAD クレーム直結リスク)
-- C:Game (= Item Specifics) は eBay 正規値: Pokémon TCG / Yu-Gi-Oh! TCG / One Piece CCG / Dragon Ball Super Card Game / Gundam Card Game
+- C:Game (= Item Specifics、タイトルとは別) は eBay 正規値: Pokémon TCG / Yu-Gi-Oh! TCG / One Piece CCG / Dragon Ball Super Card Game / Gundam Card Game
 - Title should be 70-80 characters ideally
 
 Respond in Japanese. Be concise and actionable. Use bullet points.

@@ -567,12 +567,18 @@ LISTINGS:
 
 Review each listing for:
 1. TITLE QUALITY: Is it keyword-optimized? Does it include the most searchable terms? Max 80 chars.
-2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at or slightly below TOP seller median. For NO-GO items, recommend not listing.
+2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at
+   or slightly below TOP seller median. For 高め/NO-GO items (target > median 乖離超過): **DO list at the
+   cost-plus price** — 無在庫(drop-ship)= 在庫コストなし + cost-plus = 損なし。出品は free option
+   (売れれば利益、売れなくても損失なし)。**「出品しない/見送り」を推奨してはいけない**。値下げを
+   強制せず、既存メンテ追跡(sell-through 監視 / より安い仕入れ再探索 / median 上昇時に price-revise)を flag。
 3. ITEM SPECIFICS: Are important fields missing that competitors typically fill?
 4. OVERALL: Any patterns or systematic issues across all listings?
 
 Rules to enforce:
-- No forbidden words: Japanese, GEM MT, Japan, Mint, Graded, L@@K
+- Forbidden words (spam/redundant): GEM MT, Mint, Graded, L@@K
+  ★ "Japan" / "Japanese" は Mercari系(Porter/montbell/UNIQLO UT)では **許可**(Japan Exclusive 等で
+    使う有効な検索語)。禁止語ではない。タイトルから消すよう助言してはいけない。
 - Title should be 70-80 characters ideally
 
 Respond in Japanese. Be concise and actionable. Use bullet points.
