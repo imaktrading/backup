@@ -1,5 +1,56 @@
 # iMakInventory daily_report
 
+## 2026-06-21 — ★HIGH/LOW 3日 silent 停止 → 真因修正 + 在庫メンテ + CI穴クローズ + 未出品巡回化
+
+### ★最重大: HIGH/LOW 巡回が 06-17夕〜06-20 の3日間 silent 停止していた
+- 決定: 真因は「私の amazon 修正(a12b776, 残りN点を在庫マーカー追加)が run_cycle 起動時の
+  pytest precheck の中古品検体テストを fail させ → precheck=失敗で巡回 abort」。 さらに abort 通知が
+  toast のみ(Task Scheduler の pythonw 下で不可視・メール無し)で **完全 silent** だった二重欠陥。
+  タスクは定刻 0x0 で発火し続けたが起動直後に自己中止していた。
+- 変更: (f88d9f1) `_detect_stock(html, rendered=False)` を追加し「残りN点/通常発送」は
+  rendered=True(Selenium新DOM)限定に → 旧DOM中古検体の誤判定解消・precheck 通過。
+  (d7cad31) precheck 失敗時の abort を desktop ALERT + メール発報で loud 化(silent 再発防止)。
+- 検証: `pytest tests/ -m offline` = 159 passed(中古検体 fail 解消)。 タスク発火 0x0 だがログ皆無 →
+  precheck-abort が真因と特定。 修正後 HIGH 09:30 = 売切1→取下げ1、 LOW 06:30 = 売切3→取下げ3 で正常復帰確認。
+
+### 在庫メンテ(3日バックログ清算)
+- 決定: 停止中に溜まった売切れを全取下げ。 burst guard(閾値30)が HIGH 44件/LOW 221件の spike を HOLD。
+  LOW 220件は amazon が第三者販売化(実セラー POP/コメカミジャパン等を4件実機確認、 glitch でなく Rule 0 取下げ対象)。
+- 変更(運用、 コード変更なし): HIGH holdout 19件取下げ / LOW 219件取下げ(215成功) / 公式 ✕×eBay live 7件取下げ。
+  手動取下げが cycle 経由でなく pending queue 未 drain → burst 高止まり再発 → pending 270件を drain(qty=0 確認/取下げ34)。
+- 検証: reverse_audit 反復で「✕(売切)×eBay qty>0」= **0件**(残1=正当 row728)を確定。 次 cycle 正常復帰(no_upload 解消)。
+
+### CI 穴クローズ(commit が通る ⟺ cycle が起動できる を構造保証)
+- 決定: pre-commit(115件)と cycle-precheck(offline 159件)が別物で、 検体不在テストが silent SKIP
+  (`pytest -m offline` は全 skip でも exit 0)→ 壊れた変更が commit を素通り。 HQ と分担して根治。
+- 変更: (5e6c79d/601d03a) amazon/mercari/fril の `samples_available` fixture を「検体不在=SKIP→FAIL」化(土台)。
+  HQ(6aff500, 本元)が pre-commit に cycle 同一 offline ゲートを worktree 判定で追加。
+- 検証: 失敗注入で commit 拒否を実証(`❌ Inventory offline gate FAILED`、 HEAD 不変)。 検体退避→赤も確認(amazon16/mercari21/fril11 errors)。
+
+### item_id 空欄(未出品)も巡回対象に(2026-06-10 方針を反転)
+- 決定: user 指示。 出品くんが CSV 作成→出品 後に「実は仕入元売切」 発覚を防ぐため、 出品前に源在庫を D 列へ反映。
+- 変更: (be674ab) monitor_listings の item_id 空欄 skip を除去 → 未出品も scrape。 取下げ対象は無いので
+  revise/pending/要対応 には入れない(既存の「newly_sold && item_id空欄 → 検知のみ」分岐が処理)。 巡回件数 ~290/cycle 増。
+- 検証: test_blank_itemid_skip.py を新挙動に書換(未出品も scrape / 売切でも pending・action_required 無し)2件 pass。 offline gate 159 pass。
+
+## 2026-06-19 — 公式 silent fail 群 + DNS 耐性 + 取下げ verify 化
+
+- 決定/変更/検証:
+  - (71ef8eb) 公式メール送信を retry + mail_send.log 永続記録 + desktop ALERT + 本文保存 → pythonw で結果破棄され
+    DNS/SMTP blip で silent 欠落し得た穴を撲滅。 test 5件。
+  - (e9a7ec6) 公式取下げを「K列に目標値0を楽観書込」から「実 eBay GetItem verify ベース」に → 取下げ未反映でも
+    完了扱いだった silent fail-OPEN を撲滅(montbell M 5件 実害を手動解消)。 test 5件。
+  - (d4e16a9) 公式 open_sheet に transient(DNS) backoff retry / (3f9c944) uniqlo/gu scraper に同 retry → cycle 時刻の
+    getaddrinfo failed 頻発で全体❌/⚠️noise になる穴を吸収。
+
+## 2026-06-17 — Multi-SKU 取下げ fallback + 終了済 listing verify + LOW/公式 8h 化
+
+- 決定/変更/検証:
+  - (61e5a93) 単行 Revise が 21916736(Multi-SKU)で失敗→永久滞留 fail-OPEN を、 GetItem→qty>0 variation 全 qty=0 化
+    fallback で救済。 失敗注入 test 5件。 row55 鬼滅UT XXL の 8.5h 滞留で発覚。
+  - (bb11fae) 終了済(Completed)listing は残存 Quantity を持つが購入不可 → verify を safe_failure(ended)通過扱いに(偽滞留 spam 撲滅)。
+  - (運用) LOW/公式 巡回を日1回→8h毎に頻度UP(Windows タスク、 全 cycle 時刻 非重複)。
+
 ## 2026-06-14 — mercari ReadTimeout に再取得リトライ (「エラー除外」= fail-OPEN を回避)
 
 ### 決定
