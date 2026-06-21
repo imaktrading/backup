@@ -70,5 +70,28 @@ if [ $RESULT -ne 0 ]; then
     exit 1
 fi
 
+# ============================================================================
+# (3) Inventory cycle 起動ゲートの二重化 (2026-06-21, Inventory→HQ 依頼)
+# ============================================================================
+# pre-commit と cycle 起動ゲートが別物だったため、commit は通るのに在庫巡回が止まる穴があり、
+# HIGH/LOW 在庫監視が3日間 silent 停止した (真因 commit a12b776)。在庫 worktree のコミットは
+# run_cycle.py の precheck と **完全に同一の offline ゲート** を commit 時にも通し、cycle を
+# 止める変更を物理的に弾く。これで「commit が通る ⟺ cycle が起動できる」を構造保証する。
+# 前提: Inventory が検体不在 = skip でなく fail 化済 (commit 5e6c79d) → skip 素通りの穴は閉済。
+case "$WORKTREE_TOPLEVEL" in
+    *"/dev/iMak_inventory"*)
+        echo "[pre-commit] Running Inventory cycle-precheck (offline gate)..."
+        if ! ( cd "$WORKTREE_TOPLEVEL/iMakInventory" && \
+               PYTHONIOENCODING=utf-8 python -m pytest tests/ -m offline -q --tb=short --no-header ); then
+            echo ""
+            echo "[pre-commit] ❌ Inventory offline gate FAILED — このcommitは在庫巡回を止めます。"
+            echo "[pre-commit]    run_cycle.py の precheck と同一ゲート。先に offline テストを直してください。"
+            echo "[pre-commit]    Bypass (使用厳禁): git commit --no-verify"
+            exit 1
+        fi
+        echo "[pre-commit] ✅ Inventory offline gate passed."
+        ;;
+esac
+
 echo "[pre-commit] ✅ All tests passed."
 exit 0
