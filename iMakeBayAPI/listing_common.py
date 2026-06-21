@@ -337,7 +337,8 @@ def run_self_audit(csv_path):
 # ===================================================================
 PRICE_CHECK_CONFIG = {
     "reel":        {"enabled": True},
-    "tshirt":      {"enabled": True},
+    "tshirt":      {"enabled": False},  # 2026-06-21 価格NO-GO廃止(ユーザー指示「全て出品で」)。
+    #                                     cost-plus=損なし(無在庫)+ 高めは既存メンテ追跡。TCG本丸と同方針。
     "ichibankuji": {"enabled": False},  # 2026-05-10: collectibles 特性で median gate 無効化
     "tomica":      {"enabled": True},
     "gshock":      {"enabled": False},  # スクリプト未結線。price_status を渡す実装が入るまで False で統一
