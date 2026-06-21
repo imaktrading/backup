@@ -47,8 +47,15 @@ NO_BUYBOX_SOLD_HTML_FILES = [
 
 @pytest.fixture(scope="module")
 def samples_available():
-    if not SAMPLES_DIR.exists():
-        pytest.skip(f"Amazon samples not found at {SAMPLES_DIR}")
+    # ★ 2026-06-21 no-skip 化 (HQ §): 検体不在を skip でなく FAIL にする。
+    # offline gate (run_cycle precheck + pre-commit) は検体が無いと全 skip → exit 0 = 偽 pass で
+    # 壊れた scraper 変更を silent に通す = HIGH/LOW 3日停止と同型の fail-OPEN。 検体不在は赤くする。
+    samples = list(SAMPLES_DIR.glob("*.html")) if SAMPLES_DIR.exists() else []
+    if not samples:
+        pytest.fail(
+            f"Amazon offline 検体が見つからない ({SAMPLES_DIR})。 offline gate が silent skip すると "
+            f"検知ロジックの破壊を素通りさせるため、 検体不在は SKIP でなく FAIL 扱い。 検体を配置すること。"
+        )
     return SAMPLES_DIR
 
 
