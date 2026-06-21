@@ -412,10 +412,14 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
         gap_pct = (target_usd - ref_median) / ref_median * 100 if ref_median > 0 else 999
         gap_limit_pct = tier_gap_limit * 100
 
-        # 市場価格での利益計算
+        # 市場価格で売れた場合の利益(参考)。コストプラス出品では実際の出品価格で売るので非該当。
         revenue_jpy = ref_median * p["exchange_rate"]
         profit_jpy = revenue_jpy * net_ratio - costs_jpy
         profit_rate = profit_jpy / revenue_jpy if revenue_jpy > 0 else 0
+        # 実際の出品価格(コストプラス=target_usd)で売れた場合の利益。= 我々が実際に list する価格。
+        # 構造上 黒字(cost+margin)。AI レビューにはこちらを渡し「赤字」誤認を防ぐ(2026-06-21)。
+        list_profit_jpy = target_usd * p["exchange_rate"] * net_ratio - costs_jpy
+        list_profit_rate = list_profit_jpy / (target_usd * p["exchange_rate"]) if target_usd > 0 else 0
 
         calc = {
             "cost_jpy": cost_jpy,
@@ -424,6 +428,8 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
             "market_usd": ref_median,
             "profit_jpy": profit_jpy,
             "profit_rate": profit_rate,
+            "list_profit_jpy": list_profit_jpy,
+            "list_profit_rate": list_profit_rate,
             "gap_pct": gap_pct,
             "tier_profit": tier_profit,
             "gap_limit_pct": gap_limit_pct,
@@ -514,7 +520,13 @@ def claude_review(rows, all_issues, all_comp_findings, all_gates):
         gate_text = ""
         if all_gates[i]:
             g = all_gates[i]
-            gate_text = f" | GATE: {g['status']} (市場${g['ref_median']:.0f}, 利益¥{g['calc']['profit_jpy']:,.0f}, {g['calc']['profit_rate']:.0%})"
+            # AI には **出品価格(コストプラス)で売れた場合の利益**を渡す(= 我々が実際に list する価格)。
+            # 市場中央値での利益(profit_jpy)は「中央値で売った場合の参考」で、コストプラス出品では非該当。
+            # これを渡すと高め品で負になり AI が「赤字/値下げ」と誤助言する → list_profit を正とする。
+            _c = g['calc']
+            gate_text = (f" | GATE: {g['status']} | 出品価格${_c['target_usd']:.0f}で売れた場合の利益"
+                         f"¥{_c.get('list_profit_jpy', 0):,.0f}({_c.get('list_profit_rate', 0):.0%})"
+                         f" | 市場中央値${g['ref_median']:.0f}(参考・コストプラス出品では売値はこの限りでない)")
 
         summary_lines.append(
             f"#{i+1} Title: {title}\n"
@@ -531,7 +543,13 @@ LISTINGS:
 
 Review each listing for:
 1. TITLE QUALITY: Is it keyword-optimized? Does it include the most searchable terms? Max 80 chars.
-2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at or slightly below TOP seller median. For RELAX items (薄商い: 出品≤10件, median 不安定で gate skip 適用), recommend cost-plus listing as-is (機会損失回避). For 高め/HIGH items (旧NO-GO, target>median 乖離超過): **DO list at the cost-plus price** — cost-plus means no loss and no-stock means no inventory cost, so listing is a free option (upside if it sells, no downside). Do NOT recommend skipping. Flag it for 既存メンテ tracking (sell-through monitor / re-source cheaper / price-revise when median rises).
+2. PRICING: コストプラス価格(=出品価格)が SSOT。GATE の「出品価格で売れた場合の利益」は構造上 黒字。
+   - **絶対にしてはいけない**: 「赤字」と書くこと(出品価格で売る=損はしない。市場中央値の利益は"中央値で
+     売った場合の参考"でコストプラス出品では非該当。これを根拠に赤字判定しない)。「値下げ推奨」「出品しない/
+     見送り」も書かない(値段は維持。無在庫=売れなくても損なし=free option)。
+   - GO items: TOP seller median 前後を提案して可。RELAX/高め items: **コストプラス価格のまま維持**を推奨。
+   - 高め(target>median 乖離超過)は **そのまま出品 + 既存メンテ追跡**(sell-through 監視 / より安い仕入れ
+     再探索 / median 上昇時に price-revise)を flag。値下げ強制でなく「追跡」と書く。
 3. ITEM SPECIFICS: Are important fields missing that competitors typically fill?
 4. OVERALL: Any patterns or systematic issues across all listings?
 

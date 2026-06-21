@@ -99,6 +99,39 @@ def remove_redundant_pokemon(title):
     return new, new != title
 
 
+# 重複しても自然なカード用語 (セット名+カード名で正当に再出現する。例: 'VMAX Climax' set +
+# 'Orbeetle VMAX' card)。これらは dedup しない (= 情報を壊さない)。
+_DEDUP_WHITELIST = {
+    'vmax', 'vstar', 'v', 'vunion', 'ex', 'gx', 'gex', 'x', 'break', 'go',
+    'tag', 'team', 'prime', 'star',
+}
+
+
+def remove_duplicate_words(title):
+    """タイトル内の **重複語の2回目以降を除去** (2026-06-21)。
+
+    語が既出と完全一致 (大小無視) なら削除。ただし上記カード用語 whitelist は残す
+    (セット名+カード名で正当に再出現するため)。番号/記号 (#037/070 等) は対象外。
+    例:
+      'Japanese Japanese Promo'        → 'Japanese Promo'   (言語×set名の重複)
+      'NWT Japan Brand New Japan'      → 'NWT Japan Brand New' (語順問わず)
+      'VMAX Climax #215 Orbeetle VMAX' → 不変 (VMAX は whitelist)
+    """
+    parts = title.split()
+    seen = set()
+    out = []
+    for w in parts:
+        wl = w.lower()
+        is_word = wl.isalpha() and len(wl) > 1   # 英字語のみ (番号/記号は常に残す)
+        if is_word and wl not in _DEDUP_WHITELIST and wl in seen:
+            continue                              # 重複語 (非whitelist) → 削除
+        out.append(w)
+        if is_word:
+            seen.add(wl)
+    new = ' '.join(out)
+    return new, new != title
+
+
 # 日本語文字 (ひらがな/カタカナ/漢字/半角カナ). eBay タイトルは英語必須。
 _JP_CHAR_RE = re.compile(r'[぀-ヿ一-鿿ｦ-ﾟ]')
 
@@ -176,13 +209,17 @@ def fix_title(title, language, rarity, rescues):
     Returns:
         (新タイトル, 操作ログ dict)
     """
-    log = {'rescue': [], 'pokemon_dedup': False, 'pad': [], 'jp_strip': False}
+    log = {'rescue': [], 'pokemon_dedup': False, 'word_dedup': False, 'pad': [], 'jp_strip': False}
 
     title, rescue_applied = apply_rescue(title, rescues)
     log['rescue'] = rescue_applied
 
     title, deduped = remove_redundant_pokemon(title)
     log['pokemon_dedup'] = deduped
+
+    # 汎用の重複語除去 (Japanese Japanese / Japan…Japan 等。カード用語は whitelist で残す)
+    title, word_deduped = remove_duplicate_words(title)
+    log['word_dedup'] = word_deduped
 
     # 日本語混入を pad の「前」に除去 (TitleAgent が JP名でパディングした分)。
     # 先に英語のみにしてから pad することで、除去後に短くならず英語キーワードで補強される。
@@ -218,7 +255,7 @@ def process_csv(csv_path, rescues, log_func=print):
         log_func(f"  ⚠️ ヘッダ列不足、skip: {e}")
         return {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'jp_stripped': 0, 'unchanged': 0}
 
-    stats = {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'jp_stripped': 0, 'unchanged': 0}
+    stats = {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'word_dedup': 0, 'jp_stripped': 0, 'unchanged': 0}
     for i, row in enumerate(rows[1:], start=1):
         original = row[title_idx]
         new_title, log = fix_title(
@@ -234,6 +271,9 @@ def process_csv(csv_path, rescues, log_func=print):
         if log['pokemon_dedup']:
             stats['pokemon_dedup'] += 1
             log_func(f"  [#{i}] Pokémon 重複削除")
+        if log['word_dedup']:
+            stats['word_dedup'] += 1
+            log_func(f"  [#{i}] 重複語除去: {original!r} → {new_title!r}")
         if log['pad']:
             stats['padded'] += 1
             log_func(f"  [#{i}] +pad: {', '.join(log['pad'])} ({len(original)}→{len(new_title)}字)")
@@ -246,7 +286,7 @@ def process_csv(csv_path, rescues, log_func=print):
         else:
             stats['unchanged'] += 1
 
-    if stats['rescued'] or stats['padded'] or stats['pokemon_dedup'] or stats['jp_stripped']:
+    if stats['rescued'] or stats['padded'] or stats['pokemon_dedup'] or stats['word_dedup'] or stats['jp_stripped']:
         bak = csv_path + f'.bak_post_title_{int(time.time())}'
         shutil.copy2(csv_path, bak)
         log_func(f"  📦 backup: {os.path.basename(bak)}")
@@ -292,8 +332,8 @@ def run_post_title_fix_for_latest_csv(append_log_func=print):
     )
     append_log_func(
         f"  完了: rescue={stats['rescued']} pad={stats['padded']} "
-        f"pokemon_dedup={stats['pokemon_dedup']} jp_strip={stats['jp_stripped']} "
-        f"unchanged={stats['unchanged']}\n"
+        f"pokemon_dedup={stats['pokemon_dedup']} word_dedup={stats['word_dedup']} "
+        f"jp_strip={stats['jp_stripped']} unchanged={stats['unchanged']}\n"
     )
 
 

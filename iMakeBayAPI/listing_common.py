@@ -315,12 +315,38 @@ def pad_title_to_target(title: str, item_specifics: dict, category: str = None,
 # ===================================================================
 # 統合: enforce + pad
 # ===================================================================
+# 重複しても自然なカード/商品用語(set名+品名で正当に再出現)。dedup しない。
+_TITLE_DEDUP_WHITELIST = {
+    'vmax', 'vstar', 'v', 'vunion', 'ex', 'gx', 'gex', 'x', 'break', 'go',
+    'tag', 'team', 'prime', 'star',
+}
+
+
+def dedup_title_words(title: str) -> str:
+    """タイトルの重複語の2回目以降を除去(2026-06-21)。純関数。
+
+    set名+言語/condition マーカーの重複('Japanese Japanese' / 'Japan Brand New Japan')是正。
+    whitelist のカード用語(VMAX/EX/V…)は set名+品名で正当に再出現するので残す。番号/記号は対象外。
+    """
+    seen, out = set(), []
+    for w in (title or "").split():
+        wl = w.lower()
+        is_word = wl.isalpha() and len(wl) > 1
+        if is_word and wl not in _TITLE_DEDUP_WHITELIST and wl in seen:
+            continue
+        out.append(w)
+        if is_word:
+            seen.add(wl)
+    return ' '.join(out)
+
+
 def normalize_title(title: str, is_new: bool, item_specifics: dict, category: str = None,
                     target_min: int = 70, max_chars: int = 80) -> str:
-    """Title整合性保証 + 文字数パディングを一括実行（推奨API）。"""
+    """Title整合性保証 + 文字数パディング + 重複語除去を一括実行（推奨API）。"""
     title = enforce_title_coherence(title, is_new=is_new, max_chars=max_chars)
     title = pad_title_to_target(title, item_specifics, category=category,
                                  target_min=target_min, max_chars=max_chars)
+    title = dedup_title_words(title)
     return title
 
 
