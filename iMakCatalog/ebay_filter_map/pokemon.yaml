@@ -140,12 +140,12 @@ set_code:
 
   # ----- Sword & Shield (S / Sxa) -----
   - source: S1H
-    ebay: Sword
-    note: REVIEW eBay 値
+    ebay: Shield
+    note: 拡張パック「シールド」(catalog set_name 裏取り 2026-06-21、旧swap是正)
     year: 2019
   - source: S1W
-    ebay: Shield
-    note: REVIEW eBay 値
+    ebay: Sword
+    note: 拡張パック「ソード」(catalog set_name 裏取り 2026-06-21、旧swap是正)
     year: 2019
   - source: S4a
     ebay: Shiny Star V
