@@ -96,10 +96,16 @@ KNOWN_SOLD_URLS = [
 @pytest.fixture(scope="module")
 def samples_available():
     """検体 HTML が存在するか確認 (debug/html_samples/)。
-    存在しない環境では skip して、Live test 環境差を吸収する。
+
+    ★ 2026-06-21 no-skip 化 (HQ §): 検体不在は skip でなく FAIL。 mercari は HIGH 主力で、
+    offline gate が検体不在 silent skip すると 検知ロジック破壊を素通りさせる (= fail-OPEN)。
     """
-    if not SAMPLES_DIR.exists():
-        pytest.skip(f"HTML samples not found at {SAMPLES_DIR}")
+    samples = list(SAMPLES_DIR.glob("*.html")) if SAMPLES_DIR.exists() else []
+    if not samples:
+        pytest.fail(
+            f"Mercari offline 検体が見つからない ({SAMPLES_DIR})。 検体不在の silent skip は "
+            f"壊れた変更を通すため SKIP でなく FAIL。 検体を配置すること。"
+        )
     return SAMPLES_DIR
 
 

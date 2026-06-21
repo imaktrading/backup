@@ -50,8 +50,14 @@ IN_STOCK_HTML_FILES = [
 
 @pytest.fixture(scope="module")
 def samples_available():
-    if not SAMPLES_DIR.exists():
-        pytest.skip(f"Fril samples not found at {SAMPLES_DIR}")
+    # ★ 2026-06-21 no-skip 化 (HQ §): 検体不在は skip でなく FAIL (silent 素通り = 壊れた変更を
+    # 通す fail-OPEN を撲滅。 amazon/mercari fixture と同方針)。
+    samples = list(SAMPLES_DIR.glob("*.html")) if SAMPLES_DIR.exists() else []
+    if not samples:
+        pytest.fail(
+            f"Fril offline 検体が見つからない ({SAMPLES_DIR})。 offline gate の silent skip は "
+            f"検知ロジック破壊を素通りさせるため、 検体不在は SKIP でなく FAIL。 検体を配置すること。"
+        )
     return SAMPLES_DIR
 
 
