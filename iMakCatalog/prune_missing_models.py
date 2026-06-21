@@ -1,16 +1,26 @@
-"""missing_models.csv の prune — resolver.resolve() で解決可能な行を除去.
+"""missing_models の prune — resolver.resolve() で解決可能な行を除去.
 
 背景: missing_models は解決済 item を pruning せず、毎日の auto-add/pdca/psa_mismatch を
 stale 再発行させていた(2026-06-16 報告 / 2026-06-21 HQ Q1 GO: (b) Catalog が即prune)。
-本スクリプトは「現時点で resolver が canonical product_id を返す行」= 解決済 を除去する暫定手段。
-恒久策は出品/取込時の auto-prune(別途)。
+さらに pdca.db(improvement_queue, source='missing_models')の done が CSV 再import で
+pending に戻る機序(done→pending 復活)があり、「CSV除去」と「pdca.db done化」は**セット**で
+行わないと毎日復活する(2026-06-21 HQ 実機診断)。Advisor GO=(b) Catalog 自走日次実行。
+
+本スクリプトは2面を同時に prune(セット):
+  1. missing_models.csv  : resolver 解決済 行を物理除去
+  2. pdca.db improvement_queue (source='missing_models', status='pending')
+     : resolver 解決済 を status='done' 化(= CSV 再import でも復活しない)
+
+恒久策の日次実行は本スクリプトを scheduler(schtasks 等)で回す。
 
 使い方:
   python prune_missing_models.py --dry-run   # 除去候補のみ表示(書込なし)
-  python prune_missing_models.py             # backup 取得後に実行(解決済を除去)
+  python prune_missing_models.py             # backup 取得後に実行(CSV+pdca 両方)
+  python prune_missing_models.py --csv-only  # CSV のみ(pdca.db は触らない)
 """
 from __future__ import annotations
-import argparse, csv, re, sys, shutil
+import argparse, csv, re, sys, shutil, sqlite3
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -22,6 +32,7 @@ except Exception:
     pass
 
 CSV_PATH = Path("C:/dev/iMak_data/catalog/missing_models.csv")
+PDCA_DB = Path("C:/dev/iMak_data/audit/pdca.db")
 
 
 def parse_tcg(model: str):
@@ -59,11 +70,11 @@ def resolves(category: str, model: str) -> str:
         return ""
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
-
+def prune_csv(dry_run: bool) -> int:
+    """missing_models.csv の解決済行を物理除去. Returns pruned 件数."""
+    if not CSV_PATH.exists():
+        print(f"[csv] {CSV_PATH} が無い → skip")
+        return 0
     with CSV_PATH.open(encoding="utf-8") as f:
         rdr = csv.DictReader(f)
         fields = rdr.fieldnames
@@ -74,24 +85,78 @@ def main():
         key = resolves(r["category"], r["model"])
         (pruned if key else keep).append((r, key))
 
-    print(f"total={len(rows)}  prune(解決済)={len(pruned)}  keep(未解決)={len(keep)}")
+    print(f"[csv] total={len(rows)}  prune(解決済)={len(pruned)}  keep(未解決)={len(keep)}")
     for r, key in pruned:
         print(f"  PRUNE [{r['category']}] {key:16s} <- {r['model'][:70]}")
-    print("--- keep (未解決) ---")
     for r, key in keep:
         print(f"  KEEP  [{r['category']}] {r['model'][:80]}")
-
-    if args.dry_run:
-        print("\n(dry-run: 書込なし)")
-        return
-    backup = CSV_PATH.with_suffix(f".csv.bak_prune")
+    if dry_run or not pruned:
+        return len(pruned)
+    backup = CSV_PATH.with_suffix(".csv.bak_prune")
     shutil.copy2(CSV_PATH, backup)
     with CSV_PATH.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
         for r, _ in keep:
             w.writerow(r)
-    print(f"\n✅ pruned {len(pruned)} 行除去。backup={backup.name}  残={len(keep)}")
+    print(f"  ✅ csv pruned {len(pruned)} 行。backup={backup.name}  残={len(keep)}")
+    return len(pruned)
+
+
+def prune_pdca(dry_run: bool) -> int:
+    """pdca.db improvement_queue の pending missing_models で resolver 解決済を done 化.
+
+    done→pending 復活機序(CSV 再import)を断つため CSV prune と必ずセットで行う.
+    Returns done 化件数.
+    """
+    if not PDCA_DB.exists():
+        print(f"[pdca] {PDCA_DB} が無い → skip")
+        return 0
+    con = sqlite3.connect(str(PDCA_DB))
+    con.row_factory = sqlite3.Row
+    cur = con.cursor()
+    rows = cur.execute(
+        "SELECT queue_id, category, item_id FROM improvement_queue "
+        "WHERE source='missing_models' AND status='pending'"
+    ).fetchall()
+    resolved, keep = [], []
+    for r in rows:
+        key = resolves(r["category"], r["item_id"])
+        (resolved if key else keep).append((r, key))
+    print(f"[pdca] pending missing_models={len(rows)}  done化(解決済)={len(resolved)}  keep(未解決)={len(keep)}")
+    for r, key in resolved:
+        print(f"  DONE  [{r['category']}] {key:16s} <- {r['item_id'][:70]}")
+    for r, key in keep:
+        print(f"  KEEP  [{r['category']}] {r['item_id'][:80]}")
+    if dry_run or not resolved:
+        con.close()
+        return len(resolved)
+    backup = PDCA_DB.with_name(PDCA_DB.name + ".bak_prune_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    shutil.copy2(PDCA_DB, backup)
+    now = datetime.now().strftime("%Y-%m-%d")
+    for r, _ in resolved:
+        cur.execute(
+            "UPDATE improvement_queue SET status='done', updated_ts=?, reviewed_ts=? "
+            "WHERE queue_id=?",
+            (now, now, r["queue_id"]),
+        )
+    con.commit()
+    con.close()
+    print(f"  ✅ pdca done化 {len(resolved)} 件。backup={backup.name}")
+    return len(resolved)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--csv-only", action="store_true", help="pdca.db を触らず CSV のみ")
+    args = ap.parse_args()
+
+    n_csv = prune_csv(args.dry_run)
+    n_pdca = 0 if args.csv_only else prune_pdca(args.dry_run)
+
+    mode = "DRY-RUN(書込なし)" if args.dry_run else "適用済"
+    print(f"\n=== {mode}: csv prune={n_csv}  pdca done化={n_pdca} ===")
 
 
 if __name__ == "__main__":
