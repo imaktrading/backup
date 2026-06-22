@@ -1,6 +1,22 @@
 # iMakInventory daily_report
 
-## 2026-06-21 — ★HIGH/LOW 3日 silent 停止 → 真因修正 + 在庫メンテ + CI穴クローズ + 未出品巡回化
+## 2026-06-22 — sold-out 単品 verify の偽滞留 spam 修正 (09:30 cycle ⚠️要対応 誤報の根治)
+
+### sold-out 単品 verify が QuantitySold 取りこぼし → 偽「滞留」⚠️要対応 (commit 0b7f566)
+- 決定: 09:30 HIGH cycle が iid=358251931733 (LOW row131) を「19.6h 取下げ滞留=要対応」と誤報。
+  実機調査で **危険なし=偽陽性** と確定 → 根因修正。GetItemTransactions で当該 listing は
+  **2026-05-13 に売却済 (CompleteStatus=Complete, available=0)** = 履行リスク皆無、直近売却でもない。
+- 変更: `ebay_actions/trading_api_uploader.py` `_verify_qty_zero` の単品 GetItem を raw_xml_cap=2000→None。
+  真因: `<QuantitySold>` が SellingStatus 内で 2000字より後ろ (実測 pos≈3669) に来るため cap=2000 で
+  取りこぼし → sold=0 と誤算 → available=Quantity(1)-0=1 と過大評価 → sold-out 単品 (Qty=1/Sold=1,
+  実 available=0) を永久に qty_gt0 と誤判定 → verify_qty_gt0_giveup で drain 不能=永久 spam。
+  variation 経路は既に cap 解除済だったが単品が漏れていた。fail-OPEN は導入せず (verify がより正確化=安全側)。
+- 検証: `tests/test_single_soldout_verify.py` 2件 (cap 尊重 mock で sold-out→verified=True / 在庫残→False)。
+  ライブ実証: 実 revise(21917092 redundant/success) + verify(cap=None)→available=0→verified qty=0、
+  pending から drain 完了 (processed_revise.jsonl に consumed_at 記録=silent でない)。pre-commit 115 +
+  offline 159 pass。2026-06-17 ended-listing fix (bb11fae) と同型の偽滞留撲滅。
+
+
 
 ### ★最重大: HIGH/LOW 巡回が 06-17夕〜06-20 の3日間 silent 停止していた
 - 決定: 真因は「私の amazon 修正(a12b776, 残りN点を在庫マーカー追加)が run_cycle 起動時の
