@@ -228,8 +228,8 @@ set_code:
 
   # ----- Mega Series (M / Mx) — newer Mega Evolution era -----
   - source: M2a
-    ebay: MEGA Dream ex
-    note: ハイクラスパック「MEGAドリームex」 — HQ web確定 2026-06-07 (JPセット名)
+    ebay: Mega Dream ex
+    note: ハイクラスパック「MEGAドリームex」 — eBay/TCGplayer 商品名規約=title case "Mega Dream ex" (2026-06-22 web確証/casing是正)
     year: 2025
   - source: M2
     ebay: Inferno X
