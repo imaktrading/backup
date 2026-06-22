@@ -1878,18 +1878,9 @@ class ListingPanel:
                         if _ridx >= 0 and SCRIPTS[_ridx].get("restock_revise"):
                             _run_restock_revise_for_latest_csv(
                                 self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
-                            # Revise CSV 生成後に open_after(新しい方を掴む。古いCSVを開くバグの根治)
-                            _oa2 = SCRIPTS[_ridx].get("open_after")
-                            if _oa2:
-                                try:
-                                    import glob as _g2
-                                    _hits = _g2.glob(_oa2)
-                                    if _hits:
-                                        _latest = max(_hits, key=os.path.getmtime)
-                                        os.startfile(_latest)
-                                        self.append_log(f"📂 開く: {os.path.basename(_latest)}\n")
-                                except Exception as _e2:
-                                    self.append_log(f"⚠️ open_after(restock) 失敗: {_e2}\n")
+                            # CSV の open_after は post_psa_review の **後** に回す(同時オープン回避)。
+                            # 確認ブラウザが開く時は CSV を開かない(2026-06-22 指摘)。フラグだけ立てる。
+                            self._restock_open_after_pending = SCRIPTS[_ridx].get("open_after")
                     except Exception as _e:
                         self.append_log(f"\n⚠️ RESTOCK Revise hook 失敗: {_e}\n")
                     # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
@@ -1925,8 +1916,26 @@ class ListingPanel:
                                     _latest_csv = _candidates[0]
                         # verify→build は生成前に確認済 → 後付け viewer は出さない (二重防止)。
                         # _latest_csv の算出は Step 6 (no_go_sentinel) が使うため残す。
+                        _review_opened = False
                         if _latest_csv and not _verify_before_build:
-                            run_post_psa_review(_latest_csv, self.append_log)
+                            _review_opened = bool(run_post_psa_review(_latest_csv, self.append_log))
+                        # RESTOCK CSV の open_after: 確認ブラウザを開いた時は開かない(同時オープン回避)。
+                        # 確認が無い時のみ最新CSVを開く(生成後=新しい方を掴む)。
+                        _pend_oa = getattr(self, "_restock_open_after_pending", None)
+                        if _pend_oa:
+                            self._restock_open_after_pending = None
+                            if _review_opened:
+                                self.append_log("📄 確認ブラウザを開いたため CSV自動オープンは保留(確認後に手動/同期で)\n")
+                            else:
+                                try:
+                                    import glob as _g2
+                                    _hits = _g2.glob(_pend_oa)
+                                    if _hits:
+                                        _latest_oa = max(_hits, key=os.path.getmtime)
+                                        os.startfile(_latest_oa)
+                                        self.append_log(f"📂 開く: {os.path.basename(_latest_oa)}\n")
+                                except Exception as _e3:
+                                    self.append_log(f"⚠️ open_after(restock) 失敗: {_e3}\n")
                     except Exception as _e:
                         self.append_log(f"\n⚠️ post_psa_review hook 失敗: {_e}\n")
                     # Step 6: post_no_go_sentinel (2026-05-28 追加、 NO-GO 除外 cert にスプシ K 列 sentinel 赤字書込)

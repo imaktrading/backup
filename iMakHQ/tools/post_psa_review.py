@@ -976,8 +976,12 @@ def _start_review_server(port: int = SERVER_PORT) -> tuple[HTTPServer, threading
     return server, thread, f"http://127.0.0.1:{port}/"
 
 
-def run_post_psa_review(csv_path: str, append_log_func) -> None:
-    """control_panel.py poll_queue から呼出される entry point."""
+def run_post_psa_review(csv_path: str, append_log_func) -> bool:
+    """control_panel.py poll_queue から呼出される entry point。
+
+    戻り: True = 確認要のブラウザ(review server)を開いた(=ユーザー判定待ち)/ False = 開いてない
+    (全件verify済/対象外/失敗)。呼出側は True の時 RESTOCK CSV を自動で開かない(同時オープン回避)。
+    """
     append_log_func("\n======================================================================\n")
     append_log_func("▶ post_psa_review (全カテゴリ cert HTML viewer hook)\n")
     append_log_func("======================================================================\n")
@@ -985,7 +989,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> None:
     csv_p = Path(csv_path)
     if not csv_p.exists():
         append_log_func(f"  ⚠️ CSV not found: {csv_path}\n")
-        return
+        return False
 
     # NONE/NG 判定時の行除外は「最終入稿 CSV」(= bak 差替前) に対して行う
     global _CURRENT_CSV_PATH
@@ -1014,7 +1018,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> None:
                 })
     except Exception as e:
         append_log_func(f"  ⚠️ CSV parse 失敗: {type(e).__name__}: {e}\n")
-        return
+        return False
 
     append_log_func(f"  CSV cert 数: {len(rows_info)}\n")
 
@@ -1074,7 +1078,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> None:
 
     if not targets:
         append_log_func("  ✅ 確認要 cert なし (= 全件 verify 済 or cache miss)、 HTML viewer skip\n")
-        return
+        return False
 
     append_log_func(f"  確認要 cert (= 未 verify): {len(targets)} 件\n")
     for t in targets:
@@ -1095,7 +1099,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> None:
             continue
     if not server:
         append_log_func(f"  ⚠️ server 起動失敗 (port {SERVER_PORT}-{SERVER_PORT+9} 全占有)、 手動で {HTML_OUTPUT} を開いてください\n")
-        return
+        return False
 
     # browser auto open
     try:
@@ -1108,6 +1112,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> None:
     append_log_func("\n  ⚠️ ユーザー判定要: browser で 各 cert を確認 → 「✉️ HQ に送信」 click\n")
     append_log_func(f"     結果 JSON 保存先: {RESULT_DIR}/\n")
     append_log_func("     送信後 server 自動停止、 HQ チャットで「送信完了」 と伝えてください (= HQ が catalog/スプシ書込)\n")
+    return True   # 確認ブラウザを開いた = ユーザー判定待ち(呼出側はCSV自動オープンを抑止)
 
 
 if __name__ == "__main__":
