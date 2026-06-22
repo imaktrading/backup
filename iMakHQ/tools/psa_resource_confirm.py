@@ -421,10 +421,12 @@ def build_restock_html(items):
             # チェック外す=買わない。理由は2択: 「見送り」(高い/出品者不安/納期長 等=business判断、
             # 記録のみ)と「違う」(検索が別カードを拾った誤検出=生成への改善信号→違う率トレンド)。
             # 既定 skip(外す多数は見送り)。違うカードの時だけ「違う」を押す。
+            _nm = _s(cd.get("name"))
+            _nm_html = f"<br><span class='cnm'>{_html.escape(_nm[:48])}</span>" if _nm else ""
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='skip' onchange='upd({idx})'>{img}"
-                f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}"
+                f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}{_nm_html}"
                 f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a>"
                 f"<span class='rsn'>外す理由:"
                 f"<button type='button' class='rb sel' data-r='skip' onclick='setRsn(this)'>見送り</button>"

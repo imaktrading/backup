@@ -55,6 +55,36 @@ def _min_price(prices):
     return min(vals) if vals else None
 
 
+def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
+    """視覚確証に出す仕入候補リストを作る(純関数)。
+
+    mercari は最安1件でなく **all_cands(同番号の全変種)** を複数並べ、ユーザーが現物と一致する
+    変種を1パスで選べるようにする(同番号別変種の取り違え→「違う」再検索ループ防止。2026-06-22)。
+    all_cands 無い古cache/フォールバック時は cands→best の順で代替。snkrdunk は出品一覧をそのまま。
+    Args:
+        mr: fetch_mercari_cheapest の1カード分 {"best","cands","all_cands"} (None可)。
+        c:  combine() の戻り(snkrdunk_urls / mercari_url 等)。
+    """
+    mr = mr or {}
+    out, seen = [], set()
+    merc = mr.get("all_cands") or mr.get("cands") or []
+    for t in merc[:max_mercari]:
+        url = t[1] if (t and len(t) > 1) else ""
+        if url and url not in seen:
+            seen.add(url)
+            out.append({"channel": "mercari", "url": url,
+                        "price": (t[0] if t and isinstance(t[0], int) else None),
+                        "name": (t[2] if len(t) > 2 else "")})
+    if not out and c.get("mercari_url"):            # 最終フォールバック(best のみ)
+        out.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
+    for d in (c.get("snkrdunk_urls") or [])[:max_snkr]:
+        if d.get("url") and d["url"] not in seen:
+            seen.add(d["url"])
+            out.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price"),
+                        "image": d.get("image", "")})
+    return out
+
+
 def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
     """2チャネル結果を束ねる純関数。
 
@@ -590,13 +620,7 @@ def main():
             go += 1
             if _iid:
                 wait_resourceable.add(_iid)
-            _cands = []
-            if c.get("mercari_url"):
-                _cands.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
-            for d in (c.get("snkrdunk_urls") or [])[:5]:
-                if d.get("url"):
-                    _cands.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price"),
-                                   "image": d.get("image", "")})
+            _cands = _build_visual_candidates(mr, c)
             try:
                 _cur = float(r.get("ebay_price")) if r.get("ebay_price") else None
             except (TypeError, ValueError):

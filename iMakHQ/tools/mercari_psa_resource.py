@@ -547,6 +547,9 @@ def fetch_mercari_cheapest(cards):
                 # item-cell 単位で抽出 (name·price·href 対応保証 + 通常出品のみ=オークション除外)
                 items = parse_mercari_items(drv.page_source)
                 cands = pick_psa10_candidates(items, card_no, c.get("hint"))   # 正変種 価格昇順 最大5
+                # all_cands = 同番号の **全変種**(variant_hint無)。視覚確証で「どの変種か」を人が選べる
+                # ように並べる用(同番号別変種の取り違え→違う再検索ループ防止。2026-06-22)。
+                all_cands = pick_psa10_candidates(items, card_no, None, limit=8)
                 best = cands[0] if cands else None
                 via = "kw"
                 # keyword で変種を確証できない(0件 or set語不一致=違うカードを掴むリスク)→ 画像検索。
@@ -556,8 +559,9 @@ def fetch_mercari_cheapest(cards):
                     if img:
                         best = img
                         cands = [img]
+                        all_cands = [img]
                         via = "画像検索"
-                out[i] = {"best": best, "cands": cands}
+                out[i] = {"best": best, "cands": cands, "all_cands": all_cands}
                 tag = f"¥{best[0]} ({via}, 候補{len(cands)})" if best else "PSA10在庫なし"
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: {tag}", flush=True)
             except Exception as e:
