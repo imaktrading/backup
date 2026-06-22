@@ -319,9 +319,16 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             + '</GetItemRequest>'
         )
         try:
-            # variation は Variations ブロックが 2000 字 cap の外 → cap 解除で全文取得
+            # cap 解除で全文取得 (raw_xml_cap=None)。
+            # - variation: Variations ブロックが 2000 字 cap の外 → 全文必要。
+            # - single: <QuantitySold> も SellingStatus 内で 2000 字より後ろ (実測 pos≈3669)
+            #   に来るため、 cap=2000 だと取りこぼし → sold=0 と誤算 → available=Quantity と
+            #   過大評価 → sold-out 単品 (Quantity=1/QuantitySold=1, 実 available=0) を
+            #   永久に qty_gt0 と誤判定 = 偽「滞留」spam (2026-06-22 iid=358251931733、
+            #   5/13 売却済の Active listing が amazon 源切れ flag で ~18h 偽滞留)。
+            #   → 単品も cap 解除して QuantitySold を確実に読む。
             res = _call_trading("GetItem", body, access_token=token,
-                                raw_xml_cap=(None if is_variation else 2000))
+                                raw_xml_cap=None)
         except Exception as e:
             return False, None, f"verify_exception: {type(e).__name__}: {e}"
         if res.get("error_code") == "17":
