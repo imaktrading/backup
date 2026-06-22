@@ -1800,6 +1800,10 @@ class ListingPanel:
                     # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
                     _cur = SCRIPTS[getattr(self, "_current_idx", -1)] if getattr(self, "_current_idx", -1) >= 0 else {}
                     _oa = _cur.get("open_after")
+                    # restock_revise は Revise CSV が post-chain(後段)で生成されるため、ここで開くと
+                    # 一つ前の古いCSVを掴む(2026-06-22 指摘)。生成後(Step4.5の後)に開く。
+                    if _oa and _cur.get("restock_revise"):
+                        _oa = None
                     if _oa and item[1] in (0, None):  # None=returncode未確定でも完走時は開く
                         try:
                             import glob as _g
@@ -1874,6 +1878,18 @@ class ListingPanel:
                         if _ridx >= 0 and SCRIPTS[_ridx].get("restock_revise"):
                             _run_restock_revise_for_latest_csv(
                                 self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
+                            # Revise CSV 生成後に open_after(新しい方を掴む。古いCSVを開くバグの根治)
+                            _oa2 = SCRIPTS[_ridx].get("open_after")
+                            if _oa2:
+                                try:
+                                    import glob as _g2
+                                    _hits = _g2.glob(_oa2)
+                                    if _hits:
+                                        _latest = max(_hits, key=os.path.getmtime)
+                                        os.startfile(_latest)
+                                        self.append_log(f"📂 開く: {os.path.basename(_latest)}\n")
+                                except Exception as _e2:
+                                    self.append_log(f"⚠️ open_after(restock) 失敗: {_e2}\n")
                     except Exception as _e:
                         self.append_log(f"\n⚠️ RESTOCK Revise hook 失敗: {_e}\n")
                     # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
