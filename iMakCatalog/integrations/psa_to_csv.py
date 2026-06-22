@@ -1312,6 +1312,12 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "EXTRA REGULATION BOX":        "BW",     # エクストラレギュレーションBOX(2019). cert140362929 Zoroark 014=BW-014 実在(公式収録確認, BW-001..048=本BOX)
     "EMERALD BREAK":               "XY6-B",  # エメラルドブレイク[XY6]. cert119816956 Gallade-EX 030=XY6-B-030 実在(base #001-078 は catalog で XY6-B-NNN 体系)。※高番EX #079+ は XY6-NNN のため本索引では解決せず=fail-closed(誤解決はしない)
     "NATIONAL BEGINNING":          "HSZm",   # BLACK & WHITE NATIONAL BEGINNING=BWはじめてセット全国図鑑版. cert145542066 Voltorb 014=HSZm-014 実在
+    # --- 2026-06-22 pdca/auto_add 索引不備 5件 (catalog 実在を実機確認・cardは存在、索引のみ欠落) ---
+    "BANDIT RING":                 "XY7-B",  # バンデットリング[XY7]. XY7-B-061 Meowth 実在
+    "PHANTOM GATE":                "XY4",    # ファントムゲート[XY4]. XY4-089 Manectric-EX 実在
+    "PREMIUM CHAMPION PACK":       "CP4",    # プレミアムチャンピオンパック(CP4). CP4-054 Wobbuffet 実在
+    "RED FLASH":                   "XY8-Br", # 赤い閃光[XY8](青い衝撃=XY8-Bb と対). XY8-Br-056 Houndoom Spirit Link 実在
+    "ULTRADIMENSIONAL BEASTS":     "SM4A",   # 超次元の暴獣[SM4A]. SM4A-051 Gyarados-GX 実在
     # --- 2026-06-10 PSA脱落6件 set-map (records 実在・索引のみ。真値=catalog set_name 裏取り) ---
     "SKY LEGEND":                  "SM10b",  # スカイレジェンド (cert109940063 Lillie 053=SM10b-053 実在)
     # ⚠️ 順序大事: より具体的な "...BATTLE COLLECTION" を plain "START DECK 100" より先に置く。
