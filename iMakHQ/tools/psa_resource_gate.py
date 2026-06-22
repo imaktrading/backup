@@ -731,6 +731,43 @@ def _merge_restock_out(existing_rows, new_rows, default_header):
     return [header] + kept + new_rows
 
 
+REVIEW_SKIP_TAB = "RESTOCK確証スキップ"
+REVIEW_SKIP_HEADER = ["itemID", "card_no", "title", "理由", "日付", "ebay_url"]
+
+
+def _review_skip_iids(skip_rows):
+    """RESTOCK確証スキップ タブ既存行から itemID 集合(純関数)。視覚確証で再表示しない判定。"""
+    if not skip_rows or len(skip_rows) < 2:
+        return set()
+    return {(r[0] or "").strip() for r in skip_rows[1:] if r and (r[0] or "").strip()}
+
+
+def _build_review_skip_rows(restock_cands, shown_idxs, confirmed_idxs, diff_idxs, today):
+    """視覚確証でレビュー済だが未確定(違う/見送り)の行を作る(純関数)。
+
+    shown - confirmed = 違う + 見送り。次回から視覚確証に出さないため記録する。
+    理由: diff_idxs にあれば「違う」、なければ「見送り」。
+    """
+    out = []
+    for n in sorted(shown_idxs - confirmed_idxs):
+        rc = restock_cands[n] if isinstance(n, int) and 0 <= n < len(restock_cands) else {}
+        iid = (rc.get("itemID") or "").strip()
+        if not iid:
+            continue
+        reason = "違う" if n in diff_idxs else "見送り"
+        out.append([iid, rc.get("card_no", ""), rc.get("title", ""), reason, today, rc.get("ebay_url", "")])
+    return out
+
+
+def _merge_skip_rows(existing_rows, new_rows, default_header):
+    """既存スキップ行 + 新規 をマージ(純関数・itemID重複は新規優先)。"""
+    header = existing_rows[0] if existing_rows else default_header
+    new_iids = {(r[0] or "").strip() for r in new_rows if r and (r[0] or "").strip()}
+    kept = [r for r in (existing_rows[1:] if existing_rows else [])
+            if r and (r[0] or "").strip() and (r[0] or "").strip() not in new_iids]
+    return [header] + kept + new_rows
+
+
 def _run_restock_confirm(restock_cands, mp, cert_map):
     """再仕入れ可を視覚確証(現物 vs 仕入候補)→ 確定分を「RESTOCK確定」タブへ。失敗は警告のみ。"""
     import datetime
@@ -740,16 +777,24 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     # 2026-06-22 ユーザー要望)。canonical は RESTOCK確定タブ。
     _existing = read_tab("RESTOCK確定")
     _done_iids = _restock_confirmed_iids(_existing)
+    # レビュー済だが未確定(違う/見送り)も再表示しない(2026-06-22 ユーザー指摘: 同じ3件が毎回出る)。
+    # canonical は RESTOCK確証スキップ タブ。再検討したい時はその行を消せば再浮上する。
+    _skip_existing = read_tab(REVIEW_SKIP_TAB)
+    _skip_iids = _review_skip_iids(_skip_existing)
     # 2026-06-20 価格NO-GO廃止(本丸): 仕入高も**除外せず照合に出す**(コストプラス=損なし・無在庫=
     # フリーオプション・既存メンテで追跡)。⚠仕入高 ラベルは残すので判別可。あなたが買うものを選ぶ。
     items = []
     high_n = 0
     _skipped_done = 0
+    _skipped_review = 0
     for n, rc in enumerate(restock_cands):
         iid = rc.get("itemID")
         if iid and iid in _done_iids:
             _skipped_done += 1
             continue   # 既にRESTOCK確定済 → 再確証しない
+        if iid and iid in _skip_iids:
+            _skipped_review += 1
+            continue   # 既にレビュー済(違う/見送り) → 再確証しない
         v8 = _v8_label(rc.get("cost"), rc.get("cur"), mp)
         if _is_high_cost(v8):
             high_n += 1
@@ -759,8 +804,10 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
                       "candidates": rc["candidates"], "v8": v8})
     if _skipped_done:
         print(f"  ⏭ 既にRESTOCK確定済 {_skipped_done}件は視覚確証スキップ(再作業防止)")
+    if _skipped_review:
+        print(f"  ⏭ レビュー済(違う/見送り) {_skipped_review}件は視覚確証スキップ(再表示しない・{REVIEW_SKIP_TAB}タブ)")
     if not items:
-        print("  照合対象なし(新規の再仕入れ可ゼロ=全て確定済)→ RESTOCK確定 変更なし")
+        print("  照合対象なし(新規の再仕入れ可ゼロ=全て確定/レビュー済)→ RESTOCK確定 変更なし")
         return
     if high_n:
         print(f"  🔵 うち仕入高 {high_n}件 含む(除外せず表示・既存メンテ追跡。⚠ラベルで判別)")
@@ -791,6 +838,18 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         print(f"🟢 RESTOCK確定: {len(out)-1}件 → タブ「RESTOCK確定」(手動で revise 実行 / POC-Bで自動化) {MAINT_URL}")
     except Exception as e:
         print(f"⚠ RESTOCK確定タブ更新skip ({type(e).__name__}: {e})")
+    # レビュー済だが未確定(違う/見送り)を記録 → 次回から視覚確証に出さない(再表示の繰り返し防止)
+    try:
+        from sheet_io import write_rows_to_tab as _wt2
+        shown_idxs = {it["idx"] for it in items}
+        diff_idxs = {d.get("idx") for d in (res.get("diffs") or []) if d.get("idx") is not None}
+        new_skip = _build_review_skip_rows(restock_cands, shown_idxs, set(sel.keys()), diff_idxs, today)
+        if new_skip:
+            skip_out = _merge_skip_rows(_skip_existing, new_skip, REVIEW_SKIP_HEADER)
+            _wt2(REVIEW_SKIP_TAB, skip_out)
+            print(f"  📝 {REVIEW_SKIP_TAB}: +{len(new_skip)}件 記録(次回は視覚確証に出さない・再検討は同タブ行削除で復活)")
+    except Exception as e:
+        print(f"  ⚠ {REVIEW_SKIP_TAB} 記録skip ({type(e).__name__}: {e})")
     _alert_restock_diffs(res.get("diffs") or [], res.get("skip") or 0, restock_cands, today)
 
 

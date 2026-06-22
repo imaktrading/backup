@@ -69,3 +69,44 @@ def test_merge_empty_existing_uses_default_header():
     out = g._merge_restock_out([], [["111", "A", "t", "", "", "", "", "", "", "2026-06-22"]], HEADER)
     assert out[0] == HEADER
     assert out[1][0] == "111"
+
+
+# --- レビュー済(違う/見送り)を再表示しない (2026-06-22 追加) ---
+SKIP_H = ["itemID", "card_no", "title", "理由", "日付", "ebay_url"]
+
+
+def test_review_skip_iids():
+    rows = [SKIP_H, ["111", "P-041", "t", "違う", "2026-06-22", ""],
+            ["222", "ST29-001", "t", "見送り", "2026-06-22", ""]]
+    assert g._review_skip_iids(rows) == {"111", "222"}
+    assert g._review_skip_iids([]) == set()
+
+
+def test_build_review_skip_rows_classifies_reason():
+    """shown - confirmed = 違う(diff_idxs)/見送り(それ以外)。"""
+    cands = [{"itemID": "111", "card_no": "P-041", "title": "t1", "ebay_url": "u1"},
+             {"itemID": "222", "card_no": "ST29-001", "title": "t2", "ebay_url": "u2"},
+             {"itemID": "333", "card_no": "EB02-015", "title": "t3", "ebay_url": "u3"}]
+    shown = {0, 1, 2}
+    confirmed = {2}          # 333 は確証 → skip対象外
+    diff = {0}               # 111 は違う
+    out = g._build_review_skip_rows(cands, shown, confirmed, diff, "2026-06-22")
+    by_iid = {r[0]: r for r in out}
+    assert set(by_iid) == {"111", "222"}, "確証(333)は記録しない"
+    assert by_iid["111"][3] == "違う"
+    assert by_iid["222"][3] == "見送り"
+
+
+def test_build_review_skip_skips_empty_itemid():
+    cands = [{"itemID": "", "card_no": "x", "title": "t", "ebay_url": ""}]
+    assert g._build_review_skip_rows(cands, {0}, set(), set(), "2026-06-22") == []
+
+
+def test_merge_skip_rows_keeps_and_dedups():
+    existing = [SKIP_H, ["111", "P-041", "t", "違う", "2026-06-20", ""]]
+    new = [["222", "ST29-001", "t", "見送り", "2026-06-22", ""],
+           ["111", "P-041", "t", "見送り", "2026-06-22", ""]]  # 111 更新
+    out = g._merge_skip_rows(existing, new, SKIP_H)
+    by_iid = {r[0]: r for r in out[1:]}
+    assert set(by_iid) == {"111", "222"}
+    assert by_iid["111"][3] == "見送り", "新規優先で更新"
