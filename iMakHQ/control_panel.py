@@ -284,6 +284,24 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         # 失敗しても listing 出力には影響なし
 
 
+def _runs_new_listing_dedupe(script_entry):
+    """新規出品用の重複くん(KEY tuple excluder)を走らせてよいエントリかを返す(純関数)。
+
+    RESTOCK Revise(restock_revise)は **既存出品の Action=Revise 修正**(itemID指定で qty 0→1)で、
+    新しい出品を1件も作らない=重複は原理的に起き得ない。にもかかわらず新規出品用の重複くんを通すと、
+    RESTOCK 対象カードの **自分の既存出品 KEY**(商品管理シート AI列)と自己マッチして RESTOCK 行を
+    「真の重複」と誤判定し物理除外する(2026-06-22: OP02-036/S8b-187/ST29-016 の3件が自己重複で誤除外、
+    qty=0 の OP02-036 が再出品されない事故)。canonical 母集団は RESTOCK 対象自身を含むため、母集団から
+    自 itemID を除く改修は dedupe worktree 側になる。HQ 側の正しい境界は「RESTOCK は新規用 dedupe を
+    そもそも通さない」。skip_postprocess(監査/relist)も従来どおり走らせない。
+    """
+    if script_entry.get("skip_postprocess"):
+        return False
+    if script_entry.get("restock_revise"):
+        return False
+    return True
+
+
 # ============================================================================
 # RESTOCK Add→Revise 変換 helper (2026-06-20 追加)
 # post-chain (excluder/title-fix/dedup) の **後** に最終クリーン Add CSV を Revise 化。
@@ -1836,11 +1854,18 @@ class ListingPanel:
                     # rarara hook 削除 (= 5/28 ユーザー判断、 DON 仕様で WARN ばかり実害発見ゼロ)
                     # 旧: self._run_rarara_after()
                     # Step 4: dedupe_excluder (2026-05-27 追加、 重複くん (KEY1, KEY2) tuple 物理除外)
-                    if not _skip_pp:
+                    # RESTOCK Revise は既存出品の修正=重複を作らないので新規用 dedupe を skip
+                    # (2026-06-22: 自己重複で RESTOCK 行が誤除外される事故の根治。_runs_new_listing_dedupe 参照)。
+                    _entry_now = SCRIPTS[_idx] if _idx >= 0 else {}
+                    if _runs_new_listing_dedupe(_entry_now):
                         try:
                             _run_dedupe_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
                         except Exception as _e:
                             self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
+                    elif _entry_now.get("restock_revise"):
+                        self.append_log(
+                            "\n(♻ RESTOCK: 新規出品用の重複くんを skip — Revise は既存出品の修正で重複を作らない。"
+                            "自己重複による誤除外を防止)\n")
                     # Step 4.5: RESTOCK Revise 変換 (2026-06-20)。excluder/title-fix/dedup の **後** に、
                     # 最終クリーンな Add CSV を Add→Revise 化する(順序保証=赤字/重複/旧タイトルを含めない)。
                     # ♻ ボタン (restock_revise=True) の時のみ。旧: psa_restock_build が dedup 前に変換→混入バグ。
