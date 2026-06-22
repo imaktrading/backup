@@ -569,9 +569,11 @@ def main():
         print(f"  ⚠ 研究キャッシュ保存skip ({type(e).__name__}: {e})")
 
     # --- 統合 + 出力 ---
+    import datetime as _dt
+    _judged_at = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")  # 可否判定(supply確認)の時刻
     MAX_AUX = 5  # 補URL列数 (AC-AG 相当)
     aux_cols = [f"補URL{k+1}" for k in range(MAX_AUX)]
-    out_rows = [["set_no", "title", "再仕入れ可否", "チャネル", "最安¥", "最安チャネル",
+    out_rows = [["set_no", "title", "再仕入れ可否", "判定日時", "チャネル", "最安¥", "最安チャネル",
                  "mercari¥", "mercari_URL", "snkrdunk¥", "snkrdunk件数",
                  *aux_cols, "ebay_url"]]
     go = 0
@@ -622,6 +624,7 @@ def main():
             r.get("set_no") or mp.search_keyword(r.get("title", ""), "").replace("PSA10 ", ""),
             (r.get("title") or "")[:60],
             "再仕入れ可◎" if c["resourceable"] else "不能✕(End候補)",
+            _judged_at,
             "/".join(c["channels"]) or "-",
             c["cheapest_jpy"] or "", c["cheapest_channel"] or "",
             c["mercari_jpy"] or "", c["mercari_url"],
@@ -651,6 +654,13 @@ def main():
         from sheet_io import write_rows_to_tab, MAINT_URL
         write_rows_to_tab("PSA再仕入れ", out_rows)
         print(f"📊 「PSA再仕入れ」タブ更新: {len(out_rows)-1}件 → {MAINT_URL}")
+        # 出品状態列を RESTOCK確定 join で自動付与(手動スナップショット廃止=フロー内更新)。
+        try:
+            from restock_funnel_status import update_funnel_listing_status
+            _t = update_funnel_listing_status()
+            print(f"   📍 出品状態列 同期: {_t}")
+        except Exception as _e:
+            print(f"   ⚠ 出品状態列 同期skip: {type(_e).__name__}: {_e}")
     except Exception as e:
         print(f"⚠ スプシ更新失敗: {type(e).__name__}: {e}")
 
@@ -700,25 +710,57 @@ def _is_high_cost(v8_label):
     return bool(v8_label) and v8_label.startswith("⚠仕入高")
 
 
+def _restock_confirmed_iids(existing_rows):
+    """RESTOCK確定タブ既存行から itemID 集合を返す(純関数)。再表示しない判定に使う。"""
+    if not existing_rows or len(existing_rows) < 2:
+        return set()
+    return {(r[0] or "").strip() for r in existing_rows[1:] if r and (r[0] or "").strip()}
+
+
+def _merge_restock_out(existing_rows, new_rows, default_header):
+    """既存RESTOCK確定行 + 新規確定行 をマージ(純関数)。
+
+    既存を維持しつつ新規を追加(itemID重複は新規優先)。**上書き(replace)で既存の実行済記録を
+    消さないため**(2026-06-22: 新規5件だけ確証すると既存12件が消える上書きバグの根治)。
+    existing_rows 空なら default_header + new_rows。
+    """
+    header = existing_rows[0] if existing_rows else default_header
+    new_iids = {(r[0] or "").strip() for r in new_rows if r and (r[0] or "").strip()}
+    kept = [r for r in (existing_rows[1:] if existing_rows else [])
+            if r and (r[0] or "").strip() and (r[0] or "").strip() not in new_iids]
+    return [header] + kept + new_rows
+
+
 def _run_restock_confirm(restock_cands, mp, cert_map):
     """再仕入れ可を視覚確証(現物 vs 仕入候補)→ 確定分を「RESTOCK確定」タブへ。失敗は警告のみ。"""
     import datetime
     import psa_resource_confirm as prc
+    from sheet_io import read_tab
+    # 既にRESTOCK確定済(実行済/入稿待ち)の itemID は視覚確証に再表示しない(同じ確証作業の繰り返し防止。
+    # 2026-06-22 ユーザー要望)。canonical は RESTOCK確定タブ。
+    _existing = read_tab("RESTOCK確定")
+    _done_iids = _restock_confirmed_iids(_existing)
     # 2026-06-20 価格NO-GO廃止(本丸): 仕入高も**除外せず照合に出す**(コストプラス=損なし・無在庫=
     # フリーオプション・既存メンテで追跡)。⚠仕入高 ラベルは残すので判別可。あなたが買うものを選ぶ。
     items = []
     high_n = 0
+    _skipped_done = 0
     for n, rc in enumerate(restock_cands):
+        iid = rc.get("itemID")
+        if iid and iid in _done_iids:
+            _skipped_done += 1
+            continue   # 既にRESTOCK確定済 → 再確証しない
         v8 = _v8_label(rc.get("cost"), rc.get("cur"), mp)
         if _is_high_cost(v8):
             high_n += 1
-        iid = rc.get("itemID")
         ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
         items.append({"idx": n, "title": rc["title"], "card_no": rc["card_no"],
                       "ebay_url": rc["ebay_url"], "ref_image": ref,
                       "candidates": rc["candidates"], "v8": v8})
+    if _skipped_done:
+        print(f"  ⏭ 既にRESTOCK確定済 {_skipped_done}件は視覚確証スキップ(再作業防止)")
     if not items:
-        print("  照合対象なし(再仕入れ可ゼロ)→ RESTOCK確定なし")
+        print("  照合対象なし(新規の再仕入れ可ゼロ=全て確定済)→ RESTOCK確定 変更なし")
         return
     if high_n:
         print(f"  🔵 うち仕入高 {high_n}件 含む(除外せず表示・既存メンテ追跡。⚠ラベルで判別)")
@@ -731,15 +773,18 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     confirmed = res["confirmed"]
     sel = {c["idx"]: c["urls"] for c in confirmed}
     today = datetime.date.today().isoformat()
-    out = [["itemID", "card_no", "title", "最安チャネル", "最安¥", "eBay現$", "V8判定",
-            "確認済仕入URL", "ebay_url", "確証日"]]
+    _default_header = ["itemID", "card_no", "title", "最安チャネル", "最安¥", "eBay現$", "V8判定",
+                       "確認済仕入URL", "ebay_url", "確証日"]
+    new_rows = []
     for n, rc in enumerate(restock_cands):
         if n in sel:
             urls = sel[n] or [rc.get("url", "")]
-            out.append([rc.get("itemID", ""), rc.get("card_no", ""), rc.get("title", ""),
-                        rc.get("channel", ""), rc.get("cost", ""), rc.get("cur", ""),
-                        _v8_label(rc.get("cost"), rc.get("cur"), mp),
-                        " | ".join(u for u in urls if u), rc.get("ebay_url", ""), today])
+            new_rows.append([rc.get("itemID", ""), rc.get("card_no", ""), rc.get("title", ""),
+                             rc.get("channel", ""), rc.get("cost", ""), rc.get("cur", ""),
+                             _v8_label(rc.get("cost"), rc.get("cur"), mp),
+                             " | ".join(u for u in urls if u), rc.get("ebay_url", ""), today])
+    # 既存(実行済含む)を維持しつつ新規確定を追加(上書きで既存を消さない)
+    out = _merge_restock_out(_existing, new_rows, _default_header)
     try:
         from sheet_io import write_rows_to_tab, MAINT_URL
         write_rows_to_tab("RESTOCK確定", out)

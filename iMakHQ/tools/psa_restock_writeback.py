@@ -141,6 +141,13 @@ def main():
     print(f"🔄 RESTOCK状態同期: 計{st['total']} / 実行済{st['done']} / "
           f"入稿待ち{st['pending']} / 不明{st['unknown']}")
     print(f"   🔗 master同期(復活分): A列(供給URL)+D列(売り切れ解除)+N列(仕入れ価格=新コスト) = {st.get('master_synced', 0)}行")
+    # 実行済化を PSA再仕入れ funnel の出品状態列にも反映(フロー内自動更新)。
+    try:
+        from restock_funnel_status import update_funnel_listing_status
+        _t = update_funnel_listing_status()
+        print(f"   📍 PSA再仕入れ 出品状態列 同期: {_t}")
+    except Exception as _e:
+        print(f"   ⚠ 出品状態列 同期skip: {type(_e).__name__}: {_e}")
     if st["pending"] or st["unknown"]:
         print("   ⚠ 入稿待ち/不明あり=要対応(silentに済化しない。反映後に再実行で解消)")
 

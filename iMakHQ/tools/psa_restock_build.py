@@ -60,24 +60,45 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key):
 
 
 def _read_restock_confirmed():
-    """「RESTOCK確定」タブ → [{itemID, cost, supply_url}] (I/O)。"""
+    """「RESTOCK確定」タブ → [{itemID, cost, supply_url}] (I/O)。
+
+    RESTOCK状態=実行済(=既に再出品済)は除外する。一度再出品したものを毎回再Reviseし続けると
+    在庫切れ(supply無し)になった出品まで qty=1 で出し直してしまう(2026-06-22 ユーザー指摘)。
+    再出品後の取下げは在庫監視くんが担うので、♻ は **未だ出していない分(入稿待ち/新規)だけ**生成する。
+    売れ直し(qty=0)は writeback で「入稿待ち」へ戻るため再度拾われる(取りこぼしなし)。
+    """
     from sheet_io import read_tab
     rows = read_tab("RESTOCK確定")
+    out, skipped_done = _pending_from_confirmed_rows(rows)
+    if skipped_done:
+        print(f"  ⏭ 実行済(再出品済) {skipped_done}件は生成スキップ(再出品の二重化防止)")
+    return out
+
+
+def _pending_from_confirmed_rows(rows):
+    """RESTOCK確定の2d行 → (未出品リスト[{itemID,cost,supply_url}], 実行済skip件数) (純関数)。
+
+    RESTOCK状態に「実行済」を含む行は除外(=一度再出品したものは再生成しない)。
+    """
     if not rows or len(rows) < 2:
-        return []
+        return [], 0
     h = rows[0]
 
     def _i(name):
         return h.index(name) if name in h else None
-    ii, ci, ui = _i("itemID"), _i("最安¥"), _i("仕入URL")
-    out = []
+    ii, ci, ui, si = _i("itemID"), _i("最安¥"), _i("仕入URL"), _i("RESTOCK状態")
+    out, skipped_done = [], 0
     for r in rows[1:]:
         if not any(r):
+            continue
+        status = (r[si] if si is not None and si < len(r) else "") or ""
+        if "実行済" in status:
+            skipped_done += 1
             continue
         out.append({"itemID": (r[ii] if ii is not None and ii < len(r) else ""),
                     "cost": (r[ci] if ci is not None and ci < len(r) else ""),
                     "supply_url": (r[ui] if ui is not None and ui < len(r) else "")})
-    return out
+    return out, skipped_done
 
 
 def main():

@@ -207,6 +207,9 @@ def write_rows_to_tab(tab, rows2d, sheet_id=MAINT_SHEET_ID):
     try:
         ws = sh.worksheet(tab)
         ws.clear()
+        # 既存タブの列数が不足だと update が grid limit で失敗する → 足りなければ拡張。
+        if ws.col_count < ncols:
+            ws.add_cols(ncols - ws.col_count)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=tab, rows=max(10, len(rows2d) + 5), cols=max(4, ncols))
     ws.update(range_name="A1", values=rows2d, value_input_option="RAW")
