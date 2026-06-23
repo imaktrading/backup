@@ -22,12 +22,13 @@ def test_build_rows_state_and_order():
     b_map = {"https://x/u1": "999NEW", "https://x/u2": "todo1", "https://x/u3": ""}
     rows, summary = rd.build_rows(funnel, b_map)
     assert summary == {"total": 3, "done": 1, "todo": 1, "unknown": 1, "oos": 0}
+    # 列: [#,状態,価格,カテゴリ,タイトル,SKU,旧ItemID,新ItemID,処理日時,仕入URL]
     # 価格降順 (100,90,80) かつ # は1始まり
     assert [r[0] for r in rows] == [1, 2, 3]
-    assert [r[5] for r in rows] == ["done1", "todo1", "unk1"]   # 旧ItemID列
-    states = {r[5]: r[1] for r in rows}
-    assert states["done1"] == "✅済" and rows[0][6] == "999NEW"  # 新ItemID列
-    assert states["todo1"] == "⏳未" and rows[1][6] == ""
+    assert [r[6] for r in rows] == ["done1", "todo1", "unk1"]   # 旧ItemID列
+    states = {r[6]: r[1] for r in rows}
+    assert states["done1"] == "✅済" and rows[0][7] == "999NEW"  # 新ItemID列
+    assert states["todo1"] == "⏳未" and rows[1][7] == ""
     assert states["unk1"] == "❓不明"
 
 
@@ -36,7 +37,7 @@ def test_build_rows_excludes_no_supply_url():
     b_map = {"https://x/u": "b"}
     rows, summary = rd.build_rows(funnel, b_map)
     assert summary["total"] == 1                # supply_url無は対象外
-    assert rows[0][5] == "b"
+    assert rows[0][6] == "b"                    # 旧ItemID列
 
 
 def test_build_rows_matches_asin_across_coliid_not_unknown():
@@ -62,10 +63,11 @@ def test_build_rows_processing_time_column():
     b_map = {"B000000001": "999NEW", "B000000002": "todo1"}
     times = {"B000000001": "2026-06-23 16:51:00"}
     rows, summary = rd.build_rows(funnel, b_map, times_map=times)
-    by_old = {r[5]: r for r in rows}
-    assert by_old["done1"][7] == "2026-06-23 16:51:00"   # 処理日時列
-    assert by_old["done1"][8] == "https://www.amazon.co.jp/dp/B000000001"  # URLは最終列
-    assert by_old["todo1"][7] == ""                      # 未着手は空
+    by_old = {r[6]: r for r in rows}                      # r[6]=旧ItemID
+    assert by_old["done1"][5] == "B000000001"            # SKU列
+    assert by_old["done1"][8] == "2026-06-23 16:51:00"   # 処理日時列
+    assert by_old["done1"][9] == "https://www.amazon.co.jp/dp/B000000001"  # URLは最終列
+    assert by_old["todo1"][8] == ""                      # 未着手は空
 
 
 def test_build_rows_marks_sold_out_distinctly():
@@ -85,6 +87,7 @@ def test_build_rows_marks_sold_out_distinctly():
     }
     rows, summary = rd.build_rows(funnel, b_map, stock_index=stock)
     assert summary == {"total": 2, "done": 0, "todo": 1, "unknown": 0, "oos": 1}
-    states = {r[5]: r[1] for r in rows}
-    assert states["live"] == "⏳未"
-    assert states["dead"] == "🔴在庫切れ"
+    by_old = {r[6]: r for r in rows}                      # r[6]=旧ItemID
+    assert by_old["live"][1] == "⏳未"
+    assert by_old["dead"][1] == "🔴在庫切れ"
+    assert by_old["dead"][7] == ""                        # 在庫切れの新ItemIDは空 (旧IDを出さない)

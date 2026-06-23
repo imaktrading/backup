@@ -26,7 +26,7 @@ except Exception:
 
 DASH_SHEET_ID = "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4"  # 「既存メンテ」スプシ (PDCA司令塔)
 DASH_TAB = "取下再出品"
-HEADERS = ["#", "状態", "価格$", "カテゴリ", "タイトル", "旧ItemID", "新ItemID", "処理日時", "仕入URL"]
+HEADERS = ["#", "状態", "価格$", "カテゴリ", "タイトル", "SKU", "旧ItemID", "新ItemID", "処理日時", "仕入URL"]
 
 
 def build_rows(funnel_rows, b_map, stock_index=None, now=None, times_map=None):
@@ -54,7 +54,7 @@ def build_rows(funnel_rows, b_map, stock_index=None, now=None, times_map=None):
         cur = (b_map.get(key) or "").strip()
         # 在庫切れ(売り切れ○)は最優先で区別。未/済の前に判定 (仕入不可は再出品対象外)
         if stock_index is not None and (stock_index.get(key) or {}).get("sold_out"):
-            state, newid = "🔴在庫切れ", cur; oos += 1
+            state, newid = "🔴在庫切れ", ""; oos += 1   # 新ItemIDは空 (再出品してない=旧IDを出さない)
         elif cur and fid and cur == fid:
             state, newid = "⏳未", ""; todo += 1
         elif cur and fid and cur != fid:
@@ -63,7 +63,7 @@ def build_rows(funnel_rows, b_map, stock_index=None, now=None, times_map=None):
             state, newid = "❓不明", cur; unknown += 1
         proc_time = times_map.get(key, "")
         out.append([i, state, r.get("price", ""), r.get("category", ""),
-                    (r.get("title", "") or "")[:60], fid, newid, proc_time, url])
+                    (r.get("title", "") or "")[:60], key, fid, newid, proc_time, url])
     return out, {"total": len(cands), "done": done, "todo": todo,
                  "unknown": unknown, "oos": oos}
 
