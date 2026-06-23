@@ -170,7 +170,7 @@ def test_relist_cap10_price_order_supply_required():
                  "supply_url": "https://jp.mercari.com/item/m99999999999"})  # RELIST 無 → 除外
     rows.append({"flags": "RELIST", "item_id": "nosup", "price": "999",
                  "supply_url": ""})  # supply_url 欠落 → 除外
-    picked, total, skipped, already, oos = relist_tool.select(rows)
+    picked, total, skipped, already, oos, unsup = relist_tool.select(rows)
     assert total == 71                               # RELIST フラグ総数 (70 + nosup)
     assert skipped == 1                              # supply_url 欠落 1 件
     assert already == 0                              # sheet_b_map 未指定 → 除外なし

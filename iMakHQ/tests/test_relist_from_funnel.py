@@ -35,7 +35,7 @@ def test_sku_from_url_mercari_shops_fallback_tail12():
 def test_select_caps_to_10_by_price_desc():
     rows = [_row(f"i{i}", price=i, supply_url=f"https://jp.mercari.com/item/m{i:011d}")
             for i in range(20)]
-    picked, total, skipped, already, oos = rf.select(rows, cap=10)
+    picked, total, skipped, already, oos, unsup = rf.select(rows, cap=10)
     assert total == 20
     assert skipped == 0
     assert already == 0
@@ -50,7 +50,7 @@ def test_select_excludes_missing_supply_url():
         _row("b", 90, supply_url=""),          # 除外
         _row("c", 80, supply_url="   "),       # 空白のみ → 除外
     ]
-    picked, total, skipped, already, oos = rf.select(rows, cap=10)
+    picked, total, skipped, already, oos, unsup = rf.select(rows, cap=10)
     assert total == 3
     assert skipped == 2
     assert [r["item_id"] for r in picked] == ["a"]
@@ -62,7 +62,7 @@ def test_select_only_relist_flag():
         _row("b", 90, flags="NO_CONVERT"),     # RELIST でない → 除外
         _row("c", 80, flags=""),
     ]
-    picked, total, skipped, already, oos = rf.select(rows, cap=10)
+    picked, total, skipped, already, oos, unsup = rf.select(rows, cap=10)
     assert total == 1
     assert [r["item_id"] for r in picked] == ["a"]
 
@@ -81,7 +81,7 @@ def test_select_excludes_already_relisted_by_b_diff():
         "https://x/u3": "",             # 空 → 除外
         # u4 は b_map に無い
     }
-    picked, total, skipped_no_supply, already, oos = rf.select(rows, sheet_b_map=b_map, cap=10)
+    picked, total, skipped_no_supply, already, oos, unsup = rf.select(rows, sheet_b_map=b_map, cap=10)
     assert total == 4
     assert skipped_no_supply == 0
     assert already == 3                              # done1 / gone / nomatch
@@ -98,7 +98,7 @@ def test_select_matches_amazon_asin_across_coliid():
                  supply_url="https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=AAA&psc=1")]
     # b_map は ASIN キー (load_current_b_map の戻り)。A列は別 coliid 由来でも同 ASIN。
     b_map = {rf.sku_from_url("https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=BBB"): "oldid1"}
-    picked, total, skipped_no_supply, already, oos = rf.select(rows, sheet_b_map=b_map, cap=10)
+    picked, total, skipped_no_supply, already, oos, unsup = rf.select(rows, sheet_b_map=b_map, cap=10)
     assert already == 0
     assert [r["item_id"] for r in picked] == ["oldid1"]   # coliid 差を ASIN が吸収=未着手で拾える
 
@@ -162,7 +162,7 @@ def test_select_stock_gate_excludes_sold_out_and_stale():
         "B000000002": {"b": "so", "sold_out": True, "check_time": fresh},
         "B000000003": {"b": "st", "sold_out": False, "check_time": old},
     }
-    picked, total, no_supply, already, oos = rf.select(
+    picked, total, no_supply, already, oos, unsup = rf.select(
         rows, sheet_b_map=b_map, stock_index=stock, now=now, cap=10)
     assert [r["item_id"] for r in picked] == ["ok"]   # 在庫ありのみ
     assert already == 0                                # 全て未着手 (B==funnel)
@@ -173,14 +173,38 @@ def test_select_no_stock_index_keeps_old_behavior():
     # stock_index 未指定 (None) なら在庫ゲートは効かない (従来挙動・後方互換)
     rows = [_row("a", 100, supply_url="https://www.amazon.co.jp/dp/B000000001")]
     b_map = {"B000000001": "a"}
-    picked, total, no_supply, already, oos = rf.select(rows, sheet_b_map=b_map, cap=10)
+    picked, total, no_supply, already, oos, unsup = rf.select(rows, sheet_b_map=b_map, cap=10)
     assert [r["item_id"] for r in picked] == ["a"] and oos == 0
+
+
+def test_select_category_gate_excludes_unsupported():
+    """カテゴリゲート: ②が再出品できないカテゴリは取り下げない (取下げ→再出品漏れ防止)。
+
+    2026-06-23 PSAカード(CCG)が①でEndされ②で再出品されず宙ぶらりんになった事故対策。
+    """
+    rows = [
+        _row("w", 100, supply_url="https://www.amazon.co.jp/dp/B000000001", category="Wristwatches"),
+        _row("r", 90, supply_url="https://www.amazon.co.jp/dp/B000000002", category="Reels"),
+        _row("tcg", 95, supply_url="https://jp.mercari.com/item/m33333333333", category="CCG Individual Cards"),
+    ]
+    picked, total, no_supply, already, oos, unsup = rf.select(
+        rows, cap=10, supported_categories={"Wristwatches", "Reels"})
+    assert unsup == 1                                       # CCG = ②未対応で除外
+    assert {r["item_id"] for r in picked} == {"w", "r"}     # tcg は取り下げない
+
+
+def test_select_no_category_gate_keeps_all():
+    # supported_categories 未指定なら従来どおり全カテゴリ対象 (後方互換)
+    rows = [_row("tcg", 95, supply_url="https://jp.mercari.com/item/m33333333333",
+                 category="CCG Individual Cards")]
+    picked, total, no_supply, already, oos, unsup = rf.select(rows, cap=10)
+    assert unsup == 0 and [r["item_id"] for r in picked] == ["tcg"]
 
 
 def test_write_pending_columns_and_sku(tmp_path):
     rows = [_row("itm1", 100, supply_url="https://jp.mercari.com/item/m22222222222",
                  category="Reels", title="Daiwa Reel")]
-    picked, _, _, _, _ = rf.select(rows, cap=10)
+    picked, _, _, _, _, _ = rf.select(rows, cap=10)
     out = tmp_path / "pending.csv"
     rf.write_pending(picked, str(out))
     got = list(csv.DictReader(open(out, encoding="utf-8-sig")))

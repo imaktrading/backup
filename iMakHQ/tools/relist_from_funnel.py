@@ -227,8 +227,8 @@ def load_current_b_map():
 
 
 def select(rows, sheet_b_map=None, cap=CAP, stock_index=None, now=None,
-           fresh_hours=STOCK_FRESH_HOURS):
-    """RELIST 候補を価格降順で上位 cap 件。再出品済み(B列変化)+仕入不可(在庫切れ)を自動除外。
+           fresh_hours=STOCK_FRESH_HOURS, supported_categories=None):
+    """RELIST 候補を価格降順で上位 cap 件。再出品済み(B列変化)+仕入不可(在庫切れ)+②未対応カテゴリを自動除外。
 
     sheet_b_map={ASIN/SKU: 現B列} (load_current_b_map の戻り) を渡すと、funnel の
     item_id と現B列を照合し **B列がfunnel itemIDのまま(=未着手)の行だけ**を対象にする。
@@ -240,15 +240,30 @@ def select(rows, sheet_b_map=None, cap=CAP, stock_index=None, now=None,
     スプシ行無し は仕入不可とみなし再出品しない (fail-closed)。古い funnel が 3RD 化済商品を
     拾う事故 (B0B78CZ3W3) を構造的に防ぐ。now 省略時は実行時刻。
 
+    supported_categories (集合) を渡すと **カテゴリゲート** (2026-06-23)。②再出品が対応する
+    カテゴリ(Wristwatches/Reels 等)以外は取り下げない。①でEndしても②が再出品できない
+    カテゴリ(CCG等)を取り下げる=「取下げたのに再出品されない」silent gap を防ぐ
+    (2026-06-23 PSAカード m37151631503 が取下げのみされ宙ぶらりんになった事故)。
+
     照合キーは sku_from_url(supply_url) = ASIN/SKU。coliid 揺れで行を取りこぼさない。
 
-    戻り: (picked, total_relist, skipped_no_supply, skipped_already, skipped_oos)。
+    戻り: (picked, total_relist, skipped_no_supply, skipped_already, skipped_oos, skipped_unsupported)。
     """
     if now is None:
         now = datetime.datetime.now()
     cands = relist_candidates(rows)
     with_supply = [r for r in cands if (r.get("supply_url") or "").strip()]
     skipped_no_supply = len(cands) - len(with_supply)
+    # カテゴリゲート: ②が再出品できないカテゴリは取り下げない (取下げ→再出品漏れ防止)
+    skipped_unsupported = 0
+    if supported_categories is not None:
+        kept = []
+        for r in with_supply:
+            if (r.get("category") or "").strip() in supported_categories:
+                kept.append(r)
+            else:
+                skipped_unsupported += 1
+        with_supply = kept
     skipped_already = 0
     skipped_oos = 0
     if sheet_b_map is None:
@@ -268,7 +283,8 @@ def select(rows, sheet_b_map=None, cap=CAP, stock_index=None, now=None,
                     continue
             eligible.append(r)              # 未着手 かつ 仕入可能
     ordered = sorted(eligible, key=lambda x: -float(x.get("price") or 0))
-    return ordered[:cap], len(cands), skipped_no_supply, skipped_already, skipped_oos
+    return (ordered[:cap], len(cands), skipped_no_supply, skipped_already,
+            skipped_oos, skipped_unsupported)
 
 
 def write_pending(picked, path):
@@ -307,13 +323,21 @@ def main():
     except Exception as e:  # noqa: BLE001
         sys.exit(f"⚠ {e}\n  → 再出品済み/在庫の判定ができないため中断 (二重再出品・仕入不可再出品の防止)。再実行してください。")
     b_map = {k: v["b"] for k, v in stock_index.items()}
-    picked, total_relist, skipped_no_supply, skipped_already, skipped_oos = select(
-        rows, sheet_b_map=b_map, stock_index=stock_index)
+    # ②が再出品できるカテゴリのみ取り下げる (取下げ→再出品漏れ防止)。dispatch を単一の正本に。
+    try:
+        import relist_add_from_pending as rap
+        supported = set(rap.CATEGORY_DISPATCH.keys())
+    except Exception:  # noqa: BLE001
+        supported = {"Wristwatches", "Reels"}
+    picked, total_relist, skipped_no_supply, skipped_already, skipped_oos, skipped_unsupported = select(
+        rows, sheet_b_map=b_map, stock_index=stock_index, supported_categories=supported)
     print(f"RELIST候補(NO_SEARCH+NO_CLICK) = {total_relist}件 → 取下げ {len(picked)}件 (価格高い順・上限{CAP})")
     if skipped_already:
         print(f"  ✓ 再出品済み(B列更新済)を除外 = {skipped_already}件 → 同じfunnelで次の10件を出力")
     if skipped_oos:
         print(f"  🔴 仕入不可で除外 = {skipped_oos}件 (監視くん『売り切れ』○ / 在庫確認が古い(>{STOCK_FRESH_HOURS}h) / スプシ行無し = fail-closed)")
+    if skipped_unsupported:
+        print(f"  ⛔ ②未対応カテゴリで除外 = {skipped_unsupported}件 (取り下げない=再出品漏れ防止。TCG等は専用パイプラインで対応) 対応={sorted(supported)}")
     if skipped_no_supply:
         print(f"  ⚠ supply_url(仕入元URL)欠落で除外 = {skipped_no_supply}件 (②再出品/③書戻しで追えないため対象外)")
     if not picked:
