@@ -49,12 +49,51 @@ _NOISE = ["新品", "未開封", "未使用", "送料無料", "即決", "匿名�
 
 # ---------------- 純粋ロジック ----------------
 def clean_kw(title):
-    """C列(日本語mercariタイトル)→ mercari検索語。【】ブロック・ノイズ語・記号を除去。"""
+    """C列(日本語mercariタイトル)→ mercari検索語。
+
+    ノイズ除去 + **「一番くじ」を必ず含める**(category=一番くじ確定なので、タイトルに
+    無くても先頭に付ける。2026-06-24 ユーザー指摘: 一番くじ/賞名が検索に入ってないと弱い)。
+    賞名(A賞/B賞/…/ラストワン)はタイトルに在れば残す(無い物は付けられない=タイトル依存)。
+    """
     t = re.sub(r"【[^】]*】", " ", title or "")
     t = re.sub(r"[☆★()（）\[\]]", " ", t)
     for w in _NOISE:
         t = t.replace(w, " ")
-    return re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"\s+", " ", t).strip()
+    if "一番くじ" not in t and "一番" not in t:
+        t = "一番くじ " + t
+    return t
+
+
+def extract_prize(c_title, ebay_title=""):
+    """賞ランク(A賞/B賞/…/ラストワン)を抽出。C列(日本語)優先→eBayタイトル(英語)補完。
+
+    一番くじでない通常フィギュアを除外するため、賞は検索のマスト要素(2026-06-24 ユーザー)。
+    取れなければ '' (=賞不明 → 検索が不正確になるので呼出側でフラグ)。
+    """
+    m = re.search(r"(ラストワン賞|ラストワン|ラスト賞|[A-Z]賞)", c_title or "")
+    if m:
+        g = m.group(0)
+        return "ラストワン" if "ラストワン" in g else g
+    et = ebay_title or ""
+    m = re.search(r"\b([A-Z])\s*Prize\b", et, re.I)
+    if m:
+        return m.group(1).upper() + "賞"
+    if re.search(r"last\s*one", et, re.I):
+        return "ラストワン"
+    return ""
+
+
+def build_keyword(c_title, ebay_title=""):
+    """検索語を組む。戻り: (keyword, prize)。一番くじ必須 + 賞必須(取れれば付与)。
+
+    prize='' のときは賞不明(検索が通常フィギュアと混ざる恐れ)→ 呼出側でフラグ表示。
+    """
+    kw = clean_kw(c_title)
+    prize = extract_prize(c_title, ebay_title)
+    if prize and prize not in kw:
+        kw = kw + " " + prize
+    return kw, prize
 
 
 def _card(url, price, image, checked_name, label=""):
@@ -104,7 +143,13 @@ def _page(heading, items, stage):
     for it in items:
         nm = f"row_{it['row']}"
         parts.append(f"<div class=item data-row='{it['row']}'>")
-        parts.append(f"<div class=title>{_html.escape(it['title'])} <small>(row {it['row']} / 旧itemID {it['item_id']})</small></div>")
+        ebay_url = f"https://www.ebay.com/itm/{it['item_id']}"
+        prize = it.get("prize", "")
+        prize_tag = (f"<b style='color:#070'>[{_html.escape(prize)}]</b>" if prize
+                     else "<b style='color:#a00'>[⚠️賞不明=通常フィギュア混入注意]</b>")
+        parts.append(f"<div class=title>{prize_tag} {_html.escape(it['title'])} "
+                     f"<small>(row {it['row']} / 旧itemID {it['item_id']}) "
+                     f"<a href='{ebay_url}' target=_blank>🔗 eBay出品元を見る</a></small></div>")
         parts.append("<div class=body>")
         # 参照(公式)
         rimg = it.get("ref_image") or ""
@@ -221,6 +266,32 @@ def serve_and_collect(html_str):
     return box.get("data") or {}
 
 
+def _ebay_title(item_id):
+    """eBay出品の Title を GetItem で取得(賞=英語 Prize の補完用)。失敗は ''。"""
+    import requests
+    import ebay_getitem_images as g
+    try:
+        k = g._load_keys()
+    except Exception:
+        return ""
+    hdr = {"X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
+           "X-EBAY-API-COMPATIBILITY-LEVEL": g._COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
+           "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
+           "Content-Type": "text/xml"}
+    body = ('<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
+            f"<ItemID>{item_id}</ItemID></GetItemRequest>")
+    txt = ""
+    for _ in range(4):
+        try:
+            txt = requests.post(g._ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+            break
+        except Exception:
+            time.sleep(3)
+    m = re.search(r"<Title>(.*?)</Title>", txt)
+    return _html.unescape(m.group(1)) if m else ""
+
+
 def _make_driver():
     import undetected_chromedriver as uc
     opts = uc.ChromeOptions()
@@ -309,14 +380,15 @@ def pass_identify(n, cand_n):
         drv.set_page_load_timeout(50)
         for i, t in enumerate(targets, 1):
             pics = fetch_listing_images(t["item_id"])
-            kw = clean_kw(t["title"])
-            print(f"  [{i}/{len(targets)}] {kw[:34]}", flush=True)
+            et = _ebay_title(t["item_id"])             # 一番くじ+賞は生成済eBayタイトルが確実
+            kw, prize = build_keyword(t["title"], et)  # C列(日本語作品/キャラ)+一番くじ+賞
+            print(f"  [{i}/{len(targets)}] 賞={prize or '不明'} kw={kw[:32]}", flush=True)
             try:
                 raw = kw_search(drv, kw, cand_n)
             except Exception as e:  # noqa: BLE001
                 print(f"     ⚠ 検索失敗: {e}"); raw = []
             items.append({"row": t["row"], "item_id": t["item_id"], "title": t["title"],
-                          "ref_image": pics[0] if pics else "",
+                          "prize": prize, "ref_image": pics[0] if pics else "",
                           "candidates": [{"url": c["href"], "price": c["price"],
                                           "image": c.get("image", "")} for c in raw]})
     finally:
@@ -388,9 +460,9 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if mode == "identify":
         n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-        pass_identify(n, cand_n=5)
+        pass_identify(n, cand_n=10)
     elif mode == "expand":
-        pass_expand(cand_n=8)
+        pass_expand(cand_n=10)
     else:
         print("使い方:\n  python ichibankuji_restock.py identify [件数]   # パスA 画像特定\n"
               "  python ichibankuji_restock.py expand              # パスB 画像検索+確定")
