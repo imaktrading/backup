@@ -110,7 +110,8 @@ def main():
 
     # ファネル分析(サマリー)=別「ファネル分析」スプシ / 需要・新規強化=demand_winners /
     # 再仕入れ=restock_worklist が各々担当 (Stage1-2)。ここは 取下再出品 タブのみ refresh。
-    drows, dsummary = rd.build_rows(funnel_rows, b_map, stock_index=stock_index)
+    drows, dsummary = rd.build_rows(funnel_rows, b_map, stock_index=stock_index,
+                                    times_map=rf.load_relist_times())
     rd.write_dashboard(drows, dsummary, os.path.basename(src))
 
     print(f"✅ 「既存メンテ」取下再出品タブ更新完了")

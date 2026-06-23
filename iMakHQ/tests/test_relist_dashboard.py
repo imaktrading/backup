@@ -53,6 +53,21 @@ def test_build_rows_matches_asin_across_coliid_not_unknown():
     assert rows[0][1] == "⏳未"
 
 
+def test_build_rows_processing_time_column():
+    """アイテム毎の処理日時 (③書戻し完了時刻) を列表示。history(ASIN→日時)から引く (2026-06-23)。"""
+    funnel = [
+        _row("done1", 100, "https://www.amazon.co.jp/dp/B000000001"),   # 再出品済=処理日時あり
+        _row("todo1", 90, "https://www.amazon.co.jp/dp/B000000002"),    # 未着手=処理日時なし
+    ]
+    b_map = {"B000000001": "999NEW", "B000000002": "todo1"}
+    times = {"B000000001": "2026-06-23 16:51:00"}
+    rows, summary = rd.build_rows(funnel, b_map, times_map=times)
+    by_old = {r[5]: r for r in rows}
+    assert by_old["done1"][7] == "2026-06-23 16:51:00"   # 処理日時列
+    assert by_old["done1"][8] == "https://www.amazon.co.jp/dp/B000000001"  # URLは最終列
+    assert by_old["todo1"][7] == ""                      # 未着手は空
+
+
 def test_build_rows_marks_sold_out_distinctly():
     """在庫切れ(監視くん『売り切れ』○)は 🔴在庫切れ として区別。未着手に紛れさせない。
 

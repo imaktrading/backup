@@ -212,9 +212,11 @@ def main():
                 w = csv.writer(hf)
                 if new:
                     w.writerow(["supply_url", "new_item_id", "date"])
-                today = _dt.date.today().strftime("%Y-%m-%d")
+                # date列は datetime で記録 (アイテム毎の処理日時=③完了時刻。2026-06-23)。
+                # 既存の date-only 行と混在可 (load_relisted_history は supply_url しか見ない)。
+                stamp = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 for e in written:
-                    w.writerow([e["supply_url"], e["new_item_id"], today])
+                    w.writerow([e["supply_url"], e["new_item_id"], stamp])
             print(f"📜 再出品履歴に {len(written)} 件追記: relist_history.csv")
     else:
         print(f"\n[DRY-RUN] 実書込なし。--execute で {summary['WRITE']} 件を書込")

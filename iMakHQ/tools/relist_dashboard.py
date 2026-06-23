@@ -26,10 +26,10 @@ except Exception:
 
 DASH_SHEET_ID = "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4"  # 「既存メンテ」スプシ (PDCA司令塔)
 DASH_TAB = "取下再出品"
-HEADERS = ["#", "状態", "価格$", "カテゴリ", "タイトル", "旧ItemID", "新ItemID", "仕入URL"]
+HEADERS = ["#", "状態", "価格$", "カテゴリ", "タイトル", "旧ItemID", "新ItemID", "処理日時", "仕入URL"]
 
 
-def build_rows(funnel_rows, b_map, stock_index=None, now=None):
+def build_rows(funnel_rows, b_map, stock_index=None, now=None, times_map=None):
     """funnel RELIST候補(supply_url有) → ダッシュボード行 + サマリー。価格降順。
 
     b_map は load_current_b_map の戻り = {ASIN/SKU: 現B列}。照合は sku_from_url(supply_url)
@@ -37,11 +37,15 @@ def build_rows(funnel_rows, b_map, stock_index=None, now=None):
 
     stock_index (load_sheet_index の戻り) を渡すと **在庫切れ(監視くん取下げ/3RD)** を
     🔴在庫切れ として区別表示する (2026-06-23)。「未」に見えても仕入不可なものを可視化。
+
+    times_map (load_relist_times の戻り = {ASIN: 処理日時}) を渡すと、アイテム毎の
+    **処理日時**(③書戻し完了時刻)を列表示する (2026-06-23)。
     """
     cands = [r for r in rf.relist_candidates(funnel_rows) if (r.get("supply_url") or "").strip()]
     cands.sort(key=lambda x: -float(x.get("price") or 0))
     if now is None:
         now = datetime.datetime.now()
+    times_map = times_map or {}
     out, done, todo, unknown, oos = [], 0, 0, 0, 0
     for i, r in enumerate(cands, 1):
         url = (r.get("supply_url") or "").strip()
@@ -57,8 +61,9 @@ def build_rows(funnel_rows, b_map, stock_index=None, now=None):
             state, newid = "✅済", cur; done += 1
         else:
             state, newid = "❓不明", cur; unknown += 1
+        proc_time = times_map.get(key, "")
         out.append([i, state, r.get("price", ""), r.get("category", ""),
-                    (r.get("title", "") or "")[:60], fid, newid, url])
+                    (r.get("title", "") or "")[:60], fid, newid, proc_time, url])
     return out, {"total": len(cands), "done": done, "todo": todo,
                  "unknown": unknown, "oos": oos}
 
@@ -98,7 +103,8 @@ def main():
     print("📊 スプシ読込中 (B列 + 監視くん売り切れ状態)...")
     stock_index = rf.load_sheet_index()
     b_map = {k: v["b"] for k, v in stock_index.items()}
-    rows, summary = build_rows(funnel_rows, b_map, stock_index=stock_index)
+    times_map = rf.load_relist_times()
+    rows, summary = build_rows(funnel_rows, b_map, stock_index=stock_index, times_map=times_map)
     _, line = write_dashboard(rows, summary, os.path.basename(src))
     print("✅ ダッシュボード更新:", line)
     print(f"   → 管理スプシ2 タブ「{DASH_TAB}」を参照")

@@ -102,6 +102,28 @@ def load_relisted_history():
     return history
 
 
+def load_relist_times():
+    """relist_history.csv → {ASIN/SKU: 最新の処理日時(文字列)} (ダッシュボードのアイテム毎 処理日時用)。
+
+    history は append-only なので同 ASIN は後勝ち(=最新の再出品時刻)。date列は date-only/
+    datetime 混在可 (2026-06-23 datetime化)。空/読込失敗は空dict。
+    """
+    times = {}
+    path = os.path.join(END_DIR, "relist_history.csv")
+    if not os.path.exists(path):
+        return times
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as fp:
+            for r in csv.DictReader(fp):
+                u = (r.get("supply_url") or "").strip()
+                d = (r.get("date") or "").strip()
+                if u and d:
+                    times[sku_from_url(u)] = d   # 後勝ち=最新
+    except Exception:
+        pass
+    return times
+
+
 def split_by_history(picked, history):
     """取下げ候補を「初回(relist)」と「2回目以降(END停止)」に分ける。
 
@@ -344,7 +366,8 @@ def main():
     # 進捗ダッシュボード更新 (全体像可視化・非致命)。読込済の rows/b_map/stock_index を再利用
     try:
         import relist_dashboard as rd
-        drows, dsummary = rd.build_rows(rows, b_map, stock_index=stock_index)
+        drows, dsummary = rd.build_rows(rows, b_map, stock_index=stock_index,
+                                        times_map=load_relist_times())
         rd.write_dashboard(drows, dsummary, os.path.basename(src))
         print(f"\n📋 進捗スプシ更新: タブ「{rd.DASH_TAB}」"
               f"(総数{dsummary['total']}/✅済{dsummary['done']}/⏳未{dsummary['todo']}/🔴在庫切れ{dsummary['oos']}・あと{-(-dsummary['todo']//CAP)}バッチ)")
