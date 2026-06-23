@@ -20,15 +20,16 @@ def _write(tmp_path, cats):
 
 
 def test_categories_in_counts(tmp_path):
-    p = _write(tmp_path, ["Wristwatches", "Wristwatches", "Reels"])
+    # category 列は商品管理 col17 の正本カテゴリ (2026-06-23 ASIN/col17 統一)
+    p = _write(tmp_path, ["G-shock", "G-shock", "リール"])
     c = rap.categories_in(p)
-    assert c["Wristwatches"] == 2
-    assert c["Reels"] == 1
+    assert c["G-shock"] == 2
+    assert c["リール"] == 1
 
 
 def test_dispatch_covers_known_categories():
-    # 既知カテゴリ(Wristwatches/Reels)は dispatch に登録、cmd に --relist と {pending} を含む
-    for cat in ("Wristwatches", "Reels"):
+    # 既知カテゴリ(col17: G-shock/リール/一番くじ/バッグ/tomica)は dispatch 登録、cmd に --relist と {pending}
+    for cat in ("G-shock", "リール", "一番くじ", "バッグ", "tomica"):
         assert cat in rap.CATEGORY_DISPATCH
         cwd, cmd = rap.CATEGORY_DISPATCH[cat]
         assert "--relist" in cmd
@@ -37,6 +38,7 @@ def test_dispatch_covers_known_categories():
 
 
 def test_unknown_category_not_in_dispatch():
-    # 未対応カテゴリは dispatch に無い → main() で警告スキップされる
-    assert "Figure" not in rap.CATEGORY_DISPATCH
-    assert "T-Shirts" not in rap.CATEGORY_DISPATCH
+    # 未対応カテゴリ(col17)は dispatch に無い → main() で警告スキップされる
+    assert "フィギュア" not in rap.CATEGORY_DISPATCH
+    assert "グッズ" not in rap.CATEGORY_DISPATCH
+    assert "Tシャツ" not in rap.CATEGORY_DISPATCH   # Phase B で追加予定

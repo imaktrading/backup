@@ -187,29 +187,57 @@ def test_relist_candidates_excludes_psa_ccg():
     assert [r["item_id"] for r in cands] == ["w"]   # PSA は候補にすら入らない
 
 
-def test_select_category_gate_excludes_unsupported():
-    """カテゴリゲート: ②が再出品できないカテゴリは取り下げない (取下げ→再出品漏れ防止)。
+def _stock(b, cat, sold=False, ct=None):
+    return {"b": b, "sold_out": sold, "check_time": ct or _dt.datetime(2026, 6, 23, 6, 0, 0),
+            "category": cat}
 
-    2026-06-23 事故対策。例は Action Figures (②未対応だが独立除外はされないカテゴリ)。
-    PSA(CCG)は relist_candidates 段で完全除外なのでここの例には使わない。
+
+def test_select_category_gate_uses_master_col17():
+    """カテゴリゲートは商品管理 col17 (stock_index由来) で判定。funnel カテゴリは使わない。
+
+    2026-06-23: funnel カテゴリは混在(例 Other Animation Merchandise=グッズ+一番くじ)して
+    信頼できないため、振り分け/ゲートは col17 を正本にする。フィギュア=②未対応で取り下げない。
     """
+    now = _dt.datetime(2026, 6, 23, 12, 0, 0)
     rows = [
-        _row("w", 100, supply_url="https://www.amazon.co.jp/dp/B000000001", category="Wristwatches"),
-        _row("r", 90, supply_url="https://www.amazon.co.jp/dp/B000000002", category="Reels"),
-        _row("fig", 95, supply_url="https://jp.mercari.com/item/m33333333333", category="Action Figures"),
+        _row("w", 100, supply_url="https://www.amazon.co.jp/dp/B000000001"),
+        _row("r", 90, supply_url="https://www.amazon.co.jp/dp/B000000002"),
+        _row("fig", 95, supply_url="https://jp.mercari.com/item/m33333333333"),
     ]
+    b_map = {"B000000001": "w", "B000000002": "r", "m33333333333": "fig"}
+    stock = {"B000000001": _stock("w", "G-shock"), "B000000002": _stock("r", "リール"),
+             "m33333333333": _stock("fig", "フィギュア")}
     picked, total, no_supply, already, oos, unsup = rf.select(
-        rows, cap=10, supported_categories={"Wristwatches", "Reels"})
-    assert unsup == 1                                       # Action Figures = ②未対応で除外
+        rows, sheet_b_map=b_map, stock_index=stock, now=now, cap=10,
+        supported_categories={"G-shock", "リール"})
+    assert unsup == 1                                       # フィギュア(col17) = ②未対応で除外
     assert {r["item_id"] for r in picked} == {"w", "r"}     # fig は取り下げない
+    # 振り分けキー: picked に col17 由来の _master_category が付与される
+    assert {r["item_id"]: r["_master_category"] for r in picked} == {"w": "G-shock", "r": "リール"}
 
 
 def test_select_no_category_gate_keeps_all():
-    # supported_categories 未指定なら従来どおり全カテゴリ対象 (後方互換)。CCG以外で確認。
-    rows = [_row("fig", 95, supply_url="https://jp.mercari.com/item/m33333333333",
-                 category="Action Figures")]
-    picked, total, no_supply, already, oos, unsup = rf.select(rows, cap=10)
+    # supported_categories 未指定なら全カテゴリ対象 (後方互換)
+    now = _dt.datetime(2026, 6, 23, 12, 0, 0)
+    rows = [_row("fig", 95, supply_url="https://jp.mercari.com/item/m33333333333")]
+    b_map = {"m33333333333": "fig"}
+    stock = {"m33333333333": _stock("fig", "フィギュア")}
+    picked, total, no_supply, already, oos, unsup = rf.select(
+        rows, sheet_b_map=b_map, stock_index=stock, now=now, cap=10)
     assert unsup == 0 and [r["item_id"] for r in picked] == ["fig"]
+
+
+def test_write_pending_uses_master_category():
+    """write_pending は _master_category(col17) を category 列に書く (②振り分けの正本)。"""
+    import csv as _csv, tempfile, os as _os
+    picked = [{"item_id": "i1", "supply_url": "https://jp.mercari.com/item/m55555555555",
+               "price": "100", "title": "T", "category": "Figures & Statues",
+               "_master_category": "一番くじ"}]
+    fd, p = tempfile.mkstemp(suffix=".csv"); _os.close(fd)
+    rf.write_pending(picked, p)
+    got = list(_csv.DictReader(open(p, encoding="utf-8-sig")))
+    _os.unlink(p)
+    assert got[0]["category"] == "一番くじ"        # funnel "Figures & Statues" でなく col17
 
 
 def test_write_pending_columns_and_sku(tmp_path):

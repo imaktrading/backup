@@ -46,6 +46,7 @@ CAP = 10  # 1バッチ=10件 (ユーザー指示 2026-06-05)。少量ずつ取�
 # スプシに書く「売り切れ」列。relist はこれに従う (fail-closed: ○/古い/行無し → 出さない)。
 SOLD_OUT_COL = 3      # D列「売り切れ」: ○/〇 = 監視くんが OOS 判定済
 CHECK_TIME_COL = 14   # O列「売り切れチェック時間」: 監視くんの最終在庫確認日時
+CATEGORY_COL = 17     # R列「カテゴリ」: 商品の正本カテゴリ (G-shock/リール/一番くじ/バッグ/tomica/Tシャツ/フィギュア…)。② 振り分けの正本
 SOLD_OUT_MARKS = ("○", "〇")  # ○=U+25CB / 〇=U+3007 両方 OOS 扱い
 STOCK_FRESH_HOURS = 48  # 在庫確認の鮮度しきい値。これより古い=監視くんが最近見てない=不明→出さない
 
@@ -188,11 +189,12 @@ def stock_verdict(entry, now, fresh_hours=STOCK_FRESH_HOURS):
 
 
 def load_sheet_index():
-    """両管理スプシ → {ASIN/SKU(sku_from_url(A列)): {b, sold_out, check_time}} (再出品判定+在庫ゲート用)。
+    """両管理スプシ → {ASIN/SKU(sku_from_url(A列)): {b, sold_out, check_time, category}} 。
 
-    監視くんが書く 売り切れ[D] / 売り切れチェック時間[O] を併せて取り込む。照合キーは ASIN
-    (coliid 揺れ吸収・2026-06-23)。DNS flakiness 対策 retry。失敗時は例外送出 (二重再出品/
-    在庫不明での誤再出品を防ぐため空dictで握り潰さない)。
+    監視くんが書く 売り切れ[D] / 売り切れチェック時間[O] + カテゴリ列[R=col17] を取り込む。
+    category(col17) は ② の振り分け+カテゴリゲートの正本 (funnel の eBay カテゴリは混在して
+    信頼できないため。2026-06-23)。照合キーは ASIN (coliid 揺れ吸収)。DNS flakiness 対策 retry。
+    失敗時は例外送出 (二重再出品/在庫不明での誤再出品を防ぐため空dictで握り潰さない)。
     """
     import time
     from relist_writeback import SHEETS, CREDS_PATH
@@ -216,10 +218,12 @@ def load_sheet_index():
                         continue
                     sold = (row[SOLD_OUT_COL].strip() if len(row) > SOLD_OUT_COL else "")
                     chk = (row[CHECK_TIME_COL].strip() if len(row) > CHECK_TIME_COL else "")
+                    cat = (row[CATEGORY_COL].strip() if len(row) > CATEGORY_COL else "")
                     index[key] = {
                         "b": (row[1].strip() if len(row) > 1 else ""),
                         "sold_out": sold in SOLD_OUT_MARKS,
                         "check_time": parse_check_time(chk),
+                        "category": cat,
                     }
             return index
         except Exception as e:  # noqa: BLE001
@@ -252,9 +256,12 @@ def select(rows, sheet_b_map=None, cap=CAP, stock_index=None, now=None,
     拾う事故 (B0B78CZ3W3) を構造的に防ぐ。now 省略時は実行時刻。
 
     supported_categories (集合) を渡すと **カテゴリゲート** (2026-06-23)。②再出品が対応する
-    カテゴリ(Wristwatches/Reels 等)以外は取り下げない。①でEndしても②が再出品できない
-    カテゴリ(CCG等)を取り下げる=「取下げたのに再出品されない」silent gap を防ぐ
-    (2026-06-23 PSAカード m37151631503 が取下げのみされ宙ぶらりんになった事故)。
+    **商品管理シートのカテゴリ列(col17)** 以外は取り下げない。①でEndしても②が再出品できない
+    カテゴリを取り下げる=「取下げたのに再出品されない」silent gap を防ぐ (PSAカード事故)。
+    判定は funnel の eBay カテゴリでなく stock_index 由来の col17 (funnel カテゴリは混在して
+    信頼できない。例 "Other Animation Merchandise"=グッズ+一番くじ)。stock_index 必須。
+
+    各 picked 行に "_master_category"(col17) を付与 → write_pending が ② の振り分けキーに使う。
 
     照合キーは sku_from_url(supply_url) = ASIN/SKU。coliid 揺れで行を取りこぼさない。
 
@@ -265,34 +272,30 @@ def select(rows, sheet_b_map=None, cap=CAP, stock_index=None, now=None,
     cands = relist_candidates(rows)
     with_supply = [r for r in cands if (r.get("supply_url") or "").strip()]
     skipped_no_supply = len(cands) - len(with_supply)
-    # カテゴリゲート: ②が再出品できないカテゴリは取り下げない (取下げ→再出品漏れ防止)
-    skipped_unsupported = 0
-    if supported_categories is not None:
-        kept = []
-        for r in with_supply:
-            if (r.get("category") or "").strip() in supported_categories:
-                kept.append(r)
-            else:
-                skipped_unsupported += 1
-        with_supply = kept
-    skipped_already = 0
-    skipped_oos = 0
-    if sheet_b_map is None:
-        eligible = with_supply
-    else:
-        eligible = []
-        for r in with_supply:
-            key = sku_from_url((r.get("supply_url") or "").strip())
+    skipped_already = skipped_oos = skipped_unsupported = 0
+    eligible = []
+    for r in with_supply:
+        key = sku_from_url((r.get("supply_url") or "").strip())
+        entry = stock_index.get(key) if stock_index else None
+        # 未着手判定 (sheet_b_map 指定時のみ): B列が funnel itemID のまま = 未着手
+        if sheet_b_map is not None:
             cur_b = (sheet_b_map.get(key) or "").strip()
             funnel_id = (r.get("item_id") or "").strip()
             if not (cur_b and funnel_id and cur_b == funnel_id):
                 skipped_already += 1        # B変化(再出品済)/B空/不一致 = 除外
                 continue
-            if stock_index is not None:     # 在庫ゲート (仕入可否=監視くんの真実)
-                if stock_verdict(stock_index.get(key), now, fresh_hours) != "OK":
-                    skipped_oos += 1        # 売り切れ/古い/行無し = 仕入不可 → 出さない
-                    continue
-            eligible.append(r)              # 未着手 かつ 仕入可能
+        # カテゴリゲート: 商品管理 col17 が②対応カテゴリでなければ取り下げない
+        master_cat = (entry or {}).get("category", "")
+        if supported_categories is not None and master_cat not in supported_categories:
+            skipped_unsupported += 1
+            continue
+        # 在庫ゲート (仕入可否=監視くんの真実)
+        if stock_index is not None and stock_verdict(entry, now, fresh_hours) != "OK":
+            skipped_oos += 1                # 売り切れ/古い/行無し = 仕入不可 → 出さない
+            continue
+        rr = dict(r)
+        rr["_master_category"] = master_cat  # ② 振り分けキー (col17)
+        eligible.append(rr)                  # 未着手 かつ 対応カテゴリ かつ 仕入可能
     ordered = sorted(eligible, key=lambda x: -float(x.get("price") or 0))
     return (ordered[:cap], len(cands), skipped_no_supply, skipped_already,
             skipped_oos, skipped_unsupported)
@@ -303,6 +306,8 @@ def write_pending(picked, path):
 
     列: sku / old_item_id / category / supply_url / price / title。
     sku = supply_url末尾12 (③書戻しで ACTIVEレポート Custom Label と照合)。
+    category は **商品管理 col17 (_master_category)** を採用 (②の振り分け正本)。select 経由でない
+    呼出 (テスト等) は funnel category にフォールバック。
     """
     fields = ["sku", "old_item_id", "category", "supply_url", "price", "title"]
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
@@ -313,7 +318,7 @@ def write_pending(picked, path):
             w.writerow({
                 "sku": sku_from_url(supply_url),
                 "old_item_id": r.get("item_id", ""),
-                "category": r.get("category", ""),
+                "category": r.get("_master_category") or r.get("category", ""),
                 "supply_url": supply_url,
                 "price": r.get("price", ""),
                 "title": r.get("title", ""),

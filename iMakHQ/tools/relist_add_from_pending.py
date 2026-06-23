@@ -25,12 +25,21 @@ _TOOLS = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.normpath(os.path.join(_TOOLS, "..", ".."))   # C:/dev/iMak
 REVISE_DIR = r"c:\dev\iMak_data\revise"
 
-# pending の category → (cwd, cmd[]). 各 listing script は pending を自カテゴリ分に自己フィルタ。
+# pending の category(=商品管理シート col17 の正本カテゴリ) → (cwd, cmd[])。
+# 各 listing script は pending を自カテゴリ分に自己フィルタ (col17 + supply_url) するので、
+# 同じ pending を渡すだけでよい。キーは funnel の eBay カテゴリでなく col17 (2026-06-23 ASIN/
+# col17 統一。funnel カテゴリは混在して信頼できない: 例 "Other Animation Merchandise"=グッズ+一番くじ)。
 CATEGORY_DISPATCH = {
-    "Wristwatches": (os.path.join(_ROOT, "iMakG-shock"),
-                     ["python", "gshock_to_csv.py", "--relist", "{pending}"]),
-    "Reels":        (os.path.join(_ROOT, "iMakMercari"),
-                     ["python", "mercari_to_ebay_csv.py", "--sheet", "reel", "--relist", "{pending}"]),
+    "G-shock":  (os.path.join(_ROOT, "iMakG-shock"),
+                 ["python", "gshock_to_csv.py", "--relist", "{pending}"]),
+    "リール":    (os.path.join(_ROOT, "iMakMercari"),
+                 ["python", "mercari_to_ebay_csv.py", "--sheet", "reel", "--relist", "{pending}"]),
+    "一番くじ":   (os.path.join(_ROOT, "iMakMercari"),
+                 ["python", "mercari_to_ebay_csv.py", "--sheet", "ichibankuji", "--relist", "{pending}"]),
+    "バッグ":    (os.path.join(_ROOT, "iMakMercari"),
+                 ["python", "mercari_to_ebay_csv.py", "--sheet", "porter", "--relist", "{pending}"]),
+    "tomica":   (os.path.join(_ROOT, "iMakMercari"),
+                 ["python", "mercari_to_ebay_csv.py", "--sheet", "tomica", "--relist", "{pending}"]),
 }
 
 
