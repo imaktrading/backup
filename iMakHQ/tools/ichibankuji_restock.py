@@ -42,6 +42,7 @@ SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 GID = 851100680
 PORT = 8766
 PICKS_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_picks.json"
+CONFIRMED_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_confirmed.json"
 COL_SOLD = 3       # D 売り切れ
 COL_CAT = 17       # R カテゴリ
 _NOISE = ["新品", "未開封", "未使用", "送料無料", "即決", "匿名配送", "正規品", "限定", "おまけつき", "おまけ付き"]
@@ -229,6 +230,19 @@ def get_oos_ichibankuji(limit):
         if len(out) >= limit:
             break
     return out
+
+
+def _retry(fn, tries=5, what=""):
+    """transient(API 503 / getaddrinfo / timeout)はリトライ。最終失敗は送出。"""
+    last = None
+    for i in range(tries):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            print(f"  ⚠ {what}失敗({i+1}/{tries}): {type(e).__name__}: {str(e)[:50]} → リトライ", flush=True)
+            time.sleep(5)
+    raise last
 
 
 def write_confirmed(confirmations):
@@ -498,14 +512,47 @@ def pass_expand(cand_n):
             confirmations[int(row)] = urls[0]    # 先頭(最安 or 手動)= 主supply → A列
             if len(urls) > 1:
                 aux[int(row)] = urls[1:6]        # 残り = 補URL(mercari/Shops混在OK・最大5)
-    n = write_confirmed(confirmations)
-    if aux:
-        try:
-            sheet_io.write_aux_urls(aux)   # 代替supplyを補URL列(AC-AG)に記録
-        except Exception as e:  # noqa: BLE001
-            print(f"  ⚠ 補URL記録スキップ: {e}")
-    print(f"\n✅ 確定 {n}件: A列に新supply昇格 + B列クリア + 売り切れ解除 → 通常②(mercari --sheet ichibankuji)で再出品")
+    if not confirmations:
+        print("確定なし(全行 未選択/該当なし)"); return
+    # 書込前に確定を保存(API障害で書込が落ちても再選択不要 → write モードで再適用可)
+    _save_confirmed(confirmations, aux)
+    print(f"  💾 確定を保存(書込失敗時は再選択不要・write で再適用): {CONFIRMED_FILE}")
+    try:
+        n = _apply_confirmed(confirmations, aux)
+    except Exception as e:  # noqa: BLE001
+        print(f"\n❌ スプシ書込が最終的に失敗: {type(e).__name__}: {str(e)[:60]}")
+        print(f"   選択は保存済 → 復旧: python ichibankuji_restock.py write")
+        return
+    print(f"\n✅ 確定 {n}件: A列に新supply昇格 + B列クリア + 売り切れ解除 + 補URL記録 → 通常②で再出品")
     print("   ※ 出品くんで『一番くじ』を走らせると、A列の新supplyで再出品されます")
+
+
+def _save_confirmed(confirmations, aux):
+    payload = {"confirmations": {str(k): v for k, v in confirmations.items()},
+               "aux": {str(k): v for k, v in aux.items()}}
+    os.makedirs(os.path.dirname(CONFIRMED_FILE), exist_ok=True)
+    with open(CONFIRMED_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def _apply_confirmed(confirmations, aux):
+    """確定をスプシに適用(retry付き)。A列昇格+B列クリア+売り切れ解除、補URL記録。"""
+    n = _retry(lambda: write_confirmed(confirmations), what="A列/B列/売り切れ書込") if confirmations else 0
+    if aux:
+        _retry(lambda: sheet_io.write_aux_urls(aux), what="補URL書込")
+    return n
+
+
+def pass_write():
+    """書込失敗の復旧: 保存済 ichibankuji_confirmed.json をスプシに再適用(再選択不要)。"""
+    if not os.path.exists(CONFIRMED_FILE):
+        print(f"確定ファイルなし: {CONFIRMED_FILE}"); return
+    d = json.load(open(CONFIRMED_FILE, encoding="utf-8"))
+    confirmations = {int(k): v for k, v in d.get("confirmations", {}).items()}
+    aux = {int(k): v for k, v in d.get("aux", {}).items()}
+    print(f"確定 {len(confirmations)}件 を再適用...")
+    n = _apply_confirmed(confirmations, aux)
+    print(f"✅ 再適用 {n}件: A列昇格 + B列クリア + 売り切れ解除 + 補URL記録")
 
 
 def main():
@@ -515,9 +562,12 @@ def main():
         pass_identify(n, cand_n=10)
     elif mode == "expand":
         pass_expand(cand_n=10)
+    elif mode == "write":
+        pass_write()
     else:
         print("使い方:\n  python ichibankuji_restock.py identify [件数]   # パスA 画像特定\n"
-              "  python ichibankuji_restock.py expand              # パスB 画像検索+確定")
+              "  python ichibankuji_restock.py expand              # パスB 画像検索+確定\n"
+              "  python ichibankuji_restock.py write               # 書込失敗の復旧(再選択不要)")
 
 
 if __name__ == "__main__":
