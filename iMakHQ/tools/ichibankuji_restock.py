@@ -173,19 +173,28 @@ def _page(heading, items, stage):
                      f"<input type=text class=manurl placeholder='候補が弱い時 mercari URL を貼る(実写の出品)' "
                      f"style='width:60%;padding:3px'></div>")
         parts.append("</div>")
-    parts.append("<div style='padding:16px'><button onclick='submit()'>送信</button></div>")
+    parts.append("<div style='padding:16px'><button id=sendbtn onclick='submit()'>送信</button></div>")
     parts.append("""<script>
 function submit(){
-  var picks={};
+  var picks={}, chosen=0;
   document.querySelectorAll('.item').forEach(function(it){
     var man=it.querySelector('.manurl');
     var manv = man ? man.value.trim() : '';
-    if(manv){ picks[it.dataset.row]=manv; return; }   // 手動URL優先(rescue)
-    var sel=it.querySelector('input[type=radio]:checked');
-    picks[it.dataset.row]= sel ? sel.value : '';
+    var v='';
+    if(manv){ v=manv; }                                   // 手動URL優先(rescue)
+    else { var sel=it.querySelector('input[type=radio]:checked'); v= sel?sel.value:''; }
+    picks[it.dataset.row]=v;
+    if(v && v!=='NONE') chosen++;
   });
+  if(!confirm(chosen+' 件を選択しました。送信しますか?(該当なし/未選択は除外)')) return;
+  var btn=document.getElementById('sendbtn'); if(btn){btn.disabled=true; btn.textContent='送信中...';}
   fetch('/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(picks)})
-   .then(r=>r.json()).then(_=>{document.body.innerHTML='<h2 style=padding:20px>送信完了。タブを閉じてOK。</h2>';});
+   .then(r=>r.json())
+   .then(_=>{document.body.innerHTML='<h2 style="padding:24px;color:#070">✅ 送信完了('+chosen+'件)。このタブを閉じてOK。ターミナルに戻ってください。</h2>';})
+   .catch(e=>{
+     if(btn){btn.disabled=false; btn.textContent='送信';}
+     alert('❌ 送信できませんでした: '+e+'\\n\\nサーバ経由で開いていますか?\\n  python ichibankuji_restock.py identify\\n(静的ファイルを直接開くと送信できません)');
+   });
 }
 </script>""")
     return "".join(parts)
