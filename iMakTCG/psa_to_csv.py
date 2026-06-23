@@ -2363,8 +2363,8 @@ def main():
         else:
             import collections as _collections
             from tcg_batch_select import balanced_sample, classify_franchise
-            cert_numbers = balanced_sample(cert_numbers, title_map, PSA_BATCH_LIMIT)
-            _dist = _collections.Counter(classify_franchise(title_map.get(c, "")) for c in cert_numbers)
+            cert_numbers = balanced_sample(cert_numbers, mercari_title_map, PSA_BATCH_LIMIT)
+            _dist = _collections.Counter(classify_franchise(mercari_title_map.get(c, "")) for c in cert_numbers)
             print(f"⚠️ {total}件中 franchise均等 {PSA_BATCH_LIMIT} 件を処理 "
                   f"(内訳 {dict(_dist)} / 残 {total-PSA_BATCH_LIMIT} 件は次回再走)")
         cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
