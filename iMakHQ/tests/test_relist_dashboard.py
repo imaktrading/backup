@@ -37,3 +37,17 @@ def test_build_rows_excludes_no_supply_url():
     rows, summary = rd.build_rows(funnel, b_map)
     assert summary["total"] == 1                # supply_url無は対象外
     assert rows[0][5] == "b"
+
+
+def test_build_rows_matches_asin_across_coliid_not_unknown():
+    """回帰: coliid 違いでも ASIN で済/未判定 → 「不明」誤計上しない (2026-06-23)。
+
+    funnel supply_url(coliid=AAA) と スプシA列(coliid=BBB) が同 ASIN。旧フルURL照合では
+    b_map がヒットせず ❓不明 に落ちていた。
+    """
+    import relist_from_funnel as rf
+    funnel = [_row("oldid", 100, "https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=AAA")]
+    b_map = {rf.sku_from_url("https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=BBB"): "oldid"}
+    rows, summary = rd.build_rows(funnel, b_map)
+    assert summary == {"total": 1, "done": 0, "todo": 1, "unknown": 0}   # 未着手で拾える
+    assert rows[0][1] == "⏳未"

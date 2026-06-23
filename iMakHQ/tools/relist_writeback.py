@@ -24,6 +24,9 @@ import glob
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from relist_from_funnel import sku_from_url  # ASIN/SKU 抽出 (照合キー統一・2026-06-23)
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
@@ -76,10 +79,13 @@ def plan_writeback(add_pairs, skumap, supply_to_row):
     Args:
       add_pairs: [(sku, new_item_id), ...] (Add結果レポート由来)
       skumap: {sku: supply_url}
-      supply_to_row: {supply_url: {"sheet": label, "row": idx, "current_b": str}}
+      supply_to_row: {ASIN/SKU(sku_from_url(A列)): {"sheet": label, "row": idx, "current_b": str}}
     Returns:
       [{sku,new_item_id,supply_url,sheet,row,current_b,status}, ...]
       status: 'WRITE'(旧→新上書き) | 'SKIP_SAME'(既に新ID) | 'NO_SKUMAP' | 'NO_ROW'
+
+    照合は ASIN/SKU (sku_from_url(supply_url)) で行う (2026-06-23 ASINキー化)。skumap の
+    supply_url と スプシA列 の coliid が揺れても同一商品なら同じ行に着地する。
     """
     plan = []
     for sku, new_id in add_pairs:
@@ -88,7 +94,7 @@ def plan_writeback(add_pairs, skumap, supply_to_row):
             plan.append({"sku": sku, "new_item_id": new_id, "supply_url": "",
                          "sheet": "", "row": "", "current_b": "", "status": "NO_SKUMAP"})
             continue
-        loc = supply_to_row.get(supply_url)
+        loc = supply_to_row.get(sku_from_url(supply_url))
         if not loc:
             plan.append({"sku": sku, "new_item_id": new_id, "supply_url": supply_url,
                          "sheet": "", "row": "", "current_b": "", "status": "NO_ROW"})
@@ -102,7 +108,10 @@ def plan_writeback(add_pairs, skumap, supply_to_row):
 
 
 def _read_sheets(gc):
-    """両スプシの A列(supply_url)→行 を読む。戻り: ({supply_url: loc}, {label: worksheet})。"""
+    """両スプシの A列 → 行 を読む。戻り: ({ASIN/SKU: loc}, {label: worksheet})。
+
+    キーは sku_from_url(A列) = ASIN/SKU (2026-06-23 ASINキー化)。coliid 揺れを吸収。
+    """
     supply_to_row, ws_by_label = {}, {}
     for cfg in SHEETS:
         sh = gc.open_by_key(cfg["id"])
@@ -110,9 +119,12 @@ def _read_sheets(gc):
         ws_by_label[cfg["label"]] = ws
         for i, row in enumerate(ws.get_all_values(), start=1):
             url = (row[0].strip() if row and row[0] else "")
-            if not url or url in supply_to_row:
-                continue  # 先勝ち (同 supply_url 重複は最初の行)
-            supply_to_row[url] = {"sheet": cfg["label"], "row": i,
+            if not url:
+                continue
+            key = sku_from_url(url)
+            if not key or key in supply_to_row:
+                continue  # 先勝ち (同 ASIN 重複は最初の行)
+            supply_to_row[key] = {"sheet": cfg["label"], "row": i,
                                   "current_b": (row[1].strip() if len(row) > 1 else "")}
     return supply_to_row, ws_by_label
 

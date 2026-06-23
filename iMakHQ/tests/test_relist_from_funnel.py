@@ -88,6 +88,21 @@ def test_select_excludes_already_relisted_by_b_diff():
     assert [r["item_id"] for r in picked] == ["todo1"]
 
 
+def test_select_matches_amazon_asin_across_coliid():
+    """回帰: funnel supply_url と スプシA列 の coliid が違っても ASIN で未着手判定が効く。
+
+    旧フルURL照合では coliid 揺れで b_map がヒットせず「未着手」を取りこぼし(=不明扱い)、
+    再出品が回らなかった (2026-06-23 ASINキー化の核)。
+    """
+    rows = [_row("oldid1", 100,
+                 supply_url="https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=AAA&psc=1")]
+    # b_map は ASIN キー (load_current_b_map の戻り)。A列は別 coliid 由来でも同 ASIN。
+    b_map = {rf.sku_from_url("https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=BBB"): "oldid1"}
+    picked, total, skipped_no_supply, already = rf.select(rows, sheet_b_map=b_map, cap=10)
+    assert already == 0
+    assert [r["item_id"] for r in picked] == ["oldid1"]   # coliid 差を ASIN が吸収=未着手で拾える
+
+
 def test_split_by_history_first_vs_second():
     # 一度relistした(=skumap履歴に有る) supply_url は2回目→END停止、無いものは初回→relist
     picked = [

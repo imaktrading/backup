@@ -30,14 +30,18 @@ HEADERS = ["#", "状態", "価格$", "カテゴリ", "タイトル", "旧ItemID"
 
 
 def build_rows(funnel_rows, b_map):
-    """funnel RELIST候補(supply_url有) → ダッシュボード行 + サマリー。価格降順。"""
+    """funnel RELIST候補(supply_url有) → ダッシュボード行 + サマリー。価格降順。
+
+    b_map は load_current_b_map の戻り = {ASIN/SKU: 現B列}。照合は sku_from_url(supply_url)
+    で行う (2026-06-23 ASINキー化。coliid 揺れ起因の「不明」誤判定を解消)。
+    """
     cands = [r for r in rf.relist_candidates(funnel_rows) if (r.get("supply_url") or "").strip()]
     cands.sort(key=lambda x: -float(x.get("price") or 0))
     out, done, todo, unknown = [], 0, 0, 0
     for i, r in enumerate(cands, 1):
         url = (r.get("supply_url") or "").strip()
         fid = (r.get("item_id") or "").strip()
-        cur = (b_map.get(url) or "").strip()
+        cur = (b_map.get(rf.sku_from_url(url)) or "").strip()
         if cur and fid and cur == fid:
             state, newid = "⏳未", ""; todo += 1
         elif cur and fid and cur != fid:

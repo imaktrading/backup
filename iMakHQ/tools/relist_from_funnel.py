@@ -108,7 +108,12 @@ def split_by_history(picked, history):
 
 
 def load_current_b_map():
-    """両管理スプシの {supply_url(A列): 現在のB列(itemID)} を返す (再出品済み除外用)。
+    """両管理スプシの {ASIN/SKU(sku_from_url(A列)): 現在のB列(itemID)} を返す (再出品済み除外用)。
+
+    **ASINキー化 (2026-06-23)**: 以前は A列フルURLをキーにしていたが、Amazon wishlist の
+    coliid/colid 等のパラメータが funnel↔スプシ間で揺れ、同一商品でもキー不一致 → 行が
+    引けず「不明」誤判定 + 在庫ゲート不能 になっていた。SKU(ASIN)は不変なのでこれで吸収する。
+    funnel側も select/build_rows が sku_from_url(supply_url) で引くので両端でキーが揃う。
 
     DNS flakiness 対策で retry。失敗時は例外を送出 (呼出側で「不明なら走らせない」=
     二重再出品事故を防ぐため、空dictで握り潰さない)。
@@ -128,8 +133,11 @@ def load_current_b_map():
                 ws = gc.open_by_key(cfg["id"]).get_worksheet_by_id(cfg["gid"])
                 for row in ws.get_all_values():
                     url = (row[0].strip() if row and row[0] else "")
-                    if url and url not in bmap:
-                        bmap[url] = (row[1].strip() if len(row) > 1 else "")
+                    if not url:
+                        continue
+                    key = sku_from_url(url)               # ASIN/SKU = 不変キー
+                    if key and key not in bmap:           # 先勝ち (同ASIN重複は最初の行)
+                        bmap[key] = (row[1].strip() if len(row) > 1 else "")
             return bmap
         except Exception as e:  # noqa: BLE001
             last_err = e
@@ -140,10 +148,13 @@ def load_current_b_map():
 def select(rows, sheet_b_map=None, cap=CAP):
     """RELIST 候補を価格降順で上位 cap 件。再出品済み(B列変化)を自動除外。
 
-    sheet_b_map={supply_url: 現B列} を渡すと、funnel の item_id と現B列を照合し
-    **B列がfunnel itemIDのまま(=未着手)の行だけ**を対象にする。B列が変わってる
-    (=③で新itemIDに書換済=再出品済) / B空 / 不一致 は除外。これで funnel を
+    sheet_b_map={ASIN/SKU: 現B列} (load_current_b_map の戻り) を渡すと、funnel の
+    item_id と現B列を照合し **B列がfunnel itemIDのまま(=未着手)の行だけ**を対象にする。
+    B列が変わってる (=③で新itemIDに書換済=再出品済) / B空 / 不一致 は除外。これで funnel を
     回し直さずに「次の10件」を出せる (バッチ進行とファネル再分析を分離)。
+
+    照合キーは sku_from_url(supply_url) = ASIN/SKU (2026-06-23 ASINキー化)。coliid 揺れで
+    行を取りこぼさない。
 
     戻り: (picked, total_relist, skipped_no_supply, skipped_already)。
     """
@@ -156,8 +167,8 @@ def select(rows, sheet_b_map=None, cap=CAP):
     else:
         eligible = []
         for r in with_supply:
-            url = (r.get("supply_url") or "").strip()
-            cur_b = (sheet_b_map.get(url) or "").strip()
+            key = sku_from_url((r.get("supply_url") or "").strip())
+            cur_b = (sheet_b_map.get(key) or "").strip()
             funnel_id = (r.get("item_id") or "").strip()
             if cur_b and funnel_id and cur_b == funnel_id:
                 eligible.append(r)          # B列が funnel itemID のまま = 未着手

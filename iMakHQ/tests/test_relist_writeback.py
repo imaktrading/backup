@@ -11,8 +11,9 @@ import relist_writeback as rw  # noqa: E402
 def test_plan_overwrite_old_with_new():
     add_pairs = [("B0DDS4Z29W", "999000111222")]
     skumap = {"B0DDS4Z29W": "https://www.amazon.co.jp/dp/B0DDS4Z29W"}
+    # supply_to_row は ASIN キー (sku_from_url(A列)) (2026-06-23 ASINキー化)
     supply_to_row = {
-        "https://www.amazon.co.jp/dp/B0DDS4Z29W": {"sheet": "スプシ2", "row": 279, "current_b": "357370826397"},
+        "B0DDS4Z29W": {"sheet": "スプシ2", "row": 279, "current_b": "357370826397"},
     }
     plan = rw.plan_writeback(add_pairs, skumap, supply_to_row)
     assert len(plan) == 1
@@ -43,10 +44,26 @@ def test_plan_reel_sku_regime_mismatch_resolved_by_skumap():
     # Daiwa: Add結果の CustomLabel は mercari実値 'p/B08NP6PKZM' (pendingの 'B08NP6PKZM' でない)
     add_pairs = [("p/B08NP6PKZM", "777")]
     skumap = {"p/B08NP6PKZM": "https://www.amazon.co.jp/dp/B08NP6PKZM"}
-    supply_to_row = {"https://www.amazon.co.jp/dp/B08NP6PKZM":
+    supply_to_row = {"B08NP6PKZM":   # ASIN キー
                      {"sheet": "スプシ2", "row": 645, "current_b": "358477829629"}}
     e = rw.plan_writeback(add_pairs, skumap, supply_to_row)[0]
     assert e["status"] == "WRITE" and e["row"] == 645   # skumapが橋渡し→正しい行に着地
+
+
+def test_plan_matches_across_coliid_param_mismatch():
+    """回帰: skumap の supply_url と スプシA列 の coliid が違っても、ASINキーで同じ行に着地。
+
+    旧フルURL照合では coliid 揺れで NO_ROW に落ちて B列書戻し不能 → ダッシュボードで
+    「不明」誤判定の原因だった (2026-06-23 B0CJJ5PMCZ 等)。
+    """
+    add_pairs = [("B0CJJ5PMCZ", "358900000001")]
+    # ②skumap が記録した supply_url (coliid=AAA)
+    skumap = {"B0CJJ5PMCZ": "https://www.amazon.co.jp/dp/B0CJJ5PMCZ/?coliid=AAA&psc=1"}
+    # スプシA列は別の coliid=BBB だが同一 ASIN
+    supply_to_row = {rw.sku_from_url("https://www.amazon.co.jp/dp/B0CJJ5PMCZ/?coliid=BBB&ref_=x"):
+                     {"sheet": "スプシ2", "row": 477, "current_b": "358276567493"}}
+    e = rw.plan_writeback(add_pairs, skumap, supply_to_row)[0]
+    assert e["status"] == "WRITE" and e["row"] == 477   # coliid 差を ASIN が吸収
 
 
 def test_parse_add_report_and_skumap(tmp_path):
