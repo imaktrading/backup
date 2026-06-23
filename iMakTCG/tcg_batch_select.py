@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""PSA 新規バッチの franchise 均等サンプリング (純粋ロジック・テスト可能)。
+"""PSA 新規バッチの franchise 均等サンプリング + 目視済スキップ (純粋ロジック・テスト可能)。
 
 psa_to_csv.main() が 92件等から 10件/回 を選ぶ際、従来は全体 random.shuffle → 先頭10 だった。
 在庫は Pokemon が大半なので Pokemon ばかり選ばれ、One Piece / Dragon Ball が滞留していた
@@ -10,9 +10,46 @@ psa_to_csv.main() が 92件等から 10件/回 を選ぶ際、従来は全体 ra
 (実データ98件で誤判定ゼロを確認)。分類 → round-robin で均等に取る。在庫が偏っていても
 各 franchise を満遍なく拾い、足りない franchise の分は他で埋める。
 """
+import json
 import re
 
 _PRIMARY = ("Pokemon", "OnePiece", "DragonBall")
+
+# 目視済(NONE/NG=識別不能)cert を一定期間 再出題しないためのスキップ台帳。
+# post_psa_review が NONE/NG 判定時に追記、psa_to_csv.main() が選定プールから除外する。
+# (2026-06-23 ユーザー要望: 一度目視したカードがちょいちょい再出現する → 再表示防止)
+REVIEW_SKIP_PATH = r"C:/dev/iMak_data/dedupe/psa_review_skip.json"
+REVIEW_SKIP_COOLDOWN_DAYS = 14   # この期間は再出題しない。経過後は再浮上(catalog修正済なら今度は出品可)
+
+
+def load_review_skips(path=REVIEW_SKIP_PATH):
+    """目視済スキップ台帳 {cert: {at, choice}} を読む。無ければ空 dict。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def active_review_skips(skip_data, now, cooldown_days=REVIEW_SKIP_COOLDOWN_DAYS):
+    """cooldown 期間内に NONE/NG 目視された cert の set を返す(= 今回スキップ対象)。
+
+    at(ISO日時)が cooldown 内 → スキップ。経過/不明 → スキップしない(永久hide回避 = 再浮上させる)。
+    now は datetime(test 用に注入可)。
+    """
+    import datetime as _dt
+    out = set()
+    for cert, info in (skip_data or {}).items():
+        at = info.get("at") if isinstance(info, dict) else None
+        if not at:
+            continue
+        try:
+            t = _dt.datetime.fromisoformat(at)
+        except Exception:
+            continue
+        if (now - t).days < cooldown_days:
+            out.add(str(cert))
+    return out
 
 
 def classify_franchise(title):

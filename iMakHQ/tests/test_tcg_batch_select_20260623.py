@@ -60,3 +60,36 @@ def test_balanced_sample_under_limit_returns_all():
     tmap = {"p0": "ポケモン", "o0": "ワンピース"}
     picked = bs.balanced_sample(certs, tmap, 10, shuffle=lambda x: None)
     assert sorted(picked) == ["o0", "p0"]
+
+
+# ---- 目視済(NONE/NG)cooldown スキップ ----
+import datetime as _dt  # noqa: E402
+
+
+def test_active_review_skips_within_cooldown():
+    now = _dt.datetime(2026, 6, 23, 12, 0, 0)
+    data = {
+        "c_recent": {"at": "2026-06-20T10:00:00", "choice": "NONE"},   # 3日前 → skip
+        "c_old": {"at": "2026-06-01T10:00:00", "choice": "NG"},        # 22日前 → 再浮上
+        "c_noat": {"choice": "NONE"},                                   # 日時不明 → 再浮上(永久hide回避)
+        "c_today": {"at": "2026-06-23T09:00:00", "choice": "NG"},      # 当日 → skip
+    }
+    skips = bs.active_review_skips(data, now, cooldown_days=14)
+    assert skips == {"c_recent", "c_today"}
+
+
+def test_active_review_skips_boundary():
+    now = _dt.datetime(2026, 6, 23, 12, 0, 0)
+    data = {
+        "c13": {"at": "2026-06-10T12:00:00", "choice": "NONE"},  # 13日前 → skip (<14)
+        "c14": {"at": "2026-06-09T12:00:00", "choice": "NONE"},  # 14日前 → 再浮上 (>=14)
+    }
+    skips = bs.active_review_skips(data, now, cooldown_days=14)
+    assert skips == {"c13"}
+
+
+def test_active_review_skips_empty_and_malformed():
+    now = _dt.datetime(2026, 6, 23, 12, 0, 0)
+    assert bs.active_review_skips({}, now) == set()
+    assert bs.active_review_skips(None, now) == set()
+    assert bs.active_review_skips({"x": {"at": "ゴミ"}}, now) == set()   # 不正日時 → 再浮上

@@ -2350,6 +2350,22 @@ def main():
 
     print(f"✓ {len(cert_numbers)}件の PSA 対象行を抽出（B列 itemID 空）")
 
+    # 目視済(NONE/NG=識別不能)cert を cooldown 期間スキップ (2026-06-23 再表示防止)
+    # post_psa_review が NONE/NG 判定を skip 台帳に記録 → 一定期間 再出題しない。
+    # catalog 宿題は依頼書で別途追跡(埋もれない)。cooldown 経過後は再浮上(catalog修正済なら出品可)。
+    try:
+        import datetime as _dt2
+        from tcg_batch_select import load_review_skips, active_review_skips
+        _skips = active_review_skips(load_review_skips(), _dt2.datetime.now())
+        if _skips:
+            _b = len(cert_numbers)
+            cert_numbers = [c for c in cert_numbers if c not in _skips]
+            if _b != len(cert_numbers):
+                print(f"  ⏭️ 目視済(NONE/NG, {14}日以内)を除外: {_b-len(cert_numbers)}件 "
+                      f"(catalog宿題は依頼書で追跡。cooldown後に再浮上)")
+    except Exception as _e2:
+        print(f"  ⚠️ 目視済スキップ読込失敗(無視して継続): {type(_e2).__name__}: {_e2}")
+
     # 一回 10 件まで固定 (Cloudflare bot 検出回避、2026-05-06)
     # 残りは時間を置いて次回再走で順次処理
     PSA_BATCH_LIMIT = 10

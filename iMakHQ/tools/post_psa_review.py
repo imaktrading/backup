@@ -34,6 +34,9 @@ CATALOG_DB = Path(r"C:/dev/iMak_data/catalog/products.sqlite")
 HTML_OUTPUT = Path(r"C:/dev/iMak_data/dedupe/psa_review_latest.html")
 RESULT_DIR = Path(r"C:/dev/iMak_data/dedupe/psa_review_results")
 VERIFIED_CERTS_FILE = Path(r"C:/dev/iMak_data/dedupe/verified_certs.json")
+# 目視済(NONE/NG=識別不能)cert の skip 台帳。psa_to_csv が cooldown 期間スキップに使う。
+# (パスは iMakTCG/tcg_batch_select.REVIEW_SKIP_PATH と一致させること。2026-06-23)
+REVIEW_SKIP_FILE = Path(r"C:/dev/iMak_data/dedupe/psa_review_skip.json")
 SERVER_PORT = 8765
 
 
@@ -651,6 +654,7 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                     global _PRE_BUILD_RESULTS
                     _PRE_BUILD_RESULTS = data
                     _record_verified(data)
+                    _record_review_skip(data)   # NONE/NG を cooldown スキップ台帳へ (再表示防止)
                     # JS が参照する key を 0 で埋める (build 側で実処理するため此処では書込なし)
                     summary = {"mode": "pre_build", "count": len(data),
                                "spreadsheet_writes": 0, "skipped": 0}
@@ -659,6 +663,7 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                     # 従来 (build後 hook): catalog/スプシ書込 + NONE/NG 行除外 + verified 記録
                     summary = _apply_user_judgments(data)
                     _record_verified(data)
+                    _record_review_skip(data)   # NONE/NG を cooldown スキップ台帳へ (再表示防止)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -713,6 +718,32 @@ def _load_verified_certs() -> dict:
 def _save_verified_certs(data: dict) -> None:
     VERIFIED_CERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     VERIFIED_CERTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _record_review_skip(results: list[dict]) -> None:
+    """NONE/NG (= 識別不能) 目視 cert を skip 台帳に記録 → 一定期間 再出題しない (再表示防止)。
+
+    OK/CHOSEN は verified_certs(別)で扱う。ここは「目視したが catalog 未解決」を cooldown 中
+    プールから外すための台帳。catalog 宿題は依頼書で別途追跡するので埋もれない (2026-06-23)。
+    """
+    try:
+        skips = json.loads(REVIEW_SKIP_FILE.read_text(encoding="utf-8")) if REVIEW_SKIP_FILE.exists() else {}
+    except Exception:
+        skips = {}
+    now = datetime.now().isoformat(timespec="seconds")
+    changed = False
+    for r in results:
+        cert = (r.get("cert") or "").strip()
+        choice = r.get("choice", "")
+        if cert and choice in ("NONE", "NG"):
+            skips[cert] = {"at": now, "choice": choice}
+            changed = True
+    if changed:
+        try:
+            REVIEW_SKIP_FILE.parent.mkdir(parents=True, exist_ok=True)
+            REVIEW_SKIP_FILE.write_text(json.dumps(skips, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
 
 def _record_verified(results: list[dict]) -> None:
