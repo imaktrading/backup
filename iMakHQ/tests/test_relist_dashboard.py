@@ -21,7 +21,7 @@ def test_build_rows_state_and_order():
     ]
     b_map = {"https://x/u1": "999NEW", "https://x/u2": "todo1", "https://x/u3": ""}
     rows, summary = rd.build_rows(funnel, b_map)
-    assert summary == {"total": 3, "done": 1, "todo": 1, "unknown": 1}
+    assert summary == {"total": 3, "done": 1, "todo": 1, "unknown": 1, "oos": 0}
     # 価格降順 (100,90,80) かつ # は1始まり
     assert [r[0] for r in rows] == [1, 2, 3]
     assert [r[5] for r in rows] == ["done1", "todo1", "unk1"]   # 旧ItemID列
@@ -49,5 +49,27 @@ def test_build_rows_matches_asin_across_coliid_not_unknown():
     funnel = [_row("oldid", 100, "https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=AAA")]
     b_map = {rf.sku_from_url("https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=BBB"): "oldid"}
     rows, summary = rd.build_rows(funnel, b_map)
-    assert summary == {"total": 1, "done": 0, "todo": 1, "unknown": 0}   # 未着手で拾える
+    assert summary == {"total": 1, "done": 0, "todo": 1, "unknown": 0, "oos": 0}   # 未着手で拾える
     assert rows[0][1] == "⏳未"
+
+
+def test_build_rows_marks_sold_out_distinctly():
+    """在庫切れ(監視くん『売り切れ』○)は 🔴在庫切れ として区別。未着手に紛れさせない。
+
+    元の「不明3件」の正体 = 監視くん取下げ済(OOS)。stock_index を渡すと正しく可視化される。
+    """
+    import relist_from_funnel as rf
+    funnel = [
+        _row("live", 100, "https://www.amazon.co.jp/dp/B000000001"),   # 在庫あり=未
+        _row("dead", 90, "https://www.amazon.co.jp/dp/B000000002"),    # 売り切れ=在庫切れ
+    ]
+    b_map = {"B000000001": "live", "B000000002": "dead"}
+    stock = {
+        "B000000001": {"b": "live", "sold_out": False, "check_time": None},
+        "B000000002": {"b": "dead", "sold_out": True, "check_time": None},
+    }
+    rows, summary = rd.build_rows(funnel, b_map, stock_index=stock)
+    assert summary == {"total": 2, "done": 0, "todo": 1, "unknown": 0, "oos": 1}
+    states = {r[5]: r[1] for r in rows}
+    assert states["live"] == "⏳未"
+    assert states["dead"] == "🔴在庫切れ"

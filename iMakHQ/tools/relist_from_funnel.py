@@ -40,6 +40,15 @@ END_HEADER = ["*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)",
 END_CODE = "OtherListingError"  # Cassini reset 目的の汎用 code (seller_hub_relist と統一)
 CAP = 10  # 1バッチ=10件 (ユーザー指示 2026-06-05)。少量ずつ取下→再出品→書戻しを回す
 
+# 在庫ゲート (2026-06-23): 管理スプシの監視くん列を読んで「仕入不可(3RD/OOS)」を再出品しない。
+# funnel の露出シグナル(NO_CLICK)だけでは在庫を見ておらず、古い funnel で 3RD 化済の商品を
+# 再出品 → キャンセル → BAN リスク だった (B0B78CZ3W3 事故 2026-06-23)。真実源は監視くんが
+# スプシに書く「売り切れ」列。relist はこれに従う (fail-closed: ○/古い/行無し → 出さない)。
+SOLD_OUT_COL = 3      # D列「売り切れ」: ○/〇 = 監視くんが OOS 判定済
+CHECK_TIME_COL = 14   # O列「売り切れチェック時間」: 監視くんの最終在庫確認日時
+SOLD_OUT_MARKS = ("○", "〇")  # ○=U+25CB / 〇=U+3007 両方 OOS 扱い
+STOCK_FRESH_HOURS = 48  # 在庫確認の鮮度しきい値。これより古い=監視くんが最近見てない=不明→出さない
+
 
 def sku_from_url(url: str) -> str:
     """仕入元URL → listing が付与する Custom Label(SKU) を best-effort 再現。
@@ -107,16 +116,50 @@ def split_by_history(picked, history):
     return relist_picks, end_only_picks
 
 
-def load_current_b_map():
-    """両管理スプシの {ASIN/SKU(sku_from_url(A列)): 現在のB列(itemID)} を返す (再出品済み除外用)。
+def parse_check_time(s):
+    """監視くんの「売り切れチェック時間」(YYYY/M/D H:MM:SS, 桁数まちまち) → datetime or None。"""
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        date_part, _, time_part = s.partition(" ")
+        y, mo, d = (int(x) for x in date_part.split("/"))
+        hh = mm = ss = 0
+        if time_part:
+            parts = time_part.split(":")
+            hh = int(parts[0]); mm = int(parts[1]) if len(parts) > 1 else 0
+            ss = int(parts[2]) if len(parts) > 2 else 0
+        return datetime.datetime(y, mo, d, hh, mm, ss)
+    except (ValueError, IndexError):
+        return None
 
-    **ASINキー化 (2026-06-23)**: 以前は A列フルURLをキーにしていたが、Amazon wishlist の
-    coliid/colid 等のパラメータが funnel↔スプシ間で揺れ、同一商品でもキー不一致 → 行が
-    引けず「不明」誤判定 + 在庫ゲート不能 になっていた。SKU(ASIN)は不変なのでこれで吸収する。
-    funnel側も select/build_rows が sku_from_url(supply_url) で引くので両端でキーが揃う。
 
-    DNS flakiness 対策で retry。失敗時は例外を送出 (呼出側で「不明なら走らせない」=
-    二重再出品事故を防ぐため、空dictで握り潰さない)。
+def stock_verdict(entry, now, fresh_hours=STOCK_FRESH_HOURS):
+    """在庫ゲート判定 (純粋)。戻り: 'OK' | 'SOLD_OUT' | 'STALE' | 'NO_ROW'。
+
+    OK 以外は再出品しない (fail-closed)。entry = load_sheet_index の値 (None=行無し)。
+      - NO_ROW : スプシに行が無い → 在庫不明 → 出さない
+      - SOLD_OUT: 監視くんが「売り切れ」○ → 3RD/OOS → 出さない (今回事故の本命)
+      - STALE  : チェックが fresh_hours より古い/欠落 → 監視くんが最近見てない → 出さない
+    """
+    if not entry:
+        return "NO_ROW"
+    if entry.get("sold_out"):
+        return "SOLD_OUT"
+    ct = entry.get("check_time")
+    if ct is None:
+        return "STALE"
+    if (now - ct) > datetime.timedelta(hours=fresh_hours):
+        return "STALE"
+    return "OK"
+
+
+def load_sheet_index():
+    """両管理スプシ → {ASIN/SKU(sku_from_url(A列)): {b, sold_out, check_time}} (再出品判定+在庫ゲート用)。
+
+    監視くんが書く 売り切れ[D] / 売り切れチェック時間[O] を併せて取り込む。照合キーは ASIN
+    (coliid 揺れ吸収・2026-06-23)。DNS flakiness 対策 retry。失敗時は例外送出 (二重再出品/
+    在庫不明での誤再出品を防ぐため空dictで握り潰さない)。
     """
     import time
     from relist_writeback import SHEETS, CREDS_PATH
@@ -128,7 +171,7 @@ def load_current_b_map():
             creds = Credentials.from_service_account_file(
                 CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
             gc = gspread.authorize(creds)
-            bmap = {}
+            index = {}
             for cfg in SHEETS:
                 ws = gc.open_by_key(cfg["id"]).get_worksheet_by_id(cfg["gid"])
                 for row in ws.get_all_values():
@@ -136,32 +179,56 @@ def load_current_b_map():
                     if not url:
                         continue
                     key = sku_from_url(url)               # ASIN/SKU = 不変キー
-                    if key and key not in bmap:           # 先勝ち (同ASIN重複は最初の行)
-                        bmap[key] = (row[1].strip() if len(row) > 1 else "")
-            return bmap
+                    if not key or key in index:           # 先勝ち (同ASIN重複は最初の行)
+                        continue
+                    sold = (row[SOLD_OUT_COL].strip() if len(row) > SOLD_OUT_COL else "")
+                    chk = (row[CHECK_TIME_COL].strip() if len(row) > CHECK_TIME_COL else "")
+                    index[key] = {
+                        "b": (row[1].strip() if len(row) > 1 else ""),
+                        "sold_out": sold in SOLD_OUT_MARKS,
+                        "check_time": parse_check_time(chk),
+                    }
+            return index
         except Exception as e:  # noqa: BLE001
             last_err = e
             time.sleep(3)
-    raise RuntimeError(f"スプシB列読込に失敗 (retry 4回): {type(last_err).__name__}: {last_err}")
+    raise RuntimeError(f"スプシ読込に失敗 (retry 4回): {type(last_err).__name__}: {last_err}")
 
 
-def select(rows, sheet_b_map=None, cap=CAP):
-    """RELIST 候補を価格降順で上位 cap 件。再出品済み(B列変化)を自動除外。
+def load_current_b_map():
+    """{ASIN/SKU: 現在のB列(itemID)} を返す (再出品済み除外用)。load_sheet_index の射影。
+
+    ASINキー化 (2026-06-23): A列フルURLでなく sku_from_url(A列) をキーに (coliid 揺れ吸収)。
+    select/build_rows も sku_from_url(supply_url) で引くので両端でキーが揃う。
+    """
+    return {k: v["b"] for k, v in load_sheet_index().items()}
+
+
+def select(rows, sheet_b_map=None, cap=CAP, stock_index=None, now=None,
+           fresh_hours=STOCK_FRESH_HOURS):
+    """RELIST 候補を価格降順で上位 cap 件。再出品済み(B列変化)+仕入不可(在庫切れ)を自動除外。
 
     sheet_b_map={ASIN/SKU: 現B列} (load_current_b_map の戻り) を渡すと、funnel の
     item_id と現B列を照合し **B列がfunnel itemIDのまま(=未着手)の行だけ**を対象にする。
     B列が変わってる (=③で新itemIDに書換済=再出品済) / B空 / 不一致 は除外。これで funnel を
     回し直さずに「次の10件」を出せる (バッチ進行とファネル再分析を分離)。
 
-    照合キーは sku_from_url(supply_url) = ASIN/SKU (2026-06-23 ASINキー化)。coliid 揺れで
-    行を取りこぼさない。
+    stock_index={ASIN/SKU: {sold_out, check_time}} (load_sheet_index の戻り) を渡すと、
+    **在庫ゲート**を適用 (2026-06-23)。監視くんが「売り切れ」○ / チェックが古い(>fresh_hours) /
+    スプシ行無し は仕入不可とみなし再出品しない (fail-closed)。古い funnel が 3RD 化済商品を
+    拾う事故 (B0B78CZ3W3) を構造的に防ぐ。now 省略時は実行時刻。
 
-    戻り: (picked, total_relist, skipped_no_supply, skipped_already)。
+    照合キーは sku_from_url(supply_url) = ASIN/SKU。coliid 揺れで行を取りこぼさない。
+
+    戻り: (picked, total_relist, skipped_no_supply, skipped_already, skipped_oos)。
     """
+    if now is None:
+        now = datetime.datetime.now()
     cands = relist_candidates(rows)
     with_supply = [r for r in cands if (r.get("supply_url") or "").strip()]
     skipped_no_supply = len(cands) - len(with_supply)
     skipped_already = 0
+    skipped_oos = 0
     if sheet_b_map is None:
         eligible = with_supply
     else:
@@ -170,12 +237,16 @@ def select(rows, sheet_b_map=None, cap=CAP):
             key = sku_from_url((r.get("supply_url") or "").strip())
             cur_b = (sheet_b_map.get(key) or "").strip()
             funnel_id = (r.get("item_id") or "").strip()
-            if cur_b and funnel_id and cur_b == funnel_id:
-                eligible.append(r)          # B列が funnel itemID のまま = 未着手
-            else:
+            if not (cur_b and funnel_id and cur_b == funnel_id):
                 skipped_already += 1        # B変化(再出品済)/B空/不一致 = 除外
+                continue
+            if stock_index is not None:     # 在庫ゲート (仕入可否=監視くんの真実)
+                if stock_verdict(stock_index.get(key), now, fresh_hours) != "OK":
+                    skipped_oos += 1        # 売り切れ/古い/行無し = 仕入不可 → 出さない
+                    continue
+            eligible.append(r)              # 未着手 かつ 仕入可能
     ordered = sorted(eligible, key=lambda x: -float(x.get("price") or 0))
-    return ordered[:cap], len(cands), skipped_no_supply, skipped_already
+    return ordered[:cap], len(cands), skipped_no_supply, skipped_already, skipped_oos
 
 
 def write_pending(picked, path):
@@ -207,20 +278,24 @@ def main():
     src = max(files, key=os.path.getmtime)
     rows = list(csv.DictReader(open(src, encoding="utf-8")))
     print(f"対象 funnel: {os.path.basename(src)}")
-    # 再出品済み除外用に現スプシB列を読む (funnel再分析せず「次の10件」を出すため)
-    print("📊 スプシB列読込中 (再出品済みを自動除外)...")
+    # 再出品済み除外 + 在庫ゲート用にスプシを読む (B列 + 監視くんの売り切れ/チェック時間)
+    print("📊 スプシ読込中 (再出品済み除外 + 在庫ゲート: 監視くん『売り切れ』に従う)...")
     try:
-        b_map = load_current_b_map()
+        stock_index = load_sheet_index()
     except Exception as e:  # noqa: BLE001
-        sys.exit(f"⚠ {e}\n  → 再出品済みの判定ができないため中断 (二重再出品事故防止)。再実行してください。")
-    picked, total_relist, skipped_no_supply, skipped_already = select(rows, sheet_b_map=b_map)
+        sys.exit(f"⚠ {e}\n  → 再出品済み/在庫の判定ができないため中断 (二重再出品・仕入不可再出品の防止)。再実行してください。")
+    b_map = {k: v["b"] for k, v in stock_index.items()}
+    picked, total_relist, skipped_no_supply, skipped_already, skipped_oos = select(
+        rows, sheet_b_map=b_map, stock_index=stock_index)
     print(f"RELIST候補(NO_SEARCH+NO_CLICK) = {total_relist}件 → 取下げ {len(picked)}件 (価格高い順・上限{CAP})")
     if skipped_already:
         print(f"  ✓ 再出品済み(B列更新済)を除外 = {skipped_already}件 → 同じfunnelで次の10件を出力")
+    if skipped_oos:
+        print(f"  🔴 仕入不可で除外 = {skipped_oos}件 (監視くん『売り切れ』○ / 在庫確認が古い(>{STOCK_FRESH_HOURS}h) / スプシ行無し = fail-closed)")
     if skipped_no_supply:
         print(f"  ⚠ supply_url(仕入元URL)欠落で除外 = {skipped_no_supply}件 (②再出品/③書戻しで追えないため対象外)")
     if not picked:
-        print("候補なし(未着手の supply_url 有 RELIST が0件)。全消化済 or ファネル再分析が必要。")
+        print("候補なし(未着手 かつ 仕入可能な RELIST が0件)。全消化済 / 在庫切れ / ファネル再分析が必要。")
         return
 
     # 初回(relist) と 2回目以降(END停止) に振り分け。
@@ -266,13 +341,13 @@ def main():
     print("▶ ③ 書戻し: ③ボタンで Add結果→スプシB列に新ItemID")
     print("※ watcher有は候補外 / 2回目以降は relist打ち切り(効果なし実証)")
 
-    # 進捗ダッシュボード更新 (全体像可視化・非致命)。読込済の rows/b_map を再利用
+    # 進捗ダッシュボード更新 (全体像可視化・非致命)。読込済の rows/b_map/stock_index を再利用
     try:
         import relist_dashboard as rd
-        drows, dsummary = rd.build_rows(rows, b_map)
+        drows, dsummary = rd.build_rows(rows, b_map, stock_index=stock_index)
         rd.write_dashboard(drows, dsummary, os.path.basename(src))
         print(f"\n📋 進捗スプシ更新: タブ「{rd.DASH_TAB}」"
-              f"(総数{dsummary['total']}/✅済{dsummary['done']}/⏳未{dsummary['todo']}・あと{-(-dsummary['todo']//CAP)}バッチ)")
+              f"(総数{dsummary['total']}/✅済{dsummary['done']}/⏳未{dsummary['todo']}/🔴在庫切れ{dsummary['oos']}・あと{-(-dsummary['todo']//CAP)}バッチ)")
     except Exception as _e:  # noqa: BLE001
         print(f"\n⚠ 進捗スプシ更新スキップ: {type(_e).__name__}: {_e}")
 

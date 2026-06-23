@@ -29,20 +29,29 @@ DASH_TAB = "取下再出品"
 HEADERS = ["#", "状態", "価格$", "カテゴリ", "タイトル", "旧ItemID", "新ItemID", "仕入URL"]
 
 
-def build_rows(funnel_rows, b_map):
+def build_rows(funnel_rows, b_map, stock_index=None, now=None):
     """funnel RELIST候補(supply_url有) → ダッシュボード行 + サマリー。価格降順。
 
     b_map は load_current_b_map の戻り = {ASIN/SKU: 現B列}。照合は sku_from_url(supply_url)
     で行う (2026-06-23 ASINキー化。coliid 揺れ起因の「不明」誤判定を解消)。
+
+    stock_index (load_sheet_index の戻り) を渡すと **在庫切れ(監視くん取下げ/3RD)** を
+    🔴在庫切れ として区別表示する (2026-06-23)。「未」に見えても仕入不可なものを可視化。
     """
     cands = [r for r in rf.relist_candidates(funnel_rows) if (r.get("supply_url") or "").strip()]
     cands.sort(key=lambda x: -float(x.get("price") or 0))
-    out, done, todo, unknown = [], 0, 0, 0
+    if now is None:
+        now = datetime.datetime.now()
+    out, done, todo, unknown, oos = [], 0, 0, 0, 0
     for i, r in enumerate(cands, 1):
         url = (r.get("supply_url") or "").strip()
         fid = (r.get("item_id") or "").strip()
-        cur = (b_map.get(rf.sku_from_url(url)) or "").strip()
-        if cur and fid and cur == fid:
+        key = rf.sku_from_url(url)
+        cur = (b_map.get(key) or "").strip()
+        # 在庫切れ(売り切れ○)は最優先で区別。未/済の前に判定 (仕入不可は再出品対象外)
+        if stock_index is not None and (stock_index.get(key) or {}).get("sold_out"):
+            state, newid = "🔴在庫切れ", cur; oos += 1
+        elif cur and fid and cur == fid:
             state, newid = "⏳未", ""; todo += 1
         elif cur and fid and cur != fid:
             state, newid = "✅済", cur; done += 1
@@ -50,7 +59,8 @@ def build_rows(funnel_rows, b_map):
             state, newid = "❓不明", cur; unknown += 1
         out.append([i, state, r.get("price", ""), r.get("category", ""),
                     (r.get("title", "") or "")[:60], fid, newid, url])
-    return out, {"total": len(cands), "done": done, "todo": todo, "unknown": unknown}
+    return out, {"total": len(cands), "done": done, "todo": todo,
+                 "unknown": unknown, "oos": oos}
 
 
 def write_dashboard(rows, summary, src_name):
@@ -69,8 +79,9 @@ def write_dashboard(rows, summary, src_name):
         ws = sh.add_worksheet(title=DASH_TAB, rows=len(rows) + 5, cols=len(HEADERS))
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     batches = -(-summary["todo"] // 10)
+    oos = summary.get("oos", 0)
     summary_line = (f"取下再出品 進捗  |  総数 {summary['total']}  /  ✅済 {summary['done']}  /  "
-                    f"⏳未 {summary['todo']} (あと{batches}バッチ)  /  ❓不明 {summary['unknown']}  "
+                    f"⏳未 {summary['todo']} (あと{batches}バッチ)  /  🔴在庫切れ {oos}  /  ❓不明 {summary['unknown']}  "
                     f"|  元funnel: {src_name}  |  更新 {now}")
     data = [[summary_line] + [""] * (len(HEADERS) - 1), HEADERS] + rows
     ws.update(range_name="A1", values=data, value_input_option="RAW")
@@ -84,9 +95,10 @@ def main():
     src = max(files, key=os.path.getmtime)
     funnel_rows = list(csv.DictReader(open(src, encoding="utf-8")))
     print(f"対象 funnel: {os.path.basename(src)}")
-    print("📊 スプシB列読込中...")
-    b_map = rf.load_current_b_map()
-    rows, summary = build_rows(funnel_rows, b_map)
+    print("📊 スプシ読込中 (B列 + 監視くん売り切れ状態)...")
+    stock_index = rf.load_sheet_index()
+    b_map = {k: v["b"] for k, v in stock_index.items()}
+    rows, summary = build_rows(funnel_rows, b_map, stock_index=stock_index)
     _, line = write_dashboard(rows, summary, os.path.basename(src))
     print("✅ ダッシュボード更新:", line)
     print(f"   → 管理スプシ2 タブ「{DASH_TAB}」を参照")

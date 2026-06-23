@@ -98,8 +98,9 @@ def main():
     src = max(files, key=os.path.getmtime)
     funnel_rows = list(csv.DictReader(open(src, encoding="utf-8")))
     print(f"対象 funnel: {os.path.basename(src)} ({len(funnel_rows)}行)")
-    print("📊 スプシB列読込中...")
-    b_map = rf.load_current_b_map()
+    print("📊 スプシ読込中 (B列 + 監視くん売り切れ状態)...")
+    stock_index = rf.load_sheet_index()
+    b_map = {k: v["b"] for k, v in stock_index.items()}
 
     import gspread
     from google.oauth2.service_account import Credentials
@@ -109,11 +110,11 @@ def main():
 
     # ファネル分析(サマリー)=別「ファネル分析」スプシ / 需要・新規強化=demand_winners /
     # 再仕入れ=restock_worklist が各々担当 (Stage1-2)。ここは 取下再出品 タブのみ refresh。
-    drows, dsummary = rd.build_rows(funnel_rows, b_map)
+    drows, dsummary = rd.build_rows(funnel_rows, b_map, stock_index=stock_index)
     rd.write_dashboard(drows, dsummary, os.path.basename(src))
 
     print(f"✅ 「既存メンテ」取下再出品タブ更新完了")
-    print(f"   取下再出品 : 総{dsummary['total']}/✅済{dsummary['done']}/⏳未{dsummary['todo']} (あと{-(-dsummary['todo']//10)}バッチ)")
+    print(f"   取下再出品 : 総{dsummary['total']}/✅済{dsummary['done']}/⏳未{dsummary['todo']}/🔴在庫切れ{dsummary['oos']} (あと{-(-dsummary['todo']//10)}バッチ)")
 
 
 if __name__ == "__main__":

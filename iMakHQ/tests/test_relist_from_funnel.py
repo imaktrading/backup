@@ -35,7 +35,7 @@ def test_sku_from_url_mercari_shops_fallback_tail12():
 def test_select_caps_to_10_by_price_desc():
     rows = [_row(f"i{i}", price=i, supply_url=f"https://jp.mercari.com/item/m{i:011d}")
             for i in range(20)]
-    picked, total, skipped, already = rf.select(rows, cap=10)
+    picked, total, skipped, already, oos = rf.select(rows, cap=10)
     assert total == 20
     assert skipped == 0
     assert already == 0
@@ -50,7 +50,7 @@ def test_select_excludes_missing_supply_url():
         _row("b", 90, supply_url=""),          # 除外
         _row("c", 80, supply_url="   "),       # 空白のみ → 除外
     ]
-    picked, total, skipped, already = rf.select(rows, cap=10)
+    picked, total, skipped, already, oos = rf.select(rows, cap=10)
     assert total == 3
     assert skipped == 2
     assert [r["item_id"] for r in picked] == ["a"]
@@ -62,7 +62,7 @@ def test_select_only_relist_flag():
         _row("b", 90, flags="NO_CONVERT"),     # RELIST でない → 除外
         _row("c", 80, flags=""),
     ]
-    picked, total, skipped, already = rf.select(rows, cap=10)
+    picked, total, skipped, already, oos = rf.select(rows, cap=10)
     assert total == 1
     assert [r["item_id"] for r in picked] == ["a"]
 
@@ -81,7 +81,7 @@ def test_select_excludes_already_relisted_by_b_diff():
         "https://x/u3": "",             # 空 → 除外
         # u4 は b_map に無い
     }
-    picked, total, skipped_no_supply, already = rf.select(rows, sheet_b_map=b_map, cap=10)
+    picked, total, skipped_no_supply, already, oos = rf.select(rows, sheet_b_map=b_map, cap=10)
     assert total == 4
     assert skipped_no_supply == 0
     assert already == 3                              # done1 / gone / nomatch
@@ -98,7 +98,7 @@ def test_select_matches_amazon_asin_across_coliid():
                  supply_url="https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=AAA&psc=1")]
     # b_map は ASIN キー (load_current_b_map の戻り)。A列は別 coliid 由来でも同 ASIN。
     b_map = {rf.sku_from_url("https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=BBB"): "oldid1"}
-    picked, total, skipped_no_supply, already = rf.select(rows, sheet_b_map=b_map, cap=10)
+    picked, total, skipped_no_supply, already, oos = rf.select(rows, sheet_b_map=b_map, cap=10)
     assert already == 0
     assert [r["item_id"] for r in picked] == ["oldid1"]   # coliid 差を ASIN が吸収=未着手で拾える
 
@@ -121,10 +121,66 @@ def test_split_by_history_empty_history_all_first():
     assert len(relist_picks) == 2 and end_only == []
 
 
+# ---- Phase② 在庫ゲート (監視くん『売り切れ』に従う・fail-closed) ----
+import datetime as _dt  # noqa: E402
+
+
+def test_parse_check_time_variants():
+    assert rf.parse_check_time("2026/6/2 10:44:39") == _dt.datetime(2026, 6, 2, 10, 44, 39)
+    assert rf.parse_check_time("2026/06/23 16:08:15") == _dt.datetime(2026, 6, 23, 16, 8, 15)
+    assert rf.parse_check_time("2026/6/23") == _dt.datetime(2026, 6, 23, 0, 0, 0)  # 時刻欠落OK
+    assert rf.parse_check_time("") is None
+    assert rf.parse_check_time("ゴミ") is None
+
+
+def test_stock_verdict_fail_closed():
+    now = _dt.datetime(2026, 6, 23, 12, 0, 0)
+    fresh = _dt.datetime(2026, 6, 23, 6, 0, 0)   # 6h前
+    old = _dt.datetime(2026, 6, 20, 6, 0, 0)     # 3日前
+    assert rf.stock_verdict({"sold_out": False, "check_time": fresh}, now) == "OK"
+    assert rf.stock_verdict({"sold_out": True, "check_time": fresh}, now) == "SOLD_OUT"
+    assert rf.stock_verdict({"sold_out": False, "check_time": old}, now) == "STALE"
+    assert rf.stock_verdict({"sold_out": False, "check_time": None}, now) == "STALE"
+    assert rf.stock_verdict(None, now) == "NO_ROW"   # スプシ行無し → 出さない
+
+
+def test_select_stock_gate_excludes_sold_out_and_stale():
+    """在庫ゲート: 未着手でも 売り切れ○/古い/行無し は再出品しない (B0B78CZ3W3 事故対策)。"""
+    now = _dt.datetime(2026, 6, 23, 12, 0, 0)
+    fresh = _dt.datetime(2026, 6, 23, 6, 0, 0)
+    old = _dt.datetime(2026, 6, 1, 6, 0, 0)
+    rows = [
+        _row("ok", 100, supply_url="https://www.amazon.co.jp/dp/B000000001"),   # 在庫あり→出す
+        _row("so", 90, supply_url="https://www.amazon.co.jp/dp/B000000002"),    # 売り切れ→除外
+        _row("st", 80, supply_url="https://www.amazon.co.jp/dp/B000000003"),    # 古い→除外
+        _row("nr", 70, supply_url="https://www.amazon.co.jp/dp/B000000004"),    # 行無し→除外
+    ]
+    b_map = {f"B00000000{i}": iid for i, iid in [(1, "ok"), (2, "so"), (3, "st"), (4, "nr")]}
+    # nr は stock_index に無い (行無し)
+    stock = {
+        "B000000001": {"b": "ok", "sold_out": False, "check_time": fresh},
+        "B000000002": {"b": "so", "sold_out": True, "check_time": fresh},
+        "B000000003": {"b": "st", "sold_out": False, "check_time": old},
+    }
+    picked, total, no_supply, already, oos = rf.select(
+        rows, sheet_b_map=b_map, stock_index=stock, now=now, cap=10)
+    assert [r["item_id"] for r in picked] == ["ok"]   # 在庫ありのみ
+    assert already == 0                                # 全て未着手 (B==funnel)
+    assert oos == 3                                    # so/st/nr = 仕入不可で除外
+
+
+def test_select_no_stock_index_keeps_old_behavior():
+    # stock_index 未指定 (None) なら在庫ゲートは効かない (従来挙動・後方互換)
+    rows = [_row("a", 100, supply_url="https://www.amazon.co.jp/dp/B000000001")]
+    b_map = {"B000000001": "a"}
+    picked, total, no_supply, already, oos = rf.select(rows, sheet_b_map=b_map, cap=10)
+    assert [r["item_id"] for r in picked] == ["a"] and oos == 0
+
+
 def test_write_pending_columns_and_sku(tmp_path):
     rows = [_row("itm1", 100, supply_url="https://jp.mercari.com/item/m22222222222",
                  category="Reels", title="Daiwa Reel")]
-    picked, _, _, _ = rf.select(rows, cap=10)
+    picked, _, _, _, _ = rf.select(rows, cap=10)
     out = tmp_path / "pending.csv"
     rf.write_pending(picked, str(out))
     got = list(csv.DictReader(open(out, encoding="utf-8-sig")))
