@@ -57,9 +57,9 @@ def clean_kw(title):
     return re.sub(r"\s+", " ", t).strip()
 
 
-def _card(url, price, checked_name, label=""):
-    """候補カード(ラジオ+画像+価格+リンク)の HTML。"""
-    img = mercari_image_url(url)
+def _card(url, price, image, checked_name, label=""):
+    """候補カード(ラジオ+画像+価格+リンク)の HTML。image は検索結果から取得した実URL。"""
+    img = image or mercari_image_url(url)   # 実src優先、無ければ /item/m から構築
     img_tag = (f"<img src='{_html.escape(img)}' loading='lazy'>" if img
                else "<div class=noimg>画像なし</div>")
     pr = f"¥{price:,}" if price else ""
@@ -118,7 +118,7 @@ def _page(heading, items, stage):
         if not cands:
             parts.append("<div class=skip>候補なし</div>")
         for c in cands:
-            parts.append(_card(c["url"], c.get("price", 0), nm))
+            parts.append(_card(c["url"], c.get("price", 0), c.get("image", ""), nm))
         # 該当なし(スキップ)
         parts.append(f"<label class=cand><input type=radio name='{nm}' value='NONE'>"
                      f"<div class=noimg>該当なし<br>(skip)</div></label>")
@@ -230,13 +230,38 @@ def _make_driver():
     return uc.Chrome(options=opts, version_main=maj) if maj else uc.Chrome(options=opts)
 
 
+def _href_to_image(src):
+    """検索結果HTMLの各item-cellから href→実画像src を作る (item=mercdn / shops=mercari-shops 両対応)。
+
+    Shops は assets.mercari-shops-static.com の webp で mercari_image_url では構築不能なため、
+    検索結果の <img src/srcset> を直接拾う(2026-06-24 候補画像が出ない件)。
+    """
+    out = {}
+    for b in re.split(r'data-testid="item-cell"', src)[1:]:
+        hr = re.search(r'href="(/(?:item/m\w+|shops/product/\w+))"', b)
+        if not hr:
+            continue
+        im = re.search(r'(?:src|srcset)="(https://[^"\s]+?\.(?:jpg|jpeg|png|webp)[^"\s]*)"', b)
+        out["https://jp.mercari.com" + hr.group(1)] = im.group(1) if im else ""
+    return out
+
+
 def kw_search(drv, kw, limit):
-    """段階1: キーワード検索(実写候補・価格昇順・通常出品のみ)。新品フィルタは外す(recall優先)。"""
-    url = ("https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw)
-           + "&status=on_sale&order=asc&sort=price")
+    """段階1: キーワード検索(実写候補・通常出品のみ)。
+
+    関連度順(価格昇順にしない): 価格昇順だと「台座のみ/アクリル台座」等の安いアクセサリが
+    上位に来て本体が埋もれる(2026-06-24 ユーザー指摘)。新品フィルタも外す(recall優先・
+    正しい景品を見つけるのが目的。新品担保はパスBの最終確認で)。画像は実src を付与。
+    """
+    url = "https://jp.mercari.com/search?keyword=" + urllib.parse.quote(kw) + "&status=on_sale"
     drv.get(url)
     time.sleep(8)
-    return parse_mercari_items(drv.page_source)[:limit]
+    src = drv.page_source
+    imgmap = _href_to_image(src)
+    items = parse_mercari_items(src)[:limit]
+    for it in items:
+        it["image"] = imgmap.get(it["href"], "")
+    return items
 
 
 def image_search_from_url(drv, mercari_url, limit):
@@ -292,7 +317,8 @@ def pass_identify(n, cand_n):
                 print(f"     ⚠ 検索失敗: {e}"); raw = []
             items.append({"row": t["row"], "item_id": t["item_id"], "title": t["title"],
                           "ref_image": pics[0] if pics else "",
-                          "candidates": [{"url": c["href"], "price": c["price"]} for c in raw]})
+                          "candidates": [{"url": c["href"], "price": c["price"],
+                                          "image": c.get("image", "")} for c in raw]})
     finally:
         try: drv.quit()
         except Exception: pass
@@ -333,7 +359,9 @@ def pass_expand(cand_n):
             items.append({"row": p["row"], "item_id": p["item_id"], "title": p["title"],
                           "ref_image": p.get("ref_image", ""),
                           "picked_image": mercari_image_url(p["picked_url"]),
-                          "candidates": [{"url": c["href"], "price": c["price"]} for c in raw]})
+                          "candidates": [{"url": c["href"], "price": c["price"],
+                                          "image": c.get("image", "") or mercari_image_url(c["href"])}
+                                         for c in raw]})
     finally:
         try: drv.quit()
         except Exception: pass
