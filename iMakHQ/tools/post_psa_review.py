@@ -279,6 +279,22 @@ def _img_url(src: str) -> str:
     return "/img/" + urllib.parse.quote(src, safe="")
 
 
+# 既知の画像ホスト旧→新パス書換 (サイトリニューアルで catalog 保存URLが陳腐化=404 になる対策)。
+# 正本は catalog データ修正だが、catalog 反映前でも viewer で出るよう viewer 側でも吸収する。
+# (dbs-cardgame: 2026-06-23 リニューアルで /fw/jp/images/ → /fw/images/ に変更。/jp 除去)
+_IMG_URL_REWRITES = [
+    ("dbs-cardgame.com/fw/jp/images/", "dbs-cardgame.com/fw/images/"),
+]
+
+
+def _normalize_image_url(src):
+    """既知の陳腐化パターンを現行URLに書換 (該当なしはそのまま)。"""
+    for old, new in _IMG_URL_REWRITES:
+        if old in src:
+            return src.replace(old, new)
+    return src
+
+
 def _default_image_opener(src):
     """外部画像を1回 fetch。(data, content_type) を返す。失敗は例外送出。"""
     req = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0"})
@@ -294,6 +310,7 @@ def fetch_external_image(src, retries=4, opener=None, sleep=time.sleep):
     リトライし、HTTPError(404/403=恒久)は即諦める(無駄打ち防止)。opener/sleep は test 用に注入可。
     """
     opener = opener or _default_image_opener
+    src = _normalize_image_url(src)          # 既知の旧→新パス書換 (dbs リニューアル等)
     for attempt in range(retries):
         try:
             return opener(src)

@@ -38,6 +38,22 @@ def test_http_error_not_retried():
     assert calls["n"] == 1                         # 404 は恒久 → 1回で諦め(無駄打ちしない)
 
 
+def test_dbs_url_renewal_rewrite():
+    """dbs-cardgame サイトリニューアルの旧→新パス書換 (catalog反映前でもviewerで出す)。"""
+    seen = {}
+
+    def opener(src):
+        seen["src"] = src
+        return (b"IMG", "image/webp")
+
+    old = "https://www.dbs-cardgame.com/fw/jp/images/cards/card/jp/E01-08.webp"
+    pr.fetch_external_image(old, opener=opener, sleep=lambda _s: None)
+    assert seen["src"] == "https://www.dbs-cardgame.com/fw/images/cards/card/jp/E01-08.webp"
+    # 既に新パス/他ホストは無改変
+    assert pr._normalize_image_url("https://files.bandai-tcg-plus.com/x/y.png") == \
+        "https://files.bandai-tcg-plus.com/x/y.png"
+
+
 def test_all_transient_gives_up_after_retries():
     calls = {"n": 0}
 
