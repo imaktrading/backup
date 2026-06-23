@@ -167,12 +167,20 @@ def _page(heading, items, stage):
         # 該当なし(スキップ)
         parts.append(f"<label class=cand><input type=radio name='{nm}' value='NONE'>"
                      f"<div class=noimg>該当なし<br>(skip)</div></label>")
-        parts.append("</div></div>")
+        parts.append("</div>")
+        # 手動rescue: 候補が弱い時、自分で見つけた mercari URL を貼る(ラジオより優先)
+        parts.append(f"<div style='margin-top:6px;font-size:12px'>または手動: "
+                     f"<input type=text class=manurl placeholder='候補が弱い時 mercari URL を貼る(実写の出品)' "
+                     f"style='width:60%;padding:3px'></div>")
+        parts.append("</div>")
     parts.append("<div style='padding:16px'><button onclick='submit()'>送信</button></div>")
     parts.append("""<script>
 function submit(){
   var picks={};
   document.querySelectorAll('.item').forEach(function(it){
+    var man=it.querySelector('.manurl');
+    var manv = man ? man.value.trim() : '';
+    if(manv){ picks[it.dataset.row]=manv; return; }   // 手動URL優先(rescue)
     var sel=it.querySelector('input[type=radio]:checked');
     picks[it.dataset.row]= sel ? sel.value : '';
   });
