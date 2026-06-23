@@ -155,6 +155,55 @@ def get_detail(card_id: int | str) -> dict | None:
     return parsed
 
 
+def find_official_card(set_code: str, name: str | None = None,
+                       card_number: str | None = None,
+                       max_pages: int = 15) -> dict | None:
+    """resultAPI.php を expansion(pg)+keyword で絞り、印刷番号で 1 枚を同定する targeted lookup.
+
+    用途: 空 images の backfill / product_id の実在検証(phantom 検出)の両用。
+    Returns {cardID, image_url, card_number_text, name, product_id} | None(公式DBに該当なし=phantom)。
+
+    機構メモ(2026-06-24 確立):
+      - resultAPI.php は HTML index.php と違い JSON を返す(index.php は JS-gated で結果が空)。
+      - **keyword 単独は無視される。`keyword` + `sm_and_keyword='true'` が必須**。
+      - expansion 絞りは form フィールド **`pg`**(= expansion code, 例 'SM12a' / 'SV-P')。
+      - 各 cardList entry は cardThumbFile(=画像URL) と cardID を持つ(padded_id == cardID)。
+    """
+    params: dict = {"regulation_sidebar_form": "all"}
+    if set_code:
+        params["pg"] = set_code
+    if name:
+        params["keyword"] = name
+        params["sm_and_keyword"] = "true"
+    entries: list[dict] = []
+    page = 1
+    while True:
+        data = _get(LIST_API, params={**params, "page": page}).json()
+        entries.extend(data.get("cardList", []) or [])
+        if page >= int(data.get("maxPage", 1)) or page >= max_pages:
+            break
+        page += 1
+    want = str(card_number).lstrip("0") if card_number else None
+    for e in entries:
+        detail = get_detail(e["cardID"])
+        if not detail:
+            continue
+        printed = (detail.get("card_number_text") or "").split("/")[0].lstrip("0")
+        if want is not None and printed != want:
+            continue
+        img = detail.get("image_url") or (
+            ("https://www.pokemon-card.com" + e["cardThumbFile"])
+            if e.get("cardThumbFile") else None)
+        return {
+            "cardID": str(e["cardID"]),
+            "image_url": img,
+            "card_number_text": detail.get("card_number_text"),
+            "name": detail.get("name"),
+            "product_id": derive_product_id(detail),
+        }
+    return None
+
+
 def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
     """detail.php HTML から構造化 dict を抽出 (HTML 構造を直接使う)."""
     # Search page placeholder = カード不在
