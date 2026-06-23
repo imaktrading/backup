@@ -322,12 +322,21 @@ def _ebay_title(item_id):
 
 
 def _make_driver():
+    """uc.Chrome 起動。DNS一時失敗(getaddrinfo)で初期化が稀にコケるのでリトライ。"""
     import undetected_chromedriver as uc
-    opts = uc.ChromeOptions()
-    for a in ("--headless=new", "--no-sandbox", "--lang=ja-JP", "--window-size=1280,1400"):
-        opts.add_argument(a)
     maj = _chrome_major()
-    return uc.Chrome(options=opts, version_main=maj) if maj else uc.Chrome(options=opts)
+    last = None
+    for attempt in range(3):
+        try:
+            opts = uc.ChromeOptions()   # uc は options を消費するので毎回生成
+            for a in ("--headless=new", "--no-sandbox", "--lang=ja-JP", "--window-size=1280,1400"):
+                opts.add_argument(a)
+            return uc.Chrome(options=opts, version_main=maj) if maj else uc.Chrome(options=opts)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            print(f"  ⚠ Chrome起動失敗(attempt {attempt+1}/3): {type(e).__name__} → リトライ", flush=True)
+            time.sleep(6)
+    raise last
 
 
 def _href_to_image(src):
