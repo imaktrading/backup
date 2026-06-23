@@ -177,28 +177,39 @@ def test_select_no_stock_index_keeps_old_behavior():
     assert [r["item_id"] for r in picked] == ["a"] and oos == 0
 
 
+def test_relist_candidates_excludes_psa_ccg():
+    """PSA(CCG)は独立パイプライン管轄 → 取下げ再出品の候補から完全除外 (2026-06-23 指示)。"""
+    rows = [
+        _row("w", 100, category="Wristwatches"),
+        _row("psa", 90, category="CCG Individual Cards", supply_url="https://jp.mercari.com/item/m44444444444"),
+    ]
+    cands = rf.relist_candidates(rows)
+    assert [r["item_id"] for r in cands] == ["w"]   # PSA は候補にすら入らない
+
+
 def test_select_category_gate_excludes_unsupported():
     """カテゴリゲート: ②が再出品できないカテゴリは取り下げない (取下げ→再出品漏れ防止)。
 
-    2026-06-23 PSAカード(CCG)が①でEndされ②で再出品されず宙ぶらりんになった事故対策。
+    2026-06-23 事故対策。例は Action Figures (②未対応だが独立除外はされないカテゴリ)。
+    PSA(CCG)は relist_candidates 段で完全除外なのでここの例には使わない。
     """
     rows = [
         _row("w", 100, supply_url="https://www.amazon.co.jp/dp/B000000001", category="Wristwatches"),
         _row("r", 90, supply_url="https://www.amazon.co.jp/dp/B000000002", category="Reels"),
-        _row("tcg", 95, supply_url="https://jp.mercari.com/item/m33333333333", category="CCG Individual Cards"),
+        _row("fig", 95, supply_url="https://jp.mercari.com/item/m33333333333", category="Action Figures"),
     ]
     picked, total, no_supply, already, oos, unsup = rf.select(
         rows, cap=10, supported_categories={"Wristwatches", "Reels"})
-    assert unsup == 1                                       # CCG = ②未対応で除外
-    assert {r["item_id"] for r in picked} == {"w", "r"}     # tcg は取り下げない
+    assert unsup == 1                                       # Action Figures = ②未対応で除外
+    assert {r["item_id"] for r in picked} == {"w", "r"}     # fig は取り下げない
 
 
 def test_select_no_category_gate_keeps_all():
-    # supported_categories 未指定なら従来どおり全カテゴリ対象 (後方互換)
-    rows = [_row("tcg", 95, supply_url="https://jp.mercari.com/item/m33333333333",
-                 category="CCG Individual Cards")]
+    # supported_categories 未指定なら従来どおり全カテゴリ対象 (後方互換)。CCG以外で確認。
+    rows = [_row("fig", 95, supply_url="https://jp.mercari.com/item/m33333333333",
+                 category="Action Figures")]
     picked, total, no_supply, already, oos, unsup = rf.select(rows, cap=10)
-    assert unsup == 0 and [r["item_id"] for r in picked] == ["tcg"]
+    assert unsup == 0 and [r["item_id"] for r in picked] == ["fig"]
 
 
 def test_write_pending_columns_and_sku(tmp_path):

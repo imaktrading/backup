@@ -75,9 +75,20 @@ def sku_from_url(url: str) -> str:
     return cleaned[-12:].lstrip("/")
 
 
+# 取下げ再出品フローに乗せないカテゴリ (独立パイプラインが専任管轄)。
+# CCG=PSA TCG は psa_to_csv(新規)/psa_resource_gate→psa_restock_*(再仕入れ) が専任。
+# relist 候補から完全除外 = ダッシュボードにも出さない・取下げもしない (2026-06-23 ユーザー指示)。
+EXCLUDED_CATEGORIES = {"CCG Individual Cards"}
+
+
 def relist_candidates(rows):
-    """funnel CSV rows から RELIST フラグ行 (NO_SEARCH+NO_CLICK) を抽出。"""
-    return [r for r in rows if "RELIST" in (r.get("flags") or "").split("|")]
+    """funnel CSV rows から RELIST フラグ行 (NO_SEARCH+NO_CLICK) を抽出。
+
+    EXCLUDED_CATEGORIES (PSA TCG 等の独立パイプライン管轄) は候補から完全除外する。
+    """
+    return [r for r in rows
+            if "RELIST" in (r.get("flags") or "").split("|")
+            and (r.get("category") or "").strip() not in EXCLUDED_CATEGORIES]
 
 
 def load_relisted_history():
