@@ -20,8 +20,10 @@ import csv
 import json
 import sqlite3
 import threading
+import time
 import urllib.parse
 import urllib.request
+import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from datetime import datetime
@@ -277,6 +279,32 @@ def _img_url(src: str) -> str:
     return "/img/" + urllib.parse.quote(src, safe="")
 
 
+def _default_image_opener(src):
+    """外部画像を1回 fetch。(data, content_type) を返す。失敗は例外送出。"""
+    req = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return r.read(), r.headers.get("Content-Type", "image/jpeg")
+
+
+def fetch_external_image(src, retries=4, opener=None, sleep=time.sleep):
+    """外部画像を取得 (transient はリトライ)。戻り: (data, ctype) | None。
+
+    pokemon-card.com 等で DNS一時失敗(getaddrinfo)/timeout が起きると、リトライ無しでは
+    502 → 画像が「ちょいちょい出ない」(2026-06-23 真因特定)。transient(URLError/timeout/conn)は
+    リトライし、HTTPError(404/403=恒久)は即諦める(無駄打ち防止)。opener/sleep は test 用に注入可。
+    """
+    opener = opener or _default_image_opener
+    for attempt in range(retries):
+        try:
+            return opener(src)
+        except urllib.error.HTTPError:
+            return None                      # 404/403 = 恒久 → リトライしても無駄
+        except Exception:                    # URLError(DNS)/timeout/conn = 一時的
+            if attempt < retries - 1:
+                sleep(1.5)
+    return None
+
+
 def _generate_html(targets: list[dict]) -> None:
     # JS で targets info (= cert / expected) を保持、 結果 collect 用
     targets_json = json.dumps([{
@@ -505,16 +533,13 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                 encoded = self.path[len("/img/"):]
                 src = urllib.parse.unquote(encoded)
                 if src.startswith("http://") or src.startswith("https://"):
-                    # 外部画像 = proxy
-                    try:
-                        req = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0"})
-                        with urllib.request.urlopen(req, timeout=10) as r:
-                            data = r.read()
-                            ctype = r.headers.get("Content-Type", "image/jpeg")
-                    except Exception:
+                    # 外部画像 = proxy (transient DNS/timeout はリトライ。画像欠け防止)
+                    fetched = fetch_external_image(src)
+                    if fetched is None:
                         self.send_response(502)
                         self.end_headers()
                         return
+                    data, ctype = fetched
                 else:
                     # ローカルファイル
                     p = Path(src)
