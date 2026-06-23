@@ -96,16 +96,21 @@ def build_keyword(c_title, ebay_title=""):
     return kw, prize
 
 
-def _card(url, price, image, checked_name, label=""):
-    """候補カード(ラジオ+画像+価格+リンク)の HTML。image は検索結果から取得した実URL。"""
+def _card(url, price, image, name, multi=False):
+    """候補カード(選択+画像+価格+リンク)。multi=True で checkbox(複数選択), False で radio(単一)。
+
+    image は検索結果から取得した実URL(Shops含む)。リンクは新品確認用に target=_blank。
+    """
     img = image or mercari_image_url(url)   # 実src優先、無ければ /item/m から構築
     img_tag = (f"<img src='{_html.escape(img)}' loading='lazy'>" if img
                else "<div class=noimg>画像なし</div>")
     pr = f"¥{price:,}" if price else ""
-    return (f"<label class=cand>"
-            f"<input type=radio name='{_html.escape(checked_name)}' value='{_html.escape(url)}'>"
-            f"{img_tag}<div class=meta>{pr}<br>"
-            f"<a href='{_html.escape(url)}' target=_blank>開く</a>{_html.escape(label)}</div></label>")
+    if multi:
+        inp = f"<input type=checkbox class=pick value='{_html.escape(url)}'>"
+    else:
+        inp = f"<input type=radio class=pick name='{_html.escape(name)}' value='{_html.escape(url)}'>"
+    return (f"<label class=cand>{inp}{img_tag}<div class=meta>{pr}<br>"
+            f"<a href='{_html.escape(url)}' target=_blank>開く(新品確認)</a></div></label>")
 
 
 def build_identify_html(items):
@@ -139,10 +144,12 @@ def _page(heading, items, stage):
              ".meta{font-size:11px}.skip{color:#a00}"
              "button{font-size:16px;padding:8px 24px;background:#07f;color:#fff;border:0;border-radius:5px;cursor:pointer}"
              "</style>"]
-    parts.append(f"<div class=hd>{_html.escape(heading)} — 各行で1つ選び、下の『送信』を押す</div>")
+    multi = (stage == "expand")
+    sel_hint = "同じ景品を**複数**選べる(主supply=最安+補URL)" if multi else "正しい景品を**1つ**選ぶ"
+    parts.append(f"<div class=hd>{_html.escape(heading)} — 各行で{sel_hint}、下の『送信』</div>")
     for it in items:
         nm = f"row_{it['row']}"
-        parts.append(f"<div class=item data-row='{it['row']}'>")
+        parts.append(f"<div class=item data-row='{it['row']}' data-multi='{1 if multi else 0}'>")
         ebay_url = f"https://www.ebay.com/itm/{it['item_id']}"
         prize = it.get("prize", "")
         prize_tag = (f"<b style='color:#070'>[{_html.escape(prize)}]</b>" if prize
@@ -163,10 +170,11 @@ def _page(heading, items, stage):
         if not cands:
             parts.append("<div class=skip>候補なし</div>")
         for c in cands:
-            parts.append(_card(c["url"], c.get("price", 0), c.get("image", ""), nm))
-        # 該当なし(スキップ)
-        parts.append(f"<label class=cand><input type=radio name='{nm}' value='NONE'>"
-                     f"<div class=noimg>該当なし<br>(skip)</div></label>")
+            parts.append(_card(c["url"], c.get("price", 0), c.get("image", ""), nm, multi=multi))
+        # 該当なし: 単一選択(identify)のみ明示。複数選択(expand)は未チェック=skip。
+        if not multi:
+            parts.append(f"<label class=cand><input type=radio class=pick name='{nm}' value='NONE'>"
+                         f"<div class=noimg>該当なし<br>(skip)</div></label>")
         parts.append("</div>")
         # 手動rescue: 候補が弱い時、自分で見つけた mercari URL を貼る(ラジオより優先)
         parts.append(f"<div style='margin-top:6px;font-size:12px'>または手動: "
@@ -178,15 +186,19 @@ def _page(heading, items, stage):
 function submit(){
   var picks={}, chosen=0;
   document.querySelectorAll('.item').forEach(function(it){
-    var man=it.querySelector('.manurl');
-    var manv = man ? man.value.trim() : '';
-    var v='';
-    if(manv){ v=manv; }                                   // 手動URL優先(rescue)
-    else { var sel=it.querySelector('input[type=radio]:checked'); v= sel?sel.value:''; }
-    picks[it.dataset.row]=v;
-    if(v && v!=='NONE') chosen++;
+    var multi = it.dataset.multi==='1';
+    var arr=[];
+    var man=it.querySelector('.manurl'); var manv = man ? man.value.trim() : '';
+    if(manv) arr.push(manv);                              // 手動URL(rescue)も採用
+    it.querySelectorAll('input.pick:checked').forEach(function(ip){
+      if(ip.value && ip.value!=='NONE') arr.push(ip.value);
+    });
+    // 重複除去
+    arr = arr.filter(function(u,i){return arr.indexOf(u)===i;});
+    picks[it.dataset.row]= multi ? arr : (arr[0]||'');    // expand=配列(複数) / identify=単一
+    if(arr.length) chosen++;
   });
-  if(!confirm(chosen+' 件を選択しました。送信しますか?(該当なし/未選択は除外)')) return;
+  if(!confirm(chosen+' 行で選択しました。送信しますか?(未選択は除外)')) return;
   var btn=document.getElementById('sendbtn'); if(btn){btn.disabled=true; btn.textContent='送信中...';}
   fetch('/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(picks)})
    .then(r=>r.json())
@@ -378,10 +390,22 @@ def image_search_from_url(drv, mercari_url, limit):
             return []
         fin[0].send_keys(p)
         time.sleep(12)
-        res = parse_image_search_results(drv.page_source)
+        src = drv.page_source
+        res = parse_image_search_results(src)
     except Exception:
         return []
+    # 画像検索モーダルから href→実画像src(item=mercdn / shops=mercari-shops 両対応)。
+    # parse_image_search_results は画像を返さない+Shopsは mercari_image_url で構築不可のため。
+    imgmap = {}
+    for seg in re.split(r'data-location="image_search:similar_looks_modal:item_thumbnail"', src)[1:]:
+        hr = re.search(r'href="(/(?:item/m\w+|shops/product/\w+))"', seg)
+        if not hr:
+            continue
+        im = re.search(r'(?:src|srcset)="(https://[^"\s]+?\.(?:jpg|jpeg|png|webp)[^"\s]*)"', seg)
+        imgmap["https://jp.mercari.com" + hr.group(1)] = im.group(1) if im else ""
     onsale = sorted([r for r in res if not r["sold"]], key=lambda x: x["price"])
+    for r in onsale:
+        r["image"] = imgmap.get(r["href"], "")
     return onsale[:limit]
 
 
@@ -455,18 +479,20 @@ def pass_expand(cand_n):
         try: drv.quit()
         except Exception: pass
     finals = serve_and_collect(build_expand_html(items))
-    confirmations = {}
-    aux = {}   # 補URL記録(候補群)
-    by_row = {str(it["row"]): it for it in items}
+    confirmations = {}   # row → 主supply(A列昇格)
+    aux = {}             # row → 補URL(残りの代替supply・最大5)
     for row, val in finals.items():
-        if val and val != "NONE":
-            confirmations[int(row)] = val
-            if row in by_row:
-                aux[int(row)] = [val] + [c["url"] for c in by_row[row]["candidates"] if c["url"] != val][:4]
+        urls = val if isinstance(val, list) else ([val] if (val and val != "NONE") else [])
+        seen = set()
+        urls = [u for u in urls if u and u != "NONE" and not (u in seen or seen.add(u))]
+        if urls:
+            confirmations[int(row)] = urls[0]    # 先頭(最安 or 手動)= 主supply → A列
+            if len(urls) > 1:
+                aux[int(row)] = urls[1:6]        # 残り = 補URL(mercari/Shops混在OK・最大5)
     n = write_confirmed(confirmations)
     if aux:
         try:
-            sheet_io.write_aux_urls(aux)   # 候補群を補URL列に記録(監査)
+            sheet_io.write_aux_urls(aux)   # 代替supplyを補URL列(AC-AG)に記録
         except Exception as e:  # noqa: BLE001
             print(f"  ⚠ 補URL記録スキップ: {e}")
     print(f"\n✅ 確定 {n}件: A列に新supply昇格 + B列クリア + 売り切れ解除 → 通常②(mercari --sheet ichibankuji)で再出品")
