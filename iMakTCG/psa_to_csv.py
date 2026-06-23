@@ -2350,18 +2350,23 @@ def main():
 
     print(f"✓ {len(cert_numbers)}件の PSA 対象行を抽出（B列 itemID 空）")
 
-    # 上から順でなくランダム抽出 (2026-06-10 ユーザー要望: 上位行に偏らず満遍なく出品)
-    # 環境変数 PSA_NO_SHUFFLE=1 で従来の上から順に戻せる
-    if os.environ.get("PSA_NO_SHUFFLE") != "1":
-        import random
-        random.shuffle(cert_numbers)
-
     # 一回 10 件まで固定 (Cloudflare bot 検出回避、2026-05-06)
     # 残りは時間を置いて次回再走で順次処理
     PSA_BATCH_LIMIT = 10
     if len(cert_numbers) > PSA_BATCH_LIMIT:
-        print(f"⚠️ {len(cert_numbers)}件中 ランダム {PSA_BATCH_LIMIT} 件を処理 (残 {len(cert_numbers)-PSA_BATCH_LIMIT} 件は次回再走)")
-        cert_numbers = cert_numbers[:PSA_BATCH_LIMIT]
+        # franchise 均等サンプリング (2026-06-23 ユーザー要望: Pokemon/One Piece/Dragon Ball 均等)
+        # 在庫は Pokemon 大半 → 従来の全体 shuffle だと Pokemon ばかり選ばれ OP/DB が滞留。
+        # C列タイトルで franchise 推定 → round-robin で均等に。PSA_NO_SHUFFLE=1 で従来の上から順。
+        total = len(cert_numbers)
+        if os.environ.get("PSA_NO_SHUFFLE") == "1":
+            cert_numbers = cert_numbers[:PSA_BATCH_LIMIT]
+        else:
+            import collections as _collections
+            from tcg_batch_select import balanced_sample, classify_franchise
+            cert_numbers = balanced_sample(cert_numbers, title_map, PSA_BATCH_LIMIT)
+            _dist = _collections.Counter(classify_franchise(title_map.get(c, "")) for c in cert_numbers)
+            print(f"⚠️ {total}件中 franchise均等 {PSA_BATCH_LIMIT} 件を処理 "
+                  f"(内訳 {dict(_dist)} / 残 {total-PSA_BATCH_LIMIT} 件は次回再走)")
         cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
 
     if cost_map:
