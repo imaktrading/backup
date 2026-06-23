@@ -302,6 +302,59 @@ def _default_image_opener(src):
         return r.read(), r.headers.get("Content-Type", "image/jpeg")
 
 
+IMG_CACHE_DIR = Path(r"C:/dev/iMak_data/dedupe/img_cache")
+
+
+def _cache_key(url):
+    import hashlib
+    return hashlib.sha1(url.encode("utf-8")).hexdigest()
+
+
+def cached_image_get(url, cache_dir=IMG_CACHE_DIR):
+    """ローカル snapshot から取得。(data, ctype) | None。"""
+    k = _cache_key(url)
+    d = cache_dir / k
+    if not d.exists():
+        return None
+    try:
+        ctf = cache_dir / (k + ".ct")
+        ctype = ctf.read_text(encoding="utf-8").strip() if ctf.exists() else "image/jpeg"
+        data = d.read_bytes()
+        return (data, ctype) if data else None
+    except Exception:
+        return None
+
+
+def cached_image_put(url, data, ctype, cache_dir=IMG_CACHE_DIR):
+    """ローカル snapshot に保存 (失敗は致命でない)。"""
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        k = _cache_key(url)
+        (cache_dir / k).write_bytes(data)
+        (cache_dir / (k + ".ct")).write_text(ctype or "image/jpeg", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def get_image_cached(url, cache_dir=IMG_CACHE_DIR, fetch=None):
+    """snapshot方式の取得: ローカルキャッシュ優先 → 無ければ fetch して焼き付ける。(data, ctype) | None。
+
+    一度取得に成功した画像は IMG_CACHE_DIR に永続保存され、以降は外部URLへ取りに行かない
+    (サイトリニューアル/DNS失敗/hotlink に一切左右されない = 「ちょいちょい出ない」の根本解消)。
+    2026-06-23 導入。cache_dir/fetch は test 用に注入可。
+    """
+    url = _normalize_image_url(url)              # 旧→新パス書換後の URL をキーにする
+    hit = cached_image_get(url, cache_dir)
+    if hit is not None:
+        return hit
+    got = (fetch or fetch_external_image)(url)
+    if got is None:
+        return None
+    data, ctype = got
+    cached_image_put(url, data, ctype, cache_dir)
+    return data, ctype
+
+
 def fetch_external_image(src, retries=4, opener=None, sleep=time.sleep):
     """外部画像を取得 (transient はリトライ)。戻り: (data, ctype) | None。
 
@@ -550,8 +603,8 @@ class _ReviewHandler(BaseHTTPRequestHandler):
                 encoded = self.path[len("/img/"):]
                 src = urllib.parse.unquote(encoded)
                 if src.startswith("http://") or src.startswith("https://"):
-                    # 外部画像 = proxy (transient DNS/timeout はリトライ。画像欠け防止)
-                    fetched = fetch_external_image(src)
+                    # 外部画像 = snapshot方式 (ローカルキャッシュ優先 → 無ければ retry/書換 fetch して焼付)
+                    fetched = get_image_cached(src)
                     if fetched is None:
                         self.send_response(502)
                         self.end_headers()

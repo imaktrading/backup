@@ -54,6 +54,49 @@ def test_dbs_url_renewal_rewrite():
         "https://files.bandai-tcg-plus.com/x/y.png"
 
 
+def test_snapshot_cache_serves_locally_after_first_fetch(tmp_path):
+    """snapshot方式: 一度 fetch 成功したら以降はローカルから配信(外部に取りに行かない)。"""
+    calls = {"n": 0}
+
+    def fetch(url):
+        calls["n"] += 1
+        return (b"PNGDATA", "image/png")
+
+    url = "https://www.pokemon-card.com/x/y.jpg"
+    g1 = pr.get_image_cached(url, cache_dir=tmp_path, fetch=fetch)
+    g2 = pr.get_image_cached(url, cache_dir=tmp_path, fetch=fetch)
+    assert g1 == (b"PNGDATA", "image/png")
+    assert g2 == (b"PNGDATA", "image/png")
+    assert calls["n"] == 1                       # 2回目は fetch せずキャッシュ配信(snapshot)
+
+
+def test_snapshot_cache_miss_failure_not_cached(tmp_path):
+    """fetch 失敗(None)はキャッシュしない → 次回再試行できる。"""
+    def fetch_fail(url):
+        return None
+
+    url = "https://x/dead.png"
+    assert pr.get_image_cached(url, cache_dir=tmp_path, fetch=fetch_fail) is None
+    # キャッシュに焼かれていない(成功時だけ焼く)
+    assert pr.cached_image_get(url, cache_dir=tmp_path) is None
+
+
+def test_snapshot_cache_key_after_normalize(tmp_path):
+    """旧dbs URLでも正規化後URLでキャッシュ → 旧/新どちらの要求でも同じ snapshot にヒット。"""
+    calls = {"n": 0}
+
+    def fetch(url):
+        calls["n"] += 1
+        assert "/fw/images/" in url               # 正規化後で fetch される
+        return (b"WEBP", "image/webp")
+
+    old = "https://www.dbs-cardgame.com/fw/jp/images/cards/card/jp/E01-08.webp"
+    new = "https://www.dbs-cardgame.com/fw/images/cards/card/jp/E01-08.webp"
+    pr.get_image_cached(old, cache_dir=tmp_path, fetch=fetch)
+    pr.get_image_cached(new, cache_dir=tmp_path, fetch=fetch)   # 新URL要求も同じキャッシュ
+    assert calls["n"] == 1
+
+
 def test_all_transient_gives_up_after_retries():
     calls = {"n": 0}
 
