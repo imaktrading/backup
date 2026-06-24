@@ -48,6 +48,7 @@ COL_SOLD = 3       # D 売り切れ
 COL_CAT = 17       # R カテゴリ
 COL_TITLE = 2      # C 日本語タイトル
 COL_KUJI_URL = 8   # I 公式くじURL(ユーザーが恒久入力。生成PLのV列は出品後クリアされるため別列)
+COL_COST = 13      # N 仕入価格(円)= V8価格計算のSSOT(sheet_io.PRODUCT_COL_COST と一致)
 _NOISE = ["新品", "未開封", "未使用", "送料無料", "即決", "匿名配送", "正規品", "限定", "おまけつき", "おまけ付き"]
 
 
@@ -252,20 +253,38 @@ def _retry(fn, tries=5, what=""):
     raise last
 
 
-def write_restock(sheet_rows):
-    """{row:int → {a, b, aux}} を A列=a(新supply) / B列=b(在庫補充後itemID) / D列(売り切れ)空 / 補URL=aux。
+def _col_letter(idx):
+    """0-indexed 列番号 → A1 列文字(N列=13→'N')。"""
+    return chr(65 + idx) if idx < 26 else "A" + chr(65 + idx - 26)
 
-    新規出品でなく既存listing在庫補充なので **B列はitemIDを保持/更新**(空にしない)。
+
+def build_restock_reqs(sheet_rows):
+    """sheet_rows → batch_update の range/value list(純関数・test可)。
+
+    A=新supply / B=itemID / D=売切解除 / N=cost(新supply実価格・あれば。V8計算のSSOT)。
+    cost が無い行は N列を書かない(誤って既存cost を消さない)。
     """
-    if not sheet_rows:
-        return 0
-    ws = sheet_io._product_ws()
+    ncol = _col_letter(COL_COST)
     reqs = []
     for row, d in sheet_rows.items():
         reqs.append({"range": f"A{row}", "values": [[d.get("a", "")]]})
         reqs.append({"range": f"B{row}", "values": [[d.get("b", "")]]})
         reqs.append({"range": f"D{row}", "values": [[""]]})   # 売り切れ解除(在庫補充済)
-    ws.batch_update(reqs, value_input_option="RAW")
+        if d.get("cost"):
+            reqs.append({"range": f"{ncol}{row}", "values": [[d.get("cost")]]})  # 新supply実価格→N列
+    return reqs
+
+
+def write_restock(sheet_rows):
+    """{row:int → {a, b, aux, cost}} を A=新supply / B=itemID / D=売切解除 / N=cost / 補URL=aux。
+
+    新規出品でなく既存listing在庫補充なので **B列はitemIDを保持/更新**(空にしない)。
+    cost(新supply実価格)を N列(V8計算SSOT)に焼く = refresh も profit計算もシート正値を使う。
+    """
+    if not sheet_rows:
+        return 0
+    ws = sheet_io._product_ws()
+    ws.batch_update(build_restock_reqs(sheet_rows), value_input_option="RAW")
     aux = {row: d["aux"] for row, d in sheet_rows.items() if d.get("aux")}
     if aux:
         sheet_io.write_aux_urls(aux)
@@ -655,9 +674,14 @@ def pass_expand(cand_n, dry=False):
         urls = [u for u in urls if u and u != "NONE" and not (u in seen or seen.add(u))]
         if urls:
             r = int(row)
-            confirmed[r] = {"item_id": (by_row.get(r) or {}).get("item_id", ""),
+            it = by_row.get(r) or {}
+            # ★主supplyの価格を expand 表示時の候補から確定保存(refresh の cost に使う)。
+            #   現行 mercari は "price":N を JSON で持たず再fetchが不安定なため、選んだ時の値を焼く。
+            price_map = {c.get("url"): c.get("price", 0) for c in it.get("candidates", [])}
+            confirmed[r] = {"item_id": it.get("item_id", ""),
                             "a": urls[0],          # 先頭(最安 or 手動)= 主supply → A列
-                            "aux": urls[1:6]}      # 残り = 補URL(mercari/Shops混在OK・最大5)
+                            "aux": urls[1:6],      # 残り = 補URL(mercari/Shops混在OK・最大5)
+                            "cost": price_map.get(urls[0], 0)}   # 主supply実価格(手動URLは0=refreshでfetch)
     if not confirmed:
         print("確定なし(全行 未選択/該当なし)"); return
     # 書込前に確定を保存(API障害で落ちても再選択不要 → write で再適用)
@@ -720,7 +744,8 @@ def _apply_restock(confirmed):
                 new_id = item_id
                 print(f"  ❌ row{row} eBay在庫補充 最終失敗: {e}(スプシは書く)")
         print(f"  📦 row{row}: {action}  itemID={new_id}")
-        sheet_rows[row] = {"a": d.get("a", ""), "b": new_id, "aux": d.get("aux", [])}
+        sheet_rows[row] = {"a": d.get("a", ""), "b": new_id, "aux": d.get("aux", []),
+                           "cost": d.get("cost", 0)}   # 新supply実価格→N列(V8 SSOT)
     n = _retry(lambda: write_restock(sheet_rows), what="スプシ書込")
     return n
 
@@ -900,9 +925,10 @@ def pass_refresh():
             pp = _manual_prize(sd["prizes"])
         if not pp:
             print(f"     賞={prize or '不明'} → 確定できず skip"); continue
-        cost = gen.fetch_mercari_price(supply) if supply else 0
+        # cost = expand で選んだ時の主supply実価格(保存済)。無い時のみ fetch fallback。
+        cost = d.get("cost") or (gen.fetch_mercari_price(supply) if supply else 0)
         if not cost:
-            print(f"     ⚠️ 新supply価格取得不可({supply[:40]}) → DEFAULT_PRICE", flush=True)
+            print(f"     ⚠️ 新supply価格 不明(保存無 + fetch不可: {supply[:40]}) → DEFAULT_PRICE", flush=True)
         ebay_row, new_title, price, note = _build_refreshed_row(
             gen, base_desc, sd.get("series_name", ""), sd.get("release_year", ""),
             sd.get("price_jpy", ""), sd.get("main_image", ""), kuji_url, supply, pp, cost)
