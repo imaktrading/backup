@@ -1,6 +1,30 @@
 # iMakInventory daily_report
 
-## 2026-06-22 — sold-out 単品 verify の偽滞留 spam 修正 (09:30 cycle ⚠️要対応 誤報の根治)
+## 2026-06-25 — amazon driver も連続 crash で自動再起動 (盲目化 fail-OPEN 対策) + 昨日ログ点検
+
+### ログ点検 (user 指示「昨日のログで不具合ないか」)
+- 決定: 本体監視 06-24 はクリーン。06-23 に一過性2件 (いずれも可視化済・翌 cycle 回復) を検出 →
+  うち1件 (amazon driver 無再起動) は構造ギャップにつき修正。公式監視くん (iMakeBayAPI/inventory_monitor)
+  は全 cycle 正常・mail 全 OK・audit_and_heal が乖離自動補正・scrape 精度 10/10 で不具合なし。
+- 検出した一過性2件 (06-23):
+  - 02:16 SHEET cycle: スプシ書込 DNS失敗 (scrape は全成功・売切14検知)。eBay 取下げは scrape queue
+    起点でスプシ書込から独立 ([[ebay_update_independent_from_sheet]]) = 安全、 [NG] 計上=silent でない。
+  - 06:30 LOW cycle: amazon driver セッション死 (InvalidSessionId 394件)、 row418〜831(396行)が6秒で
+    全滅=1 cycle 盲目。err_writes=396 で AK列計上=silent でない。翌 06-24 は 0件で回復。
+  - 公式 06-24 11:00: Trading API DNS失敗 → Selenium fallback 作動で全78 listing 正常処理 (silent skip 無し)。
+
+### amazon driver 無再起動ギャップ修正 (commit 67dc192)
+- 決定: driver auto-restart が mercari 専用で amazon は driver死後に残り全行盲目化していた
+  (06-23 の396行盲目の真因)。一過性なら自己回復するが持続したら mercari 297連続失敗事故と同型の fail-OPEN。
+- 変更: `monitor_listings.py process_sheet` — (1) driver-dead 検知 (mercari_driver_dead→driver_dead) に
+  "invalid session id"/"InvalidSessionId" 追加。(2) AMAZON_RESTART_THRESHOLD=3 新設、 amazon 連続 crash で
+  create_amazon_driver 再起動 (mercari と同型、 失敗時 None で続行=残り行 error 計上で次 cycle 再試行、
+  fail-closed で偽 OOS 化しない)。(3) amazon 成功で counter リセット。
+- 検証: `tests/test_amazon_driver_restart.py` 3件 (閾値定数 / invalid session id 検知 / 連続
+  InvalidSessionId→create_amazon_driver 2回以上=再起動発火・全行処理しきる、 修正前は create 1回で fail)。
+  offline 159 + pre-commit 115 pass。
+
+
 
 ### sold-out 単品 verify が QuantitySold 取りこぼし → 偽「滞留」⚠️要対応 (commit 0b7f566)
 - 決定: 09:30 HIGH cycle が iid=358251931733 (LOW row131) を「19.6h 取下げ滞留=要対応」と誤報。
