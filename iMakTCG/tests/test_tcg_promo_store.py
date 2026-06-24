@@ -38,6 +38,19 @@ def test_set_get_and_review(tmp_path):
     assert not ps.needs_review({"set_name": "Other Product Card"}, cid2, path=p)
 
 
+def test_needs_review_drives_build_warning(tmp_path):
+    """build時フラグ契約: promo系で override 無 → needs_review True(=generic で黙らせず警告)。
+    確定後は False(警告止む)。psa_to_csv の build時 '🏷️ 注意' はこの真偽に従う。"""
+    p = str(tmp_path / "promo.json")
+    specs = {"variant_type": "other_product"}
+    cid = "P-099_OTHER PRODUCT CARD"
+    assert ps.needs_review(specs, cid, path=p)            # 未確定 → 警告対象
+    ps.set_promo(cid, "Some Campaign", updated_at="2026-06-24", path=p)
+    assert not ps.needs_review(specs, cid, path=p)        # 確定後 → 警告止む
+    # 非promo は対象外 (警告しない)
+    assert not ps.needs_review({"variant_type": "normal"}, "OP01-001", path=p)
+
+
 def _base_fields():
     return {
         "C:Game": "One Piece CCG", "C:Language": "Japanese",

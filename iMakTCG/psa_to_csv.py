@@ -2503,6 +2503,11 @@ def main():
                         errors.append(cert)
                         card_info.append((cert, None))
                         continue
+                    # promo系だが配布元名 未確定 → 黙って generic で出さず build時にもフラグ
+                    # (レビューを通らない経路=verify無効/timeout でも「気づかない」を消す。出品はブロックしない)
+                    if _chk.get("_promo_needs_review"):
+                        print(f"    🏷️ 注意 #{cert}: プロモ系だが配布元名 未確定(promo override 無)"
+                              f" → generic タイトルで出品。PSA Review の promo欄で確定すると次回反映")
                     row = apply_new_gen_override(row, headers, cert, forced_card_id=_forced)
             except Exception as _e:
                 print(f"    ⚠️ new-gen override skip (#{cert}): {type(_e).__name__}: {_e}")
