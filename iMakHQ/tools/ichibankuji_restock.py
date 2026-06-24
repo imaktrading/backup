@@ -480,7 +480,7 @@ def pass_identify(n, cand_n):
     print("   次: python ichibankuji_restock.py expand")
 
 
-def pass_expand(cand_n):
+def pass_expand(cand_n, dry=False):
     if not os.path.exists(PICKS_FILE):
         print(f"picks がありません。先に identify を実行: {PICKS_FILE}"); return
     picks = json.load(open(PICKS_FILE, encoding="utf-8"))
@@ -524,6 +524,14 @@ def pass_expand(cand_n):
     # 書込前に確定を保存(API障害で書込が落ちても再選択不要 → write モードで再適用可)
     _save_confirmed(confirmations, aux)
     print(f"  💾 確定を保存(書込失敗時は再選択不要・write で再適用): {CONFIRMED_FILE}")
+    if dry:
+        print(f"\n🧪 DRY-RUN: スプシ書込なし。確定予定 {len(confirmations)}件:")
+        for r in confirmations:
+            print(f"   row{r}: A列← {confirmations[r]}")
+            for u in aux.get(r, []):
+                print(f"            補URL← {u}")
+        print(f"   → 本番反映は: python ichibankuji_restock.py write")
+        return
     try:
         n = _apply_confirmed(confirmations, aux)
     except Exception as e:  # noqa: BLE001
@@ -568,13 +576,13 @@ def main():
         n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
         pass_identify(n, cand_n=10)
     elif mode == "expand":
-        pass_expand(cand_n=10)
+        pass_expand(cand_n=10, dry=("--dry" in sys.argv))
     elif mode == "write":
         pass_write()
     else:
         print("使い方:\n  python ichibankuji_restock.py identify [件数]   # パスA 画像特定\n"
-              "  python ichibankuji_restock.py expand              # パスB 画像検索+確定\n"
-              "  python ichibankuji_restock.py write               # 書込失敗の復旧(再選択不要)")
+              "  python ichibankuji_restock.py expand [--dry]      # パスB 画像検索+確定(--dry=書込なしテスト)\n"
+              "  python ichibankuji_restock.py write               # dry/失敗後の本番反映(再選択不要)")
 
 
 if __name__ == "__main__":
