@@ -97,21 +97,24 @@ def build_keyword(c_title, ebay_title=""):
     return kw, prize
 
 
-def _card(url, price, image, name, multi=False):
-    """候補カード(選択+画像+価格+リンク)。multi=True で checkbox(複数選択), False で radio(単一)。
+def _card(url, price, image, name, multi=False, cond="", ship=""):
+    """候補カード(選択+画像+価格+状態/送料+リンク)。multi=True で checkbox(複数選択)。
 
-    image は検索結果から取得した実URL(Shops含む)。リンクは新品確認用に target=_blank。
+    image は検索結果から取得した実URL(Shops含む)。cond/ship は詳細ページ由来(新品+送料込みのみ通過)。
     """
     img = image or mercari_image_url(url)   # 実src優先、無ければ /item/m から構築
     img_tag = (f"<img src='{_html.escape(img)}' loading='lazy'>" if img
                else "<div class=noimg>画像なし</div>")
     pr = f"¥{price:,}" if price else ""
+    cs = ""
+    if cond or ship:
+        cs = f"<br><span style='color:#070;font-size:10px'>{_html.escape(cond)} {_html.escape(ship)}</span>"
     if multi:
         inp = f"<input type=checkbox class=pick value='{_html.escape(url)}'>"
     else:
         inp = f"<input type=radio class=pick name='{_html.escape(name)}' value='{_html.escape(url)}'>"
-    return (f"<label class=cand>{inp}{img_tag}<div class=meta>{pr}<br>"
-            f"<a href='{_html.escape(url)}' target=_blank>開く(新品確認)</a></div></label>")
+    return (f"<label class=cand>{inp}{img_tag}<div class=meta>{pr}{cs}<br>"
+            f"<a href='{_html.escape(url)}' target=_blank>開く</a></div></label>")
 
 
 def build_identify_html(items):
@@ -171,7 +174,8 @@ def _page(heading, items, stage):
         if not cands:
             parts.append("<div class=skip>候補なし</div>")
         for c in cands:
-            parts.append(_card(c["url"], c.get("price", 0), c.get("image", ""), nm, multi=multi))
+            parts.append(_card(c["url"], c.get("price", 0), c.get("image", ""), nm, multi=multi,
+                               cond=c.get("cond", ""), ship=c.get("ship", "")))
         # 該当なし: 単一選択(identify)のみ明示。複数選択(expand)は未チェック=skip。
         if not multi:
             parts.append(f"<label class=cand><input type=radio class=pick name='{nm}' value='NONE'>"
@@ -535,6 +539,37 @@ def image_search_from_url(drv, mercari_url, limit):
     return onsale[:limit]
 
 
+_KEEP_COND = ("新品、未使用", "未使用に近い")   # 新品扱い。これ以外(目立った傷/やや傷…)は除外
+
+
+def _cond_ship(drv, url):
+    """商品詳細ページから (状態, 送料負担) を取得。失敗は ('','')。"""
+    try:
+        drv.get(url)
+        time.sleep(3)
+        s = drv.page_source
+        c = re.search(r"(新品、未使用|未使用に近い|目立った傷や汚れなし|やや傷や汚れあり|傷や汚れあり|全体的に状態が悪い)", s)
+        ship = "送料込み" if "送料込み" in s else ("着払い" if "着払い" in s else "")
+        return (c.group(1) if c else "", ship)
+    except Exception:
+        return ("", "")
+
+
+def _filter_new_freeship(drv, raw):
+    """画像検索候補を **新品(新品、未使用/未使用に近い) かつ 送料込み** だけに絞る(詳細ページ訪問)。
+
+    状態/送料は検索結果に無く詳細ページにしかないため各候補を訪問(やや遅い)。
+    やや傷/目立った傷/着払い は除外(2026-06-24 ユーザー: 新品+送料込みのみ)。
+    """
+    kept = []
+    for c in raw:
+        cond, ship = _cond_ship(drv, c["href"])
+        if cond in _KEEP_COND and ship == "送料込み":
+            c["cond"], c["ship"] = cond, ship
+            kept.append(c)
+    return kept
+
+
 # ---------------- パス ----------------
 def pass_identify(n, cand_n):
     targets = get_oos_ichibankuji(n)
@@ -595,12 +630,15 @@ def pass_expand(cand_n, dry=False):
                 raw = image_search_from_url(drv, p["picked_url"], cand_n)
             except Exception as e:  # noqa: BLE001
                 print(f"     ⚠ 画像検索失敗: {e}"); raw = []
-            print(f"     候補 {len(raw)}件", flush=True)
+            print(f"     候補 {len(raw)}件 → 状態/送料 確認中(新品+送料込みのみ)...", flush=True)
+            raw = _filter_new_freeship(drv, raw)
+            print(f"     新品+送料込み {len(raw)}件", flush=True)
             items.append({"row": p["row"], "item_id": p["item_id"], "title": p["title"],
                           "ref_image": p.get("ref_image", ""),
                           "picked_image": mercari_image_url(p["picked_url"]),
                           "candidates": [{"url": c["href"], "price": c["price"],
-                                          "image": c.get("image", "") or mercari_image_url(c["href"])}
+                                          "image": c.get("image", "") or mercari_image_url(c["href"]),
+                                          "cond": c.get("cond", ""), "ship": c.get("ship", "")}
                                          for c in raw]})
     finally:
         try: drv.quit()
