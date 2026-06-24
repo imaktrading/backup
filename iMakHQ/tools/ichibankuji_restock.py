@@ -245,21 +245,24 @@ def _retry(fn, tries=5, what=""):
     raise last
 
 
-def write_confirmed(confirmations):
-    """確定 {row:int → supply_url} を A列昇格 + B列クリア + 売り切れ(D)クリア。
+def write_restock(sheet_rows):
+    """{row:int → {a, b, aux}} を A列=a(新supply) / B列=b(在庫補充後itemID) / D列(売り切れ)空 / 補URL=aux。
 
-    A列=新supply(死んだ旧A列を置換)、B列空=未出品扱い、D列空=売り切れ解除 → 通常②で再出品。
+    新規出品でなく既存listing在庫補充なので **B列はitemIDを保持/更新**(空にしない)。
     """
-    if not confirmations:
+    if not sheet_rows:
         return 0
     ws = sheet_io._product_ws()
     reqs = []
-    for row, url in confirmations.items():
-        reqs.append({"range": f"A{row}", "values": [[url]]})
-        reqs.append({"range": f"B{row}", "values": [[""]]})
-        reqs.append({"range": f"D{row}", "values": [[""]]})
+    for row, d in sheet_rows.items():
+        reqs.append({"range": f"A{row}", "values": [[d.get("a", "")]]})
+        reqs.append({"range": f"B{row}", "values": [[d.get("b", "")]]})
+        reqs.append({"range": f"D{row}", "values": [[""]]})   # 売り切れ解除(在庫補充済)
     ws.batch_update(reqs, value_input_option="RAW")
-    return len(confirmations)
+    aux = {row: d["aux"] for row, d in sheet_rows.items() if d.get("aux")}
+    if aux:
+        sheet_io.write_aux_urls(aux)
+    return len(sheet_rows)
 
 
 def serve_and_collect(html_str):
@@ -339,6 +342,100 @@ def _ebay_title(item_id):
             time.sleep(3)
     m = re.search(r"<Title>(.*?)</Title>", txt)
     return _html.unescape(m.group(1)) if m else ""
+
+
+def _ebay_status(item_id):
+    """GetItem(appトークン) → (ListingStatus, Quantity:int)。失敗は ('?', -1)。"""
+    import requests
+    import ebay_getitem_images as g
+    try:
+        k = g._load_keys()
+    except Exception:
+        return ("?", -1)
+    hdr = {"X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
+           "X-EBAY-API-COMPATIBILITY-LEVEL": g._COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
+           "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"], "Content-Type": "text/xml"}
+    body = ('<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
+            f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>")
+    txt = ""
+    for _ in range(4):
+        try:
+            txt = requests.post(g._ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+            break
+        except Exception:
+            time.sleep(4)
+    st = re.search(r"<ListingStatus>(.*?)</ListingStatus>", txt)
+    q = re.search(r"<Quantity>(\d+)</Quantity>", txt)
+    return (st.group(1) if st else "?", int(q.group(1)) if q else -1)
+
+
+def _sell_token():
+    """売り手OAuthトークン(Trading書込用)。refresh してから返す(PSA取下げ/復活で実績)。"""
+    import json as _j
+    import subprocess
+    import ebay_getitem_images as g
+    base = os.path.dirname(os.path.abspath(g.__file__))
+    try:
+        subprocess.run([sys.executable, "oauth_sell_setup.py", "refresh"], cwd=base, capture_output=True, timeout=60)
+    except Exception:
+        pass
+    return _j.load(open(os.path.join(base, "ebay_oauth_token_sell.json"), encoding="utf-8"))["access_token"]
+
+
+def _trading_iaf(call, inner, tok):
+    """Trading API を IAF(売り手OAuth)で叩く。transient リトライ。戻り: レスポンスXML。"""
+    import requests
+    import ebay_getitem_images as g
+    hdr = {"X-EBAY-API-CALL-NAME": call, "X-EBAY-API-SITEID": "0",
+           "X-EBAY-API-COMPATIBILITY-LEVEL": g._COMPAT, "X-EBAY-API-IAF-TOKEN": tok, "Content-Type": "text/xml"}
+    body = (f'<?xml version="1.0" encoding="utf-8"?><{call}Request xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f"{inner}</{call}Request>")
+    last = None
+    for _ in range(5):
+        try:
+            return requests.post(g._ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=40).text
+        except Exception as e:  # noqa: BLE001
+            last = e
+            time.sleep(5)
+    raise last
+
+
+def _ack_ok(txt):
+    m = re.search(r"<Ack>(.*?)</Ack>", txt)
+    return bool(m) and m.group(1) in ("Success", "Warning")
+
+
+def _short_err(txt):
+    m = re.findall(r"<ShortMessage>(.*?)</ShortMessage>", txt)
+    return "; ".join(m[:2]) if m else txt[:80]
+
+
+def ebay_restock(item_id, tok=None):
+    """eBay listing を在庫補充(新規出品でなく既存を戻す)。戻り: (item_id, action)。
+
+    - Active & qty==0 → ReviseFixedPriceItem で Quantity=1(同 itemID 復活)
+    - Completed(取下げ済) → RelistFixedPriceItem(同内容・新 itemID)
+    - Active & qty>0 → 既に在庫あり(no-op)
+    """
+    status, qty = _ebay_status(item_id)
+    tok = tok or _sell_token()
+    if status == "Completed":
+        # Relist は元の Quantity(取下げ時=0)をコピーするので Quantity=1 を明示(在庫復活)。
+        t = _trading_iaf("RelistFixedPriceItem",
+                         f"<Item><ItemID>{item_id}</ItemID><Quantity>1</Quantity></Item>", tok)
+        m = re.search(r"<ItemID>(\d+)</ItemID>", t)
+        if _ack_ok(t) and m:
+            return m.group(1), "relist(新ID・qty=1)"
+        raise RuntimeError(f"Relist失敗: {_short_err(t)}")
+    if status == "Active":
+        if qty > 0:
+            return item_id, "在庫あり(no-op)"
+        t = _trading_iaf("ReviseFixedPriceItem", f"<Item><ItemID>{item_id}</ItemID><Quantity>1</Quantity></Item>", tok)
+        if _ack_ok(t):
+            return item_id, "revise qty=1"
+        raise RuntimeError(f"Revise失敗: {_short_err(t)}")
+    raise RuntimeError(f"未対応 status={status}")
 
 
 def _make_driver():
@@ -509,65 +606,94 @@ def pass_expand(cand_n, dry=False):
         try: drv.quit()
         except Exception: pass
     finals = serve_and_collect(build_expand_html(items))
-    confirmations = {}   # row → 主supply(A列昇格)
-    aux = {}             # row → 補URL(残りの代替supply・最大5)
+    by_row = {it["row"]: it for it in items}   # row → 表示item(item_id 等)
+    confirmed = {}   # row → {item_id, a(主supply), aux(補・最大5)}
     for row, val in finals.items():
         urls = val if isinstance(val, list) else ([val] if (val and val != "NONE") else [])
         seen = set()
         urls = [u for u in urls if u and u != "NONE" and not (u in seen or seen.add(u))]
         if urls:
-            confirmations[int(row)] = urls[0]    # 先頭(最安 or 手動)= 主supply → A列
-            if len(urls) > 1:
-                aux[int(row)] = urls[1:6]        # 残り = 補URL(mercari/Shops混在OK・最大5)
-    if not confirmations:
+            r = int(row)
+            confirmed[r] = {"item_id": (by_row.get(r) or {}).get("item_id", ""),
+                            "a": urls[0],          # 先頭(最安 or 手動)= 主supply → A列
+                            "aux": urls[1:6]}      # 残り = 補URL(mercari/Shops混在OK・最大5)
+    if not confirmed:
         print("確定なし(全行 未選択/該当なし)"); return
-    # 書込前に確定を保存(API障害で書込が落ちても再選択不要 → write モードで再適用可)
-    _save_confirmed(confirmations, aux)
-    print(f"  💾 確定を保存(書込失敗時は再選択不要・write で再適用): {CONFIRMED_FILE}")
+    # 書込前に確定を保存(API障害で落ちても再選択不要 → write で再適用)
+    _save_confirmed(confirmed)
+    print(f"  💾 確定を保存(失敗時は再選択不要・write で再適用): {CONFIRMED_FILE}")
     if dry:
-        print(f"\n🧪 DRY-RUN: スプシ書込なし。確定予定 {len(confirmations)}件:")
-        for r in confirmations:
-            print(f"   row{r}: A列← {confirmations[r]}")
-            for u in aux.get(r, []):
+        print(f"\n🧪 DRY-RUN: eBay/スプシ 書込なし。確定予定 {len(confirmed)}件:")
+        for r in sorted(confirmed):
+            d = confirmed[r]
+            st, q = _ebay_status(d["item_id"]) if d["item_id"] else ("?", -1)
+            plan = "Relist(新ID)" if st == "Completed" else ("Revise qty=1" if st == "Active" and q == 0 else f"({st} qty{q})")
+            print(f"   row{r} itemID={d['item_id']}({st}/qty{q}→{plan}): A列← {d['a']}")
+            for u in d["aux"]:
                 print(f"            補URL← {u}")
-        print(f"   → 本番反映は: python ichibankuji_restock.py write")
+        print(f"   → 本番反映: python ichibankuji_restock.py write")
         return
     try:
-        n = _apply_confirmed(confirmations, aux)
+        n = _apply_restock(confirmed)
     except Exception as e:  # noqa: BLE001
-        print(f"\n❌ スプシ書込が最終的に失敗: {type(e).__name__}: {str(e)[:60]}")
+        print(f"\n❌ 反映が最終的に失敗: {type(e).__name__}: {str(e)[:60]}")
         print(f"   選択は保存済 → 復旧: python ichibankuji_restock.py write")
         return
-    print(f"\n✅ 確定 {n}件: A列に新supply昇格 + B列クリア + 売り切れ解除 + 補URL記録 → 通常②で再出品")
-    print("   ※ 出品くんで『一番くじ』を走らせると、A列の新supplyで再出品されます")
+    print(f"\n✅ 完了 {n}件: eBay在庫補充 + A列=新supply + B列=itemID + 売り切れ解除 + 補URL")
 
 
-def _save_confirmed(confirmations, aux):
-    payload = {"confirmations": {str(k): v for k, v in confirmations.items()},
-               "aux": {str(k): v for k, v in aux.items()}}
+def _save_confirmed(confirmed):
+    """confirmed = {row:int → {item_id, a, aux}} を保存(書込失敗時の再適用用)。"""
+    payload = {"items": {str(k): v for k, v in confirmed.items()}}
     os.makedirs(os.path.dirname(CONFIRMED_FILE), exist_ok=True)
     with open(CONFIRMED_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
-def _apply_confirmed(confirmations, aux):
-    """確定をスプシに適用(retry付き)。A列昇格+B列クリア+売り切れ解除、補URL記録。"""
-    n = _retry(lambda: write_confirmed(confirmations), what="A列/B列/売り切れ書込") if confirmations else 0
-    if aux:
-        _retry(lambda: sheet_io.write_aux_urls(aux), what="補URL書込")
+def _load_confirmed():
+    d = json.load(open(CONFIRMED_FILE, encoding="utf-8"))
+    return {int(k): v for k, v in (d.get("items") or {}).items()}
+
+
+def _apply_restock(confirmed):
+    """confirmed={row:{item_id,a,aux}} → eBay在庫補充(Revise/Relist) + スプシ書込。
+
+    eBay: qty0 Active→Revise qty=1(同ID) / Completed→Relist(新ID)。B列はそのitemIDを保持/更新。
+    スプシ: A列=新supply / B列=補充後itemID / 売り切れ解除 / 補URL。
+    """
+    tok = None
+    try:
+        tok = _sell_token()
+    except Exception as e:  # noqa: BLE001
+        print(f"  ⚠ 売り手トークン取得失敗: {e}(eBay補充はskip・スプシのみ)")
+    sheet_rows = {}
+    for row in sorted(confirmed):
+        d = confirmed[row]
+        item_id = (d.get("item_id") or "").strip()
+        new_id, action = item_id, "no_itemid(eBay補充skip)"
+        if item_id and tok:
+            try:
+                new_id, action = _retry(lambda: ebay_restock(item_id, tok), what=f"row{row} eBay在庫補充")
+            except Exception as e:  # noqa: BLE001
+                action = f"❌FAILED:{type(e).__name__}"
+                new_id = item_id
+                print(f"  ❌ row{row} eBay在庫補充 最終失敗: {e}(スプシは書く)")
+        print(f"  📦 row{row}: {action}  itemID={new_id}")
+        sheet_rows[row] = {"a": d.get("a", ""), "b": new_id, "aux": d.get("aux", [])}
+    n = _retry(lambda: write_restock(sheet_rows), what="スプシ書込")
     return n
 
 
 def pass_write():
-    """書込失敗の復旧: 保存済 ichibankuji_confirmed.json をスプシに再適用(再選択不要)。"""
+    """確定(保存済 or dry後)を eBay在庫補充 + スプシ反映。dry/失敗後の本番反映に使う。"""
     if not os.path.exists(CONFIRMED_FILE):
         print(f"確定ファイルなし: {CONFIRMED_FILE}"); return
-    d = json.load(open(CONFIRMED_FILE, encoding="utf-8"))
-    confirmations = {int(k): v for k, v in d.get("confirmations", {}).items()}
-    aux = {int(k): v for k, v in d.get("aux", {}).items()}
-    print(f"確定 {len(confirmations)}件 を再適用...")
-    n = _apply_confirmed(confirmations, aux)
-    print(f"✅ 再適用 {n}件: A列昇格 + B列クリア + 売り切れ解除 + 補URL記録")
+    confirmed = _load_confirmed()
+    if not confirmed:
+        print("確定なし"); return
+    print(f"確定 {len(confirmed)}件 を eBay在庫補充 + スプシ反映...")
+    n = _apply_restock(confirmed)
+    print(f"✅ 完了 {n}件: eBay在庫補充(Revise/Relist) + A列=新supply + B列=itemID + 売り切れ解除 + 補URL")
 
 
 def main():
