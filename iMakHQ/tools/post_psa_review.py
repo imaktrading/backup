@@ -298,9 +298,19 @@ def _normalize_image_url(src):
     return src
 
 
+def _encode_image_url(src):
+    """URL内の未エンコード文字(スペース等)を %エンコード。urllib.request は requests と違い
+    パスのスペースを自動エンコードせず InvalidURL('control characters') で落ちるため
+    (例: One Piece 'Other Product Card/' フォルダ=スペース入りURL→画像出ない・2026-06-24)。
+    safe に % を含め、既エンコード済URLの二重エンコードを防ぐ。"""
+    if not src:
+        return src
+    return urllib.parse.quote(src, safe="/:?#[]@!$&'()*+,;=%~")
+
+
 def _default_image_opener(src):
     """外部画像を1回 fetch。(data, content_type) を返す。失敗は例外送出。"""
-    req = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0"})
+    req = urllib.request.Request(_encode_image_url(src), headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=15) as r:
         return r.read(), r.headers.get("Content-Type", "image/jpeg")
 
