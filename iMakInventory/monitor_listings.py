@@ -84,6 +84,13 @@ DEFAULT_SLEEP_SEC = 2
 # 3 に下げて自己修復を速め、 浪費を約4分 + 2行に圧縮する。
 MERCARI_RESTART_THRESHOLD = 3
 
+# 2026-06-25: amazon driver も連続 crash で自動再起動する (旧: mercari のみ再起動ありで
+# amazon は無再起動 = driver セッション死後に残り全行が盲目化した)。
+# 2026-06-23 06:30 LOW cycle で amazon driver が InvalidSessionIdException で死亡 →
+# row418〜831 (396行) が 6 秒で全滅 = 1 cycle 盲目 (一過性で翌 cycle 回復したが、
+# 持続したら mercari 297 連続失敗事故 [[driver_restart_trigger_extended]] と同型)。
+AMAZON_RESTART_THRESHOLD = 3
+
 # 予防的 driver 再起動: mercari の実 scrape をこの件数こなすごとに driver をリサイクルする
 # (= 疲弊する前に refresh)。 ReadTimeout cluster は「累積作業で driver がへたる」のが主因なので、
 # 反応的再起動 (連続失敗で復旧) より根本的。 0 で無効化。 1 件 ~10-20s の restart コスト。
@@ -520,6 +527,7 @@ def process_sheet(
 
     results = []
     mercari_consec_none = 0  # Phase 9: mercari driver 自動再起動用カウンタ
+    amazon_consec_dead = 0   # 2026-06-25: amazon driver 自動再起動用カウンタ
     mercari_scrape_count = 0  # 2026-06-11: 予防的 driver 再起動用 (実 scrape 件数)
     total_rows = len(rows)
     if progress_callback is not None:
@@ -585,12 +593,14 @@ def process_sheet(
         # ログ表示
         sup = res["supplier"][:7].ljust(7)
         if res["error"]:
-            # mercari の連続失敗 → driver 再起動を試行
+            # 連続失敗 → driver 再起動を試行 (mercari / amazon 共通の crash 検知)
             # 2026-05-24: trigger 拡張. 旧 "scraper returned None" のみ → driver crash
             # (MaxRetryError / HTTPConnectionPool / WebDriverException) も catch.
             # 5/24 cycle で 18:04 driver 死亡後 297 連続 MaxRetryError、再起動 0 回事故。
+            # 2026-06-25: "invalid session id" 追加 (amazon driver セッション死の主シグナル、
+            # 06-23 LOW で 396 連続失敗の真因)。
             err_s = res["error"] or ""
-            mercari_driver_dead = (
+            driver_dead = (
                 "scraper returned None" in err_s
                 or "MaxRetryError" in err_s
                 or "HTTPConnectionPool" in err_s
@@ -598,8 +608,10 @@ def process_sheet(
                 or "chrome not reachable" in err_s.lower()
                 or "no such window" in err_s.lower()
                 or "session deleted" in err_s.lower()
+                or "invalid session id" in err_s.lower()
+                or "invalidsessionid" in err_s.lower()
             )
-            if res["supplier"] == "mercari" and mercari_driver_dead:
+            if res["supplier"] == "mercari" and driver_dead:
                 mercari_consec_none += 1
                 if mercari_consec_none >= MERCARI_RESTART_THRESHOLD:
                     log(f"  [!] mercari 連続 None {mercari_consec_none} 件 → driver 再起動を試行")
@@ -616,6 +628,26 @@ def process_sheet(
                         log(f"    [NG] mercari driver 再起動失敗: {_restart_err} (mercari は失敗継続、他 supplier は処理する)")
                         mercari_driver = None
                         mercari_consec_none = 0  # 再起動失敗を loop しないようリセット
+            if res["supplier"] == "amazon" and driver_dead:
+                amazon_consec_dead += 1
+                if amazon_consec_dead >= AMAZON_RESTART_THRESHOLD:
+                    log(f"  [!] amazon 連続 driver crash {amazon_consec_dead} 件 → driver 再起動を試行")
+                    if amazon_driver is not None:
+                        try:
+                            amazon_driver.quit()
+                        except Exception:
+                            pass
+                    try:
+                        amazon_driver = create_amazon_driver(headless=True, use_login_profile=True)
+                        log("    [OK] amazon driver 再起動完了 (続行)")
+                        amazon_consec_dead = 0
+                    except Exception as _restart_err:
+                        # 再起動失敗 → amazon_driver=None で続行 (残り amazon 行は error 計上 =
+                        # silent でなく次 cycle 再試行)。 fail-closed (d23ad99) で None は偽 OOS に
+                        # ならず is_sold=None=error に倒れるので burst 誤取下げは起きない。
+                        log(f"    [NG] amazon driver 再起動失敗: {_restart_err} (amazon は失敗継続、他 supplier は処理する)")
+                        amazon_driver = None
+                        amazon_consec_dead = 0  # 再起動失敗を loop しないようリセット
             if (res["error"] or "").startswith("unsupported supplier"):
                 log(f"{prefix}{sup} - skip ({res['error'][:60]})")
             else:
@@ -624,6 +656,8 @@ def process_sheet(
             # 成功した supplier に対応するカウンタをリセット
             if res["supplier"] == "mercari":
                 mercari_consec_none = 0
+            elif res["supplier"] == "amazon":
+                amazon_consec_dead = 0
             mark = "○" if res["is_sold"] else "·"
             delta_emoji = {
                 "newly_sold":      "[v]",
