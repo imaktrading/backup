@@ -150,11 +150,18 @@ def _page(heading, items, stage):
              ".cand:has(input:checked){border:3px solid #07f;background:#e8f2ff}"
              ".noimg{width:120px;height:120px;display:flex;align-items:center;justify-content:center;color:#999;border:1px dashed #ccc}"
              ".meta{font-size:11px}.skip{color:#a00}"
+             # 判断状態: pick=候補選択中(青) / skip=見送り(灰) / 未判断=黄帯
+             ".item{border:3px solid #f0c000}"   # 既定=未判断(黄)で目立たせる
+             ".item.pick{border-color:#07f;background:#eef6ff}"
+             ".item.skip{border-color:#bbb;background:#f2f2f2;opacity:.55}"
+             ".statebtns{margin:4px 0 8px}.statebtns button{font-size:14px;padding:5px 16px;margin-right:8px}"
+             ".bpick{background:#07f}.bskip{background:#888}.btag{font-weight:bold;margin-left:6px}"
              "button{font-size:16px;padding:8px 24px;background:#07f;color:#fff;border:0;border-radius:5px;cursor:pointer}"
              "</style>"]
     multi = (stage == "expand")
     sel_hint = "同じ景品を**複数**選べる(主supply=最安+補URL)" if multi else "正しい景品を**1つ**選ぶ"
-    parts.append(f"<div class=hd>{_html.escape(heading)} — 各行で{sel_hint}、下の『送信』</div>")
+    parts.append(f"<div class=hd>{_html.escape(heading)} — 各行で{sel_hint}、下の『送信』"
+                 f"&nbsp;&nbsp;<span id=counter style='background:#fff;color:#2a7;padding:2px 10px;border-radius:10px'>判断済 0 / {len(items)}</span></div>")
     for it in items:
         nm = f"row_{it['row']}"
         parts.append(f"<div class=item data-row='{it['row']}' data-multi='{1 if multi else 0}'>")
@@ -165,6 +172,11 @@ def _page(heading, items, stage):
         parts.append(f"<div class=title>{prize_tag} {_html.escape(it['title'])} "
                      f"<small>(row {it['row']} / 旧itemID {it['item_id']}) "
                      f"<a href='{ebay_url}' target=_blank>🔗 eBay出品元を見る</a></small></div>")
+        # 判断ボタン(候補から選ぶ / 見送り)+ 状態タグ。どれを判断済か一目で分かるように。
+        parts.append(f"<div class=statebtns>"
+                     f"<button type=button class=bpick onclick=\"decide('{it['row']}','pick')\">✅ 候補から選ぶ</button>"
+                     f"<button type=button class=bskip onclick=\"decide('{it['row']}','skip')\">⊘ 見送り</button>"
+                     f"<span class=btag id='tag_{it['row']}'>— 未判断</span></div>")
         parts.append("<div class=body>")
         # 参照(公式)
         rimg = it.get("ref_image") or ""
@@ -192,8 +204,49 @@ def _page(heading, items, stage):
         parts.append("</div>")
     parts.append("<div style='padding:16px'><button id=sendbtn onclick='submit()'>送信</button></div>")
     parts.append("""<script>
+function _selCount(it){
+  var n=it.querySelectorAll('input.pick:checked').length;
+  var man=it.querySelector('.manurl'); if(man && man.value.trim()) n++;
+  return n;
+}
+function _updTag(row){
+  var it=document.querySelector('.item[data-row="'+row+'"]'); if(!it) return;
+  var d=it.dataset.decision||'', n=_selCount(it), tag=document.getElementById('tag_'+row);
+  if(d==='skip') tag.textContent='⊘ 見送り';
+  else if(d==='pick'||n>0) tag.textContent='✅ 選択 '+n+'件';
+  else tag.textContent='— 未判断';
+}
+function _isDecided(it){ return (it.dataset.decision==='skip') || (it.dataset.decision==='pick') || _selCount(it)>0; }
+function _updCounter(){
+  var items=document.querySelectorAll('.item'), decided=0;
+  items.forEach(function(it){ if(_isDecided(it)) decided++; });
+  var c=document.getElementById('counter'); if(c) c.textContent='判断済 '+decided+' / '+items.length;
+}
+function decide(row, d){
+  var it=document.querySelector('.item[data-row="'+row+'"]'); if(!it) return;
+  it.dataset.decision=d;
+  it.classList.toggle('pick', d==='pick');
+  it.classList.toggle('skip', d==='skip');
+  if(d==='skip'){ it.querySelectorAll('input.pick:checked').forEach(function(x){x.checked=false;}); }
+  _updTag(row); _updCounter();
+}
+// 候補チェック/手動URL入力で自動的に pick 状態へ
+document.addEventListener('change', function(e){
+  var t=e.target; if(t && t.classList && t.classList.contains('pick')){
+    var it=t.closest('.item'); if(it){
+      if(_selCount(it)>0){ it.dataset.decision='pick'; it.classList.add('pick'); it.classList.remove('skip'); }
+      _updTag(it.dataset.row); _updCounter();
+    }
+  }
+});
+document.addEventListener('input', function(e){
+  var t=e.target; if(t && t.classList && t.classList.contains('manurl')){
+    var it=t.closest('.item'); if(it){ if(_selCount(it)>0){ it.dataset.decision='pick'; it.classList.add('pick'); } _updTag(it.dataset.row); _updCounter(); }
+  }
+});
+window.addEventListener('DOMContentLoaded', _updCounter);
 function submit(){
-  var picks={}, chosen=0;
+  var picks={}, chosen=0, undecided=0;
   document.querySelectorAll('.item').forEach(function(it){
     var multi = it.dataset.multi==='1';
     var arr=[];
@@ -206,8 +259,10 @@ function submit(){
     arr = arr.filter(function(u,i){return arr.indexOf(u)===i;});
     picks[it.dataset.row]= multi ? arr : (arr[0]||'');    // expand=配列(複数) / identify=単一
     if(arr.length) chosen++;
+    else if(it.dataset.decision!=='skip') undecided++;    // 見送りでもなく未選択 = 未判断
   });
-  if(!confirm(chosen+' 行で選択しました。送信しますか?(未選択は除外)')) return;
+  var msg = chosen+' 行で選択。'+(undecided>0 ? ('⚠️ 未判断 '+undecided+' 行(見送り扱いで除外されます)。') : '')+'送信しますか?';
+  if(!confirm(msg)) return;
   var btn=document.getElementById('sendbtn'); if(btn){btn.disabled=true; btn.textContent='送信中...';}
   fetch('/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(picks)})
    .then(r=>r.json())
@@ -562,6 +617,19 @@ def image_search_from_url(drv, mercari_url, limit):
 
 
 _KEEP_COND = ("新品、未使用", "未使用に近い")   # 新品扱い。これ以外(目立った傷/やや傷…)は除外
+_COND_VALUES = r"(新品、未使用|未使用に近い|目立った傷や汚れなし|やや傷や汚れあり|傷や汚れあり|全体的に状態が悪い)"
+
+
+def _parse_cond_ship(s):
+    """page_source → (状態, 送料負担)。**ラベル直後の値だけ**見る(純関数・test可)。
+
+    mercari は1ページに送料込み/着払い・各状態語が UI/関連商品/dropshipping注記で**常に両方**
+    出るため、全ページ grep は誤判定(2026-06-25 着払い混入バグ)。商品詳細の『商品の状態』
+    『配送料の負担』の **直後の値**(=その商品の実値)を非貪欲マッチで取る。取れねば '' (fail-closed=除外)。
+    """
+    cm = re.search(r"商品の状態.{0,120}?" + _COND_VALUES, s, re.S)
+    sm = re.search(r"配送料の負担.{0,120}?(送料込み|着払い)", s, re.S)
+    return (cm.group(1) if cm else "", sm.group(1) if sm else "")
 
 
 def _cond_ship(drv, url):
@@ -569,10 +637,7 @@ def _cond_ship(drv, url):
     try:
         drv.get(url)
         time.sleep(3)
-        s = drv.page_source
-        c = re.search(r"(新品、未使用|未使用に近い|目立った傷や汚れなし|やや傷や汚れあり|傷や汚れあり|全体的に状態が悪い)", s)
-        ship = "送料込み" if "送料込み" in s else ("着払い" if "着払い" in s else "")
-        return (c.group(1) if c else "", ship)
+        return _parse_cond_ship(drv.page_source)
     except Exception:
         return ("", "")
 
