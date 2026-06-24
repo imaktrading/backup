@@ -922,52 +922,94 @@ def pass_refresh():
 
     print(f"\n{'='*70}\n🧪 刷新プレビュー {len(planned)}件(eBay/CSV 未書込):")
     for p in planned:
-        print(f"\n  itemID={p['item_id']}  ${p['price']}")
+        act, st, q = plan_action(p["item_id"])
+        tag = {"revise": "Revise→同ID", "add": "Add→新ID(出し直し)", "skip": f"skip({st})"}[act]
+        print(f"\n  itemID={p['item_id']}  ${p['price']}  [{st} qty{q} → {tag}]")
         print(f"    旧: {p['old_title']}")
         print(f"    新: {p['new_title']}")
     print(f"\n💾 保存: {REFRESH_FILE}")
     print("  → 確認OKなら本番反映: python ichibankuji_restock.py refresh write")
-    print("     (Revise CSV を出力 → 出品くんで FileExchange 入稿)")
+    print("     (Active=Revise同ID / Completed=Add新ID で振分 → 出品くんで FileExchange 入稿)")
+
+
+def plan_action(item_id):
+    """現状 eBay 状態から刷新の適用方法を決める。戻り: 'revise'(同ID) / 'add'(新ID) / 'skip'。
+
+    itemID を変えずに済むなら Revise(同ID=view/watcher 温存)、終了済で無理なら Add(新ID=出し直し)。
+    監視くん/原因は無関係 — 「今 eBay でどうなってるか」だけで決まる(2026-06-24 ユーザー方針)。
+    """
+    if not item_id:
+        return ("skip", "?", -1)
+    st, q = _ebay_status(item_id)
+    if st == "Active":
+        return ("revise", st, q)      # Revise 可 = 同ID で内容刷新 + qty=1
+    if st == "Completed":
+        return ("add", st, q)         # 終了済 = Revise不可 → 新規Addで出し直し(新ID)
+    return ("skip", st, q)            # 状態不明 = fail-closed(推測でいじらない)
+
+
+def _write_addform_csv(rows, path):
+    """ebay_row dict list → Add形式CSV(generator と同形式 utf-8-sig)+ Free Shipping 後処理。"""
+    import csv as _csv
+    keys = list(rows[0].keys())
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    try:
+        from freeshipping_postprocess import transform_csv_to_freeshipping
+        transform_csv_to_freeshipping(path)
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Free Shipping 後処理 失敗(非致命): {type(e).__name__}: {e}")
 
 
 def refresh_write():
-    """REFRESH_FILE(刷新確定) → Add CSV → freeshipping → Revise CSV を出力(出品くん入稿用)。"""
+    """REFRESH_FILE(刷新確定) → 現状eBay状態で振分: Active→Revise CSV(同ID) / Completed→Add CSV(新ID)。"""
     if not os.path.exists(REFRESH_FILE):
         print(f"刷新確定なし: {REFRESH_FILE}(先に refresh)"); return
     planned = (json.load(open(REFRESH_FILE, encoding="utf-8")).get("items")) or []
     if not planned:
         print("刷新確定なし"); return
-    import csv as _csv
     import ichibankuji_restock_revise as rv
     gen, gd = _gen()
     out_dir = os.path.dirname(gen.OUTPUT_CSV)
-    add_csv = os.path.join(out_dir, "ichibankuji_restock_add_tmp.csv")
-    revise_csv = os.path.join(out_dir, "ichibankuji_restock_revise.csv")
 
-    rows = [p["row"] for p in planned]
-    sku_to_itemid = {p["sku"]: p["item_id"] for p in planned if p.get("sku")}
-    keys = list(rows[0].keys())
-    # Add CSV(generator と同形式: utf-8-sig DictWriter)
-    with open(add_csv, "w", encoding="utf-8-sig", newline="") as f:
-        w = _csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-    # Free Shipping 後処理(新規出品と同じ)
-    try:
-        from freeshipping_postprocess import transform_csv_to_freeshipping
-        transform_csv_to_freeshipping(add_csv)
-    except Exception as e:  # noqa: BLE001
-        print(f"⚠️ Free Shipping 後処理 失敗(非致命): {type(e).__name__}: {e}")
-    # Add → Revise 変換(Action=Revise / ItemID挿入 / qty=1 / PicURL・ScheduleTime削除)
-    n, skipped = rv.convert_file(add_csv, revise_csv, sku_to_itemid)
-    try:
-        os.remove(add_csv)
-    except Exception:
-        pass
-    print(f"\n✅ Revise CSV 出力: {revise_csv}  ({n}件)")
-    if skipped:
-        print(f"  ⚠️ itemID未解決で除外 {len(skipped)}件: {[s[0] for s in skipped]}")
-    print("  → 出品くんで FileExchange 入稿(既存listingのTitle/itemSP/価格/説明を刷新)")
+    # 現状 eBay 状態で Revise(同ID) / Add(新ID) に振り分け
+    revise_planned, add_planned, skipped_status = [], [], []
+    for p in planned:
+        act, st, q = plan_action(p.get("item_id", ""))
+        print(f"  itemID={p.get('item_id')}: {st} qty{q} → {act}")
+        (revise_planned if act == "revise" else add_planned if act == "add" else skipped_status).append(p)
+    if skipped_status:
+        print(f"  ⚠️ 状態不明で除外 {len(skipped_status)}件(fail-closed): {[p.get('item_id') for p in skipped_status]}")
+
+    outputs = []
+    # Active → Revise CSV(同ID・内容刷新 + qty=1 + PicURL/ScheduleTime削除)
+    if revise_planned:
+        add_tmp = os.path.join(out_dir, "ichibankuji_restock_add_tmp.csv")
+        revise_csv = os.path.join(out_dir, "ichibankuji_restock_revise.csv")
+        _write_addform_csv([p["row"] for p in revise_planned], add_tmp)
+        sku_to_itemid = {p["sku"]: p["item_id"] for p in revise_planned if p.get("sku")}
+        n, sk = rv.convert_file(add_tmp, revise_csv, sku_to_itemid)
+        try:
+            os.remove(add_tmp)
+        except Exception:
+            pass
+        outputs.append((revise_csv, n, "Revise(同ID=view/watcher温存)"))
+        if sk:
+            print(f"  ⚠️ Revise: itemID未解決で除外 {len(sk)}件: {[s[0] for s in sk]}")
+    # Completed → Add CSV(新ID・新規出し直し。PicURL/ScheduleTime はそのまま=新規出品)
+    if add_planned:
+        add_csv = os.path.join(out_dir, "ichibankuji_restock_add.csv")
+        _write_addform_csv([p["row"] for p in add_planned], add_csv)
+        outputs.append((add_csv, len(add_planned), "Add(新ID=終了済の出し直し)"))
+
+    if not outputs:
+        print("出力対象なし(全件 状態不明)"); return
+    print()
+    for path, cnt, kind in outputs:
+        print(f"✅ {kind} CSV 出力: {path}  ({cnt}件)")
+    print("  → 出品くんで FileExchange 入稿(Revise=旧ID内容刷新 / Add=新ID出し直し)")
 
 
 def main():
