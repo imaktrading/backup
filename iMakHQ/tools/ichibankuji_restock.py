@@ -43,8 +43,11 @@ GID = 851100680
 PORT = 8766
 PICKS_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_picks.json"
 CONFIRMED_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_confirmed.json"
+REFRESH_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_refresh.json"   # 内容刷新の確定(scrape+Claude後)
 COL_SOLD = 3       # D 売り切れ
 COL_CAT = 17       # R カテゴリ
+COL_TITLE = 2      # C 日本語タイトル
+COL_KUJI_URL = 8   # I 公式くじURL(ユーザーが恒久入力。生成PLのV列は出品後クリアされるため別列)
 _NOISE = ["新品", "未開封", "未使用", "送料無料", "即決", "匿名配送", "正規品", "限定", "おまけつき", "おまけ付き"]
 
 
@@ -734,6 +737,239 @@ def pass_write():
     print(f"✅ 完了 {n}件: eBay在庫補充(Revise/Relist) + A列=新supply + B列=itemID + 売り切れ解除 + 補URL")
 
 
+# ---------------- 内容刷新 (refresh): タイトル/itemSP/価格を新規ロジックで刷新 → FileExchange Revise CSV ----------------
+def _gen():
+    """新規生成器 ichibankuji_to_csv を import 流用(無改変)。戻り (module, gen_dir)。"""
+    gd = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMak_ichibankuji"))
+    if gd not in sys.path:
+        sys.path.insert(0, gd)
+    import ichibankuji_to_csv as gen
+    return gen, gd
+
+
+def _sheet_meta():
+    """管理シートを1回読み、{row(int): {title(C), kuji_url(I)}} を返す。"""
+    ws = sheet_io._product_ws()
+    out = {}
+    for i, row in enumerate(ws.get_all_values(), start=1):
+        if i == 1:
+            continue
+        title = (row[COL_TITLE] if len(row) > COL_TITLE else "").strip()
+        kuji = (row[COL_KUJI_URL] if len(row) > COL_KUJI_URL else "").strip()
+        out[i] = {"title": title, "kuji_url": kuji}
+    return out
+
+
+def _match_prize(prize, prizes):
+    """extract_prize の賞(A賞/ラストワン 等)を scrape の prizes[].prize に突合。無ければ None。
+
+    scrape は 'ラストワン賞'、extract_prize は 'ラストワン' と末尾差があるので 賞 を除いて比較。
+    """
+    if not prize:
+        return None
+    key = prize.rstrip("賞")
+    for p in prizes:
+        pp = (p.get("prize") or "").rstrip("賞")
+        if pp == key or (key and key in pp):
+            return p
+    return None
+
+
+def _manual_prize(prizes):
+    """賞マッチ失敗時の手動賞指定(CLI)。番号入力で1つ選ぶ。空/s = skip(None)。"""
+    if not prizes:
+        print("      賞候補なし → skip")
+        return None
+    print("      ⚠️ 賞マッチ失敗。手動指定してください:")
+    for i, p in enumerate(prizes, 1):
+        print(f"        {i}. {p.get('prize','')}: {(p.get('name') or '')[:36]}")
+    try:
+        ans = input("      番号 (空/s=skip): ").strip()
+    except EOFError:
+        ans = ""
+    if ans.isdigit() and 1 <= int(ans) <= len(prizes):
+        return prizes[int(ans) - 1]
+    return None
+
+
+def _build_refreshed_row(gen, base_desc, series_name, release_year, price_jpy, main_image,
+                         kuji_url, supply_url, prize_p, cost_jpy):
+    """1賞ぶんを Claude+pricing+build_row で刷新。戻り (ebay_row|None, new_title, price, note)。"""
+    series_data = {
+        "series_name": series_name, "release_year": release_year, "price_jpy": price_jpy,
+        "main_image": main_image, "url": kuji_url, "mercari_url": supply_url, "prizes": [],
+    }
+    prize_data = {"prize": prize_p.get("prize", ""), "name": prize_p.get("name", ""),
+                  "size_cm": prize_p.get("size_cm", "")}
+    claude_result = gen.analyze_with_claude(series_data, prize_data)
+    if not claude_result:
+        return None, "", 0, "Claude失敗"
+    if not claude_result.get("is_figure", True):
+        return None, claude_result.get("title", ""), 0, "非フィギュア判定→skip"
+
+    # pricing: cost = 新supply実価格。新発売 median 信頼性低のため gap_limit=10.0(generator 同条件)
+    listing_price = gen.DEFAULT_PRICE
+    ebay_median = 0.0
+    price_status = "GO"
+    try:
+        if cost_jpy and int(cost_jpy) > 0:
+            from pricing_engine import compute_listing_price
+            try:
+                from listing_common import PRICE_CHECK_CONFIG
+                if PRICE_CHECK_CONFIG.get("ichibankuji", {}).get("enabled"):
+                    from check_csv_core import fetch_ebay_market_median
+                    _kw = " ".join((claude_result.get("title", "") or "").split()[:5])
+                    ebay_median, _hits = fetch_ebay_market_median(
+                        keywords=_kw, category_ids=str(gen.EBAY_CATEGORY),
+                        condition_id=str(gen.CONDITION_ID), limit=30)
+            except Exception:
+                pass
+            pricing = compute_listing_price(int(cost_jpy), ebay_median, gen.PROFIT_CATEGORY,
+                                            gap_limit_override=10.0)
+            listing_price = max(pricing.get("price", gen.DEFAULT_PRICE), 9.98)
+            price_status = pricing.get("status", "GO")
+    except Exception as e:  # noqa: BLE001
+        print(f"      ⚠️ pricing失敗: {e}(DEFAULT_PRICE使用)")
+
+    ebay_row = gen.build_row(series_data, prize_data, claude_result, listing_price, base_desc)
+
+    # 物理ゲート(新規生成と同じ品質基準): error は HOLD=skip(fail-closed)
+    try:
+        from listing_common import gate_row_or_hold
+        allowed, viol = gate_row_or_hold(ebay_row, category="ichibankuji",
+                                         sku=ebay_row.get("CustomLabel", ""),
+                                         price_status=price_status, median_usd=ebay_median)
+        if not allowed:
+            errs = [f"{f}={i}" for f, i, s in viol if s == "error"]
+            return None, ebay_row.get("*Title", ""), listing_price, f"HOLD:{errs}"
+    except Exception as e:  # noqa: BLE001
+        print(f"      ⚠️ gate skip(非致命): {e}")
+
+    return ebay_row, ebay_row.get("*Title", ""), listing_price, "OK"
+
+
+def pass_refresh():
+    """確定(confirmed.json)の各行を scrape+Claude で刷新 → プレビュー表示 + REFRESH_FILE 保存。
+
+    dry必須(表示→明示 `refresh write`)。eBay/CSV への書込はしない。
+    """
+    if not os.path.exists(CONFIRMED_FILE):
+        print(f"確定ファイルなし: {CONFIRMED_FILE}(先に identify→expand)"); return
+    confirmed = _load_confirmed()
+    if not confirmed:
+        print("確定なし"); return
+    gen, gd = _gen()
+    base_path = os.path.join(gd, "ICHIBANKUJI.txt")
+    base_desc = open(base_path, encoding="utf-8").read() if os.path.exists(base_path) else None
+    meta = _sheet_meta()
+
+    # 同一くじURLは1回 scrape(重い処理を集約)
+    drv = _make_driver()
+    scraped = {}
+    try:
+        drv.set_page_load_timeout(60)
+        urls = {(meta.get(r) or {}).get("kuji_url", "") for r in confirmed}
+        for u in sorted(x for x in urls if x and x != "-"):
+            print(f"  🔎 scrape: {u}", flush=True)
+            try:
+                scraped_sd = _retry(lambda: gen.scrape_1kuji(drv, u), tries=3, what="scrape_1kuji")
+            except Exception as e:  # noqa: BLE001
+                print(f"     ⚠ scrape失敗: {e}"); scraped_sd = None
+            scraped[u] = scraped_sd
+    finally:
+        try: drv.quit()
+        except Exception: pass
+
+    planned = []   # [{item_id, sku, row, old_title, new_title, price}]
+    for row in sorted(confirmed):
+        d = confirmed[row]
+        item_id = (d.get("item_id") or "").strip()
+        m = meta.get(row) or {}
+        kuji_url = (m.get("kuji_url") or "").strip()
+        title_jp = m.get("title") or ""
+        supply = (d.get("a") or "").strip()
+        print(f"\n  [row{row}] itemID={item_id} {title_jp[:30]}", flush=True)
+        if not kuji_url or kuji_url == "-":
+            print("     ⚠️ I列(公式くじURL)空 → skip(刷新不可)"); continue
+        sd = scraped.get(kuji_url)
+        if not sd or not sd.get("prizes"):
+            print("     ⚠️ scrape不可/賞0 → skip"); continue
+        prize = extract_prize(title_jp, _ebay_title(item_id))   # C列(日本語)+eBayタイトル(英語)から賞
+        pp = _match_prize(prize, sd["prizes"])
+        if not pp:
+            pp = _manual_prize(sd["prizes"])
+        if not pp:
+            print(f"     賞={prize or '不明'} → 確定できず skip"); continue
+        cost = gen.fetch_mercari_price(supply) if supply else 0
+        if not cost:
+            print(f"     ⚠️ 新supply価格取得不可({supply[:40]}) → DEFAULT_PRICE", flush=True)
+        ebay_row, new_title, price, note = _build_refreshed_row(
+            gen, base_desc, sd.get("series_name", ""), sd.get("release_year", ""),
+            sd.get("price_jpy", ""), sd.get("main_image", ""), kuji_url, supply, pp, cost)
+        if not ebay_row:
+            print(f"     ⏭ {note}"); continue
+        old_title = _ebay_title(item_id)
+        planned.append({"item_id": item_id, "sku": ebay_row.get("CustomLabel", ""),
+                        "row": ebay_row, "old_title": old_title, "new_title": new_title,
+                        "price": price})
+        print(f"     ✅ 賞={pp.get('prize')} cost¥{cost or '?'} → ${price}")
+
+    if not planned:
+        print("\n刷新対象なし"); return
+    os.makedirs(os.path.dirname(REFRESH_FILE), exist_ok=True)
+    with open(REFRESH_FILE, "w", encoding="utf-8") as f:
+        json.dump({"items": planned}, f, ensure_ascii=False, indent=2)
+
+    print(f"\n{'='*70}\n🧪 刷新プレビュー {len(planned)}件(eBay/CSV 未書込):")
+    for p in planned:
+        print(f"\n  itemID={p['item_id']}  ${p['price']}")
+        print(f"    旧: {p['old_title']}")
+        print(f"    新: {p['new_title']}")
+    print(f"\n💾 保存: {REFRESH_FILE}")
+    print("  → 確認OKなら本番反映: python ichibankuji_restock.py refresh write")
+    print("     (Revise CSV を出力 → 出品くんで FileExchange 入稿)")
+
+
+def refresh_write():
+    """REFRESH_FILE(刷新確定) → Add CSV → freeshipping → Revise CSV を出力(出品くん入稿用)。"""
+    if not os.path.exists(REFRESH_FILE):
+        print(f"刷新確定なし: {REFRESH_FILE}(先に refresh)"); return
+    planned = (json.load(open(REFRESH_FILE, encoding="utf-8")).get("items")) or []
+    if not planned:
+        print("刷新確定なし"); return
+    import csv as _csv
+    import ichibankuji_restock_revise as rv
+    gen, gd = _gen()
+    out_dir = os.path.dirname(gen.OUTPUT_CSV)
+    add_csv = os.path.join(out_dir, "ichibankuji_restock_add_tmp.csv")
+    revise_csv = os.path.join(out_dir, "ichibankuji_restock_revise.csv")
+
+    rows = [p["row"] for p in planned]
+    sku_to_itemid = {p["sku"]: p["item_id"] for p in planned if p.get("sku")}
+    keys = list(rows[0].keys())
+    # Add CSV(generator と同形式: utf-8-sig DictWriter)
+    with open(add_csv, "w", encoding="utf-8-sig", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    # Free Shipping 後処理(新規出品と同じ)
+    try:
+        from freeshipping_postprocess import transform_csv_to_freeshipping
+        transform_csv_to_freeshipping(add_csv)
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Free Shipping 後処理 失敗(非致命): {type(e).__name__}: {e}")
+    # Add → Revise 変換(Action=Revise / ItemID挿入 / qty=1 / PicURL・ScheduleTime削除)
+    n, skipped = rv.convert_file(add_csv, revise_csv, sku_to_itemid)
+    try:
+        os.remove(add_csv)
+    except Exception:
+        pass
+    print(f"\n✅ Revise CSV 出力: {revise_csv}  ({n}件)")
+    if skipped:
+        print(f"  ⚠️ itemID未解決で除外 {len(skipped)}件: {[s[0] for s in skipped]}")
+    print("  → 出品くんで FileExchange 入稿(既存listingのTitle/itemSP/価格/説明を刷新)")
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if mode == "identify":
@@ -743,10 +979,17 @@ def main():
         pass_expand(cand_n=10, dry=("--dry" in sys.argv))
     elif mode == "write":
         pass_write()
+    elif mode == "refresh":
+        if len(sys.argv) > 2 and sys.argv[2] == "write":
+            refresh_write()
+        else:
+            pass_refresh()
     else:
         print("使い方:\n  python ichibankuji_restock.py identify [件数]   # パスA 画像特定\n"
               "  python ichibankuji_restock.py expand [--dry]      # パスB 画像検索+確定(--dry=書込なしテスト)\n"
-              "  python ichibankuji_restock.py write               # dry/失敗後の本番反映(再選択不要)")
+              "  python ichibankuji_restock.py write               # dry/失敗後の本番反映(再選択不要)\n"
+              "  python ichibankuji_restock.py refresh             # 内容刷新プレビュー(scrape+Claude、書込なし)\n"
+              "  python ichibankuji_restock.py refresh write       # 刷新を Revise CSV 出力(出品くん入稿用)")
 
 
 if __name__ == "__main__":
