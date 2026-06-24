@@ -18,7 +18,9 @@ import os
 import sys
 import csv
 import json
+import os
 import sqlite3
+import sys
 import threading
 import time
 import urllib.parse
@@ -38,6 +40,74 @@ VERIFIED_CERTS_FILE = Path(r"C:/dev/iMak_data/dedupe/verified_certs.json")
 # (パスは iMakTCG/tcg_batch_select.REVIEW_SKIP_PATH と一致させること。2026-06-23)
 REVIEW_SKIP_FILE = Path(r"C:/dev/iMak_data/dedupe/psa_review_skip.json")
 SERVER_PORT = 8765
+
+# ---- promo (配布元) レビュー: iMakTCG の promo store/抽出を流用 (catalog外 per-card override) ----
+_TCG_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakTCG"))
+
+
+def _ensure_tcg_path():
+    if _TCG_DIR not in sys.path:
+        sys.path.insert(0, _TCG_DIR)
+
+
+def _catalog_specs_for(category: str, product_id: str) -> dict:
+    """catalog の specs(JSON) を dict で取得 (失敗/不在は {})。"""
+    if not product_id:
+        return {}
+    try:
+        con = sqlite3.connect(str(CATALOG_DB))
+        row = con.execute("SELECT specs FROM products WHERE product_id=? AND category=?",
+                          (product_id, category)).fetchone()
+        con.close()
+        return json.loads(row[0]) if row and row[0] else {}
+    except Exception:
+        return {}
+
+
+def _promo_for(category: str, product_id: str, subject: str):
+    """(is_promo, 下書きpromo名)。promo variant のみ。確定済はその値、未確定は Subject から提案。"""
+    try:
+        _ensure_tcg_path()
+        from tcg_promo_store import is_promo_variant, get_promo, is_reviewed
+        from tcg_promo_name import propose_promo
+    except Exception:
+        return (False, "")
+    specs = _catalog_specs_for(category, product_id)
+    if not is_promo_variant(specs):
+        return (False, "")
+    if is_reviewed(product_id):
+        return (True, get_promo(product_id))          # レビュー済 = 確定値(空含む)を表示
+    char = (specs.get("character_name") or "")
+    cnum = (specs.get("card_number_text") or "")
+    return (True, propose_promo(subject, char, cnum))
+
+
+def _write_promo_overrides(results, confirmed, append_log_func=lambda *_: None, store_path=None) -> int:
+    """確定 cert のうち promo 系の入力値を per-card override に書込 (catalog外)。戻り: 書込件数。
+
+    confirmed の product_id が promo variant の時のみ書く (CHOSEN で非promoを選んだ誤書込を防止)。
+    入力空 = 「レビュー済・promo無し」として記録 (= 次回フラグしない)。store_path は test 注入用。
+    """
+    try:
+        _ensure_tcg_path()
+        from tcg_promo_store import set_promo, is_promo_variant
+    except Exception:
+        return 0
+    today = datetime.now().strftime("%Y-%m-%d")
+    by_cert = {str(r.get("cert", "")): r for r in (results or [])}
+    _kw = {"path": store_path} if store_path else {}
+    n = 0
+    for cert, pid in (confirmed or {}).items():
+        r = by_cert.get(str(cert))
+        if not r or not r.get("is_promo"):
+            continue
+        if not is_promo_variant(_catalog_specs_for(r.get("category", ""), pid)):
+            continue
+        set_promo(pid, (r.get("promo") or "").strip(), updated_at=today, **_kw)
+        n += 1
+    if n:
+        append_log_func(f"  🏷️ promo 確定 {n} 件を per-card override に保存\n")
+    return n
 
 
 def _detect_category(brand: str) -> str | None:
@@ -475,7 +545,12 @@ def _generate_html(targets: list[dict]) -> None:
         '}',
         '',
         'function submitResults() {',
-        '  var results = TARGETS.map(t => Object.assign({cert: t.cert, expected: t.expected, category: t.category}, ANSWERS[t.cert] || {choice: "PENDING"}));',
+        '  var results = TARGETS.map(function(t) {',
+        '    var o = Object.assign({cert: t.cert, expected: t.expected, category: t.category}, ANSWERS[t.cert] || {choice: "PENDING"});',
+        '    var pin = document.getElementById("promo_" + t.cert);',   # promo 入力(promo系のみ存在)
+        '    if (pin) { o.is_promo = true; o.promo = pin.value.trim(); }',
+        '    return o;',
+        '  });',
         '  document.getElementById("dl-btn").disabled = true;',
         '  document.getElementById("dl-btn").textContent = "送信中...";',
         '  fetch("/submit", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(results)})',
@@ -574,6 +649,16 @@ def _generate_html(targets: list[dict]) -> None:
             html.append(f'<button id="btn_{cert}_NG" class="btn btn-ng" onclick="answer(\'{cert}\', \'NG\')">❌ 違う (候補から選択)</button>')
         html.append(f'<button id="btn_{cert}_NONE" class="btn btn-none" onclick="answer(\'{cert}\', \'NONE\')">該当なし</button>')
         html.append('</div>')
+
+        # promo (配布元) 欄: promo 系カードのみ。PSA ラベル文字を見て OK/編集/消す(空=promo無し)。
+        if t.get("is_promo"):
+            import html as _h
+            pv = _h.escape(t.get("promo_proposed") or "", quote=True)
+            html.append('<div class="promo-box" style="margin:8px 0;padding:8px;background:#fff7e6;border:1px solid #ffd591;border-radius:6px">')
+            html.append('<div class=label>🏷️ 何のプロモか (PSA ラベル文字を確認 → 合ってれば OK / 違えば編集 / 不明なら空に)</div>')
+            html.append(f'<input id="promo_{cert}" type="text" value="{pv}" placeholder="例: Ichiban Kuji Purchase Bonus" '
+                        'style="width:90%;padding:5px;font-size:14px" />')
+            html.append('</div>')
 
         # 候補 list
         is_open = not (t.get("csv_expected") and expected_img)
@@ -1009,10 +1094,12 @@ def _build_target_for_cert(cert: str):
         csv_expected = f"{set_code}-{card_number}"
     candidates = _get_candidates(category, set_code, card_number, brand=brand,
                                  expected_product_id=csv_expected, subject=subject)
+    is_promo, promo_proposed = _promo_for(category, csv_expected, subject)
     return {
         "cert": cert, "brand": brand, "subject": subject, "card_number": card_number,
         "category": category, "set_code": set_code, "csv_expected": csv_expected,
         "cert_image_url": meta.get("CardImageUrl", ""), "candidates": candidates,
+        "is_promo": is_promo, "promo_proposed": promo_proposed,
     }
 
 
@@ -1093,6 +1180,11 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
 
     parsed, none_records = parse_confirmations(_PRE_BUILD_RESULTS)
     confirmed.update(parsed)
+    # promo (配布元名) 確定 → per-card override に保存 (build のタイトル生成がこれを読む)
+    try:
+        _write_promo_overrides(_PRE_BUILD_RESULTS, confirmed, append_log_func)
+    except Exception as _pe:
+        append_log_func(f"  ⚠️ promo override 書込失敗: {type(_pe).__name__}: {_pe}\n")
     # NONE/NG = identity 未確定 → catalog 追加依頼に自動ルーティング (build後 hook と同経路)
     if none_records:
         try:

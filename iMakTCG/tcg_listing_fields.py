@@ -161,6 +161,7 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
             return {}, f"forced card_id {forced_card_id} が catalog に無い"
         fields = map_specs_to_fields(specs, _psa_year(cert))
         fields["_card_id"] = forced_card_id
+        _attach_promo(fields, specs, forced_card_id)
         return fields, None
 
     franchise = _detect_franchise(game_hint, "")
@@ -185,7 +186,23 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
 
     fields = map_specs_to_fields(specs, _psa_year(cert))
     fields["_card_id"] = card_id
+    _attach_promo(fields, specs, card_id)
     return fields, None
+
+
+def _attach_promo(fields: dict, specs: dict, card_id: str):
+    """プロモ系カードに 確定済 promo 名 / 検出フラグ を注入 (catalog外 per-card override)。
+
+    promo 名は PSA Subject 由来=非公式のため catalog でなく tcg_promo_store に保存
+    (catalog_official_only)。タイトル付与は build_title_from_fields が _promo を読む。
+    """
+    try:
+        from tcg_promo_store import is_promo_variant, get_promo, needs_review
+        fields["_is_promo"] = is_promo_variant(specs)
+        fields["_promo"] = get_promo(card_id)
+        fields["_promo_needs_review"] = needs_review(specs, card_id)
+    except Exception:
+        fields["_is_promo"], fields["_promo"], fields["_promo_needs_review"] = False, "", False
 
 
 def map_specs_to_fields(specs: dict, year: str = ""):
@@ -291,8 +308,13 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
         core.append(game)
     if fields.get("C:Language") == "Japanese":
         core.append("Japanese")
-    if fields.get("C:Set"):
-        core.append(fields["C:Set"])
+    # ★promo: generic な Set "Promo Cards" は具体的な配布元名 (Ichiban Kuji Purchase Bonus 等)
+    #   に **置換** する (冗長を消し 80字枠を確保。C:Set 項目自体は filter 用に不変=タイトル表記のみ)。
+    promo = (fields.get("_promo") or "").strip()
+    cset = fields.get("C:Set", "")
+    _use_promo_as_set = bool(promo) and cset.strip().lower() in ("promo cards", "promo")
+    if cset:
+        core.append(promo if _use_promo_as_set else cset)
     num = fields.get("C:Card Number", "")
     if num:
         core.append(f"#{num}")
@@ -310,6 +332,10 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
 
     optional = []
     core_text = " ".join(core)
+    # ★promo 配布元説明: Set 置換で core に入れた場合(_use_promo_as_set)は二重付与しない。
+    #   Set が generic でない(具体的set名がある)時のみ optional 先頭 = 80字超で最後まで残す。
+    if promo and not _use_promo_as_set and not _word_overlap(promo, core_text):
+        optional.append(promo)
     if fields.get("C:Rarity") and not _word_overlap(fields["C:Rarity"], core_text):
         optional.append(fields["C:Rarity"])
     if fields.get("C:Features"):
