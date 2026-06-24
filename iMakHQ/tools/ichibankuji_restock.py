@@ -285,6 +285,12 @@ def serve_and_collect(html_str):
                 box["data"] = json.loads(raw)
             except Exception:
                 box["data"] = {}
+            try:
+                _d = box.get("data") or {}
+                _nz = {k: v for k, v in _d.items() if v and v != "NONE"}
+                print(f"  📥 受信: {len(_d)}行 / 選択あり {len(_nz)}行 → {_nz}", flush=True)
+            except Exception:
+                pass
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -492,6 +498,7 @@ def pass_expand(cand_n):
                 raw = image_search_from_url(drv, p["picked_url"], cand_n)
             except Exception as e:  # noqa: BLE001
                 print(f"     ⚠ 画像検索失敗: {e}"); raw = []
+            print(f"     候補 {len(raw)}件", flush=True)
             items.append({"row": p["row"], "item_id": p["item_id"], "title": p["title"],
                           "ref_image": p.get("ref_image", ""),
                           "picked_image": mercari_image_url(p["picked_url"]),
