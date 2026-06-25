@@ -995,7 +995,11 @@ def _gen():
 
 
 def _sheet_meta():
-    """管理シートを1回読み、{row(int): {title(C), kuji_url(I)}} を返す。"""
+    """管理シートを1回読み、{row(int): {title(C), kuji_url(I), item_id(B)}} を返す。
+
+    item_id は **現B列**(write の Relist で新IDに更新済)。confirmed.json の item_id は relist 後
+    stale になるため、refresh は現B列を正とする。
+    """
     ws = sheet_io._product_ws()
     out = {}
     for i, row in enumerate(ws.get_all_values(), start=1):
@@ -1003,7 +1007,8 @@ def _sheet_meta():
             continue
         title = (row[COL_TITLE] if len(row) > COL_TITLE else "").strip()
         kuji = (row[COL_KUJI_URL] if len(row) > COL_KUJI_URL else "").strip()
-        out[i] = {"title": title, "kuji_url": kuji}
+        item_id = (row[1] if len(row) > 1 else "").strip()
+        out[i] = {"title": title, "kuji_url": kuji, "item_id": item_id}
     return out
 
 
@@ -1130,8 +1135,9 @@ def pass_refresh():
     planned = []   # [{item_id, sku, row, old_title, new_title, price}]
     for row in sorted(confirmed):
         d = confirmed[row]
-        item_id = (d.get("item_id") or "").strip()
         m = meta.get(row) or {}
+        # 現B列itemID優先(write の Relist で新IDに変わっても追従。confirmed の旧IDは stale)
+        item_id = (m.get("item_id") or d.get("item_id") or "").strip()
         kuji_url = (m.get("kuji_url") or "").strip()
         title_jp = m.get("title") or ""
         supply = (d.get("a") or "").strip()

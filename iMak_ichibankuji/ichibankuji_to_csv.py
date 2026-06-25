@@ -103,6 +103,24 @@ def get_shipping_policy(price):
                 return policy
         return "800-1000"
 
+def _parse_release_year(page_text):
+    """発売年(YYYY)を返す。**「店頭販売：YYYY年MM月」を最優先**(=正規の発売日)。
+
+    旧実装は『ページ最初の YYYY年MM月』を取っていたが、ニュース/期間/別日付を誤取得しうる
+    (2026-06-25 ユーザー指摘: 公式に「店頭販売：」テキストあり)。店頭販売→オンライン販売→
+    最初のYYYY年 の順でフォールバック。見つからなければ ''。純関数(test可)。
+    """
+    if not page_text:
+        return ""
+    for pat in (r"店頭販売[^\d]{0,8}(\d{4})年\d{1,2}月",
+                r"オンライン販売[^\d]{0,8}(\d{4})年\d{1,2}月",
+                r"(\d{4})年\d{1,2}月"):
+        m = re.search(pat, page_text)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def scrape_1kuji(driver, url):
     """1kuji.comから賞別データをSeleniumで取得"""
     try:
@@ -135,11 +153,8 @@ def scrape_1kuji(driver, url):
                 series_name = title.get_text(strip=True).replace('｜一番くじ倶楽部｜BANDAI SPIRITS公式 一番くじ情報サイト', '').strip()
 
         # 発売年・価格取得 (page_text = BS get_text 経由で安定 source)
-        release_date = ""
+        release_date = _parse_release_year(page_text)
         price_jpy = ""
-        date_m = re.search(r'(\d{4})年(\d{1,2})月', page_text)
-        if date_m:
-            release_date = date_m.group(1)
         price_m = re.search(r'1回(\d+)円', page_text)
         if price_m:
             price_jpy = price_m.group(1)
