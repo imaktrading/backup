@@ -16,6 +16,7 @@ eBay在庫なし(監視くん取下げ=管理シート 売り切れ○)の一番
 
 サーバは port 8766 (PSA Review=8765 と非競合)。
 """
+import datetime
 import html as _html
 import json
 import os
@@ -44,6 +45,8 @@ PORT = 8766
 PICKS_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_picks.json"
 CONFIRMED_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_confirmed.json"
 REFRESH_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_refresh.json"   # 内容刷新の確定(scrape+Claude後)
+COOLDOWN_FILE = r"C:/dev/iMak_data/dedupe/ichibankuji_candidate_wait.json"  # 候補待ち(候補0/見送り)台帳
+COOLDOWN_DAYS = 5   # 候補待ち cooldown(この日数 identify に出さない→後日 supply 出たら再浮上)
 COL_SOLD = 3       # D 売り切れ
 COL_CAT = 17       # R カテゴリ
 COL_TITLE = 2      # C 日本語タイトル
@@ -101,10 +104,43 @@ def build_keyword(c_title, ebay_title=""):
     return kw, prize
 
 
-def _card(url, price, image, name, multi=False, cond="", ship=""):
-    """候補カード(選択+画像+価格+状態/送料+リンク)。multi=True で checkbox(複数選択)。
+def parse_pick(val):
+    """submit値 → (skip:bool, oks:[{url,price}])。純関数(test可)。
 
-    image は検索結果から取得した実URL(Shops含む)。cond/ship は詳細ページ由来(新品+送料込みのみ通過)。
+    新形式: {"skip":bool, "oks":[{"url","price"}]}。旧形式(str/list)も後方互換で受ける。
+    """
+    if isinstance(val, dict):
+        oks = [o for o in (val.get("oks") or []) if isinstance(o, dict) and o.get("url")]
+        return (bool(val.get("skip")), oks)
+    if isinstance(val, str):
+        return (False, [{"url": val, "price": 0}] if (val and val != "NONE") else [])
+    if isinstance(val, list):
+        return (False, [{"url": u, "price": 0} for u in val if u and u != "NONE"])
+    return (False, [])
+
+
+def sort_oks_desc(oks):
+    """可候補を価格『高い順』に並べ重複URL除去。戻り (urls[:6], cost=最高値)。純関数。
+
+    A列=最高値supply / 補URL=以降(最大5)。価格は最高値で Revise(高い方しか残らなくても赤字回避)。
+    """
+    s = sorted(oks, key=lambda o: o.get("price", 0), reverse=True)
+    seen, urls = set(), []
+    for o in s:
+        u = o.get("url")
+        if u and u not in seen:
+            seen.add(u)
+            urls.append(u)
+    cost = s[0].get("price", 0) if s else 0
+    return urls[:6], cost
+
+
+def _card(url, price, image, name, multi=False, cond="", ship=""):
+    """候補カード。各候補に **可/否** を個別に付ける(どこまで調べたか分かる=未/可/否)。
+
+    可=採用(複数=主+補URL最大6・identify=1つ) / 否=却下 / 未マーク=未調査。
+    price は data-price に持たせ、submit 時に『高い順』ソート+最高値pricing に使う。
+    image は検索結果の実URL(Shops含む)。cond/ship は詳細ページ由来(新品+送料込みのみ通過)。
     """
     img = image or mercari_image_url(url)   # 実src優先、無ければ /item/m から構築
     img_tag = (f"<img src='{_html.escape(img)}' loading='lazy'>" if img
@@ -113,12 +149,13 @@ def _card(url, price, image, name, multi=False, cond="", ship=""):
     cs = ""
     if cond or ship:
         cs = f"<br><span style='color:#070;font-size:10px'>{_html.escape(cond)} {_html.escape(ship)}</span>"
-    if multi:
-        inp = f"<input type=checkbox class=pick value='{_html.escape(url)}'>"
-    else:
-        inp = f"<input type=radio class=pick name='{_html.escape(name)}' value='{_html.escape(url)}'>"
-    return (f"<label class=cand>{inp}{img_tag}<div class=meta>{pr}{cs}<br>"
-            f"<a href='{_html.escape(url)}' target=_blank>開く</a></div></label>")
+    safe = _html.escape(url)
+    return (f"<div class=cand data-url='{safe}' data-price='{int(price or 0)}' data-mark=''>"
+            f"<div class=candbtns>"
+            f"<button type=button class=okb onclick=\"mark(this,'ok')\">可</button>"
+            f"<button type=button class=ngb onclick=\"mark(this,'ng')\">否</button></div>"
+            f"{img_tag}<div class=meta>{pr}{cs}<br>"
+            f"<a href='{safe}' target=_blank>開く</a></div></div>")
 
 
 def build_identify_html(items):
@@ -145,17 +182,22 @@ def _page(heading, items, stage):
              ".title{font-weight:bold;margin-bottom:6px}.body{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}"
              ".ref img,.ref .noimg{max-width:150px;max-height:150px;border:2px solid #2a7}"
              ".ref{font-size:11px;color:#666;text-align:center}"
-             ".cand{display:inline-block;border:1px solid #ccc;border-radius:4px;padding:4px;margin:3px;cursor:pointer;text-align:center;background:#fafafa}"
-             ".cand input{display:block;margin:0 auto 3px}.cand img{max-width:120px;max-height:120px}"
-             ".cand:has(input:checked){border:3px solid #07f;background:#e8f2ff}"
+             ".cand{display:inline-block;border:1px solid #ccc;border-radius:4px;padding:4px;margin:3px;text-align:center;background:#fafafa;vertical-align:top}"
+             ".cand img{max-width:120px;max-height:120px}"
+             ".cand.ok{border:3px solid #07f;background:#e8f2ff}"
+             ".cand.ng{border:1px solid #ccc;background:#eee;opacity:.4}"
+             # 候補ごとの 可/否 ボタン(個別に印=どこまで調べたか分かる)
+             ".candbtns{margin-bottom:3px}.candbtns button{font-size:13px;padding:2px 10px;margin:0 2px;border-radius:4px;border:0;cursor:pointer;color:#fff}"
+             ".okb{background:#07f}.ngb{background:#c33}"
+             ".cand.ok .okb{outline:3px solid #034}.cand.ng .ngb{outline:3px solid #600}"
              ".noimg{width:120px;height:120px;display:flex;align-items:center;justify-content:center;color:#999;border:1px dashed #ccc}"
              ".meta{font-size:11px}.skip{color:#a00}"
-             # 判断状態: pick=候補選択中(青) / skip=見送り(灰) / 未判断=黄帯
-             ".item{border:3px solid #f0c000}"   # 既定=未判断(黄)で目立たせる
+             # 商品状態: pick=可候補あり(青) / skip=見送り(灰) / 未調査=黄帯
+             ".item{border:3px solid #f0c000}"   # 既定=未調査(黄)で目立たせる
              ".item.pick{border-color:#07f;background:#eef6ff}"
              ".item.skip{border-color:#bbb;background:#f2f2f2;opacity:.55}"
              ".statebtns{margin:4px 0 8px}.statebtns button{font-size:14px;padding:5px 16px;margin-right:8px}"
-             ".bpick{background:#07f}.bskip{background:#888}.btag{font-weight:bold;margin-left:6px}"
+             ".bskip{background:#888}.btag{font-weight:bold;margin-left:6px}"
              "button{font-size:16px;padding:8px 24px;background:#07f;color:#fff;border:0;border-radius:5px;cursor:pointer}"
              "</style>"]
     multi = (stage == "expand")
@@ -172,11 +214,10 @@ def _page(heading, items, stage):
         parts.append(f"<div class=title>{prize_tag} {_html.escape(it['title'])} "
                      f"<small>(row {it['row']} / 旧itemID {it['item_id']}) "
                      f"<a href='{ebay_url}' target=_blank>🔗 eBay出品元を見る</a></small></div>")
-        # 判断ボタン(候補から選ぶ / 見送り)+ 状態タグ。どれを判断済か一目で分かるように。
+        # 各候補に可/否を付ける(下のカード)。この景品ごと不要なら『見送り』。状態タグで進捗表示。
         parts.append(f"<div class=statebtns>"
-                     f"<button type=button class=bpick onclick=\"decide('{it['row']}','pick')\">✅ 候補から選ぶ</button>"
-                     f"<button type=button class=bskip onclick=\"decide('{it['row']}','skip')\">⊘ 見送り</button>"
-                     f"<span class=btag id='tag_{it['row']}'>— 未判断</span></div>")
+                     f"<button type=button class=bskip onclick=\"decideSkip('{it['row']}')\">⊘ この景品ごと見送り</button>"
+                     f"<span class=btag id='tag_{it['row']}'>— 未調査</span></div>")
         parts.append("<div class=body>")
         # 参照(公式)
         rimg = it.get("ref_image") or ""
@@ -192,10 +233,7 @@ def _page(heading, items, stage):
         for c in cands:
             parts.append(_card(c["url"], c.get("price", 0), c.get("image", ""), nm, multi=multi,
                                cond=c.get("cond", ""), ship=c.get("ship", "")))
-        # 該当なし: 単一選択(identify)のみ明示。複数選択(expand)は未チェック=skip。
-        if not multi:
-            parts.append(f"<label class=cand><input type=radio class=pick name='{nm}' value='NONE'>"
-                         f"<div class=noimg>該当なし<br>(skip)</div></label>")
+        # 該当なし = どの候補にも『可』を付けず『見送り』を押す(= 候補待ち5日へ)。
         parts.append("</div>")
         # 手動rescue: 候補が弱い時、自分で見つけた mercari URL を貼る(ラジオより優先)
         parts.append(f"<div style='margin-top:6px;font-size:12px'>または手動: "
@@ -204,72 +242,78 @@ def _page(heading, items, stage):
         parts.append("</div>")
     parts.append("<div style='padding:16px'><button id=sendbtn onclick='submit()'>送信</button></div>")
     parts.append("""<script>
-function _selCount(it){
-  var n=it.querySelectorAll('input.pick:checked').length;
+function _cands(it){ return it.querySelectorAll('.cand'); }
+function _restyle(c){ c.classList.toggle('ok', c.dataset.mark==='ok'); c.classList.toggle('ng', c.dataset.mark==='ng'); }
+function mark(btn, state){
+  var c=btn.closest('.cand'), it=btn.closest('.item');
+  c.dataset.mark = (c.dataset.mark===state) ? '' : state;   // 同じボタン再押下=解除
+  if(c.dataset.mark==='ok' && it.dataset.multi!=='1'){       // identify=可は1つだけ
+    _cands(it).forEach(function(o){ if(o!==c && o.dataset.mark==='ok'){o.dataset.mark=''; _restyle(o);} });
+  }
+  _restyle(c);
+  if(it.dataset.decision==='skip') it.dataset.decision='';   // 候補を触ったら見送り解除
+  _sync(it);
+}
+function decideSkip(row){
+  var it=document.querySelector('.item[data-row="'+row+'"]'); if(!it) return;
+  var on = it.dataset.decision!=='skip';
+  it.dataset.decision = on ? 'skip' : '';
+  if(on){ _cands(it).forEach(function(c){ c.dataset.mark=''; _restyle(c); }); }  // 見送り=全マーク解除
+  _sync(it);
+}
+function _okCount(it){
+  var n=0; _cands(it).forEach(function(c){ if(c.dataset.mark==='ok') n++; });
   var man=it.querySelector('.manurl'); if(man && man.value.trim()) n++;
   return n;
 }
-function _updTag(row){
-  var it=document.querySelector('.item[data-row="'+row+'"]'); if(!it) return;
-  var d=it.dataset.decision||'', n=_selCount(it), tag=document.getElementById('tag_'+row);
-  if(d==='skip') tag.textContent='⊘ 見送り';
-  else if(d==='pick'||n>0) tag.textContent='✅ 選択 '+n+'件';
-  else tag.textContent='— 未判断';
+function _sync(it){
+  var cs=_cands(it), ok=0, ng=0;
+  cs.forEach(function(c){ if(c.dataset.mark==='ok')ok++; else if(c.dataset.mark==='ng')ng++; });
+  var man=it.querySelector('.manurl'); if(man && man.value.trim()) ok++;
+  var skip = it.dataset.decision==='skip';
+  it.classList.toggle('pick', !skip && ok>0);
+  it.classList.toggle('skip', skip);
+  var tag=document.getElementById('tag_'+it.dataset.row);
+  if(skip) tag.textContent='⊘ 見送り';
+  else if(ok>0) tag.textContent='可'+ok+' 否'+ng+' 未'+(cs.length-(ok-(man&&man.value.trim()?1:0))-ng);
+  else if(cs.length===0) tag.textContent='候補なし(見送り推奨)';
+  else tag.textContent='否'+ng+' / 未'+(cs.length-ng)+' (未調査)';
+  _counter();
 }
-function _isDecided(it){ return (it.dataset.decision==='skip') || (it.dataset.decision==='pick') || _selCount(it)>0; }
-function _updCounter(){
-  var items=document.querySelectorAll('.item'), decided=0;
-  items.forEach(function(it){ if(_isDecided(it)) decided++; });
-  var c=document.getElementById('counter'); if(c) c.textContent='判断済 '+decided+' / '+items.length;
+function _counter(){
+  var items=document.querySelectorAll('.item'), done=0;
+  items.forEach(function(it){ if(it.dataset.decision==='skip' || _okCount(it)>0) done++; });
+  var c=document.getElementById('counter'); if(c) c.textContent='判断済 '+done+' / '+items.length;
 }
-function decide(row, d){
-  var it=document.querySelector('.item[data-row="'+row+'"]'); if(!it) return;
-  it.dataset.decision=d;
-  it.classList.toggle('pick', d==='pick');
-  it.classList.toggle('skip', d==='skip');
-  if(d==='skip'){ it.querySelectorAll('input.pick:checked').forEach(function(x){x.checked=false;}); }
-  _updTag(row); _updCounter();
-}
-// 候補チェック/手動URL入力で自動的に pick 状態へ
-document.addEventListener('change', function(e){
-  var t=e.target; if(t && t.classList && t.classList.contains('pick')){
-    var it=t.closest('.item'); if(it){
-      if(_selCount(it)>0){ it.dataset.decision='pick'; it.classList.add('pick'); it.classList.remove('skip'); }
-      _updTag(it.dataset.row); _updCounter();
-    }
-  }
-});
 document.addEventListener('input', function(e){
-  var t=e.target; if(t && t.classList && t.classList.contains('manurl')){
-    var it=t.closest('.item'); if(it){ if(_selCount(it)>0){ it.dataset.decision='pick'; it.classList.add('pick'); } _updTag(it.dataset.row); _updCounter(); }
+  if(e.target && e.target.classList && e.target.classList.contains('manurl')){
+    var it=e.target.closest('.item'); if(it) _sync(it);
   }
 });
-window.addEventListener('DOMContentLoaded', _updCounter);
+window.addEventListener('DOMContentLoaded', _counter);
 function submit(){
-  var picks={}, chosen=0, undecided=0;
+  var picks={}, chosen=0, wait=0;
   document.querySelectorAll('.item').forEach(function(it){
-    var multi = it.dataset.multi==='1';
-    var arr=[];
-    var man=it.querySelector('.manurl'); var manv = man ? man.value.trim() : '';
-    if(manv) arr.push(manv);                              // 手動URL(rescue)も採用
-    it.querySelectorAll('input.pick:checked').forEach(function(ip){
-      if(ip.value && ip.value!=='NONE') arr.push(ip.value);
-    });
-    // 重複除去
-    arr = arr.filter(function(u,i){return arr.indexOf(u)===i;});
-    picks[it.dataset.row]= multi ? arr : (arr[0]||'');    // expand=配列(複数) / identify=単一
-    if(arr.length) chosen++;
-    else if(it.dataset.decision!=='skip') undecided++;    // 見送りでもなく未選択 = 未判断
+    var skip = it.dataset.decision==='skip', oks=[];
+    if(!skip){
+      it.querySelectorAll('.cand[data-mark="ok"]').forEach(function(c){
+        oks.push({url:c.dataset.url, price:parseInt(c.dataset.price||'0',10)});
+      });
+      var man=it.querySelector('.manurl'); var mv=man?man.value.trim():'';
+      if(mv) oks.push({url:mv, price:0});   // 手動URL(価格不明=0、refresh側でfetch fallback)
+    }
+    picks[it.dataset.row]={skip:skip, oks:oks};   // 可候補(高い順は送信後にサーバで)
+    if(oks.length) chosen++; else wait++;          // 可ゼロ(見送り/未調査/否のみ)=候補待ち5日へ
   });
-  var msg = chosen+' 行で選択。'+(undecided>0 ? ('⚠️ 未判断 '+undecided+' 行(見送り扱いで除外されます)。') : '')+'送信しますか?';
+  var msg=chosen+' 行で可を選択。'+(wait>0?('残 '+wait+' 行は可ゼロ→候補待ち(5日)に入ります。'):'')+'送信しますか?';
   if(!confirm(msg)) return;
   var btn=document.getElementById('sendbtn'); if(btn){btn.disabled=true; btn.textContent='送信中...';}
   fetch('/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(picks)})
    .then(r=>r.json())
-   .then(_=>{document.body.innerHTML='<h2 style="padding:24px;color:#070">✅ 送信完了('+chosen+'件)。このタブを閉じてOK。ターミナルに戻ってください。</h2>';})
+   .then(_=>{document.body.innerHTML='<h2 style="padding:24px;color:#070">✅ 送信完了('+chosen+'件確定 / '+wait+'件 候補待ち)。タブを閉じてOK。</h2>';})
    .catch(e=>{
      if(btn){btn.disabled=false; btn.textContent='送信';}
-     alert('❌ 送信できませんでした: '+e+'\\n\\nサーバ経由で開いていますか?\\n  python ichibankuji_restock.py identify\\n(静的ファイルを直接開くと送信できません)');
+     alert('❌ 送信できませんでした: '+e+'\\n\\nサーバ経由で開いていますか?(静的ファイル直開きは不可)');
    });
 }
 </script>""")
@@ -277,10 +321,55 @@ function submit(){
 
 
 # ---------------- I/O ----------------
+# ---------------- 候補待ち cooldown (Q3: 候補0/見送りの溜まり込み防止・5日) ----------------
+def _today():
+    return datetime.date.today().isoformat()
+
+
+def cooldown_active(rec, today):
+    """台帳レコードが today 時点で有効(=identify に出さない)か。純関数。"""
+    return bool(rec) and (rec.get("until", "") > today)
+
+
+def filter_cooldown(oos_list, ledger, today):
+    """OOS list から cooldown 中の item を除外。純関数。戻り (残list, 除外件数)。"""
+    kept = [t for t in oos_list if not cooldown_active(ledger.get(str(t["item_id"])), today)]
+    return kept, len(oos_list) - len(kept)
+
+
+def _load_cooldown():
+    try:
+        return json.load(open(COOLDOWN_FILE, encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def _add_cooldown(item_ids, reason="候補0/見送り", days=COOLDOWN_DAYS, today=None):
+    """item_ids を cooldown 台帳に登録(until=today+days)。後日 supply 出たら再浮上。"""
+    ids = [str(i) for i in item_ids if i]
+    if not ids:
+        return 0
+    today = today or _today()
+    until = (datetime.date.fromisoformat(today) + datetime.timedelta(days=days)).isoformat()
+    led = _load_cooldown()
+    for iid in ids:
+        led[iid] = {"until": until, "reason": reason, "set": today}
+    os.makedirs(os.path.dirname(COOLDOWN_FILE), exist_ok=True)
+    tmp = COOLDOWN_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(led, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, COOLDOWN_FILE)
+    return len(ids)
+
+
 def get_oos_ichibankuji(limit):
-    """管理シート: category=一番くじ + 売り切れ○ + B列itemID。戻り [{row,item_id,title}]。"""
+    """管理シート: category=一番くじ + 売り切れ○ + B列itemID。戻り [{row,item_id,title}]。
+
+    候補待ち cooldown(候補0/見送りで5日)中の item は除外(毎回出て溜まるのを防ぐ)。
+    cooldown を除いた上で limit 件を返す。
+    """
     ws = sheet_io._product_ws()
-    out = []
+    cand = []
     for i, row in enumerate(ws.get_all_values(), start=1):
         if i == 1:
             continue
@@ -289,10 +378,11 @@ def get_oos_ichibankuji(limit):
         sold = (row[COL_SOLD] if len(row) > COL_SOLD else "").strip()
         title = (row[2] if len(row) > 2 else "").strip()
         if cat == "一番くじ" and b and sold:
-            out.append({"row": i, "item_id": b, "title": title})
-        if len(out) >= limit:
-            break
-    return out
+            cand.append({"row": i, "item_id": b, "title": title})
+    kept, n_cd = filter_cooldown(cand, _load_cooldown(), _today())
+    if n_cd:
+        print(f"  ⏳ 候補待ち cooldown 中 {n_cd}件 を除外(5日)")
+    return kept[:limit]
 
 
 def _retry(fn, tries=5, what=""):
@@ -684,14 +774,22 @@ def pass_identify(n, cand_n):
         try: drv.quit()
         except Exception: pass
     picks = serve_and_collect(build_identify_html(items))
-    # picks: {row(str): url|'NONE'|''}。url が入った行を保存(パスBの種)。
+    # picks: {row(str): {skip, oks:[{url,price}]}}。可1つを picked_url に。見送り/可ゼロは候補待ち。
     saved = []
+    cooldown_ids = []
     by_row = {str(it["row"]): it for it in items}
     for row, val in picks.items():
-        if val and val != "NONE" and row in by_row:
-            it = by_row[row]
-            saved.append({"row": int(row), "item_id": it["item_id"], "title": it["title"],
-                          "ref_image": it["ref_image"], "picked_url": val})
+        if row not in by_row:
+            continue
+        it = by_row[row]
+        skip, oks = parse_pick(val)
+        if skip or not oks:
+            cooldown_ids.append(it["item_id"]); continue
+        saved.append({"row": int(row), "item_id": it["item_id"], "title": it["title"],
+                      "ref_image": it["ref_image"], "picked_url": oks[0]["url"]})
+    if cooldown_ids:
+        n = _add_cooldown(cooldown_ids, reason="identify:見送り/該当なし")
+        print(f"  ⏳ 識別できず {n}件 を候補待ち({COOLDOWN_DAYS}日)に登録")
     os.makedirs(os.path.dirname(PICKS_FILE), exist_ok=True)
     with open(PICKS_FILE, "w", encoding="utf-8") as f:
         json.dump(saved, f, ensure_ascii=False, indent=2)
@@ -732,23 +830,25 @@ def pass_expand(cand_n, dry=False):
         except Exception: pass
     finals = serve_and_collect(build_expand_html(items))
     by_row = {it["row"]: it for it in items}   # row → 表示item(item_id 等)
-    confirmed = {}   # row → {item_id, a(主supply), aux(補・最大5)}
+    confirmed = {}   # row → {item_id, a(主=最高値supply), aux(補・最大5), cost(最高値)}
+    cooldown_ids = []
     for row, val in finals.items():
-        urls = val if isinstance(val, list) else ([val] if (val and val != "NONE") else [])
-        seen = set()
-        urls = [u for u in urls if u and u != "NONE" and not (u in seen or seen.add(u))]
-        if urls:
-            r = int(row)
-            it = by_row.get(r) or {}
-            # ★主supplyの価格を expand 表示時の候補から確定保存(refresh の cost に使う)。
-            #   現行 mercari は "price":N を JSON で持たず再fetchが不安定なため、選んだ時の値を焼く。
-            price_map = {c.get("url"): c.get("price", 0) for c in it.get("candidates", [])}
-            confirmed[r] = {"item_id": it.get("item_id", ""),
-                            "a": urls[0],          # 先頭(最安 or 手動)= 主supply → A列
-                            "aux": urls[1:6],      # 残り = 補URL(mercari/Shops混在OK・最大5)
-                            "cost": price_map.get(urls[0], 0)}   # 主supply実価格(手動URLは0=refreshでfetch)
+        r = int(row)
+        it = by_row.get(r) or {}
+        skip, oks = parse_pick(val)
+        if skip or not oks:
+            if it.get("item_id"):
+                cooldown_ids.append(it["item_id"])   # 見送り/可ゼロ = 候補待ち
+            continue
+        # 高い順に並べ替え(A列=最高値supply / 補URL=以降最大5) + 最高値を cost に(赤字回避)
+        urls, cost = sort_oks_desc(oks)
+        confirmed[r] = {"item_id": it.get("item_id", ""), "a": urls[0],
+                        "aux": urls[1:6], "cost": cost}
+    if cooldown_ids:
+        n = _add_cooldown(cooldown_ids, reason="expand:見送り/候補なし")
+        print(f"  ⏳ 候補待ち {n}件 を {COOLDOWN_DAYS}日 cooldown に登録(次回identifyで除外)")
     if not confirmed:
-        print("確定なし(全行 未選択/該当なし)"); return
+        print("確定なし(全行 見送り/候補待ち)"); return
     # 書込前に確定を保存(API障害で落ちても再選択不要 → write で再適用)
     _save_confirmed(confirmed)
     print(f"  💾 確定を保存(失敗時は再選択不要・write で再適用): {CONFIRMED_FILE}")
