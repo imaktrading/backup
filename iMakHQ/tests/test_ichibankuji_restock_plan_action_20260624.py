@@ -52,6 +52,16 @@ def test_restock_reqs_no_cost_skips_N():
     assert not any(q["range"].startswith("N") for q in reqs)
 
 
+def test_restock_reqs_write_kuji_to_I():
+    """公式くじURL(kuji)が I列(=col8)に入る(refresh用)。無い行は I列を書かない。"""
+    reqs = r.build_restock_reqs({110: {"a": "u", "b": "x", "aux": [], "cost": 17000,
+                                       "kuji": "https://1kuji.com/products/jojo"}})
+    ranges = {q["range"]: q["values"][0][0] for q in reqs}
+    assert ranges["I110"] == "https://1kuji.com/products/jojo"
+    reqs2 = r.build_restock_reqs({111: {"a": "u", "b": "x", "aux": [], "cost": 8000}})
+    assert not any(q["range"].startswith("I") for q in reqs2)
+
+
 def test_confirmed_roundtrip_preserves_cost(tmp_path, monkeypatch):
     """expand で選んだ主supply価格(cost)が confirmed の save/load を生き残る
     (= refresh が壊れた fetch_mercari_price に頼らず実価格を使える)。"""

@@ -218,6 +218,12 @@ def _page(heading, items, stage):
         parts.append(f"<div class=statebtns>"
                      f"<button type=button class=bskip onclick=\"decideSkip('{it['row']}')\">⊘ この景品ごと見送り</button>"
                      f"<span class=btag id='tag_{it['row']}'>— 未調査</span></div>")
+        # 公式くじURL欄(expand のみ)= refresh(内容刷新)用。入れて送信すると I列 に保存される。
+        if stage == "expand":
+            kv = _html.escape(it.get("kuji_url", "") or "", quote=True)
+            parts.append(f"<div style='margin:2px 0 8px;font-size:12px'>🎯 公式くじURL(refresh用・I列保存): "
+                         f"<input type=text class=kujiurl value='{kv}' "
+                         f"placeholder='https://1kuji.com/products/... (任意)' style='width:55%;padding:3px'></div>")
         parts.append("<div class=body>")
         # 参照(公式)
         rimg = it.get("ref_image") or ""
@@ -302,7 +308,8 @@ function submit(){
       var man=it.querySelector('.manurl'); var mv=man?man.value.trim():'';
       if(mv) oks.push({url:mv, price:0});   // 手動URL(価格不明=0、refresh側でfetch fallback)
     }
-    picks[it.dataset.row]={skip:skip, oks:oks};   // 可候補(高い順は送信後にサーバで)
+    var ku=it.querySelector('.kujiurl'); var kuv=ku?ku.value.trim():'';
+    picks[it.dataset.row]={skip:skip, oks:oks, kuji:kuv};   // kuji=公式URL(I列保存)
     if(oks.length) chosen++; else wait++;          // 可ゼロ(見送り/未調査/否のみ)=候補待ち5日へ
   });
   var msg=chosen+' 行で可を選択。'+(wait>0?('残 '+wait+' 行は可ゼロ→候補待ち(5日)に入ります。'):'')+'送信しますか?';
@@ -410,6 +417,7 @@ def build_restock_reqs(sheet_rows):
     cost が無い行は N列を書かない(誤って既存cost を消さない)。
     """
     ncol = _col_letter(COL_COST)
+    icol = _col_letter(COL_KUJI_URL)
     reqs = []
     for row, d in sheet_rows.items():
         reqs.append({"range": f"A{row}", "values": [[d.get("a", "")]]})
@@ -417,6 +425,8 @@ def build_restock_reqs(sheet_rows):
         reqs.append({"range": f"D{row}", "values": [[""]]})   # 売り切れ解除(在庫補充済)
         if d.get("cost"):
             reqs.append({"range": f"{ncol}{row}", "values": [[d.get("cost")]]})  # 新supply実価格→N列
+        if d.get("kuji"):
+            reqs.append({"range": f"{icol}{row}", "values": [[d.get("kuji")]]})  # 公式くじURL→I列(refresh用)
     return reqs
 
 
@@ -609,15 +619,31 @@ def ebay_restock(item_id, tok=None):
     raise RuntimeError(f"未対応 status={status}")
 
 
-def _make_driver():
-    """uc.Chrome 起動。DNS一時失敗(getaddrinfo)で初期化が稀にコケるのでリトライ。"""
+# ★ログインしない専用プロファイル(アカウント無し=BANリスクなし)。仕入アカウントの
+# ログインprofileで自動化すると BAN→仕入不能の本末転倒(2026-06-25 ユーザー指摘)。
+# 匿名でも画像検索は動く(expand2/5実績)。毎回まっさら匿名は bot 判定されやすいので、cookie 保温
+# だけのアカウント無し dir + 非headless でブラウザらしさを出す。仕入profileとは別物。
+MERCARI_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\ichibankuji_scrape_profile"
+
+
+def _make_driver(headless=False):
+    """uc.Chrome 起動。**ログインしない専用プロファイル + 既定 非headless**。
+
+    匿名(=BANリスクなし)だが cookie 保温 + 非headless で「まっさら匿名 headless」より弾かれにくく
+    する。**仕入アカウントには絶対ログインしない**(BAN→仕入不能回避)。
+    DNS一時失敗(getaddrinfo)で初期化が稀にコケるのでリトライ。
+    """
     import undetected_chromedriver as uc
+    os.makedirs(MERCARI_PROFILE_DIR, exist_ok=True)
     maj = _chrome_major()
     last = None
     for attempt in range(3):
         try:
             opts = uc.ChromeOptions()   # uc は options を消費するので毎回生成
-            for a in ("--headless=new", "--no-sandbox", "--lang=ja-JP", "--window-size=1280,1400"):
+            opts.add_argument(f"--user-data-dir={MERCARI_PROFILE_DIR}")   # ログイン済セッション
+            if headless:
+                opts.add_argument("--headless=new")
+            for a in ("--no-sandbox", "--lang=ja-JP", "--window-size=1280,1400"):
                 opts.add_argument(a)
             return uc.Chrome(options=opts, version_main=maj) if maj else uc.Chrome(options=opts)
         except Exception as e:  # noqa: BLE001
@@ -661,9 +687,40 @@ def kw_search(drv, kw, limit):
     return items
 
 
-def image_search_from_url(drv, mercari_url, limit):
-    """段階2: 選んだ実写(mercari_url の画像)で mercari画像検索 → 同景品 候補(価格昇順)。"""
+def _image_search_once(drv, seed_path):
+    """画像検索を1回実行 → page_source を返す(失敗/結果0は '')。
+
+    結果が揃うまでポーリング(揃えば早期return。固定sleepより速く確実)。
+    """
     from selenium.webdriver.common.by import By
+    try:
+        drv.get("https://jp.mercari.com/search?keyword=%20")
+        time.sleep(6)
+        btn = drv.find_elements(By.CSS_SELECTOR, '[data-testid="image-search-button"]')
+        if not btn:
+            return ""
+        btn[0].click()
+        time.sleep(2)
+        fin = drv.find_elements(By.CSS_SELECTOR, 'input[type="file"]')
+        if not fin:
+            return ""
+        fin[0].send_keys(seed_path)
+        for _ in range(8):                       # 最大~24s、結果が出たら即抜け
+            time.sleep(3)
+            src = drv.page_source
+            if parse_image_search_results(src):
+                return src
+        return ""
+    except Exception:
+        return ""
+
+
+def image_search_from_url(drv, mercari_url, limit, tries=3):
+    """段階2: 選んだ実写で mercari画像検索 → 同景品候補。
+
+    expand で3件連続検索すると burst で**間欠的に0**を返す(単独実行なら出る=2026-06-25 実機確認)。
+    0件なら再検索リトライ(tries回)。待ち時間でなく間欠failが主因なので retry が効く。
+    """
     import requests
     img = mercari_image_url(mercari_url)
     if not img:
@@ -674,23 +731,16 @@ def image_search_from_url(drv, mercari_url, limit):
             f.write(requests.get(img, timeout=30, headers={"User-Agent": "Mozilla/5.0"}).content)
     except Exception:
         return []
-    try:
-        drv.get("https://jp.mercari.com/search?keyword=%20")
-        time.sleep(7)
-        btn = drv.find_elements(By.CSS_SELECTOR, '[data-testid="image-search-button"]')
-        if not btn:
-            return []
-        btn[0].click()
-        time.sleep(2)
-        fin = drv.find_elements(By.CSS_SELECTOR, 'input[type="file"]')
-        if not fin:
-            return []
-        fin[0].send_keys(p)
-        time.sleep(12)
-        src = drv.page_source
-        res = parse_image_search_results(src)
-    except Exception:
+    src = ""
+    for attempt in range(tries):
+        src = _image_search_once(drv, p)
+        if src:
+            break
+        print(f"     ↻ 画像検索0件 → リトライ {attempt + 1}/{tries}", flush=True)
+        time.sleep(4)
+    if not src:
         return []
+    res = parse_image_search_results(src)
     # 画像検索モーダルから href→実画像src(item=mercdn / shops=mercari-shops 両対応)。
     # parse_image_search_results は画像を返さない+Shopsは mercari_image_url で構築不可のため。
     imgmap = {}
@@ -805,6 +855,10 @@ def pass_expand(cand_n, dry=False):
     print(f"画像検索+確定(パスB): {len(picks)}件 (各最安{cand_n}候補)")
     if not picks:
         print("特定済(picked_url)が無い"); return
+    try:
+        meta = _sheet_meta()   # 既存 I列(公式くじURL)を欄に pre-fill するため
+    except Exception:
+        meta = {}
     drv = _make_driver()
     items = []
     try:
@@ -821,6 +875,7 @@ def pass_expand(cand_n, dry=False):
             items.append({"row": p["row"], "item_id": p["item_id"], "title": p["title"],
                           "ref_image": p.get("ref_image", ""),
                           "picked_image": mercari_image_url(p["picked_url"]),
+                          "kuji_url": (meta.get(p["row"]) or {}).get("kuji_url", ""),  # I列 pre-fill
                           "candidates": [{"url": c["href"], "price": c["price"],
                                           "image": c.get("image", "") or mercari_image_url(c["href"]),
                                           "cond": c.get("cond", ""), "ship": c.get("ship", "")}
@@ -842,8 +897,9 @@ def pass_expand(cand_n, dry=False):
             continue
         # 高い順に並べ替え(A列=最高値supply / 補URL=以降最大5) + 最高値を cost に(赤字回避)
         urls, cost = sort_oks_desc(oks)
+        kuji = (val.get("kuji") or "").strip() if isinstance(val, dict) else ""
         confirmed[r] = {"item_id": it.get("item_id", ""), "a": urls[0],
-                        "aux": urls[1:6], "cost": cost}
+                        "aux": urls[1:6], "cost": cost, "kuji": kuji}   # kuji→I列(refresh用)
     if cooldown_ids:
         n = _add_cooldown(cooldown_ids, reason="expand:見送り/候補なし")
         print(f"  ⏳ 候補待ち {n}件 を {COOLDOWN_DAYS}日 cooldown に登録(次回identifyで除外)")
@@ -910,7 +966,8 @@ def _apply_restock(confirmed):
                 print(f"  ❌ row{row} eBay在庫補充 最終失敗: {e}(スプシは書く)")
         print(f"  📦 row{row}: {action}  itemID={new_id}")
         sheet_rows[row] = {"a": d.get("a", ""), "b": new_id, "aux": d.get("aux", []),
-                           "cost": d.get("cost", 0)}   # 新supply実価格→N列(V8 SSOT)
+                           "cost": d.get("cost", 0),   # 新supply実価格→N列(V8 SSOT)
+                           "kuji": d.get("kuji", "")}  # 公式くじURL→I列(refresh用)
     n = _retry(lambda: write_restock(sheet_rows), what="スプシ書込")
     return n
 
