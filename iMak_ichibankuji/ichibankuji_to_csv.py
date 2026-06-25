@@ -599,13 +599,16 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
         if prize_en.strip() == ' Prize':
             prize_en = character + ' Prize'
 
-    # C:Series：Claudeの結果を優先、なければフォールバック
+    # series_name_en は Description の Specs ブロック用(フル英語作品名)。
     if not series_name_en:
         series_name_en = f"Ichiban Kuji {franchise}"
-    # eBay Series field は 65 文字制限. 超過すると入稿失敗 (ErrorCode 21919308).
-    # word 境界で安全に短縮 (= eBay 仕様への上流防衛、listing_common 検証は二段防御).
     series_name_en = _truncate_at_word_boundary(series_name_en, max_len=65)
-    print(f"    → C:Series に設定: {series_name_en}")
+    # ★C:Series(eBay item specific)は "Ichiban Kuji" 固定。理由(2026-06-25 ユーザー合意):
+    #   261055 の Series は selection型で、フル作品名(自由文字列)は eBay に drop される
+    #   (既存出品が全て Series 空だった)。"Ichiban Kuji" は有効値で確実に載り、Series フィルタに
+    #   ヒット=回遊SEO。作品名/賞/キャラは Title・Franchise・TV Show・Character・説明文でカバー済。
+    SERIES_EBAY = "Ichiban Kuji"
+    print(f"    → C:Series: {SERIES_EBAY}(固定) / 作品名は説明文Specsへ: {series_name_en}")
 
     # Description生成
     height_cm = claude_result.get('item_height_cm', prize_data.get('size_cm', ''))
@@ -666,7 +669,7 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
             else f"{height_cm} cm" if height_cm
             else ""
         ),
-        "C:Series": series_name_en,
+        "C:Series": SERIES_EBAY,   # "Ichiban Kuji" 固定(selection有効値・フィルタヒット)。作品名は説明文へ
         "StoreCategoryID": 42133037010,
         "StoreCategoryID2": STORE_CATEGORY2.get(franchise.lower(), STORE_CATEGORY2_DEFAULT),
     }
