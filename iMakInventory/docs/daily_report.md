@@ -1,6 +1,23 @@
 # iMakInventory daily_report
 
-## 2026-06-25 — amazon driver も連続 crash で自動再起動 (盲目化 fail-OPEN 対策) + 昨日ログ点検
+## 2026-06-25 — amazon driver 自動再起動 + 昨日ログ点検 + 在庫整合性確認 (reverse_audit 偽乖離2件 + SHOPS skip 修正)
+
+### 在庫整合性確認 (user 指示「在庫は問題ないの」) — 実害ゼロ、構造ギャップ2件
+- 決定: pending=0 / action_required=0。reverse_audit 手動実行 (06-16 以降 自動停止のため) で乖離2件検出 →
+  **両方とも偽陽性 = 取下げ漏れ実害ゼロ**と確定。
+  - HIGH row728 (トゲキッスV): 既知正当 (user 手動再買 qty=1、url空) [[ended_listing_not_failopen]]。
+  - HIGH row949 (PSA10ミラーピカチュウex SHOPS, iid=358705341664): eBay qty=1 live × D=○。
+    源を clean 環境で 5/5 再 scrape → **ON_SALE qty=1 ¥38,280 = 在庫あり** → eBay qty=1 は正しい (取下げ不要)。
+    ※ 初回 scrape は orphan chrome 競合で flip-flop した。即取下げせず源確認した判断が正解 ([[dont_act_on_audit_alert_without_human_review]])。
+- 変更(1) mercari SHOPS skip 除外 (commit 6ea4cfe): `monitor_listings.py` — URL が /shops/ = SHOPS は
+  D=○ skip せず毎 cycle 再 scrape (restock 検知)。SHOPS は業者出品で復活するのに 1点もの前提 skip が
+  誤適用され、 売切→D=○ 後の復活を検知できず D=○ が stale 化していた (row949 の真因)。通常 item(/item/) は
+  skip 維持。test_mercari_shops_no_skip.py。
+- 検証: 次 cycle で row949 再 scrape→ON_SALE→D=○ 自動是正される見込み。offline 159 + pre-commit 115 pass。
+- 残課題(2) **reverse_audit が 06-16 のスケジュール再編以降 自動実行されていない**: Phase 5 起動条件
+  `sheet=="both"` の cycle (旧 _Cycle_BothDaily0930) が消滅し、 現タスクは SHEET(6x/日)/LOW(3x/日) のみ。
+  → 安全原則「定期 reconciliation で乖離ゼロ継続証跡」が本体側で途切れ。要 再開 (どこかの cycle に Phase 5 復帰)。
+  公式側 (iMakeBayAPI/inventory_monitor) は audit_and_heal が毎 cycle 稼働で乖離自動補正中=問題なし。
 
 ### ログ点検 (user 指示「昨日のログで不具合ないか」)
 - 決定: 本体監視 06-24 はクリーン。06-23 に一過性2件 (いずれも可視化済・翌 cycle 回復) を検出 →
