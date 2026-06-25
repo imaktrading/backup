@@ -400,16 +400,122 @@ def run_ebay_down_sheet_active_audit(
     return result
 
 
+# ============================================================================
+# daily 専用エントリ (2026-06-25): 06-16 のスケジュール再編で run_cycle の
+#   `--sheet both` cycle が消滅 → Phase 5 reverse_audit が自動実行されなくなった。
+#   安全原則「定期 reconciliation で乖離ゼロを継続証跡」が本体側で途切れたため、
+#   専用 daily cron (iMakInventory_ReverseAudit_Daily 09:30) でこの関数を直接呼ぶ。
+#   reverse + ebay_down を 1 回の eBay active map で両方走らせ、 取下げ漏れ (reverse
+#   mismatch>0) / audit 不能 (mismatch==-1) を **多チャネルで非-silent に** 通知する。
+# ============================================================================
+HEARTBEAT_LOG = DECISION_LOG_DIR / "reverse_audit_daily.log"
+ALERT_LOG = DECISION_LOG_DIR / "AUDIT_ALERT.log"
+
+
+def _toast(title: str, body: str) -> None:
+    """Windows toast (win10toast 不在 / 失敗時は黙って skip)."""
+    try:
+        from win10toast import ToastNotifier  # noqa: PLC0415
+        ToastNotifier().show_toast(title, body[:200], duration=15, threaded=True)
+    except Exception:
+        pass
+
+
+def _email_alert(subject: str, body: str) -> bool:
+    """Gmail SMTP で alert 送信 (opt-in: encrypted_gmail.dat 不在なら skip)。失敗しても raise しない."""
+    try:
+        from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
+        from email_notifier import _send_via_gmail  # noqa: PLC0415
+        cfg = load_gmail_config()
+        if cfg is None:
+            return False
+        address, app_password, to = cfg
+        _send_via_gmail(address, app_password, to, subject, body)
+        return True
+    except Exception as e:
+        print(f"  [!] email alert 送信失敗: {type(e).__name__}: {e}", flush=True)
+        return False
+
+
+def _run_daily_audit() -> dict:
+    """daily cron 用: reverse + ebay_down を共有 qty_map で両方実行 + 非-silent 通知 + 継続証跡."""
+    ts = datetime.now().isoformat(timespec="seconds")
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    # eBay active map を 1 回だけ取得 → 両 audit で共有 (二重 DL 回避)。
+    # 取得失敗時は None で続行 → 各 audit が自前 fetch → 空なら fail-closed (mismatch/orphan=-1)。
+    shared_qty_map = None
+    try:
+        shared_qty_map = _fetch_ebay_qty_map()
+        print(f"  [daily_audit] eBay active map: {len(shared_qty_map)} 件 (両 audit 共有)", flush=True)
+    except Exception as e:
+        print(f"  [!] [daily_audit] eBay active map 取得失敗、 各 audit 自前 fetch に fallback: "
+              f"{type(e).__name__}: {e}", flush=True)
+        shared_qty_map = None
+
+    rev = run_reverse_audit(write_log=True, qty_map=shared_qty_map)
+    edn = run_ebay_down_sheet_active_audit(write_sheet=True, write_log=True, qty_map=shared_qty_map)
+
+    mc = rev.get("mismatch_count", 0)
+    oc = edn.get("orphan_count", 0)
+
+    # 継続証跡 heartbeat (= 乖離 0 でも「実行した」証跡。 pythonw でも残る。 安全原則: 継続 reconciliation)
+    status = "OK" if (mc == 0 and oc >= 0) else ("AUDIT_ERROR" if mc == -1 else "MISMATCH")
+    with open(HEARTBEAT_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "ts": ts, "status": status,
+            "reverse_mismatch": mc, "reverse_by_sheet": rev.get("by_sheet"),
+            "reverse_error": rev.get("error"),
+            "ebay_down_orphan": oc, "ebay_down_error": edn.get("error"),
+            "reverse_log": rev.get("log_path"), "ebay_down_log": edn.get("log_path"),
+        }, ensure_ascii=False) + "\n")
+
+    # 非-silent アラート判定:
+    #   mc > 0  = 取下げ漏れ疑い (D=○ なのに eBay qty>0) = fail-OPEN の最有力候補 → critical
+    #   mc == -1 = audit 不能 (eBay 取得失敗 / sheet 読込失敗) = 検出網が動かなかった → critical
+    #   ebay_down orphan は review シートに書出済 = 自動で害なし → heartbeat のみ (alert しない)
+    if mc > 0 or mc == -1:
+        if mc > 0:
+            subj = f"[iMakInventory] ⚠️ reverse_audit 乖離 {mc} 件 (取下げ漏れ疑い)"
+            body = (f"reverse_audit が D=○ × eBay qty>0 の乖離を {mc} 件検出。\n"
+                    f"sheet 別: {rev.get('by_sheet')}\nsupplier 別: {rev.get('by_supplier')}\n"
+                    f"= 売切マーク済なのに eBay で買える状態 = 無在庫履行不能 → 要対応。\n"
+                    f"log: {rev.get('log_path')}\n")
+        else:
+            subj = "[iMakInventory] ⚠️ reverse_audit 実行不能 (検出網が動かなかった)"
+            body = (f"reverse_audit が fail-closed で中断 (= 乖離ゼロを証明できていない)。\n"
+                    f"error: {rev.get('error')}\n"
+                    f"eBay 取得失敗 / sheet 読込失敗の可能性。 次 cron で自動再試行されるが継続するなら要調査。\n")
+        # 多重防御: alert ログ (永続) + toast + email、 各 best-effort
+        with open(ALERT_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{ts}\t{subj}\n{body}\n{'-'*60}\n")
+        _toast(subj, body)
+        emailed = _email_alert(subj, body)
+        print(f"  [★critical] {subj} (alert_log + toast + email={'sent' if emailed else 'skip/fail'})",
+              flush=True)
+    else:
+        print(f"  ✓ reverse_audit 乖離 0 件 (= 継続証跡を 1 件積上げ)", flush=True)
+
+    return {"ts": ts, "status": status, "reverse": rev, "ebay_down": edn}
+
+
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser(description="reverse_audit / ebay_down_audit")
-    ap.add_argument("--mode", choices=["reverse", "ebay_down"], default="reverse",
-                    help="reverse = D=○+qty>0 (取下げ漏れ) / ebay_down = D空欄+qty=0/ended")
+    ap.add_argument("--mode", choices=["reverse", "ebay_down", "all"], default="reverse",
+                    help="reverse = D=○+qty>0 (取下げ漏れ) / ebay_down = D空欄+qty=0/ended / "
+                         "all = 両方 + 非-silent alert (daily cron 用)")
     ap.add_argument("--no-sheet-write", action="store_true",
                     help="ebay_down mode で review シート書込を skip (dry)")
     args = ap.parse_args()
 
-    if args.mode == "ebay_down":
+    if args.mode == "all":
+        res = _run_daily_audit()
+        print(f"\n=== daily_audit 結果 ({res['status']}) ===")
+        print(f"  reverse 乖離: {res['reverse'].get('mismatch_count')} 件 / "
+              f"ebay_down orphan: {res['ebay_down'].get('orphan_count')} 件")
+        print(f"  heartbeat: {HEARTBEAT_LOG}")
+    elif args.mode == "ebay_down":
         res = run_ebay_down_sheet_active_audit(write_sheet=not args.no_sheet_write)
         print(f"\n=== ebay_down_audit 結果 ===")
         print(f"  orphan (D空欄+eBay取下げ済): {res.get('orphan_count')} 件")

@@ -14,10 +14,33 @@
   誤適用され、 売切→D=○ 後の復活を検知できず D=○ が stale 化していた (row949 の真因)。通常 item(/item/) は
   skip 維持。test_mercari_shops_no_skip.py。
 - 検証: 次 cycle で row949 再 scrape→ON_SALE→D=○ 自動是正される見込み。offline 159 + pre-commit 115 pass。
-- 残課題(2) **reverse_audit が 06-16 のスケジュール再編以降 自動実行されていない**: Phase 5 起動条件
-  `sheet=="both"` の cycle (旧 _Cycle_BothDaily0930) が消滅し、 現タスクは SHEET(6x/日)/LOW(3x/日) のみ。
-  → 安全原則「定期 reconciliation で乖離ゼロ継続証跡」が本体側で途切れ。要 再開 (どこかの cycle に Phase 5 復帰)。
-  公式側 (iMakeBayAPI/inventory_monitor) は audit_and_heal が毎 cycle 稼働で乖離自動補正中=問題なし。
+- 残課題(2) **reverse_audit が 06-16 のスケジュール再編以降 自動実行されていない** → ✅ **本日復旧** (下記)。
+
+### reverse_audit 自動実行の復旧 — 専用 daily cron に切出 (commit 予定)
+- 決定: 06-16 再編で Phase 5 起動条件 `sheet=="both" and not sheet_id` を満たす cycle が消滅
+  (旧 _Cycle_BothDaily0930 削除、 現タスクは SHEET=--sheet-id 指定 6x/日 と LOW=--sheet low 3x/日 のみ)
+  → reverse_audit (取下げ漏れ reconciliation) が 9 日間自動実行ゼロ = 安全原則「定期 reconciliation で
+  乖離ゼロ継続証跡」が本体側で途切れ = fail-OPEN 検出網の穴。**user 裁定: 専用 daily タスクで復旧**
+  (run_cycle 改修・source 再スキャン不要。 reverse_audit は HIGH/LOW シートを eBay と直接突合し monitor
+  scan 移行と独立なため)。
+- 変更:
+  - `reverse_audit.py`: `_run_daily_audit()` 新設 + `--mode all` CLI 追加。reverse + ebay_down を共有
+    eBay active map で両方実行。 (1) 乖離 0 でも heartbeat 証跡 (`decision_log/reverse_audit_daily.log`)
+    を必ず append = 継続 reconciliation の客観証跡。 (2) reverse mismatch>0 (取下げ漏れ疑い) /
+    mismatch==-1 (eBay取得/sheet読込失敗で audit 不能) は **alert ログ + desktop toast + email の
+    3 チャネル非-silent 通知** ([[koshiki_mail_silent_fail_fixed]] 同型の多重防御)。 ebay_down orphan は
+    review シート書出済で自動無害 → heartbeat のみ (alert しない)。
+  - `tools/register_reverse_audit_daily_task.ps1` 新設 → タスク `iMakInventory_ReverseAudit_Daily`
+    を **10:00 daily** で登録済 (cycle と非重複、 reverse_audit は chrome 不使用で 一括kill 制約外、
+    09:30 SHEET cycle との eBay API 負荷集中を回避)。次回 2026-06-26 10:00。
+- 検証: `tests/test_reverse_audit_daily.py` 4件 (乖離0=heartbeat のみ/mismatch>0=3チャネル発火/
+  audit不能(-1)=非-silent/ebay_down orphan単独=alert せず) pass。offline 159 pass、 既存 full suite に
+  対し regression ゼロ (残 13 fail は全て network 依存 live test + 私の変更前から fail の既存 2 件)。
+  **ライブ実証**: `python reverse_audit.py --mode all` exit 0、 reverse 乖離 2 / ebay_down orphan 230、
+  alert 3 チャネル全発火 (email=sent 実送確認)、 heartbeat=MISMATCH 記録。乖離 2 件は今朝確認済の
+  既知偽陽性のみ (row728 トゲキッス V=user手動再買url空 / row949 SHOPS=源在庫あり D=○ stale、
+  SHOPS skip 修正で次 cycle 自動是正) = 新規取下げ漏れゼロ。
+- 公式側 (iMakeBayAPI/inventory_monitor) は audit_and_heal が毎 cycle 稼働で乖離自動補正中=元から問題なし。
 
 ### ログ点検 (user 指示「昨日のログで不具合ないか」)
 - 決定: 本体監視 06-24 はクリーン。06-23 に一過性2件 (いずれも可視化済・翌 cycle 回復) を検出 →
