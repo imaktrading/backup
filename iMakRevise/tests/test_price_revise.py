@@ -160,17 +160,41 @@ class TestShouldRevise:
         )
         assert not ok and reason == "no_cost"
 
-    def test_abnormal_delta(self):
-        # AH=1000 → N=4000 (+300%) → abnormal
+    def test_abnormal_delta_mismatch(self):
+        # AH=1000 → N=4000 (+300%) で eBay 実価格が N 計算値と不一致 → abnormal (scrape 誤り疑い)
         ok, reason, extras = should_revise(
             item_id=ITEM_ID, sold_flag="", n_jpy=4000, ah_jpy=1000,
             current_usd=10, current_policy="DDP-A-P01",
-            v7_usd=10, v7_policy="DDP-A-P01",
+            v7_usd=99, v7_policy="DDP-A-P09",  # eBay($10) ≠ N計算値($99)
             abnormal_delta_threshold=200,
         )
         assert not ok and reason == "abnormal_delta"
         assert extras["is_abnormal"] is True
         assert extras["delta_pct"] == 300.0
+
+    def test_abnormal_delta_reconciled(self):
+        # AH=1000 → N=4000 (+300%) でも eBay 実価格 == N 計算値 → RESTOCK 反映済 = aligned
+        ok, reason, extras = should_revise(
+            item_id=ITEM_ID, sold_flag="", n_jpy=4000, ah_jpy=1000,
+            current_usd=99, current_policy="DDP-A-P09",
+            v7_usd=99, v7_policy="DDP-A-P09",  # 一致 = 整合済
+            abnormal_delta_threshold=200,
+        )
+        assert not ok and reason == "aligned"
+        assert extras["is_abnormal"] is False
+        assert extras["delta_pct"] == 300.0
+
+    def test_abnormal_delta_not_in_snapshot(self):
+        # 急騰だが snapshot 不在 → 整合確認できず fail-closed で abnormal
+        ok, reason, extras = should_revise(
+            item_id=ITEM_ID, sold_flag="", n_jpy=4000, ah_jpy=1000,
+            current_usd=None, current_policy=None,
+            v7_usd=99, v7_policy="DDP-A-P09",
+            in_snapshot=False,
+            abnormal_delta_threshold=200,
+        )
+        assert not ok and reason == "abnormal_delta"
+        assert extras["is_abnormal"] is True
 
     def test_no_snapshot(self):
         # current_usd/policy 両方 None

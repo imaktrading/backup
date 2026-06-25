@@ -441,13 +441,33 @@ def should_revise(
         return False, "no_cost", extras
 
     # 異常検出 (= AH↔N delta > threshold)
+    abnormal = False
     if ah_jpy is not None and ah_jpy > 0:
         delta_pct = (n_jpy - ah_jpy) / ah_jpy * 100
         extras["delta_pct"] = delta_pct
-        if delta_pct > abnormal_delta_threshold:
-            extras["is_abnormal"] = True
-            extras["details"] = f"AH=¥{ah_jpy:,.0f} → N=¥{n_jpy:,.0f} (+{delta_pct:.0f}%)"
-            return False, "abnormal_delta", extras
+        abnormal = delta_pct > abnormal_delta_threshold
+
+    if abnormal:
+        # RESTOCK 整合 reconciliation (2026-06-25):
+        # AH↔N が急騰でも、eBay 実価格が N 計算値 (= v7_usd/v7_policy) と一致するなら
+        # RESTOCK 時に監視くん側で既に値上げ反映済 = 整合 = aligned (alert 不要)。
+        # 一致しない場合のみ scrape 誤り疑いとして従来通り abnormal alert (fail-closed)。
+        base = f"AH=¥{ah_jpy:,.0f} → N=¥{n_jpy:,.0f} (+{delta_pct:.0f}%)"
+        reconciled = (
+            in_snapshot
+            and current_usd is not None and current_policy is not None
+            and (available_qty is None or available_qty >= 1)
+            and _normalize.normalize_usd(current_usd) == _normalize.normalize_usd(v7_usd)
+            and _normalize.normalize_policy_name(current_policy)
+            == _normalize.normalize_policy_name(v7_policy)
+        )
+        if reconciled:
+            extras["is_abnormal"] = False
+            extras["details"] = base + " | eBay価格=N計算値で整合 (RESTOCK反映済)"
+            return False, "aligned", extras
+        extras["is_abnormal"] = True
+        extras["details"] = base
+        return False, "abnormal_delta", extras
 
     # snapshot 在籍 check (= 取下げ済 listing 想定)
     if not in_snapshot:
@@ -554,7 +574,9 @@ def detect_candidates(rows, threshold_pct: float = DEFAULT_THRESHOLD_PCT,
             url=url,
             sold_flag=sold_flag,
             is_abnormal=is_abnormal,
-            skip_reason=(f"ABNORMAL_DELTA (+{delta_pct:.0f}%)" if is_abnormal else None),
+            # skip_reason は付けない (2026-06-25): 異常 delta も V8/snapshot まで流し、
+            # should_revise の RESTOCK 整合照合で aligned / abnormal_delta に振り分ける。
+            skip_reason=None,
             sku=sku,
             variation_size=var_size,
             variation_color=var_color,
@@ -965,7 +987,7 @@ def write_abnormal_alert_log(abnormal: list, output_dir: Path = CSV_OUTPUT_DIR) 
         for c in abnormal:
             f.write(f"\nItemID: {c.item_id} | sheet: {c.source_sheet} | category: {c.category}\n")
             f.write(f"  AH: ¥{(c.ah_jpy or 0):,.0f} → N: ¥{c.new_jpy:,.0f} (+{c.delta_pct:.0f}%)\n")
-            f.write(f"  判定: {c.skip_reason} で skip\n")
+            f.write(f"  判定: ABNORMAL_DELTA で skip (eBay 実価格 ≠ N 計算値 = scrape 誤り疑い)\n")
             f.write(f"  推奨: スプシ N 列 (row{c.row_index}) を手動確認、監視くん scrape ロジック検証\n")
     return path
 
@@ -1137,18 +1159,11 @@ def run_price_revise(
     result.candidates = all_candidates
     print(f"[revise] === 全 sheet 統合 eligible: {len(all_candidates)} 件 ===")
 
-    # === Step 2: 異常 delta pre-filter (= V8 計算前 skip + alert) ===
-    normal_candidates = []
-    for c in all_candidates:
-        if c.is_abnormal:
-            c.decision_reason = "abnormal_delta"
-            c.decision_details = f"AH=¥{(c.ah_jpy or 0):,.0f} → N=¥{c.new_jpy:,.0f} (+{c.delta_pct:.0f}%)"
-            result.abnormal.append(c)
-            result.skipped.append(c)
-        else:
-            normal_candidates.append(c)
-    if result.abnormal:
-        print(f"[revise] 異常 delta 検出: {len(result.abnormal)} 件 -> skip + alert log")
+    # === Step 2: 異常 delta も V8/snapshot まで流す (pre-filter 廃止 2026-06-25) ===
+    # 旧: is_abnormal を計算前に一律 skip+alert していた → RESTOCK で正規値上げ済の行も
+    #     毎 cycle 誤 alert。新: should_revise で eBay 実価格 vs N 計算値を照合し、
+    #     整合 (RESTOCK 反映済) なら aligned、不一致なら abnormal_delta に振り分ける。
+    normal_candidates = all_candidates
 
     # === Step 3: pack mapping 読込 + 全 eligible で V8 計算 ===
     from . import pack_items as _pack_mod
@@ -1297,6 +1312,11 @@ def run_price_revise(
             result.revisable.append(c)
         else:
             c.basis = "skip"
+            # RESTOCK 整合照合の結果を反映 (2026-06-25)
+            c.is_abnormal = extras.get("is_abnormal", False)
+            if reason == "abnormal_delta":
+                c.skip_reason = "ABNORMAL_DELTA"
+                result.abnormal.append(c)
             result.skipped.append(c)
 
     # === Step 6: 大量検出 警告 (= 上限 cap なし、新 logic 設計) ===
