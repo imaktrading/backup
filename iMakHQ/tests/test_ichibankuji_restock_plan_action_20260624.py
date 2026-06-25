@@ -62,6 +62,21 @@ def test_restock_reqs_write_kuji_to_I():
     assert not any(q["range"].startswith("I") for q in reqs2)
 
 
+def test_write_supplies_records_original_itemid_no_ebay(monkeypatch):
+    """Option B: expand/write は スプシ記録のみ。B列=既存itemID(relistしない)・eBay触らない。"""
+    captured = {}
+    monkeypatch.setattr(r, "write_restock", lambda sr: captured.update(rows=sr) or len(sr))
+    monkeypatch.setattr(r, "_retry", lambda fn, **k: fn())   # リトライをインライン実行
+    called = {"ebay": 0}
+    monkeypatch.setattr(r, "ebay_restock", lambda *a, **k: called.__setitem__("ebay", called["ebay"] + 1) or ("x", "y"))
+    n = r._write_supplies({105: {"item_id": "358", "a": "u", "aux": ["x", "y"], "cost": 4500,
+                                 "kuji": "https://1kuji.com/j"}})
+    sr = captured["rows"][105]
+    assert sr["b"] == "358"            # 既存itemID(relist しない=stale無し)
+    assert sr["cost"] == 4500 and sr["kuji"] == "https://1kuji.com/j" and sr["aux"] == ["x", "y"]
+    assert called["ebay"] == 0         # eBay 在庫補充は呼ばない(refresh CSV入稿に一本化)
+
+
 def test_confirmed_roundtrip_preserves_cost(tmp_path, monkeypatch):
     """expand で選んだ主supply価格(cost)が confirmed の save/load を生き残る
     (= refresh が壊れた fetch_mercari_price に頼らず実価格を使える)。"""

@@ -909,23 +909,22 @@ def pass_expand(cand_n, dry=False):
     _save_confirmed(confirmed)
     print(f"  💾 確定を保存(失敗時は再選択不要・write で再適用): {CONFIRMED_FILE}")
     if dry:
-        print(f"\n🧪 DRY-RUN: eBay/スプシ 書込なし。確定予定 {len(confirmed)}件:")
+        print(f"\n🧪 DRY-RUN: スプシ書込なし。記録予定 {len(confirmed)}件(eBayは触らない=在庫復活+刷新は refresh):")
         for r in sorted(confirmed):
             d = confirmed[r]
-            st, q = _ebay_status(d["item_id"]) if d["item_id"] else ("?", -1)
-            plan = "Relist(新ID)" if st == "Completed" else ("Revise qty=1" if st == "Active" and q == 0 else f"({st} qty{q})")
-            print(f"   row{r} itemID={d['item_id']}({st}/qty{q}→{plan}): A列← {d['a']}")
+            print(f"   row{r} itemID={d['item_id']} cost¥{d.get('cost') or '?'}: A列← {d['a']}")
             for u in d["aux"]:
                 print(f"            補URL← {u}")
-        print(f"   → 本番反映: python ichibankuji_restock.py write")
+        print(f"   → 本番記録: python ichibankuji_restock.py write")
         return
     try:
-        n = _apply_restock(confirmed)
+        n = _write_supplies(confirmed)
     except Exception as e:  # noqa: BLE001
-        print(f"\n❌ 反映が最終的に失敗: {type(e).__name__}: {str(e)[:60]}")
+        print(f"\n❌ スプシ記録が最終的に失敗: {type(e).__name__}: {str(e)[:60]}")
         print(f"   選択は保存済 → 復旧: python ichibankuji_restock.py write")
         return
-    print(f"\n✅ 完了 {n}件: eBay在庫補充 + A列=新supply + B列=itemID + 売り切れ解除 + 補URL")
+    print(f"\n✅ 記録完了 {n}件: A列=新supply / B列=itemID / 売切解除 / N列=cost / 補URL。"
+          f"\n   eBayは未変更 → 在庫復活+内容刷新は: python ichibankuji_restock.py refresh → refresh write")
 
 
 def _save_confirmed(confirmed):
@@ -941,8 +940,25 @@ def _load_confirmed():
     return {int(k): v for k, v in (d.get("items") or {}).items()}
 
 
+def _write_supplies(confirmed):
+    """confirmed → **スプシのみ記録**(eBayは触らない)。戻り: 記録件数。
+
+    A列=新supply / B列=既存itemID(relistしない) / D列=売切解除 / N列=cost / AC-AG=補URL / I列=kuji。
+    eBay の在庫復活(qty=1)+ 内容刷新は **refresh の CSV入稿で一括**(古い中身で売れる瞬間を作らない・
+    eBay更新1回・relistしないので itemID 不変=stale無し。2026-06-25 ユーザー方針)。
+    """
+    sheet_rows = {}
+    for row in sorted(confirmed):
+        d = confirmed[row]
+        sheet_rows[row] = {"a": d.get("a", ""), "b": (d.get("item_id") or "").strip(),
+                           "aux": d.get("aux", []), "cost": d.get("cost", 0), "kuji": d.get("kuji", "")}
+        print(f"  📝 row{row}: スプシ記録(eBay未変更) itemID={sheet_rows[row]['b']} cost¥{d.get('cost') or '?'}")
+    return _retry(lambda: write_restock(sheet_rows), what="スプシ書込")
+
+
 def _apply_restock(confirmed):
-    """confirmed={row:{item_id,a,aux}} → eBay在庫補充(Revise/Relist) + スプシ書込。
+    """[DEPRECATED 2026-06-25] eBay在庫補充(Revise/Relist)+スプシ。Option B で expand/write は
+    _write_supplies(スプシのみ)に移行。在庫復活は refresh CSV入稿に一本化。未使用(参照用に残置)。
 
     eBay: qty0 Active→Revise qty=1(同ID) / Completed→Relist(新ID)。B列はそのitemIDを保持/更新。
     スプシ: A列=新supply / B列=補充後itemID / 売り切れ解除 / 補URL。
@@ -973,15 +989,16 @@ def _apply_restock(confirmed):
 
 
 def pass_write():
-    """確定(保存済 or dry後)を eBay在庫補充 + スプシ反映。dry/失敗後の本番反映に使う。"""
+    """確定(保存済 or dry後)を **スプシのみ記録**(eBay触らない)。dry/失敗後の復旧に使う。"""
     if not os.path.exists(CONFIRMED_FILE):
         print(f"確定ファイルなし: {CONFIRMED_FILE}"); return
     confirmed = _load_confirmed()
     if not confirmed:
         print("確定なし"); return
-    print(f"確定 {len(confirmed)}件 を eBay在庫補充 + スプシ反映...")
-    n = _apply_restock(confirmed)
-    print(f"✅ 完了 {n}件: eBay在庫補充(Revise/Relist) + A列=新supply + B列=itemID + 売り切れ解除 + 補URL")
+    print(f"確定 {len(confirmed)}件 を スプシ記録(eBay未変更)...")
+    n = _write_supplies(confirmed)
+    print(f"✅ 記録完了 {n}件: A列=新supply / B列=itemID / 売切解除 / N列=cost / 補URL。"
+          f"\n   eBay在庫復活+刷新は: refresh → refresh write → 出品くん入稿")
 
 
 # ---------------- 内容刷新 (refresh): タイトル/itemSP/価格を新規ロジックで刷新 → FileExchange Revise CSV ----------------
@@ -1280,12 +1297,26 @@ def main():
             refresh_write()
         else:
             pass_refresh()
+    elif mode == "supply":
+        # ボタン①: 識別+supply確定 を1発(identify→expand)。出品くん用 combined。
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        pass_identify(n, cand_n=10)
+        if os.path.exists(PICKS_FILE) and json.load(open(PICKS_FILE, encoding="utf-8")):
+            pass_expand(cand_n=10, dry=False)
+        else:
+            print("識別0件 → expand skip")
+    elif mode == "refresh-csv":
+        # ボタン②: 刷新→CSV を1発(refresh→refresh write)。プレビューはログに出るが確認は出力CSVで。
+        pass_refresh()
+        if os.path.exists(REFRESH_FILE) and (json.load(open(REFRESH_FILE, encoding="utf-8")).get("items")):
+            refresh_write()
+        else:
+            print("刷新対象なし → CSV出力 skip")
     else:
-        print("使い方:\n  python ichibankuji_restock.py identify [件数]   # パスA 画像特定\n"
-              "  python ichibankuji_restock.py expand [--dry]      # パスB 画像検索+確定(--dry=書込なしテスト)\n"
-              "  python ichibankuji_restock.py write               # dry/失敗後の本番反映(再選択不要)\n"
-              "  python ichibankuji_restock.py refresh             # 内容刷新プレビュー(scrape+Claude、書込なし)\n"
-              "  python ichibankuji_restock.py refresh write       # 刷新を Revise CSV 出力(出品くん入稿用)")
+        print("使い方:\n  python ichibankuji_restock.py supply [件数]      # ★ボタン①: 識別+supply確定(identify→expand)\n"
+              "  python ichibankuji_restock.py refresh-csv         # ★ボタン②: 刷新→Revise/Add CSV(refresh→write)\n"
+              "  --- 個別(手動/デバッグ) ---\n"
+              "  identify [件数] / expand [--dry] / write / refresh / refresh write")
 
 
 if __name__ == "__main__":

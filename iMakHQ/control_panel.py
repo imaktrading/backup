@@ -524,6 +524,29 @@ SCRIPTS = [
         # 結果は「既存メンテ」スプシ 価格抵抗タブに集約 (CSV廃止)
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
+    # ---- 一番くじ 在庫補充→内容刷新 (2026-06-25 配線。CLI: ichibankuji_restock.py) ----
+    # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
+    # 古い中身で売れる瞬間を作らない設計(eBay更新は②の入稿1回)。
+    {
+        "category": None, "type": "utility",
+        "label": "🎴一番くじ補充① supply確定",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # identify→expand: OOS一番くじ→景品選択→supply可否(+公式URL→I列)→スプシ記録(eBay触らない)
+        "cmd": ["python", "ichibankuji_restock.py", "supply", "10"],
+        "params": [],
+        "skip_postprocess": True,   # スプシ記録のみ=listing CSV 生成でない(excluder/重複くん不要)
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "🎴一番くじ補充② 刷新→CSV",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # refresh→write: I列の公式URL scrape+Claude→新title/itemSP/価格→Revise(同ID)/Add(新ID) CSV
+        "cmd": ["python", "ichibankuji_restock.py", "refresh-csv"],
+        "params": [],
+        "skip_postprocess": True,   # Revise/Add CSV は新規生成でない→excluder/重複くん通さない
+    },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
     #       C:/dev/iMak_data/seller_hub/reports/ に置く (無ければデスクトップの所定フォルダ)
