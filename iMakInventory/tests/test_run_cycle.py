@@ -276,7 +276,9 @@ def test_email_header_shows_untaken_count_when_action_required(tmp_path, monkeyp
     # 2 系統冒頭ステータス (ユーザー要件 2026-06-10): 仕入元在庫監視 / eBay 在庫調整 を 一目で
     assert "仕入元在庫監視 :" in body
     assert "eBay 在庫調整  :" in body
-    assert "⚠️ 要対応 (売切検知 4 → 完了 2 / 未取下げ 2)" in body
+    # 未取下げ (action_required.count) に加え、 2026-06-11 追加の「送信失敗」(upload success=False)
+    # も bit 表示される。 case の 3 件目 (item 333) は success=False → 送信失敗 1 が併記されるのが正。
+    assert "⚠️ 要対応 (売切検知 4 → 完了 2 / 未取下げ 2 / 送信失敗 1)" in body
     assert "verify_qty_gt0_giveup" in body
     # 旧 bug の「正常」 表記が出ないことを確認
     assert "正常 (取下げ実施)" not in body
