@@ -161,6 +161,7 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
             return {}, f"forced card_id {forced_card_id} が catalog に無い"
         fields = map_specs_to_fields(specs, _psa_year(cert))
         fields["_card_id"] = forced_card_id
+        _fill_game_fallback(fields, game_hint)
         _attach_promo(fields, specs, forced_card_id)
         return fields, None
 
@@ -186,8 +187,19 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
 
     fields = map_specs_to_fields(specs, _psa_year(cert))
     fields["_card_id"] = card_id
+    _fill_game_fallback(fields, game_hint)
     _attach_promo(fields, specs, card_id)
     return fields, None
+
+
+def _fill_game_fallback(fields, game_hint):
+    """catalog game_ebay 空で C:Game が落ちると **タイトルからゲーム語(Pokemon等)が消える**
+    (2026-06-25 XY-140 Hex Maniac: game_ebay=None でタイトル 'Pokemon' 抜け)。catalog が空の時のみ
+    row/PSA 由来の game_hint を C:Game に補完(card 同定は変えず、ゲーム語だけ救う)。純関数。
+    """
+    if not (fields.get("C:Game") or "").strip() and (game_hint or "").strip():
+        fields["C:Game"] = game_hint.strip()
+    return fields
 
 
 def _attach_promo(fields: dict, specs: dict, card_id: str):
