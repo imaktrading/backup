@@ -543,8 +543,13 @@ def process_sheet(
         # 1 点もの中心の mercari は売切後に同 URL から復活しない、 scrape する実益ゼロ。
         # HIGH 295 + LOW 23 = 318 件 削減 (mercari 全 645 中 49%)、 cycle 時間 半減効果。
         # 関連: [[amazon_restore_after_scrape_reliability]] (= amazon は別途継続 chk)
+        # ★ 2026-06-25 除外: mercari SHOPS (jp.mercari.com/shops/product/...) は業者出品で
+        # 復活 (restock) する。 1点もの前提の skip を SHOPS に適用すると、 売切→D=○ 後に
+        # 源が復活しても永久 skip で検知できず D=○ が stale 化する (iid=358705341664 の偽 ✕)。
+        # SHOPS は通常 mercari item と違い再入荷するので skip せず毎 cycle 再 scrape する。
         row_supplier = detect_supplier(_domain_of(row["url"]))
         cur_sold = (row.get("current_sold") or "").strip()
+        is_mercari_shops = "/shops/" in (row.get("url") or "")
         # === item_id 空欄 = 未出品 も巡回対象にする (2026-06-21 user 指示で方針反転) ===
         # 旧 (2026-06-10): item_id 空欄 = 未出品 = scrape skip だった。
         # 新 (2026-06-21): 未出品も scrape する。 理由: 出品くんが CSV 作成 → 出品 した後に
@@ -552,7 +557,7 @@ def process_sheet(
         # 取下げ対象 (eBay listing) は無いので revise/pending/要対応 には入れない。
         # 売切検知時の扱いは下段 (newly_sold && item_id 空欄 → 「未出品扱い、 検知のみ記録、
         # revise なし、 alert なし」) で既に正しく分岐済 = D 列だけ更新される。
-        if row_supplier == "mercari" and cur_sold in ("○", "〇"):
+        if row_supplier == "mercari" and cur_sold in ("○", "〇") and not is_mercari_shops:
             log(f"{prefix}mercari  - skip (D=○、 mercari 復活機会なし)")
             results.append({
                 "row_index":         row["row_index"],
