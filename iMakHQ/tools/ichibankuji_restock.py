@@ -869,6 +869,15 @@ def pass_expand(cand_n, dry=False):
                 raw = image_search_from_url(drv, p["picked_url"], cand_n)
             except Exception as e:  # noqa: BLE001
                 print(f"     ⚠ 画像検索失敗: {e}"); raw = []
+            if not raw:
+                # 画像検索0(bot判定/timing)→ キーワード検索フォールバック(identifyで実績あり)。
+                #   「候補なし」で手詰まりにしない。新品+送料込みは下の filter で担保。
+                kw, _pz = build_keyword(p["title"], _ebay_title(p["item_id"]))
+                print(f"     画像検索0 → キーワード検索 fallback: {kw[:32]}", flush=True)
+                try:
+                    raw = kw_search(drv, kw, cand_n)
+                except Exception as e:  # noqa: BLE001
+                    print(f"     ⚠ キーワード検索も失敗: {e}"); raw = []
             print(f"     候補 {len(raw)}件 → 状態/送料 確認中(新品+送料込みのみ)...", flush=True)
             raw = _filter_new_freeship(drv, raw)
             print(f"     新品+送料込み {len(raw)}件", flush=True)
