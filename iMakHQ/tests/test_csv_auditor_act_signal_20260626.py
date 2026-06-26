@@ -56,3 +56,47 @@ def test_notify_csv_ready_message():
     import notify_csv_ready as ncr
     m = ncr.build_message(7, "C:/x/tcg_upload_20260626.csv")
     assert "7件" in m and "tcg_upload_20260626.csv" in m and "UP" in m
+
+
+# ===================== 決定論NG digest(PDCA担保) =====================
+
+def _find(cat="tcg", item="X", field="catalog_add", ft="catalog_gap", seen=2, status="pending"):
+    return {"category": cat, "item_id": item, "target_field": field,
+            "finding_type": ft, "seen_count": seen, "status": status}
+
+
+def test_recurring_findings_pending_and_seen_threshold():
+    """pending かつ seen_count>=min_seen のみ再発扱い。done や単発は除外。"""
+    rows = [
+        _find(item="SWSH-014", seen=13),                 # 再発(13回)
+        _find(item="BOA-013", seen=8),                   # 再発(8回)
+        _find(item="ONESHOT", seen=1),                   # 単発 → 除外
+        _find(item="FIXED", seen=9, status="done"),      # 解決済 → 除外
+    ]
+    out = ca.recurring_findings(rows, min_seen=2)
+    items = [r["item_id"] for r in out]
+    assert items == ["SWSH-014", "BOA-013"]              # seen 降順・pending のみ
+
+
+def test_recurring_findings_sorted_by_seen():
+    rows = [_find(item="A", seen=3), _find(item="B", seen=10), _find(item="C", seen=2)]
+    assert [r["item_id"] for r in ca.recurring_findings(rows)] == ["B", "A", "C"]
+
+
+def test_ng_digest_counts():
+    d = ca._build_ng_digest("tcg", [("sku1", "msg1")], ["error: 2件"], [_find(seen=2)])
+    assert d["counts"] == {"program": 1, "log": 1, "recurring_missing": 1}
+
+
+def test_act_prompt_with_digest_mandates_disposition():
+    """digest を渡すと『各項目に必ず処分・無言で飛ばすな』と再発のコード提案指示が入る。"""
+    d = ca._build_ng_digest("tcg", [("s", "m")], [], [_find(item="SWSH-014", seen=13)])
+    p = ca._build_act_prompt("tcg", "x.csv", None, "review_logs/ng_digest_x.json", d)
+    assert "ng_digest_x.json" in p
+    assert "必ず処分" in p and "無言で飛ばすな" in p
+    assert "recurring_missing" in p and "コード修正提案を必ず" in p
+
+
+def test_act_prompt_without_digest_has_no_digest_line():
+    p = ca._build_act_prompt("tcg", "x.csv", None)
+    assert "決定論NG digest" not in p   # digest 無しなら該当行は出さない

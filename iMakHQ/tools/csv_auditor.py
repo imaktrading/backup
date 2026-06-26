@@ -709,17 +709,95 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
     _pdca_accumulate(project, catalog_items, program_items, dry_run)
-    # --- Act合図: 監査完了 → headless Claude をBG起動して NG対応(コピペ不要) ---
-    _signal_claude_act(project, csv_path, log_path, dry_run)
+    # --- 決定論NG digest: program不整合 + logシグナル + 再発finding(pdca seen_count) を束ねる(無言スキップ防止=PDCA担保) ---
+    recurring = recurring_findings(_load_pdca_recurring())
+    digest = _build_ng_digest(project, program_items, log_signals, recurring)
+    digest_path = _write_ng_digest(project, digest, dry_run)
+    if recurring:
+        top = recurring[0]
+        print(f"  🔁 再発finding(catalog依頼/修正で消えない) {len(recurring)}件 → 構造/コード疑い(Actで提案化)"
+              f" / 筆頭 seen×{top['seen_count']}: {str(top['item_id'])[:50]}")
+    # --- Act合図: 監査完了 → headless Claude をBG起動して NG対応(コピペ不要・digest各項目を必ず処分) ---
+    _signal_claude_act(project, csv_path, log_path, dry_run, digest_path, digest)
     return 1 if (exclude_idx or program_items or catalog_items) else 0
 
 
-def _build_act_prompt(project, csv_path, log_path):
+def recurring_findings(rows, min_seen=2):
+    """再発(複数ラン消えない)findings を抽出 (純関数, test可)。
+
+    rows = [{"category","item_id","target_field","finding_type","seen_count","status"}] (pdca由来)。
+    pending かつ seen_count>=min_seen = catalog依頼/修正を重ねても消えていない
+    = 構造/コードの疑い(誤カテゴリ/adapter抽出不能/スコープ外/generator脱落の常習)。
+    ※missing_models.csv は (cat,model) dedup されるので再発検出に使えない → pdca.db improvement_queue
+      の seen_count(再発で++)を真の再発ソースとする。
+    戻り: seen_count 降順 list。
+    """
+    out = [r for r in rows
+           if (r.get("status") == "pending" and int(r.get("seen_count") or 0) >= min_seen)]
+    out.sort(key=lambda r: int(r.get("seen_count") or 0), reverse=True)
+    return out
+
+
+def _load_pdca_recurring(min_seen=2, limit=25):
+    """pdca.db improvement_queue から再発(pending・seen_count>=min_seen)を取得 (I/O・失敗は [])。"""
+    try:
+        import pdca_store as _pdca
+        con = _pdca.connect()
+        cur = con.execute(
+            "SELECT category,item_id,target_field,finding_type,seen_count,status "
+            "FROM improvement_queue WHERE status='pending' AND seen_count>=? "
+            "ORDER BY seen_count DESC LIMIT ?", (min_seen, limit))
+        rows = [{"category": r["category"], "item_id": r["item_id"],
+                 "target_field": r["target_field"], "finding_type": r["finding_type"],
+                 "seen_count": r["seen_count"], "status": r["status"]} for r in cur.fetchall()]
+        con.close()
+        return rows
+    except Exception as _e:
+        print(f"  ⚠️ pdca 再発取得skip: {type(_e).__name__}")
+        return []
+
+
+def _build_ng_digest(project, program_items, log_signals, recurring):
+    """決定論で検出した NG を1つに束ねる (純関数, test可)。headless が各項目を必ず処分する元。"""
+    return {
+        "project": project,
+        "program_items": [{"sku": s, "msg": m} for s, m in program_items],
+        "log_signals": list(log_signals or []),
+        "recurring_missing": recurring,
+        "counts": {"program": len(program_items), "log": len(log_signals or []),
+                   "recurring_missing": len(recurring)},
+    }
+
+
+def _write_ng_digest(project, digest, dry_run):
+    """NG digest を JSON 化 (PDCA の決定論記録)。戻り: path or ''。dry-run は書かない。"""
+    if dry_run:
+        return ""
+    try:
+        os.makedirs(REVIEW_DIR, exist_ok=True)
+        p = os.path.join(REVIEW_DIR, f"ng_digest_{_today()}_{project}.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(digest, f, ensure_ascii=False, indent=2)
+        return p
+    except Exception as _e:
+        print(f"  ⚠️ NG digest 書込skip: {type(_e).__name__}")
+        return ""
+
+
+def _build_act_prompt(project, csv_path, log_path, digest_path="", digest=None):
     """headless Claude(claude -p)へ渡す NG対応(Act)指示文 (純関数, test可)。"""
     report = os.path.join(REVIEW_DIR, f"csv_auditor_{_today()}_{project}.md")
     act_out = os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.md")
     run_logs = os.path.join(WORKSPACE, "iMakHQ", "run_logs")
     notify = os.path.join(WORKSPACE, "iMakHQ", "tools", "notify_csv_ready.py")
+    cnt = (digest or {}).get("counts", {})
+    digest_line = (
+        f"- 【決定論NG digest】{digest_path}\n"
+        f"  (program不整合 {cnt.get('program',0)}件 / logシグナル {cnt.get('log',0)}件 / "
+        f"再発missing {cnt.get('recurring_missing',0)}件)。"
+        "**この digest の各項目に必ず処分(直した/依頼した/コード修正提案/誤検出打消し/対応不要+理由)を1件ずつ書け。"
+        "無言で飛ばすな**(=これが無いと PDCA にならない)。\n"
+    ) if digest_path else ""
     return (
         "あなたは iMak HQ Claude(出品専任)。出品くんの自動ランが完了した直後に、CSV監査くんから"
         "無人で呼ばれた。memory `ng_items_need_proactive_action` の手順で NG対応(Actフェーズ)を実行せよ。\n"
@@ -727,6 +805,7 @@ def _build_act_prompt(project, csv_path, log_path):
         f"- 監査レポート: {report}\n"
         f"- 生成ログdir(最新.logを読む): {run_logs}\n"
         f"- NG台帳: {MISSING_MODELS_PATH}\n"
+        + digest_line +
         "【優先順位 — CSV UP を最優先】\n"
         "①CSVを手直し: 監査の必須spec空/タイトル短/形式を点検。catalogに値が在るのに空=generator脱落のみ"
         "CSVを直接修正。日本語blank/catalog欠落由来の空欄は fail-closed で正(推測で埋めるな)。最終 入稿可否件数を確定。\n"
@@ -735,19 +814,24 @@ def _build_act_prompt(project, csv_path, log_path):
         "③カタログ依頼+誤検出整理(UPシグナルの後): 本物欠落は該当worktreeの requests/ に完全な依頼書"
         "(cert/brand/番号/subject+source)投入(catalog追加は2026-05-25合意で確認不要)。catalogに実在するのに"
         "『要調査』の誤検出は missing_models を打消し+真因(viewer/generator)を特定。誤カテゴリは訂正。\n"
+        "【再発missing の扱い=重要】digest の recurring_missing(複数日 catalog未登録のまま)は、catalog依頼を"
+        "再投入するだけでは消えない構造問題(誤カテゴリ/adapter抽出不能/スコープ外)の疑い。**catalog依頼で済ませず、"
+        "真因仮説+コード修正提案を必ずレポートに書け**(=PDCA の Act)。\n"
         "【制約・厳守】プログラムのコード修正と git commit はするな(『修正が修正を生む』防止=人間レビュー必須)。"
         "必要なコード修正は提案として列挙するだけ。本番入稿・eBay revision・その他不可逆/外向き操作もするな。\n"
         f"【出力】完了後、Actレポートを {act_out} に書け"
-        "(形式: ①CSV=入稿可否N件(理由) / ②UPシグナル発報済 / ③依頼N件・誤検出打消しM件・コード修正提案K件)。"
+        "(形式: ①CSV=入稿可否N件(理由) / ②UPシグナル発報済 / ③依頼N件・誤検出打消しM件・コード修正提案K件 / "
+        "digest各項目の処分一覧)。"
     )
 
 
-def _signal_claude_act(project, csv_path, log_path, dry_run):
+def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", digest=None):
     """監査完了後に headless Claude を BG 起動して NG対応(Act)を回す (ユーザー要望 2026-06-26)。
 
     監査くんが終わったら HQ に合図 → コピペ不要で ①CSV→②修正+依頼。
     - 非dry-run のみ。`CSV_AUDITOR_NO_SIGNAL=1` で無効化(test/CI/手動確認時)。
     - BG detached・try/except で監査本体は絶対に壊さない。headless にはコード修正/commit/入稿をさせない(提案止まり)。
+    - digest_path/digest: 決定論NG digest を渡し、各項目を必ず処分させる(無言スキップ防止=PDCA担保)。
     戻り: "skipped"(dry/env) / "no-cli" / "spawned" / "error:<type>" (test 可)。
     """
     if (dry_run or os.environ.get("CSV_AUDITOR_NO_SIGNAL") == "1"
@@ -758,7 +842,7 @@ def _signal_claude_act(project, csv_path, log_path, dry_run):
         if not claude_bin:
             print("  ⚠️ claude CLI 不在 → Act合図 skip(『見て』で手動起動可)")
             return "no-cli"
-        prompt = _build_act_prompt(project, csv_path, log_path)
+        prompt = _build_act_prompt(project, csv_path, log_path, digest_path, digest)
         os.makedirs(REVIEW_DIR, exist_ok=True)
         logf = open(os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.log"), "a", encoding="utf-8")
         flags = 0
