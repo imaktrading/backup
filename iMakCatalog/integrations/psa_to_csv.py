@@ -1312,6 +1312,10 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "EXTRA REGULATION BOX":        "BW",     # エクストラレギュレーションBOX(2019). cert140362929 Zoroark 014=BW-014 実在(公式収録確認, BW-001..048=本BOX)
     "EMERALD BREAK":               "XY6-B",  # エメラルドブレイク[XY6]. cert119816956 Gallade-EX 030=XY6-B-030 実在(base #001-078 は catalog で XY6-B-NNN 体系)。※高番EX #079+ は XY6-NNN のため本索引では解決せず=fail-closed(誤解決はしない)
     "NATIONAL BEGINNING":          "HSZm",   # BLACK & WHITE NATIONAL BEGINNING=BWはじめてセット全国図鑑版. cert145542066 Voltorb 014=HSZm-014 実在
+    # --- 2026-06-26 HQ PSA NG followup: EXPANSION 20TH ANNIVERSARY → CP6 (cert135877490 Haunter #046=CP6-046実在) ---
+    #   注: catalog は同セットを CP6-NNN(91枚, PSA番号一致) と 20th-NNN(74枚, 別番号=Tauros#046) の二重コードで保持。
+    #   PSA brand 'EXPANSION 20TH ANNIVERSARY' の印刷番号は CP6 体系と一致するため CP6 を採用("25TH ANNIVERSARY COLLECTION"=S8a と非衝突)。
+    "20TH ANNIVERSARY":            "CP6",
     # --- 2026-06-22 pdca/auto_add 索引不備 5件 (catalog 実在を実機確認・cardは存在、索引のみ欠落) ---
     "BANDIT RING":                 "XY7-B",  # バンデットリング[XY7]. XY7-B-061 Meowth 実在
     "PHANTOM GATE":                "XY4",    # ファントムゲート[XY4]. XY4-089 Manectric-EX 実在
