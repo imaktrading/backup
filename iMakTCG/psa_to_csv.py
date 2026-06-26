@@ -2245,10 +2245,24 @@ def load_targets_from_sheet_psa():
     ws = sh.get_worksheet_by_id(PSA_GID)
     all_values = ws.get_all_values()
 
+    # 出品済(itemID非空の同KEY行が在る)カードの集合。2枚目(itemID空・同KEY)を抽出段階で除外し、
+    # viewer 毎回再表示の浪費を防ぐ(dedup は CSV 段階で消すが抽出=目視は止めないため。2026-06-26)。
+    try:
+        import sys as _sys
+        _hq_tools = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "iMakHQ", "tools")
+        if _hq_tools not in _sys.path:
+            _sys.path.insert(0, _hq_tools)
+        from sheet_io import listed_keys as _listed_keys, PRODUCT_COL_KEY as _KEY_COL
+        _listed = _listed_keys(all_values)
+    except Exception as _e_lk:
+        print(f"  ⚠️ 出品済KEY算出失敗(抽出スキップ無効化して継続): {type(_e_lk).__name__}")
+        _listed, _KEY_COL = set(), 34
+
     cert_numbers = []
     cost_map = {}
     url_map = {}
     title_map = {}
+    _skipped_listed = 0
     for row in all_values[1:]:  # header 除外
         url      = (row[0]  if len(row) > 0  else '').strip()  # A
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
@@ -2259,8 +2273,14 @@ def load_targets_from_sheet_psa():
         no_go    = (row[10] if len(row) > 10 else '').strip()  # K NO-GO sentinel (= 「出品見合せ（仕入高）」 等)
         cost_n   = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円)
         category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
+        key_v    = (row[_KEY_COL] if len(row) > _KEY_COL else '').strip()  # AI canonical KEY
 
         if not cert or item_id or not url:
+            continue
+        # 同KEYが既に出品済(別行でitemID埋め) = この行は2枚目 → 抽出しない(viewer再表示の浪費防止)。
+        # KEY未記入の行は従来通り通す(安全側)。
+        if key_v and key_v in _listed:
+            _skipped_listed += 1
             continue
         # 統合シートは TCG / Tシャツ / 一番くじ / Montbell 等の混在。R列='TCG' のみ PSA 対象
         # (他 listing スクリプトと同じ R 列フィルタ運用に合わせる)
@@ -2284,6 +2304,9 @@ def load_targets_from_sheet_psa():
                     cost_map[cert] = int(m.group(1).replace(',', ''))
                 except ValueError:
                     pass
+    if _skipped_listed:
+        print(f"  ⏭️ 既出品(同KEYが出品済)の2枚目を除外: {_skipped_listed}件 "
+              f"(viewer毎回再表示の浪費防止。dedupと二重ではなく抽出段階で先に止める)")
     return cert_numbers, cost_map, url_map, title_map
 
 

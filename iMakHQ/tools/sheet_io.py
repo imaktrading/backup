@@ -38,6 +38,25 @@ def build_key_map(rows2d, itemid_col=PRODUCT_COL_ITEMID, key_col=PRODUCT_COL_KEY
     return out
 
 
+def listed_keys(rows2d, itemid_col=PRODUCT_COL_ITEMID, key_col=PRODUCT_COL_KEY):
+    """商品管理シート rows → 「出品済」canonical KEY の集合 (純関数, test可)。
+
+    出品済 = その KEY を持つ行のうち itemID(B列) 非空の行が1つ以上ある = 実際に eBay 出品された。
+    用途: PSA 抽出で、出品済カードの2枚目(別cert・itemID空・同KEY)を抽出段階で除外し、
+    viewer に毎回再表示されて目視労力を浪費するのを防ぐ(dedup は CSV 段階で消すが抽出は止めない)。
+    url-key(item:/shops:) は catalog-backed でない固有idなので除外。
+    """
+    out = set()
+    for r in rows2d[1:]:
+        if len(r) <= max(itemid_col, key_col):
+            continue
+        iid = (r[itemid_col] or "").strip()
+        key = (r[key_col] or "").strip()
+        if iid and key and not key.startswith("item:") and not key.startswith("shops:"):
+            out.add(key)
+    return out
+
+
 PRODUCT_COL_AUX_START = 28   # AC (補URL1)。AC-AG = 補URL1-5 (idx28-32 / 1-indexed col 29-33)。
 PRODUCT_AUX_MAX = 5
 

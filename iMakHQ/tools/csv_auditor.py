@@ -32,6 +32,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 
 try:
@@ -708,7 +709,73 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
     _pdca_accumulate(project, catalog_items, program_items, dry_run)
+    # --- Act合図: 監査完了 → headless Claude をBG起動して NG対応(コピペ不要) ---
+    _signal_claude_act(project, csv_path, log_path, dry_run)
     return 1 if (exclude_idx or program_items or catalog_items) else 0
+
+
+def _build_act_prompt(project, csv_path, log_path):
+    """headless Claude(claude -p)へ渡す NG対応(Act)指示文 (純関数, test可)。"""
+    report = os.path.join(REVIEW_DIR, f"csv_auditor_{_today()}_{project}.md")
+    act_out = os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.md")
+    run_logs = os.path.join(WORKSPACE, "iMakHQ", "run_logs")
+    notify = os.path.join(WORKSPACE, "iMakHQ", "tools", "notify_csv_ready.py")
+    return (
+        "あなたは iMak HQ Claude(出品専任)。出品くんの自動ランが完了した直後に、CSV監査くんから"
+        "無人で呼ばれた。memory `ng_items_need_proactive_action` の手順で NG対応(Actフェーズ)を実行せよ。\n"
+        f"- 対象CSV: {csv_path}\n"
+        f"- 監査レポート: {report}\n"
+        f"- 生成ログdir(最新.logを読む): {run_logs}\n"
+        f"- NG台帳: {MISSING_MODELS_PATH}\n"
+        "【優先順位 — CSV UP を最優先】\n"
+        "①CSVを手直し: 監査の必須spec空/タイトル短/形式を点検。catalogに値が在るのに空=generator脱落のみ"
+        "CSVを直接修正。日本語blank/catalog欠落由来の空欄は fail-closed で正(推測で埋めるな)。最終 入稿可否件数を確定。\n"
+        f"②CSV UPシグナル(③より先・最優先): 手直しが済んだら即、入稿可否件数Nで `python \"{notify}\" <N> \"{csv_path}\"` を"
+        "**バックグラウンド実行**して UP を促す通知を出す(③の後続処理を待たせない)。ただし入稿(eBayアップ)自体はするな=人の操作。\n"
+        "③カタログ依頼+誤検出整理(UPシグナルの後): 本物欠落は該当worktreeの requests/ に完全な依頼書"
+        "(cert/brand/番号/subject+source)投入(catalog追加は2026-05-25合意で確認不要)。catalogに実在するのに"
+        "『要調査』の誤検出は missing_models を打消し+真因(viewer/generator)を特定。誤カテゴリは訂正。\n"
+        "【制約・厳守】プログラムのコード修正と git commit はするな(『修正が修正を生む』防止=人間レビュー必須)。"
+        "必要なコード修正は提案として列挙するだけ。本番入稿・eBay revision・その他不可逆/外向き操作もするな。\n"
+        f"【出力】完了後、Actレポートを {act_out} に書け"
+        "(形式: ①CSV=入稿可否N件(理由) / ②UPシグナル発報済 / ③依頼N件・誤検出打消しM件・コード修正提案K件)。"
+    )
+
+
+def _signal_claude_act(project, csv_path, log_path, dry_run):
+    """監査完了後に headless Claude を BG 起動して NG対応(Act)を回す (ユーザー要望 2026-06-26)。
+
+    監査くんが終わったら HQ に合図 → コピペ不要で ①CSV→②修正+依頼。
+    - 非dry-run のみ。`CSV_AUDITOR_NO_SIGNAL=1` で無効化(test/CI/手動確認時)。
+    - BG detached・try/except で監査本体は絶対に壊さない。headless にはコード修正/commit/入稿をさせない(提案止まり)。
+    戻り: "skipped"(dry/env) / "no-cli" / "spawned" / "error:<type>" (test 可)。
+    """
+    if (dry_run or os.environ.get("CSV_AUDITOR_NO_SIGNAL") == "1"
+            or "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST")):
+        return "skipped"
+    try:
+        claude_bin = shutil.which("claude")
+        if not claude_bin:
+            print("  ⚠️ claude CLI 不在 → Act合図 skip(『見て』で手動起動可)")
+            return "no-cli"
+        prompt = _build_act_prompt(project, csv_path, log_path)
+        os.makedirs(REVIEW_DIR, exist_ok=True)
+        logf = open(os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.log"), "a", encoding="utf-8")
+        flags = 0
+        if sys.platform == "win32":
+            flags = subprocess.CREATE_NO_WINDOW | 0x00000008  # DETACHED_PROCESS
+        subprocess.Popen(
+            [claude_bin, "-p", prompt, "--dangerously-skip-permissions",
+             "--add-dir", r"C:\dev\iMak_data", "--add-dir", WORKSPACE],
+            cwd=os.path.join(WORKSPACE, "iMakHQ"),
+            stdout=logf, stderr=subprocess.STDOUT, creationflags=flags,
+        )
+        print(f"  🤖 Act合図: headless Claude を BG起動 → NG対応(コピペ不要、"
+              f"結果は review_logs/ng_act_{_today()}_{project}.md)")
+        return "spawned"
+    except Exception as _e:
+        print(f"  ⚠️ Act合図 skip(監査は完了): {type(_e).__name__}: {_e}")
+        return f"error:{type(_e).__name__}"
 
 
 def _pdca_accumulate(project, catalog_items, program_items, dry_run):

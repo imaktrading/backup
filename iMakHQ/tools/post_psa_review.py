@@ -156,9 +156,13 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
     try:
         # === 優先度 1: expected_product_id プレフィックス検索 ===
         if expected_product_id:
+            # 変種suffix付き (One Piece reprint/promo: '_PRB01_1' '_p2' 等) は base まで削って
+            # 兄弟変種も surface する。auto-pick が C(Common) でも PSA が Alt Art の場合、
+            # その兄弟 (SR Full Art 等) を候補に出さないと人が選べない (Boa Hancock PRB01 事例)。
+            base_prefix = expected_product_id.rsplit("_", 1)[0] if "_" in expected_product_id else expected_product_id
             cur.execute(
                 "SELECT product_id FROM products WHERE category=? AND product_id LIKE ? ORDER BY product_id LIMIT 30",
-                (category, f"{expected_product_id}%")
+                (category, f"{base_prefix}%")
             )
             rows = cur.fetchall()
 
@@ -194,7 +198,9 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
         # set_code 抽出漏れ・promo・新セット・ID lookup 失敗 (= miss) でも、catalog に
         # そのキャラが在れば必ず候補に出す。HTML の本来目的 (人が候補から選ぶ) を担保。
         # subject 例 'SABO' / 'MONKEY D LUFFY ALTERNATE ART' → name_en LIKE で引く。
-        if subject and not expected_product_id:
+        # 2026-06-26: expected_product_id 有でも常に併走。reprint set (PRB01 等) で auto-pick が
+        # 別 base の正解変種 (例 ST03-013 系 → 正解は OP01-078 系 SR) を取りこぼすのを防ぐ。
+        if subject:
             import re
             _NOISE = {"ALTERNATE", "ALT", "ART", "RARE", "FOIL", "PARALLEL", "SPECIAL", "FULL",
                       "MANGA", "COMIC", "LEADER", "SUPER", "SECRET", "PROMO", "CARD", "THE", "AND",
@@ -215,9 +221,14 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
                                 [category] + [f"%{t}%" for t in toks])
                     char_rows = cur.fetchall()
             if char_rows:
-                # キャラ候補を先頭に (人が選びやすい)。既存 rows は dedup して後ろに残す。
-                seen = {p for (p,) in char_rows}
-                rows = char_rows + [r for r in rows if r[0] not in seen]
+                if expected_product_id:
+                    # expected (prefix hit) を先頭に保ち、キャラ候補を後ろに追加 (取りこぼし救済)。
+                    seen = {r[0] for r in rows}
+                    rows = rows + [r for r in char_rows if r[0] not in seen]
+                else:
+                    # expected 不明時はキャラ候補を先頭に (人が選びやすい)。既存 rows は後ろ。
+                    seen = {p for (p,) in char_rows}
+                    rows = char_rows + [r for r in rows if r[0] not in seen]
 
         # === 優先度 4: category 全件 (= 最終 safety net) ===
         if not rows:
