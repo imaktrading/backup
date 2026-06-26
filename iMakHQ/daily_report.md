@@ -1253,3 +1253,37 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - Q8-I set_name_ebay tail(4,217 set_name本体欠落・promo中心)= 件数順 (a) 他セラー調査で低優先
 - PSA cert C:Rarity(S-P-071/M-P-020 等 rarity空)= Pokemon rarity 9,599 PDCA に集約
 - psa_mismatch itemID→KEY シート記入 = HQ域 / missing_models auto-prune 恒久化 = 並行
+
+## 2026-06-21〜06-25 — Catalog: Q8-I投入 / prune恒久化 / 画像backfill機構 / 日次HQ依頼 / 新弾チェック
+
+### 決定事項
+- 決定1(Q8-I (c') GO): set_name_ebay 未マップは catalog に翻訳元(set_name)無し→公開リファレンス確証分のみ自由文字列投入。CP概念パック5コードを web確証(TCGplayer/eBay)で投入。promo/starter 127コードは除外残置(Advisor承認)。
+- 決定2(missing_models prune 恒久化, Advisor (b) GO): prune_missing_models.py に pdca.db improvement_queue done化を統合(CSV除去とセットで done→pending復活を断つ)。schtasks 日次04:00登録(Advisor承認)。
+- 決定3(M2a casing): yaml="MEGA Dream ex" vs test="Mega Dream ex" 乖離を TCGplayer商品名規約(title case)で是正。
+- 決定4(resolver索引5件): pdca/auto_add の missing 多くは索引不備。catalog実在を実機確認し索引追加=BANDIT RING→XY7-B/PHANTOM GATE→XY4/PREMIUM CHAMPION PACK→CP4/RED FLASH→XY8-Br/ULTRADIMENSIONAL BEASTS→SM4A。
+- 決定5(画像backfill機構): pokemon-card.com resultAPI.php(pg+keyword, sm_and_keyword=true必須)→cardID→画像 の解決機構を確立。find_official_card + tools/backfill_pokemon_images.py 新設。
+- 決定6(phantom誤断定の訂正・HQ feedback): SM12a-224/SV-P-291 を「公式DBに無い=phantom」と報告→HQがPSA現物cert(147571967=#224 FA UR / 146003969=#291 新pr)で実在確認。resultAPIはsecret-rare/未掲載新promoを返さない=image gapであり削除/rekey不可。ツール分類を unverified に訂正。
+- 判定(HQ日次依頼): One Piece auto_add 7件=全て既存(投入不要) / Pokemon FAMILY-014・BLACK DECK KIT×2=真missing(旧世代/簡易版・対象外寄りkeep) / Weiss Schwarz=catalog対象外 / m接頭辞=Mercari非catalog-backed / PSA10 C:Rarity=Pokemon rarity backlog。
+- 判定(新弾チェック 06-25): 4カテゴリ全て released新弾の収録漏れ無し。Pokemon M1L-M5/SV11B/W 公式件数完全一致。次弾は全て未発売(OP17=8月/GD05=7/24/FB11=9/12/Pokemon M6)。
+
+### 変更
+- 変更: ebay_filter_map/pokemon.yaml(CP1/2/3/5/6 追加 / M2a casing是正)
+- 変更: prune_missing_models.py(prune_pdca追加=CSV+pdca.dbセット)
+- 変更: integrations/psa_to_csv.py(_POKEMON_SET_NAME_TO_CODE 5件追加)
+- 変更: scrapers/pokemon_tcg.py(find_official_card 新設) / tools/backfill_pokemon_images.py 新設
+- 変更(共有DB・git外): Q8-I CP系221件 set_name_ebay / E01 Energy Marker 24件 game_ebay+set_name_ebay / S8a-P プロモ画像25件 / BW Extra Regulation Box 12件 / dbs-cardgame 画像URL 2823件置換 / OP05-091正KEY確定(=base)。各backup取得済。
+- 変更(scraper・gitignore): _dbfw_official_local_fetch.py 画像パス /fw/jp/→/fw/ 是正(site renewal)。
+- commit: fdd4e1b / b30dac1 / c873690 / dd5c53d / 2e55b8c / ebd5e7d
+
+### 検証(実出力)
+- 検証✅ pre-commit pytest 全commit pass(231 passed,1 skipped) / 全体 308 passed
+- 検証✅ resolver索引5件 期待product_id解決(XY7-B-061/XY4-089/CP4-054/XY8-Br-056/SM4A-051)・回帰なし
+- 検証✅ prune_pdca: done88件にresolver適用→78解決/10未解決=HQ genuine-open判定と完全一致(fail-closed正常) / schtasks Next Run確認・初回手動実行ログUTF-8
+- 検証✅ dbs URL置換後 新URL5本 HEAD fetch全200(死URL0) / S8a-P card-1/13/25 全200 / E01-09_p1 game_ebay+set_name_ebay充足
+- 検証✅ 新弾チェック: 公式resultAPI件数 catalog完全一致(M1L92/M2a250/M5 81/SV11B174等) / M6=0(未発売)
+
+### 情報待ち/レビュー待ち(HQ/Dedupe)
+- phantom依頼(SM12a-224/SV-P-291)= HQ「実在・是正不要」で確定(secret/新prの image gap、別フェーズで画像対応)
+- OP06-068_AC01/OP12-063_AC01 = Admirable Collection alt-art(bandai API/CDN外)=専用fetch別フェーズ
+- 根①/DBFW = root① A-2(resolver alias追従)緑待ちでブロック(先行不可)
+- 次弾scrape: GD05(7/24)→OP17(8月)→FB11(9/12)→Pokemon M6 の発売時
