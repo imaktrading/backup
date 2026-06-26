@@ -1,6 +1,32 @@
 # iMakInventory daily_report
 
-## 2026-06-25 — amazon driver 自動再起動 + 昨日ログ点検 + 在庫整合性確認 (reverse_audit 偽乖離2件 + SHOPS skip 修正)
+## 2026-06-26 — 陳腐化テスト2件修正 + 在庫適正 再確認 (取下げ漏れ実害ゼロ)
+
+### 陳腐化していた既存テスト2件を現行コード仕様に追従 (commit cec28cc)
+- 決定: full suite で fail していた非-live 2件は **コードが正しく、テストの期待値が機能追加前のまま
+  固定** されていた陳腐化バグ → テスト側を現仕様に追従。
+- 変更:
+  - `tests/test_run_cycle.py`: email ヘッダ「⚠️ 要対応」に 2026-06-11 追加の「送信失敗」bit が
+    併記される現仕様へ期待文字列を更新 (`売切検知 4 → 完了 2 / 未取下げ 2` → `… / 送信失敗 1`)。
+  - `tests/test_n_col_price_now.py`: `update_listings_sold_marks` の返り値に追加された `err_writes`
+    キーを期待 dict に追加。
+- 検証: 非-live テスト **414 全 pass** (残 11 deselected は network 依存の live smoke のみ)。
+  pre-commit 115 + offline 159 pass。
+
+### 在庫適正 再確認 (user「在庫は適正なの/問題なし?」) — 取下げ漏れ実害ゼロ
+- 決定: 履行不能リスクのある取下げ漏れ (= 在庫切れ D=○ なのに eBay で買える) は **ゼロ = 問題なし**。
+- 検証 (実機 06-26):
+  - pending_revise (取下げ滞留): **0 件**。
+  - action_required.jsonl: 累積 892 行だが **最新エントリ 06-22T08:10** = sold-out 単品 verify 修正
+    (commit 0b7f566) 以降 新規ゼロ (3日以上クリーン)。内訳 886=過去 burst guard holdout / 6=旧 verify giveup。
+  - reverse_audit (06-25 11:10 daily, HIGH 2件) は **両方 既知偽陽性**:
+    row949 SHOPS PSA10ミラーピカチュウ = 源在庫あり (eBay qty=1 が正、D=○ が stale)、HIGH=SHEET cycle
+    6x/日 再 scrape + SHOPS skip 修正で自動是正。row728 トゲキッス V = user 手動再買 (qty=1, url空) で意図的。
+  - 公式監視くん (iMakeBayAPI/inventory_monitor) は audit_and_heal が毎 cycle 乖離自動補正で稼働中。
+- 補足: 専用 daily cron `iMakInventory_ReverseAudit_Daily` は 2026-06-26 10:00 から自動実行開始
+  (継続証跡 heartbeat 積上げ)。
+
+## 2026-06-25 — amazon driver 自動再起動 + 昨日ログ点検 + 在庫整合性確認 (reverse_audit 偽乖離2件 + SHOPS skip 修正) + reverse_audit 専用 daily cron 復旧
 
 ### 在庫整合性確認 (user 指示「在庫は問題ないの」) — 実害ゼロ、構造ギャップ2件
 - 決定: pending=0 / action_required=0。reverse_audit 手動実行 (06-16 以降 自動停止のため) で乖離2件検出 →
