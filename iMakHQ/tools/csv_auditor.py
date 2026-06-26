@@ -763,7 +763,10 @@ def _signal_claude_act(project, csv_path, log_path, dry_run):
         logf = open(os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.log"), "a", encoding="utf-8")
         flags = 0
         if sys.platform == "win32":
-            flags = subprocess.CREATE_NO_WINDOW | 0x00000008  # DETACHED_PROCESS
+            # CREATE_NO_WINDOW(窓なし)+ NEW_PROCESS_GROUP(独立=親終了に巻き込まれない)。
+            # ※DETACHED_PROCESS は付けない: claude.CMD shim が console 無しだと即死し 0 出力になる
+            #   (2026-06-26 初回無人走行で発覚。det付き=0byte / CNW単独=正常出力 を実測)。
+            flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         subprocess.Popen(
             [claude_bin, "-p", prompt, "--dangerously-skip-permissions",
              "--add-dir", r"C:\dev\iMak_data", "--add-dir", WORKSPACE],
