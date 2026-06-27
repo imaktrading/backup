@@ -84,6 +84,18 @@ def fetch_listing_images(item_id, _cache={}):
         return []
 
 
+def build_pic_url(images, extra, relist_mode, cap=24):
+    """eBay PicURL 文字列を組む (純関数, test可)。
+
+    relist時は画像が eBay EPS(i.ebayimg.com)なので、自前ホストの extra(999.png/banner)を
+    混ぜると "mixture of Self Hosted and EPS pictures" で eBay が拒否 → relist は extra 無し。
+    通常出品は従来通り extra を末尾連結(上限 cap=24)。
+    """
+    extra = [] if relist_mode else list(extra or [])
+    pics = list(images)[:cap - len(extra)] + extra
+    return "|".join(pics)
+
+
 def img_media_type(data):
     """画像バイト先頭(マジックバイト)から media_type を判定 (純関数, test可)。
 

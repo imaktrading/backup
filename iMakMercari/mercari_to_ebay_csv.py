@@ -1022,11 +1022,11 @@ def main():
                     _pat = re.compile(re.escape(_mid.group(0)) + r'_(\d+)\.')
                     _own = sorted((u for u in _allp if _pat.search(u)),
                                   key=lambda u: int(_pat.search(u).group(1)))
-                # eBay PicURL 上限 24。cfg の追加画像分の余白を残して自商品写真を採用。
-                _extra = cfg.get("extra_pics", [])
-                pic_urls = (_own or _allp)[:24 - len(_extra)]
-                pic_urls += _extra            # Porter: 999.png + preowned banner を末尾追加
-                pic_url = '|'.join(pic_urls)
+                # eBay PicURL 上限 24。relist時は eBay EPS画像に自前 extra_pics(999.png/banner)を
+                # 混ぜると "mixture of Self Hosted and EPS pictures" で拒否されるため extra 無し
+                # (元listing画像に banner も既にEPSで含まれる。2026-06-28 バッグ relist 失敗で発覚)。
+                from ebay_getitem_images import build_pic_url as _bpu
+                pic_url = _bpu(_own or _allp, cfg.get("extra_pics", []), relist_mode)
                 # 価格決定 (pricing_engine 共通) — eBay市場中央値を取得して反映
                 price_str = re.sub(r"[^0-9]", "", str(price_jpy))
                 cost_jpy = int(price_str) if price_str else 5000
