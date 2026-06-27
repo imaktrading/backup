@@ -1,0 +1,14 @@
+{
+  "_comment": "reverse_audit の承認済み既知偽陽性 allowlist。ここに登録した item_id の D=○×eBay qty>0 乖離は daily cron の critical alert (toast/email) を抑制するが、heartbeat には毎回記録する (silent drop 禁止・安全原則準拠)。fail-closed: ここに無い item_id は従来通り必ず alert。登録は人手確認 (取下げ漏れではないと断定) 後のみ。状況が変わったら (例: 物理在庫を手放した) 当該 entry を削除して alert を復活させること。",
+  "acknowledged": [
+    {
+      "item_id": "358645217419",
+      "title": "PSA10トゲキッス V 6084",
+      "sheet": "HIGH",
+      "row": 728,
+      "reason": "user 手動確保済の PSA10 鑑定品 1点物 (無在庫向かない商材)。源 mercari は売切 (D=○) だが物理在庫を保有し eBay で意図的に出品継続中 (qty=1)。url 空で源 scrape 不能のため D=○ が恒久 stale → 毎日同じ乖離を出し続けるが取下げ漏れではない (履行可能)。",
+      "acknowledged_at": "2026-06-27",
+      "acknowledged_by": "Inventory Claude (過去 user 確認: 2026-06-25 daily_report)"
+    }
+  ]
+}

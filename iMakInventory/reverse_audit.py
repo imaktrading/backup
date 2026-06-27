@@ -411,6 +411,33 @@ def run_ebay_down_sheet_active_audit(
 HEARTBEAT_LOG = DECISION_LOG_DIR / "reverse_audit_daily.log"
 ALERT_LOG = DECISION_LOG_DIR / "AUDIT_ALERT.log"
 
+# 承認済み既知偽陽性 allowlist (2026-06-27 新設):
+#   url 空で源 scrape 不能なまま eBay live = reverse_audit が毎日同じ乖離を出し続け、
+#   critical alert が常時鳴る → 本物の取下げ漏れ alert が埋もれる (alert 疲労)。
+#   人手で「取下げ漏れではない」と確認済の item_id をここに登録すると、 当該乖離は
+#   **alert (toast/email) を抑制** するが **heartbeat には毎回記録** する (= silent drop 禁止、
+#   安全原則準拠)。 fail-closed: ここに無い item_id は従来通り必ず alert。
+#   登録は git 追跡ファイルで人手レビュー可能 (= 不可視な握り潰しにしない)。
+ACK_FILE = ROOT_DIR / "reverse_audit_acknowledged.json"
+
+
+def _load_acknowledged() -> dict:
+    """承認済み item_id → entry の dict を返す (ファイル不在/壊れていれば空 = fail-closed で全件 alert)."""
+    try:
+        if not ACK_FILE.exists():
+            return {}
+        data = json.loads(ACK_FILE.read_text(encoding="utf-8"))
+        out = {}
+        for e in data.get("acknowledged", []):
+            iid = str(e.get("item_id", "")).strip()
+            if iid:
+                out[iid] = e
+        return out
+    except Exception as e:
+        print(f"  [!] [daily_audit] ack allowlist 読込失敗 (= 全件 alert に倒す): "
+              f"{type(e).__name__}: {e}", flush=True)
+        return {}
+
 
 def _toast(title: str, body: str) -> None:
     """Windows toast (win10toast 不在 / 失敗時は黙って skip)."""
@@ -459,28 +486,55 @@ def _run_daily_audit() -> dict:
     mc = rev.get("mismatch_count", 0)
     oc = edn.get("orphan_count", 0)
 
+    # 承認済み既知偽陽性を分離 (alert は unack のみ、 ack は heartbeat に必ず記録 = silent drop 禁止)。
+    ack = _load_acknowledged()
+    all_items = rev.get("items", []) or []
+    ack_items = [it for it in all_items if str(it.get("item_id", "")).strip() in ack]
+    unack_items = [it for it in all_items if str(it.get("item_id", "")).strip() not in ack]
+    unack_count = len(unack_items)
+    ack_ids = [str(it.get("item_id", "")).strip() for it in ack_items]
+
     # 継続証跡 heartbeat (= 乖離 0 でも「実行した」証跡。 pythonw でも残る。 安全原則: 継続 reconciliation)
-    status = "OK" if (mc == 0 and oc >= 0) else ("AUDIT_ERROR" if mc == -1 else "MISMATCH")
+    #   status は **未承認** 乖離で判定 (= 承認済みだけなら OK 扱いだが、 ack 内訳は必ず残す)。
+    if mc == -1:
+        status = "AUDIT_ERROR"
+    elif unack_count > 0:
+        status = "MISMATCH"
+    elif ack_items:
+        status = "OK_ACK_ONLY"   # 乖離はあるが全て承認済み既知偽陽性
+    else:
+        status = "OK"
     with open(HEARTBEAT_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps({
             "ts": ts, "status": status,
             "reverse_mismatch": mc, "reverse_by_sheet": rev.get("by_sheet"),
+            "reverse_unack": unack_count, "reverse_ack": len(ack_items),
+            "acknowledged_ids": ack_ids,
             "reverse_error": rev.get("error"),
             "ebay_down_orphan": oc, "ebay_down_error": edn.get("error"),
             "reverse_log": rev.get("log_path"), "ebay_down_log": edn.get("log_path"),
         }, ensure_ascii=False) + "\n")
 
+    if ack_items:
+        print(f"  [info] 承認済み既知偽陽性 {len(ack_items)} 件は alert 抑制 (heartbeat 記録済): "
+              f"{ack_ids}", flush=True)
+
     # 非-silent アラート判定:
-    #   mc > 0  = 取下げ漏れ疑い (D=○ なのに eBay qty>0) = fail-OPEN の最有力候補 → critical
+    #   unack_count > 0  = 未承認の取下げ漏れ疑い (D=○ なのに eBay qty>0) = fail-OPEN 最有力 → critical
     #   mc == -1 = audit 不能 (eBay 取得失敗 / sheet 読込失敗) = 検出網が動かなかった → critical
     #   ebay_down orphan は review シートに書出済 = 自動で害なし → heartbeat のみ (alert しない)
-    if mc > 0 or mc == -1:
-        if mc > 0:
-            subj = f"[iMakInventory] ⚠️ reverse_audit 乖離 {mc} 件 (取下げ漏れ疑い)"
-            body = (f"reverse_audit が D=○ × eBay qty>0 の乖離を {mc} 件検出。\n"
-                    f"sheet 別: {rev.get('by_sheet')}\nsupplier 別: {rev.get('by_supplier')}\n"
+    #   承認済みのみ (unack=0) → critical alert は出さない (= 既知ノイズで本物を埋もれさせない)
+    if unack_count > 0 or mc == -1:
+        if unack_count > 0:
+            from collections import Counter  # noqa: PLC0415
+            by_sheet = dict(Counter(it["sheet"] for it in unack_items))
+            by_supplier = dict(Counter(it.get("supplier", "?") for it in unack_items))
+            subj = f"[iMakInventory] ⚠️ reverse_audit 乖離 {unack_count} 件 (取下げ漏れ疑い)"
+            body = (f"reverse_audit が D=○ × eBay qty>0 の未承認乖離を {unack_count} 件検出。\n"
+                    f"sheet 別: {by_sheet}\nsupplier 別: {by_supplier}\n"
                     f"= 売切マーク済なのに eBay で買える状態 = 無在庫履行不能 → 要対応。\n"
-                    f"log: {rev.get('log_path')}\n")
+                    + (f"(別途 承認済み既知偽陽性 {len(ack_items)} 件 {ack_ids} は抑制)\n" if ack_items else "")
+                    + f"log: {rev.get('log_path')}\n")
         else:
             subj = "[iMakInventory] ⚠️ reverse_audit 実行不能 (検出網が動かなかった)"
             body = (f"reverse_audit が fail-closed で中断 (= 乖離ゼロを証明できていない)。\n"
@@ -493,10 +547,14 @@ def _run_daily_audit() -> dict:
         emailed = _email_alert(subj, body)
         print(f"  [★critical] {subj} (alert_log + toast + email={'sent' if emailed else 'skip/fail'})",
               flush=True)
+    elif ack_items:
+        print(f"  ✓ reverse_audit 未承認乖離 0 件 (承認済み {len(ack_items)} 件のみ = 既知偽陽性、 "
+              f"継続証跡を 1 件積上げ)", flush=True)
     else:
         print(f"  ✓ reverse_audit 乖離 0 件 (= 継続証跡を 1 件積上げ)", flush=True)
 
-    return {"ts": ts, "status": status, "reverse": rev, "ebay_down": edn}
+    return {"ts": ts, "status": status, "reverse": rev, "ebay_down": edn,
+            "unack_count": unack_count, "ack_count": len(ack_items), "ack_ids": ack_ids}
 
 
 if __name__ == "__main__":
@@ -512,7 +570,8 @@ if __name__ == "__main__":
     if args.mode == "all":
         res = _run_daily_audit()
         print(f"\n=== daily_audit 結果 ({res['status']}) ===")
-        print(f"  reverse 乖離: {res['reverse'].get('mismatch_count')} 件 / "
+        print(f"  reverse 乖離: {res['reverse'].get('mismatch_count')} 件 "
+              f"(未承認 {res.get('unack_count')} / 承認済 {res.get('ack_count')} {res.get('ack_ids')}) / "
               f"ebay_down orphan: {res['ebay_down'].get('orphan_count')} 件")
         print(f"  heartbeat: {HEARTBEAT_LOG}")
     elif args.mode == "ebay_down":

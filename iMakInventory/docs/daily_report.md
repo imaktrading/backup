@@ -1,5 +1,32 @@
 # iMakInventory daily_report
 
+## 2026-06-27 — daily cron 初回自動実行を確認 + reverse_audit 承認済み allowlist 新設 (alert 疲労対策)
+
+### reverse_audit daily cron 初回自動実行 = 稼働実証 + SHOPS 自動是正の確認
+- 決定: 昨日復旧した `iMakInventory_ReverseAudit_Daily` が **06-27 10:00 に初回自動実行**され、
+  乖離1件を検知して alert 発報 = **cron が設計通り稼働している実証**。
+- 検知乖離は row728 (トゲキッス V) のみ = 既知偽陽性。**row949 SHOPS は乖離リストから消滅**
+  = 昨日の SHOPS skip 修正 (commit 6ea4cfe) が予告通り D=○ を自動是正したことを実機確認。
+
+### row728 が毎日同じ偽 critical alert → 承認済み allowlist で抑制 (commit 予定)
+- 決定: row728 (item 358645217419, PSA10トゲキッス V) は url 空で源 scrape 不能なまま eBay live
+  (qty=1)。user が物理確保済の 1点物 PSA10 鑑定品 (無在庫向かない商材) を意図的に出品継続中で
+  **取下げ漏れではない** (履行可能、過去 user 確認済 [[ended_listing_not_failopen]])。だが D=○ が恒久
+  stale のため **毎日同じ critical alert を出し続ける → 本物の取下げ漏れ alert が埋もれる (alert 疲労)**。
+  安全原則「DLQ/要対応リストは墓場にせず…」と裏腹に、 既知ノイズの常時発報は真の警告の visibility を
+  下げる → **承認済み既知偽陽性 allowlist で alert のみ抑制** (データ・heartbeat は温存)。
+- 変更:
+  - `reverse_audit_acknowledged.json` 新設 (git 追跡 = 人手レビュー可能): item_id + reason +
+    acknowledged_at を明記。row728 を登録。
+  - `reverse_audit.py` `_run_daily_audit()`: 乖離を承認済み/未承認に分離。**critical alert (toast/
+    email/AUDIT_ALERT.log) は未承認分のみ**で発火。承認済みは **heartbeat に reverse_ack /
+    acknowledged_ids として毎回記録** (= silent drop 禁止・安全原則準拠)。**fail-closed**: allowlist に
+    無い item_id は従来通り必ず alert、 ファイル不在/破損時も全件 alert に倒す。status に OK_ACK_ONLY 新設。
+- 検証: `tests/test_reverse_audit_daily.py` を 4→6 件に拡張 (承認済みのみ→alert 抑制+heartbeat 記録 /
+  承認+未承認混在→未承認件数だけで alert)。offline 159 pass。**ライブ実証**: `--mode all` exit 0、
+  status=OK_ACK_ONLY (未承認 0 / 承認済 1)、heartbeat に ack 記録 + AUDIT_ALERT.log に新規追記なし
+  = 抑制成功。未承認の本物乖離は従来通り 3 チャネル発火 (前回 06-25 実証済)。
+
 ## 2026-06-26 — 陳腐化テスト2件修正 + 在庫適正 再確認 (取下げ漏れ実害ゼロ)
 
 ### 陳腐化していた既存テスト2件を現行コード仕様に追従 (commit cec28cc)
