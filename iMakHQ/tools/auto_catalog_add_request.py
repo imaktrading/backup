@@ -57,6 +57,25 @@ def _append_processed(rows: list[dict]) -> None:
             w.writerow([r["category"], r["model"], r["detected_at"]])
 
 
+def _prune_old_missing(unique: dict[tuple[str, str], dict], max_age_days: int = 30,
+                       today: str = "") -> int:
+    """detected_at が max_age_days より古い行を unique から in-place 削除 (純関数寄り, test可)。
+    戻り: 間引いた件数。today 未指定なら本日。ISO 日付の辞書順比較。"""
+    if not today:
+        today = datetime.date.today().strftime("%Y-%m-%d")
+    try:
+        cutoff = (datetime.date.fromisoformat(today[:10])
+                  - datetime.timedelta(days=max_age_days)).isoformat()
+    except Exception:
+        return 0
+    drop = [k for k, r in unique.items()
+            if len((r.get("detected_at") or "")[:10]) == 10
+            and r["detected_at"][:10] < cutoff]
+    for k in drop:
+        del unique[k]
+    return len(drop)
+
+
 def _rewrite_missing(unique: dict[tuple[str, str], dict]) -> None:
     """missing_models.csv を dedup 後の内容で書き戻す (= 容量管理)."""
     with MISSING_CSV.open("w", encoding="utf-8", newline="") as f:
@@ -115,6 +134,13 @@ def main() -> int:
             k = (r["category"], r["model"])
             if k not in unique or r["detected_at"] > unique[k]["detected_at"]:
                 unique[k] = r
+
+    # 1b. 長期滞留(detected_at > 30日)を間引き(K1・容量管理 + 再import停止)。
+    # 30日経っても catalog 未追加 = 依頼済の構造案件(pdca 側で stale 退役済)。再 import で
+    # seen_count を永遠に増やし続けるのを止める。新規検出が来れば detected_at 新でまた載る。
+    pruned_old = _prune_old_missing(unique)
+    if pruned_old:
+        print(f"[prune] missing_models 古い行(>30日)を {pruned_old} 件間引き")
 
     # 2. 既処理と差分
     processed = _load_processed()

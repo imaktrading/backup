@@ -209,6 +209,37 @@ def prune_resolved_gaps(con, resolve_fn, ts="", sources=("missing_models",)):
     return {"pruned": pruned, "checked": len(rows), "remaining_pending": remaining}
 
 
+def prune_stale_findings(con, today, max_age_days=21, sources=None):
+    """長期未解決の pending を 'stale' に退役させる(digest の恒久ノイズを断つ=K1/K5)。
+
+    created_ts(=初回検出)が max_age_days より古い pending を stale 化。catalog_gap は毎ラン
+    missing_models から再 import されて seen_count が永遠に増える(SWSH Family seen×14 等)が、
+    upsert は 'stale' を sticky に保つ(done 以外は status 維持)ので再 import でも復活しない
+    = オシレーションなし。新規の別 item_id(別cert)は別 finding として pending で出るので
+    新規取りこぼしは無い。fail-closed: ts 不正な行は触らない。
+    Returns: {"pruned": n, "checked": m}。
+    """
+    try:
+        from datetime import date, timedelta
+        cutoff = (date.fromisoformat(str(today)[:10]) - timedelta(days=max_age_days)).isoformat()
+    except Exception:
+        return {"pruned": 0, "checked": 0}
+    q = "SELECT queue_id, created_ts FROM improvement_queue WHERE status='pending'"
+    params = []
+    if sources:
+        q += " AND source IN (%s)" % ",".join("?" * len(sources))
+        params = list(sources)
+    rows = con.execute(q, params).fetchall()
+    pruned = 0
+    for r in rows:
+        ct = (r["created_ts"] or "")[:10]
+        if len(ct) == 10 and ct < cutoff:        # ISO 日付の辞書順 = 時系列順
+            set_status(con, r["queue_id"], "stale", today)
+            pruned += 1
+    con.commit()
+    return {"pruned": pruned, "checked": len(rows)}
+
+
 def make_catalog_resolver(catalog_db):
     """catalog products.sqlite を引いて (category,item_id)->bool を返す resolve_fn を生成。
 

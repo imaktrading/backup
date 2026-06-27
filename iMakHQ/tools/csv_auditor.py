@@ -922,11 +922,18 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run):
         except Exception as _pe:
             print(f"  ⚠️ PDCA prune skip: {type(_pe).__name__}: {_pe}")
         synced = _pdca.sync_processed(con, CATALOG_REQ_DIR, ts=ts)        # ループ閉じ
+        # 長期未解決(created_ts > 21日)の pending を stale 退役 → digest の恒久ノイズを断つ(K1/K5)。
+        staled = 0
+        try:
+            staled = _pdca.prune_stale_findings(con, ts, max_age_days=21)["pruned"]
+        except Exception as _se:
+            print(f"  ⚠️ PDCA stale prune skip: {type(_se).__name__}")
         emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts)
         con.commit()
         con.close()
-        if emitted or synced or pruned:
-            print(f"  📊 PDCA: 集約発行 {emitted} 件 / 完了同期 {synced} 件 / 解決済prune {pruned} 件 (dedup済)")
+        if emitted or synced or pruned or staled:
+            print(f"  📊 PDCA: 集約発行 {emitted} 件 / 完了同期 {synced} 件 / "
+                  f"解決済prune {pruned} 件 / 長期stale退役 {staled} 件 (dedup済)")
     except Exception as _e:
         print(f"  ⚠️ PDCA accumulate skip (監査は継続): {type(_e).__name__}: {_e}")
 
