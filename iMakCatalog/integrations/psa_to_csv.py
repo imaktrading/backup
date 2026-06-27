@@ -1322,6 +1322,7 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "PREMIUM CHAMPION PACK":       "CP4",    # プレミアムチャンピオンパック(CP4). CP4-054 Wobbuffet 実在
     "RED FLASH":                   "XY8-Br", # 赤い閃光[XY8](青い衝撃=XY8-Bb と対). XY8-Br-056 Houndoom Spirit Link 実在
     "BLUE SHOCK":                  "XY8-Bb", # 青い衝撃[XY8](赤い閃光=XY8-Br と対). XY8-Bb-001..064 実在(set索引). 注: FA secret #061(M Glalie EX)は未scrape=別途catalog_add
+    "DOUBLE BLAZE":                "SM10",   # ダブルブレイズ[SM10]. SM10-033 Gengar 実在(cert 2026-06-27)
     "ULTRADIMENSIONAL BEASTS":     "SM4A",   # 超次元の暴獣[SM4A]. SM4A-051 Gyarados-GX 実在
     # --- 2026-06-10 PSA脱落6件 set-map (records 実在・索引のみ。真値=catalog set_name 裏取り) ---
     "SKY LEGEND":                  "SM10b",  # スカイレジェンド (cert109940063 Lillie 053=SM10b-053 実在)
