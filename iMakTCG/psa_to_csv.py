@@ -486,6 +486,18 @@ def smart_titlecase(s):
         result.append(''.join(new_sub))
     return ' '.join(result)
 
+def pokemon_out_of_scope(franchise, brand):
+    """catalog が構造的に収録しない Pokemon サブセット = out-of-scope skip 対象 (純関数, test可)。
+
+    現状: e-card期 BLACK DECK KIT (2002 VSデッキ) のみ。catalog 収録0件を実機確認済 (2026-06-27 K2)。
+    ※XY期は catalog に173件あるので含めない (丸ごと除外すると出せるカードを殺す=K3不採用)。
+    新サブセットを足す時も「catalog 0件」を実機確認してから追加する (誤除外=recall損 防止)。
+    """
+    if franchise != "Pokemon":
+        return False
+    return "BLACK DECK KIT" in (brand or "").upper()
+
+
 def detect_game_info(brand):
     brand_upper = brand.upper()
     if "DUAL IMPACT" in brand_upper:
@@ -1627,6 +1639,13 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # missing_models へ dragonball_scg として誤って積むのを防ぐ (2026-06-27 K4 根治)。
     if franchise == "Dragon Ball Heroes":
         print(f"    ⏭️ Skip: Dragon Ball Heroes はアーケード=catalog(SCG)対象外 (cert {cert_number}, {subject})")
+        return None
+
+    # Pokemon e-card期 BLACK DECK KIT (2002 VS デッキ) は catalog 収録0件=Bandai/公式API対象外。
+    # catalog 依頼しても永久に埋まらない → out-of-scope skip で missing_models 汚染も止める(K2)。
+    # ※XY期は catalog に173件あるので丸ごと除外しない(K3 は不採用=出せるカードを殺すため)。
+    if pokemon_out_of_scope(franchise, brand):
+        print(f"    ⏭️ Skip: Pokemon Black Deck Kit (e-card期) はカタログ未収録=対象外 (cert {cert_number}, {subject})")
         return None
 
     # Character欄はPSA Subjectから接尾辞を剥がして純キャラ名のみに (fallback)

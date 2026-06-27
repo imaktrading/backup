@@ -39,3 +39,12 @@ def test_real_scg_still_classified_as_scg():
     game2, _s2, fr2 = pc.detect_game_info(
         "DRAGON BALL SUPER DIVERS ADVANCE PACK DRAGON BALL 40TH ANNIVERSARY EDITION")
     assert fr2 == "Dragon Ball" and game2 == "Dragon Ball Super Card Game"
+
+
+def test_pokemon_black_deck_kit_out_of_scope():
+    """K2: Black Deck Kit (e-card期・catalog0件) は out-of-scope。XY期は対象外にしない。"""
+    assert pc.pokemon_out_of_scope("Pokemon", "POKEMON JAPANESE BLACK DECK KIT") is True
+    # XY期は catalog に173件あるので除外しない(K3不採用=出せるカードを殺さない)
+    assert pc.pokemon_out_of_scope("Pokemon", "POKEMON JAPANESE XY BLUE SHOCK") is False
+    # 他 franchise は無関係
+    assert pc.pokemon_out_of_scope("One Piece", "BLACK DECK KIT") is False
