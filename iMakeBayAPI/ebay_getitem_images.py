@@ -84,6 +84,24 @@ def fetch_listing_images(item_id, _cache={}):
         return []
 
 
+def img_media_type(data):
+    """画像バイト先頭(マジックバイト)から media_type を判定 (純関数, test可)。
+
+    Claude API は media_type と実体の不一致で 400 を返す。eBay画像(i.ebayimg.com)は .JPG/.PNG
+    混在で URL拡張子も実体と食い違うため**バイトで判定**する(2026-06-28 relist画像流用で
+    PNG混入が jpeg 固定指定により Claude 400 全失敗したのを根治)。Claude 対応4形式 + 既定 jpeg。
+    """
+    if data[:8].startswith(b"\x89PNG"):
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
 def relist_photo_source(relist_mode, item_id, source_urls, fetch_fn=None):
     """取下再出品②の画像ソース選択 (純関数, test可)。
 

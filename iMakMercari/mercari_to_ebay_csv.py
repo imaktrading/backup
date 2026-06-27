@@ -619,8 +619,11 @@ Return ONLY valid JSON (no markdown, no explanation):
 }
 """
 
+from ebay_getitem_images import img_media_type as _img_media_type  # 実バイトで media_type 判定(共通)
+
+
 def get_images_base64(photo_url_str, max_images=MAX_IMAGES):
-    """写真URLから画像をbase64に変換"""
+    """写真URLから画像を (base64, media_type) のリストに変換 (media_type は実バイト判定)。"""
     # 出品者プロフ画像(thumb/members)は商品写真でない。スプシ写真列に全行混入しており
     # 取りに行くと404でログを汚す(実商品写真は別途取得OK)。先頭で除外する。
     urls = [u.strip() for u in photo_url_str.split('|')
@@ -640,7 +643,7 @@ def get_images_base64(photo_url_str, max_images=MAX_IMAGES):
                 resp = requests.get(try_url, headers=HEADERS, timeout=15)
                 if resp.status_code == 200 and len(resp.content) > 1000:
                     b64 = base64.standard_b64encode(resp.content).decode('utf-8')
-                    images.append(b64)
+                    images.append((b64, _img_media_type(resp.content)))   # 実バイトで media_type 判定
                     print(f"    画像取得OK ({len(resp.content)//1024}KB): ...{try_url[-50:]}")
                     break
             except Exception as e:
@@ -670,12 +673,17 @@ def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b6
             print(f"    ⚠️ whitelist_registry 読込失敗（検証スキップ）: {_e}")
 
     content = []
-    for img_b64 in images_b64:
+    for _img in images_b64:
+        # get_images_base64 は (b64, media_type) を返す。旧 str 形式にも後方互換。
+        if isinstance(_img, tuple):
+            img_b64, _mt = _img
+        else:
+            img_b64, _mt = _img, "image/jpeg"
         content.append({
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": "image/jpeg",
+                "media_type": _mt,
                 "data": img_b64,
             }
         })
