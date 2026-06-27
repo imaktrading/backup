@@ -705,6 +705,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     _report(project, csv_path, dry_run, len(rows), exclude_idx, ship_fixes,
             catalog_items, program_items, seo_notes, cat_req, prog_req,
             log_signals, excl_result, dc["gate_summary"], dc["claude"])
+    # --- CSV UPシグナルを即発報(反応速度最優先)。入稿可否=監査の決定論結果(行数-除外)。
+    #     headless の起動・解析(数分)を待たずに UP できるようにする(ユーザー要望 2026-06-27) ---
+    _signal_csv_up(csv_path, len(rows) - len(exclude_idx), dry_run)
     # --- PDCA: 台帳に蓄積 + 前回比トレンド + 再発検知 (dry-run は追記しない) ---
     _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
@@ -809,8 +812,9 @@ def _build_act_prompt(project, csv_path, log_path, digest_path="", digest=None):
         "【優先順位 — CSV UP を最優先】\n"
         "①CSVを手直し: 監査の必須spec空/タイトル短/形式を点検。catalogに値が在るのに空=generator脱落のみ"
         "CSVを直接修正。日本語blank/catalog欠落由来の空欄は fail-closed で正(推測で埋めるな)。最終 入稿可否件数を確定。\n"
-        f"②CSV UPシグナル(③より先・最優先): 手直しが済んだら即、入稿可否件数Nで `python \"{notify}\" <N> \"{csv_path}\"` を"
-        "**バックグラウンド実行**して UP を促す通知を出す(③の後続処理を待たせない)。ただし入稿(eBayアップ)自体はするな=人の操作。\n"
+        f"②CSV UPシグナル: **csv_auditor が監査終了時に即発報済**(入稿可否件数=行数-除外の決定論値)。"
+        f"あなた(headless)は通常やらなくてよい。**例外**: ①の手直しで入稿可否件数が変わった時だけ、"
+        f"更新後の件数Nで `python \"{notify}\" <N> \"{csv_path}\"` をBG再発報。入稿(eBayアップ)自体はするな=人の操作。\n"
         "③カタログ依頼+誤検出整理(UPシグナルの後): 本物欠落は該当worktreeの requests/ に完全な依頼書"
         "(cert/brand/番号/subject+source)投入(catalog追加は2026-05-25合意で確認不要)。catalogに実在するのに"
         "『要調査』の誤検出は missing_models を打消し+真因(viewer/generator)を特定。誤カテゴリは訂正。\n"
@@ -840,6 +844,51 @@ def _resolve_claude_exe(claude_bin):
     return exe if os.path.exists(exe) else (claude_bin or "")
 
 
+def _act_disabled(dry_run):
+    """Act/UP の自動発報を抑止すべきか (dry-run/test/env)。"""
+    return (dry_run or os.environ.get("CSV_AUDITOR_NO_SIGNAL") == "1"
+            or "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST")))
+
+
+def _detached_spawn(argv, stdout_path=None):
+    """argv を tree-kill 耐性で BG 起動 (中継 python が DETACHED 起動して即終了)。
+
+    control_panel は csv_auditor 終了後 taskkill /F /T でツリー一括kill する。直接 Popen だと
+    子孫として巻き込まれて即死(2026-06-27 実測: DETACHED/CNW どの flag でも /T から逃げられない)。
+    中継を1つ噛ませ即終了させると、起動対象は orphan 化してツリーから外れ生存する。
+    """
+    payload = list(argv)
+    launcher = (
+        "import subprocess,sys,json\n"
+        "argv=json.loads(sys.argv[1]); logp=sys.argv[2] or None\n"
+        "out=open(logp,'w',encoding='utf-8') if logp else subprocess.DEVNULL\n"
+        "subprocess.Popen(argv,stdout=out,stderr=subprocess.STDOUT,"
+        "creationflags=0x00000008|0x00000200)\n"   # DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
+    )
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    subprocess.Popen([sys.executable, "-c", launcher, json.dumps(payload), stdout_path or ""],
+                     creationflags=flags)
+
+
+def _signal_csv_up(csv_path, n_listable, dry_run):
+    """入稿可否が確定した瞬間(監査終了時)に UP 通知を**即**発報 (反応速度=最優先)。
+
+    入稿可否は監査くんが自分で持つ決定論情報(エラー数/ゲート/除外)。headless の起動・ログ読込
+    (数分)を待たずに csv_auditor が直接 UP を出す → ユーザーは即 UP できる。headless は遅くて
+    良い③(依頼/コード提案)だけ裏で回す。戻り: "skipped"/"fired"/"error:<type>" (test可)。
+    """
+    if _act_disabled(dry_run):
+        return "skipped"
+    try:
+        notify = os.path.join(WORKSPACE, "iMakHQ", "tools", "notify_csv_ready.py")
+        _detached_spawn([sys.executable, notify, str(n_listable), csv_path])
+        print(f"  🟢 CSV UPシグナル即発報: {n_listable}件 入稿OK → UPして(headless③は裏で継続)")
+        return "fired"
+    except Exception as _e:
+        print(f"  ⚠️ UPシグナル skip(監査は完了): {type(_e).__name__}")
+        return f"error:{type(_e).__name__}"
+
+
 def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", digest=None):
     """監査完了後に headless Claude を BG 起動して NG対応(Act)を回す (ユーザー要望 2026-06-26)。
 
@@ -854,8 +903,7 @@ def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", dig
     - digest_path/digest: 決定論NG digest を渡し、各項目を必ず処分させる(無言スキップ防止=PDCA担保)。
     戻り: "skipped"(dry/env) / "no-cli" / "spawned" / "error:<type>" (test 可)。
     """
-    if (dry_run or os.environ.get("CSV_AUDITOR_NO_SIGNAL") == "1"
-            or "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST")):
+    if _act_disabled(dry_run):
         return "skipped"
     try:
         claude_exe = _resolve_claude_exe(shutil.which("claude"))
@@ -868,23 +916,13 @@ def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", dig
         prompt_file = os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.prompt.txt")
         with open(prompt_file, "w", encoding="utf-8") as pf:
             pf.write(prompt)
-        # 中継 python -c: claude.exe を DETACHED+NEW_GROUP で起動 → 即 return(中継終了)。
-        # これで claude が csv_auditor ツリーから外れ、後続の taskkill /T を生き延びる。
-        launcher = (
-            "import subprocess,sys,os\n"
-            "exe,logp,pf,wd=sys.argv[1:5]\n"
-            "subprocess.Popen([exe,'-p',open(pf,encoding='utf-8').read(),"
-            "'--dangerously-skip-permissions','--add-dir',r'C:\\\\dev\\\\iMak_data','--add-dir',wd],"
-            "cwd=os.path.join(wd,'iMakHQ'),stdout=open(logp,'w',encoding='utf-8'),"
-            "stderr=subprocess.STDOUT,creationflags=0x00000008|0x00000200)\n"
-        )
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        subprocess.Popen(
-            [sys.executable, "-c", launcher, claude_exe, log_file, prompt_file, WORKSPACE],
-            creationflags=flags,
-        )
-        print(f"  🤖 Act合図: headless Claude を中継経由でBG起動(tree-kill耐性) → NG対応"
-              f"(コピペ不要、結果は review_logs/ng_act_{_today()}_{project}.md)")
+        # claude.exe を中継経由 detach 起動(tree-kill 耐性)。prompt はファイル渡し。
+        _detached_spawn(
+            [claude_exe, "-p", prompt,
+             "--dangerously-skip-permissions", "--add-dir", r"C:\dev\iMak_data", "--add-dir", WORKSPACE],
+            stdout_path=log_file)
+        print(f"  🤖 Act(③依頼/コード提案)を headless にBG委譲(tree-kill耐性) → "
+              f"review_logs/ng_act_{_today()}_{project}.md")
         return "spawned"
     except Exception as _e:
         print(f"  ⚠️ Act合図 skip(監査は完了): {type(_e).__name__}: {_e}")

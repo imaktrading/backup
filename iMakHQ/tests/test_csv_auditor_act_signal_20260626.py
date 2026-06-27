@@ -25,15 +25,26 @@ def test_signal_skipped_on_dry_run():
 
 
 def test_act_prompt_priority_csv_up_before_catalog():
-    """優先順位: ①CSV手直し → ②CSV UPシグナル → ③カタログ依頼。UPが依頼より先。"""
+    """優先順位: ①CSV手直し → ②UP → ③カタログ依頼。UPは csv_auditor が即発報済(headlessは例外時のみ)。"""
     p = ca._build_act_prompt("tcg", "C:/x/tcg_upload.csv", None)
     assert "①CSVを手直し" in p
     assert "②CSV UPシグナル" in p
     assert "③カタログ依頼" in p
-    # UPシグナルが ③カタログ より前に出てくる(=優先される)
     assert p.index("②CSV UPシグナル") < p.index("③カタログ依頼")
-    # UPシグナルは notify ヘルパをBG実行する指示
-    assert "notify_csv_ready.py" in p and "バックグラウンド" in p
+    # UP は csv_auditor が即発報済 → headless は通常やらない(例外=手直しで件数変動時のみ再発報)
+    assert "即発報済" in p
+    assert "notify_csv_ready.py" in p   # 例外再発報用に notify パスは残す
+
+
+def test_signal_csv_up_skipped_under_pytest():
+    """UP 即発報も pytest 中は spawn しない(本物のダイアログを出さない)。"""
+    assert ca._signal_csv_up("x.csv", 8, dry_run=False) == "skipped"
+    assert ca._signal_csv_up("x.csv", 8, dry_run=True) == "skipped"
+
+
+def test_act_disabled_guard():
+    assert ca._act_disabled(True) is True             # dry-run
+    assert ca._act_disabled(False) is True            # pytest 中(sys.modules に pytest)
 
 
 def test_act_prompt_has_constraints():
