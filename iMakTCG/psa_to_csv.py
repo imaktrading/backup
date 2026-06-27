@@ -538,6 +538,13 @@ def detect_game_info(brand):
         # = 公式 × eBay フィルタ 最大活用 (= memory:official_x_ebay_filter_max_activation)
         # 検索 query 副作用は _normalize_game_short mapping で吸収済
         return "One Piece CCG", short_set, "One Piece"
+    elif "DRAGON BALL HEROES" in brand_upper:
+        # Super Dragon Ball Heroes はアーケード専用カード(別商品ライン)。catalog は
+        # Dragon Ball Super Card Game (SCG) のみ収録 → Heroes はスコープ外。
+        # franchise を専用値で返し、caller (build_row) で fail-closed skip させる。
+        # (2026-06-27 K4: "DRAGON BALL" の総称分岐が Heroes を SCG に誤分類し missing_models を
+        #  汚染していた=seen×3の再発。Yu-Gi-Oh! と同じ out-of-scope skip パターンで根治)
+        return "Dragon Ball Heroes", brand, "Dragon Ball Heroes"
     elif "DRAGON BALL" in brand_upper:
         # セット名を短縮：長いプレフィックスを除去して末尾のセット名だけ残す
         # 例: "DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE BLAZING AURA" → "Blazing Aura"
@@ -1614,6 +1621,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # 準備が整ったらユーザーが解除指示する。catalog 側の日本版収録は別途依頼済。
     if franchise == "Yu-Gi-Oh!":
         print(f"    ⏭️ Skip: 遊戯王は現在出品対象外 (cert {cert_number}, {subject})")
+        return None
+
+    # Dragon Ball Heroes (アーケード) は catalog(SCG)スコープ外 → fail-closed skip。
+    # missing_models へ dragonball_scg として誤って積むのを防ぐ (2026-06-27 K4 根治)。
+    if franchise == "Dragon Ball Heroes":
+        print(f"    ⏭️ Skip: Dragon Ball Heroes はアーケード=catalog(SCG)対象外 (cert {cert_number}, {subject})")
         return None
 
     # Character欄はPSA Subjectから接尾辞を剥がして純キャラ名のみに (fallback)
