@@ -825,12 +825,32 @@ def _build_act_prompt(project, csv_path, log_path, digest_path="", digest=None):
     )
 
 
+def _resolve_claude_exe(claude_bin):
+    """claude.CMD shim → 実体 claude.exe を解決 (純関数, test可)。
+
+    csv_auditor は control_panel の subprocess で、終了後 `taskkill /F /T` でツリー一括kill される。
+    .CMD shim を起動すると cmd→claude.exe がツリーに残り tree-kill で巻き込まれる(2026-06-27 実測で
+    DETACHED/CNW どの flag でも taskkill /T からは逃げられないと確認)。→ 実体 .exe を中継経由で
+    起動し、中継を即終了させてツリーから外す(=tree-kill 生存)。
+    """
+    if claude_bin and claude_bin.lower().endswith(".exe"):
+        return claude_bin
+    base = os.path.dirname(claude_bin or "")
+    exe = os.path.join(base, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
+    return exe if os.path.exists(exe) else (claude_bin or "")
+
+
 def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", digest=None):
     """監査完了後に headless Claude を BG 起動して NG対応(Act)を回す (ユーザー要望 2026-06-26)。
 
     監査くんが終わったら HQ に合図 → コピペ不要で ①CSV→②修正+依頼。
     - 非dry-run のみ。`CSV_AUDITOR_NO_SIGNAL=1` で無効化(test/CI/手動確認時)。
-    - BG detached・try/except で監査本体は絶対に壊さない。headless にはコード修正/commit/入稿をさせない(提案止まり)。
+    - **tree-kill 生存が肝**: control_panel は csv_auditor 終了後 `taskkill /F /T` でツリーを一括kill
+      する(control_panel.py:_kill_process_tree)。claude を csv_auditor の子孫のまま起動すると即死
+      (2026-06-27 実測: DETACHED/CNW どの flag でも /T からは逃げられない)。→ **中継 python を1つ
+      噛ませ、中継が claude.exe を DETACHED 起動して即終了**する。中継が死ぬと claude は orphan 化し
+      csv_auditor のツリーから外れる → tree-kill 生存(実測 SURVIVED 確認)。
+    - try/except で監査本体は絶対に壊さない。headless にはコード修正/commit/入稿をさせない(提案止まり)。
     - digest_path/digest: 決定論NG digest を渡し、各項目を必ず処分させる(無言スキップ防止=PDCA担保)。
     戻り: "skipped"(dry/env) / "no-cli" / "spawned" / "error:<type>" (test 可)。
     """
@@ -838,27 +858,33 @@ def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", dig
             or "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST")):
         return "skipped"
     try:
-        claude_bin = shutil.which("claude")
-        if not claude_bin:
-            print("  ⚠️ claude CLI 不在 → Act合図 skip(『見て』で手動起動可)")
+        claude_exe = _resolve_claude_exe(shutil.which("claude"))
+        if not claude_exe or not os.path.exists(claude_exe):
+            print("  ⚠️ claude.exe 不在 → Act合図 skip(『見て』で手動起動可)")
             return "no-cli"
         prompt = _build_act_prompt(project, csv_path, log_path, digest_path, digest)
         os.makedirs(REVIEW_DIR, exist_ok=True)
-        logf = open(os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.log"), "a", encoding="utf-8")
-        flags = 0
-        if sys.platform == "win32":
-            # CREATE_NO_WINDOW(窓なし)+ NEW_PROCESS_GROUP(独立=親終了に巻き込まれない)。
-            # ※DETACHED_PROCESS は付けない: claude.CMD shim が console 無しだと即死し 0 出力になる
-            #   (2026-06-26 初回無人走行で発覚。det付き=0byte / CNW単独=正常出力 を実測)。
-            flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen(
-            [claude_bin, "-p", prompt, "--dangerously-skip-permissions",
-             "--add-dir", r"C:\dev\iMak_data", "--add-dir", WORKSPACE],
-            cwd=os.path.join(WORKSPACE, "iMakHQ"),
-            stdout=logf, stderr=subprocess.STDOUT, creationflags=flags,
+        log_file = os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.log")
+        prompt_file = os.path.join(REVIEW_DIR, f"ng_act_{_today()}_{project}.prompt.txt")
+        with open(prompt_file, "w", encoding="utf-8") as pf:
+            pf.write(prompt)
+        # 中継 python -c: claude.exe を DETACHED+NEW_GROUP で起動 → 即 return(中継終了)。
+        # これで claude が csv_auditor ツリーから外れ、後続の taskkill /T を生き延びる。
+        launcher = (
+            "import subprocess,sys,os\n"
+            "exe,logp,pf,wd=sys.argv[1:5]\n"
+            "subprocess.Popen([exe,'-p',open(pf,encoding='utf-8').read(),"
+            "'--dangerously-skip-permissions','--add-dir',r'C:\\\\dev\\\\iMak_data','--add-dir',wd],"
+            "cwd=os.path.join(wd,'iMakHQ'),stdout=open(logp,'w',encoding='utf-8'),"
+            "stderr=subprocess.STDOUT,creationflags=0x00000008|0x00000200)\n"
         )
-        print(f"  🤖 Act合図: headless Claude を BG起動 → NG対応(コピペ不要、"
-              f"結果は review_logs/ng_act_{_today()}_{project}.md)")
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        subprocess.Popen(
+            [sys.executable, "-c", launcher, claude_exe, log_file, prompt_file, WORKSPACE],
+            creationflags=flags,
+        )
+        print(f"  🤖 Act合図: headless Claude を中継経由でBG起動(tree-kill耐性) → NG対応"
+              f"(コピペ不要、結果は review_logs/ng_act_{_today()}_{project}.md)")
         return "spawned"
     except Exception as _e:
         print(f"  ⚠️ Act合図 skip(監査は完了): {type(_e).__name__}: {_e}")

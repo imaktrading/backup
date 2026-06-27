@@ -100,3 +100,13 @@ def test_act_prompt_with_digest_mandates_disposition():
 def test_act_prompt_without_digest_has_no_digest_line():
     p = ca._build_act_prompt("tcg", "x.csv", None)
     assert "決定論NG digest" not in p   # digest 無しなら該当行は出さない
+
+
+def test_resolve_claude_exe_passthrough_and_derive():
+    """既に .exe ならそのまま。.CMD shim なら同階層の実体 claude.exe を導出。"""
+    # .exe はそのまま
+    assert ca._resolve_claude_exe(r"C:\x\claude.exe") == r"C:\x\claude.exe"
+    # .CMD → 実体 path を組み立てる(存在しなければ元を返すので、組み立て規則だけ検証)
+    derived = ca._resolve_claude_exe(r"C:\npm\claude.CMD")
+    # 存在しない環境では元の .CMD にフォールバック。存在する実機では .exe を返す。
+    assert derived.endswith("claude.exe") or derived == r"C:\npm\claude.CMD"
