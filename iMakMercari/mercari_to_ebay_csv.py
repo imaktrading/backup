@@ -824,6 +824,7 @@ def load_targets_from_sheet(sheet_cfg, only_urls=None):
         if True:
             targets.append({
                 "URL": url,
+                "ItemID": item_id,       # 取下再出品②: 元listingの eBay画像流用に使う(B列=取下げた itemID)
                 "タイトル": title_jp,
                 "状態": condition,
                 "ConditionID": condition_id,
@@ -915,6 +916,17 @@ def main():
         price_jpy = row.get('商品価格', '')
         description_jp = row.get('商品説明', '')
         photo_urls = row.get('写真URL', '')
+
+        # 取下再出品②: 画像はソース(mercari/1kuji.com)から取り直さず、取下げた元eBay listing の
+        # 画像を流用(1kuji.com 汎用OG混入・画像失敗での行スキップを根治。2026-06-28)。
+        if relist_mode:
+            try:
+                from ebay_getitem_images import relist_photo_source as _rps
+                photo_urls, _note = _rps(True, row.get('ItemID', ''), photo_urls)
+                if _note:
+                    print(f"    🖼️ {_note}")
+            except Exception as _e_ri:
+                print(f"    ⚠️ relist 画像流用 skip({type(_e_ri).__name__}) → ソース画像で続行")
 
         print(f"[{idx+1}/{len(rows)}] {title_jp[:40]}...")
 

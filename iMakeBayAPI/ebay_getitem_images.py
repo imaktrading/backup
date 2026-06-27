@@ -84,6 +84,27 @@ def fetch_listing_images(item_id, _cache={}):
         return []
 
 
+def relist_photo_source(relist_mode, item_id, source_urls, fetch_fn=None):
+    """取下再出品②の画像ソース選択 (純関数, test可)。
+
+    relist 時は **取下げた元eBay listing の画像をそのまま流用**(ユーザー方針
+    「リスティング中の画像を流用するだけ」2026-06-28)。ソース(mercari/1kuji.com)から
+    取り直さない=1kuji.com 汎用OG画像混入・画像取得失敗での行スキップを根治。
+    eBay画像が0(ended >90日 / API失敗)の時のみ source に fallback(画像消失で誤出品しないため)。
+    戻り: (photo_urls_str, note)。note は print 用(空=非relist)。
+    """
+    if not relist_mode:
+        return source_urls, ""
+    fn = fetch_fn or fetch_listing_images
+    try:
+        pics = fn(item_id)
+    except Exception:
+        pics = []
+    if pics:
+        return "|".join(pics), f"relist: 元eBay listing({item_id})の画像 {len(pics)}枚を流用"
+    return source_urls, f"relist: 元eBay画像0(itemID={item_id}) → ソース画像で続行"
+
+
 def fetch_listing_qty(item_id):
     """item_id の listing の **販売可能数(Quantity - QuantitySold)** を返す。失敗/不明は None。
 
