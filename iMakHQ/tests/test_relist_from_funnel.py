@@ -174,6 +174,25 @@ def test_select_stock_gate_excludes_sold_out_only():
     assert oos == 2                                          # so(売切)/nr(行無し) のみ除外
 
 
+def test_select_excludes_miokuri_9999():
+    """見送りマーカー B列=9999 は再ピックしない(恒久対象外。2026-06-28)。"""
+    now = _dt.datetime(2026, 6, 23, 12, 0, 0)
+    fresh = _dt.datetime(2026, 6, 23, 6, 0, 0)
+    rows = [
+        _row("ok", 100, supply_url="https://www.amazon.co.jp/dp/B000000001"),   # 通常→出す
+        _row("mi", 90, supply_url="https://www.amazon.co.jp/dp/B000000009"),    # 見送り(B=9999)→除外
+    ]
+    b_map = {"B000000001": "ok", "B000000009": rf.MIOKURI_B}
+    stock = {
+        "B000000001": {"b": "ok", "sold_out": False, "check_time": fresh},
+        "B000000009": {"b": rf.MIOKURI_B, "sold_out": False, "check_time": fresh},
+    }
+    picked, total, no_supply, already, oos, unsup = rf.select(
+        rows, sheet_b_map=b_map, stock_index=stock, now=now, cap=10)
+    assert [r["item_id"] for r in picked] == ["ok"]   # 見送りは出ない
+    assert already == 1                                # 9999 は除外カウント
+
+
 def test_select_no_stock_index_keeps_old_behavior():
     # stock_index 未指定 (None) なら在庫ゲートは効かない (従来挙動・後方互換)
     rows = [_row("a", 100, supply_url="https://www.amazon.co.jp/dp/B000000001")]

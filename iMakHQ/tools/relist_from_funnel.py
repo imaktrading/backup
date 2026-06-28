@@ -50,6 +50,8 @@ CHECK_TIME_COL = 14   # O列「売り切れチェック時間」: 監視くん�
 CATEGORY_COL = 17     # R列「カテゴリ」: 商品の正本カテゴリ (G-shock/リール/一番くじ/バッグ/tomica/Tシャツ/フィギュア…)。② 振り分けの正本
 SOLD_OUT_MARKS = ("○", "〇")  # ○=U+25CB / 〇=U+3007 両方 OOS 扱い
 STOCK_FRESH_HOURS = 48  # 在庫確認の鮮度しきい値。これより古い=監視くんが最近見てない=不明→出さない
+MIOKURI_B = "9999"  # 見送りマーカー: B列=9999 は「出品しない」確定(女性物等)。①再出品も通常出品も対象外。
+                    # eBay未出品なのにスプシB列が死IDだと スプシ≠eBay になるのを、実IDでない 9999 で表現(2026-06-28)
 
 
 def sku_from_url(url: str) -> str:
@@ -280,6 +282,9 @@ def select(rows, sheet_b_map=None, cap=CAP, stock_index=None, now=None,
         if sheet_b_map is not None:
             cur_b = (sheet_b_map.get(key) or "").strip()
             funnel_id = (r.get("item_id") or "").strip()
+            if cur_b == MIOKURI_B:
+                skipped_already += 1        # 見送り(9999)=恒久対象外。再ピックしない
+                continue
             if not (cur_b and funnel_id and cur_b == funnel_id):
                 skipped_already += 1        # B変化(再出品済)/B空/不一致 = 除外
                 continue
