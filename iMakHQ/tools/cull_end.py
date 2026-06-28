@@ -65,6 +65,28 @@ def select(rows, cap=CAP, min_age=MIN_AGE):
     return cull, eligible, eligible[:cap]
 
 
+def verify_oos(picked, fetch_fn):
+    """各 picked の現eBay qty を実機確認し qty==0 のものだけ残す (fail-closed)。
+
+    古い funnel を小分け処理する間に補充された listing を誤って取り下げる事故を防ぐ
+    (2026-06-28)。fail-closed = qty>0(在庫復活) も qty取得不能(None/例外) も End しない。
+    戻り: (kept, revived, failed)。fetch_fn は item_id→qty(int or None) の注入可能関数(test用)。
+    """
+    kept, revived, failed = [], [], []
+    for r in picked:
+        try:
+            q = fetch_fn(r["item_id"])
+        except Exception:
+            q = None
+        if q is None:
+            failed.append(r)
+        elif q > 0:
+            revived.append(r)
+        else:
+            kept.append(r)
+    return kept, revived, failed
+
+
 def main():
     fs = glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv"))
     if not fs:
@@ -83,6 +105,31 @@ def main():
     if not picked:
         print("対象なし。処理終了。")
         return
+
+    # 古い funnel を小分け処理する間に補充された listing を誤取下げしないよう、
+    # End 直前に現eBay qty を実機確認 (fail-closed: qty>0/不明は除外)。
+    # CULL_NO_VERIFY=1 で明示スキップ可 (緊急時/オフライン)。
+    if os.environ.get("CULL_NO_VERIFY") == "1":
+        print("  ※ CULL_NO_VERIFY=1: 現eBay在庫の実機確認をスキップ")
+    else:
+        sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "..", "iMakeBayAPI")))
+        try:
+            from ebay_getitem_images import fetch_listing_qty
+        except Exception as e:
+            sys.exit(f"在庫検証モジュール読込失敗のため中止 (fail-closed): {e}\n"
+                     "  → どうしても検証なしで進めるなら CULL_NO_VERIFY=1")
+        print(f"  現eBay在庫を実機確認中 ({len(picked)}件, qty>0/不明は除外)...", flush=True)
+        picked, revived, failed = verify_oos(picked, fetch_listing_qty)
+        if revived:
+            print(f"  ⚠ 在庫復活で除外 = {len(revived)}件 (補充された listing の誤取下げ防止)")
+            for r in revived:
+                print(f"     復活: {r['item_id']} {(r.get('title') or '')[:45]}")
+        if failed:
+            print(f"  ⚠ qty取得失敗で除外 (fail-closed) = {len(failed)}件")
+        print(f"  → End 確定 (qty=0 実機確認済) = {len(picked)}件")
+        if not picked:
+            print("実機確認後の End 対象なし。処理終了。")
+            return
 
     stamp = datetime.date.today().strftime("%Y%m%d")
     os.makedirs(END_DIR, exist_ok=True)
