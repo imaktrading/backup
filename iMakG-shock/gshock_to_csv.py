@@ -1559,8 +1559,9 @@ def load_relist_targets(pending_csv):
     only_urls = set()
     with open(pending_csv, "r", encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
-            if (row.get("category") or "").strip() != "Wristwatches":
-                continue  # G-shock(Wristwatches)以外はこのスクリプト対象外
+            if (row.get("category") or "").strip() not in ("G-shock", "Wristwatches"):
+                continue  # pending の category は col17 SSOT="G-shock"(2026-06-23統一)。旧"Wristwatches"
+                # 固定だと0件除外=取下げ済が再出品されず fail-OPEN(2026-06-28発覚)。両対応に。
             url = (row.get("supply_url") or "").strip()
             if url:
                 only_urls.add(url)
