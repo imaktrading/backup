@@ -169,23 +169,21 @@ def parse_check_time(s):
 
 
 def stock_verdict(entry, now, fresh_hours=STOCK_FRESH_HOURS):
-    """在庫ゲート判定 (純粋)。戻り: 'OK' | 'SOLD_OUT' | 'STALE' | 'NO_ROW'。
+    """在庫ゲート判定 (純粋)。戻り: 'OK' | 'SOLD_OUT' | 'NO_ROW'。
 
-    OK 以外は再出品しない (fail-closed)。entry = load_sheet_index の値 (None=行無し)。
-      - NO_ROW : スプシに行が無い → 在庫不明 → 出さない
-      - SOLD_OUT: 監視くんが「売り切れ」○ → 3RD/OOS → 出さない (今回事故の本命)
-      - STALE  : チェックが fresh_hours より古い/欠落 → 監視くんが最近見てない → 出さない
+    2026-06-28 ユーザー判断: 監視くんの在庫鮮度(>48h)で除外しない。スプシの売り切れ列を見て
+    判断する。現世代の取下再出品を完了させる(次世代へ進む)ことを優先。鮮度ゲートが STALE で
+    大半を止め、世代が永久に終わらないのを解消。
+      - NO_ROW : スプシに行が無い → 在庫不明(売り切れ列すら見れない)→ 出さない
+      - SOLD_OUT: スプシ「売り切れ」○ → OOS → 出さない(これは維持=売り切れ再出品でBAN防止)
+      - OK     : 行あり & 売り切れでない → last-known 在庫で出す(鮮度は問わない)
+    ※rsk: 監視くんが未確認で実は売切の場合 last-known で出る。売り切れ列が真実源(ユーザー合意)。
     """
     if not entry:
         return "NO_ROW"
     if entry.get("sold_out"):
         return "SOLD_OUT"
-    ct = entry.get("check_time")
-    if ct is None:
-        return "STALE"
-    if (now - ct) > datetime.timedelta(hours=fresh_hours):
-        return "STALE"
-    return "OK"
+    return "OK"   # 鮮度(check_time)では除外しない(2026-06-28 設計変更)
 
 
 def load_sheet_index():

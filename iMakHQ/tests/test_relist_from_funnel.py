@@ -133,26 +133,31 @@ def test_parse_check_time_variants():
     assert rf.parse_check_time("ゴミ") is None
 
 
-def test_stock_verdict_fail_closed():
+def test_stock_verdict_sold_out_gate():
+    """2026-06-28 設計変更: 在庫鮮度(>48h)では除外しない。売り切れ列のみで判定。
+    売り切れ○=SOLD_OUT / 行無し=NO_ROW / それ以外(古い・check無しでも)=OK(last-known在庫で出す)。"""
     now = _dt.datetime(2026, 6, 23, 12, 0, 0)
     fresh = _dt.datetime(2026, 6, 23, 6, 0, 0)   # 6h前
     old = _dt.datetime(2026, 6, 20, 6, 0, 0)     # 3日前
     assert rf.stock_verdict({"sold_out": False, "check_time": fresh}, now) == "OK"
     assert rf.stock_verdict({"sold_out": True, "check_time": fresh}, now) == "SOLD_OUT"
-    assert rf.stock_verdict({"sold_out": False, "check_time": old}, now) == "STALE"
-    assert rf.stock_verdict({"sold_out": False, "check_time": None}, now) == "STALE"
+    # 鮮度ゲート廃止: 古い/check無しでも 売り切れでなければ OK(現世代を完了させるため)
+    assert rf.stock_verdict({"sold_out": False, "check_time": old}, now) == "OK"
+    assert rf.stock_verdict({"sold_out": False, "check_time": None}, now) == "OK"
+    assert rf.stock_verdict({"sold_out": True, "check_time": old}, now) == "SOLD_OUT"  # 売切は古くても除外
     assert rf.stock_verdict(None, now) == "NO_ROW"   # スプシ行無し → 出さない
 
 
-def test_select_stock_gate_excludes_sold_out_and_stale():
-    """在庫ゲート: 未着手でも 売り切れ○/古い/行無し は再出品しない (B0B78CZ3W3 事故対策)。"""
+def test_select_stock_gate_excludes_sold_out_only():
+    """在庫ゲート(2026-06-28 設計変更): 売り切れ○/行無し は除外、古い(STALE)は出す。
+    現世代を完了させるため鮮度では切らない。売切再出品BAN防止(売り切れ○除外)は維持。"""
     now = _dt.datetime(2026, 6, 23, 12, 0, 0)
     fresh = _dt.datetime(2026, 6, 23, 6, 0, 0)
     old = _dt.datetime(2026, 6, 1, 6, 0, 0)
     rows = [
         _row("ok", 100, supply_url="https://www.amazon.co.jp/dp/B000000001"),   # 在庫あり→出す
         _row("so", 90, supply_url="https://www.amazon.co.jp/dp/B000000002"),    # 売り切れ→除外
-        _row("st", 80, supply_url="https://www.amazon.co.jp/dp/B000000003"),    # 古い→除外
+        _row("st", 80, supply_url="https://www.amazon.co.jp/dp/B000000003"),    # 古い→**出す**(鮮度ゲート廃止)
         _row("nr", 70, supply_url="https://www.amazon.co.jp/dp/B000000004"),    # 行無し→除外
     ]
     b_map = {f"B00000000{i}": iid for i, iid in [(1, "ok"), (2, "so"), (3, "st"), (4, "nr")]}
@@ -164,9 +169,9 @@ def test_select_stock_gate_excludes_sold_out_and_stale():
     }
     picked, total, no_supply, already, oos, unsup = rf.select(
         rows, sheet_b_map=b_map, stock_index=stock, now=now, cap=10)
-    assert [r["item_id"] for r in picked] == ["ok"]   # 在庫ありのみ
-    assert already == 0                                # 全て未着手 (B==funnel)
-    assert oos == 3                                    # so/st/nr = 仕入不可で除外
+    assert [r["item_id"] for r in picked] == ["ok", "st"]   # 在庫あり + 古いが売切でない
+    assert already == 0                                      # 全て未着手 (B==funnel)
+    assert oos == 2                                          # so(売切)/nr(行無し) のみ除外
 
 
 def test_select_no_stock_index_keeps_old_behavior():
