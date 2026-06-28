@@ -8,8 +8,9 @@ import time
 import requests
 from datetime import datetime, timedelta
 
-# --relist (取下再出品②) 時 True: ScheduleTime を即時(now)にして即live。
-# 通常出品は2週間後 scheduleだが、relist は live 後でないと③書戻し(新ItemID取得)が回らないため即時。
+# ScheduleTime 制御。True=即live / False=2週間後スケジュール。
+# 2026-06-28: 取下再出品② も新規同様スケジュール出品に統一(ユーザー要望)。relist でも True にしない
+# (scheduled でも FileExchange Add は ItemID 即返す→③書戻しは回る)。
 # 価格/タイトル/item specifics は通常出品と同じ最新ロジックで再生成する(relistの狙い)。
 # コストは管理スプシの実コストを引くので正しく再算出される(据置はしない)。
 _IMMEDIATE_SCHEDULE = False
@@ -1603,23 +1604,24 @@ def main():
     global _IMMEDIATE_SCHEDULE
     ap = argparse.ArgumentParser()
     ap.add_argument("--relist", default="",
-                    help="保留リストCSV(supply_url列) → 指定URLのみ即live再出品(既存キュー無視)")
+                    help="保留リストCSV(supply_url列) → 指定URLのみスケジュール再出品(2週間後・既存キュー無視)")
     args, _ = ap.parse_known_args()
     relist_mode = bool(args.relist)
 
     print("=== iMak Trading Japan - G-SHOCK CASIO URL → eBay CSV ===\n")
 
     if relist_mode:
-        # 取下再出品② — 既存キュー無視・指定URLのみ・ScheduleTime即live
-        _IMMEDIATE_SCHEDULE = True
+        # 取下再出品② — 既存キュー無視・指定URLのみ。2026-06-28: 即liveでなく新規同様スケジュール
+        # 出品(2週間後)に統一(ユーザー要望)。scheduled でも FileExchange は ItemID を即返すので
+        # ③書戻しは回る。→ _IMMEDIATE_SCHEDULE は True にしない(get_schedule_time が2週間後)。
         _pending_name = args.relist.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
-        print(f"🔁 取下再出品②モード: {_pending_name} → 指定URLのみ即live再出品")
+        print(f"🔁 取下再出品②モード: {_pending_name} → 指定URLのみスケジュール再出品(2週間後)")
         targets = load_relist_targets(args.relist)
         print(f"  対象 G-shock = {len(targets)} 件 (既存スプシキューは無視)")
         if not targets:
             print("エラー: 保留リストに G-shock(Wristwatches) 対象なし")
             return
-        print(f"\n合計 {len(targets)} 件を処理します (即live)。\n")
+        print(f"\n合計 {len(targets)} 件を処理します (スケジュール2週間後)。\n")
     else:
         # 2026-05-05: 入力経路を LOW スプシ駆動 (主) + URL ファイル (fallback) に拡張
         # memory: dropshipping_model_premise (抽出くん収集 → 出品くん自動連動)
