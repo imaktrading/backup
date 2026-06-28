@@ -147,18 +147,24 @@ def main():
     skumap = load_skumap(args.skumap)
     print(f"📂 skumap: {os.path.basename(args.skumap)} → {len(skumap)} sku")
 
-    # --auto: デスクトップの Add結果レポートを自動検出 (skumap より新しい = 今バッチの分)
+    # --auto: Add結果レポートを自動検出 (skumap より新しい = 今バッチの分)。
+    # デスクトップ + 最新 UP_* フォルダ の両方を探す(集約運用では結果がUPフォルダに入るため。2026-06-28)。
     if args.auto:
         sku_mtime = os.path.getmtime(args.skumap)
-        # 結果レポートは末尾に -Mon-YYYY-... が付く。アップ元CSV(csv_output)と区別され、
-        # End結果(relist_end_*)は *_upload_* に該当しないので自然に除外。
-        found = [p for p in glob.glob(os.path.join(DESK, "*_upload_*-*.csv"))
-                 if os.path.getmtime(p) > sku_mtime]
-        found.sort(key=os.path.getmtime)
+        # 結果レポートは末尾に -Mon-YYYY-... が付く。End結果(relist_end_*)は *_upload_* 非該当で自然除外。
+        search_dirs = [DESK]
+        _ups = sorted(glob.glob(os.path.join(REVISE_DIR, "UP_*")), key=os.path.getmtime)
+        if _ups:
+            search_dirs.append(_ups[-1])   # 最新の集約フォルダ
+        found = []
+        for _d in search_dirs:
+            found += [p for p in glob.glob(os.path.join(_d, "*_upload_*-*.csv"))
+                      if os.path.getmtime(p) > sku_mtime]
+        found = sorted(set(found), key=os.path.getmtime)
         if not found:
-            sys.exit("デスクトップに skumap より新しい Add結果レポートが見つかりません。\n"
-                     "  ②再出品→Add CSVアップ→結果レポートDL の順で実行してください。")
-        print(f"🔍 --auto 検出: {len(found)} 件の結果レポート (skumap より新しい)")
+            sys.exit("デスクトップ/最新UPフォルダに skumap より新しい Add結果レポートが見つかりません。\n"
+                     "  ②再出品→Add CSVアップ→結果レポートDL(UPフォルダ or デスクトップ)の順で実行してください。")
+        print(f"🔍 --auto 検出: {len(found)} 件の結果レポート (skumap より新しい / {len(search_dirs)}箇所探索)")
         args.add_report = found
 
     if not args.add_report:
