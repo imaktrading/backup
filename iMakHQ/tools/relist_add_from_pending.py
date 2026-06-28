@@ -13,8 +13,10 @@ import collections
 import csv
 import glob
 import os
+import shutil
 import subprocess
 import sys
+import time
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -69,6 +71,7 @@ def main():
     cats = categories_in(pending)
     print(f"   カテゴリ内訳: {dict(cats)}")
 
+    _t0 = time.time()   # この②実行で生成された Add CSV を mtime で特定するため
     ran, skipped = [], []
     for cat, cnt in cats.items():
         if cat in CATEGORY_DISPATCH:
@@ -85,13 +88,31 @@ def main():
         print(f"  ⚠️ {cat} ({cnt}件) → --relist 未対応カテゴリ (スキップ)。listing script 側の対応が必要")
 
     skufiles = sorted(glob.glob(os.path.join(REVISE_DIR, "relist_skumap_*.csv")))
-    addfiles = sorted(glob.glob(os.path.join(_ROOT, "iMakHQ", "csv_output", "*_upload_*.csv")),
-                      key=os.path.getmtime)[-5:]
+    # この②実行で生成された Add CSV = mtime が _t0 以降のもの(他カテゴリ/過去分を混ぜない)。
+    gen_add = [a for a in glob.glob(os.path.join(_ROOT, "iMakHQ", "csv_output", "*_upload_*.csv"))
+               if os.path.getmtime(a) >= _t0]
     print(f"\n  skumap: {os.path.basename(skufiles[-1]) if skufiles else '(無)'}")
-    print("  生成 Add CSV (直近):")
-    for a in addfiles:
+    print("  生成 Add CSV:")
+    for a in sorted(gen_add):
         print(f"    {a}")
-    print("\n▶ 次: 上の Add CSV を eBay FileExchange にアップ → 結果レポートDL → ③書戻しボタン")
+
+    # ①②のCSVを1フォルダに集約(煩雑解消・ユーザー要望 2026-06-28)。
+    # End CSV(①)+ 生成Add CSV(②)を revise/UP_<stamp>/ にコピー → アップはここから1箇所で済む。
+    stamp = os.path.basename(pending).replace("relist_pending_", "").replace(".csv", "")
+    up_dir = os.path.join(REVISE_DIR, f"UP_{stamp}")
+    os.makedirs(up_dir, exist_ok=True)
+    collected = []
+    end_csv = os.path.join(REVISE_DIR, f"relist_end_{stamp}.csv")
+    for src in ([end_csv] if os.path.exists(end_csv) else []) + sorted(gen_add):
+        try:
+            shutil.copy(src, up_dir)
+            collected.append(os.path.basename(src))
+        except Exception as _e:
+            print(f"  ⚠️ 集約コピー失敗 {os.path.basename(src)}: {type(_e).__name__}")
+    print(f"\n📁 ①②CSVを1フォルダに集約: {up_dir}")
+    for c in collected:
+        print(f"    {c}")
+    print("\n▶ 次: 上フォルダの End CSV(取下げ)→ Add CSV(再出品)を eBay FileExchange にアップ → 結果DL → ③書戻し")
 
 
 if __name__ == "__main__":
