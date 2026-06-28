@@ -925,16 +925,26 @@ def main():
         description_jp = row.get('商品説明', '')
         photo_urls = row.get('写真URL', '')
 
-        # 取下再出品②: 画像はソース(mercari/1kuji.com)から取り直さず、取下げた元eBay listing の
-        # 画像を流用(1kuji.com 汎用OG混入・画像失敗での行スキップを根治。2026-06-28)。
+        # 取下再出品②: relist は既存listingの再出品。元eBay listing から **画像 + condition** を継承
+        # (再現性の高い設計)。① 画像=ソース(mercari/1kuji.com)から取り直さず元画像流用(汎用OG/失敗根治)。
+        # ② condition=元の ConditionID を権威に(Claude の画像推定で New↔Used がブレて title marker
+        #    不一致 HOLD になり native Relist 回避策=③非互換 を生んだのを根治。2026-06-28 設計修正)。
         if relist_mode:
+            _iid = row.get('ItemID', '')
             try:
-                from ebay_getitem_images import relist_photo_source as _rps
-                photo_urls, _note = _rps(True, row.get('ItemID', ''), photo_urls)
+                from ebay_getitem_images import relist_photo_source as _rps, fetch_listing_condition as _flc
+                photo_urls, _note = _rps(True, _iid, photo_urls)
                 if _note:
                     print(f"    🖼️ {_note}")
+                _orig_cid = _flc(_iid)
+                if _orig_cid:
+                    condition_id_sheet = str(_orig_cid)          # 元 ConditionID を権威に
+                    condition_jp = "新品、未使用" if _orig_cid == 1000 else "中古"  # Claude へ正しい condition を伝える
+                    print(f"    🏷️ relist: 元listingの ConditionID={_orig_cid} を継承({'新品' if _orig_cid==1000 else '中古'})")
+                else:
+                    print(f"    ⚠️ relist: 元 ConditionID 取得不可(itemID={_iid}) → 通常判定で続行")
             except Exception as _e_ri:
-                print(f"    ⚠️ relist 画像流用 skip({type(_e_ri).__name__}) → ソース画像で続行")
+                print(f"    ⚠️ relist 継承 skip({type(_e_ri).__name__}) → 通常処理で続行")
 
         print(f"[{idx+1}/{len(rows)}] {title_jp[:40]}...")
 

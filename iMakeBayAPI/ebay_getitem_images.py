@@ -96,6 +96,47 @@ def build_pic_url(images, extra, relist_mode, cap=24):
     return "|".join(pics)
 
 
+def fetch_listing_condition(item_id):
+    """item_id の listing の ConditionID(int)を返す。失敗/不明は None。
+
+    取下再出品の condition 継承用: relist は既存listingの再出品なので condition は既知(元の
+    ConditionID)。これを権威にすれば Claude の画像推定で New↔Used がブレて title marker 不一致
+    HOLD になるのを根治できる(2026-06-28 New品relist が Pre-owned 誤推定で HOLD→native Relist
+    回避策が③非互換を生んだ。設計修正=元condition継承で Add 一本化)。
+    """
+    item_id = str(item_id).strip()
+    if not item_id:
+        return None
+    try:
+        k = _load_keys()
+        hdr = {
+            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
+            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
+            "Content-Type": "text/xml",
+        }
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
+            f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+        )
+        text = None
+        for attempt in range(4):
+            try:
+                text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                break
+            except requests.exceptions.ConnectionError:
+                if attempt < 3:
+                    time.sleep(3)
+                    continue
+                raise
+        m = re.search(r"<ConditionID>(\d+)</ConditionID>", text)
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
 def img_media_type(data):
     """画像バイト先頭(マジックバイト)から media_type を判定 (純関数, test可)。
 

@@ -44,3 +44,8 @@ def test_non_relist_keeps_source_untouched():
     urls, note = g.relist_photo_source(
         False, "x", "src.jpg", fetch_fn=lambda iid: called.append(iid) or ["e.jpg"])
     assert urls == "src.jpg" and note == "" and called == []
+
+
+def test_fetch_listing_condition_empty_is_none():
+    """空itemIDは None(契約)。relist condition 継承の安全側。"""
+    assert g.fetch_listing_condition("") is None
