@@ -26,6 +26,7 @@ import datetime
 import glob
 import os
 import re
+import shutil
 import sys
 
 try:
@@ -389,9 +390,16 @@ def main():
         write_pending(end_only_picks, stop_path)
         print(f"停止リスト (2回目以降・記録): {stop_path}")
 
+    # ①②CSVを1フォルダに集約(煩雑解消・2026-06-28)。日付+時刻で一意=1日複数バッチでも混ざらない。
+    # ① は End CSV をここに格納し、② がこの最新フォルダに Add CSV を足す(アップは1箇所で済む)。
+    up_dir = os.path.join(END_DIR, "UP_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(up_dir, exist_ok=True)
+    shutil.copy(end_path, up_dir)
+
     # 候補確認はスプシ「取下再出品」タブで見る (デスクトップCSV出力は廃止 2026-06-07)
 
-    print(f"\nEnd CSV (eBayアップで取下げ・{len(picked)}件): {end_path}")
+    print(f"\n📁 集約フォルダ: {up_dir} (End CSV 格納済。②が Add を同フォルダに追加)")
+    print(f"End CSV (eBayアップで取下げ・{len(picked)}件): {end_path}")
     print(f"保留リスト (②再出品・初回{len(relist_picks)}件): {pending_path}")
     print(f"\n▶ ① 取下げ: End CSV を eBay FileExchange にアップ → {len(picked)}件 終了")
     if relist_picks:

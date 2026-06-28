@@ -100,7 +100,10 @@ def main():
     # End CSV(①)+ 生成Add CSV(②)を revise/UP_<日付_時刻>/ にコピー → アップはここから1箇所で済む。
     # ※フォルダ名は **②実行の日付+時刻** で一意(1日複数バッチが同じフォルダに混ざらない)。
     stamp = os.path.basename(pending).replace("relist_pending_", "").replace(".csv", "")  # End/pending の日付
-    up_dir = os.path.join(REVISE_DIR, f"UP_{time.strftime('%Y%m%d_%H%M%S')}")
+    # ① が作った最新の UP_* フォルダに Add を足す(①の End CSV と同じフォルダに集約)。
+    # 無ければ新規作成(① 旧版/単独②run のフォールバック)。
+    _ups = sorted(glob.glob(os.path.join(REVISE_DIR, "UP_*")), key=os.path.getmtime)
+    up_dir = _ups[-1] if _ups else os.path.join(REVISE_DIR, f"UP_{time.strftime('%Y%m%d_%H%M%S')}")
     os.makedirs(up_dir, exist_ok=True)
     collected = []
     end_csv = os.path.join(REVISE_DIR, f"relist_end_{stamp}.csv")
