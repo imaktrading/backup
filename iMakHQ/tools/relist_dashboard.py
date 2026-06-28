@@ -46,14 +46,17 @@ def build_rows(funnel_rows, b_map, stock_index=None, now=None, times_map=None):
     if now is None:
         now = datetime.datetime.now()
     times_map = times_map or {}
-    out, done, todo, unknown, oos = [], 0, 0, 0, 0
+    out, done, todo, unknown, oos, miokuri = [], 0, 0, 0, 0, 0
     for i, r in enumerate(cands, 1):
         url = (r.get("supply_url") or "").strip()
         fid = (r.get("item_id") or "").strip()
         key = rf.sku_from_url(url)
         cur = (b_map.get(key) or "").strip()
-        # 在庫切れ(売り切れ○)は最優先で区別。未/済の前に判定 (仕入不可は再出品対象外)
-        if stock_index is not None and (stock_index.get(key) or {}).get("sold_out"):
+        # 見送り(B列=9999)は最優先で区別。出品しない確定なので 済/未/在庫切れ のどれでもない。
+        if cur == rf.MIOKURI_B:
+            state, newid = "🚫見送り", ""; miokuri += 1
+        # 在庫切れ(売り切れ○)は次に区別。未/済の前に判定 (仕入不可は再出品対象外)
+        elif stock_index is not None and (stock_index.get(key) or {}).get("sold_out"):
             state, newid = "🔴在庫切れ", ""; oos += 1   # 新ItemIDは空 (再出品してない=旧IDを出さない)
         elif cur and fid and cur == fid:
             state, newid = "⏳未", ""; todo += 1
@@ -65,7 +68,7 @@ def build_rows(funnel_rows, b_map, stock_index=None, now=None, times_map=None):
         out.append([i, state, r.get("price", ""), r.get("category", ""),
                     (r.get("title", "") or "")[:60], key, fid, newid, proc_time, url])
     return out, {"total": len(cands), "done": done, "todo": todo,
-                 "unknown": unknown, "oos": oos}
+                 "unknown": unknown, "oos": oos, "miokuri": miokuri}
 
 
 def write_dashboard(rows, summary, src_name):
@@ -85,8 +88,10 @@ def write_dashboard(rows, summary, src_name):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     batches = -(-summary["todo"] // 10)
     oos = summary.get("oos", 0)
+    miokuri = summary.get("miokuri", 0)
     summary_line = (f"取下再出品 進捗  |  総数 {summary['total']}  /  ✅済 {summary['done']}  /  "
-                    f"⏳未 {summary['todo']} (あと{batches}バッチ)  /  🔴在庫切れ {oos}  /  ❓不明 {summary['unknown']}  "
+                    f"⏳未 {summary['todo']} (あと{batches}バッチ)  /  🔴在庫切れ {oos}  /  "
+                    f"🚫見送り {miokuri}  /  ❓不明 {summary['unknown']}  "
                     f"|  元funnel: {src_name}  |  更新 {now}")
     data = [[summary_line] + [""] * (len(HEADERS) - 1), HEADERS] + rows
     ws.update(range_name="A1", values=data, value_input_option="RAW")

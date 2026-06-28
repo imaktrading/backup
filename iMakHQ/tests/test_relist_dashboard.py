@@ -21,7 +21,7 @@ def test_build_rows_state_and_order():
     ]
     b_map = {"https://x/u1": "999NEW", "https://x/u2": "todo1", "https://x/u3": ""}
     rows, summary = rd.build_rows(funnel, b_map)
-    assert summary == {"total": 3, "done": 1, "todo": 1, "unknown": 1, "oos": 0}
+    assert summary == {"total": 3, "done": 1, "todo": 1, "unknown": 1, "oos": 0, "miokuri": 0}
     # 列: [#,状態,価格,カテゴリ,タイトル,SKU,旧ItemID,新ItemID,処理日時,仕入URL]
     # 価格降順 (100,90,80) かつ # は1始まり
     assert [r[0] for r in rows] == [1, 2, 3]
@@ -50,7 +50,7 @@ def test_build_rows_matches_asin_across_coliid_not_unknown():
     funnel = [_row("oldid", 100, "https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=AAA")]
     b_map = {rf.sku_from_url("https://www.amazon.co.jp/dp/B0DDS4Z29W/?coliid=BBB"): "oldid"}
     rows, summary = rd.build_rows(funnel, b_map)
-    assert summary == {"total": 1, "done": 0, "todo": 1, "unknown": 0, "oos": 0}   # 未着手で拾える
+    assert summary == {"total": 1, "done": 0, "todo": 1, "unknown": 0, "oos": 0, "miokuri": 0}   # 未着手で拾える
     assert rows[0][1] == "⏳未"
 
 
@@ -86,7 +86,7 @@ def test_build_rows_marks_sold_out_distinctly():
         "B000000002": {"b": "dead", "sold_out": True, "check_time": None},
     }
     rows, summary = rd.build_rows(funnel, b_map, stock_index=stock)
-    assert summary == {"total": 2, "done": 0, "todo": 1, "unknown": 0, "oos": 1}
+    assert summary == {"total": 2, "done": 0, "todo": 1, "unknown": 0, "oos": 1, "miokuri": 0}
     by_old = {r[6]: r for r in rows}                      # r[6]=旧ItemID
     assert by_old["live"][1] == "⏳未"
     assert by_old["dead"][1] == "🔴在庫切れ"
