@@ -292,7 +292,20 @@ def classify(rows):
     # 真の死筋=CULL。End可否は最終的に再仕入れ可否ゲートで決める(eBay指標では死筋を確定できない)。
     def _demand(r):
         return r["sold_qty"] + r["watch"] + r.get("sales90", 0)   # 並び順用 (実需を上位に)
+    # PSA10 の RESTOCK は再仕入れフロー(mercari_psa_resource)の strict 実需ゲート
+    #   (実売/watch/organic impr ≥1) でしか拾われない。impr_total(広告込み)だけで RESTOCK に
+    #   すると、再仕入れにも乗らず CULL にも落ちず宙ぶらりんになる(2026-06-28 実データ 211件)。
+    #   → PSA は real_demand(=PSA再仕入れと同基準)で判定し、実需ゼロなら CULL(畳む)に落とす。
+    #   非PSA は従来通り impr_total>0 を RESTOCK とみなす(各カテゴリの再仕入れ運用に委ねる)。
+    try:
+        from mercari_psa_resource import is_psa10
+    except Exception:
+        def is_psa10(_t): return False
+    def _real_demand(r):
+        return _demand(r) > 0 or r.get("impr", 0) >= 1   # organic のみ (impr_total=広告は除外)
     def _worth_restock(r):
+        if is_psa10(r.get("title", "")):
+            return _real_demand(r)
         return _demand(r) > 0 or r.get("impr_total", 0) > 0
     restock = [r for r in oos if _worth_restock(r)]
     cull = [r for r in oos if not _worth_restock(r)]
