@@ -292,8 +292,9 @@ MODEL = "claude-sonnet-4-6"
 MAX_IMAGES = 4
 SCHEDULE_WEEKS = 2
 
-# 取下再出品② --relist 時 True: ScheduleTime を即時(now)にして即live。
-# relist は live 後でないと③書戻し(新ItemID取得)が回らないため2週間scheduleでなく即時。
+# ScheduleTime 制御。True=即live(ScheduleTime空欄) / False=2週間後スケジュール。
+# 2026-06-28: 取下再出品② も新規同様スケジュール出品に統一(ユーザー要望)。relist でも True にしない。
+# (scheduled でも FileExchange Add は ItemID を即返すため③書戻しは問題なく回る)
 _IMMEDIATE_SCHEDULE = False
 
 HEADERS = {
@@ -852,12 +853,13 @@ def main():
     parser.add_argument("--sheet", choices=list(SHEET_REGISTRY.keys()),
                         help="読込スプシ (porter/tomica)。指定なしは商品管理シート.csv (ローカル)")
     parser.add_argument("--relist", default="",
-                        help="取下再出品②: 保留リストCSV(supply_url列) → 指定URLのみ即live再出品(既存キュー無視)")
+                        help="取下再出品②: 保留リストCSV(supply_url列) → 指定URLのみスケジュール再出品(2週間後・既存キュー無視)")
     args, _ = parser.parse_known_args()
     relist_mode = bool(args.relist)
-    global _IMMEDIATE_SCHEDULE
-    if relist_mode:
-        _IMMEDIATE_SCHEDULE = True
+    # 取下再出品② も新規と同じ ScheduleTime(2週間後)でスケジュール出品(ユーザー要望 2026-06-28)。
+    # 即liveだと全件一斉live=露出集中/事故時の取返し不可。scheduled でも FileExchange は ItemID を
+    # 即返すので③書戻し(結果CSVのItemID読取)は回る(旧"live後でないと③"は誤認)。
+    # → _IMMEDIATE_SCHEDULE は False のまま = get_schedule_time が2週間後を返す。
 
     # --sheet 指定時はカテゴリ別ファイル名に変更（例: reel_upload_*.csv, porter_upload_*.csv）
     global OUTPUT_CSV
@@ -873,7 +875,7 @@ def main():
                 _u = (_r.get("supply_url") or "").strip()
                 if _u:
                     relist_only_urls.add(_u)
-        print(f"🔁 取下再出品②モード: {len(relist_only_urls)}件のURL → cat_filter で当シート分のみ即live再出品")
+        print(f"🔁 取下再出品②モード: {len(relist_only_urls)}件のURL → cat_filter で当シート分のみスケジュール再出品(2週間後)")
 
     rows = []
     if args.sheet:
