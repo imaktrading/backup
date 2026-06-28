@@ -97,9 +97,10 @@ def main():
         print(f"    {a}")
 
     # ①②のCSVを1フォルダに集約(煩雑解消・ユーザー要望 2026-06-28)。
-    # End CSV(①)+ 生成Add CSV(②)を revise/UP_<stamp>/ にコピー → アップはここから1箇所で済む。
-    stamp = os.path.basename(pending).replace("relist_pending_", "").replace(".csv", "")
-    up_dir = os.path.join(REVISE_DIR, f"UP_{stamp}")
+    # End CSV(①)+ 生成Add CSV(②)を revise/UP_<日付_時刻>/ にコピー → アップはここから1箇所で済む。
+    # ※フォルダ名は **②実行の日付+時刻** で一意(1日複数バッチが同じフォルダに混ざらない)。
+    stamp = os.path.basename(pending).replace("relist_pending_", "").replace(".csv", "")  # End/pending の日付
+    up_dir = os.path.join(REVISE_DIR, f"UP_{time.strftime('%Y%m%d_%H%M%S')}")
     os.makedirs(up_dir, exist_ok=True)
     collected = []
     end_csv = os.path.join(REVISE_DIR, f"relist_end_{stamp}.csv")
