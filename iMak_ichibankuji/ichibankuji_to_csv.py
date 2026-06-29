@@ -647,6 +647,10 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
         "C:TV Show": claude_result.get('tv_show', franchise),
         "C:Movie": claude_result.get('tv_show', franchise),
         "C:Brand": "Bandai",
+        # Age Level: Bandai 一番くじ公式表記=対象年齢15才以上 → "15+"。CPSC(2026-07-08 eFiling)で
+        # 児童製品(≤12歳)扱いを外す宣言。※カテゴリ261055に Age Level の公式aspectは無い=カスタム
+        # 自由文字列として記載(フィルタ用でなく非児童製品の明示。2026-06-29 ユーザー指示)。
+        "C:Age Level": "15+",
         "C:Language": "Japanese",
         "C:Material": "Plastic",  # eBayフィルタ正規値（"PVC, ABS"はリスト無し）
         "C:Character": character,
