@@ -21,7 +21,8 @@ def test_signature_classes():
     s = pfb.program_signature
     assert s("禁止ワード 'japan' がタイトルに含まれている") == "banned_word_in_title"
     assert s("タイトル形式逸脱: 必須語 '#' がタイトルに無い") == "title_missing_card_number"
-    assert s("タイトル↔spec不一致: C:Color='Black' がタイトルに反映されてない") == "title_spec_mismatch"
+    assert s("タイトル↔spec不一致: C:Color='Black' がタイトルに反映されてない") == "title_spec_mismatch:C:Color"
+    assert s("タイトル↔spec不一致: C:Character='DON!! Card' がタイトルに") == "title_spec_mismatch:C:Character"
     assert s("タイトル形式逸脱: ['Reel'] のいずれもタイトルに無い") == "title_format_deviation"
     # 未知症状は安定プレフィックスで保持(取りこぼさない)
     assert s("謎のエラー").startswith("program:")

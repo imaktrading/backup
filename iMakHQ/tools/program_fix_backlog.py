@@ -47,7 +47,9 @@ def program_signature(msg):
     if "'#'" in m:
         return "title_missing_card_number"
     if "spec不一致" in m:
-        return "title_spec_mismatch"
+        # フィールド名まで含めて分離(C:Color と C:Character は別バグ=別 closure)。
+        fm = re.search(r"(C:[^=']+)=", m)
+        return "title_spec_mismatch:" + (fm.group(1).strip() if fm else "?")
     if "タイトル形式逸脱" in m:
         return "title_format_deviation"
     if "必須Item Specific" in m or "推奨Item Specific" in m:
