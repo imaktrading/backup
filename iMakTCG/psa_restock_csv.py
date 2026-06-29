@@ -247,7 +247,6 @@ EBAY_SPEC_TO_CSV = {
     "Year Manufactured": "C:Year Manufactured",
     "Country of Origin": "C:Country of Origin",
     "Franchise": "C:Franchise",
-    "Age Level": "C:Age Level",
     "Autographed": "C:Autographed",
     "Vintage": "C:Vintage",
     "Material": "C:Material",
@@ -268,7 +267,7 @@ EBAY_SPEC_TO_CSV = {
 SPEC_NO_OVERRIDE = {
     "C:Grade", "C:Professional Grader", "C:Graded",
     "C:Manufacturer", "C:Language", "C:Country of Origin",
-    "C:Year Manufactured", "C:Age Level", "C:Autographed",
+    "C:Year Manufactured", "C:Autographed",
     "C:Vintage", "C:Material", "C:Customized",
 }
 
@@ -2207,7 +2206,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         # 場合の eBay AI 勝手な Japan 補完を明示的に塞ぐ＝従来方針）。
         rarity, features, manufacturer, "Japanese", year,
         ("Japan" if franchise == "One Piece" else "Does not apply"), franchise,
-        "6+", "No", "No", "Card Stock", card_size, "No",
+        # Age Level 列は出力しない (2026-06-29 CPSC対応): PSA鑑定品=コレクター市場=非児童製品。
+        # PSA公式店も Age Level 未設定が業界標準。"6+"=児童製品扱い→7/8 eFiling 通関リスク回避。
+        "No", "No", "Card Stock", card_size, "No",
         finish, attribute, illustrator, cost, power, "",
         "", "",   # C:HP / C:Stage (旧コアは空・新コアが catalog hp_ebay/stage_ebay から充填)
         "Near Mint or Better", "10",
@@ -2426,7 +2427,7 @@ def main():
         "BestOfferEnabled", "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
         "C:Game", "C:Set", "C:Card Type", "C:Card Name", "C:Character", "C:Card Number",
         "C:Rarity", "C:Features", "C:Manufacturer", "C:Language", "C:Year Manufactured",
-        "C:Country of Origin", "C:Franchise", "C:Age Level", "C:Autographed",
+        "C:Country of Origin", "C:Franchise", "C:Autographed",
         "C:Vintage", "C:Material", "C:Card Size", "C:Customized",
         "C:Finish", "C:Attribute/MTG:Color", "C:Illustrator", "C:Cost", "C:Attack/Power", "C:Defense/Toughness",
         # C:HP / C:Stage は新コアが catalog hp_ebay/stage_ebay から充填 (2026-06-15 最大活用)。
