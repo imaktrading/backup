@@ -720,6 +720,13 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
         top = recurring[0]
         print(f"  🔁 再発finding(catalog依頼/修正で消えない) {len(recurring)}件 → 構造/コード疑い(Actで提案化)"
               f" / 筆頭 seen×{top['seen_count']}: {str(top['item_id'])[:50]}")
+    # --- program修正 backlog を明示 surface (catalog と違い実装者=HQ 待ち。報告のみ→スルーを防ぐ) ---
+    prog_open = _load_open_program_fix()
+    if prog_open:
+        print(f"  🛠️ 未対応 program修正 backlog {len(prog_open)}件 "
+              f"(実装=HQ / `python program_fix_backlog.py` で詳細 / done で閉じる):")
+        for r in prog_open[:6]:
+            print(f"     seen×{r['seen_count']} {r['item_id']} ← {(r['evidence'] or '')[:50]}")
     # --- Act合図: 監査完了 → headless Claude をBG起動して NG対応(コピペ不要・digest各項目を必ず処分) ---
     _signal_claude_act(project, csv_path, log_path, dry_run, digest_path, digest)
     return 1 if (exclude_idx or program_items or catalog_items) else 0
@@ -757,6 +764,23 @@ def _load_pdca_recurring(min_seen=2, limit=25):
         return rows
     except Exception as _e:
         print(f"  ⚠️ pdca 再発取得skip: {type(_e).__name__}")
+        return []
+
+
+def _load_open_program_fix(limit=50):
+    """未対応(pending)の program_fix backlog を seen_count 降順で読む (surface用, read-only)。"""
+    try:
+        import pdca_store as _pdca
+        con = _pdca.connect()
+        cur = con.execute(
+            "SELECT item_id, seen_count, evidence FROM improvement_queue "
+            "WHERE finding_type='program_fix' AND status='pending' "
+            "ORDER BY seen_count DESC, updated_ts DESC LIMIT ?", (limit,))
+        rows = [{"item_id": r["item_id"], "seen_count": r["seen_count"],
+                 "evidence": r["evidence"]} for r in cur.fetchall()]
+        con.close()
+        return rows
+    except Exception:
         return []
 
 
@@ -947,8 +971,16 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run):
             _pdca.upsert_improvement(con, project, sku, field, "",
                                      evidence=str(msg)[:80], source="auditor", layer="A",
                                      finding_type=ft, ts=ts)
+        from program_fix_backlog import program_signature as _prog_sig
         for sku, msg in program_items:
             _pdca.record_finding(con, ts, project, sku, "program", str(msg)[:120], ts=ts)
+            # program バグも catalog と対称に actionable queue へ(閉ループ化 2026-06-29)。
+            # 症状クラスで dedup し別SKUでの再発を seen_count に集約 → 慢性度が surface される。
+            # closure: HQが直す→回帰テスト追加→program_fix_backlog.py done。直ってなければ
+            # 次監査で同症状が再upsertされ done→pending に自動復活(=スルー不能)。
+            _pdca.upsert_improvement(con, project, _prog_sig(msg), "program_fix", "",
+                                     evidence=f"{sku}: {str(msg)[:90]}", source="auditor",
+                                     layer="code", finding_type="program_fix", ts=ts)
         # psa_to_csv 検出の catalog未登録 (missing_models.csv) も queue へ (= 入稿しない catalog-miss を還元)
         _mm = _pdca.import_missing_models(con, MISSING_MODELS_PATH, ts=ts)
         # 解決済 prune: catalog に後から収録/索引修正された gap を done 化 → 真の未解決のみ emit
