@@ -1126,6 +1126,14 @@ def load_aspects(project):
     return _ASPECT_CACHE[path]
 
 
+# 意図的に出力しない aspect (= SEO提案で「追加しろ」と出すとCPSC等の方針と矛盾する)。
+# 2026-06-29: TCG の Age Level は CPSC eFiling 対応で**わざと削除**(PSA鑑定品=非児童製品)。
+# 監査くんが「列が無い→追加で検索性UP」と再提案すると、毎回ノイズ+誤再追加リスク → 抑制。
+_INTENTIONALLY_OMITTED_ASPECTS = {
+    "tcg": {"Age Level"},
+}
+
+
 def ebay_aspect_findings(headers, rows, project):
     """取得済 eBay公式フィルタ(Aspects)と Item Specifics を照合 = 武器の活用。API不要(offline)。
       ① SELECTION_ONLY の値が許容リスト外 → eBayフィルタ不ヒット (findability欠損)
@@ -1134,10 +1142,13 @@ def ebay_aspect_findings(headers, rows, project):
     asp = load_aspects(project)
     if not asp:
         return []
+    omit = _INTENTIONALLY_OMITTED_ASPECTS.get(project, set())
     hm = {h: i for i, h in enumerate(headers)}
     notes = []
     # ① RECOMMENDED/required aspect の未充足 (CSV全体で集約=1回)
     for name, a in asp.items():
+        if name in omit:
+            continue   # 意図的に外した aspect は「追加しろ」と提案しない (CPSC方針と矛盾するため)
         c = a.get("constraint", {})
         if not (c.get("aspect_required") or c.get("aspect_usage") == "RECOMMENDED"):
             continue

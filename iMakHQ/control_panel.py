@@ -85,6 +85,47 @@ def _official_stock_category(url):
     return "その他"
 
 # ============================================================================
+def summarize_audit_log(log: str) -> str:
+    """CSV監査くんの stdout から要点を抽出して短いサマリー文字列を返す (純関数・test可)。
+
+    出品くんが監査完走時にポップアップ表示する用 (対話セッションは外部から起こせないため、
+    結果報告を GUI 側で能動的に行う。2026-06-29)。抽出できなければ空文字。
+    """
+    if not log:
+        return ""
+    import re as _re
+    lines = []
+
+    def _find(pat):
+        m = _re.search(pat, log)
+        return m.group(1) if m else None
+
+    up = _find(r"CSV UPシグナル[^\n]*?(\d+)\s*件\s*入稿OK")
+    if up is not None:
+        lines.append(f"🟢 入稿OK: {up}件 → UPして")
+    excl = _find(r"除外\(出品しない\):\s*(\d+)\s*件")
+    if excl and excl != "0":
+        lines.append(f"❌ 出品除外: {excl}件 (CSVから物理除外済)")
+    nogo = _find(r"❌NO-GO\s*(\d+)")
+    if nogo and nogo != "0":
+        lines.append(f"🚫 市場NO-GO: {nogo}件 (入稿前に要確認)")
+    cat = _find(r"カタログ修正依頼:\s*(\d+)\s*件")
+    if cat and cat != "0":
+        lines.append(f"📨 catalog依頼: {cat}件 (自動投入済)")
+    prog = _find(r"プログラム修正依頼:\s*(\d+)\s*件")
+    if prog and prog != "0":
+        lines.append(f"🛠 program修正NG: {prog}件")
+    backlog = _find(r"未対応 program修正 backlog\s*(\d+)\s*件")
+    if backlog and backlog != "0":
+        lines.append(f"🛠 program backlog: {backlog}件 (実装=HQ・要対応)")
+    recur = _find(r"再発finding[^\n]*?(\d+)\s*件")
+    if recur and recur != "0":
+        lines.append(f"🔁 再発: {recur}件 (catalog scope外中心・既知)")
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
 # csv_postprocess_excluder helper (check_csv NO-GO 行を CSV から物理除外)
 # 2026-04-28 追加: dual_gate_disagreement.md CRITICAL 問題の応急対処.
 # psa_to_csv ↔ check_csv の市場ゲート判定矛盾で、check_csv が「除外済」表示しても
@@ -1814,12 +1855,33 @@ class ListingPanel:
         """ListingPanel: rarara helper 呼出 (互換ラッパ)."""
         _run_rarara_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
 
+    def _show_audit_summary(self, captured_log):
+        """CSV監査くん完走 → 要点をポップアップ表示 (出品くん側の能動報告)."""
+        summary = summarize_audit_log(captured_log)
+        if not summary:
+            return
+        self.append_log("\n" + "=" * 70 + "\n📋 監査サマリー (要点)\n" + summary + "\n" + "=" * 70 + "\n")
+        try:
+            messagebox.showinfo("CSV監査くん 完了", summary)
+        except Exception:
+            pass
+
     def poll_queue(self):
         try:
             while True:
                 item = self.queue.get_nowait()
                 if isinstance(item, tuple) and item[0] == "__done__":
                     self.append_log(f"\n--- 終了 (returncode={item[1]}) ---\n")
+                    # CSV監査くん 完走 → 要点サマリーをポップアップ (HQチャットの介在なしで結果を即可視化。
+                    # 2026-06-29: 対話セッションは外部から起こせないため、出品くん側で報告する)。
+                    try:
+                        _idx2 = getattr(self, "_current_idx", -1)
+                        _cmd2 = SCRIPTS[_idx2].get("cmd", []) if _idx2 >= 0 else []
+                        if any("csv_auditor.py" in str(c) for c in _cmd2):
+                            _clog = self.log.get("1.0", "end") if hasattr(self, "log") else ""
+                            self._show_audit_summary(_clog)
+                    except Exception as _e:
+                        self.append_log(f"⚠️ 監査サマリー表示失敗: {_e}\n")
                     # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
                     _cur = SCRIPTS[getattr(self, "_current_idx", -1)] if getattr(self, "_current_idx", -1) >= 0 else {}
                     _oa = _cur.get("open_after")
