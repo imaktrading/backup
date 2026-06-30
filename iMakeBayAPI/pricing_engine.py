@@ -506,6 +506,37 @@ def compute_listing_price(cost_jpy, median_usd, category, gap_limit_override=Non
     }
 
 
+def apply_pricedown_override(cost_jpy, category, *, cut_pct=5.0, gate_pct=10.0):
+    """NO_CONVERT 値下げ override (リバイス君が flag品に適用する正規ロジック・2026-06-30)。
+
+    **絶対指定=冪等**: 必ず V8標準価格から計算する(現在価格・前回価格は一切使わない)。
+    → 毎週/何回適用しても同じ結果。compound しない(ユーザー懸念「2回走って10%にならない?」の対策)。
+
+    安全保証 (赤字NG): **gate_pct > cut_pct を不変条件**にする。
+      gate(利益率≥gate_pct)を満たす品だけ cut_pct% 値下げ → 失う利益 ≤ V8推奨の cut_pct%
+      (手数料も減るので実際はそれ未満) → 値下げ後の利益 ≥ (gate_pct - cut_pct)% > 0 = 必ず黒字。
+      break-even の外部再構成(DDP込みでV8と不整合)は不要。gate が安全を保証する。
+    degressive利益率対策: 薄利(利益率<gate_pct)の高コスト品は自動的に gate で除外=据置。
+
+    戻り: {"price", "applied": bool, "reason", "margin_std_pct", "margin_after_floor_pct"}
+    """
+    if gate_pct <= cut_pct:
+        raise ValueError(f"gate_pct({gate_pct})は cut_pct({cut_pct})より大きく必須(赤字防止の不変条件)")
+    rec = compute_listing_price(cost_jpy, 0.0, category)
+    v8 = rec["price"]
+    fx = float(_profit_load().get("exchange_rate") or 162.0)
+    profit_usd = float(rec.get("profit_jpy") or 0) / fx
+    margin_std = (profit_usd / v8 * 100) if v8 else 0.0                 # 標準利益率%
+    if margin_std < gate_pct:
+        return {"price": round(v8, 2), "applied": False,
+                "reason": f"薄利(利益率{margin_std:.1f}%<{gate_pct}%)で据置",
+                "margin_std_pct": round(margin_std, 1), "margin_after_floor_pct": round(margin_std, 1)}
+    return {"price": round(v8 * (1.0 - cut_pct / 100.0), 2), "applied": True,
+            "reason": f"{cut_pct}%値下げ(利益率{margin_std:.1f}%→残≥{margin_std - cut_pct:.1f}%)",
+            "margin_std_pct": round(margin_std, 1),
+            "margin_after_floor_pct": round(margin_std - cut_pct, 1)}
+
+
 if __name__ == "__main__":
     # 自己テスト
     cases = [
