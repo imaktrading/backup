@@ -20,8 +20,11 @@ from revise.price_revise import (
     HEADER_ROWS,
     MAX_JPY,
     MIN_JPY,
+    PRICEDOWN_FLG_VALUE,
     REVISE_CSV_HEADER,
     ReviseCandidate,
+    _import_pricedown_override,
+    _import_v8_pricing,
     _is_sold,
     _is_valid_jpy,
     _to_float,
@@ -715,6 +718,105 @@ class TestExtractSheetId:
 
 # ============================================================================
 # best_offer (新 Phase)
+
+# ============================================================================
+# NO_CONVERT 値下げ override (2026-06-30)
+# ============================================================================
+def _pd_candidate(category="G-shock", n=17000, title="CASIO G-SHOCK",
+                  flag=PRICEDOWN_FLG_VALUE, sold=""):
+    return ReviseCandidate(
+        row_index=2, item_id="X", category=category, new_jpy=n, ah_jpy=None,
+        f_jpy=None, delta_pct=0.0, basis="pending", title=title,
+        sold_flag=sold, pricedown_flag=flag,
+    )
+
+
+_V8_FN = _import_v8_pricing()
+_PD_FN = _import_pricedown_override()
+
+
+def _std_price(category, n, title=""):
+    c = _pd_candidate(category=category, n=n, title=title, flag="")
+    compute_new_usd(c, _V8_FN)  # flag 無 = 標準
+    return c.new_usd, c.shipping_profile_name
+
+
+class TestPricedownOverride:
+    """apply_pricedown_override を import して compute_new_usd で適用する受入テスト."""
+
+    def test_flag_applies_pricedown(self):
+        std_usd, _ = _std_price("G-shock", 17000)
+        c = _pd_candidate("G-shock", 17000)
+        compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+        assert c.pricedown_applied is True
+        assert c.new_usd < std_usd  # 値下げされている
+
+    def test_no_flag_keeps_standard(self):
+        std_usd, std_pol = _std_price("G-shock", 17000)
+        c = _pd_candidate("G-shock", 17000, flag="")
+        compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+        assert c.pricedown_applied is False
+        assert c.new_usd == std_usd and c.shipping_profile_name == std_pol
+
+    def test_idempotent(self):
+        """同一入力で2回適用 → 価格不変 (compound しない・冪等)."""
+        c1 = _pd_candidate("G-shock", 17000)
+        compute_new_usd(c1, _V8_FN, pricedown_fn=_PD_FN)
+        c2 = _pd_candidate("G-shock", 17000)
+        compute_new_usd(c2, _V8_FN, pricedown_fn=_PD_FN)
+        compute_new_usd(c2, _V8_FN, pricedown_fn=_PD_FN)  # 2回目
+        assert c1.new_usd == c2.new_usd
+
+    def test_loss_injection_high_cost_holds_standard(self):
+        """高cost (gate<10%) の flag品 → applied=False で標準価格 (値下げされない)."""
+        std_usd, _ = _std_price("G-shock", 60000)
+        c = _pd_candidate("G-shock", 60000)
+        compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+        assert c.pricedown_applied is False
+        assert c.new_usd == std_usd  # gate 据置 = 標準価格そのまま
+
+    def test_sold_flag_no_pricedown(self):
+        """flag あっても D列売切 → override しない (belt-and-suspenders)."""
+        std_usd, _ = _std_price("G-shock", 17000)
+        c = _pd_candidate("G-shock", 17000, sold="○")
+        compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+        assert c.pricedown_applied is False
+        assert c.new_usd == std_usd
+
+    def test_title_override_porter(self):
+        """バッグ(アネロ)+PORTER title → Porter 価格基準で値下げ (誤カテゴリにならない)."""
+        title = "希少 PORTER 2層式 タンカー ショルダーバッグ"
+        c = _pd_candidate("バッグ", 12000, title=title)
+        compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+        expect = _PD_FN(cost_jpy=12000, category="バッグ(アネロ)", title=title)
+        assert c.new_usd == expect["price"]
+        no_title = _PD_FN(cost_jpy=12000, category="バッグ(アネロ)")
+        assert expect["price"] != no_title["price"]  # title_override が効いている
+
+    def test_price_and_policy_set_together(self):
+        """price と shipping_profile_name は override の戻り値とセットで一致."""
+        c = _pd_candidate("G-shock", 17000)
+        compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+        od = _PD_FN(cost_jpy=17000, category="G-SHOCK", title="CASIO G-SHOCK")
+        assert c.new_usd == od["price"]
+        assert c.shipping_profile_name == od["shipping_profile_name"]
+
+
+class TestDetectCandidatesPricedown:
+    def test_al_flag_read_high_low(self):
+        row = [""] * 38
+        row[0] = "https://example.com/x"; row[1] = "123"; row[13] = "5000"
+        row[17] = "G-shock"; row[37] = PRICEDOWN_FLG_VALUE
+        c = detect_candidates([row], schema="high_low")
+        assert len(c) == 1 and c[0].pricedown_flag == PRICEDOWN_FLG_VALUE
+
+    def test_official_schema_ignores_index37(self):
+        """official synthetic row は 37 幅 = index37 不在 → pricedown_flag 空."""
+        row = [""] * 37
+        row[1] = "123"; row[13] = "5000"; row[17] = "Tシャツ"
+        c = detect_candidates([row], schema="official")
+        assert len(c) == 1 and c[0].pricedown_flag == ""
+
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

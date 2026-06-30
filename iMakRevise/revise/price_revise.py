@@ -112,6 +112,8 @@ COL_N_PRICE = 13     # N (仕入れ価格 ¥)
 COL_CHECK_TIME = 14  # O (売り切れチェック時間)
 COL_CATEGORY = 17    # R (カテゴリ)
 COL_AH_PRICE = 33    # AH (前期 N ¥)
+COL_PRICEDOWN_FLG = 37  # AL (値下FLG = NO_CONVERT 値下げ対象、HQ noconvert がフル同期書込)
+PRICEDOWN_FLG_VALUE = "値下5pp"  # AL 列がこの値の行のみ 5pp 値下げ override 対象
 
 # 公式 SKU詳細 schema
 COL_OFFICIAL_LISTING_ID = 3  # D
@@ -217,6 +219,9 @@ class ReviseCandidate:
     variation_size: str = ""                       # スプシ G 列
     variation_color: str = ""                      # スプシ H 列
     is_variation: bool = False                     # True なら variation listing の 1 SKU
+    # NO_CONVERT 値下げ override (2026-06-30 追加、HIGH/LOW のみ)
+    pricedown_flag: str = ""                        # AL 列 (= "値下5pp" なら 5pp 値下げ対象)
+    pricedown_applied: bool = False                 # 実際に override が適用されたか (gate 通過)
 
 
 @dataclass
@@ -340,7 +345,10 @@ def load_sheet_rows(sheet_key: str = "HIGH"):
     ws = sh.worksheet(cfg["tab"])
 
     if cfg["schema"] == "high_low":
-        all_rows = ws.get_values(f"A1:AH{ws.row_count}")
+        # AL列(値下FLG, index37)まで読む (2026-06-30 NO_CONVERT 値下げ対応)。
+        # ※ index34-36 は KEY/KEY2/巡回ERR で variation 列(COL_VAR_SKU=34)と衝突するが、
+        #   detect_candidates は variation 列を official schema 限定で読むため high_low では無害。
+        all_rows = ws.get_values(f"A1:AL{ws.row_count}")
         if not all_rows:
             return [], [], ws, cfg["schema"]
         return all_rows[0], all_rows[HEADER_ROWS:], ws, cfg["schema"]
@@ -507,7 +515,8 @@ def should_revise(
 # ============================================================================
 def detect_candidates(rows, threshold_pct: float = DEFAULT_THRESHOLD_PCT,
                        mode: str = "normal", source_sheet: str = "HIGH",
-                       abnormal_delta_threshold: Optional[float] = None) -> list:
+                       abnormal_delta_threshold: Optional[float] = None,
+                       schema: str = "high_low") -> list:
     """各行を ReviseCandidate に変換 (= スプシ filter pass のみ).
 
     新 logic (2026-05-22): 起動判定はここでは行わない。eligible 行を返すだけ。
@@ -541,10 +550,16 @@ def detect_candidates(rows, threshold_pct: float = DEFAULT_THRESHOLD_PCT,
         ah_jpy = _to_float(row[COL_AH_PRICE]) if len(row) > COL_AH_PRICE else None
         category = (row[COL_CATEGORY] or "").strip() if len(row) > COL_CATEGORY else ""
         title = (row[COL_TITLE] or "").strip() if len(row) > COL_TITLE else ""
-        # variation 関連 (2026-05-24)
-        sku = (row[COL_VAR_SKU] or "").strip() if len(row) > COL_VAR_SKU else ""
-        var_size = (row[COL_VAR_SIZE] or "").strip() if len(row) > COL_VAR_SIZE else ""
-        var_color = (row[COL_VAR_COLOR] or "").strip() if len(row) > COL_VAR_COLOR else ""
+        # variation 関連 (2026-05-24): index34-36 は official synthetic row のみ SKU/Size/Color。
+        # high_low 実シートでは 34-36 = KEY/KEY2/巡回ERR なので読まない (= 空のまま、変動は snapshot 由来)。
+        if schema == "official":
+            sku = (row[COL_VAR_SKU] or "").strip() if len(row) > COL_VAR_SKU else ""
+            var_size = (row[COL_VAR_SIZE] or "").strip() if len(row) > COL_VAR_SIZE else ""
+            var_color = (row[COL_VAR_COLOR] or "").strip() if len(row) > COL_VAR_COLOR else ""
+        else:
+            sku = var_size = var_color = ""
+        # NO_CONVERT 値下FLG (AL列、high_low のみ。official synthetic row は 37 幅で index37 不在 → 空)
+        pricedown_flag = (row[COL_PRICEDOWN_FLG] or "").strip() if len(row) > COL_PRICEDOWN_FLG else ""
 
         # スプシ filter (= スプシ条件 NG はここで弾く、URL filter 廃止)
         if _normalize.is_sold(sold_flag):
@@ -585,6 +600,7 @@ def detect_candidates(rows, threshold_pct: float = DEFAULT_THRESHOLD_PCT,
             #                 RelationshipDetails (= Size=XS|Color=BLACK) で variation 特定可能
             #                 eBay FileExchange は SKU 列を変動特定に使わない (公式 doc)
             is_variation=bool(sku) or bool(var_size) or bool(var_color),
+            pricedown_flag=pricedown_flag,
         ))
     return candidates
 
@@ -638,6 +654,18 @@ def _import_v8_pricing():
         sys.path.insert(0, _IMAK_EBAY_API_PATH)
     from pricing_engine import compute_listing_price_v6  # type: ignore  # noqa: PLC0415
     return compute_listing_price_v6
+
+
+def _import_pricedown_override():
+    """本元 pricing_engine.apply_pricedown_override を import (= NO_CONVERT 値下げ SSOT).
+
+    cost+category+title から V8標準を絶対計算し 5pp 値下げ (gate で赤字防止・冪等)。
+    title を渡すことで標準パス (compute_listing_price_v6) と同じ title_override が効く。
+    """
+    if _IMAK_EBAY_API_PATH not in sys.path:
+        sys.path.insert(0, _IMAK_EBAY_API_PATH)
+    from pricing_engine import apply_pricedown_override  # type: ignore  # noqa: PLC0415
+    return apply_pricedown_override
 
 
 # ============================================================================
@@ -696,7 +724,7 @@ def normalize_category(category_label: str) -> str:
     return cat
 
 
-def compute_new_usd(candidate: ReviseCandidate, v8_fn) -> ReviseCandidate:
+def compute_new_usd(candidate: ReviseCandidate, v8_fn, pricedown_fn=None) -> ReviseCandidate:
     """V8 pricing_engine 経由で価格計算.
 
     成功時: candidate.new_usd / shipping_usd / shipping_profile_name 等を埋める
@@ -704,6 +732,11 @@ def compute_new_usd(candidate: ReviseCandidate, v8_fn) -> ReviseCandidate:
 
     pack 反映: effective_cost = N × pack_count を V8 に渡す (= 2026-05-22 pack 対応)。
     pack_count は candidate に事前 set されている前提 (= run_price_revise で設定)。
+
+    NO_CONVERT 値下げ (2026-06-30): pricedown_fn 指定 + AL列flag="値下5pp" + D≠○ の行は、
+    標準 V8 算出後に apply_pricedown_override(cost, category, title) の price+shipping_profile_name
+    でセット差し替え (= 5pp 値下げ)。title を渡すので title_override は標準パスと整合。
+    赤字行 (gate 未達含む) は override 側 applied=False で標準価格が返るため安全。
     """
     norm_category = normalize_category(candidate.category)
     # effective_cost = N × pack_count (= mapping 未登録なら pack_count=1 で同値)
@@ -734,6 +767,25 @@ def compute_new_usd(candidate: ReviseCandidate, v8_fn) -> ReviseCandidate:
     if candidate.profit_jpy is not None and candidate.profit_jpy < 0:
         candidate.skip_reason = f"赤字 利益¥{candidate.profit_jpy:.0f}"
         candidate.new_usd = None  # skip 扱い
+        return candidate
+
+    # NO_CONVERT 値下げ override (HIGH/LOW のみ、AL列flag品)
+    if (pricedown_fn is not None
+            and candidate.pricedown_flag == PRICEDOWN_FLG_VALUE
+            and not _normalize.is_sold(candidate.sold_flag)):
+        try:
+            od = pricedown_fn(
+                cost_jpy=candidate.effective_cost,
+                category=norm_category,
+                title=candidate.title,
+            )
+            # price と shipping_profile_name は必ずセットで採用 (バンド跨ぎ不整合防止)
+            candidate.new_usd = od["price"]
+            candidate.shipping_profile_name = od["shipping_profile_name"]
+            candidate.pricedown_applied = bool(od.get("applied"))
+        except Exception as e:
+            # override 失敗時は標準価格を据置 (fail-safe: 値下げしないだけ、誤価格は出さない)
+            print(f"  [WARN pricedown override 失敗→標準据置] item={candidate.item_id}: {e}")
 
     return candidate
 
@@ -1144,6 +1196,7 @@ def run_price_revise(
 
         sheet_candidates = detect_candidates(
             rows, threshold_pct=threshold_pct, mode=mode, source_sheet=sheet_key,
+            schema=schema,
         )
         before = len(sheet_candidates)
         sheet_candidates = [c for c in sheet_candidates if c.item_id not in seen_item_ids]
@@ -1173,7 +1226,9 @@ def run_price_revise(
     if normal_candidates:
         print(f"[revise] V8 計算 {len(normal_candidates)} 件 (pack mapping {len(pack_map)} 件 読込)...")
         v8_fn = _import_v8_pricing()
+        pricedown_fn = _import_pricedown_override()
         v8_failed = 0
+        pricedown_applied_count = 0
         for c in normal_candidates:
             # pack 反映
             c.pack_count = _pack_mod.get_pack_count(c.item_id, pack_map)
@@ -1185,11 +1240,17 @@ def run_price_revise(
                     c.pack_suspect = True
                     pack_suspect_count += 1
                     print(f"  [WARN pack 疑い 未登録] item={c.item_id} title={(c.title or '')[:60]}")
-            compute_new_usd(c, v8_fn)
+            compute_new_usd(c, v8_fn, pricedown_fn=pricedown_fn)
             if c.skip_reason and "V8" in c.skip_reason:
                 v8_failed += 1
+            if c.pricedown_applied:
+                pricedown_applied_count += 1
         if v8_failed:
             print(f"[revise]   V8 計算失敗: {v8_failed} 件 (= Unknown category 等)")
+        pricedown_flagged = sum(1 for c in normal_candidates if c.pricedown_flag == PRICEDOWN_FLG_VALUE)
+        if pricedown_flagged:
+            print(f"[revise]   NO_CONVERT 値下げ: flag {pricedown_flagged} 件 中 "
+                  f"{pricedown_applied_count} 件に 5pp 適用 (残は gate 据置)")
         if pack_registered_count:
             print(f"[revise]   pack mapping 適用: {pack_registered_count} 件")
         if pack_suspect_count:
