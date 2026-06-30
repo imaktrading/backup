@@ -506,11 +506,14 @@ def compute_listing_price(cost_jpy, median_usd, category, gap_limit_override=Non
     }
 
 
-def apply_pricedown_override(cost_jpy, category, *, cut_pct=5.0, gate_pct=10.0):
+def apply_pricedown_override(cost_jpy, category, *, title="", cut_pct=5.0, gate_pct=10.0):
     """NO_CONVERT 値下げ override (リバイス君が flag品に適用する正規ロジック・2026-06-30)。
 
     **絶対指定=冪等**: 必ず V8標準価格から計算する(現在価格・前回価格は一切使わない)。
     → 毎週/何回適用しても同じ結果。compound しない(ユーザー懸念「2回走って10%にならない?」の対策)。
+
+    title: title_override(バッグ→Porter等)を効かせるため標準パスと同じ title を渡す
+           (2026-06-30 リバイス君指摘: 無しだと Porter が アネロ価格になり誤カテゴリ=正確性NG)。
 
     安全保証 (赤字NG): **gate_pct > cut_pct を不変条件**にする。
       gate(利益率≥gate_pct)を満たす品だけ cut_pct% 値下げ → 失う利益 ≤ V8推奨の cut_pct%
@@ -522,7 +525,8 @@ def apply_pricedown_override(cost_jpy, category, *, cut_pct=5.0, gate_pct=10.0):
     """
     if gate_pct <= cut_pct:
         raise ValueError(f"gate_pct({gate_pct})は cut_pct({cut_pct})より大きく必須(赤字防止の不変条件)")
-    rec = compute_listing_price(cost_jpy, 0.0, category)
+    # title_override(Porter等)を効かせるため v6 を title 付きで呼ぶ(標準パスと同一カテゴリ解決)
+    rec = compute_listing_price_v6(cost_jpy, 0.0, category, title=title)
     v8 = rec["price"]
     fx = float(_profit_load().get("exchange_rate") or 162.0)
     profit_usd = float(rec.get("profit_jpy") or 0) / fx

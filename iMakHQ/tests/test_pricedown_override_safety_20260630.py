@@ -56,6 +56,15 @@ def test_gate_must_exceed_cut():
         pe.apply_pricedown_override(3000, "TCG(PSA10)", gate_pct=5, cut_pct=5)
 
 
+def test_title_override_porter():
+    # title_override: バッグ(アネロ)カテゴリでも title="PORTER" なら Porter 解決(誤カテゴリ防止)
+    cost = 20000
+    r_no = pe.apply_pricedown_override(cost, "バッグ(アネロ)", title="")
+    r_porter = pe.apply_pricedown_override(cost, "バッグ(アネロ)", title="YOSHIDA PORTER Tanker Bag")
+    # title でカテゴリ解決が変わり、基準価格(=値下げ後価格)が異なる
+    assert r_porter["price"] != r_no["price"]
+
+
 def test_policy_recomputed_at_new_price():
     # 値下げ品は送料Policyを新価格で取り直す(バンド跨ぎ整合)。返り値の policy が新価格tier由来。
     cat, cost = CHEAP

@@ -170,7 +170,8 @@ def main():
     ad_rate = _f(cache.get("ad_rate") or 0.10)
 
     def compute_fn(cost_jpy, median, cat, title):
-        return pe.compute_listing_price(cost_jpy=cost_jpy, median_usd=median or 0.0, category=cat)
+        # title_override(Porter等)を効かせる: 標準と同じカテゴリ解決にするため v6 を title付きで呼ぶ
+        return pe.compute_listing_price_v6(cost_jpy, median or 0.0, cat, title=title or "")
 
     from ebay_getitem_images import fetch_listing_price
 
