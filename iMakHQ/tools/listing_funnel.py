@@ -364,6 +364,18 @@ def classify(rows):
             "RELIST": relist, "OUT_OF_STOCK": oos, "RESTOCK": restock, "CULL": cull, "ctr_q1": ctr_q1}
 
 
+# バケツ → 既にボタン化済の対策 (出品くん control_panel のボタン名)。空=対策ボタン無し
+# (OVERPRICED/NEW_WAIT/DEAD_SIMPLE は意図的に専用ボタン無し)。Summary の E列に表示 (2026-06-30)。
+BUCKET_REMEDY_BUTTON = {
+    "NO_SEARCH":  "取下再出品①②③ (End→Add→書戻し)",
+    "NO_CLICK":   "✏️ タイトル改修 / 取下再出品①②③",
+    "NO_CONVERT": "💲 価格抵抗",
+    "RELIST":     "取下再出品①②③ (End→Add→書戻し)",
+    "RESTOCK":    "🛒 在庫切れ再仕入れ (PSA/一番くじは専用補充)",
+    "CULL":       "🧹 CULL停止 (50件/回)",
+}
+
+
 def write_xlsx(path, rows, c, summary_lines):
     """バケツ別シートの Excel を出力 (Summary + 各バケツ + eBayリンク)。"""
     import openpyxl
@@ -391,12 +403,15 @@ def write_xlsx(path, rows, c, summary_lines):
     ws.cell(row=r0, column=1, value="バケツ").font = Font(bold=True)
     ws.cell(row=r0, column=2, value="件数").font = Font(bold=True)
     ws.cell(row=r0, column=3, value="意味/アクション").font = Font(bold=True)
+    ws.cell(row=r0, column=5, value="対策ボタン (済)").font = Font(bold=True)
     for k, (name, desc) in enumerate(buckets, start=r0 + 1):
         ws.cell(row=k, column=1, value=name)
         ws.cell(row=k, column=2, value=len(c.get(name, [])))
         ws.cell(row=k, column=3, value=desc)
+        ws.cell(row=k, column=5, value=BUCKET_REMEDY_BUTTON.get(name, ""))  # E列: 対策済ボタン名
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["C"].width = 44
+    ws.column_dimensions["E"].width = 36
 
     cols = [("item_id", 13), ("title", 46), ("site", 6), ("category", 20), ("price", 8),
             ("trend_price", 10), ("qty", 5), ("sold_qty", 6), ("sales90", 8), ("watch", 7),
