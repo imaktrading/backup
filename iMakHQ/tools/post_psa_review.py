@@ -1131,19 +1131,32 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
     """
     global _PRE_BUILD_MODE, _PRE_BUILD_RESULTS
     confirmed: dict = {}
-    # ★verify→build ではバッチ全件を毎回 HTML に出し、その回に確認した cert だけを build 対象にする。
-    #  (2026-06-15 ユーザー指摘: verified キャッシュで過去確認済を勝手に確定扱いすると
-    #   「HTMLで6件 → なのに10件処理」という不透明なズレが出る。バッチ=確認=処理 を一致させる)。
+    # verified_certs.json の OK/CHOSEN 済を pre-load → 自動確定(build=CSV化)。viewer に再表示しない。
+    #  (2026-06-30 ユーザー: 「確認済なのにCSV化されず毎回viewer再浮上」ループの本質を解消。
+    #   2026-06-15 の透明性懸念=「HTML件数と処理件数のズレ」は下の明示ログ "cache自動確定N/viewer確認M"
+    #   で担保。NONE/NG/PENDING は cache にあっても build しない=従来通り fail-closed)。
+    try:
+        _vc = json.loads(VERIFIED_CERTS_FILE.read_text(encoding="utf-8")) if VERIFIED_CERTS_FILE.exists() else {}
+    except Exception:
+        _vc = {}
     targets = []
+    n_cache = 0
     for cert in certs:
         cert = str(cert).strip()
         if not cert:
             continue
+        _rec = _vc.get(cert) or {}
+        if _rec.get("choice") in ("OK", "CHOSEN") and (_rec.get("product_id") or "").strip():
+            confirmed[cert] = _rec["product_id"].strip()
+            n_cache += 1
+            continue   # 確認済 → viewer に出さず確定値で build (再浮上ループ解消)
         t = _build_target_for_cert(cert)
         if t is None:
             append_log_func(f"  ⚠️ cert {cert}: cache miss/category不明/対象外 → 目視対象外 (build skip)\n")
             continue
         targets.append(t)
+    if n_cache:
+        append_log_func(f"  ✅ verified_certs から自動確定(viewer再表示せず build): {n_cache}件 / viewer目視対象: {len(targets)}件\n")
 
     if not targets:
         append_log_func("  ✅ 目視確認対象 cert なし (全件 cache miss/対象外)、viewer skip\n")
