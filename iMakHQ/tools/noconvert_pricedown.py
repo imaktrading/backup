@@ -38,7 +38,7 @@ CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
 SHEET_IDS = ["19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk",   # HIGH
              "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0"]   # LOW
 SHEET_GID = 851100680
-COL_ITEMID, COL_SOLD, COL_COST, COL_CAT = 1, 3, 13, 17   # B / D / N / R
+COL_SUPPLY, COL_ITEMID, COL_SOLD, COL_COST, COL_CAT = 0, 1, 3, 13, 17   # A / B / D / N / R
 
 # 商品管理シート R列 ラベル → pricing_engine カテゴリ。未収載=floor出さず「要確認」(fail-closed)。
 SHEET_CAT_TO_PRICING = {
@@ -82,7 +82,8 @@ def load_sheet_index():
                 continue
             idx[iid] = {"cost": (r[COL_COST] if len(r) > COL_COST else "").strip(),
                         "cat": (r[COL_CAT] if len(r) > COL_CAT else "").strip(),
-                        "sold": (r[COL_SOLD] if len(r) > COL_SOLD else "").strip()}
+                        "sold": (r[COL_SOLD] if len(r) > COL_SOLD else "").strip(),
+                        "supply": (r[COL_SUPPLY] if len(r) > COL_SUPPLY else "").strip()}
     return idx
 
 
@@ -127,9 +128,9 @@ def main():
     print(f"NO_CONVERT = {len(nc)}件。商品管理スプシ(HIGH/LOW)読込中...", flush=True)
     idx = load_sheet_index()
 
-    out = [["判断(値下/様子見)", "カテゴリ", "商品名", "現価格", "最新仕入¥", "V8推奨",
-            "込み利益$", "下限(プロモ据置)", "下限(プロモ外)", "値下げ余地%(据置)", "値下げ余地%(外)",
-            "在庫", "eBay URL"]]
+    out = [["値下げ余地%(据置)", "判断(値下/様子見)", "カテゴリ", "商品名", "現価格", "最新仕入¥", "V8推奨",
+            "込み利益$", "下限(プロモ据置)", "下限(プロモ外)", "値下げ余地%(外)",
+            "在庫", "仕入元URL", "eBay URL"]]
     rows_calc = []
     n_oos = n_nomatch = 0
     for r in nc:
@@ -152,14 +153,14 @@ def main():
     rows_calc.sort(key=lambda x: -x[4])    # 値下げ余地%(据置) 降順
     for r, d, cur, res, _ in rows_calc:
         if "error" in res:
-            out.append(["", d["cat"], (r.get("title") or "")[:50], f"${cur:.0f}",
-                        f"¥{_f(d['cost']):.0f}", "要確認", res["error"], "", "", "", "", "仕入可", r.get("ebay_url", "")])
+            out.append(["", "", d["cat"], (r.get("title") or "")[:50], f"${cur:.0f}",
+                        f"¥{_f(d['cost']):.0f}", "要確認", res["error"], "", "", "",
+                        "仕入可", d.get("supply", ""), r.get("ebay_url", "")])
         else:
-            out.append(["", res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}",
+            out.append([res["room_keep_pct"], "", res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}",
                         f"¥{_f(d['cost']):.0f}", f"${res['v8_rec']:.0f}", f"${res['profit_usd']:.1f}",
-                        f"${res['floor_keep']:.0f}", f"${res['floor_drop']:.0f}",
-                        f"{res['room_keep_pct']:.0f}%", f"{res['room_drop_pct']:.0f}%",
-                        "仕入可", r.get("ebay_url", "")])
+                        f"${res['floor_keep']:.0f}", f"${res['floor_drop']:.0f}", f"{res['room_drop_pct']:.0f}%",
+                        "仕入可", d.get("supply", ""), r.get("ebay_url", "")])
 
     calc_ok = sum(1 for x in rows_calc if "error" not in x[3])
     print(f"  結合 {len(rows_calc)+n_oos}件 / 売切○(仕入不可=除外) {n_oos} / 未結合 {n_nomatch}")
