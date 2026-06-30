@@ -144,6 +144,19 @@ def test_acknowledged_only_suppresses_alert_but_logs(monkeypatch, tmp_path):
     assert calls["toast"] == 0 and calls["email"] == 0
 
 
+def test_crash_alert_is_not_silent(monkeypatch, tmp_path):
+    # daily_audit が最外周で想定外クラッシュしても heartbeat(AUDIT_CRASH)+alert を必ず残す
+    # (2026-06-30 10:00 の silent crash 再発防止)。
+    hb, al = _patch_logs(monkeypatch, tmp_path)
+    calls = _patch_channels(monkeypatch)
+    RA._emit_crash_alert("RuntimeError: boom", "Traceback ... boom")
+    hb_entry = _last_heartbeat(hb)
+    assert hb_entry["status"] == "AUDIT_CRASH"
+    assert "boom" in hb_entry["error"]
+    assert al.exists() and "クラッシュ" in al.read_text(encoding="utf-8")
+    assert calls["toast"] == 1 and calls["email"] == 1
+
+
 def test_mixed_ack_and_unack_alerts_only_unack(monkeypatch, tmp_path):
     # 承認済み 1 + 未承認 2 → 未承認 2 件だけで alert 発火 (承認済みは件数に数えない)。
     hb, al = _patch_logs(monkeypatch, tmp_path)

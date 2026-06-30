@@ -464,6 +464,31 @@ def _email_alert(subject: str, body: str) -> bool:
         return False
 
 
+def _emit_crash_alert(err: str, tb_str: str = "") -> None:
+    """daily_audit が最外周で想定外クラッシュした時に非-silent 記録 (heartbeat AUDIT_CRASH + alert)。
+
+    pythonw cron では stderr が破棄され、 _run_daily_audit より外の例外は heartbeat/alert に
+    到達せず silent crash する (2026-06-30 10:00 実観測)。 audit が走らなかったこと自体を
+    非-silent にするための最後の砦。
+    """
+    ts = datetime.now().isoformat(timespec="seconds")
+    try:
+        DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(HEARTBEAT_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": ts, "status": "AUDIT_CRASH", "error": err},
+                               ensure_ascii=False) + "\n")
+        subj = "[iMakInventory] ⚠️ reverse_audit daily cron クラッシュ (audit 未完了)"
+        body = (f"reverse_audit --mode all が想定外の例外で中断 = 当日の reconciliation 未実行。\n"
+                f"error: {err}\n\n{tb_str}\n"
+                f"= 乖離ゼロを証明できていない。 次 cron で自動再試行されるが継続するなら要調査。\n")
+        with open(ALERT_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{ts}\t{subj}\n{body}\n{'-'*60}\n")
+        _toast(subj, body)
+        _email_alert(subj, body)
+    finally:
+        print(f"  [NG] daily_audit クラッシュ (非-silent 記録済): {err}", flush=True)
+
+
 def _run_daily_audit() -> dict:
     """daily cron 用: reverse + ebay_down を共有 qty_map で両方実行 + 非-silent 通知 + 継続証跡."""
     ts = datetime.now().isoformat(timespec="seconds")
@@ -568,12 +593,22 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     if args.mode == "all":
-        res = _run_daily_audit()
-        print(f"\n=== daily_audit 結果 ({res['status']}) ===")
-        print(f"  reverse 乖離: {res['reverse'].get('mismatch_count')} 件 "
-              f"(未承認 {res.get('unack_count')} / 承認済 {res.get('ack_count')} {res.get('ack_ids')}) / "
-              f"ebay_down orphan: {res['ebay_down'].get('orphan_count')} 件")
-        print(f"  heartbeat: {HEARTBEAT_LOG}")
+        # daily cron は pythonw 起動で stdout/stderr が破棄される。 _run_daily_audit の
+        # 内部 try は run_reverse_audit 等の個別失敗は握るが、 想定外の例外がそこより外で
+        # 起きると heartbeat/alert に到達せず **silent crash** する (2026-06-30 10:00 で実観測:
+        # exit 1 + heartbeat 無記録)。 audit が走らなかったこと自体を非-silent にするため、
+        # 最外周で捕捉して AUDIT_ERROR heartbeat + alert を必ず残す (安全原則: audit 不能は非-silent)。
+        try:
+            res = _run_daily_audit()
+            print(f"\n=== daily_audit 結果 ({res['status']}) ===")
+            print(f"  reverse 乖離: {res['reverse'].get('mismatch_count')} 件 "
+                  f"(未承認 {res.get('unack_count')} / 承認済 {res.get('ack_count')} {res.get('ack_ids')}) / "
+                  f"ebay_down orphan: {res['ebay_down'].get('orphan_count')} 件")
+            print(f"  heartbeat: {HEARTBEAT_LOG}")
+        except Exception as e:
+            import traceback as _tb  # noqa: PLC0415
+            _emit_crash_alert(f"{type(e).__name__}: {e}", _tb.format_exc())
+            sys.exit(1)
     elif args.mode == "ebay_down":
         res = run_ebay_down_sheet_active_audit(write_sheet=not args.no_sheet_write)
         print(f"\n=== ebay_down_audit 結果 ===")

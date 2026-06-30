@@ -1,5 +1,32 @@
 # iMakInventory daily_report
 
+## 2026-06-30 — 過去数日ログ点検: 在庫適正 (取下げ漏れゼロ) + cron silent crash 穴を hardening
+
+### 在庫整合性確認 (user「過去数日分のログで在庫に問題ないか」) — 問題なし
+- 決定: 06-27〜30 の全 cycle (31本) + 公式監視くんを点検。**履行不能リスクの取下げ漏れゼロ = 在庫適正**。
+- 検証:
+  - 本体 cycle 31本: **up_ng=0 / action_required=0 / pending_stuck=0** を全 cycle で確認
+    (= 取下げ upload 全成功・未対応ゼロ・滞留ゼロ)。`skipped_lock_held` は cycle 重複時の正常 skip。
+    各 cycle の scrape error 3〜25件/1247 は transient (network)、 fail-closed で誤取下げ化せず。
+  - reverse_audit heartbeat: 06-28/29/30 とも **OK_ACK_ONLY (未承認乖離 0)** = D=○ 系の漏れゼロ
+    (承認済み row728 のみ)。
+  - **固着 scrape error (盲点リスク) を深掘り**: persistent_err_rows に PSA10 カード 5件
+    (358632857689/694/701/703, 358637511019) が連続 None (fail-closed)。**D≠○ なので reverse_audit
+    の死角** → 源が実売切なら fail-OPEN 漏れになり得る。本体 scraper で各 3回 scrape して実機判定 →
+    **5件とも 3/3 ON_SALE (在庫あり) × eBay qty=1 = 全て正しく漏れなし**。固着は PSA10 ページへの
+    anti-bot で transient、 fail-closed が正しく機能していた (誤取下げも漏れも無し)。
+  - 公式監視くん (iMakeBayAPI/inventory_monitor): mail_send.log 全 OK、 audit_and_heal の
+    **pending:0** が連日 (= 未解決の漏れゼロ・乖離自動補正稼働)。
+
+### reverse_audit daily cron の silent crash 穴を hardening (commit 予定)
+- 決定: 点検中に **06-30 10:00 の reverse_audit cron が exit 1 + heartbeat 無記録で落ちていた**
+  のを発見 (手動再実行は exit 0 = 真因は transient)。問題は失敗そのものより **silent だったこと**:
+  pythonw は stderr 破棄、 かつ `_run_daily_audit` より外で例外が起きると heartbeat/alert コードに
+  到達せず = 「audit が走らなかった」を誰も気づけない (安全原則「audit 不能は非-silent」違反)。
+- 変更: `reverse_audit.py` `--mode all` を最外周 try で捕捉し、 想定外クラッシュ時も
+  `_emit_crash_alert()` で **heartbeat(AUDIT_CRASH) + AUDIT_ALERT.log + toast + email** を必ず残す。
+- 検証: `tests/test_reverse_audit_daily.py` に crash-guard test 追加 (7件)。offline 159 pass。
+
 ## 2026-06-27 — daily cron 初回自動実行を確認 + reverse_audit 承認済み allowlist 新設 (alert 疲労対策)
 
 ### reverse_audit daily cron 初回自動実行 = 稼働実証 + SHOPS 自動是正の確認
