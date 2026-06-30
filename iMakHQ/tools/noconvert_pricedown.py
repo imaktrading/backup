@@ -34,6 +34,9 @@ except Exception:
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 FUNNEL_DIR = os.path.normpath(os.path.join(_HERE, "..", "funnel_output"))
+# 現価格は funnel(生成25日前=実価格と大きく乖離)でも report(通貨混在)でもなく、
+# **GetItem でライブ取得(USD換算)** する (2026-06-30 ユーザー指摘「eBay URLあるんだから自分で見ろ」)。
+# non-US出品(AUD/EUR/GBP)も ConvertedCurrentPrice で USD 正規化 → V8(USD)と正しく比較。
 CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
 SHEET_IDS = ["19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk",   # HIGH
              "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0"]   # LOW
@@ -124,46 +127,57 @@ def main():
     def compute_fn(cost_jpy, median, cat, title):
         return pe.compute_listing_price(cost_jpy=cost_jpy, median_usd=median or 0.0, category=cat)
 
+    from ebay_getitem_images import fetch_listing_price
+
     nc = load_noconvert()
     print(f"NO_CONVERT = {len(nc)}件。商品管理スプシ(HIGH/LOW)読込中...", flush=True)
     idx = load_sheet_index()
 
-    out = [["値下げ余地%(据置)", "判断(値下/様子見)", "カテゴリ", "商品名", "現価格", "最新仕入¥", "V8推奨",
-            "込み利益$", "下限(プロモ据置)", "下限(プロモ外)", "値下げ余地%(外)",
-            "在庫", "仕入元URL", "eBay URL"]]
-    rows_calc = []
+    # 仕入可(売切でない)+結合済 のみ live 価格取得対象に絞る (GetItem 回数を最小化)
+    targets = []
     n_oos = n_nomatch = 0
     for r in nc:
-        iid = (r.get("item_id") or "").strip()
-        d = idx.get(iid)
+        d = idx.get((r.get("item_id") or "").strip())
         if not d:
             n_nomatch += 1
             continue
         if is_sold_out(d["sold"]):
             n_oos += 1
             continue            # 仕入不可=対象外 (fail-closed)
-        cur = _f(r.get("price"))
+        targets.append((r, d))
+
+    print(f"  仕入可 {len(targets)}件 → eBay GetItem で現価格(USD換算)をライブ取得中...", flush=True)
+    out = [["値下げ余地%(据置)", "判断(値下/様子見)", "カテゴリ", "商品名", "現価格$", "通貨", "最新仕入¥",
+            "V8推奨", "込み利益$", "下限(プロモ据置)", "下限(プロモ外)", "値下げ余地%(外)",
+            "在庫", "仕入元URL", "eBay URL"]]
+    rows_calc = []
+    n_noprice = 0
+    for i, (r, d) in enumerate(targets, 1):
+        cur, ccy = fetch_listing_price(r.get("item_id"))
+        if cur is None or cur <= 0:
+            n_noprice += 1
+            continue            # ライブ価格取れない(ended等)→ 除外 (fail-closed)
         res = compute_pricedown(cur, _f(d["cost"]), d["cat"], r.get("title", ""),
                                 compute_fn=compute_fn, fx=fx, ad_rate=ad_rate)
-        if "error" in res:
-            rows_calc.append((r, d, cur, res, -1))
-            continue
-        rows_calc.append((r, d, cur, res, res["room_keep_pct"]))
+        rows_calc.append((r, d, cur, ccy or "USD", res,
+                          res["room_keep_pct"] if "error" not in res else -999))
+        if i % 25 == 0:
+            print(f"    ...{i}/{len(targets)}", flush=True)
 
-    rows_calc.sort(key=lambda x: -x[4])    # 値下げ余地%(据置) 降順
-    for r, d, cur, res, _ in rows_calc:
+    rows_calc.sort(key=lambda x: -x[5])    # 値下げ余地%(据置) 降順
+    for r, d, cur, ccy, res, _ in rows_calc:
         if "error" in res:
-            out.append(["", "", d["cat"], (r.get("title") or "")[:50], f"${cur:.0f}",
+            out.append(["", "", d["cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
                         f"¥{_f(d['cost']):.0f}", "要確認", res["error"], "", "", "",
                         "仕入可", d.get("supply", ""), r.get("ebay_url", "")])
         else:
-            out.append([res["room_keep_pct"], "", res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}",
+            out.append([res["room_keep_pct"], "", res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
                         f"¥{_f(d['cost']):.0f}", f"${res['v8_rec']:.0f}", f"${res['profit_usd']:.1f}",
                         f"${res['floor_keep']:.0f}", f"${res['floor_drop']:.0f}", f"{res['room_drop_pct']:.0f}%",
                         "仕入可", d.get("supply", ""), r.get("ebay_url", "")])
 
-    calc_ok = sum(1 for x in rows_calc if "error" not in x[3])
-    print(f"  結合 {len(rows_calc)+n_oos}件 / 売切○(仕入不可=除外) {n_oos} / 未結合 {n_nomatch}")
+    calc_ok = sum(1 for x in rows_calc if "error" not in x[4])
+    print(f"  結合 {len(targets)+n_oos}件 / 売切○(仕入不可=除外) {n_oos} / 未結合 {n_nomatch} / ライブ価格取得不可 {n_noprice}")
     print(f"  値下げ余地 算出 {calc_ok}件 / 要確認(カテゴリ未対応等) {len(rows_calc)-calc_ok}件")
     try:
         from sheet_io import write_rows_to_tab, MAINT_URL

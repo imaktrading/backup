@@ -221,10 +221,72 @@ def fetch_listing_qty(item_id):
         return None
 
 
+def fetch_listing_price(item_id):
+    """item_id の listing の **現在価格を USD換算で** 返す: (price_usd: float, native_ccy: str) or (None, None)。
+
+    funnel/レポートのスナップショットは古くなる(リバイス君が随時更新)ため、現価格は GetItem で
+    実時間取得する (2026-06-30)。non-US出品は native が AUD/EUR/GBP のため、V8(USD)と比較できるよう
+    ConvertedCurrentPrice(eBayのUSD換算)を価格として返す。native通貨も併せて返す。
+    """
+    item_id = str(item_id).strip()
+    if not item_id:
+        return None, None
+    try:
+        k = _load_keys()
+        hdr = {
+            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
+            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
+            "Content-Type": "text/xml",
+        }
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
+            f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+        )
+        text = None
+        for attempt in range(4):
+            try:
+                text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                break
+            except requests.exceptions.ConnectionError:
+                if attempt < 3:
+                    time.sleep(3)
+                    continue
+                raise
+        return _parse_getitem_price(text)
+    except Exception:
+        return None, None
+
+
+def _parse_getitem_price(text):
+    """GetItem XML → (USD換算価格, native通貨) (純関数, test可)。
+
+    ConvertedCurrentPrice(eBayのUSD換算)優先 → なければ CurrentPrice。
+    native通貨は CurrentPrice の currencyID 属性から(AUD/EUR/GBP/USD)。
+    """
+    if not text:
+        return None, None
+    native_ccy = None
+    mc = re.search(r'<CurrentPrice[^>]*currencyID="([A-Z]+)"', text)
+    if mc:
+        native_ccy = mc.group(1)
+    for tag in ("ConvertedCurrentPrice", "ConvertedStartPrice"):
+        mm = re.search(rf"<{tag}[^>]*>([\d.]+)</{tag}>", text)
+        if mm:
+            return float(mm.group(1)), native_ccy
+    for tag in ("CurrentPrice", "StartPrice"):
+        mm = re.search(rf"<{tag}[^>]*>([\d.]+)</{tag}>", text)
+        if mm:
+            return float(mm.group(1)), native_ccy or "USD"
+    return None, None
+
+
 if __name__ == "__main__":
     import sys
     for iid in sys.argv[1:]:
         urls = fetch_listing_images(iid)
-        print(f"{iid}: {len(urls)} pics / avail_qty={fetch_listing_qty(iid)}")
+        print(f"{iid}: {len(urls)} pics / avail_qty={fetch_listing_qty(iid)} / price={fetch_listing_price(iid)}")
         for u in urls:
             print("  ", u)
