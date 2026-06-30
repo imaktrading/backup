@@ -126,6 +126,43 @@ def summarize_audit_log(log: str) -> str:
     return "\n".join(lines)
 
 
+def summarize_generation_drops(log: str) -> str:
+    """新規生成ログから「CSVにならなかった分(生成段階の skip/reject/除外)」を抽出 (純関数・test可)。
+
+    全カテゴリ共通(TCG/G-shock/Mercari/一番くじ)。generator固有の文言に依存せず、共通の
+    ドロップ marker を含む行を拾う。監査くんは「CSVになった行」しか見ないため、生成段階で
+    fail-closed 除外された分が盲点になる(2026-06-30 ユーザー指摘「CSVにならなかった分はなんなの」)。
+    """
+    if not log:
+        return ""
+    import re
+    # ドロップ確定の精密パターン(全カテゴリ共通)。0件・補正・成功行は拾わない。
+    drop_res = [
+        re.compile(r"除外[:：]\s*[1-9]\d*\s*件"),        # 既出品/目視済 除外 (0件は除外)
+        re.compile(r"→\s*reject"),                        # 名前不一致 reject
+        re.compile(r"未登録[:：].*?(Skip|skip|スキップ)"),  # catalog未登録 skip
+        re.compile(r"スキップ\(目視"),                    # 目視未確定
+        re.compile(r"見送り[:：]?\s*[1-9]\d*\s*件"),       # 出品見送り N件
+        re.compile(r"失敗[:：]\s*[1-9]\d*\s*件"),          # 失敗 >0
+        re.compile(r"NO-?GO\s*[1-9]\d*\s*件"),             # NO-GO除外
+    ]
+    # 誤検出除外: 補正(=ドロップでない)/ 目視確定(=成功)/ Policy skip / 監査backlog行
+    exclude = ("補正", "目視確定", "強制置換", "Policy", "title_spec_mismatch", "backlog")
+    seen, hits = set(), []
+    for ln in log.splitlines():
+        s = ln.strip()
+        if not s or any(x in s for x in exclude):
+            continue
+        if any(r.search(s) for r in drop_res):
+            key = s[:60]
+            if key not in seen:
+                seen.add(key)
+                hits.append(s[:90])
+    if not hits:
+        return ""
+    return "📋 CSVにならなかった分(生成段階で除外/skip/reject):\n" + "\n".join("  " + h for h in hits[:20])
+
+
 # csv_postprocess_excluder helper (check_csv NO-GO 行を CSV から物理除外)
 # 2026-04-28 追加: dual_gate_disagreement.md CRITICAL 問題の応急対処.
 # psa_to_csv ↔ check_csv の市場ゲート判定矛盾で、check_csv が「除外済」表示しても
@@ -1866,6 +1903,17 @@ class ListingPanel:
         except Exception:
             pass
 
+    def _show_generation_drops(self, captured_log):
+        """新規生成完走 → CSVにならなかった分(生成段階の除外/skip/reject)を表示 (全カテゴリ共通)."""
+        summary = summarize_generation_drops(captured_log)
+        if not summary:
+            return
+        self.append_log("\n" + "=" * 70 + "\n" + summary + "\n" + "=" * 70 + "\n")
+        try:
+            messagebox.showinfo("生成: CSVにならなかった分", summary)
+        except Exception:
+            pass
+
     def poll_queue(self):
         try:
             while True:
@@ -1880,8 +1928,13 @@ class ListingPanel:
                         if any("csv_auditor.py" in str(c) for c in _cmd2):
                             _clog = self.log.get("1.0", "end") if hasattr(self, "log") else ""
                             self._show_audit_summary(_clog)
+                        # 新規生成(全カテゴリ)完了時: CSVにならなかった分(生成段階の除外/skip/reject)を可視化。
+                        # 監査くんはCSV化された行しか見ないので、生成段階のドロップが盲点になるのを防ぐ。
+                        if _idx2 >= 0 and SCRIPTS[_idx2].get("type") == "new":
+                            _glog = self.log.get("1.0", "end") if hasattr(self, "log") else ""
+                            self._show_generation_drops(_glog)
                     except Exception as _e:
-                        self.append_log(f"⚠️ 監査サマリー表示失敗: {_e}\n")
+                        self.append_log(f"⚠️ サマリー表示失敗: {_e}\n")
                     # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
                     _cur = SCRIPTS[getattr(self, "_current_idx", -1)] if getattr(self, "_current_idx", -1) >= 0 else {}
                     _oa = _cur.get("open_after")
