@@ -34,7 +34,7 @@ def test_promo_collision():
 def test_unconfirmed_viewer():
     log = "スキップ(目視未確定): #139291730"
     drops = dc.classify_drops(log, set_exists=lambda p: True)
-    assert drops and drops[0]["class"] == "目視未確定" and "139291730" in drops[0]["item"]
+    assert drops and "catalog欠" in drops[0]["class"] and "139291730" in drops[0]["item"]
 
 
 def test_normal_exclusion_is_no_action():

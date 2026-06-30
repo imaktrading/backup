@@ -67,9 +67,9 @@ def classify_drops(log, *, set_exists, card_exists=None):
             if cid in seen:
                 continue
             seen.add(cid)
-            out.append({"item": cid, "class": "目視未確定",
-                        "cause": "viewer で候補確定できず(候補なし/曖昧)",
-                        "act": "cooldown後に再浮上 / catalog候補の有無を確認"})
+            out.append({"item": cid, "class": "該当なし(catalog欠)",
+                        "cause": "viewer候補は出たが正カードがcatalogに無い(該当なし)",
+                        "act": "catalog拡充: 該当カードを追加(NONE→自動宿題化される運用)"})
             continue
 
         # ④ 既出品/目視済 除外(件数行)= 正常
