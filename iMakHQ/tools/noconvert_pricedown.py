@@ -48,6 +48,10 @@ COL_SUPPLY, COL_ITEMID, COL_SOLD, COL_COST, COL_CAT = 0, 1, 3, 13, 17   # A / B 
 MARGIN_GATE_PCT = 10
 CUT_PP = 5
 
+COL_AL_FLAG = 37          # AL列(0-index37=38列目)。値下FLG。Q列(FLG)は重複くん使用中のため末尾に新設。
+AL_FLAG_HEADER = "値下FLG"
+AL_FLAG_VALUE = f"値下{CUT_PP}pp"
+
 # 商品管理シート R列 ラベル → pricing_engine カテゴリ。未収載=floor出さず「要確認」(fail-closed)。
 SHEET_CAT_TO_PRICING = {
     "G-shock": "G-SHOCK", "TCG": "TCG(PSA10)", "Tシャツ": "Tシャツ(UT)",
@@ -79,6 +83,38 @@ def load_noconvert():
         sys.exit("funnel_*.csv がありません。先に『📊 ファネル分析』を実行してください。")
     rows = list(csv.DictReader(open(max(fs, key=os.path.getmtime), encoding="utf-8")))
     return [r for r in rows if "NO_CONVERT" in (r.get("flags") or "").split("|")]
+
+
+def write_al_flags(flagged_ids):
+    """HIGH/LOW 商品管理シートの AL列(値下FLG)を **フル同期** で書く (I/O)。
+
+    flagged_ids に居る itemID の行 → "値下{CUT_PP}pp"、それ以外の全行 → "" (clear)。
+    = 売れた/薄利化/対象外になった品の flag を毎回掃除する(追加削除をフル同期で回す)。
+    リバイス君はこの AL列を読んで apply_pricedown_override を適用する(2026-06-30)。
+    戻り: {sheet: (set件数, clear件数)}。
+    """
+    import gspread
+    from google.oauth2.service_account import Credentials
+    gc = gspread.authorize(Credentials.from_service_account_file(
+        CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
+    summary = {}
+    for sid in SHEET_IDS:
+        ws = gc.open_by_key(sid).get_worksheet_by_id(SHEET_GID)
+        rows = ws.get_all_values()
+        col = build_al_column(rows, flagged_ids)
+        ws.update(range_name=f"AL1:AL{len(col)}", values=col, value_input_option="RAW")
+        n_set = sum(1 for c in col[1:] if c[0] == AL_FLAG_VALUE)
+        summary[sid[:8]] = (n_set, len(col) - 1 - n_set)
+    return summary
+
+
+def build_al_column(rows, flagged_ids):
+    """AL列のフル同期値を構築 (純関数, test可)。行1=ヘッダー、以降 itemID が flagged なら値・他は空。"""
+    col = [[AL_FLAG_HEADER]]
+    for r in rows[1:]:
+        iid = (r[COL_ITEMID] if len(r) > COL_ITEMID else "").strip()
+        col.append([AL_FLAG_VALUE if (iid and iid in flagged_ids) else ""])
+    return col
 
 
 def load_sheet_index():
@@ -174,6 +210,7 @@ def main():
             print(f"    ...{i}/{len(targets)}", flush=True)
 
     rows_calc.sort(key=lambda x: -x[5])    # 利益率%(据置) 降順
+    flagged_ids = set()                    # AL列フル同期用: 値下5pp 対象の itemID
     for r, d, cur, ccy, res, _ in rows_calc:
         if "error" in res:
             out.append(["", "", d["cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
@@ -184,6 +221,8 @@ def main():
             # 判断 自動記入: 利益率≥10% は 5pp 削っても≥5%残る=赤字なし → 「値下5pp」候補。
             # 10%未満は薄利で除外(空欄)。閾値/削り幅は MARGIN_GATE/CUT_PP で調整可。
             judge = f"値下{CUT_PP}pp" if res["margin_keep_pct"] >= MARGIN_GATE_PCT else ""
+            if judge:
+                flagged_ids.add((r.get("item_id") or "").strip())
             out.append([res["margin_keep_pct"], judge, res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
                         f"¥{_f(d['cost']):.0f}", f"${res['v8_rec']:.0f}", f"${res['profit_usd']:.1f}",
                         res["margin_drop_pct"], gap,
@@ -198,7 +237,16 @@ def main():
         print(f"💲 「値下げ余地」タブ更新: {len(out)-1}件 → {MAINT_URL}")
     except Exception as e:
         print(f"⚠ タブ更新失敗: {type(e).__name__}: {e}")
-    print("▶ 各行の値下げ余地%を見て、判断列に「値下/様子見」を記入 → リバイス君が利益率上書きで反映(別途依頼)。")
+    # 商品管理シート AL列(値下FLG)をフル同期 → リバイス君が読む。NOCONVERT_NO_FLAG_WRITE=1 で抑止。
+    if os.environ.get("NOCONVERT_NO_FLAG_WRITE") == "1":
+        print(f"  ※ AL列書込skip (NOCONVERT_NO_FLAG_WRITE=1)。値下5pp対象 {len(flagged_ids)}件")
+    else:
+        try:
+            s = write_al_flags(flagged_ids)
+            print(f"🏷 AL列(値下FLG)フル同期: {dict(s)} (値下5pp={len(flagged_ids)}件・他はclear)")
+        except Exception as e:
+            print(f"⚠ AL列書込失敗: {type(e).__name__}: {e}")
+    print("▶ リバイス君が AL列(値下FLG)を読み、apply_pricedown_override で週1反映(本実装依頼後)。")
     print("※ 売切○は仕入不可のため除外済。自動値下げはしない。")
 
 

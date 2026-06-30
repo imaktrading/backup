@@ -44,6 +44,19 @@ def test_margin_math():
     assert res2["margin_keep_pct"] == res["margin_keep_pct"]
 
 
+def test_build_al_column_full_sync():
+    # フル同期: flagged な itemID は値、他(売れた/対象外)は必ずclear、行1=ヘッダー
+    rows = [["URL", "itemID"],            # header (B=itemID)
+            ["u", "111"], ["u", "222"], ["u", "333"], ["u", ""]]
+    col = m.build_al_column(rows, {"111", "333"})
+    assert col[0] == [m.AL_FLAG_HEADER]
+    assert col[1] == [m.AL_FLAG_VALUE]    # 111 flagged
+    assert col[2] == [""]                 # 222 非対象=clear
+    assert col[3] == [m.AL_FLAG_VALUE]    # 333 flagged
+    assert col[4] == [""]                 # 空itemID=clear
+    assert len(col) == len(rows)
+
+
 def test_margin_gate_constant():
     # ゲート閾値で5pp削っても黒字が保証される (≥10% → 5pp削って≥5%)
     assert m.MARGIN_GATE_PCT - m.CUT_PP >= 0
