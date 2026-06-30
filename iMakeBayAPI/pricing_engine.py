@@ -530,11 +530,18 @@ def apply_pricedown_override(cost_jpy, category, *, cut_pct=5.0, gate_pct=10.0):
     if margin_std < gate_pct:
         return {"price": round(v8, 2), "applied": False,
                 "reason": f"薄利(利益率{margin_std:.1f}%<{gate_pct}%)で据置",
-                "margin_std_pct": round(margin_std, 1), "margin_after_floor_pct": round(margin_std, 1)}
-    return {"price": round(v8 * (1.0 - cut_pct / 100.0), 2), "applied": True,
+                "margin_std_pct": round(margin_std, 1), "margin_after_floor_pct": round(margin_std, 1),
+                "shipping_profile_name": rec.get("shipping_profile_name", "")}
+    new_price = round(v8 * (1.0 - cut_pct / 100.0), 2)
+    # 送料Policyは **新価格で取り直す**(値下げで価格バンドを跨ぐと標準V8のpolicyが不整合になるため。
+    # 2026-06-30 HQ判断: 整合性優先。price と policy をセットで返す=取り直し忘れの余地ゼロ)。
+    group = rec.get("group") or _v6_group(rec.get("category_resolved", category))
+    new_tier = _v6_tier(new_price)[0]
+    return {"price": new_price, "applied": True,
             "reason": f"{cut_pct}%値下げ(利益率{margin_std:.1f}%→残≥{margin_std - cut_pct:.1f}%)",
             "margin_std_pct": round(margin_std, 1),
-            "margin_after_floor_pct": round(margin_std - cut_pct, 1)}
+            "margin_after_floor_pct": round(margin_std - cut_pct, 1),
+            "shipping_profile_name": _v6_policy_name(group, new_tier)}
 
 
 if __name__ == "__main__":

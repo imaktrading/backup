@@ -56,6 +56,17 @@ def test_gate_must_exceed_cut():
         pe.apply_pricedown_override(3000, "TCG(PSA10)", gate_pct=5, cut_pct=5)
 
 
+def test_policy_recomputed_at_new_price():
+    # 値下げ品は送料Policyを新価格で取り直す(バンド跨ぎ整合)。返り値の policy が新価格tier由来。
+    cat, cost = CHEAP
+    r = pe.apply_pricedown_override(cost, cat)
+    assert "shipping_profile_name" in r
+    if r["applied"]:
+        group = pe._v6_group(cat)
+        expected = pe._v6_policy_name(group, pe._v6_tier(r["price"])[0])
+        assert r["shipping_profile_name"] == expected   # 新価格の tier で取り直し済
+
+
 def test_relative_would_compound_contrast():
     # 対比: 相対実装(前回価格×0.95)は compound する → だから絶対指定が必須
     def relative(prev):
