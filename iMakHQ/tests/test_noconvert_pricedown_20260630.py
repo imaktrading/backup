@@ -30,19 +30,18 @@ def test_zero_cost_flagged():
     assert res.get("error") == "仕入値ゼロ"
 
 
-def test_floor_and_room_math():
-    # cost¥10000, cur$120, fx159, ad0.10。推奨=120, 利益¥4000=$25.16
+def test_margin_math():
+    # cost¥10000 → 模擬V8: 推奨=120, 利益¥4000=$25.16(fx159)
     res = m.compute_pricedown(120.0, 10000, "TCG", "card", compute_fn=_fake_compute, fx=159.0, ad_rate=0.10)
     assert abs(res["v8_rec"] - 120.0) < 0.01
     assert abs(res["profit_usd"] - 25.16) < 0.1            # 4000/159
-    # floor据置 = 推奨 - 利益$ = 120 - 25.16 = 94.84
-    assert abs(res["floor_keep"] - 94.84) < 0.1
-    # floor外 = floor据置 - ad*推奨 = 94.84 - 12 = 82.84
-    assert abs(res["floor_drop"] - 82.84) < 0.1
-    # 値下げ余地(据置) = (120-94.84)/120 ≈ 21%
-    assert 20 < res["room_keep_pct"] < 22
-    # プロモ外す方が余地大
-    assert res["room_drop_pct"] > res["room_keep_pct"]
+    # 利益率(据置) = 込み利益 / V8推奨 = 25.16/120 ≈ 21%
+    assert 20 < res["margin_keep_pct"] < 22
+    # プロモ外 = 据置 + ad_rate(10pp) ≈ 31%
+    assert abs(res["margin_drop_pct"] - (res["margin_keep_pct"] + 10)) < 0.2
+    # cur_price は利益率に影響しない(V8由来=cost-based)
+    res2 = m.compute_pricedown(999.0, 10000, "TCG", "card", compute_fn=_fake_compute, fx=159.0, ad_rate=0.10)
+    assert res2["margin_keep_pct"] == res["margin_keep_pct"]
 
 
 def test_pricing_map_targets_valid():

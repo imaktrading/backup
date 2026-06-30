@@ -96,10 +96,12 @@ def load_sheet_index():
 
 
 def compute_pricedown(cur_price, cost_jpy, sheet_cat, title, *, compute_fn, fx, ad_rate):
-    """1商品の値下げ余地を算出 (純関数, test可)。
+    """1商品の利益率(=値下げ余地)を算出 (純関数, test可)。
 
-    戻り dict: {pricing_cat, v8_rec, profit_usd, floor_keep, floor_drop, room_keep_pct, room_drop_pct}
-    または {"error": 理由} (カテゴリ未対応/仕入値ゼロ)。
+    値下げ余地 = V8が価格に織り込んだ利益率 = 込み利益 ÷ V8推奨価格。V8自身の出力をそのまま使う
+    (自前の損益分岐近似は DDP/fee grossup を誤るため廃止。2026-06-30 ユーザー指摘)。
+    margin_keep = 利益率(プロモ据置) / margin_drop = 広告(ad_rate)を外した分も上乗せ。
+    戻り dict または {"error": 理由} (カテゴリ未対応/仕入値ゼロ)。cur_price は表示/乖離確認用。
     """
     if cost_jpy <= 0:
         return {"error": "仕入値ゼロ"}
@@ -112,14 +114,11 @@ def compute_pricedown(cur_price, cost_jpy, sheet_cat, title, *, compute_fn, fx, 
         return {"error": f"V8計算失敗({type(e).__name__})"}
     v8 = _f(rec.get("price"))
     profit_usd = _f(rec.get("profit_jpy")) / fx if fx else 0.0
-    floor_keep = round(v8 - profit_usd, 2)                       # 損益分岐(プロモ据置)
-    floor_drop = round(floor_keep - ad_rate * v8, 2)            # 広告分も削る(プロモ外す)
-    room_keep = cur_price - floor_keep                          # 現価格からの値下げ可能幅
-    room_drop = cur_price - floor_drop
+    margin_keep = round(100 * profit_usd / v8, 1) if v8 else 0.0           # 利益率(プロモ据置)
+    margin_drop = round(margin_keep + 100 * ad_rate, 1)                    # +広告分(プロモ外す)
     return {"pricing_cat": rec.get("category_resolved", base), "v8_rec": v8,
-            "profit_usd": round(profit_usd, 2), "floor_keep": floor_keep, "floor_drop": floor_drop,
-            "room_keep_pct": round(100 * room_keep / cur_price, 1) if cur_price else 0.0,
-            "room_drop_pct": round(100 * room_drop / cur_price, 1) if cur_price else 0.0}
+            "profit_usd": round(profit_usd, 2),
+            "margin_keep_pct": margin_keep, "margin_drop_pct": margin_drop}
 
 
 def main():
@@ -152,8 +151,8 @@ def main():
         targets.append((r, d))
 
     print(f"  仕入可 {len(targets)}件 → eBay GetItem で現価格(USD換算)をライブ取得中...", flush=True)
-    out = [["値下げ余地%(据置)", "判断(値下/様子見)", "カテゴリ", "商品名", "現価格$", "通貨", "最新仕入¥",
-            "V8推奨", "込み利益$", "下限(プロモ据置)", "下限(プロモ外)", "値下げ余地%(外)",
+    out = [["利益率%(=値下げ余地・据置)", "判断(値下/様子見)", "カテゴリ", "商品名", "現価格$", "通貨", "最新仕入¥",
+            "V8推奨$", "込み利益$", "利益率%(プロモ外)", "現価格÷V8(乖離)",
             "在庫", "仕入元URL", "eBay URL"]]
     rows_calc = []
     n_noprice = 0
@@ -165,20 +164,21 @@ def main():
         res = compute_pricedown(cur, _f(d["cost"]), d["cat"], r.get("title", ""),
                                 compute_fn=compute_fn, fx=fx, ad_rate=ad_rate)
         rows_calc.append((r, d, cur, ccy or "USD", res,
-                          res["room_keep_pct"] if "error" not in res else -999))
+                          res["margin_keep_pct"] if "error" not in res else -999))
         if i % 25 == 0:
             print(f"    ...{i}/{len(targets)}", flush=True)
 
-    rows_calc.sort(key=lambda x: -x[5])    # 値下げ余地%(据置) 降順
+    rows_calc.sort(key=lambda x: -x[5])    # 利益率%(据置) 降順
     for r, d, cur, ccy, res, _ in rows_calc:
         if "error" in res:
             out.append(["", "", d["cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
-                        f"¥{_f(d['cost']):.0f}", "要確認", res["error"], "", "", "",
+                        f"¥{_f(d['cost']):.0f}", "要確認", res["error"], "", "",
                         "仕入可", d.get("supply", ""), r.get("ebay_url", "")])
         else:
-            out.append([res["room_keep_pct"], "", res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
+            gap = round(cur / res["v8_rec"], 2) if res["v8_rec"] else ""   # 現価格÷V8 (1.0=追従, <1=値上げ遅れ)
+            out.append([res["margin_keep_pct"], "", res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
                         f"¥{_f(d['cost']):.0f}", f"${res['v8_rec']:.0f}", f"${res['profit_usd']:.1f}",
-                        f"${res['floor_keep']:.0f}", f"${res['floor_drop']:.0f}", f"{res['room_drop_pct']:.0f}%",
+                        res["margin_drop_pct"], gap,
                         "仕入可", d.get("supply", ""), r.get("ebay_url", "")])
 
     calc_ok = sum(1 for x in rows_calc if "error" not in x[4])
