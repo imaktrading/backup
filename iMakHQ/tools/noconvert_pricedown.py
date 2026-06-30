@@ -43,6 +43,11 @@ SHEET_IDS = ["19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk",   # HIGH
 SHEET_GID = 851100680
 COL_SUPPLY, COL_ITEMID, COL_SOLD, COL_COST, COL_CAT = 0, 1, 3, 13, 17   # A / B / D / N / R
 
+# 判断ゲート: 利益率がこれ以上なら CUT_PP 削っても黒字 → 「値下」候補。未満は薄利で除外。
+# (degressive利益率で一律%は不可。≥10%だけ拾えば5pp削っても≥5%残る=赤字なし。2026-06-30 ユーザー)
+MARGIN_GATE_PCT = 10
+CUT_PP = 5
+
 # 商品管理シート R列 ラベル → pricing_engine カテゴリ。未収載=floor出さず「要確認」(fail-closed)。
 SHEET_CAT_TO_PRICING = {
     "G-shock": "G-SHOCK", "TCG": "TCG(PSA10)", "Tシャツ": "Tシャツ(UT)",
@@ -176,7 +181,10 @@ def main():
                         "仕入可", d.get("supply", ""), r.get("ebay_url", "")])
         else:
             gap = round(cur / res["v8_rec"], 2) if res["v8_rec"] else ""   # 現価格÷V8 (1.0=追従, <1=値上げ遅れ)
-            out.append([res["margin_keep_pct"], "", res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
+            # 判断 自動記入: 利益率≥10% は 5pp 削っても≥5%残る=赤字なし → 「値下5pp」候補。
+            # 10%未満は薄利で除外(空欄)。閾値/削り幅は MARGIN_GATE/CUT_PP で調整可。
+            judge = f"値下{CUT_PP}pp" if res["margin_keep_pct"] >= MARGIN_GATE_PCT else ""
+            out.append([res["margin_keep_pct"], judge, res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
                         f"¥{_f(d['cost']):.0f}", f"${res['v8_rec']:.0f}", f"${res['profit_usd']:.1f}",
                         res["margin_drop_pct"], gap,
                         "仕入可", d.get("supply", ""), r.get("ebay_url", "")])

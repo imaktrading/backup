@@ -44,6 +44,11 @@ def test_margin_math():
     assert res2["margin_keep_pct"] == res["margin_keep_pct"]
 
 
+def test_margin_gate_constant():
+    # ゲート閾値で5pp削っても黒字が保証される (≥10% → 5pp削って≥5%)
+    assert m.MARGIN_GATE_PCT - m.CUT_PP >= 0
+
+
 def test_pricing_map_targets_valid():
     # マップ先は pricing カテゴリ名(空でない)
     for sheet_cat, pricing in m.SHEET_CAT_TO_PRICING.items():
