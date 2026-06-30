@@ -20,7 +20,8 @@ def test_sold_out_detection():
 
 
 def test_unmapped_category_is_flagged():
-    res = m.compute_pricedown(100, 5000, "グッズ", "x", compute_fn=_fake_compute, fx=159.0, ad_rate=0.10)
+    # マップに無いカテゴリは「要確認(未対応)」になる (fail-closed)
+    res = m.compute_pricedown(100, 5000, "存在しないカテゴリZZZ", "x", compute_fn=_fake_compute, fx=159.0, ad_rate=0.10)
     assert "error" in res and "未対応" in res["error"]
 
 
