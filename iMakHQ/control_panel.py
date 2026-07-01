@@ -601,8 +601,8 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "noconvert_pricedown.py"],
         "params": [],
-        # 結果は「既存メンテ」スプシ 値下げ余地タブ + 商品管理シート AL列(値下FLG)
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+        # 結果は「既存メンテ」スプシ 値下げ余地タブ(gid直開き) + 商品管理シート AL列(値下FLG)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=1187422007",
     },
     # ---- 一番くじ 在庫補充→内容刷新 (2026-06-25 配線。CLI: ichibankuji_restock.py) ----
     # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
