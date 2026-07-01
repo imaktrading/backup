@@ -552,8 +552,8 @@ SCRIPTS = [
         "params": [],
     },
     # 2026-06-04: 月次レポート生成 / 今、見る はパネルから削除 (ファネル分析が上位互換。.py は残置)
-    # 取下再出品 ①②③ を上段、✏️タイトル改修/💲価格抵抗 を下段に並べる (3列グリッド=d1)。
-    # 表示順は _ugroup "relist" 群の SCRIPTS 出現順なので ①②③→タイトル改修→価格抵抗 の順で置く。
+    # 取下再出品 ①②③ を上段、✏️タイトル改修/💲値下げ余地 を下段に並べる (3列グリッド=d1)。
+    # 表示順は _ugroup "relist" 群の SCRIPTS 出現順なので ①②③→タイトル改修→値下げ余地 の順で置く。
     {
         "category": None, "type": "utility",
         "label": "取下再出品① 取下げ(End)",
@@ -593,13 +593,15 @@ SCRIPTS = [
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     {
-        # NO_CONVERT: 高クリック無販売を自分の実売(proven)と照合=価格抵抗 (2026-06-05)。②の下段
+        # NO_CONVERT 値下げ余地 (2026-07-01 price_resistance から差替)。②の下段。
+        # 利益率(V8・ライブUSD)算出 → 値下げ余地シート + B列「値下5pp」判断 + AL列flag書込。
+        # リバイス君が週1で AL列を読み apply_pricedown_override を適用。旧 price_resistance は役割終了。
         "category": None, "type": "utility",
-        "label": "💲 価格抵抗",
+        "label": "💲 値下げ余地",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "price_resistance.py"],
+        "cmd": ["python", "noconvert_pricedown.py"],
         "params": [],
-        # 結果は「既存メンテ」スプシ 価格抵抗タブに集約 (CSV廃止)
+        # 結果は「既存メンテ」スプシ 値下げ余地タブ + 商品管理シート AL列(値下FLG)
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     # ---- 一番くじ 在庫補充→内容刷新 (2026-06-25 配線。CLI: ichibankuji_restock.py) ----
@@ -1506,7 +1508,7 @@ class ListingPanel:
             # 在庫あり listing を直す: 取下再出品①②③(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
             if any(s in cmd for s in ("relist_from_funnel", "relist_add_from_pending",
                                       "relist_writeback", "dump_us_qty1_sku",
-                                      "noclick_targets", "price_resistance")):
+                                      "noclick_targets", "noconvert_pricedown")):
                 return "relist"
             return "report"
         ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": [], "audit": []}
@@ -1686,7 +1688,7 @@ class ListingPanel:
                              for cat in cat_order if categories[cat].get("relist") is not None]
             d1 = ttk.LabelFrame(scroll_frame, text="🔧 在庫あり — 直す (検索/タイトル/価格) 出品≥21日", padding=4)
             d1.pack(fill="x", padx=4, pady=(6, 0))
-            # 3列: 上段①②③ / 下段✏️タイトル改修(①下)・💲価格抵抗(②下) が縦に揃う
+            # 3列: 上段①②③ / 下段✏️タイトル改修(①下)・💲値下げ余地(②下) が縦に揃う
             _grid_named(d1, relist_items, ncol=3)
             d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ / 整理", padding=4)
             d2.pack(fill="x", padx=4, pady=(6, 0))
