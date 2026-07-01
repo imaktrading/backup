@@ -597,7 +597,7 @@ SCRIPTS = [
         # 利益率(V8・ライブUSD)算出 → 値下げ余地シート + B列「値下5pp」判断 + AL列flag書込。
         # リバイス君が週1で AL列を読み apply_pricedown_override を適用。旧 price_resistance は役割終了。
         "category": None, "type": "utility",
-        "label": "💲 値下げ余地",
+        "label": "💲 価格見直し",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "noconvert_pricedown.py"],
         "params": [],
