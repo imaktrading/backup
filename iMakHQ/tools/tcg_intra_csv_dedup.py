@@ -25,16 +25,30 @@ def _design_key(row, header):
     return (g("C:Game"), g("C:Set"), g("C:Card Number"))
 
 
+def _title_key(row, header):
+    """row の完全一致タイトル(小文字)を identity に。純関数。空なら ''。"""
+    i = header.index("*Title") if "*Title" in header else -1
+    return (row[i].strip().lower() if 0 <= i < len(row) else "")
+
+
 def dup_row_indices(body, header):
     """同一 design key の 2件目以降の body index(0-based)を返す。純関数。
 
-    design key の構成要素のどれかが空(同定不能)の行は対象外=残す(誤除外しない fail-closed)。
+    design key = (game, set, card_number)。構成要素に空がある行(catalog gap で C:Set 空等)は
+    **完全一致タイトルにフォールバック**して同定する。card number 自体に set コードが含まれ、
+    identical title = 同一 listing 確定なので Set 空でも安全に間引ける。別カードは title が違うため
+    誤除外しない。design key も title も空なら同定不能 → 残す(fail-closed)。
+    (2026-07-01: Set 空で design key が同定放棄され identical 2枚が素通りした事故の恒久対策。
+     従来は `if "" in key: continue` で丸ごとスキップしていた)。
     """
     seen, drop = set(), set()
     for i, row in enumerate(body):
         key = _design_key(row, header)
         if "" in key:
-            continue
+            t = _title_key(row, header)
+            if not t:
+                continue  # design key も title も無い → 同定不能、残す
+            key = ("__title__", t)
         if key in seen:
             drop.add(i)
         else:
