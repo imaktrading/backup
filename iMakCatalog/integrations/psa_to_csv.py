@@ -770,6 +770,13 @@ def _search_one_piece_promo_by_number(
             edition_hit = True
         if re.search(r"25TH|25\s*周年", hay) and "25周年" in sn:
             edition_hit = True
+        # 2026-07-02: "Nth ANNIVERSARY SET" edition (cert84400496 OTAMA #006 → OP01-006_p4).
+        #   汎用promo(_P 'Promotion Card' score150)に本命(_p4 'Nst ANNIVERSARY SET')が
+        #   負けて沈む問題を是正。**ordinal番号一致必須** = 1st/2nd/3rd の別anniversary set への
+        #   暴発防止(番号違いなら発火せず、既存の keyword +60 のみ)。
+        m_anniv = re.search(r"(\d+)\s*(?:ST|ND|RD|TH)\s*ANNIVERSARY", hay)
+        if m_anniv and re.search(rf"\b{m_anniv.group(1)}\s*(?:st|nd|rd|th)\s*ANNIVERSARY", sn, re.IGNORECASE):
+            edition_hit = True
         # edition/event pair (両方一致必須=暴発防止)。英keyword in hay かつ 日keyword in official。
         for en, jp in (
             ("FILM RED", "FILM RED"),

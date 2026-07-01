@@ -51,3 +51,15 @@ def test_caseC_sabo_best_selection_unchanged():
     assert _pid("049", "SABO",
                 "ONE PIECE JAPANESE PREMIUM CARD COLLECTION -BEST SELECTION VOL.4-"
                 ) == "OP10-049_p1"
+
+
+def test_anniversary_set_edition_resolves_p4():
+    # 2026-07-02 (cert84400496): '1ST ANNIVERSARY SET' [OTAMA] #006 → OP01-006_p4.
+    # 汎用promo(OP01-006_P 'Promotion Card' score150 同点)に沈まず、ordinal一致で一意化。
+    assert _pid("006", "OTAMA", "ONE PIECE JAPANESE 1ST ANNIVERSARY SET") == "OP01-006_p4"
+
+
+def test_anniversary_ordinal_no_overfire():
+    # 暴発防止: ordinal番号一致必須。'2ND ANNIVERSARY' brand は 1st ANNIVERSARY set(_p4)を選ばない。
+    pid = _pid("006", "OTAMA", "ONE PIECE JAPANESE 2ND ANNIVERSARY SET")
+    assert pid != "OP01-006_p4", "別ordinal(2nd)が1st edition(_p4)に暴発"
