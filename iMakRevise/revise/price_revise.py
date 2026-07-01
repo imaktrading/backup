@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import re
 import subprocess
 import sys
 import time
@@ -112,8 +113,9 @@ COL_N_PRICE = 13     # N (仕入れ価格 ¥)
 COL_CHECK_TIME = 14  # O (売り切れチェック時間)
 COL_CATEGORY = 17    # R (カテゴリ)
 COL_AH_PRICE = 33    # AH (前期 N ¥)
-COL_PRICEDOWN_FLG = 37  # AL (値下FLG = NO_CONVERT 値下げ対象、HQ noconvert がフル同期書込)
-PRICEDOWN_FLG_VALUE = "値下5pp"  # AL 列がこの値の行のみ 5pp 値下げ override 対象
+COL_PRICEDOWN_FLG = 37  # AL (値下FLG(pp) = NO_CONVERT 値下げ幅%、HQ noconvert がフル同期書込)
+# AL 列は 2026-07-01 から数値pp (既定"5"、人手で"8"等に上書き可、空=非対象)。
+# 旧: 文字列 "値下5pp" 固定 → 廃止。
 
 # 公式 SKU詳細 schema
 COL_OFFICIAL_LISTING_ID = 3  # D
@@ -220,7 +222,7 @@ class ReviseCandidate:
     variation_color: str = ""                      # スプシ H 列
     is_variation: bool = False                     # True なら variation listing の 1 SKU
     # NO_CONVERT 値下げ override (2026-06-30 追加、HIGH/LOW のみ)
-    pricedown_flag: str = ""                        # AL 列 (= "値下5pp" なら 5pp 値下げ対象)
+    pricedown_flag: str = ""                        # AL 列 (= 正の数値pp なら値下げ対象、cut_pct に使用)
     pricedown_applied: bool = False                 # 実際に override が適用されたか (gate 通過)
 
 
@@ -401,6 +403,29 @@ def _is_sold(cell_value: str) -> bool:
 def _is_valid_jpy(v: Optional[float]) -> bool:
     """¥が有効値か (range check)."""
     return v is not None and MIN_JPY <= v <= MAX_JPY
+
+
+_LEGACY_PRICEDOWN_RE = re.compile(r"^値下(\d+(?:\.\d+)?)pp$")
+
+
+def parse_pricedown_pp(flag) -> Optional[float]:
+    """AL列(値下FLG) を値下げ幅% に解釈 (2026-07-01 数値化).
+
+    正の数値なら float (= cut_pct)、空/非数値/0以下は None (= 非対象)。
+    例: "5"→5.0 / "8"→8.0 / ""→None。
+    後方互換: 旧文字列 "値下5pp" → 5.0 (noconvert の数値化 sync が未走の移行期を安全に跨ぐ)。
+    """
+    s = str(flag or "").strip()
+    if not s:
+        return None
+    m = _LEGACY_PRICEDOWN_RE.match(s)
+    if m:
+        s = m.group(1)
+    try:
+        pp = float(s)
+    except ValueError:
+        return None
+    return pp if pp > 0 else None
 
 
 # ============================================================================
@@ -769,15 +794,17 @@ def compute_new_usd(candidate: ReviseCandidate, v8_fn, pricedown_fn=None) -> Rev
         candidate.new_usd = None  # skip 扱い
         return candidate
 
-    # NO_CONVERT 値下げ override (HIGH/LOW のみ、AL列flag品)
+    # NO_CONVERT 値下げ override (HIGH/LOW のみ、AL列=正の数値pp の行)
+    cut_pp = parse_pricedown_pp(candidate.pricedown_flag)
     if (pricedown_fn is not None
-            and candidate.pricedown_flag == PRICEDOWN_FLG_VALUE
+            and cut_pp is not None
             and not _normalize.is_sold(candidate.sold_flag)):
         try:
             od = pricedown_fn(
                 cost_jpy=candidate.effective_cost,
                 category=norm_category,
                 title=candidate.title,
+                cut_pct=cut_pp,  # AL列の数値pp (5→5% / 8→8%)
             )
             # price と shipping_profile_name は必ずセットで採用 (バンド跨ぎ不整合防止)
             candidate.new_usd = od["price"]
@@ -785,7 +812,8 @@ def compute_new_usd(candidate: ReviseCandidate, v8_fn, pricedown_fn=None) -> Rev
             candidate.pricedown_applied = bool(od.get("applied"))
         except Exception as e:
             # override 失敗時は標準価格を据置 (fail-safe: 値下げしないだけ、誤価格は出さない)
-            print(f"  [WARN pricedown override 失敗→標準据置] item={candidate.item_id}: {e}")
+            # 例: 手動 AL≥gate(10) → 関数が ValueError (赤字防止の不変条件) → 標準据置。
+            print(f"  [WARN pricedown override 失敗→標準据置] item={candidate.item_id} AL={candidate.pricedown_flag!r}: {e}")
 
     return candidate
 
@@ -1247,10 +1275,12 @@ def run_price_revise(
                 pricedown_applied_count += 1
         if v8_failed:
             print(f"[revise]   V8 計算失敗: {v8_failed} 件 (= Unknown category 等)")
-        pricedown_flagged = sum(1 for c in normal_candidates if c.pricedown_flag == PRICEDOWN_FLG_VALUE)
+        pricedown_flagged = sum(
+            1 for c in normal_candidates if parse_pricedown_pp(c.pricedown_flag) is not None
+        )
         if pricedown_flagged:
             print(f"[revise]   NO_CONVERT 値下げ: flag {pricedown_flagged} 件 中 "
-                  f"{pricedown_applied_count} 件に 5pp 適用 (残は gate 据置)")
+                  f"{pricedown_applied_count} 件に値下げ適用 (残は gate 据置)")
         if pack_registered_count:
             print(f"[revise]   pack mapping 適用: {pack_registered_count} 件")
         if pack_suspect_count:

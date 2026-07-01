@@ -20,7 +20,6 @@ from revise.price_revise import (
     HEADER_ROWS,
     MAX_JPY,
     MIN_JPY,
-    PRICEDOWN_FLG_VALUE,
     REVISE_CSV_HEADER,
     ReviseCandidate,
     _import_pricedown_override,
@@ -30,6 +29,7 @@ from revise.price_revise import (
     _to_float,
     compute_new_usd,
     detect_candidates,
+    parse_pricedown_pp,
     round_98,
     should_revise,
     write_revise_csv,
@@ -723,7 +723,7 @@ class TestExtractSheetId:
 # NO_CONVERT 値下げ override (2026-06-30)
 # ============================================================================
 def _pd_candidate(category="G-shock", n=17000, title="CASIO G-SHOCK",
-                  flag=PRICEDOWN_FLG_VALUE, sold=""):
+                  flag="5", sold=""):
     return ReviseCandidate(
         row_index=2, item_id="X", category=category, new_jpy=n, ah_jpy=None,
         f_jpy=None, delta_pct=0.0, basis="pending", title=title,
@@ -797,18 +797,76 @@ class TestPricedownOverride:
         """price と shipping_profile_name は override の戻り値とセットで一致."""
         c = _pd_candidate("G-shock", 17000)
         compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
-        od = _PD_FN(cost_jpy=17000, category="G-SHOCK", title="CASIO G-SHOCK")
+        od = _PD_FN(cost_jpy=17000, category="G-SHOCK", title="CASIO G-SHOCK", cut_pct=5.0)
         assert c.new_usd == od["price"]
         assert c.shipping_profile_name == od["shipping_profile_name"]
+
+    def test_al_5_is_5pct(self):
+        """AL="5" → cut_pct=5% (関数を cut_pct=5 で直呼びした値と一致)."""
+        c = _pd_candidate("G-shock", 17000, flag="5")
+        compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+        assert c.new_usd == _PD_FN(cost_jpy=17000, category="G-SHOCK",
+                                   title="CASIO G-SHOCK", cut_pct=5.0)["price"]
+
+    def test_al_8_is_8pct(self):
+        """AL="8" → cut_pct=8% (5% より安い)."""
+        c5 = _pd_candidate("G-shock", 17000, flag="5")
+        compute_new_usd(c5, _V8_FN, pricedown_fn=_PD_FN)
+        c8 = _pd_candidate("G-shock", 17000, flag="8")
+        compute_new_usd(c8, _V8_FN, pricedown_fn=_PD_FN)
+        assert c8.new_usd == _PD_FN(cost_jpy=17000, category="G-SHOCK",
+                                    title="CASIO G-SHOCK", cut_pct=8.0)["price"]
+        assert c8.new_usd < c5.new_usd  # 8% の方が安い
+
+    def test_al_over_gate_holds_standard(self):
+        """AL="10" (gate<=cut → ValueError) → fail-safe で標準価格据置."""
+        std_usd, _ = _std_price("G-shock", 17000)
+        c = _pd_candidate("G-shock", 17000, flag="10")
+        compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+        assert c.pricedown_applied is False
+        assert c.new_usd == std_usd
+
+    def test_al_empty_or_nonnumeric_no_pricedown(self):
+        """AL 空/非数値/0以下 → 非対象 (標準価格)."""
+        std_usd, _ = _std_price("G-shock", 17000)
+        for flag in ("", "0", "-3", "abc"):
+            c = _pd_candidate("G-shock", 17000, flag=flag)
+            compute_new_usd(c, _V8_FN, pricedown_fn=_PD_FN)
+            assert c.pricedown_applied is False, f"flag={flag!r}"
+            assert c.new_usd == std_usd, f"flag={flag!r}"
+
+    def test_legacy_string_compat(self):
+        """移行期: 旧 "値下5pp" は 5% として拾う (= 数値 "5" と同値)."""
+        c_legacy = _pd_candidate("G-shock", 17000, flag="値下5pp")
+        compute_new_usd(c_legacy, _V8_FN, pricedown_fn=_PD_FN)
+        c_num = _pd_candidate("G-shock", 17000, flag="5")
+        compute_new_usd(c_num, _V8_FN, pricedown_fn=_PD_FN)
+        assert c_legacy.pricedown_applied is True
+        assert c_legacy.new_usd == c_num.new_usd
+
+
+class TestParsePricedownPp:
+    def test_positive_numbers(self):
+        assert parse_pricedown_pp("5") == 5.0
+        assert parse_pricedown_pp("8") == 8.0
+        assert parse_pricedown_pp(" 7 ") == 7.0
+
+    def test_legacy_string(self):
+        assert parse_pricedown_pp("値下5pp") == 5.0
+        assert parse_pricedown_pp("値下8pp") == 8.0
+
+    def test_none_cases(self):
+        for v in ("", None, "0", "-1", "abc", "5pp", "値下pp"):
+            assert parse_pricedown_pp(v) is None
 
 
 class TestDetectCandidatesPricedown:
     def test_al_flag_read_high_low(self):
         row = [""] * 38
         row[0] = "https://example.com/x"; row[1] = "123"; row[13] = "5000"
-        row[17] = "G-shock"; row[37] = PRICEDOWN_FLG_VALUE
+        row[17] = "G-shock"; row[37] = "8"
         c = detect_candidates([row], schema="high_low")
-        assert len(c) == 1 and c[0].pricedown_flag == PRICEDOWN_FLG_VALUE
+        assert len(c) == 1 and c[0].pricedown_flag == "8"
 
     def test_official_schema_ignores_index37(self):
         """official synthetic row は 37 幅 = index37 不在 → pricedown_flag 空."""
