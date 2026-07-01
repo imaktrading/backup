@@ -39,8 +39,23 @@ BANNED_TITLE_WORDS = [
 ]
 # 注: "japan" はMercari系（Porter/montbell/UT）では許可（Japan Exclusive等で使用）
 
-# 必須Item Specifics（空欄だと品質低下）
-REQUIRED_SPECIFICS = ["C:Brand", "C:Type", "C:Size", "C:Color", "C:Department"]
+# 必須Item Specifics（空欄だと品質低下）。カテゴリで適用specが異なる。
+# 2026-07-01: バッグ(57988/52357)に apparel spec の C:Type/C:Size を必須扱いしていたため
+# Porter が毎回「C:Type 空」で誤検出→監査くん再発の主因(9件)。category-aware 化して解消。
+# apparel(Clothing 11450 / T-shirts 15687)は従来通り C:Type/C:Size 必須。
+_REQUIRED_APPAREL = ["C:Brand", "C:Type", "C:Size", "C:Color", "C:Department"]
+_REQUIRED_BAGS = ["C:Brand", "C:Style", "C:Color", "C:Department"]  # C:Style=バッグの種別(=Type相当)
+_BAG_CATEGORIES = {"57988", "52357"}
+REQUIRED_SPECIFICS = _REQUIRED_APPAREL  # 後方互換(既定=apparel)
+
+
+def required_specifics_for(category):
+    """eBay category id に応じた必須Item Specifics(純関数, test可)。
+
+    バッグ(57988/52357)は apparel spec(C:Type/C:Size)が非該当なので除外し、
+    バッグの種別を表す C:Style を代替必須にする。それ以外(apparel)は従来通り。
+    """
+    return _REQUIRED_BAGS if str(category).strip() in _BAG_CATEGORIES else _REQUIRED_APPAREL
 # あると望ましいItem Specifics
 RECOMMENDED_SPECIFICS = [
     "C:Style", "C:Material", "C:Pattern", "C:Features", "C:Closure",
@@ -396,8 +411,8 @@ def validate_row(row, row_idx):
     except ValueError:
         issues.append(("ERROR", f"価格が数値でない: {price}"))
 
-    # --- 必須Item Specifics ---
-    for spec in REQUIRED_SPECIFICS:
+    # --- 必須Item Specifics (category-aware: バッグは C:Type/C:Size 非該当) ---
+    for spec in required_specifics_for(category):
         val = get_col(row, spec)
         if not val:
             issues.append(("WARN", f"必須Item Specific '{spec}' が空"))
