@@ -1689,7 +1689,11 @@ class ListingPanel:
             _grid_named(d1, relist_items, ncol=3)
             d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ / 整理", padding=4)
             d2.pack(fill="x", padx=4, pady=(6, 0))
-            _grid_named(d2, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=4)
+            # d2 は 在庫補充(pack)を入れ子にするので、oosボタンは内側Frame(grid)に包む
+            # (同一親で grid と pack を混在させると tkinter が描画失敗する。2026-07-01 修正)
+            d2_oos = ttk.Frame(d2)
+            d2_oos.pack(fill="x")
+            _grid_named(d2_oos, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=4)
 
             # ③ 在庫なし進捗: CULL停止の残件数(約何回分) と RESTOCK再仕入れ(US)商品数。
             def _oos_progress():
