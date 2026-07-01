@@ -1901,24 +1901,17 @@ class ListingPanel:
         summary = summarize_audit_log(captured_log)
         if not summary:
             return
+        # ポップアップは廃止(2026-07-01 ユーザー: HQが対話で自動報告する方式に)。log には残す。
         self.append_log("\n" + "=" * 70 + "\n📋 監査サマリー (要点)\n" + summary + "\n" + "=" * 70 + "\n")
-        try:
-            messagebox.showinfo("CSV監査くん 完了", summary)
-        except Exception:
-            pass
 
     def _show_problem_report(self, captured_log):
-        """新規生成完走 → 統合「問題提起」(CSV化分の監査問題 + 非化分の原因→対策案)を表示.
+        """新規生成完走 → 統合「問題提起」(CSV化分の監査問題 + 非化分の原因→対策案)を log に出力.
 
-        全カテゴリ共通。判断・指示は人(ユーザー方針 2026-06-30: 提起の自動化が目的)."""
+        全カテゴリ共通。ポップアップは廃止(2026-07-01)、HQ が対話で自動報告する(判断・指示は人)."""
         report = build_problem_report(captured_log)
         if not report:
             return
         self.append_log("\n" + "=" * 70 + "\n" + report + "\n" + "=" * 70 + "\n")
-        try:
-            messagebox.showinfo("問題提起 (原因→対策案・判断は人)", report)
-        except Exception:
-            pass
 
     def poll_queue(self):
         try:
