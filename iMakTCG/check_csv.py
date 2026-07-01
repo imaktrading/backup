@@ -43,6 +43,19 @@ BANNED_TITLE_WORDS = [
 
 # 必須Item Specifics（空欄だと品質低下）
 REQUIRED_SPECIFICS = ["C:Game", "C:Set", "C:Card Name", "C:Character", "C:Rarity"]
+
+
+def required_specifics_for_card(card_number):
+    """カード種別に応じた必須Item Specifics(純関数, test可)。
+
+    DON!!カード(One Piece、card number 'DON-' prefix)は構造的に rarity を持たない特殊カード
+    → C:Rarity を必須から外す。C:Type-on-bags と同型の「非該当spec誤検出」で、DON カードが
+    毎監査で「C:Rarity 空」を出していた根本対策(2026-07-02)。won't-fix で隠すのでなく監査
+    ルール自体を賢くする方針(Gemini 推奨: 恒久ロジックで識別できる例外はルール化が正)。
+    """
+    if str(card_number).strip().lower().startswith("don-"):
+        return [s for s in REQUIRED_SPECIFICS if s != "C:Rarity"]
+    return REQUIRED_SPECIFICS
 # あると望ましいItem Specifics
 RECOMMENDED_SPECIFICS = [
     "C:Card Type", "C:Features", "C:Finish", "C:Attribute/MTG:Color",
@@ -348,8 +361,8 @@ def validate_row(row, row_idx):
     except ValueError:
         issues.append(("ERROR", f"価格が数値でない: {price}"))
 
-    # --- 必須Item Specifics ---
-    for spec in REQUIRED_SPECIFICS:
+    # --- 必須Item Specifics (card-aware: DON!!カードは C:Rarity 非該当) ---
+    for spec in required_specifics_for_card(get_col(row, "C:Card Number")):
         val = get_col(row, spec)
         if not val:
             issues.append(("WARN", f"必須Item Specific '{spec}' が空"))
