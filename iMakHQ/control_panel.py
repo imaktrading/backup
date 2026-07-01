@@ -583,18 +583,8 @@ SCRIPTS = [
         "params": [],
     },
     {
-        # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)。①の下段
-        "category": None, "type": "utility",
-        "label": "✏️ タイトル改修",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "noclick_targets.py"],
-        "params": [],
-        # 結果は「既存メンテ」スプシ タイトル改修タブに集約 (CSV廃止)
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
-    },
-    {
-        # NO_CONVERT 値下げ余地 (2026-07-01 price_resistance から差替)。②の下段。
-        # 利益率(V8・ライブUSD)算出 → 値下げ余地シート + B列「値下5pp」判断 + AL列flag書込。
+        # NO_CONVERT 価格見直し (2026-07-01 price_resistance から差替。タイトル改修と順序入替=価格見直しを先に)。
+        # 利益率(V8・ライブUSD)算出 → 値下げ余地シート + B列pp(既定5/手動可) + AL列flag書込。
         # リバイス君が週1で AL列を読み apply_pricedown_override を適用。旧 price_resistance は役割終了。
         "category": None, "type": "utility",
         "label": "💲 価格見直し",
@@ -603,6 +593,16 @@ SCRIPTS = [
         "params": [],
         # 結果は「既存メンテ」スプシ 値下げ余地タブ(gid直開き) + 商品管理シート AL列(値下FLG)
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=1187422007",
+    },
+    {
+        # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)。①の下段
+        "category": None, "type": "utility",
+        "label": "✏️ タイトル改修",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "noclick_targets.py"],
+        "params": [],
+        # 結果は「既存メンテ」スプシ タイトル改修タブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
     # ---- 一番くじ 在庫補充→内容刷新 (2026-06-25 配線。CLI: ichibankuji_restock.py) ----
     # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
