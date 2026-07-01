@@ -44,17 +44,32 @@ def test_margin_math():
     assert res2["margin_keep_pct"] == res["margin_keep_pct"]
 
 
-def test_build_al_column_full_sync():
-    # フル同期: flagged な itemID は値、他(売れた/対象外)は必ずclear、行1=ヘッダー
-    rows = [["URL", "itemID"],            # header (B=itemID)
-            ["u", "111"], ["u", "222"], ["u", "333"], ["u", ""]]
+def _row(iid, al=""):
+    # itemID=B(idx1), AL=idx37。間を埋める
+    r = [""] * 38
+    r[1] = iid
+    r[37] = al
+    return r
+
+
+def test_build_al_column_full_sync_and_default():
+    # フル同期: flagged は既定5、非flagged/空itemIDはclear、行1=ヘッダー
+    rows = [["hdr"], _row("111"), _row("222"), _row("333"), _row("")]
     col = m.build_al_column(rows, {"111", "333"})
     assert col[0] == [m.AL_FLAG_HEADER]
-    assert col[1] == [m.AL_FLAG_VALUE]    # 111 flagged
+    assert col[1] == ["5"]                # 111 flagged → 既定5
     assert col[2] == [""]                 # 222 非対象=clear
-    assert col[3] == [m.AL_FLAG_VALUE]    # 333 flagged
+    assert col[3] == ["5"]                # 333 flagged → 既定5
     assert col[4] == [""]                 # 空itemID=clear
-    assert len(col) == len(rows)
+
+
+def test_build_al_column_preserves_manual():
+    # 手動で 8 を入れた flagged 行は上書きしない。空の flagged は既定5。
+    rows = [["hdr"], _row("111", "8"), _row("222", "5"), _row("333", "")]
+    col = m.build_al_column(rows, {"111", "333"})
+    assert col[1] == ["8"]                # 手動8 保持
+    assert col[2] == [""]                 # 222 非flagged → clear(手動でも対象外なら消える)
+    assert col[3] == ["5"]                # 空flagged → 既定5
 
 
 def test_margin_gate_constant():

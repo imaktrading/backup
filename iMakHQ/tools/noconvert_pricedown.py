@@ -48,9 +48,9 @@ COL_SUPPLY, COL_ITEMID, COL_SOLD, COL_COST, COL_CAT = 0, 1, 3, 13, 17   # A / B 
 MARGIN_GATE_PCT = 10
 CUT_PP = 5
 
-COL_AL_FLAG = 37          # AL列(0-index37=38列目)。値下FLG。Q列(FLG)は重複くん使用中のため末尾に新設。
-AL_FLAG_HEADER = "値下FLG"
-AL_FLAG_VALUE = f"値下{CUT_PP}pp"
+COL_AL_FLAG = 37          # AL列(0-index37=38列目)。値下FLG=削るpp(数値)。Q列は重複くん使用中のため末尾。
+AL_FLAG_HEADER = "値下FLG(pp)"
+AL_FLAG_VALUE = str(CUT_PP)   # 既定 = "5"(pp)。数値=リバイス君がcut_pctとして読む。手動で"8"等に変更可
 
 # 商品管理シート R列 ラベル → pricing_engine カテゴリ。未収載=floor出さず「要確認」(fail-closed)。
 SHEET_CAT_TO_PRICING = {
@@ -103,17 +103,28 @@ def write_al_flags(flagged_ids):
         rows = ws.get_all_values()
         col = build_al_column(rows, flagged_ids)
         ws.update(range_name=f"AL1:AL{len(col)}", values=col, value_input_option="RAW")
-        n_set = sum(1 for c in col[1:] if c[0] == AL_FLAG_VALUE)
+        n_set = sum(1 for c in col[1:] if str(c[0]).strip())
         summary[sid[:8]] = (n_set, len(col) - 1 - n_set)
     return summary
 
 
 def build_al_column(rows, flagged_ids):
-    """AL列のフル同期値を構築 (純関数, test可)。行1=ヘッダー、以降 itemID が flagged なら値・他は空。"""
+    """AL列のフル同期値を構築 (純関数, test可)。行1=ヘッダー。
+
+    flagged 行: **既存AL値が数値なら保持(=手動 8等を上書きしない)**、空なら既定 CUT_PP(5)。
+    非flagged 行: 空にクリア(売れた/薄利化/対象外=フル同期)。
+    → 既定5・人が8等に手動変更でき、noconvertが毎回上書きしない。リバイス君は数値をcut_ppとして読む。
+    """
     col = [[AL_FLAG_HEADER]]
     for r in rows[1:]:
         iid = (r[COL_ITEMID] if len(r) > COL_ITEMID else "").strip()
-        col.append([AL_FLAG_VALUE if (iid and iid in flagged_ids) else ""])
+        cur = (r[COL_AL_FLAG] if len(r) > COL_AL_FLAG else "").strip()
+        if iid and iid in flagged_ids:
+            # 既存が正の数値(手動含む)ならそのまま保持、無ければ既定 CUT_PP
+            keep = cur if cur.replace(".", "", 1).isdigit() and float(cur or 0) > 0 else AL_FLAG_VALUE
+            col.append([keep])
+        else:
+            col.append([""])
     return col
 
 
@@ -193,7 +204,7 @@ def main():
         targets.append((r, d))
 
     print(f"  仕入可 {len(targets)}件 → eBay GetItem で現価格(USD換算)をライブ取得中...", flush=True)
-    out = [["利益率%(=値下げ余地・据置)", "判断(値下/様子見)", "カテゴリ", "商品名", "現価格$", "通貨", "最新仕入¥",
+    out = [["利益率%(=値下げ余地・据置)", "値下pp(既定5/手動で8等可)", "カテゴリ", "商品名", "現価格$", "通貨", "最新仕入¥",
             "V8推奨$", "込み利益$", "利益率%(プロモ外)", "現価格÷V8(乖離)",
             "在庫", "仕入元URL", "eBay URL"]]
     rows_calc = []
@@ -221,7 +232,7 @@ def main():
             gap = round(cur / res["v8_rec"], 2) if res["v8_rec"] else ""   # 現価格÷V8 (1.0=追従, <1=値上げ遅れ)
             # 判断 自動記入: 利益率≥10% は 5pp 削っても≥5%残る=赤字なし → 「値下5pp」候補。
             # 10%未満は薄利で除外(空欄)。閾値/削り幅は MARGIN_GATE/CUT_PP で調整可。
-            judge = f"値下{CUT_PP}pp" if res["margin_keep_pct"] >= MARGIN_GATE_PCT else ""
+            judge = str(CUT_PP) if res["margin_keep_pct"] >= MARGIN_GATE_PCT else ""   # B列=削るpp(数値)
             if judge:
                 flagged_ids.add((r.get("item_id") or "").strip())
             out.append([res["margin_keep_pct"], judge, res["pricing_cat"], (r.get("title") or "")[:50], f"${cur:.0f}", ccy,
