@@ -151,9 +151,13 @@ def build_problem_report(log: str, catalog_db_path: str = CATALOG_DB_PATH) -> st
                 _sys.path.insert(0, _p)
         import drop_classifier as _dc
         se, ce = _dc.make_catalog_lookups(catalog_db_path)
-        rep = _dc.render_problem_report(_dc.classify_drops(log, set_exists=se, card_exists=ce))
+        _drops = _dc.classify_drops(log, set_exists=se, card_exists=ce)
+        rep = _dc.render_problem_report(_drops)
         if rep:
             parts.append(rep)
+        recon = _dc.reconcile_counts(log, _drops)   # 件数照合(silent drop検出)
+        if recon:
+            parts.append(recon)
     except Exception as _e:
         parts.append(f"⚠ drop原因分類 失敗(非致命): {type(_e).__name__}: {_e}")
     return "\n\n".join(parts)

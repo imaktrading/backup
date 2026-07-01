@@ -1120,6 +1120,26 @@ _PRE_BUILD_EVENT = threading.Event()
 _PRE_BUILD_RESULTS: "list | None" = None
 
 
+def split_verified(certs, vc):
+    """verified_certs(vc) から OK/CHOSEN済(有効product_id)を自動確定に、他を viewer対象に振り分け (純関数)。
+
+    2026-06-30: 確認済なのに毎回 viewer 再浮上→CSV化されないループを解消。
+    OK/CHOSEN + product_id 有 → confirmed(build=CSV化)。NONE/NG/PENDING/pid空 → viewer(fail-closed)。
+    戻り: (confirmed: {cert: product_id}, viewer_certs: [cert])。
+    """
+    confirmed, viewer = {}, []
+    for cert in certs:
+        cert = str(cert).strip()
+        if not cert:
+            continue
+        rec = (vc or {}).get(cert) or {}
+        if rec.get("choice") in ("OK", "CHOSEN") and (rec.get("product_id") or "").strip():
+            confirmed[cert] = rec["product_id"].strip()
+        else:
+            viewer.append(cert)
+    return confirmed, viewer
+
+
 def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_sec=1800) -> dict:
     """【verify→build】CSV 生成の **前** に HTML 目視確認を回し、確定 product_id を返す。
 
@@ -1139,17 +1159,10 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         _vc = json.loads(VERIFIED_CERTS_FILE.read_text(encoding="utf-8")) if VERIFIED_CERTS_FILE.exists() else {}
     except Exception:
         _vc = {}
+    confirmed, _viewer_certs = split_verified(certs, _vc)
+    n_cache = len(confirmed)
     targets = []
-    n_cache = 0
-    for cert in certs:
-        cert = str(cert).strip()
-        if not cert:
-            continue
-        _rec = _vc.get(cert) or {}
-        if _rec.get("choice") in ("OK", "CHOSEN") and (_rec.get("product_id") or "").strip():
-            confirmed[cert] = _rec["product_id"].strip()
-            n_cache += 1
-            continue   # 確認済 → viewer に出さず確定値で build (再浮上ループ解消)
+    for cert in _viewer_certs:
         t = _build_target_for_cert(cert)
         if t is None:
             append_log_func(f"  ⚠️ cert {cert}: cache miss/category不明/対象外 → 目視対象外 (build skip)\n")

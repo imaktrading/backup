@@ -97,6 +97,29 @@ def render_problem_report(drops):
     return "\n".join(lines)
 
 
+def reconcile_counts(log, drops):
+    """処理N件 vs (成功 + actionable落ち) を照合し silent drop 余地を検出 (純関数, test可)。
+
+    ユーザー方針(2026-06-30): 「入力N = CSV X + 落ち Y」が合わなければ、拾えてない drop=silent drop
+    がある証拠。合わない時はそれ自体を問題提起する(=取りこぼしゼロ保証)。
+    """
+    import re
+
+    def _n(pat):
+        m = re.search(pat, log or "")
+        return int(m.group(1)) if m else None
+    processed = _n(r"(\d+)\s*件を処理")
+    if processed is None:
+        return ""
+    success = _n(r"成功[:：]\s*(\d+)\s*件") or 0
+    actionable = sum(1 for d in drops if d.get("class") != "正常")
+    accounted = success + actionable
+    if processed == accounted:
+        return f"✅ 件数照合OK: 処理{processed} = 成功{success} + 落ち{actionable}"
+    return (f"⚠️ 件数不一致(silent drop余地): 処理{processed} ≠ 成功{success}+落ち{actionable} "
+            f"(差{processed - accounted}件) → 拾えてない drop の可能性・要確認")
+
+
 def make_catalog_lookups(catalog_db_path):
     """本番用: catalog sqlite から set_exists/card_exists を作る (I/O)。"""
     import sqlite3

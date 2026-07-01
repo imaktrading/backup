@@ -488,13 +488,16 @@ def smart_titlecase(s):
 def pokemon_out_of_scope(franchise, brand):
     """catalog が構造的に収録しない Pokemon サブセット = out-of-scope skip 対象 (純関数, test可)。
 
-    現状: e-card期 BLACK DECK KIT (2002 VSデッキ) のみ。catalog 収録0件を実機確認済 (2026-06-27 K2)。
+    現状: e-card期 BLACK DECK KIT (2002 VSデッキ) / FAMILY POKEMON CARD GAME (はじめての〜)。
+    いずれも catalog 収録0件を実機確認済 (BLACK DECK KIT=2026-06-27 K2 / FAMILY=2026-07-01
+    Pokemon 22006件中 Family 0件)。seen×18 で永久 recurring 化していたのを止める。
     ※XY期は catalog に173件あるので含めない (丸ごと除外すると出せるカードを殺す=K3不採用)。
     新サブセットを足す時も「catalog 0件」を実機確認してから追加する (誤除外=recall損 防止)。
     """
     if franchise != "Pokemon":
         return False
-    return "BLACK DECK KIT" in (brand or "").upper()
+    b = (brand or "").upper()
+    return "BLACK DECK KIT" in b or "FAMILY POKEMON CARD GAME" in b
 
 
 def detect_game_info(brand):

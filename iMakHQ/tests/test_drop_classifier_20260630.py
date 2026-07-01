@@ -43,6 +43,19 @@ def test_normal_exclusion_is_no_action():
     assert drops[0]["class"] == "正常" and "不要" in drops[0]["act"]
 
 
+def test_reconcile_counts():
+    # 処理10 = 成功8 + 落ち2(actionable) → OK
+    log_ok = "10件を処理します\n成功: 8件 / 失敗: 0件"
+    drops = [{"class": "収録漏れ"}, {"class": "promo衝突"}, {"class": "正常"}]  # actionable=2
+    assert "照合OK" in dc.reconcile_counts(log_ok, drops)
+    # 処理10 ≠ 成功5+落ち2=7 → 不一致警告(silent drop余地)
+    log_ng = "10件を処理します\n成功: 5件 / 失敗: 0件"
+    r = dc.reconcile_counts(log_ng, drops)
+    assert "不一致" in r and "silent drop" in r
+    # 処理件数不明 → 空
+    assert dc.reconcile_counts("成功: 5件", drops) == ""
+
+
 def test_render_and_empty():
     assert dc.render_problem_report([]) == ""
     rep = dc.render_problem_report([{"item": "X", "class": "収録漏れ", "cause": "c", "act": "a"}])
