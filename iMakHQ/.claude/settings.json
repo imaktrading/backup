@@ -28,5 +28,17 @@
     "additionalDirectories": [
       "C:\\Users\\imax2"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python C:/dev/iMak/iMakHQ/tools/audit_catchup.py"
+          }
+        ]
+      }
+    ]
   }
 }
