@@ -1725,9 +1725,10 @@ class ListingPanel:
                 pass
 
             if ug["report"]:
-                rep = ttk.LabelFrame(scroll_frame, text="📦 在庫補充", padding=4)
-                rep.pack(fill="x", padx=4, pady=(8, 0))
-                _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]])
+                # 在庫補充 は 在庫なし(d2)枠の中に入れ子(2026-07-01)。3列=PSA再仕入れ3が1行目・一番くじ①②が2行目。
+                rep = ttk.LabelFrame(d2, text="📦 在庫補充", padding=4)
+                rep.pack(fill="x", padx=4, pady=(6, 0))
+                _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]], ncol=3)
 
         # 状態ライン
         status_frame = ttk.Frame(root)
