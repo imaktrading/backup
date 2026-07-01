@@ -175,6 +175,19 @@ def test_consistency_tcg_character_missing_flagged():
     assert A.title_spec_consistency(h, row2, "tcg") == []
 
 
+def test_consistency_tcg_don_card_not_flagged():
+    # DON!! カード(One Piece)はキャラ不在。C:Character='DON!! Card' でタイトルに 'DON!!' が
+    # 無くても誤検出しない (card number 'DON-...' で識別)。2026-07-01 program backlog 解消。
+    h = ["*Title", "C:Character", "C:Card Number"]
+    row = ["PSA 10 One Piece Japanese Premium Booster The Best #DON-PRB01-027",
+           "DON!! Card", "DON-PRB01-027"]
+    assert A.title_spec_consistency(h, row, "tcg") == []
+    # 通常カードは従来通り検出する(DON除外が効きすぎないこと)
+    h2 = ["*Title", "C:Character", "C:Card Number"]
+    row2 = ["PSA 10 One Piece #OP01-025 Zoro", "Nami", "OP01-025"]
+    assert any("C:Character" in m for m in A.title_spec_consistency(h2, row2, "tcg"))
+
+
 # --- タイトル形式準拠 (生成ロジックのフォーマット) ---
 def test_format_gshock_prefix_and_watch():
     h = ["*Title", "C:Brand"]

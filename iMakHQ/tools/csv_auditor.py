@@ -272,9 +272,17 @@ def title_spec_consistency(headers, row, project):
     _bi = hm.get("C:Brand")
     _brand = (str(row[_bi]).strip().lower() if _bi is not None and _bi < len(row) else "")
     _is_reel = any(b in _brand for b in _REEL_BRANDS)
+    # DON!! カード(One Piece)は「キャラ」を持たない特殊カード。C:Character にフォールバックで
+    # 'DON!! Card' が入り、タイトルは番号(#DON-PRB01-027)で表現するため first_token 'DON!!' が
+    # タイトルに無く誤検出する → C:Character 整合は対象外 (2026-07-01、C:Type-on-bags と同型)。
+    _cn_i = hm.get("C:Card Number")
+    _cardnum = (str(row[_cn_i]).strip().lower() if _cn_i is not None and _cn_i < len(row) else "")
+    _is_don = _cardnum.startswith("don-")
     out = []
     for col, mode in cols:
         if col == "C:Color" and _is_reel:
+            continue
+        if col == "C:Character" and _is_don:
             continue
         i = hm.get(col)
         if i is None or i >= len(row):
