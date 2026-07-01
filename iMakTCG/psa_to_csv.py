@@ -500,6 +500,22 @@ def pokemon_out_of_scope(franchise, brand):
     return "BLACK DECK KIT" in b or "FAMILY POKEMON CARD GAME" in b
 
 
+def is_out_of_scope_language(brand):
+    """非日本語版(ASIA/KOREAN/CHINESE)は当店catalog(日本版)の対象外=fail-closed skip (純関数, test可)。
+
+    PSA brand は日本版が '... JAPANESE ...'。ASIA/KOREAN/CHINESE 版は別商品で日本版 record へ
+    解決しない(Catalog 2026-07-01 ruling)。従来はこれらが resolver 未解決 → missing_models に
+    積まれ「catalog_add」として永久 recurring 化していた(例 POKEMON ASIA 25TH ANNIVERSARY、
+    seen×21)。catalog に足しても当店は日本版のみ扱うため埋まらない → 早期 skip で汚染を止める。
+    JAPANESE を含む brand は誤検出防止で対象外にしない(2026-07-02、won't-fix でなく監査/生成
+    ルールを賢くする方針)。
+    """
+    toks = set((brand or "").upper().replace("-", " ").split())
+    if "JAPANESE" in toks:
+        return False
+    return bool(toks & {"ASIA", "ASIAN", "KOREAN", "CHINESE"})
+
+
 def detect_game_info(brand):
     brand_upper = brand.upper()
     if "DUAL IMPACT" in brand_upper:
@@ -1648,6 +1664,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # ※XY期は catalog に173件あるので丸ごと除外しない(K3 は不採用=出せるカードを殺すため)。
     if pokemon_out_of_scope(franchise, brand):
         print(f"    ⏭️ Skip: Pokemon Black Deck Kit (e-card期) はカタログ未収録=対象外 (cert {cert_number}, {subject})")
+        return None
+
+    # 非日本語版(ASIA/KOREAN/CHINESE)は当店=日本版のみ扱い → 対象外 skip。
+    # catalog に足しても埋まらず missing_models を永久汚染するのを止める(2026-07-02)。
+    if is_out_of_scope_language(brand):
+        print(f"    ⏭️ Skip: 非日本語版(ASIA/KOREAN/CHINESE)=日本版catalog対象外 (cert {cert_number}, brand='{brand}')")
         return None
 
     # Character欄はPSA Subjectから接尾辞を剥がして純キャラ名のみに (fallback)
