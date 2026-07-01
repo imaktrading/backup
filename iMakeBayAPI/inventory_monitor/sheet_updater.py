@@ -72,10 +72,19 @@ SKU_ERR_FLG_HEADER = "巡回ERR"
 # 認証 / スプシオープン
 # ============================================================================
 # transient (DNS/接続) 失敗の判定キーワード
+# ★ 2026-07-02: gspread の Google API server error (5xx/429) を追加。
+#   03:00 cycle が K列同期(open_sheet) で `APIError: [503]: The service is currently unavailable`
+#   1 回で monitor step NG → 全 listing 在庫不明になった (DNS blip 対策[06-18]は接続系のみで
+#   Google API 5xx を拾えていなかった)。 5xx/429 は Google 側の一時障害=backoff retry で救済可能。
+#   bracketed status ("[503]" 等) で誤マッチ回避 (bare "503" は他文言に混入し得るため使わない)。
 _TRANSIENT_NET_KEYWORDS = (
     "getaddrinfo failed", "NameResolutionError", "Max retries exceeded",
     "ConnectionError", "Connection aborted", "RemoteDisconnected",
     "Timeout", "timed out", "Temporary failure in name resolution",
+    # Google Sheets API (gspread APIError) の一時的サーバ側エラー
+    "[500]", "[502]", "[503]", "[504]", "[429]",
+    "The service is currently unavailable", "Internal error encountered",
+    "backendError", "rateLimitExceeded", "Quota exceeded",
 )
 # retry の backoff 秒 (= 0,5,15,30 → 計 ~50s。 数秒の DNS blip を救済、 長時間障害は諦めて raise)
 _OPEN_SHEET_BACKOFFS = (0, 5, 15, 30)

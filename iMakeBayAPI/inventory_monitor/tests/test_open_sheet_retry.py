@@ -50,6 +50,34 @@ def test_transient_then_success(monkeypatch):
     assert calls["n"] == 3
 
 
+def test_google_api_503_retries_then_success(monkeypatch):
+    """Google Sheets API 503 (gspread APIError) → transient 扱いで retry → 成功 (2026-07-02 regression)。
+
+    07-02 03:00 cycle が open_by_key で `APIError: [503]: The service is currently unavailable`
+    1 回 → monitor step NG になった。 5xx/429 は Google 側一時障害なので backoff retry で救済する。
+    """
+    _patch_common(monkeypatch)
+    calls = {"n": 0}
+    sentinel = _FakeSheet()
+
+    class _GC:
+        def open_by_key(self, key):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise RuntimeError("APIError: APIError: [503]: The service is currently unavailable.")
+            return sentinel
+
+    monkeypatch.setattr(S.gspread, "authorize", lambda creds: _GC())
+    assert S.open_sheet() is sentinel
+    assert calls["n"] == 3  # 503 を 2 回 retry して 3 回目で成功
+
+
+def test_bare_status_number_not_false_matched(monkeypatch):
+    """業務文言中の裸の数字 (例 'row 503') は transient 誤判定しない (bracketed のみ拾う)。"""
+    assert S._is_transient_net_error(Exception("row 503 updated / 429 rows total")) is False
+    assert S._is_transient_net_error(Exception("APIError: [503]: unavailable")) is True
+
+
 def test_non_transient_raises_immediately(monkeypatch):
     """認証エラー等 transient でない例外は retry せず即 raise。"""
     _patch_common(monkeypatch)
