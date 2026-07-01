@@ -1287,3 +1287,35 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - OP06-068_AC01/OP12-063_AC01 = Admirable Collection alt-art(bandai API/CDN外)=専用fetch別フェーズ
 - 根①/DBFW = root① A-2(resolver alias追従)緑待ちでブロック(先行不可)
 - 次弾scrape: GD05(7/24)→OP17(8月)→FB11(9/12)→Pokemon M6 の発売時
+
+## 2026-06-26〜07-01 — Catalog: 日次HQ依頼(resolver索引4件/scope判断/promo衝突/FA secret)
+
+### 決定事項
+- 決定1(resolver索引4件・catalog実在確認): PSA brand→set_code 逆引き欠落の偽missing を索引追加で解消。
+  20TH ANNIVERSARY→CP6(cert135877490 Haunter=CP6-046) / BLUE SHOCK→XY8-Bb(青い衝撃, 既存#001-064救済) /
+  DOUBLE BLAZE→SM10(SM10-033 Gengar) / TAG BOLT→SM9(SM9-038 Gengar&Mimikyu-GX)。全て実在を実機確認。
+- 決定2(前回判定の訂正): Girls Edition Charlotte Pudding #008 = 前回「真missing」→ **既存 ST07-008**(Premium Collection は
+  既存カードの parallel 再録で原番号維持)と訂正。同型: 1st Anniversary Otama=OP01-006_p4 既存。解決は subject 照合(viewer域)。
+- 決定3(スコープ外の確定): DBH GALAXY MISSION 10 / GOD MISSION 1(Super Dragon Ball Heroes=アーケード)は catalog対象外。
+  Super Divers 40th は Fusion World と別ライン=**HQ scope判断待ち**(収録は business 判断)。
+- 決定4(promo番号衝突・推測追加せず): HQ「P-013 Sanji / P-006 Chopper 追加」依頼→公式API(EN+JA)は P-013=Gordon /
+  P-006=Luffy のみで**官製に該当variant無し**。id_strict/推測禁止に従い**追加保留**、cert画像で真product_id同定を要請(Boa Hancock同型)。
+- 判定(FA secret=既知ギャップ): BLUE SHOCK #061(M Glalie EX FA)/NIGHT UNISON #067/MIRACLE TWINS #112 = base番号超の
+  FA secret。公式 resultAPI が secret-rare を返さないため未scrape(実在だが未収録)。HQ「実在だが不採用(K3)」skip と同型。
+- 所見(dual-code): 20周年セットが CP6-NNN(91枚,PSA番号一致)と 20th-NNN(74枚,別番号: 046=Tauros)で二重保持=dual-source dup(root①下流)。
+
+### 変更
+- 変更: integrations/psa_to_csv.py(_POKEMON_SET_NAME_TO_CODE: 20TH ANNIVERSARY/BLUE SHOCK/DOUBLE BLAZE/TAG BOLT 追加)
+- commit: 2346f36 / cfc47cb / 81c0ab5 / c04687b (全 push 済)
+- 共有DB変更なし(索引はコードのみ。data投入は無し=既存/対象外/skipのため)
+
+### 検証(実出力)
+- 検証✅ 索引4件 期待product_id解決(CP6-046 / XY8-Bb-060 / SM10-033 / SM9-038)・25th非衝突・全commit 308 pass(pre-commit 231 pass)
+- 検証✅ promo衝突: 公式API EN+JA とも P-013=Gordon/P-006=Luffy のみ=Sanji/Chopper無し実証(推測追加せず)
+- 検証✅ FA secret: SM9a max#063<#067 / SM11 max#106<#112 = base超secret を実機確認
+- 検証✅ Girls Edition=ST07-008 / Otama=OP01-006_p4 / OP04-039 Rebecca alt-art 実在(既存=投入不要)
+
+### 情報待ち/判断待ち(HQ)
+- P-013/P-006 promo衝突: cert(#148328055/#150414013/#145541765)の PSA画像 → 真KEY同定 → 必要なら premium variant整備
+- Super Divers 40th: catalog に Super Divers ライン収録するか = scope/business 判断
+- FA secret(BLUE SHOCK#061/NIGHT UNISON#067/MIRACLE TWINS#112): secret対応 fetch は別フェーズ(現状 fail-closed skip で整合)
