@@ -604,29 +604,6 @@ SCRIPTS = [
         # 結果は「既存メンテ」スプシ タイトル改修タブに集約 (CSV廃止)
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
-    # ---- 一番くじ 在庫補充→内容刷新 (2026-06-25 配線。CLI: ichibankuji_restock.py) ----
-    # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
-    # 古い中身で売れる瞬間を作らない設計(eBay更新は②の入稿1回)。
-    {
-        "category": None, "type": "utility",
-        "label": "🎴一番くじ補充① supply確定",
-        "label_fg": "#0a7",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        # identify→expand: OOS一番くじ→景品選択→supply可否(+公式URL→I列)→スプシ記録(eBay触らない)
-        "cmd": ["python", "ichibankuji_restock.py", "supply", "10"],
-        "params": [],
-        "skip_postprocess": True,   # スプシ記録のみ=listing CSV 生成でない(excluder/重複くん不要)
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "🎴一番くじ補充② 刷新→CSV",
-        "label_fg": "#0a7",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        # refresh→write: I列の公式URL scrape+Claude→新title/itemSP/価格→Revise(同ID)/Add(新ID) CSV
-        "cmd": ["python", "ichibankuji_restock.py", "refresh-csv"],
-        "params": [],
-        "skip_postprocess": True,   # Revise/Add CSV は新規生成でない→excluder/重複くん通さない
-    },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
     #       C:/dev/iMak_data/seller_hub/reports/ に置く (無ければデスクトップの所定フォルダ)
@@ -696,6 +673,26 @@ SCRIPTS = [
         "params": [],
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
+    # ---- 一番くじ 在庫補充 (PSA再仕入れの下に配置。2026-07-01 順序変更)。CLI: ichibankuji_restock.py ----
+    # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
+    {
+        "category": None, "type": "utility",
+        "label": "🎴一番くじ補充① supply確定",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ichibankuji_restock.py", "supply", "10"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "🎴一番くじ補充② 刷新→CSV",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ichibankuji_restock.py", "refresh-csv"],
+        "params": [],
+        "skip_postprocess": True,
+    },
     {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
         "category": None, "type": "utility",
@@ -710,7 +707,7 @@ SCRIPTS = [
     {
         # B: CULL(在庫切れ&需要皆無) を age>=21・CAP50/回 で段階 End CSV 化 (2026-06-05)
         "category": None, "type": "utility",
-        "label": "🧹 CULL停止 (50件/回)",
+        "label": "🗑 取下げ (50件/回)",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "cull_end.py"],
         "params": [],
@@ -1728,7 +1725,7 @@ class ListingPanel:
                 pass
 
             if ug["report"]:
-                rep = ttk.LabelFrame(scroll_frame, text="📈 レポート", padding=4)
+                rep = ttk.LabelFrame(scroll_frame, text="📦 在庫補充", padding=4)
                 rep.pack(fill="x", padx=4, pady=(8, 0))
                 _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]])
 
