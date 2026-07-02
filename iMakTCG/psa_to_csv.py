@@ -516,6 +516,20 @@ def is_out_of_scope_language(brand):
     return bool(toks & {"ASIA", "ASIAN", "KOREAN", "CHINESE"})
 
 
+def is_unidentifiable_don_card(subject, card_number):
+    """番号なしの DON!! カードは変種特定不能 → 出品対象外 skip (純関数, test可)。
+
+    One Piece の DON!! カードは、番号(DON-PRB01-027 等)があれば正常に出品できるが、PSA データで
+    card番号が欠落(#None)している個体は「どの DON 変種か」特定できず catalog key 付与も正しい出品も
+    できない(fail-closed)。Catalog も無番=収録却下と判定済(2026-07-02)。番号有り DON は skip しない。
+    ※入力データ(PSA)が構造的に特定不能なケースであり、システム欠陥の握りつぶしではない
+    (=処理境界の定義。Gemini 諮問結論。number 有りは対象外にしないので listable な DON は殺さない)。
+    """
+    subj = (subject or "").upper()
+    num = (card_number or "").strip()
+    return "DON!!" in subj and not num
+
+
 def detect_game_info(brand):
     brand_upper = brand.upper()
     if "DUAL IMPACT" in brand_upper:
@@ -1670,6 +1684,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # catalog に足しても埋まらず missing_models を永久汚染するのを止める(2026-07-02)。
     if is_out_of_scope_language(brand):
         print(f"    ⏭️ Skip: 非日本語版(ASIA/KOREAN/CHINESE)=日本版catalog対象外 (cert {cert_number}, brand='{brand}')")
+        return None
+
+    # 番号なし DON!! カードは変種特定不能 → 出品対象外(理由をログに残す=追跡可能)。
+    if is_unidentifiable_don_card(subject, card_number):
+        print(f"    ⏭️ Skip: reason=no_card_number_don DON!!カード番号欠落=変種特定不能 (cert {cert_number}, subject='{subject}')")
         return None
 
     # Character欄はPSA Subjectから接尾辞を剥がして純キャラ名のみに (fallback)
