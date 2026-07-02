@@ -292,14 +292,33 @@ def _queue_table(items):
     return rows
 
 
+def category_in_project(cat, project):
+    """queue item の category が発行対象 project に属すか (純関数, test可)。
+
+    2026-07-02: emit_consolidated_request が category 無関係に全pendingをダンプし、gshock発行時に
+    TCG項目が gshock ラベルの依頼に混入していた(Catalog 指摘)。project→category族で振り分ける。
+    TCG は fine-grained (pokemon_tcg/one_piece_tcg/dragonball_scg/gundam_tcg/yugioh_tcg) と粗い 'tcg' が
+    混在するので、'tcg' project は '*_tcg'/'*_scg'/'tcg' を包含。gshock/mercari/ichibankuji は厳密一致。
+    """
+    cat = (cat or "").strip().lower()
+    project = (project or "").strip().lower()
+    if cat == project:
+        return True
+    if project == "tcg":
+        return cat.endswith("_tcg") or cat.endswith("_scg")
+    return False
+
+
 def emit_consolidated_request(con, category, out_dir, today):
     """pending 改善候補を **1本の dedup済 catalog 依頼 .md** に集約発行 (Phase2/3・自動)。
 
     層A(客観ギャップ=即対応)と層B(競合intel候補=要裏取り)を分節で出力。
     毎回新規 .md を量産せず日付単位1ファイルに上書き(滞留スパム停止)。
     catalog 反映は Catalog が裏取りして実施 (SSOT/fail-closed)。Returns: 発行件数。
+    発行は **当該 project(category)に属す項目のみ**(他カテゴリ混入防止=Catalog 誤ルーティング根治)。
     """
-    pend = [r for r in list_queue(con, status="pending", limit=10000) if r.get("source") != "md_import"]
+    pend = [r for r in list_queue(con, status="pending", limit=10000)
+            if r.get("source") != "md_import" and category_in_project(r.get("category"), category)]
     layer_a = [r for r in pend if r.get("layer") == "A"]
     layer_b = [r for r in pend if r.get("layer") == "B"]
     if not pend:
