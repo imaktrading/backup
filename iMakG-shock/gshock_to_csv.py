@@ -1522,7 +1522,7 @@ def build_row(url, price, data, base_desc):
         case_thickness,     # 整数mmに丸め
         data.get('weight', ''),
         "FixedPrice", "GTC", 1,
-        1, LOCATION, 1,
+        LOCATION, 1,   # *Location, BestOfferEnabled (PayPalAccepted 列は削除済=header と整合)
         "Does not apply",
         get_shipping_policy(price), RETURN_POLICY, PAYMENT_POLICY,
         get_store_category(model_full),
@@ -1683,7 +1683,11 @@ def main():
         "C:With Original Box/Packaging", "C:With Papers", "C:Manufacturer Warranty",
         "C:Band Length", "C:Case Thickness", "C:Item Weight",
         "*Format", "*Duration", "*Quantity",
-        "PayPalAccepted", "*Location", "BestOfferEnabled",
+        # PayPalAccepted 削除(2026-07-02): managed payments 完全移行後、eBay File Exchange が
+        # このレガシー決済列(=1)を検出するとビジネスポリシー無効の旧モードに落ち、送料プロファイルを
+        # 適用せず「有効な配送サービス無し(err 216118)」で全弾き。決済は PaymentProfileName(SALE)が担う。
+        # TCG generator は元々この列が無く無傷。実機検証: 本列除去で gshock 8件が Warning のみで出品成功。
+        "*Location", "BestOfferEnabled",
         "Product:UPC",
         "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
         "StoreCategoryID",
