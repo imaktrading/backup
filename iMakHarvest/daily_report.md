@@ -1,5 +1,43 @@
 # iMakHarvest daily_report
 
+## 2026-07-03 — Amazon G-shock 抽出: 部品除外フィルタ + 新着sortパス (= 精度/網羅 是正)
+
+### 決定
+
+- user 指摘の 2 精度問題を是正:
+  1. **ベゼル/部品混入**: MTG-B3000「交換用バンド」単体が is_gshock (ブランド一致) で keep 通過
+     → 時計本体でない部品を keep gate で除外。
+  2. **新作取りこぼし** (DW-6900CMG-3JF): 広い「G-Shock」既定sort検索は Amazon 表示上限
+     (~400-500件) で頭打ち → 新作が圏外に埋もれる。 narrow検索/新着sortなら到達可 (実測)。
+- 対策方針: (a) 部品除外フィルタ (b) 新着sortパス併設。 いずれも user 承認 (両方実装)。
+
+### 変更
+
+- `scrapers/amazon_search_http.py`: `is_accessory_part(title)` 新規 + `should_keep` に
+  `and not is_accessory_part` 追加、 return に `accessory_part`。 判定 = 明示 part marker
+  (交換用/保護フィルム/BAND-SKU 等) or (腕時計/watch 表記なし かつ アクセサリ名詞)。
+  本体型番名の "メタルベゼル・バンドモデル" 等は誤除外しない設計。
+- `run_harvest_amazon_search.py`: (1) selenium fetch 側にも `accessory_part` reject 追加。
+  (2) PRESETS 各 preset に **新着sortパス** (`-new`, `s=date-desc-rank`) 併設。 新着パスは
+  merchantId URL フィルタ (p_6) を外し Phase B の per-ASIN merchantId 検証に委ねる
+  (= search段 merchantId 絞込が直販でも稀に落とすため。 ASIN dedup で既定sortと重複吸収)。
+- `tests/test_amazon_parts_filter.py` 新規 10 件。
+
+### データ是正 (中間スプシ amazon_gshock タブ)
+
+- 差分抽出 +12 → 型番重複2 + 部品1 を削除 → CMG系(DW-6900CMG-3JF 等)5件を narrow検索で回収
+  → 既存 legacy 型番重複 7組を整理。 **309 → 最終 316 行 (重複0/部品0/列ズレ0 実機検証済)**。
+
+### 検証
+
+- ✅ `test_amazon_parts_filter.py`(10) + `test_amazon_ladies_filter.py`(8) = 18 passed。
+- ✅ amazon 関連 5 ファイル = **72 passed**。 PRESETS = all:4/mens:2/ladies:2 パス。
+- ✅ 実機: CMG系 append 後 DW-6900CMG-3JF 存在確認、 部品/列ズレ/型番重複なし。
+- ⚠️ 未対応: HTTP検索の一過性ブロックで page1=0 → false-0 abort する silent bug
+  (`amazon_search_http.collect_search_asins` の `new_added==0 break`) は別途対応候補。
+
+---
+
 ## 2026-06-17 — sheet_writer append の列ズレ事故修正 (= HIGH Porter 7行が U列起点に +20列ずれ)
 
 ### 決定

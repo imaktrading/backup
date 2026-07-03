@@ -106,16 +106,26 @@ DUMP_DIR = Path(r"C:\dev\iMak_data\catalog\_amazon_jp_dumps")
 # preset 検索 URL (= 6/11 sniff で確認、 メンズ 200-300 弱 / レディース 推定 100 弱)
 # URL filter `&rh=p_6%3AAN1VRQENFRJN5` = Amazon.co.jp 販売者絞込
 # (= 6/11 ユーザー指示、 拡張機能 selenium 環境で効かない代替策)
+# 各 preset に「新着sortパス」(-new) を併設する (2026-07-03)。
+# 理由: 広い "G-Shock" 既定sort検索は Amazon の表示上限 (~400-500件) で頭打ちになり、
+#   新作 (例 DW-6900CMG-3JF) が圏外に埋もれて取りこぼす。 s=date-desc-rank で新着順に
+#   別途走査し、 新規到着分を回収する。 新着パスは merchantId URL フィルタ (p_6) を外す
+#   (= search段のmerchantId絞込は直販でも稀に落とすため。 直販判定は Phase B の per-ASIN
+#   merchantId検証に委ねる)。 ASIN dedup で既定sortパスとの重複は自動吸収。
 PRESETS = {
     "gshock-all": [
         ("mens", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011&rh=p_6%3AAN1VRQENFRJN5"),
+        ("mens-new", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011&s=date-desc-rank"),
         ("ladies", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A338087011&rh=p_6%3AAN1VRQENFRJN5"),
+        ("ladies-new", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A338087011&s=date-desc-rank"),
     ],
     "gshock-mens": [
         ("mens", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011&rh=p_6%3AAN1VRQENFRJN5"),
+        ("mens-new", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A337470011&s=date-desc-rank"),
     ],
     "gshock-ladies": [
         ("ladies", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A338087011&rh=p_6%3AAN1VRQENFRJN5"),
+        ("ladies-new", "https://www.amazon.co.jp/s?k=G-Shock&rh=n%3A338087011&s=date-desc-rank"),
     ],
 }
 
@@ -552,6 +562,16 @@ def _fetch_details(
                 "reason": "ladies_only",
             })
             _log(f"  REJECT ladies-only title")
+        elif amazon_search_http.is_accessory_part(title):
+            items_rejected.append({
+                "url": url,
+                "asin": asin,
+                "seller": seller,
+                "brand": brand,
+                "title": title[:80],
+                "reason": "accessory_part",
+            })
+            _log(f"  REJECT accessory/part (not watch body)")
         else:
             merged = {
                 "asin": asin,

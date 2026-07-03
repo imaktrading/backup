@@ -356,6 +356,43 @@ def is_ladies_only(title: str) -> bool:
     return True
 
 
+# 部品/アクセサリ (= 時計本体でない) 除外。 交換用バンド/ベゼル/保護フィルム等の単体
+# パーツが「[カシオ]ジーショック... 交換用 バンド」でブランド一致し keep gate を通過した
+# (2026-07-03: MTG-B3000 交換用バンドが誤混入)。 時計本体のみ残す。
+# 注意: 本体の型番名に含まれる "メタルベゼル・バンドモデル" 等を誤除外しないよう、
+#   (1) 明示 part marker (交換/替え/保護/単体/BAND-SKU) か、
+#   (2) "腕時計"/"watch" 表記なし かつ アクセサリ名詞あり、 の時のみ部品と判定。
+ACCESSORY_PART_RE = re.compile(
+    r"交換用|交換バンド|交換ベルト|交換ベゼル|替えバンド|替えベルト|純正バンド|"
+    r"バンドのみ|ベルトのみ|ベゼルのみ|保護フィルム|保護カバー|保護シート|液晶保護|"
+    r"ケースカバー|ストラップ単体|BAND\s?GS|\bBEZEL\b|REPLACEMENT\s+BAND",
+    re.IGNORECASE,
+)
+ACCESSORY_NOUN_RE = re.compile(
+    r"バンド|ベルト|ベゼル|ストラップ|カバー|保護|フィルム|"
+    r"\bBAND\b|\bBELT\b|\bSTRAP\b|\bBEZEL\b|\bCOVER\b",
+    re.IGNORECASE,
+)
+WATCH_MARKER_RE = re.compile(r"腕時計|watch", re.IGNORECASE)
+
+
+def is_accessory_part(title: str) -> bool:
+    """title が 時計本体でない 部品/アクセサリ なら True (= keep gate で除外).
+
+    precision 優先 (誤出品回避)。 以下いずれかで部品と判定:
+      1. 明示 part marker (交換用 / 保護フィルム / BAND-SKU 等) を含む
+      2. "腕時計"/"watch" 表記が無く、 かつ アクセサリ名詞 (バンド/ベルト/ベゼル等) を含む
+    本体 (= 国内正規 CASIO listing) は必ず "腕時計" を含み、 かつ型番名の
+    "メタルベゼル・バンドモデル" 等は (1)(2) いずれにも該当しないため誤除外しない。
+    """
+    t = title or ""
+    if ACCESSORY_PART_RE.search(t):
+        return True
+    if not WATCH_MARKER_RE.search(t) and ACCESSORY_NOUN_RE.search(t):
+        return True
+    return False
+
+
 def evaluate_detail_for_keep(
     session: requests.Session, asin: str,
 ) -> dict:
@@ -398,5 +435,10 @@ def evaluate_detail_for_keep(
         "is_gshock": is_gshock, "variant_asins": variant_asins,
         "monthly_sales_text": monthly_sales_text,
         "ladies_only": is_ladies_only(title),
-        "should_keep": (seller_ok and is_gshock and not is_ladies_only(title)),
+        "accessory_part": is_accessory_part(title),
+        "should_keep": (
+            seller_ok and is_gshock
+            and not is_ladies_only(title)
+            and not is_accessory_part(title)
+        ),
     }
