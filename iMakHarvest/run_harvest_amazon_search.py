@@ -57,6 +57,24 @@ def attach_to_existing_chrome(port: int = 9222):
                      version_main=detect_chrome_major() or CHROME_VERSION_MAIN)
 
 
+def _create_driver_with_retry(headless: bool, retries: int = 3):
+    """create_driver を DNS/network 一過性失敗に強くする。
+
+    2026-07-03: HTTP prefilter (Phase B) を 758件完走 keep=5 まで到達した後、
+    Phase 2 の create_driver が getaddrinfo blip で落ち、 append 前にクラッシュ
+    (= 50分の Phase B が無駄に)。 一過性 blip は backoff リトライで回復する。
+    """
+    last = None
+    for att in range(1, retries + 1):
+        try:
+            return create_driver(headless=headless)
+        except Exception as e:  # noqa: BLE001 (uc/urllib の DNS 失敗は多様な型)
+            last = e
+            _log(f"create_driver 失敗 (attempt {att}/{retries}): {e!r} → backoff")
+            time.sleep(8 * att)
+    raise last
+
+
 # ============================================================================
 # G-shock brand 判定 (= 6/11 5 件 sample で CITIZEN 混入課題対応)
 # ============================================================================
@@ -209,7 +227,7 @@ def setup_extension_mode(headless: bool = False) -> int:
     """
     _log("=== setup-extension mode ===")
     _log(f"chrome 起動 + 拡張機能 install URL navigate: {EXTENSION_INSTALL_URL}")
-    driver = create_driver(headless=headless)
+    driver = _create_driver_with_retry(headless)
     try:
         driver.get(EXTENSION_INSTALL_URL)
         _log("ブラウザで「Chrome に追加」 ボタン押下 + install 確認してください")
@@ -432,29 +450,41 @@ def _http_variant_supplement(
 
 
 def _load_existing_asins_from_tab(label: str) -> set[str]:
-    """中間スプシ既存タブから ASIN set 読込 (= 重複 fetch 防止 pre-load 用)."""
+    """中間スプシ既存タブから ASIN set 読込 (= 重複 fetch 防止 pre-load 用).
+
+    読込失敗を silent に空扱いすると skip=0 で全件再 fetch (無駄 + captcha リスク) に
+    なるため、 DNS blip 等の一過性失敗は backoff リトライし、 尽きたら fail-fast で raise。
+    タブ未作成 (= 初回) は正当な空として set() を返す (2026-07-03 DNS flapping 対策)。
+    """
+    import gspread  # noqa: PLC0415
     from sheet_writer_amazon import build_amazon_tab_name  # noqa: PLC0415
     from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
 
     tab_name = build_amazon_tab_name(label)
-    try:
-        sh = open_seller_staging_sheet()
-        ws = sh.worksheet(tab_name)
-    except Exception:
-        return set()
-    asins: set[str] = set()
-    try:
-        all_values = ws.get_all_values()
-        for row in all_values[1:]:
-            if not row:
-                continue
-            url = (row[0] or "").strip()
-            asin = amazon_search.parse_asin_from_url(url)
-            if asin:
-                asins.add(asin)
-    except Exception:
-        pass
-    return asins
+    last = None
+    for att in range(1, 4):
+        try:
+            sh = open_seller_staging_sheet()
+            try:
+                ws = sh.worksheet(tab_name)
+            except gspread.exceptions.WorksheetNotFound:
+                return set()  # タブ未作成 = 正当な空
+            asins: set[str] = set()
+            for row in ws.get_all_values()[1:]:
+                if not row:
+                    continue
+                asin = amazon_search.parse_asin_from_url((row[0] or "").strip())
+                if asin:
+                    asins.add(asin)
+            return asins
+        except Exception as e:  # noqa: BLE001 (DNS/接続 blip は多様な型)
+            last = e
+            _log(f"skip-existing タブ読込 失敗 (attempt {att}/3): {e!r} → backoff")
+            time.sleep(6 * att)
+    raise RuntimeError(
+        f"skip-existing タブ '{tab_name}' 読込に失敗 (DNS blip?): {last!r}。 "
+        f"silent skip=0 は全件再fetchになるため中断。 DNS 安定後に再実行を。"
+    )
 
 
 def _fetch_details(
@@ -680,7 +710,7 @@ def harvest_amazon_search(
         _log(f"[attach] localhost:{attach_port} の既存 chrome に接続")
         driver = attach_to_existing_chrome(port=attach_port)
     else:
-        driver = create_driver(headless=headless)
+        driver = _create_driver_with_retry(headless)
     try:
         if supplement_variants_from_tab and variant_sup_result:
             all_urls = variant_sup_result["url_keep_urls"]

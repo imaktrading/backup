@@ -189,11 +189,10 @@ def collect_search_asins(
         if captcha:
             captcha_hit = True
             break
-        if not text:
-            break
-        page_asins = parse_search_asins(text)
-        # 0 件 = 真の末尾 or 一過性ブロック/空応答。 リトライで区別 (fail-OPEN 回避:
-        # ブロック由来の 0 を「収集完了」と誤認し silent に打ち切る事故を防ぐ)。
+        page_asins = parse_search_asins(text or "")
+        # 0 件 = 真の末尾 or 一過性ブロック/空応答/ネットワーク失敗(None)。 リトライで区別
+        # (fail-OPEN 回避: ブロックや DNS blip 由来の 0 を「収集完了」と誤認し silent に
+        # 打ち切る事故を防ぐ。 2026-07-03: ローカル DNS flapping で頻発)。
         if not page_asins:
             for _ in range(EMPTY_PAGE_RETRIES):
                 _sleep_jitter(max(3.0, rate_min * 2), max(6.0, rate_max * 2))
