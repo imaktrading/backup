@@ -175,3 +175,46 @@ def test_is_gshock_item_empty_brand_fallback():
     assert is_gshock_item("", "DW-5600BB-1 black") is False
     # indicator あるが 型番 なし → reject
     assert is_gshock_item("", "G-Shock メンズ") is False
+
+
+# --------------------------------------------------------------------------
+# collect_search_asins: 空ページ(ブロック疑い)リトライ (2026-07-03 false-0 対策)
+# --------------------------------------------------------------------------
+def _asin_html(*asins):
+    return "".join(
+        f'<div data-component-type="s-search-result" data-asin="{a}"></div>'
+        for a in asins
+    )
+
+
+def test_collect_retries_on_empty_page(monkeypatch):
+    """page1 が一過性ブロックで空 → リトライで回復し、 0件abort しないこと."""
+    import scrapers.amazon_search_http as H
+
+    # 実ブロックは「非空 HTML だが検索結果0件」(= parse で []、 captcha 無し)。
+    block = "<html><body>no results</body></html>"
+    # page1: block,block,回復(2件) / page2: block×リトライ (=真の末尾)
+    seq = [block, block, _asin_html("B000000001", "B000000002"),
+           block, block, block, block]
+    calls = {"n": 0}
+
+    def fake_fetch(session, url):
+        i = calls["n"]
+        calls["n"] += 1
+        return (seq[i] if i < len(seq) else ""), False
+
+    monkeypatch.setattr(H, "fetch_search_page", fake_fetch)
+    monkeypatch.setattr(H, "_sleep_jitter", lambda a, b: None)
+    r = H.collect_search_asins(object(), "https://www.amazon.co.jp/s?k=x", max_pages=2)
+    # リトライで page1 の 2 件を回収 (= false-0 abort しない)
+    assert r["asins"] == ["B000000001", "B000000002"]
+
+
+def test_collect_genuine_empty_breaks(monkeypatch):
+    """リトライ後も空なら真の末尾として break (無限リトライしない)."""
+    import scrapers.amazon_search_http as H
+    monkeypatch.setattr(H, "fetch_search_page",
+                        lambda s, u: ("<html>no results</html>", False))
+    monkeypatch.setattr(H, "_sleep_jitter", lambda a, b: None)
+    r = H.collect_search_asins(object(), "https://www.amazon.co.jp/s?k=x", max_pages=3)
+    assert r["asins"] == []

@@ -49,6 +49,10 @@ DEFAULT_TIMEOUT = 30
 
 # 検索結果 page 走査上限 (= 安全 hard cap)
 DEFAULT_MAX_SEARCH_PAGES = 15
+# 空ページ(0 ASIN)時のリトライ回数。 Amazon の一過性ソフトブロックは captcha を出さず
+# 0 件ページを返すことがあり、 これを「収集完了」と誤認して silent に打ち切る事故
+# (fail-OPEN, 2026-07-02/03) を防ぐ。 リトライ後も 0 なら真の末尾とみなす。
+EMPTY_PAGE_RETRIES = 3
 
 # seller=Amazon.co.jp 判別 marker (= HTTP HTML 内の text、 100% 精度実証済 2026-06-11)
 # Amazon.co.jp の merchantId (= URL filter `&rh=p_6%3AAN1VRQENFRJN5` と同じ値)
@@ -188,6 +192,28 @@ def collect_search_asins(
         if not text:
             break
         page_asins = parse_search_asins(text)
+        # 0 件 = 真の末尾 or 一過性ブロック/空応答。 リトライで区別 (fail-OPEN 回避:
+        # ブロック由来の 0 を「収集完了」と誤認し silent に打ち切る事故を防ぐ)。
+        if not page_asins:
+            for _ in range(EMPTY_PAGE_RETRIES):
+                _sleep_jitter(max(3.0, rate_min * 2), max(6.0, rate_max * 2))
+                text, captcha = fetch_search_page(session, url)
+                if captcha:
+                    captcha_hit = True
+                    break
+                page_asins = parse_search_asins(text or "")
+                if page_asins:
+                    if progress_callback:
+                        try:
+                            progress_callback(page, len(all_asins),
+                                              f"page {page}: 空応答→リトライ成功")
+                        except Exception:
+                            pass
+                    break
+            if captcha_hit:
+                break
+            if not page_asins:
+                break  # リトライ後も 0 = 真の末尾 (or 恒常ブロック)
         new_added = 0
         for a in page_asins:
             if a not in seen:
