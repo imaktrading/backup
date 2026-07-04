@@ -172,7 +172,9 @@
 <p><span style="text-decoration: underline;"><strong>Customs and Duties Policy</strong></span></p>
 <p><strong>For U.S. Buyers (DDP: Delivered Duty Paid)</strong></p>
 <p>All import duties, taxes, and customs fees are <b>included</b> in the total amount. <b>No additional payment</b> is required upon delivery.</p>
-<p><strong>For Buyers outside the U.S. (DDU: Delivered Duty Unpaid)</strong></p>
+<p><strong>For European Union (EU) Buyers — Orders up to €150 (DDP: Delivered Duty Paid)</strong></p>
+<p>Import duties and customs fees are <b>prepaid and included</b> in the shipping cost shown at checkout. <b>No additional customs payment</b> is required upon delivery. (VAT is collected by eBay at checkout as required by EU rules.)</p>
+<p><strong>For Buyers in All Other Countries (DDU: Delivered Duty Unpaid)</strong></p>
 <p>Import duties, taxes, and customs fees are <b>not included</b> in the item price or shipping cost. These charges are the <b>buyer's responsibility</b> and vary by country.</p>
 <p><span style="text-decoration: underline;"><span style="vertical-align: inherit;"><span style="vertical-align: inherit;"><span style="font-weight: bolder;"><span style="vertical-align: inherit;"><span style="vertical-align: inherit;">Important Notes</span></span></span></span></span></span></p>
 <ul>
