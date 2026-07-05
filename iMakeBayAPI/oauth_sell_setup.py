@@ -43,6 +43,11 @@ SCOPES = [
     "https://api.ebay.com/oauth/api_scope",
     "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
     "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+    # 2026-07-02: Business Policy(配送ポリシー)の状態を Account API で読むため追加。
+    # Trading GetSellerProfiles は廃止済 → sell/account/v1/fulfillment_policy が唯一の read 経路。
+    # 2026-07-05: SpeedPAK化(国際便をStandardInternational→SpeedPAK)を API で書換えるため
+    # readonly → write の sell.account に昇格(read も兼ねる)。
+    "https://api.ebay.com/oauth/api_scope/sell.account",
 ]
 
 
