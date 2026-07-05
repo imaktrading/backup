@@ -1574,6 +1574,9 @@ def lookup_pokemon(
     """
     if not card_number:
         return None
+    # PSA card# は "NNN/TTT"(分母=set 総数)形式のことがある (例 '005/015')。
+    # Pokemon の product_id は分子のみ (S8a-G-005) なので分母を除去して正規化。
+    card_number = card_number.split("/")[0].strip()
     set_code = extract_set_code_from_brand_pokemon(brand)
 
     # 2026-06-13: subject 側 "GOLDEN BOX" 検出 (cert142931332 PIKACHU V 25TH ANNIV-GOLDEN BOX #005).
@@ -1583,11 +1586,17 @@ def lookup_pokemon(
     #   言語 gate: catalog S8a-G-* は日本語 record のため、brand が日本語 (JAPANESE/JPN) と
     #   明示されるときのみ適用。ASIA/KOREAN/CHINESE 版を日本語 record へ誤解決させない (fail-closed)。
     #   S8a-G prefix は golden box 専用 = 番号一致なら必ず golden box カード (over-fire 不能)。
-    if "GOLDEN BOX" in (subject or "").upper() and re.search(
-        r"\b(JAPAN(?:ESE)?|JPN)\b", (brand or "").upper()
-    ):
+    #   2026-07-05 (HQ依頼 cert142931332): 25th Golden Box は**日本専用 subset**(他言語版なし)。
+    #   PSA が日本版 Golden Box を "POKEMON ASIA 25TH ANNIVERSARY PROMO" と誤ラベルする実例あり
+    #   (subject に GOLDEN BOX は残る)。Golden Box に外国語版が存在しない以上、subject=GOLDEN BOX の
+    #   ASIA brand は日本版 S8a-G で確定 → language gate に "ASIA 25TH ANNIVERSARY" を追加許可。
+    #   誤resolve不能の根拠: (a) S8a-G は golden box 15枚専用 prefix、(b) ID完全一致(S8a-G-###実在時のみ)、
+    #   (c) subject に GOLDEN BOX 必須。promo pack(S8a-P Dark Gyarados 等)は subject に GOLDEN BOX 無=不発。
+    _gb_brand_ok = bool(re.search(r"\b(JAPAN(?:ESE)?|JPN)\b", (brand or "").upper())) or \
+        ("ASIA 25TH ANNIVERSARY" in (brand or "").upper())
+    if "GOLDEN BOX" in (subject or "").upper() and _gb_brand_ok:
         if verbose and set_code != "S8a-G":
-            print(f"    🔁 Pokemon subject-path: 'GOLDEN BOX'+JP brand → set_code "
+            print(f"    🔁 Pokemon subject-path: 'GOLDEN BOX'+JP/ASIA brand → set_code "
                   f"{set_code!r}→'S8a-G' (brand={brand!r}, subject={subject!r})")
         set_code = "S8a-G"
 

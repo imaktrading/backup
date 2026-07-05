@@ -183,23 +183,39 @@ class TestPokemonGoldenBox(unittest.TestCase):
         self.assertEqual(r["card_id"], "S8a-005")
 
 
-class TestPokemonGoldenBoxAsiaReject(unittest.TestCase):
-    """ASIA(非日本語) brand の Golden Box → reject が正 (fail-closed language gate).
+class TestPokemonGoldenBoxAsia(unittest.TestCase):
+    """25th Golden Box は**日本専用 subset**(他言語版なし)。PSA が日本版 Golden Box を
+    "POKEMON ASIA 25TH ANNIVERSARY PROMO" と誤ラベルする実例あり (cert142931332)。
 
-    ⚠️ 2026-06-13 訂正: cert 142931332 の **実物スラブは「2021 POKEMON JPN」+ 券面日本語**
-    (S8a-G 005/015, illust Ryota Murayama) = 日本語版で S8a-G-005 に一致。前回(2026-06-12)
-    「実物=ASIA版」とした判定は **HQ raw dump の brand="POKEMON ASIA..." が実物(JPN)と矛盾した
-    誤データ**が原因だった。→ 正しい JP brand で再scrape すれば subject-path で自動解決
-    (test_golden_box_subject_path_jp_brand 参照)。
-
-    本 test が守るのは「**brand が ASIA/非日本語と明示された入力**は日本語 record に解決させない」
-    という language gate (= ASIA/繁中/韓/尼 の同番号 S8a-G を日本語 S8a-G-005 へ誤解決させない)。
-    この挙動自体は引き続き正しい (2026-06-13 subject-path に JP gate を追加して維持)。
+    2026-07-05 方針改訂 (HQ依頼 `2026-07-05_pokemon_asia_25th_goldenbox_resolver.md`):
+    実物スラブは「2021 POKEMON JPN」+ 券面日本語 = S8a-G-005 (日本語版, user確認済)。
+    Golden Box に外国語版が存在しない以上、subject=GOLDEN BOX の ASIA brand は日本版 S8a-G で確定。
+    → 旧「ASIA=reject」を改め、subject-path の language gate に "ASIA 25TH ANNIVERSARY" を許可。
+    誤resolve不能: S8a-G=golden box 15枚専用 prefix + ID完全一致 + subject に GOLDEN BOX 必須。
     """
 
-    def test_asia_golden_box_rejects(self):
+    def test_asia_golden_box_resolves_s8ag(self):
+        # ASIA 誤ラベル + subject GOLDEN BOX → S8a-G-005 (日本版) に解決 (旧 reject から改訂)
+        for num in ("005", "005/015"):
+            r = pc.lookup_pokemon(
+                "POKEMON ASIA 25TH ANNIVERSARY PROMO", num,
+                "PIKACHU V 25TH ANNIV-GOLDEN BOX", verbose=False,
+            )
+            self.assertIsNotNone(r, num)
+            self.assertEqual(r["card_id"], "S8a-G-005", num)
+
+    def test_asia_promo_pack_without_goldenbox_not_hijacked(self):
+        # subject に GOLDEN BOX が無い ASIA promo (Dark Gyarados 等) は S8a-G に誤爆しない (fail-closed)
         r = pc.lookup_pokemon(
             "POKEMON ASIA 25TH ANNIVERSARY PROMO", "005",
+            "DARK GYARADOS 25TH ANNIVERSARY", verbose=False,
+        )
+        self.assertNotEqual((r or {}).get("card_id"), "S8a-G-005")
+
+    def test_asia_golden_box_nonexistent_number_failclosed(self):
+        # golden box に存在しない番号 → None (ID完全一致 fail-closed)
+        r = pc.lookup_pokemon(
+            "POKEMON ASIA 25TH ANNIVERSARY PROMO", "099",
             "PIKACHU V 25TH ANNIV-GOLDEN BOX", verbose=False,
         )
         self.assertIsNone(r)
