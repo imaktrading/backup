@@ -127,7 +127,8 @@ class TestLookupOnePiece:
         )
         assert result is not None
         assert result["card_id"] == "PRB02-005"
-        assert result["name_en"] == "Monkey.D.Luffy"
+        # 2026-07-03 中黒→ドット是正後: 'Monkey.D.Luffy' → 'Monkey D. Luffy'
+        assert result["name_en"] == "Monkey D. Luffy"
         assert result["rarity_en"] == "SR"
         assert result["power"] == "5000"
         # 旧形式互換フィールド
