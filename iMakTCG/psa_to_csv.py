@@ -516,6 +516,28 @@ def is_out_of_scope_language(brand):
     return bool(toks & {"ASIA", "ASIAN", "KOREAN", "CHINESE"})
 
 
+def should_skip_out_of_scope_language(brand, franchise, card_number, subject,
+                                       lookup_pokemon_fn=None):
+    """is_out_of_scope_language の catalog-aware 版 (純関数, test可)。
+
+    非日本語 brand でも **日本版 catalog に解決できる Pokemon カードは skip しない**。
+    PSA が日本版 25th Anniversary Golden Box(S8a-G) 等を "POKEMON ASIA 25TH ANNIVERSARY"
+    と誤ラベルする例があり(cert 142931332 = S8a-G-005 Pikachu V)、brand 文字列だけの skip は
+    false-positive(recall 損)になる。catalog 解決可否で最終判断 = fail-closed 維持(解決不能は skip)。
+    lookup_pokemon_fn は test 用の注入口(未指定時は catalog_psa.lookup_pokemon)。
+    """
+    if not is_out_of_scope_language(brand):
+        return False
+    if franchise == "Pokemon":
+        fn = lookup_pokemon_fn or catalog_psa.lookup_pokemon
+        try:
+            if fn(brand, card_number, subject):
+                return False  # 日本版 catalog 解決 → 出品継続
+        except Exception:
+            pass
+    return True
+
+
 def is_unidentifiable_don_card(subject, card_number):
     """番号なしの DON!! カードは変種特定不能 → 出品対象外 skip (純関数, test可)。
 
@@ -1682,8 +1704,13 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
 
     # 非日本語版(ASIA/KOREAN/CHINESE)は当店=日本版のみ扱い → 対象外 skip。
     # catalog に足しても埋まらず missing_models を永久汚染するのを止める(2026-07-02)。
-    if is_out_of_scope_language(brand):
-        print(f"    ⏭️ Skip: 非日本語版(ASIA/KOREAN/CHINESE)=日本版catalog対象外 (cert {cert_number}, brand='{brand}')")
+    # 2026-07-05: catalog-aware 化。PSA が日本版 25th Anniversary Golden Box(S8a-G) 等を
+    # "POKEMON ASIA 25TH ANNIVERSARY" と誤ラベルする例がある(cert 142931332 = 日本版
+    # S8a-G-005 Pikachu V が誤 skip されていた)。brand 文字列だけで撥ねず、日本版 catalog に
+    # 解決できる Pokemon カードは出品する(false-positive skip = recall 損の防止)。解決できなければ
+    # 従来通り fail-closed skip(誤出品防止は維持)。
+    if should_skip_out_of_scope_language(brand, franchise, card_number, subject):
+        print(f"    ⏭️ Skip: 非日本語版(ASIA/KOREAN/CHINESE)=日本版catalog未解決 (cert {cert_number}, brand='{brand}')")
         return None
 
     # 番号なし DON!! カードは変種特定不能 → 出品対象外(理由をログに残す=追跡可能)。
