@@ -31,6 +31,12 @@ import urllib.parse
 
 import requests
 
+# Windows の既定 stdout(cp932) だと ✅ 等の絵文字 print で UnicodeEncodeError → utf-8 化。
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KEYS_FILE = os.path.join(SCRIPT_DIR, "ebay keys.txt")
 SELL_TOKEN_FILE = os.path.join(SCRIPT_DIR, "ebay_oauth_token_sell.json")
@@ -48,6 +54,9 @@ SCOPES = [
     # 2026-07-05: SpeedPAK化(国際便をStandardInternational→SpeedPAK)を API で書換えるため
     # readonly → write の sell.account に昇格(read も兼ねる)。
     "https://api.ebay.com/oauth/api_scope/sell.account",
+    # 2026-07-06: eBaymag出品の inline 配送を ReviseItem(Trading, IAFトークン)で SpeedPAK に
+    # 書換えるため sell.inventory 追加。
+    "https://api.ebay.com/oauth/api_scope/sell.inventory",
 ]
 
 
