@@ -1,5 +1,42 @@
 # iMakInventory daily_report
 
+## 2026-07-07 — 【重大】07-04〜07 取下げ漏れ蓄積(24件)を発見・全閉鎖 + deadlock 解除 + 再発防止
+
+### インシデント概要 (user「ここ数日のログで在庫に問題ないか」→ 発見)
+- 決定: **07-04 以降、本物の fail-OPEN(売切なのに eBay live)が 24 件蓄積していた**のを発見し全閉鎖。
+  BAN リスクの取下げ漏れ。放置 3-4 日。「在庫適正」ではなかった。
+- 連鎖 (root cause):
+  1. **07-04 00:16 eBay Trading API 518「Call usage limit reached」**(日次呼出上限)で取下げ upload
+     全滅 + reverse_audit も同時クラッシュ(AUDIT_CRASH、 06-30 追加の crash-guard が非-silent 検知)。
+  2. 518 が ack="Failure" のため **action-needed failure 扱い** → 取下げ失敗が急増ガードを誘発。
+  3. **急増ガード(偽OOS 95件事故対策)が pending の同一 item を毎 cycle HOLD**、 しかも
+     action_required へ **dedup 無し追記** → 恒久 deadlock + ファイル肥大(335 item / 2227 entry)。
+  4. reverse_audit が検知: 07-05 unack=9 → 07-06 =13 → **07-07 =24**(daily alert は発報していたが
+     数日 triage されず)。
+
+### 対処 (実施済)
+- 決定/検証: 独立検証(reverse_audit の D=○ かつ eBay qty>0)24件 + 源 spot-check **7/7 全て売切**
+  (montbell/BANDAI 削除・PSA10 SOLD・PORTER 削除等) = 偽陽性ゼロ。
+- **24件すべて eBay revise qty=0 + verify 実行、 最終確認 24/24 qty=0**(release_holdouts / 直接 revise)。
+  中心は PSA10 TCG・PORTER タンカー・montbell 等の1点物。
+- **deadlock 解除**: `tools/drain_stale_holdouts.py` 新設 → eBay active snapshot で各 holdout の qty 判定、
+  **qty=0/ended の stale 2305 entry(334 item)を archive+削除、 qty>0 の本物は絶対消さない(fail-CLOSED)**
+  → action_required 2 unique まで縮小 = 閾値大幅下回りで deadlock 解消。
+
+### 再発防止 (commit)
+- 変更(1) `ebay_actions/trading_api_uploader.py`: **518 = rate_limited = transient 分類**
+  (`_is_rate_limited` 追加、 action-needed から除外)。 ただし **success=False は維持**(item は live の
+  まま pending 残置 → 次 cycle 自動 retry、 取下げ義務 persist、 silent 完了化しない)。 result に
+  rate_limited_failure を明示。
+- 変更(2) `monitor_listings.py append_action_required`: **(item_id, reason) で冪等化**
+  (= burst guard の毎 cycle 再追記による重複肥大を根絶。 空 item_id は row_index で dedup)。
+- 検証: `tests/test_ratelimit_and_dedup.py` 4件(518分類 / 他失敗と非混同 / dedup / 別item・別reasonは保持)。
+  offline 160 + upload系 53 pass、 regression ゼロ。
+- fubuki(358543374678, SHOPS 白上フブキ賞): reverse_audit 再点検で出た新規 unack 1件。 SHOPS は restock
+  するため D=○ が stale になりやすいので source を本体 scraper で再確認 → **3/3 SOLD_OUT 確定** →
+  revise qty=0 + verify で閉鎖(= 計 25 件閉鎖)。 358284424252(ワンピース一番くじ)は D空欄=非漏れで qty=1 正常。
+- 最終状態: reverse_audit unack=0 相当(全 live 漏れ qty=0)、 action_required 2 unique(閾値下)、 deadlock 解消。
+
 ## 2026-06-30 — 過去数日ログ点検: 在庫適正 (取下げ漏れゼロ) + cron silent crash 穴を hardening
 
 ### 在庫整合性確認 (user「過去数日分のログで在庫に問題ないか」) — 問題なし

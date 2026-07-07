@@ -232,6 +232,23 @@ def _parse_csv_rows(csv_path: Path) -> list:
 INCYCLE_RETRY_INTERVALS_SEC = [5.0, 15.0, 45.0]
 
 
+def _is_rate_limited(res: dict) -> bool:
+    """eBay API 呼出上限 (518 Call usage limit) = 時間で回復する transient (2026-07-07 追加).
+
+    ★ 2026-07-04 事故: 518 が ack="Failure" のため action-needed failure に分類され、
+    取下げ失敗が大量に action_required へ流入 → 急増ガードが deadlock 化 → 5 日間で
+    取下げ漏れ 24 件蓄積。 518 は日次上限リセットで回復する transient なので、
+    「本物の取下げ要対応」 とは区別する。 ただし success=False は維持 (= item は live の
+    まま = pending queue に残り次 cycle で自動 retry、 取下げ義務は persist)。 in-cycle
+    retry はしない (= 上限は数秒で回復しないため無駄 + 呼出をさらに消費するので逆効果)。
+    """
+    if res.get("success"):
+        return False
+    code = str(res.get("error_code") or "")
+    msg = (res.get("error_message") or "")
+    return code == "518" or "Call usage limit" in msg
+
+
 def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
                                 pacing_sec: float = 0.3) -> dict:
     """CSV (= eBay FileExchange format) を Trading API ReviseInventoryStatus で処理.
@@ -467,6 +484,7 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             success = False
         else:
             success = revise_success
+        rate_limited = _is_rate_limited(res)
         entry = {
             **item,
             "success": success,
@@ -474,6 +492,7 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             "error_code": res["error_code"],
             "error_message": res["error_message"],
             "safe_failure": is_safe_failure,
+            "rate_limited": rate_limited,
             "verified": verified,
             "verify_qty": verify_qty,
             "verify_msg": verify_msg,
@@ -513,20 +532,24 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
     success_count = sum(1 for r in results if r["ack"] == "Success")
     warning_count = sum(1 for r in results if r["ack"] == "Warning")
     safe_failure_count = sum(1 for r in results if r.get("safe_failure"))
+    # rate_limited (518) は action-needed から除外 = 急増ガード deadlock 誘発を防ぐ。
+    # success=False のまま pending 残置で次 cycle 自動 retry (取下げ義務 persist)。
     action_needed_failure = sum(
         1 for r in results
-        if r["ack"] == "Failure" and not r.get("safe_failure")
+        if r["ack"] == "Failure" and not r.get("safe_failure") and not r.get("rate_limited")
     )
+    rate_limited_failure = sum(1 for r in results if r.get("rate_limited"))
     transient_failure = sum(
         1 for r in results
         if r.get("ack") is None and not r.get("safe_failure") and not r["success"]
-    )
+    ) + rate_limited_failure
     # 旧 sell_feed_uploader 互換: 「Warning N + safe Failure M + action-needed Failure J」
     # + Trading API 拡張: Success N (= 成功) + Transient K (= DNS/Timeout 系)
     result_text = (f"Success {success_count} + Warning {warning_count} "
                    f"+ safe Failure {safe_failure_count} "
                    f"+ action-needed Failure {action_needed_failure} "
-                   f"+ Transient {transient_failure}")
+                   f"+ Transient {transient_failure}"
+                   + (f" (内 API上限518 {rate_limited_failure})" if rate_limited_failure else ""))
     failure_details = [
         {"item_id": r["item_id"], "error_code": r["error_code"],
          "error_message": r["error_message"], "safe": r.get("safe_failure", False)}
@@ -545,6 +568,7 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
         "warning": warning_count,
         "safe_failure": safe_failure_count,
         "action_needed_failure": action_needed_failure,
+        "rate_limited_failure": rate_limited_failure,
         "failure_details": failure_details,
         "csv_lines": len(rows),
         "log_path": str(log_path),

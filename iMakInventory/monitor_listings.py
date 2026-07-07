@@ -361,12 +361,33 @@ def append_action_required(sheet_label: str, result: dict, reason: str,
       - "supplier_not_supported"  : URL から supplier 判定不能
     """
     DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    item_id = result.get("item_id") or ""
+    row_index = result["row_index"]
+    # ★ 2026-07-07: 冪等化 (dedup)。 burst guard は pending queue の同一 item を毎 cycle
+    # HOLD するため、 dedup が無いと同一 (item, reason) が延々追記され肥大化 (実測 335 item /
+    # 2227 entry = 平均 6.6 重複、 07-04〜07 の deadlock で発生)。 同一 keyの entry が既にあれば
+    # 追記しない (= 記録は 1 度きり、 silent 化はしない)。 key は item_id 優先、 空欄は row_index。
+    dedup_key = (item_id or f"row:{row_index}", reason)
+    if ACTION_REQUIRED_FILE.exists():
+        try:
+            for line in ACTION_REQUIRED_FILE.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ek = (e.get("item_id") or f"row:{e.get('row_index')}", e.get("reason"))
+                if ek == dedup_key:
+                    return  # 既記録 = 追記 skip (dedup)
+        except Exception:
+            pass  # 読込失敗時は保守的に追記 (silent 化しない方を優先)
     entry = {
         "ts":           datetime.now().isoformat(timespec="seconds"),
         "sheet":        sheet_label,
-        "row_index":    result["row_index"],
+        "row_index":    row_index,
         "url":          result["url"],
-        "item_id":      result.get("item_id") or "",
+        "item_id":      item_id,
         "title":        result.get("title", ""),
         "supplier":     result.get("supplier", ""),
         "raw_status":   result.get("raw_status", ""),
