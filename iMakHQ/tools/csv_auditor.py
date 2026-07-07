@@ -291,7 +291,11 @@ def title_spec_consistency(headers, row, project):
         if not val:
             continue
         if mode == "first_token":
-            tok = val.split()[0] if val.split() else val
+            # 区切りは空白 + ピリオド。ドット略記名 (例 'Portgas.D.Ace') を
+            # 1トークン扱いすると title の 'Portgas D Ace'(空白) に不一致→誤検出するため、
+            # '.' でも分割して先頭の実トークンを取る (2026-07-07、Portgas.D.Ace 誤検出恒久対策)。
+            _parts = [t for t in re.split(r"[\s.]+", val) if t]
+            tok = _parts[0] if _parts else val
             hit = tok.lower() in title
         else:  # whole: 複数値 "A, B / C" は各 part で判定。1つでも在れば一致。
             parts = [p.strip() for p in re.split(r"[,/&]", val) if p.strip()]

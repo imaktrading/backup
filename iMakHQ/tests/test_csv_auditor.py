@@ -188,6 +188,19 @@ def test_consistency_tcg_don_card_not_flagged():
     assert any("C:Character" in m for m in A.title_spec_consistency(h2, row2, "tcg"))
 
 
+def test_consistency_tcg_dotted_character_not_flagged():
+    # ドット略記名 'Portgas.D.Ace' は split() で1トークンになり、空白区切りタイトル
+    # 'Portgas D Ace' に不一致→誤検出していた (charfix前の生成時監査で毎回発火、seen×3)。
+    # first_token を空白+'.' で分割し先頭 'Portgas' で照合する恒久修正の回帰テスト。2026-07-07。
+    h = ["*Title", "C:Character"]
+    row = ["PSA 10 One Piece Japanese Portgas D Ace Saikyo Jump-May 2024 #P-074",
+           "Portgas.D.Ace"]
+    assert A.title_spec_consistency(h, row, "tcg") == []
+    # 先頭名がタイトルに無い真の不一致は依然として検出する(緩めすぎ防止)
+    row2 = ["PSA 10 One Piece #OP01-025 Zoro", "Portgas.D.Ace"]
+    assert any("C:Character" in m for m in A.title_spec_consistency(h, row2, "tcg"))
+
+
 # --- タイトル形式準拠 (生成ロジックのフォーマット) ---
 def test_format_gshock_prefix_and_watch():
     h = ["*Title", "C:Brand"]
