@@ -19,6 +19,11 @@ set:
   - source: プロモーションカード
     ebay: Promo Cards
     note: JA 'Promotion Card'
+  - source: 限定商品収録カード
+    ebay: Promo Cards
+    note: >-
+      2026-07-07 HQ依頼: プレミアムグッズセット等 限定商品収録の RESOURCE カード(RP-024〜043)。
+      eBay Set facet は非booster配布カードを一律 Promo Cards に束ねる(プロモと同バケツ)。
   - source: リミテッドBOX Ver.β
     ebay: Limited Box Beta Ver.
     note: JA-only Limited Box β — REVIEW eBay 値
