@@ -1,5 +1,30 @@
 # iMakInventory daily_report
 
+## 2026-07-08 — 公式 K列同期バグ(variation restore 復活漏れ) 修正 + 07-07 事故の再起動対応
+
+### 公式監視くん K列同期の (listing_id, UUID) 複合キー化 (commit 52b5015)
+- 決定: user 指摘「358749467113 の XL が在庫補充されない」を調査 → **K列同期の UUID 単独キーが
+  真因**と特定し修正。XL は即復活。全 variation listing の同種復活漏れも根絶。
+- 真因: eBay の variation SKU (Custom label) UUID は listing 固有でなく **size ごとの共通テンプレ**で、
+  同一 UUID が数百 listing で共有 (実測: XL UUID が 330 listing で共有)。旧 `build_uuid_to_qty` は
+  `{uuid: qty}` の UUID 単独キーで dict last-wins → report 末尾 listing の qty が全 listing の同 size 行に
+  書かれ、SKU シート K列(eBay 現Qty)が壊れる → 在庫あるのに restore されない (◎ × K=0 を満たさず)。
+  - 実証: 358749467113(POP MART UT/OFF WHITE) の XL = UNIQLO 在庫 qty11 あり × eBay qty=0。
+    シート K列が誤って「1」(実際0) で restore 条件を満たさず放置。GetItem で S=0/M=1/L=1/XL=0 確認、
+    UNIQLO API で size 003=S=切れ / 006=XL=在庫11 を確認 = XL は本来復活すべきだった。
+- 変更: `ebay_qty_sync.py` `build_uuid_to_qty` / `match_qty_updates` を **(listing_id, uuid) 複合キー**に
+  (audit_sheet_vs_ebay.load_ebay_qty と同方式)。
+- 検証: `tests/test_ebay_qty_sync_compound_key.py` 3件 (共有UUIDでも listing 別に正しく qty マップ)。
+  既存 21 pass、pre-commit 115 + offline gate pass。
+- 実対応: (1) K列同期 execute で壊れてた 6件(XL含む)を実 eBay と一致に是正。(2) 当該 XL を
+  `revise_inventory_status_variation` で qty=1 直接復活 → GetItem で XL=1 確認 (購入可能に回復)。
+
+### 07-07 取下げ漏れ事故の後処理 (再起動対応)
+- 決定: user PC 再起動。17:30 HIGH cycle が 18:50 の driver crash (InvalidSessionId) で 24 分ハング
+  していたため、再起動が最善と判断 (fail-closed で取下げ段階未到達=中途半端な取下げなし)。
+- 対応: 再起動後 stale `.cycle.lock`(pid=35240) を削除 → 次 cycle スキップ回避。orphan chrome 22個も
+  一掃されクリーン。次 HIGH 21:30 / LOW 22:30 / reverse_audit 明日10:00 が Ready 確認。
+
 ## 2026-07-07 — 【重大】07-04〜07 取下げ漏れ蓄積(24件)を発見・全閉鎖 + deadlock 解除 + 再発防止
 
 ### インシデント概要 (user「ここ数日のログで在庫に問題ないか」→ 発見)
