@@ -46,12 +46,19 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def build_uuid_to_qty(ebay_data: dict) -> dict:
-    """parse_ebay_report の戻り値 → {uuid: qty(int)} 辞書化.
+    """parse_ebay_report の戻り値 → {(listing_id, uuid): qty(int)} 辞書化.
 
+    ★ 2026-07-08 修正: 旧実装は {uuid: qty} で UUID 単独キーだったが、 eBay の variation
+    SKU (Custom label) UUID は **listing 固有でなく size ごとの共通テンプレ** で、 同一 UUID が
+    数百 listing で共有される (実測: XL の UUID が 330 listing で共有)。 UUID 単独キーだと
+    dict の last-wins で report 末尾 listing の qty が全 listing の同 size 行に書かれ、 K 列
+    (eBay 現Qty) が壊れる → 在庫あるのに restore されない (◎ × K=0 条件を満たさず) 機会損失。
+    → (listing_id, uuid) 複合キーにして listing 別に正しく qty を保持する
+    (audit_sheet_vs_ebay.load_ebay_qty と同方式)。
     qty は int 化、parse 失敗時は -1 (= マッチしても書込スキップ判定に使う)。
     """
-    uuid_qty: dict = {}
-    for variations in ebay_data.values():
+    key_qty: dict = {}
+    for listing_id, variations in ebay_data.items():
         for v in variations:
             sku = v.get("sku", "").strip()
             if not UUID_RE.match(sku):
@@ -60,15 +67,16 @@ def build_uuid_to_qty(ebay_data: dict) -> dict:
                 qty = int(v.get("qty", "0").strip() or 0)
             except (ValueError, AttributeError):
                 qty = -1
-            uuid_qty[sku] = qty
-    return uuid_qty
+            key_qty[(str(listing_id).strip(), sku)] = qty
+    return key_qty
 
 
 def match_qty_updates(uuid_qty: dict, sheet_skus: list) -> list:
-    """SKU シート行 ↔ uuid_qty で match、K 列書換対象を抽出.
+    """SKU シート行 ↔ (listing_id, uuid)→qty で match、K 列書換対象を抽出.
 
     対処済 (B=TRUE) 行は **スキップ** (= auto_qty_zero の qty 上書きを保護、
     古い eBay report で書き戻すと自動処理結果を巻き戻すため)。
+    照合は (listing_id, uuid) 複合キー (= UUID が listing 跨ぎで共有される問題への対策)。
     """
     results = []
     for sheet_idx, row in enumerate(sheet_skus, start=2):
@@ -76,12 +84,14 @@ def match_qty_updates(uuid_qty: dict, sheet_skus: list) -> list:
         # 対処済 (B=TRUE) 行はスキップ
         if r[1].strip().upper() in ("TRUE", "VRAI"):
             continue
+        listing_id = r[3].strip()
         sku_uuid = r[5].strip()
         if not UUID_RE.match(sku_uuid):
             continue
-        if sku_uuid not in uuid_qty:
+        key = (listing_id, sku_uuid)
+        if key not in uuid_qty:
             continue
-        new_qty = uuid_qty[sku_uuid]
+        new_qty = uuid_qty[key]
         if new_qty < 0:
             continue
         try:
