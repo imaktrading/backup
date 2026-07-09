@@ -81,3 +81,74 @@ def test_append_action_required_distinct_items_and_reasons_kept(tmp_path, monkey
     M.append_action_required("SHEET", {"row_index": 55, "url": "u", "item_id": "", "raw_status": ""},
                              reason="item_id_empty", dry_run=False)
     assert _count_entries(f) == 4  # row55 は 1 件だけ
+
+
+# ============================================================================
+# Root fix (2026-07-09 再発): cycle 外取下げ済 (D=○ × eBay qty=0) の pending prune
+#   = 急増ガード誤発火 deadlock の構造的原因を断つ。 fail-CLOSED を失敗注入で検証。
+# ============================================================================
+def _cand(item_id, row=10):
+    return {"sheet_label": "HIGH", "row_index": row, "item_id": item_id,
+            "url": f"https://x/{item_id}", "title": "t", "current_sold": "○"}
+
+
+def test_prune_qty_map_zero_is_pruned_positive_is_kept():
+    """qty_map: qty=0 → prune (drain 対象) / qty>0 → 温存 (取下げ義務 persist)。"""
+    from ebay_actions.revise_csv_generator import prune_taken_down_candidates
+    cands = [_cand("A"), _cand("B"), _cand("C")]
+    qty_map = {"A": 0, "B": 3, "C": 0}
+    live, drained, unknown = prune_taken_down_candidates(cands, qty_map=qty_map)
+    assert sorted(drained) == ["A", "C"], "eBay qty=0 が drain 対象になっていない"
+    assert [c["item_id"] for c in live] == ["B"], "qty>0 の live 品が温存されていない"
+    assert unknown == 0
+
+
+def test_prune_absent_from_map_confirmed_via_getitem(monkeypatch):
+    """map 不在は GetItem で確定。 部分取得 map での誤 prune (fail-OPEN) を防ぐ核。"""
+    import ebay_actions.revise_csv_generator as R
+    # A は map 不在 & GetItem=0 (ended) → prune。 B は map 不在 & GetItem=5 → 温存。
+    getitem = {"A": 0, "B": 5}
+    monkeypatch.setattr(R, "_ebay_current_qty", lambda iid, tok: getitem.get(iid))
+    live, drained, unknown = R.prune_taken_down_candidates(
+        [_cand("A"), _cand("B")], qty_map={}, token="tok")
+    assert drained == ["A"], "map 不在 & ended を GetItem で prune できていない"
+    assert [c["item_id"] for c in live] == ["B"]
+    assert unknown == 0
+
+
+def test_prune_api_failure_is_kept_failclosed(monkeypatch):
+    """GetItem が None (API 失敗/qty 不明) → 温存 (fail-CLOSED)。 誤 prune=fail-OPEN 禁止。"""
+    import ebay_actions.revise_csv_generator as R
+    monkeypatch.setattr(R, "_ebay_current_qty", lambda iid, tok: None)
+    live, drained, unknown = R.prune_taken_down_candidates(
+        [_cand("A"), _cand("B")], qty_map={}, token="tok")
+    assert drained == [], "API 失敗品を誤って drain した (fail-OPEN)"
+    assert len(live) == 2, "判定不能品を温存していない"
+    assert unknown == 2
+
+
+def test_prune_empty_item_id_is_kept():
+    """item_id 空欄は判定不能 → 温存 (fail-CLOSED)。"""
+    from ebay_actions.revise_csv_generator import prune_taken_down_candidates
+    live, drained, unknown = prune_taken_down_candidates(
+        [_cand(""), _cand("A")], qty_map={"A": 0})
+    assert drained == ["A"]
+    assert [c["item_id"] for c in live] == [""]
+
+
+def test_prune_breaks_surge_guard_deadlock():
+    """deadlock 再現: 35 candidates のうち 20 が取下げ済 (qty=0) → prune 後 15 件。
+    急増ガード閾値 (30) を下回り HOLD 誤発火しない = deadlock が解ける。"""
+    from ebay_actions.revise_csv_generator import (
+        prune_taken_down_candidates, DEFAULT_NEWLY_SOLD_BURST_THRESHOLD,
+    )
+    done = [_cand(f"DONE{i}", row=i) for i in range(20)]      # 取下げ済
+    live_items = [_cand(f"LIVE{i}", row=100 + i) for i in range(15)]  # 本物 live
+    qty_map = {**{f"DONE{i}": 0 for i in range(20)},
+               **{f"LIVE{i}": 1 for i in range(15)}}
+    live, drained, _ = prune_taken_down_candidates(done + live_items, qty_map=qty_map)
+    assert len(drained) == 20
+    assert len(live) == 15
+    # prune 前 (35) は閾値超で全 HOLD だったが、 prune 後 (15) は閾値以下 → 正常 upload へ
+    assert len(done + live_items) > DEFAULT_NEWLY_SOLD_BURST_THRESHOLD
+    assert len(live) <= DEFAULT_NEWLY_SOLD_BURST_THRESHOLD

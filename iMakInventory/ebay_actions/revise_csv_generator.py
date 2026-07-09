@@ -125,6 +125,20 @@ DEFAULT_NEWLY_SOLD_BURST_THRESHOLD = int(
     os.environ.get("INVENTORY_NEWLY_SOLD_BURST_THRESHOLD", "30")
 )
 
+# 2026-07-09 root fix: cycle 外 (reverse_audit / release_holdouts / 手動) で取下げ済
+# = D=○ 維持 × eBay qty=0 の pending が drain されず蓄積 → pending>30 → 急増ガードが
+# 毎 cycle 全 HOLD → upload されない → drain されない → 恒久 deadlock (07-04/07-09 事故)。
+# 対策: 急増ガード判定の「前」に、取下げ済 (eBay qty=0) candidate を pending から prune し
+# processed へ archive する。 これで急増ガードの候補数が「真に live な取下げ義務」のみを
+# 反映し、 取下げ済品の滞留で誤発火する deadlock を構造的に断つ。
+#   fail-CLOSED: qty>0 / qty 不明 (API 失敗) は温存 (取下げ義務 persist)。
+#   quota: qty_map (GetSellerList) が cheap に渡された時は常時 prune、 無ければ candidates が
+#   この閾値以上に積み上がった cycle でだけ自前 fetch (定常時は追加 API ゼロ)。 閾値は急増
+#   ガード (30) より低く取り、 deadlock 化する前に prune が働くマージンを確保。
+DEFAULT_PRUNE_TAKEN_DOWN_TRIGGER = int(
+    os.environ.get("INVENTORY_PRUNE_TAKEN_DOWN_TRIGGER", "20")
+)
+
 
 # ============================================================================
 # 売切候補の収集
@@ -317,6 +331,48 @@ def collect_from_pending_queue(
     return candidates, skipped
 
 
+def _ebay_current_qty(iid: str, token: str) -> Optional[int]:
+    """eBay GetItem で現在 available qty を返す (= Quantity - QuantitySold).
+
+    Returns:
+      int : available (0 = 取下げ済 / 売切)
+      0   : error 17 (Item not found / already ended) も qty=0 同等扱い
+      None: API 失敗 / qty 不明 = 削除保留 (fail-CLOSED)
+    """
+    if not iid:
+        return None
+    # 循環 import 回避のため遅延 import
+    from ebay_actions.trading_api_client import (  # noqa: PLC0415
+        _call_trading,
+    )
+    import re as _re  # noqa: PLC0415
+    body = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+        f'<ItemID>{iid}</ItemID></GetItemRequest>'
+    )
+    try:
+        res = _call_trading("GetItem", body, access_token=token)
+    except Exception as e:
+        print(f"    [!] GetItem 例外 iid={iid}: {type(e).__name__}: {e}")
+        return None
+    if res.get("error_code") == "17":
+        # Item not found / already ended → qty=0 同等
+        return 0
+    if not res.get("success"):
+        return None
+    # <Quantity> は累計出品数、 available = Quantity - QuantitySold で計算
+    # (旧 logic は Quantity をそのまま読んでて false positive 発生、 2026-06-10 修正)
+    xml = res.get("raw_xml", "")
+    q_m = _re.search(r"<Quantity>(\d+)</Quantity>", xml)
+    sold_m = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", xml)
+    if q_m:
+        total_qty = int(q_m.group(1))
+        sold = int(sold_m.group(1)) if sold_m else 0
+        return max(0, total_qty - sold)
+    return None
+
+
 def prune_discarded_entries(skipped: list[dict]) -> dict:
     """verify で「sheet で D が ○ でなくなった/itemID が変わった」と判定された
     pending entry を **eBay GetItem qty=0 確認後にのみ** discard する。
@@ -357,9 +413,8 @@ def prune_discarded_entries(skipped: list[dict]) -> dict:
     # eBay GetItem で qty 確認 (= pending 残置 / discard を判定)
     # 循環 import 回避のため遅延 import
     from ebay_actions.trading_api_client import (  # noqa: PLC0415
-        load_access_token, _call_trading,
+        load_access_token,
     )
-    import re as _re  # noqa: PLC0415
     try:
         token = load_access_token()
     except Exception as e:
@@ -367,34 +422,7 @@ def prune_discarded_entries(skipped: list[dict]) -> dict:
         return {"discarded": 0, "kept_qty_gt0": 0, "reincluded": []}
 
     def _ebay_qty(iid: str) -> Optional[int]:
-        """eBay GetItem で現在 qty 取得。 None = API 失敗 / 不明 = 削除保留。"""
-        if not iid:
-            return None
-        body = (
-            '<?xml version="1.0" encoding="utf-8"?>'
-            '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f'<ItemID>{iid}</ItemID></GetItemRequest>'
-        )
-        try:
-            res = _call_trading("GetItem", body, access_token=token)
-        except Exception as e:
-            print(f"    [!] GetItem 例外 iid={iid}: {type(e).__name__}: {e}")
-            return None
-        if res.get("error_code") == "17":
-            # Item not found / already ended → qty=0 同等
-            return 0
-        if not res.get("success"):
-            return None
-        # ★ 修正 2026-06-10: <Quantity> は累計出品数、 available = Quantity - QuantitySold
-        # で計算する。 旧 logic は Quantity をそのまま読んでて false positive 発生。
-        xml = res.get("raw_xml", "")
-        q_m = _re.search(r"<Quantity>(\d+)</Quantity>", xml)
-        sold_m = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", xml)
-        if q_m:
-            total_qty = int(q_m.group(1))
-            sold = int(sold_m.group(1)) if sold_m else 0
-            return max(0, total_qty - sold)
-        return None
+        return _ebay_current_qty(iid, token)
 
     # pending 全行を走査、 target 該当 entry のみ eBay qty 確認
     archived = 0
@@ -489,6 +517,83 @@ def drain_pending_queue(consumed_item_ids: list[str]) -> int:
         encoding="utf-8",
     )
     return moved
+
+
+def prune_taken_down_candidates(
+    candidates: list[dict],
+    qty_map: Optional[dict] = None,
+    token: Optional[str] = None,
+) -> tuple[list, list, int]:
+    """D=○ だが eBay 上で既に取下げ済 (available qty=0) の candidate を除外する.
+
+    2026-07-09 root fix。 cycle 外 (reverse_audit / release_holdouts / 手動) で取下げた
+    qty=0 品は sheet の D=○ が残るため collect_from_pending_queue が毎 cycle candidate に
+    拾い続ける。 upload まで到達すれば uploader の verify が qty=0 → success 化 →
+    drain するが、 急増ガードが upload 前に全 HOLD すると drain されず滞留 → pending 肥大 →
+    恒久 deadlock。 本関数は急増ガード判定の前で取下げ済品を candidates から抜き、 その
+    item_id を drain 対象として返す (呼び側で drain_pending_queue で archive)。
+
+    判定 (fail-CLOSED):
+      - qty_map に item_id 有り & qty > 0  → live = 温存 (取下げ義務 persist)
+      - qty_map に item_id 有り & qty == 0 → 取下げ済 = prune
+      - qty_map に item_id 無し           → GetItem で確定 (err17/qty0 のみ prune、
+                                             qty>0 は温存、 API 失敗も温存)
+        ※ GetSellerList active map の「不在」は ended(取下げ済) と 部分取得失敗 の両義。
+          部分取得での誤 prune=fail-OPEN を避けるため必ず GetItem で個別確認する。
+      - item_id 空欄                        → 温存 (判定不能、 fail-CLOSED)
+
+    Args:
+        candidates: collect_from_pending_queue が返す candidate list
+                    (各 dict は "item_id" を持つ)
+        qty_map: {item_id: available_qty} (GetSellerList 由来)。 None なら全件 GetItem。
+        token: GetItem 用 access token。 None なら必要時に load_access_token()。
+
+    Returns: (live_candidates, drained_item_ids, unknown_kept)
+      - live_candidates: 取下げ義務が残る (= CSV/upload へ流す) candidate list
+      - drained_item_ids: eBay qty=0 確認済 = drain_pending_queue へ渡す item_id list
+      - unknown_kept: API 失敗等で判定不能のまま温存した件数 (= 監視用)
+    """
+    if not candidates:
+        return candidates, [], 0
+
+    # map 不在 item を GetItem 確認するため token を用意 (遅延)
+    def _get_token() -> Optional[str]:
+        nonlocal token
+        if token:
+            return token
+        try:
+            from ebay_actions.trading_api_client import load_access_token  # noqa: PLC0415
+            token = load_access_token()
+            return token
+        except Exception as e:
+            print(f"  [!] prune_taken_down: token load 失敗 (全件温存): {type(e).__name__}: {e}")
+            return None
+
+    live = []
+    drained_ids = []
+    unknown_kept = 0
+    for c in candidates:
+        iid = (c.get("item_id") or "").strip()
+        if not iid:
+            live.append(c)  # 判定不能 = 温存
+            continue
+        qty = qty_map.get(iid) if qty_map is not None else None
+        if qty is None:
+            # map 不在 or map 未提供 → GetItem で確定
+            tok = _get_token()
+            if tok is None:
+                live.append(c)  # token 無し = 温存 (fail-CLOSED)
+                unknown_kept += 1
+                continue
+            qty = _ebay_current_qty(iid, tok)
+        if qty == 0:
+            drained_ids.append(iid)  # 取下げ済 = prune
+        elif qty is None:
+            live.append(c)  # API 失敗 = 温存 (fail-CLOSED)
+            unknown_kept += 1
+        else:
+            live.append(c)  # qty > 0 = live = 取下げ義務残
+    return live, drained_ids, unknown_kept
 
 
 # ============================================================================
@@ -642,6 +747,7 @@ def run(
     low_sheet_id: Optional[str] = None,
     single_sheet_id: Optional[str] = None,
     single_sheet_label: Optional[str] = None,
+    provided_qty_map: Optional[dict] = None,
 ) -> dict:
     # 単一スプシ mode (Phase 6a)
     is_single_mode = bool(single_sheet_id)
@@ -755,6 +861,39 @@ def run(
         raise ValueError(f"unsupported mode: {mode}")
 
     print(f"  合計候補: {len(candidates)} 件 (dedup 前)")
+
+    # 2026-07-09 root fix: 急増ガードの「前」に取下げ済 (eBay qty=0) candidate を prune。
+    # cycle 外で取下げた D=○ 品が pending に滞留 → 急増ガード誤発火 → deadlock を構造的に断つ。
+    # quota: qty_map が cheap に渡された時は常時 prune、 無ければ candidates が閾値以上に
+    # 積み上がった cycle でだけ自前 fetch (定常時は追加 API ゼロ)。 fail-CLOSED: qty>0/不明は温存。
+    if mode == "pending" and candidates:
+        qty_map = provided_qty_map
+        if qty_map is None and len(candidates) >= DEFAULT_PRUNE_TAKEN_DOWN_TRIGGER:
+            # deadlock 化しかけ = 取下げ済滞留の疑い → GetSellerList active map を自前取得
+            try:
+                from reverse_audit import _fetch_ebay_qty_map  # noqa: PLC0415
+                qty_map = _fetch_ebay_qty_map()
+                print(f"  [prune] candidates {len(candidates)} 件 >= 閾値 "
+                      f"{DEFAULT_PRUNE_TAKEN_DOWN_TRIGGER} → eBay active map fetch: "
+                      f"{len(qty_map)} 件")
+            except Exception as e:
+                print(f"  [!] [prune] eBay active map 取得失敗 (prune skip): "
+                      f"{type(e).__name__}: {e}")
+                qty_map = None
+        if qty_map is not None:
+            try:
+                candidates, drained_ids, unknown_kept = prune_taken_down_candidates(
+                    candidates, qty_map=qty_map,
+                )
+                if drained_ids:
+                    moved = drain_pending_queue(drained_ids)
+                    print(f"  [prune] 取下げ済 (eBay qty=0) {len(drained_ids)} 件を "
+                          f"pending から drain → processed archive ({moved} 件)")
+                    print(f"          残 live candidates: {len(candidates)} 件"
+                          f"{f' (判定不能 温存 {unknown_kept} 件)' if unknown_kept else ''}")
+            except Exception as e:
+                print(f"  [!] [prune] prune_taken_down_candidates 失敗 (温存): "
+                      f"{type(e).__name__}: {e}")
 
     # HQ 2026-06-10 Phase 1.6 取下げ側急増ガード (= 6/3 偽 OOS 95 件型対策):
     # candidates 件数が閾値超なら scraper 系異常疑い → 全件 HOLD + action_required 記録 + alert。
