@@ -33,6 +33,11 @@ def test_first_official_image_english_only_returns_empty():
     assert p._first_official_image(["https://files.bandai-tcg-plus.com/card_image/OP-EN/OP06/OP06-022_d.png"]) == ""
 
 
+def test_first_official_image_yugioh_ygoprodeck_excluded():
+    # 遊戯王の ygoprodeck(英語/国際版DB) は日本語版公式でない → 除外 → 公式画像なし('')
+    assert p._first_official_image(["https://images.ygoprodeck.com/images/cards/64163367.jpg"]) == ""
+
+
 def test_first_official_image_pokemon_gundam_are_ja():
     # Pokemon(pokemon-card.com) / Gundam(gundam-gcg.com/jp) は元から日本語版 → そのまま採用
     assert p._first_official_image(["https://www.pokemon-card.com/assets/images/card_images/large/SM12a/x.jpg"]).endswith("x.jpg")

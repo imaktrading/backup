@@ -1587,8 +1587,13 @@ def _first_official_image(images):
             return ""
     if not isinstance(images, (list, tuple)) or not images:
         return ""
-    # 英語版(-EN/ や /en/ を含む)を除外 → 日本語版のみ採用。日本語版が無ければ '' (英語版は出さない)
-    ja = [u for u in images if u and "-en/" not in str(u).lower() and "/en/" not in str(u).lower()]
+    # 英語版を除外 → 日本語版のみ採用。日本語版が無ければ '' (英語版は絶対に出さない)。
+    #   -en/ , /en/ : bandai 等の英語版パス
+    #   ygoprodeck   : 遊戯王の海外(英語/国際版)コミュニティDB = 日本語版公式でない
+    def _is_en(u):
+        s = str(u).lower()
+        return "-en/" in s or "/en/" in s or "ygoprodeck" in s
+    ja = [u for u in images if u and not _is_en(u)]
     if not ja:
         return ""
     url = str(ja[0]).strip()
