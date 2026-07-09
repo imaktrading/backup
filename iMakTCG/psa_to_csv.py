@@ -1571,20 +1571,52 @@ def _load_cert_overrides():
         return {}
 
 
-def _build_pic_url(data):
-    """eBay CSV PicURL = 表 | 裏 | 999.png (= 2026-06-01 ユーザー要望).
+def _first_official_image(images):
+    """catalog の images (JSON文字列 or list) から公式表画像URL(日本語版)を返す。無ければ''。
+    当店は日本版のみ出品 → 英語版(-EN)画像は使わない。日本語版が無ければ公式画像を付けない。
+    (One Piece は images[0]=英語版(OP-EN)・[1]=日本語版(OP-JA) なので JA を選ぶ。
+     Pokemon(pokemon-card.com) / Gundam(gundam-gcg.com/jp) は元から日本語版。)
+    gundam-gcg の '/seg/../' 混入URLは正規化 (= /jp/cards/../images/ → /jp/images/).
+    2026-07-08 ユーザー要望: PSA表/裏 に公式表(日本語版)を追加 (TCG全カテゴリ)."""
+    if not images:
+        return ""
+    if isinstance(images, str):
+        try:
+            images = json.loads(images)
+        except Exception:
+            return ""
+    if not isinstance(images, (list, tuple)) or not images:
+        return ""
+    # 英語版(-EN/ や /en/ を含む)を除外 → 日本語版のみ採用。日本語版が無ければ '' (英語版は出さない)
+    ja = [u for u in images if u and "-en/" not in str(u).lower() and "/en/" not in str(u).lower()]
+    if not ja:
+        return ""
+    url = str(ja[0]).strip()
+    if not url:
+        return ""
+    # '/segment/../' を1回正規化 (相対パス混入の gundam URL 対策)
+    url = re.sub(r"/[^/]+/\.\./", "/", url)
+    return url
 
-    PSA cert page から取得した front/back 画像を順序保持で組立.
+
+def _build_pic_url(data):
+    """eBay CSV PicURL = 表 | 裏 | 公式表 | 999.png.
+
+    PSA cert page の front/back + catalog の公式表画像を順序保持で組立.
+    (2026-06-01: 表/裏 | 2026-07-08: 公式表を追加=ユーザー要望).
     取得失敗時は fallback (= 既存 PIC_URL のみ).
     """
     parts = []
     if data:
         f = data.get("CardImageUrlFront")
         b = data.get("CardImageUrlBack")
+        off = data.get("CardImageUrlOfficial")
         if f:
             parts.append(f)
         if b and b != f:
             parts.append(b)
+        if off and off != f and off != b:
+            parts.append(off)
     parts.append(PIC_URL)
     return "|".join(parts)
 
@@ -1733,6 +1765,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     official_illustrator = ""
     official_finish = ""
     official_card_size = ""  # 2026-05-31: adapter から取得 (= 全 franchise block で set 試行)
+    official_image_url = ""  # 2026-07-08: catalog images[0] = 公式表画像 (PicURL に追加)
 
     # overrides 適用時: 公式DB lookup を完全スキップして overrides の specs を直接採用
     if _override_applied:
@@ -1794,6 +1827,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # 検索 query 副作用は check_csv._normalize_game_short / market_gate に "One Piece CCG":"One Piece" 追加で吸収
             official_finish = bandai.get("finish") or ""
             official_card_size = bandai.get("card_size") or ""
+            official_image_url = _first_official_image(bandai.get("images")) or official_image_url
         elif catalog_misses is not None:
             catalog_misses.append(("one_piece_tcg", f"{brand}-{card_number}"))
         # iMakCatalog miss → Vision に委ねる (fallback 構築は廃止、PSA Brand "P" + 番号
@@ -1815,6 +1849,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
             official_finish = pokemon.get("finish") or ""
             official_card_size = pokemon.get("card_size") or ""
+            official_image_url = _first_official_image(pokemon.get("images")) or official_image_url
             # card_type: scraper が specs.card_type に Pokémon/Trainer/Energy を保存済
             official_card_type = pokemon.get("card_type", "")
             official_attribute = pokemon.get("type_en", "")
@@ -1877,6 +1912,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                 # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
                 official_finish = db_card.get("finish") or ""
                 official_card_size = db_card.get("card_size") or ""
+                official_image_url = _first_official_image(db_card.get("images")) or official_image_url
             elif catalog_misses is not None:
                 catalog_misses.append(("dragonball_scg", f"{brand}-{card_number}"))
 
@@ -1901,6 +1937,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
             official_finish = gd_card.get("finish") or ""
             official_card_size = gd_card.get("card_size") or ""
+            official_image_url = _first_official_image(gd_card.get("images")) or official_image_url
         elif catalog_misses is not None:
             catalog_misses.append(("gundam_tcg", f"{brand}-{card_number}"))
 
@@ -1930,8 +1967,13 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
             official_finish = ygo.get("finish") or ""
             official_card_size = ygo.get("card_size") or ""
+            official_image_url = _first_official_image(ygo.get("images")) or official_image_url
         elif catalog_misses is not None:
             catalog_misses.append(("yugioh_tcg", f"{brand}-{card_number}"))
+
+    # 2026-07-08: catalog の公式表画像を data に格納 → _build_pic_url が 表|裏|公式|999 で組立
+    if official_image_url:
+        data['CardImageUrlOfficial'] = official_image_url
 
     # ===== 画像主導カード特定の結果を反映 (新ルーチン由来) =====
     # confidence high/medium の場合、既存 lookup 結果より優先で official_* を上書き。
