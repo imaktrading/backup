@@ -1,5 +1,28 @@
 # iMakInventory daily_report
 
+## 2026-07-09 — reverse_audit 漏れ5件取下げ + 急増ガード deadlock 再発を応急 drain (根本修正は次回)
+
+### daily reverse_audit alert (未承認乖離5件) → 全取下げ
+- 決定: 07-09 10:02 の daily reverse_audit が D=○ × eBay qty>0 の未承認乖離 5件 (全 HIGH/mercari 1点物) を
+  検出 (+ 承認済 row728 は抑制)。源 scrape で **5/5 全て売切確認** (SOLD_OUT×3 / DELETED×2、偽陽性ゼロ)
+  → revise qty=0 + verify で **全取下げ (5/5、NG=0)**。
+- 対象: 358488910096(ワンピース ロー) / 358694804610(PSA10キテルグマ) / 358758104227(PSA10マックスウェル) /
+  358738073104(PSA10ガロード) / 358738073102(PSA10シュガー)。
+
+### ★急増ガード deadlock が再発 (07-07 修正は不完全だった)
+- 決定: 取下げ後に調べたら pending 66 / action_required 67 unique まで **再蓄積** = burst guard 恒久発火状態。
+  07-07 の修正 (518 transient化 + append dedup) は trigger と重複肥大は直したが **核心の穴を見逃していた**。
+- 真の core bug: reverse_audit / release_holdouts / 手動 で cycle **外**に取下げた qty=0 品が
+  **pending_revise.jsonl から drain されない** (drain_pending_queue は cycle upload 成功時のみ発火) →
+  「D=○ のまま eBay qty=0 (取下げ済)」品が pending に滞留 → pending>30 → 急増ガードが毎cycle 全 HOLD →
+  恒久 deadlock。既存 prune_discarded_entries は「源復活 (D クリア)」品しか消さず、この経路が無いのが穴。
+- 応急 (実施): `read_pending_queue` + eBay active CSV の qty_map で qty=0/取下げ済を判定 →
+  `drain_pending_queue` で pending 66→**5**、`tools/drain_stale_holdouts.py --execute` で
+  action_required 81→**10** (閾値30以下 = 発火停止 = 正常運用復帰)。
+- 未実施 (次セッション最優先): **各 cycle で pending を「D=○ かつ eBay qty=0」= 取下げ済で prune する**
+  経路を追加 (eBay active snapshot reuse で quota 節約、fail-CLOSED、失敗注入テスト付き)。drain は応急で
+  放置すると数日でまた蓄積する。詳細 memory: takedown_backlog_deadlock_20260707。
+
 ## 2026-07-08 — 公式 K列同期バグ(variation restore 復活漏れ) 修正 + 07-07 事故の再起動対応
 
 ### 公式監視くん K列同期の (listing_id, UUID) 複合キー化 (commit 52b5015)
