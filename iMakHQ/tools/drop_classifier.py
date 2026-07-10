@@ -78,6 +78,21 @@ def classify_drops(log, *, set_exists, card_exists=None):
             out.append({"item": f"{m.group(1)} {m.group(2)}件", "class": "正常",
                         "cause": f"{m.group(1)}のため除外(出品済/cooldown)", "act": "対応不要(正常)"})
             continue
+
+        # ⑤ 番号なし DON!! skip: "reason=no_card_number_don ... (cert 154458065, subject='DON!! CARD')"
+        #    DON!! は標準番号を持たないが set_code+treatment(rarity)で一意に識別可能。
+        #    番号必須の fail-closed が誤除外し、しかも silent drop になっていた(2026-07-10 見過ごし発覚)。
+        #    → 「識別可・要catalog対応」として明示し問題提起へ(silent drop 禁止)。
+        m = re.search(r"no_card_number_don.*?cert\s+(\d+).*?subject='([^']+)'", s)
+        if m:
+            cid = "#" + m.group(1)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            out.append({"item": cid, "class": "DON!!識別可(要catalog)",
+                        "cause": f"DON!!カード('{m.group(2)}')=番号なしだが set+処理(rarity)で識別可・catalog未対応で誤除外",
+                        "act": "catalog に DON!! を set_code+treatment(rarity)で登録 → 出品可(cert cache に set/rarity 有り)"})
+            continue
     return out
 
 

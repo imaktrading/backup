@@ -43,6 +43,29 @@ def test_normal_exclusion_is_no_action():
     assert drops[0]["class"] == "正常" and "不要" in drops[0]["act"]
 
 
+def test_don_card_skip_is_classified_not_silent():
+    # 番号なし DON!! は set+treatment(rarity)で識別可能 → silent drop させず問題提起に出す (2026-07-10)。
+    # 回帰: この skip 行が分類0件だと "-1 silent drop" に埋もれ、有価カードを見過ごす。
+    log = ("    ⏭️ Skip: reason=no_card_number_don DON!!カード番号欠落=変種特定不能 "
+           "(cert 154458065, subject='DON!! CARD')")
+    drops = dc.classify_drops(log, set_exists=lambda p: True)
+    assert drops, "DON!! skip が分類されず silent drop になっている(見過ごし再発)"
+    d = drops[0]
+    assert d["class"] == "DON!!識別可(要catalog)"
+    assert "154458065" in d["item"]
+    assert d["class"] != "正常"          # actionable として reconcile に計上される
+    assert "catalog" in d["act"]
+
+
+def test_don_skip_makes_reconcile_account_for_it():
+    # DON!! を分類すれば actionable に載り、処理件数照合で silent drop が減る方向に働く。
+    log = ("2件を処理します\n成功: 1件 / 失敗: 1件\n"
+           "    ⏭️ Skip: reason=no_card_number_don DON!!... (cert 999999, subject='DON!! CARD')")
+    drops = dc.classify_drops(log, set_exists=lambda p: True)
+    # 処理2 = 成功1 + 落ち1(DON!!) → 照合OK(DON!! が silent でなく計上される)
+    assert "照合OK" in dc.reconcile_counts(log, drops)
+
+
 def test_reconcile_counts():
     # 処理10 = 成功8 + 落ち2(actionable) → OK
     log_ok = "10件を処理します\n成功: 8件 / 失敗: 0件"
