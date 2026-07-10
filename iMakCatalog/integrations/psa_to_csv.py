@@ -1349,6 +1349,11 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     #     paired sub-set(Collection/Ultra の Sun/Moon)は Sun≠Moon で各々一意のため個別に可。
     "SHINING LEGENDS":   "SM3p",   # ひかる伝説
     "CHAMPION ROAD":     "SM6b",   # チャンピオンロード
+    # --- 2026-07-10 resolver mapping gap 解消 (records実在・set一意) ---
+    "SOULSILVER COLLECTION": "L1-Bss",  # ソウルシルバーコレクション (L1-Bss-021=ニョロトノ 実在)
+    "HEARTGOLD COLLECTION":  "L1-Bhg",  # ハートゴールドコレクション (L1-Bhg-001=ビードル 実在)
+    "POKEKYUN COLLECTION":   "CP3",     # ポケキュンコレクション (CP3-032=ミツル 実在)
+    "DREAM SHINE COLLECTION": "CP5",    # 幻・伝説ドリームキラコレクション (CP5-014=ケルディオ 実在)
     "GG END":            "SM10a",  # ジージーエンド
     "DETECTIVE PIKACHU": "SMP2",   # 名探偵ピカチュウ (スペシャルパック)
     "ULTRA MOON":        "SM5M",   # ウルトラムーン
