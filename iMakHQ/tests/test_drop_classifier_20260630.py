@@ -43,6 +43,33 @@ def test_normal_exclusion_is_no_action():
     assert drops[0]["class"] == "正常" and "不要" in drops[0]["act"]
 
 
+def test_promo_reject_but_rescued_is_not_a_drop():
+    # reject後にpromo fallbackでbuild成功した品は drop に数えない(二重計上回避・2026-07-10)。
+    log = ("⚠️ iMakCatalog ID hit P-013 (ゴードン) だが PSA Subject 'SANJI' と名前不一致 → reject\n"
+           "🎯 iMakCatalog hit (promo fallback): OP01-013_p1 サンジ (Subject='SANJI' brand='X' と一致, 11件中 score=280)\n"
+           "✨ Title: PSA 10 One Piece ... #OP01-013 Sanji")
+    drops = dc.classify_drops(log, set_exists=lambda p: True)
+    assert not any(d["class"] == "promo衝突" for d in drops), \
+        "救済済(build成功)のpromoが drop に二重計上されている"
+
+
+def test_promo_reject_without_rescue_still_flagged():
+    # 救済ログが無い純粋な reject は従来どおり promo衝突として問題提起する(回帰: 見落とさない)。
+    log = "⚠️ iMakCatalog ID hit P-013 (ゴードン) だが PSA Subject 'SANJI' と名前不一致 → reject"
+    drops = dc.classify_drops(log, set_exists=lambda p: True)
+    assert any(d["class"] == "promo衝突" and d["item"] == "P-013" for d in drops)
+
+
+def test_reconcile_accurate_after_rescue_exclusion():
+    # 処理2 = 成功1(fallback build) + 落ち1(該当なし) → 照合OK。救済分をdropに数えないので合う。
+    log = ("2件を処理します\n成功: 1件 / 失敗: 0件\n"
+           "⚠️ ID hit P-013 (ゴードン) だが PSA Subject 'SANJI' と名前不一致 → reject\n"
+           "🎯 iMakCatalog hit (promo fallback): OP01-013_p1 サンジ (Subject='SANJI' と一致)\n"
+           "スキップ(目視未確定): #163045378")
+    drops = dc.classify_drops(log, set_exists=lambda p: True)
+    assert "照合OK" in dc.reconcile_counts(log, drops)
+
+
 def test_don_card_skip_is_classified_not_silent():
     # 番号なし DON!! は set+treatment(rarity)で識別可能 → silent drop させず問題提起に出す (2026-07-10)。
     # 回帰: この skip 行が分類0件だと "-1 silent drop" に埋もれ、有価カードを見過ごす。

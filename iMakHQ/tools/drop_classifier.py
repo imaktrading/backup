@@ -24,6 +24,10 @@ def classify_drops(log, *, set_exists, card_exists=None):
     """
     out = []
     seen = set()
+    # promo fallback で救済された subject(= ID不一致 reject の後に別variantで build 成功)は
+    # drop に数えない(二重計上=件数照合のノイズ・オオカミ少年化を防ぐ。2026-07-10)。
+    #   救済ログ: "iMakCatalog hit (promo fallback): OP01-013_p1 サンジ (Subject='SANJI' ... と一致 ...)"
+    rescued = set(re.findall(r"promo fallback.*?Subject='([^']+)'", log or ""))
     for ln in (log or "").splitlines():
         s = ln.strip()
         if not s:
@@ -51,6 +55,8 @@ def classify_drops(log, *, set_exists, card_exists=None):
         m = re.search(r"ID hit\s+(\S+).*?Subject\s+'([^']+)'.*?不一致", s)
         if m:
             cid, subj = m.group(1), m.group(2)
+            if subj in rescued:
+                continue   # reject後にpromo fallbackで救済=build成功 → dropではない(二重計上回避)
             key = f"{cid}|{subj}"
             if key in seen:
                 continue
