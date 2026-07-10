@@ -30,6 +30,9 @@ set:
   - source: 限定商品収録カード
     ebay: Promo Cards
     note: JA 'Limited Product Card' — REVIEW eBay 値
+  - source: プレミアムカードコレクション -GIRLS EDITION-
+    ebay: Promo Cards
+    note: 2026-07-10 Premium Card Collection Girls Edition (ST07-008_GE 等 parallel)
 
   # Vision OCR 由来の長文セット名 (PSA カード上の印刷名、bracket [...] 抜き)
   # 旧 psa_to_csv._ONEPIECE_SET_NAME_MAP の Vision エントリから移植

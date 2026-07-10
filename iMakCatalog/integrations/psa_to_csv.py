@@ -784,6 +784,10 @@ def _search_one_piece_promo_by_number(
             ("PROMOTION CARD SET", "プロモーションカードセット"),
             ("STANDARD BATTLE", "スタンダードバトル"),
             ("EVENT PRIZE", "記念品"),
+            # 2026-07-10 (cert85592405 Pudding #008 → ST07-008_GE): プレミアムカードコレクション
+            #   -GIRLS EDITION- 収録 parallel。official set_name に 'GIRLS EDITION' を持つ変種のみ +250。
+            #   両側一致必須なので base ST07-008/他promo(_P 等)には発火しない。
+            ("GIRLS EDITION", "GIRLS EDITION"),
             # 2026-06-12 収録: ADMIRABLE COLLECTION vol.N 封入 promo (cert 151477459 Reiju #068
             #   → OP06-068_AC01)。official set_name に "Admirable Collection" を持つ変種のみ +250。
             #   両側一致必須なので別 #068 変種(PRB01/p1 等)には発火しない。
@@ -884,6 +888,11 @@ def extract_set_code_from_brand_gundam(brand: str) -> Optional[str]:
     # PSA brand 'GUNDAM JAPANESE RESOURCE PROMOS' → 'P' に潰すと P-009 を探して miss するため先に分岐.
     if "RESOURCE" in b:
         return "RP"
+    # 2026-07-10 (cert154708676): PB01 プレミアムグッズセット -新機動戦記ガンダムW- は ST02(Wings of
+    #   Advance)の Wing カードを同番号で再録(parallel C+)。#010 Heero Yuy → ST02-010(_PB01 variant)。
+    #   lookup_gundam 側で brand=PREMIUM GOODS 時に _PB01 variant を優先。
+    if "PREMIUM GOODS" in b and ("GUNDAM W" in b or "WING" in b):
+        return "ST02"
     if any(k in b for k in ("PROMO", "PROMOS", "ANNIVERSARY", "CHAMPIONSHIP")):
         return "P"
     return None
@@ -972,7 +981,18 @@ def lookup_gundam(
 
     base_pid = f"{set_code}-{card_number}"
 
-    record = api.lookup(GUNDAM_CATEGORY, base_pid)
+    # 2026-07-10: PB01 プレミアムグッズセット由来 cert は base(starter deck print)でなく
+    #   _PB01 parallel record を優先 (set_name が premium goods = C:Set 正確化)。
+    record = None
+    if "PREMIUM GOODS" in (brand or "").upper():
+        cand = api.lookup(GUNDAM_CATEGORY, f"{base_pid}_PB01")
+        if cand and _record_name_matches_subject(cand, subject):
+            record = cand
+            if verbose:
+                print(f"    🎯 iMakCatalog (Gundam) hit (PB01 premium goods): {base_pid}_PB01")
+
+    if record is None:
+        record = api.lookup(GUNDAM_CATEGORY, base_pid)
     if record and not _record_name_matches_subject(record, subject):
         if verbose:
             print(f"    ⚠️ iMakCatalog (Gundam) ID hit {base_pid} ({record['name']}) "
