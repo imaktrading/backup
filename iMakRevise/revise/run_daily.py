@@ -111,6 +111,19 @@ def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
         err = "" if u["success"] else f"  err={u['error']}"
         lines.append(f"  [{mark}] {u['label']}: {u['csv']} (attempt {u['attempts']}){err}")
 
+    # 価格変動が大きい順 上位10件 (旧→新 USD が両方取れる分のみ)
+    priced = [c for c in result.revisable if c.current_usd and c.new_usd]
+    top = sorted(priced, key=lambda c: abs(c.new_usd - c.current_usd), reverse=True)[:10]
+    if top:
+        lines += ["", "■ 価格変動 大きい順 上位10件 (旧→新 / 差額):"]
+        for i, c in enumerate(top, 1):
+            delta = c.new_usd - c.current_usd
+            title = (c.title or "")[:40]
+            lines.append(
+                f"  {i:2}. [{c.source_sheet}] item={c.item_id} {c.category} "
+                f"${c.current_usd:.2f}→${c.new_usd:.2f} ({delta:+.2f}) {title}"
+            )
+
     if n_abn:
         lines += ["", "■ 異常保留 (自動UPせず、人手確認要) 上位:"]
         for c in result.abnormal[:10]:
