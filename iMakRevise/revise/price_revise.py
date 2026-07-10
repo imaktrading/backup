@@ -242,6 +242,9 @@ class ReviseRunResult:
     abnormal: list = field(default_factory=list)  # 異常 delta で skip した分
     init_targets: list = field(default_factory=list)
     csv_path: Optional[str] = None
+    var_price_path: Optional[str] = None       # variation 価格 UP CSV
+    var_shipping_path: Optional[str] = None     # variation 送料 UP CSV
+    review_xlsx_path: Optional[str] = None      # レビュー xlsx (日次自動UP のメール添付用)
     alert_log_path: Optional[str] = None
     cap_exceeded: bool = False  # 旧 logic 互換 (新 logic では常に False)
 
@@ -1460,6 +1463,8 @@ def run_price_revise(
         var_paths = write_revise_variation_csv(result.revisable, variations_map=variations_map)
         if var_paths.get("price_path"):
             var_n = sum(1 for c in result.revisable if c.is_variation)
+            result.var_price_path = str(var_paths["price_path"])
+            result.var_shipping_path = str(var_paths["shipping_path"])
             print(f"[revise] eBay UP CSV (variation price, {var_n} 行): {var_paths['price_path']}")
             print(f"[revise] eBay UP CSV (variation shipping, ItemID 単位): {var_paths['shipping_path']}")
 
@@ -1487,6 +1492,7 @@ def run_price_revise(
                 abnormal=result.abnormal,
                 all_skipped=result.skipped,
             )
+            result.review_xlsx_path = str(xlsx_path)
             print(f"[review] レビュー xlsx: {xlsx_path}")
         except Exception as e:
             print(f"[review] [WARN] xlsx 生成失敗 (CSV のみ生成済): {e}")
