@@ -42,6 +42,17 @@ def test_dream_shine_collection_maps_cp5():
                "014", "KELDEO") == "CP5-014"
 
 
+def test_super_burst_impact_maps_sm8():
+    # 2026-07-11: SUPER-BURST IMPACT #058 = 既存 SM8-058 (ブラッキー)
+    assert _pk("POKEMON JAPANESE SUN & MOON SUPER-BURST IMPACT", "058", "UMBREON") == "SM8-058"
+
+
+def test_sm12a_214_jirachi_hyper_rare_added():
+    # 2026-07-11: SM12a Tag All Stars #214 Jirachi-GX HR (secret rare, resultAPI非掲載→追加)
+    assert _pk("POKEMON JAPANESE SUN & MOON TAG TEAM GX ALL STARS",
+               "214", "JIRACHI GX") == "SM12a-214"
+
+
 def test_sm12_112_hyper_rare_added():
     assert _pk("POKEMON JAPANESE SUN & MOON ALTER GENESIS", "112", "ARCS DLGA PALKIA GX") == "SM12-112"
 
