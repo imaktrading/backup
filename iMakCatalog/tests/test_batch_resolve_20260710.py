@@ -53,6 +53,12 @@ def test_sm12a_214_jirachi_hyper_rare_added():
                "214", "JIRACHI GX") == "SM12a-214"
 
 
+def test_cruel_traitor_yveltal_break_rekeyed_xy11():
+    # 2026-07-12: XY11 冷酷の反逆者 #034 Yveltal BREAK は cardID-32100 fallback key で入っていた
+    #   → XY11-034 に re-key (CRUEL TRAITOR→XY11 mapping は既存)。
+    assert _pk("POKEMON JAPANESE XY CRUEL TRAITOR", "034", "YVELTAL BREAK") == "XY11-034"
+
+
 def test_sm12_112_hyper_rare_added():
     assert _pk("POKEMON JAPANESE SUN & MOON ALTER GENESIS", "112", "ARCS DLGA PALKIA GX") == "SM12-112"
 
