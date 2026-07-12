@@ -89,6 +89,10 @@ def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
     n_var = sum(1 for c in result.revisable if c.is_variation)
     n_abn = len(result.abnormal)
     n_skip = len(result.skipped)
+    # revise 内訳 (価格が動いたか / 送料profileだけか)
+    n_usd = sum(1 for c in result.revisable if getattr(c, "revise_content", "") == "USD のみ")
+    n_pol = sum(1 for c in result.revisable if getattr(c, "revise_content", "") == "Policy のみ")
+    n_both = sum(1 for c in result.revisable if getattr(c, "revise_content", "") == "USD+Policy")
 
     lines = [
         f"リバイスくん 日次自動 revise 結果 ({now:%Y-%m-%d %H:%M} JST)"
@@ -96,7 +100,8 @@ def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
         "",
         f"■ 生成",
         f"  revise 対象   : {n_revise} 件 (single {n_single} / variation {n_var})",
-        f"  異常保留      : {n_abn} 件  ← UP せず。要目視 (review.xlsx 参照)",
+        f"    └ 内訳      : 価格変更 {n_usd} / 送料のみ {n_pol} / 価格+送料 {n_both}",
+        f"  異常保留      : {n_abn} 件  ← UP せず。要目視",
         f"  その他 skip   : {n_skip} 件",
         "",
         f"■ 自動UP",
@@ -111,11 +116,14 @@ def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
         err = "" if u["success"] else f"  err={u['error']}"
         lines.append(f"  [{mark}] {u['label']}: {u['csv']} (attempt {u['attempts']}){err}")
 
-    # 価格変動が大きい順 上位10件 (旧→新 USD が両方取れる分のみ)
-    priced = [c for c in result.revisable if c.current_usd and c.new_usd]
+    # 価格変動が大きい順 上位10件 (実際に価格が動いた分のみ。送料のみ revise 等 delta=0 は除外)
+    priced = [
+        c for c in result.revisable
+        if c.current_usd and c.new_usd and abs(c.new_usd - c.current_usd) >= 0.01
+    ]
     top = sorted(priced, key=lambda c: abs(c.new_usd - c.current_usd), reverse=True)[:10]
+    lines += ["", "■ 価格変動 大きい順 上位10件 (旧→新 / 差額):"]
     if top:
-        lines += ["", "■ 価格変動 大きい順 上位10件 (旧→新 / 差額):"]
         for i, c in enumerate(top, 1):
             delta = c.new_usd - c.current_usd
             title = (c.title or "")[:40]
@@ -123,13 +131,14 @@ def _build_summary_body(result, uploads: list, dry_run: bool) -> str:
                 f"  {i:2}. [{c.source_sheet}] item={c.item_id} {c.category} "
                 f"${c.current_usd:.2f}→${c.new_usd:.2f} ({delta:+.2f}) {title}"
             )
+    else:
+        lines.append("  (本日は価格変動なし = 送料profile変更のみ)")
 
     if n_abn:
         lines += ["", "■ 異常保留 (自動UPせず、人手確認要) 上位:"]
         for c in result.abnormal[:10]:
             lines.append(f"  - [{c.source_sheet}] item={c.item_id} {c.decision_details}")
 
-    lines += ["", "詳細は添付 review.xlsx を参照。"]
     return "\n".join(lines)
 
 
@@ -161,16 +170,7 @@ def _send_summary(result, uploads: list, dry_run: bool) -> int:
     msg["From"] = cfg["sender"]
     msg["To"] = cfg["recipient"]
     msg.set_content(body)
-
-    xlsx = getattr(result, "review_xlsx_path", None)
-    if xlsx and Path(xlsx).exists():
-        data = Path(xlsx).read_bytes()
-        msg.add_attachment(
-            data,
-            maintype="application",
-            subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=Path(xlsx).name,
-        )
+    # xlsx 添付は Gmail が自己送信メールごと弾く (2026-07-12 判明) → 本文にパス記載に変更
 
     ctx = ssl.create_default_context()
     last_err = None
