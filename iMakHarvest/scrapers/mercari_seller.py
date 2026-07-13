@@ -81,6 +81,11 @@ DEFAULT_AFTER_CLICK_WAIT_SEC = 2.0  # button click 後の lazy load 完了待ち
 # manual click 待機 mode (= user 手動「もっと見る (5)」 click 完了待ち)
 DEFAULT_MANUAL_WAIT_POLL_SEC = 3.0  # polling 間隔
 DEFAULT_MANUAL_WAIT_STABLE_SEC = 15.0  # 連続 N 秒 listing 増えなければ完了とみなす
+# 「click 完了!」 button (= done_event) 使用時の stable fallback 秒数。 button 押下で即完了する
+# のが本筋だが、 押し忘れ時の保険。 15s だと「もっと見る」 を押し切る前に打ち切られる
+# (2026-07-13: seller 623636774 が 347件中 初期10件で早期完了し 0件事故) ため、
+# button 併用時は idle 2分まで待つ。
+DEFAULT_MANUAL_BUTTON_STABLE_SEC = 120.0
 DEFAULT_MANUAL_WAIT_MAX_SEC = 600  # 最大待機時間 (= 10 分)
 
 # 5/26 user 確認: メルカリは ログアウト state でも seller profile 見れる
@@ -379,12 +384,18 @@ def _wait_for_manual_load(
                     return current
             except Exception:
                 pass
-        # stable_sec 判定 (= 既存、 done_event 無い or 未 set 時の自動 fallback)
+        # stable_sec 判定 (= 既存、 done_event 無い or 未 set 時の自動 fallback)。
+        # button 併用時 (= done_event あり) は stable を大幅緩和し、 「もっと見る」 を
+        # 押し切る前に 15s で打ち切られる早期完了事故を防ぐ (= 本筋は button 押下で即完了)。
+        effective_stable = (
+            max(stable_sec, DEFAULT_MANUAL_BUTTON_STABLE_SEC)
+            if done_event is not None else stable_sec
+        )
         if current <= last_count:
             stable_elapsed = elapsed - last_change_time
-            if stable_elapsed >= stable_sec:
+            if stable_elapsed >= effective_stable:
                 if progress_callback:
-                    progress_callback(current, f"{current} 件で {stable_sec:.0f}s 安定、 完了とみなす")
+                    progress_callback(current, f"{current} 件で {effective_stable:.0f}s 安定、 完了とみなす")
                 return current
     if progress_callback:
         progress_callback(last_count, f"{max_wait_sec}s timeout、 {last_count} 件で打切")

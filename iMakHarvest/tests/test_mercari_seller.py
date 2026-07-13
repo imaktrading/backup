@@ -585,3 +585,41 @@ class TestLoadUntilEnough:
         # 後方互換 alias の確認
         from scrapers.mercari_seller import _scroll_until_enough, _load_until_enough
         assert _scroll_until_enough is _load_until_enough
+
+
+# --------------------------------------------------------------------------
+# _wait_for_manual_load: button 併用時は stable を緩和 (2026-07-13 早期完了事故)
+# --------------------------------------------------------------------------
+class TestManualWaitButtonStable:
+    def _run(self, monkeypatch, done_event, stable_sec, max_wait_sec):
+        import threading  # noqa: PLC0415
+
+        import scrapers.mercari_seller as M
+        monkeypatch.setattr(M.time, "sleep", lambda s: None)
+        # listing 数は増えない (= user が click しない状況を模擬)
+        monkeypatch.setattr(M, "_collect_listing_urls_from_page", lambda d: ["u"] * 10)
+        monkeypatch.setattr(M, "_dismiss_alert_if_present", lambda d: None)
+        msgs = []
+        M._wait_for_manual_load(
+            object(), poll_interval=1.0, stable_sec=stable_sec,
+            max_wait_sec=max_wait_sec,
+            progress_callback=lambda c, m: msgs.append(m),
+            done_event=done_event,
+        )
+        return msgs
+
+    def test_no_button_completes_on_stable(self, monkeypatch):
+        # done_event 無し → stable_sec(6s) で自動完了 (= 従来挙動維持)
+        msgs = self._run(monkeypatch, done_event=None, stable_sec=6, max_wait_sec=1000)
+        assert any("安定" in m for m in msgs)
+        assert not any("timeout" in m for m in msgs)
+
+    def test_button_present_does_not_early_complete(self, monkeypatch):
+        # done_event あり(未set) → stable_sec(6s) では完了せず、 button 優先。
+        # max_wait=30s < effective_stable(120s) なので timeout まで到達する
+        # (= 「もっと見る」 押し切る前に 15s で打ち切られる早期完了事故の再発防止)。
+        import threading  # noqa: PLC0415
+        ev = threading.Event()
+        msgs = self._run(monkeypatch, done_event=ev, stable_sec=6, max_wait_sec=30)
+        assert not any("安定" in m for m in msgs)
+        assert any("timeout" in m for m in msgs)

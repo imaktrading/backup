@@ -1,5 +1,32 @@
 # iMakHarvest daily_report
 
+## 2026-07-13 — メルカリセラー手動待機: button 併用時の 15s 早期完了を修正
+
+### 決定
+
+- user 報告「seller 623636774 が 0件」を調査 → **DOM 破損でも出品ゼロでもなく under-collection**。
+  ログ `出現 10 / 既知 skip 10 / 取得 0` + スクショで **セラーは大量出品ありなのに初期10件で
+  早期完了**を確認。 原因 = `_wait_for_manual_load` の **15s stable 自動完了が「click 完了!」
+  button (done_event) 併用時も生きており、 user が「もっと見る」 を押し切る前に打ち切っていた**。
+  (done_event は 6/3 に早期完了対策で追加されたが、 stable 判定を無効化しておらず修正が不完全)。
+
+### 変更
+
+- `scrapers/mercari_seller.py`: `DEFAULT_MANUAL_BUTTON_STABLE_SEC=120` 新設。
+  `_wait_for_manual_load` の stable 判定を、 **done_event あり時のみ `max(stable_sec, 120s)`**
+  に緩和 (= button 押下で即完了が本筋、 押し忘れ時のみ 2分 idle fallback)。 done_event 無し時
+  は従来 15s 維持 (= 既存挙動保持、 [[mercari_scraper_freeze]] 準拠)。
+- `tests/test_mercari_seller.py`: 回帰テスト 2件 (button無=15s完了 / button有=15sで完了せず)。
+
+### 検証
+
+- ✅ `tests/test_mercari_seller.py` = 53 passed (新2件含む)。
+- ⚠️ 運用: 再実行時は Chrome で **「もっと見る」 を押して件数を増やし → 「click 完了!」 button**
+  で明示完了。 15s では切れなくなった。 もし click しても件数が増えない場合はフリマアシスト
+  load-more 不具合 (= 別調査)。
+
+---
+
 ## 2026-07-03 — Amazon G-shock 抽出: 部品除外フィルタ + 新着sortパス (= 精度/網羅 是正)
 
 ### 決定
