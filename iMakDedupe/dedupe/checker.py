@@ -1400,7 +1400,12 @@ def run_check_csv_canonical(
     print(f"[*] CSV check (single-key mode, dry_run={dry_run}): {csv_path}", flush=True)
     client = sheet_io.authorize_client()
 
-    # HIGH/LOW から既存 canonical KEY set 構築 (= ACTIVE filter)
+    # HIGH/LOW から既存 canonical KEY set 構築 (= 真の live filter)
+    # 2026-07-13 是正 (BUILD `..._livefilter_itemid_fix_build.md`):
+    #   ACTIVE = **itemID(B)非空 AND sold(D)空** = 今 eBay に live 出品中の個体のみ。
+    #   旧: item_id_col=A(URL) 代用 → A(仕入元URL)だけ有り B 空の **未出品キュー行(orphan)** を
+    #       既存扱いに混入 → 未出品なのに新規候補を誤ブロック + 補URL の live 保証崩壊。
+    #   → item_id_col=B(itemID) に是正。 これで「弾いた = live 出品中」を構造保証。
     existing_keys: set = set()
     for label, sid in [("HIGH", sheet_io.HIGH_SHEET_ID), ("LOW", sheet_io.LOW_SHEET_ID)]:
         sh = sheet_io.open_spreadsheet(sid, client=client)
@@ -1414,12 +1419,12 @@ def run_check_csv_canonical(
             key_col=key_col,
             active_only=True,
             sold_col=sheet_io.LISTINGS_COL_SOLD,
-            item_id_col=sheet_io.LISTINGS_COL_URL,  # B 列 itemID 想定の替わり
+            item_id_col=sheet_io.LISTINGS_COL_ITEMID,  # B(itemID) = live の真実 (= 2026-07-13 是正)
         )
         for k in keys:
             if k:
                 existing_keys.add(k.strip())
-        print(f"[{label}] 既存 canonical KEY 数: {len(keys)}")
+        print(f"[{label}] 既存 canonical KEY 数 (= live のみ): {len(keys)}")
 
     result = csv_check.check_csv_canonical(
         csv_path=Path(csv_path),
@@ -1428,10 +1433,17 @@ def run_check_csv_canonical(
         strict_mode=strict_mode,
     )
 
+    # 2026-07-13: 既存 set は itemID(B) 基準 = live 出品中のみ で構築したため、
+    # removed_canonical_keys は **全て live 出品中の個体に一致** = 補URL の live 保証 True。
+    # HQ 側 補URL plumbing (= 除外KEY の live primary 行に補URL を貯める) で使う。
+    result["live_guaranteed"] = True
+    result["removed_keys_live"] = list(result.get("removed_canonical_keys") or [])
+
     print()
     print(f"  mode            : {'strict (unresolved も除外)' if strict_mode else 'keep-unresolved (= 既定、 除外は真の重複のみ)'}")
+    print(f"  existing set     : live のみ (= itemID(B)非空 AND sold(D)空)、 live_guaranteed={result['live_guaranteed']}")
     print(f"  total           : {result['total']}")
-    print(f"  removed (真の重複): {result['removed']}")
+    print(f"  removed (真の重複・全て live 一致): {result['removed']}")
     print(f"  kept (残存)     : {result['kept']}  (= unresolved {result['unknown']} 件を含む)" if not strict_mode else f"  kept (残存)     : {result['kept']}")
     print(f"  unknown (解決不能・keep): {result['unknown']}")
     print(f"  skipped_unresolved (= strict 除外): {result['skipped_unresolved']}")

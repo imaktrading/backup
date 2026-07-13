@@ -32,7 +32,9 @@ OFFICIAL_SHEET_ID = "101KL6KxMugKqZeSp2W5L2ykTvT0Zwd3RzlfsHgiJsg0"
 
 # === HIGH/LOW 商品管理シート (= LISTINGS_GID は両 spreadsheet で共通) ===
 LISTINGS_GID = 851100680
-LISTINGS_COL_URL = 1     # A
+LISTINGS_COL_URL = 1     # A — 仕入元URL (= 抽出くん書込。 未出品キュー行にも存在する)
+LISTINGS_COL_ITEMID = 2  # B — eBay itemID (= 出品済 = live の唯一の真実。 未出品行は空)
+                          # 2026-07-13: 既存判定 filter の live 基準はこれ (= A=URL 代用の是正)
 LISTINGS_COL_TITLE = 3   # C
 LISTINGS_COL_SOLD = 4    # D — 売切/取下げフラグ (= 空欄=ACTIVE / `○`等=非 ACTIVE)
                           # 2026-05-27: false positive 修正 (= 過去出品との誤一致 防止)

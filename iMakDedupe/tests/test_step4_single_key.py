@@ -373,3 +373,117 @@ class TestUnresolvedNotRemoved:
                 csv_path=str(path), dry_run=True, strict_mode=True
             )
         assert captured["strict_mode"] is True
+
+
+# ============================================================================
+# 2026-07-13 BUILD: 既存判定 filter を itemID(B列) 基準に是正
+# 依頼: dedupe/requests/2026-07-13_dedup_livefilter_itemid_fix_build.md
+# orphan (A=URL有 B=itemID空 D=sold空 = 未出品キュー) を既存扱いしない。
+# 真の live (B非空 D空) は従来どおり除外。 removed は全て live 一致 → live_guaranteed=True。
+# ============================================================================
+
+def _fake_ws(values):
+    ws = MagicMock()
+    ws.get_all_values.return_value = values
+    ws.col_values.side_effect = lambda c: [r[c - 1] if len(r) >= c else "" for r in values]
+    return ws
+
+
+class TestLiveFilterItemIdBuild:
+    # 商品管理シート layout: A=URL, B=itemID, C=title, D=sold, E=KEY(canonical)
+    _HEADER = ["URL", "itemID", "title", "売り切れ", "KEY"]
+
+    def _run_with_low_rows(self, tmp_path, low_rows, csv_resolves):
+        """LOW を fake ws にして run_check_csv_canonical を実走 (read_canonical_keys は本物)."""
+        from dedupe import sheet_io
+        low_ws = _fake_ws([self._HEADER] + low_rows)
+        high_ws = _fake_ws([self._HEADER])  # HIGH は空 (key_col None で skip)
+
+        def _open(sid, client=None):
+            m = MagicMock()
+            m.worksheet.return_value = (
+                low_ws if sid == sheet_io.LOW_SHEET_ID else high_ws
+            )
+            return m
+
+        def _findkey(ws):
+            return 5 if ws is low_ws else None  # LOW のみ KEY 列 (E=5)
+
+        path = tmp_path / "cand.csv"
+        _write_csv(
+            path,
+            [{"*Title": f"cand{i}", "C:Card Number": ""} for i in range(len(csv_resolves))],
+        )
+        with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
+             patch("dedupe.sheet_io.open_spreadsheet", side_effect=_open), \
+             patch("dedupe.sheet_io.find_canonical_key_column", side_effect=_findkey), \
+             patch("dedupe.resolver_io.resolve_csv_row", side_effect=csv_resolves), \
+             patch("dedupe.csv_check.check_csv_canonical", wraps=csv_check.check_csv_canonical) as spy:
+            checker.run_check_csv_canonical(csv_path=str(path), dry_run=True)
+        return spy.call_args
+
+    def test_existing_set_is_itemid_live_only(self, tmp_path):
+        """既存 set = live(B非空 D空)のみ。 orphan(B空) と sold(D非空) は除外."""
+        low_rows = [
+            ["u1", "111", "t1", "", "LIVE-KEY"],       # live → 既存に入る
+            ["u2", "", "t2", "", "ORPHAN-KEY"],        # A有 B空 D空 = 未出品 → 除外
+            ["u3", "333", "t3", "○", "SOLD-KEY"],      # 売切 → 除外
+        ]
+        call = self._run_with_low_rows(tmp_path, low_rows, csv_resolves=["X"])
+        existing = call.kwargs["existing_canonical_keys"]
+        assert "LIVE-KEY" in existing
+        assert "ORPHAN-KEY" not in existing  # orphan は既存扱いしない (= BUILD 中核)
+        assert "SOLD-KEY" not in existing
+
+    def test_live_candidate_removed_orphan_candidate_kept(self, tmp_path):
+        """新規候補: live 一致は除外 / orphan 一致は keep (= 誤ブロック解消)."""
+        low_rows = [
+            ["u1", "111", "t1", "", "LIVE-KEY"],
+            ["u2", "", "t2", "", "ORPHAN-KEY"],
+        ]
+        # candidate 2 件: LIVE-KEY(既存 live) と ORPHAN-KEY(未出品)
+        from dedupe import sheet_io
+        low_ws = _fake_ws([self._HEADER] + low_rows)
+        high_ws = _fake_ws([self._HEADER])
+
+        def _open(sid, client=None):
+            m = MagicMock()
+            m.worksheet.return_value = low_ws if sid == sheet_io.LOW_SHEET_ID else high_ws
+            return m
+
+        def _findkey(ws):
+            return 5 if ws is low_ws else None
+
+        path = tmp_path / "cand.csv"
+        _write_csv(path, [
+            {"*Title": "cand_live", "C:Card Number": ""},
+            {"*Title": "cand_orphan", "C:Card Number": ""},
+        ])
+        captured = {}
+        real = csv_check.check_csv_canonical
+
+        def _wrap(**kw):
+            r = real(**kw)
+            captured["result"] = r
+            return r
+
+        with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
+             patch("dedupe.sheet_io.open_spreadsheet", side_effect=_open), \
+             patch("dedupe.sheet_io.find_canonical_key_column", side_effect=_findkey), \
+             patch("dedupe.resolver_io.resolve_csv_row", side_effect=["LIVE-KEY", "ORPHAN-KEY"]), \
+             patch("dedupe.csv_check.check_csv_canonical", side_effect=_wrap):
+            checker.run_check_csv_canonical(csv_path=str(path), dry_run=True)
+        r = captured["result"]
+        assert r["removed"] == 1  # LIVE-KEY のみ除外
+        assert r["kept"] == 1     # ORPHAN-KEY は keep (= 未出品なので誤ブロックしない)
+        assert "LIVE-KEY" in r["removed_canonical_keys"]
+        assert "ORPHAN-KEY" not in r["removed_canonical_keys"]
+        # live 保証フラグ
+        assert r["live_guaranteed"] is True
+        assert r["removed_keys_live"] == r["removed_canonical_keys"]
+
+    def test_listings_col_itemid_constant_is_b(self):
+        """LISTINGS_COL_ITEMID = 2 (= B列) であること (= 是正の定数根拠)."""
+        from dedupe import sheet_io
+        assert sheet_io.LISTINGS_COL_ITEMID == 2
+        assert sheet_io.LISTINGS_COL_URL == 1  # A は URL (= itemID 代用しない)
