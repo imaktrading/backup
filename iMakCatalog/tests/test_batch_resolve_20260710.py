@@ -59,6 +59,11 @@ def test_cruel_traitor_yveltal_break_rekeyed_xy11():
     assert _pk("POKEMON JAPANESE XY CRUEL TRAITOR", "034", "YVELTAL BREAK") == "XY11-034"
 
 
+def test_ex_battle_boost_mewtwo_added():
+    # 2026-07-14: EXバトルブースト(EBB, BW期)#045 Mewtwo EX を追加 + EX BATTLE BOOST→EBB mapping
+    assert _pk("POKEMON JAPANESE BLACK & WHITE EX BATTLE BOOST", "045", "MEWTWO EX") == "EBB-045"
+
+
 def test_sm12_112_hyper_rare_added():
     assert _pk("POKEMON JAPANESE SUN & MOON ALTER GENESIS", "112", "ARCS DLGA PALKIA GX") == "SM12-112"
 

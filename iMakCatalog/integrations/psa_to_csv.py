@@ -1376,6 +1376,7 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "DREAM SHINE COLLECTION": "CP5",    # 幻・伝説ドリームキラコレクション (CP5-014=ケルディオ 実在)
     "SUPER-BURST IMPACT":    "SM8",     # 超爆インパクト (SM8-058=ブラッキー 実在)
     "SUPER BURST IMPACT":    "SM8",     # hyphen 無し表記も吸収
+    "EX BATTLE BOOST":       "EBB",     # EXバトルブースト BW期 (EBB-045=ミュウツーEX 追加, cert28837)
     "GG END":            "SM10a",  # ジージーエンド
     "DETECTIVE PIKACHU": "SMP2",   # 名探偵ピカチュウ (スペシャルパック)
     "ULTRA MOON":        "SM5M",   # ウルトラムーン
