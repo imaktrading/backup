@@ -68,3 +68,31 @@
 - LOW G-shock: 9 件 (= scope2 5 + scope3 4)
 - HIGH TCG: 6 件 (= Phase 5)
 - 合計: **15 件** → スプシ上の冗長 row 整理完了
+
+---
+
+## 2026-07-14
+
+### 起動時: 前セッション未push commit を保全 (= 消失防止・最優先)
+
+- 決定: 位置確認 (C:/dev/iMak_dedupe / feature/dedupe-phase1) OK・working tree clean だが origin 比 2 commit 先行 (da505e1 7/13 live-filter是正 + 7e81fa8) が未 push と判明 → 即 push
+- 変更: git push origin feature/dedupe-phase1 (441ca1b..da505e1)、コード変更なし
+- 検証: `git status -sb` で ahead 0 確認、push 完了 (前セッションは commit まで完了・push 途中落ちを回収)
+
+### B空+cert 行の cert→KEー backfill feasibility 回答 (= 補URL 実効化)
+
+- 決定: 「新規 resolver 不要・既存 primitive で backfill 可・fail-closed 維持」で回答。ただし歩留まり律速は resolver でなく **PSA cache miss** と実測判明 → cache warming を最優先レバーとして提言
+- 変更: iMak_data/dedupe/requests/2026-07-14_dedup_key_backfill_for_hoju_url_feasibility_response.md (= 回答のみ、実装着手なし)
+- 検証: HIGH シート read-only 実測 (scratchpad audit_cert_backfill_feasibility.py)。R=TCG/B空/A有/cert有 = 269 行、KEー空 245 行中 **product_id 解決 83 (33%) / unresolved 162 (うち PSA cache miss 147=60%, cache HIT だが未解決 15)**、url_key 0 (product_id 限定確認)。live filter が B基準 (checker.py:1422) のため backfill 行の orphan 混入なしを code 監査で確認
+
+### 既存 primitive 監査結果 (= 実装不要の根拠)
+
+- 決定: cert→KEー は `resolver_io.resolve_sheet_row` + sheet 駆動 backfill `sheet_io.backfill_canonical_key` が既存 → 追加は「B空限定 + url_col=None (product_id限定)」薄い CLI wrapper のみ (小 BUILD、承認後着手)
+- 変更: なし (feasibility 段、コード改変なし)
+- 検証: resolver_io.py:110-158 / sheet_io.py:885-1013 / iMakeBayAPI_psa_io.py:53-65 を Read 監査、fail-closed (""→無書込)・冪等 (空KEーのみ)・非破壊を確認
+
+### 次フェーズ持越し (= HQ 判断待ち)
+
+- cert backfill CLI (B空限定・product_id限定) の BUILD 承認可否
+- PSA cache warming: 補URL 歩留まりの最大レバー。cache miss 147 certs を 出品くん/iMakeBayAPI で fetch させられるか (dedupe 外・要 HQ)。対象 147 certs list は read-only 抽出可
+- DON!! カード (cache HIT だが CardNumber 空) は image-hash 経路要・B空行に画像URL無ければ unresolved のまま → 補URL 対象外で良いか
