@@ -1,0 +1,156 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert151546678 POKEMON JAPANESE XY BLUE SHOCK [FA/M GLALIE EX BLUE SHOCK-1ST EDITION] #061 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 12,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "ONE PIECE JAPANESE PRB01-PREMIUM BOOSTER -ONE PIECE CARD THE BEST--",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "POKEMON JAPANESE SUN & MOON TAG BOLT-038",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m64840268502",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m16264478035",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "PSA10-125969846",
+      "target_field": "C:Rarity",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "m99298510053",
+      "target_field": "C:Rarity",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "PSA10-135503726",
+      "target_field": "C:Rarity",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "m83713827934",
+      "target_field": "C:Rarity",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m97832784794",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m43247967215",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m73990682466",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m12748379095",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m17901877917",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m17327854170",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m50744263892",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert139291730 POKEMON JAPANESE SUN & MOON STRENGTH EXPANSION PACK NIGHT UNISON [FA/GRDVR. & SYLVN. GX NIGHT UNISON-HYPER] #067 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert141208100 POKEMON JAPANESE SUN & MOON MIRACLE TWINS [FA/DRAGONITE GX MIRACLE TWINS-HYPER] #112 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 18
+  }
+}

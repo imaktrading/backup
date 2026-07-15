@@ -361,6 +361,30 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         append_log_func(f"\n⚠️ dedupe hook (write-keys) 失敗: {type(e).__name__}: {e}\n")
         # 失敗しても listing 出力には影響なし
 
+    # Step 4c: 補URL 自動追記 (2026-07-13)。write-keys で HIGHT に KEー書込済の直後に実行。
+    # 重複くんが弾いた「同KEー既出品の2枚目」の A列URL(実在の別個体=vetted supply)を、同KEー
+    # 出品中primary の 補URL(AC-AG)に **既存保持+冪等** で追加(= primary が売れたら再ソースする
+    # backup 供給源)。read-merge-write なので既存(SNKRDUNK/Mercari由来)は消さない。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 補URL 自動追記 (弾いた2枚目URL → 出品中primaryの補URL・既存保持+冪等)\n")
+    append_log_func("======================================================================\n")
+    try:
+        hoju = os.path.join(WORKSPACE, "iMakHQ", "tools", "hoju_url_from_dupes.py")
+        r = subprocess.run(
+            [sys.executable, hoju, "--write"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, env=env,
+        )
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ 補URL 追記 returncode={r.returncode}(続行)\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ 補URL 追記 失敗(続行): {type(e).__name__}: {e}\n")
+        # 失敗しても listing 出力には影響なし
+
 
 def _runs_new_listing_dedupe(script_entry):
     """新規出品用の重複くん(KEY tuple excluder)を走らせてよいエントリかを返す(純関数)。

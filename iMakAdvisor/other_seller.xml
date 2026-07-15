@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+  <GetSingleItemResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+   <Timestamp>2026-07-03T21:46:53.669Z</Timestamp>
+   <Ack>Failure</Ack>
+   <Errors>
+    <ShortMessage>Invalid token.</ShortMessage>
+    <LongMessage>Invalid token. Please specify a valid token as HTTP header.</LongMessage>
+    <ErrorCode>1.32</ErrorCode>
+    <SeverityCode>Error</SeverityCode>
+    <ErrorClassification>RequestError</ErrorClassification>
+   </Errors>
+   <Build>1299_CORE_APILW_19146596_R1</Build>
+   <Version>1299</Version>
+  </GetSingleItemResponse>
+ 

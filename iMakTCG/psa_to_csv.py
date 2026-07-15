@@ -552,6 +552,25 @@ def is_unidentifiable_don_card(subject, card_number):
     return "DON!!" in subj and not num
 
 
+def don_treatment_subject(subject, card_number, vision_result):
+    """番号なし DON!! に Vision の treatment を連結した subject を返す (純関数, test可)。
+
+    Catalog 回答 (2026-07-10): catalog は DON を `DON-{set_code}-{NNN}` + `psa_subject_hint` で
+    識別可能 (265件収録)。**真因は生成器が treatment を渡していないこと**。treatment は
+    card_identifier(Vision) の `rarity` 欄に入る (例 'Alternate Art Gold')。
+    実測: lookup_don(subject='DON!! CARD ALTERNATE ART GOLD') → DON-EB04-002 / 'DON!! CARD' → None。
+
+    戻り: 連結後 subject。DON!!でない / 番号有り / treatment 無し → None (= 連結不可)。
+    treatment 無しの DON は従来どおり fail-closed skip (推測で出さない)。
+    """
+    if not is_unidentifiable_don_card(subject, card_number):
+        return None
+    treat = ((vision_result or {}).get("rarity") or "").strip()
+    if not treat:
+        return None
+    return f"{subject} {treat}"
+
+
 def detect_game_info(brand):
     brand_upper = brand.upper()
     if "DUAL IMPACT" in brand_upper:
@@ -1713,10 +1732,30 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         print(f"    ⏭️ Skip: 非日本語版(ASIA/KOREAN/CHINESE)=日本版catalog未解決 (cert {cert_number}, brand='{brand}')")
         return None
 
-    # 番号なし DON!! カードは変種特定不能 → 出品対象外(理由をログに残す=追跡可能)。
+    # 番号なし DON!! カード: 従来は無条件 skip だったが、Catalog 回答(2026-07-10)より
+    # 「catalog は set+treatment で識別可能。真因は生成器が treatment を渡してないこと」= HQ の宿題。
+    # → Vision が拾った treatment(rarity 欄)を subject に連結して catalog に問い、
+    #   **実際に解決できた時だけ出品**(fail-closed 維持: 解決不能なら従来どおり skip)。
+    _don_record = None
     if is_unidentifiable_don_card(subject, card_number):
-        print(f"    ⏭️ Skip: reason=no_card_number_don DON!!カード番号欠落=変種特定不能 (cert {cert_number}, subject='{subject}')")
-        return None
+        _subj_try = don_treatment_subject(subject, card_number, _vision_result)
+        _don_hit = None
+        if _subj_try:
+            try:
+                # ★lookup_one_piece は番号空の DON を lookup_don に回さない(=None を返す)。
+                #   Catalog 実測どおり lookup_don を直接呼ぶ必要がある(2026-07-15 実機で確認)。
+                _don_hit = catalog_psa.lookup_don(brand, _subj_try)
+            except Exception as _e_don:
+                print(f"    ⚠️ DON treatment lookup 失敗: {type(_e_don).__name__}: {_e_don}")
+        if _don_hit:
+            subject = _subj_try
+            _don_record = _don_hit   # 本流(lookup_one_piece)は DON を解決できないので record を持ち回る
+            print(f"    🎯 DON: treatment 連結で catalog 解決 (cert {cert_number}, subject='{subject}')")
+        else:
+            _t = "有" if _subj_try else "無"
+            print(f"    ⏭️ Skip: reason=no_card_number_don DON!!カード番号欠落=変種特定不能 "
+                  f"(cert {cert_number}, subject='{subject}', treatment={_t})")
+            return None
 
     # Character欄はPSA Subjectから接尾辞を剥がして純キャラ名のみに (fallback)
     character = smart_titlecase(extract_character_name(subject))
@@ -1764,6 +1803,10 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         # ID 完全一致のみ、フォールバック禁止 (PRB02-005 / ST16-005 事故再発防止).
         # eBay フィルタ値変換 (set_name / rarity) は adapter が ebay_filter_map で実行済み.
         bandai = catalog_psa.lookup_one_piece(brand, card_number, subject)
+        # 番号なし DON!!: lookup_one_piece は DON を解決しない(None)。上で lookup_don が
+        # treatment 連結で解決済なら、その record を本流に流す(2026-07-15)。
+        if not bandai and _don_record:
+            bandai = _don_record
         # ===== iMakCatalog 戻り値の eBay US 向け正規化 (新ルーチン、独立) =====
         # JP→EN 翻訳 (キャラクター→Character / 赤→Red / モンキー・D・ルフィ→Monkey D. Luffy)
         # + ピリオド連結補正 (Monkey.D.Luffy → Monkey D. Luffy)
