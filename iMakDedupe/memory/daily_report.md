@@ -96,3 +96,25 @@
 - cert backfill CLI (B空限定・product_id限定) の BUILD 承認可否
 - PSA cache warming: 補URL 歩留まりの最大レバー。cache miss 147 certs を 出品くん/iMakeBayAPI で fetch させられるか (dedupe 外・要 HQ)。対象 147 certs list は read-only 抽出可
 - DON!! カード (cache HIT だが CardNumber 空) は image-hash 経路要・B空行に画像URL無ければ unresolved のまま → 補URL 対象外で良いか
+
+---
+
+## 2026-07-15
+
+### cert→KEー backfill CLI BUILD (= 補URL 実効化・ユーザー承認済)
+
+- 決定: 7/14 feasibility 承認を受け BUILD。既存 primitive `backfill_canonical_key` に「B空限定 + category限定」param 追加 + 薄い CLI runner。product_id 限定 (url封じ)・fail-closed・冪等
+- 変更: dedupe/checker.py:1583-1640 (= run_backfill_keys_from_cert) / checker.py:1229-1237 (= --backfill-keys-from-cert flag) / checker.py:1338-1339 (= dispatch) / sheet_io.py:885-940 (= only_item_id_empty + category_col/value param + 新 counts) / tests/test_backfill_from_cert.py (= 新規 10 件)
+- 検証: 新規 test 10 件 pass + dedupe 全 suite 347 passed。本実行で **KEー 付与 83 行** (feasibility 見込みと完全一致)・written_url_key=0 (url封じ確認)・再実行 written=0 (冪等、skipped_existing 24→107)
+
+### 147 cache-miss cert list 抽出 (= cache warming 用・read-only)
+
+- 決定: backfill 後 KEー空残の cert を cache miss / cache-hit未解決 で分類、147 cache-miss を HQ に list 提供
+- 変更: iMak_data/dedupe/requests/2026-07-15_psa_cache_miss_certs.txt (147 certs plain) / 同 _for_warming.json (詳細) / _build_response.md (完了報告)
+- 検証: PSA cache miss 147 + cache-hit未解決 15 (= feasibility 実測と一致)。fetch script 入力用 plain list 出力確認
+
+### 次フェーズ持越し (= HQ 側)
+
+- HQ が 147 certs を PSA fetch → cache warming → 重複くん再 backfill で resolve 率上昇見込み
+- 補URL ツール (hoju_url_from_dupes.py) で cert 経由 2枚目↔primary 突合 → 歩留まり再測定
+- ③ DON!! (cache HIT だが CardNumber 空) は image-hash 経路・本 BUILD 対象外 (取りこぼし許容)

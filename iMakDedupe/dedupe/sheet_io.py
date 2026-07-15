@@ -893,6 +893,9 @@ def backfill_canonical_key(
     item_id_col: Optional[int] = None,
     snapshot_titles: Optional[dict] = None,
     upgrade_url_to_card: bool = False,
+    only_item_id_empty: bool = False,
+    category_col: Optional[int] = None,
+    category_value: Optional[str] = None,
 ) -> dict:
     """Step 4: canonical KEY を resolver 経由で取得し KEY 列 (= 単一列) に書込.
 
@@ -903,6 +906,13 @@ def backfill_canonical_key(
     - 解決不能 ("") は書込しない (= fail-closed、 keep over remove)
 
     upgrade_url_to_card: True なら url 既存値を product_id で上書き許容 (= 5/28 互換挙動).
+
+    2026-07-15 (= cert-backfill CLI BUILD、 補URL 実効化):
+    - only_item_id_empty: True なら item_id_col(B) 非空 row を skip
+      (= B空=2枚目候補/未出品行のみ対象、 live 出品行の KEー は触らない)。
+      True 時は item_id_col 必須。
+    - category_col + category_value: 指定時、 当該列が値と一致する row のみ対象
+      (= 例 R='TCG' 限定。 cert 由来 backfill は TCG scope に閉じる)。
     """
     import gspread  # 遅延
     from .checker import (
@@ -912,6 +922,9 @@ def backfill_canonical_key(
         KEY_TYPE_PRODUCT_ID,
         KEY_TYPE_URL_KEY,
     )
+
+    if only_item_id_empty and item_id_col is None:
+        raise ValueError("only_item_id_empty=True には item_id_col が必須")
 
     values = ws.get_all_values()
     counts = {
@@ -923,6 +936,8 @@ def backfill_canonical_key(
         "snapshot_hits": 0,
         "snapshot_misses": 0,
         "upgraded_url_to_product_id": 0,
+        "skipped_item_id_present": 0,
+        "skipped_category_mismatch": 0,
     }
     if not values:
         return counts
@@ -933,6 +948,18 @@ def backfill_canonical_key(
     for offset, row in enumerate(values[1:], start=1):
         row_idx = offset + 1
         counts["total_rows"] += 1
+
+        # category 限定 (= 例 R='TCG' のみ。 指定なければ全 category)
+        if category_col is not None and category_value is not None:
+            if _safe_cell(row, category_col).strip() != category_value:
+                counts["skipped_category_mismatch"] += 1
+                continue
+
+        # B空限定 (= item_id 非空 = live 出品行は touch しない)
+        if only_item_id_empty:
+            if _safe_cell(row, item_id_col).strip():
+                counts["skipped_item_id_present"] += 1
+                continue
 
         current_key = _safe_cell(row, key_col)
 

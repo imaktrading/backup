@@ -1227,6 +1227,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Phase 1e: API cache の Item Specifics で HIGH/LOW KEY 列 補完.",
     )
     parser.add_argument(
+        "--backfill-keys-from-cert",
+        action="store_true",
+        help=(
+            "2026-07-15: HIGH R='TCG' AND B(itemID)空 の KEー空 row を cert 経由で "
+            "canonical KEー 解決 → 空 KEー に書込 (= 補URL 実効化)。 product_id 限定 "
+            "(url封じ)・fail-closed・冪等。 --dry-run で件数のみ。"
+        ),
+    )
+    parser.add_argument(
         "--check-csv",
         metavar="CSV_PATH",
         default=None,
@@ -1327,6 +1336,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     if args.backfill_keys_from_api:
         return run_backfill_keys_from_api(dry_run=args.dry_run)
+    if args.backfill_keys_from_cert:
+        return run_backfill_keys_from_cert(dry_run=args.dry_run)
     if args.check_csv:
         # Step 4: --legacy-tuple-mode 明示なしなら single-key (= resolver 経由) で実行
         if args.legacy_tuple_mode:
@@ -1577,6 +1588,66 @@ def run_write_keys_from_csv_canonical(csv_path: str, dry_run: bool = False) -> i
         print(f"  samples:")
         for s in result["samples"][:5]:
             print(f"    {s}")
+    return 0
+
+
+def run_backfill_keys_from_cert(dry_run: bool = False) -> int:
+    """cert→canonical KEー backfill (= 補URL 実効化、 2026-07-15 BUILD).
+
+    依頼: iMak_data/dedupe/requests/2026-07-15_dedup_cert_backfill_cli_build.md
+
+    HIGH 商品管理シートの **R='TCG' AND B(itemID)空** row のうち KEー 空を対象に、
+    cert 経由 (= resolve_sheet_row 内で PSA cache→brand/subject→catalog exact) で
+    canonical KEー を解決し空 KEー セルに書込。
+
+    補URL 用途 = product_id 限定:
+    - url_col=None → url-key 経路封じ (= 2枚目の仕入URL 由来 url-key は primary と
+      不一致で無意味。 backfill_canonical_key は product_id / url_key を書き得るが、
+      url 非渡しで product_id か "" のみに絞る)。
+    - image_url_col=None → DON image-hash 経路は本 BUILD 対象外 (= 取りこぼし許容)。
+
+    fail-closed / 冪等:
+    - 解決不能 ("") は書込まない。
+    - 空 KEー セルにのみ書込。 既存 product_id は上書き/削除しない。
+    - 再実行で追加 0 (= idempotent)。
+    """
+    from . import sheet_io
+
+    print(f"[*] cert→KEー backfill (B空・product_id限定, dry_run={dry_run})", flush=True)
+    client = sheet_io.authorize_client()
+    sh = sheet_io.open_spreadsheet(sheet_io.HIGH_SHEET_ID, client=client)
+    ws = sh.worksheet("商品管理シート")
+    key_col = sheet_io.find_canonical_key_column(ws)
+    if key_col is None:
+        print("HIGH スプシ KEー 列なし、 abort")
+        return 1
+
+    counts = sheet_io.backfill_canonical_key(
+        ws,
+        key_col=key_col,
+        title_col=sheet_io.LISTINGS_COL_TITLE,          # C
+        url_col=None,                                   # product_id 限定 (url-key 封じ)
+        cert_col=sheet_io.HIGH_COL_CERT_OR_ENGTITLE,    # I (= R='TCG' なら cert)
+        image_url_col=None,                             # DON image 経路は対象外
+        dry_run=dry_run,
+        item_id_col=sheet_io.LISTINGS_COL_ITEMID,       # B
+        upgrade_url_to_card=False,
+        only_item_id_empty=True,                        # B空限定
+        category_col=sheet_io.HIGH_COL_CATEGORY,        # R
+        category_value=sheet_io.HIGH_CATEGORY_TCG_VALUE,  # 'TCG'
+    )
+
+    print()
+    print(f"  total_rows              : {counts['total_rows']}")
+    print(f"  skipped_category_mismatch: {counts['skipped_category_mismatch']}")
+    print(f"  skipped_item_id_present : {counts['skipped_item_id_present']}  (= B非空=live/出品済)")
+    print(f"  skipped_existing        : {counts['skipped_existing']}  (= KEー既存)")
+    print(f"  skipped_no_resolution   : {counts['skipped_no_resolution']}  (= 解決不能 fail-closed)")
+    print(f"  written_product_id      : {counts['written_product_id']}  ← 付与行数")
+    print(f"  written_url_key         : {counts['written_url_key']}  (= 0 のはず, url封じ)")
+    print(f"  upgraded_url→product_id : {counts['upgraded_url_to_product_id']}")
+    if counts["written_url_key"]:
+        print("  [!] WARNING: url_key が書かれた (= url封じの想定外)。 要確認")
     return 0
 
 
