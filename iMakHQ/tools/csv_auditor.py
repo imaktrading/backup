@@ -614,6 +614,42 @@ def _row_sku(headers, row):
     return "(no-sku)"
 
 
+# identity = 「その item_id が何の商品か」を Catalog が引ける最小情報。カテゴリ別 if を作らず
+# 列の有無で拾う (無い列は素通り) → TCG/G-shock/Mercari どれでも同じ経路で効く。
+# 並び順 = 識別力の高い順。max_len で切れても手掛かりが残るようにする
+# (C:Franchise は C:Game と冗長なので入れない)。
+_IDENTITY_KEYS = (
+    "C:Card Number", "C:Card Name", "C:Character", "C:Set", "C:Language", "C:Game",
+    "C:Brand", "C:Model", "C:MPN",
+)
+
+
+def card_identity(headers, row, max_len=90):
+    """CSV 行から商品 identity 文字列を組む (純関数)。
+
+    item_id (CustomLabel=m*/PSA10-*) は出品IDでありカードIDではないため、Catalog は
+    それ単体では対象を特定できない (= 依頼が backfill 不能で永久再掲。2026-07-15 発覚)。
+    生成物である CSV 行には catalog 由来の事実 (カード番号/名/セット) が既に載っているので、
+    それを identity として同送する。値は **CSV にある事実のみ** (推測・補完はしない)。
+    Returns: "OP04-119 | Donquixote Rosinante | Kingdoms of Intrigue" / 手掛かり無しは ""。
+    """
+    hm = {h: i for i, h in enumerate(headers)}
+    parts = []
+    for key in _IDENTITY_KEYS:
+        i = hm.get(key)
+        if i is None or i >= len(row):
+            continue
+        v = str(row[i]).strip()
+        if v and v not in parts:
+            parts.append(v)
+    if not parts:                       # spec が全滅の行 → タイトルを手掛かりに (空欄よりマシ)
+        i = hm.get("*Title")
+        if i is not None and i < len(row):
+            parts = [str(row[i]).strip()] if str(row[i]).strip() else []
+    out = " | ".join(parts)
+    return out[:max_len].strip(" |")
+
+
 # ============================================================================
 # メイン監査
 # ============================================================================
@@ -645,6 +681,7 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # --- 行ごとに findings → disposition 集約 ---
     exclude_idx = []          # 1-based 除外行
     catalog_items, program_items = [], []
+    identity_by_sku = {}      # sku(出品ID) → 商品identity。Catalog が依頼から対象を引くため
     seo_notes = []
     all_vr = []               # 各行 validate_row 結果 (Claude総合レビュー文脈用)
     for i, row in enumerate(rows, 1):
@@ -657,6 +694,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
             findings = vr + native_findings(headers, row)
         disps = [classify_finding(sev, msg) for sev, msg in findings]
         sku = _row_sku(headers, row)
+        _ident = card_identity(headers, row)
+        if _ident and not identity_by_sku.get(sku):
+            identity_by_sku[sku] = _ident
         eff = []   # 除外判定用 (spec_empty_excludes=False のカテゴリは spec空を除外に倒さない)
         for (sev, msg), d in zip(findings, disps):
             if d == SPEC_EMPTY and not spec_excl:
@@ -723,7 +763,7 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # --- PDCA: 台帳に蓄積 + 前回比トレンド + 再発検知 (dry-run は追記しない) ---
     _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
-    _pdca_accumulate(project, catalog_items, program_items, dry_run)
+    _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku)
     # --- 決定論NG digest: program不整合 + logシグナル + 再発finding(pdca seen_count) を束ねる(無言スキップ防止=PDCA担保) ---
     recurring = recurring_findings(_load_pdca_recurring())
     digest = _build_ng_digest(project, program_items, log_signals, recurring)
@@ -965,7 +1005,7 @@ def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", dig
         return f"error:{type(_e).__name__}"
 
 
-def _pdca_accumulate(project, catalog_items, program_items, dry_run):
+def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku=None):
     """catalog/program 指摘を pdca.db 改善キューに蓄積し、dedup済 catalog 依頼を集約発行 +
     処理済を done 同期 (PDCA spiral-up Phase1b+2)。dry-run は記録しない。
     write-only・try/except で監査本体には一切影響させない。"""
@@ -982,7 +1022,8 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run):
             field = m.group(1) if m else "catalog_request"
             _pdca.upsert_improvement(con, project, sku, field, "",
                                      evidence=str(msg)[:80], source="auditor", layer="A",
-                                     finding_type=ft, ts=ts)
+                                     finding_type=ft,
+                                     identity=(identity_by_sku or {}).get(sku, ""), ts=ts)
         from program_fix_backlog import program_signature as _prog_sig
         for sku, msg in program_items:
             _pdca.record_finding(con, ts, project, sku, "program", str(msg)[:120], ts=ts)

@@ -101,9 +101,21 @@ CREATE TABLE IF NOT EXISTS improvement_queue (
   evidence TEXT, source TEXT, layer TEXT, confidence REAL,
   finding_type TEXT, seen_count INTEGER DEFAULT 1, priority REAL,
   status TEXT DEFAULT 'pending',
+  identity TEXT DEFAULT '',
   created_ts TEXT, updated_ts TEXT, reviewed_ts TEXT
 );
 """
+
+# 既存DBに後付けする列 (CREATE TABLE IF NOT EXISTS は既存テーブルを変更しないため)
+_ADD_COLUMNS = {"identity": "TEXT DEFAULT ''"}
+
+
+def _migrate(con):
+    """不足列を ALTER で追加 (冪等)。既存 pdca.db を作り直さず前進させる。"""
+    have = {r[1] for r in con.execute("PRAGMA table_info(improvement_queue)")}
+    for col, decl in _ADD_COLUMNS.items():
+        if col not in have:
+            con.execute(f"ALTER TABLE improvement_queue ADD COLUMN {col} {decl}")
 
 
 def connect(db_path: str = None) -> sqlite3.Connection:
@@ -116,6 +128,7 @@ def connect(db_path: str = None) -> sqlite3.Connection:
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
     con.executescript(_SCHEMA)
+    _migrate(con)
     return con
 
 
@@ -147,29 +160,40 @@ def upsert_gap_keyword(con, card_id, keyword, rate, ts=""):
 
 def upsert_improvement(con, category, item_id, target_field, suggested_value="", *,
                        evidence="", source="", layer="A", confidence=1.0,
-                       finding_type="other", ts=""):
+                       finding_type="other", identity="", ts=""):
     """改善候補を upsert。既存(同 dkey)なら seen_count++ で再発を数え priority 再計算。
 
     done 済の dkey が再発したら status を pending に戻す (= 直したのにまた出た → 再発行対象)。
+
+    identity: item_id が何の商品かを Catalog が解決できる手掛かり (TCG なら
+      「カード番号 | カード名 | セット名」)。item_id (m*/PSA10-* = 出品ID) 単体では
+      Catalog が対象カードを特定できず backfill 不能 → 依頼が永久に再掲される
+      (2026-07-15 発覚)。dedup_key には含めない (= 既存行の同一性を保ち、
+      再検出時に空の既存行へ後から埋まる)。
     """
     dk = dedup_key(category, item_id, target_field, suggested_value)
-    row = con.execute("SELECT queue_id, seen_count, status FROM improvement_queue WHERE dkey=?", (dk,)).fetchone()
+    row = con.execute("SELECT queue_id, seen_count, status, identity FROM improvement_queue WHERE dkey=?",
+                      (dk,)).fetchone()
     if row:
         seen = (row["seen_count"] or 1) + 1
         new_status = "pending" if row["status"] == "done" else row["status"]
         pri = compute_priority(finding_type, seen, confidence)
+        # identity は「空の既存行に埋める / 新しい値で更新」。取得できなかった時に
+        # 既存の解決手掛かりを空で潰さない (fail-closed)。
+        ident = (identity or "").strip() or (row["identity"] or "")
         con.execute(
             "UPDATE improvement_queue SET seen_count=?, priority=?, status=?, evidence=?,"
-            " confidence=?, updated_ts=? WHERE queue_id=?",
-            (seen, pri, new_status, evidence, confidence, ts, row["queue_id"]))
+            " confidence=?, identity=?, updated_ts=? WHERE queue_id=?",
+            (seen, pri, new_status, evidence, confidence, ident, ts, row["queue_id"]))
         return row["queue_id"]
     pri = compute_priority(finding_type, 1, confidence)
     cur = con.execute(
         "INSERT INTO improvement_queue (dkey, category, item_id, target_field, suggested_value,"
-        " evidence, source, layer, confidence, finding_type, seen_count, priority, status, created_ts, updated_ts)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,1,?, 'pending', ?, ?)",
+        " evidence, source, layer, confidence, finding_type, seen_count, priority, status,"
+        " identity, created_ts, updated_ts)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,1,?, 'pending', ?, ?, ?)",
         (dk, category, item_id, target_field, suggested_value, evidence, source, layer,
-         confidence, finding_type, pri, ts, ts))
+         confidence, finding_type, pri, (identity or "").strip(), ts, ts))
     return cur.lastrowid
 
 
@@ -285,9 +309,11 @@ def queue_stats(con):
 
 
 def _queue_table(items):
-    rows = ["| pri | item | field | 候補値 | 確信度 | 根拠 |", "|--:|---|---|---|--:|---|"]
+    rows = ["| pri | item | 商品(identity) | field | 候補値 | 確信度 | 根拠 |",
+            "|--:|---|---|---|---|--:|---|"]
     for r in items:
-        rows.append(f"| {r['priority']} | {r['item_id']} | {r['target_field']} | "
+        ident = (r.get("identity") or "").strip() or "**(不明=要調査)**"
+        rows.append(f"| {r['priority']} | {r['item_id']} | {ident} | {r['target_field']} | "
                     f"{(r['suggested_value'] or '')[:24]} | {r.get('confidence','')} | {(r['evidence'] or '')[:50]} |")
     return rows
 
@@ -328,6 +354,8 @@ def emit_consolidated_request(con, category, out_dir, today):
         f"- 発行日: {today} / 発行者: HQ pdca_store / フェーズ: 本実装",
         "- 改善キュー(pdca.db)からの**集約・重複排除済**依頼。毎回の .md 量産を置換。",
         "- 完了したら `_processed.md` 等にリネーム → 次回 sync で queue=done に同期。",
+        "- `item` は出品ID (m*=メルカリ / PSA10-*=PSA cert)。**どのカードかは `商品(identity)` 列**"
+        " (カード番号 | カード名 | セット名) で引く。identity が (不明) の行は HQ 側で解決できなかった分。",
         "",
         f"## 層A 客観ギャップ(即対応) {len(layer_a)} 件",
         "(catalog 事実と突合した確実な不足/誤り。優先度降順)",
@@ -402,11 +430,12 @@ def generate_report(con, out_path, limit=50):
         "- 優先度 = 重要度 × 再発回数 × 確信度 (高いほど先に対応)",
         "",
         f"## pending 優先度 TOP{limit}",
-        "| pri | item | field | 値 | seen | layer | source |",
-        "|--:|---|---|---|--:|---|---|",
+        "| pri | item | 商品(identity) | field | 値 | seen | layer | source |",
+        "|--:|---|---|---|---|--:|---|---|",
     ]
     for r in list_queue(con, status="pending", limit=limit):
-        lines.append(f"| {r['priority']} | {r['item_id']} | {r['target_field']} | "
+        lines.append(f"| {r['priority']} | {r['item_id']} | {(r.get('identity') or '') or '(不明)'} | "
+                     f"{r['target_field']} | "
                      f"{(r['suggested_value'] or '')[:20]} | {r['seen_count']} | {r['layer']} | {r['source']} |")
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_text("\n".join(lines), encoding="utf-8")
