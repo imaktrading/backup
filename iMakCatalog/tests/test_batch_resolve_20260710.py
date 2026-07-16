@@ -64,6 +64,29 @@ def test_ex_battle_boost_mewtwo_added():
     assert _pk("POKEMON JAPANESE BLACK & WHITE EX BATTLE BOOST", "045", "MEWTWO EX") == "EBB-045"
 
 
+def test_night_unison_067_hyper_rare_added():
+    # 2026-07-16: SM9a Night Unison #067 Gardevoir & Sylveon-GX HR (secret rare) 追加
+    assert _pk("POKEMON JAPANESE SUN & MOON STRENGTH EXPANSION PACK NIGHT UNISON",
+               "067", "GARDEVOIR SYLVEON GX") == "SM9a-067"
+
+
+def test_miracle_twins_112_hyper_rare_added():
+    # 2026-07-16: SM11 Miracle Twin #112 Dragonite-GX HR (secret rare) 追加
+    assert _pk("POKEMON JAPANESE SUN & MOON MIRACLE TWINS", "112", "DRAGONITE GX") == "SM11-112"
+
+
+def test_family_pokemon_card_game_maps_sh():
+    # 2026-07-16: SwSh ファミリーポケモンカードゲーム #014 = 既存 SH-014 (ゲッコウガV)
+    assert _pk("POKEMON JAPANESE SWORD & SHIELD FAMILY POKEMON CARD GAME",
+               "014", "GRENINJA V") == "SH-014"
+
+
+def test_black_deck_kit_added_bdk():
+    # 2026-07-16: 2004 PCG ロケット団ハーフデッキ-black- (synthetic BDK) #005/#006 追加
+    assert _pk("POKEMON JAPANESE BLACK DECK KIT", "005", "DARK MAGCARGO") == "BDK-005"
+    assert _pk("POKEMON JAPANESE BLACK DECK KIT", "006", "DARK HOUNDOOM") == "BDK-006"
+
+
 def test_sm12_112_hyper_rare_added():
     assert _pk("POKEMON JAPANESE SUN & MOON ALTER GENESIS", "112", "ARCS DLGA PALKIA GX") == "SM12-112"
 
