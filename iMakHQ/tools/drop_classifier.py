@@ -16,6 +16,33 @@ catalog 照会(set_exists/card_exists)は注入可=テスト可。
 import re
 
 
+def rescued_subjects(log):
+    """reject 直後に fallback で救済された PSA subject を集める (純関数)。
+
+    救済ログは fallback の種類ごとに**行の形が違う**:
+      promo  : "iMakCatalog hit (promo fallback): OP01-013_p1 サンジ (Subject='SANJI' ... と一致 ...)"
+      reprint: "iMakCatalog hit (reprint fallback): OP10-030_OP13_p2 Smoker (PSA set=OP13 の再録版、1件中)"
+    reprint 側は Subject を持たないため subject 名では突合できない。両者に共通するのは
+    **reject の直後行に fallback hit が出る**構造(生成器が reject→即 fallback 試行するため)。
+    → 文言 ('promo') ではなく構造で救済判定する。'promo fallback' だけを見ていたため
+      reprint fallback 救済品を drop に二重計上した 2026-07-17 の再発を構造的に防ぐ
+      (= 新種の fallback が増えても文言追従なしで拾える)。
+
+    fail-closed: 隣接していなければ救済とみなさない。取りこぼしは件数不一致=警告で surface
+    されるだけだが、誤って救済扱いにすると本物の drop が消えて silent drop になる(より危険)。
+    """
+    rescued = set()
+    lines = (log or "").splitlines()
+    for i, ln in enumerate(lines):
+        m = re.search(r"ID hit\s+(\S+).*?Subject\s+'([^']+)'.*?不一致", ln)
+        if not m:
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if re.search(r"iMakCatalog hit \([^)]*fallback\)", nxt):
+            rescued.add(m.group(2))
+    return rescued
+
+
 def classify_drops(log, *, set_exists, card_exists=None):
     """生成ログ → [{item, class, cause, act}] (純関数, catalog照会は注入)。
 
@@ -24,10 +51,9 @@ def classify_drops(log, *, set_exists, card_exists=None):
     """
     out = []
     seen = set()
-    # promo fallback で救済された subject(= ID不一致 reject の後に別variantで build 成功)は
-    # drop に数えない(二重計上=件数照合のノイズ・オオカミ少年化を防ぐ。2026-07-10)。
-    #   救済ログ: "iMakCatalog hit (promo fallback): OP01-013_p1 サンジ (Subject='SANJI' ... と一致 ...)"
-    rescued = set(re.findall(r"promo fallback.*?Subject='([^']+)'", log or ""))
+    # fallback で救済された subject(= ID不一致 reject の後に別variantで build 成功)は
+    # drop に数えない(二重計上=件数照合のノイズ・オオカミ少年化を防ぐ。2026-07-10 promo / 2026-07-17 reprint)。
+    rescued = rescued_subjects(log)
     for ln in (log or "").splitlines():
         s = ln.strip()
         if not s:
@@ -56,7 +82,7 @@ def classify_drops(log, *, set_exists, card_exists=None):
         if m:
             cid, subj = m.group(1), m.group(2)
             if subj in rescued:
-                continue   # reject後にpromo fallbackで救済=build成功 → dropではない(二重計上回避)
+                continue   # reject後に fallback で救済=build成功 → dropではない(二重計上回避)
             key = f"{cid}|{subj}"
             if key in seen:
                 continue
