@@ -1379,6 +1379,7 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "EX BATTLE BOOST":       "EBB",     # EXバトルブースト BW期 (EBB-045=ミュウツーEX 追加, cert28837)
     "FAMILY POKEMON CARD GAME": "SH",   # SwSh ファミリーポケモンカードゲーム (SH-014=ゲッコウガV 実在)
     "BLACK DECK KIT":        "BDK",     # 2004 PCG ロケット団ハーフデッキ-black- (公式code無→synthetic BDK)
+    "BLASTOISE & SUICUNE":   "CLK",     # ポケカ クラシック カメックス&スイクンexデッキ (CLK-008=ラプラス実在). 他Classicデッキ(Charizard/Venusaur)と衝突しないdeck名で限定
     "GG END":            "SM10a",  # ジージーエンド
     "DETECTIVE PIKACHU": "SMP2",   # 名探偵ピカチュウ (スペシャルパック)
     "ULTRA MOON":        "SM5M",   # ウルトラムーン

@@ -87,6 +87,13 @@ def test_black_deck_kit_added_bdk():
     assert _pk("POKEMON JAPANESE BLACK DECK KIT", "006", "DARK HOUNDOOM") == "BDK-006"
 
 
+def test_clk_classic_blastoise_suicune_lapras_added():
+    # 2026-07-18: ポケカ クラシック カメックス&スイクンexデッキ #008 Lapras (CLK-008) 追加。
+    #   deck名 'BLASTOISE & SUICUNE' で限定 (他Classicデッキと非衝突)。
+    assert _pk("POKEMON JAPANESE CLK-TRADING CARD GAME CLASSIC BLASTOISE & SUICUNE EX DECK",
+               "008", "LAPRAS") == "CLK-008"
+
+
 def test_sm12_112_hyper_rare_added():
     assert _pk("POKEMON JAPANESE SUN & MOON ALTER GENESIS", "112", "ARCS DLGA PALKIA GX") == "SM12-112"
 
