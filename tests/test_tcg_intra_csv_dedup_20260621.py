@@ -51,8 +51,25 @@ def test_incomplete_key_not_dropped():
 def test_control_panel_wires_intra_dedup_before_write_keys():
     cp = (Path(__file__).resolve().parent.parent / "iMakHQ" / "control_panel.py").read_text(encoding="utf-8")
     assert "tcg_intra_csv_dedup.py" in cp
-    # 物理除外(check-csv)の後・KEY書込(write-keys)の前に挟む
+    # 物理除外(check-csv)の後・intra間引きを挟み、**メインKEY書込(Step 4b)は intra の後**。
+    # intra で間引いた分(兄弟未出品)に KEY を書くと orphan 化するため、この順序が安全条件。
     i_excl = cp.index("--check-csv")
     i_intra = cp.index("tcg_intra_csv_dedup.py")
-    i_wk = cp.index("--write-keys-from-csv")
-    assert i_excl < i_intra < i_wk
+    i_wk_main = cp.index("--write-keys-from-csv", i_intra)   # intra 以降の write-keys = Step 4b
+    assert i_excl < i_intra < i_wk_main
+
+
+def test_control_panel_livedup_writeback_runs_before_intra_dedup():
+    """live重複除外(4a)の KEY 書込は intra間引き(4a-2)の**前**(2026-07-18)。
+
+    4a が消すのは出品済(live兄弟あり)= KEY 書いても orphan にならない安全な分。
+    一方 intra が消すのは兄弟未出品なので KEY を書いてはいけない。両者を分けるため、
+    live重複 writeback は必ず intra の前に置き、4a が消した分だけを対象化する。
+    """
+    cp = (Path(__file__).resolve().parent.parent / "iMakHQ" / "control_panel.py").read_text(encoding="utf-8")
+    assert "_write_keys_for_livedup_removed" in cp
+    i_excl = cp.index("--check-csv")
+    # 呼出のみ(_pre_rows を渡す実引数)を狙う = def 行を誤ヒットしない
+    i_call = cp.index("_write_keys_for_livedup_removed(append_log_func, latest_csv, _pre_rows")
+    i_intra = cp.index("tcg_intra_csv_dedup.py")
+    assert i_excl < i_call < i_intra

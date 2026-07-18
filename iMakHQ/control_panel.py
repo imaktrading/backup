@@ -4,6 +4,7 @@
 
 追加方法: SCRIPTS リストに項目を1つ追加するだけ。
 """
+import csv
 import os
 import re
 import sys
@@ -266,6 +267,78 @@ def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
 DEDUPE_WORKTREE = r"C:\dev\iMak_dedupe\iMakDedupe"
 
 
+# ============================================================================
+# live重複除外 cert への KEY 書込 (浪費ループ対策・2026-07-18)
+# ----------------------------------------------------------------------------
+# 症状: 同一カードが既に live 出品済(例 Bloodmoon Ursaluna SV5a-091)だと、その2枚目の
+#   cert 行はスプシで KEY 空のまま抽出される → 生成 → Step 4a(check-csv)が「live重複」として
+#   物理除外 → KEY書込(4b)は deduped CSV を見るので cert に KEY が付かない → 次回also抽出。
+#   結果、1回10件の franchise 枠を毎回1つ浪費(2026-07-16/17 で Bloodmoon が連続空振り)。
+# 対策: 4a が消した cert にも KEY を書く。除外理由=live重複=出品済の兄弟がいる → KEY を書いても
+#   orphan掃除(psa_orphan_key_clean: listed兄弟が無い時のみ消す)に消されない=安全。
+# 重要な境界: intra-CSV間引き(4a-2)で消える分は兄弟が未出品なので KEY を書くと orphan 化する。
+#   ∴ 対象は **4a(check-csv)が消した分のみ**。4a-2 の前に diff を取って切り分ける。
+# ============================================================================
+def _row_label(header, row):
+    """CSV 行の一意ラベル(CustomLabel=PSA cert-sku)。純関数。"""
+    try:
+        i = header.index("CustomLabel")
+    except ValueError:
+        i = 0
+    return row[i].strip() if i < len(row) else ""
+
+
+def _read_csv_rows(path):
+    """CSV を (data_rows, header) に読む。純関数(I/Oのみ)。"""
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    return (rows[1:], rows[0]) if rows else ([], [])
+
+
+def _livedup_removed_rows(pre_rows, pre_header, post_rows, post_header):
+    """4a(live重複除外)で消えた行を返す(純関数・CustomLabel で突合・test可)。"""
+    post_labels = {_row_label(post_header, r) for r in post_rows}
+    return [r for r in pre_rows if _row_label(pre_header, r) not in post_labels]
+
+
+def _write_keys_for_livedup_removed(append_log_func, latest_csv, pre_rows, pre_header, env):
+    """4a が live重複として消した cert に KEY を書く(浪費ループ対策)。write-only・失敗許容。"""
+    if not pre_rows:
+        return
+    try:
+        post_rows, post_header = _read_csv_rows(latest_csv)
+    except Exception as e:
+        append_log_func(f"\n(live重複KEY書込: 事後読込失敗 skip: {type(e).__name__})\n")
+        return
+    removed = _livedup_removed_rows(pre_rows, pre_header, post_rows, post_header)
+    if not removed:
+        return
+    append_log_func("\n======================================================================\n")
+    append_log_func(f"▶ live重複除外 cert に KEY 書込 (浪費ループ対策・{len(removed)}件)\n")
+    append_log_func("======================================================================\n")
+    tmp = latest_csv + ".livedup_removed.csv"
+    try:
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+            w.writerow(pre_header)
+            w.writerows(removed)
+        r = subprocess.run(
+            [sys.executable, "-m", "dedupe.checker", "--write-keys-from-csv", tmp],
+            cwd=DEDUPE_WORKTREE, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180, env=env)
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ live重複KEY書込 returncode={r.returncode}(続行)\n")
+    except Exception as e:
+        append_log_func(f"\n⚠️ live重複KEY書込 失敗(続行): {type(e).__name__}: {e}\n")
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     """csv_output/ の最新 CSV に対して 重複くん --check-csv を実行 (= 物理除外)."""
     csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
@@ -302,6 +375,13 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
 
+    # 浪費ループ対策(2026-07-18): Step 4a が消す前に CSV 全行を控える(4a diff 用)。
+    try:
+        _pre_rows, _pre_header = _read_csv_rows(latest_csv)
+    except Exception as _e_pre:
+        _pre_rows, _pre_header = [], []
+        append_log_func(f"\n(live重複KEY書込: 事前読込失敗 skip: {type(_e_pre).__name__})\n")
+
     # Step 4a: 物理除外 (= Phase 1g、 真の重複 row を CSV から削除)
     append_log_func("\n======================================================================\n")
     append_log_func("▶ 重複くん dedupe_excluder ((KEY1, KEY2) tuple 物理除外)\n")
@@ -321,6 +401,10 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
                 append_log_func(r.stderr)
     except Exception as e:
         append_log_func(f"\n⚠️ dedupe hook (check-csv) 失敗: {type(e).__name__}: {e}\n")
+
+    # Step 4a-diff: 4a(live重複)で消えた cert に KEY を書く(浪費ループ対策)。
+    # 必ず 4a-2(intra間引き)の**前**に実行 = 4a が消した分だけを対象化(4a-2 分は兄弟未出品で対象外)。
+    _write_keys_for_livedup_removed(append_log_func, latest_csv, _pre_rows, _pre_header, env)
 
     # Step 4a-2: CSV内 同design重複の間引き (2026-06-21)。重複くんは「既出品」としか照合せず
     # 同一CSV内の同design複数コピー(別cert)を間引かない → 同じカードが複数枚出る。ここで
