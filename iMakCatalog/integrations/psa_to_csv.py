@@ -397,6 +397,21 @@ def _apply_ebay_fields(legacy: dict, record: dict, category: str) -> dict:
     legacy["finish"] = specs.get("finish") or ""
     legacy["game"] = specs.get("game_ebay") or legacy.get("game") or ""
     legacy["card_size"] = specs.get("card_size_ebay") or "Standard"
+
+    # 2026-07-18 (HQ依頼 dbscg_resolver_rarity_recovery B): DBSCG の parallel/alt-art は
+    #   rarity_ebay が '★' 付き JP コード (L★/SR★/C★ 等) で eBay facet 非正規。
+    #   ★ を除去して base コードへ正規化し、★の意味(alt-art)は Features='Alternative Art' で表現。
+    #   L★(Leader parallel)は base=Leader が rarity 非該当(空)のため、既存 yaml 決定に倣い SCR。
+    if category == "dragonball_scg" and isinstance(legacy.get("rarity"), str) and "★" in legacy["rarity"]:
+        base = legacy["rarity"].replace("★", "").strip()
+        norm = {"L": "SCR", "P": "Promo", "PR": "Promo"}.get(base, base)  # C/UC/R/SR/SCR は base 短縮コードのまま
+        legacy["rarity"] = norm
+        legacy["rarity_ebay"] = norm
+        legacy["rarity_en"] = norm
+        feats = list(legacy.get("features") or [])
+        if "Alternative Art" not in feats:
+            feats.append("Alternative Art")
+        legacy["features"] = feats
     return legacy
 
 
@@ -1145,9 +1160,16 @@ def lookup_dragonball(
         return None
     # card_number が既に set-prefix 込みの full product_id 形 (e.g. 'FS02-04' / 'FB02-001' /
     # 'E01-02'=Energy Marker / 'E-04' / 'FP-024') の場合、それ自体で exact lookup を試す.
-    # alt-art 等は _p1 variant を優先 (E01-02 ALTERNATE ART → E01-02_p1).
+    # alt-art 等は variant を優先.
     if re.match(r"^[A-Z]{1,3}\d*-\w", card_number, re.IGNORECASE):
-        full_candidates = [f"{card_number}_{suf}" for suf in _variant_candidates(subject)]
+        sufs = _variant_candidates(subject)
+        # 2026-07-18 (HQ依頼 dbscg_resolver_rarity_recovery): _PARA(bandai, rarity保持) と
+        #   _p1(dbfw, rarity空) が両立する二重ソース重複では、rarity を持つ _PARA を優先する
+        #   (_p1 を返すと C:Rarity 空→fail-closed skip=alt-art 誤除外)。216組すべて PARA=rarity有/p1=無 実測。
+        #   read-side の解決優先のみ (alias_of/KEY 非接触=root① A-2/live≠0 と無関係、KEY orphan 化リスクなし)。
+        if sufs and "PARA" not in sufs:
+            sufs = ["PARA"] + sufs
+        full_candidates = [f"{card_number}_{suf}" for suf in sufs]
         full_candidates.append(card_number)   # base は最後 (variant 優先)
         for pid in full_candidates:
             record = api.lookup(DRAGONBALL_CATEGORY, pid)
