@@ -94,6 +94,11 @@ def test_clk_classic_blastoise_suicune_lapras_added():
                "008", "LAPRAS") == "CLK-008"
 
 
+def test_plasma_gale_maps_bw7b():
+    # 2026-07-19: BLACK & WHITE PLASMA GALE #035 = 既存 BW7-B-035 (ギラティナ)
+    assert _pk("POKEMON JAPANESE BLACK & WHITE PLASMA GALE", "035", "GIRATINA") == "BW7-B-035"
+
+
 def test_sm12_112_hyper_rare_added():
     assert _pk("POKEMON JAPANESE SUN & MOON ALTER GENESIS", "112", "ARCS DLGA PALKIA GX") == "SM12-112"
 
