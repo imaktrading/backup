@@ -132,6 +132,43 @@ def remove_duplicate_words(title):
     return new, new != title
 
 
+# eBay が title/subtitle/item specifics で禁止する装飾文字 (ErrorCode 240 /
+# LP_SNB_CutsieCharacters)。superscript/subscript/★/™/½ 等。混入すると入稿が
+# **物理的に失敗**する (2026-07-18 発覚: DBSCG rarity 'C★'/'SR★'/'L★' がタイトルと
+# C:Rarity に流入 → Frieza FS04-11 が毎バッチ ErrorCode 240 で失敗、DBSCG 911件が同地雷)。
+# アクセント文字 (é in Pokémon 等) は eBay 許容なので **絶対に含めない** (curated set)。
+_EBAY_BANNED_CHARS = (
+    "★☆✩✪✫✬✭✮✯✰⭐"       # 星 (= 今回の主犯。DBSCG parallel rarity marker)
+    "™®©℠"                 # 商標/著作権
+    "♥♡♦♣♠❤️❤♪♫"           # スート/ハート/音符
+    "½¼¾⅓⅔⅛⅜⅝⅞"           # 分数記号
+    "⁰¹²³⁴⁵⁶⁷⁸⁹"           # 上付き数字
+    "₀₁₂₃₄₅₆₇₈₉"           # 下付き数字
+    "•‣►▶◄◀▲▼"             # 装飾 bullet/矢印
+)
+_EBAY_BANNED_RE = re.compile('[' + re.escape(_EBAY_BANNED_CHARS) + ']')
+
+
+def strip_ebay_banned_chars(text, collapse_ws=True):
+    """eBay 禁止装飾文字を除去する最終ガード (title / item specifics / description 共通)。
+
+    混入経路 (catalog rarity コードの ★ 等) を問わず、CSV 出力の**直前**で物理除去する
+    = 入稿失敗 (ErrorCode 240) を構造的に防ぐ。値の「正しさ」(C★→Common 等の正規化) は
+    別レイヤ (Catalog SSOT) の責務で、ここは「禁止文字を絶対に eBay へ出さない」に専念する。
+
+    collapse_ws: title/spec は True で連続/末尾スペースを整理。**Description(HTML)は False**
+      にして改行・インデント等の空白を保持する (collapse すると HTML が壊れる)。
+
+    Returns: (新テキスト, 除去したか bool)。
+    """
+    if not text or not _EBAY_BANNED_RE.search(text):
+        return text, False
+    new = _EBAY_BANNED_RE.sub('', text)
+    if collapse_ws:
+        new = re.sub(r'\s+', ' ', new).strip()
+    return new, new != text
+
+
 # 日本語文字 (ひらがな/カタカナ/漢字/半角カナ). eBay タイトルは英語必須。
 _JP_CHAR_RE = re.compile(r'[぀-ヿ一-鿿ｦ-ﾟ]')
 
@@ -209,7 +246,8 @@ def fix_title(title, language, rarity, rescues):
     Returns:
         (新タイトル, 操作ログ dict)
     """
-    log = {'rescue': [], 'pokemon_dedup': False, 'word_dedup': False, 'pad': [], 'jp_strip': False}
+    log = {'rescue': [], 'pokemon_dedup': False, 'word_dedup': False, 'pad': [],
+           'jp_strip': False, 'banned_strip': False}
 
     title, rescue_applied = apply_rescue(title, rescues)
     log['rescue'] = rescue_applied
@@ -225,6 +263,10 @@ def fix_title(title, language, rarity, rescues):
     # 先に英語のみにしてから pad することで、除去後に短くならず英語キーワードで補強される。
     title, jp_stripped = strip_japanese(title)
     log['jp_strip'] = jp_stripped
+
+    # eBay 禁止文字 (★ 等) を pad の前に除去 (rarity 'C★' 由来のタイトル混入を潰す)。
+    title, banned_stripped = strip_ebay_banned_chars(title)
+    log['banned_strip'] = banned_stripped
 
     title, pad_applied = pad_title(title, language=language, rarity=rarity)
     log['pad'] = pad_applied
@@ -253,9 +295,18 @@ def process_csv(csv_path, rescues, log_func=print):
         lang_idx = header.index('C:Language')
     except ValueError as e:
         log_func(f"  ⚠️ ヘッダ列不足、skip: {e}")
-        return {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'jp_stripped': 0, 'unchanged': 0}
+        return {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'word_dedup': 0,
+                'jp_stripped': 0, 'banned_stripped': 0, 'spec_banned_stripped': 0, 'unchanged': 0}
 
-    stats = {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'word_dedup': 0, 'jp_stripped': 0, 'unchanged': 0}
+    # item specifics 列 (C:*) = eBay 禁止文字サニタイズ対象。title と別軸で、
+    # 全 C: 列 (C:Rarity='C★' 等) から ★ 等を除去 (ErrorCode 240 の入稿失敗を防ぐ)。
+    spec_idxs = [j for j, h in enumerate(header) if h.startswith('C:')]
+    # Description(HTML)内の Specs ブロックにも rarity 'C★' 等が反映される。240 の対象
+    # (title/description) なので除去。ただし HTML なので空白は collapse しない。
+    desc_idx = header.index('*Description') if '*Description' in header else None
+
+    stats = {'rescued': 0, 'padded': 0, 'pokemon_dedup': 0, 'word_dedup': 0,
+             'jp_stripped': 0, 'banned_stripped': 0, 'spec_banned_stripped': 0, 'unchanged': 0}
     for i, row in enumerate(rows[1:], start=1):
         original = row[title_idx]
         new_title, log = fix_title(
@@ -280,13 +331,38 @@ def process_csv(csv_path, rescues, log_func=print):
         if log['jp_strip']:
             stats['jp_stripped'] += 1
             log_func(f"  [#{i}] 🚫 日本語除去: {original[:50]!r} → {new_title[:50]!r}")
+        if log['banned_strip']:
+            stats['banned_stripped'] += 1
+            log_func(f"  [#{i}] 🚫 eBay禁止文字除去(title): {original!r} → {new_title!r}")
 
         if new_title != original:
             row[title_idx] = new_title
-        else:
+
+        # item specifics の禁止文字除去 (title と独立。C:Rarity='C★' 等)
+        spec_changed = False
+        for j in spec_idxs:
+            if j >= len(row):
+                continue
+            cleaned, changed = strip_ebay_banned_chars(row[j])
+            if changed:
+                log_func(f"  [#{i}] 🚫 eBay禁止文字除去({header[j]}): {row[j]!r} → {cleaned!r}")
+                row[j] = cleaned
+                spec_changed = True
+        # Description(HTML)の禁止文字除去 (空白は保持)
+        if desc_idx is not None and desc_idx < len(row):
+            cleaned, changed = strip_ebay_banned_chars(row[desc_idx], collapse_ws=False)
+            if changed:
+                log_func(f"  [#{i}] 🚫 eBay禁止文字除去(*Description HTML内)")
+                row[desc_idx] = cleaned
+                spec_changed = True
+        if spec_changed:
+            stats['spec_banned_stripped'] += 1
+
+        if new_title == original and not spec_changed:
             stats['unchanged'] += 1
 
-    if stats['rescued'] or stats['padded'] or stats['pokemon_dedup'] or stats['word_dedup'] or stats['jp_stripped']:
+    if any(stats[k] for k in ('rescued', 'padded', 'pokemon_dedup', 'word_dedup',
+                              'jp_stripped', 'banned_stripped', 'spec_banned_stripped')):
         bak = csv_path + f'.bak_post_title_{int(time.time())}'
         shutil.copy2(csv_path, bak)
         log_func(f"  📦 backup: {os.path.basename(bak)}")
@@ -333,7 +409,8 @@ def run_post_title_fix_for_latest_csv(append_log_func=print):
     append_log_func(
         f"  完了: rescue={stats['rescued']} pad={stats['padded']} "
         f"pokemon_dedup={stats['pokemon_dedup']} word_dedup={stats['word_dedup']} "
-        f"jp_strip={stats['jp_stripped']} unchanged={stats['unchanged']}\n"
+        f"jp_strip={stats['jp_stripped']} banned_strip={stats['banned_stripped']} "
+        f"spec_banned={stats['spec_banned_stripped']} unchanged={stats['unchanged']}\n"
     )
 
 
