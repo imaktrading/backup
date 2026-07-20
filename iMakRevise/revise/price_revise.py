@@ -274,6 +274,34 @@ def _gspread_client():
     return _gs.authorize(creds)
 
 
+def _gspread_retry(fn, what: str, attempts: int = 3, wait_sec: int = 30):
+    """gspread API 呼出を transient エラー (5xx / 429 / 接続断) 時にリトライ.
+
+    Google Sheets API は散発的に 503 (service unavailable) を返す。即中止すると
+    その日の revise がまるごと skip → 取りこぼしになるため backoff リトライで自己回復させる。
+    (2026-07: 07/16・07/18 の日次中止が 503 起因だったため導入)
+    """
+    last_err = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001 - APIError/接続断を横断で捕捉
+            msg = str(e)
+            transient = (
+                "[503]" in msg or "[500]" in msg or "[502]" in msg
+                or "[504]" in msg or "[429]" in msg
+                or "unavailable" in msg.lower() or "timed out" in msg.lower()
+                or "connection" in msg.lower()
+            )
+            if not transient or attempt == attempts:
+                raise
+            last_err = e
+            print(f"[revise] [WARN] {what} 一時失敗 (attempt {attempt}/{attempts}): {e} "
+                  f"→ {wait_sec}s 待って再試行")
+            time.sleep(wait_sec)
+    raise last_err  # 到達しないが保険
+
+
 # variation 用 metadata 専用 列 (= HIGH/LOW schema の未使用 index に格納)
 # row[34] = SKU, row[35] = Size, row[36] = Color (= row[33] AH の外側、35 列拡張)
 COL_VAR_SKU = 34
@@ -346,14 +374,15 @@ def load_sheet_rows(sheet_key: str = "HIGH"):
         raise ValueError(f"Unknown sheet_key: {sheet_key}")
     cfg = SHEETS[sheet_key]
     gc = _gspread_client()
-    sh = gc.open_by_key(cfg["id"])
-    ws = sh.worksheet(cfg["tab"])
+    sh = _gspread_retry(lambda: gc.open_by_key(cfg["id"]), f"{sheet_key} open_by_key")
+    ws = _gspread_retry(lambda: sh.worksheet(cfg["tab"]), f"{sheet_key} worksheet")
 
     if cfg["schema"] == "high_low":
         # AL列(値下FLG, index37)まで読む (2026-06-30 NO_CONVERT 値下げ対応)。
         # ※ index34-36 は KEY/KEY2/巡回ERR で variation 列(COL_VAR_SKU=34)と衝突するが、
         #   detect_candidates は variation 列を official schema 限定で読むため high_low では無害。
-        all_rows = ws.get_values(f"A1:AL{ws.row_count}")
+        all_rows = _gspread_retry(
+            lambda: ws.get_values(f"A1:AL{ws.row_count}"), f"{sheet_key} get_values")
         if not all_rows:
             return [], [], ws, cfg["schema"]
         return all_rows[0], all_rows[HEADER_ROWS:], ws, cfg["schema"]
@@ -361,7 +390,8 @@ def load_sheet_rows(sheet_key: str = "HIGH"):
     if cfg["schema"] == "official":
         # 公式: SKU詳細 を P 列まで読込 (= D=ItemID/E=Title/F=SKU/G=Size/H=Color/J=Cost/P=Category)
         # 2026-05-24 variation 対応: SKU 単位で行展開 (= 旧 listing 単位集約は廃止)
-        all_rows = ws.get_values(f"A1:P{ws.row_count}")
+        all_rows = _gspread_retry(
+            lambda: ws.get_values(f"A1:P{ws.row_count}"), f"{sheet_key} get_values")
         if not all_rows:
             return [], [], ws, cfg["schema"]
         header = all_rows[0]
