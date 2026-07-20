@@ -68,11 +68,11 @@ def classify_drops(log, *, set_exists, card_exists=None):
             seen.add(cid)
             setp = cid.split("-")[0]
             if set_exists(setp):
-                out.append({"item": cid, "class": "収録漏れ",
+                out.append({"item": cid, "class": "収録漏れ", "cert": None,
                             "cause": f"収録漏れ(セット {setp} は対象内だが {cid} が欠番)",
                             "act": f"catalog拡充依頼: {cid} を追加"})
             else:
-                out.append({"item": cid, "class": "scope外",
+                out.append({"item": cid, "class": "scope外", "cert": None,
                             "cause": f"scope外(セット {setp} 自体が catalog 未収録)",
                             "act": f"判断: {setp} を新規収録するか / 再試行停止(scope-out)"})
             continue
@@ -87,7 +87,7 @@ def classify_drops(log, *, set_exists, card_exists=None):
             if key in seen:
                 continue
             seen.add(key)
-            out.append({"item": cid, "class": "promo衝突",
+            out.append({"item": cid, "class": "promo衝突", "cert": None,
                         "cause": f"promo番号衝突({cid} は catalog と別キャラ・PSA='{subj}')",
                         "act": f"catalog に {cid} の '{subj}' variant 追加 + 番号+subject で lookup"})
             continue
@@ -99,7 +99,7 @@ def classify_drops(log, *, set_exists, card_exists=None):
             if cid in seen:
                 continue
             seen.add(cid)
-            out.append({"item": cid, "class": "該当なし(catalog欠)",
+            out.append({"item": cid, "class": "該当なし(catalog欠)", "cert": m.group(1),
                         "cause": "viewer候補は出たが正カードがcatalogに無い(該当なし)",
                         "act": "catalog拡充: 該当カードを追加(NONE→自動宿題化される運用)"})
             continue
@@ -121,7 +121,7 @@ def classify_drops(log, *, set_exists, card_exists=None):
             if cid in seen:
                 continue
             seen.add(cid)
-            out.append({"item": cid, "class": "DON!!識別可(要catalog)",
+            out.append({"item": cid, "class": "DON!!識別可(要catalog)", "cert": m.group(1),
                         "cause": f"DON!!カード('{m.group(2)}')=番号なしだが set+処理(rarity)で識別可・catalog未対応で誤除外",
                         "act": "catalog に DON!! を set_code+treatment(rarity)で登録 → 出品可(cert cache に set/rarity 有り)"})
             continue
@@ -159,11 +159,23 @@ def reconcile_counts(log, drops):
     if processed is None:
         return ""
     success = _n(r"成功[:：]\s*(\d+)\s*件") or 0
-    actionable = sum(1 for d in drops if d.get("class") != "正常")
-    accounted = success + actionable
+
+    # 落ちは **cert 単位** で数える(2026-07-20)。
+    # 同じ1枚が「未登録: CP4-075」(card_id経路) と「目視未確定: #156576106」(cert経路) の
+    # 二本のログ行で拾われ、seen が別キーのため二重計上されていた（実ログで CP4-075 = cert
+    # 156576106 と確定）。cert を持つ finding が drop の実体で、card_id だけの finding
+    # (収録漏れ/scope外/promo衝突) は **その drop の理由説明** なので計上しない。
+    # cert 情報が一切無いログ(旧形式)では従来どおり件数で数える(後方互換・取りこぼし防止)。
+    actionable = [d for d in drops if d.get("class") != "正常"]
+    cert_drops = {d.get("cert") for d in actionable if d.get("cert")}
+    if cert_drops:
+        n_drop = len(cert_drops)
+    else:
+        n_drop = len(actionable)
+    accounted = success + n_drop
     if processed == accounted:
-        return f"✅ 件数照合OK: 処理{processed} = 成功{success} + 落ち{actionable}"
-    return (f"⚠️ 件数不一致(silent drop余地): 処理{processed} ≠ 成功{success}+落ち{actionable} "
+        return f"✅ 件数照合OK: 処理{processed} = 成功{success} + 落ち{n_drop}"
+    return (f"⚠️ 件数不一致(silent drop余地): 処理{processed} ≠ 成功{success}+落ち{n_drop} "
             f"(差{processed - accounted}件) → 拾えてない drop の可能性・要確認")
 
 
