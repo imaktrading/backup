@@ -1402,3 +1402,43 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   新 test_err_flag_prev_propagation.py 5件(失敗注入で fix無し時 4件 fail 確認)、pre-commit 115件 pass。
   公式監視くん(iMakeBayAPI/inventory_monitor/main.py)は別実装で err_flag_prev 直接使用=影響なしを確認。
 - 後処理: 堆積していた古い marker を一括クリア(HIGH 48件→0 / LOW 18件→0、verify 残0)。
+
+## 2026-07-21 — 両系統 稼働健全性の実機確認 (コード変更なし・検証セッション)
+
+### 公式監視くん 07-15 03:00 scrape error 1件 の triage → transient 確定・対応不要
+
+- 決定: montbell scrape error 1件(listing 358275199203 / product_id=1103322 ウインドブラスト パーカ Men's)
+  は **DNS 瞬断(getaddrinfo failed / NameResolutionError)** = レポート手順の「transient → 次cycle auto retry」型。
+  持続でない(07-11〜14 は 0件、07-15 のみ)ため手動chk基準(×3)に非該当。対応不要と確定。
+- 変更: <コード変更なし>。
+- 検証: (1)`socket.gethostbyname('webshop.montbell.jp')` で DNS 復旧確認(180.147.235.227)。(2)montbell_scraper で
+  再scrape 成功=在庫状況不明を解消(源: 在庫あり31/なし25、STORE_STOCK=直営店在庫は in_stock=True 扱いが正)。
+  (3)eBay GetItem(**raw_xml_cap=None**)で当該 variation listing を突合 → **fail-OPEN 0件 / restore漏れ 0件**(源と完全同期、Active/live 23-42)。
+- ★私自身の反省: 初回 GetItem を default `raw_xml_cap=2000` で呼び XML が Description で打ち切られ Variation を取りこぼし
+  「restore漏れ31件」と誤報。cap=None で再取得し訂正。手動検証でも cap=None 必須 (memory soldout_single_verify_cap_fixed と同型トラップ)。
+
+### 直近5件ログ 両系統確認 → 全正常
+
+- 決定: メルカリ系「監視くん」cycle と 公式監視くん、両方の直近5件を確認。両系統とも稼働健全と確定。
+- 変更: <コード変更なし>。
+- 検証: メルカリ cycle(07-20〜21): 全て success・cand=allowed(HOLD なし)・upload=True、pending=2/action_required=0。
+  公式監視くん(07-19 19:00〜07-21 03:00): 全て scrape error 0・108 listing 全件成功・全step OK。
+
+### reverse_audit 07-20 10:00 AUDIT_ERROR → transient・今日の再突合で埋め済み
+
+- 決定: 07-20 の daily reverse_audit が `sheet_read_failed: HIGH ConnectionError` で fail-closed 中断(継続証跡が1回欠測)。
+  transient な通信断でコード/eBayバグではない。今日 read-only 再突合で gap を埋め、隠れ fail-OPEN 無しを確定。
+- 変更: <コード変更なし>(fail-closed 中断は設計通りの正しい挙動、3経路alert 発報済み)。
+- 検証: 07-16〜19 は OK_ACK_ONLY/unack=0 連続。07-21 07:2x に run_reverse_audit(write_log=False) 実行 →
+  **mismatch=1(既知 ack品 358645217419 のみ)/新規 unack=0**。
+
+### 常連 ack品 358645217419(PSA10トゲキッス V, HIGH row728) 再確認 → 正当な意図的例外
+
+- 決定: 毎日出る唯一の乖離は reverse_audit_acknowledged.json 登録済の **user 手動確保 PSA10 鑑定品(1点物)**。
+  源mercari売切(D=○)だが物理在庫保有で eBay 意図的出品継続(qty=1)、url空で D=○ が恒久stale。取下げ漏れでなく履行可能。対応不要。
+- 変更: <コード変更なし>。
+- 検証: ack エントリの reason/acknowledged_at(2026-06-27, user確認2026-06-25)を確認。eBay qty=1/Active、fail-OPENでない。
+  ★条件付き: user がこの現物を手放した/eBayで売れた場合は ack 削除+取下げ要(ack コメントにも明記)。
+
+### セッション結論
+- **在庫切れ販売 fail-OPEN = 0(実機確認済)**。deadlock 根本修正(commit 18fac83)は6日間安定。両監視系統 稼働健全。要対応なし。
