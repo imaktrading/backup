@@ -68,6 +68,13 @@ JP_TYPE_TO_EN = {
     "フェアリー": "Fairy", "ドラゴン": "Dragon", "無色": "Colorless",
 }
 
+# rarity 画像が `ic_rare_*.gif` 命名でない系統 (公式の少数例外) → JP rarity コード
+#   ic_hikaru.gif = ひかるポケモン (SM3+「ひかる伝説」等)。公式はマーク画像のみで
+#   文字コードを持たないため、小売表記 [H] (遊々亭/カーナベル) を JP コードとして採用。
+_RARITY_IMG_ALT = {
+    "hikaru": "H",
+}
+
 
 # ============================================================================
 # HTTP
@@ -269,6 +276,13 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
         # アンダースコアあり → 先頭部分を rarity とする
         rarity_part = raw.split("_")[0].upper()
         out["rarity"] = rarity_part
+    else:
+        # ic_rare_* 以外の rarity 画像 (公式が別命名にしている少数系統)
+        #   ic_hikaru.gif = ひかるポケモン (SM3+ ひかる伝説 等) → JP 表記 'H'
+        #     (遊々亭/カーナベル [H] / 駿河屋 [☆]。eBay facet = 'Shiny Holo Rare')
+        m_alt = re.search(r'rarity/ic_(\w+)\.gif', html_decoded)
+        if m_alt and m_alt.group(1).lower() in _RARITY_IMG_ALT:
+            out["rarity"] = _RARITY_IMG_ALT[m_alt.group(1).lower()]
 
     # Plain-text body for free-form fields
     text_only = re.sub(r"<script[^>]*>.*?</script>", "", html_decoded, flags=re.DOTALL | re.IGNORECASE)

@@ -320,6 +320,12 @@ set_code:
 # Rarity (Pokemon 公式画像ファイル名から抽出した short code)
 # ============================================================================
 rarity:
+  - source: H
+    ebay: Shiny Holo Rare
+    note: >-
+      ひかるポケモン (SM3+ ひかる伝説 等)。公式は rarity 画像 ic_hikaru.gif のみで文字コードを持たず、
+      小売表記 [H] を JP コードとして採用 (2026-07-20)。eBay facet は 'Shiny Holo Rare'
+      (× 'Shining Holo Rare')。
   - source: C
     ebay: C
     note: Common
