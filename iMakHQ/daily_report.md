@@ -1319,3 +1319,60 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - P-013/P-006 promo衝突: cert(#148328055/#150414013/#145541765)の PSA画像 → 真KEY同定 → 必要なら premium variant整備
 - Super Divers 40th: catalog に Super Divers ライン収録するか = scope/business 判断
 - FA secret(BLUE SHOCK#061/NIGHT UNISON#067/MIRACLE TWINS#112): secret対応 fetch は別フェーズ(現状 fail-closed skip で整合)
+
+---
+
+## 2026-07-02〜07-20 — Catalog: 停滞catalog_add一括解消 / name_en中黒是正 / DBSCG alt-art回収 / Classic rarity訂正
+
+### 決定事項
+- 決定1(promo rarity=Promo 方針・Gemini裏取り): Pokemon promo専用セット(product_id が厳密 `-P` stem)の rarity 空は
+  eBay公式facet値 **'Promo'** で一括backfill可と確定。「-P/-G = promo配布」は product_id から導かれる確定事実で推測でない
+  (Gemini: TOPセラーのデファクト、facet設計上も整合、絶対原則に非違反)。第1弾1,012件 + 第2弾155件(M-P/MMB-P/S8a-P)。
+  **例外**: Premium Champion Pack(CP4)等 reprint 系は束ねNG。
+- 決定2(CP4/Classic は rarity 記号を持たない=空欄が正): CP4 は全リバースミラーホロで printed rarity 無し(HQ が日本一次ソース
+  カーナベル【-】で確定)。**同型で Classic(CLK/CLF)も printed rarity 無し**と判明 → 2026-07-18 に CLK-008 へ入れた
+  `'Rare Holo'` は**誤りのため空へ訂正**。Serebii の "Promo" 表示は no-symbol のプレースホルダで ingest しない。
+- 決定3(Gundam Resource は rarity 概念なし): 公式(gundam-gcg.com)に rarity 欄が存在しない → RP-### の C:Rarity 空は正。
+  HQ に「card_type=RESOURCE は C:Rarity 必須から除外」を回答。set は `限定商品収録カード → Promo Cards` を filter_map 登録。
+- 決定4(DBSCG canonical=_PARA、alias化は依然保留): `_PARA`(bandai)/`_p1`(dbfw)重複216組は **216/216 で _PARA=rarity有 /
+  _p1=rarity無** を実測 → canonical は _PARA(HQ の「_p1が正」案は C:Rarity 空を招くため不採用。2026-06-21 決定と一致)。
+  **一括alias化は root① A-2(resolver alias追従)未完 + live≠0 で KEY orphan 化=BAN直結のため着手せず**(alias_of は gshock 243件のみ実測)。
+  代わりに **read-side のみ**の回避策(下記変更)で誤除外を回収。
+- 決定5(cardID-* fallback key backlog): 実在するのに `cardID-{数字}` で resolver が引けないカードが **1,559件**。
+  sibling 導出 dry-run で mismap 実測(THE BEST OF XY→XY衝突 / 裂空のカリスマ3枚が同一キーに潰れる)→ **一括re-keyは禁止**、
+  cert 到来時の on-demand re-key を採用(Yveltal #034 → XY11-034 のみ実施)。
+- 決定6(スコープ外の確定): ITAJAGA DRAGON BALL(VOL.7/8)= カルビー系スナック封入 promo で Fusion World SCG ではない
+  → dragonball_scg は誤カテゴリ、収録しない。PRB01 の set-level entry は card-level identity 抽出不能(set はフル収録1,673件)。
+
+### 変更
+- **resolver set mapping 追加**(いずれも catalog に record 実在の "偽missing" を解消): SOULSILVER→L1-Bss / HEARTGOLD→L1-Bhg /
+  POKEKYUN→CP3 / DREAM SHINE→CP5 / SUPER-BURST IMPACT→SM8 / EX BATTLE BOOST→EBB / FAMILY POKEMON CARD GAME→SH /
+  BLACK DECK KIT→BDK / BLASTOISE & SUICUNE→CLK / VENUSAUR & LUGIA→CLF / PLASMA GALE→BW7-B
+- **resolver 挙動修正**: ASIA誤ラベルの25th Golden Box→S8a-G(cert142931332) / OP `Nth ANNIVERSARY SET` edition照合(cert84400496)
+  / OP `GIRLS EDITION` edition照合 / Gundam `PREMIUM GOODS`→ST02+_PB01 variant優先 / card# 分母除去(005/015→005)
+- **DBSCG alt-art 回収(HQ依頼)**: `lookup_dragonball` で _PARA/_p1 重複時 **rarity保持側(_PARA)優先** + `★`付き rarity を
+  base コードへ正規化 + `Features='Alternative Art'`(L★→SCR/P・PR★→Promo/他は base)。**alias_of・KEY 非接触**。
+- **catalog 追加**: SM12-112 / SM12a-214 / SM9a-067 / SM11-112(secret rare HR、公式resultAPI非掲載)/ EBB-045 / CP4-075 /
+  CLK-008 / CLF-002 / CLF-015 / BDK-005・006 / XY8-Bb-061 / ST07-008_GE / ST02-010_PB01 / GA-V01CMG-3AJF・4AJF(G-SHOCK)
+- **データ是正**: name_en 中黒(・)→ドット誤romanize **814件**(+ character_name 753件)、name_jp=NULL の取りこぼし **109件**
+  (遊戯王 T.G./P.U.N.K./D.D. 等の正当省略名は保護)。Pokemon promo rarity **1,167件**。Gundam RP set_name_ebay **53件**。
+  SH set set_name_ebay 53件 + V-rarity 6件。XY11-034 re-key。CLK-008 rarity 訂正。
+- commit: 3957f6a〜85818a8(15commit、**全 push 済**)。共有DB は毎回 backup 取得。
+
+### 検証(実出力)
+- 検証✅ 全 231 pass(pre-commit)/ 回帰テスト新規追加: `test_batch_resolve_20260710`(21ケース)、`test_dbscg_para_rarity_recovery`(4ケース)
+- 検証✅ name_en: `P-074→Portgas D. Ace` / `PRB02-005→Monkey D. Luffy`、`Monkey.D%`/`Portgas.D%` 残**0**、遊戯王 `D.D.*` **135件無傷**
+- 検証✅ promo rarity: 厳密 `-P` stem の rarity 空 残**0**(M-P-020/S8a-G-005/S-P-126 等 'Promo')
+- 検証✅ Gundam RP: 全53枚 C:Set='Promo Cards' 統一、公式に rarity 欄なしを確認
+- 検証✅ DBSCG: cert158452539 FB01-071 / cert158452538 FB04-051 → **_PARA解決** + C:Rarity='SCR'(非空) + Features=['Alternative Art']、
+  base(★無)不変。SR★→SR / C★→C / SCR★→SCR も実測
+- 検証✅ rarity='?' 仮説の**否定**: catalog 全走査で `rarity='?'` は**0件**(verbose の '?' は None のデフォルト表示)→ bulk backfill 対象ゼロ
+- 検証✅ 前回 daily_report で「未収録・別フェーズ」としていた **FA secret(NIGHT UNISON#067 / MIRACLE TWINS#112)を本期間で追加完了**
+
+### 情報待ち/判断待ち(HQ)
+- **m*/PSA10-* の card identity**: Mercari SKU は catalog 側から card 解決不能。ledger.jsonl も監査run要約のみで subject を持たない
+  → set_code+番号 or subject の提供で即切り分け可(recurring な C:Rarity/C:Set 空の残件)
+- **PRB01 cert の card-level raw**(set はフル収録済、cert の subject/番号が抽出できていない)
+- **cardID-* backlog(1,559件)の方針**: on-demand re-key 継続 / BREAK・LEGEND系~25件の限定バッチ実施可否
+- **DBSCG 216組 alias 化**: root① A-2(alias追従の全franchise共通化)完了 + Dedupe 4証跡が前提。順序厳守で未着手
+- **DBSCG rarity facet の表記**: 現行 SSOT は短縮コード(SR/SCR/C…)。eBay 実facetが full name なら★に限らず全dbscg一括の別正規化が必要
