@@ -94,9 +94,38 @@ def test_clk_classic_blastoise_suicune_lapras_added():
                "008", "LAPRAS") == "CLK-008"
 
 
+def test_classic_decks_have_no_printed_rarity():
+    # 2026-07-20 訂正: ポケカ Classic (CLK/CLF) は printed rarity 記号を持たない(retailer【-】)。
+    #   CLK-008 に一度入れた 'Rare Holo' は誤りだったので空へ訂正。CP4 と同型の扱い。
+    for brand, num, subj in (
+        ("POKEMON JAPANESE CLK-TRADING CARD GAME CLASSIC BLASTOISE & SUICUNE EX DECK", "008", "LAPRAS"),
+        ("POKEMON JAPANESE CLF-TRADING CARD GAME CLASSIC VENUSAUR & LUGIA EX DECK", "002", "IVYSAUR"),
+    ):
+        r = P.lookup_pokemon(brand, num, subj, verbose=False)
+        assert r is not None
+        assert not r.get("rarity"), f"{r['card_id']} は Classic なので rarity 空が正"
+
+
+def test_clf_venusaur_lugia_deck_added():
+    # 2026-07-20: ポケカ クラシック フシギバナ&ルギアexデッキ (CLF, JP /032) #002/#015 追加
+    assert _pk("POKEMON JAPANESE CLF-TRADING CARD GAME CLASSIC VENUSAUR & LUGIA EX DECK",
+               "002", "IVYSAUR") == "CLF-002"
+    assert _pk("POKEMON JAPANESE CLF-TRADING CARD GAME CLASSIC VENUSAUR & LUGIA EX DECK",
+               "015", "CHANSEY") == "CLF-015"
+
+
 def test_plasma_gale_maps_bw7b():
     # 2026-07-19: BLACK & WHITE PLASMA GALE #035 = 既存 BW7-B-035 (ギラティナ)
     assert _pk("POKEMON JAPANESE BLACK & WHITE PLASMA GALE", "035", "GIRATINA") == "BW7-B-035"
+
+
+def test_cp4_075_m_lucario_ex_added():
+    # 2026-07-20: CP4 Premium Champion Pack #075 メガルカリオEX 追加。
+    #   CP4 は printed rarity 無し(全リバースミラーホロ)= C:Rarity 空が正 (HQ 2026-07-02 確定)。
+    r = P.lookup_pokemon("POKEMON JAPANESE PREMIUM CHAMPION PACK", "075", "M LUCARIO EX", verbose=False)
+    assert r is not None and r["card_id"] == "CP4-075"
+    assert r.get("set_name_ebay") == "Premium Champion Pack"
+    assert not r.get("rarity")  # CP4 は rarity 記号を持たない
 
 
 def test_sm12_112_hyper_rare_added():

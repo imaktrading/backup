@@ -1403,6 +1403,7 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "BLACK DECK KIT":        "BDK",     # 2004 PCG ロケット団ハーフデッキ-black- (公式code無→synthetic BDK)
     "BLASTOISE & SUICUNE":   "CLK",     # ポケカ クラシック カメックス&スイクンexデッキ (CLK-008=ラプラス実在). 他Classicデッキ(Charizard/Venusaur)と衝突しないdeck名で限定
     "PLASMA GALE":           "BW7-B",   # プラズマゲイル (BW7-B-035=ギラティナ 実在)
+    "VENUSAUR & LUGIA":      "CLF",     # ポケカ クラシック フシギバナ&ルギアexデッキ (CLF-002=フシギソウ). JP は /032 (英語版 CLV /034 と別採番)
     "GG END":            "SM10a",  # ジージーエンド
     "DETECTIVE PIKACHU": "SMP2",   # 名探偵ピカチュウ (スペシャルパック)
     "ULTRA MOON":        "SM5M",   # ウルトラムーン
