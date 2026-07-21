@@ -7,11 +7,41 @@ import os
 import re
 import json
 import time
+import sys as _sys_early
+# stdout/stderr を utf-8 に(cp932 コンソールで ✅ 等の絵文字 print が UnicodeEncodeError →
+# 成功なのに returncode=1 になり「中間CSVが古い」と誤判定する事故を防ぐ。2026-07-21)。
+for _s in (_sys_early.stdout, _sys_early.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import anthropic
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
+
+
+def _detect_chrome_major():
+    """インストール済 Chrome のメジャー版を取得(失敗時 None = uc 自動検出に委ねる)。
+
+    uc.Chrome の自動検出が driver 版を取り違える事故(2026-07-21 Chrome150 vs driver151)を防ぐため
+    レジストリ BLBeacon から実機版を読む。CLAUDE.md「version_main ハードコード禁止・レジストリ検出」準拠。
+    """
+    try:
+        import winreg
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                k = winreg.OpenKey(hive, r"Software\Google\Chrome\BLBeacon")
+                v, _ = winreg.QueryValueEx(k, "version")
+                winreg.CloseKey(k)
+                return int(str(v).split(".")[0])
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return None
+
 
 # ===== 設定 =====
 # API key.txt から読み込む（スクリプトと同じフォルダ、絶対パス参照）
@@ -1190,7 +1220,11 @@ def main():
             return
         options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
-        driver = uc.Chrome(options=options)
+        # Chrome 実機のメジャー版を検出して渡す(uc 自動検出が driver 版を取り違える事故防止:
+        # 2026-07-21 Chrome150 に uc が 151 driver を掴んで SessionNotCreated。
+        # CLAUDE.md「version_main 数値ハードコード禁止・レジストリ検出」準拠)。
+        maj = _detect_chrome_major()
+        driver = uc.Chrome(options=options, version_main=maj) if maj else uc.Chrome(options=options)
         try:
             phase1_extract_intermediate(driver, urls)
         finally:
