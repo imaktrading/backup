@@ -43,6 +43,18 @@ def _detect_chrome_major():
     return None
 
 
+def _height_num(v):
+    """高さ文字列から**先頭の数値だけ**を取り出す(純関数)。
+
+    Claude が item_height_in に整形済み文字列(例 '8.5 in (21.5 cm)')を返すことがあり、
+    それをさらに ` in ({cm} cm)` で包むと 'X in (Y cm) in (Y cm)' と二重化する事故を防ぐ
+    (2026-07-21 rarara 検出。inch 値は 'X in (Y cm)' の先頭に来るので先頭数値=inch で正しい)。
+    """
+    import re as _re
+    m = _re.search(r"\d+(?:\.\d+)?", str(v or ""))
+    return m.group(0) if m else ""
+
+
 # ===== 設定 =====
 # API key.txt から読み込む（スクリプトと同じフォルダ、絶対パス参照）
 # import 時に fail させない (CWD 依存 / test 環境耐性).
@@ -578,7 +590,8 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
     character = claude_result.get('character', '')
     figure_type = claude_result.get('figure_type', 'Figure')
     year = claude_result.get('year', series_data.get('release_year', ''))
-    height_in = claude_result.get('item_height_in', '')
+    # Claude が 'X in (Y cm)' 等の整形済み文字列を返すことがあるので数値だけ抽出(二重化防止)。
+    height_in = _height_num(claude_result.get('item_height_in', ''))
     # フォールバック：Claudeが返せない場合はsize_cmから計算
     if not height_in and prize_data.get('size_cm'):
         try:
@@ -641,7 +654,7 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
     print(f"    → C:Series: {SERIES_EBAY}(固定) / 作品名は説明文Specsへ: {series_name_en}")
 
     # Description生成
-    height_cm = claude_result.get('item_height_cm', prize_data.get('size_cm', ''))
+    height_cm = _height_num(claude_result.get('item_height_cm', prize_data.get('size_cm', '')))
     desc_data = {
         'series_name_en': series_name_en,
         'prize_en': prize_en,
