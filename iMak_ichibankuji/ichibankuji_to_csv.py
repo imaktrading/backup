@@ -1061,7 +1061,9 @@ def _process_sheet_to_ebay_csv():
         try:
             options = uc.ChromeOptions()
             options.add_argument("--no-sandbox")
-            driver = uc.Chrome(options=options)
+            # Phase1 と同じく実機 Chrome major を渡す(uc 自動検出の版取り違え防止。2026-07-21)。
+            _maj = _detect_chrome_major()
+            driver = uc.Chrome(options=options, version_main=_maj) if _maj else uc.Chrome(options=options)
             try:
                 for url, ts in by_url.items():
                     sd = scrape_1kuji(driver, url)
