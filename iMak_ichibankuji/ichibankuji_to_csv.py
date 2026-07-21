@@ -43,6 +43,24 @@ def _detect_chrome_major():
     return None
 
 
+def _extract_first_json(text):
+    """Claude 応答から**最初の JSON オブジェクトだけ**を取り出す(純関数)。
+
+    Claude が JSON の後に説明文を付けて返すと json.loads が 'Extra data: line N' で落ち、
+    その景品が丸ごと脱落していた(2026-07-21 Baki 宮本武蔵/愚地克巳が間欠再発で脱落)。
+    先頭の ```json フェンス除去 + 最初の '{' から raw_decode(末尾の余分は無視)で堅牢化。
+    """
+    import json as _json
+    t = str(text or "").strip()
+    t = re.sub(r"^```json\s*", "", t)
+    t = re.sub(r"\s*```$", "", t)
+    i = t.find("{")
+    if i < 0:
+        raise ValueError("応答に JSON オブジェクト({...})が無い")
+    obj, _ = _json.JSONDecoder().raw_decode(t[i:])
+    return obj
+
+
 def _height_num(v):
     """高さ文字列から**先頭の数値だけ**を取り出す(純関数)。
 
@@ -472,10 +490,7 @@ Return ONLY valid JSON:
                 max_tokens=800,
                 messages=messages,
             )
-            text = message.content[0].text.strip()
-            text = re.sub(r'^```json\s*', '', text)
-            text = re.sub(r'\s*```$', '', text)
-            result = json.loads(text)
+            result = _extract_first_json(message.content[0].text)
         except Exception as e:
             print(f"    Claude APIエラー (attempt {attempt+1}): {e}")
             return last_result
