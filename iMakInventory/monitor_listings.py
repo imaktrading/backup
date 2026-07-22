@@ -52,6 +52,9 @@ from sheet_updater import (  # noqa: E402
     HIGH_SHEET_ID,
     LOW_SHEET_ID,
     LISTINGS_GID,
+    LISTINGS_COL_PRICE_NOW_M,
+    LISTINGS_COL_PRICE_NOW,
+    _col_letter,
     open_sheet_by_id,
     get_listings_worksheet,
     read_listings_rows,
@@ -917,8 +920,16 @@ def process_sheet(
         e_count = sum(1 for u in updates if "err_flag" in u)
         log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + N 列価格 {n_count} 件 + O 列 {o_count} 件 + AK巡回ERR {e_count} 件)")
         try:
-            res = update_listings_sold_marks(ws, updates)
-            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / m_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
+            # ★ 2026-07-22 per-sheet ゲート (HQ high_sheet_scope_confirm + points_write_hold_notice):
+            #   移行済シート(LOW)のみ現在価格を M(13) に書く。未移行(HIGH 等)は col13='価格上昇有無'
+            #   なので破損回避のため従来どおり N(14) に書く (HQ が HIGH を準備するまで現状維持)。
+            #   K(ポイント)書込は Harvest 抽出欠陥調査中のため全 sheet 停止 (enable_points=False)。
+            migrated = (sheet_id == LOW_SHEET_ID)
+            price_col = LISTINGS_COL_PRICE_NOW_M if migrated else LISTINGS_COL_PRICE_NOW
+            res = update_listings_sold_marks(
+                ws, updates, price_col_idx=price_col, enable_points=False)
+            _price_letter = _col_letter(price_col)
+            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')}[hold] / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
         except Exception as e:
             log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())

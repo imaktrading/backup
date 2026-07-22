@@ -212,10 +212,17 @@ def read_listings_rows(
     return rows
 
 
-def update_listings_sold_marks(ws, updates: list) -> dict:
-    """商品管理シートの D 列 (売り切れ) / O 列 (チェック時間) / M 列 (現在価格) / K 列 (ポイント) を batch 更新.
+def update_listings_sold_marks(ws, updates: list,
+                               price_col_idx: int = LISTINGS_COL_PRICE_NOW_M,
+                               enable_points: bool = True) -> dict:
+    """商品管理シートの D 列 (売り切れ) / O 列 (チェック時間) / 現在価格列 / K 列 (ポイント) を batch 更新.
 
     ★ 2026-07-22 HQ 依頼で書き先を N→M へ変更 + K 追加 (N は関数化するため誰も書かない)。
+
+    price_col_idx: 現在価格の書込先列 (1-based)。移行済シート(LOW)=M(13)、未移行(HIGH)=N(14)。
+                   caller が sheet 毎に指定する (HIGH は HQ 準備前のため従来の N 書込を維持する)。
+    enable_points: K(ポイント) 書込を有効化するか。★2026-07-22 HQ hold notice でポイント抽出の
+                   欠陥調査中につき運用上は False (K 汚染再発防止)。Harvest 修正確定後に True へ戻す。
 
     Args:
         ws:      gspread worksheet
@@ -295,7 +302,7 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
                 })
                 ah_writes += 1
             cell_updates.append({
-                "range": f"{_col_letter(LISTINGS_COL_PRICE_NOW_M)}{row_idx}",  # M
+                "range": f"{_col_letter(price_col_idx)}{row_idx}",  # 移行済=M(13) / 未移行=N(14)
                 "values": [[price_jpy]],
             })
             m_writes += 1
@@ -303,8 +310,10 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
             # K 列 (基本ポイント ¥): amazon 行のみ caller が points_jpy を載せる (表示なし→0)。
             # fetch 失敗行は price_jpy=None で上の gate に入らず、 ここも実行されない = K 不触。
             # 「同一フェッチで M と K を一貫更新」= 旧M−現pt の N過小を構造的に回避 (HQ 2026-07-22)。
+            # ★ enable_points=False (HQ hold notice 2026-07-22) の間は K を書かない (欠陥調査中)。
             points_jpy = u.get("points_jpy")
-            if isinstance(points_jpy, int) and not isinstance(points_jpy, bool) and points_jpy >= 0:
+            if (enable_points and isinstance(points_jpy, int)
+                    and not isinstance(points_jpy, bool) and points_jpy >= 0):
                 cell_updates.append({
                     "range": f"{_col_letter(LISTINGS_COL_POINTS)}{row_idx}",  # K
                     "values": [[points_jpy]],

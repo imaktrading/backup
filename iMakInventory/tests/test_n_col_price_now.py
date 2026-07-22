@@ -210,6 +210,40 @@ def test_points_jpy_without_price_not_written():
     assert "M8" not in ranges and "K8" not in ranges
 
 
+def test_enable_points_false_halts_k_write():
+    """★ enable_points=False (HQ hold notice 2026-07-22) なら points_jpy があっても K を書かない.
+    M(現在価格) は書く (= K だけ停止)."""
+    from sheet_updater import update_listings_sold_marks
+    ws = MagicMock()
+    ws.batch_update = MagicMock()
+
+    updates = [{"row_index": 8, "checked_at": "t", "o_only": True,
+                "price_jpy": 5000, "points_jpy": 1831}]
+    res = update_listings_sold_marks(ws, updates, enable_points=False)
+    assert res["m_writes"] == 1
+    assert res["k_writes"] == 0
+    ranges = [c["range"] for c in ws.batch_update.call_args[0][0]]
+    assert "M8" in ranges
+    assert "K8" not in ranges
+
+
+def test_price_col_idx_n_for_unmigrated_high_sheet():
+    """★ price_col_idx=14 (未移行 HIGH) なら現在価格を N(14) に書き、 M(13) は触らない.
+    (HIGH col13='価格上昇有無' への破損を回避、 HQ 準備前は従来 N 書込を維持)."""
+    from sheet_updater import update_listings_sold_marks, LISTINGS_COL_PRICE_NOW
+    ws = MagicMock()
+    ws.batch_update = MagicMock()
+
+    updates = [{"row_index": 5, "checked_at": "t", "o_only": True, "price_jpy": 3000}]
+    res = update_listings_sold_marks(ws, updates,
+                                     price_col_idx=LISTINGS_COL_PRICE_NOW,  # 14 = N
+                                     enable_points=False)
+    assert res["m_writes"] == 1  # 価格書込カウント (列は N)
+    ranges = {c["range"]: c["values"][0][0] for c in ws.batch_update.call_args[0][0]}
+    assert ranges.get("N5") == 3000
+    assert "M5" not in ranges
+
+
 def test_points_jpy_non_int_skips_k_column():
     """points_jpy が非 int なら K 列を触らない (型安全)."""
     from sheet_updater import update_listings_sold_marks
