@@ -66,34 +66,30 @@ class TestExtractPointsJpy:
 
 
 class TestPlanRow:
-    """backfill tool の行計画 (= N 過小を書かない fail-closed 検証)."""
+    """backfill tool の行計画 (formula_switch 2026-07-22 後: **K のみ書く**).
+
+    N はシート関数 =(MあればM、なければF)−K (= HQ 設置) のため書かない。
+    N セル書込は関数を壊す → plan は K 以外を含まないことが回帰条件。
+    """
 
     def _plan(self, *a, **k):
         from tools.backfill_amazon_points_low import plan_row
         return plan_row(*a, **k)
 
-    def test_points_basic(self):
-        # F一致・pt あり → K=pt, N=F−pt, F更新なし
+    def test_points_only_k(self):
         p = self._plan(14080, 14080, 1831)
-        assert p == {"f": None, "k": 1831, "n": 12249}
+        assert p == {"k": 1831}
 
-    def test_no_points_n_equals_f(self):
+    def test_no_points_k_empty(self):
         p = self._plan(14080, 14080, None)
-        assert p == {"f": None, "k": "", "n": 14080}
+        assert p == {"k": ""}
 
     def test_fetch_fail_skips(self):
         assert self._plan(14080, None, None) is None
 
-    def test_price_rose_n_not_understated(self):
-        # 価格上昇 10,000→12,000, pt1,200: 旧F−pt=8,800 は過小。 現在値一貫で N=10,800
-        p = self._plan(10000, 12000, 1200)
-        assert p == {"f": 12000, "k": 1200, "n": 10800}
-        assert p["n"] >= 10000 - 1200  # 過小でない
-
-    def test_price_fell_updates_consistently(self):
-        p = self._plan(10000, 8000, 800)
-        assert p == {"f": 8000, "k": 800, "n": 7200}
-
-    def test_sheet_f_missing(self):
-        p = self._plan(None, 9000, 900)
-        assert p == {"f": 9000, "k": 900, "n": 8100}
+    def test_never_writes_n_or_f(self):
+        # 価格乖離があっても K のみ (= N/F は書かない。 鮮度は監視くん M 担当)
+        for sheet_f, page, pts in ((10000, 12000, 1200), (10000, 8000, 800), (None, 9000, 900)):
+            p = self._plan(sheet_f, page, pts)
+            assert set(p.keys()) == {"k"}
+            assert p["k"] == pts

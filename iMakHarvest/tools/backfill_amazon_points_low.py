@@ -1,21 +1,22 @@
-"""backfill_amazon_points_low - LOW の Amazon 行に K=ポイント(円) / N=実質仕入値(F−K) を記入.
+"""backfill_amazon_points_low - LOW の Amazon 行に K=ポイント(円) を記入.
 
-HQ 依頼 2026-07-22 (Amazon ポイント込み実質仕入値)。 ユーザー確定仕様:
-  - K列(11) = ポイント(円)  ※ LOW K は未使用確認済 (HQ/Harvest/監視くん とも)。
-    ヘッダ「NO-GO判定」→「ポイント(円)」に改名 (apply 時)。
-  - N列(14) = F − K  (下流 pick_cost_jpy が N>F 優先で読む = 下流変更ゼロ)
-  - 対象 = A列 が amazon.co.jp の行のみ (メルカリ等は不触)。 D=○(売切) は既定 skip。
+HQ 依頼 2026-07-22 + **設計変更 (同日 formula_switch)**:
+  - 書き手はスプシに**観測値のみ**書く。 K列(11) = ポイント(円) を本 tool が記入。
+  - **N列は書かない** (= HQ が ARRAYFORMULA `=(MあればM、なければF)−K` を設置。
+    N セルへの値書込は関数を壊すため、 1 プロセスも残さないこと)。
+  - **F の追従更新もしない** (= F は capture 時価格として不変。 価格鮮度は監視くんの M が担う)。
+  - ※ 初回適用 (2026-07-22 run) のみ旧仕様で N=F−K / F現在化 を書いたが、 HQ の関数化で
+    置換されるため無害 (= formula_switch 依頼書 3 項で完走 OK 済)。
   - fail-closed:
-      * ページにポイント表記なし → K="" / N=F  (値引きを盛らない)
-      * fetch 失敗/captcha → 行を触らず skip (再実行で埋まる。 過小 N を書かない)
+      * ページにポイント表記なし → K=""  (値引きを盛らない)
+      * fetch 失敗/captcha → 行を触らず skip (再実行で埋まる)
       * ポイントは「確実に付く基本分」のみ (= extract_points_jpy が price×pct 整合で
         campaign 分を排除)
-  - 価格乖離対策: シート F と現ページ価格が違う行は F/K/N を **現在ページ値で一貫更新**
-    (旧F−現pt の混成は価格上昇時に N 過小 = 原価過小の危険があるため)。
+  - 対象 = A列 が amazon.co.jp の行のみ (メルカリ等は不触)。 D=○(売切) は既定 skip。
 
 使い方:
   python tools/backfill_amazon_points_low.py --dry-run --max-rows 5   # 検証
-  python tools/backfill_amazon_points_low.py                          # 本適用
+  python tools/backfill_amazon_points_low.py                          # 本適用 (K のみ)
 """
 from __future__ import annotations
 
@@ -41,7 +42,7 @@ COL_A_URL = 1
 COL_D_SOLD = 4
 COL_F_PRICE = 6
 COL_K_POINTS = 11
-COL_N_NET = 14
+# COL_N (14) は formula_switch (2026-07-22) 以降 書込禁止 (= HQ の ARRAYFORMULA が計算)
 K_HEADER = "ポイント(円)"
 
 
@@ -63,14 +64,12 @@ def _to_int(s: str):
 def plan_row(sheet_f, page_price, points):
     """1 行の書込計画 (= 純粋関数、 テスト対象).
 
-    Returns: {"f": int|None(変更なし), "k": int|"", "n": int} or None (= skip)
+    formula_switch (2026-07-22) 後: **K のみ書く** (N はシート関数、 F は不変)。
+    Returns: {"k": int|""} or None (= fetch 失敗系: 触らない fail-closed)
     """
     if page_price is None:
         return None  # fetch 失敗系: 触らない (fail-closed)
-    k = points if points else ""
-    n = page_price - points if points else page_price
-    f_update = page_price if (sheet_f is None or page_price != sheet_f) else None
-    return {"f": f_update, "k": k, "n": n}
+    return {"k": points if points else ""}
 
 
 def main(argv=None) -> int:
@@ -122,7 +121,7 @@ def main(argv=None) -> int:
 
     session = H.create_session()
     updates = []
-    stats = {"points": 0, "no_points": 0, "fetch_fail": 0, "f_refresh": 0}
+    stats = {"points": 0, "no_points": 0, "fetch_fail": 0}
     for idx, (ri, asin, sheet_f) in enumerate(targets, 1):
         text, captcha = H.fetch_detail_page(session, asin)
         if captcha:
@@ -142,22 +141,15 @@ def main(argv=None) -> int:
         else:
             tag = "pt" if points else "ptなし"
             stats["points" if points else "no_points"] += 1
-            f_note = ""
-            if plan["f"] is not None and sheet_f is not None:
-                stats["f_refresh"] += 1
-                f_note = f", F更新 {sheet_f}→{page_price}"
             k_disp = plan["k"] if plan["k"] != "" else "(空)"
-            _log(f"  [{idx}/{len(targets)}] row{ri} {asin}: F={page_price} K={k_disp} "
-                 f"N={plan['n']} ({tag}{f_note})")
-            if plan["f"] is not None:
-                updates.append({"range": f"F{ri}", "values": [[plan["f"]]]})
+            _log(f"  [{idx}/{len(targets)}] row{ri} {asin}: page価格={page_price} "
+                 f"K={k_disp} ({tag})  ※N/Fは書かない(関数化後)")
             updates.append({"range": f"K{ri}", "values": [[plan["k"]]]})
-            updates.append({"range": f"N{ri}", "values": [[plan["n"]]]})
         if idx < len(targets):
             time.sleep(random.uniform(args.rate_min, args.rate_max))
 
     _log(f"集計: pt取得={stats['points']} ptなし={stats['no_points']} "
-         f"fetch失敗={stats['fetch_fail']} F現在化={stats['f_refresh']} / 書込セル={len(updates)}")
+         f"fetch失敗={stats['fetch_fail']} / 書込セル(K)={len(updates)}")
 
     if args.dry_run:
         _log("dry-run: 書込なし")
