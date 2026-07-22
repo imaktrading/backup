@@ -1,5 +1,20 @@
 # iMakHarvest daily_report
 
+## 2026-07-23 — re-backfill 完走 (widget anchor 版、HQ go 案A)
+
+### 決定
+- HQ go (サンプル20 目視OK + 高率ポリシー=案A忠実採用、HIGH は別途) を受け全量再適用。
+
+### 検証 (シート実測 = 独立検証)
+- ✅ LOW 380行: pt取得331 / ptなし21 / fetch失敗28 (不触)。F=現在価格+K のみ書込 (704セル)。
+- ✅ **旧汚染シグネチャ (0.8%未満) = 0件** (defect時136 → 根絶)。
+- pt率分布: 1%帯51 / 2-10%帯9 / 10-13.5%帯166 / **>13.5%=105 (最大39.9%、widget実表示の
+  ポイントアップ、一覧を response に添付)**。
+- 依頼書 (defect / rebackfill_go) processed 化、完了報告を response に追記。
+- 残: fetch失敗28行は後日 tool 再実行で回収。HIGH 55行は HQ 準備完了の別 go 待ち。
+
+---
+
 ## 2026-07-22 (続) — ポイント抽出 defect 修正 (widget anchor 化)
 
 ### 決定
