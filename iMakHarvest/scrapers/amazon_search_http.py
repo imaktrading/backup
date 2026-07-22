@@ -301,6 +301,53 @@ def extract_title(html_text: str) -> str:
     return ""
 
 
+def extract_price_jpy(html_text: str) -> Optional[int]:
+    """detail HTML から buybox 価格 (円) を抽出。 取れなければ None."""
+    if not html_text:
+        return None
+    m = re.search(r'class="a-price-whole">([0-9,]+)', html_text)
+    if not m:
+        return None
+    try:
+        return int(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+# 「1,831ポイント (13%)」 形式 (= 基本獲得ポイント表記)
+_POINTS_RE = re.compile(r"([0-9,]+)\s*ポイント\s*\((\d{1,2})%\)")
+
+
+def extract_points_jpy(html_text: str, price_jpy: Optional[int] = None) -> Optional[int]:
+    """detail HTML から **基本ポイント (円)** を抽出 (fail-closed: 確信なければ None).
+
+    HQ 依頼 2026-07-22 (実質仕入値 N = F − ポイント)。 安全方針 = 「確実に付く分だけ」:
+      - ページには 基本ポイント の他に Amazon Mastercard 等の campaign ポイント表記も
+        混在する (例: 基本 1831pt(13%) と campaign 2165pt(14%))。
+      - **points ≈ price × pct% の内部整合チェック** (± price1% + 20円) で基本分のみ採用。
+        campaign 分は price×pct と一致しないため弾かれる (実ページ 3/3 で検証済)。
+      - 整合する候補の最初 (= 文書順で buybox 側) を返す。 なければ None。
+    price_jpy 省略時は HTML から抽出。 price 不明なら検証不能 → None (= fail-closed)。
+    """
+    if not html_text:
+        return None
+    price = price_jpy if price_jpy else extract_price_jpy(html_text)
+    if not price or price <= 0:
+        return None
+    tol = max(price * 0.01, 20.0)
+    for m in _POINTS_RE.finditer(html_text):
+        try:
+            pts = int(m.group(1).replace(",", ""))
+            pct = int(m.group(2))
+        except ValueError:
+            continue
+        if pts <= 0 or pts >= price:
+            continue
+        if abs(pts - price * pct / 100.0) <= tol:
+            return pts
+    return None
+
+
 def extract_monthly_sales_text(html_text: str) -> str:
     """detail HTML から「過去 1 ヶ月で N 点以上購入」 表記を生 verbatim 抽出 (= V 列用).
 
