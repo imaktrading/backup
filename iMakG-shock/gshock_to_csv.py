@@ -628,6 +628,21 @@ def _listed_gshock_models(all_values):
     return listed
 
 
+def _assert_n_formula_intact(ws):
+    """LOW N列(仕入値SSOT)が ARRAYFORMULA であることを確認。壊れていたら即 abort。
+
+    2026-07-22 設計: N =(M=現在価格 or F)− K=ポイント のシート関数(N1 の ARRAYFORMULA)。
+    どこかのプロセスが N セルに値を書くと関数が静かに壊れ、仕入値が陳腐化したまま
+    誤った価格で出品される(fail-OPEN)。検知したら出品を止めるのが正(出品の正確性 > 継続)。
+    """
+    formula = ws.acell("N1", value_render_option="FORMULA").value or ""
+    if not formula.startswith("=ARRAYFORMULA"):
+        raise RuntimeError(
+            f"LOW N列の仕入値関数が壊れています (N1={formula[:50]!r})。"
+            "N セルに値を書いたプロセスを特定し、N1 に ARRAYFORMULA を再設置してください"
+            " (HQ daily_report 2026-07-22 参照)")
+
+
 def _select_gshock_row(row, only_urls=None, listed_models=None):
     """1 スプシ行 → ((url, model, price_jpy_str), None) 採用 / (None, reason) 除外。
 
@@ -699,6 +714,7 @@ def load_targets_from_low_sheet(only_urls=None):
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(GSHOCK_SHEET_ID)
         ws = sh.get_worksheet_by_id(GSHOCK_GID)
+        _assert_n_formula_intact(ws)   # N列(仕入値SSOT)の関数破損検知 (2026-07-22)
         all_values = ws.get_all_values()
     except Exception as e:
         print(f"⚠️ スプシ取込失敗: {type(e).__name__}: {e} → URL ファイル fallback")
