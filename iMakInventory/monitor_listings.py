@@ -920,16 +920,19 @@ def process_sheet(
         e_count = sum(1 for u in updates if "err_flag" in u)
         log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + N 列価格 {n_count} 件 + O 列 {o_count} 件 + AK巡回ERR {e_count} 件)")
         try:
-            # ★ 2026-07-22 per-sheet ゲート (HQ high_sheet_scope_confirm + points_write_hold_notice):
-            #   移行済シート(LOW)のみ現在価格を M(13) に書く。未移行(HIGH 等)は col13='価格上昇有無'
-            #   なので破損回避のため従来どおり N(14) に書く (HQ が HIGH を準備するまで現状維持)。
-            #   K(ポイント)書込は Harvest 抽出欠陥調査中のため全 sheet 停止 (enable_points=False)。
-            migrated = (sheet_id == LOW_SHEET_ID)
+            # ★ per-sheet ゲート (HQ 一連の依頼):
+            #   移行済シートは現在価格を M(13)、未移行は従来 N(14) に書く (col13 破損回避)。
+            #   2026-07-22: LOW 移行 → 2026-07-22: HIGH も col13='現在価格(円)'/〇0件 準備完了で移行
+            #   (high_migration_go、実機再確認済 col11='ポイント(円)'/col13='現在価格(円)')。
+            #   K(ポイント): 2026-07-23 抽出 defect 修正 (3a58a60 同期) 完了 → 再開 (enable_points=True、
+            #   points_write_resume_go)。両シート対象、表示なし=0/fetch失敗=不触/Amazon行のみ。
+            MIGRATED_SHEET_IDS = {LOW_SHEET_ID, HIGH_SHEET_ID}
+            migrated = (sheet_id in MIGRATED_SHEET_IDS)
             price_col = LISTINGS_COL_PRICE_NOW_M if migrated else LISTINGS_COL_PRICE_NOW
             res = update_listings_sold_marks(
-                ws, updates, price_col_idx=price_col, enable_points=False)
+                ws, updates, price_col_idx=price_col, enable_points=True)
             _price_letter = _col_letter(price_col)
-            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')}[hold] / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
+            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
         except Exception as e:
             log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())
