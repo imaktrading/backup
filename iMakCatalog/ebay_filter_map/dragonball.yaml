@@ -163,8 +163,11 @@ set_code:
 # ============================================================================
 rarity:
   - source: L
-    ebay: ""
-    note: Leader = card type, not rarity → eBay 空欄
+    ebay: Leader
+    note: >-
+      HQ 裁定 2026-07-21: eBay Rarity facet(cat 183454)は FREE_TEXT で正規57値に Leader 相当が
+      無い → 'Leader' 出力を正とする(空にすると fail-closed skip で Leader カードが誤除外)。
+      旧決定 L→"" は是正。詳細 requests/2026-07-21_dbscg_leader_rarity_keep_response.md
   - source: C
     ebay: C
   - source: UC
