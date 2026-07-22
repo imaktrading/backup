@@ -314,38 +314,59 @@ def extract_price_jpy(html_text: str) -> Optional[int]:
         return None
 
 
-# 「1,831ポイント (13%)」 形式 (= 基本獲得ポイント表記)
-_POINTS_RE = re.compile(r"([0-9,]+)\s*ポイント\s*\((\d{1,2})%\)")
+# ポイント widget anchor (= この商品自身の獲得ポイント表示。 buybox 内は ASIN 属性付き)。
+# ★ 2026-07-22 defect の教訓: 全ページ走査は カルーセル/「よく一緒に購入」 の **別商品の
+#   ポイント** や campaign 込み値を拾う (48件が pt率24%等 / 136件が別商品の小額pt)。
+#   buybox の本物は `ポイント: 1831pt (13%)` と **"pt" 表記** で、 旧 regex (ポイント表記
+#   前提) は buybox に一度もマッチしていなかった。 → widget 限定抽出に全面変更。
+_POINTS_WIDGET_MARKERS = (
+    'data-feature-name="pointsInsideBuyBox"',  # buybox 内 (data-csa-c-asin 属性あり)
+    'data-feature-name="points"',              # 商品情報欄の ポイント: 行
+)
+_POINTS_WIDGET_SEG_LEN = 2500
+# tag 除去後の widget 内表記: 「ポイント: 1,831pt (13%)」
+_BUYBOX_POINTS_RE = re.compile(r"ポイント:\s*([0-9,]+)\s*pt\s*\((\d{1,3})%\)")
 
 
 def extract_points_jpy(html_text: str, price_jpy: Optional[int] = None) -> Optional[int]:
-    """detail HTML から **基本ポイント (円)** を抽出 (fail-closed: 確信なければ None).
+    """detail HTML から **この商品の獲得ポイント (円)** を抽出 (fail-closed: 確信なければ None).
 
-    HQ 依頼 2026-07-22 (実質仕入値 N = F − ポイント)。 安全方針 = 「確実に付く分だけ」:
-      - ページには 基本ポイント の他に Amazon Mastercard 等の campaign ポイント表記も
-        混在する (例: 基本 1831pt(13%) と campaign 2165pt(14%))。
-      - **points ≈ price × pct% の内部整合チェック** (± price1% + 20円) で基本分のみ採用。
-        campaign 分は price×pct と一致しないため弾かれる (実ページ 3/3 で検証済)。
-      - 整合する候補の最初 (= 文書順で buybox 側) を返す。 なければ None。
-    price_jpy 省略時は HTML から抽出。 price 不明なら検証不能 → None (= fail-closed)。
+    HQ 依頼 2026-07-22 + defect 修正 (同日):
+      - **points widget (`data-feature-name=\"pointsInsideBuyBox\"` / `\"points\"`) 内のみ**を
+        見る。 widget が無い = ポイントなし → None。 全ページ走査はしない
+        (= カルーセル/よく一緒に購入 の別商品 pt を拾った 2026-07-22 defect の再発防止)。
+      - widget 断片の tag を除去し 「ポイント: N,NNNpt (X%)」 を抽出。
+      - **整合チェック**: |pts − price×pct%| ≤ max(price×0.5%, 10円) かつ 0 < pts < price。
+        不整合 (= parse 事故) は None (= 値引きを盛らない)。
+    price_jpy 省略時は HTML から抽出。 price 不明なら検証不能 → None。
     """
     if not html_text:
         return None
     price = price_jpy if price_jpy else extract_price_jpy(html_text)
     if not price or price <= 0:
         return None
-    tol = max(price * 0.01, 20.0)
-    for m in _POINTS_RE.finditer(html_text):
+    for marker in _POINTS_WIDGET_MARKERS:
+        p = html_text.find(marker)
+        if p < 0:
+            continue
+        seg = html_text[p:p + _POINTS_WIDGET_SEG_LEN]
+        clean = re.sub(r"<[^>]+>", " ", seg)
+        clean = clean.replace("&nbsp;", " ").replace(" ", " ")
+        clean = re.sub(r"\s+", " ", clean)
+        m = _BUYBOX_POINTS_RE.search(clean)
+        if not m:
+            continue  # この widget に値なし → 次の marker
         try:
             pts = int(m.group(1).replace(",", ""))
             pct = int(m.group(2))
         except ValueError:
-            continue
+            return None
         if pts <= 0 or pts >= price:
-            continue
-        if abs(pts - price * pct / 100.0) <= tol:
+            return None
+        if abs(pts - price * pct / 100.0) <= max(price * 0.005, 10.0):
             return pts
-    return None
+        return None  # widget はあるが price と不整合 = 変則 layout → fail-closed
+    return None  # points widget なし = ポイントなし
 
 
 def extract_monthly_sales_text(html_text: str) -> str:

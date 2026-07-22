@@ -64,12 +64,14 @@ def _to_int(s: str):
 def plan_row(sheet_f, page_price, points):
     """1 行の書込計画 (= 純粋関数、 テスト対象).
 
-    formula_switch (2026-07-22) 後: **K のみ書く** (N はシート関数、 F は不変)。
-    Returns: {"k": int|""} or None (= fetch 失敗系: 触らない fail-closed)
+    defect 依頼 (2026-07-22 19:48) 指示3: 検証分母 = 現在ページ価格。 その場合
+    **F も現在価格へ同時更新して混成 (旧F × 現pt) を防ぐ** (= backfill 一回限りの話)。
+    N は書かない (= シート関数 =(MあればM、なければF)−K が計算)。
+    Returns: {"f": int, "k": int|""} or None (= fetch 失敗系: 触らない fail-closed)
     """
     if page_price is None:
         return None  # fetch 失敗系: 触らない (fail-closed)
-    return {"k": points if points else ""}
+    return {"f": page_price, "k": points if points else ""}
 
 
 def main(argv=None) -> int:
@@ -142,8 +144,10 @@ def main(argv=None) -> int:
             tag = "pt" if points else "ptなし"
             stats["points" if points else "no_points"] += 1
             k_disp = plan["k"] if plan["k"] != "" else "(空)"
-            _log(f"  [{idx}/{len(targets)}] row{ri} {asin}: page価格={page_price} "
-                 f"K={k_disp} ({tag})  ※N/Fは書かない(関数化後)")
+            rate = f"{points / page_price * 100:.1f}%" if points else "-"
+            _log(f"  [{idx}/{len(targets)}] row{ri} {asin}: F={page_price}(現在価格に更新) "
+                 f"K={k_disp} ({tag} {rate})  ※Nは書かない(シート関数)")
+            updates.append({"range": f"F{ri}", "values": [[plan["f"]]]})
             updates.append({"range": f"K{ri}", "values": [[plan["k"]]]})
         if idx < len(targets):
             time.sleep(random.uniform(args.rate_min, args.rate_max))
