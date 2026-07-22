@@ -1,5 +1,32 @@
 # iMakHarvest daily_report
 
+## 2026-07-22 — Amazon ポイント込み実質仕入値 (HQ依頼 3通、当日完結)
+
+### 決定
+
+- HQ 依頼 (feasibility → go → formula_switch) を当日で完遂。
+  - K列(11)=ポイント(円) 確定 (LOW K 未使用を実機確認: Inventory の K 書込は SKU シート向け)。
+  - **formula_switch (同日上書き)**: N はシート関数 =(MあればM、なければF)−K に移行。
+    書き手は観測値のみ → Harvest tool は **K のみ書く** (N 書込は関数を壊すため残存ゼロ必須)。
+
+### 変更
+
+- `scrapers/amazon_search_http.py`: `extract_price_jpy` / `extract_points_jpy` 新設
+  (price×pct 整合 ±1%+20円 で基本 pt のみ採用、 campaign 分排除、 fail-closed None)。
+- `tools/backfill_amazon_points_low.py` 新規 → formula_switch で **K-only** に改修
+  (N/F 書込撤去、 grep で N 書込残存ゼロ確認)。 commit `9b28c3d` → `820671b`。
+- `tests/test_amazon_points.py` 15件 (整合フィルタ / fail-closed / plan_row K-only 契約)。
+
+### 検証
+
+- ✅ 実ページ 3/3 で pt 抽出一致 (1831/1378/1584)。
+- ✅ 本適用 (LOW 380行): **pt取得336 / ptなし11 / fetch失敗33 (不触)**、 K1 ヘッダ改名済。
+- ✅ 実機全件照合: **K非空336 / N==F−K 全336一致 / 不一致0 / 欠落0** (全角￥書式込)。
+- ✅ pt率 1〜13% 帯、 20% 超の異常値なし。 依頼書 3通 processed 化 + 最終報告を response に追記。
+- 残: fetch失敗33行は tool 再実行で回収 (K-only なので ARRAYFORMULA 後も安全)。
+
+---
+
 ## 2026-07-13 — メルカリセラー手動待機: button 併用時の 15s 早期完了を修正
 
 ### 決定
