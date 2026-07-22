@@ -1483,3 +1483,16 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   K=11='ポイント(円)' は一致。test_n_col_price_now を M/K 全面更新 + test_amazon_points_extract 新設(7件) +
   test_multi_sourcing_fallback の AH を N→M 対応。**pre-commit 全 pass(115 + 151)**。
 - next: HQ へ response 投入(deploy完了+列番号訂正+N関数化go)。live 1巡回証明は次 LOW cycle 待ち。価格急増ガードは Phase 2。
+
+### HQ 緊急2件対応: K書込全停止 + HIGH破損回避のper-sheetゲート (commit 3e4df1b)
+- 決定: HQ から緊急2件。①Harvest backfill K 336件の半数超が実勢不整合 → 移植 extract_points_jpy も同欠陥の
+  可能性 → **K書込を全sheet停止**。②23c9762 の N→M が sheet非依存で **HIGH にも波及**、HIGH col13='価格上昇有無'
+  への価格書込=破損リスク → **HIGH は N維持に是正**。
+- 変更: [sheet_updater.py](../sheet_updater.py) `update_listings_sold_marks` に `price_col_idx`/`enable_points`
+  ゲート追加。[monitor_listings.py](../monitor_listings.py) `process_sheet` が sheet_id==LOW_SHEET_ID の時のみ
+  M(13)書込、他(HIGH)は従来 N(14)書込、K は enable_points=False で全停止。
+- 検証: ★**実機ログで commit(19:23:59)後の実 HIGH/LOW 巡回ゼロを確認** = ungated M/K は一度も実シートに
+  適用されず、**HIGH col13 未破損・LOW K 未書込**(HQ 再クリア不要)。HIGH 実ヘッダ確認: col13='価格上昇有無'
+  /col11='NO-GO'/col14='仕入れ価格（円）'。gate テスト2件追加、pre-commit 全 pass(115+151)。
+- next: 両 response 投入済。K 再開は Harvest 修正後 HQ go で enable_points=True。HIGH の M/K 移行は HQ が
+  col13 準備完了後に migrated 判定へ HIGH_SHEET_ID 追加(切替前に col13 実ヘッダ再確認)。
