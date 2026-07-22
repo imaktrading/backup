@@ -125,7 +125,9 @@ def test_offline_amazon_no_buybox_is_sold_via_unqualified(samples_available, fil
 # 「販売元 = Amazon.co.jp」 のみ in_stock=True。 第三者販売 (FBA 含む) は取下げ対象。
 SELLER_GATE_SAMPLES = [
     # (filename, expected_in_stock, expected_reason_prefix, note)
-    ("newincart_B0F9JP4JX5_row440.html",     True,  "submit_buy_now",       "Amazon 直販 NEW"),
+    # 2026-07-22: primary-availability-message span 優先化で #availability の「在庫あり。」を
+    # 先に拾うようになった (verdict=True は不変、 reason が submit_buy_now → availability_in_stock)。
+    ("newincart_B0F9JP4JX5_row440.html",     True,  "availability_in_stock", "Amazon 直販 NEW"),
     ("usedonly_B07XGKZTRF_row549.html",      False, "third_party_seller",   "中古化 FBA 第三者"),
     ("usedonly_B0C6LMYHJT_row594.html",      None,  "no_signal",            "中古化 buy box 不在"),
     ("soldout_B018LSERHE_row554.html",       False, "unqualifiedBuyBox",    "真の売切"),

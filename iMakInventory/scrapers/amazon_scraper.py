@@ -154,10 +154,25 @@ def _detect_stock(html: str, rendered: bool = False) -> tuple[Optional[bool], st
     if seller_kind == 'third_party':
         return False, f"third_party_seller: {seller_name}"
 
-    # 第一手段 (thunderbit blog 推奨): <div id="availability"> の text で判定
-    m = _re.search(r'<div[^>]*id="availability"[^>]*>(.*?)</div>', html, _re.DOTALL)
-    if m:
-        avail_text = _re.sub(r"<[^>]+>", "", m.group(1)).strip()
+    # 第一手段: availability メッセージ text で判定。
+    # ★ 2026-07-22: 旧実装は <div id="availability"> を正規表現で掴んでいたが、 先頭の [^>]* が
+    # 手前の CSS/wrapper 内の id="availability" 部分文字列 (例 data-csa-c-content-id="availability"
+    # や .availabilityMoreDetailsIcon style block) に誤マッチし、 非貪欲 (.*?) が CSS だけ拾って
+    # 本物の「残りN点」div に届かず no_signal → fail-closed で永久滞留
+    # (row686 B09C64HBQX が連続13回失敗、 実は「残り1点」= 在庫あり)。 旧5検体は偶々この
+    # 誤マッチ手前要素が無く通っていた。 Amazon の意味的クラス primary-availability-message span を
+    # 優先ソースにする (検体6/6 = 旧 row115/118/506/524/535 + 新 row686 で正しく取得を確認)。
+    avail_text = ""
+    ms = _re.search(
+        r'<span[^>]*primary-availability-message[^>]*>(.*?)</span>', html, _re.DOTALL)
+    if ms:
+        avail_text = _re.sub(r"<[^>]+>", "", ms.group(1)).strip()
+    else:
+        # fallback: 旧 <div id="availability"> 抽出 (span 非在時の後方互換)
+        m = _re.search(r'<div[^>]*id="availability"[^>]*>(.*?)</div>', html, _re.DOTALL)
+        if m:
+            avail_text = _re.sub(r"<[^>]+>", "", m.group(1)).strip()
+    if avail_text:
         avail_low = avail_text.lower()
         if ("在庫切れ" in avail_text or "currently unavailable" in avail_low
                 or "お取り扱いできません" in avail_text or "現在お取り扱い" in avail_text
