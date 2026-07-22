@@ -1496,3 +1496,23 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   /col11='NO-GO'/col14='仕入れ価格（円）'。gate テスト2件追加、pre-commit 全 pass(115+151)。
 - next: 両 response 投入済。K 再開は Harvest 修正後 HQ go で enable_points=True。HIGH の M/K 移行は HQ が
   col13 準備完了後に migrated 判定へ HIGH_SHEET_ID 追加(切替前に col13 実ヘッダ再確認)。
+
+## 2026-07-23 — HIGH を M(13)移行 + K書込再開(抽出を widget anchor 版 3a58a60 に同期) — HQ 2件 (commit 5019a04)
+
+### HIGH 移行 (high_migration_go)
+- 決定: HQ が HIGH col13='価格上昇有無'→'現在価格(円)' 改名+〇37件クリア、col11='NO-GO判定'→'ポイント(円)'
+  改名完了 → migrated 判定に HIGH_SHEET_ID 追加で M(13)書込へ切替。
+- 変更: [monitor_listings.py](../monitor_listings.py) process_sheet の migrated を {LOW, HIGH} に拡張。
+- 検証: ★切替go条件どおり **HIGH 実ヘッダ再確認** = col11='ポイント(円)'/col13='現在価格(円)'/col13残存〇=0。
+  → HIGH も M(13)書込・N停止。HQ が HIGH N を関数化する順序 (deploy→報告→関数化)。
+
+### K書込再開 + 抽出 defect 修正同期 (points_write_resume_go)
+- 決定: Harvest が抽出 defect を原因確定・修正 (commit 3a58a60、HQ 独立検証: 旧汚染0件/N=F−K整合100%)。
+  真因=旧regexが buybox 実表記「ポイント: 1831pt(13%)」に不マッチ→カルーセル別商品ptを誤取得。→同期+K再開。
+- 変更: [scrapers/amazon_scraper.py](../scrapers/amazon_scraper.py) `_extract_points_jpy` を widget anchor 版
+  (`data-feature-name="pointsInsideBuyBox"/"points"` 内のみ・整合±max(price×0.5%,10円)・高率忠実採用) に差替え。
+  process_sheet を enable_points=True に。
+- 検証: widget 抽出を実 DOM 断片で確認 (本物採用/カルーセル無視/不整合→None/高率忠実/&nbsp;分断耐性)。
+  test_amazon_points_extract を widget 形式に全面更新(10件)。**pre-commit 全 pass(115 + 151)**。
+- next: 両 response 投入済。HQ が HIGH N 関数化 + Harvest HIGH backfill(55行)で全系統完成。
+  次巡回で K 実書込を Inventory 側でも突合予定。高率pt は cap 無し忠実採用(案A・ユーザー裁定)。
