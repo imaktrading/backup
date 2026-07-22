@@ -1442,3 +1442,29 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 
 ### セッション結論
 - **在庫切れ販売 fail-OPEN = 0(実機確認済)**。deadlock 根本修正(commit 18fac83)は6日間安定。両監視系統 稼働健全。要対応なし。
+
+## 2026-07-22 — amazon 在庫判定 availability regex の CSS 誤マッチ修正 (row686 持続エラー根治) + HQ feasibility 回答
+
+### row686 B09C64HBQX 持続エラー(連続13回)の真因特定・修正 (commit 3c6f61b)
+- 決定: 直近ログの唯一の実質エラー「持続エラー 要手動chk 1件 = row686 amazon scraper returned None」を
+  検体採取して根治。**fail-OPEN ではない**(item_id 空 = eBay 未出品)が、D列 stale で出品機会損失 + 横展開盲点。
+- 真因: `_detect_stock` の `<div[^>]*id="availability"[^>]*>(.*?)</div>` が手前の CSS/wrapper 内
+  id="availability" 部分文字列(`data-csa-c-content-id="availability"` / `.availabilityMoreDetailsIcon` style)
+  に誤マッチ、非貪欲 `(.*?)` が CSS だけ拾い本物の「残り1点」div に届かず no_signal → fail-closed。
+  商品は在庫あり(「残り1点」)なのに13回連続 None。旧5検体は偶々誤マッチ手前要素が無く通っていた。
+- 変更: [scrapers/amazon_scraper.py:157](../scrapers/amazon_scraper.py) — availability text の優先ソースを
+  Amazon 意味的クラス `primary-availability-message` span に変更(div は fallback)。
+  [tools/capture_amazon_specimen.py](../tools/capture_amazon_specimen.py) 新設(cycle 非稼働窓で検体採取+即診断)。
+- 検証: 検体6/6(旧 row115/118/506/524/535 + 新 row686)で正しい在庫テキスト取得を実機確認。
+  row686 は None → **True(在庫あり)** に修正。[tests/test_amazon_availability_regex_20260722.py](../tests/test_amazon_availability_regex_20260722.py)
+  新設(CSS decoy 誤マッチ / soldout / 3rd gate / 検体駆動)。test_amazon_stock_detection.py の newincart_row440 の
+  reason 期待を submit_buy_now → availability_in_stock に更新(verdict=True 不変)。**pre-commit 全 pass(115 + 151 tests)**。
+- バックログ突合: 影響範囲は row686 1件のみ(持続エラー報告も「1件」)、item_id 空 = eBay 未出品 → **fail-OPEN 取下げ漏れゼロ**。
+  次 LOW cycle で in_stock 検出 → 持続エラー解消 + D列 stale 解消(出品くんへ在庫あり反映)。
+
+### HQ feasibility 回答: Amazon 価格+ポイント巡回相乗り
+- 決定: HQ 依頼 `2026-07-22_amazon_price_points_refresh_feasibility.md` に回答書投入。**可能だが SSOT 衝突を警告**。
+- 変更: `iMak_data/inventory/requests/2026-07-22_..._response.md` 作成(実装着手なし)。
+- 検証: 実コード確認 — ①amazon 巡回は full HTML 取得済 ②N列(現在価格)は既に毎cycle書込済(依頼の想定超え)
+  ③fail-closed(None→維持)実装済 ④急増ガードは売切数ベースで価格変動は非対応=新規要。
+  ★N列セマンティクス衝突(現状=総額 vs 要望=F−K実質)を明記、実装 go 前に HQ/Revise 合意必須と回答。
