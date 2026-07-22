@@ -1468,3 +1468,18 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 検証: 実コード確認 — ①amazon 巡回は full HTML 取得済 ②N列(現在価格)は既に毎cycle書込済(依頼の想定超え)
   ③fail-closed(None→維持)実装済 ④急増ガードは売切数ベースで価格変動は非対応=新規要。
   ★N列セマンティクス衝突(現状=総額 vs 要望=F−K実質)を明記、実装 go 前に HQ/Revise 合意必須と回答。
+
+### HQ 本実装 go: 監視巡回に M(現在価格)+K(ポイント)書込を追加、書き先 N→M 移行 (commit 23c9762)
+- 決定: ユーザー裁定「書き手は観測値のみ・N はシート関数」で SSOT 衝突を解消。監視くんは Amazon 行に
+  M=現在価格 / K=基本ポイント を書き、N 書込を停止 (HQ が =(M or F)−K の ARRAYFORMULA 化)。
+- 変更:
+  - [sheet_updater.py](../sheet_updater.py): 価格の書き先を N(14)→M(13)、K(11)書込追加、N不書込、AH を M-write に連動。
+  - [scrapers/amazon_scraper.py](../scrapers/amazon_scraper.py): `_extract_points_jpy` 移植(iMakHarvest 9b28c3d)、
+    price×pct整合で基本分のみ・campaign排除・fail-closed。requests/selenium/fetch_amazon に points_jpy 追加。
+  - [monitor_listings.py](../monitor_listings.py): points_jpy を sub_result→result→update 貫通。amazon 在庫あり行のみ
+    K セット(表示なし→0/fetch失敗→不触)。
+- 検証: ★**実シートのヘッダを実機確認 → 依頼書「M列(12)」は番号誤記を発見**。実際 col12=L='ConditionID'、
+  現在価格は col13(=文字M)。**col12 書込はデータ破損** → 定数を 13 に修正(回帰テストが `_col_letter(12)='L'`で検出)。
+  K=11='ポイント(円)' は一致。test_n_col_price_now を M/K 全面更新 + test_amazon_points_extract 新設(7件) +
+  test_multi_sourcing_fallback の AH を N→M 対応。**pre-commit 全 pass(115 + 151)**。
+- next: HQ へ response 投入(deploy完了+列番号訂正+N関数化go)。live 1巡回証明は次 LOW cycle 待ち。価格急増ガードは Phase 2。
