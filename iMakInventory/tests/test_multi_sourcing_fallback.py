@@ -218,28 +218,30 @@ class _FakeWS:
         self.batch_calls.append(list(updates))
 
 
-def test_ah_written_when_n_is_updated():
-    """N 列を更新する時、AH に旧 N (prev_n_jpy_str) もコピーされる."""
+def test_ah_written_when_m_is_updated():
+    """M 列 (現在価格) を更新する時、AH に旧 N (prev_n_jpy_str) もコピーされる.
+    (2026-07-22: 書き先 N→M 移行。AH 退避は M-write に連動、退避元は read 時の N 計算値)."""
     from sheet_updater import update_listings_sold_marks
     ws = _FakeWS()
     res = update_listings_sold_marks(ws, [{
         "row_index":       100,
         "is_sold":         False,
         "checked_at":      "2026/05/10 10:00:00",
-        "price_jpy":       3000,           # 新 N
-        "prev_n_jpy_str":  "1500",         # 旧 N (= AH に書く)
+        "price_jpy":       3000,           # 新 M
+        "prev_n_jpy_str":  "1500",         # 旧 N 計算値 (= AH に書く)
     }])
-    assert res["n_writes"] == 1
+    assert res["m_writes"] == 1
     assert res["ah_writes"] == 1
-    # 1 batch_update 内に AH と N が両方含まれる
+    # 1 batch_update 内に AH と M が両方含まれる (N には書かない)
     cells = ws.batch_calls[0]
     ranges = {c["range"]: c["values"][0][0] for c in cells}
     assert ranges.get("AH100") == "1500"
-    assert ranges.get("N100") == 3000
+    assert ranges.get("M100") == 3000
+    assert "N100" not in ranges
 
 
 def test_ah_not_written_when_prev_n_empty():
-    """初回 cycle (= AH に書く前期 N が無い) は AH に touch しない."""
+    """初回 cycle (= AH に書く前期 N が無い) は AH に touch しない (M は書く)."""
     from sheet_updater import update_listings_sold_marks
     ws = _FakeWS()
     res = update_listings_sold_marks(ws, [{
@@ -249,30 +251,30 @@ def test_ah_not_written_when_prev_n_empty():
         "price_jpy":       3000,
         "prev_n_jpy_str":  "",     # 旧 N が空
     }])
-    assert res["n_writes"] == 1
+    assert res["m_writes"] == 1
     assert res["ah_writes"] == 0
     cells = ws.batch_calls[0]
     ranges = [c["range"] for c in cells]
     assert "AH100" not in ranges
-    assert "N100" in ranges
+    assert "M100" in ranges
 
 
-def test_ah_not_written_when_n_skipped():
-    """price_jpy=None (scrape 失敗) で N も AH も touch しない."""
+def test_ah_not_written_when_m_skipped():
+    """price_jpy=None (scrape 失敗) で M も AH も touch しない."""
     from sheet_updater import update_listings_sold_marks
     ws = _FakeWS()
     res = update_listings_sold_marks(ws, [{
         "row_index":       100,
         "checked_at":      "2026/05/10 10:00:00",
         "o_only":          True,
-        # price_jpy なし → N も AH も触らない
+        # price_jpy なし → M も AH も触らない
     }])
-    assert res["n_writes"] == 0
+    assert res["m_writes"] == 0
     assert res["ah_writes"] == 0
     cells = ws.batch_calls[0]
     ranges = [c["range"] for c in cells]
     assert "AH100" not in ranges
-    assert "N100" not in ranges
+    assert "M100" not in ranges
 
 
 def test_check_one_row_with_fallback_propagates_current_n():

@@ -265,6 +265,44 @@ def _amazon_extract_from_text(txt: str) -> Optional[int]:
         return None
 
 
+# 「1,831ポイント (13%)」 形式 (= 基本獲得ポイント表記)。
+_POINTS_RE = re.compile(r"([0-9,]+)\s*ポイント\s*\((\d{1,2})%\)")
+
+
+def _extract_points_jpy(html_text: str, price_jpy: Optional[int]) -> Optional[int]:
+    """detail HTML から **基本ポイント (円)** を抽出 (fail-closed: 確信なければ None).
+
+    HQ 依頼 2026-07-22 (実質仕入値 N = (M or F) − ポイント)。 Harvest `extract_points_jpy`
+    (iMakHarvest commit 9b28c3d) の移植 (worktree 跨ぎ import 不可のため二重実装せず移植)。
+    安全方針 = 「確実に付く分だけ」:
+      - ページには 基本ポイント の他に Amazon Mastercard 等の campaign ポイント表記も
+        混在する (例: 基本 1831pt(13%) と campaign 2165pt(14%))。
+      - **points ≈ price × pct% の内部整合チェック** (± price1% + 20円) で基本分のみ採用。
+        campaign 分は price×pct と一致しないため弾かれる (Harvest 実ページ 3/3 で検証済)。
+      - 整合する候補の最初 (= 文書順で buybox 側) を返す。 なければ None。
+    price_jpy 不明なら検証不能 → None (= fail-closed)。
+    ※ 呼出側で「fetch 成功 × in_stock × price 有効」なのに None = 「基本ポイント表示なし」の
+      確定観測 → K=0 書込、 「fetch 失敗」= K 不触、 と区別する (本関数は両者を None で返す)。
+    """
+    if not html_text:
+        return None
+    price = price_jpy
+    if not price or price <= 0:
+        return None
+    tol = max(price * 0.01, 20.0)
+    for m in _POINTS_RE.finditer(html_text):
+        try:
+            pts = int(m.group(1).replace(",", ""))
+            pct = int(m.group(2))
+        except ValueError:
+            continue
+        if pts <= 0 or pts >= price:
+            continue
+        if abs(pts - price * pct / 100.0) <= tol:
+            return pts
+    return None
+
+
 def _extract_price_jpy(html: str) -> Optional[int]:
     """HTML から価格 (¥) を抽出.
 
@@ -372,10 +410,13 @@ def _fetch_via_requests(url: str) -> Optional[dict]:
     if in_stock is None:
         return None  # 判定不能 → fallback to Selenium
 
+    price = _extract_price_jpy(html)
     return {
         "name": _extract_name(html),
         "in_stock": in_stock,
-        "price_jpy": _extract_price_jpy(html),
+        "price_jpy": price,
+        # 同一 HTML から基本ポイント抽出 (HQ 2026-07-22)。price 有効時のみ検証可、なければ None。
+        "points_jpy": _extract_points_jpy(html, price),
         "_reason": reason,
     }
 
@@ -447,6 +488,8 @@ def _fetch_via_selenium(url: str, driver=None, headless: bool = True) -> Optiona
             return None  # 判定不能 → fail-closed (取下げに流さない)
         return {"name": name, "in_stock": verdict,
                 "price_jpy": price if verdict else None,
+                # 在庫あり時のみ現ページから基本ポイント抽出 (HQ 2026-07-22)。売切は None。
+                "points_jpy": _extract_points_jpy(html, price) if verdict else None,
                 "_reason": f"selenium:{reason}"}
     finally:
         if own_driver:
@@ -562,12 +605,15 @@ def fetch_product_inventory(
                 "size": "",
                 "in_stock": bool(in_stock_val),
                 "quantity": 1 if in_stock_val else 0,
-                # 2026-05-25 売切時は price_jpy=None 強制 (= N列触らない、 既存値維持)
+                # 2026-05-25 売切時は price_jpy=None 強制 (= M列触らない、 既存値維持)
                 # 売切時の amazon page では「新品 from」 / 中古最安 / 関連価格 等が表示され、
-                # 仕入できない (= 現実の販売価格でない) のに scraper が拾うと N列が
+                # 仕入できない (= 現実の販売価格でない) のに scraper が拾うと M列が
                 # 異常値 (= 旧値の数十倍 等) に上書きされる事例あり (= row 500 案件:
                 # 2599 → 39600、 売切時の「新品 from」 fallback)。
                 "price_jpy": raw.get("price_jpy") if in_stock_val else None,
+                # 基本ポイント(円): 在庫あり時のみ。None=「表示なし or 検証不能」(呼出側で区別)。
+                # 売切は price と同様 None 強制 (K は触らない)。
+                "points_jpy": raw.get("points_jpy") if in_stock_val else None,
             }
         ],
     }

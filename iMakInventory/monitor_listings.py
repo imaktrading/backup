@@ -123,7 +123,7 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
     domain = _domain_of(url)
     supplier = detect_supplier(domain)
     out = {"url": url, "supplier": supplier, "is_sold": None,
-           "raw_status": "", "error": None, "price_jpy": None}
+           "raw_status": "", "error": None, "price_jpy": None, "points_jpy": None}
 
     if supplier == "mercari":
         try:
@@ -177,6 +177,12 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
     raw_price = skus[0].get("price_jpy")
     if isinstance(raw_price, int) and not isinstance(raw_price, bool) and raw_price >= 0:
         out["price_jpy"] = raw_price
+
+    # 基本ポイント(円): amazon の在庫あり時のみ scraper が値 or None を返す (HQ 2026-07-22)。
+    # None は「表示なし or 検証不能」= 区別は update 構築側 (fetch 成否) で行う。ここは素通し。
+    raw_points = skus[0].get("points_jpy")
+    if isinstance(raw_points, int) and not isinstance(raw_points, bool) and raw_points >= 0:
+        out["points_jpy"] = raw_points
 
     return out
 
@@ -236,6 +242,7 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
         else:
             raw_status = f"in_stock@backup#{hit_index} ({hit['raw_status'] or 'in_stock'})"
         price_jpy = hit["price_jpy"]   # 在庫ありの URL の価格を採用
+        points_jpy = hit.get("points_jpy")  # 在庫あり URL の基本ポイント (amazon のみ、他は None)
     else:
         # 短絡 hit なし: 全候補 is_sold=True (全部売切) or error 含む
         has_error = any(s["error"] for s in sub_results)
@@ -247,6 +254,7 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
             raw_status = f"all_sold ({n}/{n})" if n > 1 else (main_sub["raw_status"] or "out_of_stock")
             # 全部売切 → 価格は意味ないが、主 URL の最終価格を残す
             price_jpy = main_sub["price_jpy"]
+            points_jpy = None  # 売切は K 触らない (price と同様)
         else:
             # error 含む → 不確定 (Precision 100%、取下げ skip)
             is_sold = None
@@ -260,6 +268,7 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
                 error = f"uncertain: {err_count}/{n} candidates errored ({first_err})"
             raw_status = ""
             price_jpy = None
+            points_jpy = None  # 不確定は K 触らない (fail-closed)
 
     result = {
         "row_index":         row["row_index"],
@@ -273,6 +282,7 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
         "delta":             "uncertain",
         "error":             error,
         "price_jpy":         price_jpy,
+        "points_jpy":        points_jpy,   # 基本ポイント(円): amazon 在庫あり時のみ int、他 None
         "candidates_checked": len(sub_results),
         # AH 列 (前期 N) 用: read 時に取得した N 列値を引き継ぐ。書込時にここを AH へコピー
         "current_n_jpy_str": row.get("current_n_jpy_str", ""),
@@ -828,8 +838,15 @@ def process_sheet(
                 "err_flag":   marker,
             }
             if price_jpy is not None:
-                upd["price_jpy"] = price_jpy
+                upd["price_jpy"] = price_jpy   # → sheet_updater が M列(12) に書込
                 upd["prev_n_jpy_str"] = prev_n
+                # K列(11) 基本ポイント: amazon の在庫あり行のみ (HQ 2026-07-22)。
+                # 表示なし→0 (確定観測)、 fetch 失敗は上の price_jpy=None で弾かれ不触。
+                # = 同一フェッチ・同一巡回で M と K を一貫更新 (旧F−現pt の N過小を構造的に防ぐ)。
+                if r.get("supplier") == "amazon":
+                    _pts = r.get("points_jpy")
+                    upd["points_jpy"] = (_pts if isinstance(_pts, int)
+                                         and not isinstance(_pts, bool) and _pts >= 0 else 0)
             updates.append(upd)
             if marker_count(marker) >= PERSISTENT_THRESHOLD:
                 persistent_err_rows.append({
@@ -858,8 +875,15 @@ def process_sheet(
             if clear_err:
                 upd["err_flag"] = ""
             if price_jpy is not None:
-                upd["price_jpy"] = price_jpy
+                upd["price_jpy"] = price_jpy   # → sheet_updater が M列(12) に書込
                 upd["prev_n_jpy_str"] = prev_n
+                # K列(11) 基本ポイント: amazon の在庫あり行のみ (HQ 2026-07-22)。
+                # 表示なし→0 (確定観測)、 fetch 失敗は上の price_jpy=None で弾かれ不触。
+                # = 同一フェッチ・同一巡回で M と K を一貫更新 (旧F−現pt の N過小を構造的に防ぐ)。
+                if r.get("supplier") == "amazon":
+                    _pts = r.get("points_jpy")
+                    upd["points_jpy"] = (_pts if isinstance(_pts, int)
+                                         and not isinstance(_pts, bool) and _pts >= 0 else 0)
             updates.append(upd)
         else:
             # 変化あり → D + O 両方更新 (前 cycle marker あれば AK も clear)
@@ -871,8 +895,15 @@ def process_sheet(
             if clear_err:
                 upd["err_flag"] = ""
             if price_jpy is not None:
-                upd["price_jpy"] = price_jpy
+                upd["price_jpy"] = price_jpy   # → sheet_updater が M列(12) に書込
                 upd["prev_n_jpy_str"] = prev_n
+                # K列(11) 基本ポイント: amazon の在庫あり行のみ (HQ 2026-07-22)。
+                # 表示なし→0 (確定観測)、 fetch 失敗は上の price_jpy=None で弾かれ不触。
+                # = 同一フェッチ・同一巡回で M と K を一貫更新 (旧F−現pt の N過小を構造的に防ぐ)。
+                if r.get("supplier") == "amazon":
+                    _pts = r.get("points_jpy")
+                    upd["points_jpy"] = (_pts if isinstance(_pts, int)
+                                         and not isinstance(_pts, bool) and _pts >= 0 else 0)
             updates.append(upd)
 
     if dry_run:
@@ -887,7 +918,7 @@ def process_sheet(
         log(f"  スプシ書込中... 全 {o_count} 行 (D 列変化 {d_count} 件 + N 列価格 {n_count} 件 + O 列 {o_count} 件 + AK巡回ERR {e_count} 件)")
         try:
             res = update_listings_sold_marks(ws, updates)
-            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / n_writes={res.get('n_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
+            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / m_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
         except Exception as e:
             log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())

@@ -73,7 +73,15 @@ LISTINGS_COL_ITEM_ID = 2      # B: eBay listing ID
 LISTINGS_COL_TITLE = 3        # C: タイトル (日本語)
 LISTINGS_COL_SOLD = 4         # D: 売り切れ ← Inventory が "○" を書く
 LISTINGS_COL_PRICE = 6        # F: 出品時の価格 (¥) ← 触らない (履歴保存)
-LISTINGS_COL_PRICE_NOW = 14   # N: 現在の仕入元価格 (¥) ← Inventory が毎 cycle 上書き (None なら維持)
+# ★ 2026-07-22 HQ 依頼: 「書き手は観測値のみ・N はシート関数」設計へ移行。
+#   監視くんの書き先を N(14) → M(12) に変更。 N は誰も書かず HQ が =(M or F)−K の ARRAYFORMULA 化。
+#   K(11)=基本ポイント(円) を amazon 行に追加書込。 切替順序: Inventory deploy(本変更) → HQ 関数化。
+LISTINGS_COL_POINTS = 11      # K: 基本ポイント (¥) ← Inventory(amazon 毎 cycle) + Harvest(capture 時)
+# ★ 実シートのヘッダを実機確認して確定 (2026-07-22): 依頼書の「M列(12)」は番号誤記。
+#   実際は col11=K'ポイント(円)' / col12=L'ConditionID'(既存) / col13=M'現在価格(円)' / col14=N'仕入れ価格（円）'。
+#   現在価格は列13(=文字M)。列12(L)は ConditionID なので書込厳禁 (破損する)。
+LISTINGS_COL_PRICE_NOW_M = 13  # M: 現在価格 (¥) ← Inventory が毎 cycle 上書き (None なら維持)
+LISTINGS_COL_PRICE_NOW = 14   # N: =(M or F)−K の関数 (誰も書かない)。read は AH(前期N) の退避元に使う
 LISTINGS_COL_CHECKED_AT = 15  # O: 売り切れチェック時間
 LISTINGS_COL_BACKUP_URL_1 = 29  # AC: 補仕入URL #1 (空欄 OK、HIGH のみ)
 LISTINGS_COL_BACKUP_URL_2 = 30  # AD: 補仕入URL #2
@@ -205,7 +213,9 @@ def read_listings_rows(
 
 
 def update_listings_sold_marks(ws, updates: list) -> dict:
-    """商品管理シートの D 列 (売り切れ) / O 列 (チェック時間) / N 列 (現在価格) を batch 更新.
+    """商品管理シートの D 列 (売り切れ) / O 列 (チェック時間) / M 列 (現在価格) / K 列 (ポイント) を batch 更新.
+
+    ★ 2026-07-22 HQ 依頼で書き先を N→M へ変更 + K 追加 (N は関数化するため誰も書かない)。
 
     Args:
         ws:      gspread worksheet
@@ -215,7 +225,9 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
                 "is_sold":    True / False (o_only=True 時は無視),
                 "checked_at": "2026/04/29 17:00:00" (省略時は now),
                 "o_only":     True なら D 列を触らず O 列のみ更新 (Phase 9 fix),
-                "price_jpy":  int (現在価格、None or 省略時は N 列を触らない = 既存値維持),
+                "price_jpy":  int (現在価格、None or 省略時は M 列を触らない = 既存値維持),
+                "points_jpy": int (基本ポイント¥、amazon 行のみ caller が載せる。表示なし→0。
+                              省略/None → K 列を触らない = 既存値維持),
             },
             ...
         ]
@@ -225,25 +237,30 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
       - o_only 省略 / False → D + O 両方書込
       - D 列: is_sold=True → "○", False → "" (人手 ○ を上書きしない場合は呼出側で制御)
       - O 列: 全 update に timestamp を書く (= trabajo 同等仕様、巡回チェック日時)
-      - N 列: price_jpy が int (>=0) で渡された行のみ書込。None / 省略 → 既存値維持
+      - M 列: price_jpy が int (>=0) で渡された行のみ書込。None / 省略 → 既存値維持
         (一時的取得失敗で価値情報を消すリスク回避、trabajo SheetRow.cs n_nowPrice 同等仕様)
         ※ D/O 列のロジックには一切影響しない (purely additive)
-      - AH 列 (前期 N): N 列を書く前に prev_n_jpy_str (= 旧 N 値の生文字列) を AH にコピー。
+      - K 列: points_jpy が int (>=0) で渡された行のみ書込 (= M を書く行に限る)。None / 省略 → 既存値維持。
+        caller は amazon 在庫あり行でのみ points_jpy をセット (表示なし→0 の確定観測 / fetch 失敗→不触)。
+      - N 列: 一切書かない (HQ が =(M or F)−K の ARRAYFORMULA を設置)。
+      - AH 列 (前期 N): M 列を書く前に prev_n_jpy_str (= read 時の N 計算値) を AH にコピー。
         prev_n_jpy_str が空なら touch しない (= 初回 cycle の AH は空のまま、Revise 側で考慮)。
-        このコピーは "N 列 を新値で上書きする時のみ" 走る = N の動きに連動した historical snapshot。
+        このコピーは "M 列 を新値で上書きする時のみ" 走る = 価格の動きに連動した historical snapshot。
       - AK 列 (巡回ERR): update dict に "err_flag" キーがあれば (空文字含む) AK 列に書込。
         エラー行 → marker 文字列 / 成功行 → "" (clear)。キー不在の行は AK を touch しない。
 
-    Returns: {"updated": N, "d_writes": N, "o_writes": N, "n_writes": N, "ah_writes": N, "err_writes": N}
+    Returns: {"updated": N, "d_writes": N, "o_writes": N, "m_writes": N, "k_writes": N,
+              "ah_writes": N, "err_writes": N}
     """
     if not updates:
-        return {"updated": 0, "d_writes": 0, "o_writes": 0, "n_writes": 0, "ah_writes": 0,
-                "err_writes": 0}
+        return {"updated": 0, "d_writes": 0, "o_writes": 0, "m_writes": 0, "k_writes": 0,
+                "ah_writes": 0, "err_writes": 0}
 
     cell_updates = []
     d_writes = 0
     o_writes = 0
-    n_writes = 0
+    m_writes = 0
+    k_writes = 0
     ah_writes = 0
     err_writes = 0
     for u in updates:
@@ -264,10 +281,12 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
         })
         o_writes += 1
 
-        # N 列 (現在価格): price_jpy が int で渡された場合のみ書込。None / 不在 / 非 int は触らない。
+        # M 列 (現在価格): price_jpy が int で渡された場合のみ書込。None / 不在 / 非 int は触らない。
+        # ★ 2026-07-22: 旧実装は N(14) に書いていたが、 N はシート関数化するため書き先を M(12) に変更。
         price_jpy = u.get("price_jpy")
         if isinstance(price_jpy, int) and not isinstance(price_jpy, bool) and price_jpy >= 0:
-            # AH 列 (前期 N): N を上書きする前に旧 N をコピー (= "前 cycle の N" を保存)
+            # AH 列 (前期 N): M を上書きする前に read 時の N 計算値 (prev_n_jpy_str) をコピー
+            # (= "前 cycle の N" を保存)。 N 関数化後は N セルの計算値を退避する形になる。
             prev_n_str = u.get("prev_n_jpy_str", "")
             if prev_n_str:
                 cell_updates.append({
@@ -276,10 +295,21 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
                 })
                 ah_writes += 1
             cell_updates.append({
-                "range": f"N{row_idx}",
+                "range": f"{_col_letter(LISTINGS_COL_PRICE_NOW_M)}{row_idx}",  # M
                 "values": [[price_jpy]],
             })
-            n_writes += 1
+            m_writes += 1
+
+            # K 列 (基本ポイント ¥): amazon 行のみ caller が points_jpy を載せる (表示なし→0)。
+            # fetch 失敗行は price_jpy=None で上の gate に入らず、 ここも実行されない = K 不触。
+            # 「同一フェッチで M と K を一貫更新」= 旧M−現pt の N過小を構造的に回避 (HQ 2026-07-22)。
+            points_jpy = u.get("points_jpy")
+            if isinstance(points_jpy, int) and not isinstance(points_jpy, bool) and points_jpy >= 0:
+                cell_updates.append({
+                    "range": f"{_col_letter(LISTINGS_COL_POINTS)}{row_idx}",  # K
+                    "values": [[points_jpy]],
+                })
+                k_writes += 1
 
         # AK 列 (巡回ERR): "err_flag" キーがあれば書込 (空文字 = clear も明示書込)。
         # キー不在 = AK 非対応 caller (= 既存呼出元) → AK を一切 touch しない (後方互換)。
@@ -292,7 +322,8 @@ def update_listings_sold_marks(ws, updates: list) -> dict:
 
     ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
     return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes,
-            "n_writes": n_writes, "ah_writes": ah_writes, "err_writes": err_writes}
+            "m_writes": m_writes, "k_writes": k_writes, "ah_writes": ah_writes,
+            "err_writes": err_writes}
 
 
 def _col_letter(n: int) -> str:
