@@ -1916,6 +1916,37 @@ class ListingPanel:
         except Exception as e:
             self.append_log(f"⚠️ orphan掃除 skip(新規生成は続行): {type(e).__name__}: {e}\n")
 
+    def _check_n_formula_guard(self):
+        """統合High/Low の N列(仕入値SSOT)関数の破損検知。壊れていたら False (=run 中止)。
+
+        2026-07-23 設計: N =(M=現在価格 or F)−K=ポイント の ARRAYFORMULA (N1 の1セル)。
+        どこかのプロセスが N セルに値を書くと関数が静かに壊れ、陳腐化した仕入値で誤価格
+        出品が続く (fail-OPEN)。listing 系 run の前に両シートを確認する。
+        LOW は gshock_to_csv 内にも同ガードあり (二重化)。HIGH の主要消費者 psa_to_csv は
+        no-touch 運用のため、HIGH はここが唯一のガード。
+        ネットワーク等でチェック自体が失敗した場合は警告のみで続行 (可用性優先。破損の
+        確証がある時だけ止める)。
+        """
+        try:
+            import gspread
+            from google.oauth2.service_account import Credentials
+            creds = Credentials.from_service_account_file(
+                GSHEET_CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+            gc = gspread.authorize(creds)
+            for label, (sid, gid) in CONSOLIDATED_SHEETS.items():
+                ws = gc.open_by_key(sid).get_worksheet_by_id(gid)
+                f = ws.acell("N1", value_render_option="FORMULA").value or ""
+                if not f.startswith("=ARRAYFORMULA"):
+                    self.append_log(
+                        f"🚫 {label} スプシ N列の仕入値関数が壊れています (N1={f[:40]!r})。\n"
+                        "   N セルに値を書いたプロセスを特定し、N1 に ARRAYFORMULA を再設置\n"
+                        "   してください (memory: amazon_points_net_cost_system 参照)。run 中止。\n")
+                    return False
+            return True
+        except Exception as e:
+            self.append_log(f"⚠️ N関数ガード チェック不能(続行): {type(e).__name__}: {e}\n")
+            return True
+
     def run_script(self, idx):
         script = SCRIPTS[idx]
         # 一番くじ: ウィザード式ダイアログを起動
@@ -1935,6 +1966,10 @@ class ListingPanel:
         # 問題を、毎回 生成前に掃除して再発防止。control_panel のみ・dedupe/psa_to_csv は不変。
         if script.get("category") == "PSA TCG" and script.get("type") == "new":
             self._run_psa_orphan_clean()
+        # listing 系 run 前の N列(仕入値SSOT)関数ガード (2026-07-23、両スプシ)
+        if script.get("type") == "new" and not self._check_n_formula_guard():
+            self.status_var.set("中止: N列関数の破損検知")
+            return
         cmd = list(script["cmd"])
         for pname, entry in self.param_entries[idx].items():
             v = entry.get().strip()
