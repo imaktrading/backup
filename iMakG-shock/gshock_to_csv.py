@@ -599,7 +599,36 @@ def extract_model_from_text(text):
     return None
 
 
-def _select_gshock_row(row, only_urls=None):
+def _listed_gshock_models(all_values):
+    """出品中(B=itemID有 AND D=売切空)の G-shock の型番集合を返す(純関数)。
+
+    2026-07-22: 同型番が既に live 出品済の「2枚目行」が B空のため毎回抽出→生成→dedupe除外を
+    繰り返し、1回10枠のうち数枠を空振りで浪費していた(この run で 3/10 枠)。抽出段階で
+    「出品中の型番」と突合して先に止める(PSA の既出品KEY除外と同思想)。
+    - 集合は AI列(canonical KEY)∪ タイトル等からの抽出型番(AI空でも取りこぼさない)。
+    - **動的判定**: live が売れて D=売切になれば次回から集合に入らず、2枚目が自動で再浮上する
+      (KEY書き戻し方式と違い解除操作が不要)。
+    """
+    listed = set()
+    for row in all_values[1:]:
+        cat = (row[17] if len(row) > 17 else '').strip()
+        b = (row[1] if len(row) > 1 else '').strip()
+        sold = (row[3] if len(row) > 3 else '').strip()
+        if cat != 'G-shock' or not b or sold:
+            continue
+        key = (row[34] if len(row) > 34 else '').strip()   # AI列 canonical KEY
+        if key:
+            listed.add(key.upper())
+        m = extract_model_from_text(
+            (row[2] if len(row) > 2 else '') + ' '
+            + (row[8] if len(row) > 8 else '') + ' '
+            + (row[7] if len(row) > 7 else ''))
+        if m:
+            listed.add(m.upper())
+    return listed
+
+
+def _select_gshock_row(row, only_urls=None, listed_models=None):
     """1 スプシ行 → ((url, model, price_jpy_str), None) 採用 / (None, reason) 除外。
 
     純粋関数 (network無し) — load_targets_from_low_sheet とテスト両方が使う。
@@ -631,6 +660,10 @@ def _select_gshock_row(row, only_urls=None):
     # color suffix 欠落 (例: GW-2320FP) は catalog の完全 ID と不一致 → SKIP (Precision 100%).
     if not is_complete_gshock_model(model):
         return None, 'partial_model'
+    # 同型番が既に live 出品済 → 2枚目行は抽出しない(毎回 dedupe 除外される空振り枠の根絶。
+    # 取下再出品(only_urls)時は明示指定なので適用しない)。live が消えれば次回自動で再浮上。
+    if only_urls is None and listed_models and model.upper() in listed_models:
+        return None, 'already_listed'
     return (url, model, price_f), None
 
 
@@ -674,10 +707,14 @@ def load_targets_from_low_sheet(only_urls=None):
     targets = []
     skipped_no_model = 0
     skipped_partial_model = 0
+    skipped_listed = 0
+    listed_models = _listed_gshock_models(all_values)   # 出品中の型番(2枚目行の空振り防止)
     for row in all_values[1:]:
-        target, reason = _select_gshock_row(row, only_urls=only_urls)
+        target, reason = _select_gshock_row(row, only_urls=only_urls, listed_models=listed_models)
         if target:
             targets.append(target)
+        elif reason == 'already_listed':
+            skipped_listed += 1
         elif reason == 'no_model':
             skipped_no_model += 1
         elif reason == 'partial_model':
@@ -689,6 +726,9 @@ def load_targets_from_low_sheet(only_urls=None):
             print(f"⚠️ partial model_id (color suffix 欠落): {model!r} → SKIP "
                   f"(Mercari title/desc に完全型番 (例: {model}-1A4JR) が無い)")
 
+    if skipped_listed:
+        print(f"⏭️ 既出品(同型番が live 出品済)の2枚目を除外: {skipped_listed}件 "
+              f"(毎回 dedupe 除外される空振り枠の防止。live が消えれば自動再浮上)")
     if skipped_no_model:
         print(f"⚠️ {skipped_no_model} 件は型番抽出失敗で SKIP (Precision 100% 原則)")
     if skipped_partial_model:
