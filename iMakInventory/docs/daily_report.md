@@ -1552,3 +1552,21 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   **pre-commit 全 pass (151 + offline gate)**。
 - next: live-fire 証明 (`completion_must_be_proven`) は実 surge 事象 or 手動注入テストで確認予定。
   発火閾値(50%/10行/50%)は初期値、運用データで要調整なら追って更新。
+- 追記: ALERT 配線テスト2件 (tests/test_price_surge_alert_wiring.py) 追加 — process_sheet の surge を
+  run_cycle が集約→desktop file+gmail(mock)+toast 発報する配線を実送なしで実証 (commit 5b474cc)。
+  実 gmail は spam につき mock 代替。計16テストで detect+配線を実証、live-fire 穴を閉鎖。
+
+### M/K 全系統完成 — HIGH N関数化(HQ) + HIGH backfill(Harvest) 完了確認
+- 決定: 「HQ待ち/Harvest待ち」としていた #2/#3 は本日午前に完了済 (ユーザー実機 read-back で確認)。
+  LOW・HIGH とも M(現在価格)/K(ポイント)/N(=(M or F)−K 関数) の全系統が稼働状態。
+- 検証 (ユーザー実機 read-back、独立確認は重複回避のため未実施):
+  - HIGH: N1=ARRAYFORMULA / N=(M or F)−K 整合 1414行・不一致 0 / M 非空 479行 (18:29 巡回 price_writes=473
+    と整合) / K 非空 13行 (backfill 10 + 巡回 3)。row297: 3850−1002=2848 で N 計算確認。
+  - HIGH Amazon 55行 (現役10/売切45): K 現役 10/10 全充足・未充足 0。
+  - 分業機能確認: backfill(過去分一括) row283 K=608 → 巡回更新 K=640。売切→現役復帰 row281/298 を巡回が
+    K=256/625 記入。row300 pt無 "" → 巡回が 0 記入 (空欄 vs 0 の表記差はあるが N=F−0 で計算上同義、benign)。
+  - HQ 実施経緯: ①F空でN有の212行を先に F へ退避 (仕入値消失ゼロ) → ②N クリア+関数設置 →
+    ③K列パーセント書式罠 修正 → ④監視くん巡回で M/K を鮮度維持。
+- 変更: コード変更なし (記録のみ)。
+- 状態: **M/K/N pricing SSOT が LOW・HIGH 両シートで全系統完成・稼働中**。Inventory 側の実装キューは
+  #1(K突合) #4(価格急増ガード) 含め完了。残るは常時監視 (widget表記再変化 = fail-closed 安全側)。
