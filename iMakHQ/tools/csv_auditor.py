@@ -915,9 +915,21 @@ def _resolve_claude_exe(claude_bin):
     """
     if claude_bin and claude_bin.lower().endswith(".exe"):
         return claude_bin
+    candidates = []
     base = os.path.dirname(claude_bin or "")
-    exe = os.path.join(base, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
-    return exe if os.path.exists(exe) else (claude_bin or "")
+    if base:
+        candidates.append(os.path.join(
+            base, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"))
+    # ★2026-07-23: 出品くん subprocess は PATH に npm dir が無く which('claude')=None になる
+    #   (7/20以降 Act合図が毎回 skip されていた真因)。既知の標準 install 位置へフォールバック。
+    appdata = os.environ.get("APPDATA", "")
+    if appdata:
+        candidates.append(os.path.join(
+            appdata, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"))
+    for exe in candidates:
+        if os.path.exists(exe):
+            return exe
+    return claude_bin or ""
 
 
 def _act_disabled(dry_run):

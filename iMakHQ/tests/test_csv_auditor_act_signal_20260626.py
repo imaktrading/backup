@@ -121,3 +121,19 @@ def test_resolve_claude_exe_passthrough_and_derive():
     derived = ca._resolve_claude_exe(r"C:\npm\claude.CMD")
     # 存在しない環境では元の .CMD にフォールバック。存在する実機では .exe を返す。
     assert derived.endswith("claude.exe") or derived == r"C:\npm\claude.CMD"
+
+
+def test_resolve_claude_exe_appdata_fallback_when_which_none(tmp_path, monkeypatch):
+    """★2026-07-23 回帰: which('claude')=None (出品くん subprocess は npm dir が PATH 外) でも
+    APPDATA 標準 install 位置へフォールバックして実体 exe を見つける。"""
+    exe = tmp_path / "npm" / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"stub")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    assert ca._resolve_claude_exe(None) == str(exe)
+
+
+def test_resolve_claude_exe_none_and_no_fallback(monkeypatch, tmp_path):
+    """which=None かつ APPDATA にも無ければ空文字 (従来どおり no-cli skip)。"""
+    monkeypatch.setenv("APPDATA", str(tmp_path))  # 空dir
+    assert ca._resolve_claude_exe(None) == ""
