@@ -55,6 +55,33 @@ def _min_price(prices):
     return min(vals) if vals else None
 
 
+_VERIFIED_CERTS_FILE = r"C:/dev/iMak_data/dedupe/verified_certs.json"
+
+
+def load_verified_certs(path=_VERIFIED_CERTS_FILE):
+    """出品時 HTML 目視確認の資産 {cert: {choice, product_id}} を読む。失敗は {}。"""
+    import json
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def key_from_verified_cert(cert, verified):
+    """cert → 出品時に確定した canonical KEY (純関数, test可)。
+
+    出品時 HTML viewer で人が確定した変種 (choice=OK=期待通り / CHOSEN=選択) の product_id を返す。
+    NONE/未確定/欠落は "" (= fail-closed: 推測で KEY を捏造しない)。
+    cert は「その出品」の同定に不変(再仕入れで別個体を買っても、この出品済カードの識別は cert)。
+    → itemID join 漏れ(書き戻し漏れ/relist)を、出品時に払った目視コストの資産で埋める。
+    """
+    rec = verified.get(str(cert or "").strip()) if cert else None
+    if rec and rec.get("choice") in ("OK", "CHOSEN"):
+        return (rec.get("product_id") or "").strip()
+    return ""
+
+
 def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     """視覚確証に出す仕入候補リストを作る(純関数)。
 
@@ -359,6 +386,26 @@ def main():
         print(f"  canonical KEY 付与: {keyed}/{len(rows)}枚 (商品管理シート itemID join)")
     except Exception as e:
         print(f"  ⚠ canonical KEY map 取得失敗 ({type(e).__name__}: {e}) — bare番号で続行")
+
+    # --- Step6 P1b: itemID join 漏れを「出品時 目視確定」資産で補完 (2026-07-24) ---
+    # 出品時に HTML viewer で確定した変種は verified_certs.json (cert→product_id) に資産化されている。
+    # だが商品管理シートAI列への KEY 書き戻しは promo等 12変種曖昧カードで漏れる(write-keys が
+    # 再解決で絞れず skip)→ RESTOCK が「出品したのに未解決」で再目視を要求する欠陥だった。
+    # itemID→cert(シートI列, cert_map)→verified_certs で、出品時に払った目視コストを回収する。
+    _vc = load_verified_certs()
+    if _vc:
+        recovered = 0
+        for r in rows:
+            if r.get("key"):
+                continue
+            iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+            k2 = key_from_verified_cert(cert_map.get(iid, ""), _vc)
+            if k2:
+                r["key"] = k2
+                recovered += 1
+        if recovered:
+            print(f"  🔑 出品時 目視確定を資産回収: {recovered}件 "
+                  f"(verified_certs.json cert→KEY / itemID join漏れを補完=再目視不要)")
 
     # --- pre-search 目視確認ゲート (2026-06-17) ---
     # 「探す前に、仕入れたい正カードが正しいか」を catalog 正カード画像で目視確認 → 確定分だけ探索。
