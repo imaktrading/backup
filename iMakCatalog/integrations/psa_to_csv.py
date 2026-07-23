@@ -874,7 +874,8 @@ def extract_set_code_from_brand_gundam(brand: str) -> Optional[str]:
     if not brand:
         return None
     b = brand.upper()
-    m = re.search(r"\b(GD\d+|ST\d+|EX\d+)\b", b)
+    # EB (Extra Booster) を 2026-07-23 追加。EB01 Eternal Nexus。
+    m = re.search(r"\b(GD\d+|ST\d+|EX\d+|EB\d+)\b", b)
     if m:
         return m.group(1)
     # set 名キーワード逆引き (PSA brand が code token を持たず literal英名のみのケース)
@@ -896,6 +897,10 @@ def extract_set_code_from_brand_gundam(brand: str) -> Optional[str]:
         ("CELESTIAL DRIVE", "ST07"),
         ("FLASH OF RADIANCE", "ST08"),
         ("DESTINY IGNITION", "ST09"),
+        ("GENERATION PULSE", "ST10"),
+        # Booster / Extra Booster 新弾 (2026-07-23)
+        ("FREEDOM ASCENSION", "GD05"),
+        ("ETERNAL NEXUS", "EB01"),
     ):
         if kw in b:
             return code

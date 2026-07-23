@@ -48,6 +48,16 @@ set_code:
   - source: GD04
     ebay: Phantom Aria
     year: 2025
+  - source: GD05
+    ebay: Freedom Ascension
+    year: 2026
+    note: 2026-07-25 発売 (1周年記念弾)。2026-07-23 追加
+
+  # ----- Extra Booster (EB) -----
+  - source: EB01
+    ebay: Eternal Nexus
+    year: 2026
+    note: 2026-06-27 発売。2026-07-23 追加
 
   # ----- Starter Deck (ST) -----
   - source: ST01
@@ -77,6 +87,10 @@ set_code:
   - source: ST09
     ebay: Destiny Ignition
     year: 2026
+  - source: ST10
+    ebay: Generation Pulse
+    year: 2026
+    note: 2026-06-27 発売。2026-07-23 追加
 
   # ----- Premium Card Collection (PC) -----
   - source: PC01A
