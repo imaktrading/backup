@@ -1516,3 +1516,16 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   test_amazon_points_extract を widget 形式に全面更新(10件)。**pre-commit 全 pass(115 + 151)**。
 - next: 両 response 投入済。HQ が HIGH N 関数化 + Harvest HIGH backfill(55行)で全系統完成。
   次巡回で K 実書込を Inventory 側でも突合予定。高率pt は cap 無し忠実採用(案A・ユーザー裁定)。
+
+### K再開後 実書込 突合 (fail-OPEN ゼロ確認)
+- 決定: K再開 (5019a04) 後の実巡回で K が widget 由来の正しい値で landing しているか突合。
+- 検証: ★HIGH 18:29 cycle 実データ (decision_log/listings_SHEET_20260723_182935.jsonl) で
+  points セット 9行を確認。全て **per-item で price 比例** (1%/8%/12.7%/18%/20%/26%)、
+  旧欠陥 (多数行同一小額pt / carousel別商品pt) のシグネチャ不在 = widget anchor 抽出が正常。
+  高率pt(26%)は cap せず忠実採用 (案A)。表示なし1行は K=0/不触 (fail-closed)。
+  write summary: `d=14 / price[M]=473 / k=10 / err(AK)=4`。
+  ★err_writes=4 = 書込失敗でなく前cycle(14:33)の scraper マーカー clear (4行とも今cycle error='')。
+  ★row1416(アルベド)は既D=○ unchanged=新規売切でない。
+  reverse_audit 本日10:03: reverse_unack=**0** (唯一mismatch=既ack済 358645217419) → 意図vs実eBay乖離ゼロ。
+- 変更: `iMak_data/inventory/requests/2026-07-23_points_write_resume_go_reconcile.md` (HQ突合レポート) のみ。コード変更なし。
+- next: HIGH N関数化(HQ) + HIGH backfill(Harvest) 待ち。価格急増ガード(価格変動版)は Phase 2 として着手予定。
