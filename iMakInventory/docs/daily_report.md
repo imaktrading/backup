@@ -1529,3 +1529,26 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   reverse_audit 本日10:03: reverse_unack=**0** (唯一mismatch=既ack済 358645217419) → 意図vs実eBay乖離ゼロ。
 - 変更: `iMak_data/inventory/requests/2026-07-23_points_write_resume_go_reconcile.md` (HQ突合レポート) のみ。コード変更なし。
 - next: HIGH N関数化(HQ) + HIGH backfill(Harvest) 待ち。価格急増ガード(価格変動版)は Phase 2 として着手予定。
+
+### 価格急増ガード (M/K書込側 supplier単位) 実装 (commit 7bcdd7a)
+- 決定: M(現在価格)書込が全 supplier 毎cycle・集約異常検知なし → scraper 系統崩壊 (DOM構造変化) で
+  「plausible だが誤った」価格が多数行に一括 landing → 下流 pricing/revise を汚染するリスク。
+  グローバル原則#4「急増ガード(誤一括防止)」の価格版として実装。★ユーザー裁定: 発火単位=supplier
+  (①案。真の failure mode に一致、崩壊 supplier だけ HOLD で機会損失最小)。
+- 変更:
+  - [sheet_updater.py](../sheet_updater.py): `detect_price_surge()` 新設 — 前M(current_m_jpy_str) vs
+    新price_jpy を like-with-like 比較、|Δ|/prev>50% の急変行が supplier の判定対象(prev-Mあり)の
+    50%以上 かつ >=10行 → HOLD。prev-M/price_jpy 欠は母数外(初回cycle 誤発火なし)。
+    N(=M-K)代用時の points offset(最大26%)誤発火を回避するため col13 直読を追加。
+    `update_listings_sold_marks`: HOLD supplier の M/K のみ skip、**D/O(取下げ)は必ず書く**(fail-OPEN回避)。
+    `enable_price_surge_guard` で緊急 override 可。surge_held/surge_stats/m_held を返す。
+  - [monitor_listings.py](../monitor_listings.py): current_m_jpy_str を result 貫通、発火時 prominent log、
+    process_sheet が price_surge_held/stats を返す。
+  - [run_cycle.py](../run_cycle.py): sheet跨ぎ集約 → 発火時 desktop ALERT file + gmail + toast の3ch
+    非-silent 告知 (pythonw 下でも気づける、precheck alert と同 infra)。
+- 検証: [tests/test_price_surge_guard.py](../tests/test_price_surge_guard.py) 14件 — 安定時無発火/
+  系統崩壊→HOLD/他supplier無影響/min_rows(10)未満無発火/min_ratio(50%)未満無発火/初回(prev-M欠)除外/
+  fetch失敗(price None)除外/中程度30%値動き非急変/**HOLD行でもD-O必書**/override/空updates。
+  **pre-commit 全 pass (151 + offline gate)**。
+- next: live-fire 証明 (`completion_must_be_proven`) は実 surge 事象 or 手動注入テストで確認予定。
+  発火閾値(50%/10行/50%)は初期値、運用データで要調整なら追って更新。
