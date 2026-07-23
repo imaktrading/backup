@@ -979,6 +979,15 @@ def _to_legacy_dict_gundam(record: dict) -> dict:
     return _apply_ebay_fields(legacy, record, "gundam_tcg")
 
 
+# PB01 プレミアムグッズセット -新機動戦記ガンダムW- の同梱カード (公式 products/pb01.html:
+#   カード2種×2枚)。複数 base セット (GD01/ST02) の再録なので brand→set_code 逆引きでは
+#   引けない → collector number からの明示 map (2026-07-23 cert154708671)。
+_PB01_BASE_BY_NUMBER = {
+    "100": "GD01-100",   # 覚悟の表れ / A Show of Resolve [Ito画] U+
+    "010": "ST02-010",   # ヒイロ・ユイ / Heero Yuy [Ito画] C+
+}
+
+
 def lookup_gundam(
     brand: str,
     card_number: str,
@@ -998,13 +1007,21 @@ def lookup_gundam(
 
     # 2026-07-10: PB01 プレミアムグッズセット由来 cert は base(starter deck print)でなく
     #   _PB01 parallel record を優先 (set_name が premium goods = C:Set 正確化)。
+    # 2026-07-23 (cert154708671): PB01 は ST02 だけでなく GD01-100 も再録するため、
+    #   set_code 逆引き (PREMIUM GOODS+WING→ST02) では #100 が ST02-100 に化けて miss。
+    #   PB01 収録カードは番号→base pid が固定 (公式 products/pb01.html: カード2種) なので
+    #   明示 map で引き直す。名前一致ガードは従来どおり (fail-closed)。
     record = None
     if "PREMIUM GOODS" in (brand or "").upper():
-        cand = api.lookup(GUNDAM_CATEGORY, f"{base_pid}_PB01")
-        if cand and _record_name_matches_subject(cand, subject):
-            record = cand
-            if verbose:
-                print(f"    🎯 iMakCatalog (Gundam) hit (PB01 premium goods): {base_pid}_PB01")
+        _pb01_base = _PB01_BASE_BY_NUMBER.get(card_number.zfill(3))
+        pb_base = _pb01_base or base_pid
+        for pid_try in (f"{pb_base}_PB01", f"{pb_base}_P"):
+            cand = api.lookup(GUNDAM_CATEGORY, pid_try)
+            if cand and _record_name_matches_subject(cand, subject):
+                record = cand
+                if verbose:
+                    print(f"    🎯 iMakCatalog (Gundam) hit (PB01 premium goods): {pid_try}")
+                break
 
     if record is None:
         record = api.lookup(GUNDAM_CATEGORY, base_pid)
