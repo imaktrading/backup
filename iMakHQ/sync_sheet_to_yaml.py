@@ -30,7 +30,7 @@ import yaml
 from google.oauth2.service_account import Credentials
 
 # ------------ 設定 ------------
-SHEET_ID = "1LnEixfUp3XnWlqjMDXXrVfL-AF6EpHJHrWRdCr-Mh8k"  # V8 スプシ
+SHEET_ID = "1YLnR4aW5cgjquYXUaNPb_hnVwrHegobZyh-eAT6tVM0"  # V9 スプシ (2026-07-23 V8→V9 切替。V8=1LnEixfUp3XnWlqjMDXXrVfL-AF6EpHJHrWRdCr-Mh8k)
 YAML_PATH = Path(r"c:\dev\iMak\iMakeBayAPI\config\global.yaml")
 CREDS_PATH = Path(r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
