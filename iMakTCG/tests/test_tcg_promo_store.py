@@ -69,14 +69,28 @@ def test_title_includes_promo():
 
 
 def test_title_drops_year_before_promo_when_long():
-    """80字に収まらない時、promo は最後まで残り Year が先に落ちる。"""
+    """80字に収まらない時、promo は Year より優先で残る (Year が先に落ちる)。"""
     f = _base_fields()
-    f["C:Character"] = "Monkey D. Luffy Straw Hat Pirates Captain"   # 長くする
+    f["C:Character"] = "Monkey D. Luffy"   # promo フル + Character は収まるが Year は溢れる長さ
     f["_promo"] = "Ichiban Kuji Purchase Bonus"
     t = lf.build_title_from_fields(f, grade="10")
     assert len(t) <= 80
-    assert "Ichiban Kuji Purchase Bonus" in t   # promo 死守
+    assert "Ichiban Kuji Purchase Bonus" in t   # promo は Year より死守
     assert "2026" not in t                       # Year は犠牲に
+    assert "Monkey D. Luffy" in t
+
+
+def test_title_character_beats_promo_when_very_long():
+    """カード名死守 (2026-07-23 改訂仕様): Character が長く promo フルでは収まらない場合、
+    promo(Set 扱い)側を短縮してでも Character は全体を残す。旧仕様は Character を
+    末尾 pop で切っていた (実害: 'Reshiram &' 止まりタイトル)。"""
+    f = _base_fields()
+    chara = "Monkey D. Luffy Straw Hat Pirates Captain"
+    f["C:Character"] = chara
+    f["_promo"] = "Ichiban Kuji Purchase Bonus"
+    t = lf.build_title_from_fields(f, grade="10")
+    assert len(t) <= 80
+    assert chara in t, f"カード名が切れた: {t!r}"
 
 
 def test_no_promo_no_change():

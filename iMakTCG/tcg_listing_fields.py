@@ -315,23 +315,31 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     (Set/番号/Character/Japanese/PSA10 は死守 = カード同定に必須)。
     """
     game = _game_word(fields.get("C:Game", ""))
-    core = ["PSA", str(grade)]
-    if game:
-        core.append(game)
-    if fields.get("C:Language") == "Japanese":
-        core.append("Japanese")
     # ★promo: generic な Set "Promo Cards" は具体的な配布元名 (Ichiban Kuji Purchase Bonus 等)
     #   に **置換** する (冗長を消し 80字枠を確保。C:Set 項目自体は filter 用に不変=タイトル表記のみ)。
     promo = (fields.get("_promo") or "").strip()
     cset = fields.get("C:Set", "")
     _use_promo_as_set = bool(promo) and cset.strip().lower() in ("promo cards", "promo")
-    if cset:
-        core.append(promo if _use_promo_as_set else cset)
+    set_full = (promo if _use_promo_as_set else cset) if cset else ""
     num = fields.get("C:Card Number", "")
-    if num:
-        core.append(f"#{num}")
-    if fields.get("C:Character"):
-        core.append(fields["C:Character"])
+    lang_ja = fields.get("C:Language") == "Japanese"
+    chara = fields.get("C:Character", "")
+
+    def _core_tokens(set_disp):
+        core = ["PSA", str(grade)]
+        if game:
+            core.append(game)
+        if lang_ja:
+            core.append("Japanese")
+        if set_disp:
+            core.append(set_disp)
+        if num:
+            core.append(f"#{num}")
+        if chara:
+            core.append(chara)
+        return core
+
+    core = _core_tokens(set_full)
 
     # 任意 (末尾から落とせる) — 高情報順。
     # ★ワード単位の重複ガード: 任意要素(Rarity/Features)の有意語が既存タイトルに在れば足さない。
@@ -357,8 +365,7 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     if fields.get("C:Year Manufactured"):
         optional.append(fields["C:Year Manufactured"])
 
-    def _assemble(opts):
-        toks = core + opts
+    def _assemble(toks):
         # 重複語 dedupe (大小無視・既出 token は落とす)
         seen, out = set(), []
         for t in toks:
@@ -369,14 +376,31 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
             out.append(t)
         return " ".join(out)
 
-    # Year→Features→Rarity の順に落として 80字に収める
-    for drop in range(len(optional) + 1):
-        opts = optional[: len(optional) - drop] if drop else optional
-        title = _assemble(opts)
-        if len(title) <= _TITLE_MAX:
-            return title
-    # core だけでも超える場合は素直に truncate (語境界)
-    title = _assemble([])
+    # ★Set 短縮候補 (2026-07-23): カード名(Character)/番号は絶対に切らない。
+    #   80字超は「任意要素を落とす」→ それでも超えるなら「Set 名を短縮」の順で吸収する。
+    #   短縮は ①ダッシュ区切りの後半だけ残す (例 'Sun & Moon—Unbroken Bonds'→'Unbroken Bonds')
+    #   ②前方の語を1つずつ落とす。旧実装は末尾語 pop で Character が切れていた
+    #   (実害: 'Reshiram &' 止まりタイトル 2026-07-23 run)。
+    set_variants = [set_full]
+    if set_full:
+        tail = re.split(r"[—–―]", set_full)[-1].strip()
+        if tail and tail != set_full:
+            set_variants.append(tail)
+        base_words = set_variants[-1].split()
+        for i in range(1, len(base_words)):
+            set_variants.append(" ".join(base_words[i:]))
+
+    # 各 Set 候補 × (Year→Features→Rarity の順に落とす) で最初に 80字へ収まる組を採用。
+    # 全部収まる通常ケースは 1 周目 (= フル Set + 全 optional) で従来と同一結果。
+    for set_disp in set_variants:
+        ctoks = _core_tokens(set_disp)
+        for drop in range(len(optional) + 1):
+            opts = optional[: len(optional) - drop] if drop else optional
+            title = _assemble(ctoks + opts)
+            if len(title) <= _TITLE_MAX:
+                return title
+    # 最終手段 (Set を最短化しても core が超過): 従来の語境界 truncate
+    title = _assemble(_core_tokens(set_variants[-1] if set_variants else ""))
     if len(title) > _TITLE_MAX:
         parts = title.split()
         while parts and len(" ".join(parts)) > _TITLE_MAX:
