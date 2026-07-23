@@ -99,6 +99,17 @@ LISTINGS_COL_PRICE_PREV = 34  # AH: 前期 N (毎 cycle で旧 N がコピーさ
 LISTINGS_COL_ERR_FLG = 37     # AK
 LISTINGS_ERR_FLG_HEADER = "巡回ERR"
 
+# ── 価格急増ガード (M/K 書込側、2026-07-23) ──────────────────────────────
+# scraper の DOM 構造変化で 1 supplier が丸ごと誤パースし、多数行に「plausible だが誤った」
+# 現在価格が一括で M に landing する事故 (履歴: 2026-06 amazon buybox DOM 化で全滅 /
+# scraper_price_vulnerability「最初の¥」誤採用) を防ぐ。発火単位は supplier (真の failure
+# mode に一致)。閾値超で「その supplier の M/K 書込のみ HOLD」+ ALERT。D/O (取下げ) は
+# 絶対に止めない (fail-OPEN=取下げ漏れ が最悪、価格汚染防止とは別レイヤ)。
+# グローバル原則 #4「急増ガード (誤一括防止)」の価格版。
+PRICE_SURGE_THRESHOLD = 0.5    # 前 M からの |Δ| がこの割合超 = 「急変行」(±50%)
+PRICE_SURGE_MIN_ROWS = 10      # 判定に要する supplier あたり最小 (prev-M ありの) 価格行数
+PRICE_SURGE_MIN_RATIO = 0.5    # 急変行 / 判定対象行 がこの割合以上 → 系統崩壊とみなし HOLD
+
 
 # ============================================================================
 # 認証 / スプシオープン
@@ -206,15 +217,69 @@ def read_listings_rows(
             "backup_urls":  backup_urls,  # AC-AG (#29-33) のうち空でないものだけ
             # 現在の N 列値 (生文字列、空欄も含む)。次 cycle で AH (前期 N) にコピーされる
             "current_n_jpy_str": (row[LISTINGS_COL_PRICE_NOW - 1] if len(row) >= LISTINGS_COL_PRICE_NOW else "").strip(),
+            # 現在の M 列値 (=前 cycle に書いた現在価格、移行済 LOW/HIGH 両シート)。価格急増ガードの
+            # like-with-like 比較元 (prev-M vs 新 price_jpy)。N(=M-K) で代用すると points 分オフセットが乗る。
+            "current_m_jpy_str": (row[LISTINGS_COL_PRICE_NOW_M - 1] if len(row) >= LISTINGS_COL_PRICE_NOW_M else "").strip(),
             # AK 列 (巡回ERR) の現状値 = 前 cycle までの連続エラー marker。re-mark 時の回数累積に使う
             "err_flag_prev": (row[LISTINGS_COL_ERR_FLG - 1] if len(row) >= LISTINGS_COL_ERR_FLG else "").strip(),
         })
     return rows
 
 
+def _parse_price_jpy(s) -> Optional[int]:
+    """スプシ生文字列 (¥1,500 / '1500' / '' 等) を int(円) へ。parse 不能 → None."""
+    if s is None:
+        return None
+    digits = "".join(ch for ch in str(s) if ch.isdigit())
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
+
+
+def detect_price_surge(updates: list,
+                       threshold: float = PRICE_SURGE_THRESHOLD,
+                       min_rows: int = PRICE_SURGE_MIN_ROWS,
+                       min_ratio: float = PRICE_SURGE_MIN_RATIO) -> tuple:
+    """supplier 単位の価格急増 (= scraper 系統崩壊疑い) を検出.
+
+    prev-M (current_m_jpy_str) と新 price_jpy を like-with-like 比較し、|Δ|/prev > threshold
+    の「急変行」割合が min_ratio 以上 かつ 判定対象が min_rows 以上の supplier を HOLD 対象とする。
+    prev-M が無い/parse 不能な行、price_jpy 未セット行は判定母数から除外 (= 初回 cycle は誤発火しない)。
+
+    Returns: (held_suppliers: set[str], stats: dict[str, {"total","surged","ratio"}])
+    """
+    per_supplier: dict = {}
+    for u in updates:
+        pj = u.get("price_jpy")
+        if not (isinstance(pj, int) and not isinstance(pj, bool) and pj >= 0):
+            continue
+        prev = _parse_price_jpy(u.get("current_m_jpy_str"))
+        if prev is None or prev <= 0:
+            continue
+        sup = u.get("supplier") or "unknown"
+        d = per_supplier.setdefault(sup, {"total": 0, "surged": 0})
+        d["total"] += 1
+        if abs(pj - prev) / prev > threshold:
+            d["surged"] += 1
+
+    held = set()
+    stats = {}
+    for sup, d in per_supplier.items():
+        tot, surg = d["total"], d["surged"]
+        ratio = (surg / tot) if tot else 0.0
+        stats[sup] = {"total": tot, "surged": surg, "ratio": round(ratio, 3)}
+        if tot >= min_rows and ratio >= min_ratio:
+            held.add(sup)
+    return held, stats
+
+
 def update_listings_sold_marks(ws, updates: list,
                                price_col_idx: int = LISTINGS_COL_PRICE_NOW_M,
-                               enable_points: bool = True) -> dict:
+                               enable_points: bool = True,
+                               enable_price_surge_guard: bool = True) -> dict:
     """商品管理シートの D 列 (売り切れ) / O 列 (チェック時間) / 現在価格列 / K 列 (ポイント) を batch 更新.
 
     ★ 2026-07-22 HQ 依頼で書き先を N→M へ変更 + K 追加 (N は関数化するため誰も書かない)。
@@ -257,11 +322,19 @@ def update_listings_sold_marks(ws, updates: list,
         エラー行 → marker 文字列 / 成功行 → "" (clear)。キー不在の行は AK を touch しない。
 
     Returns: {"updated": N, "d_writes": N, "o_writes": N, "m_writes": N, "k_writes": N,
-              "ah_writes": N, "err_writes": N}
+              "ah_writes": N, "err_writes": N, "surge_held": [supplier...], "surge_stats": {...}}
     """
     if not updates:
         return {"updated": 0, "d_writes": 0, "o_writes": 0, "m_writes": 0, "k_writes": 0,
-                "ah_writes": 0, "err_writes": 0}
+                "ah_writes": 0, "err_writes": 0, "surge_held": [], "surge_stats": {}}
+
+    # ── 価格急増ガード (supplier 単位) ──
+    # scraper 系統崩壊で多数行に誤価格が一括 landing する事故を防ぐ。HOLD 対象 supplier の行は
+    # M/K 書込のみ skip (D/O は下で通常どおり書く = 取下げは絶対止めない)。
+    surge_held: set = set()
+    surge_stats: dict = {}
+    if enable_price_surge_guard:
+        surge_held, surge_stats = detect_price_surge(updates)
 
     cell_updates = []
     d_writes = 0
@@ -270,6 +343,7 @@ def update_listings_sold_marks(ws, updates: list,
     k_writes = 0
     ah_writes = 0
     err_writes = 0
+    m_held = 0   # 急増ガードで M 書込を見送った行数
     for u in updates:
         row_idx = u["row_index"]
         checked_at = u.get("checked_at") or datetime.now().strftime("%Y/%m/%d %H:%M:%S")
@@ -290,8 +364,12 @@ def update_listings_sold_marks(ws, updates: list,
 
         # M 列 (現在価格): price_jpy が int で渡された場合のみ書込。None / 不在 / 非 int は触らない。
         # ★ 2026-07-22: 旧実装は N(14) に書いていたが、 N はシート関数化するため書き先を M(12) に変更。
+        # ★ 2026-07-23: 価格急増ガードで HOLD 対象 supplier の行は M/K 書込を skip (D/O は通常どおり)。
         price_jpy = u.get("price_jpy")
-        if isinstance(price_jpy, int) and not isinstance(price_jpy, bool) and price_jpy >= 0:
+        if (u.get("supplier") or "unknown") in surge_held:
+            if isinstance(price_jpy, int) and not isinstance(price_jpy, bool) and price_jpy >= 0:
+                m_held += 1   # 本来 M を書く行を急増ガードで見送った (= stale 維持、fail-closed)
+        elif isinstance(price_jpy, int) and not isinstance(price_jpy, bool) and price_jpy >= 0:
             # AH 列 (前期 N): M を上書きする前に read 時の N 計算値 (prev_n_jpy_str) をコピー
             # (= "前 cycle の N" を保存)。 N 関数化後は N セルの計算値を退避する形になる。
             prev_n_str = u.get("prev_n_jpy_str", "")
@@ -332,7 +410,8 @@ def update_listings_sold_marks(ws, updates: list,
     ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
     return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes,
             "m_writes": m_writes, "k_writes": k_writes, "ah_writes": ah_writes,
-            "err_writes": err_writes}
+            "err_writes": err_writes, "m_held": m_held,
+            "surge_held": sorted(surge_held), "surge_stats": surge_stats}
 
 
 def _col_letter(n: int) -> str:

@@ -225,7 +225,7 @@ def _phase_monitor(
             targets.append(("LOW", l_id))
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0,
              "url_alerts_count": 0, "by_sheet": {}, "error_rows": [],
-             "persistent_err_rows": []}
+             "persistent_err_rows": [], "price_surge": []}
 
     # ProgressWriter を monitor_listings の callback として食わせる
     progress_callback = None
@@ -251,9 +251,47 @@ def _phase_monitor(
             # 持続エラー (連続3回以上) も sheet 跨ぎ集約 → メール別掲用
             for pr in (stats.get("persistent_err_rows") or []):
                 grand["persistent_err_rows"].append({**pr, "sheet": label})
+            # 価格急増ガード発火 (supplier 単位) を sheet 跨ぎ集約 → cycle 後に ALERT 別掲
+            for sup in (stats.get("price_surge_held") or []):
+                st = (stats.get("price_surge_stats") or {}).get(sup, {})
+                grand["price_surge"].append({"sheet": label, "supplier": sup, **st})
         except Exception as e:
             _log(f"  [NG] [{label}] 例外: {type(e).__name__}: {e}", test_mode)
             grand["by_sheet"][label] = {"error": f"{type(e).__name__}: {e}"}
+
+    # ★ 価格急増ガード ALERT: scraper 系統崩壊で M/K が HOLD された = 要 DOM 確認。
+    #   pythonw (Task Scheduler) 下でも気づけるよう desktop ALERT file + mail で必ず告知 (非 silent)。
+    #   D/O (取下げ) は正常書込のため fail-OPEN ではないが、価格 stale 放置は出品機会損失につながる。
+    if grand["price_surge"]:
+        _lines = [f"  - [{s['sheet']}] {s['supplier']}: 急変 {s.get('surged','?')}/{s.get('total','?')} 行 "
+                  f"(ratio={s.get('ratio','?')})" for s in grand["price_surge"]]
+        _msg = ("価格急増ガードが発火し、以下 supplier の M(現在価格)/K(ポイント) 書込を HOLD しました。\n"
+                "scraper の DOM 構造変化で系統的に誤価格を拾っている疑いがあります。\n"
+                "DOM 検体を採取し marker/regex を確認してください (fail-closed のため誤汚染ではなく "
+                "価格 stale 側 = 安全)。D/O (取下げ) は正常書込のため取下げ漏れはありません。\n\n"
+                + "\n".join(_lines))
+        _log(f"  [★価格急増ガード] {len(grand['price_surge'])} supplier HOLD → ALERT 発報", test_mode)
+        _notify_toast("iMakInventory 価格急増ガード発火", _msg[:200])
+        try:
+            desk = (Path.home() / "OneDrive" / "デスクトップ"
+                    / f"ALERT_iMakInventory_price_surge_"
+                      f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+            desk.write_text(_msg, encoding="utf-8")
+            _log(f"  [★価格急増ガード] desktop ALERT 出力: {desk.name}", test_mode)
+        except Exception as e:
+            _log(f"  [!] 価格急増ガード desktop alert 失敗: {type(e).__name__}: {e}", test_mode)
+        try:
+            from email_notifier import _send_via_gmail  # noqa: PLC0415
+            from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
+            _cfg = load_gmail_config()
+            if _cfg:
+                _a, _p, _t = _cfg
+                _send_via_gmail(_a, _p, _t,
+                                "[★iMakInventory] 価格急増ガード発火 (scraper系統崩壊疑い / 価格書込HOLD)",
+                                _msg)
+                _log("  [★価格急増ガード] alert mail 送信", test_mode)
+        except Exception as e:
+            _log(f"  [!] 価格急増ガード mail 失敗: {type(e).__name__}: {e}", test_mode)
     return grand
 
 

@@ -54,6 +54,7 @@ from sheet_updater import (  # noqa: E402
     LISTINGS_GID,
     LISTINGS_COL_PRICE_NOW_M,
     LISTINGS_COL_PRICE_NOW,
+    PRICE_SURGE_THRESHOLD,
     _col_letter,
     open_sheet_by_id,
     get_listings_worksheet,
@@ -289,6 +290,8 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
         "candidates_checked": len(sub_results),
         # AH 列 (前期 N) 用: read 時に取得した N 列値を引き継ぐ。書込時にここを AH へコピー
         "current_n_jpy_str": row.get("current_n_jpy_str", ""),
+        # 価格急増ガード用: 前 cycle に書いた M(現在価格)。新 price_jpy と like-with-like 比較する
+        "current_m_jpy_str": row.get("current_m_jpy_str", ""),
         # AK 列 (巡回ERR) 前 cycle marker を引き継ぐ。2026-06-16 追加: これが欠落していたため
         # 書込ループの clear_err が常に False = 成功してもクリア不発火 (古い marker が無限残留)、
         # かつ error 再mark 時も count が常に ×1 (= PERSISTENT_THRESHOLD「要手動chk」永久不発火)。
@@ -909,6 +912,8 @@ def process_sheet(
                                          and not isinstance(_pts, bool) and _pts >= 0 else 0)
             updates.append(upd)
 
+    price_surge_held: list = []    # 価格急増ガードで M/K を HOLD した supplier (return で run_cycle へ)
+    price_surge_stats: dict = {}
     if dry_run:
         log("  [DRY RUN] スプシ書込 skip")
         for r in [x for x in results if x["delta"] in ("newly_sold", "newly_in_stock")][:10]:
@@ -933,6 +938,17 @@ def process_sheet(
                 ws, updates, price_col_idx=price_col, enable_points=True)
             _price_letter = _col_letter(price_col)
             log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
+            # ★ 価格急増ガード: HOLD 対象 supplier があれば prominent に告知 (非 silent)。
+            #   D/O(取下げ) は書けている = fail-OPEN ではない。M/K(価格) のみ保留 = 誤汚染を防ぐ側。
+            price_surge_held = res.get("surge_held") or []
+            price_surge_stats = res.get("surge_stats") or {}
+            if price_surge_held:
+                _held_desc = ", ".join(
+                    f"{s}({price_surge_stats.get(s, {}).get('surged', '?')}/{price_surge_stats.get(s, {}).get('total', '?')})"
+                    for s in price_surge_held)
+                log(f"  [★価格急増ガード発火] supplier={_held_desc} の M/K 書込を HOLD "
+                    f"(前M比 ±{int(PRICE_SURGE_THRESHOLD*100)}%超が過半)。見送り {res.get('m_held', 0)} 行。"
+                    f"scraper 系統崩壊疑い → 要 DOM 検体確認。D/O は正常書込。")
         except Exception as e:
             log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())
@@ -986,6 +1002,8 @@ def process_sheet(
         "url_alerts":           url_alerts,
         "error_rows":           error_rows,
         "persistent_err_rows":  persistent_err_rows,
+        "price_surge_held":     price_surge_held,   # 価格急増ガードで HOLD した supplier 一覧
+        "price_surge_stats":    price_surge_stats,
     }
 
 
