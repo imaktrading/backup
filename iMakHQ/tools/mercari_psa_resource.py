@@ -177,28 +177,51 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
     return out
 
 
-def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite", limit=12):
+def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite",
+                                limit=12, title_hint=""):
     """card番号 → その番号の catalog 変種候補 [{product_id,name_jp,set,image}]。
 
     KEY未解決の行で「正しい変種をユーザーが選ぶ」ための候補(確認ゲート②)。完全一致を先頭、
     以降 product_id 昇順。'P-041' は P-041 / P-041_D / P-041_ST18 … の様に suffix違いを束ねる
     (P-0419 等の別番号を拾わないよう exact OR '<card_no>_%' に限定)。失敗/空は []。
+
+    ★2026-07-24 フォールバック: Pokemon 等は eBay タイトルの card番号が「038/095」形式
+    (コレクター番号)で、catalog の product_id はセットコード形式(SM9-038)のため product_id
+    一致では 0件 → 目視ゲートに候補が出ない(RESTOCK再仕入れが回らない)不具合があった。
+    product_id で引けず card_no が NNN/NNN 形式なら、specs.card_number_text で再検索する。
+    複数セットが同じコレクター番号を持つため、title_hint(eBayタイトル)にキャラ名(name_en)が
+    含まれる候補を上位に並べて特定を助ける(fail-closed: 確定はユーザー目視)。
     """
     if not card_no:
         return []
     import json
+    import re as _re
     import sqlite3
+    _cols = "product_id, name_jp, set_name, images, specs, language, name_en"
     try:
         con = sqlite3.connect(_db)
         rows = con.execute(
-            "SELECT product_id, name_jp, set_name, images, specs, language FROM products "
+            f"SELECT {_cols} FROM products "
             "WHERE product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE",
             (card_no, card_no + "_%")).fetchall()
+        # フォールバック: product_id 不一致 かつ コレクター番号形式 → card_number_text で再検索
+        if not rows and _re.fullmatch(r"\d{1,3}/[A-Za-z0-9]{1,4}", card_no.strip()):
+            rows = con.execute(
+                f"SELECT {_cols} FROM products "
+                "WHERE json_extract(specs,'$.card_number_text')=?", (card_no.strip(),)).fetchall()
         con.close()
     except Exception:
         return []
+    _hint = (title_hint or "").lower()
+
+    def _name_in_hint(name_en):
+        # name_en の識別トークン(4字以上の英単語)が title_hint に含まれれば一致とみなす
+        toks = [t for t in _re.findall(r"[A-Za-z]{4,}", (name_en or "")) if t.lower() not in
+                ("card", "japanese", "pokemon", "promo")]
+        return any(t.lower() in _hint for t in toks) if toks else False
+
     out = []
-    for pid, nj, sn, imgs, specs, lang in rows:
+    for pid, nj, sn, imgs, specs, lang, nen in rows:
         if "dummy" in (pid or "").lower():     # catalog内部のダミー行は候補から除外(実在変種でない)
             continue
         # 英語版は別カード(=100%違う)。Japanese PSA再仕入れなので en / both(英語表記併合) を除外。
@@ -221,8 +244,12 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
                     # 画像が死んでても変種を text で特定できるよう識別属性も返す(alt_art/rarity/入手元)
                     "variant_type": (sp.get("variant_type") or "").strip(),
                     "rarity": (sp.get("rarity") or "").strip(),
-                    "get_info": (sp.get("get_info") or "").strip()})
-    out.sort(key=lambda d: (d["product_id"] != card_no, d["product_id"]))
+                    "get_info": (sp.get("get_info") or "").strip(),
+                    "_hint_match": _name_in_hint(nen)})
+    # 並び: ①完全一致 product_id ②title のキャラ名一致(fallbackの複数セット絞り) ③product_id 昇順
+    out.sort(key=lambda d: (d["product_id"] != card_no, not d["_hint_match"], d["product_id"]))
+    for d in out:
+        d.pop("_hint_match", None)
     return out[:limit]
 
 

@@ -414,7 +414,9 @@ def main():
             # ② 候補: その card番号の catalog 変種(ユーザーが正しい変種を選ぶ)。
             # 題名から取れない△variant等は「PSA番号補完」(Catalog確定のbase番号)で補う → ②候補が出る。
             card_no = _resource_card_number(r.get("title", "") or "", r.get("key")) or cardno_override.get(iid, "")
-            variants = mp.catalog_variants_for_cardno(card_no)
+            # title_hint = eBayタイトル。Pokemon等 コレクター番号(NNN/095)fallback時に
+            # 同番号の複数セットからキャラ名でユーザー特定を助ける(2026-07-24)。
+            variants = mp.catalog_variants_for_cardno(card_no, title_hint=r.get("title", "") or "")
             # 解決済KEY自身は必ず候補に含める(card番号ヒット漏れ/大小文字差でも②が出る・既定選択)
             rk = r.get("key")
             if rk and not any(c["product_id"] == rk for c in variants):
