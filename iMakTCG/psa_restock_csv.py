@@ -2603,14 +2603,15 @@ def main():
             today = datetime.now().strftime("%Y-%m-%d")
 
             if not market:
-                # 競合0件: 目標利益確保価格と$100の高い方で先行出品
+                # 競合0件: V8/V9 SSOT 価格 (pricing_engine) と $100 の高い方で先行出品
+                # (2026-07-23: psa_to_csv と同時修正。旧レガシー式は SSOT と数ドルずれるため廃止)
                 if cost_jpy is not None:
-                    tier_profit, _ = get_tier_params(100)  # $100帯のパラメータ
-                    costs_jpy = cost_jpy + SHIPPING_JPY
-                    min_price = costs_jpy / (EXCHANGE_RATE * (NET_RATIO - tier_profit))
-                    min_price = max(min_price, 100)
-                    min_price = round(min_price, 2)
+                    from pricing_engine import compute_listing_price as _pe_compute
+                    _pr = _pe_compute(cost_jpy, 0, "TCG(PSA10)")
+                    min_price = round(_pr["target_usd"], 2)
                     min_price = int(min_price) + 0.98 if min_price > 10 else min_price
+                    if min_price < 100:
+                        min_price = 100.98
                 else:
                     min_price = 100.00
                 # CSVの価格を更新
