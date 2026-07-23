@@ -1,0 +1,1648 @@
+{
+  "timestamp": "2026-06-14T08:12:01.386042",
+  "dry_run": false,
+  "price_cap": 0,
+  "keywords": [
+    "ワンピース　PSA10"
+  ],
+  "candidates": 233,
+  "one_piece_models": 233,
+  "cards_with_psa10": 233,
+  "total_psa10_listings": 3850,
+  "supplement": 31,
+  "new_candidate": 202,
+  "written": 233,
+  "cards": [
+    {
+      "card_id": "ST30-001",
+      "name": "Luffy & Ace L-P [ST30-001] (Start Deck EX \"Luffy&Ace Bonus Pack\")",
+      "cheapest": 365000,
+      "n_listings": 25,
+      "supplement": false
+    },
+    {
+      "card_id": "ST10-006",
+      "name": "Monkey.D.Luffy SR [ST10-006](Promotional Card \"ONE PIECE DAY'24 Visitor Benefits\")",
+      "cheapest": 124900,
+      "n_listings": 49,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey.D.Luffy SEC-SPC :3th Anniversary Special Card (Gold Background) [OP05-119](Booster Pack \"A Fist of Divine Speed\")",
+      "cheapest": 2200000,
+      "n_listings": 7,
+      "supplement": false
+    },
+    {
+      "card_id": "P-033",
+      "name": "Monkey.D.Luffy P [P-033] [EN](Promotional Card \"Championship 2023 Event Pack Finalist Ver.\")",
+      "cheapest": 22500000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "ST21-015",
+      "name": "Roronoa Zoro SR [ST21-015](Promotional Card \"Flagship Battle Top 8 Souvenirs\")",
+      "cheapest": 91000,
+      "n_listings": 53,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-001",
+      "name": "Monkey D Luffy L Serial Number (Opened) [ST01-001] (Flagship Battle Victory souvenir)",
+      "cheapest": 16000000,
+      "n_listings": 3,
+      "supplement": false
+    },
+    {
+      "card_id": "OPCD-098",
+      "name": "DON!! Card : Robin & Uta & Nami & Hancock Super Parallel [Opened](Extra Booster \"Heroines Edition Special Set\")",
+      "cheapest": 75000,
+      "n_listings": 48,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-061",
+      "name": "Monkey.D.Luffy SEC-SP (Comic Parallel) [EB02-061](Extra Booster \"Anime 25th Collection\")",
+      "cheapest": 922200,
+      "n_listings": 15,
+      "supplement": false
+    },
+    {
+      "card_id": "OP14-112",
+      "name": "Boa Hancock SR :Top Prize [OP14-112](Promotional Card \"Championship 26-27 Season 1 BCGFest Qualifiers\")",
+      "cheapest": 3999999,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-119",
+      "name": "Portgas D Ace SEC-P Serial Number (Opened) [OP07-119] (Flagship Battle Souvenir)for Japan",
+      "cheapest": 1130000,
+      "n_listings": 14,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-118",
+      "name": "Monkey.D.Luffy SEC-RSP (Red Comic Parallel) [OP13-118](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 4200000,
+      "n_listings": 7,
+      "supplement": false
+    },
+    {
+      "card_id": "OP-P-041",
+      "name": "Monkey D Luffy (Gear 5) P [P-041] (Promotion Card Seven-Eleven Collaboration)",
+      "cheapest": 4100,
+      "n_listings": 27,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-012",
+      "name": "Monkey D Luffy SR-P [ST01-012] (Booster Pack Awakening of the New Era)",
+      "cheapest": 1850000,
+      "n_listings": 24,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-120",
+      "name": "Shanks SEC-SP (Comic Parallel) [OP01-120](Booster Pack \"ROMANCE DAWN\")",
+      "cheapest": 335000,
+      "n_listings": 24,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-051",
+      "name": "Boa Hancock SR-SP (Comic Parallel) [OP07-051](Booster Pack \"The Future After 500 years\")",
+      "cheapest": 384999,
+      "n_listings": 20,
+      "supplement": false
+    },
+    {
+      "card_id": "CS25-26WF-DON",
+      "name": "DON!! Card (Luffy) :Participation :Opened(Promotional Card \"Championship 25-26 World Final\")",
+      "cheapest": 3333333,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-016",
+      "name": "Nami [OP01-016] [CHN] (1st Anniversary set)",
+      "cheapest": 1100000,
+      "n_listings": 6,
+      "supplement": true
+    },
+    {
+      "card_id": "OP15-118",
+      "name": "Enel SEC-SP (Comic Parallel) [OP15-118](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 240000,
+      "n_listings": 38,
+      "supplement": false
+    },
+    {
+      "card_id": "OP02-059",
+      "name": "Boa Hancock UC-P [OP02-059] (Booster Pack Final Battle)",
+      "cheapest": 38500,
+      "n_listings": 24,
+      "supplement": false
+    },
+    {
+      "card_id": "EB04-061",
+      "name": "Monkey.D.Luffy SEC :Serial Numbered :Champion's Prize :Opened [EB04-061](Promotional Card \"Flagship Battle\")",
+      "cheapest": 3100000,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "OP02-013",
+      "name": "Portgas.D.Ace SR-SP (Comic Parallel) [OP02-013](Premium Booster \"One Piece Card The Best\")",
+      "cheapest": 800000,
+      "n_listings": 4,
+      "supplement": false
+    },
+    {
+      "card_id": "OP06-118",
+      "name": "Roronoa Zoro SEC-SP (Comic Parallel) [OP06-118](Booster Pack \"Wings Of The Captain\")",
+      "cheapest": 450000,
+      "n_listings": 25,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-001",
+      "name": "Monkey.D.Luffy L [ST01-001](\"Family Deck Set\")",
+      "cheapest": 400000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-120",
+      "name": "Sabo SEC-RSP (Red Comic Parallel) [OP13-120](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 819000,
+      "n_listings": 8,
+      "supplement": false
+    },
+    {
+      "card_id": "ST17-004",
+      "name": "Boa Hancock SR-P [ST17-004](Premium Booster \"One Piece Card The Best Storage Box Set\")",
+      "cheapest": 723000,
+      "n_listings": 11,
+      "supplement": false
+    },
+    {
+      "card_id": "ST16-001",
+      "name": "Uta SR-P [ST16-001](Premium Booster \"One Piece Card The Best Storage Box Set\")",
+      "cheapest": 185000,
+      "n_listings": 11,
+      "supplement": true
+    },
+    {
+      "card_id": "OP01-016",
+      "name": "Nami [OP01-016] [CHN] (1st Anniversary set)",
+      "cheapest": 7800000,
+      "n_listings": 1,
+      "supplement": true
+    },
+    {
+      "card_id": "OP04-001",
+      "name": "Nefertari Vivi L-P [OP04-001] (Booster Pack The Kingdom Of Conspiracy)",
+      "cheapest": 54500,
+      "n_listings": 28,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-060",
+      "name": "Monkey.D.Luffy L-SPC [OP05-060](Extra Booster \"Anime 25th Collection\")",
+      "cheapest": 1200000,
+      "n_listings": 6,
+      "supplement": true
+    },
+    {
+      "card_id": "P-043",
+      "name": "Monkey.D.Luffy P :Participation Prize [P-043][EN](Promotional Card \"Dreamhack Dallas 2024\")",
+      "cheapest": 150000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-001",
+      "name": "Monkey D Luffy L [ST01-001] (Weekly Shonen Jump 2023 6th and 7th issue All applicants service Recafig)",
+      "cheapest": 128000,
+      "n_listings": 40,
+      "supplement": false
+    },
+    {
+      "card_id": "OP06-119",
+      "name": "Sanji SEC-SP (Comic Parallel) [OP06-119](Premium Booster \"One Piece Card The Best vol.2\")",
+      "cheapest": 280000,
+      "n_listings": 21,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-060",
+      "name": "Monkey.D.Luffy L [OP05-060] [EN](PSA Exclusive Collaboration Promo Card)",
+      "cheapest": 238000,
+      "n_listings": 23,
+      "supplement": true
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey.D.Luffy SEC-SP (Comic Parallel) [OP05-119](Booster Pack \"Awakening Of The New Era\")",
+      "cheapest": 1530000,
+      "n_listings": 17,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-119",
+      "name": "Monkey.D.Luffy SEC [OP09-119](Promotional Card \"3rd ANNIVERSARY SET\")",
+      "cheapest": 126000,
+      "n_listings": 44,
+      "supplement": false
+    },
+    {
+      "card_id": "PRB02-006",
+      "name": "Roronoa Zoro R-SPC [PRB02-006](Extra Booster \"EGGHEAD CRISIS\")",
+      "cheapest": 177999,
+      "n_listings": 20,
+      "supplement": false
+    },
+    {
+      "card_id": "OP02-099",
+      "name": "Sakazuki SR-P [OP02-099] (Champion Ship Prize)",
+      "cheapest": 20000000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP11-054",
+      "name": "Nami SR [OP11-054](Promotional Card \"3rd ANNIVERSARY SET\")",
+      "cheapest": 74000,
+      "n_listings": 34,
+      "supplement": false
+    },
+    {
+      "card_id": "ST10-010",
+      "name": "Trafalgar Law SR [ST10-010] (Champion Ship Prize)",
+      "cheapest": 980000,
+      "n_listings": 11,
+      "supplement": false
+    },
+    {
+      "card_id": "P-055",
+      "name": "Monkey.D.Luffy : P (Opened) [P-055] [EN] (Promotional Card \"ONE PIECE COLLEGE BASKETBALL : US VOYAGE\")",
+      "cheapest": 142998,
+      "n_listings": 98,
+      "supplement": false
+    },
+    {
+      "card_id": "EB04-061",
+      "name": "Monkey.D.Luffy SEC :Serial Numbered :Champion's Prize :Opened [EB04-061] [Aisa ver.] (Promotional Card \"Flagship Battle 2026 April May\")",
+      "cheapest": 2500000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-078",
+      "name": "Boa Hancock SR-SPC [OP01-078] (Booster Pack The Kingdom Of Conspiracy)",
+      "cheapest": 194900,
+      "n_listings": 21,
+      "supplement": true
+    },
+    {
+      "card_id": "ST13-003",
+      "name": "Monkey.D.Luffy L [ST13-003] [EN](Promotional Card \"BVB x ONE PIECE Matchday 2025\")",
+      "cheapest": 390000,
+      "n_listings": 62,
+      "supplement": false
+    },
+    {
+      "card_id": "OPC-P-001",
+      "name": "Monkey D. Luffy P-P  [P-001] (Premium Card Collection 25th Anniversary Edition)",
+      "cheapest": 44999,
+      "n_listings": 49,
+      "supplement": false
+    },
+    {
+      "card_id": "ST30-001",
+      "name": "Luffy & Ace L [ST30-001] (Start Deck EX \"Luffy&Ace\")",
+      "cheapest": 110000,
+      "n_listings": 4,
+      "supplement": false
+    },
+    {
+      "card_id": "OP14-112",
+      "name": "Boa Hancock SR-SPC :Japanese pattern Art [OP14-112](Booster Pack \"THE AZURE SEA'S SEVEN\")",
+      "cheapest": 154000,
+      "n_listings": 20,
+      "supplement": false
+    },
+    {
+      "card_id": "ST18-005",
+      "name": "Luffy Taro SR-SPC [ST18-005](Booster Pack \"A Fist of Divine Speed\")",
+      "cheapest": 144000,
+      "n_listings": 21,
+      "supplement": false
+    },
+    {
+      "card_id": "OP14-033",
+      "name": "Perona SR :Top Prize [OP14-033](Promotional Card \"Extra Grand Battle\")",
+      "cheapest": 100000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP10-005",
+      "name": "Sanji SR :Champion's Prize [OP10-005](Promotional Card \"Flagship Battle\")",
+      "cheapest": 340000,
+      "n_listings": 15,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-119",
+      "name": "Monkey.D.Luffy SEC-SP (Comic Parallel) [OP09-119](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 459800,
+      "n_listings": 21,
+      "supplement": false
+    },
+    {
+      "card_id": "OP02-099",
+      "name": "Sakazuki SR-P [OP02-099] [EN](Promotional Card \"Championship 2023 Souvenir\")",
+      "cheapest": 1100000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "ST13-003",
+      "name": "Monkey.D.Luffy L [ST13-003](Promotional Card \"Seven-Eleven Collaboration\")",
+      "cheapest": 49999,
+      "n_listings": 5,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-120",
+      "name": "Shanks SEC-P (Opened) [OP01-120](Flagship Battle Victory souvenir) for Japan",
+      "cheapest": 920000,
+      "n_listings": 18,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-002",
+      "name": "Uta R [OP09-002](Promotional Card \"Flagship Battle Victory Souvenir\")",
+      "cheapest": 275000,
+      "n_listings": 19,
+      "supplement": false
+    },
+    {
+      "card_id": "OP06-101",
+      "name": "Onami R-SPC [OP06-101] (Booster Pack 500 Yeas in the Future)",
+      "cheapest": 95000,
+      "n_listings": 53,
+      "supplement": false
+    },
+    {
+      "card_id": "P-112",
+      "name": "Nami P :Participation Prize [P-112](Promotional Card \"Crew Battle Straw Hat Crew Only Tournament\")",
+      "cheapest": 50000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP12-020",
+      "name": "Roronoa Zoro : L :Serial Numbered :Winner Prize :Opened [OP12-020 ](Promotional Card \"Flagship Battle 2026 January\")",
+      "cheapest": 1400000,
+      "n_listings": 12,
+      "supplement": false
+    },
+    {
+      "card_id": "OP08-105",
+      "name": "Jewelry Bonney SR-P [OP08-105](Premium Booster \"One Piece Card The Best Storage Box Set\")",
+      "cheapest": 245000,
+      "n_listings": 5,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-016",
+      "name": "Nami R [OP01-016] [EN](1st Anniversary Set)",
+      "cheapest": 500000,
+      "n_listings": 2,
+      "supplement": true
+    },
+    {
+      "card_id": "ST30-012",
+      "name": "Monkey.D.Luffy SR-P [ST30-012] (Start Deck EX \"Luffy&Ace Bonus Pack\")",
+      "cheapest": 245000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "ST13-003",
+      "name": "Monkey.D.Luffy L-P [ST13-003](Premium Card Collection \"Leader Collection\")",
+      "cheapest": 110000,
+      "n_listings": 10,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-012",
+      "name": "Monkey.D.Luffy : Wanted SR-SPC [ST01-012](Booster Pack Formidable Enemy)",
+      "cheapest": 89500,
+      "n_listings": 25,
+      "supplement": false
+    },
+    {
+      "card_id": "ST10‐006/OP01‐02/OP01‐013/OP01‐017/ST01‐006",
+      "name": "Nico Robin R [OP01-017] [CHN] (1st Anniversary set)",
+      "cheapest": 555555,
+      "n_listings": 4,
+      "supplement": false
+    },
+    {
+      "card_id": "OPCD-104",
+      "name": "DON!! Card : Kumamon & Luffy (Premium Card Collection \"Kumamoto Special\")",
+      "cheapest": 175000,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey.D.Luffy SEC-SPC :3th Anniversary Special Card (Silver Background) [OP05-119](Booster Pack \"A Fist of Divine Speed\")",
+      "cheapest": 1050000,
+      "n_listings": 13,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-010",
+      "name": "Monkey.D.Luffy L [EB02-010] [EN](Promotional Card \"ONE PIECE Card Game x Los Angeles Dodgers\")",
+      "cheapest": 780000,
+      "n_listings": 33,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-004",
+      "name": "Shanks SR : final tournament Best 32 [OP09-004](Promotional Card \"Championship 2025\")",
+      "cheapest": 12000000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP03-112",
+      "name": "Charlotte Pudding R [OP03-112](Promotional Card \"Championship 2024 Souvenir\")",
+      "cheapest": 395000,
+      "n_listings": 5,
+      "supplement": false
+    },
+    {
+      "card_id": "ST14-001",
+      "name": "Monkey.D.Luffy L [ST14-001](Start Deck \"3D2Y\")",
+      "cheapest": 139999,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-093",
+      "name": "Marshall.D.Teach SR-SP (Comic Parallel) [OP09-093](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 290000,
+      "n_listings": 19,
+      "supplement": false
+    },
+    {
+      "card_id": "OPC-P-022",
+      "name": "Monkey D Luffy [P-022]  (「ONE PIECE FILM RED」Attendant's Benefits Tutorial Deck)",
+      "cheapest": 138000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "P-072",
+      "name": "Ryuma P [P-072] ([Monsters: 103 Mercies Dragon Damnation] Official Guidebook DVD Include BOX OWAZABAKO)",
+      "cheapest": 250000,
+      "n_listings": 13,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-003",
+      "name": "Monkey D Luffy L-P [OP01-003] (Booster Pack ROMANCE DAWN)",
+      "cheapest": 149800,
+      "n_listings": 26,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-086",
+      "name": "Nefeltari Vivi R [OP05-086](Promotional Card \"Championships 2024 Souvenirs\")",
+      "cheapest": 900000,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-061",
+      "name": "Monkey.D.Luffy L [OP09-061] [EN](ANNIVERSARY SET \"English 2nd ANNIVERSARY SET English Ver.\")",
+      "cheapest": 444444,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-051",
+      "name": "Boa Hancock SR-P [OP07-051](ONE PIECE Card Game \"China 2nd ANNIVERSARY SET Japanese Ver.\")",
+      "cheapest": 280000,
+      "n_listings": 11,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-004",
+      "name": "Shanks SR-SP (Comic Parallel) [OP09-004](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 300000,
+      "n_listings": 15,
+      "supplement": false
+    },
+    {
+      "card_id": "OP10-111",
+      "name": "Monkey.D.Luffy R [OP10-111](Premium Card Collection \"6 assort vol.1\")",
+      "cheapest": 135000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "P-061",
+      "name": "Monkey D Luffy P [P-061] (ONE PIECE Card Game Encore Pack)",
+      "cheapest": 72000,
+      "n_listings": 5,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-120",
+      "name": "Shanks SEC-SP (Comic Parallel) [OP01-120](Premium Booster \"One Piece Card The Best\")",
+      "cheapest": 1000000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-001",
+      "name": "Roronoa Zoro L [OP01-001] (Weekly Shonen Jump 2024 Issue 3 All Applicants Service Recafig)",
+      "cheapest": 159000,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "OPCD-099",
+      "name": "DON!! Card : Boa Hancock Super Parallel (Extra Booster \"ONE PIECE Heroines edition\")",
+      "cheapest": 84800,
+      "n_listings": 12,
+      "supplement": false
+    },
+    {
+      "card_id": "OP15-118",
+      "name": "Enel SEC [OP15-118](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 39000,
+      "n_listings": 3,
+      "supplement": false
+    },
+    {
+      "card_id": "EB03-026",
+      "name": "Boa Hancock SR-SPC [EB03-026](Extra Booster \"ONE PIECE Heroines edition\")",
+      "cheapest": 325500,
+      "n_listings": 26,
+      "supplement": false
+    },
+    {
+      "card_id": "OP14-120",
+      "name": "Crocodile SEC :Top Prize [OP14-120](Promotional Card \"Championship 26-27 Season 1 BCGFest Qualifiers\")",
+      "cheapest": 1380000,
+      "n_listings": 3,
+      "supplement": false
+    },
+    {
+      "card_id": "OP02-096",
+      "name": "Kuzan SR-P [OP02-096] (Champion Ship Prize)",
+      "cheapest": 2200000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-051",
+      "name": "Boa Hancock SR-P [OP07-051] [CN](\"2nd ANNIVERSARY SET\"CN)",
+      "cheapest": 649000,
+      "n_listings": 5,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-051",
+      "name": "Boa Hancock SR [OP07-051] [CN](\"2nd ANNIVERSARY SET\"CN)",
+      "cheapest": 175000,
+      "n_listings": 19,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-038",
+      "name": "Boa Hancock L-SPC [OP07-038](Extra Booster \"Anime 25th Collection\")",
+      "cheapest": 540000,
+      "n_listings": 8,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-050",
+      "name": "Nami R-P [OP09-050](Promotional Card \"Let's Get Started Campaign Promotion Pack\")",
+      "cheapest": 140000,
+      "n_listings": 13,
+      "supplement": true
+    },
+    {
+      "card_id": "OP13-118",
+      "name": "Monkey.D.Luffy SEC-SP (Comic Parallel) [OP13-118](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 495000,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "OP15-086",
+      "name": "Nami SR-P [OP15-086][EN](Booster Pack \"ADVENTURE ON KAMI’S ISLAND\")",
+      "cheapest": 350000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-001",
+      "name": "Monkey D Luffy L [ST01-001] (Start Deck Straw Hat Pirates)",
+      "cheapest": 57800,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "ST21-014",
+      "name": "Monkey.D.Luffy SR [ST21-014](Promotional Card \"ONE PIECE magazine Special Feature Weekly Shonen Jump & ONE PIECE 020\")",
+      "cheapest": 55000,
+      "n_listings": 115,
+      "supplement": true
+    },
+    {
+      "card_id": "EB02-006",
+      "name": "Yamato SR :Serial Numbered :Champion's Prize :Opened [EB02-006](Promotional Card \"Extra Grand Battle\")",
+      "cheapest": 1000000,
+      "n_listings": 5,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-118",
+      "name": "Monkey.D.Luffy SEC-P [OP13-118](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 76900,
+      "n_listings": 72,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-119",
+      "name": "Portgas.D.Ace SEC-RSP (Red Comic Parallel) [OP13-119](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 1485000,
+      "n_listings": 5,
+      "supplement": false
+    },
+    {
+      "card_id": "OP-P-001",
+      "name": "Monkey D Luffy P [P-001] (Promotion Card Seven-Eleven Collaboration)",
+      "cheapest": 128000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "EB03-024",
+      "name": "Nefeltari Vivi SR-SPC [EB03-024](Extra Booster \"ONE PIECE Heroines edition\")",
+      "cheapest": 108000,
+      "n_listings": 11,
+      "supplement": false
+    },
+    {
+      "card_id": "OPCD-005",
+      "name": "DON!! Card -Luffy- (Booster Pack \"ROMANCE DAWN\")",
+      "cheapest": 100000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-070",
+      "name": "Nami UC [OP09-070](Premium Card Collection \"Best Selection vol.4\")",
+      "cheapest": 98000,
+      "n_listings": 4,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-020",
+      "name": "We are !! R [EB02-020](Extra Booster \"Anime 25th Collection\")",
+      "cheapest": 77777,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-004",
+      "name": "Shanks : Gold Background SR-SPC :3th Anniversary Special Card [OP09-004](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 339500,
+      "n_listings": 11,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-109",
+      "name": "Monkey.D.Luffy SR [OP07-109](Premium Card Collection \"- ONE PIECE DAY'24 -\")",
+      "cheapest": 33000,
+      "n_listings": 80,
+      "supplement": true
+    },
+    {
+      "card_id": "ST21-001",
+      "name": "Monkey.D.Luffy L-P [ST21-001](Start Deck EX \"Gear 5\")",
+      "cheapest": 123000,
+      "n_listings": 37,
+      "supplement": false
+    },
+    {
+      "card_id": "OP02-013",
+      "name": "Portgas.D.Ace SR [OP02-013](Special Goods Set \"2nd ANNIVERSARY SET\")",
+      "cheapest": 71500,
+      "n_listings": 24,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-118",
+      "name": "Gol D. Roger SEC-GSP [OP09-118](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 1280000,
+      "n_listings": 9,
+      "supplement": false
+    },
+    {
+      "card_id": "ST10-006",
+      "name": "Monkey D Luffy SR [ST10-006] (Champion Ship Prize)",
+      "cheapest": 2900000,
+      "n_listings": 9,
+      "supplement": false
+    },
+    {
+      "card_id": "P-115",
+      "name": "Boa Hancock P [P-115](Promotional Card \"V Jump January 2026 Issue Supplement\")",
+      "cheapest": 55555,
+      "n_listings": 16,
+      "supplement": true
+    },
+    {
+      "card_id": "FIG-BD-1KUJI-ONEP-CARDGAME",
+      "name": "Monkey.D.Luffy L :Opened [OP13-001](Promotional Card \"Ichibansho ONE PIECE CARD GAME Purchase Bonus\")",
+      "cheapest": 33000,
+      "n_listings": 85,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-007",
+      "name": "Nami C-P [ST01-007](Premium Booster \"One Piece Card The Best Storage Box Set\")",
+      "cheapest": 520000,
+      "n_listings": 9,
+      "supplement": false
+    },
+    {
+      "card_id": "ST26-005",
+      "name": "Monkey.D.Luffy SR-SPC [ST26-005](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 135000,
+      "n_listings": 24,
+      "supplement": false
+    },
+    {
+      "card_id": "OP15-119",
+      "name": "Monkey.D.Luffy SEC-P [OP15-119](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 189999,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP03-116",
+      "name": "Shirahoshi UC [OP03-116](Promotional Card \"Championships 2024 Souvenirs\")",
+      "cheapest": 470000,
+      "n_listings": 12,
+      "supplement": false
+    },
+    {
+      "card_id": "ST29-001",
+      "name": "Monkey.D.Luffy L [ST29-001](Start Deck \"EGGHEAD\")",
+      "cheapest": 37999,
+      "n_listings": 3,
+      "supplement": false
+    },
+    {
+      "card_id": "OPC-P-007",
+      "name": "Monkey D Luffy [P-007]  (Sikyo JUMP 2022.9 Freebie)",
+      "cheapest": 199000,
+      "n_listings": 3,
+      "supplement": false
+    },
+    {
+      "card_id": "P-066",
+      "name": "Boa Hancock P [P-066] [CN](Promotional Card \"Chinese New Year 2025 Exclusive\")",
+      "cheapest": 106000,
+      "n_listings": 15,
+      "supplement": false
+    },
+    {
+      "card_id": "OPCD-015",
+      "name": "DON!! Card : Monkey.D.Luffy (Promotional Card \"Champion Ship 2023 World Final Prize\")",
+      "cheapest": 658000,
+      "n_listings": 15,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-093",
+      "name": "Marshall.D.Teach SR-SPC :3th Anniversary Special Card (Silver Background) [OP09-093](Booster Pack \"LEGACY OF THE MASTER\")",
+      "cheapest": 320000,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "ST21-015",
+      "name": "Roronoa Zoro SR [ST21-015](Promotional Card \"Flagship Battle Top 8 Souvenirs\") for Asia",
+      "cheapest": 159000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP02-013",
+      "name": "Portgas.D.Ace SR-SP (Comic Parallel) [OP02-013](Booster Pack \"Paramount War\")",
+      "cheapest": 315000,
+      "n_listings": 19,
+      "supplement": false
+    },
+    {
+      "card_id": "P-075",
+      "name": "Monkey.D.Luffy P [P-075] [Aisa ver.](Promotional Card \"Mini-tin Pack Set VOL.1\")",
+      "cheapest": 350000,
+      "n_listings": 5,
+      "supplement": true
+    },
+    {
+      "card_id": "ST21-014",
+      "name": "Monkey.D.Luffy SR [ST21-014](Promotional Card \"Flagship Battle Winner's Memento\")",
+      "cheapest": 560000,
+      "n_listings": 35,
+      "supplement": true
+    },
+    {
+      "card_id": "OP09-051",
+      "name": "Buggy : Gold Background R-SPC :3th Anniversary Special Card [OP09-051](Booster Pack \"THE AZURE SEA'S SEVEN\")",
+      "cheapest": 700000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP08-106",
+      "name": "Nami : SR (Opened) [OP08-106](Promotional Card \"Nami Get Campaign With Serial Number\")",
+      "cheapest": 5000000,
+      "n_listings": 3,
+      "supplement": true
+    },
+    {
+      "card_id": "EB02-052",
+      "name": "Enel SR-SPC [EB02-052](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 69500,
+      "n_listings": 10,
+      "supplement": false
+    },
+    {
+      "card_id": "OP15-118",
+      "name": "Enel SEC-P [OP15-118](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 50000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-042",
+      "name": "Edward.Newgate SR-SPC [OP13-042](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 70000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-016",
+      "name": "Nami R [OP01-016] ( Premium Card Collection Girls Edition)",
+      "cheapest": 116000,
+      "n_listings": 16,
+      "supplement": true
+    },
+    {
+      "card_id": "ST15-005",
+      "name": "Portgas.D.Ace SR [ST15-005] [EN](Promotional Card \"CS 25-26 Finalist Card Set 1\")",
+      "cheapest": 1500000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP02-036",
+      "name": "Nami SR [OP02-036] (Premium Card Collection -Best Selection vol.1-)",
+      "cheapest": 38000,
+      "n_listings": 8,
+      "supplement": true
+    },
+    {
+      "card_id": "OP09-051",
+      "name": "Buggy R-SP (Comic Parallel) [OP09-051](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 168000,
+      "n_listings": 9,
+      "supplement": false
+    },
+    {
+      "card_id": "EB03-026",
+      "name": "Boa Hancock SR-P [EB03-026](Extra Booster \"ONE PIECE Heroines edition\")",
+      "cheapest": 57000,
+      "n_listings": 10,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-051",
+      "name": "Boa Hancock SR [OP07-051](ONE PIECE Card Game \"China 2nd ANNIVERSARY SET Japanese Ver.\")",
+      "cheapest": 99999,
+      "n_listings": 17,
+      "supplement": false
+    },
+    {
+      "card_id": "ST10-013",
+      "name": "Eustass\"Captain\"Kid [ST10-013] (Champion Ship Prize)",
+      "cheapest": 420000,
+      "n_listings": 15,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-016",
+      "name": "Nami R [OP01-016] (Promotion Card Set 1)",
+      "cheapest": 92000,
+      "n_listings": 25,
+      "supplement": true
+    },
+    {
+      "card_id": "ST18-002",
+      "name": "O-Nami C [ST18-002](Promotional Card \"8 Pack Battle Victory Souvenir\")",
+      "cheapest": 144000,
+      "n_listings": 14,
+      "supplement": false
+    },
+    {
+      "card_id": "P-043",
+      "name": "Monkey D Luffy P [P-043]  (Weekly Shonen  JUMP 2023 36/37 combined issue supplement)",
+      "cheapest": 53000,
+      "n_listings": 93,
+      "supplement": false
+    },
+    {
+      "card_id": "PRB02-017",
+      "name": "Boa Hancock SR-P [PRB02-017](Premium Booster \"One Piece Card The Best vol.2\")",
+      "cheapest": 85000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-051",
+      "name": "Boa Hancock R-P [OP13-051](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 51800,
+      "n_listings": 3,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-061",
+      "name": "Monkey.D.Luffy SEC [EB02-061](Extra Booster \"Anime 25th Collection\")",
+      "cheapest": 51999,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-050",
+      "name": "Nami R-P [OP09-050](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 27000,
+      "n_listings": 8,
+      "supplement": true
+    },
+    {
+      "card_id": "OP02-114",
+      "name": "Borsalino SR-P [OP02-114] (Champion Ship Prize)",
+      "cheapest": 1080000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-119",
+      "name": "Monkey.D.Luffy SEC [OP09-119](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 44980,
+      "n_listings": 10,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-119",
+      "name": "Monkey.D.Luffy SEC-P [OP09-119](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 56800,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-120",
+      "name": "Sabo SEC [OP13-120](Promotional Card \"Season 2 Area Finals Tournament Top-Tier Prize\")",
+      "cheapest": 450000,
+      "n_listings": 11,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey D Luffy SEC-P [OP05-119] (Booster Pack Awakening of the New Era)",
+      "cheapest": 98000,
+      "n_listings": 51,
+      "supplement": false
+    },
+    {
+      "card_id": "P-001",
+      "name": "Monkey D Luffy P [P-001] (Promotion Card Set 1)",
+      "cheapest": 200000,
+      "n_listings": 11,
+      "supplement": false
+    },
+    {
+      "card_id": "OP11-080",
+      "name": "Gear 2 R-P [OP11-080](Booster Pack \"A Fist of Divine Speed\")",
+      "cheapest": 130000,
+      "n_listings": 24,
+      "supplement": false
+    },
+    {
+      "card_id": "OPCD-053",
+      "name": "DON!! Card : Monkey.D.Luffy (Promotional Card \"Championship 2024 World Final Participation Commemorative Item\")",
+      "cheapest": 1050000,
+      "n_listings": 3,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey.D.Luffy : Wanted SEC-SPC [OP05-119](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 130000,
+      "n_listings": 56,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-061",
+      "name": "Monkey.D.Luffy L [OP09-061](ANNIVERSARY SET \"English 2nd ANNIVERSARY SET Japanese Ver.\")",
+      "cheapest": 169000,
+      "n_listings": 48,
+      "supplement": false
+    },
+    {
+      "card_id": "OP11-106",
+      "name": "Zeus R-SPC [OP11-106](Extra Booster \"EGGHEAD CRISIS\")",
+      "cheapest": 125000,
+      "n_listings": 12,
+      "supplement": true
+    },
+    {
+      "card_id": "OP05-067",
+      "name": "Zoro-Juurou R [OP05-067](Promotional Card \"ONE PIECE CARD GAME 2nd ANNIVERSARY COMPLETE GUIDE\")",
+      "cheapest": 42000,
+      "n_listings": 53,
+      "supplement": false
+    },
+    {
+      "card_id": "OPC-P-001",
+      "name": "Monkey D Luffy P [P-001] (CHAMPIONSHIP Set Privilege)",
+      "cheapest": 59999,
+      "n_listings": 53,
+      "supplement": false
+    },
+    {
+      "card_id": "OP08-001",
+      "name": "Tony Tony.Chopper L-SPC [OP08-001](Extra Booster \"Anime 25th Collection\")",
+      "cheapest": 810000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-061",
+      "name": "Monkey.D.Luffy SEC-SPC [EB02-061](Premium Booster \"One Piece Card The Best vol.2\")",
+      "cheapest": 98000,
+      "n_listings": 23,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-091",
+      "name": "Rebecca SR-SPC [OP05-091] (Booster Pack Wings of Captain)",
+      "cheapest": 36000,
+      "n_listings": 25,
+      "supplement": true
+    },
+    {
+      "card_id": "OP04-083",
+      "name": "Sabo SR-SP (Comic Parallel) [OP04-083](Premium Booster \"One Piece Card The Best\")",
+      "cheapest": 499999,
+      "n_listings": 4,
+      "supplement": false
+    },
+    {
+      "card_id": "ST03-013",
+      "name": "Boa Hancock C :Full Art [ST03-013](Premium Booster \"One Piece Card The Best\")",
+      "cheapest": 69999,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP03-114",
+      "name": "Charlotte Linlin SR [OP03-114](Promotional Card \"Championships 2024 Souvenirs\")",
+      "cheapest": 4110000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-010",
+      "name": "Monkey.D.Luffy L-P [EB02-010](Extra Booster \"Anime 25th Collection\")",
+      "cheapest": 388000,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "P-041",
+      "name": "Monkey.D.Luffy P [P-041](Promotional Card \"ONE PIECE EMOTION\")",
+      "cheapest": 73000,
+      "n_listings": 18,
+      "supplement": true
+    },
+    {
+      "card_id": "OP02-004",
+      "name": "Edward.Newgate SR [OP02-004] [EN](Promotional Card \"Championship 2023 Offline Regional Top 16\")",
+      "cheapest": 850000,
+      "n_listings": 3,
+      "supplement": false
+    },
+    {
+      "card_id": "OPCD-019",
+      "name": "DON!! Card : Ado & Uta (Promotional Card \"ONE PIECE DAY'24 Visitor Benefits\")",
+      "cheapest": 148000,
+      "n_listings": 18,
+      "supplement": false
+    },
+    {
+      "card_id": "ST08-002",
+      "name": "Uta SR [ST08-002] (Premium Card Collection - Uta -)",
+      "cheapest": 20000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "ST02-001",
+      "name": "Eustass\"Captain\"Kid L [ST02-001](Premium Card Collection \"Leader Collection\")",
+      "cheapest": 60000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "P-106",
+      "name": "Monkey.D.Luffy P [P-106](Promotional Card \"Promotion Card Set 2025\")",
+      "cheapest": 32498,
+      "n_listings": 17,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-006",
+      "name": "Tony Tony Chopper C Parallel [ST01-006] (Premium Card Collection 25th Anniversary Editionl)",
+      "cheapest": 63000,
+      "n_listings": 5,
+      "supplement": true
+    },
+    {
+      "card_id": "ST03-013",
+      "name": "Boa Hancock C [ST03-013](Premium Card Collection \"Best Selection Vol.2\")",
+      "cheapest": 44000,
+      "n_listings": 9,
+      "supplement": false
+    },
+    {
+      "card_id": "OP12-039",
+      "name": "Luffy is the man who will become the Pirate King! R [OP12-039](Promotional Card \"3rd ANNIVERSARY SET\")",
+      "cheapest": 34500,
+      "n_listings": 29,
+      "supplement": false
+    },
+    {
+      "card_id": "OP03-122",
+      "name": "Sogeking SEC-SP (Comic Parallel) [OP03-122](Booster Pack \"Pillars Of Strength\")",
+      "cheapest": 139999,
+      "n_listings": 7,
+      "supplement": false
+    },
+    {
+      "card_id": "ST15-005",
+      "name": "Portgas.D.Ace SR [ST15-005](Promotional Card \"3rd ANNIVERSARY SET\")",
+      "cheapest": 69000,
+      "n_listings": 39,
+      "supplement": false
+    },
+    {
+      "card_id": "P-033",
+      "name": "Monkey D Luffy [P-033]  (Weekly Shonen  JUMP 2023.1/7 Freebie)",
+      "cheapest": 85500,
+      "n_listings": 65,
+      "supplement": false
+    },
+    {
+      "card_id": "P-001",
+      "name": "Monkey.D.Luffy P [P-001] [EN](Promotional Card \"GIFT COLLECTION 2023\")",
+      "cheapest": 295000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey.D.Luffy SEC [OP05-119](ANNIVERSARY SET \"English 2nd ANNIVERSARY SET Japanese Ver.\")",
+      "cheapest": 77000,
+      "n_listings": 22,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-093",
+      "name": "Marshall.D.Teach SR-SPC :3th Anniversary Special Card (Gold Background) [OP09-093](Booster Pack \"LEGACY OF THE MASTER\")",
+      "cheapest": 488000,
+      "n_listings": 9,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-006",
+      "name": "Tony Tony Chopper C Parallel [ST01-006] (Flagship Battle Best 8)",
+      "cheapest": 155000,
+      "n_listings": 32,
+      "supplement": true
+    },
+    {
+      "card_id": "ST16-005",
+      "name": "Monkey.D.Luffy C : Foil [ST16-005](Premium Booster \"One Piece Card The Best vol.2\")",
+      "cheapest": 30000,
+      "n_listings": 3,
+      "supplement": true
+    },
+    {
+      "card_id": "ST01-012",
+      "name": "Monkey.D.Luffy SR [ST01-012] [EN](Promotional Card \"Championship 2024 Celebration Pack\")",
+      "cheapest": 1650000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP06-101",
+      "name": "Onami R-P [OP06-101] (Booster Pack Wings of Captain)",
+      "cheapest": 35000,
+      "n_listings": 25,
+      "supplement": false
+    },
+    {
+      "card_id": "OPC-EN-TCG-LUFFY-P",
+      "name": "Monkey D Luffy L :Participation Prize :Pre-errata Life 4 [P] (8 Pack Battle)",
+      "cheapest": 66500,
+      "n_listings": 11,
+      "supplement": false
+    },
+    {
+      "card_id": "P-106",
+      "name": "Monkey.D.Luffy P [P-106](Promotional Card \"Standard Battle December 2025 Victory Souvenir\")",
+      "cheapest": 62999,
+      "n_listings": 13,
+      "supplement": false
+    },
+    {
+      "card_id": "OP14-041",
+      "name": "Boa Hancock L-P [OP14-041](Booster Pack \"THE AZURE SEA'S SEVEN\")",
+      "cheapest": 87500,
+      "n_listings": 16,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-060",
+      "name": "Monkey.D.Luffy L [OP05-060](ONE PIECE Card Game \"SOUND LOADER Volume.1\")",
+      "cheapest": 90000,
+      "n_listings": 7,
+      "supplement": true
+    },
+    {
+      "card_id": "OP01-016",
+      "name": "Nami R-SP (Comic Parallel) [OP01-016](Premium Booster \"One Piece Card The Best\")",
+      "cheapest": 209999,
+      "n_listings": 35,
+      "supplement": true
+    },
+    {
+      "card_id": "OP12-087",
+      "name": "Nico Robin SR-P [OP12-087](Booster Pack \"LEGACY OF THE MASTER\")",
+      "cheapest": 125000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-062",
+      "name": "O-Nami UC [OP05-062] [EN](Promotional Card \"Illustration Box Vol.2\")",
+      "cheapest": 92500,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-119",
+      "name": "Portgas.D.Ace SEC [OP13-119](Promotional Card \"Season 2 Area Finals Tournament Top-Tier Prize\")",
+      "cheapest": 1700000,
+      "n_listings": 4,
+      "supplement": false
+    },
+    {
+      "card_id": "ST13 -015",
+      "name": "Monkey.D.Luffy SR [ST13-015](Special Goods Set \"2nd ANNIVERSARY SET\")",
+      "cheapest": 117000,
+      "n_listings": 41,
+      "supplement": false
+    },
+    {
+      "card_id": "ST21-001",
+      "name": "Monkey.D.Luffy L-P [ST21-001] [EN](Starter Deck EX \"Gear 5\")",
+      "cheapest": 170000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "P-110",
+      "name": "Monkey.D.Luffy P [P-110](Premium Card Collection \"ONE PIECE DAY'25\")",
+      "cheapest": 62490,
+      "n_listings": 112,
+      "supplement": false
+    },
+    {
+      "card_id": "OP11-118",
+      "name": "Monkey.D.Luffy SEC-SP (Comic Parallel) [OP11-118](Booster Pack \"A Fist of Divine Speed\")",
+      "cheapest": 249000,
+      "n_listings": 33,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-012",
+      "name": "Monkey D Luffy SR [ST01-012] (Booster Pack Awakening of the New Era)",
+      "cheapest": 61999,
+      "n_listings": 80,
+      "supplement": false
+    },
+    {
+      "card_id": "P-075",
+      "name": "Monkey.D.Luffy P [P-075](Premium Card Collection \"Best Selection vol.3\")",
+      "cheapest": 84000,
+      "n_listings": 3,
+      "supplement": true
+    },
+    {
+      "card_id": "ST18-005",
+      "name": "Luffy-Tarou SR [ST18-005][Aisa ver.](Promotional Card \"Treasure Chest vol.1\")",
+      "cheapest": 300000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-119",
+      "name": "Portgas D Ace SEC-P [OP07-119] (Booster Pack The Future After 500 years)",
+      "cheapest": 24500,
+      "n_listings": 14,
+      "supplement": false
+    },
+    {
+      "card_id": "ST17-004",
+      "name": "Boa Hancock SR [ST17-004] [EN](Promotional Card \"Illustration Box Vol.2\")",
+      "cheapest": 115000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "P-037",
+      "name": "Monkey D Luffy P [P-037] (Sikyo JUMP 2023.6 Freebie)",
+      "cheapest": 48900,
+      "n_listings": 5,
+      "supplement": false
+    },
+    {
+      "card_id": "P-041",
+      "name": "Monkey.D.Luffy P [P-041](Start Deck \"Purple Monkey.D.Luffy\")",
+      "cheapest": 38900,
+      "n_listings": 15,
+      "supplement": true
+    },
+    {
+      "card_id": "OPC-P-001",
+      "name": "Monkey D Luffy [P-001]  (Promotion Pack 2022)",
+      "cheapest": 55000,
+      "n_listings": 4,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-006",
+      "name": "Tony Tony.Chopper C [ST01-006] [EN](1st Anniversary Set)",
+      "cheapest": 665000,
+      "n_listings": 5,
+      "supplement": true
+    },
+    {
+      "card_id": "P-066",
+      "name": "Boa Hancock P [P-066](Sikyo JUMP 2024.4 Freebie)",
+      "cheapest": 57800,
+      "n_listings": 12,
+      "supplement": false
+    },
+    {
+      "card_id": "OP04-083",
+      "name": "Sabo SR-SP (Comic Parallel) [OP04-083](Booster Pack \"Kingdoms Of Intrigue\")",
+      "cheapest": 176000,
+      "n_listings": 22,
+      "supplement": false
+    },
+    {
+      "card_id": "ST10‐006/OP01‐02/OP01‐013/OP01‐017/ST01‐006",
+      "name": "Monkey D Luffy SR [ST10-006] [CHN] (1st Anniversary set)",
+      "cheapest": 450000,
+      "n_listings": 9,
+      "supplement": false
+    },
+    {
+      "card_id": "OP14-031",
+      "name": "Nami SR-P [OP14-031](Booster Pack \"THE AZURE SEA'S SEVEN\")",
+      "cheapest": 65000,
+      "n_listings": 2,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey D Luffy SEC [OP05-119] (Booster Pack Awakening of the New Era)",
+      "cheapest": 53000,
+      "n_listings": 8,
+      "supplement": false
+    },
+    {
+      "card_id": "P-112",
+      "name": "Nami P [P-112] [Aisa ver.](Promotional Card \"Mini-tin Pack Set vol.2\")",
+      "cheapest": 72050,
+      "n_listings": 28,
+      "supplement": false
+    },
+    {
+      "card_id": "OP06-022",
+      "name": "Yamato L [OP06-022](Promotional Card \"Weekly Shonen JUMP 2023 No.36 and 37 Service for All Applicants LECAFIG\")",
+      "cheapest": 20000,
+      "n_listings": 31,
+      "supplement": false
+    },
+    {
+      "card_id": "EB03-053",
+      "name": "Nami SR-P [EB03-053](Extra Booster \"ONE PIECE Heroines edition\")",
+      "cheapest": 40000,
+      "n_listings": 3,
+      "supplement": true
+    },
+    {
+      "card_id": "OP02-059",
+      "name": "Boa Hancock UC [OP02-059] (Promotion Card Set 2)",
+      "cheapest": 118000,
+      "n_listings": 10,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-010",
+      "name": "Monkey.D.Luffy L [EB02-010](\"SOUND LOADER Luffy Edition\")",
+      "cheapest": 199999,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "ST13-016",
+      "name": "Yamato C [ST13-016] [EN](Promotional Card \"Illustration Box Vol.1\")",
+      "cheapest": 99999,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-061",
+      "name": "Monkey.D.Luffy L-P [OP09-061](Booster Pack \"Emperors In The New World\")",
+      "cheapest": 47980,
+      "n_listings": 57,
+      "supplement": false
+    },
+    {
+      "card_id": "OP09-004",
+      "name": "Shanks : Silver Background SR-SPC :3th Anniversary Special Card [OP09-004](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 156000,
+      "n_listings": 15,
+      "supplement": false
+    },
+    {
+      "card_id": "OP11-041",
+      "name": "Nami L [OP11-041](Promotion Card \"Official Playmat & Card Set Whole Cake Island Arc Included\")",
+      "cheapest": 130000,
+      "n_listings": 7,
+      "supplement": false
+    },
+    {
+      "card_id": "ST21-014",
+      "name": "Monkey.D.Luffy SR [ST21-014](Promotional Card \"Flagship Battle\") For Asia",
+      "cheapest": 830000,
+      "n_listings": 2,
+      "supplement": true
+    },
+    {
+      "card_id": "OP01-013",
+      "name": "Sanji R [OP01-013] [EN](1st Anniversary Set)",
+      "cheapest": 318000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey.D.Luffy SEC-P [OP05-119](Premium Booster \"One Piece Card The Best\")",
+      "cheapest": 57500,
+      "n_listings": 34,
+      "supplement": false
+    },
+    {
+      "card_id": "OP01-025",
+      "name": "Roronoa Zoro SR [OP01-025] (Flagship Battle Victory souvenir)",
+      "cheapest": 489999,
+      "n_listings": 31,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-119",
+      "name": "Portgas.D.Ace SEC-SP (Comic Parallel) [OP13-119](Booster Pack \"CARRYING ON HIS WILL\")",
+      "cheapest": 267000,
+      "n_listings": 18,
+      "supplement": false
+    },
+    {
+      "card_id": "ST01-012",
+      "name": "Monkey.D.Luffy SR [ST01-012](Promotional Card \"Weekly Shonen Jump 2025 Issue 19 All Applicants Gift\")",
+      "cheapest": 85000,
+      "n_listings": 22,
+      "supplement": false
+    },
+    {
+      "card_id": "OP05-119",
+      "name": "Monkey.D.Luffy SEC [OP05-119](Premium Booster \"One Piece Card The Best\")",
+      "cheapest": 46800,
+      "n_listings": 15,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-035",
+      "name": "Sanji & Pudding SR :Champion's Prize [EB02-035](Promotional Card \"8 Pack Battle\")",
+      "cheapest": 200000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP07-073",
+      "name": "Monkey.D.Luffy R :Attendee Gift [OP07-073](Promotional Card \"BANDAI CARD GAMES Fest 25-26 in Tokyo\")",
+      "cheapest": 53000,
+      "n_listings": 18,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-010",
+      "name": "Monkey.D.Luffy L [EB02-010](\"Official Playmat Limited Edition vol.5\")",
+      "cheapest": 250000,
+      "n_listings": 8,
+      "supplement": false
+    },
+    {
+      "card_id": "EB02-003",
+      "name": "Tony Tony.Chopper R [EB02-003](Promotional Card \"ONE PIECE CHOPPER’s 1 Issue Supplement\")",
+      "cheapest": 50400,
+      "n_listings": 7,
+      "supplement": false
+    },
+    {
+      "card_id": "P",
+      "name": "Monkey.D.Luffy L :Participation Prize [P](Promotional Card \"8 Pack Battle 2026 March\")",
+      "cheapest": 40000,
+      "n_listings": 1,
+      "supplement": false
+    },
+    {
+      "card_id": "OP12-014",
+      "name": "Boa Hancock SR-SPC [OP12-014](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 169000,
+      "n_listings": 30,
+      "supplement": false
+    },
+    {
+      "card_id": "P-105",
+      "name": "Sabo P-SPC [P-105](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 48800,
+      "n_listings": 8,
+      "supplement": false
+    },
+    {
+      "card_id": "OP15-116",
+      "name": "Gum-Gum Golden Rifle R-P [OP15-116](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 75980,
+      "n_listings": 6,
+      "supplement": false
+    },
+    {
+      "card_id": "OP15-077",
+      "name": "Jamboule R-P [OP15-077](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 75000,
+      "n_listings": 4,
+      "supplement": false
+    },
+    {
+      "card_id": "OP13-031",
+      "name": "Trafalgar Law R-SPC [OP13-031](Booster Pack \"Adventure on KAMI’s Island\")",
+      "cheapest": 83500,
+      "n_listings": 6,
+      "supplement": false
+    }
+  ]
+}

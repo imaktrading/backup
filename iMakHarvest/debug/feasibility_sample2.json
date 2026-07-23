@@ -1,0 +1,42 @@
+{
+  "Shimanoリール": {
+    "q": "シマノ スピニングリール",
+    "checked": 12,
+    "direct": 6,
+    "direct_pct": 50,
+    "price_min": 1690,
+    "price_max": 27000
+  },
+  "Daiwaリール": {
+    "q": "ダイワ リール",
+    "checked": 12,
+    "direct": 5,
+    "direct_pct": 42,
+    "price_min": 2788,
+    "price_max": 20185
+  },
+  "BOSSペダル": {
+    "q": "BOSS エフェクター ギター",
+    "checked": 12,
+    "direct": 0,
+    "direct_pct": 0,
+    "price_min": 8980,
+    "price_max": 26581
+  },
+  "ねんどろいど": {
+    "q": "ねんどろいど フィギュア",
+    "checked": 12,
+    "direct": 2,
+    "direct_pct": 17,
+    "price_min": 4091,
+    "price_max": 27800
+  },
+  "SonyXM": {
+    "q": "ソニー ヘッドホン WH-1000XM",
+    "checked": 12,
+    "direct": 1,
+    "direct_pct": 8,
+    "price_min": 23537,
+    "price_max": 90000
+  }
+}

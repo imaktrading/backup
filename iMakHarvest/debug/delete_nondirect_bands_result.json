@@ -1,0 +1,114 @@
+{
+  "dry_run": false,
+  "band_rows": [
+    {
+      "row": 85,
+      "asin": "B015SHWRUU",
+      "title": "[カシオ] 純正 替えバンド G-SHOCK Ｇショック 10502763 黒 ブラック "
+    },
+    {
+      "row": 89,
+      "asin": "B01EJU3U12",
+      "title": "[カシオ] G-SHOCK Gショック 純正 替えバンド ベルト ウレタン 黒 ブラック "
+    },
+    {
+      "row": 93,
+      "asin": "B09YGHJY8S",
+      "title": "[カシオ] 腕時計 G-SHOCK 【国内正規品】 オプションバンド BANDGS02P-"
+    },
+    {
+      "row": 208,
+      "asin": "B09YHBZW1D",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 オプショナルバンド BANDGS02P-"
+    }
+  ],
+  "nondirect_deleted": [
+    {
+      "row": 15,
+      "asin": "B0CYLNCYRY",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 GA-2300-1AJF メンズ ブラッ"
+    },
+    {
+      "row": 34,
+      "asin": "B0FXM283LP",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 G-SHOCK nano 環境配慮素材採"
+    },
+    {
+      "row": 60,
+      "asin": "B0D7VR4YYH",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 G-SQUAD Bluetooth 搭載"
+    },
+    {
+      "row": 73,
+      "asin": "B000GAYQKY",
+      "title": "[カシオ]casio G-SHOCK BASIC FIRST TYPE DW-5600E-"
+    },
+    {
+      "row": 74,
+      "asin": "B00JRDCL26",
+      "title": "カシオ 腕時計 G-SHOCK Camouflage Series（カモフラージュシリーズ"
+    },
+    {
+      "row": 83,
+      "asin": "B000FPVUJA",
+      "title": "[カシオ]CASIO 腕時計 G-SHOCK ジーショック MUDMAN G-9000-1"
+    },
+    {
+      "row": 91,
+      "asin": "B0DFTQHBSQ",
+      "title": "カシオ G-Shock 八角形 ライトブルー ステンレススチール 腕時計 GM2110D-"
+    },
+    {
+      "row": 92,
+      "asin": "B073ZJVXMS",
+      "title": "G-Shock GA-700UC メンズ腕時計 One Size カーキ/ブラック"
+    },
+    {
+      "row": 95,
+      "asin": "B0F9KBBS3R",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 フルメタル Bluetooth搭載 タフ"
+    },
+    {
+      "row": 169,
+      "asin": "B07RVTZ3X7",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 カーボンコアガード構造 GA-2000S"
+    },
+    {
+      "row": 319,
+      "asin": "B0CQC3TLRZ",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 ミッドサイズ メタルカバード GM-S5"
+    },
+    {
+      "row": 373,
+      "asin": "B0GJ2SS5HP",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 GM-5600YRA-8JF メンズ シ"
+    },
+    {
+      "row": 374,
+      "asin": "B0CQNZJTZ6",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 web限定 ミッドサイズモデル FOOD"
+    }
+  ],
+  "reverted_to_direct": [],
+  "delete_rows_idx": [
+    374,
+    373,
+    319,
+    208,
+    169,
+    95,
+    93,
+    92,
+    91,
+    89,
+    85,
+    83,
+    74,
+    73,
+    60,
+    34,
+    15
+  ],
+  "deleted": 17,
+  "cleared_q": 0
+}

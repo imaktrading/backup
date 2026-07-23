@@ -1,0 +1,64 @@
+{
+  "dry_run": false,
+  "filled": [
+    {
+      "row": 66,
+      "key": "GWG-B1000-1AJF",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 GWG-B1000-1AJFメンズ ブラック"
+    },
+    {
+      "row": 71,
+      "key": "GWG-B1000-1A4JF",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 GWG-B1000-1A4JFメンズ レッド"
+    },
+    {
+      "row": 87,
+      "key": "GWA11001A3JF",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 GRAVITYMASTER 電波ソーラー GWA1"
+    },
+    {
+      "row": 189,
+      "key": "MTG-B3000-1AJF",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 MTG-B3000-1AJFメンズ ブラック"
+    },
+    {
+      "row": 228,
+      "key": "GWG-B1000-3AJF",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 GWG-B1000-3AJFメンズ カーキー"
+    },
+    {
+      "row": 356,
+      "key": "DW-6900NNJ-1JR",
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 DW-6900NNJ-1JRメンズ ブラック"
+    }
+  ],
+  "still_empty": [
+    {
+      "row": 93,
+      "title": "[カシオ] 腕時計 G-SHOCK 【国内正規品】 オプションバンド BANDGS02P-1JR メ"
+    },
+    {
+      "row": 208,
+      "title": "[カシオ] 腕時計 ジーショック 【国内正規品】 オプショナルバンド BANDGS02P-7JR メ"
+    }
+  ],
+  "skipped_excluded": [
+    {
+      "row": 85,
+      "title": "[カシオ] 純正 替えバンド G-SHOCK Ｇショック 10502763 黒 ブラック 交換用 部"
+    },
+    {
+      "row": 89,
+      "title": "[カシオ] G-SHOCK Gショック 純正 替えバンド ベルト ウレタン 黒 ブラック 10512"
+    },
+    {
+      "row": 91,
+      "title": "カシオ G-Shock 八角形 ライトブルー ステンレススチール 腕時計 GM2110D-2A, シ"
+    },
+    {
+      "row": 92,
+      "title": "G-Shock GA-700UC メンズ腕時計 One Size カーキ/ブラック"
+    }
+  ],
+  "written": 6
+}

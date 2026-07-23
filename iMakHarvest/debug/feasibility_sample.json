@@ -1,0 +1,38 @@
+{
+  "Casio標準": {
+    "q": "カシオ 腕時計 スタンダード",
+    "asins_found": 60,
+    "checked": 12,
+    "direct": 5,
+    "direct_pct": 42,
+    "price_min": 1540,
+    "price_max": 12280
+  },
+  "Seiko": {
+    "q": "セイコー 腕時計 メンズ",
+    "asins_found": 60,
+    "checked": 12,
+    "direct": 4,
+    "direct_pct": 33,
+    "price_min": 2300,
+    "price_max": 77000
+  },
+  "Citizen": {
+    "q": "シチズン 腕時計 エコドライブ",
+    "asins_found": 57,
+    "checked": 12,
+    "direct": 11,
+    "direct_pct": 92,
+    "price_min": 13090,
+    "price_max": 77000
+  },
+  "ガンプラ": {
+    "q": "ガンプラ RG ガンダム",
+    "asins_found": 52,
+    "checked": 12,
+    "direct": 0,
+    "direct_pct": 0,
+    "price_min": 2898,
+    "price_max": 7350
+  }
+}

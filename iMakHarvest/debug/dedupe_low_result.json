@@ -1,0 +1,280 @@
+{
+  "dry_run": false,
+  "dup_asin": 48,
+  "delete_rows": [
+    {
+      "asin": "B0BSTTJQ83",
+      "row": 708,
+      "key": "GM-110BB-1AJF"
+    },
+    {
+      "asin": "B0BQHLG2BN",
+      "row": 692,
+      "key": "GW-9400YJ-1JF"
+    },
+    {
+      "asin": "B07VCHDWVR",
+      "row": 754,
+      "key": "GA-2100-1A1JF"
+    },
+    {
+      "asin": "B098DF4YX4",
+      "row": 744,
+      "key": "GW-M5610U-1BJF"
+    },
+    {
+      "asin": "B0041234EC",
+      "row": 721,
+      "key": "GD-100-1BJF"
+    },
+    {
+      "asin": "B000U455NI",
+      "row": 720,
+      "key": "AW-591-2AJF"
+    },
+    {
+      "asin": "B0F5ZD7KKC",
+      "row": 733,
+      "key": "GBX-100S-1JF"
+    },
+    {
+      "asin": "B0CP26HV8G",
+      "row": 746,
+      "key": "DW-6900UB-9JF"
+    },
+    {
+      "asin": "B0DTY1DBDV",
+      "row": 723,
+      "key": "DW-6900TR-1JR"
+    },
+    {
+      "asin": "B07BL17CFT",
+      "row": 696,
+      "key": "GMW-B5000D-1JF"
+    },
+    {
+      "asin": "B0747JJG8S",
+      "row": 738,
+      "key": "GAW-100-1AJF"
+    },
+    {
+      "asin": "B0747JJG8T",
+      "row": 728,
+      "key": "GAW-100B-1AJF"
+    },
+    {
+      "asin": "B0CYLNCYRY",
+      "row": 710,
+      "key": "GA-2300-1AJF"
+    },
+    {
+      "asin": "B07NXXKSF7",
+      "row": 713,
+      "key": "GA-2000-1A9JF"
+    },
+    {
+      "asin": "B0DDSWQB22",
+      "row": 734,
+      "key": "GLX-5600KB-1JR"
+    },
+    {
+      "asin": "B0018JIYZU",
+      "row": 729,
+      "key": "GLX-5600-7JF"
+    },
+    {
+      "asin": "B0018JEZDU",
+      "row": 730,
+      "key": "GLX-5600-1JF"
+    },
+    {
+      "asin": "B0DR28V3KB",
+      "row": 727,
+      "key": "GD-010-1A1JF"
+    },
+    {
+      "asin": "B098D3TSYP",
+      "row": 745,
+      "key": "GW-M5610U-1JF"
+    },
+    {
+      "asin": "B098DNTVP5",
+      "row": 742,
+      "key": "GW-S5600U-1JF"
+    },
+    {
+      "asin": "B005JQ00Q4",
+      "row": 741,
+      "key": "GW-8900A-1JF"
+    },
+    {
+      "asin": "B0DR1VKD87",
+      "row": 705,
+      "key": "GA-010-1A1JF"
+    },
+    {
+      "asin": "B01M7UCY2U",
+      "row": 739,
+      "key": "AWG-M100SBB-1AJF"
+    },
+    {
+      "asin": "B0F5ZVPDGD",
+      "row": 695,
+      "key": "GD-B500S-8JF"
+    },
+    {
+      "asin": "B07CM874CD",
+      "row": 731,
+      "key": "GWX-5700CS-7JF"
+    },
+    {
+      "asin": "B07N6DCG99",
+      "row": 725,
+      "key": "GW-B5600HR-1JF"
+    },
+    {
+      "asin": "B0CSDNBDGN",
+      "row": 755,
+      "key": "DW-5600UBB-1JF"
+    },
+    {
+      "asin": "B004I443N4",
+      "row": 748,
+      "key": "GA-110-1AJF"
+    },
+    {
+      "asin": "B004I443NE",
+      "row": 747,
+      "key": "GA-110-1BJF"
+    },
+    {
+      "asin": "B098DBKXV6",
+      "row": 719,
+      "key": "G-5600UE-1JF"
+    },
+    {
+      "asin": "B002N2Z0IA",
+      "row": 718,
+      "key": "GW-7900B-1JF"
+    },
+    {
+      "asin": "B089BDP37K",
+      "row": 732,
+      "key": "GBX-100-1JF"
+    },
+    {
+      "asin": "B0F9K8Q2F9",
+      "row": 736,
+      "key": "GA-2100HDS-7A1JF"
+    },
+    {
+      "asin": "B0D9Y3SRQN",
+      "row": 722,
+      "key": "GA-2100RW-1AJF"
+    },
+    {
+      "asin": "B0F9K1Q77J",
+      "row": 737,
+      "key": "DW-6900HDS-7A1JF"
+    },
+    {
+      "asin": "B0CJJ5PMCZ",
+      "row": 753,
+      "key": "DW-6900NNJ-1JR"
+    },
+    {
+      "asin": "B0CT2LVHBJ",
+      "row": 735,
+      "key": "GM-5600GC-1JF"
+    },
+    {
+      "asin": "B0GJ35ST3M",
+      "row": 749,
+      "key": "GA-2100CM-8AJF"
+    },
+    {
+      "asin": "B0G8WJBRZT",
+      "row": 709,
+      "key": "GX-56UBB-1JF"
+    },
+    {
+      "asin": "B0DNZ1VLKN",
+      "row": 756,
+      "key": "DW-5000R-1AJF"
+    },
+    {
+      "asin": "B0GP67KV21",
+      "row": 752,
+      "key": "DW-5600MNC-1JF"
+    },
+    {
+      "asin": "B0GP5LCFC6",
+      "row": 750,
+      "key": "DW-5600MNC-8A2JF"
+    },
+    {
+      "asin": "B0GP5QC6HN",
+      "row": 751,
+      "key": "DW-5600MNC-7A8JF"
+    },
+    {
+      "asin": "B0DTYH4Y9G",
+      "row": 726,
+      "key": "GW-5000HS-7JF"
+    },
+    {
+      "asin": "B098DGF6CM",
+      "row": 743,
+      "key": "GW-5000U-1JF"
+    },
+    {
+      "asin": "B0CQC6FF76",
+      "row": 724,
+      "key": "GM-6900U-1JF"
+    },
+    {
+      "asin": "B0G8WWPV9W",
+      "row": 740,
+      "key": "GW-6900U-1JF"
+    }
+  ],
+  "multi_id_flag": [
+    {
+      "asin": "B098D3TSYP",
+      "key": "GW-M5610U-1JF",
+      "ebay_ids": [
+        "356980160947",
+        "356980160959"
+      ],
+      "rows": [
+        319,
+        325
+      ]
+    },
+    {
+      "asin": "B0CJJ5PMCZ",
+      "key": "DW-6900NNJ-1JR",
+      "ebay_ids": [
+        "358556999744",
+        "358276567493"
+      ],
+      "rows": [
+        464,
+        490
+      ]
+    },
+    {
+      "asin": "B0F9K5ZP1R",
+      "key": "G-5600SFJ-9JR",
+      "ebay_ids": [
+        "357173500721",
+        "358422162572"
+      ],
+      "rows": [
+        482,
+        506
+      ]
+    }
+  ],
+  "deleted": 47
+}

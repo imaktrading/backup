@@ -1,0 +1,250 @@
+{
+  "timestamp": "2026-06-12T06:16:14.379550",
+  "tab": "amazon_gshock",
+  "dry_run": false,
+  "asin_targets": 376,
+  "direct_count": 361,
+  "flicker_count": 0,
+  "nondirect_count": 15,
+  "fetch_failed_count": 0,
+  "captcha_hit": false,
+  "writes_planned": 40,
+  "writes_done": 40,
+  "nondirect_rows": [
+    {
+      "row": 15,
+      "asin": "B0CYLNCYRY",
+      "merchant_ids": [
+        "A32HVTQLD51QUY"
+      ]
+    },
+    {
+      "row": 34,
+      "asin": "B0FXM283LP",
+      "merchant_ids": [
+        "A1339UDD3F0UQU",
+        "A1P4H6L9Y738GS"
+      ]
+    },
+    {
+      "row": 60,
+      "asin": "B0D7VR4YYH",
+      "merchant_ids": [
+        "A1YWWSW450B6AD"
+      ]
+    },
+    {
+      "row": 73,
+      "asin": "B000GAYQKY",
+      "merchant_ids": []
+    },
+    {
+      "row": 74,
+      "asin": "B00JRDCL26",
+      "merchant_ids": [
+        "A1EJGP084HULR"
+      ]
+    },
+    {
+      "row": 83,
+      "asin": "B000FPVUJA",
+      "merchant_ids": [
+        "A1EJGP084HULR"
+      ]
+    },
+    {
+      "row": 85,
+      "asin": "B015SHWRUU",
+      "merchant_ids": [
+        "A3PL8DDOHAWMLP"
+      ]
+    },
+    {
+      "row": 89,
+      "asin": "B01EJU3U12",
+      "merchant_ids": [
+        "A3AXAWWSI9KVHH"
+      ]
+    },
+    {
+      "row": 91,
+      "asin": "B0DFTQHBSQ",
+      "merchant_ids": [
+        "A1EJGP084HULR"
+      ]
+    },
+    {
+      "row": 92,
+      "asin": "B073ZJVXMS",
+      "merchant_ids": [
+        "A1EJGP084HULR"
+      ]
+    },
+    {
+      "row": 95,
+      "asin": "B0F9KBBS3R",
+      "merchant_ids": [
+        "A32HVTQLD51QUY"
+      ]
+    },
+    {
+      "row": 169,
+      "asin": "B07RVTZ3X7",
+      "merchant_ids": [
+        "A3OLT0WTYV7A0Q"
+      ]
+    },
+    {
+      "row": 319,
+      "asin": "B0CQC3TLRZ",
+      "merchant_ids": [
+        "A2HBM8EAMQCW5N"
+      ]
+    },
+    {
+      "row": 373,
+      "asin": "B0GJ2SS5HP",
+      "merchant_ids": [
+        "A1YRIMNL7QAJQ0",
+        "A32HVTQLD51QUY"
+      ]
+    },
+    {
+      "row": 374,
+      "asin": "B0CQNZJTZ6",
+      "merchant_ids": [
+        "A183NSMYT9H0A3",
+        "A35VAISM5WY7LT"
+      ]
+    }
+  ],
+  "flicker_rows": [],
+  "cleared_wrong_flag_rows": [
+    {
+      "row": 346,
+      "asin": "B07JYHSQZD",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 349,
+      "asin": "B092M7XTH9",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 350,
+      "asin": "B092MB1HPS",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 352,
+      "asin": "B0CT2BY154",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 353,
+      "asin": "B0F9K1Q77J",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 354,
+      "asin": "B0F9JNZ572",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 355,
+      "asin": "B0DTYF216P",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 356,
+      "asin": "B0CJJ5PMCZ",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 357,
+      "asin": "B0H2CLW4T2",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 359,
+      "asin": "B0DNYYBWKB",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 360,
+      "asin": "B0CP26HV8G",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 361,
+      "asin": "B0G33PRMXD",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 362,
+      "asin": "B0FF45HDLB",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 363,
+      "asin": "B0CYLPJRBF",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 364,
+      "asin": "B0FF47M956",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 365,
+      "asin": "B0CYLP9HWP",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 366,
+      "asin": "B0CYLPNHYN",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 367,
+      "asin": "B0FF45PM4P",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 368,
+      "asin": "B0CQNZT8LG",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 369,
+      "asin": "B0CW19BZ6F",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 370,
+      "asin": "B08X277CX2",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 371,
+      "asin": "B08X1ZX7XP",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 372,
+      "asin": "B0FSKR1FFH",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 376,
+      "asin": "B0F9K112T9",
+      "old_q": "AMAZON_US"
+    },
+    {
+      "row": 377,
+      "asin": "B0D9Y2QMVS",
+      "old_q": "AMAZON_US"
+    }
+  ],
+  "fetch_failed_rows": []
+}
