@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scrapers import amazon_search  # noqa: E402
 from scrapers import amazon_search_http as H  # noqa: E402
 from sheet_writer import (  # noqa: E402
+    HIGH_SHEET_ID,
     LISTINGS_GID,
     LOW_SHEET_ID,
     get_listings_worksheet,
@@ -76,6 +77,9 @@ def plan_row(sheet_f, page_price, points):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--sheet", choices=["low", "high"], default="low",
+                    help="対象スプシ (HIGH は 2026-07-23 go 依頼で追加。K は Amazon 行限定"
+                         "書込のため PSA NO-GO sentinel 行 (非Amazon) には触らない)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--include-sold", action="store_true", help="D=○ 行も対象に含める")
     ap.add_argument("--max-rows", type=int, default=0, help="処理上限 (0=無制限、検証用)")
@@ -83,23 +87,26 @@ def main(argv=None) -> int:
     ap.add_argument("--rate-max", type=float, default=5.0)
     args = ap.parse_args(argv)
 
+    sheet_name = args.sheet.upper()
+    sheet_id = HIGH_SHEET_ID if args.sheet == "high" else LOW_SHEET_ID
+
     # DNS flapping 耐性 (= 2026-07 環境で getaddrinfo 断続失敗) → backoff リトライ
     sh = None
     last = None
     for att in range(1, 5):
         try:
-            sh = open_sheet_by_id(LOW_SHEET_ID)
+            sh = open_sheet_by_id(sheet_id)
             break
         except Exception as e:  # noqa: BLE001
             last = e
-            _log(f"LOW open 失敗 (attempt {att}/4): {type(e).__name__} → backoff")
+            _log(f"{sheet_name} open 失敗 (attempt {att}/4): {type(e).__name__} → backoff")
             time.sleep(6 * att)
     if sh is None:
-        _log(f"LOW open 不能 (DNS?): {last!r} → 中断")
+        _log(f"{sheet_name} open 不能 (DNS?): {last!r} → 中断")
         return 1
     ws = get_listings_worksheet(sh, LISTINGS_GID)
     vals = ws.get_all_values()
-    _log(f"LOW rows={len(vals)} (header含む)")
+    _log(f"{sheet_name} rows={len(vals)} (header含む)")
 
     # 対象行の選定
     targets = []

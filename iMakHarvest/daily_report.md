@@ -1,5 +1,17 @@
 # iMakHarvest daily_report
 
+## 2026-07-23 (続) — HIGH backfill 完走 (全系統の最終ピース)
+
+- 決定: HQ go (2026-07-23_high_backfill_go.md) を受け、LOW と同一の widget anchor 修正版で
+  HIGH の Amazon 行に F=現在価格 + K=pt(円) を backfill。N 不触。
+- 変更: `tools/backfill_amazon_points_low.py` に `--sheet {low,high}` 追加 (HIGH_SHEET_ID 切替のみ)。
+- 検証: dry-run 5行 → 本適用。HIGH Amazon 行 total=55 (HQ 想定一致)、うち売切44 = 既定 skip、
+  現役11行 = K記入10 / ptなし1 (fail-closed "") / fetch失敗0、書込22セル。
+  実行後 read-back で TGT 11行の K がログ全一致 + 非対象行 (PSA NO-GO sentinel 含む) の K 変化ゼロを実測。
+  pt率分布: 1%帯1 / 10-13.5%帯2 / >13.5%=7 (最大26%)。報告を `_processed.md` に追記済 → HQ 独立検証待ち。
+
+---
+
 ## 2026-07-23 — re-backfill 完走 (widget anchor 版、HQ go 案A)
 
 ### 決定
