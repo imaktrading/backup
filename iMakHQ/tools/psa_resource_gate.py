@@ -395,6 +395,7 @@ def main():
     _vc = load_verified_certs()
     if _vc:
         recovered = 0
+        _recovered_wb = {}     # itemID→KEY: シートAI列へ書戻し(次回から itemID join で直接解決)
         for r in rows:
             if r.get("key"):
                 continue
@@ -403,9 +404,19 @@ def main():
             if k2:
                 r["key"] = k2
                 recovered += 1
+                if iid:
+                    _recovered_wb[iid] = k2
         if recovered:
             print(f"  🔑 出品時 目視確定を資産回収: {recovered}件 "
                   f"(verified_certs.json cert→KEY / itemID join漏れを補完=再目視不要)")
+            # 資産化: 回収KEYをシートAI列へ書戻し → write-keys の書き戻し漏れを恒久治癒
+            # (次回は itemID join で直接解決。verified_certs 再recover に毎回依存しない)。
+            try:
+                from sheet_io import write_keys
+                n = write_keys(itemid_row, _recovered_wb)
+                print(f"  🔑 回収KEYをシートAI列へ書戻し: {n}行 (次回から itemID join で解決=書き戻し漏れ治癒)")
+            except Exception as e:
+                print(f"  ⚠ 回収KEY書戻し skip ({type(e).__name__}: {e}) — 今回はメモリ上のKEYで続行")
 
     # --- pre-search 目視確認ゲート (2026-06-17) ---
     # 「探す前に、仕入れたい正カードが正しいか」を catalog 正カード画像で目視確認 → 確定分だけ探索。
