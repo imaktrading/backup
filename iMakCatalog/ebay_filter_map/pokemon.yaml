@@ -243,6 +243,12 @@ set_code:
     ebay: Ninja Spinner
     note: 拡張パック「ニンジャスピナー」 — HQ web確定 2026-06-07 (JPセット名)
     year: 2025
+  - source: M5
+    ebay: Abyss Eye
+    note: >-
+      MEGA拡張パック「アビスアイ」(2026-05-22 発売, メガダークライex)。eBay/TCGplayer facet
+      = "Abyss Eye" (TCGplayer 'M5: Abyss Eye' / pokemon-card.com/ex/m5 で確認 2026-07-24)。
+    year: 2026
 
   # ----- Black & White / X & Y / Diamond & Pearl Platinum (旧) -----
   - source: XY

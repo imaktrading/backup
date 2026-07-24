@@ -1273,6 +1273,10 @@ POKEMON_CATEGORY = "pokemon_tcg"
 # 出典: 各 set の公式日本語名 + 対応 set_code (image_url 由来).
 # 新弾追加時は本マップにも追記.
 _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
+    # --- 2026-07-24 追加: MEGA拡張 アビスアイ[M5] (2026-05-22 発売). メインセット81種は収録済だが
+    #     set_name/set_name_ebay 欠落 + brand→code 未登録で resolve 不能だった (M1-M4 は整備済)。
+    #     eBay/TCGplayer facet = "Abyss Eye" (TCGplayer 'M5: Abyss Eye' で確認)。secret rares(/081超)は未収録。 ---
+    "ABYSS EYE":                   "M5",
     # --- 2026-06-07 追加: PSA英語セット名→code 解決漏れ (既存カードを未収録誤判定していた根治) ---
     #     HQ依頼 requests/2026-06-07_psa_adapter_pokemon_setcode_resolution.md
     #     キーワード in 判定なので英語セット名そのままで可。BW3/BW8/XY11 は2デッキ混在で
