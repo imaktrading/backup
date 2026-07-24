@@ -151,6 +151,23 @@ def main():
 
     import undetected_chromedriver as uc
     import mercari_psa_resource as _mp   # _chrome_major(): driver/Chrome 版不一致回避
+    # ★2026-07-24 PSA と同じ資産化を横展開: End候補/在庫不明を待ち台帳に蓄積し毎回再チェック
+    # (出品で得た「再仕入れ価値」を世代でリセットしない)。待ち台帳の未解決を今回チェックに合流。
+    _WAIT_TAB = "G-shock再仕入れ待ち"
+    try:
+        import psa_restock_wait as _prw
+        from sheet_io import read_tab as _rt
+        _wled0 = _prw.ledger_from_rows(_rt(_WAIT_TAB))
+        _have = {_mp._ebay_item_id(r.get("ebay_url", "") or "") for r in rows}
+        _merged = 0
+        for t in _prw.recheck_targets(_wled0):
+            if t.get("itemID") and t["itemID"] not in _have:
+                rows.append({"title": t.get("title", ""), "ebay_url": t.get("ebay_url", "")})
+                _merged += 1
+        if _merged:
+            print(f"♻ {_WAIT_TAB}から {_merged}件を再チェックに合流(蓄積分・供給は動的)")
+    except Exception as _e:
+        print(f"⚠ {_WAIT_TAB}読込skip ({type(_e).__name__}: {_e})")
     opts = uc.ChromeOptions()
     opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
     opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1000")
@@ -158,6 +175,9 @@ def main():
     driver = uc.Chrome(options=opts, version_main=_maj) if _maj else uc.Chrome(options=opts)
     out_rows = [["型番", "title", "再仕入れ可否", "Amazon¥", "販売元", "ASIN", "AmazonURL", "ebay_url"]]
     go = 0
+    _resourceable_ids = set()   # 再仕入れ可 itemID → 待ち台帳で復活可に
+    _end_candidates = []        # 供給なし確定(not_found/3rd-party) → End候補
+    _held_list = []             # Amazon到達不可(search_error)=在庫不明 → 蓄積して再取得
     try:
         driver.set_page_load_timeout(50)
         for i, r in enumerate(rows):
@@ -183,6 +203,18 @@ def main():
                              "再仕入れ可◎" if ok else "不能✕(End候補)",
                              res.get("price_jpy") or "", res.get("seller", ""),
                              res.get("asin", ""), res.get("url", ""), r.get("ebay_url", "")])
+            # 待ち台帳向け分類: 可 / 在庫不明(Amazon到達不可=search_error) / 供給なし確定
+            _iid = _mp._ebay_item_id(r.get("ebay_url", "") or "")
+            if not _iid:
+                continue
+            _rec = {"itemID": _iid, "key": "", "card_no": model,
+                    "title": (r.get("title") or "")[:90], "ebay_url": r.get("ebay_url", "")}
+            if ok:
+                _resourceable_ids.add(_iid)
+            elif str(res.get("_error", "")).startswith("search_error"):
+                _held_list.append(_rec)      # Amazon到達不可=取れなかった → 在庫不明(End候補にしない)
+            else:
+                _end_candidates.append(_rec)  # not_found / 3rd-party = 供給なし確定 → End候補
     finally:
         try:
             driver.quit()
@@ -196,6 +228,22 @@ def main():
         print(f"📊 「G-shock再仕入れ」タブ更新: {len(out_rows)-1}件 → {MAINT_URL}")
     except Exception as e:
         print(f"⚠ スプシ更新失敗: {type(e).__name__}: {e}")
+
+    # ★資産化: End候補/在庫不明を待ち台帳に蓄積(消さず毎回再チェック)、供給戻りは復活可に。
+    try:
+        import psa_restock_wait as _prw, datetime as _dt
+        from sheet_io import read_tab as _rt, write_rows_to_tab as _wt
+        _today = _dt.date.today().isoformat()
+        _prev = _prw.ledger_from_rows(_rt(_WAIT_TAB))
+        _wled, _wst = _prw.reconcile(_prev, _end_candidates, _resourceable_ids, _today,
+                                     held_candidates=_held_list)
+        _wt(_WAIT_TAB, _prw.to_tab_rows(_wled))
+        print(f"♻ {_WAIT_TAB}: 新規{_wst['new']} 継続{_wst['still_waiting']} 復活{_wst['revived']} "
+              f"在庫不明{_wst.get('unknown', 0)} / 待ち計{_wst['total_wait']}")
+        if _wst["revived"]:
+            print(f"   → 復活可{_wst['revived']}件(供給戻り)= RESTOCK対象。タブ「{_WAIT_TAB}」参照")
+    except Exception as e:
+        print(f"⚠ {_WAIT_TAB}更新skip ({type(e).__name__}: {e})")
 
 
 if __name__ == "__main__":

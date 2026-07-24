@@ -62,3 +62,15 @@ def test_is_amazon_seller_thirdparty_excluded():
 def test_seller_from_text():
     assert g.seller_from_text("出荷元 Amazon\n販売元 Amazon.co.jp") == "Amazon.co.jp"
     assert g.seller_from_text("Amazon.co.jp が販売、発送します") == "Amazon.co.jp"
+
+
+def test_gshock_wait_ledger_wired_20260724():
+    """2026-07-24: End候補/在庫不明を待ち台帳(G-shock再仕入れ待ち)に蓄積する配線が在る。"""
+    with open(_MOD, encoding="utf-8") as f:
+        src = f.read()
+    assert '"G-shock再仕入れ待ち"' in src or "_WAIT_TAB" in src
+    assert "psa_restock_wait" in src            # 汎用reconcile を再利用
+    assert "held_candidates=_held_list" in src  # 在庫不明も蓄積(孤児化防止)
+    assert "_resourceable_ids" in src and "_end_candidates" in src
+    # search_error(Amazon到達不可)= held、それ以外の不能 = End候補 の分類
+    assert 'startswith("search_error")' in src
