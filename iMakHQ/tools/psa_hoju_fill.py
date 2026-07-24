@@ -212,6 +212,39 @@ def _save_cache(cache, path=CACHE_PATH):
         json.dump(cache, f, ensure_ascii=False)
 
 
+class _KeepAwake:
+    """実行中だけ Windows をスリープさせない(無人夜間runの早期死を防ぐ)。
+
+    ★2026-07-25: 無人放置の search が毎回スリープで死んだ(chromedriver不達→初回コミット前に落ちる)。
+    resilience(バッチ毎コミット)は「コミット済を守る」だけでスリープ死そのものは防げない。
+    SetThreadExecutionState(ES_SYSTEM_REQUIRED) で run 中は system sleep を抑止し、終了で解除。
+    Windows 以外/失敗は no-op(害なし)。ディスプレイは消えてよい(ES_DISPLAY_REQUIREDは付けない)。
+    """
+    _ES_CONTINUOUS = 0x80000000
+    _ES_SYSTEM_REQUIRED = 0x00000001
+
+    def __enter__(self):
+        self._ok = False
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                ctypes.windll.kernel32.SetThreadExecutionState(
+                    self._ES_CONTINUOUS | self._ES_SYSTEM_REQUIRED)
+                self._ok = True
+        except Exception:
+            self._ok = False
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            if self._ok:
+                import ctypes
+                ctypes.windll.kernel32.SetThreadExecutionState(self._ES_CONTINUOUS)  # 抑止解除
+        except Exception:
+            pass
+        return False
+
+
 def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, commit_batch=8):
     """夜間検索本体(impure)。HIGH→対象抽出→検索→**サブバッチ毎にcacheコミット**。補URL列は触らない。
 
@@ -260,37 +293,38 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
     #   長寿命driver劣化(昨夜の初回10件 HTTPConnectionPool 全滅)を避ける。
     print(f"▶ 補URLリサーチ {len(searchable)}件 (mercari+snkrdunk / {commit_batch}件ごとにcacheコミット)...", flush=True)
     m_hit = s_hit = done = 0
-    for start in range(0, len(searchable), commit_batch):
-        grp = searchable[start:start + commit_batch]
-        # メルカリ(このバッチだけ。fresh driver・内部 8s throttle)。startup失敗等はバッチごと隔離。
-        mercari_res = {}
-        try:
-            cards = [{**queries[i], "ebay_item_id": todo[i]["itemID"]} for i in grp]
-            scraped = mp.fetch_mercari_cheapest(cards)
-            for j, i in enumerate(grp):
-                mercari_res[i] = scraped.get(j)
-        except Exception as e:
-            print(f"  ⚠ メルカリ batch skip ({type(e).__name__}: {str(e)[:40]}) — このバッチは SNKRDUNK のみ", flush=True)
-        # SNKRDUNK(HTTP)+ マージ
-        for i in grp:
-            t, q = todo[i], queries[i]
-            iid, cn = t["itemID"], q.get("card_no")
+    with _KeepAwake():   # 実行中はマシンをスリープさせない(無人runの初回コミット前スリープ死を防ぐ)
+        for start in range(0, len(searchable), commit_batch):
+            grp = searchable[start:start + commit_batch]
+            # メルカリ(このバッチだけ。fresh driver・内部 8s throttle)。startup失敗等はバッチごと隔離。
+            mercari_res = {}
             try:
-                snkr = sp.check_by_keyword(cn, variant_hint=q.get("hint"),
-                                           multi_variant=q.get("multi_variant"))
+                cards = [{**queries[i], "ebay_item_id": todo[i]["itemID"]} for i in grp]
+                scraped = mp.fetch_mercari_cheapest(cards)
+                for j, i in enumerate(grp):
+                    mercari_res[i] = scraped.get(j)
             except Exception as e:
-                snkr = {"_error": str(e)[:40] or "error", "available": False, "psa10_price_jpy": None}
-            m = mercari_res.get(i)
-            if isinstance(m, dict) and m.get("best"):
-                m_hit += 1
-            if isinstance(snkr, dict) and snkr.get("available"):
-                s_hit += 1
-            merge_search_result(cache, iid, m, snkr, today)
-            if snkr_sleep:
-                time.sleep(snkr_sleep)
-        _save_cache(cache)            # ★バッチ完了ごとにコミット(途中死でもここまで残る)
-        done += len(grp)
-        print(f"   💾 {done}/{len(searchable)} コミット (mercari在庫{m_hit} / snkr在庫{s_hit})", flush=True)
+                print(f"  ⚠ メルカリ batch skip ({type(e).__name__}: {str(e)[:40]}) — このバッチは SNKRDUNK のみ", flush=True)
+            # SNKRDUNK(HTTP)+ マージ
+            for i in grp:
+                t, q = todo[i], queries[i]
+                iid, cn = t["itemID"], q.get("card_no")
+                try:
+                    snkr = sp.check_by_keyword(cn, variant_hint=q.get("hint"),
+                                               multi_variant=q.get("multi_variant"))
+                except Exception as e:
+                    snkr = {"_error": str(e)[:40] or "error", "available": False, "psa10_price_jpy": None}
+                m = mercari_res.get(i)
+                if isinstance(m, dict) and m.get("best"):
+                    m_hit += 1
+                if isinstance(snkr, dict) and snkr.get("available"):
+                    s_hit += 1
+                merge_search_result(cache, iid, m, snkr, today)
+                if snkr_sleep:
+                    time.sleep(snkr_sleep)
+            _save_cache(cache)            # ★バッチ完了ごとにコミット(途中死でもここまで残る)
+            done += len(grp)
+            print(f"   💾 {done}/{len(searchable)} コミット (mercari在庫{m_hit} / snkr在庫{s_hit})", flush=True)
     print(f"✅ 補URLリサーチ完了: {len(searchable)}件 (mercari在庫あり{m_hit} / snkr在庫あり{s_hit}) "
           f"→ psa_research_cache.json 書込。補URL書込は slice3(昼確認)。")
     return {"searched": len(searchable), "mercari_hit": m_hit, "snkr_hit": s_hit,
