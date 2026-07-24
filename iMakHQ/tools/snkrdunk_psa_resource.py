@@ -156,7 +156,7 @@ def _bracket_matches(name_upper, cn_norm):
     return False
 
 
-def _match_item(data, card_number, variant_hint=None):
+def _match_item(data, card_number, variant_hint=None, multi_variant=False):
     """search レスポンスから card_number に一致する trading-card の item dict を返す
     (純関数・id-strict)。id だけ欲しい時は parse_search_for_card、画像も要る時は item.thumbnailUrl。
 
@@ -193,6 +193,17 @@ def _match_item(data, card_number, variant_hint=None):
     if not matches:
         return None
     if len(matches) == 1:
+        # ★2026-07-24 多変種プロモ(P-066/P-041 等)は、市場に1件だけあっても それが自出品と同じ
+        # 変種とは限らない → 番号一致だけで確定せず hint(入手元set)確証を必須にする(fail-closed)。
+        # 単一変種カードは従来どおり番号一致=確定(hint不問)。
+        if multi_variant and variant_hint:
+            # set部分(hint先頭3=set_name/get_info/set_ebay)のみで確証。キャラ名(name_jp=index5)は
+            # 同キャラ別変種で必ずマッチし誤確証するので使わない(_variant_matches と同基準)。
+            set_part = list(variant_hint)[:3] if isinstance(variant_hint, (list, tuple)) else variant_hint
+            toks = [t for t in _hint_tokens(set_part) if not re.fullmatch(r"[A-Z]{2,}\d{1,3}", t)]
+            nm = (matches[0].get("name") or "").upper().replace(" ", "").replace("-", "")
+            if toks and not any(t in nm for t in toks):
+                return None                    # 番号一致だが変種(set)未確証 → 誤variant掴まない
         return matches[0]                      # 単一一致 = 確定
     # 複数 print (変種非決定性): ①set トークンで絞る → ②同setで残れば print種別で tie-break
     toks = _hint_tokens(variant_hint)
@@ -220,7 +231,7 @@ def parse_search_for_card(data, card_number, variant_hint=None):
     return it.get("id") if isinstance(it, dict) else None
 
 
-def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None, _meta=None):
+def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None, _meta=None, multi_variant=False):
     """productNumber(例 OP11-106) → SNKRDUNK trading-card id を HTTP 解決。Selenium不要・全シリーズ。
 
     Step6 P3: variant_hint(canonical変種の set/name) を渡すと、同番号の複数 print から正しい
@@ -239,7 +250,7 @@ def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None, _meta=
     if r.status_code != 200:
         return None
     try:
-        it = _match_item(r.json(), card_number, variant_hint=variant_hint)
+        it = _match_item(r.json(), card_number, variant_hint=variant_hint, multi_variant=multi_variant)
     except Exception:
         return None
     if not isinstance(it, dict):
@@ -305,7 +316,8 @@ def fetch_psa10_listings(card_id, timeout=_TIMEOUT_SEC):
         return None
 
 
-def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant_hint=None):
+def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant_hint=None,
+                     multi_variant=False):
     """productNumber から HTTP-only で PSA10 再仕入れ可否を判定。
 
     出品一覧API(displayShortConditionTitle='PSA10')で実PSA10出品の最安を取り、補URLは
@@ -315,7 +327,8 @@ def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant
     Returns: {available, psa10_price_jpy, conditions, card_id, card_url} or {"_error":...}
     """
     _meta = {}                                       # resolve_card_id が thumbnail(実カード画像)を入れる
-    cid = resolve_card_id(card_number, timeout=timeout, variant_hint=variant_hint, _meta=_meta)
+    cid = resolve_card_id(card_number, timeout=timeout, variant_hint=variant_hint, _meta=_meta,
+                          multi_variant=multi_variant)
     if cid is None:
         return {"_error": "card_not_found", "available": False, "psa10_price_jpy": None}
     card_image = _meta.get("thumbnail", "")          # RESTOCK確証で出す実カード画像(全PSA10出品で共通)

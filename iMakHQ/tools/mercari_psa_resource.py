@@ -265,10 +265,33 @@ def build_card_query(title, set_no, key=None):
     nj = (meta.get("name_jp") if meta else None) or name_jp_for_card(card_no)
     image = meta.get("image") if meta else ""
     hint = meta.get("hint") if meta else []
+    mv = _is_multi_variant(card_no)   # 多変種プロモ判定(画像検索fail-closedの根拠)
     if not card_no:
-        return {"kw": "", "card_no": "", "name_jp": nj, "key": key or "", "image": image or "", "hint": hint}
+        return {"kw": "", "card_no": "", "name_jp": nj, "key": key or "", "image": image or "",
+                "hint": hint, "multi_variant": mv}
     kw = f"PSA10 {nj} {card_no}" if nj else f"PSA10 {card_no}"
-    return {"kw": kw, "card_no": card_no, "name_jp": nj, "key": key or "", "image": image or "", "hint": hint}
+    return {"kw": kw, "card_no": card_no, "name_jp": nj, "key": key or "", "image": image or "",
+            "hint": hint, "multi_variant": mv}
+
+
+def _is_multi_variant(card_no, _cache={}):
+    """card_no が catalog で 2 変種以上(=同番号で別配布/別art)か(純関数・DB1回でcache)。
+
+    ★2026-07-24: 多変種プロモ(P-066=3 / P-041=8 等)は、kw で正変種を確証できない時に
+    画像検索(番号のみ検証=変種を見ない)へ落ちると別変種を掴む(=「違う」連打の主因)。
+    多変種なら画像検索 fallback を使わず fail-closed(候補出さず手動仕入れ)にするための判定。
+    """
+    cn = (card_no or "").strip()
+    if not cn:
+        return False
+    if cn in _cache:
+        return _cache[cn]
+    try:
+        n = len(catalog_variants_for_cardno(cn))
+    except Exception:
+        n = 0
+    _cache[cn] = n > 1
+    return _cache[cn]
 
 
 def build_input_from_funnel():
@@ -597,7 +620,16 @@ def fetch_mercari_cheapest(cards):
                 via = "kw"
                 # keyword で変種を確証できない(0件 or set語不一致=違うカードを掴むリスク)→ 画像検索。
                 # 画像検索は自社PSAスラブ画像で視覚一致 → 番号+PSA10検証なので別カード混入を防ぐ。
-                if (best is None or not kw_variant_confident(best[2], c.get("hint"))) and eid:
+                _unconfident = best is None or not kw_variant_confident(best[2], c.get("hint"))
+                if _unconfident and eid and c.get("multi_variant"):
+                    # ★2026-07-24 fail-closed: 多変種プロモ(P-066/P-041 等)は画像検索(番号のみ検証・
+                    # 変種を見ない)で別変種を掴む=「違う」連打の主因。多変種×変種未確証は画像検索せず
+                    # 候補を出さない(手動仕入れに倒す)。単一変種のみ画像検索OK(番号一致=正)。
+                    best = None
+                    cands = []
+                    via = "多変種fail-closed(画像検索skip)"
+                    print(f"  [{i+1}/{len(cards)}] {card_no}: 多変種で変種確証不可→候補出さず(手動仕入れ)", flush=True)
+                elif _unconfident and eid:
                     img = image_search_fallback(drv, eid, card_no)
                     if img:
                         best = img

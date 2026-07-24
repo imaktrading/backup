@@ -648,7 +648,9 @@ def main():
             meta = mp.card_meta_for_key(k)
             if meta:
                 vhint = meta.get("hint")  # set + get_info(入手元set) + variant_type + rarity + name_jp + key
-        res = sp.check_by_keyword(cn, variant_hint=vhint)
+        # 多変種プロモは単一一致でも変種確証必須(番号だけで別変種を掴まない・2026-07-24)
+        _mv = mp._is_multi_variant(cn)
+        res = sp.check_by_keyword(cn, variant_hint=vhint, multi_variant=_mv)
         snkr_res[i] = res
         if res.get("_error") == "card_not_found":
             print(f"  [{i+1}/{len(rows)}] {cn}: SNKRDUNK未登録", flush=True)
