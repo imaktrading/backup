@@ -63,6 +63,7 @@ from sheet_updater import (  # noqa: E402
     paint_backup_url_cells,
     clear_sold_backup_cells,
     ensure_sold_at_header,
+    append_rescue_log_rows,
     detect_supplier,
     _domain_of,
     ensure_listings_err_header,
@@ -253,6 +254,22 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
 
     result = _build_row_result(row, sub_results, hit_index=hit_index)
     result["backup_slot_results"] = backup_slot_results
+
+    # ★ 補URL救済 signal (フック2、2026-07-25 HQ Phase1 測定用)。
+    #   救済 = 主URL(A) が is_sold=True 確定 (取得成功) AND 補URL≥1本が in_stock 確定。
+    #   ★ fail-closed: 主が None/error (uncertain) は救済に数えない (raw_status="in_stock@backup#N" は
+    #     主 uncertain でも発火し得るため proxy に使わず、main_sub.is_sold を直接判定)。
+    #   通常在庫 (主 in_stock) は救済でない (主が死んだ時のみ)。
+    main_is_sold = (main_sub["is_sold"] is True)
+    alive_backups = [s for s in backup_slot_results if s and s.get("is_sold") is False]
+    result["rescued"] = bool(main_is_sold and alive_backups)
+    if result["rescued"]:
+        saver = alive_backups[0]   # 最初の生存補 (= 延命した URL)
+        result["rescue_detail"] = {
+            "backup_slot": saver["slot"],                       # 0-4 = AC-AG
+            "backup_url":  saver["url"],
+            "main_status": main_sub["raw_status"] or "out_of_stock",
+        }
     return result
 
 
@@ -370,6 +387,31 @@ PENDING_REVISE_FILE = DECISION_LOG_DIR / "pending_revise.jsonl"
 # HQ 2026-06-10 FINAL 指示 B: silent 除外を禁止。 newly_sold だが item_id 空欄等で
 # revise 不能な entry は action_required.jsonl に記録、 cycle report で要対応として明示
 ACTION_REQUIRED_FILE = DECISION_LOG_DIR / "action_required.jsonl"
+# 補URL救済ログ (フック2、2026-07-25)。救済 = 主URL死 AND 補URL≥1本 在庫あり (Phase1 救済率 signal)。
+RESCUE_EVENTS_FILE = DECISION_LOG_DIR / "rescue_events.jsonl"   # 監査用 (実書込の証跡)
+
+
+def _rescue_key(r: dict) -> str:
+    """救済 dedup のキー。 item_id 優先、 空欄は row: fallback。"""
+    return (r.get("item_id") or "").strip() or f"row:{r['row_index']}"
+
+
+def load_rescue_state(sheet_label: str) -> set:
+    """前 cycle に「救済状態」だったキー集合を読む (遷移ベース dedup 用)。"""
+    p = DECISION_LOG_DIR / f"rescue_state_{sheet_label}.json"
+    if p.exists():
+        try:
+            return set(json.loads(p.read_text(encoding="utf-8")))
+        except Exception:
+            return set()
+    return set()
+
+
+def save_rescue_state(sheet_label: str, keys: set) -> None:
+    """今 cycle の救済状態キー集合を保存 (次 cycle の遷移判定基準)。"""
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    p = DECISION_LOG_DIR / f"rescue_state_{sheet_label}.json"
+    p.write_text(json.dumps(sorted(keys), ensure_ascii=False), encoding="utf-8")
 
 
 def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None:
@@ -1065,6 +1107,54 @@ def process_sheet(
     # decision_log は dry_run でも記録
     append_decision_log(sheet_label, results, dry_run)
 
+    # ── 補URL救済ログ (フック2、遷移ベース dedup) ──
+    # 救済 = 主URL死確定 AND 補URL≥1本 在庫あり (Phase1 救済率 signal)。前 cycle に救済状態でなかった
+    # キーが今 cycle 救済 = 「救済状態への遷移」= 1 回記録 (延べ cycle 水増し防止)。復活→再死は再カウント。
+    rescue_result = {"new_events": 0, "current_rescued": 0, "appended": 0}
+    rescued_now = {}
+    for r in results:
+        if r.get("rescued"):
+            rescued_now[_rescue_key(r)] = r
+    rescue_result["current_rescued"] = len(rescued_now)
+    prev_rescued = load_rescue_state(sheet_label)
+    new_keys = [k for k in rescued_now if k not in prev_rescued]
+    if new_keys:
+        events = []
+        for k in new_keys:
+            r = rescued_now[k]
+            d = r.get("rescue_detail", {})
+            events.append({
+                "date":        checked_at_now,
+                "item_id":     r.get("item_id", ""),
+                "title":       r.get("title", ""),
+                "backup_slot": _col_letter(29 + d.get("backup_slot", 0)),  # AC-AG
+                "main_status": d.get("main_status", ""),
+                "backup_url":  d.get("backup_url", ""),
+            })
+        rescue_result["new_events"] = len(events)
+        # 監査用ローカル jsonl は dry_run でも残す (証跡)
+        try:
+            with open(RESCUE_EVENTS_FILE, "a", encoding="utf-8") as f:
+                for e in events:
+                    f.write(json.dumps({**e, "sheet": sheet_label, "dry_run": dry_run},
+                                       ensure_ascii=False) + "\n")
+        except Exception as _re:
+            log(f"  [!] 救済ログ jsonl 追記失敗: {type(_re).__name__}: {_re}")
+        log(f"  [補URL救済] 新規救済 {len(events)} 件 (主死→補で延命)。現在救済中 {len(rescued_now)} 件。")
+        if not dry_run:
+            try:
+                ap = append_rescue_log_rows(ws.spreadsheet, events)
+                rescue_result["appended"] = ap["appended"]
+                log(f"  [OK] 補URL救済ログ タブ追記 {ap['appended']} 件 → {ap['tab']}")
+            except Exception as _ae:
+                log(f"  [!] 補URL救済ログ タブ追記失敗 (jsonl は保存済): {type(_ae).__name__}: {_ae}")
+    # 状態保存は実巡回のみ (dry_run は遷移基準を汚さない = 実巡回で確実に記録させる)
+    if not dry_run:
+        try:
+            save_rescue_state(sheet_label, set(rescued_now.keys()))
+        except Exception as _se:
+            log(f"  [!] 救済 state 保存失敗: {type(_se).__name__}: {_se}")
+
     if persistent_err_rows:
         log(f"  ⚠️ 持続エラー (連続{PERSISTENT_THRESHOLD}回以上、要手動 chk): {len(persistent_err_rows)} 件")
         for er in persistent_err_rows[:10]:
@@ -1082,6 +1172,7 @@ def process_sheet(
         "price_surge_held":     price_surge_held,   # 価格急増ガードで HOLD した supplier 一覧
         "price_surge_stats":    price_surge_stats,
         "backup_clear":         backup_clear_result,  # 補URL消込結果 (cleared/skipped_mismatch/held/surge)
+        "rescue":               rescue_result,        # 補URL救済 (new_events/current_rescued/appended)
     }
 
 

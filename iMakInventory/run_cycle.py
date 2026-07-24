@@ -226,7 +226,8 @@ def _phase_monitor(
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0,
              "url_alerts_count": 0, "by_sheet": {}, "error_rows": [],
              "persistent_err_rows": [], "price_surge": [],
-             "backup_clear_cleared": 0, "backup_clear_held": [], "backup_clear_mismatch": []}
+             "backup_clear_cleared": 0, "backup_clear_held": [], "backup_clear_mismatch": [],
+             "rescue_new": 0, "rescue_current": 0}
 
     # ProgressWriter を monitor_listings の callback として食わせる
     progress_callback = None
@@ -256,6 +257,10 @@ def _phase_monitor(
             for sup in (stats.get("price_surge_held") or []):
                 st = (stats.get("price_surge_stats") or {}).get(sup, {})
                 grand["price_surge"].append({"sheet": label, "supplier": sup, **st})
+            # 補URL救済 (フック2、Phase1 救済率 signal) を集約 (正常イベント = alert なし、ログのみ)
+            rc = stats.get("rescue") or {}
+            grand["rescue_new"] += rc.get("new_events", 0)
+            grand["rescue_current"] += rc.get("current_rescued", 0)
             # 補URL消込の HOLD (急増ガード) / mismatch (HQ差替等) を集約 → ALERT 別掲
             bc = stats.get("backup_clear") or {}
             grand["backup_clear_cleared"] += bc.get("cleared", 0)
@@ -341,6 +346,11 @@ def _phase_monitor(
                 _log("  [★補URL消込] alert mail 送信", test_mode)
         except Exception as e:
             _log(f"  [!] 補URL消込 mail 失敗: {type(e).__name__}: {e}", test_mode)
+
+    # 補URL救済 (Phase1 救済率 signal)。正常イベント = ログのみ (HQ が 補URL救済ログ から集計)。
+    if grand["rescue_new"] or grand["rescue_current"]:
+        _log(f"  [補URL救済] 新規救済 {grand['rescue_new']} 件 / 現在救済中 {grand['rescue_current']} 件 "
+             f"(主死→補で延命、Phase1 救済率 signal)", test_mode)
     return grand
 
 

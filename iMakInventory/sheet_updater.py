@@ -650,6 +650,58 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
             "candidate_count": n, "surge": False}
 
 
+RESCUE_LOG_TAB = "補URL救済ログ"
+RESCUE_LOG_HEADER = ["日付", "itemID", "タイトル", "生存backupSlot", "主URL状態", "backupURL"]
+
+
+def append_rescue_log_rows(sh, events: list) -> dict:
+    """補URL救済イベントを `補URL救済ログ` タブに追記 (フック2、2026-07-25)。
+
+    救済 = 主URL(A) 売切確定 AND 補URL≥1本 在庫あり (= 補が取下げを防いだ = Phase1 救済率の signal)。
+    caller (monitor) が遷移ベース dedup 済の新規救済のみ渡す。
+
+    ★ gspread の append_rows は false success があるため使わない ([[gspread_append_rows_unreliable]])。
+      col A の現行行数を読み、次行から明示 range で ws.update する。
+
+    Args:
+        events: [{"item_id","title","backup_slot","main_status","backup_url","date"}]
+
+    Returns: {"appended": N, "tab": RESCUE_LOG_TAB}
+    """
+    if not events:
+        return {"appended": 0, "tab": RESCUE_LOG_TAB}
+
+    # タブ取得 or 新規作成 (header 付き)
+    try:
+        ws_log = sh.worksheet(RESCUE_LOG_TAB)
+    except gspread.WorksheetNotFound:
+        ws_log = sh.add_worksheet(title=RESCUE_LOG_TAB, rows=1000, cols=len(RESCUE_LOG_HEADER))
+        ws_log.update(values=[RESCUE_LOG_HEADER], range_name="A1",
+                      value_input_option="USER_ENTERED")
+
+    # header 未設定 (空タブ) なら設定
+    existing = ws_log.col_values(1)
+    if not existing:
+        ws_log.update(values=[RESCUE_LOG_HEADER], range_name="A1",
+                      value_input_option="USER_ENTERED")
+        existing = [RESCUE_LOG_HEADER[0]]
+
+    next_row = len(existing) + 1
+    rows = [[
+        e.get("date", ""),
+        e.get("item_id", ""),
+        (e.get("title", "") or "")[:80],
+        e.get("backup_slot", ""),
+        e.get("main_status", ""),
+        (e.get("backup_url", "") or "")[:200],
+    ] for e in events]
+    end_row = next_row + len(rows) - 1
+    ws_log.update(values=rows,
+                  range_name=f"A{next_row}:F{end_row}",
+                  value_input_option="USER_ENTERED")
+    return {"appended": len(rows), "tab": RESCUE_LOG_TAB}
+
+
 # ============================================================================
 # メインシート読込
 # ============================================================================
