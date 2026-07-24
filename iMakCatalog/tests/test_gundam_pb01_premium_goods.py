@@ -46,6 +46,15 @@ class TestPb01Resolve(unittest.TestCase):
         r = pc.lookup_gundam(_BRAND, "999", "NONEXISTENT CARD", verbose=False)
         self.assertIsNone(r)
 
+    def test_pb01_set_name_is_promo_cards_not_base(self):
+        """2026-07-24 HQ依頼: PB01 再録の set は base 弾名でなく Promo Cards。
+        _row_to_dict が set_name_official 未登録時に product_id prefix(ST02/GD01)へ
+        fallback して 'Wings of Advance'/'Newtype Rising' を返すと PSA brand(PB01)と
+        不一致→selfcheck 拒否。yaml に PB01 set マッピングを追加して整合させた。"""
+        for num, subj in [("010", "HEERO YUY"), ("100", "A SHOW OF RESOLVE")]:
+            r = pc.lookup_gundam(_BRAND, num, subj, verbose=False)
+            self.assertEqual(r.get("set_name_ebay"), "Promo Cards", num)
+
 
 if __name__ == "__main__":
     unittest.main()

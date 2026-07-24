@@ -24,6 +24,13 @@ set:
     note: >-
       2026-07-07 HQ依頼: プレミアムグッズセット等 限定商品収録の RESOURCE カード(RP-024〜043)。
       eBay Set facet は非booster配布カードを一律 Promo Cards に束ねる(プロモと同バケツ)。
+  - source: プレミアムグッズセット-新機動戦記ガンダムW-[PB01]
+    ebay: Promo Cards
+    note: >-
+      2026-07-24 HQ依頼: PB01 プレミアムグッズセット(ガンダムW)再録カード(GD01-100_PB01 /
+      ST02-010_PB01 等)。この set_name_official が未登録だと _row_to_dict が product_id prefix
+      (ST02/GD01)へ fallback し base 弾名(Wings of Advance 等)を返して PSA brand(PB01)と不一致→
+      selfcheck 拒否。限定商品と同じ Promo Cards バケツに正規化して整合させる。
   - source: リミテッドBOX Ver.β
     ebay: Limited Box Beta Ver.
     note: JA-only Limited Box β — REVIEW eBay 値
