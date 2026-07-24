@@ -1570,3 +1570,27 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 変更: コード変更なし (記録のみ)。
 - 状態: **M/K/N pricing SSOT が LOW・HIGH 両シートで全系統完成・稼働中**。Inventory 側の実装キューは
   #1(K突合) #4(価格急増ガード) 含め完了。残るは常時監視 (widget表記再変化 = fail-closed 安全側)。
+
+## 2026-07-25 — 補URL売切消込 + 売切日時stamp + positional 5枠read (HQ hoju_url_sold_cleanup 本実装、commit 48cd8db)
+
+### feasibility → POC → 本実装 一気通貫 (HQ go: Phase1実測待たず並行)
+- 決定: HQ「補URL能動充填」の消し手 = ①売切確定の補URL(AC-AG)消込 + ②売切日時記録 を実装。
+  ユーザー判断で Phase1 実測を待たず並行実装 (死URLが枠を埋める前に消込を用意)。
+- 変更:
+  - [sheet_updater.py](../sheet_updater.py): `read_listings_rows` に `backup_url_slots`(固定5枠 positional 空=None)
+    追加 (懸念1)。`clear_sold_backup_cells`(compare-and-clear で書込直前 re-read+一致時のみ消す+消込急増ガード
+    CLEAR_SURGE_THRESHOLD=20)。`sold_at` stamp を AO=41 に書込 + `ensure_sold_at_header`(別ラベル在なら no-op)。
+  - [monitor_listings.py](../monitor_listings.py): `check_one_row_with_fallback` が `backup_slot_results`(len5 列マップ)
+    を返す。`_build_row_result` の在庫判定は不変(position-agnostic を隔離)。paint を列番号ベースに統一。
+    clear_candidates 収集(is_sold=True のみ)/sold_at(newly_sold遷移時)/dry-run で消込候補提示。
+  - [run_cycle.py](../run_cycle.py): 消込 HOLD/mismatch を sheet跨ぎ集約→desktop file+gmail+toast 3ch 告知。
+- 検証:
+  - ★**実機ヘッダで依頼書「AL=38 が空」は誤りと発見**: AL=38='値下FLG(pp)'使用中 / AM=39 は463セルにデータ有
+    (ヘッダ空だが使用中) / AN=40='仕入override' / **AO=41 が完全未使用(col_values=0)** → AO=41「売切日時」へ
+    append (AK 巡回ERR と同方式)。M12/M13 型破損を事前回避。HQ に列訂正を report (要確認)。
+  - POC (懸念1): 実 HIGH 1408行/補URL153行/全 slots 長さ==5/現状 gap=0 (=compaction が今は偶々恒等、
+    消込で gap 発生時に旧 read は誤爆 → positional 化は予防修正)。スクレイプなしで実データ確認。
+  - test 31件: 位置ズレ/gap alignment/compare-and-clear(一致消す・HQ差替不一致→消さず要対応)/急増HOLD+override/
+    stamp/header安全/fail注入+3chアラート配線(mock 実送なし)。**pre-commit 全 pass(151+offline)**。
+- next: 次 HIGH cycle で消込 cleared 実績 + audit(死URL→空き枠復活)突合。HQ に AO=41 可否確認。
+  実スクレイプ dry-run は cycle 非稼働窓で別途可能 (chrome 一括kill が巡回干渉するため今回は代替)。
