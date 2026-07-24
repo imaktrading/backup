@@ -270,7 +270,8 @@ class _KeepAwake:
         return False
 
 
-def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, commit_batch=8):
+def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, commit_batch=8,
+                     min_reviews=100):
     """夜間検索本体(impure)。HIGH→対象抽出→検索→**サブバッチ毎にcacheコミット**。補URL列は触らない。
 
     Args:
@@ -279,6 +280,7 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
         fresh: True で当日キャッシュも無視して全対象を再取得。
         snkr_sleep: SNKRDUNK 呼出間の待機秒(BAN 回避・nightly slow-and-steady)。
         commit_batch: この件数ごとに mercari+snkrdunk+cache保存(途中死の損失を≤1バッチに限定)。
+        min_reviews: メルカリ補URL候補の個人セラー評価件数の下限(既定100)。送料込みも必須。
     """
     import datetime
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -326,7 +328,8 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
             mercari_res = {}
             try:
                 cards = [{**queries[i], "ebay_item_id": todo[i]["itemID"]} for i in grp]
-                scraped = mp.fetch_mercari_cheapest(cards)
+                # 補URL候補は「送料込み + 個人セラー評価件数≥min_reviews」に絞る(詳細訪問・opt-in)。
+                scraped = mp.fetch_mercari_cheapest(cards, freeship_min_reviews=min_reviews)
                 for j, i in enumerate(grp):
                     mercari_res[i] = scraped.get(j)
             except Exception as e:
@@ -569,7 +572,7 @@ def main():
         pass
     # slice2: `search` で夜間検索。slice3: `confirm` で昼確認→補URL書込。無引数=slice1 件数レポート。
     if "search" in sys.argv:
-        max_backups, limit, fresh, commit_batch = 1, None, False, 8
+        max_backups, limit, fresh, commit_batch, min_reviews = 1, None, False, 8, 100
         for a in sys.argv[1:]:
             if a.startswith("--max-backups="):
                 max_backups = int(a.split("=", 1)[1])
@@ -577,9 +580,12 @@ def main():
                 limit = int(a.split("=", 1)[1])
             elif a.startswith("--commit-batch="):
                 commit_batch = int(a.split("=", 1)[1])
+            elif a.startswith("--min-reviews="):
+                min_reviews = int(a.split("=", 1)[1])
             elif a == "--fresh":
                 fresh = True
-        run_night_search(max_backups=max_backups, limit=limit, fresh=fresh, commit_batch=commit_batch)
+        run_night_search(max_backups=max_backups, limit=limit, fresh=fresh,
+                         commit_batch=commit_batch, min_reviews=min_reviews)
         return
     if "confirm" in sys.argv:
         max_backups, limit, dry = 1, None, "--dry-run" in sys.argv

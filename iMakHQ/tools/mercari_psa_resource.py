@@ -569,12 +569,95 @@ def image_search_fallback(drv, ebay_item_id, card_no, max_open=12):
     return None
 
 
-def fetch_mercari_cheapest(cards):
+# --- 出品者/送料フィルタ (詳細ページ由来。検索グリッドに無い) -----------------------
+# ★2026-07-25: 補URL候補を「送料込み + (個人セラーは評価件数≥N)」に絞る(ユーザー要望)。
+# 送料/状態/評価は商品詳細ページにしか無いため各候補を訪問して判定(やや遅い=opt-in)。
+_COND_VALUES = r"(新品、未使用|未使用に近い|目立った傷や汚れなし|やや傷や汚れあり|傷や汚れあり|全体的に状態が悪い)"
+
+
+def _parse_cond_ship(s):
+    """詳細 page_source → (商品の状態, 送料負担)。**ラベル直後の値だけ**取る純関数(test可)。
+
+    mercari は送料込み/着払い・状態語が UI/関連商品で常に両方出る(2026-06-25 着払い混入バグ)ため、
+    『商品の状態』『配送料の負担』ラベル直後の値を非貪欲マッチで取る。取れねば '' (fail-closed)。
+    ichibankuji_restock._parse_cond_ship と同一規約(検証: 実レンダHTMLで('新品、未使用','送料込み'))。
+    """
+    cm = re.search(r"商品の状態.{0,120}?" + _COND_VALUES, s or "", re.S)
+    sm = re.search(r"配送料の負担.{0,120}?(送料込み|着払い)", s or "", re.S)
+    return (cm.group(1) if cm else "", sm.group(1) if sm else "")
+
+
+def _parse_seller_reviews(s):
+    """詳細 page_source → 出品者の**評価件数**(int) or None(純関数・test可)。
+
+    ★星の数(5段階評価中4.5)ではなく **件数**。seller aria-label の 'N件のレビュー' を取る
+    (実レンダHTMLで 1回のみ出現=一意。検証済 '1282件のレビュー')。取れねば None(fail-closed=除外)。
+    """
+    m = re.search(r"([\d,]+)件のレビュー", s or "")
+    return int(m.group(1).replace(",", "")) if m else None
+
+
+def _is_shops_url(href):
+    """メルカリShops(業者)出品か。個人は /item/m…、Shops は /shops/product/…(純関数)。"""
+    return "/shops/product/" in (href or "")
+
+
+def candidate_passes_filter(cond, ship, reviews, is_shops, min_reviews=100, require_freeship=True):
+    """補URL候補が「送料込み + 個人は評価件数≥min_reviews」を満たすか(純関数・test可)。
+
+    - 送料込み必須(着払い=実原価が過小表示→除外)。require_freeship=False で無効化可。
+    - **個人(Shopsでない)のみ 評価件数≥min_reviews**。Shops(業者)は評価不問。
+    - reviews=None(取れない)は個人なら不合格(fail-closed)。Shops は reviews 不要。
+    """
+    if require_freeship and ship != "送料込み":
+        return False
+    if not is_shops:
+        if reviews is None or reviews < min_reviews:
+            return False
+    return True
+
+
+def _detail_supply_check(drv, href, min_reviews=100, require_freeship=True):
+    """詳細ページを訪問し candidate_passes_filter を評価 → (ok, ship, reviews)。失敗は (False,'',None)。"""
+    try:
+        drv.get(href)
+        time.sleep(3)
+        src = drv.page_source
+    except Exception:
+        return (False, "", None)
+    _cond, ship = _parse_cond_ship(src)
+    reviews = None if _is_shops_url(href) else _parse_seller_reviews(src)
+    ok = candidate_passes_filter(_cond, ship, reviews, _is_shops_url(href),
+                                 min_reviews=min_reviews, require_freeship=require_freeship)
+    return (ok, ship, reviews)
+
+
+def _filter_candidates_supply(drv, cands, min_reviews=100, keep=5):
+    """候補(price,href,name) を詳細訪問で「送料込み+個人評価≥min_reviews」に絞る(価格昇順・最大keep件)。
+
+    各候補の詳細を訪問(遅い)。keep 件通ったら打ち切り。全滅なら []。opt-in(呼出側が有効化時のみ)。
+    """
+    out = []
+    for c in cands:
+        href = c[1] if len(c) > 1 else ""
+        if not href:
+            continue
+        ok, _ship, _rev = _detail_supply_check(drv, href, min_reviews=min_reviews)
+        if ok:
+            out.append(c)
+            if len(out) >= keep:
+                break
+    return out
+
+
+def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
     """各カードの メルカリ on_sale PSA10 を取得 → {idx: {"best":(price,url,name)|None, "cands":[(price,url,name),...]}}。
 
     best = 最安(価格判定用)、cands = 正変種 PSA10 を価格昇順で最大5件(補URL=両ch混合の代替候補用)。
     cards: [{"kw":検索語, "card_no":照合番号, "ebay_item_id":フォールバック用}] のリスト。
     キーワード検索で0件なら、ebay_item_id があれば画像検索フォールバックを試す。
+    freeship_min_reviews: None=フィルタ無し(既定=RESTOCKゲート等の従来挙動不変)。int を渡すと
+      候補を「送料込み + 個人セラー評価件数≥その値」に絞る(詳細ページ訪問=やや遅い。slice2 補URL用)。
     """
     import undetected_chromedriver as uc
 
@@ -636,6 +719,14 @@ def fetch_mercari_cheapest(cards):
                         cands = [img]
                         all_cands = [img]
                         via = "画像検索"
+                # 補URL用フィルタ(opt-in): 送料込み + 個人セラー評価件数≥N に絞る(詳細訪問=遅い)。
+                # best も絞り込み後の最安(送料込み+評価OK)にする=価格判定も実仕入可の値になる。
+                if freeship_min_reviews is not None and cands:
+                    _before = len(cands)
+                    cands = _filter_candidates_supply(drv, cands, min_reviews=freeship_min_reviews)
+                    best = cands[0] if cands else None
+                    if _before != len(cands):
+                        via += f"+送料込み/評価≥{freeship_min_reviews}({_before}→{len(cands)})"
                 out[i] = {"best": best, "cands": cands, "all_cands": all_cands}
                 tag = f"¥{best[0]} ({via}, 候補{len(cands)})" if best else "PSA10在庫なし"
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: {tag}", flush=True)
