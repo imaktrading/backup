@@ -159,6 +159,26 @@ def targets_needing_search(targets, cache, today):
     return [t for t in targets if not _entry_complete(cache.get(t.get("itemID")), today)]
 
 
+def _entry_fresh(entry, today, max_age_days=3):
+    """slice3 が消費してよい鮮度か(純関数)= mercari/snkrdunk 両方揃い + date が窓内。
+
+    slice2 の same-day(_entry_complete)より緩い。**夜に検索→翌朝(=別日付)確認**の日跨ぎで
+    キャッシュが失効しないため(供給は1-2日で消えないし、slice3 は人が現物と視覚照合する)。
+    未来日付(0未満)や窓超過は False。日付欠落/解析不可も False(fail-closed)。
+    """
+    if not (isinstance(entry, dict) and "mercari" in entry and "snkrdunk" in entry):
+        return False
+    d = entry.get("date")
+    if not d:
+        return False
+    try:
+        import datetime
+        age = (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(d)).days
+    except Exception:
+        return False
+    return 0 <= age <= max_age_days
+
+
 def merge_search_result(cache, iid, mercari, snkrdunk, today):
     """検索結果を1件分キャッシュへマージ(純関数・fail-closed)。
 
@@ -319,6 +339,42 @@ def _ebay_itm_url(itemid):
     return f"https://www.ebay.com/itm/{itemid}" if itemid else ""
 
 
+def backfill_status(rows2d):
+    """live PSA を補URL本数でセグメント(純関数)= 件数感/進捗ダッシュボード用(slice4 フック1の素)。
+
+    Returns {live_psa, b0(補0), b1_4(補1-4), full(満杯5), by_count:{0..5}}。
+    「補あり(≥1) vs 補なし(0)」がファネル成績セグメント(取下率/live日数)の軸になる。
+    """
+    allt = select_backfill_targets(rows2d, max_backups=AUXN + 1)   # 補<6 = 満杯含む全 live PSA
+    by = {}
+    for t in allt:
+        by[t["n_backups"]] = by.get(t["n_backups"], 0) + 1
+    return {"live_psa": len(allt), "b0": by.get(0, 0),
+            "b1_4": sum(by.get(k, 0) for k in range(1, AUXN)),
+            "full": by.get(AUXN, 0), "by_count": {k: by.get(k, 0) for k in range(AUXN + 1)}}
+
+
+def run_status(max_backups=1):
+    """補URL充填の件数感 + キャッシュ確証待ちを1画面で(read-only)。"""
+    import datetime
+    today = datetime.date.today().isoformat()
+    vals = _read_high()
+    st = backfill_status(vals)
+    print(f"=== 補URL充填 現在地 (live PSA {st['live_psa']}件) ===")
+    print(f"  補なし(0本)  : {st['b0']}件  ← 充填の主対象(丸腰=仕入元1本切れで即取下げ)")
+    print(f"  補あり(1-4本): {st['b1_4']}件")
+    print(f"  満杯(5本)    : {st['full']}件")
+    print(f"  本数内訳: " + " / ".join(f"{k}本={st['by_count'][k]}" for k in range(AUXN + 1)))
+    # 当日〜窓内キャッシュで確証可能(=slice3 confirm で今出せる)件数
+    cache = _load_cache()
+    targets = select_backfill_targets(vals, max_backups=max_backups)
+    ready = sum(1 for t in targets if _entry_fresh(cache.get(t["itemID"]), today))
+    need = sum(1 for t in targets if not _entry_fresh(cache.get(t["itemID"]), today))
+    print(f"\n=== 対象(補<{max_backups}) {len(targets)}件 ===")
+    print(f"  確証待ち(キャッシュ済) : {ready}件  → `confirm` で視覚確証→補URL書込")
+    print(f"  未検索(要 slice2)     : {need}件  → `search` で夜間検索")
+
+
 def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     """昼の確認(impure)。slice2 が焼いた当日キャッシュから候補を出し、現物と視覚確証→
     確定URLを補URL(AC-AG)へ **既存保持+空き枠のみ** 冪等書込(hoju同規約)。主URL(A)は触らない。
@@ -354,7 +410,7 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         if iid in skip_iids:
             continue
         entry = cache.get(iid)
-        if not _entry_complete(entry, today):
+        if not _entry_fresh(entry, today):     # 夜検索→翌朝確認の日跨ぎOK(same-dayより緩い窓)
             no_cache += 1
             continue
         mr = entry.get("mercari") or {}
@@ -466,6 +522,9 @@ def main():
             elif a.startswith("--limit="):
                 limit = int(a.split("=", 1)[1])
         run_daytime_confirm(max_backups=max_backups, limit=limit, dry_run=dry)
+        return
+    if "status" in sys.argv:
+        run_status()
         return
     vals = _read_high()
     print(f"HIGH {len(vals)-1} 行")

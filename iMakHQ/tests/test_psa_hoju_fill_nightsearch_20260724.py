@@ -14,11 +14,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 from psa_hoju_fill import (
     _card_no_from_key,
     _entry_complete,
+    _entry_fresh,
     _mercari_errored,
     _merge_skip_rows,
     _skip_iids_from_tab,
+    backfill_status,
     compute_backurl_additions,
     merge_search_result,
+    select_backfill_targets,
     targets_needing_search,
 )
 
@@ -118,3 +121,42 @@ def test_merge_skip_rows_new_wins_on_dupe_itemid():
     new = [["358a", "1", "t", "違う", "d2"]]     # 同itemID → 新規優先
     merged = _merge_skip_rows(existing, new, existing[0])
     assert merged == [["itemID", "cert", "title", "理由", "日付"], ["358a", "1", "t", "違う", "d2"]]
+
+
+def test_entry_fresh_accepts_recent_window_for_daytime():
+    e = {"mercari": None, "snkrdunk": {}, "date": "2026-07-22"}
+    assert _entry_fresh(e, "2026-07-24", max_age_days=3)         # 2日前=窓内(夜検索→翌朝確認)
+    assert not _entry_fresh(e, "2026-07-27", max_age_days=3)     # 5日前=窓超過
+    assert not _entry_fresh({"mercari": None, "date": "2026-07-24"}, "2026-07-24")  # snkrdunk欠落
+    assert not _entry_fresh({"mercari": None, "snkrdunk": {}, "date": "2026-07-25"}, "2026-07-24")  # 未来日付
+    assert not _entry_fresh(None, "2026-07-24")
+
+
+# --- slice4(HQ側): 件数感セグメント -------------------------------------------
+
+def test_backfill_status_segments_by_backup_count():
+    # HIGH schema と同じ _row ヘルパで補本数別に作る
+    rows = [_H_hdr(),
+            _row_bk(itemid="a", cert="1", backups=0),
+            _row_bk(itemid="b", cert="2", backups=0),
+            _row_bk(itemid="c", cert="3", backups=2),
+            _row_bk(itemid="d", cert="4", backups=5)]
+    st = backfill_status(rows)
+    assert st["live_psa"] == 4 and st["b0"] == 2 and st["b1_4"] == 1 and st["full"] == 1
+    assert st["by_count"][0] == 2 and st["by_count"][2] == 1 and st["by_count"][5] == 1
+
+
+# backfill_status 用の行ヘルパ(targets test の _row と同形)
+from psa_hoju_fill import AUX0 as _AUX0
+
+
+def _H_hdr():
+    return ["URL", "itemID", "タイトル", "売り切れ"] + [""] * 4 + ["Title"] + [""] * 8 + ["カテゴリ"] + [""] * 40
+
+
+def _row_bk(itemid="", cert="", cat="TCG", sold="", key="K1", backups=0):
+    r = [""] * 41
+    r[1], r[3], r[8], r[17], r[34], r[2] = itemid, sold, cert, cat, key, "t"
+    for k in range(backups):
+        r[_AUX0 + k] = f"https://sup/{k}"
+    return r
