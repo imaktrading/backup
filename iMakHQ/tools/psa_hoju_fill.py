@@ -212,6 +212,31 @@ def _save_cache(cache, path=CACHE_PATH):
         json.dump(cache, f, ensure_ascii=False)
 
 
+def _clean_orphan_chrome():
+    """run 開始時に孤児 headless chrome + undetected_chromedriver を kill(clean slate)。
+
+    ★2026-07-25: 無人run が sleep/crash で死ぬたび chrome/driver が残留 → 累積(実測56 chrome+3 driver)で
+    次 run の driver 起動が詰まり即死する連鎖が発覚(CLAUDE.md 既知パターンを入れ忘れていた)。
+    **通常ブラウザ(非headless)は温存** — undetected_chromedriver 全部 + `--headless` を持つ chrome のみ kill。
+    Windows 以外/失敗は no-op。
+    """
+    if sys.platform != "win32":
+        return
+    import subprocess
+    ps = (
+        "Get-CimInstance Win32_Process -Filter \"Name='undetected_chromedriver.exe'\" | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }; "
+        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        "Where-Object { $_.CommandLine -match '--headless' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }"
+    )
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                       timeout=30, capture_output=True)
+    except Exception:
+        pass
+
+
 class _KeepAwake:
     """実行中だけ Windows をスリープさせない(無人夜間runの早期死を防ぐ)。
 
@@ -292,6 +317,7 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
     #   死んでも直前バッチまで残す(=再実行で当日済skipして続きから)。fresh driver/batch も
     #   長寿命driver劣化(昨夜の初回10件 HTTPConnectionPool 全滅)を避ける。
     print(f"▶ 補URLリサーチ {len(searchable)}件 (mercari+snkrdunk / {commit_batch}件ごとにcacheコミット)...", flush=True)
+    _clean_orphan_chrome()   # 前回crash の孤児 headless chrome/driver を掃除(累積で driver起動詰まり=即死を防ぐ)
     m_hit = s_hit = done = 0
     with _KeepAwake():   # 実行中はマシンをスリープさせない(無人runの初回コミット前スリープ死を防ぐ)
         for start in range(0, len(searchable), commit_batch):
