@@ -2174,8 +2174,20 @@ class ListingPanel:
                             _vidx >= 0 and SCRIPTS[_vidx].get("env", {}).get("PSA_VERIFY_BEFORE_BUILD") == "1")
                     except Exception:
                         _verify_before_build = False
+                    # RESTOCK Revise は変種を確定KEIから forced 生成済み(既存出品の再出品)。
+                    # cert確認 viewer は無関係=Revise CSV は既に確定変種で生成済みなので出さない
+                    # (2026-07-24 ユーザー指摘: 無関係なら出すな)。
+                    _is_restock_revise = False
+                    try:
+                        _ridx2 = getattr(self, "_current_idx", -1)
+                        _is_restock_revise = bool(_ridx2 >= 0 and SCRIPTS[_ridx2].get("restock_revise"))
+                    except Exception:
+                        _is_restock_revise = False
+                    _skip_review = _verify_before_build or _is_restock_revise
                     if _verify_before_build:
                         self.append_log("\n(post_psa_review: verify→build で生成前に確認済 — 後付け hook skip)\n")
+                    elif _is_restock_revise:
+                        self.append_log("\n(post_psa_review: RESTOCK Revise は確定変種で生成済 — cert確認 hook skip)\n")
                     try:
                         _tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
                         if _tools_dir not in sys.path:
@@ -2197,7 +2209,7 @@ class ListingPanel:
                         # verify→build は生成前に確認済 → 後付け viewer は出さない (二重防止)。
                         # _latest_csv の算出は Step 6 (no_go_sentinel) が使うため残す。
                         _review_opened = False
-                        if _latest_csv and not _verify_before_build:
+                        if _latest_csv and not _skip_review:
                             _review_opened = bool(run_post_psa_review(_latest_csv, self.append_log))
                         # RESTOCK CSV の open_after: 確認ブラウザを開いた時は開かない(同時オープン回避)。
                         # 確認が無い時のみ最新CSVを開く(生成後=新しい方を掴む)。
