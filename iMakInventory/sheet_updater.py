@@ -98,6 +98,17 @@ LISTINGS_COL_PRICE_PREV = 34  # AH: 前期 N (毎 cycle で旧 N がコピーさ
 # AJ=KEY2_ARCHIVED の次の空き列に append (= 既存列の挿入/ズレ無し、grid は BA=53 まで存在)。
 LISTINGS_COL_ERR_FLG = 37     # AK
 LISTINGS_ERR_FLG_HEADER = "巡回ERR"
+# 売切日時 (行が完全売切=newly_sold になった瞬間の日時、1 回記録)。churn 型番チューニング用 (HQ 消費)。
+# ★ 2026-07-25 実機ヘッダ確認: 依頼書「AL=38 が空」は誤り (AL=38='値下FLG(pp)' 使用中 / AM=39 は
+#   ヘッダ空だが 463 セルにデータ有=使用中 / AN=40='仕入override(手動)')。header 長=40、AO=41 は
+#   完全未使用 (col_values=0) → AK と同じ末尾 append 方式で AO=41 に新設。HQ に列訂正を報告済。
+LISTINGS_COL_SOLD_AT = 41     # AO
+LISTINGS_SOLD_AT_HEADER = "売切日時"
+
+# ── 補URL 売切消込 急増ガード (2026-07-25) ─────────────────────────────────
+# 1 cycle の補URL消込数が異常に多い = scraper の系統的誤 is_sold=True でデータ不具合の疑い
+# (2026-06-03 偽OOS 95件型)。閾値超で一括自動消込を止めて告知 (誤一括消去防止)。
+CLEAR_SURGE_THRESHOLD = 20    # 1 cycle でこの件数超の補URL消込が出たら HOLD + ALERT
 
 # ── 価格急増ガード (M/K 書込側、2026-07-23) ──────────────────────────────
 # scraper の DOM 構造変化で 1 supplier が丸ごと誤パースし、多数行に「plausible だが誤った」
@@ -201,9 +212,16 @@ def read_listings_rows(
         url = (row[LISTINGS_COL_URL - 1] if len(row) >= LISTINGS_COL_URL else "").strip()
         if only_with_url and not url:
             continue
+        # backup_urls: 空を詰めた list (後方互換、位置情報なし)。
+        # backup_url_slots: 固定 5 枠 positional (AC-AG に 1:1、空セルは None)。
+        # ★ 2026-07-25: 補URL消込/売切stamp/色塗りは「どの列か」の位置精度が Precision 100% の前提。
+        #   空詰め backup_urls は消込で穴 (AC消→AD残) ができると index↔列 がズレ誤セルを消す →
+        #   positional slots を正とする (懸念1 解消)。
         backup_urls = []
+        backup_url_slots = []
         for col in LISTINGS_COL_BACKUP_URLS:
             v = (row[col - 1] if len(row) >= col else "").strip()
+            backup_url_slots.append(v if v else None)
             if v:
                 backup_urls.append(v)
         rows.append({
@@ -214,7 +232,8 @@ def read_listings_rows(
             "current_sold": (row[LISTINGS_COL_SOLD - 1] if len(row) >= LISTINGS_COL_SOLD else "").strip(),
             "price":        (row[LISTINGS_COL_PRICE - 1] if len(row) >= LISTINGS_COL_PRICE else "").strip(),
             "checked_at":   (row[LISTINGS_COL_CHECKED_AT - 1] if len(row) >= LISTINGS_COL_CHECKED_AT else "").strip(),
-            "backup_urls":  backup_urls,  # AC-AG (#29-33) のうち空でないものだけ
+            "backup_urls":  backup_urls,  # AC-AG (#29-33) のうち空でないもの (後方互換)
+            "backup_url_slots": backup_url_slots,  # AC-AG 固定 5 枠 positional (空=None)。消込/stamp/色塗り用
             # 現在の N 列値 (生文字列、空欄も含む)。次 cycle で AH (前期 N) にコピーされる
             "current_n_jpy_str": (row[LISTINGS_COL_PRICE_NOW - 1] if len(row) >= LISTINGS_COL_PRICE_NOW else "").strip(),
             # 現在の M 列値 (=前 cycle に書いた現在価格、移行済 LOW/HIGH 両シート)。価格急増ガードの
@@ -326,7 +345,8 @@ def update_listings_sold_marks(ws, updates: list,
     """
     if not updates:
         return {"updated": 0, "d_writes": 0, "o_writes": 0, "m_writes": 0, "k_writes": 0,
-                "ah_writes": 0, "err_writes": 0, "surge_held": [], "surge_stats": {}}
+                "ah_writes": 0, "err_writes": 0, "sold_at_writes": 0,
+                "surge_held": [], "surge_stats": {}}
 
     # ── 価格急増ガード (supplier 単位) ──
     # scraper 系統崩壊で多数行に誤価格が一括 landing する事故を防ぐ。HOLD 対象 supplier の行は
@@ -343,6 +363,7 @@ def update_listings_sold_marks(ws, updates: list,
     k_writes = 0
     ah_writes = 0
     err_writes = 0
+    sold_at_writes = 0   # AO 売切日時 書込行数
     m_held = 0   # 急増ガードで M 書込を見送った行数
     for u in updates:
         row_idx = u["row_index"]
@@ -407,10 +428,20 @@ def update_listings_sold_marks(ws, updates: list,
             })
             err_writes += 1
 
+        # AO 列 (売切日時): "sold_at" キー (非空 str) があれば書込。行が完全売切 (newly_sold) に
+        # なった瞬間の日時を 1 回記録 (churn 型番チューニング用、HQ 消費)。空/None → 触らない。
+        sold_at = u.get("sold_at")
+        if isinstance(sold_at, str) and sold_at.strip():
+            cell_updates.append({
+                "range": f"{_col_letter(LISTINGS_COL_SOLD_AT)}{row_idx}",  # AO
+                "values": [[sold_at]],
+            })
+            sold_at_writes += 1
+
     ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
     return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes,
             "m_writes": m_writes, "k_writes": k_writes, "ah_writes": ah_writes,
-            "err_writes": err_writes, "m_held": m_held,
+            "err_writes": err_writes, "m_held": m_held, "sold_at_writes": sold_at_writes,
             "surge_held": sorted(surge_held), "surge_stats": surge_stats}
 
 
@@ -436,6 +467,31 @@ def ensure_listings_err_header(ws) -> bool:
     if (cur or "").strip() == LISTINGS_ERR_FLG_HEADER:
         return False
     ws.update(values=[[LISTINGS_ERR_FLG_HEADER]],
+              range_name=f"{_col_letter(col)}1",
+              value_input_option="USER_ENTERED")
+    return True
+
+
+def ensure_sold_at_header(ws) -> bool:
+    """商品管理シート AO1 に「売切日時」ヘッダを設定 (未設定時のみ).
+
+    ★ 2026-07-25: AO=41 は実機ヘッダ確認で完全未使用 (col_values=0) を確認した末尾 append 先。
+      依頼書の「AL=38」は使用中 (値下FLG) だったため訂正。header 書込前に現値を確認し、別ラベルが
+      入っていたら **上書きせず False を返す** (他列の誤上書き=破損を防ぐ、M12/M13 事故の教訓)。
+
+    Returns: True なら新規書込、False なら既設 or 別ラベル在で no-op。
+    """
+    col = LISTINGS_COL_SOLD_AT
+    try:
+        cur = (ws.cell(1, col).value or "").strip()
+    except Exception:
+        cur = None
+    if cur == LISTINGS_SOLD_AT_HEADER:
+        return False
+    if cur:
+        # 想定外の既存ラベル → 触らない (安全側)。caller が warning を出す。
+        return False
+    ws.update(values=[[LISTINGS_SOLD_AT_HEADER]],
               range_name=f"{_col_letter(col)}1",
               value_input_option="USER_ENTERED")
     return True
@@ -521,6 +577,77 @@ def paint_backup_url_cells(ws, paints: list) -> dict:
         ws.spreadsheet.batch_update({"requests": requests})
 
     return {"painted": len(paints), "red_cells": red_cells, "default_cells": default_cells}
+
+
+def clear_sold_backup_cells(ws, clear_candidates: list,
+                            enable_surge_guard: bool = True) -> dict:
+    """売切確定 (is_sold=True) の補URL (AC-AG) セルを compare-and-clear で消込.
+
+    ★ 2026-07-25 実装 (HQ 補URL能動充填 Phase2 の消し手)。役割分離: HQ=空き枠に足す /
+      監視=売切確定セルを消す。狙い=死んだ補URLが枠を埋め続けて HQ が新供給を足せなくなるのを防ぐ。
+
+    必須ガード (全AI共通原則):
+      - fail-closed: caller は is_sold=True 確定の候補のみ渡す (error/uncertain は渡さない)。
+      - compare-and-clear (懸念2 解消): 書込直前にセルを **re-read** し、監視が is_sold=True と確認した
+        URL 文字列とセル現在値が一致する時だけ消す。HQ が別の生きた新URLに差し替えていれば不一致 →
+        消さない (skipped_mismatch = 要対応、silent drop しない)。役割分離のタイミングの穴を構造的に塞ぐ。
+      - 主URL(col A) は対象外 (candidates は補URL 列のみ)。
+      - 消込急増ガード: 候補が CLEAR_SURGE_THRESHOLD 超なら一括自動消込を止めて HOLD (誤一括消去防止)。
+
+    Args:
+        clear_candidates: [{"row_index": int, "slot": 0-4, "expected_url": str}]
+                          slot 0-4 = AC-AG (列 29+slot)。expected_url = 監視が is_sold=True と見た URL。
+        enable_surge_guard: 消込急増ガードを有効化 (default True、緊急 override 用に False 可)。
+
+    Returns: {"cleared": N, "skipped_mismatch": [...], "held": bool,
+              "candidate_count": N, "surge": bool}
+    """
+    n = len(clear_candidates)
+    if n == 0:
+        return {"cleared": 0, "skipped_mismatch": [], "held": False,
+                "candidate_count": 0, "surge": False}
+
+    # 消込急増ガード: 異常件数なら消込せず HOLD (caller が ALERT)。
+    if enable_surge_guard and n > CLEAR_SURGE_THRESHOLD:
+        return {"cleared": 0, "skipped_mismatch": [], "held": True,
+                "candidate_count": n, "surge": True}
+
+    # 対象 row の AC-AG を書込直前に re-read (compare-and-clear)。
+    rows = sorted({c["row_index"] for c in clear_candidates})
+    ac = _col_letter(LISTINGS_COL_BACKUP_URL_1)   # AC
+    ag = _col_letter(LISTINGS_COL_BACKUP_URL_5)   # AG
+    ranges = [f"{ac}{r}:{ag}{r}" for r in rows]
+    got = ws.batch_get(ranges)
+    cur = {}
+    for r, g in zip(rows, got):
+        vals = (list(g[0]) if g else [])
+        cur[r] = vals
+
+    cell_updates = []
+    cleared = 0
+    skipped = []
+    for c in clear_candidates:
+        r = c["row_index"]
+        slot = c["slot"]
+        expected = (c["expected_url"] or "").strip()
+        vals = cur.get(r, [])
+        actual = (vals[slot].strip() if slot < len(vals) and vals[slot] else "")
+        if expected and actual == expected:
+            cell_updates.append({
+                "range": f"{_col_letter(LISTINGS_COL_BACKUP_URL_1 + slot)}{r}",
+                "values": [[""]],   # クリア
+            })
+            cleared += 1
+        else:
+            # HQ 差替 / 既に変化 / 空 → 消さない (silent drop 禁止、要対応として返す)
+            skipped.append({"row_index": r, "slot": slot,
+                            "expected_url": expected, "actual": actual})
+
+    if cell_updates:
+        ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+
+    return {"cleared": cleared, "skipped_mismatch": skipped, "held": False,
+            "candidate_count": n, "surge": False}
 
 
 # ============================================================================

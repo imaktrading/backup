@@ -225,7 +225,8 @@ def _phase_monitor(
             targets.append(("LOW", l_id))
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0,
              "url_alerts_count": 0, "by_sheet": {}, "error_rows": [],
-             "persistent_err_rows": [], "price_surge": []}
+             "persistent_err_rows": [], "price_surge": [],
+             "backup_clear_cleared": 0, "backup_clear_held": [], "backup_clear_mismatch": []}
 
     # ProgressWriter を monitor_listings の callback として食わせる
     progress_callback = None
@@ -255,6 +256,14 @@ def _phase_monitor(
             for sup in (stats.get("price_surge_held") or []):
                 st = (stats.get("price_surge_stats") or {}).get(sup, {})
                 grand["price_surge"].append({"sheet": label, "supplier": sup, **st})
+            # 補URL消込の HOLD (急増ガード) / mismatch (HQ差替等) を集約 → ALERT 別掲
+            bc = stats.get("backup_clear") or {}
+            grand["backup_clear_cleared"] += bc.get("cleared", 0)
+            if bc.get("held") or bc.get("surge"):
+                grand["backup_clear_held"].append(
+                    {"sheet": label, "candidate_count": bc.get("candidate_count", 0)})
+            for mm in (bc.get("skipped_mismatch") or []):
+                grand["backup_clear_mismatch"].append({**mm, "sheet": label})
         except Exception as e:
             _log(f"  [NG] [{label}] 例外: {type(e).__name__}: {e}", test_mode)
             grand["by_sheet"][label] = {"error": f"{type(e).__name__}: {e}"}
@@ -292,6 +301,46 @@ def _phase_monitor(
                 _log("  [★価格急増ガード] alert mail 送信", test_mode)
         except Exception as e:
             _log(f"  [!] 価格急増ガード mail 失敗: {type(e).__name__}: {e}", test_mode)
+
+    # ★ 補URL消込 ALERT: 消込急増ガード HOLD / compare-and-clear mismatch (HQ差替等) を非 silent 告知。
+    #   いずれも D/O(取下げ) は正常書込 = fail-OPEN ではない (延命枠の衛生管理レイヤ)。silent drop 禁止。
+    if grand["backup_clear_held"] or grand["backup_clear_mismatch"]:
+        _held = grand["backup_clear_held"]
+        _mm = grand["backup_clear_mismatch"]
+        _parts = []
+        if _held:
+            _parts.append("【消込急増ガード HOLD】" + ", ".join(
+                f"[{h['sheet']}] 候補{h['candidate_count']}件" for h in _held)
+                + " → 一括消込を止めた (データ不具合での誤一括消去防止)。要 DOM 確認。")
+        if _mm:
+            _parts.append(f"【compare-and-clear mismatch {len(_mm)}件】セル値≠確認URL "
+                          "(HQ が生きた新URLに差替 or 変化) → 消さずに要対応記録。")
+            for m in _mm[:15]:
+                _parts.append(f"  - [{m.get('sheet')}] row{m.get('row_index')} "
+                              f"slot{m.get('slot')}: expected={ (m.get('expected_url') or '')[:40]}")
+        _msg = ("補URL 売切消込で要対応が発生しました (D/O 取下げは正常 = fail-OPEN ではない)。\n\n"
+                + "\n".join(_parts))
+        _log(f"  [★補URL消込] HOLD={len(_held)} / mismatch={len(_mm)} → ALERT 発報", test_mode)
+        _notify_toast("iMakInventory 補URL消込 要対応", _msg[:200])
+        try:
+            desk = (Path.home() / "OneDrive" / "デスクトップ"
+                    / f"ALERT_iMakInventory_backup_clear_"
+                      f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+            desk.write_text(_msg, encoding="utf-8")
+            _log(f"  [★補URL消込] desktop ALERT 出力: {desk.name}", test_mode)
+        except Exception as e:
+            _log(f"  [!] 補URL消込 desktop alert 失敗: {type(e).__name__}: {e}", test_mode)
+        try:
+            from email_notifier import _send_via_gmail  # noqa: PLC0415
+            from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
+            _cfg = load_gmail_config()
+            if _cfg:
+                _a, _p, _t = _cfg
+                _send_via_gmail(_a, _p, _t,
+                                "[★iMakInventory] 補URL消込 要対応 (急増HOLD/mismatch)", _msg)
+                _log("  [★補URL消込] alert mail 送信", test_mode)
+        except Exception as e:
+            _log(f"  [!] 補URL消込 mail 失敗: {type(e).__name__}: {e}", test_mode)
     return grand
 
 

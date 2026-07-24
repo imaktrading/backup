@@ -61,6 +61,8 @@ from sheet_updater import (  # noqa: E402
     read_listings_rows,
     update_listings_sold_marks,
     paint_backup_url_cells,
+    clear_sold_backup_cells,
+    ensure_sold_at_header,
     detect_supplier,
     _domain_of,
     ensure_listings_err_header,
@@ -213,19 +215,45 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
     補設定 row でも全候補を毎 cycle scrape する (= 短絡しない)。理由は AC-AG セルの色塗り
     のために各補 URL の状態を可視化するため。性能影響: backup_urls 空の row は 1 候補のまま。
 
-    Returns: 既存 check_one_row と同じ形式 + sub_results (色塗り用、各候補の state list)
+    Returns: 既存 check_one_row と同じ形式 + sub_results (在庫判定用、実 URL のみ) +
+             backup_slot_results (色塗り/消込用、AC-AG 固定 5 枠 positional、空枠=None)。
+
+    ★ 2026-07-25: sub_results は「実 scrape した候補のみ」(判定ロジックは position-agnostic なので
+      不変)。色塗り/消込は「どの列か」の位置が要るため backup_slot_results (len 5) を別に持つ。
+      空詰め index で列を推定しない (懸念1: 穴で誤セルを消す事故を構造的に防ぐ)。
     """
-    backup_urls = row.get("backup_urls", []) or []
-    candidates = [row["url"]] + backup_urls
-    sub_results = []
-    hit_index = -1
-    for idx, url in enumerate(candidates):
-        sub = _check_single_url(url, sleep_sec, mercari_driver, amazon_driver)
+    # 固定 5 枠 positional (read が付ける)。旧 backup_urls しか無い呼出には fallback で slots 化。
+    slots = row.get("backup_url_slots")
+    if slots is None:
+        _bu = row.get("backup_urls", []) or []
+        slots = list(_bu) + [None] * (5 - len(_bu))
+    slots = list(slots)[:5] + [None] * max(0, 5 - len(slots))
+
+    # 主 URL は必ず scrape (index 0)
+    main_sub = _check_single_url(row["url"], sleep_sec, mercari_driver, amazon_driver)
+    sub_results = [main_sub]
+    hit_index = 0 if main_sub["is_sold"] is False else -1
+
+    # 補 URL: 埋まっている枠だけ scrape。 枠位置 (0-4 = AC-AG) を保った結果を別途保持。
+    backup_slot_results = []
+    for slot_i, burl in enumerate(slots):
+        if not burl:
+            backup_slot_results.append(None)   # 空枠 (色塗り "unknown" / 消込対象外)
+            continue
+        sub = _check_single_url(burl, sleep_sec, mercari_driver, amazon_driver)
         sub_results.append(sub)
-        # 最初の in_stock を hit_index として記録 (短絡せず全候補チェック)
         if sub["is_sold"] is False and hit_index < 0:
-            hit_index = idx
-    return _build_row_result(row, sub_results, hit_index=hit_index)
+            hit_index = len(sub_results) - 1   # sub_results 内の index (価格採用に使う)
+        backup_slot_results.append({
+            "slot": slot_i,                    # 0-4 = AC-AG (列 29+slot_i)
+            "url": burl,
+            "is_sold": sub["is_sold"],         # True=売切 / False=在庫あり / None=不確定
+            "error": sub["error"],
+        })
+
+    result = _build_row_result(row, sub_results, hit_index=hit_index)
+    result["backup_slot_results"] = backup_slot_results
+    return result
 
 
 def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
@@ -900,6 +928,9 @@ def process_sheet(
             }
             if clear_err:
                 upd["err_flag"] = ""
+            # 売切日時 (AO): 行が完全売切 (newly_sold = D ""→○) になった瞬間を 1 回記録 (churn 用)。
+            if r.get("delta") == "newly_sold":
+                upd["sold_at"] = checked_at_now
             if price_jpy is not None:
                 upd["price_jpy"] = price_jpy   # → sheet_updater が M列(12) に書込
                 upd["prev_n_jpy_str"] = prev_n
@@ -912,12 +943,36 @@ def process_sheet(
                                          and not isinstance(_pts, bool) and _pts >= 0 else 0)
             updates.append(upd)
 
+    # ── 補URL 売切消込の候補収集 (懸念2: fail-closed) ──
+    # backup_slot_results (固定 5 枠 positional) の is_sold=True 枠のみ = 売切確定の補URL。
+    # error/None (uncertain) は消さない。主URL (slot 概念外) は対象外。実 clear は下で compare-and-clear。
+    clear_candidates = []
+    for r in results:
+        slots = r.get("backup_slot_results")
+        if not slots:
+            continue
+        for s in slots:
+            if s and s.get("is_sold") is True and s.get("url"):
+                clear_candidates.append({
+                    "row_index":    r["row_index"],
+                    "slot":         s["slot"],           # 0-4 = AC-AG
+                    "expected_url": s["url"],
+                })
+
     price_surge_held: list = []    # 価格急増ガードで M/K を HOLD した supplier (return で run_cycle へ)
     price_surge_stats: dict = {}
+    backup_clear_result: dict = {"cleared": 0, "skipped_mismatch": [], "held": False,
+                                 "candidate_count": len(clear_candidates), "surge": False}
     if dry_run:
         log("  [DRY RUN] スプシ書込 skip")
         for r in [x for x in results if x["delta"] in ("newly_sold", "newly_in_stock")][:10]:
             log(f"    変化検知サンプル: row{r['row_index']} {r['delta']} {r['url'][:50]}")
+        # POC 実証: 補URL消込の候補を dry-run で提示 (実書込なし)。fail-closed で is_sold=True のみ。
+        if clear_candidates:
+            log(f"  [DRY RUN] 補URL消込 候補 {len(clear_candidates)} 件 (is_sold=True 確定のみ、実 clear なし):")
+            for c in clear_candidates[:15]:
+                log(f"    row{c['row_index']} slot{c['slot']}({_col_letter(29 + c['slot'])}) "
+                    f"→ clear対象 {c['expected_url'][:55]}")
     elif updates:
         d_count = sum(1 for u in updates if not u.get("o_only"))
         n_count = sum(1 for u in updates if u.get("price_jpy") is not None)
@@ -937,7 +992,7 @@ def process_sheet(
             res = update_listings_sold_marks(
                 ws, updates, price_col_idx=price_col, enable_points=True)
             _price_letter = _col_letter(price_col)
-            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')})")
+            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')} / sold_at_writes={res.get('sold_at_writes', 0)})")
             # ★ 価格急増ガード: HOLD 対象 supplier があれば prominent に告知 (非 silent)。
             #   D/O(取下げ) は書けている = fail-OPEN ではない。M/K(価格) のみ保留 = 誤汚染を防ぐ側。
             price_surge_held = res.get("surge_held") or []
@@ -949,31 +1004,51 @@ def process_sheet(
                 log(f"  [★価格急増ガード発火] supplier={_held_desc} の M/K 書込を HOLD "
                     f"(前M比 ±{int(PRICE_SURGE_THRESHOLD*100)}%超が過半)。見送り {res.get('m_held', 0)} 行。"
                     f"scraper 系統崩壊疑い → 要 DOM 検体確認。D/O は正常書込。")
+
+            # ★ 補URL 売切消込 (compare-and-clear + 消込急増ガード)。sold_at と別 API (書込直前 re-read)。
+            #   D/O(取下げ) は上で書けている = 消込の HOLD/mismatch は fail-OPEN ではない (延命枠の衛生管理)。
+            if clear_candidates:
+                # AO ヘッダ (売切日時) を未設定時のみ用意 (別ラベル在なら触らない=破損回避)。
+                try:
+                    ensure_sold_at_header(ws)
+                except Exception as _he:
+                    log(f"  [!] 売切日時ヘッダ設定 skip: {type(_he).__name__}: {_he}")
+                backup_clear_result = clear_sold_backup_cells(ws, clear_candidates)
+                bc = backup_clear_result
+                if bc.get("surge") or bc.get("held"):
+                    log(f"  [★補URL消込 急増ガード発火] 候補 {bc['candidate_count']} 件 > 閾値 "
+                        f"→ 一括消込を HOLD (データ不具合での誤一括消去防止)。要 DOM 確認。")
+                else:
+                    log(f"  [OK] 補URL消込: cleared={bc['cleared']} / candidate={bc['candidate_count']} "
+                        f"/ skipped(HQ差替等 mismatch)={len(bc['skipped_mismatch'])}")
+                    if bc["skipped_mismatch"]:
+                        log(f"  [⚠要対応] 補URL消込 mismatch {len(bc['skipped_mismatch'])} 件 "
+                            f"(セル値≠確認URL = HQ差替/変化、silent drop せず記録)")
         except Exception as e:
             log(f"  [NG] スプシ書込失敗: {type(e).__name__}: {e}")
             log(traceback.format_exc())
 
         # AC-AG (補 URL) 色塗り: 補 URL 設定 row のみ paint。売切は赤字、それ以外は黒字。
-        # results の sub_results は主 URL を index=0 とするため、補は index 1〜5。
+        # ★ 2026-07-25: backup_slot_results (固定 5 枠 positional、空枠=None) を列番号ベースで参照。
+        #   旧実装は sub_results の詰めた index を列に対応させており、消込で穴ができるとズレた (懸念1)。
         paints = []
         for r in results:
-            sub = r.get("sub_results") or []
-            if len(sub) <= 1:
-                continue   # 補 URL なし (= sub は主のみ) → スキップ
+            slots = r.get("backup_slot_results")
+            if not slots or all(s is None for s in slots):
+                continue   # 補 URL なし → スキップ
             states = []
-            for backup_idx in range(1, 6):  # 補 1〜5 (sub_results index 1-5)
-                if backup_idx < len(sub):
-                    s = sub[backup_idx]
-                    if s.get("is_sold") is True:
-                        states.append("sold")
-                    elif s.get("is_sold") is False:
-                        states.append("in_stock")
-                    elif s.get("error"):
-                        states.append("error")
-                    else:
-                        states.append("unknown")
+            for slot_i in range(5):   # slot 0-4 = AC-AG (列 29-33)
+                s = slots[slot_i] if slot_i < len(slots) else None
+                if s is None:
+                    states.append("unknown")           # 補 URL 空欄
+                elif s.get("is_sold") is True:
+                    states.append("sold")
+                elif s.get("is_sold") is False:
+                    states.append("in_stock")
+                elif s.get("error"):
+                    states.append("error")
                 else:
-                    states.append("unknown")   # 補 URL 空欄
+                    states.append("unknown")
             paints.append({"row_index": r["row_index"], "states": states})
         if paints:
             log(f"  AC-AG セル色塗り中... {len(paints)} 行")
@@ -1004,6 +1079,7 @@ def process_sheet(
         "persistent_err_rows":  persistent_err_rows,
         "price_surge_held":     price_surge_held,   # 価格急増ガードで HOLD した supplier 一覧
         "price_surge_stats":    price_surge_stats,
+        "backup_clear":         backup_clear_result,  # 補URL消込結果 (cleared/skipped_mismatch/held/surge)
     }
 
 

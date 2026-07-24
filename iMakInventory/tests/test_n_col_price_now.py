@@ -311,7 +311,8 @@ def test_empty_returns_new_write_keys_zero():
     ws = MagicMock()
     res = update_listings_sold_marks(ws, [])
     assert res == {"updated": 0, "d_writes": 0, "o_writes": 0, "m_writes": 0, "k_writes": 0,
-                   "ah_writes": 0, "err_writes": 0, "surge_held": [], "surge_stats": {}}
+                   "ah_writes": 0, "err_writes": 0, "sold_at_writes": 0,
+                   "surge_held": [], "surge_stats": {}}
 
 
 def test_legacy_call_without_price_jpy_unchanged():
