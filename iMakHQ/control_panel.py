@@ -781,6 +781,39 @@ SCRIPTS = [
         "params": [],
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
+    # ---- 補URL能動充填 (2026-07-25 Phase1)。出品が「仕入元1本切れ」で死なないよう補URL(AC-AG)を厚く保つ。
+    #   夜=検索(無人・8件毎cacheコミット=途中死で残る) → 昼=視覚確証で正変種だけ補URL書込 → status=件数感。
+    #   RESTOCKゲートと同一 primitives・共有cache。設計: discussion/2026-07-24_psa_hoju_url_replenishment_design.md ----
+    {
+        "category": None, "type": "utility",
+        "label": "📊 補URL件数感(status)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "status"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # slice2: 補が薄い live PSA を mercari/snkrdunk 検索→候補+画像を cache(補URL列は触らない)。無人可・停止可。
+        "category": None, "type": "utility",
+        "label": "🔎 補URL夜間検索(slice2)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "search"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
+        "category": None, "type": "utility",
+        "label": "🩹 補URL補強(昼確認/slice3)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "confirm"],
+        "params": [],
+        "skip_postprocess": True,
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
     # ---- 一番くじ 在庫補充 (PSA再仕入れの下に配置。2026-07-01 順序変更)。CLI: ichibankuji_restock.py ----
     # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
     {
