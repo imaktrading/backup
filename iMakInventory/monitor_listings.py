@@ -989,6 +989,13 @@ def process_sheet(
             MIGRATED_SHEET_IDS = {LOW_SHEET_ID, HIGH_SHEET_ID}
             migrated = (sheet_id in MIGRATED_SHEET_IDS)
             price_col = LISTINGS_COL_PRICE_NOW_M if migrated else LISTINGS_COL_PRICE_NOW
+            # AO ヘッダ (売切日時) を先に用意 (sold_at 書込 or 消込候補があれば)。消込候補の有無に依らず
+            # newly_sold 行の sold_at が書かれる時にヘッダが付くようにする (別ラベル在なら no-op=破損回避)。
+            if any(u.get("sold_at") for u in updates) or clear_candidates:
+                try:
+                    ensure_sold_at_header(ws)
+                except Exception as _he:
+                    log(f"  [!] 売切日時ヘッダ設定 skip: {type(_he).__name__}: {_he}")
             res = update_listings_sold_marks(
                 ws, updates, price_col_idx=price_col, enable_points=True)
             _price_letter = _col_letter(price_col)
@@ -1008,11 +1015,6 @@ def process_sheet(
             # ★ 補URL 売切消込 (compare-and-clear + 消込急増ガード)。sold_at と別 API (書込直前 re-read)。
             #   D/O(取下げ) は上で書けている = 消込の HOLD/mismatch は fail-OPEN ではない (延命枠の衛生管理)。
             if clear_candidates:
-                # AO ヘッダ (売切日時) を未設定時のみ用意 (別ラベル在なら触らない=破損回避)。
-                try:
-                    ensure_sold_at_header(ws)
-                except Exception as _he:
-                    log(f"  [!] 売切日時ヘッダ設定 skip: {type(_he).__name__}: {_he}")
                 backup_clear_result = clear_sold_backup_cells(ws, clear_candidates)
                 bc = backup_clear_result
                 if bc.get("surge") or bc.get("held"):
