@@ -2393,6 +2393,30 @@ GSHEET_CREDS_FILE = os.path.join(
 )
 
 
+def _psa_cost_from_row(cost_n, price_m, price_f):
+    """仕入¥ を N(SSOT)→ M(現在価格)→ F(取得時価格) の優先で決める。純関数(test可)。
+
+    2026-07-24 根治: 従来 `N or F` で、N列(#REF!/空)の時に F列(=取得時の古い価格)へ
+    フォールバックし、値下がりした品を過大 pricing していた(DON!! 出品時 F¥23,000 を拾い
+    $279.98。実際は現価格 M¥14,000 → $184.98)。SSOT 定義 N=(M or F)−K は M(現在)を
+    F(古い)より優先するので、コード側も N空でも M を先に見る。#REF!/非数値は数字が無く
+    自然に次候補へ流れる。
+    """
+    import re as _re
+    for src in (cost_n, price_m, price_f):
+        s = (src or "").strip()
+        if not s:
+            continue
+        m = _re.search(r'([\d,]+)', s)
+        if not m:
+            continue          # '#REF!' 等 数字なし → 次候補(M→F)へ
+        try:
+            return int(m.group(1).replace(',', ''))
+        except ValueError:
+            continue
+    return None
+
+
 def load_targets_from_sheet_psa():
     """Porter/Ichibankuji/Reel と共用の出品管理スプシ (19kj8... gid=851100680)
     から PSA 出品対象を抽出。
@@ -2451,7 +2475,8 @@ def load_targets_from_sheet_psa():
         price_f  = (row[5]  if len(row) > 5  else '').strip()  # F "¥11,000"
         cert     = (row[8]  if len(row) > 8  else '').strip()  # I cert#
         no_go    = (row[10] if len(row) > 10 else '').strip()  # K NO-GO sentinel (= 「出品見合せ（仕入高）」 等)
-        cost_n   = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円)
+        price_m  = (row[12] if len(row) > 12 else '').strip()  # M 現在価格(円) = 監視くん更新の最新
+        cost_n   = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円) = SSOT (M or F)−K
         category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
         key_v    = (row[_KEY_COL] if len(row) > _KEY_COL else '').strip()  # AI canonical KEY
 
@@ -2475,15 +2500,10 @@ def load_targets_from_sheet_psa():
         cert_numbers.append(cert)
         url_map[cert] = url
         title_map[cert] = title
-        # 仕入値: N列優先、空なら F列(¥11,000 形式) を parse
-        cost_src = cost_n or price_f
-        if cost_src:
-            m = _re.search(r'([\d,]+)', cost_src)
-            if m:
-                try:
-                    cost_map[cert] = int(m.group(1).replace(',', ''))
-                except ValueError:
-                    pass
+        # 仕入値: N(SSOT)→ M(現在価格)→ F(取得時) の優先。N#REF!/空でも M(最新)を拾う。
+        _cost = _psa_cost_from_row(cost_n, price_m, price_f)
+        if _cost is not None:
+            cost_map[cert] = _cost
     if _skipped_listed:
         print(f"  ⏭️ 既出品(同KEYが出品済)の2枚目を除外: {_skipped_listed}件 "
               f"(viewer毎回再表示の浪費防止。dedupと二重ではなく抽出段階で先に止める)")
