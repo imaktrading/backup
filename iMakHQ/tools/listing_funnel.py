@@ -119,6 +119,38 @@ def _i(v):
         return 0
 
 
+def archive_generation(data_dir, report_paths):
+    """今回の生レポート一式を data_dir/<YYYYMMDD>/ に**コピー保管**(生データの永久資産化)。
+
+    2026-07-24 制定: Seller Hub 生CSV/xlsx を世代ごとに貯めれば、後からどんなトレンド分析も
+    遡って作れる(見られ続けない出品 / ずっと再仕入れ価値 / カテゴリ別 sell-through 推移 等)。
+    派生分類を貯めるより生データ archive が完全・将来対応。日付は active レポートの内容日付
+    (ファイル名 YYYY-MM-DD)。既に同名があれば skip(冪等)。funnel の入力(直下 loose)は
+    そのまま残す(funnel は直下を読むため)。戻り: (archive_dir, copied件数)。
+    """
+    import shutil
+    active = next((p for p in report_paths if p and "active-listings" in os.path.basename(p)), None)
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", os.path.basename(active or "")) if active else None
+    stamp = f"{m[1]}{m[2]}{m[3]}" if m else None
+    if not stamp:  # 内容日付が取れない時は archive しない(誤フォルダ名を作らない=fail-closed)
+        return (None, 0)
+    adir = os.path.join(data_dir, stamp)
+    os.makedirs(adir, exist_ok=True)
+    copied = 0
+    for p in report_paths:
+        if not p or not os.path.isfile(p):
+            continue
+        dst = os.path.join(adir, os.path.basename(p))
+        if os.path.exists(dst):
+            continue
+        try:
+            shutil.copy2(p, dst)
+            copied += 1
+        except Exception:
+            pass
+    return (adir, copied)
+
+
 def find_file(data_dir, pattern):
     hits = glob.glob(os.path.join(data_dir, pattern))
     return max(hits, key=os.path.getmtime) if hits else None
@@ -558,6 +590,13 @@ def main():
             f"   古いレポートで走らせると funnel世代が更新されず効果測定も無意味になります。\n"
             f"   → Seller Hub で4-5レポートを再DL → {data_dir} に置き直してから再実行。\n"
             f"   (どうしても古いまま実行する場合は --force)")
+    # 生レポートを世代フォルダに永久アーカイブ(以後 定期実行で自動蓄積=分析を後から遡れる)
+    try:
+        _adir, _ncopy = archive_generation(data_dir, [f_active, f_quality, f_unsold, f_promoted, f_orders])
+        if _adir:
+            print(f"🗄 生レポート archive: {os.path.basename(_adir)}/ に {_ncopy}件保管(世代蓄積=後から分析可)")
+    except Exception as _ae:
+        print(f"  ⚠ archive skip(非致命): {type(_ae).__name__}: {_ae}")
     print(f"data-dir: {data_dir}  (レポート最古 {_worst}日前)")
     print(f"  active  : {os.path.basename(f_active)}")
     print(f"  quality : {os.path.basename(f_quality) if f_quality else '(なし=簡易判定)'}")
