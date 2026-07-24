@@ -272,12 +272,181 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0):
             "skipped": skipped, "no_query": no_query}
 
 
+# ---------------------------------------------------------------------------
+# slice3: 昼の確認(有人)。キャッシュ済候補を視覚確証→補URL(AC-AG)へ冪等書込。
+# ---------------------------------------------------------------------------
+CONFIRM_SKIP_TAB = "補URL確証スキップ"
+CONFIRM_SKIP_HEADER = ["itemID", "cert", "title", "理由", "日付"]
+
+
+def compute_backurl_additions(existing, new_urls, max_slots=None):
+    """既存補URL + 確定URL → (書込full_list, 追加分)。hoju と同規約の冪等追記(純関数)。
+
+    既存を消さず、未収載の new_urls を空き枠にだけ足し、max_slots で頭打ち。空文字・重複は無視。
+    Returns: (full[:max_slots], added)。added が空なら書込不要。
+    """
+    if max_slots is None:
+        max_slots = AUXN
+    full = [u for u in (existing or []) if u]      # 既存(空除去)
+    added = []
+    for u in (new_urls or []):
+        u = (u or "").strip()
+        if not u or u in full:
+            continue
+        if len(full) >= max_slots:
+            break                                   # 満杯 → 溢れは書かない(売切上書きは監視くん Phase2)
+        full.append(u)
+        added.append(u)
+    return full[:max_slots], added
+
+
+def _skip_iids_from_tab(rows):
+    """補URL確証スキップ タブ → itemID集合(純関数)。見送り/違うは再表示しない。"""
+    if not rows or len(rows) < 2:
+        return set()
+    return {(r[0] or "").strip() for r in rows[1:] if r and (r[0] or "").strip()}
+
+
+def _merge_skip_rows(existing_rows, new_rows, header):
+    """既存スキップ行 + 新規(itemID重複は新規優先)を純関数マージ。"""
+    new_iids = {(r[0] or "").strip() for r in new_rows if r and (r[0] or "").strip()}
+    kept = [r for r in (existing_rows[1:] if existing_rows else [])
+            if r and (r[0] or "").strip() and (r[0] or "").strip() not in new_iids]
+    return [header] + kept + new_rows
+
+
+def _ebay_itm_url(itemid):
+    return f"https://www.ebay.com/itm/{itemid}" if itemid else ""
+
+
+def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
+    """昼の確認(impure)。slice2 が焼いた当日キャッシュから候補を出し、現物と視覚確証→
+    確定URLを補URL(AC-AG)へ **既存保持+空き枠のみ** 冪等書込(hoju同規約)。主URL(A)は触らない。
+
+    - 対象 = 補<閾値 live PSA で、当日キャッシュに候補がある行(=slice2 で在庫確認済)。
+    - スキップ台帳(見送り/違う)にある itemID は再表示しない(前回判断の尊重)。
+    - 補が閾値以上に増えた行は select_backfill_targets から自然に外れる(=補URL自体がレジューム状態)。
+    - dry_run: 書込せず件数/内訳のみ(確証UIも出さない)。
+    """
+    import datetime
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mercari_psa_resource as mp
+    import psa_resource_confirm as prc
+    import psa_resource_gate as gate
+
+    today = datetime.date.today().isoformat()
+    vals = _read_high()
+    targets = select_backfill_targets(vals, max_backups=max_backups)
+    cache = _load_cache()
+
+    # スキップ台帳(見送り/違う)= 再表示しない
+    try:
+        from sheet_io import read_tab
+        skip_iids = _skip_iids_from_tab(read_tab(CONFIRM_SKIP_TAB))
+    except Exception:
+        skip_iids = set()
+
+    # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
+    items, item_targets = [], []
+    no_cache = no_cand = 0
+    for t in targets:
+        iid = t["itemID"]
+        if iid in skip_iids:
+            continue
+        entry = cache.get(iid)
+        if not _entry_complete(entry, today):
+            no_cache += 1
+            continue
+        mr = entry.get("mercari") or {}
+        c = gate.combine(mr.get("best"), entry.get("snkrdunk"),
+                         mercari_cands=mr.get("cands"), max_aux=AUXN)
+        cands = gate._build_visual_candidates(mr, c)
+        if not cands:
+            no_cand += 1
+            continue
+        idx = len(items)
+        cn = build_search_query(t, mp).get("card_no") or ""
+        ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(t.get("cert") or None)
+        items.append({"idx": idx, "title": (t.get("title") or "")[:90], "card_no": cn,
+                      "ebay_url": _ebay_itm_url(iid), "ref_image": ref, "candidates": cands})
+        item_targets.append(t)
+
+    print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
+          f"候補なしskip {no_cand} / 台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
+    if limit is not None:
+        items, item_targets = items[:limit], item_targets[:limit]
+        for n, it in enumerate(items):
+            it["idx"] = n
+        print(f"  (limit={limit} → {len(items)}件)")
+    if not items:
+        print("  確証対象なし。終了。")
+        return {"confirmed": 0, "written_rows": 0, "added_urls": 0}
+    if dry_run:
+        print("  (dry-run) 確証UI/書込なし。上記件数のみ。")
+        return {"confirmed": 0, "written_rows": 0, "added_urls": 0, "candidates_ready": len(items)}
+
+    print(f"▶ 補URL補強 視覚確証: {len(items)}件をブラウザ表示。① 現物 と 仕入候補を見比べ、"
+          "**その出品に足す補URL(=正しい変種の在庫)だけチェックを残す**...")
+    res = prc.restock_confirm(items)
+    if res is None:
+        print("⚠ 確証タイムアウト/未確定 — 補URL書込なし(再実行してください)。")
+        return {"confirmed": 0, "written_rows": 0, "added_urls": 0}
+    confirmed = {c["idx"]: c["urls"] for c in res["confirmed"]}
+
+    # --- 確定URL → 補URL(AC-AG)へ冪等書込(既存保持・空き枠のみ) ---
+    aux_writeback, added_total = {}, 0
+    for idx, urls in confirmed.items():
+        t = item_targets[idx]
+        row = t["row"]
+        r = vals[row - 1] if 0 < row <= len(vals) else []
+        existing = [(_cell(r, AUX0 + k)) for k in range(AUXN)]
+        existing = [u for u in existing if u]
+        full, added = compute_backurl_additions(existing, urls, AUXN)
+        if added:
+            aux_writeback[row] = full
+            added_total += len(added)
+    written = 0
+    if aux_writeback:
+        try:
+            from sheet_io import write_aux_urls
+            written = write_aux_urls(aux_writeback)
+            print(f"🔗 補URL(AC-AG) 冪等書込: {written}行 / 追加URL {added_total}本 (既存保持・空き枠のみ)")
+        except Exception as e:
+            print(f"⚠ 補URL書込失敗: {type(e).__name__}: {e}")
+    else:
+        print("  書込対象なし(全て既存収載 or 満杯 or 確定ゼロ)。")
+
+    # --- 見送り/違う を台帳へ(次回再表示しない)+ 違う=検索精度事故アラート ---
+    diffs = {d.get("idx") for d in (res.get("diffs") or []) if d.get("idx") is not None}
+    shown = set(range(len(items)))
+    not_confirmed = shown - set(confirmed.keys())
+    if not_confirmed:
+        new_skip = []
+        for idx in sorted(not_confirmed):
+            t = item_targets[idx]
+            reason = "違う" if idx in diffs else "見送り"
+            new_skip.append([t["itemID"], t.get("cert", ""), (t.get("title") or "")[:60], reason, today])
+        try:
+            from sheet_io import read_tab, write_rows_to_tab
+            merged = _merge_skip_rows(read_tab(CONFIRM_SKIP_TAB), new_skip, CONFIRM_SKIP_HEADER)
+            write_rows_to_tab(CONFIRM_SKIP_TAB, merged)
+            print(f"  📝 {CONFIRM_SKIP_TAB}: +{len(new_skip)}件 記録(次回は再表示しない・再検討は同タブ行削除)")
+        except Exception as e:
+            print(f"  ⚠ {CONFIRM_SKIP_TAB} 記録skip ({type(e).__name__}: {e})")
+    if diffs:
+        print(f"🚨 「違う」{len(diffs)}件 = 検索が別カード/別変種を拾った精度事故。"
+              "slice2 の検索(kw/variant_hint)を要修正(残存=精度事故の放置)。")
+
+    print(f"✅ 昼確認完了: 確証{len(confirmed)}件 → 補URL {written}行に {added_total}本追記。")
+    return {"confirmed": len(confirmed), "written_rows": written, "added_urls": added_total}
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    # slice2: `search` で夜間検索。無引数は slice1 の件数レポート(read-only)。
+    # slice2: `search` で夜間検索。slice3: `confirm` で昼確認→補URL書込。無引数=slice1 件数レポート。
     if "search" in sys.argv:
         max_backups, limit, fresh = 1, None, False
         for a in sys.argv[1:]:
@@ -288,6 +457,15 @@ def main():
             elif a == "--fresh":
                 fresh = True
         run_night_search(max_backups=max_backups, limit=limit, fresh=fresh)
+        return
+    if "confirm" in sys.argv:
+        max_backups, limit, dry = 1, None, "--dry-run" in sys.argv
+        for a in sys.argv[1:]:
+            if a.startswith("--max-backups="):
+                max_backups = int(a.split("=", 1)[1])
+            elif a.startswith("--limit="):
+                limit = int(a.split("=", 1)[1])
+        run_daytime_confirm(max_backups=max_backups, limit=limit, dry_run=dry)
         return
     vals = _read_high()
     print(f"HIGH {len(vals)-1} 行")

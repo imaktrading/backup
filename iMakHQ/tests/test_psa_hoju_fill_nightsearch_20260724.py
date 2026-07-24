@@ -15,6 +15,9 @@ from psa_hoju_fill import (
     _card_no_from_key,
     _entry_complete,
     _mercari_errored,
+    _merge_skip_rows,
+    _skip_iids_from_tab,
+    compute_backurl_additions,
     merge_search_result,
     targets_needing_search,
 )
@@ -76,3 +79,42 @@ def test_card_no_from_key_derives_number_when_title_lacks_it():
     assert _card_no_from_key("shops:abc") == ""
     assert _card_no_from_key("") == ""
     assert _card_no_from_key(None) == ""
+
+
+# --- slice3: 昼確認→補URL冪等書込 の純関数 -------------------------------------
+
+def test_compute_backurl_additions_appends_to_empty_slots():
+    # 既存2本 + 新規2本(1本は既存重複) → 空き枠に未収載1本だけ足す
+    existing = ["https://a", "https://b"]
+    full, added = compute_backurl_additions(existing, ["https://b", "https://c"], max_slots=5)
+    assert full == ["https://a", "https://b", "https://c"] and added == ["https://c"]
+
+
+def test_compute_backurl_additions_caps_at_max_slots():
+    existing = ["u1", "u2", "u3", "u4"]
+    full, added = compute_backurl_additions(existing, ["u5", "u6"], max_slots=5)
+    assert full == ["u1", "u2", "u3", "u4", "u5"] and added == ["u5"]   # 満杯で u6 は溢れ=書かない
+
+
+def test_compute_backurl_additions_ignores_empty_and_dupes():
+    full, added = compute_backurl_additions([], ["", "x", "x", "  "], max_slots=5)
+    assert full == ["x"] and added == ["x"]
+
+
+def test_compute_backurl_additions_no_new_returns_empty_added():
+    full, added = compute_backurl_additions(["a"], ["a"], max_slots=5)
+    assert added == []            # 追加ゼロ=書込不要のシグナル
+
+
+def test_skip_iids_from_tab():
+    rows = [["itemID", "cert"], ["358a", "1"], ["", "2"], ["358b", "3"]]
+    assert _skip_iids_from_tab(rows) == {"358a", "358b"}
+    assert _skip_iids_from_tab([]) == set()
+    assert _skip_iids_from_tab([["itemID"]]) == set()
+
+
+def test_merge_skip_rows_new_wins_on_dupe_itemid():
+    existing = [["itemID", "cert", "title", "理由", "日付"], ["358a", "1", "t", "見送り", "d1"]]
+    new = [["358a", "1", "t", "違う", "d2"]]     # 同itemID → 新規優先
+    merged = _merge_skip_rows(existing, new, existing[0])
+    assert merged == [["itemID", "cert", "title", "理由", "日付"], ["358a", "1", "t", "違う", "d2"]]
