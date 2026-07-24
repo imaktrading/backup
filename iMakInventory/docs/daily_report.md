@@ -1594,3 +1594,19 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
     stamp/header安全/fail注入+3chアラート配線(mock 実送なし)。**pre-commit 全 pass(151+offline)**。
 - next: 次 HIGH cycle で消込 cleared 実績 + audit(死URL→空き枠復活)突合。HQ に AO=41 可否確認。
   実スクレイプ dry-run は cycle 非稼働窓で別途可能 (chrome 一括kill が巡回干渉するため今回は代替)。
+
+### 補URL救済ログ (フック2、Phase1 救済率 signal) 実装 (commit 1ce39dd) + AO=41 確認受領
+- 決定: HQ フック2 go。救済 = 主URL死確定 AND 補URL≥1本在庫あり (= 補が取下げを防いだ) を遷移ベースで記録。
+  Phase1「続/撤退」判断の核心(救済率)の分子 signal。AO=41 は HQ 確認OK・移設不要 (hq_confirm 受領)。
+- 変更:
+  - [monitor_listings.py](../monitor_listings.py): check_one_row_with_fallback が rescued/rescue_detail を返す
+    (★厳密 fail-closed: main_sub.is_sold=True 直接判定。raw_status='in_stock@backup#N' proxy は主uncertainでも
+    発火し救済率過大→撤退誤判定になるため不採用)。遷移ベース dedup (rescue_state_{sheet}.json、救済遷移1回)。
+    rescue_events.jsonl 証跡 + タブ追記 + run_cycle 集約。
+  - [sheet_updater.py](../sheet_updater.py): append_rescue_log_rows (補URL救済ログ タブに明示range追記、
+    append_rows 不使用=false success回避、タブ自動作成)。
+  - [run_cycle.py](../run_cycle.py): rescue_new/current 集約+ログ (正常イベント=alert無し)。
+- 検証: test 9件 (救済True/主uncertain除外/主生存除外/全売切除外/補error除外/state roundtrip/key/タブ作成+追記)。
+  **pre-commit 全 pass(151+offline)**。★初期救済率は live 未測定 (本日commit、次HIGH cycleで実データ)。
+- next: 次 HIGH cycle で ①消込cleared ②売切日時 ③救済ログ を live 実機観測→まとめて実績報告。
+  HQ へ signal 厳密定義(proxy不採用)の認識合わせ依頼。
