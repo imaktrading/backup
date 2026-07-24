@@ -226,6 +226,32 @@ set_code:
     ebay: Luffy & Ace
     note: STARTER DECK EX -Luffy & Ace- (JA-only 現時点) — REVIEW eBay 値
     year: 2026
+  # --- 2026-07-11 発売の新スターターデッキ (2026-07-24 自走取込)。命名は既存 ST 規約=目玉キャラ名。
+  #     ★REVIEW: 新弾のため eBay Set facet 実値は HQ 未確証。character 名で暫定登録 (空=skip 回避)。 ---
+  - source: ST-31
+    ebay: Monkey D Luffy
+    note: STARTER DECK -RED Monkey.D.Luffy- [ST-31] — REVIEW eBay 値 (ST-26 と同名別レコード)
+    year: 2026
+  - source: ST-32
+    ebay: Roronoa Zoro
+    note: STARTER DECK -GREEN Roronoa Zoro- [ST-32] — REVIEW eBay 値
+    year: 2026
+  - source: ST-33
+    ebay: Kuzan
+    note: STARTER DECK -BLUE Kuzan- [ST-33] — REVIEW eBay 値
+    year: 2026
+  - source: ST-34
+    ebay: Charlotte Katakuri
+    note: STARTER DECK -PURPLE Charlotte Katakuri- [ST-34] — REVIEW eBay 値
+    year: 2026
+  - source: ST-35
+    ebay: Sabo
+    note: STARTER DECK -RED/BLACK Sabo- [ST-35] — REVIEW eBay 値
+    year: 2026
+  - source: ST-36
+    ebay: Eustass Kid
+    note: STARTER DECK -YELLOW Eustass Captain Kid- [ST-36] — REVIEW eBay 値
+    year: 2026
 
   # ----- Extra Booster (EB) -----
   - source: EB-01
