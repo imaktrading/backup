@@ -65,3 +65,37 @@ def test_gate_wires_restock_wait():
     i_merge = src.index("再チェックに合流")
     i_search = src.index("メルカリ最安取得")
     assert i_merge < i_search
+
+
+def test_held_unknown_accumulated_as_new(_prw=None):
+    """★2026-07-24: 在庫不明(取得失敗)は台帳に無ければ ST_UNKNOWN で新規蓄積(孤児化防止)。"""
+    prw = _load("psa_restock_wait")
+    held = [{"itemID": "H1", "key": "P-041", "card_no": "P-041", "title": "Luffy", "ebay_url": "u"}]
+    ledger, stats = prw.reconcile([], [], set(), "2026-07-24", held_candidates=held)
+    assert stats["unknown"] == 1
+    row = next(r for r in ledger if r["itemID"] == "H1")
+    assert row["status"] == prw.ST_UNKNOWN
+    # recheck 対象に含まれる(毎回再取得)
+    assert any(t["itemID"] == "H1" for t in prw.recheck_targets(ledger))
+
+
+def test_held_does_not_downgrade_known_wait():
+    """在庫不明が既存の ST_WAIT(供給なし確定)を downgrade しない(recheck++のみ)。"""
+    prw = _load("psa_restock_wait")
+    prev = [{"初出日": "2026-07-01", "最終確認日": "2026-07-01", "status": prw.ST_WAIT,
+             "再チェック回数": "5", "itemID": "W1", "KEY": "", "card_no": "", "title": "", "ebay_url": ""}]
+    held = [{"itemID": "W1", "key": "", "card_no": "", "title": "", "ebay_url": ""}]
+    ledger, stats = prw.reconcile(prev, [], set(), "2026-07-24", held_candidates=held)
+    row = next(r for r in ledger if r["itemID"] == "W1")
+    assert row["status"] == prw.ST_WAIT           # downgrade しない
+    assert row["再チェック回数"] == "6"            # recheck は進む
+
+
+def test_held_becomes_revived_when_supply_returns():
+    """在庫不明→次回 再仕入れ可なら復活可に昇格。"""
+    prw = _load("psa_restock_wait")
+    prev = [{"初出日": "2026-07-20", "最終確認日": "2026-07-20", "status": prw.ST_UNKNOWN,
+             "再チェック回数": "2", "itemID": "U1", "KEY": "", "card_no": "", "title": "", "ebay_url": ""}]
+    ledger, stats = prw.reconcile(prev, [], {"U1"}, "2026-07-24")
+    row = next(r for r in ledger if r["itemID"] == "U1")
+    assert row["status"] == prw.ST_REVIVED

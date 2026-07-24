@@ -15,6 +15,9 @@ LEDGER_HEADER = ["初出日", "最終確認日", "status", "再チェック回�
 
 ST_WAIT = "待ち(供給なし)"
 ST_REVIVED = "復活可(供給あり→RESTOCK)"
+# ★2026-07-24: 取得失敗(メルカリtimeout等)=在庫不明。End候補(供給なし確定)と区別して蓄積し
+# 毎回再取得する。台帳から漏れて追跡が切れる「孤児」を防ぐ(ユーザー指摘: 世代でリセットするな)。
+ST_UNKNOWN = "在庫不明(取得失敗・要再取得)"
 
 
 def ledger_from_rows(rows2d):
@@ -30,19 +33,20 @@ def ledger_from_rows(rows2d):
     return out
 
 
-def reconcile(prev, end_candidates, resourceable_itemids, today):
-    """前回台帳 + 今回(End候補 / 再仕入れ可) を突合 → (新台帳rows, stats)。
+def reconcile(prev, end_candidates, resourceable_itemids, today, held_candidates=None):
+    """前回台帳 + 今回(End候補 / 再仕入れ可 / 在庫不明) を突合 → (新台帳rows, stats)。
 
     Args:
         prev: [dict] 前回台帳
-        end_candidates: [{itemID,key,card_no,title,ebay_url}] 今回 再仕入れ不能(End候補)
+        end_candidates: [{itemID,key,card_no,title,ebay_url}] 今回 再仕入れ不能(End候補=供給なし確定)
         resourceable_itemids: set 今回 再仕入れ可になった itemID
         today: 'YYYY-MM-DD'
+        held_candidates: [{...}] 今回 取得失敗=在庫不明(End候補に倒さず蓄積・毎回再取得)
     Returns:
-        (ledger:[dict], stats:{new,still_waiting,revived,total_wait})
+        (ledger:[dict], stats:{new,still_waiting,revived,unknown,total_wait})
     """
     by_id = {r.get("itemID"): dict(r) for r in prev if r.get("itemID")}
-    stats = {"new": 0, "still_waiting": 0, "revived": 0}
+    stats = {"new": 0, "still_waiting": 0, "revived": 0, "unknown": 0}
 
     for ec in end_candidates:
         iid = ec.get("itemID") or ""
@@ -65,7 +69,26 @@ def reconcile(prev, end_candidates, resourceable_itemids, today):
         })
         by_id[iid] = cur
 
-    # 供給が戻った(再仕入れ可)= 待ち→復活可。台帳に在る itemID のみ対象。
+    # 在庫不明(取得失敗)= 台帳に無ければ ST_UNKNOWN で新規蓄積(=孤児防止)、在れば recheck++で
+    # 既存 status を維持(WAIT/REVIVED を downgrade しない=前回の確定情報を捨てない)。
+    for hc in (held_candidates or []):
+        iid = hc.get("itemID") or ""
+        if not iid:
+            continue
+        cur = by_id.get(iid)
+        if cur is None:
+            by_id[iid] = {
+                "初出日": today, "最終確認日": today, "status": ST_UNKNOWN,
+                "再チェック回数": "1", "itemID": iid, "KEY": hc.get("key", ""),
+                "card_no": hc.get("card_no", ""), "title": hc.get("title", ""),
+                "ebay_url": hc.get("ebay_url", ""),
+            }
+            stats["unknown"] += 1
+        else:
+            cur["再チェック回数"] = str(int(cur.get("再チェック回数") or 0) + 1)
+            cur["最終確認日"] = today   # status は維持(downgrade しない)
+
+    # 供給が戻った(再仕入れ可)= 待ち/在庫不明→復活可。台帳に在る itemID のみ対象。
     for iid in resourceable_itemids:
         cur = by_id.get(iid)
         if cur is not None and cur.get("status") != ST_REVIVED:
@@ -74,7 +97,7 @@ def reconcile(prev, end_candidates, resourceable_itemids, today):
             stats["revived"] += 1
 
     ledger = list(by_id.values())
-    stats["total_wait"] = sum(1 for r in ledger if r.get("status") == ST_WAIT)
+    stats["total_wait"] = sum(1 for r in ledger if r.get("status") in (ST_WAIT, ST_UNKNOWN))
     return ledger, stats
 
 
@@ -85,7 +108,7 @@ def recheck_targets(ledger):
     """
     out = []
     for r in ledger:
-        if r.get("status") != ST_WAIT:
+        if r.get("status") not in (ST_WAIT, ST_UNKNOWN):   # 在庫不明も毎回再取得対象
             continue
         out.append({"itemID": r.get("itemID", ""), "key": r.get("KEY", ""),
                     "card_no": r.get("card_no", ""), "title": r.get("title", ""),

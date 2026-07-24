@@ -689,6 +689,7 @@ def main():
     wait_resourceable = set()   # 再仕入れ可 itemID → 待ち台帳で「復活可」に
     restock_cands = []   # POC-A: 再仕入れ可 → RESTOCK視覚確証ビューア用
     held_unknown = 0     # ★取得失敗=在庫不明 → End候補にせず判定保留(次サイクル再チェック)
+    held_list = []       # 在庫不明を待ち台帳に蓄積(孤児化防止・毎回再取得)
     for i, r in enumerate(rows):
         mr = mercari_res.get(i) or {}
         c = combine(mr.get("best"), snkr_res.get(i),
@@ -716,6 +717,10 @@ def main():
                 "channel": c.get("cheapest_channel"), "url": c.get("cheapest_url")})
         elif _mercari_unknown:
             held_unknown += 1   # 在庫不明 → End候補に落とさない(fail-closed)。次回再取得。
+            if _iid:
+                held_list.append({"itemID": _iid, "key": r.get("key", ""),
+                                  "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
+                                  "title": (r.get("title") or "")[:90], "ebay_url": r.get("ebay_url", "")})
         elif _iid:
             wait_end.append({"itemID": _iid, "key": r.get("key", ""),
                              "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
@@ -756,10 +761,10 @@ def main():
         from sheet_io import read_tab, write_rows_to_tab
         today = datetime.date.today().isoformat()
         prev = prw.ledger_from_rows(read_tab("再仕入れ待ち"))
-        wled, wst = prw.reconcile(prev, wait_end, wait_resourceable, today)
+        wled, wst = prw.reconcile(prev, wait_end, wait_resourceable, today, held_candidates=held_list)
         write_rows_to_tab("再仕入れ待ち", prw.to_tab_rows(wled))
         print(f"♻ 再仕入れ待ち台帳: 新規{wst['new']} 継続{wst['still_waiting']} "
-              f"復活{wst['revived']} / 待ち計{wst['total_wait']}")
+              f"復活{wst['revived']} 在庫不明{wst.get('unknown', 0)} / 待ち計{wst['total_wait']}")
         if wst["revived"]:
             print(f"   → 復活可{wst['revived']}件(供給戻り)= RESTOCK対象。タブ「再仕入れ待ち」上段参照")
     except Exception as e:
