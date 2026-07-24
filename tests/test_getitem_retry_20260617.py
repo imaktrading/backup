@@ -44,3 +44,21 @@ def test_failure_not_cached_as_empty(monkeypatch):
     cache = {}
     assert m.fetch_listing_images("888", _cache=cache) == []
     assert "888" not in cache   # 失敗は確定キャッシュしない=次回再試行できる
+
+
+def test_retries_on_read_timeout_then_succeeds(monkeypatch):
+    """2026-07-24: 高負荷 run の read timeout も ConnectionError 同様リトライし現物画像を欠かさない。"""
+    calls = {"n": 0}
+
+    def fake_post(*a, **k):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise m.requests.exceptions.ReadTimeout("timed out")
+        return _R()
+
+    monkeypatch.setattr(m.requests, "post", fake_post)
+    monkeypatch.setattr(m, "_load_keys", lambda: {"AppID": "", "DevID": "", "AppSecret": "", "AuthToken": ""})
+    monkeypatch.setattr(m.time, "sleep", lambda s: None)
+    out = m.fetch_listing_images("777", _cache={})
+    assert out == ["http://x/1.jpg", "http://x/2.jpg"]
+    assert calls["n"] == 3   # timeout 2回 → 3回目成功(旧実装は Timeout を握り潰し画像空だった)

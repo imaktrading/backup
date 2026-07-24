@@ -57,14 +57,16 @@ def fetch_listing_images(item_id, _cache={}):
             f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
             f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
         )
-        # DNS瞬断/接続エラーは数回リトライ(無いと画像が虫食いで欠落する。2026-06-17)。
+        # DNS瞬断/接続エラー/読取タイムアウトは数回リトライ(無いと画像が虫食いで欠落する。2026-06-17)。
+        # 2026-07-24: ConnectionError だけでなく Timeout も拾う。高負荷 run で GetItem が read timeout
+        # → 例外握り潰しで現物画像が空 → RESTOCK視覚確証で「出品したのに現物が見えない」欠落の真因。
         # 成功 or リトライ尽きるまで _cache に [] を入れない(失敗を確定キャッシュしない)。
         r = None
         for attempt in range(4):
             try:
                 r = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30)
                 break
-            except requests.exceptions.ConnectionError:
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
                 if attempt < 3:
                     time.sleep(3)
                     continue
