@@ -63,6 +63,40 @@ except FileNotFoundError:
     ANTHROPIC_API_KEY = None
 
 PIC_URL = "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main/999.png"
+
+# eBay PicURL 制約 (ErrorCode 20002): 1本 500 字以内 / 全体 3975 字以内。
+_PIC_URL_MAX_LEN = 500
+# 本物の PSA カード画像 CDN (psa_cache CardImageUrl と一致)。
+_PSA_CARD_CDN = "d1htnxwo4o0jhw.cloudfront.net"
+# 画像でない host (トラッキング/解析ビーコン) と装飾/プレースホルダ。DOM に紛れる gomi を弾く。
+# 2026-07-24: bat.bing.com ビーコン(582字)と table-image-ink プレースホルダが PicURL に混入し
+# ErrorCode 20002 で入稿失敗 (cert 55542036 Vaporeon)。従来 filter ['cert','card','psa','grading']
+# はビーコンURL内に埋め込まれた psacard.com/cert を拾って誤通過していた。
+_PIC_TRACKER_HOSTS = ("bat.bing", "bing.com", "google-analytics", "googletagmanager",
+                      "doubleclick", "facebook.com", "/action/", "gtm=", "/collect?")
+_PIC_PLACEHOLDER = ("table-image", "placeholder", "spacer", "blank.", "sprite", "/logo")
+
+
+def _is_real_card_image(src):
+    """DOM から拾った img src が「本物の PSA カード画像」か判定 (トラッキング/装飾を除外)。純関数."""
+    s = (src or "").strip().lower()
+    if not s.startswith("http"):
+        return False
+    if len(src) > _PIC_URL_MAX_LEN:      # eBay 制約超 = そもそも載せられない
+        return False
+    path = s.split("?", 1)[0]
+    if _PSA_CARD_CDN in s and "/cert/" in path:   # = 確実に本物のカード画像
+        return True
+    if any(h in s for h in _PIC_TRACKER_HOSTS):   # トラッキング/ビーコン host は明確に除外
+        return False
+    if any(p in path for p in _PIC_PLACEHOLDER):  # プレースホルダ/装飾を除外
+        return False
+    # 汎用: 画像拡張子で終わる + 従来キーワードを含むものだけ許可 (query 付きは path で判定)
+    is_img = path.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
+    has_kw = any(x in s for x in ("cert", "card", "psa", "grading"))
+    return is_img and has_kw
+
+
 RETURN_POLICY = "No return"
 PAYMENT_POLICY = "SALE"
 LOCATION = "Osaka"
@@ -1206,9 +1240,7 @@ def get_psa_data(driver, cert_number):
             imgs = driver.find_elements(By.TAG_NAME, "img")
             for img in imgs:
                 src = img.get_attribute("src") or ""
-                if not src.startswith("http"):
-                    continue
-                if not any(x in src.lower() for x in ['cert', 'card', 'psa', 'grading']):
+                if not _is_real_card_image(src):   # トラッキングビーコン/プレースホルダ/長すぎURL を除外
                     continue
                 if src in card_image_urls:
                     continue
@@ -1600,11 +1632,12 @@ def _build_pic_url(data):
     if data:
         f = data.get("CardImageUrlFront")
         b = data.get("CardImageUrlBack")
-        if f:
+        # 最終防波堤: 500字超 or 非画像URL は載せない (ErrorCode 20002 の二重ガード)。
+        if f and _is_real_card_image(f):
             parts.append(f)
-        if b and b != f:
+        if b and b != f and _is_real_card_image(b):
             parts.append(b)
-    parts.append(PIC_URL)
+    parts.append(PIC_URL)   # 999.png ダミーは常に末尾 (front/back が無くても最低1本)
     return "|".join(parts)
 
 
