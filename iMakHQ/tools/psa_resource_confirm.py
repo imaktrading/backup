@@ -354,7 +354,7 @@ def _serve_confirm(page_bytes, extract, timeout):
     return state["result"] if state["done"] else None
 
 
-def confirm_targets(items, timeout=1800):
+def confirm_targets(items, timeout=10800):   # 2026-07-24 ユーザー要望で 30分→3時間に延長
     """探索前 目視確認 → {"confirmed":[{idx,key}], "rejected":[{idx,reason}]}。未確定は None。"""
     def _ex(data):
         return {"confirmed": [{"idx": int(d["idx"]), "key": d.get("key") or ""}
@@ -478,7 +478,7 @@ def parse_restock_result(data):
     return {"confirmed": out, "diffs": diffs, "skip": int(data.get("skip") or 0)}
 
 
-def restock_confirm(items, timeout=1800):
+def restock_confirm(items, timeout=10800):   # 2026-07-24 ユーザー要望で 30分→3時間に延長
     """RESTOCK視覚確証 → {confirmed:[{idx,urls}], diffs:[{idx,url}], skip} を返す
     (候補1つでも残ればRESTOCK)。未確定は None。"""
     return _serve_confirm(build_restock_html(items).encode("utf-8"), parse_restock_result, timeout)

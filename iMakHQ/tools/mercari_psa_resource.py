@@ -554,15 +554,31 @@ def fetch_mercari_cheapest(cards):
     キーワード検索で0件なら、ebay_item_id があれば画像検索フォールバックを試す。
     """
     import undetected_chromedriver as uc
-    opts = uc.ChromeOptions()
-    opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
-    opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1400")
-    _maj = _chrome_major()
-    drv = uc.Chrome(options=opts, version_main=_maj) if _maj else uc.Chrome(options=opts)
+
+    def _new_driver():
+        opts = uc.ChromeOptions()
+        opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
+        opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1400")
+        _maj = _chrome_major()
+        d = uc.Chrome(options=opts, version_main=_maj) if _maj else uc.Chrome(options=opts)
+        d.set_page_load_timeout(50)
+        return d
+
+    # ★2026-07-24 確実性優先(ユーザー方針): driver を _RESTART_EVERY 件ごとに作り直す。
+    # 長時間セッションで uc.Chrome が不安定化し途中でクラッシュ→以降 全 item timeout(2026-07-24
+    # item58 で全滅=79件が空)を防ぐ。BAN回避の 8s sleep は維持し「速度より しっかり探す」。
+    _RESTART_EVERY = 10
     out = {}
+    drv = _new_driver()
     try:
-        drv.set_page_load_timeout(50)
         for i, c in enumerate(cards):
+            if i > 0 and i % _RESTART_EVERY == 0:
+                try:
+                    drv.quit()
+                except Exception:
+                    pass
+                drv = _new_driver()
+                print(f"  ♻ Mercari driver 再起動 ({i}件処理済 / 安定化)", flush=True)
             kw = c.get("kw"); card_no = c.get("card_no"); eid = c.get("ebay_item_id")
             if not kw:
                 out[i] = None
@@ -592,7 +608,11 @@ def fetch_mercari_cheapest(cards):
                 tag = f"¥{best[0]} ({via}, 候補{len(cands)})" if best else "PSA10在庫なし"
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: {tag}", flush=True)
             except Exception as e:
-                out[i] = {"best": None, "cands": []}
+                # ★2026-07-24 fail-closed: 取得失敗(timeout等)は「在庫なし」と区別する。
+                # _error 付き = 「不明(取得できなかった)」。呼出側は End候補に倒さず判定保留し、
+                # キャッシュにも残さない(次サイクルで再取得)。区別しないと「本当に無いのか
+                # 取れなかっただけか分からないのに End候補」= fail-OPEN(仕入可能を取下げ)。
+                out[i] = {"best": None, "cands": [], "_error": str(e)[:40] or "error"}
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: ERR {str(e)[:30]}", flush=True)
     finally:
         try:

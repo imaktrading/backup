@@ -648,10 +648,18 @@ def main():
         else:
             print(f"  [{i+1}/{len(rows)}] {cn}: PSA10在庫なし", flush=True)
 
-    # 研究キャッシュ更新(当日付き) — 次回の同日再走はスクレイプ不要に
+    # 研究キャッシュ更新(当日付き) — 次回の同日再走はスクレイプ不要に。
+    # ★2026-07-24 fail-closed: メルカリ取得失敗(_error)は **キャッシュに残さない** →
+    # 次サイクルで再取得される(「取れなかっただけ」を「在庫なし」として焼き付けない)。
+    def _mercari_errored(m):
+        return isinstance(m, dict) and m.get("_error")
     for i in range(len(rows)):
         if _iids[i]:
-            _rcache[_iids[i]] = {"mercari": mercari_res.get(i), "snkrdunk": snkr_res.get(i), "date": _today}
+            _entry = {"snkrdunk": snkr_res.get(i), "date": _today}
+            _m = mercari_res.get(i)
+            if not _mercari_errored(_m):
+                _entry["mercari"] = _m       # 成功/在庫なし(確定)のみキャッシュ
+            _rcache[_iids[i]] = _entry
     try:
         with open(_cache_path, "w", encoding="utf-8") as _f:
             _json.dump(_rcache, _f, ensure_ascii=False)
@@ -671,11 +679,17 @@ def main():
     wait_end = []        # 再仕入れ不能(End候補) → 待ち台帳へ
     wait_resourceable = set()   # 再仕入れ可 itemID → 待ち台帳で「復活可」に
     restock_cands = []   # POC-A: 再仕入れ可 → RESTOCK視覚確証ビューア用
+    held_unknown = 0     # ★取得失敗=在庫不明 → End候補にせず判定保留(次サイクル再チェック)
     for i, r in enumerate(rows):
         mr = mercari_res.get(i) or {}
         c = combine(mr.get("best"), snkr_res.get(i),
                     mercari_cands=mr.get("cands"), max_aux=MAX_AUX)
         _iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+        # ★2026-07-24 fail-closed: メルカリ取得失敗(_error)かつ SNKRDUNK も在庫確定なし
+        # → 「本当に無い」のか「取れなかった」のか不明 → End候補にしない(=取下げに倒さない)。
+        # 判定保留=次サイクルで再チェック(キャッシュにも残さないので再取得される)。
+        _mercari_unknown = bool(mercari_res.get(i) and isinstance(mercari_res.get(i), dict)
+                                and mercari_res.get(i).get("_error"))
         if c["resourceable"]:
             go += 1
             if _iid:
@@ -690,6 +704,8 @@ def main():
                 "title": (r.get("title") or "")[:90], "ebay_url": r.get("ebay_url", ""),
                 "candidates": _cands, "cost": c.get("cheapest_jpy"), "cur": _cur,
                 "channel": c.get("cheapest_channel"), "url": c.get("cheapest_url")})
+        elif _mercari_unknown:
+            held_unknown += 1   # 在庫不明 → End候補に落とさない(fail-closed)。次回再取得。
         elif _iid:
             wait_end.append({"itemID": _iid, "key": r.get("key", ""),
                              "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
@@ -715,7 +731,12 @@ def main():
             c["snkrdunk_jpy"] or "", c["snkrdunk_count"],
             *aux, r.get("ebay_url", ""),
         ])
-    print(f"\n再仕入れ可: {go}/{len(rows)}  不能(End候補): {len(rows)-go}")
+    _end_n = len(rows) - go - held_unknown
+    print(f"\n再仕入れ可: {go}/{len(rows)}  不能(End候補): {_end_n}"
+          + (f"  ⏸判定保留(メルカリ取得失敗=在庫不明・次回再取得): {held_unknown}" if held_unknown else ""))
+    if held_unknown:
+        print("  ⚠ 保留分は End候補にしていません(取れなかった=在庫なしに倒さない/fail-closed)。"
+              "次サイクルで再取得されます。")
     # 探索後ビューアは廃止(探索前の確認ゲートで変種確認済 + 静的HTMLは画像プロキシ不可のため)。
 
     # 再仕入れ待ち台帳を更新: End候補は蓄積(消さず毎回再チェック)、供給戻りは「復活可」に。

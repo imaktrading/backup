@@ -1140,7 +1140,7 @@ def split_verified(certs, vc):
     return confirmed, viewer
 
 
-def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_sec=1800) -> dict:
+def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_sec=10800) -> dict:
     """【verify→build】CSV 生成の **前** に HTML 目視確認を回し、確定 product_id を返す。
 
     certs: 対象 cert list (PSA cache に scrape 済前提)。
