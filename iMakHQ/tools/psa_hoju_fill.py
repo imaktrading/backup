@@ -212,14 +212,15 @@ def _save_cache(cache, path=CACHE_PATH):
         json.dump(cache, f, ensure_ascii=False)
 
 
-def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0):
-    """夜間検索本体(impure)。HIGH→対象抽出→検索→増分キャッシュ書込。補URL列は触らない。
+def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, commit_batch=8):
+    """夜間検索本体(impure)。HIGH→対象抽出→検索→**サブバッチ毎にcacheコミット**。補URL列は触らない。
 
     Args:
         max_backups: slice1 の閾値(既定1=補0本=初期 backlog)。
         limit: 今回叩く対象上限(None=全部。夜跨ぎ backlog を分割消化する用)。
         fresh: True で当日キャッシュも無視して全対象を再取得。
         snkr_sleep: SNKRDUNK 呼出間の待機秒(BAN 回避・nightly slow-and-steady)。
+        commit_batch: この件数ごとに mercari+snkrdunk+cache保存(途中死の損失を≤1バッチに限定)。
     """
     import datetime
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -252,41 +253,45 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0):
         print("  探索可能な対象なし。終了。")
         return {"searched": 0, "mercari_hit": 0, "snkr_hit": 0, "skipped": skipped, "no_query": no_query}
 
-    # --- メルカリ(一括 Selenium。内部で 8s throttle + driver 10件毎再起動 = BAN/クラッシュ耐性) ---
-    print(f"▶ メルカリ最安取得 {len(searchable)}件 (throttle 済)...", flush=True)
-    mercari_res = {}   # todo-index → 結果
-    try:
-        cards = [{**queries[i], "ebay_item_id": todo[i]["itemID"]} for i in searchable]
-        scraped = mp.fetch_mercari_cheapest(cards)
-        for j, i in enumerate(searchable):
-            mercari_res[i] = scraped.get(j)
-    except Exception as e:
-        print(f"  ⚠ メルカリ一括 skip ({type(e).__name__}: {e}) — SNKRDUNK のみ書込", flush=True)
-
-    # --- SNKRDUNK(HTTP-only)+ 増分キャッシュ書込(探索可能な対象のみ) ---
-    print("▶ SNKRDUNK PSA10 取得 + キャッシュ増分書込...", flush=True)
-    m_hit = s_hit = 0
-    for n, i in enumerate(searchable):
-        t, q = todo[i], queries[i]
-        iid, cn = t["itemID"], q.get("card_no")
+    # --- サブバッチ処理(mercari→snkrdunk→**cacheコミット**を commit_batch 件ごと) ---
+    # ★2026-07-25 resilience: 昨夜「mercari一括を全部やってから書込」中に途中死(マシンsleep)→
+    #   snkrdunkループ未到達で40件全ロスト。→ サブバッチ毎に mercari+snkrdunk+save をまとめ、
+    #   死んでも直前バッチまで残す(=再実行で当日済skipして続きから)。fresh driver/batch も
+    #   長寿命driver劣化(昨夜の初回10件 HTTPConnectionPool 全滅)を避ける。
+    print(f"▶ 補URLリサーチ {len(searchable)}件 (mercari+snkrdunk / {commit_batch}件ごとにcacheコミット)...", flush=True)
+    m_hit = s_hit = done = 0
+    for start in range(0, len(searchable), commit_batch):
+        grp = searchable[start:start + commit_batch]
+        # メルカリ(このバッチだけ。fresh driver・内部 8s throttle)。startup失敗等はバッチごと隔離。
+        mercari_res = {}
         try:
-            snkr = sp.check_by_keyword(cn, variant_hint=q.get("hint"),
-                                       multi_variant=q.get("multi_variant"))
+            cards = [{**queries[i], "ebay_item_id": todo[i]["itemID"]} for i in grp]
+            scraped = mp.fetch_mercari_cheapest(cards)
+            for j, i in enumerate(grp):
+                mercari_res[i] = scraped.get(j)
         except Exception as e:
-            snkr = {"_error": str(e)[:40] or "error", "available": False, "psa10_price_jpy": None}
-        m = mercari_res.get(i)
-        if isinstance(m, dict) and m.get("best"):
-            m_hit += 1
-        if isinstance(snkr, dict) and snkr.get("available"):
-            s_hit += 1
-        merge_search_result(cache, iid, m, snkr, today)
-        if (n + 1) % 5 == 0:
-            _save_cache(cache)          # 増分コミット(いつ落ちても残る)
-            print(f"   {n+1}/{len(searchable)} (mercari在庫{m_hit} / snkr在庫{s_hit})", flush=True)
-        if snkr_sleep:
-            time.sleep(snkr_sleep)
-    _save_cache(cache)
-    print(f"✅ 夜間検索完了: {len(searchable)}件検索 (mercari在庫あり{m_hit} / snkr在庫あり{s_hit}) "
+            print(f"  ⚠ メルカリ batch skip ({type(e).__name__}: {str(e)[:40]}) — このバッチは SNKRDUNK のみ", flush=True)
+        # SNKRDUNK(HTTP)+ マージ
+        for i in grp:
+            t, q = todo[i], queries[i]
+            iid, cn = t["itemID"], q.get("card_no")
+            try:
+                snkr = sp.check_by_keyword(cn, variant_hint=q.get("hint"),
+                                           multi_variant=q.get("multi_variant"))
+            except Exception as e:
+                snkr = {"_error": str(e)[:40] or "error", "available": False, "psa10_price_jpy": None}
+            m = mercari_res.get(i)
+            if isinstance(m, dict) and m.get("best"):
+                m_hit += 1
+            if isinstance(snkr, dict) and snkr.get("available"):
+                s_hit += 1
+            merge_search_result(cache, iid, m, snkr, today)
+            if snkr_sleep:
+                time.sleep(snkr_sleep)
+        _save_cache(cache)            # ★バッチ完了ごとにコミット(途中死でもここまで残る)
+        done += len(grp)
+        print(f"   💾 {done}/{len(searchable)} コミット (mercari在庫{m_hit} / snkr在庫{s_hit})", flush=True)
+    print(f"✅ 補URLリサーチ完了: {len(searchable)}件 (mercari在庫あり{m_hit} / snkr在庫あり{s_hit}) "
           f"→ psa_research_cache.json 書込。補URL書込は slice3(昼確認)。")
     return {"searched": len(searchable), "mercari_hit": m_hit, "snkr_hit": s_hit,
             "skipped": skipped, "no_query": no_query}
@@ -504,15 +509,17 @@ def main():
         pass
     # slice2: `search` で夜間検索。slice3: `confirm` で昼確認→補URL書込。無引数=slice1 件数レポート。
     if "search" in sys.argv:
-        max_backups, limit, fresh = 1, None, False
+        max_backups, limit, fresh, commit_batch = 1, None, False, 8
         for a in sys.argv[1:]:
             if a.startswith("--max-backups="):
                 max_backups = int(a.split("=", 1)[1])
             elif a.startswith("--limit="):
                 limit = int(a.split("=", 1)[1])
+            elif a.startswith("--commit-batch="):
+                commit_batch = int(a.split("=", 1)[1])
             elif a == "--fresh":
                 fresh = True
-        run_night_search(max_backups=max_backups, limit=limit, fresh=fresh)
+        run_night_search(max_backups=max_backups, limit=limit, fresh=fresh, commit_batch=commit_batch)
         return
     if "confirm" in sys.argv:
         max_backups, limit, dry = 1, None, "--dry-run" in sys.argv
