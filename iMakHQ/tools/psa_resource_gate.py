@@ -602,12 +602,21 @@ def main():
 
     # --- メルカリ (一括 Selenium。当日キャッシュ分は再利用、未キャッシュのみスクレイプ) ---
     mercari_res = {}
-    _to_scrape = [i for i in range(len(rows)) if not (_cache_hit(_iids[i]) and "mercari" in _cache_hit(_iids[i]))]
+    _to_scrape_all = [i for i in range(len(rows)) if not (_cache_hit(_iids[i]) and "mercari" in _cache_hit(_iids[i]))]
     for i in range(len(rows)):
         c = _cache_hit(_iids[i])
         if c and "mercari" in c:
             mercari_res[i] = c["mercari"]
-    print(f"▶ メルカリ最安取得: 当日キャッシュ再利用 {len(rows)-len(_to_scrape)}件 / 新規スクレイプ {len(_to_scrape)}件")
+    # ★2026-07-24「10件づつ」(ユーザー方針): 1回のメルカリ再走は _batch 件までに制限。
+    # 残り(_deferred)は End候補にせず判定保留=次回バッチで再取得。全件を一気に走らせて
+    # HTML(視覚確証)を待たせない。キャッシュ済(=前回 再仕入れ可)はそのまま即表示される。
+    # RESTOCK_SCRAPE_BATCH=0 で「メルカリ再走なし(キャッシュ+SNKRDUNKのみ)」= 14件を即表示。
+    _batch = int(os.environ.get("RESTOCK_SCRAPE_BATCH", "10"))
+    _deferred = set(_to_scrape_all[_batch:]) if _batch >= 0 else set()
+    _to_scrape = _to_scrape_all[:_batch] if _batch > 0 else ([] if _batch == 0 else _to_scrape_all)
+    print(f"▶ メルカリ最安取得: 当日キャッシュ再利用 {len(rows)-len(_to_scrape_all)}件 / "
+          f"今回スクレイプ {len(_to_scrape)}件"
+          + (f" / 次回送り {len(_deferred)}件(End候補にしない=判定保留)" if _deferred else ""))
     if _to_scrape:
         try:
             cards = [{**mp.build_card_query(rows[i].get("title", ""), rows[i].get("set_no", ""), rows[i].get("key")),
@@ -685,11 +694,12 @@ def main():
         c = combine(mr.get("best"), snkr_res.get(i),
                     mercari_cands=mr.get("cands"), max_aux=MAX_AUX)
         _iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
-        # ★2026-07-24 fail-closed: メルカリ取得失敗(_error)かつ SNKRDUNK も在庫確定なし
-        # → 「本当に無い」のか「取れなかった」のか不明 → End候補にしない(=取下げに倒さない)。
-        # 判定保留=次サイクルで再チェック(キャッシュにも残さないので再取得される)。
-        _mercari_unknown = bool(mercari_res.get(i) and isinstance(mercari_res.get(i), dict)
-                                and mercari_res.get(i).get("_error"))
+        # ★2026-07-24 fail-closed: メルカリ「取得失敗(_error)」or「今回バッチ送り(_deferred)」で
+        # SNKRDUNK も在庫確定なし → 「本当に無い」か「まだ確認してない」か不明 → End候補にしない
+        # (=取下げに倒さない)。判定保留=次サイクルで再チェック。
+        _mercari_unknown = (i in _deferred) or bool(
+            mercari_res.get(i) and isinstance(mercari_res.get(i), dict)
+            and mercari_res.get(i).get("_error"))
         if c["resourceable"]:
             go += 1
             if _iid:

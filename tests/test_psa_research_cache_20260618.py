@@ -21,7 +21,7 @@ def test_gate_has_research_cache():
     assert "psa_research_cache.json" in src
     assert "--fresh" in src and "_cache_hit" in src
     assert 'c.get("date") == _today' in src           # 当日のみ再利用(古いは再スクレイプ)
-    assert "新規スクレイプ" in src and "キャッシュ再利用" in src
+    assert "今回スクレイプ" in src and "キャッシュ再利用" in src   # 2026-07-24 バッチ化で「新規→今回」に改称
 
 
 def test_combine_survives_cache_json_roundtrip():
