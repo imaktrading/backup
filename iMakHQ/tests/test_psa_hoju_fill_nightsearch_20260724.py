@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 from psa_hoju_fill import (
+    _card_no_from_key,
     _entry_complete,
     _mercari_errored,
     merge_search_result,
@@ -63,3 +64,15 @@ def test_merge_search_result_success_completes_entry():
 def test_merge_search_result_no_itemid_is_noop():
     cache = {"X": 1}
     assert merge_search_result(cache, "", {"best": None}, {}, TODAY) == {"X": 1}
+
+
+def test_card_no_from_key_derives_number_when_title_lacks_it():
+    # Pokemon 等 title に番号が出ない → KEY(SV8a-093/M2a-198)から番号を取る(gate 規約と同一)
+    assert _card_no_from_key("SV8a-093") == "SV8A-093"
+    assert _card_no_from_key("EB04-001_p1") == "EB04-001"      # 変種suffix除去
+    assert _card_no_from_key("SV-P-241") == "SV-P-241"
+    # fail-closed: url-key / 数字なし / 空 は "" (探索不能=cache汚染しない)
+    assert _card_no_from_key("item:m12345") == ""
+    assert _card_no_from_key("shops:abc") == ""
+    assert _card_no_from_key("") == ""
+    assert _card_no_from_key(None) == ""

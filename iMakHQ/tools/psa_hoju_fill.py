@@ -100,6 +100,36 @@ def _read_high():
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "psa_research_cache.json")
 
 
+def _card_no_from_key(key):
+    """canonical KEY → 検索用 card番号(変種suffix除去)。gate `_key_card_number` と同一規約(純関数)。
+
+    title に番号が出ない Pokemon 等(KEY=SV8a-093 / M2a-198)の供給源。url-key(item:/shops:)・
+    数字を含まない値は "" (fail-closed)。build_card_query は title だけ見て空を返すため、slice2 は
+    これで KEY を補い両チャネルを起動する(build_card_query 本体は gate 共用なので触らない)。
+    """
+    k = (key or "").strip()
+    if not k or k.startswith(("item:", "shops:")):
+        return ""
+    base = k.split("_")[0].strip().upper()
+    return base if any(ch.isdigit() for ch in base) else ""
+
+
+def build_search_query(target, mp):
+    """1対象 → 検索クエリ(build_card_query + KEYフォールバック)。card_no 空なら kw も空(=探索不能)。
+
+    build_card_query(gate共用)が title 由来 card_no を空で返したら KEY 由来番号で補い、kw を
+    'PSA10 <name_jp> <card_no>' で再構成。snkrdunk も同じ card_no を使う。純ロジック(mp はDB引き用)。
+    """
+    q = mp.build_card_query(target.get("title", ""), "", target.get("key") or None)
+    if not q.get("card_no"):
+        cn = _card_no_from_key(target.get("key"))
+        if cn:
+            q["card_no"] = cn
+            nj = q.get("name_jp")
+            q["kw"] = f"PSA10 {nj} {cn}" if nj else f"PSA10 {cn}"
+    return q
+
+
 def _mercari_errored(m):
     """メルカリ取得が「取れなかった(_error)」= 在庫確定でない(純関数)。
 
@@ -189,50 +219,57 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0):
           + (f" (limit={limit})" if limit is not None else ""))
     if not todo:
         print("  対象なし(全て当日検索済 or 補が閾値以上)。終了。")
-        return {"searched": 0, "mercari_hit": 0, "snkr_hit": 0, "skipped": skipped}
+        return {"searched": 0, "mercari_hit": 0, "snkr_hit": 0, "skipped": skipped, "no_query": 0}
 
-    # クエリ生成(build_card_query = kw/card_no/name_jp/hint/multi_variant/image)。
-    queries = [mp.build_card_query(t.get("title", ""), "", t.get("key") or None) for t in todo]
+    # クエリ生成(build_card_query + KEYフォールバック)。card_no 空=探索不能 → 対象から除外し
+    # **キャッシュに書かない**(mercari=None を焼くと RESTOCK ゲートが「在庫なし確定」と誤読=汚染)。
+    queries = [build_search_query(t, mp) for t in todo]
+    searchable = [i for i in range(len(todo)) if queries[i].get("card_no")]
+    no_query = len(todo) - len(searchable)
+    if no_query:
+        print(f"  ⏭ 探索不能(title/KEYから card番号取れず) {no_query}件 = 検索せず・cache汚染しない(要 catalog/KEY補完)")
+    if not searchable:
+        print("  探索可能な対象なし。終了。")
+        return {"searched": 0, "mercari_hit": 0, "snkr_hit": 0, "skipped": skipped, "no_query": no_query}
 
     # --- メルカリ(一括 Selenium。内部で 8s throttle + driver 10件毎再起動 = BAN/クラッシュ耐性) ---
-    print(f"▶ メルカリ最安取得 {len(todo)}件 (throttle 済)...", flush=True)
-    mercari_res = {}
+    print(f"▶ メルカリ最安取得 {len(searchable)}件 (throttle 済)...", flush=True)
+    mercari_res = {}   # todo-index → 結果
     try:
-        cards = [{**queries[i], "ebay_item_id": todo[i]["itemID"]} for i in range(len(todo))]
-        mercari_res = mp.fetch_mercari_cheapest(cards)
+        cards = [{**queries[i], "ebay_item_id": todo[i]["itemID"]} for i in searchable]
+        scraped = mp.fetch_mercari_cheapest(cards)
+        for j, i in enumerate(searchable):
+            mercari_res[i] = scraped.get(j)
     except Exception as e:
         print(f"  ⚠ メルカリ一括 skip ({type(e).__name__}: {e}) — SNKRDUNK のみ書込", flush=True)
 
-    # --- SNKRDUNK(HTTP-only)+ 増分キャッシュ書込 ---
+    # --- SNKRDUNK(HTTP-only)+ 増分キャッシュ書込(探索可能な対象のみ) ---
     print("▶ SNKRDUNK PSA10 取得 + キャッシュ増分書込...", flush=True)
     m_hit = s_hit = 0
-    for i, t in enumerate(todo):
-        q = queries[i]
-        iid = t["itemID"]
-        cn = q.get("card_no")
-        if cn:
-            try:
-                snkr = sp.check_by_keyword(cn, variant_hint=q.get("hint"),
-                                           multi_variant=q.get("multi_variant"))
-            except Exception as e:
-                snkr = {"_error": str(e)[:40] or "error", "available": False, "psa10_price_jpy": None}
-        else:
-            snkr = None
+    for n, i in enumerate(searchable):
+        t, q = todo[i], queries[i]
+        iid, cn = t["itemID"], q.get("card_no")
+        try:
+            snkr = sp.check_by_keyword(cn, variant_hint=q.get("hint"),
+                                       multi_variant=q.get("multi_variant"))
+        except Exception as e:
+            snkr = {"_error": str(e)[:40] or "error", "available": False, "psa10_price_jpy": None}
         m = mercari_res.get(i)
         if isinstance(m, dict) and m.get("best"):
             m_hit += 1
         if isinstance(snkr, dict) and snkr.get("available"):
             s_hit += 1
         merge_search_result(cache, iid, m, snkr, today)
-        if (i + 1) % 5 == 0:
+        if (n + 1) % 5 == 0:
             _save_cache(cache)          # 増分コミット(いつ落ちても残る)
-            print(f"   {i+1}/{len(todo)} (mercari在庫{m_hit} / snkr在庫{s_hit})", flush=True)
-        if cn and snkr_sleep:
+            print(f"   {n+1}/{len(searchable)} (mercari在庫{m_hit} / snkr在庫{s_hit})", flush=True)
+        if snkr_sleep:
             time.sleep(snkr_sleep)
     _save_cache(cache)
-    print(f"✅ 夜間検索完了: {len(todo)}件検索 (mercari在庫あり{m_hit} / snkr在庫あり{s_hit}) "
+    print(f"✅ 夜間検索完了: {len(searchable)}件検索 (mercari在庫あり{m_hit} / snkr在庫あり{s_hit}) "
           f"→ psa_research_cache.json 書込。補URL書込は slice3(昼確認)。")
-    return {"searched": len(todo), "mercari_hit": m_hit, "snkr_hit": s_hit, "skipped": skipped}
+    return {"searched": len(searchable), "mercari_hit": m_hit, "snkr_hit": s_hit,
+            "skipped": skipped, "no_query": no_query}
 
 
 def main():
