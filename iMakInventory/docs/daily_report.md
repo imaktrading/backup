@@ -1630,3 +1630,19 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 限界/next: isSoldOut が初期HTML不安定→requestsでUNKNOWN多発。自動判定 完全復旧は Selenium描画 or 公式API
   (`/v1/` namespace在るがpath未特定, DNS不安定で中断)特定が別途必要。当面fail-closedで偽取下げゼロ+要手動chk顕在化。
   HQへ根本原因+修正+backlog+復旧方針相談を投入(2026-07-25_snkrdunk_false_sold_rootcause_and_fix.md)。
+
+### snkrdunk sold検知 API復旧 (is_listing_live 統合) + 42偽取下げ HQ relist受領 (commit bab91d6)
+- 決定: HQ が CSR非依存 helper `is_listing_live(url)->True|False|None` を提供(iMakHQ 42a5064、used-listings
+  API の listing_id突合、self-contained requests-only)。これを snkrdunk sold検知の PRIMARY に統合し復旧。
+- 変更: [scrapers/snkrdunk_scraper.py](../scrapers/snkrdunk_scraper.py) — `_hq_is_listing_live`(絶対パス遅延
+  import + url単位cache + 失敗time None fallback)。fetch_product_inventory 先頭で is_listing_live 呼出:
+  True→IN_STOCK / False→SOLD_OUT(消込発火) / None→従来requests経路(404/isSoldOut/uncertain)へフォールバック。
+- 検証: ★live実証 47480716(旧偽sold URL)→is_listing_live=True→統合後 IN_STOCK(WebFetch販売中¥82000と一致)。
+  46775731→True。test +5(True→instock/False→sold/None→404fallback/None+CSR→uncertain/import失敗fallback)。
+  既存requests経路testは _hq_is_listing_live=None固定で維持。**pre-commit 全pass(151+offline)**。
+- 42偽取下げ backlog: HQ が API再検証(LIVE39/SOLD3)→**LIVE39を relist済**(ReviseFixedPriceItem qty0→1、master
+  同期)。SOLD3は genuine据置(私の例358589046154含む)。fix(bab91d6)で snkrdunk 正判定=復活stick。
+  → **偽取下げ backlog クローズ**(HQ処理完了 + 監視くん再発防止済)。
+- next: 次HIGH cycleで 消込(genuine sold発火/live温存)/売切日時/救済ログ/復活39行温存 を実機観測 →
+  偽消込ゼロ継続証跡で最終報告(completion_must_be_proven の残り=巡回1本)。161 backlog ドレインは candidate
+  が genuine収れん後に再評価。
