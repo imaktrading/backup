@@ -605,6 +605,17 @@ def don_treatment_subject(subject, card_number, vision_result):
     return f"{subject} {treat}"
 
 
+def don_lookup_subject(subject, subj_try):
+    """DON lookup に渡す subject を選ぶ純関数(2026-07-25)。
+
+    treatment 連結版(subj_try = don_treatment_subject の戻り)が有ればそれを使い、無ければ
+    原 subject を返す。★PRB02 Buggy/Shanks は Vision で rarity(treatment) が空でも
+    vision_character 単独で解決できる(Catalog POC f6834e1) → treatment 空(subj_try=None)でも
+    原 subject で lookup_don を試すための subject 選択。従来は subj_try 無=即skip だった欠陥の根治。
+    """
+    return subj_try or subject
+
+
 def detect_game_info(brand):
     brand_upper = brand.upper()
     if "DUAL IMPACT" in brand_upper:
@@ -1785,23 +1796,29 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     #   **実際に解決できた時だけ出品**(fail-closed 維持: 解決不能なら従来どおり skip)。
     _don_record = None
     if is_unidentifiable_don_card(subject, card_number):
-        _subj_try = don_treatment_subject(subject, card_number, _vision_result)
+        # 解決の手がかりは2系統: treatment(Vision rarity を subject に連結) or character(Vision)。
+        # ★2026-07-25: PRB02 Buggy/Shanks 等は rarity(treatment) が Vision で空でも character 単独で
+        #   一意解決できる(Catalog POC f6834e1: lookup_don の vision_character 一致 step)。→ treatment 空でも
+        #   character が有れば lookup_don を試す(従来は treatment 空=即skip で character 経路に到達しなかった)。
+        _subj_try = don_treatment_subject(subject, card_number, _vision_result)   # treatment付subject or None
+        _vc = ((_vision_result or {}).get("character") or "").strip()
+        _q_subj = don_lookup_subject(subject, _subj_try)   # treatment有れば連結subject、無ければ原subject
         _don_hit = None
-        if _subj_try:
+        if _subj_try or _vc:
             try:
-                # ★lookup_one_piece は番号空の DON を lookup_don に回さない(=None を返す)。
-                #   Catalog 実測どおり lookup_don を直接呼ぶ必要がある(2026-07-15 実機で確認)。
-                _don_hit = catalog_psa.lookup_don(brand, _subj_try)
+                # ★lookup_one_piece は番号空の DON を lookup_don に回さない(=None)。lookup_don を直接呼ぶ
+                #   (2026-07-15)。vision_character 一致で同set内の複数キャラ Gold DON を1件に解決(tie解消)。
+                _don_hit = catalog_psa.lookup_don(brand, _q_subj, vision_character=_vc or None)
             except Exception as _e_don:
-                print(f"    ⚠️ DON treatment lookup 失敗: {type(_e_don).__name__}: {_e_don}")
+                print(f"    ⚠️ DON lookup 失敗: {type(_e_don).__name__}: {_e_don}")
         if _don_hit:
-            subject = _subj_try
+            subject = _q_subj
             _don_record = _don_hit   # 本流(lookup_one_piece)は DON を解決できないので record を持ち回る
-            print(f"    🎯 DON: treatment 連結で catalog 解決 (cert {cert_number}, subject='{subject}')")
+            print(f"    🎯 DON: catalog 解決 (cert {cert_number}, subject='{subject}', vision_character='{_vc or '無'}')")
         else:
-            _t = "有" if _subj_try else "無"
             print(f"    ⏭️ Skip: reason=no_card_number_don DON!!カード番号欠落=変種特定不能 "
-                  f"(cert {cert_number}, subject='{subject}', treatment={_t})")
+                  f"(cert {cert_number}, subject='{subject}', treatment={'有' if _subj_try else '無'}, "
+                  f"character={_vc or '無'})")
             return None
 
     # Character欄はPSA Subjectから接尾辞を剥がして純キャラ名のみに (fallback)
