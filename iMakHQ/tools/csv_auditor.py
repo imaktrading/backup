@@ -98,6 +98,44 @@ CATEGORY_MAP = {
 # importlib ロード時に sys.path へ足す共有 dir
 _SHARED_PATHS = [os.path.join(WORKSPACE, "iMakeBayAPI")]
 
+# project → 属する catalog category 集合 (recurring_missing の project-scoped filter 用・2026-07-25)。
+# missing_models.csv / pdca improvement_queue はプロジェクト横断のグローバル台帳のため、gshock 監査に
+# TCG由来(dragonball_scg 等)の recurring が混入していた(2026-07-25 ITAJAGA 誤検出)。監査対象プロジェクトの
+# category に属さない recurring を digest から除外する。※未知(下表に無い)category は「残す」= 誤って隠さない。
+PROJECT_CATALOG_CATEGORIES = {
+    "tcg": {"one_piece_tcg", "pokemon_tcg", "dragonball_scg", "gundam_tcg"},
+    "gshock": {"gshock"},
+    "ichibankuji": {"ichibankuji"},
+    "mercari": {"uniqlo", "montbell", "porter", "gu"},
+}
+
+
+def _category_owner_map():
+    """{catalog_category: 所有project} を PROJECT_CATALOG_CATEGORIES から構築(純関数)。"""
+    out = {}
+    for proj, cats in PROJECT_CATALOG_CATEGORIES.items():
+        for c in cats:
+            out[c] = proj
+    return out
+
+
+def filter_recurring_for_project(recurring, project, owner_map=None):
+    """recurring から「別プロジェクト所属と分かる category」を除外(純関数・test可)。
+
+    owner_map(={category:project})に category が有り かつ project 不一致 → 除外(他プロジェクト案件)。
+    owner_map に無い(未知)category / project 一致 → **残す**(未知を silent に隠さない=fail-safe)。
+    2026-07-25: gshock 監査に dragonball_scg(TCG) の recurring が混入する構造を根絶。
+    """
+    if owner_map is None:
+        owner_map = _category_owner_map()
+    out = []
+    for r in recurring:
+        cat = (r.get("category") or "").strip()
+        owner = owner_map.get(cat)
+        if owner is None or owner == project:
+            out.append(r)
+    return out
+
 
 # ============================================================================
 # disposition (純関数 = テスト対象の中核)
@@ -765,7 +803,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
     _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku)
     # --- 決定論NG digest: program不整合 + logシグナル + 再発finding(pdca seen_count) を束ねる(無言スキップ防止=PDCA担保) ---
-    recurring = recurring_findings(_load_pdca_recurring())
+    # ★2026-07-25: recurring は project-scoped(監査対象=project のカテゴリのみ)。missing_models/pdca は
+    # グローバル台帳のため、他プロジェクト由来(例 gshock 監査に dragonball_scg=TCG)の混入を除外。
+    recurring = filter_recurring_for_project(recurring_findings(_load_pdca_recurring()), project)
     digest = _build_ng_digest(project, program_items, log_signals, recurring)
     digest_path = _write_ng_digest(project, digest, dry_run)
     if recurring:

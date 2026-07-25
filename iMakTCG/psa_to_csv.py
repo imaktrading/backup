@@ -664,6 +664,13 @@ def detect_game_info(brand):
         # (2026-06-27 K4: "DRAGON BALL" の総称分岐が Heroes を SCG に誤分類し missing_models を
         #  汚染していた=seen×3の再発。Yu-Gi-Oh! と同じ out-of-scope skip パターンで根治)
         return "Dragon Ball Heroes", brand, "Dragon Ball Heroes"
+    elif "ITAJAGA" in brand_upper or "イタジャガ" in brand:
+        # ITAJAGA(イタジャガ)= カルビースナック封入の食玩プロモ。公式TCGカタログ(SCG)対象外。
+        # Brand="ITAJAGA DRAGON BALL VOL.N" が下の "DRAGON BALL" 分岐で dragonball_scg に誤分類され
+        # → auto_catalog_add 空撃ち + missing_models 居座り(seen×9-10・7/16以来)で recurring_missing を
+        # 汚染していた。Dragon Ball Heroes と同じ out-of-scope skip パターンで根治(2026-07-25・Catalog要求)。
+        # franchise を専用値で返し、build_row で fail-closed skip させる(= dragonball_scg 照会も miss登録もしない)。
+        return "Itajaga", brand, "Itajaga"
     elif "DRAGON BALL" in brand_upper:
         # セット名を短縮：長いプレフィックスを除去して末尾のセット名だけ残す
         # 例: "DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE BLAZING AURA" → "Blazing Aura"
@@ -1745,6 +1752,13 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # missing_models へ dragonball_scg として誤って積むのを防ぐ (2026-06-27 K4 根治)。
     if franchise == "Dragon Ball Heroes":
         print(f"    ⏭️ Skip: Dragon Ball Heroes はアーケード=catalog(SCG)対象外 (cert {cert_number}, {subject})")
+        return None
+
+    # ITAJAGA(カルビースナック封入 食玩プロモ)は公式TCGカタログ対象外 → fail-closed skip。
+    # detect_game_info が franchise="Itajaga" を返す。dragonball_scg 誤分類→missing_models 汚染を根治
+    # (2026-07-25 K5・Catalog 2026-07-17 要求)。対応カテゴリが無いので出品しない(推測補完は方針違反)。
+    if franchise == "Itajaga":
+        print(f"    ⏭️ Skip: ITAJAGA(カルビースナック食玩プロモ)=公式TCGカタログ対象外 (cert {cert_number}, {subject})")
         return None
 
     # Pokemon e-card期 BLACK DECK KIT (2002 VS デッキ) は catalog 収録0件=Bandai/公式API対象外。
