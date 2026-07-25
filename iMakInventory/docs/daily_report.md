@@ -1646,3 +1646,19 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - next: 次HIGH cycleで 消込(genuine sold発火/live温存)/売切日時/救済ログ/復活39行温存 を実機観測 →
   偽消込ゼロ継続証跡で最終報告(completion_must_be_proven の残り=巡回1本)。161 backlog ドレインは candidate
   が genuine収れん後に再評価。
+
+### 補URL消込 backlog 64件 手動ドレイン実施 + 復元アーカイブ + 手動ツール新設 (commit 2ebe58d/3c3d176)
+- 決定: is_listing_live 統合で snkrdunk 偽sold 解消 → 消込候補が genuine 化。HQ の補URL充填が「売切補URL
+  消込待ち」でブロックされていたため、64件を supervised override で実削除 (急増ガードを一度きり override)。
+- 変更/実施:
+  - 手動ドレイン: 18:37 cycle の genuine 候補 64件 (mercari46 + snkrdunk18、全て positive信号sold) を
+    clear_sold_backup_cells(enable_surge_guard=False) で実削除。**cleared=64 / mismatch=0**。AC-AG 64スロット解放。
+  - [sheet_updater.py](../sheet_updater.py): clear_sold_backup_cells が cleared_entries(row/slot/col/url) を返す。
+  - [monitor_listings.py](../monitor_listings.py): 消したものを decision_log/cleared_backups_archive.jsonl に追記
+    (誤削除でも url 復元可=データ安全)。今回64件も保存済。
+  - [tools/supervised_backup_drain.py](../tools/supervised_backup_drain.py) 新設: 自動が急増ガードで止まる時の
+    手動fallback。dry-run既定+--execute、--reverify-snkrdunk(削除直前 is_listing_live 再確認)、compare-and-clear+
+    アーカイブ。既存 release_holdouts と同運用。
+- 検証: cleared=64/mismatch=0 実機確認。test更新(cleared_entries 復元データ)。**pre-commit 全pass(151+offline)**。
+  ★消込が触るのは補URL(AC-AG)のみ=主URL/listing/D列不変。HQ へ「64スロット解放、充填に進めます」報告投入。
+- 運用: 候補<20→定期巡回で自動消込 / 候補≥20→手動ツール。「全自動発火」は次巡回で最終確認 (dont_declare_complete_after_one_cycle)。
