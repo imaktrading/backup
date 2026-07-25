@@ -23,6 +23,8 @@ def _patch_common(monkeypatch, tmp_path, sent):
     import auth.encrypted_gmail as encrypted_gmail
     monkeypatch.setattr(run_cycle.Path, "home", staticmethod(lambda: tmp_path))
     (tmp_path / "OneDrive" / "デスクトップ").mkdir(parents=True, exist_ok=True)
+    # throttle state を tmp に隔離 (実 decision_log の state に依存しない = 初回 emit を保証)
+    monkeypatch.setattr(run_cycle, "BACKUP_CLEAR_ALERT_STATE", tmp_path / "bc_alert_state.json")
     monkeypatch.setattr(run_cycle, "_notify_toast", lambda *a, **k: None)
     monkeypatch.setattr(encrypted_gmail, "load_gmail_config", lambda: ("a", "p", "t"))
     monkeypatch.setattr(email_notifier, "_send_via_gmail",

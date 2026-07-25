@@ -65,6 +65,51 @@ DECISION_LOG_DIR = SCRIPT_DIR / "decision_log"
 DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOCK_FILE = DECISION_LOG_DIR / ".cycle.lock"
 LOCK_STALE_HOURS = 6
+
+# 補URL消込 急増ガード ALERT の throttle (2026-07-25):
+# 既知 backlog (snkrdunk判定復旧待ち等) で毎 cycle HOLD すると desktop file+mail を 4h毎に量産し
+# アラート疲労 (2026-07-25 デスクトップに3件/日堆積で発覚)。cycle ログ/レポートには毎回出す
+# (= 非 silent 維持) が、desktop file+mail は「新規/悪化/24h経過」時のみに絞る (reverse_audit OK_ACK_ONLY 思想)。
+BACKUP_CLEAR_ALERT_STATE = DECISION_LOG_DIR / "backup_clear_alert_state.json"
+BACKUP_CLEAR_ALERT_HEARTBEAT_HOURS = 24   # この時間経過で同条件でも再告知 (墓場化防止)
+BACKUP_CLEAR_ALERT_GROWTH = 20            # 候補がこの件数以上 増えたら悪化とみなし再告知
+
+
+def _should_emit_backup_clear_alert(held_max: int, mismatch_n: int) -> bool:
+    """desktop file+mail を出すべきか (throttle 判定)。ログ出力自体は常に行う想定。
+
+    - mismatch (compare-and-clear 不一致) は actionable → 常に告知。
+    - HOLD のみ (既知 backlog) は 新規/+GROWTH悪化/HEARTBEAT経過 のいずれかで告知。
+    - 判定に失敗したら保守的に True (silent 化しない方を優先)。
+    """
+    if mismatch_n > 0:
+        return True
+    if held_max <= 0:
+        return False
+    try:
+        import json as _json  # noqa: PLC0415
+        prev = {}
+        if BACKUP_CLEAR_ALERT_STATE.exists():
+            prev = _json.loads(BACKUP_CLEAR_ALERT_STATE.read_text(encoding="utf-8"))
+        now = datetime.now()
+        emit = True
+        last_ts = prev.get("ts")
+        last_max = int(prev.get("held_max", 0))
+        if last_ts:
+            try:
+                elapsed_h = (now - datetime.fromisoformat(last_ts)).total_seconds() / 3600.0
+            except Exception:
+                elapsed_h = 1e9
+            # 既知条件 (件数が増えていない かつ HEARTBEAT 未満) なら告知しない
+            if held_max <= last_max + BACKUP_CLEAR_ALERT_GROWTH and elapsed_h < BACKUP_CLEAR_ALERT_HEARTBEAT_HOURS:
+                emit = False
+        if emit:
+            BACKUP_CLEAR_ALERT_STATE.write_text(
+                _json.dumps({"ts": now.isoformat(timespec="seconds"), "held_max": held_max},
+                            ensure_ascii=False), encoding="utf-8")
+        return emit
+    except Exception:
+        return True   # 判定失敗 → 保守的に告知 (silent 化しない)
 PYTEST_PRECHECK_TIMEOUT_SEC = 120  # 検体 42 件は 1 秒程度、120s で十分
 
 # Windows: 黒窓抑制用 flag (Phase 9 拡張 A2)
@@ -325,27 +370,36 @@ def _phase_monitor(
                               f"slot{m.get('slot')}: expected={ (m.get('expected_url') or '')[:40]}")
         _msg = ("補URL 売切消込で要対応が発生しました (D/O 取下げは正常 = fail-OPEN ではない)。\n\n"
                 + "\n".join(_parts))
-        _log(f"  [★補URL消込] HOLD={len(_held)} / mismatch={len(_mm)} → ALERT 発報", test_mode)
-        _notify_toast("iMakInventory 補URL消込 要対応", _msg[:200])
-        try:
-            desk = (Path.home() / "OneDrive" / "デスクトップ"
-                    / f"ALERT_iMakInventory_backup_clear_"
-                      f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
-            desk.write_text(_msg, encoding="utf-8")
-            _log(f"  [★補URL消込] desktop ALERT 出力: {desk.name}", test_mode)
-        except Exception as e:
-            _log(f"  [!] 補URL消込 desktop alert 失敗: {type(e).__name__}: {e}", test_mode)
-        try:
-            from email_notifier import _send_via_gmail  # noqa: PLC0415
-            from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
-            _cfg = load_gmail_config()
-            if _cfg:
-                _a, _p, _t = _cfg
-                _send_via_gmail(_a, _p, _t,
-                                "[★iMakInventory] 補URL消込 要対応 (急増HOLD/mismatch)", _msg)
-                _log("  [★補URL消込] alert mail 送信", test_mode)
-        except Exception as e:
-            _log(f"  [!] 補URL消込 mail 失敗: {type(e).__name__}: {e}", test_mode)
+        # ★ throttle: 既知 backlog の HOLD を毎 cycle 4h毎に desktop file+mail 量産するとアラート疲労。
+        #   cycle ログには常に出す (非 silent 維持) が、desktop file+mail は「新規/悪化/24h経過/mismatch有」時のみ。
+        _held_max = max((h.get("candidate_count", 0) for h in _held), default=0)
+        _emit = _should_emit_backup_clear_alert(_held_max, len(_mm))
+        if _emit:
+            _log(f"  [★補URL消込] HOLD={len(_held)} / mismatch={len(_mm)} → ALERT 発報", test_mode)
+            _notify_toast("iMakInventory 補URL消込 要対応", _msg[:200])
+            try:
+                desk = (Path.home() / "OneDrive" / "デスクトップ"
+                        / f"ALERT_iMakInventory_backup_clear_"
+                          f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+                desk.write_text(_msg, encoding="utf-8")
+                _log(f"  [★補URL消込] desktop ALERT 出力: {desk.name}", test_mode)
+            except Exception as e:
+                _log(f"  [!] 補URL消込 desktop alert 失敗: {type(e).__name__}: {e}", test_mode)
+            try:
+                from email_notifier import _send_via_gmail  # noqa: PLC0415
+                from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
+                _cfg = load_gmail_config()
+                if _cfg:
+                    _a, _p, _t = _cfg
+                    _send_via_gmail(_a, _p, _t,
+                                    "[★iMakInventory] 補URL消込 要対応 (急増HOLD/mismatch)", _msg)
+                    _log("  [★補URL消込] alert mail 送信", test_mode)
+            except Exception as e:
+                _log(f"  [!] 補URL消込 mail 失敗: {type(e).__name__}: {e}", test_mode)
+        else:
+            # 非 silent: 告知は throttle したが cycle ログ + report には必ず残す (墓場化しない)。
+            _log(f"  [補URL消込] HOLD={len(_held)}(候補最大{_held_max}) / mismatch=0 "
+                 f"= 既知 backlog 継続 (desktop/mail は throttle、次は悪化 or 24h で再告知)", test_mode)
 
     # 補URL救済 (Phase1 救済率 signal)。正常イベント = ログのみ (HQ が 補URL救済ログ から集計)。
     if grand["rescue_new"] or grand["rescue_current"]:
