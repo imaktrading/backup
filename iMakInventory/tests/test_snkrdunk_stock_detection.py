@@ -126,14 +126,61 @@ class TestFetchProductInventory:
         assert info["status"] == "SOLD_OUT"
         assert info["skus"][0]["in_stock"] is False
 
-    def test_jsonld_missing(self):
+    def test_jsonld_missing_is_uncertain_not_sold(self):
+        """★ 2026-07-25 fail-closed 修正: 判定不能 → in_stock=None (旧: False=偽sold)。
+
+        snkrdunk CSR 化で jsonld Product が消滅 → 全件「判定不能」。旧実装は in_stock=False に潰し
+        「売切確定(is_sold=True)」に化けて偽取下げ/偽消込を量産した。None のまま返し uncertain に倒す。
+        """
         with patch("scrapers.snkrdunk_scraper.requests.get",
-                   return_value=_mock_response(200, "<html>no jsonld</html>")):
+                   return_value=_mock_response(200, "<html>no jsonld no rsc</html>")):
             info = fetch_product_inventory(
                 "https://snkrdunk.com/apparels/159278/used/12345")
         assert info is not None
         assert info["status"] == "UNKNOWN"
-        assert info["skus"][0]["in_stock"] is False   # fail-closed
+        assert info["skus"][0]["in_stock"] is None   # ★ 判定不能 (False ではない)
+
+    def test_rsc_is_sold_out_true(self):
+        """RSC ペイロード isSoldOut:true (当該id同一object) → SOLD_OUT."""
+        html = ('<html><script>self.__next_f.push([1,"...'
+                '{\\"id\\":12345,\\"isUsed\\":true,\\"isSoldOut\\":true,\\"price\\":8900}'
+                '..."])</script></html>').replace("\\", "")
+        with patch("scrapers.snkrdunk_scraper.requests.get",
+                   return_value=_mock_response(200, html)):
+            info = fetch_product_inventory(
+                "https://snkrdunk.com/apparels/159278/used/12345")
+        assert info["status"] == "SOLD_OUT"
+        assert info["skus"][0]["in_stock"] is False
+
+    def test_rsc_is_sold_out_false(self):
+        """RSC isSoldOut:false → IN_STOCK (WebFetch=販売中 と一致する側)."""
+        html = '<html><script>x={"id":12345,"isSoldOut":false,"isUsed":true}</script></html>'
+        with patch("scrapers.snkrdunk_scraper.requests.get",
+                   return_value=_mock_response(200, html)):
+            info = fetch_product_inventory(
+                "https://snkrdunk.com/apparels/159278/used/12345")
+        assert info["status"] == "IN_STOCK"
+        assert info["skus"][0]["in_stock"] is True
+
+    def test_rsc_other_item_not_attributed(self):
+        """別 item(別id)の isSoldOut を当該 id に誤帰属しない (同一object境界を守る)。"""
+        # id=99999 が sold、当該 id=12345 の isSoldOut は無い → 当該は判定不能
+        html = '<html><script>a={"id":99999,"isSoldOut":true};b={"id":12345,"name":"x"}</script></html>'
+        with patch("scrapers.snkrdunk_scraper.requests.get",
+                   return_value=_mock_response(200, html)):
+            info = fetch_product_inventory(
+                "https://snkrdunk.com/apparels/159278/used/12345")
+        assert info["status"] == "UNKNOWN"
+        assert info["skus"][0]["in_stock"] is None
+
+    def test_monitor_treats_none_as_uncertain(self):
+        """結合: snkrdunk in_stock=None → monitor _check_single_url が is_sold=None(uncertain)+error."""
+        import monitor_listings as ml
+        with patch("scrapers.snkrdunk_scraper.requests.get",
+                   return_value=_mock_response(200, "<html>csr no signal</html>")):
+            sub = ml._check_single_url("https://snkrdunk.com/apparels/159278/used/12345")
+        assert sub["is_sold"] is None       # ★ 偽 sold(True) にならない
+        assert sub["error"] is not None     # uncertain = error 明示 → 要手動chk へ
 
     def test_network_error(self):
         with patch("scrapers.snkrdunk_scraper.requests.get",

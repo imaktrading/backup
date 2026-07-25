@@ -7,11 +7,18 @@ HTTP-only (Selenium 不要)、JSON-LD parse で完結。
   https://snkrdunk.com/apparels/{model_id}/used/{instance_id}
   (= PSA10 鑑定済 1 個体 出品 page)
 
-判定 logic:
-  - HTTP 200 + JSON-LD `availability:"https://schema.org/InStock"` → 在庫あり (qty=1)
-  - HTTP 404 → 削除/売切 (= 廃番、status=DELETED)
-  - HTTP 200 + availability!=InStock → 売切中 (= status=SOLD_OUT)
-  - その他 → 不確定 (= status=UNKNOWN、fail-closed で in_stock=False)
+判定 logic (★2026-07-25 改訂: snkrdunk CSR 化対応 + fail-closed 厳格化):
+  - HTTP 404 → 削除/売却確定 (status=DELETED, in_stock=False) ← 信頼できる sold 信号
+  - RSC ペイロード `"isSoldOut":true`  → SOLD_OUT (in_stock=False)
+  - RSC ペイロード `"isSoldOut":false` → IN_STOCK (in_stock=True)
+  - (legacy) JSON-LD availability InStock / HTML app div class sold → IN_STOCK / SOLD_OUT
+  - どの信号でも確定できない → **status=UNKNOWN, in_stock=None (判定不能)**
+    ★ 旧実装は in_stock=False に潰していたため、CSR 化で jsonld Product 消滅 → 全件「判定不能」が
+      「売切確定(is_sold=True)」に化け、偽取下げ/偽消込を量産した (2026-07-25 発覚)。None のまま返し
+      monitor 側で is_sold=None (uncertain→skip) に倒す = fail-closed (Precision 100%)。
+  - 注意: CSR 化で isSoldOut は初期 HTML に安定して来ない → requests では取りこぼしが多く UNKNOWN 多発。
+    確実な自動判定復旧には Selenium 描画 or 公式 API 特定が必要 (別タスク)。当面は uncertain を
+    「要手動chk」で顕在化させ、偽取下げは出さない安全側に倒す。
 
 仕入元特性:
   - 1 URL = 1 個体 (variation なし、size/color 無関係)
@@ -76,9 +83,36 @@ def _extract_jsonld_product(html: str) -> Optional[dict]:
     return None
 
 
+def _extract_is_sold_out(html: str, url: str):
+    """RSC ペイロード内の当該 instanceId に紐づく isSoldOut を抽出.
+
+    ★ 2026-07-25: snkrdunk が CSR 化し jsonld から Product が消滅・旧 sold 信号(app div class)も消滅。
+      在庫状態は Next.js RSC ペイロードの `{"id":<iid>,...,"isSoldOut":true|false}` にのみ残る。
+      同一 object 内 (id と isSoldOut の間に別 object 境界 {} を挟まない) の一致のみ採用 =
+      隣接 object の誤取得を防ぐ。見つからなければ None (= 判定不能、fail-closed で uncertain)。
+
+    Returns: True (売切) / False (在庫あり) / None (判定不能)。
+    """
+    pid = parse_product_id(url) or ""
+    iid = pid.split(":")[-1] if ":" in pid else pid
+    if not iid or not iid.isdigit():
+        return None
+    # {"id":IID ... "isSoldOut":X}  (同一 object = 間に {} 境界なし)
+    m = re.search(r'"id":' + iid + r'\b[^{}]*?"isSoldOut":(true|false)', html)
+    if not m:
+        m = re.search(r'"isSoldOut":(true|false)[^{}]*?"id":' + iid + r'\b', html)
+    if m:
+        return m.group(1) == "true"
+    return None
+
+
 def _fetch_via_requests(url: str) -> dict:
     """requests で fetch、status + 在庫情報 dict を返却."""
-    out = {"http_status": None, "in_stock": False, "name": "", "price_jpy": None,
+    # ★ 2026-07-25 fail-closed 修正: in_stock 既定を None (判定不能) に。
+    #   旧実装は既定 False → 判定不能(jsonld_missing 等)が「売切確定(is_sold=True)」に化け、
+    #   偽取下げ・偽消込を量産した (snkrdunk CSR 化で jsonld Product 消滅が発端)。
+    #   True/False は POSITIVE な信号でのみ設定し、確証なきは None のまま返す。
+    out = {"http_status": None, "in_stock": None, "name": "", "price_jpy": None,
            "_reason": "unknown"}
     try:
         r = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT_SEC, allow_redirects=True)
@@ -88,41 +122,54 @@ def _fetch_via_requests(url: str) -> dict:
 
     out["http_status"] = r.status_code
     if r.status_code == 404:
+        # 404 = 出品削除 = 売却/取下げ確定 (信頼できる sold 信号)
+        out["in_stock"] = False
         out["_reason"] = "http_404"
         return out
     if r.status_code != 200:
-        out["_reason"] = f"http_{r.status_code}"
+        out["_reason"] = f"http_{r.status_code}"   # in_stock=None (判定不能)
         return out
 
-    product = _extract_jsonld_product(r.text)
-    if not product:
-        out["_reason"] = "jsonld_missing"
-        return out
-
-    out["name"] = product.get("name", "")
-    offers = product.get("offers") or {}
-    if isinstance(offers, list):
-        offers = offers[0] if offers else {}
-    out["price_jpy"] = offers.get("price") if offers else None
-    availability = (offers.get("availability") or "") if isinstance(offers, dict) else ""
-
-    # 2026-05-25 SOLD 判定 強化:
-    # JSON-LD `availability` は SNKRDUNK 側で売却後も `InStock` 維持されるバグあり
-    # (= 358589046154 ケース、 5/24 売却済でも JSON-LD InStock 返却)。
-    # HTML 内 `<div id="app" class="content used-item-detail sold">` が実 SOLD signal。
-    # JSON-LD InStock + HTML class `sold` あれば SOLD_OUT 優先 (= HTML 真値)。
-    html_sold = bool(re.search(
-        r'<div\s+id=["\']app["\'][^>]*class=["\'][^"\']*\bsold\b[^"\']*["\']',
-        r.text, re.I,
-    ))
-    if html_sold:
+    # ① RSC ペイロードの isSoldOut (CSR 化後の唯一の在庫信号、在れば positive)
+    iso = _extract_is_sold_out(r.text, url)
+    if iso is True:
         out["in_stock"] = False
-        out["_reason"] = "html_class_sold"
-    elif "InStock" in availability:
+        out["_reason"] = "rsc_sold_out"
+        return out
+    if iso is False:
         out["in_stock"] = True
-        out["_reason"] = "instock"
-    else:
-        out["_reason"] = f"availability:{availability.split('/')[-1] if availability else 'unknown'}"
+        out["_reason"] = "rsc_in_stock"
+        return out
+
+    # ② legacy: jsonld Product の availability / HTML app div class sold (現行 snkrdunk では通常不在)
+    product = _extract_jsonld_product(r.text)
+    if product:
+        out["name"] = product.get("name", "")
+        offers = product.get("offers") or {}
+        if isinstance(offers, list):
+            offers = offers[0] if offers else {}
+        out["price_jpy"] = offers.get("price") if offers else None
+        availability = (offers.get("availability") or "") if isinstance(offers, dict) else ""
+        html_sold = bool(re.search(
+            r'<div\s+id=["\']app["\'][^>]*class=["\'][^"\']*\bsold\b[^"\']*["\']',
+            r.text, re.I,
+        ))
+        if html_sold:
+            out["in_stock"] = False
+            out["_reason"] = "html_class_sold"
+            return out
+        if "InStock" in availability:
+            out["in_stock"] = True
+            out["_reason"] = "instock"
+            return out
+        # availability が明示的に sold 系 (OutOfStock/SoldOut) → positive sold
+        if availability and ("OutOfStock" in availability or "SoldOut" in availability):
+            out["in_stock"] = False
+            out["_reason"] = f"availability:{availability.split('/')[-1]}"
+            return out
+
+    # ③ どの信号でも確定できない → 判定不能 (in_stock=None のまま = fail-closed で uncertain→skip)
+    out["_reason"] = "undetermined_csr"
     return out
 
 
@@ -157,18 +204,23 @@ def fetch_product_inventory(
         return None  # 通信失敗 (retry 全滅)
 
     reason = raw.get("_reason", "")
-    in_stock = bool(raw.get("in_stock", False))
+    # ★ 2026-07-25 fail-closed: in_stock は None(判定不能)/True/False の 3 値。
+    #   None を bool() で False に潰すと「判定不能→売切確定」の偽 sold になる (今回の bug 根本) →
+    #   None のまま skus に載せ、 monitor 側で is_sold=None (uncertain→skip) に倒す。
+    raw_in_stock = raw.get("in_stock")   # None / True / False
 
     if reason == "http_404":
         status = "DELETED"
-    elif in_stock:
+        raw_in_stock = False             # 削除=売却確定
+    elif raw_in_stock is True:
         status = "IN_STOCK"
-    elif reason == "html_class_sold" or reason.startswith("availability:"):
-        # 2026-05-25: HTML class `sold` 検出 も SOLD_OUT に分類
-        # (= JSON-LD InStock + HTML sold の場合、 HTML 真値を採用)
+    elif raw_in_stock is False:
+        # POSITIVE な sold 信号 (rsc_sold_out / html_class_sold) のみここに来る
         status = "SOLD_OUT"
     else:
+        # 判定不能 (undetermined_csr / jsonld_missing / http_5xx 等) → UNKNOWN、in_stock=None 維持
         status = "UNKNOWN"
+        raw_in_stock = None
 
     try:
         price = int(raw.get("price_jpy")) if raw.get("price_jpy") is not None else None
@@ -184,8 +236,8 @@ def fetch_product_inventory(
         "skus": [
             {
                 "size": "",
-                "in_stock": in_stock,
-                "quantity": 1 if in_stock else 0,
+                "in_stock": raw_in_stock,   # None=判定不能 (monitor が is_sold=None=uncertain に倒す)
+                "quantity": 1 if raw_in_stock else 0,
                 "price_jpy": price,
             }
         ],
