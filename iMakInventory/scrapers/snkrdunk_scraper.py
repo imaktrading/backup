@@ -35,6 +35,31 @@ from typing import Optional
 
 import requests
 
+# ── snkrdunk sold 検知の API 復旧 (2026-07-25) ──────────────────────────────
+# snkrdunk 商品ページが CSR 化しページ scrape sold 検知が壊れた (偽sold量産→偽取下げ/偽消込) 対策。
+# HQ の CSR非依存 helper `is_listing_live(url)` を流用 (used-listings API の listing_id 突合で
+# True=live / False=sold / None=API失敗or非対象=uncertain)。commit iMakHQ 42a5064、self-contained
+# (requests のみ依存)。監視くんは絶対パスで遅延 import、利用不能時は既存 requests パスに安全フォールバック。
+_HQ_TOOLS_PATH = r"C:\dev\iMak\iMakHQ\tools"
+_LIVE_CACHE: dict = {}   # url → True/False/None (cycle 内重複 API 抑制、run_cycle 単位でプロセスは使い捨て)
+
+
+def _hq_is_listing_live(url: str):
+    """HQ `is_listing_live` を遅延 import で呼ぶ。利用不能/例外なら None (= 既存 fail-closed へ)。"""
+    if url in _LIVE_CACHE:
+        return _LIVE_CACHE[url]
+    result = None
+    try:
+        if _HQ_TOOLS_PATH not in sys.path:
+            sys.path.insert(0, _HQ_TOOLS_PATH)
+        from snkrdunk_psa_resource import is_listing_live  # noqa: PLC0415
+        result = is_listing_live(url)
+    except Exception:
+        result = None
+    _LIVE_CACHE[url] = result
+    return result
+
+
 _HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -188,6 +213,21 @@ def fetch_product_inventory(
     } or None on fetch failure.
     """
     pid = parse_product_id(url) or ""
+
+    # ★ 2026-07-25 API 復旧: HQ の is_listing_live を PRIMARY 判定に (CSR非依存・positive信号)。
+    #   True=live→IN_STOCK / False=sold→SOLD_OUT (= 消込を snkrdunk でも正しく発火) / None→既存 requests
+    #   パス (404/isSoldOut/uncertain) にフォールバック。helper 利用不能でも既存挙動で安全。
+    live = _hq_is_listing_live(url)
+    if live is True or live is False:
+        return {
+            "name": "", "product_id": pid, "color": "",
+            "status": "IN_STOCK" if live else "SOLD_OUT",
+            "fetched_at": datetime.now().isoformat(timespec="seconds"),
+            "skus": [{"size": "", "in_stock": live,
+                      "quantity": 1 if live else 0, "price_jpy": None}],
+        }
+    # live is None → 従来の requests 経路へフォールバック (404 は依然 reliable sold 信号)
+
     # 接続例外リトライ (2026-06-11): cycle 中は snkrdunk を大量に叩くため (多数行 × 各最大6候補)、
     # rate-limit/接続瞬断で requests.get が例外→http_status=None→None を返し、 monitor 側で
     # 「uncertain: N/M candidates errored」 の誤アラートになる (= fril と同型、 在庫ある補欠候補が
