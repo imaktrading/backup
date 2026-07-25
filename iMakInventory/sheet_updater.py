@@ -605,12 +605,12 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
     n = len(clear_candidates)
     if n == 0:
         return {"cleared": 0, "skipped_mismatch": [], "held": False,
-                "candidate_count": 0, "surge": False}
+                "candidate_count": 0, "surge": False, "cleared_entries": []}
 
     # 消込急増ガード: 異常件数なら消込せず HOLD (caller が ALERT)。
     if enable_surge_guard and n > CLEAR_SURGE_THRESHOLD:
         return {"cleared": 0, "skipped_mismatch": [], "held": True,
-                "candidate_count": n, "surge": True}
+                "candidate_count": n, "surge": True, "cleared_entries": []}
 
     # 対象 row の AC-AG を書込直前に re-read (compare-and-clear)。
     rows = sorted({c["row_index"] for c in clear_candidates})
@@ -626,6 +626,7 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
     cell_updates = []
     cleared = 0
     skipped = []
+    cleared_entries = []   # ★ 消した内容 (row/slot/col/url) = 復元用アーカイブに載せる (データ安全)
     for c in clear_candidates:
         r = c["row_index"]
         slot = c["slot"]
@@ -633,11 +634,10 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
         vals = cur.get(r, [])
         actual = (vals[slot].strip() if slot < len(vals) and vals[slot] else "")
         if expected and actual == expected:
-            cell_updates.append({
-                "range": f"{_col_letter(LISTINGS_COL_BACKUP_URL_1 + slot)}{r}",
-                "values": [[""]],   # クリア
-            })
+            col = _col_letter(LISTINGS_COL_BACKUP_URL_1 + slot)
+            cell_updates.append({"range": f"{col}{r}", "values": [[""]]})   # クリア
             cleared += 1
+            cleared_entries.append({"row_index": r, "slot": slot, "col": col, "url": expected})
         else:
             # HQ 差替 / 既に変化 / 空 → 消さない (silent drop 禁止、要対応として返す)
             skipped.append({"row_index": r, "slot": slot,
@@ -647,7 +647,7 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
         ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
 
     return {"cleared": cleared, "skipped_mismatch": skipped, "held": False,
-            "candidate_count": n, "surge": False}
+            "candidate_count": n, "surge": False, "cleared_entries": cleared_entries}
 
 
 RESCUE_LOG_TAB = "補URL救済ログ"

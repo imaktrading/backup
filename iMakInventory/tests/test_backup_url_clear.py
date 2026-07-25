@@ -106,6 +106,9 @@ def test_clear_matches_only_when_cell_equals_expected():
     # AD5 を "" でクリア
     ranges = [c["range"] for c in ws.batch_update.call_args[0][0]]
     assert "AD5" in ranges
+    # ★ 復元用: 消したものが cleared_entries に (row/slot/col/url) で残る
+    assert res["cleared_entries"] == [
+        {"row_index": 5, "slot": 1, "col": "AD", "url": "https://b2"}]
 
 
 def test_clear_skips_on_mismatch_hq_replaced():
@@ -150,7 +153,7 @@ def test_clear_empty_candidates_noop():
     ws = MagicMock()
     res = clear_sold_backup_cells(ws, [])
     assert res == {"cleared": 0, "skipped_mismatch": [], "held": False,
-                   "candidate_count": 0, "surge": False}
+                   "candidate_count": 0, "surge": False, "cleared_entries": []}
 
 
 def test_clear_empty_expected_never_clears():

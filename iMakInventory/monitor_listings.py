@@ -389,6 +389,9 @@ PENDING_REVISE_FILE = DECISION_LOG_DIR / "pending_revise.jsonl"
 ACTION_REQUIRED_FILE = DECISION_LOG_DIR / "action_required.jsonl"
 # 補URL救済ログ (フック2、2026-07-25)。救済 = 主URL死 AND 補URL≥1本 在庫あり (Phase1 救済率 signal)。
 RESCUE_EVENTS_FILE = DECISION_LOG_DIR / "rescue_events.jsonl"   # 監査用 (実書込の証跡)
+# 補URL消込の復元用アーカイブ (2026-07-25)。消したセル (row/slot/col/url) を全て記録 →
+# 誤削除でも URL を残し復元可能にする (データ安全)。cell を消しても値はここに残る。
+CLEARED_BACKUPS_ARCHIVE = DECISION_LOG_DIR / "cleared_backups_archive.jsonl"
 
 
 def _rescue_key(r: dict) -> str:
@@ -1058,6 +1061,20 @@ def process_sheet(
             #   D/O(取下げ) は上で書けている = 消込の HOLD/mismatch は fail-OPEN ではない (延命枠の衛生管理)。
             if clear_candidates:
                 backup_clear_result = clear_sold_backup_cells(ws, clear_candidates)
+                # ★ 消したものを復元用アーカイブに追記 (データ安全: 誤削除でも URL を残す)。
+                _cleared_entries = backup_clear_result.get("cleared_entries") or []
+                if _cleared_entries:
+                    try:
+                        with open(CLEARED_BACKUPS_ARCHIVE, "a", encoding="utf-8") as _af:
+                            for _e in _cleared_entries:
+                                _af.write(json.dumps(
+                                    {**_e, "sheet": sheet_label, "item_id":
+                                     next((r.get("item_id", "") for r in results
+                                           if r["row_index"] == _e["row_index"]), ""),
+                                     "ts": checked_at_now, "reason": "cycle_auto_clear"},
+                                    ensure_ascii=False) + "\n")
+                    except Exception as _ae:
+                        log(f"  [!] 消込アーカイブ追記失敗 (削除は成功): {type(_ae).__name__}: {_ae}")
                 bc = backup_clear_result
                 if bc.get("surge") or bc.get("held"):
                     log(f"  [★補URL消込 急増ガード発火] 候補 {bc['candidate_count']} 件 > 閾値 "
