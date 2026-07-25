@@ -359,9 +359,17 @@ def _phase_monitor(
         _mm = grand["backup_clear_mismatch"]
         _parts = []
         if _held:
-            _parts.append("【消込急増ガード HOLD】" + ", ".join(
-                f"[{h['sheet']}] 候補{h['candidate_count']}件" for h in _held)
-                + " → 一括消込を止めた (データ不具合での誤一括消去防止)。要 DOM 確認。")
+            _parts.append(
+                "【消込急増ガード HOLD】" + ", ".join(
+                    f"[{h['sheet']}] 候補{h['candidate_count']}件" for h in _held)
+                + " → 一括消込を保留 (閾値超で誤一括削除を防止)。\n"
+                "  ★ snkrdunk 判定は is_listing_live で正確化済のため、通常これは "
+                "**genuine な売切補URL backlog** (誤検知ではない)。対処:\n"
+                "    1) 確認: python -m tools.supervised_backup_drain --label HIGH\n"
+                "    2) 実削除: python -m tools.supervised_backup_drain --label HIGH --execute\n"
+                "  (compare-and-clear + 復元アーカイブで安全。触るのは補URL(AC-AG)のみ)。\n"
+                "  ※ 万一 別supplier scraper の一斉偽sold崩壊の可能性が疑わしい時のみ、"
+                "先に候補一覧の supplier 偏りを確認すること。")
         if _mm:
             _parts.append(f"【compare-and-clear mismatch {len(_mm)}件】セル値≠確認URL "
                           "(HQ が生きた新URLに差替 or 変化) → 消さずに要対応記録。")
