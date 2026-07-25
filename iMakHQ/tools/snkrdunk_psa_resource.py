@@ -302,6 +302,50 @@ def psa10_listings_for(card_id, timeout=_TIMEOUT_SEC):
             for x in ls]
 
 
+# --- 監視くん消込 用: 個別出品URLが今も販売中か (CSR非依存・API突合) -----------------
+# ★2026-07-25: snkrdunk 商品ページ CSR化で monitor のページscrape sold検知が壊れ偽sold量産。
+# HQ の used-listings API(psa10_listings)は無事なので、listing_id 突合で「その出品が生きてるか」を
+# CSR非依存に判定する primitive を提供。監視くんが snkrdunk補URL/主URLの sold検知に流用する。
+_LISTING_URL_RE = re.compile(r"/apparels/(\d+)/used/(\d+)")
+
+
+def _parse_listing_url(url):
+    """snkrdunk 個別出品URL → (card_id, listing_id) or (None, None)(純関数・test可)。"""
+    m = _LISTING_URL_RE.search(url or "")
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+
+def _live_from_listings(listing_id, listings):
+    """listing_id が現PSA10出品一覧(fetch_psa10_listings戻り)に在るか(純関数)。
+
+    listings=None(API失敗)は呼び出し側で uncertain 扱い。ここでは在る=True/無い=False のみ。
+    """
+    ids = {str(x.get("listing_id")) for x in (listings or []) if isinstance(x, dict)}
+    return str(listing_id) in ids
+
+
+def is_listing_live(url, timeout=_TIMEOUT_SEC):
+    """snkrdunk 個別出品URLが今も販売中か → True / False / None(uncertain)。監視くん消込のsold検知用。
+
+    CSR化した商品ページに依存せず、used-listings API の **listing_id 突合**で判定:
+      - listing_id が現PSA10出品一覧に在る → True(live)
+      - 無い(空一覧含む=売切) → False(sold)  ※API取得成功時のみ
+      - snkrdunk個別URLでない / card_id・listing_id 抽出不可 / **API失敗** → None(uncertain=fail-closed:消さない)
+    ★ fetch_psa10_listings を使う(None=API失敗 と []=売切 を区別。psa10_listings_for は両方 [] で不可)。
+    使い方(監視くん): snkrdunk 枠の is_sold は `is_listing_live(url)` の否定。None は uncertain→消さない。
+    """
+    card_id, lid = _parse_listing_url(url)
+    if not card_id or not lid:
+        return None
+    try:
+        ls = fetch_psa10_listings(card_id, timeout=timeout)
+    except Exception:
+        return None
+    if ls is None:                 # API失敗 = 判定不能(fail-closed)
+        return None
+    return _live_from_listings(lid, ls)
+
+
 def fetch_psa10_listings(card_id, timeout=_TIMEOUT_SEC):
     """card_id の PSA10販売中出品を価格昇順で返す。API失敗時は None (= min-prices へフォールバック)。"""
     if not card_id or not str(card_id).strip():
