@@ -1961,6 +1961,7 @@ def lookup_don(
     subject: str,
     image_url: Optional[str] = None,
     verbose: bool = True,
+    vision_character: Optional[str] = None,
 ) -> Optional[dict]:
     """DON カードを catalog から psa_subject_hint match で lookup.
 
@@ -2031,6 +2032,32 @@ def lookup_don(
             print(f"    ⚠️ DON: catalog 候補 0 件 "
                   f"(brand={brand!r}, set_code_brand={set_code_brand!r})")
         return None
+
+    # 2.5) vision_character 一致キー (2026-07-25 HQ POC: PRB02 等 subject が generic 'DON!! CARD'
+    #      で hint scoring が多数 tie になるケースを、cert cache の Vision character で一意化する。
+    #      HQ 側呼出は同スコープの _vision_result を vision_character に渡す。cert cache の
+    #      Vision character を「正」として扱う (HQ 承認 2026-07-25)。fail-closed: 一致0/複数なら
+    #      従来の hint scoring にフォールスルー (推測で埋めない)。)
+    if vision_character:
+        vc = vision_character.strip().upper()
+        char_matches = []
+        for r in rows:
+            try:
+                sp = json.loads(r["specs"])
+            except Exception:
+                sp = {}
+            rc = (sp.get("character") or "").strip().upper()
+            if rc and rc == vc:
+                char_matches.append(r)
+        if len(char_matches) == 1:
+            record = api._row_to_dict(char_matches[0])
+            if verbose:
+                print(f"    🎯 iMakCatalog (DON) hit (vision_character={vision_character!r}): "
+                      f"{record['product_id']}")
+            return record
+        if len(char_matches) > 1 and verbose:
+            print(f"    ⏳ DON vision_character={vision_character!r} tie "
+                  f"({len(char_matches)} 件) → hint scoring へフォールスルー")
 
     # 3) 各候補を hint keyword で scoring
     best_score = 0
