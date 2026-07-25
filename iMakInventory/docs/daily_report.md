@@ -1670,3 +1670,11 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   全スロット解放。全て cleared_backups_archive.jsonl 記録(復元可)。107>20で自動は非発火→手動ツールで一掃。
 - 検証: 消込候補 mercari47+snkrdunk60=107。skip(既削除/変化)は compare-and-clear で保護。★kill が効かず手動
   cycle完走したが害なし(正確検出で正常完了)。次巡回で候補<20収れんなら自動消込へ移行(最終確認)。
+
+### ★最終実証: 定期巡回で自動消込 稼働確認 = ①消込 全自動で完成 (22:27 scheduled cycle)
+- 決定: backlog 107件 drain 後、21:30 scheduled cycle(本番cron)を観測。
+- 検証: [22:27] `[OK] 補URL消込: cleared=3 / candidate=3 / mismatch=0`、色塗り赤=3、err_writes=49→9。
+  = backlog 一掃で候補が churn 分の3件に激減 → **3<20 で急増ガード非発火 → 自動消込が実行**(手動介入なし)。
+  ★「定期巡回で自動消込が回る」を本番 cron で実機実証 = ①消込 全自動で完成 (dont_declare_complete_after_one_cycle 充足)。
+- 3フック最終状態: ①補URL消込=**完成**(自動稼働実証+手動fallback+復元アーカイブ) / ②売切日時=完成(毎cycle) /
+  ③救済ログ=実装済。snkrdunk偽sold は fail-closed + is_listing_live で根絶、backlog 107全削除、偽取下げ42はHQ relist済。
