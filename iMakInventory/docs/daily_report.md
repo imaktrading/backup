@@ -1662,3 +1662,11 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 検証: cleared=64/mismatch=0 実機確認。test更新(cleared_entries 復元データ)。**pre-commit 全pass(151+offline)**。
   ★消込が触るのは補URL(AC-AG)のみ=主URL/listing/D列不変。HQ へ「64スロット解放、充填に進めます」報告投入。
 - 運用: 候補<20→定期巡回で自動消込 / 候補≥20→手動ツール。「全自動発火」は次巡回で最終確認 (dont_declare_complete_after_one_cycle)。
+
+### 追記: is_listing_live フル cycle 実証 + backlog 107件 全削除 (19:40)
+- 決定: 18:40 手動HIGH cycle(is_listing_live込)が完走(19:35)。★主URL=snkrdunk is_sold=False38/True7/None2=
+  正確検出 live実証(06:31偽sold46/47→根絶)。genuine死補URL=107件確定(snkrdunk60+mercari47)。
+- 実施: 追加43件(snkrdunk42+mercari1)を tools/supervised_backup_drain --execute で実削除 → 累計107件クリア=
+  全スロット解放。全て cleared_backups_archive.jsonl 記録(復元可)。107>20で自動は非発火→手動ツールで一掃。
+- 検証: 消込候補 mercari47+snkrdunk60=107。skip(既削除/変化)は compare-and-clear で保護。★kill が効かず手動
+  cycle完走したが害なし(正確検出で正常完了)。次巡回で候補<20収れんなら自動消込へ移行(最終確認)。
