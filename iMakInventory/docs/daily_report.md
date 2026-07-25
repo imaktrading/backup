@@ -1610,3 +1610,23 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   **pre-commit 全 pass(151+offline)**。★初期救済率は live 未測定 (本日commit、次HIGH cycleで実データ)。
 - next: 次 HIGH cycle で ①消込cleared ②売切日時 ③救済ログ を live 実機観測→まとめて実績報告。
   HQ へ signal 厳密定義(proxy不採用)の認識合わせ依頼。
+
+## 2026-07-25 — 【重大】snkrdunk 偽sold 根本原因 + fail-closed 修正 (補URL消込 初live のスポット検証が発端、commit 9953a14)
+- 決定: 補URL消込 初live で 161候補→急増ガードHOLD。HQ承認済ドレインの直前スポット検証で snkrdunk が
+  偽sold量産と判明 → **ドレイン中止**（生きた補URL誤削除を回避）。急増ガードが2026-06-03偽OOS型を実防止。
+- 根本原因: snkrdunk が完全CSR化 → jsonld から Product 消滅(@graph に Org/WebSite のみ)、旧sold信号
+  (app div class)も消滅。`_fetch_via_requests` が判定不能時 in_stock=False(確定)を返し → monitor で
+  is_sold=True(偽sold, error=None)化。CSR化で全snkrdunkが判定不能→全件偽sold。fail-closed違反。
+- 変更: [scrapers/snkrdunk_scraper.py](../scrapers/snkrdunk_scraper.py) — in_stock 既定 False→None。
+  True/False は POSITIVE信号(404/RSC isSoldOut/availability)のみ。RSC isSoldOut を当該instanceId同一object内
+  で抽出。判定不能→UNKNOWN/in_stock=None→monitor is_sold=None(uncertain→skip)。偽sold/偽取下げ/偽消込 即停止。
+- 検証: ★実HTML解析(47480716=PSA10ニコロビン, HTTP200, jsonld@graphにProduct無し, isSoldOut初期HTML不在)
+  + WebFetch spot(47128319 ¥18000販売中/47480716 ¥82000販売中 = scraper sold と矛盾)。
+  test 20件(判定不能→None/isSoldOut true→sold・false→instock/別item誤帰属なし/monitor結合 is_sold=None+error)。
+  **pre-commit 全pass(151+offline)**。
+- ★backlog: 主URL=snkrdunk 47行中46行 is_sold=True(98%異常)=系統的偽sold。全て過去cycleで既D=○(取下げ済)。
+  item_id有42件を偽取下げ疑いとして抽出(decision_log/snkrdunk_false_takedown_suspects_20260725.txt)。
+  ただしgenuine売切混在(例 358589046154=5/24実売却)→要個別再検証+HQ relist。
+- 限界/next: isSoldOut が初期HTML不安定→requestsでUNKNOWN多発。自動判定 完全復旧は Selenium描画 or 公式API
+  (`/v1/` namespace在るがpath未特定, DNS不安定で中断)特定が別途必要。当面fail-closedで偽取下げゼロ+要手動chk顕在化。
+  HQへ根本原因+修正+backlog+復旧方針相談を投入(2026-07-25_snkrdunk_false_sold_rootcause_and_fix.md)。
