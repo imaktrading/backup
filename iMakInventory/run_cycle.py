@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -156,14 +157,60 @@ def _log(msg: str, test_mode: bool = False):
 # ============================================================================
 # Lock file
 # ============================================================================
+def _lock_pid_alive(content: str) -> Optional[bool]:
+    """lock 内容の pid/host からプロセス生存を判定。True=生存 / False=死亡 / None=判定不能。
+
+    ★ 2026-07-26: PC 再起動/クラッシュで cycle が kill されると lock が残り、時間ベース(6h)の
+      staleness まで次の巡回がブロックされる (実害: 2026-07-26 08:03 再起動で ~4.5h 監視の穴)。
+      pid が同一 host で存在しなければ即 stale と判定して復帰する。
+    """
+    m_pid = re.search(r"pid=(\d+)", content or "")
+    m_host = re.search(r"host=(\S+)", content or "")
+    if not m_pid:
+        return None
+    # 別 host の lock は当機で pid 判定不能 (単機運用だが安全側)
+    if m_host and m_host.group(1) != socket.gethostname():
+        return None
+    pid = int(m_pid.group(1))
+    # ★ Windows では os.kill(pid,0) は TerminateProcess を呼び「プロセスを終了」してしまう危険がある
+    #   (生存チェックにならない)。tasklist で該当 pid の存在を安全に確認する (ctypes handle の落とし穴回避)。
+    if sys.platform == "win32":
+        try:
+            import subprocess  # noqa: PLC0415
+            out = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True, text=True, timeout=10,
+            )
+            # 一致すれば pid を含む行が出る。無一致は "実行されていません/No tasks" のみ (pid を含まない)。
+            return str(pid) in (out.stdout or "")
+        except Exception:
+            return None
+    # POSIX: signal 0 は安全な存在確認 (終了させない)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True    # 存在するが権限なし = 生存
+    except Exception:
+        return None
+
+
 def _acquire_lock(test_mode: bool = False) -> bool:
     """Returns True if lock acquired. False if already held (and not stale)."""
     if LOCK_FILE.exists():
         try:
             age = time.time() - LOCK_FILE.stat().st_mtime
-            if age < LOCK_STALE_HOURS * 3600:
-                content = LOCK_FILE.read_text(encoding="utf-8", errors="replace")[:200]
-                _log(f"[!] lock 保持中 (age {age/60:.1f} min < {LOCK_STALE_HOURS}h, content: {content})", test_mode)
+            content = LOCK_FILE.read_text(encoding="utf-8", errors="replace")[:200]
+            # ★ PID 生存チェック優先: プロセスが死んでいれば age に依らず stale (再起動/クラッシュ即復帰)
+            alive = _lock_pid_alive(content)
+            if alive is False:
+                _log(f"[!] stale lock 検出 (pid 死亡 = 再起動/クラッシュ)、削除して続行 (content: {content})", test_mode)
+                LOCK_FILE.unlink(missing_ok=True)
+            elif age < LOCK_STALE_HOURS * 3600:
+                # 生存 or 判定不能 かつ 6h 未満 → 保持中とみなす (誤って二重起動しない安全側)
+                _log(f"[!] lock 保持中 (pid_alive={alive}, age {age/60:.1f} min < {LOCK_STALE_HOURS}h, content: {content})", test_mode)
                 return False
             else:
                 _log(f"[!] stale lock 検出 ({age/3600:.1f}h > {LOCK_STALE_HOURS}h)、削除して続行", test_mode)

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -68,6 +69,47 @@ def test_lock_stale_removal(tmp_path, monkeypatch):
     assert f"pid={os.getpid()}" in content  # 新しい pid
 
     _release_lock()
+
+
+def test_lock_reboot_recovery_dead_pid(tmp_path, monkeypatch):
+    """★ 2026-07-26: PC再起動/クラッシュで死んだ pid の lock は age<6h でも即 stale で復帰."""
+    import socket
+    from run_cycle import _acquire_lock, _release_lock
+    import run_cycle as rc
+
+    fake_lock = tmp_path / ".cycle.lock"
+    monkeypatch.setattr(rc, "LOCK_FILE", fake_lock)
+
+    # 同一 host + 存在しない pid + 直近 (age 1分) の lock (= 再起動でプロセスだけ消えた状況)
+    dead_pid = 2147480000   # 実在しない大きな pid
+    fake_lock.write_text(
+        f"pid={dead_pid} host={socket.gethostname()} ts=recent", encoding="utf-8")
+    import time as _t
+    now = _t.time()
+    os.utime(fake_lock, (now, now))   # age ~0 (6h 未満)
+
+    # pid 死亡 → age に依らず stale とみなして acquire 成功
+    assert _acquire_lock() is True
+    assert f"pid={os.getpid()}" in fake_lock.read_text(encoding="utf-8")
+    _release_lock()
+
+
+def test_lock_alive_pid_held(tmp_path, monkeypatch):
+    """生存 pid (同一host) + age<6h の lock は保持中 = acquire しない (二重起動防止)."""
+    import socket
+    from run_cycle import _acquire_lock
+    import run_cycle as rc
+
+    fake_lock = tmp_path / ".cycle.lock"
+    monkeypatch.setattr(rc, "LOCK_FILE", fake_lock)
+
+    # 現在の pytest プロセス (=生存) を書いた直近 lock
+    fake_lock.write_text(
+        f"pid={os.getpid()} host={socket.gethostname()} ts=recent", encoding="utf-8")
+    now = time.time()
+    os.utime(fake_lock, (now, now))
+
+    assert _acquire_lock() is False   # 生存 pid → 保持中扱い
 
 
 def test_cycle_log_structure():
