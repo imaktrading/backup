@@ -921,9 +921,15 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         if _is_high_cost(v8):
             high_n += 1
         ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
+        # 多変種(同番号で別アート/色/パラレル/Gold)は絵柄取り違えが起きやすい → 確証UIに⚠️バッジ
+        # (補URL slice3 と横展開・2026-07-26)。単一変種は番号一致=正で流し見OK。
+        try:
+            _mv = bool(mp._is_multi_variant(rc.get("card_no") or ""))
+        except Exception:
+            _mv = False
         items.append({"idx": n, "title": rc["title"], "card_no": rc["card_no"],
                       "ebay_url": rc["ebay_url"], "ref_image": ref,
-                      "candidates": rc["candidates"], "v8": v8})
+                      "candidates": rc["candidates"], "v8": v8, "multi_variant": _mv})
     if _skipped_done:
         print(f"  ⏭ 既にRESTOCK確定済 {_skipped_done}件は視覚確証スキップ(再作業防止)")
     if _skipped_review:
