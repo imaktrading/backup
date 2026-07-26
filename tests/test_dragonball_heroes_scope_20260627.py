@@ -42,9 +42,15 @@ def test_real_scg_still_classified_as_scg():
 
 
 def test_pokemon_black_deck_kit_out_of_scope():
-    """K2: Black Deck Kit (e-card期・catalog0件) は out-of-scope。XY期は対象外にしない。"""
-    assert pc.pokemon_out_of_scope("Pokemon", "POKEMON JAPANESE BLACK DECK KIT") is True
-    # FAMILY POKEMON CARD GAME (catalog 0件=2026-07-01) も out-of-scope (seen×18 永久recurring止め)
+    """out-of-scope は FAMILY POKEMON CARD GAME (catalog0件) のみ。XY期は対象外にしない。
+
+    ★2026-07-26 改訂: BLACK DECK KIT を除外解除。2026-06-27 は catalog 0件だったが、その後
+    BDK-005/006 (わるいマグカルゴ/わるいヘルガー) が収録され、cert 138056958=BDK-006 が catalog hit
+    するのにハードコード skip で殺されていた。catalog 有無で判定させる (SSOT)。
+    """
+    # BLACK DECK KIT は catalog 収録済(BDK-005/006) → もう out-of-scope skip しない
+    assert pc.pokemon_out_of_scope("Pokemon", "POKEMON JAPANESE BLACK DECK KIT") is False
+    # FAMILY POKEMON CARD GAME (catalog 0件=2026-07-01) は out-of-scope 継続 (seen×18 永久recurring止め)
     assert pc.pokemon_out_of_scope("Pokemon", "POKEMON JAPANESE SWORD & SHIELD FAMILY POKEMON CARD GAME") is True
     # XY期は catalog に173件あるので除外しない(K3不採用=出せるカードを殺さない)
     assert pc.pokemon_out_of_scope("Pokemon", "POKEMON JAPANESE XY BLUE SHOCK") is False

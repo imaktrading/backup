@@ -522,16 +522,19 @@ def smart_titlecase(s):
 def pokemon_out_of_scope(franchise, brand):
     """catalog が構造的に収録しない Pokemon サブセット = out-of-scope skip 対象 (純関数, test可)。
 
-    現状: e-card期 BLACK DECK KIT (2002 VSデッキ) / FAMILY POKEMON CARD GAME (はじめての〜)。
-    いずれも catalog 収録0件を実機確認済 (BLACK DECK KIT=2026-06-27 K2 / FAMILY=2026-07-01
-    Pokemon 22006件中 Family 0件)。seen×18 で永久 recurring 化していたのを止める。
+    現状: FAMILY POKEMON CARD GAME (はじめての〜) のみ。catalog 収録0件を実機確認済
+    (2026-07-01 Pokemon 22006件中 Family 0件)。seen×18 で永久 recurring 化していたのを止める。
     ※XY期は catalog に173件あるので含めない (丸ごと除外すると出せるカードを殺す=K3不採用)。
+    ★2026-07-26: BLACK DECK KIT を除外リストから外した。2026-06-27 時点は catalog 0件だったが
+    その後 catalog に BDK-005/006 (わるいマグカルゴ/わるいヘルガー) が収録された (cert 138056958=
+    BDK-006 が hit するのに本 skip で殺されていた)。ハードコード除外でなく catalog 有無で判定させる
+    (catalog hit→出品 / no-hit→下流の catalog欠 fail-closed skip)= SSOT 原則。
     新サブセットを足す時も「catalog 0件」を実機確認してから追加する (誤除外=recall損 防止)。
     """
     if franchise != "Pokemon":
         return False
     b = (brand or "").upper()
-    return "BLACK DECK KIT" in b or "FAMILY POKEMON CARD GAME" in b
+    return "FAMILY POKEMON CARD GAME" in b
 
 
 def is_out_of_scope_language(brand):
@@ -1772,11 +1775,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         print(f"    ⏭️ Skip: ITAJAGA(カルビースナック食玩プロモ)=公式TCGカタログ対象外 (cert {cert_number}, {subject})")
         return None
 
-    # Pokemon e-card期 BLACK DECK KIT (2002 VS デッキ) は catalog 収録0件=Bandai/公式API対象外。
-    # catalog 依頼しても永久に埋まらない → out-of-scope skip で missing_models 汚染も止める(K2)。
+    # catalog が構造的に収録しない Pokemon サブセット(現状 FAMILY POKEMON CARD GAME のみ)を skip。
+    # ※BLACK DECK KIT は 2026-07-26 に除外解除(catalog に BDK-005/006 収録済=catalog有無で判定)。
     # ※XY期は catalog に173件あるので丸ごと除外しない(K3 は不採用=出せるカードを殺すため)。
     if pokemon_out_of_scope(franchise, brand):
-        print(f"    ⏭️ Skip: Pokemon Black Deck Kit (e-card期) はカタログ未収録=対象外 (cert {cert_number}, {subject})")
+        print(f"    ⏭️ Skip: Pokemon {subject} はカタログ構造的未収録=対象外 (cert {cert_number})")
         return None
 
     # 非日本語版(ASIA/KOREAN/CHINESE)は当店=日本版のみ扱い → 対象外 skip。
