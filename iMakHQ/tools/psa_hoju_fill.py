@@ -491,8 +491,16 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         idx = len(items)
         cn = build_search_query(t, mp).get("card_no") or ""
         ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(t.get("cert") or None)
+        # 多変種(同番号で catalog に2変種以上=別アート/色/パラレル/Gold)か → UI に⚠️バッジ出す。
+        # 単一変種は番号一致=正なので流し見でOK、多変種だけ絵柄を要確認(「違う」の主因はここ)。
+        _mv = False
+        try:
+            _mv = bool(mp._is_multi_variant(cn)) if cn else False
+        except Exception:
+            _mv = False
         items.append({"idx": idx, "title": (t.get("title") or "")[:90], "card_no": cn,
-                      "ebay_url": _ebay_itm_url(iid), "ref_image": ref, "candidates": cands})
+                      "ebay_url": _ebay_itm_url(iid), "ref_image": ref, "candidates": cands,
+                      "multi_variant": _mv})
         item_targets.append(t)
 
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "

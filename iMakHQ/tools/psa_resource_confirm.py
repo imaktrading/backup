@@ -436,10 +436,16 @@ def build_restock_html(items):
             cand_html = ["<div class='cph'>仕入候補なし</div>"]
         v8 = _s(it.get("v8"))
         v8_html = f"<div class='lbl'>{_html.escape(v8)}</div>" if v8 else ""
+        # 多変種(同番号で別アート/色/パラレル/Gold が catalog に複数)は絵柄取り違えが起きやすい →
+        # 目立つ⚠️バッジで「絵柄を要確認」を明示(単一変種は番号一致=正で流し見OK)。it.multi_variant が
+        # 無い/False の呼出(RESTOCKゲート等)はバッジ非表示=後方互換。
+        mv_html = ("<div style='background:#c00;color:#fff;font-weight:bold;padding:3px 8px;"
+                   "border-radius:4px;margin:3px 0;font-size:13px'>⚠️ 多変種(同番号で複数絵柄)"
+                   " — 現物と candidate の<u>絵柄</u>を要確認</div>") if it.get("multi_variant") else ""
         rows.append(
             f"<div class='card' id='c{idx}' data-idx='{idx}'>"
             f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
-            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>"
+            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>{mv_html}"
             f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
             f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
             f"<div class='cands'>{''.join(cand_html)}</div></div></div>"
