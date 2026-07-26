@@ -1,5 +1,28 @@
 # iMakHarvest daily_report
 
+## 2026-07-26 (続3) — 複数仕入元マージ POC (HQ go)
+
+### 決定
+- HQ POC go (`..._multisource_merge_feasibility_hq_confirm` / `..._yodobashi_ifce_design_poc`)。
+  分界確定: Harvest=型番マージ+補URL(データ)AC-AG冪等追記+在庫I/F提供 / Inventory=D復活・M-min(状態)。
+
+### 変更 (新規)
+- `scrapers/yodobashi_search_http.py`: `stock_price_by_model()` I/F 追加 (word=型番 検索タイルから
+  在庫bool+価格+URL、 型番完全一致1商品に絞る、 fail-closed=判定不能は ok=False)。
+- `gshock_merge.py`: `compute_merge()` 純関数 (型番キー・主/補URL 冪等マージ、 空枠のみ・満杯skip・
+  新規別出し、 在庫状態は touch しない = Inventory 責務)。PSA hoju compute_additions の LOW 版。
+- test: `test_gshock_merge.py` 9件 + yodobashi I/F 検証。
+
+### 検証 (実測)
+- **型番ピンポイント検索精度**: 6/6 型番で `word=型番`→完全一致1商品に絞れた (誤マージなし)。
+- **在庫I/F**: 実在4型番=在庫True/価格/URL取得、 非在型番=fail-closed (ok=False, None)。
+  ★重要: **素の HTTP で成功** (Inventory の「Akamai=Selenium必須」と食い違い)→ 監視くんに
+  Selenium 不要のスナップショット供給が可能。
+- `pytest tests/` = **796 passed**。
+- POC結果 + I/F提案 (型番キー・HTTPスナップショット・fail-closed) を `_response.md` で HQ に共有。
+
+---
+
 ## 2026-07-26 (続2) — 項目Amazon整合 (画像/説明/色/ポイント) + 3RD救済
 
 ### 決定

@@ -270,6 +270,59 @@ def fetch_detail(session: requests.Session, product_id: str) -> dict:
     }
 
 
+# ============================================================================
+# 在庫/価格 I/F (= 監視くん M-min 供給用、 2026-07-26 POC)
+# ============================================================================
+# 設計方針:
+#   - 監視くんに毎cycle重い Selenium を叩かせない。 Harvest が **素の HTTP** で
+#     `word=<型番>` 検索 → タイルの配送表記で在庫・価格を返す (Akamai challenge 無しを実証)。
+#   - キー = **型番** (= merge KEY と同一、 URL 変動に強い)。 型番完全一致で 1 商品に絞る
+#     (型番検索は色違い/関連が複数ヒットするため。 POC 実測 6/6 で完全一致 1 商品)。
+#   - fail-closed: 型番不一致/fetch 失敗/challenge は (None, None) = min 対象外
+#     (延命にも取下げにも倒さない。 snkrdunk listing_live_price と同扱い)。
+def _exact_model_match(text: str, model: str) -> bool:
+    """text 内に model が 型番境界付きで完全一致するか (= 部分一致誤検出を防ぐ)."""
+    if not text or not model:
+        return False
+    return re.search(r"(?<![A-Z0-9])" + re.escape(model) + r"(?![A-Z0-9])", text) is not None
+
+
+def stock_price_by_model(
+    session: requests.Session, model: str, timeout: int = DEFAULT_TIMEOUT,
+) -> dict:
+    """型番 → (在庫bool, 価格) を HTTP 検索タイルから取得 (fail-closed).
+
+    Returns: {
+        "model": str, "in_stock": bool|None, "price_jpy": int|None,
+        "url": str|None, "ok": bool,  # ok=False は判定不能 (= min 対象外)
+    }
+    - 型番完全一致タイルが 1 つ → その在庫/価格。 0 or 複数 → 判定不能 (ok=False)。
+    - ヨドバシは全商品 新品直販 (中古/3rd 無し) → 在庫あり = 新品在庫あり。
+    """
+    fail = {"model": model, "in_stock": None, "price_jpy": None, "url": None, "ok": False}
+    if not model:
+        return fail
+    url = f"https://www.yodobashi.com/?word={model}"
+    try:
+        res = session.get(url, timeout=timeout)
+        text = res.text if res.status_code == 200 else ""
+    except Exception:
+        return fail
+    if not text:
+        return fail
+    matches = [t for t in parse_product_tiles(text) if _exact_model_match(t["title"], model)]
+    if len(matches) != 1:
+        return fail  # 0 or 複数 = 一意に絞れない → fail-closed
+    m = matches[0]
+    return {
+        "model": model,
+        "in_stock": m["in_stock"],
+        "price_jpy": m["price_jpy"],
+        "url": m["url"],
+        "ok": True,
+    }
+
+
 def collect_gshock_products(
     session: requests.Session,
     base_url: str,
