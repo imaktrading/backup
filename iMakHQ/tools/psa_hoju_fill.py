@@ -472,7 +472,7 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
 
     # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
     items, item_targets = [], []
-    no_cache = no_cand = 0
+    no_cache = no_cand = no_cardno = no_ref = 0
     for t in targets:
         iid = t["itemID"]
         if iid in skip_iids:
@@ -488,9 +488,19 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         if not cands:
             no_cand += 1
             continue
-        idx = len(items)
+        # ★2026-07-26 fail-closed: card_no が今取れない(探索不能)= stale cache の誤候補リスク(別カード/別ジャンル)
+        # → 確証に出さない。9999ダミー等の「番号取り違えで焼かれた誤キャッシュ」(例 One Pieceにポケモン候補)を締め出す。
         cn = build_search_query(t, mp).get("card_no") or ""
+        if not cn:
+            no_cardno += 1
+            continue
+        # ★現物画像(eBay GetItem or cert)が取れない = 視覚確証不能(ダミーitemID=9999 / GetItem失敗)
+        # → 確証に出さない(見えないカードを人に確定させない=fail-closed)。
         ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(t.get("cert") or None)
+        if not ref:
+            no_ref += 1
+            continue
+        idx = len(items)
         # 多変種(同番号で catalog に2変種以上=別アート/色/パラレル/Gold)か → UI に⚠️バッジ出す。
         # 単一変種は番号一致=正なので流し見でOK、多変種だけ絵柄を要確認(「違う」の主因はここ)。
         _mv = False
@@ -509,7 +519,8 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         item_targets.append(t)
 
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
-          f"候補なしskip {no_cand} / 台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
+          f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
+          f"台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
     if limit is not None:
         items, item_targets = items[:limit], item_targets[:limit]
         for n, it in enumerate(items):
