@@ -610,6 +610,16 @@ def _fetch_details(
                 "reason": "accessory_part",
             })
             _log(f"  REJECT accessory/part (not watch body)")
+        elif amazon_search_http.is_gift_or_pair_set(title):
+            items_rejected.append({
+                "url": url,
+                "asin": asin,
+                "seller": seller,
+                "brand": brand,
+                "title": title[:80],
+                "reason": "gift_or_pair_set",
+            })
+            _log(f"  REJECT ギフトセット/ペアウォッチ (= 複合SKU)")
         else:
             merged = {
                 "asin": asin,

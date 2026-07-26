@@ -8,6 +8,18 @@
   URL収集765 → HTTP直販/brand filter keep18 → variant展開 kept30/reject3、captcha無。
   JSON: `_amazon_jp_dumps/amazon_gshock_20260726T075058.json`。
 
+### ギフトセット/ペアウォッチ 除外 (user 指示)
+- 決定: メンズ抽出から **ギフトセット (バンドル SKU) と ペアウォッチ (2型番同梱) を除外**。
+  複合 SKU は catalog の ID 完全一致 lookup に写像不能 + 仕入元/価格が単品と別。単品本体のみ残す。
+- 変更:
+  - `scrapers/amazon_search_http.py`: `is_gift_or_pair_set(title)` 追加 (`ペア\s*ウォッチ|ギフト\s*セット`)、
+    `evaluate_detail_for_keep.should_keep` に `and not is_gift_or_pair_set` 追加 (Phase B)。
+  - `run_harvest_amazon_search.py`: Phase C REJECT 連鎖に `gift_or_pair_set` 分岐追加。
+  - `tools/delete_gift_pair.py`: 既存タブの物理削除ツール新規 (delete_ladies 同型、判定は単一ソース)。
+- 検証: フィルタ回帰テスト10件 (`tests/test_amazon_giftpair_filter.py`)。
+  スプシ実削除: dry-run 19行 (今回15 + 過去残4) → 全タイトル目視で ペア/ギフト 確認 → 削除19、
+  **残存0件 / 327行**を実測。
+
 ### fail-OPEN defect 修正 (user 指摘「そんなはずない」が契機)
 - 決定: 検索 page1=0件 (captcha無) の**間欠ソフトブロックを「新規なし・正常」と誤報告する
   fail-OPEN を封じる**。1回目 run が silent に0件完了し30件を取りこぼしかけた。

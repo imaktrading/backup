@@ -498,6 +498,23 @@ def is_accessory_part(title: str) -> bool:
     return False
 
 
+# ギフトセット / ペアウォッチ (= 単品でない 複合 SKU) 除外 (2026-07-26 user 指示)。
+# - ギフトセット: 化粧箱等とのバンドル SKU (= 単品と別商品、 仕入元/価格が別)。
+# - ペアウォッチ: 2 型番 (例 GA-2100-1A1JF / GMA-S2100BA-4AJF) を 1 listing に同梱。
+#   catalog の「ID 完全一致 lookup のみ・fail-closed」では単一 card_id に写像できず、
+#   誤出品リスクが高い。 メンズ単品のみ残す方針。
+GIFT_PAIR_SET_RE = re.compile(r"ペア\s*ウォッチ|ギフト\s*セット")
+
+
+def is_gift_or_pair_set(title: str) -> bool:
+    """title が ギフトセット/ペアウォッチ (= 複合 SKU) なら True (= keep gate で除外).
+
+    単品の腕時計本体のみを残す。 ペアウォッチは 2 型番同梱で catalog の ID 一致
+    lookup に写像不能、 ギフトセットはバンドル SKU のため単品と別扱い。
+    """
+    return bool(GIFT_PAIR_SET_RE.search(title or ""))
+
+
 def evaluate_detail_for_keep(
     session: requests.Session, asin: str,
 ) -> dict:
@@ -541,9 +558,11 @@ def evaluate_detail_for_keep(
         "monthly_sales_text": monthly_sales_text,
         "ladies_only": is_ladies_only(title),
         "accessory_part": is_accessory_part(title),
+        "gift_or_pair_set": is_gift_or_pair_set(title),
         "should_keep": (
             seller_ok and is_gshock
             and not is_ladies_only(title)
             and not is_accessory_part(title)
+            and not is_gift_or_pair_set(title)
         ),
     }
