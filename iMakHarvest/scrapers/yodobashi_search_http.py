@@ -157,6 +157,119 @@ def parse_product_tiles(html_text: str) -> list[dict]:
     return out
 
 
+# ============================================================================
+# Phase 2: detail page から 画像 / 説明 / 色 / ポイント率 抽出 (= Amazon 項目に整合)
+# ============================================================================
+# ポイント円 (= ゴールドポイント付与額) は静的 HTML に直値で入る:
+#   <span id="js_scl_pointValue" ...>1,066</span>（10％還元）（￥1,066相当）
+# → pointValue を直接採る (計算不要、 rate は参考抽出)。 fail-closed: 取れなければ None。
+_POINT_VALUE_RE = re.compile(r'id="js_scl_pointValue"[^>]*>([0-9,]+)')
+_POINT_RATE_RE = re.compile(r'id="js_scl_pointrate"[^>]*>（(\d{1,3})[％%]')
+# 商品画像 (= この商品自身の product_id を含む画像のみ、 おすすめ商品を除外)
+_IMG_RE_TMPL = r"https://image\.yodobashi\.com/+product/[0-9/]+/{pid}_[0-9A-Za-z_]+\.jpg"
+
+
+def extract_points_jpy(html_text: str) -> Optional[int]:
+    """detail HTML から ゴールドポイント付与額 (円) を直接抽出。 無ければ None (fail-closed).
+
+    Amazon 側 (extract_points_jpy と同じ「ポイント円」意味) と揃え、 K 列に格納する。
+    """
+    m = _POINT_VALUE_RE.search(html_text or "")
+    if not m:
+        return None
+    try:
+        return int(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def extract_point_rate(html_text: str) -> Optional[int]:
+    """detail HTML から 還元率 (%) を抽出 (参考値)。 無ければ None."""
+    m = _POINT_RATE_RE.search(html_text or "")
+    if not m:
+        return None
+    try:
+        v = int(m.group(1))
+    except ValueError:
+        return None
+    return v if 0 <= v <= 100 else None
+
+
+def extract_detail_images(html_text: str, product_id: str, limit: int = 8) -> list[str]:
+    """detail HTML から この商品の画像 URL を抽出 (dedup、 // 正規化、 先頭順、 上限 limit).
+
+    limit: セル肥大を防ぐ主要画像上限 (default 8。 Yodobashi は 20-99 枚あるため)。
+    """
+    if not html_text or not product_id:
+        return []
+    raw = re.findall(_IMG_RE_TMPL.format(pid=re.escape(product_id)), html_text)
+    out: list[str] = []
+    seen: set[str] = set()
+    for u in raw:
+        u = re.sub(r"(?<!:)//+", "/", u)  # image.yodobashi.com//product → /product
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def extract_clean_title(html_text: str) -> str:
+    """detail HTML の meta description / <title> から配送表記を含まない商品名を抽出."""
+    t = html_text or ""
+    m = re.search(r'<meta\s+name="description"\s+content="([^"]+)"', t)
+    if m:
+        name = m.group(1)
+        # 「…の通販ならヨドバシ…」以降を落とす
+        name = re.split(r"の通販なら", name)[0].strip()
+        if name:
+            return name
+    m = re.search(r"<title>(.*?)</title>", t, re.S)
+    if m:
+        return re.sub(r"^ヨドバシ\.com\s*[-‐―]\s*", "", m.group(1).strip()).split("通販")[0].strip()
+    return ""
+
+
+def fetch_detail(session: requests.Session, product_id: str) -> dict:
+    """product detail を HTTP fetch し 画像/説明/色/ポイント率/価格/型番 を抽出.
+
+    Returns: {
+        "fetch_ok": bool, "title": str, "price_jpy": int|None,
+        "points_jpy": int|None, "point_rate_pct": int|None,
+        "image_urls": list[str], "description": str, "color": str,
+        "model_number": str,
+    }
+    fail-closed: fetch 失敗は fetch_ok=False、 色/ポイントは確証なければ空/None。
+    """
+    from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+
+    url = f"https://www.yodobashi.com/product/{product_id}/"
+    try:
+        res = session.get(url, timeout=DEFAULT_TIMEOUT)
+        text = res.text if res.status_code == 200 else ""
+    except Exception:
+        text = ""
+    if not text:
+        return {"fetch_ok": False, "title": "", "price_jpy": None,
+                "points_jpy": None, "point_rate_pct": None, "image_urls": [],
+                "description": "", "color": "", "model_number": ""}
+    title = extract_clean_title(text)
+    desc_m = re.search(r'<meta\s+name="description"\s+content="([^"]+)"', text)
+    description = desc_m.group(1).strip() if desc_m else title
+    return {
+        "fetch_ok": True,
+        "title": title,
+        "price_jpy": _price_from_text(text),
+        "points_jpy": extract_points_jpy(text),
+        "point_rate_pct": extract_point_rate(text),
+        "image_urls": extract_detail_images(text, product_id),
+        "description": description,
+        "color": extract_katakana_color_from_text(title, description),
+        "model_number": extract_model_from_title(title),
+    }
+
+
 def collect_gshock_products(
     session: requests.Session,
     base_url: str,

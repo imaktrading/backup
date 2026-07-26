@@ -46,6 +46,7 @@ COL_CONDITION = 5      # E: 商品状態
 COL_PRICE = 6          # F: 価格
 COL_IMAGES = 7         # G: 画像 URL
 COL_DESCRIPTION = 8    # H: 商品説明
+COL_POINTS = 11        # K: ポイント(円) - 2026-07-26 追加 (中間スプシで仕入原価比較用)
 COL_COLOR = 19         # S: 色                  - Phase 1d (Amazon は基本空欄)
 COL_SIZE = 20          # T: サイズ              - Phase 1d (Amazon は基本空欄)
 COL_MONTHLY_SALES = 22 # V: Amazon 月販売数     - 2026-06-11 user 指示: 生 verbatim 「過去1ヶ月で N 点以上購入」
@@ -146,7 +147,11 @@ def _build_row(item: dict) -> list:
     row[COL_PRICE - 1] = price_str
     row[COL_IMAGES - 1] = image_str
     row[COL_DESCRIPTION - 1] = description
-    # I-R (9-18) は空欄
+    # K (11): ポイント(円) - 2026-07-26 追加。 item に points_jpy があれば書く
+    # (中間スプシで 仕入原価比較 = 価格−ポイント のため。 無ければ空欄 fail-closed)。
+    points = item.get("points_jpy")
+    row[COL_POINTS - 1] = "" if points in (None, "") else str(int(points))
+    # I,J,L-R は空欄
     row[COL_COLOR - 1] = color
     row[COL_SIZE - 1] = size
     # U (21): バナー価格 列 (= 既存 mercari format)、 Amazon は空

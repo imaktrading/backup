@@ -3,7 +3,11 @@ import pytest
 
 from scrapers.yodobashi_search_http import (
     build_page_url,
+    extract_clean_title,
+    extract_detail_images,
     extract_model_from_title,
+    extract_points_jpy,
+    extract_point_rate,
     is_in_stock,
     parse_product_tiles,
 )
@@ -51,6 +55,59 @@ def test_is_in_stock(text, expected):
 def test_is_in_stock_out_marker_wins_over_delivery():
     # 「お取り寄せ」表記があれば お届け表記より優先で skip (fail-closed)
     assert is_in_stock("お取り寄せ 明後日中にお届けできます") is False
+
+
+# --- detail page 抽出 (= 実 markup を模した snippet) ---
+_DETAIL = (
+    '<meta name="description" content="カシオ CASIO G-SHOCK ジーショック AW-591-2AJF'
+    'の通販ならヨドバシカメラの公式サイト">'
+    '<span id="js_scl_pointValue" class="orange">1,066</span>'
+    '<span id="js_scl_pointrate">（10％還元）</span>'
+    '<span id="js_scl_pointPrice">（￥1,066相当）</span>'
+    '<img src="https://image.yodobashi.com//product/100/000/001/000/893/847/'
+    '100000001000893847_10203_004.jpg">'
+    '<img src="https://image.yodobashi.com//product/100/000/001/000/893/847/'
+    '100000001000893847_10201.jpg">'
+    # おすすめ商品の別 pid 画像 (= 除外されるべき)
+    '<img src="https://image.yodobashi.com//product/999/000/000/000/000/000/'
+    '999000000000000000_10203.jpg">'
+)
+
+
+def test_extract_points_jpy_direct_value():
+    # 直値 1,066 を採る (率×価格の計算ではなく pointValue 直読み)
+    assert extract_points_jpy(_DETAIL) == 1066
+
+
+def test_extract_points_jpy_none_when_absent():
+    assert extract_points_jpy("<div>no points here</div>") is None
+
+
+def test_extract_point_rate():
+    assert extract_point_rate(_DETAIL) == 10
+
+
+def test_extract_detail_images_scoped_and_normalized():
+    imgs = extract_detail_images(_DETAIL, "100000001000893847")
+    # 自 pid の 2 枚のみ (999 の別商品画像は除外)、 // が / に正規化
+    assert len(imgs) == 2
+    assert all("/product/" in u and "//product" not in u for u in imgs)
+    assert all("100000001000893847_" in u for u in imgs)
+
+
+def test_extract_detail_images_limit():
+    pid = "100000001000893847"
+    many = "".join(
+        f'<img src="https://image.yodobashi.com//product/1/0/0/0/0/0/{pid}_{i:05d}.jpg">'
+        for i in range(20)
+    )
+    assert len(extract_detail_images(many, pid, limit=8)) == 8
+
+
+def test_extract_clean_title_strips_boilerplate():
+    t = extract_clean_title(_DETAIL)
+    assert "AW-591-2AJF" in t
+    assert "通販" not in t  # 「の通販なら…」以降は落とす
 
 
 def test_parse_product_tiles_container_scoped():

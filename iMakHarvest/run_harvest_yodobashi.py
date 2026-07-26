@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -71,6 +73,10 @@ def main(argv=None) -> int:
     ap.add_argument("--max-pages", type=int, default=Y.DEFAULT_MAX_PAGES)
     ap.add_argument("--include-out-of-stock", action="store_true",
                     help="在庫あり以外 (取寄/廃番) も含める (既定=在庫ありのみ)")
+    ap.add_argument("--no-detail", action="store_true",
+                    help="詳細fetchを省略 (画像/説明/色/ポイントなし、 高速確認用)")
+    ap.add_argument("--detail-rate-min", type=float, default=1.5)
+    ap.add_argument("--detail-rate-max", type=float, default=3.0)
     args = ap.parse_args(argv)
 
     _log(f"開始: label={args.label!r} dry_run={args.dry_run}")
@@ -107,6 +113,34 @@ def main(argv=None) -> int:
         kept.append(p)
     _log(f"keep={len(kept)} / reject={rej}")
 
+    # Phase 2: detail fetch (= 画像/説明/色/ポイント円 を Amazon 項目に整合させる)
+    detail_stats = {"ok": 0, "fail": 0, "points": 0}
+    if not args.no_detail and kept:
+        _log(f"=== Phase 2: detail fetch ({len(kept)} 件、 画像/説明/色/ポイント) ===")
+        for i, p in enumerate(kept, 1):
+            d = Y.fetch_detail(session, p["product_id"])
+            if not d["fetch_ok"]:
+                detail_stats["fail"] += 1
+                if i % 20 == 0 or i == len(kept):
+                    _log(f"  detail {i}/{len(kept)} (ok={detail_stats['ok']} fail={detail_stats['fail']})")
+                time.sleep(random.uniform(args.detail_rate_min, args.detail_rate_max))
+                continue
+            detail_stats["ok"] += 1
+            # detail 値で補完 (title は配送表記なしの clean 版に差替)
+            p["title_clean"] = d["title"] or p["title"]
+            p["image_urls"] = d["image_urls"]
+            p["description"] = d["description"]
+            p["color"] = d["color"]
+            p["points_jpy"] = d["points_jpy"]
+            if d["price_jpy"]:
+                p["price_jpy"] = d["price_jpy"]  # detail 価格を優先 (authoritative)
+            if d["points_jpy"]:
+                detail_stats["points"] += 1
+            if i % 20 == 0 or i == len(kept):
+                _log(f"  detail {i}/{len(kept)} (ok={detail_stats['ok']} fail={detail_stats['fail']} pt={detail_stats['points']})")
+            time.sleep(random.uniform(args.detail_rate_min, args.detail_rate_max))
+        _log(f"detail: {detail_stats}")
+
     # JSON dump
     DUMP_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -142,8 +176,14 @@ def main(argv=None) -> int:
     else:
         from sheet_writer_yodobashi import append_yodobashi_items  # noqa: PLC0415
         items = [{
-            "url": p["url"], "title": p["title"],
-            "price_jpy": p["price_jpy"], "model_number": p["model_number"],
+            "url": p["url"],
+            "title": p.get("title_clean") or p["title"],
+            "price_jpy": p["price_jpy"],
+            "model_number": p["model_number"],
+            "image_urls": p.get("image_urls") or [],
+            "description": p.get("description") or "",
+            "color": p.get("color") or "",
+            "points_jpy": p.get("points_jpy"),
         } for p in kept]
         sheet_result = append_yodobashi_items(items, label=args.label)
         _log(f"[SHEET] {sheet_result}")

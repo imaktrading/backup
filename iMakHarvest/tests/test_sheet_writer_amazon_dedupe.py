@@ -266,3 +266,23 @@ class TestAppendNewUrls:
         result = append_new_urls(ws, items)
         assert result["appended"] == 1
         assert result["skipped_existing"] == 1
+
+
+class TestBuildRowPoints:
+    """_build_row が K(11) 列に ポイント(円) を書く (2026-07-26 追加)."""
+
+    def test_points_written_to_col_k(self):
+        from sheet_writer_amazon import COL_POINTS, _build_row
+        row = _build_row({"url": "https://www.amazon.co.jp/dp/B08N5WRWNW",
+                          "points_jpy": 1066})
+        assert row[COL_POINTS - 1] == "1066"
+
+    def test_points_blank_when_absent(self):
+        from sheet_writer_amazon import COL_POINTS, _build_row
+        row = _build_row({"url": "https://www.amazon.co.jp/dp/B08N5WRWNW"})
+        assert row[COL_POINTS - 1] == ""
+
+    def test_points_blank_when_none(self):
+        from sheet_writer_amazon import COL_POINTS, _build_row
+        row = _build_row({"url": "x", "points_jpy": None})
+        assert row[COL_POINTS - 1] == ""

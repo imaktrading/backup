@@ -1,5 +1,33 @@
 # iMakHarvest daily_report
 
+## 2026-07-26 (続2) — 項目Amazon整合 (画像/説明/色/ポイント) + 3RD救済
+
+### 決定
+- user: ヨドバシ抽出項目を Amazon に極力揃える + ポイントを両方 K 列に入れる。
+- user: Amazon で 3RD 化し取り下げた分を ヨドバシ在庫で救済できないか。
+
+### 変更
+- `scrapers/yodobashi_search_http.py`: `fetch_detail()` 追加 (詳細ページから画像8枚/説明/
+  色(共通 whitelist・fail-closed)/**ポイント円 直値** `js_scl_pointValue`/clean title)。
+- `sheet_writer_amazon.py`: `_build_row` に **K=ポイント(円)** 書込追加 (Amazon/ヨドバシ共有)。
+- `run_harvest_yodobashi.py`: Phase 2 詳細fetch追加 → G/H/S/K 書込、title を clean 版に差替。
+- `tools/backfill_amazon_points_staging.py`: amazon_<label> の K を backfill (widget anchor 版・
+  DNS リトライ付き)。
+- test: yodobashi 14件 (points直値/画像scope/clean title 等) + _build_row K 3件。
+
+### 検証 (実測)
+- yodobashi_gshock 283行 **全項目再収集**: URL/title/価格/画像/説明/ポイント/型番=283/283、
+  色=16/283 (fail-closed、 タイトル色語のみ・推測なし)、K ポイント=**283/283 (全件10%)**。
+- amazon_gshock K backfill: **311/327** (残16=ポイントなし)。※ fetch完走後の書込で DNS 一過性
+  失敗 (getaddrinfo) → **ログから311値を復元し retry 書込で完走** (再fetchなし)。ツールに
+  DNS リトライを恒久追加。
+- **3RD救済**: HIGH/LOW の Amazon×D=○ (取下げ) 193型番 ∩ ヨドバシ在庫283 = **21型番**が
+  ヨドバシ仕入で復活可 (`_amazon_jp_dumps/yodobashi_rescue_candidates.json`、価格−pt=実質原価付)。
+  注: D=○ は理由(3RD/実売)未記録のため「取下げ∩在庫」。3RD厳密化は seller 再確認が要。
+- `pytest tests/` = **787 passed**。
+
+---
+
 ## 2026-07-26 (続) — ヨドバシ G-shock 収集 新設 (第2の仕入元 + Amazon差分)
 
 ### 決定
