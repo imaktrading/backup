@@ -1678,3 +1678,15 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   ★「定期巡回で自動消込が回る」を本番 cron で実機実証 = ①消込 全自動で完成 (dont_declare_complete_after_one_cycle 充足)。
 - 3フック最終状態: ①補URL消込=**完成**(自動稼働実証+手動fallback+復元アーカイブ) / ②売切日時=完成(毎cycle) /
   ③救済ログ=実装済。snkrdunk偽sold は fail-closed + is_listing_live で根絶、backlog 107全削除、偽取下げ42はHQ relist済。
+
+### M列価格を「在庫あり候補の min(主+補)」に修正 = 実効仕入れ値追随 (HQ依頼、commit 8d89664)
+- 決定: 旧 M=「順序上最初の在庫あり」1本 → 主売切+複数補が別価格生存時に最安を採らず N(仕入れ値)過大/過小の
+  GAP。HQ 本実装go → M=min(在庫あり かつ price取得できた候補)、K=min を採った同一URLの points。
+- 変更: [monitor_listings.py](../monitor_listings.py) `_build_row_result` — price_jpy を「is_sold=False かつ
+  price有 候補の min」に、points_jpy を同一(min)URLのものに。在庫判定(hit_index=取下げ可否)は不変(判定と価格分離)。
+  価格ゼロ→M不触(fail-closed)。
+- 検証: [tests/test_m_price_min_live.py](../tests/test_m_price_min_live.py) 5件(最安がAC以外→AE採用/主最安/
+  売切uncertain無視/価格ゼロ→不触/全売切不変) + fallback回帰。**pre-commit 全pass(151+offline)**。
+- 共有: snkrdunk は is_listing_live で価格を返さない(CSR化で価格消滅)→ snkrdunk最安生存でも min対象外(M不触)。
+  価格も効かせるには is_listing_live に最安listing価格を足す拡張が要る(HQ psa10_listings_for は価格保持)→別途判断。
+- next: HQ が AN override 棚卸しで「動的追随=AN空」に整える。実cycleで主売切+複数補の M=最安を1件突合予定。
