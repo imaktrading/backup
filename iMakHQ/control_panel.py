@@ -757,6 +757,9 @@ SCRIPTS = [
         # (Mercari単体・確認/PDCA無し)から張替 (2026-06-17)。
         "cmd": ["python", "psa_resource_gate.py"],
         "params": [],
+        # ★新規再仕入れ可が10件見つかるまで保留分を検索(2026-07-26 ユーザー要望「10件出したい」)。
+        # SNKRDUNK先取り→メルカリ保留分をtargetまで掘る。BAN上限=RESTOCK_MAX_SCRAPE(既定60)/1走行。
+        "env": {"RESTOCK_TARGET_NEW": "10"},
         # 結果は「既存メンテ」スプシ PSA再仕入れタブに集約 (CSV廃止。再仕入れ系をシート統一)
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
