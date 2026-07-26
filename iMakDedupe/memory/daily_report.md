@@ -118,3 +118,19 @@
 - HQ が 147 certs を PSA fetch → cache warming → 重複くん再 backfill で resolve 率上昇見込み
 - 補URL ツール (hoju_url_from_dupes.py) で cert 経由 2枚目↔primary 突合 → 歩留まり再測定
 - ③ DON!! (cache HIT だが CardNumber 空) は image-hash 経路・本 BUILD 対象外 (取りこぼし許容)
+
+---
+
+## 2026-07-26
+
+### 母集団の穴 2件 feasibility 回答 (= HQ 相談・実装着手なし)
+
+- 決定: ①取下げ中(D=○)を母集団に / ②KEY2片欠け緩和 の feasibility。両方「人が見る疑いフラグに閉じるなら可」で回答。除外方向は 2つの既存安全設計を壊すため NG と明示
+- 変更: iMak_data/dedupe/requests/2026-07-26_dedupe_population_holes_feasibility_response.md (= 回答のみ、コード改変なし)
+- 検証: 現行突合モデル実機監査。①既存 live filter (B非空+D空=7/13 da505e1) は補URL live保証の基盤 → 広げると保証崩壊+orphan誤ブロック再来+RESTOCK衝突。別 pass 化必須。②除外緩和は Sabo型誤マージ risk (OP01-078 vs _PRB01 は catalog別pid実在しうる) → backfill先行 (fail-closed) が筋。実害小 (別cert別個体/仕入元URL別/主補URL共有0) で急ぎでない、やらないも妥当と同意
+
+### 確認待ち (= HQ 回答後に実装フェーズ判断)
+
+- HQ 依拠の突合はどれか (dedupe単一KEY既定 / --legacy-tuple-mode / HQ dup_guard.py)
+- ①疑いフラグを dedupe と HQ dup_guard どちらに持たせるか (母集団2系統管理回避、dup_guard audit の D非空拡張が筋なら dedupe実装不要)
+- ①②とも出力は「人が見る疑いフラグ」に閉じる理解で合っているか (物理除外・DUPマーク・listing削減しない)
