@@ -498,9 +498,14 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
             _mv = bool(mp._is_multi_variant(cn)) if cn else False
         except Exception:
             _mv = False
+        # 現在の仕入れ値(N=col13)+現在価格(M=col12)をカードに表示 → 候補価格と見比べて「今より安い供給か」が分かる。
+        _row = t.get("row")
+        _rv = vals[_row - 1] if (_row and 0 < _row <= len(vals)) else []
+        _cost_now = (_cell(_rv, 13) or "")   # N=仕入れ値
+        _price_now = (_cell(_rv, 12) or "")   # M=現在価格
         items.append({"idx": idx, "title": (t.get("title") or "")[:90], "card_no": cn,
                       "ebay_url": _ebay_itm_url(iid), "ref_image": ref, "candidates": cands,
-                      "multi_variant": _mv})
+                      "multi_variant": _mv, "cost_now": _cost_now, "price_now": _price_now})
         item_targets.append(t)
 
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "

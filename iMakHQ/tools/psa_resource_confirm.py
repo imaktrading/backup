@@ -442,10 +442,20 @@ def build_restock_html(items):
         mv_html = ("<div style='background:#c00;color:#fff;font-weight:bold;padding:3px 8px;"
                    "border-radius:4px;margin:3px 0;font-size:13px'>⚠️ 多変種(同番号で複数絵柄)"
                    " — 現物と candidate の<u>絵柄</u>を要確認</div>") if it.get("multi_variant") else ""
+        # 現在の仕入れ値(N)を表示 → 候補価格と見比べて「今の仕入れ値より安い供給か」が一目で分かる。
+        # cost_now が無い呼出(RESTOCKゲート等)は非表示=後方互換。price_now(M)も併記(あれば)。
+        _cn = _s(it.get("cost_now"))
+        _pn = _s(it.get("price_now"))
+        cost_html = ""
+        if _cn:
+            _extra = f" / 現在価格 ¥{_html.escape(_pn)}" if _pn else ""
+            cost_html = (f"<div style='background:#eef;color:#036;font-weight:bold;padding:3px 8px;"
+                         f"border-radius:4px;margin:3px 0;font-size:13px'>💴 現在の仕入れ値 ¥{_html.escape(_cn)}"
+                         f"{_extra}（候補がこれより安ければ◎）</div>")
         rows.append(
             f"<div class='card' id='c{idx}' data-idx='{idx}'>"
             f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
-            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>{mv_html}"
+            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>{mv_html}{cost_html}"
             f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
             f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
             f"<div class='cands'>{''.join(cand_html)}</div></div></div>"
