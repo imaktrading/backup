@@ -170,18 +170,19 @@ def restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost=None)
 
     - A列(URL=供給先)を最新の仕入URLに更新(売れたらここから買う)。
     - D列(売り切れ)をクリア(空)= 供給が戻った=売り切れ解除。
-    - AN列(仕入override)を RESTOCK 確定の新仕入値(最安¥)に更新。N は live ARRAYFORMULA なので
-      **直書きすると spill を塞いで #REF! 全崩壊する**(2026-07-24 事故)。cost 上書きは AN へ。
-      N1 式が AN 優先で読む → N=確定コストになり、V8/Revise/v6_fetch_costs がそれを拾う(従来の意図を維持)。
+    - **M列(現在価格)を RESTOCK 確定の新仕入値(最安¥)で seed**。N=(M or F)−K がこれを拾い、以降は
+      監視くんの M=min(生きてる最安:主+補) が毎cycle上書き = **cost が動的追随する**(2026-07-26)。
+      ★AN列(仕入override=凍結)には書かない: AN は N式で最優先=固定 なので、書くと M-min 動的追随を
+      上書きして「安い供給を見つけても値下げされない」出品を作る(2026-07-26 実測: RESTOCK 走行毎に
+      AN凍結 4→14 に増殖し M-min を無効化していた)。凍結したい時だけ人が手で AN に入れる運用に戻す。
+      M は formula でない regular 列なので直書き安全(N直書きの #REF! 事故は M seed では起きない)。
     在庫監視くんが D列「売り切れ」を見て、RESTOCK で復活させた出品を取り下げ直すのを防ぐ
-    (状態同期の安全原則: 意図(復活) と 実状態(master) の乖離をゼロに)。touch は A/D/AN列のみ。
+    (状態同期の安全原則: 意図(復活) と 実状態(master) の乖離をゼロに)。touch は A/D/M列のみ(AN不可触)。
     戻り: 更新行数。row 不明な itemID は skip。
     """
     if not itemid_to_row:
         return 0
     ws = _product_ws()
-    ov = PRODUCT_COL_COST_OVERRIDE
-    ov_col = chr(65 + ov) if ov < 26 else "A" + chr(65 + ov - 26)  # 39→AN
     reqs = []
     n = 0
     for iid, row in itemid_to_row.items():
@@ -193,7 +194,7 @@ def restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost=None)
         reqs.append({"range": f"D{row}", "values": [[""]]})          # D列(idx3)=売り切れクリア
         cost = _to_yen_int((itemid_to_cost or {}).get(iid, ""))
         if cost:
-            reqs.append({"range": f"{ov_col}{row}", "values": [[cost]]})  # AN列(idx39)=仕入override → N式が拾う
+            reqs.append({"range": f"M{row}", "values": [[cost]]})    # M列(idx12)=現在価格 seed → N=M-K で動的追随
         n += 1
     if reqs:
         ws.batch_update(reqs, value_input_option="RAW")
