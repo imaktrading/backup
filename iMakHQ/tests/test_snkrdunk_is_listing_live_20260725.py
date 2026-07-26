@@ -9,7 +9,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
-from snkrdunk_psa_resource import _live_from_listings, _parse_listing_url
+from snkrdunk_psa_resource import (
+    _live_from_listings,
+    _live_price_from_listings,
+    _parse_listing_url,
+)
 
 
 def test_parse_listing_url():
@@ -27,3 +31,14 @@ def test_live_from_listings_membership():
     assert _live_from_listings("99999999", listings) is False       # 無い=sold
     assert _live_from_listings("47178192", []) is False             # 空一覧(card売切)=sold
     assert _live_from_listings("47178192", None) is False           # None→[]扱い(呼出側でuncertain分岐)
+
+
+def test_live_price_from_listings_returns_specific_listing_price():
+    listings = [{"listing_id": 47178192, "price": 9000}, {"listing_id": 44574530, "price": 8500}]
+    assert _live_price_from_listings("47178192", listings) == (True, 9000)   # その listing の価格
+    assert _live_price_from_listings("44574530", listings) == (True, 8500)
+    assert _live_price_from_listings("99999999", listings) == (False, None)  # 無い=売切
+    assert _live_price_from_listings("47178192", []) == (False, None)        # 空一覧=売切
+    # 価格取得不能(int>0でない)は (True, None)=価格未確定→min対象外
+    assert _live_price_from_listings("x", [{"listing_id": "x", "price": None}]) == (True, None)
+    assert _live_price_from_listings("y", [{"listing_id": "y", "price": 0}]) == (True, None)

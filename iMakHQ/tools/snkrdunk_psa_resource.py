@@ -346,6 +346,40 @@ def is_listing_live(url, timeout=_TIMEOUT_SEC):
     return _live_from_listings(lid, ls)
 
 
+def _live_price_from_listings(listing_id, listings):
+    """listing_id を現PSA10一覧から探し (live, price_jpy) を返す純関数。無→(False,None)。
+
+    price は int>0 のみ採用(取得不能は None=価格未確定 → min 対象外に倒せる)。
+    """
+    for x in (listings or []):
+        if isinstance(x, dict) and str(x.get("listing_id")) == str(listing_id):
+            p = x.get("price")
+            return (True, p if isinstance(p, int) and p > 0 else None)
+    return (False, None)
+
+
+def listing_live_price(url, timeout=_TIMEOUT_SEC):
+    """snkrdunk 個別出品URL → (live: bool|None, price_jpy: int|None)。監視くん M-min(仕入れ値)用。
+
+    is_listing_live と同じ CSR非依存の listing_id 突合。**1 API call で 生死 + その listing の現在価格**を返す:
+      - listing_id が現PSA10一覧に在る → (True, その価格)  ※価格取得不能なら (True, None)
+      - 無い(空一覧含む=売切)         → (False, None)
+      - 非snkrURL / card_id・listing_id 不可 / API失敗 → (None, None)(uncertain)
+    使い方(監視くん): snkrdunk 補URL の M-min 反映に price を使う。price=None は「価格未確定」で min 対象外
+    (在庫の生死判定は live で従来どおり)。→ snkrdunk が最安の生存でも価格が M に効くようになる。
+    """
+    card_id, lid = _parse_listing_url(url)
+    if not card_id or not lid:
+        return (None, None)
+    try:
+        ls = fetch_psa10_listings(card_id, timeout=timeout)
+    except Exception:
+        return (None, None)
+    if ls is None:
+        return (None, None)
+    return _live_price_from_listings(lid, ls)
+
+
 def fetch_psa10_listings(card_id, timeout=_TIMEOUT_SEC):
     """card_id の PSA10販売中出品を価格昇順で返す。API失敗時は None (= min-prices へフォールバック)。"""
     if not card_id or not str(card_id).strip():
