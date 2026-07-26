@@ -1690,3 +1690,13 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 共有: snkrdunk は is_listing_live で価格を返さない(CSR化で価格消滅)→ snkrdunk最安生存でも min対象外(M不触)。
   価格も効かせるには is_listing_live に最安listing価格を足す拡張が要る(HQ psa10_listings_for は価格保持)→別途判断。
 - next: HQ が AN override 棚卸しで「動的追随=AN空」に整える。実cycleで主売切+複数補の M=最安を1件突合予定。
+
+### snkrdunk 価格を M-min に効かせる (listing_live_price 統合、commit 1977352)
+- 決定: M=min(生きてる最安)修正後、snkrdunk は is_listing_live が価格を返さず min対象外だったギャップ。
+  HQ が listing_live_price(url)->(live,price) helper 提供(165d273) → 差替。
+- 変更: [scrapers/snkrdunk_scraper.py](../scrapers/snkrdunk_scraper.py) PRIMARY を listing_live_price に。
+  (True,price)→IN_STOCK price_jpy=price(M-min対象) / (True,None)→在庫あり但価格未確定(min対象外) /
+  (False,None)→SOLD_OUT / (None,None)→requests fallback。在庫判定・消込は live で不変。
+- 検証: 検体「主売切+snkrdunk補最安2500+mercari補4000→M=2500(snkrdunk)」+ (True,9000)/(True,None)/fallback。
+  **pre-commit 全pass(151+offline)**。→ M-price 正確性が mercari/amazon/snkrdunk 全チャネル完結。
+- next: 実cycleで主売切+snkrdunk補最安→M=snkrdunk価格 を1件突合。HQ の AN棚卸しと両輪。
