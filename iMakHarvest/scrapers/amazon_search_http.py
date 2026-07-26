@@ -167,12 +167,19 @@ def collect_search_asins(
         "pages_scanned": int,
         "captcha_hit": bool,
         "page_counts": list[int],  # 各 page の ASIN 数
+        "blocked": bool,           # page1 が retry 後も 0件 (captcha無) = ブロック疑い
     }
+
+    ※ blocked = fail-OPEN 対策 (2026-07-26)。 検索は実質必ず page1 に結果を持つため、
+      page1 が retry 後も 0件 (captcha marker 無し) なら「末尾」ではなく一過性ブロック
+      or HTML 構造変化。 これを「収集完了 (新規0件)」と誤報告すると無人実行で silent
+      に取りこぼす。 呼出側は blocked=True で異常終了し、 0 を正常返ししないこと。
     """
     all_asins: list[str] = []
     seen: set[str] = set()
     page_counts: list[int] = []
     captcha_hit = False
+    blocked = False
     pages_scanned = 0
 
     p = urlparse(base_url)
@@ -212,7 +219,11 @@ def collect_search_asins(
             if captcha_hit:
                 break
             if not page_asins:
-                break  # リトライ後も 0 = 真の末尾 (or 恒常ブロック)
+                # page1 が retry 後も 0件 = 末尾ではなくブロック/構造変化 (fail-OPEN 対策)。
+                # page>1 の 0件 は正当な末尾。
+                if page == 1:
+                    blocked = True
+                break
         new_added = 0
         for a in page_asins:
             if a not in seen:
@@ -239,6 +250,7 @@ def collect_search_asins(
         "pages_scanned": pages_scanned,
         "captcha_hit": captcha_hit,
         "page_counts": page_counts,
+        "blocked": blocked,
     }
 
 

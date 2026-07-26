@@ -318,6 +318,7 @@ def _http_prefilter_keep_asins(
     all_asins: list[str] = []
     seen: set[str] = set(pre_visited_asins)
     captcha_url = False
+    search_blocked = False
     for label, base_url in paths:
         _log(f"[http-prefilter] URL 収集 path={label}: {base_url}")
         r = amazon_search_http.collect_search_asins(
@@ -325,6 +326,12 @@ def _http_prefilter_keep_asins(
             rate_min=rate_min, rate_max=rate_max,
             progress_callback=lambda i, n, m: _log(f"  {m}"),
         )
+        if r.get("blocked"):
+            # page1=0件 (captcha無) = ブロック疑い。 0を「新規なし」と誤報告しないため
+            # 収集を中断し search_blocked を立てる (呼出側が異常終了)。fail-OPEN 対策。
+            search_blocked = True
+            _log(f"[http-prefilter] ⚠️ path={label} page1=0件 (captcha無) = ブロック疑い → 中断")
+            break
         if r["captcha_hit"]:
             captcha_url = True
             break
@@ -374,6 +381,7 @@ def _http_prefilter_keep_asins(
         "rejected_asin_count": rejected,
         "skipped_pre_visited": len(pre_visited_asins),
         "captcha_hit": captcha_url or captcha_detail,
+        "search_blocked": search_blocked,
     }
 
 
@@ -664,6 +672,16 @@ def harvest_amazon_search(
             rate_min=3.0,
             rate_max=5.0,
         )
+        if http_filter_result.get("search_blocked"):
+            # fail-OPEN 対策: page1=0件 (captcha無) のブロックを「新規なし」と誤報告しない。
+            # 異常終了 (blocked=True) にし、 呼出元 main() が exit 1 で loud 失敗させる。
+            _log("[http-prefilter] ❌ 検索ブロック検出 (page1=0件・captcha無) → 異常終了。")
+            _log("[http-prefilter]    0件を『新規なし』と誤報告しないため。 時間を空けて再実行を。")
+            return {
+                "summary": {"label": label, "http_prefilter": http_filter_result,
+                            "blocked": True},
+                "json_dump_path": None, "sheet_result": None,
+            }
         if not http_filter_result["url_keep_urls"]:
             _log("[http-prefilter] keep ASIN 0 件、 abort")
             return {
@@ -872,6 +890,11 @@ def main(argv: list[str] | None = None) -> int:
     _log(json.dumps(result["summary"], ensure_ascii=False, indent=2))
     _log(f"JSON: {result['json_dump_path']}")
     _log(f"Sheet: {result['sheet_result']}")
+    if result.get("summary", {}).get("blocked"):
+        # fail-OPEN 対策: 検索ブロックで収集未完了。 exit 1 で cron/呼出側に失敗を伝える
+        # (0件を「新規なし・正常」と誤認させない)。
+        _log("❌ 検索ブロックにより収集未完了。 exit 1 (= 新規0件を正常扱いしない)")
+        return 1
     return 0
 
 

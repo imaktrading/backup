@@ -1,5 +1,28 @@
 # iMakHarvest daily_report
 
+## 2026-07-26 — Amazon G-shock 差分取得 + fail-OPEN defect 修正
+
+### G-shock 差分 (HQ 手動依頼方式)
+- 決定: `run_harvest_amazon_search.py --preset gshock-mens --use-http-prefilter --skip-existing-tab gshock` 実行。
+- 検証: **新規30件を amazon_gshock タブに append** (skipped_existing=0 = 全て真の新規)。
+  URL収集765 → HTTP直販/brand filter keep18 → variant展開 kept30/reject3、captcha無。
+  JSON: `_amazon_jp_dumps/amazon_gshock_20260726T075058.json`。
+
+### fail-OPEN defect 修正 (user 指摘「そんなはずない」が契機)
+- 決定: 検索 page1=0件 (captcha無) の**間欠ソフトブロックを「新規なし・正常」と誤報告する
+  fail-OPEN を封じる**。1回目 run が silent に0件完了し30件を取りこぼしかけた。
+- 変更:
+  - `scrapers/amazon_search_http.py:collect_search_asins` — page1 が retry 後も0件なら
+    `blocked=True` を返す (page>1 の0件は従来通り正当な末尾)。
+  - `run_harvest_amazon_search.py:_http_prefilter_keep_asins` — `search_blocked` 伝播。
+  - `run_harvest_amazon_search.py:harvest_amazon_search` — blocked 時は summary に `blocked:True`
+    で loud-abort (0件を keep空=正常 と混同しない)。
+  - `run_harvest_amazon_search.py:main` — blocked 時 **exit 1** (cron/呼出側に失敗を伝える)。
+- 検証: 新規テスト2件 (page1空→blocked=True / page2空→blocked=False) + 統合probeで
+  main() exit 1 を実測確認。`pytest tests/` = **752 passed**。
+
+---
+
 ## 2026-07-23 (続) — HIGH backfill 完走 (全系統の最終ピース)
 
 - 決定: HQ go (2026-07-23_high_backfill_go.md) を受け、LOW と同一の widget anchor 修正版で

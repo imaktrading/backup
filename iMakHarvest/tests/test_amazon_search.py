@@ -218,3 +218,34 @@ def test_collect_genuine_empty_breaks(monkeypatch):
     monkeypatch.setattr(H, "_sleep_jitter", lambda a, b: None)
     r = H.collect_search_asins(object(), "https://www.amazon.co.jp/s?k=x", max_pages=3)
     assert r["asins"] == []
+
+
+def test_collect_page1_empty_sets_blocked(monkeypatch):
+    """page1 が retry 後も 0件 (captcha無) = ブロック疑い → blocked=True (fail-OPEN 対策)."""
+    import scrapers.amazon_search_http as H
+    monkeypatch.setattr(H, "fetch_search_page",
+                        lambda s, u: ("<html>no results</html>", False))
+    monkeypatch.setattr(H, "_sleep_jitter", lambda a, b: None)
+    r = H.collect_search_asins(object(), "https://www.amazon.co.jp/s?k=x", max_pages=3)
+    assert r["asins"] == []
+    assert r["blocked"] is True  # ← 0件を「末尾/正常」と誤認せずブロックと判定
+
+
+def test_collect_page2_empty_not_blocked(monkeypatch):
+    """page1 は結果あり、 page2 が空 = 正当な末尾 → blocked=False (誤検出しない)."""
+    import scrapers.amazon_search_http as H
+    seq = [_asin_html("B000000001", "B000000002"),  # page1: 2件
+           "<html>no results</html>", "<html>no results</html>",  # page2 + retry×...
+           "<html>no results</html>", "<html>no results</html>"]
+    calls = {"n": 0}
+
+    def fake_fetch(session, url):
+        i = calls["n"]
+        calls["n"] += 1
+        return (seq[i] if i < len(seq) else ""), False
+
+    monkeypatch.setattr(H, "fetch_search_page", fake_fetch)
+    monkeypatch.setattr(H, "_sleep_jitter", lambda a, b: None)
+    r = H.collect_search_asins(object(), "https://www.amazon.co.jp/s?k=x", max_pages=3)
+    assert r["asins"] == ["B000000001", "B000000002"]
+    assert r["blocked"] is False  # ← page>1 の 0件 は末尾、 ブロックではない
