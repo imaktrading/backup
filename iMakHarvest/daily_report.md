@@ -20,6 +20,11 @@
 - **冪等性**: 再run で 追記0・冪等skip244 → 完全冪等を実証。
 - snapshot も対象が21→236型番に自動拡大(build_yodobashi_snapshot が LOW のヨドバシURL行型番を拾う)。
 
+### FLG 追加 (user 指示: LOW未収載を中間スプシで一目で分かるように)
+- `run_gshock_merge` に FLG(Q列)冪等更新を追加: yodobashi_gshock の **LOW未収載型番行に Q="新規"**、
+  収載済(=補URL対象)行はクリア。現値一致は書かない(冪等)。
+- 実測: Q="新規" **47行** ちょうど(read-back)、値統一。test 1件追加。JSON別出しも併存(listing用)。
+
 ---
 
 ## 2026-07-26 (続5) — snapshot生成 cron 登録 (毎日22:20)

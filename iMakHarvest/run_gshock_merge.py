@@ -40,7 +40,9 @@ from sheet_writer_amazon import (  # noqa: E402
 
 COL_URL = 1        # A
 COL_D = 4          # D 売切 (= 絶対 touch しない)
+COL_FLG = 17       # Q FLG (= yodobashi_gshock に LOW未収載フラグを立てる列)
 COL_KEY_SRC = 35   # AI 型番 (yodobashi_gshock/LOW 共通)
+FLG_NEW = "新規"    # LOW 未収載 (= 新規出品候補) を表すフラグ値
 COL_SUPP_START = 29  # AC
 COL_SUPP_END = 33    # AG (補URL 1-5)
 COL_KEY = 35       # AI 型番
@@ -81,19 +83,53 @@ def _row_model(row) -> str:
     return (_cell(row, COL_KEY) or extract_model_from_title(_cell(row, 3))).upper()
 
 
-def _load_yodobashi_tab_source() -> list[dict]:
-    """中間スプシ yodobashi_gshock タブから {model,url} list を読む (既定 source)."""
+def _open_yodobashi_tab():
+    """yodobashi_gshock worksheet + 全行 vals を返す (DNS リトライ付)."""
     from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
     ws = _with_retry(
         lambda: open_seller_staging_sheet().worksheet("yodobashi_gshock"),
         "yodobashi_gshock open")
+    vals = _with_retry(ws.get_all_values, "yodobashi_gshock get_all_values")
+    return ws, vals
+
+
+def _source_from_yodobashi_vals(vals) -> list[dict]:
     out = []
-    for r in ws.get_all_values()[1:]:
+    for r in vals[1:]:
         model = _cell(r, COL_KEY_SRC)
         url = _cell(r, COL_URL)
         if model and url:
             out.append({"model": model, "url": url})
     return out
+
+
+def _flag_new_candidates(yws, yvals, new_models: set, dry_run: bool) -> int:
+    """yodobashi_gshock の Q(FLG)列に LOW未収載フラグを冪等更新.
+
+    LOW未収載型番の行 → Q="新規"、 LOW収載済(=補URL対象)の行 → Q="" (クリア)。
+    現値と一致する行は書かない (冪等・最小書込)。 Returns: 書込セル数。
+    """
+    updates = []
+    for i, r in enumerate(yvals[1:], start=2):
+        model = _cell(r, COL_KEY_SRC).upper()
+        if not model:
+            continue
+        desired = FLG_NEW if model in new_models else ""
+        cur = _cell(r, COL_FLG)
+        if cur == desired:
+            continue
+        updates.append({"range": f"{_col_letter(COL_FLG)}{i}", "values": [[desired]]})
+    _log(f"FLG(Q列) 更新計画: {len(updates)} 行 (新規={FLG_NEW!r} / 収載済=クリア)")
+    if dry_run or not updates:
+        return len(updates)
+    CH = 60
+    for k in range(0, len(updates), CH):
+        chunk = updates[k:k + CH]
+        _with_retry(
+            lambda c=chunk: yws.batch_update(c, value_input_option="USER_ENTERED"),
+            f"FLG batch_update[{k}]")
+    _log(f"FLG 書込完了: {len(updates)} セル")
+    return len(updates)
 
 
 def main(argv=None) -> int:
@@ -103,11 +139,13 @@ def main(argv=None) -> int:
                     help="{model,url} list の JSON (既定=yodobashi_gshock タブ全型番)")
     args = ap.parse_args(argv)
 
+    yws = yvals = None
     if args.source:
         src = json.loads(Path(args.source).read_text(encoding="utf-8"))
         src_name = Path(args.source).name
     else:
-        src = _load_yodobashi_tab_source()
+        yws, yvals = _open_yodobashi_tab()  # FLG 書込に再利用
+        src = _source_from_yodobashi_vals(yvals)
         src_name = "yodobashi_gshock(tab)"
     # {model(大文字): url} (同型番複数URLは最初の1つ)
     model_url = {}
@@ -165,7 +203,8 @@ def main(argv=None) -> int:
 
     _log(f"補URL 書込計画: {len(updates)} セル (AC-AG のみ、 D列 不触)")
 
-    # 新規候補を JSON 別出し (= listing project 用。 LOW には書かない)
+    # 新規候補を JSON 別出し (= listing project 用) + 中間スプシ yodobashi_gshock の
+    # Q(FLG)列にフラグ (= user 指示、 シート上で新規出品対象が一目で分かる)。
     new_out = [{"model": m, "url": model_url[m]} for m in new_candidate_models]
     if not args.dry_run:
         NEW_CANDIDATES_JSON.write_text(
@@ -174,6 +213,12 @@ def main(argv=None) -> int:
     else:
         _log(f"新規候補 {len(new_out)} 件 (dry-run: JSON未出力)。先頭: "
              f"{[m for m in new_candidate_models[:10]]}")
+
+    # yodobashi_gshock の FLG(Q列) を冪等更新 (source=タブ の時のみ = 行位置が対応)
+    if yws is not None and yvals is not None:
+        _flag_new_candidates(yws, yvals, set(new_candidate_models), args.dry_run)
+    elif args.source:
+        _log("FLG更新skip (--source 指定時は yodobashi_gshock 行位置と対応しないため)")
 
     if args.dry_run:
         _log("dry-run: 補URL 書込なし")
