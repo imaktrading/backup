@@ -454,7 +454,10 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("\n======================================================================\n")
     append_log_func("▶ dup_guard (KEY補完の取りこぼし救済 + 入稿前 同一カード検出)\n")
     append_log_func("======================================================================\n")
-    for _mode in (["--fill-keys", latest_csv], ["--pre-upload", latest_csv]):
+    # --audit --no-refresh = シートだけで完結(eBay API を叩かないので即時)。致命側である
+    # 「同じ仕入元URLを2出品が指す」を **毎サイクル** 0件であることの証跡にする。
+    for _mode in (["--fill-keys", latest_csv], ["--pre-upload", latest_csv],
+                  ["--audit", "--no-refresh"]):
         try:
             _dgp = os.path.join(WORKSPACE, "iMakHQ", "tools", "dup_guard.py")
             r = subprocess.run([sys.executable, _dgp] + _mode,
