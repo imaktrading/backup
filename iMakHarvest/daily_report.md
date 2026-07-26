@@ -1,5 +1,27 @@
 # iMakHarvest daily_report
 
+## 2026-07-26 (続6) — マージを設計思想版に修正 (21初弾 → 全236被り + 47新規別出し)
+
+### 決定 (user 指摘)
+- 初弾は「取下げ(D=○)∩在庫」21型番だけだったが、**設計思想は「ヨドバシ全型番をLOW突合、
+  被る全型番の全行に先回りで補URL冪等追記」**。21はそのサブセットに過ぎない → 恒久版に修正。
+
+### 変更
+- `run_gshock_merge.py` 全面改修:
+  - 既定 source = **yodobashi_gshock タブ全283型番**(21救済JSON限定を廃止)。
+  - **LOW未収載型番 → new_candidates として `yodobashi_new_to_low.json` に別出し**
+    (新規出品は listing project 責務、LOW には書かない)。
+  - DNS flapping 耐性の `_with_retry`(sheet open/read/batch_update)を追加。
+
+### 検証 (実測)
+- 全283投入 → **LOW被り236型番(244行)/ 補URL追記221行(+既存冪等skip23=21救済分)/ 満杯0**、
+  **LOW未収載47型番を別出し**。D列不触。
+- read-back: LOW で **ヨドバシ補URL保持行 = 244**(21救済23 + 今回221)。
+- **冪等性**: 再run で 追記0・冪等skip244 → 完全冪等を実証。
+- snapshot も対象が21→236型番に自動拡大(build_yodobashi_snapshot が LOW のヨドバシURL行型番を拾う)。
+
+---
+
 ## 2026-07-26 (続5) — snapshot生成 cron 登録 (毎日22:20)
 
 - 決定: HQ `..._cron_cadence_2220_GO.md` で 22:20 cron GO (LOW cycle 22:30 の10分前)。
