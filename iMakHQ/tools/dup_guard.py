@@ -1,0 +1,401 @@
+# -*- coding: utf-8 -*-
+"""dup_guard — 出品の重複ガード (2026-07-26)。
+
+## なぜ要るか (2026-07-26 実測で判明した穴)
+- 商品管理シートの KEY(AI列) が空の live 行が ACTIVE 386 中 80 あり、重複くん(dedupe)は
+  「KEY空=判定不能」で **素通り**(fail-OPEN)していた。結果、同一カードが2枠 live に:
+  ガンダム RP-028 (cert 154708661 / 154708662) が 7/06・7/07 に連続出品された。
+- ただし実害の本体は「同一カード」ではない。**同じ仕入元URLを2出品が指す**と、両方売れた時に
+  片方が履行不能 → キャンセル → Defect (無在庫の生命線)。同一カードでも仕入元が別なら健全。
+  → 本モジュールは **URL共有=致命 / 同一カード=注意** の2段で見る。
+- 出品は止めない (listing を勝手に絞らない原則)。検出→警告→台帳。物理除外はしない。
+
+## 提供するもの
+- 純関数: card_token_from_title / norm_url / shared_supply_urls / live_card_index /
+          dup_candidates / filter_urls_owned_by_others
+- I/O   : audit()          … 全 ACTIVE を棚卸し(URL共有 + 同一カード) + live titles cache 更新
+          pre_upload(csv)  … 入稿前 CSV を live と突合して警告 + 台帳
+          fill_keys_from_titles(csv) … KEY空 & タイトルの #ID が catalog に完全一致する行に KEY を書く
+                                       (dedupe resolver が解けない DON!! 等の救済。ID完全一致のみ=fail-closed)
+
+CLI:
+  python tools/dup_guard.py --audit
+  python tools/dup_guard.py --pre-upload <csv>
+  python tools/dup_guard.py --fill-keys <csv> [--dry]
+"""
+import csv
+import json
+import os
+import re
+import sys
+import sqlite3
+from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sheet_io
+
+A, B, C, D = 0, 1, 2, 3
+CERT = sheet_io.PRODUCT_COL_CERT                 # I(8)
+KEY = sheet_io.PRODUCT_COL_KEY                   # AI(34)
+AUX0, AUXN = sheet_io.PRODUCT_COL_AUX_START, sheet_io.PRODUCT_AUX_MAX   # AC(28), 5
+
+CATALOG_DB = r"C:\dev\iMak_data\catalog\products.sqlite"
+DATA_DIR = r"C:\dev\iMak_data\hq"
+LIVE_CACHE = os.path.join(DATA_DIR, "live_listings_cache.json")
+LEDGER = os.path.join(DATA_DIR, "dup_guard_ledger.jsonl")
+
+CSV_TITLE = "*Title"
+CSV_LABEL = "CustomLabel"
+CSV_CERT = "CDA:Certification Number - (ID: 27503)"
+
+
+# ===================================================================
+# 純関数
+# ===================================================================
+def card_token_from_title(title):
+    """eBay タイトルの '#<カードID>' を返す(大文字化)。無ければ None。
+
+    例: 'PSA 10 Gundam Japanese #RP-028 Resource 2026 Card' → 'RP-028'
+        '... #DON-PRB02-018 DON!! Card 2025'                → 'DON-PRB02-018'
+    ※ '#073/066' のような分数表記も token としてそのまま返す(set 違いの衝突は
+      呼び出し側が KEY を優先することで回避する)。
+    """
+    if not title:
+        return None
+    m = re.search(r"#([A-Za-z0-9][A-Za-z0-9\-/_.]*)", str(title))
+    return m.group(1).upper() if m else None
+
+
+def norm_url(url):
+    """仕入元URL の比較キー(query/fragment/末尾スラッシュ除去 + 小文字)。空は ''。"""
+    if not url:
+        return ""
+    u = str(url).strip().split("?")[0].split("#")[0].rstrip("/")
+    return u.lower()
+
+
+def _cell(row, idx):
+    return (row[idx] or "").strip() if len(row) > idx else ""
+
+
+def _is_active(row):
+    """出品中 & 取下げられていない行か (B有り + D空)。"""
+    return bool(_cell(row, B)) and not _cell(row, D)
+
+
+def shared_supply_urls(rows2d):
+    """ACTIVE 行の 主URL(A)+補URL(AC-AG) を集計し、**2出品以上が指す URL** だけ返す。
+
+    戻り: {正規化URL: [itemID,...(重複なし・昇順)]}。これが1件でもあれば
+    「両方売れたら片方履行不能」= キャンセル→Defect の実リスク (fail-OPEN の本体)。
+    純関数(rows2d は header 含む2次元配列)。
+    """
+    owner = {}
+    for r in rows2d[1:]:
+        if not _is_active(r):
+            continue
+        iid = _cell(r, B)
+        urls = [_cell(r, A)] + [_cell(r, AUX0 + k) for k in range(AUXN)]
+        for u in urls:
+            n = norm_url(u)
+            if n:
+                owner.setdefault(n, set()).add(iid)
+    return {u: sorted(v) for u, v in owner.items() if len(v) > 1}
+
+
+def live_card_index(rows2d, titles_by_itemid=None):
+    """ACTIVE 行の カードキー → [itemID]。
+
+    カードキー優先順:
+      1. KEY(AI列)      … catalog canonical id (最も確か)
+      2. 't:' + タイトル token … KEY空の救済。titles_by_itemid={itemID: eBayタイトル} が要る
+    KEY も token も無い行は index に入れない (= 判定不能。素通りでなく「不明」として
+    呼び出し側が扱えるよう、別途 unkeyed で返す)。
+    戻り: (index{key: [itemID]}, unkeyed[itemID])。純関数。
+    """
+    titles_by_itemid = titles_by_itemid or {}
+    index, unkeyed = {}, []
+    for r in rows2d[1:]:
+        if not _is_active(r):
+            continue
+        iid = _cell(r, B)
+        k = _cell(r, KEY)
+        if k and not k.startswith(("item:", "shops:")):
+            index.setdefault(k, []).append(iid)
+            continue
+        tok = card_token_from_title(titles_by_itemid.get(iid, ""))
+        if tok:
+            index.setdefault("t:" + tok, []).append(iid)
+        else:
+            unkeyed.append(iid)
+    return index, unkeyed
+
+
+def dup_candidates(csv_rows, header, index, cert_to_key=None):
+    """入稿予定 CSV 行 × live index → 同一カードが既に live な行を返す。
+
+    csv_rows/header: CSV の実データ。cert_to_key: {cert: KEY} (シート由来。あれば優先)。
+    戻り: [{'label','cert','title','card_key','existing':[itemID]}]。純関数。
+    """
+    cert_to_key = cert_to_key or {}
+    hi = {n: i for i, n in enumerate(header)}
+    out = []
+    for r in csv_rows:
+        def col(name):
+            i = hi.get(name)
+            return (r[i] or "").strip() if i is not None and i < len(r) else ""
+        cert, title = col(CSV_CERT), col(CSV_TITLE)
+        key = cert_to_key.get(cert) or ""
+        card_key = key if key else ("t:" + (card_token_from_title(title) or ""))
+        if card_key in ("", "t:"):
+            continue
+        existing = index.get(card_key) or []
+        if existing:
+            out.append({"label": col(CSV_LABEL), "cert": cert, "title": title,
+                        "card_key": card_key, "existing": list(existing)})
+    return out
+
+
+def filter_urls_owned_by_others(urls, owner_by_url, self_itemid):
+    """補URL 書込前フィルタ: **他の出品が既に使っている URL** を落とす。
+
+    urls: 追加しようとしている URL list / owner_by_url: {正規化URL: [itemID]}(全ACTIVE)
+    self_itemid: 書込先の出品。自分が既に持っている URL は残す(冪等)。
+    戻り: (通す urls, 落とした [(url, [owner...])])。純関数。
+    """
+    keep, dropped = [], []
+    for u in urls:
+        owners = [o for o in (owner_by_url.get(norm_url(u)) or []) if o != self_itemid]
+        if owners:
+            dropped.append((u, owners))
+        else:
+            keep.append(u)
+    return keep, dropped
+
+
+# ===================================================================
+# I/O
+# ===================================================================
+def _read_csv(path):
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    return (rows[1:], rows[0]) if rows else ([], [])
+
+
+def catalog_has(product_ids):
+    """catalog に **完全一致で存在する** product_id の集合を返す(ID-strict・fallback無)。"""
+    ids = [i for i in set(product_ids) if i]
+    if not ids or not os.path.exists(CATALOG_DB):
+        return set()
+    con = sqlite3.connect(CATALOG_DB)
+    try:
+        out = set()
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            q = "select product_id from products where product_id in ({})".format(
+                ",".join("?" * len(chunk)))
+            out |= {r[0] for r in con.execute(q, chunk)}
+        return out
+    finally:
+        con.close()
+
+
+def _ebay_active_titles():
+    """eBay Active(US本体) の {itemID: title} を取得。失敗時は None (= 判定不能)。"""
+    try:
+        sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
+        import dns_cache  # noqa: F401
+        from fix_de_speedpak_shipping import refresh, token, post
+    except Exception as e:
+        print(f"  (live titles 取得不可: {type(e).__name__}: {e})")
+        return None
+    try:
+        refresh()
+        tok = token()
+        out = {}
+        for n in range(1, 60):
+            inner = ("<ActiveList><Include>true</Include><Pagination>"
+                     f"<EntriesPerPage>200</EntriesPerPage><PageNumber>{n}</PageNumber>"
+                     "</Pagination></ActiveList>")
+            t = post("GetMyeBaySelling", inner, tok)
+            al = t[t.find("<ActiveList>"):t.find("</ActiveList>")]
+            chunk = re.findall(r"<Item>(.*?)</Item>", al, re.S)
+            if not chunk:
+                break
+            for it in chunk:
+                iid = re.search(r"<ItemID>(\d+)</ItemID>", it)
+                ti = re.search(r"<Title>(.*?)</Title>", it)
+                cur = re.search(r'<CurrentPrice currencyID="(\w+)"', it)
+                # USD = US本体のみ。GBP/CAD/EUR は eBaymag ミラー(同SKUの複製=重複ではない)
+                if iid and ti and cur and cur.group(1) == "USD":
+                    out[iid.group(1)] = ti.group(1)
+        return out
+    except Exception as e:
+        print(f"  (live titles 取得失敗: {type(e).__name__}: {e})")
+        return None
+
+
+def _load_live_cache():
+    try:
+        with open(LIVE_CACHE, encoding="utf-8") as f:
+            return json.load(f).get("titles") or {}
+    except Exception:
+        return {}
+
+
+def _save_live_cache(titles):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(LIVE_CACHE, "w", encoding="utf-8") as f:
+        json.dump({"generated_at": datetime.now().isoformat(timespec="seconds"),
+                   "titles": titles}, f, ensure_ascii=False)
+
+
+def _ledger(kind, payload):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(LEDGER, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": datetime.now().isoformat(timespec="seconds"),
+                            "kind": kind, **payload}, ensure_ascii=False) + "\n")
+
+
+def audit(refresh_titles=True):
+    """全 ACTIVE 棚卸し: ①仕入元URL共有(致命) ②同一カード多重(注意)。戻り: stats dict。"""
+    vals = sheet_io._product_ws().get_all_values()
+    shared = shared_supply_urls(vals)
+    titles = _ebay_active_titles() if refresh_titles else None
+    if titles:
+        _save_live_cache(titles)
+    else:
+        titles = _load_live_cache()
+        if refresh_titles:
+            print("  ⚠ live titles を更新できず cache を使用(同一カード判定は劣化)")
+    index, unkeyed = live_card_index(vals, titles)
+    dup_cards = {k: v for k, v in index.items() if len(v) > 1}
+
+    n_act = sum(1 for r in vals[1:] if _is_active(r))
+    print(f"■ dup_guard audit  ACTIVE {n_act}行 / live titles {len(titles)}件")
+    print(f"★① 仕入元URL共有(=キャンセル risk): {len(shared)}件")
+    for u, owners in list(shared.items())[:30]:
+        print(f"    ⚠ {u[:70]}  →  {owners}")
+    print(f"② 同一カード多重(注意・仕入元が別なら健全): {len(dup_cards)}組 "
+          f"/ 判定不能(KEY無+token無) {len(unkeyed)}件")
+    for k, v in list(dup_cards.items())[:30]:
+        print(f"    - {k:22} {v}")
+    _ledger("audit", {"shared_supply": {u: o for u, o in shared.items()},
+                      "dup_cards": {k: v for k, v in dup_cards.items()},
+                      "unkeyed": len(unkeyed), "active": n_act})
+    if shared:
+        print("‼ URL共有あり = 両方売れたら履行不能。片方の補URL差替 or 取下げが必要。")
+    return {"active": n_act, "shared_supply": len(shared),
+            "dup_cards": len(dup_cards), "unkeyed": len(unkeyed)}
+
+
+def pre_upload(csv_path, use_cache_only=True):
+    """入稿前 CSV を live と突合 → 同一カードが既に live な行を警告(除外はしない)。"""
+    rows, header = _read_csv(csv_path)
+    if not rows:
+        print("  (dup_guard: CSV 空 skip)")
+        return {"rows": 0, "dups": 0}
+    vals = sheet_io._product_ws().get_all_values()
+    cert_to_key = {}
+    for r in vals[1:]:
+        if not _is_active(r):
+            continue
+        c, k = _cell(r, CERT), _cell(r, KEY)
+        if c and k and not k.startswith(("item:", "shops:")):
+            cert_to_key[c] = k
+    titles = _load_live_cache() if use_cache_only else (_ebay_active_titles() or {})
+    index, _unkeyed = live_card_index(vals, titles)
+    # 自分自身(=同じcert)は除外して突合する
+    csv_certs = set()
+    hi = {n: i for i, n in enumerate(header)}
+    ci = hi.get(CSV_CERT)
+    if ci is not None:
+        csv_certs = {(r[ci] or "").strip() for r in rows if ci < len(r)}
+    self_iids = {_cell(r, B) for r in vals[1:] if _cell(r, CERT) in csv_certs and _cell(r, B)}
+    index = {k: [i for i in v if i not in self_iids] for k, v in index.items()}
+    index = {k: v for k, v in index.items() if v}
+
+    cands = dup_candidates(rows, header, index, cert_to_key)
+    print(f"■ dup_guard 入稿前チェック: {len(rows)}行 → 同一カードが既に live: {len(cands)}件")
+    for c in cands:
+        print(f"    ⚠ {c['label']:18} {c['card_key']:20} 既存={c['existing']}")
+        print(f"       {c['title'][:76]}")
+    if cands:
+        print("    ※出品は止めません(仕入元が別なら健全)。仕入元URLが同じ場合のみ致命 → audit で確認。")
+        _ledger("pre_upload", {"csv": os.path.basename(csv_path),
+                               "dups": [{k: c[k] for k in ("label", "cert", "card_key", "existing")}
+                                        for c in cands]})
+    return {"rows": len(rows), "dups": len(cands)}
+
+
+def fill_keys_from_titles(csv_path, dry_run=False):
+    """KEY空の live 行に、CSV タイトルの #ID が catalog に **完全一致** する時だけ KEY を書く。
+
+    dedupe resolver が解けない DON!! カード等の救済 (catalog には DON-PRB02-018 が実在する)。
+    ID完全一致のみ・推測なし (fail-closed)。cert でシート行を特定する。
+    """
+    rows, header = _read_csv(csv_path)
+    if not rows:
+        return {"written": 0, "unresolved": 0}
+    hi = {n: i for i, n in enumerate(header)}
+
+    def col(r, name):
+        i = hi.get(name)
+        return (r[i] or "").strip() if i is not None and i < len(r) else ""
+
+    vals = sheet_io._product_ws().get_all_values()
+    cert_row, cert_iid = {}, {}
+    for n, r in enumerate(vals[1:], start=2):
+        c = _cell(r, CERT)
+        if c and not _cell(r, KEY) and _cell(r, B):
+            cert_row[c], cert_iid[c] = n, _cell(r, B)
+
+    want = {}
+    for r in rows:
+        cert = col(r, CSV_CERT)
+        if cert not in cert_row:
+            continue
+        tok = card_token_from_title(col(r, CSV_TITLE))
+        if tok:
+            want[cert] = tok
+    ok = catalog_has(want.values())
+    itemid_to_row, itemid_to_key, unresolved = {}, {}, []
+    for cert, tok in want.items():
+        if tok in ok:
+            iid = cert_iid[cert]
+            itemid_to_row[iid] = cert_row[cert]
+            itemid_to_key[iid] = tok
+        else:
+            unresolved.append((cert, tok))
+    print(f"■ dup_guard KEY補完: 候補{len(want)} / catalog一致{len(itemid_to_key)} / 未解決{len(unresolved)}")
+    for iid, k in itemid_to_key.items():
+        print(f"    + {iid} row{itemid_to_row[iid]} → KEY='{k}'")
+    for cert, tok in unresolved:
+        print(f"    - cert={cert} token='{tok}' は catalog に無い → 書かない(fail-closed)")
+    if dry_run or not itemid_to_key:
+        return {"written": 0, "unresolved": len(unresolved), "resolved": len(itemid_to_key)}
+    written = sheet_io.write_keys(itemid_to_row, itemid_to_key)
+    print(f"    ✔ AI列 書込: {written}行")
+    _ledger("fill_keys", {"csv": os.path.basename(csv_path), "written": written,
+                          "keys": itemid_to_key})
+    return {"written": written, "unresolved": len(unresolved), "resolved": len(itemid_to_key)}
+
+
+def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    args = sys.argv[1:]
+    if "--audit" in args:
+        audit(refresh_titles="--no-refresh" not in args)
+    elif "--pre-upload" in args:
+        pre_upload(args[args.index("--pre-upload") + 1])
+    elif "--fill-keys" in args:
+        fill_keys_from_titles(args[args.index("--fill-keys") + 1], dry_run="--dry" in args)
+    else:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()

@@ -542,11 +542,32 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     confirmed = {c["idx"]: c["urls"] for c in res["confirmed"]}
 
     # --- 確定URL → 補URL(AC-AG)へ冪等書込(既存保持・空き枠のみ) ---
+    # ★ 他出品が既に使っている仕入元URLは書かない(2026-07-26)。同じURLを2出品が指すと
+    #   両方売れた時に片方が履行不能 → キャンセル → Defect。補URL充填はこの事故の主な入口。
+    try:
+        import dup_guard as _dg
+        _owner_by_url = {}
+        for _r in vals[1:]:
+            if not (_cell(_r, B) and not _cell(_r, D)):
+                continue
+            for _u in [_cell(_r, A)] + [_cell(_r, AUX0 + k) for k in range(AUXN)]:
+                _n = _dg.norm_url(_u)
+                if _n:
+                    _owner_by_url.setdefault(_n, set()).add(_cell(_r, B))
+        _owner_by_url = {k: sorted(v) for k, v in _owner_by_url.items()}
+    except Exception as _e_dg:
+        print(f"  ⚠ URL共有ガード無効(続行): {type(_e_dg).__name__}: {_e_dg}")
+        _dg, _owner_by_url = None, {}
+
     aux_writeback, added_total = {}, 0
     for idx, urls in confirmed.items():
         t = item_targets[idx]
         row = t["row"]
         r = vals[row - 1] if 0 < row <= len(vals) else []
+        if _dg is not None:
+            urls, _dropped = _dg.filter_urls_owned_by_others(urls, _owner_by_url, _cell(r, B))
+            for _u, _own in _dropped:
+                print(f"  ⛔ 補URL除外(他出品が使用中 {_own}): {_u[:70]}")
         existing = [(_cell(r, AUX0 + k)) for k in range(AUXN)]
         existing = [u for u in existing if u]
         full, added = compute_backurl_additions(existing, urls, AUXN)

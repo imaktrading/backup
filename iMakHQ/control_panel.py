@@ -445,6 +445,30 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         append_log_func(f"\n⚠️ dedupe hook (write-keys) 失敗: {type(e).__name__}: {e}\n")
         # 失敗しても listing 出力には影響なし
 
+    # Step 4b-2: KEY 補完の取りこぼし救済 + 入稿前 重複ガード (2026-07-26)
+    # - write-keys が skipped_no_resolution にする種別(DON!! カード等)は KEY が空のまま出品され、
+    #   重複くんの母集団から外れて **同一カード2枠 live** を生む(ガンダム RP-028 実例)。
+    #   → タイトルの #ID が catalog に完全一致する時だけ KEY を書く(ID-strict・推測なし)。
+    # - その上で「同じカードが既に live」を検出して警告する。**出品は止めない**
+    #   (仕入元が別なら健全。致命は「同じ仕入元URLを2出品が指す」方で、それは audit が見る)。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ dup_guard (KEY補完の取りこぼし救済 + 入稿前 同一カード検出)\n")
+    append_log_func("======================================================================\n")
+    for _mode in (["--fill-keys", latest_csv], ["--pre-upload", latest_csv]):
+        try:
+            _dgp = os.path.join(WORKSPACE, "iMakHQ", "tools", "dup_guard.py")
+            r = subprocess.run([sys.executable, _dgp] + _mode,
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=180, env=env)
+            if r.stdout:
+                append_log_func(r.stdout)
+            if r.returncode != 0:
+                append_log_func(f"\n⚠️ dup_guard {_mode[0]} returncode={r.returncode}(続行)\n")
+                if r.stderr:
+                    append_log_func(r.stderr)
+        except Exception as e:
+            append_log_func(f"\n⚠️ dup_guard {_mode[0]} 失敗(続行): {type(e).__name__}: {e}\n")
+
     # Step 4c: 補URL 自動追記 (2026-07-13)。write-keys で HIGHT に KEー書込済の直後に実行。
     # 重複くんが弾いた「同KEー既出品の2枚目」の A列URL(実在の別個体=vetted supply)を、同KEー
     # 出品中primary の 補URL(AC-AG)に **既存保持+冪等** で追加(= primary が売れたら再ソースする
