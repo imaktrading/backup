@@ -98,8 +98,8 @@ class TestFetchProductInventory:
 
     @pytest.fixture(autouse=True)
     def _no_api(self):
-        # HQ helper を None 固定 → 従来 requests 経路にフォールバックさせて既存挙動を検証
-        with patch("scrapers.snkrdunk_scraper._hq_is_listing_live", return_value=None):
+        # HQ helper を uncertain 固定 → 従来 requests 経路にフォールバックさせて既存挙動を検証
+        with patch("scrapers.snkrdunk_scraper._hq_listing_live_price", return_value=(None, None)):
             yield
 
     def test_in_stock(self):
@@ -191,8 +191,8 @@ class TestFetchProductInventory:
         assert sub["error"] is not None     # uncertain = error 明示 → 要手動chk へ
 
     def test_network_error(self):
-        with patch("scrapers.snkrdunk_scraper._hq_is_listing_live", return_value=None), \
-             patch("scrapers.snkrdunk_scraper.requests.get",
+        # _no_api autouse で listing_live_price=(None,None) → requests 経路 → ConnectionError → None
+        with patch("scrapers.snkrdunk_scraper.requests.get",
                    side_effect=ConnectionError("network down")):
             info = fetch_product_inventory(
                 "https://snkrdunk.com/apparels/159278/used/45538280")
@@ -200,26 +200,37 @@ class TestFetchProductInventory:
 
 
 class TestApiListingLive:
-    """★ 2026-07-25 API 復旧: HQ is_listing_live を PRIMARY 判定に統合 (CSR非依存)。"""
+    """★ 2026-07-25 API 復旧 + 2026-07-26 価格付き: HQ listing_live_price を PRIMARY 判定に統合。"""
 
-    def test_live_true_in_stock(self):
-        with patch("scrapers.snkrdunk_scraper._hq_is_listing_live", return_value=True):
+    def test_live_true_with_price_for_min(self):
+        """★(True, 9000) → IN_STOCK + price_jpy=9000 (= M-min に snkrdunk 価格が効く)."""
+        with patch("scrapers.snkrdunk_scraper._hq_listing_live_price", return_value=(True, 9000)):
             info = fetch_product_inventory(
                 "https://snkrdunk.com/apparels/157939/used/47480716")
         assert info["status"] == "IN_STOCK"
         assert info["skus"][0]["in_stock"] is True
+        assert info["skus"][0]["price_jpy"] == 9000
+
+    def test_live_true_price_none_excluded_from_min(self):
+        """(True, None) = live だが価格未確定 → in_stock=True だが price_jpy=None (M-min対象外)."""
+        with patch("scrapers.snkrdunk_scraper._hq_listing_live_price", return_value=(True, None)):
+            info = fetch_product_inventory(
+                "https://snkrdunk.com/apparels/157939/used/47480716")
+        assert info["status"] == "IN_STOCK"
+        assert info["skus"][0]["in_stock"] is True
+        assert info["skus"][0]["price_jpy"] is None
 
     def test_live_false_sold_out(self):
         """listing_id が一覧に無い = 売切 → SOLD_OUT (= 消込を snkrdunk でも正しく発火)."""
-        with patch("scrapers.snkrdunk_scraper._hq_is_listing_live", return_value=False):
+        with patch("scrapers.snkrdunk_scraper._hq_listing_live_price", return_value=(False, None)):
             info = fetch_product_inventory(
                 "https://snkrdunk.com/apparels/742110/used/46890058")
         assert info["status"] == "SOLD_OUT"
         assert info["skus"][0]["in_stock"] is False
 
     def test_live_none_falls_back_to_requests_404(self):
-        """helper が None(API失敗/非対象) → 従来 requests 経路へ。404 は依然 sold として拾う."""
-        with patch("scrapers.snkrdunk_scraper._hq_is_listing_live", return_value=None), \
+        """helper が (None,None)(API失敗/非対象) → 従来 requests 経路へ。404 は依然 sold として拾う."""
+        with patch("scrapers.snkrdunk_scraper._hq_listing_live_price", return_value=(None, None)), \
              patch("scrapers.snkrdunk_scraper.requests.get",
                    return_value=_mock_response(404, "")):
             info = fetch_product_inventory(
@@ -228,8 +239,8 @@ class TestApiListingLive:
         assert info["skus"][0]["in_stock"] is False
 
     def test_live_none_and_csr_page_is_uncertain(self):
-        """helper None + CSR ページ(信号なし) → UNKNOWN/in_stock=None (偽sold にしない fail-closed)."""
-        with patch("scrapers.snkrdunk_scraper._hq_is_listing_live", return_value=None), \
+        """helper (None,None) + CSR ページ(信号なし) → UNKNOWN/in_stock=None (偽sold にしない fail-closed)."""
+        with patch("scrapers.snkrdunk_scraper._hq_listing_live_price", return_value=(None, None)), \
              patch("scrapers.snkrdunk_scraper.requests.get",
                    return_value=_mock_response(200, "<html>csr no signal</html>")):
             info = fetch_product_inventory(
@@ -238,13 +249,14 @@ class TestApiListingLive:
         assert info["skus"][0]["in_stock"] is None
 
     def test_helper_import_failure_safe_fallback(self):
-        """helper が例外 → None 扱いで既存経路へ (import 事故でも crash しない)."""
+        """helper が例外 → (None,None) 扱いで既存経路へ (import 事故でも crash しない)."""
         import scrapers.snkrdunk_scraper as sd
         sd._LIVE_CACHE.clear()
+        sd._LIVE_PRICE_CACHE.clear()
         with patch("scrapers.snkrdunk_scraper.sys.path", []), \
              patch("scrapers.snkrdunk_scraper.requests.get",
                    return_value=_mock_response(404, "")):
-            # _hq_is_listing_live は import 失敗 → None → 404 経路
+            # _hq_listing_live_price は import 失敗 → (None,None) → 404 経路
             info = fetch_product_inventory(
                 "https://snkrdunk.com/apparels/159278/used/12345")
         assert info["status"] == "DELETED"

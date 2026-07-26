@@ -13,8 +13,8 @@ pytestmark = pytest.mark.offline
 
 @pytest.fixture(autouse=True)
 def _no_api(monkeypatch):
-    # ★ 2026-07-25: is_listing_live(PRIMARY) を None 固定 → 従来 requests retry 経路を検証。
-    monkeypatch.setattr(s, "_hq_is_listing_live", lambda url: None)
+    # ★ 2026-07-26: listing_live_price(PRIMARY) を uncertain 固定 → 従来 requests retry 経路を検証。
+    monkeypatch.setattr(s, "_hq_listing_live_price", lambda url: (None, None))
 
 
 def test_retry_recovers_on_transient_conn_error(monkeypatch):

@@ -60,6 +60,32 @@ def _hq_is_listing_live(url: str):
     return result
 
 
+_LIVE_PRICE_CACHE: dict = {}   # url → (live, price_jpy)
+
+
+def _hq_listing_live_price(url: str):
+    """HQ `listing_live_price` を遅延 import で呼ぶ。生死+価格を 1 call で取得 (M-min に snkrdunk 価格を効かせる)。
+
+    Returns: (live: bool|None, price_jpy: int|None)。利用不能/例外なら (None, None) = uncertain → 既存 fail-closed。
+    ★ price=None は「価格未確定」= M-min 対象外に倒す (在庫の生死は live で判定、消込は従来どおり)。
+    """
+    if url in _LIVE_PRICE_CACHE:
+        return _LIVE_PRICE_CACHE[url]
+    result = (None, None)
+    try:
+        if _HQ_TOOLS_PATH not in sys.path:
+            sys.path.insert(0, _HQ_TOOLS_PATH)
+        from snkrdunk_psa_resource import listing_live_price  # noqa: PLC0415
+        r = listing_live_price(url)
+        # (live, price) タプル想定。想定外形は uncertain に倒す。
+        if isinstance(r, tuple) and len(r) == 2:
+            result = r
+    except Exception:
+        result = (None, None)
+    _LIVE_PRICE_CACHE[url] = result
+    return result
+
+
 _HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -214,17 +240,21 @@ def fetch_product_inventory(
     """
     pid = parse_product_id(url) or ""
 
-    # ★ 2026-07-25 API 復旧: HQ の is_listing_live を PRIMARY 判定に (CSR非依存・positive信号)。
-    #   True=live→IN_STOCK / False=sold→SOLD_OUT (= 消込を snkrdunk でも正しく発火) / None→既存 requests
-    #   パス (404/isSoldOut/uncertain) にフォールバック。helper 利用不能でも既存挙動で安全。
-    live = _hq_is_listing_live(url)
+    # ★ 2026-07-25 API 復旧 + 2026-07-26 価格付き: HQ の listing_live_price を PRIMARY 判定に
+    #   (CSR非依存・生死+価格を 1 call)。True=live→IN_STOCK(price は M-min 用) / False=sold→SOLD_OUT
+    #   (= 消込を snkrdunk でも正しく発火) / None→既存 requests パス (404/isSoldOut/uncertain) にフォールバック。
+    #   ★price=None(価格未確定)は price_jpy=None のまま = M-min 対象外 (在庫の生死は live で確定、消込不変)。
+    live, live_price = _hq_listing_live_price(url)
     if live is True or live is False:
+        _price = None
+        if live and isinstance(live_price, int) and not isinstance(live_price, bool) and live_price >= 0:
+            _price = live_price   # live かつ 価格確定 → M-min に効かせる
         return {
             "name": "", "product_id": pid, "color": "",
             "status": "IN_STOCK" if live else "SOLD_OUT",
             "fetched_at": datetime.now().isoformat(timespec="seconds"),
             "skus": [{"size": "", "in_stock": live,
-                      "quantity": 1 if live else 0, "price_jpy": None}],
+                      "quantity": 1 if live else 0, "price_jpy": _price}],
         }
     # live is None → 従来の requests 経路へフォールバック (404 は依然 reliable sold 信号)
 

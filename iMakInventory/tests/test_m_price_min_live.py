@@ -92,6 +92,20 @@ def test_in_stock_but_no_price_leaves_m_untouched():
     assert r["points_jpy"] is None
 
 
+def test_snkrdunk_cheapest_wins_min_over_mercari():
+    """★HQ検体: 主売切 + snkrdunk補=最安生存(2500) + mercari補=高値生存(4000) → M=2500(snkrdunk)."""
+    import monitor_listings as ml
+    table = {
+        "main": {"is_sold": True,  "price": None, "points": None, "supplier": "mercari"},
+        "AC":   {"is_sold": False, "price": 4000, "points": None, "supplier": "mercari"},   # 高値生存
+        "AD":   {"is_sold": False, "price": 2500, "points": None, "supplier": "snkrdunk"},  # 最安生存(snkrdunk)
+    }
+    with patch("monitor_listings._check_single_url", side_effect=_stub(table)):
+        r = ml.check_one_row_with_fallback(_row("main", ["AC", "AD"]))
+    assert r["is_sold"] is False
+    assert r["price_jpy"] == 2500     # ★ snkrdunk が最安 → M=snkrdunk価格 (listing_live_price 由来)
+
+
 def test_all_sold_unchanged():
     """全売切 → is_sold=True (取下げ)。 価格採用ロジックの分岐外 (従来どおり)."""
     import monitor_listings as ml
