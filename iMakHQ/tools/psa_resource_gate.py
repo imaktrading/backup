@@ -737,10 +737,19 @@ def main():
         if rn and aux:
             aux_writeback[rn] = aux
         aux += [""] * (MAX_AUX - len(aux))
+        # ★C列(再仕入れ可否)は3値: 可◎ / まだ探してない(判定保留=在庫不明) / 探して無い(End候補)。
+        # 従来は2値で「判定保留」も「不能✕(End候補)」表示=「探して無い」と誤読させてた(2026-07-26 ユーザー指摘)。
+        # _mercari_unknown = メルカリ未検索(batch送り)or取得失敗 → 在庫不明(次回再取得)。fail-closed。
+        if c["resourceable"]:
+            _c_status = "再仕入れ可◎"
+        elif _mercari_unknown:
+            _c_status = "⏸判定保留(未検索/在庫不明)"
+        else:
+            _c_status = "不能✕(End候補)"
         out_rows.append([
             r.get("set_no") or mp.search_keyword(r.get("title", ""), "").replace("PSA10 ", ""),
             (r.get("title") or "")[:60],
-            "再仕入れ可◎" if c["resourceable"] else "不能✕(End候補)",
+            _c_status,
             _judged_at,
             "/".join(c["channels"]) or "-",
             c["cheapest_jpy"] or "", c["cheapest_channel"] or "",
