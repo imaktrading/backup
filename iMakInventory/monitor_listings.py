@@ -290,8 +290,25 @@ def _build_row_result(row: dict, sub_results: list, hit_index: int) -> dict:
             raw_status = hit["raw_status"] or "in_stock"
         else:
             raw_status = f"in_stock@backup#{hit_index} ({hit['raw_status'] or 'in_stock'})"
-        price_jpy = hit["price_jpy"]   # 在庫ありの URL の価格を採用
-        points_jpy = hit.get("points_jpy")  # 在庫あり URL の基本ポイント (amazon のみ、他は None)
+        # ★ 2026-07-26 HQ依頼: M(価格) は「在庫あり かつ 価格取得できた候補の min」= 実効仕入れ値 (今買える
+        #   最安の生きた供給)。旧実装は「順序上最初の在庫あり」1本で、主売切+複数補が別価格生存時に最安を
+        #   採らず N(仕入れ値) が過大/過小になる GAP があった。在庫判定(取下げ可否)は hit_index のまま不変
+        #   (=1本でも在庫あり→取下げない)。判定と価格採用を分離。
+        #   ★K(points)整合: min を採った "同一URL" の points を使う (別URLのM − 別URLのpt で N過小になる
+        #   落とし穴を回避)。amazon 以外 points=None は従来どおり (caller が amazon 行のみ K 書込)。
+        _priced_live = [s for s in sub_results
+                        if s.get("is_sold") is False
+                        and isinstance(s.get("price_jpy"), int)
+                        and not isinstance(s.get("price_jpy"), bool)
+                        and s.get("price_jpy") >= 0]
+        if _priced_live:
+            _cheapest = min(_priced_live, key=lambda s: s["price_jpy"])
+            price_jpy = _cheapest["price_jpy"]
+            points_jpy = _cheapest.get("points_jpy")
+        else:
+            # 在庫ありだが価格取得できた候補ゼロ (snkrdunk は is_listing_live で価格なし等) → M 不触 (fail-closed)
+            price_jpy = None
+            points_jpy = None
     else:
         # 短絡 hit なし: 全候補 is_sold=True (全部売切) or error 含む
         has_error = any(s["error"] for s in sub_results)
