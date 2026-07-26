@@ -600,34 +600,10 @@ def main():
         c = _rcache.get(iid)
         return c if (c and c.get("date") == _today) else None
 
-    # --- メルカリ (一括 Selenium。当日キャッシュ分は再利用、未キャッシュのみスクレイプ) ---
-    mercari_res = {}
-    _to_scrape_all = [i for i in range(len(rows)) if not (_cache_hit(_iids[i]) and "mercari" in _cache_hit(_iids[i]))]
-    for i in range(len(rows)):
-        c = _cache_hit(_iids[i])
-        if c and "mercari" in c:
-            mercari_res[i] = c["mercari"]
-    # ★2026-07-24「10件づつ」(ユーザー方針): 1回のメルカリ再走は _batch 件までに制限。
-    # 残り(_deferred)は End候補にせず判定保留=次回バッチで再取得。全件を一気に走らせて
-    # HTML(視覚確証)を待たせない。キャッシュ済(=前回 再仕入れ可)はそのまま即表示される。
-    # RESTOCK_SCRAPE_BATCH=0 で「メルカリ再走なし(キャッシュ+SNKRDUNKのみ)」= 14件を即表示。
-    _batch = int(os.environ.get("RESTOCK_SCRAPE_BATCH", "10"))
-    _deferred = set(_to_scrape_all[_batch:]) if _batch >= 0 else set()
-    _to_scrape = _to_scrape_all[:_batch] if _batch > 0 else ([] if _batch == 0 else _to_scrape_all)
-    print(f"▶ メルカリ最安取得: 当日キャッシュ再利用 {len(rows)-len(_to_scrape_all)}件 / "
-          f"今回スクレイプ {len(_to_scrape)}件"
-          + (f" / 次回送り {len(_deferred)}件(End候補にしない=判定保留)" if _deferred else ""))
-    if _to_scrape:
-        try:
-            cards = [{**mp.build_card_query(rows[i].get("title", ""), rows[i].get("set_no", ""), rows[i].get("key")),
-                      "ebay_item_id": _iids[i]} for i in _to_scrape]
-            scraped = mp.fetch_mercari_cheapest(cards)
-            for j, i in enumerate(_to_scrape):
-                mercari_res[i] = scraped.get(j)
-        except Exception as e:
-            print(f"  ⚠ メルカリ skip ({type(e).__name__}: {e}) — SNKRDUNKのみで判定")
-
     # --- SNKRDUNK (HTTP-only。当日キャッシュ分は再利用) ---
+    # ★2026-07-26: SNKRDUNK(全件・HTTP高速)を **先に** 取得 → メルカリは「新規再仕入れ可が N件
+    #   見つかるまで」保留分をチャンク検索するループに(RESTOCK_TARGET_NEW>0 のとき)。SNKRDUNK済で
+    #   resourceable が分かるので、足りない分だけメルカリを掘る = 無駄スクレイプ最小・確証が毎回N件出る。
     print("▶ SNKRDUNK PSA10 取得中 (HTTP, 当日分はキャッシュ再利用)...")
     import snkrdunk_psa_resource as sp
     snkr_res = {}
@@ -658,6 +634,81 @@ def main():
             print(f"  [{i+1}/{len(rows)}] {cn}: PSA10 ¥{res.get('psa10_price_jpy')}", flush=True)
         else:
             print(f"  [{i+1}/{len(rows)}] {cn}: PSA10在庫なし", flush=True)
+
+    # --- メルカリ (一括 Selenium。当日キャッシュ分は再利用、未キャッシュのみスクレイプ) ---
+    mercari_res = {}
+    _to_scrape_all = [i for i in range(len(rows)) if not (_cache_hit(_iids[i]) and "mercari" in _cache_hit(_iids[i]))]
+    for i in range(len(rows)):
+        c = _cache_hit(_iids[i])
+        if c and "mercari" in c:
+            mercari_res[i] = c["mercari"]
+
+    # 既に確定/レビュー済の itemID(=視覚確証に出さない) → 「新規」再仕入れ可の判定に使う。
+    _processed_iids = set()
+    try:
+        from sheet_io import read_tab as _rt_proc
+        _processed_iids = (_restock_confirmed_iids(_rt_proc("RESTOCK確定"))
+                           | _review_skip_iids(_rt_proc(REVIEW_SKIP_TAB)))
+    except Exception as _e:
+        print(f"  ⚠ 既処理itemID読込skip ({type(_e).__name__}) — 新規カウントは全resourceable基準")
+
+    def _count_new_resourceable():
+        """現在の snkr_res + mercari_res で「新規(未確定・未レビュー)の再仕入れ可」件数。
+        = 視覚確証HTMLに実際に出る件数と一致(確証は _processed_iids を除外表示するため)。"""
+        pairs = []
+        for _i, _r in enumerate(rows):
+            _mr = mercari_res.get(_i) or {}
+            _c = combine(_mr.get("best"), snkr_res.get(_i), mercari_cands=_mr.get("cands"), max_aux=5)
+            _iid = mp._ebay_item_id(_r.get("ebay_url", "") or "")
+            pairs.append((bool(_c["resourceable"]), _iid))
+        return _count_new_resourceable_from(pairs, _processed_iids)
+
+    def _scrape_chunk(idxs):
+        if not idxs:
+            return
+        try:
+            cards = [{**mp.build_card_query(rows[i].get("title", ""), rows[i].get("set_no", ""), rows[i].get("key")),
+                      "ebay_item_id": _iids[i]} for i in idxs]
+            scraped = mp.fetch_mercari_cheapest(cards)
+            for j, i in enumerate(idxs):
+                mercari_res[i] = scraped.get(j)
+        except Exception as e:
+            print(f"  ⚠ メルカリ skip ({type(e).__name__}: {e}) — SNKRDUNKのみで判定")
+
+    _batch = int(os.environ.get("RESTOCK_SCRAPE_BATCH", "10"))
+    _target = int(os.environ.get("RESTOCK_TARGET_NEW", "0"))       # >0 で「新規N件見つかるまで」ループ
+    _max_scrape = int(os.environ.get("RESTOCK_MAX_SCRAPE", "60"))  # BAN安全: 1走行のメルカリ検索上限
+    _cache_reuse = len(rows) - len(_to_scrape_all)
+
+    if _target > 0:
+        # ★「新規再仕入れ可が _target 件見つかるまで」保留分を _batch 刻みで検索(BAN throttle維持)。
+        # _max_scrape で1走行の検索上限を打ち切り。保留が尽きても止める(在庫が実際に無ければ N件出ない=正)。
+        # 未検索の残りは End候補にせず判定保留(fail-closed)。
+        _chunk = _batch if _batch > 0 else 10
+        print(f"▶ メルカリ: 新規再仕入れ可 {_target}件 見つかるまで検索(当日キャッシュ {_cache_reuse}件 / "
+              f"保留 {len(_to_scrape_all)}件 / 1走行上限 {_max_scrape}件・{_chunk}件刻み)")
+        _ptr = 0
+        _have = _count_new_resourceable()
+        print(f"  ⟳ 起点(キャッシュ+SNKRDUNK)で新規 {_have}/{_target}", flush=True)
+        while _have < _target and _ptr < len(_to_scrape_all) and _ptr < _max_scrape:
+            _chunk_idxs = _to_scrape_all[_ptr:_ptr + _chunk]
+            _scrape_chunk(_chunk_idxs)
+            _ptr += len(_chunk_idxs)
+            _have = _count_new_resourceable()
+            print(f"  ⟳ 新規再仕入れ可 {_have}/{_target}(検索 {_ptr}/{len(_to_scrape_all)})", flush=True)
+        _deferred = set(_to_scrape_all[_ptr:])
+        _reason = ("目標到達" if _have >= _target
+                   else ("保留尽き=在庫ある分は探し切った" if _ptr >= len(_to_scrape_all)
+                         else f"1走行上限{_max_scrape}件で打切り"))
+        print(f"  ✓ 新規 {_have}件 ({_reason})"
+              + (f" / 次回送り {len(_deferred)}件(判定保留)" if _deferred else ""))
+    else:
+        # 従来: 固定 _batch 件だけ検索(残りは判定保留)。RESTOCK_SCRAPE_BATCH=0 でメルカリ再走なし。
+        _deferred = set(_to_scrape_all[_batch:]) if _batch >= 0 else set()
+        _to_scrape = _to_scrape_all[:_batch] if _batch > 0 else ([] if _batch == 0 else _to_scrape_all)
+        print(f"▶ メルカリ最安取得: 当日キャッシュ再利用 {_cache_reuse}件 / 今回スクレイプ {len(_to_scrape)}件"
+              + (f" / 次回送り {len(_deferred)}件(End候補にしない=判定保留)" if _deferred else ""))
+        _scrape_chunk(_to_scrape)
 
     # 研究キャッシュ更新(当日付き) — 次回の同日再走はスクレイプ不要に。
     # ★2026-07-24 fail-closed: メルカリ取得失敗(_error)は **キャッシュに残さない** →
@@ -839,6 +890,25 @@ def _is_high_cost(v8_label):
     仕入高 = ⚠仕入高 で始まる時のみ True。判定不能・市場内・計算不可は False(=照合に出す)。
     """
     return bool(v8_label) and v8_label.startswith("⚠仕入高")
+
+
+def _count_new_resourceable_from(pairs, processed_iids):
+    """[(resourceable_bool, itemID), ...] → 新規(未処理=確定/レビュー済でない)の再仕入れ可 件数(純関数)。
+
+    「新規N件見つかるまで」ループの停止判定に使う。itemID 空(join不能)の resourceable も
+    新規として数える(確証には出るため)。processed_iids = RESTOCK確定 ∪ レビュー済 の itemID。
+    """
+    seen = set()
+    cnt = 0
+    for res, iid in pairs:
+        if not res:
+            continue
+        if iid:
+            if iid in processed_iids or iid in seen:
+                continue
+            seen.add(iid)
+        cnt += 1
+    return cnt
 
 
 def _restock_confirmed_iids(existing_rows):
