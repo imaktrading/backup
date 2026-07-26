@@ -94,6 +94,7 @@ LISTINGS_COL_BACKUP_URLS = (
     LISTINGS_COL_BACKUP_URL_5,
 )
 LISTINGS_COL_PRICE_PREV = 34  # AH: 前期 N (毎 cycle で旧 N がコピーされる、Revise が短期 trend に利用)
+LISTINGS_COL_KEY = 35         # AI: KEY (= 型番/productNumber)。yodobashi snapshot lookup のキー (2026-07-26)
 # AK: 巡回ERR (scrape error / 在庫不能 row のマーカー、成功で clear)。2026-06-11 追加。
 # AJ=KEY2_ARCHIVED の次の空き列に append (= 既存列の挿入/ズレ無し、grid は BA=53 まで存在)。
 LISTINGS_COL_ERR_FLG = 37     # AK
@@ -234,6 +235,7 @@ def read_listings_rows(
             "checked_at":   (row[LISTINGS_COL_CHECKED_AT - 1] if len(row) >= LISTINGS_COL_CHECKED_AT else "").strip(),
             "backup_urls":  backup_urls,  # AC-AG (#29-33) のうち空でないもの (後方互換)
             "backup_url_slots": backup_url_slots,  # AC-AG 固定 5 枠 positional (空=None)。消込/stamp/色塗り用
+            "key_number":   (row[LISTINGS_COL_KEY - 1] if len(row) >= LISTINGS_COL_KEY else "").strip(),  # AI: 型番 (yodobashi lookup)
             # 現在の N 列値 (生文字列、空欄も含む)。次 cycle で AH (前期 N) にコピーされる
             "current_n_jpy_str": (row[LISTINGS_COL_PRICE_NOW - 1] if len(row) >= LISTINGS_COL_PRICE_NOW else "").strip(),
             # 現在の M 列値 (=前 cycle に書いた現在価格、移行済 LOW/HIGH 両シート)。価格急増ガードの
@@ -741,6 +743,8 @@ def detect_supplier(domain: str) -> str:
         return "fril"
     if "snkrdunk.com" in d:
         return "snkrdunk"
+    if "yodobashi.com" in d:
+        return "yodobashi"   # G-shock 補仕入元 (Harvest の HTTP snapshot を型番で lookup、2026-07-26)
     return "other"
 
 

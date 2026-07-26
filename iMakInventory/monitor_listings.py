@@ -118,19 +118,78 @@ def log(msg: str):
 # ============================================================================
 # 1 行 (1 listing) の在庫チェック
 # ============================================================================
+# ── ヨドバシ在庫スナップショット (Harvest 供給、2026-07-26) ────────────────────
+# G-shock 補仕入元。Harvest が LOW cycle 直前に HTTP(requests+bs4) で全型番の在庫+価格を snapshot 化
+# (Selenium 不要・Akamai challenge 無を Harvest 実測)。監視くんは型番(AI列)で JSON を lookup するだけ =
+# cycle 負荷ゼロ。snkrdunk listing_live_price と同型。fail-closed: 欠損/古い/型番無 → uncertain(min対象外)。
+YODOBASHI_SNAPSHOT_PATH = Path(r"C:\dev\iMak_data\harvest\yodobashi_stock_snapshot.json")
+YODOBASHI_SNAPSHOT_MAX_AGE_H = 12   # generated_at がこれ超に古い → 使わない (fail-closed)
+_yodo_snap_cache: dict = {}         # {"loaded":bool, "data":dict|None} (cycle 内 1 回 load)
+
+
+def _load_yodobashi_snapshot():
+    """ヨドバシ在庫 snapshot を load (cycle 内キャッシュ)。古い/欠損なら None (= 全 lookup uncertain)."""
+    if _yodo_snap_cache.get("loaded"):
+        return _yodo_snap_cache.get("data")
+    data = None
+    try:
+        if YODOBASHI_SNAPSHOT_PATH.exists():
+            raw = json.loads(YODOBASHI_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+            gen = raw.get("generated_at")
+            fresh = False
+            if gen:
+                try:
+                    dt = datetime.fromisoformat(gen)
+                    ref = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+                    fresh = (ref - dt).total_seconds() / 3600.0 <= YODOBASHI_SNAPSHOT_MAX_AGE_H
+                except Exception:
+                    fresh = False
+            if fresh:
+                data = {k: v for k, v in raw.items() if k != "generated_at"}
+    except Exception:
+        data = None
+    _yodo_snap_cache["loaded"] = True
+    _yodo_snap_cache["data"] = data
+    return data
+
+
 def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
-                      mercari_driver=None, amazon_driver=None) -> dict:
+                      mercari_driver=None, amazon_driver=None,
+                      model_number: str = "") -> dict:
     """1 URL に対する scraper 呼出 + 結果 dict 返却 (純粋 helper).
 
     Returns: {url, supplier, is_sold (True/False/None), raw_status, error, price_jpy}
         - is_sold=False: 在庫あり (= 取下げ対象外)
         - is_sold=True : 売切 (= 取下げ候補)
         - is_sold=None : 不確定 (scraper 失敗等、error 必ず非 None)
+
+    model_number: yodobashi 補URL の snapshot lookup キー (行の AI列=型番)。他 supplier では未使用。
     """
     domain = _domain_of(url)
     supplier = detect_supplier(domain)
     out = {"url": url, "supplier": supplier, "is_sold": None,
            "raw_status": "", "error": None, "price_jpy": None, "points_jpy": None}
+
+    # ★ yodobashi: scraper を叩かず Harvest snapshot を型番で lookup (fail-closed)。
+    if supplier == "yodobashi":
+        snap = _load_yodobashi_snapshot()
+        entry = (snap or {}).get((model_number or "").strip())
+        if not snap or not isinstance(entry, dict):
+            out["error"] = "yodobashi snapshot 欠損/古い/型番無 (fail-closed=min対象外)"
+            return out
+        ins = entry.get("in_stock")
+        if ins is True:
+            out["is_sold"] = False
+            out["raw_status"] = "yodobashi_in_stock"
+            p = entry.get("price_jpy")
+            if isinstance(p, int) and not isinstance(p, bool) and p >= 0:
+                out["price_jpy"] = p   # M-min に効かせる
+        elif ins is False:
+            out["is_sold"] = True
+            out["raw_status"] = "yodobashi_sold"
+        else:
+            out["error"] = "yodobashi in_stock=None (判定不能, fail-closed)"
+        return out
 
     if supplier == "mercari":
         try:
@@ -230,8 +289,11 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
         slots = list(_bu) + [None] * (5 - len(_bu))
     slots = list(slots)[:5] + [None] * max(0, 5 - len(slots))
 
+    _model = row.get("key_number", "")   # AI列=型番 (yodobashi 補URL の snapshot lookup キー)
+
     # 主 URL は必ず scrape (index 0)
-    main_sub = _check_single_url(row["url"], sleep_sec, mercari_driver, amazon_driver)
+    main_sub = _check_single_url(row["url"], sleep_sec, mercari_driver, amazon_driver,
+                                 model_number=_model)
     sub_results = [main_sub]
     hit_index = 0 if main_sub["is_sold"] is False else -1
 
@@ -241,7 +303,8 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
         if not burl:
             backup_slot_results.append(None)   # 空枠 (色塗り "unknown" / 消込対象外)
             continue
-        sub = _check_single_url(burl, sleep_sec, mercari_driver, amazon_driver)
+        sub = _check_single_url(burl, sleep_sec, mercari_driver, amazon_driver,
+                                model_number=_model)
         sub_results.append(sub)
         if sub["is_sold"] is False and hit_index < 0:
             hit_index = len(sub_results) - 1   # sub_results 内の index (価格採用に使う)

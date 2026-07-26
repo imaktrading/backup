@@ -28,7 +28,7 @@ def _stub_check_single_url(in_stock_per_url: dict):
     Args:
         in_stock_per_url: { url -> "in_stock" | "sold" | "error" }
     """
-    def _stub(url, sleep_sec=0, mercari_driver=None, amazon_driver=None):
+    def _stub(url, sleep_sec=0, mercari_driver=None, amazon_driver=None, model_number=""):
         v = in_stock_per_url.get(url, "sold")
         if v == "in_stock":
             return {"url": url, "supplier": "mercari", "is_sold": False,

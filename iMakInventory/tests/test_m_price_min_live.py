@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 
 def _stub(table):
     """url -> {"is_sold":bool|None, "price":int|None, "points":int|None, "supplier":str}."""
-    def _f(url, sleep_sec=0, mercari_driver=None, amazon_driver=None):
+    def _f(url, sleep_sec=0, mercari_driver=None, amazon_driver=None, model_number=""):
         d = table[url]
         return {"url": url, "supplier": d.get("supplier", "amazon"),
                 "is_sold": d["is_sold"], "raw_status": "in_stock" if d["is_sold"] is False else "x",
