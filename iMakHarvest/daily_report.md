@@ -1,5 +1,19 @@
 # iMakHarvest daily_report
 
+## 2026-07-26 (続5) — snapshot生成 cron 登録 (毎日22:20)
+
+- 決定: HQ `..._cron_cadence_2220_GO.md` で 22:20 cron GO (LOW cycle 22:30 の10分前)。
+- 変更: `run_snapshot_cron.cmd`(ラッパー、無窓pythonw+ログ)+ Task Scheduler タスク
+  `iMakHarvest_YodobashiSnapshot_Daily`(毎日22:20)。
+- 検証: 初回テスト実行で **Last Result=1**(WindowsApps python シム失敗 + 日本語RENコメント
+  文字化けが真因)→ **①実体pythonパス化 ②.cmd を ASCII コメント化** で解消 → **Last Result=0**、
+  snapshot generated_at が自動更新(19:36:15、21型番)を実測。Next Run=22:20。
+- 教訓: (1) Task Scheduler で WindowsApps python **実行エイリアスのシムは失敗** →
+  `PythonSoftwareFoundation.Python.3.11_...\pythonw.exe` の実体パスを使う。
+  (2) **.cmd は ASCII のみ**(cmd.exe が UTF-8 日本語 REM を CP932 誤読しspurious error)。
+
+---
+
 ## 2026-07-26 (続4) — 複数仕入元マージ 本実装 初弾 (21型番救済 + snapshot)
 
 ### 決定
