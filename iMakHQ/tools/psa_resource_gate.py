@@ -895,6 +895,19 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     import datetime
     import psa_resource_confirm as prc
     from sheet_io import read_tab
+    # 現在の仕入れ値(N=col13)+現在価格(M=col12)を itemID で引く → 確証カードに💴表示(補URL slice3 と横展開)。
+    # 「今の仕入れ価格 vs 見つけた候補」を見比べて、安い供給か一目で分かる(2026-07-26)。失敗は空マップ。
+    _cost_by_iid = {}
+    try:
+        import sheet_io as _sio
+        _pv = _sio._product_ws().get_all_values()
+        for _r in _pv[1:]:
+            _iid = (_r[1].strip() if len(_r) > 1 else "")
+            if _iid:
+                _cost_by_iid[_iid] = ((_r[13].strip() if len(_r) > 13 else ""),
+                                      (_r[12].strip() if len(_r) > 12 else ""))  # (N仕入れ値, M現在価格)
+    except Exception as _e:
+        print(f"  ⚠ 仕入れ値マップ取得skip ({type(_e).__name__})")
     # 既にRESTOCK確定済(実行済/入稿待ち)の itemID は視覚確証に再表示しない(同じ確証作業の繰り返し防止。
     # 2026-06-22 ユーザー要望)。canonical は RESTOCK確定タブ。
     _existing = read_tab("RESTOCK確定")
@@ -927,9 +940,11 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
             _mv = bool(mp._is_multi_variant(rc.get("card_no") or ""))
         except Exception:
             _mv = False
+        _cn, _pn = _cost_by_iid.get(iid, ("", ""))   # 現在の仕入れ値N / 現在価格M
         items.append({"idx": n, "title": rc["title"], "card_no": rc["card_no"],
                       "ebay_url": rc["ebay_url"], "ref_image": ref,
-                      "candidates": rc["candidates"], "v8": v8, "multi_variant": _mv})
+                      "candidates": rc["candidates"], "v8": v8, "multi_variant": _mv,
+                      "cost_now": _cn, "price_now": _pn})
     if _skipped_done:
         print(f"  ⏭ 既にRESTOCK確定済 {_skipped_done}件は視覚確証スキップ(再作業防止)")
     if _skipped_review:
