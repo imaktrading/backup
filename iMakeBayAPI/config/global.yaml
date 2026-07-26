@@ -127,7 +127,7 @@ v5_pricing:
 # 商品本体 USD + Policy 送料 USD で listing
 # ------------------------------------------------
 v6_pricing:
-  last_synced_at: '2026-05-24T12:08:07+09:00'  # sync_sheet_to_yaml.py 自動更新
+  last_synced_at: '2026-07-24T19:59:48+09:00'  # sync_sheet_to_yaml.py 自動更新
   enabled: true                    # V6 paid shipping mode (2026-05-20 切替、V5 スプシ完全一致)
   # グループ別 HTS率 (+5% buffer 込み) / Split (案A=1.0 / 案B=0.5)
   groups:

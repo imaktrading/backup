@@ -1,0 +1,28 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452537 ITAJAGA DRAGON BALL VOL.8 [GOHAN & GOTEN & TRUNKS] #21 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 9,
+      "status": "pending"
+    },
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452535 ITAJAGA DRAGON BALL VOL.7 [GOKU & GOHAN] #28 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 8,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 2
+  }
+}
