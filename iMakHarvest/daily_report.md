@@ -1,5 +1,32 @@
 # iMakHarvest daily_report
 
+## 2026-07-26 (続) — ヨドバシ G-shock 収集 新設 (第2の仕入元 + Amazon差分)
+
+### 決定
+- user 依頼: ヨドバシ.com から G-shock を収集し中間スプシに出す + Amazon との差分確認。
+- feasibility 実機調査: サーバHTML(JSアプリでない)・captcha無・単一直販(merchantId不要)。
+  在庫は配送表記で判定 (「…お届けできます」=在庫あり 283 / 廃番・取寄 7)。
+  無在庫DS前提で **在庫あり(お届け表記)のみ keep**、取寄/廃番/予約は fail-closed skip。
+
+### 変更 (新規ファイル)
+- `scrapers/yodobashi_search_http.py`: カテゴリ検索を `/pN/` パスで全ページ走査、
+  `.js_productList .productListTile` から型番/価格/在庫を parse。page1=0件で blocked
+  (Amazon と同じ fail-OPEN ガード)。
+- `sheet_writer_yodobashi.py`: `yodobashi_<label>` タブに append (product_id dedup、
+  列構成は sheet_writer_amazon と共有 → AI列型番で両タブ突合可)。
+- `run_harvest_yodobashi.py`: 収集→keep gate(在庫/gshock/gift-pair除外)→append→Amazon差分。
+- `tests/test_yodobashi_search.py`: 16件 (URL構築/型番/在庫/container-scoped parse)。
+
+### 検証 (実測)
+- 収集290 → keep283 (在庫あり) / reject7 (out_of_stock)。gift_pair 除外は共有関数で0。
+- スプシ: `yodobashi_gshock` に **283行 append** (appended=283/skipped=0)。
+  read-back: URL不正0 / F価格非数字0 / AI型番空0。
+- **Amazon 差分 (型番ベース)**: ヨドバシのみ **51型番** (Amazon未収集の新規候補) /
+  両方232 / Amazonのみ95。
+- `pytest tests/` = **778 passed**。
+
+---
+
 ## 2026-07-26 — Amazon G-shock 差分取得 + fail-OPEN defect 修正
 
 ### G-shock 差分 (HQ 手動依頼方式)
