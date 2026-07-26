@@ -1700,3 +1700,14 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 検証: 検体「主売切+snkrdunk補最安2500+mercari補4000→M=2500(snkrdunk)」+ (True,9000)/(True,None)/fallback。
   **pre-commit 全pass(151+offline)**。→ M-price 正確性が mercari/amazon/snkrdunk 全チャネル完結。
 - next: 実cycleで主売切+snkrdunk補最安→M=snkrdunk価格 を1件突合。HQ の AN棚卸しと両輪。
+
+### ヨドバシ補URL 在庫snapshot lookup 統合 = G-shock 3rd化延命 + M-min (HQ依頼、commit 3a5cee7)
+- 決定: G-shock(LOW) の Amazon 3rd化(OOS)をヨドバシ補URL(新品在庫)で延命 + M=min(Amazon,ヨドバシ)。
+  ★Selenium不要: Harvest が HTTP snapshot(型番→在庫,価格)を LOW cycle 前生成 → 監視くんは型番(AI列)で JSON lookup。
+- 変更: [sheet_updater.py](../sheet_updater.py) detect_supplier に yodobashi、read に AI列(35)=KEY(key_number)。
+  [monitor_listings.py](../monitor_listings.py) _load_yodobashi_snapshot(12h staleness) + _check_single_url に
+  yodobashi分岐(model_number lookup): in_stock True+price→是False+price(M-min) / False→sold / null/型番無→uncertain。
+  延命/M-min は既存 machinery 流用。snapshot 置き場=iMak_data/harvest/yodobashi_stock_snapshot.json(HQ合意)。
+- 検証: test 10件(HQ検体: Amazon3rd化+ヨドバシ在庫→延命M=2万 / 両OOS→D=○ / null→uncertain / stale・欠損→fail-closed)。
+  **pre-commit 全pass(151+offline)**。cycle 負荷ゼロ(scraper叩かず JSON lookup)。
+- next: Harvest が snapshot 生成開始で次 LOW cycle から自動作動(それまで欠損=fail-closed無害)。実cycle突合予定。
