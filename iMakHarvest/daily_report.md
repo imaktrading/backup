@@ -1,5 +1,26 @@
 # iMakHarvest daily_report
 
+## 2026-07-26 (続4) — 複数仕入元マージ 本実装 初弾 (21型番救済 + snapshot)
+
+### 決定
+- HQ WRITE_GO (`..._impl_go_WRITE_GO.md`): 21型番救済の補URL実書込 + snapshot生成ランナー。
+
+### 変更 (新規)
+- `run_gshock_merge.py`: LOW(1jF9vggb) の AC-AG 補URL に ヨドバシURL を型番キーで冪等追記
+  (compute_merge 配線)。**D列不触・AC-AG限定 assert 安全弁**。同型番複数行は各行独立に追記。
+- `build_yodobashi_snapshot.py`: LOW でヨドバシURL保持の型番の (在庫,価格,url) を
+  `iMak_data/harvest/yodobashi_stock_snapshot.json` に型番キーで生成 (fail-closed・generated_at)。
+- test: `test_gshock_merge_runner.py` (AC-AG列マッピング / ヨドバシURL検出)。
+
+### 検証 (実測・完了条件クリア)
+- **21型番補URL実書込**: dry-run → 実書込 **AC 23セル** (21型番、同型番複数行で23行)。
+  read-back: **AC 23/23 入力 / D列変化 0件** (在庫状態不触を実証)。
+- **snapshot初回生成**: 21型番 **全 in_stock=True** + price + url、generated_at=19:14。不備0。
+- `pytest tests/` = **798 passed**。
+- → 次 LOW cycle で Inventory が「Amazon 3rd化 → ヨドバシ延命 + M最安」を突合予定。報告は `_response.md`。
+
+---
+
 ## 2026-07-26 (続3) — 複数仕入元マージ POC (HQ go)
 
 ### 決定
