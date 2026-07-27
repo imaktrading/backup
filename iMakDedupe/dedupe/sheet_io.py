@@ -917,7 +917,7 @@ def backfill_canonical_key(
     import gspread  # 遅延
     from .checker import (
         classify_canonical_key,
-        extract_canonical_key,
+        extract_canonical_key_with_category,
         KEY_TYPE_FAILED,
         KEY_TYPE_PRODUCT_ID,
         KEY_TYPE_URL_KEY,
@@ -938,6 +938,9 @@ def backfill_canonical_key(
         "upgraded_url_to_product_id": 0,
         "skipped_item_id_present": 0,
         "skipped_category_mismatch": 0,
+        # 2026-07-27 Phase2b: カテゴリ prefix 内訳
+        "written_with_category": 0,   # {category}:{pid} で書いた分
+        "written_bare_pid": 0,        # category 空で bare pid を書いた分 (= 想定外・要確認)
     }
     if not values:
         return counts
@@ -980,7 +983,9 @@ def backfill_canonical_key(
         cert = _safe_cell(row, cert_col) if cert_col else ""
         image_url = _safe_cell(row, image_url_col) if image_url_col else ""
 
-        new_key, new_type = extract_canonical_key(
+        # 2026-07-27 Phase2b: カテゴリ prefix 込みで解決 ({category}:{product_id})。
+        # url-key / 未解決は prefix 無 (build_key が category 空で判別)。
+        new_key, new_type = extract_canonical_key_with_category(
             title=chosen_title,
             url=url,
             cert=cert,
@@ -1006,6 +1011,11 @@ def backfill_canonical_key(
             )
             if new_type == KEY_TYPE_PRODUCT_ID:
                 counts["written_product_id"] += 1
+                # prefix 内訳 (= `:` 含み かつ url-key でない = catalog-backed)
+                if ":" in new_key:
+                    counts["written_with_category"] += 1
+                else:
+                    counts["written_bare_pid"] += 1
             else:
                 counts["written_url_key"] += 1
             wrote = True

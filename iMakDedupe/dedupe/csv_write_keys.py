@@ -435,6 +435,9 @@ def write_canonical_key_to_high(
         "skipped_cert_unmatched": 0,
         "skipped_no_resolution": 0,
         "skipped_existing_product_id": 0,
+        # 2026-07-27 Phase2b: カテゴリ prefix 内訳
+        "written_with_category": 0,   # {category}:{pid} で書いた分
+        "written_bare_pid": 0,        # category 空で bare pid を書いた分 (= 想定外)
         "samples": [],
     }
 
@@ -455,7 +458,12 @@ def write_canonical_key_to_high(
         result["matched"] += 1
 
         # === resolver 経由 canonical KEY 解決 (= 再 parse 禁止) ===
-        canonical_key = resolver_io.resolve_csv_row(csv_row, purpose="listing")
+        # 2026-07-27 Phase2b: カテゴリ prefix 込み ({category}:{product_id})。
+        # resolver の保証 (catalog-backed=category非空 / url-key・未解決=category空) に依拠、
+        # build_key が category 非空時のみ prefix (= url-key `:` 誤認回避)。
+        from .key_format import build_key
+        _res = resolver_io.resolve_csv_row_with_category(csv_row, purpose="listing")
+        canonical_key = build_key(_res.get("category"), _res.get("product_id"))
         new_type = classify_canonical_key(canonical_key)
 
         if new_type != KEY_TYPE_PRODUCT_ID:
@@ -481,6 +489,11 @@ def write_canonical_key_to_high(
                 }
             )
             result["written_key"] += 1
+            # Phase2b prefix 内訳 (= `:` 含み = catalog-backed / 無 = bare 想定外)
+            if ":" in canonical_key:
+                result["written_with_category"] += 1
+            else:
+                result["written_bare_pid"] += 1
             wrote = True
         else:
             current_type = classify_canonical_key(current_key)

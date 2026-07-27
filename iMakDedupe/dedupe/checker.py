@@ -167,6 +167,38 @@ def extract_canonical_key(
     return key, classify_canonical_key(key)
 
 
+def extract_canonical_key_with_category(
+    title: str = "",
+    url: str = "",
+    cert: str = "",
+    image_url: str = "",
+    extra_text: str = "",
+    purpose: str = "dedup",
+) -> Tuple[str, str]:
+    """canonical KEY を **カテゴリ prefix 込み** で取得 (= 案B Phase2b 書く側用).
+
+    resolve_sheet_row_with_category → key_format.build_key で
+    `{category}:{product_id}` (catalog-backed) / url-key そのまま / "" を組立。
+    classify は組立後の KEー に対して行う (= prefix 付き product_id も PRODUCT_ID 判定)。
+
+    Returns:
+        (canonical_key, key_type) — extract_canonical_key と同 signature。
+        canonical_key: "gundam_tcg:ST02-010" / "item:m..." / "" (= 未解決)
+    """
+    from . import resolver_io
+    from .key_format import build_key
+    res = resolver_io.resolve_sheet_row_with_category(
+        title=title,
+        url=url,
+        image_url=image_url,
+        cert=cert,
+        extra_text=extra_text,
+        purpose=purpose,
+    )
+    key = build_key(res.get("category"), res.get("product_id"))
+    return key, classify_canonical_key(key)
+
+
 @dataclass(frozen=True)
 class CanonicalIndex:
     """既存出品スプシ (= HIGH/LOW/公式) から構築した単一 KEY 突合 index.
@@ -1586,6 +1618,8 @@ def run_write_keys_from_csv_canonical(csv_path: str, dry_run: bool = False) -> i
     print(f"  HIGH TCG rows           : {result['high_tcg_rows']}")
     print(f"  matched                 : {result['matched']}")
     print(f"  written_key (新規)      : {result['written_key']}")
+    print(f"    ├ written_with_category: {result.get('written_with_category', 0)}  (= {{category}}:{{pid}} 新形式)")
+    print(f"    └ written_bare_pid     : {result.get('written_bare_pid', 0)}  (= category 空 bare。 0 のはず)")
     print(f"  upgraded url→product_id : {result['upgraded_url_to_product_id']}")
     print(f"  skipped_no_cert         : {result['skipped_no_cert']}")
     print(f"  skipped_cert_unmatched  : {result['skipped_cert_unmatched']}")
@@ -1651,10 +1685,14 @@ def run_backfill_keys_from_cert(dry_run: bool = False) -> int:
     print(f"  skipped_existing        : {counts['skipped_existing']}  (= KEー既存)")
     print(f"  skipped_no_resolution   : {counts['skipped_no_resolution']}  (= 解決不能 fail-closed)")
     print(f"  written_product_id      : {counts['written_product_id']}  ← 付与行数")
+    print(f"    ├ written_with_category: {counts['written_with_category']}  (= {{category}}:{{pid}} 新形式)")
+    print(f"    └ written_bare_pid     : {counts['written_bare_pid']}  (= category 空 bare。 0 のはず)")
     print(f"  written_url_key         : {counts['written_url_key']}  (= 0 のはず, url封じ)")
     print(f"  upgraded_url→product_id : {counts['upgraded_url_to_product_id']}")
     if counts["written_url_key"]:
         print("  [!] WARNING: url_key が書かれた (= url封じの想定外)。 要確認")
+    if counts["written_bare_pid"]:
+        print("  [!] WARNING: category 空の bare pid が書かれた (= Phase2b prefix 想定外)。 要確認")
     return 0
 
 

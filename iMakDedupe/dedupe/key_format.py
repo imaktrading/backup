@@ -61,6 +61,32 @@ def parse_key(k: Optional[str]) -> Tuple[Optional[str], str]:
     return (None, k)
 
 
+def build_key(category: Optional[str], product_id: Optional[str]) -> str:
+    """書く側 (= Phase2b): (category, product_id) から KEー を組立.
+
+    catalog resolver `resolve_with_category` の戻り {product_id, category} を
+    そのまま渡す想定。分岐は resolver の保証 (= catalog-backed なら category 非空、
+    url-key / 未解決は category 空) に依拠:
+
+    - product_id 空 → "" (= fail-closed。 KEー を書かない)
+    - category 非空 → "{category}:{product_id}" (= catalog-backed → prefix)
+    - category 空 → product_id そのまま (= url-key `item:`/`shops:` は prefix しない。
+      `:` を含むため prefix すると読む側が category 誤認する)
+
+    >>> build_key("gundam_tcg", "ST02-010")
+    'gundam_tcg:ST02-010'
+    >>> build_key("", "item:m12345")
+    'item:m12345'
+    >>> build_key("", "")
+    ''
+    """
+    product_id = (product_id or "").strip()
+    if not product_id:
+        return ""
+    category = (category or "").strip()
+    return f"{category}:{product_id}" if category else product_id
+
+
 def group_key(k: Optional[str]) -> str:
     """突合用の正規化 KEー (= 同一カード判定の group 単位).
 
@@ -83,4 +109,4 @@ def group_key(k: Optional[str]) -> str:
     return f"{cat}:{pid}" if cat else pid
 
 
-__all__ = ["parse_key", "group_key"]
+__all__ = ["parse_key", "group_key", "build_key"]

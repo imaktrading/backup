@@ -59,9 +59,17 @@ def _run(rows, resolve_map, dry_run=False):
     ws = _fake_ws(rows)
 
     def _fake_resolve(title="", url="", image_url="", cert="", extra_text="", purpose="dedup"):
-        return resolve_map.get(cert, "")
+        # Phase2b: resolve_sheet_row_with_category は dict を返す。
+        # resolve_map の値が str なら product_id とみなし category 自動推定
+        # (url-key/空 → category=""、 それ以外 → one_piece_tcg)。 dict ならそのまま。
+        v = resolve_map.get(cert, {"product_id": "", "category": ""})
+        if isinstance(v, dict):
+            return v
+        if not v or v.startswith(("item:", "shops:")):
+            return {"product_id": v, "category": ""}
+        return {"product_id": v, "category": "one_piece_tcg"}
 
-    with patch("dedupe.resolver_io.resolve_sheet_row", side_effect=_fake_resolve):
+    with patch("dedupe.resolver_io.resolve_sheet_row_with_category", side_effect=_fake_resolve):
         counts = sheet_io.backfill_canonical_key(
             ws,
             key_col=KEY_COL,
@@ -86,14 +94,42 @@ def _run(rows, resolve_map, dry_run=False):
 
 
 def test_product_id_resolved_writes_key():
-    """B空+cert+KEー空 が product_id 解決 → KEー 書込."""
+    """B空+cert+KEー空 が product_id 解決 → カテゴリ prefix 込み KEー 書込 (Phase2b)."""
     rows = [_row(url="u1", itemid="", title="Luffy", cert="111", key="")]
     counts, writes = _run(rows, {"111": "OP01-016"})
     assert counts["written_product_id"] == 1
     assert counts["written_url_key"] == 0
-    # row_idx=2 (header 除く 1 行目), KEー col=19 = 'S2'
+    assert counts["written_with_category"] == 1
+    assert counts["written_bare_pid"] == 0
+    # row_idx=2 (header 除く 1 行目), KEー col=19 = 'S2'。 Phase2b で prefix 付与
     assert "S2" in writes
-    assert writes["S2"] == "OP01-016"
+    assert writes["S2"] == "one_piece_tcg:OP01-016"
+
+
+def test_phase2b_category_prefix_written():
+    """Phase2b: catalog-backed は {category}:{product_id}、 category は resolver 由来."""
+    rows = [_row(url="u1", itemid="", title="Heero", cert="111", key="")]
+    counts, writes = _run(rows, {"111": {"product_id": "ST02-010", "category": "gundam_tcg"}})
+    assert writes["S2"] == "gundam_tcg:ST02-010"
+    assert counts["written_with_category"] == 1
+
+
+def test_phase2b_url_key_not_prefixed():
+    """url-key (category 空) は prefix しない (= `:` 誤認回避)."""
+    rows = [_row(url="u1", itemid="", title="x", cert="111", key="")]
+    counts, writes = _run(rows, {"111": {"product_id": "item:m12345", "category": ""}})
+    # url-key は url_col=None でも build_key は raw を返すが classify=url → written_url_key
+    assert counts["written_url_key"] == 1
+    assert counts["written_with_category"] == 0
+    assert writes["S2"] == "item:m12345"
+
+
+def test_phase2b_fail_closed_not_written():
+    """resolver 未解決 (product_id 空) → 書かない (fail-closed)."""
+    rows = [_row(url="u1", itemid="", title="謎", cert="111", key="")]
+    counts, writes = _run(rows, {"111": {"product_id": "", "category": ""}})
+    assert counts["skipped_no_resolution"] == 1
+    assert writes == {}
 
 
 def test_unresolved_not_written():
@@ -168,8 +204,8 @@ def test_idempotent_second_run_no_writes():
     rows = [_row(url="u1", itemid="", title="Luffy", cert="111", key="")]
     counts1, writes1 = _run(rows, {"111": "OP01-016"})
     assert counts1["written_product_id"] == 1
-    # 2回目: KEー が付いた状態を模擬
-    rows2 = [_row(url="u1", itemid="", title="Luffy", cert="111", key="OP01-016")]
+    # 2回目: KEー が付いた状態を模擬 (= Phase2b prefix 付き形で既存)
+    rows2 = [_row(url="u1", itemid="", title="Luffy", cert="111", key="one_piece_tcg:OP01-016")]
     counts2, writes2 = _run(rows2, {"111": "OP01-016"})
     assert counts2["written_product_id"] == 0
     assert counts2["skipped_existing"] == 1
@@ -192,9 +228,9 @@ def test_dry_run_no_batch_update():
     ws = _fake_ws(rows)
 
     def _fake_resolve(**kw):
-        return "OP01-016"
+        return {"product_id": "OP01-016", "category": "one_piece_tcg"}
 
-    with patch("dedupe.resolver_io.resolve_sheet_row", side_effect=_fake_resolve):
+    with patch("dedupe.resolver_io.resolve_sheet_row_with_category", side_effect=_fake_resolve):
         counts = sheet_io.backfill_canonical_key(
             ws, key_col=KEY_COL, title_col=TITLE_COL, url_col=None,
             cert_col=CERT_COL, image_url_col=None, dry_run=True,
