@@ -443,6 +443,34 @@ def run_status(max_backups=1):
     print(f"  未検索(要 slice2)     : {need}件  → `search` で夜間検索")
 
 
+def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, aux_max=None):
+    """確定URL → 補URL書込計画 {row: [URL×5]} を決める **純関数**(I/Oなし・test可)。
+
+    - guard_ok=False (= URL共有ガードを組めなかった) なら **何も書かない**。
+      ガード無効のまま書くと、他出品が使用中の仕入元URLを掴み、両方売れた時に片方が
+      履行不能 → キャンセル → Defect。「判定不能は skip、破壊的動作に倒さない」に従う。
+    - guard_ok=True なら 他出品所有のURLを落とした上で、既存保持・空き枠のみ埋める。
+    戻り: (aux_writeback{row: [5要素]}, 追加URL総数, 落としたURL [(url, [owner...])])
+    """
+    aux_max = aux_max or AUXN
+    if not guard_ok:
+        return {}, 0, []
+    import dup_guard as _dg
+    aux_writeback, added_total, dropped_all = {}, 0, []
+    for idx, urls in confirmed.items():
+        t = item_targets[idx]
+        row = t["row"]
+        r = vals[row - 1] if 0 < row <= len(vals) else []
+        urls, dropped = _dg.filter_urls_owned_by_others(urls, owner_by_url, _cell(r, B))
+        dropped_all.extend(dropped)
+        existing = [u for u in (_cell(r, AUX0 + k) for k in range(aux_max)) if u]
+        full, added = compute_backurl_additions(existing, urls, aux_max)
+        if added:
+            aux_writeback[row] = full
+            added_total += len(added)
+    return aux_writeback, added_total, dropped_all
+
+
 def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     """昼の確認(impure)。slice2 が焼いた当日キャッシュから候補を出し、現物と視覚確証→
     確定URLを補URL(AC-AG)へ **既存保持+空き枠のみ** 冪等書込(hoju同規約)。主URL(A)は触らない。
@@ -544,9 +572,13 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     # --- 確定URL → 補URL(AC-AG)へ冪等書込(既存保持・空き枠のみ) ---
     # ★ 他出品が既に使っている仕入元URLは書かない(2026-07-26)。同じURLを2出品が指すと
     #   両方売れた時に片方が履行不能 → キャンセル → Defect。補URL充填はこの事故の主な入口。
+    # ★ ガードを組めなかった時は **書かない**(2026-07-26 監査指摘)。
+    #   ガード無効のまま書込を続けると、他出品が使用中のURLを掴んで両売れ→履行不能→Defect。
+    #   「判定不能は skip、破壊的動作に倒さない」(failclosed_must_skip_not_destructive) に従う。
+    #   補URLは足せなくても出品は死なない(既存供給は残る)ので、skip の損失は小さい。
+    _guard_ok, _owner_by_url = True, {}
     try:
         import dup_guard as _dg
-        _owner_by_url = {}
         for _r in vals[1:]:
             if not (_cell(_r, B) and not _cell(_r, D)):
                 continue
@@ -556,26 +588,17 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
                     _owner_by_url.setdefault(_n, set()).add(_cell(_r, B))
         _owner_by_url = {k: sorted(v) for k, v in _owner_by_url.items()}
     except Exception as _e_dg:
-        print(f"  ⚠ URL共有ガード無効(続行): {type(_e_dg).__name__}: {_e_dg}")
-        _dg, _owner_by_url = None, {}
+        print(f"⚠️要対応 URL共有ガードを組めず **補URL書込を中止**: {type(_e_dg).__name__}: {_e_dg}")
+        _guard_ok = False
 
-    aux_writeback, added_total = {}, 0
-    for idx, urls in confirmed.items():
-        t = item_targets[idx]
-        row = t["row"]
-        r = vals[row - 1] if 0 < row <= len(vals) else []
-        if _dg is not None:
-            urls, _dropped = _dg.filter_urls_owned_by_others(urls, _owner_by_url, _cell(r, B))
-            for _u, _own in _dropped:
-                print(f"  ⛔ 補URL除外(他出品が使用中 {_own}): {_u[:70]}")
-        existing = [(_cell(r, AUX0 + k)) for k in range(AUXN)]
-        existing = [u for u in existing if u]
-        full, added = compute_backurl_additions(existing, urls, AUXN)
-        if added:
-            aux_writeback[row] = full
-            added_total += len(added)
+    aux_writeback, added_total, dropped = plan_aux_writeback(
+        confirmed, item_targets, vals, _owner_by_url, _guard_ok)
+    for _u, _own in dropped:
+        print(f"  ⛔ 補URL除外(他出品が使用中 {_own}): {_u[:70]}")
     written = 0
-    if aux_writeback:
+    if not _guard_ok:
+        print("  (ガード不成立のため書込0行。確証結果は台帳に残るので再実行で復帰できます)")
+    elif aux_writeback:
         try:
             from sheet_io import write_aux_urls
             written = write_aux_urls(aux_writeback)
