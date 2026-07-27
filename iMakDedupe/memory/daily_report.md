@@ -134,3 +134,19 @@
 - HQ 依拠の突合はどれか (dedupe単一KEY既定 / --legacy-tuple-mode / HQ dup_guard.py)
 - ①疑いフラグを dedupe と HQ dup_guard どちらに持たせるか (母集団2系統管理回避、dup_guard audit の D非空拡張が筋なら dedupe実装不要)
 - ①②とも出力は「人が見る疑いフラグ」に閉じる理解で合っているか (物理除外・DUPマーク・listing削減しない)
+
+---
+
+## 2026-07-27
+
+### 母集団の穴 HQ 返信受領 → dedupe 側 ①実装不要で確定
+
+- 決定: HQ が3質問に回答。①は HQ dup_guard.py restock_collision() に実装完了 (--audit ④・実測23組検出) → dedupe側実装不要。②突合緩和やらない/variant backfill先行同意/急がない機会実行。live filter広げない。OP01-078=KEー揺れ(catalog責務)訂正受領
+- 変更: iMak_data/dedupe/requests/2026-07-26_..._hq_reply.md 受領 + 同 _dedupe_ack.md (ack + 技術注記)。dedupe コード改変なし
+- 検証: HQ 返信精読。EB03-053/OP08-106=母集団タイミング穴の見立てが23組検出で裏付け確認。dedupe 側に着手すべき残実装なし
+
+### ② variant backfill の技術注記 (= HQ に ack で共有)
+
+- 決定: 「variant backfill先行」を現行 --backfill-keys-from-cert でそのまま回しても **既存の非空KEー(variant片欠け)には効かない** (現行は空KEーのみ書込・既存skip=冪等設計)。②の既存片欠け行を閉じるには「非空KEーを catalog 再解決して variant suffix を補う upgrade モード」の小改修が要る = 一発 run では閉じない
+- 変更: 未実装 (= 現行 backfill は空KEー限定。upgrade モードは feasibility/BUILD 未依頼)
+- 検証: sheet_io.backfill_canonical_key は current_key 非空なら skipped_existing (url-key→product_id upgrade のみ例外)。variant精度 upgrade 経路は無し → grep/コード確認済。HQ④フラグが二次安全網なので急ぎ不要
