@@ -379,6 +379,21 @@ def _normalize_image_url(src):
     return src
 
 
+# PSA 画像 CDN は同じキーで /small/(380x640) /medium/ /large/(1140x1920) を配信する。
+# psa_cache に入るのは scrape 時の /small/ だが、**この解像度では ★(パラレル)1個の差が
+# 判別できず**、目視で「該当なし(NONE)」に倒れて出品機会を落とす。
+# 実例 2026-07-27: cert153420191 Perona は /small/ では p4/p5 を区別できなかったが、
+# /large/ で右下 `OP01-077 ★ UC` の ★ が読め、OP01-077_p5 と確定できた。
+_PSA_IMG_HOST = "d1htnxwo4o0jhw.cloudfront.net"
+
+
+def psa_hires_url(src):
+    """PSA 画像 URL を /large/ 版にする。対象外や既に large なら None (=変換不要)。純関数。"""
+    if not src or _PSA_IMG_HOST not in src or "/small/" not in src:
+        return None
+    return src.replace("/small/", "/large/")
+
+
 def _encode_image_url(src):
     """URL内の未エンコード文字(スペース等)を %エンコード。urllib.request は requests と違い
     パスのスペースを自動エンコードせず InvalidURL('control characters') で落ちるため
@@ -458,14 +473,18 @@ def fetch_external_image(src, retries=4, opener=None, sleep=time.sleep):
     """
     opener = opener or _default_image_opener
     src = _normalize_image_url(src)          # 既知の旧→新パス書換 (dbs リニューアル等)
-    for attempt in range(retries):
-        try:
-            return opener(src)
-        except urllib.error.HTTPError:
-            return None                      # 404/403 = 恒久 → リトライしても無駄
-        except Exception:                    # URLError(DNS)/timeout/conn = 一時的
-            if attempt < retries - 1:
-                sleep(1.5)
+    # ★PSA 画像は先に高解像度(/large/)を試す。無ければ元の /small/ に落とす(fail-safe)。
+    #   目視で ★(パラレル)を判別できるかが「出品できる/NONEで落とす」の分かれ目になるため。
+    candidates = [u for u in (psa_hires_url(src), src) if u]
+    for url in candidates:
+        for attempt in range(retries):
+            try:
+                return opener(url)
+            except urllib.error.HTTPError:
+                break                        # 404/403 = 恒久 → 次の候補(=元URL)へ
+            except Exception:                # URLError(DNS)/timeout/conn = 一時的
+                if attempt < retries - 1:
+                    sleep(1.5)
     return None
 
 
