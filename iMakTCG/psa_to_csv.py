@@ -1163,6 +1163,34 @@ def load_description():
 # (新コア override が新値で description を作り直す replace_tcg_specs も同モジュール)。
 from tcg_listing_fields import build_tcg_specs_html, insert_tcg_specs  # noqa: E402,F401
 
+def detected_grade_from_title(title):
+    """LLM が現物ラベルから読んだタイトル冒頭の "PSA <n>" から グレードを取る (純関数)。
+
+    ★2026-07-27 事故: PSA **9** の Dragon Ball E-60 が **PSA 10 として** CSV 化された。
+      - Claude は画像から正しく `PSA 9 Dragon Ball SCG ...` を生成していた
+      - しかし build_title は `prefix = "PSA 10"` 固定、C:Grade も "10" 固定、
+        さらに新コア override が C:Grade を読んで `PSA 10 ...` にタイトルを再生成
+      → パイプライン全体が **PSA10 限定運用**の前提で、非PSA10 が混ざると全部 10 に化ける。
+      価格も "PSA 10" で市場検索するため相場($8,450)を誤って引き、GO 判定まで出ていた。
+    戻り: 数値文字列 ('9'/'10') / 取れなければ None。
+    """
+    if not title:
+        return None
+    m = re.match(r"\s*PSA\s+(\d{1,2})\b", str(title), re.IGNORECASE)
+    return m.group(1) if m else None
+
+
+def is_psa10_or_unknown(title):
+    """出品してよいか (= PSA10 と読めた or 読めなかった) を返す (純関数)。
+
+    **PSA10 以外だと判った時だけ False**(= 出品しない)。読めない時は従来どおり続行する
+    (パイプラインは PSA10 前提で、ここで全部止めると出品がゼロになるため)。
+    = 「判っている誤りだけを確実に止める」fail-closed。
+    """
+    g = detected_grade_from_title(title)
+    return g is None or g == "10"
+
+
 def parse_psa_page(text):
     data = {}
     lines = [l.strip() for l in text.split('\n') if l.strip()]
@@ -2232,6 +2260,14 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
 
     # タイトル: Claudeが有効なら使用、欠落/不正ならルールベース
     claude_title = claude_result.get('title') if claude_result else None
+    # ★PSA10 以外は出品しない (2026-07-27 事故: PSA9 が PSA10 として出かかった)。
+    #   タイトル/CustomLabel/C:Grade/市場検索が全て PSA10 固定なので、非PSA10 は
+    #   グレード誤表示 + 相場誤参照 になる。現物ラベルを読めた時だけ確実に止める。
+    if not is_psa10_or_unknown(claude_title):
+        _g = detected_grade_from_title(claude_title)
+        print(f"    🚫 PSA{_g} を検出 → **出品しない** (本 pipeline は PSA10 限定運用。"
+              f"グレード誤表示 + PSA10 相場の誤参照になるため fail-closed)")
+        return None
     if claude_title:
         title = strip_banned_words(claude_title)
         title = pad_title(title, card_type=card_type, set_name=set_name)
