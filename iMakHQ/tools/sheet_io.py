@@ -5,6 +5,7 @@
 各分析ボタン(需要・新規強化/再仕入れ/効果測定 等)は結果を「既存メンテ」スプシの
 専用タブに書く。デスクトップCSVは廃止。
 """
+import functools
 import os
 
 MAINT_SHEET_ID = "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4"   # 「既存メンテ」スプシ
@@ -63,6 +64,95 @@ PRODUCT_COL_AUX_START = 28   # AC (補URL1)。AC-AG = 補URL1-5 (idx28-32 / 1-in
 PRODUCT_AUX_MAX = 5
 
 
+def _col_letters_to_idx0(letters):
+    """列文字 → 0-indexed 列番号 ('A'→0 / 'AN'→39)。純関数。不正入力は None。"""
+    letters = (letters or "").strip().upper()
+    if not letters or not letters.isalpha():
+        return None
+    idx = 0
+    for ch in letters:
+        idx = idx * 26 + (ord(ch) - 64)
+    return idx - 1
+
+
+def range_touches_col(a1_range, col_idx0):
+    """A1 レンジが指定列を含むか (純関数)。'AN5'/'AN2:AN9'/'A2:AN9'/'A:AN' すべて True。
+
+    列指定のない開けたレンジ('2:5' や '' = シート全体)は **含む扱い**(安全側)。
+    """
+    if col_idx0 is None:
+        return False
+    s = str(a1_range or "").split("!")[-1].replace("$", "").strip().upper()
+    if not s:
+        return True
+    parts = s.split(":")
+    cols = []
+    for p in parts:
+        letters = "".join(ch for ch in p if ch.isalpha())
+        cols.append(_col_letters_to_idx0(letters))
+    if len(parts) == 1:
+        return cols[0] == col_idx0 if cols[0] is not None else True
+    lo, hi = cols[0], cols[1]
+    if lo is None or hi is None:      # 行だけのレンジ = 全列を含む
+        return True
+    return min(lo, hi) <= col_idx0 <= max(lo, hi)
+
+
+class _ANWriteGuard:
+    """商品管理シートの **AN列(仕入override)への書込を実行時に拒否**する薄い proxy (2026-07-27)。
+
+    ★なぜ実行時ガードが要るか (2026-07-27 監査指摘):
+    source 走査の test だけでは `ws.update_cell(row, 40, v)` の **数値列指定** や
+    `chr(65 + idx0)` の **動的な列文字生成** を検知できず、しかもその2つは
+    このリポジトリに既にある確立済みスタイル(sheet_io の write_aux_urls/write_keys 等)。
+    = 「AN{row}」という文字列を書かなくても簡単に AN を触れてしまう。
+    そこで **書込の出口(worksheet)を1点に絞って弾く**。列の指定方法に依らず止まる。
+
+    AN が入った行は N=(M or F)−K の動的追随を無視して仕入値が凍結し、供給価格が上がっても
+    値上げされず、誰も気づかないまま安売りが続く(実測: Boa Hancock P-066 が ¥29,999 凍結の
+    まま実勢 ¥48,000 に対し $353.98 で出品)。AN は **人が手で入れる時だけ** の入口。
+    """
+
+    _WRITE_METHODS = ("batch_update", "update", "update_acell", "update_cell", "update_cells")
+    _AN = PRODUCT_COL_COST_OVERRIDE          # 39 (0-indexed) = AN列
+
+    def __init__(self, ws):
+        object.__setattr__(self, "_ws", ws)
+
+    def __getattr__(self, name):
+        attr = getattr(object.__getattribute__(self, "_ws"), name)
+        if name in _ANWriteGuard._WRITE_METHODS and callable(attr):
+            return functools.partial(_ANWriteGuard._checked, self, name, attr)
+        return attr
+
+    @staticmethod
+    def _deny(where):
+        raise PermissionError(
+            f"AN列(仕入override)への書込は禁止です [{where}]。"
+            "AN を書くと N=(M or F)−K の動的追随が止まり仕入値が凍結します"
+            "(実測: ¥29,999 凍結のまま実勢 ¥48,000 → 安売り)。"
+            "cost を反映したいなら M列(現在価格)を seed してください。"
+            "AN は人が手で入れる時だけの入口です。")
+
+    def _checked(self, name, attr, *args, **kwargs):
+        an = _ANWriteGuard._AN
+        if name == "batch_update" and args:
+            for req in (args[0] or []):
+                if isinstance(req, dict) and range_touches_col(req.get("range"), an):
+                    _ANWriteGuard._deny(f"batch_update range={req.get('range')}")
+        elif name in ("update", "update_acell") and args:
+            if isinstance(args[0], str) and range_touches_col(args[0], an):
+                _ANWriteGuard._deny(f"{name} range={args[0]}")
+        elif name == "update_cell" and len(args) >= 2:
+            if args[1] == an + 1:                      # gspread は 1-indexed
+                _ANWriteGuard._deny(f"update_cell col={args[1]}")
+        elif name == "update_cells" and args:
+            for c in (args[0] or []):
+                if getattr(c, "col", None) == an + 1:
+                    _ANWriteGuard._deny(f"update_cells col={getattr(c, 'col', None)}")
+        return attr(*args, **kwargs)
+
+
 def _product_ws():
     import gspread
     from google.oauth2.service_account import Credentials
@@ -73,7 +163,7 @@ def _product_ws():
     ws = next((w for w in sh.worksheets() if w.id == PRODUCT_GID), None)
     if ws is None:
         raise RuntimeError(f"商品管理シート gid={PRODUCT_GID} が見つからない")
-    return ws
+    return _ANWriteGuard(ws)
 
 
 def product_key_map():

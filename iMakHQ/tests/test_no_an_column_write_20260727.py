@@ -23,8 +23,10 @@ import re
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SKIP_DIRS = {".git", "__pycache__", "_archive", "node_modules", ".pytest_cache", "venv", ".venv"}
-# この test 自身と、AN を **読む** だけのモジュールは対象外
-ALLOW_FILES = {"test_no_an_column_write_20260727.py"}
+# test_*.py は対象外(検体や説明で AN{row} を書くため)。本番コードだけを見る。
+# テストが誤って AN に書いても実行時ガード(_ANWriteGuard)が止めるので二重に守られている。
+def _is_test_file(name):
+    return name.startswith("test_")
 
 # AN{row} レンジを組み立てる書き方
 PATTERNS = [
@@ -39,8 +41,37 @@ def _py_files():
     for root, dirs, files in os.walk(REPO):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for f in files:
-            if f.endswith(".py") and f not in ALLOW_FILES:
+            if f.endswith(".py") and not _is_test_file(f):
                 yield os.path.join(root, f)
+
+
+def test_patterns_actually_detect_violations():
+    """★このガード自体が空振りでないことを検体で固定する (監査指摘 2026-07-27)。
+
+    以前は手元で確認しただけで証跡がリポジトリに残っていなかった。
+    なお **数値列指定 / chr() 生成は source 走査では検知できない**(下 2 検体)。
+    そこは実行時ガードが受け持つ → `test_an_write_runtime_guard_20260727.py`。
+    """
+    must_detect = [
+        'reqs.append({"range": f"AN{row}", "values": [[cost]]})',
+        'rng = "AN" + str(row)',
+        'rng = "AN%d" % row',
+        'rng = "AN{}".format(row)',
+    ]
+    must_pass = [
+        'reqs.append({"range": f"M{row}", "values": [[cost]]})',   # 正しい書き方
+        "PRODUCT_COL_COST_OVERRIDE = 39",                          # 定義
+        "an = row[PRODUCT_COL_COST_OVERRIDE]",                     # 読取
+    ]
+    for s in must_detect:
+        assert any(p.search(s) for p in PATTERNS), f"検知できていない: {s}"
+    for s in must_pass:
+        assert not any(p.search(s) for p in PATTERNS), f"誤検知: {s}"
+    # source 走査の限界(=実行時ガードが必要な理由)も明示しておく
+    bypasses = ['ws.update_cell(row, 40, cost)', 'col = "A" + chr(65 + idx0 - 26)']
+    for s in bypasses:
+        assert not any(p.search(s) for p in PATTERNS), \
+            "この検体は source 走査では検知できない前提。実行時ガード側で止める"
 
 
 def test_no_code_writes_to_an_column():
