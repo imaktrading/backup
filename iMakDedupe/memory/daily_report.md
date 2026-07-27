@@ -185,3 +185,21 @@
 - dual-mode は deploy済 (commit 22abf85) = いつ振り直しても fail-open しない
 - upgrade 本実行 (555行) は HQ の実行go+目視待ち (HQ が go/目視を持つと明言)。response: 2026-07-27_key_category_phase3_sync_needed_response.md
 - go 後: 本実行 → upgrade実件数 + by_category + 9行帰趨 報告 → 旧枯れたら migration_dual_match=False
+
+### 案B Phase3 upgrade 本実行 DONE (= Advisor GO 受領)
+
+- 決定: Advisor が 555 で GO (dry-run目視OK・641でなく555採用)。条件=backup保持/実件数by_category/9行帰趨個別/据置100未対応リスト再掲。本実行
+- 変更: HIGH KEー列 555件 upgrade (data書込、product_id不変)。residual list = iMak_data/dedupe/requests/2026-07-27_phase3_upgrade_residual_100.json。報告 = _upgrade_DONE.md
+- 検証: upgraded 555 (dry-run一致・pokemon330/one_piece171/gundam31/db23)、冪等 (再run 0, already_prefixed 73→628)。9行全て PSA brand で正しく upgrade (誤カテゴリ0)。据置100 = pid_mismatch82(variant揺れ)+no_category18(catalog未収載)
+
+### ★訂正記録: row252 ST04-013 は Yugioh でなく GUNDAM SEED
+
+- 決定: 前報で「row252 エンデュミオン=Yugioh→据置」と書いたが誤り。実データ cert136338200 PSA brand=GUNDAM JAPANESE SEED STRIKE / subject=HAWK OF ENDYMION = Gundam SEED。resolver が PSA brand で正しく gundam_tcg:ST04-013 に確定 (二重ゲート正常)
+- 変更: なし (resolver 判定が正・私の事前推測が誤り)
+- 検証: 実機 resolve_with_category = {product_id ST04-013, category gundam_tcg}。Endymion名から早合点、PSA brand が権威で正確
+
+### 継続タスク (= 据置0まで)
+
+- 据置100 (pid_mismatch82/no_category18) を 0 に = catalog variant整合/収載後 dedupe 再upgrade で吸収。次報以降も残件再掲 (墓場にしない)
+- 据置0到達後: migration_dual_match=False + check候補prefixed単独 (不可逆・要HQ go)
+- LOW bare は対象外 (合意)
