@@ -281,22 +281,34 @@ def _read_csv(path):
     return (rows[1:], rows[0]) if rows else ([], [])
 
 
-def catalog_has(product_ids):
-    """catalog に **完全一致で存在する** product_id の集合を返す(ID-strict・fallback無)。"""
+def catalog_categories(product_ids):
+    """product_id → [category,...] を catalog から引く(ID完全一致のみ・fallback無)。
+
+    ★product_id は **カテゴリ内でのみ一意**(schema は `UNIQUE(category, product_id)`)。
+    One Piece と Gundam が同じ set-code 体系を使うため `ST02-010` は両方に実在する(実測283件)。
+    → カテゴリが2つ以上返る product_id は **どちらのカードか決められない**ので、
+      呼び出し側は fail-closed で書かないこと。
+    """
     ids = [i for i in set(product_ids) if i]
     if not ids or not os.path.exists(CATALOG_DB):
-        return set()
+        return {}
     con = sqlite3.connect(CATALOG_DB)
     try:
-        out = set()
+        out = {}
         for i in range(0, len(ids), 400):
             chunk = ids[i:i + 400]
-            q = "select product_id from products where product_id in ({})".format(
-                ",".join("?" * len(chunk)))
-            out |= {r[0] for r in con.execute(q, chunk)}
+            q = ("select product_id, category from products where product_id in ({})"
+                 .format(",".join("?" * len(chunk))))
+            for pid, cat in con.execute(q, chunk):
+                out.setdefault(pid, []).append(cat)
         return out
     finally:
         con.close()
+
+
+def catalog_has(product_ids):
+    """catalog に **完全一致で存在する** product_id の集合を返す(ID-strict・fallback無)。"""
+    return set(catalog_categories(product_ids))
 
 
 def _ebay_active_titles():
@@ -469,27 +481,37 @@ def fill_keys_from_titles(csv_path, dry_run=False):
         tok = card_token_from_title(col(r, CSV_TITLE))
         if tok:
             want[cert] = tok
-    ok = catalog_has(want.values())
-    itemid_to_row, itemid_to_key, unresolved = {}, {}, []
+    cats = catalog_categories(want.values())
+    itemid_to_row, itemid_to_key, unresolved, ambiguous = {}, {}, [], []
     for cert, tok in want.items():
-        if tok in ok:
+        c = sorted(set(cats.get(tok) or []))
+        if len(c) == 1:
+            # ★KEY は `{category}:{product_id}`(2026-07-27 3者合意)。別ゲームの同番号を分離する。
             iid = cert_iid[cert]
             itemid_to_row[iid] = cert_row[cert]
-            itemid_to_key[iid] = tok
+            itemid_to_key[iid] = f"{c[0]}:{tok}"
+        elif len(c) > 1:
+            # 同じ番号が複数カテゴリに実在 → どちらのカードか決められない → 書かない(fail-closed)
+            ambiguous.append((cert, tok, c))
         else:
             unresolved.append((cert, tok))
-    print(f"■ dup_guard KEY補完: 候補{len(want)} / catalog一致{len(itemid_to_key)} / 未解決{len(unresolved)}")
+    print(f"■ dup_guard KEY補完: 候補{len(want)} / catalog一致{len(itemid_to_key)} / "
+          f"カテゴリ曖昧{len(ambiguous)} / 未解決{len(unresolved)}")
+    for cert, tok, c in ambiguous:
+        print(f"    - cert={cert} '{tok}' は {c} の複数カテゴリに実在 → 書かない(fail-closed)")
     for iid, k in itemid_to_key.items():
         print(f"    + {iid} row{itemid_to_row[iid]} → KEY='{k}'")
     for cert, tok in unresolved:
         print(f"    - cert={cert} token='{tok}' は catalog に無い → 書かない(fail-closed)")
     if dry_run or not itemid_to_key:
-        return {"written": 0, "unresolved": len(unresolved), "resolved": len(itemid_to_key)}
+        return {"written": 0, "unresolved": len(unresolved), "ambiguous": len(ambiguous),
+                "resolved": len(itemid_to_key)}
     written = sheet_io.write_keys(itemid_to_row, itemid_to_key)
     print(f"    ✔ AI列 書込: {written}行")
     _ledger("fill_keys", {"csv": os.path.basename(csv_path), "written": written,
                           "keys": itemid_to_key})
-    return {"written": written, "unresolved": len(unresolved), "resolved": len(itemid_to_key)}
+    return {"written": written, "unresolved": len(unresolved), "ambiguous": len(ambiguous),
+            "resolved": len(itemid_to_key)}
 
 
 def main():

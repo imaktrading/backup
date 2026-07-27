@@ -79,6 +79,47 @@ def test_legacy_and_new_key_do_not_merge_during_migration():
     assert sorted(index) == ["ST02-010", "gundam_tcg:ST02-010"]
 
 
+def test_fill_keys_writes_category_prefix_and_skips_ambiguous(tmp_path, monkeypatch):
+    """★書く側(Phase2): KEY を `{category}:{product_id}` で書く。
+
+    カテゴリが複数返る product_id(= 別ゲームに同番号が実在)は **どちらか決められない**ので
+    書かない(fail-closed)。ST02-010 が gundam/one_piece 両方に実在するのが実例。
+    """
+    import csv as _csv
+    csv_path = tmp_path / "t.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        w = _csv.writer(f)
+        w.writerow([dg.CSV_LABEL, dg.CSV_TITLE, dg.CSV_CERT])
+        w.writerow(["a", "PSA 10 One Piece ... #DON-PRB02-018 DON!! Card", "111"])
+        w.writerow(["b", "PSA 10 Gundam ... #ST02-010 Heero Yuy", "222"])
+
+    sheet = [[f"c{i}" for i in range(NCOL)],
+             _row(iid="iid1", cert="111"), _row(iid="iid2", cert="222")]
+    monkeypatch.setattr(dg.sheet_io, "_product_ws", lambda: type("W", (), {
+        "get_all_values": staticmethod(lambda: sheet)})())
+    monkeypatch.setattr(dg, "catalog_categories", lambda ids: {
+        "DON-PRB02-018": ["one_piece_tcg"],
+        "ST02-010": ["gundam_tcg", "one_piece_tcg"],      # ★曖昧
+    })
+    written = {}
+    monkeypatch.setattr(dg.sheet_io, "write_keys",
+                        lambda rows, keys: written.update(keys) or len(keys))
+
+    st = dg.fill_keys_from_titles(str(csv_path))
+    assert written == {"iid1": "one_piece_tcg:DON-PRB02-018"}, "カテゴリ prefix 付きで書く"
+    assert st["ambiguous"] == 1 and st["written"] == 1
+
+
+def test_url_keys_are_never_treated_as_category():
+    """★url-key は既に `:` を含む(`item:123`)。カテゴリと誤認すると突合が壊れる。
+
+    実測(2026-07-27): シート上の `:` 入り KEY は `item:` 278件 / `shops:` 11件のみ。
+    """
+    assert dg.group_key("item:1234567890") == "item:1234567890"
+    assert dg.group_key("shops:abcdef") == "shops:abcdef"
+    assert dg.parse_key("item:123")[0] is None
+
+
 def test_norm_url():
     assert dg.norm_url("https://jp.mercari.com/item/m123?utm=1") == "https://jp.mercari.com/item/m123"
     assert dg.norm_url("https://jp.mercari.com/item/m123/") == "https://jp.mercari.com/item/m123"
