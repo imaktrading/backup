@@ -75,6 +75,20 @@ worktree調整・横断インフラのコードは書く。**出品くんの lis
 「全部知ってる前提」を物理的に担保するため、相談に入る前に必ず以下を読む。
 読まずに答えるのは禁止 (推測で相談に乗ると的外れになる)。
 
+### 0. 🚨 最優先: 現在地 (これを読まずに喋るな・2026-07-27 修正)
+
+**まずこの2つ。順番も固定。**
+
+1. `C:\Users\imax2\.claude\projects\c--dev-iMak\memory\daily_report.md` の**最上段**
+   = 「現在地 + 次の一手」。何が終わってて何が待ちかは全部ここにある。
+2. `C:\Users\imax2\.claude\projects\c--dev-iMak\memory\MEMORY.md` (= **生きている index**)
+
+> ⚠️ **2026-07-27 に発覚した事故**: 従来この項は
+> `C--dev-iMak-iMakHQ\memory\MEMORY.md` を指していたが、**そちらは 2026-04-28 で凍結**しており、
+> Advisor は 3ヶ月前の知識で毎回起動していた (5〜7月の決定 = AN列廃止・PSA10 gate・KEY カテゴリ化・
+> 利益計算 v8/v9・EU DDP 等を一切知らない状態)。**参照先は `c--dev-iMak\memory\` (小文字 dir) が正**。
+> 旧 `C--dev-iMak-iMakHQ\memory\` は**歴史資料**であり、現在地の判断に使わないこと。
+
 ### 1. 全プロジェクト CLAUDE.md
 - `C:\Users\imax2\.claude\CLAUDE.md` (グローバル / 全プロジェクト共通ルール)
 - `C:\dev\iMak\iMakHQ\CLAUDE.md` (司令塔)
@@ -86,12 +100,39 @@ worktree調整・横断インフラのコードは書く。**出品くんの lis
 - `C:\dev\iMak\iMakAudit\CLAUDE.md`
 
 ### 2. HQ memory (横断的気づき・進捗・決定事項)
-- `C:\Users\imax2\.claude\projects\C--dev-iMak-iMakHQ\memory\MEMORY.md` (index)
-- 必要に応じて memory/*.md 個別ファイル
+- **`C:\Users\imax2\.claude\projects\c--dev-iMak\memory\MEMORY.md`** (index / 現行・小文字 dir)
+- index の hook を見て、相談に関係する `memory/*.md` 個別ファイルを開く
+- **memory は HQ(出品専任)と共有**。Advisor 専用 memory を別に育てない
+  (知識が分岐して噛み合わなくなる)。書込先も同じ dir。
 
-### 3. 直近の活動 (オプション、相談内容に応じて)
+### 3. 各 worktree の未処理 requests (調整ハブの本務)
+- `C:\dev\iMak_data\{catalog,dedupe,inventory,harvest,revise}\requests\` の
+  **`_processed` / `_response` が付いていない .md** = 未処理。起動時に必ず列挙する。
+- `C:\dev\iMak_data\hq\requests\` = 自分宛の受領箱。
+
+### 4. 直近の活動 (オプション、相談内容に応じて)
 - 各プロジェクトの `git log -10 --oneline`
 - HQ 配下の最近変更されたファイル
+
+---
+
+## 🚨 セッションを長期間引っ張らない (2026-07-27 制定)
+
+- 2026-05-03 に開始した Advisor セッションが **85日間 1本 / transcript 60MB** まで肥大し、
+  compaction の繰り返しで過去が潰れていた。**「Advisor が使えない」の主因**。
+- **作業の区切りごとに新セッションを立てる**。長くても数日で切る。
+- 切る前に必ず **daily_report.md に現在地を書き出す**。次セッションはそこから始まる。
+- 「セッションを続けていれば覚えている」は誤り。**永続化されるのは daily_report / memory / commit だけ**。
+
+## 🚨 他worktreeを自分の回答待ちで止めない (2026-07-27 制定)
+
+Advisor は中継ハブなので、**1件保留すると複数 worktree が同時に停止する**。
+
+- 依頼・督促を受けたら**その場で返球**する。督促が来た時点で既に手遅れ。
+- 全部決められなくても **「相手が先に進められる部分」を切り出して即返す**
+  (例:「案2はそちら側で着手可能、こちら待ちではない」)。結論が出るまで黙るのが最悪。
+- 「判断待ち」に見えるものの多くは**実測すれば消える**。件数・実データを取ってから返す。
+- ユーザー判断が要るのは **破壊的 / 不可逆 / 外向き** のみ。cron 時刻・段取り・優先順は自分で決める。
 
 ---
 

@@ -84,6 +84,8 @@
 - iMakTCG PSA 走査: 16件 → 4件 CSV成功 (Bonney 2件救済 + Hancock タイトル修正成功)
 - title_generation_agent: 3ケース全て期待通り改変 (CLI test + 実走 PASS)
 - memory 統合完了: 旧3系統 → canonical 1系統 (`C--dev-iMak-iMakHQ/memory/`) 56 .md
+  - ※**2026-07-27 追記**: この dir は 2026-04-28 で更新停止。**現行 canonical は
+    `c--dev-iMak/memory/` (小文字)**。当時の記述をここに追う人が古い方を読まないよう注記。
 - Gemini二次監査: 直近 DISPUTE 0件 / 虚偽申告なし
 
 ---
