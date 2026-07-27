@@ -162,3 +162,14 @@
 - resolver が (category, product_id) を surface する小API拡張 (Catalog側) → 書き側 join。_guess_category は heuristic で単独採用非推奨 (cert行で真カテゴリと食い違いrisk)
 - 語彙整合済: catalog category列 = _guess_category出力 = HQ group_key = gundam_tcg/one_piece_tcg で一致
 - 既存 live 6件 (ST01-006_p1 / 358604221709 等) の振り直しは HQ Phase3
+
+### KEー カテゴリ prefix 案B — Phase2b 書く側切替 実装+本実行 (= HQ 依頼)
+
+- 決定: Catalog Phase2a resolve_with_category (commit a0ebb49) を利用し、書く2サイトを {category}:{product_id} に切替。曖昧は resolver が PSA brand で分離・fail-closed 済 → dedupe 側追加判定不要。check側候補解決は bare 据置 (移行期 fail-open 最小・大半の既存bareと突合維持)
+- 変更: resolver_io.py (resolve_with_category / resolve_csv_row_with_category / resolve_sheet_row_with_category + _build_*_context 抽出) / key_format.build_key / checker.extract_canonical_key_with_category / csv_write_keys.py (--write-keys-from-csv) / sheet_io.backfill_canonical_key (--backfill-keys-from-cert) / tests(test_write_keys_phase2b 新規5 + test_backfill_from_cert 更新)。commit d521c64
+- 検証: 全376 passed。cert backfill 本実行=新形式74件書込 (written_with_category=74/bare=0/url-key=0/fail-closed=293)、冪等 (再run written=0, skipped_existing 52→126)。実機spot-check: pokemon_tcg41/one_piece_tcg27/gundam_tcg3/dragonball_scg3=計74、variant suffix保持 (OP07-057_p1)。Gundam に gundam_tcg: 付与でOP同番号衝突分離=案B目的達成
+
+### Phase3 申し送り (= HQ)
+
+- 既存旧形式KEー (重複ID衝突6件, live ST01-006_p1/358604221709) + HQ DON!!4件 の振り直しは HQ
+- Phase3 で旧形式振り直し進んだら dedupe check側も新形式切替を検討 (現時点 bare据置が fail-open最小)
