@@ -1165,6 +1165,50 @@ def load_description():
 # (新コア override が新値で description を作り直す replace_tcg_specs も同モジュール)。
 from tcg_listing_fields import build_tcg_specs_html, insert_tcg_specs  # noqa: E402,F401
 
+PSA_IMG_HOST = "d1htnxwo4o0jhw.cloudfront.net"
+
+
+def psa_large_variant(url):
+    """PSA 画像 URL の `/small/`(380x640) を `/large/`(1140x1920) にする (純関数)。
+
+    ★なぜ効くか (2026-07-27 に判明):
+      - **eBay 商品画像(PicURL)**: 380px ではズームが効かず、PSA スラブの状態が見えない
+        (eBay はズームに 1600px 以上を推奨)。高額カードほど購入判断されにくい。
+      - **Vision の同定**: ★(パラレル)1個や card_number の細部が潰れる。実際 Perona
+        OP01-077_p4/p5 は /small/ では判別不能、/large/ で ★ が読めて確定できた。
+      - psa_cache / viewer / PicURL は同じ URL を共有するので、**取得時点で上げれば全部効く**。
+    対象外(別ホスト / 既に large)は None。
+    """
+    if not url or PSA_IMG_HOST not in url or "/small/" not in url:
+        return None
+    return url.replace("/small/", "/large/")
+
+
+def upgrade_psa_images(urls, exists):
+    """PSA 画像 URL list を /large/ に上げる。`exists(url)->bool` が False なら元のまま。
+
+    /large/ が無い cert がありうるので **実在確認できた時だけ**差し替える
+    (PicURL が 404 だと eBay 側で画像なし = さらに悪い)。純関数 (存在確認は注入)。
+    """
+    out = []
+    for u in urls or []:
+        big = psa_large_variant(u)
+        out.append(big if (big and exists(big)) else u)
+    return out
+
+
+def _url_exists(url, timeout=8):
+    """HEAD で 200 か確認 (I/O)。失敗は False (= 元URL を使う fail-safe)。"""
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, method="HEAD",
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
 _SUPPLIER_NON_PSA10 = re.compile(r"PSA\s*[・･]?\s*([1-9])(?![0-9])", re.IGNORECASE)
 
 
@@ -1341,6 +1385,10 @@ def get_psa_data(driver, cert_number):
 
         data = parse_psa_page(body)
         if card_image_urls:
+            # ★取得時点で /large/(1140x1920) に上げる。PicURL(eBay商品画像)・Vision同定・
+            #   psa_cache・viewer が同じ URL を共有するので、ここ1箇所で全部に効く。
+            #   実在確認できた分だけ差し替え (404 を PicURL に載せない)。
+            card_image_urls = upgrade_psa_images(card_image_urls, _url_exists)
             data['CardImageUrl'] = card_image_urls[0]   # = 表面 (= 既存 title 生成等で使用)
             data['CardImageUrlFront'] = card_image_urls[0]
             if len(card_image_urls) >= 2:
