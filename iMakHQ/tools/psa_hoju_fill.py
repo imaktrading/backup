@@ -31,6 +31,7 @@ import sheet_io
 
 A, B, C, D, CERT = 0, 1, 2, 3, sheet_io.PRODUCT_COL_CERT          # 0,1,2,3,8
 CATEGORY = 17                                                      # R (カテゴリ。'TCG' が PSA)
+LISTED_AT = 20                                                     # U (出品日時。新規優先の並べ替えキー)
 KEY = sheet_io.PRODUCT_COL_KEY                                     # 34
 AUX0, AUXN = sheet_io.PRODUCT_COL_AUX_START, sheet_io.PRODUCT_AUX_MAX  # 28, 5
 HIGH_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
@@ -51,12 +52,28 @@ def _backup_count(row):
     return sum(1 for k in range(AUXN) if _cell(row, AUX0 + k))
 
 
+def _listed_sort_key(row):
+    """出品日時(U列)の降順ソート用キー。空/不正は最古扱い(= 後回し)。
+
+    形式は 'YYYY-MM-DD ...' / 'YYYY/MM/DD ...' の両方が実在するので区切りを正規化して
+    文字列比較する (ISO 風なので辞書順 = 時系列順)。
+    """
+    v = _cell(row, LISTED_AT).replace("/", "-")
+    return v if len(v) >= 10 and v[:4].isdigit() else ""
+
+
 def select_backfill_targets(rows2d, max_backups=1):
     """HIGH rows2d(header含む) → 補<max_backups の live PSA 行リスト。純関数(test可)。
 
     max_backups=1 → 補 0本のみ(残1件でリフィル=定常の既定)。
     初期一括は呼び手が大きめ(例 5)を渡して「満杯未満すべて」を対象にできる。
     Returns: [{row(1-indexed), itemID, cert, key, card_no_title, n_backups, empty_slots}]
+
+    ★2026-07-28: **新規出品を最優先**に並べ替える (出品日時 U列の降順)。
+      理由: backlog が行順(=古い順)だと、1日あたりの処理件数が限られる運用では
+      新規出品が最後尾に並び、**一番死にやすい出品直後の数日が無防備**になる。
+      実測 (7/20-7/27 出品49件): 仕入元売切れ10件のうち **補URL 0本の8件が完全死**、
+      補URLがあった2件は生存。= 補URLの有無が生死を分けており、付ける順番が効く。
     """
     out = []
     for i, r in enumerate(rows2d[1:], start=2):
@@ -79,7 +96,10 @@ def select_backfill_targets(rows2d, max_backups=1):
         out.append({
             "row": i, "itemID": iid, "cert": cert, "key": key,
             "title": _cell(r, C), "n_backups": nb, "empty_slots": AUXN - nb,
+            "listed_at": _listed_sort_key(r),
         })
+    # 新規優先 (出品日時の降順)。同着は行番号昇順で安定させる。
+    out.sort(key=lambda t: (t["listed_at"], -t["row"]), reverse=True)
     return out
 
 
