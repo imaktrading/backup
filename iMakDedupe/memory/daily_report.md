@@ -173,3 +173,15 @@
 
 - 既存旧形式KEー (重複ID衝突6件, live ST01-006_p1/358604221709) + HQ DON!!4件 の振り直しは HQ
 - Phase3 で旧形式振り直し進んだら dedupe check側も新形式切替を検討 (現時点 bare据置が fail-open最小)
+
+### 案B Phase3 — check側 dual-mode + upgrade モード 実装 (= HQ返信で段取り確定)
+
+- 決定: HQ 実測で Phase3 対象は6件でなく655行 (旧形式bare非url)。HQ単独振り直しは check側bare据置のまま=fail-open拡大で停止。HQ決定=案2(check両対応)先行 + dedupe が upgrade モードで一貫振り直し (HQは書かない・backup保持)。9行曖昧は cert→PSA brand で resolver 確定分のみ
+- 変更: csv_check.py (check_csv_canonical dual-mode: 候補prefixed解決+既存をbare/新両照合, migration_dual_match) / sheet_io.upgrade_bare_keys_to_category (二重fail-closed: category確定 かつ 再導出pid==既存bare のみ) / checker.py (--upgrade-keys-to-category + extract_canonical_key_with_category流用) / tests (test_upgrade_keys_to_category新規10 + test_key_format dual-mode6 + 既存をdict API更新)。commit 22abf85
+- 検証: 全392 passed。upgrade dry-run 実測 upgraded 555 (pokemon330/one_piece171/gundam31/db23) / skipped_pid_mismatch82 / skipped_no_category18 / 既prefixed73 = 計bare非url 655 (HQ実測一致)。誤カテゴリ焼き込み0 (row252 ST04-013=Yugioh は pid不一致で据置)
+
+### Phase3 本実行 go 待ち (= HQ 目視)
+
+- dual-mode は deploy済 (commit 22abf85) = いつ振り直しても fail-open しない
+- upgrade 本実行 (555行) は HQ の実行go+目視待ち (HQ が go/目視を持つと明言)。response: 2026-07-27_key_category_phase3_sync_needed_response.md
+- go 後: 本実行 → upgrade実件数 + by_category + 9行帰趨 報告 → 旧枯れたら migration_dual_match=False
