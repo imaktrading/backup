@@ -217,6 +217,65 @@ def merge_search_result(cache, iid, mercari, snkrdunk, today):
     return cache
 
 
+# ---------------------------------------------------------------------------
+# 候補の番号照合 (2026-07-28)。確証UI に「明らかに別カード」を出さないための足切り。
+# ★除外しかしない (採用は必ず有人確証)。判定不能は残す = recall を落とさない fail-closed。
+# ---------------------------------------------------------------------------
+_SLASH_NO_RE = re.compile(r"(\d{1,3})\s*[/／]\s*(\d{1,3})")          # 093/187 (Pokemon 等)
+_HYPHEN_NO_RE = re.compile(r"\b([A-Za-z]{1,5}\d{0,3}[A-Za-z]?)-(\d{1,3})\b")  # OP11-106 / P-041
+
+
+def _target_card_number(card_no):
+    """catalog の card_no → (set_code大文字, 番号int)。取れない要素は ''/None。純関数。
+
+    'OP11-106' → ('OP11', 106) / 'SV8a-093' → ('SV8A', 93) / 'P-041' → ('P', 41)。
+    """
+    s = (card_no or "").strip()
+    if not s:
+        return "", None
+    m = _HYPHEN_NO_RE.search(s)
+    if m:
+        return m.group(1).upper(), int(m.group(2))
+    m = _SLASH_NO_RE.search(s)
+    if m:
+        return "", int(m.group(1))
+    return "", None
+
+
+def candidate_number_conflicts(name, card_no):
+    """候補タイトルが **明らかに別番号** を名乗っているか (純関数)。
+
+    True = 除外してよい。判定材料が無い/読めない場合は False (= 残して人に見せる)。
+    - タイトルに 'xxx-nnn' 形式があり、どれも対象と一致しない → 衝突
+    - タイトルに 'nnn/mmm' 形式があり、左辺のどれも対象番号と一致しない → 衝突
+      (ゼロ埋め差は int 比較で吸収: '7/095' と '007' は一致)
+    """
+    tset, tnum = _target_card_number(card_no)
+    if tnum is None:
+        return False                      # 対象側が不明 = 判定しない
+    t = (name or "").strip()
+    if not t:
+        return False                      # 候補名なし (snkrdunk 等) = 判定しない
+    hyph = _HYPHEN_NO_RE.findall(t)
+    if hyph:
+        for sc, n in hyph:
+            if int(n) == tnum and (not tset or sc.upper() == tset):
+                return False              # 一致あり
+        return True                       # 全部違う番号を名乗っている
+    slash = _SLASH_NO_RE.findall(t)
+    if slash:
+        return all(int(a) != tnum for a, _ in slash)
+    return False                          # 番号表記なし = 判定不能 → 残す
+
+
+def filter_candidates_by_number(cands, card_no):
+    """候補リストから明らかな別番号を除く。戻り: (残す, 落とした)。純関数(test可)。"""
+    keep, drop = [], []
+    for c in (cands or []):
+        (drop if candidate_number_conflicts(c.get("name"), card_no) else keep).append(c)
+    return keep, drop
+
+
 def _load_cache(path=CACHE_PATH):
     import json
     try:
@@ -521,6 +580,7 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
     items, item_targets = [], []
     no_cache = no_cand = no_cardno = no_ref = 0
+    no_cand_after_filter = n_dropped = 0   # 番号足切りの計測(2026-07-28)
     for t in targets:
         iid = t["itemID"]
         if iid in skip_iids:
@@ -544,6 +604,13 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
             continue
         # ★現物画像(eBay GetItem or cert)が取れない = 視覚確証不能(ダミーitemID=9999 / GetItem失敗)
         # → 確証に出さない(見えないカードを人に確定させない=fail-closed)。
+        # ★2026-07-28: 番号が明らかに違う候補を確証UIに出さない(足切り)。
+        # 「候補に明らかに別カードが混ざる」= 人が毎回目で弾いていた無駄。除外のみ・採用は有人のまま。
+        cands, dropped = filter_candidates_by_number(cands, cn)
+        n_dropped += len(dropped)
+        if not cands:
+            no_cand_after_filter += 1
+            continue
         ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(t.get("cert") or None)
         if not ref:
             no_ref += 1
@@ -568,6 +635,7 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
 
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
+          f"番号不一致で除外 {n_dropped}候補(全滅skip {no_cand_after_filter}件) / "
           f"台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
     if limit is not None:
         items, item_targets = items[:limit], item_targets[:limit]
