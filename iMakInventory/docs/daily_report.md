@@ -1711,3 +1711,40 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 検証: test 10件(HQ検体: Amazon3rd化+ヨドバシ在庫→延命M=2万 / 両OOS→D=○ / null→uncertain / stale・欠損→fail-closed)。
   **pre-commit 全pass(151+offline)**。cycle 負荷ゼロ(scraper叩かず JSON lookup)。
 - next: Harvest が snapshot 生成開始で次 LOW cycle から自動作動(それまで欠損=fail-closed無害)。実cycle突合予定。
+
+## 2026-07-27 — ★LOW 巡回が 25h 停止していた (lock 衝突) → 時刻是正 + 自己回復 + 巡回停止の非-silent 化
+
+### 事象 (user「どうなった?」の点検で発覚)
+- 決定: **LOW の最終完走が 07-26 16:14、以降 25h 未実行**だったと判定。潜在 fail-OPEN
+  (G-shock 836行の売切を検知できない窓)。HIGH/公式/reverse_audit は正常 (pending=0/action_required=0、
+  07-27 10:00 reverse_audit=OK_ACK_ONLY)。
+- 真因: **HIGH の所要が 60〜64 分に伸び、LOW の起動時刻が「HIGH 開始 +60 分」ちょうど**で衝突。
+  実測 13:30 HIGH が 14:30:18 終了 / LOW は 14:30:03 起動 = **15 秒差で `skipped_lock_held`**。
+  07-26 22:30・07-27 06:30・14:30 の 3 連続で skip。当時の skip 処理は **toast 1 発のみ**で
+  desktop/mail に出ず、pythonw 実行のため誰も気づけない = **silent**(安全原則2 違反)。
+
+### 対策 (3層、いずれも実施済)
+- 決定/変更(1) **時刻是正**: Task Scheduler `iMakInventory_Cycle_LOW` を 06:30/14:30/22:30 →
+  **06:45/14:45/22:45** に変更 (HIGH 完了 ~+65分 の後ろに退避、LOW 所要 ~1h50 で次 HIGH まで余裕)。
+- 変更(2) **自己回復** [run_cycle.py](../run_cycle.py): `_acquire_lock(wait_minutes=)` 新設。
+  lock 保持中でも即諦めず **最大 45 分 (60秒 poll) 解放を待って続行**。`_try_acquire_lock` に
+  従来の 1 回試行を分離。待っても取れなければ従来通り skip (二重起動しない = 安全側)。
+- 変更(3) **非-silent 化** [run_cycle.py](../run_cycle.py): `_last_cycle_success` /
+  `_check_cycle_staleness` / `_emit_nonsilent_alert` 新設。label ごとの想定間隔
+  (`CYCLE_INTERVAL_HOURS` SHEET=4h / LOW=8h × 2.2) を超えて完走が無ければ
+  **desktop file + gmail + toast の 3ch 告知**。**skip 時だけでなく毎 cycle 末に全 label を突合**
+  するため「task がそもそも発火しない/PC 停止」も HIGH 側から検知できる。6h throttle 付き
+  (戻り値では毎回報告 = 墓場化させない)、完走履歴ゼロは判定不能で誤報しない、state 破損は告知側に倒す。
+- 実対応: 22:45 を待たず **17:30 HIGH 完了直後に LOW を手動起動**して穴を閉じる job を投入。
+- 検証: [tests/test_cycle_staleness.py](../tests/test_cycle_staleness.py) **11 件**
+  (最新完走の抽出/skip を完走扱いしない/別 label 無視/success 派生/25h→発火/正常→非発火/
+  履歴無→非発火/throttle 中も戻り値は報告/throttle 満了で再発火/state 破損→告知/lock 待ち自己回復/期限切れ skip)。
+  **offline 151 pass / 非-live 全 525 pass**。
+
+### 併行対応
+- **補URL消込 backlog 41 件** (snkrdunk28 + mercari13、25→28→35→41 と増加、毎 cycle 急増ガード HOLD):
+  dry-run で対象確定 → HIGH cycle 完了後に `tools/supervised_backup_drain --reverify-snkrdunk --execute`
+  (削除直前に is_listing_live 再確認 + compare-and-clear + 復元アーカイブ)。
+- **ヨドバシ snapshot が 19h stale** (最終 07-26 22:30、12h 閾値超 → fail-closed で無視) のため
+  統合は未発火。HQ/Harvest へ生成頻度を LOW 巡回 (06:45/14:45/22:45) の 30〜60 分前に合わせる依頼を投入
+  (`iMak_data/inventory/requests/2026-07-27_yodobashi_snapshot_cadence_request.md`)。閾値 12h の変更は独断せず回答待ち。

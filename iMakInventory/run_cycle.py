@@ -67,6 +67,19 @@ DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOCK_FILE = DECISION_LOG_DIR / ".cycle.lock"
 LOCK_STALE_HOURS = 6
 
+# 巡回停止の非-silent 検知 + 自己回復 (2026-07-27):
+# HIGH の所要が 60〜64 分に伸び、LOW 起動 (HIGH 開始 +60 分) と衝突して skipped_lock_held が
+# 3 連続 → LOW が 25h 止まっていたのを実観測 (toast だけで誰も気づけない = silent)。
+#   ① lock 保持中でも即諦めず LOCK_WAIT_MINUTES まで解放を待って自己回復する
+#   ② 「最後に完走してからの経過」が想定間隔を大きく超えたら desktop file + mail で非-silent 告知
+#      (skip 時だけでなく毎 cycle 末に全 label を突合 = 「そもそも task が発火しない」も検知できる)
+LOCK_WAIT_MINUTES = 45          # lock 解放待ちの上限 (次 cycle を潰さない範囲)
+LOCK_WAIT_POLL_SEC = 60
+CYCLE_INTERVAL_HOURS = {"SHEET": 4, "LOW": 8}   # 各 label の巡回間隔 (Task Scheduler と対)
+CYCLE_STALE_MULT = 2.2                          # この倍率を超えたら「止まっている」
+CYCLE_STALE_ALERT_STATE = DECISION_LOG_DIR / "cycle_staleness_alert_state.json"
+CYCLE_STALE_ALERT_THROTTLE_HOURS = 6            # 同 label の再告知間隔 (アラート疲労防止)
+
 # 補URL消込 急増ガード ALERT の throttle (2026-07-25):
 # 既知 backlog (snkrdunk判定復旧待ち等) で毎 cycle HOLD すると desktop file+mail を 4h毎に量産し
 # アラート疲労 (2026-07-25 デスクトップに3件/日堆積で発覚)。cycle ログ/レポートには毎回出す
@@ -197,8 +210,24 @@ def _lock_pid_alive(content: str) -> Optional[bool]:
         return None
 
 
-def _acquire_lock(test_mode: bool = False) -> bool:
-    """Returns True if lock acquired. False if already held (and not stale)."""
+def _acquire_lock(test_mode: bool = False, wait_minutes: int = 0) -> bool:
+    """Returns True if lock acquired. False if already held (and not stale).
+
+    wait_minutes > 0 なら、保持中でも解放を待ってから再試行する (2026-07-27)。
+    前 cycle が数分〜1h 長引いただけで自分の巡回が丸ごと落ちる (= 監視の穴) のを自己回復させる。
+    """
+    deadline = time.time() + wait_minutes * 60
+    while True:
+        if _try_acquire_lock(test_mode):
+            return True
+        if time.time() >= deadline:
+            return False
+        _log(f"[!] lock 解放待ち... (残り {max(0, deadline - time.time())/60:.0f} min)", test_mode)
+        time.sleep(LOCK_WAIT_POLL_SEC)
+
+
+def _try_acquire_lock(test_mode: bool = False) -> bool:
+    """1 回だけ lock 取得を試みる (待たない)。"""
     if LOCK_FILE.exists():
         try:
             age = time.time() - LOCK_FILE.stat().st_mtime
@@ -230,6 +259,110 @@ def _release_lock(test_mode: bool = False):
         LOCK_FILE.unlink(missing_ok=True)
     except Exception as e:
         _log(f"[!] lock release 失敗: {e}", test_mode)
+
+
+# ============================================================================
+# 巡回停止 (staleness) の非-silent 検知
+# ============================================================================
+def _emit_nonsilent_alert(tag: str, subject: str, msg: str, test_mode: bool = False):
+    """desktop ALERT file + gmail + toast の 3ch 告知 (pythonw でも気づける)。fail 時も他 ch は継続。"""
+    _notify_toast(subject[:60], msg[:200])
+    try:
+        desk = (Path.home() / "OneDrive" / "デスクトップ"
+                / f"ALERT_iMakInventory_{tag}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+        desk.write_text(msg, encoding="utf-8")
+        _log(f"  [★{tag}] desktop ALERT 出力: {desk.name}", test_mode)
+    except Exception as e:
+        _log(f"  [!] {tag} desktop alert 失敗: {type(e).__name__}: {e}", test_mode)
+    try:
+        from email_notifier import _send_via_gmail  # noqa: PLC0415
+        from auth.encrypted_gmail import load_gmail_config  # noqa: PLC0415
+        _cfg = load_gmail_config()
+        if _cfg:
+            _a, _p, _t = _cfg
+            _send_via_gmail(_a, _p, _t, subject, msg)
+            _log(f"  [★{tag}] alert mail 送信", test_mode)
+    except Exception as e:
+        _log(f"  [!] {tag} mail 失敗: {type(e).__name__}: {e}", test_mode)
+
+
+def _last_cycle_success(label: str) -> Optional[datetime]:
+    """cycle_*.jsonl から label の最終「完走」時刻を返す (無ければ None)。"""
+    # file 名が cycle_<YYYYmmdd_HHMMSS>.jsonl = 名前降順が時刻降順 (mtime は同秒で不定順になる)
+    files = sorted(DECISION_LOG_DIR.glob("cycle_*.jsonl"), key=lambda p: p.name, reverse=True)[:300]
+    for p in files:   # 最初に見つかった完走が最新
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if d.get("sheet_label") != label or not str(d.get("status", "")).startswith("success"):
+            continue
+        try:
+            return datetime.fromisoformat(d.get("ts_end") or d.get("ts_start"))
+        except Exception:
+            continue
+    return None
+
+
+def _check_cycle_staleness(test_mode: bool = False) -> list:
+    """全 label の「最後の完走からの経過」を突合し、想定間隔超過を非-silent 告知。
+
+    skip 時だけでなく毎 cycle 末に呼ぶ (= 自分以外の label が止まっていても気づける)。
+    完走記録が 1 件も無い label は判定不能として alert しない (初回導入時の誤報防止)。
+    """
+    stale = []
+    now = datetime.now()
+    for label, interval_h in CYCLE_INTERVAL_HOURS.items():
+        last = _last_cycle_success(label)
+        if last is None:
+            continue
+        elapsed_h = (now - last).total_seconds() / 3600.0
+        limit_h = interval_h * CYCLE_STALE_MULT
+        if elapsed_h > limit_h:
+            stale.append({"label": label, "elapsed_h": round(elapsed_h, 1),
+                          "limit_h": round(limit_h, 1), "last_success": last.isoformat(timespec="seconds")})
+    if not stale:
+        return []
+
+    # throttle (同 label を 6h 以内に再告知しない)。判定失敗時は告知側に倒す (silent 化しない)。
+    to_emit = stale
+    try:
+        prev = {}
+        if CYCLE_STALE_ALERT_STATE.exists():
+            prev = json.loads(CYCLE_STALE_ALERT_STATE.read_text(encoding="utf-8"))
+        to_emit = []
+        for s in stale:
+            last_ts = prev.get(s["label"])
+            if last_ts:
+                try:
+                    if (now - datetime.fromisoformat(last_ts)).total_seconds() / 3600.0 \
+                            < CYCLE_STALE_ALERT_THROTTLE_HOURS:
+                        continue
+                except Exception:
+                    pass
+            to_emit.append(s)
+        if to_emit:
+            prev.update({s["label"]: now.isoformat(timespec="seconds") for s in to_emit})
+            CYCLE_STALE_ALERT_STATE.write_text(
+                json.dumps(prev, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        _log(f"  [!] staleness throttle 判定失敗 (告知側に倒す): {type(e).__name__}: {e}", test_mode)
+
+    # ログには常に出す (= 非 silent 維持)、desktop/mail は throttle 後のみ
+    for s in stale:
+        _log(f"  [★巡回停止] {s['label']}: 最終完走 {s['last_success']} から {s['elapsed_h']}h "
+             f"(想定 {s['limit_h']}h 以内) = 監視が止まっています", test_mode)
+    if to_emit:
+        lines = [f"  - {s['label']}: 最終完走 {s['last_success']} から {s['elapsed_h']}h 経過 "
+                 f"(想定 {s['limit_h']}h 以内)" for s in to_emit]
+        msg = ("巡回が想定間隔を超えて実行されていません (在庫切れを検知できない = 取下げ漏れリスク)。\n"
+               "よくある原因: 前 cycle の長期化による lock 競合 / Task Scheduler 停止 / PC 停止。\n"
+               "対処: Task Scheduler の起動時刻が他 cycle と重なっていないか、"
+               "手動で `python run_cycle.py --sheet <high|low>` が通るかを確認してください。\n\n"
+               + "\n".join(lines))
+        _emit_nonsilent_alert("cycle_stale", "[★iMakInventory] 巡回が停止しています (取下げ漏れリスク)",
+                              msg, test_mode)
+    return stale
 
 
 # ============================================================================
@@ -648,12 +781,19 @@ def run_cycle(
         "status": "init",
     }
 
-    if not _acquire_lock(test_mode):
+    # lock 保持中でも即諦めず解放を待つ (前 cycle の長期化で巡回が丸ごと落ちるのを自己回復)
+    if not _acquire_lock(test_mode, wait_minutes=0 if test_mode else LOCK_WAIT_MINUTES):
         cycle_log["status"] = "skipped_lock_held"
         cycle_log["ts_end"] = datetime.now().isoformat(timespec="seconds")
+        cycle_log["waited_minutes"] = 0 if test_mode else LOCK_WAIT_MINUTES
         path = _record_cycle_log(cycle_log)
         _notify_toast("iMakInventory: skipped",
                       f"lock 保持中、巡回 skip ({path.name})")
+        # skip 自体を silent にしない: 「止まっている」水準なら 3ch 告知
+        try:
+            cycle_log["staleness"] = _check_cycle_staleness(test_mode)
+        except Exception as e:
+            _log(f"  [!] staleness 判定失敗: {type(e).__name__}: {e}", test_mode)
         return cycle_log
 
     # ライブ進捗 writer (Phase 9b: GUI が 30秒 polling して表示)
@@ -1053,6 +1193,12 @@ def run_cycle(
         }
     except Exception as e:
         _log(f"  [!] action_required 集計失敗: {type(e).__name__}: {e}", test_mode)
+
+    # ★ 全 label の巡回 staleness を毎 cycle 突合 (自分以外が止まっていても気づける = 非 silent)
+    try:
+        cycle_log["staleness"] = _check_cycle_staleness(test_mode)
+    except Exception as e:
+        _log(f"  [!] staleness 判定失敗: {type(e).__name__}: {e}", test_mode)
 
     log_path = _record_cycle_log(cycle_log)
     _log(f"=== cycle 完了: status={cycle_log['status']} log={log_path.name} ===", test_mode)
