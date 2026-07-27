@@ -192,21 +192,24 @@ def restock_collision(rows2d, titles_by_itemid=None):
             for k, v in sorted(live.items()) if k in susp]
 
 
-def frozen_cost_rows(rows2d, gap_yen=3000):
-    """AN(仕入override)が入っていて **実勢M と乖離** している ACTIVE 行を返す。
+def frozen_cost_rows(rows2d, gap_yen=0):
+    """★**廃止した AN列に値が入っていないか**の tripwire (2026-07-27 に AN列を廃止)。
 
-    AN は「人が意図的に仕入値を固定する」入口。入っている行は N=(M or F)−K の動的追随を
-    無視するため、供給価格が上がっても値上げされず **気づかないまま安売り**が続く
-    (2026-07-27 実測: Boa Hancock P-066 が ¥29,999 で凍結 → 実勢 ¥48,000 に対し $353.98 で出品)。
-    コード側は AN に書かないよう封じたが、**過去に凍結された行と、人が手で入れた行**は残るので
-    毎サイクル可視化する。gap>0 = 安売り側(Mの方が高い=仕入が上がったのに据置)。
-    戻り: [{'row','itemID','an','m','gap','title'}] を gap 降順。純関数。
+    経緯: AN(仕入override)は「人が仕入値を固定する」入口だったが、無在庫モデルでは
+    仕入値=今の最安(M)が常に正しく、凍結は原理的に誤り。手元在庫の取得原価は F、
+    ポイント控除は K が持つため **AN が担う残余ケースが無かった**(実績も人の書込ゼロ)。
+    → N1 の ARRAYFORMULA から AN 分岐を除去し、AN を参照しない形にした
+    (backup: iMak_data/hq/n_formula_backup_20260727.json)。
+
+    以降 AN に値が入っても価格には効かないが、**入っていること自体が異常**(誰かが
+    復活させようとしている / 旧コードが動いている)なので毎サイクル検出する。
+    既定 gap_yen=0 = 値があれば全件報告。純関数。
+    戻り: [{'row','itemID','an','m','gap','title'}]。
     """
     def _yen(v):
-        try:
-            return int(str(v).replace(",", "").replace("¥", "").strip() or 0)
-        except ValueError:
-            return 0
+        # 全角￥/半角¥/カンマ が混在するので **数字だけ**取る(sheet_io._to_yen_int と同規約)。
+        s = "".join(ch for ch in str(v or "") if ch.isdigit())
+        return int(s) if s else 0
 
     out = []
     for n, r in enumerate(rows2d[1:], start=2):
@@ -217,7 +220,7 @@ def frozen_cost_rows(rows2d, gap_yen=3000):
             continue
         m = _yen(_cell(r, COST_NOW))
         gap = m - an if m else 0
-        if abs(gap) >= gap_yen or not m:
+        if abs(gap) >= gap_yen:
             out.append({"row": n, "itemID": _cell(r, B), "an": an, "m": m, "gap": gap,
                         "title": _cell(r, C)[:40]})
     return sorted(out, key=lambda x: -x["gap"])
@@ -348,11 +351,9 @@ def audit(refresh_titles=True):
     for k, v in list(dup_cards.items())[:30]:
         print(f"    - {k:22} {v}")
     frozen = frozen_cost_rows(vals)
-    print(f"★③ 仕入値の凍結(AN override)で実勢とズレている行: {len(frozen)}件")
+    print(f"★③ 廃止したAN列(仕入override)に値がある行: {len(frozen)}件 ※常に0が正常")
     for f in frozen:
-        sign = "安売り" if f["gap"] > 0 else "高値"
-        print(f"    ⚠ row{f['row']:5} {f['itemID']} AN={f['an']:,} M={f['m']:,} "
-              f"差={f['gap']:+,}({sign})  {f['title']}")
+        print(f"    ⚠ row{f['row']:5} {f['itemID']} AN={f['an']:,} M={f['m']:,}  {f['title']}")
     coll = restock_collision(vals, titles)
     print(f"④ RESTOCK復活で2枠になりうる組(取下げ中に同じカードが居る): {len(coll)}組")
     for c in coll[:20]:
@@ -364,7 +365,7 @@ def audit(refresh_titles=True):
     if shared:
         print("‼ URL共有あり = 両方売れたら履行不能。片方の補URL差替 or 取下げが必要。")
     if frozen:
-        print("‼ AN(仕入override)は人が手で入れる時だけ。意図が無ければ空にすると N が M に追随します。")
+        print("‼ AN列は 2026-07-27 に廃止済(N は参照しない)。値が入っているのは異常 → 空にしてください。")
     return {"active": n_act, "shared_supply": len(shared), "dup_cards": len(dup_cards),
             "frozen_cost": len(frozen), "restock_collision": len(coll),
             "unkeyed": len(unkeyed)}

@@ -19,7 +19,11 @@ PRODUCT_GID = 851100680
 PRODUCT_COL_ITEMID = 1   # B
 PRODUCT_COL_CERT = 8     # I (PSA cert#。psa_cache.json で CardImageUrl=現物PSA画像を引く)
 PRODUCT_COL_COST = 13    # N (仕入れ価格（円）= live ARRAYFORMULA。**書込禁止**。読取専用)
-PRODUCT_COL_COST_OVERRIDE = 39   # AN (仕入override手動)。N は式なので直書き不可 → cost 上書きはここへ。
+PRODUCT_COL_COST_OVERRIDE = 39   # AN (仕入override) — ★2026-07-27 廃止。N の式はもう参照しない。
+# 廃止理由: 無在庫モデルでは仕入値=今の最安(M)が常に正しく、凍結は原理的に誤り。
+# 手元在庫の取得原価は F(商品価格)、ポイント控除は K が持つので AN の残余ケースが無かった
+# (実績も人の書込ゼロ。入っていた4件は全て旧 RESTOCK コードの機械書込)。
+# 定数は「この列に書かない」ことを示すためだけに残す(_ANWriteGuard が参照)。
                                  # N1 式が AN 優先で読む (AN空なら (M or F)−K)。2026-07-24 制定。
 PRODUCT_COL_KEY = 34     # AI (canonical product_id)
 

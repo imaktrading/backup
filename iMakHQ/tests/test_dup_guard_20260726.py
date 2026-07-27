@@ -170,21 +170,30 @@ def test_restock_collision_uses_title_token_when_key_empty():
     assert out and out[0]["card_key"] == "t:RP-028"
 
 
-# --------------------------- ⑤ 仕入値の凍結(AN override)検出
-def test_frozen_cost_detected_when_market_rose():
-    """★実例: AN=29,999 で凍結 / 実勢 M=48,000 → 安売り。必ず検出する。"""
+# ------------- ⑤ 廃止した AN列に値が入っていないかの tripwire (2026-07-27 廃止)
+def test_any_value_in_abolished_an_column_is_reported():
+    """★AN列は廃止済(N は参照しない)。値があること自体が異常なので全件出す。"""
     rows = [HEADER, _row(iid="358357723957", an="29999", m="48000", title="Boa Hancock P-066")]
     out = dg.frozen_cost_rows(rows)
-    assert len(out) == 1
-    assert out[0]["an"] == 29999 and out[0]["m"] == 48000 and out[0]["gap"] == 18001
+    assert len(out) == 1 and out[0]["an"] == 29999 and out[0]["m"] == 48000
 
 
-def test_frozen_cost_ignores_small_gap_and_no_override():
-    """AN無し(=追随中)は対象外。乖離が小さい行もノイズにしない。"""
-    rows = [HEADER,
-            _row(iid="111", m="48000"),                    # AN無し = 正常
-            _row(iid="222", an="15180", m="14430")]        # 差 -750 = 閾値未満
-    assert dg.frozen_cost_rows(rows, gap_yen=3000) == []
+def test_small_gap_is_still_reported_after_abolition():
+    """乖離が小さくても「AN に値がある」時点で異常(旧: 3000円未満は無視していた)。"""
+    rows = [HEADER, _row(iid="222", an="15180", m="14430")]
+    assert len(dg.frozen_cost_rows(rows)) == 1
+
+
+def test_no_override_is_clean():
+    rows = [HEADER, _row(iid="111", m="48000")]
+    assert dg.frozen_cost_rows(rows) == []
+
+
+def test_yen_parser_handles_fullwidth_sign():
+    """★実データは '￥7,500'(全角) が混在する。半角¥しか剥がさないと 0 と誤読する。"""
+    rows = [HEADER, _row(iid="333", an="￥29,999", m="￥48,000")]
+    out = dg.frozen_cost_rows(rows)
+    assert out[0]["an"] == 29999 and out[0]["m"] == 48000
 
 
 def test_frozen_cost_ignores_sold_rows():
