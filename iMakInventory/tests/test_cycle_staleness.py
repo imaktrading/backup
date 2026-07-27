@@ -19,11 +19,13 @@ if str(ROOT) not in sys.path:
 
 
 def _write_cycle(dirpath: Path, name: str, label: str, status: str, ts: datetime):
+    """実データと同じ形で書く: sheet_label は LOW 巡回でも "SHEET" 固定 (CLI 既定値)。"""
     p = dirpath / name
     p.write_text(json.dumps({
         "ts_start": ts.isoformat(timespec="seconds"),
         "ts_end": ts.isoformat(timespec="seconds"),
-        "sheet_label": label,
+        "sheet": "low" if label == "LOW" else "both",
+        "sheet_label": "SHEET",
         "status": status,
     }, ensure_ascii=False), encoding="utf-8")
     return p
@@ -68,6 +70,28 @@ def test_success_variants_count(rc_env):
     now = datetime.now()
     _write_cycle(d, "cycle_1.jsonl", "SHEET", "success_no_upload", now - timedelta(minutes=30))
     assert rc._last_cycle_success("SHEET") is not None
+
+
+def test_low_cycle_is_not_misread_as_sheet(rc_env):
+    """★回帰: LOW 巡回も sheet_label='SHEET' で記録される (実データ 2026-07-27)。
+
+    sheet_label で判定すると LOW が永久に「履歴なし」= staleness 非発火 (silent) に戻る。
+    """
+    rc, d, _ = rc_env
+    now = datetime.now()
+    p = _write_cycle(d, "cycle_l.jsonl", "LOW", "success", now - timedelta(hours=1))
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    assert raw["sheet_label"] == "SHEET" and raw["sheet"] == "low"   # 実データの形
+    assert rc._cycle_label_of(raw) == "LOW"
+    assert rc._last_cycle_success("LOW") is not None                 # LOW として拾える
+    assert rc._last_cycle_success("SHEET") is None                   # HIGH に誤計上しない
+
+
+def test_cycle_label_falls_back_to_by_sheet(rc_env):
+    """sheet 未記録の古い log は monitor.by_sheet で救う"""
+    rc, _d, _ = rc_env
+    assert rc._cycle_label_of({"phases": {"monitor": {"by_sheet": {"LOW": {}}}}}) == "LOW"
+    assert rc._cycle_label_of({"sheet_label": "SHEET"}) == "SHEET"
 
 
 # ---------------------------------------------------------------- staleness

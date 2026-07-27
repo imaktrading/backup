@@ -1741,6 +1741,19 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   履歴無→非発火/throttle 中も戻り値は報告/throttle 満了で再発火/state 破損→告知/lock 待ち自己回復/期限切れ skip)。
   **offline 151 pass / 非-live 全 525 pass**。
 
+### ★実データ突合で staleness 判定バグを発見・修正 (同日 commit)
+- 決定: 手動 LOW 完走後に実 cycle log を突合したところ、**`sheet_label` は LOW 巡回でも "SHEET" 固定**
+  (CLI 既定値) で記録されていた (実データ: `sheet='low'` / `sheet_label='SHEET'` / by_sheet=['LOW'])。
+  初版は `sheet_label` で label 判定していたため **LOW が永久に「完走履歴なし」= staleness 非発火**
+  = 今回の 25h 停止をまさに検知できない silent に逆戻りする実装だった。
+- 変更: `_cycle_label_of()` 新設 — **`sheet` フィールドを正** (low→LOW / both,high→SHEET)、
+  未記録の古い log は `monitor.by_sheet` で救い、最後に sheet_label へ fallback。
+- 検証: 回帰テスト 2 件追加 (LOW を SHEET に誤計上しない / by_sheet fallback) = 計 13 件。
+  **実データ照合**: SHEET 最終完走 07-27 18:37 / LOW 20:23 を正しく抽出、staleness=[] (正常)。
+  offline 151 / 非-live 527 全 pass。
+- 教訓: 「テストが通った」は実データ形式が想定通りである証明にはならない。ログ由来の判定は
+  必ず実ファイルの field を目視突合してから完了と言う ([[dont_declare_complete_after_one_cycle]])。
+
 ### 併行対応
 - **補URL消込 backlog 41 件** (snkrdunk28 + mercari13、25→28→35→41 と増加、毎 cycle 急増ガード HOLD):
   dry-run で対象確定 → HIGH cycle 完了後に `tools/supervised_backup_drain --reverify-snkrdunk --execute`

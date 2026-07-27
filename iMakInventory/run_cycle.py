@@ -286,6 +286,23 @@ def _emit_nonsilent_alert(tag: str, subject: str, msg: str, test_mode: bool = Fa
         _log(f"  [!] {tag} mail 失敗: {type(e).__name__}: {e}", test_mode)
 
 
+def _cycle_label_of(d: dict) -> str:
+    """cycle_log から実体の label を判定する。
+
+    ★ `sheet_label` は CLI 既定値のまま "SHEET" 固定で記録される (LOW 巡回でも "SHEET")。
+      2026-07-27 の実データで確認 (sheet='low' / sheet_label='SHEET')。判定に使うと LOW が
+      永久に「履歴なし」となり staleness が発火しない = silent に逆戻りするため、
+      **実際に指定された `sheet` を正**とする。monitor.by_sheet があれば補助的に使う。
+    """
+    sheet = str(d.get("sheet") or "").lower()
+    if sheet == "low":
+        return "LOW"
+    if sheet in ("high", "both"):
+        return "SHEET"
+    by_sheet = list(((d.get("phases") or {}).get("monitor") or {}).get("by_sheet") or {})
+    return by_sheet[0] if by_sheet else str(d.get("sheet_label") or "SHEET")
+
+
 def _last_cycle_success(label: str) -> Optional[datetime]:
     """cycle_*.jsonl から label の最終「完走」時刻を返す (無ければ None)。"""
     # file 名が cycle_<YYYYmmdd_HHMMSS>.jsonl = 名前降順が時刻降順 (mtime は同秒で不定順になる)
@@ -295,7 +312,7 @@ def _last_cycle_success(label: str) -> Optional[datetime]:
             d = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if d.get("sheet_label") != label or not str(d.get("status", "")).startswith("success"):
+        if _cycle_label_of(d) != label or not str(d.get("status", "")).startswith("success"):
             continue
         try:
             return datetime.fromisoformat(d.get("ts_end") or d.get("ts_start"))
