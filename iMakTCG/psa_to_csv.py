@@ -778,7 +778,8 @@ CRITICAL - FACTS ONLY POLICY:
 
 TITLE RULES (FACTS ONLY - eBay Keyword Spamming Policy compliant):
 - Length: up to 80 characters MAX. Use what facts allow - 50-80 char range is acceptable.
-- Start with "PSA 10" (factual: card is graded PSA 10)
+- Start with "PSA " + the grade you actually read on the label (usually "PSA 10"; if the label
+  says MINT 9 write "PSA 9"). NEVER write a grade you did not see on the label.
 - Template: PSA 10 [Game] [Set] #[Num] [Exact PSA Subject with full character name] [Rarity if in PSA label]
 - Game short names (= iMakKeywords PDF Q1 2026 実データ Rank 準拠):
   * Pokemon (Rank 1, never "Pokemon TCG")
@@ -805,6 +806,7 @@ TITLE RULES (FACTS ONLY - eBay Keyword Spamming Policy compliant):
 
 Return ONLY valid JSON:
 {{
+  "psa_grade": "The grade number printed on the PSA label in the image (right side). 'GEM MT 10' → '10', 'MINT 9' → '9', 'NM-MT 8' → '8'. Read it from the image, do NOT assume 10. Blank only if the label is unreadable.",
   "title": "eBay title max 80 chars",
   "card_name": "Clean card name only, no rarity",
   "rarity": "ONLY extract from PSA label Subject suffix: 'ALTERNATE ART' → 'Alternate Art', 'SPECIAL ART' → 'Special Art', 'SECRET' → 'Secret Rare', 'PARALLEL' → 'Parallel', 'MANGA' → 'Manga Rare'. If PSA Subject has no rarity marker, return BLANK - never guess from set/context.",
@@ -1163,6 +1165,40 @@ def load_description():
 # (新コア override が新値で description を作り直す replace_tcg_specs も同モジュール)。
 from tcg_listing_fields import build_tcg_specs_html, insert_tcg_specs  # noqa: E402,F401
 
+_SUPPLIER_NON_PSA10 = re.compile(r"PSA\s*[・･]?\s*([1-9])(?![0-9])", re.IGNORECASE)
+
+
+def supplier_grade_hint(supplier_title):
+    """仕入元タイトル(商品管理シート C列)から PSA グレード表記を拾う (純関数)。
+
+    ★これが 2026-07-27 の誤出品 6件を実際に発見した信号。
+      例: 「【PSA9・ワンオーナー】バギー 金ドン スーパーパラレルドン ワンピースカード」
+    `PSA10` は 10 なので拾わない (`[1-9](?![0-9])` で 1 桁のみ)。
+    戻り: '9' 等 / 表記なしは None。
+    """
+    if not supplier_title:
+        return None
+    m = _SUPPLIER_NON_PSA10.search(str(supplier_title))
+    return m.group(1) if m else None
+
+
+def non_psa10_certs(title_map):
+    """{cert: 仕入元タイトル} → PSA10 でないと **仕入元が明記している** cert の {cert: grade}。
+
+    ★なぜ LLM タイトル側の gate だけでは不足か:
+      Claude への prompt が `Start with "PSA 10"` と**指示している**ため、PSA9 でも
+      素直に "PSA 10" と書いてしまう可能性が高い(今回はたまたま Claude が実物を優先して
+      "PSA 9" と書いたので気づけただけ)。**仕入元表記は決定論的で、これが本命の gate**。
+    純関数。
+    """
+    out = {}
+    for cert, title in (title_map or {}).items():
+        g = supplier_grade_hint(title)
+        if g:
+            out[str(cert)] = g
+    return out
+
+
 def detected_grade_from_title(title):
     """LLM が現物ラベルから読んだタイトル冒頭の "PSA <n>" から グレードを取る (純関数)。
 
@@ -1180,15 +1216,19 @@ def detected_grade_from_title(title):
     return m.group(1) if m else None
 
 
-def is_psa10_or_unknown(title):
+def is_psa10_or_unknown(title, psa_grade=None):
     """出品してよいか (= PSA10 と読めた or 読めなかった) を返す (純関数)。
 
-    **PSA10 以外だと判った時だけ False**(= 出品しない)。読めない時は従来どおり続行する
-    (パイプラインは PSA10 前提で、ここで全部止めると出品がゼロになるため)。
-    = 「判っている誤りだけを確実に止める」fail-closed。
+    判定材料は2つ。**どちらかが「10でない」と言ったら出品しない**(fail-closed):
+      1. `psa_grade` = LLM が **PSA ラベル画像から直接読んだ**グレード (最も確か。画像が真実)
+      2. `title` 冒頭の `PSA <n>` (副次。prompt の書式に依存する)
+    読めない時は従来どおり続行する (pipeline は PSA10 前提で、全部止めると出品がゼロになる)。
+    = 「判っている誤りだけを確実に止める」。
     """
-    g = detected_grade_from_title(title)
-    return g is None or g == "10"
+    for g in (str(psa_grade or "").strip(), detected_grade_from_title(title)):
+        if g and g != "10":
+            return False
+    return True
 
 
 def parse_psa_page(text):
@@ -2263,9 +2303,10 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # ★PSA10 以外は出品しない (2026-07-27 事故: PSA9 が PSA10 として出かかった)。
     #   タイトル/CustomLabel/C:Grade/市場検索が全て PSA10 固定なので、非PSA10 は
     #   グレード誤表示 + 相場誤参照 になる。現物ラベルを読めた時だけ確実に止める。
-    if not is_psa10_or_unknown(claude_title):
-        _g = detected_grade_from_title(claude_title)
-        print(f"    🚫 PSA{_g} を検出 → **出品しない** (本 pipeline は PSA10 限定運用。"
+    _vision_grade = (claude_result or {}).get('psa_grade') if claude_result else None
+    if not is_psa10_or_unknown(claude_title, _vision_grade):
+        _g = (str(_vision_grade or "").strip() or detected_grade_from_title(claude_title))
+        print(f"    🚫 PSA{_g} を検出(ラベル画像) → **出品しない** (本 pipeline は PSA10 限定運用。"
               f"グレード誤表示 + PSA10 相場の誤参照になるため fail-closed)")
         return None
     if claude_title:
@@ -2642,6 +2683,19 @@ def main():
         return
 
     print(f"✓ {len(cert_numbers)}件の PSA 対象行を抽出（B列 itemID 空）")
+
+    # ★PSA10 以外を入口で落とす (2026-07-27 誤出品事故の本命 gate)。
+    #   本 pipeline は PSA10 限定運用 (title/C:Grade/相場すべて "10" 固定) なので、
+    #   PSA9 等が混ざると **グレード誤表示のまま出品** される (実害 live 6件・全て END 済)。
+    #   仕入元タイトルの "PSA9" 表記は決定論的で、実際にこの6件を発見した信号。
+    _non10 = non_psa10_certs(mercari_title_map)
+    if _non10:
+        _hit = [c for c in cert_numbers if str(c) in _non10]
+        if _hit:
+            print(f"  🚫 PSA10以外(仕入元表記)を除外: {len(_hit)}件 "
+                  f"→ {[f'#{c}=PSA{_non10[str(c)]}' for c in _hit]}")
+            print("     (本 pipeline は PSA10 限定運用。グレード誤表示 + PSA10相場の誤参照になるため)")
+            cert_numbers = [c for c in cert_numbers if str(c) not in _non10]
 
     # 目視済(NONE/NG=識別不能)cert を cooldown 期間スキップ (2026-06-23 再表示防止)
     # post_psa_review が NONE/NG 判定を skip 台帳に記録 → 一定期間 再出題しない。

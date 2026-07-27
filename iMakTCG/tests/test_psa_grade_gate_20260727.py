@@ -21,7 +21,37 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from psa_to_csv import detected_grade_from_title, is_psa10_or_unknown  # noqa: E402
+from psa_to_csv import (detected_grade_from_title, is_psa10_or_unknown,  # noqa: E402
+                        supplier_grade_hint, non_psa10_certs)
+
+
+# --------------------------------------------------------------- 3層のガード
+def test_vision_grade_from_label_blocks():
+    """★本命1: ラベル画像から読んだグレードで止める(画像が真実)。
+
+    タイトルが "PSA 10" でも(prompt が PSA 10 と書かせても)、画像が 9 なら出品しない。
+    """
+    assert is_psa10_or_unknown("PSA 10 Dragon Ball ... #E-60 Energy Marker", psa_grade="9") is False
+    assert is_psa10_or_unknown("PSA 10 Pokemon ...", psa_grade="10") is True
+    assert is_psa10_or_unknown("PSA 10 Pokemon ...", psa_grade="") is True     # 読めず → 続行
+    assert is_psa10_or_unknown("PSA 10 Pokemon ...", psa_grade=None) is True
+
+
+def test_supplier_title_hint():
+    """★本命2: 仕入元タイトルの PSA9 表記(実際に誤出品6件を発見した信号)。"""
+    assert supplier_grade_hint("【PSA9・ワンオーナー】バギー 金ドン スーパーパラレルドン") == "9"
+    assert supplier_grade_hint("2023 ONE PIECE モンキー・D・ルフィ #033　PSA9") == "9"
+    assert supplier_grade_hint("ルカリオ＆メルメタルGX UR PSA9") == "9"
+    assert supplier_grade_hint("【PSA10・ワンオーナー】シャンクス 金ドン") is None      # 10 は拾わない
+    assert supplier_grade_hint("PSA 10 ワンピース") is None
+    assert supplier_grade_hint("") is None
+
+
+def test_non_psa10_certs_filters_targets():
+    m = {"152976738": "【PSA9・ワンオーナー】バギー 金ドン",
+         "158715772": "【PSA10】シャンクス ALT",
+         "111": "ポケモンカード(グレード表記なし)"}
+    assert non_psa10_certs(m) == {"152976738": "9"}
 
 
 def test_detect_grade():
