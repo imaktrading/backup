@@ -1,5 +1,20 @@
 # iMakHarvest daily_report
 
+## 2026-07-27 (続) — merge/収集を cron 化 (HQ (A) GO)
+
+- 決定: HQ 督促回答で **(A) cron化 GO**。手動放置は「新型番がヨドバシに出ても補URL未載=silentな
+  取りこぼし=fail-OPEN」なので自動化が安全側。順序 収集→merge→snapshot→LOW を厳守。
+- 変更: 失敗マーカー付きラッパー2本 + Task Scheduler 2タスク:
+  - `run_yodobashi_harvest_cron.cmd` → `iMakHarvest_YodobashiHarvest_2100` (毎日21:00 収集)
+  - `run_gshock_merge_cron.cmd` → `iMakHarvest_GshockMerge_2130` (毎日21:30 merge)
+  - 両ラッパー: PYTHONIOENCODING=utf-8、**失敗時 exit≠0 で `debug\CRON_FAILED_*.flag` を残す**
+    (成功で自動クリア)= 「要対応」を silent に流さない (グローバル状態同期原則2項)。
+- 検証: merge ラッパー test-run = **exit0 / flag無し / 冪等(追記0・FLG増減0)/ UTF8ログ可読**。
+  収集ラッパーは 21:00 予定実行との二重回避のため手動実行せず、今夜が初の全チェーン稼働。
+- 依存順: 21:00収集 → 21:30merge → 22:00snapshot → 22:45 LOW cycle。全て22:00前完了(収集~15分)。
+
+---
+
 ## 2026-07-27 — snapshot生成 cron を 1日3回に変更 (06/14/22)
 
 - 決定: HQ `..._cadence_3x_daily.md`。LOW巡回が06:45/14:45/22:45に変更 + 監視くん12h staleガードで
