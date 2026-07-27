@@ -130,6 +130,11 @@ def _card_no_from_key(key):
     k = (key or "").strip()
     if not k or k.startswith(("item:", "shops:")):
         return ""
+    # ★2026-07-28: KEY の **カテゴリ接頭辞**('pokemon_tcg:SV5a-083')を先に落とす。
+    # 旧 bare 形式前提で split("_")[0] していたため、新形式では 'pokemon' を拾って数字なし→""
+    # となり **探索不能**になっていた(実測: 補URL対象127件中91件がこれで候補ゼロのまま放置)。
+    if ":" in k:
+        k = k.split(":", 1)[1]
     base = k.split("_")[0].strip().upper()
     return base if any(ch.isdigit() for ch in base) else ""
 

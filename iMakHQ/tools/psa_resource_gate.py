@@ -41,7 +41,13 @@ def _key_card_number(key):
     """
     if not key or str(key).startswith(("item:", "shops:")):
         return None
-    base = str(key).split("_")[0].strip().upper()
+    k = str(key)
+    # ★2026-07-28: KEY の **カテゴリ接頭辞**('pokemon_tcg:SV5a-083')を先に落とす。
+    # 旧 bare 形式('SV5a-083')前提で split("_")[0] していたため、新形式では 'pokemon' を拾って
+    # 数字なし→None になり **番号が取れない**(= SNKRDUNK 突合が沈黙して供給を見落とす)。
+    if ":" in k:
+        k = k.split(":", 1)[1]
+    base = k.split("_")[0].strip().upper()
     return base if re.search(r"\d", base) else None
 
 
