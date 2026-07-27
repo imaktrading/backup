@@ -150,3 +150,15 @@
 - 決定: 「variant backfill先行」を現行 --backfill-keys-from-cert でそのまま回しても **既存の非空KEー(variant片欠け)には効かない** (現行は空KEーのみ書込・既存skip=冪等設計)。②の既存片欠け行を閉じるには「非空KEーを catalog 再解決して variant suffix を補う upgrade モード」の小改修が要る = 一発 run では閉じない
 - 変更: 未実装 (= 現行 backfill は空KEー限定。upgrade モードは feasibility/BUILD 未依頼)
 - 検証: sheet_io.backfill_canonical_key は current_key 非空なら skipped_existing (url-key→product_id upgrade のみ例外)。variant精度 upgrade 経路は無し → grep/コード確認済。HQ④フラグが二次安全網なので急ぎ不要
+
+### KEー カテゴリ prefix 案B — Phase1b 読む側後方互換 実装 (= HQ 依頼)
+
+- 決定: catalog `UNIQUE(category, product_id)` で product_id global一意でない (OP×Gundam 同番号 282件)。KEー を `{category}:{product_id}` 形式に。Phase1b=読む側のみ、書く側は Phase2。HQ dup_guard.parse_key/group_key と同一規約採用
+- 変更: dedupe/key_format.py (新規 parse_key/group_key) / csv_check.py:388-411 (既定--check-csv 突合を group_key経由) / checker.py:187-208 (CanonicalIndex from_iterable/__contains__ を group_key経由) / tests/test_key_format.py (新規21件)
+- 検証: 新規21 pass + dedupe全 suite 368 passed (回帰なし)。旧`ST02-010`と新`gundam_tcg:ST02-010`は別group_key=別グループ (移行期混ぜない)、url-key恒等 (後方互換)、実機で classify_canonical_key('gundam_tcg:ST02-010')=product_id 確認。legacy path はKEー全体を突合値に使う設計で元から区別=非接触
+
+### Phase2 持越し (= 書く側・別依頼)
+
+- resolver が (category, product_id) を surface する小API拡張 (Catalog側) → 書き側 join。_guess_category は heuristic で単独採用非推奨 (cert行で真カテゴリと食い違いrisk)
+- 語彙整合済: catalog category列 = _guess_category出力 = HQ group_key = gundam_tcg/one_piece_tcg で一致
+- 既存 live 6件 (ST01-006_p1 / 358604221709 等) の振り直しは HQ Phase3

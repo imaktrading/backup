@@ -186,20 +186,27 @@ class CanonicalIndex:
 
     @classmethod
     def from_iterable(cls, keys: Iterable[str]) -> "CanonicalIndex":
-        """canonical KEY string iterable から index 構築 (= 空・None は skip)."""
+        """canonical KEY string iterable から index 構築 (= 空・None は skip).
+
+        2026-07-27 Phase1b: KEー を group_key 正規化して格納 (= カテゴリ込み突合)。
+        旧 `ST02-010` と 新 `gundam_tcg:ST02-010` は別 group_key → 別グループ
+        (= 移行期に混ぜない)。 url-key / 旧形式は group_key が恒等なので後方互換。
+        """
+        from .key_format import group_key
         out: set = set()
         for k in keys:
             if not k:
                 continue
             k_stripped = k.strip()
             if k_stripped:
-                out.add(k_stripped)
+                out.add(group_key(k_stripped))
         return cls(frozenset(out))
 
     def __contains__(self, key: str) -> bool:
+        from .key_format import group_key
         if not key:
             return False
-        return key.strip() in self.keys
+        return group_key(key) in self.keys
 
     def __len__(self) -> int:
         return len(self.keys)

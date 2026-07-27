@@ -385,6 +385,12 @@ def check_csv_canonical(
     removed_indices: set = set()
     unresolved_indices: set = set()
 
+    # 2026-07-27 Phase1b: 既存 KEー set を group_key 正規化 (= カテゴリ込み突合)。
+    # 旧 `ST02-010` と 新 `gundam_tcg:ST02-010` は別 group_key → 別グループ
+    # (= 移行期に混ぜない、 出品機会を守る側)。 url-key / 旧形式は恒等 (= 後方互換)。
+    from .key_format import group_key
+    existing_grouped = frozenset(group_key(k) for k in existing_canonical_keys)
+
     for i, row in enumerate(rows, start=1):
         canonical_key = resolver_io.resolve_csv_row(row, purpose="dedup")
         if not canonical_key:
@@ -399,7 +405,7 @@ def check_csv_canonical(
                 )
                 result["skipped_unresolved"] += 1
             continue
-        if canonical_key in existing_canonical_keys:
+        if group_key(canonical_key) in existing_grouped:
             # 2026-06-12 scope1: 重複除外 KEY を記録 (= DUP マーカー書込用)
             if canonical_key not in result["removed_canonical_keys"]:
                 result["removed_canonical_keys"].append(canonical_key)
