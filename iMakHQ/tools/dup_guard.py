@@ -68,6 +68,35 @@ def card_token_from_title(title):
     return m.group(1).upper() if m else None
 
 
+def parse_key(k):
+    """KEY → (category|None, product_id)。新形式 `gundam_tcg:ST02-010` と旧形式 `ST02-010` 両対応。
+
+    catalog の product_id は **カテゴリ内で一意**(schema は `UNIQUE(category, product_id)`)で、
+    global 一意は元から保証されていない。One Piece と Gundam が同じ set-code 体系を使うため
+    `ST02-010` は両方に実在する(実測 283件が重複)。KEY にカテゴリが無いと dedupe が
+    別ゲームの同番号を同一商品と誤認する → **KEY 側にカテゴリを持たせる**(2026-07-27 Catalog 合意)。
+    `:` は product_id が使わない文字(`[A-Za-z0-9_-]`)なので、最初の `:` で確実に分離できる。
+    純関数。url-key(`item:` / `shops:`)は catalog-backed でないのでカテゴリ扱いしない。
+    """
+    k = (k or "").strip()
+    if not k or k.startswith(("item:", "shops:")):
+        return (None, k)
+    if ":" in k:
+        cat, _, pid = k.partition(":")
+        return (cat, pid)
+    return (None, k)
+
+
+def group_key(k):
+    """突合用のグループキー。カテゴリが判っていれば含める(別ゲーム同番号を分離する)。
+
+    移行期は 旧形式(カテゴリ無)と新形式が併存するが、**両者は同一グループにしない**。
+    = 誤って「重複」と判定して出品を落とす方向には倒さない(fail-closed は出品を守る側)。純関数。
+    """
+    cat, pid = parse_key(k)
+    return f"{cat}:{pid}" if cat else pid
+
+
 def norm_url(url):
     """仕入元URL の比較キー(query/fragment/末尾スラッシュ除去 + 小文字)。空は ''。"""
     if not url:
@@ -123,7 +152,7 @@ def live_card_index(rows2d, titles_by_itemid=None):
         iid = _cell(r, B)
         k = _cell(r, KEY)
         if k and not k.startswith(("item:", "shops:")):
-            index.setdefault(k, []).append(iid)
+            index.setdefault(group_key(k), []).append(iid)
             continue
         tok = card_token_from_title(titles_by_itemid.get(iid, ""))
         if tok:
@@ -148,7 +177,7 @@ def dup_candidates(csv_rows, header, index, cert_to_key=None):
             return (r[i] or "").strip() if i is not None and i < len(r) else ""
         cert, title = col(CSV_CERT), col(CSV_TITLE)
         key = cert_to_key.get(cert) or ""
-        card_key = key if key else ("t:" + (card_token_from_title(title) or ""))
+        card_key = group_key(key) if key else ("t:" + (card_token_from_title(title) or ""))
         if card_key in ("", "t:"):
             continue
         existing = index.get(card_key) or []
@@ -175,7 +204,7 @@ def restock_collision(rows2d, titles_by_itemid=None):
     def _key(r):
         k = _cell(r, KEY)
         if k and not k.startswith(("item:", "shops:")):
-            return k
+            return group_key(k)
         tok = card_token_from_title(titles_by_itemid.get(_cell(r, B), ""))
         return "t:" + tok if tok else None
 

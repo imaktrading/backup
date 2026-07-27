@@ -44,6 +44,41 @@ def test_card_token_from_title():
     assert dg.card_token_from_title("") is None
 
 
+# --------------- KEY のカテゴリ対応 (2026-07-27 Catalog 合意・案B の読む側)
+def test_parse_key_new_and_legacy():
+    assert dg.parse_key("gundam_tcg:ST02-010") == ("gundam_tcg", "ST02-010")
+    assert dg.parse_key("ST02-010") == (None, "ST02-010")          # 旧形式
+    assert dg.parse_key("OP09-062_p") == (None, "OP09-062_p")      # variant suffix はそのまま
+    assert dg.parse_key("item:12345") == (None, "item:12345")      # url-key はカテゴリ扱いしない
+    assert dg.parse_key("") == (None, "")
+
+
+def test_different_games_same_number_are_separated():
+    """★本命: One Piece と Gundam の ST02-010 を別商品として扱う(283件の重複対策)。"""
+    rows = [HEADER,
+            _row(iid="111", key="gundam_tcg:ST02-010"),
+            _row(iid="222", key="one_piece_tcg:ST02-010")]
+    index, _ = dg.live_card_index(rows, {})
+    assert index == {"gundam_tcg:ST02-010": ["111"], "one_piece_tcg:ST02-010": ["222"]}
+
+
+def test_same_game_same_number_still_groups():
+    rows = [HEADER,
+            _row(iid="111", key="gundam_tcg:ST02-010"),
+            _row(iid="222", key="gundam_tcg:ST02-010")]
+    index, _ = dg.live_card_index(rows, {})
+    assert index["gundam_tcg:ST02-010"] == ["111", "222"]
+
+
+def test_legacy_and_new_key_do_not_merge_during_migration():
+    """移行期: 旧(カテゴリ無)と新は同一視しない = 誤って重複判定して出品を落とさない。"""
+    rows = [HEADER,
+            _row(iid="111", key="ST02-010"),
+            _row(iid="222", key="gundam_tcg:ST02-010")]
+    index, _ = dg.live_card_index(rows, {})
+    assert sorted(index) == ["ST02-010", "gundam_tcg:ST02-010"]
+
+
 def test_norm_url():
     assert dg.norm_url("https://jp.mercari.com/item/m123?utm=1") == "https://jp.mercari.com/item/m123"
     assert dg.norm_url("https://jp.mercari.com/item/m123/") == "https://jp.mercari.com/item/m123"
