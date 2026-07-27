@@ -107,6 +107,15 @@ def summarize_audit_log(log: str) -> str:
     excl = _find(r"除外\(出品しない\):\s*(\d+)\s*件")
     if excl and excl != "0":
         lines.append(f"❌ 出品除外: {excl}件 (CSVから物理除外済)")
+    # 重複除外は「捨てた」のでなく「弾いた2枚目の仕入元を primary の補URLに移した」= 供給を厚くした
+    # (hoju_url_from_dupes)。除外件数だけ報告すると機会損失に見えるので、補URL 追加とセットで出す。
+    dup = _find(r"removed \(真の重複[^\n]*?\):\s*(\d+)")
+    hoju_n = _re.search(r"追加対象primary\s*\d+\s*行\s*/\s*追加URL\s*(\d+)", log)
+    if dup and dup != "0":
+        if hoju_n and hoju_n.group(1) != "0":
+            lines.append(f"♻ 重複除外 {dup}件 → 補URL {hoju_n.group(1)}本 追加 (供給を厚くした)")
+        else:
+            lines.append(f"♻ 重複除外 {dup}件 (補URL 追加なし=既存収載 or 満杯)")
     nogo = _find(r"❌NO-GO\s*(\d+)")
     if nogo and nogo != "0":
         lines.append(f"🚫 市場NO-GO: {nogo}件 (入稿前に要確認)")
