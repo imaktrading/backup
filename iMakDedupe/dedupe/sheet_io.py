@@ -1048,3 +1048,105 @@ def backfill_canonical_key(
             ws.batch_update(updates[i : i + CHUNK], value_input_option="USER_ENTERED")
 
     return counts
+
+
+def upgrade_bare_keys_to_category(
+    ws,
+    key_col: int,
+    title_col: int,
+    cert_col: Optional[int] = None,
+    url_col: Optional[int] = None,
+    image_url_col: Optional[int] = None,
+    dry_run: bool = False,
+) -> dict:
+    """既存 bare KEー を `{category}:{product_id}` に upgrade (= 案B Phase3).
+
+    依頼: iMak_data/dedupe/requests/2026-07-27_key_category_phase3_sync_needed.md
+          + `_hq_response_phase3_and_cache_warming.md`（HQ が dedupe 一貫振り直しを採用）
+
+    対象: KEー **非空・bare(`:` 無し)・非 url-key** の row。
+
+    二重 fail-closed（誤カテゴリ・別 pid 焼き込み防止）:
+    - resolver が **category を確定** (= 非空) しない → 据置（bare のまま）
+    - resolver 再導出 product_id が **既存 bare KEー と不一致** → 据置
+      （= 同一カードの KEー に prefix を足すだけ、という不変を保証）
+    これで曖昧 9 行も cert→PSA brand で確定できる分のみ upgrade、
+    決められない分は bare 据置（dual-mode が拾う）。
+
+    既存の product_id 自体は変えない（prefix を足すだけ）。url-key は対象外。
+    """
+    import gspread  # 遅延
+    from .checker import extract_canonical_key_with_category
+    from .key_format import parse_key
+
+    values = ws.get_all_values()
+    counts = {
+        "total_rows": 0,
+        "skipped_empty": 0,
+        "skipped_url_key": 0,
+        "skipped_already_prefixed": 0,
+        "skipped_no_category": 0,   # resolver が category 確定できず（fail-closed 据置）
+        "skipped_pid_mismatch": 0,  # 再導出 pid ≠ 既存 bare（fail-closed 据置）
+        "upgraded": 0,
+        "by_category": {},
+        "samples": [],
+    }
+    if not values:
+        return counts
+
+    updates = []
+    SAMPLE_MAX = 12
+
+    for offset, row in enumerate(values[1:], start=1):
+        row_idx = offset + 1
+        counts["total_rows"] += 1
+
+        current = _safe_cell(row, key_col).strip()
+        if not current:
+            counts["skipped_empty"] += 1
+            continue
+        if current.startswith(("item:", "shops:")):
+            counts["skipped_url_key"] += 1
+            continue
+        cat0, _pid0 = parse_key(current)
+        if cat0:  # 既に prefixed
+            counts["skipped_already_prefixed"] += 1
+            continue
+
+        # bare key = current。 resolver で再導出 (= 独立にカテゴリ + pid 確定)
+        title = _safe_cell(row, title_col)
+        cert = _safe_cell(row, cert_col) if cert_col else ""
+        url = _safe_cell(row, url_col) if url_col else ""
+        image_url = _safe_cell(row, image_url_col) if image_url_col else ""
+
+        new_key, _new_type = extract_canonical_key_with_category(
+            title=title, url=url, cert=cert, image_url=image_url, purpose="dedup",
+        )
+        rcat, rpid = parse_key(new_key)
+        if not rcat:
+            # url-key / 未解決 / category 不明 → 据置（fail-closed）
+            counts["skipped_no_category"] += 1
+            continue
+        if rpid != current:
+            # 再導出 pid が既存 bare と不一致 → 据置（別カードに化ける事故防止）
+            counts["skipped_pid_mismatch"] += 1
+            continue
+
+        # safe: 同 pid + category 確定 → prefix を足して upgrade
+        updates.append(
+            {
+                "range": gspread.utils.rowcol_to_a1(row_idx, key_col),
+                "values": [[new_key]],
+            }
+        )
+        counts["upgraded"] += 1
+        counts["by_category"][rcat] = counts["by_category"].get(rcat, 0) + 1
+        if len(counts["samples"]) < SAMPLE_MAX:
+            counts["samples"].append(f"row {row_idx}: {current} → {new_key}")
+
+    if updates and not dry_run:
+        CHUNK = 500
+        for i in range(0, len(updates), CHUNK):
+            ws.batch_update(updates[i : i + CHUNK], value_input_option="USER_ENTERED")
+
+    return counts

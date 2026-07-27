@@ -132,6 +132,23 @@ def _write_csv(path: Path, rows: list) -> None:
         w.writerows(rows)
 
 
+def _rwc_dict(k):
+    """key 文字列 → resolve_csv_row_with_category の戻り dict (Phase3 dual-mode 対応)."""
+    from dedupe.key_format import parse_key
+    cat, pid = parse_key(k)
+    return {"product_id": pid, "category": cat or ""}
+
+
+def _rwc_side(keys):
+    """key 文字列 list → resolve_csv_row_with_category の side_effect 関数."""
+    it = iter(keys)
+
+    def _fn(row, purpose="dedup"):
+        return _rwc_dict(next(it))
+
+    return _fn
+
+
 class TestCsvCheckCanonicalSSOT:
     def test_total_equals_removed_plus_kept(self, tmp_path):
         """invariant: total == removed + kept (= csv_check_canonical 内 assert)."""
@@ -146,8 +163,8 @@ class TestCsvCheckCanonicalSSOT:
         )
         # resolver mock: row1=既存 KEY、 row2=新規、 row3=解決不能
         with patch(
-            "dedupe.resolver_io.resolve_csv_row",
-            side_effect=["EXISTING-KEY", "NEW-KEY", ""],
+            "dedupe.resolver_io.resolve_csv_row_with_category",
+            side_effect=_rwc_side(["EXISTING-KEY", "NEW-KEY", ""]),
         ):
             result = csv_check.check_csv_canonical(
                 csv_path=path,
@@ -176,8 +193,8 @@ class TestCsvCheckCanonicalSSOT:
             ],
         )
         with patch(
-            "dedupe.resolver_io.resolve_csv_row",
-            side_effect=["EXISTING-KEY", "NEW-KEY", "ANOTHER-NEW"],
+            "dedupe.resolver_io.resolve_csv_row_with_category",
+            side_effect=_rwc_side(["EXISTING-KEY", "NEW-KEY", "ANOTHER-NEW"]),
         ):
             result = csv_check.check_csv_canonical(
                 csv_path=path,
@@ -203,7 +220,8 @@ class TestCsvCheckCanonicalSSOT:
             ],
         )
         with patch(
-            "dedupe.resolver_io.resolve_csv_row", side_effect=["NEW-KEY", ""]
+            "dedupe.resolver_io.resolve_csv_row_with_category",
+            side_effect=_rwc_side(["NEW-KEY", ""]),
         ):
             result = csv_check.check_csv_canonical(
                 csv_path=path,
@@ -237,7 +255,8 @@ class TestSaboScenarioIntegration:
         )
         # resolver mock: Sabo = OP10-049_p1
         with patch(
-            "dedupe.resolver_io.resolve_csv_row", return_value="OP10-049_p1"
+            "dedupe.resolver_io.resolve_csv_row_with_category",
+            return_value=_rwc_dict("OP10-049_p1"),
         ):
             result = csv_check.check_csv_canonical(
                 csv_path=path,
@@ -273,7 +292,8 @@ class TestUnresolvedNotRemoved:
         )
         # Mercari 1 点もの = catalog 突合不能 = 全 unresolved ("")
         with patch(
-            "dedupe.resolver_io.resolve_csv_row", side_effect=["", "", ""]
+            "dedupe.resolver_io.resolve_csv_row_with_category",
+            side_effect=_rwc_side(["", "", ""]),
         ):
             result = csv_check.check_csv_canonical(
                 csv_path=path,
@@ -290,7 +310,8 @@ class TestUnresolvedNotRemoved:
         """check_csv_canonical の strict_mode 省略時デフォルト = keep (= 6/16 是正)."""
         path = tmp_path / "in.csv"
         _write_csv(path, [{"*Title": "x", "C:Card Number": ""}])
-        with patch("dedupe.resolver_io.resolve_csv_row", side_effect=[""]):
+        with patch("dedupe.resolver_io.resolve_csv_row_with_category",
+                   side_effect=_rwc_side([""])):
             result = csv_check.check_csv_canonical(
                 csv_path=path,
                 existing_canonical_keys=frozenset(),
@@ -311,8 +332,8 @@ class TestUnresolvedNotRemoved:
             ],
         )
         with patch(
-            "dedupe.resolver_io.resolve_csv_row",
-            side_effect=["OP01-001", "OP01-002", ""],
+            "dedupe.resolver_io.resolve_csv_row_with_category",
+            side_effect=_rwc_side(["OP01-001", "OP01-002", ""]),
         ):
             result = csv_check.check_csv_canonical(
                 csv_path=path,
@@ -417,7 +438,7 @@ class TestLiveFilterItemIdBuild:
         with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
              patch("dedupe.sheet_io.open_spreadsheet", side_effect=_open), \
              patch("dedupe.sheet_io.find_canonical_key_column", side_effect=_findkey), \
-             patch("dedupe.resolver_io.resolve_csv_row", side_effect=csv_resolves), \
+             patch("dedupe.resolver_io.resolve_csv_row_with_category", side_effect=_rwc_side(csv_resolves)), \
              patch("dedupe.csv_check.check_csv_canonical", wraps=csv_check.check_csv_canonical) as spy:
             checker.run_check_csv_canonical(csv_path=str(path), dry_run=True)
         return spy.call_args
@@ -470,7 +491,7 @@ class TestLiveFilterItemIdBuild:
         with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
              patch("dedupe.sheet_io.open_spreadsheet", side_effect=_open), \
              patch("dedupe.sheet_io.find_canonical_key_column", side_effect=_findkey), \
-             patch("dedupe.resolver_io.resolve_csv_row", side_effect=["LIVE-KEY", "ORPHAN-KEY"]), \
+             patch("dedupe.resolver_io.resolve_csv_row_with_category", side_effect=_rwc_side(["LIVE-KEY", "ORPHAN-KEY"])), \
              patch("dedupe.csv_check.check_csv_canonical", side_effect=_wrap):
             checker.run_check_csv_canonical(csv_path=str(path), dry_run=True)
         r = captured["result"]

@@ -326,6 +326,7 @@ def check_csv_canonical(
     existing_canonical_keys: "frozenset[str]",
     dry_run: bool = False,
     strict_mode: bool = False,
+    migration_dual_match: bool = True,
 ) -> Dict[str, Any]:
     """CSV を resolver 経由で canonical KEY 化 → 既存 set と単一突合 → 重複物理除外.
 
@@ -388,11 +389,20 @@ def check_csv_canonical(
     # 2026-07-27 Phase1b: 既存 KEー set を group_key 正規化 (= カテゴリ込み突合)。
     # 旧 `ST02-010` と 新 `gundam_tcg:ST02-010` は別 group_key → 別グループ
     # (= 移行期に混ぜない、 出品機会を守る側)。 url-key / 旧形式は恒等 (= 後方互換)。
-    from .key_format import group_key
+    from .key_format import group_key, build_key
     existing_grouped = frozenset(group_key(k) for k in existing_canonical_keys)
 
+    # 2026-07-27 Phase3 案2: 候補を **prefixed で解決**しつつ、既存 set とは
+    # **prefixed 形 と bare(product_id) 形 の両方で照合** する移行 dual-mode。
+    # - prefixed 形 → 新形式に振り直された既存とマッチ (= Phase2b/upgrade 済分)
+    # - bare 形 → 旧形式のまま残る既存とマッチ (= Phase3 未完了分。 fail-open 防止)
+    # url-key は category="" で prefix されないため bare 形と一致 (= 従来どおり)。
+    # 移行完了 (旧形式が枯れた) 後は migration_dual_match=False で bare 照合を落とす。
     for i, row in enumerate(rows, start=1):
-        canonical_key = resolver_io.resolve_csv_row(row, purpose="dedup")
+        res = resolver_io.resolve_csv_row_with_category(row, purpose="dedup")
+        pid = (res.get("product_id") or "").strip()
+        cat = (res.get("category") or "").strip()
+        canonical_key = build_key(cat, pid)  # prefixed / url-key / ""
         if not canonical_key:
             # 解決不能 → unknown 計上、 strict_mode で除外対象に
             result["unknown"] += 1
@@ -405,7 +415,13 @@ def check_csv_canonical(
                 )
                 result["skipped_unresolved"] += 1
             continue
-        if group_key(canonical_key) in existing_grouped:
+        # 照合形の集合: prefixed 形 (+ dual-mode 時は catalog-backed に限り bare 形)
+        match_forms = {group_key(canonical_key)}
+        if migration_dual_match and cat:
+            # catalog-backed のみ bare(product_id) も照合 (= 旧形式既存に当てる)。
+            # url-key (cat="") は bare 追加しない (= prefixed 形と同一で二重不要)。
+            match_forms.add(pid)
+        if match_forms & existing_grouped:
             # 2026-06-12 scope1: 重複除外 KEY を記録 (= DUP マーカー書込用)
             if canonical_key not in result["removed_canonical_keys"]:
                 result["removed_canonical_keys"].append(canonical_key)

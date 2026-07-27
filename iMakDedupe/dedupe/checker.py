@@ -1275,6 +1275,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument(
+        "--upgrade-keys-to-category",
+        action="store_true",
+        help=(
+            "2026-07-27 案B Phase3: HIGH の既存 bare KEー を {category}:{product_id} に "
+            "upgrade。 resolver が category 確定 かつ 再導出 pid が既存 bare と一致する時のみ "
+            "(= 二重 fail-closed)。 曖昧は bare 据置。 --dry-run で件数のみ。"
+        ),
+    )
+    parser.add_argument(
         "--check-csv",
         metavar="CSV_PATH",
         default=None,
@@ -1377,6 +1386,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_backfill_keys_from_api(dry_run=args.dry_run)
     if args.backfill_keys_from_cert:
         return run_backfill_keys_from_cert(dry_run=args.dry_run)
+    if args.upgrade_keys_to_category:
+        return run_upgrade_keys_to_category(dry_run=args.dry_run)
     if args.check_csv:
         # Step 4: --legacy-tuple-mode 明示なしなら single-key (= resolver 経由) で実行
         if args.legacy_tuple_mode:
@@ -1693,6 +1704,53 @@ def run_backfill_keys_from_cert(dry_run: bool = False) -> int:
         print("  [!] WARNING: url_key が書かれた (= url封じの想定外)。 要確認")
     if counts["written_bare_pid"]:
         print("  [!] WARNING: category 空の bare pid が書かれた (= Phase2b prefix 想定外)。 要確認")
+    return 0
+
+
+def run_upgrade_keys_to_category(dry_run: bool = False) -> int:
+    """既存 bare KEー を {category}:{product_id} に upgrade (= 案B Phase3).
+
+    依頼: 2026-07-27 HQ 返信 (案2 dual-mode 先行 + dedupe が 641+9 を一貫振り直し)。
+    HIGH 商品管理シートの bare KEー を、resolver がカテゴリ確定 かつ 再導出 pid が
+    既存 bare と一致する時のみ prefix 化 (= 二重 fail-closed)。曖昧は据置 (dual-mode が拾う)。
+    """
+    from . import sheet_io
+
+    print(f"[*] bare KEー → {{category}}:{{pid}} upgrade (Phase3, dry_run={dry_run})", flush=True)
+    client = sheet_io.authorize_client()
+    sh = sheet_io.open_spreadsheet(sheet_io.HIGH_SHEET_ID, client=client)
+    ws = sh.worksheet("商品管理シート")
+    key_col = sheet_io.find_canonical_key_column(ws)
+    if key_col is None:
+        print("HIGH スプシ KEー 列なし、 abort")
+        return 1
+
+    counts = sheet_io.upgrade_bare_keys_to_category(
+        ws,
+        key_col=key_col,
+        title_col=sheet_io.LISTINGS_COL_TITLE,          # C
+        cert_col=sheet_io.HIGH_COL_CERT_OR_ENGTITLE,    # I
+        url_col=sheet_io.LISTINGS_COL_URL,              # A
+        image_url_col=7,                                # G = 写真URL
+        dry_run=dry_run,
+    )
+
+    print()
+    print(f"  total_rows              : {counts['total_rows']}")
+    print(f"  skipped_empty           : {counts['skipped_empty']}")
+    print(f"  skipped_url_key         : {counts['skipped_url_key']}")
+    print(f"  skipped_already_prefixed: {counts['skipped_already_prefixed']}  (= 新形式済)")
+    print(f"  skipped_no_category     : {counts['skipped_no_category']}  (= category 未確定 fail-closed 据置)")
+    print(f"  skipped_pid_mismatch    : {counts['skipped_pid_mismatch']}  (= 再導出pid≠既存 fail-closed 据置)")
+    print(f"  upgraded                : {counts['upgraded']}  ← prefix 付与行数")
+    if counts["by_category"]:
+        print(f"  by_category             :")
+        for c, n in sorted(counts["by_category"].items(), key=lambda x: -x[1]):
+            print(f"    {c}: {n}")
+    if counts["samples"]:
+        print(f"  samples:")
+        for s in counts["samples"][:12]:
+            print(f"    {s}")
     return 0
 
 
