@@ -37,6 +37,8 @@ import sheet_io
 A, B, C, D = 0, 1, 2, 3
 CERT = sheet_io.PRODUCT_COL_CERT                 # I(8)
 KEY = sheet_io.PRODUCT_COL_KEY                   # AI(34)
+COST_OVERRIDE = sheet_io.PRODUCT_COL_COST_OVERRIDE  # AN(39) 仕入override(人が手で入れる時だけ)
+COST_NOW = 12                                    # M(現在価格=生きてる最安。N の追随元)
 AUX0, AUXN = sheet_io.PRODUCT_COL_AUX_START, sheet_io.PRODUCT_AUX_MAX   # AC(28), 5
 
 CATALOG_DB = r"C:\dev\iMak_data\catalog\products.sqlite"
@@ -154,6 +156,37 @@ def dup_candidates(csv_rows, header, index, cert_to_key=None):
             out.append({"label": col(CSV_LABEL), "cert": cert, "title": title,
                         "card_key": card_key, "existing": list(existing)})
     return out
+
+
+def frozen_cost_rows(rows2d, gap_yen=3000):
+    """AN(仕入override)が入っていて **実勢M と乖離** している ACTIVE 行を返す。
+
+    AN は「人が意図的に仕入値を固定する」入口。入っている行は N=(M or F)−K の動的追随を
+    無視するため、供給価格が上がっても値上げされず **気づかないまま安売り**が続く
+    (2026-07-27 実測: Boa Hancock P-066 が ¥29,999 で凍結 → 実勢 ¥48,000 に対し $353.98 で出品)。
+    コード側は AN に書かないよう封じたが、**過去に凍結された行と、人が手で入れた行**は残るので
+    毎サイクル可視化する。gap>0 = 安売り側(Mの方が高い=仕入が上がったのに据置)。
+    戻り: [{'row','itemID','an','m','gap','title'}] を gap 降順。純関数。
+    """
+    def _yen(v):
+        try:
+            return int(str(v).replace(",", "").replace("¥", "").strip() or 0)
+        except ValueError:
+            return 0
+
+    out = []
+    for n, r in enumerate(rows2d[1:], start=2):
+        if len(r) <= COST_OVERRIDE or not _is_active(r):
+            continue
+        an = _yen(_cell(r, COST_OVERRIDE))
+        if not an:
+            continue
+        m = _yen(_cell(r, COST_NOW))
+        gap = m - an if m else 0
+        if abs(gap) >= gap_yen or not m:
+            out.append({"row": n, "itemID": _cell(r, B), "an": an, "m": m, "gap": gap,
+                        "title": _cell(r, C)[:40]})
+    return sorted(out, key=lambda x: -x["gap"])
 
 
 def filter_urls_owned_by_others(urls, owner_by_url, self_itemid):
@@ -280,13 +313,22 @@ def audit(refresh_titles=True):
           f"/ 判定不能(KEY無+token無) {len(unkeyed)}件")
     for k, v in list(dup_cards.items())[:30]:
         print(f"    - {k:22} {v}")
+    frozen = frozen_cost_rows(vals)
+    print(f"★③ 仕入値の凍結(AN override)で実勢とズレている行: {len(frozen)}件")
+    for f in frozen:
+        sign = "安売り" if f["gap"] > 0 else "高値"
+        print(f"    ⚠ row{f['row']:5} {f['itemID']} AN={f['an']:,} M={f['m']:,} "
+              f"差={f['gap']:+,}({sign})  {f['title']}")
     _ledger("audit", {"shared_supply": {u: o for u, o in shared.items()},
                       "dup_cards": {k: v for k, v in dup_cards.items()},
+                      "frozen_cost": frozen,
                       "unkeyed": len(unkeyed), "active": n_act})
     if shared:
         print("‼ URL共有あり = 両方売れたら履行不能。片方の補URL差替 or 取下げが必要。")
-    return {"active": n_act, "shared_supply": len(shared),
-            "dup_cards": len(dup_cards), "unkeyed": len(unkeyed)}
+    if frozen:
+        print("‼ AN(仕入override)は人が手で入れる時だけ。意図が無ければ空にすると N が M に追随します。")
+    return {"active": n_act, "shared_supply": len(shared), "dup_cards": len(dup_cards),
+            "frozen_cost": len(frozen), "unkeyed": len(unkeyed)}
 
 
 def pre_upload(csv_path, use_cache_only=True):

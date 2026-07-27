@@ -19,10 +19,11 @@ import dup_guard as dg  # noqa: E402
 NCOL = 40
 
 
-def _row(url="", iid="", title="", sold="", cert="", key="", aux=()):
+def _row(url="", iid="", title="", sold="", cert="", key="", aux=(), an="", m=""):
     r = [""] * NCOL
     r[dg.A], r[dg.B], r[dg.C], r[dg.D] = url, iid, title, sold
     r[dg.CERT], r[dg.KEY] = cert, key
+    r[dg.COST_OVERRIDE], r[dg.COST_NOW] = an, m
     for k, u in enumerate(aux):
         r[dg.AUX0 + k] = u
     return r
@@ -140,6 +141,29 @@ def test_filter_urls_owned_by_others():
         ["https://jp.mercari.com/item/m1", "https://jp.mercari.com/item/m3"], owner, "222")
     assert keep == ["https://jp.mercari.com/item/m3"]
     assert dropped == [("https://jp.mercari.com/item/m1", ["111"])]
+
+
+# --------------------------- ④ 仕入値の凍結(AN override)検出
+def test_frozen_cost_detected_when_market_rose():
+    """★実例: AN=29,999 で凍結 / 実勢 M=48,000 → 安売り。必ず検出する。"""
+    rows = [HEADER, _row(iid="358357723957", an="29999", m="48000", title="Boa Hancock P-066")]
+    out = dg.frozen_cost_rows(rows)
+    assert len(out) == 1
+    assert out[0]["an"] == 29999 and out[0]["m"] == 48000 and out[0]["gap"] == 18001
+
+
+def test_frozen_cost_ignores_small_gap_and_no_override():
+    """AN無し(=追随中)は対象外。乖離が小さい行もノイズにしない。"""
+    rows = [HEADER,
+            _row(iid="111", m="48000"),                    # AN無し = 正常
+            _row(iid="222", an="15180", m="14430")]        # 差 -750 = 閾値未満
+    assert dg.frozen_cost_rows(rows, gap_yen=3000) == []
+
+
+def test_frozen_cost_ignores_sold_rows():
+    """取下げ済(D=○)は価格追随の対象外なので警告しない。"""
+    rows = [HEADER, _row(iid="333", an="29999", m="48000", sold="○")]
+    assert dg.frozen_cost_rows(rows) == []
 
 
 def test_filter_urls_keeps_self_owned_url_idempotent():
