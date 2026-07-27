@@ -99,13 +99,20 @@ def _normalize_url_key(url: str) -> str:
     return f"{host}{path}"  # query/fragment 除去の generic 正規化
 
 
-def resolve(context: dict) -> str:
-    """canonical KEY を返す。context = {category, signals{cert,brand,subject,card_no,model,url,image,...}, purpose?}.
+def _resolve_impl(context: dict) -> tuple[str, str]:
+    """canonical KEY を **(catalog_category, product_id)** で返す内部実装。
 
-    判別不能・未対応・名前不一致は **""** (fail-closed)。推測で固有idを当てない。
+    - catalog_category = product_id が属する catalog `category` 列の値
+      (= `UNIQUE(category, product_id)` の解決時に確定するカテゴリ)。
+      DON は catalog 上 'one_piece_tcg' に格納されているため 'one_piece_tcg' を返す
+      (dispatch 上の 'don' ではない)。
+    - fail-closed (未解決) は ("", "")。
+    - 非 catalog-backed の marketplace url-key は category 無し → ("", url_key)。
+      ⚠️ url-key は 'item:123' 等 ':' を含むため、KEY prefix ({category}:{pid}) を
+        付けてはいけない (category="" で返すことで書く側/dedupe が prefix 対象外と判別可)。
     """
     if not isinstance(context, dict):
-        return ""
+        return ("", "")
     signals = context.get("signals") or {}
     cat = _norm_category(context.get("category"))
     brand = signals.get("brand") or ""
@@ -126,7 +133,9 @@ def resolve(context: dict) -> str:
         # key不統一(card_id vs product_id)を facade が吸収 (docstring §冒頭の契約).
         # lookup_pokemon/one_piece 等は legacy dict で card_id、lookup_yugioh は
         # 生 record で product_id を返すため、両対応 (2026-06-11 yugioh resolve→'' 修正)。
-        return (rec or {}).get("card_id") or (rec or {}).get("product_id") or ""
+        pid = (rec or {}).get("card_id") or (rec or {}).get("product_id") or ""
+        # cat は _TCG_LOOKUP の key = catalog category と一致 (one_piece_tcg/gundam_tcg 等)。
+        return (cat, pid) if pid else ("", "")
     # 1b) G-shock (signature が TCG と違う: model のみ。_TCG_LOOKUP には入れない)
     #     KEY_REDESIGN_SPEC §3「解決は resolver 1 箇所」の本道。dedupe が G-shock CSV を
     #     全除外していた真因 = ここの未配線 (旧 line 134-136「G-shock等は別phase」)。
@@ -135,21 +144,51 @@ def resolve(context: dict) -> str:
     if cat == "gshock":
         model = signals.get("model") or ""
         if not model:
-            return ""  # fail-closed: model 不明 (推測で埋めない)
+            return ("", "")  # fail-closed: model 不明 (推測で埋めない)
         rec = _gl.lookup_gshock(model)
         if not rec:
-            return ""  # fail-closed: catalog 未収録 / 真1:N 曖昧
-        return rec.get("alias_of") or rec.get("product_id") or ""
-    # 2) DON (signature が異なる: brand, subject, image_url)
+            return ("", "")  # fail-closed: catalog 未収録 / 真1:N 曖昧
+        pid = rec.get("alias_of") or rec.get("product_id") or ""
+        return ("gshock", pid) if pid else ("", "")
+    # 2) DON (signature が異なる: brand, subject, image_url)。catalog 上は one_piece_tcg に格納。
     if cat == "don":
         rec = _pc.lookup_don(brand, subject, image, verbose=False)
-        return (rec or {}).get("card_id") or (rec or {}).get("product_id") or ""
-    # 3) non-catalog marketplace URL → 正規化 url-key
+        pid = (rec or {}).get("card_id") or (rec or {}).get("product_id") or ""
+        return ("one_piece_tcg", pid) if pid else ("", "")
+    # 3) non-catalog marketplace URL → 正規化 url-key (category 無し)
     if url:
-        return _normalize_url_key(url)
+        return ("", _normalize_url_key(url))
     # 4) 未対応 category / signal不足 → fail-closed
     #    (G-shock は上の 1b で配線済 2026-06-12。新 category はここに dispatch 追加)
-    return ""
+    return ("", "")
+
+
+def resolve(context: dict) -> str:
+    """canonical KEY (product_id) を返す。context = {category, signals{...}, purpose?}.
+
+    判別不能・未対応・名前不一致は **""** (fail-closed)。推測で固有idを当てない。
+    後方互換: 戻り値は従来どおり product_id 文字列 (category は resolve_with_category で取得)。
+    """
+    return _resolve_impl(context)[1]
+
+
+def resolve_with_category(context: dict) -> dict:
+    """resolve() の拡張版 (2026-07-27 Phase2a, HQ依頼)。
+
+    canonical KEY に加え **catalog category を同梱**して返す。
+    KEY カテゴリ prefix ({category}:{product_id}, 案B) の起点。
+
+    戻り: {"product_id": str, "category": str}
+      - 解決成功: product_id = canonical product_id, category = catalog の category 列値
+        ('one_piece_tcg' / 'gundam_tcg' / 'pokemon_tcg' / 'dragonball_scg' / 'yugioh_tcg' / 'gshock')。
+      - fail-closed (未解決): {"product_id": "", "category": ""}。
+      - marketplace url-key: {"product_id": "item:123..", "category": ""}
+        (category="" = KEY prefix 対象外。url-key は ':' を含むため prefix してはいけない)。
+
+    既存 resolve() は非破壊 (本関数と同じ内部実装 _resolve_impl を共有)。
+    """
+    cat, pid = _resolve_impl(context)
+    return {"product_id": pid, "category": cat}
 
 
 __all__ = ["resolve"]

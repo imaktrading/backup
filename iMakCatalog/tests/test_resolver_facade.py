@@ -86,3 +86,50 @@ def test_missing_signals_failclosed():
 def test_marketplace_url_key():
     assert _r(None, url="https://jp.mercari.com/item/m12345678?ref=x") == "item:m12345678"
     assert _r(None, url="https://mercari-shops.com/shops/products/abc123") == "shops:abc123"
+
+
+# ============================================================================
+# Phase2a: resolve_with_category (2026-07-27 HQ依頼) — KEY category prefix の起点
+# ============================================================================
+def _rc(category=None, **signals):
+    return resolver.resolve_with_category({"category": category, "signals": signals})
+
+
+def test_with_category_backward_compat_equals_resolve():
+    """resolve_with_category.product_id は既存 resolve() と常に一致 (非破壊)."""
+    ctxs = [
+        {"category": "one_piece_tcg", "signals": {
+            "brand": "ONE PIECE JAPANESE 25TH ANNIVERSARY PREMIUM CARD COLLECTION",
+            "subject": "TONY TONY CHOPPER", "card_no": "006"}},
+        {"category": "pokemon_tcg", "signals": {
+            "brand": "POKEMON JAPANESE ABYSS EYE", "card_no": "001", "subject": "TROPIUS"}},
+        {"category": "gundam_tcg", "signals": {
+            "brand": "GUNDAM JAPANESE ST02-WINGS", "card_no": "010", "subject": "HEERO YUY"}},
+    ]
+    for c in ctxs:
+        assert resolver.resolve(c) == resolver.resolve_with_category(c)["product_id"]
+
+
+def test_with_category_disambiguates_st02_010_collision():
+    """同一 product_id 'ST02-010' が category で分離される (案B の核心)."""
+    g = _rc("gundam_tcg", brand="GUNDAM JAPANESE ST02-WINGS", card_no="010", subject="HEERO YUY")
+    o = _rc("one_piece_tcg", brand="ONE PIECE JAPANESE ST02", card_no="010", subject="BASIL HAWKINS")
+    assert g == {"product_id": "ST02-010", "category": "gundam_tcg"}
+    assert o == {"product_id": "ST02-010", "category": "one_piece_tcg"}
+
+
+def test_with_category_pokemon():
+    d = _rc("pokemon_tcg", brand="POKEMON JAPANESE ABYSS EYE", card_no="001", subject="TROPIUS")
+    assert d == {"product_id": "M5-001", "category": "pokemon_tcg"}
+
+
+def test_with_category_url_key_has_empty_category():
+    """url-key は catalog-backed でない → category="" (KEY prefix 対象外)."""
+    d = _rc(None, url="https://mercari.com/item/m123456")
+    assert d["category"] == ""
+    assert d["product_id"].startswith("item:")
+
+
+def test_with_category_failclosed_empty_both():
+    d = _rc("gundam_tcg", brand="GUNDAM JAPANESE ST02", card_no="999", subject="NOBODY")
+    assert d == {"product_id": "", "category": ""}
