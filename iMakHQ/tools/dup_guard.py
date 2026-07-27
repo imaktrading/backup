@@ -158,6 +158,40 @@ def dup_candidates(csv_rows, header, index, cert_to_key=None):
     return out
 
 
+def restock_collision(rows2d, titles_by_itemid=None):
+    """live出品 と **取下げ中(D非空)** に同じカードが居る組を返す(=RESTOCK復活で2枠になる予備軍)。
+
+    重複くん(dedupe)の母集団は「ACTIVE = itemID有り + D空」に絞られている。これは 7/13 に
+    「弾いた=今 live 出品中」を構造保証するための意図的な設計で、**広げてはいけない**
+    (補URL の live primary 保証が崩れ、取下げ中KEY との一致で新規を誤ブロックする)。
+    しかしその結果、**取下げ中の在庫が母集団から消え**、同じカードをもう1枚出品でき、
+    後で RESTOCK で復活すると2枠 live になる (EB03-053 / OP08-106 がこの形)。
+    → 母集団は触らず、**独立の疑いフラグ**として人に見せる (Dedupe回答 2026-07-26 の推奨形)。
+    **除外も DUP マークもしない**。純関数。
+    戻り: [{'card_key','live':[itemID],'suspended':[itemID]}]
+    """
+    titles_by_itemid = titles_by_itemid or {}
+
+    def _key(r):
+        k = _cell(r, KEY)
+        if k and not k.startswith(("item:", "shops:")):
+            return k
+        tok = card_token_from_title(titles_by_itemid.get(_cell(r, B), ""))
+        return "t:" + tok if tok else None
+
+    live, susp = {}, {}
+    for r in rows2d[1:]:
+        iid = _cell(r, B)
+        if not iid:
+            continue
+        k = _key(r)
+        if not k:
+            continue
+        (live if not _cell(r, D) else susp).setdefault(k, []).append(iid)
+    return [{"card_key": k, "live": v, "suspended": susp[k]}
+            for k, v in sorted(live.items()) if k in susp]
+
+
 def frozen_cost_rows(rows2d, gap_yen=3000):
     """AN(仕入override)が入っていて **実勢M と乖離** している ACTIVE 行を返す。
 
@@ -319,16 +353,21 @@ def audit(refresh_titles=True):
         sign = "安売り" if f["gap"] > 0 else "高値"
         print(f"    ⚠ row{f['row']:5} {f['itemID']} AN={f['an']:,} M={f['m']:,} "
               f"差={f['gap']:+,}({sign})  {f['title']}")
+    coll = restock_collision(vals, titles)
+    print(f"④ RESTOCK復活で2枠になりうる組(取下げ中に同じカードが居る): {len(coll)}組")
+    for c in coll[:20]:
+        print(f"    - {c['card_key']:22} live={c['live']} 取下げ中={c['suspended']}")
     _ledger("audit", {"shared_supply": {u: o for u, o in shared.items()},
                       "dup_cards": {k: v for k, v in dup_cards.items()},
-                      "frozen_cost": frozen,
+                      "frozen_cost": frozen, "restock_collision": coll,
                       "unkeyed": len(unkeyed), "active": n_act})
     if shared:
         print("‼ URL共有あり = 両方売れたら履行不能。片方の補URL差替 or 取下げが必要。")
     if frozen:
         print("‼ AN(仕入override)は人が手で入れる時だけ。意図が無ければ空にすると N が M に追随します。")
     return {"active": n_act, "shared_supply": len(shared), "dup_cards": len(dup_cards),
-            "frozen_cost": len(frozen), "unkeyed": len(unkeyed)}
+            "frozen_cost": len(frozen), "restock_collision": len(coll),
+            "unkeyed": len(unkeyed)}
 
 
 def pre_upload(csv_path, use_cache_only=True):

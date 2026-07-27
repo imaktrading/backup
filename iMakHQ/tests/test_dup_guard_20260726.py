@@ -143,7 +143,34 @@ def test_filter_urls_owned_by_others():
     assert dropped == [("https://jp.mercari.com/item/m1", ["111"])]
 
 
-# --------------------------- ④ 仕入値の凍結(AN override)検出
+# ------------- ④ RESTOCK復活で2枠になる予備軍(取下げ中との衝突・Dedupe回答の推奨形)
+def test_restock_collision_flags_live_vs_suspended():
+    """★EB03-053型: live に1枚、取下げ中に同じカード → 復活すると2枠。疑いとして出す。"""
+    rows = [HEADER,
+            _row(iid="358600821593", key="EB03-053"),                 # live
+            _row(iid="358810782374", key="EB03-053", sold="○")]       # 取下げ中
+    out = dg.restock_collision(rows)
+    assert len(out) == 1
+    assert out[0]["live"] == ["358600821593"] and out[0]["suspended"] == ["358810782374"]
+
+
+def test_restock_collision_ignores_when_no_suspended_twin():
+    rows = [HEADER,
+            _row(iid="111", key="EB03-053"),
+            _row(iid="222", key="P-110", sold="○")]
+    assert dg.restock_collision(rows) == []
+
+
+def test_restock_collision_uses_title_token_when_key_empty():
+    """KEY空でも eBayタイトルの #ID で拾う(母集団の穴を塞ぐのが目的なので)。"""
+    rows = [HEADER, _row(iid="111"), _row(iid="222", sold="○")]
+    titles = {"111": "PSA 10 Gundam Japanese #RP-028 Resource",
+              "222": "PSA 10 Gundam Japanese #RP-028 Resource"}
+    out = dg.restock_collision(rows, titles)
+    assert out and out[0]["card_key"] == "t:RP-028"
+
+
+# --------------------------- ⑤ 仕入値の凍結(AN override)検出
 def test_frozen_cost_detected_when_market_rose():
     """★実例: AN=29,999 で凍結 / 実勢 M=48,000 → 安売り。必ず検出する。"""
     rows = [HEADER, _row(iid="358357723957", an="29999", m="48000", title="Boa Hancock P-066")]
