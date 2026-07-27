@@ -134,6 +134,34 @@ Advisor は中継ハブなので、**1件保留すると複数 worktree が同�
 - 「判断待ち」に見えるものの多くは**実測すれば消える**。件数・実データを取ってから返す。
 - ユーザー判断が要るのは **破壊的 / 不可逆 / 外向き** のみ。cron 時刻・段取り・優先順は自分で決める。
 
+## 🚨 commit / push / daily_report は Advisor も必ずやる (2026-07-27 制定)
+
+**Advisor と出品専任は同じ worktree・同じ branch (`C:/dev/iMak` master) を共有している。**
+= `.git/index` も `daily_report.md` も共有物。以下のガードレール込みで運用する。
+
+### commit — 必須。ただし `git add -A` / `git add .` は**禁止**
+
+- Advisor は 2026-06-21 からコードを書く (横断インフラ・`sheet_io`・pre-commit hook・監査)。
+  **未 commit は branch 操作で消える** (2026-04-30 / 05-03 / 05-09 に同型事故3回)。
+- ⚠️ index が共有なので、`git add -A` は **出品専任が編集中のファイルを巻き込んで commit する**。
+  必ず **`git add <自分が触ったファイルだけ>`** と明示すること。
+- 作業の区切りごとに commit。「保存した = 永続化された」は誤り。
+
+### push — する
+
+- remote backup になるうえ、**灰色地帯 (`iMakeBayAPI/listing_common` / `check_csv` / `sheet_io`) の
+  受け渡しが push で成立する** (相手セッションが `git log` で拾える)。
+- pre-commit が全 test を回すので、赤いまま push されることはない。
+
+### daily_report.md — 必ず書く (これが現在地喪失の根本対策)
+
+`C:\Users\imax2\.claude\projects\c--dev-iMak\memory\daily_report.md` の**最上段に追記**。
+
+- ⚠️ **`Write` (全文上書き) は禁止。`Edit` (部分置換) のみ。** 全文書きだと出品専任の追記を消す。
+- ⚠️ 見出しに **書き手を明記**: `## 2026-07-27 20:45 [Advisor] 〜`
+  (無署名だと後から誰の判断か辿れない)。
+- 書式は 決定 / 変更(file:line or 未実装) / 検証 の3点セット。
+
 ---
 
 ## 応答スタイル
