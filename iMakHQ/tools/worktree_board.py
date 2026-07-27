@@ -52,6 +52,30 @@ def _is_closed(path: Path, stems: set[str]) -> bool:
     return any(s != path.stem and s.startswith(prefix) for s in stems)
 
 
+# headless 担当が書く中間成果物。窓口がレビューして `_response.md` に昇格させる。
+# **依頼として再 dispatch してはいけない**ので pending とは別枠に分ける。
+DRAFT_SUFFIXES = ("_draft", "_question")
+
+
+def pending_for(worktree: str, recent_days: int = RECENT_DAYS):
+    """(自分が返すべき, 相手ボール, 窓口レビュー待ち) の Path list を返す."""
+    d = DATA_ROOT / worktree / "requests"
+    if not d.is_dir():
+        return [], [], []
+    cutoff = time.time() - recent_days * 86400
+    files = [p for p in d.glob("*.md") if p.stat().st_mtime >= cutoff]
+    stems = {p.stem for p in files}
+    mine, theirs, drafts = [], [], []
+    for p in sorted(files, key=lambda x: -x.stat().st_mtime):
+        if p.stem.lower().endswith(DRAFT_SUFFIXES):
+            drafts.append(p)
+            continue
+        if _is_closed(p, stems):
+            continue
+        (theirs if _is_outbound(p.stem, worktree) else mine).append(p)
+    return mine, theirs, drafts
+
+
 def _age(ts: float) -> str:
     h = (time.time() - ts) / 3600
     if h < 1:
@@ -76,15 +100,10 @@ def main() -> int:
         if not d.is_dir():
             continue
         files = [p for p in d.glob("*.md") if p.stat().st_mtime >= cutoff]
-        stems = {p.stem for p in files}
-        mine, theirs = [], []
-        for p in sorted(files, key=lambda x: -x.stat().st_mtime):
-            if _is_closed(p, stems):
-                continue
-            (theirs if _is_outbound(p.stem, wt) else mine).append(p)
+        mine, theirs, drafts = pending_for(wt, RECENT_DAYS)
         latest = max((p.stat().st_mtime for p in files), default=0)
 
-        if not (mine or theirs):
+        if not (mine or theirs or drafts):
             state = f"動きなし (最終 {_age(latest)})" if latest else "動きなし"
             print(f"## {label} — {state}")
             print()
@@ -93,7 +112,9 @@ def main() -> int:
         grand_mine += len(mine)
         grand_theirs += len(theirs)
         print(f"## {label} — 自分が返す {len(mine)}件 / 相手待ち {len(theirs)}件"
-              f" (最終 {_age(latest)})")
+              f" / レビュー待ち {len(drafts)}件 (最終 {_age(latest)})")
+        for p in drafts[:MAX_SHOW]:
+            print(f"- 🟡 **レビュー待ち(headless下書き)** {p.name} ({_age(p.stat().st_mtime)})")
         for p in mine[:MAX_SHOW]:
             print(f"- 🔴 **要返球** {p.name} ({_age(p.stat().st_mtime)})")
         if len(mine) > MAX_SHOW:
