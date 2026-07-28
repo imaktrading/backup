@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath
 
 import sheet_io
 from mercari_psa_resource import parse_mercari_items, parse_image_search_results, _chrome_major
-from psa_resource_html import mercari_image_url
+from psa_resource_html import mercari_image_url, shops_image_large
 from ebay_getitem_images import fetch_listing_images
 
 try:
@@ -665,7 +665,8 @@ def _href_to_image(src):
         if not hr:
             continue
         im = re.search(r'(?:src|srcset)="(https://[^"\s]+?\.(?:jpg|jpeg|png|webp)[^"\s]*)"', b)
-        out["https://jp.mercari.com" + hr.group(1)] = im.group(1) if im else ""
+        # Shops のサムネは size セグメントを large に上げる(目視の見比べ精度。2026-07-28)
+        out["https://jp.mercari.com" + hr.group(1)] = shops_image_large(im.group(1)) if im else ""
     return out
 
 

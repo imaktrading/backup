@@ -24,6 +24,25 @@ def mercari_image_url(url):
     return f"https://static.mercdn.net/item/detail/orig/photos/{m.group(1)}_1.jpg"
 
 
+# メルカリ Shops の画像 CDN は同じキーで size セグメントを差し替えられる。
+#   検索結果のサムネ: .../-/240x240/plain/<id>.jpg@webp
+#   商品ページ og:image: .../-/large/plain/<id>.jpg@jpg   ← 実測 (2026-07-28)
+# 個人出品は mercari_image_url が orig を組めるが、**Shops だけ検索結果のサムネのまま**
+# 目視に出ていた。PSA cert 画像の /small/→/large/ と同じ理屈で、見比べ精度を上げる。
+_SHOPS_CDN_SIZE_RE = re.compile(r"(assets\.mercari-shops-static\.com/-/)[^/]+/")
+
+
+def shops_image_large(url):
+    """メルカリ Shops 画像URL の size セグメントを large に上げる (純関数)。
+
+    対象外(Shops CDN でない / 既に large)や空は元の値をそのまま返す = 呼び手は無条件に通せる。
+    """
+    u = (url or "").strip()
+    if not u or "assets.mercari-shops-static.com/-/" not in u:
+        return url
+    return _SHOPS_CDN_SIZE_RE.sub(r"\1large/", u, count=1)
+
+
 _SNKR_CACHE = {}
 
 

@@ -107,6 +107,12 @@ def _resolve_image_url(u):
     - snkrdunk 商品ページ → og:image
     """
     u = u or ""
+    # メルカリ Shops の画像は size セグメントを large に上げる(サムネのままだと変種を見分けられない)。
+    try:
+        from psa_resource_html import shops_image_large
+        u = shops_image_large(u)
+    except Exception:
+        pass
     # 既に直画像URL(CDN host / 画像拡張子)なら解決不要でそのまま(SNKRDUNK thumbnailUrl 等)。
     if "cdn.snkrdunk.com" in u or u.lower().split("?", 1)[0].endswith(
             (".jpg", ".jpeg", ".png", ".webp", ".gif")):
