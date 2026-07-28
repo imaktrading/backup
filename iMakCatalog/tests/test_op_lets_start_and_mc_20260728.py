@@ -54,3 +54,31 @@ class TestMcStartDeck100(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSiStartDeck100(unittest.TestCase):
+    def test_si_set_filled_rarity_empty(self):
+        r = pc.lookup_pokemon("POKEMON JAPANESE START DECK 100", "001", "VENUSAUR V")
+        self.assertIsNotNone(r)
+        self.assertEqual(r.get("card_id"), "SI-001")
+        self.assertEqual(r.get("set_name_ebay"), "Start Deck 100")
+        self.assertFalse(r.get("rarity"))  # deck=印刷レアリティ無し=空欄が正
+
+
+class TestDbscgVariantRarityBackfill(unittest.TestCase):
+    def test_leader_variant_gets_leader(self):
+        from iMakCatalog import api
+        rec = api.lookup(category="dragonball_scg", product_id="FB06-001_p1")
+        self.assertEqual(rec["specs"].get("rarity_ebay"), "Leader")
+
+    def test_battle_variant_gets_rarity(self):
+        from iMakCatalog import api
+        rec = api.lookup(category="dragonball_scg", product_id="FB06-002_p1")
+        self.assertEqual(rec["specs"].get("rarity_ebay"), "Super Rare")
+
+    def test_number_divergence_stays_empty(self):
+        """FB07-025 base=Omega Shenron に sibling(Syn Shenron)の rarity を焼かない (name-guard)."""
+        from iMakCatalog import api
+        for pid in ("FB07-025", "FB07-025_p1"):
+            rec = api.lookup(category="dragonball_scg", product_id=pid)
+            self.assertFalse(rec["specs"].get("rarity"), pid)

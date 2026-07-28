@@ -249,6 +249,13 @@ set_code:
       MEGA拡張パック「アビスアイ」(2026-05-22 発売, メガダークライex)。eBay/TCGplayer facet
       = "Abyss Eye" (TCGplayer 'M5: Abyss Eye' / pokemon-card.com/ex/m5 で確認 2026-07-24)。
     year: 2026
+  - source: SI
+    ebay: Start Deck 100
+    note: >-
+      スタートデッキ100 (/414, 419件)。set 全欠を Advisor 監査で検出 → set backfill (2026-07-28)。
+      eBay/TCGplayer facet = "Start Deck 100" (TCGplayer 'Venusaur V - SI: Start Deck 100' で確認)。
+      ★rarity は空欄が正: デッキ収録カードは印刷レアリティ無し (SI 0/419, MC/CP4/Classic 同型)。
+    year: 2022
   - source: MC
     ebay: Start Deck 100 Battle Collection
     note: >-
