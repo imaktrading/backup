@@ -29,7 +29,7 @@ def _ugroup(cmd):
         return "oos"
     if any(s in c for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
         return "discover"
-    if "psa_hoju_fill.py" in c and ("--limit=15" in c or "confirm" in c):
+    if "psa_hoju_fill.py" in c and "--limit=15" in c:
         return "hoju"
     return "report"
 
@@ -41,9 +41,16 @@ def _group_of(label):
     raise AssertionError(f"ボタンが無い: {label}")
 
 
-def test_post_listing_buttons_are_in_new_panel():
+def test_search_button_is_new_panel_only():
+    """🆕 は出品直後専用。"""
     assert _group_of("🆕 出品直後の補URL候補検索(当日分)") == "hoju"
-    assert _group_of("🩹 補URL補強(昼確認/slice3)") == "hoju"
+
+
+def test_confirm_button_stays_in_maintenance_and_is_also_shown_in_new_panel():
+    """🩹 は既存backlogの定常消化でも使うのでメンテ側に残し、新規パネルには併置する。"""
+    assert _group_of("🩹 補URL補強(昼確認/slice3)") == "report"   # 実体はメンテ側
+    src = open(os.path.join(HQ, "control_panel.py"), encoding="utf-8").read()
+    assert "_confirm_idx" in src                                  # 新規パネルにも並べている
 
 
 def test_routine_buttons_stay_in_maintenance():
