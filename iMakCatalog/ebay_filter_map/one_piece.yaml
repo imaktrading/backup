@@ -33,6 +33,24 @@ set:
   - source: プレミアムカードコレクション -GIRLS EDITION-
     ebay: Promo Cards
     note: 2026-07-10 Premium Card Collection Girls Edition (ST07-008_GE 等 parallel)
+  # 2026-07-29 live cert set_name_ebay 欠損 (214KEY残36の一部)。既存 promo/event と同じ Promo Cards バケツ。
+  - source: プレミアムカードコレクション 25周年エディション
+    ebay: Promo Cards
+    note: 25th Anniversary Edition Premium Card Collection (OP01-001_p1 / ST01-006_p1 等)。REVIEW eBay 値
+  - source: プレミアムカードコレクション ‐ONE PIECE FILM RED ‐
+    ebay: Promo Cards
+    note: Premium Card Collection FILM RED (OP01-017_p2 / ST01-013_p3 等)。既存同setで Promo Cards 実績あり
+  - source: スタンダードバトル 2024年1月優勝記念品
+    ebay: Promo Cards
+    note: Standard Battle 優勝記念品 (event prize promo, OP03-044_p2)。REVIEW eBay 値
+  - source: フラッグシップバトル2025 10月ベスト8記念品
+    ebay: Promo Cards
+    note: Flagship Battle 記念品 (event prize promo, OP12-031_p2)。REVIEW eBay 値
+  - source: 2nd ANNIVERSARY SET
+    ebay: 500 Years in the Future
+    note: >-
+      OP06-118_p4 (Zoro SEC)。同 set_name_official の既存カードが '500 Years in the Future' 実績のため
+      整合。★REVIEW: 2nd Anniversary Set の eBay facet は要 HQ 確証 (Promo Cards の可能性も)。
 
   # Vision OCR 由来の長文セット名 (PSA カード上の印刷名、bracket [...] 抜き)
   # 旧 psa_to_csv._ONEPIECE_SET_NAME_MAP の Vision エントリから移植
