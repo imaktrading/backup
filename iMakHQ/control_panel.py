@@ -1697,13 +1697,19 @@ class ListingPanel:
                 return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
                 return "discover"  # 新規ネタ探し
+            # ★2026-07-28: 出品直後に押す補URL2ボタン(🆕検索/🩹確証)は **新規出品パネル**に置く。
+            # 出品→itemID書込→補URL確保 は一連の流れなので、既存メンテ側に離すと導線が切れる
+            # (ユーザー指示)。件数感/夜間検索は定常運用なのでメンテ側に残す。
+            if "psa_hoju_fill.py" in cmd and ("--limit=15" in cmd or "confirm" in cmd):
+                return "hoju"
             # 在庫あり listing を直す: 取下再出品①②③(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
             if any(s in cmd for s in ("relist_from_funnel", "relist_add_from_pending",
                                       "relist_writeback", "dump_us_qty1_sku",
                                       "noclick_targets", "noconvert_pricedown")):
                 return "relist"
             return "report"
-        ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": [], "audit": []}
+        ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": [],
+              "audit": [], "hoju": []}
         for idx in utilities:
             ug[_ugroup(idx)].append(idx)
 
@@ -1750,6 +1756,11 @@ class ListingPanel:
                 aud = ttk.LabelFrame(new_sec, text="🔍 出品前チェック (CSV生成後に実行)", padding=4)
                 aud.pack(fill="x", pady=(8, 0))
                 _grid_named(aud, [(SCRIPTS[i]["label"], i) for i in ug["audit"]])
+            if ug["hoju"]:
+                hj = ttk.LabelFrame(
+                    new_sec, text="🔗 出品後 補URL確保 (入稿 → itemID書込 の後に実行)", padding=4)
+                hj.pack(fill="x", pady=(8, 0))
+                _grid_named(hj, [(SCRIPTS[i]["label"], i) for i in ug["hoju"]])
         else:
             # ===== 🔧 既存メンテ =====
             REPORTS_DIR = r"C:/dev/iMak_data/seller_hub/reports"
