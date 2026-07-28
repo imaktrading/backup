@@ -182,7 +182,7 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .col.psa img{width:200px;height:270px;object-fit:contain;display:block;margin:2px auto;border:1px solid #eee;background:#fafafa}
 .ph{min-height:120px;display:flex;align-items:center;justify-content:center;color:#c33;
     font-size:12px;border:1px dashed #c33;margin:2px;text-align:center;padding:4px}
-.cands{display:flex;flex-direction:column;gap:5px;height:580px;overflow-y:auto;overflow-x:hidden}
+.cands{display:flex;flex-direction:column;gap:5px;height:290px;overflow-y:auto;overflow-x:hidden}
 .cand{display:flex;align-items:flex-start;gap:8px;border:1px solid #eee;border-radius:4px;padding:3px 4px;cursor:pointer}
 .cand img{width:200px;height:270px;object-fit:contain;border:1px solid #eee;margin:0;background:#fafafa}
 .cand .cph{width:200px;height:270px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;border:1px dashed #ccc}
@@ -465,11 +465,13 @@ def build_restock_html(items):
             f"<div class='card' id='c{idx}' data-idx='{idx}'>"
             f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
             f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>{mv_html}{cost_html}"
+            # ★2026-07-28: タイトル/eBayリンクは候補リストの**上**に置く(候補が縦に長いと
+            # 下端がスクロールしないと見えず、何のカードを見ているか分からなくなるため)。
+            f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
+            f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品</a>"
             f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
             f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
             f"<div class='cands'>{''.join(cand_html)}</div></div></div>"
-            f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
-            f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品</a>"
             "</div>")
     head = (f"<h1>RESTOCK 視覚確証 — {len(items)}件。① 現物 と見比べて<b>買う候補だけチェックを残す</b>。"
             "買わない候補(違うカード / 高い / 出品者不安 / 納期長 等)は<b>仕入見送り=チェックを外す</b>。"
