@@ -1390,12 +1390,18 @@ def get_psa_data(driver, cert_number):
             #   実在確認できた分だけ差し替え (404 を PicURL に載せない)。
             card_image_urls = upgrade_psa_images(card_image_urls, _url_exists)
             data['CardImageUrl'] = card_image_urls[0]   # = 表面 (= 既存 title 生成等で使用)
-            data['CardImageUrlFront'] = card_image_urls[0]
             if len(card_image_urls) >= 2:
+                # 2枚取れた時だけ順序(表→裏)を信用する。実サンプルで [0]=表面を確認済。
+                data['CardImageUrlFront'] = card_image_urls[0]
                 data['CardImageUrlBack'] = card_image_urls[1]
                 print(f"    📷 PSA 画像 表+裏 取得 (2 枚)")
             else:
-                print(f"    📷 PSA 画像 表のみ取得 (1 枚)")
+                # ★2026-07-28: **1枚しか拾えなかった時は表面と断定しない**(fail-closed)。
+                # 実例 cert 150712284: 1枚だけ取れた画像が **裏面**(青いカード裏)だったのに
+                # Front として記録され、eBay 商品画像も Vision 同定も裏面を見ていた。
+                # Front を空にすることで build_pic_url が載せず、目視で気づける。
+                data['CardImageUrlUnknownSide'] = card_image_urls[0]
+                print(f"    ⚠️ PSA 画像 1 枚のみ = 表裏不明 → 商品画像に使わない (面確定できず)")
         if not data.get('Subject'):
             print(f"\n    [DEBUG] {body[:400]}")
             return None
