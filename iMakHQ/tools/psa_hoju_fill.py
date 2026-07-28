@@ -273,6 +273,27 @@ def candidate_number_conflicts(name, card_no):
     return False                          # 番号表記なし = 判定不能 → 残す
 
 
+def _norm_url(u):
+    """URL 比較用の正規化(純関数)。クエリ/フラグメント/末尾スラッシュ/大文字小文字の差を吸収。"""
+    v = (u or "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    return v.lower()
+
+
+def filter_candidates_known_urls(cands, known_urls):
+    """既に自分が使っている供給(主URL A列 / 既存補URL)を候補から除く。戻り: (残す, 落とした)。
+
+    ★2026-07-28: 確証UIに **主URLと同じ出品** が出ていた(実測18件)。同一個体なので写真も cert も
+    現物と同じになり「現物と候補が同じ cert」に見える = 目視が成立しない。補URLの目的は
+    **別個体の確保**なので、主URLの再提示は意味がないどころか有害(同じURLを2枠が指すと、
+    売れた時に両方が履行不能になる)。既存補URL との重複も目視の無駄なので同時に落とす。
+    """
+    known = {_norm_url(u) for u in (known_urls or []) if u}
+    keep, drop = [], []
+    for c in (cands or []):
+        (drop if _norm_url(c.get("url")) in known else keep).append(c)
+    return keep, drop
+
+
 def filter_candidates_by_number(cands, card_no):
     """候補リストから明らかな別番号を除く。戻り: (残す, 落とした)。純関数(test可)。"""
     keep, drop = [], []
@@ -664,7 +685,7 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
     items, item_targets = [], []
     no_cache = no_cand = no_cardno = no_ref = 0
-    no_cand_after_filter = n_dropped = 0   # 番号足切りの計測(2026-07-28)
+    no_cand_after_filter = n_dropped = n_known = 0   # 足切りの計測(2026-07-28)
     for t in targets:
         iid = t["itemID"]
         if iid in skip_iids:
@@ -688,6 +709,16 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
             continue
         # ★現物画像(eBay GetItem or cert)が取れない = 視覚確証不能(ダミーitemID=9999 / GetItem失敗)
         # → 確証に出さない(見えないカードを人に確定させない=fail-closed)。
+        # ★2026-07-28: 既に自分が使っている供給(主URL/既存補URL)は出さない。
+        # 主URLと同じ出品が出ると「現物と候補が同じ cert」になり目視が成立しない(実測18件)。
+        _row0 = t.get("row")
+        _rv0 = vals[_row0 - 1] if (_row0 and 0 < _row0 <= len(vals)) else []
+        _known = [_cell(_rv0, A)] + [_cell(_rv0, AUX0 + k) for k in range(AUXN)]
+        cands, dropped_known = filter_candidates_known_urls(cands, _known)
+        n_known += len(dropped_known)
+        if not cands:
+            no_cand_after_filter += 1
+            continue
         # ★2026-07-28: 番号が明らかに違う候補を確証UIに出さない(足切り)。
         # 「候補に明らかに別カードが混ざる」= 人が毎回目で弾いていた無駄。除外のみ・採用は有人のまま。
         cands, dropped = filter_candidates_by_number(cands, cn)
@@ -719,7 +750,7 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
 
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
-          f"番号不一致で除外 {n_dropped}候補(全滅skip {no_cand_after_filter}件) / "
+          f"既知URL除外 {n_known}候補 / 番号不一致で除外 {n_dropped}候補(全滅skip {no_cand_after_filter}件) / "
           f"台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
     if limit is not None:
         items, item_targets = items[:limit], item_targets[:limit]
