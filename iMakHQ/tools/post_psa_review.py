@@ -513,7 +513,7 @@ def _generate_html(targets: list[dict]) -> None:
         # ★2026-07-28: 候補が多いと比較元(現物)が上へ流れて見えなくなる → sticky で残す。
         # top はツールバー(sticky top:0・約52px)の下。z-index はツールバー(100)より低く、
         # 候補カードより高くする。max-height で画面を占有しすぎないようにする。
-        '.confirm{display:flex;gap:24px;align-items:flex-start;margin:14px 0;padding:14px;background:#1f3a1f;border-radius:6px;border:2px solid #4caf50;position:sticky;top:52px;z-index:60;max-height:52vh;overflow:auto}',
+        '.confirm{display:flex;gap:24px;align-items:flex-start;margin:14px 0;padding:14px;background:#1f3a1f;border-radius:6px;border:2px solid #4caf50;max-height:42vh;overflow:auto}',
         '.confirm .label{font-size:18px;color:#9fffa0;font-weight:bold;margin-bottom:6px}',
         '.confirm img{max-width:380px;max-height:44vh;object-fit:contain;border:1px solid #444;border-radius:4px}',
         '.confirm-q{font-size:24px;color:#ffd700;font-weight:bold;margin:8px 0;text-align:center;align-self:center}',
@@ -522,7 +522,7 @@ def _generate_html(targets: list[dict]) -> None:
         # ★2026-07-28: 候補をスクロールすると回答ボタンも流れて押しに行けない。
         # 現物は上に sticky、回答は **画面下に sticky**(bottom:0)で固定する。
         # bottom 固定なら現物ブロックの高さ(可変)に依存せず両方が常に見える。
-        '.answer-btns{display:flex;gap:10px;margin:10px 0;position:sticky;bottom:0;z-index:60;background:#2a2a2a;padding:8px 0;border-top:1px solid #444}',
+        '.answer-btns{display:flex;gap:10px;margin:10px 0;background:#2a2a2a;padding:8px 0;border-top:1px solid #444}',
         '.btn{padding:10px 18px;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:bold}',
         '.btn-ok{background:#4caf50;color:#fff}',
         '.btn-ng{background:#f44336;color:#fff}',
@@ -530,7 +530,10 @@ def _generate_html(targets: list[dict]) -> None:
         '.btn:hover{opacity:0.85}',
         '.btn.active{box-shadow:0 0 0 3px #fff}',
         '.candidates-toggle{cursor:pointer;color:#80c0ff;text-decoration:underline;font-size:13px;margin:8px 0}',
-        '.candidates{display:none;margin-top:8px}',
+        # ★2026-07-28: sticky で現物/回答を貼り付けるとカードの上に重なって見づらい(ユーザー指摘)。
+        # 代わりに **候補側を内側スクロール**にする。カード内で候補だけが動くので、
+        # 現物(上)と回答ボタン(下)は定位置のまま、何も重ならない(補URL確証UIと同じ作り)。
+        '.candidates{display:none;margin-top:8px;max-height:46vh;overflow-y:auto;overflow-x:hidden}',
         '.candidates.show{display:block}',
         '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}',
         '.cand{border:2px solid #555;padding:8px;background:#333;text-align:center;border-radius:6px;cursor:pointer;transition:all 0.15s}',
