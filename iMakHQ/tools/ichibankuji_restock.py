@@ -772,28 +772,60 @@ def _parse_cond_ship(s):
     return (cm.group(1) if cm else "", sm.group(1) if sm else "")
 
 
+MIN_SELLER_REVIEWS = 100          # PSA 補URL と同値 (mercari_psa_resource の既定)
+
+
 def _cond_ship(drv, url):
-    """商品詳細ページから (状態, 送料負担) を取得。失敗は ('','')。"""
+    """商品詳細ページから (状態, 送料負担, 評価件数) を取得。失敗は ('','',None)。
+
+    評価件数は PSA 側と同じ parser を使う(二重実装しない)。取れない=None は個人セラーなら
+    不合格側に倒す(fail-closed。呼び手の candidate_passes_filter が判定)。
+    """
     try:
         drv.get(url)
         time.sleep(3)
-        return _parse_cond_ship(drv.page_source)
+        src = drv.page_source
+        cond, ship = _parse_cond_ship(src)
+        try:
+            import mercari_psa_resource as mp
+            reviews = mp._parse_seller_reviews(src)
+        except Exception:
+            reviews = None
+        return (cond, ship, reviews)
     except Exception:
-        return ("", "")
+        return ("", "", None)
 
 
 def _filter_new_freeship(drv, raw):
-    """画像検索候補を **新品(新品、未使用/未使用に近い) かつ 送料込み** だけに絞る(詳細ページ訪問)。
+    """候補を **新品 かつ 送料込み かつ セラー条件** で絞る(詳細ページ訪問)。
 
-    状態/送料は検索結果に無く詳細ページにしかないため各候補を訪問(やや遅い)。
-    やや傷/目立った傷/着払い は除外(2026-06-24 ユーザー: 新品+送料込みのみ)。
+    状態/送料/評価は検索結果に無く詳細ページにしかないため各候補を訪問(やや遅い)。
+    - 状態: 新品、未使用 / 未使用に近い のみ (2026-06-24 ユーザー: 新品+送料込みのみ)
+    - 送料: 送料込みのみ (着払いは実原価が過小表示になる)
+    - セラー: **PSA 補URL と同じ条件**に統一 (2026-07-28 ユーザー指示)。
+      = 個人セラーは評価件数≥MIN_SELLER_REVIEWS、Shops(業者)は評価不問。
+      判定は mercari_psa_resource.candidate_passes_filter を直接使う(規約の二重実装を避ける)。
+      import できない時は従来どおり新品+送料込みのみで通す(先読みを止めない)。
     """
+    try:
+        import mercari_psa_resource as mp
+    except Exception:
+        mp = None
     kept = []
     for c in raw:
-        cond, ship = _cond_ship(drv, c["href"])
-        if cond in _KEEP_COND and ship == "送料込み":
-            c["cond"], c["ship"] = cond, ship
-            kept.append(c)
+        cond, ship, reviews = _cond_ship(drv, c["href"])
+        if cond not in _KEEP_COND:
+            continue
+        if mp is not None:
+            ok = mp.candidate_passes_filter(cond, ship, reviews,
+                                            mp._is_shops_url(c["href"]),
+                                            min_reviews=MIN_SELLER_REVIEWS)
+        else:
+            ok = (ship == "送料込み")
+        if not ok:
+            continue
+        c["cond"], c["ship"], c["reviews"] = cond, ship, reviews
+        kept.append(c)
     return kept
 
 
