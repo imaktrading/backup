@@ -347,7 +347,7 @@ def update_listings_sold_marks(ws, updates: list,
     """
     if not updates:
         return {"updated": 0, "d_writes": 0, "o_writes": 0, "m_writes": 0, "k_writes": 0,
-                "ah_writes": 0, "err_writes": 0, "sold_at_writes": 0,
+                "ah_writes": 0, "err_writes": 0, "sold_at_writes": 0, "sold_at_clears": 0,
                 "surge_held": [], "surge_stats": {}}
 
     # ── 価格急増ガード (supplier 単位) ──
@@ -366,6 +366,7 @@ def update_listings_sold_marks(ws, updates: list,
     ah_writes = 0
     err_writes = 0
     sold_at_writes = 0   # AO 売切日時 書込行数
+    sold_at_clears = 0   # AO 売切日時 clear 行数 (在庫復活時)
     m_held = 0   # 急増ガードで M 書込を見送った行数
     for u in updates:
         row_idx = u["row_index"]
@@ -432,6 +433,9 @@ def update_listings_sold_marks(ws, updates: list,
 
         # AO 列 (売切日時): "sold_at" キー (非空 str) があれば書込。行が完全売切 (newly_sold) に
         # なった瞬間の日時を 1 回記録 (churn 型番チューニング用、HQ 消費)。空/None → 触らない。
+        # ★ 2026-07-29: 在庫復活 (D ○→空) 時は "clear_sold_at" で明示 clear する。
+        #   AO は「その行が今 売切である日時」の意味なので、在庫が戻ったら残してはいけない
+        #   (在庫あり行に売切日時が残り Days to Sell 集計や CULL 判断を誤らせる。HQ 指摘 39 行)。
         sold_at = u.get("sold_at")
         if isinstance(sold_at, str) and sold_at.strip():
             cell_updates.append({
@@ -439,11 +443,18 @@ def update_listings_sold_marks(ws, updates: list,
                 "values": [[sold_at]],
             })
             sold_at_writes += 1
+        elif u.get("clear_sold_at"):
+            cell_updates.append({
+                "range": f"{_col_letter(LISTINGS_COL_SOLD_AT)}{row_idx}",  # AO
+                "values": [[""]],
+            })
+            sold_at_clears += 1
 
     ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
     return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes,
             "m_writes": m_writes, "k_writes": k_writes, "ah_writes": ah_writes,
             "err_writes": err_writes, "m_held": m_held, "sold_at_writes": sold_at_writes,
+            "sold_at_clears": sold_at_clears,
             "surge_held": sorted(surge_held), "surge_stats": surge_stats}
 
 

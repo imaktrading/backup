@@ -1805,6 +1805,40 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   現時点で ×8 到達はゼロ = 今回の変更で消える行も増える行も無い (= 挙動の後退なし)。数日後に
   ×8 到達した行から自動的に別枠へ移る。
 
+## 2026-07-29 — AO(売切日時) が在庫あり行に残るバグ 修正 + 既存 73 行是正 (HQ 指摘)
+
+### 真因 = 「在庫復活時に AO を clear していなかった」(HQ 仮説2 が正解、仮説1 は否定)
+- 決定: HQ「在庫あり(D空) なのに AO に売切日時が入っている 39 行」の切り分け依頼に対し、
+  **コード実機確認で仮説1 (主URL売切で打っている) を否定**。AO 打刻条件は
+  `delta == "newly_sold"` = **行として D ""→○ に遷移した時のみ** で、主URL 単独では打たない
+  (ヨドバシ延命行に AO があるのは「以前に行全体が売切 → 後で復活」した履歴)。
+  真因は **`newly_in_stock` (D ○→空) で AO を消していなかった** こと = HQ 仮説2。
+- 変更 (恒久修正):
+  - [sheet_updater.py](../sheet_updater.py): `clear_sold_at` キーで AO の明示 clear をサポート
+    (`sold_at_clears` を戻り値に追加)。キー不在の caller は従来どおり AO 不触 (後方互換)。
+  - [monitor_listings.py](../monitor_listings.py): `newly_in_stock` 遷移で `clear_sold_at=True`。
+    cycle ログに `sold_at_clears=N` を出力。
+  - 設計意図の明文化: **AO =「その行が今 売切である日時」**。売切→復活の履歴は
+    decision_log (listings_*.jsonl / diff_*.md) に残るので clear しても失われない。
+- 変更 (既存分の是正): [tools/clear_stale_sold_at.py](../tools/clear_stale_sold_at.py) 新設。
+  dry-run 既定 / compare-and-clear (書込直前 re-read、値が変わった行・その後売切になった行は保護) /
+  復元アーカイブ `cleared_sold_at_archive.jsonl` / 触るのは AO のみ。
+- 実施: **HIGH 58 + LOW 15 = 73 行を clear、mismatch(保護)=0**。再スキャンで **両シート 0 行**を確認。
+  ★HQ 報告の 39 行との差は抽出条件: HQ は「itemID あり」に限定、こちらは **除外なし**で実施
+  (内訳: 実 itemID 36 / 9999 が 3 / itemID 空 34)。全 73 行がアーカイブ済で復元可能。
+- 検証: [tests/test_sold_at_clear.py](../tests/test_sold_at_clear.py) 6 件 (売切→打刻・復活→clear /
+  キー無しは不触 / monitor 分岐 / 抽出条件 / compare-and-clear の保護 2 系統 / execute で書込+アーカイブ)。
+  offline 180 全 pass。
+
+### ヨドバシ延命 backfill 後の実測 (22:45 LOW、backfill 17:10 の後の初回)
+- 延命 **12 件** (backfill 前 10 件 → +2)。全て「主 amazon=out_of_stock × ヨドバシ在庫あり」で
+  M=ヨドバシ価格。delta は全件 unchanged = **D 列を動かした行はゼロ** (誤延命の兆候なし)。
+- 型番 lookup: ヨドバシ補URL 行 246 / in_stock 211 / **error(型番無等) 65 → 32 に半減**
+  (= HQ backfill 33 行が効いた)。
+- ★**ヨドバシ売切 (in_stock=false) が初観測 = 3 件** (row275 / row695 / row786)。いずれも
+  主 amazon が在庫ありのため行は在庫あり判定 = 正しい挙動。**「全候補売切 → D=○ → 取下げ」の
+  完全経路はまだ未検証** (in_stock=false の行で主も死ぬケースが出ていない)。
+
 ### 併行対応
 - **補URL消込 backlog 41 件** (snkrdunk28 + mercari13、25→28→35→41 と増加、毎 cycle 急増ガード HOLD):
   dry-run で対象確定 → HIGH cycle 完了後に `tools/supervised_backup_drain --reverify-snkrdunk --execute`

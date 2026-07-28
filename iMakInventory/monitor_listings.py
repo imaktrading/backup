@@ -1131,6 +1131,12 @@ def process_sheet(
             # 売切日時 (AO): 行が完全売切 (newly_sold = D ""→○) になった瞬間を 1 回記録 (churn 用)。
             if r.get("delta") == "newly_sold":
                 upd["sold_at"] = checked_at_now
+            # ★ 在庫復活 (newly_in_stock = D ○→空) では AO を clear する (2026-07-29 HQ 指摘)。
+            #   AO は「その行が今 売切である日時」の意味。復活後も残すと在庫あり行に売切日時が
+            #   残り、Days to Sell 集計・CULL/RESTOCK 判断・人の目視を誤らせる (実測 39 行)。
+            #   売切→復活の履歴は decision_log (listings_*.jsonl / diff_*.md) に残るので失われない。
+            elif r.get("delta") == "newly_in_stock":
+                upd["clear_sold_at"] = True
             if price_jpy is not None:
                 upd["price_jpy"] = price_jpy   # → sheet_updater が M列(12) に書込
                 upd["prev_n_jpy_str"] = prev_n
@@ -1199,7 +1205,7 @@ def process_sheet(
             res = update_listings_sold_marks(
                 ws, updates, price_col_idx=price_col, enable_points=True)
             _price_letter = _col_letter(price_col)
-            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')} / sold_at_writes={res.get('sold_at_writes', 0)})")
+            log(f"  [OK] updated={res['updated']} (d_writes={res.get('d_writes', '?')} / price[{_price_letter}]_writes={res.get('m_writes', '?')} / k_writes={res.get('k_writes', '?')} / o_writes={res.get('o_writes', '?')} / err_writes={res.get('err_writes', '?')} / sold_at_writes={res.get('sold_at_writes', 0)} / sold_at_clears={res.get('sold_at_clears', 0)})")
             # ★ 価格急増ガード: HOLD 対象 supplier があれば prominent に告知 (非 silent)。
             #   D/O(取下げ) は書けている = fail-OPEN ではない。M/K(価格) のみ保留 = 誤汚染を防ぐ側。
             price_surge_held = res.get("surge_held") or []
