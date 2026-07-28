@@ -43,6 +43,16 @@ def test_reference_does_not_eat_the_screen():
     assert "max-height" in c
 
 
+def test_answer_buttons_are_reachable_while_scrolling():
+    """候補をスクロールしても 合ってる/違う/該当なし に手が届くこと。
+    現物(上 sticky)と重ならないよう、回答は **画面下** に固定する
+    (現物ブロックの高さは可変なので、上に2つ並べると重なる)。"""
+    c = _css(".answer-btns")
+    assert "position:sticky" in c
+    assert "bottom:0" in c
+    assert "background" in c        # 透過だと候補が透けて読めない
+
+
 def test_parent_has_no_overflow_that_breaks_sticky():
     """親に overflow:hidden/auto が付くと sticky が効かなくなる。"""
     assert "overflow" not in _css(".target")

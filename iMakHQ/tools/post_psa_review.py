@@ -519,7 +519,10 @@ def _generate_html(targets: list[dict]) -> None:
         '.confirm-q{font-size:24px;color:#ffd700;font-weight:bold;margin:8px 0;text-align:center;align-self:center}',
         '.no-expected{background:#3a1f1f;border-color:#f44336;color:#ffaaaa}',
         '.no-expected .label{color:#ffaaaa}',
-        '.answer-btns{display:flex;gap:10px;margin:10px 0}',
+        # ★2026-07-28: 候補をスクロールすると回答ボタンも流れて押しに行けない。
+        # 現物は上に sticky、回答は **画面下に sticky**(bottom:0)で固定する。
+        # bottom 固定なら現物ブロックの高さ(可変)に依存せず両方が常に見える。
+        '.answer-btns{display:flex;gap:10px;margin:10px 0;position:sticky;bottom:0;z-index:60;background:#2a2a2a;padding:8px 0;border-top:1px solid #444}',
         '.btn{padding:10px 18px;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:bold}',
         '.btn-ok{background:#4caf50;color:#fff}',
         '.btn-ng{background:#f44336;color:#fff}',
