@@ -14,10 +14,17 @@
 ★品質を落とさないための縛り (headless は対話できない = 誤解に気づけないため):
     - 担当が書けるのは **`_draft.md` まで**。`_response.md` への昇格は窓口がレビューしてから。
       → 誤回答が相手 worktree に流れない。品質の下限が「窓口のレビュー品質」になる。
-      ★2026-07-29: prompt で禁じても **担当2つとも _response.md を直接書き、コードを commit した**。
-        言い回しは抑止力にならないので、①`--disallowedTools` で commit/push/checkout を落とし、
-        ②実行後に共有領域を突合して `_response.md` を **機械的に `_draft.md` へ降格**する方式に変更。
-        ただし **コード編集そのものは止めていない** (draft を書くのに Write が要るため。要・別途確認)。
+      ★2026-07-29: 初回運用で「担当が _response.md を直接書いた」と判断したが **これは誤り**だった。
+        dispatch ログは `SUMMARY: draft 5件` = 遵守しており、_response.md を書いていたのは
+        **ユーザーが別途開いていた対話セッション**だった。機械降格は正規回答を巻き込むため撤回。
+        残したのは ①`--disallowedTools` で commit/push/checkout を拒否 (defense in depth)
+        ②実行中に出現した `_response.md` の **検出・報告のみ** (rename しない)。
+
+★同時実行に注意 (2026-07-29 実地で踏んだ):
+    dispatch は自身の中では直列だが、**dispatch を2本同時に起動すると同じ worktree に
+    headless が2つ立つ** (実際 dedupe に2プロセス同時起動が発生)。
+    前回の dispatch が走り切る前に次を起動しないこと。**対話セッションが開いている worktree も
+    同様に競合しうる**。
     - **証拠添付必須** (実行コマンド + 出力)。証拠の無い主張は窓口が却下する。
     - **確信が無ければ書かせない**。`_question.md` に何が分からないかを書いて止める (fail-closed)。
     - **コード修正 / git commit / 破壊的・不可逆・外向き操作を禁止**。
@@ -76,30 +83,22 @@ def _snapshot(d: Path) -> dict:
 
 
 def _enforce_draft_only(wt: str, before: dict) -> list[str]:
-    """担当が勝手に `_response.md` を書いていたら **`_draft.md` に強制降格**する。
+    """dispatch 実行中に増えた `_response.md` を **検出して報告するだけ** (rename しない)。
 
-    prompt でいくら禁じても守られないため、事後に機械で戻す (窓口レビューの門を必ず通す)。
-    戻り値は違反内容の文字列リスト (呼び出し側が目立つ形で報告する)。
+    ★2026-07-29 撤回の経緯:
+      当初は `_response.md` を機械的に `_draft.md` へ降格させる実装にしたが、**前提が誤り**だった。
+      「headless 担当が _response を直接書いた」と判断した根拠のファイルは、実際には
+      **ユーザーが別途開いていた対話セッション**が書いたものだった (dispatch ログは
+      `SUMMARY: draft 5件` = プロトコル遵守)。
+      対話セッションと dispatch は**同時に走りうる**ため、機械降格は
+      **正規の回答を勝手に draft へ引き戻す**副作用がある。よって rename は廃止し、検出のみ残す。
+      → 増えた `_response.md` は「dispatch 由来か対話セッション由来か切り分けよ」の材料として出す。
     """
     d = _requests_dir(wt)
     after = _snapshot(d)
     new = [n for n in after if n not in before or after[n] != before.get(n)]
-    violations = []
-    for name in sorted(new):
-        if not name.endswith("_response.md"):
-            continue
-        src = d / name
-        dst = d / (name[: -len("_response.md")] + "_draft.md")
-        i = 2
-        while dst.exists():
-            dst = d / (name[: -len("_response.md")] + f"_draft{i}.md")
-            i += 1
-        try:
-            src.rename(dst)
-            violations.append(f"{name} → {dst.name} に強制降格 (担当が _response を直接作成)")
-        except OSError as e:
-            violations.append(f"{name} の降格に失敗: {e}")
-    return violations
+    return [f"{n} が dispatch 中に出現 (dispatch 由来か対話セッション由来か要確認)"
+            for n in sorted(new) if n.endswith("_response.md")]
 
 
 def _resolve_claude_exe() -> str:
@@ -226,9 +225,11 @@ def main() -> int:
         print(f"- {r['worktree']}: {r['status']} ({r['n']}件) {r.get('summary', '')}")
     all_v = [(r["worktree"], v) for r in results for v in r.get("violations", [])]
     if all_v:
-        print(f"\n🚨 プロトコル違反 {len(all_v)}件 (機械的に是正済。担当の prompt 遵守は当てにしない)")
+        print(f"\n⚠️ dispatch 中に増えた `_response.md` {len(all_v)}件 (**自動では触っていない**)")
         for wt, v in all_v:
             print(f"  - [{wt}] {v}")
+        print("  → dispatch ログの SUMMARY が `draft N件` なら、その _response は"
+              "**対話セッション由来**。担当の違反と決めつけないこと。")
     if not dry_run:
         print("\n→ 窓口は各 `_draft.md` / `_question.md` を**読んで検算してから** "
               "`_response.md` に昇格させること (headless の自己申告をそのまま流さない)。")
