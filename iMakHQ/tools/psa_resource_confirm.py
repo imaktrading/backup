@@ -191,6 +191,10 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px}
 .cand:has(.ck:not(:checked)) .rsn{display:inline-flex}
 .rb{font-size:10px;padding:1px 5px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:pointer}
+.zm{font-size:13px;padding:0 6px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:zoom-in;line-height:1.6}
+#zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;cursor:zoom-out}
+#zov img{max-width:96vw;max-height:96vh;object-fit:contain;background:#fff}
+#zov.on{display:flex}
 .rb.sel{background:#c33;color:#fff;border-color:#c33;font-weight:bold}
 .t{font-size:13px;word-break:break-word;margin:4px 0}
 .no{font-size:12px;color:#555}
@@ -374,6 +378,10 @@ def confirm_targets(items, timeout=10800):   # 2026-07-24 ユーザー要望で 
 
 
 _JS_RESTOCK = """
+function zoom(ev,btn){ev.preventDefault(); ev.stopPropagation();
+  var o=document.getElementById('zov'); o.querySelector('img').src=btn.dataset.img; o.classList.add('on');}
+function zclose(ev){ev.preventDefault(); document.getElementById('zov').classList.remove('on');}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')document.getElementById('zov').classList.remove('on');});
 function imgFail(el,big){var d=document.createElement('div'); d.className=big?'ph':'cph';
   d.textContent='画像なし'; if(el.parentNode) el.parentNode.replaceChild(d,el);}
 function upd(i){var c=document.getElementById('c'+i);
@@ -437,6 +445,8 @@ def build_restock_html(items):
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='skip' onchange='upd({idx})'>{img}"
                 f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}{_nm_html}"
                 f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a>"
+                f" <button type='button' class='zm' title='拡大'"
+                f" data-img=\"{_html.escape(_proxied(imgsrc))}\" onclick='zoom(event,this)'>🔍</button>"
                 f"<span class='rsn'>外す理由:"
                 f"<button type='button' class='rb sel' data-r='skip' onclick='setRsn(this)'>見送り</button>"
                 f"<button type='button' class='rb' data-r='diff' onclick='setRsn(this)'>違う</button>"
@@ -483,6 +493,7 @@ def build_restock_html(items):
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>RESTOCK確証</title>"
             f"<style>{_CSS}</style></head><body>"
             f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
+            f"<div id='zov' onclick='zclose(event)'><img alt=''></div>"
             f"<div id='done'></div><script>{_JS_RESTOCK}</script></body></html>")
 
 
