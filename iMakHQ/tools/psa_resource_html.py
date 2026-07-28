@@ -98,14 +98,14 @@ def build_html(items, out_path):
     .ref img{max-width:200px;max-height:200px;border:2px solid #2a7}
     .ref .lbl{font-size:13px;color:#060;margin-top:4px;word-break:break-word}
     .cands{display:flex;gap:8px;flex-wrap:wrap;flex:1}
-    .cand{width:150px;text-align:center;border:1px solid #ddd;border-radius:4px;padding:6px;background:#fafafa}
+    .cand{width:214px;text-align:center;border:1px solid #ddd;border-radius:4px;padding:6px;background:#fafafa}
     .cand.main{border-color:#c50;border-width:2px;background:#fff7f0}
-    .cand img{max-width:138px;max-height:138px}
+    .cand img{max-width:200px;max-height:200px}
     .cand .meta{font-size:12px;margin-top:3px}
     .cand a{font-size:12px;color:#06c;text-decoration:none}
     .ch{display:inline-block;font-size:11px;padding:1px 5px;border-radius:3px;background:#ddd;margin-bottom:3px}
     .ch.mercari{background:#fde}.ch.snkrdunk{background:#def}
-    .noimg{width:138px;height:138px;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;border:1px dashed #ccc}
+    .noimg{width:200px;height:200px;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;border:1px dashed #ccc}
     """
     parts = [f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>PSA再仕入れ 目視</title><style>{css}</style></head><body>"]
     parts.append(f"<h1>PSA再仕入れ 目視ビューア — {len(items)}件(左=仕入れたい正カード / 右=候補。変種が同じか確認)</h1>")

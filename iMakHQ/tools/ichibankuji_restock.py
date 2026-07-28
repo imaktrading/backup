@@ -183,14 +183,14 @@ def _page(heading, items, stage):
              ".ref img,.ref .noimg{max-width:150px;max-height:150px;border:2px solid #2a7}"
              ".ref{font-size:11px;color:#666;text-align:center}"
              ".cand{display:inline-block;border:1px solid #ccc;border-radius:4px;padding:4px;margin:3px;text-align:center;background:#fafafa;vertical-align:top}"
-             ".cand img{max-width:120px;max-height:120px}"
+             ".cand img{max-width:150px;max-height:150px}"
              ".cand.ok{border:3px solid #07f;background:#e8f2ff}"
              ".cand.ng{border:1px solid #ccc;background:#eee;opacity:.4}"
              # 候補ごとの 可/否 ボタン(個別に印=どこまで調べたか分かる)
              ".candbtns{margin-bottom:3px}.candbtns button{font-size:13px;padding:2px 10px;margin:0 2px;border-radius:4px;border:0;cursor:pointer;color:#fff}"
              ".okb{background:#07f}.ngb{background:#c33}"
              ".cand.ok .okb{outline:3px solid #034}.cand.ng .ngb{outline:3px solid #600}"
-             ".noimg{width:120px;height:120px;display:flex;align-items:center;justify-content:center;color:#999;border:1px dashed #ccc}"
+             ".noimg{width:150px;height:150px;display:flex;align-items:center;justify-content:center;color:#999;border:1px dashed #ccc}"
              ".meta{font-size:11px}.skip{color:#a00}"
              # 商品状態: pick=可候補あり(青) / skip=見送り(灰) / 未調査=黄帯
              ".item{border:3px solid #f0c000}"   # 既定=未調査(黄)で目立たせる
