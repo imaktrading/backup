@@ -28,6 +28,9 @@ import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from viewer_zoom import ZOOM_CSS, ZOOM_JS, ZOOM_OVERLAY, zoom_button
 from datetime import datetime
 
 PSA_CACHE_DIR = Path(r"C:/dev/iMak/iMakeBayAPI/cache/psa_certs")
@@ -531,6 +534,7 @@ def _generate_html(targets: list[dict]) -> None:
         '.cand .num{font-size:16px;color:#ffd700;font-weight:bold}',
         '.cand .pid{font-size:11px;color:#aaa;word-break:break-all;margin-top:4px}',
         '.cand.expected-pid{border-color:#9fffa0;background:#2c3c2c}',
+        ZOOM_CSS,
         'h1{color:#ffd700}',
         '.toolbar{position:sticky;top:0;background:#1a1a1a;padding:10px;border-bottom:1px solid #444;z-index:100;display:flex;gap:14px;align-items:center}',
         '.toolbar #status{font-size:16px;color:#ffd700;font-weight:bold}',
@@ -706,10 +710,16 @@ def _generate_html(targets: list[dict]) -> None:
                 html.append(f'<img src="{_img_url(img_path)}">')
             else:
                 html.append('<div style="padding:30px;color:#666">no image</div>')
+            # 現物(cert画像)と並べて拡大。カード自体は選択トグルなので、
+            # ボタン側で preventDefault/stopPropagation して誤選択を防ぐ(viewer_zoom)。
+            if img_path and (img_path.startswith("http") or Path(img_path).exists()):
+                html.append(zoom_button(_img_url(img_path), _img_url(t.get("cert_image_url") or "")))
             html.append(f'<div class=pid>{pid}</div></div>')
         html.append('</div></div>')
         html.append('</div>')
 
+    html.append(ZOOM_OVERLAY)
+    html.append(f'<script>{ZOOM_JS}</script>')
     html.append('</body></html>')
     HTML_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     HTML_OUTPUT.write_text('\n'.join(html), encoding="utf-8")

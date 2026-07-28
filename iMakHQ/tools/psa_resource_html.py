@@ -11,7 +11,12 @@
 I/O は fetch_snkr_image / build_html のみ。build_html は純粋(画像URLを受け取って描画)。
 """
 import html as _html
+import os
 import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from viewer_zoom import ZOOM_CSS, ZOOM_JS, ZOOM_OVERLAY, zoom_button
 import time
 import urllib.request
 
@@ -106,7 +111,7 @@ def build_html(items, out_path):
     .ch{display:inline-block;font-size:11px;padding:1px 5px;border-radius:3px;background:#ddd;margin-bottom:3px}
     .ch.mercari{background:#fde}.ch.snkrdunk{background:#def}
     .noimg{width:200px;height:200px;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;border:1px dashed #ccc}
-    """
+    """ + ZOOM_CSS
     parts = [f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>PSA再仕入れ 目視</title><style>{css}</style></head><body>"]
     parts.append(f"<h1>PSA再仕入れ 目視ビューア — {len(items)}件(左=仕入れたい正カード / 右=候補。変種が同じか確認)</h1>")
     for it in items:
@@ -132,9 +137,13 @@ def build_html(items, out_path):
             main = " main" if cd.get("is_main") else ""
             parts.append(
                 f"<div class='cand{main}'><span class='ch {ch}'>{_html.escape(ch)}{' ★最安' if cd.get('is_main') else ''}</span>"
-                f"{tag}<div class='meta'>{pstr}</div><a href='{_html.escape(cd.get('url',''))}' target='_blank'>開く</a></div>"
+                f"{tag}<div class='meta'>{pstr}</div>"
+                f"<a href='{_html.escape(cd.get('url',''))}' target='_blank'>開く</a> "
+                f"{zoom_button(cimg, ref_img)}</div>"
             )
         parts.append("</div></div></div>")
+    parts.append(ZOOM_OVERLAY)
+    parts.append(f"<script>{ZOOM_JS}</script>")
     parts.append("</body></html>")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("".join(parts))

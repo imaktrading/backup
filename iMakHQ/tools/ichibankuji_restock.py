@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath
 import sheet_io
 from mercari_psa_resource import parse_mercari_items, parse_image_search_results, _chrome_major
 from psa_resource_html import mercari_image_url, shops_image_large
+from viewer_zoom import ZOOM_CSS, ZOOM_JS, ZOOM_OVERLAY, zoom_button
 from ebay_getitem_images import fetch_listing_images
 
 try:
@@ -135,7 +136,7 @@ def sort_oks_desc(oks):
     return urls[:6], cost
 
 
-def _card(url, price, image, name, multi=False, cond="", ship=""):
+def _card(url, price, image, name, multi=False, cond="", ship="", ref_image=""):
     """候補カード。各候補に **可/否** を個別に付ける(どこまで調べたか分かる=未/可/否)。
 
     可=採用(複数=主+補URL最大6・identify=1つ) / 否=却下 / 未マーク=未調査。
@@ -155,7 +156,9 @@ def _card(url, price, image, name, multi=False, cond="", ship=""):
             f"<button type=button class=okb onclick=\"mark(this,'ok')\">可</button>"
             f"<button type=button class=ngb onclick=\"mark(this,'ng')\">否</button></div>"
             f"{img_tag}<div class=meta>{pr}{cs}<br>"
-            f"<a href='{safe}' target=_blank>開く</a></div></div>")
+            f"<a href='{safe}' target=_blank>開く</a> "
+            # 現物と並べて拡大(見比べが目的なので候補単独の全画面にはしない)
+            f"{zoom_button(img, ref_image)}</div></div>")
 
 
 def build_identify_html(items):
@@ -199,7 +202,7 @@ def _page(heading, items, stage):
              ".statebtns{margin:4px 0 8px}.statebtns button{font-size:14px;padding:5px 16px;margin-right:8px}"
              ".bskip{background:#888}.btag{font-weight:bold;margin-left:6px}"
              "button{font-size:16px;padding:8px 24px;background:#07f;color:#fff;border:0;border-radius:5px;cursor:pointer}"
-             "</style>"]
+             + ZOOM_CSS + "</style>"]
     multi = (stage == "expand")
     sel_hint = "同じ景品を**複数**選べる(主supply=最安+補URL)" if multi else "正しい景品を**1つ**選ぶ"
     parts.append(f"<div class=hd>{_html.escape(heading)} — 各行で{sel_hint}、下の『送信』"
@@ -238,7 +241,8 @@ def _page(heading, items, stage):
             parts.append("<div class=skip>候補なし</div>")
         for c in cands:
             parts.append(_card(c["url"], c.get("price", 0), c.get("image", ""), nm, multi=multi,
-                               cond=c.get("cond", ""), ship=c.get("ship", "")))
+                               cond=c.get("cond", ""), ship=c.get("ship", ""),
+                               ref_image=(it.get("picked_image") or rimg)))
         # 該当なし = どの候補にも『可』を付けず『見送り』を押す(= 候補待ち5日へ)。
         parts.append("</div>")
         # 手動rescue: 候補が弱い時、自分で見つけた mercari URL を貼る(ラジオより優先)
@@ -246,6 +250,8 @@ def _page(heading, items, stage):
                      f"<input type=text class=manurl placeholder='候補が弱い時 mercari URL を貼る(実写の出品)' "
                      f"style='width:60%;padding:3px'></div>")
         parts.append("</div>")
+    parts.append(ZOOM_OVERLAY)
+    parts.append(f"<script>{ZOOM_JS}</script>")
     parts.append("<div style='padding:16px'><button id=sendbtn onclick='submit()'>送信</button></div>")
     parts.append("""<script>
 function _cands(it){ return it.querySelectorAll('.cand'); }
