@@ -193,8 +193,10 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .rb{font-size:10px;padding:1px 5px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:pointer}
 .zm{font-size:13px;padding:0 6px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:zoom-in;line-height:1.6}
 #zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;cursor:zoom-out}
-#zov img{max-width:96vw;max-height:96vh;object-fit:contain;background:#fff}
-#zov.on{display:flex}
+#zov img{max-width:46vw;max-height:88vh;object-fit:contain;background:#fff;display:block}
+#zov.on{display:flex;gap:16px}
+#zref,#zcand{text-align:center}
+#zov .zc{color:#fff;font-size:15px;font-weight:bold;margin-bottom:6px}
 .rb.sel{background:#c33;color:#fff;border-color:#c33;font-weight:bold}
 .t{font-size:13px;word-break:break-word;margin:4px 0}
 .no{font-size:12px;color:#555}
@@ -379,7 +381,12 @@ def confirm_targets(items, timeout=10800):   # 2026-07-24 ユーザー要望で 
 
 _JS_RESTOCK = """
 function zoom(ev,btn){ev.preventDefault(); ev.stopPropagation();
-  var o=document.getElementById('zov'); o.querySelector('img').src=btn.dataset.img; o.classList.add('on');}
+  var card=btn.closest('.card'); var ref=(card&&card.dataset.ref)||'';
+  var o=document.getElementById('zov');
+  var L=o.querySelector('#zref'), R=o.querySelector('#zcand');
+  if(ref){L.querySelector('img').src=ref; L.style.display='block';} else {L.style.display='none';}
+  R.querySelector('img').src=btn.dataset.img;
+  o.classList.add('on');}
 function zclose(ev){ev.preventDefault(); document.getElementById('zov').classList.remove('on');}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')document.getElementById('zov').classList.remove('on');});
 function imgFail(el,big){var d=document.createElement('div'); d.className=big?'ph':'cph';
@@ -472,7 +479,7 @@ def build_restock_html(items):
                          f"border-radius:4px;margin:3px 0;font-size:13px'>💴 現在の仕入れ値 ¥{_html.escape(_cn)}"
                          f"{_extra}（候補がこれより安ければ◎）</div>")
         rows.append(
-            f"<div class='card' id='c{idx}' data-idx='{idx}'>"
+            f"<div class='card' id='c{idx}' data-idx='{idx}' data-ref=\"{_proxied(ref)}\">"
             f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
             f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>{mv_html}{cost_html}"
             # ★2026-07-28: タイトル/eBayリンクは候補リストの**上**に置く(候補が縦に長いと
@@ -493,7 +500,9 @@ def build_restock_html(items):
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>RESTOCK確証</title>"
             f"<style>{_CSS}</style></head><body>"
             f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
-            f"<div id='zov' onclick='zclose(event)'><img alt=''></div>"
+            f"<div id='zov' onclick='zclose(event)'>"
+            f"<div id='zref'><div class='zc'>① 現物(出品)</div><img alt=''></div>"
+            f"<div id='zcand'><div class='zc'>仕入候補</div><img alt=''></div></div>"
             f"<div id='done'></div><script>{_JS_RESTOCK}</script></body></html>")
 
 
