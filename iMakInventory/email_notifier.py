@@ -362,17 +362,35 @@ def _format_body_inner(cycle_log: Dict[str, Any]) -> str:
                     lines.append(f"  ... 他 {(mon.get('errors', 0) or 0) - 10} 件")
                 # メール本文は上位 10 件で頭打ち → 全件はスプシ AK 列で filter (件数無制限)
                 lines.append("  ★ 全 error 行はスプシ AK 列「巡回ERR」を filter (= メール 10 件 cap の取りこぼし無し)")
-                # 持続エラー (連続3回以上) を別掲 → transient と区別して手動 chk を促す
-                persistent = (mon.get("persistent_err_rows") or [])
-                if persistent:
-                    lines.append("")
-                    lines.append(f"  ⚠️⚠️ 持続エラー {len(persistent)} 件 (連続3回以上 scrape 失敗 = transient でない、 要手動 chk):")
-                    for pr in persistent[:10]:
-                        lines.append(f"  - {pr.get('sheet','?')} row{pr.get('row_index','?')} ×{pr.get('count','?')}回 "
-                                      f"iid={pr.get('item_id') or '(空)'} sup={pr.get('supplier','?')}")
-                        lines.append(f"      url: {pr.get('url','')[:100]}")
-                    if len(persistent) > 10:
-                        lines.append(f"  ... 他 {len(persistent) - 10} 件 (全件: スプシ AK 列を ×3 以上で filter)")
+            # 持続エラー (連続3回以上) を別掲 → transient と区別して手動 chk を促す
+            persistent = (mon.get("persistent_err_rows") or [])
+            if persistent:
+                lines.append("")
+                lines.append(f"  ⚠️⚠️ 持続エラー {len(persistent)} 件 (連続3回以上 scrape 失敗 = transient でない、 要手動 chk):")
+                for pr in persistent[:10]:
+                    lines.append(f"  - {pr.get('sheet','?')} row{pr.get('row_index','?')} ×{pr.get('count','?')}回 "
+                                  f"iid={pr.get('item_id') or '(空)'} sup={pr.get('supplier','?')}")
+                    lines.append(f"      url: {pr.get('url','')[:100]}")
+                if len(persistent) > 10:
+                    lines.append(f"  ... 他 {len(persistent) - 10} 件 (全件: スプシ AK 列を ×3 以上で filter)")
+            # ★ 死んだ仕入元 (連続8回以上) は「回復待ち」から外して別掲 (2026-07-28)。
+            #   自己回復しか降りる経路が無いと要対応リストが墓場になる (HQ 指摘)。
+            #   件数を消すのではなく「必要な対処 = URL 差替」に分類し直す。
+            dead = (mon.get("dead_source_rows") or [])
+            if dead:
+                risk = [d for d in dead if d.get("listing_risk")]
+                lines.append("")
+                lines.append(f"  ⚰️ 死んだ仕入元 {len(dead)} 件 (連続8回以上失敗 = 自己回復しない、"
+                             f"補URL充填 or 主URL差替が必要):")
+                lines.append(f"     うち出品が生きている行 = {len(risk)} 件 "
+                             f"(← 在庫不明のまま販売中。優先対処)")
+                for dr in dead[:10]:
+                    mark = "★出品生存" if dr.get("listing_risk") else "出品リスク無(D=○/未出品)"
+                    lines.append(f"  - {dr.get('sheet','?')} row{dr.get('row_index','?')} "
+                                 f"×{dr.get('count','?')}回 [{mark}] sup={dr.get('supplier','?')}")
+                    lines.append(f"      url: {dr.get('url','')[:100]}")
+                if len(dead) > 10:
+                    lines.append(f"  ... 他 {len(dead) - 10} 件 (全件: スプシ AK 列を ×8 以上で filter)")
                 # 対応手順
                 lines.append("")
                 lines.append("  対応手順 (= 漏れ 0 最優先、 該当 row の在庫状況不明):")

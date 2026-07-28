@@ -1784,6 +1784,27 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 補足: ④ は並列化しなくても価値がある (上限接近を事前に知る)。逆に**並列化しても API/スクレイプの
   総量は減らない**ため、④ の計測は将来の並列化可否を判断する材料にもなる。
 
+### 巡回ERR の墓場化を解消 — ×8 以上を「死んだ仕入元」に別枠化 (HQ 2026-07-28 指摘)
+- 決定: HQ 観測「持続エラーは ×3 で要手動 chk に上がるが**降りる経路が自己回復しかない**。
+  残 6 件は D=○/未出品で出品リスクは無いが ×3→×4 と単調増加、このままだと ×10、×20 と育つ」
+  = 要対応リストの墓場化 (安全原則3 違反)。**件数を消すのではなく「必要な対処」で分類し直す**方針で実装。
+- 変更:
+  - [err_flag.py](../err_flag.py): `DEAD_SOURCE_THRESHOLD=8` + `is_dead_source()`。
+    LOW=3巡回/日・HIGH=6巡回/日 なので ×8 ≒ 1〜3 日回復しない = transient ではない。
+    **marker の計数は止めない** (silent drop しない、育った回数は見える)。
+  - [monitor_listings.py](../monitor_listings.py): 持続エラーを ×3-7 (回復待ち) と ×8+ (死んだ仕入元) に
+    分離し `dead_source_rows` として返す。各行に **`listing_risk`** (= item_id あり かつ D≠○
+    = 在庫不明のまま販売中) を付与し、triage を「対処が要る行」だけに絞れるように。
+  - [email_notifier.py](../email_notifier.py): 「⚰️ 死んだ仕入元 N 件 (補URL充填 or 主URL差替が必要)」
+    を別ブロックで描画。**うち出品生存 N 件**を先頭に出す。併せて持続/死亡ブロックを
+    `if error_rows:` の内側から外に出した (error_rows が空でも持続行が消えない = silent drop 防止)。
+- 検証: [tests/test_dead_source_split.py](../tests/test_dead_source_split.py) 5 件
+  (閾値 / 死亡後も計数継続 / ×7 は回復待ち・×8 は死亡へ / listing_risk 4 パターン / メール別枠描画)。
+  offline 174 / 非-live 550 全 pass。
+  **実機分布 (07-28 19:0x)**: HIGH = ERR 0 件 / LOW = 6 件 (全て ×4、全て D=○ or 未出品)。
+  現時点で ×8 到達はゼロ = 今回の変更で消える行も増える行も無い (= 挙動の後退なし)。数日後に
+  ×8 到達した行から自動的に別枠へ移る。
+
 ### 併行対応
 - **補URL消込 backlog 41 件** (snkrdunk28 + mercari13、25→28→35→41 と増加、毎 cycle 急増ガード HOLD):
   dry-run で対象確定 → HIGH cycle 完了後に `tools/supervised_backup_drain --reverify-snkrdunk --execute`

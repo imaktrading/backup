@@ -68,7 +68,9 @@ from sheet_updater import (  # noqa: E402
     _domain_of,
     ensure_listings_err_header,
 )
-from err_flag import build_err_marker, marker_count, PERSISTENT_THRESHOLD  # noqa: E402
+from err_flag import (  # noqa: E402
+    build_err_marker, marker_count, PERSISTENT_THRESHOLD, DEAD_SOURCE_THRESHOLD,
+)
 from scrapers.mercari_scraper import fetch_product_inventory as fetch_mercari  # noqa: E402
 from scrapers.mercari_scraper import create_driver as create_mercari_driver  # noqa: E402
 from scrapers.amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
@@ -1028,6 +1030,8 @@ def process_sheet(
     updates = []
     # AK 列 (巡回ERR) 連続エラー回数が PERSISTENT_THRESHOLD 以上の行 = 持続エラー (要手動 chk)
     persistent_err_rows = []
+    # ×DEAD_SOURCE_THRESHOLD 以上 = 自己回復しない仕入元 (URL 差替が要る) → 別枠
+    dead_source_rows = []
     # 2026-05-25 純粋抽出化 (依頼: monitor_pure_extract_implementation): 異常値ガード撤廃
     # 監視くんは scrape 値そのまま N列書込、 異常値判定 / warning / alert は全て下流
     # (リバイスくん / 出品くん / 別 logger worker) に委譲。 1 機能 1 worker 原則。
@@ -1068,7 +1072,10 @@ def process_sheet(
                                          and not isinstance(_pts, bool) and _pts >= 0 else 0)
             updates.append(upd)
             if marker_count(marker) >= PERSISTENT_THRESHOLD:
-                persistent_err_rows.append({
+                # 出品が生きている (item_id あり かつ D≠○) 行だけが在庫不明 = 取下げ判断に効く。
+                # D=○ / 未出品は「在庫は分からないが出品リスクは無い」ので triage 用に明示する。
+                _iid = (r.get("item_id") or "").strip()
+                entry = {
                     "row_index": r["row_index"],
                     "item_id":   r.get("item_id", ""),
                     "url":       (r.get("url") or "")[:120],
@@ -1076,7 +1083,15 @@ def process_sheet(
                     "count":     marker_count(marker),
                     "error":     (r.get("error") or "")[:150],
                     "supplier":  r.get("supplier", ""),
-                })
+                    "listing_risk": bool(_iid and _iid != "9999"
+                                         and not (r.get("current_sold") or "").strip()),
+                }
+                # ★ ×DEAD_SOURCE_THRESHOLD 以上は「回復待ち」から外して「死んだ仕入元」枠へ
+                #   (HQ 2026-07-28 指摘: 降りる経路が自己回復しかなく要対応リストが墓場化する)
+                if marker_count(marker) >= DEAD_SOURCE_THRESHOLD:
+                    dead_source_rows.append(entry)
+                else:
+                    persistent_err_rows.append(entry)
             continue
         # D 列に変化があるかどうか判定
         new_d = "○" if r["is_sold"] else ""
@@ -1314,9 +1329,18 @@ def process_sheet(
             log(f"  [!] 救済 state 保存失敗: {type(_se).__name__}: {_se}")
 
     if persistent_err_rows:
-        log(f"  ⚠️ 持続エラー (連続{PERSISTENT_THRESHOLD}回以上、要手動 chk): {len(persistent_err_rows)} 件")
+        _risk = sum(1 for e in persistent_err_rows if e.get("listing_risk"))
+        log(f"  ⚠️ 持続エラー (連続{PERSISTENT_THRESHOLD}〜{DEAD_SOURCE_THRESHOLD - 1}回、回復待ち): "
+            f"{len(persistent_err_rows)} 件 (うち出品生存 {_risk} 件)")
         for er in persistent_err_rows[:10]:
             log(f"     row{er['row_index']} ×{er['count']} {er['url'][:60]}")
+    if dead_source_rows:
+        _risk = sum(1 for e in dead_source_rows if e.get("listing_risk"))
+        log(f"  ⚠️ 死んだ仕入元 (連続{DEAD_SOURCE_THRESHOLD}回以上 = 自己回復しない、URL 差替が要る): "
+            f"{len(dead_source_rows)} 件 (うち出品生存 {_risk} 件)")
+        for er in dead_source_rows[:10]:
+            log(f"     row{er['row_index']} ×{er['count']} "
+                f"{'[出品生存]' if er.get('listing_risk') else '[出品リスク無]'} {er['url'][:60]}")
 
     log(f"  完了 [{sheet_label}]")
     return {
@@ -1327,6 +1351,7 @@ def process_sheet(
         "url_alerts":           url_alerts,
         "error_rows":           error_rows,
         "persistent_err_rows":  persistent_err_rows,
+        "dead_source_rows":     dead_source_rows,
         "price_surge_held":     price_surge_held,   # 価格急増ガードで HOLD した supplier 一覧
         "price_surge_stats":    price_surge_stats,
         "backup_clear":         backup_clear_result,  # 補URL消込結果 (cleared/skipped_mismatch/held/surge)

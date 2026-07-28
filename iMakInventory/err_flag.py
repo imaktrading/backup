@@ -21,6 +21,10 @@ from typing import Optional
 #: 連続エラーがこの回数以上でメール別掲 (= 手動 chk 促し)
 PERSISTENT_THRESHOLD = 3
 
+#: 連続エラーがこの回数以上 = 「回復待ち」ではなく「死んだ仕入元 (要 URL 差替)」として別枠化。
+#: LOW は 1 日 3 巡回・HIGH は 6 巡回なので ×8 ≒ 1〜3 日回復しない = transient ではない。
+DEAD_SOURCE_THRESHOLD = 8
+
 _COUNT_RE = re.compile(r"×(\d+)")
 
 
@@ -64,4 +68,16 @@ def build_err_marker(err: str, prev_marker: str = "", now: Optional[datetime] = 
 
 def is_persistent(marker: str, threshold: int = PERSISTENT_THRESHOLD) -> bool:
     """marker が持続エラー (連続 threshold 回以上) か."""
+    return marker_count(marker) >= threshold
+
+
+def is_dead_source(marker: str, threshold: int = DEAD_SOURCE_THRESHOLD) -> bool:
+    """marker が「死んだ仕入元」(連続 threshold 回以上 = 自己回復を待っても戻らない) か.
+
+    2026-07-28 HQ 指摘: 持続エラーは ×3 で「要手動 chk」に上がるが、そこから**降りる経路が
+    自己回復しかない**。回復しない URL (出品終了・削除済 等) は ×4 → ×10 → ×20 と単調に育ち、
+    「要対応リスト」が墓場になる (安全原則3: DLQ を墓場にしない、に反する)。
+    ×DEAD_SOURCE_THRESHOLD 以降は **「回復待ち」ではなく「仕入元の差替が要る」** と分類を変え、
+    別枠で提示する (件数を消すのではなく、必要な対処の種類を変える)。
+    """
     return marker_count(marker) >= threshold

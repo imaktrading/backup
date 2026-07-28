@@ -516,7 +516,7 @@ def _phase_monitor(
             targets.append(("LOW", l_id))
     grand = {"processed": 0, "newly_sold": 0, "newly_in_stock": 0, "errors": 0,
              "url_alerts_count": 0, "by_sheet": {}, "error_rows": [],
-             "persistent_err_rows": [], "price_surge": [],
+             "persistent_err_rows": [], "dead_source_rows": [], "price_surge": [],
              "backup_clear_cleared": 0, "backup_clear_held": [], "backup_clear_mismatch": [],
              "rescue_new": 0, "rescue_current": 0}
 
@@ -544,6 +544,8 @@ def _phase_monitor(
             # 持続エラー (連続3回以上) も sheet 跨ぎ集約 → メール別掲用
             for pr in (stats.get("persistent_err_rows") or []):
                 grand["persistent_err_rows"].append({**pr, "sheet": label})
+            for dr in (stats.get("dead_source_rows") or []):
+                grand["dead_source_rows"].append({**dr, "sheet": label})
             # 価格急増ガード発火 (supplier 単位) を sheet 跨ぎ集約 → cycle 後に ALERT 別掲
             for sup in (stats.get("price_surge_held") or []):
                 st = (stats.get("price_surge_stats") or {}).get(sup, {})
