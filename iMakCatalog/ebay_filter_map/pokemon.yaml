@@ -249,6 +249,14 @@ set_code:
       MEGA拡張パック「アビスアイ」(2026-05-22 発売, メガダークライex)。eBay/TCGplayer facet
       = "Abyss Eye" (TCGplayer 'M5: Abyss Eye' / pokemon-card.com/ex/m5 で確認 2026-07-24)。
     year: 2026
+  - source: MC
+    ebay: Start Deck 100 Battle Collection
+    note: >-
+      スタートデッキ100 バトルコレクション (/742, 766件)。set/rarity 全欠を Advisor 監査で検出
+      → set backfill (2026-07-28)。eBay/TCGplayer facet = "Start Deck 100 Battle Collection"
+      (TCGplayer 'Pikachu ex 227/742 - Start Deck 100 Battle Collection' で確認)。
+      ★rarity は空欄が正: デッキ収録カードは印刷レアリティ記号を持たない (MC 0/766, CP4/Classic 同型)。
+    year: 2023
 
   # ----- Black & White / X & Y / Diamond & Pearl Platinum (旧) -----
   - source: XY

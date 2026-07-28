@@ -813,6 +813,13 @@ def _search_one_piece_promo_by_number(
             #   で照合する。例 cert 148642488 ZORO 2ND ANV. COMPLETE GUIDE #067 → OP05-067_p2
             #   (#067 候補中 official に COMPLETE GUIDE を持つのは _p2 のみ = 一意特定)。
             ("COMPLETE GUIDE", "COMPLETE GUIDE"),
+            # 2026-07-27 (HQ verdict cert153420191 Perona #077 → OP01-077_p4/_p5):
+            #   「始めようキャンペーン プロモーションパック」(英 PSA brand "LET'S START CAMPAIGN
+            #   PROMOTION PACK")。official に「始めようキャンペーン」を持つ p4/p5 のみ +250 で、
+            #   汎用 _P 'Promotion Card' を上回らせる。★(p4=無/p5=有)の判別は画像のみ可のため、
+            #   p4/p5 が同点なら従来どおり fail-closed reject → HQ viewer が確定 (HQ 承認)。
+            #   apostrophe 揺れ回避で英側は "START CAMPAIGN"、日側「始めようキャンペーン」両側必須。
+            ("START CAMPAIGN", "始めようキャンペーン"),
         ):
             if en in hay and (jp in sn or jp in sn_upper):
                 edition_hit = True
