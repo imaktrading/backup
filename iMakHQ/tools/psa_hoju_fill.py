@@ -281,6 +281,36 @@ def filter_candidates_by_number(cands, card_no):
     return keep, drop
 
 
+def restock_targets(limit=None):
+    """ファネルの RESTOCK∩PSA10 を「検索対象」の形に変換する (2026-07-28)。
+
+    再仕入れ照合ボタン(psa_resource_gate)は押してから探すので待たされる。**同じ
+    psa_research_cache を共有している**ので、夜のうちにここを温めておけば当日キャッシュが効き、
+    ボタンは即座に候補を出せる(再スクレイプも減って BAN リスクも下がる)。
+
+    KEY/cert は商品管理シートから itemID で join (gate の Step6 P1 と同じ血統)。
+    itemID が取れない行は skip (キャッシュは itemID キーのため)。
+    """
+    import psa_resource_gate as gate
+    rows, mp = gate._load_restock_psa10()
+    if not rows:
+        return []
+    vals = _read_high()
+    key_by, cert_by, title_by = {}, {}, {}
+    for r in vals[1:]:
+        iid = _cell(r, B)
+        if iid:
+            key_by[iid], cert_by[iid], title_by[iid] = _cell(r, KEY), _cell(r, CERT), _cell(r, C)
+    out = []
+    for r in rows:
+        iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+        if not iid:
+            continue
+        out.append({"itemID": iid, "key": key_by.get(iid, ""), "cert": cert_by.get(iid, ""),
+                    "title": r.get("title") or title_by.get(iid, "")})
+    return out[:limit] if limit else out
+
+
 def _load_cache(path=CACHE_PATH):
     import json
     try:
@@ -355,6 +385,7 @@ class _KeepAwake:
 
 
 def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, commit_batch=8,
+                     targets=None,
                      min_reviews=100):
     """夜間検索本体(impure)。HIGH→対象抽出→検索→**サブバッチ毎にcacheコミット**。補URL列は触らない。
 
@@ -365,6 +396,8 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
         snkr_sleep: SNKRDUNK 呼出間の待機秒(BAN 回避・nightly slow-and-steady)。
         commit_batch: この件数ごとに mercari+snkrdunk+cache保存(途中死の損失を≤1バッチに限定)。
         min_reviews: メルカリ補URL候補の個人セラー評価件数の下限(既定100)。送料込みも必須。
+        targets: 対象を呼び手が渡す(None=HIGH から補URL薄い live PSA を自前抽出)。
+                 再仕入れ候補の先読み(restock_targets)に同じ検索経路を使い回すための口。
     """
     import datetime
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -372,15 +405,18 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
     import snkrdunk_psa_resource as sp
 
     today = datetime.date.today().isoformat()
-    vals = _read_high()
-    targets = select_backfill_targets(vals, max_backups=max_backups)
+    if targets is None:
+        targets = select_backfill_targets(_read_high(), max_backups=max_backups)
+        label = f"補<{max_backups}"
+    else:
+        label = "RESTOCK候補"       # 呼び手が対象を決めた(= 再仕入れ候補の先読み)
     cache = {} if fresh else _load_cache()
     todo = targets if fresh else targets_needing_search(targets, cache, today)
     total_targets = len(targets)
     skipped = total_targets - len(todo)
     if limit is not None:
         todo = todo[:limit]
-    print(f"夜間検索: 対象(補<{max_backups}) {total_targets}件 / 当日済skip {skipped}件 / 今回 {len(todo)}件"
+    print(f"夜間検索: 対象({label}) {total_targets}件 / 当日済skip {skipped}件 / 今回 {len(todo)}件"
           + (f" (limit={limit})" if limit is not None else ""))
     if not todo:
         print("  対象なし(全て当日検索済 or 補が閾値以上)。終了。")
@@ -747,6 +783,18 @@ def main():
                 fresh = True
         run_night_search(max_backups=max_backups, limit=limit, fresh=fresh,
                          commit_batch=commit_batch, min_reviews=min_reviews)
+        return
+    if "search-restock" in sys.argv:
+        # 再仕入れ候補(ファネル RESTOCK∩PSA10)の先読み。共有キャッシュを温めるだけで、
+        # スプシにも補URL列にも書かない(判定は「🃏 PSA再仕入れ照合」ボタンの有人ゲートのまま)。
+        limit = 20
+        for a in sys.argv[1:]:
+            if a.startswith("--limit="):
+                limit = int(a.split("=", 1)[1])
+        tg = restock_targets()
+        print(f"RESTOCK候補 {len(tg)}件 を先読み(limit={limit})")
+        if tg:
+            run_night_search(targets=tg, limit=limit)
         return
     if "confirm" in sys.argv:
         max_backups, limit, dry = 1, None, "--dry-run" in sys.argv
