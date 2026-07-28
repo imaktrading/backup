@@ -1754,6 +1754,36 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
 - 教訓: 「テストが通った」は実データ形式が想定通りである証明にはならない。ログ由来の判定は
   必ず実ファイルの field を目視突合してから完了と言う ([[dont_declare_complete_after_one_cycle]])。
 
+### 並列化の障害 ②④ を先行修正 (③ は ① と不可分のため据置) — user 指示「気になる、改善されるなら着手」
+- 決定: 「専用 profile にすれば HIGH/LOW の時刻を気にしなくていいのでは」の問いに対し、実機確認の結果
+  **障害は4つ**あり profile 専用化 (①) で解けるのは 1 つだけと判定。**単独で今日の実害がある ② と、
+  並列化と無関係に有用な ④ を先行実装**。③ は ① なしで入れると害になるため着手しない。
+- 変更(2) **chrome 一括 kill の越境を停止** [monitor_listings.py](../monitor_listings.py):
+  旧 `_kill_stale_scraper_chrome` は「`--headless` な chrome.exe 全部 + undetected_chromedriver 全部」を
+  **マシン全体で無差別 kill** しており、公式監視くん `check_ebay_login.py` や他 worktree
+  (Catalog/Harvest/Revise) の headless chrome を巻き込み得た (= 並列化以前に現行の越境事故リスク)。
+  `_select_stale_scraper_pids()` を純粋関数として新設し、**chrome は自分の profile dir を指す --headless のみ /
+  driver は親プロセスが死んだ真の orphan のみ**を kill。CommandLine 不明は触らない (fail-safe)。
+- 変更(4) **eBay API 日次呼出量の計測 + 上限接近の非-silent 告知**
+  [trading_api_client.py](../ebay_actions/trading_api_client.py) / [run_cycle.py](../run_cycle.py):
+  2026-07-04 の 518 (Call usage limit) は「当たってから」しか分からず取下げ漏れ 24 件を招いた。
+  `record_api_call()` を `_call_trading` と GetSellerList の 2 経路に挿し `ebay_api_usage.json` に
+  日次集計 (日付変更で自動リセット・破損時は数え直し・書込失敗でも API 呼出は止めない)。
+  cycle 末に `_check_ebay_api_usage()` が **上限 5000 の 70% で 1 日 1 回だけ 3ch 告知**。
+- 検証: [tests/test_kill_stale_chrome.py](../tests/test_kill_stale_chrome.py) 12 件
+  (自 profile のみ kill / 他プロジェクト headless は残す / 非 headless は残す / orphan driver のみ /
+  CommandLine 不明は不触 / self_pid 不触 / profile 不明時は 1 つも kill しない / 実機 enumerate→kill 配線)、
+  [tests/test_ebay_api_usage.py](../tests/test_ebay_api_usage.py) 9 件 (集計・日跨ぎリセット・破損・
+  書込不能でも例外なし・retry ごと計上・閾値未満は無告知・同日 1 回のみ・計測不能は誤報しない)。
+  **実機 dry 確認**: 全 310 プロセス中 kill 対象 0 (chrome 14 個は全てユーザーの非 headless = 温存)。
+  offline 169 / 非-live 545 全 pass。
+- ★据置の理由 (③ 個別ロック): 現在 HIGH/LOW は **同一の chrome profile を共用** (mercari
+  `local_data\iMakMercari\chrome_profile` / amazon `local_data\iMakInventory\chrome_profile_amazon`)。
+  ① を解かずに個別ロック化すると同時起動で SingletonLock 競合 → driver 起動不能/profile 破損。
+  **③ は ① とセットで「並列化」案件として扱う** (今日入れても改善ゼロ・リスクのみ)。
+- 補足: ④ は並列化しなくても価値がある (上限接近を事前に知る)。逆に**並列化しても API/スクレイプの
+  総量は減らない**ため、④ の計測は将来の並列化可否を判断する材料にもなる。
+
 ### 併行対応
 - **補URL消込 backlog 41 件** (snkrdunk28 + mercari13、25→28→35→41 と増加、毎 cycle 急増ガード HOLD):
   dry-run で対象確定 → HIGH cycle 完了後に `tools/supervised_backup_drain --reverify-snkrdunk --execute`

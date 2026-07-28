@@ -570,30 +570,90 @@ def append_action_required(sheet_label: str, result: dict, reason: str,
 # ============================================================================
 # orphan chrome 一掃 (cycle 開始時の clean slate 確保、2026-06-12)
 # ============================================================================
-def _kill_stale_scraper_chrome(log=print) -> None:
-    """scraper の orphan な headless chrome + undetected_chromedriver を kill.
+# 自分の scraper が使う chrome profile (= kill 対象を自分の資産に限定するための指紋)
+def _own_profile_dirs() -> tuple:
+    from scrapers import mercari_scraper, amazon_scraper  # noqa: PLC0415
+    dirs = []
+    for mod, attr in ((mercari_scraper, "CHROME_PROFILE_DIR"),
+                      (amazon_scraper, "EBAY_AMAZON_PROFILE_DIR")):
+        v = getattr(mod, attr, None)
+        if isinstance(v, str) and v.strip():
+            dirs.append(v.strip().lower())
+    return tuple(dirs)
 
-    ユーザーの通常ブラウザ (= 非 headless) は --headless filter で温存。
+
+def _select_stale_scraper_pids(procs, profile_dirs, self_pid: int = 0) -> list:
+    """kill すべき PID を選ぶ純粋関数 (2026-07-28 に無差別 kill から限定 kill へ)。
+
+    ★ 旧実装は「--headless な chrome.exe 全部 + undetected_chromedriver 全部」をマシン全体で
+      kill していた。これは他プロジェクト (公式監視くん check_ebay_login / Catalog / Harvest 等)
+      の headless chrome も巻き込む越境事故になる。自分の資産だけを対象にする:
+
+      - chrome.exe            : --headless かつ **自分の profile dir を指しているもの**
+      - undetected_chromedriver: **親プロセスが既に死んでいる真の orphan のみ**
+                                 (他プロジェクトの稼働中 driver は親 python が生きているので残る)
+
+      CommandLine が取れないプロセスは **kill しない** (fail-safe: 判定不能なら触らない)。
+    """
+    live = {int(p.get("ProcessId") or 0) for p in procs if p.get("ProcessId")}
+    out = []
+    for p in procs:
+        try:
+            pid = int(p.get("ProcessId") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not pid or pid == self_pid:
+            continue
+        name = (p.get("Name") or "").lower()
+        cmd = (p.get("CommandLine") or "")
+        if name == "chrome.exe":
+            low = cmd.lower()
+            if "--headless" not in low:
+                continue                        # ユーザーの通常ブラウザは温存
+            if not any(d and d in low for d in profile_dirs):
+                continue                        # 他プロジェクトの headless chrome は触らない
+            out.append(pid)
+        elif name.startswith("undetected_chromedriver"):
+            try:
+                ppid = int(p.get("ParentProcessId") or 0)
+            except (TypeError, ValueError):
+                continue
+            if ppid and ppid not in live:        # 親が死んでいる = 前 cycle の残骸
+                out.append(pid)
+    return out
+
+
+def _kill_stale_scraper_chrome(log=print) -> None:
+    """自分の scraper が残した orphan chrome / driver だけを kill (clean slate).
+
     driver 生成"前"(並走 driver 皆無の安全な時点) でのみ呼ぶこと
     (cycle 途中で呼ぶと並走中の他 supplier driver の chrome を巻き込む)。
     """
     if sys.platform != "win32":
         return
-    ps = (
-        "Get-Process undetected_chromedriver -ErrorAction SilentlyContinue | "
-        "Stop-Process -Force -ErrorAction SilentlyContinue; "
-        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
-        "Where-Object { $_.CommandLine -match '--headless' } | "
-        "ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"
-    )
+    import subprocess  # noqa: PLC0415
+    ps = ("Get-CimInstance Win32_Process | "
+          "Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 2")
     try:
-        import subprocess  # noqa: PLC0415
-        subprocess.run(
+        r = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        procs = json.loads((r.stdout or "").strip() or "[]")
+        if isinstance(procs, dict):
+            procs = [procs]
+        pids = _select_stale_scraper_pids(procs, _own_profile_dirs(), self_pid=os.getpid())
+        if not pids:
+            log("  [cleanup] orphan chrome/driver なし (自分の profile 配下のみ対象)")
+            return
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "Stop-Process -Id " + ",".join(str(p) for p in pids) + " -Force -ErrorAction SilentlyContinue"],
             capture_output=True, timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        log("  [cleanup] 前 cycle の orphan chrome/driver を一掃 (clean slate)")
+        log(f"  [cleanup] 自分の orphan chrome/driver {len(pids)} 個を一掃 (他プロジェクトは不触)")
     except Exception as e:
         log(f"  [cleanup] orphan kill skip ({type(e).__name__}: {e})")
 

@@ -30,6 +30,52 @@ OAUTH_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 COMPATIBILITY_LEVEL = "967"
 SITE_ID_US = "0"
 
+# ============================================================================
+# API 呼出量の計測 (2026-07-28)
+# ============================================================================
+# 2026-07-04 に日次上限 518 (Call usage limit reached) で取下げ upload が全滅し、
+# 取下げ漏れ 24 件が蓄積した。当時 518 は「起きてから」しか分からず、消費量を
+# 事前に知る手段が無かった。呼出を1本の choke point で数え、run_cycle が閾値超で
+# 非-silent 告知する (= 事故る前に気づく)。計測失敗は絶対に API 呼出を止めない。
+API_USAGE_PATH = Path(__file__).resolve().parent.parent / "decision_log" / "ebay_api_usage.json"
+
+
+def record_api_call(call_name: str, n: int = 1, today: Optional[str] = None) -> dict:
+    """日次 API 呼出数をカウントして返す (日付が変われば自動リセット)。fail-safe。"""
+    from datetime import datetime as _dt  # noqa: PLC0415
+    day = today or _dt.now().strftime("%Y-%m-%d")
+    data = {"date": day, "total": 0, "by_call": {}}
+    try:
+        if API_USAGE_PATH.exists():
+            prev = json.loads(API_USAGE_PATH.read_text(encoding="utf-8"))
+            if isinstance(prev, dict) and prev.get("date") == day:
+                data = {"date": day, "total": int(prev.get("total") or 0),
+                        "by_call": dict(prev.get("by_call") or {})}
+    except Exception:
+        pass        # 破損/読めない → 今日の分から数え直す (呼出は止めない)
+    data["total"] += n
+    data["by_call"][call_name] = int(data["by_call"].get(call_name) or 0) + n
+    try:
+        API_USAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        API_USAGE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+    return data
+
+
+def read_api_usage(today: Optional[str] = None) -> dict:
+    """今日の呼出数を返す (別日 / 欠損 / 破損 は 0 件扱い)。"""
+    from datetime import datetime as _dt  # noqa: PLC0415
+    day = today or _dt.now().strftime("%Y-%m-%d")
+    try:
+        d = json.loads(API_USAGE_PATH.read_text(encoding="utf-8"))
+        if isinstance(d, dict) and d.get("date") == day:
+            return {"date": day, "total": int(d.get("total") or 0),
+                    "by_call": dict(d.get("by_call") or {})}
+    except Exception:
+        pass
+    return {"date": day, "total": 0, "by_call": {}}
+
 
 # ============================================================================
 # OAuth token
@@ -147,6 +193,7 @@ def _call_trading(call_name: str, body_xml: str,
     r = None
     for attempt in range(max_net_retries + 1):
         try:
+            record_api_call(call_name)      # 実際に送った回数を数える (retry も 1 回として計上)
             r = requests.post(TRADING_API_URL, headers=headers,
                               data=body_xml.encode("utf-8"), timeout=timeout)
             break
@@ -300,6 +347,7 @@ def get_my_active_listings(access_token: Optional[str] = None,
     for page in range(1, max_pages + 1):
         body = _build_getsellerlist_xml(page, entries_per_page)
         headers = {**headers_base, "X-EBAY-API-IAF-TOKEN": access_token}
+        record_api_call("GetSellerList")     # _call_trading を通らない経路も計測に含める
         r = requests.post(TRADING_API_URL, headers=headers,
                           data=body.encode("utf-8"), timeout=60)
         xml = r.text

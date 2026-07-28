@@ -80,6 +80,13 @@ CYCLE_STALE_MULT = 2.2                          # この倍率を超えたら「
 CYCLE_STALE_ALERT_STATE = DECISION_LOG_DIR / "cycle_staleness_alert_state.json"
 CYCLE_STALE_ALERT_THROTTLE_HOURS = 6            # 同 label の再告知間隔 (アラート疲労防止)
 
+# eBay Trading API 日次呼出量の事前警告 (2026-07-28):
+# 2026-07-04 に 518 (Call usage limit reached) で取下げ upload 全滅 → 取下げ漏れ 24 件蓄積。
+# 上限に当たってから気づくのでは遅いので、消費量を計測し 70% で 1 日 1 回だけ非-silent 告知する。
+EBAY_API_DAILY_LIMIT = 5000                     # eBay Trading API の既定 日次上限
+EBAY_API_WARN_RATIO = 0.7
+EBAY_API_ALERT_STATE = DECISION_LOG_DIR / "ebay_api_alert_state.json"
+
 # 補URL消込 急増ガード ALERT の throttle (2026-07-25):
 # 既知 backlog (snkrdunk判定復旧待ち等) で毎 cycle HOLD すると desktop file+mail を 4h毎に量産し
 # アラート疲労 (2026-07-25 デスクトップに3件/日堆積で発覚)。cycle ログ/レポートには毎回出す
@@ -301,6 +308,48 @@ def _cycle_label_of(d: dict) -> str:
         return "SHEET"
     by_sheet = list(((d.get("phases") or {}).get("monitor") or {}).get("by_sheet") or {})
     return by_sheet[0] if by_sheet else str(d.get("sheet_label") or "SHEET")
+
+
+def _check_ebay_api_usage(test_mode: bool = False) -> dict:
+    """eBay Trading API の日次消費量を見て、上限手前で 1 日 1 回だけ非-silent 告知。
+
+    上限に当たると取下げ upload が全滅する (2026-07-04 の 24 件漏れ) ため、当たる前に知らせる。
+    計測が読めない場合は 0 件扱い (告知しない = 誤報より無音を選ぶ。実害検知は既存の 518 分類が担う)。
+    """
+    try:
+        from ebay_actions.trading_api_client import read_api_usage  # noqa: PLC0415
+        usage = read_api_usage()
+    except Exception as e:
+        _log(f"  [!] API usage 読取失敗: {type(e).__name__}: {e}", test_mode)
+        return {}
+    total = int(usage.get("total") or 0)
+    threshold = int(EBAY_API_DAILY_LIMIT * EBAY_API_WARN_RATIO)
+    usage["threshold"] = threshold
+    usage["limit"] = EBAY_API_DAILY_LIMIT
+    if total < threshold:
+        return usage
+    _log(f"  [★eBay API] 本日の呼出 {total} 件 (閾値 {threshold} / 上限 {EBAY_API_DAILY_LIMIT})", test_mode)
+    try:    # 同日 1 回だけ告知
+        prev = json.loads(EBAY_API_ALERT_STATE.read_text(encoding="utf-8")) \
+            if EBAY_API_ALERT_STATE.exists() else {}
+        if prev.get("date") == usage.get("date"):
+            usage["alerted"] = False
+            return usage
+        EBAY_API_ALERT_STATE.write_text(json.dumps({"date": usage.get("date"), "total": total}),
+                                        encoding="utf-8")
+    except Exception:
+        pass    # state 不明なら告知側に倒す
+    top = sorted((usage.get("by_call") or {}).items(), key=lambda kv: -kv[1])[:5]
+    msg = (f"本日の eBay Trading API 呼出が {total} 件 (上限 {EBAY_API_DAILY_LIMIT} の "
+           f"{total / EBAY_API_DAILY_LIMIT:.0%}) に達しました。\n"
+           "上限に当たると取下げ upload が全滅し、売切品が eBay に残ります "
+           "(2026-07-04 に同型で取下げ漏れ 24 件)。\n"
+           "対処: 不要な再実行 (手動 audit / 再 upload) を控える。翌日 0 時 (PST) にリセットされます。\n\n"
+           "内訳 (上位):\n" + "\n".join(f"  - {k}: {v}" for k, v in top))
+    _emit_nonsilent_alert("ebay_api_usage",
+                          "[★iMakInventory] eBay API 日次上限に接近 (取下げ不能リスク)", msg, test_mode)
+    usage["alerted"] = True
+    return usage
 
 
 def _last_cycle_success(label: str) -> Optional[datetime]:
@@ -1216,6 +1265,12 @@ def run_cycle(
         cycle_log["staleness"] = _check_cycle_staleness(test_mode)
     except Exception as e:
         _log(f"  [!] staleness 判定失敗: {type(e).__name__}: {e}", test_mode)
+
+    # ★ eBay API 日次消費量 (上限に当たる前に気づく)
+    try:
+        cycle_log["ebay_api_usage"] = _check_ebay_api_usage(test_mode)
+    except Exception as e:
+        _log(f"  [!] API usage 判定失敗: {type(e).__name__}: {e}", test_mode)
 
     log_path = _record_cycle_log(cycle_log)
     _log(f"=== cycle 完了: status={cycle_log['status']} log={log_path.name} ===", test_mode)
