@@ -2231,7 +2231,17 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     card_type = official_card_type   # Claude 追放
     cost      = official_cost        # Claude 追放
     power     = official_power       # Claude 追放
+    # ★2026-07-28: catalog に finish が無い時だけ、**PSA ラベルに明記された分**を転記する。
+    # 推測は一切しない(画像の光り方・rarity からの類推は従来どおり禁止)。ラベル記載は
+    # PSA が現物を鑑定して打った一次情報なので「確認できた事実」に当たる。
+    # 実測: 823 cert 中 32件(3.9%)にのみ明記あり。残りは従来どおり空欄。
     finish    = official_finish      # Claude 追放 + Subject キーワード判定も廃止
+    if not finish:
+        try:
+            from psa_label_finish import finish_from_psa_label
+            finish = finish_from_psa_label(subject)
+        except Exception:
+            pass                      # 取れなければ従来どおり空欄(fail-closed)
     attribute = official_color or official_attribute  # Claude 追放
 
     # 2026-04-24 Canonical Map (Phase 1): eBay フィルタ正規値へ無言整形
