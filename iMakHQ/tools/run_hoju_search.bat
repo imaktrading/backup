@@ -40,6 +40,12 @@ REM     スプシにも補URL列にも書かない (判定は従来どおり有�
 echo [restock] prefetch %date% %time% >> "%LOG%"
 python -u psa_hoju_fill.py search-restock --limit=20 >> "%LOG%" 2>&1
 
+REM --- ④ 一番くじ 補URL候補の先読み ---
+REM     「🎯 一番くじ 補URL特定」も押してから検索していたので待たされる。
+REM     候補だけ貯める (目視UIは開かない・スプシにも書かない)。キャッシュは3日窓。
+echo [ichibankuji] prefetch %date% %time% >> "%LOG%"
+python -u ichibankuji_restock.py prefetch 10 >> "%LOG%" 2>&1
+
 :done
 echo [end] %date% %time% >> "%LOG%"
 endlocal

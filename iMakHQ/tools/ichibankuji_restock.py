@@ -797,17 +797,62 @@ def _filter_new_freeship(drv, raw):
     return kept
 
 
-# ---------------- パス ----------------
-def pass_identify(n, cand_n):
-    targets = get_oos_ichibankuji(n)
-    print(f"画像特定(パスA): OOS一番くじ {len(targets)}件 (各最安{cand_n}候補)")
-    if not targets:
-        print("対象なし"); return
-    drv = _make_driver()
-    items = []
+# ---------------- 候補の先読みキャッシュ (2026-07-28) ----------------
+# 目視はユーザーのタイミングでやりたいが、検索は待ちたくない ⇒ 夜のうちに候補だけ貯める。
+# PSA 側 (psa_hoju_fill の psa_research_cache) と同じ考え方。書込は一切せず候補のみ。
+IDENTIFY_CACHE = r"C:/dev/iMak_data/dedupe/ichibankuji_identify_cache.json"
+IDENTIFY_CACHE_DAYS = 3          # PSA の _entry_fresh と同じ鮮度窓
+
+
+def _identify_cache_load():
     try:
-        drv.set_page_load_timeout(50)
+        with open(IDENTIFY_CACHE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _identify_cache_save(cache):
+    os.makedirs(os.path.dirname(IDENTIFY_CACHE), exist_ok=True)
+    with open(IDENTIFY_CACHE, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False)
+
+
+def _identify_cache_fresh(entry, today=None):
+    """当日〜IDENTIFY_CACHE_DAYS 以内か(純関数)。日付不正/未来日は False (fail-closed)。"""
+    if not isinstance(entry, dict) or not entry.get("date"):
+        return False
+    try:
+        t = datetime.date.fromisoformat(today or datetime.date.today().isoformat())
+        age = (t - datetime.date.fromisoformat(entry["date"])).days
+    except Exception:
+        return False
+    return 0 <= age <= IDENTIFY_CACHE_DAYS
+
+
+def _identify_scrape(targets, cand_n, use_cache=True):
+    """OOS対象 → 候補付き items。**キャッシュが新しい対象は再検索しない**(driver も起こさない)。
+
+    戻り値の形は従来の pass_identify 内で組んでいたものと同一 (UI 側は無改修)。
+    """
+    cache = _identify_cache_load() if use_cache else {}
+    today = datetime.date.today().isoformat()
+    todo = [t for t in targets
+            if not (use_cache and _identify_cache_fresh(cache.get(str(t["item_id"])), today))]
+    items, drv = [], None
+    if todo:
+        print(f"  検索が要る対象: {len(todo)}/{len(targets)}件 (残りはキャッシュ再利用)", flush=True)
+        drv = _make_driver()
+    try:
+        if drv:
+            drv.set_page_load_timeout(50)
         for i, t in enumerate(targets, 1):
+            iid = str(t["item_id"])
+            ent = cache.get(iid)
+            if use_cache and _identify_cache_fresh(ent, today):
+                items.append({k: ent[k] for k in
+                              ("row", "item_id", "title", "prize", "ref_image", "candidates")})
+                continue
             pics = fetch_listing_images(t["item_id"])
             et = _ebay_title(t["item_id"])             # 一番くじ+賞は生成済eBayタイトルが確実
             kw, prize = build_keyword(t["title"], et)  # C列(日本語作品/キャラ)+一番くじ+賞
@@ -816,13 +861,39 @@ def pass_identify(n, cand_n):
                 raw = kw_search(drv, kw, cand_n)
             except Exception as e:  # noqa: BLE001
                 print(f"     ⚠ 検索失敗: {e}"); raw = []
-            items.append({"row": t["row"], "item_id": t["item_id"], "title": t["title"],
-                          "prize": prize, "ref_image": pics[0] if pics else "",
-                          "candidates": [{"url": c["href"], "price": c["price"],
-                                          "image": c.get("image", "")} for c in raw]})
+            it = {"row": t["row"], "item_id": t["item_id"], "title": t["title"],
+                  "prize": prize, "ref_image": pics[0] if pics else "",
+                  "candidates": [{"url": c["href"], "price": c["price"],
+                                  "image": c.get("image", "")} for c in raw]}
+            items.append(it)
+            cache[iid] = {**it, "date": today}
+            _identify_cache_save(cache)      # 1件ごとに保存(途中死しても貯めた分は残す)
     finally:
-        try: drv.quit()
-        except Exception: pass
+        if drv:
+            try: drv.quit()
+            except Exception: pass
+    return items
+
+
+def pass_prefetch(n, cand_n):
+    """無人の候補先読み。**目視UIを開かず・書込もしない**。夜間 cron 用 (2026-07-28)。"""
+    targets = get_oos_ichibankuji(n)
+    print(f"候補先読み: OOS一番くじ {len(targets)}件 (各最安{cand_n}候補)")
+    if not targets:
+        print("対象なし"); return
+    items = _identify_scrape(targets, cand_n)
+    n_cand = sum(len(it.get("candidates") or []) for it in items)
+    print(f"✅ 先読み完了: {len(items)}件 / 候補 {n_cand}件 → {IDENTIFY_CACHE}")
+    print("   目視は「🎯 一番くじ 補URL特定」ボタンで好きなタイミングに(再検索せず即表示)")
+
+
+# ---------------- パス ----------------
+def pass_identify(n, cand_n):
+    targets = get_oos_ichibankuji(n)
+    print(f"画像特定(パスA): OOS一番くじ {len(targets)}件 (各最安{cand_n}候補)")
+    if not targets:
+        print("対象なし"); return
+    items = _identify_scrape(targets, cand_n)
     picks = serve_and_collect(build_identify_html(items))
     # picks: {row(str): {skip, oks:[{url,price}]}}。可1つを picked_url に。見送り/可ゼロは候補待ち。
     saved = []
@@ -1306,6 +1377,10 @@ def main():
             refresh_write()
         else:
             pass_refresh()
+    elif mode == "prefetch":
+        # 夜間: 候補だけ貯める(目視UIを開かない・スプシに書かない)。昼の identify が即表示になる。
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        pass_prefetch(n, cand_n=10)
     elif mode == "supply":
         # ボタン①: 識別+supply確定 を1発(identify→expand)。出品くん用 combined。
         n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
