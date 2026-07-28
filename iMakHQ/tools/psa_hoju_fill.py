@@ -327,28 +327,67 @@ def _save_cache(cache, path=CACHE_PATH):
 
 
 def _clean_orphan_chrome():
-    """run 開始時に孤児 headless chrome + undetected_chromedriver を kill(clean slate)。
+    """★2026-07-28 廃止(no-op)。**他プロセスの driver を殺していた**ため。
 
-    ★2026-07-25: 無人run が sleep/crash で死ぬたび chrome/driver が残留 → 累積(実測56 chrome+3 driver)で
-    次 run の driver 起動が詰まり即死する連鎖が発覚(CLAUDE.md 既知パターンを入れ忘れていた)。
-    **通常ブラウザ(非headless)は温存** — undetected_chromedriver 全部 + `--headless` を持つ chrome のみ kill。
-    Windows 以外/失敗は no-op。
+    旧実装は run 開始時に `undetected_chromedriver` を **全部** kill していた(孤児掃除)。
+    しかし深夜は 01:30 監視くん Cycle / 04:00 Backup / 04:30 リバイスくん が動いており、
+    01:30 の cycle が長引いたまま 03:00 に本 run が始まると **監視くんの driver を殺す**。
+    取下げ処理の途中で driver が消える = 状態同期が壊れる危険側の失敗。
+
+    → ユーザー判断(2026-07-28): 他プロセスには触らず、**自分が起こした分だけ後片付けする**
+      (_cleanup_own_drivers)。孤児蓄積の対策はそちらで達成する。
+    互換のため関数は残すが何もしない。
+    """
+    return
+
+
+def _own_driver_pids():
+    """このプロセスが親の undetected_chromedriver PID と、その子 chrome PID を返す。
+
+    他ジョブの driver を巻き込まないための「所有権」判定。親子関係で見るので、同時刻に
+    別ジョブが driver を起こしていても取り違えない。Windows 以外/失敗は空(=何もしない)。
     """
     if sys.platform != "win32":
-        return
+        return []
+    import json as _json
     import subprocess
     ps = (
-        "Get-CimInstance Win32_Process -Filter \"Name='undetected_chromedriver.exe'\" | "
-        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }; "
-        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
-        "Where-Object { $_.CommandLine -match '--headless' } | "
-        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }"
+        f"$me={os.getpid()};"
+        "$drv=Get-CimInstance Win32_Process -Filter \"Name='undetected_chromedriver.exe'\" |"
+        " Where-Object {$_.ParentProcessId -eq $me};"
+        "$ids=@($drv | ForEach-Object {$_.ProcessId});"
+        "$kids=@();"
+        "if($ids.Count -gt 0){$kids=Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" |"
+        " Where-Object {$ids -contains $_.ParentProcessId} | ForEach-Object {$_.ProcessId}}"
+        "; ConvertTo-Json @($ids + $kids)"
     )
     try:
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           timeout=30, capture_output=True, text=True)
+        val = _json.loads((r.stdout or "").strip() or "[]")
+        return [int(v) for v in (val if isinstance(val, list) else [val])]
+    except Exception:
+        return []
+
+
+def _cleanup_own_drivers():
+    """自分が起こした driver/chrome だけを終了する(他ジョブには触らない)。
+
+    run 終了時に呼ぶ。途中 crash で残った分は次回 run では「自分の子」でなくなるため対象外だが、
+    親を失った driver は Windows が概ね回収する。**他プロセスを巻き込まない**ことを優先する。
+    """
+    pids = _own_driver_pids()
+    if not pids:
+        return 0
+    import subprocess
+    ids = ",".join(str(p) for p in pids)
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command",
+                        f"Stop-Process -Id {ids} -Force -EA SilentlyContinue"],
                        timeout=30, capture_output=True)
     except Exception:
-        pass
+        return 0
+    return len(pids)
 
 
 class _KeepAwake:
@@ -439,7 +478,8 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
     #   死んでも直前バッチまで残す(=再実行で当日済skipして続きから)。fresh driver/batch も
     #   長寿命driver劣化(昨夜の初回10件 HTTPConnectionPool 全滅)を避ける。
     print(f"▶ 補URLリサーチ {len(searchable)}件 (mercari+snkrdunk / {commit_batch}件ごとにcacheコミット)...", flush=True)
-    _clean_orphan_chrome()   # 前回crash の孤児 headless chrome/driver を掃除(累積で driver起動詰まり=即死を防ぐ)
+    # ★2026-07-28: 起動時の一括 kill は廃止(他ジョブの driver を殺していた)。
+    # 代わりに **自分が起こした分だけ** run 終了時に片付ける(_cleanup_own_drivers)。
     m_hit = s_hit = done = 0
     with _KeepAwake():   # 実行中はマシンをスリープさせない(無人runの初回コミット前スリープ死を防ぐ)
         for start in range(0, len(searchable), commit_batch):
@@ -474,6 +514,9 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
             _save_cache(cache)            # ★バッチ完了ごとにコミット(途中死でもここまで残る)
             done += len(grp)
             print(f"   💾 {done}/{len(searchable)} コミット (mercari在庫{m_hit} / snkr在庫{s_hit})", flush=True)
+    _n_killed = _cleanup_own_drivers()
+    if _n_killed:
+        print(f"   🧹 自分が起こした driver/chrome {_n_killed}個を終了(他ジョブには触らない)")
     print(f"✅ 補URLリサーチ完了: {len(searchable)}件 (mercari在庫あり{m_hit} / snkr在庫あり{s_hit}) "
           f"→ psa_research_cache.json 書込。補URL書込は slice3(昼確認)。")
     return {"searched": len(searchable), "mercari_hit": m_hit, "snkr_hit": s_hit,
