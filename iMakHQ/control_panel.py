@@ -505,31 +505,6 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         append_log_func(f"\n⚠️ 補URL 追記 失敗(続行): {type(e).__name__}: {e}\n")
         # 失敗しても listing 出力には影響なし
 
-    # Step 4d: 当日出品分の補URL候補を**今すぐ**探す (2026-07-28)。
-    # Step 4c は「同バッチで弾いた2枚目」からしか補URLを作れないので、重複が無い新規は補0本で出る。
-    # psa_hoju_fill の対象抽出は新規優先(出品日時降順)にしたが、夜間 search を待つと出品直後の
-    # 一番死にやすい数日を補0本で過ごす。実測 (7/20-7/27 出品49件): 仕入元売切れ10件のうち
-    # **補URL 0本の8件が完全死**、補URLがあった2件は救済ログで生存していた。
-    # → 入稿直後に slice2(検索→キャッシュ)だけ回す。**補URL の書込は slice3(昼確認=有人)のまま**
-    #   (別個体が本当に同じカードかは人が現物照合する。fail-closed を崩さない)。
-    # 検索は Selenium/HTTP で数分かかるので **BG 起動して listing フローは待たない**。
-    append_log_func("\n▶ 当日出品分の補URL候補を検索 (BG・書込は「補URL確証」ボタンで有人確認)\n")
-    try:
-        os.makedirs(os.path.join(WORKSPACE, "iMakHQ", "review_logs"), exist_ok=True)
-        hoju_log = os.path.join(
-            WORKSPACE, "iMakHQ", "review_logs",
-            f"hoju_search_{time.strftime('%Y-%m-%d_%H%M')}.log")
-        with open(hoju_log, "w", encoding="utf-8") as lf:
-            subprocess.Popen(
-                [sys.executable, os.path.join(WORKSPACE, "iMakHQ", "tools", "psa_hoju_fill.py"),
-                 "search", "--limit=15"],
-                stdout=lf, stderr=subprocess.STDOUT, env=env,
-                cwd=os.path.join(WORKSPACE, "iMakHQ", "tools"))
-        append_log_func(f"  → BG 起動 (log: review_logs/{os.path.basename(hoju_log)})\n")
-    except Exception as e:
-        append_log_func(f"  ⚠️ 補URL 候補検索の起動 失敗(続行): {type(e).__name__}: {e}\n")
-
-
 def _runs_new_listing_dedupe(script_entry):
     """新規出品用の重複くん(KEY tuple excluder)を走らせてよいエントリかを返す(純関数)。
 
@@ -853,6 +828,19 @@ SCRIPTS = [
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_hoju_fill.py", "status"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # ★2026-07-28: **入稿して itemID を書き終えた直後に押す**ボタン。
+        # 補URL検索の対象は「itemID が入っている(=出品済)」行なので、CSV生成直後の自動実行では
+        # 当日の新規カードを拾えない(itemID がまだ無い)。itemID が付いた時点は人しか知らないため、
+        # 自動化せずボタンにする(ユーザー提案)。対象は新規優先の並びで先頭に来る。
+        "category": None, "type": "utility",
+        "label": "🆕 出品直後の補URL候補検索(当日分)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "search", "--limit=15"],
         "params": [],
         "skip_postprocess": True,
     },
