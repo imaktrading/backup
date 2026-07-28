@@ -169,7 +169,7 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .bar button{font-size:14px;padding:6px 14px;margin-right:8px;cursor:pointer}
 .go{background:#2a7;color:#fff;border:none;border-radius:4px;font-weight:bold;padding:8px 20px}
 .grid{display:flex;flex-wrap:wrap;gap:10px;padding:12px}
-.card{width:560px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
+.card{width:900px;border:1px solid #ccc;border-radius:6px;background:#fff;padding:8px}
 .card.noimg{border-color:#c33;border-width:2px}
 .card.off{opacity:.55;background:#fff4f4}
 .rsn{display:none;margin:4px 0;font-size:12px;width:100%}
@@ -182,12 +182,12 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .col.psa img{width:200px;height:270px;object-fit:contain;display:block;margin:2px auto;border:1px solid #eee;background:#fafafa}
 .ph{min-height:120px;display:flex;align-items:center;justify-content:center;color:#c33;
     font-size:12px;border:1px dashed #c33;margin:2px;text-align:center;padding:4px}
-.cands{display:flex;flex-direction:column;gap:5px;height:280px;overflow-y:scroll}
-.cand{display:flex;align-items:center;gap:6px;border:1px solid #eee;border-radius:4px;padding:3px 4px;cursor:pointer}
+.cands{display:flex;flex-direction:column;gap:5px;height:580px;overflow-y:auto;overflow-x:hidden}
+.cand{display:flex;align-items:flex-start;gap:8px;border:1px solid #eee;border-radius:4px;padding:3px 4px;cursor:pointer}
 .cand img{width:200px;height:270px;object-fit:contain;border:1px solid #eee;margin:0;background:#fafafa}
 .cand .cph{width:200px;height:270px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;border:1px dashed #ccc}
 .cand:has(input:checked){border-color:#2a7;background:#eafaf1}
-.clbl{font-size:11px;word-break:break-word;line-height:1.2}
+.clbl{flex:1;min-width:0;font-size:12px;word-break:break-word;line-height:1.35}
 .rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px}
 .cand:has(.ck:not(:checked)) .rsn{display:inline-flex}
 .rb{font-size:10px;padding:1px 5px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:pointer}
