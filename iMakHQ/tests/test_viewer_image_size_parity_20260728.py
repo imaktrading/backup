@@ -55,12 +55,16 @@ def test_psa_resource_html_candidate_matches_reference():
     assert cand == ref
 
 
-def test_post_psa_review_candidate_matches_reference():
-    """現物 .confirm img(max-width) と 候補 .cand img(max-height) を同値に。"""
+def test_post_psa_review_candidate_size_is_left_as_designed():
+    """★2026-07-28: PSA目視だけは **元のサイズ(候補220px / 4列)に戻した**。
+
+    候補を現物と同寸(380px)にしたら1枚が巨大になり、縦に伸びて比較元も回答ボタンも
+    流れる = 実使用で不可だった(ユーザー判定)。この画面は候補を一覧して素早く選ぶ用途なので、
+    小さめ多列が正しい。他ビューア(1対1で見比べる画面)とは要件が違う。
+    """
     s = _src("post_psa_review.py")
-    ref = _px(r"\.confirm img\{max-width:(\d+)px", s)
-    cand = _px(r"\.cand img\{[^}]*max-height:(\d+)px", s)
-    assert cand == ref
+    assert _px(r"\.cand img\{[^}]*max-height:(\d+)px", s) == 220
+    assert _px(r"\.grid\{display:grid;grid-template-columns:repeat\((\d)", s) == 4
 
 
 def test_post_psa_don_check_candidate_matches_reference():

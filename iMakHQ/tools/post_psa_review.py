@@ -538,12 +538,12 @@ def _generate_html(targets: list[dict]) -> None:
         # ★2026-07-28: 候補を **横1列 + 横スクロール** にする(ユーザー案)。
         # 縦に伸びないので現物(上)も回答ボタン(下)も定位置のまま常に見える。
         # sticky で貼り付ける案はカードの上に重なって不評だった。
-        '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}',
+        '.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}',
 
         '.cand{border:2px solid #555;padding:8px;background:#333;text-align:center;border-radius:6px;cursor:pointer;transition:all 0.15s}',
         '.cand:hover{border-color:#80c0ff;background:#3a3a4a}',
         '.cand.selected{border-color:#2196f3;background:#1f3a5a;box-shadow:0 0 0 3px #2196f3}',
-        '.cand img{max-width:100%;height:auto;border-radius:2px;max-height:380px}',
+        '.cand img{max-width:100%;height:auto;border-radius:2px;max-height:220px}',
         '.cand .num{font-size:16px;color:#ffd700;font-weight:bold}',
         '.cand .pid{font-size:11px;color:#aaa;word-break:break-all;margin-top:4px}',
         '.cand.expected-pid{border-color:#9fffa0;background:#2c3c2c}',
