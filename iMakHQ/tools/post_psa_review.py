@@ -510,9 +510,12 @@ def _generate_html(targets: list[dict]) -> None:
         '.target.answered-none{border-color:#9e9e9e;background:#2a2a2a;opacity:0.6}',
         '.target h2{color:#ffd700;margin:0 0 8px;font-size:20px}',
         '.cert-info{font-size:13px;color:#ccc;margin:4px 0}',
-        '.confirm{display:flex;gap:24px;align-items:flex-start;margin:14px 0;padding:14px;background:#1f3a1f;border-radius:6px;border:2px solid #4caf50}',
+        # ★2026-07-28: 候補が多いと比較元(現物)が上へ流れて見えなくなる → sticky で残す。
+        # top はツールバー(sticky top:0・約52px)の下。z-index はツールバー(100)より低く、
+        # 候補カードより高くする。max-height で画面を占有しすぎないようにする。
+        '.confirm{display:flex;gap:24px;align-items:flex-start;margin:14px 0;padding:14px;background:#1f3a1f;border-radius:6px;border:2px solid #4caf50;position:sticky;top:52px;z-index:60;max-height:52vh;overflow:auto}',
         '.confirm .label{font-size:18px;color:#9fffa0;font-weight:bold;margin-bottom:6px}',
-        '.confirm img{max-width:380px;border:1px solid #444;border-radius:4px}',
+        '.confirm img{max-width:380px;max-height:44vh;object-fit:contain;border:1px solid #444;border-radius:4px}',
         '.confirm-q{font-size:24px;color:#ffd700;font-weight:bold;margin:8px 0;text-align:center;align-self:center}',
         '.no-expected{background:#3a1f1f;border-color:#f44336;color:#ffaaaa}',
         '.no-expected .label{color:#ffaaaa}',
