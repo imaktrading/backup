@@ -48,6 +48,23 @@ def _log(m: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {m}", flush=True)
 
 
+def _with_retry(fn, what: str, attempts: int = 5):
+    """DNS flapping / Google API 503 (2026-07 環境) 耐性の backoff リトライ.
+
+    2026-07-28: 06:00 snapshot が Sheets API 503 で silent 失敗した事故対策。
+    """
+    import time  # noqa: PLC0415
+    last = None
+    for att in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            _log(f"  {what} retry {att}/{attempts} ({type(e).__name__}) → backoff")
+            time.sleep(5 * att)
+    raise last
+
+
 def _cell(row, c):
     return (row[c - 1].strip() if len(row) >= c else "")
 
@@ -59,8 +76,10 @@ def _has_yodobashi(row) -> bool:
 
 def collect_target_models() -> list[str]:
     """LOW で ヨドバシ URL を持つ行の型番集合 (dedup、 順序保持)."""
-    ws = get_listings_worksheet(open_sheet_by_id(LOW_SHEET_ID), LISTINGS_GID)
-    vals = ws.get_all_values()
+    ws = _with_retry(
+        lambda: get_listings_worksheet(open_sheet_by_id(LOW_SHEET_ID), LISTINGS_GID),
+        "LOW open")
+    vals = _with_retry(ws.get_all_values, "LOW get_all_values")
     out: list[str] = []
     seen: set[str] = set()
     for row in vals[1:]:

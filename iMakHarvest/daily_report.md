@@ -1,5 +1,19 @@
 # iMakHarvest daily_report
 
+## 2026-07-28 — snapshot cron の silent失敗を修正 (06:00 が API503 で無flag失敗)
+
+- 事象: 07-28 06:00 の snapshot cron が Google Sheets API **503** で失敗 (Last Result=1)。
+  build_yodobashi_snapshot に **API/DNS リトライが無く**、かつ snapshot ラッパーに**失敗flagが無かった**
+  ため **silent 失敗**(collect/merge には flag あり、snapshot だけ抜けていた)。
+  → snapshot が 22:10(前夜) のまま = 8.6h 古。06:45 LOW cycle は 12h 以内で効いた(fail-closed で無害)。
+- 修正:
+  - `build_yodobashi_snapshot.py`: `_with_retry`(sheet open/read)追加。
+  - `run_snapshot_cron.cmd`: 失敗時 `CRON_FAILED_snapshot.flag` を残す(成功で自動クリア)+ PYTHONIOENCODING=utf-8。
+    = 3ラッパー(collect/merge/snapshot)全てで「失敗をsilentに流さない」を統一。
+- 検証: 手動再生成 exit0 / flag無し / generated_at 07-28T07:10 に最新化(237型番・在庫236)。
+
+---
+
 ## 2026-07-27 (続) — merge/収集を cron 化 (HQ (A) GO)
 
 - 決定: HQ 督促回答で **(A) cron化 GO**。手動放置は「新型番がヨドバシに出ても補URL未載=silentな
