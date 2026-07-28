@@ -41,7 +41,10 @@ def psa_image_for_cert(cert):
     if not cert:
         return ""
     rec = _PSA_CACHE.get(str(cert).strip())
-    return (rec.get("CardImageUrl", "") if isinstance(rec, dict) else "") or ""
+    url = (rec.get("CardImageUrl", "") if isinstance(rec, dict) else "") or ""
+    # ★2026-07-28: 既存キャッシュは 823件中818件が /small/(380x640) のまま。PSA CDN は同じキーで
+    # /large/(1140x1920) も配信するので **表示時に上げる**(取得時の /large/ 化は新規分にしか効かない)。
+    return url.replace("/small/", "/large/")
 
 
 def ebay_listing_image(item_id):
