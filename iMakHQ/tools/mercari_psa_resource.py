@@ -30,6 +30,9 @@ except Exception:
     pass
 
 DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
+# PSA 供給検索(メルカリ)専用の Chrome プロファイル。**ログインしない**(BAN→仕入不能を避ける)。
+# ジョブごとに別ディレクトリ = 同時実行してもプロファイルロックが競合しない (2026-07-28)。
+PSA_SCRAPE_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\psa_mercari_scrape_profile"
 FUNNEL_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "funnel_output"))
 CATEGORY = "TCG(PSA10)"
 SETNO_RE = re.compile(r"\b([A-Z]{2,3}\d{2}-\d{2,3}|P-\d{2,3}|SB\d{2}-\d{2,3}|#\d{3}/[A-Z0-9]+|#\d{2,3})\b")
@@ -662,11 +665,28 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
     import undetected_chromedriver as uc
 
     def _new_driver():
-        opts = uc.ChromeOptions()
-        opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
-        opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1400")
-        _maj = _chrome_major()
-        d = uc.Chrome(options=opts, version_main=_maj) if _maj else uc.Chrome(options=opts)
+        # ★2026-07-28: **専用プロファイル**を持たせる(従来は指定なし=毎回まっさらな一時profile)。
+        # 一番くじ側は既に専用profileで cookie を保温しており、PSA 側だけ「初回訪問の匿名 headless」
+        # として最も弾かれやすかった。ジョブごとに別ディレクトリなので他ジョブとロックが競合しない。
+        # **ログインはしない**(仕入アカBAN→仕入不能を避ける。一番くじと同方針)。
+        # profile が他プロセスに掴まれている等で起動できない時は一時profileへ fallback(走行を止めない)。
+        def _mk(profile_dir):
+            opts = uc.ChromeOptions()
+            opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
+            opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1400")
+            if profile_dir:
+                opts.add_argument(f"--user-data-dir={profile_dir}")
+            _maj = _chrome_major()
+            return uc.Chrome(options=opts, version_main=_maj) if _maj else uc.Chrome(options=opts)
+
+        try:
+            os.makedirs(PSA_SCRAPE_PROFILE_DIR, exist_ok=True)
+            d = _mk(PSA_SCRAPE_PROFILE_DIR)
+        except Exception as e:      # noqa: BLE001
+            import tempfile
+            print(f"  ⚠ 専用profile で起動できず一時profileへ({type(e).__name__}) — "
+                  f"cookie保温は効かないが走行は継続", flush=True)
+            d = _mk(tempfile.mkdtemp(prefix="psa_mercari_"))
         d.set_page_load_timeout(50)
         return d
 
