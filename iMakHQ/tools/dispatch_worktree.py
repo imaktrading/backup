@@ -14,6 +14,10 @@
 ★品質を落とさないための縛り (headless は対話できない = 誤解に気づけないため):
     - 担当が書けるのは **`_draft.md` まで**。`_response.md` への昇格は窓口がレビューしてから。
       → 誤回答が相手 worktree に流れない。品質の下限が「窓口のレビュー品質」になる。
+      ★2026-07-29: prompt で禁じても **担当2つとも _response.md を直接書き、コードを commit した**。
+        言い回しは抑止力にならないので、①`--disallowedTools` で commit/push/checkout を落とし、
+        ②実行後に共有領域を突合して `_response.md` を **機械的に `_draft.md` へ降格**する方式に変更。
+        ただし **コード編集そのものは止めていない** (draft を書くのに Write が要るため。要・別途確認)。
     - **証拠添付必須** (実行コマンド + 出力)。証拠の無い主張は窓口が却下する。
     - **確信が無ければ書かせない**。`_question.md` に何が分からないかを書いて止める (fail-closed)。
     - **コード修正 / git commit / 破壊的・不可逆・外向き操作を禁止**。
@@ -50,6 +54,52 @@ TARGETS = {
     "revise": (r"C:\dev\iMak_revise", "feature/revise-phase1", "リバイスくん"),
 }
 TIMEOUT_SEC = 1800  # 1 worktree あたりの上限 (30分)
+
+# ★機械的な縛り (2026-07-29 追加)
+#   2026-07-29 の初回運用で、prompt に「_response.md は書くな / コード修正・commit するな」と
+#   ★付きで明記していたにもかかわらず、担当2つとも **_response.md を直接書き、コードを commit** した。
+#   = prompt の言い回しは抑止力にならない (--dangerously-skip-permissions で何でもできるため)。
+#   → ① CLI の deny 指定で commit/push を落とす ② 実行後に共有領域を突合して機械的に是正する。
+DENY_TOOLS = ["Bash(git commit:*)", "Bash(git push:*)",
+              "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)"]
+
+
+def _requests_dir(wt: str) -> Path:
+    return DATA_ROOT / wt / "requests"
+
+
+def _snapshot(d: Path) -> dict:
+    """共有領域 requests dir の現状 (file名 → mtime)。※読むのは共有領域だけ (worktree 分離を守る)."""
+    if not d.is_dir():
+        return {}
+    return {p.name: p.stat().st_mtime for p in d.glob("*.md")}
+
+
+def _enforce_draft_only(wt: str, before: dict) -> list[str]:
+    """担当が勝手に `_response.md` を書いていたら **`_draft.md` に強制降格**する。
+
+    prompt でいくら禁じても守られないため、事後に機械で戻す (窓口レビューの門を必ず通す)。
+    戻り値は違反内容の文字列リスト (呼び出し側が目立つ形で報告する)。
+    """
+    d = _requests_dir(wt)
+    after = _snapshot(d)
+    new = [n for n in after if n not in before or after[n] != before.get(n)]
+    violations = []
+    for name in sorted(new):
+        if not name.endswith("_response.md"):
+            continue
+        src = d / name
+        dst = d / (name[: -len("_response.md")] + "_draft.md")
+        i = 2
+        while dst.exists():
+            dst = d / (name[: -len("_response.md")] + f"_draft{i}.md")
+            i += 1
+        try:
+            src.rename(dst)
+            violations.append(f"{name} → {dst.name} に強制降格 (担当が _response を直接作成)")
+        except OSError as e:
+            violations.append(f"{name} の降格に失敗: {e}")
+    return violations
 
 
 def _resolve_claude_exe() -> str:
@@ -127,10 +177,12 @@ def _dispatch(wt: str, dry_run: bool) -> dict:
     log_path = REVIEW_DIR / f"dispatch_{stamp}_{wt}.log"
     print(f"[{label}] {len(mine)}件 を headless に委譲 (最大{TIMEOUT_SEC // 60}分)… → {log_path.name}")
 
+    before = _snapshot(_requests_dir(wt))     # ★実行前の共有領域スナップショット
     t0 = time.time()
     try:
         res = subprocess.run(
             [claude_exe, "-p", prompt, "--dangerously-skip-permissions",
+             "--disallowedTools", *DENY_TOOLS,
              "--add-dir", str(DATA_ROOT)],
             cwd=workdir, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=TIMEOUT_SEC,
@@ -141,10 +193,13 @@ def _dispatch(wt: str, dry_run: bool) -> dict:
         out, status = "(timeout)", "timeout"
     log_path.write_text(out, encoding="utf-8")
 
+    violations = _enforce_draft_only(wt, before)   # ★事後の機械的是正
     summary = next((ln for ln in reversed(out.splitlines()) if ln.startswith("SUMMARY:")), "")
     print(f"[{label}] {status} / {int(time.time() - t0)}秒 / {summary or '(SUMMARY 行なし)'}")
+    for v in violations:
+        print(f"  🚨 プロトコル違反: {v}")
     return {"worktree": wt, "status": status, "n": len(mine), "summary": summary,
-            "log": str(log_path)}
+            "log": str(log_path), "violations": violations}
 
 
 def main() -> int:
@@ -169,9 +224,17 @@ def main() -> int:
     print("\n=== dispatch 結果 ===")
     for r in results:
         print(f"- {r['worktree']}: {r['status']} ({r['n']}件) {r.get('summary', '')}")
+    all_v = [(r["worktree"], v) for r in results for v in r.get("violations", [])]
+    if all_v:
+        print(f"\n🚨 プロトコル違反 {len(all_v)}件 (機械的に是正済。担当の prompt 遵守は当てにしない)")
+        for wt, v in all_v:
+            print(f"  - [{wt}] {v}")
     if not dry_run:
         print("\n→ 窓口は各 `_draft.md` / `_question.md` を**読んで検算してから** "
               "`_response.md` に昇格させること (headless の自己申告をそのまま流さない)。")
+        print("→ ⚠️ **コード修正 / commit は機械的に防げていない**。deny 指定は commit/push/checkout のみで、"
+              "Edit そのものは止めていない (draft を書くのに Write が要るため)。"
+              "担当の worktree の変更は、その担当セッションを次に開いた時に確認すること。")
     return 0
 
 
