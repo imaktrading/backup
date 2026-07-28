@@ -203,3 +203,9 @@
 - 据置100 (pid_mismatch82/no_category18) を 0 に = catalog variant整合/収載後 dedupe 再upgrade で吸収。次報以降も残件再掲 (墓場にしない)
 - 据置0到達後: migration_dual_match=False + check候補prefixed単独 (不可逆・要HQ go)
 - LOW bare は対象外 (合意)
+
+### 7/28 HQ受領: 据置18(no_category)→catalog 収載依頼済・dedupe待機
+
+- 決定: HQ が no_category 18 を全て catalog 未収載と分類し catalog に依頼 (昨日6件と同根)。dedupe は待機、収載通知で再upgrade。row252 は HQ も同誤り承認=「PSA brand権威 resolver判定 > 人間直感」教訓化・設計維持
+- 変更: なし (ack のみ: 2026-07-28_residual_18_routed_to_catalog_ack.md)
+- 検証: 即時アクションなし。トリガ = catalog18収載通知→再upgrade / pid_mismatch82は18後にHQ再分類。DON-PRB02-018(PSA9 END)は無害確認済
