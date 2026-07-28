@@ -872,7 +872,10 @@ SCRIPTS = [
         "label": "🩹 補URL補強(昼確認/slice3)",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "psa_hoju_fill.py", "confirm"],
+        # ★2026-07-28: 1回10件ずつ(ユーザー要望「途中で辞められないから」)。
+        # 確証UIは全件まとめて送信する作り = 出した分は最後までやり切る必要がある。
+        # 補が埋まった行は次回 select_backfill_targets から自然に外れるので、押すたびに続きが出る。
+        "cmd": ["python", "psa_hoju_fill.py", "confirm", "--limit=10"],
         "params": [],
         "skip_postprocess": True,
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
