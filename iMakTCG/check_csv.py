@@ -45,17 +45,37 @@ BANNED_TITLE_WORDS = [
 REQUIRED_SPECIFICS = ["C:Game", "C:Set", "C:Card Name", "C:Character", "C:Rarity"]
 
 
-def required_specifics_for_card(card_number):
+# ★2026-07-29: レアリティ/キャラが **構造的に存在しない** カード種別。
+# Catalog が1件ずつ実機判定して確定したもの (「取れなかった」ではなく「存在しない」)。
+# 出所: hq/requests/2026-07-29_audit_exclusions_final_and_rarity_in_title.md (Advisor 経由)
+#   - dragonball_scg ENERGY MARKER 257件 … 同base に rarity 持ち兄弟 0件
+#   - gundam_tcg RESOURCE 140 / EX RESOURCE 13 / EX BASE 13 … 同上
+# 粒度は **card_type / 番号 prefix 単位**。カテゴリ丸ごとの除外は本当の欠損を見逃すので禁止。
+NO_RARITY_CARD_TYPES = {"don", "resource", "ex resource", "ex base", "energy marker"}
+NO_RARITY_NUMBER_PREFIXES = ("don-", "rp-")     # DON!! / Gundam リソース
+# キャラクター概念が無い種別 (name='リソース' / 'エナジーマーカー')
+NO_CHARACTER_CARD_TYPES = {"resource", "ex resource", "ex base", "energy marker"}
+
+
+def required_specifics_for_card(card_number, card_type=""):
     """カード種別に応じた必須Item Specifics(純関数, test可)。
 
     DON!!カード(One Piece、card number 'DON-' prefix)は構造的に rarity を持たない特殊カード
     → C:Rarity を必須から外す。C:Type-on-bags と同型の「非該当spec誤検出」で、DON カードが
     毎監査で「C:Rarity 空」を出していた根本対策(2026-07-02)。won't-fix で隠すのでなく監査
     ルール自体を賢くする方針(Gemini 推奨: 恒久ロジックで識別できる例外はルール化が正)。
+
+    2026-07-29: 同じ理屈で **Gundam RESOURCE系 / DBSCG ENERGY MARKER** も除外する
+    (Catalog 実機判定で「存在しない」と確定)。これらは C:Character も持たない。
     """
-    if str(card_number).strip().lower().startswith("don-"):
-        return [s for s in REQUIRED_SPECIFICS if s != "C:Rarity"]
-    return REQUIRED_SPECIFICS
+    num = str(card_number).strip().lower()
+    ctype = str(card_type).strip().lower()
+    drop = set()
+    if num.startswith(NO_RARITY_NUMBER_PREFIXES) or ctype in NO_RARITY_CARD_TYPES:
+        drop.add("C:Rarity")
+    if ctype in NO_CHARACTER_CARD_TYPES:
+        drop.add("C:Character")
+    return [s for s in REQUIRED_SPECIFICS if s not in drop] if drop else REQUIRED_SPECIFICS
 # あると望ましいItem Specifics
 RECOMMENDED_SPECIFICS = [
     "C:Card Type", "C:Features", "C:Finish", "C:Attribute/MTG:Color",
@@ -362,7 +382,8 @@ def validate_row(row, row_idx):
         issues.append(("ERROR", f"価格が数値でない: {price}"))
 
     # --- 必須Item Specifics (card-aware: DON!!カードは C:Rarity 非該当) ---
-    for spec in required_specifics_for_card(get_col(row, "C:Card Number")):
+    for spec in required_specifics_for_card(get_col(row, "C:Card Number"),
+                                            get_col(row, "C:Card Type")):
         val = get_col(row, spec)
         if not val:
             issues.append(("WARN", f"必須Item Specific '{spec}' が空"))
