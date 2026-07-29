@@ -152,6 +152,14 @@ def build_search_query(target, mp):
             q["card_no"] = cn
             nj = q.get("name_jp")
             q["kw"] = f"PSA10 {nj} {cn}" if nj else f"PSA10 {cn}"
+            # ★2026-07-29: 多変種判定は build_card_query が **title 由来 card_no** で行うため、
+            # title に番号が無い行(= ここに来る行)では必ず False のままだった。
+            # → ⚠️多変種バッジが出ず、同番号別変種を人が流し見して掴む(「違う」の主因)。
+            # KEY から番号を補えたこの時点で取り直す(カテゴリも渡し、別作品の変種を数えない)。
+            try:
+                q["multi_variant"] = bool(mp._is_multi_variant(cn, mp.split_key(target.get("key"))[0]))
+            except Exception:
+                pass
     return q
 
 

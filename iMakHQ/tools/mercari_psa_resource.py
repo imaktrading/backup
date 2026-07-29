@@ -127,6 +127,25 @@ def name_jp_for_card(card_no, _cache={}):
     return nj
 
 
+def split_key(key):
+    """canonical KEY → (category, product_id)。純関数。
+
+    ★2026-07-29: KEY は `one_piece_tcg:ST04-005_OP08` の様に **カテゴリ接頭辞つき**だが、
+      catalog の `product_id` 列に接頭辞は入っていない。接頭辞を付けたまま引くと **必ず空振り**する。
+      実測: live PSA 246件のうち **217件(88%)が接頭辞つき** = ほぼ全部がカタログ未解決になっていた。
+      症状は「name_jp / hint が空 → 検索語が番号だけ・変種の絞り込みが無効 → 別変種を掴む」。
+      同型のバグを 2026-07-28 に `psa_hoju_fill._card_no_from_key` で直済(探索不能127→91件解消)。
+      **同じ接頭辞問題がこちらに残っていた**ので同じ規約に揃える。
+    """
+    k = (key or "").strip()
+    if not k or k.startswith(("item:", "shops:")):   # url-key は catalog 引きの対象外
+        return "", ""
+    if ":" in k:
+        cat, pid = k.split(":", 1)
+        return cat.strip(), pid.strip()
+    return "", k
+
+
 def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sqlite"):
     """canonical product_id(固有KEY) → {name_jp, image, set, get_info, variant_type, rarity, hint}。
 
@@ -135,6 +154,11 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
     / rarity** に在る(_p1 と _p2 は set_name=None でも get_info=神速の拳 vs EGGHEAD で区別可)。
     hint = これらを束ねた照合トークン source(メルカリ/SNKRDUNK 両チャネルで variant pin に使う=画像不要)。
     KEY 無 / catalog 未収録 → None (呼出側は bare fallback)。
+
+    ★KEY のカテゴリ接頭辞は split_key で落としてから引く(付けたままだと必ず空振り)。
+      接頭辞があればカテゴリでも絞る: 同じ product_id が別作品に実在するため
+      (実測 `ST04-005` = ワンピース「クイーン」と ガンダム「ストライクダガー」が同居)。
+      カテゴリ一致が無く候補が複数なら **None** (どれか分からないものを掴まない = fail-closed)。
     """
     if not key:
         return None
@@ -143,12 +167,25 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
     import json
     import sqlite3
     out = None
+    cat, pid = split_key(key)
+    if not pid:
+        _cache[key] = None
+        return None
     try:
         con = sqlite3.connect(_db)
-        r = con.execute(
-            "SELECT name_jp, images, set_name, specs FROM products WHERE product_id=?", (key,)
-        ).fetchone()
+        rows = con.execute(
+            "SELECT name_jp, images, set_name, specs, category FROM products WHERE product_id=?",
+            (pid,)).fetchall()
         con.close()
+        r = None
+        if cat:
+            hit = [x for x in rows if (x[4] or "") == cat]
+            # カテゴリ一致が無い時は、候補が1件(=曖昧さなし)の時だけ採用する
+            r = hit[0] if hit else (rows[0] if len(rows) == 1 else None)
+        else:
+            # 接頭辞なしKEY: 1件なら採用。複数作品に同じ product_id が在る時は **None**。
+            # 先頭を黙って採ると別作品のカード名で仕入れを探す(= 誤仕入れ経路)。
+            r = rows[0] if len(rows) == 1 else None
         if r:
             try:
                 imgs = json.loads(r[1]) if r[1] else []
@@ -181,7 +218,7 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
 
 
 def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products.sqlite",
-                                limit=12, title_hint=""):
+                                limit=12, title_hint="", category=""):
     """card番号 → その番号の catalog 変種候補 [{product_id,name_jp,set,image}]。
 
     KEY未解決の行で「正しい変種をユーザーが選ぶ」ための候補(確認ゲート②)。完全一致を先頭、
@@ -194,6 +231,10 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
     product_id で引けず card_no が NNN/NNN 形式なら、specs.card_number_text で再検索する。
     複数セットが同じコレクター番号を持つため、title_hint(eBayタイトル)にキャラ名(name_en)が
     含まれる候補を上位に並べて特定を助ける(fail-closed: 確定はユーザー目視)。
+
+    ★2026-07-29 category: 番号体系は作品を跨いで衝突する(実測 `ST04-005` = ワンピース「クイーン」
+      と ガンダム「ストライクダガー」が同居)。カテゴリが分かる呼出(KEY 接頭辞由来)は必ず渡すこと。
+      渡さない場合は従来どおり全作品から拾う(= 別作品が混ざりうる)。
     """
     if not card_no:
         return []
@@ -201,17 +242,21 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
     import re as _re
     import sqlite3
     _cols = "product_id, name_jp, set_name, images, specs, language, name_en"
+    _cat_sql, _cat_arg = ("", ())
+    if (category or "").strip():
+        _cat_sql, _cat_arg = (" AND category=?", ((category or "").strip(),))
     try:
         con = sqlite3.connect(_db)
         rows = con.execute(
             f"SELECT {_cols} FROM products "
-            "WHERE product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE",
-            (card_no, card_no + "_%")).fetchall()
+            "WHERE (product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE)" + _cat_sql,
+            (card_no, card_no + "_%") + _cat_arg).fetchall()
         # フォールバック: product_id 不一致 かつ コレクター番号形式 → card_number_text で再検索
         if not rows and _re.fullmatch(r"\d{1,3}/[A-Za-z0-9]{1,4}", card_no.strip()):
             rows = con.execute(
                 f"SELECT {_cols} FROM products "
-                "WHERE json_extract(specs,'$.card_number_text')=?", (card_no.strip(),)).fetchall()
+                "WHERE json_extract(specs,'$.card_number_text')=?" + _cat_sql,
+                (card_no.strip(),) + _cat_arg).fetchall()
         con.close()
     except Exception:
         return []
@@ -268,7 +313,8 @@ def build_card_query(title, set_no, key=None):
     nj = (meta.get("name_jp") if meta else None) or name_jp_for_card(card_no)
     image = meta.get("image") if meta else ""
     hint = meta.get("hint") if meta else []
-    mv = _is_multi_variant(card_no)   # 多変種プロモ判定(画像検索fail-closedの根拠)
+    cat = split_key(key)[0] if key else ""
+    mv = _is_multi_variant(card_no, cat)   # 多変種プロモ判定(画像検索fail-closedの根拠)
     if not card_no:
         return {"kw": "", "card_no": "", "name_jp": nj, "key": key or "", "image": image or "",
                 "hint": hint, "multi_variant": mv}
@@ -277,7 +323,7 @@ def build_card_query(title, set_no, key=None):
             "hint": hint, "multi_variant": mv}
 
 
-def _is_multi_variant(card_no, _cache={}):
+def _is_multi_variant(card_no, category="", _cache={}):
     """card_no が catalog で 2 変種以上(=同番号で別配布/別art)か(純関数・DB1回でcache)。
 
     ★2026-07-24: 多変種プロモ(P-066=3 / P-041=8 等)は、kw で正変種を確証できない時に
@@ -287,14 +333,15 @@ def _is_multi_variant(card_no, _cache={}):
     cn = (card_no or "").strip()
     if not cn:
         return False
-    if cn in _cache:
-        return _cache[cn]
+    ck = (cn, (category or "").strip())   # ★カテゴリ込みで cache (別作品の変種数を使い回さない)
+    if ck in _cache:
+        return _cache[ck]
     try:
-        n = len(catalog_variants_for_cardno(cn))
+        n = len(catalog_variants_for_cardno(cn, category=(category or "").strip()))
     except Exception:
         n = 0
-    _cache[cn] = n > 1
-    return _cache[cn]
+    _cache[ck] = n > 1
+    return _cache[ck]
 
 
 def build_input_from_funnel():
