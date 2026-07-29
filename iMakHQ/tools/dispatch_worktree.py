@@ -71,6 +71,34 @@ DENY_TOOLS = ["Bash(git commit:*)", "Bash(git push:*)",
               "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)"]
 
 
+LOCK_PATH = REVIEW_DIR / "dispatch.lock"
+LOCK_STALE_SEC = 3 * 3600      # 3h 以上古い lock は死んだプロセスの残骸とみなす
+
+
+def acquire_lock() -> bool:
+    """dispatch の多重起動を **プロセス跨ぎ**で防ぐ (常駐 watcher と cron が併走するため).
+
+    2026-07-29: 同じ worktree に headless が2本同時起動する事故を起こした。
+    タスク側の MultipleInstances だけでは「watcher 起動」と「cron 起動」の衝突は防げない。
+    """
+    REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    if LOCK_PATH.exists():
+        age = time.time() - LOCK_PATH.stat().st_mtime
+        if age < LOCK_STALE_SEC:
+            return False
+        LOCK_PATH.unlink(missing_ok=True)   # stale → 奪う
+    try:
+        with open(LOCK_PATH, "x", encoding="utf-8") as f:
+            f.write(f"{os.getpid()} {datetime.now().isoformat()}\n")
+        return True
+    except FileExistsError:
+        return False
+
+
+def release_lock() -> None:
+    LOCK_PATH.unlink(missing_ok=True)
+
+
 def _requests_dir(wt: str) -> Path:
     return DATA_ROOT / wt / "requests"
 
@@ -216,9 +244,16 @@ def main() -> int:
         print(f"不明な worktree: {bad} (指定可: {list(TARGETS)})")
         return 2
 
-    results = []
-    for wt in names:  # ★直列。共有DB/スプシの同時書込を避ける
-        results.append(_dispatch(wt, dry_run))
+    if not dry_run and not acquire_lock():
+        print("他の dispatch が実行中 (lock あり) → 何もしない")
+        return 0
+    try:
+        results = []
+        for wt in names:  # ★直列。共有DB/スプシの同時書込を避ける
+            results.append(_dispatch(wt, dry_run))
+    finally:
+        if not dry_run:
+            release_lock()
 
     print("\n=== dispatch 結果 ===")
     for r in results:
