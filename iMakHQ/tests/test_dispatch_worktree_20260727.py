@@ -4,6 +4,7 @@ headless 委譲は「対話できない = 誤解に気づけない」のが唯�
 それを潰す3点 (draft止め / 証拠必須 / 迷ったら質問) が prompt から消えたら落とす。
 """
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -71,6 +72,65 @@ def test_targets_cover_all_worker_worktrees():
     assert set(dw.TARGETS) == {"catalog", "dedupe", "inventory", "harvest", "revise", "hq"}
     # HQ だけは他と違い専用 worktree が無い = Advisor と同居。ここが変わったら気づけるように固定。
     assert dw.TARGETS["hq"][0] == r"C:\dev\iMak"
+
+
+def _dead_pid() -> int:
+    """確実に死んでいる PID (Popen が handle を握っているので recycle されない)."""
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    return p.pid
+
+
+def _use_tmp_lock(tmp_path, monkeypatch):
+    monkeypatch.setattr(dw, "REVIEW_DIR", tmp_path)
+    monkeypatch.setattr(dw, "LOCK_PATH", tmp_path / "dispatch.lock")
+
+
+def test_pid_alive_distinguishes_self_from_dead():
+    assert dw._pid_alive(os.getpid()) is True
+    assert dw._pid_alive(_dead_pid()) is False
+    assert dw._pid_alive(0) is False
+
+
+def test_orphan_lock_is_taken_over_without_waiting_3h(tmp_path, monkeypatch):
+    """2026-07-29 の実害: watcher 再起動で死んだ前世代の lock が残り、全 worktree が3時間停止した。
+
+    lock が「今さっき」書かれていても、所有者が死んでいれば奪えること。
+    """
+    _use_tmp_lock(tmp_path, monkeypatch)
+    dw.LOCK_PATH.write_text(f"{_dead_pid()} 2026-07-29T17:03:48\n", encoding="utf-8")
+
+    assert dw.acquire_lock() is True                      # 時間切れを待たずに奪う
+    assert dw._lock_owner_pid() == os.getpid()            # 自分の PID で取り直している
+    dw.release_lock()
+    assert not dw.LOCK_PATH.exists()
+
+
+def test_live_owner_lock_is_respected(tmp_path, monkeypatch):
+    """生きている dispatch の lock は奪わない (奪うと同じ worktree に headless が2本立つ)."""
+    _use_tmp_lock(tmp_path, monkeypatch)
+    dw.LOCK_PATH.write_text(f"{os.getpid()} now\n", encoding="utf-8")
+    assert dw.acquire_lock() is False
+    assert dw._lock_owner_pid() == os.getpid()            # 破棄されていない
+
+
+def test_unreadable_pid_is_treated_as_alive(tmp_path, monkeypatch):
+    """PID が読めない = 判定不能。安全側 (生存扱い) に倒し、3h の stale 判定に任せる."""
+    _use_tmp_lock(tmp_path, monkeypatch)
+    dw.LOCK_PATH.write_text("こわれている\n", encoding="utf-8")
+    assert dw._lock_owner_pid() is None
+    assert dw.acquire_lock() is False
+
+
+def test_liveness_check_uses_win32_api_not_os_kill():
+    """Windows の os.kill(pid, 0) は TerminateProcess = 生存確認のつもりで相手を殺す。
+
+    nt 分岐が OpenProcess 問い合わせであること (os.kill に書き換えられたら落とす)。
+    """
+    src = Path(dw.__file__).read_text(encoding="utf-8")
+    nt_branch = src.split('if os.name != "nt":')[1].split("def _lock_owner_pid")[0]
+    assert "OpenProcess" in nt_branch and "GetExitCodeProcess" in nt_branch
+    assert "TerminateProcess" not in nt_branch
 
 
 def test_dispatch_uses_no_window_on_windows():

@@ -39,6 +39,7 @@
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import shutil
 import subprocess
@@ -78,7 +79,52 @@ DENY_TOOLS = ["Bash(git commit:*)", "Bash(git push:*)",
 
 
 LOCK_PATH = REVIEW_DIR / "dispatch.lock"
-LOCK_STALE_SEC = 3 * 3600      # 3h 以上古い lock は死んだプロセスの残骸とみなす
+LOCK_STALE_SEC = 3 * 3600      # 3h 以上古い lock は死んだプロセスの残骸とみなす (最後の砦)
+
+
+def _pid_alive(pid: int) -> bool:
+    """PID が生きているか。**分からない時は「生きている」と答える** (安全側 = lock を奪わない).
+
+    ★`os.kill(pid, 0)` は使わない。Windows の CPython では OpenProcess + **TerminateProcess** に
+      なるため、「生存確認のつもりで相手を殺す」。ここは Win32 API で問い合わせるだけにする。
+    """
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True                      # 居るが触れない = 生きている
+        return True
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    ERROR_INVALID_PARAMETER = 87             # = そんな PID は存在しない
+    k32 = ctypes.windll.kernel32
+    handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return k32.GetLastError() != ERROR_INVALID_PARAMETER
+    try:
+        code = ctypes.c_ulong()
+        if k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return code.value == STILL_ACTIVE
+        return True                          # 問い合わせ自体に失敗 → 安全側
+    finally:
+        k32.CloseHandle(handle)
+
+
+def _lock_owner_pid() -> int | None:
+    """lock file の先頭に書いた PID。読めない/壊れていれば None (= 判定不能)."""
+    try:
+        head = LOCK_PATH.read_text(encoding="utf-8").split()
+    except OSError:
+        return None
+    try:
+        return int(head[0]) if head else None
+    except ValueError:
+        return None
 
 
 def acquire_lock() -> bool:
@@ -86,13 +132,25 @@ def acquire_lock() -> bool:
 
     2026-07-29: 同じ worktree に headless が2本同時起動する事故を起こした。
     タスク側の MultipleInstances だけでは「watcher 起動」と「cron 起動」の衝突は防げない。
+
+    ★2026-07-29 夕: **孤児 lock で全 worktree が3時間止まった**。
+      watcher タスクが再起動され、lock を持っていた前世代 pythonw (PID 11632) が
+      release_lock() を通らずに死亡 → 生きているプロセスは1つも無いのに lock だけが残り、
+      以後すべての周回が「他の dispatch 実行中」で空回り。時間切れ (3h) まで誰も動けなかった。
+      → **所有者 PID の生存を確認**し、死んでいれば時間を待たずに奪う。
+        時間ベースの stale 判定は、PID が読めない/判定不能な場合の保険として残す。
     """
     REVIEW_DIR.mkdir(parents=True, exist_ok=True)
     if LOCK_PATH.exists():
         age = time.time() - LOCK_PATH.stat().st_mtime
-        if age < LOCK_STALE_SEC:
+        owner = _lock_owner_pid()
+        # PID 不明 (= 判定不能) は「生きている」扱い。誤って奪って二重起動する方が害が大きい。
+        owner_alive = True if owner is None else _pid_alive(owner)
+        if owner_alive and age < LOCK_STALE_SEC:
             return False
-        LOCK_PATH.unlink(missing_ok=True)   # stale → 奪う
+        why = "所有者プロセス不在 (孤児)" if not owner_alive else f"{int(age)}秒経過 (stale)"
+        print(f"(古い lock を破棄: {why} / owner={owner})")
+        LOCK_PATH.unlink(missing_ok=True)   # 孤児 or stale → 奪う
     try:
         with open(LOCK_PATH, "x", encoding="utf-8") as f:
             f.write(f"{os.getpid()} {datetime.now().isoformat()}\n")
