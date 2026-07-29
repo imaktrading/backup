@@ -27,6 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from harvest_stamp import check_previous_stamp, write_stamp  # noqa: E402
 from scrapers import yodobashi_search_http as Y  # noqa: E402
 from scrapers.amazon_search_http import is_gift_or_pair_set  # noqa: E402
 
@@ -36,6 +37,8 @@ DEFAULT_SEARCH_URL = (
     "?spcs=Specvaluecode_500000000000326001_0001_0000000173_0000001591&word=G-shock"
 )
 DUMP_DIR = Path(r"c:\dev\iMak_data\catalog\_amazon_jp_dumps")
+STAMP_PATH = Path(r"c:\dev\iMak_data\harvest\yodobashi_harvest_stamp.json")
+STAMP_STALE_HOURS = 25  # cron cadence=1日1回 → 25h 超で warn (依頼書 §3)
 
 
 def _log(m: str) -> None:
@@ -81,6 +84,9 @@ def main(argv=None) -> int:
 
     _log(f"開始: label={args.label!r} dry_run={args.dry_run}")
     _log(f"  URL: {args.url}")
+
+    # 前回スタンプの鮮度チェック (silent 死 検知、 fail-open で続行)
+    check_previous_stamp(STAMP_PATH, STAMP_STALE_HOURS, label="yodobashi_harvest")
 
     session = Y.create_session()
     res = Y.collect_gshock_products(
@@ -195,6 +201,21 @@ def main(argv=None) -> int:
                  "only_amazon": len(only_amz)},
         "sheet": sheet_result, "dump": str(dump_path),
     }, ensure_ascii=False, indent=2))
+
+    # 完走スタンプ書込 (dry_run 時は書かない = 本番未走を dry_run で潰さないため)
+    if args.dry_run:
+        _log("[stamp] skip (--dry-run)")
+    else:
+        appended = (sheet_result or {}).get("appended", 0) if isinstance(sheet_result, dict) else 0
+        skipped_existing = (sheet_result or {}).get("skipped_existing", 0) if isinstance(sheet_result, dict) else 0
+        stamp = write_stamp(STAMP_PATH, {
+            "input": len(kept),
+            "appended": appended,
+            "skipped_existing": skipped_existing,
+            "label": args.label,
+            "dry_run": False,
+        })
+        _log(f"[stamp] wrote {STAMP_PATH.name} ok_at={stamp['ok_at']}")
     return 0
 
 

@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from gshock_merge import compute_merge  # noqa: E402
+from harvest_stamp import check_previous_stamp, write_stamp  # noqa: E402
 from scrapers.yodobashi_search_http import extract_model_from_title  # noqa: E402
 from sheet_writer_amazon import (  # noqa: E402
     LISTINGS_GID,
@@ -48,6 +49,8 @@ COL_SUPP_END = 33    # AG (補URL 1-5)
 COL_KEY = 35       # AI 型番
 NEW_CANDIDATES_JSON = Path(
     r"c:\dev\iMak_data\catalog\_amazon_jp_dumps\yodobashi_new_to_low.json")
+STAMP_PATH = Path(r"c:\dev\iMak_data\harvest\gshock_merge_stamp.json")
+STAMP_STALE_HOURS = 25  # cron cadence=1日1回 → 25h 超で warn (依頼書 §3)
 
 
 def _log(m: str) -> None:
@@ -139,6 +142,9 @@ def main(argv=None) -> int:
                     help="{model,url} list の JSON (既定=yodobashi_gshock タブ全型番)")
     args = ap.parse_args(argv)
 
+    # 前回スタンプの鮮度チェック (silent 死 検知、 fail-open で続行)
+    check_previous_stamp(STAMP_PATH, STAMP_STALE_HOURS, label="gshock_merge")
+
     yws = yvals = None
     if args.source:
         src = json.loads(Path(args.source).read_text(encoding="utf-8"))
@@ -220,27 +226,39 @@ def main(argv=None) -> int:
     elif args.source:
         _log("FLG更新skip (--source 指定時は yodobashi_gshock 行位置と対応しないため)")
 
+    written = 0
     if args.dry_run:
         _log("dry-run: 補URL 書込なし")
+        _log("[stamp] skip (--dry-run)")
         return 0
-    if not updates:
+    if updates:
+        # 安全弁: 書込先は AC-AG 列のみ (D=在庫状態 等を絶対に触らない)
+        allowed = {_col_letter(c) for c in range(COL_SUPP_START, COL_SUPP_END + 1)}
+        import re as _re  # noqa: PLC0415
+        for u in updates:
+            col = _re.match(r"[A-Z]+", u["range"]).group(0)
+            assert col in allowed, f"AC-AG 以外への書込を検出: {u['range']} (禁止)"
+        CH = 60
+        for i in range(0, len(updates), CH):
+            chunk = updates[i:i + CH]
+            _with_retry(
+                lambda c=chunk: ws.batch_update(c, value_input_option="USER_ENTERED"),
+                f"batch_update[{i}]")
+            written += len(chunk)
+        _log(f"補URL 書込完了: {written} セル")
+    else:
         _log("補URL 書込対象なし (全て冪等skip)")
-        return 0
-    # 安全弁: 書込先は AC-AG 列のみ (D=在庫状態 等を絶対に触らない)
-    allowed = {_col_letter(c) for c in range(COL_SUPP_START, COL_SUPP_END + 1)}
-    import re as _re  # noqa: PLC0415
-    for u in updates:
-        col = _re.match(r"[A-Z]+", u["range"]).group(0)
-        assert col in allowed, f"AC-AG 以外への書込を検出: {u['range']} (禁止)"
-    CH = 60
-    written = 0
-    for i in range(0, len(updates), CH):
-        chunk = updates[i:i + CH]
-        _with_retry(
-            lambda c=chunk: ws.batch_update(c, value_input_option="USER_ENTERED"),
-            f"batch_update[{i}]")
-        written += len(chunk)
-    _log(f"補URL 書込完了: {written} セル")
+
+    # 完走スタンプ書込 (dry_run 時は書かない = 本番未走を dry_run で潰さないため)
+    stamp = write_stamp(STAMP_PATH, {
+        "yodobashi_models": len(model_url),
+        "matched_low_rows": len(existing_by_key),
+        "matched_models": len(matched_models),
+        "new_candidates": len(new_candidate_models),
+        "supp_url_appended_cells": written,
+        "dry_run": False,
+    })
+    _log(f"[stamp] wrote {STAMP_PATH.name} ok_at={stamp['ok_at']}")
     return 0
 
 

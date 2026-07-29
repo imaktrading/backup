@@ -28,6 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from harvest_stamp import check_previous_stamp  # noqa: E402
 from scrapers import yodobashi_search_http as Y  # noqa: E402
 from scrapers.yodobashi_search_http import extract_model_from_title  # noqa: E402
 from sheet_writer_amazon import (  # noqa: E402
@@ -38,6 +39,9 @@ from sheet_writer_amazon import (  # noqa: E402
 )
 
 SNAPSHOT_PATH = Path(r"c:\dev\iMak_data\harvest\yodobashi_stock_snapshot.json")
+# snapshot cron cadence=06/14/22 = 8h → 10h 超で warn (2h 余裕)
+# (依頼書 §3 「LOW 側 12h ガード頼みにしない、片側落ちても気づく」)
+SNAPSHOT_STALE_HOURS = 10
 COL_URL = 1
 COL_SUPP_START = 29  # AC
 COL_SUPP_END = 33    # AG
@@ -98,6 +102,11 @@ def main(argv=None) -> int:
     ap.add_argument("--rate-min", type=float, default=1.0)
     ap.add_argument("--rate-max", type=float, default=2.5)
     args = ap.parse_args(argv)
+
+    # 前回 generated_at の鮮度チェック (LOW 側 12h ガード頼みにしない、fail-open で続行)
+    check_previous_stamp(
+        SNAPSHOT_PATH, SNAPSHOT_STALE_HOURS,
+        timestamp_key="generated_at", label="yodobashi_snapshot")
 
     models = collect_target_models()
     _log(f"対象型番 (LOW でヨドバシURL保持): {len(models)}")
