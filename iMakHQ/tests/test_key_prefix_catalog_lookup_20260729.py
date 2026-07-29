@@ -11,6 +11,7 @@
 import os
 import sqlite3
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
 
@@ -88,6 +89,20 @@ def test_variants_are_scoped_by_category(tmp_path):
     op = mp.catalog_variants_for_cardno("ST04-005", _db=db, category="one_piece_tcg")
     assert {d["name_jp"] for d in allv} == {"クイーン", "ストライクダガー"}
     assert {d["name_jp"] for d in op} == {"クイーン"}
+
+
+def test_gate_scopes_variant_choices_by_category():
+    """確証ゲート② の変種候補は **KEY のカテゴリで絞って**引くこと。
+
+    絞らないと、人が選ぶ選択肢に別作品のカードが並ぶ (ST04-005 にガンダムのカードが混ざる)。
+    選べてしまう = 別作品を仕入れに行く経路になるので、UI に出す前に閉じる。
+    """
+    src = (Path(__file__).parent.parent / "tools" / "psa_resource_gate.py").read_text(encoding="utf-8")
+    assert "category=mp.split_key(r.get(\"key\"))[0]" in src, "変種候補がカテゴリで絞られていない"
+    # ⚠️多変種バッジ側も同様 (別作品を変種として数えない)
+    assert 'mp._is_multi_variant(cn, mp.split_key(k)[0])' in src
+    assert 'mp._is_multi_variant(rc.get("card_no") or "", mp.split_key(rc.get("key"))[0])' in src
+    assert '"key": r.get("key", "")' in src, "restock_cands が key を持ち回っていない(判定に使えない)"
 
 
 def test_multi_variant_recomputed_after_key_fallback(monkeypatch):

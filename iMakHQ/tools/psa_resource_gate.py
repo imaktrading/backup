@@ -480,7 +480,12 @@ def main():
             card_no = _resource_card_number(r.get("title", "") or "", r.get("key")) or cardno_override.get(iid, "")
             # title_hint = eBayタイトル。Pokemon等 コレクター番号(NNN/095)fallback時に
             # 同番号の複数セットからキャラ名でユーザー特定を助ける(2026-07-24)。
-            variants = mp.catalog_variants_for_cardno(card_no, title_hint=r.get("title", "") or "")
+            # ★2026-07-29: KEY のカテゴリで絞る。番号体系は作品を跨いで衝突するため
+            # (実測 ST04-005 = ワンピース「クイーン」/ ガンダム「ストライクダガー」)、
+            # 絞らないと **別作品のカードが選択肢に並び、人が選べてしまう**。
+            variants = mp.catalog_variants_for_cardno(
+                card_no, title_hint=r.get("title", "") or "",
+                category=mp.split_key(r.get("key"))[0])
             # 解決済KEY自身は必ず候補に含める(card番号ヒット漏れ/大小文字差でも②が出る・既定選択)
             rk = r.get("key")
             if rk and not any(c["product_id"] == rk for c in variants):
@@ -631,7 +636,7 @@ def main():
             if meta:
                 vhint = meta.get("hint")  # set + get_info(入手元set) + variant_type + rarity + name_jp + key
         # 多変種プロモは単一一致でも変種確証必須(番号だけで別変種を掴まない・2026-07-24)
-        _mv = mp._is_multi_variant(cn)
+        _mv = mp._is_multi_variant(cn, mp.split_key(k)[0])   # 別作品の変種を数に入れない
         res = sp.check_by_keyword(cn, variant_hint=vhint, multi_variant=_mv)
         snkr_res[i] = res
         if res.get("_error") == "card_not_found":
@@ -771,6 +776,9 @@ def main():
                 _cur = None
             restock_cands.append({
                 "itemID": _iid, "card_no": _resource_card_number(r.get("title", "") or "", r.get("key")) or "",
+                # key も持ち回る: 確証UIの ⚠️多変種判定を **カテゴリで絞る**ため(2026-07-29)。
+                # 無いと別作品の同番号を変種として数え、警告が過剰に出る。
+                "key": r.get("key", ""),
                 "title": (r.get("title") or "")[:90], "ebay_url": r.get("ebay_url", ""),
                 "candidates": _cands, "cost": c.get("cheapest_jpy"), "cur": _cur,
                 "channel": c.get("cheapest_channel"), "url": c.get("cheapest_url")})
@@ -1022,7 +1030,8 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         # 多変種(同番号で別アート/色/パラレル/Gold)は絵柄取り違えが起きやすい → 確証UIに⚠️バッジ
         # (補URL slice3 と横展開・2026-07-26)。単一変種は番号一致=正で流し見OK。
         try:
-            _mv = bool(mp._is_multi_variant(rc.get("card_no") or ""))
+            # カテゴリで絞る(別作品の同番号を変種として数えない・2026-07-29)
+            _mv = bool(mp._is_multi_variant(rc.get("card_no") or "", mp.split_key(rc.get("key"))[0]))
         except Exception:
             _mv = False
         _cn, _pn = _cost_by_iid.get(iid, ("", ""))   # 現在の仕入れ値N / 現在価格M

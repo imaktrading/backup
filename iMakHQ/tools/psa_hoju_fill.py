@@ -743,7 +743,8 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         # 単一変種は番号一致=正なので流し見でOK、多変種だけ絵柄を要確認(「違う」の主因はここ)。
         _mv = False
         try:
-            _mv = bool(mp._is_multi_variant(cn)) if cn else False
+            # カテゴリで絞る(別作品の同番号を変種として数えない・2026-07-29)
+            _mv = bool(mp._is_multi_variant(cn, mp.split_key(t.get("key"))[0])) if cn else False
         except Exception:
             _mv = False
         # 現在の仕入れ値(N=col13)+現在価格(M=col12)をカードに表示 → 候補価格と見比べて「今より安い供給か」が分かる。
