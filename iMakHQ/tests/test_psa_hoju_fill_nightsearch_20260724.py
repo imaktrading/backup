@@ -188,6 +188,47 @@ def test_seen_urls_by_iid_parses_ledger():
     assert got["358b"] == []
 
 
+# --- 候補単位の「違う」を負例として貯める (2026-07-29) ---------------------
+# それまで、出品自体が確定した場合は候補の「違う」が警告1行で消えており、
+# 次回また同じ別カードが候補に並んでいた (人の1クリックが捨てられていた)。
+
+def test_rejected_candidate_is_not_shown_again():
+    from psa_hoju_fill import filter_candidates_rejected
+    cands = [{"url": "https://jp.mercari.com/item/m1"},
+             {"url": "https://jp.mercari.com/item/m2"}]
+    keep, drop = filter_candidates_rejected(cands, {"https://jp.mercari.com/item/m1"})
+    assert [c["url"] for c in keep] == ["https://jp.mercari.com/item/m2"]
+    assert len(drop) == 1
+
+
+def test_rejected_filter_normalizes_urls():
+    """クエリ/末尾スラッシュ/大小文字が違うだけの同一出品も除く。"""
+    from psa_hoju_fill import filter_candidates_rejected
+    cands = [{"url": "https://JP.mercari.com/item/m1/?utm_source=x"}]
+    keep, drop = filter_candidates_rejected(cands, {"https://jp.mercari.com/item/m1"})
+    assert keep == [] and len(drop) == 1
+
+
+def test_ng_urls_by_iid_groups_per_listing():
+    """NG は **出品ごと**。別の出品では同じURLが正解になりうるので混ぜない。"""
+    from psa_hoju_fill import _ng_urls_by_iid
+    rows = [["itemID", "cert", "url", "title", "日付"],
+            ["358a", "1", "https://jp.mercari.com/item/m1", "t", "2026-07-29"],
+            ["358a", "1", "https://jp.mercari.com/item/m2", "t", "2026-07-29"],
+            ["358b", "2", "https://jp.mercari.com/item/m1", "t", "2026-07-29"]]
+    got = _ng_urls_by_iid(rows)
+    assert len(got["358a"]) == 2
+    assert got["358b"] == {"https://jp.mercari.com/item/m1"}
+
+
+def test_merge_ng_rows_dedups_by_item_and_url():
+    from psa_hoju_fill import _merge_ng_rows, NG_CAND_HEADER
+    existing = [NG_CAND_HEADER, ["358a", "1", "https://jp.mercari.com/item/m1", "t", "d1"]]
+    new = [["358a", "1", "https://jp.mercari.com/item/m1/", "t", "d2"]]   # 同一(正規化後)
+    merged = _merge_ng_rows(existing, new, NG_CAND_HEADER)
+    assert len(merged) == 2 and merged[1][4] == "d2"          # 新規優先で1件のまま
+
+
 def test_cache_candidate_urls_reads_all_cands():
     from psa_hoju_fill import _cache_candidate_urls
     e = {"mercari": {"best": None, "cands": [], "all_cands": [[100, "https://x", "n"]]}}

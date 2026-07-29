@@ -600,6 +600,50 @@ def _norm_urls(urls):
     return {_norm_url(u) for u in (urls or []) if (u or "").strip()}
 
 
+# 候補単位の「違う」台帳 (2026-07-29)。
+# それまで、確証UIで候補を個別に「違う」と外しても **その出品自体が確定した場合は
+# 記録が残らず**、警告が1行出るだけだった (= 次回また同じ別カードが候補に並ぶ)。
+# 「押した1クリックが必ずどこかの改善につながる」ようにするため、負例として貯めて
+# 次回から出さない。出品単位の伏せ (CONFIRM_SKIP_TAB) とは別物 = 出品は伏せない。
+NG_CAND_TAB = "補URL候補NG"
+NG_CAND_HEADER = ["itemID", "cert", "url", "title", "日付"]
+
+
+def _ng_urls_by_iid(rows):
+    """候補NG台帳 → {itemID: {正規化URL}} (純関数)。"""
+    out = {}
+    for r in (rows[1:] if rows and len(rows) > 1 else []):
+        if not r or len(r) < 3:
+            continue
+        iid, url = (r[0] or "").strip(), (r[2] or "").strip()
+        if iid and url:
+            out.setdefault(iid, set()).add(_norm_url(url))
+    return out
+
+
+def filter_candidates_rejected(cands, ng_urls):
+    """過去に「違う」と判定された候補を除く。戻り: (残す, 落とした)。純関数。
+
+    人が一度「別カード」と判断した出品は、次に見せても同じ判断になる。
+    再提示は目視の無駄で、押し間違いの元でもある。
+    """
+    ng = set(ng_urls or ())
+    keep, drop = [], []
+    for c in (cands or []):
+        (drop if _norm_url(c.get("url")) in ng else keep).append(c)
+    return keep, drop
+
+
+def _merge_ng_rows(existing_rows, new_rows, header):
+    """候補NG行をマージ(純関数)。(itemID, url) 重複は新規優先。"""
+    def key(r):
+        return ((r[0] or "").strip(), _norm_url(r[2] if len(r) > 2 else ""))
+    new_keys = {key(r) for r in new_rows if r and (r[0] or "").strip()}
+    kept = [r for r in (existing_rows[1:] if existing_rows else [])
+            if r and len(r) > 2 and (r[0] or "").strip() and key(r) not in new_keys]
+    return [header] + kept + list(new_rows)
+
+
 def _has_new_supply(seen_urls, current_urls):
     """前回外した時に見せた候補と比べて **新しい出品が出ているか**(純関数)。
 
@@ -798,6 +842,14 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     except Exception:
         skip_iids = set()
 
+    # 候補単位の「違う」= 負例。次回この出品にこのURLは出さない (人の1クリックを捨てない)。
+    try:
+        from sheet_io import read_tab
+        ng_by_iid = _ng_urls_by_iid(read_tab(NG_CAND_TAB))
+    except Exception:
+        ng_by_iid = {}
+    n_ng = 0
+
     # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
     items, item_targets = [], []
     no_cache = no_cand = no_cardno = no_ref = 0
@@ -842,6 +894,12 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         if not cands:
             no_cand_after_filter += 1
             continue
+        # ★過去に人が「違う」と判定した候補は二度と出さない (2026-07-29)。
+        cands, dropped_ng = filter_candidates_rejected(cands, ng_by_iid.get(iid))
+        n_ng += len(dropped_ng)
+        if not cands:
+            no_cand_after_filter += 1
+            continue
         ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(t.get("cert") or None)
         if not ref:
             no_ref += 1
@@ -867,7 +925,8 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
 
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
-          f"既知URL除外 {n_known}候補 / 番号不一致で除外 {n_dropped}候補(全滅skip {no_cand_after_filter}件) / "
+          f"既知URL除外 {n_known}候補 / 番号不一致で除外 {n_dropped}候補 / "
+          f"過去に「違う」除外 {n_ng}候補(全滅skip {no_cand_after_filter}件) / "
           f"台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
     if limit is not None:
         items, item_targets = items[:limit], item_targets[:limit]
@@ -950,6 +1009,25 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
             print(f"  📝 {CONFIRM_SKIP_TAB}: +{len(new_skip)}件 記録(次回は再表示しない・再検討は同タブ行削除)")
         except Exception as e:
             print(f"  ⚠ {CONFIRM_SKIP_TAB} 記録skip ({type(e).__name__}: {e})")
+    # --- 候補単位の「違う」を負例として台帳へ (2026-07-29) ---
+    # ここが無いと、出品自体が確定した場合に「違う」の1クリックが警告1行で消えていた
+    # (次回また同じ別カードが候補に並ぶ)。押した判断は必ず次回に効かせる。
+    _ng_new = []
+    for d in (res.get("diffs") or []):
+        _i, _u = d.get("idx"), (d.get("url") or "").strip()
+        if _i is None or not _u or _i >= len(item_targets):
+            continue
+        _t = item_targets[_i]
+        _ng_new.append([_t["itemID"], _t.get("cert", ""), _u, (_t.get("title") or "")[:60], today])
+    if _ng_new:
+        try:
+            from sheet_io import read_tab, write_rows_to_tab
+            write_rows_to_tab(NG_CAND_TAB,
+                              _merge_ng_rows(read_tab(NG_CAND_TAB), _ng_new, NG_CAND_HEADER))
+            print(f"  🚫 {NG_CAND_TAB}: +{len(_ng_new)}件 記録"
+                  f"(この出品にこのURLは次回から出さない・復活は同タブ行削除)")
+        except Exception as e:
+            print(f"  ⚠ {NG_CAND_TAB} 記録skip ({type(e).__name__}: {e})")
     if diffs:
         print(f"🚨 「違う」{len(diffs)}件 = 検索が別カード/別変種を拾った精度事故。"
               "slice2 の検索(kw/variant_hint)を要修正(残存=精度事故の放置)。")
