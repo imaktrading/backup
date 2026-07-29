@@ -52,6 +52,9 @@ def _is_quote_or_requirement(line: str) -> bool:
         # ★見出しは除外。テンプレの章タイトル「## 実装できなかった部分の明示」に反応して
         #   中身が「なし」でも ⚠️ になっていた (2026-07-30 実測)。申告は本文にある。
         return True
+    if re.search(r"\b0\s*(failed|errors?|件失敗)", s, re.I):
+        # ★「383 passed (0 failed, 0 error)」= 成功報告。ここに反応していた (2026-07-30 実測)
+        return True
     if "✅" in s or "test_" in s:
         # ★テスト名 (`test_check_corrupt_stamp_emits_warning` = 「失敗」を含む) や
         #   ✅ 付きの完了行に反応していた。これらは申告ではない (2026-07-30 実測)。

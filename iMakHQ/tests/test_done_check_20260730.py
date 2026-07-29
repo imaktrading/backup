@@ -56,6 +56,13 @@ def test_data_work_can_prove_with_commands_instead_of_tests(tmp_path):
     assert dc.check_one(p)["ok"] is True
 
 
+def test_zero_failure_summary_is_not_flagged(tmp_path):
+    """「383 passed (0 failed, 0 error)」= 成功報告。ここに反応していた (2026-07-30 実測)。"""
+    body = "commit: 98caa61\n結果: **383 passed** (0 failed, 0 error)\n"
+    p = _mk(tmp_path, "catalog", "w_response_done.md", body)
+    assert dc.check_one(p)["ok"] is True
+
+
 def test_test_names_containing_failure_words_are_not_flagged(tmp_path):
     """テスト名やチェック済み行に反応しない (`test_..._corrupt_..._warning` 等)。"""
     body = GOOD + "\n- `test_check_corrupt_stamp_emits_warning` — 読取失敗 warn を確認\n"
