@@ -149,3 +149,88 @@ def test_idempotent_second_run():
     counts, writes = _run(rows, {"111": {"product_id": "ST02-010", "category": "gundam_tcg"}})
     assert counts["upgraded"] == 0
     assert counts["skipped_already_prefixed"] == 1
+
+
+# ==============================================================================
+# 2026-07-29 Advisor GO: resolver 空時の catalog 直接 lookup fallback (§2)
+# ==============================================================================
+
+
+def _run_with_direct(rows, resolve_map, direct_lookup, dry_run=False):
+    """resolver + catalog 直接 lookup 両方 patch する版."""
+    ws = MagicMock()
+    ws.get_all_values.return_value = [_HEADER] + rows
+
+    def _fake(title="", url="", image_url="", cert="", extra_text="", purpose="dedup"):
+        key = cert or title
+        return resolve_map.get(key, {"product_id": "", "category": ""})
+
+    def _fake_direct(product_id):
+        return direct_lookup.get(product_id.upper() if product_id else "")
+
+    with patch("dedupe.resolver_io.resolve_sheet_row_with_category", side_effect=_fake), \
+         patch("dedupe.catalog_io.get_category_by_product_id_unique", side_effect=_fake_direct):
+        counts = sheet_io.upgrade_bare_keys_to_category(
+            ws, key_col=KEY_COL, title_col=TITLE_COL, cert_col=CERT_COL, dry_run=dry_run,
+        )
+    writes = {}
+    if not dry_run:
+        for call in ws.batch_update.call_args_list:
+            for upd in call.args[0]:
+                writes[upd["range"]] = upd["values"][0][0]
+    return counts, writes
+
+
+def test_direct_lookup_hit_unique():
+    """resolver 空 + catalog unique 1 hit → upgrade via direct lookup (§2 GO 主経路)."""
+    rows = [_row(title="?", cert="cert-r008", key="R-008")]
+    counts, writes = _run_with_direct(
+        rows,
+        resolve_map={"cert-r008": {"product_id": "", "category": ""}},  # resolver 空
+        direct_lookup={"R-008": "gundam_tcg"},
+    )
+    assert counts["upgraded"] == 1
+    assert counts["upgraded_via_direct_lookup"] == 1
+    assert counts["by_category"] == {"gundam_tcg": 1}
+    assert counts["skipped_no_category"] == 0
+    assert writes["E2"] == "gundam_tcg:R-008"
+
+
+def test_direct_lookup_ambiguous_skipped():
+    """catalog に 2+ hit → unique 関数が None → 据置 (fail-closed §2 条件①)."""
+    rows = [_row(title="?", cert="cert-eb", key="EB01-006")]
+    counts, writes = _run_with_direct(
+        rows,
+        resolve_map={"cert-eb": {"product_id": "", "category": ""}},  # resolver 空
+        direct_lookup={"EB01-006": None},  # unique 関数は ambiguous 時 None
+    )
+    assert counts["upgraded"] == 0
+    assert counts["upgraded_via_direct_lookup"] == 0
+    assert counts["skipped_no_category"] == 1
+    assert writes == {}
+
+
+def test_direct_lookup_not_found_skipped():
+    """catalog 未登録 (T17 = NIKKE 等) → unique 関数が None → 据置."""
+    rows = [_row(title="?", cert="cert-t17", key="T17")]
+    counts, writes = _run_with_direct(
+        rows,
+        resolve_map={"cert-t17": {"product_id": "", "category": ""}},
+        direct_lookup={},  # 未登録 → None
+    )
+    assert counts["upgraded"] == 0
+    assert counts["upgraded_via_direct_lookup"] == 0
+    assert counts["skipped_no_category"] == 1
+    assert writes == {}
+
+
+def test_direct_lookup_not_used_when_resolver_succeeds():
+    """§2 条件③: 既存 resolver 経路は絶対に置き換えない。resolver hit 時は direct を呼ばない."""
+    rows = [_row(title="Heero", cert="cert-ok", key="ST02-010")]
+    resolver_map = {"cert-ok": {"product_id": "ST02-010", "category": "gundam_tcg"}}
+    # direct lookup が呼ばれないことを確認するため、呼ばれたら別カテゴリを返す trap を仕込む
+    direct_lookup = {"ST02-010": "pokemon_tcg"}
+    counts, writes = _run_with_direct(rows, resolver_map, direct_lookup)
+    assert counts["upgraded"] == 1
+    assert counts["upgraded_via_direct_lookup"] == 0  # direct 経由でない
+    assert writes["E2"] == "gundam_tcg:ST02-010"  # resolver の gundam_tcg が採用

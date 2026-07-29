@@ -209,3 +209,18 @@
 - 決定: HQ が no_category 18 を全て catalog 未収載と分類し catalog に依頼 (昨日6件と同根)。dedupe は待機、収載通知で再upgrade。row252 は HQ も同誤り承認=「PSA brand権威 resolver判定 > 人間直感」教訓化・設計維持
 - 変更: なし (ack のみ: 2026-07-28_residual_18_routed_to_catalog_ack.md)
 - 検証: 即時アクションなし。トリガ = catalog18収載通知→再upgrade / pid_mismatch82は18後にHQ再分類。DON-PRB02-018(PSA9 END)は無害確認済
+
+## 2026-07-30
+
+### 案B Phase3+ 直接照会 fallback 実装 (Advisor GO 受領・回答書 2026-07-29_direct_catalog_lookup_GO_response.md)
+
+- 決定: resolver 空時の catalog 直接 (category, pid) 照会経路を Phase3 upgrade に追加。fail-closed=DISTINCT category が exactly 1 の時のみ upgrade、0/曖昧は据置。既存 resolver 経路は置換せず fallback として並存 (§2 条件①-⑤ 全担保)
+- 変更: dedupe/catalog_io.py:445-473 (get_category_by_product_id_unique 新規) / dedupe/sheet_io.py:1088-1157 (skipped_no_category 分岐に direct lookup fallback + upgraded_via_direct_lookup counter) / dedupe/checker.py:1746-1748 (via resolver / via direct lookup 内訳print)
+- 検証: pytest 全 403 passed (offline)。追加 test 11件 = TestGetCategoryByProductIdUnique 7件 (unique/曖昧2件/未登録/case不変/空/open失敗) + test_upgrade_keys_to_category 4件 (direct hit/曖昧skip/未登録skip/resolver優先=直接呼ばず)
+- 保留: dry-run 本走 (`python -m dedupe.checker --upgrade-keys-to-category --dry-run`) は spreadsheet 認証が必要な人手セッションで実施。§3 期待値 = upgraded 15 (gundam_tcg 8 + one_piece_tcg 7) / skipped_no_category 3 (T17/MM2-068/MM5-SEC2) / skipped_pid_mismatch 82
+
+### permission deny 5件 (git/fs) 設定 / dedupe 固有スクリプト deny 0件
+
+- 決定: `C:/dev/iMak_dedupe/.claude/settings.json` を作成 (defaultMode=bypassPermissions + git force-push/reset --hard/rm -rf のみ deny)。dedupe は eBay 触らないので eBay 系 deny 不要、スプシ書込は本業なので deny 対象外 (Advisor GO §4 承認済)
+- 変更: `.claude/settings.json` 新規 (.gitignore 対象=commit 対象外)。回答書 `2026-07-29_permission_deny_for_irreversible_ops_response.md` の draft JSON をそのまま採用
+- 検証: file 実在 (`ls C:/dev/iMak_dedupe/.claude/`)、`git check-ignore` で ignore 確認済

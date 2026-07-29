@@ -1085,9 +1085,10 @@ def upgrade_bare_keys_to_category(
         "skipped_empty": 0,
         "skipped_url_key": 0,
         "skipped_already_prefixed": 0,
-        "skipped_no_category": 0,   # resolver が category 確定できず（fail-closed 据置）
+        "skipped_no_category": 0,   # resolver 空 かつ catalog 直接 lookup も 0/曖昧（fail-closed 据置）
         "skipped_pid_mismatch": 0,  # 再導出 pid ≠ 既存 bare（fail-closed 据置）
         "upgraded": 0,
+        "upgraded_via_direct_lookup": 0,  # 2026-07-29 Advisor GO §2: resolver 空 → catalog 直接 lookup で救済
         "by_category": {},
         "samples": [],
     }
@@ -1123,10 +1124,22 @@ def upgrade_bare_keys_to_category(
             title=title, url=url, cert=cert, image_url=image_url, purpose="dedup",
         )
         rcat, rpid = parse_key(new_key)
+        via_direct_lookup = False
         if not rcat:
-            # url-key / 未解決 / category 不明 → 据置（fail-closed）
-            counts["skipped_no_category"] += 1
-            continue
+            # Advisor GO 2026-07-29 §2: resolver 空時の fallback として catalog 直接照会。
+            # bare KEー は product_id 自身なので、catalog に unique 1 category ヒットしたら
+            # それは「導出」でなく「照合」で確定できる (fail-closed = 0 or 2+ は据置)。
+            from .catalog_io import get_category_by_product_id_unique
+            direct_cat = get_category_by_product_id_unique(current)
+            if direct_cat:
+                rcat = direct_cat
+                rpid = current  # bare = product_id 自身、prefix を足すだけ (§2 条件②)
+                new_key = f"{rcat}:{current}"
+                via_direct_lookup = True
+            else:
+                # url-key / 未解決 / catalog 未登録 or 曖昧 → 据置（fail-closed）
+                counts["skipped_no_category"] += 1
+                continue
         if rpid != current:
             # 再導出 pid が既存 bare と不一致 → 据置（別カードに化ける事故防止）
             counts["skipped_pid_mismatch"] += 1
@@ -1140,6 +1153,8 @@ def upgrade_bare_keys_to_category(
             }
         )
         counts["upgraded"] += 1
+        if via_direct_lookup:
+            counts["upgraded_via_direct_lookup"] += 1
         counts["by_category"][rcat] = counts["by_category"].get(rcat, 0) + 1
         if len(counts["samples"]) < SAMPLE_MAX:
             counts["samples"].append(f"row {row_idx}: {current} → {new_key}")

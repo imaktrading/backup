@@ -441,3 +441,33 @@ def get_category_by_product_id(product_id: str) -> Optional[str]:
         return row[0] if row else None
     finally:
         con.close()
+
+
+def get_category_by_product_id_unique(product_id: str) -> Optional[str]:
+    """catalog products.product_id から category を fail-closed に逆引き.
+
+    `DISTINCT category` が **exactly 1** の時のみ返す。0 or 2+ は None (据置)。
+    upgrade_bare_keys_to_category の resolver-空 fallback で使用。
+    2026-07-29 Advisor GO §2 条件①「2件以上ヒットしたら据置」準拠。
+
+    既存 get_category_by_product_id (LIMIT 1) と別関数として並存させる
+    (呼出側の fail-open 期待を壊さない)。
+    """
+    if not product_id:
+        return None
+    try:
+        con = open_catalog_readonly()
+    except Exception:
+        return None
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT DISTINCT category FROM products WHERE UPPER(product_id) = ?",
+            (product_id.upper(),),
+        )
+        rows = cur.fetchall()
+        if len(rows) == 1 and rows[0][0]:
+            return rows[0][0]
+        return None  # 0 hit or ambiguous → 据置
+    finally:
+        con.close()

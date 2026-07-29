@@ -1742,7 +1742,10 @@ def run_upgrade_keys_to_category(dry_run: bool = False) -> int:
     print(f"  skipped_already_prefixed: {counts['skipped_already_prefixed']}  (= 新形式済)")
     print(f"  skipped_no_category     : {counts['skipped_no_category']}  (= category 未確定 fail-closed 据置)")
     print(f"  skipped_pid_mismatch    : {counts['skipped_pid_mismatch']}  (= 再導出pid≠既存 fail-closed 据置)")
+    _via_direct = counts.get("upgraded_via_direct_lookup", 0)
     print(f"  upgraded                : {counts['upgraded']}  ← prefix 付与行数")
+    print(f"    ├ via resolver        : {counts['upgraded'] - _via_direct}")
+    print(f"    └ via direct lookup   : {_via_direct}  (= 2026-07-29 新経路 catalog 直接照会)")
     if counts["by_category"]:
         print(f"  by_category             :")
         for c, n in sorted(counts["by_category"].items(), key=lambda x: -x[1]):

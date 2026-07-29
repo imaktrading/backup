@@ -261,3 +261,82 @@ class TestFindProductIdInText:
 
     def test_empty_pids(self):
         assert catalog_io.find_product_id_in_text("OP08-106", frozenset()) is None
+
+
+class TestGetCategoryByProductIdUnique:
+    """2026-07-29 Advisor GO §2 §3: fail-closed 直接 lookup 関数の回帰 test.
+
+    既存 `get_category_by_product_id` (LIMIT 1) と別関数として並存。
+    - 0 hit → None
+    - unique 1 hit → category
+    - 2+ hit (別カテゴリ重複) → None (fail-closed)
+    """
+
+    @pytest.fixture
+    def ambiguous_db(self, tmp_path, monkeypatch):
+        """gundam_tcg と one_piece_tcg に同じ product_id EB01-006 が実在するミニ DB.
+
+        Advisor GO 本文で参照される「283 product_id が複数カテゴリ実在」ケースの再現。
+        `open_catalog_readonly` を fixture DB に向ける (default arg は import 時 bind
+        なので `CATALOG_DB_PATH` monkeypatch では効かない → 関数自体を差し替え)。
+        """
+        db = tmp_path / "ambiguous.sqlite"
+        con = sqlite3.connect(db)
+        cur = con.cursor()
+        cur.execute(
+            "CREATE TABLE products (id INTEGER PRIMARY KEY, category TEXT, product_id TEXT)"
+        )
+        products = [
+            (1, "gundam_tcg", "R-008"),          # unique 1 hit
+            (2, "one_piece_tcg", "DON-OP13-002"),  # unique 1 hit
+            # 2件重複ケース (別カテゴリ)
+            (3, "gundam_tcg", "EB01-006"),
+            (4, "one_piece_tcg", "EB01-006"),
+            # 同カテゴリ内 duplicate row (DISTINCT category で 1 に圧縮される想定)
+            (5, "gundam_tcg", "R-018"),
+            (6, "gundam_tcg", "R-018"),
+        ]
+        cur.executemany("INSERT INTO products VALUES (?, ?, ?)", products)
+        con.commit()
+        con.close()
+
+        real_open = catalog_io.open_catalog_readonly
+
+        def _open_fixture(path=None):
+            return real_open(db)
+
+        monkeypatch.setattr(catalog_io, "open_catalog_readonly", _open_fixture)
+        return db
+
+    def test_unique_hit_returns_category(self, ambiguous_db):
+        assert catalog_io.get_category_by_product_id_unique("R-008") == "gundam_tcg"
+
+    def test_unique_hit_case_insensitive(self, ambiguous_db):
+        # UPPER 正規化: lowercase 入力でも hit
+        assert catalog_io.get_category_by_product_id_unique("r-008") == "gundam_tcg"
+        assert catalog_io.get_category_by_product_id_unique("don-op13-002") == "one_piece_tcg"
+
+    def test_ambiguous_returns_none(self, ambiguous_db):
+        """複数 category に同一 product_id → None (fail-closed §2 条件①)."""
+        assert catalog_io.get_category_by_product_id_unique("EB01-006") is None
+
+    def test_same_category_duplicates_are_unique(self, ambiguous_db):
+        """DISTINCT で 1 に集約されるので、同カテゴリ内複数 row は unique として返す."""
+        assert catalog_io.get_category_by_product_id_unique("R-018") == "gundam_tcg"
+
+    def test_not_found_returns_none(self, ambiguous_db):
+        """catalog 未登録 (T17/MM2-068 相当) → None (fail-closed)."""
+        assert catalog_io.get_category_by_product_id_unique("T17") is None
+        assert catalog_io.get_category_by_product_id_unique("MM2-068") is None
+
+    def test_empty_input_returns_none(self):
+        assert catalog_io.get_category_by_product_id_unique("") is None
+        assert catalog_io.get_category_by_product_id_unique(None) is None
+
+    def test_open_failure_returns_none(self, monkeypatch):
+        """open_catalog_readonly が exception を投げた場合、握って None 返し (fail-closed)."""
+        def _raise(path=None):
+            raise FileNotFoundError("simulated missing DB")
+
+        monkeypatch.setattr(catalog_io, "open_catalog_readonly", _raise)
+        assert catalog_io.get_category_by_product_id_unique("R-008") is None
