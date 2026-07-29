@@ -556,7 +556,7 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
 # slice3: 昼の確認(有人)。キャッシュ済候補を視覚確証→補URL(AC-AG)へ冪等書込。
 # ---------------------------------------------------------------------------
 CONFIRM_SKIP_TAB = "補URL確証スキップ"
-CONFIRM_SKIP_HEADER = ["itemID", "cert", "title", "理由", "日付"]
+CONFIRM_SKIP_HEADER = ["itemID", "cert", "title", "理由", "日付", "その時の候補URL"]
 
 
 def compute_backurl_additions(existing, new_urls, max_slots=None):
@@ -584,11 +584,36 @@ def compute_backurl_additions(existing, new_urls, max_slots=None):
 # 「cooldown付き skip台帳で一定期間再表示しない … 数日後再挑戦」だったが、**実装は期限なし**で
 # 一度でも外すと二度と補URLが付かなかった (= その出品は永久に丸腰)。
 # 「違う」の主因の一つは **正変種が今その日に売られていない**ことなので、時間を置けば解決する。
+#
+# ★期間は **翌日** (ユーザー判断 2026-07-29「即対応していかないと生きていけない。翌日でいい」)。
+#   ただし 2026-06-22 に「同じ3件が毎回出る」と指摘された経緯があるため、短縮だけだと
+#   ノイズが再発する。**新供給が出た時だけ出す** (下の _has_new_supply) を併用して両立させる。
 CONFIRM_SKIP_COOLDOWN_DAYS = {
-    "違う": 7,        # 別変種/別カードしか無かった → 供給は入れ替わるので1週間で再挑戦
-    "見送り": 14,     # 高い/出品者不安 等の business 判断 → やや長め
+    "違う": 1,
+    "見送り": 1,
 }
-CONFIRM_SKIP_COOLDOWN_DEFAULT = 7
+CONFIRM_SKIP_COOLDOWN_DEFAULT = 1
+
+
+def _norm_urls(urls):
+    """URL 集合を比較用に正規化(純関数)。空要素は落とす。"""
+    return {_norm_url(u) for u in (urls or []) if (u or "").strip()}
+
+
+def _has_new_supply(seen_urls, current_urls):
+    """前回外した時に見せた候補と比べて **新しい出品が出ているか**(純関数)。
+
+    True = 出す価値がある (前回は無かった供給が市場に出た)。
+    前回の記録が無い (旧形式の台帳行) 場合は True = 出す。
+    「同じ候補しか無いのに毎日出す」を防ぎつつ、「新しく出たのに1週間出さない」も防ぐ。
+    """
+    cur = _norm_urls(current_urls)
+    if not cur:
+        return False                      # 候補ゼロ = 見せるものが無い
+    seen = _norm_urls(seen_urls)
+    if not seen:
+        return True                       # 記録なし(旧行) → 出す
+    return bool(cur - seen)
 
 
 def _skip_row_active(reason, date_str, today):
@@ -607,6 +632,30 @@ def _skip_row_active(reason, date_str, today):
     if age < 0:
         return True          # 未来日付 = 壊れている → 触らない
     return age < days
+
+
+def _seen_urls_by_iid(rows):
+    """台帳 → {itemID: [その時に見せた候補URL]} (純関数)。旧形式(5列)の行は空リスト。"""
+    out = {}
+    for r in (rows[1:] if rows and len(rows) > 1 else []):
+        iid = (r[0] or "").strip() if r else ""
+        if not iid:
+            continue
+        cell = r[5] if len(r) > 5 else ""
+        out[iid] = [u.strip() for u in (cell or "").split("|") if u.strip()]
+    return out
+
+
+def _cache_candidate_urls(entry):
+    """キャッシュ1件 → 今出せる候補URL(純関数)。新供給の有無を安く判定するための素。
+
+    メルカリの all_cands/cands のみ見る (SNKRDUNK 側の増減は拾わない = 保守的)。
+    """
+    m = (entry or {}).get("mercari") or {}
+    if not isinstance(m, dict):
+        return []
+    rows = m.get("all_cands") or m.get("cands") or []
+    return [t[1] for t in rows if t and len(t) > 1 and t[1]]
 
 
 def _skip_iids_from_tab(rows, today=None):
@@ -735,9 +784,17 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         _skip_rows = read_tab(CONFIRM_SKIP_TAB)
         skip_iids = _skip_iids_from_tab(_skip_rows, today=today)
         _all_skip = _skip_iids_from_tab(_skip_rows)
+        _seen_urls = _seen_urls_by_iid(_skip_rows)
         _revived = len(_all_skip) - len(skip_iids)
         if _revived:
             print(f"  ♻ cooldown 満了 {_revived}件 → 再表示対象に復帰 (台帳の行は残す)")
+        # ★新供給が出ていれば cooldown 中でも出す (前回見せた候補に無いURLが在る)。
+        # 「翌日再挑戦」を活かしつつ「同じ候補しか無いのに毎日出る」を防ぐ両立策。
+        _newsupply = {i for i in skip_iids
+                      if _has_new_supply(_seen_urls.get(i), _cache_candidate_urls(cache.get(i)))}
+        if _newsupply:
+            skip_iids -= _newsupply
+            print(f"  🆕 新しい供給が出た {len(_newsupply)}件 → cooldown 中だが再表示する")
     except Exception:
         skip_iids = set()
 
@@ -880,7 +937,12 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         for idx in sorted(not_confirmed):
             t = item_targets[idx]
             reason = "違う" if idx in diffs else "見送り"
-            new_skip.append([t["itemID"], t.get("cert", ""), (t.get("title") or "")[:60], reason, today])
+            # ★その時に見せた候補URLを残す。次回「新しい供給が出たか」を判定する唯一の材料。
+            # これが無いと cooldown 明けに同じ候補をまた見せることになる。
+            _shown = " | ".join(c.get("url", "") for c in (items[idx].get("candidates") or [])
+                                if c.get("url"))
+            new_skip.append([t["itemID"], t.get("cert", ""), (t.get("title") or "")[:60],
+                             reason, today, _shown])
         try:
             from sheet_io import read_tab, write_rows_to_tab
             merged = _merge_skip_rows(read_tab(CONFIRM_SKIP_TAB), new_skip, CONFIRM_SKIP_HEADER)

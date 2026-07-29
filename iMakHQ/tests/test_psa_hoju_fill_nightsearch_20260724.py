@@ -128,17 +128,13 @@ def _skip_rows(*rows):
     return [_H] + [list(r) for r in rows]
 
 
-def test_skip_cooldown_expires_and_reshows():
+def test_skip_cooldown_is_next_day():
+    """ユーザー判断 (2026-07-29): 翌日には再挑戦する。寝かせない。"""
     rows = _skip_rows(["358a", "1", "t", "違う", "2026-07-01"])
-    assert _skip_iids_from_tab(rows, today="2026-07-05") == {"358a"}   # 4日 = 期間内
-    assert _skip_iids_from_tab(rows, today="2026-07-09") == set()      # 8日 = 満了で復帰
-
-
-def test_skip_cooldown_is_longer_for_miokuri():
-    """見送り(高い/出品者不安=business判断)は「違う」より長く伏せる。"""
-    rows = _skip_rows(["358a", "1", "t", "見送り", "2026-07-01"])
-    assert _skip_iids_from_tab(rows, today="2026-07-09") == {"358a"}   # 8日 = まだ期間内
-    assert _skip_iids_from_tab(rows, today="2026-07-16") == set()      # 15日 = 満了
+    assert _skip_iids_from_tab(rows, today="2026-07-01") == {"358a"}   # 同日 = 伏せる
+    assert _skip_iids_from_tab(rows, today="2026-07-02") == set()      # 翌日 = 復帰
+    rows2 = _skip_rows(["358b", "1", "t", "見送り", "2026-07-01"])
+    assert _skip_iids_from_tab(rows2, today="2026-07-02") == set()     # 見送りも翌日
 
 
 def test_skip_unparseable_date_stays_hidden():
@@ -151,6 +147,53 @@ def test_skip_without_today_keeps_legacy_behavior():
     """today 省略 = 従来どおり全行対象 (呼出側が明示した時だけ cooldown が効く)。"""
     rows = _skip_rows(["358a", "1", "t", "違う", "2020-01-01"])
     assert _skip_iids_from_tab(rows) == {"358a"}
+
+
+# --- 新供給が出た時だけ出す (cooldown を翌日に縮めてもノイズにしない) ------------
+# 2026-06-22 に「同じ3件が毎回出る」と指摘された経緯があるため、期間短縮だけだと再発する。
+
+def test_new_supply_detected_when_unseen_url_appears():
+    from psa_hoju_fill import _has_new_supply
+    seen = ["https://jp.mercari.com/item/m1"]
+    assert _has_new_supply(seen, ["https://jp.mercari.com/item/m1",
+                                  "https://jp.mercari.com/item/m2"]) is True
+
+
+def test_no_new_supply_when_same_urls():
+    """前回と同じ候補しか無い = 見せても同じ判断になる → 出さない。"""
+    from psa_hoju_fill import _has_new_supply
+    seen = ["https://jp.mercari.com/item/m1?utm=x", "https://jp.mercari.com/item/m2/"]
+    assert _has_new_supply(seen, ["https://jp.mercari.com/item/m2",
+                                  "https://JP.mercari.com/item/m1"]) is False
+
+
+def test_no_new_supply_when_no_candidates():
+    from psa_hoju_fill import _has_new_supply
+    assert _has_new_supply(["https://jp.mercari.com/item/m1"], []) is False
+
+
+def test_legacy_row_without_record_is_reshown():
+    """旧形式(候補URL列なし)の行は記録が無い → 出す (取りこぼしより再表示を選ぶ)。"""
+    from psa_hoju_fill import _has_new_supply
+    assert _has_new_supply([], ["https://jp.mercari.com/item/m1"]) is True
+
+
+def test_seen_urls_by_iid_parses_ledger():
+    from psa_hoju_fill import _seen_urls_by_iid
+    rows = [_H + ["その時の候補URL"],
+            ["358a", "1", "t", "違う", "2026-07-29", "https://a | https://b"],
+            ["358b", "1", "t", "見送り", "2026-07-29"]]        # 旧形式(5列)
+    got = _seen_urls_by_iid(rows)
+    assert got["358a"] == ["https://a", "https://b"]
+    assert got["358b"] == []
+
+
+def test_cache_candidate_urls_reads_all_cands():
+    from psa_hoju_fill import _cache_candidate_urls
+    e = {"mercari": {"best": None, "cands": [], "all_cands": [[100, "https://x", "n"]]}}
+    assert _cache_candidate_urls(e) == ["https://x"]
+    assert _cache_candidate_urls({}) == []
+    assert _cache_candidate_urls({"mercari": None}) == []
 
 
 def test_merge_skip_rows_new_wins_on_dupe_itemid():
