@@ -40,10 +40,27 @@ def test_missing_commit_is_flagged(tmp_path):
 
 
 def test_missing_test_result_is_flagged(tmp_path):
-    """『テストした』の自己申告だけでは通さない。件数が要る。"""
-    p = _mk(tmp_path, "catalog", "x_response_done.md", "commit: 4d5b74e\nテストしました\n")
+    """『やりました』の自己申告だけでは通さない。件数か実行記録が要る。"""
+    p = _mk(tmp_path, "catalog", "x_response_done.md", "commit: 4d5b74e\nやりました\n")
     r = dc.check_one(p)
-    assert r["ok"] is False and any("テスト" in x for x in r["reasons"])
+    assert r["ok"] is False and any("証拠" in x for x in r["reasons"])
+
+
+def test_data_work_can_prove_with_commands_instead_of_tests(tmp_path):
+    """テストが書けない作業 (DB/yaml 投入等) は **実行コマンドと出力**を証拠として認める。
+
+    テストを一律必須にすると、テストの書けない作業が永久に ⚠️ になり警告が形骸化する。
+    """
+    body = "commit: 4d5b74e\n\n## 検証\n```\nSELECT count(*) FROM products ... → 12件\n```\n"
+    p = _mk(tmp_path, "catalog", "y_response_done.md", body)
+    assert dc.check_one(p)["ok"] is True
+
+
+def test_test_names_containing_failure_words_are_not_flagged(tmp_path):
+    """テスト名やチェック済み行に反応しない (`test_..._corrupt_..._warning` 等)。"""
+    body = GOOD + "\n- `test_check_corrupt_stamp_emits_warning` — 読取失敗 warn を確認\n"
+    p = _mk(tmp_path, "harvest", "z_response_done.md", body)
+    assert dc.check_one(p)["ok"] is True
 
 
 def test_partial_implementation_is_surfaced(tmp_path):

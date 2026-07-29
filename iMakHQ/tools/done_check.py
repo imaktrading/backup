@@ -26,6 +26,10 @@ WORKTREES = ("hq", "catalog", "dedupe", "inventory", "harvest", "revise")
 # 証拠として最低限あるべきもの
 RE_COMMIT = re.compile(r"\b[0-9a-f]{7,40}\b")
 RE_TESTS = re.compile(r"(\d+)\s*(passed|pass|件 pass|tests? passed)", re.I)
+# ★データ作業 (catalog の DB/yaml 投入等) にはテストが無い。その場合は
+#   「実行したコマンドと出力」を証拠として認める (2026-07-30)。
+#   テストを一律必須にすると、テストの書けない作業が永久に ⚠️ になり警告が形骸化する。
+RE_VERIFY = re.compile(r"(検証|実行コマンド|実測|SELECT\s|python -c|pytest)", re.I)
 # 窓口が必ず目を通すべき語 (黙って流さない)
 ALERT_WORDS = (
     "実装できなかった", "未実装", "できていません", "失敗", "failed", "error",
@@ -48,6 +52,10 @@ def _is_quote_or_requirement(line: str) -> bool:
         # ★見出しは除外。テンプレの章タイトル「## 実装できなかった部分の明示」に反応して
         #   中身が「なし」でも ⚠️ になっていた (2026-07-30 実測)。申告は本文にある。
         return True
+    if "✅" in s or "test_" in s:
+        # ★テスト名 (`test_check_corrupt_stamp_emits_warning` = 「失敗」を含む) や
+        #   ✅ 付きの完了行に反応していた。これらは申告ではない (2026-07-30 実測)。
+        return True
     return any(m in s for m in CONDITIONAL_MARKERS)   # 条件節 = 「〜があれば書く」の要求文
 
 
@@ -60,8 +68,8 @@ def check_one(path: Path) -> dict:
     reasons = []
     if not RE_COMMIT.search(body):
         reasons.append("commit hash が無い (何を commit したか不明)")
-    if not RE_TESTS.search(body):
-        reasons.append("テスト結果が無い (緑である証拠が無い)")
+    if not RE_TESTS.search(body) and not RE_VERIFY.search(body):
+        reasons.append("テスト結果も検証の実行記録も無い (動いた証拠が無い)")
     # 要読解ワードは **申告行だけ**見る (引用・条件節は除く)
     hits = sorted({w for line in body.splitlines() if not _is_quote_or_requirement(line)
                    for w in ALERT_WORDS if w.lower() in line.lower()})
