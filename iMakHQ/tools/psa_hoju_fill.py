@@ -621,6 +621,22 @@ def _ng_urls_by_iid(rows):
     return out
 
 
+def filter_candidates_used_by_others(cands, used_by_others, self_iid):
+    """**他の出品が既に使っている**仕入元URLを候補から外す。戻り: (残す, 落とした)。純関数。
+
+    従来は書込時にだけ弾いていたため、**捨てる前提の候補を人に見せて判断させていた**
+    (2026-07-30 ユーザー指摘「さっきやったカードが出てくる」)。同じカードの別出品が
+    並ぶと候補集合がほぼ同じになり、同じ目視を何度も繰り返すことになる。
+    同一URLを2出品が指すと両方売れた時に履行不能 → キャンセル → Defect なので
+    **どのみち書けない。見せない方が正しい**。
+    """
+    keep, drop = [], []
+    for c in (cands or []):
+        owners = set(used_by_others.get(_norm_url(c.get("url")), ())) - {self_iid}
+        (drop if owners else keep).append(c)
+    return keep, drop
+
+
 def filter_candidates_rejected(cands, ng_urls):
     """過去に「違う」と判定された候補を除く。戻り: (残す, 落とした)。純関数。
 
@@ -850,6 +866,28 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         ng_by_iid = {}
     n_ng = 0
 
+    # ★2026-07-30: **他の出品が既に使っているURL**を、目視に出す前に外す。
+    #   従来は書込時にだけ弾いていた (`⛔ 補URL除外(他出品が使用中)`) ため、
+    #   **捨てる前提の候補を人に見せて判断させていた** (ユーザー指摘「さっきやったカードが出てくる」)。
+    #   同じカードの別出品が並ぶと候補集合がほぼ同じになり、同じものを何度も目視することになる。
+    #   同一URLを2出品が指すと両方売れた時に履行不能 → キャンセル → Defect なので、
+    #   どのみち書けない。**見せない方が正しい**。
+    _used_by_others = {}
+    try:
+        import dup_guard as _dg0
+        for _r in vals[1:]:
+            _iid0 = _cell(_r, B)
+            if not (_iid0 and not _cell(_r, D)):      # live 出品のみ
+                continue
+            for _u0 in [_cell(_r, A)] + [_cell(_r, AUX0 + k) for k in range(AUXN)]:
+                _n0 = _dg0.norm_url(_u0)
+                if _n0:
+                    _used_by_others.setdefault(_n0, set()).add(_iid0)
+    except Exception as _e0:
+        print(f"  ⚠ 使用中URLマップを作れず、表示前の除外はskip ({type(_e0).__name__})")
+        _used_by_others = {}
+    n_used = 0
+
     # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
     items, item_targets = [], []
     no_cache = no_cand = no_cardno = no_ref = 0
@@ -900,6 +938,14 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         if not cands:
             no_cand_after_filter += 1
             continue
+        # ★他の出品が使用中のURLは **見せる前に**外す (どのみち書けない・2026-07-30)。
+        if _used_by_others:
+            _keep, _drop = filter_candidates_used_by_others(cands, _used_by_others, iid)
+            n_used += len(_drop)
+            cands = _keep
+            if not cands:
+                no_cand_after_filter += 1
+                continue
         ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(t.get("cert") or None)
         if not ref:
             no_ref += 1
@@ -918,15 +964,21 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         _rv = vals[_row - 1] if (_row and 0 < _row <= len(vals)) else []
         _cost_now = (_cell(_rv, 13) or "")   # N=仕入れ値
         _price_now = (_cell(_rv, 12) or "")   # M=現在価格
+        # ★同じカード(KEY)の別出品が対象に居ると、候補がほぼ同じで「さっきやった」に見える。
+        #   別物であることを明示する (2026-07-30 ユーザー指摘)。
+        _sib = [x["itemID"] for x in targets
+                if x is not t and (x.get("key") or "") and x.get("key") == t.get("key")]
         items.append({"idx": idx, "title": (t.get("title") or "")[:90], "card_no": cn,
                       "ebay_url": _ebay_itm_url(iid), "ref_image": ref, "candidates": cands,
-                      "multi_variant": _mv, "cost_now": _cost_now, "price_now": _price_now})
+                      "multi_variant": _mv, "cost_now": _cost_now, "price_now": _price_now,
+                      "siblings": _sib})
         item_targets.append(t)
 
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
           f"既知URL除外 {n_known}候補 / 番号不一致で除外 {n_dropped}候補 / "
-          f"過去に「違う」除外 {n_ng}候補(全滅skip {no_cand_after_filter}件) / "
+          f"過去に「違う」除外 {n_ng}候補 / 他出品が使用中で除外 {n_used}候補"
+          f"(全滅skip {no_cand_after_filter}件) / "
           f"台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
     if limit is not None:
         items, item_targets = items[:limit], item_targets[:limit]

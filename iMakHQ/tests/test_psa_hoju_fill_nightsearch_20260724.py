@@ -209,6 +209,30 @@ def test_rejected_filter_normalizes_urls():
     assert keep == [] and len(drop) == 1
 
 
+def test_url_used_by_other_listing_is_hidden_before_review():
+    """他の出品が使っているURLは **目視に出す前に** 外す (2026-07-30 ユーザー指摘)。
+
+    従来は書込時にだけ弾いていたので、**捨てる前提の候補を人に見せて判断させていた**。
+    同一URLを2出品が指すと両方売れた時に履行不能 → Defect なので、どのみち書けない。
+    """
+    from psa_hoju_fill import filter_candidates_used_by_others
+    cands = [{"url": "https://jp.mercari.com/item/m1"},
+             {"url": "https://jp.mercari.com/item/m2"}]
+    used = {"https://jp.mercari.com/item/m1": {"358_other"}}
+    keep, drop = filter_candidates_used_by_others(cands, used, "358_self")
+    assert [c["url"] for c in keep] == ["https://jp.mercari.com/item/m2"]
+    assert len(drop) == 1
+
+
+def test_own_url_is_not_treated_as_used_by_others():
+    """自分自身が使っているURLは『他出品が使用中』ではない (別ロジックで除外済)。"""
+    from psa_hoju_fill import filter_candidates_used_by_others
+    cands = [{"url": "https://jp.mercari.com/item/m1"}]
+    used = {"https://jp.mercari.com/item/m1": {"358_self"}}
+    keep, drop = filter_candidates_used_by_others(cands, used, "358_self")
+    assert len(keep) == 1 and drop == []
+
+
 def test_ng_urls_by_iid_groups_per_listing():
     """NG は **出品ごと**。別の出品では同じURLが正解になりうるので混ぜない。"""
     from psa_hoju_fill import _ng_urls_by_iid
