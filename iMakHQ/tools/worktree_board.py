@@ -168,6 +168,21 @@ def main() -> int:
             print(f"  …他{len(theirs) - MAX_SHOW}件")
         print()
 
+    # ★事務員 (clerk) の死活監視 (2026-07-30)。
+    #   事務員は「異常を見つける係」なので、**事務員自身が死ぬと誰も気づけない**。
+    #   増員しても解決しない (同じ仕事の人数が増えるだけ) ので、外側から生存を見る。
+    #   7/28-7/30 の夜間 cron が exit 0 のまま空振りしていた件と同型の失敗を防ぐ。
+    reports = sorted((DATA_ROOT / "clerk" / "reports").glob("*_patrol.md"),
+                     key=lambda p: p.stat().st_mtime) if (DATA_ROOT / "clerk" / "reports").is_dir() else []
+    if not reports:
+        print("⚠️ 事務巡回のレポートが1件も無い — 事務員が動いていない疑い\n")
+    else:
+        last = reports[-1]
+        hours = (time.time() - last.stat().st_mtime) / 3600
+        mark = "⚠️ " if hours > 24 else ""
+        print(f"{mark}事務巡回: 最終 {_age(last.stat().st_mtime)} ({last.name})"
+              + (" — **24h 以上動いていない**" if hours > 24 else "") + "\n")
+
     print(f"---\n**合計: 要返球 {grand_mine}件 / 相手ボール {grand_theirs}件**")
     if grand_mine:
         print("→ 要返球を先に片付ける。**自分の回答待ちで他 worktree を止めない**。")
