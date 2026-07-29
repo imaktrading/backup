@@ -185,10 +185,30 @@ def test_implement_mode_allows_commit_but_never_push():
         assert ng in dw.IMPLEMENT_DENY_TOOLS
 
 
-def test_hq_is_excluded_from_auto_implement():
-    """HQ は Advisor と同じ worktree を共有するので自動実装しない (同時編集で壊れる)。"""
-    assert "hq" in dw.NO_AUTO_IMPLEMENT
-    assert dw._dispatch("hq", dry_run=True, mode="implement")["status"] == "skip-no-auto-impl"
+def test_hq_auto_implement_is_gated_by_busy_flag(tmp_path, monkeypatch):
+    """HQ も自動実装するが、**窓口が同じ worktree を編集中は止める** (2026-07-30)。
+
+    HQ は Advisor と C:/dev/iMak を共有するため同時編集で壊れる。ただし衝突するのは
+    「窓口が編集中」の時だけなので、旗が立っている間だけ避ければ残り時間は並列に働ける。
+    """
+    monkeypatch.setattr(dw, "REVIEW_DIR", tmp_path)
+    monkeypatch.setattr(dw, "HQ_BUSY_FLAG", tmp_path / "hq_busy.flag")
+    assert dw.hq_busy() is False                       # 旗なし = 走ってよい
+    dw.HQ_BUSY_FLAG.write_text("123 now", encoding="utf-8")
+    assert dw.hq_busy() is True
+    assert dw._dispatch("hq", dry_run=True, mode="implement")["status"] == "skip-hq-busy"
+    dw.HQ_BUSY_FLAG.unlink()
+    assert dw.hq_busy() is False
+
+
+def test_hq_busy_flag_expires(tmp_path, monkeypatch):
+    """旗の消し忘れで HQ が永久に止まらないこと (STALE で自動解除)。"""
+    monkeypatch.setattr(dw, "REVIEW_DIR", tmp_path)
+    monkeypatch.setattr(dw, "HQ_BUSY_FLAG", tmp_path / "hq_busy.flag")
+    dw.HQ_BUSY_FLAG.write_text("123 old", encoding="utf-8")
+    monkeypatch.setattr(dw, "HQ_BUSY_STALE_SEC", -1)   # 即失効させる
+    assert dw.hq_busy() is False
+    assert not dw.HQ_BUSY_FLAG.exists(), "失効した旗は片付ける"
 
 
 def test_implement_prompt_requires_tests_and_evidence():

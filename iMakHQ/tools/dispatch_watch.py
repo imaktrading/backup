@@ -25,11 +25,11 @@ import dispatch_worktree as dw  # noqa: E402
 
 POLL_SEC = 15          # 監視間隔
 DEBOUNCE_SEC = 20      # 依頼が「書き終わって静止」したと判断するまでの待ち
-# 同時に走らせる worktree 数。★2026-07-30: 3 では harvest / revise が待たされたため 5 に。
-# 自動実装の対象は hq を除く 5 worktree なので、5 なら **誰も待たない**。
-# 1 worktree = headless claude 1本。上げるほど課金と CPU を使うので、これ以上は上げない
-# (6 にしても hq は自動実装しないので意味がない)。
-MAX_PARALLEL = 5
+# 同時に走らせる worktree 数。★2026-07-30: 3 → 5 → 6。
+#   3 では harvest / revise が待たされた (実測)。その後 HQ も自動実装の対象にしたため、
+#   全 6 worktree が同時に走れる 6 にする。**上限が対象数を下回ると、そこが待ち行列になる**。
+#   1 worktree = headless claude 1本。上げるほど課金と CPU を使うので、対象数以上には上げない。
+MAX_PARALLEL = 6
 LOG = dw.REVIEW_DIR / "dispatch_watch.log"
 
 
@@ -123,6 +123,8 @@ def main() -> int:
             for wt in dw.TARGETS:
                 if wt in dw.NO_AUTO_IMPLEMENT:
                     continue
+                if wt == "hq" and dw.hq_busy():
+                    continue          # 窓口が同じ worktree を編集中 → 次の周回で
                 with guard:
                     if wt in inflight or len(inflight) >= MAX_PARALLEL:
                         continue

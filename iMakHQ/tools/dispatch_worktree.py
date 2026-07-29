@@ -86,9 +86,28 @@ DENY_TOOLS = ["Bash(git commit:*)", "Bash(git push:*)",
 #       2026-04/05 に同型事故3回)。「書いたら commit まで」が安全側。
 IMPLEMENT_DENY_TOOLS = ["Bash(git push:*)", "Bash(git checkout:*)",
                         "Bash(git switch:*)", "Bash(git reset:*)"]
-# HQ は Advisor と **同じ worktree (C:/dev/iMak)** を共有しており、窓口自身が編集中のことが
-# 多い。headless に同じ作業ツリーを触らせると衝突するので、自動実装の対象外にする。
-NO_AUTO_IMPLEMENT = {"hq"}
+# ★2026-07-30 改訂: HQ も自動実装の対象にする (ユーザー提案「HQ にも分散指示すれば」)。
+#   HQ は Advisor と **同じ worktree (C:/dev/iMak)** を共有するため、当初は対象外にしていたが、
+#   衝突するのは「窓口が編集している最中」だけ。**窓口が busy flag を立てている間だけ避ける**
+#   ことで、残り時間はHQも並列に働ける (= 窓口の手が空いている夜間・待ち時間も回る)。
+NO_AUTO_IMPLEMENT: set[str] = set()
+# 窓口 (Advisor/出品専任) が同じ worktree を編集中に立てる旗。存在する間 HQ の自動実装を止める。
+# 窓口は「編集を始める前に立てて、commit したら消す」。消し忘れても STALE で自動解除する。
+HQ_BUSY_FLAG = REVIEW_DIR / "hq_busy.flag"
+HQ_BUSY_STALE_SEC = 2 * 3600      # 旗の消し忘れで永久に止まらないよう 2h で自動失効
+
+
+def hq_busy() -> bool:
+    """窓口が C:/dev/iMak を編集中か (= HQ の自動実装を避けるべきか)。"""
+    try:
+        if not HQ_BUSY_FLAG.exists():
+            return False
+        if time.time() - HQ_BUSY_FLAG.stat().st_mtime > HQ_BUSY_STALE_SEC:
+            HQ_BUSY_FLAG.unlink(missing_ok=True)   # 消し忘れ → 自動解除 (止めっぱなしにしない)
+            return False
+        return True
+    except OSError:
+        return False
 
 
 LOCK_PATH = REVIEW_DIR / "dispatch.lock"
@@ -301,6 +320,9 @@ def _dispatch(wt: str, dry_run: bool, mode: str = "draft") -> dict:
     if mode == "implement":
         if wt in NO_AUTO_IMPLEMENT:
             return {"worktree": wt, "status": "skip-no-auto-impl", "n": 0}
+        if wt == "hq" and hq_busy():
+            # 窓口が同じ worktree を編集中 → 同時編集で壊すので今回は見送る (次の周回で再挑戦)
+            return {"worktree": wt, "status": "skip-hq-busy", "n": 0}
         todo = implement_for(wt)
         if not todo:
             return {"worktree": wt, "status": "skip-empty", "n": 0}
@@ -372,6 +394,17 @@ def main() -> int:
     except Exception:
         pass
     args = sys.argv[1:]
+    # 窓口が C:/dev/iMak を編集する前後に立てる/降ろす旗 (HQ の自動実装との同時編集を避ける)。
+    if "--busy" in args:
+        REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+        HQ_BUSY_FLAG.write_text(f"{os.getpid()} {datetime.now().isoformat()}\n", encoding="utf-8")
+        print(f"🚧 HQ busy 旗を立てた ({HQ_BUSY_FLAG.name})。HQ の自動実装は止まる"
+              f" (最長 {HQ_BUSY_STALE_SEC // 3600}h で自動失効)")
+        return 0
+    if "--free" in args:
+        HQ_BUSY_FLAG.unlink(missing_ok=True)
+        print("✅ HQ busy 旗を降ろした。HQ の自動実装が再開する")
+        return 0
     dry_run = "--dry-run" in args
     names = [a for a in args if not a.startswith("--")]
     if "--all" in args or not names:
