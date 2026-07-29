@@ -580,11 +580,55 @@ def compute_backurl_additions(existing, new_urls, max_slots=None):
     return full[:max_slots], added
 
 
-def _skip_iids_from_tab(rows):
-    """補URL確証スキップ タブ → itemID集合(純関数)。見送り/違うは再表示しない。"""
+# 確証スキップの cooldown (2026-07-29)。設計 (discussion/2026-07-24_..._design.md:65) は
+# 「cooldown付き skip台帳で一定期間再表示しない … 数日後再挑戦」だったが、**実装は期限なし**で
+# 一度でも外すと二度と補URLが付かなかった (= その出品は永久に丸腰)。
+# 「違う」の主因の一つは **正変種が今その日に売られていない**ことなので、時間を置けば解決する。
+CONFIRM_SKIP_COOLDOWN_DAYS = {
+    "違う": 7,        # 別変種/別カードしか無かった → 供給は入れ替わるので1週間で再挑戦
+    "見送り": 14,     # 高い/出品者不安 等の business 判断 → やや長め
+}
+CONFIRM_SKIP_COOLDOWN_DEFAULT = 7
+
+
+def _skip_row_active(reason, date_str, today):
+    """その台帳行がまだ「再表示しない」期間内か(純関数)。
+
+    日付が読めない行は **True (skip 継続)**。判定材料が無いのに再表示すると、
+    毎回同じものが出続けて目視が信用されなくなるため (安全側)。
+    """
+    days = CONFIRM_SKIP_COOLDOWN_DAYS.get((reason or "").strip(), CONFIRM_SKIP_COOLDOWN_DEFAULT)
+    try:
+        import datetime
+        age = (datetime.date.fromisoformat((today or "").strip())
+               - datetime.date.fromisoformat((date_str or "").strip())).days
+    except Exception:
+        return True
+    if age < 0:
+        return True          # 未来日付 = 壊れている → 触らない
+    return age < days
+
+
+def _skip_iids_from_tab(rows, today=None):
+    """補URL確証スキップ タブ → 「今は再表示しない」itemID集合(純関数)。
+
+    today を渡すと **cooldown 判定**する (期間を過ぎた行は集合に入らない = 再表示される)。
+    today 省略時は従来どおり全行を対象 (後方互換)。
+    台帳の行は消さない: 「いつ・なぜ外したか」の履歴は残す (再表示は判定だけで制御する)。
+    """
     if not rows or len(rows) < 2:
         return set()
-    return {(r[0] or "").strip() for r in rows[1:] if r and (r[0] or "").strip()}
+    out = set()
+    for r in rows[1:]:
+        if not r or not (r[0] or "").strip():
+            continue
+        if today is not None:
+            reason = r[3] if len(r) > 3 else ""
+            date_str = r[4] if len(r) > 4 else ""
+            if not _skip_row_active(reason, date_str, today):
+                continue          # cooldown 満了 → 再表示する
+        out.add((r[0] or "").strip())
+    return out
 
 
 def _merge_skip_rows(existing_rows, new_rows, header):
@@ -683,10 +727,17 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     targets = select_backfill_targets(vals, max_backups=max_backups)
     cache = _load_cache()
 
-    # スキップ台帳(見送り/違う)= 再表示しない
+    # スキップ台帳(見送り/違う)= cooldown 期間中だけ再表示しない (2026-07-29)。
+    # 期限なしで隠していたため、一度外した出品は永久に補URLが付かなかった。
+    # 「違う」の主因の一つは *その日* 正変種が売られていないことなので、時間で解決する。
     try:
         from sheet_io import read_tab
-        skip_iids = _skip_iids_from_tab(read_tab(CONFIRM_SKIP_TAB))
+        _skip_rows = read_tab(CONFIRM_SKIP_TAB)
+        skip_iids = _skip_iids_from_tab(_skip_rows, today=today)
+        _all_skip = _skip_iids_from_tab(_skip_rows)
+        _revived = len(_all_skip) - len(skip_iids)
+        if _revived:
+            print(f"  ♻ cooldown 満了 {_revived}件 → 再表示対象に復帰 (台帳の行は残す)")
     except Exception:
         skip_iids = set()
 

@@ -116,6 +116,43 @@ def test_skip_iids_from_tab():
     assert _skip_iids_from_tab([["itemID"]]) == set()
 
 
+# --- 確証スキップの cooldown (2026-07-29) ---------------------------------
+# 設計は「cooldown付きで一定期間だけ再表示しない」だったが、実装が期限なしだったため
+# 一度「違う」を押した出品は **永久に補URLが付かない** 状態だった (= 丸腰のまま放置)。
+# 「違う」の主因の一つは *その日* 正変種が売られていないことなので、時間で解決する。
+
+_H = ["itemID", "cert", "title", "理由", "日付"]
+
+
+def _skip_rows(*rows):
+    return [_H] + [list(r) for r in rows]
+
+
+def test_skip_cooldown_expires_and_reshows():
+    rows = _skip_rows(["358a", "1", "t", "違う", "2026-07-01"])
+    assert _skip_iids_from_tab(rows, today="2026-07-05") == {"358a"}   # 4日 = 期間内
+    assert _skip_iids_from_tab(rows, today="2026-07-09") == set()      # 8日 = 満了で復帰
+
+
+def test_skip_cooldown_is_longer_for_miokuri():
+    """見送り(高い/出品者不安=business判断)は「違う」より長く伏せる。"""
+    rows = _skip_rows(["358a", "1", "t", "見送り", "2026-07-01"])
+    assert _skip_iids_from_tab(rows, today="2026-07-09") == {"358a"}   # 8日 = まだ期間内
+    assert _skip_iids_from_tab(rows, today="2026-07-16") == set()      # 15日 = 満了
+
+
+def test_skip_unparseable_date_stays_hidden():
+    """日付が読めない行は skip 継続 (判定材料なしで再表示すると毎回同じものが出る)。"""
+    rows = _skip_rows(["358a", "1", "t", "違う", ""], ["358b", "1", "t", "違う", "こわれ"])
+    assert _skip_iids_from_tab(rows, today="2026-07-09") == {"358a", "358b"}
+
+
+def test_skip_without_today_keeps_legacy_behavior():
+    """today 省略 = 従来どおり全行対象 (呼出側が明示した時だけ cooldown が効く)。"""
+    rows = _skip_rows(["358a", "1", "t", "違う", "2020-01-01"])
+    assert _skip_iids_from_tab(rows) == {"358a"}
+
+
 def test_merge_skip_rows_new_wins_on_dupe_itemid():
     existing = [["itemID", "cert", "title", "理由", "日付"], ["358a", "1", "t", "見送り", "d1"]]
     new = [["358a", "1", "t", "違う", "d2"]]     # 同itemID → 新規優先
