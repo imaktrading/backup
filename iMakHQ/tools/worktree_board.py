@@ -76,6 +76,49 @@ def pending_for(worktree: str, recent_days: int = RECENT_DAYS):
     return mine, theirs, drafts
 
 
+# ★2026-07-30: 実装が「人がそのセッションを開くまで」動かない問題の解消。
+# 窓口が draft を検算して `_response.md` に **実装 GO** と書いても、response は「決着済」
+# 扱いなので二度と dispatch されず、**誰も実装しないまま滞留**していた。
+# (ユーザー指摘:「閉じていいと言ったから立ち上げてない」= セッションを開く前提が崩れている)
+# → GO と書かれた response を **実装キュー**として拾い、担当に実装させる。
+# ★マーカーは **明示トークン1つだけ**にする (2026-07-30)。
+#   最初「実装 GO」等の自然文で拾ったら、**7/22・7/26 の完了済み回答まで実装キューに入った**。
+#   誤って再実装させると破壊になりうるので、窓口が意図的に書いた時だけ動くようにする。
+#   窓口はこのトークンを、実装させたい `_response.md` の本文に1行入れる。
+IMPLEMENT_MARKERS = ("[IMPLEMENT-GO]",)
+# 実装完了の印。担当がこれを書いたらキューから外れる (証拠付きの完了報告を兼ねる)。
+IMPLEMENT_DONE_SUFFIXES = ("_done", "_applied")
+
+
+def implement_for(worktree: str, recent_days: int = RECENT_DAYS):
+    """実装させるべき `_response.md` を返す (窓口が GO を書いたもの / 未完了のみ)。
+
+    条件 (すべて満たすもののみ):
+      - `*_response.md` である (= 窓口が検算して昇格させた正式回答)
+      - 本文に実装 GO の印がある (IMPLEMENT_MARKERS)
+      - `<stem>_done.md` / `_applied.md` がまだ無い
+    """
+    d = DATA_ROOT / worktree / "requests"
+    if not d.is_dir():
+        return []
+    cutoff = time.time() - recent_days * 86400
+    files = [p for p in d.glob("*.md") if p.stat().st_mtime >= cutoff]
+    stems = {p.stem for p in files}
+    out = []
+    for p in sorted(files, key=lambda x: -x.stat().st_mtime):
+        if not p.stem.lower().endswith("_response"):
+            continue
+        if any(f"{p.stem}{sfx}" in stems for sfx in IMPLEMENT_DONE_SUFFIXES):
+            continue
+        try:
+            body = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if any(m in body for m in IMPLEMENT_MARKERS):
+            out.append(p)
+    return out
+
+
 def _age(ts: float) -> str:
     h = (time.time() - ts) / 3600
     if h < 1:

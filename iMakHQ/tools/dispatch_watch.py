@@ -40,15 +40,17 @@ def log(msg: str) -> None:
         pass
 
 
-def _run_one(wt: str, names: str, done: dict, fresh_names: list, inflight: set, lock) -> None:
+def _run_one(wt: str, names: str, done: dict, fresh_names: list, inflight: set, lock,
+             mode: str = "draft") -> None:
     """1 worktree 分を最後まで走らせる (別スレッド)。例外は握って常駐を守る。"""
     try:
-        log(f"[{wt}] 新規 {len(fresh_names)}件 検出 → dispatch: {names}")
+        _what = "実装" if mode == "implement" else "新規"
+        log(f"[{wt}] {_what} {len(fresh_names)}件 検出 → dispatch: {names}")
         if not dw.acquire_lock(wt):
             log(f"[{wt}] 同じ worktree の dispatch が実行中 → 次の周回で再試行")
             return
         try:
-            r = dw._dispatch(wt, dry_run=False)
+            r = dw._dispatch(wt, dry_run=False, mode=mode)
             log(f"[{wt}] 完了: {r.get('status')} / {r.get('summary', '')}")
             for v in r.get("violations", []):
                 log(f"[{wt}] ⚠️ {v}")
@@ -70,6 +72,7 @@ def main() -> int:
         pass
     import threading
     done: dict[str, set[str]] = {wt: set() for wt in dw.TARGETS}
+    impl_done: dict[str, set[str]] = {wt: set() for wt in dw.TARGETS}
     seen_at: dict[tuple[str, str], float] = {}
     inflight: set[str] = set()          # 今走っている worktree
     guard = threading.Lock()
@@ -109,6 +112,28 @@ def main() -> int:
                     inflight.add(wt)
                 threading.Thread(target=_run_one, daemon=True,
                                  args=(wt, names, done, fresh_names, inflight, guard)).start()
+
+            # ★2026-07-30: 実装キュー。窓口が `_response.md` に「実装 GO」と書いた案件を
+            # 担当が自分で実装する。従来はここが **人がセッションを開くまで動かない**
+            # 待ち行列になっており、GO を出した案件が全部滞留していた。
+            for wt in dw.TARGETS:
+                if wt in dw.NO_AUTO_IMPLEMENT:
+                    continue
+                with guard:
+                    if wt in inflight or len(inflight) >= MAX_PARALLEL:
+                        continue
+                todo = dw.implement_for(wt)
+                fresh = [p for p in todo if p.name not in impl_done[wt]]
+                if not fresh:
+                    continue
+                names = ", ".join(p.name for p in fresh)
+                fresh_names = [p.name for p in fresh]
+                with guard:
+                    inflight.add(wt)
+                    impl_done[wt].update(fresh_names)   # 走らせたら再投入しない (完了印は担当が書く)
+                threading.Thread(target=_run_one, daemon=True,
+                                 args=(wt, names, impl_done, fresh_names, inflight, guard,
+                                       "implement")).start()
         except Exception as e:                      # 常駐なので落とさない
             log(f"!! 例外 (継続します): {type(e).__name__}: {e}")
         time.sleep(POLL_SEC)

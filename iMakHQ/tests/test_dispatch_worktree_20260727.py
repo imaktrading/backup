@@ -147,6 +147,50 @@ def test_watcher_runs_worktrees_in_parallel():
     assert "dw.acquire_lock(wt)" in src, "worktree 単位の lock を使っていない"
 
 
+def test_implement_queue_requires_explicit_token(tmp_path, monkeypatch):
+    """実装キューは **明示トークン [IMPLEMENT-GO]** がある response だけ拾う (2026-07-30)。
+
+    最初「実装 GO」等の自然文で拾ったら 7/22・7/26 の **完了済み回答まで**キューに入った。
+    誤って再実装させると破壊になりうるので、窓口が意図的に書いた時だけ動かす。
+    """
+    d = tmp_path / "catalog" / "requests"
+    d.mkdir(parents=True)
+    (d / "a_response.md").write_text("実装 GO と自然文で書いただけ", encoding="utf-8")
+    (d / "b_response.md").write_text("本文\n\n[IMPLEMENT-GO]\n", encoding="utf-8")
+    (d / "c_response.md").write_text("[IMPLEMENT-GO]", encoding="utf-8")
+    (d / "c_response_done.md").write_text("実装済み", encoding="utf-8")   # 完了印あり
+    (d / "d.md").write_text("[IMPLEMENT-GO]", encoding="utf-8")           # response でない
+    monkeypatch.setattr(wb, "DATA_ROOT", tmp_path)
+
+    got = {p.name for p in wb.implement_for("catalog")}
+    assert got == {"b_response.md"}, f"実装キューの条件が緩い/厳しすぎる: {got}"
+
+
+def test_implement_mode_allows_commit_but_never_push():
+    """実装モードは commit を許し、push/checkout/reset は禁止のまま。
+
+    未 commit で放置する方が危険 (branch 操作で消える。2026-04/05 に同型事故3回)。
+    一方 push/reset は履歴と他セッションを壊すので禁止を維持する。
+    """
+    assert "Bash(git commit:*)" in dw.DENY_TOOLS               # 下書きモードは commit も禁止
+    assert "Bash(git commit:*)" not in dw.IMPLEMENT_DENY_TOOLS  # 実装モードは commit 可
+    for ng in ("Bash(git push:*)", "Bash(git reset:*)", "Bash(git checkout:*)"):
+        assert ng in dw.IMPLEMENT_DENY_TOOLS
+
+
+def test_hq_is_excluded_from_auto_implement():
+    """HQ は Advisor と同じ worktree を共有するので自動実装しない (同時編集で壊れる)。"""
+    assert "hq" in dw.NO_AUTO_IMPLEMENT
+    assert dw._dispatch("hq", dry_run=True, mode="implement")["status"] == "skip-no-auto-impl"
+
+
+def test_implement_prompt_requires_tests_and_evidence():
+    p = dw._build_implement_prompt("catalog", [Path("x_response.md")])
+    for must in ("テストを書く", "1つでも赤いなら commit しない", "_done.md",
+                 "git push / checkout / switch / reset は禁止", "_question.md"):
+        assert must in p
+
+
 def test_liveness_check_uses_win32_api_not_os_kill():
     """Windows の os.kill(pid, 0) は TerminateProcess = 生存確認のつもりで相手を殺す。
 

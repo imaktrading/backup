@@ -49,7 +49,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from worktree_board import pending_for  # noqa: E402
+from worktree_board import implement_for, pending_for  # noqa: E402
 
 DATA_ROOT = Path(r"C:\dev\iMak_data")
 REVIEW_DIR = Path(r"C:\dev\iMak\iMakHQ\review_logs")
@@ -76,6 +76,19 @@ TIMEOUT_SEC = 1800  # 1 worktree あたりの上限 (30分)
 #   → ① CLI の deny 指定で commit/push を落とす ② 実行後に共有領域を突合して機械的に是正する。
 DENY_TOOLS = ["Bash(git commit:*)", "Bash(git push:*)",
               "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)"]
+
+# ★2026-07-30 実装モード。窓口が `_response.md` に「実装 GO」と書いた案件を担当が実装する。
+#   背景: 実装が「人がそのセッションを開くまで」動かず、GO を出した案件が全部滞留していた
+#   (ユーザーは窓口経由で回す運用なので、各 worktree を開く前提そのものが成り立たない)。
+#   下書きモードとの違いは **コード修正と git commit を許す**こと。ただし:
+#     - push / checkout / switch / reset は引き続き禁止 (履歴と他セッションを壊さない)
+#     - commit は **許可する**。未 commit のまま放置する方が危険 (branch 操作で消える。
+#       2026-04/05 に同型事故3回)。「書いたら commit まで」が安全側。
+IMPLEMENT_DENY_TOOLS = ["Bash(git push:*)", "Bash(git checkout:*)",
+                        "Bash(git switch:*)", "Bash(git reset:*)"]
+# HQ は Advisor と **同じ worktree (C:/dev/iMak)** を共有しており、窓口自身が編集中のことが
+# 多い。headless に同じ作業ツリーを触らせると衝突するので、自動実装の対象外にする。
+NO_AUTO_IMPLEMENT = {"hq"}
 
 
 LOCK_PATH = REVIEW_DIR / "dispatch.lock"
@@ -251,14 +264,53 @@ def _build_prompt(wt: str, pending: list[Path]) -> str:
     )
 
 
-def _dispatch(wt: str, dry_run: bool) -> dict:
-    mine, _theirs, _drafts = pending_for(wt)
-    label = TARGETS[wt][2]
-    if not mine:
-        print(f"[{label}] 未処理なし → 起動しない")
-        return {"worktree": wt, "status": "skip-empty", "n": 0}
+def _build_implement_prompt(wt: str, responses: list) -> str:
+    """実装モードの prompt。GO 済の正式回答を **実装して commit まで**やらせる。"""
+    workdir, branch, label = TARGETS[wt]
+    files = "\n".join(f"  - {p}" for p in responses)
+    return (
+        f"あなたは {label} ({wt}) の担当 Claude セッションです。窓口から headless で起動されました。\n"
+        f"**窓口が検算して『実装 GO』を出した案件を実装してください。**\n\n"
+        f"【あなたの領域】{workdir} (branch {branch})。他 worktree は読取も含め触らないこと。\n\n"
+        f"【対象】{len(responses)} 件:\n{files}\n\n"
+        "【やること】\n"
+        "1. 各回答書を読み、**指示された実装をそのまま行う**。設計を勝手に変えない。\n"
+        "   回答書に条件・追加要求 (テスト化・件数実測 等) が書いてあれば **必ず満たす**。\n"
+        "2. **テストを書く**。回帰テストの無い実装は未完成とみなす。\n"
+        "3. **テストを全部通す** (自 worktree の pytest)。1つでも赤いなら commit しない。\n"
+        "4. **git commit する** (自分が触ったファイルだけ明示 add。`git add -A` は禁止)。\n"
+        "   commit message に『何を・なぜ』と回答書の file 名を書く。\n"
+        "5. 完了したら共有領域に **`<回答書のfile名>_done.md`** を書く。中身は証拠:\n"
+        "   - commit hash / 変更した file:line\n"
+        "   - **テスト実行コマンドとその出力の要点** (何件 pass したか)\n"
+        "   - 回答書の追加要求をどう満たしたか\n"
+        "   - 実装できなかった部分があれば **明示**する (黙って落とさない)\n\n"
+        "【厳守・禁止】\n"
+        "- **git push / checkout / switch / reset は禁止**。commit だけしてよい。\n"
+        "- 破壊的・不可逆・外向きの操作 (本番入稿・eBay revision・一括取下げ・DB破壊的更新・"
+        "スプシの一括書換) は禁止。\n"
+        "- **判断に迷ったら実装せず** `<回答書のfile名>_question.md` に何が分からないかを書いて止める。\n"
+        "  推測で実装する方が、質問で止まるより遥かに悪い。\n"
+        "- 回答書に無いことを『ついでに』直さない。範囲を勝手に広げない。\n\n"
+        "【出力】最後に1行で `SUMMARY: 実装N件 / commit M件 / question K件` を出力すること。"
+    )
 
-    prompt = _build_prompt(wt, mine)
+
+def _dispatch(wt: str, dry_run: bool, mode: str = "draft") -> dict:
+    label = TARGETS[wt][2]
+    if mode == "implement":
+        if wt in NO_AUTO_IMPLEMENT:
+            return {"worktree": wt, "status": "skip-no-auto-impl", "n": 0}
+        todo = implement_for(wt)
+        if not todo:
+            return {"worktree": wt, "status": "skip-empty", "n": 0}
+        mine, prompt = todo, _build_implement_prompt(wt, todo)
+    else:
+        mine, _theirs, _drafts = pending_for(wt)
+        if not mine:
+            print(f"[{label}] 未処理なし → 起動しない")
+            return {"worktree": wt, "status": "skip-empty", "n": 0}
+        prompt = _build_prompt(wt, mine)
     workdir = TARGETS[wt][0]
     if not os.path.isdir(workdir):
         print(f"[{label}] ⚠️ 作業ディレクトリ不在: {workdir} → skip")
@@ -277,8 +329,10 @@ def _dispatch(wt: str, dry_run: bool) -> dict:
 
     REVIEW_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-    log_path = REVIEW_DIR / f"dispatch_{stamp}_{wt}.log"
-    print(f"[{label}] {len(mine)}件 を headless に委譲 (最大{TIMEOUT_SEC // 60}分)… → {log_path.name}")
+    _tag = "impl" if mode == "implement" else "draft"
+    log_path = REVIEW_DIR / f"dispatch_{stamp}_{wt}_{_tag}.log"
+    print(f"[{label}] {len(mine)}件 を headless に委譲 ({_tag} / 最大{TIMEOUT_SEC // 60}分)… "
+          f"→ {log_path.name}")
 
     before = _snapshot(_requests_dir(wt))     # ★実行前の共有領域スナップショット
     t0 = time.time()
@@ -287,9 +341,10 @@ def _dispatch(wt: str, dry_run: bool) -> dict:
     #   窓が出ると閉じられ、閉じると子プロセスが 0xC000013A で死ぬ (昨夜の cron 事故と同型) ので必ず抑止する。
     no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
+        _deny = IMPLEMENT_DENY_TOOLS if mode == "implement" else DENY_TOOLS
         res = subprocess.run(
             [claude_exe, "-p", prompt, "--dangerously-skip-permissions",
-             "--disallowedTools", *DENY_TOOLS,
+             "--disallowedTools", *_deny,
              "--add-dir", str(DATA_ROOT)],
             cwd=workdir, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=TIMEOUT_SEC,
@@ -301,7 +356,8 @@ def _dispatch(wt: str, dry_run: bool) -> dict:
         out, status = "(timeout)", "timeout"
     log_path.write_text(out, encoding="utf-8")
 
-    violations = _enforce_draft_only(wt, before)   # ★事後の機械的是正
+    # 実装モードでは `_response.md` の出現は正常 (窓口が書いたものを実装しただけ) なので検査しない
+    violations = [] if mode == "implement" else _enforce_draft_only(wt, before)
     summary = next((ln for ln in reversed(out.splitlines()) if ln.startswith("SUMMARY:")), "")
     print(f"[{label}] {status} / {int(time.time() - t0)}秒 / {summary or '(SUMMARY 行なし)'}")
     for v in violations:
