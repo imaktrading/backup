@@ -168,6 +168,7 @@ def main():
             print(f"♻ {_WAIT_TAB}から {_merged}件を再チェックに合流(蓄積分・供給は動的)")
     except Exception as _e:
         print(f"⚠ {_WAIT_TAB}読込skip ({type(_e).__name__}: {_e})")
+    _mp._quiet_chromedriver()      # chromedriver の黒窓を出さない (2026-07-30)
     opts = uc.ChromeOptions()
     opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
     opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1000")

@@ -31,6 +31,11 @@ CATEGORY = "G-SHOCK"
 def fetch_mercari_new(models):
     """各型番の メルカリ 新品・未使用 on_sale 最安 → {idx: (price, url, name)}。"""
     import undetected_chromedriver as uc
+    try:                                   # chromedriver の黒窓を出さない (2026-07-30)
+        from mercari_psa_resource import _quiet_chromedriver
+        _quiet_chromedriver()
+    except Exception:
+        pass
     opts = uc.ChromeOptions()
     opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
     opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1400")

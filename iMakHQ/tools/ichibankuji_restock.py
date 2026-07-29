@@ -30,7 +30,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakeBayAPI")))
 
 import sheet_io
-from mercari_psa_resource import parse_mercari_items, parse_image_search_results, _chrome_major
+from mercari_psa_resource import (parse_mercari_items, parse_image_search_results, _chrome_major,
+                                  _quiet_chromedriver)
 from psa_resource_html import mercari_image_url, shops_image_large
 from viewer_zoom import ZOOM_CSS, ZOOM_JS, ZOOM_OVERLAY, zoom_button
 from ebay_getitem_images import fetch_listing_images
@@ -642,6 +643,7 @@ def _make_driver(headless=False):
     import undetected_chromedriver as uc
     os.makedirs(MERCARI_PROFILE_DIR, exist_ok=True)
     maj = _chrome_major()
+    _quiet_chromedriver()          # chromedriver の黒窓を出さない (2026-07-30)
     last = None
     for attempt in range(3):
         try:

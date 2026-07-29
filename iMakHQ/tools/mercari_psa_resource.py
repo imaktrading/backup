@@ -395,6 +395,20 @@ def build_input_from_funnel():
     return out
 
 
+def _quiet_chromedriver():
+    """chromedriver の黒窓を抑止 (共有ヘルパへ委譲・冪等)。失敗しても走行は止めない。
+
+    2026-07-30: 無人 cron 中に `undetected_chromedriver.exe` のコンソール窓が出っぱなしになり
+    ユーザーから指摘。窓を閉じられると子プロセスが道連れで死ぬ経路でもあるため塞ぐ。
+    """
+    try:
+        sys.path.insert(0, r"C:/dev/iMak/iMakeBayAPI")
+        from chrome_util import silence_chromedriver_console
+        return silence_chromedriver_console()
+    except Exception:
+        return False
+
+
 def _chrome_major():
     """インストール済 Chrome のメジャー版を取得 (失敗時 None = uc自動検出に委ねる)。
 
@@ -717,6 +731,8 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
         # として最も弾かれやすかった。ジョブごとに別ディレクトリなので他ジョブとロックが競合しない。
         # **ログインはしない**(仕入アカBAN→仕入不能を避ける。一番くじと同方針)。
         # profile が他プロセスに掴まれている等で起動できない時は一時profileへ fallback(走行を止めない)。
+        _quiet_chromedriver()          # ★黒窓を出さない(無人cron中に出っぱなしになる・2026-07-30)
+
         def _mk(profile_dir):
             opts = uc.ChromeOptions()
             opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
