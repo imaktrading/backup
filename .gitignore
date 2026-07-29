@@ -159,3 +159,9 @@ iMakAdvisor/*.pptx
 
 # RESTOCK 用 Chrome profile (runtime・再生成可)
 iMakHQ/chrome_profile_psa_restock/
+
+# dispatch (常駐 watcher / worktree 委譲) の実行時生成物 — 再生成可・履歴に不要
+# 2026-07-29: dispatch.lock を commit すると別プロセスが「実行中」と誤認して永久に止まる
+iMakHQ/review_logs/dispatch.lock
+iMakHQ/review_logs/dispatch_*.log
+iMakHQ/review_logs/dispatch_watch.log
