@@ -62,5 +62,22 @@ def test_draft_files_are_not_redispatched(tmp_path, monkeypatch):
 
 
 def test_targets_cover_all_worker_worktrees():
-    """CLAUDE.md の worktree 表と一致していること (増減時に気づけるように)。"""
-    assert set(dw.TARGETS) == {"catalog", "dedupe", "inventory", "harvest", "revise"}
+    """CLAUDE.md の worktree 表 + HQ と一致していること (増減時に気づけるように)。
+
+    2026-07-29: `hq` を追加。HQ は専用 worktree を持たず Advisor と C:/dev/iMak を共有するため
+    当初は対象外にしていたが、hq/requests の依頼が誰にも読まれず 43h 放置された。
+    止まり続けるより同一 worktree の衝突リスクを取る、というユーザー判断。
+    """
+    assert set(dw.TARGETS) == {"catalog", "dedupe", "inventory", "harvest", "revise", "hq"}
+    # HQ だけは他と違い専用 worktree が無い = Advisor と同居。ここが変わったら気づけるように固定。
+    assert dw.TARGETS["hq"][0] == r"C:\dev\iMak"
+
+
+def test_dispatch_uses_no_window_on_windows():
+    """claude.exe を窓なしで起動すること (pythonw 常駐から起動すると黒窓が出っぱなしになる)。
+
+    窓が出る → ユーザーが閉じる → 子プロセスが 0xC000013A で即死、という事故経路を塞ぐため。
+    """
+    src = Path(dw.__file__).read_text(encoding="utf-8")
+    assert "CREATE_NO_WINDOW" in src
+    assert "creationflags=no_window" in src

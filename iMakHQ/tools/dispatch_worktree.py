@@ -59,6 +59,12 @@ TARGETS = {
     "inventory": (r"C:\dev\iMak_inventory", "feature/inventory-phase1", "監視くん"),
     "harvest": (r"C:\dev\iMak_harvest", "feature/harvest-phase1", "抽出くん"),
     "revise": (r"C:\dev\iMak_revise", "feature/revise-phase1", "リバイスくん"),
+    # ★HQ(出品専任) は **Advisor と同じ worktree (C:/dev/iMak)** を共有している (既知の灰色地帯)。
+    #   他の5つと違い専用 worktree が無いため、headless が Advisor と同じフォルダ・同じ .git/index で動く。
+    #   それでも入れる理由: HQ 宛の依頼が誰にも読まれず 43h 止まった (2026-07-29)。
+    #   縛り: draft のみ / commit は --disallowedTools で拒否 / コード修正は prompt で禁止。
+    #   → 未コミットの編集が現れたら `git status` で気づける。恒久策は HQ 専用 worktree の切出し。
+    "hq": (r"C:\dev\iMak", "master", "出品専任(HQ)"),
 }
 TIMEOUT_SEC = 1800  # 1 worktree あたりの上限 (30分)
 
@@ -206,6 +212,10 @@ def _dispatch(wt: str, dry_run: bool) -> dict:
 
     before = _snapshot(_requests_dir(wt))     # ★実行前の共有領域スナップショット
     t0 = time.time()
+    # ★CREATE_NO_WINDOW: 親が pythonw (コンソール無し) だと claude.exe が**自前のコンソール窓を作る**。
+    #   常駐 watcher から起動すると画面に黒窓が出っぱなしになる (2026-07-29 ユーザー報告)。
+    #   窓が出ると閉じられ、閉じると子プロセスが 0xC000013A で死ぬ (昨夜の cron 事故と同型) ので必ず抑止する。
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         res = subprocess.run(
             [claude_exe, "-p", prompt, "--dangerously-skip-permissions",
@@ -213,6 +223,7 @@ def _dispatch(wt: str, dry_run: bool) -> dict:
              "--add-dir", str(DATA_ROOT)],
             cwd=workdir, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=TIMEOUT_SEC,
+            creationflags=no_window,
         )
         out = (res.stdout or "") + (("\n[stderr]\n" + res.stderr) if res.stderr else "")
         status = "ok" if res.returncode == 0 else f"exit{res.returncode}"
