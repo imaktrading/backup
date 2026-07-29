@@ -223,6 +223,23 @@ def main() -> int:
     print("\n=== dispatch 結果 ===")
     for r in results:
         print(f"- {r['worktree']}: {r['status']} ({r['n']}件) {r.get('summary', '')}")
+    # 無人 (cron) 実行だと画面に何も残らないため、実行サマリを必ずファイルに落とす。
+    # 窓口は次に開いた時にこれを見れば「誰が何件処理したか」が分かる。
+    if not dry_run:
+        try:
+            REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+            lines = [f"# dispatch 実行サマリ {stamp}", ""]
+            for r in results:
+                lines.append(f"- {r['worktree']}: {r['status']} ({r['n']}件) {r.get('summary', '')}")
+                for v in r.get("violations", []):
+                    lines.append(f"    ⚠️ {v}")
+            total = sum(r["n"] for r in results)
+            lines += ["", f"合計 {total}件 を委譲。draft は窓口レビュー後に `_response.md` へ昇格すること。"]
+            (REVIEW_DIR / f"dispatch_summary_{stamp}.md").write_text(
+                "\n".join(lines), encoding="utf-8")
+        except OSError as e:
+            print(f"(サマリ書込に失敗: {e})")
     all_v = [(r["worktree"], v) for r in results for v in r.get("violations", [])]
     if all_v:
         print(f"\n⚠️ dispatch 中に増えた `_response.md` {len(all_v)}件 (**自動では触っていない**)")
