@@ -1,20 +1,20 @@
 @echo off
 REM ====================================================================
-REM PSA Cloudflare çªç ´ç”¨ chrome profile æ‰‹å‹• setup
+REM PSA Cloudflare “Ë”j—p chrome profile è“® setup
 REM
-REM ç”¨é€”: psa_to_csv ãŒ PSA Cloudflare bot æ¤œå‡ºã§å¤±æ•—ã™ã‚‹æ™‚ã€
-REM       user ãŒ 1 å›æ‰‹å‹•ã§ Cloudflare ãƒã‚§ãƒƒã‚¯ ã‚¯ãƒªã‚¢ â†’ cookie ä¿å­˜ã€‚
-REM       ä»¥é™ 24-72h ã¯ psa_to_csv ãŒè‡ªå‹• scrape é€šã‚‹æƒ³å®šã€‚
+REM —p“r: psa_to_csv ‚ª PSA Cloudflare bot ŒŸo‚Å¸”s‚·‚éA
+REM       user ‚ª 1 ‰ñè“®‚Å Cloudflare ƒ`ƒFƒbƒN ƒNƒŠƒA ¨ cookie •Û‘¶B
+REM       ˆÈ~ 24-72h ‚Í psa_to_csv ‚ª©“® scrape ’Ê‚é‘z’èB
 REM
-REM æ‰‹é †:
-REM   1. ã“ã®ãƒãƒƒãƒã‚’ãƒ€ãƒ–ãƒ«ã‚¯ãƒªãƒƒã‚¯
-REM   2. Chrome ãŒ PSA cert ãƒšãƒ¼ã‚¸ã‚’é–‹ã
-REM   3. Cloudflare ã®ã€ŒI'm not a robotã€ ãƒã‚§ãƒƒã‚¯ãƒœãƒƒã‚¯ã‚¹ãŒã‚ã‚Œã° click
-REM   4. PSA cert è©³ç´°ãƒšãƒ¼ã‚¸ (= ã‚°ãƒ¬ãƒ¼ãƒ‰ç­‰) ãŒè¦‹ãˆã‚Œã°æˆåŠŸ
-REM   5. Chrome ã‚’é–‰ã˜ã‚‹ (= cookie ãŒ profile ã«ä¿å­˜ã•ã‚Œã‚‹)
-REM   6. psa_to_csv ã‚’å†èµ° â†’ Cloudflare çªç ´ã§ãã‚‹ã‹ç¢ºèª
+REM è‡:
+REM   1. ‚±‚Ìƒoƒbƒ`‚ğƒ_ƒuƒ‹ƒNƒŠƒbƒN
+REM   2. Chrome ‚ª PSA cert ƒy[ƒW‚ğŠJ‚­
+REM   3. Cloudflare ‚ÌuI'm not a robotv ƒ`ƒFƒbƒNƒ{ƒbƒNƒX‚ª‚ ‚ê‚Î click
+REM   4. PSA cert Ú×ƒy[ƒW (= ƒOƒŒ[ƒh“™) ‚ªŒ©‚¦‚ê‚Î¬Œ÷
+REM   5. Chrome ‚ğ•Â‚¶‚é (= cookie ‚ª profile ‚É•Û‘¶‚³‚ê‚é)
+REM   6. psa_to_csv ‚ğÄ‘– ¨ Cloudflare “Ë”j‚Å‚«‚é‚©Šm”F
 REM
-REM å†å®Ÿè¡Œã‚¿ã‚¤ãƒŸãƒ³ã‚°: psa_to_csv ã§å†ã³ Cloudflare å¤±æ•—ãŒå‡ºãŸã‚‰ (= 24-72h å¾Œæƒ³å®š)
+REM ÄÀsƒ^ƒCƒ~ƒ“ƒO: psa_to_csv ‚ÅÄ‚Ñ Cloudflare ¸”s‚ªo‚½‚ç (= 24-72h Œã‘z’è)
 REM ====================================================================
 
 set PROFILE_DIR=C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa
@@ -25,7 +25,7 @@ if not exist "%PROFILE_DIR%" mkdir "%PROFILE_DIR%"
 start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="%PROFILE_DIR%" --no-first-run --no-default-browser-check --disable-features=ChromeWhatsNewUI "%TEST_CERT_URL%"
 
 echo.
-echo Chrome èµ·å‹•æ¸ˆã€‚ PSA cert ãƒšãƒ¼ã‚¸ã§ Cloudflare ãƒã‚§ãƒƒã‚¯ ã‚¯ãƒªã‚¢å¾Œã€ Chrome ã‚’é–‰ã˜ã¦ãã ã•ã„ã€‚
-echo cookie ãŒä»¥ä¸‹ã«ä¿å­˜ã•ã‚Œã¾ã™: %PROFILE_DIR%
+echo Chrome ‹N“®ÏB PSA cert ƒy[ƒW‚Å Cloudflare ƒ`ƒFƒbƒN ƒNƒŠƒAŒãA Chrome ‚ğ•Â‚¶‚Ä‚­‚¾‚³‚¢B
+echo cookie ‚ªˆÈ‰º‚É•Û‘¶‚³‚ê‚Ü‚·: %PROFILE_DIR%
 echo.
 pause

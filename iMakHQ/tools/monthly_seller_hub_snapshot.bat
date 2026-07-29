@@ -1,19 +1,19 @@
 @echo off
-REM iMak Trading Japan - Seller Hub æœˆæ¬¡ snapshot (Windows ã‚¿ã‚¹ã‚¯ã‚¹ã‚±ã‚¸ãƒ¥ãƒ¼ãƒ©ç”¨)
+REM iMak Trading Japan - Seller Hub ŒŸ snapshot (Windows ƒ^ƒXƒNƒXƒPƒWƒ…[ƒ‰—p)
 REM
-REM æœˆåˆ 1 æ—¥ 04:00 ã« Windows ã‚¿ã‚¹ã‚¯ã‚¹ã‚±ã‚¸ãƒ¥ãƒ¼ãƒ©ã§å®Ÿè¡Œã™ã‚‹æƒ³å®š (Inventory cron 4h ã¨è¢«ã‚‰ãªã„æ™‚åˆ»)ã€‚
-REM Active / Ended ä¸¡æ–¹ã‚’å…¨ãƒšãƒ¼ã‚¸ scrape ã—ã¦ iMak_data/seller_hub/ ã«æ°¸ç¶šä¿å­˜ã™ã‚‹ã€‚
+REM Œ‰ 1 “ú 04:00 ‚É Windows ƒ^ƒXƒNƒXƒPƒWƒ…[ƒ‰‚ÅÀs‚·‚é‘z’è (Inventory cron 4h ‚Æ”í‚ç‚È‚¢)B
+REM Active / Ended —¼•û‚ğ‘Sƒy[ƒW scrape ‚µ‚Ä iMak_data/seller_hub/ ‚É‰i‘±•Û‘¶‚·‚éB
 REM
-REM ãƒ­ã‚°å‡ºåŠ›: C:\dev\iMak\iMakHQ\logs\monthly_snapshot_<date>.log
+REM ƒƒOo—Í: C:\dev\iMak\iMakHQ\logs\monthly_snapshot_<date>.log
 REM
-REM ä¾å­˜: iMakInventory chrome_profile_ebay (cookie æ°¸ç¶šåŒ–æ¸ˆ) ãŒå¿…è¦ã€‚
-REM       Inventory cron ãŒåŒæ™‚åˆ»ã«èµ°ã‚‹ã¨ profile lock è¡çªã™ã‚‹ãŸã‚ã€æ™‚åˆ»ã‚’èª¿æ•´ã™ã‚‹ã“ã¨ã€‚
+REM ˆË‘¶: iMakInventory chrome_profile_ebay (cookie ‰i‘±‰»Ï) ‚ª•K—vB
+REM       Inventory cron ‚ª“¯‚É‘–‚é‚Æ profile lock Õ“Ë‚·‚é‚½‚ßA‚ğ’²®‚·‚é‚±‚ÆB
 
 setlocal
 cd /d C:\dev\iMak\iMakHQ
 set PYTHONIOENCODING=utf-8
 
-REM ãƒ­ã‚°ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒª
+REM ƒƒOƒfƒBƒŒƒNƒgƒŠ
 if not exist logs mkdir logs
 set LOGDATE=%date:~0,4%%date:~5,2%%date:~8,2%
 set LOGFILE=logs\monthly_snapshot_%LOGDATE%.log
@@ -21,13 +21,13 @@ set LOGFILE=logs\monthly_snapshot_%LOGDATE%.log
 echo === iMak Seller Hub Monthly Snapshot %date% %time% === > "%LOGFILE%"
 echo. >> "%LOGFILE%"
 
-REM Ended å…¨ä»¶ (View å«ã‚€ã€90æ—¥æ¶ˆå¤±ãƒ‡ãƒ¼ã‚¿é˜²æ­¢)
-echo [STEP 1/2] Ended å…¨ä»¶ scrape (--all-pages) >> "%LOGFILE%"
+REM Ended ‘SŒ (View ŠÜ‚ŞA90“úÁ¸ƒf[ƒ^–h~)
+echo [STEP 1/2] Ended ‘SŒ scrape (--all-pages) >> "%LOGFILE%"
 python seller_hub_view.py --status ended --all-pages --save --wait 25 >> "%LOGFILE%" 2>&1
 echo. >> "%LOGFILE%"
 
-REM Active å…¨ä»¶ (View+Watchers ç¾åœ¨åœ°ã‚¹ãƒŠãƒƒãƒ—)
-echo [STEP 2/2] Active å…¨ä»¶ scrape (--all-pages) >> "%LOGFILE%"
+REM Active ‘SŒ (View+Watchers Œ»İ’nƒXƒiƒbƒv)
+echo [STEP 2/2] Active ‘SŒ scrape (--all-pages) >> "%LOGFILE%"
 python seller_hub_view.py --status active --all-pages --save --wait 25 >> "%LOGFILE%" 2>&1
 echo. >> "%LOGFILE%"
 
