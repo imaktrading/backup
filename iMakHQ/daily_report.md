@@ -1376,3 +1376,27 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - **cardID-* backlog(1,559件)の方針**: on-demand re-key 継続 / BREAK・LEGEND系~25件の限定バッチ実施可否
 - **DBSCG 216組 alias 化**: root① A-2(alias追従の全franchise共通化)完了 + Dedupe 4証跡が前提。順序厳守で未着手
 - **DBSCG rarity facet の表記**: 現行 SSOT は短縮コード(SR/SCR/C…)。eBay 実facetが full name なら★に限らず全dbscg一括の別正規化が必要
+
+---
+
+## 2026-07-30 — 214KEY §2 revert + permission deny 追加
+
+### 決定事項
+- 決定1: commit 8a8f428 の `2nd ANNIVERSARY SET → 500 Years in the Future` mapping は誤り(箱名から一意 eBay facet 決まらず)。yaml/DB から削除 + 回帰テスト固定 (依頼: `2026-07-29_live_key_214_verdicts_response.md`)
+- 決定2: worktree root に `.claude/settings.json` を新規作成し 17 deny ルールで即席不可逆操作を防止 (依頼: `2026-07-29_permission_deny_for_irreversible_ops_response.md`)。HQ 指示で `Bash(git checkout .*)` (broad glob) を `Bash(git checkout -- *)` + `Bash(git checkout .)` の 2 分割に修正
+
+### 変更
+- 変更: iMakCatalog/ebay_filter_map/one_piece.yaml:49-53 — `2nd ANNIVERSARY SET` mapping 5行削除、削除理由コメントに置換
+- 変更: iMakCatalog/tests/test_live_key_36_gaps_20260729.py — TestOpPromoSetBackfill から OP06-118_p4 期待削除 + TestAnniversarySetRevertRegression 2 tests 追加 (`to_ebay_value` None / lookup set_name ≠ '500 Years')
+- 変更: (DB) `DELETE FROM ebay_filter_map WHERE category='one_piece_tcg' AND field='set' AND source_value='2nd ANNIVERSARY SET'` 実行済 (1 row 削除)
+- 変更: C:/dev/iMak_catalog/.claude/settings.json 新規作成 (17 deny rules)。**.gitignore で `**/.claude/` 除外のため commit されない** → 本 daily_report 記載が唯一の証跡
+- deny 内訳: git push --force系 2 / git push origin master系 2 / git reset --hard 1 / git checkout 破壊系 2 (broad glob 回避で narrow 化) / git clean -f 1 / rm -rf系 4 (broad 2 + catalog固有 2) / DROP TABLE/DATABASE/TRUNCATE 3 / products.sqlite 誤上書き 2 = **本業 (prune_missing_models.py / scrapers/*.py / scripts/backfill_*.py / migrations/*.py / loader.py / pytest / git commit) 非該当**
+
+### 検証(実出力)
+- 検証✅ pytest -q → 383 passed (0 failed) / pre-commit hook 231 pass
+- 検証✅ `api.to_ebay_value('one_piece_tcg', 'set', '2nd ANNIVERSARY SET')` → None (revert 確認)
+- 検証✅ DB SELECT COUNT — 削除前 1 → 削除後 0
+- 検証✅ settings.json JSON valid (17 deny rules loaded / defaultMode=bypassPermissions)
+- 検証✅ `git check-ignore -v .claude/settings.json` → `.gitignore:114:**/.claude/` (期待どおり untracked)
+- 検証⚠️ 「deny 発動の目視確認」は headless セッションでは実施不能 (現セッションが起動時に読み込んだ設定に基づく)。次の Catalog 通常セッションで `git push --force` を叩いて確認要 (`completion_must_be_proven`)
+- commit: 98caa61 (§2 revert), + 本 daily_report commit
