@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(*_clear_sku_sheet.py*)"
+    ]
+  }
+}

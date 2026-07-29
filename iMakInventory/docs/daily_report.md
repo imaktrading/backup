@@ -1,5 +1,38 @@
 # iMakInventory daily_report
 
+## 2026-07-30 — Claude Code 権限 deny 追加 (`.claude/settings.json` 新設, HQ 依頼)
+
+### 依頼書 / 承認
+- 依頼: `iMak_data/inventory/requests/2026-07-29_permission_deny_for_irreversible_ops.md` (HQ)
+- 回答: 同 `_response.md` — 「一般シェル破壊 5件 + `_clear_sku_sheet.py` のみで GO」承認 [IMPLEMENT-GO]
+
+### 変更
+- 新設: [`.claude/settings.json`](../../.claude/settings.json)
+  - `defaultMode: bypassPermissions` を明示保持 (グローバル継承・acceptEdits に落とすと確認ダイアログで cron 手動再走が止まる)
+  - deny: `git push --force*` / `git push -f*` / `git reset --hard*` / `rm -rf *` / `rm -fr *` / `*_clear_sku_sheet.py*`
+- 新設: [`.claude/README.md`](../../.claude/README.md) — 「必要時は deny を一時的に外して手で回す」脱出手順を明記 (回答書 §2)
+- 回帰: [`tests/test_claude_settings_deny_20260729.py`](../tests/test_claude_settings_deny_20260729.py) 5件
+  - 必須 deny 欠落検知
+  - cron 本業スクリプト (`run_cycle` / `revise_qty_csv_generator` / `trading_api_*` 等) が deny に混入していないことを検証
+  - `defaultMode` が bypassPermissions を維持していることを検証
+
+### 意図的に deny に **入れなかった** もの
+- HQ 例示の eBay 書込 pattern (`*cull_end.py*` / `*relist_*.py*` / `*gshock_revise_descriptions.py*` /
+  `*ebay_update_all_policies.py*` / `*fix_de_speedpak_shipping.py*`) — Inventory に該当ファイル無し (grep 済)
+- cron 本業の全 eBay 書込コード (`run_cycle.py` / `trading_api_*` / `revise_qty_csv_generator.py` 等) — 1日13回の巡回停止 → BAN リスク
+- グレー層 (`tools/release_holdouts.py --execute` / `supervised_backup_drain.py --execute` / `drain_stale_holdouts.py --execute`) — email 通知本文に手順明示された日常運用
+
+### 検証状況
+- pytest: 新規 5件 pass + 既存回帰 (`pytest tests/` で total 400 pass)
+- **git push --force 発火実機確認は headless セッションでは未実施** (headless では `git push` 系禁止 + Claude Code は settings をセッション起動時に読むため書換直後の同一セッションでは効かない)
+  - → 対話 Advisor セッションが `git push --force` を叩いて deny 目視するのを次アクション化 (回答書 §3)
+- cron への影響: `pythonw` 直接呼びで Claude harness を経由しないため理屈上ゼロ。実機確認は次巡回 (HIGH cycle) の正常完了で確認する
+
+### 別件: 補URL backlog 161件 (回答書 §4)
+- **状況: 完了 (2026-07-25 に 107件手動 drain 実施済 + 22:27 scheduled cycle で残 3件を自動消込実証)**
+- 詳細は 2026-07-25 エントリ「補URL消込 backlog 64件 手動ドレイン実施」以降参照
+- HQ ボールなし (`2026-07-25_hoju_url_clear_backlog_161_consult_hq_approve.md` は着地済)
+
 ## 2026-07-09 — reverse_audit 漏れ5件取下げ + 急増ガード deadlock 再発を応急 drain (根本修正は次回)
 
 ### daily reverse_audit alert (未承認乖離5件) → 全取下げ
