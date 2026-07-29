@@ -53,6 +53,31 @@ def test_partial_implementation_is_surfaced(tmp_path):
     assert r["ok"] is False and any("要読解" in x for x in r["reasons"])
 
 
+def test_quoted_requirement_is_not_flagged(tmp_path):
+    """依頼文の引用で吊るさない (2026-07-30 実測の誤検出)。
+
+    dedupe / inventory とも中身は完璧だったのに、「実装できなかった**部分があれば**明示」
+    という要求文の再掲に反応して ⚠️ になった。全部が ⚠️ になると警告が読まれなくなる
+    = 検査が無いのと同じになるので、**申告行だけ**を見る。
+    """
+    body = GOOD + "\n> 実装できなかった部分があれば明示すること\n"
+    p = _mk(tmp_path, "dedupe", "x_response_done.md", body)
+    assert dc.check_one(p)["ok"] is True
+
+
+def test_section_heading_alone_is_not_flagged(tmp_path):
+    """テンプレの章タイトルで吊るさない (中身が「なし」でも ⚠️ になっていた)。"""
+    body = GOOD + "\n## 実装できなかった / 保留部分 (明示)\n\nなし。全て完了。\n"
+    p = _mk(tmp_path, "dedupe", "z_response_done.md", body)
+    assert dc.check_one(p)["ok"] is True
+
+
+def test_real_partial_implementation_is_still_flagged(tmp_path):
+    """本物の申告は従来どおり拾う (誤検出対策で見逃したら本末転倒)。"""
+    p = _mk(tmp_path, "dedupe", "y_response_done.md", GOOD + "\n§3 は実装できなかった\n")
+    assert dc.check_one(p)["ok"] is False
+
+
 def test_scan_collects_all_worktrees(tmp_path):
     _mk(tmp_path, "catalog", "a_response_done.md", GOOD)
     _mk(tmp_path, "harvest", "b_response_done.md", "証拠なし")

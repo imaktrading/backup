@@ -33,6 +33,24 @@ ALERT_WORDS = (
 )
 
 
+# ★2026-07-30: 誤検出を抑える。依頼文の**引用**や条件節に反応すると全報告が ⚠️ になり、
+#   警告が意味を失って読まれなくなる (実測: dedupe/inventory とも中身は完璧なのに
+#   「実装できなかった**部分があれば**明示」の引用で吊るされた)。**狼少年にしない**。
+QUOTE_PREFIXES = (">", "|", "- >")
+CONDITIONAL_MARKERS = ("があれば", "場合は", "なら", "こと。", "してください", "禁止")
+
+
+def _is_quote_or_requirement(line: str) -> bool:
+    s = line.strip()
+    if s.startswith(QUOTE_PREFIXES):
+        return True                       # 引用 = 依頼文の再掲であって申告ではない
+    if s.startswith("#"):
+        # ★見出しは除外。テンプレの章タイトル「## 実装できなかった部分の明示」に反応して
+        #   中身が「なし」でも ⚠️ になっていた (2026-07-30 実測)。申告は本文にある。
+        return True
+    return any(m in s for m in CONDITIONAL_MARKERS)   # 条件節 = 「〜があれば書く」の要求文
+
+
 def check_one(path: Path) -> dict:
     """1件の `_done.md` を検査 → {ok, reasons[]}."""
     try:
@@ -44,7 +62,9 @@ def check_one(path: Path) -> dict:
         reasons.append("commit hash が無い (何を commit したか不明)")
     if not RE_TESTS.search(body):
         reasons.append("テスト結果が無い (緑である証拠が無い)")
-    hits = sorted({w for w in ALERT_WORDS if w.lower() in body.lower()})
+    # 要読解ワードは **申告行だけ**見る (引用・条件節は除く)
+    hits = sorted({w for line in body.splitlines() if not _is_quote_or_requirement(line)
+                   for w in ALERT_WORDS if w.lower() in line.lower()})
     if hits:
         reasons.append("要読解ワード: " + " / ".join(hits))
     return {"ok": not reasons, "reasons": reasons}
