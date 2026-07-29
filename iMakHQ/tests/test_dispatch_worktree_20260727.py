@@ -140,11 +140,18 @@ def test_locks_are_per_worktree(tmp_path, monkeypatch):
 
 
 def test_watcher_runs_worktrees_in_parallel():
-    """watcher が並行実行になっていること (直列に戻ったら落とす)。"""
+    """watcher が並行実行で、**自動実装の対象全員が同時に走れる**こと。
+
+    上限が対象数より小さいと、そこが新しい待ち行列になる (実測 2026-07-30: 上限3で
+    harvest / revise が待たされた)。自動実装対象 = TARGETS - NO_AUTO_IMPLEMENT。
+    """
     src = (Path(__file__).parent.parent / "tools" / "dispatch_watch.py").read_text(encoding="utf-8")
-    assert "MAX_PARALLEL" in src
     assert "threading.Thread(" in src
     assert "dw.acquire_lock(wt)" in src, "worktree 単位の lock を使っていない"
+    import dispatch_watch as dwatch
+    need = len(set(dw.TARGETS) - dw.NO_AUTO_IMPLEMENT)
+    assert dwatch.MAX_PARALLEL >= need, (
+        f"並列上限 {dwatch.MAX_PARALLEL} < 自動実装対象 {need} → 待ち行列が残る")
 
 
 def test_implement_queue_requires_explicit_token(tmp_path, monkeypatch):
