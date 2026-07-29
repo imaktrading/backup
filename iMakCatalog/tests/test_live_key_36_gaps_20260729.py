@@ -28,15 +28,37 @@ class TestCharacterNameBackfill(unittest.TestCase):
 
 class TestOpPromoSetBackfill(unittest.TestCase):
     def test_op_promo_event_sets_resolve(self):
+        # OP06-118_p4 は 2026-07-30 revert 済 (§2 revert response 参照)。
+        # 箱名 '2nd ANNIVERSARY SET' から一意 eBay facet が決まらないため mapping 削除。
         expect = {
             "OP01-001_p1": "Promo Cards", "OP01-017_p2": "Promo Cards",
             "OP03-044_p2": "Promo Cards", "OP12-031_p2": "Promo Cards",
             "ST01-006_p1": "Promo Cards", "ST01-013_p3": "Promo Cards",
-            "OP06-118_p4": "500 Years in the Future",
         }
         for pid, ebay in expect.items():
             rec = api.lookup(category="one_piece_tcg", product_id=pid)
             self.assertEqual(rec["set_name"], ebay, pid)
+
+
+class TestAnniversarySetRevertRegression(unittest.TestCase):
+    """2026-07-30 revert 回帰: `2nd ANNIVERSARY SET` は eBay facet が箱名から
+    一意に決まらないため mapping を削除した。yaml 再追加/loader 再導入で
+    復活しないことを固定する。"""
+
+    def test_to_ebay_value_returns_none(self):
+        # 直接 mapping 引き: None (削除済)
+        self.assertIsNone(
+            api.to_ebay_value("one_piece_tcg", "set", "2nd ANNIVERSARY SET")
+        )
+
+    def test_op06_118_p4_not_resolved_to_500_years(self):
+        # lookup の派生 set_name も '500 Years in the Future' であってはならない
+        rec = api.lookup(category="one_piece_tcg", product_id="OP06-118_p4")
+        self.assertIsNotNone(rec, "OP06-118_p4 が DB に無い")
+        self.assertNotEqual(
+            rec["set_name"], "500 Years in the Future",
+            "revert 済のはずが '500 Years in the Future' に解決している",
+        )
 
 
 if __name__ == "__main__":
