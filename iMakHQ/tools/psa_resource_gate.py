@@ -950,11 +950,41 @@ REVIEW_SKIP_TAB = "RESTOCK確証スキップ"
 REVIEW_SKIP_HEADER = ["itemID", "card_no", "title", "理由", "日付", "ebay_url"]
 
 
-def _review_skip_iids(skip_rows):
-    """RESTOCK確証スキップ タブ既存行から itemID 集合(純関数)。視覚確証で再表示しない判定。"""
+# ★2026-07-29: 補URL側 (psa_hoju_fill) と同じく **期限なしで永久に伏せていた**。
+# RESTOCK は「売れた後の再仕入れ」なので、埋もれると直接 機会損失になる。
+# 「違う」の主因の一つは *その日* 正変種が売られていないことなので、翌日には再挑戦する
+# (ユーザー判断 2026-07-29「即対応していかないと生きていけない。翌日でいい」)。
+REVIEW_SKIP_COOLDOWN_DAYS = 1
+
+
+def _review_skip_iids(skip_rows, today=None):
+    """RESTOCK確証スキップ タブ既存行から itemID 集合(純関数)。視覚確証で再表示しない判定。
+
+    today を渡すと cooldown 判定する (翌日以降は集合から外れる = 再表示)。
+    日付が読めない行は伏せたまま (判定材料なしの再表示は毎回同じものが出るため)。
+    today 省略時は従来どおり全行対象 (後方互換)。
+    """
     if not skip_rows or len(skip_rows) < 2:
         return set()
-    return {(r[0] or "").strip() for r in skip_rows[1:] if r and (r[0] or "").strip()}
+    out = set()
+    for r in skip_rows[1:]:
+        if not r or not (r[0] or "").strip():
+            continue
+        if today is not None and not _review_skip_active(r[4] if len(r) > 4 else "", today):
+            continue
+        out.add((r[0] or "").strip())
+    return out
+
+
+def _review_skip_active(date_str, today):
+    """その行がまだ伏せる期間内か(純関数)。日付が読めない行は True(伏せたまま)。"""
+    try:
+        import datetime
+        age = (datetime.date.fromisoformat((today or "").strip())
+               - datetime.date.fromisoformat((date_str or "").strip())).days
+    except Exception:
+        return True
+    return age < 0 or age < REVIEW_SKIP_COOLDOWN_DAYS
 
 
 def _build_review_skip_rows(restock_cands, shown_idxs, confirmed_idxs, diff_idxs, today):
@@ -1007,8 +1037,14 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     _done_iids = _restock_confirmed_iids(_existing)
     # レビュー済だが未確定(違う/見送り)も再表示しない(2026-06-22 ユーザー指摘: 同じ3件が毎回出る)。
     # canonical は RESTOCK確証スキップ タブ。再検討したい時はその行を消せば再浮上する。
+    # ★2026-07-29: 期限なしで永久に伏せていた → **翌日には再挑戦**する (補URL側と同一規約)。
+    #   台帳の行は消さない (履歴)。判定だけで再表示を制御する。
     _skip_existing = read_tab(REVIEW_SKIP_TAB)
-    _skip_iids = _review_skip_iids(_skip_existing)
+    _today_for_skip = datetime.date.today().isoformat()
+    _skip_iids = _review_skip_iids(_skip_existing, today=_today_for_skip)
+    _revived_n = len(_review_skip_iids(_skip_existing)) - len(_skip_iids)
+    if _revived_n:
+        print(f"  ♻ cooldown 満了 {_revived_n}件 → 再確証の対象に復帰 (台帳の行は残す)")
     # 2026-06-20 価格NO-GO廃止(本丸): 仕入高も**除外せず照合に出す**(コストプラス=損なし・無在庫=
     # フリーオプション・既存メンテで追跡)。⚠仕入高 ラベルは残すので判別可。あなたが買うものを選ぶ。
     items = []

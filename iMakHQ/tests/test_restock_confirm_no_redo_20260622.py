@@ -102,6 +102,25 @@ def test_build_review_skip_skips_empty_itemid():
     assert g._build_review_skip_rows(cands, {0}, set(), set(), "2026-06-22") == []
 
 
+def test_review_skip_cooldown_is_next_day():
+    """2026-07-29: 期限なしで永久に伏せていた → **翌日には再確証に戻す**。
+
+    RESTOCK は売れた後の再仕入れなので、埋もれると直接 機会損失になる。
+    「違う」の主因の一つは *その日* 正変種が売られていないことなので、時間で解決する。
+    """
+    rows = [SKIP_H, ["111", "P-041", "t", "違う", "2026-07-29", ""]]
+    assert g._review_skip_iids(rows, today="2026-07-29") == {"111"}   # 同日 = 伏せる
+    assert g._review_skip_iids(rows, today="2026-07-30") == set()     # 翌日 = 復帰
+    assert g._review_skip_iids(rows) == {"111"}                       # today 省略 = 従来動作
+
+
+def test_review_skip_unparseable_date_stays_hidden():
+    """日付が読めない行は伏せたまま (判定材料なしの再表示は毎回同じものが出る)。"""
+    rows = [SKIP_H, ["111", "P-041", "t", "違う", "", ""],
+            ["222", "P-042", "t", "違う", "こわれ", ""]]
+    assert g._review_skip_iids(rows, today="2026-07-30") == {"111", "222"}
+
+
 def test_merge_skip_rows_keeps_and_dedups():
     existing = [SKIP_H, ["111", "P-041", "t", "違う", "2026-06-20", ""]]
     new = [["222", "ST29-001", "t", "見送り", "2026-06-22", ""],
