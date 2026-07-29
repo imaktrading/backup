@@ -33,6 +33,27 @@ def test_psa_confirm_candidate_matches_reference():
     assert (cand_w, cand_h) == (ref_w, ref_h)
 
 
+def test_psa_review_layout_stays_at_7_25():
+    """PSA目視(post_psa_review)のレイアウトを 7/25 時点に固定する (2026-07-29).
+
+    7/28 に sticky / 内側スクロール / 横1列 を順に試し、**すべてユーザーが不可と判定**。
+    撤回コミットが出たが `.confirm` の `max-height:42vh; overflow:auto` が消し残っており、
+    現物(比較元)が画面の42%に押し込まれてスクロールが要る状態が続いていた(7/29 再指摘)。
+    同じ変更が三度目に入らないよう、ここで落とす。
+    """
+    s = _src("post_psa_review.py")
+    confirm = re.search(r"'\.confirm\{[^}]*\}'", s)
+    assert confirm, ".confirm の CSS が見つからない"
+    body = confirm.group(0)
+    assert "max-height" not in body, "現物ブロックの高さを制限しない (7/25 の見え方に戻す)"
+    assert "overflow" not in body, "現物ブロックを内側スクロールにしない"
+    assert "position:sticky" not in body, "現物ブロックを貼り付けない (カードに重なって不評)"
+    btns = re.search(r"'\.answer-btns\{[^}]*\}'", s)
+    assert btns and "position:sticky" not in btns.group(0), "回答ボタンを画面下に固定しない"
+    # 候補は 4列グリッド (横1列+横スクロール案は撤回済)
+    assert "grid-template-columns:repeat(4,1fr)" in s
+
+
 def test_psa_confirm_candidate_is_not_cropped():
     """object-fit:cover は端を切り落とす = 番号や★が隠れる。contain であること。"""
     s = _src("psa_resource_confirm.py")

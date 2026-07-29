@@ -510,18 +510,16 @@ def _generate_html(targets: list[dict]) -> None:
         '.target.answered-none{border-color:#9e9e9e;background:#2a2a2a;opacity:0.6}',
         '.target h2{color:#ffd700;margin:0 0 8px;font-size:20px}',
         '.cert-info{font-size:13px;color:#ccc;margin:4px 0}',
-        # ★2026-07-28: 候補が多いと比較元(現物)が上へ流れて見えなくなる → sticky で残す。
-        # top はツールバー(sticky top:0・約52px)の下。z-index はツールバー(100)より低く、
-        # 候補カードより高くする。max-height で画面を占有しすぎないようにする。
-        '.confirm{display:flex;gap:24px;align-items:flex-start;margin:14px 0;padding:14px;background:#1f3a1f;border-radius:6px;border:2px solid #4caf50;max-height:42vh;overflow:auto}',
+        # ★2026-07-29: 7/28 のレイアウト変更(sticky/内側スクロール/横1列)は実使用で不可 →
+        # **7/25 時点に完全復帰**。sticky は 7/28 に撤回済だったが `max-height:42vh;overflow:auto`
+        # が消し残っており、現物(比較元)が画面の42%に押し込まれてスクロールが要る状態だった。
+        # 現物は縦に伸ばして原寸で見せる。ここを触らないこと(2回不可の判定が出ている)。
+        '.confirm{display:flex;gap:24px;align-items:flex-start;margin:14px 0;padding:14px;background:#1f3a1f;border-radius:6px;border:2px solid #4caf50}',
         '.confirm .label{font-size:18px;color:#9fffa0;font-weight:bold;margin-bottom:6px}',
         '.confirm img{max-width:380px;border:1px solid #444;border-radius:4px}',
         '.confirm-q{font-size:24px;color:#ffd700;font-weight:bold;margin:8px 0;text-align:center;align-self:center}',
         '.no-expected{background:#3a1f1f;border-color:#f44336;color:#ffaaaa}',
         '.no-expected .label{color:#ffaaaa}',
-        # ★2026-07-28: 候補をスクロールすると回答ボタンも流れて押しに行けない。
-        # 現物は上に sticky、回答は **画面下に sticky**(bottom:0)で固定する。
-        # bottom 固定なら現物ブロックの高さ(可変)に依存せず両方が常に見える。
         '.answer-btns{display:flex;gap:10px;margin:10px 0}',
         '.btn{padding:10px 18px;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:bold}',
         '.btn-ok{background:#4caf50;color:#fff}',
@@ -530,16 +528,9 @@ def _generate_html(targets: list[dict]) -> None:
         '.btn:hover{opacity:0.85}',
         '.btn.active{box-shadow:0 0 0 3px #fff}',
         '.candidates-toggle{cursor:pointer;color:#80c0ff;text-decoration:underline;font-size:13px;margin:8px 0}',
-        # ★2026-07-28: sticky で現物/回答を貼り付けるとカードの上に重なって見づらい(ユーザー指摘)。
-        # 代わりに **候補側を内側スクロール**にする。カード内で候補だけが動くので、
-        # 現物(上)と回答ボタン(下)は定位置のまま、何も重ならない(補URL確証UIと同じ作り)。
         '.candidates{display:none;margin-top:8px}',
         '.candidates.show{display:block}',
-        # ★2026-07-28: 候補を **横1列 + 横スクロール** にする(ユーザー案)。
-        # 縦に伸びないので現物(上)も回答ボタン(下)も定位置のまま常に見える。
-        # sticky で貼り付ける案はカードの上に重なって不評だった。
         '.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}',
-
         '.cand{border:2px solid #555;padding:8px;background:#333;text-align:center;border-radius:6px;cursor:pointer;transition:all 0.15s}',
         '.cand:hover{border-color:#80c0ff;background:#3a3a4a}',
         '.cand.selected{border-color:#2196f3;background:#1f3a5a;box-shadow:0 0 0 3px #2196f3}',
