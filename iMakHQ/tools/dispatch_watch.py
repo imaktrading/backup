@@ -25,6 +25,7 @@ import dispatch_worktree as dw  # noqa: E402
 
 POLL_SEC = 15          # 監視間隔
 DEBOUNCE_SEC = 20      # 依頼が「書き終わって静止」したと判断するまでの待ち
+MAX_PARALLEL = 3       # 同時に走らせる worktree 数 (課金と CPU の上限。0 = 無制限にしない)
 LOG = dw.REVIEW_DIR / "dispatch_watch.log"
 
 
@@ -39,18 +40,51 @@ def log(msg: str) -> None:
         pass
 
 
+def _run_one(wt: str, names: str, done: dict, fresh_names: list, inflight: set, lock) -> None:
+    """1 worktree 分を最後まで走らせる (別スレッド)。例外は握って常駐を守る。"""
+    try:
+        log(f"[{wt}] 新規 {len(fresh_names)}件 検出 → dispatch: {names}")
+        if not dw.acquire_lock(wt):
+            log(f"[{wt}] 同じ worktree の dispatch が実行中 → 次の周回で再試行")
+            return
+        try:
+            r = dw._dispatch(wt, dry_run=False)
+            log(f"[{wt}] 完了: {r.get('status')} / {r.get('summary', '')}")
+            for v in r.get("violations", []):
+                log(f"[{wt}] ⚠️ {v}")
+        finally:
+            dw.release_lock(wt)
+        with lock:
+            done[wt].update(fresh_names)
+    except Exception as e:
+        log(f"[{wt}] !! 例外 (継続します): {type(e).__name__}: {e}")
+    finally:
+        with lock:
+            inflight.discard(wt)
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+    import threading
     done: dict[str, set[str]] = {wt: set() for wt in dw.TARGETS}
     seen_at: dict[tuple[str, str], float] = {}
-    log(f"watch 開始 (poll={POLL_SEC}s / debounce={DEBOUNCE_SEC}s / 対象={list(dw.TARGETS)})")
+    inflight: set[str] = set()          # 今走っている worktree
+    guard = threading.Lock()
+    log(f"watch 開始 (poll={POLL_SEC}s / debounce={DEBOUNCE_SEC}s / 並行={MAX_PARALLEL} / "
+        f"対象={list(dw.TARGETS)})")
 
     while True:
         try:
             for wt in dw.TARGETS:
+                # ★2026-07-30: 担当ごとに **並行**で走らせる (従来は全体で1本の lock =
+                # 直列だったため、依頼を出した担当が前の担当の終了を数分待たされていた)。
+                # worktree は別々で、headless は共有DB/スプシへ書けないので衝突しない。
+                with guard:
+                    if wt in inflight or len(inflight) >= MAX_PARALLEL:
+                        continue
                 mine, _theirs, _drafts = dw.pending_for(wt)
                 fresh = [p for p in mine if p.name not in done[wt]]
                 if not fresh:
@@ -70,18 +104,11 @@ def main() -> int:
                     continue
 
                 names = ", ".join(p.name for p in fresh)
-                log(f"[{wt}] 新規 {len(fresh)}件 検出 → dispatch: {names}")
-                if not dw.acquire_lock():
-                    log(f"[{wt}] 他の dispatch 実行中 → 次の周回で再試行")
-                    continue
-                try:
-                    r = dw._dispatch(wt, dry_run=False)
-                    log(f"[{wt}] 完了: {r.get('status')} / {r.get('summary', '')}")
-                    for v in r.get("violations", []):
-                        log(f"[{wt}] ⚠️ {v}")
-                finally:
-                    dw.release_lock()
-                done[wt].update(p.name for p in fresh)
+                fresh_names = [p.name for p in fresh]
+                with guard:
+                    inflight.add(wt)
+                threading.Thread(target=_run_one, daemon=True,
+                                 args=(wt, names, done, fresh_names, inflight, guard)).start()
         except Exception as e:                      # 常駐なので落とさない
             log(f"!! 例外 (継続します): {type(e).__name__}: {e}")
         time.sleep(POLL_SEC)

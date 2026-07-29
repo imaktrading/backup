@@ -115,10 +115,10 @@ def _pid_alive(pid: int) -> bool:
         k32.CloseHandle(handle)
 
 
-def _lock_owner_pid() -> int | None:
+def _lock_owner_pid(wt=None) -> int | None:
     """lock file の先頭に書いた PID。読めない/壊れていれば None (= 判定不能)."""
     try:
-        head = LOCK_PATH.read_text(encoding="utf-8").split()
+        head = _lock_path(wt).read_text(encoding="utf-8").split()
     except OSError:
         return None
     try:
@@ -127,7 +127,18 @@ def _lock_owner_pid() -> int | None:
         return None
 
 
-def acquire_lock() -> bool:
+def _lock_path(wt=None):
+    """lock file の path。wt を渡すと **worktree ごとの lock** (2026-07-30).
+
+    従来は全 worktree で1本の lock を共有していたため、**担当が直列にしか動けず待ち行列**が
+    できていた (実測: 出品専任が監視くんの後ろで数分待たされる)。担当は別々の worktree で
+    動き、headless は共有DB/スプシへの書込を禁止しているので、**並行しても衝突しない**。
+    防ぎたいのは「同じ worktree に2本立つ」ことだけなので、lock を worktree 単位に割る。
+    """
+    return LOCK_PATH if not wt else REVIEW_DIR / f"dispatch_{wt}.lock"
+
+
+def acquire_lock(wt=None) -> bool:
     """dispatch の多重起動を **プロセス跨ぎ**で防ぐ (常駐 watcher と cron が併走するため).
 
     2026-07-29: 同じ worktree に headless が2本同時起動する事故を起こした。
@@ -141,26 +152,27 @@ def acquire_lock() -> bool:
         時間ベースの stale 判定は、PID が読めない/判定不能な場合の保険として残す。
     """
     REVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    if LOCK_PATH.exists():
-        age = time.time() - LOCK_PATH.stat().st_mtime
-        owner = _lock_owner_pid()
+    path = _lock_path(wt)
+    if path.exists():
+        age = time.time() - path.stat().st_mtime
+        owner = _lock_owner_pid(wt)
         # PID 不明 (= 判定不能) は「生きている」扱い。誤って奪って二重起動する方が害が大きい。
         owner_alive = True if owner is None else _pid_alive(owner)
         if owner_alive and age < LOCK_STALE_SEC:
             return False
         why = "所有者プロセス不在 (孤児)" if not owner_alive else f"{int(age)}秒経過 (stale)"
-        print(f"(古い lock を破棄: {why} / owner={owner})")
-        LOCK_PATH.unlink(missing_ok=True)   # 孤児 or stale → 奪う
+        print(f"(古い lock を破棄: {why} / owner={owner} / {path.name})")
+        path.unlink(missing_ok=True)   # 孤児 or stale → 奪う
     try:
-        with open(LOCK_PATH, "x", encoding="utf-8") as f:
+        with open(path, "x", encoding="utf-8") as f:
             f.write(f"{os.getpid()} {datetime.now().isoformat()}\n")
         return True
     except FileExistsError:
         return False
 
 
-def release_lock() -> None:
-    LOCK_PATH.unlink(missing_ok=True)
+def release_lock(wt=None) -> None:
+    _lock_path(wt).unlink(missing_ok=True)
 
 
 def _requests_dir(wt: str) -> Path:

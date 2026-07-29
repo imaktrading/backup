@@ -122,6 +122,31 @@ def test_unreadable_pid_is_treated_as_alive(tmp_path, monkeypatch):
     assert dw.acquire_lock() is False
 
 
+def test_locks_are_per_worktree(tmp_path, monkeypatch):
+    """担当ごとに lock を分ける = 別 worktree は **並行**して走れる (2026-07-30)。
+
+    従来は全体で1本の lock だったため、依頼を出した担当が前の担当の終了を待たされていた
+    (実測: 出品専任が監視くんの後ろで数分待ち)。worktree は別々で、headless は共有DB/
+    スプシへ書けないので、同時に走っても衝突しない。防ぐべきは「同じ worktree に2本」だけ。
+    """
+    _use_tmp_lock(tmp_path, monkeypatch)
+    assert dw.acquire_lock("catalog") is True
+    assert dw.acquire_lock("inventory") is True, "別 worktree が待たされている (直列のまま)"
+    assert dw.acquire_lock("catalog") is False, "同じ worktree に2本立ってしまう"
+    dw.release_lock("catalog")
+    assert dw.acquire_lock("catalog") is True     # 解放後は取り直せる
+    dw.release_lock("catalog")
+    dw.release_lock("inventory")
+
+
+def test_watcher_runs_worktrees_in_parallel():
+    """watcher が並行実行になっていること (直列に戻ったら落とす)。"""
+    src = (Path(__file__).parent.parent / "tools" / "dispatch_watch.py").read_text(encoding="utf-8")
+    assert "MAX_PARALLEL" in src
+    assert "threading.Thread(" in src
+    assert "dw.acquire_lock(wt)" in src, "worktree 単位の lock を使っていない"
+
+
 def test_liveness_check_uses_win32_api_not_os_kill():
     """Windows の os.kill(pid, 0) は TerminateProcess = 生存確認のつもりで相手を殺す。
 
