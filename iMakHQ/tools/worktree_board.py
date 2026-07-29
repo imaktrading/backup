@@ -168,6 +168,15 @@ def main() -> int:
             print(f"  …他{len(theirs) - MAX_SHOW}件")
         print()
 
+    # ★担当が書いた「他担当宛の依頼草案」(2026-07-30)。投入は窓口が宛先確認してから。
+    #   担当は他 worktree を読めず、相互投入を許すとループを止められないため。
+    _routing = sorted((DATA_ROOT / "_routing").glob("*.md")) if (DATA_ROOT / "_routing").is_dir() else []
+    if _routing:
+        print(f"## 🔀 ルーティング待ち {len(_routing)}件 — **窓口が宛先を確認して投入する**")
+        for p in _routing:
+            print(f"- {p.name} ({_age(p.stat().st_mtime)})")
+        print("→ `python route_inbox.py --inject <file名>`\n")
+
     # ★事務員 (clerk) の死活監視 (2026-07-30)。
     #   事務員は「異常を見つける係」なので、**事務員自身が死ぬと誰も気づけない**。
     #   増員しても解決しない (同じ仕事の人数が増えるだけ) ので、外側から生存を見る。
