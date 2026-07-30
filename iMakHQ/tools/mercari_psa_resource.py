@@ -46,9 +46,30 @@ def search_keyword(title, set_no):
     return ("PSA10 " + sn).strip() if sn else ""
 
 
+# ★他社鑑定会社 (2026-07-30 追加: CGC が漏れていた)
+#   ユーザー報告「PSA ではなく CGC の候補が出てくる」。メルカリは出品者が
+#   `CGC10 PSA10` のように併記するため、`"PSA10" in n` だけでは通ってしまう。
+#   CGC スラブを PSA10 出品の仕入元にすると **別商品を送ること**になり SNAD → Defect。
+#   = 2026-07-27 の PSA9 混入 4件END と同型 ([[psa10_only_pipeline_grade_gate]])。
+#
+#   ★境界付きで判定する: 素の部分一致だと **カード名に埋もれた3文字が誤爆**する。
+#     既存の "ARS" は "STARS" に、"AGS" は "TAGS" に部分一致してしまい、
+#     正当な PSA10 を弾いていた (潜在 bug。ここで同時に解消)。
+#   ★`TAG` / `ACE` は入れない: Pokemon の "TAG TEAM" / "ACE SPEC" と衝突して
+#     正当な供給を大量に落とすため。必要なら「数字が続く時だけ」で別途対応する。
+#
+#   ★★判定は **空白を残した文字列** に対して行う。空白除去後に当てると
+#     `CGC pristine …` が `CGCPRISTINE` になり、後方境界 `(?![A-Z])` が P に当たって
+#     **すり抜ける** (2026-07-30 実データ `CGC pristine PSA10 ワンピースデイ25 ルフィ P-110`
+#     で確認)。PSA9/8/7 の方は `PSA 9` 表記を拾うため空白除去後に当てる = 使う文字列が違う。
+_OTHER_GRADER_RE = re.compile(r"(?<![A-Z])(CGC|SGC|AGS|HGA|BGS|ARS|BVG|GMA)(?![A-Z])")
+
+
 def is_psa10(name):
     n = name.replace(" ", "").upper()
-    if any(b in n for b in ("PSA9", "PSA8", "PSA7", "BGS", "ARS")):
+    if any(b in n for b in ("PSA9", "PSA8", "PSA7")):
+        return False
+    if _OTHER_GRADER_RE.search(name.upper()):   # ★空白を残した形で当てる
         return False
     # 「PSA10相当」= 未鑑定の同等品 (生カード)。本物のPSA10 slabではないので除外
     # (2026-06-09 ユーザー指摘: 相当は除外)。原文の 相当 で判定 (upper非影響)。
