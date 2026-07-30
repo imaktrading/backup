@@ -222,14 +222,18 @@ def fetch():
 
     # ★2026-07-31: 旧 shipMode(独/FedEx7) 廃止。EU送料マスタ から国別に取る。
     #   FedEx は 2026-07-30 に全廃し rate table は Economy 4段階 ($17/$20/$24/$28)。
-    eu = {}
+    eu, jp_post, ioss = {}, 1240.0, 150.0
     try:
-        for r in sh.worksheet("EU送料マスタ").get(
-                "A11:J35", value_render_option="UNFORMATTED_VALUE"):
+        m = sh.worksheet("EU送料マスタ")
+        for r in m.get("A11:J35", value_render_option="UNFORMATTED_VALUE"):
             r = (list(r) + [""] * 10)[:10]
             if str(r[0]).strip() and isinstance(r[7], (int, float)):
                 eu[str(r[0]).strip()] = {"tier": num(r[2]), "cost": num(r[7]),
                                          "name": str(r[1])}
+        # >€150 = DDU 帯の定数 (日本郵便実費 / IOSS上限)
+        c = m.get("F6:F7", value_render_option="UNFORMATTED_VALUE")
+        if c and len(c) >= 2:
+            jp_post, ioss = num(c[0][0]) or jp_post, num(c[1][0]) or ioss
     except Exception:                                          # noqa: BLE001
         pass
     de_ship = 14.86        # DEミラーの国内(DE宛)送料。AT宛は 17.49
@@ -237,6 +241,7 @@ def fetch():
     return {"fx": fx, "promo": promo, "payo": payo, "target": target, "cats": cats,
             "country": country, "gshock": gshock,
             "eu": eu, "deShip": de_ship, "atShip": at_ship,
+            "jpPost": jp_post, "iossEur": ioss,
             "routes": ROUTES, "tabs": TABS,
             "url": f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit#gid="}
 
@@ -322,6 +327,11 @@ function euCountry(){
   const s = document.getElementById('eucty');
   return (s && s.value) || 'DE';
 }
+/* IOSS 上限 (€150) を、そのルートの通貨に換算したしきい値 */
+function iossLimit(cur){
+  const lim = P.iossEur || 150;
+  return lim * (P.fx.EUR || 1) / (P.fx[cur] || 1);
+}
 
 function calc(price){
   const dk = dest.value, ck = cat.value;
@@ -343,9 +353,13 @@ function calc(price){
       N = D * fx;
     } else {
       /* ★2026-07-31: EU送料マスタ から国別に取る (旧: 独/FedEx7 の2値)。
-         D = rate table の段階($) = DDP送料収入 / N = DDP総コスト − 想定送料J */
+         D = rate table の段階($) = 送料収入 (ポリシー値なので帯によらず一定)
+         N = 成約額で帯が変わる:
+             ≤€150 … DDP/Economy。実費+関税(当方負担) − 想定送料J
+             >€150 … DDU/日本郵便。買い手が着払いで関税を払うので当方コストに入れない */
       const e = P.eu[euCountry()] || {tier: 17, cost: 3219};
-      D = e.tier;  N = e.cost - J;
+      D = e.tier;
+      N = (price <= iossLimit(cur)) ? (e.cost - J) : (P.jpPost - J);
     }
     E = F + D; G = E * fx;
     K = G * fr + 0.4 * fx; L = G * promo; M = G * P.payo;
@@ -354,7 +368,20 @@ function calc(price){
     D = price * tax; E = price + D; F = price; G = E * fx; N = D * fx;
     K = (G - N) * fr + 0.4 * fx; L = (G - N) * promo; M = (G - N) * P.payo;
   }
-  const O = cost - pt + J + K + L + M + N;
+  /* ★DE計算だけ DDP構造を持つ (DEミラーは送料を別取り €14.86/AT €17.49)。
+     送料収入は**ポリシー値なので帯によらず一定**。変わるのはコスト側と VAT率。 */
+  let S = 0;
+  if (tab === 'DE計算'){
+    const c2 = euCountry();
+    const R = (c2 === 'AT') ? P.atShip : P.deShip;      // 送料収入 (€)
+    const vat = (c2 === 'AT') ? 0.20 : 0.19;            // 実注文で AT=20% を確認
+    D = (price + R) * vat;                              // VAT
+    E = price + R + D; F = price; G = E * fx; N = D * fx;
+    const e = P.eu[c2] || {cost: 3219};
+    S = (price <= P.iossEur ? e.cost : P.jpPost) - J;   // DDPコスト (>€150 は DDU=関税なし)
+    K = (G - N) * fr + 0.4 * fx; L = (G - N) * promo; M = (G - N) * P.payo;
+  }
+  const O = cost - pt + J + K + L + M + N + S;
   return {tab, sym, cur, fx, fr, price, D, E, F, G, N, K, L, M, J, O,
           profit: G - O, margin: (G - O) / G, cost, pt};
 }
@@ -561,17 +588,23 @@ def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False,
             # ★2026-07-31: EU送料マスタ 由来の国別値 (旧 独/FedEx7 の2値は廃止)
             e = (p.get("eu") or {}).get(eu_country or "DE", {"tier": 17, "cost": 3219})
             D = e["tier"]
-            N = e["cost"] - J
+            # ≤€150 = DDP/Economy (関税は当方負担) / >€150 = DDU/日本郵便 (買い手着払い)
+            lim = p.get("iossEur", 150) * p["fx"]["EUR"] / p["fx"]["USD"]
+            N = (e["cost"] if price <= lim else p.get("jpPost", 1240)) - J
         G = (F + D) * fx
         K, L, M = G * fr + 0.4 * fx, G * promo, G * p["payo"]
     elif tab == "DE計算":
         # ★2026-07-31: DEミラーは送料を別取り (DE €14.86 / AT €17.49)。
         #   売上に送料収入を含め、DDPコスト(実費+関税−想定送料J) を別途引く。
-        R = p["atShip"] if (eu_country or "DE") == "AT" else p["deShip"]
-        D = (price + R) * c["tax"]
+        cc = eu_country or "DE"
+        R = p.get("atShip", 17.49) if cc == "AT" else p.get("deShip", 14.86)
+        vat = 0.20 if cc == "AT" else 0.19          # 実注文で AT=20% を確認
+        D = (price + R) * vat
         G = (price + R + D) * fx
         N = D * fx
-        S = (p.get("eu") or {}).get(eu_country or "DE", {"cost": 3219})["cost"] - J
+        e = (p.get("eu") or {}).get(cc, {"cost": 3219})
+        # ≤€150 = DDP/Economy (関税は当方負担) / >€150 = DDU/日本郵便 (買い手着払い)
+        S = (e["cost"] if price <= p.get("iossEur", 150) else p.get("jpPost", 1240)) - J
         K, L, M = (G - N) * fr + 0.4 * fx, (G - N) * promo, (G - N) * p["payo"]
         return (G - (cost - pt + J + K + L + M + N + S))
     else:
