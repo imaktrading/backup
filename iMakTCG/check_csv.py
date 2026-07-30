@@ -52,9 +52,34 @@ REQUIRED_SPECIFICS = ["C:Game", "C:Set", "C:Card Name", "C:Character", "C:Rarity
 #   - gundam_tcg RESOURCE 140 / EX RESOURCE 13 / EX BASE 13 … 同上
 # 粒度は **card_type / 番号 prefix 単位**。カテゴリ丸ごとの除外は本当の欠損を見逃すので禁止。
 NO_RARITY_CARD_TYPES = {"don", "resource", "ex resource", "ex base", "energy marker"}
-NO_RARITY_NUMBER_PREFIXES = ("don-", "rp-")     # DON!! / Gundam リソース
+# 番号 prefix (小文字比較・DON! / Gundam RESOURCE のような番号体系)
+# 2026-07-30 追加: Pokemon 番号 prefix 系 (Advisor 2026-07-29 応答 §1)
+#   MC-* / SI-*  : スタートデッキ100 系 (1,185件)。デッキ収録カードは印刷レアリティ記号なし
+#   CP4-* / CP5- : Classic 系 (件数未確認、要実測)。印刷レアリティ表記なし
+# 番号 prefix 単位で判定 (C:Set の表記依存は禁止=Advisor 明示指示)。
+NO_RARITY_NUMBER_PREFIXES = (
+    "don-", "rp-",                 # One Piece DON!! / Gundam リソース
+    "mc-", "si-", "cp4-", "cp5-",  # Pokemon スタートデッキ100 / Classic 系 (2026-07-30)
+)
 # キャラクター概念が無い種別 (name='リソース' / 'エナジーマーカー')
 NO_CHARACTER_CARD_TYPES = {"resource", "ex resource", "ex base", "energy marker"}
+
+# ★2026-07-30: Pokemon の hi-class パック系 set code prefix 単位除外。
+# Advisor 応答 (2026-07-29): 「set 名の部分一致は却下、set code prefix で判定してください。
+# C:Set の表記は生成側の都合で変わるので、判定が表記に依存すると静かに壊れる」。
+# 対象は Advisor 提示の 11 件出品済 (公式 pokemon-card.com に rarity 表記が無い hi-class 系):
+#   S8b   VMAXクライマックス       (S8b-101, S8b-126)
+#   M2a   MEGAドリームex           (M2a-012, M2a-079)  ← 2026-07-29 実害はここ
+#   SM8b  GXウルトラシャイニー     (SM8b-001, SM8b-089, SM8b-105)
+#   SV4a  シャイニートレジャーex   (SV4a-055)
+#   S6K   (7/29 一覧の 1 件)       (S6K-037)
+#   XY    プロモ系                 (XY-139, XY-140)
+#   HSZm  BW期プロモ               (HSZm-014)  ← セット同定不能で別途空欄確定
+# 番号 prefix は小文字比較 (card_number.lower().startswith)。
+# 判定粒度: `S8b-XXX` の "S8b-" 部分。product_id 全体でなく先頭 (英字+数字+"-") のみ照合。
+NO_RARITY_POKEMON_SET_PREFIXES = (
+    "s8b-", "m2a-", "sm8b-", "sv4a-", "s6k-", "xy-", "hszm-",
+)
 
 
 def required_specifics_for_card(card_number, card_type=""):
@@ -67,11 +92,22 @@ def required_specifics_for_card(card_number, card_type=""):
 
     2026-07-29: 同じ理屈で **Gundam RESOURCE系 / DBSCG ENERGY MARKER** も除外する
     (Catalog 実機判定で「存在しない」と確定)。これらは C:Character も持たない。
+
+    2026-07-30: Pokemon hi-class パック系 set code prefix (S8b/M2a/SM8b/SV4a/S6K/XY/HSZm)
+    + スタートデッキ100 / Classic 系 (MC/SI/CP4/CP5) を C:Rarity 除外に追加
+    (公式 pokemon-card.com に rarity 表記無し = catalog 側で構造的に取得不能)。
+    Advisor 応答 (2026-07-29): set 名部分一致は却下、set code prefix 単位で判定。
     """
     num = str(card_number).strip().lower()
     ctype = str(card_type).strip().lower()
     drop = set()
     if num.startswith(NO_RARITY_NUMBER_PREFIXES) or ctype in NO_RARITY_CARD_TYPES:
+        drop.add("C:Rarity")
+    # Pokemon set code prefix (hi-class + Classic 系)。既存 NO_RARITY_NUMBER_PREFIXES と
+    # 別配列で管理する理由: 前者は franchise 横断 (DON!!/RESOURCE) だが本群は Pokemon 専用
+    # で追加/削除の粒度が違う。監査ノイズ削減目的の除外は catalog の rarity 有無に追随して
+    # 頻繁に更新される見込み。
+    if num.startswith(NO_RARITY_POKEMON_SET_PREFIXES):
         drop.add("C:Rarity")
     if ctype in NO_CHARACTER_CARD_TYPES:
         drop.add("C:Character")
