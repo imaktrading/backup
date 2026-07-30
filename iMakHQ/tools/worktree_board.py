@@ -57,6 +57,32 @@ def _is_closed(path: Path, stems: set[str]) -> bool:
 DRAFT_SUFFIXES = ("_draft", "_question")
 
 
+def _draft_is_closed(path: Path, stems: set[str]) -> bool:
+    """draft / question の決着判定.
+
+    `_is_closed` は `{stem}_*` (= draft 自身に closure が付いた形) しか見ないため、
+    `X_draft.md` に対して **兄弟の `X_response.md`** が書かれた通常の decision フローを
+    決着とみなせず、レビュー待ちに残り続けていた (2026-07-30: 実測12件を28件と表示)。
+    draft 側は **base stem (= draft/question 接尾を外した幹) に closure が付いたか**で見る。
+    """
+    low = path.stem.lower()
+    base = None
+    for suf in DRAFT_SUFFIXES:
+        if low.endswith(suf):
+            base = path.stem[: -len(suf)].rstrip("_")
+            break
+    if base is None:
+        return False
+    bl = base.lower()
+    for s in stems:
+        sl = s.lower()
+        if sl == low or not sl.startswith(bl):
+            continue
+        if sl.endswith(CLOSED_SUFFIXES):
+            return True
+    return False
+
+
 def pending_for(worktree: str, recent_days: int = RECENT_DAYS):
     """(自分が返すべき, 相手ボール, 窓口レビュー待ち) の Path list を返す."""
     d = DATA_ROOT / worktree / "requests"
@@ -64,11 +90,14 @@ def pending_for(worktree: str, recent_days: int = RECENT_DAYS):
         return [], [], []
     cutoff = time.time() - recent_days * 86400
     files = [p for p in d.glob("*.md") if p.stat().st_mtime >= cutoff]
-    stems = {p.stem for p in files}
+    # closure 判定用の stem 集合は **期間で絞らない**。回答が cutoff 外にあると
+    # 決着済の draft が「レビュー待ち」に復活してしまう。
+    stems = {p.stem for p in d.glob("*.md")}
     mine, theirs, drafts = [], [], []
     for p in sorted(files, key=lambda x: -x.stat().st_mtime):
         if p.stem.lower().endswith(DRAFT_SUFFIXES):
-            drafts.append(p)
+            if not (_is_closed(p, stems) or _draft_is_closed(p, stems)):
+                drafts.append(p)
             continue
         if _is_closed(p, stems):
             continue
