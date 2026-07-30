@@ -271,6 +271,68 @@ def _variant_candidates(subject: str) -> list[str]:
 
 
 # ============================================================================
+# 修飾語込み set-name キーワード bonus (Advisor 2026-07-29 §3-A)
+# ============================================================================
+# base スコア10 / _p1..p5 スコア0 のため、同 card_number の variant を巡る際に必ず base が勝つ
+# 事象 (例: OP07-051 500 Years が OP07-051_p4 China 2nd ANNIVERSARY に勝つ) の根治。
+#
+# キーワードは **修飾語込み必須** (Advisor 明示指示):
+#   ❌ 'ANNIVERSARY' 単独 → 2nd/3rd/China/English で別セット → 誤マッチ量産
+#   ✅ 'CHINA 2ND ANNIVERSARY' 等の修飾語込み
+#
+# 探索順: **specific (region qualified) → generic**。first-match で bonus 判定するため、
+# より具体的なキーワードが brand に含まれる場合はそちらが優先される
+# (例: brand='CHINA 2ND ANNIVERSARY SET' なら CHINA-specific が採用、'2ND ANNIVERSARY SET'
+# だけの汎用 keyword は使われない → China record が Japanese record に誤って +300 されるのを防ぐ)。
+_BRAND_SETNAME_KEYWORDS = [
+    # region-qualified (specific, must come first)
+    "CHINA 2ND ANNIVERSARY",
+    "CHINA 3RD ANNIVERSARY",
+    "CHINA 4TH ANNIVERSARY",
+    "ENGLISH 2ND ANNIVERSARY",
+    "ENGLISH 3RD ANNIVERSARY",
+    "ENGLISH 4TH ANNIVERSARY",
+    # Complete Guide 応募特典 (specific format)
+    "1ST ANNIVERSARY COMPLETE GUIDE",
+    "2ND ANNIVERSARY COMPLETE GUIDE",
+    "3RD ANNIVERSARY COMPLETE GUIDE",
+    "4TH ANNIVERSARY COMPLETE GUIDE",
+    # generic Japanese ANNIVERSARY SET (fallback)
+    "1ST ANNIVERSARY SET",
+    "2ND ANNIVERSARY SET",
+    "3RD ANNIVERSARY SET",
+    "4TH ANNIVERSARY SET",
+    "5TH ANNIVERSARY SET",
+]
+
+
+def _brand_setname_bonus(psa_brand: str, set_name_official: str) -> int:
+    """PSA brand の modifier-qualified set キーワードが record.set_name_official に含まれるなら +300.
+
+    Advisor 2026-07-29 §3-A: OP07-051 (500 Years) が OP07-051_p4 (China 2nd Anniv Boa Hancock)
+    に負ける事象の根治。base pid が名前一致で先に採用されるため、set_name_official 側で
+    「brand が示す variant セット」を identify する signal を +300 で加える。
+
+    暴発防止: bare 'ANNIVERSARY' 禁止。キー語は必ず修飾語込み。
+    specific → generic の順で first-match により誤マッチを避ける (テストで固定)。
+
+    Returns: 300 (brand と set_name_official に同じ修飾語込みキーワードあり) or 0。
+    """
+    if not psa_brand or not set_name_official:
+        return 0
+    b = psa_brand.upper()
+    s = set_name_official.upper()
+    matched_kw = None
+    for kw in _BRAND_SETNAME_KEYWORDS:      # specific → generic
+        if kw in b:
+            matched_kw = kw
+            break
+    if matched_kw is None:
+        return 0
+    return 300 if matched_kw in s else 0
+
+
+# ============================================================================
 # 旧 bandai_jp.fetch_card 形式に変換
 # ============================================================================
 # Bandai TCG の color JA→EN (One Piece / Dragon Ball 共通)。eBay 出力は英語必須。
@@ -409,7 +471,8 @@ def lookup_one_piece(
     #    例: PSA Brand 'PROMOS' + 番号 '019' + Subject 'JEWELRY BONNEY' →
     #        P-019 (Bepo) reject 後、OP07-019_P (Bonney WSJ 付録版) を救済
     if record is None and set_code == "P":
-        record = _search_one_piece_promo_by_number(card_number, subject, verbose=verbose)
+        record = _search_one_piece_promo_by_number(card_number, subject, verbose=verbose,
+                                                   brand=brand)
 
     # 4. Reprint/SP Alt fallback: PSA brand に specific set あり (例: OP11) で base miss
     #    → 全 set_code に対して {番号}_{PSA_set_code} suffix を試行 + 名前検証
@@ -520,6 +583,7 @@ def _search_one_piece_promo_by_number(
     card_number: str,
     subject: str,
     verbose: bool = True,
+    brand: str = "",
 ) -> Optional[dict]:
     """Promo brand fallback: 番号 + 名前検証で 全 set_code を横断検索.
 
@@ -564,17 +628,21 @@ def _search_one_piece_promo_by_number(
     # Promo brand の場合: _P / _P_* suffix 付き record を優先 (実物が promo 版だから)
     def _promo_score(rec: dict) -> int:
         pid = rec.get("product_id", "")
+        s = 0
+        # +300: PSA brand の修飾語込み set キーワードが set_name_official に一致
+        # (Advisor 2026-07-29 §3-A: China 2nd ANNIVERSARY variant を base に負けなくする)
+        s += _brand_setname_bonus(brand, rec.get("set_name_official") or "")
         # 末尾 '_P' または '_P_' suffix → 高優先 (promo 版そのもの)
         if re.search(r"_P(_|$)", pid):
-            return 100
+            s += 100
         # set_name_official が 'Promotion' / 'プロモーション' 含む → 中優先
         sn = (rec.get("set_name_official") or "").lower()
         if "promotion" in sn or "プロモーション" in (rec.get("set_name_official") or ""):
-            return 50
+            s += 50
         # base record (suffix 無し) → 低優先
         if "_" not in pid:
-            return 10
-        return 0
+            s += 10
+        return s
 
     candidates.sort(key=_promo_score, reverse=True)
     chosen = candidates[0]
