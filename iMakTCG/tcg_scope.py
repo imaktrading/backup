@@ -1,0 +1,90 @@
+"""tcg_scope — PSA→CSV pipeline の out-of-scope 判定 (純関数, SSOT・2026-07-30).
+
+build_row (iMakTCG/psa_to_csv.py) と _route_none_to_catalog
+(iMakHQ/tools/post_psa_review.py) の両方から呼ばれる **共通ヘルパ**。両者が同じ真理表で
+「未収録カテゴリの cert を skip」する = missing_models.csv に SCG 対象外が毎日流れ、
+Catalog に無駄な調査依頼が量産される事故 (2026-07-29 発覚) の根治。
+
+対象外一覧 (2026-07-29 Advisor 確定):
+- Yu-Gi-Oh! ................ catalog 日本版未収録
+- SDBH = Super Dragon Ball Heroes .... アーケード=SCG対象外
+- DIVERS = Dragon Ball Super Divers ... アーケード派生=SCG対象外 (brand 文字列で識別、
+                                       franchise は "Dragon Ball" になる)
+- ITAJAGA / イタジャガ .... 食玩プロモ、公式 TCG カタログ対象外
+- Pokemon FAMILY POKEMON CARD GAME ... catalog 構造的未収録
+
+pokemon_out_of_scope (psa_to_csv.py) との関係:
+本モジュールは pokemon_out_of_scope に依存しない (循環 import 回避)。真理表 (FAMILY のみ
+skip、BLACK DECK KIT は skip しない) は同一。BLACK DECK KIT は 2026-07-26 以降 catalog
+有無で判定 (skip しない=recall 損防止)。
+
+依存: 標準ライブラリのみ (test-friendly)。
+"""
+from __future__ import annotations
+
+
+def is_out_of_scope(franchise: str, brand: str) -> tuple[bool, str]:
+    """PSA brand ✕ franchise → out-of-scope 判定 (純関数).
+
+    Args:
+        franchise: detect_game_info(brand) の3タプル目 ("One Piece" / "Dragon Ball" /
+                   "Pokemon" / "Yu-Gi-Oh!" / "Dragon Ball Heroes" / "Itajaga" 等)。
+        brand:     PSA cache の Brand 文字列 (大文字小文字混在)。
+
+    Returns:
+        (True, 理由文字列)  = skip すべき (build_row: return None / route: 書かない)
+        (False, "")         = scope 内 (通常処理)
+    """
+    b = (brand or "").upper()
+    if franchise == "Yu-Gi-Oh!":
+        return True, "遊戯王は現在対象外(catalog日本版未収録)"
+    if franchise == "Dragon Ball Heroes":
+        return True, "SDBH=アーケード=SCG対象外"
+    if franchise == "Itajaga":
+        return True, "ITAJAGA=食玩プロモ=公式TCGカタログ対象外"
+    # DIVERS は detect_game_info が franchise="Dragon Ball" を返す (SCG 本編と同扱い)
+    # → brand 文字列で識別。dragonball_scg に catalog 実体無しで missing_models 永久汚染
+    # (2026-07-29 Advisor 確定)。DIVERS の全 vol (4/7/40th 等) を一括除外。
+    if "DIVERS" in b:
+        return True, "DIVERS=SCG対象外(catalog未収録)"
+    # Pokemon FAMILY POKEMON CARD GAME (はじめての〜) は catalog 0件 (2026-07-01 実機確認)
+    if franchise == "Pokemon" and "FAMILY POKEMON CARD GAME" in b:
+        return True, "Pokemon FAMILY POKEMON CARD GAME (catalog構造的未収録)"
+    return False, ""
+
+
+def detect_franchise_from_brand(brand: str) -> str:
+    """brand 文字列だけから franchise を軽量判定 (純関数, psa_to_csv 非依存).
+
+    _route_none_to_catalog から is_out_of_scope を呼ぶ前段 (post_psa_review は
+    detect_game_info を持たない = psa_to_csv 重い import を避けるため軽量版を用意)。
+    真理表は detect_game_info の franchise 判定と一致させる。
+
+    Args:
+        brand: PSA cache Brand (例 'DRAGON BALL SUPER DIVERS 4', 'ONE PIECE JAPANESE OP08-...')
+
+    Returns:
+        franchise 名 ("One Piece" / "Dragon Ball" / "Pokemon" / "Yu-Gi-Oh!" /
+        "Dragon Ball Heroes" / "Itajaga" / "Gundam" 等)。判定不能は brand をそのまま。
+    """
+    b = (brand or "").upper()
+    # 順序が意味を持つ: specific → 総称 (detect_game_info と同じ)
+    if "DRAGON BALL HEROES" in b:
+        return "Dragon Ball Heroes"
+    if "ITAJAGA" in b or "イタジャガ" in (brand or ""):
+        return "Itajaga"
+    if "YU-GI-OH" in b or "YUGIOH" in b:
+        return "Yu-Gi-Oh!"
+    # Gundam 判定: DUAL IMPACT / NEWTYPE RISING / STEEL REQUIEM 等の specific set →
+    # 総称 GUNDAM。detect_game_info と真理表を合わせる。
+    for token in ("DUAL IMPACT", "NEWTYPE RISING", "STEEL REQUIEM", "HEROIC BEGINNINGS",
+                  "WINGS OF ADVANCE", "ZEON", "SEED STRIKE", "IRON BLOOM", "GUNDAM"):
+        if token in b:
+            return "Gundam"
+    if "ONE PIECE" in b:
+        return "One Piece"
+    if "DRAGON BALL" in b:
+        return "Dragon Ball"
+    if "POKEMON" in b:
+        return "Pokemon"
+    return brand or ""

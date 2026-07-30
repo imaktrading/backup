@@ -1877,31 +1877,15 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     _catalog_category_for_variant = None
     game, set_name, franchise = detect_game_info(brand)
 
-    # 2026-06-12: 遊戯王は現在 出品対象外 (ユーザー指示で当面 SKIP)。
-    # 理由: catalog が日本版遊戯王を未収録 (= 候補が英語版のみで正カードに当たらない)。
-    # 準備が整ったらユーザーが解除指示する。catalog 側の日本版収録は別途依頼済。
-    if franchise == "Yu-Gi-Oh!":
-        print(f"    ⏭️ Skip: 遊戯王は現在出品対象外 (cert {cert_number}, {subject})")
-        return None
-
-    # Dragon Ball Heroes (アーケード) は catalog(SCG)スコープ外 → fail-closed skip。
-    # missing_models へ dragonball_scg として誤って積むのを防ぐ (2026-06-27 K4 根治)。
-    if franchise == "Dragon Ball Heroes":
-        print(f"    ⏭️ Skip: Dragon Ball Heroes はアーケード=catalog(SCG)対象外 (cert {cert_number}, {subject})")
-        return None
-
-    # ITAJAGA(カルビースナック封入 食玩プロモ)は公式TCGカタログ対象外 → fail-closed skip。
-    # detect_game_info が franchise="Itajaga" を返す。dragonball_scg 誤分類→missing_models 汚染を根治
-    # (2026-07-25 K5・Catalog 2026-07-17 要求)。対応カテゴリが無いので出品しない(推測補完は方針違反)。
-    if franchise == "Itajaga":
-        print(f"    ⏭️ Skip: ITAJAGA(カルビースナック食玩プロモ)=公式TCGカタログ対象外 (cert {cert_number}, {subject})")
-        return None
-
-    # catalog が構造的に収録しない Pokemon サブセット(現状 FAMILY POKEMON CARD GAME のみ)を skip。
-    # ※BLACK DECK KIT は 2026-07-26 に除外解除(catalog に BDK-005/006 収録済=catalog有無で判定)。
-    # ※XY期は catalog に173件あるので丸ごと除外しない(K3 は不採用=出せるカードを殺すため)。
-    if pokemon_out_of_scope(franchise, brand):
-        print(f"    ⏭️ Skip: Pokemon {subject} はカタログ構造的未収録=対象外 (cert {cert_number})")
+    # 2026-07-30: 共通ヘルパ tcg_scope.is_out_of_scope に SSOT 集約。
+    # 従来は build_row 内に 4 分岐 (Yu-Gi-Oh!/Heroes/Itajaga/Pokemon FAMILY) が個別 return None、
+    # 加えて post_psa_review._route_none_to_catalog が同じ真理表を持たず missing_models.csv に
+    # SCG 対象外を毎日書き込んでいた (2026-07-29 Advisor 発覚)。片方だけ塞ぐと次に scope を
+    # 変えた時にまた乖離するので、両方から 1 か所を呼ぶ形に統一。DIVERS も本 helper で新規除外。
+    from tcg_scope import is_out_of_scope as _is_out_of_scope
+    _oos, _oos_reason = _is_out_of_scope(franchise, brand)
+    if _oos:
+        print(f"    ⏭️ Skip: {_oos_reason} (cert {cert_number}, {subject})")
         return None
 
     # 非日本語版(ASIA/KOREAN/CHINESE)は当店=日本版のみ扱い → 対象外 skip。

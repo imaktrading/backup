@@ -978,10 +978,19 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
     NONE は『解決済』でなく『catalog で解決すべき宿題』。build_row の catalog-miss と同経路で
     auto_catalog_add_request watcher が依頼書を自動投入する。これにより HTML から消えても
     宿題は catalog 依頼として surface し続ける。
-    Returns: missing_models.csv に書いた行数。
+
+    2026-07-30: SCG 対象外 (Yu-Gi-Oh!/SDBH/DIVERS/ITAJAGA/Pokemon FAMILY) は
+    tcg_scope.is_out_of_scope で **書き込む前に skip**。従来は本関数が scope 判定を持たず、
+    build_row と乖離して毎日 Catalog に無駄な調査を積んでいた (2026-07-29 Advisor 発覚)。
+    build_row と同じ真理表を SSOT (tcg_scope) から共有する。
+
+    Returns: missing_models.csv に書いた行数 (skip 済は含まない)。
     """
     if not none_records:
         return 0
+    # tcg_scope を lazy import (テスト時 iMakTCG path が無くても本関数外は動く)。
+    _ensure_tcg_path()
+    from tcg_scope import is_out_of_scope, detect_franchise_from_brand
     path = Path(missing_path) if missing_path else _MISSING_MODELS_PATH
     written = 0
     try:
@@ -1001,6 +1010,13 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                 brand = (meta.get("Brand") or "").strip()
                 subject = (meta.get("Subject") or "").strip()
                 cardno = (meta.get("CardNumber") or "").strip()
+                # SSOT scope gate: build_row と同じ真理表で SCG 対象外を除外
+                # (missing_models 汚染 → auto_catalog_add 無駄依頼の根治 2026-07-30)。
+                franchise = detect_franchise_from_brand(brand)
+                oos, oos_reason = is_out_of_scope(franchise, brand)
+                if oos:
+                    print(f"    ⏭️ Skip missing_models (scope外): cert{cert} {oos_reason}")
+                    continue
                 model = (f"cert{cert} {brand} [{subject}] #{cardno} "
                          f"(auto候補{expected}=該当なし 要調査)").replace(",", " ")
                 model = " ".join(model.split())  # 連続空白圧縮
