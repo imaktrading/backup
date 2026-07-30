@@ -9,6 +9,7 @@
 """
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 # psa_resource_gate は重い import 群を持つので、純関数だけ取り出してテスト
@@ -119,6 +120,18 @@ def test_review_skip_unparseable_date_stays_hidden():
     rows = [SKIP_H, ["111", "P-041", "t", "違う", "", ""],
             ["222", "P-042", "t", "違う", "こわれ", ""]]
     assert g._review_skip_iids(rows, today="2026-07-30") == {"111", "222"}
+
+
+def test_restock_shares_negative_examples_with_hoju():
+    """RESTOCK の「違う」も **補URL側と同じ台帳**に貯め、両方で効かせること (2026-07-30)。
+
+    実測: 1走行で9件の「違う」が記録だけされて次回また同じ候補が出ていた
+    (人の9クリックが捨てられていた)。同じ出品×同じURLの判断は共有すべき。
+    """
+    src = (Path(__file__).parent.parent / "tools" / "psa_resource_gate.py").read_text(encoding="utf-8")
+    assert "_hf.NG_CAND_TAB" in src, "違うを候補NG台帳に記録していない"
+    assert "filter_candidates_rejected" in src, "記録した違うを表示前に除外していない"
+    assert "_merge_ng_rows" in src, "台帳を上書きしている (追記でないと過去の判断が消える)"
 
 
 def test_merge_skip_rows_keeps_and_dedups():

@@ -1051,6 +1051,13 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     high_n = 0
     _skipped_done = 0
     _skipped_review = 0
+    # ★過去に人が「違う」と判定した候補は二度と出さない (補URL側と同じ台帳を共有・2026-07-30)。
+    try:
+        import psa_hoju_fill as _hf0
+        _ng_by_iid = _hf0._ng_urls_by_iid(read_tab(_hf0.NG_CAND_TAB))
+    except Exception:
+        _ng_by_iid, _hf0 = {}, None
+    _n_ng = 0
     for n, rc in enumerate(restock_cands):
         iid = rc.get("itemID")
         if iid and iid in _done_iids:
@@ -1059,6 +1066,14 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         if iid and iid in _skip_iids:
             _skipped_review += 1
             continue   # 既にレビュー済(違う/見送り) → 再確証しない
+        if _ng_by_iid and _hf0 and iid:
+            _keep, _drop = _hf0.filter_candidates_rejected(rc.get("candidates") or [],
+                                                           _ng_by_iid.get(iid))
+            if _drop:
+                _n_ng += len(_drop)
+                rc["candidates"] = _keep
+            if not _keep:
+                continue          # 全部が既に「違う」判定済 → 見せる意味がない
         v8 = _v8_label(rc.get("cost"), rc.get("cur"), mp)
         if _is_high_cost(v8):
             high_n += 1
@@ -1082,6 +1097,8 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     if not items:
         print("  照合対象なし(新規の再仕入れ可ゼロ=全て確定/レビュー済)→ RESTOCK確定 変更なし")
         return
+    if _n_ng:
+        print(f"  🚫 過去に「違う」と判定済の候補 {_n_ng}件を除外(補URL側と共有の台帳)")
     if high_n:
         print(f"  🔵 うち仕入高 {high_n}件 含む(除外せず表示・既存メンテ追跡。⚠ラベルで判別)")
     print(f"▶ RESTOCK視覚確証: 再仕入れ可 {len(items)}件をブラウザ表示。候補ごとに①現物と同じか確認...")
@@ -1134,6 +1151,26 @@ def _alert_restock_diffs(diffs, skip, restock_cands, today):
     if not diffs:
         print(f"  外し: 見送り{skip} / 違う0(検索の誤検出なし=精度OK)")
         return
+    # ★2026-07-30: 「違う」を **負例として貯める**。補URL側 (slice3) と **同じタブを共有**するので、
+    #   どちらで押した判断も両方に効く。これが無いと次回また同じ候補を見せることになり、
+    #   人の1クリックが捨てられる (実測: 1走行で9件が捨てられていた)。
+    try:
+        import psa_hoju_fill as _hf
+        from sheet_io import read_tab as _rt, write_rows_to_tab as _wt
+        _new = []
+        for d in diffs:
+            i = d.get("idx")
+            rc = restock_cands[i] if isinstance(i, int) and 0 <= i < len(restock_cands) else {}
+            iid, url = (rc.get("itemID") or "").strip(), (d.get("url") or "").strip()
+            if iid and url:
+                _new.append([iid, "", url, (rc.get("title") or "")[:60], today])
+        if _new:
+            _wt(_hf.NG_CAND_TAB,
+                _hf._merge_ng_rows(_rt(_hf.NG_CAND_TAB), _new, _hf.NG_CAND_HEADER))
+            print(f"  🚫 {_hf.NG_CAND_TAB}: +{len(_new)}件 記録"
+                  f"(この出品にこのURLは次回から出さない・補URL側と共有)")
+    except Exception as e:
+        print(f"  ⚠ 候補NG台帳への記録skip ({type(e).__name__}: {e})")
     print(f"🚨 違う即対応 {len(diffs)}件(見送り{skip})— 検索が別カードを拾った=精度事故。生成(検索)を今すぐ直す:")
     rows = [["日付", "card_no", "title", "チャネル", "誤候補URL", "状態"]]
     for d in diffs:
