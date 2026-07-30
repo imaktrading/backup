@@ -402,16 +402,21 @@ function setRsn(btn){var cand=btn.closest('.cand'); var ck=cand.querySelector('.
   ck.dataset.rsn=btn.dataset.r;
   cand.querySelectorAll('.rb').forEach(function(b){b.classList.toggle('sel', b.dataset.r===btn.dataset.r);});}
 function go(){
-  var conf=[]; var diffs=[]; var skip=0;
+  var conf=[]; var diffs=[]; var skip=0; var unset=0;
   document.querySelectorAll('.card').forEach(function(c){
     var idx=parseInt(c.dataset.idx); var urls=[];
     c.querySelectorAll('.ck').forEach(function(ck){
       if(ck.checked){urls.push(ck.dataset.url);}
-      else if((ck.dataset.rsn||'skip')==='diff'){diffs.push({idx:idx, url:ck.dataset.url});}
-      else{skip++;}});
+      else if(ck.dataset.rsn==='diff'){diffs.push({idx:idx, url:ck.dataset.url});}
+      else{skip++; if(!ck.dataset.rsn) unset++;}});
     if(urls.length) conf.push({idx:idx, urls:urls});
   });
-  if(diffs.length && !confirm('違う(別カード)が'+diffs.length+'件。検索の精度事故=即対応対象です。確定しますか?')) return;
+  /* ★理由の既定選択を外したので、未選択が「黙って見送り」になる。件数を必ず見せる
+     (惰性で見送りが積まれると『違う』が defect 指標として機能しなくなる)。 */
+  var msg=[];
+  if(diffs.length) msg.push('違う(別商品)が'+diffs.length+'件 — 検索の精度事故=即対応対象です。');
+  if(unset) msg.push('理由未選択が'+unset+'件 — 見送りとして記録します。別商品なら「違う」を押してください。');
+  if(msg.length && !confirm(msg.join('\n')+'\n\n確定しますか?')) return;
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({confirmed:conf, diffs:diffs, skip:skip})}).then(function(){
     document.getElementById('main').style.display='none';
@@ -443,20 +448,28 @@ def build_restock_html(items):
             pstr = f"¥{price:,}" if isinstance(price, int) else (_s(price) if price else "")
             # 候補ごとに個別チェック(既定ON)。①と違う候補だけ外せる(1つ違っても全部NGにならない)。
             # チェック外す=買わない。理由は2択: 「見送り」(高い/出品者不安/納期長 等=business判断、
-            # 記録のみ)と「違う」(検索が別カードを拾った誤検出=生成への改善信号→違う率トレンド)。
-            # 既定 skip(外す多数は見送り)。違うカードの時だけ「違う」を押す。
+            # 記録のみ)と「違う」(検索が別商品を拾った誤検出=生成への改善信号→違う率トレンド)。
+            # ★2026-07-30: 既定を skip から **未選択** に変更。既定 skip だと惰性で見送りが積まれ、
+            #   「違う」が defect 指標として機能しない (実害: CGC 候補が毎日 見送りにされ続けた)。
+            #   未選択のまま確定した場合は go() が件数を confirm で見せてから 見送り 扱いにする。
             _nm = _s(cd.get("name"))
             _nm_html = f"<br><span class='cnm'>{_html.escape(_nm[:48])}</span>" if _nm else ""
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
-                f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='skip' onchange='upd({idx})'>{img}"
+                f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='' onchange='upd({idx})'>{img}"
                 f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}{_nm_html}"
                 f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a>"
                 f" <button type='button' class='zm' title='拡大'"
                 f" data-img=\"{_html.escape(_proxied(imgsrc))}\" onclick='zoom(event,this)'>🔍</button>"
+                # ★2026-07-30: 「違う」を『カードの同定が違う』と読まれて 見送り が選ばれ続けていた
+                #   (ユーザー報告: CGC 候補を毎日 見送りにしていた)。原因は
+                #   (a) 見送りが既定選択 (b) 説明文が「違うカード…は見送り」と書いていた矛盾。
+                #   ラベルで意味を明示し、既定選択を外す。理由は defect 指標なので惰性で埋まると死ぬ。
                 f"<span class='rsn'>外す理由:"
-                f"<button type='button' class='rb sel' data-r='skip' onclick='setRsn(this)'>見送り</button>"
-                f"<button type='button' class='rb' data-r='diff' onclick='setRsn(this)'>違う</button>"
+                f"<button type='button' class='rb' data-r='diff' onclick='setRsn(this)'"
+                f" title='別商品。鑑定会社違い(CGC/BGS等) / 別カード / 別変種'>違う(別商品)</button>"
+                f"<button type='button' class='rb' data-r='skip' onclick='setRsn(this)'"
+                f" title='商品は合っているが今回は買わない。高い / 納期 / 出品者不安'>見送り(商品は合っている)</button>"
                 f"</span></span></label>")
         if not cand_html:
             cand_html = ["<div class='cph'>仕入候補なし</div>"]
@@ -498,8 +511,11 @@ def build_restock_html(items):
             f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
             f"<div class='cands'>{''.join(cand_html)}</div></div></div>"
             "</div>")
+    # ★2026-07-30: 旧文は「買わない候補(**違うカード** / 高い / …)は仕入見送り」と書いており、
+    #   別に「違う」ボタンがあるのと矛盾していた。これが 見送り 誤用の原因。意味を書き分ける。
     head = (f"<h1>RESTOCK 視覚確証 — {len(items)}件。① 現物 と見比べて<b>買う候補だけチェックを残す</b>。"
-            "買わない候補(違うカード / 高い / 出品者不安 / 納期長 等)は<b>仕入見送り=チェックを外す</b>。"
+            "外した候補は理由を選ぶ: <b>違う(別商品)</b>=鑑定会社違い(CGC等)/別カード/別変種 "
+            "→ 検索の精度事故として即対応する。 <b>見送り(商品は合っている)</b>=高い/納期/出品者不安。"
             "1つでも残ればRESTOCK確定 → 確定。</h1>")
     bar = ("<div class='bar'><button class='go' onclick='go()'>✅ RESTOCK確定</button>"
            "<button onclick='setAll(true)'>全部ON</button>"
