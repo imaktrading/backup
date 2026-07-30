@@ -31,10 +31,28 @@
 **キプロス(CY)とマルタ(MT)が突出して高い**(0.5kg で 5,288 / 4,829)。他は 2,500〜3,400 に収まる。
 カテゴリ既定送料 ¥2,000〜3,000 と比べると、**0.5kg でおおむね同等〜やや上**。
 
+### ★Economy 固有の制限 (2026-07-30 ユーザーマニュアルより・**我々に効くもの**)
+
+出典: `C:/dev/iMak_data/shipping/USER_MANUAL_SpeedPAK_Japan_20260730.pdf` 「輸送制限品目」
+
+| # | 制限 | 我々への影響 |
+|---|---|---|
+| 25 | **申告輸送価額が 1kg あたり 1,000 USD 以上は Economy 禁止** | ★**PSA10 が該当しうる**。スラブ実測 ~0.1kg、梱包 0.2〜0.3kg。$250 のカードを 0.2kg で送ると **$1,250/kg = 抵触**。0.3kg なら $833/kg で収まる |
+| 22 | **磁性体を含む製品は Economy 不可** | 該当薄いが、マグネット付きケース等は注意 |
+| 22 | Orange Connex が許可していないバッテリー付き製品 | **実績では G-SHOCK の US 向けが通っている**(機器内蔵ボタン電池)。単体電池・リチウムパックは不可 |
+| 27c | **硬貨(古銭含む)は Economy 禁止** | 該当なし(現状) |
+| — | 取引額上限: **EU €150 / UK £135 / US 1,200〜1,300 USD / AU 1,000 AUD** | 超える帯は Economy に載せない |
+
+★**$1,000/kg 制限は「軽くて高い」商材に効く**。TCG は梱包重量で回避できる余地がある
+(0.3kg 以上にすれば $300 まで OK)。運用として **梱包重量を意図的に確保する**のが安全。
+※ US 向けでは実際に通っている実績があるため、運用上の厳格さは不明。**EU は新設なので
+より厳しく見られる可能性**がある。
+
 ## 1. 原本 PDF の保管場所(セッションを跨いで参照可)
 
 ```
 C:/dev/iMak_data/shipping/RATE_GUIDE_SpeedPAK_Economy_JP_20260730.pdf   ★最新(EU27拡大版)
+C:/dev/iMak_data/shipping/USER_MANUAL_SpeedPAK_Japan_20260730.pdf      ★最新(制限品目・電池規定)
 C:/dev/iMak_data/shipping/RATE GUIDE of eBay SpeedPAK Economy-JP.pdf          (2026-06-22 版)
 C:/dev/iMak_data/shipping/RATE GUIDE of eBay SpeedPAK Japan Ship via FedEx-JP.pdf (2026-06-26 版)
 ```
