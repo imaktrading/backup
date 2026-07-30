@@ -37,6 +37,133 @@ ROUTES = {
 }
 
 
+# 商品管理シートの列 (0-based)。sheet_io と同じ並び。
+COL_URL, COL_ITEMID, COL_COST_N, COL_STOCKCHK, COL_CAT = 0, 1, 13, 14, 17
+COL_AUX = range(28, 33)          # AC〜AG = 補URL 1〜5
+CUR2DEST = {"EUR": "DE", "GBP": "UK", "AUD": "AU", "CAD": "CA"}
+CAT2CALC = {"TCG": "TCG(PSA10)", "PSA": "TCG(PSA10)", "G-SHOCK": "G-SHOCK",
+            "Tシャツ": "Tシャツ(UT)", "montbell": "Montbell(軽)", "一番くじ": "一番くじ"}
+
+
+def fetch_offers():
+    """受信中の Best Offer を eBay から取り、商品管理シートの仕入値まで解決して返す。
+
+    なぜ (2026-07-31 ユーザー要望「ボタンを押せば仕入れ値まで拾って HTML を出せる?」):
+        オファーは期限が短い (実例: 受信から丸1日)。**国・出品価格・仕入値を人が
+        探して手入力する時間が判断を遅らせる**。全部 API とシートから取れるので取る。
+
+    ★仕入値は **商品管理シート N列 (実質仕入値)** が SSOT。補URL から推測しない。
+      N = (M or F) − K の ARRAYFORMULA で、監視くんが供給を見て維持している値。
+    ★ミラー (ebay.de 等) の itemID はシートに無い。**SKU (= mercari item ID) が
+      A列の仕入元 URL に含まれる**ので、そこで突合する。
+    """
+    import re
+    sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
+    import dns_cache  # noqa: F401
+    import fix_de_speedpak_shipping as fx
+
+    fx.refresh()
+    tok = fx.token()
+
+    # 1) オファーが付いている listing を特定 (GetBestOffers 単体では ItemID が返らない)
+    items = {}
+    for n in range(1, 40):
+        inner = ('<ActiveList><Include>true</Include><Pagination>'
+                 f'<EntriesPerPage>200</EntriesPerPage><PageNumber>{n}</PageNumber>'
+                 '</Pagination></ActiveList><DetailLevel>ReturnAll</DetailLevel>')
+        t = fx.post("GetMyeBaySelling", inner, tok)
+        al = t[t.find("<ActiveList>"):t.find("</ActiveList>")]
+        chunk = re.findall(r"<Item>(.*?)</Item>", al, re.S)
+        if not chunk:
+            break
+        for it in chunk:
+            bo = re.search(r"<BestOfferCount>(\d+)</BestOfferCount>", it)
+            if not (bo and int(bo.group(1)) > 0):
+                continue
+            iid = re.search(r"<ItemID>(\d+)</ItemID>", it)
+            cp = re.search(r'<CurrentPrice currencyID="(\w+)">([\d.]+)<', it)
+            ti = re.search(r"<Title>(.*?)</Title>", it)
+            vu = re.search(r"<ViewItemURL>(.*?)</ViewItemURL>", it)
+            if iid and cp:
+                items[iid.group(1)] = {
+                    "list": float(cp.group(2)), "cur": cp.group(1),
+                    "title": (ti.group(1) if ti else "").replace("&amp;", "&"),
+                    "url": vu.group(1) if vu else ""}
+        tp = re.search(r"<TotalNumberOfPages>(\d+)</TotalNumberOfPages>", t)
+        if tp and n >= int(tp.group(1)):
+            break
+    if not items:
+        return []
+
+    # 2) 商品管理シート (仕入値 SSOT) を1回だけ読む
+    rows = []
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        import sheet_io
+        creds = Credentials.from_service_account_file(
+            sheet_io.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        ws = (gspread.authorize(creds).open_by_key(sheet_io.PRODUCT_SHEET_ID)
+              .get_worksheet_by_id(sheet_io.PRODUCT_GID))
+        rows = ws.get_all_values()[1:]
+    except Exception as e:                                    # noqa: BLE001
+        print(f"⚠️ 商品管理シートが読めない ({e}) → 仕入値は 0 で出す")
+
+    def yen(v):
+        try:
+            return int(str(v).replace(",", "").replace("¥", "").strip() or 0)
+        except ValueError:
+            return 0
+
+    out = []
+    for iid, meta in items.items():
+        # 3) その listing のオファー明細
+        x = fx.post("GetBestOffers",
+                    f"<ItemID>{iid}</ItemID><BestOfferStatus>Active</BestOfferStatus>"
+                    "<DetailLevel>ReturnAll</DetailLevel>", tok, site="0")
+        # 4) SKU (= 仕入元 mercari item ID) を取る
+        gi = fx.post("GetItem", f"<ItemID>{iid}</ItemID><DetailLevel>ReturnAll</DetailLevel>",
+                     tok, site="0")
+        m = re.search(r"<SKU>(.*?)</SKU>", gi)
+        sku = m.group(1) if m else ""
+
+        cost, stock, supply, cat_sheet, cost_src = 0, "", 0, "", ""
+        for r in rows:
+            if sku and len(r) > COL_URL and sku in (r[COL_URL] or ""):
+                cost = yen(r[COL_COST_N] if len(r) > COL_COST_N else 0)
+                stock = r[COL_STOCKCHK] if len(r) > COL_STOCKCHK else ""
+                supply = sum(1 for i in COL_AUX if len(r) > i and (r[i] or "").strip())
+                cat_sheet = r[COL_CAT] if len(r) > COL_CAT else ""
+                cost_src = f"商品管理シート N列 / itemID {r[COL_ITEMID]}"
+                break
+
+        for o in re.findall(r"<BestOffer>(.*?)</BestOffer>", x, re.S):
+            def g(t, s=o):
+                mm = re.search(rf"<{t}[^>]*>(.*?)</{t}>", s, re.S)
+                return mm.group(1) if mm else ""
+            if g("Status") != "Pending":
+                continue
+            country = g("CountryName")
+            cur = meta["cur"]
+            dest = CUR2DEST.get(cur) or ("US" if country == "US"
+                                         else "その他 (US出品・米国外へ発送)")
+            calc_cat = next((v for k, v in CAT2CALC.items()
+                             if k.lower() in (cat_sheet or "").lower()), "TCG(PSA10)")
+            out.append({
+                "itemId": iid, "title": meta["title"], "url": meta["url"],
+                "list": meta["list"], "sym": {"EUR": "€", "GBP": "£", "AUD": "A$",
+                                              "CAD": "C$"}.get(cur, "$"),
+                "price": float(g("Price") or 0), "dest": dest,
+                "destLabel": f"{country or '?'}／{cur}", "country": country or "?",
+                "cat": calc_cat, "cost": cost, "costSrc": cost_src,
+                "stock": stock, "supply": supply,
+                "buyer": g("UserID"), "fb": g("FeedbackScore"),
+                "expire": (g("ExpirationTime") or "")[:16].replace("T", " "),
+            })
+    out.sort(key=lambda o: o["expire"])
+    return out
+
+
 def fetch():
     """設定タブから、計算に要る値を全部取る (これが SSOT)。"""
     import gspread
@@ -126,10 +253,17 @@ a{color:#7ab8ff}
 <div class="sub">スプレッドシート v9 の各タブ15行の数式をそのまま移植（生成時に突合検証済）。
 最終確認はシートで。</div>
 
+<div class="f" style="margin-bottom:12px">
+  <label>📥 受信中のオファー（選ぶと全項目が入る）</label>
+  <div id="offerbox"><select id="offersel"></select>
+    <div id="meta" style="color:#9cf;font-size:12px;margin-top:6px"></div></div>
+</div>
+
 <div class="grid">
   <div class="f"><label>バイヤーの国（仕向地）</label><select id="dest"></select></div>
   <div class="f"><label>カテゴリ</label><select id="cat"></select></div>
   <div class="f"><label>オファー金額（現地通貨）</label><input id="price" type="number" step="0.01" value="70"></div>
+  <div class="f"><label>出品価格（任意・帯またぎ検出用）</label><input id="list" type="number" step="0.01" value="0"></div>
   <div class="f"><label>仕入値（円）</label><input id="cost" type="number" step="10" value="1800"></div>
   <div class="f"><label>ポイント還元（円）</label><input id="pt" type="number" step="10" value="0"></div>
   <div class="f"><label>プロモ</label><select id="promo">
@@ -209,6 +343,69 @@ function solve(targetMargin){                 // その利益率になる価格�
   return (lo + hi) / 2;
 }
 
+/* ===== 発送手段の判定 (2026-07-30 ユーザー要望) =====
+   ★何で送るかは **出品価格ではなく成約額** で決まる。オファーで €150 を下回ると
+     日本郵便がドイツ向けを引き受けないため SpeedPAK Economy に切替が要る
+     (2026-07-31 実例: 出品 €220.62 の listing に €120 のオファー = 帯またぎ)。
+   ★根拠: SPEEDPAK_COVERAGE.md / jp_post_eu_suspension_20260724 /
+     shipping_route_by_destination / uk_vat_135_shipping_rules */
+const IOSS_EUR = 150;      // EU: IOSS 上限 (Economy の取引額上限でもある)
+const UK_GBP   = 135;      // UK: VAT 徴収境界
+const AU_GST   = 1000;     // AU: 同一バイヤー同日 GST 境界
+
+function shipInfo(dk, price){
+  const cur = P.routes[dk][2];
+  const eur = price * (P.fx[cur] || 0) / (P.fx.EUR || 1);   // 成約額の EUR 換算
+  const out = {method:'', why:'', warns:[]};
+  if (dk === 'DE'){
+    if (eur <= IOSS_EUR){
+      out.method = 'SpeedPAK Economy（DE_EconomySppedPAK）';
+      out.why = '取引額 €' + eur.toFixed(2) + ' ≤ €150 = IOSS 帯。日本郵便は独の €150未満を引き受けない';
+    } else {
+      out.method = '日本郵便（EMS / 国際eパケット）';
+      out.why = '取引額 €' + eur.toFixed(2) + ' > €150。Economy は €150 超を扱えない';
+    }
+  } else if (dk === 'UK'){
+    out.method = '日本郵便（送料は価格内包）';
+    out.why = price <= UK_GBP ? '£135 以下 = eBay が VAT 徴収済' : '£135 超 = DDU（バイヤーが着払い）';
+    if (price <= UK_GBP) out.warns.push('VAT 徴収済 → <b>必ず単独で発送</b>（他と同梱すると二重課税）');
+  } else if (dk === 'CA'){
+    out.method = '国際eパケット（日本郵便）';
+    out.why = 'DDU。米国関税は払わないので US 基準より利益は厚い';
+  } else if (dk === 'AU'){
+    out.method = '日本郵便';
+    out.why = price <= AU_GST ? 'A$1,000 以下 = GST 徴収済' : 'A$1,000 超 = 別扱い';
+  } else if (dk === 'US'){
+    out.method = 'SpeedPAK Economy（US_EconomySppedPAK）';
+    out.why = '米国内向け。関税は当方負担（DDP）';
+  } else {                                   // その他 (US出品・米国外へ発送)
+    if (eur <= IOSS_EUR){
+      out.method = 'SpeedPAK Economy（rate table iMak_EU_DDP_Common）';
+      out.why = '取引額 €' + eur.toFixed(2) + ' ≤ €150。EU25 か国は Economy でカバー';
+    } else {
+      out.method = '日本郵便 / FedEx';
+      out.why = '取引額 €' + eur.toFixed(2) + ' > €150 = Economy 不可';
+    }
+  }
+  // 帯またぎ (出品価格を入れた時だけ)
+  const listP = +document.getElementById('list').value || 0;
+  if (listP > 0 && (dk === 'DE' || dk === 'その他 (US出品・米国外へ発送)')){
+    const listEUR = listP * (P.fx[cur] || 0) / (P.fx.EUR || 1);
+    if (listEUR > IOSS_EUR && eur <= IOSS_EUR)
+      out.warns.push('<b>帯またぎ</b>: 出品 €' + listEUR.toFixed(2) + ' は「>€150=日本郵便」設定だが、'
+        + 'この成約額は €150 未満。<b>実際は SpeedPAK Economy で発送すること</b>');
+    if (listEUR <= IOSS_EUR && eur > IOSS_EUR)
+      out.warns.push('<b>帯またぎ</b>: 出品は Economy 設定だが成約額が €150 超。<b>日本郵便で発送</b>');
+  }
+  if (out.method.indexOf('Economy') >= 0){
+    out.warns.push('Economy 制約: <b>6〜16営業日</b> / 電池不可 / '
+      + '<b>申告額 1kgあたり $1,000 以上は不可</b>（PSA10 は梱包 0.3kg 以上を確保）');
+  }
+  if (dk === 'DE' || dk === 'その他 (US出品・米国外へ発送)')
+    out.warns.push('EU 向けは <b>IOSS 番号 IM2760000742</b> を差出人参照番号欄に入れる（忘れると VAT 二重払い）');
+  return out;
+}
+
 function render(){
   const r = calc(+document.getElementById('price').value || 0);
   const v = document.getElementById('verdict');
@@ -235,15 +432,59 @@ function render(){
       line('送料', '-' + yen(r.J)) + line('eBay手数料', '-' + yen(r.K)) +
       line('プロモ費', '-' + yen(r.L)) + line('Payoneer', '-' + yen(r.M)) +
       line(r.tab.startsWith('US') ? 'DDP/関税ほか' : 'VAT/GST相殺', '-' + yen(r.N)) +
-    '</div>';
+    '</div>' +
+    (function(){
+      const s = shipInfo(dest.value, r.price);
+      return '<div style="margin-top:14px;padding:12px;border:1px solid #3a5;border-radius:8px;'
+        + 'background:#16241a">'
+        + '<div style="color:#9f9;font-size:12px;margin-bottom:4px">📦 何で送るか（成約額で決まる）</div>'
+        + '<div style="font-size:18px;font-weight:bold">' + s.method + '</div>'
+        + '<div style="color:#bbb;font-size:12px;margin-top:3px">' + s.why + '</div>'
+        + (s.warns.length
+            ? '<ul style="margin:8px 0 0;padding-left:18px;font-size:12px;color:#ffd">'
+              + s.warns.map(w => '<li>' + w + '</li>').join('') + '</ul>'
+            : '')
+        + '</div>';
+    })();
   document.getElementById('lnk').innerHTML =
     '<a href="' + P.url + P.tabs[r.tab] + '" target="_blank">' + r.tab + ' を開く</a>' +
     '（C15 に ' + r.sym + r.price.toFixed(2) + ' を入れて 16行を見る）';
 }
 function line(k, v){ return '<div class="line"><span>' + k + '</span><b>' + v + '</b></div>'; }
 
-['dest','cat','price','cost','pt','promo'].forEach(id =>
+['dest','cat','price','list','cost','pt','promo'].forEach(id =>
   document.getElementById(id).addEventListener('input', render));
+
+/* ===== 受信中オファーの自動読込 (--offers 生成時のみ中身が入る) ===== */
+(function(){
+  const box = document.getElementById('offerbox');
+  if (!P.offers || !P.offers.length){
+    box.innerHTML = '<span style="color:#888">受信中のオファーは読み込まれていません'
+      + '（<code>python offer_calc.py --offers</code> で自動取得）</span>';
+    return;
+  }
+  const sel = document.getElementById('offersel');
+  P.offers.forEach((o, i) => sel.add(new Option(
+    `${o.sym}${o.price}  ${o.title.slice(0,44)}  (${o.destLabel}／期限 ${o.expire}）`, i)));
+  function apply(){
+    const o = P.offers[+sel.value];
+    dest.value = o.dest; cat.value = o.cat;
+    document.getElementById('price').value = o.price;
+    document.getElementById('list').value = o.list;
+    document.getElementById('cost').value = o.cost;
+    document.getElementById('meta').innerHTML =
+      `<a href="${o.url}" target="_blank">${o.itemId}</a> ／ 出品 ${o.sym}${o.list}`
+      + ` ／ 仕入 ¥${o.cost.toLocaleString()}`
+      + (o.costSrc ? `（${o.costSrc}）` : '')
+      + ` ／ バイヤー ${o.buyer}（${o.country}・評価${o.fb}）`
+      + (o.stock ? ` ／ 在庫確認 ${o.stock}` : '')
+      + (o.supply ? ` ／ 補URL ${o.supply}本` : '');
+    render();
+  }
+  sel.addEventListener('change', apply);
+  apply();
+})();
+
 render();
 </script></body></html>"""
 
@@ -354,6 +595,22 @@ def main() -> int:
     except Exception:
         pass
     p = fetch()
+
+    # ★既定で受信中オファーを読む (2026-07-31)。オファーは期限が短く、
+    #   国・出品価格・仕入値を人が探す時間がそのまま判断の遅れになる。
+    #   取得に失敗しても手入力版として使えるよう、例外は握って続行する。
+    p["offers"] = []
+    if "--no-offers" not in sys.argv:
+        try:
+            p["offers"] = fetch_offers()
+            print(f"📥 受信中オファー: {len(p['offers'])} 件")
+            for o in p["offers"]:
+                print(f"   {o['sym']}{o['price']} / 出品 {o['sym']}{o['list']} / "
+                      f"仕入 ¥{o['cost']:,} / {o['destLabel']} / 期限 {o['expire']}")
+                print(f"     {o['title'][:70]}")
+        except Exception as e:                                # noqa: BLE001
+            print(f"⚠️ オファー取得に失敗 ({e}) → 手入力版として生成します")
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(HTML.replace("__DATA__", json.dumps(p, ensure_ascii=False)), encoding="utf-8")
     print(f"✅ 生成: {OUT}")
