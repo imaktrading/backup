@@ -17,13 +17,20 @@
 使い方:
     python draft_triage.py            # 全 worktree
     python draft_triage.py catalog    # 単一 worktree
+    python draft_triage.py --record   # 集計を triage_metrics.jsonl に1行追記 (事務員が使う)
+
+★--record は「様子見」を放置にしないための計測 (2026-07-30 ユーザー「とりあえず様子見したら？」)。
+  現体制 (dispatch + 事務員 + 窓口) を続けるか、定型を窓口も通さない案1へ進むかを
+  **勘ではなく推移で**決めるため、必須/定型の件数と滞留日数を毎巡回で残す。
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +58,11 @@ ROUTINE_PREFIXES = (
     "auto_catalog_add_", "pdca_catalog_queue_", "audit_catalog_fix_", "psa_mismatch_catalog",
 )
 STALE_DAYS = 30
+
+METRICS = Path(r"C:\dev\iMak_data\clerk\triage_metrics.jsonl")
+# 案1 (定型を窓口も通さない) へ進む判断ライン。ここに触れたら窓口へ提案を上げる。
+MUST_ALERT = 5          # 必須が連続してこの数を超えるなら窓口が捌けていない
+STAGNANT_ALERT_DAYS = 3  # 必須が3日動いていないなら同じく捌けていない
 
 
 def _body(path: Path) -> str:
@@ -122,7 +134,10 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    only = sys.argv[1] if len(sys.argv) > 1 else None
+    # ★フラグを worktree 名として拾わないこと。`--record` を only に入れて
+    #   全 worktree を skip し「0件」と誤報した (2026-07-30)。
+    positional = [a for a in sys.argv[1:] if not a.startswith("-")]
+    only = positional[0] if positional else None
 
     must: list[tuple[str, Path, str]] = []
     routine: list[tuple[str, Path, str, str]] = []
@@ -151,7 +166,40 @@ def main() -> int:
         print("- なし")
     for label, p, why, default in routine:
         print(f"- [{label}] {p.name}\n  - {why} → 既定: {default}")
-    print(f"\nSUMMARY: 窓口必須{len(must)}件 / 定型{len(routine)}件")
+    # ---- 滞留日数 (必須の最古) と 体制判断ライン ----
+    oldest = max((time.time() - p.stat().st_mtime) / 86400 for _l, p, _w in must) if must else 0.0
+    flags = []
+    if len(must) > MUST_ALERT:
+        flags.append(f"必須が{len(must)}件 (>{MUST_ALERT}) = 窓口が捌けていない")
+    if oldest >= STAGNANT_ALERT_DAYS:
+        flags.append(f"必須の最古が{oldest:.1f}日 (>={STAGNANT_ALERT_DAYS}) = 滞留している")
+    if flags:
+        print("\n## 🚩 体制の見直しライン に触れた")
+        for f in flags:
+            print(f"- {f}")
+        print("- → 窓口へ: 「定型を窓口も通さない (案1)」へ進めるか判断を上げること")
+
+    if "--record" in sys.argv:
+        METRICS.parent.mkdir(parents=True, exist_ok=True)
+        rec = {"ts": datetime.now().isoformat(timespec="seconds"),
+               "must": len(must), "routine": len(routine),
+               "oldest_must_days": round(oldest, 2),
+               "flags": flags}
+        with METRICS.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        # 直近の推移 (様子見の判断材料。窓口が覚えておかなくて済むように出す)
+        try:
+            hist = [json.loads(ln) for ln in
+                    METRICS.read_text(encoding="utf-8").splitlines() if ln.strip()][-6:]
+            if len(hist) > 1:
+                print("\n## 推移 (直近)")
+                for h in hist:
+                    print(f"- {h['ts']}  必須{h['must']} / 定型{h['routine']}"
+                          f" / 最古{h['oldest_must_days']}日")
+        except (OSError, ValueError):
+            pass
+
+    print(f"\nSUMMARY: 窓口必須{len(must)}件 / 定型{len(routine)}件 / 必須最古{oldest:.1f}日")
     return 0
 
 

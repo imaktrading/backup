@@ -108,6 +108,36 @@ def test_different_day_successor_is_routine(tmp_path):
     assert "closed" in default
 
 
+def test_flags_are_not_treated_as_worktree_name(monkeypatch, capsys):
+    """`--record` を worktree 名として拾って全件 skip し「0件」と誤報した bug の回帰.
+
+    フラグしか渡していないのに `only` が立つと、全 worktree が skip されて
+    滞留 0件 に見える = 事務員の報告が嘘になる (2026-07-30)。
+    """
+    calls = []
+
+    def fake_pending(wt, recent_days=None):
+        calls.append(wt)
+        return [], [], []
+
+    monkeypatch.setattr(dt.wb, "pending_for", fake_pending)
+    monkeypatch.setattr(dt, "METRICS", Path(os.devnull))
+    monkeypatch.setattr(sys, "argv", ["draft_triage.py", "--record"])
+    dt.main()
+    capsys.readouterr()
+    assert len(calls) == len(dt.wb.WORKTREES), f"全 worktree を見ていない: {calls}"
+
+
+def test_single_worktree_arg_still_filters(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(dt.wb, "pending_for",
+                        lambda wt, recent_days=None: (calls.append(wt), ([], [], []))[1])
+    monkeypatch.setattr(sys, "argv", ["draft_triage.py", "catalog"])
+    dt.main()
+    capsys.readouterr()
+    assert calls == ["catalog"]
+
+
 def test_worktree_word_alone_is_not_must(tmp_path):
     """規約引用で `worktree` が出るだけでは必須にしない (初版の誤検知)."""
     p = _mk(tmp_path, "2026-07-30_note_draft.md",
