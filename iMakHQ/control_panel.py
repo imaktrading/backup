@@ -819,6 +819,17 @@ SCRIPTS = [
         "params": [],
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
+    {
+        # オファーが来た時の判定 (2026-07-30)。利益計算タブが6つあり、選び間違えると判断を誤る。
+        # 特に US サイトは **バイヤーが米国内か国外か**でタブが変わる (関税を払うか払わないか)。
+        # 無条件に US計算 で見ると実態より悪く出て、**通せるオファーを落とす**。
+        # 数式は v9 各タブ15行をそのまま移植し、生成時に --verify でシートと突合済 (差1円未満)。
+        "category": None, "type": "utility",
+        "label": "💰 オファー判定(利益計算)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "offer_calc.py"],
+        "params": [],
+    },
     # ---- 補URL能動充填 (2026-07-25 Phase1)。出品が「仕入元1本切れ」で死なないよう補URL(AC-AG)を厚く保つ。
     #   夜=検索(無人・8件毎cacheコミット=途中死で残る) → 昼=視覚確証で正変種だけ補URL書込 → status=件数感。
     #   RESTOCKゲートと同一 primitives・共有cache。設計: discussion/2026-07-24_psa_hoju_url_replenishment_design.md ----
