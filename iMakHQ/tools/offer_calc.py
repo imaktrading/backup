@@ -24,8 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 SHEET_ID = "1YLnR4aW5cgjquYXUaNPb_hnVwrHegobZyh-eAT6tVM0"
 OUT = Path(r"C:\dev\iMak_data\hq\offer_calc.html")
-TABS = {"US計算": 1508273141, "US計算_非US": 607539795, "UK計算": 5314130,
-        "DE計算": 1674894197, "AU計算": 1197179659, "CA計算": 1530445170}
+# ★2026-07-31: DE計算 / US計算_非US を DDP構造版へ差替えたため gid が変わった
+#   (旧タブは *_bk20260731 として残置)。gid はタブを開くリンクにしか使わないが、
+#   古いままだと退避タブへ飛ぶので更新すること。
+TABS = {"US計算": 1508273141, "US計算_非US": 44630822, "UK計算": 5314130,
+        "DE計算": 793979528, "AU計算": 1197179659, "CA計算": 1530445170}
 # 仕向地 → (タブ, 通貨記号, 為替キー)
 ROUTES = {
     "US": ("US計算", "$", "USD"),
@@ -217,9 +220,23 @@ def fetch():
         if str(r[0]).strip():
             gshock[r[0]] = num(r[1])
 
-    ship_mode = (sh.worksheet("US計算_非US").get("S3") or [["FedEx7"]])[0][0]
+    # ★2026-07-31: 旧 shipMode(独/FedEx7) 廃止。EU送料マスタ から国別に取る。
+    #   FedEx は 2026-07-30 に全廃し rate table は Economy 4段階 ($17/$20/$24/$28)。
+    eu = {}
+    try:
+        for r in sh.worksheet("EU送料マスタ").get(
+                "A11:J35", value_render_option="UNFORMATTED_VALUE"):
+            r = (list(r) + [""] * 10)[:10]
+            if str(r[0]).strip() and isinstance(r[7], (int, float)):
+                eu[str(r[0]).strip()] = {"tier": num(r[2]), "cost": num(r[7]),
+                                         "name": str(r[1])}
+    except Exception:                                          # noqa: BLE001
+        pass
+    de_ship = 14.86        # DEミラーの国内(DE宛)送料。AT宛は 17.49
+    at_ship = 17.49
     return {"fx": fx, "promo": promo, "payo": payo, "target": target, "cats": cats,
-            "country": country, "gshock": gshock, "shipMode": ship_mode,
+            "country": country, "gshock": gshock,
+            "eu": eu, "deShip": de_ship, "atShip": at_ship,
             "routes": ROUTES, "tabs": TABS,
             "url": f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit#gid="}
 
@@ -268,6 +285,7 @@ a{color:#7ab8ff}
   <div class="f"><label>ポイント還元（円）</label><input id="pt" type="number" step="10" value="0"></div>
   <div class="f"><label>プロモ</label><select id="promo">
       <option value="0">外す（承諾時はこちら）</option><option value="1">つけたまま</option></select></div>
+  <div class="f"><label>EU 仕向国（送料・関税の実費に効く）</label><select id="eucty"></select></div>
 </div>
 
 <div id="verdict"></div>
@@ -299,6 +317,12 @@ function feeRate(countryKey, catKey){
   return (base + c.intl + c.reg) * (1 + c.tax);
 }
 
+/* 仕向国コード。DE ルートは DE/AT、その他ルートは EU国セレクタの値を使う */
+function euCountry(){
+  const s = document.getElementById('eucty');
+  return (s && s.value) || 'DE';
+}
+
 function calc(price){
   const dk = dest.value, ck = cat.value;
   const [tab, sym, cur] = P.routes[dk];
@@ -318,9 +342,10 @@ function calc(price){
       D = t * C.hts * 1.021 * C.split + 1.5;
       N = D * fx;
     } else {
-      D = P.shipMode === '独' ? 17 : (P.shipMode === 'FedEx7' ? 20 : 0);
-      N = P.shipMode === '独' ? (2296 - J + 3 * P.fx.EUR + 555)
-        : (P.shipMode === 'FedEx7' ? (2721 - J + 3 * P.fx.EUR + 555) : 0);
+      /* ★2026-07-31: EU送料マスタ から国別に取る (旧: 独/FedEx7 の2値)。
+         D = rate table の段階($) = DDP送料収入 / N = DDP総コスト − 想定送料J */
+      const e = P.eu[euCountry()] || {tier: 17, cost: 3219};
+      D = e.tier;  N = e.cost - J;
     }
     E = F + D; G = E * fx;
     K = G * fr + 0.4 * fx; L = G * promo; M = G * P.payo;
@@ -452,8 +477,18 @@ function render(){
 }
 function line(k, v){ return '<div class="line"><span>' + k + '</span><b>' + v + '</b></div>'; }
 
-['dest','cat','price','list','cost','pt','promo'].forEach(id =>
+/* EU 仕向国セレクタ (EU送料マスタ 由来) */
+(function(){
+  const s = document.getElementById('eucty');
+  const ks = Object.keys(P.eu || {});
+  if (!ks.length){ s.add(new Option('DE (マスタ未読込)', 'DE')); return; }
+  ks.forEach(k => s.add(new Option(`${k} ${P.eu[k].name}（$${P.eu[k].tier}）`, k)));
+  s.value = 'DE';
+})();
+
+['dest','cat','price','list','cost','pt','promo','eucty'].forEach(id =>
   document.getElementById(id).addEventListener('input', render));
+document.getElementById('eucty').addEventListener('change', render);
 
 /* ===== 受信中オファーの自動読込 (--offers 生成時のみ中身が入る) ===== */
 (function(){
@@ -493,10 +528,14 @@ DDP = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 220, 24
        300, 350, 400, 450, 500, 550, 600, 700, 800, 900, 1000, 1500]
 
 
-def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False):
+def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False,
+            eu_country="DE"):
     """HTML(JS) と **同じ式**を Python でも持つ。検証はこれとシートを突き合わせる。
 
     2実装が食い違ったら、その時点で検証が落ちる = 気づける。
+
+    eu_country: EU送料マスタ の国コード。US計算_非US / DE計算 の DDP に効く
+                (2026-07-31 追加。旧 shipMode の置換)。
     """
     cur = {"US計算": "USD", "US計算_非US": "USD", "UK計算": "GBP",
            "DE計算": "EUR", "AU計算": "AUD", "CA計算": "CAD"}[tab]
@@ -519,12 +558,22 @@ def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False):
             D = t * C["hts"] * 1.021 * C["split"] + 1.5
             N = D * fx
         else:
-            m = p["shipMode"]
-            D = 17 if m == "独" else (20 if m == "FedEx7" else 0)
-            N = (2296 - J + 3 * p["fx"]["EUR"] + 555) if m == "独" else \
-                ((2721 - J + 3 * p["fx"]["EUR"] + 555) if m == "FedEx7" else 0)
+            # ★2026-07-31: EU送料マスタ 由来の国別値 (旧 独/FedEx7 の2値は廃止)
+            e = (p.get("eu") or {}).get(eu_country or "DE", {"tier": 17, "cost": 3219})
+            D = e["tier"]
+            N = e["cost"] - J
         G = (F + D) * fx
         K, L, M = G * fr + 0.4 * fx, G * promo, G * p["payo"]
+    elif tab == "DE計算":
+        # ★2026-07-31: DEミラーは送料を別取り (DE €14.86 / AT €17.49)。
+        #   売上に送料収入を含め、DDPコスト(実費+関税−想定送料J) を別途引く。
+        R = p["atShip"] if (eu_country or "DE") == "AT" else p["deShip"]
+        D = (price + R) * c["tax"]
+        G = (price + R + D) * fx
+        N = D * fx
+        S = (p.get("eu") or {}).get(eu_country or "DE", {"cost": 3219})["cost"] - J
+        K, L, M = (G - N) * fr + 0.4 * fx, (G - N) * promo, (G - N) * p["payo"]
+        return (G - (cost - pt + J + K + L + M + N + S))
     else:
         D = price * c["tax"]
         G = (price + D) * fx
