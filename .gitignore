@@ -156,6 +156,12 @@ iMak_ichibankuji/pending/intermediate_*.csv
 iMakG-shock/casio_finder/unlisted_from_catalog_*.csv
 # Advisor 生成 PPT (binary・再生成可)
 iMakAdvisor/*.pptx
+# DEミラー 送料一括修正の実行状態 (snapshot=rollback用 / done=再開用。listing 実体が正で再取得可)
+# ★共有 index なので、untracked のまま置くと相手セッションの `git add -A` で巻き込まれる
+iMakeBayAPI/de_mirror_fedex_removal_snapshot.json
+iMakeBayAPI/de_mirror_fedex_removal_done.json
+iMakeBayAPI/de_mirror_fedex_removal_failed.json
+iMakeBayAPI/de_speedpak_failed.json
 
 # RESTOCK 用 Chrome profile (runtime・再生成可)
 iMakHQ/chrome_profile_psa_restock/
