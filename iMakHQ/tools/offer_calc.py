@@ -557,9 +557,16 @@ def verify(p):
         except ValueError:
             return 0.0
 
-    def cell(ws, ref, default=""):
-        """空セルでも落ちない読取 (gspread は空だと [] を返す)。"""
-        v = ws.get(ref)
+    def cell(ws, ref, default="", raw=False):
+        """空セルでも落ちない読取 (gspread は空だと [] を返す)。
+
+        ★raw=True で **書式を適用しない生値**を返す (2026-07-31 修正)。
+          既定の ws.get() は表示値なので、通貨書式のセルは 70 → "$70.00" という
+          **文字列**で返る。それをそのまま書き戻していたため、`--verify` を
+          走らせるたびに入力セルが文字列化し、下流の数式が全て #VALUE! で
+          落ちていた (US計算/非US/UK/AU/CA の 5タブ・計101セルが実際に壊れていた)。
+        """
+        v = ws.get(ref, value_render_option="UNFORMATTED_VALUE") if raw else ws.get(ref)
         if not v or not v[0]:
             return default
         return v[0][0]
@@ -571,7 +578,8 @@ def verify(p):
         cat_key = cell(ws, "F3", "Tシャツ(UT)")
         cost = num(cell(ws, "H9", "0"))
         pt = num(cell(ws, "I9", "0"))
-        keep = cell(ws, "C15", "70")
+        # ★生値で退避する。表示値だと "$70.00" (文字列) になり、書き戻しでセルが壊れる
+        keep = num(cell(ws, "C15", 70, raw=True)) or 70
         for price in (50, 100, 250):
             ws.update_acell("C15", price)
             row = (ws.get("B16:Q16") or [[]])[0]
