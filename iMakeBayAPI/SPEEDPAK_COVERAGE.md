@@ -48,6 +48,36 @@
 ※ US 向けでは実際に通っている実績があるため、運用上の厳格さは不明。**EU は新設なので
 より厳しく見られる可能性**がある。
 
+### ★rate table 変更プラン (2026-07-30 確定・実データ根拠つき)
+
+対象: rate table `5296250010` = `iMak_EU_DDP_Common` (36ポリシー共有)。**eBay UI 専用・API 不可**。
+
+**新しい姿 (Economy 4行 / Expedited 全削除)**
+
+| 料金 | 国 (計25か国 = EU27 − MT − CY) |
+|---|---|
+| **$17** | Germany |
+| **$20** | Sweden, Poland |
+| **$24** | Austria, Belgium, Bulgaria, Czech Republic, Denmark, Greece, Hungary, Ireland, **Italy**, Latvia, Lithuania, Luxembourg, Netherlands, Portugal, Slovakia, Slovenia, Spain |
+| **$28** | Croatia, Estonia, Finland, France, Romania |
+
+**根拠 (実費 = 基本料金 × 1.155 + TPC独自手数料、0.5kg 基準)**
+- 燃油 15.5% は **実請求から実測** (¥200 / ¥1,289)。PDF に率の記載なし
+- TPC独自手数料 (「EU国一覧」タブ): **FR €2/HSコード / IT €2/1発送 / RO 約€5**。
+  これを入れ忘れると 仏伊羅 で薄くなる
+- **0.5kg 基準にした理由 = 実売データ**。販売実績129件中 EU は23件で、内訳は
+  **アパレル(UT) 8 / G-SHOCK 7 / その他 6 / montbell 2、TCG(PSA) は 0件**。
+  EU で売れているのは 0.5kg 級であり、0.3kg 設計だと売れるたび持ち出しになる
+- **Italy だけ実費 $24.2 を $24 に置く** (差 ¥30 は誤差)。EU 実売2位 (6件) で、
+  $28 にすると値上げ影響が主力に直撃するため
+- EU の実売は **独13 / 伊6 で8割**。他国は年数件レベル
+
+**作業順序 (これを守らないと穴が空く)**
+1. 発送除外に MT/CY を追加 ← **完了済** (2026-07-30, 86ポリシー / `ebay_exclude_regions.py`)
+2. Economy に 4 行を **追加**
+3. Expedited の 3 行を **削除**
+4. 25か国が漏れなく入っているか照合 (3 を先にやると発送可なのに料金なしの穴ができる)
+
 ## 1. 原本 PDF の保管場所(セッションを跨いで参照可)
 
 ```
