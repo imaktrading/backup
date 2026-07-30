@@ -1057,6 +1057,55 @@ def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", dig
         return f"error:{type(_e).__name__}"
 
 
+_PSA_CACHE_DIR = os.path.join(WORKSPACE, "iMakeBayAPI", "cache", "psa_certs")
+
+
+def _identity_from_psa_cache(cert: str) -> str:
+    """PSA cert 番号 → identity 文字列 (純関数寄り、失敗は "")。
+
+    csv_auditor が pdca_store に渡す identity は、通常は CSV 行の spec 列
+    (C:Card Number/C:Card Name/C:Set) から組む。ところが post_psa_review で
+    NONE 判定 → CSV 除外された cert は CSV 行が無く identity 空欄となり、Catalog は
+    「どのカードか」を解決できず依頼が永久再掲されていた (2026-07-27 Advisor 指摘)。
+    素材は PSA cache に持っているので (Brand/Subject/CardNumber)、そこから identity を
+    組んで backfill する = 経路 A の穴を塞ぐ。
+
+    Returns: "CARDNUMBER | Subject | Brand" 形式 (欠けは省略)。cache 無しは ""。
+    """
+    if not cert:
+        return ""
+    path = os.path.join(_PSA_CACHE_DIR, f"{cert}.json")
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return ""
+    parts = []
+    for k in ("CardNumber", "Subject", "Brand"):
+        v = (meta.get(k) or "").strip()
+        if v and v not in parts:
+            parts.append(v)
+    return " | ".join(parts)[:120]
+
+
+def _resolve_identity(sku: str, identity_by_sku: dict | None) -> str:
+    """identity_by_sku の値を優先し、空なら PSA cache fallback (純関数寄り)。
+
+    経路 A (csv_auditor) 側で catalog に依頼を出すときの identity 解決 SSOT。
+    CSV に載っている行は identity_by_sku[sku] にヒットする。CSV 除外 (post_psa_review
+    NONE) されたが sku=PSA10-<cert> 形式なら PSA cache から backfill を試みる。
+    """
+    ident = (identity_by_sku or {}).get(sku, "") or ""
+    if ident:
+        return ident
+    s = (sku or "")
+    if s.startswith("PSA10-"):
+        return _identity_from_psa_cache(s[len("PSA10-"):])
+    return ""
+
+
 def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku=None):
     """catalog/program 指摘を pdca.db 改善キューに蓄積し、dedup済 catalog 依頼を集約発行 +
     処理済を done 同期 (PDCA spiral-up Phase1b+2)。dry-run は記録しない。
@@ -1075,7 +1124,7 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
             _pdca.upsert_improvement(con, project, sku, field, "",
                                      evidence=str(msg)[:80], source="auditor", layer="A",
                                      finding_type=ft,
-                                     identity=(identity_by_sku or {}).get(sku, ""), ts=ts)
+                                     identity=_resolve_identity(sku, identity_by_sku), ts=ts)
         from program_fix_backlog import program_signature as _prog_sig
         for sku, msg in program_items:
             _pdca.record_finding(con, ts, project, sku, "program", str(msg)[:120], ts=ts)

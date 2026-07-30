@@ -391,11 +391,44 @@ def sync_processed(con, requests_dir, ts=""):
     return synced
 
 
+_MISSING_MODEL_IDENTITY_RE = re.compile(
+    r"^cert(\d+)\s+(?P<brand>.+?)\s+\[(?P<subject>.+?)\]\s+#(?P<cardno>\S+)"
+)
+
+
+def parse_missing_model_identity(model: str) -> str:
+    """post_psa_review が書く missing_models.csv の model 列から identity を抽出 (純関数)。
+
+    書式: `cert{N} {BRAND} [{SUBJECT}] #{CARDNUMBER} (auto候補...=該当なし 要調査)`
+    (iMakHQ/tools/post_psa_review.py:_route_none_to_catalog 由来)
+
+    identity = "CARDNUMBER | SUBJECT | BRAND"。マッチ失敗は "" (fail-safe)。
+
+    2026-07-27 Advisor 発覚: 経路 B (missing_models → pdca queue) は identity を渡して
+    おらず、model 列に素材があるのに使っていなかった (queue 540/543/544 で実測)。素材を
+    そのまま identity に転記する = Catalog が「どのカード」を解決できる材料を渡す。
+    """
+    if not model:
+        return ""
+    m = _MISSING_MODEL_IDENTITY_RE.match(model.strip())
+    if not m:
+        return ""
+    parts = [m.group("cardno").strip(), m.group("subject").strip(), m.group("brand").strip()]
+    parts = [p for p in parts if p]
+    return " | ".join(parts)[:120]
+
+
 def import_missing_models(con, path, ts=""):
     """psa_to_csv が書く missing_models.csv (catalog未登録カード) を改善キューに取込む。
 
     形式: category,model,detected_at。1行=1未登録カード → 層A catalog_gap として upsert
     (dedup で同カードは集約)。= 「入稿しない catalog-miss」が PDCA に乗り Catalog 依頼に流れる。
+
+    2026-07-30: model 列から identity を parse して同送 (parse_missing_model_identity)。
+    post_psa_review 由来の書式 `cert{N} {BRAND} [{SUBJECT}] #{CARDNUMBER} (...)` は既に
+    identity 素材を含むので、Catalog が「どのカード」を解決できるように転記する。
+    (2026-07-27 Advisor 経路 B の穴を塞ぐ)。
+
     Returns: 取込件数。
     """
     p = Path(path)
@@ -410,10 +443,12 @@ def import_missing_models(con, path, ts=""):
                 category = (row.get("category") or "tcg").strip()
                 if not model:
                     continue
+                ident = parse_missing_model_identity(model)
                 upsert_improvement(con, category, model, "catalog_add", "",
                                    evidence="missing_models (catalog未登録→入稿せず)",
                                    source="missing_models", layer="A",
-                                   finding_type="catalog_gap", ts=ts)
+                                   finding_type="catalog_gap",
+                                   identity=ident, ts=ts)
                 n += 1
     except Exception:
         return n
