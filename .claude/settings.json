@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "deny": [
+      "Bash(*revise/variation_upload.py*)",
+      "Bash(*revise\\variation_upload.py*)",
+      "Bash(*revise/ebay_trading_api.py*)",
+      "Bash(*revise\\ebay_trading_api.py*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push --force-with-lease*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)"
+    ]
+  }
+}
