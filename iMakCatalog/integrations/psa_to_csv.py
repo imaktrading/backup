@@ -456,6 +456,21 @@ def _to_legacy_dict(record: dict) -> dict:
     return _apply_ebay_fields(legacy, record, "one_piece_tcg")
 
 
+# CSV 出力に届く値だけの署名 (2026-08-01 窓口 GO)。同点候補の「出力等価」判定に使う。
+#   product_id / images / created_at / spec_source 等 listing に届かない列は含めない
+#   (窓口確認: PSA 出品の PicURL は実物写真、catalog images は CSV に出ない)。
+_PROMO_CSV_EQ_KEYS = ("set_name_ebay", "rarity_ebay", "character_name",
+                      "finish", "features", "card_type_ebay")
+
+
+def _promo_csv_output_sig(rec: dict) -> tuple:
+    """promo 候補の **CSV に出る値** の署名。等しい候補は listing 上 同一 = 誤表示リスク0。"""
+    sp = rec.get("specs") or {}
+    return (rec.get("name_en"), rec.get("name")) + tuple(
+        json.dumps(sp.get(k), ensure_ascii=False, sort_keys=True)
+        for k in _PROMO_CSV_EQ_KEYS)
+
+
 # ============================================================================
 # メイン: lookup_one_piece
 # ============================================================================
@@ -826,6 +841,11 @@ def _search_one_piece_promo_by_number(
         # UTA は短語のため \bUTA\b 限定 + official 'ウタ'
         if re.search(r"\bUTA\b", hay) and "ウタ" in sn:
             edition_hit = True
+        # 2026-08-01: 出力等価 tie の決定的採用 (下記) は **edition_hit した候補にのみ** 許可する。
+        #   brand が edition/set を一意特定した時だけ「top tie = その product の変種」= 採用が安全。
+        #   generic/ambiguous brand (edition句無し, edition_hit=False) の同点は従来どおり fail-closed
+        #   (誤出品防止。test: chopper_generic_failclosed / charlotte_pudding_reject 等)。
+        rec["_edition_hit"] = edition_hit
         if edition_hit:
             score += 250  # edition 一意特定 = 汎用promo(_P 220)を上回る最優先
         # qualifier: 同一edition内の別variantを分離(+30)。WINNER↔優勝 / PREMIUM CARD COLLECTION↔プレミアムカードコレクション
@@ -846,10 +866,28 @@ def _search_one_piece_promo_by_number(
     top_score = scored[0][0]
     top_n = sum(1 for s, _ in scored if s == top_score)
 
-    # 同点 reject (= fail-closed、人間判断待ち)
+    # 同点処理
     if top_n > 1:
+        tied = [c for s, c in scored if s == top_score]
+        # 2026-08-01 (窓口 GO: promotion_pack_response §3):
+        #   同点候補が **CSV に出る値で完全一致** なら fail-closed reject でなく **決定的に採用**する。
+        #   PERONA OP01-077_p4/_p5 のように差が ★(=product_id/images のみ、CSV に届かない) だけの場合、
+        #   どちらを選んでも生成 CSV は同一 = 誤表示リスク 0。始めようキャンペーン系統7カード全部が該当。
+        #   ★1フィールドでも CSV 値に差があれば従来どおり reject (窓口条件2、絶対に緩めない)。
+        #   ★採用は決定的 (product_id 昇順最小、窓口条件3)。
+        #   ※ 人が viewer で確定した KEY (forced_card_id) の優先は HQ pipeline 側で resolver 出力より
+        #     先に適用される (catalog resolver は手動 KEY 未設定時のみ参照) ため本変更は非干渉。
+        _all_edition = all(c.get("_edition_hit") for c in tied)
+        if _all_edition and len({_promo_csv_output_sig(c) for c in tied}) == 1:
+            chosen = min(tied, key=lambda c: c["product_id"])
+            if verbose:
+                print(f"    🎯 iMakCatalog hit (promo fallback, edition一致の同点 {top_n} 件だが "
+                      f"CSV 出力等価 → 決定的採用 min pid): {chosen['product_id']}")
+            return chosen
+
+        # CSV 値に差がある同点 = fail-closed reject (人間判断待ち)
         if verbose:
-            print(f"    ⚠️ promo fallback 同点 top {top_n} 件 ({len(candidates)} 候補中) "
+            print(f"    ⚠️ promo fallback 同点 top {top_n} 件 ({len(candidates)} 候補中, CSV値に差) "
                   f"→ fail-closed reject (brand={brand!r}, subject={subject!r})")
             for s, c in scored[:5]:
                 print(f"        score={s} pid={c['product_id']} set={c.get('set_name_official', '')[:50]!r}")

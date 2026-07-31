@@ -20,13 +20,14 @@ import psa_to_csv as pc  # type: ignore  # noqa: E402
 
 
 class TestLetsStartCampaign(unittest.TestCase):
-    def test_perona_steers_to_hajimeyou_series_failclosed(self):
-        """汎用_P でなく始めようキャンペーン系(p4/p5)を最上位にし、★不明で同点→fail-closed."""
+    def test_perona_steers_to_hajimeyou_series(self):
+        """汎用_P でなく始めようキャンペーン系(p4/p5)を最上位にする。
+        2026-08-01 窓口GO で挙動変更: p4/p5 は ★差のみ=CSV出力等価なので、fail-closed でなく
+        決定的採用 (min pid=_p4)。詳細は test_promo_tie_csv_equivalence_20260801。"""
         r = pc.lookup_one_piece(
             "ONE PIECE JAPANESE LET'S START CAMPAIGN PROMOTION PACK", "077", "PERONA",
             verbose=False)
-        # p4/p5 が ★ で同点 → fail-closed reject (HQ viewer が p5 と確定する運用)
-        self.assertIsNone(r)
+        self.assertEqual((r or {}).get("card_id"), "OP01-077_p4")
 
     def test_regression_sabo_best_selection(self):
         r = pc.lookup_one_piece(
