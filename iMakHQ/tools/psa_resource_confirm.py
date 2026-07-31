@@ -193,6 +193,7 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .rb{font-size:10px;padding:1px 5px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:pointer}
 .vok{font-size:10px;padding:1px 5px;border-radius:3px;background:#2a7;color:#fff;font-weight:bold}
 .vng{font-size:10px;padding:1px 5px;border-radius:3px;background:#e80;color:#fff;font-weight:bold}
+.nng{font-size:10px;padding:1px 5px;border-radius:3px;background:#c00;color:#fff;font-weight:bold}
 .zm{font-size:13px;padding:0 6px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:zoom-in;line-height:1.6}
 #zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;cursor:zoom-out}
 #zov img{max-width:46vw;max-height:88vh;object-fit:contain;background:#fff;display:block}
@@ -466,6 +467,11 @@ def build_restock_html(items):
             _vok = cd.get("variant_ok")
             _v_html = ("<span class='vok'>✅変種一致</span>" if _vok is True
                        else "<span class='vng'>⚠️変種未確認</span>" if _vok is False else "")
+            # ★2026-08-01: 番号未確認 (出品名に番号が無く、名前一致だけで拾った候補)。
+            #   厳密一致が0件のときだけ出る枠なので、**変種以前に別カードの可能性**がある。
+            #   変種バッジより強い警告として、こちらを優先表示する。
+            if cd.get("number_ok") is False:
+                _v_html = "<span class='nng'>🔴番号未確認 — 別カードの可能性あり</span>"
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='' onchange='upd({idx})'>{img}"

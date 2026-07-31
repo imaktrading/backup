@@ -577,6 +577,38 @@ def pick_psa10_candidates(items, card_no, variant_hint=None, limit=5):
             for it in _variant_matches(items, card_no, variant_hint)[:limit]]
 
 
+def _norm_name(s):
+    """カード名の比較用正規化 (純関数)。空白・中黒・ハイフン差を吸収する。"""
+    t = (s or "").upper()
+    for ch in " 　・･-‐‑–—ー~〜「」『』【】()()[]":
+        t = t.replace(ch, "")
+    return t
+
+
+def pick_psa10_loose_candidates(items, name_jp, limit=6):
+    """★2026-08-01: **番号を確認できない**が名前は一致する PSA10 候補 (純関数)。
+
+    なぜ要るか:
+        メルカリの PSA10 出品は **商品名にカード番号を書かない**ことが多い。厳密一致
+        (`_name_matches_card`) を必須にすると、在庫が実在しても候補ゼロになり、
+        「市場に無い」と誤診してしまう (実測 2026-08-01: 補0本74件のうち 39件が候補なし)。
+
+    ★これは strict が0件のときの **フォールバック専用**。番号未確認なので:
+        - 価格判定 (`best`) や RESTOCK ゲートには **絶対に使わない**
+        - 視覚確証UI に **番号未確認と明示して**出し、最終判断は人の目視に委ねる
+          (ユーザー方針 2026-08-01「最終は目視するわけだから、近しいのを含めていい」)
+
+    名前が取れない (name_jp 空) 場合は [] = 判定材料が無いので出さない (fail-closed)。
+    """
+    key = _norm_name(name_jp)
+    if not key:
+        return []
+    return [(it["price"], it["href"], it["name"])
+            for it in items
+            if it.get("price", 0) > 0 and is_psa10(it.get("name") or "")
+            and key in _norm_name(it.get("name"))][:limit]
+
+
 def parse_image_search_results(src):
     """画像検索モーダル(image-grid)の結果を [{price,sold,href}] に分解する純関数。
 
@@ -831,7 +863,17 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
                     best = cands[0] if cands else None
                     if _before != len(cands):
                         via += f"+送料込み/評価≥{freeship_min_reviews}({_before}→{len(cands)})"
-                out[i] = {"best": best, "cands": cands, "all_cands": all_cands}
+                # ★2026-08-01: 厳密一致(番号必須)が0件のときだけ、**名前一致のみ**の候補を
+                #   別枠で拾う。メルカリは番号を書かない出品が多く、そのままだと在庫が
+                #   実在しても「候補なし」になるため。番号未確認なので best/価格判定には
+                #   一切使わず、視覚確証UIに「番号未確認」と明示して出す。
+                loose = []
+                if not all_cands:
+                    loose = pick_psa10_loose_candidates(items, c.get("name_jp"))
+                    if loose:
+                        via += f"+番号未確認{len(loose)}件"
+                out[i] = {"best": best, "cands": cands, "all_cands": all_cands,
+                          "loose_cands": loose}
                 tag = f"¥{best[0]} ({via}, 候補{len(cands)})" if best else "PSA10在庫なし"
                 print(f"  [{i+1}/{len(cards)}] {card_no or kw}: {tag}", flush=True)
             except Exception as e:

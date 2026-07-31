@@ -744,7 +744,10 @@ def _cache_candidate_urls(entry):
     m = (entry or {}).get("mercari") or {}
     if not isinstance(m, dict):
         return []
-    rows = m.get("all_cands") or m.get("cands") or []
+    # ★2026-08-01: 厳密一致が0件のときは **番号未確認(名前一致のみ)** の枠も候補として数える。
+    #   ここで拾わないと「候補なし」として確証UIに出ないまま埋もれる (実測39件がこの状態だった)。
+    #   番号未確認である事実は _build_visual_candidates が number_ok=False で持ち回り、UI が明示する。
+    rows = m.get("all_cands") or m.get("cands") or m.get("loose_cands") or []
     return [t[1] for t in rows if t and len(t) > 1 and t[1]]
 
 

@@ -116,6 +116,18 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
                         "price": (t[0] if t and isinstance(t[0], int) else None),
                         "name": (t[2] if len(t) > 2 else ""),
                         "variant_ok": url in verified})
+    # ★2026-08-01: 番号未確認 (名前一致のみ) の候補を **最後に** 足す。
+    #   厳密一致が0件のときだけ mercari 側が積む枠。「候補なし」で終わらせず、
+    #   目視で弾ける形にして人に見せる (ユーザー方針: 最終は目視なので近しいのも出す)。
+    #   number_ok=False を持たせ、UI で明確に区別できるようにする。
+    for t in (mr.get("loose_cands") or [])[:max_mercari]:
+        url = t[1] if (t and len(t) > 1) else ""
+        if url and url not in seen:
+            seen.add(url)
+            out.append({"channel": "mercari", "url": url,
+                        "price": (t[0] if t and isinstance(t[0], int) else None),
+                        "name": (t[2] if len(t) > 2 else ""),
+                        "variant_ok": False, "number_ok": False})
     if not out and c.get("mercari_url"):            # 最終フォールバック(best のみ)
         out.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
     for d in (c.get("snkrdunk_urls") or [])[:max_snkr]:
