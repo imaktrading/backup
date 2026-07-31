@@ -153,14 +153,32 @@ def ship_jpy_of(row):
     sku = (row.get('sku') or '').strip()
     title = (row.get('title') or '')
     up = sku.upper()
+    tl = title.lower()
     if up.startswith('PSA10') or title.startswith('PSA 10'):
         return CATEGORY_SHIP_JPY['TCG(PSA10)']
-    if re.search(r'\bG-SHOCK\b|CASIO', title, re.I):
+    if re.search(r'\bg-shock\b|casio', tl):
         return CATEGORY_SHIP_JPY['G-SHOCK']
-    if 'UNIQLO' in up or up.startswith('UT-') or 'TEMPLATE_NWT' in up:
-        return CATEGORY_SHIP_JPY['Tシャツ(UT)']
-    if 'MONTBELL' in up:
-        return CATEGORY_SHIP_JPY['Montbell(軽)']
+    # ★2026-07-31 追加: lo band を全件 GetItem した実測 (headless HQ の question) で、
+    #   ¥2000 でないカテゴリが 66件 混在すると判明。既定 2000 のままだと **取り過ぎ**になる。
+    #   値は V9 `設定` を正とする (question の推定値ではなく SSOT に合わせる)。
+    if re.search(r'porter|yoshida', tl):
+        return CATEGORY_SHIP_JPY['Porter']                    # 3500 (Tanker 等 1-2kg)
+    if re.search(r's\.h\.figuarts|figuarts|banpresto|figur\b|statue', tl):
+        return CATEGORY_SHIP_JPY['フィギュア']                  # 3000
+    if re.search(r'ichiban ?kuji|一番くじ', tl):
+        return CATEGORY_SHIP_JPY['一番くじ']                    # 3000
+    if 'gashapon' in tl or 'gacha' in tl:
+        return CATEGORY_SHIP_JPY['ガシャポン']                  # 2000
+    if re.search(r'daiwa|shimano|rolle\b|baitcast|angelrolle', tl):
+        return CATEGORY_SHIP_JPY['リール']                      # 3000
+    if 'montbell' in tl or 'MONTBELL' in up:
+        return CATEGORY_SHIP_JPY['Montbell(軽)']                # 2000 (Wind Blast 等 0.2-0.3kg)
+    if 'UNIQLO' in up or up.startswith('UT-') or 'TEMPLATE_NWT' in up or 'uniqlo' in tl:
+        return CATEGORY_SHIP_JPY['Tシャツ(UT)']                 # 2000
+    # V9 に該当カテゴリが無い明らかな重量物 (ゴルフボール1ダース / スニーカー) は
+    # 実送料 > DDPコスト が確実なので **0 扱い** = 取り過ぎない側に倒す。
+    if re.search(r'golfb|tourstage|bridgestone|sneaker|laufschuhe|asics', tl):
+        return 99999
     return DEFAULT_SHIP_JPY
 
 
