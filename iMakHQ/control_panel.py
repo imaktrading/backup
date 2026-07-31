@@ -1309,6 +1309,7 @@ class HomePanel:
         except Exception:                                     # noqa: BLE001
             pass
         ttk.Button(nav, text="🔄 更新", command=self.refresh_dashboard).pack(side="right", padx=2)
+        ttk.Button(nav, text="⏰ 定期", command=self.open_schedules).pack(side="right", padx=2)
         self.offer_btn = ttk.Button(nav, text="💰 オファー対応", style="Offer.TButton",
                                     command=self.open_offer_calc)
         self.offer_btn.pack(side="right", padx=2)
@@ -1337,17 +1338,6 @@ class HomePanel:
         ttk.Label(wt_frame, textvariable=self.wt_var, font=("Consolas", 9),
                   justify="left", foreground="#222222").pack(anchor="w")
         threading.Thread(target=self._refresh_worktree_board, daemon=True).start()
-
-        # === 定期スケジュールの実行状況 (2026-07-31) ===
-        #   18 タスク全部並べても読まないので **異常だけ出す**。正常は件数のみ。
-        #   実際に `iMak Catalog Integrity Weekly` が結果=255 で失敗し続けていたのに
-        #   誰も気づいていなかった。
-        sch_frame = ttk.LabelFrame(root, text="⏰ 定期スケジュール", padding=6)
-        sch_frame.pack(fill="x", padx=10, pady=(0, 6))
-        self.sch_var = tk.StringVar(value="読込中…")
-        ttk.Label(sch_frame, textvariable=self.sch_var, font=("Consolas", 9),
-                  justify="left", foreground="#222222").pack(anchor="w")
-        threading.Thread(target=self._refresh_schedules, daemon=True).start()
 
         # === 進捗テーブル (総合 / 今月 を横並び・各半幅) ===  推奨アクション枠は撤去
         prog_row = ttk.Frame(root)
@@ -1486,12 +1476,68 @@ class HomePanel:
     #   -2147020576 既に実行中のインスタンスがある (0x800710E0)。常駐 watcher で普通に出る
     _SCH_OK = {"0", "267009", "267011", "-2147020576"}
 
-    def _refresh_schedules(self):
-        """定期スケジュールを **全件** 一覧表示 (名前 / 前回 / 結果 / 次回)。
+    # 各タスクが何をしているか (schtasks の Task To Run を実際に読んで書いた。推測ではない)
+    _SCH_DESC = {
+        "iMakHarvest_YodobashiSnapshot_0600": "ヨドバシの在庫を撮る (1日3回の1回目)",
+        "iMakHarvest_YodobashiSnapshot_1400": "ヨドバシの在庫を撮る (2回目)",
+        "iMakHarvest_YodobashiSnapshot_2200": "ヨドバシの在庫を撮る (3回目)",
+        "iMakHarvest_YodobashiHarvest_2100": "ヨドバシから商品を拾う (抽出くん本体)",
+        "iMakHarvest_GshockMerge_2130": "G-shock を複数仕入元でまとめる",
+        "iMakInventory_Cycle": "在庫の巡回 (HIGH シート)。売切れたら取下げ",
+        "iMakInventory_Cycle_LOW": "在庫の巡回 (LOW シート)",
+        "iMakInventory_Monitor_Daily": "在庫監視の日次レポート",
+        "iMakInventory_ReverseAudit_Daily": "意図 と 実eBay状態 の突合 (取下げ漏れ検出)",
+        "iMakInventory_Backup": "商品管理シートのバックアップ",
+        "iMakRevise_DailyAutoRevise": "価格の自動改定 (リバイスくん本体)",
+        "iMakRevise_WeeklyReminder": "週次リマインダー ★巡回を定期化したので意図的に無効",
+        "iMak_Catalog_prune_missing_models": "解決済みのカタログ宿題を掃除",
+        "iMak_Catalog_set_name_audit_daily": "カタログの set名 整合を毎日監査",
+        "iMak Catalog Integrity Weekly": "カタログ整合監査 + 可視化スプシ更新 (週次)",
+        "iMakHQ_DispatchWatch": "依頼を検知して担当を自動起動する常駐watcher",
+        "iMakHQ_ClerkPatrol": "事務員巡回。滞留した依頼を集計・仕分け",
+        "iMakHQ_HojuSearch_2330": "補URL(仕入元の予備)を夜間に検索",
+    }
 
-        実際 `iMak Catalog Integrity Weekly` が結果=255 で失敗し続けていたのに
-        誰も気づいていなかった (2026-07-31)。一覧に出ていれば気づける。
+    def open_schedules(self):
+        """定期スケジュールを別ウィンドウで一覧 (2026-07-31)。
+
+        `iMak Catalog Integrity Weekly` が 07-27 から結果=255 で失敗し続けていたのに
+        誰も気づいていなかった。schtasks を叩かないと分からない = 見えないのと同じ。
         """
+        win = getattr(self, "_sched_win", None)
+        if win is not None and tk.Toplevel.winfo_exists(win):
+            win.lift()
+            win.focus_force()
+            return
+        win = tk.Toplevel(self.root)
+        self._sched_win = win
+        win.title("⏰ 定期スケジュール")
+        win.geometry(_load_geometry("schedules", "1180x620"))
+
+        head = ttk.Frame(win, padding=8)
+        head.pack(fill="x")
+        self.sch_head = tk.StringVar(value="読込中…")
+        ttk.Label(head, textvariable=self.sch_head, font=("", 11, "bold")).pack(side="left")
+        ttk.Button(head, text="🔄 更新",
+                   command=lambda: threading.Thread(
+                       target=self._refresh_schedules, daemon=True).start()).pack(side="right")
+        ttk.Label(head, text="🔵 正常   🟡 注意(無効/未実行)   🔴 失敗",
+                  foreground="#555").pack(side="right", padx=12)
+
+        cols = ("#", "状態", "タスク", "何をしている", "前回", "結果", "次回")
+        tree = ttk.Treeview(win, columns=cols, show="headings", height=20)
+        for c, w in zip(cols, (34, 44, 240, 330, 118, 96, 118)):
+            tree.heading(c, text=c)
+            tree.column(c, width=w, anchor="w")
+        tree.tag_configure("ok", background="#e8f0ff", foreground="#003366")
+        tree.tag_configure("warn", background="#fff4c4", foreground="#806600")
+        tree.tag_configure("ng", background="#ffd4d4", foreground="#800000")
+        tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.sch_tree = tree
+        threading.Thread(target=self._refresh_schedules, daemon=True).start()
+
+    def _refresh_schedules(self):
+        """schtasks を読んで一覧を作る。信号は 🔵正常 / 🟡注意 / 🔴失敗。"""
         import re
         import subprocess
 
@@ -1518,26 +1564,38 @@ class HomePanel:
 
             def _hm(s):                      # "2026/07/31 4:00:01" → "07/31 04:00"
                 m = re.search(r"(\d+)/(\d+)\s+(\d+):(\d+)", s or "")
-                return f"{int(m.group(1)):02d}/{int(m.group(2)):02d} {int(m.group(3)):02d}:{m.group(4)}" if m else "—"
+                return (f"{int(m.group(1)):02d}/{int(m.group(2)):02d} "
+                        f"{int(m.group(3)):02d}:{m.group(4)}") if m else "—"
 
-            ng = 0
-            lines = []
-            for name, (last, res, nxt, state) in sorted(seen.items()):
+            rows, ng, warn = [], 0, 0
+            for i, (name, (last, res, nxt, state)) in enumerate(sorted(seen.items()), 1):
                 if state in ("無効", "Disabled"):
-                    mark = "⏸"
+                    sig, tag = "🟡 無効", "warn"
+                    warn += 1
                 elif res in self._SCH_OK:
-                    mark = "✅"
+                    sig, tag = "🔵 正常", "ok"
                 else:
-                    mark = "❌"
+                    sig, tag = "🔴 失敗", "ng"
                     ng += 1
-                lines.append(f"{mark} {name:<34} 前回 {_hm(last)}  結果 {res:>12}  次回 {_hm(nxt)}")
-            head = (f"全 {len(seen)} 件 / ❌ 失敗 {ng} 件"
-                    + ("   ← 要対応" if ng else "   (すべて正常)"))
-            txt = "\n".join([head] + lines)
+                rows.append((tag, (i, sig, name, self._SCH_DESC.get(name, "—"),
+                                   _hm(last), res, _hm(nxt))))
+            head = (f"全 {len(seen)} 件   🔵 {len(seen) - ng - warn}   "
+                    f"🟡 {warn}   🔴 {ng}" + ("   ← 要対応" if ng else ""))
         except Exception as e:                                # noqa: BLE001
-            txt = f"⚠️ 取得失敗: {e}"
+            rows, head = [], f"⚠️ 取得失敗: {e}"
+
+        def _apply():
+            if getattr(self, "sch_head", None) is not None:
+                self.sch_head.set(head)
+            t = getattr(self, "sch_tree", None)
+            if t is None or not t.winfo_exists():
+                return
+            t.delete(*t.get_children())
+            for tag, vals in rows:
+                t.insert("", "end", values=vals, tags=(tag,))
+
         try:
-            self.root.after(0, lambda: self.sch_var.set(txt))
+            self.root.after(0, _apply)
         except Exception:                                     # noqa: BLE001
             pass
 
