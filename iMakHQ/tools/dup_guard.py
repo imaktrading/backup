@@ -134,6 +134,53 @@ def shared_supply_urls(rows2d):
     return {u: sorted(v) for u, v in owner.items() if len(v) > 1}
 
 
+def plan_shared_url_cleanup(rows2d):
+    """共有された仕入元URLを **補URL側から外す**修正計画を作る (純関数)。
+
+    ★なぜ必要か (2026-08-01 実害):
+      `hoju_url_from_dupes` は「重複くんが弾いた2枚目の A列URL」を primary の補URLに足す。
+      2枚目は書いた時点では **itemID 空 (未出品)** なので誰とも衝突していない。
+      ところが **その2枚目が後日そのまま出品される**と、その行の主URLが他行の補URLと一致し、
+      「両方売れたら片方が履行不能 → キャンセル → Defect」になる。
+      = 入口ガードだけでは原理的に防げない。**危険化した時点で外す reconciliation が要る**。
+
+    方針:
+      - 外すのは **補URL(AC-AG) 側だけ**。主URL(A) は絶対に触らない (出品の供給そのもの)。
+      - 対象は「その URL を **主URL として持つ ACTIVE 行が別に存在する**」補URLのみ。
+        補URL どうしの重複は、実際に売れるまで履行不能にならないので触らない (過剰除去を避ける)。
+      - 供給が減るだけで破壊的動作ではない (`failclosed_must_skip_not_destructive` の安全側)。
+
+    戻り: {row(1-indexed): {'itemid', 'drop':[url,...], 'keep':[url,...], 'owner':{url:itemID}}}
+    """
+    primary_owner = {}
+    for r in rows2d[1:]:
+        if not _is_active(r):
+            continue
+        n = norm_url(_cell(r, A))
+        if n:
+            primary_owner.setdefault(n, _cell(r, B))
+    plan = {}
+    for i, r in enumerate(rows2d[1:], start=2):
+        if not _is_active(r):
+            continue
+        me = _cell(r, B)
+        aux = [_cell(r, AUX0 + k) for k in range(AUXN)]
+        drop, keep, owner = [], [], {}
+        for u in aux:
+            if not u:
+                continue
+            n = norm_url(u)
+            holder = primary_owner.get(n)
+            if holder and holder != me:
+                drop.append(u)
+                owner[u] = holder
+            else:
+                keep.append(u)
+        if drop:
+            plan[i] = {"itemid": me, "drop": drop, "keep": keep, "owner": owner}
+    return plan
+
+
 def live_card_index(rows2d, titles_by_itemid=None):
     """ACTIVE 行の カードキー → [itemID]。
 
@@ -387,6 +434,23 @@ def audit(refresh_titles=True):
     print(f"★① 仕入元URL共有(=キャンセル risk): {len(shared)}件")
     for u, owners in list(shared.items())[:30]:
         print(f"    ⚠ {u[:70]}  →  {owners}")
+    # ★2026-08-01: 検出して終わりにせず **その場で是正**する。
+    #   共有の主因は hoju_url_from_dupes が足した「2枚目URL」で、書いた時点では未出品でも
+    #   その2枚目が後日出品されると危険化する (入口ガードでは原理的に防げない)。
+    #   外すのは補URL側だけ・主URLは不触なので供給が減るだけ = 安全側。
+    _cleanup = plan_shared_url_cleanup(vals)
+    if _cleanup:
+        n_url = sum(len(v["drop"]) for v in _cleanup.values())
+        print(f"    🔧 是正: 他出品の主URLと重なる補URL {n_url}本 を {len(_cleanup)}行から外します")
+        for row, v in list(_cleanup.items())[:10]:
+            for u in v["drop"]:
+                print(f"       row{row}(itemID={v['itemid']}) ← {u[:58]} (主は {v['owner'][u]})")
+        try:
+            import sheet_io as _si
+            _si.write_aux_urls({row: v["keep"] for row, v in _cleanup.items()})
+            print(f"    ✅ 是正 完了 ({len(_cleanup)}行の補URLを書き換え)")
+        except Exception as _e:      # noqa: BLE001
+            print(f"    ⚠️要対応 是正の書込に失敗 (検出のみ): {type(_e).__name__}: {_e}")
     print(f"② 同一カード多重(注意・仕入元が別なら健全): {len(dup_cards)}組 "
           f"/ 判定不能(KEY無+token無) {len(unkeyed)}件")
     for k, v in list(dup_cards.items())[:30]:
