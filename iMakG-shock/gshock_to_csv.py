@@ -1983,7 +1983,14 @@ def main():
         print(f"\n通知ファイル: {notify_path}")
 
     if not relist_mode:
-        input("\nEnterで終了...")
+        # ★2026-08-01: 出品くん(control_panel)からの起動は stdin が無く EOFError → returncode=1。
+        #   直前の「Catalog 未登録」通知が表示されないまま落ちていた (psa_to_csv と同型・8cf56f2)。
+        #   Windows では isatty() が当てにならない (/dev/null でも True) ので except を最終防波堤にする。
+        if sys.stdin and sys.stdin.isatty():
+            try:
+                input("\nEnterで終了...")
+            except EOFError:
+                pass
 
 if __name__ == "__main__":
     main()
