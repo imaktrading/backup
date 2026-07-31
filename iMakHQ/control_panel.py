@@ -1478,14 +1478,18 @@ class HomePanel:
 
     # 各タスクが何をしているか (schtasks の Task To Run を実際に読んで書いた。推測ではない)
     _SCH_DESC = {
-        "iMakHarvest_YodobashiSnapshot_0600": "ヨドバシの在庫を撮る (1日3回の1回目)",
-        "iMakHarvest_YodobashiSnapshot_1400": "ヨドバシの在庫を撮る (2回目)",
-        "iMakHarvest_YodobashiSnapshot_2200": "ヨドバシの在庫を撮る (3回目)",
-        "iMakHarvest_YodobashiHarvest_2100": "ヨドバシから商品を拾う (抽出くん本体)",
-        "iMakHarvest_GshockMerge_2130": "G-shock を複数仕入元でまとめる",
-        "iMakInventory_Cycle": "在庫の巡回 (HIGH シート)。売切れたら取下げ",
-        "iMakInventory_Cycle_LOW": "在庫の巡回 (LOW シート)",
-        "iMakInventory_Monitor_Daily": "在庫監視の日次レポート",
+        "iMakHarvest_YodobashiSnapshot_0600": "ヨドバシ公式の在庫を撮る (1日3回の1回目)",
+        "iMakHarvest_YodobashiSnapshot_1400": "ヨドバシ公式の在庫を撮る (2回目)",
+        "iMakHarvest_YodobashiSnapshot_2200": "ヨドバシ公式の在庫を撮る (3回目)",
+        "iMakHarvest_YodobashiHarvest_2100": "ヨドバシ公式から新規商品を拾う (抽出くん本体)",
+        "iMakHarvest_GshockMerge_2130": "G-shock を Amazon + ヨドバシ公式 の2ソースでまとめる",
+        # ★仕入元を明記する。一覧に出ていない = やっていない と読まれるため (2026-07-31 指摘)
+        #   scrapers/ の実体: uniqlo(公式L2S API) / montbell(公式HTML) / amazon /
+        #                     mercari / snkrdunk / fril
+        "iMakInventory_Cycle": "在庫巡回 HIGH｜公式(UNIQLO/GU・montbell)+メルカリ/Amazon/"
+                               "スニダン/ラクマ を見て売切れたら取下げ",
+        "iMakInventory_Cycle_LOW": "在庫巡回 LOW｜同上 (公式在庫も含む)",
+        "iMakInventory_Monitor_Daily": "在庫監視の日次レポート (巡回結果のまとめ)",
         "iMakInventory_ReverseAudit_Daily": "意図 と 実eBay状態 の突合 (取下げ漏れ検出)",
         "iMakInventory_Backup": "商品管理シートのバックアップ",
         "iMakRevise_DailyAutoRevise": "価格の自動改定 (リバイスくん本体)",
