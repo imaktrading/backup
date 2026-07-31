@@ -90,6 +90,10 @@ def run(commit: bool):
                 fills.append((r["id"], GUNDAM_UTILITY[jp], UTIL_SRC))
                 continue
             # rule A: propagation
+            # ★name-guard 不変条件 (2026-08-01, name_guard.propagate_name_fields と同一): amap は
+            #   name_jp キー = **name_jp 完全一致のみ伝播**。別 name_jp (別キャラ) の name_en は
+            #   構造上入らない (FB10-025_p1 ベジット等の誤伝播はこの migration 由来ではない)。
+            #   unique(len==1) 制約で曖昧も除外。allowlist は持たない。
             if jp in amap and len(amap[jp]) == 1:
                 fills.append((r["id"], next(iter(amap[jp])), PROP_SRC))
             elif jp in amap:

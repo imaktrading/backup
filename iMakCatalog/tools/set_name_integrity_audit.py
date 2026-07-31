@@ -196,10 +196,40 @@ def main():
     else:
         print(report)
 
+    # ── base→_pN name 誤伝播の継続検出 (2026-08-01 name-guard, WARN のみ・自動修正なし) ──
+    #   name_jp≠base なのに name_en/character_name が base と一致する _pN = 別カードに別キャラ名。
+    #   これが >0 は name_guard.propagate_name_fields を通さない別経路の再混入。
+    import os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from name_guard import find_variant_name_violations, find_facet_n1_candidates  # noqa: E402
+    _conn = sqlite3.connect(str(DB_PATH))
+    _cats = categories or ["pokemon_tcg", "one_piece_tcg", "gundam_tcg",
+                           "dragonball_scg", "yugioh_tcg"]
+    name_viol = []
+    for _cat in _cats:
+        name_viol += find_variant_name_violations(_conn, _cat)
+    if name_viol:
+        print(f"\n⚠️ [name-guard] base→_pN 名前誤伝播 {len(name_viol)} 件 (WARN, 自動修正なし):")
+        for v in name_viol[:20]:
+            print(f"    {v['product_id']}: name_jp={v['name_jp']!r} ≠ base={v['base_name_jp']!r} "
+                  f"だが name_en/char が base と一致 (name_en={v['name_en']!r})")
+
+    # set_name_ebay N:1 誤マップ候補 (WARN のみ・自動修正なし。allowlist=facet_n1_allowlist.yaml)
+    facet_n1 = []
+    for _cat in _cats:
+        facet_n1 += [{**x, "category": _cat} for x in find_facet_n1_candidates(_conn, _cat)]
+    _conn.close()
+    if facet_n1:
+        print(f"\n⚠️ [facet-N:1] allowlist 外の N:1 誤マップ候補 {len(facet_n1)} facet "
+              f"(WARN・自動修正なし・一括null禁止。per-facet で窓口 GO 要):")
+        for x in facet_n1[:30]:
+            print(f"    {x['set_name_ebay']!r} <- stranger {list(x['strangers'].items())[:4]}")
+
     # 完走マーカー (末尾に必ず出す。ログの grep でこれが無ければ途中死亡).
     print(
         f"{_END_MARK}: era={len(era_mismatch)} inconsistent={len(inconsistent)} "
-        f"none_src={len(none_list)} name_desync={len(name_desync)} ==="
+        f"none_src={len(none_list)} name_desync={len(name_desync)} "
+        f"name_propagate_viol={len(name_viol)} facet_n1_candidates={len(facet_n1)} ==="
     )
 
 

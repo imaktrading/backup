@@ -1,0 +1,93 @@
+# set_name_ebay の N:1 (複数 JP set → 1 eBay facet) のうち、**正当な半セット結合** allowlist。
+#
+# 依頼: requests/2026-08-01_hq_decisions_nameguard_facet_fb10049.md ③ (窓口)。
+# 目的: N:1 検出 (set_name_integrity_audit の WARN) が、英語1セット=JP2半セットの正当な結合
+#   (例 コレクションサン+ムーン → 'Sun & Moon') を **誤検出しない** ための除外リスト。
+#
+# 規約:
+#   - **コードにハードコードしない** (窓口指示)。本 yaml が SSOT。
+#   - facet ごとに、その facet に正当に属する set_name_official を列挙。
+#   - ここに**無い** JP set が同 facet を持っていたら = mismap 候補として WARN (自動修正はしない)。
+#   - 追加は「英語1セット=JP半セット結合」が公式構造で確認できたものだけ。straggler(数枚だけ別セット)
+#     は allowlist に足さず、候補として窓口 per-facet GO に回す。
+#
+# category: pokemon_tcg (現状 pokemon のみ。他カテゴリで N:1 が出たら節を足す)
+
+pokemon_tcg:
+  # ── SM / SWSH / SV: 英語1セット = JP 表裏 2 半セット (均衡カウント確認済) ──
+  "Sun & Moon":
+    - "拡張パック「コレクション サン」"
+    - "拡張パック「コレクション ムーン」"
+    - "拡張パック「サン&ムーン」"
+    - "拡張パック「サン＆ムーン」"
+  "Scarlet & Violet—Paradox Rift":
+    - "拡張パック「古代の咆哮」"
+    - "拡張パック「未来の一閃」"
+  "Sword & Shield—Astral Radiance":
+    - "拡張パック「スペースジャグラー」"
+    - "拡張パック「タイムゲイザー」"
+  "Sword & Shield—Chilling Reign":
+    - "拡張パック「漆黒のガイスト」"
+    - "拡張パック「白銀のランス」"
+  "Sword & Shield—Battle Styles":
+    - "拡張パック「一撃マスター」"
+    - "拡張パック「連撃マスター」"
+    # 注: 「双璧のファイター」は Battle Styles か別セットか要確認 → allowlist 未登録 (候補で出す)
+  # ── XY: 英語1セット = JP 2 半セット ──
+  "XY":
+    - "拡張パック「コレクションX」"
+    - "拡張パック「コレクションY」"
+  "XY—Steam Siege":
+    - "拡張パック「冷酷の反逆者」"
+    - "拡張パック「爆熱の闘士」"
+  "XY—BREAKthrough":
+    - "拡張パック「赤い閃光」"
+    - "拡張パック「青い衝撃」"
+  "XY—Primal Clash":
+    - "拡張パック「ガイアボルケーノ」"
+    - "拡張パック「タイダルストーム」"
+  # ── B&W / D&P / HGSS: 英語1セット = JP 2 半セット ──
+  "Black & White":
+    - "拡張パック「ブラックコレクション」"
+    - "拡張パック「ホワイトコレクション」"
+  "Black & White—Dragons Exalted":
+    - "拡張パック「リューズブラスト」"
+    - "拡張パック「リューノブレード」"
+  "Black & White—Plasma Freeze":
+    - "拡張パック「ライデンナックル」"
+    - "拡張パック「ラセンフォース」"
+  "Black & White—Next Destinies":
+    - "拡張パック「サイコドライブ」"
+    - "拡張パック「ヘイルブリザード」"
+  "Black & White—Boundaries Crossed":
+    - "拡張パック「コールドフレア」"
+    - "拡張パック「フリーズボルト」"
+  "Diamond & Pearl—Legends Awakened":
+    - "拡張パック「怒りの神殿」"
+    - "拡張パック「秘境の叫び」"
+  "Diamond & Pearl":
+    - "拡張パック「時空の創造 ダイヤモンドコレクション」"
+    - "拡張パック「時空の創造 パールコレクション」"
+  "HeartGold & SoulSilver":
+    - "拡張パック「ソウルシルバーコレクション」"
+    - "拡張パック「ハートゴールドコレクション」"
+  "Pokemon Card Game Classic":
+    - "ポケモンカードゲーム クラシック カメックス&スイクンexデッキ"
+    - "ポケモンカードゲーム クラシック フシギバナ&ルギアexデッキ"
+  # ── 主セット (dominant, 均衡または単一) を登録して straggler だけを候補に残す ──
+  #   ※ 各 facet の残り (低カウント別セット) が mismap 候補として WARN に出る。
+  "Sun & Moon—Team Up":            # SM9 = タッグボルト (単一)
+    - "拡張パック「タッグボルト」"
+  "Sun & Moon—Celestial Storm":    # 裂空のカリスマ
+    - "拡張パック「裂空のカリスマ」"
+  "Sun & Moon—Forbidden Light":    # 禁断の光
+    - "拡張パック「禁断の光」"
+  "Sun & Moon—Unbroken Bonds":     # ダブルブレイズ
+    - "拡張パック「ダブルブレイズ」"
+  "Sun & Moon—Guardians Rising":   # SM2 = 月光+島々 (均衡 55/57)
+    - "拡張パック「アローラの月光」"
+    - "拡張パック「キミを待つ島々」"
+  "Sword & Shield—Lost Origin":    # ロストアビス
+    - "拡張パック「ロストアビス」"
+  "Galactic's Conquest":           # ギンガの覇道
+    - "拡張パック「ギンガの覇道」"
