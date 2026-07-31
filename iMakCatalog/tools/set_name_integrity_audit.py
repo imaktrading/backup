@@ -21,6 +21,7 @@ HQ 照合ツール(出力CSV側) と二重で守る (= dual_gate)。
   python iMakCatalog/tools/set_name_integrity_audit.py --out audit.md # md 出力
 """
 import argparse
+import datetime as _dt
 import json
 import re
 import sqlite3
@@ -28,6 +29,11 @@ import sys
 from collections import defaultdict
 
 DB_PATH = "C:/dev/iMak_data/catalog/products.sqlite"
+
+# 完走マーカー (途中で死んだ = マーカーが出ない = ログ検知できる).
+# prune_daily.log と同型の「=== ... ===」規約に合わせる (2026-07-31 daily cron 化).
+_START_MARK = "=== set_name integrity audit START"
+_END_MARK = "=== set_name integrity audit COMPLETE"
 
 _ERAS = ["Scarlet & Violet", "Sword & Shield", "Sun & Moon", "Black & White", "XY"]
 
@@ -172,17 +178,29 @@ def main():
     args = ap.parse_args()
     categories = None if args.cat == "all" else [args.cat]
 
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    cat_s = ",".join(categories) if categories else "all"
+    ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"{_START_MARK} {ts} (cat={cat_s}) ===")
+
     era_mismatch, inconsistent, none_list, name_desync = audit(categories)
     report = render(era_mismatch, inconsistent, none_list, name_desync, categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)
         print(f"wrote {args.out}")
-        print(f"era不一致={len(era_mismatch)} / 不統一={len(inconsistent)} / "
-              f"source=(none) set_code={len(none_list)} / name不整合={len(name_desync)}")
     else:
-        sys.stdout.reconfigure(encoding="utf-8")
         print(report)
+
+    # 完走マーカー (末尾に必ず出す。ログの grep でこれが無ければ途中死亡).
+    print(
+        f"{_END_MARK}: era={len(era_mismatch)} inconsistent={len(inconsistent)} "
+        f"none_src={len(none_list)} name_desync={len(name_desync)} ==="
+    )
 
 
 if __name__ == "__main__":
