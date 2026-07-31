@@ -308,6 +308,93 @@ def queue_stats(con):
             "pending": by_status.get("pending", 0), "done": by_status.get("done", 0)}
 
 
+_OPAQUE_ID_RE = re.compile(r"^(PSA10-\d+|m\d{8,})$", re.IGNORECASE)
+
+
+def is_opaque_listing_id(item_id) -> bool:
+    """item_id が「出品IDだけでは商品を特定できない」形式か (純関数, test可)。
+
+    PSA10-<cert> / m<メルカリID> は出品IDであって商品IDではない。identity が空のまま
+    Catalog へ送ると「どのカードか分からず原理的に着手不能」= 無駄往復になる
+    (2026-07-27 Advisor 指摘 §3)。一方 gshock の item_id は型番そのもの (= 特定可能)、
+    program_fix の item_id は症状シグネチャで Catalog へは出ないので、ここで True に
+    しない = 既存の依頼経路を塞がない (silent drop 防止)。
+    """
+    return bool(_OPAQUE_ID_RE.match((item_id or "").strip()))
+
+
+def backfill_identities(con, resolve_fn, ts="", status="pending"):
+    """identity 空の行を resolve_fn で後埋め (既存行の救済)。
+
+    identity 解決は upsert 時に渡す設計だが、解決経路を後から実装した場合 (2026-07-31)
+    **既に積まれている行は空のまま**で、再検出されるまで永久に (不明) で出続ける。
+    毎監査ここを通して既存行も救う。
+
+    Args:
+        resolve_fn: item_id -> identity 文字列 (解決不能は "")。例外は握り潰す (監査を止めない)。
+    Returns: {"filled": n, "checked": m}
+    """
+    rows = con.execute(
+        "SELECT queue_id, item_id FROM improvement_queue"
+        " WHERE status=? AND TRIM(COALESCE(identity,''))=''", (status,)).fetchall()
+    filled = 0
+    for r in rows:
+        try:
+            ident = (resolve_fn(r["item_id"]) or "").strip()
+        except Exception:
+            ident = ""
+        if ident:
+            con.execute("UPDATE improvement_queue SET identity=?, updated_ts=? WHERE queue_id=?",
+                        (ident[:120], ts, r["queue_id"]))
+            filled += 1
+    con.commit()
+    return {"filled": filled, "checked": len(rows)}
+
+
+def partition_by_identity(items):
+    """Catalog へ送れる行 / 送っても着手不能な行 に分ける (純関数, test可)。
+
+    送らない = identity 空 **かつ** item_id が出品ID形式 (is_opaque_listing_id)。
+    それ以外 (gshock 型番等) は従来どおり送る。
+    Returns: (sendable, held)
+    """
+    sendable, held = [], []
+    for r in items:
+        ident = (r.get("identity") or "").strip()
+        if not ident and is_opaque_listing_id(r.get("item_id")):
+            held.append(r)
+        else:
+            sendable.append(r)
+    return sendable, held
+
+
+def write_unresolved_note(held, out_path, today, category=""):
+    """identity 未解決で送らなかった分を **毎回全件再掲** する残件リストを書く。
+
+    黙って落とすと no_partial_shipping_with_todo / 状態同期原則2 (silent drop 禁止) に触れる。
+    毎回上書き = 「今この瞬間の未解決全件」が常に 1 ファイルに載る (増殖しない)。
+    held が空なら「0件」と書く (ファイルを消さない = 見に行った時に必ず状態が読める)。
+    """
+    lines = [
+        f"# HQ 保留箱: identity 未解決 (Catalog へ送っていない) — {category or 'all'}",
+        f"- 更新: {today} / 発行者: HQ pdca_store (毎監査 上書き = 常に全件)",
+        "- ここに載る行は **出品ID しか無く、どの商品か HQ 側で解決できなかった**分。",
+        "  Catalog に送っても着手不能なので送らない (fail-closed)。解決したら自動で依頼に載る。",
+        "",
+        f"## 未解決 {len(held)} 件",
+    ]
+    if held:
+        lines += ["| item | category | field | 根拠 | seen |", "|---|---|---|---|--:|"]
+        for r in held:
+            lines.append(f"| {r['item_id']} | {r.get('category','')} | {r['target_field']} | "
+                         f"{(r.get('evidence') or '')[:60]} | {r.get('seen_count','')} |")
+    else:
+        lines.append("(なし = 未解決ゼロ)")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text("\n".join(lines), encoding="utf-8")
+    return len(held)
+
+
 def _queue_table(items):
     rows = ["| pri | item | 商品(identity) | field | 候補値 | 確信度 | 根拠 |",
             "|--:|---|---|---|---|--:|---|"]
@@ -335,7 +422,7 @@ def category_in_project(cat, project):
     return False
 
 
-def emit_consolidated_request(con, category, out_dir, today):
+def emit_consolidated_request(con, category, out_dir, today, held_out=None):
     """pending 改善候補を **1本の dedup済 catalog 依頼 .md** に集約発行 (Phase2/3・自動)。
 
     層A(客観ギャップ=即対応)と層B(競合intel候補=要裏取り)を分節で出力。
@@ -343,8 +430,13 @@ def emit_consolidated_request(con, category, out_dir, today):
     catalog 反映は Catalog が裏取りして実施 (SSOT/fail-closed)。Returns: 発行件数。
     発行は **当該 project(category)に属す項目のみ**(他カテゴリ混入防止=Catalog 誤ルーティング根治)。
     """
-    pend = [r for r in list_queue(con, status="pending", limit=10000)
-            if r.get("source") != "md_import" and category_in_project(r.get("category"), category)]
+    pend_all = [r for r in list_queue(con, status="pending", limit=10000)
+                if r.get("source") != "md_import" and category_in_project(r.get("category"), category)]
+    # identity 未解決 (出品IDのみ) は送らない = Catalog が着手不能な依頼を積まない。
+    # 落とした分は held_out で呼出側へ返し、残件リストに毎回再掲する (silent drop 禁止)。
+    pend, held = partition_by_identity(pend_all)
+    if held_out is not None:
+        held_out.extend(held)
     layer_a = [r for r in pend if r.get("layer") == "A"]
     layer_b = [r for r in pend if r.get("layer") == "B"]
     if not pend:

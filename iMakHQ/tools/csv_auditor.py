@@ -50,6 +50,8 @@ REVIEW_DIR = os.path.join(WORKSPACE, "iMakHQ", "review_logs")
 CATALOG_REQ_DIR = r"C:\dev\iMak_data\catalog\requests"
 MISSING_MODELS_PATH = r"C:/dev/iMak_data/catalog/missing_models.csv"  # psa_to_csv 検出の catalog未登録
 CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"              # 解決済 prune の照合先
+# identity 未解決で Catalog へ送らなかった分の残件リスト (毎監査 上書き = 常に全件再掲)
+UNRESOLVED_IDENTITY_PATH = os.path.join(REVIEW_DIR, "pdca_identity_unresolved.md")
 
 # project → check_csv.py / listing_commonカテゴリ / *Category値 / 固有列 / 送料自動修正可否
 CATEGORY_MAP = {
@@ -1172,12 +1174,31 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
             staled = _pdca.prune_stale_findings(con, ts, max_age_days=21)["pruned"]
         except Exception as _se:
             print(f"  ⚠️ PDCA stale prune skip: {type(_se).__name__}")
-        emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts)
+        # 既存行の identity 後埋め (解決経路を後から実装した分の救済 2026-08-01)。
+        # これを通さないと、7/31 以前に積まれた PSA cert 行は再検出まで (不明) のまま出続ける。
+        filled = 0
+        try:
+            filled = _pdca.backfill_identities(
+                con, lambda iid: _resolve_identity(iid, identity_by_sku), ts=ts)["filled"]
+        except Exception as _be:
+            print(f"  ⚠️ PDCA identity backfill skip: {type(_be).__name__}: {_be}")
+        held = []
+        emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts, held_out=held)
         con.commit()
         con.close()
-        if emitted or synced or pruned or staled:
+        # 送らなかった分は毎回全件を残件リストに再掲 (黙って落とさない)。
+        try:
+            _pdca.write_unresolved_note(held, UNRESOLVED_IDENTITY_PATH, ts, category=project)
+        except Exception as _we:
+            print(f"  ⚠️ 未解決リスト書込 skip: {type(_we).__name__}: {_we}")
+        if emitted or synced or pruned or staled or filled:
             print(f"  📊 PDCA: 集約発行 {emitted} 件 / 完了同期 {synced} 件 / "
-                  f"解決済prune {pruned} 件 / 長期stale退役 {staled} 件 (dedup済)")
+                  f"解決済prune {pruned} 件 / 長期stale退役 {staled} 件 / identity後埋め {filled} 件 (dedup済)")
+        if held:
+            print(f"  ⚠️ identity 未解決につき Catalog へ送らず保留 {len(held)} 件 "
+                  f"(要対応・全件: {UNRESOLVED_IDENTITY_PATH})")
+            for r in held[:10]:
+                print(f"     - {r['item_id']} / {r['target_field']}")
     except Exception as _e:
         print(f"  ⚠️ PDCA accumulate skip (監査は継続): {type(_e).__name__}: {_e}")
 
