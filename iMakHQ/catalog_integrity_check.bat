@@ -22,20 +22,22 @@ REM 1) integrity audit -> writes dated report to tools\_audit_reports\
 REM    exit 1 = anomalies detected (by design, NOT a crash)
 python "c:\dev\iMak\iMakHQ\tools\catalog_integrity_check.py" %STAMP% >> "%LOG%" 2>&1
 set STEP1=%ERRORLEVEL%
-echo [step1 catalog_integrity_check] exit=%STEP1%>> "%LOG%"
+REM 2026-07-31: "exit=%STEP1%>>" swallows the value, because "%STEP1%>>" is parsed
+REM   as a redirection. Always put a space before ">>" so it logs "exit=1 ".
+echo [step1 catalog_integrity_check] exit=%STEP1% >> "%LOG%"
 if "%STEP1%"=="1" set ANOMALY=1
 if not "%STEP1%"=="0" if not "%STEP1%"=="1" set RC=%STEP1%
 
 REM 1b) hand whitelist vs eBay official filter drift (value drift detection)
 python "c:\dev\iMak\iMakHQ\tools\whitelist_official_drift.py" >> "%LOG%" 2>&1
 set STEP2=%ERRORLEVEL%
-echo [step2 whitelist_official_drift] exit=%STEP2%>> "%LOG%"
+echo [step2 whitelist_official_drift] exit=%STEP2% >> "%LOG%"
 if not "%STEP2%"=="0" if "%RC%"=="0" set RC=%STEP2%
 
 REM 2) refresh catalog visualization spreadsheet with latest (corrected) catalog
 python "c:\dev\iMak\iMakHQ\tools\catalog_to_sheet.py" >> "%LOG%" 2>&1
 set STEP3=%ERRORLEVEL%
-echo [step3 catalog_to_sheet] exit=%STEP3%>> "%LOG%"
+echo [step3 catalog_to_sheet] exit=%STEP3% >> "%LOG%"
 if not "%STEP3%"=="0" if "%RC%"=="0" set RC=%STEP3%
 
 REM anomalies alone must not look like a crash, but must not look like "clean" either
