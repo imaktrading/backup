@@ -2,23 +2,20 @@
 """
 iMak Trading Japan - 利益計算パラメータ SSOT (Single Source of Truth)
 
-データソース優先順位:
-  1. Google Sheets (PRIMARY): 利益計算シート v2_GS
-     https://docs.google.com/spreadsheets/d/1ft91iIsJjbMVw3Gx4GmeO-DQ0A47jp6O1TbiZeTslag/
-  2. ローカルキャッシュ (cache/profit_params_cache.json): GS取得結果を1時間保持
-  3. Excel フォールバック: iMakHQ/sheets/【NEW】利益計算シート_v2.xlsx
-  4. ハードコードフォールバック: 全部失敗時の最終値
+データソース優先順位 (2026-07-31 改訂: Excel フォールバックを廃止):
+  1. ローカルキャッシュ (cache/profit_params_cache.json): GS取得結果を1時間保持
+  2. Google Sheets (PRIMARY): GSHEET_URL (V4 copy, pricing_engine 専用)
+  3. ローカルキャッシュ (stale 許容): GS 不達時に期限切れでも使う
+  4. yaml フォールバック: iMakeBayAPI/config/global.yaml (= SSOT)
+
+★Excel (`iMakHQ/sheets/【NEW】利益計算シート_v2.xlsx`) は **第二 SSOT として有害**だったため
+  chain から外した。詳細は `_load()` 直前のコメント参照。
 """
 import json
 import os
 import sys
 import time
 from pathlib import Path
-
-try:
-    import openpyxl
-except ImportError:
-    openpyxl = None
 
 try:
     import gspread
@@ -42,7 +39,6 @@ CACHE_DIR = SCRIPT_DIR / "cache"
 CACHE_FILE = CACHE_DIR / "profit_params_cache.json"
 CACHE_TTL_SECONDS = 3600
 
-SPREADSHEET = WORKSPACE_ROOT / "iMakHQ" / "sheets" / "【NEW】利益計算シート_v2.xlsx"
 
 # Fallback 値は config_loader 経由で yaml(global.yaml) から取得（SSOT）
 # 旧: ハードコード -> 新: iMakeBayAPI/config/global.yaml
@@ -147,45 +143,14 @@ def _load_from_gsheet():
         return None
 
 
-def _load_from_excel():
-    if openpyxl is None or not SPREADSHEET.exists():
-        return None
-    try:
-        wb = openpyxl.load_workbook(SPREADSHEET, data_only=True)
-        ws = wb["設定"] if "設定" in wb.sheetnames else wb.active
-        cache = _default_cache()
-        if ws["B2"].value is not None:
-            cache["exchange_rate"] = float(ws["B2"].value)
-        if ws["B3"].value is not None:
-            cache["ad_rate"] = float(ws["B3"].value)
-        if ws["B4"].value is not None:
-            cache["payo_fee"] = float(ws["B4"].value)
-        if ws["B5"].value is not None:
-            cache["target_profit"] = float(ws["B5"].value)
-        for src_cell, key in [("F2", "exchange_rate_eur"), ("H2", "exchange_rate_gbp"), ("J2", "exchange_rate_aud")]:
-            try:
-                v = ws[src_cell].value
-                if v is not None:
-                    cache[key] = float(v)
-            except Exception:
-                pass
-        categories = {}
-        for row in range(17, 60):
-            name = ws[f"A{row}"].value
-            fvf = ws[f"B{row}"].value
-            ship = ws[f"C{row}"].value
-            if not name or fvf is None or ship is None:
-                continue
-            try:
-                categories[str(name).strip()] = (float(fvf), int(ship))
-            except (TypeError, ValueError):
-                continue
-        if categories:
-            cache["categories"] = categories
-        cache["source"] = "excel"
-        return cache
-    except Exception:
-        return None
+# ★2026-07-31: Excel フォールバック (`_load_from_excel`) を廃止した。
+#   Excel (`iMakHQ/sheets/【NEW】利益計算シート_v2.xlsx`) は 7fb70dd (2026-04-25 baseline) 以降
+#   更新されていないのに **yaml より先に return する** 位置に居たため、creds を持たない
+#   worktree (revise 等) は yaml(SSOT) に到達できず、Excel の値を掴んでいた。
+#   実害: Excel のカテゴリ名は `Montbell(一般)/(ジャケット)`、yaml/コードは `Montbell(軽)/(重)` で
+#   乖離 → `get_category_params("Montbell(重)") is None` → import 時に TypeError。
+#   (2026-07-31 リバイスくんが特定。`iMakMercari/montbell_listing.py:368` が collection error)
+#   = 埋もれた第二 SSOT。chain から外し、fallback は yaml 一本に統一する。
 
 
 def _load():
@@ -206,10 +171,6 @@ def _load():
         stale["source"] = stale.get("source", "gsheet") + "/stale"
         _cache = stale
         return stale
-    excel_data = _load_from_excel()
-    if excel_data:
-        _cache = excel_data
-        return excel_data
     _cache = _default_cache()
     return _cache
 
