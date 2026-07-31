@@ -49,7 +49,11 @@ def test_targets_needing_search_skips_completed_today():
         "B": {"snkrdunk": {}, "date": TODAY},                                       # mercari欠落→残
     }
     need = targets_needing_search(targets, cache, TODAY)
-    assert [t["itemID"] for t in need] == ["B", "C"]
+    # ★2026-08-01: 戻りは **最後に探した日が古い順** になった (古い出品が永久に探索されない
+    #   starvation の修正)。C は未探索なので B(当日 mercari 欠落) より先に来る。
+    #   このテストの主眼は「完了済 A を skip すること」で、順序は下の並べ替え規約に従う。
+    #   → 並べ替え自体の回帰は test_hoju_rotation_and_variant_20260801.py が持つ。
+    assert [t["itemID"] for t in need] == ["C", "B"]
 
 
 def test_merge_search_result_fail_closed_drops_errored_mercari():

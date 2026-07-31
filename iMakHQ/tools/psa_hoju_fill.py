@@ -183,13 +183,43 @@ def _entry_complete(entry, today):
             and "mercari" in entry and "snkrdunk" in entry)
 
 
+def _search_age_key(entry, today):
+    """検索キューの並べ替え用: 「最後に探した日からの経過日数」(大きいほど先に探す)。
+
+    未探索(entry 無し / date 無し / 解析不能) は最優先 (float('inf'))。
+    """
+    d = (entry or {}).get("date") if isinstance(entry, dict) else None
+    if not d:
+        return float("inf")
+    try:
+        import datetime
+        return (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(d)).days
+    except Exception:
+        return float("inf")
+
+
 def targets_needing_search(targets, cache, today):
-    """当日まだ検索し切れてない対象だけ返す(純関数・レジューム耐性)。
+    """当日まだ検索し切れてない対象を **探し直すべき順** で返す(純関数・レジューム耐性)。
 
     補URL自体がレジューム状態(埋まればクエリから外れる)だが、夜間検索の中断耐性のため
     「当日キャッシュ完了」も skip 条件にする(同夜の再実行で残りだけ叩く)。
+
+    ★2026-08-01 並べ替えを追加 (これが無いと **一部が永久に探されない**)。
+      入力 targets は select_backfill_targets が **出品日時の降順**(新規優先)で返す。
+      夜間検索は `todo[:limit]` で先頭 limit 件しか叩かないため、対象数 > limit の間
+      **古い出品はいつまでも順番が回ってこない**。実測 2026-08-01: 対象82件のうち
+      14件が 7/25 の cache のまま(= 3日の鮮度窓を超えて確証UIにすら出ない)、22件が未探索。
+      → 「最後に探した日が古い順」に並べ替え、全対象が必ず一巡するようにする。
+      未探索(=新規出品も含む)が最優先なのは従来どおり。同着は新しい出品を先に。
+
+    ★「市場に無い」対象を落とさないこと。候補ゼロでも entry は残るので経過日数で必ず戻ってくる。
+      供給は後から湧くので、探し続けるのが正しい (打ち切ると二度と補URLが付かない)。
     """
-    return [t for t in targets if not _entry_complete(cache.get(t.get("itemID")), today)]
+    todo = [t for t in targets if not _entry_complete(cache.get(t.get("itemID")), today)]
+    # 経過日数の降順のみで並べる。同着は **入力順(=出品日時の降順)がそのまま残る**
+    # (Python の sort は安定) ので、「未探索の中では新規出品が先」は従来どおり保たれる。
+    todo.sort(key=lambda t: -_search_age_key(cache.get(t.get("itemID")), today))
+    return todo
 
 
 def _entry_fresh(entry, today, max_age_days=3):

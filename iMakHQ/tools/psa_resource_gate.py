@@ -100,21 +100,30 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     """
     mr = mr or {}
     out, seen = [], set()
+    # ★2026-08-01: all_cands は **同番号の全変種**(変種未確証) なので、そのまま並べると
+    #   別変種が上に来て人が毎回「違う」を押す羽目になる。cands(= _variant_matches を通った
+    #   **正変種**) に載っている URL を先頭へ寄せ、各候補に variant_ok を持たせて UI で
+    #   区別できるようにする。cands が空(mercari の出品名にセット名が無くて確証できない場合)は
+    #   全部 variant_ok=False = 「変種未確認だから絵柄をよく見て」を人に伝える。
+    verified = {t[1] for t in (mr.get("cands") or []) if t and len(t) > 1 and t[1]}
     merc = mr.get("all_cands") or mr.get("cands") or []
+    merc = sorted(merc, key=lambda t: 0 if (t and len(t) > 1 and t[1] in verified) else 1)
     for t in merc[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
         if url and url not in seen:
             seen.add(url)
             out.append({"channel": "mercari", "url": url,
                         "price": (t[0] if t and isinstance(t[0], int) else None),
-                        "name": (t[2] if len(t) > 2 else "")})
+                        "name": (t[2] if len(t) > 2 else ""),
+                        "variant_ok": url in verified})
     if not out and c.get("mercari_url"):            # 最終フォールバック(best のみ)
         out.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
     for d in (c.get("snkrdunk_urls") or [])[:max_snkr]:
         if d.get("url") and d["url"] not in seen:
             seen.add(d["url"])
+            # snkrdunk は card_id で引いているので変種は特定済み (番号一致の全変種を混ぜない)。
             out.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price"),
-                        "image": d.get("image", "")})
+                        "image": d.get("image", ""), "variant_ok": True})
     return out
 
 

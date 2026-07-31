@@ -191,6 +191,8 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 .rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px}
 .cand:has(.ck:not(:checked)) .rsn{display:inline-flex}
 .rb{font-size:10px;padding:1px 5px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:pointer}
+.vok{font-size:10px;padding:1px 5px;border-radius:3px;background:#2a7;color:#fff;font-weight:bold}
+.vng{font-size:10px;padding:1px 5px;border-radius:3px;background:#e80;color:#fff;font-weight:bold}
 .zm{font-size:13px;padding:0 6px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:zoom-in;line-height:1.6}
 #zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;cursor:zoom-out}
 #zov img{max-width:46vw;max-height:88vh;object-fit:contain;background:#fff;display:block}
@@ -457,10 +459,17 @@ def build_restock_html(items):
             #   未選択のまま確定した場合は go() が件数を confirm で見せてから 見送り 扱いにする。
             _nm = _s(cd.get("name"))
             _nm_html = f"<br><span class='cnm'>{_html.escape(_nm[:48])}</span>" if _nm else ""
+            # ★2026-08-01: 変種が確証できているかを候補ごとに出す。mercari の候補は既定で
+            #   「同番号の全変種」なので、確証できていない物を黙って混ぜると人が毎回「違う」を
+            #   押すことになる (=「候補が違うのは意味がない」)。確証済は先頭に並んでいる。
+            #   variant_ok を持たない呼出 (旧 cache 等) はバッジ非表示 = 後方互換。
+            _vok = cd.get("variant_ok")
+            _v_html = ("<span class='vok'>✅変種一致</span>" if _vok is True
+                       else "<span class='vng'>⚠️変種未確認</span>" if _vok is False else "")
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='' onchange='upd({idx})'>{img}"
-                f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr}{_nm_html}"
+                f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr} {_v_html}{_nm_html}"
                 f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a>"
                 f" <button type='button' class='zm' title='拡大'"
                 f" data-img=\"{_html.escape(_proxied(imgsrc))}\" onclick='zoom(event,this)'>🔍</button>"
