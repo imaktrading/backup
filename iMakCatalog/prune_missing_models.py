@@ -11,6 +11,12 @@ pending に戻る機序(done→pending 復活)があり、「CSV除去」と「p
   2. pdca.db improvement_queue (source='missing_models', status='pending')
      : resolver 解決済 を status='done' 化(= CSV 再import でも復活しない)
 
+2026-07-31 追加 (Advisor GO pdca_catalog_queue_tcg_response.md 群B):
+  対象外(out-of-scope)確定 cert の永久除外機構を追加.
+  `_OUT_OF_SCOPE_CERTS` に列挙された cert 番号 は resolver をバイパスして常に prune 対象.
+  対象外 = 参入しないゲーム/期(SDBH, Neo era 等)、または一次情報 (公式 product_id 体系) が
+  存在しない一点物 promo (Championship Set 2023 等)。再依頼が起きない形にする恒久措置。
+
 恒久策の日次実行は本スクリプトを scheduler(schtasks 等)で回す。
 
 使い方:
@@ -33,6 +39,37 @@ except Exception:
 
 CSV_PATH = Path("C:/dev/iMak_data/catalog/missing_models.csv")
 PDCA_DB = Path("C:/dev/iMak_data/audit/pdca.db")
+
+# ---------------------------------------------------------------------------
+# 対象外 (out-of-scope) 永久除外 cert リスト
+# ---------------------------------------------------------------------------
+# 追加基準 (どれか):
+#   1. 対象外ゲーム/期に属する (SDBH / Neo era 等) = Advisor 確定
+#   2. 公式 product_id 体系が公開されていない一点物 promo = 推測 catalog_add 不可
+# 追加時は必ず該当 response.md を「why」として付記する。
+_OUT_OF_SCOPE_CERTS: dict[str, str] = {
+    # 2026-07-31 pdca_catalog_queue_tcg_response.md 群B B-8:
+    #   PORTGAS D. ACE CHAMPIONSHIP SET 2023 — 大会入賞者配布 promo、公式 product_id 体系公開無
+    "cert153574704": "out_of_scope: OP championship 2023 promo (公式 product_id 無)",
+    "cert153574705": "out_of_scope: OP championship 2023 promo (公式 product_id 無)",
+    # 2026-07-31 pdca_catalog_queue_tcg_response.md 群B B-7:
+    #   POKEMON Neo era (2000-2001) = 無在庫運営と相性が悪く参入せず
+    "cert157799487": "out_of_scope: POKEMON Neo era (vintage, 参入せず)",
+}
+
+
+def _extract_cert(model: str) -> str | None:
+    """model 文字列先頭の 'certNNN...' を抜く. 無ければ None."""
+    m = re.match(r"(cert\d+)\b", model or "")
+    return m.group(1) if m else None
+
+
+def is_out_of_scope(model: str) -> str | None:
+    """model が out-of-scope なら理由 str を返す (denylist hit). なければ None."""
+    cert = _extract_cert(model)
+    if cert and cert in _OUT_OF_SCOPE_CERTS:
+        return _OUT_OF_SCOPE_CERTS[cert]
+    return None
 
 
 def parse_tcg(model: str):
@@ -71,7 +108,7 @@ def resolves(category: str, model: str) -> str:
 
 
 def prune_csv(dry_run: bool) -> int:
-    """missing_models.csv の解決済行を物理除去. Returns pruned 件数."""
+    """missing_models.csv の解決済行 + out-of-scope 確定行を物理除去. Returns pruned 件数."""
     if not CSV_PATH.exists():
         print(f"[csv] {CSV_PATH} が無い → skip")
         return 0
@@ -82,12 +119,17 @@ def prune_csv(dry_run: bool) -> int:
 
     keep, pruned = [], []
     for r in rows:
+        oos = is_out_of_scope(r["model"])
+        if oos:
+            pruned.append((r, oos))
+            continue
         key = resolves(r["category"], r["model"])
         (pruned if key else keep).append((r, key))
 
-    print(f"[csv] total={len(rows)}  prune(解決済)={len(pruned)}  keep(未解決)={len(keep)}")
+    print(f"[csv] total={len(rows)}  prune(解決済+対象外)={len(pruned)}  keep(未解決)={len(keep)}")
     for r, key in pruned:
-        print(f"  PRUNE [{r['category']}] {key:16s} <- {r['model'][:70]}")
+        tag = key if key else "resolved"
+        print(f"  PRUNE [{r['category']}] {tag[:32]:32s} <- {r['model'][:70]}")
     for r, key in keep:
         print(f"  KEEP  [{r['category']}] {r['model'][:80]}")
     if dry_run or not pruned:
@@ -121,11 +163,16 @@ def prune_pdca(dry_run: bool) -> int:
     ).fetchall()
     resolved, keep = [], []
     for r in rows:
+        oos = is_out_of_scope(r["item_id"])
+        if oos:
+            resolved.append((r, oos))
+            continue
         key = resolves(r["category"], r["item_id"])
         (resolved if key else keep).append((r, key))
-    print(f"[pdca] pending missing_models={len(rows)}  done化(解決済)={len(resolved)}  keep(未解決)={len(keep)}")
+    print(f"[pdca] pending missing_models={len(rows)}  done化(解決済+対象外)={len(resolved)}  keep(未解決)={len(keep)}")
     for r, key in resolved:
-        print(f"  DONE  [{r['category']}] {key:16s} <- {r['item_id'][:70]}")
+        tag = key if key else "resolved"
+        print(f"  DONE  [{r['category']}] {tag[:32]:32s} <- {r['item_id'][:70]}")
     for r, key in keep:
         print(f"  KEEP  [{r['category']}] {r['item_id'][:80]}")
     if dry_run or not resolved:
