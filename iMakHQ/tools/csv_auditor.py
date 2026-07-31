@@ -939,6 +939,15 @@ def _build_act_prompt(project, csv_path, log_path, digest_path="", digest=None):
         "真因仮説+コード修正提案を必ずレポートに書け**(=PDCA の Act)。\n"
         "【制約・厳守】プログラムのコード修正と git commit はするな(『修正が修正を生む』防止=人間レビュー必須)。"
         "必要なコード修正は提案として列挙するだけ。本番入稿・eBay revision・その他不可逆/外向き操作もするな。\n"
+        # ★2026-07-31: 提案の行き先を作る。従来は ng_act_*.md に書くだけで **誰も読まず消えていた**
+        #   (実測: 7/30 の提案「SDBH SCG が catalog 全体未登録」は妥当だったが放置され、
+        #    翌日 Advisor が同じ問題を再発見して依頼書化していた = 二度手間)。
+        #   requests に置けば worktree ボードに載り、窓口が拾える。
+        "【★コード修正提案の行き先】提案が1件以上あるなら、レポートに書くだけでなく "
+        "`C:/dev/iMak_data/hq/requests/<YYYY-MM-DD>_act_code_proposals_<project>.md` にも同じ内容を書け"
+        "(既に同名があれば**上書きせず追記もせず skip**=重複投入回避)。1件も無いなら作るな。"
+        "冒頭に『依頼日/依頼者=CSV監査くん Act/緊急度/フェーズ=提案』を明記し、提案ごとに"
+        "**現象・実機で確認した根拠・影響件数・修正案・触るファイル**を書くこと。\n"
         f"【出力】完了後、Actレポートを {act_out} に書け"
         "(形式: ①CSV=入稿可否N件(理由) / ②UPシグナル発報済 / ③依頼N件・誤検出打消しM件・コード修正提案K件 / "
         "digest各項目の処分一覧)。"
@@ -991,7 +1000,13 @@ def _detached_spawn(argv, stdout_path=None):
         "argv=json.loads(sys.argv[1]); logp=sys.argv[2] or None\n"
         "out=open(logp,'w',encoding='utf-8') if logp else subprocess.DEVNULL\n"
         "subprocess.Popen(argv,stdout=out,stderr=subprocess.STDOUT,"
-        "creationflags=0x00000008|0x00000200)\n"   # DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
+        # ★2026-07-31: DETACHED_PROCESS(0x08) をやめ CREATE_NO_WINDOW(0x08000000) に。
+        #   DETACHED はコンソールを継承しないだけで、コンソールアプリ(claude.exe)には
+        #   Windows が **新しいコンソールを割り当てる** → 監査終了ごとに CMD がちらつく
+        #   (ユーザー報告 2026-07-31)。NO_WINDOW ならウィンドウ自体が作られない。
+        #   tree-kill 耐性は「中継が即終了して孤児化する」ことで担保しており DETACHED に
+        #   依存していない。実験で両 flags とも中継終了後に子が生存することを確認済。
+        "creationflags=0x00000200|0x08000000)\n"   # CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW
     )
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     subprocess.Popen([sys.executable, "-c", launcher, json.dumps(payload), stdout_path or ""],
