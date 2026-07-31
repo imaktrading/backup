@@ -1541,6 +1541,8 @@ class HomePanel:
         tree.tag_configure("ok", background="#e8f0ff", foreground="#003366")
         tree.tag_configure("warn", background="#fff4c4", foreground="#806600")
         tree.tag_configure("ng", background="#ffd4d4", foreground="#800000")
+        tree.tag_configure("hdr", background="#e0e0e0", foreground="#000000",
+                           font=("", 10, "bold"))
         tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.sch_tree = tree
         threading.Thread(target=self._refresh_schedules, daemon=True).start()
@@ -1576,8 +1578,23 @@ class HomePanel:
                 return (f"{int(m.group(1)):02d}/{int(m.group(2)):02d} "
                         f"{int(m.group(3)):02d}:{m.group(4)}") if m else "—"
 
+            # ★担当者ごとにまとめて並べる (2026-07-31 要望)。
+            #   担当内は 名前順。担当の並びは「毎日動く順」= 業務の流れに合わせて固定。
+            ORDER = ["抽出くん", "監視くん", "リバイスくん", "カタログ", "出品くん"]
+
+            def _key(item):
+                who = self._SCH_DESC.get(item[0], ("—",))[0]
+                return (ORDER.index(who) if who in ORDER else len(ORDER), who, item[0])
+
             rows, ng, warn = [], 0, 0
-            for i, (name, (last, res, nxt, state)) in enumerate(sorted(seen.items()), 1):
+            prev_who = None
+            i = 0
+            for name, (last, res, nxt, state) in sorted(seen.items(), key=_key):
+                who, tgt, desc = self._SCH_DESC.get(name, ("—", "—", "—"))
+                if who != prev_who:                       # 担当の切れ目に見出し行
+                    rows.append(("hdr", ("", "", f"◆ {who}", "", "", "", "", "")))
+                    prev_who = who
+                i += 1
                 if state in ("無効", "Disabled"):
                     sig, tag = "🟡 無効", "warn"
                     warn += 1
@@ -1586,7 +1603,6 @@ class HomePanel:
                 else:
                     sig, tag = "🔴 失敗", "ng"
                     ng += 1
-                who, tgt, desc = self._SCH_DESC.get(name, ("—", "—", "—"))
                 rows.append((tag, (i, sig, who, tgt, desc, _hm(last), res, _hm(nxt))))
             head = (f"全 {len(seen)} 件   🔵 {len(seen) - ng - warn}   "
                     f"🟡 {warn}   🔴 {ng}" + ("   ← 要対応" if ng else ""))
