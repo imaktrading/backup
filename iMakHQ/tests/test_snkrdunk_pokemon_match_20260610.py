@@ -89,9 +89,20 @@ def test_key_card_number_derivation():
     assert gate._key_card_number("") is None
 
 
-def test_resource_card_number_prefers_title_then_key():
-    # OnePiece: title に番号 → title 由来
+def test_resource_card_number_prefers_key_then_title():
+    """★2026-08-01 優先順を逆転: KEY(catalog SSOT) 優先 / title は fallback。
+
+    旧実装は title 優先だった。実測 itemID 358604221709 で
+    eBayタイトル `#EB01-006`(SR) vs KEY `ST01-006_p1`(C) が食い違い、
+    PSA ラベル(25TH ANNIVERSARY PREMIUM CARD COLLECTION)から **KEY が正**と確定。
+    title 優先のままだと **別カード(SR)の供給を探して買ってしまう**。
+    """
+    # 一致していれば当然その番号
     assert gate._resource_card_number("Luffy OP11-106 PSA10", "OP11-106_p1") == "OP11-106"
+    # ★食い違ったら KEY を採る (旧実装は title の EB01-006 を返していた)
+    assert gate._resource_card_number("Chopper EB01-006 PSA10", "ST01-006_p1") == "ST01-006"
+    # KEY から取れない (url-key) → title 由来へ fallback
+    assert gate._resource_card_number("Luffy OP11-106 PSA10", "item:999") == "OP11-106"
     # Pokemon: title 日本語(番号無) → KEY 由来
     assert gate._resource_card_number("ポケモンカード ピカチュウ PSA10", "SV-P-291") == "SV-P-291"
     # 番号源が無い → None (fail-closed)

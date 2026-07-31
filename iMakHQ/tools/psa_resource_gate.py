@@ -51,9 +51,29 @@ def _key_card_number(key):
     return base if re.search(r"\d", base) else None
 
 
-def _resource_card_number(title, key):
-    """SNKRDUNK 突合用 card番号: title 由来(OP/ST/EB/P)優先、無ければ canonical KEY 由来。"""
-    return _card_number(title) or _key_card_number(key)
+def _resource_card_number(title, key, item_id=""):
+    """突合用 card番号。**canonical KEY(catalog SSOT) を優先**し、無ければ title 由来。
+
+    ★2026-08-01 優先順を逆転 (旧: title 優先 / 新: KEY 優先)。
+
+    理由 (実測で誤仕入れ手前まで来ていた):
+        itemID 358604221709 の eBay タイトルは `#EB01-006 Tony Chopper` だが、
+        KEY は `ST01-006_p1`。PSA のラベルは
+        `Brand=ONE PIECE JAPANESE 25TH ANNIVERSARY PREMIUM CARD COLLECTION / CardNumber=006`
+        で **KEY が正**。EB01-006 は別セット(EXTRA BOOSTER)の **rarity SR** で、
+        ST01-006_p1 は 25周年プレミアムカードコレクションの **rarity C** = 別物。
+        title 優先のままだと **SR の供給を探して買ってしまう** (= 別カードを送る / 赤字)。
+
+    KEY は catalog 解決済の SSOT ([[catalog_ssot_principle]])。タイトルは自由文で、
+    出品時の生成ミスや表記ゆれが入りうるので、同定の一次ソースにしない。
+    食い違いは黙って直さず警告する (タイトル側の誤りを検出する唯一の口になる)。
+    """
+    ck = _key_card_number(key) or ""
+    ct = _card_number(title) or ""
+    if ck and ct and ck.upper() != ct.upper():
+        print(f"  ⚠️ 番号不一致: eBayタイトル='{ct}' / KEY='{ck}' → **KEY を採用** "
+              f"(itemID={item_id or '?'} / タイトル側が誤りの疑い = 要 revise 確認)", flush=True)
+    return ck or ct or None      # 番号源が無ければ None (fail-closed。従来の戻り値規約を維持)
 
 
 def _min_price(prices):
@@ -311,7 +331,8 @@ def _backfill_snkr_card_image(cached, row, mp, sp):
             updated["psa10_listings"] = fresh_ls
     # card_image(thumbnail)欠落時のみ search で補完(これは card番号→variant の再 resolve が必要)。
     if not cached.get("card_image"):
-        cn = _resource_card_number(row.get("title", "") or "", row.get("key"))
+        cn = _resource_card_number(row.get("title", "") or "", row.get("key"),
+                                   row.get("itemID") or "")
         if cn:
             vh = None
             k = row.get("key")
@@ -498,7 +519,7 @@ def main():
             psa_img = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(cert_map.get(iid) if iid else None)
             # ② 候補: その card番号の catalog 変種(ユーザーが正しい変種を選ぶ)。
             # 題名から取れない△variant等は「PSA番号補完」(Catalog確定のbase番号)で補う → ②候補が出る。
-            card_no = _resource_card_number(r.get("title", "") or "", r.get("key")) or cardno_override.get(iid, "")
+            card_no = _resource_card_number(r.get("title", "") or "", r.get("key"), iid) or cardno_override.get(iid, "")
             # title_hint = eBayタイトル。Pokemon等 コレクター番号(NNN/095)fallback時に
             # 同番号の複数セットからキャラ名でユーザー特定を助ける(2026-07-24)。
             # ★2026-07-29: KEY のカテゴリで絞る。番号体系は作品を跨いで衝突するため
@@ -644,7 +665,8 @@ def main():
         if c and "snkrdunk" in c:
             snkr_res[i] = _backfill_snkr_card_image(c["snkrdunk"], r, mp, sp)
             continue
-        cn = _resource_card_number(r.get("title", "") or "", r.get("key"))
+        cn = _resource_card_number(r.get("title", "") or "", r.get("key"),
+                                   r.get("itemID") or "")
         if not cn:
             snkr_res[i] = None
             print(f"  [{i+1}/{len(rows)}] (card番号抽出不可) skip", flush=True)
