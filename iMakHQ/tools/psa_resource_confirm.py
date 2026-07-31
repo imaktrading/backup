@@ -416,7 +416,10 @@ function go(){
   var msg=[];
   if(diffs.length) msg.push('違う(別商品)が'+diffs.length+'件 — 検索の精度事故=即対応対象です。');
   if(unset) msg.push('理由未選択が'+unset+'件 — 見送りとして記録します。別商品なら「違う」を押してください。');
-  if(msg.length && !confirm(msg.join('\n')+'\n\n確定しますか?')) return;
+  /* ★2026-08-01: ここは Python の**非 raw** 文字列なので \n と書くと本物の改行が埋まり、
+     JS の文字列リテラルが行途中で切れて SyntaxError → この script ブロックの関数が
+     **全部未定義**になる (zoom/upd/setAll/setRsn/go/imgFail が丸ごと死ぬ)。必ず \\n と書く。 */
+  if(msg.length && !confirm(msg.join('\\n')+'\\n\\n確定しますか?')) return;
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({confirmed:conf, diffs:diffs, skip:skip})}).then(function(){
     document.getElementById('main').style.display='none';
