@@ -3200,7 +3200,14 @@ def main():
             print(f"  - [{category}] {model}")
         print(f"\n通知ファイル: {notify_path}")
 
-    input("\nEnterで終了...")
+    # ★2026-07-31: 出品くん(control_panel)からの起動は stdin が無く、ここで EOFError → returncode=1。
+    #   直前の「Catalog 未登録カード一覧」が表示されないまま落ちていた (毎走行で発生)。
+    #   対話起動 (人が直接叩いた時) だけ待つ。
+    if sys.stdin and sys.stdin.isatty():
+        try:
+            input("\nEnterで終了...")
+        except EOFError:
+            pass
 
 if __name__ == "__main__":
     main()
