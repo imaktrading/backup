@@ -536,8 +536,13 @@ document.getElementById('eucty').addEventListener('change', render);
 (function(){
   const box = document.getElementById('offerbox');
   if (!P.offers || !P.offers.length){
-    box.innerHTML = '<span style="color:#888">受信中のオファーは読み込まれていません'
-      + '（<code>python offer_calc.py --offers</code> で自動取得）</span>';
+    /* ★「0件」と「取れていない」を必ず区別する。取得失敗を 0件 と表示すると、
+       実際にはオファーが来ているのに「無い」と読んで見落とす (危険側)。 */
+    box.innerHTML = P.offersLoaded
+      ? '<span style="color:#888">受信中のオファーは <b>0 件</b>です。</span>'
+      : '<span style="color:#c60">⚠️ オファーを取得できていません'
+        + '（取得に失敗したか <code>--no-offers</code> で生成）。'
+        + '<b>0件とは限りません</b></span>';
     return;
   }
   const sel = document.getElementById('offersel');
@@ -720,9 +725,13 @@ def main() -> int:
     #   国・出品価格・仕入値を人が探す時間がそのまま判断の遅れになる。
     #   取得に失敗しても手入力版として使えるよう、例外は握って続行する。
     p["offers"] = []
+    # ★取得できたか自体を持つ。0件と「取れていない」を画面で区別するため
+    #   (取得失敗を 0件 と出すと、来ているオファーを見落とす)。
+    p["offersLoaded"] = False
     if "--no-offers" not in sys.argv:
         try:
             p["offers"] = fetch_offers()
+            p["offersLoaded"] = True
             print(f"📥 受信中オファー: {len(p['offers'])} 件")
             for o in p["offers"]:
                 print(f"   {o['sym']}{o['price']} / 出品 {o['sym']}{o['list']} / "

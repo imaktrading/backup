@@ -819,23 +819,10 @@ SCRIPTS = [
         "params": [],
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
     },
-    {
-        # オファーが来た時の判定 (2026-07-30)。利益計算タブが6つあり、選び間違えると判断を誤る。
-        # 特に US サイトは **バイヤーが米国内か国外か**でタブが変わる (関税を払うか払わないか)。
-        # 無条件に US計算 で見ると実態より悪く出て、**通せるオファーを落とす**。
-        # 数式は v9 各タブ15行をそのまま移植し、生成時に --verify でシートと突合済 (差1円未満)。
-        #
-        # ★2026-07-31: 押すだけで **受信中オファーを自動読込**するようにした。
-        #   eBay から オファー額/バイヤー国/出品価格 を、商品管理シートから 仕入値(N列) を取り、
-        #   HTML に prefill する。オファーは期限が短く (実例: 翌日23:11)、人が国と仕入値を
-        #   探す時間がそのまま判断の遅れになるため。**「何で送るか」も成約額から表示**する
-        #   (出品 €220.62 に €120 のオファー = €150 の帯をまたぐと配送手段が変わる)。
-        "category": None, "type": "utility",
-        "label": "💰 オファー判定(自動読込)",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "offer_calc.py"],
-        "params": [],
-    },
+    # ★2026-07-31: 「💰 オファー判定(自動読込)」はここから撤去。
+    #   トップの nav に **青字「💰 オファー対応」**ボタンを新設し、そちらへ集約した
+    #   (同じ `offer_calc.py` を叩くだけの重複だった)。実装は HomePanel.open_offer_calc。
+    #   オファーは「既存メンテ」の作業ではなく、来たら即判断する独立の入口なので上段に置く。
     # ---- 補URL能動充填 (2026-07-25 Phase1)。出品が「仕入元1本切れ」で死なないよう補URL(AC-AG)を厚く保つ。
     #   夜=検索(無人・8件毎cacheコミット=途中死で残る) → 昼=視覚確証で正変種だけ補URL書込 → status=件数感。
     #   RESTOCKゲートと同一 primitives・共有cache。設計: discussion/2026-07-24_psa_hoju_url_replenishment_design.md ----
@@ -1313,7 +1300,18 @@ class HomePanel:
         # 2026-06-04: 宿題ボタン撤去(open_tasks/TasksDialog は残置=戻せる)。
         #   URL入力(TCG)は仕組みのレベルアップで不要化 → URLInputDialog/open_url_input ごと削除。
         #   リスティングを 新規出品 / 既存メンテ の2ボタンに分割。
+        # ★2026-07-31: オファー対応 を 既存メンテ と 更新 の間に追加 (青字)。
+        #   side="right" は **pack した順に右から左へ**並ぶので、
+        #   見た目を 新規出品 → 既存メンテ → オファー対応 → 更新 にするには
+        #   この逆順 (更新 → オファー対応 → 既存メンテ → 新規出品) で pack する。
+        try:
+            ttk.Style().configure("Offer.TButton", foreground="#0066cc")
+        except Exception:                                     # noqa: BLE001
+            pass
         ttk.Button(nav, text="🔄 更新", command=self.refresh_dashboard).pack(side="right", padx=2)
+        self.offer_btn = ttk.Button(nav, text="💰 オファー対応", style="Offer.TButton",
+                                    command=self.open_offer_calc)
+        self.offer_btn.pack(side="right", padx=2)
         ttk.Button(nav, text="🔧 既存メンテ", command=lambda: self.open_listing("maint")).pack(side="right", padx=2)
         ttk.Button(nav, text="🆕 新規出品", command=lambda: self.open_listing("new")).pack(side="right", padx=2)
 
@@ -1458,6 +1456,46 @@ class HomePanel:
 
     def open_tasks(self):
         TasksDialog(self.root)
+
+    def open_offer_calc(self):
+        """オファー判定 HTML を生成してブラウザで開く (2026-07-31)。
+
+        受信中の Best Offer を eBay から読み、**国・出品価格・仕入値**まで自動で埋める。
+        オファーは期限が短い (実例: 受信から丸1日) ので、人が探す時間がそのまま判断の遅れになる。
+        生成 → ブラウザ表示まで offer_calc.py 側でやるので、ここは起動するだけ。
+        """
+        import threading
+
+        # ★HomePanel には status_var が無い (別クラスのもの)。
+        #   進捗はボタン文言で出し、失敗時だけ messagebox で知らせる。
+        btn = getattr(self, "offer_btn", None)
+
+        def _label(text):
+            if btn is not None:
+                try:
+                    self.root.after(0, lambda: btn.config(text=text))
+                except Exception:                             # noqa: BLE001
+                    pass
+
+        def _run():
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "tools", "offer_calc.py")
+            env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+            _label("💰 取得中…")
+            try:
+                r = subprocess.run([sys.executable, "-X", "utf8", script],
+                                   cwd=os.path.dirname(script), env=env,
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", timeout=900)
+                if r.returncode != 0:
+                    raise RuntimeError((r.stdout or r.stderr or "")[-300:])
+            except Exception as e:                            # noqa: BLE001
+                self.root.after(0, lambda: messagebox.showerror(
+                    "オファー判定", f"起動に失敗しました:\n{e}"))
+            finally:
+                _label("💰 オファー対応")
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def open_listing(self, mode="new"):
         """新規出品 / 既存メンテ を別ウィンドウで開く（既にあれば前面表示）。"""
