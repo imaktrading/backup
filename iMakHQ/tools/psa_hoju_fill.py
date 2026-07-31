@@ -146,6 +146,33 @@ def build_search_query(target, mp):
     'PSA10 <name_jp> <card_no>' で再構成。snkrdunk も同じ card_no を使う。純ロジック(mp はDB引き用)。
     """
     q = mp.build_card_query(target.get("title", ""), "", target.get("key") or None)
+    # ★2026-08-01 KEY 優先 (catalog SSOT)。
+    #   build_card_query は **タイトルから抜いた番号**を第一優先にする。ところがこの title は
+    #   **仕入元(メルカリ)の出品タイトルをそのまま持っている列**であって、我々が生成した値ではない
+    #   (同じ列に「カウズ Tシャツ XL」等の生の出品名が並んでいるのが証拠)。
+    #   = 他人が書いた自由文。番号を書き間違えていることがある。
+    #   実測2件: `シャーロット・プリン OP10-012` (正 ST12-012) / `フランペ OP01-008` (正 EB01-056)。
+    #   この誤番号でメルカリを検索していたため、在庫があっても0件 →「市場に無い」と誤診していた。
+    #   KEY は catalog 解決済の SSOT なので **食い違ったら KEY を採る** ([[catalog_ssot_principle]])。
+    #   ★出品者の書き間違いは直せないので「上流修正」ではなく、ここで恒久的に KEY を優先する。
+    _cn_key = _card_no_from_key(target.get("key"))
+    _cn_title = (q.get("card_no") or "").strip()
+    if _cn_key and _cn_title and _cn_key.upper() != _cn_title.upper():
+        print(f"  ⚠️ 番号不一致: 仕入元タイトル='{_cn_title}' / KEY='{_cn_key}' → **KEY を採用** "
+              f"(itemID={target.get('itemID')} / 出品者の表記ゆれ・誤記)", flush=True)
+        q["card_no"] = _cn_key
+        # ★name_jp も引き直す。build_card_query は catalog(KEY)の name_jp が空だと
+        #   **タイトル由来の誤番号**から名前を逆引きしてしまう (実測: OP10-012 → 'ドラゴン十三號'、
+        #   OP01-008 → 'キャベンディッシュ' = どちらも別カードの名前が検索語に載っていた)。
+        #   KEY の catalog レコードに name_jp があればそれ、無ければ **正しい番号**から引き直す。
+        _meta = mp.card_meta_for_key(target.get("key")) or {}
+        nj = (_meta.get("name_jp") or "").strip() or mp.name_jp_for_card(_cn_key) or ""
+        q["name_jp"] = nj
+        q["kw"] = f"PSA10 {nj} {_cn_key}" if nj else f"PSA10 {_cn_key}"
+        try:
+            q["multi_variant"] = bool(mp._is_multi_variant(_cn_key, mp.split_key(target.get("key"))[0]))
+        except Exception:
+            pass
     if not q.get("card_no"):
         cn = _card_no_from_key(target.get("key"))
         if cn:
