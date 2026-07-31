@@ -26,7 +26,26 @@ eBaymag は送料を **listing ごとに inline 焼き込み** し、ポリシ�
 
 ### 検証（実体を暴く）
 - `GetItem`（読取は legacy AuthToken でOK）で実 listing の `ShippingServiceOptions` を見る。
-  `DE_SparversandAusDemAusland €0` = leak / `DE_EconomySppedPAK €14.86` = 正。
+
+> ★2026-07-31 改訂: **「€0 = leak / €14.86 = 正」は誤り**。正否は **価格帯**で変わる。
+>
+> ```
+> 送料 = (その手段の実費 − 国際エアパケット実費) + 当方負担の関税
+> ```
+>
+> | 帯 | サービス | 送料 |
+> |---|---|---|
+> | **≤€150** | `DE_EconomySppedPAK` / `DE_IntlEconomySppedPAK` | **有料**。実送料¥2,000 のカテゴリなら 国内 €6.6 / 国際 €11.6 (レートで変動) |
+> | **>€150** | `DE_SparversandAusDemAusland` / `DE_SonstigeInternational` | **€0** (国際エアパケット。関税は買い手着払い) |
+>
+> 経緯: 同一SKU 5ミラー実測 (PSA10 Pikachu / SKU m76107330544) で
+> UK £188.35+£0 / CA C$355.36+C$0 / AU A$363.69+A$0 が本体だけで ¥40.5千に揃うのに対し、
+> DE だけ €220.62+€14.86 で **¥2,700 高い**と判明。ただし「全部 €0」も誤りで、
+> **≤€150 は SpeedPAK で送り DDPコスト(関税込)を当方が負担する**ため、その差額は徴収する。
+> 全帯 €0 にすると ≤€150 が全額持ち出しになる。
+>
+> **帯 (と ≤€150 ではカテゴリ別実送料) を見ないと正否は判定できない。**
+> 判定と修正は `de_mirror_fedex_removal.py` (帯・カテゴリを持つ) で行うこと。
 
 ### 一括特定
 - `GetMyeBaySelling`（ActiveList, 全ページ）で active 全件走査。各 Item は **`CurrentPrice currencyID`（通貨=マーケット判定）** と **`ShippingServiceCost`（送料）** を inline で返す。

@@ -154,5 +154,8 @@ PDF を直接見て確認すること(text 抽出だけで断定しない)。
 
 ## 関連
 - `iMakeBayAPI/EBAYMAG_SHIPPING_RUNBOOK.md`(eBaymag ミラー側の送料運用)
-- `iMakeBayAPI/fix_de_speedpak_shipping.py --count`(DE ミラーの無料€0 leak 監視)
+- `iMakeBayAPI/fix_de_speedpak_shipping.py --count`(DE ミラーの送料 leak 検出)
+  ★2026-07-31: 判定を反転。**「€0 = leak」ではない**。正は帯で違い、
+  **≤€150 = 有料 (実費−国際エアパケット+関税) / >€150 = €0**。自動修正はせず数えるだけ。
+  修正は帯を持つ `de_mirror_fedex_removal.py` で行う
 - メモリ: [[jp_post_eu_suspension_20260724]] / [[eu_ddp_speedpak_setup_status]] / [[ebay_ioss_number_for_eu_shipping]]

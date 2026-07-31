@@ -236,11 +236,13 @@ def fetch():
             jp_post, ioss = num(c[0][0]) or jp_post, num(c[1][0]) or ioss
     except Exception:                                          # noqa: BLE001
         pass
-    de_ship = 14.86        # DEミラーの国内(DE宛)送料。AT宛は 17.49
-    at_ship = 17.49
+    # ★2026-07-31: `deShip`/`atShip` (€14.86/€17.49 の固定額) は廃止。
+    #   送料は固定額ではなく **DDPコストと同額** (= 実費 − 想定送料 + 関税) で、
+    #   取れるかどうかは **出品価格の帯** で決まる。計算は calc_py / JS の
+    #   `(e.cost - J)` 側に一本化した。ここで値を持つと二重定義になるので置かない。
     return {"fx": fx, "promo": promo, "payo": payo, "target": target, "cats": cats,
             "country": country, "gshock": gshock,
-            "eu": eu, "deShip": de_ship, "atShip": at_ship,
+            "eu": eu,
             "jpPost": jp_post, "iossEur": ioss,
             "routes": ROUTES, "tabs": TABS,
             "url": f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit#gid="}
