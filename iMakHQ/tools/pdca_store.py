@@ -351,6 +351,50 @@ def backfill_identities(con, resolve_fn, ts="", status="pending"):
     return {"filled": filled, "checked": len(rows)}
 
 
+def parse_identity_fields(identity):
+    """identity "CARDNUMBER | カード名 | セット名 ..." → (番号, 名前) (純関数, test可)。
+
+    番号/名前が取れない形は ("", "") = 判定材料なし → 呼出側は触らない (fail-closed)。
+    """
+    parts = [p.strip() for p in str(identity or "").split("|")]
+    num = parts[0] if parts and parts[0] else ""
+    name = parts[1] if len(parts) > 1 else ""
+    return num, name
+
+
+def prune_non_applicable_specs(con, still_required_fn, ts="", status="pending"):
+    """「今の監査ルールではもう必須でない」spec 指摘を queue から落とす (status='resolved')。
+
+    2026-07-29/30 に Catalog 実機判定で「公式に存在しない」と確定した種別
+    (Gundam RESOURCE / DBSCG ENERGY MARKER / Pokemon hi-class 等) は check_csv 側で
+    必須から外したが、**それ以前に積まれた queue 行はそのまま残る**。放置すると
+    「空欄維持で確定した項目」を Catalog に依頼してしまう (2026-08-01 実在: E-60 Energy Marker
+    の C:Rarity が発行対象に載っていた)。
+
+    Args:
+        still_required_fn: (番号, 名前, target_field) -> bool。今も必須なら True。
+            例外/判定不能は True 側に倒す = 消さない (fail-closed)。
+    Returns: {"pruned": n, "checked": m}
+    """
+    rows = con.execute(
+        "SELECT queue_id, item_id, identity, target_field FROM improvement_queue"
+        " WHERE status=? AND finding_type='必須Item Specific'", (status,)).fetchall()
+    pruned = 0
+    for r in rows:
+        num, name = parse_identity_fields(r["identity"])
+        if not num and not name:
+            continue                                   # 判定材料なし → 触らない
+        try:
+            still = still_required_fn(num, name, r["target_field"])
+        except Exception:
+            still = True
+        if not still:
+            set_status(con, r["queue_id"], "resolved", ts)
+            pruned += 1
+    con.commit()
+    return {"pruned": pruned, "checked": len(rows)}
+
+
 def partition_by_identity(items):
     """Catalog へ送れる行 / 送っても着手不能な行 に分ける (純関数, test可)。
 

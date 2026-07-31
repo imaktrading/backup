@@ -77,9 +77,15 @@ def test_resolve_identity_falls_back_to_cache_for_missing_sku(tmp_path, monkeypa
 
 
 def test_resolve_identity_non_psa_sku_returns_empty(tmp_path, monkeypatch):
-    """Mercari (m....) 等の非 PSA sku は cache lookup 対象外 → 空 (経路 A の適用範囲外)。"""
+    """非 PSA sku (m....) は PSA cache 対象外。
+
+    2026-08-01 改訂: PSA cache の次に **出品CSV履歴** を見るようになったので、
+    「空になる」条件は *履歴にも無い* 場合。履歴にあれば解決するのが正しい挙動
+    (メルカリ出品の identity はここでしか取れない)。
+    """
     import csv_auditor as ca
     monkeypatch.setattr(ca, "_PSA_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(ca, "_CSV_HISTORY_IDENTITIES", {})     # 履歴 空
     assert ca._resolve_identity("m27764156929", {}) == ""
 
 

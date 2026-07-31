@@ -136,3 +136,127 @@ def test_unresolved_note_written_even_when_zero(tmp_path):
     p = tmp_path / "pdca_identity_unresolved.md"
     assert ps.write_unresolved_note([], str(p), "2026-08-01", category="gshock") == 0
     assert "未解決 0 件" in p.read_text(encoding="utf-8")
+
+
+# ----- prune_non_applicable_specs (2026-08-01 追加) -----
+
+def test_parse_identity_fields():
+    assert ps.parse_identity_fields("E-60 | Energy Marker | Manga Booster 01") == ("E-60", "Energy Marker")
+    assert ps.parse_identity_fields("RP-029") == ("RP-029", "")
+    assert ps.parse_identity_fields("") == ("", "")
+    assert ps.parse_identity_fields(None) == ("", "")
+
+
+def test_prune_retires_specs_that_are_no_longer_required(tmp_path):
+    """7/29-30 に「公式に存在しない」と確定した種別の残骸を退役させる。"""
+    con = _con(tmp_path)
+    ps.upsert_improvement(con, "tcg", "PSA10-1", "C:Rarity", identity="E-60 | Energy Marker | MB01",
+                          finding_type="必須Item Specific", source="auditor", ts="2026-08-01")
+    ps.upsert_improvement(con, "tcg", "PSA10-2", "C:Rarity", identity="101/184 | Umbreon VMAX | VMAX Climax",
+                          finding_type="必須Item Specific", source="auditor", ts="2026-08-01")
+
+    def still(num, name, field):
+        return not (name.lower() == "energy marker" or num.lower().startswith("rp-"))
+
+    assert ps.prune_non_applicable_specs(con, still, ts="2026-08-01") == {"pruned": 1, "checked": 2}
+    st = {r["item_id"]: r["status"] for r in ps.list_queue(con)}
+    assert st["PSA10-1"] == "resolved" and st["PSA10-2"] == "pending"
+
+
+def test_prune_keeps_rows_without_identity_material(tmp_path):
+    """identity が無い行は判定材料が無い = 触らない (誤退役より再掲の方が安全)。"""
+    con = _con(tmp_path)
+    ps.upsert_improvement(con, "tcg", "m99999999999", "C:Rarity",
+                          finding_type="必須Item Specific", source="auditor", ts="2026-08-01")
+    assert ps.prune_non_applicable_specs(con, lambda *a: False, ts="2026-08-01")["pruned"] == 0
+
+
+def test_prune_keeps_rows_when_rule_raises(tmp_path):
+    con = _con(tmp_path)
+    ps.upsert_improvement(con, "tcg", "PSA10-3", "C:Rarity", identity="E-60 | Energy Marker",
+                          finding_type="必須Item Specific", source="auditor", ts="2026-08-01")
+
+    def boom(*_a):
+        raise RuntimeError("check_csv import 不能")
+
+    assert ps.prune_non_applicable_specs(con, boom, ts="2026-08-01")["pruned"] == 0
+
+
+def test_prune_ignores_non_required_spec_findings(tmp_path):
+    """catalog_gap 等 (必須spec以外) は対象外。"""
+    con = _con(tmp_path)
+    ps.upsert_improvement(con, "tcg", "PSA10-4", "catalog_request", identity="E-60 | Energy Marker",
+                          finding_type="catalog_gap", source="auditor", ts="2026-08-01")
+    assert ps.prune_non_applicable_specs(con, lambda *a: False, ts="2026-08-01")["checked"] == 0
+
+
+def test_still_required_spec_uses_check_csv_ssot():
+    """判定は check_csv (SSOT) 側。ここに除外表を複製していないことの確認。"""
+    import csv_auditor as ca
+    assert not ca._still_required_spec("E-60", "Energy Marker", "C:Rarity")
+    assert not ca._still_required_spec("RP-029", "Resource", "C:Rarity")
+    assert ca._still_required_spec("101/184", "Umbreon VMAX", "C:Rarity")
+    assert ca._still_required_spec("101/184", "Umbreon VMAX", "program_fix")   # 必須リスト外
+
+
+# ----- 出品CSV 履歴からの identity 復元 (2026-08-01: メルカリ出品の唯一の手掛かり) -----
+
+def _write_csv(path, rows):
+    import csv as _c
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = _c.writer(f)
+        w.writerow(["CustomLabel", "C:Card Number", "C:Card Name", "C:Set"])
+        for r in rows:
+            w.writerow(r)
+
+
+def test_csv_history_resolves_mercari_listing_id(tmp_path, monkeypatch):
+    import csv_auditor as ca
+    _write_csv(tmp_path / "tcg_upload_1.csv",
+               [["m63215518361", "045/093", "Mewtwo-EX", "Black & White Ex Battle Boost"]])
+    monkeypatch.setattr(ca, "_CSV_HISTORY_IDENTITIES", None)
+    idx = ca._load_csv_history_identities(str(tmp_path))
+    monkeypatch.setattr(ca, "_CSV_HISTORY_IDENTITIES", idx)
+    got = ca._identity_from_csv_history("m63215518361")
+    assert "045/093" in got and "Mewtwo-EX" in got
+
+
+def test_csv_history_prefers_newest_file(tmp_path, monkeypatch):
+    """同じ出品IDが複数CSVにあるなら新しい方 (= 最新の catalog 値)。"""
+    import os as _os
+    import csv_auditor as ca
+    old, new = tmp_path / "a.csv", tmp_path / "b.csv"
+    _write_csv(old, [["m1111", "OLD-1", "旧名", "旧セット"]])
+    _write_csv(new, [["m1111", "NEW-1", "新名", "新セット"]])
+    _os.utime(old, (1000, 1000))
+    _os.utime(new, (2000, 2000))
+    monkeypatch.setattr(ca, "_CSV_HISTORY_IDENTITIES", None)
+    assert "NEW-1" in ca._load_csv_history_identities(str(tmp_path))["m1111"]
+
+
+def test_csv_history_skips_broken_files(tmp_path, monkeypatch):
+    """壊れた/列違いの CSV 1本で全体を落とさない。"""
+    import csv_auditor as ca
+    (tmp_path / "broken.csv").write_text("これは,CSVでは,ない", encoding="utf-8")
+    _write_csv(tmp_path / "ok.csv", [["m2222", "OP01-013", "Sanji", ""]])
+    monkeypatch.setattr(ca, "_CSV_HISTORY_IDENTITIES", None)
+    assert "OP01-013" in ca._load_csv_history_identities(str(tmp_path))["m2222"]
+
+
+def test_csv_history_returns_empty_for_unknown_sku(tmp_path, monkeypatch):
+    import csv_auditor as ca
+    _write_csv(tmp_path / "ok.csv", [["m3333", "OP01-013", "Sanji", ""]])
+    monkeypatch.setattr(ca, "_CSV_HISTORY_IDENTITIES", None)
+    idx = ca._load_csv_history_identities(str(tmp_path))
+    monkeypatch.setattr(ca, "_CSV_HISTORY_IDENTITIES", idx)
+    assert ca._identity_from_csv_history("m9999") == ""
+
+
+def test_resolve_identity_order_is_by_sku_then_psa_then_csv(tmp_path, monkeypatch):
+    """優先順: CSV行の値 > PSA cache > 出品CSV履歴 (精度の高い順)。"""
+    import csv_auditor as ca
+    monkeypatch.setattr(ca, "_PSA_CACHE_DIR", str(tmp_path / "no_psa"))
+    monkeypatch.setattr(ca, "_CSV_HISTORY_IDENTITIES", {"PSA10-9": "履歴値", "m4444": "履歴値"})
+    assert ca._resolve_identity("PSA10-9", {"PSA10-9": "行の値"}) == "行の値"
+    assert ca._resolve_identity("PSA10-9", None) == "履歴値"      # PSA cache 無 → 履歴
+    assert ca._resolve_identity("m4444", None) == "履歴値"

@@ -1112,6 +1112,75 @@ def _identity_from_psa_cache(cert: str) -> str:
     return " | ".join(parts)[:120]
 
 
+_CSV_HISTORY_IDENTITIES = None      # {sku: identity} 遅延構築 (プロセス内 1 回)
+
+
+def _load_csv_history_identities(csv_dir=None):
+    """過去に生成した出品CSV から {CustomLabel: identity} を作る (新しい順、初出優先)。
+
+    identity の材料 (カード番号/名/セット) は **その行を作った時に catalog から引いた事実**
+    なので、CSV が残っていれば後からでも復元できる。PSA cache に無いメルカリ出品
+    (m*) はこれが唯一の手掛かり (2026-08-01: 保留 4 件がすべてここで解決できた)。
+    推測は一切しない = CSV に載っている値だけを組む (card_identity と同じ規則)。
+    """
+    global _CSV_HISTORY_IDENTITIES
+    if _CSV_HISTORY_IDENTITIES is not None:
+        return _CSV_HISTORY_IDENTITIES
+    out = {}
+    d = csv_dir or os.path.join(WORKSPACE, "iMakHQ", "csv_output")
+    try:
+        files = sorted(glob.glob(os.path.join(d, "*.csv")), key=os.path.getmtime, reverse=True)
+    except Exception:
+        files = []
+    for path in files:
+        try:
+            with open(path, encoding="utf-8", errors="replace", newline="") as f:
+                r = _csv.reader(f)
+                headers = next(r)
+                hm = {h: i for i, h in enumerate(headers)}
+                ci = hm.get("CustomLabel", hm.get("*CustomLabel"))
+                if ci is None:
+                    continue
+                for row in r:
+                    if ci >= len(row):
+                        continue
+                    sku = str(row[ci]).strip()
+                    if not sku or sku in out:
+                        continue          # 新しい CSV の値を優先 (初出勝ち)
+                    ident = card_identity(headers, row)
+                    if ident:
+                        out[sku] = ident
+        except Exception:
+            continue                      # 壊れた CSV 1 本で全体を落とさない
+    _CSV_HISTORY_IDENTITIES = out
+    return out
+
+
+def _identity_from_csv_history(sku: str) -> str:
+    return _load_csv_history_identities().get((sku or "").strip(), "")
+
+
+def _still_required_spec(card_number: str, card_name: str, field: str) -> bool:
+    """その spec が **今の監査ルール** でもまだ必須か (queue の退役判定用)。
+
+    SSOT は check_csv.required_specifics_for_card (DON!!/RESOURCE/ENERGY MARKER/
+    Pokemon hi-class 等の「公式に存在しない」除外を持つ側)。ここに判定を複製しない。
+    identity の 2 番目 (カード名) を card_type として渡す: 非該当種別は name がそのまま
+    種別名 ('Resource' / 'Energy Marker')。通常カードの名前は除外集合に無いので誤退役しない。
+    import 不能・field が必須リスト管理外なら True (= 消さない、fail-closed)。
+    """
+    if not str(field or "").startswith("C:"):
+        return True
+    try:
+        sys.path.insert(0, os.path.join(WORKSPACE, "iMakTCG"))
+        from check_csv import REQUIRED_SPECIFICS, required_specifics_for_card
+    except Exception:
+        return True
+    if field not in REQUIRED_SPECIFICS:
+        return True                       # そもそも必須リスト外 = ここで判定しない
+    return field in required_specifics_for_card(card_number, card_name)
+
+
 def _resolve_identity(sku: str, identity_by_sku: dict | None) -> str:
     """identity_by_sku の値を優先し、空なら PSA cache fallback (純関数寄り)。
 
@@ -1124,8 +1193,11 @@ def _resolve_identity(sku: str, identity_by_sku: dict | None) -> str:
         return ident
     s = (sku or "")
     if s.startswith("PSA10-"):
-        return _identity_from_psa_cache(s[len("PSA10-"):])
-    return ""
+        ident = _identity_from_psa_cache(s[len("PSA10-"):])
+        if ident:
+            return ident
+    # 最後の砦: 過去の出品CSV (m* のメルカリ出品はここでしか解決できない)
+    return _identity_from_csv_history(s)
 
 
 def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku=None):
@@ -1182,6 +1254,12 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
                 con, lambda iid: _resolve_identity(iid, identity_by_sku), ts=ts)["filled"]
         except Exception as _be:
             print(f"  ⚠️ PDCA identity backfill skip: {type(_be).__name__}: {_be}")
+        # 「今のルールではもう必須でない」spec 指摘の退役 (7/29-30 の除外確定より前の残骸)。
+        nonapp = 0
+        try:
+            nonapp = _pdca.prune_non_applicable_specs(con, _still_required_spec, ts=ts)["pruned"]
+        except Exception as _ne:
+            print(f"  ⚠️ 非該当spec prune skip: {type(_ne).__name__}: {_ne}")
         held = []
         emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts, held_out=held)
         con.commit()
@@ -1191,9 +1269,10 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
             _pdca.write_unresolved_note(held, UNRESOLVED_IDENTITY_PATH, ts, category=project)
         except Exception as _we:
             print(f"  ⚠️ 未解決リスト書込 skip: {type(_we).__name__}: {_we}")
-        if emitted or synced or pruned or staled or filled:
+        if emitted or synced or pruned or staled or filled or nonapp:
             print(f"  📊 PDCA: 集約発行 {emitted} 件 / 完了同期 {synced} 件 / "
-                  f"解決済prune {pruned} 件 / 長期stale退役 {staled} 件 / identity後埋め {filled} 件 (dedup済)")
+                  f"解決済prune {pruned} 件 / 長期stale退役 {staled} 件 / identity後埋め {filled} 件 / "
+                  f"非該当spec退役 {nonapp} 件 (dedup済)")
         if held:
             print(f"  ⚠️ identity 未解決につき Catalog へ送らず保留 {len(held)} 件 "
                   f"(要対応・全件: {UNRESOLVED_IDENTITY_PATH})")
