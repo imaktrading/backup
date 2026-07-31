@@ -114,6 +114,36 @@ def costs_for(band, ship_jpy, rate):
     return economy_costs(ship_jpy, rate)
 
 
+def _money(v):
+    """'14.86' / 14.86 / None を比較可能な小数2桁文字列に (純関数)。None は ''。"""
+    if v in (None, ''):
+        return ''
+    try:
+        return f'{float(v):.2f}'
+    except (TypeError, ValueError):
+        return str(v)
+
+
+FX_TOLERANCE_EUR = 0.20      # 為替ドリフト許容 (€0.20 ≈ ¥37)
+
+
+def _cost_matches(actual, expected):
+    """実料金が期待どおりか (純関数)。
+
+    ★為替は毎回 live で引くので、書込時と照合時で期待値が数セント動く。厳密一致にすると
+    正しく反映済でも「不一致」になる (実測: €6.61 書込 → 照合時 €6.64 で false negative)。
+    - **無料(0) と有料の取り違えは許さない** … 帯を間違えた = 定義違反なので厳格に見る
+    - 有料どうしは ±FX_TOLERANCE_EUR まで許容
+    """
+    a, e = _money(actual), _money(expected)
+    if e == '' or a == '':
+        return a == e
+    fa, fe = float(a), float(e)
+    if fe == 0.0 or fa == 0.0:
+        return fa == fe
+    return abs(fa - fe) <= FX_TOLERANCE_EUR
+
+
 def ship_jpy_of(row):
     """listing の SKU/タイトルから V9 カテゴリの実送料(JPY)を決める (純関数)。
 
@@ -234,30 +264,45 @@ def cmd_plan(rows):
 
 
 def cmd_verify(rows, tok, n=None):
-    """実状態を GetItem で照合。帯ごとの期待値と一致するか数える。"""
+    """実状態を GetItem で照合。帯ごとの期待値と一致するか数える。
+
+    ★2026-07-31: **料金も照合する**。従来はサービス名/宛先しか見ておらず、料金が
+    €14.86/€17.49 のままでも「一致」と報告していた (実測でサービスだけ切替済・料金据置と判明)。
+    verify が緑なのに実態が違う = 最も避けたい検証の穴なので塞ぐ。
+    """
     sample = rows if n is None else rows[:n]
+    rate = eur_jpy()
     ok = ng = 0
     bad = []
     fedex = 0
     for i, r in enumerate(sample, 1):
-        b = BANDS[band_of(r['price'])]
+        band = band_of(r['price'])
+        b = BANDS[band]
+        exp_d, exp_i = costs_for(band, ship_jpy_of(r), rate)
         cur = read_shipping(r['id'], tok)
         dsvc = cur['dom'][0]['svc'] if cur['dom'] else None
         isvc = cur['intl'][0]['svc'] if cur['intl'] else None
         iloc = cur['intl'][0]['loc'] if cur['intl'] else []
+        dcost = cur['dom'][0].get('cost') if cur['dom'] else None
+        icost = cur['intl'][0].get('cost') if cur['intl'] else None
         if isvc == 'DE_IntlExpeditedSppedPAK':
             fedex += 1
-        if dsvc == b['dom'] and isvc == b['intl'] and iloc == ['AT']:
+        svc_ok = (dsvc == b['dom'] and isvc == b['intl'] and iloc == ['AT'])
+        cost_ok = _cost_matches(dcost, exp_d) and _cost_matches(icost, exp_i)
+        if svc_ok and cost_ok:
             ok += 1
         else:
             ng += 1
-            bad.append({'id': r['id'], 'price': r['price'], 'dom': dsvc, 'intl': isvc, 'loc': iloc})
+            bad.append({'id': r['id'], 'price': r['price'], 'dom': dsvc, 'intl': isvc,
+                        'loc': iloc, 'cost': f'{dcost}/{icost}', 'exp': f'{exp_d}/{exp_i}',
+                        'why': ('svc' if not svc_ok else '') + ('cost' if not cost_ok else '')})
         if i % 25 == 0 or i == len(sample):
             print(f'  verify {i}/{len(sample)}  一致={ok} 不一致={ng} FedEx残={fedex}', flush=True)
     if bad:
         print(f'\n不一致 {len(bad)}件 (先頭10):')
         for b in bad[:10]:
-            print(f'  {b["id"]} €{b["price"]}  dom={b["dom"]} intl={b["intl"]} loc={b["loc"]}')
+            print(f'  {b["id"]} €{b["price"]} [{b["why"]}] dom={b["dom"]} intl={b["intl"]} '
+                  f'loc={b["loc"]} 料金 {b["cost"]} (期待 {b["exp"]})')
     print(f'\nVERIFY: 一致={ok} 不一致={ng} FedEx残={fedex} / {len(sample)}件')
     return ng == 0 and fedex == 0
 
@@ -362,6 +407,15 @@ def main():
     rows = enumerate_eur(tok)
     rows.sort(key=lambda r: r['id'])
     lo, hi = cmd_plan(rows)
+
+    # ★2026-07-31: 帯を指定して試験できるようにする。--limit だけだと先頭から取るため、
+    #   >€150 (€0) ばかり当たって **有料側 (≤€150) を実証できない**。
+    if '--band' in args:
+        want = args[args.index('--band') + 1]
+        if want not in BANDS:
+            print(f'--band は {list(BANDS)} のいずれか'); return
+        rows = [r for r in rows if band_of(r['price']) == want]
+        print(f'\n★--band {want} で絞込: {len(rows)}件')
 
     if '--verify' in args:
         cmd_verify(rows if limit is None else rows[:limit], tok)
