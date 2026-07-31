@@ -102,11 +102,16 @@ _SHARED_PATHS = [os.path.join(WORKSPACE, "iMakeBayAPI")]
 # missing_models.csv / pdca improvement_queue はプロジェクト横断のグローバル台帳のため、gshock 監査に
 # TCG由来(dragonball_scg 等)の recurring が混入していた(2026-07-25 ITAJAGA 誤検出)。監査対象プロジェクトの
 # category に属さない recurring を digest から除外する。※未知(下表に無い)category は「残す」= 誤って隠さない。
+# ★2026-08-01: **project名そのもの** も自分の category として持たせる。
+#   pdca improvement_queue には subcategory (pokemon_tcg 等) だけでなく **project名のまま**
+#   (`category='tcg'`) 積まれた行が実在する (実測: pending 16件)。owner_map に "tcg" key が
+#   無いと `owner=None` → fail-safe で残る → **gshock/ichibankuji/mercari の digest に全部混入**。
+#   seen_count>=2 に達した分から順に表面化するので、放置すると毎日 digest が汚れ続ける。
 PROJECT_CATALOG_CATEGORIES = {
-    "tcg": {"one_piece_tcg", "pokemon_tcg", "dragonball_scg", "gundam_tcg"},
+    "tcg": {"tcg", "one_piece_tcg", "pokemon_tcg", "dragonball_scg", "gundam_tcg"},
     "gshock": {"gshock"},
     "ichibankuji": {"ichibankuji"},
-    "mercari": {"uniqlo", "montbell", "porter", "gu"},
+    "mercari": {"mercari", "uniqlo", "montbell", "porter", "gu"},
 }
 
 

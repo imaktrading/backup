@@ -50,3 +50,22 @@ def test_recurring_unknown_category_kept_not_hidden():
     # 未知 category / 空 は隠さない(fail-safe: silent drop しない)
     rec = [{"category": "unknown_cat", "item_id": "x"}, {"category": "", "item_id": "y"}]
     assert len(filter_recurring_for_project(rec, "gshock")) == 2
+
+
+def test_recurring_project_name_as_category_is_scoped():
+    """★2026-08-01: pdca には **project名のまま** の category('tcg'/'mercari')が積まれている。
+
+    owner_map に project名 key が無いと `owner=None` → fail-safe で残り、
+    **gshock/ichibankuji/mercari の digest に TCG 案件が全部混入**していた
+    (実測: `category='tcg' AND status='pending'` が 16件。うち seen_count>=2 の1件が leak 中)。
+    未知 category を残す fail-safe は正しいが、**既知の project名を未知扱いにしてはいけない**。
+    """
+    rec = [{"category": "tcg", "item_id": "certTCG"},
+           {"category": "mercari", "item_id": "certMER"},
+           {"category": "gshock", "item_id": "certGS"}]
+    # gshock 監査: project名 category の tcg / mercari は落とす
+    assert [r["item_id"] for r in filter_recurring_for_project(rec, "gshock")] == ["certGS"]
+    # tcg 監査: category='tcg' は自分のものなので残す (取りこぼさない)
+    assert [r["item_id"] for r in filter_recurring_for_project(rec, "tcg")] == ["certTCG"]
+    # mercari 監査: category='mercari' は自分のもの
+    assert [r["item_id"] for r in filter_recurring_for_project(rec, "mercari")] == ["certMER"]
