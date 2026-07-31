@@ -1327,6 +1327,17 @@ class HomePanel:
                   foreground="#333333", justify="left").pack(anchor="w")
         self._update_clocks()
 
+        # === 担当者の稼働状況 (2026-07-31) ===
+        #   worktree_board.py は前から在ったが **CLI にしか出ておらず、誰も見ていなかった**。
+        #   実際に「監視くんの依頼が6日前から相手ボールのまま」「ルーティング待ちが8時間放置」
+        #   が起きていた。トップに常設して、放置が目に入るようにする。
+        wt_frame = ttk.LabelFrame(root, text="👷 担当者の稼働状況", padding=6)
+        wt_frame.pack(fill="x", padx=10, pady=(0, 6))
+        self.wt_var = tk.StringVar(value="読込中…")
+        ttk.Label(wt_frame, textvariable=self.wt_var, font=("Consolas", 9),
+                  justify="left", foreground="#222222").pack(anchor="w")
+        threading.Thread(target=self._refresh_worktree_board, daemon=True).start()
+
         # === 進捗テーブル (総合 / 今月 を横並び・各半幅) ===  推奨アクション枠は撤去
         prog_row = ttk.Frame(root)
         prog_row.pack(fill="x", padx=10, pady=(6, 8))
@@ -1457,6 +1468,53 @@ class HomePanel:
     def open_tasks(self):
         TasksDialog(self.root)
 
+    def _refresh_worktree_board(self):
+        """`worktree_board.py` の集計を 1 行/担当 に畳んでトップに出す (2026-07-31)。
+
+        全文はボタンから開ける CLI があるので、ここは **放置が目に入る**ことだけを狙う。
+        赤 = 自分(窓口)が返す / ⏳ = 相手待ち / 🟡 = headless下書きのレビュー待ち。
+        """
+        import re
+        import subprocess
+
+        try:
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "tools", "worktree_board.py")
+            r = subprocess.run([sys.executable, "-X", "utf8", script],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=120,
+                               env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+            lines, route = [], 0
+            for ln in (r.stdout or "").splitlines():
+                s = ln.strip()
+                # ★🔀 行を先に判定する。この行も " — " を含むので、
+                #   一般の「## 名前 — 本文」パターンに先に食われる (2026-07-31 実測)
+                if s.startswith("## 🔀"):
+                    mm = re.search(r"(\d+)件", s)
+                    route = int(mm.group(1)) if mm else 0
+                    continue
+                m = re.match(r"^## (.+?) — (.*)$", s)
+                if m:
+                    name, body = m.group(1), m.group(2)
+                    # 「動きなし」以外で 要返球/相手待ち があれば目立たせる
+                    mark = "  "
+                    if re.search(r"自分が返す [1-9]", body):
+                        mark = "🔴"
+                    elif re.search(r"相手待ち [1-9]", body):
+                        mark = "⏳"
+                    elif re.search(r"レビュー待ち [1-9]", body):
+                        mark = "🟡"
+                    lines.append(f"{mark} {name:<12} {body}")
+            if route:
+                lines.append(f"🔀 ルーティング待ち {route}件 — 窓口が宛先を確認して投入")
+            txt = "\n".join(lines) if lines else "(集計できませんでした)"
+        except Exception as e:                                # noqa: BLE001
+            txt = f"⚠️ 取得失敗: {e}"
+        try:
+            self.root.after(0, lambda: self.wt_var.set(txt))
+        except Exception:                                     # noqa: BLE001
+            pass
+
     def open_offer_calc(self):
         """オファー判定 HTML を生成してブラウザで開く (2026-07-31)。
 
@@ -1524,6 +1582,9 @@ class HomePanel:
         self.tree.delete(*self.tree.get_children())
         self.month_tree.delete(*self.month_tree.get_children())
         threading.Thread(target=self._fetch_and_update, daemon=True).start()
+        # 担当者の稼働状況も一緒に更新 (放置を見逃さないため)
+        self.wt_var.set("読込中…")
+        threading.Thread(target=self._refresh_worktree_board, daemon=True).start()
 
     def _fetch_and_update(self):
         import time as _time
