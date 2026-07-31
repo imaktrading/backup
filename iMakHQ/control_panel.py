@@ -1338,6 +1338,17 @@ class HomePanel:
                   justify="left", foreground="#222222").pack(anchor="w")
         threading.Thread(target=self._refresh_worktree_board, daemon=True).start()
 
+        # === 定期スケジュールの実行状況 (2026-07-31) ===
+        #   18 タスク全部並べても読まないので **異常だけ出す**。正常は件数のみ。
+        #   実際に `iMak Catalog Integrity Weekly` が結果=255 で失敗し続けていたのに
+        #   誰も気づいていなかった。
+        sch_frame = ttk.LabelFrame(root, text="⏰ 定期スケジュール", padding=6)
+        sch_frame.pack(fill="x", padx=10, pady=(0, 6))
+        self.sch_var = tk.StringVar(value="読込中…")
+        ttk.Label(sch_frame, textvariable=self.sch_var, font=("Consolas", 9),
+                  justify="left", foreground="#222222").pack(anchor="w")
+        threading.Thread(target=self._refresh_schedules, daemon=True).start()
+
         # === 進捗テーブル (総合 / 今月 を横並び・各半幅) ===  推奨アクション枠は撤去
         prog_row = ttk.Frame(root)
         prog_row.pack(fill="x", padx=10, pady=(6, 8))
@@ -1467,6 +1478,68 @@ class HomePanel:
 
     def open_tasks(self):
         TasksDialog(self.root)
+
+    # schtasks の「前回の結果」で、失敗ではないもの
+    #   0          正常終了
+    #   267009     現在実行中          (0x41301)
+    #   267011     まだ一度も実行していない (0x41303)
+    #   -2147020576 既に実行中のインスタンスがある (0x800710E0)。常駐 watcher で普通に出る
+    _SCH_OK = {"0", "267009", "267011", "-2147020576"}
+
+    def _refresh_schedules(self):
+        """定期スケジュールを **全件** 一覧表示 (名前 / 前回 / 結果 / 次回)。
+
+        実際 `iMak Catalog Integrity Weekly` が結果=255 で失敗し続けていたのに
+        誰も気づいていなかった (2026-07-31)。一覧に出ていれば気づける。
+        """
+        import re
+        import subprocess
+
+        try:
+            r = subprocess.run(["schtasks", "/query", "/fo", "LIST", "/v"],
+                               capture_output=True, text=True,
+                               encoding="cp932", errors="replace", timeout=120)
+            seen = {}
+            for blk in (r.stdout or "").split("\n\n"):
+                d = {}
+                for ln in blk.splitlines():
+                    if ":" in ln:
+                        k, v = ln.split(":", 1)
+                        d[k.strip()] = v.strip()
+                name = d.get("TaskName") or d.get("タスク名") or ""
+                if not re.search(r"iMak", name, re.I):
+                    continue
+                seen[name.lstrip("\\")] = (
+                    d.get("Last Run Time") or d.get("前回の実行時刻") or "",
+                    d.get("Last Result") or d.get("前回の結果") or "",
+                    d.get("Next Run Time") or d.get("次回の実行時刻") or "",
+                    d.get("Scheduled Task State") or d.get("スケジュールされたタスクの状態") or "",
+                )
+
+            def _hm(s):                      # "2026/07/31 4:00:01" → "07/31 04:00"
+                m = re.search(r"(\d+)/(\d+)\s+(\d+):(\d+)", s or "")
+                return f"{int(m.group(1)):02d}/{int(m.group(2)):02d} {int(m.group(3)):02d}:{m.group(4)}" if m else "—"
+
+            ng = 0
+            lines = []
+            for name, (last, res, nxt, state) in sorted(seen.items()):
+                if state in ("無効", "Disabled"):
+                    mark = "⏸"
+                elif res in self._SCH_OK:
+                    mark = "✅"
+                else:
+                    mark = "❌"
+                    ng += 1
+                lines.append(f"{mark} {name:<34} 前回 {_hm(last)}  結果 {res:>12}  次回 {_hm(nxt)}")
+            head = (f"全 {len(seen)} 件 / ❌ 失敗 {ng} 件"
+                    + ("   ← 要対応" if ng else "   (すべて正常)"))
+            txt = "\n".join([head] + lines)
+        except Exception as e:                                # noqa: BLE001
+            txt = f"⚠️ 取得失敗: {e}"
+        try:
+            self.root.after(0, lambda: self.sch_var.set(txt))
+        except Exception:                                     # noqa: BLE001
+            pass
 
     def _refresh_worktree_board(self):
         """`worktree_board.py` の集計を 1 行/担当 に畳んでトップに出す (2026-07-31)。
