@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "defaultMode": "acceptEdits",
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 7)",
       "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 6)",
@@ -27,6 +27,19 @@
     ],
     "additionalDirectories": [
       "C:\\Users\\imax2"
+    ],
+    "deny": [
+      "Bash(python*fix_de_speedpak_shipping.py*)",
+      "Bash(python*ebay_update_all_policies.py*)",
+      "Bash(python*cull_end.py*)",
+      "Bash(python*relist_from_funnel.py*)",
+      "Bash(python*relist_add_from_pending.py*)",
+      "Bash(python*gshock_revise_descriptions.py*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)"
     ]
   },
   "hooks": {

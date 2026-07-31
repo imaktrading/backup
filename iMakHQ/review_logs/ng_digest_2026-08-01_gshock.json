@@ -1,0 +1,20 @@
+{
+  "project": "gshock",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "tcg",
+      "item_id": "m81161788422",
+      "target_field": "catalog_request",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 1
+  }
+}
