@@ -1476,30 +1476,37 @@ class HomePanel:
     #   -2147020576 既に実行中のインスタンスがある (0x800710E0)。常駐 watcher で普通に出る
     _SCH_OK = {"0", "267009", "267011", "-2147020576"}
 
-    # 各タスクが何をしているか (schtasks の Task To Run を実際に読んで書いた。推測ではない)
+    # (対象, 何をしているか)
+    # ★schtasks の `Task To Run` と、呼ばれる .bat/.py の中身を **実際に読んで**書いた。
+    #   「一覧に無い = やっていない と判断されても文句言えない」(2026-07-31 ユーザー指摘) ので、
+    #   仕入元と対象範囲まで書く。全商品なのか一部なのかが分からないのが一番困る。
     _SCH_DESC = {
-        "iMakHarvest_YodobashiSnapshot_0600": "ヨドバシ公式の在庫を撮る (1日3回の1回目)",
-        "iMakHarvest_YodobashiSnapshot_1400": "ヨドバシ公式の在庫を撮る (2回目)",
-        "iMakHarvest_YodobashiSnapshot_2200": "ヨドバシ公式の在庫を撮る (3回目)",
-        "iMakHarvest_YodobashiHarvest_2100": "ヨドバシ公式から新規商品を拾う (抽出くん本体)",
-        "iMakHarvest_GshockMerge_2130": "G-shock を Amazon + ヨドバシ公式 の2ソースでまとめる",
-        # ★仕入元を明記する。一覧に出ていない = やっていない と読まれるため (2026-07-31 指摘)
-        #   scrapers/ の実体: uniqlo(公式L2S API) / montbell(公式HTML) / amazon /
-        #                     mercari / snkrdunk / fril
-        "iMakInventory_Cycle": "在庫巡回 HIGH｜公式(UNIQLO/GU・montbell)+メルカリ/Amazon/"
-                               "スニダン/ラクマ を見て売切れたら取下げ",
-        "iMakInventory_Cycle_LOW": "在庫巡回 LOW｜同上 (公式在庫も含む)",
-        "iMakInventory_Monitor_Daily": "在庫監視の日次レポート (巡回結果のまとめ)",
-        "iMakInventory_ReverseAudit_Daily": "意図 と 実eBay状態 の突合 (取下げ漏れ検出)",
-        "iMakInventory_Backup": "商品管理シートのバックアップ",
-        "iMakRevise_DailyAutoRevise": "価格の自動改定 (リバイスくん本体)",
-        "iMakRevise_WeeklyReminder": "週次リマインダー ★巡回を定期化したので意図的に無効",
-        "iMak_Catalog_prune_missing_models": "解決済みのカタログ宿題を掃除",
-        "iMak_Catalog_set_name_audit_daily": "カタログの set名 整合を毎日監査",
-        "iMak Catalog Integrity Weekly": "カタログ整合監査 + 可視化スプシ更新 (週次)",
-        "iMakHQ_DispatchWatch": "依頼を検知して担当を自動起動する常駐watcher",
-        "iMakHQ_ClerkPatrol": "事務員巡回。滞留した依頼を集計・仕分け",
-        "iMakHQ_HojuSearch_2330": "補URL(仕入元の予備)を夜間に検索",
+        "iMakHarvest_YodobashiSnapshot_0600": ("G-shock", "ヨドバシ公式の在庫を撮る (1日3回の1回目)"),
+        "iMakHarvest_YodobashiSnapshot_1400": ("G-shock", "ヨドバシ公式の在庫を撮る (2回目)"),
+        "iMakHarvest_YodobashiSnapshot_2200": ("G-shock", "ヨドバシ公式の在庫を撮る (3回目)"),
+        "iMakHarvest_YodobashiHarvest_2100": ("G-shock", "ヨドバシ公式から新規商品を拾う (抽出くん本体)"),
+        "iMakHarvest_GshockMerge_2130": ("G-shock", "Amazon + ヨドバシ公式 の2ソースを型番でまとめる"),
+        # scrapers/ の実体: uniqlo(公式L2S API) / montbell(公式HTML) / amazon / mercari /
+        #                   snkrdunk / fril
+        "iMakInventory_Cycle": ("出品中 全商品 (HIGHシート)",
+                                "公式(UNIQLO/GU・montbell)+メルカリ/Amazon/スニダン/ラクマ を見て "
+                                "売切れたら取下げ"),
+        "iMakInventory_Cycle_LOW": ("出品中 全商品 (LOWシート)", "同上 (公式在庫も含む)"),
+        "iMakInventory_Monitor_Daily": ("出品中 全商品", "在庫監視の日次レポート (巡回結果のまとめ)"),
+        "iMakInventory_ReverseAudit_Daily": ("出品中 全商品",
+                                             "意図 と 実eBay状態 の突合 (取下げ漏れ検出)"),
+        "iMakInventory_Backup": ("商品管理シート", "シート全体のバックアップ"),
+        "iMakRevise_DailyAutoRevise": ("出品中 全商品", "価格の自動改定 (リバイスくん本体)"),
+        "iMakRevise_WeeklyReminder": ("—", "週次リマインダー ★巡回を定期化したので意図的に無効"),
+        "iMak_Catalog_prune_missing_models": ("カタログ宿題", "解決済みの宿題を掃除"),
+        "iMak_Catalog_set_name_audit_daily": ("カタログ 全カテゴリ", "set名 の整合を毎日監査"),
+        "iMak Catalog Integrity Weekly": ("カタログ 全カテゴリ", "整合監査 + 可視化スプシ更新 (週次)"),
+        "iMakHQ_DispatchWatch": ("6担当の依頼箱", "依頼を検知して担当を自動起動する常駐watcher"),
+        "iMakHQ_ClerkPatrol": ("6担当の依頼箱", "滞留した依頼を集計・仕分け (事務員巡回)"),
+        # ★run_hoju_search.bat の中身: psa_hoju_fill(PSA=TCG) 3 段 + ichibankuji_restock。
+        #   1回 計30件だけ。**全商品ではない**
+        "iMakHQ_HojuSearch_2330": ("PSA(TCG) + 一番くじ / 1回30件",
+                                   "補URL(仕入元の予備)を夜間に検索。補0本→補1本→再仕入れ の順"),
     }
 
     def open_schedules(self):
@@ -1516,7 +1523,7 @@ class HomePanel:
         win = tk.Toplevel(self.root)
         self._sched_win = win
         win.title("⏰ 定期スケジュール")
-        win.geometry(_load_geometry("schedules", "1180x620"))
+        win.geometry(_load_geometry("schedules", "1360x620"))
 
         head = ttk.Frame(win, padding=8)
         head.pack(fill="x")
@@ -1528,9 +1535,9 @@ class HomePanel:
         ttk.Label(head, text="🔵 正常   🟡 注意(無効/未実行)   🔴 失敗",
                   foreground="#555").pack(side="right", padx=12)
 
-        cols = ("#", "状態", "タスク", "何をしている", "前回", "結果", "次回")
+        cols = ("#", "状態", "タスク", "対象", "何をしている", "前回", "結果", "次回")
         tree = ttk.Treeview(win, columns=cols, show="headings", height=20)
-        for c, w in zip(cols, (34, 44, 240, 330, 118, 96, 118)):
+        for c, w in zip(cols, (32, 44, 232, 176, 330, 112, 92, 112)):
             tree.heading(c, text=c)
             tree.column(c, width=w, anchor="w")
         tree.tag_configure("ok", background="#e8f0ff", foreground="#003366")
@@ -1581,8 +1588,8 @@ class HomePanel:
                 else:
                     sig, tag = "🔴 失敗", "ng"
                     ng += 1
-                rows.append((tag, (i, sig, name, self._SCH_DESC.get(name, "—"),
-                                   _hm(last), res, _hm(nxt))))
+                tgt, desc = self._SCH_DESC.get(name, ("—", "—"))
+                rows.append((tag, (i, sig, name, tgt, desc, _hm(last), res, _hm(nxt))))
             head = (f"全 {len(seen)} 件   🔵 {len(seen) - ng - warn}   "
                     f"🟡 {warn}   🔴 {ng}" + ("   ← 要対応" if ng else ""))
         except Exception as e:                                # noqa: BLE001
