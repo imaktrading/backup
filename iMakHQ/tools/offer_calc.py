@@ -332,6 +332,14 @@ function iossLimit(cur){
   const lim = P.iossEur || 150;
   return lim * (P.fx.EUR || 1) / (P.fx[cur] || 1);
 }
+/* 出品価格 (ポリシー判定用)。送料を取れるかは **出品時のポリシー** で決まり、
+   出品後に変えられない。>€150 で出したら、オファーで €150 を割っても送料は 0 のまま。
+   空欄なら「出品=成約」とみなす (= その価格で出したらの試算)。
+   ★シートの r15/16 が $C$9 を見るのと同じ扱い (2026-07-31)。 */
+function listedPrice(price){
+  const v = +document.getElementById('list').value || 0;
+  return v > 0 ? v : price;
+}
 
 function calc(price){
   const dk = dest.value, ck = cat.value;
@@ -353,13 +361,17 @@ function calc(price){
       N = D * fx;
     } else {
       /* ★2026-07-31: EU送料マスタ から国別に取る (旧: 独/FedEx7 の2値)。
-         D = rate table の段階($) = 送料収入 (ポリシー値なので帯によらず一定)
          N = 成約額で帯が変わる:
              ≤€150 … DDP/Economy。実費+関税(当方負担) − 想定送料J
-             >€150 … DDU/日本郵便。買い手が着払いで関税を払うので当方コストに入れない */
+             >€150 … DDU/国際エアパケット。買い手が着払いで関税を払うので当方コストに入れない
+         D = 送料収入 = **N と同額** (US計算 の `N = D*fx` と同じ関係)。
+             定義:「DDP分と日本郵便との差額 + 関税」を送料として徴収する。
+             J(設定の想定送料) は日本郵便で送った場合の想定で、本体価格に内包済。
+             >€150 は送料無料なので 0。 */
       const e = P.eu[euCountry()] || {tier: 17, cost: 3219};
-      D = e.tier;
-      N = (price <= iossLimit(cur)) ? (e.cost - J) : (P.jpPost - J);
+      const lim = iossLimit(cur);
+      N = (price <= lim) ? (e.cost - J) : 0;                 // コストは成約額の帯
+      D = (listedPrice(price) <= lim) ? (e.cost - J) / fx : 0;  // 送料は出品価格の帯
     }
     E = F + D; G = E * fx;
     K = G * fr + 0.4 * fx; L = G * promo; M = G * P.payo;
@@ -368,17 +380,20 @@ function calc(price){
     D = price * tax; E = price + D; F = price; G = E * fx; N = D * fx;
     K = (G - N) * fr + 0.4 * fx; L = (G - N) * promo; M = (G - N) * P.payo;
   }
-  /* ★DE計算だけ DDP構造を持つ (DEミラーは送料を別取り €14.86/AT €17.49)。
-     送料収入は**ポリシー値なので帯によらず一定**。変わるのはコスト側と VAT率。 */
+  /* ★DE計算だけ DDP構造を持つ。送料は固定額ではなく **DDPコストと同額**。
+     定義:「DDP分と日本郵便との差額 + 関税」を送料として徴収する。
+     J(設定の想定送料) は日本郵便で送った場合の想定で、本体価格に内包済。
+     >€150 は国際エアパケット = 送料無料 なので 0。 */
   let S = 0;
   if (tab === 'DE計算'){
     const c2 = euCountry();
-    const R = (c2 === 'AT') ? P.atShip : P.deShip;      // 送料収入 (€)
+    const e = P.eu[c2] || {cost: 3219};
+    const lim = P.iossEur || 150;
+    S = (price <= lim) ? (e.cost - J) : 0;              // DDPコスト。>€150 は想定送料Jで足りる
+    const R = (listedPrice(price) <= lim) ? (e.cost - J) / fx : 0;  // 送料収入 = 出品価格の帯
     const vat = (c2 === 'AT') ? 0.20 : 0.19;            // 実注文で AT=20% を確認
     D = (price + R) * vat;                              // VAT
     E = price + R + D; F = price; G = E * fx; N = D * fx;
-    const e = P.eu[c2] || {cost: 3219};
-    S = (price <= P.iossEur ? e.cost : P.jpPost) - J;   // DDPコスト (>€150 は DDU=関税なし)
     K = (G - N) * fr + 0.4 * fx; L = (G - N) * promo; M = (G - N) * P.payo;
   }
   const O = cost - pt + J + K + L + M + N + S;
@@ -556,13 +571,17 @@ DDP = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 220, 24
 
 
 def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False,
-            eu_country="DE"):
+            eu_country="DE", listed=None):
     """HTML(JS) と **同じ式**を Python でも持つ。検証はこれとシートを突き合わせる。
 
     2実装が食い違ったら、その時点で検証が落ちる = 気づける。
 
     eu_country: EU送料マスタ の国コード。US計算_非US / DE計算 の DDP に効く
                 (2026-07-31 追加。旧 shipMode の置換)。
+    listed:     **出品価格**。送料を取れるかは出品時のポリシーで決まるので、
+                D(DDP分送料) はこちらの帯で判定する。N(DDPコスト) は成約額 price の帯。
+                None なら出品=成約 (= その価格で出したらの試算)。
+                (2026-07-31: シートの r15/16 が $C$9 を見るのに合わせた)
     """
     cur = {"US計算": "USD", "US計算_非US": "USD", "UK計算": "GBP",
            "DE計算": "EUR", "AU計算": "AUD", "CA計算": "CAD"}[tab]
@@ -587,24 +606,31 @@ def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False,
         else:
             # ★2026-07-31: EU送料マスタ 由来の国別値 (旧 独/FedEx7 の2値は廃止)
             e = (p.get("eu") or {}).get(eu_country or "DE", {"tier": 17, "cost": 3219})
-            D = e["tier"]
-            # ≤€150 = DDP/Economy (関税は当方負担) / >€150 = DDU/日本郵便 (買い手着払い)
+            # ≤€150 = DDP/Economy (関税は当方負担) / >€150 = DDU/国際エアパケット (買い手着払い)
+            # >€150 は想定送料 J(¥2,000) で足りる (実費はそれ以下、差はバッファ) → 追加 0
             lim = p.get("iossEur", 150) * p["fx"]["EUR"] / p["fx"]["USD"]
-            N = (e["cost"] if price <= lim else p.get("jpPost", 1240)) - J
+            N = (e["cost"] - J) if price <= lim else 0.0
+            # ★DDP分送料 D = DDPコスト と同額 (US計算 の `N9=D9*$C$3` と同じ関係)。
+            #   ただし判定は **出品価格**。>€150 で出したら送料無料ポリシーなので、
+            #   オファーで ≤€150 に落ちても送料は取れない (= またぎ)。
+            D = (e["cost"] - J) / fx if (listed if listed is not None else price) <= lim else 0.0
         G = (F + D) * fx
         K, L, M = G * fr + 0.4 * fx, G * promo, G * p["payo"]
     elif tab == "DE計算":
-        # ★2026-07-31: DEミラーは送料を別取り (DE €14.86 / AT €17.49)。
-        #   売上に送料収入を含め、DDPコスト(実費+関税−想定送料J) を別途引く。
+        # ★2026-07-31: DEミラーの送料は固定額 (€14.86/€17.49) ではなく **DDPコストと同額**。
+        #   定義: 「DDP分と日本郵便との差額 + 関税」を送料として徴収する。
+        #   J(設定の想定送料) は日本郵便で送った場合の想定で、本体価格に内包済。
+        #   >€150 は国際エアパケット = 送料無料 なので 0。
         cc = eu_country or "DE"
-        R = p.get("atShip", 17.49) if cc == "AT" else p.get("deShip", 14.86)
+        e = (p.get("eu") or {}).get(cc, {"cost": 3219})
+        ioss = p.get("iossEur", 150)
+        S = (e["cost"] - J) if price <= ioss else 0.0       # コストは成約額の帯
+        # 送料を取れるかは **出品価格** の帯 (出品時のポリシーは後から変えられない)
+        R = (e["cost"] - J) / fx if (listed if listed is not None else price) <= ioss else 0.0
         vat = 0.20 if cc == "AT" else 0.19          # 実注文で AT=20% を確認
         D = (price + R) * vat
         G = (price + R + D) * fx
         N = D * fx
-        e = (p.get("eu") or {}).get(cc, {"cost": 3219})
-        # ≤€150 = DDP/Economy (関税は当方負担) / >€150 = DDU/日本郵便 (買い手着払い)
-        S = (e["cost"] if price <= p.get("iossEur", 150) else p.get("jpPost", 1240)) - J
         K, L, M = (G - N) * fr + 0.4 * fx, (G - N) * promo, (G - N) * p["payo"]
         return (G - (cost - pt + J + K + L + M + N + S))
     else:
@@ -662,12 +688,16 @@ def verify(p):
         pt = num(cell(ws, "I9", "0"))
         # ★生値で退避する。表示値だと "$70.00" (文字列) になり、書き戻しでセルが壊れる
         keep = num(cell(ws, "C15", 70, raw=True)) or 70
+        # ★出品価格 = 基準 C9。シートの r15/16 は D(送料) をこの帯で判定するので、
+        #   Python 側にも同じ値を渡さないと「またぎ」の有無で食い違う (2026-07-31)。
+        #   C9 は仕入から解かれる値で C15 では動かないため、ループ前に1回読む。
+        listed = num(cell(ws, "C9", 0, raw=True)) or None
         for price in (50, 100, 250):
             ws.update_acell("C15", price)
             row = (ws.get("B16:Q16") or [[]])[0]
             sheet_profit = num(row[14]) if len(row) > 14 else None
             mine = calc_py(p, tab, cat_key, dest if not tab.startswith("US") else "US",
-                           price, cost, pt, promo_on=False)
+                           price, cost, pt, promo_on=False, listed=listed)
             diff = abs((sheet_profit or 0) - mine)
             mark = "✅" if diff <= 1.5 else "❌"
             if diff > 1.5:

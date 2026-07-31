@@ -40,26 +40,106 @@ import fix_de_speedpak_shipping as fx  # noqa: E402  (token/refresh/post を再�
 SNAP = 'de_mirror_fedex_removal_snapshot.json'
 DONE = 'de_mirror_fedex_removal_done.json'   # 途中終了しても再開できるよう成功分を逐次記録
 IOSS_CAP = 150.0            # SpeedPAK Economy の取引額上限 (EU / IOSS)
-DOM_COST = '14.86'          # 現行据え置き
-INTL_COST = '17.49'         # 現行据え置き
+# ★2026-07-31 確定 (V9 スプシ・ユーザー確定):
+#     送料 = (その手段の実費 − 国際エアパケット実費) + 当方負担の関税
+#   - EU ≤€150 : SpeedPAK Economy (IOSS/DDP・関税は当方負担) → **有料**
+#   - EU >€150 : 国際エアパケット (DDU・関税は買い手着払い)   → **€0**
+#
+#   朝の時点では「他ミラーは €0 なのに DE だけ €14.86 = 二重取り → 全部 €0」と判断していたが、
+#   それが正しいのは **>€150 帯だけ**。≤€150 は SpeedPAK で送り DDP コスト(関税込)を当方が負担
+#   するので、その差額はバイヤーから徴収する。全帯 €0 にすると ≤€150 が全額持ち出しになる。
+#
+#   ★「国際エアパケット実費」は V9 `設定` の **カテゴリ別 実送料(JPY)** で、2000〜3500 と幅がある。
+#     DEミラー実測(2026-07-31, 708件)でも TCG/G-shock/UT(=2000) 以外に montbell 等が混在するため、
+#     料金は 1本の定数ではなく **カテゴリごとに算出**する。
+DDP_COST_JPY = {'DE': 3218.535, 'AT': 4133.295}   # 実費(0.5kg・燃油込) + 関税・手数料
+FALLBACK_EURJPY = 184.4495                        # 取得失敗時のみ (実行時は live を引く)
+DEFAULT_SHIP_JPY = 2000                           # カテゴリ不明時 (最頻値)
+
+# V9 `設定` のカテゴリ別 実送料(JPY)
+CATEGORY_SHIP_JPY = {
+    'TCG(PSA10)': 2000, 'G-SHOCK': 2000, 'Tシャツ(UT)': 2000, 'Montbell(軽)': 2000,
+    'ユニクロ(非UT)': 2000, 'トミカ': 2000, 'POPMart': 2000, 'ガシャポン': 2000,
+    'サンリオ文具': 2000, 'ヴィンテージ玩具': 2000, 'ダイソー': 2000,
+    'サンリオぬいぐるみ': 2500,
+    'Montbell(重)': 3000, '一番くじ': 3000, 'フィギュア': 3000, 'バッグ(アネロ)': 3000, 'リール': 3000,
+    'Porter': 3500,
+}
 
 BANDS = {
-    'economy': {  # ≤ €150
+    'economy': {  # ≤ €150 … SpeedPAK Economy (DDP)。料金は economy_costs() でカテゴリ別に算出
         'dom': 'DE_EconomySppedPAK',
         'intl': 'DE_IntlEconomySppedPAK',
+        'paid': True,
     },
-    'jppost': {   # > €150
+    'jppost': {   # > €150 … 国際エアパケット (DDU)。カテゴリに依らず €0
         'dom': 'DE_SparversandAusDemAusland',
         'intl': 'DE_SonstigeInternational',
+        'paid': False,
     },
 }
+
+
+def eur_jpy():
+    """実行時点の EUR/JPY を V9 `設定`!F2 から引く。失敗時は FALLBACK (警告つき)。"""
+    try:
+        sys.path.insert(0, r'C:/dev/iMak/iMakHQ/tools')
+        import gspread
+        from google.oauth2.service_account import Credentials
+        import sheet_io as _si
+        cr = Credentials.from_service_account_file(
+            _si.CREDS_PATH, scopes=['https://www.googleapis.com/auth/spreadsheets'])
+        v = gspread.authorize(cr).open_by_key(
+            '1YLnR4aW5cgjquYXUaNPb_hnVwrHegobZyh-eAT6tVM0').worksheet('設定').acell('F2').value
+        return float(str(v).replace(',', ''))
+    except Exception as e:      # noqa: BLE001
+        print(f'  ⚠ EUR/JPY を取得できず fallback {FALLBACK_EURJPY} 使用 ({type(e).__name__})')
+        return FALLBACK_EURJPY
+
+
+def economy_costs(ship_jpy, rate):
+    """≤€150 帯の (国内DE, 国際AT) 送料 (純関数)。
+
+    差額が負になるカテゴリ (実送料 > DDPコスト) は 0 にする = バイヤーから取り過ぎない。
+    """
+    def one(dest):
+        return f'{max((DDP_COST_JPY[dest] - ship_jpy) / rate, 0.0):.2f}'
+    return one('DE'), one('AT')
+
+
+def costs_for(band, ship_jpy, rate):
+    """帯 + カテゴリ実送料 → (国内, 国際) 送料文字列 (純関数)。>€150 は常に €0。"""
+    if not BANDS[band]['paid']:
+        return '0.00', '0.00'
+    return economy_costs(ship_jpy, rate)
+
+
+def ship_jpy_of(row):
+    """listing の SKU/タイトルから V9 カテゴリの実送料(JPY)を決める (純関数)。
+
+    ★確実に判るものだけ分類し、不明は DEFAULT_SHIP_JPY。推測で 3000 側に倒すと
+    バイヤーから取る額が減る (= こちらの持ち出し) ので、不明は最頻値 2000 に置く。
+    """
+    sku = (row.get('sku') or '').strip()
+    title = (row.get('title') or '')
+    up = sku.upper()
+    if up.startswith('PSA10') or title.startswith('PSA 10'):
+        return CATEGORY_SHIP_JPY['TCG(PSA10)']
+    if re.search(r'\bG-SHOCK\b|CASIO', title, re.I):
+        return CATEGORY_SHIP_JPY['G-SHOCK']
+    if 'UNIQLO' in up or up.startswith('UT-') or 'TEMPLATE_NWT' in up:
+        return CATEGORY_SHIP_JPY['Tシャツ(UT)']
+    if 'MONTBELL' in up:
+        return CATEGORY_SHIP_JPY['Montbell(軽)']
+    return DEFAULT_SHIP_JPY
 
 
 def band_of(price):
     return 'economy' if price <= IOSS_CAP else 'jppost'
 
 
-def shipping_xml(dom_svc, intl_svc, dom_cost=DOM_COST, intl_cost=INTL_COST):
+def shipping_xml(dom_svc, intl_svc, dom_cost, intl_cost):
+    """★料金は必ず呼び手が渡す (帯 + カテゴリで変わるため既定値を持たせない。2026-07-31)。"""
     return ('<ShippingDetails><ShippingType>Flat</ShippingType>'
             f'<ShippingServiceOptions><ShippingService>{dom_svc}</ShippingService>'
             f'<ShippingServiceCost currencyID="EUR">{dom_cost}</ShippingServiceCost>'
@@ -86,7 +166,12 @@ def enumerate_eur(tok):
             cp = re.search(r'<CurrentPrice currencyID="(\w+)">([\d.]+)<', it)
             iid = re.search(r'<ItemID>(\d+)</ItemID>', it)
             if cp and iid and cp.group(1) == 'EUR':
-                out.append({'id': iid.group(1), 'price': float(cp.group(2))})
+                # SKU/Title も持つ (カテゴリ別の実送料を決めるのに要る。2026-07-31)
+                sku = re.search(r'<SKU>(.*?)</SKU>', it)
+                ttl = re.search(r'<Title>(.*?)</Title>', it, re.S)
+                out.append({'id': iid.group(1), 'price': float(cp.group(2)),
+                            'sku': sku.group(1) if sku else '',
+                            'title': ttl.group(1) if ttl else ''})
         tp = re.search(r'<TotalNumberOfPages>(\d+)</TotalNumberOfPages>', t)
         if tp and n >= int(tp.group(1)):
             break
@@ -135,7 +220,15 @@ def cmd_plan(rows):
           f'/ 国際 {BANDS["economy"]["intl"]} → AT')
     print(f'  >€{IOSS_CAP:.0f} : {len(hi):>4}件 → 国内 {BANDS["jppost"]["dom"]:<28} '
           f'/ 国際 {BANDS["jppost"]["intl"]} → AT')
-    print(f'  料金は据え置き: 国内 €{DOM_COST} / 国際 €{INTL_COST}')
+    rate = eur_jpy()
+    d2, i2 = economy_costs(DEFAULT_SHIP_JPY, rate)
+    print(f'  料金 (EUR/JPY={rate:.4f}):')
+    print(f'    ≤€{IOSS_CAP:.0f} = (DDPコスト − カテゴリ別実送料) / レート'
+          f'  … 実送料¥{DEFAULT_SHIP_JPY} なら 国内 €{d2} / 国際 €{i2}')
+    for jpy in sorted({v for v in CATEGORY_SHIP_JPY.values()} - {DEFAULT_SHIP_JPY}):
+        dd, ii = economy_costs(jpy, rate)
+        print(f'                                        実送料¥{jpy} なら 国内 €{dd} / 国際 €{ii}')
+    print(f'    >€{IOSS_CAP:.0f} = 国内 €0.00 / 国際 €0.00 (DDU・関税は買い手着払い)')
     print('\nFedEx (DE_IntlExpeditedSppedPAK) は全件から消える。')
     return lo, hi
 
@@ -171,6 +264,14 @@ def cmd_verify(rows, tok, n=None):
 
 def cmd_go(rows, tok, limit=None):
     target = rows if limit is None else rows[:limit]
+    rate = eur_jpy()                       # ★実行時点のレートで再計算 (依頼書の指示)
+    import collections as _c
+    mix = _c.Counter(ship_jpy_of(r) for r in target if band_of(r['price']) == 'economy')
+    print(f'EUR/JPY={rate:.4f} / ≤€{IOSS_CAP:.0f} 帯のカテゴリ実送料内訳: '
+          + ' / '.join(f'¥{k}×{v}' for k, v in sorted(mix.items())))
+    for jpy in sorted(mix):
+        d, i = economy_costs(jpy, rate)
+        print(f'    実送料¥{jpy} → 国内 €{d} / 国際 €{i}')
     # --- 実行前スナップショット (rollback 用) ---
     snap = json.load(open(SNAP)) if os.path.exists(SNAP) else {}
     todo = [r for r in target if r['id'] not in snap]
@@ -192,8 +293,10 @@ def cmd_go(rows, tok, limit=None):
     ok = warn = fail = 0
     failed = []
     for i, r in enumerate(todo2, 1):
-        b = BANDS[band_of(r['price'])]
-        ack, tok, err = revise(r['id'], shipping_xml(b['dom'], b['intl']), tok)
+        band = band_of(r['price'])
+        b = BANDS[band]
+        dom_c, intl_c = costs_for(band, ship_jpy_of(r), rate)
+        ack, tok, err = revise(r['id'], shipping_xml(b['dom'], b['intl'], dom_c, intl_c), tok)
         if ack in ('Success', 'Warning'):
             done.add(r['id'])
             ok += 1 if ack == 'Success' else 0
