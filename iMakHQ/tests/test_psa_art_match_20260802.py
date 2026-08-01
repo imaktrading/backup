@@ -107,14 +107,64 @@ def test_original_candidate_dicts_are_not_mutated():
     assert "art" not in cands[0], "呼出側の候補 dict を書き換えている"
 
 
+def test_match_pct_is_parsed_and_clamped():
+    assert A.parse_verdict('{"verdict":"same","match_pct":93}')["match_pct"] == 93
+    # 不正値は None (= 「%不明」表示)。0 に丸めると「0%一致」と誤読される
+    assert A.parse_verdict('{"verdict":"same","match_pct":"abc"}')["match_pct"] is None
+    assert A.parse_verdict('{"verdict":"same"}')["match_pct"] is None
+    assert A.parse_verdict('{"verdict":"same","match_pct":420}')["match_pct"] == 100
+    assert A.parse_verdict('{"verdict":"same","match_pct":-5}')["match_pct"] == 0
+
+
+def test_pct_is_attached_to_candidates():
+    keep, _ = A.annotate_candidates("ref", [{"url": "u"}], client=_FakeClient(
+        '{"verdict":"same","match_pct":88,"reason":"構図一致"}'), fetch=_fetch_ok, cache={})
+    assert keep[0]["art_pct"] == 88 and keep[0]["art_reason"] == "構図一致"
+
+
 def test_ui_shows_art_badges():
     import psa_resource_confirm as prc
     h = prc.build_restock_html([{
         "idx": 0, "title": "t", "card_no": "OP09-050", "ebay_url": "https://x",
         "ref_image": "https://img/a.jpg",
         "candidates": [{"channel": "mercari", "url": "https://jp.mercari.com/item/m1",
-                        "price": 100, "art": "same", "art_reason": "一致"},
+                        "price": 100, "art": "same", "art_pct": 93,
+                        "art_reason": "構図一致"},
                        {"channel": "mercari", "url": "https://jp.mercari.com/item/m2",
-                        "price": 200, "art": "unsure", "art_reason": "不明瞭"}]}])
-    assert "🖼️絵柄一致" in h and "🖼️絵柄は要目視" in h
-    assert "採用の根拠にはしないでください" in h, "same を根拠にしない旨の注意が無い"
+                        "price": 200, "art": "unsure", "art_pct": 58,
+                        "art_reason": "反射で見えない"}]}])
+    # ユーザー要求(2026-08-02): 判断材料は **HTML本文に出す**。tooltip は出ていないのと同じ
+    assert "一致度 93%" in h and "一致度 58%(要目視)" in h
+    assert "構図一致" in h and "反射で見えない" in h, "判断理由が本文に出ていない"
+    assert "採用の根拠にはせず" in h, "一致度を根拠にしない旨の注意が無い"
+
+
+def test_uniform_variant_badge_is_replaced_by_one_line():
+    """全候補が同じ変種判定なら候補ごとのバッジは出さない。
+
+    実例 (itemID 358600821598 / OP09-050 ナミ): 8候補すべて「⚠️変種未確認」= 見分けに
+    使えないのに全部に警告が付き、警告として死んでいた。
+    """
+    import psa_resource_confirm as prc
+    h = prc.build_restock_html([{
+        "idx": 0, "title": "t", "card_no": "OP09-050", "ebay_url": "https://x",
+        "ref_image": "https://img/a.jpg",
+        "candidates": [{"channel": "mercari", "url": "https://jp.mercari.com/item/m1",
+                        "price": 100, "variant_ok": False},
+                       {"channel": "mercari", "url": "https://jp.mercari.com/item/m2",
+                        "price": 200, "variant_ok": False}]}])
+    assert "⚠️変種未確認" not in h, "見分けに使えないバッジが候補ごとに出ている"
+    assert "裏取りできず" in h and "判断材料になりません" in h
+
+
+def test_mixed_variant_badges_are_kept():
+    """差がある時は従来どおり候補ごとに出す (情報として機能する)。"""
+    import psa_resource_confirm as prc
+    h = prc.build_restock_html([{
+        "idx": 0, "title": "t", "card_no": "OP09-050", "ebay_url": "https://x",
+        "ref_image": "https://img/a.jpg",
+        "candidates": [{"channel": "mercari", "url": "https://jp.mercari.com/item/m1",
+                        "price": 100, "variant_ok": True},
+                       {"channel": "mercari", "url": "https://jp.mercari.com/item/m2",
+                        "price": 200, "variant_ok": False}]}])
+    assert "✅変種一致" in h and "⚠️変種未確認" in h

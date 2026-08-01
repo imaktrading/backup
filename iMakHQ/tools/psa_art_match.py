@@ -55,7 +55,11 @@ _PROMPT = (
     "- 構図や登場人物が明らかに違う場合だけ different。\n"
     "- 少しでも迷ったら unsure。unsure は人が目視するので、無理に same/different を選ばない。\n"
     "\n"
-    'JSONのみ出力: {"verdict":"same|different|unsure","reason":"40字以内の日本語"}'
+    "match_pct = 絵柄が同一である確からしさ(0-100の整数)。画質が悪い・一部しか見えない等で\n"
+    "自信が持てないなら正直に下げる。100 は『間違いなく同一』の時だけ。\n"
+    "\n"
+    'JSONのみ出力: {"verdict":"same|different|unsure","match_pct":0-100,'
+    '"reason":"40字以内の日本語。何を見てそう判断したか"}'
 )
 
 
@@ -67,8 +71,14 @@ def _load_key():
         return ""
 
 
+# 質問(_PROMPT)や返す項目を変えたら上げる。古い判定は自動で無効になり、次回に取り直される
+# (混在すると「一致度—」と「一致度93%」が並んで読めなくなる)。
+PROMPT_VERSION = 2
+
+
 def _cache_key(ref_url, cand_url):
-    return hashlib.sha1(f"{ref_url}|{cand_url}".encode("utf-8")).hexdigest()[:20]
+    return hashlib.sha1(
+        f"v{PROMPT_VERSION}|{ref_url}|{cand_url}".encode("utf-8")).hexdigest()[:20]
 
 
 def load_cache(path=CACHE_PATH):
@@ -90,10 +100,20 @@ def save_cache(cache, path=CACHE_PATH):
         pass
 
 
+def _pct(v):
+    """match_pct を 0-100 の int に正規化。数値でなければ None (= 表示しない)。"""
+    try:
+        n = int(round(float(v)))
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, n))
+
+
 def parse_verdict(text):
-    """モデル出力 → {"verdict", "reason"} (純関数・test可)。
+    """モデル出力 → {"verdict", "match_pct", "reason"} (純関数・test可)。
 
     未知の値・壊れた JSON は **unsure** に倒す (捨てる方向に倒さない)。
+    match_pct が無い/不正なら None = UI は「%不明」として出す (0% と混同させない)。
     """
     s = (text or "").strip()
     if s.startswith("```"):
@@ -101,11 +121,12 @@ def parse_verdict(text):
     try:
         d = json.loads(s)
     except Exception:
-        return {"verdict": "unsure", "reason": "判定結果を読めなかった"}
+        return {"verdict": "unsure", "match_pct": None, "reason": "判定結果を読めなかった"}
     v = str(d.get("verdict", "")).strip().lower()
     if v not in VERDICTS:
-        return {"verdict": "unsure", "reason": "判定値が不正"}
-    return {"verdict": v, "reason": str(d.get("reason", ""))[:60]}
+        return {"verdict": "unsure", "match_pct": None, "reason": "判定値が不正"}
+    return {"verdict": v, "match_pct": _pct(d.get("match_pct")),
+            "reason": str(d.get("reason", ""))[:60]}
 
 
 def _image_block(url, fetch):
@@ -126,7 +147,8 @@ def compare_art(ref_url, cand_url, *, client=None, fetch=None, cache=None, api_k
     判定できない事情 (キー無 / 画像取れない / API失敗) は全て **unsure**。
     client/fetch/cache を注入できる = ネットワーク無しでテスト可能。
     """
-    out_unsure = {"verdict": "unsure", "reason": "判定不能(目視で確認)", "cached": False}
+    out_unsure = {"verdict": "unsure", "match_pct": None,
+                  "reason": "判定不能(目視で確認)", "cached": False}
     if not ref_url or not cand_url:
         return out_unsure
     ck = _cache_key(ref_url, cand_url)
@@ -164,7 +186,8 @@ def compare_art(ref_url, cand_url, *, client=None, fetch=None, cache=None, api_k
                        "content": blocks + [{"type": "text", "text": _PROMPT}]}])
         res = parse_verdict(r.content[0].text)
     except Exception as e:
-        return {"verdict": "unsure", "reason": f"判定失敗({type(e).__name__})", "cached": False}
+        return {"verdict": "unsure", "match_pct": None,
+                "reason": f"判定失敗({type(e).__name__})", "cached": False}
     if cache is not None:
         cache[ck] = dict(res)
     res["cached"] = False
@@ -186,6 +209,7 @@ def annotate_candidates(ref_url, cands, *, client=None, fetch=None, cache=None, 
                           cache=cache, api_key=api_key)
         c = dict(c)
         c["art"] = res["verdict"]
+        c["art_pct"] = res.get("match_pct")
         c["art_reason"] = res.get("reason", "")
         (dropped if res["verdict"] == "different" else keep).append(c)
     return keep, dropped

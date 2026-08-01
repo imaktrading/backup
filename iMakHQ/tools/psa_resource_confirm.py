@@ -252,6 +252,9 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .nng{font-size:10px;padding:1px 5px;border-radius:3px;background:#c00;color:#fff;font-weight:bold}
 .aok{font-size:10px;padding:1px 5px;border-radius:3px;background:#06c;color:#fff;font-weight:bold}
 .aun{font-size:10px;padding:1px 5px;border-radius:3px;background:#999;color:#fff}
+.arsn{font-size:11px;color:#036;background:#eef4ff;border-radius:3px;padding:1px 5px;
+      display:inline-block;margin-top:2px;line-height:1.4}
+.vuni{background:#666;color:#fff;padding:3px 8px;border-radius:4px;margin:3px 0;font-size:12px}
 .zm{font-size:13px;padding:0 6px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:zoom-in;line-height:1.6}
 #zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;cursor:zoom-out}
 #zov img{max-width:46vw;max-height:88vh;object-fit:contain;background:#fff;display:block}
@@ -518,8 +521,9 @@ _LABEL_NOTE_HTML = (
     "<div style='margin-top:4px'>"
     "🖼️ <b>絵柄の事前判定</b>: 現物と候補の絵柄をAIが先に突き合わせ、"
     "<b>明らかに別の絵柄のものは表示前に省いて</b>います(省いた件数と理由はターミナルに出ます)。"
-    "<span class='aok'>🖼️絵柄一致</span> は参考値です — 出品写真は角度・光・スリーブで見え方が変わるため、"
-    "<b>採用の根拠にはしないでください</b>。<span class='aun'>🖼️絵柄は要目視</span> は自信が無い分です。"
+    "残った候補には <b>一致度(%)と判断理由</b> を出しています。"
+    "出品写真は角度・光・スリーブで見え方が変わるので、<b>一致度は参考値</b>です — "
+    "高くても<b>採用の根拠にはせず</b>、必ず写真を見てください。低い/理由が曖昧なものは目視で落とす前提です。"
     "</div></div>")
 
 
@@ -533,8 +537,16 @@ def build_restock_html(items):
         ref = it.get("ref_image") or ""
         ref_tag = (f"<img src='{_proxied(ref)}' loading='lazy' onerror='imgFail(this,1)'>" if ref
                    else "<div class='ph'>現物画像なし</div>")
+        # ★2026-08-02: 全候補が同じ variant_ok なら、そのバッジは**見分ける情報を持っていない**。
+        #   実例 (itemID 358600821598 / OP09-050 ナミ): 8候補すべて「⚠️変種未確認」で、
+        #   タイトルに「新たなる皇帝」と書いてある候補まで未確認だった (_variant_matches の
+        #   セット名トークンが日英で噛み合わない)。全部に同じ警告が付くと警告として死ぬので、
+        #   候補ごとのバッジは出さず「この出品では変種を文字で裏取りできていない」と1行で言う。
+        _cds = it.get("candidates") or []
+        _vset = {c.get("variant_ok") for c in _cds}
+        _variant_uniform = len(_cds) > 1 and len(_vset) == 1
         cand_html = []
-        for cd in (it.get("candidates") or []):
+        for cd in _cds:
             u = cd.get("url") or ""
             # 画像は cd.image(SNKRDUNK=実カードthumbnail)優先、無ければ url を解決(mercari=CDN直画像)。
             # SNKRDUNK は listing ページの og:image がサイト既定ロゴで全候補同一になるため image を使う。
@@ -556,8 +568,11 @@ def build_restock_html(items):
             #   押すことになる (=「候補が違うのは意味がない」)。確証済は先頭に並んでいる。
             #   variant_ok を持たない呼出 (旧 cache 等) はバッジ非表示 = 後方互換。
             _vok = cd.get("variant_ok")
-            _v_html = ("<span class='vok'>✅変種一致</span>" if _vok is True
-                       else "<span class='vng'>⚠️変種未確認</span>" if _vok is False else "")
+            if _variant_uniform:
+                _v_html = ""      # 全候補同じ = 見分けに使えない (カード上部で1行にまとめて出す)
+            else:
+                _v_html = ("<span class='vok'>✅変種一致</span>" if _vok is True
+                           else "<span class='vng'>⚠️変種未確認</span>" if _vok is False else "")
             # ★2026-08-01: 番号未確認 (出品名に番号が無く、名前一致だけで拾った候補)。
             #   厳密一致が0件のときだけ出る枠なので、**変種以前に別カードの可能性**がある。
             #   変種バッジより強い警告として、こちらを優先表示する。
@@ -566,16 +581,23 @@ def build_restock_html(items):
             # ★2026-08-02: 絵柄の事前判定 (psa_art_match)。明らかに別の物は表示前に省いてあるので、
             #   ここに出るのは same か unsure。unsure は「自信が無い=目視で落とす」ことを明示する。
             #   art を持たない呼出(旧cache / APIキー無し)はバッジ非表示 = 後方互換。
+            #   ★2026-08-02(2): ユーザー「同じか違うかの判断材料がHTMLに出ていないと意味がない」
+            #   → 一致度(%)と理由を **本文に出す**。title= のツールチップは出ていないのと同じ。
             _art = cd.get("art")
-            _ar = _html.escape(_s(cd.get("art_reason")))
+            _ar = _s(cd.get("art_reason"))
+            _ap = cd.get("art_pct")
+            _apct = f"{int(_ap)}%" if isinstance(_ap, (int, float)) else "—"
             if _art == "same":
-                _v_html += f"<span class='aok' title='{_ar}'>🖼️絵柄一致</span>"
+                _v_html += f"<span class='aok'>🖼️絵柄 一致度 {_apct}</span>"
             elif _art == "unsure":
-                _v_html += f"<span class='aun' title='{_ar}'>🖼️絵柄は要目視</span>"
+                _v_html += f"<span class='aun'>🖼️絵柄 一致度 {_apct}(要目視)</span>"
+            _ar_html = (f"<br><span class='arsn'>🖼️ {_html.escape(_ar)}</span>"
+                        if _art in ("same", "unsure") and _ar else "")
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='' onchange='upd({idx})'>{img}"
-                f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr} {_v_html}{_nm_html}"
+                f"<span class='clbl'>{_html.escape(_s(cd.get('channel')))} {pstr} {_v_html}"
+                f"{_ar_html}{_nm_html}"
                 f"<br><a href='{_html.escape(_s(u))}' target='_blank'>開く</a>"
                 f" <button type='button' class='zm' title='拡大'"
                 f" data-img=\"{_html.escape(_proxied(imgsrc))}\" onclick='zoom(event,this)'>🔍</button>"
@@ -624,6 +646,15 @@ def build_restock_html(items):
         idf_html = ("<div class='idf'>" + "".join(idf) +
                     "<b style='background:#666'><i>照合</i>この番号+変種+絵柄が合えば同じカード"
                     "(ラベルの書式違いは無関係)</b></div>") if idf else ""
+        # 全候補が同じ variant_ok = 見分けに使えないので、候補ごとのバッジではなく事情を1行で書く
+        vuni_html = ""
+        if _variant_uniform:
+            _same_val = next(iter(_vset))
+            vuni_html = ("<div class='vuni'>🏷️ 変種の<b>文字</b>照合: 全候補とも" +
+                         ("<b>一致</b>" if _same_val is True else "<b>裏取りできず</b>") +
+                         " — 候補間の差が出ないので判断材料になりません。"
+                         "<b>絵柄の一致度</b>と現物の写真で判断してください。</div>"
+                         ) if _same_val is not None else ""
         cost_html = ""
         if _cn:
             _extra = f" / 現在価格 ¥{_html.escape(_pn)}" if _pn else ""
@@ -633,7 +664,8 @@ def build_restock_html(items):
         rows.append(
             f"<div class='card' id='c{idx}' data-idx='{idx}' data-ref=\"{_proxied(ref)}\">"
             f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
-            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>{idf_html}{mv_html}{sib_html}{cost_html}"
+            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>"
+            f"{idf_html}{vuni_html}{mv_html}{sib_html}{cost_html}"
             # ★2026-07-28: タイトル/eBayリンクは候補リストの**上**に置く(候補が縦に長いと
             # 下端がスクロールしないと見えず、何のカードを見ているか分からなくなるため)。
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
