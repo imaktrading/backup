@@ -29,8 +29,8 @@ _PSA_CACHE_PATH = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakTCG", "data", "psa_cache.json"))
 
 
-def psa_image_for_cert(cert):
-    """PSA cert# → 現物PSA画像URL(psa_cache.json の CardImageUrl)。無ければ ''。"""
+def _load_psa_cache():
+    """psa_cache.json を1回だけ読む (失敗しても {} で続行)。"""
     global _PSA_CACHE
     if _PSA_CACHE is None:
         try:
@@ -38,6 +38,12 @@ def psa_image_for_cert(cert):
                 _PSA_CACHE = json.load(f)
         except Exception:
             _PSA_CACHE = {}
+    return _PSA_CACHE
+
+
+def psa_image_for_cert(cert):
+    """PSA cert# → 現物PSA画像URL(psa_cache.json の CardImageUrl)。無ければ ''。"""
+    _load_psa_cache()
     if not cert:
         return ""
     rec = _PSA_CACHE.get(str(cert).strip())
@@ -45,6 +51,44 @@ def psa_image_for_cert(cert):
     # ★2026-07-28: 既存キャッシュは 823件中818件が /small/(380x640) のまま。PSA CDN は同じキーで
     # /large/(1140x1920) も配信するので **表示時に上げる**(取得時の /large/ 化は新規分にしか効かない)。
     return url.replace("/small/", "/large/")
+
+
+_VARIETY_WORDS = (
+    "ALTERNATE ART", "ALT ART", "SPECIAL ART", "MANGA ART", "FULL ART", "PARALLEL",
+    "SECRET RARE", "SPECIAL CARD SET", "CHARACTER RARE", "TRAINER GALLERY", "ART RARE",
+    "SUPER RARE", "PROMO", "GOLD", "FOIL",
+)
+
+
+def split_subject_variety(subject):
+    """PSA Subject → (キャラ名, 変種名) に割る **純関数**。
+
+    'NAMI ALTERNATE ART' → ('NAMI', 'ALTERNATE ART')
+    'GLACEON VSTAR SPECIAL CARD SET' → ('GLACEON VSTAR', 'SPECIAL CARD SET')
+    既知の変種語が末尾に無ければ変種は空 (推測しない = 空欄なら人が絵柄で見る)。
+    """
+    s = (subject or "").strip()
+    up = s.upper()
+    for w in sorted(_VARIETY_WORDS, key=len, reverse=True):
+        if up.endswith(w):
+            return s[: len(s) - len(w)].strip(), s[len(s) - len(w):].strip()
+    return s, ""
+
+
+def psa_label_facts(cert, card_no=""):
+    """cert → 目視照合に使う {number, variety, brand} (揺れないものだけ)。
+
+    ★2026-08-02: PSA の**印字ラベルは書式が複数ある**ため、ラベル文字列そのものは
+    同一性の根拠にならない。揺れないのは **番号** と **変種名**。この2つを画面に出して
+    「これが合っていれば同じカード」と示すための素材を作る。cert が cache に無ければ空。
+    """
+    d = (_load_psa_cache() or {}).get(str(cert or "")) or {}
+    if not d:
+        return {"number": card_no or "", "variety": "", "brand": ""}
+    _name, variety = split_subject_variety(d.get("Subject"))
+    return {"number": card_no or _s(d.get("CardNumber")),
+            "variety": variety,
+            "brand": _s(d.get("Brand"))}
 
 
 def ebay_listing_image(item_id):
@@ -164,8 +208,20 @@ def _fetch_image(url, retries=4):
 
 _CSS = """
 body{font-family:'Segoe UI',Meiryo,sans-serif;margin:0;background:#f4f4f4;font-size:15px}
-h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position:sticky;top:0;z-index:5}
-.bar{position:sticky;top:46px;background:#fff;padding:8px 16px;border-bottom:1px solid #ccc;z-index:4}
+h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
+/* ★2026-08-02: bar を sticky top:0 にする。以前は h1 が sticky top:0 / bar が top:46px 固定で、
+   h1 の文言が2〜3行に折り返すと実高さが 46px を超え、**スクロール時に bar が h1 の下に潜って
+   「全部ON」が押せなくなっていた** (ユーザー報告)。h1 は説明文なので流して、操作ボタンだけ常駐させる。 */
+.bar{position:sticky;top:0;background:#fff;padding:8px 16px;border-bottom:1px solid #ccc;z-index:6;
+     box-shadow:0 2px 4px rgba(0,0,0,.15)}
+.note{background:#fffbe6;border:1px solid #e0c000;border-left:6px solid #e0c000;margin:8px 12px;
+      padding:8px 12px;font-size:13px;line-height:1.6;border-radius:4px}
+.note .ex{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.note .ex span{background:#fff;border:1px solid #ddd;border-radius:3px;padding:2px 6px;
+      font-family:Consolas,monospace;font-size:11px}
+.idf{display:flex;flex-wrap:wrap;gap:5px;margin:3px 0}
+.idf b{background:#036;color:#fff;border-radius:3px;padding:2px 7px;font-size:12px;font-weight:normal}
+.idf b i{font-style:normal;opacity:.7;margin-right:4px}
 .bar button{font-size:14px;padding:6px 14px;margin-right:8px;cursor:pointer}
 .go{background:#2a7;color:#fff;border:none;border-radius:4px;font-weight:bold;padding:8px 20px}
 .grid{display:flex;flex-wrap:wrap;gap:10px;padding:12px}
@@ -200,6 +256,8 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px;position
 #zov.on{display:flex;gap:16px}
 #zref,#zcand{text-align:center}
 #zov .zc{color:#fff;font-size:15px;font-weight:bold;margin-bottom:6px}
+#zov .zn{color:#ffd;background:rgba(0,0,0,.5);font-size:12px;margin-bottom:6px;padding:3px 8px;
+      border-radius:3px;max-width:46vw}
 .rb.sel{background:#c33;color:#fff;border-color:#c33;font-weight:bold}
 .t{font-size:13px;word-break:break-word;margin:4px 0}
 .no{font-size:12px;color:#555}
@@ -304,7 +362,8 @@ def build_confirm_html(items):
            "<span style='color:#c33;font-size:13px'>※候補複数なら現物と同じ変種を選択。候補なし=要catalog追加</span></div>")
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>PSA再仕入れ 確認</title>"
             f"<style>{_CSS}</style></head><body>"
-            f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
+            # bar を先頭 = sticky top:0 (h1 の折返しでボタンが隠れないように・2026-08-02)
+            f"<div id='main'>{bar}{head}<div class='grid'>{''.join(rows)}</div></div>"
             f"<div id='done'></div><script>{_JS}</script></body></html>")
 
 
@@ -432,6 +491,31 @@ function go(){
 """
 
 
+# ★2026-08-02: PSA の**印字ラベルは同じカードでも書式が複数ある**。
+#   実例 (どちらも OP09-050 ナミ ALTERNATE ART・柄も完全一致):
+#     現物 cert 97317368 : "2024 ONE PIECE JPN."     / 3行目 "OP09-ALTERNATE ART"
+#     候補 cert 165347848: "2024 ONE PIECE OP09 JP"  / 3行目 "ALTERNATE ART"
+#   API が返す Brand はさらに別書式 ("ONE PIECE JAPANESE OP09-EMPERORS IN THE NEW WORLD")。
+#   = セットコードが1行目に出るか3行目に出るかまで変わる。
+#   ユーザー報告(2026-08-02): 「画像は酷似していてラベルが違えば、違うカードと目視で判別してしまう」
+#   → 同一カードを「違う」と押す = 使える仕入元を捨てる。ラベル書式は別カードの根拠にならないので、
+#     何で判定するのかを画面に明示する。
+_LABEL_NOTE_HTML = (
+    "<div class='note'>"
+    "<b>⚠️ ラベルの書き方が違っても、同じカードのことがあります。</b>"
+    " PSA は同じカードに<b>複数の印字書式</b>を使います。下は<b>全部同じカード</b>です:"
+    "<div class='ex'>"
+    "<span>2024 ONE PIECE <b>JPN.</b> … <b>OP09-</b>ALTERNATE ART</span>"
+    "<span>2024 ONE PIECE <b>OP09 JP</b> … ALTERNATE ART</span>"
+    "<span>ONE PIECE <b>JAPANESE OP09-EMPERORS IN THE NEW WORLD</b> / NAMI ALTERNATE ART</span>"
+    "</div>"
+    "判定は <b>①カード番号 ②変種名(ALTERNATE ART / パラレル / プロモ等) ③絵柄</b> の3つで行ってください。"
+    "<b>ラベルの1行目の書き方・セットコードの位置は根拠になりません。</b>"
+    " 逆に、絵柄が同じでも<b>配布が違えば別カード</b>です(例: ブースター版 と 始めようキャンペーン版)。"
+    "迷ったら 🔍 で拡大して<b>絵柄</b>を見比べてください。"
+    "</div>")
+
+
 def build_restock_html(items):
     """RESTOCK視覚確証 HTML。items: [{idx, title, card_no, ebay_url, ref_image,
     candidates:[{channel,url,price}], v8}]。① 現物 と 仕入候補(買う物の出品画像) を並べ目視一致。
@@ -511,6 +595,19 @@ def build_restock_html(items):
                     f" ({len(_sib)}件: {_html.escape(', '.join(map(str, _sib[:3])))})"
                     " — 絵柄が同じでも<b>別の出品</b>なので、それぞれに補URLが要ります</div>"
                     ) if _sib else ""
+        # ★2026-08-02: 「何を見て同じと判断するのか」をカードごとに出す。
+        #   ラベルの書式は揺れるが、**番号・変種名**は揺れない。現物の値を並べておけば、
+        #   候補ラベルの書き方が違っても『この2つが合っているか』だけ見れば済む。
+        #   psa_label が無い呼出(RESTOCKゲート等)は非表示=後方互換。
+        _lab = it.get("psa_label") or {}
+        idf = []
+        for _cap, _k in (("番号", "number"), ("変種", "variety"), ("PSAセット", "brand")):
+            _v = _s(_lab.get(_k))
+            if _v:
+                idf.append(f"<b><i>{_cap}</i>{_html.escape(_v)}</b>")
+        idf_html = ("<div class='idf'>" + "".join(idf) +
+                    "<b style='background:#666'><i>照合</i>この番号+変種+絵柄が合えば同じカード"
+                    "(ラベルの書式違いは無関係)</b></div>") if idf else ""
         cost_html = ""
         if _cn:
             _extra = f" / 現在価格 ¥{_html.escape(_pn)}" if _pn else ""
@@ -520,7 +617,7 @@ def build_restock_html(items):
         rows.append(
             f"<div class='card' id='c{idx}' data-idx='{idx}' data-ref=\"{_proxied(ref)}\">"
             f"<div class='cnt' id='cnt{idx}'>RESTOCK ✓(買う候補のみ残す)</div>"
-            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>{mv_html}{sib_html}{cost_html}"
+            f"<div class='no'>{_html.escape(_s(it.get('card_no')))}</div>{idf_html}{mv_html}{sib_html}{cost_html}"
             # ★2026-07-28: タイトル/eBayリンクは候補リストの**上**に置く(候補が縦に長いと
             # 下端がスクロールしないと見えず、何のカードを見ているか分からなくなるため)。
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
@@ -541,10 +638,14 @@ def build_restock_html(items):
            "<span style='color:#c33;font-size:13px'>※チェック=買う / 外す=買わない(理由: 見送り or 違う を選択)</span></div>")
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>RESTOCK確証</title>"
             f"<style>{_CSS}</style></head><body>"
-            f"<div id='main'>{head}{bar}<div class='grid'>{''.join(rows)}</div></div>"
+            # ★2026-08-02: bar を先頭に置く(sticky top:0)。h1 は折り返して高さが変わるので、
+            #   h1 の下に bar を敷くと隠れる。操作ボタンを常に画面上端に出す。
+            f"<div id='main'>{bar}{head}{_LABEL_NOTE_HTML}<div class='grid'>{''.join(rows)}</div></div>"
             f"<div id='zov' onclick='zclose(event)'>"
             f"<div id='zref'><div class='zc'>① 現物(出品)</div><img alt=''></div>"
-            f"<div id='zcand'><div class='zc'>仕入候補</div><img alt=''></div></div>"
+            f"<div id='zcand'><div class='zc'>仕入候補</div>"
+            f"<div class='zn'>ラベルの<b>書式違い</b>は別カードの根拠になりません — "
+            f"<b>番号・変種名・絵柄</b>で判定</div><img alt=''></div></div>"
             f"<div id='done'></div><script>{_JS_RESTOCK}</script></body></html>")
 
 

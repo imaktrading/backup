@@ -102,3 +102,71 @@ def test_parse_restock_result_empty():
 def test_empty_url():
     assert prc._resolve_image_url("") == ""
     assert prc._resolve_image_url(None) == ""
+
+
+# ============================================================================
+# ラベル書式ゆれ対策 (2026-08-02)
+# PSA は同じカードに複数の印字書式を使う。実例(どちらも OP09-050 ナミ ALTERNATE ART・柄も同一):
+#   cert 97317368  "2024 ONE PIECE JPN."    / "OP09-ALTERNATE ART"
+#   cert 165347848 "2024 ONE PIECE OP09 JP" / "ALTERNATE ART"
+# ユーザー報告: 「画像は酷似していてラベルが違えば、違うカードと目視で判別してしまう」
+# = 同一カードを「違う」と押して使える仕入元を捨てる。UI に判定材料と注意書きを出して防ぐ。
+# ============================================================================
+
+
+def test_variety_is_split_from_subject():
+    assert prc.split_subject_variety("NAMI ALTERNATE ART") == ("NAMI", "ALTERNATE ART")
+    assert prc.split_subject_variety("GLACEON VSTAR SPECIAL CARD SET") == (
+        "GLACEON VSTAR", "SPECIAL CARD SET")
+
+
+def test_unknown_variety_is_left_blank_not_guessed():
+    # 既知の変種語が無ければ空欄。推測して埋めると誤った根拠を人に見せることになる。
+    assert prc.split_subject_variety("NAMI") == ("NAMI", "")
+    assert prc.split_subject_variety("") == ("", "")
+
+
+def test_label_facts_fall_back_to_card_no_when_cert_unknown():
+    f = prc.psa_label_facts("0000000000", "OP09-050")
+    assert f["number"] == "OP09-050" and f["variety"] == "" and f["brand"] == ""
+
+
+def _html_one(**over):
+    it = {"idx": 0, "title": "Nami R-P [OP09-050]", "card_no": "OP09-050",
+          "ebay_url": "https://x", "ref_image": "https://img/a.jpg",
+          "candidates": [{"channel": "mercari", "url": "https://jp.mercari.com/item/m1",
+                          "price": 16800, "name": "ナミ OP09-050"}]}
+    it.update(over)
+    return prc.build_restock_html([it])
+
+
+def test_label_notice_is_always_shown():
+    h = _html_one()
+    assert "ラベルの書き方が違っても" in h
+    assert "番号" in h and "変種名" in h and "絵柄" in h
+    assert "根拠になりません" in h
+
+
+def test_identity_chips_show_number_and_variety():
+    h = _html_one(psa_label={"number": "OP09-050", "variety": "ALTERNATE ART",
+                             "brand": "ONE PIECE JAPANESE OP09-EMPERORS IN THE NEW WORLD"})
+    assert "class='idf'" in h
+    assert "ALTERNATE ART" in h and "OP09-050" in h
+
+
+def test_identity_chips_absent_when_no_label_facts():
+    # psa_label を渡さない呼出(RESTOCKゲート等)は非表示 = 後方互換
+    assert "class='idf'" not in _html_one()
+
+
+def test_action_bar_precedes_heading_so_buttons_stay_visible():
+    """全部ON/OFF が h1 の下に潜って押せなくなる回帰を防ぐ。
+
+    h1 は文言が長く2〜3行に折り返すため実高さが変わる。旧CSSは .bar を top:46px 固定で
+    敷いていたので、折り返すと bar が h1 の裏に隠れた(ユーザー報告 2026-08-02)。
+    """
+    for h in (_html_one(), prc.build_confirm_html([{"idx": 0, "title": "t", "card_no": "OP09-050",
+                                                    "candidates": [], "ebay_url": "https://x"}])):
+        assert h.index("class='bar'") < h.index("<h1>"), "bar が h1 より後ろ = 隠れる配置"
+    assert ".bar{position:sticky;top:0" in prc._CSS
+    assert "position:sticky" not in prc._CSS.split("\n")[1]   # h1 行に sticky を残さない

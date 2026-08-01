@@ -1028,10 +1028,18 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         #   別物であることを明示する (2026-07-30 ユーザー指摘)。
         _sib = [x["itemID"] for x in targets
                 if x is not t and (x.get("key") or "") and x.get("key") == t.get("key")]
+        # ★2026-08-02: 目視照合の「揺れない材料」(番号 / 変種名)を画面に出す。
+        #   PSA の印字ラベルは同じカードでも書式が複数あり (例: "ONE PIECE JPN. / OP09-ALTERNATE ART"
+        #   と "ONE PIECE OP09 JP / ALTERNATE ART" は同一カード)、ラベルの見た目が違うだけで
+        #   人が「違う」を押してしまう = 使える仕入元を捨てる。
+        try:
+            _lab = prc.psa_label_facts(t.get("cert"), cn)
+        except Exception:
+            _lab = {}
         items.append({"idx": idx, "title": (t.get("title") or "")[:90], "card_no": cn,
                       "ebay_url": _ebay_itm_url(iid), "ref_image": ref, "candidates": cands,
                       "multi_variant": _mv, "cost_now": _cost_now, "price_now": _price_now,
-                      "siblings": _sib})
+                      "siblings": _sib, "psa_label": _lab})
         item_targets.append(t)
 
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
