@@ -342,8 +342,10 @@ class TestEbayFilterMap:
         assert r["set_name"] == "Premium Booster Vol.2"
 
     def test_st16_set_code_resolved(self):
+        # ST-16 は 2026-08-02 に silent collision (ST-11 Uta と衝突) 解消のため
+        # `Uta` → `GREEN Uta` へ更新済。依頼: 2026-08-02_ebay_filter_map_st18_st26_collapse_response.md
         r = api.lookup("one_piece_tcg", "ST16-005")
-        assert r["set_name"] == "Uta"
+        assert r["set_name"] == "GREEN Uta"
 
     def test_rarity_leader_returns_empty(self):
         """L (Leader) → eBay rarity は空欄."""

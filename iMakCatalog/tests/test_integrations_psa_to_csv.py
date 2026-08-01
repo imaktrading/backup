@@ -459,7 +459,9 @@ class TestSetCodeToEbayName:
         assert catalog_psa.set_code_to_ebay_name("OP-06") == "Wings of the Captain"
 
     def test_known_st_set(self):
-        assert catalog_psa.set_code_to_ebay_name("ST-16") == "Uta"
+        # 2026-08-02: ST-16 の silent collision (ST-11 Uta と衝突) 解消のため `GREEN Uta` へ.
+        # 依頼: 2026-08-02_ebay_filter_map_st18_st26_collapse_response.md
+        assert catalog_psa.set_code_to_ebay_name("ST-16") == "GREEN Uta"
 
     def test_known_prb_set(self):
         assert catalog_psa.set_code_to_ebay_name("PRB-02") == "Premium Booster Vol.2"

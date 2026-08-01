@@ -34,7 +34,9 @@ def test_known_main_sets_op_series():
 
 def test_known_starter_decks_st_series():
     assert _convert("ST-03") == "The Seven Warlords of the Sea"
-    assert _convert("ST-16") == "Uta"
+    # 2026-08-02: ST-16 の silent collision (ST-11 Uta と衝突) 解消のため `GREEN Uta`.
+    # 依頼: 2026-08-02_ebay_filter_map_st18_st26_collapse_response.md
+    assert _convert("ST-16") == "GREEN Uta"
 
 
 def test_known_extra_booster_eb_series():

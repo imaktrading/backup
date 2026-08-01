@@ -132,7 +132,7 @@ set_code:
     year: 2025
   - source: OP-15
     ebay: Adventure on Kami's Island
-    note: REVIEW — eBay 実値要確認
+    note: EN 単体リリース未収録 (現行 EN は OP15-EB04 bundled のみ)、値は OP15-EB04 `BOOSTER PACK -ADVENTURE ON KAMI'S ISLAND-` から派生 (2026-08-02)
     year: 2026
   - source: OP-16
     ebay: The Time of Battle
@@ -142,11 +142,11 @@ set_code:
   # ----- Compound Booster (OP × EB combined releases for EN market) -----
   - source: OP14-EB04
     ebay: The Azure Sea's Seven Heroes
-    note: REVIEW — EB-04 を OP-14 と bundled した EN リリース
+    note: 公式 EN dump `_opcg_en_set_mapping.json` 突合済 (`BOOSTER PACK THE AZURE SEA'S SEVEN- [OP14-EB04]`, EB-04 を OP-14 と bundled した EN リリース, 2026-08-02)
     year: 2025
   - source: OP15-EB04
     ebay: Adventure on Kami's Island
-    note: REVIEW — EB-04 を OP-15 と bundled した EN リリース
+    note: 公式 EN dump `_opcg_en_set_mapping.json` 突合済 (`BOOSTER PACK -ADVENTURE ON KAMI'S ISLAND- [OP15-EB04]`, EB-04 を OP-15 と bundled した EN リリース, 2026-08-02)
     year: 2026
 
   # ----- Starter Deck (ST) -----
@@ -198,21 +198,22 @@ set_code:
     ebay: Edward Newgate
     year: 2024
   - source: ST-16
-    ebay: Uta
-    note: ST-16 Uta starter deck (GREEN)
+    ebay: GREEN Uta
+    note: 公式 STARTER DECK -GREEN Uta- [ST-16]; ST-11 (Uta) と silent collision 解消 (2026-08-02)
     year: 2024
   - source: ST-17
     ebay: Donquixote Doflamingo
     year: 2024
   - source: ST-18
-    ebay: Monkey D Luffy
-    note: ST-18 PURPLE Monkey.D.Luffy starter — REVIEW eBay 値
+    ebay: PURPLE Monkey D. Luffy
+    note: 公式 STARTER DECK -PURPLE Monkey.D.Luffy- [ST-18]; ST-08 (Monkey D. Luffy) の色違い派生 (2026-08-02)
     year: 2025
   - source: ST-19
     ebay: Smoker
     year: 2025
   - source: ST-20
-    ebay: Charlotte Katakuri
+    ebay: YELLOW Charlotte Katakuri
+    note: 公式 STARTER DECK -YELLOW Charlotte Katakuri- [ST-20]; ST-34 と silent collision 解消 (2026-08-02)
     year: 2025
   - source: ST-21
     ebay: Gear 5
@@ -235,50 +236,52 @@ set_code:
     note: BLUE Buggy (旧 yaml 誤記 'Aramaki Premium Card Set')
     year: 2025
   - source: ST-26
-    ebay: Monkey D Luffy
-    note: PURPLE/BLACK Monkey.D.Luffy (旧 yaml 誤記 'Reverse Captains')
+    ebay: PURPLE/BLACK Monkey D. Luffy
+    note: 公式 STARTER DECK -PURPLE/BLACK Monkey.D.Luffy- [ST-26]; ST-08/18/31 の色違い派生 (2026-08-02, 旧 yaml 誤記 'Reverse Captains' 是正済)
     year: 2025
   - source: ST-27
-    ebay: Marshall D Teach
-    note: BLACK Marshall.D.Teach — REVIEW eBay 値
+    ebay: BLACK Marshall D. Teach
+    note: 公式 STARTER DECK -BLACK Marshall.D.Teach- [ST-27]; 現時点 collision 無しだが将来同名別色に備え色 prefix 付与 (2026-08-02)
     year: 2026
   - source: ST-28
-    ebay: Yamato
-    note: GREEN/YELLOW Yamato (ST-09 と同名、別レコード)
+    ebay: GREEN/YELLOW Yamato
+    note: 公式 STARTER DECK -GREEN/YELLOW Yamato- [ST-28]; ST-09 (Yamato) と silent collision 解消 (2026-08-02)
     year: 2026
   - source: ST-29
     ebay: Egghead
-    note: REVIEW eBay 値
+    note: 公式 STARTER DECK -Egghead- [ST-29] (色 prefix 無し・collision 無し, 2026-08-02)
     year: 2026
   - source: ST-30
     ebay: Luffy & Ace
-    note: STARTER DECK EX -Luffy & Ace- (JA-only 現時点) — REVIEW eBay 値
+    note: 公式 STARTER DECK EX -Luffy & Ace- [ST-30] (JA-only 現時点、色 prefix 無し・collision 無し, 2026-08-02)
     year: 2026
   # --- 2026-07-11 発売の新スターターデッキ (2026-07-24 自走取込)。命名は既存 ST 規約=目玉キャラ名。
-  #     ★REVIEW: 新弾のため eBay Set facet 実値は HQ 未確証。character 名で暫定登録 (空=skip 回避)。 ---
+  #     2026-08-02 REVIEW 解消: 公式 set_name_official (STARTER DECK -<COLOR> <NAME>- [ST-NN]) から
+  #     色 prefix + ST-08 と揃えた dot 表記へ再導出。ST-18/26/31 (Monkey D. Luffy 3種) と ST-20/34
+  #     (Charlotte Katakuri 2種) の silent collision も同時解消。 ---
   - source: ST-31
-    ebay: Monkey D Luffy
-    note: STARTER DECK -RED Monkey.D.Luffy- [ST-31] — REVIEW eBay 値 (ST-26 と同名別レコード)
+    ebay: RED Monkey D. Luffy
+    note: 公式 STARTER DECK -RED Monkey.D.Luffy- [ST-31]; ST-08/18/26 の色違い派生 (2026-08-02)
     year: 2026
   - source: ST-32
-    ebay: Roronoa Zoro
-    note: STARTER DECK -GREEN Roronoa Zoro- [ST-32] — REVIEW eBay 値
+    ebay: GREEN Roronoa Zoro
+    note: 公式 STARTER DECK -GREEN Roronoa Zoro- [ST-32]; 現時点 collision 無しだが将来同名別色に備え色 prefix 付与 (2026-08-02)
     year: 2026
   - source: ST-33
-    ebay: Kuzan
-    note: STARTER DECK -BLUE Kuzan- [ST-33] — REVIEW eBay 値
+    ebay: BLUE Kuzan
+    note: 公式 STARTER DECK -BLUE Kuzan- [ST-33]; 現時点 collision 無しだが将来同名別色に備え色 prefix 付与 (2026-08-02)
     year: 2026
   - source: ST-34
-    ebay: Charlotte Katakuri
-    note: STARTER DECK -PURPLE Charlotte Katakuri- [ST-34] — REVIEW eBay 値
+    ebay: PURPLE Charlotte Katakuri
+    note: 公式 STARTER DECK -PURPLE Charlotte Katakuri- [ST-34]; ST-20 の色違い派生 (2026-08-02)
     year: 2026
   - source: ST-35
-    ebay: Sabo
-    note: STARTER DECK -RED/BLACK Sabo- [ST-35] — REVIEW eBay 値
+    ebay: RED/BLACK Sabo
+    note: 公式 STARTER DECK -RED/BLACK Sabo- [ST-35]; 現時点 collision 無しだが将来同名別色に備え色 prefix 付与 (2026-08-02)
     year: 2026
   - source: ST-36
-    ebay: Eustass Kid
-    note: STARTER DECK -YELLOW Eustass Captain Kid- [ST-36] — REVIEW eBay 値
+    ebay: YELLOW Eustass "Captain" Kid
+    note: 公式 STARTER DECK -YELLOW Eustass"Captain"Kid- [ST-36]; 引用符を挿入して読みやすく (2026-08-02)
     year: 2026
 
   # ----- Extra Booster (EB) -----
@@ -290,11 +293,11 @@ set_code:
     year: 2024
   - source: EB-03
     ebay: ONE PIECE Heroines Edition
-    note: REVIEW eBay 値
+    note: 公式 EN dump `_opcg_en_set_mapping.json` 突合済 (`EXTRA BOOSTER -ONE PIECE HEROINES EDITION- [EB-03]`, 2026-08-02)
     year: 2025
   - source: EB-04
     ebay: Egghead Crisis
-    note: EB-04 単体 (OP14-EB04 / OP15-EB04 とは別レコード) — REVIEW eBay 値
+    note: EB-04 単体 JA (現行 EN は OP14-EB04 / OP15-EB04 に bundled されている、EN 単体未リリース)、値は JA 公式名から (2026-08-02)
     year: 2026
 
   # ----- Premium Booster (PRB) -----
