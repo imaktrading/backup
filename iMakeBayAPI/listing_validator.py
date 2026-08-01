@@ -6,6 +6,17 @@ iMak Trading Japan - リスティングCSV出力前セルフチェック
 """
 import re
 
+# セットコード接頭辞の語彙 (= catalog の product_id 実データから採取)。
+# 2026-08-01: ここが One Piece 専用 (OP|ST|EB|PRB) だったため、Gundam の
+#   title '#ST02-010' × PSA brand 'GUNDAM JAPANESE PB01-PREMIUM GOODS SET ...' が
+#   「PSA brand にセットコードが1つも無い」と誤判定され、正しいカード(catalog ST02-010_PB01)を
+#   reject していた (cert 154708676)。①catalog は正・②照合側の語彙不足 → ②を修正。
+#   Gundam: GD(1346) ST(905) EB(121) + 再録容器 PB01 / SC01 / PC1,PC2
+#   One Piece: OP(5869) ST(1510) EB(582) PRB(47)
+# 語彙は**明示リスト**にする ([A-Z]{2,4}\d{2} のワイルドカードは 'PSA10' 等に誤爆するため)。
+SET_CODE_PREFIXES = ("PRB", "OP", "ST", "EB", "GD", "PB", "SC", "PC")
+_SET_CODE_ALT = "|".join(SET_CODE_PREFIXES)   # 長い接頭辞を先に = PRB が PR|B に割れない
+
 
 def validate_title_against_psa(title, psa_brand, psa_card_number):
     """タイトル中のセットコード/番号がPSAデータと整合するか検証。
@@ -34,10 +45,10 @@ def validate_title_against_psa(title, psa_brand, psa_card_number):
     #   - 単語内部の "STOP15" の OP は隣接文字が word char で \b 無 → 非マッチ
     # 2026-04-25 ケース2 拡張:
     # PSA brand に set code が一切無い「プロモ命名のみ」のケースも _is_promo_dual_citizenship 経由で許容
-    psa_has_any_set_code = bool(re.search(r'\b(OP|ST|EB|PRB)(\d+)', psa_brand.upper()))
+    psa_has_any_set_code = bool(re.search(r'\b(%s)(\d+)' % _SET_CODE_ALT, psa_brand.upper()))
     promo_dual_reason = _is_promo_dual_citizenship(title, psa_brand)
 
-    for match in re.finditer(r'\b(OP|ST|EB|PRB)(\d+)(?:-?\d+)?\b', title_upper):
+    for match in re.finditer(r'\b(%s)(\d+)(?:-?\d+)?\b' % _SET_CODE_ALT, title_upper):
         prefix = match.group(1)
         num = match.group(2)
         code = f"{prefix}{num}"  # OP09
@@ -63,7 +74,7 @@ def validate_title_against_psa(title, psa_brand, psa_card_number):
                 )
 
     # 3. ハイフン形式のカード番号 (OP09-091等) の番号部分照合
-    for match in re.finditer(r'\b(?:OP|ST|EB|PRB)\d+-(\d+)\b', title_upper):
+    for match in re.finditer(r'\b(?:%s)\d+-(\d+)\b' % _SET_CODE_ALT, title_upper):
         title_num = match.group(1).lstrip('0')
         if psa_card_number:
             psa_num_str = str(psa_card_number).lstrip('0').split('/')[0]

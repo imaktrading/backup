@@ -16,7 +16,7 @@ import os
 # プロジェクト相対パス: iMakHQ/tests/ から iMakeBayAPI/ へ
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'iMakeBayAPI')))
 from listing_common import audit_csv_row, gate_row_or_hold
-from listing_validator import _is_promo_dual_citizenship
+from listing_validator import _is_promo_dual_citizenship, validate_title_against_psa
 
 try:
     import pytest
@@ -162,8 +162,36 @@ def _check_gate_allows_go():
     assert allowed is True, f"gate_row_or_hold must allow GO status, violations={violations}"
 
 
+def _check_set_code_vocabulary():
+    """セットコード照合の語彙は franchise 横断であること。
+
+    ①catalog(ST02-010_PB01 = Gundam Heero Yuy) は正しく、②照合側の語彙が
+    One Piece 専用 (OP|ST|EB|PRB) だったため PSA brand の 'PB01' をセットコードと
+    認識できず、正しいカードを reject していた (cert 154708676)。
+    語彙不足で落とさないこと / 本当に不整合な時は落とすこと の両方を固定する。
+    """
+    gundam_brand = "GUNDAM JAPANESE PB01-PREMIUM GOODS SET -MOBILE SUIT GUNDAM WING-"
+    assert validate_title_against_psa(
+        "PSA 10 Gundam TCG Promo Cards #ST02-010 Heero Yuy 2026", gundam_brand, "010"
+    ) == [], "PSA brand 側のセットコード(PB01)を認識できず誤 reject している"
+
+    # PSA brand にセットコードが1つも無い = 元セット参照で説明できない → 従来どおり error
+    assert validate_title_against_psa(
+        "PSA 10 One Piece #OP09-091 X", "ONE PIECE JAPANESE BOOSTER", "091"
+    ), "語彙拡張で本来の不整合検出まで緩んでいる"
+
+    # 番号不一致は語彙に関係なく落とす (誤出品防止の本丸)
+    assert validate_title_against_psa(
+        "PSA 10 Gundam #ST02-010 Heero Yuy", gundam_brand, "011"
+    ), "カード番号不一致が検出されていない"
+
+
 # pytest 用
 if _HAS_PYTEST:
+    def test_set_code_vocabulary_is_cross_franchise():
+        _check_set_code_vocabulary()
+
+
     @pytest.mark.parametrize("case", fixtures["SUCCESS_CASES"], ids=lambda c: c["name"])
     def test_audit_success_cases(case):
         _check_success(case)
@@ -227,6 +255,7 @@ if __name__ == "__main__":
     for gate_name, gate_fn in [
         ("gate_physical_blocking_by_alert", _check_gate_blocks_alert),
         ("gate_allows_go_status", _check_gate_allows_go),
+        ("set_code_vocabulary_is_cross_franchise", _check_set_code_vocabulary),
     ]:
         try:
             gate_fn()
