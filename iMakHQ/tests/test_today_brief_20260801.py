@@ -102,19 +102,85 @@ def _blockers():
     return {"requests": [], "pdca_pending": None, "pdca_oldest_days": None, "tasks": []}
 
 
-def test_pace_item_suppressed_when_less_than_one_day_behind():
-    """月初の『1日分未満の遅れ』は出さない (初版のノイズ源)。"""
-    today = datetime.date(2026, 8, 1)
-    pace = tb.month_pace(0, today, 100_000)          # gap=3,226 / need=3,333
-    items = tb.build_items(today, [], 0, [], _sheet(), _blockers(), pace)
-    assert not [i for i in items if "ペース" in i["title"]]
+def test_no_bare_pace_fact_item():
+    """『売上ペース遅れ ¥N』のような **事実だけの項目は出さない**。
 
-
-def test_pace_item_shown_when_meaningfully_behind():
+    2026-08-01 ユーザー指摘「事実の羅列で、何をすればいいかが無い」。
+    ペースは診断ヘッダで示し、指示側は必ず「何を何件やるか」にする。
+    """
     today = datetime.date(2026, 8, 20)
     pace = tb.month_pace(10_000, today, 100_000)
     items = tb.build_items(today, [], 10_000, [], _sheet(), _blockers(), pace)
-    assert [i for i in items if "ペース" in i["title"]]
+    assert not [i for i in items if "ペース" in i["title"]]
+
+
+def test_every_item_is_an_instruction_with_how_and_minutes():
+    """全項目が『やり方』と『所要時間』を持つ = 読んだ人が次の動作に移れる。"""
+    today = datetime.date(2026, 8, 1)
+    orders = [{"date": "2026-07-27", "title": "PSA 10", "amount": "USD 70.00",
+               "jpy": 11000, "ship_by": "2026-08-06"}]
+    s = _sheet(hoju={"b0": 74, "b1_4": 154, "full": 26, "live_psa": 254})
+    b = _blockers()
+    b["pdca_pending"] = 14
+    items = tb.build_items(today, orders, 0, [], s, b, None)
+    assert items
+    for it in items:
+        assert it["how"], it["title"]
+        assert it["minutes"], it["title"]
+        assert it["effect"], it["title"]
+
+
+def test_daily_quota_is_capped_not_all_at_once():
+    """『74件やれ』ではなく『今日10件』に切る (毎日削れる量にする)。"""
+    today = datetime.date(2026, 8, 1)
+    s = _sheet(hoju={"b0": 74, "b1_4": 154, "full": 26, "live_psa": 254})
+    it = [i for i in tb.build_items(today, [], 0, [], s, _blockers(), None)
+          if "仕入元URL" in i["title"]][0]
+    assert f"今日 {tb.DAILY_HOJU_CHECK}件" in it["title"]
+    assert it["count"] == 74                      # 母数は残す
+    assert it["minutes"] == tb.DAILY_HOJU_CHECK * tb.MIN_PER_HOJU
+
+
+def test_quota_never_exceeds_remaining_work():
+    """残 3件しか無いのに『今日10件』とは言わない。"""
+    today = datetime.date(2026, 8, 1)
+    s = _sheet(hoju={"b0": 22, "b1_4": 0, "full": 0, "live_psa": 22})
+    it = [i for i in tb.build_items(today, [], 0, [], s, _blockers(), None)
+          if "仕入元URL" in i["title"]][0]
+    assert "今日 10件" in it["title"]              # 22 > 10 なので 10件
+    s2 = _sheet(hoju={"b0": 20, "b1_4": 0, "full": 0, "live_psa": 20})
+    it2 = [i for i in tb.build_items(today, [], 0, [], s2, _blockers(), None)
+           if "仕入元URL" in i["title"]][0]
+    assert it2["count"] == 20
+
+
+# ----- sales_econ: 目標を「件数」に翻訳する -----
+
+def test_sales_econ_translates_target_into_sales_count():
+    rows = [("2026-05", 15_000), ("2026-05", 10_000), ("2026-06", 20_000)]
+    e = tb.sales_econ(rows, 100_000)
+    assert e["n"] == 3
+    assert e["avg"] == 15_000
+    assert round(e["need_sales"], 2) == round(100_000 / 15_000, 2)
+
+
+def test_sales_econ_marks_months_that_hit_target():
+    rows = [("2026-05", 120_000), ("2026-06", 40_000)]
+    e = tb.sales_econ(rows, 100_000)
+    assert e["months_ok"] == ["2026-05"] and e["months_ng"] == ["2026-06"]
+
+
+def test_sales_econ_none_when_no_history():
+    assert tb.sales_econ([], 100_000) is None
+
+
+# ----- トラフィック上限の扱い -----
+
+def test_stale_view_cutoff_is_lowest_returned_value():
+    """API は 200件しか返さない (offset 無効・実測)。『閲覧0』と断定せず『以下』と言う。"""
+    rows = [("a", 100, 50, 0), ("b", 80, 5, 0)]
+    assert tb.stale_view_cutoff(rows) == 5
+    assert tb.stale_view_cutoff([]) is None
 
 
 def test_unshipped_order_is_p0_with_days_left():
