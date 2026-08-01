@@ -86,6 +86,16 @@ def test_autorun_batch_files_are_ascii_only():
         raw = p.read_bytes()
         assert all(b < 128 for b in raw), f"{name} に非ASCIIが入った (再発経路)"
         assert b"desk_autorun_setup.py" in raw, f"{name} が setup を呼んでいない"
+        # ★2026-08-02: 生成時のエスケープ取り違えで `\tools` が **TAB + ools** になり
+        #   `Errno 22 Invalid argument` でファイルが開けなかった。
+        #   バックスラッシュを使わなければこの経路自体が消える (Windows の python は
+        #   スラッシュ区切りを受け付ける)。制御文字が混ざっていないことも直接見る。
+        assert b"\\" not in raw, f"{name} にバックスラッシュがある (エスケープ事故の再発経路)"
+        assert not any(b < 32 and b not in (10, 13) for b in raw), \
+            f"{name} に制御文字が混ざっている (TAB 混入の再発)"
+        # 呼び先が実在すること (パスが壊れていたら落とす)
+        called = ROOT / "iMakHQ" / "tools" / "desk_autorun_setup.py"
+        assert called.exists(), "desk_autorun_setup.py が無い"
 
 
 def test_batch_files_have_no_bom():
