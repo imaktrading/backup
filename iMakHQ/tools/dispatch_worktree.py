@@ -256,6 +256,26 @@ def _resolve_claude_exe() -> str:
     return found
 
 
+# ★2026-08-01 ユーザー確定の「1丁目1番地」。**セッションが変わっても、誰が担当になっても**
+#   必ず効かせるため、headless で起動する全 worktree のプロンプト先頭に入れる。
+#   グローバル CLAUDE.md にも同文を置いてあるが、headless は起動プロンプトが行動を支配するので
+#   ここに書かないと守られない。文言を変えないこと (変えると担当ごとに解釈が割れる)。
+_TRIAGE_RULE = (
+    "【🔀 1丁目1番地 — カタログ絡みは必ずこの手順で判定してから直す】\n"
+    "  ① カタログのデータは正しいのか\n"
+    "  ② 出品くんの引き方は正しいのか\n"
+    "  ①が正しいなら → ②を修正 / ②が正しいなら → ①を修正 /\n"
+    "  ①②とも誤りなら → 両方直す / ①②とも正しいなら → 直すものは無い(= 出品しない が答え)\n"
+    "- **分類はこの4つだけ。5つ目は存在しない。** 判定を書かずに個別修正を始めるな。\n"
+    "- 判定基準: **①が正しい**=公式dump/ebay_filter_map から**今その場で計算した値**と一致する\n"
+    "  (人が過去に焼いた値を正の根拠にしない) / **②が正しい**=入力が canonical KEY だけ\n"
+    "  (タイトル等の自由文を使っていない)。\n"
+    "- 回答書の**冒頭に①②の判定を書く**。②が原因ならカタログに依頼を出さず自分側で直す。\n"
+    "- 同じ判定が2回出たら、個別のカードを直すのではなく**発生源を直す**。\n"
+    "- この手順に条件や例外を足さない。\n\n"
+)
+
+
 def _build_prompt(wt: str, pending: list[Path]) -> str:
     workdir, branch, label = TARGETS[wt]
     files = "\n".join(f"  - {p}" for p in pending)
@@ -263,6 +283,7 @@ def _build_prompt(wt: str, pending: list[Path]) -> str:
         f"あなたは {label} ({wt}) の担当 Claude セッションです。窓口セッション (出品専任) から "
         f"headless で起動されました。自分の requests を処理してください。\n\n"
         f"【あなたの領域】{workdir} (branch {branch})。他 worktree は読取も含め触らないこと。\n\n"
+        + _TRIAGE_RULE +
         f"【処理対象】共有領域の未処理依頼 {len(pending)} 件:\n{files}\n\n"
         "【やること】各依頼を読み、対応判断し、同じ dir に **`<元のfile名>_draft.md`** を書く。\n"
         "- ★**`_response.md` は書くな**。あなたが書けるのは draft まで。正式回答への昇格は窓口が\n"
@@ -295,6 +316,7 @@ def _build_implement_prompt(wt: str, responses: list) -> str:
         f"あなたは {label} ({wt}) の担当 Claude セッションです。窓口から headless で起動されました。\n"
         f"**窓口が検算して『実装 GO』を出した案件を実装してください。**\n\n"
         f"【あなたの領域】{workdir} (branch {branch})。他 worktree は読取も含め触らないこと。\n\n"
+        + _TRIAGE_RULE +
         f"【対象】{len(responses)} 件:\n{files}\n\n"
         "【やること】\n"
         "1. 各回答書を読み、**指示された実装をそのまま行う**。設計を勝手に変えない。\n"

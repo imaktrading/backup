@@ -247,3 +247,45 @@ def test_render_says_nothing_to_do_when_empty():
     today = datetime.date(2026, 8, 1)
     txt = tb.render(today, [], None, _sheet(), 100, None, [], 5)
     assert "出品を回してください" in txt
+
+
+# ----- 「どのボタンを押すか」まで落ちているか (2026-08-01 ユーザー指摘) -----
+
+def test_every_actionable_item_has_button_or_url():
+    """指示は必ず **押す先** を持つ。文章の手順だけで終わらせない。"""
+    today = datetime.date(2026, 8, 1)
+    orders = [{"date": "2026-07-27", "title": "PSA 10", "amount": "USD 70.00",
+               "jpy": 11000, "ship_by": "2026-08-06"}]
+    s = _sheet(hoju={"b0": 74, "b1_4": 154, "full": 26, "live_psa": 254},
+               meta={"1": ("ゲンガー", "TCG")})
+    b = _blockers()
+    b["pdca_pending"] = 14
+    b["tasks"] = [("iMakHQ_DispatchWatch", 255)]
+    b["requests"] = [("catalog", 1, "x.md")]
+    items = tb.build_items(today, orders, 0, [("1", 900, 130, 0)], s, b, None)
+    assert items
+    for it in items:
+        assert it["button"] or it["url"], it["title"]
+
+
+def test_button_labels_exist_in_control_panel():
+    """★ボタン名は control_panel.SCRIPTS の label と完全一致していること。
+
+    ズレると『▶ 実行』が出ずに指示が押せなくなる (文字列でしか繋がっていないため
+    リネーム時に静かに壊れる)。ここで固定する。
+    """
+    import io
+    import re
+    path = os.path.join(os.path.dirname(__file__), "..", "control_panel.py")
+    src = io.open(path, encoding="utf-8").read()
+    labels = set(re.findall(r'"label": "([^"]+)"', src))
+    for b in (tb.BTN_HOJU, tb.BTN_END, tb.BTN_PRICE, tb.BTN_RESTOCK):
+        assert b in labels, b
+
+
+def test_render_prints_the_button_to_press():
+    today = datetime.date(2026, 8, 1)
+    s = _sheet(hoju={"b0": 74, "b1_4": 154, "full": 26, "live_psa": 254})
+    items = tb.build_items(today, [], 0, [], s, _blockers(), None)
+    txt = tb.render(today, items, None, s, 100, None, [], 5)
+    assert "押すボタン" in txt and tb.BTN_HOJU in txt

@@ -125,8 +125,18 @@ def category_skew(counts):
     return top, n / total, thin
 
 
+# ★指示は「押すボタン」まで落とす。文章で手順を書いても人は動けない (2026-08-01 ユーザー指摘)。
+#   値は control_panel.SCRIPTS の label と **完全一致**させること (パネル側が label で引く)。
+#   ここに無い作業は url= で開き先を持たせる。
+BTN_HOJU = "🩹 補URL補強(昼確認/slice3)"
+BTN_END = "取下再出品① 取下げ(End)"
+BTN_PRICE = "💲 価格見直し"
+BTN_RESTOCK = "🛒 在庫切れ再仕入れ"
+URL_ORDERS = "https://www.ebay.com/sh/ord?filter=status%3AAWAITING_SHIPMENT"
+
+
 def make_item(pri, title, why, action, source, count=None, days_left_=None,
-              how="", effect="", minutes=None):
+              how="", effect="", minutes=None, button="", url=""):
     """title は **今日の指示** (「〜を N 件やる」)。事実だけ書かない。
 
     why=数字の根拠 / how=どのボタン・コマンドか / effect=やると何が変わるか /
@@ -134,7 +144,8 @@ def make_item(pri, title, why, action, source, count=None, days_left_=None,
     """
     return {"pri": pri, "title": title, "why": why, "action": action,
             "source": source, "count": count, "days_left": days_left_,
-            "how": how, "effect": effect, "minutes": minutes}
+            "how": how, "effect": effect, "minutes": minutes,
+            "button": button, "url": url}
 
 
 def sales_econ(sold_rows, target_jpy):
@@ -449,8 +460,8 @@ def build_items(today, orders, sold_jpy, traffic_rows, sheet, blockers, pace, ec
             f"{o['date']} 注文 / {o['amount']} 入金済 / 発送期限 {o['ship_by']}"
             + (f" = 残 {dl} 日" if dl is not None else ""),
             "仕入れ → 発送",
-            "eBay Fulfillment API", days_left_=dl, minutes=30,
-            how="仕入元を確定して購入 → 到着後に発送登録",
+            "eBay Fulfillment API", days_left_=dl, minutes=30, url=URL_ORDERS,
+            how="Seller Hub の Awaiting shipment を開く → 仕入元を確定して購入 → 発送登録",
             effect="期限超過は Late shipment = Defect。1件でも account health が削れる"))
 
     # --- P1: 需要が実証済みなのに取れていない (売上に一番近い) ---
@@ -468,9 +479,8 @@ def build_items(today, orders, sold_jpy, traffic_rows, sheet, blockers, pace, ec
             f"30日で {' / '.join(label(i, v) for i, _, v, _ in hot[:3])} — 閲覧はあるのに成約0。"
             f"集中は {top_cat}",
             f"上位 {n} 件を処理", "eBay Analytics × 管理スプシ",
-            count=len(hot), minutes=n * MIN_PER_PRICE,
-            how="出品くん →「値下げ余地」タブで該当を確認 → 余地があれば値下げ / "
-                "無ければ同じ系統をもう1件出す",
+            count=len(hot), minutes=n * MIN_PER_PRICE, button=BTN_PRICE,
+            how="値下げ余地を出して該当を確認 → 余地があれば値下げ / 無ければ同系統をもう1件出す",
             effect=f"閲覧が付いている = 需要は実証済。1件成約で平均 "
                    f"¥{(econ or {}).get('avg', 0):,.0f}"))
 
@@ -487,8 +497,8 @@ def build_items(today, orders, sold_jpy, traffic_rows, sheet, blockers, pace, ec
                 f"(内訳 {', '.join(f'{k}{n}' for k, n in cats.most_common(3))})",
                 "出品を増やすのではなく、動かない枠を売れ筋に入れ替える",
                 "eBay Analytics (上位200件のみ返るため『以下』とだけ言える) × 管理スプシ",
-                count=len(stale), minutes=20,
-                how="取下再出品タブで対象を選び END → 空いた枠に売れている系統を出す",
+                count=len(stale), minutes=20, button=BTN_END,
+                how="対象を END → 空いた枠に売れている系統を出す",
                 effect="出品数は足りている。回転しない在庫を抱えても露出は増えない"))
 
     # --- P1: 補URL ゼロ (売れた瞬間に履行不能 = キャンセル = BAN 方向) ---
@@ -500,8 +510,8 @@ def build_items(today, orders, sold_jpy, traffic_rows, sheet, blockers, pace, ec
             f"live PSA {h.get('live_psa','?')}件中 {h['b0']}件が補URL 0本 "
             f"(1-4本={h.get('b1_4','?')} / 満杯={h.get('full','?')})",
             f"{n} 件だけ確証する", "管理スプシ (backfill_status)",
-            count=h["b0"], minutes=n * MIN_PER_HOJU,
-            how="出品くん → 🩹補URL確証 ボタン",
+            count=h["b0"], minutes=n * MIN_PER_HOJU, button=BTN_HOJU,
+            how="補URL補強を回して確証する",
             effect=f"売れてから探すと履行不能→キャンセル→Defect。毎日{n}件で "
                    f"{-(-h['b0'] // n)}日で解消"))
 
@@ -510,19 +520,20 @@ def build_items(today, orders, sold_jpy, traffic_rows, sheet, blockers, pace, ec
         items.append(make_item(
             "P2", f"{target} の依頼 {n}件を返球する",
             f"最新: {latest}", "返球 or 督促", "requests dir", count=n, minutes=10,
-            how="窓口として内容を見て _response.md を書く",
+            url=os.path.join(REQUESTS_ROOT, target, "requests"),
+            how="requests フォルダを開いて _response.md を書く",
             effect="放置すると相手 worktree が止まる"))
     if blockers.get("pdca_pending"):
         items.append(make_item(
             "P2", f"PDCA キュー {blockers['pdca_pending']}件 — 発行済みで動いていないものを見る",
             f"最古 {blockers.get('pdca_oldest_days','?')} 日前", "滞留の原因を潰す",
-            "pdca.db", count=blockers["pdca_pending"], minutes=15,
+            "pdca.db", count=blockers["pdca_pending"], minutes=15, url=REVIEW_DIR,
             how="review_logs の digest で再発回数を確認",
             effect="滞留が長い = 依頼しても解決しない構造問題の疑い"))
     for name, rc in blockers["tasks"]:
         items.append(make_item(
             "P2", f"定期タスクの異常を確認: {name}",
-            f"LastTaskResult={rc}", "実行ログ確認", "schtasks", minutes=10,
+            f"LastTaskResult={rc}", "実行ログ確認", "schtasks", minutes=10, url="taskschd.msc",
             how="タスクスケジューラの履歴 → 該当時刻のログ",
             effect="無人巡回が止まると在庫/監査が黙って止まる"))
     return items
@@ -576,6 +587,10 @@ def render(today, items, pace, sheet, traffic_total, bottleneck, errors, limit, 
     for i, it in enumerate(top, 1):
         m = f" — 約{it['minutes']:.0f}分" if it.get("minutes") else ""
         L += [f"### {i}. [{it['pri']}] {it['title']}{m}"]
+        if it.get("button"):
+            L.append(f"- **押すボタン**: 出品くん → 「{it['button']}」")
+        elif it.get("url"):
+            L.append(f"- **開く**: {it['url']}")
         if it.get("how"):
             L.append(f"- **やり方**: {it['how']}")
         L.append(f"- 数字: {it['why']}")

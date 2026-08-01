@@ -1334,9 +1334,13 @@ class HomePanel:
         #   月商目標から逆算した優先順で、期限ものを先頭に出す。
         tb_frame = ttk.LabelFrame(root, text="📋 今日やること (秘書くん)", padding=6)
         tb_frame.pack(fill="x", padx=10, pady=(0, 6))
-        self.brief_var = tk.StringVar(value="読込中…")
-        ttk.Label(tb_frame, textvariable=self.brief_var, font=("Consolas", 9),
+        self.brief_head = tk.StringVar(value="読込中…")
+        ttk.Label(tb_frame, textvariable=self.brief_head, font=("Consolas", 9),
                   justify="left", foreground="#222222").pack(anchor="w")
+        # ★1行 = 1指示 + **その場で押せるボタン**。文章で手順を書いても人は動けない
+        #   (2026-08-01 ユーザー指摘「で、どのボタンを押せばいいのか」)。
+        self.brief_rows = ttk.Frame(tb_frame)
+        self.brief_rows.pack(fill="x", pady=(2, 0))
         ttk.Button(tb_frame, text="全文を開く",
                    command=self.open_today_brief).pack(anchor="e", pady=(2, 0))
         threading.Thread(target=self._refresh_today_brief, daemon=True).start()
@@ -1654,28 +1658,57 @@ class HomePanel:
                                errors="replace", timeout=300,
                                env=dict(os.environ, PYTHONIOENCODING="utf-8"))
             d = _json.loads(r.stdout or "{}")
-            lines = []
-            pace = d.get("pace") or {}
-            if pace:
-                mark = "✅" if pace.get("on_track") else "⚠️"
-                lines.append(f"{mark} 今月 ¥{pace.get('sold', 0):,.0f} / 目標 ¥{pace.get('target', 0):,} "
-                             f"(残 {pace.get('remaining_days', 0)}日 → ¥{pace.get('need_per_day', 0):,.0f}/日)")
-            for i, it in enumerate(d.get("items", []), 1):
-                dl = it.get("days_left")
-                due = f" [残{dl}日]" if isinstance(dl, int) and dl < 900 else ""
-                lines.append(f"{i}. [{it.get('pri')}] {it.get('title', '')[:52]}{due}")
-            bn = d.get("bottleneck")
-            if bn:
-                lines.append(f"★詰まり: {bn['name']} {bn['count']}件 (手作業 約{bn['minutes']:.0f}分)")
+            econ = d.get("econ") or {}
+            head = []
+            if econ:
+                head.append(f"平均成約 ¥{econ.get('avg', 0):,.0f} → 月目標には "
+                            f"{econ.get('need_sales', 0):.1f}件/月 の成約が必要 "
+                            f"(達成 {len(econ.get('months_ok', []))}ヶ月 / 未達 {len(econ.get('months_ng', []))}ヶ月)")
             for e in d.get("errors", []):
-                lines.append(f"⚠️ {e}")
-            txt = "\n".join(lines) if lines else "(今日の期限もの・提案は閾値未満)"
+                head.append(f"⚠️ {e}")
+            items = d.get("items", [])
         except Exception as e:                                # noqa: BLE001
-            txt = f"⚠️ 取得失敗: {e}"
+            head, items = [f"⚠️ 取得失敗: {e}"], []
         try:
-            self.root.after(0, lambda: self.brief_var.set(txt))
+            self.root.after(0, lambda: self._render_brief_rows("\n".join(head), items))
         except Exception:                                     # noqa: BLE001
             pass
+
+    def _render_brief_rows(self, head, items):
+        """1指示 = 1行 + 実行ボタン。押した先は既存のスクリプト/画面 (新経路を作らない)。"""
+        self.brief_head.set(head or "(今日の期限もの・提案は閾値未満)")
+        for w in self.brief_rows.winfo_children():
+            w.destroy()
+        label_to_idx = {s.get("label"): i for i, s in enumerate(SCRIPTS)}
+        for i, it in enumerate(items, 1):
+            row = ttk.Frame(self.brief_rows)
+            row.pack(fill="x", pady=1)
+            dl = it.get("days_left")
+            due = f" [残{dl}日]" if isinstance(dl, int) and dl < 900 else ""
+            mins = f" 約{it['minutes']:.0f}分" if it.get("minutes") else ""
+            ttk.Label(row, text=f"{i}. [{it.get('pri')}] {it.get('title', '')[:58]}{due}{mins}",
+                      font=("Consolas", 9), foreground="#222222").pack(side="left", anchor="w")
+            btn_label = it.get("button") or ""
+            idx = label_to_idx.get(btn_label)
+            if idx is not None:
+                ttk.Button(row, text=f"▶ {btn_label[:22]}", width=24,
+                           command=lambda k=idx: self.run_script(k)).pack(side="right")
+            elif it.get("url"):
+                ttk.Button(row, text="▶ 開く", width=8,
+                           command=lambda u=it["url"]: self._open_target(u)).pack(side="right")
+
+    def _open_target(self, target):
+        """URL / フォルダ / mmc を開く (指示から1クリックで現場へ飛ぶ)。"""
+        import webbrowser
+        try:
+            if str(target).startswith("http"):
+                webbrowser.open(target)
+            elif str(target).endswith(".msc"):
+                subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
+            else:
+                os.startfile(target)                          # noqa: S606
+        except Exception as e:                                # noqa: BLE001
+            messagebox.showwarning("開けません", f"{target}\n{e}")
 
     def open_today_brief(self):
         """秘書くんの全文 (根拠 + やること) をテキストで開く。"""
