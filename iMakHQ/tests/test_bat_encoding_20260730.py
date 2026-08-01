@@ -48,6 +48,46 @@ def test_no_utf8_encoded_batch_files():
     assert not bad, "cmd.exe が読めない .bat がある (CP932 で保存し直すこと):\n" + "\n".join(bad)
 
 
+def test_batch_files_use_crlf():
+    """★2026-08-02 追加: `.bat` は **CRLF** でないと cmd.exe が行を認識できない。
+
+    実害: `自走ON_ALPHA.bat` を「20分→5分」に直すとき、テキストで読んで `newline=""` で
+    書き戻したため **CRLF が全部 LF になった**。ユーザーの画面に
+    `'します' は、内部コマンドまたは外部コマンドとして認識されていません` が大量に出た。
+    **1回目の作成は正しく、2回目の書き換えで壊した。**
+    既存の encoding テストは CP932 で読めるかしか見ておらず、改行を見ていなかったので通った。
+    = 「直したつもりが壊す」経路が塞がっていなかった。
+
+    ★対象は**自走の .bat だけ**にしてある。既存の .bat には LF のものが 20本以上あり、
+    実運用で動いている (cmd は単純な行なら LF を許容する)。一括で書き換えるのは
+    別の事故を呼ぶので、ユーザー指示なしにはやらない。新しく作るものから守る。
+    """
+    bad = []
+    for name in ("自走ON_ALPHA.bat", "自走OFF_ALPHA.bat"):
+        p = ROOT / "iMakHQ" / name
+        if not p.exists():
+            continue
+        raw = p.read_bytes()
+        if raw.count(b"\n") != raw.count(b"\r\n"):
+            bad.append(str(p))
+    assert not bad, "LF だけの行がある .bat (CRLF で保存し直すこと):\n" + "\n".join(bad)
+
+
+def test_autorun_batch_files_are_ascii_only():
+    """自走 ON/OFF の `.bat` は ASCII のみ。日本語の表示は Python 側 (setup) が持つ。
+
+    `.bat` に日本語を置くと CP932 と CRLF の両方を守り続ける必要があり、書き換えのたびに
+    壊れる。表示・確認・分岐を Python に寄せれば、この事故は構造的に起きない。
+    """
+    for name in ("自走ON_ALPHA.bat", "自走OFF_ALPHA.bat"):
+        p = ROOT / "iMakHQ" / name
+        if not p.exists():
+            continue
+        raw = p.read_bytes()
+        assert all(b < 128 for b in raw), f"{name} に非ASCIIが入った (再発経路)"
+        assert b"desk_autorun_setup.py" in raw, f"{name} が setup を呼んでいない"
+
+
 def test_batch_files_have_no_bom():
     """BOM 付きだと 1 行目 (`@echo off`) が壊れて画面にゴミが出る。"""
     bom = [str(p) for p in _bat_files() if p.read_bytes()[:3] == b"\xef\xbb\xbf"]
