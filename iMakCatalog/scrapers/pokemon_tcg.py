@@ -326,19 +326,38 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
             out["type_en"] = _EN_TYPE_NAMES.get(en_type, en_type.capitalize())
             out["type_jp"] = _EN_TO_JP.get(out["type_en"], "")
 
-    # Set name (拡張パック「XXX」 / ハイクラスパック「XXX」 等) — 任意の空白許可
-    set_patterns = [
-        r"(拡張パック\s*「[^」]+」)",
-        r"(ハイクラスパック\s*「[^」]+」)",
-        r"(スターターセット[^「」]*?「[^」]+」)",
-        r"(スペシャル(?:パック|BOX|セット)[^「」]*?「[^」]+」)",
-        r"(プロモカード[^「」]*?「[^」]+」)",
-    ]
-    for pat in set_patterns:
-        m = re.search(pat, text)
-        if m:
-            out["set_name_official"] = re.sub(r"\s+", " ", m.group(1)).strip()
-            break
+    # Set name — 構造セレクタ優先、regex は fallback。
+    #   2026-08-01 差替 (窓口回答書 §C-2/C-3): 公式 detail HTML は set 名を構造化した
+    #     <section class="SubSection"><div class="PopupSub"><ul class="List">
+    #       <li class="List_item">TEXT or <a>TEXT</a></li>  ← 先頭を採る
+    #   に持っているので、まずこれを取る。regex 5本は「」括弧必須で `『』` / 括弧無し /
+    #   「おまけカード」「参加賞」「封入カード」等の表記が拾えず 6,533件 NULL の主因だった。
+    #   複数 <li> がある場合は **先頭が商品名**、2番目以降はシリーズ名 / 購入導線なので捨てる。
+    #   セレクタが空なら既存の 5 regex に fallback。両方空なら NULL (fail_closed = 推測で埋めない)。
+    m_sub = re.search(
+        r'<section\s+class="SubSection">.*?<li\s+class="List_item"[^>]*>(.*?)</li>',
+        html_decoded,
+        re.DOTALL,
+    )
+    if m_sub:
+        inner_text = re.sub(r"<[^>]+>", "", m_sub.group(1))
+        normalized = re.sub(r"\s+", " ", inner_text).strip()
+        if normalized:
+            out["set_name_official"] = normalized
+
+    if not out.get("set_name_official"):
+        set_patterns = [
+            r"(拡張パック\s*「[^」]+」)",
+            r"(ハイクラスパック\s*「[^」]+」)",
+            r"(スターターセット[^「」]*?「[^」]+」)",
+            r"(スペシャル(?:パック|BOX|セット)[^「」]*?「[^」]+」)",
+            r"(プロモカード[^「」]*?「[^」]+」)",
+        ]
+        for pat in set_patterns:
+            m = re.search(pat, text)
+            if m:
+                out["set_name_official"] = re.sub(r"\s+", " ", m.group(1)).strip()
+                break
 
     # Illustrator — HTML 内の <div class="author">...</div> から取る方が確実
     m = re.search(r'<div\s+class="author">\s*イラストレーター[\s　]*([^<]+?)\s*</div>',
