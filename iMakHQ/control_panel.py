@@ -1328,23 +1328,6 @@ class HomePanel:
                   foreground="#333333", justify="left").pack(anchor="w")
         self._update_clocks()
 
-        # === 📋 今日やること (秘書くん 2026-08-01) ===
-        #   信号 (発送期限/閲覧数/カテゴリ偏り/補URL滞留/依頼滞留) は前から全部あったが、
-        #   **バラバラの場所にあって「今日どれからやるか」が人の頭の中にしか無かった**。
-        #   月商目標から逆算した優先順で、期限ものを先頭に出す。
-        tb_frame = ttk.LabelFrame(root, text="📋 今日やること (秘書くん)", padding=6)
-        tb_frame.pack(fill="x", padx=10, pady=(0, 6))
-        self.brief_head = tk.StringVar(value="読込中…")
-        ttk.Label(tb_frame, textvariable=self.brief_head, font=("Consolas", 9),
-                  justify="left", foreground="#222222").pack(anchor="w")
-        # ★1行 = 1指示 + **その場で押せるボタン**。文章で手順を書いても人は動けない
-        #   (2026-08-01 ユーザー指摘「で、どのボタンを押せばいいのか」)。
-        self.brief_rows = ttk.Frame(tb_frame)
-        self.brief_rows.pack(fill="x", pady=(2, 0))
-        ttk.Button(tb_frame, text="全文を開く",
-                   command=self.open_today_brief).pack(anchor="e", pady=(2, 0))
-        threading.Thread(target=self._refresh_today_brief, daemon=True).start()
-
         # === 担当者の稼働状況 (2026-07-31) ===
         #   worktree_board.py は前から在ったが **CLI にしか出ておらず、誰も見ていなかった**。
         #   実際に「監視くんの依頼が6日前から相手ボールのまま」「ルーティング待ちが8時間放置」
@@ -1640,84 +1623,6 @@ class HomePanel:
             self.root.after(0, _apply)
         except Exception:                                     # noqa: BLE001
             pass
-
-    def _refresh_today_brief(self):
-        """`today_brief.py --json` を叩き、上位を 1行/件 に畳んでトップに出す (2026-08-01)。
-
-        パネルは狭いので **タイトルと期限だけ**。根拠と手順は「全文を開く」で読む。
-        取得できなかった source があれば末尾に出す (0件と不明を混ぜない)。
-        """
-        import json as _json
-        import subprocess
-
-        try:
-            script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                  "tools", "today_brief.py")
-            r = subprocess.run([sys.executable, "-X", "utf8", script, "--json", "--limit", "5"],
-                               capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=300,
-                               env=dict(os.environ, PYTHONIOENCODING="utf-8"))
-            d = _json.loads(r.stdout or "{}")
-            econ = d.get("econ") or {}
-            head = []
-            if econ:
-                head.append(f"平均成約 ¥{econ.get('avg', 0):,.0f} → 月目標には "
-                            f"{econ.get('need_sales', 0):.1f}件/月 の成約が必要 "
-                            f"(達成 {len(econ.get('months_ok', []))}ヶ月 / 未達 {len(econ.get('months_ng', []))}ヶ月)")
-            for e in d.get("errors", []):
-                head.append(f"⚠️ {e}")
-            items = d.get("items", [])
-        except Exception as e:                                # noqa: BLE001
-            head, items = [f"⚠️ 取得失敗: {e}"], []
-        try:
-            self.root.after(0, lambda: self._render_brief_rows("\n".join(head), items))
-        except Exception:                                     # noqa: BLE001
-            pass
-
-    def _render_brief_rows(self, head, items):
-        """1指示 = 1行 + 実行ボタン。押した先は既存のスクリプト/画面 (新経路を作らない)。"""
-        self.brief_head.set(head or "(今日の期限もの・提案は閾値未満)")
-        for w in self.brief_rows.winfo_children():
-            w.destroy()
-        label_to_idx = {s.get("label"): i for i, s in enumerate(SCRIPTS)}
-        for i, it in enumerate(items, 1):
-            row = ttk.Frame(self.brief_rows)
-            row.pack(fill="x", pady=1)
-            dl = it.get("days_left")
-            due = f" [残{dl}日]" if isinstance(dl, int) and dl < 900 else ""
-            mins = f" 約{it['minutes']:.0f}分" if it.get("minutes") else ""
-            ttk.Label(row, text=f"{i}. [{it.get('pri')}] {it.get('title', '')[:58]}{due}{mins}",
-                      font=("Consolas", 9), foreground="#222222").pack(side="left", anchor="w")
-            btn_label = it.get("button") or ""
-            idx = label_to_idx.get(btn_label)
-            if idx is not None:
-                ttk.Button(row, text=f"▶ {btn_label[:22]}", width=24,
-                           command=lambda k=idx: self.run_script(k)).pack(side="right")
-            elif it.get("url"):
-                ttk.Button(row, text="▶ 開く", width=8,
-                           command=lambda u=it["url"]: self._open_target(u)).pack(side="right")
-
-    def _open_target(self, target):
-        """URL / フォルダ / mmc を開く (指示から1クリックで現場へ飛ぶ)。"""
-        import webbrowser
-        try:
-            if str(target).startswith("http"):
-                webbrowser.open(target)
-            elif str(target).endswith(".msc"):
-                subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
-            else:
-                os.startfile(target)                          # noqa: S606
-        except Exception as e:                                # noqa: BLE001
-            messagebox.showwarning("開けません", f"{target}\n{e}")
-
-    def open_today_brief(self):
-        """秘書くんの全文 (根拠 + やること) をテキストで開く。"""
-        import subprocess
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "tools", "today_brief.py")
-        subprocess.Popen([sys.executable, "-X", "utf8", script, "--limit", "8"],
-                         creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
-                         env=dict(os.environ, PYTHONIOENCODING="utf-8"))
 
     def _refresh_worktree_board(self):
         """`worktree_board.py` の集計を 1 行/担当 に畳んでトップに出す (2026-07-31)。
