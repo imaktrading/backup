@@ -83,8 +83,13 @@ def _card_tokens(card_no):
     return [t for t in re.split(r"[^A-Za-z0-9]", (card_no or "").upper()) if t]
 
 
-def _name_matches_card(name, card_no):
+def _name_matches_card(name, card_no, market_no=None):
     """商品名が対象カード番号を『トークン連続一致』で含むか (id-strict, fail-closed)。
+
+    ★2026-08-02: market_no(= catalog specs.card_number_text = **市場が使う表記**)も受ける。
+      ポケカは canonical `XY11-034` に対し市場は `034/054` と書くため、canonical だけで
+      照合すると在庫が実在しても全部弾かれていた(補0本の候補ゼロ 26件の主因)。
+      どちらか一方の表記で一致すれば採用する(どちらも id 由来なので厳密性は落ちない)。
 
     番号をハイフン区切りでトークン化し、商品名のトークン列に連続部分列として現れるか判定。
     単純な部分文字列照合だと promo の短い番号 'P-041' が遊戯王 'FOTB-JP041'(=JP041) 等に
@@ -93,15 +98,16 @@ def _name_matches_card(name, card_no):
 
     SNKRDUNK 側 (parse_search_for_card) と同じ fail-closed 思想。番号が無ければ採用しない。
     """
-    parts = _card_tokens(card_no)
-    if not parts:
-        return False
     tokens = [t for t in re.split(r"[^A-Za-z0-9]", (name or "").upper()) if t]
-    m = len(parts)
-    for i in range(len(tokens) - m + 1):
-        if tokens[i:i + m] == parts:
-            return True
-    return False
+
+    def _hit(no):
+        parts = _card_tokens(no)
+        if not parts:
+            return False
+        m = len(parts)
+        return any(tokens[i:i + m] == parts for i in range(len(tokens) - m + 1))
+
+    return _hit(card_no) or _hit(market_no)
 
 
 def _ebay_item_id(url):
@@ -222,8 +228,14 @@ def card_meta_for_key(key, _cache={}, _db=r"C:/dev/iMak_data/catalog/products.sq
             set_name_ebay = (sp.get("set_name_ebay") or "").strip()  # set名(英語) → SNKRDUNK用
             variant_type = (sp.get("variant_type") or "").strip()
             rarity = (sp.get("rarity") or "").strip()
+            # ★2026-08-02: 市場が実際に使う番号表記。ポケカは canonical `XY11-034` に対し
+            #   出品タイトルは `034/054` と書く。canonical で検索すると **0件**になり、
+            #   名前だけ拾う救済枠(loose_cands)も同じ検索結果から拾う作りなので道連れで空になる
+            #   (実測: 補0本の候補ゼロ 33件中 26件がポケカ)。catalog が既に持っている値を使う。
+            market_no = (sp.get("card_number_text") or "").strip()
             out = {
                 "name_jp": r[0], "image": imgs[0] if imgs else "", "set": r[2] or "",
+                "market_no": market_no,
                 "get_info": get_info, "set_name_ebay": set_name_ebay,
                 "variant_type": variant_type, "rarity": rarity,
                 # hint = 変種識別トークン source。set名は **日本語(get_info)とブー英語(set_name_ebay)両方**
@@ -334,14 +346,19 @@ def build_card_query(title, set_no, key=None):
     nj = (meta.get("name_jp") if meta else None) or name_jp_for_card(card_no)
     image = meta.get("image") if meta else ""
     hint = meta.get("hint") if meta else []
+    # ★2026-08-02: 検索語の番号は **市場が使う表記**(catalog specs.card_number_text)を優先。
+    #   canonical `XY11-034` で検索すると 0件になり、救済枠まで空になる(同じ検索結果から拾うため)。
+    #   照合(_name_matches_card)は canonical と市場表記の **どちらでも** 通す。
+    market_no = (meta.get("market_no") if meta else "") or ""
     cat = split_key(key)[0] if key else ""
     mv = _is_multi_variant(card_no, cat)   # 多変種プロモ判定(画像検索fail-closedの根拠)
     if not card_no:
-        return {"kw": "", "card_no": "", "name_jp": nj, "key": key or "", "image": image or "",
-                "hint": hint, "multi_variant": mv}
-    kw = f"PSA10 {nj} {card_no}" if nj else f"PSA10 {card_no}"
-    return {"kw": kw, "card_no": card_no, "name_jp": nj, "key": key or "", "image": image or "",
-            "hint": hint, "multi_variant": mv}
+        return {"kw": "", "card_no": "", "market_no": market_no, "name_jp": nj, "key": key or "",
+                "image": image or "", "hint": hint, "multi_variant": mv}
+    kw_no = market_no or card_no
+    kw = f"PSA10 {nj} {kw_no}" if nj else f"PSA10 {kw_no}"
+    return {"kw": kw, "card_no": card_no, "market_no": market_no, "name_jp": nj, "key": key or "",
+            "image": image or "", "hint": hint, "multi_variant": mv}
 
 
 def _is_multi_variant(card_no, category="", _cache={}):
@@ -492,7 +509,7 @@ def parse_mercari_items(src):
     return items
 
 
-def _variant_matches(items, card_no, variant_hint=None):
+def _variant_matches(items, card_no, variant_hint=None, market_no=None):
     """価格昇順 items から PSA10 かつ対象カード番号一致の **正変種** 候補を昇順 list で返す(純関数)。
 
     Step6 P3: variant_hint(canonical変種の get_info=入手元set 等)があれば、番号一致の中で
@@ -503,7 +520,8 @@ def _variant_matches(items, card_no, variant_hint=None):
     - hint無 (KEY未解決) → 番号一致の全候補 (価格昇順)
     """
     matches = [it for it in items  # DOM順 = 価格昇順
-               if it["price"] > 0 and is_psa10(it["name"]) and _name_matches_card(it["name"], card_no)]
+               if it["price"] > 0 and is_psa10(it["name"])
+               and _name_matches_card(it["name"], card_no, market_no)]
     if not matches:
         return []
     if not variant_hint:
@@ -568,13 +586,13 @@ def pick_cheapest_psa10(items, card_no, variant_hint=None):
     return (it["price"], it["href"], it["name"])
 
 
-def pick_psa10_candidates(items, card_no, variant_hint=None, limit=5):
+def pick_psa10_candidates(items, card_no, variant_hint=None, limit=5, market_no=None):
     """正変種 PSA10 候補を価格昇順で最大 limit 件 [(price, href, name)] 返す。
 
     補URL(メルカリ＆SNKRDUNK 混合の代替候補)用。最安が売切/状態相違時の次の手。fail-closed 時は []。
     """
     return [(it["price"], it["href"], it["name"])
-            for it in _variant_matches(items, card_no, variant_hint)[:limit]]
+            for it in _variant_matches(items, card_no, variant_hint, market_no)[:limit]]
 
 
 def _norm_name(s):
@@ -870,6 +888,21 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
                 loose = []
                 if not all_cands:
                     loose = pick_psa10_loose_candidates(items, c.get("name_jp"))
+                    # ★2026-08-02: 救済枠は **同じ検索結果から** 拾う作りなので、検索自体が
+                    #   0件だと道連れで空になる(実測: 補0本の候補ゼロ33件は all/loose とも0
+                    #   = 検索が空振り)。番号を外して名前だけで引き直し、初めて救済が機能する。
+                    #   番号未確認のまま出す枠なので best/価格判定には使わない(従来どおり)。
+                    if not loose and not items and c.get("name_jp"):
+                        kw2 = f"PSA10 {c['name_jp']}"
+                        url2 = ("https://jp.mercari.com/search?keyword="
+                                + urllib.parse.quote(kw2) + "&status=on_sale&order=asc&sort=price")
+                        try:
+                            drv.get(url2); time.sleep(8)
+                            items2 = parse_mercari_items(drv.page_source)
+                            loose = pick_psa10_loose_candidates(items2, c.get("name_jp"))
+                            via += f"+番号なし再検索({len(items2)}件)"
+                        except Exception as _e2:
+                            print(f"    ⚠️ 番号なし再検索 失敗: {type(_e2).__name__}", flush=True)
                     if loose:
                         via += f"+番号未確認{len(loose)}件"
                 out[i] = {"best": best, "cands": cands, "all_cands": all_cands,

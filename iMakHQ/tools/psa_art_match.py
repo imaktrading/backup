@@ -215,7 +215,7 @@ def extra_photo_urls(cand_url, n=2):
 
 
 def compare_art(ref_url, cand_url, *, client=None, fetch=None, cache=None, api_key=None,
-                ref_facts=None, cand_title="", extra_photos=1):
+                ref_facts=None, cand_title="", extra_photos=0):
     """現物 vs 候補 を3軸(絵柄/変種/配布)で判定 → dict + "cached"。
 
     判定できない事情 (キー無 / 画像取れない / API失敗) は全て **unsure / 全軸 unknown**。
@@ -263,8 +263,10 @@ def compare_art(ref_url, cand_url, *, client=None, fetch=None, cache=None, api_k
         if b is None:
             return out_unsure
         blocks.append(b)
-    # 候補の追加写真は「取れたら足す」= 失敗しても判定は続ける
-    for u in extra_photo_urls(cand_url, n=extra_photos + 1):
+    # 候補の追加写真は既定 OFF。コストの9割は画像で、1枚足すと約+40%になる割に
+    # 的中率が上がる証拠が無い (2026-08-02 ユーザー判断: 精度が上がらないなら払わない)。
+    # 必要なら extra_photos=1 で有効化できる。「取れたら足す」= 失敗しても判定は続ける。
+    for u in extra_photo_urls(cand_url, n=extra_photos + 1) if extra_photos else []:
         try:
             b = _image_block(u, fetch)
         except Exception:
@@ -289,20 +291,25 @@ def compare_art(ref_url, cand_url, *, client=None, fetch=None, cache=None, api_k
 def drop_reason(res):
     """「明らかに別カード」と言い切れる根拠だけを返す。無ければ "" (= 残して人が見る)。
 
-    省くのは **絵柄が別** または **配布が別** の時だけ。どちらも「別の商品」が確定する軸。
-    変種(パラレル/加工)は写真では見誤りやすいので **省かない** — 目立つ印を付けて人に見せる。
+    ★省くのは **絵柄が別** の時だけ。絵柄は写真から直接見ているので、他人が書いた自由文に
+      依存しない。
+    ★変種(パラレル/加工) と 配布(セット) では **省かない**:
+      - 変種は写真では見誤りやすい (箔の反射・スリーブ)
+      - 配布は判断材料の大半が **出品タイトル = 他人が書いた自由文**。誤記や記載漏れで
+        良い仕入元を捨てることになる。2026-08-01 に「仕入元の出品タイトルを信じていた」
+        バグ(7f4288a)を直したばかりで、同じ形。[[catalog_ssot_principle]]
+      どちらも UI に印を付けて **人が判断する**。
     """
     if res.get("art") == "different":
         return f"絵柄が別: {res.get('art_reason') or res.get('reason', '')}"
-    if res.get("dist") == "different":
-        return f"配布が別: {res.get('dist_reason') or res.get('reason', '')}"
-    if res.get("verdict") == "different" and res.get("art") != "same":
+    # 旧形式キャッシュ(軸を持たない v2 以前)は verdict しか無いので、それで判断する
+    if res.get("verdict") == "different" and res.get("art") == "unknown":
         return f"別カード: {res.get('reason', '')}"
     return ""
 
 
 def annotate_candidates(ref_url, cands, *, client=None, fetch=None, cache=None, api_key=None,
-                        image_of=None, ref_facts=None, title_of=None, extra_photos=1):
+                        image_of=None, ref_facts=None, title_of=None, extra_photos=0):
     """候補に3軸判定を付ける → (残す候補, 省いた候補)。
 
     - 絵柄が別 / 配布が別 = **明らかに別カード** → 省く (ユーザー指示 2026-08-02)

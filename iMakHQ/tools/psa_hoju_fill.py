@@ -168,7 +168,8 @@ def build_search_query(target, mp):
         _meta = mp.card_meta_for_key(target.get("key")) or {}
         nj = (_meta.get("name_jp") or "").strip() or mp.name_jp_for_card(_cn_key) or ""
         q["name_jp"] = nj
-        q["kw"] = f"PSA10 {nj} {_cn_key}" if nj else f"PSA10 {_cn_key}"
+        _kwno = q.get("market_no") or _cn_key
+        q["kw"] = f"PSA10 {nj} {_kwno}" if nj else f"PSA10 {_kwno}"
         try:
             q["multi_variant"] = bool(mp._is_multi_variant(_cn_key, mp.split_key(target.get("key"))[0]))
         except Exception:
@@ -178,7 +179,10 @@ def build_search_query(target, mp):
         if cn:
             q["card_no"] = cn
             nj = q.get("name_jp")
-            q["kw"] = f"PSA10 {nj} {cn}" if nj else f"PSA10 {cn}"
+            # 検索語の番号は市場表記(catalog specs.card_number_text)を優先。
+            # canonical `XY11-034` で検索すると0件になり救済枠まで空になる(2026-08-02)。
+            kwno = q.get("market_no") or cn
+            q["kw"] = f"PSA10 {nj} {kwno}" if nj else f"PSA10 {kwno}"
             # ★2026-07-29: 多変種判定は build_card_query が **title 由来 card_no** で行うため、
             # title に番号が無い行(= ここに来る行)では必ず False のままだった。
             # → ⚠️多変種バッジが出ず、同番号別変種を人が流し見して掴む(「違う」の主因)。

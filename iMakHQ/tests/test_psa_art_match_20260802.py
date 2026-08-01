@@ -194,19 +194,24 @@ def test_unknown_axis_when_missing_or_invalid():
         assert A.parse_verdict("broken")[a] == "unknown"
 
 
-def test_dropped_when_art_or_dist_differs():
+def test_dropped_only_when_art_differs():
+    # 絵柄は写真から直接見ている = 自由文に依存しない。省く根拠はこれだけ。
     assert "絵柄が別" in A.drop_reason({"art": "different", "art_reason": "別構図"})
-    assert "配布が別" in A.drop_reason(
-        {"art": "same", "dist": "different", "dist_reason": "キャンペーン版"})
 
 
-def test_variant_mismatch_is_kept_not_dropped():
-    """変種違いは写真で見誤りやすいので省かない。印を付けて人に見せる。"""
-    res = {"art": "same", "variant": "different", "dist": "same", "verdict": "unsure"}
-    assert A.drop_reason(res) == ""
+def test_variant_and_dist_mismatch_are_kept_not_dropped():
+    """変種・配布の不一致では省かない (2026-08-02 ユーザー判断)。
+
+    変種は写真で見誤りやすい。配布は判断材料が **出品タイトル=他人の自由文** なので、
+    誤記や記載漏れで良い仕入元を捨てる。7f4288a で直したのと同じ形。
+    """
+    assert A.drop_reason({"art": "same", "variant": "different", "dist": "same"}) == ""
+    assert A.drop_reason({"art": "same", "variant": "same", "dist": "different",
+                          "dist_reason": "キャンペーン版"}) == ""
+    assert A.drop_reason({"art": "unknown", "dist": "different", "verdict": "unsure"}) == ""
     keep, drop = A.annotate_candidates("ref", [{"url": "u"}], client=_FakeClient(
         '{"verdict":"unsure","match_pct":70,"art":"same","variant":"different",'
-        '"variant_reason":"箔が見えない","dist":"same"}'), fetch=_fetch_ok, cache={})
+        '"variant_reason":"箔が見えない","dist":"different"}'), fetch=_fetch_ok, cache={})
     assert (len(keep), len(drop)) == (1, 0)
     assert keep[0]["ax_variant"] == "different" and keep[0]["ax_variant_reason"] == "箔が見えない"
 
@@ -252,4 +257,23 @@ def test_ui_shows_three_axis_rows():
     assert "絵柄: 一致" in h and "構図一致" in h
     assert "変種: 不一致" in h and "箔が見えない" in h
     assert "配布: 材料なし→目視" in h
-    assert "変種の不一致は省きません" in h
+    assert "変種・配布の不一致では省きません" in h
+
+
+def test_second_photo_is_off_by_default():
+    """コストの9割は画像。2枚目は約+40%かかる割に的中率が上がる証拠が無い
+    (2026-08-02 ユーザー判断: 精度が上がらないなら払わない)。既定 OFF。"""
+    seen = []
+
+    def fetch(u):
+        seen.append(u)
+        return _fetch_ok(u)
+
+    url = "https://static.mercdn.net/item/detail/orig/photos/m61591955291_1.jpg"
+    A.compare_art("ref", url, client=_FakeClient('{"verdict":"same"}'), fetch=fetch, cache={})
+    assert not any(u.endswith("_2.jpg") for u in seen), "既定で2枚目を取りに行っている"
+
+    seen.clear()
+    A.compare_art("ref", url, client=_FakeClient('{"verdict":"same"}'), fetch=fetch,
+                  cache={}, extra_photos=1)
+    assert any(u.endswith("_2.jpg") for u in seen), "extra_photos=1 で有効化できない"
