@@ -1025,16 +1025,25 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         #   ラベルの印字書式は同じカードでも変わるので (OP09-050 実物2枚で確認)、
         #   人がラベルの見た目で「違う」を押すと使える仕入元を捨てる。判定は絵柄で行う。
         #   same/unsure は全部出す = 自信が無いものは目視で落とす (ユーザー指示)。
+        # 現物の確定情報 (catalog/PSA) を渡す = モデルに推測させず「正」を与える
+        try:
+            _facts = dict(prc.psa_label_facts(t.get("cert"), cn))
+            _meta = mp.card_meta_for_key(t.get("key")) or {}
+            _facts["set_name"] = _meta.get("set") or ""
+        except Exception:
+            _facts = {}
         _dropped_art = []
         if _art_cache is not None:
             try:
-                cands, _dropped_art = _art.annotate_candidates(ref, cands, cache=_art_cache)
+                cands, _dropped_art = _art.annotate_candidates(
+                    ref, cands, cache=_art_cache, ref_facts=_facts)
             except Exception as _e:
                 print(f"  ⚠️ 絵柄判定 失敗(非致命・全候補を目視へ): {type(_e).__name__}: {_e}")
                 _dropped_art = []
             n_art_diff += len(_dropped_art)
             for _c in _dropped_art:
-                art_dropped_log.append((iid, _c.get("url", ""), _c.get("art_reason", "")))
+                art_dropped_log.append((iid, _c.get("url", ""),
+                                        _c.get("drop_why") or _c.get("art_reason", "")))
             if not cands:
                 no_cand_after_filter += 1
                 art_all_dropped += 1

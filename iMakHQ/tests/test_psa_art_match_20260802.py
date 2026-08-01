@@ -168,3 +168,88 @@ def test_mixed_variant_badges_are_kept():
                        {"channel": "mercari", "url": "https://jp.mercari.com/item/m2",
                         "price": 200, "variant_ok": False}]}])
     assert "✅変種一致" in h and "⚠️変種未確認" in h
+
+
+# ============================================================================
+# 3軸判定 (絵柄 / 変種 / 配布) — ユーザー指示 2026-08-02
+#   「①一致度だけでなく ②変種・配布の確認 ③拡大して見る もできるでしょ」
+# ============================================================================
+_FULL = ('{"verdict":"same","match_pct":91,'
+         '"art":"same","art_reason":"構図一致",'
+         '"variant":"same","variant_reason":"箔の反射あり",'
+         '"dist":"same","dist_reason":"新たなる皇帝と記載",'
+         '"reason":"3軸とも一致"}')
+
+
+def test_three_axes_are_parsed():
+    d = A.parse_verdict(_FULL)
+    assert (d["art"], d["variant"], d["dist"]) == ("same", "same", "same")
+    assert d["variant_reason"] == "箔の反射あり" and d["dist_reason"] == "新たなる皇帝と記載"
+
+
+def test_unknown_axis_when_missing_or_invalid():
+    d = A.parse_verdict('{"verdict":"same","art":"maybe"}')
+    assert d["art"] == "unknown" and d["variant"] == "unknown" and d["dist"] == "unknown"
+    for a in A.AXES:
+        assert A.parse_verdict("broken")[a] == "unknown"
+
+
+def test_dropped_when_art_or_dist_differs():
+    assert "絵柄が別" in A.drop_reason({"art": "different", "art_reason": "別構図"})
+    assert "配布が別" in A.drop_reason(
+        {"art": "same", "dist": "different", "dist_reason": "キャンペーン版"})
+
+
+def test_variant_mismatch_is_kept_not_dropped():
+    """変種違いは写真で見誤りやすいので省かない。印を付けて人に見せる。"""
+    res = {"art": "same", "variant": "different", "dist": "same", "verdict": "unsure"}
+    assert A.drop_reason(res) == ""
+    keep, drop = A.annotate_candidates("ref", [{"url": "u"}], client=_FakeClient(
+        '{"verdict":"unsure","match_pct":70,"art":"same","variant":"different",'
+        '"variant_reason":"箔が見えない","dist":"same"}'), fetch=_fetch_ok, cache={})
+    assert (len(keep), len(drop)) == (1, 0)
+    assert keep[0]["ax_variant"] == "different" and keep[0]["ax_variant_reason"] == "箔が見えない"
+
+
+def test_reference_facts_and_title_go_into_prompt():
+    p = A.build_prompt({"number": "OP09-050", "variety": "ALTERNATE ART",
+                        "set_name": "BOOSTER -EMPERORS IN THE NEW WORLD- [OP-09]"},
+                       "【PSA10】ナミ OP09-050 新たなる皇帝")
+    assert "OP09-050" in p and "ALTERNATE ART" in p and "EMPERORS" in p
+    assert "新たなる皇帝" in p
+    assert "『無い』と解釈しない" in p, "書いていない=無い と誤読させない指示が要る"
+
+
+def test_extra_photo_urls_for_mercari_only():
+    u = "https://static.mercdn.net/item/detail/orig/photos/m61591955291_1.jpg"
+    assert A.extra_photo_urls(u) == [
+        "https://static.mercdn.net/item/detail/orig/photos/m61591955291_2.jpg"]
+    assert A.extra_photo_urls("https://cdn.snkrdunk.com/x.webp") == []
+    assert A.extra_photo_urls("") == []
+
+
+def test_old_cache_entries_are_reused_after_prompt_change():
+    """質問を変えても、判定済みの分を捨てない (APIが使えない時に効く)。"""
+    old_key = A._cache_key("ref", "u", "", version=A.PROMPT_VERSION - 1)
+    cache = {old_key: {"verdict": "different", "match_pct": 5, "reason": "別構図"}}
+    keep, drop = A.annotate_candidates("ref", [{"url": "u"}], client=None,
+                                       fetch=_fetch_ok, cache=cache, api_key="")
+    assert (len(keep), len(drop)) == (0, 1), "旧判定が引き継がれていない"
+    assert drop[0]["art_pct"] == 5
+    assert drop[0]["ax_art"] == "unknown", "旧形式に無い軸は unknown(=目視)"
+
+
+def test_ui_shows_three_axis_rows():
+    import psa_resource_confirm as prc
+    h = prc.build_restock_html([{
+        "idx": 0, "title": "t", "card_no": "OP09-050", "ebay_url": "https://x",
+        "ref_image": "https://img/a.jpg",
+        "candidates": [{"channel": "mercari", "url": "https://jp.mercari.com/item/m1",
+                        "price": 100, "art": "same", "art_pct": 91, "art_reason": "総合一致",
+                        "ax_art": "same", "ax_art_reason": "構図一致",
+                        "ax_variant": "different", "ax_variant_reason": "箔が見えない",
+                        "ax_dist": "unknown", "ax_dist_reason": ""}]}])
+    assert "絵柄: 一致" in h and "構図一致" in h
+    assert "変種: 不一致" in h and "箔が見えない" in h
+    assert "配布: 材料なし→目視" in h
+    assert "変種の不一致は省きません" in h

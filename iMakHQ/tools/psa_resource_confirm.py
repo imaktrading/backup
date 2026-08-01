@@ -255,6 +255,11 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .arsn{font-size:11px;color:#036;background:#eef4ff;border-radius:3px;padding:1px 5px;
       display:inline-block;margin-top:2px;line-height:1.4}
 .vuni{background:#666;color:#fff;padding:3px 8px;border-radius:4px;margin:3px 0;font-size:12px}
+.axs,.axd,.axu{font-size:10px;padding:1px 5px;border-radius:3px;color:#fff;margin-right:4px}
+.axs{background:#2a7}
+.axd{background:#c00;font-weight:bold}
+.axu{background:#aaa}
+.axr{font-size:11px;color:#444}
 .zm{font-size:13px;padding:0 6px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:zoom-in;line-height:1.6}
 #zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;cursor:zoom-out}
 #zov img{max-width:46vw;max-height:88vh;object-fit:contain;background:#fff;display:block}
@@ -519,8 +524,12 @@ _LABEL_NOTE_HTML = (
     " 逆に、絵柄が同じでも<b>配布が違えば別カード</b>です(例: ブースター版 と 始めようキャンペーン版)。"
     "迷ったら 🔍 で拡大して<b>絵柄</b>を見比べてください。"
     "<div style='margin-top:4px'>"
-    "🖼️ <b>絵柄の事前判定</b>: 現物と候補の絵柄をAIが先に突き合わせ、"
-    "<b>明らかに別の絵柄のものは表示前に省いて</b>います(省いた件数と理由はターミナルに出ます)。"
+    "🖼️ <b>事前判定</b>: 現物と候補を <b>絵柄 / 変種(パラレル等の加工) / 配布(どのセットで出たか)</b> の"
+    "3軸でAIが先に突き合わせています。"
+    "<b>絵柄が別・配布が別</b>と判定できたものは表示前に省いています(件数と理由はターミナルに出ます)。"
+    "<b>変種の不一致は省きません</b> — 写真では見誤りやすいので "
+    "<span class='axd'>変種: 不一致</span> と印を付けて残します。"
+    "<span class='axu'>材料なし→目視</span> は写真に写っていない/出品タイトルに書かれていない分です。"
     "残った候補には <b>一致度(%)と判断理由</b> を出しています。"
     "出品写真は角度・光・スリーブで見え方が変わるので、<b>一致度は参考値</b>です — "
     "高くても<b>採用の根拠にはせず</b>、必ず写真を見てください。低い/理由が曖昧なものは目視で落とす前提です。"
@@ -593,6 +602,26 @@ def build_restock_html(items):
                 _v_html += f"<span class='aun'>🖼️絵柄 一致度 {_apct}(要目視)</span>"
             _ar_html = (f"<br><span class='arsn'>🖼️ {_html.escape(_ar)}</span>"
                         if _art in ("same", "unsure") and _ar else "")
+            # ★2026-08-02(3): 3軸 (絵柄 / 変種 / 配布) を1行ずつ出す。
+            #   「同じか違うか」を人が判断するのに要る材料はこの3つ。unknown は
+            #   「材料が写っていない/書かれていない」= そこは自分の目で見る、の意味。
+            #   変種は写真で見誤りやすいので **省かず** ここで目立たせる (different でも残す)。
+            _AXL = (("ax_art", "絵柄"), ("ax_variant", "変種"), ("ax_dist", "配布"))
+            _ax_rows = []
+            for _k, _cap in _AXL:
+                _v = cd.get(_k)
+                if not _v:
+                    continue
+                _rs = _s(cd.get(_k + "_reason"))
+                _mark = {"same": ("axs", "一致"), "different": ("axd", "不一致"),
+                         "unknown": ("axu", "材料なし→目視")}.get(_v)
+                if not _mark:
+                    continue
+                _cls, _lbl = _mark
+                _ax_rows.append(f"<span class='{_cls}'>{_cap}: {_lbl}</span>"
+                                + (f"<span class='axr'>{_html.escape(_rs)}</span>" if _rs else ""))
+            if _ax_rows:
+                _ar_html += "<br>" + "<br>".join(_ax_rows)
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='' onchange='upd({idx})'>{img}"
