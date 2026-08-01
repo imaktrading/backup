@@ -952,6 +952,17 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     items, item_targets = [], []
     no_cache = no_cand = no_cardno = no_ref = 0
     no_cand_after_filter = n_dropped = n_known = 0   # 足切りの計測(2026-07-28)
+    # 絵柄判定 (2026-08-02)。API キーが無ければ判定自体を回さず、従来どおり全候補を目視へ。
+    n_art_diff = art_all_dropped = 0
+    art_dropped_log = []
+    try:
+        import psa_art_match as _art
+        _art_cache = _art.load_cache() if _art._load_key() else None
+        if _art_cache is None:
+            print("  ⚠️ APIキーが無いため絵柄判定はスキップ (全候補を目視へ)")
+    except Exception as _e_art:
+        print(f"  ⚠️ 絵柄判定モジュール読込失敗 → skip ({type(_e_art).__name__})")
+        _art, _art_cache = None, None
     for t in targets:
         iid = t["itemID"]
         if iid in skip_iids:
@@ -1010,6 +1021,24 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         if not ref:
             no_ref += 1
             continue
+        # ★2026-08-02: 現物 × 候補 の**絵柄**を先に突き合わせ、明らかに別の絵柄だけ省く。
+        #   ラベルの印字書式は同じカードでも変わるので (OP09-050 実物2枚で確認)、
+        #   人がラベルの見た目で「違う」を押すと使える仕入元を捨てる。判定は絵柄で行う。
+        #   same/unsure は全部出す = 自信が無いものは目視で落とす (ユーザー指示)。
+        _dropped_art = []
+        if _art_cache is not None:
+            try:
+                cands, _dropped_art = _art.annotate_candidates(ref, cands, cache=_art_cache)
+            except Exception as _e:
+                print(f"  ⚠️ 絵柄判定 失敗(非致命・全候補を目視へ): {type(_e).__name__}: {_e}")
+                _dropped_art = []
+            n_art_diff += len(_dropped_art)
+            for _c in _dropped_art:
+                art_dropped_log.append((iid, _c.get("url", ""), _c.get("art_reason", "")))
+            if not cands:
+                no_cand_after_filter += 1
+                art_all_dropped += 1
+                continue
         idx = len(items)
         # 多変種(同番号で catalog に2変種以上=別アート/色/パラレル/Gold)か → UI に⚠️バッジ出す。
         # 単一変種は番号一致=正なので流し見でOK、多変種だけ絵柄を要確認(「違う」の主因はここ)。
@@ -1045,9 +1074,21 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
           f"既知URL除外 {n_known}候補 / 番号不一致で除外 {n_dropped}候補 / "
-          f"過去に「違う」除外 {n_ng}候補 / 他出品が使用中で除外 {n_used}候補"
+          f"過去に「違う」除外 {n_ng}候補 / 他出品が使用中で除外 {n_used}候補 / "
+          f"絵柄が明らかに別で除外 {n_art_diff}候補"
           f"(全滅skip {no_cand_after_filter}件) / "
           f"台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
+    # ★省いた分は必ず表に出す (silent drop 禁止)。誤って捨てていないか人が検算できるようにする。
+    if art_dropped_log:
+        _tail = f" (うち全候補が別で {art_all_dropped}件は対象外)" if art_all_dropped else ""
+        print(f"  🎨 絵柄が明らかに別で省いた {len(art_dropped_log)}候補{_tail}:")
+        for _iid, _u, _r in art_dropped_log[:15]:
+            print(f"     - {_iid} {_u} … {_r}")
+        if len(art_dropped_log) > 15:
+            print(f"     … 他 {len(art_dropped_log) - 15}候補")
+    # same/unsure も含めて判定結果は保存 (同じ組を再問合せしない)
+    if _art_cache is not None:
+        _art.save_cache(_art_cache)
     if limit is not None:
         items, item_targets = items[:limit], item_targets[:limit]
         for n, it in enumerate(items):

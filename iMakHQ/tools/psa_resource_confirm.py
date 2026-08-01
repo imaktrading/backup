@@ -250,6 +250,8 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .vok{font-size:10px;padding:1px 5px;border-radius:3px;background:#2a7;color:#fff;font-weight:bold}
 .vng{font-size:10px;padding:1px 5px;border-radius:3px;background:#e80;color:#fff;font-weight:bold}
 .nng{font-size:10px;padding:1px 5px;border-radius:3px;background:#c00;color:#fff;font-weight:bold}
+.aok{font-size:10px;padding:1px 5px;border-radius:3px;background:#06c;color:#fff;font-weight:bold}
+.aun{font-size:10px;padding:1px 5px;border-radius:3px;background:#999;color:#fff}
 .zm{font-size:13px;padding:0 6px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:zoom-in;line-height:1.6}
 #zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;cursor:zoom-out}
 #zov img{max-width:46vw;max-height:88vh;object-fit:contain;background:#fff;display:block}
@@ -513,7 +515,12 @@ _LABEL_NOTE_HTML = (
     "<b>ラベルの1行目の書き方・セットコードの位置は根拠になりません。</b>"
     " 逆に、絵柄が同じでも<b>配布が違えば別カード</b>です(例: ブースター版 と 始めようキャンペーン版)。"
     "迷ったら 🔍 で拡大して<b>絵柄</b>を見比べてください。"
-    "</div>")
+    "<div style='margin-top:4px'>"
+    "🖼️ <b>絵柄の事前判定</b>: 現物と候補の絵柄をAIが先に突き合わせ、"
+    "<b>明らかに別の絵柄のものは表示前に省いて</b>います(省いた件数と理由はターミナルに出ます)。"
+    "<span class='aok'>🖼️絵柄一致</span> は参考値です — 出品写真は角度・光・スリーブで見え方が変わるため、"
+    "<b>採用の根拠にはしないでください</b>。<span class='aun'>🖼️絵柄は要目視</span> は自信が無い分です。"
+    "</div></div>")
 
 
 def build_restock_html(items):
@@ -556,6 +563,15 @@ def build_restock_html(items):
             #   変種バッジより強い警告として、こちらを優先表示する。
             if cd.get("number_ok") is False:
                 _v_html = "<span class='nng'>🔴番号未確認 — 別カードの可能性あり</span>"
+            # ★2026-08-02: 絵柄の事前判定 (psa_art_match)。明らかに別の物は表示前に省いてあるので、
+            #   ここに出るのは same か unsure。unsure は「自信が無い=目視で落とす」ことを明示する。
+            #   art を持たない呼出(旧cache / APIキー無し)はバッジ非表示 = 後方互換。
+            _art = cd.get("art")
+            _ar = _html.escape(_s(cd.get("art_reason")))
+            if _art == "same":
+                _v_html += f"<span class='aok' title='{_ar}'>🖼️絵柄一致</span>"
+            elif _art == "unsure":
+                _v_html += f"<span class='aun' title='{_ar}'>🖼️絵柄は要目視</span>"
             cand_html.append(
                 f"<label class='cand'><input type='checkbox' class='ck' checked "
                 f"data-idx='{idx}' data-url='{_html.escape(_s(u))}' data-rsn='' onchange='upd({idx})'>{img}"
