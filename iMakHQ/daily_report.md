@@ -408,3 +408,22 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - gshock_to_csv の is_active_msrp 廃盤 skip を **REVERT**（gshock_to_csv.py:1446、「廃盤も Amazon で仕入れるから勝手に外すな」のユーザー指摘対応）
 
 ---
+
+## 2026-07-31 — リバイスくん `.claude/settings.json` に不可逆操作の deny を追加 (734db4f)
+
+### 決定事項
+- 決定: `bypassPermissions` 下でも `variation_upload.py` / `ebay_trading_api.py` の Bash 直叩き、`git push --force*`、`git reset --hard`、`rm -rf` を deny。`defaultMode` は継承任せにせず明示指定
+- 決定: `.gitignore` に `**/.claude/` があっても `git add -f` で強制追跡し設定を恒久化（worktree ごとに `.gitignore` の扱いが違う点を利用）
+
+### 変更
+- 変更: `.claude/settings.json`（新規・`git add -f` で強制追跡）
+- 変更: `iMakRevise/decision_log/2026-07-30_claude_permission_deny.md`（新規）
+- 変更: `iMakRevise/tests/test_claude_settings_deny.py`（新規・回帰テスト）
+
+### 検証
+- 検証✅: `pytest iMakRevise/tests/test_claude_settings_deny.py` = 34 pass / 1 skip
+- 検証✅: 実測 — `variation_upload.py --help` は deny で拒否 / `git push --force --dry-run` は deny で拒否
+- 検証✅: 実測 — `python -m revise.run_daily --dry-run`（毎日 04:30 の cron 経路）は deny 非該当で起動する（import 経由呼出のため Bash cmdline に `variation_upload.py` が現れない）
+- 依頼: `iMak_data/revise/requests/2026-07-29_permission_deny_for_irreversible_ops.md`（Advisor GO / IMPLEMENT-GO）
+
+---
