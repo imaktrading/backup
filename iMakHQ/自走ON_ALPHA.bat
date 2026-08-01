@@ -5,7 +5,8 @@ echo  ============================================================
 echo   窓口 ALPHA の自走を ON にします
 echo  ============================================================
 echo.
-echo   20分ごとに、残務を「1件だけ」自動で片付けます。
+echo   5分ごとに、残務を「1件だけ」自動で片付けます。
+echo   ・残務が無い時は agent を立てずに終わるので、空振りのコストはゼロ
 echo   ・他の窓口が持っている件、担当が別の件には手を出しません
 echo   ・eBay書込 / CSV入稿 / スプシ一括書換 / 出品くん本体 は禁止済み
 echo   ・止めたくなったら 自走OFF_ALPHA.bat をダブルクリック
@@ -24,7 +25,7 @@ if errorlevel 2 goto cancel
 powershell -NoProfile -ExecutionPolicy Bypass -File "C:\dev\iMak\iMakHQ\tools\desk_autorun_register.ps1"
 if errorlevel 1 goto failed
 echo.
-echo   [OK] ON にしました。20分以内に最初の1件を取りにいきます。
+echo   [OK] ON にしました。5分以内に最初の1件を取りにいきます。
 echo        動いたかは iMakHQ\review_logs\desk_*.log で見られます。
 echo.
 pause

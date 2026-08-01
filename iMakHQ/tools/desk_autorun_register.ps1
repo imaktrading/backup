@@ -4,15 +4,20 @@
 # 日本語コメントが行を壊す (test_bat_encoding_20260730 の教訓)。処理はこちらに寄せる。
 #
 # 管理者権限は不要 (自分のユーザーのタスクなので)。
+param([int]$Minutes = 5)   # 起動間隔。変えたいときはここだけ
+
 $ErrorActionPreference = 'Stop'
 try {
     $py  = 'C:\Users\imax2\AppData\Local\Microsoft\WindowsApps\pythonw.exe'
     $act = New-ScheduledTaskAction -Execute $py `
         -Argument '-X utf8 "C:\dev\iMak\iMakHQ\tools\desk_autorun.py" --who ALPHA' `
         -WorkingDirectory 'C:\dev\iMak'
-    # 20分間隔。1件ずつしか取らないので、詰まっていれば20分ごとに1件ずつ減っていく。
+    # 既定5分。1件ずつしか取らないので、詰まっていれば5分ごとに1件ずつ減っていく。
+    # ★短くしてもコストはほぼゼロ: 残務が無い起動は agent を立てずに1秒未満で終わる
+    #   (`skip-empty`)。課金が発生するのは「実際に仕事があった時」だけ。
+    #   走行中は IgnoreNew で新規起動しないので、間隔を詰めても多重にはならない。
     $trg = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddHours(6) `
-        -RepetitionInterval (New-TimeSpan -Minutes 20)
+        -RepetitionInterval (New-TimeSpan -Minutes $Minutes)
     # IgnoreNew: 前の1件が走っている間は新しく起動しない (1窓口1件を守る)
     # ExecutionTimeLimit 40分: desk_autorun 側の 30分 timeout より少し長く取る
     $set = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable `
