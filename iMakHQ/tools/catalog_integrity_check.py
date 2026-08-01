@@ -113,6 +113,58 @@ def check_set_code(con):
     return out
 
 
+# ★2026-08-02 追加 (検査4・5)。
+#   背景: ST-18/ST-26 が **4月から今日まで**「別セットなのに同じ eBay 値」のまま放置された。
+#   既存の検査は「表に載っているか」「yaml と DB がズレていないか」しか見ておらず、
+#   **載っている値そのものの確からしさを誰も見ていなかった**。
+#   ユーザー指摘:「管理物の確からしさは誰がチェックするの」
+#   ★`ebay_filter_map` は **①(カタログ)の一部**。map の誤りは①の誤り (1丁目1番地 追記③)。
+
+# 人が「未検証」と自分で書いた印。これが残っている限り、その行は①の正の根拠にできない。
+UNVERIFIED_MARKERS = ("REVIEW", "要確認", "推定", "仮")
+
+# 同じ eBay 値に潰れていても**正しい**組 (JA/EN 表記ゆれ・hyphen 変異体など、実体が同一)。
+# ここに入れる時は「実体が同一である根拠」をコメントで残すこと。安易に足すと検査が死ぬ。
+COLLISION_ALLOW = {
+    # 同一セットの JA 表記と EN 表記 / set_code の hyphen 有無。実体が同じなので潰れて正しい。
+    ("one_piece_tcg", "set_code", "500 Years in the Future"),
+    ("one_piece_tcg", "set_code", "Premium Booster One Piece The Best"),
+    ("one_piece_tcg", "set_code", "Adventure on Kami's Island"),
+    ("one_piece_tcg", "set_code", "The Azure Sea's Seven Heroes"),
+}
+
+
+def check_unverified_filtermap(con):
+    """`note` に未検証の印が残っている変換表の行 (= ①の正の根拠にできない行)。"""
+    out = {}
+    like = " OR ".join(["note LIKE ?"] * len(UNVERIFIED_MARKERS))
+    args = [f"%{m}%" for m in UNVERIFIED_MARKERS]
+    rows = con.execute(
+        f"SELECT category, field, source_value, ebay_value, note FROM ebay_filter_map "
+        f"WHERE {like} ORDER BY category, field, source_value", args).fetchall()
+    for cat, field, src, ev, note in rows:
+        out.setdefault(cat, []).append((field, src, ev, (note or "")[:60]))
+    return out
+
+
+def check_filtermap_collision(con):
+    """複数の公式値が同じ eBay 値に潰れている組 (ST-18/26 と同型)。
+
+    潰れ自体が即誤りとは限らない (JA/EN 表記ゆれは正しい) ので、実体が同一だと
+    確認できたものだけ `COLLISION_ALLOW` に入れて除外する。**残りは要検証**。
+    """
+    rows = con.execute(
+        "SELECT category, field, ebay_value, COUNT(*) n, GROUP_CONCAT(source_value) "
+        "FROM ebay_filter_map GROUP BY category, field, ebay_value "
+        "HAVING n > 1 ORDER BY category, field, n DESC").fetchall()
+    out = {}
+    for cat, field, ev, n, srcs in rows:
+        if (cat, field, ev) in COLLISION_ALLOW:
+            continue
+        out.setdefault(cat, []).append((field, ev, n, srcs))
+    return out
+
+
 def check_filtermap_drift(con):
     """yaml(SSOT) と DB ebay_filter_map の値ズレ (INSERT OR IGNORE 波及)。"""
     drift = []
@@ -152,13 +204,18 @@ def main():
     ne = check_name_en(con)
     sc = check_set_code(con)
     df = check_filtermap_drift(con)
+    uv = check_unverified_filtermap(con)
+    cl = check_filtermap_collision(con)
 
     n_ne = sum(len(v) for v in ne.values())
     n_sc = sum(len(v) for v in sc.values())
     n_df = len([d for d in df if not d[0].startswith("(")])
+    n_uv = sum(len(v) for v in uv.values())
+    n_cl = sum(len(v) for v in cl.values())
 
     lines = [f"# カタログ整合 定期監査 ({stamp})", ""]
-    lines.append(f"## サマリー: name_en割れ={n_ne} / set_code割れ={n_sc} / filter_mapドリフト={n_df}")
+    lines.append(f"## サマリー: name_en割れ={n_ne} / set_code割れ={n_sc} / filter_mapドリフト={n_df}"
+                 f" / **未検証map={n_uv}** / **map潰れ={n_cl}**")
     lines.append("")
     lines.append("## 1. name_en 自己整合 (高信頼 suspect)")
     for cat, items in ne.items():
@@ -175,6 +232,27 @@ def main():
     lines.append("## 3. filter_map yaml↔DB ドリフト")
     for cat, key, ev_yaml, ev_db in df[:50]:
         lines.append(f"  - {cat} {key}: yaml={ev_yaml!r} DB={ev_db!r}")
+
+    lines.append("")
+    lines.append("## 4. 変換表に未検証の印が残っている行 (①の正の根拠にできない)")
+    lines.append("   → 公式を今その場で再取得して検証し、note を根拠に置き換えること")
+    for cat, items in uv.items():
+        lines.append(f"### {cat}: {len(items)}件")
+        for field, src, ev, note in items[:20]:
+            lines.append(f"  - {field} {src} -> {ev!r} : {note}")
+        if len(items) > 20:
+            lines.append(f"  …他{len(items) - 20}件")
+
+    lines.append("")
+    lines.append("## 5. 別の公式値が同じ eBay 値に潰れている (ST-18/26 と同型)")
+    lines.append("   → 実体が同一なら COLLISION_ALLOW に根拠付きで追加。違うなら①の誤り")
+    for cat, items in cl.items():
+        lines.append(f"### {cat}: {len(items)}組")
+        for field, ev, n, srcs in items[:20]:
+            lines.append(f"  - {field} {ev!r} x{n} <- {srcs}")
+        if len(items) > 20:
+            lines.append(f"  …他{len(items) - 20}組")
+
     report = "\n".join(lines)
     print(report)
 
@@ -183,7 +261,7 @@ def main():
     with open(os.path.join(rdir, f"integrity_{stamp}.md"), "w", encoding="utf-8") as f:
         f.write(report)
 
-    anomalies = n_ne + n_sc + n_df
+    anomalies = n_ne + n_sc + n_df + n_uv + n_cl
     print(f"\n=> 異常合計 {anomalies}件 (exit {'1' if anomalies else '0'})")
     sys.exit(1 if anomalies else 0)
 
