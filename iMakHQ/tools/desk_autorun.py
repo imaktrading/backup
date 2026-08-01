@@ -102,17 +102,22 @@ def build_prompt(who: str, item: dict) -> str:
    - ①の根拠は **今その場で計算した値**。`note` に `REVIEW` が付いた行は人が焼いた未検証値なので
      正の根拠にしない
    - **②が原因ならカタログに依頼を出さない**。こちら側で直す
-2. **やってはいけないこと** (人の判断が要る):
+2. **依頼書の「既に判明していること」は再調査するな。**
+   そこに書いてある実測値・突合結果・公式から取った値は **起票者が確認済み**。
+   答えるのは **「聞きたいこと (未回答)」だけ**。同じ結論に二度たどり着くのは無駄で、
+   起票者より弱い根拠 (公式を取り直さない推測等) で上書きすると判断の質が下がる。
+   既知に疑いがあるなら、答え直さずに**その旨を書いて止める**。
+3. **やってはいけないこと** (人の判断が要る):
    - eBay への書込 (出品・リバイス・取下げ)・CSV 入稿・スプシの一括書換・ファイル削除
    - `git push` / `checkout` / `switch` / `reset` (CLI 側でも拒否済)
    - 出品くん listing 本体 (`psa_to_csv` / `tshirt_listing` / `tcg_listing_fields` /
      `post_title_fix`) の編集 = 出品専任の領分
    - 判断に迷ったら**やらずに残す**。理由を書いて `release` すればよい
-3. **git**: `git add -A` は禁止。自分が触ったファイルだけ明示 add。add したら即 commit
-4. **daily_report**: `C:\\Users\\imax2\\.claude\\projects\\c--dev-iMak\\memory\\daily_report.md`
+4. **git**: `git add -A` は禁止。自分が触ったファイルだけ明示 add。add したら即 commit
+5. **daily_report**: `C:\\Users\\imax2\\.claude\\projects\\c--dev-iMak\\memory\\daily_report.md`
    の最上段に `## YYYY-MM-DD HH:MM [{who}] 〜` で **Edit で追記** (Write 禁止)。
    書式は 決定 / 変更(file:line) / 検証 の3点セット
-5. **終わったら必ず claim を閉じる**:
+6. **終わったら必ず claim を閉じる**:
    - 片付いた: `python iMakHQ/tools/claim.py done {item['id']} --who {who} --note "..."`
    - 手を出せなかった: `python iMakHQ/tools/claim.py release {item['id']} --who {who}`
 

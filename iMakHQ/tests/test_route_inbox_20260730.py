@@ -63,3 +63,18 @@ def test_dispatch_prompts_forbid_direct_cross_posting():
               dw._build_implement_prompt("catalog", [Path("x_response.md")])):
         assert "_routing" in p
         assert "直接置くのは禁止" in p
+
+
+def test_dispatch_prompt_forbids_redoing_known_facts():
+    """★2026-08-02: 起票者が既に答えを出した問いを、担当が調べ直す事故の防止。
+
+    実害: BRAVO が公式を実取得して「pokemon の set_name_official は44%しか正しくない」と
+    突き止めたうえで依頼書を起票したが、質問をそのまま残したため ALPHA が同じ問いに
+    **fetch 0件・DB内部だけ**で答え直した。同じ結論に2回到達し、根拠は弱くなった。
+    → 依頼書は「既に判明していること」「聞きたいこと(未回答)」に分け、受け手は既知を再調査しない。
+    """
+    import dispatch_worktree as _dw
+    from pathlib import Path as _P
+    p = _dw._build_prompt("catalog", [_P("x.md")])
+    assert "既に判明していること" in p, "既知を再調査するなの指示が無い"
+    assert "聞きたいこと" in p

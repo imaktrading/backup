@@ -136,7 +136,9 @@ def test_prompt_carries_the_hard_rules():
     item = {"id": "backlog:x", "kind": "残件", "title": "t", "path": "", "body": "b"}
     p = A.build_prompt("ALPHA", item)
     for must in ("1丁目1番地", "禁止", "eBay への書込", "git add -A", "daily_report",
-                 "claim.py done", "claim.py release", "psa_to_csv", "SUMMARY:"):
+                 "claim.py done", "claim.py release", "psa_to_csv", "SUMMARY:",
+                 # ★2026-08-02: 起票者が答えを出した問いを相手が調べ直す事故 (BRAVO→ALPHA)
+                 "既に判明していること"):
         assert must in p, f"prompt に『{must}』が無い"
     assert "「①②とも正しい → 直すものは無い」は禁止" in p, \
         "2026-08-02 の規約改訂が自走 prompt に反映されていない"
