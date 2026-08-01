@@ -61,6 +61,34 @@ def test_status_tool_reports_the_four_sections():
         assert sec in src, f"status_now.py に『{sec}』の節が無い"
 
 
+def test_no_second_definition_of_genzaichi():
+    """★分岐の真因: 「現在地」が2箇所で別々に定義されていると担当ごとに答えが割れる。
+
+    2026-08-01: ALPHA/BRAVO の CLAUDE.md は上部で「現在地 = status_now.py の出力」と書きつつ、
+    下部の『セッション開始時に読む』で **daily_report を「(= 現在地)」** と呼んでいた。
+    定義が2つあれば、どちらを採るかは担当次第 = 作文が生まれる。定義は1つだけにする。
+    """
+    for s in SESSIONS:
+        t = _claude_md(s)
+        assert "(= 現在地)" not in t, f"{s}: daily_report を『現在地』と呼ぶ二重定義が残っている"
+
+
+def test_new_desks_have_session_start_hook():
+    """指示文だけでは守られない。**hook で自動注入**されていること。
+
+    2026-08-01: ALPHA/BRAVO には `.claude/settings.json` が無く SessionStart hook も無かったため、
+    現在地の答えが本人任せになっていた (Advisor/出品専任 には元から hook が有る)。
+    """
+    import json
+    for s in ("iMakAdvisor", "iMakAlpha", "iMakBravo"):
+        p = os.path.join(ROOT, s, ".claude", "settings.json")
+        assert os.path.exists(p), f"{s}: .claude/settings.json が無い"
+        d = json.load(io.open(p, encoding="utf-8"))
+        cmds = [h["command"] for g in d.get("hooks", {}).get("SessionStart", [])
+                for h in g.get("hooks", [])]
+        assert any("status_now.py" in c for c in cmds), f"{s}: SessionStart に status_now.py が無い"
+
+
 def test_next_actions_are_quoted_from_daily_report_not_invented():
     """『次にやること』は daily_report の原文を出す (道具が勝手に作らない)。"""
     src = io.open(os.path.join(ROOT, "iMakHQ", "tools", "status_now.py"),
