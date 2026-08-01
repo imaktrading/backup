@@ -73,6 +73,17 @@ DESK_BY_DIR = {
 
 RE_PRIORITY = re.compile(r"^\s*[-*]\s*優先度\s*[:：]\s*(\d+)", re.M)
 RE_BLOCKED = re.compile(r"^\s*[-*]\s*状態\s*[:：]\s*(待ち.*)$", re.M)
+# ★2026-08-02: 担当が決まっている件を別の窓口に渡さない。
+#   実害: 8/1 に Advisor が「出品くんにやらせて」と指示されて出品専任宛に書いた依頼書を、
+#   翌朝の `next` が **Advisor 本人に**渡した。宛先は依頼書に書いてあったのに claim が見ていない。
+#   `- 担当: 出品専任` / `- 宛先: ALPHA` の形で1行書けば、その窓口以外には回さない。
+RE_OWNER = re.compile(r"^\s*[-*]\s*(?:担当|宛先)\s*[:：]\s*([^\s(（]+)", re.M)
+# 担当名の表記ゆれを1つに寄せる (窓口名は4つしかないので固定表で足りる)。
+OWNER_ALIASES = {
+    "出品専任": "出品専任", "出品くん": "出品専任", "hq": "出品専任", "HQ": "出品専任",
+    "advisor": "Advisor", "Advisor": "Advisor", "ADV": "Advisor", "adv": "Advisor",
+    "alpha": "ALPHA", "ALPHA": "ALPHA", "bravo": "BRAVO", "BRAVO": "BRAVO",
+}
 RE_TITLE = re.compile(r"^#\s*(.+?)\s*$", re.M)
 RE_UNSAFE = re.compile(r"[^0-9A-Za-z_.-]")
 
@@ -96,6 +107,15 @@ def detect_who(cwd: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------- 残件 (_backlog)
+def _owner_of(body: str) -> str:
+    """本文から担当窓口を読む。書いていなければ "" (= 誰でも取れる)."""
+    m = RE_OWNER.search(body or "")
+    if not m:
+        return ""
+    raw = m.group(1).strip().strip("*`")
+    return OWNER_ALIASES.get(raw, OWNER_ALIASES.get(raw.lower(), raw))
+
+
 def _parse_backlog(path: Path) -> dict:
     try:
         body = path.read_text(encoding="utf-8", errors="replace")
@@ -112,6 +132,7 @@ def _parse_backlog(path: Path) -> dict:
         "path": path,
         "priority": int(mp.group(1)) if mp else 5,
         "blocked": mb.group(1).strip() if mb else "",
+        "owner": _owner_of(body),
         "mtime": path.stat().st_mtime if path.exists() else 0.0,
         "body": body,
     }
@@ -124,7 +145,7 @@ def backlog_items() -> list[dict]:
 
 
 def add_backlog(title: str, priority: int = 5, detail: str = "",
-                who: str = "", blocked: str = "") -> Path:
+                who: str = "", blocked: str = "", owner: str = "") -> Path:
     """残件を1件足す。file 名は日付 + 件名の slug。"""
     BACKLOG.mkdir(parents=True, exist_ok=True)
     now = datetime.now()
@@ -138,6 +159,8 @@ def add_backlog(title: str, priority: int = 5, detail: str = "",
     lines = [f"# {title}", "",
              f"- 優先度: {priority}",
              f"- 起票: {now:%Y-%m-%d %H:%M} [{who or detect_who() or '?'}]"]
+    if owner:
+        lines.append(f"- 担当: {owner}")
     if blocked:
         lines.append(f"- 状態: {blocked}")
     lines += ["", detail.strip(), ""]
@@ -164,6 +187,12 @@ def request_items() -> list[dict]:
             continue
         for kind, paths in (("要返球", mine), ("レビュー待ち", drafts)):
             for p in paths:
+                # 依頼書は本文冒頭に `- 担当: 出品専任` を書ける。宛先が書いてあるものを
+                # 別の窓口に渡さない (8/1 の実害。依頼書には書いてあったのに読んでいなかった)。
+                try:
+                    head = p.read_text(encoding="utf-8", errors="replace")[:2000]
+                except OSError:
+                    head = ""
                 out.append({
                     "id": f"{wt}:{p.stem}",
                     "kind": kind,
@@ -171,6 +200,7 @@ def request_items() -> list[dict]:
                     "path": p,
                     "priority": 5,
                     "blocked": "",
+                    "owner": _owner_of(head),
                     "mtime": p.stat().st_mtime,
                     "body": "",
                 })
@@ -300,6 +330,11 @@ def next_item(who: str) -> dict:
         if it["blocked"]:
             skipped.append((it, f"待ち: {it['blocked']}"))
             continue
+        if it.get("owner") and it["owner"] != who:
+            # 担当指定がある件は本人以外に渡さない。**急ぐなら `take` で明示的に横取りできる**
+            # (自動で渡すと、頼んだ本人が翌朝それを掴む事故になる = 8/1 の実害)。
+            skipped.append((it, f"担当: {it['owner']}"))
+            continue
         r = take(it["id"], who, title=it["title"], kind=it["kind"])
         if r["ok"]:
             return {"ok": True, "item": it, "note": r["reason"], "skipped": skipped}
@@ -341,7 +376,8 @@ def render_list(items: list[dict] | None = None) -> str:
         out.append("## 取れる (優先度順)")
         for it, _ in free:
             pr = f"P{it['priority']} " if it["kind"] == "残件" else ""
-            out.append(f"- ⬜ [{it['kind']}] {pr}`{it['id']}` {it['title']}"
+            ow = f" →**{it['owner']}**" if it.get("owner") else ""
+            out.append(f"- ⬜ [{it['kind']}]{ow} {pr}`{it['id']}` {it['title']}"
                        f" ({_age(it['mtime'])})")
         out.append("")
     if blocked:
@@ -387,6 +423,8 @@ def main(argv=None) -> int:
     sp.add_argument("--priority", type=int, default=5)
     sp.add_argument("--detail", default="")
     sp.add_argument("--blocked", default="", help="外部待ち等で着手できない理由")
+    sp.add_argument("--owner", default="",
+                    help="担当窓口 (指定するとその窓口以外の next には出さない)")
     args = ap.parse_args(argv)
 
     cmd = args.cmd or "list"
@@ -419,6 +457,9 @@ def main(argv=None) -> int:
     if cmd == "take":
         who = _who_or_die(args)
         it = next((x for x in all_items() if x["id"] == args.id), None)
+        if it and it.get("owner") and it["owner"] != who:
+            # 明示 take は許す (急ぐことはある)。ただし **黙って横取りさせない**。
+            print(f"⚠️ この件の担当は **{it['owner']}** です。{who} が横取りします。")
         r = take(args.id, who, title=(it or {}).get("title", ""),
                  kind=(it or {}).get("kind", ""))
         print(("取った" if r["ok"] else "取れない") + f": {args.id} — {r['reason'] or 'OK'}")
@@ -439,7 +480,8 @@ def main(argv=None) -> int:
         return 0
     if cmd == "add":
         who = _who_or_die(args)
-        p = add_backlog(args.title, args.priority, args.detail, who, args.blocked)
+        p = add_backlog(args.title, args.priority, args.detail, who, args.blocked,
+                        args.owner)
         print(f"追加: {p}")
         return 0
     ap.print_help()

@@ -173,6 +173,50 @@ def test_every_window_is_told_to_claim_before_starting():
         assert "claim.py next" in t, f"{s}: 着手コマンドが書かれていない"
 
 
+# ------------------------------------------------------------------ 担当指定
+def test_next_never_hands_out_someone_elses_assignment(tmp_path, monkeypatch):
+    """★2026-08-02 の実害。宛先が書いてあるのに claim が読んでいなかった.
+
+    8/1 に Advisor が「出品くんにやらせて」と指示されて**出品専任宛**に書いた依頼書を、
+    翌朝の `next` が **Advisor 本人に**渡した。頼んだ本人が翌朝それを掴む = 振り分けが無意味。
+    """
+    _setup(tmp_path, monkeypatch, n_backlog=0)
+    C.add_backlog("出品くんの仕事", priority=1, who="Advisor", owner="出品専任")
+    C.add_backlog("誰でもいい仕事", priority=2, who="Advisor")
+    r = C.next_item("Advisor")
+    assert r["ok"] is True
+    assert "誰でもいい" in r["item"]["title"], "担当が別の件を渡してはいけない"
+    assert any("担当: 出品専任" in why for _it, why in r["skipped"])
+    # 本人には渡る
+    assert "出品くん" in C.next_item("出品専任")["item"]["title"]
+
+
+def test_owner_is_read_from_a_request_file_body(tmp_path, monkeypatch):
+    """依頼書 (requests/*.md) の `- 担当:` も読むこと (残件ファイルだけでは足りない)."""
+    _setup(tmp_path, monkeypatch, n_backlog=0)
+    d = tmp_path / "hq" / "requests"
+    d.mkdir(parents=True)
+    (d / "2026-08-01_x.md").write_text(
+        "# 依頼\n\n- 依頼日: 2026-08-01\n- 担当: 出品専任\n", encoding="utf-8")
+    it = C.all_items()[0]
+    assert it["owner"] == "出品専任"
+    assert C.next_item("ALPHA")["ok"] is False, "担当外の窓口に渡してはいけない"
+
+
+def test_owner_aliases_are_normalized(tmp_path, monkeypatch):
+    """表記ゆれ (出品くん / HQ / adv) で振り分けが外れないこと."""
+    for raw, want in (("出品くん", "出品専任"), ("HQ", "出品専任"),
+                      ("adv", "Advisor"), ("alpha", "ALPHA")):
+        assert C._owner_of(f"- 担当: {raw}\n") == want, raw
+
+
+def test_explicit_take_can_override_the_assignment(tmp_path, monkeypatch):
+    """急ぐことはあるので **明示 take は通す** (自動で渡さないだけ)."""
+    _setup(tmp_path, monkeypatch, n_backlog=0)
+    p = C.add_backlog("出品くんの仕事", priority=1, who="Advisor", owner="出品専任")
+    assert C.take(f"backlog:{p.stem}", "ALPHA")["ok"] is True
+
+
 def test_board_shows_who_holds_what(tmp_path, monkeypatch):
     """現在地に『誰が何を持っているか』が出ること (出ないと窓口が確認しようがない)."""
     src = io.open(os.path.join(ROOT, "iMakHQ", "tools", "worktree_board.py"),
