@@ -96,10 +96,12 @@ def turn_off() -> int:
 
 
 def main(argv=None) -> int:
-    # cmd.exe の画面は CP932。化けさせない (ここを決められるのが Python にした理由)。
+    # ★2026-08-02: 最初 cp932 を指定したら画面が化けた。この環境のコンソールは **UTF-8**
+    #   (同じ画面で `desk_autorun.py` が utf-8 で出した日本語は正しく読めていた)。
+    #   兄弟ツールと揃える = 実際に動いている方に合わせる。
     for st in (sys.stdout, sys.stderr):
         try:
-            st.reconfigure(encoding="cp932", errors="replace")
+            st.reconfigure(encoding="utf-8", errors="replace")
         except Exception:                                      # noqa: BLE001
             pass
     ap = argparse.ArgumentParser(description="窓口 ALPHA の自走を ON/OFF する")
