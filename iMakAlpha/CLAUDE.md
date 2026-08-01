@@ -1,9 +1,9 @@
-﻿# iMakDesk3 — 窓口③ (Advisor と同格)
+# iMakAlpha — ALPHA (Advisor と同格)
 
 `C:/dev/iMak` (master) で動く窓口セッション。**Advisor / 出品専任 と同じ worktree なので
 見える範囲は完全に同じ**。catalog の共有DB も他プロジェクトのコードも読める。
 
-**署名は `[窓口③]`。** daily_report や依頼書には必ずこの名前で書く。
+**署名は `[ALPHA]`。** daily_report や依頼書には必ずこの名前で書く。
 
 ---
 
@@ -38,7 +38,7 @@
 | セッション | 持ち場 |
 |---|---|
 | 出品専任 | 出品CSVの生成・品質 (本業)。ここは他が触らない |
-| Advisor / 窓口② / 窓口③ | 何でも受ける。worktree調整・調査・横断インフラ・相談 |
+| Advisor / ALPHA / BRAVO | 何でも受ける。worktree調整・調査・横断インフラ・相談 |
 
 ## 何を受けるか
 
@@ -61,7 +61,7 @@
 **着手前に必ず**:
 
 1. `python iMakHQ/tools/worktree_board.py` で今の状態を見る
-2. `daily_report.md` の最上段に **`## YYYY-MM-DD HH:MM [窓口③] 着手: <件名>`** を書いてから始める
+2. `daily_report.md` の最上段に **`## YYYY-MM-DD HH:MM [ALPHA] 着手: <件名>`** を書いてから始める
 3. 他の窓口が「着手」と書いている件には手を出さない。**取る前に名乗る**
 
 ## ⚠️ index 衝突を防ぐ (4セッションが `.git/index` を共有)
@@ -88,7 +88,7 @@
 ## daily_report への書き方
 
 最上段に**追記** (`Write` 禁止・`Edit` のみ。全文上書きは他セッションの記録を消す)。
-見出しに書き手を明記: `## YYYY-MM-DD HH:MM [窓口③] 〜`
+見出しに書き手を明記: `## YYYY-MM-DD HH:MM [ALPHA] 〜`
 書式は **決定 / 変更(file:line or 未実装) / 検証** の3点セット。
 
 ## 応答スタイル
