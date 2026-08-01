@@ -238,6 +238,24 @@ def main() -> int:
         print(f"{mark}事務巡回: 最終 {_age(last.stat().st_mtime)} ({last.name})"
               + (" — **24h 以上動いていない**" if hours > 24 else "") + "\n")
 
+    # ★2026-08-02: dispatch watcher の死活。**死んでも誰も気づかない**のが本当の問題だった
+    #   (8/1 に 9時間 / 8/2 に2回、人が偶然気づいて手で再起動している)。
+    #   事務員の死活監視と同じ理由で、外側から生存を見る。
+    try:
+        import dispatch_watch as _dwatch
+        _watch_age = _dwatch.heartbeat_age()
+    except Exception:                                          # noqa: BLE001
+        _watch_age = None
+    if _watch_age is None:
+        print("⚠️ dispatch watcher の heartbeat が無い — **依頼が誰にも配られていない疑い**")
+        print("→ `schtasks /end /tn iMakHQ_DispatchWatch; schtasks /run /tn iMakHQ_DispatchWatch`\n")
+    elif _watch_age > 300:
+        print(f"⚠️ dispatch watcher が {int(_watch_age / 60)}分 止まっている — "
+              "**依頼が誰にも配られていない**")
+        print("→ `schtasks /end /tn iMakHQ_DispatchWatch; schtasks /run /tn iMakHQ_DispatchWatch`\n")
+    else:
+        print(f"dispatch watcher: 稼働中 (heartbeat {int(_watch_age)}秒前)\n")
+
     print(f"---\n**合計: 要返球 {grand_mine}件 / 相手ボール {grand_theirs}件**")
     if grand_mine:
         print("→ 要返球を先に片付ける。**自分の回答待ちで他 worktree を止めない**。")

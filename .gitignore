@@ -174,3 +174,4 @@ iMakHQ/review_logs/dispatch_watch.log
 
 # dispatcher の実行時ロック (実体はプロセス管理用・履歴に残す意味がない)
 iMakHQ/review_logs/*.lock
+iMakHQ/review_logs/*.heartbeat

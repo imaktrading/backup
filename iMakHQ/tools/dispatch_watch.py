@@ -32,6 +32,17 @@ DEBOUNCE_SEC = 20      # 依頼が「書き終わって静止」したと判断�
 MAX_PARALLEL = 6
 LOG = dw.REVIEW_DIR / "dispatch_watch.log"
 
+# ★2026-08-02: 死んでも誰も気づかない問題の対策 (2日で2回、人が手で再起動している)。
+#   watcher が生きている限り毎周回この file を touch する。**これが唯一の生存証明**。
+#   - 起動時: heartbeat が新しければ「本物が生きている」→ 新インスタンスは即終了 (多重起動防止)
+#   - 起動時: heartbeat が古ければ「前のは死んでいる」→ 引き継いで走る (幽霊 Running の解除)
+#   Task Scheduler の `IgnoreNew` に多重起動防止を任せていたが、**プロセスが無いのに
+#   Running に張り付く幽霊状態**になると 30分ごとの再起動トリガが全部弾かれ、
+#   8/1 は 9時間停止した。判定を「Task Scheduler の状態」から「実際の heartbeat」に移す。
+HEARTBEAT = dw.REVIEW_DIR / "dispatch_watch.heartbeat"
+# 生存とみなす上限。POLL_SEC(15s) の数倍。dispatch 中も main loop は回るので伸びない。
+ALIVE_SEC = 90
+
 
 def log(msg: str) -> None:
     line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}"
@@ -40,6 +51,28 @@ def log(msg: str) -> None:
         dw.REVIEW_DIR.mkdir(parents=True, exist_ok=True)
         with open(LOG, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def heartbeat_age() -> float | None:
+    """heartbeat の経過秒。file が無ければ None (純関数に近い read-only)."""
+    try:
+        return time.time() - HEARTBEAT.stat().st_mtime
+    except OSError:
+        return None
+
+
+def is_alive() -> bool:
+    """本物の watcher が生きているか。**Task Scheduler の状態を見ない** (幽霊を掴むため)."""
+    age = heartbeat_age()
+    return age is not None and age < ALIVE_SEC
+
+
+def beat() -> None:
+    try:
+        dw.REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+        HEARTBEAT.write_text(f"{datetime.now():%Y-%m-%d %H:%M:%S}\n", encoding="utf-8")
     except OSError:
         pass
 
@@ -60,8 +93,15 @@ def _run_one(wt: str, names: str, done: dict, fresh_names: list, inflight: set, 
                 log(f"[{wt}] ⚠️ {v}")
         finally:
             dw.release_lock(wt)
-        with lock:
-            done[wt].update(fresh_names)
+        # ★2026-08-02: **成功した時だけ**処理済にする。
+        #   従来は exit1 (usage limit・API エラー等) でも処理済に入れていたため、
+        #   失敗した依頼は二度と拾われず滞留した (8/1 の `_BC_response.md` が実例)。
+        #   失敗を憶えない = 次の周回で自然に再試行される (fail-OPEN を作らない)。
+        if r.get("status") == "ok":
+            with lock:
+                done[wt].update(fresh_names)
+        else:
+            log(f"[{wt}] ⚠️ 失敗のため処理済にしない (次の周回で再試行): {names}")
     except Exception as e:
         log(f"[{wt}] !! 例外 (継続します): {type(e).__name__}: {e}")
     finally:
@@ -80,10 +120,20 @@ def main() -> int:
     seen_at: dict[tuple[str, str], float] = {}
     inflight: set[str] = set()          # 今走っている worktree
     guard = threading.Lock()
+
+    # ★多重起動防止は **heartbeat で判定する** (Task Scheduler の Running 状態は幽霊化する)。
+    if is_alive():
+        log(f"既に生きている watcher がある (heartbeat {heartbeat_age():.0f}秒前) → このインスタンスは終了")
+        return 0
+    age = heartbeat_age()
+    if age is not None:
+        log(f"前の watcher は停止していた (heartbeat {age / 60:.0f}分前) → 引き継ぐ")
+    beat()
     log(f"watch 開始 (poll={POLL_SEC}s / debounce={DEBOUNCE_SEC}s / 並行={MAX_PARALLEL} / "
         f"対象={list(dw.TARGETS)})")
 
     while True:
+        beat()          # ★生存証明。これが止まった = watcher が死んだ
         try:
             for wt in dw.TARGETS:
                 # ★2026-07-30: 担当ごとに **並行**で走らせる (従来は全体で1本の lock =
@@ -146,4 +196,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # ★2026-08-02: 落ちた事実を必ず残す。8/1・8/2 とも **ログに何も無いまま消えていて**
+    #   死因を追えなかった。終了は必ず1行書く (次に落ちた時に理由が分かるように)。
+    try:
+        _rc = main()
+    except BaseException as _e:                                # noqa: BLE001
+        log(f"!! watch 終了: {type(_e).__name__}: {_e}")
+        raise
+    log(f"!! watch 終了 (rc={_rc})")
+    raise SystemExit(_rc)
