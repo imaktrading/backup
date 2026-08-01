@@ -15,6 +15,106 @@ catalog 照会(set_exists/card_exists)は注入可=テスト可。
 """
 import re
 
+# ============================================================================
+# 構造的 drop 検出 (2026-08-01) — 「毎回どこかで件数不一致が出る」の根本対策
+#
+# 旧方式は **drop の種類ごとに正規表現を1本ずつ足す** 方式だった。新しい落ち方
+# (selfcheck不合格・PSA取得失敗 等) が出るたび分類漏れ → 「⚠️件数不一致」だけが出て
+# 中身が分からない、を繰り返していた (足し忘れが構造的に起きる = モグラ叩き)。
+#
+# 根本対策: drop の **集合を差分で決める**。
+#     落ち = 処理した cert 全体(universe) − CSV に載った cert(成功)
+# 正規表現は「集合の決定」から降格して **理由の説明** だけを担う。理由が付かなければ
+# 「未分類(要調査)」として cert 付きで必ず表に出す。
+# → 新種の落ち方が増えても、件数は定義上必ず合い、silent drop は原理的に発生しない。
+# ============================================================================
+
+# 処理対象 cert (universe): psa_to_csv.py:2842/2866 の "取得中(確認用): #<cert>..." / "取得中: #<cert>..."
+_CERT_LINE = re.compile(r"取得中(?:\(確認用\))?\s*[:：]\s*#(\d{6,})")
+# 生成 CSV の CustomLabel = "PSA10-<cert>" (= 成功して CSV に載った cert)
+_CSV_CERT = re.compile(r"PSA10-(\d{6,})")
+_CSV_PATH = re.compile(r"完了[!！]\s*出力\s*[:：]\s*(.+?\.csv)")
+
+
+def processed_certs(log):
+    """処理した cert の全集合 = universe (順序保持・純関数)。"""
+    out, seen = [], set()
+    for m in _CERT_LINE.finditer(log or ""):
+        c = m.group(1)
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def built_certs(csv_text):
+    """CSV に載った cert (= 成功)。"""
+    return set(_CSV_CERT.findall(csv_text or ""))
+
+
+def csv_path_from_log(log):
+    """生成ログ末尾の「完了！出力: <path>」から CSV パスを取る (無ければ空)。"""
+    m = _CSV_PATH.search(log or "")
+    return m.group(1).strip() if m else ""
+
+
+def drop_reason(log, cert):
+    """cert 1件が CSV に載らなかった理由をログから引く (純関数)。
+
+    ここに該当が無くても **drop の集合からは外れない**。「未分類(要調査)」として出る。
+    """
+    c = re.escape(cert)
+
+    # ① 目視未確定 (viewer で OK/CHOSEN が付かなかった) — psa_to_csv.py:2860
+    if re.search(r"目視未確定\D*?%s" % c, log):
+        return {"class": "該当なし(catalog欠)",
+                "cause": "viewer候補は出たが正カードがcatalogに無い(該当なし)",
+                "act": "catalog拡充: 該当カードを追加(NONE→自動宿題化される運用)"}
+
+    # ② catalog未登録で入稿しない (fail-closed) — psa_to_csv.py:2897
+    m = re.search(r"Skip \(catalog未登録[^)]*\)\D*?%s[^(]*\(([^)]*)\)" % c, log)
+    if m:
+        return {"class": "catalog未登録(入稿せず)",
+                "cause": f"catalog に公式データが無く fail-closed で除外 ({m.group(1)})",
+                "act": "catalog拡充依頼 (該当カードを追加)"}
+
+    # ③ セルフチェック不合格 — psa_to_csv.py:2878 / listing_validator
+    #    直前に「❌ セルフチェック失敗 (#cert):」+ 明細行が出るので明細まで拾う。
+    m = re.search(r"セルフチェック失敗\s*\(#%s\)\s*[:：]?\s*\n\s*[^\n]*?❌\s*([^\n]+)" % c, log)
+    if m or re.search(r"Skipping\s*#%s\b[^\n]*selfcheck" % c, log):
+        detail = m.group(1).strip() if m else "selfcheck failed in build_row"
+        return {"class": "セルフチェック不合格",
+                "cause": f"出力直前の整合チェックで弾いた: {detail}",
+                "act": "1丁目1番地で判定 — ①catalog値が正なら②(照合ルール/タイトル生成)を修正"}
+
+    # ④ PSA 取得失敗 ("取得中(確認用): #cert... 失敗")
+    if re.search(r"取得中(?:\(確認用\))?\s*[:：]\s*#%s\s*\.{0,3}\s*失敗" % c, log):
+        return {"class": "PSA取得失敗",
+                "cause": "PSA サイトから cert データを取得できなかった(通信/Cloudflare/存在しない)",
+                "act": "再走で回復するか確認。恒常的なら scrape 側を調査"}
+
+    # ⑤ 理由不明 — **握り潰さない**。cert 付きで表に出して次の分類ルールの起点にする。
+    return {"class": "未分類(要調査)",
+            "cause": "CSVに載らなかったが、ログから落ちた理由を特定できなかった",
+            "act": f"生成ログで #{cert} を検索し、原因行を drop_reason() に分類ルール追加"}
+
+
+def structural_drops(log, csv_text):
+    """universe − CSV = 落ちの実体 (cert単位)。理由を付けて返す。"""
+    universe = processed_certs(log)
+    if not universe or csv_text is None:
+        return []
+    ok = built_certs(csv_text)
+    out = []
+    for cert in universe:
+        if cert in ok:
+            continue
+        d = dict(drop_reason(log, cert))
+        d["item"] = "#" + cert
+        d["cert"] = cert
+        out.append(d)
+    return out
+
 
 def rescued_subjects(log):
     """reject 直後に fallback で救済された PSA subject を集める (純関数)。
@@ -43,11 +143,13 @@ def rescued_subjects(log):
     return rescued
 
 
-def classify_drops(log, *, set_exists, card_exists=None):
+def classify_drops(log, *, set_exists, card_exists=None, csv_text=None):
     """生成ログ → [{item, class, cause, act}] (純関数, catalog照会は注入)。
 
     set_exists(prefix)->bool: そのセット接頭辞のカードが catalog に1件でも在るか。
     card_exists(card_id)->bool: その個別IDが在るか(任意)。
+    csv_text: 生成された CSV 本文。渡すと **universe − CSV の差分で drop 集合を確定**する
+              (= 分類ルールの足し忘れで silent drop にならない)。未指定なら旧来のパターン方式。
     """
     out = []
     seen = set()
@@ -125,6 +227,15 @@ def classify_drops(log, *, set_exists, card_exists=None):
                         "cause": f"DON!!カード('{m.group(2)}')=番号なしだが set+処理(rarity)で識別可・catalog未対応で誤除外",
                         "act": "catalog に DON!! を set_code+treatment(rarity)で登録 → 出品可(cert cache に set/rarity 有り)"})
             continue
+
+    # ★ 構造的補完: CSV が渡されていれば「universe − CSV」で落ちの実体を確定する。
+    #    上のパターン群で既に cert 付きで拾えているものは重複させない。
+    #    パターン側だけに在って universe に無い finding (収録漏れ/scope外/promo衝突 = card_id 単位)
+    #    は **その drop の理由説明** として残す (件数は cert 側で数えるので二重計上しない)。
+    already = {d.get("cert") for d in out if d.get("cert")}
+    for d in structural_drops(log, csv_text):
+        if d["cert"] not in already:
+            out.append(d)
     return out
 
 
@@ -144,11 +255,15 @@ def render_problem_report(drops):
     return "\n".join(lines)
 
 
-def reconcile_counts(log, drops):
+def reconcile_counts(log, drops, csv_text=None):
     """処理N件 vs (成功 + actionable落ち) を照合し silent drop 余地を検出 (純関数, test可)。
 
     ユーザー方針(2026-06-30): 「入力N = CSV X + 落ち Y」が合わなければ、拾えてない drop=silent drop
     がある証拠。合わない時はそれ自体を問題提起する(=取りこぼしゼロ保証)。
+
+    2026-08-01 根本対策: csv_text があれば **cert 突合** で照合する。落ちは差集合で決まるため
+    件数は定義上必ず合い、「⚠️不一致」は分類漏れでは鳴らなくなる。残った警告は
+    「ログ自体が欠けている(宣言件数 ≠ 取得中行数)」という別種の実害だけを指す。
     """
     import re
 
@@ -158,6 +273,22 @@ def reconcile_counts(log, drops):
     processed = _n(r"(\d+)\s*件を処理")
     if processed is None:
         return ""
+
+    # ---- cert 突合 (csv_text がある時。分類ルールの網羅性に依存しない) ----
+    universe = processed_certs(log)
+    if universe and csv_text is not None:
+        ok = built_certs(csv_text)
+        n_ok = len([c for c in universe if c in ok])
+        n_dr = len(universe) - n_ok
+        if processed != len(universe):
+            return (f"⚠️ ログ欠落の疑い: 宣言{processed}件 ≠ 取得中行{len(universe)}件 "
+                    f"(差{processed - len(universe)}件) → 途中でログが切れた/取得行が出ていない")
+        unknown = [d for d in drops if d.get("class") == "未分類(要調査)"]
+        line = f"✅ 件数照合OK(cert突合): 処理{len(universe)} = CSV{n_ok} + 落ち{n_dr}"
+        if unknown:
+            line += f" ※うち理由未特定 {len(unknown)}件 (要分類ルール追加)"
+        return line
+
     success = _n(r"成功[:：]\s*(\d+)\s*件") or 0
 
     # 落ちは **cert 単位** で数える(2026-07-20)。

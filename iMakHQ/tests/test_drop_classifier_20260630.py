@@ -106,6 +106,99 @@ def test_reconcile_counts():
     assert dc.reconcile_counts("成功: 5件", drops) == ""
 
 
+# ============================================================================
+# 構造的 drop 検出 (2026-08-01) — 「分類ルールの足し忘れ」で件数不一致が毎回出るのを止める
+# ============================================================================
+_LOG_STRUCTURAL = (
+    "4件を処理します。（仕入値あり: 4件）\n"
+    "取得中(確認用): #111111111... ✓\n"
+    "取得中(確認用): #222222222... ✓\n"
+    "取得中(確認用): #333333333... ✓\n"
+    "取得中(確認用): #444444444... 失敗\n"
+    "スキップ(目視未確定): #333333333\n"
+    "    ❌ セルフチェック失敗 (#222222222):\n"
+    "       ❌ タイトルに'ST02'があるが PSA brand に存在しない: 'GUNDAM JAPANESE PB01-...'\n"
+    "    ⚠️ Skipping #222222222: selfcheck failed in build_row\n"
+    "成功: 1件 / 失敗: 1件\n"
+    "完了！出力: C:/x/tcg_upload_1.csv\n"
+)
+_CSV_STRUCTURAL = '"CustomLabel"\n"PSA10-111111111"\n'
+
+
+def _structural_drops():
+    return dc.classify_drops(_LOG_STRUCTURAL, set_exists=lambda p: True,
+                             csv_text=_CSV_STRUCTURAL)
+
+
+def test_universe_minus_csv_defines_the_drop_set():
+    # 落ちは「処理cert − CSVcert」の差分で決まる。分類ルールの有無に依存しない。
+    assert dc.processed_certs(_LOG_STRUCTURAL) == [
+        "111111111", "222222222", "333333333", "444444444"]
+    assert dc.built_certs(_CSV_STRUCTURAL) == {"111111111"}
+    certs = {d["cert"] for d in dc.structural_drops(_LOG_STRUCTURAL, _CSV_STRUCTURAL)}
+    assert certs == {"222222222", "333333333", "444444444"}
+
+
+def test_selfcheck_failure_is_named_not_a_bare_count_gap():
+    # 2026-08-01 の実ケース: selfcheck 落ちに分類ルールが無く「⚠️件数不一致」だけが出ていた。
+    d = {x["cert"]: x for x in _structural_drops() if x.get("cert")}
+    assert d["222222222"]["class"] == "セルフチェック不合格"
+    assert "ST02" in d["222222222"]["cause"], "弾いた理由の明細が出ていない"
+    assert "①" in d["222222222"]["act"] and "②" in d["222222222"]["act"], \
+        "1丁目1番地の判定に接続されていない"
+    assert d["444444444"]["class"] == "PSA取得失敗"
+    assert d["333333333"]["class"] == "該当なし(catalog欠)"
+
+
+def test_unknown_drop_is_surfaced_with_cert_not_silent():
+    # 未知の落ち方でも **集合から外れない**。cert 付きで「未分類」として必ず表に出る。
+    log = ("2件を処理します\n取得中: #777777777... ✓\n取得中: #888888888... ✓\n"
+           "🌀 これは将来の新しい落ち方 (#888888888)\n完了！出力: C:/x/a.csv\n")
+    drops = dc.classify_drops(log, set_exists=lambda p: True,
+                              csv_text='"PSA10-777777777"\n')
+    unknown = [d for d in drops if d["class"] == "未分類(要調査)"]
+    assert len(unknown) == 1 and unknown[0]["cert"] == "888888888"
+    assert "888888888" in unknown[0]["act"], "調べる手がかり(cert)が対策案に無い"
+
+
+def test_reconcile_always_balances_when_csv_given():
+    # 新種の落ち方が増えても件数は定義上合う → ⚠️不一致は分類漏れでは鳴らない。
+    r = dc.reconcile_counts(_LOG_STRUCTURAL, _structural_drops(), csv_text=_CSV_STRUCTURAL)
+    assert "照合OK" in r and "処理4" in r and "CSV1" in r and "落ち3" in r
+
+
+def test_reconcile_reports_unknown_count():
+    log = ("2件を処理します\n取得中: #777777777... ✓\n取得中: #888888888... ✓\n"
+           "完了！出力: C:/x/a.csv\n")
+    csv = '"PSA10-777777777"\n'
+    drops = dc.classify_drops(log, set_exists=lambda p: True, csv_text=csv)
+    r = dc.reconcile_counts(log, drops, csv_text=csv)
+    assert "照合OK" in r and "理由未特定 1件" in r
+
+
+def test_reconcile_still_flags_truncated_log():
+    # 分類漏れでは鳴らないが、ログ自体が欠けている(宣言数 ≠ 取得中行数)は実害なので鳴らす。
+    log = ("10件を処理します\n取得中: #777777777... ✓\n完了！出力: C:/x/a.csv\n")
+    csv = '"PSA10-777777777"\n'
+    r = dc.reconcile_counts(log, dc.classify_drops(log, set_exists=lambda p: True, csv_text=csv),
+                            csv_text=csv)
+    assert "ログ欠落" in r
+
+
+def test_structural_mode_does_not_double_count_existing_rules():
+    # ③目視未確定 は旧ルールでも cert 付きで拾える。構造側と二重に並べない。
+    drops = _structural_drops()
+    certs = [d.get("cert") for d in drops if d.get("cert")]
+    assert len(certs) == len(set(certs)), f"cert が二重計上されている: {certs}"
+
+
+def test_legacy_path_unchanged_without_csv():
+    # csv_text 未指定(旧呼出/他カテゴリ)では従来のパターン方式のまま = 後方互換。
+    drops = dc.classify_drops(_LOG_STRUCTURAL, set_exists=lambda p: True)
+    assert not any(d["class"] == "未分類(要調査)" for d in drops)
+    assert "不一致" in dc.reconcile_counts(_LOG_STRUCTURAL, drops)
+
+
 def test_render_and_empty():
     assert dc.render_problem_report([]) == ""
     rep = dc.render_problem_report([{"item": "X", "class": "収録漏れ", "cause": "c", "act": "a"}])

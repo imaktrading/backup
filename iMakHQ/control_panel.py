@@ -161,11 +161,21 @@ def build_problem_report(log: str, catalog_db_path: str = CATALOG_DB_PATH) -> st
                 _sys.path.insert(0, _p)
         import drop_classifier as _dc
         se, ce = _dc.make_catalog_lookups(catalog_db_path)
-        _drops = _dc.classify_drops(log, set_exists=se, card_exists=ce)
+        # 生成 CSV 本文を渡すと drop 集合を「処理cert − CSV cert」の差分で確定できる
+        # (2026-08-01: 分類ルールの足し忘れで毎回 ⚠️件数不一致 が出ていたのの根本対策)。
+        _csv_text = None
+        try:
+            _csv_p = _dc.csv_path_from_log(log)
+            if _csv_p and os.path.isfile(_csv_p):
+                with open(_csv_p, "r", encoding="utf-8", errors="replace") as _f:
+                    _csv_text = _f.read()
+        except Exception:
+            _csv_text = None   # 読めなければ従来のパターン方式にフォールバック
+        _drops = _dc.classify_drops(log, set_exists=se, card_exists=ce, csv_text=_csv_text)
         rep = _dc.render_problem_report(_drops)
         if rep:
             parts.append(rep)
-        recon = _dc.reconcile_counts(log, _drops)   # 件数照合(silent drop検出)
+        recon = _dc.reconcile_counts(log, _drops, csv_text=_csv_text)   # 件数照合(silent drop検出)
         if recon:
             parts.append(recon)
     except Exception as _e:
