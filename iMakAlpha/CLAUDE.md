@@ -15,6 +15,24 @@ python iMakHQ/tools/status_now.py
 ★セッション開始時に **SessionStart hook が同じものを自動で流し込む**。それが現在地。
 2026-08-01: 同じ問いに窓口ごとに違う答えが返ったため、指示文ではなく hook で固定した。
 
+## 🎫 「残務やって」と言われたら — **claim を取ってから着手する**
+
+```
+python iMakHQ/tools/claim.py next
+```
+
+**取れた1件だけをやる。** 取れなかった件は他の窓口が持っているので触らない。
+4窓口は同じ worktree / 同じ daily_report を見ているため、claim が無いと
+**全員が同じ1件目に着手する**。
+
+- 一覧: `python iMakHQ/tools/claim.py list`
+- 完了: `python iMakHQ/tools/claim.py done <ID> --note "..."`
+- 着手しないなら返す: `python iMakHQ/tools/claim.py release <ID>`
+- 残務に気づいたら足す: `python iMakHQ/tools/claim.py add "<件名>" --priority 3 --detail "..."`
+
+(2026-08-01: 「着手前に daily_report で名乗る」は口約束で、board も status_now も
+『着手』を読んでいなかった。取り合いは仕組みで防ぐ)
+
 ---
 
 ## 🔀 1丁目1番地 (2026-08-01 ユーザー確定・絶対)

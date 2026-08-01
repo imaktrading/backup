@@ -165,6 +165,23 @@ def main() -> int:
 
     cutoff = time.time() - RECENT_DAYS * 86400
     print(f"# worktree ボード (直近{RECENT_DAYS}日 / 共有領域のみ)\n")
+
+    # ★2026-08-01: 窓口が4つになり、**同じ件に複数窓口が着手する**余地ができた。
+    #   誰が何を持っているかを board の先頭に出す (詳細と着手は claim.py)。
+    #   循環 import になるのでここで遅延 import する (claim.py は board を参照する)。
+    try:
+        import claim as _claim
+        _held = [(it, c) for it in _claim.all_items()
+                 if (c := _claim.read_claim(it["id"]))]
+    except Exception:                                          # noqa: BLE001
+        _held = []
+    if _held:
+        print(f"## 🔒 着手中 {len(_held)}件 — **他の窓口は触らない**")
+        for it, c in _held:
+            mark = " ⚠️放置(奪取可)" if c.get("stale") else ""
+            print(f"- **[{c.get('who', '?')}]**{mark} {it['title']} `{it['id']}`")
+        print()
+
     grand_mine = grand_theirs = 0
 
     for wt, label in WORKTREES:

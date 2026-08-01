@@ -39,6 +39,15 @@ def _board():
     return _run([sys.executable, os.path.join(HERE, "worktree_board.py")])
 
 
+def _backlog():
+    """残務ボード (誰が何を持っているか / 次に取れるのは何か)。read-only。
+
+    2026-08-01: 窓口が4つになり、同じ残務に複数窓口が着手しうる状態になった。
+    着手は `claim.py next` (状態を変えるのでこの道具ではやらない)。
+    """
+    return _run([sys.executable, os.path.join(HERE, "claim.py"), "list"])
+
+
 def _hoju():
     """補URL: 対象(補0本)の件数と内訳。catalog DB / スプシを読むので数十秒かかる場合あり。"""
     code = (
@@ -86,10 +95,13 @@ def main():
     print("## 1. 各担当の未処理\n")
     print(_board().rstrip())
 
-    print("\n## 2. 出品の数字\n")
+    print("\n## 2. 残務ボード (着手は claim.py next)\n")
+    print(_backlog().rstrip())
+
+    print("\n## 3. 出品の数字\n")
     print("  " + _hoju())
 
-    print("\n## 3. 今日の commit\n")
+    print("\n## 4. 今日の commit\n")
     cs = _commits()
     if cs:
         for ln in cs:
@@ -98,7 +110,7 @@ def main():
     else:
         print("  (今日はまだ commit なし)")
 
-    print("\n## 4. 次にやること (daily_report 最上段より・原文)\n")
+    print("\n## 5. 次にやること (daily_report 最上段より・原文)\n")
     for ln in _next_actions():
         print("  " + ln)
 

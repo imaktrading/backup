@@ -33,6 +33,24 @@ python iMakHQ/tools/status_now.py
 **この出力が現在地。そのまま示す。** 補足は後ろに足してよいが、出力自体は書き換えない。
 (2026-08-01: 同じ問いに ALPHA と BRAVO が違う答えを返したため、定義をコマンドに固定した)
 
+## 🎫 「残務やって」と言われたら — **claim を取ってから着手する**
+
+```
+python iMakHQ/tools/claim.py next
+```
+
+**取れた1件だけをやる。** 取れなかった件は他の窓口が持っているので触らない。
+4窓口は同じ worktree / 同じ daily_report を見ているため、claim が無いと
+**全員が同じ1件目に着手する**。
+
+- 一覧: `python iMakHQ/tools/claim.py list`
+- 完了: `python iMakHQ/tools/claim.py done <ID> --note "..."`
+- 着手しないなら返す: `python iMakHQ/tools/claim.py release <ID>`
+- 残務に気づいたら足す: `python iMakHQ/tools/claim.py add "<件名>" --priority 3 --detail "..."`
+
+(2026-08-01: 「着手前に daily_report で名乗る」は口約束で、board も status_now も
+『着手』を読んでいなかった。取り合いは仕組みで防ぐ)
+
 ---
 
 ## 🛡️ Worktree 分離ルール (2026-05-01 制定・絶対厳守)
