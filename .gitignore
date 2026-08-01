@@ -171,3 +171,6 @@ iMakHQ/chrome_profile_psa_restock/
 iMakHQ/review_logs/dispatch.lock
 iMakHQ/review_logs/dispatch_*.log
 iMakHQ/review_logs/dispatch_watch.log
+
+# dispatcher の実行時ロック (実体はプロセス管理用・履歴に残す意味がない)
+iMakHQ/review_logs/*.lock
