@@ -392,10 +392,49 @@ def get_oos_ichibankuji(limit):
         sold = (row[COL_SOLD] if len(row) > COL_SOLD else "").strip()
         title = (row[2] if len(row) > 2 else "").strip()
         if cat == "一番くじ" and b and sold:
-            cand.append({"row": i, "item_id": b, "title": title})
+            cand.append({"row": i, "item_id": b, "title": title, "kind": "oos"})
     kept, n_cd = filter_cooldown(cand, _load_cooldown(), _today())
     if n_cd:
         print(f"  ⏳ 候補待ち cooldown 中 {n_cd}件 を除外(5日)")
+    return kept[:limit]
+
+
+AUX_COL0 = 28          # AC 補URL の先頭 index(0基点) / AC-AG の5本
+AUX_MAX = 5
+
+
+def get_thin_backup_ichibankuji(limit, max_backups=1):
+    """**まだ生きている**一番くじで補URLが薄い行 → [{row,item_id,title,kind:'live_thin'}]。
+
+    ★2026-08-02: 従来の対象は「売り切れ○」= **死んでから**探す事後型だけだった。
+      補URL は「仕入元が消えた時の保険」なので、切れてから貯めても保険にならない。
+      実測: live 29件のうち **10件が補0本(34.5%)**、満杯は1件(3.4%)。
+      同じ時点の PSA は 補0本 19% / 満杯 16% / 平均2.36本 で、差は設計から来ている
+      (PSA は live を毎晩無人で探して積み上げる)。ここを揃える。
+
+    live = B列itemID あり かつ D列売り切れ 空。cooldown は OOS と共用。
+    """
+    ws = sheet_io._product_ws()
+    cand = []
+    for i, row in enumerate(ws.get_all_values(), start=1):
+        if i == 1:
+            continue
+
+        def g(j, _r=row):
+            return (_r[j] if len(_r) > j else "") or ""
+
+        if g(COL_CAT).strip() != "一番くじ":
+            continue
+        if not g(1).strip() or g(COL_SOLD).strip():
+            continue                      # itemID 無し / 売り切れ = ここでは扱わない
+        n_aux = sum(1 for k in range(AUX_COL0, AUX_COL0 + AUX_MAX) if g(k).strip())
+        if n_aux >= max_backups:
+            continue
+        cand.append({"row": i, "item_id": g(1).strip(), "title": g(2).strip(),
+                     "kind": "live_thin", "n_aux": n_aux})
+    kept, n_cd = filter_cooldown(cand, _load_cooldown(), _today())
+    if n_cd:
+        print(f"  ⏳ (live)候補待ち cooldown 中 {n_cd}件 を除外(5日)")
     return kept[:limit]
 
 
@@ -422,11 +461,18 @@ def build_restock_reqs(sheet_rows):
 
     A=新supply / B=itemID / D=売切解除 / N=cost(新supply実価格・あれば。V8計算のSSOT)。
     cost が無い行は N列を書かない(誤って既存cost を消さない)。
+
+    ★2026-08-02 kind='live_thin' (= まだ生きている出品の補URL補充) は **1本も書かない**。
+      この行は出品が生きていて A列(現supply)も B列(itemID)も有効なので、上書きすると
+      itemID を剥がして eBay 出品との紐付けを切る = 取下げ漏れ/二重出品の原因になる。
+      補充したいのは AUX(補URL)だけ。AUX は write_restock 側で別途 append する。
     """
     ncol = _col_letter(COL_COST)
     icol = _col_letter(COL_KUJI_URL)
     reqs = []
     for row, d in sheet_rows.items():
+        if d.get("kind") == "live_thin":
+            continue          # live 行は A/B/D/N を触らない (補URLのみ)
         reqs.append({"range": f"A{row}", "values": [[d.get("a", "")]]})
         reqs.append({"range": f"B{row}", "values": [[d.get("b", "")]]})
         reqs.append({"range": f"D{row}", "values": [[""]]})   # 売り切れ解除(在庫補充済)
@@ -891,8 +937,10 @@ def _identify_scrape(targets, cand_n, use_cache=True):
             iid = str(t["item_id"])
             ent = cache.get(iid)
             if use_cache and _identify_cache_fresh(ent, today):
-                items.append({k: ent[k] for k in
-                              ("row", "item_id", "title", "prize", "ref_image", "candidates")})
+                _it = {k: ent[k] for k in
+                       ("row", "item_id", "title", "prize", "ref_image", "candidates")}
+                _it["kind"] = t.get("kind", "oos")   # kind は対象側の属性(cacheに焼かない)
+                items.append(_it)
                 continue
             pics = fetch_listing_images(t["item_id"])
             et = _ebay_title(t["item_id"])             # 一番くじ+賞は生成済eBayタイトルが確実
@@ -906,8 +954,8 @@ def _identify_scrape(targets, cand_n, use_cache=True):
                   "prize": prize, "ref_image": pics[0] if pics else "",
                   "candidates": [{"url": c["href"], "price": c["price"],
                                   "image": c.get("image", "")} for c in raw]}
-            items.append(it)
-            cache[iid] = {**it, "date": today}
+            items.append({**it, "kind": t.get("kind", "oos")})
+            cache[iid] = {**it, "date": today}   # kind は焼かない(対象側の属性で日々変わる)
             _identify_cache_save(cache)      # 1件ごとに保存(途中死しても貯めた分は残す)
     finally:
         if drv:
@@ -916,10 +964,22 @@ def _identify_scrape(targets, cand_n, use_cache=True):
     return items
 
 
-def pass_prefetch(n, cand_n):
-    """無人の候補先読み。**目視UIを開かず・書込もしない**。夜間 cron 用 (2026-07-28)。"""
+def pass_prefetch(n, cand_n, max_backups=1):
+    """無人の候補先読み。**目視UIを開かず・書込もしない**。夜間 cron 用 (2026-07-28)。
+
+    ★2026-08-02: OOS(売り切れ=事後)だけでなく、**live で補が薄い行**も貯める。
+      補URL は切れた時の保険なので、切れる前に積んでおかないと意味がない。
+      OOS を先に埋めてから live 薄い分を足す(OOS は売上が止まっているので優先)。
+    """
     targets = get_oos_ichibankuji(n)
-    print(f"候補先読み: OOS一番くじ {len(targets)}件 (各最安{cand_n}候補)")
+    n_oos = len(targets)
+    if len(targets) < n:
+        seen = {t["row"] for t in targets}
+        for t in get_thin_backup_ichibankuji(n - len(targets), max_backups=max_backups):
+            if t["row"] not in seen:
+                targets.append(t)
+    print(f"候補先読み: OOS {n_oos}件 + live補薄 {len(targets) - n_oos}件 "
+          f"= {len(targets)}件 (各最安{cand_n}候補)")
     if not targets:
         print("対象なし"); return
     items = _identify_scrape(targets, cand_n)
@@ -948,7 +1008,8 @@ def pass_identify(n, cand_n):
         if skip or not oks:
             cooldown_ids.append(it["item_id"]); continue
         saved.append({"row": int(row), "item_id": it["item_id"], "title": it["title"],
-                      "ref_image": it["ref_image"], "picked_url": oks[0]["url"]})
+                      "ref_image": it["ref_image"], "picked_url": oks[0]["url"],
+                      "kind": it.get("kind", "oos")})
     if cooldown_ids:
         n = _add_cooldown(cooldown_ids, reason="identify:見送り/該当なし")
         print(f"  ⏳ 識別できず {n}件 を候補待ち({COOLDOWN_DAYS}日)に登録")
@@ -994,6 +1055,7 @@ def pass_expand(cand_n, dry=False):
             raw = _filter_new_freeship(drv, raw)
             print(f"     新品+送料込み {len(raw)}件", flush=True)
             items.append({"row": p["row"], "item_id": p["item_id"], "title": p["title"],
+                          "kind": p.get("kind", "oos"),
                           "ref_image": p.get("ref_image", ""),
                           "picked_image": mercari_image_url(p["picked_url"]),
                           "kuji_url": (meta.get(p["row"]) or {}).get("kuji_url", ""),  # I列 pre-fill
@@ -1019,8 +1081,16 @@ def pass_expand(cand_n, dry=False):
         # 高い順に並べ替え(A列=最高値supply / 補URL=以降最大5) + 最高値を cost に(赤字回避)
         urls, cost = sort_oks_desc(oks)
         kuji = (val.get("kuji") or "").strip() if isinstance(val, dict) else ""
-        confirmed[r] = {"item_id": it.get("item_id", ""), "a": urls[0],
-                        "aux": urls[1:6], "cost": cost, "kuji": kuji}   # kuji→I列(refresh用)
+        kind = it.get("kind", "oos")
+        if kind == "live_thin":
+            # ★live 行は A列(現supply)が生きているので **選んだ全部を補URL** にする。
+            #   1本目を A に取ると現supply を上書きしてしまう。cost も現行を維持する。
+            confirmed[r] = {"item_id": it.get("item_id", ""), "a": "", "aux": urls[:AUX_MAX],
+                            "cost": 0, "kuji": kuji, "kind": kind}
+        else:
+            confirmed[r] = {"item_id": it.get("item_id", ""), "a": urls[0],
+                            "aux": urls[1:6], "cost": cost, "kuji": kuji,
+                            "kind": kind}   # kuji→I列(refresh用)
     if cooldown_ids:
         n = _add_cooldown(cooldown_ids, reason="expand:見送り/候補なし")
         print(f"  ⏳ 候補待ち {n}件 を {COOLDOWN_DAYS}日 cooldown に登録(次回identifyで除外)")
@@ -1072,8 +1142,14 @@ def _write_supplies(confirmed):
     for row in sorted(confirmed):
         d = confirmed[row]
         sheet_rows[row] = {"a": d.get("a", ""), "b": (d.get("item_id") or "").strip(),
-                           "aux": d.get("aux", []), "cost": d.get("cost", 0), "kuji": d.get("kuji", "")}
-        print(f"  📝 row{row}: スプシ記録(eBay未変更) itemID={sheet_rows[row]['b']} cost¥{d.get('cost') or '?'}")
+                           "aux": d.get("aux", []), "cost": d.get("cost", 0),
+                           "kuji": d.get("kuji", ""), "kind": d.get("kind", "oos")}
+        if sheet_rows[row]["kind"] == "live_thin":
+            print(f"  📝 row{row}: 補URLのみ追記(出品は生きているので A/B/D/N は触らない) "
+                  f"+{len(sheet_rows[row]['aux'])}本")
+        else:
+            print(f"  📝 row{row}: スプシ記録(eBay未変更) itemID={sheet_rows[row]['b']} "
+                  f"cost¥{d.get('cost') or '?'}")
     return _retry(lambda: write_restock(sheet_rows), what="スプシ書込")
 
 
