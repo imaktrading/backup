@@ -51,3 +51,26 @@ def test_edit_distance_is_capped_and_symmetric():
     assert K._edit_distance("kirara", "kirawra") == 1
     assert K._edit_distance("abc", "xyz") >= 3
     assert K._edit_distance("", "") == 0
+
+
+# ---- 長音の表記ゆれは誤記ではない (2026-08-03) ----
+# 実害: row121 'Yoko Kurama'(妖狐) → 'Youko Kurama' を綴り違いとして HOLD し、
+# 正しい出品を止めてしまった。畳むのは日本語の長音パターンだけ('ou'→'o'/'uu'→'u')。
+
+def test_long_vowel_romaji_variant_is_not_a_typo():
+    assert K.title_drift_warnings("Prize Yoko Kurama Figure",
+                                  "Prize Youko Kurama Figure") == []
+    assert K.title_drift_warnings("Prize Yuki Figure", "Prize Yuuki Figure") == []
+    assert K.title_drift_warnings("Prize Ryo Figure", "Prize Ryou Figure") == []
+
+
+def test_english_words_are_not_collapsed():
+    """'oo'/'oh' は畳まない = 英単語の誤記を見逃さない。"""
+    assert [k for k, _ in K.title_drift_warnings("Sailor Moon Figure",
+                                                 "Sailor Mon Figure")] == ["typo"]
+    assert K._romaji_key("book") == "book"
+
+
+def test_real_typo_still_caught_after_the_relaxation():
+    assert [k for k, _ in K.title_drift_warnings(
+        "Prize Kirara Hoshi Figure", "Prize Kirawra Hoshi Figure")] == ["typo"]

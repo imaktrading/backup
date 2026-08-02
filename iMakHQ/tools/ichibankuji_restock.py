@@ -1288,6 +1288,17 @@ def _edit_distance(a, b, cap=3):
     return min(prev[-1], cap)
 
 
+def _romaji_key(w):
+    """日本語の**長音の表記ゆれ**を吸収した比較キー (純関数)。
+
+    ★2026-08-03: 'Yoko Kurama'(妖狐) と 'Youko Kurama' は同じ名前の別ローマ字表記であって
+      誤記ではない。これを綴り違いとして止めると、正しい出品が出せなくなる(実害: row121)。
+      畳むのは **日本語の長音パターンだけ** ('ou'→'o' / 'uu'→'u')。
+      'oo'/'oh' は英単語 (book, oh) を壊すので畳まない = 'Moon' vs 'Mon' は誤記のまま検出する。
+    """
+    return (w or "").lower().replace("ou", "o").replace("uu", "u")
+
+
 def title_drift_warnings(old_title, new_title):
     """旧タイトル → 新タイトル の**固有名詞の壊れ**を検出 (純関数・test可)。
 
@@ -1311,6 +1322,9 @@ def title_drift_warnings(old_title, new_title):
         wl = w.lower()
         if wl in new_l or wl in _DRIFT_IGNORE:
             continue
+        # 長音の表記ゆれ(Yoko/Youko)は誤記ではない → 一致とみなして何も言わない
+        if any(_romaji_key(n) == _romaji_key(w) for n in new):
+            continue
         near = [n for n in new if n.lower() not in {o.lower() for o in old}
                 and _edit_distance(wl, n.lower()) <= 2]
         if near:
@@ -1319,6 +1333,29 @@ def title_drift_warnings(old_title, new_title):
             out.append(("dropped", f"'{w}' が落ちた"))
     return out
 
+
+
+def repair_title_typos(old_title, new_title):
+    """綴り違いを **旧タイトルの綴りに戻す** → (直したtitle, [直した内容]) (純関数)。
+
+    ★2026-08-03: 生成は走らせるたびに違う綴りを作る (実測: 星綺羅羅 が 'Kirawra' → 'Kirakira')。
+      HOLD で止めるだけだと、生成が安定するまでその商品は永久に出せない。
+      旧タイトルは **実際に出品できていた = 人の目を通っている** ので、そちらを正として戻す。
+      戻せなかったものだけ HOLD に残す。
+    """
+    fixed, notes = new_title or "", []
+    for kind, msg in title_drift_warnings(old_title, new_title):
+        if kind != "typo":
+            continue
+        m = re.match(r"'([^']+)' → '([^']+)'", msg)
+        if not m:
+            continue
+        good, bad = m.group(1), m.group(2)
+        pat = r"\b" + re.escape(bad) + r"\b"
+        if re.search(pat, fixed):
+            fixed = re.sub(pat, good, fixed)
+            notes.append(f"'{bad}' → '{good}' に戻した(旧タイトルが正)")
+    return fixed, notes
 
 def _build_refreshed_row(gen, base_desc, series_name, release_year, price_jpy, main_image,
                          kuji_url, supply_url, prize_p, cost_jpy):
@@ -1441,12 +1478,17 @@ def pass_refresh():
         old_title = _ebay_title(item_id)
         # ★2026-08-03: 固有名詞の壊れを **入稿前に** 止める(誤記=SNADリスク・出品の正確性原則)。
         drift = title_drift_warnings(old_title, new_title)
-        typos = [m for k, m in drift if k == "typo"]
         for k, m in drift:
             print(f"     {'❌' if k == 'typo' else '⚠️'} タイトル {m}")
-        if typos:
-            print("     ⏭ 綴り違いは出さない(HOLD)。旧タイトルを正として人が直すまで保留")
-            continue
+        if any(k == "typo" for k, _ in drift):
+            new_title, repaired = repair_title_typos(old_title, new_title)
+            for r in repaired:
+                print(f"     🔧 タイトル {r}")
+            if ebay_row is not None:
+                ebay_row["*Title"] = new_title
+            if any(k == "typo" for k, _ in title_drift_warnings(old_title, new_title)):
+                print("     ⏭ 綴りを戻せなかった → HOLD(出さない)")
+                continue
         planned.append({"item_id": item_id, "sku": ebay_row.get("CustomLabel", ""),
                         "row": ebay_row, "old_title": old_title, "new_title": new_title,
                         "price": price})
