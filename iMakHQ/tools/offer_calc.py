@@ -42,10 +42,28 @@ ROUTES = {
 
 # 商品管理シートの列 (0-based)。sheet_io と同じ並び。
 COL_URL, COL_ITEMID, COL_COST_N, COL_STOCKCHK, COL_CAT = 0, 1, 13, 14, 17
+# I列 = PSA cert#。見出しは 'Title' のままだが**中身は cert** (実測 948行)。
+# sheet_io.PRODUCT_COL_CERT と同じ値を持つ (二重定義を避けたいが sheet_io を import する
+# 前に定数が要るので、値をここに置きテストで一致を固定する)。
+COL_CERT = 8
 COL_AUX = range(28, 33)          # AC〜AG = 補URL 1〜5
 CUR2DEST = {"EUR": "DE", "GBP": "UK", "AUD": "AU", "CAD": "CA"}
 CAT2CALC = {"TCG": "TCG(PSA10)", "PSA": "TCG(PSA10)", "G-SHOCK": "G-SHOCK",
             "Tシャツ": "Tシャツ(UT)", "montbell": "Montbell(軽)", "一番くじ": "一番くじ"}
+
+# ★2026-08-02: シート行が引けない出品 (ミラー等) でカテゴリが既定値の TCG(PSA10) に
+#   落ちていた (実例: 一番くじのフィギュアが TCG と表示)。**出品自身の eBay カテゴリ**から
+#   引けば、シートに無くても正しく決まる。CategoryID は site が変わっても同じ値が返る。
+CATID2CALC = {
+    "183454": "TCG(PSA10)",      # CCG Individual Cards
+    "69528": "一番くじ",          # Animation Art & Merchandise
+    "31387": "G-SHOCK",          # Wristwatches
+    "15687": "Tシャツ(UT)",       # Men's T-Shirts
+    "53159": "Tシャツ(UT)",       # Women's Tops
+}
+# 最後の砦。カテゴリも取れない時に**黙って TCG にしない**ための語。
+TITLE2CALC = [("psa", "TCG(PSA10)"), ("ichiban kuji", "一番くじ"), ("g-shock", "G-SHOCK"),
+              ("gshock", "G-SHOCK"), ("t-shirt", "Tシャツ(UT)"), ("tee", "Tシャツ(UT)")]
 
 
 def fetch_offers():
@@ -129,16 +147,40 @@ def fetch_offers():
                      tok, site="0")
         m = re.search(r"<SKU>(.*?)</SKU>", gi)
         sku = m.group(1) if m else ""
+        # ★ミラー判定 (2026-08-02)。Site は US 固定・Currency も当てにならないが、
+        #   eBaymag が作った出品には `ApplicationData` に `ebaymag.com-<id>` が入る。
+        #   US本体 120件を実測して0件だったので、**ミラーの印として使える**。
+        _app = re.search(r"<ApplicationData>(.*?)</ApplicationData>", gi)
+        is_mirror = bool(_app and "ebaymag" in _app.group(1).lower())
+        _cid = re.search(r"<PrimaryCategory>.*?<CategoryID>(\d+)</CategoryID>", gi, re.S)
+        cat_id = _cid.group(1) if _cid else ""
 
         cost, stock, supply, cat_sheet, cost_src = 0, "", 0, "", ""
+        # ★2026-08-02: 突合を3経路にした。従来は「SKU = 仕入元メルカリID」しか見ておらず、
+        #   PSA (SKU=`PSA10-<cert>`) と ミラー (SKU 無し) では **黙って 0** になっていた。
+        #   0 のまま採算を見ると赤字オファーを承諾しかねないので、取れない時は理由を出す。
+        _cert = ""
+        mm = re.match(r"(?i)^PSA10?-(\d{6,10})$", sku or "")
+        if mm:
+            _cert = mm.group(1)
         for r in rows:
-            if sku and len(r) > COL_URL and sku in (r[COL_URL] or ""):
-                cost = yen(r[COL_COST_N] if len(r) > COL_COST_N else 0)
-                stock = r[COL_STOCKCHK] if len(r) > COL_STOCKCHK else ""
-                supply = sum(1 for i in COL_AUX if len(r) > i and (r[i] or "").strip())
-                cat_sheet = r[COL_CAT] if len(r) > COL_CAT else ""
-                cost_src = f"商品管理シート N列 / itemID {r[COL_ITEMID]}"
-                break
+            hit = False
+            if _cert and len(r) > COL_CERT and (r[COL_CERT] or "").strip() == _cert:
+                hit, how = True, f"cert {_cert}"
+            elif not _cert and sku and len(r) > COL_URL and sku in (r[COL_URL] or ""):
+                hit, how = True, f"仕入元URL / SKU {sku}"
+            if not hit:
+                continue
+            cost = yen(r[COL_COST_N] if len(r) > COL_COST_N else 0)
+            stock = r[COL_STOCKCHK] if len(r) > COL_STOCKCHK else ""
+            supply = sum(1 for i in COL_AUX if len(r) > i and (r[i] or "").strip())
+            cat_sheet = r[COL_CAT] if len(r) > COL_CAT else ""
+            cost_src = f"商品管理シート N列 ({how}) / itemID {r[COL_ITEMID]}"
+            break
+        if not cost_src:
+            cost_src = ("⚠️ ミラー出品のためシートに無い → **仕入値は手入力**"
+                        if is_mirror else
+                        "⚠️ 商品管理シートに該当行なし → **仕入値は手入力**")
 
         for o in re.findall(r"<BestOffer>(.*?)</BestOffer>", x, re.S):
             def g(t, s=o):
@@ -150,8 +192,15 @@ def fetch_offers():
             cur = meta["cur"]
             dest = CUR2DEST.get(cur) or ("US" if country == "US"
                                          else "その他 (US出品・米国外へ発送)")
+            # カテゴリ: ①シート ②出品自身の eBay カテゴリ ③タイトル語 の順。
+            # ★既定値で TCG(PSA10) に落とさない (一番くじを TCG と表示していた原因)。
             calc_cat = next((v for k, v in CAT2CALC.items()
-                             if k.lower() in (cat_sheet or "").lower()), "TCG(PSA10)")
+                             if k.lower() in (cat_sheet or "").lower()), "")
+            if not calc_cat:
+                calc_cat = CATID2CALC.get(cat_id, "")
+            if not calc_cat:
+                _t = (meta["title"] or "").lower()
+                calc_cat = next((v for k, v in TITLE2CALC if k in _t), "TCG(PSA10)")
             out.append({
                 "itemId": iid, "title": meta["title"], "url": meta["url"],
                 "list": meta["list"], "sym": {"EUR": "€", "GBP": "£", "AUD": "A$",
