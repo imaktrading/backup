@@ -171,11 +171,17 @@ def fetch_offers():
                 hit, how = True, f"仕入元URL / SKU {sku}"
             if not hit:
                 continue
-            cost = yen(r[COL_COST_N] if len(r) > COL_COST_N else 0)
+            # ★2026-08-02: yen(r[N]) を pick_cost_jpy(r) に統合。
+            #   N(SSOT)→M(現在価格)→F(取得時) で、N が #REF!/空でも M/F にフォールバック。
+            #   listing_common に 1 本化して、出品くん5系統+PSA+offer_calc が同一定義になる
+            #   (以前は三様: offer_calc=N only / _psa_cost_from_row=N→M→F / pick_cost_jpy=N→F)。
+            from listing_common import pick_cost_jpy
+            _c = pick_cost_jpy(r)
+            cost = int(_c) if _c else 0
             stock = r[COL_STOCKCHK] if len(r) > COL_STOCKCHK else ""
             supply = sum(1 for i in COL_AUX if len(r) > i and (r[i] or "").strip())
             cat_sheet = r[COL_CAT] if len(r) > COL_CAT else ""
-            cost_src = f"商品管理シート N列 ({how}) / itemID {r[COL_ITEMID]}"
+            cost_src = f"商品管理シート N→M→F ({how}) / itemID {r[COL_ITEMID]}"
             break
         if not cost_src:
             cost_src = ("⚠️ ミラー出品のためシートに無い → **仕入値は手入力**"
