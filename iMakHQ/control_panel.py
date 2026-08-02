@@ -1490,6 +1490,13 @@ class HomePanel:
     # ★schtasks の `Task To Run` と、呼ばれる .bat/.py の中身を **実際に読んで**書いた。
     #   「一覧に無い = やっていない と判断されても文句言えない」(2026-07-31 ユーザー指摘) ので、
     #   仕入元と対象範囲まで書く。全商品なのか一部なのかが分からないのが一番困る。
+    # ★2026-08-02: 表に無いタスクを「—」で静かに通していた。
+    #   実害: 8/2 に登録した `iMakCatalog_OpcgDumpRefresh` が担当者「—」で末尾に落ち、
+    #   何をする task なのか誰にも分からない状態でパネルに並んでいた。
+    #   タスクを登録したのに説明を書き忘れる = **見えないのと同じ**なので、
+    #   「—」ではなく **⚠️未登録** と出して、書けと促す。
+    _SCH_UNKNOWN = ("⚠️未登録", "—", "★このタスクの説明が無い。control_panel.py の _SCH_DESC に追記すること")
+
     _SCH_DESC = {
         # (担当者, 対象, 何をしている)
         # ★担当者はユーザーの呼び方 (グローバル CLAUDE.md の呼称に合わせる):
@@ -1511,6 +1518,8 @@ class HomePanel:
         "iMak_Catalog_prune_missing_models": ("カタログ", "カタログ宿題", "解決済みの宿題を掃除"),
         "iMak_Catalog_set_name_audit_daily": ("カタログ", "カタログ 全カテゴリ", "set名 の整合を毎日監査"),
         "iMak Catalog Integrity Weekly": ("カタログ", "カタログ 全カテゴリ", "整合監査 + 可視化スプシ更新 (週次)"),
+        "iMakCatalog_OpcgDumpRefresh": ("カタログ", "ONE PIECE 公式 dump",
+                                        "公式から dump を取り直す (月次)。壊れていたら巻き戻す"),
         "iMakHQ_DispatchWatch": ("出品くん", "6担当の依頼箱", "依頼を検知して担当を自動起動する常駐watcher"),
         "iMakHQ_ClerkPatrol": ("出品くん", "6担当の依頼箱", "滞留した依頼を集計・仕分け (事務員巡回)"),
         "iMakHQ_HojuSearch_2330": ("出品くん", "PSA(TCG) + 一番くじ / 1回30件",
@@ -1593,14 +1602,14 @@ class HomePanel:
             ORDER = ["抽出くん", "監視くん", "リバイスくん", "カタログ", "出品くん"]
 
             def _key(item):
-                who = self._SCH_DESC.get(item[0], ("—",))[0]
+                who = self._SCH_DESC.get(item[0], (_SCH_UNKNOWN[0],))[0]
                 return (ORDER.index(who) if who in ORDER else len(ORDER), who, item[0])
 
             rows, ng, warn = [], 0, 0
             prev_who = None
             i = 0
             for name, (last, res, nxt, state) in sorted(seen.items(), key=_key):
-                who, tgt, desc = self._SCH_DESC.get(name, ("—", "—", "—"))
+                who, tgt, desc = self._SCH_DESC.get(name, _SCH_UNKNOWN)
                 if who != prev_who:                       # 担当の切れ目に見出し行
                     rows.append(("hdr", ("", "", f"◆ {who}", "", "", "", "", "")))
                     prev_who = who
