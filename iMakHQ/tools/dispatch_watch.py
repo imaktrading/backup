@@ -77,8 +77,13 @@ def beat() -> None:
         pass
 
 
+# ★2026-08-03: 失敗した実装を再投入するまでの待ち。0 にすると 30分 timeout を
+#   15秒ごとに繰り返す hot loop になる (課金と CPU をひたすら焼く)。
+RETRY_COOLDOWN_SEC = 15 * 60
+
+
 def _run_one(wt: str, names: str, done: dict, fresh_names: list, inflight: set, lock,
-             mode: str = "draft") -> None:
+             mode: str = "draft", fail_at: dict | None = None) -> None:
     """1 worktree 分を最後まで走らせる (別スレッド)。例外は握って常駐を守る。"""
     try:
         _what = "実装" if mode == "implement" else "新規"
@@ -101,7 +106,18 @@ def _run_one(wt: str, names: str, done: dict, fresh_names: list, inflight: set, 
             with lock:
                 done[wt].update(fresh_names)
         else:
-            log(f"[{wt}] ⚠️ 失敗のため処理済にしない (次の周回で再試行): {names}")
+            # ★2026-08-03: 実装キューは **走らせる前に** 処理済へ入れていたため、
+            #   ここで「再試行する」と書いても実際は二度と拾われなかった
+            #   (8/2 の offer_calc 実装が timeout → 10時間放置。8/1 に潰したのと同型が
+            #    実装キュー側に残っていた)。**登録を成功時だけにし、失敗は覚えて冷ます**。
+            with lock:
+                done[wt].difference_update(fresh_names)
+                if fail_at is not None:
+                    now = time.time()
+                    for n in fresh_names:
+                        fail_at[(wt, n)] = now
+            log(f"[{wt}] ⚠️ 失敗のため処理済にしない "
+                f"({RETRY_COOLDOWN_SEC // 60}分後に再試行): {names}")
     except Exception as e:
         log(f"[{wt}] !! 例外 (継続します): {type(e).__name__}: {e}")
     finally:
@@ -117,6 +133,7 @@ def main() -> int:
     import threading
     done: dict[str, set[str]] = {wt: set() for wt in dw.TARGETS}
     impl_done: dict[str, set[str]] = {wt: set() for wt in dw.TARGETS}
+    impl_fail_at: dict[tuple[str, str], float] = {}   # (worktree, file名) → 最後に失敗した時刻
     seen_at: dict[tuple[str, str], float] = {}
     inflight: set[str] = set()          # 今走っている worktree
     guard = threading.Lock()
@@ -179,17 +196,23 @@ def main() -> int:
                     if wt in inflight or len(inflight) >= MAX_PARALLEL:
                         continue
                 todo = dw.implement_for(wt)
-                fresh = [p for p in todo if p.name not in impl_done[wt]]
+                _now = time.time()
+                fresh = [p for p in todo
+                         if p.name not in impl_done[wt]
+                         # 直前に失敗した件は冷ますまで再投入しない (hot loop 防止)
+                         and _now - impl_fail_at.get((wt, p.name), 0) >= RETRY_COOLDOWN_SEC]
                 if not fresh:
                     continue
                 names = ", ".join(p.name for p in fresh)
                 fresh_names = [p.name for p in fresh]
                 with guard:
                     inflight.add(wt)
-                    impl_done[wt].update(fresh_names)   # 走らせたら再投入しない (完了印は担当が書く)
+                    # ★同じ周回で二重に起こさないための印。**失敗したら _run_one が取り消す**
+                    #   (従来はここで入れっぱなしにして、失敗しても二度と拾わなかった)
+                    impl_done[wt].update(fresh_names)
                 threading.Thread(target=_run_one, daemon=True,
                                  args=(wt, names, impl_done, fresh_names, inflight, guard,
-                                       "implement")).start()
+                                       "implement", impl_fail_at)).start()
         except Exception as e:                      # 常駐なので落とさない
             log(f"!! 例外 (継続します): {type(e).__name__}: {e}")
         time.sleep(POLL_SEC)
