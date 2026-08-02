@@ -31,6 +31,9 @@ class _Lock:
 
 
 def _run(status, done, fail_at, monkeypatch, names=("x_response.md",)):
+    # ★テストが本番の dispatch_watch.log を汚さないこと (2026-08-03 実際に汚した)。
+    #   ログに架空の file 名が混じると、翌朝それを見た窓口が実際の事故と誤認する。
+    monkeypatch.setattr(dwatch, "log", lambda *a, **k: None)
     monkeypatch.setattr(dwatch.dw, "acquire_lock", lambda wt: True)
     monkeypatch.setattr(dwatch.dw, "release_lock", lambda wt: None)
     monkeypatch.setattr(dwatch.dw, "_dispatch",
