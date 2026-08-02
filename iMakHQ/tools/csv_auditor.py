@@ -799,12 +799,15 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     prog_req = write_program_request(project, program_items, dry_run)
     log_signals = _scan_log(log_path) if log_path else []
 
+    # ★AI 段 (TitleAgent / Vision / AI総合レビュー) が落ちていないか。落ちていれば緑で終わらせない。
+    degraded = ai_degraded(log_path, dc.get("claude", ""), csv_path)
+
     _report(project, csv_path, dry_run, len(rows), exclude_idx, ship_fixes,
             catalog_items, program_items, seo_notes, cat_req, prog_req,
-            log_signals, excl_result, dc["gate_summary"], dc["claude"])
+            log_signals, excl_result, dc["gate_summary"], dc["claude"], degraded)
     # --- CSV UPシグナルを即発報(反応速度最優先)。入稿可否=監査の決定論結果(行数-除外)。
     #     headless の起動・解析(数分)を待たずに UP できるようにする(ユーザー要望 2026-06-27) ---
-    _signal_csv_up(csv_path, len(rows) - len(exclude_idx), dry_run)
+    _signal_csv_up(csv_path, len(rows) - len(exclude_idx), dry_run, degraded)
     # --- PDCA: 台帳に蓄積 + 前回比トレンド + 再発検知 (dry-run は追記しない) ---
     _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
@@ -1020,7 +1023,7 @@ def _detached_spawn(argv, stdout_path=None):
                      creationflags=flags)
 
 
-def _signal_csv_up(csv_path, n_listable, dry_run):
+def _signal_csv_up(csv_path, n_listable, dry_run, degraded=()):
     """入稿可否が確定した瞬間(監査終了時)に UP 通知を**即**発報 (反応速度=最優先)。
 
     入稿可否は監査くんが自分で持つ決定論情報(エラー数/ゲート/除外)。headless の起動・ログ読込
@@ -1031,7 +1034,15 @@ def _signal_csv_up(csv_path, n_listable, dry_run):
         return "skipped"
     try:
         notify = os.path.join(WORKSPACE, "iMakHQ", "tools", "notify_csv_ready.py")
-        _detached_spawn([sys.executable, notify, str(n_listable), csv_path])
+        note = " | ".join(degraded or ())
+        _detached_spawn([sys.executable, notify, str(n_listable), csv_path] + ([note] if note else []))
+        if note:
+            # ★内容は正しいが AI 補強 (タイトル最適化・絵柄照合・総合レビュー) が効いていない。
+            #   「入稿するな」ではなく「**このまま入れると SEO が弱い**」を必ず見せる。
+            print(f"  ⚠️ CSV UPシグナル: {n_listable}件 — **AI補強が落ちた走行** ({note})")
+            print("     内容は監査済みだが タイトル最適化/絵柄照合 が効いていない。"
+                  "急がないなら復旧後に再走を推奨")
+            return "fired_degraded"
         print(f"  🟢 CSV UPシグナル即発報: {n_listable}件 入稿OK → UPして(headless③は裏で継続)")
         return "fired"
     except Exception as _e:
@@ -1366,6 +1377,76 @@ def _exclude(csv_path, nogo_indices):
         return None
 
 
+# ★2026-08-02: AI 段が落ちた走行を「🟢 入稿OK」で終わらせない。
+#   実害 (2026-08-02 19:10): Anthropic API が credit 不足になり TitleAgent / Vision /
+#   AI総合レビューが**全カードで失敗**したのに、走行は続行して最後は緑の「入稿OK」で終わった。
+#   落ちたことは行間のログにしか出ておらず、タイトルが短くなって初めて気づいた
+#   (short_titles 3件 / avg_title_len -7.2)。= degraded なのに正常と報告する fail-OPEN。
+#   → **呼べたのに失敗した**時だけ ⚠️ に倒す。key 未設定 (= その環境では AI 無しが正常) は倒さない。
+AI_FAIL_PATS = [
+    ("APIクレジット不足", r"credit balance is too low"),
+    ("APIレート制限", r"rate_limit_error|429 Too Many Requests"),
+    ("API過負荷", r"overloaded_error|529"),
+    ("APIエラー", r"Claude API ?エラー|invalid_request_error|authentication_error"),
+]
+# 「キーが無い」は環境設定であって失敗ではない。ここで倒すと毎回 ⚠️ になり警告が意味を失う。
+AI_NOKEY_PAT = r"APIキーなし|api_key.*not set"
+
+
+def generation_logs_for(csv_path, run_logs_dir=""):
+    """その CSV に触れた走行のログを **全部** 返す (無ければ [])。
+
+    ★2026-08-02: 監査くんは自分の run log しか見ておらず、**劣化は生成側で起きる**ため
+    今日の実ケース (生成ログに credit エラー18件) を取り逃がしていた。
+    生成ログには最後に「出力: <CSVのフルパス>」が入るので、**CSV名を含む最新の .log** を辿る。
+    """
+    if not csv_path:
+        return []
+    d = run_logs_dir or os.path.join(WORKSPACE, "iMakHQ", "run_logs")
+    name = os.path.basename(csv_path)
+    try:
+        cands = [os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(".log")]
+    except OSError:
+        return []
+    hits = []
+    for p in cands:
+        try:
+            if name in open(p, encoding="utf-8", errors="replace").read():
+                hits.append(p)
+        except OSError:
+            continue
+    # ★1本に絞らない。監査くん自身のログが最新になるため、絞ると **生成側の劣化を取り逃がす**
+    #   (2026-08-02 の実ケースがこれ)。触れたログは全部読む。
+    return sorted(hits, key=os.path.getmtime)
+
+
+def ai_degraded(log_path="", claude_text="", csv_path="", run_logs_dir=""):
+    """AI 段が **呼べたのに失敗した** 証拠を返す (純関数寄り・test可)。
+
+    自分の run log だけでなく、**その CSV を生成した走行のログ**も見る
+    (TitleAgent / Vision は生成側で動くので、監査くんのログには何も出ない)。
+    戻り: ["APIクレジット不足: 9件", ...]。空 = 劣化なし (= 緑で終わってよい)。
+    """
+    paths = [p for p in ([log_path] + generation_logs_for(csv_path, run_logs_dir)) if p]
+    txt = ""
+    for p in dict.fromkeys(paths):                 # 同じ file を二度数えない
+        if not os.path.exists(p):
+            continue
+        try:
+            txt += open(p, encoding="utf-8", errors="replace").read() + "\n"
+        except OSError:
+            continue
+    txt += "\n" + (claude_text or "")
+    out = []
+    for label, pat in AI_FAIL_PATS:
+        n = len(re.findall(pat, txt, re.I))
+        if n:
+            out.append(f"{label}: {n}件")
+    if not out and re.search(r"Claude review skip:", claude_text or ""):
+        out.append("AI総合レビューが例外で落ちた")
+    return out
+
+
 def _scan_log(log_path):
     if not log_path or not os.path.exists(log_path):
         return []
@@ -1510,13 +1591,17 @@ def deep_checks(mod, headers, rows, all_vr, project, csv_path):
 
 def _report(project, csv_path, dry_run, n_rows, exclude_idx, ship_fixes,
             catalog_items, program_items, seo_notes, cat_req, prog_req,
-            log_signals, excl_result, gate_summary=None, claude="" ):
+            log_signals, excl_result, gate_summary=None, claude="", degraded=()):
     gate_summary = gate_summary or []
     gc = collections.Counter(st for _, st in gate_summary)
     print("\n" + "=" * 64)
     print(f"📋 CSV監査くん レポート ({project}) {'[DRY-RUN]' if dry_run else ''}")
     print("=" * 64)
     print(f"  対象行: {n_rows}")
+    if degraded:
+        # ★落ちた事実をレポート本体にも出す (行間のログに埋もれさせない)
+        print(f"  ⚠️ AI補強が落ちた走行: {' / '.join(degraded)}")
+        print("     → タイトル最適化・絵柄照合・AI総合レビューが効いていない (内容の監査は実施済)")
     print(f"  ✅ 送料ポリシー自動修正: {len(ship_fixes)}件")
     for i, old, new, price in ship_fixes[:10]:
         print(f"     [行{i}] '{old}' → '{new}' (${price})")
