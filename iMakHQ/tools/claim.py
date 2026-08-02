@@ -193,6 +193,16 @@ def request_items() -> list[dict]:
                     head = p.read_text(encoding="utf-8", errors="replace")[:2000]
                 except OSError:
                     head = ""
+                # ★2026-08-02: レビュー待ち (headless の下書き) は **起票した窓口に戻す**。
+                #   実害: BRAVO 起票の件を Advisor が裁定して GO まで出し、
+                #   起票者は決着を知らなかった。`- 担当:` が書いていなければ
+                #   元依頼の起票者を owner にする (誰のものでもない状態を作らない)。
+                owner = _owner_of(head)
+                if not owner and kind == "レビュー待ち":
+                    try:
+                        owner = wb.requester_of(p)
+                    except Exception:                          # noqa: BLE001
+                        owner = ""
                 out.append({
                     "id": f"{wt}:{p.stem}",
                     "kind": kind,
@@ -200,7 +210,7 @@ def request_items() -> list[dict]:
                     "path": p,
                     "priority": 5,
                     "blocked": "",
-                    "owner": _owner_of(head),
+                    "owner": owner,
                     "mtime": p.stat().st_mtime,
                     "body": "",
                 })

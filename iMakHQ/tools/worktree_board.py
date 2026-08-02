@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import re
 import sys
 import time
 from pathlib import Path
@@ -55,6 +56,64 @@ def _is_closed(path: Path, stems: set[str]) -> bool:
 # headless 担当が書く中間成果物。窓口がレビューして `_response.md` に昇格させる。
 # **依頼として再 dispatch してはいけない**ので pending とは別枠に分ける。
 DRAFT_SUFFIXES = ("_draft", "_question")
+
+# ★2026-08-02: 回答が **起票した窓口に戻らない** 問題の対策。
+#   実害: BRAVO が起票した pokemon の件を、Catalog が draft で返した後、
+#   Advisor が裁定して GO まで出した。BRAVO は自分の依頼が決着したことを知らなかった。
+#   claim には `- 担当:` を読む仕組みが既にあるのに、**依頼書の起票者を誰も owner に
+#   していなかった**ため、draft は「誰のものでもない」状態で置かれていた。
+#   → draft/question の持ち主は **元依頼を書いた窓口**とする。
+RE_REQUESTER = (
+    re.compile(r"^\s*[-*].*?窓口\s*[:：]\s*\*{0,2}([^\s*/(（]+)", re.M),   # `- 依頼日: … / 窓口: **BRAVO**`
+    re.compile(r"^\s*[-*].*?(?:起票|依頼者|作成)\s*[:：].*?\[([^\]]+)\]", re.M),  # `- 起票: … [Advisor]`
+    re.compile(r"^\s*[-*].*?(?:起票者|依頼者)\s*[:：]\s*\*{0,2}([^\s*/(（]+)", re.M),
+)
+DESK_NAMES = {
+    "出品専任": "出品専任", "出品くん": "出品専任",
+    "advisor": "Advisor", "adv": "Advisor",
+    "alpha": "ALPHA", "bravo": "BRAVO",
+}
+
+
+def _base_request(path: Path) -> Path:
+    """`X_draft.md` / `X_question.md` → 元依頼 `X.md`。無ければ自分自身."""
+    stem = path.stem
+    for suf in DRAFT_SUFFIXES:
+        if stem.lower().endswith(suf):
+            base = path.with_name(stem[: -len(suf)] + path.suffix)
+            return base if base.is_file() else path
+    return path
+
+
+def requester_of(path: Path) -> str:
+    """依頼書を書いた窓口名。読めなければ "" (= 誰でも取れる)。
+
+    draft/question は **元依頼**を見る (draft を書いたのは headless 担当なので、
+    そこに書いてある名前は起票者ではない)。
+    """
+    src = _base_request(path)
+    try:
+        head = src.read_text(encoding="utf-8", errors="replace")[:2000]
+    except OSError:
+        return ""
+    for rx in RE_REQUESTER:
+        m = rx.search(head)
+        if not m:
+            continue
+        raw = m.group(1).strip().strip("*`[]")
+        name = DESK_NAMES.get(raw, DESK_NAMES.get(raw.lower(), ""))
+        if name:
+            return name
+    return ""
+
+
+def current_desk() -> str:
+    """今この board を見ている窓口 (cwd 由来)。判定できなければ ""."""
+    try:
+        import claim
+        return claim.detect_who()
+    except Exception:                                          # noqa: BLE001
+        return ""
 
 
 def _draft_is_closed(path: Path, stems: set[str]) -> bool:
@@ -183,6 +242,7 @@ def main() -> int:
         print()
 
     grand_mine = grand_theirs = 0
+    desk = current_desk()          # 起票が自分の件に ★ を付けるため
 
     for wt, label in WORKTREES:
         d = DATA_ROOT / wt / "requests"
@@ -203,7 +263,13 @@ def main() -> int:
         print(f"## {label} — 自分が返す {len(mine)}件 / 相手待ち {len(theirs)}件"
               f" / レビュー待ち {len(drafts)}件 (最終 {_age(latest)})")
         for p in drafts[:MAX_SHOW]:
-            print(f"- 🟡 **レビュー待ち(headless下書き)** {p.name} ({_age(p.stat().st_mtime)})")
+            # ★起票した窓口を必ず出す。書いていない依頼は「起票者不明」と出して、
+            #   次に起票する人が名前を書くよう促す (誰のものでもない状態を作らない)。
+            req = requester_of(p)
+            tag = f" — 起票: **{req}**" if req else " — 起票者不明"
+            if req and req == desk:
+                tag += " ★**あなたのボール**"
+            print(f"- 🟡 **レビュー待ち(headless下書き)** {p.name} ({_age(p.stat().st_mtime)}){tag}")
         for p in mine[:MAX_SHOW]:
             print(f"- 🔴 **要返球** {p.name} ({_age(p.stat().st_mtime)})")
         if len(mine) > MAX_SHOW:
