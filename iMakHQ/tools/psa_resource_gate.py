@@ -903,14 +903,30 @@ def main():
     except Exception as e:
         print(f"⚠ スプシ更新失敗: {type(e).__name__}: {e}")
 
-    # 商品管理シートの 補URL列(AC-AG)へ SNKRDUNK PSA10 直リンクを書戻し
+    # ★2026-08-03 ユーザー指示「目視を経由せずにカードを特定することはやめよう」で **書込を停止**。
+    #
+    # 何が起きていたか:
+    #   ここは `aux_writeback` (= **メルカリ + SNKRDUNK 混合**の候補URL / 上の :838 参照) を
+    #   **確証UIを一度も通さずに** 商品管理シートの補URL(AC-AG)へ直接書いていた。
+    #   「SNKRDUNK は cert で個体特定できるから安全」という理解は**誤り**で、実際は
+    #   `check_by_keyword(card_number)` = **カード番号での検索**。同番号に複数変種があれば
+    #   メルカリと同じく別変種を掴む (2026-08-03 実測で判明)。
+    #
+    # なぜ止めるのが正しいか (実害):
+    #   誤った補URLは表示が汚れるだけでは済まない。監視くんがその価格を M列に書き、
+    #   `N=(M or F)-K` が拾い、**価格エンジンが出品価格をその安値から決める**。
+    #   2026-08-03: 別変種(通常版 ¥12,200)を掴んだ結果、ミラー版(¥57,500)の出品が
+    #   **$169.98 で出ていた** (正しくは $640.98 = 3.8倍差)。オファーが来て偶然気づいた。
+    #
+    # 候補は捨てない: `psa_research_cache.json` に保存済み (上の「研究キャッシュ保存」)。
+    #   `psa_hoju_fill.py confirm` の視覚確証UIが同じ cache を読んで人に見せるので、
+    #   **目視を通ってから**補URLに入る。ここで書かなくても供給は失われない。
     if aux_writeback:
-        try:
-            from sheet_io import write_aux_urls
-            n = write_aux_urls(aux_writeback)
-            print(f"🔗 商品管理シート 補URL(AC-AG) 書戻し: {n}行")
-        except Exception as e:
-            print(f"⚠ 補URL書戻し失敗: {type(e).__name__}: {e}")
+        _n_url = sum(len(v) for v in aux_writeback.values())
+        print(f"🔒 補URL(AC-AG) の自動書戻しは **停止中** "
+              f"(候補 {len(aux_writeback)}行 / {_n_url}本 は cache に保持)")
+        print("   → 目視を通すこと: 出品くんパネルの「補URL補強(昼確認)」"
+              "= `psa_hoju_fill.py confirm`")
 
     # --- POC-A: RESTOCK視覚確証ビューア(再仕入れ可のみ)→ RESTOCK確定リスト + V8自動利益判定 ---
     # 不可逆(RESTOCK=出品復活→売れたら仕入)の前に「① 現物 vs 仕入候補(買う物)」を視覚一致確認。
