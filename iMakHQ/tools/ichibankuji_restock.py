@@ -53,7 +53,7 @@ COL_SOLD = 3       # D 売り切れ
 COL_CAT = 17       # R カテゴリ
 COL_TITLE = 2      # C 日本語タイトル
 COL_KUJI_URL = 8   # I 公式くじURL(ユーザーが恒久入力。生成PLのV列は出品後クリアされるため別列)
-COL_COST = 13      # N 仕入価格(円)= V8価格計算のSSOT(sheet_io.PRODUCT_COL_COST と一致)
+COL_COST = 13      # N 仕入価格(円)= V8価格計算のSSOT (読み専用。書込は M seed へ 2026-08-02)
 _NOISE = ["新品", "未開封", "未使用", "送料無料", "即決", "匿名配送", "正規品", "限定", "おまけつき", "おまけ付き"]
 
 
@@ -459,35 +459,46 @@ def _col_letter(idx):
 def build_restock_reqs(sheet_rows):
     """sheet_rows → batch_update の range/value list(純関数・test可)。
 
-    A=新supply / B=itemID / D=売切解除 / N=cost(新supply実価格・あれば。V8計算のSSOT)。
-    cost が無い行は N列を書かない(誤って既存cost を消さない)。
+    A=新supply / B=itemID / D=売切解除 / M=cost seed(新supply実価格・あれば)。
+    cost が無い行は M列を書かない(誤って既存cost を消さない)。
 
     ★2026-08-02 kind='live_thin' (= まだ生きている出品の補URL補充) は **1本も書かない**。
       この行は出品が生きていて A列(現supply)も B列(itemID)も有効なので、上書きすると
       itemID を剥がして eBay 出品との紐付けを切る = 取下げ漏れ/二重出品の原因になる。
       補充したいのは AUX(補URL)だけ。AUX は write_restock 側で別途 append する。
+
+    ★2026-08-02 N書込廃止 → M書込へ切替 (BRAVO 依頼書 D 項):
+      旧: N列(=(M or F)−K の ARRAYFORMULA spill)に cost を直書き → 1セル書くと spill が
+      塞がり N1=#REF! で 1415行の N が全空 (7/27 廃止対応 `sheet_io.restock_reactivate_master`
+      と同じ #REF! 全崩壊の同型再発)。
+      新: M列(現在価格)に seed。M は formula でない regular 列なので直書き安全。
+      監視くんが次巡回で M=min(生きてる最安) を上書きするので **一時 seed** でよい (N は
+      ARRAYFORMULA で M/F の変化に自動追随)。
     """
-    ncol = _col_letter(COL_COST)
+    mcol = _col_letter(sheet_io.PRODUCT_COL_COST_M)
     icol = _col_letter(COL_KUJI_URL)
     reqs = []
     for row, d in sheet_rows.items():
         if d.get("kind") == "live_thin":
-            continue          # live 行は A/B/D/N を触らない (補URLのみ)
+            continue          # live 行は A/B/D/M を触らない (補URLのみ)
         reqs.append({"range": f"A{row}", "values": [[d.get("a", "")]]})
         reqs.append({"range": f"B{row}", "values": [[d.get("b", "")]]})
         reqs.append({"range": f"D{row}", "values": [[""]]})   # 売り切れ解除(在庫補充済)
         if d.get("cost"):
-            reqs.append({"range": f"{ncol}{row}", "values": [[d.get("cost")]]})  # 新supply実価格→N列
+            # 新supply実価格 → M列(現在価格 seed)。次巡回で監視くんが上書きする一時 seed。
+            reqs.append({"range": f"{mcol}{row}", "values": [[d.get("cost")]]})
         if d.get("kuji"):
             reqs.append({"range": f"{icol}{row}", "values": [[d.get("kuji")]]})  # 公式くじURL→I列(refresh用)
     return reqs
 
 
 def write_restock(sheet_rows):
-    """{row:int → {a, b, aux, cost}} を A=新supply / B=itemID / D=売切解除 / N=cost / 補URL=aux。
+    """{row:int → {a, b, aux, cost}} を A=新supply / B=itemID / D=売切解除 / M=cost seed / 補URL=aux。
 
     新規出品でなく既存listing在庫補充なので **B列はitemIDを保持/更新**(空にしない)。
-    cost(新supply実価格)を N列(V8計算SSOT)に焼く = refresh も profit計算もシート正値を使う。
+    cost(新supply実価格)は M列(現在価格) に seed = N=(M or F)−K の ARRAYFORMULA が拾い、
+    次巡回で監視くんが M=min(生きてる最安) を上書きするので一時 seed でよい (旧 N直書きは
+    ARRAYFORMULA spill を塞いで N1=#REF! で全空になる同型事故を起こしていた)。
     """
     if not sheet_rows:
         return 0
@@ -1258,6 +1269,57 @@ def _manual_prize(prizes):
     return None
 
 
+_DRIFT_IGNORE = {"new", "japan", "japanese", "figure", "prize", "anime", "manga", "bandai",
+                 "ichiban", "kuji", "the", "and", "with", "for", "one", "last"}
+
+
+def _edit_distance(a, b, cap=3):
+    """編集距離 (cap 超えは cap を返す・純関数)。短い語の綴り違い検出用。"""
+    if abs(len(a) - len(b)) > cap:
+        return cap
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+        if min(prev) >= cap:
+            return cap
+    return min(prev[-1], cap)
+
+
+def title_drift_warnings(old_title, new_title):
+    """旧タイトル → 新タイトル の**固有名詞の壊れ**を検出 (純関数・test可)。
+
+    戻り: [(kind, msg)]。kind='typo' は綴り違い(誤記)= 出さない。'dropped' は語落ち = 警告のみ。
+
+    ★2026-08-03: 刷新プレビューで実際に出た事故:
+        'Kirara Hoshi' → 'Kirawra Hoshi'   (綴りが壊れた = 誤記 → SNAD リスク)
+        'Yoko Kurama'  → 'Kurama'          (妖狐が落ちて別キャラと紛れる)
+      生成は Claude なので固有名詞を書き換えることがある。公式名は日本語で英題と直接
+      突き合わせられないため、**前回出していたタイトル**を基準に差分を見る
+      (前回は実際に出品できていた = 人の目を通っている)。
+      語落ちは 80字制限で正当に起こるので警告のみ。綴り違いは意図的にやる理由が無いので止める。
+    """
+    def toks(t):
+        return [w for w in re.split(r"[^A-Za-z']+", t or "") if len(w) > 2]
+
+    old, new = toks(old_title), toks(new_title)
+    new_l = {w.lower() for w in new}
+    out = []
+    for w in old:
+        wl = w.lower()
+        if wl in new_l or wl in _DRIFT_IGNORE:
+            continue
+        near = [n for n in new if n.lower() not in {o.lower() for o in old}
+                and _edit_distance(wl, n.lower()) <= 2]
+        if near:
+            out.append(("typo", f"'{w}' → '{near[0]}' 綴り違い(誤記の疑い)"))
+        else:
+            out.append(("dropped", f"'{w}' が落ちた"))
+    return out
+
+
 def _build_refreshed_row(gen, base_desc, series_name, release_year, price_jpy, main_image,
                          kuji_url, supply_url, prize_p, cost_jpy):
     """1賞ぶんを Claude+pricing+build_row で刷新。戻り (ebay_row|None, new_title, price, note)。"""
@@ -1377,6 +1439,14 @@ def pass_refresh():
         if not ebay_row:
             print(f"     ⏭ {note}"); continue
         old_title = _ebay_title(item_id)
+        # ★2026-08-03: 固有名詞の壊れを **入稿前に** 止める(誤記=SNADリスク・出品の正確性原則)。
+        drift = title_drift_warnings(old_title, new_title)
+        typos = [m for k, m in drift if k == "typo"]
+        for k, m in drift:
+            print(f"     {'❌' if k == 'typo' else '⚠️'} タイトル {m}")
+        if typos:
+            print("     ⏭ 綴り違いは出さない(HOLD)。旧タイトルを正として人が直すまで保留")
+            continue
         planned.append({"item_id": item_id, "sku": ebay_row.get("CustomLabel", ""),
                         "row": ebay_row, "old_title": old_title, "new_title": new_title,
                         "price": price})

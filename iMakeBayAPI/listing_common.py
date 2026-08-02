@@ -327,16 +327,27 @@ def dedup_title_words(title: str) -> str:
 
     set名+言語/condition マーカーの重複('Japanese Japanese' / 'Japan Brand New Japan')是正。
     whitelist のカード用語(VMAX/EX/V…)は set名+品名で正当に再出現するので残す。番号/記号は対象外。
+
+    ★2026-08-03: **連続した繰り返しは残す**。作品名そのものが同じ語を続けて含むケースを
+      壊していた (実害: 一番くじ 幽☆遊☆白書 の 'Yu Yu Hakusho' → 'Yu Hakusho' が2件。
+      検索キーワードそのものが消えるので露出が落ちる)。
+      この関数が本来直したいのは 'Japanese … Japanese' のような **離れた** 再出現であって、
+      隣り合う繰り返しではない。隣接は作品名の一部とみなして残す
+      (他例: 'Deux Deux' / 'Duran Duran' / 'Boutades Boutades' 等、固有名詞は珍しくない)。
     """
     seen, out = set(), []
+    prev_wl = None
     for w in (title or "").split():
         wl = w.lower()
         is_word = wl.isalpha() and len(wl) > 1
-        if is_word and wl not in _TITLE_DEDUP_WHITELIST and wl in seen:
+        if (is_word and wl not in _TITLE_DEDUP_WHITELIST and wl in seen
+                and wl != prev_wl):          # 隣接の繰り返し(= 作品名)は落とさない
+            prev_wl = wl
             continue
         out.append(w)
         if is_word:
             seen.add(wl)
+        prev_wl = wl
     return ' '.join(out)
 
 
@@ -582,15 +593,25 @@ def gate_row_or_hold(row_data: dict, category: str = None,
 
 
 # ===================================================================
-# LOW スプシ 仕入値 抽出 (N列 優先 + F列 fallback、2026-05-18)
-# LOW スプシ には 2 つの仕入関連列があり:
-#   F (index 5) = 商品価格      (= supplier listing 価格、当初値)
-#   N (index 13) = 仕入れ価格(円) (= 実コスト、ポイント還元等 反映済の最新値)
-# 全 listing scripts 共通: N が非空なら N、空なら F を採用
+# LOW スプシ 仕入値 抽出 (N列 > M列 > F列 優先順、2026-08-02 M列追加)
+# LOW スプシ には 3 つの仕入関連列があり:
+#   F (index 5)  = 商品価格      (= supplier listing 価格、取得時の値)
+#   M (index 12) = 現在価格      (= 監視くん更新の最新観測値・生きてる最安)
+#   N (index 13) = 仕入れ価格(円) (= SSOT (M or F)−K の ARRAYFORMULA 結果)
+# 優先順:
+#   1) N (SSOT) が数値で有れば N
+#   2) 空/#REF! なら M (最新観測値) — 2026-07-24 DON!! カード事故 (N#REF!→F の
+#      古い値 ¥23,000 拾い過大 pricing) の再発防止。SSOT 定義 N=(M or F)−K は M を
+#      F より優先するので、コード側も N空でも M を先に見る
+#   3) M も空なら F (取得時)
+# K (ポイント円) は reader 側で控除しない (N が生きている時は N=(M or F)−K で控除済。
+# 空フォールバック時に更に引くと二重控除で仕入¥過小 → 利益過大表示 → 赤字承諾方向 fail-safe と逆)
 # ===================================================================
-def pick_cost_jpy(row, f_idx: int = 5, n_idx: int = 13) -> str:
-    """LOW スプシ row から仕入値を抽出 (N列 > F列 優先順)。
-    Returns: 数値のみ抽出した string ("¥24,750" → "24750")。空なら ""
+def pick_cost_jpy(row, f_idx: int = 5, n_idx: int = 13, m_idx: int = 12) -> str:
+    """LOW スプシ row から仕入値を抽出 (N列 > M列 > F列 優先順)。純関数。
+
+    Returns: 数値のみ抽出した string ("¥24,750" → "24750")。#REF!/非数値は自然に次候補へ。
+    全空なら "".
     """
     def _clean(s):
         import re as _re
@@ -599,6 +620,10 @@ def pick_cost_jpy(row, f_idx: int = 5, n_idx: int = 13) -> str:
         n_val = _clean(row[n_idx])
         if n_val:
             return n_val
+    if m_idx is not None and len(row) > m_idx:
+        m_val = _clean(row[m_idx])
+        if m_val:
+            return m_val
     if f_idx is not None and len(row) > f_idx:
         return _clean(row[f_idx])
     return ""

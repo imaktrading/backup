@@ -63,3 +63,29 @@ def test_lc_dedup_keeps_whitelist():
     lc = _load_lc()
     t = "PSA 10 Pokemon VMAX Climax #215/184 Orbeetle VMAX Character Super Rare"
     assert lc.dedup_title_words(t) == t   # VMAX 2回 維持
+
+
+# ---- 連続した繰り返しは作品名 (2026-08-03) ----
+# 実害: 一番くじ 幽☆遊☆白書 の 'Yu Yu Hakusho' → 'Yu Hakusho' が2件。検索キーワード
+# そのものが消えるので露出が落ちる。文字数制限による切り詰めではない(75字/72字で余裕あり)。
+# この関数が本来直したいのは 'Japanese … Japanese' のような **離れた** 再出現。
+
+def test_adjacent_repeat_is_kept_series_name():
+    lc = _load_lc()
+    t = "Ichiban Kuji Yu Yu Hakusho C Prize Hiei Masterlise Figure New"
+    assert lc.dedup_title_words(t) == t, "作品名の連続した繰り返しを消している"
+
+
+def test_adjacent_repeat_kept_but_distant_repeat_still_removed():
+    lc = _load_lc()
+    # 同じ語が「隣接」と「離れて」両方出る場合: 隣接は残し、離れた再出現だけ落とす
+    got = lc.dedup_title_words("Yu Yu Hakusho Figure Yu Special")
+    assert got == "Yu Yu Hakusho Figure Special"
+
+
+def test_distant_repeat_removal_unchanged():
+    lc = _load_lc()
+    # 回帰: 本来の用途は従来どおり
+    assert lc.dedup_title_words("PSA 10 Japanese Card Japanese Set") == "PSA 10 Japanese Card Set"
+    assert (lc.dedup_title_words("PSA 10 One Piece Booster One Piece The Best")
+            == "PSA 10 One Piece Booster The Best")
