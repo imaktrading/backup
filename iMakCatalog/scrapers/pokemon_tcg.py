@@ -346,8 +346,12 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
             out["set_name_official"] = normalized
 
     if not out.get("set_name_official"):
+        # 2026-08-02: `強化拡張パック「X」` を `|` 順序で先出しに (窓口回答書 Finding 6)。
+        # SM9a-067 型が旧 regex では「強化」を落として `拡張パック「X」` になっていた。
+        # SubSection が拾えれば動かない dead branch だが、将来 SubSection が構造変更で
+        # 落ちた時に静かに旧バグへ戻らないための先出し。
         set_patterns = [
-            r"(拡張パック\s*「[^」]+」)",
+            r"(強化拡張パック\s*「[^」]+」|拡張パック\s*「[^」]+」)",
             r"(ハイクラスパック\s*「[^」]+」)",
             r"(スターターセット[^「」]*?「[^」]+」)",
             r"(スペシャル(?:パック|BOX|セット)[^「」]*?「[^」]+」)",
