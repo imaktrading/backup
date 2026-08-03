@@ -2612,10 +2612,15 @@ def load_targets_from_sheet_psa():
             _sys.path.insert(0, _hq_tools)
         from sheet_io import (listed_key_forms as _listed_key_forms,
                               listed_certs as _listed_certs,
+                              live_listed_certs as _live_certs,
                               already_listed_reason as _already_listed,
                               PRODUCT_COL_KEY as _KEY_COL)
         _listed = _listed_key_forms(all_values)
-        _listed_cert = _listed_certs(all_values)
+        # 出品済 cert は2つの根拠を union する。片方だけでは漏れる:
+        #   シートB列 … 書き戻し漏れがある (実測 live PSA10 638件中 36件が空)
+        #   live SKU  … dup_guard の cache 経由 (eBay は叩かない)。ただし `PSA10-<cert>`
+        #               形式の出品しか cert を持たないので補完は部分的 (実測 +1件)
+        _listed_cert = _listed_certs(all_values) | _live_certs()
     except Exception as _e_lk:
         print(f"  ⚠️ 出品済KEY算出失敗(抽出スキップ無効化して継続): {type(_e_lk).__name__}")
         _listed, _listed_cert, _KEY_COL = set(), set(), 34

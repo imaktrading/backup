@@ -7,6 +7,7 @@
 """
 import functools
 import os
+import re as _re
 
 MAINT_SHEET_ID = "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4"   # 「既存メンテ」スプシ
 MAINT_URL = f"https://docs.google.com/spreadsheets/d/{MAINT_SHEET_ID}/edit"
@@ -101,6 +102,40 @@ def listed_certs(rows2d, itemid_col=PRODUCT_COL_ITEMID, cert_col=PRODUCT_COL_CER
         if iid and cert:
             out.add(cert)
     return out
+
+
+LIVE_CACHE_PATH = r"C:\dev\iMak_data\hq\live_listings_cache.json"
+_CERT_SKU_RE = _re.compile(r"^PSA10-(\d{6,})$", _re.I)
+
+
+def certs_from_skus(sku_by_itemid):
+    """live 出品の SKU(CustomLabel `PSA10-<cert>`) → 出品済 cert の集合 (純関数)。"""
+    out = set()
+    for sku in (sku_by_itemid or {}).values():
+        m = _CERT_SKU_RE.match((sku or "").strip())
+        if m:
+            out.add(m.group(1))
+    return out
+
+
+def live_listed_certs(path=LIVE_CACHE_PATH):
+    """live cache の SKU から出品済 cert を取る (eBay を叩かない・失敗は空集合)。
+
+    シートの itemID 書き戻しは漏れるので (実測 2026-08-03: live PSA10 638件のうち
+    **36件がシートに itemID を持たない**)、シート由来の cert 集合を SKU 側から補う。
+
+    ★ただし **これで全部は埋まらない**。回収できるのは CustomLabel が `PSA10-<cert>`
+    形式の出品だけ (実測 176/638)。古い出品は `005-PSA10` / `m73494307129` 等の
+    別形式で **cert を持っていない** ため、36件のうち回収できたのは実測 **1件**。
+    残り35件は「itemID をシートに書き戻す」データ修復でしか埋まらない (別途 backlog)。
+    cache が古い/無い時は空集合 = シート側の判定に素直に戻るだけで、悪化はしない。
+    """
+    try:
+        import json as _json
+        with open(path, encoding="utf-8") as f:
+            return certs_from_skus(_json.load(f).get("skus") or {})
+    except Exception:
+        return set()
 
 
 def already_listed_reason(cert, key, listed_cert_set, listed_key_form_set):

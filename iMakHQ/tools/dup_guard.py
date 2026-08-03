@@ -8,7 +8,10 @@
 - ただし実害の本体は「同一カード」ではない。**同じ仕入元URLを2出品が指す**と、両方売れた時に
   片方が履行不能 → キャンセル → Defect (無在庫の生命線)。同一カードでも仕入元が別なら健全。
   → 本モジュールは **URL共有=致命 / 同一カード=注意** の2段で見る。
-- 出品は止めない (listing を勝手に絞らない原則)。検出→警告→台帳。物理除外はしない。
+- 同一カードは止めない (listing を勝手に絞らない原則)。検出→警告→台帳。
+- ★2026-08-03 追加: **同一 cert (= 同じ現物) が既に出品済**の行だけは別格で、
+  pre_upload が **物理除外**する。二度売れたら片方は必ず履行できないため
+  (NO-GO 行を物理削除するのと同じ扱い)。同一カードの2枚目とは切り分ける。
 
 ## 提供するもの
 - 純関数: card_token_from_title / norm_url / shared_supply_urls / live_card_index /
@@ -209,6 +212,34 @@ def live_card_index(rows2d, titles_by_itemid=None):
     return index, unkeyed
 
 
+# SKU(CustomLabel) → cert の定義は sheet_io に1本化 (抽出段と入稿前で同じ判定にするため)
+certs_from_skus = sheet_io.certs_from_skus
+
+
+def same_cert_already_live(csv_rows, header, listed_cert_set):
+    """CSV 行のうち **同一 cert が既に出品済** のものを返す (純関数)。
+
+    ★これは「同じカードの2枚目」とは別物。**同じ現物**なので二度売れたら片方は必ず
+    履行できない → キャンセル → Defect。よって警告ではなく **物理除外** する。
+    2026-08-03 実害: cert 152687775 / 158452544 が既出品のまま CSV に入った。
+
+    なぜ従来すり抜けたか: pre_upload は「自分自身(=同じcert)は除外して突合する」設計で、
+    **同一 cert の live をわざと索引から外していた**。同一カード判定の自己一致を消す意図
+    だったが、結果として最も重い「同一現物の二重出品」だけが常に無検出になっていた。
+    """
+    hi = {n: i for i, n in enumerate(header)}
+    ci, li, ti = hi.get(CSV_CERT), hi.get(CSV_LABEL), hi.get(CSV_TITLE)
+    out = []
+    for n, r in enumerate(csv_rows):
+        cert = (r[ci] or "").strip() if ci is not None and ci < len(r) else ""
+        if cert and cert in (listed_cert_set or ()):
+            out.append({"row": n,
+                        "cert": cert,
+                        "label": (r[li] or "").strip() if li is not None and li < len(r) else "",
+                        "title": (r[ti] or "").strip() if ti is not None and ti < len(r) else ""})
+    return out
+
+
 def dup_candidates(csv_rows, header, index, cert_to_key=None):
     """入稿予定 CSV 行 × live index → 同一カードが既に live な行を返す。
 
@@ -366,11 +397,12 @@ def _ebay_active_titles():
         from fix_de_speedpak_shipping import refresh, token, post
     except Exception as e:
         print(f"  (live titles 取得不可: {type(e).__name__}: {e})")
-        return None
+        return None, None
     try:
         refresh()
         tok = token()
         out = {}
+        skus = {}
         for n in range(1, 60):
             inner = ("<ActiveList><Include>true</Include><Pagination>"
                      f"<EntriesPerPage>200</EntriesPerPage><PageNumber>{n}</PageNumber>"
@@ -385,12 +417,15 @@ def _ebay_active_titles():
                 ti = re.search(r"<Title>(.*?)</Title>", it)
                 cur = re.search(r'<CurrentPrice currencyID="(\w+)"', it)
                 # USD = US本体のみ。GBP/CAD/EUR は eBaymag ミラー(同SKUの複製=重複ではない)
+                sk = re.search(r"<SKU>(.*?)</SKU>", it)
                 if iid and ti and cur and cur.group(1) == "USD":
                     out[iid.group(1)] = ti.group(1)
-        return out
+                    if sk:                     # ★SKU = CustomLabel。PSA10-<cert> が入る
+                        skus[iid.group(1)] = sk.group(1)
+        return out, skus
     except Exception as e:
         print(f"  (live titles 取得失敗: {type(e).__name__}: {e})")
-        return None
+        return None, None
 
 
 def _load_live_cache():
@@ -401,11 +436,37 @@ def _load_live_cache():
         return {}
 
 
-def _save_live_cache(titles):
+def _load_live_skus():
+    """live cache の {itemID: SKU}。旧形式(skus 無し)の cache でも壊れない。"""
+    try:
+        with open(LIVE_CACHE, encoding="utf-8") as f:
+            return json.load(f).get("skus") or {}
+    except Exception:
+        return {}
+
+
+def _strip_rows(csv_path, header, kept_rows):
+    """CSV を kept_rows で書き直す (backup を残す)。NO-GO 行の物理除外と同じ扱い。"""
+    bak = csv_path + ".bak_same_cert"
+    try:
+        with open(csv_path, encoding="utf-8", newline="") as f:
+            open(bak, "w", encoding="utf-8", newline="").write(f.read())
+    except OSError:
+        pass
+    with open(csv_path, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+        w.writerow(header)
+        w.writerows(kept_rows)
+    print(f"       ✏️ CSV 上書き済 ({len(kept_rows)}行) / backup: {os.path.basename(bak)}")
+
+
+def _save_live_cache(titles, skus=None):
     os.makedirs(DATA_DIR, exist_ok=True)
+    payload = {"generated_at": datetime.now().isoformat(timespec="seconds"), "titles": titles}
+    if skus is not None:                       # ★SKU = 二重出品ガードの根拠 (cert が入っている)
+        payload["skus"] = skus
     with open(LIVE_CACHE, "w", encoding="utf-8") as f:
-        json.dump({"generated_at": datetime.now().isoformat(timespec="seconds"),
-                   "titles": titles}, f, ensure_ascii=False)
+        json.dump(payload, f, ensure_ascii=False)
 
 
 def _ledger(kind, payload):
@@ -419,9 +480,9 @@ def audit(refresh_titles=True):
     """全 ACTIVE 棚卸し: ①仕入元URL共有(致命) ②同一カード多重(注意)。戻り: stats dict。"""
     vals = sheet_io._product_ws().get_all_values()
     shared = shared_supply_urls(vals)
-    titles = _ebay_active_titles() if refresh_titles else None
+    titles, skus = _ebay_active_titles() if refresh_titles else (None, None)
     if titles:
-        _save_live_cache(titles)
+        _save_live_cache(titles, skus)
     else:
         titles = _load_live_cache()
         if refresh_titles:
@@ -477,11 +538,16 @@ def audit(refresh_titles=True):
 
 
 def pre_upload(csv_path, use_cache_only=True):
-    """入稿前 CSV を live と突合 → 同一カードが既に live な行を警告(除外はしない)。"""
+    """入稿前 CSV を live と突合。
+
+    2段:
+      🔴 **同一cert が既に出品済** → 物理除外する (同じ現物。二度売れたら片方は履行不能)
+      ⚠️ 同一カードの2枚目          → 警告のみ (仕入元が別なら健全。出品は止めない)
+    """
     rows, header = _read_csv(csv_path)
     if not rows:
         print("  (dup_guard: CSV 空 skip)")
-        return {"rows": 0, "dups": 0}
+        return {"rows": 0, "dups": 0, "same_cert": 0}
     vals = sheet_io._product_ws().get_all_values()
     cert_to_key = {}
     for r in vals[1:]:
@@ -490,9 +556,43 @@ def pre_upload(csv_path, use_cache_only=True):
         c, k = _cell(r, CERT), _cell(r, KEY)
         if c and k and not k.startswith(("item:", "shops:")):
             cert_to_key[c] = k
-    titles = _load_live_cache() if use_cache_only else (_ebay_active_titles() or {})
+    if use_cache_only:
+        titles, skus = _load_live_cache(), _load_live_skus()
+    else:
+        titles, skus = _ebay_active_titles()
+        titles, skus = titles or {}, skus or {}
+        if titles:
+            _save_live_cache(titles, skus)
+
+    # ---- 🔴 同一cert (= 同じ現物の二重出品) は物理除外する ----------------
+    #   根拠は2つ union する。どちらか片方だけでは漏れる:
+    #     - シート B列(itemID)  … 書き戻し漏れがある (実測 live PSA10 638件中 36件が空)
+    #     - live SKU(CustomLabel) … eBay 側の事実。ただし `PSA10-<cert>` 形式の出品しか
+    #       cert を持たない (実測 176/638) ので、36件のうち埋まるのは実測1件。残り35件は
+    #       itemID 書き戻しのデータ修復が要る = **ここは完全ではない** (backlog)
+    listed_cert = sheet_io.listed_certs(vals) | certs_from_skus(skus)
+    severe = same_cert_already_live(rows, header, listed_cert)
+    if severe:
+        print(f"■ 🔴 dup_guard: **同一cert が既に出品済** {len(severe)}件 → CSV から物理除外します")
+        for s in severe:
+            print(f"    🚫 {s['label']:18} cert={s['cert']}  {s['title'][:60]}")
+        print("       (同じ現物なので二度売れたら片方は必ず履行できない = キャンセル → Defect)")
+        drop = {s["row"] for s in severe}
+        kept = [r for i, r in enumerate(rows) if i not in drop]
+        _strip_rows(csv_path, header, kept)
+        _ledger("pre_upload_stripped",
+                {"csv": os.path.basename(csv_path),
+                 "same_cert": [{k: s[k] for k in ("label", "cert", "title")} for s in severe]})
+        rows = kept
+        if not rows:
+            print("  (同一cert 除外の結果 CSV が空になりました)")
+            return {"rows": 0, "dups": 0, "same_cert": len(severe)}
+
     index, _unkeyed = live_card_index(vals, titles)
     # 自分自身(=同じcert)は除外して突合する
+    # ★ここで同一cert を index から外すのは **同一カード判定** の自己一致を消すためだけ。
+    #   同一cert 自体は上で既に物理除外済 (2026-08-03 まで、この行のせいで
+    #   最も重い「同一現物の二重出品」だけが常に無検出だった)。
     csv_certs = set()
     hi = {n: i for i, n in enumerate(header)}
     ci = hi.get(CSV_CERT)
@@ -512,7 +612,7 @@ def pre_upload(csv_path, use_cache_only=True):
         _ledger("pre_upload", {"csv": os.path.basename(csv_path),
                                "dups": [{k: c[k] for k in ("label", "cert", "card_key", "existing")}
                                         for c in cands]})
-    return {"rows": len(rows), "dups": len(cands)}
+    return {"rows": len(rows), "dups": len(cands), "same_cert": len(severe)}
 
 
 def fill_keys_from_titles(csv_path, dry_run=False):

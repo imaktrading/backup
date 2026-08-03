@@ -1,0 +1,116 @@
+# -*- coding: utf-8 -*-
+"""入稿前に「同一cert が既に出品済」の行を物理除外する (2026-08-03).
+
+なぜ抽出段のガード (test_double_listing_guard_20260803.py) だけでは足りないか:
+
+  1. 抽出段はシートの B列(itemID) を根拠にする。しかし **書き戻しは漏れる**。
+     実測 (2026-08-03): live PSA10 627件のうち **35件がシートに itemID を持たない**。
+     その35件と同じ cert は「まだ出品していない」に見えるので素通りする。
+  2. CSV は抽出段以外の経路 (fork / 手直し / RESTOCK) でも作られる。最終地点で見る必要がある。
+
+そして pre_upload には **同一cert を必ず見逃す設計バグ**があった:
+  「自分自身(=同じcert)は除外して突合する」で live index から同一cert を外していたため、
+  最も重い「同じ現物の二重出品」だけが常に無検出だった (2026-08-03 の実害2件がこれ)。
+
+守りたいこと:
+  - 同一cert = 同じ現物 → **物理除外**する (二度売れたら片方は必ず履行できない)
+  - 同一カードの2枚目 → 従来どおり **警告のみ** (仕入元が別なら健全。出品を勝手に絞らない)
+"""
+from __future__ import annotations
+
+import csv
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+import dup_guard as dg  # noqa: E402
+import sheet_io  # noqa: E402
+
+HEADER = [dg.CSV_LABEL, dg.CSV_TITLE, dg.CSV_CERT]
+
+
+def _rows():
+    return [["PSA10-152687775", "PSA 10 One Piece #OP09-020 Come On", "152687775"],
+            ["PSA10-137215176", "PSA 10 Pokemon #324/S-P Lugia V", "137215176"]]
+
+
+class TestCertsFromSkus:
+    def test_extracts_cert_from_custom_label(self):
+        assert dg.certs_from_skus({"3588": "PSA10-152687775"}) == {"152687775"}
+
+    def test_ignores_non_psa_skus(self):
+        assert dg.certs_from_skus({"1": "m83047742482", "2": "", "3": None}) == set()
+
+    def test_definition_is_shared_with_sheet_io(self):
+        """抽出段と入稿前で判定がズレないよう、定義は1本であること."""
+        assert dg.certs_from_skus is sheet_io.certs_from_skus
+
+
+class TestSameCertAlreadyLive:
+    def test_detects_row_whose_cert_is_already_listed(self):
+        got = dg.same_cert_already_live(_rows(), HEADER, {"152687775"})
+        assert [g["cert"] for g in got] == ["152687775"]
+        assert got[0]["row"] == 0
+
+    def test_clean_rows_pass(self):
+        assert dg.same_cert_already_live(_rows(), HEADER, {"999999999"}) == []
+
+    def test_empty_listed_set_is_safe(self):
+        assert dg.same_cert_already_live(_rows(), HEADER, set()) == []
+        assert dg.same_cert_already_live(_rows(), HEADER, None) == []
+
+    def test_row_without_cert_is_not_blocked(self):
+        """cert が無い行まで止めると出品対象を勝手に絞ることになる."""
+        assert dg.same_cert_already_live([["m1", "t", ""]], HEADER, {"152687775"}) == []
+
+
+class TestStripRows:
+    def _csv(self, tmp_path):
+        p = tmp_path / "t.csv"
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+            w.writerow(HEADER)
+            w.writerows(_rows())
+        return str(p)
+
+    def test_rewrites_csv_and_keeps_backup(self, tmp_path, capsys):
+        p = self._csv(tmp_path)
+        dg._strip_rows(p, HEADER, _rows()[1:])
+        with open(p, encoding="utf-8") as f:
+            out = list(csv.reader(f))
+        assert len(out) == 2 and out[1][0] == "PSA10-137215176"
+        assert os.path.exists(p + ".bak_same_cert"), "戻せる形にしてから書き換えること"
+
+    def test_backup_holds_the_original(self, tmp_path):
+        p = self._csv(tmp_path)
+        dg._strip_rows(p, HEADER, [])
+        with open(p + ".bak_same_cert", encoding="utf-8") as f:
+            assert len(list(csv.reader(f))) == 3
+
+
+class TestSelfExclusionNoLongerHidesSameCert:
+    """★回帰の本体: 「自分自身は除外」が同一cert を隠していた件."""
+
+    def test_same_cert_is_reported_even_though_index_excludes_self(self):
+        # live index からは self_iids として消える cert でも、severe 判定は独立に効く
+        severe = dg.same_cert_already_live(_rows(), HEADER, {"152687775"})
+        assert severe, "同一cert は self 扱いで消してはいけない"
+
+
+class TestLiveListedCerts:
+    def test_missing_cache_is_empty_not_crash(self, tmp_path):
+        assert sheet_io.live_listed_certs(str(tmp_path / "nope.json")) == set()
+
+    def test_reads_skus_from_cache(self, tmp_path):
+        import json
+        p = tmp_path / "c.json"
+        p.write_text(json.dumps({"titles": {}, "skus": {"3588": "PSA10-152687775"}}),
+                     encoding="utf-8")
+        assert sheet_io.live_listed_certs(str(p)) == {"152687775"}
+
+    def test_old_cache_without_skus_is_empty(self, tmp_path):
+        """旧形式 cache でも壊れない (= シート側の判定に素直に戻るだけ)."""
+        import json
+        p = tmp_path / "c.json"
+        p.write_text(json.dumps({"titles": {"1": "t"}}), encoding="utf-8")
+        assert sheet_io.live_listed_certs(str(p)) == set()
