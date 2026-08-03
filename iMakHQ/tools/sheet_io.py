@@ -18,6 +18,7 @@ PRODUCT_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 PRODUCT_GID = 851100680
 PRODUCT_COL_ITEMID = 1   # B
 PRODUCT_COL_CERT = 8     # I (PSA cert#。psa_cache.json で CardImageUrl=現物PSA画像を引く)
+PRODUCT_COL_COST_M = 12  # M (現在価格・監視くん更新の最新観測値。書込 seed 可・regular 列)
 PRODUCT_COL_COST = 13    # N (仕入れ価格（円）= live ARRAYFORMULA。**書込禁止**。読取専用)
 PRODUCT_COL_COST_OVERRIDE = 39   # AN (仕入override) — ★2026-07-27 廃止。N の式はもう参照しない。
 # 廃止理由: 無在庫モデルでは仕入値=今の最安(M)が常に正しく、凍結は原理的に誤り。
@@ -64,6 +65,62 @@ def listed_keys(rows2d, itemid_col=PRODUCT_COL_ITEMID, key_col=PRODUCT_COL_KEY):
     return out
 
 
+def normalize_key(key):
+    """canonical KEY を **比較用**に正規化 (純関数)。
+
+    ★2026-08-03: 同じ KEY が namespace prefix 付き/無しの両方で書かれており
+    (`FB08-121_p1` と `dragonball_scg:FB08-121_p1`)、生文字列比較の dedup が
+    すり抜けていた。**比較のときだけ** prefix を落とす。書込値は変えない。
+    """
+    k = (key or "").strip()
+    if not k or k.startswith("item:") or k.startswith("shops:"):
+        return ""
+    return k.split(":", 1)[-1].strip().lower()
+
+
+def listed_key_forms(rows2d, itemid_col=PRODUCT_COL_ITEMID, key_col=PRODUCT_COL_KEY):
+    """出品済 KEY を **正規化した** 集合 (純関数)。`listed_keys` の比較用。"""
+    return {n for n in (normalize_key(k) for k in listed_keys(rows2d, itemid_col, key_col)) if n}
+
+
+def listed_certs(rows2d, itemid_col=PRODUCT_COL_ITEMID, cert_col=PRODUCT_COL_CERT):
+    """出品済 PSA cert の集合 (純関数, test可)。
+
+    ★2026-08-03: **同じ cert = 同じ現物**。二度出品したら片方は必ず履行できない
+    (無在庫以前の問題で、現物が1枚しかない)。KEY がどう揺れても cert は揺れないので、
+    これが二重出品に対する**最も硬い**ガード。
+    実害: 2026-08-03 の CSV に cert 152687775 / 158452544 が入り、どちらも
+    itemID 358853881133 / 358794594782 で既に出品中だった。シート実測で同型 24件。
+    """
+    out = set()
+    for r in rows2d[1:]:
+        if len(r) <= max(itemid_col, cert_col):
+            continue
+        iid = (r[itemid_col] or "").strip()
+        cert = (r[cert_col] or "").strip()
+        if iid and cert:
+            out.add(cert)
+    return out
+
+
+def already_listed_reason(cert, key, listed_cert_set, listed_key_form_set):
+    """この行を出品してはいけない理由を返す (無ければ "")。純関数, test可。
+
+    - cert 一致 = **同一の現物**が既に出品中 → 絶対に出さない (KEY 不問)
+    - KEY 一致 = 同じカードの2枚目 → 従来どおり抽出段で止める (正規化して比較)
+
+    ★KEY が空でも cert で止まる。従来は `key and key in listed` の fail-OPEN だったため
+    KEY 未記入の行が素通りしていた (シート実測 24件中 21件がこの経路)。
+    """
+    cert = (cert or "").strip()
+    if cert and cert in (listed_cert_set or ()):
+        return "cert"
+    nk = normalize_key(key)
+    if nk and nk in (listed_key_form_set or ()):
+        return "key"
+    return ""
+
+
 PRODUCT_COL_AUX_START = 28   # AC (補URL1)。AC-AG = 補URL1-5 (idx28-32 / 1-indexed col 29-33)。
 PRODUCT_AUX_MAX = 5
 
@@ -102,59 +159,90 @@ def range_touches_col(a1_range, col_idx0):
     return min(lo, hi) <= col_idx0 <= max(lo, hi)
 
 
-class _ANWriteGuard:
-    """商品管理シートの **AN列(仕入override)への書込を実行時に拒否**する薄い proxy (2026-07-27)。
+class _ColWriteGuard:
+    """商品管理シートの **指定列への書込を実行時に拒否**する薄い proxy (2026-07-27 → 08-02 汎用化)。
 
     ★なぜ実行時ガードが要るか (2026-07-27 監査指摘):
     source 走査の test だけでは `ws.update_cell(row, 40, v)` の **数値列指定** や
     `chr(65 + idx0)` の **動的な列文字生成** を検知できず、しかもその2つは
     このリポジトリに既にある確立済みスタイル(sheet_io の write_aux_urls/write_keys 等)。
-    = 「AN{row}」という文字列を書かなくても簡単に AN を触れてしまう。
+    = 「AN{row}」という文字列を書かなくても簡単に AN/N を触れてしまう。
     そこで **書込の出口(worksheet)を1点に絞って弾く**。列の指定方法に依らず止まる。
 
-    AN が入った行は N=(M or F)−K の動的追随を無視して仕入値が凍結し、供給価格が上がっても
-    値上げされず、誰も気づかないまま安売りが続く(実測: Boa Hancock P-066 が ¥29,999 凍結の
-    まま実勢 ¥48,000 に対し $353.98 で出品)。AN は **人が手で入れる時だけ** の入口。
+    ★2026-08-02 N列も同型ガード対象に追加 (BRAVO 依頼書 E 項):
+    ichibankuji_restock が N列に cost を焼いていた事故 (7/27〜8/02 で N1=#REF! → 全空)
+    の同型再発防止。N列は ARRAYFORMULA (M or F)−K の spill 列で、1セル書込むと spill が
+    塞がり全 1415行が #REF!。値を反映したいなら M列(regular)を seed する運用。
+
+    guarded_cols: {列idx0: (列名, deny メッセージ)} の dict。列ごとに違う理由メッセージ。
     """
 
     _WRITE_METHODS = ("batch_update", "update", "update_acell", "update_cell", "update_cells")
-    _AN = PRODUCT_COL_COST_OVERRIDE          # 39 (0-indexed) = AN列
 
-    def __init__(self, ws):
+    def __init__(self, ws, guarded_cols=None):
         object.__setattr__(self, "_ws", ws)
+        # guarded_cols 省略時は既定として AN 列のみ (2026-07-27 互換)。
+        if guarded_cols is None:
+            guarded_cols = {PRODUCT_COL_COST_OVERRIDE: ("AN", _AN_DENY_MSG)}
+        object.__setattr__(self, "_guarded", dict(guarded_cols))
 
     def __getattr__(self, name):
         attr = getattr(object.__getattribute__(self, "_ws"), name)
-        if name in _ANWriteGuard._WRITE_METHODS and callable(attr):
-            return functools.partial(_ANWriteGuard._checked, self, name, attr)
+        if name in _ColWriteGuard._WRITE_METHODS and callable(attr):
+            return functools.partial(_ColWriteGuard._checked, self, name, attr)
         return attr
 
-    @staticmethod
-    def _deny(where):
-        raise PermissionError(
-            f"AN列(仕入override)への書込は禁止です [{where}]。"
-            "AN を書くと N=(M or F)−K の動的追随が止まり仕入値が凍結します"
-            "(実測: ¥29,999 凍結のまま実勢 ¥48,000 → 安売り)。"
-            "cost を反映したいなら M列(現在価格)を seed してください。"
-            "AN は人が手で入れる時だけの入口です。")
+    def _deny(self, col_idx0, where):
+        label, msg = self._guarded[col_idx0]
+        raise PermissionError(f"{label}列への書込は禁止です [{where}]。{msg}")
 
     def _checked(self, name, attr, *args, **kwargs):
-        an = _ANWriteGuard._AN
+        guarded = object.__getattribute__(self, "_guarded")
         if name == "batch_update" and args:
             for req in (args[0] or []):
-                if isinstance(req, dict) and range_touches_col(req.get("range"), an):
-                    _ANWriteGuard._deny(f"batch_update range={req.get('range')}")
+                if isinstance(req, dict):
+                    rng = req.get("range")
+                    for col in guarded:
+                        if range_touches_col(rng, col):
+                            self._deny(col, f"batch_update range={rng}")
         elif name in ("update", "update_acell") and args:
-            if isinstance(args[0], str) and range_touches_col(args[0], an):
-                _ANWriteGuard._deny(f"{name} range={args[0]}")
+            if isinstance(args[0], str):
+                for col in guarded:
+                    if range_touches_col(args[0], col):
+                        self._deny(col, f"{name} range={args[0]}")
         elif name == "update_cell" and len(args) >= 2:
-            if args[1] == an + 1:                      # gspread は 1-indexed
-                _ANWriteGuard._deny(f"update_cell col={args[1]}")
+            for col in guarded:
+                if args[1] == col + 1:                # gspread は 1-indexed
+                    self._deny(col, f"update_cell col={args[1]}")
         elif name == "update_cells" and args:
             for c in (args[0] or []):
-                if getattr(c, "col", None) == an + 1:
-                    _ANWriteGuard._deny(f"update_cells col={getattr(c, 'col', None)}")
+                col1 = getattr(c, "col", None)
+                if col1 is not None:
+                    for col in guarded:
+                        if col1 == col + 1:
+                            self._deny(col, f"update_cells col={col1}")
         return attr(*args, **kwargs)
+
+
+# 後方互換: 既存 test / 他 module が名前で参照している可能性に備え alias を残す。
+_ANWriteGuard = _ColWriteGuard
+
+
+_AN_DENY_MSG = ("AN を書くと N=(M or F)−K の動的追随が止まり仕入値が凍結します"
+                "(実測: ¥29,999 凍結のまま実勢 ¥48,000 → 安売り)。"
+                "cost を反映したいなら M列(現在価格)を seed してください。"
+                "AN は人が手で入れる時だけの入口です。")
+_N_DENY_MSG = ("N列は ARRAYFORMULA (M or F)−K の spill 出力です。1セル書込むと "
+               "spill が塞がり N1=#REF! で全行が #REF! になります "
+               "(2026-07-27〜08-02 ichibankuji_restock 事故で N109-N123 の 7 行を焼き、"
+               "他 1400行 が #REF! で offer_calc の cost=0 表示 → 赤字承諾リスク)。"
+               "cost を反映したいなら M列(現在価格)を seed してください。"
+               "N はシートの数式が計算する唯一の出口で、コードから書く経路は無い。")
+
+_PRODUCT_GUARDED_COLS = {
+    PRODUCT_COL_COST_OVERRIDE: ("AN", _AN_DENY_MSG),
+    PRODUCT_COL_COST:          ("N",  _N_DENY_MSG),
+}
 
 
 def _product_ws():
@@ -167,7 +255,7 @@ def _product_ws():
     ws = next((w for w in sh.worksheets() if w.id == PRODUCT_GID), None)
     if ws is None:
         raise RuntimeError(f"商品管理シート gid={PRODUCT_GID} が見つからない")
-    return _ANWriteGuard(ws)
+    return _ColWriteGuard(ws, _PRODUCT_GUARDED_COLS)
 
 
 def product_key_map():

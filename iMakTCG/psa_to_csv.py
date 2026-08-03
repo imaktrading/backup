@@ -2557,23 +2557,18 @@ def _psa_cost_from_row(cost_n, price_m, price_f):
 
     2026-07-24 根治: 従来 `N or F` で、N列(#REF!/空)の時に F列(=取得時の古い価格)へ
     フォールバックし、値下がりした品を過大 pricing していた(DON!! 出品時 F¥23,000 を拾い
-    $279.98。実際は現価格 M¥14,000 → $184.98)。SSOT 定義 N=(M or F)−K は M(現在)を
-    F(古い)より優先するので、コード側も N空でも M を先に見る。#REF!/非数値は数字が無く
-    自然に次候補へ流れる。
+    $279.98。実際は現価格 M¥14,000 → $184.98)。
+
+    2026-08-02 統合: listing_common.pick_cost_jpy の thin wrapper に置換。
+    N→M→F 優先は 5 listing scripts + offer_calc と 1 定義に集約 (三様問題の解消)。
     """
-    import re as _re
-    for src in (cost_n, price_m, price_f):
-        s = (src or "").strip()
-        if not s:
-            continue
-        m = _re.search(r'([\d,]+)', s)
-        if not m:
-            continue          # '#REF!' 等 数字なし → 次候補(M→F)へ
-        try:
-            return int(m.group(1).replace(',', ''))
-        except ValueError:
-            continue
-    return None
+    from listing_common import pick_cost_jpy
+    row = [""] * 14
+    row[5] = "" if price_f is None else str(price_f)
+    row[12] = "" if price_m is None else str(price_m)
+    row[13] = "" if cost_n is None else str(cost_n)
+    s = pick_cost_jpy(row)
+    return int(s) if s else None
 
 
 def load_targets_from_sheet_psa():
@@ -2615,17 +2610,24 @@ def load_targets_from_sheet_psa():
         _hq_tools = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "iMakHQ", "tools")
         if _hq_tools not in _sys.path:
             _sys.path.insert(0, _hq_tools)
-        from sheet_io import listed_keys as _listed_keys, PRODUCT_COL_KEY as _KEY_COL
-        _listed = _listed_keys(all_values)
+        from sheet_io import (listed_key_forms as _listed_key_forms,
+                              listed_certs as _listed_certs,
+                              already_listed_reason as _already_listed,
+                              PRODUCT_COL_KEY as _KEY_COL)
+        _listed = _listed_key_forms(all_values)
+        _listed_cert = _listed_certs(all_values)
     except Exception as _e_lk:
         print(f"  ⚠️ 出品済KEY算出失敗(抽出スキップ無効化して継続): {type(_e_lk).__name__}")
-        _listed, _KEY_COL = set(), 34
+        _listed, _listed_cert, _KEY_COL = set(), set(), 34
+        def _already_listed(cert, key, certs, keys):  # noqa: E306  (fallback: 従来どおり素通り)
+            return ""
 
     cert_numbers = []
     cost_map = {}
     url_map = {}
     title_map = {}
     _skipped_listed = 0
+    _skipped_cert = []
     for row in all_values[1:]:  # header 除外
         url      = (row[0]  if len(row) > 0  else '').strip()  # A
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
@@ -2641,9 +2643,16 @@ def load_targets_from_sheet_psa():
 
         if not cert or item_id or not url:
             continue
-        # 同KEYが既に出品済(別行でitemID埋め) = この行は2枚目 → 抽出しない(viewer再表示の浪費防止)。
-        # KEY未記入の行は従来通り通す(安全側)。
-        if key_v and key_v in _listed:
+        # ★2026-08-03: 二重出品ガード。cert 一致 = **同一の現物**が既に出品中 → 絶対に出さない
+        #   (現物は1枚しかないので片方は必ず履行できない)。KEY 一致 = 同じカードの2枚目 → 従来どおり止める。
+        #   旧実装は `key_v and key_v in _listed` の **fail-OPEN** で、KEY 未記入 / KEY 表記揺れ
+        #   (`FB08-121_p1` vs `dragonball_scg:FB08-121_PARA`) の行が素通りしていた。
+        #   実害: 2026-08-03 の CSV に既出品の cert 152687775 / 158452544 が入った (シート実測 同型24件)。
+        _dup = _already_listed(cert, key_v, _listed_cert, _listed)
+        if _dup == "cert":
+            _skipped_cert.append(cert)
+            continue
+        if _dup:
             _skipped_listed += 1
             continue
         # 統合シートは TCG / Tシャツ / 一番くじ / Montbell 等の混在。R列='TCG' のみ PSA 対象
@@ -2663,6 +2672,10 @@ def load_targets_from_sheet_psa():
         _cost = _psa_cost_from_row(cost_n, price_m, price_f)
         if _cost is not None:
             cost_map[cert] = _cost
+    if _skipped_cert:
+        print(f"  🚫 二重出品ガード: 同一cert が既に出品済 → 除外 {len(_skipped_cert)}件 "
+              f"→ {_skipped_cert[:8]}{' …' if len(_skipped_cert) > 8 else ''}")
+        print(f"     (同じ cert = 同じ現物。二度出すと片方は必ず履行できない)")
     if _skipped_listed:
         print(f"  ⏭️ 既出品(同KEYが出品済)の2枚目を除外: {_skipped_listed}件 "
               f"(viewer毎回再表示の浪費防止。dedupと二重ではなく抽出段階で先に止める)")
