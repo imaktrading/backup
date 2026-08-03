@@ -811,7 +811,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # --- PDCA: 台帳に蓄積 + 前回比トレンド + 再発検知 (dry-run は追記しない) ---
     _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
-    _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku)
+    _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku,
+                     audited_rows=len(rows),
+                     audited_skus=[_row_sku(headers, r) for r in rows])
     # --- 決定論NG digest: program不整合 + logシグナル + 再発finding(pdca seen_count) を束ねる(無言スキップ防止=PDCA担保) ---
     # ★2026-07-25: recurring は project-scoped(監査対象=project のカテゴリのみ)。missing_models/pdca は
     # グローバル台帳のため、他プロジェクト由来(例 gshock 監査に dragonball_scg=TCG)の混入を除外。
@@ -1211,7 +1213,8 @@ def _resolve_identity(sku: str, identity_by_sku: dict | None) -> str:
     return _identity_from_csv_history(s)
 
 
-def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku=None):
+def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku=None,
+                     audited_rows=0, audited_skus=None):
     """catalog/program 指摘を pdca.db 改善キューに蓄積し、dedup済 catalog 依頼を集約発行 +
     処理済を done 同期 (PDCA spiral-up Phase1b+2)。dry-run は記録しない。
     write-only・try/except で監査本体には一切影響させない。"""
@@ -1222,10 +1225,12 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
         import pdca_store as _pdca
         con = _pdca.connect()
         ts = _today()
+        _seen_dkeys = set()      # 今回の走行で検出した finding (= 再検出なし判定の母集団)
         for sku, msg in catalog_items:
             ft = "必須Item Specific" if "必須" in msg else "catalog_gap"
             m = _re.search(r"'(C:[^']+)'", msg)
             field = m.group(1) if m else "catalog_request"
+            _seen_dkeys.add(_pdca.dedup_key(project, sku, field, ""))
             _pdca.upsert_improvement(con, project, sku, field, "",
                                      evidence=str(msg)[:80], source="auditor", layer="A",
                                      finding_type=ft,
@@ -1257,6 +1262,18 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
             staled = _pdca.prune_stale_findings(con, ts, max_age_days=21)["pruned"]
         except Exception as _se:
             print(f"  ⚠️ PDCA stale prune skip: {type(_se).__name__}")
+        # 今回の走行で **再検出されなかった** auditor 由来 pending を閉じる (証拠で閉じる。2026-08-03)。
+        # 時間 (days_stale) で閉じる案より速く正確: m81161788422 のように CSV 側が既に整合している
+        # 指摘が、次の監査で即座に閉じる。CSVが空/0行の走行では1件も閉じない (fail-closed)。
+        nored = 0
+        try:
+            _nr = _pdca.close_not_redetected(con, project, _seen_dkeys, audited_skus,
+                                             ts=ts, audited_rows=audited_rows)
+            nored = _nr["closed"]
+            if _nr.get("skipped_reason"):
+                print(f"  ⏭ 再検出なしclose: {_nr['skipped_reason']}")
+        except Exception as _ce:
+            print(f"  ⚠️ 再検出なしclose skip: {type(_ce).__name__}: {_ce}")
         # 既存行の identity 後埋め (解決経路を後から実装した分の救済 2026-08-01)。
         # これを通さないと、7/31 以前に積まれた PSA cert 行は再検出まで (不明) のまま出続ける。
         filled = 0
@@ -1280,8 +1297,9 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
             _pdca.write_unresolved_note(held, UNRESOLVED_IDENTITY_PATH, ts, category=project)
         except Exception as _we:
             print(f"  ⚠️ 未解決リスト書込 skip: {type(_we).__name__}: {_we}")
-        if emitted or synced or pruned or staled or filled or nonapp:
+        if emitted or synced or pruned or staled or filled or nonapp or nored:
             print(f"  📊 PDCA: 集約発行 {emitted} 件 / 完了同期 {synced} 件 / "
+                  f"再検出なしclose {nored} 件 / "
                   f"解決済prune {pruned} 件 / 長期stale退役 {staled} 件 / identity後埋め {filled} 件 / "
                   f"非該当spec退役 {nonapp} 件 (dedup済)")
         if held:

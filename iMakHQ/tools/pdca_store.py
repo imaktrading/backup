@@ -233,6 +233,67 @@ def prune_resolved_gaps(con, resolve_fn, ts="", sources=("missing_models",)):
     return {"pruned": pruned, "checked": len(rows), "remaining_pending": remaining}
 
 
+def close_not_redetected(con, category, seen_dkeys, audited_item_ids, ts="", *,
+                         sources=("auditor",), finding_types=None, audited_rows=0):
+    """今回の走行で **再検出されなかった** pending を done 化する (証拠で閉じる)。
+
+    ★2026-08-03: auditor 由来の finding は「時間が経ったから閉じる」しかなかった
+      (`prune_resolved_gaps` の resolver は catalog の product_id で照合するが、auditor 行の
+       item_id は メルカリ item id (`m81161788422`) なので必ず False = 永久に pending)。
+      だが監査くんは毎回「その走行で検出した全件」を持っている。pending なのにそこに居ない
+      = **今回のCSVでは再現しなかった** = 解決済。時間の閾値を持つ必要がない。
+
+    復活: 再発したら `upsert_improvement` が done → pending に戻す (既存の revival がそのまま効く)。
+      だから新ステータスを作らない。閉じた理由は evidence に残す。
+
+    ★fail-closed: **今回何も検出できなかった走行では1件も閉じない**。
+      CSVが空/0行/例外で終わった走行を「全部解決した」と解釈すると、未解決の指摘を全消しする
+      ([[failclosed_must_skip_not_destructive]])。呼出側は audited_rows に実際に監査した行数を渡す。
+
+    ★★ 対象は **今回の監査対象に入っていた item_id だけ**。
+      監査は毎回「その日のCSV1本」しか見ないので、別の日のCSV由来の finding は永久に
+      再検出されない。母集団を絞らないと **未解決の backlog を全部消す**
+      (実測: tcg/auditor の pending 13件のうち12件は過去CSV由来の 必須Item Specific。
+       絞らずに走らせたら13件全部 done になった)。
+      「今日そのSKUを監査した。そして指摘は出なかった」= 解決、が唯一の証拠。
+
+    Args:
+        seen_dkeys: 今回 upsert した dedup_key の集合。
+        audited_item_ids: 今回の走行で **実際に監査した SKU** の集合 (= 母集団)。
+        audited_rows: 今回監査した CSV 行数。0 なら何もしない。
+    Returns: {"closed": n, "checked": m, "skipped_reason": str}
+    """
+    seen = set(seen_dkeys or ())
+    pop = {str(x).strip() for x in (audited_item_ids or ()) if str(x).strip()}
+    if audited_rows <= 0:
+        return {"closed": 0, "checked": 0, "skipped_reason": "監査行0件 → 閉じない(fail-closed)"}
+    if not pop:
+        return {"closed": 0, "checked": 0,
+                "skipped_reason": "今回の監査対象SKUを特定できず → 閉じない(fail-closed)"}
+    ph = ",".join("?" * len(sources))
+    sql = ("SELECT queue_id, dkey, item_id, evidence FROM improvement_queue "
+           f"WHERE status='pending' AND category=? AND source IN ({ph})")
+    args = [category, *sources]
+    if finding_types:
+        sql += " AND finding_type IN (%s)" % ",".join("?" * len(finding_types))
+        args += list(finding_types)
+    rows = con.execute(sql, tuple(args)).fetchall()
+    closed = 0
+    for r in rows:
+        if r["item_id"] not in pop:
+            continue          # 今回そのSKUを見ていない = 解決の証拠が無い(残す)
+        if r["dkey"] in seen:
+            continue          # 今回も出た = 未解決
+        note = f"auto-closed: 再検出なし ({str(ts)[:10]})"
+        ev = (r["evidence"] or "").strip()
+        con.execute("UPDATE improvement_queue SET status='done', evidence=?, updated_ts=? "
+                    "WHERE queue_id=?",
+                    ((ev + " / " + note) if ev else note, ts, r["queue_id"]))
+        closed += 1
+    con.commit()
+    return {"closed": closed, "checked": len(rows), "skipped_reason": ""}
+
+
 def prune_stale_findings(con, today, max_age_days=21, sources=None):
     """長期未解決の pending を 'stale' に退役させる(digest の恒久ノイズを断つ=K1/K5)。
 
