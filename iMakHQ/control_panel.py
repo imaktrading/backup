@@ -1956,6 +1956,7 @@ class ListingPanel:
         # - verified カテゴリを先頭にまとめる (ユーザー要望)
         self.param_entries = {}
         self._run_log = None
+        self._run_log_path = None   # 完走後の要約はログ欄でなくこのファイルを読む(2026-08-03)
 
         # 1) SCRIPTS をカテゴリ別に分類
         categories: dict[str, dict[str, int]] = {}  # {category: {type: script_idx}}
@@ -2433,6 +2434,30 @@ class ListingPanel:
         """ListingPanel: rarara helper 呼出 (互換ラッパ)."""
         _run_rarara_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
 
+    def _run_log_text(self):
+        """今回の走行の stdout を **run log ファイル** から読む (2026-08-03)。
+
+        ログ欄(self.log)を読むと 2つの理由で **前の走行が混ざる**:
+          - クリアを押し忘れると前走行の全文が残る
+            (実害 2026-08-02: gshock の報告に TCG の「入稿OK6件」「#155393557」が混入)
+          - 5000行を超えると先頭1000行が削除される(control_panel.py の膨張防止)
+        run log は走行ごとに新規ファイルなので、どちらの影響も受けない。
+        読めない時だけ従来どおりログ欄にフォールバック (= 報告が消えるより混ざる方がまし)。
+        """
+        path = getattr(self, "_run_log_path", None)
+        if path:
+            try:
+                fh = getattr(self, "_run_log", None)
+                if fh and not fh.closed:
+                    fh.flush()
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    txt = f.read()
+                if txt.strip():
+                    return txt
+            except Exception as _e:
+                self.append_log(f"⚠️ run log 読取失敗 → ログ欄で代用: {type(_e).__name__}\n")
+        return self.log.get("1.0", "end") if hasattr(self, "log") else ""
+
     def _show_audit_summary(self, captured_log):
         """CSV監査くん完走 → 要点をポップアップ表示 (出品くん側の能動報告)."""
         summary = summarize_audit_log(captured_log)
@@ -2464,11 +2489,9 @@ class ListingPanel:
                         # 新規生成(全カテゴリ)完了時: 統合問題提起(CSV化分の監査問題 + 非化分の原因→対策案)。
                         # 生成ログは drops + inline自己監査を含むので1本で両方カバー。
                         if _idx2 >= 0 and SCRIPTS[_idx2].get("type") == "new":
-                            _glog = self.log.get("1.0", "end") if hasattr(self, "log") else ""
-                            self._show_problem_report(_glog)
+                            self._show_problem_report(self._run_log_text())
                         elif any("csv_auditor.py" in str(c) for c in _cmd2):
-                            _clog = self.log.get("1.0", "end") if hasattr(self, "log") else ""
-                            self._show_audit_summary(_clog)
+                            self._show_audit_summary(self._run_log_text())
                     except Exception as _e:
                         self.append_log(f"⚠️ サマリー表示失敗: {_e}\n")
                     # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
@@ -2516,7 +2539,7 @@ class ListingPanel:
                     # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
                     if not _skip_pp:
                         try:
-                            captured_log = self.log.get("1.0", "end") if hasattr(self, 'log') else ""
+                            captured_log = self._run_log_text()
                             _run_excluder_for_latest_csv(self.append_log, captured_log)
                         except Exception as _e:
                             self.append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
