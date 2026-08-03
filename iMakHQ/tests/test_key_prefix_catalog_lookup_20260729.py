@@ -106,24 +106,27 @@ def test_gate_scopes_variant_choices_by_category():
 
 
 def test_multi_variant_recomputed_after_key_fallback(monkeypatch):
-    """title に番号が無い行でも、KEY から番号を補った後に多変種判定を取り直すこと。
+    """title に番号が無い行でも、KEY から番号を取って多変種判定をすること。
 
     取り直さないと ⚠️多変種バッジが出ず、同番号別変種を流し見で掴む (「違う」の主因)。
+
+    ★2026-08-03 改訂: KEY 優先は **build_card_query 本体**へ移った
+    (以前は `build_search_query` が後から上書きするパッチだった)。
+    本体を mock で潰すと「補ったか」を確かめられないので、**本体を動かして**検証する。
+    catalog DB だけ mock する。
     """
     calls = []
-
-    def fake_build(title, set_no, key=None):
-        return {"kw": "", "card_no": "", "name_jp": "クイーン", "key": key or "",
-                "image": "", "hint": ["x"], "multi_variant": False}
 
     def fake_mv(card_no, category="", *a, **k):
         calls.append((card_no, category))
         return True
 
-    monkeypatch.setattr(mp, "build_card_query", fake_build)
+    monkeypatch.setattr(mp, "card_meta_for_key", lambda k: {"name_jp": "クイーン"})
+    monkeypatch.setattr(mp, "name_jp_for_card", lambda n: None)
     monkeypatch.setattr(mp, "_is_multi_variant", fake_mv)
-    q = hf.build_search_query({"title": "【PSA10】クイーン 二つの伝説 SP", "key": "one_piece_tcg:ST04-005_OP08"}, mp)
-    assert q["card_no"] == "ST04-005"
+    q = hf.build_search_query({"title": "【PSA10】クイーン 二つの伝説 SP",
+                               "key": "one_piece_tcg:ST04-005_OP08"}, mp)
+    assert q["card_no"] == "ST04-005", "KEY から番号を取れていない"
     assert q["kw"] == "PSA10 クイーン ST04-005"
-    assert q["multi_variant"] is True, "KEY で番号を補った後に多変種判定を取り直していない"
-    assert calls == [("ST04-005", "one_piece_tcg")], "カテゴリを渡していない (別作品の変種を数える)"
+    assert q["multi_variant"] is True, "多変種判定をしていない"
+    assert ("ST04-005", "one_piece_tcg") in calls,         f"カテゴリ込みで判定していない (別作品の変種を数える): {calls}"

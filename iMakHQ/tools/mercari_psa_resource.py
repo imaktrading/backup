@@ -116,8 +116,40 @@ def _ebay_item_id(url):
     return mt.group(1) if mt else ""
 
 
-def _extract_card_no(title, set_no):
-    """set_no か title からカード番号を取り出す (ハイフン保持, 例 'OP11-106' / 'P-041')。"""
+def card_no_from_key(key):
+    """canonical KEY → 検索用 card番号 (変種suffix除去)。純関数。
+
+    ★2026-08-03: `psa_hoju_fill._card_no_from_key` をここへ移した (呼び出し側の後付け
+    パッチではなく **本体で KEY を優先する**ため)。gate `_key_card_number` と同一規約。
+
+    url-key (`item:` / `shops:`) と数字を含まない値は "" (fail-closed)。
+    KEY のカテゴリ接頭辞 (`pokemon_tcg:SV5a-083`) は先に落とす
+    (旧 bare 形式前提で split("_")[0] していた頃、新形式では 'pokemon' を拾って
+     数字なし→"" となり **探索不能**になっていた。実測: 補URL対象127件中91件)。
+    """
+    k = (key or "").strip()
+    if not k or k.startswith(("item:", "shops:")):
+        return ""
+    if ":" in k:
+        k = k.split(":", 1)[1]
+    base = k.split("_")[0].strip().upper()
+    return base if any(ch.isdigit() for ch in base) else ""
+
+
+def _extract_card_no(title, set_no, key=None):
+    """カード番号を取り出す。**KEY (catalog SSOT) を最優先**。
+
+    ★2026-08-03 (1丁目1番地 ②の修正): 従来は set_no → title の順で、KEY を持っていても
+    **番号だけ自由文から取っていた**。この title は **仕入元(メルカリ)の出品タイトルをそのまま**
+    持つ列で、他人が書いた自由文。番号を書き間違えていることがある
+    (実測: `シャーロット・プリン` の行に `OP10-012`(正 `ST12-012`) / `フランペ` に `OP01-008`(正 `EB01-056`))。
+    誤番号で検索すれば当然0件になり **「市場に無い」と誤診**する。
+
+    優先順: **KEY** → set_no (呼び出し側の構造化値) → title (最後の砦・後方互換)
+    """
+    ck = card_no_from_key(key)
+    if ck:
+        return ck
     sn = (set_no or "").strip()
     if not sn:
         mt = SETNO_RE.search(title or "")
@@ -341,7 +373,10 @@ def build_card_query(title, set_no, key=None):
     kw = 'PSA10 <name_jp> <card_no>'。card_no は照合用、image は P3 画像pin用。
     key 無 / catalog 未収録 → 従来の bare card_no 経路に fallback (後方互換)。
     """
-    card_no = _extract_card_no(title, set_no)
+    # ★2026-08-03: KEY 優先。従来はここが title 由来の番号を第一優先にしていたため、
+    #   呼び出し側 (psa_hoju_fill.build_search_query) が後から上書きするパッチを持っていた。
+    #   **本体で正しくすれば、後付けパッチは要らなくなる**。
+    card_no = _extract_card_no(title, set_no, key)
     meta = card_meta_for_key(key) if key else None
     nj = (meta.get("name_jp") if meta else None) or name_jp_for_card(card_no)
     image = meta.get("image") if meta else ""
