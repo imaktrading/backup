@@ -87,6 +87,56 @@ OWNER_ALIASES = {
 RE_TITLE = re.compile(r"^#\s*(.+?)\s*$", re.M)
 RE_UNSAFE = re.compile(r"[^0-9A-Za-z_.-]")
 
+# ★2026-08-03: **固定番号**。ユーザー指示「それぞれに番号で指示した方が混乱しない」。
+#   ID (`backlog:2026-08-02_gshock_to_csv.py_1989___NameError___retu`) は口頭で言えない。
+#   かといって「上から1,2,3」は**優先度順に並ぶので1件増減すると全部ずれる**。
+#   「4番やって」と言った時点で相手の4番が別件になっていたら、claim を作った意味が無い。
+#   → **一度振ったら二度と変えない。閉じても欠番のまま残す**。
+#   台帳は git の外 (実行時状態と同じ理由。`_claims` の隣に置く)。
+NUMBERS = DATA_ROOT / "_claims" / "_numbers.json"
+
+
+def _load_numbers() -> dict:
+    try:
+        return json.loads(NUMBERS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def number_of(item_id: str) -> int:
+    """item に固定番号を振る (既にあればそれを返す)。**欠番は再利用しない**."""
+    m = _load_numbers()
+    if item_id in m:
+        return int(m[item_id])
+    n = max([int(v) for v in m.values()] or [0]) + 1
+    m[item_id] = n
+    try:
+        NUMBERS.parent.mkdir(parents=True, exist_ok=True)
+        NUMBERS.write_text(json.dumps(m, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+    return n
+
+
+def id_by_number(n) -> str:
+    """番号 → item ID。無ければ ""。`take 4` 等で使う."""
+    try:
+        n = int(str(n).lstrip("#＃番"))
+    except (TypeError, ValueError):
+        return ""
+    for k, v in _load_numbers().items():
+        if int(v) == n:
+            return k
+    return ""
+
+
+def resolve(ref: str) -> str:
+    """`4` / `#4` / 完全な ID のどれでも受ける (窓口が番号で言えるように)."""
+    ref = (ref or "").strip()
+    if re.fullmatch(r"[#＃番]?\d+", ref):
+        return id_by_number(ref) or ref
+    return ref
+
 
 # ---------------------------------------------------------------- 窓口の判定
 def detect_who(cwd: str | None = None) -> str:
@@ -151,9 +201,16 @@ def add_backlog(title: str, priority: int = 5, detail: str = "",
     now = datetime.now()
     slug = RE_UNSAFE.sub("_", title)[:40].strip("_") or "item"
     stem = f"{now:%Y-%m-%d}_{slug}"
+    # ★2026-08-03: 空き名の再利用を禁じる。**`_done/` も見る**。
+    #   閉じた件のファイルは `_done/` へ移るので `BACKLOG` だけ見ると名前が空き、
+    #   新しい件が同じ stem を取る → **ID が同じ → 固定番号を引き継ぐ**。
+    #   「4番は常に同じ件」が壊れるので、過去に使った名前は二度と使わない。
+    def _taken(q: Path) -> bool:
+        return q.exists() or (BACKLOG_DONE / q.name).exists()
+
     p = BACKLOG / f"{stem}.md"
     n = 2
-    while p.exists():
+    while _taken(p):
         p = BACKLOG / f"{stem}_{n}.md"
         n += 1
     lines = [f"# {title}", "",
@@ -224,7 +281,10 @@ def _sort_key(it: dict):
 
 
 def all_items() -> list[dict]:
-    return sorted(backlog_items() + request_items(), key=_sort_key)
+    items = sorted(backlog_items() + request_items(), key=_sort_key)
+    for it in items:                      # 固定番号を付与 (未採番なら採番して保存)
+        it["no"] = number_of(it["id"])
+    return items
 
 
 # ---------------------------------------------------------------- claim 本体
@@ -379,26 +439,26 @@ def render_list(items: list[dict] | None = None) -> str:
         out.append("## 着手中 (触らない)")
         for it, c in held:
             mark = " ⚠️放置" if c.get("stale") else ""
-            out.append(f"- 🔒 **[{c.get('who', '?')}]**{mark} `{it['id']}` {it['title']}"
-                       f" ({int(c.get('age_hours', 0) * 60)}分)")
+            out.append(f"- **№{it['no']:<3}** 🔒 **[{c.get('who', '?')}]**{mark} {it['title']}"
+                       f" ({int(c.get('age_hours', 0) * 60)}分)  `{it['id']}`")
         out.append("")
     if free:
         out.append("## 取れる (優先度順)")
         for it, _ in free:
             pr = f"P{it['priority']} " if it["kind"] == "残件" else ""
             ow = f" →**{it['owner']}**" if it.get("owner") else ""
-            out.append(f"- ⬜ [{it['kind']}]{ow} {pr}`{it['id']}` {it['title']}"
-                       f" ({_age(it['mtime'])})")
+            out.append(f"- **№{it['no']:<3}** [{it['kind']}]{ow} {pr}{it['title']}"
+                       f" ({_age(it['mtime'])})  `{it['id']}`")
         out.append("")
     if blocked:
         out.append("## 待ち (取れない)")
         for it, _ in blocked:
-            out.append(f"- ⛔ `{it['id']}` {it['title']} — {it['blocked']}")
+            out.append(f"- **№{it['no']:<3}** ⛔ {it['title']} — {it['blocked']}  `{it['id']}`")
         out.append("")
     if not (free or held or blocked):
         out.append("残務なし。")
-    out.append("→ 着手は `python iMakHQ/tools/claim.py next` "
-               "(取れた1件だけやる。取れなかった件は他窓口が持っている)")
+    out.append("→ 着手は `claim.py next` (最優先を1件) / `claim.py take 4` (**番号で指定**)")
+    out.append("   番号は**一度振ったら変わらない**。閉じても欠番のまま = 「4番」は常に同じ件")
     return "\n".join(out)
 
 
@@ -424,9 +484,9 @@ def main(argv=None) -> int:
     sub.add_parser("next", help="最優先の未claim を1件取る")
     for name, helptext in (("take", "指定して取る"), ("release", "返す")):
         sp = sub.add_parser(name, help=helptext)
-        sp.add_argument("id")
+        sp.add_argument("id", help="番号 (4) でも ID でも可")
     sp = sub.add_parser("done", help="完了")
-    sp.add_argument("id")
+    sp.add_argument("id", help="番号 (4) でも ID でも可")
     sp.add_argument("--note", default="")
     sp = sub.add_parser("add", help="残件を足す")
     sp.add_argument("title")
@@ -466,6 +526,7 @@ def main(argv=None) -> int:
         return 0
     if cmd == "take":
         who = _who_or_die(args)
+        args.id = resolve(args.id)          # 番号 (`4` / `#4`) でも受ける
         it = next((x for x in all_items() if x["id"] == args.id), None)
         if it and it.get("owner") and it["owner"] != who:
             # 明示 take は許す (急ぐことはある)。ただし **黙って横取りさせない**。
@@ -475,11 +536,13 @@ def main(argv=None) -> int:
         print(("取った" if r["ok"] else "取れない") + f": {args.id} — {r['reason'] or 'OK'}")
         return 0 if r["ok"] else 1
     if cmd == "release":
+        args.id = resolve(args.id)
         r = release(args.id, _who_or_die(args))
         print(("返した" if r["ok"] else "返せない") + f": {args.id} — {r['reason'] or 'OK'}")
         return 0 if r["ok"] else 1
     if cmd == "done":
         who = _who_or_die(args)
+        args.id = resolve(args.id)
         r = done(args.id, who, args.note)
         if not r["ok"]:
             print(f"完了にできない: {r['reason']}")

@@ -91,7 +91,9 @@ python iMakHQ/tools/claim.py next
 4窓口は同じ worktree / 同じ daily_report を見ているため、claim が無いと
 **全員が同じ1件目に着手する**。
 
-- 一覧: `python iMakHQ/tools/claim.py list`
+- 一覧: `python iMakHQ/tools/claim.py list` — **№付き**で出る
+- **番号で指示される**: 「4番やって」= `python iMakHQ/tools/claim.py take 4`。
+  番号は**一度振ったら変わらない**(閉じても欠番のまま)ので、4窓口とも同じ番号を見ている
 - 完了: `python iMakHQ/tools/claim.py done <ID> --note "..."`
 - 着手しないなら返す: `python iMakHQ/tools/claim.py release <ID>`
 - 残務に気づいたら足す: `python iMakHQ/tools/claim.py add "<件名>" --priority 3 --detail "..."`

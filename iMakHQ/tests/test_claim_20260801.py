@@ -233,3 +233,50 @@ def test_status_now_shows_the_backlog_board():
     src = io.open(os.path.join(ROOT, "iMakHQ", "tools", "status_now.py"),
                   encoding="utf-8").read()
     assert "claim.py" in src and "残務ボード" in src
+
+
+# ------------------------------------------------------------------ 固定番号
+def test_number_is_stable_and_never_reused(tmp_path, monkeypatch):
+    """★ユーザー指示「それぞれに番号で指示した方が混乱しない」(2026-08-03).
+
+    「上から1,2,3」は優先度順に並ぶため **1件増減すると全部ずれる**。
+    「4番やって」と言った時点で相手の4番が別件になっていたら claim を作った意味が無い。
+    → 一度振った番号は**二度と変わらない。閉じても欠番のまま**。
+    """
+    _setup(tmp_path, monkeypatch, n_backlog=0)
+    monkeypatch.setattr(C, "NUMBERS", tmp_path / "_claims" / "_numbers.json")
+    a = C.add_backlog("あとで", priority=9, who="Advisor")
+    b = C.add_backlog("さきに", priority=1, who="Advisor")
+    n_a, n_b = C.number_of(f"backlog:{a.stem}"), C.number_of(f"backlog:{b.stem}")
+    assert n_a == 1 and n_b == 2, "採番は登録順 (表示順ではない)"
+
+    # 優先度順に並べても番号は動かない
+    ids = [it["no"] for it in C.all_items()]
+    assert ids == [2, 1], f"表示順で番号が振り直されている: {ids}"
+
+    # 高優先を閉じても、残った側の番号は不変。欠番は再利用しない
+    C.done(f"backlog:{b.stem}", "Advisor")
+    assert C.number_of(f"backlog:{a.stem}") == n_a
+    c = C.add_backlog("あとから足す", priority=5, who="Advisor")
+    assert C.number_of(f"backlog:{c.stem}") == 3, "欠番2を再利用してはいけない"
+
+
+def test_number_can_be_used_instead_of_id(tmp_path, monkeypatch):
+    """`take 4` / `#4` / 完全な ID のどれでも同じ件を指すこと (口頭で言えるように)."""
+    _setup(tmp_path, monkeypatch, n_backlog=0)
+    monkeypatch.setattr(C, "NUMBERS", tmp_path / "_claims" / "_numbers.json")
+    p = C.add_backlog("仕事", priority=1, who="Advisor")
+    iid = f"backlog:{p.stem}"
+    n = C.number_of(iid)
+    assert C.resolve(str(n)) == iid
+    assert C.resolve(f"#{n}") == iid
+    assert C.resolve(iid) == iid, "ID をそのまま渡しても通ること"
+    assert C.resolve("999") == "999", "未採番の番号は解決せずそのまま返す (誤爆させない)"
+
+
+def test_list_shows_numbers():
+    """一覧に番号が出ること。出なければ窓口間で番号を共有できない."""
+    import io
+    src = io.open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "tools", "claim.py"), encoding="utf-8").read()
+    assert "№" in src and "it['no']" in src
