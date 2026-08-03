@@ -95,3 +95,16 @@ def test_next_actions_are_quoted_from_daily_report_not_invented():
                   encoding="utf-8").read()
     assert "daily_report" in src
     assert re.search(r"いま誰待ちか", src), "daily_report の該当節を引く実装になっていない"
+
+
+def test_every_session_defines_the_backlog_list_as_a_command():
+    """「残務一覧を出して」も**コマンドの出力**に固定する (2026-08-03).
+
+    残務データは4窓口で共有され番号も固定だが、**窓口が作文すれば違う一覧が出る**。
+    2026-08-01 に「現在地は?」で ALPHA と BRAVO が違う答えを返したのと同型なので、
+    同じやり方 (定義をコマンドに固定 + 『作文しない』) で塞ぐ。
+    """
+    for s in SESSIONS:
+        t = _claude_md(s)
+        assert "残務一覧を出して" in t, f"{s}: 残務一覧の定義が無い"
+        assert "claim.py list" in t, f"{s}: 一覧コマンドが無い"

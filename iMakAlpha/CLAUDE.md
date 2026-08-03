@@ -25,6 +25,16 @@ python iMakHQ/tools/claim.py next
 4窓口は同じ worktree / 同じ daily_report を見ているため、claim が無いと
 **全員が同じ1件目に着手する**。
 
+## 📋「残務一覧を出して」と言われたら — **作文しない**
+
+```
+python iMakHQ/tools/claim.py list
+```
+
+**この出力が残務一覧。そのまま示す。** 補足は後ろに足してよいが、出力自体は書き換えない。
+memory や daily_report から自分で組み立てると、窓口ごとに違う一覧が出る
+(2026-08-01 に「現在地」で実際に起きた事故と同型)。
+
 - 一覧: `python iMakHQ/tools/claim.py list` — **№付き**で出る
 - **番号で指示される**: 「4番やって」= `python iMakHQ/tools/claim.py take 4`。
   番号は**一度振ったら変わらない**(閉じても欠番のまま)ので、4窓口とも同じ番号を見ている
