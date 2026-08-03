@@ -74,9 +74,16 @@ def test_yodobashi_null_is_uncertain(snap):
 
 
 def test_yodobashi_key_missing_is_uncertain(snap):
-    """snapshot に型番が無い → uncertain (min対象外)."""
+    """型番でも URL でも引けない → uncertain (min対象外).
+
+    ★ 2026-08-03: URL 逆引き fallback 追加により「型番が無い」だけでは uncertain にならない
+    (同じ URL のエントリがあれば引ける = 本 fallback の目的)。uncertain になるのは
+    **型番も URL も当たらない**時だけ、に期待値を更新。URL が当たるケースは
+    tests/test_yodobashi_url_lookup.py が担保する。
+    """
     import monitor_listings as ml
-    snap({"OTHER": {"in_stock": True, "price_jpy": 9000, "url": YURL}})
+    snap({"OTHER": {"in_stock": True, "price_jpy": 9000,
+                    "url": "https://www.yodobashi.com/product/999999999999999/"}})
     sub = ml._check_single_url(YURL, model_number="GW-NOTFOUND")
     assert sub["is_sold"] is None
     assert sub["price_jpy"] is None
@@ -161,3 +168,147 @@ def test_amazon_oos_yodo_uncertain_not_takedown(snap):
                side_effect=_stub_amazon_yodo(amazon_sold=True, yodo_key="GW-8202K-2JR")):
         r = ml.check_one_row_with_fallback(row)
     assert r["is_sold"] is None        # uncertain → 取下げ skip (fail-closed)
+
+
+# ============================================================================
+# URL 逆引き fallback (2026-08-03 追加)
+#   窓口回答 `2026-08-03_yodobashi_url_reverse_lookup_response.md` の条件:
+#     - 型番で引ける行は従来どおり通ること
+#     - AI空+URL一致で引けること (=orphan KEY を作らずコード側で吸収)
+#     - 両方失敗で uncertain になること (fail-closed)
+#     - URL の表記ゆれ (末尾スラッシュ等) で外さないこと
+# ============================================================================
+def test_url_fallback_hit_when_key_empty(snap):
+    """AI列(型番) 空 でも 補URL が snapshot と一致すれば in_stock で拾える."""
+    import monitor_listings as ml
+    snap({"GST-B400-1AJF": {"in_stock": True, "price_jpy": 44000, "url": YURL}})
+    sub = ml._check_single_url(YURL, model_number="")     # ← 型番なし
+    assert sub["supplier"] == "yodobashi"
+    assert sub["is_sold"] is False
+    assert sub["price_jpy"] == 44000
+    assert sub["error"] is None
+
+
+def test_url_fallback_hit_when_key_wrong(snap):
+    """AI列(型番) が snapshot に無い型番でも 補URL が一致すれば拾える (AI列に依存しない)."""
+    import monitor_listings as ml
+    snap({"GST-B400-1AJF": {"in_stock": True, "price_jpy": 44000, "url": YURL}})
+    sub = ml._check_single_url(YURL, model_number="WRONG-KEY-9999")
+    assert sub["is_sold"] is False
+    assert sub["price_jpy"] == 44000
+
+
+def test_url_fallback_sold(snap):
+    """URL 逆引きでも in_stock=False は正しく sold に落とす (延命扱いにしない)."""
+    import monitor_listings as ml
+    snap({"GST-X": {"in_stock": False, "price_jpy": None, "url": YURL}})
+    sub = ml._check_single_url(YURL, model_number="")
+    assert sub["is_sold"] is True
+    assert sub["price_jpy"] is None
+
+
+def test_url_fallback_none_is_uncertain(snap):
+    """URL 逆引きヒット + in_stock=None → uncertain (fail-closed)."""
+    import monitor_listings as ml
+    snap({"GST-X": {"in_stock": None, "price_jpy": None, "url": YURL}})
+    sub = ml._check_single_url(YURL, model_number="")
+    assert sub["is_sold"] is None
+    assert sub["error"] is not None
+
+
+def test_url_fallback_miss_is_uncertain(snap):
+    """AI列も URL も snapshot に無い → uncertain (fail-closed / 誤 sold にも 誤 in_stock にも倒さない)."""
+    import monitor_listings as ml
+    snap({"GST-X": {"in_stock": True, "price_jpy": 44000,
+                    "url": "https://www.yodobashi.com/product/999999999999999999/"}})
+    sub = ml._check_single_url(YURL, model_number="")     # URL も 型番も miss
+    assert sub["is_sold"] is None
+    assert sub["price_jpy"] is None
+    assert sub["error"] is not None
+
+
+def test_key_hit_still_wins_over_url(snap):
+    """型番で引ける行は従来どおり通る (URL 逆引きは fallback、上書きしない)."""
+    import monitor_listings as ml
+    # 同じ URL に対して 型番 A は 在庫あり 44000、型番 B は 在庫あり 99999
+    # 呼出は 型番 A なので 44000 が採用されるべき (URL 逆引きに落ちて B を拾わない)
+    snap({
+        "MATCHED-KEY":    {"in_stock": True, "price_jpy": 44000, "url": YURL},
+        "OTHER-BUT-SAME": {"in_stock": True, "price_jpy": 99999, "url": YURL},
+    })
+    sub = ml._check_single_url(YURL, model_number="MATCHED-KEY")
+    assert sub["price_jpy"] == 44000
+
+
+def test_url_fallback_ignores_trailing_slash(snap):
+    """末尾スラッシュ有無で外さない (行の URL は無、snapshot 側は有)."""
+    import monitor_listings as ml
+    snap({"K": {"in_stock": True, "price_jpy": 44000,
+                "url": "https://www.yodobashi.com/product/100000001006099462/"}})
+    sub = ml._check_single_url(
+        "https://www.yodobashi.com/product/100000001006099462",   # 末尾 / 無
+        model_number="",
+    )
+    assert sub["is_sold"] is False
+    assert sub["price_jpy"] == 44000
+
+
+def test_url_fallback_ignores_query_and_case(snap):
+    """クエリ・fragment・大小文字差で外さない (canonical productId で突合)."""
+    import monitor_listings as ml
+    snap({"K": {"in_stock": True, "price_jpy": 44000,
+                "url": "https://www.yodobashi.com/product/100000001006099462/"}})
+    sub = ml._check_single_url(
+        "HTTPS://WWW.yodobashi.com/product/100000001006099462/?utm_source=x#frag",
+        model_number="",
+    )
+    assert sub["is_sold"] is False
+    assert sub["price_jpy"] == 44000
+
+
+def test_url_fallback_no_productid_no_hit(snap):
+    """productId を含まない URL は逆引き対象外 (誤突合を作らない)."""
+    import monitor_listings as ml
+    snap({"K": {"in_stock": True, "price_jpy": 44000,
+                "url": "https://www.yodobashi.com/product/100000001006099462/"}})
+    sub = ml._check_single_url(
+        "https://www.yodobashi.com/category/gshock/",   # productId 無し
+        model_number="",
+    )
+    assert sub["is_sold"] is None
+    assert sub["error"] is not None
+
+
+def test_url_index_rebuilt_when_snapshot_reloads(snap):
+    """snapshot が切り替わったら URL 逆引き index も作り直す (古い index で判定しない)."""
+    import monitor_listings as ml
+    URL_OLD = "https://www.yodobashi.com/product/100000001000000001/"
+    URL_NEW = "https://www.yodobashi.com/product/100000001000000002/"
+    snap({"K1": {"in_stock": True,  "price_jpy": 1000, "url": URL_OLD}})
+    ml._check_single_url(URL_OLD, model_number="")   # index を張る
+    snap({"K2": {"in_stock": True,  "price_jpy": 2000, "url": URL_NEW}})
+    # 古い URL は もう snapshot に無い → uncertain (旧 index を使い回さない)
+    old = ml._check_single_url(URL_OLD, model_number="")
+    assert old["is_sold"] is None
+    # 新しい URL は 拾える
+    new = ml._check_single_url(URL_NEW, model_number="")
+    assert new["is_sold"] is False
+    assert new["price_jpy"] == 2000
+
+
+def test_ai_column_never_written(snap):
+    """★orphan KEY 防止: URL 逆引きは AI列 (row['key_number']) を書き換えない.
+
+    (実装は _check_single_url に閉じているので row dict は不変のはず。回帰の門番として明示 assert。)
+    """
+    import monitor_listings as ml
+    snap({"GST-B400-1AJF": {"in_stock": True, "price_jpy": 44000, "url": YURL}})
+    row = _row("https://www.amazon.co.jp/dp/B0X", [YURL], "")   # AI列 空
+    original_key = row["key_number"]
+    with patch("monitor_listings._check_single_url",
+               side_effect=_stub_amazon_yodo(amazon_sold=True, yodo_key="")):
+        r = ml.check_one_row_with_fallback(row)
+    assert row["key_number"] == original_key == ""     # 触っていない
+    assert "key_number" not in r                       # 結果 dict にも書き戻していない
+    assert r["is_sold"] is False                       # かつ URL 逆引きで救済できている
+    assert r["price_jpy"] == 44000

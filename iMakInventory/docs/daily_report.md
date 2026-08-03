@@ -1838,6 +1838,43 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   現時点で ×8 到達はゼロ = 今回の変更で消える行も増える行も無い (= 挙動の後退なし)。数日後に
   ×8 到達した行から自動的に別枠へ移る。
 
+## 2026-08-03 — ヨドバシ判定に URL 逆引き fallback (窓口 IMPLEMENT-GO、AI列は不触)
+
+### 背景 — AI列(型番)が空の 34 行が「在庫があっても永久に判定不能」だった
+- 決定: 窓口依頼「ヨドバシ在庫があるのに M が空・D=○ (row827/832)」を調査し、真因を
+  **AI列(KEY)が空 → `snapshot.get("")` → fail-closed で uncertain → D も M も触らない** と特定。
+  snapshot 側は正常 (両型番とも in_stock=true / 44,000・67,760、generated_at 14:10 で fresh)。
+- **AI列 backfill は採らない**方針で窓口裁定。未出品行に KEY を書くと orphan KEY になり
+  出品歩留まりを落とす既知障害 (07-28 に HQ が意図的に据置した 32 行がまさにそれ)。
+  → **snapshot が各エントリに持つ `url` で逆引きし、シートに一切書かずにコード側で吸収**する。
+
+### 変更 (commit)
+- [monitor_listings.py](../monitor_listings.py): `_yodobashi_url_key()` (productId `/product/<digits>/`
+  を優先、無ければ scheme/www/クエリ/末尾スラッシュを落とした小文字 URL) と
+  `_yodobashi_entry_by_url()` (snapshot 1 回 load につき 1 回だけ URL index を構築) を新設。
+  `_check_single_url` の yodobashi 分岐を **①型番 lookup → ②当たらなければ URL 逆引き** の 2 段に。
+  `_load_yodobashi_snapshot` は再 load 時に `url_index` を破棄 (古い index の使い回し防止)。
+- **fail-closed は不変**: ①②とも当たらなければ従来どおり uncertain (在庫あり/なしに倒さない)。
+  **AI列には書き込まない**。
+
+### 検証
+- [tests/test_yodobashi_url_lookup.py](../tests/test_yodobashi_url_lookup.py) **17 件**
+  (型番経路の回帰 2 / AI空→URLで在庫あり / 誤 KEY でも URL で正しく引く / URL逆引きで売切検知 /
+  **URL 表記ゆれ 6 パターン** (末尾スラッシュ・http・www無・クエリ/フラグメント・商品名パス付き) /
+  未知 URL は uncertain / snapshot 欠損 / in_stock=null / url 無しエントリは index に載せない /
+  キー生成 / snapshot 再 load で index 再構築)。
+- 既存テスト 1 件を新仕様に追従 (`test_yodobashi_key_missing_is_uncertain` = 「型番が無い」だけでは
+  uncertain にならず、**型番も URL も当たらない**時のみ uncertain)。
+  併せて `test_n_col_price_now` の期待 dict に `sold_at_clears` を追加 (07-29 AO 修正の陳腐化)。
+- **offline 202 / 非-live 589 全 pass**。
+- ★**before/after (直近 LOW cycle 実データで再判定)**: ヨドバシ lookup 不能
+  **34 行 → 1 行** (残り 1 行 = row275 は snapshot 側に url が無い)。**33 行が判定可能に**。
+  効果が即出る行 (主URL売切) 8 行の内訳:
+  - **D 解除 + M 書込に転じる: 5 行** (row749 ¥34,650 / row783 ¥39,600 / row815 ¥20,790 /
+    **row827 ¥44,000** / **row832 ¥67,760** = 依頼の 2 行を含む)
+  - **D=○ を維持 (誤復活しない): 3 行** (row745 / row805 / row834 = ヨドバシも in_stock=false)
+- 次 LOW cycle (22:45) で実機の D 解除 + M 書込を突合し、窓口へ完了報告する。
+
 ## 2026-07-29 — AO(売切日時) が在庫あり行に残るバグ 修正 + 既存 73 行是正 (HQ 指摘)
 
 ### 真因 = 「在庫復活時に AO を clear していなかった」(HQ 仮説2 が正解、仮説1 は否定)

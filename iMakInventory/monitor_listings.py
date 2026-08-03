@@ -152,7 +152,45 @@ def _load_yodobashi_snapshot():
         data = None
     _yodo_snap_cache["loaded"] = True
     _yodo_snap_cache["data"] = data
+    _yodo_snap_cache.pop("url_index", None)   # snapshot が変われば URL 逆引き index も作り直す
     return data
+
+
+def _yodobashi_url_key(url: str) -> str:
+    """ヨドバシ URL から突合キーを作る (表記ゆれで外さないための正規化)。
+
+    canonical な productId (`/product/<digits>/`) を優先。取れなければ scheme/www/クエリ/
+    末尾スラッシュを落とした小文字 URL を使う。空文字は「キー無し」= 突合しない。
+    """
+    u = (url or "").strip()
+    if not u:
+        return ""
+    m = re.search(r"/product/(\d+)", u)
+    if m:
+        return m.group(1)
+    u = u.split("#", 1)[0].split("?", 1)[0].lower()
+    u = re.sub(r"^https?://", "", u)
+    u = re.sub(r"^www\.", "", u)
+    return u.rstrip("/")
+
+
+def _yodobashi_entry_by_url(snap: dict, url: str):
+    """snapshot を URL で逆引き (AI列=型番 が空/不一致の行の救済)。無ければ None (fail-closed)。"""
+    key = _yodobashi_url_key(url)
+    if not key or not snap:
+        return None
+    index = _yodo_snap_cache.get("url_index")
+    if index is None:                      # snapshot 1 回 load につき 1 回だけ構築
+        index = {}
+        for model, ent in snap.items():
+            if not isinstance(ent, dict):
+                continue
+            k = _yodobashi_url_key(ent.get("url") or "")
+            if k:
+                index.setdefault(k, ent)
+        _yodo_snap_cache["url_index"] = index
+    ent = index.get(key)
+    return ent if isinstance(ent, dict) else None
 
 
 def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
@@ -172,10 +210,16 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
     out = {"url": url, "supplier": supplier, "is_sold": None,
            "raw_status": "", "error": None, "price_jpy": None, "points_jpy": None}
 
-    # ★ yodobashi: scraper を叩かず Harvest snapshot を型番で lookup (fail-closed)。
+    # ★ yodobashi: scraper を叩かず Harvest snapshot を lookup (fail-closed)。
+    #   ① AI列(型番) で引く → ② 引けなければ **補URL 自体で逆引き** (2026-08-03 窓口 GO)。
+    #   ②を足した理由: AI列は「未出品行に KEY を書くと orphan KEY になる」ため意図的に空の行が
+    #   34 行あり、その行は在庫があっても永久に判定不能だった (row827/832 の実害)。
+    #   snapshot は各エントリに url を持つので、AI列に一切書かずにコード側で吸収できる。
     if supplier == "yodobashi":
         snap = _load_yodobashi_snapshot()
         entry = (snap or {}).get((model_number or "").strip())
+        if snap and not isinstance(entry, dict):
+            entry = _yodobashi_entry_by_url(snap, url)
         if not snap or not isinstance(entry, dict):
             out["error"] = "yodobashi snapshot 欠損/古い/型番無 (fail-closed=min対象外)"
             return out
