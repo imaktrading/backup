@@ -2648,21 +2648,23 @@ def load_targets_from_sheet_psa():
 
         if not cert or item_id or not url:
             continue
+        # 統合シートは TCG / Tシャツ / 一番くじ / Montbell 等の混在。R列='TCG' のみ PSA 対象
+        # (他 listing スクリプトと同じ R 列フィルタ運用に合わせる)
+        if category != 'TCG':
+            continue
         # ★2026-08-03: 二重出品ガード。cert 一致 = **同一の現物**が既に出品中 → 絶対に出さない
         #   (現物は1枚しかないので片方は必ず履行できない)。KEY 一致 = 同じカードの2枚目 → 従来どおり止める。
         #   旧実装は `key_v and key_v in _listed` の **fail-OPEN** で、KEY 未記入 / KEY 表記揺れ
         #   (`FB08-121_p1` vs `dragonball_scg:FB08-121_PARA`) の行が素通りしていた。
         #   実害: 2026-08-03 の CSV に既出品の cert 152687775 / 158452544 が入った (シート実測 同型24件)。
+        #   ★必ず **カテゴリ判定の後**に置くこと。I列は PSA cert 専用ではなく montbell は型番を
+        #   入れており (`1103247` が3行で共有)、前に置くと在庫のある別商品まで止める。
         _dup = _already_listed(cert, key_v, _listed_cert, _listed)
         if _dup == "cert":
             _skipped_cert.append(cert)
             continue
         if _dup:
             _skipped_listed += 1
-            continue
-        # 統合シートは TCG / Tシャツ / 一番くじ / Montbell 等の混在。R列='TCG' のみ PSA 対象
-        # (他 listing スクリプトと同じ R 列フィルタ運用に合わせる)
-        if category != 'TCG':
             continue
         # D 列 売り切れ '○' は drop-shipping 不可 (仕入れ確実でないため出品 NG)
         if sold:

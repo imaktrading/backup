@@ -84,7 +84,11 @@ def listed_key_forms(rows2d, itemid_col=PRODUCT_COL_ITEMID, key_col=PRODUCT_COL_
     return {n for n in (normalize_key(k) for k in listed_keys(rows2d, itemid_col, key_col)) if n}
 
 
-def listed_certs(rows2d, itemid_col=PRODUCT_COL_ITEMID, cert_col=PRODUCT_COL_CERT):
+PRODUCT_COL_CATEGORY = 17   # R (TCG / Tシャツ / 一番くじ / アウトドア・ジャケット 等が混在)
+
+
+def listed_certs(rows2d, itemid_col=PRODUCT_COL_ITEMID, cert_col=PRODUCT_COL_CERT,
+                 category_col=PRODUCT_COL_CATEGORY, categories=("TCG",)):
     """出品済 PSA cert の集合 (純関数, test可)。
 
     ★2026-08-03: **同じ cert = 同じ現物**。二度出品したら片方は必ず履行できない
@@ -92,11 +96,20 @@ def listed_certs(rows2d, itemid_col=PRODUCT_COL_ITEMID, cert_col=PRODUCT_COL_CER
     これが二重出品に対する**最も硬い**ガード。
     実害: 2026-08-03 の CSV に cert 152687775 / 158452544 が入り、どちらも
     itemID 358853881133 / 358794594782 で既に出品中だった。シート実測で同型 24件。
+
+    ★カテゴリで絞るのが必須 (2026-08-03 の実機確認で判明)。I列は **PSA cert 専用ではなく**、
+    montbell は同じ列に **型番** を入れている (`1103247` が3行で共有され、うち1行が出品済)。
+    型番は「同じ現物」を意味しないので、カテゴリを見ないと **在庫のある別商品を誤って止める**。
+    categories=None で全カテゴリ (テスト用)。
     """
     out = set()
     for r in rows2d[1:]:
         if len(r) <= max(itemid_col, cert_col):
             continue
+        if categories is not None:
+            cat = (r[category_col] or "").strip() if len(r) > category_col else ""
+            if cat not in categories:
+                continue
         iid = (r[itemid_col] or "").strip()
         cert = (r[cert_col] or "").strip()
         if iid and cert:

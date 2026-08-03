@@ -23,17 +23,18 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from sheet_io import (already_listed_reason, listed_certs, listed_key_forms,  # noqa: E402
-                      normalize_key, PRODUCT_COL_CERT, PRODUCT_COL_ITEMID,
-                      PRODUCT_COL_KEY)
+                      normalize_key, PRODUCT_COL_CATEGORY, PRODUCT_COL_CERT,
+                      PRODUCT_COL_ITEMID, PRODUCT_COL_KEY)
 
 HEADER = ["URL", "itemID", "title"]
 
 
-def _row(itemid="", key="", cert="", ncols=36):
+def _row(itemid="", key="", cert="", category="TCG", ncols=36):
     r = [""] * ncols
     r[PRODUCT_COL_ITEMID] = itemid
     r[PRODUCT_COL_KEY] = key
     r[PRODUCT_COL_CERT] = cert
+    r[PRODUCT_COL_CATEGORY] = category
     return r
 
 
@@ -69,6 +70,22 @@ class TestListedCerts:
 
     def test_blank_cert_is_ignored(self):
         assert listed_certs([HEADER, _row(itemid="358", cert="")]) == set()
+
+    def test_non_tcg_rows_are_excluded(self):
+        """★I列は PSA cert 専用ではない。montbell は同じ列に **型番** を入れている.
+
+        実データ (2026-08-03): `1103247` = O.D.アノラックの型番が3行で共有され、
+        1行が出品済。型番は「同じ現物」を意味しない (在庫のある通常商品) ので、
+        カテゴリを見ずに止めると **別商品の出品を潰す**。
+        """
+        rows = [HEADER,
+                _row(itemid="356816799540", cert="1103247", category="アウトドア・ジャケット"),
+                _row(itemid="358853881133", cert="152687775", category="TCG")]
+        assert listed_certs(rows) == {"152687775"}, "montbell 型番を cert 扱いしない"
+
+    def test_categories_none_means_all(self):
+        rows = [HEADER, _row(itemid="1", cert="1103247", category="アウトドア・ジャケット")]
+        assert listed_certs(rows, categories=None) == {"1103247"}
 
 
 class TestAlreadyListedReason:
