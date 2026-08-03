@@ -10,6 +10,11 @@
   - **呼べたのに失敗した**時は ⚠️ に倒す (クレジット不足 / レート制限 / 過負荷 / 認証)
   - **key 未設定**は環境設定なので倒さない (毎回 ⚠️ になると警告が意味を失う)
   - 通知本文も緑にしない
+
+★2026-08-03 追記 — 逆向きの事故 (狼少年):
+  `529` を裸で見ていたため PSA cert 番号 `#152976738` / `#152976751` の中の "529" に当たり、
+  過負荷ゼロの走行が「⚠️ API過負荷: 3件」で通知されていた。毎回 ⚠️ が出れば本物を見落とす
+  ので、これも fail-OPEN と同じ害。**裸の数値ステータスコードを単独パターンにしない**。
 """
 from __future__ import annotations
 
@@ -61,6 +66,45 @@ class TestAiDegraded:
 
     def test_missing_log_does_not_crash(self):
         assert ca.ai_degraded("C:/no/such/file.log", "") == []
+
+
+class TestNoFalsePositiveFromIdNumbers:
+    """★2026-08-03 実ログ: cert 番号の中の "529" で毎回 ⚠️ が出ていた.
+
+    警告が毎回出ると本物の劣化を見落とす。誤検知は fail-OPEN と同じ害として扱う。
+    """
+
+    #: 2026-08-03 19:43 の走行ログから該当行をそのまま (3件すべてが cert 由来だった)
+    REAL_LOG = (
+        "  🚫 PSA10以外(仕入元表記)を除外: 5件 → "
+        "['#158452532=PSA9', '#152687772=PSA9', '#152976738=PSA9', "
+        "'#146618405=PSA9', '#146618399=PSA9']\n"
+        "取得中(確認用): #152976751... ✓\n"
+        "     PSA10-152976751: 推奨Item Specifics が空: Finish\n"
+    )
+
+    def test_cert_numbers_containing_529_are_not_degraded(self, tmp_path):
+        assert ca.ai_degraded(_log(tmp_path, self.REAL_LOG)) == []
+
+    def test_real_overload_without_body_is_still_detected(self, tmp_path):
+        """本物は取り逃がさない (overloaded_error が本文に出ない client 経由も想定)."""
+        txt = "httpx.HTTPStatusError: Server error '529 Overloaded' for url '...'"
+        assert "API過負荷: 1件" in ca.ai_degraded(_log(tmp_path, txt))
+
+    def test_status_code_form_is_detected(self, tmp_path):
+        assert ca.ai_degraded(_log(tmp_path, "Error code: 529 - overloaded"))
+
+    def test_overloaded_error_body_still_detected(self, tmp_path):
+        assert ca.ai_degraded(_log(tmp_path, "{'type': 'overloaded_error'}"))
+
+    def test_no_pattern_matches_bare_id_digits(self, tmp_path):
+        """構造ガード: どの判定語も **裸の数字だけ** では発火しないこと.
+
+        個別に潰しても、次に 429/503 等を裸で足せば同じ事故が再発する。
+        """
+        ids = " ".join(f"#1{n}529{n}" for n in range(400, 460))    # 529/429/503 を内包
+        ids += " " + " ".join(f"PSA10-{n}" for n in (152976751, 146618429, 100503999))
+        assert ca.ai_degraded(_log(tmp_path, ids)) == []
 
 
 class TestGenerationLogIsAlsoRead:

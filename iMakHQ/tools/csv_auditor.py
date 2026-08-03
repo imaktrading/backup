@@ -1401,10 +1401,16 @@ def _exclude(csv_path, nogo_indices):
 #   落ちたことは行間のログにしか出ておらず、タイトルが短くなって初めて気づいた
 #   (short_titles 3件 / avg_title_len -7.2)。= degraded なのに正常と報告する fail-OPEN。
 #   → **呼べたのに失敗した**時だけ ⚠️ に倒す。key 未設定 (= その環境では AI 無しが正常) は倒さない。
+#   ★2026-08-03: 逆向きの事故も起きた。`529` を **裸で** 見ていたため PSA cert 番号
+#   (`#152976738` / `#152976751`) の中の "529" に当たり、過負荷ゼロの走行が毎回
+#   「⚠️ API過負荷: 3件」になっていた。狼少年になると本物の劣化を見落とすので、
+#   **数値のステータスコードは必ず文脈語とセットで**見る (裸の数字を単独パターンにしない)。
 AI_FAIL_PATS = [
     ("APIクレジット不足", r"credit balance is too low"),
     ("APIレート制限", r"rate_limit_error|429 Too Many Requests"),
-    ("API過負荷", r"overloaded_error|529"),
+    ("API過負荷", r"overloaded_error"
+                 r"|(?:error code|status(?:[ _]code)?|http)[=: ]*\s*529\b"
+                 r"|\b529\s+(?:server\s+)?overloaded"),
     ("APIエラー", r"Claude API ?エラー|invalid_request_error|authentication_error"),
 ]
 # 「キーが無い」は環境設定であって失敗ではない。ここで倒すと毎回 ⚠️ になり警告が意味を失う。
