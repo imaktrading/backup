@@ -184,8 +184,15 @@ def plan_shared_url_cleanup(rows2d):
     return plan
 
 
-def live_card_index(rows2d, titles_by_itemid=None):
+def live_card_index(rows2d, titles_by_itemid=None, active_ids=None):
     """ACTIVE 行の カードキー → [itemID]。
+
+    ★2026-08-04: `active_ids` (eBay ActiveList の itemID 集合) を渡すと、**そちらを真とする**。
+    シートの D列は「**仕入元が**売り切れた」印であって「eBay 出品が終わった」印ではない。
+    補URL で供給を繋いでいるので D='○' でも出品は生きている。実測 (2026-08-04):
+    itemID を持つ 1,127行のうち D='○' が 749行、**そのうち 626行は eBay ActiveList に居る**。
+    D列で live を判定すると live を 626件分 過小評価し、その相手には重複判定が効かない。
+    実害: 8/03 OP07-109 / 8/04 OP05-098_P が **KEY 完全一致なのに素通り**して CSV に入った。
 
     カードキー優先順:
       1. KEY(AI列)      … catalog canonical id (最も確か)
@@ -197,9 +204,10 @@ def live_card_index(rows2d, titles_by_itemid=None):
     titles_by_itemid = titles_by_itemid or {}
     index, unkeyed = {}, []
     for r in rows2d[1:]:
-        if not _is_active(r):
-            continue
         iid = _cell(r, B)
+        alive = (iid in active_ids) if active_ids else _is_active(r)
+        if not alive:
+            continue
         k = _cell(r, KEY)
         if k and not k.startswith(("item:", "shops:")):
             index.setdefault(group_key(k), []).append(iid)
@@ -549,13 +557,16 @@ def pre_upload(csv_path, use_cache_only=True):
         print("  (dup_guard: CSV 空 skip)")
         return {"rows": 0, "dups": 0, "same_cert": 0}
     vals = sheet_io._product_ws().get_all_values()
+    # ★2026-08-04: **ACTIVE 行に絞ってはいけない**。ここで引きたいのは
+    #   「入稿しようとしている CSV 行自身の KEY」であり、その行は定義上まだ未出品
+    #   (itemID 空 = _is_active False)。絞ると自分の KEY が引けず、タイトル token
+    #   (`t:OP05-098`) にフォールバックして、live 側の `one_piece_tcg:OP05-098_P` と
+    #   永久に一致しない。8/04 の OP05-098_P はこれで素通りした (KEY は完全一致していた)。
     cert_to_key = {}
     for r in vals[1:]:
-        if not _is_active(r):
-            continue
         c, k = _cell(r, CERT), _cell(r, KEY)
         if c and k and not k.startswith(("item:", "shops:")):
-            cert_to_key[c] = k
+            cert_to_key.setdefault(c, k)
     if use_cache_only:
         titles, skus = _load_live_cache(), _load_live_skus()
     else:
@@ -588,7 +599,8 @@ def pre_upload(csv_path, use_cache_only=True):
             print("  (同一cert 除外の結果 CSV が空になりました)")
             return {"rows": 0, "dups": 0, "same_cert": len(severe)}
 
-    index, _unkeyed = live_card_index(vals, titles)
+    # ★live の真は eBay ActiveList (シートの D列は「仕入元が売切」であって出品終了ではない)
+    index, _unkeyed = live_card_index(vals, titles, active_ids=set(titles) or None)
     # 自分自身(=同じcert)は除外して突合する
     # ★ここで同一cert を index から外すのは **同一カード判定** の自己一致を消すためだけ。
     #   同一cert 自体は上で既に物理除外済 (2026-08-03 まで、この行のせいで
@@ -609,6 +621,8 @@ def pre_upload(csv_path, use_cache_only=True):
         print(f"       {c['title'][:76]}")
     if cands:
         print("    ※出品は止めません(仕入元が別なら健全)。仕入元URLが同じ場合のみ致命 → audit で確認。")
+        print("    ※★重複くん(dedupe_excluder)は D列基準で live を判定するため、ここに出た行が")
+        print("      物理除外されずに残ることがある。**入稿前に目視で外すか判断すること**。")
         _ledger("pre_upload", {"csv": os.path.basename(csv_path),
                                "dups": [{k: c[k] for k in ("label", "cert", "card_key", "existing")}
                                         for c in cands]})

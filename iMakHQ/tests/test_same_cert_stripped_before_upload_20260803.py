@@ -114,3 +114,43 @@ class TestLiveListedCerts:
         p = tmp_path / "c.json"
         p.write_text(json.dumps({"titles": {"1": "t"}}), encoding="utf-8")
         assert sheet_io.live_listed_certs(str(p)) == set()
+
+
+class TestLiveIsEbayTruthNotSheetSoldColumn:
+    """★2026-08-04: D列(仕入元 売切) で live を判定すると live を過小評価する.
+
+    実測: itemID を持つ 1,127行のうち D='○' が 749行、**そのうち 626行は eBay ActiveList
+    に居る**(補URL で供給を繋いでいるので出品は生きている)。D列基準だと、その626件が
+    「live でない」扱いになり、KEY が完全一致していても重複判定が効かない。
+    実害: 8/03 OP07-109 / 8/04 OP05-098_P が素通りして CSV に入った (2日連続)。
+    """
+
+    B, D, KEY = dg.B, dg.D, dg.KEY
+
+    def _rows(self):
+        def row(iid, sold, key, ncols=36):
+            r = [""] * ncols
+            r[self.B], r[self.D], r[self.KEY] = iid, sold, key
+            return r
+        return [["URL", "itemID"],
+                row("358833464170", "○", "one_piece_tcg:OP05-098_P"),   # 仕入元売切だが eBay は live
+                row("358999999999", "", "one_piece_tcg:OTHER-001")]
+
+    def test_sold_marked_row_is_dropped_without_active_ids(self):
+        """従来挙動 (= これが取りこぼしの正体)."""
+        index, _ = dg.live_card_index(self._rows())
+        assert "one_piece_tcg:OP05-098_P" not in index
+
+    def test_sold_marked_row_counts_as_live_when_ebay_says_so(self):
+        index, _ = dg.live_card_index(self._rows(), active_ids={"358833464170"})
+        assert index["one_piece_tcg:OP05-098_P"] == ["358833464170"]
+
+    def test_ebay_truth_also_drops_rows_not_in_active_list(self):
+        """逆向き: シートが live と言っても eBay に無ければ live ではない."""
+        index, _ = dg.live_card_index(self._rows(), active_ids={"358833464170"})
+        assert "one_piece_tcg:OTHER-001" not in index
+
+    def test_empty_active_ids_falls_back_to_sheet(self):
+        """cache が空の時は従来判定に戻る (悪化させない)."""
+        index, _ = dg.live_card_index(self._rows(), active_ids=None)
+        assert "one_piece_tcg:OTHER-001" in index
