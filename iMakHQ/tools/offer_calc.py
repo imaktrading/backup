@@ -66,6 +66,25 @@ TITLE2CALC = [("psa", "TCG(PSA10)"), ("ichiban kuji", "一番くじ"), ("g-shock
               ("gshock", "G-SHOCK"), ("t-shirt", "Tシャツ(UT)"), ("tee", "Tシャツ(UT)")]
 
 
+def parse_best_offers(xml, into=None):
+    """GetBestOffers のレスポンス → {itemID: {"title", "xml"}} (純関数, test可)。
+
+    形: ItemBestOffersArray > ItemBestOffers > (Item.ItemID/Title + BestOfferArray>BestOffer)
+    """
+    import re
+    out = into if into is not None else {}
+    for ib in re.findall(r"<ItemBestOffers>(.*?)</ItemBestOffers>", xml or "", re.S):
+        iid = re.search(r"<ItemID>(\d+)</ItemID>", ib)
+        if not iid:
+            continue
+        ti = re.search(r"<Title>(.*?)</Title>", ib)
+        e = out.setdefault(iid.group(1), {"title": "", "xml": ""})
+        if ti:
+            e["title"] = ti.group(1).replace("&amp;", "&").replace("&apos;", "'")
+        e["xml"] += ib
+    return out
+
+
 def fetch_offers():
     """受信中の Best Offer を eBay から取り、商品管理シートの仕入値まで解決して返す。
 
@@ -86,35 +105,39 @@ def fetch_offers():
     fx.refresh()
     tok = fx.token()
 
-    # 1) オファーが付いている listing を特定 (GetBestOffers 単体では ItemID が返らない)
-    items = {}
+    # 1) オファーを **GetBestOffers 単体** (ItemID 指定なし) で全部取る。
+    #
+    # ★2026-08-05 修正。従来は GetMyeBaySelling の ActiveList を舐めて
+    #   `<BestOfferCount>` が 1 以上の listing を探していたが、**この tag は
+    #   ActiveList のレスポンスに存在しない** (実測: 200件中 0 個)。
+    #   よって条件が全件 false になり、オファーが実在しても **常に 0件** だった。
+    #   (実害 2026-08-05: 実際には 2件 来ていたのに「読み込まない」)
+    #   加えて `TotalNumberOfPages` は ActiveList 以外の list の分も返る
+    #   (実測 ['1','24','1','6']) ので、先頭を拾うと **1ページ目で打ち切っていた**
+    #   = 仮に tag があっても 200/1824 件しか見ない実装だった。
+    #
+    #   GetBestOffers は ItemID を省くと全 listing 分を返し、
+    #   ItemBestOffersArray > ItemBestOffers > (Item.ItemID/Title + BestOfferArray) の形で
+    #   **ItemID も一緒に返ってくる**ので、1コールで足りる。
+    offers_by_item = {}
     for n in range(1, 40):
-        inner = ('<ActiveList><Include>true</Include><Pagination>'
-                 f'<EntriesPerPage>200</EntriesPerPage><PageNumber>{n}</PageNumber>'
-                 '</Pagination></ActiveList><DetailLevel>ReturnAll</DetailLevel>')
-        t = fx.post("GetMyeBaySelling", inner, tok)
-        al = t[t.find("<ActiveList>"):t.find("</ActiveList>")]
-        chunk = re.findall(r"<Item>(.*?)</Item>", al, re.S)
-        if not chunk:
+        t = fx.post("GetBestOffers",
+                    "<BestOfferStatus>Active</BestOfferStatus>"
+                    f"<Pagination><EntriesPerPage>100</EntriesPerPage>"
+                    f"<PageNumber>{n}</PageNumber></Pagination>"
+                    "<DetailLevel>ReturnAll</DetailLevel>", tok, site="0")
+        before = len(offers_by_item)
+        parse_best_offers(t, offers_by_item)
+        if len(offers_by_item) == before and not re.search(r"<ItemBestOffers>", t):
             break
-        for it in chunk:
-            bo = re.search(r"<BestOfferCount>(\d+)</BestOfferCount>", it)
-            if not (bo and int(bo.group(1)) > 0):
-                continue
-            iid = re.search(r"<ItemID>(\d+)</ItemID>", it)
-            cp = re.search(r'<CurrentPrice currencyID="(\w+)">([\d.]+)<', it)
-            ti = re.search(r"<Title>(.*?)</Title>", it)
-            vu = re.search(r"<ViewItemURL>(.*?)</ViewItemURL>", it)
-            if iid and cp:
-                items[iid.group(1)] = {
-                    "list": float(cp.group(2)), "cur": cp.group(1),
-                    "title": (ti.group(1) if ti else "").replace("&amp;", "&"),
-                    "url": vu.group(1) if vu else ""}
-        tp = re.search(r"<TotalNumberOfPages>(\d+)</TotalNumberOfPages>", t)
-        if tp and n >= int(tp.group(1)):
+        pr = re.search(r"<PaginationResult>.*?<TotalNumberOfPages>(\d+)</TotalNumberOfPages>",
+                       t, re.S)
+        if pr and n >= int(pr.group(1)):
             break
-    if not items:
+    if not offers_by_item:
         return []
+    items = {i: {"list": 0.0, "cur": "USD", "title": v["title"], "url": ""}
+             for i, v in offers_by_item.items()}
 
     # 2) 商品管理シート (仕入値 SSOT) を1回だけ読む
     rows = []
@@ -138,15 +161,23 @@ def fetch_offers():
 
     out = []
     for iid, meta in items.items():
-        # 3) その listing のオファー明細
-        x = fx.post("GetBestOffers",
-                    f"<ItemID>{iid}</ItemID><BestOfferStatus>Active</BestOfferStatus>"
-                    "<DetailLevel>ReturnAll</DetailLevel>", tok, site="0")
-        # 4) SKU (= 仕入元 mercari item ID) を取る
+        # 3) オファー明細は 1) で取得済 (item ごとの再取得はしない)
+        x = offers_by_item[iid]["xml"]
+        # 4) SKU (= 仕入元 mercari item ID) と 出品価格 を取る
         gi = fx.post("GetItem", f"<ItemID>{iid}</ItemID><DetailLevel>ReturnAll</DetailLevel>",
                      tok, site="0")
         m = re.search(r"<SKU>(.*?)</SKU>", gi)
         sku = m.group(1) if m else ""
+        # 出品価格/通貨/URL は GetItem から (GetBestOffers は返さない)
+        _cp = re.search(r'<CurrentPrice currencyID="(\w+)">([\d.]+)<', gi)
+        if _cp:
+            meta["cur"], meta["list"] = _cp.group(1), float(_cp.group(2))
+        _vu = re.search(r"<ViewItemURL>(.*?)</ViewItemURL>", gi)
+        if _vu:
+            meta["url"] = _vu.group(1).replace("&amp;", "&")
+        if not meta["title"]:
+            _ti = re.search(r"<Title>(.*?)</Title>", gi)
+            meta["title"] = (_ti.group(1) if _ti else "").replace("&amp;", "&")
         # ★ミラー判定 (2026-08-02)。Site は US 固定・Currency も当てにならないが、
         #   eBaymag が作った出品には `ApplicationData` に `ebaymag.com-<id>` が入る。
         #   US本体 120件を実測して0件だったので、**ミラーの印として使える**。
