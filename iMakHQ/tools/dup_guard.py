@@ -619,14 +619,38 @@ def pre_upload(csv_path, use_cache_only=True):
     for c in cands:
         print(f"    ⚠ {c['label']:18} {c['card_key']:20} 既存={c['existing']}")
         print(f"       {c['title'][:76]}")
+    # ★2026-08-05: canonical KEY が **完全一致** した行は物理除外する。
+    #   これは「勝手に絞る」ではなく、重複くん(dedupe_excluder)が元々やろうとしている
+    #   ことと同じ (= 同KEYが live なら出さない)。重複くんは live を D列で判定するため
+    #   626件を live と見なせず落とせないので、eBay ActiveList を根拠にこちらで落とす。
+    #   タイトル token 一致 (`t:`) は精度が低いので **警告のまま** (別セットの同番号を
+    #   巻き込むと出品対象を不当に減らす)。3日連続 (8/03 OP07-109 / 8/04 OP05-098_P /
+    #   8/05 OP05-060) で人が手で外していたのを止める。
+    exact = [c for c in cands if not str(c.get("card_key", "")).startswith("t:")]
+    if exact:
+        print(f"■ 🔴 canonical KEY 完全一致 {len(exact)}件 → CSV から物理除外します")
+        for c in exact:
+            print(f"    🚫 {c['label']:18} {c['card_key']:26} 既存={c['existing']}")
+        drop_labels = {c["label"] for c in exact}
+        li = hi.get(CSV_LABEL)
+        kept = [r for r in rows
+                if li is None or li >= len(r) or (r[li] or "").strip() not in drop_labels]
+        _strip_rows(csv_path, header, kept)
+        _ledger("pre_upload_stripped_samekey",
+                {"csv": os.path.basename(csv_path),
+                 "dups": [{k: c[k] for k in ("label", "cert", "card_key", "existing")}
+                          for c in exact]})
+        rows = kept
+    weak = [c for c in cands if c not in exact]
+    if weak:
+        print("    ※上記のうちタイトル token 一致分は**残しています**(別セットの同番号を"
+              "巻き込むため)。仕入元が別なら健全。入稿前に目視で判断すること。")
     if cands:
-        print("    ※出品は止めません(仕入元が別なら健全)。仕入元URLが同じ場合のみ致命 → audit で確認。")
-        print("    ※★重複くん(dedupe_excluder)は D列基準で live を判定するため、ここに出た行が")
-        print("      物理除外されずに残ることがある。**入稿前に目視で外すか判断すること**。")
         _ledger("pre_upload", {"csv": os.path.basename(csv_path),
                                "dups": [{k: c[k] for k in ("label", "cert", "card_key", "existing")}
                                         for c in cands]})
-    return {"rows": len(rows), "dups": len(cands), "same_cert": len(severe)}
+    return {"rows": len(rows), "dups": len(cands), "same_cert": len(severe),
+            "same_key_stripped": len(exact)}
 
 
 def fill_keys_from_titles(csv_path, dry_run=False):

@@ -154,3 +154,38 @@ class TestLiveIsEbayTruthNotSheetSoldColumn:
         """cache が空の時は従来判定に戻る (悪化させない)."""
         index, _ = dg.live_card_index(self._rows(), active_ids=None)
         assert "one_piece_tcg:OTHER-001" in index
+
+
+class TestExactKeyIsStrippedTokenIsNot:
+    """★2026-08-05: canonical KEY 完全一致は物理除外、タイトル token 一致は残す.
+
+    3日連続で人が手で外していた (8/03 OP07-109 / 8/04 OP05-098_P / 8/05 OP05-060)。
+    KEY 完全一致は重複くんが元々落とす対象なので、落とすのは「勝手に絞る」ではない。
+    一方 token 一致 (`t:OP05-119`) は **別セットの同番号**を巻き込む:
+    実データで `one_piece_tcg:OP05-119`(Awakening/日本語) と
+    `OP05-119_PRB01_1`(Premium Booster再録) / `OP05-119_p8`(英語版) は別のカード。
+    """
+
+    CANDS = [{"label": "m98445743388", "cert": "157208427",
+              "card_key": "one_piece_tcg:OP05-060", "existing": ["358419376373"]},
+             {"label": "m11111111111", "cert": "146618418",
+              "card_key": "t:OP05-119", "existing": ["358814877732"]}]
+
+    def _split(self, cands):
+        exact = [c for c in cands if not str(c.get("card_key", "")).startswith("t:")]
+        return exact, [c for c in cands if c not in exact]
+
+    def test_exact_key_match_is_selected_for_removal(self):
+        exact, _ = self._split(self.CANDS)
+        assert [c["label"] for c in exact] == ["m98445743388"]
+
+    def test_title_token_match_is_kept(self):
+        _, weak = self._split(self.CANDS)
+        assert [c["label"] for c in weak] == ["m11111111111"], \
+            "別セットの同番号を落とすと出品対象を不当に減らす"
+
+    def test_source_strips_only_exact(self):
+        src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "dup_guard.py"),
+                   encoding="utf-8").read()
+        assert 'startswith("t:")' in src, "token 一致を除外対象から外す条件が要る"
+        assert "pre_upload_stripped_samekey" in src, "除外は台帳に残すこと"
