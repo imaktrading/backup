@@ -444,6 +444,47 @@ def _load_live_cache():
         return {}
 
 
+CACHE_MAX_AGE_H = 6      # これより古い live cache は「今 live か」の根拠にしない
+
+
+def cache_age_hours(path=None, now=None):
+    """live cache の古さ(時間)。無い/壊れている時は None (= 判定不能)。純関数寄り, test可。"""
+    p = path or LIVE_CACHE
+    try:
+        with open(p, encoding="utf-8") as f:
+            ts = json.load(f).get("generated_at")
+        if not ts:
+            return None
+        gen = datetime.fromisoformat(ts)
+    except Exception:                                          # noqa: BLE001
+        return None
+    return ((now or datetime.now()) - gen).total_seconds() / 3600.0
+
+
+def ensure_fresh_live_cache(max_age_h=CACHE_MAX_AGE_H):
+    """live cache が古ければ eBay から取り直す。戻り: (titles, skus, ok)。
+
+    ★2026-08-07 発覚: この cache を **更新する担当が居なかった**。
+    control_panel は `--audit --no-refresh` (シートだけで完結) で呼び、`--pre-upload` は
+    `use_cache_only=True` で読むだけ。8/04-8/06 に cache が最新だったのは
+    **人が手で叩いていたから**で、放っておけば古くなる。
+    古い cache を「今 live」の根拠にすると、
+      - 新しく出した listing が cache に無い → 重複を **見逃す** (今回直した事故の再来)
+      - 終了した listing が cache に残る   → 真新規を **誤って落とす**
+    どちらも黙って起きるので、**入稿の直前に自分で新鮮さを保証する**。
+    """
+    age = cache_age_hours()
+    if age is not None and age <= max_age_h:
+        return _load_live_cache(), _load_live_skus(), True
+    print(f"  ↻ live cache が{'無い/壊れている' if age is None else f'{age:.1f}時間前と古い'}"
+          f" → eBay から取り直します")
+    titles, skus = _ebay_active_titles()
+    if titles:
+        _save_live_cache(titles, skus)
+        return titles, skus or {}, True
+    return _load_live_cache(), _load_live_skus(), False
+
+
 def _load_live_skus():
     """live cache の {itemID: SKU}。旧形式(skus 無し)の cache でも壊れない。"""
     try:
@@ -568,12 +609,20 @@ def pre_upload(csv_path, use_cache_only=True):
         if c and k and not k.startswith(("item:", "shops:")):
             cert_to_key.setdefault(c, k)
     if use_cache_only:
-        titles, skus = _load_live_cache(), _load_live_skus()
+        titles, skus, fresh = ensure_fresh_live_cache()
     else:
         titles, skus = _ebay_active_titles()
         titles, skus = titles or {}, skus or {}
+        fresh = bool(titles)
         if titles:
             _save_live_cache(titles, skus)
+    if not fresh:
+        # ★判定不能を「重複なし」に倒さない。二重出品(→キャンセル→Defect)の方が
+        #   出品が1日遅れることより遥かに重い。CSV は触らずに人へ返す。
+        print("■ ⛔ live 情報が取得できず、cache も古い/無い → **重複判定を行いません**")
+        print("     CSV は変更していません。ネット復旧後に再実行するか、目視で確認してください")
+        return {"rows": len(rows), "dups": 0, "same_cert": 0, "same_key_stripped": 0,
+                "blocked": True}
 
     # ---- 🔴 同一cert (= 同じ現物の二重出品) は物理除外する ----------------
     #   根拠は2つ union する。どちらか片方だけでは漏れる:
@@ -725,12 +774,15 @@ def main():
     if "--audit" in args:
         audit(refresh_titles="--no-refresh" not in args)
     elif "--pre-upload" in args:
-        pre_upload(args[args.index("--pre-upload") + 1])
+        # ★判定できなかった時は非ゼロで返す (走行ログに「続行」と出て人が気づける)
+        if pre_upload(args[args.index("--pre-upload") + 1]).get("blocked"):
+            return 2
     elif "--fill-keys" in args:
         fill_keys_from_titles(args[args.index("--fill-keys") + 1], dry_run="--dry" in args)
     else:
         print(__doc__)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

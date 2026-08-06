@@ -189,3 +189,65 @@ class TestExactKeyIsStrippedTokenIsNot:
                    encoding="utf-8").read()
         assert 'startswith("t:")' in src, "token 一致を除外対象から外す条件が要る"
         assert "pre_upload_stripped_samekey" in src, "除外は台帳に残すこと"
+
+
+class TestLiveCacheFreshness:
+    """★2026-08-07: この cache を **更新する担当が居なかった**.
+
+    control_panel は `--audit --no-refresh` (eBay を叩かない) で呼び、`--pre-upload` は
+    cache を読むだけ。8/04-8/06 に cache が最新だったのは **人が手で叩いていたから**。
+    古い cache を「今 live」の根拠にすると、
+      - 新しく出した listing が cache に無い → 重複を見逃す (直したはずの事故の再来)
+      - 終了した listing が cache に残る    → 真新規を誤って落とす
+    どちらも黙って起きるので、入稿直前に自分で新鮮さを保証する。
+    """
+
+    def _write(self, tmp_path, ts):
+        import json
+        p = tmp_path / "c.json"
+        p.write_text(json.dumps({"generated_at": ts, "titles": {}, "skus": {}}),
+                     encoding="utf-8")
+        return str(p)
+
+    def test_age_of_fresh_cache_is_small(self):
+        from datetime import datetime, timedelta
+        now = datetime(2026, 8, 7, 12, 0, 0)
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            import pathlib
+            p = self._write(pathlib.Path(d), (now - timedelta(hours=1)).isoformat())
+            assert abs(dg.cache_age_hours(p, now) - 1.0) < 0.01
+
+    def test_missing_cache_is_unknown_not_zero(self, tmp_path):
+        """無い cache を「0時間前(新鮮)」にすると、黙って古い判定で通ってしまう."""
+        assert dg.cache_age_hours(str(tmp_path / "nope.json")) is None
+
+    def test_broken_cache_is_unknown(self, tmp_path):
+        p = tmp_path / "c.json"
+        p.write_text("{ not json", encoding="utf-8")
+        assert dg.cache_age_hours(str(p)) is None
+
+    def test_cache_without_timestamp_is_unknown(self, tmp_path):
+        import json
+        p = tmp_path / "c.json"
+        p.write_text(json.dumps({"titles": {}}), encoding="utf-8")
+        assert dg.cache_age_hours(str(p)) is None
+
+    def test_stale_threshold_exists(self):
+        assert dg.CACHE_MAX_AGE_H > 0
+
+    def test_pre_upload_blocks_when_live_unknown(self, tmp_path, monkeypatch, capsys):
+        """判定不能を「重複なし」に倒さない (= CSV を触らず人に返す)."""
+        p = tmp_path / "t.csv"
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+            w.writerow(HEADER)
+            w.writerows(_rows())
+        before = open(p, encoding="utf-8").read()
+        monkeypatch.setattr(dg.sheet_io, "_product_ws",
+                            lambda: type("W", (), {"get_all_values": lambda s: [["h"]]})())
+        monkeypatch.setattr(dg, "ensure_fresh_live_cache", lambda *a, **k: ({}, {}, False))
+        r = dg.pre_upload(str(p))
+        assert r.get("blocked") is True
+        assert "⛔" in capsys.readouterr().out
+        assert open(p, encoding="utf-8").read() == before, "判定不能なら CSV は触らない"
