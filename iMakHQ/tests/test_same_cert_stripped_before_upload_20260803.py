@@ -251,3 +251,60 @@ class TestLiveCacheFreshness:
         assert r.get("blocked") is True
         assert "⛔" in capsys.readouterr().out
         assert open(p, encoding="utf-8").read() == before, "判定不能なら CSV は触らない"
+
+
+class TestKeySplitSameCardMonitor:
+    """★2026-08-07: catalog の canonical 未統合が **何件の害か** を常設で数える.
+
+    カタログ回答 (2026-08-07): 同じカードが EN源/JP源で別 product_id。`alias_of` は
+    G-SHOCK 専用設計で TCG には 0件。統合するには image_phash の backfill + 新スキーマが要る。
+    しかし実測すると助かる件は 未出品側 0件 / live どうし 3組(578種) しか無い。
+    → **直さない判断**をしたので、増えたら気づけるように毎サイクル数える。
+    """
+
+    B, KEY = dg.B, dg.KEY
+
+    def _rows(self, keys):
+        def row(iid, key, ncols=36):
+            r = [""] * ncols
+            r[self.B], r[self.KEY] = iid, key
+            return r
+        return [["URL", "itemID"]] + [row(i, k) for i, k in keys]
+
+    def test_identity_ignores_variant_suffix_and_namespace(self):
+        sc = {("one_piece_tcg", "OP09-020_PRB02"): "PRB02",
+              ("one_piece_tcg", "OP09-020_r1"): "PRB02"}
+        a = dg.card_identity("one_piece_tcg:OP09-020_PRB02", sc)
+        b = dg.card_identity("one_piece_tcg:OP09-020_r1", sc)
+        assert a == b == ("OP09-020", "PRB02")
+
+    def test_different_set_is_different_card(self):
+        """★ここを畳むと別カードまで重複扱いになる (ST-23版 と PRB-02版)."""
+        sc = {("one_piece_tcg", "OP09-020_ST23"): "ST23",
+              ("one_piece_tcg", "OP09-020_PRB02"): "PRB02"}
+        assert (dg.card_identity("one_piece_tcg:OP09-020_ST23", sc)
+                != dg.card_identity("one_piece_tcg:OP09-020_PRB02", sc))
+
+    def test_detects_en_jp_split(self, monkeypatch):
+        monkeypatch.setattr(dg, "_setcode_map",
+                            lambda: {("one_piece_tcg", "OP09-020_PRB02"): "PRB02",
+                                     ("one_piece_tcg", "OP09-020_r1"): "PRB02"})
+        rows = self._rows([("1", "one_piece_tcg:OP09-020_PRB02"),
+                           ("2", "one_piece_tcg:OP09-020_r1")])
+        got = dg.key_split_same_card(rows, {"1": "t", "2": "t"})
+        assert len(got) == 1 and got[0]["number"] == "OP09-020"
+
+    def test_unknown_setcode_is_not_counted(self, monkeypatch):
+        """セットコードが取れない = 別カードかもしれない。過大に言わない."""
+        monkeypatch.setattr(dg, "_setcode_map", lambda: {})
+        rows = self._rows([("1", "one_piece_tcg:OP07-085_OP11"),
+                           ("2", "one_piece_tcg:OP07-085_p")])
+        assert dg.key_split_same_card(rows, {"1": "t", "2": "t"}) == []
+
+    def test_non_live_rows_are_ignored(self, monkeypatch):
+        monkeypatch.setattr(dg, "_setcode_map",
+                            lambda: {("one_piece_tcg", "OP09-020_PRB02"): "PRB02",
+                                     ("one_piece_tcg", "OP09-020_r1"): "PRB02"})
+        rows = self._rows([("1", "one_piece_tcg:OP09-020_PRB02"),
+                           ("2", "one_piece_tcg:OP09-020_r1")])
+        assert dg.key_split_same_card(rows, {"1": "t"}) == []

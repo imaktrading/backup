@@ -248,6 +248,61 @@ def same_cert_already_live(csv_rows, header, listed_cert_set):
     return out
 
 
+_SETCODE_RE = re.compile(r"[\[【]\s*([A-Za-z0-9\-]+)\s*[\]】]")
+
+
+def card_identity(key, setcode_by_pid=None):
+    """KEY → (カード番号, セットコード)。同じ実カードなら一致する識別子 (純関数)。
+
+    catalog は同じカードを EN源(`bandai_tcg_plus`) と JP源(`opcg_official`) で
+    **別 product_id** に持つ (`OP09-020_PRB02` と `OP09-020_r1`)。product_id では
+    束ねられないので、**カード番号 + セットコード**で見る。
+    セットコードは `set_name_official` の `[PRB-02]` / 【PRB-02】 から取り、`-` を落として
+    EN/JP の表記差を吸収する。
+    """
+    cat, _, pid = (key or "").partition(":")
+    if not pid:
+        cat, pid = "", (key or "")
+    num = re.split(r"_", pid)[0].upper()
+    sc = (setcode_by_pid or {}).get((cat, pid), "")
+    return (num, sc)
+
+
+def _setcode_map():
+    """(category, product_id) → セットコード。catalog を1回だけ読む。"""
+    out = {}
+    try:
+        con = sqlite3.connect(CATALOG_DB)
+        for cat, pid, s in con.execute(
+                "SELECT category, product_id, set_name_official FROM products"):
+            m = _SETCODE_RE.search(s or "")
+            out[(cat, pid)] = m.group(1).upper().replace("-", "") if m else ""
+    except Exception:                                          # noqa: BLE001
+        pass
+    return out
+
+
+def key_split_same_card(rows2d, titles_by_itemid=None):
+    """live 出品どうしで「同じカードなのに KEY が違う」組を返す。
+
+    catalog の canonical 未統合が **実際に何件の害になっているか**の常設計測。
+    セットコードが取れない KEY は **別カードかもしれない**ので数えない (過大に言わない)。
+    """
+    sc = _setcode_map()
+    live = set(titles_by_itemid or {})
+    by_ident = {}
+    for r in rows2d[1:]:
+        iid, k = _cell(r, B), _cell(r, KEY)
+        if not (iid in live and k) or k.startswith(("item:", "shops:")):
+            continue
+        idt = card_identity(k, sc)
+        if not idt[1]:                       # セットコード不明 = 同一カードと断定できない
+            continue
+        by_ident.setdefault(idt, {})[k] = iid
+    return [{"number": i[0], "set": i[1], "keys": sorted(ks), "itemIDs": sorted(ks.values())}
+            for i, ks in by_ident.items() if len(ks) > 1]
+
+
 def dup_candidates(csv_rows, header, index, cert_to_key=None):
     """入稿予定 CSV 行 × live index → 同一カードが既に live な行を返す。
 
@@ -573,9 +628,19 @@ def audit(refresh_titles=True):
     print(f"④ RESTOCK復活で2枠になりうる組(取下げ中に同じカードが居る): {len(coll)}組")
     for c in coll[:20]:
         print(f"    - {c['card_key']:22} live={c['live']} 取下げ中={c['suspended']}")
+    # ★2026-08-07: 「同じカードなのに KEY が違う」件数を毎回測る。
+    #   カタログの canonical 統合 (EN源/JP源 の product_id 分裂 / alias_of は G-SHOCK 専用で
+    #   TCG には0件) を直すかどうかの **判断材料**。実測すると今は
+    #   未出品側 0件 / live どうし 3組(578種) しか無く、直しても助かる件がほぼ無い。
+    #   → 直さない判断をしたので、**増えたら気づけるように常設で数える**。
+    split = key_split_same_card(vals, titles)
+    print(f"⑤ 同じカードなのに KEY が違う組 (catalog canonical 未統合の実害): {len(split)}組")
+    for s in split[:10]:
+        print(f"    - 番号={s['number']:12} セット={s['set'] or '?':8} KEY={s['keys']}")
     _ledger("audit", {"shared_supply": {u: o for u, o in shared.items()},
                       "dup_cards": {k: v for k, v in dup_cards.items()},
                       "frozen_cost": frozen, "restock_collision": coll,
+                      "key_split_same_card": split,
                       "unkeyed": len(unkeyed), "active": n_act})
     if shared:
         print("‼ URL共有あり = 両方売れたら履行不能。片方の補URL差替 or 取下げが必要。")
