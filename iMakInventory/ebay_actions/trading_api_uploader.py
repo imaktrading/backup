@@ -379,6 +379,51 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
             )
         return False, None, "qty_tag_missing"
 
+    def _verify_qty_gt_zero(item) -> tuple:
+        """★ 2026-08-07 revive_qty1_impl §8: _verify_qty_zero の対称 (復活側 verify)。
+
+        Returns: (verified: bool, observed_qty: int|None, err_msg: str)
+          - verified=True: available>0 確認 (= 復活成功)
+          - verified=False, observed_qty=0: revise が反映されてない (= まだ qty=0 のまま)
+          - verified=False, observed_qty=None: API 失敗 / 確認不能 (= 保守的に失敗扱い)
+
+        revive 側は「_verify_qty_zero と対称」 に in-cycle 短 retry する。 err_17
+        (Item not found / ended) は復活の verify では失敗扱い (= 復活対象 listing が
+        存在しない = 履行不能リスクなので silent 成功にしない)。 variation listing の
+        復活は本 revive パスの対象外 (依頼書 §5 で orphan gate と切離済)。
+        """
+        import re as _re  # noqa: PLC0415
+        iid = item.get("item_id", "")
+        if not iid:
+            return False, None, "item_id_empty"
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f'<ItemID>{iid}</ItemID>'
+            '</GetItemRequest>'
+        )
+        try:
+            res = _call_trading("GetItem", body, access_token=token, raw_xml_cap=None)
+        except Exception as e:
+            return False, None, f"verify_exception: {type(e).__name__}: {e}"
+        if res.get("error_code") == "17":
+            # 復活の verify では失敗扱い (listing が消えている = 復活できていない)
+            return False, 0, "err_17_listing_ended"
+        if not res.get("success"):
+            return False, None, f"verify_failed_ack={res.get('ack')} err={res.get('error_code')}"
+        xml = res.get("raw_xml", "")
+        q_m = _re.search(r"<Quantity>(\d+)</Quantity>", xml)
+        sold_m = _re.search(r"<QuantitySold>(\d+)</QuantitySold>", xml)
+        if q_m:
+            total_qty = int(q_m.group(1))
+            sold = int(sold_m.group(1)) if sold_m else 0
+            available = max(0, total_qty - sold)
+            return (available > 0), available, (
+                f"available_{available}" if available > 0
+                else f"qty_still_zero_(total_{total_qty}_sold_{sold})"
+            )
+        return False, None, "qty_tag_missing"
+
     # in-cycle retry policy: module-level INCYCLE_RETRY_INTERVALS_SEC を使う
 
     # run_daily.py の _parse_qty_output で 「CSV 行数」 文言を regex match させるため
@@ -476,11 +521,37 @@ def upload_csv_via_trading_api(csv_path: Path, dry_run: bool = False,
                 if revise_success:
                     verified, verify_qty, verify_msg = _verify_qty_zero(item)
                 verify_attempts = attempt_idx
+        elif revise_success and item.get("quantity", 0) > 0:
+            # ★ 2026-08-07 revive_qty1_impl §8: 復活 (qty>=1 化) の in-cycle verify。
+            # _verify_qty_zero の対称。 revise + verify NG (まだ qty=0) なら再 Revise + 再 verify
+            # を短間隔で追いかける (同 cycle 内で閉じる)。 revive_qty1_impl_response 完了条件 1
+            # (silent drop 禁止) を満たすため、 verify 通過しなければ success=False で
+            # action_required に流し、 pending 残置で次 cycle 再試行。
+            verified, verify_qty, verify_msg = _verify_qty_gt_zero(item)
+            verify_attempts = 1
+            for attempt_idx, sleep_sec in enumerate(INCYCLE_RETRY_INTERVALS_SEC, start=2):
+                if verified:
+                    break
+                if verify_qty is None:
+                    if attempt_idx > 2:
+                        break
+                print(f"  [{i}/{len(rows)}] revive verify NG ({verify_msg}) → {sleep_sec}s sleep + 再 Revise + 再 verify",
+                      flush=True)
+                time.sleep(sleep_sec)
+                res = _call_one(item)
+                is_safe_failure = res["error_code"] in ("17", "231", "21916750")
+                revise_success = res["success"] or is_safe_failure
+                if revise_success:
+                    verified, verify_qty, verify_msg = _verify_qty_gt_zero(item)
+                verify_attempts = attempt_idx
 
-        # 最終判定: verify 通過 or 元から verify 対象外 (qty != 0 等) なら success
+        # 最終判定: verify 通過 or 元から verify 対象外なら success
         # verify が必要だったのに通過しなかった → success=False (= action_required)
         if item.get("quantity") == 0 and not verified:
             # qty=0 化が目的だったが in-cycle verify 通過せず → 失敗確定 (= silent ではない)
+            success = False
+        elif item.get("quantity", 0) > 0 and not verified:
+            # ★ revive (qty>0 化) が verify 通過せず → 失敗確定 (silent drop 禁止)
             success = False
         else:
             success = revise_success

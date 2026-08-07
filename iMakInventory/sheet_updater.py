@@ -105,6 +105,11 @@ LISTINGS_ERR_FLG_HEADER = "巡回ERR"
 #   完全未使用 (col_values=0) → AK と同じ末尾 append 方式で AO=41 に新設。HQ に列訂正を報告済。
 LISTINGS_COL_SOLD_AT = 41     # AO
 LISTINGS_SOLD_AT_HEADER = "売切日時"
+# R列 (0-index 17 = 1-based 18) = カテゴリ (G-shock / TCG / 一番くじ / Tシャツ / バッグ 等)。
+# 復活の採算 gate で pricing_engine.compute_listing_price(cost_jpy, None, category) を
+# 呼ぶ時に必要。 生値はスプシ表記 (G-shock 等) なので CAT_SHEET_TO_PRICING でカテゴリ表記
+# に正規化する (2026-08-07 revive_qty1_impl_response §12-1 の実測に基づく)。
+LISTINGS_COL_CATEGORY = 18    # R
 
 # ── 補URL 売切消込 急増ガード (2026-07-25) ─────────────────────────────────
 # 1 cycle の補URL消込数が異常に多い = scraper の系統的誤 is_sold=True でデータ不具合の疑い
@@ -243,6 +248,9 @@ def read_listings_rows(
             "current_m_jpy_str": (row[LISTINGS_COL_PRICE_NOW_M - 1] if len(row) >= LISTINGS_COL_PRICE_NOW_M else "").strip(),
             # AK 列 (巡回ERR) の現状値 = 前 cycle までの連続エラー marker。re-mark 時の回数累積に使う
             "err_flag_prev": (row[LISTINGS_COL_ERR_FLG - 1] if len(row) >= LISTINGS_COL_ERR_FLG else "").strip(),
+            # R 列 (カテゴリ) 生値 (G-shock / TCG / 一番くじ 等)。復活の採算 gate で pricing_engine
+            # を呼ぶ時に resolve_pricing_category で正規化する (2026-08-07 revive_qty1_impl §4)。
+            "category": (row[LISTINGS_COL_CATEGORY - 1] if len(row) >= LISTINGS_COL_CATEGORY else "").strip(),
         })
     return rows
 
@@ -757,6 +765,98 @@ def detect_supplier(domain: str) -> str:
     if "yodobashi.com" in d:
         return "yodobashi"   # G-shock 補仕入元 (Harvest の HTTP snapshot を型番で lookup、2026-07-26)
     return "other"
+
+
+# ============================================================================
+# 復活 (revive) 用 URL 分類 (2026-08-07 revive_qty1_impl §2)
+# ============================================================================
+# 「在庫数を持つ仕入元」= 売切後も再入荷が原理的にありうる URL 群 (白リスト)。
+# 復活対象になるのはこの群のみ (fail-closed: 判別できない URL は復活しない)。
+# 依頼書 §① の実測: 売切1,139件のうち再入荷成立474 / 1点もの665 に割れ、
+# 1点もの群を巡回から外すと監視総量が減る (負荷は増えない)。
+_RESTOCKABLE_HOST_KEYS = (
+    "amazon",            # Amazon.co.jp / Amazon.com (仕入元 = 販売元 gate 済)
+    "yodobashi.com",     # ヨドバシ (G-shock 補仕入)
+    "uniqlo.com",        # UNIQLO 公式
+    "montbell.jp",       # montbell 公式
+    "workman.jp",        # ワークマン 公式
+    "gu-global.com",     # GU 公式
+)
+
+# 1点もの (= 売切→復活が原理的に無い) URL 群。 巡回対象からも外す。
+_ONE_OFF_HOST_KEYS = (
+    "fril.jp",                          # ラクマ
+    "snkrdunk.com",                     # スニダン
+    "auctions.yahoo.co.jp",             # ヤフオク
+    "paypayfleamarket.yahoo.co.jp",     # PayPayフリマ
+)
+
+
+def is_restockable_url(url: str) -> bool:
+    """在庫数を持つ仕入元 URL か。 fail-closed: 判定できないものは False。
+
+    メルカリは URL の形で別物:
+      - `jp.mercari.com/shops/product/...` = 業者出品 (在庫数を持つ) → True
+      - `jp.mercari.com/item/mXXXX`         = 個人の1点もの        → False
+    """
+    u = (url or "").lower()
+    if not u:
+        return False
+    if "mercari.com" in u or "mercari.jp" in u:
+        return "/shops/product/" in u
+    return any(k in u for k in _RESTOCKABLE_HOST_KEYS)
+
+
+def is_one_off_url(url: str) -> bool:
+    """1点もの仕入元 URL か (= 売切→復活が原理的に無い)。
+
+    fail-closed 対称: 復活も巡回打切りも「わかる時だけ」倒す。未知ドメインは
+    is_restockable_url も is_one_off_url も False で、既存の巡回ロジックに委ねる。
+    """
+    u = (url or "").lower()
+    if not u:
+        return False
+    if ("mercari.com" in u or "mercari.jp" in u) and "/shops/product/" not in u:
+        return True   # メルカリ個人 (jp.mercari.com/item/mXXXX)
+    return any(k in u for k in _ONE_OFF_HOST_KEYS)
+
+
+# ============================================================================
+# 復活 (revive) 用 カテゴリ変換表 (2026-08-07 revive_qty1_impl §4)
+# ============================================================================
+# シートの R 列 (LISTINGS_COL_CATEGORY) 生値 → pricing_engine.compute_listing_price
+# の category 引数 (= profit_params のカテゴリ名)。
+#
+# ★SSOT のミラー: `iMakHQ/tools/offer_calc.py:51 CAT2CALC` と同一値。 別実装で作り直す
+# ことを避けるため literal 転記 (他 worktree の tool を import できない制約のため。
+# HQ 側で更新があれば同じ内容にする必要がある)。
+#
+# ★fail-closed: この表に無いカテゴリ (バッグ / グッズ / アウトドア・ジャケット /
+# グリグラ / カプセルトイ 等) は復活候補から skip する (= 採算計算不能 = 誤復活防止)。
+# 拡充は窓口 (HQ) が持つ。 監視くん側での「推測 map 追加」 は禁止 (SSOT 崩壊防止)。
+CAT_SHEET_TO_PRICING = {
+    "TCG":       "TCG(PSA10)",
+    "PSA":       "TCG(PSA10)",
+    "G-SHOCK":   "G-SHOCK",
+    "Tシャツ":   "Tシャツ(UT)",
+    "montbell":  "Montbell(軽)",
+    "一番くじ":  "一番くじ",
+}
+
+
+def resolve_pricing_category(cat_sheet: str) -> Optional[str]:
+    """シートのカテゴリ生値 (R列) → pricing_engine カテゴリ名。 fail-closed。
+
+    大文字小文字を無視した部分一致 (offer_calc.py:234 と同じ引き方)。
+    ヒットしなければ None (= 復活対象から除外、 skip_no_category として計上)。
+    """
+    s = (cat_sheet or "").lower()
+    if not s:
+        return None
+    for k, v in CAT_SHEET_TO_PRICING.items():
+        if k.lower() in s:
+            return v
+    return None
 
 
 def read_main_active_rows(sh, supplier_filter: str = "all") -> list:

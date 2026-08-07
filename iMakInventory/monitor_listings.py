@@ -67,6 +67,7 @@ from sheet_updater import (  # noqa: E402
     detect_supplier,
     _domain_of,
     ensure_listings_err_header,
+    is_one_off_url,
 )
 from err_flag import (  # noqa: E402
     build_err_marker, marker_count, PERSISTENT_THRESHOLD, DEAD_SOURCE_THRESHOLD,
@@ -518,6 +519,14 @@ RESCUE_EVENTS_FILE = DECISION_LOG_DIR / "rescue_events.jsonl"   # 監査用 (実
 # 補URL消込の復元用アーカイブ (2026-07-25)。消したセル (row/slot/col/url) を全て記録 →
 # 誤削除でも URL を残し復元可能にする (データ安全)。cell を消しても値はここに残る。
 CLEARED_BACKUPS_ARCHIVE = DECISION_LOG_DIR / "cleared_backups_archive.jsonl"
+# ★ 2026-08-07 revive_qty1_impl §6 復活パス:
+# pending_revive.jsonl = 2 cycle 連続 in_stock 確定した行 (= 誤検知1回で誤復活しない)。
+# newly_in_stock_state.json = 1 cycle 目に検知した (label, item_id) を暫定記録し、
+#   2 cycle 目でも in_stock なら pending_revive に enqueue。 消えたら state から掃除。
+# 対称: pending_revise.jsonl (取下げ) / newly_sold は 1 cycle で送る (漏れ=Defect直撃)
+#       pending_revive.jsonl (復活)   / newly_in_stock は 2 cycle 確定 (誤復活=BAN 直撃)
+PENDING_REVIVE_FILE = DECISION_LOG_DIR / "pending_revive.jsonl"
+NEWLY_IN_STOCK_STATE_FILE = DECISION_LOG_DIR / "newly_in_stock_state.json"
 
 
 def _rescue_key(r: dict) -> str:
@@ -561,6 +570,156 @@ def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None
     }
     with open(PENDING_REVISE_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+# ============================================================================
+# 復活 (revive) パス — 2 cycle 連続確定 state + pending_revive enqueue
+# ============================================================================
+def load_newly_in_stock_state() -> dict:
+    """{"HIGH": {"<item_id>": {"first_seen_at": iso, "cycles": N}}, ...} を読む。
+
+    形式不正/読み失敗は空 dict (fail-safe: 復活 gate は「未確定」に倒れる)。
+    """
+    if not NEWLY_IN_STOCK_STATE_FILE.exists():
+        return {}
+    try:
+        data = json.loads(NEWLY_IN_STOCK_STATE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        return data
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_newly_in_stock_state(state: dict) -> None:
+    """newly_in_stock_state.json を書出。 sheet 別 dict of dict を保存。"""
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    NEWLY_IN_STOCK_STATE_FILE.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def append_pending_revive(sheet_label: str, result: dict, dry_run: bool) -> None:
+    """delta="newly_in_stock" が 2 cycle 連続確定した行を pending queue に append.
+
+    ★ pending_revise (取下げ) と対称構造。 dry_run でも記録する (queue 状態の追跡用)。
+    revive_csv_generator (mode="revive") がここを読んで gate 4段を掛け qty=1 化 CSV を作る。
+    """
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "ts":           datetime.now().isoformat(timespec="seconds"),
+        "sheet":        sheet_label,
+        "row_index":    result["row_index"],
+        "url":          result["url"],
+        "item_id":      result["item_id"],
+        "title":        result.get("title", ""),
+        "supplier":     result.get("supplier", ""),
+        "raw_status":   result.get("raw_status", ""),
+        "dry_run":      dry_run,
+    }
+    with open(PENDING_REVIVE_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def confirm_and_enqueue_revive(
+    sheet_label: str,
+    results: list,
+    dry_run: bool,
+    state: Optional[dict] = None,
+) -> dict:
+    """cycle 内 results から newly_in_stock を拾い、 2 cycle 連続確定を判定して enqueue。
+
+    state 遷移 (per (sheet_label, item_id)):
+      - 今 cycle に newly_in_stock 検知 &&  state 未登録    → cycles=1 で state に記録
+                                                              (pending_revive には積まない)
+      - 今 cycle に newly_in_stock 検知 or in_stock (unchanged で D=空 かつ is_sold=False) &&
+        state 登録 && cycles>=1                              → 2 cycle 確定 = enqueue、 state 削除
+      - 今 cycle に is_sold=True (売切に反転) or item_id 変化 → state から削除
+        (幻の in_stock を state に残さない)
+      - state 登録済で今 cycle に見なかった (skip 等)         → 温存 (次 cycle まで待つ)
+
+    ★ Amazon の Featured Offer flakiness (= 1 cycle だけ誤って in_stock に見える) を弾く
+    のが本 gate の目的。 pending_revive まで進んだ行はさらに URL/3点/採算/二重出品 gate を
+    revive_csv_generator が掛ける。
+
+    Args:
+        sheet_label: "HIGH" / "LOW" / "SHEET"
+        results:     monitor サイクルの results list
+        dry_run:     True なら pending_revive/state 書込を skip
+        state:       テスト用 injection (省略で load_newly_in_stock_state() から取得)
+
+    Returns: {"promoted": N, "first_seen": M, "cleared": K, "stayed": L}
+    """
+    if state is None:
+        state = load_newly_in_stock_state()
+    sheet_state = state.setdefault(sheet_label, {})
+    ts_now = datetime.now().isoformat(timespec="seconds")
+
+    promoted = 0
+    first_seen = 0
+    cleared = 0
+    stayed = 0
+
+    # 今 cycle に 何らかの判定が出た item_id 集合 (state 掃除用)
+    observed_ids = set()
+    for r in results:
+        iid = (r.get("item_id") or "").strip()
+        if not iid:
+            continue
+        observed_ids.add(iid)
+        delta = r.get("delta")
+        is_sold = r.get("is_sold")
+        cur_sold_marked = (r.get("current_sold") or "").strip() in ("○", "〇")
+        # 判定不能 (エラー/uncertain) は state に触らない (前状態温存 = fail-closed)
+        if is_sold is None or delta == "uncertain":
+            if iid in sheet_state:
+                stayed += 1
+            continue
+        # 売切 (is_sold=True) → state から削除 (幻の in_stock を持ち越さない)
+        if is_sold is True:
+            if iid in sheet_state:
+                del sheet_state[iid]
+                cleared += 1
+            continue
+        # 以下 is_sold=False (在庫あり判定) のパス
+        if delta == "newly_in_stock":
+            # ○→空 に変化した cycle
+            if iid not in sheet_state:
+                sheet_state[iid] = {"first_seen_at": ts_now, "cycles": 1}
+                first_seen += 1
+            else:
+                # 既に state 登録済 (前 cycle) + 今も in_stock → 2 cycle 確定 = enqueue
+                sheet_state[iid]["cycles"] = int(sheet_state[iid].get("cycles", 1)) + 1
+                append_pending_revive(sheet_label, r, dry_run=dry_run)
+                del sheet_state[iid]
+                promoted += 1
+        elif delta == "unchanged" and not cur_sold_marked:
+            # D=空 のまま in_stock 継続 (= 復活後の追いかけ判定)
+            if iid in sheet_state:
+                # 前 cycle newly_in_stock 記録済 + 今も in_stock → 確定
+                sheet_state[iid]["cycles"] = int(sheet_state[iid].get("cycles", 1)) + 1
+                append_pending_revive(sheet_label, r, dry_run=dry_run)
+                del sheet_state[iid]
+                promoted += 1
+            # state に無ければ何もしない (元から在庫あり、 変化なし)
+
+    # 今 cycle に見なかった state entry は保持 (次 cycle まで温存、 stayed に加算)
+    for iid in list(sheet_state.keys()):
+        if iid not in observed_ids:
+            stayed += 1
+
+    if not dry_run:
+        try:
+            save_newly_in_stock_state(state)
+        except OSError as e:
+            log(f"  [!] newly_in_stock_state 保存失敗: {type(e).__name__}: {e}")
+
+    return {
+        "promoted": promoted,
+        "first_seen": first_seen,
+        "cleared": cleared,
+        "stayed": stayed,
+    }
 
 
 def append_action_required(sheet_label: str, result: dict, reason: str,
@@ -845,7 +1004,6 @@ def process_sheet(
         # SHOPS は通常 mercari item と違い再入荷するので skip せず毎 cycle 再 scrape する。
         row_supplier = detect_supplier(_domain_of(row["url"]))
         cur_sold = (row.get("current_sold") or "").strip()
-        is_mercari_shops = "/shops/" in (row.get("url") or "")
         # === item_id 空欄 = 未出品 も巡回対象にする (2026-06-21 user 指示で方針反転) ===
         # 旧 (2026-06-10): item_id 空欄 = 未出品 = scrape skip だった。
         # 新 (2026-06-21): 未出品も scrape する。 理由: 出品くんが CSV 作成 → 出品 した後に
@@ -853,15 +1011,23 @@ def process_sheet(
         # 取下げ対象 (eBay listing) は無いので revise/pending/要対応 には入れない。
         # 売切検知時の扱いは下段 (newly_sold && item_id 空欄 → 「未出品扱い、 検知のみ記録、
         # revise なし、 alert なし」) で既に正しく分岐済 = D 列だけ更新される。
-        if row_supplier == "mercari" and cur_sold in ("○", "〇") and not is_mercari_shops:
-            log(f"{prefix}mercari  - skip (D=○、 mercari 復活機会なし)")
+        # ★ 2026-08-07 revive_qty1_impl §② (HIGH の巡回漏れ解消): D=○ の 1点もの URL は
+        # 復活が原理的にありえないので巡回打切り (旧: mercari 個人のみ / 新: 1点もの全般)。
+        # 実測: 1,139件中665件が対象 → HIGH の「戻らない638件」を巡回から外し、「再入荷する
+        # 142件」に visit budget を回す。 fail-closed 対称: is_restockable_url が生きてる URL
+        # 群は従来どおり毎 cycle 再 scrape する (mercari SHOPS 等 = 再入荷しうる)。
+        if cur_sold in ("○", "〇") and is_one_off_url(row.get("url") or ""):
+            log(f"{prefix}{row_supplier:<7} - skip (D=○、1点もの 復活機会なし)")
             results.append({
                 "row_index":         row["row_index"],
                 "url":               row["url"],
                 "item_id":           row.get("item_id", ""),
                 "title":             row.get("title", ""),
-                "supplier":          "mercari",
+                "supplier":          row_supplier,
                 "is_sold":           True,
+                # raw_status は下流 (書込ループ) の完全 skip 判定に使うので
+                # 「skipped_mercari_sold」 と同型のマーカーを付ける (別名にすると下流が
+                # スプシ書込を掛けてしまう)。 名前はレガシー継承で意味は「1点もの skip」。
                 "raw_status":        "skipped_mercari_sold",
                 "current_sold":      cur_sold,
                 "delta":             "unchanged",
@@ -1392,6 +1558,23 @@ def process_sheet(
             log(f"     row{er['row_index']} ×{er['count']} "
                 f"{'[出品生存]' if er.get('listing_risk') else '[出品リスク無]'} {er['url'][:60]}")
 
+    # ── 復活 (revive) パス — 2 cycle 連続確定判定 → pending_revive.jsonl enqueue ──
+    # ★ 2026-08-07 revive_qty1_impl §6: newly_in_stock は 1 cycle だけの誤検知
+    # (Amazon Featured Offer flakiness 等) を弾くため 2 cycle 連続で確定した行のみ enqueue。
+    # ここで pending に積むだけで、 URL白 / 3点セット / 採算 / 二重出品 の 4 gate は
+    # revive_csv_generator (Phase 2.5/3.5) が改めて掛ける (fail-closed 多層)。
+    revive_result = {"promoted": 0, "first_seen": 0, "cleared": 0, "stayed": 0}
+    try:
+        revive_result = confirm_and_enqueue_revive(sheet_label, results, dry_run=dry_run)
+        if revive_result["promoted"] or revive_result["first_seen"]:
+            log(f"  [復活 gate] promoted={revive_result['promoted']} "
+                f"(2cycle 確定 → pending_revive.jsonl) / "
+                f"first_seen={revive_result['first_seen']} (1cycle 目、次回確定待ち) / "
+                f"cleared={revive_result['cleared']} (幻の in_stock 削除) / "
+                f"stayed={revive_result['stayed']} (温存)")
+    except Exception as _re:
+        log(f"  [!] revive gate 例外 (本筋に影響なし): {type(_re).__name__}: {_re}")
+
     log(f"  完了 [{sheet_label}]")
     return {
         "processed":            len(results),
@@ -1406,6 +1589,7 @@ def process_sheet(
         "price_surge_stats":    price_surge_stats,
         "backup_clear":         backup_clear_result,  # 補URL消込結果 (cleared/skipped_mismatch/held/surge)
         "rescue":               rescue_result,        # 補URL救済 (new_events/current_rescued/appended)
+        "revive":               revive_result,        # 復活 2cycle 確定 (promoted/first_seen/cleared/stayed)
     }
 
 

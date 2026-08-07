@@ -52,6 +52,11 @@ from ebay_actions.revise_csv_generator import (  # noqa: E402
     run as run_revise_csv,
     drain_pending_queue,
 )
+from ebay_actions.revive_csv_generator import (  # noqa: E402
+    run as run_revive_csv,
+    drain_pending_revive,
+    PENDING_REVIVE_FILE,
+)
 from ebay_actions.sell_feed_uploader import upload_one_csv  # noqa: E402 (= legacy fallback、 緊急時 手動 path)
 from ebay_actions.trading_api_uploader import upload_csv_via_trading_api  # noqa: E402
 from upload_health import record_upload_result  # noqa: E402
@@ -742,6 +747,61 @@ def _phase_upload(csv_path_str: str, test_mode: bool) -> dict:
 
 
 # ============================================================================
+# 復活 (revive) phase — 2026-08-07 revive_qty1_impl §9
+# ============================================================================
+def _phase_revive_csv(
+    sheet: str,
+    test_mode: bool,
+    cycle_started_at: datetime,
+    single_sheet_id: Optional[str] = None,
+    single_sheet_label: Optional[str] = None,
+    high_sheet_id: Optional[str] = None,
+    low_sheet_id: Optional[str] = None,
+    max_per_cycle: Optional[int] = None,
+    provided_qty_map: Optional[dict] = None,
+) -> dict:
+    """revive_csv_generator (mode=revive) で qty=1 化 CSV を生成 (取下げの対称)。
+
+    cycle_started_at は 3点セット gate の O 列比較用。 phase 実行開始時刻を渡す。
+    """
+    _log(f"=== Phase 2.5/3.5: revive_csv_generator (sheet={sheet}) ===", test_mode)
+    try:
+        return run_revive_csv(
+            sheet=sheet, dry_run=False,
+            max_per_cycle=max_per_cycle,
+            high_sheet_id=high_sheet_id, low_sheet_id=low_sheet_id,
+            single_sheet_id=single_sheet_id,
+            single_sheet_label=single_sheet_label,
+            cycle_started_at=cycle_started_at,
+            provided_qty_map=provided_qty_map,
+        )
+    except Exception as e:
+        _log(f"  [NG] revive_csv 例外: {type(e).__name__}: {e}", test_mode)
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def _phase_revive_upload(csv_path_str: str, test_mode: bool) -> dict:
+    """Trading API ReviseInventoryStatus (qty=1) で復活 + _verify_qty_gt_zero verify。
+
+    _phase_upload と同じく upload_csv_via_trading_api を通す (CSV の Quantity 列で
+    qty=0/1 が分岐 → uploader 側で _verify_qty_zero / _verify_qty_gt_zero を振分)。
+    """
+    _log(f"=== Phase 3.5/3.5: trading_api_uploader.revive_upload (csv={csv_path_str}) ===",
+         test_mode)
+    try:
+        result = upload_csv_via_trading_api(Path(csv_path_str), dry_run=False)
+        if not result.get("success"):
+            result["error"] = (
+                f"Trading API revive: total={result.get('total')} "
+                f"ok={result.get('ok')} ng={result.get('ng')}"
+            )
+        return result
+    except Exception as e:
+        _log(f"  [NG] Trading API revive_upload 例外: {type(e).__name__}: {e}", test_mode)
+        return {"error": f"{type(e).__name__}: {e}", "success": False}
+
+
+# ============================================================================
 # Phase 8: D 列 backup / diff helpers
 # ============================================================================
 def _resolve_backup_targets(
@@ -1111,6 +1171,85 @@ def run_cycle(
                         _log(f"  [ALERT] upload_health ALERT 発火 (reason={health_res.get('reason')})", test_mode)
                 except Exception as e:
                     _log(f"  [!] upload_health record 失敗: {type(e).__name__}: {e}", test_mode)
+
+        # ================================================================
+        # Phase 2.5/3.5: 復活 (qty=1) CSV 生成 + upload
+        # 2026-08-07 revive_qty1_impl §9: pending_revive.jsonl に 2 cycle 連続
+        # 確定した行があれば URL白 → 3点セット → 二重出品 → 採算 の 4 gate を掛けて
+        # qty=1 化 CSV を出す。 monitor_only や burst 発火時は skip。
+        # ================================================================
+        if not monitor_only:
+            try:
+                pending_revive_exists = PENDING_REVIVE_FILE.exists() and \
+                    PENDING_REVIVE_FILE.stat().st_size > 0
+            except OSError:
+                pending_revive_exists = False
+            if pending_revive_exists:
+                progress_writer.update(phase="revive_csv", force=True)
+                cycle_started_dt = datetime.fromisoformat(cycle_log["ts_start"])
+                rv = _phase_revive_csv(
+                    sheet, test_mode,
+                    cycle_started_at=cycle_started_dt,
+                    single_sheet_id=sheet_id,
+                    single_sheet_label=sheet_label,
+                    high_sheet_id=high_sheet_id,
+                    low_sheet_id=low_sheet_id,
+                )
+                cycle_log["phases"]["revive_csv"] = rv
+                revive_csv_path = rv.get("csv_path") if isinstance(rv, dict) else None
+                if not revive_csv_path or skip_upload:
+                    _log(f"  revive upload skip (csv_path={revive_csv_path}, "
+                         f"skip_upload={skip_upload})", test_mode)
+                    cycle_log["phases"]["revive_upload"] = {"skipped":
+                        "csv_path none or skip_upload"}
+                else:
+                    progress_writer.update(phase="revive_upload", force=True)
+                    ru = _phase_revive_upload(revive_csv_path, test_mode)
+                    cycle_log["phases"]["revive_upload"] = ru
+                    # drain: 成功 item を processed_revive.jsonl に archive、 pending から除去
+                    try:
+                        succ_ids = [res["item_id"] for res in (ru.get("results") or [])
+                                     if res.get("success")]
+                        moved = drain_pending_revive(succ_ids)
+                        failed_kept = len(rv.get("allowed_item_ids") or []) - len(succ_ids)
+                        _log(f"  pending_revive → processed_revive archive: {moved} 件 "
+                             f"(失敗 {failed_kept} 件は pending 残置 → 次 cycle で retry)",
+                             test_mode)
+                    except Exception as e:
+                        _log(f"  [!] drain_pending_revive 失敗: {type(e).__name__}: {e}",
+                             test_mode)
+                    # verify 通過せず (silent drop 禁止) → action_required.jsonl 記録
+                    try:
+                        from monitor_listings import append_action_required  # noqa: PLC0415
+                        revive_verify_failed = [
+                            res for res in (ru.get("results") or [])
+                            if not res.get("success") and res.get("verified") is False
+                            and (res.get("quantity") or 0) > 0
+                        ]
+                        for res in revive_verify_failed:
+                            append_action_required(
+                                sheet_label=res.get("sheet_label", ""),
+                                result={
+                                    "row_index": res.get("row_index", -1),
+                                    "url":       res.get("url", ""),
+                                    "item_id":   res.get("item_id", ""),
+                                    "title":     res.get("title", ""),
+                                    "supplier":  res.get("supplier", ""),
+                                    "raw_status": "revive_verify_failed",
+                                },
+                                reason="revive_verify_gt0_giveup",
+                                dry_run=False,
+                            )
+                        if revive_verify_failed:
+                            _log(f"  [★要対応] revive in-cycle verify 通過せず: "
+                                 f"{len(revive_verify_failed)} 件 → action_required.jsonl",
+                                 test_mode)
+                    except Exception as e:
+                        _log(f"  [!] revive action_required 記録失敗: "
+                             f"{type(e).__name__}: {e}", test_mode)
+            else:
+                _log(f"  revive skip (pending_revive.jsonl 空)", test_mode)
+                cycle_log["phases"]["revive_csv"] = {"skipped": "no pending_revive"}
 
         # Phase 4: audit sample (Phase 7d') — IN_STOCK から 5 件抜き取り → audit シート追記
         # cycle status に関わらず実行 (in_stock データがあれば audit する)
