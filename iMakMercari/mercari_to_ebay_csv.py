@@ -25,6 +25,12 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from listing_core import get_csv_output_path as _gcop
 OUTPUT_CSV = _gcop("mercari", "upload")
 
+# 追加固定画像 (Mercari実写の後に末尾追加 = 先頭の実写=ギャラリーサムネは維持)。
+# imaktrading.github.io でホスト (G-shock/TCG の 999.png と同じ運用)。カテゴリ cfg の
+# "extra_pics" に注入し、共通の PicURL 生成が cfg.get("extra_pics") を末尾連結する (if分岐を避けデータ注入)。
+_IMG_HOST = "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main"
+PORTER_EXTRA_PICS = [f"{_IMG_HOST}/999.png", f"{_IMG_HOST}/preowned_banner_logo.png"]
+
 # ===== 専用スプシ ===== (Tシャツと同じ列構成: A=URL/B=ItemID/C=タイトル/D=売り切れ/E=状態/F=価格/G=写真URL/H=説明)
 SHEET_REGISTRY = {
     "porter": {
@@ -37,6 +43,7 @@ SHEET_REGISTRY = {
         "profit_category": "Porter",
         "condition_id": 3000,
         "description_template": "USED.txt",
+        "extra_pics": PORTER_EXTRA_PICS,   # 実写の後に 999.png + preowned banner を末尾追加
         "keyword_pdf": "Clothing_Shoes_Accessories_2026Q1.pdf",
         "research_metadata": {
             "last_updated": "2026-04-22",
@@ -200,11 +207,17 @@ SHIPPING_POLICIES = [
 ]
 
 
-def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "800-1000"
+def get_shipping_policy(price, category="Porter"):
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由).
+    mercari_to_ebay_csv は動的 category なので 引数で受取り."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, category)
+    except Exception:
+        for threshold, policy in SHIPPING_POLICIES:
+            if price <= threshold:
+                return policy
+        return "800-1000"
 
 
 def get_schedule_time():
@@ -212,8 +225,11 @@ def get_schedule_time():
     return future.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def build_description_with_specs(template_path, specs):
-    """USED.txtテンプレを読み込み、Shippingマーカー直前にSpecsブロック挿入"""
+def build_description_with_specs(template_path, specs, extra_note_html=""):
+    """USED.txtテンプレを読み込み、Shippingマーカー直前にSpecsブロック(+任意の追加注記)挿入。
+
+    extra_note_html: 商品固有の追加注記 (例: Tanker のballistic nylon色見え注記)。Specsの直後に挿入。
+    """
     try:
         with open(template_path, "r", encoding="utf-8") as f:
             template = f.read()
@@ -221,19 +237,39 @@ def build_description_with_specs(template_path, specs):
         template = "<html><body><p>Item description</p></body></html>"
 
     # Specs HTML 構築
+    # 手測り中古品の寸法は説明文側に "approx." を明記 (SNAD 保護)。
+    # Item Specifics 本体(CSV C:列)は eBay フィルタ用に数値のままにし、Description だけ approx. を付ける。
+    _APPROX_KEYS = {"Bag Width", "Bag Height", "Bag Depth", "Item Weight"}
     spec_lines = []
     for k, v in (specs or {}).items():
         if v and str(v).strip():
-            spec_lines.append(f'<li><b>{k}:</b> {v}</li>')
+            disp = f"approx. {v}" if k in _APPROX_KEYS else v
+            spec_lines.append(f'<li><b>{k}:</b> {disp}</li>')
     specs_html = (
         '<p><span style="text-decoration: underline;"><strong>Specifications</strong></span></p>'
         '<ul>' + "".join(spec_lines) + '</ul>'
     )
+    block = specs_html + (extra_note_html or "")
     # Shippingマーカー直前に挿入
     marker = '<p><span style="text-decoration: underline;"><strong>Shipping'
     if marker in template:
-        return template.replace(marker, specs_html + marker, 1)
-    return template + specs_html
+        return template.replace(marker, block + marker, 1)
+    return template + block
+
+
+# Porter Tanker (バリスティックナイロン) の色見え注記。黒/濃色が光沢で灰色に見える誤認の予防。
+# 2026-06-09 Oskar (デンマーク) 色見えクレーム対応。汎用 About Color はテンプレ共通、これは Tanker 上乗せ。
+TANKER_COLOR_NOTE = (
+    '<p>Note: Porter Tanker uses ballistic nylon. Its sheen can make the dark/black color appear '
+    'grey in photos, but the actual color is exactly as stated in the title.</p>'
+)
+
+
+def tanker_color_note(profit_category, title_en):
+    """Porter Tanker のとき色見え注記 HTML を返す。それ以外は空文字 (= 注記なし)。"""
+    if profit_category == "Porter" and "tanker" in (title_en or "").lower():
+        return TANKER_COLOR_NOTE
+    return ""
 
 
 # === listing_common.py に集約済 → 共通ライブラリから import (2026-04-23) ===
@@ -252,9 +288,14 @@ from listing_common import (
     detect_condition_id_from_state,
     get_default_condition_description,
 )
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 MAX_IMAGES = 4
 SCHEDULE_WEEKS = 2
+
+# ScheduleTime 制御。True=即live(ScheduleTime空欄) / False=2週間後スケジュール。
+# 2026-06-28: 取下再出品② も新規同様スケジュール出品に統一(ユーザー要望)。relist でも True にしない。
+# (scheduled でも FileExchange Add は ItemID を即返すため③書戻しは問題なく回る)
+_IMMEDIATE_SCHEDULE = False
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -262,6 +303,10 @@ HEADERS = {
 }
 
 def get_schedule_time():
+    if _IMMEDIATE_SCHEDULE:
+        # 即live = ScheduleTime 空欄 (アップ時に即出品)。過去時刻は eBay が
+        # "scheduled time occurs in the past" で reject する (2026-06-06 実機判明)。
+        return ""
     future = datetime.utcnow() + timedelta(weeks=SCHEDULE_WEEKS)
     return future.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -327,7 +372,9 @@ Generate eBay listing content based on Mercari product data and images provided.
 - Size: Mini / Small / Medium(416) / Large / **Extra Large**（"XL"でなく"Extra Large"）
 - Department: **"Men"(1,826)** または "Unisex Adults"(1,321) — Porterは男性ユース多数派なので基本"Men"、ハンドバッグ系のみ"Unisex Adults"
 - Country of Origin: "Japan" 固定（eBayフィルタ自体は機能薄いが検索インデックス用）
-- Bag Width / Bag Height / Bag Depth: cm 数値のみ
+- Bag Width / Bag Height / Bag Depth: cm 値に必ず "cm" 単位を付ける（例: "5 cm", "40 cm"）。
+  ※裸数値だと spec_normalizer が 6 未満を曖昧扱いで変換できず "5" のまま残る（マチ 5cm 等が in(cm) 化されない）。
+  単位を付ければ大小に関係なく "2.0 in (5.0 cm)" 形式に正規化される。
 推奨（フィルタヒット率高）:
 - Closure: **"Zip"(901)圧倒的** / Buckle(95) / Drawstring(49) / Snap(42) / Push Lock(8)
 - Pattern: **"Solid"(819)圧倒的** / Camouflage(84) / Striped(7)
@@ -573,9 +620,15 @@ Return ONLY valid JSON (no markdown, no explanation):
 }
 """
 
+from ebay_getitem_images import img_media_type as _img_media_type  # 実バイトで media_type 判定(共通)
+
+
 def get_images_base64(photo_url_str, max_images=MAX_IMAGES):
-    """写真URLから画像をbase64に変換"""
-    urls = [u.strip() for u in photo_url_str.split('|') if u.strip()]
+    """写真URLから画像を (base64, media_type) のリストに変換 (media_type は実バイト判定)。"""
+    # 出品者プロフ画像(thumb/members)は商品写真でない。スプシ写真列に全行混入しており
+    # 取りに行くと404でログを汚す(実商品写真は別途取得OK)。先頭で除外する。
+    urls = [u.strip() for u in photo_url_str.split('|')
+            if u.strip() and 'thumb/members' not in u]
     images = []
     for url in urls[:max_images]:
         # メルカリShops (assets.mercari-shops-static.com) はURLをそのまま使う
@@ -591,7 +644,7 @@ def get_images_base64(photo_url_str, max_images=MAX_IMAGES):
                 resp = requests.get(try_url, headers=HEADERS, timeout=15)
                 if resp.status_code == 200 and len(resp.content) > 1000:
                     b64 = base64.standard_b64encode(resp.content).decode('utf-8')
-                    images.append(b64)
+                    images.append((b64, _img_media_type(resp.content)))   # 実バイトで media_type 判定
                     print(f"    画像取得OK ({len(resp.content)//1024}KB): ...{try_url[-50:]}")
                     break
             except Exception as e:
@@ -621,12 +674,17 @@ def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b6
             print(f"    ⚠️ whitelist_registry 読込失敗（検証スキップ）: {_e}")
 
     content = []
-    for img_b64 in images_b64:
+    for _img in images_b64:
+        # get_images_base64 は (b64, media_type) を返す。旧 str 形式にも後方互換。
+        if isinstance(_img, tuple):
+            img_b64, _mt = _img
+        else:
+            img_b64, _mt = _img, "image/jpeg"
         content.append({
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": "image/jpeg",
+                "media_type": _mt,
                 "data": img_b64,
             }
         })
@@ -713,8 +771,30 @@ If OFFICIAL SPECS section is provided, those values are authoritative for Item S
 
     return last_result
 
-def load_targets_from_sheet(sheet_cfg):
-    """統合Hight/Low スプシから R列カテゴリで絞り込み + ItemIDブランク行を取得"""
+def append_skumap(pending_csv, sku, supply_url, category):
+    """取下再出品② — {supply_url → 実際に付与した sku} を skumap CSV に追記。
+
+    出品くんが付けた CustomLabel が ③書戻しで ACTIVEレポートと照合する権威ある実値。
+    pending と同 dir に relist_skumap_<stamp>.csv として各カテゴリの --relist 実行が追記。
+    ③ は sku をキーに ACTIVE(新ItemID) と supply_url(スプシ行) を橋渡しする。
+    """
+    if not pending_csv:
+        return
+    path = pending_csv.replace("relist_pending_", "relist_skumap_")
+    new = not _os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+        if new:
+            w.writerow(["sku", "supply_url", "category"])
+        w.writerow([sku, supply_url, category])
+
+
+def load_targets_from_sheet(sheet_cfg, only_urls=None):
+    """統合Hight/Low スプシから R列カテゴリで絞り込み + ItemIDブランク行を取得.
+
+    only_urls 指定時 (取下再出品②): A列が only_urls に含まれる行だけを、ItemID/sold に
+    関係なく取込む (取下げ済の特定URLを再出品。コストはスプシから引くので最新pricingが再算出)。
+    """
     import gspread
     from google.oauth2.service_account import Credentials
     creds = Credentials.from_service_account_file(
@@ -732,15 +812,28 @@ def load_targets_from_sheet(sheet_cfg):
         title_jp = row[2] if len(row) > 2 else ""
         sold = row[3] if len(row) > 3 else ""
         condition = row[4] if len(row) > 4 else ""
-        price = row[5] if len(row) > 5 else ""
+        # 仕入参考: N列 (実コスト) 優先 / F列 (商品価格) fallback (2026-05-18)
+        import sys as _sys_pc
+        _sys_pc.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+        from listing_common import pick_cost_jpy as _pick_cost
+        price = _pick_cost(row)  # 旧: row[5] (F商品価格のみ)
         photo_urls = row[6] if len(row) > 6 else ""
         description = row[7] if len(row) > 7 else ""
         condition_id = row[11] if len(row) > 11 else ""  # L列 ConditionID (1000=新品/3000=中古)
         category = row[17] if len(row) > 17 else ""  # R列
-        # カテゴリフィルタ + ItemIDブランク & 売り切れでない
-        if url and not item_id and not sold and (not cat_filter or category == cat_filter):
+        if not url or (cat_filter and category != cat_filter):
+            continue
+        if only_urls is not None:
+            # 取下再出品②: 指定URLのみ、ItemID/sold フィルタは無視 (取下げ済を再出品)
+            if url not in only_urls:
+                continue
+        elif item_id or sold:
+            # 通常: 未出品(ItemID空)かつ売切れでない行のみ
+            continue
+        if True:
             targets.append({
                 "URL": url,
+                "ItemID": item_id,       # 取下再出品②: 元listingの eBay画像流用に使う(B列=取下げた itemID)
                 "タイトル": title_jp,
                 "状態": condition,
                 "ConditionID": condition_id,
@@ -759,12 +852,30 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sheet", choices=list(SHEET_REGISTRY.keys()),
                         help="読込スプシ (porter/tomica)。指定なしは商品管理シート.csv (ローカル)")
+    parser.add_argument("--relist", default="",
+                        help="取下再出品②: 保留リストCSV(supply_url列) → 指定URLのみスケジュール再出品(2週間後・既存キュー無視)")
     args, _ = parser.parse_known_args()
+    relist_mode = bool(args.relist)
+    # 取下再出品② も新規と同じ ScheduleTime(2週間後)でスケジュール出品(ユーザー要望 2026-06-28)。
+    # 即liveだと全件一斉live=露出集中/事故時の取返し不可。scheduled でも FileExchange は ItemID を
+    # 即返すので③書戻し(結果CSVのItemID読取)は回る(旧"live後でないと③"は誤認)。
+    # → _IMMEDIATE_SCHEDULE は False のまま = get_schedule_time が2週間後を返す。
 
     # --sheet 指定時はカテゴリ別ファイル名に変更（例: reel_upload_*.csv, porter_upload_*.csv）
     global OUTPUT_CSV
     if args.sheet:
         OUTPUT_CSV = _gcop(args.sheet, "upload")
+
+    # 取下再出品②: 保留リストから対象 supply_url を集約 (cat_filter で当該シート分のみ自然に絞られる)
+    relist_only_urls = None
+    if relist_mode:
+        relist_only_urls = set()
+        with open(args.relist, "r", encoding="utf-8-sig", newline="") as _f:
+            for _r in csv.DictReader(_f):
+                _u = (_r.get("supply_url") or "").strip()
+                if _u:
+                    relist_only_urls.add(_u)
+        print(f"🔁 取下再出品②モード: {len(relist_only_urls)}件のURL → cat_filter で当シート分のみスケジュール再出品(2週間後)")
 
     rows = []
     if args.sheet:
@@ -773,10 +884,11 @@ def main():
         _validate_research_metadata(args.sheet, cfg)
         print(f"📊 スプシ読込: {cfg['label']} ({cfg['sheet_id'][:12]}...)\n")
         try:
-            rows = load_targets_from_sheet(cfg)
+            rows = load_targets_from_sheet(cfg, only_urls=relist_only_urls)
         except Exception as e:
             print(f"エラー: スプシ読込失敗: {e}")
-            input("Enterで終了...")
+            if not relist_mode:
+                input("Enterで終了...")
             return
     else:
         try:
@@ -814,6 +926,27 @@ def main():
         price_jpy = row.get('商品価格', '')
         description_jp = row.get('商品説明', '')
         photo_urls = row.get('写真URL', '')
+
+        # 取下再出品②: relist は既存listingの再出品。元eBay listing から **画像 + condition** を継承
+        # (再現性の高い設計)。① 画像=ソース(mercari/1kuji.com)から取り直さず元画像流用(汎用OG/失敗根治)。
+        # ② condition=元の ConditionID を権威に(Claude の画像推定で New↔Used がブレて title marker
+        #    不一致 HOLD になり native Relist 回避策=③非互換 を生んだのを根治。2026-06-28 設計修正)。
+        if relist_mode:
+            _iid = row.get('ItemID', '')
+            try:
+                from ebay_getitem_images import relist_photo_source as _rps, fetch_listing_condition as _flc
+                photo_urls, _note = _rps(True, _iid, photo_urls)
+                if _note:
+                    print(f"    🖼️ {_note}")
+                _orig_cid = _flc(_iid)
+                if _orig_cid:
+                    condition_id_sheet = str(_orig_cid)          # 元 ConditionID を権威に
+                    condition_jp = "新品、未使用" if _orig_cid == 1000 else "中古"  # Claude へ正しい condition を伝える
+                    print(f"    🏷️ relist: 元listingの ConditionID={_orig_cid} を継承({'新品' if _orig_cid==1000 else '中古'})")
+                else:
+                    print(f"    ⚠️ relist: 元 ConditionID 取得不可(itemID={_iid}) → 通常判定で続行")
+            except Exception as _e_ri:
+                print(f"    ⚠️ relist 継承 skip({type(_e_ri).__name__}) → 通常処理で続行")
 
         print(f"[{idx+1}/{len(rows)}] {title_jp[:40]}...")
 
@@ -865,6 +998,14 @@ def main():
             # ロールバック: この try/except ブロックをコメントアウトで完全復元.
             try:
                 from spec_normalizer import normalize_specs, enforce_brand_prefix
+                # 寸法が裸数値(例 "5")だと normalize_specs が <6 を曖昧扱いで dual化できず "5" のまま残る
+                # (= マチ5cm が "2.0 in (5.0 cm)" にならない既知欠陥)。本パイプラインは cm 出力指示なので、
+                # 裸数値の寸法には "cm" を補い、大小に関係なく確実に dual化させる (プロンプト指示の二重保険)。
+                import re as _re_dim
+                for _dk in ("Bag Width", "Bag Height", "Bag Depth"):
+                    _dv = str(item_specifics.get(_dk, "")).strip()
+                    if _re_dim.fullmatch(r"[\d.]+", _dv):
+                        item_specifics[_dk] = f"{_dv} cm"
                 item_specifics = normalize_specs(item_specifics, brand_hint=args.sheet or "")
                 title_en = enforce_brand_prefix(title_en, brand_hint=args.sheet or "")
             except Exception as _e:
@@ -883,9 +1024,21 @@ def main():
                     # L列空欄 → E列(状態)から推定
                     is_new = is_new_condition(condition_jp)
                     final_condition_id = 1000 if is_new else cfg['condition_id']
-                # ピックURL (max 12枚)
-                pic_urls = [u.strip() for u in (photo_urls or '').split('|') if u.strip()][:12]
-                pic_url = '|'.join(pic_urls)
+                # ピックURL: 写真URL列には別商品の写真や出品者プロフ画像(thumb/members)が大量に混在し、
+                # かつ旧[:12]キャップで自商品の写真(14〜20枚)が11枚に削れていた。SKU(m<id>)で自商品の
+                # 写真だけを連番順に抽出し、商品1枚目をギャラリーサムネにする。取れなければ従来挙動に fallback。
+                _allp = [u.strip() for u in (photo_urls or '').split('|') if u.strip()]
+                _mid = re.search(r'm\d{11,12}', url or '')
+                _own = []
+                if _mid:
+                    _pat = re.compile(re.escape(_mid.group(0)) + r'_(\d+)\.')
+                    _own = sorted((u for u in _allp if _pat.search(u)),
+                                  key=lambda u: int(_pat.search(u).group(1)))
+                # eBay PicURL 上限 24。relist時は eBay EPS画像に自前 extra_pics(999.png/banner)を
+                # 混ぜると "mixture of Self Hosted and EPS pictures" で拒否されるため extra 無し
+                # (元listing画像に banner も既にEPSで含まれる。2026-06-28 バッグ relist 失敗で発覚)。
+                from ebay_getitem_images import build_pic_url as _bpu
+                pic_url = _bpu(_own or _allp, cfg.get("extra_pics", []), relist_mode)
                 # 価格決定 (pricing_engine 共通) — eBay市場中央値を取得して反映
                 price_str = re.sub(r"[^0-9]", "", str(price_jpy))
                 cost_jpy = int(price_str) if price_str else 5000
@@ -918,9 +1071,10 @@ def main():
                 # Description: 新品なら NEW.txt、中古なら cfg指定（USED.txt等）
                 desc_template = "NEW.txt" if is_new else cfg.get('description_template', 'USED.txt')
                 tpl_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), desc_template)
-                desc_html = build_description_with_specs(tpl_path, item_specifics)
-                # 送料
-                ship_policy = get_shipping_policy(listing_price)
+                _tanker_note = tanker_color_note(cfg.get('profit_category'), title_en)
+                desc_html = build_description_with_specs(tpl_path, item_specifics, extra_note_html=_tanker_note)
+                # 送料 (V6 mode: category 別 Policy 名)
+                ship_policy = get_shipping_policy(listing_price, cfg.get('profit_category', 'Porter'))
                 # 行構築
                 # リール: 既存imax-64出品も全て 261030 (Sporting Goods > Fishing > Reels)
                 # Claude reel_type は Item Specifics の Reel Type 用に保持
@@ -975,10 +1129,17 @@ def main():
                         pass
 
                 # === 物理ゲート: listing_common.audit_csv_row でerror検出 → HOLDへ ===
+                # 取下再出品②: 無在庫モデルでは「価格が高い→出品しない」判定はしない(在庫リスク0、
+                # 売れたら仕入れる)。元の10件も市場超えで出ていた。よって relist時は価格ALERTのHOLDを
+                # bypass(price_status=GO)。Item Specifics 等 他の物理ゲートは維持。ALERTは可視化継続。
+                _gate_price_status = _price_status
+                if relist_mode and _price_status == "ALERT":
+                    print(f"    🔁 relist: 価格ALERT(median ${_ebay_median:.2f}乖離)だが無在庫方針で出品継続")
+                    _gate_price_status = "GO"
                 from listing_common import gate_row_or_hold as _gate
                 _allowed, _viol = _gate(row_data, category=validate_category,
                                          mercari_state=condition_jp, sku=sku,
-                                         price_status=_price_status, median_usd=_ebay_median)
+                                         price_status=_gate_price_status, median_usd=_ebay_median)
                 if not _allowed:
                     _err_msgs = [f"{f}={i}" for f, i, s in _viol if s == "error"]
                     hold_reasons.extend(_err_msgs)
@@ -992,6 +1153,8 @@ def main():
                     continue
 
                 results.append(row_data)
+                if relist_mode:
+                    append_skumap(args.relist, sku, url, args.sheet)
                 t_ok = "OK" if len(title_en) <= 80 else f"WARN:{len(title_en)}chars"
                 print(f"    {t_ok} ({len(title_en)}字) ${listing_price} SKU={sku} {title_en}")
             else:
@@ -1030,6 +1193,15 @@ def main():
             writer.writeheader()
             writer.writerows(results)
 
+        # Free Shipping 移行 (2026-05-18)
+        try:
+            import sys as _sys_fs
+            _sys_fs.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            from freeshipping_postprocess import transform_csv_to_freeshipping
+            transform_csv_to_freeshipping(OUTPUT_CSV)
+        except Exception as _e:
+            print(f"⚠️ Free Shipping post-process 失敗 (mercari): {type(_e).__name__}: {_e}")
+
         # Step 8 拡張: decision_log に config_version + 使用値を刻印
         try:
             import sys as _sys_dl
@@ -1042,6 +1214,12 @@ def main():
 
         print(f"\n[OK] 完了! 出力: {OUTPUT_CSV}")
         print(f"成功: {len(results)}件 / 失敗・HOLD: {len(errors)}件")
+        # 生成時セルフ監査 (CSV監査くん) — 監査を待たず生成で品質確認
+        try:
+            from listing_common import run_self_audit
+            run_self_audit(OUTPUT_CSV)
+        except Exception as _e:
+            print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
     else:
         print("\n[NG] 出力データなし")
 
@@ -1061,10 +1239,11 @@ def main():
         except Exception:
             pass
 
-    try:
-        input("\nEnterで終了...")
-    except EOFError:
-        pass  # subprocess 実行時(stdin無し)は何もせず終了
+    if not relist_mode:
+        try:
+            input("\nEnterで終了...")
+        except EOFError:
+            pass  # subprocess 実行時(stdin無し)は何もせず終了
 
 if __name__ == "__main__":
     main()

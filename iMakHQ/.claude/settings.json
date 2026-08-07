@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 7)",
       "Bash(PYTHONIOENCODING=utf-8 python tshirt_listing.py --limit 6)",
@@ -26,6 +27,35 @@
     ],
     "additionalDirectories": [
       "C:\\Users\\imax2"
+    ],
+    "deny": [
+      "Bash(python*fix_de_speedpak_shipping.py*)",
+      "Bash(python*ebay_update_all_policies.py*)",
+      "Bash(python*cull_end.py*)",
+      "Bash(python*relist_from_funnel.py*)",
+      "Bash(python*relist_add_from_pending.py*)",
+      "Bash(python*gshock_revise_descriptions.py*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python C:/dev/iMak/iMakHQ/tools/audit_catchup.py"
+          },
+          {
+            "type": "command",
+            "command": "python C:/dev/iMak/iMakHQ/tools/adv_delta.py"
+          }
+        ]
+      }
     ]
   }
 }

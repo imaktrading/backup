@@ -133,3 +133,45 @@ iMakHarvest/
 # 2026-05-09: branch 切替で workspace JSON が書き換わり iMakCatalog 行が消失した同型事故対策
 # uncommitted な workspace 編集が branch 切替で消える問題を構造的に解決するため untracked 化
 *.code-workspace
+
+# === Secrets / credentials (絶対コミット禁止・2026-06-02) ===
+# eBay OAuth トークン等の認証情報。git に入れると流出 = アカウント乗っ取りリスク
+ebay_oauth_token.json
+*oauth_token*.json
+*_token.json
+*.pem
+
+# === 運用データ / 再生成可 出力 (2026-06-14 本元整理) ===
+# funnel 分析出力 (relist ファネル分析の per-run CSV、再生成可)
+iMakHQ/funnel_output/
+# 手動 archive (obsolete コード。git 履歴に旧版が既存=重複)
+iMakHQ/_archive/
+# pre-migration 手動バックアップ snapshot (point-in-time・再生成可)
+_backup/
+# audit_reports の反復 dev 出力 (integrity の test/v2/full/final 系。final 監査 json は個別 track)
+iMakHQ/tools/_audit_reports/integrity_*.md
+# 一番くじ 中間処理ファイル (transient)
+iMak_ichibankuji/pending/intermediate_*.csv
+# G-shock casio_finder の未出品 gap 出力 (再生成可)
+iMakG-shock/casio_finder/unlisted_from_catalog_*.csv
+# Advisor 生成 PPT (binary・再生成可)
+iMakAdvisor/*.pptx
+# DEミラー 送料一括修正の実行状態 (snapshot=rollback用 / done=再開用。listing 実体が正で再取得可)
+# ★共有 index なので、untracked のまま置くと相手セッションの `git add -A` で巻き込まれる
+iMakeBayAPI/de_mirror_fedex_removal_snapshot.json
+iMakeBayAPI/de_mirror_fedex_removal_done.json
+iMakeBayAPI/de_mirror_fedex_removal_failed.json
+iMakeBayAPI/de_speedpak_failed.json
+
+# RESTOCK 用 Chrome profile (runtime・再生成可)
+iMakHQ/chrome_profile_psa_restock/
+
+# dispatch (常駐 watcher / worktree 委譲) の実行時生成物 — 再生成可・履歴に不要
+# 2026-07-29: dispatch.lock を commit すると別プロセスが「実行中」と誤認して永久に止まる
+iMakHQ/review_logs/dispatch.lock
+iMakHQ/review_logs/dispatch_*.log
+iMakHQ/review_logs/dispatch_watch.log
+
+# dispatcher の実行時ロック (実体はプロセス管理用・履歴に残す意味がない)
+iMakHQ/review_logs/*.lock
+iMakHQ/review_logs/*.heartbeat

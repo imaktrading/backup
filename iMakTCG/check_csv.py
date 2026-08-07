@@ -34,12 +34,84 @@ API_KEY_FILE = "API key.txt"
 MAX_TITLE_LEN = 80
 IDEAL_TITLE_MIN = 70
 BANNED_TITLE_WORDS = [
-    "japanese", "japan", "gem mt", "gem-mt", "gemmt",
+    # 2026-06-08: psa_to_csv.py:721 と同期。"japanese"/"japan" は削除 (生成側は 2026-05-01 に既に削除済)。
+    # JP 印刷版を eBay US で売る運用で事実情報・SEO価値高 (TOP競合多数が使用)。spam語のみ残す。
+    # 生成 (psa_to_csv) が SSOT。post_title_fix が "Japanese" pad しても誤検出しないようになる。
+    "gem mt", "gem-mt", "gemmt",
     "mint", "graded", "l@@k", "look", "wow", "nr",
 ]
 
 # 必須Item Specifics（空欄だと品質低下）
 REQUIRED_SPECIFICS = ["C:Game", "C:Set", "C:Card Name", "C:Character", "C:Rarity"]
+
+
+# ★2026-07-29: レアリティ/キャラが **構造的に存在しない** カード種別。
+# Catalog が1件ずつ実機判定して確定したもの (「取れなかった」ではなく「存在しない」)。
+# 出所: hq/requests/2026-07-29_audit_exclusions_final_and_rarity_in_title.md (Advisor 経由)
+#   - dragonball_scg ENERGY MARKER 257件 … 同base に rarity 持ち兄弟 0件
+#   - gundam_tcg RESOURCE 140 / EX RESOURCE 13 / EX BASE 13 … 同上
+# 粒度は **card_type / 番号 prefix 単位**。カテゴリ丸ごとの除外は本当の欠損を見逃すので禁止。
+NO_RARITY_CARD_TYPES = {"don", "resource", "ex resource", "ex base", "energy marker"}
+# 番号 prefix (小文字比較・DON! / Gundam RESOURCE のような番号体系)
+# 2026-07-30 追加: Pokemon 番号 prefix 系 (Advisor 2026-07-29 応答 §1)
+#   MC-* / SI-*  : スタートデッキ100 系 (1,185件)。デッキ収録カードは印刷レアリティ記号なし
+#   CP4-* / CP5- : Classic 系 (件数未確認、要実測)。印刷レアリティ表記なし
+# 番号 prefix 単位で判定 (C:Set の表記依存は禁止=Advisor 明示指示)。
+NO_RARITY_NUMBER_PREFIXES = (
+    "don-", "rp-",                 # One Piece DON!! / Gundam リソース
+    "mc-", "si-", "cp4-", "cp5-",  # Pokemon スタートデッキ100 / Classic 系 (2026-07-30)
+)
+# キャラクター概念が無い種別 (name='リソース' / 'エナジーマーカー')
+NO_CHARACTER_CARD_TYPES = {"resource", "ex resource", "ex base", "energy marker"}
+
+# ★2026-07-30: Pokemon の hi-class パック系 set code prefix 単位除外。
+# Advisor 応答 (2026-07-29): 「set 名の部分一致は却下、set code prefix で判定してください。
+# C:Set の表記は生成側の都合で変わるので、判定が表記に依存すると静かに壊れる」。
+# 対象は Advisor 提示の 11 件出品済 (公式 pokemon-card.com に rarity 表記が無い hi-class 系):
+#   S8b   VMAXクライマックス       (S8b-101, S8b-126)
+#   M2a   MEGAドリームex           (M2a-012, M2a-079)  ← 2026-07-29 実害はここ
+#   SM8b  GXウルトラシャイニー     (SM8b-001, SM8b-089, SM8b-105)
+#   SV4a  シャイニートレジャーex   (SV4a-055)
+#   S6K   (7/29 一覧の 1 件)       (S6K-037)
+#   XY    プロモ系                 (XY-139, XY-140)
+#   HSZm  BW期プロモ               (HSZm-014)  ← セット同定不能で別途空欄確定
+# 番号 prefix は小文字比較 (card_number.lower().startswith)。
+# 判定粒度: `S8b-XXX` の "S8b-" 部分。product_id 全体でなく先頭 (英字+数字+"-") のみ照合。
+NO_RARITY_POKEMON_SET_PREFIXES = (
+    "s8b-", "m2a-", "sm8b-", "sv4a-", "s6k-", "xy-", "hszm-",
+)
+
+
+def required_specifics_for_card(card_number, card_type=""):
+    """カード種別に応じた必須Item Specifics(純関数, test可)。
+
+    DON!!カード(One Piece、card number 'DON-' prefix)は構造的に rarity を持たない特殊カード
+    → C:Rarity を必須から外す。C:Type-on-bags と同型の「非該当spec誤検出」で、DON カードが
+    毎監査で「C:Rarity 空」を出していた根本対策(2026-07-02)。won't-fix で隠すのでなく監査
+    ルール自体を賢くする方針(Gemini 推奨: 恒久ロジックで識別できる例外はルール化が正)。
+
+    2026-07-29: 同じ理屈で **Gundam RESOURCE系 / DBSCG ENERGY MARKER** も除外する
+    (Catalog 実機判定で「存在しない」と確定)。これらは C:Character も持たない。
+
+    2026-07-30: Pokemon hi-class パック系 set code prefix (S8b/M2a/SM8b/SV4a/S6K/XY/HSZm)
+    + スタートデッキ100 / Classic 系 (MC/SI/CP4/CP5) を C:Rarity 除外に追加
+    (公式 pokemon-card.com に rarity 表記無し = catalog 側で構造的に取得不能)。
+    Advisor 応答 (2026-07-29): set 名部分一致は却下、set code prefix 単位で判定。
+    """
+    num = str(card_number).strip().lower()
+    ctype = str(card_type).strip().lower()
+    drop = set()
+    if num.startswith(NO_RARITY_NUMBER_PREFIXES) or ctype in NO_RARITY_CARD_TYPES:
+        drop.add("C:Rarity")
+    # Pokemon set code prefix (hi-class + Classic 系)。既存 NO_RARITY_NUMBER_PREFIXES と
+    # 別配列で管理する理由: 前者は franchise 横断 (DON!!/RESOURCE) だが本群は Pokemon 専用
+    # で追加/削除の粒度が違う。監査ノイズ削減目的の除外は catalog の rarity 有無に追随して
+    # 頻繁に更新される見込み。
+    if num.startswith(NO_RARITY_POKEMON_SET_PREFIXES):
+        drop.add("C:Rarity")
+    if ctype in NO_CHARACTER_CARD_TYPES:
+        drop.add("C:Character")
+    return [s for s in REQUIRED_SPECIFICS if s not in drop] if drop else REQUIRED_SPECIFICS
 # あると望ましいItem Specifics
 RECOMMENDED_SPECIFICS = [
     "C:Card Type", "C:Features", "C:Finish", "C:Attribute/MTG:Color",
@@ -134,110 +206,6 @@ def search_ebay_active(token, keywords, limit=50):
     return _fetch_mg(token, keywords, limit=limit)
 
 
-def fetch_top_seller_specs(token, items, max_items=3):
-    """TOPセラーのリスティングからItem Specificsを取得して集約"""
-    top_items = []
-    for item in items:
-        seller = item.get("seller", {})
-        score = seller.get("feedbackScore", 0)
-        pct_str = seller.get("feedbackPercentage", "0")
-        try:
-            pct = float(pct_str)
-        except (ValueError, TypeError):
-            pct = 0
-        if score >= TOP_SELLER_MIN_FEEDBACK and pct >= TOP_SELLER_MIN_PERCENTAGE:
-            item_id = item.get("itemId", "")
-            if item_id:
-                top_items.append(item_id)
-        if len(top_items) >= max_items:
-            break
-
-    if not top_items:
-        for item in items[:max_items]:
-            item_id = item.get("itemId", "")
-            if item_id:
-                top_items.append(item_id)
-
-    all_specs = []
-    for item_id in top_items:
-        try:
-            url = f"https://api.ebay.com/buy/browse/v1/item/{item_id}"
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-                "Content-Type": "application/json",
-            }
-            resp = requests.get(url, headers=headers, timeout=15)
-            if resp.status_code != 200:
-                continue
-            data = resp.json()
-            aspects = data.get("localizedAspects", [])
-            specs = {}
-            for asp in aspects:
-                name = asp.get("name", "")
-                value = asp.get("value", "")
-                if name and value:
-                    specs[name] = value
-            if specs:
-                all_specs.append(specs)
-            time.sleep(0.3)
-        except Exception:
-            pass
-
-    if not all_specs:
-        return {}
-
-    from collections import Counter
-    merged = {}
-    all_keys = set()
-    for specs in all_specs:
-        all_keys.update(specs.keys())
-    for key in all_keys:
-        values = [s[key] for s in all_specs if key in s]
-        if values:
-            merged[key] = Counter(values).most_common(1)[0][0]
-    return merged
-
-
-# eBay Item Specifics名 → CSV列名
-EBAY_SPEC_TO_CSV = {
-    "Game": "C:Game", "Set": "C:Set", "Card Type": "C:Card Type",
-    "Card Name": "C:Card Name", "Character": "C:Character",
-    "Card Number": "C:Card Number", "Rarity": "C:Rarity",
-    "Features": "C:Features", "Finish": "C:Finish",
-    "Attribute/MTG:Color": "C:Attribute/MTG:Color",
-    "Cost": "C:Cost", "Attack/Power": "C:Attack/Power",
-}
-
-
-def compare_item_specifics(row, top_specs):
-    """自社リスティング vs TOPセラーのItem Specificsを比較"""
-    findings = []
-    if not top_specs:
-        return findings
-
-    for ebay_name, csv_col in EBAY_SPEC_TO_CSV.items():
-        my_val = get_col(row, csv_col).strip()
-        top_val = top_specs.get(ebay_name, "").strip()
-
-        if not top_val:
-            continue
-
-        if not my_val and top_val:
-            findings.append(("WARN", f"'{ebay_name}' が空 → TOPセラーは「{top_val}」"))
-        elif my_val != top_val and my_val and top_val:
-            findings.append(("INFO", f"'{ebay_name}' 自分「{my_val}」 vs TOP「{top_val}」"))
-
-    # TOPセラーにあって自分のCSVにない項目
-    known_csv_cols = set(EBAY_SPEC_TO_CSV.values())
-    for ebay_name, top_val in top_specs.items():
-        if ebay_name not in EBAY_SPEC_TO_CSV and top_val:
-            # CSV列に対応がない項目は情報として表示
-            pass  # 既存マッピング外は無視
-
-    return findings
-
-
 def classify_sellers(items):
     """競合をTOPセラーと全セラーに分類して価格情報を返す"""
     all_prices = []
@@ -288,7 +256,9 @@ def build_search_query(row):
     game_short = {
         "Dragon Ball Super Card Game": "Dragon Ball",
         "One Piece Card Game": "One Piece",
-        "Gundam CCG": "Gundam",
+        "One Piece CCG": "One Piece",  # 2026-05-31: eBay 正規値、 検索 query は短縮
+        "Gundam CCG": "Gundam",  # 旧 listing 互換
+        "Gundam Card Game": "Gundam",  # 2026-05-31: 当店 catalog 正規値
         "Pokemon": "Pokemon",
         "Pokémon TCG": "Pokemon",
     }.get(game, game)
@@ -344,6 +314,42 @@ def load_cost_data(csv_path):
 
 
 # ===== 内部バリデーション =====
+_CATALOG_SET_REF = None  # {set_name_ebay: 主流total} を一度だけ catalog から構築・cache
+
+
+def _catalog_set_consistency(set_name, card_number, year=""):
+    """C:Set の整合チェック2種 (2026-06-07 set誤マップ事故対策)。矛盾なら理由、OK/判定不能は None。
+
+    (A) Set ↔ カード番号total: catalog多数派total と食い違い (cross-era/total違いを検出)
+    (B) Set世代 ↔ Year: set名の世代と Year が年代レンジ外 (catalog汚染に依存せず堅い)
+    """
+    global _CATALOG_SET_REF
+    try:
+        import sys as _sys, os as _os
+        _t = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakHQ", "tools")
+        if _t not in _sys.path:
+            _sys.path.insert(0, _t)
+        from catalog_set_audit import set_total_reference, row_set_issue, eb_era, ERA_YEARS
+        if _CATALOG_SET_REF is None:
+            _CATALOG_SET_REF = set_total_reference()
+        # (A) total 整合
+        issue = row_set_issue(set_name, card_number, _CATALOG_SET_REF)
+        if issue:
+            return issue
+        # (B) 世代×Year 整合 (catalog参照に依存しない)
+        import re as _re
+        ee = eb_era(set_name or "")
+        m = _re.search(r"(20\d\d)", str(year or ""))
+        if ee in ERA_YEARS and m:
+            y = int(m.group(1)); lo, hi = ERA_YEARS[ee]
+            if not (lo <= y <= hi):
+                return (f"Set世代↔Year 不整合: Set='{set_name}'(世代 {ee}:{lo}-{hi}) なのに Year={y} "
+                        f"→ set_name_ebay 誤マップ疑い")
+        return None
+    except Exception:
+        return None
+
+
 def validate_row(row, row_idx):
     """1行のCSVデータをバリデーション。問題リストを返す"""
     issues = []
@@ -383,26 +389,37 @@ def validate_row(row, row_idx):
     if condition != "2750":
         issues.append(("ERROR", f"ConditionID が 2750 でない: {condition}"))
 
-    # --- 価格・送料整合性 ---
+    # --- 価格・送料整合性 (V6 mode: DDP-{group}-P{tier} / V5 mode: tier 名) ---
     try:
         price_f = float(price)
-        expected_policies = [
-            (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
-            (300, "200-300"), (400, "300-400"), (500, "400-500"),
-            (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
-        ]
-        expected = "800-1000"
-        for threshold, policy in expected_policies:
-            if price_f <= threshold:
-                expected = policy
-                break
+        # listing_common.get_shipping_policy_name() 経由で期待値取得 (yaml v6_pricing.enabled で自動切替)
+        try:
+            import sys, os
+            _eb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI")
+            if _eb not in sys.path:
+                sys.path.insert(0, _eb)
+            from listing_common import get_shipping_policy_name
+            expected = get_shipping_policy_name(price_f, "TCG(PSA10)")
+        except Exception:
+            # fallback: 旧 V5 tier 名
+            expected_policies = [
+                (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+                (300, "200-300"), (400, "300-400"), (500, "400-500"),
+                (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+            ]
+            expected = "800-1000"
+            for threshold, policy in expected_policies:
+                if price_f <= threshold:
+                    expected = policy
+                    break
         if shipping != expected:
             issues.append(("WARN", f"送料ポリシー '{shipping}' が価格${price}に対して不一致（期待: {expected}）"))
     except ValueError:
         issues.append(("ERROR", f"価格が数値でない: {price}"))
 
-    # --- 必須Item Specifics ---
-    for spec in REQUIRED_SPECIFICS:
+    # --- 必須Item Specifics (card-aware: DON!!カードは C:Rarity 非該当) ---
+    for spec in required_specifics_for_card(get_col(row, "C:Card Number"),
+                                            get_col(row, "C:Card Type")):
         val = get_col(row, spec)
         if not val:
             issues.append(("WARN", f"必須Item Specific '{spec}' が空"))
@@ -416,6 +433,12 @@ def validate_row(row, row_idx):
     # --- PSA鑑定番号 ---
     if not cert or not cert.isdigit():
         issues.append(("ERROR", f"PSA鑑定番号が不正: {cert}"))
+
+    # --- カタログ内部整合: Set↔カード番号total / Set世代↔Year (2026-06-07 set誤マップ事故対策) ---
+    _setissue = _catalog_set_consistency(get_col(row, "C:Set"), get_col(row, "C:Card Number"),
+                                         get_col(row, "C:Year Manufactured"))
+    if _setissue:
+        issues.append(("ERROR", _setissue))
 
     return issues
 
@@ -459,10 +482,14 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
         gap_pct = (target_usd - ref_median) / ref_median * 100 if ref_median > 0 else 999
         gap_limit_pct = tier_gap_limit * 100
 
-        # 市場価格での利益計算
+        # 市場価格で売れた場合の利益(参考)。コストプラス出品では実際の出品価格で売るので非該当。
         revenue_jpy = ref_median * p["exchange_rate"]
         profit_jpy = revenue_jpy * net_ratio - costs_jpy
         profit_rate = profit_jpy / revenue_jpy if revenue_jpy > 0 else 0
+        # 実際の出品価格(コストプラス=target_usd)で売れた場合の利益。= 我々が実際に list する価格。
+        # 構造上 黒字(cost+margin)。AI レビューにはこちらを渡し「赤字」誤認を防ぐ(2026-06-21)。
+        list_profit_jpy = target_usd * p["exchange_rate"] * net_ratio - costs_jpy
+        list_profit_rate = list_profit_jpy / (target_usd * p["exchange_rate"]) if target_usd > 0 else 0
 
         calc = {
             "cost_jpy": cost_jpy,
@@ -471,6 +498,8 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
             "market_usd": ref_median,
             "profit_jpy": profit_jpy,
             "profit_rate": profit_rate,
+            "list_profit_jpy": list_profit_jpy,
+            "list_profit_rate": list_profit_rate,
             "gap_pct": gap_pct,
             "tier_profit": tier_profit,
             "gap_limit_pct": gap_limit_pct,
@@ -503,10 +532,11 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
                         f"全体中央値${ref_median:.0f} (乖離{gap_pct:.0f}%/許容{gap_limit_pct:.0f}%) → "
                         f"${target_usd:.0f}で出品")
         else:
-            gate_status = "NOGO"
-            gate_msg = (f"❌ NO-GO — 仕入¥{cost_jpy:,} → "
+            gate_status = "NOGO"   # 内部status名は維持(market_log/集計の互換)。表示は「高め(出品)」。
+            # 2026-06-20 価格NO-GO廃止: コストプラス(損なし)+無在庫+既存メンテ追跡 → 価格で見送らない。
+            gate_msg = (f"🔵 高め — 仕入¥{cost_jpy:,} → "
                         f"全体中央値${ref_median:.0f} (乖離{gap_pct:.0f}% > 許容{gap_limit_pct:.0f}%) → "
-                        f"CSV除外済")
+                        f"出品(既存メンテ追跡)")
 
         findings.append(("GATE", gate_msg))
         gate_result = {
@@ -516,24 +546,8 @@ def compare_with_competitors(row, competitors, total_count, cost_jpy=None):
             "total": total_count,
         }
 
-    # 競合タイトルからキーワード傾向を抽出
-    comp_words = {}
-    for item in competitors:
-        t = item.get("title", "").lower()
-        for w in t.split():
-            w = w.strip('.,;:!?()[]"\'')
-            if len(w) >= 3 and w not in {"psa", "the", "and", "for", "new"}:
-                comp_words[w] = comp_words.get(w, 0) + 1
-
-    my_words = set(my_title.lower().split())
-    frequent = sorted(comp_words.items(), key=lambda x: -x[1])
-    missing_keywords = []
-    for word, count in frequent[:20]:
-        if count >= 2 and word not in my_words and word not in {"card", "cards", "game"}:
-            missing_keywords.append(f"{word}({count}件)")
-    if missing_keywords:
-        findings.append(("INFO", f"競合で頻出だが自分のタイトルにない語: {', '.join(missing_keywords[:5])}"))
-
+    # 2026-06-15: 競合タイトルのキーワード傾向抽出は廃止。タイトルは catalog(SSOT)決定論生成なので
+    # 競合語の注入は推測(catalog-official-only/fail-closed 違反)。価格ゲートのみ残す。
     return findings, gate_result
 
 
@@ -576,7 +590,13 @@ def claude_review(rows, all_issues, all_comp_findings, all_gates):
         gate_text = ""
         if all_gates[i]:
             g = all_gates[i]
-            gate_text = f" | GATE: {g['status']} (市場${g['ref_median']:.0f}, 利益¥{g['calc']['profit_jpy']:,.0f}, {g['calc']['profit_rate']:.0%})"
+            # AI には **出品価格(コストプラス)で売れた場合の利益**を渡す(= 我々が実際に list する価格)。
+            # 市場中央値での利益(profit_jpy)は「中央値で売った場合の参考」で、コストプラス出品では非該当。
+            # これを渡すと高め品で負になり AI が「赤字/値下げ」と誤助言する → list_profit を正とする。
+            _c = g['calc']
+            gate_text = (f" | GATE: {g['status']} | 出品価格${_c['target_usd']:.0f}で売れた場合の利益"
+                         f"¥{_c.get('list_profit_jpy', 0):,.0f}({_c.get('list_profit_rate', 0):.0%})"
+                         f" | 市場中央値${g['ref_median']:.0f}(参考・コストプラス出品では売値はこの限りでない)")
 
         summary_lines.append(
             f"#{i+1} Title: {title}\n"
@@ -593,23 +613,39 @@ LISTINGS:
 
 Review each listing for:
 1. TITLE QUALITY: Is it keyword-optimized? Does it include the most searchable terms? Max 80 chars.
-2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at or slightly below TOP seller median. For RELAX items (薄商い: 出品≤10件, median 不安定で gate skip 適用), recommend cost-plus listing as-is (機会損失回避). For NO-GO items, recommend not listing.
+2. PRICING: コストプラス価格(=出品価格)が SSOT。GATE の「出品価格で売れた場合の利益」は構造上 黒字。
+   - **絶対にしてはいけない**: 「赤字」と書くこと(出品価格で売る=損はしない。市場中央値の利益は"中央値で
+     売った場合の参考"でコストプラス出品では非該当。これを根拠に赤字判定しない)。「値下げ推奨」「出品しない/
+     見送り」も書かない(値段は維持。無在庫=売れなくても損なし=free option)。
+   - GO items: TOP seller median 前後を提案して可。RELAX/高め items: **コストプラス価格のまま維持**を推奨。
+   - 高め(target>median 乖離超過)は **そのまま出品 + 既存メンテ追跡**(sell-through 監視 / より安い仕入れ
+     再探索 / median 上昇時に price-revise)を flag。値下げ強制でなく「追跡」と書く。
 3. ITEM SPECIFICS: Are important fields missing that competitors typically fill?
 4. OVERALL: Any patterns or systematic issues across all listings?
 
 Rules to enforce:
 - "PSA 10" must be at the start of every title
-- No forbidden words: Japanese, GEM MT, Japan, Mint, Graded, L@@K
-- Game short names: One Piece TCG, Dragon Ball SCG, Gundam CCG, Pokemon
+- Forbidden words in TITLE (spam/redundant): GEM MT, Mint, Graded, L@@K
+  ★ "Japanese" は **日本版カードの必須言語表記 = 有効な検索語**。禁止語ではない。
+    タイトルに "Japanese" が在っても **絶対に flag/削除助言しないこと**(意図的に入れている)。
+- Game short names in TITLE (= iMakKeywords PDF Q1 2026 Rank 準拠):
+  * Pokemon (never "Pokemon TCG") / Yugioh (no hyphen) / One Piece (never "One Piece TCG") /
+    Dragon Ball SCG / Gundam TCG (never "Gundam Card Game" in title)
+  ★ タイトルが既に "Pokemon"(= "Pokemon TCG" でない)なら **正しい**。下の C:Game (Item Specifics)
+    が "Pokémon TCG" でも、それは eBay 正規値で **タイトルとは別物**。タイトルを
+    "Pokemon TCG → Pokemon" に直せ等と助言してはいけない(タイトルは既に正しい)。
+- Finish 追加禁止 ("Foil"/"Holo" 等 SNAD クレーム直結リスク)
+- C:Game (= Item Specifics、タイトルとは別) は eBay 正規値: Pokémon TCG / Yu-Gi-Oh! TCG / One Piece CCG / Dragon Ball Super Card Game / Gundam Card Game
 - Title should be 70-80 characters ideally
 
 Respond in Japanese. Be concise and actionable. Use bullet points.
 Format: まず各リスティングの個別フィードバック、最後に全体の改善提案。"""
 
     try:
+        from card_identifier import CLAUDE_MODEL  # モデル名 SSOT (1箇所集約)
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_MODEL,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -645,6 +681,43 @@ def main(csv_path: str | None = None):
     print(f"対象: {csv_path}")
     headers, rows = load_csv(csv_path)
     print(f"件数: {len(rows)} リスティング")
+
+    # === 禁止 field 強制空欄化 (= W チェック gate、 2026-06-01 追加) ===
+    # memory:finish_only_blank_other_keep_processed
+    # variant_meta 等の別経路から finish 投入される事故防止 = 最終 gate で物理空欄化.
+    # 違反検出時: 警告 log + 自動空欄化 + CSV 上書き保存.
+    FORBIDDEN_BLANK_FIELDS = ["C:Finish"]
+    _forbidden_hits = []
+    for fld in FORBIDDEN_BLANK_FIELDS:
+        if fld not in headers:
+            continue
+        idx = headers.index(fld)
+        for i, r in enumerate(rows, 1):
+            if idx < len(r) and r[idx]:
+                _forbidden_hits.append((i, fld, r[idx]))
+                r[idx] = ""
+    if _forbidden_hits:
+        print()
+        print("=" * 60)
+        print(f"⚠️ 禁止 field 強制空欄化 ({len(_forbidden_hits)} 件、 SNAD リスク回避):")
+        for i, fld, val in _forbidden_hits[:10]:
+            print(f"  [{i}] {fld}={val!r} → \"\" 強制空欄化")
+        # CSV 上書き保存 (= 入稿前に物理修正、 入稿は空欄状態で行われる)
+        try:
+            import csv as _csv
+            _bak = csv_path + ".bak_forbidden_strip"
+            import shutil as _sh
+            _sh.copy(csv_path, _bak)
+            with open(csv_path, "w", newline="", encoding="utf-8") as _f:
+                _w = _csv.writer(_f, quoting=_csv.QUOTE_NONNUMERIC)
+                _w.writerow(headers)
+                _w.writerows(rows)
+            print(f"  📦 backup: {_bak}")
+            print(f"  ✏️ CSV 上書き済 (= 禁止 field 空欄化反映)")
+        except Exception as _e:
+            print(f"  ⚠️ CSV 上書き失敗: {type(_e).__name__}: {_e}")
+        print("=" * 60)
+        print()
 
     # 仕入値データ読み込み
     cost_data = load_cost_data(csv_path)
@@ -705,16 +778,8 @@ def main(csv_path: str | None = None):
                 icon = {"ERROR": "❌", "WARN": "⚠️", "INFO": "ℹ️", "GATE": "🏁"}.get(sev, "•")
                 print(f"  {icon} {msg}")
 
-            # 3) TOPセラーItem Specifics比較
-            if competitors:
-                top_specs = fetch_top_seller_specs(token, competitors)
-                if top_specs:
-                    spec_findings = compare_item_specifics(row, top_specs)
-                    for sev, msg in spec_findings:
-                        icon = {"ERROR": "❌", "WARN": "⚠️", "INFO": "ℹ️"}.get(sev, "•")
-                        print(f"  {icon} {msg}")
-                    comp_findings.extend(spec_findings)
-
+            # 2026-06-15: TOPセラー Item Specifics 比較は廃止。生成は catalog(SSOT)決定論なので
+            # 競合値は使わない(取り込むと catalog-official-only/fail-closed 違反)。市場は価格ゲートのみ参照。
             time.sleep(0.5)  # API rate limit
         else:
             comp_findings.append(("INFO", "eBay API未接続のため競合比較スキップ"))
@@ -763,9 +828,10 @@ def main(csv_path: str | None = None):
         else:
             nogo_count += 1
             c = gate["calc"]
-            print(f"  [{i+1}] {title_short}... → ❌ NO-GO 出品{gate['total']}件 ${c['market_usd']:.0f} 乖離{c['gap_pct']:.0f}% > 許容{c['gap_limit_pct']:.0f}%")
+            # 2026-06-20 価格NO-GO廃止: 高めは除外せず出品 + 既存メンテ追跡(excluder が高めとして記録)。
+            print(f"  [{i+1}] {title_short}... → 🔵 高め 出品{gate['total']}件 ${c['market_usd']:.0f} 乖離{c['gap_pct']:.0f}% > 許容{c['gap_limit_pct']:.0f}% → 出品(既存メンテ追跡)")
 
-    print(f"\n  結果: ✅ GO {go_count} / 🔓 緩和 {relax_count} / 🟡 保留 {hold_count} / ❌ NO-GO {nogo_count} / ⬜ 不明 {no_data_count}")
+    print(f"\n  結果: ✅ GO {go_count} / 🔓 緩和 {relax_count} / 🟡 保留 {hold_count} / 🔵 高め(出品) {nogo_count} / ⬜ 不明 {no_data_count}")
 
     # === チェックサマリー ===
     print(f"\n{'═'*60}")

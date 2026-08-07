@@ -1,0 +1,39 @@
+{
+  "sheet": "LOW(G-shock)",
+  "sheet_id": "1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0",
+  "gid": 851100680,
+  "col": "AI(idx34)",
+  "date": "2026-06-11",
+  "entries": [
+    {
+      "row": 202,
+      "old": "GBX-100NS-1",
+      "new": "GBX-100NS-1JF"
+    },
+    {
+      "row": 299,
+      "old": "GA-2100-1A1",
+      "new": "GA-2100-1A1JF"
+    },
+    {
+      "row": 379,
+      "old": "GX-56MF-1",
+      "new": "GX-56MF-1JF"
+    },
+    {
+      "row": 425,
+      "old": "G-5600UE-1",
+      "new": "G-5600UE-1JF"
+    },
+    {
+      "row": 434,
+      "old": "DW-5600UBB-1",
+      "new": "DW-5600UBB-1JF"
+    },
+    {
+      "row": 435,
+      "old": "DW-5600UE-1",
+      "new": "DW-5600UE-1JF"
+    }
+  ]
+}

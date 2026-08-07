@@ -19,8 +19,14 @@ import pokemon_card_jp
 import bandai_tcg_plus
 
 # iMakCatalog (Phase 1: One Piece TCG を bandai_jp.py 直接スクレイプから DB lookup へ移行)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "iMakCatalog"))
+# 2026-05-28: separated worktree (= C:/dev/iMak_catalog/iMakCatalog) を優先参照
+# 本元 worktree (= ../iMakCatalog) は master branch 古いため、 variant_meta.py 等の新 module が無い
+_CATALOG_SEPARATED = r"C:/dev/iMak_catalog/iMakCatalog"
+if os.path.isdir(_CATALOG_SEPARATED):
+    sys.path.insert(0, _CATALOG_SEPARATED)
+else:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "iMakCatalog"))
 from integrations import psa_to_csv as catalog_psa
 
 try:
@@ -32,10 +38,11 @@ except Exception:
 # build_row() 等で動的 import されるため、モジュールロード時にパスを通しておく必要あり
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
 from listing_core import get_csv_output_path as _gcop  # CSV出力先の中央集約用 (iMakHQ/csv_output/<project>_upload_<ts>.csv)
+from chrome_util import detect_chrome_major  # uc version_main を実Chromeから検出 (数値ハードコード禁止)
 
 # ===== 設定 =====
 CERTS_FILE = "certs.txt"
-DESCRIPTION_FILE = "PSA10.txt"
+DESCRIPTION_FILE = "PSA10_snkrdunk.txt"  # 防衛テンプレ (= Stock Photo + cert 違う可能性 明記) を全 TCG listing 適用
 DEFAULT_PRICE = 100.00
 SCHEDULE_WEEKS = 2
 
@@ -56,6 +63,40 @@ except FileNotFoundError:
     ANTHROPIC_API_KEY = None
 
 PIC_URL = "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main/999.png"
+
+# eBay PicURL 制約 (ErrorCode 20002): 1本 500 字以内 / 全体 3975 字以内。
+_PIC_URL_MAX_LEN = 500
+# 本物の PSA カード画像 CDN (psa_cache CardImageUrl と一致)。
+_PSA_CARD_CDN = "d1htnxwo4o0jhw.cloudfront.net"
+# 画像でない host (トラッキング/解析ビーコン) と装飾/プレースホルダ。DOM に紛れる gomi を弾く。
+# 2026-07-24: bat.bing.com ビーコン(582字)と table-image-ink プレースホルダが PicURL に混入し
+# ErrorCode 20002 で入稿失敗 (cert 55542036 Vaporeon)。従来 filter ['cert','card','psa','grading']
+# はビーコンURL内に埋め込まれた psacard.com/cert を拾って誤通過していた。
+_PIC_TRACKER_HOSTS = ("bat.bing", "bing.com", "google-analytics", "googletagmanager",
+                      "doubleclick", "facebook.com", "/action/", "gtm=", "/collect?")
+_PIC_PLACEHOLDER = ("table-image", "placeholder", "spacer", "blank.", "sprite", "/logo")
+
+
+def _is_real_card_image(src):
+    """DOM から拾った img src が「本物の PSA カード画像」か判定 (トラッキング/装飾を除外)。純関数."""
+    s = (src or "").strip().lower()
+    if not s.startswith("http"):
+        return False
+    if len(src) > _PIC_URL_MAX_LEN:      # eBay 制約超 = そもそも載せられない
+        return False
+    path = s.split("?", 1)[0]
+    if _PSA_CARD_CDN in s and "/cert/" in path:   # = 確実に本物のカード画像
+        return True
+    if any(h in s for h in _PIC_TRACKER_HOSTS):   # トラッキング/ビーコン host は明確に除外
+        return False
+    if any(p in path for p in _PIC_PLACEHOLDER):  # プレースホルダ/装飾を除外
+        return False
+    # 汎用: 画像拡張子で終わる + 従来キーワードを含むものだけ許可 (query 付きは path で判定)
+    is_img = path.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
+    has_kw = any(x in s for x in ("cert", "card", "psa", "grading"))
+    return is_img and has_kw
+
+
 RETURN_POLICY = "No return"
 PAYMENT_POLICY = "SALE"
 LOCATION = "Osaka"
@@ -232,7 +273,6 @@ EBAY_SPEC_TO_CSV = {
     "Year Manufactured": "C:Year Manufactured",
     "Country of Origin": "C:Country of Origin",
     "Franchise": "C:Franchise",
-    "Age Level": "C:Age Level",
     "Autographed": "C:Autographed",
     "Vintage": "C:Vintage",
     "Material": "C:Material",
@@ -244,6 +284,8 @@ EBAY_SPEC_TO_CSV = {
     "Cost": "C:Cost",
     "Attack/Power": "C:Attack/Power",
     "Defense/Toughness": "C:Defense/Toughness",
+    "HP": "C:HP",
+    "Stage": "C:Stage",
     "Card Condition": "C:Card Condition",
 }
 
@@ -251,7 +293,7 @@ EBAY_SPEC_TO_CSV = {
 SPEC_NO_OVERRIDE = {
     "C:Grade", "C:Professional Grader", "C:Graded",
     "C:Manufacturer", "C:Language", "C:Country of Origin",
-    "C:Year Manufactured", "C:Age Level", "C:Autographed",
+    "C:Year Manufactured", "C:Autographed",
     "C:Vintage", "C:Material", "C:Customized",
 }
 
@@ -262,14 +304,186 @@ RARITY_PATTERN = re.compile(
 )
 
 def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "800-1000"
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由)."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, "TCG(PSA10)")
+    except Exception:
+        for threshold, policy in SHIPPING_POLICIES:
+            if price <= threshold:
+                return policy
+        return "800-1000"
 
 def get_schedule_time():
     future = datetime.utcnow() + timedelta(weeks=SCHEDULE_WEEKS)
     return future.strftime("%Y-%m-%d %H:%M:%S")
+
+
+_EBAY_FILTER_AVAILABLE = None
+_EBAY_FILTER_REPORT = {
+    "validated": 0,           # 正規化で eBay 正規値に書き換え
+    "passthrough": 0,         # validate 戻り値が入力と同じ (= 一致 or FREE_TEXT B 案)
+    "blanked": 0,             # SELECTION_ONLY で不在 → 空欄
+    "truncated": 0,           # 文字数制限超 → 切詰
+    "required_blank": 0,      # 必須 field が空欄 (= 出品エラーリスク警告)
+    "jp_blanked": 0,          # Item Specifics に日本語混入 → fail-closed 空欄化
+    "blanked_samples": [],
+    "truncated_samples": [],
+    "required_blank_samples": [],
+    "jp_blanked_samples": [],
+}
+
+# 日本語 codepoint (ひらがな/カタカナ/CJK/半角カナ)。英単語 "Japanese" や em-dash(—)
+# は含まれないので影響なし。
+_JP_CHAR_RE = re.compile(r'[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]')
+
+
+def _contains_japanese(s):
+    """文字列に日本語 codepoint が含まれるか (Item Specifics fail-closed ガード用)."""
+    return bool(_JP_CHAR_RE.search(str(s or "")))
+
+
+def _get_ebay_filter():
+    global _EBAY_FILTER_AVAILABLE
+    if _EBAY_FILTER_AVAILABLE is None:
+        try:
+            import ebay_filter_masters as _ef  # sys.path に C:/dev/iMak_catalog/iMakCatalog 済
+            _EBAY_FILTER_AVAILABLE = _ef
+        except Exception as _e:
+            print(f"  ⚠️ ebay_filter_masters import 失敗 (= validate skip): {_e}")
+            _EBAY_FILTER_AVAILABLE = False
+    return _EBAY_FILTER_AVAILABLE if _EBAY_FILTER_AVAILABLE else None
+
+
+# eBay SELECTION_ONLY だが eBay が裏で受付ける特殊値の whitelist
+# 例: Country of Origin = "Does not apply" (= グローバル CLAUDE.md 方針)
+#   eBay 公式 API list には未登録だが、 出品は通る。 空欄にすると eBay AI が
+#   勝手に Japan 等を補完するため、 明示的に "Does not apply" を入れる必要あり。
+EBAY_FILTER_SPECIAL_BYPASS = {
+    "Country of Origin": {"does not apply", "japan"},  # NFKC+lower 正規化済 で比較
+}
+
+
+def _sample_append(key, sample, cap=20):
+    if len(_EBAY_FILTER_REPORT[key]) < cap:
+        _EBAY_FILTER_REPORT[key].append(sample)
+
+
+def apply_ebay_filter_to_row(row, headers, category="tcg"):
+    """row 内 C:<aspect> 値を eBay 正規値 validate.
+
+    3 ケース処理 (= memory:official_x_ebay_filter_max_activation):
+      - 一致              → eBay 正規値 (= validate_value で NFKC 正規化済 return)
+      - FREE_TEXT 不在    → catalog 値そのまま (= validate_value 改修済 B 案)
+      - SELECTION_ONLY 不在 → 空欄 (= validate_value None)
+
+    Gemini 改善 B 同梱:
+      - aspect_required + 空欄 → 警告 log (= 出品エラーリスク)
+      - 文字数制限超          → truncation
+    """
+    # 2026-06-03 fail-closed 日本語ガード (ef 有無に関わらず最優先で実行 = validate skip 時も
+    # 日本語を出さない)。Item Specifics に日本語 codepoint が混入したら空欄化。
+    # eBay US 出品の C:* は英語必須。catalog の name_en 欠落等で日本語 (name_jp) が漏れた場合、
+    # 誤値で出すより空欄が安全 (= 出品の正確性原則 / 空欄 > 誤り)。英単語 "Japanese" や
+    # em-dash(—) は日本語 codepoint を含まないため無影響。
+    for aspect, csv_col in EBAY_SPEC_TO_CSV.items():
+        if csv_col not in headers:
+            continue
+        idx = headers.index(csv_col)
+        if idx >= len(row):
+            continue
+        if _contains_japanese(row[idx]):
+            _EBAY_FILTER_REPORT["jp_blanked"] += 1
+            _sample_append("jp_blanked_samples", f"{aspect}={str(row[idx]).strip()}")
+            row[idx] = ""
+
+    ef = _get_ebay_filter()
+    if ef is None:
+        return row
+    for aspect, csv_col in EBAY_SPEC_TO_CSV.items():
+        if csv_col not in headers:
+            continue
+        idx = headers.index(csv_col)
+        if idx >= len(row):
+            continue
+        raw = str(row[idx] or "").strip()
+
+        # 改善 B-1: 必須 field + 空欄 = 警告 log (= continue で空欄維持)
+        if not raw:
+            try:
+                if ef.is_required(category, aspect):
+                    _EBAY_FILTER_REPORT["required_blank"] += 1
+                    _sample_append("required_blank_samples", aspect)
+            except Exception:
+                pass
+            continue
+
+        # 改善 B-2: 文字数制限 truncation
+        try:
+            max_len = ef.get_max_length(category, aspect)
+        except Exception:
+            max_len = None
+        if max_len and len(raw) > max_len:
+            _EBAY_FILTER_REPORT["truncated"] += 1
+            _sample_append("truncated_samples", f"{aspect}: {len(raw)}→{max_len}")
+            raw = raw[:max_len]
+
+        # 改善 A 同梱の validate_value (= NFKC + FREE_TEXT B 案)
+        validated = ef.validate_value(category, aspect, raw)
+        if validated is None:
+            # SELECTION_ONLY 不在 = 空欄
+            # ただし whitelist 特殊値 (= 例: Country "Does not apply") は そのまま採用
+            bypass_set = EBAY_FILTER_SPECIAL_BYPASS.get(aspect, set())
+            if raw.lower() in bypass_set:
+                _EBAY_FILTER_REPORT["passthrough"] += 1
+                row[idx] = raw
+            else:
+                _EBAY_FILTER_REPORT["blanked"] += 1
+                _sample_append("blanked_samples", f"{aspect}={raw}")
+                row[idx] = ""
+        elif validated == raw:
+            # 一致 or FREE_TEXT B 案 そのまま return
+            _EBAY_FILTER_REPORT["passthrough"] += 1
+            row[idx] = raw
+        else:
+            # NFKC 正規化等で eBay 正規表記に書き換え
+            _EBAY_FILTER_REPORT["validated"] += 1
+            row[idx] = validated
+    return row
+
+
+def print_ebay_filter_report():
+    """cycle 終了時に呼出 = listing CSV 全行 validate 後のサマリー."""
+    r = _EBAY_FILTER_REPORT
+    total = r["validated"] + r["passthrough"] + r["blanked"]
+    if total == 0 and r["required_blank"] == 0 and r["truncated"] == 0 and r["jp_blanked"] == 0:
+        return
+    print()
+    print("=" * 60)
+    print("eBay フィルタ validate サマリー (= 3 ケース処理 + 改善 B)")
+    print("=" * 60)
+    print(f"  ✅ passthrough  (= 一致 or FREE_TEXT B 案 そのまま): {r['passthrough']}")
+    print(f"  🔧 validated    (= NFKC 正規化で eBay 正規表記に書換)  : {r['validated']}")
+    print(f"  ⬜ blanked      (= SELECTION_ONLY 不在で空欄)         : {r['blanked']}")
+    print(f"  ✂  truncated    (= 文字数制限超で切詰)                : {r['truncated']}")
+    print(f"  ⚠️ required_blank (= 必須 field が空欄 = 出品エラーリスク): {r['required_blank']}")
+    print(f"  🚫 jp_blanked    (= Item Specifics 日本語混入で空欄化)   : {r['jp_blanked']}")
+    if r["jp_blanked_samples"]:
+        print(f"  jp_blanked samples (max 20):")
+        for s in r["jp_blanked_samples"]:
+            print(f"    - {s}")
+    if r["blanked_samples"]:
+        print(f"  blanked samples (max 20):")
+        for s in r["blanked_samples"]:
+            print(f"    - {s}")
+    if r["truncated_samples"]:
+        print(f"  truncated samples:")
+        for s in r["truncated_samples"]:
+            print(f"    - {s}")
+    if r["required_blank_samples"]:
+        print(f"  required_blank samples:")
+        for s in r["required_blank_samples"]:
+            print(f"    - {s}")
 
 def get_store_category(franchise):
     for key, cat_id in STORE_CATEGORIES.items():
@@ -305,28 +519,128 @@ def smart_titlecase(s):
         result.append(''.join(new_sub))
     return ' '.join(result)
 
+def pokemon_out_of_scope(franchise, brand):
+    """catalog が構造的に収録しない Pokemon サブセット = out-of-scope skip 対象 (純関数, test可)。
+
+    現状: FAMILY POKEMON CARD GAME (はじめての〜) のみ。catalog 収録0件を実機確認済
+    (2026-07-01 Pokemon 22006件中 Family 0件)。seen×18 で永久 recurring 化していたのを止める。
+    ※XY期は catalog に173件あるので含めない (丸ごと除外すると出せるカードを殺す=K3不採用)。
+    ★2026-07-26: BLACK DECK KIT を除外リストから外した。2026-06-27 時点は catalog 0件だったが
+    その後 catalog に BDK-005/006 (わるいマグカルゴ/わるいヘルガー) が収録された (cert 138056958=
+    BDK-006 が hit するのに本 skip で殺されていた)。ハードコード除外でなく catalog 有無で判定させる
+    (catalog hit→出品 / no-hit→下流の catalog欠 fail-closed skip)= SSOT 原則。
+    新サブセットを足す時も「catalog 0件」を実機確認してから追加する (誤除外=recall損 防止)。
+    """
+    if franchise != "Pokemon":
+        return False
+    b = (brand or "").upper()
+    return "FAMILY POKEMON CARD GAME" in b
+
+
+def is_out_of_scope_language(brand):
+    """非日本語版(ASIA/KOREAN/CHINESE)は当店catalog(日本版)の対象外=fail-closed skip (純関数, test可)。
+
+    PSA brand は日本版が '... JAPANESE ...'。ASIA/KOREAN/CHINESE 版は別商品で日本版 record へ
+    解決しない(Catalog 2026-07-01 ruling)。従来はこれらが resolver 未解決 → missing_models に
+    積まれ「catalog_add」として永久 recurring 化していた(例 POKEMON ASIA 25TH ANNIVERSARY、
+    seen×21)。catalog に足しても当店は日本版のみ扱うため埋まらない → 早期 skip で汚染を止める。
+    JAPANESE を含む brand は誤検出防止で対象外にしない(2026-07-02、won't-fix でなく監査/生成
+    ルールを賢くする方針)。
+    """
+    toks = set((brand or "").upper().replace("-", " ").split())
+    if "JAPANESE" in toks:
+        return False
+    return bool(toks & {"ASIA", "ASIAN", "KOREAN", "CHINESE"})
+
+
+def should_skip_out_of_scope_language(brand, franchise, card_number, subject,
+                                       lookup_pokemon_fn=None):
+    """is_out_of_scope_language の catalog-aware 版 (純関数, test可)。
+
+    非日本語 brand でも **日本版 catalog に解決できる Pokemon カードは skip しない**。
+    PSA が日本版 25th Anniversary Golden Box(S8a-G) 等を "POKEMON ASIA 25TH ANNIVERSARY"
+    と誤ラベルする例があり(cert 142931332 = S8a-G-005 Pikachu V)、brand 文字列だけの skip は
+    false-positive(recall 損)になる。catalog 解決可否で最終判断 = fail-closed 維持(解決不能は skip)。
+    lookup_pokemon_fn は test 用の注入口(未指定時は catalog_psa.lookup_pokemon)。
+    """
+    if not is_out_of_scope_language(brand):
+        return False
+    if franchise == "Pokemon":
+        fn = lookup_pokemon_fn or catalog_psa.lookup_pokemon
+        try:
+            if fn(brand, card_number, subject):
+                return False  # 日本版 catalog 解決 → 出品継続
+        except Exception:
+            pass
+    return True
+
+
+def is_unidentifiable_don_card(subject, card_number):
+    """番号なしの DON!! カードは変種特定不能 → 出品対象外 skip (純関数, test可)。
+
+    One Piece の DON!! カードは、番号(DON-PRB01-027 等)があれば正常に出品できるが、PSA データで
+    card番号が欠落(#None)している個体は「どの DON 変種か」特定できず catalog key 付与も正しい出品も
+    できない(fail-closed)。Catalog も無番=収録却下と判定済(2026-07-02)。番号有り DON は skip しない。
+    ※入力データ(PSA)が構造的に特定不能なケースであり、システム欠陥の握りつぶしではない
+    (=処理境界の定義。Gemini 諮問結論。number 有りは対象外にしないので listable な DON は殺さない)。
+    """
+    subj = (subject or "").upper()
+    num = (card_number or "").strip()
+    return "DON!!" in subj and not num
+
+
+def don_treatment_subject(subject, card_number, vision_result):
+    """番号なし DON!! に Vision の treatment を連結した subject を返す (純関数, test可)。
+
+    Catalog 回答 (2026-07-10): catalog は DON を `DON-{set_code}-{NNN}` + `psa_subject_hint` で
+    識別可能 (265件収録)。**真因は生成器が treatment を渡していないこと**。treatment は
+    card_identifier(Vision) の `rarity` 欄に入る (例 'Alternate Art Gold')。
+    実測: lookup_don(subject='DON!! CARD ALTERNATE ART GOLD') → DON-EB04-002 / 'DON!! CARD' → None。
+
+    戻り: 連結後 subject。DON!!でない / 番号有り / treatment 無し → None (= 連結不可)。
+    treatment 無しの DON は従来どおり fail-closed skip (推測で出さない)。
+    """
+    if not is_unidentifiable_don_card(subject, card_number):
+        return None
+    treat = ((vision_result or {}).get("rarity") or "").strip()
+    if not treat:
+        return None
+    return f"{subject} {treat}"
+
+
+def don_lookup_subject(subject, subj_try):
+    """DON lookup に渡す subject を選ぶ純関数(2026-07-25)。
+
+    treatment 連結版(subj_try = don_treatment_subject の戻り)が有ればそれを使い、無ければ
+    原 subject を返す。★PRB02 Buggy/Shanks は Vision で rarity(treatment) が空でも
+    vision_character 単独で解決できる(Catalog POC f6834e1) → treatment 空(subj_try=None)でも
+    原 subject で lookup_don を試すための subject 選択。従来は subj_try 無=即skip だった欠陥の根治。
+    """
+    return subj_try or subject
+
+
 def detect_game_info(brand):
     brand_upper = brand.upper()
     if "DUAL IMPACT" in brand_upper:
-        return "Gundam CCG", "Dual Impact", "Gundam"
+        return "Gundam Card Game", "Dual Impact", "Gundam"
     elif "NEWTYPE RISING" in brand_upper:
-        return "Gundam CCG", "Newtype Rising", "Gundam"
+        return "Gundam Card Game", "Newtype Rising", "Gundam"
     elif "STEEL REQUIEM" in brand_upper:
-        return "Gundam CCG", "Steel Requiem", "Gundam"
+        return "Gundam Card Game", "Steel Requiem", "Gundam"
     elif "HEROIC BEGINNINGS" in brand_upper:
-        return "Gundam CCG", "Heroic Beginnings", "Gundam"
+        return "Gundam Card Game", "Heroic Beginnings", "Gundam"
     elif "WINGS OF ADVANCE" in brand_upper:
-        return "Gundam CCG", "Wings of Advance", "Gundam"
+        return "Gundam Card Game", "Wings of Advance", "Gundam"
     elif "ZEON" in brand_upper:
-        return "Gundam CCG", "Zeon's Rush", "Gundam"
+        return "Gundam Card Game", "Zeon's Rush", "Gundam"
     elif "SEED STRIKE" in brand_upper:
-        return "Gundam CCG", "SEED Strike", "Gundam"
+        return "Gundam Card Game", "SEED Strike", "Gundam"
     elif "IRON BLOOM" in brand_upper:
-        return "Gundam CCG", "Iron Bloom", "Gundam"
+        return "Gundam Card Game", "Iron Bloom", "Gundam"
     elif "GUNDAM" in brand_upper and ("EX BASE" in brand_upper or "PROMOS" in brand_upper):
-        return "Gundam CCG", "Edition Beta Promos", "Gundam"
+        return "Gundam Card Game", "Edition Beta Promos", "Gundam"
     elif "GUNDAM" in brand_upper:
-        return "Gundam CCG", brand, "Gundam"
+        return "Gundam Card Game", brand, "Gundam"
     elif "ONE PIECE" in brand_upper:
         # セット名を清浄化：長いプレフィックス/"JAPANESE"を除去
         prefixes = [
@@ -353,9 +667,24 @@ def detect_game_info(brand):
         # "Promos" / "Promo" → "Promo Cards" (eBayオートコンプリート候補に合わせる)
         if short_set.lower() in ("promos", "promo"):
             short_set = "Promo Cards"
-        # Game名: eBay慣行は "One Piece Card Game" (公式名)
-        # TOPセラーで "One Piece CCG" も見られるが、公式名を優先
-        return "One Piece Card Game", short_set, "One Piece"
+        # Game名: eBay 公式 API 正規値 "One Piece CCG" 採用 (2026-05-31)
+        # = 公式 × eBay フィルタ 最大活用 (= memory:official_x_ebay_filter_max_activation)
+        # 検索 query 副作用は _normalize_game_short mapping で吸収済
+        return "One Piece CCG", short_set, "One Piece"
+    elif "DRAGON BALL HEROES" in brand_upper:
+        # Super Dragon Ball Heroes はアーケード専用カード(別商品ライン)。catalog は
+        # Dragon Ball Super Card Game (SCG) のみ収録 → Heroes はスコープ外。
+        # franchise を専用値で返し、caller (build_row) で fail-closed skip させる。
+        # (2026-06-27 K4: "DRAGON BALL" の総称分岐が Heroes を SCG に誤分類し missing_models を
+        #  汚染していた=seen×3の再発。Yu-Gi-Oh! と同じ out-of-scope skip パターンで根治)
+        return "Dragon Ball Heroes", brand, "Dragon Ball Heroes"
+    elif "ITAJAGA" in brand_upper or "イタジャガ" in brand:
+        # ITAJAGA(イタジャガ)= カルビースナック封入の食玩プロモ。公式TCGカタログ(SCG)対象外。
+        # Brand="ITAJAGA DRAGON BALL VOL.N" が下の "DRAGON BALL" 分岐で dragonball_scg に誤分類され
+        # → auto_catalog_add 空撃ち + missing_models 居座り(seen×9-10・7/16以来)で recurring_missing を
+        # 汚染していた。Dragon Ball Heroes と同じ out-of-scope skip パターンで根治(2026-07-25・Catalog要求)。
+        # franchise を専用値で返し、build_row で fail-closed skip させる(= dragonball_scg 照会も miss登録もしない)。
+        return "Itajaga", brand, "Itajaga"
     elif "DRAGON BALL" in brand_upper:
         # セット名を短縮：長いプレフィックスを除去して末尾のセット名だけ残す
         # 例: "DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE BLAZING AURA" → "Blazing Aura"
@@ -372,6 +701,21 @@ def detect_game_info(brand):
         return "Dragon Ball Super Card Game", short_set, "Dragon Ball"
     elif "POKEMON" in brand_upper:
         return "Pokemon", brand, "Pokemon"
+    elif "YU-GI-OH" in brand_upper or "YUGIOH" in brand_upper:
+        prefixes = [
+            "YU-GI-OH! JAPANESE ", "YU-GI-OH JAPANESE ", "YUGIOH JAPANESE ",
+            "YU-GI-OH! ", "YU-GI-OH ", "YUGIOH ",
+        ]
+        short_set = brand
+        for prefix in prefixes:
+            if brand_upper.startswith(prefix):
+                short_set = brand[len(prefix):]
+                break
+        cleaned = re.sub(r'^[A-Z]+-?\d+[A-Z]*[\s\-]+', '', short_set, flags=re.IGNORECASE)
+        if cleaned:
+            short_set = cleaned
+        short_set = smart_titlecase(short_set)
+        return "Yu-Gi-Oh! TCG", short_set, "Yu-Gi-Oh!"
     else:
         return brand, brand, brand
 
@@ -434,9 +778,15 @@ CRITICAL - FACTS ONLY POLICY:
 
 TITLE RULES (FACTS ONLY - eBay Keyword Spamming Policy compliant):
 - Length: up to 80 characters MAX. Use what facts allow - 50-80 char range is acceptable.
-- Start with "PSA 10" (factual: card is graded PSA 10)
+- Start with "PSA " + the grade you actually read on the label (usually "PSA 10"; if the label
+  says MINT 9 write "PSA 9"). NEVER write a grade you did not see on the label.
 - Template: PSA 10 [Game] [Set] #[Num] [Exact PSA Subject with full character name] [Rarity if in PSA label]
-- Game short names: "One Piece TCG" / "Dragon Ball SCG" / "Gundam CCG" / "Pokemon"
+- Game short names (= iMakKeywords PDF Q1 2026 実データ Rank 準拠):
+  * Pokemon (Rank 1, never "Pokemon TCG")
+  * Yugioh (Rank 19, no hyphen, never "Yu-Gi-Oh!" / "Yu-Gi-Oh! TCG")
+  * One Piece (Rank 13, never "One Piece TCG" / "One Piece Card Game")
+  * Dragon Ball SCG (industry abbreviation)
+  * Gundam TCG (industry abbreviation, never "Gundam Card Game")
 - Character name: use the EXACT name from PSA label Subject. Do not shorten, do not alter:
   * "O-Nami" stays "O-Nami" (never "Nami")
   * "Tony Tony Chopper" stays "Tony Tony Chopper" (never "Tony Chopper")
@@ -456,6 +806,7 @@ TITLE RULES (FACTS ONLY - eBay Keyword Spamming Policy compliant):
 
 Return ONLY valid JSON:
 {{
+  "psa_grade": "The grade number printed on the PSA label in the image (right side). 'GEM MT 10' → '10', 'MINT 9' → '9', 'NM-MT 8' → '8'. Read it from the image, do NOT assume 10. Blank only if the label is unreadable.",
   "title": "eBay title max 80 chars",
   "card_name": "Clean card name only, no rarity",
   "rarity": "ONLY extract from PSA label Subject suffix: 'ALTERNATE ART' → 'Alternate Art', 'SPECIAL ART' → 'Special Art', 'SECRET' → 'Secret Rare', 'PARALLEL' → 'Parallel', 'MANGA' → 'Manga Rare'. If PSA Subject has no rarity marker, return BLANK - never guess from set/context.",
@@ -470,8 +821,9 @@ Return ONLY valid JSON:
         # メッセージ構築（画像あり/なし）
         user_content = image_content + [{"type": "text", "text": prompt_text}]
 
+        from card_identifier import CLAUDE_MODEL  # モデル名 SSOT (1箇所集約)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_MODEL,
             max_tokens=300,
             system="You are a JSON-only response bot. You must always respond with valid JSON only. Never include any explanation, preamble, or text outside the JSON object.",
             messages=[{"role": "user", "content": user_content}]
@@ -496,7 +848,7 @@ Game: {game}, Set: {set_name}, Card: #{card_number}, Label: {subject}
 "power":"number or blank","finish":"Foil or Non-Foil"}}"""
             }]
             retry_msg = client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=CLAUDE_MODEL,
                 max_tokens=300,
                 system="Respond with valid JSON only.",
                 messages=[{"role": "user", "content": retry_content}]
@@ -756,12 +1108,17 @@ def build_title(game, set_name, card_number, subject, finish=""):
     """事実ベースタイトル生成: PSAのSubject(キャラ名+rarity)をsmart_titlecaseして使用。
     一切の推論・改変を行わず、PSAが提供する事実のみを並べる。
     """
+    # 2026-05-31: 実データ準拠 mapping (= iMakKeywords PDF Q1 2026 検索ランキング)
+    # title = バイヤー通称 (= SEO 最大化)、 C:Game = eBay 正規値 (= dropdown hit) の別軸戦略.
+    # 詳細: memory:official_x_ebay_filter_max_activation
     game_short = {
-        "Dragon Ball Super Card Game": "Dragon Ball SCG",
-        "One Piece Card Game": "One Piece TCG",
-        "Gundam CCG": "Gundam CCG",
-        "Pokemon": "Pokemon",
-        "Pokémon TCG": "Pokemon",
+        "Pokémon TCG": "Pokemon",                       # Rank 1 (圧倒的最強)
+        "Pokemon": "Pokemon",                            # 旧互換
+        "Yu-Gi-Oh! TCG": "Yugioh",                       # Rank 19 (= ハイフン/space 無し最強)
+        "One Piece CCG": "One Piece",                    # Rank 13 (= TCG suffix なしで節約)
+        "One Piece Card Game": "One Piece",              # 旧互換
+        "Dragon Ball Super Card Game": "Dragon Ball SCG",  # データ無、慣行略称
+        "Gundam Card Game": "Gundam TCG",                # データ無、慣行略称 (= TCG が一般)
     }.get(game, game)
 
     prefix = "PSA 10"
@@ -803,6 +1160,121 @@ def load_description():
     except:
         return "PSA graded card shipped from Japan. Grade and cert number are as listed."
 
+
+# 商品説明 Specs ブロックのヘルパは新コア(tcg_listing_fields)に集約=SSOT。旧コアも同一を使う
+# (新コア override が新値で description を作り直す replace_tcg_specs も同モジュール)。
+from tcg_listing_fields import build_tcg_specs_html, insert_tcg_specs  # noqa: E402,F401
+
+PSA_IMG_HOST = "d1htnxwo4o0jhw.cloudfront.net"
+
+
+def psa_large_variant(url):
+    """PSA 画像 URL の `/small/`(380x640) を `/large/`(1140x1920) にする (純関数)。
+
+    ★なぜ効くか (2026-07-27 に判明):
+      - **eBay 商品画像(PicURL)**: 380px ではズームが効かず、PSA スラブの状態が見えない
+        (eBay はズームに 1600px 以上を推奨)。高額カードほど購入判断されにくい。
+      - **Vision の同定**: ★(パラレル)1個や card_number の細部が潰れる。実際 Perona
+        OP01-077_p4/p5 は /small/ では判別不能、/large/ で ★ が読めて確定できた。
+      - psa_cache / viewer / PicURL は同じ URL を共有するので、**取得時点で上げれば全部効く**。
+    対象外(別ホスト / 既に large)は None。
+    """
+    if not url or PSA_IMG_HOST not in url or "/small/" not in url:
+        return None
+    return url.replace("/small/", "/large/")
+
+
+def upgrade_psa_images(urls, exists):
+    """PSA 画像 URL list を /large/ に上げる。`exists(url)->bool` が False なら元のまま。
+
+    /large/ が無い cert がありうるので **実在確認できた時だけ**差し替える
+    (PicURL が 404 だと eBay 側で画像なし = さらに悪い)。純関数 (存在確認は注入)。
+    """
+    out = []
+    for u in urls or []:
+        big = psa_large_variant(u)
+        out.append(big if (big and exists(big)) else u)
+    return out
+
+
+def _url_exists(url, timeout=8):
+    """HEAD で 200 か確認 (I/O)。失敗は False (= 元URL を使う fail-safe)。"""
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, method="HEAD",
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
+_SUPPLIER_NON_PSA10 = re.compile(r"PSA\s*[・･]?\s*([1-9])(?![0-9])", re.IGNORECASE)
+
+
+def supplier_grade_hint(supplier_title):
+    """仕入元タイトル(商品管理シート C列)から PSA グレード表記を拾う (純関数)。
+
+    ★これが 2026-07-27 の誤出品 6件を実際に発見した信号。
+      例: 「【PSA9・ワンオーナー】バギー 金ドン スーパーパラレルドン ワンピースカード」
+    `PSA10` は 10 なので拾わない (`[1-9](?![0-9])` で 1 桁のみ)。
+    戻り: '9' 等 / 表記なしは None。
+    """
+    if not supplier_title:
+        return None
+    m = _SUPPLIER_NON_PSA10.search(str(supplier_title))
+    return m.group(1) if m else None
+
+
+def non_psa10_certs(title_map):
+    """{cert: 仕入元タイトル} → PSA10 でないと **仕入元が明記している** cert の {cert: grade}。
+
+    ★なぜ LLM タイトル側の gate だけでは不足か:
+      Claude への prompt が `Start with "PSA 10"` と**指示している**ため、PSA9 でも
+      素直に "PSA 10" と書いてしまう可能性が高い(今回はたまたま Claude が実物を優先して
+      "PSA 9" と書いたので気づけただけ)。**仕入元表記は決定論的で、これが本命の gate**。
+    純関数。
+    """
+    out = {}
+    for cert, title in (title_map or {}).items():
+        g = supplier_grade_hint(title)
+        if g:
+            out[str(cert)] = g
+    return out
+
+
+def detected_grade_from_title(title):
+    """LLM が現物ラベルから読んだタイトル冒頭の "PSA <n>" から グレードを取る (純関数)。
+
+    ★2026-07-27 事故: PSA **9** の Dragon Ball E-60 が **PSA 10 として** CSV 化された。
+      - Claude は画像から正しく `PSA 9 Dragon Ball SCG ...` を生成していた
+      - しかし build_title は `prefix = "PSA 10"` 固定、C:Grade も "10" 固定、
+        さらに新コア override が C:Grade を読んで `PSA 10 ...` にタイトルを再生成
+      → パイプライン全体が **PSA10 限定運用**の前提で、非PSA10 が混ざると全部 10 に化ける。
+      価格も "PSA 10" で市場検索するため相場($8,450)を誤って引き、GO 判定まで出ていた。
+    戻り: 数値文字列 ('9'/'10') / 取れなければ None。
+    """
+    if not title:
+        return None
+    m = re.match(r"\s*PSA\s+(\d{1,2})\b", str(title), re.IGNORECASE)
+    return m.group(1) if m else None
+
+
+def is_psa10_or_unknown(title, psa_grade=None):
+    """出品してよいか (= PSA10 と読めた or 読めなかった) を返す (純関数)。
+
+    判定材料は2つ。**どちらかが「10でない」と言ったら出品しない**(fail-closed):
+      1. `psa_grade` = LLM が **PSA ラベル画像から直接読んだ**グレード (最も確か。画像が真実)
+      2. `title` 冒頭の `PSA <n>` (副次。prompt の書式に依存する)
+    読めない時は従来どおり続行する (pipeline は PSA10 前提で、全部止めると出品がゼロになる)。
+    = 「判っている誤りだけを確実に止める」。
+    """
+    for g in (str(psa_grade or "").strip(), detected_grade_from_title(title)):
+        if g and g != "10":
+            return False
+    return True
+
+
 def parse_psa_page(text):
     data = {}
     lines = [l.strip() for l in text.split('\n') if l.strip()]
@@ -821,6 +1293,19 @@ def parse_psa_page(text):
             data['Brand'] = brand
             data['CardNumber'] = card_number  # 文字列のまま保持（006等）
             data['Subject'] = subject
+
+        # 2026-05-27 追加: PSA Japan label 経由 fallback (= DON!! CARD 等 #番号なし card 対応)
+        # OP15 cert 156219827 等で発覚、 既存 #XXX regex に hit しない special card 救済
+        if line == 'ブランド／タイトル' and i + 1 < len(lines):
+            if not data.get('Brand'):
+                brand_raw = lines[i + 1].strip()
+                data['Brand'] = re.sub(r'^\d{4}\s+', '', brand_raw).strip()
+        if line == 'サブジェクト' and i + 1 < len(lines):
+            if not data.get('Subject'):
+                data['Subject'] = RARITY_PATTERN.sub('', lines[i + 1].strip()).strip()
+        if line == 'カード番号' and i + 1 < len(lines):
+            if not data.get('CardNumber'):
+                data['CardNumber'] = lines[i + 1].strip()
 
         if line == '発行年' and i + 1 < len(lines):
             try:
@@ -855,38 +1340,81 @@ def get_psa_data(driver, cert_number):
     if cert_number in cache:
         cached = cache[cert_number]
         if cached and cached.get('Subject'):
+            # iMakeBayAPI 共有 cache にも投入 (= local cache hit でも、 共有 cache 未登録なら書込)
+            try:
+                import psa_api as _ihq_psa_api
+                _ihq_psa_api.save_cache(cert_number, cached)
+            except Exception:
+                pass
             return cached
 
     url = f"https://www.psacard.com/ja-JP/cert/{cert_number}/psa"
     try:
-        driver.get(url)
-        time.sleep(5)
-        body = driver.find_element(By.TAG_NAME, "body").text
+        # 5/29: Cloudflare challenge 検知 + 自動 retry (= 最大 3 回、 30 sec 待ち)
+        _CF_MARKERS = ("Cloudflare", "セキュリティ検証", "Ray ID", "challenge-platform")
+        body = ""
+        for _retry in range(3):
+            driver.get(url)
+            time.sleep(15)  # 5 → 15 sec (= bot 警戒度上昇対策)
+            body = driver.find_element(By.TAG_NAME, "body").text
+            if not any(_m in body for _m in _CF_MARKERS):
+                break  # challenge 通った
+            print(f"\n    🛡️ Cloudflare challenge 検知 (retry {_retry + 1}/3)、 30 sec 待機...")
+            time.sleep(30)
+        else:
+            # 3 retry 全部 challenge = warmup driver の cookie 失効
+            print(f"    ❌ Cloudflare challenge 抜けられず、 warmup driver の cookie refresh が必要")
+            return None
 
-        # カード画像URL取得
-        card_image_url = None
+        # カード画像URL取得 (= 表/裏 2 枚、 2026-06-01 ユーザー要望)
+        # PicURL 構成: 表(front) | 裏(back) | 999.png (= 既存ダミー)
+        card_image_urls = []  # = [front_url, back_url] 順序 (= PSA page DOM 表示順 = 表→裏想定)
         try:
-            from selenium.webdriver.support.ui import WebDriverWait
-            from selenium.webdriver.support import expected_conditions as EC
             imgs = driver.find_elements(By.TAG_NAME, "img")
             for img in imgs:
                 src = img.get_attribute("src") or ""
-                if any(x in src.lower() for x in ['cert', 'card', 'psa', 'grading']) and src.startswith("http"):
-                    card_image_url = src
+                if not _is_real_card_image(src):   # トラッキングビーコン/プレースホルダ/長すぎURL を除外
+                    continue
+                if src in card_image_urls:
+                    continue
+                card_image_urls.append(src)
+                if len(card_image_urls) >= 2:
                     break
         except Exception as e:
             print(f"\n    画像取得エラー: {e}")
 
         data = parse_psa_page(body)
-        if card_image_url:
-            data['CardImageUrl'] = card_image_url
+        if card_image_urls:
+            # ★取得時点で /large/(1140x1920) に上げる。PicURL(eBay商品画像)・Vision同定・
+            #   psa_cache・viewer が同じ URL を共有するので、ここ1箇所で全部に効く。
+            #   実在確認できた分だけ差し替え (404 を PicURL に載せない)。
+            card_image_urls = upgrade_psa_images(card_image_urls, _url_exists)
+            data['CardImageUrl'] = card_image_urls[0]   # = 表面 (= 既存 title 生成等で使用)
+            if len(card_image_urls) >= 2:
+                # 2枚取れた時だけ順序(表→裏)を信用する。実サンプルで [0]=表面を確認済。
+                data['CardImageUrlFront'] = card_image_urls[0]
+                data['CardImageUrlBack'] = card_image_urls[1]
+                print(f"    📷 PSA 画像 表+裏 取得 (2 枚)")
+            else:
+                # ★2026-07-28: **1枚しか拾えなかった時は表面と断定しない**(fail-closed)。
+                # 実例 cert 150712284: 1枚だけ取れた画像が **裏面**(青いカード裏)だったのに
+                # Front として記録され、eBay 商品画像も Vision 同定も裏面を見ていた。
+                # Front を空にすることで build_pic_url が載せず、目視で気づける。
+                data['CardImageUrlUnknownSide'] = card_image_urls[0]
+                print(f"    ⚠️ PSA 画像 1 枚のみ = 表裏不明 → 商品画像に使わない (面確定できず)")
         if not data.get('Subject'):
             print(f"\n    [DEBUG] {body[:400]}")
             return None
 
-        # キャッシュに保存
+        # キャッシュに保存 (= ローカル既存)
         cache[cert_number] = data
         _save_psa_cache(cache)
+        # iMakeBayAPI 共有 cache にも書込 (= 重複くん が cert 単位 read、 SoC + 内部 SSOT)
+        try:
+            import psa_api as _ihq_psa_api
+            _ihq_psa_api.save_cache(cert_number, data)
+        except Exception:
+            pass  # fail-closed (= 共有 cache 失敗で既存 cycle 止めない)
         return data
     except Exception as e:
         print(f"    Error: {e}")
@@ -1043,6 +1571,22 @@ def _strip_variant_from_character(name):
     # 「: XX」以降を除去
     clean = re.sub(r'\s*:\s*.+$', '', clean)
     return clean.strip()
+
+
+def _strip_known_set_suffix(name, set_name):
+    """character/card_name 末尾に残った「既知の set 名」を実 set 名で決定論的に除去する。
+
+    Pokemon の character/card_name は PSA Subject を denylist で削って作るため、未登録の
+    新 set 名が末尾に残る (例 'Togekiss V Legendary Heartbeat' / 'Corviknight Vmax Vmax Climax')。
+    set 名は別途 catalog から確定済 (C:Set 列が持つ) ので、それを末尾から剥がせば denylist 漏れを根絶できる。
+    例: ('Togekiss V Legendary Heartbeat', 'Legendary Heartbeat') → 'Togekiss V'
+        ('Corviknight Vmax Vmax Climax',   'VMAX Climax')        → 'Corviknight Vmax'
+    """
+    if not name or not set_name:
+        return name
+    pat = r"\s+" + re.escape(set_name.strip()) + r"\s*$"
+    cleaned = re.sub(pat, "", name, flags=re.IGNORECASE).strip()
+    return cleaned or name  # 全消え (set名=name 異常) は元を維持
 
 
 def _build_card_name(character_clean, subject, original_name=""):
@@ -1221,6 +1765,62 @@ def _load_cert_overrides():
         return {}
 
 
+def _build_pic_url(data):
+    """eBay CSV PicURL = 表 | 裏 | 999.png (= 2026-06-01 ユーザー要望).
+
+    PSA cert page から取得した front/back 画像を順序保持で組立.
+    取得失敗時は fallback (= 既存 PIC_URL のみ).
+    """
+    parts = []
+    if data:
+        f = data.get("CardImageUrlFront")
+        b = data.get("CardImageUrlBack")
+        # 最終防波堤: 500字超 or 非画像URL は載せない (ErrorCode 20002 の二重ガード)。
+        if f and _is_real_card_image(f):
+            parts.append(f)
+        if b and b != f and _is_real_card_image(b):
+            parts.append(b)
+    parts.append(PIC_URL)   # 999.png ダミーは常に末尾 (front/back が無くても最低1本)
+    return "|".join(parts)
+
+
+# 2026-06-09: 短タイトル(<70)を catalog の実ファクトだけで補強 (year/rarity/set code)。
+# 捏造しない: facts が無ければ伸ばさない。refine_title の後 (= 短縮されない最終段) で適用。
+_RARITY_FULL_FOR_TITLE = {"AR": "Art Rare", "SR": "Super Rare", "SAR": "Special Art Rare"}
+# catalog rarity short code → eBay Features 値 (TOPセラーは rarity descriptor を Features に入れる慣習)。
+# Features が variant/PSA Subject から取れない時のフォールバック (= 実属性、捏造でない)。
+_RARITY_TO_FEATURES = {
+    "AR": "Art Rare", "SR": "Super Rare", "SAR": "Special Art Rare",
+    "UR": "Ultra Rare", "HR": "Hyper Rare", "MA": "Mega Attack Rare",
+    "RR": "Double Rare", "RRR": "Triple Rare", "SSR": "Shiny Super Rare",
+}
+
+
+def _pad_title_with_facts(title, year, rarity_short, set_code, target_min=70, max_chars=80):
+    """short title を catalog 実ファクト (年/レアリティ全名/set code) で補強。
+    TOPセラー頻出語 (2025 / Super Rare / M1S 等) と一致。値が無ければ足さない (捏造なし)。"""
+    if not title or len(title) >= target_min:
+        return title
+    tl = title.lower()
+    facts = []
+    y = str(year).strip() if year is not None else ""
+    if y.isdigit() and len(y) == 4 and y not in title:   # 実 PSA Year のみ (default 補完はしない)
+        facts.append(y)
+    rf = _RARITY_FULL_FOR_TITLE.get((rarity_short or "").upper().strip())
+    if rf and rf.lower() not in tl:
+        facts.append(rf)
+    if set_code and set_code.lower() not in tl:
+        facts.append(set_code)
+    for f in facts:
+        cand = f"{title} {f}"
+        if len(cand) <= max_chars:
+            title = cand
+            tl = title.lower()
+        if len(title) >= target_min:
+            break
+    return title
+
+
 def build_row(cert_number, price, data, description, driver=None, catalog_misses=None):
     subject = data.get('Subject', 'Unknown')
     card_number = data.get('CardNumber', '')
@@ -1272,7 +1872,64 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # _vision_result は元のまま、既存挙動継続
 
     card_number = str(card_number)  # ゼロ埋め保持
+    # 2026-05-28 variant_meta 連動用 初期化 (= 各 franchise hit block で値設定、 末尾で連動)
+    _catalog_pid_for_variant = None
+    _catalog_category_for_variant = None
     game, set_name, franchise = detect_game_info(brand)
+
+    # 2026-07-30: 共通ヘルパ tcg_scope.is_out_of_scope に SSOT 集約。
+    # 従来は build_row 内に 4 分岐 (Yu-Gi-Oh!/Heroes/Itajaga/Pokemon FAMILY) が個別 return None、
+    # 加えて post_psa_review._route_none_to_catalog が同じ真理表を持たず missing_models.csv に
+    # SCG 対象外を毎日書き込んでいた (2026-07-29 Advisor 発覚)。片方だけ塞ぐと次に scope を
+    # 変えた時にまた乖離するので、両方から 1 か所を呼ぶ形に統一。DIVERS も本 helper で新規除外。
+    from tcg_scope import is_out_of_scope as _is_out_of_scope
+    _oos, _oos_reason = _is_out_of_scope(franchise, brand)
+    if _oos:
+        print(f"    ⏭️ Skip: {_oos_reason} (cert {cert_number}, {subject})")
+        return None
+
+    # 非日本語版(ASIA/KOREAN/CHINESE)は当店=日本版のみ扱い → 対象外 skip。
+    # catalog に足しても埋まらず missing_models を永久汚染するのを止める(2026-07-02)。
+    # 2026-07-05: catalog-aware 化。PSA が日本版 25th Anniversary Golden Box(S8a-G) 等を
+    # "POKEMON ASIA 25TH ANNIVERSARY" と誤ラベルする例がある(cert 142931332 = 日本版
+    # S8a-G-005 Pikachu V が誤 skip されていた)。brand 文字列だけで撥ねず、日本版 catalog に
+    # 解決できる Pokemon カードは出品する(false-positive skip = recall 損の防止)。解決できなければ
+    # 従来通り fail-closed skip(誤出品防止は維持)。
+    if should_skip_out_of_scope_language(brand, franchise, card_number, subject):
+        print(f"    ⏭️ Skip: 非日本語版(ASIA/KOREAN/CHINESE)=日本版catalog未解決 (cert {cert_number}, brand='{brand}')")
+        return None
+
+    # 番号なし DON!! カード: 従来は無条件 skip だったが、Catalog 回答(2026-07-10)より
+    # 「catalog は set+treatment で識別可能。真因は生成器が treatment を渡してないこと」= HQ の宿題。
+    # → Vision が拾った treatment(rarity 欄)を subject に連結して catalog に問い、
+    #   **実際に解決できた時だけ出品**(fail-closed 維持: 解決不能なら従来どおり skip)。
+    _don_record = None
+    if is_unidentifiable_don_card(subject, card_number):
+        # 解決の手がかりは2系統: treatment(Vision rarity を subject に連結) or character(Vision)。
+        # ★2026-07-25: PRB02 Buggy/Shanks 等は rarity(treatment) が Vision で空でも character 単独で
+        #   一意解決できる(Catalog POC f6834e1: lookup_don の vision_character 一致 step)。→ treatment 空でも
+        #   character が有れば lookup_don を試す(従来は treatment 空=即skip で character 経路に到達しなかった)。
+        _subj_try = don_treatment_subject(subject, card_number, _vision_result)   # treatment付subject or None
+        _vc = ((_vision_result or {}).get("character") or "").strip()
+        _q_subj = don_lookup_subject(subject, _subj_try)   # treatment有れば連結subject、無ければ原subject
+        _don_hit = None
+        if _subj_try or _vc:
+            try:
+                # ★lookup_one_piece は番号空の DON を lookup_don に回さない(=None)。lookup_don を直接呼ぶ
+                #   (2026-07-15)。vision_character 一致で同set内の複数キャラ Gold DON を1件に解決(tie解消)。
+                _don_hit = catalog_psa.lookup_don(brand, _q_subj, vision_character=_vc or None)
+            except Exception as _e_don:
+                print(f"    ⚠️ DON lookup 失敗: {type(_e_don).__name__}: {_e_don}")
+        if _don_hit:
+            subject = _q_subj
+            _don_record = _don_hit   # 本流(lookup_one_piece)は DON を解決できないので record を持ち回る
+            print(f"    🎯 DON: catalog 解決 (cert {cert_number}, subject='{subject}', vision_character='{_vc or '無'}')")
+        else:
+            print(f"    ⏭️ Skip: reason=no_card_number_don DON!!カード番号欠落=変種特定不能 "
+                  f"(cert {cert_number}, subject='{subject}', treatment={'有' if _subj_try else '無'}, "
+                  f"character={_vc or '無'})")
+            return None
+
     # Character欄はPSA Subjectから接尾辞を剥がして純キャラ名のみに (fallback)
     character = smart_titlecase(extract_character_name(subject))
 
@@ -1287,6 +1944,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     official_card_number = card_number
     official_illustrator = ""
     official_finish = ""
+    official_card_size = ""  # 2026-05-31: adapter から取得 (= 全 franchise block で set 試行)
 
     # overrides 適用時: 公式DB lookup を完全スキップして overrides の specs を直接採用
     if _override_applied:
@@ -1318,6 +1976,10 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         # ID 完全一致のみ、フォールバック禁止 (PRB02-005 / ST16-005 事故再発防止).
         # eBay フィルタ値変換 (set_name / rarity) は adapter が ebay_filter_map で実行済み.
         bandai = catalog_psa.lookup_one_piece(brand, card_number, subject)
+        # 番号なし DON!!: lookup_one_piece は DON を解決しない(None)。上で lookup_don が
+        # treatment 連結で解決済なら、その record を本流に流す(2026-07-15)。
+        if not bandai and _don_record:
+            bandai = _don_record
         # ===== iMakCatalog 戻り値の eBay US 向け正規化 (新ルーチン、独立) =====
         # JP→EN 翻訳 (キャラクター→Character / 赤→Red / モンキー・D・ルフィ→Monkey D. Luffy)
         # + ピリオド連結補正 (Monkey.D.Luffy → Monkey D. Luffy)
@@ -1343,6 +2005,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # Set: adapter が ebay_filter_map で変換済み
             if bandai.get("set_name_ebay"):
                 set_name = bandai["set_name_ebay"]
+            # 2026-05-31: adapter 経由 finish / card_size を listing に反映
+            # game = build_row line 502-505 で "One Piece CCG" (= eBay 正規値) 採用済
+            # 検索 query 副作用は check_csv._normalize_game_short / market_gate に "One Piece CCG":"One Piece" 追加で吸収
+            official_finish = bandai.get("finish") or ""
+            official_card_size = bandai.get("card_size") or ""
         elif catalog_misses is not None:
             catalog_misses.append(("one_piece_tcg", f"{brand}-{card_number}"))
         # iMakCatalog miss → Vision に委ねる (fallback 構築は廃止、PSA Brand "P" + 番号
@@ -1361,6 +2028,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         if pokemon:
             official_rarity = pokemon.get("rarity", "")
             official_power = pokemon.get("hp", "")
+            # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
+            official_finish = pokemon.get("finish") or ""
+            official_card_size = pokemon.get("card_size") or ""
             # card_type: scraper が specs.card_type に Pokémon/Trainer/Energy を保存済
             official_card_type = pokemon.get("card_type", "")
             official_attribute = pokemon.get("type_en", "")
@@ -1370,8 +2040,16 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # set: adapter が ebay_filter_map で変換済み
             if pokemon.get("set_name_ebay"):
                 set_name = pokemon["set_name_ebay"]
+            # 2026-05-28 variant_meta 連動用 (= Features/Finish/Rarity 自動補完)
+            _catalog_pid_for_variant = pokemon.get("card_id")
+            _catalog_category_for_variant = "pokemon_tcg"
         elif catalog_misses is not None:
             catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}"))
+
+        # 整合(先手): 確定した set 名を character/card_name 末尾から除去。
+        # denylist 漏れ (Togekiss V Legendary Heartbeat / Corviknight Vmax Vmax Climax 型) の根本対策。
+        character = _strip_known_set_suffix(character, set_name)
+        card_name = _strip_known_set_suffix(card_name, set_name)
 
     elif franchise == "Dragon Ball":
         # Dragon Ball Fusion World — iMakCatalog DB lookup (Phase 2: bandai_tcg_plus から移行).
@@ -1412,6 +2090,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                     set_name = db_card["set_name_ebay"]
                 if db_card.get("card_name"):
                     character = db_card["card_name"]
+                # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
+                official_finish = db_card.get("finish") or ""
+                official_card_size = db_card.get("card_size") or ""
             elif catalog_misses is not None:
                 catalog_misses.append(("dragonball_scg", f"{brand}-{card_number}"))
 
@@ -1433,8 +2114,40 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                 set_name = gd_card["set_name_ebay"]
             if gd_card.get("card_name"):
                 character = gd_card["card_name"]
+            # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
+            official_finish = gd_card.get("finish") or ""
+            official_card_size = gd_card.get("card_size") or ""
         elif catalog_misses is not None:
             catalog_misses.append(("gundam_tcg", f"{brand}-{card_number}"))
+
+    elif franchise == "Yu-Gi-Oh!":
+        ygo = catalog_psa.lookup_yugioh(brand, card_number, subject)
+        if ygo:
+            try:
+                _raw_specs = ygo.get("specs")
+                if isinstance(_raw_specs, str):
+                    ygo_specs = json.loads(_raw_specs) if _raw_specs else {}
+                else:
+                    ygo_specs = _raw_specs or {}
+            except Exception:
+                ygo_specs = {}
+            if ygo.get("name_en"):
+                character = ygo["name_en"]
+                card_name = ygo["name_en"]
+            official_card_type = ygo_specs.get("type", "") or ygo_specs.get("humanReadableCardType", "")
+            official_rarity = ygo_specs.get("primary_set_rarity", "")
+            official_attribute = ygo_specs.get("attribute", "")
+            atk_val = ygo_specs.get("atk")
+            if atk_val is not None and atk_val != "":
+                official_power = str(atk_val)
+            primary_set = ygo_specs.get("primary_set_name", "")
+            if primary_set:
+                set_name = primary_set
+            # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
+            official_finish = ygo.get("finish") or ""
+            official_card_size = ygo.get("card_size") or ""
+        elif catalog_misses is not None:
+            catalog_misses.append(("yugioh_tcg", f"{brand}-{card_number}"))
 
     # ===== 画像主導カード特定の結果を反映 (新ルーチン由来) =====
     # confidence high/medium の場合、既存 lookup 結果より優先で official_* を上書き。
@@ -1451,31 +2164,18 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         # ('OP07-019' 等) で gap-fill する.
         if v.get("card_number") and (
             not official_card_number
-            or not re.match(r"[A-Z]", official_card_number)
+            or (
+                not re.match(r"[A-Z]", official_card_number)
+                and "/" not in str(official_card_number)
+            )
         ):
             official_card_number = v["card_number"]
         if v.get("character") and not character:
             character = v["character"]
-        if v.get("set_name") and not set_name:
-            # 既存 Canonical Map (iMakCatalog ebay_filter_map) に通して正規化
-            # 例: "OP13" → ハイフン補完で "OP-13" → "Carrying On His Will"
-            #     "ROMANCE DAWN" → 大文字検出で "Romance Dawn"
-            _raw_set = v["set_name"]
-            _normalized = catalog_psa.set_code_to_ebay_name(_raw_set)
-            if _normalized == _raw_set:
-                # マップヒット失敗 → ハイフン補完で再試行
-                _m_set = re.match(r'^(OP|ST|EB|PRB)(\d+)$', _raw_set, re.IGNORECASE)
-                if _m_set:
-                    _normalized = catalog_psa.set_code_to_ebay_name(
-                        f"{_m_set.group(1).upper()}-{_m_set.group(2)}"
-                    )
-            if _normalized != _raw_set:
-                set_name = _normalized
-            elif _raw_set.isupper():
-                # 全大文字 → Title Case 化 (例: "ROMANCE DAWN" → "Romance Dawn")
-                set_name = _raw_set.title()
-            else:
-                set_name = _raw_set
+        # 2026-06-08: set_name は Vision で生成しない (fail-closed / SSOT)。
+        # catalog lookup の set_name_ebay が SSOT。catalog miss は catalog_misses で
+        # skip + 自動依頼される。Vision の raw set 名を変換して埋めると
+        # ①「参照のみ」に反する ②catalog 意図的空欄(JP限定)を上書きしてしまう → 廃止。
         if v.get("rarity") and not official_rarity:
             official_rarity = v["rarity"]
         if v.get("color") and not official_color:
@@ -1521,7 +2221,17 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     card_type = official_card_type   # Claude 追放
     cost      = official_cost        # Claude 追放
     power     = official_power       # Claude 追放
+    # ★2026-07-28: catalog に finish が無い時だけ、**PSA ラベルに明記された分**を転記する。
+    # 推測は一切しない(画像の光り方・rarity からの類推は従来どおり禁止)。ラベル記載は
+    # PSA が現物を鑑定して打った一次情報なので「確認できた事実」に当たる。
+    # 実測: 823 cert 中 32件(3.9%)にのみ明記あり。残りは従来どおり空欄。
     finish    = official_finish      # Claude 追放 + Subject キーワード判定も廃止
+    if not finish:
+        try:
+            from psa_label_finish import finish_from_psa_label
+            finish = finish_from_psa_label(subject)
+        except Exception:
+            pass                      # 取れなければ従来どおり空欄(fail-closed)
     attribute = official_color or official_attribute  # Claude 追放
 
     # 2026-04-24 Canonical Map (Phase 1): eBay フィルタ正規値へ無言整形
@@ -1596,27 +2306,57 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             print(f"    [AUTO-FIX] Leader Cost: {cost!r} -> '' (Leader はコスト持たない仕様)")
             cost = ""
 
-    # 2026-04-25: ONE PIECE Set コード → 公式名称（eBay フィルタヒット率向上）
-    # 2026-04-26: iMakCatalog ebay_filter_map 経由に切替
-    if franchise == "One Piece" and set_name:
-        _new_set = catalog_psa.set_code_to_ebay_name(set_name)
-        if _new_set != set_name:
-            print(f"    [AUTO-FIX] Set: {set_name!r} -> {_new_set!r} (iMakCatalog ebay_filter_map)")
-            set_name = _new_set
-    # 2026-04-26: DRAGON BALL Set 名 → eBay フィルタ表示用クリーンアップ
-    elif franchise == "Dragon Ball" and set_name:
-        _new_set = _dragonball_set_name_to_ebay(set_name)
-        if _new_set != set_name:
-            print(f"    [AUTO-FIX] Set: {set_name!r} -> {_new_set!r} (公式名称マップ)")
-            set_name = _new_set
+    # 2026-06-08: 出品は「参照のみ」化 (SSOT)。set_name は catalog lookup の
+    # set_name_ebay (Catalog #1a で clean な eBay facet 名を確定保存済) をそのまま使う。
+    # 旧: 出品の度に set_code_to_ebay_name / _dragonball_set_name_to_ebay で再変換していたが、
+    #     保存値が既に clean なので no-op + 変換層のバグ伝播源 → 撤去。
+    #     カタログに無い (=set_name_ebay 空) なら空欄のまま (fail-closed)。変換で埋め直さない。
 
     # One Piece Leader の rarity 空欄補完 (Canonical Map 適用後の値で判定)
     if not rarity and card_type == "Leader" and franchise == "One Piece":
         rarity = "Leader"
     card_number = official_card_number  # 公式の完全番号 (例: "231/193")
 
+    # 2026-05-27: DON カード防御 — eBay 送信値 (= C:Card Number) は強制空欄維持
+    # Catalog の DON-{set_code}-NNN は dedup 内部 KEY であって 公式 card_number ではない。
+    # 誤って eBay に内部 KEY を送信しないよう、 DON!! Card 検出時に強制空欄化。
+    # 5/27 ユーザー方針: 「カード番号じゃないけど KEY として使うから」
+    if subject and "DON!!" in str(subject).upper():
+        if card_number:
+            print(f"    🔧 DON カード防御: card_number={card_number!r} → '' (= eBay 送信空欄維持、 KEY は内部 dedup 用のみ)")
+        card_number = ""
+        official_card_number = ""
+
+    # 2026-05-27: Card Number 完全形補完 (= 重複くん Phase 1e 発見、 dedup 精度向上)
+    # catalog miss 等で連番のみ ("060") のまま eBay 送信されてた listing が複数発覚 (= POC 3/5 件)。
+    # 完全形 ("OP05-060") で送信すべきため、 PSA brand から set prefix 抽出 → 補完。
+    # set_name 英語名 (= "Awakening of the New Era" 等) からは prefix 取れないため brand 優先。
+    if card_number and re.match(r"^\d+$", str(card_number)):
+        _brand_upper = (data.get('Brand') or '').upper()
+        _m_prefix = re.search(r'\b(OP\d+|ST\d+|EB\d+|PRB\d+|RP|GD\d+|FB\d+|FS\d+|SB\d+)\b', _brand_upper)
+        if _m_prefix:
+            _prefix = _m_prefix.group(1)
+            _zfilled = str(card_number).zfill(3)
+            _completed = f"{_prefix}-{_zfilled}"
+            print(f"    🔧 Card Number 完全形補完: {card_number!r} -> {_completed!r} (PSA brand={_prefix})")
+            card_number = _completed
+            official_card_number = _completed
+
+    # 2026-05-27 撤回: SM-P 系 正規化 (= `001/SM-P` → `SM-P-001`) は SEO アレンジに該当、
+    # 「Catalog = 公式 = 正 = KEY で統一」 新原則 (= 同日対話) で撤回。
+    # 公式表記そのまま eBay 送信、 重複くんも Catalog 公式値で dedup。
+
     # タイトル: Claudeが有効なら使用、欠落/不正ならルールベース
     claude_title = claude_result.get('title') if claude_result else None
+    # ★PSA10 以外は出品しない (2026-07-27 事故: PSA9 が PSA10 として出かかった)。
+    #   タイトル/CustomLabel/C:Grade/市場検索が全て PSA10 固定なので、非PSA10 は
+    #   グレード誤表示 + 相場誤参照 になる。現物ラベルを読めた時だけ確実に止める。
+    _vision_grade = (claude_result or {}).get('psa_grade') if claude_result else None
+    if not is_psa10_or_unknown(claude_title, _vision_grade):
+        _g = (str(_vision_grade or "").strip() or detected_grade_from_title(claude_title))
+        print(f"    🚫 PSA{_g} を検出(ラベル画像) → **出品しない** (本 pipeline は PSA10 限定運用。"
+              f"グレード誤表示 + PSA10 相場の誤参照になるため fail-closed)")
+        return None
     if claude_title:
         title = strip_banned_words(claude_title)
         title = pad_title(title, card_type=card_type, set_name=set_name)
@@ -1657,58 +2397,59 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         print(f"    ⚠️ title_generation_agent 失敗: {type(_e).__name__}: {_e}")
         # title は元のまま、既存挙動継続
 
-    # SKU (CustomLabel): メルカリ item ID 形式 `m\d+` を最優先（tshirt_listing_rules 準拠）。
-    # 無在庫運用でメルカリ元ページへの即時逆引きと二重出品防止を両立するキー設計。
-    # URL 無し / 抽出失敗時のみ PSA cert# ベースにフォールバック。
+    # 2026-06-09: 短タイトル(<70)を catalog 実ファクト(年/レアリティ/set code)で補強 (捏造なし、最終段)
+    _pid_for_sc = _catalog_pid_for_variant or official_card_number or ""
+    _m_sc = re.match(r"^([A-Za-z]+\d*[A-Za-z]?)-", str(_pid_for_sc))
+    _set_code_title = _m_sc.group(1) if _m_sc else ""
+    _title_before = title
+    title = _pad_title_with_facts(title, data.get('Year'), official_rarity, _set_code_title)
+    if title != _title_before:
+        print(f"    🔧 タイトル補強(catalog事実): {len(_title_before)}字→{len(title)}字: {title}")
+
+    # SKU (CustomLabel): A列 仕入元 URL から item ID 抽出 (tshirt_listing_rules 準拠)
+    # 優先順: Mercari (m\d+) → SNKRDUNK (apparels/.*/used/\d+) → PSA cert# フォールバック
+    # 無在庫運用で元ページへの即時逆引きと二重出品防止を両立するキー設計
     import re as _re_sku
-    _mercari_url = data.get('_mercari_url', '')
-    _mid = _re_sku.search(r'/item/(m\d+)', _mercari_url)
-    custom_label = _mid.group(1) if _mid else f"PSA10-{cert_number}"
+    _supplier_url = data.get('_mercari_url', '')  # 変数名は互換性のため維持 (= 実体は supplier URL)
+    _mid = _re_sku.search(r'/item/(m\d+)', _supplier_url)
+    if _mid:
+        custom_label = _mid.group(1)  # Mercari: m12345
+    else:
+        _snkr = _re_sku.search(r'snkrdunk\.com/apparels/\d+/used/(\d+)', _supplier_url)
+        if _snkr:
+            custom_label = _snkr.group(1)  # SNKRDUNK: 45549454 (= URL の listing instance ID そのまま、検索可)
+        else:
+            custom_label = f"PSA10-{cert_number}"
     store_cat_id = get_store_category(franchise)
     shipping = get_shipping_policy(price)
 
-    card_size = "Standard" if franchise == "One Piece" else "Japanese"
+    # Card Size = "Standard" (= 市場標準。seller分析 Standard 24 / Japanese 4、catalog も Standard)。
+    # 新コア(TCG_USE_NEW_GEN=1)は catalog card_size_ebay→Standard 既定で同値を出す。
+    card_size = "Standard"
     # Manufacturerはゲームにより異なる
     manufacturer = "The Pokémon Company" if franchise == "Pokemon" else "Bandai"
     illustrator = official_illustrator or ""
 
-    # セルフチェック（CSV出力前、PSA整合性 + 3AI議論）
-    from listing_validator import validate_and_report
+    # セルフチェック（CSV出力前、PSA整合性の決定論検証のみ）
+    # 誤出品防止は validate_row の error reject が担保
+    # (catalog-miss は main() の新コア解決ゲートで別途 skip し入稿しない)。
+    from listing_validator import validate_row
     tcg_specs = {"Brand": manufacturer, "Type": card_type, "Size": "N/A", "Color": attribute or "N/A",
                  "Game": game, "Set": set_name, "Rarity": rarity, "Card Number": card_number}
-    # psa_card_number は listing_validator の Rule 3 が「数字のみ」を前提にしているため、
+    # psa_card_number は validate_row の Rule 3 が「数字のみ」を前提にしているため、
     # line 1372 で official_card_number に上書き済の card_number ではなく PSA 生値を渡す。
     # （Bandai補完値を渡すと "ST16-004" vs "004" の false positive が発生する）
-    # overrides 適用時は3AIへ「人手検証済」コンテキストを追加
-    # (PSA cert# vs 公式 collection# の番号体系違いを許容、画像/Subject 整合性は引き続きチェック)
-    _override_context = None
-    if _override_applied:
-        _override_context = (
-            f"NOTE: This listing has manual overrides applied (cert_overrides.json).\n"
-            f"Reason: {_override.get('reason', '')}\n"
-            f"Reviewer: human-verified at {_override.get('applied_at', '')}\n"
-            f"PSA cert# may differ from any external DB collection# by design.\n"
-            f"Focus your validation on Subject/image consistency, NOT on cert# numerical match."
-        )
-    else:
-        # iMakCatalog (公式 DB) hit 時は authority context を 3AI に注入.
-        # set_name 表記揺れ / Pokemon の Attribute=Type 慣習 等を 3AI に説明し、
-        # 機械的 BLOCK を防ぐ. catalog miss の場合は None で通常判定継続.
-        try:
-            from catalog_authority_context import maybe_build_context as _cat_ctx
-            _override_context = _cat_ctx(
-                brand=brand,
-                card_number=data.get('CardNumber', ''),
-                subject=subject,
-                franchise=franchise,
-            )
-        except Exception:
-            _override_context = None
-    if not validate_and_report(
-        cert_number, title, tcg_specs, "", 183454, 2750, price, PIC_URL,
+    _errors, _warnings = validate_row(
+        title, tcg_specs, "", 183454, 2750, price, PIC_URL,
         psa_brand=brand, psa_card_number=data.get('CardNumber', ''),
-        override_context=_override_context,
-    ):
+    )
+    for _w in _warnings:
+        print(f"       ⚠️ {_w}")
+    if _errors:
+        print(f"    ❌ セルフチェック失敗 (#{cert_number}):")
+        for _e in _errors:
+            print(f"       ❌ {_e}")
+        print(f"    → この商品はCSVに含めません")
         return None
 
     # ===== Card Name/Character の variant suffix 剥がし (新ルーチン、独立) =====
@@ -1749,18 +2490,57 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         print(f"    [AUTO-FIX] Leader Cost (post-catalog): {cost!r} -> '' (Leader はコスト持たない仕様)")
         cost = ""
 
+    # 2026-05-28 variant_meta 連動 (= ① Phase A.1 Pokemon catalog で投入済の variant メタ活用)
+    # PSA Subject から variant_code 抽出 → catalog 公式値で Features/Finish/Rarity 補完
+    if _catalog_pid_for_variant and _catalog_category_for_variant:
+        try:
+            from integrations import variant_meta as _vm  # 既存 catalog_psa と同 import 経路
+            _variant_code = _vm.extract_variant_alias(data.get('Subject', '') or '')
+            if _variant_code:
+                _meta = _vm.get_variant_meta(_catalog_pid_for_variant, _variant_code, _catalog_category_for_variant)
+                if _meta:
+                    if not features:
+                        features = _meta.get("features", "")
+                    # 2026-06-01: finish 投入禁止 (= SNAD クレーム直結リスク)
+                    # memory:finish_only_blank_other_keep_processed
+                    # variant_meta 経由の finish も削除、 listing 側で常に空欄
+                    if _meta.get("rarity_ebay"):
+                        rarity = _meta["rarity_ebay"]
+                    print(f"    🎨 variant_meta 連動: {_variant_code} → features={features!r} rarity={rarity!r}")
+        except Exception as _e:
+            print(f"    ⚠️ variant_meta 連動失敗: {type(_e).__name__}: {_e}")
+
+    # 2026-06-09: Features がまだ空なら catalog rarity から導出 (TOPセラーは rarity を Features に入れる)。
+    # 実属性なので捏造でない。variant (Alt Art 等) が取れてる時は上書きしない。
+    if not features:
+        _feat = _RARITY_TO_FEATURES.get((official_rarity or "").upper().strip(), "")
+        if _feat:
+            features = _feat
+            print(f"    🔧 Features 補完(catalog rarity {official_rarity!r}→{features!r})")
+
+    # 商品説明に個別 Specifications ブロックを挿入 (listing の Item Specifics と同値を転記・空欄skip)
+    description = insert_tcg_specs(description, build_tcg_specs_html([
+        ("Card Name", card_name), ("Set", set_name), ("Card Number", card_number),
+        ("Rarity", rarity), ("Card Type", card_type), ("Year", year), ("Language", "Japanese"),
+    ]))
+
     return [
-        "Add", 183454, title, PIC_URL, price, 2750,
+        "Add", 183454, title, _build_pic_url(data), price, 2750,
         275010, 275020, cert_number,
         get_schedule_time(), custom_label, description,
         "FixedPrice", "GTC", 1, LOCATION, 1,
         shipping, RETURN_POLICY, PAYMENT_POLICY,
         game, set_name, card_type, card_name, character, card_number,
-        # Country of Origin: "Does not apply" 固定（tshirt_listing_rules 準拠）。
-        # 画像/公式DBで製造国を100%特定できない限り、eBay AI の勝手な Japan 補完を明示的に塞ぐ
-        rarity, features, manufacturer, "Japanese", year, "Does not apply", franchise,
-        "6+", "No", "No", "Card Stock", card_size, "No",
+        # Country of Origin: One Piece は card に made in japan 印字で日本製造が確実 → "Japan"
+        # (2026-06-10 ユーザー指示・まず OP から)。他は "Does not apply"（製造国を特定できない
+        # 場合の eBay AI 勝手な Japan 補完を明示的に塞ぐ＝従来方針）。
+        rarity, features, manufacturer, "Japanese", year,
+        ("Japan" if franchise == "One Piece" else "Does not apply"), franchise,
+        # Age Level 列は出力しない (2026-06-29 CPSC対応): PSA鑑定品=コレクター市場=非児童製品。
+        # PSA公式店も Age Level 未設定が業界標準。"6+"=児童製品扱い→7/8 eFiling 通関リスク回避。
+        "No", "No", "Card Stock", card_size, "No",
         finish, attribute, illustrator, cost, power, "",
+        "", "",   # C:HP / C:Stage (旧コアは空・新コアが catalog hp_ebay/stage_ebay から充填)
         "Near Mint or Better", "10",
         "Professional Sports Authenticator (PSA)", "Yes",
         store_cat_id,
@@ -1770,6 +2550,25 @@ GSHEET_CREDS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..",
     "double-hold-421922-7c0d38d3f73d.json"
 )
+
+
+def _psa_cost_from_row(cost_n, price_m, price_f):
+    """仕入¥ を N(SSOT)→ M(現在価格)→ F(取得時価格) の優先で決める。純関数(test可)。
+
+    2026-07-24 根治: 従来 `N or F` で、N列(#REF!/空)の時に F列(=取得時の古い価格)へ
+    フォールバックし、値下がりした品を過大 pricing していた(DON!! 出品時 F¥23,000 を拾い
+    $279.98。実際は現価格 M¥14,000 → $184.98)。
+
+    2026-08-02 統合: listing_common.pick_cost_jpy の thin wrapper に置換。
+    N→M→F 優先は 5 listing scripts + offer_calc と 1 定義に集約 (三様問題の解消)。
+    """
+    from listing_common import pick_cost_jpy
+    row = [""] * 14
+    row[5] = "" if price_f is None else str(price_f)
+    row[12] = "" if price_m is None else str(price_m)
+    row[13] = "" if cost_n is None else str(cost_n)
+    s = pick_cost_jpy(row)
+    return int(s) if s else None
 
 
 def load_targets_from_sheet_psa():
@@ -1804,10 +2603,36 @@ def load_targets_from_sheet_psa():
     ws = sh.get_worksheet_by_id(PSA_GID)
     all_values = ws.get_all_values()
 
+    # 出品済(itemID非空の同KEY行が在る)カードの集合。2枚目(itemID空・同KEY)を抽出段階で除外し、
+    # viewer 毎回再表示の浪費を防ぐ(dedup は CSV 段階で消すが抽出=目視は止めないため。2026-06-26)。
+    try:
+        import sys as _sys
+        _hq_tools = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "iMakHQ", "tools")
+        if _hq_tools not in _sys.path:
+            _sys.path.insert(0, _hq_tools)
+        from sheet_io import (listed_key_forms as _listed_key_forms,
+                              listed_certs as _listed_certs,
+                              live_listed_certs as _live_certs,
+                              already_listed_reason as _already_listed,
+                              PRODUCT_COL_KEY as _KEY_COL)
+        _listed = _listed_key_forms(all_values)
+        # 出品済 cert は2つの根拠を union する。片方だけでは漏れる:
+        #   シートB列 … 書き戻し漏れがある (実測 live PSA10 638件中 36件が空)
+        #   live SKU  … dup_guard の cache 経由 (eBay は叩かない)。ただし `PSA10-<cert>`
+        #               形式の出品しか cert を持たないので補完は部分的 (実測 +1件)
+        _listed_cert = _listed_certs(all_values) | _live_certs()
+    except Exception as _e_lk:
+        print(f"  ⚠️ 出品済KEY算出失敗(抽出スキップ無効化して継続): {type(_e_lk).__name__}")
+        _listed, _listed_cert, _KEY_COL = set(), set(), 34
+        def _already_listed(cert, key, certs, keys):  # noqa: E306  (fallback: 従来どおり素通り)
+            return ""
+
     cert_numbers = []
     cost_map = {}
     url_map = {}
     title_map = {}
+    _skipped_listed = 0
+    _skipped_cert = []
     for row in all_values[1:]:  # header 除外
         url      = (row[0]  if len(row) > 0  else '').strip()  # A
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
@@ -1815,8 +2640,11 @@ def load_targets_from_sheet_psa():
         sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ ('○'=売切)
         price_f  = (row[5]  if len(row) > 5  else '').strip()  # F "¥11,000"
         cert     = (row[8]  if len(row) > 8  else '').strip()  # I cert#
-        cost_n   = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円)
+        no_go    = (row[10] if len(row) > 10 else '').strip()  # K NO-GO sentinel (= 「出品見合せ（仕入高）」 等)
+        price_m  = (row[12] if len(row) > 12 else '').strip()  # M 現在価格(円) = 監視くん更新の最新
+        cost_n   = (row[13] if len(row) > 13 else '').strip()  # N 仕入れ価格(円) = SSOT (M or F)−K
         category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
+        key_v    = (row[_KEY_COL] if len(row) > _KEY_COL else '').strip()  # AI canonical KEY
 
         if not cert or item_id or not url:
             continue
@@ -1824,26 +2652,108 @@ def load_targets_from_sheet_psa():
         # (他 listing スクリプトと同じ R 列フィルタ運用に合わせる)
         if category != 'TCG':
             continue
+        # ★2026-08-03: 二重出品ガード。cert 一致 = **同一の現物**が既に出品中 → 絶対に出さない
+        #   (現物は1枚しかないので片方は必ず履行できない)。KEY 一致 = 同じカードの2枚目 → 従来どおり止める。
+        #   旧実装は `key_v and key_v in _listed` の **fail-OPEN** で、KEY 未記入 / KEY 表記揺れ
+        #   (`FB08-121_p1` vs `dragonball_scg:FB08-121_PARA`) の行が素通りしていた。
+        #   実害: 2026-08-03 の CSV に既出品の cert 152687775 / 158452544 が入った (シート実測 同型24件)。
+        #   ★必ず **カテゴリ判定の後**に置くこと。I列は PSA cert 専用ではなく montbell は型番を
+        #   入れており (`1103247` が3行で共有)、前に置くと在庫のある別商品まで止める。
+        _dup = _already_listed(cert, key_v, _listed_cert, _listed)
+        if _dup == "cert":
+            _skipped_cert.append(cert)
+            continue
+        if _dup:
+            _skipped_listed += 1
+            continue
         # D 列 売り切れ '○' は drop-shipping 不可 (仕入れ確実でないため出品 NG)
         if sold:
+            continue
+        # K 列 NO-GO sentinel (= 過去 cycle 価格 NO-GO 除外で書込) → 抽出対象外
+        if no_go:
             continue
         cert_numbers.append(cert)
         url_map[cert] = url
         title_map[cert] = title
-        # 仕入値: N列優先、空なら F列(¥11,000 形式) を parse
-        cost_src = cost_n or price_f
-        if cost_src:
-            m = _re.search(r'([\d,]+)', cost_src)
-            if m:
-                try:
-                    cost_map[cert] = int(m.group(1).replace(',', ''))
-                except ValueError:
-                    pass
+        # 仕入値: N(SSOT)→ M(現在価格)→ F(取得時) の優先。N#REF!/空でも M(最新)を拾う。
+        _cost = _psa_cost_from_row(cost_n, price_m, price_f)
+        if _cost is not None:
+            cost_map[cert] = _cost
+    if _skipped_cert:
+        print(f"  🚫 二重出品ガード: 同一cert が既に出品済 → 除外 {len(_skipped_cert)}件 "
+              f"→ {_skipped_cert[:8]}{' …' if len(_skipped_cert) > 8 else ''}")
+        print(f"     (同じ cert = 同じ現物。二度出すと片方は必ず履行できない)")
+        # ★2026-08-07 重複くん要望: 抽出段で落とした cert を **後から追える形**で残す。
+        #   抽出段は「目視削減の前段」であって判定の権威ではない。権威は重複くん。
+        #   痕跡が無いと重複くんが「本来自分が捕まえるべきだった件」を audit できない。
+        try:
+            import json as _json
+            from datetime import datetime as _dt
+            _tr = r"C:\dev\iMak_data\hq\extract_cert_skips.jsonl"
+            os.makedirs(os.path.dirname(_tr), exist_ok=True)
+            with open(_tr, "a", encoding="utf-8") as _f:
+                _f.write(_json.dumps({"ts": _dt.now().isoformat(timespec="seconds"),
+                                      "stage": "psa_to_csv.extract",
+                                      "reason": "same_cert_already_listed",
+                                      "certs": _skipped_cert}, ensure_ascii=False) + "\n")
+        except Exception as _e_tr:                      # 痕跡が残せなくても抽出は止めない
+            print(f"     ⚠️ 除外痕跡の記録に失敗(続行): {type(_e_tr).__name__}")
+    if _skipped_listed:
+        print(f"  ⏭️ 既出品(同KEYが出品済)の2枚目を除外: {_skipped_listed}件 "
+              f"(viewer毎回再表示の浪費防止。dedupと二重ではなく抽出段階で先に止める)")
     return cert_numbers, cost_map, url_map, title_map
+
+
+_PSA_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa"
+_psa_warmup_driver = None  # warmup で起動した uc.Chrome、 main の本処理に流用
+
+
+def _psa_cloudflare_warmup():
+    """PSA Cloudflare 対策 = uc.Chrome を visible で起動 + user 手動 突破.
+
+    2026-05-26 実装。 通常 chrome 起動だと profile 衝突するため uc.Chrome を warmup から使う。
+    driver は本処理に流用 (= 同 instance 維持で profile 衝突回避)。
+    """
+    global _psa_warmup_driver
+    import tkinter as _tk
+    from tkinter import messagebox as _mb
+
+    TEST_URL = "https://www.psacard.com/cert/89631139"
+    os.makedirs(_PSA_PROFILE_DIR, exist_ok=True)
+
+    print("\n🔓 Cloudflare warmup: uc.Chrome 起動中...")
+    try:
+        options = uc.ChromeOptions()
+        options.add_argument("--no-sandbox")
+        options.add_argument(f"--user-data-dir={_PSA_PROFILE_DIR}")
+        options.add_argument("--disable-features=CalculateNativeWinOcclusion")
+        options.add_argument("--no-first-run")
+        options.add_argument("--no-default-browser-check")
+        _psa_warmup_driver = uc.Chrome(options=options, version_main=detect_chrome_major())
+        _psa_warmup_driver.get(TEST_URL)
+    except Exception as _e:
+        print(f"⚠️ uc.Chrome 起動失敗: {_e}, warmup skip → 本処理が新規起動試行")
+        _psa_warmup_driver = None
+        return
+
+    _root = _tk.Tk()
+    _root.withdraw()
+    _root.attributes("-topmost", True)
+    _mb.showinfo(
+        "PSA Cloudflare チェック",
+        "Chrome で PSA cert ページを開きました。\n\n"
+        "1. Cloudflare チェック (= 「I'm not a robot」 等) があれば click\n"
+        "2. PSA cert 詳細ページ (= グレード等) が見えれば成功\n"
+        "3. **Chrome は閉じずに** この OK を押してください\n"
+        "(= 同 driver で scrape 続行、 profile 衝突回避)",
+    )
+    _root.destroy()
+    print("✅ Cloudflare warmup 完了、 psa_to_csv 続行\n")
 
 
 def main():
     print("=== iMak Trading Japan - PSA → eBay CSV Generator ===\n")
+    _psa_cloudflare_warmup()
 
     # 2026-04-24: certs.txt 廃止、スプシ駆動に完全移行
     # スプシ (19kj8... gid=851100680) の I列=cert# / B列=itemID空 / A列=URL で処理対象を抽出
@@ -1857,12 +2767,52 @@ def main():
 
     print(f"✓ {len(cert_numbers)}件の PSA 対象行を抽出（B列 itemID 空）")
 
+    # ★PSA10 以外を入口で落とす (2026-07-27 誤出品事故の本命 gate)。
+    #   本 pipeline は PSA10 限定運用 (title/C:Grade/相場すべて "10" 固定) なので、
+    #   PSA9 等が混ざると **グレード誤表示のまま出品** される (実害 live 6件・全て END 済)。
+    #   仕入元タイトルの "PSA9" 表記は決定論的で、実際にこの6件を発見した信号。
+    _non10 = non_psa10_certs(mercari_title_map)
+    if _non10:
+        _hit = [c for c in cert_numbers if str(c) in _non10]
+        if _hit:
+            print(f"  🚫 PSA10以外(仕入元表記)を除外: {len(_hit)}件 "
+                  f"→ {[f'#{c}=PSA{_non10[str(c)]}' for c in _hit]}")
+            print("     (本 pipeline は PSA10 限定運用。グレード誤表示 + PSA10相場の誤参照になるため)")
+            cert_numbers = [c for c in cert_numbers if str(c) not in _non10]
+
+    # 目視済(NONE/NG=識別不能)cert を cooldown 期間スキップ (2026-06-23 再表示防止)
+    # post_psa_review が NONE/NG 判定を skip 台帳に記録 → 一定期間 再出題しない。
+    # catalog 宿題は依頼書で別途追跡(埋もれない)。cooldown 経過後は再浮上(catalog修正済なら出品可)。
+    try:
+        import datetime as _dt2
+        from tcg_batch_select import load_review_skips, active_review_skips
+        _skips = active_review_skips(load_review_skips(), _dt2.datetime.now())
+        if _skips:
+            _b = len(cert_numbers)
+            cert_numbers = [c for c in cert_numbers if c not in _skips]
+            if _b != len(cert_numbers):
+                print(f"  ⏭️ 目視済(NONE/NG, {14}日以内)を除外: {_b-len(cert_numbers)}件 "
+                      f"(catalog宿題は依頼書で追跡。cooldown後に再浮上)")
+    except Exception as _e2:
+        print(f"  ⚠️ 目視済スキップ読込失敗(無視して継続): {type(_e2).__name__}: {_e2}")
+
     # 一回 10 件まで固定 (Cloudflare bot 検出回避、2026-05-06)
     # 残りは時間を置いて次回再走で順次処理
     PSA_BATCH_LIMIT = 10
     if len(cert_numbers) > PSA_BATCH_LIMIT:
-        print(f"⚠️ {len(cert_numbers)}件中 先頭 {PSA_BATCH_LIMIT} 件のみ処理 (残 {len(cert_numbers)-PSA_BATCH_LIMIT} 件は次回再走)")
-        cert_numbers = cert_numbers[:PSA_BATCH_LIMIT]
+        # franchise 均等サンプリング (2026-06-23 ユーザー要望: Pokemon/One Piece/Dragon Ball 均等)
+        # 在庫は Pokemon 大半 → 従来の全体 shuffle だと Pokemon ばかり選ばれ OP/DB が滞留。
+        # C列タイトルで franchise 推定 → round-robin で均等に。PSA_NO_SHUFFLE=1 で従来の上から順。
+        total = len(cert_numbers)
+        if os.environ.get("PSA_NO_SHUFFLE") == "1":
+            cert_numbers = cert_numbers[:PSA_BATCH_LIMIT]
+        else:
+            import collections as _collections
+            from tcg_batch_select import balanced_sample, classify_franchise
+            cert_numbers = balanced_sample(cert_numbers, mercari_title_map, PSA_BATCH_LIMIT)
+            _dist = _collections.Counter(classify_franchise(mercari_title_map.get(c, "")) for c in cert_numbers)
+            print(f"⚠️ {total}件中 franchise均等 {PSA_BATCH_LIMIT} 件を処理 "
+                  f"(内訳 {dict(_dist)} / 残 {total-PSA_BATCH_LIMIT} 件は次回再走)")
         cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
 
     if cost_map:
@@ -1870,12 +2820,20 @@ def main():
     else:
         print(f"{len(cert_numbers)}件を処理します。\n")
 
-    options = uc.ChromeOptions()
-    options.add_argument("--no-sandbox")
-    # 2026-04-26: バックグラウンド動作化 (目障り回避、機能には影響なし)
-    options.add_argument("--window-size=800,600")
-    options.add_argument("--window-position=100,100")
-    driver = uc.Chrome(options=options)
+    # 2026-05-26: warmup phase で uc.Chrome 起動済の場合は流用 (= profile 衝突回避)
+    if _psa_warmup_driver is not None:
+        driver = _psa_warmup_driver
+        print("🔁 warmup driver 流用 (= cookie 引き継ぎ + profile 衝突回避)")
+    else:
+        # fallback: warmup 失敗時 or 直接 CLI 実行時
+        os.makedirs(_PSA_PROFILE_DIR, exist_ok=True)
+        options = uc.ChromeOptions()
+        options.add_argument("--no-sandbox")
+        options.add_argument(f"--user-data-dir={_PSA_PROFILE_DIR}")
+        options.add_argument("--disable-features=CalculateNativeWinOcclusion")
+        options.add_argument("--window-size=800,600")
+        options.add_argument("--window-position=100,100")
+        driver = uc.Chrome(options=options, version_main=detect_chrome_major())
     try:
         driver.minimize_window()  # 起動後即最小化
     except Exception:
@@ -1892,9 +2850,12 @@ def main():
         "BestOfferEnabled", "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
         "C:Game", "C:Set", "C:Card Type", "C:Card Name", "C:Character", "C:Card Number",
         "C:Rarity", "C:Features", "C:Manufacturer", "C:Language", "C:Year Manufactured",
-        "C:Country of Origin", "C:Franchise", "C:Age Level", "C:Autographed",
+        "C:Country of Origin", "C:Franchise", "C:Autographed",
         "C:Vintage", "C:Material", "C:Card Size", "C:Customized",
         "C:Finish", "C:Attribute/MTG:Color", "C:Illustrator", "C:Cost", "C:Attack/Power", "C:Defense/Toughness",
+        # C:HP / C:Stage は新コアが catalog hp_ebay/stage_ebay から充填 (2026-06-15 最大活用)。
+        # 旧コアは空 (build_row が "" を出す)。catalog *_ebay 充填まで空欄 (回帰なし)。
+        "C:HP", "C:Stage",
         "C:Card Condition", "C:Grade", "C:Professional Grader", "C:Graded", "StoreCategoryID",
     ]
 
@@ -1903,9 +2864,42 @@ def main():
     catalog_misses = []  # iMakCatalog 未登録 (要 Catalog Claude 拡充依頼) — gshock_to_csv と同パターン
     # PSAデータ取得 → build_row（価格はデフォルト$100で仮生成）
     card_info = []  # (cert, data) を保持して後で価格更新
+
+    # ===== verify→build (PSA_VERIFY_BEFORE_BUILD=1): 先に全 cert scrape → HTML目視確認 →
+    #       確定したカードだけ CSV 生成 (= 確定してから作る)。既定 OFF=従来の build→確認。 =====
+    _verify_mode = os.environ.get("PSA_VERIFY_BEFORE_BUILD") == "1"
+    _prescraped = {}
+    _confirmed_pids = {}
+    _skipped_unconfirmed = []
+    if _verify_mode:
+        print("\n🔎 verify→build モード: 先に scrape → 目視確認 → 確定カードのみ生成")
+        for cert in cert_numbers:
+            print(f"取得中(確認用): #{cert}...", end="", flush=True)
+            d = get_psa_data(driver, cert)
+            _prescraped[cert] = d
+            print(" ✓" if d else " 失敗")
+        try:
+            _tools = r"C:/dev/iMak/iMakHQ/tools"
+            if _tools not in sys.path:
+                sys.path.insert(0, _tools)
+            from post_psa_review import run_pre_build_verify
+            _confirmed_pids = run_pre_build_verify(cert_numbers, print)
+        except Exception as _e:
+            print(f"⚠️ pre-build verify 失敗 → 確定不能のため build 中止(誤出品回避): {type(_e).__name__}: {_e}")
+            _confirmed_pids = {}
+
     for cert in cert_numbers:
-        print(f"取得中: #{cert}...", end="", flush=True)
-        data = get_psa_data(driver, cert)
+        if _verify_mode:
+            # 確定 (OK/CHOSEN) した cert のみ build。未確定/NONE/NG は出品しない (fail-closed)。
+            if cert not in _confirmed_pids:
+                print(f"スキップ(目視未確定): #{cert}")
+                _skipped_unconfirmed.append(cert)
+                card_info.append((cert, None))
+                continue
+            data = _prescraped.get(cert)
+        else:
+            print(f"取得中: #{cert}...", end="", flush=True)
+            data = get_psa_data(driver, cert)
 
         if data:
             subject = data.get('Subject', 'Unknown')
@@ -1920,12 +2914,43 @@ def main():
                 errors.append(cert)
                 card_info.append((cert, None))
                 continue
+            # 並行ビルド切替 (strangler): TCG_USE_NEW_GEN=1 の時だけ catalog 決定論値で上書き。
+            # 既定 OFF=この分岐は no-op で旧挙動を完全維持 (本番不変)。
+            # verify_mode 時は確定 product_id (forced_card_id) で再生成 = 人が選んだカードを権威に。
+            try:
+                from tcg_new_gen_override import env_enabled, apply_new_gen_override
+                if env_enabled():
+                    _forced = _confirmed_pids.get(cert, "") if _verify_mode else ""
+                    # ★catalog hit 判定 (新コア・全 franchise の決定論解決)。
+                    #   miss = 公式データ無し → **入稿しない** (fail-closed / catalog_official_only)。
+                    #   catalog-miss を弾く正規ゲートはここ1本。
+                    from tcg_listing_fields import build_listing_fields as _blf
+                    _gi = headers.index("C:Game") if "C:Game" in headers else None
+                    _game = row[_gi] if (_gi is not None and _gi < len(row)) else ""
+                    _chk, _cerr = _blf(str(cert), _game or "", forced_card_id=_forced)
+                    if _cerr:
+                        print(f"    ⏭️ Skip (catalog未登録→入稿しない・catalog依頼): #{cert} ({_cerr})")
+                        errors.append(cert)
+                        card_info.append((cert, None))
+                        continue
+                    # promo系だが配布元名 未確定 → 黙って generic で出さず build時にもフラグ
+                    # (レビューを通らない経路=verify無効/timeout でも「気づかない」を消す。出品はブロックしない)
+                    if _chk.get("_promo_needs_review"):
+                        print(f"    🏷️ 注意 #{cert}: プロモ系だが配布元名 未確定(promo override 無)"
+                              f" → generic タイトルで出品。PSA Review の promo欄で確定すると次回反映")
+                    row = apply_new_gen_override(row, headers, cert, forced_card_id=_forced)
+            except Exception as _e:
+                print(f"    ⚠️ new-gen override skip (#{cert}): {type(_e).__name__}: {_e}")
+            apply_ebay_filter_to_row(row, headers, category="tcg")
             rows.append(row)
             card_info.append((cert, data))
         else:
             print(f" → 失敗")
             errors.append(cert)
             card_info.append((cert, None))
+
+    if _verify_mode and _skipped_unconfirmed:
+        print(f"\n🔎 目視未確定で出品見送り: {len(_skipped_unconfirmed)} 件 {_skipped_unconfirmed}")
 
     driver.quit()
 
@@ -2005,14 +3030,17 @@ def main():
             today = datetime.now().strftime("%Y-%m-%d")
 
             if not market:
-                # 競合0件: 目標利益確保価格と$100の高い方で先行出品
+                # 競合0件: V8/V9 SSOT 価格 (pricing_engine) と $100 の高い方で先行出品
+                # (2026-07-23: 旧レガシー式 [tier(100)+定数比率のインライン計算] は SSOT と
+                #  数ドルずれる [実害: DON-EB04-002 $186.98 vs V9 $190.98] ため廃止。
+                #  通常経路 (line 2811 付近) と同じエンジンに統一)
                 if cost_jpy is not None:
-                    tier_profit, _ = get_tier_params(100)  # $100帯のパラメータ
-                    costs_jpy = cost_jpy + SHIPPING_JPY
-                    min_price = costs_jpy / (EXCHANGE_RATE * (NET_RATIO - tier_profit))
-                    min_price = max(min_price, 100)
-                    min_price = round(min_price, 2)
+                    from pricing_engine import compute_listing_price as _pe_compute
+                    _pr = _pe_compute(cost_jpy, 0, "TCG(PSA10)")
+                    min_price = round(_pr["target_usd"], 2)
                     min_price = int(min_price) + 0.98 if min_price > 10 else min_price
+                    if min_price < 100:
+                        min_price = 100.98
                 else:
                     min_price = 100.00
                 # CSVの価格を更新
@@ -2037,52 +3065,39 @@ def main():
             top_info = f" (TOP${top_median:.0f})" if top_median else ""
             total = market["total"]
 
-            # 乖離率計算（仕入値がある場合）— 価格帯別パラメータ適用
+            # 乖離率計算（仕入値がある場合）— V5 pricing_engine 経由（2026-05-19 V5 切替）
             if cost_jpy is not None:
-                tier_profit, tier_gap_limit = get_tier_params(all_median)
+                _, tier_gap_limit = get_tier_params(all_median)
                 costs_jpy = cost_jpy + SHIPPING_JPY
-                target_usd = costs_jpy / (EXCHANGE_RATE * (NET_RATIO - tier_profit))
+                # V5 ロジック: pricing_engine が yaml v5_pricing から IFS 利益率 + 35% markup で計算
+                from pricing_engine import compute_listing_price as _v5_compute
+                _v5_res = _v5_compute(cost_jpy, 0, "TCG(PSA10)")
+                target_usd = _v5_res["target_usd"]
+                tier_profit = _v5_res["profit_target"]
                 breakeven_usd = costs_jpy / (EXCHANGE_RATE * NET_RATIO)
                 gap_pct = (target_usd - all_median) / all_median * 100 if all_median > 0 else 999
                 gap_limit_pct = tier_gap_limit * 100
 
-                if total <= MARKET_GATE_MIN_LISTINGS or target_usd <= MARKET_GATE_MAX_TARGET_USD:
-                    # 緩和条件 (OR):
-                    #  (a) 薄商い: 出品数 ≤ MARKET_GATE_MIN_LISTINGS → median 信頼度低
-                    #  (b) 低額帯: target_usd ≤ MARKET_GATE_MAX_TARGET_USD → 焦付きリスク低
-                    # どちらか満たせば gate skip、コストプラス価格で出品 (機会損失回避)
-                    price = round(target_usd, 2)
-                    price = int(price) + 0.98 if price > 10 else price
-                    if total <= MARKET_GATE_MIN_LISTINGS and target_usd <= MARKET_GATE_MAX_TARGET_USD:
-                        reason = (f"出品{total}件≤{MARKET_GATE_MIN_LISTINGS}+"
-                                  f"target≤${MARKET_GATE_MAX_TARGET_USD:.0f}")
-                    elif total <= MARKET_GATE_MIN_LISTINGS:
-                        reason = f"出品{total}件≤{MARKET_GATE_MIN_LISTINGS}、median 不安定"
-                    else:
-                        reason = f"target ${target_usd:.0f}≤${MARKET_GATE_MAX_TARGET_USD:.0f}、低額帯"
-                    gate_label = "緩和"
-                    gate = f"🔓 緩和 ${price} ({reason}→gate skip)"
+                # 2026-05-23: 価格 = 常に V7 スプシ logic (= target_usd) で固定。
+                # market median は 参考情報として log 出力のみ、 価格決定には使わない。
+                # 旧: GO branch で market×0.95 採用 → 高額カードで過剰利益 (例 Uta cost¥19500 → $664)
+                # 新: 常に cost-plus IFS target_usd → 一貫した利益率
+                price = round(target_usd, 2)
+                price = int(price) + 0.98 if price > 10 else price
+
+                # market 比較ラベル (= 参考のみ、 price には影響なし)
+                if total <= MARKET_GATE_MIN_LISTINGS:
+                    gate_label = "薄商い"
+                    gate = f"ℹ️ V7 ${price} (出品{total}件≤{MARKET_GATE_MIN_LISTINGS}、median 参考程度)"
                 elif gap_pct <= 0:
-                    # GO: 市場が目標を上回る → 中央値×95%で出品
-                    price = round(all_median * 0.95, 2)
-                    price = int(price) + 0.98 if price > 10 else price
-                    gate_label = "GO"
-                    gate = f"✅ GO ${price} (利益{tier_profit:.0%}内)"
+                    gate_label = "市場高"
+                    gate = f"ℹ️ V7 ${price} (市場${all_median:.0f}> target、機会損失の可能性あり)"
                 elif gap_pct <= gap_limit_pct:
-                    # 保留: 許容乖離内 → 目標価格で出品して待つ
-                    price = round(target_usd, 2)
-                    price = int(price) + 0.98 if price > 10 else price
-                    gate_label = "保留"
-                    gate = f"🟡 保留 (乖離{gap_pct:.0f}%/許容{gap_limit_pct:.0f}% → ${price}で出品)"
+                    gate_label = "適正"
+                    gate = f"ℹ️ V7 ${price} (乖離{gap_pct:.0f}%≤許容{gap_limit_pct:.0f}%)"
                 else:
-                    # NO-GO: 許容乖離超過 → CSV除外
-                    nogo_price = round(target_usd, 2)
-                    nogo_price = int(nogo_price) + 0.98 if nogo_price > 10 else nogo_price
-                    price = None
-                    gate_label = "NO-GO"
-                    diff = nogo_price - all_median
-                    gate = f"❌ NO-GO ${nogo_price} +${diff:.0f} 乖離{gap_pct:.0f}% > 許容{gap_limit_pct:.0f}% → CSV除外"
-                    skip_certs.add(cert)
+                    gate_label = "⚠️乖離大"
+                    gate = f"⚠️ V7 ${price} (target>市場${all_median:.0f}、乖離{gap_pct:.0f}%>許容{gap_limit_pct:.0f}% — 売れにくい可能性)"
 
                 # ログ記録（全判定）
                 market_log_rows.append([
@@ -2143,6 +3158,14 @@ def main():
         writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
         writer.writerows(rows)
 
+    # Free Shipping 移行: post-processor で _free.csv 生成 (2026-05-18)
+    # 既存 logic 触らず CSV のみ price+DDP 加算 & ShippingProfile=Free に置換
+    try:
+        from freeshipping_postprocess import transform_csv_to_freeshipping
+        transform_csv_to_freeshipping(output_file)
+    except Exception as _e:
+        print(f"⚠️ Free Shipping post-process 失敗 (TCG): {type(_e).__name__}: {_e}")
+
     # Step 8 拡張: decision_log に config_version + 使用値を刻印
     try:
         from decision_log import log_csv_batch as _log_batch
@@ -2159,9 +3182,19 @@ def main():
         print(f"仕入値データ: {cost_file}")
 
     print(f"\n完了！出力: {output_file}")
+
+    # 生成時セルフ監査 (CSV監査くんを自動実行) — 監査項目を「待たず」生成で確認する。
+    try:
+        from listing_common import run_self_audit
+        run_self_audit(output_file)
+    except Exception as _e:
+        print(f"⚠️ セルフ監査 失敗 (非致命): {type(_e).__name__}: {_e}")
     print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")
     if errors:
         print(f"失敗: {', '.join(errors)}")
+
+    # eBay フィルタ validate サマリー (= 3 ケース処理 + Gemini 改善 B レポート)
+    print_ebay_filter_report()
 
     # CSVチェッカー自動実行
     # Phase D (2026-04-29): subprocess.run → 関数呼出. 同一プロセスにすることで
@@ -2202,7 +3235,14 @@ def main():
             print(f"  - [{category}] {model}")
         print(f"\n通知ファイル: {notify_path}")
 
-    input("\nEnterで終了...")
+    # ★2026-07-31: 出品くん(control_panel)からの起動は stdin が無く、ここで EOFError → returncode=1。
+    #   直前の「Catalog 未登録カード一覧」が表示されないまま落ちていた (毎走行で発生)。
+    #   対話起動 (人が直接叩いた時) だけ待つ。
+    if sys.stdin and sys.stdin.isatty():
+        try:
+            input("\nEnterで終了...")
+        except EOFError:
+            pass
 
 if __name__ == "__main__":
     main()

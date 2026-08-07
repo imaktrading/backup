@@ -68,8 +68,37 @@ def get_tier_params(price_usd):
     return 0.10, 0.10
 
 
+def _ddp_usd_for_price(price_usd: float) -> float:
+    """価格 tier から DDP 金額 ($) を逆引き (= global.yaml ddp_shipping_tiers)。
+
+    Free Shipping mode 移行 (2026-05-18) 後、出品価格は bundled (= item + DDP)。
+    DDP 実コストは seller が DHL に支払うため、利益計算に含める必要がある。
+    """
+    cache = _profit_load()
+    tiers = cache.get("ddp_shipping_tiers", [])
+    if not tiers:
+        # fallback: 古い yaml 構造 or 読込失敗時
+        defaults = [(39, 15), (60, 20), (100, 30), (200, 50), (300, 75),
+                    (400, 105), (500, 130), (600, 155), (800, 210), (1000, 260)]
+        for max_usd, ddp in defaults:
+            if price_usd <= max_usd:
+                return float(ddp)
+        return 260.0
+    for tier in tiers:
+        if price_usd <= tier.get("max_usd", 0):
+            return float(tier.get("ddp_usd", 0))
+    return float(tiers[-1].get("ddp_usd", 260))
+
+
 def _compute_target_usd(cost_jpy, category, profit_target):
-    """コストプラスで最低出品価格を計算。"""
+    """コストプラスで最低出品価格を計算 (Free Shipping bundled price)。
+
+    根本修正 (2026-05-18): DDP実コスト + 国内送料 + 仕入 を含めた total cost
+    から target_profit を確保できる bundled price (= item + DDP 込) を出力。
+
+    式: bundled_price × FX × (1 - fees - profit_target) = cost + 国内送料 + DDP実
+    DDP は bundled_price tier に依存 → 5 回 iteration で収束。
+    """
     cache = _profit_load()
     params = get_category_params(category)
     if params is None:
@@ -77,7 +106,19 @@ def _compute_target_usd(cost_jpy, category, profit_target):
     net_ratio = 1 - params["fvf"] - INTL_FEE - cache["ad_rate"] - cache["payo_fee"] - profit_target
     if net_ratio <= 0:
         raise ValueError(f"net_ratio<=0 (profit_target {profit_target} too high)")
-    return (cost_jpy + params["shipping_jpy"]) / (cache["exchange_rate"] * net_ratio)
+    fx = cache["exchange_rate"]
+    base_cost = cost_jpy + params["shipping_jpy"]
+
+    # DDP iteration: 価格 ↔ DDP の循環依存を 5 回反復で収束
+    price = base_cost / (fx * net_ratio)  # 初期推定 (= 旧式、DDP なし)
+    for _ in range(5):
+        ddp_usd = _ddp_usd_for_price(price)
+        ddp_jpy = ddp_usd * fx
+        new_price = (base_cost + ddp_jpy) / (fx * net_ratio)
+        if abs(new_price - price) < 0.01:
+            break
+        price = new_price
+    return price
 
 
 def _round_98(price_usd):
@@ -86,6 +127,289 @@ def _round_98(price_usd):
     if p > 10:
         return int(p) + 0.98
     return p
+
+
+# ============================================================================
+# V5 価格決定 (2026-05-19 確定): 35% 一律 markup + 仕入ベース IFS 利益率
+# 詳細: V5 spreadsheet 1dFU... row 22 / yaml v5_pricing section
+# ============================================================================
+def _profit_rate_from_cost_v5(cost_jpy: float) -> float:
+    """yaml v5_pricing.profit_rate_ifs から仕入¥に応じた利益率を引く."""
+    import config_loader
+    ifs = config_loader.get_v5_pricing().get("profit_rate_ifs", [])
+    for tier in ifs:
+        if cost_jpy < tier["cost_max"]:
+            return float(tier["rate"])
+    return 0.09  # fallback
+
+
+def _fvf_effective_v5(category: str, country: str = "US") -> float:
+    """V5 G3 formula 完全再現: (FVF_base or G-SHOCK 上書き + Intl + Reg) × (1+VAT)."""
+    import config_loader
+    v5 = config_loader.get_v5_pricing()
+    cache = _profit_load()
+    # G-SHOCK 国別 上書き
+    if category == "G-SHOCK":
+        override = v5.get("gshock_country_fvf", {}).get(country)
+        if override is not None:
+            fvf_base = float(override)
+        else:
+            fvf_base = get_category_params(category)["fvf"]
+    else:
+        fvf_base = get_category_params(category)["fvf"]
+    # 国別 fees
+    country_fees = v5.get("country_fees", {}).get(country, {"vat": 0, "intl": INTL_FEE, "reg": 0})
+    return (fvf_base + float(country_fees["intl"]) + float(country_fees["reg"])) * (1 + float(country_fees["vat"]))
+
+
+def _compute_target_usd_v5(cost_jpy: float, category: str, country: str = "US") -> float:
+    """V5 closed-form 価格計算 (= iteration なし、35% markup 一律).
+
+    式:
+      利益¥ = 仕入¥ × IFS(cost)
+      C = (仕入 + 国内送料 + insertion + 利益¥) / (1 - markup × (FVF_eff + ad + payo))
+      G = C × markup_factor  (= US は ×1.35、非US は ×1.0)
+      F (USD) = G / FX
+    """
+    import config_loader
+    v5 = config_loader.get_v5_pricing()
+    cache = _profit_load()
+    params = get_category_params(category)
+    if params is None:
+        raise ValueError(f"Unknown category: {category}")
+    fx = cache["exchange_rate"]
+    shipping_jpy = params["shipping_jpy"]
+    fvf_eff = _fvf_effective_v5(category, country)
+    insertion_jpy = 0.4 * fx
+    rate = _profit_rate_from_cost_v5(cost_jpy)
+    profit_jpy = cost_jpy * rate
+    # markup_factor: US は 1.35、他は 1.0
+    if country == "US":
+        mf = 1 + float(v5.get("markup_rate_us", 0.35))
+    else:
+        mf = 1 + float(v5.get("markup_rate_other", 0.0))
+    denom = 1 - mf * (fvf_eff + cache["ad_rate"] + cache["payo_fee"])
+    if denom <= 0:
+        raise ValueError(f"net_ratio<=0 (cat={category}, country={country})")
+    base = cost_jpy + shipping_jpy + insertion_jpy + profit_jpy
+    C = base / denom
+    G = C * mf
+    return G / fx
+
+
+def compute_listing_price_v5(cost_jpy, median_usd, category, gap_limit_override=None, country="US"):
+    """V5 ロジックで出品価格決定 (= 35% markup + IFS 利益率 closed-form).
+
+    互換 API: compute_listing_price と同じ signature (= country 引数追加).
+    Returns: 同 dict 形式.
+    """
+    target_usd = _compute_target_usd_v5(cost_jpy, category, country)
+    price = _round_98(target_usd)
+    # 利益再計算 (確定 F での実利益)
+    cache = _profit_load()
+    params = get_category_params(category)
+    fx = cache["exchange_rate"]
+    fvf_eff = _fvf_effective_v5(category, country)
+    revenue_jpy = price * fx
+    import config_loader
+    v5 = config_loader.get_v5_pricing()
+    mf = 1 + (float(v5.get("markup_rate_us", 0.35)) if country == "US" else float(v5.get("markup_rate_other", 0)))
+    ddp_jpy = revenue_jpy - revenue_jpy / mf  # = revenue × (1 - 1/mf)
+    insertion_jpy = 0.4 * fx
+    cost_total = cost_jpy + params["shipping_jpy"] + insertion_jpy + revenue_jpy * (fvf_eff + cache["ad_rate"] + cache["payo_fee"]) + ddp_jpy
+    profit_jpy = revenue_jpy - cost_total
+    profit_target = _profit_rate_from_cost_v5(cost_jpy)
+    # 中央値ゲート
+    if not median_usd or median_usd <= 0:
+        return {"price": price, "target_usd": target_usd, "profit_target": profit_target,
+                "profit_jpy": profit_jpy, "gap_pct": None, "gap_limit_pct": None,
+                "status": "NO_MEDIAN", "alert_msg": None}
+    _, gap_limit = get_tier_params(price)
+    if gap_limit_override is not None:
+        gap_limit = gap_limit_override
+    gap_pct = (target_usd - median_usd) / median_usd * 100
+    gap_limit_pct = gap_limit * 100
+    if gap_pct <= gap_limit_pct:
+        return {"price": price, "target_usd": target_usd, "profit_target": profit_target,
+                "profit_jpy": profit_jpy, "gap_pct": gap_pct, "gap_limit_pct": gap_limit_pct,
+                "status": "GO", "alert_msg": None}
+    return {"price": price, "target_usd": target_usd, "profit_target": profit_target,
+            "profit_jpy": profit_jpy, "gap_pct": gap_pct, "gap_limit_pct": gap_limit_pct,
+            "status": "ALERT",
+            "alert_msg": f"乖離率超過: 当社${price:.2f} vs 中央値${median_usd:.2f} = +{gap_pct:.0f}% (上限+{gap_limit_pct:.0f}%) → 見送り推奨"}
+
+
+# ============================================================================
+# V6 価格決定 (2026-05-20 確定): paid shipping + Policy tier + group A/B/C HTS
+# 詳細: V5 spreadsheet 1dFU-0Zl... 設定!HTS_RATE + yaml v6_pricing
+# - 商品本体 C ($) を closed-form で算出 (V5 G9 equation 同式)
+# - F ($) = case A: INT(C)+0.98 / case B: INT(C + DDP_from_C×(1-split))+0.98
+# - D ($) = Policy = tier_upper(F) × hts × 1.021 × split + 1.5
+# - 利益 = 仕入 × IFS (target、V5 P9 と一致)
+# ============================================================================
+def _v6_resolve_category(category: str, title: str = "") -> str:
+    """title-based override を最優先で適用 (HIGHT/LOW R列 曖昧時)."""
+    import re
+    import config_loader
+    v6 = config_loader.get_v6_pricing()
+    overrides = v6.get("title_overrides", [])
+    t = (title or "").lower()
+    for ov in overrides:
+        if re.search(ov["pattern"], t, re.IGNORECASE):
+            return ov["category"]
+    return category
+
+
+def _v6_group(category: str) -> str:
+    """カテゴリ → グループ A/B/C."""
+    import config_loader
+    v6 = config_loader.get_v6_pricing()
+    mapping = v6.get("category_to_group", {})
+    return mapping.get(category, "A")  # default A
+
+
+def _v6_tier(price_usd: float) -> tuple:
+    """価格 → (tier_name, upper_usd)."""
+    import config_loader
+    v6 = config_loader.get_v6_pricing()
+    uppers = v6.get("price_tier_uppers", [])
+    for i, upper in enumerate(uppers, 1):
+        if price_usd <= upper:
+            return f"P{i:02d}", upper
+    return "P31", uppers[-1] if uppers else 1500
+
+
+def _v6_policy_shipping_usd(group: str, tier_upper: float) -> float:
+    """Policy 送料 = upper × hts × 1.021 × split + 1.5."""
+    import config_loader
+    v6 = config_loader.get_v6_pricing()
+    grp = v6.get("groups", {}).get(group, {})
+    return tier_upper * grp.get("hts_rate", 0.18) * 1.021 * grp.get("split", 1.0) + 1.5
+
+
+def _v6_policy_name(group: str, tier: str) -> str:
+    """Policy 名生成 (= "DDP-A-P09" 等)、B→A remap 適用."""
+    import config_loader
+    v6 = config_loader.get_v6_pricing()
+    fmt = v6.get("policy_name_format", "DDP-{group}-{tier}")
+    raw = fmt.format(group=group, tier=tier)
+    return v6.get("policy_remap", {}).get(raw, raw)
+
+
+def _compute_listing_price_v6(cost_jpy: float, category: str, country: str = "US",
+                                title: str = "") -> dict:
+    """V6 closed-form 価格計算 (= V5 spreadsheet row 9 と完全同式).
+
+    Returns dict:
+      price          : 出品価格 (item-only USD, $X.98)
+      shipping_usd   : Policy 送料 USD
+      buyer_total_usd: F + Policy
+      shipping_profile_name: eBay Policy 名 (= "DDP-A-P09" 等)
+      group, tier    : デバッグ用
+      profit_jpy     : 仕入 × IFS (target、V5 P9 と一致)
+      profit_rate    : IFS 利益率
+    """
+    import config_loader
+    v6 = config_loader.get_v6_pricing()
+    if not v6:
+        raise ValueError("v6_pricing 設定が見つかりません")
+    # categorize (title override 適用)
+    category = _v6_resolve_category(category, title)
+    group = _v6_group(category)
+    grp_cfg = v6["groups"][group]
+    hts = float(grp_cfg["hts_rate"])
+    split = float(grp_cfg["split"])
+    m = 1 + hts * 1.021
+
+    cache = _profit_load()
+    fx = cache["exchange_rate"]
+    params = get_category_params(category)
+    if params is None:
+        raise ValueError(f"Unknown category: {category}")
+    shipping_jpy_v = params["shipping_jpy"]
+    fvf_eff = _fvf_effective_v5(category, country)
+    insertion_jpy = float(v6.get("insertion_usd", 0.4)) * fx
+    clearance_jpy = float(v6.get("clearance_jpy", 245))
+    mr = fvf_eff + cache["ad_rate"] + cache["payo_fee"]
+    profit_rate = _profit_rate_from_cost_v5(cost_jpy)
+    P_target_jpy = cost_jpy * profit_rate
+
+    denom = 1 - mr * m
+    if denom <= 0:
+        raise ValueError(f"net_ratio<=0 (cat={category}, group={group})")
+    # G_buyer ¥ = (H + J + ins + clear×mr + P) × m / (1 - mr×m) + clear
+    G_buyer_jpy = (cost_jpy + shipping_jpy_v + insertion_jpy + clearance_jpy * mr + P_target_jpy) * m / denom + clearance_jpy
+    # C ($) = (G - clear) / m / FX
+    C_usd = (G_buyer_jpy - clearance_jpy) / m / fx
+    # F ($) = case A: INT(C)+0.98 / case B: INT(C + DDP_from_C×(1-split)) + 0.98
+    if split == 1.0:
+        F_usd = int(C_usd) + 0.98
+    else:
+        DDP_from_C = C_usd * hts * 1.021 + clearance_jpy / fx
+        F_usd = int(C_usd + DDP_from_C * (1 - split)) + 0.98
+
+    tier, upper = _v6_tier(F_usd)
+    D_usd = round(_v6_policy_shipping_usd(group, upper), 2)
+    buyer_total = round(F_usd + D_usd, 2)
+    policy_name = _v6_policy_name(group, tier)
+
+    return {
+        "price": F_usd,
+        "shipping_usd": D_usd,
+        "buyer_total_usd": buyer_total,
+        "shipping_profile_name": policy_name,
+        "group": group,
+        "tier": tier,
+        "tier_upper_usd": upper,
+        "profit_jpy": round(P_target_jpy, 0),
+        "profit_rate": profit_rate,
+        "category_resolved": category,
+    }
+
+
+def compute_listing_price_v6(cost_jpy, median_usd, category, gap_limit_override=None,
+                              country="US", title=""):
+    """V6 ロジック (= paid shipping + Policy tier).
+
+    互換 API: compute_listing_price と同じ signature (+ country/title 引数).
+    """
+    calc = _compute_listing_price_v6(cost_jpy, category, country=country, title=title)
+    price = calc["price"]
+    target_usd = price  # V6 では INT 適用後の値が target
+    profit_jpy = calc["profit_jpy"]
+    profit_target = calc["profit_rate"]
+    # 中央値ゲート
+    if not median_usd or median_usd <= 0:
+        return {
+            "price": price, "target_usd": target_usd, "profit_target": profit_target,
+            "profit_jpy": profit_jpy, "gap_pct": None, "gap_limit_pct": None,
+            "status": "NO_MEDIAN", "alert_msg": None,
+            "shipping_usd": calc["shipping_usd"],
+            "buyer_total_usd": calc["buyer_total_usd"],
+            "shipping_profile_name": calc["shipping_profile_name"],
+            "group": calc["group"], "tier": calc["tier"],
+            "category_resolved": calc["category_resolved"],
+        }
+    _, gap_limit = get_tier_params(price)
+    if gap_limit_override is not None:
+        gap_limit = gap_limit_override
+    gap_pct = (target_usd - median_usd) / median_usd * 100
+    gap_limit_pct = gap_limit * 100
+    status = "GO" if gap_pct <= gap_limit_pct else "ALERT"
+    alert_msg = None if status == "GO" else (
+        f"乖離率超過: 当社${price:.2f} vs 中央値${median_usd:.2f} = +{gap_pct:.0f}% "
+        f"(上限+{gap_limit_pct:.0f}%) → 見送り推奨"
+    )
+    return {
+        "price": price, "target_usd": target_usd, "profit_target": profit_target,
+        "profit_jpy": profit_jpy, "gap_pct": gap_pct, "gap_limit_pct": gap_limit_pct,
+        "status": status, "alert_msg": alert_msg,
+        "shipping_usd": calc["shipping_usd"],
+        "buyer_total_usd": calc["buyer_total_usd"],
+        "shipping_profile_name": calc["shipping_profile_name"],
+        "group": calc["group"], "tier": calc["tier"],
+        "category_resolved": calc["category_resolved"],
+    }
 
 
 def compute_listing_price(cost_jpy, median_usd, category, gap_limit_override=None):
@@ -112,6 +436,16 @@ def compute_listing_price(cost_jpy, median_usd, category, gap_limit_override=Non
         alert_msg:      見送り推奨時の説明文（statusがALERTの時のみ）
       }
     """
+    # V6 / V5 / V4 dispatch (= yaml の enabled フラグで切替)
+    import config_loader
+    if config_loader.is_v6_pricing_enabled():
+        return compute_listing_price_v6(cost_jpy, median_usd, category,
+                                         gap_limit_override=gap_limit_override, country="US")
+    if config_loader.is_v5_pricing_enabled():
+        return compute_listing_price_v5(cost_jpy, median_usd, category,
+                                          gap_limit_override=gap_limit_override, country="US")
+
+    # 旧 V4 ロジック (= rollback 用 fallback)
     # 1. 価格決定: 価格自身からティア確定（イテレーション）
     #    まず最高利益率(25%)で仮計算 → 結果のティアで再計算 → 収束
     profit_target, _ = get_tier_params(0)  # 0なら最小ティア(最高利益率)
@@ -124,11 +458,12 @@ def compute_listing_price(cost_jpy, median_usd, category, gap_limit_override=Non
     target_usd = _compute_target_usd(cost_jpy, category, profit_target)
     price = _round_98(target_usd)
 
-    # 利益計算
+    # 利益計算 (DDP実コスト含む、2026-05-18 根本修正)
     cache = _profit_load()
     params = get_category_params(category)
     revenue_jpy = price * cache["exchange_rate"]
-    profit_jpy = revenue_jpy * (1 - params["fvf"] - INTL_FEE - cache["ad_rate"] - cache["payo_fee"]) - (cost_jpy + params["shipping_jpy"])
+    ddp_jpy = _ddp_usd_for_price(price) * cache["exchange_rate"]
+    profit_jpy = revenue_jpy * (1 - params["fvf"] - INTL_FEE - cache["ad_rate"] - cache["payo_fee"]) - (cost_jpy + params["shipping_jpy"] + ddp_jpy)
 
     # 2. 中央値による乖離判定
     if not median_usd or median_usd <= 0:
@@ -169,6 +504,48 @@ def compute_listing_price(cost_jpy, median_usd, category, gap_limit_override=Non
         "status": status,
         "alert_msg": alert_msg,
     }
+
+
+def apply_pricedown_override(cost_jpy, category, *, title="", cut_pct=5.0, gate_pct=10.0):
+    """NO_CONVERT 値下げ override (リバイス君が flag品に適用する正規ロジック・2026-06-30)。
+
+    **絶対指定=冪等**: 必ず V8標準価格から計算する(現在価格・前回価格は一切使わない)。
+    → 毎週/何回適用しても同じ結果。compound しない(ユーザー懸念「2回走って10%にならない?」の対策)。
+
+    title: title_override(バッグ→Porter等)を効かせるため標準パスと同じ title を渡す
+           (2026-06-30 リバイス君指摘: 無しだと Porter が アネロ価格になり誤カテゴリ=正確性NG)。
+
+    安全保証 (赤字NG): **gate_pct > cut_pct を不変条件**にする。
+      gate(利益率≥gate_pct)を満たす品だけ cut_pct% 値下げ → 失う利益 ≤ V8推奨の cut_pct%
+      (手数料も減るので実際はそれ未満) → 値下げ後の利益 ≥ (gate_pct - cut_pct)% > 0 = 必ず黒字。
+      break-even の外部再構成(DDP込みでV8と不整合)は不要。gate が安全を保証する。
+    degressive利益率対策: 薄利(利益率<gate_pct)の高コスト品は自動的に gate で除外=据置。
+
+    戻り: {"price", "applied": bool, "reason", "margin_std_pct", "margin_after_floor_pct"}
+    """
+    if gate_pct <= cut_pct:
+        raise ValueError(f"gate_pct({gate_pct})は cut_pct({cut_pct})より大きく必須(赤字防止の不変条件)")
+    # title_override(Porter等)を効かせるため v6 を title 付きで呼ぶ(標準パスと同一カテゴリ解決)
+    rec = compute_listing_price_v6(cost_jpy, 0.0, category, title=title)
+    v8 = rec["price"]
+    fx = float(_profit_load().get("exchange_rate") or 162.0)
+    profit_usd = float(rec.get("profit_jpy") or 0) / fx
+    margin_std = (profit_usd / v8 * 100) if v8 else 0.0                 # 標準利益率%
+    if margin_std < gate_pct:
+        return {"price": round(v8, 2), "applied": False,
+                "reason": f"薄利(利益率{margin_std:.1f}%<{gate_pct}%)で据置",
+                "margin_std_pct": round(margin_std, 1), "margin_after_floor_pct": round(margin_std, 1),
+                "shipping_profile_name": rec.get("shipping_profile_name", "")}
+    new_price = round(v8 * (1.0 - cut_pct / 100.0), 2)
+    # 送料Policyは **新価格で取り直す**(値下げで価格バンドを跨ぐと標準V8のpolicyが不整合になるため。
+    # 2026-06-30 HQ判断: 整合性優先。price と policy をセットで返す=取り直し忘れの余地ゼロ)。
+    group = rec.get("group") or _v6_group(rec.get("category_resolved", category))
+    new_tier = _v6_tier(new_price)[0]
+    return {"price": new_price, "applied": True,
+            "reason": f"{cut_pct}%値下げ(利益率{margin_std:.1f}%→残≥{margin_std - cut_pct:.1f}%)",
+            "margin_std_pct": round(margin_std, 1),
+            "margin_after_floor_pct": round(margin_std - cut_pct, 1),
+            "shipping_profile_name": _v6_policy_name(group, new_tier)}
 
 
 if __name__ == "__main__":

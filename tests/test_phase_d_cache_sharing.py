@@ -27,6 +27,20 @@ for p in (_TCG, _EBAY_API):
         sys.path.insert(0, str(p))
 
 
+@pytest.fixture(autouse=True)
+def _force_tcg_check_csv():
+    """4プロジェクトに check_csv.py が在りモジュール名衝突する。スイート実行時に他の
+    check_csv が sys.modules に先キャッシュされると本テストが別モジュールを掴む。
+    各テスト前に check_csv を落とし iMakTCG を sys.path 先頭に固定して正しい方を import させる
+    (2026-06-09 collection順変化で露呈、コードは正常=単独緑)。"""
+    sys.modules.pop("check_csv", None)
+    if str(_TCG) in sys.path:
+        sys.path.remove(str(_TCG))
+    sys.path.insert(0, str(_TCG))
+    yield
+    sys.modules.pop("check_csv", None)
+
+
 def test_check_csv_main_accepts_csv_path():
     """check_csv.main() must accept csv_path kwarg (Phase D-1)."""
     import check_csv

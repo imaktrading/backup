@@ -263,7 +263,9 @@ def _normalize_game_short(game: str) -> str:
     return {
         "Dragon Ball Super Card Game": "Dragon Ball",
         "One Piece Card Game": "One Piece",
-        "Gundam CCG": "Gundam",
+        "One Piece CCG": "One Piece",  # 2026-05-31: eBay 正規値、 検索 query は短縮
+        "Gundam CCG": "Gundam",  # 旧 listing 互換
+        "Gundam Card Game": "Gundam",  # 2026-05-31: 当店 catalog 正規値
         "Pokemon": "Pokemon",
         "Pokémon TCG": "Pokemon",
     }.get(game, game)

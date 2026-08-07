@@ -29,13 +29,16 @@ except ImportError:
     _HAS_PYTEST = False
 
 
-# ===== 凍結した期待値 (yaml 2026-04-25-v1 時点) =====
-# yaml が変更されたら期待値も更新（変更検知のための故意の硬さ）
+# ===== 凍結した期待値 (v8_GS 2026-05-24 移行後の実値) =====
+# yaml が変更されたら期待値も更新（変更検知のための故意の硬さ）。
+# 2026-06-03: v8 国別モデルへ同期。ライブ pricing_engine SSOT (gsheet V4-copy) の実値で凍結。
+#   G-SHOCK 0.1325→0.1375 / Tシャツ(UT) 0.153→0.14 / 一番くじ 0.1325/¥2500→0.14/¥3000。
+#   TCG(PSA10) は v8 でも 0.1325/¥2000 で不変。
 EXPECTED_BY_PROJECT = {
     "iMakTCG":          {"category": "TCG(PSA10)", "fvf": 0.1325, "shipping_jpy": 2000},
-    "iMakG-shock":      {"category": "G-SHOCK",    "fvf": 0.1325, "shipping_jpy": 2000},
-    "iMakMercari":      {"category": "Tシャツ(UT)", "fvf": 0.153,  "shipping_jpy": 2000},
-    "iMak_ichibankuji": {"category": "一番くじ",    "fvf": 0.1325, "shipping_jpy": 2500},
+    "iMakG-shock":      {"category": "G-SHOCK",    "fvf": 0.1375, "shipping_jpy": 2000},
+    "iMakMercari":      {"category": "Tシャツ(UT)", "fvf": 0.14,   "shipping_jpy": 2000},
+    "iMak_ichibankuji": {"category": "一番くじ",    "fvf": 0.14,   "shipping_jpy": 3000},
 }
 
 

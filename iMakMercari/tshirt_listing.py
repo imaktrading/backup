@@ -38,7 +38,7 @@ CATEGORY_FILTER = "Tシャツ"  # R列(18) で絞り込み
 
 # 出力
 DESCRIPTION_FILE = os.path.join(SCRIPT_DIR, "NEW.txt")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 SCHEDULE_WEEKS = 2
 DEFAULT_PRICE = 100.00
 
@@ -354,10 +354,15 @@ def get_schedule_time():
 
 
 def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "400-500"
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由)."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, "Tシャツ(UT)")
+    except Exception:
+        for threshold, policy in SHIPPING_POLICIES:
+            if price <= threshold:
+                return policy
+        return "400-500"
 
 
 def load_description():
@@ -420,7 +425,10 @@ def get_listing_targets():
         title_jp = row[2] if len(row) > 2 else ""
         sold = row[3] if len(row) > 3 else ""
         condition = row[4] if len(row) > 4 else ""
-        price = row[5] if len(row) > 5 else ""
+        # 仕入参考: N列 (実コスト) 優先 / F列 (商品価格) fallback (2026-05-18)
+        sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI"))
+        from listing_common import pick_cost_jpy as _pick_cost
+        price = _pick_cost(row)  # 旧: row[5] (F商品価格のみ)
         photo_urls = row[6] if len(row) > 6 else ""
         description = row[7] if len(row) > 7 else ""
         category = row[17] if len(row) > 17 else ""  # R列
@@ -478,6 +486,44 @@ def download_image_b64(url):
     return None
 
 
+def _detect_media_type(b64_data):
+    """base64画像データの magic bytes から media_type を判定(2026-06-21)。
+
+    mercari は webp 配信があり、image/jpeg 固定だと Claude API が
+    'image appears to be a image/webp' で 400 拒否 → 生成失敗。実形式を渡して回避。
+    Claude は jpeg/png/gif/webp 全対応。判定不能時は jpeg。
+    """
+    try:
+        head = base64.b64decode(b64_data[:64])
+    except Exception:
+        return "image/jpeg"
+    if head[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return "image/jpeg"
+
+
+def _parse_json_lenient(text):
+    """Claude応答 → dict。JSON の後に説明文が付く場合(Extra data error)に堅牢化(2026-06-21)。
+
+    まず素直に loads、失敗したら先頭の '{' から raw_decode で 1個目の JSON value だけ取る
+    (末尾の余分なテキストを無視)。
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        if start < 0:
+            raise
+        obj, _ = json.JSONDecoder().raw_decode(text[start:])
+        return obj
+
+
 def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b64, max_retries=2):
     """Claude APIでリスティング情報生成 + ホワイトリスト検証 + 違反時リトライ.
     違反があればフィードバックを添えて再リクエスト（最大max_retries回）。
@@ -491,7 +537,7 @@ def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b6
     for img in images_b64:
         content.append({
             "type": "image",
-            "source": {"type": "base64", "media_type": "image/jpeg", "data": img},
+            "source": {"type": "base64", "media_type": _detect_media_type(img), "data": img},
         })
     content.append({
         "type": "text",
@@ -515,7 +561,7 @@ Generate an eBay listing for this UNIQLO UT T-shirt.""",
             text = message.content[0].text.strip()
             text = re.sub(r"^```json\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
-            result = json.loads(text)
+            result = _parse_json_lenient(text)
         except Exception as e:
             print(f"    ⚠️ Claude API attempt {attempt+1}: {e}")
             return last_result  # 直前成功結果があればそれを返す
@@ -799,6 +845,12 @@ def main():
         with open(output_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
             writer.writerows(rows)
+        # Free Shipping 移行 (2026-05-18)
+        try:
+            from freeshipping_postprocess import transform_csv_to_freeshipping
+            transform_csv_to_freeshipping(output_file)
+        except Exception as _e:
+            print(f"⚠️ Free Shipping post-process 失敗 (Tshirt): {type(_e).__name__}: {_e}")
         print(f"\n完了！出力: {output_file}")
         print(f"成功: {len(rows)-1}件")
 
@@ -814,6 +866,13 @@ def main():
             )
         except Exception as e:
             print(f"⚠️ チェッカー実行エラー: {e}")
+
+        # 生成時セルフ監査 (CSV監査くん) — check_csv に加え 4観点(整合/形式/SEO/文字数) を確認
+        try:
+            from listing_common import run_self_audit
+            run_self_audit(output_file)
+        except Exception as _e:
+            print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
 
         # スプシにメルカリURL追記（A列にURL, C列にタイトルは既にスプシにある）
         # → スプシは既にトラバホで管理。追記不要。

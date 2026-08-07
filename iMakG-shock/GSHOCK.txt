@@ -155,7 +155,7 @@
 <p><span style="text-decoration: underline;"><strong><span style="vertical-align: inherit;"><span style="vertical-align: inherit;">Description</span></span></strong></span></p>
 <p>This item is <b>Brand New</b>, meticulously inspected to ensure its pristine condition. You will receive a product in original, perfect condition, just as you'd find it in a retail store. All original packaging, tags, and included accessories are present and intact. Invest in quality with peace of mind.</p>
 <p><strong>Note:</strong> Manual is in Japanese only. No English version included.</p>
-<p><span style="text-decoration: underline;"><strong>Shipping &amp; Estimated Delivery</strong></span></p>
+<p><span style="text-decoration: underline;"><strong>About Color</strong></span></p><p>Colors may appear slightly different depending on lighting, camera, and screen settings. The item is exactly as described.</p><p><span style="text-decoration: underline;"><strong>Shipping &amp; Estimated Delivery</strong></span></p>
 <p>Handling time is based on our shipping policy. We will do our best to ship quickly and pack your item carefully.</p>
 <ul>
 <li><span style="vertical-align: inherit;">eBay International Shipping(DDP to U.S.) : 1-2weeks</span></li>
@@ -165,7 +165,9 @@
 <p><span style="text-decoration: underline;"><strong>Customs and Duties Policy</strong></span></p>
 <p><strong>For U.S. Buyers (DDP: Delivered Duty Paid)</strong></p>
 <p>All import duties, taxes, and customs fees are <b>included</b> in the total amount. <b>No additional payment</b> is required upon delivery.</p>
-<p><strong>For Buyers outside the U.S. (DDU: Delivered Duty Unpaid)</strong></p>
+<p><strong>For European Union (EU) Buyers &mdash; Orders up to &euro;150 (DDP: Delivered Duty Paid)</strong></p>
+<p>Import duties and customs fees are <b>prepaid and included</b> in the shipping cost shown at checkout. <b>No additional customs payment</b> is required upon delivery. (VAT is collected by eBay at checkout as required by EU rules.)</p>
+<p><strong>For Buyers in All Other Countries (DDU: Delivered Duty Unpaid)</strong></p>
 <p>Import duties, taxes, and customs fees are <b>not included</b> in the item price or shipping cost. These charges are the <b>buyer's responsibility</b> and vary by country.</p>
 <p><span style="text-decoration: underline;"><span style="vertical-align: inherit;"><span style="vertical-align: inherit;"><span style="font-weight: bolder;"><span style="vertical-align: inherit;"><span style="vertical-align: inherit;">Important Notes</span></span></span></span></span></span></p>
 <p><span style="vertical-align: inherit;"><span style="vertical-align: inherit;"><span style="font-weight: bolder;"><span style="vertical-align: inherit;"><span style="vertical-align: inherit;"></span></span></span></span></span></p>

@@ -346,3 +346,91 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - **優先度低**: response_processor.py 拡張設計（HOLD理由分類の学習データ化）
 
 ---
+
+## 2026-06-02 — 🚨 インシデント記録: 85MB マラソンセッション crash → 記憶喪失 2 回
+
+### 決定事項
+- 決定1: 単一 Claude Code セッションを長期間（今回 **4/26→6/1 の 5 週間連続**）回し続ける運用を**禁止**。作業区切りで新セッション or `/clear` する
+- 決定2: 文脈は context 頼みにせず、**作業区切りごとに daily_report.md へ 3 点セット（決定/変更/検証）で書き出す**運用を徹底（書き出していない分は crash で全消失するため）
+- 決定3: 肥大した transcript `8271606a-...jsonl`（85MB）は **resume 対象から外す**（開くと再 crash する）。アーカイブ退避
+
+### 原因（実機計測）
+- セッション `8271606a-69ff-4cda-af88-999e76d94284.jsonl` を実測:
+  - 稼働期間: **2026-04-26T04:29 → 2026-06-01T10:29（5 週間以上 連続）**
+  - イベント数 23,222 行 / file-history-snapshot **1,944 個** / 合計 **85 MB**
+  - 内訳: file-history-snapshot 43MB + user 21MB + assistant 21MB
+- resume 時にこの 85MB を丸ごとロードしようとして失敗 → 文脈引継げず新規起動 = 記憶喪失
+- 6/1 19:32 の後続セッション（21KB）も即死、翌朝も再発（= 同一巨大ファイルへの resume 失敗の繰り返し）
+
+### 検証
+- 検証✅: `wc -l` で 23,222 行、`python json` 集計で type別バイト数（file-history-snapshot 43.0MB / user 21.2MB / assistant 20.9MB）を確認
+- 検証✅: first/last timestamp で 5 週間連続稼働を確認
+- 検証✅: daily_report.md が **4/24 で停止**していたことを確認（5 週間分の作業が永続層に未記録 = 記憶喪失の被害を拡大させた真因）
+
+### 教訓 → memory 化
+- `marathon_session_causes_amnesia.md` に記録（長期1本セッション禁止 + daily_report こまめ書き出し）
+
+---
+
+## 2026-04-25〜06-01 — ブリッジ要約（git log からの事後再構成）
+
+> ⚠️ 注記: 上記 85MB セッション crash で 4/24 以降の daily_report 記録が欠落。
+> 以下は **git commit log から事後再構成**した要約であり、当時の contemporaneous な検証ログではない。
+> 各項目の「変更」は commit hash で追跡可能（= 検証可能）だが、検証欄の実走確認は当時のログが消失したため再構成不可。
+
+### 5/9–5/11: fail-closed 強化 + ichibankuji scraper 構造化 + market gate SSOT
+- 4fc441f: gshock_to_csv — partial model_id（color suffix 欠落）を fail-closed SKIP
+- 4ed0314: psa adapter — pokemon promo + dbscg full-pid card_number 対応
+- d5caf57 / 3d17608 / cff5b09: ichibankuji scraper — text regex 完全撤廃、BeautifulSoup CSS selector 構造抽出に統一
+- 0b14d6a / 88dc6aa: 一番くじ median gate 無効化 + gap_limit_override（collectibles 特性対応）
+- 2c827b2 / 32840e2 / 59a7990: psa+check の market gate を SSOT 化（出品数 ≤ 10 件で gate skip、ユーザー判断 5/11）
+- 01d516c / efca29e: casio_finder_from_catalog — iMakCatalog × active diff で未出品モデル抽出
+
+### 5/12–5/13: 死蔵 listing 再出品ツール群（seller_hub_*） + G-shock 色判定 bug
+- b7d576c / 6bad219 / 71a16c6: seller_hub_view — 15 項目 snapshot 保存、Active/Ended 両対応、全ページ scrape
+- 3996b5f / 47bc860 / 07d49dc / 6892f7d: seller_hub_relist — View=0 死蔵 listing 取下げ再出品ツール（ビフォーアフター CSV + --undo 巻き戻し）
+- 96c8248 / 1d0da35: ビフォーアフター xlsx 化（差分セル黄色ハイライト + 4-sheet 構造 + 承認/却下 dialog）
+- 7bd780a / 66d6d1a / 74d026f / 8c548e2 / 9d0e3dd: G-shock 色判定 bug 連続修正（suffix 解析失敗で "Black" fallback → get_band_color SSOT 化）
+
+### 5/15: ライバルセラー分析ツール群
+- 03789b3 / d844e40: gap_finder + ebay_seller_store_scraper（Browse API でライバル store listing 取得）
+- 130f48c / 204b13e: WatchCount.com trending + PicClick watch 数 merge
+
+### 5/16–5/17: Workman listing 実装
+- 63580d0 / 3ce3593 / e206137: workman_scraper（公式 JSON-LD）+ listing Phase 2（variation CSV + 公式在庫要チェック経路 + size chart）
+- d7fa68d / cdeb49c: seller_hub_view fix（US listing 検出復活、listed_date 月名 format、num_lines 順序）
+
+### 5/24: 利益計算スプシ v8_GS 完走（memory: profit_calc_sheet_v8）
+- 全カテゴリ split=1.0 + US計算 2-sheet 分離 + スニーカー/ゴルフ追加、yaml + Policy 31 + listing 324 全 V8 化
+
+### 5/29–6/1: G-shock カタログ 4-source 拡張（進行中）
+- 3-source 戦略（公式491 / ファンサイト / ShockBase 2,777）+ Amazon 直販を 4 番目 source 追加（Harvest 依頼投入済）
+- gshock_to_csv の is_active_msrp 廃盤 skip を **REVERT**（gshock_to_csv.py:1446、「廃盤も Amazon で仕入れるから勝手に外すな」のユーザー指摘対応）
+
+---
+
+## 2026-05-22〜06-09 — ブリッジ要約2（横断進捗 + 5月実績）
+
+> 6/2 インシデント以降の実務進捗を事後再構成。日次の詳細は memory 側 daily_report に密に記録済、本欄は HQ 横断サマリ。
+
+### 決定 / 主な進捗（プロジェクト横断）
+
+- **取下げ再出品（relist）システム 大規模実装**: フルファネル分析（NO_SEARCH=露出されない / NO_CLICK=見られてクリックされない / NO_CONVERT=クリックされて売れない の3要因切り分け）+ `funnel_diff` 効果測定（改修前後の差分計測で PDCA クローズ）+ タイトル改修ループ。死蔵 listing を要因別に処置する基盤。
+- **在庫切れ対応 強化**: RESTOCK（再仕入れ可なら再出品）/ CULL（仕入れ不能は段階的に End）の2系統に整理。
+- **mercari fix**: 写真11枚化 / バッグ寸法抽出 / Porter 999.png（ダミー画像）対応。
+- **Catalog**: TCG 5カテゴリの公式画像 100% 化、name_en 1,810件補完。
+- **Inventory**: 公式監視くんを Trading API 化、SKU シート cache 導入。
+- **Harvest**: Casio 公式 G-shock scraper を新規実装。
+- **Revise**: 全 sheet の価格 + Policy revise を完全反映。
+
+### 検証 / 実績（KPI）
+
+- **5月実績: 12件 / ¥17,665**（目標 ¥100,000 に対し達成率 17.7% = 未達）。
+- **6月（1〜6日）: 1件 / ¥5,664**。
+
+### 未完了 / 残課題（次セッション以降）
+
+- **売上が目標比で大幅未達**（5月 17.7%）。露出天井が構造的に低い前提（送料無料DDP断念済）で「何を・どれだけ出すか」が課題。relist / ファネル分析はこの底上げ施策。
+- **6/9 受信: Oskar 色見えクレーム対応** — Porter Tanker の Description に色注記を追加する依頼が別途あり（要対応）。
+
+---

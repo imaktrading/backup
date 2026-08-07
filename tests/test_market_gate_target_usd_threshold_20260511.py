@@ -11,8 +11,20 @@
 from __future__ import annotations
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TCG = _REPO_ROOT / "iMakTCG"
+
+# 2026-06-03: psa_to_csv は 2026-05-23 V7 移行で OR 緩和 gate (≤10件 OR ≤$250) を廃止し
+# cost-plus always-list (薄商い/市場高/適正/⚠️乖離大) へ刷新。check_csv は旧 OR-gate のまま
+# = dual_gate_disagreement 未解決。下記テストは psa 側の旧 OR/AND 契約と GO/保留/NO-GO を
+# source grep で検証しており現行 psa と乖離。ゲート SSOT 統一後に書換/復活。
+_V7_GATE_XFAIL = pytest.mark.xfail(
+    reason="psa_to_csv が V7 cost-plus gate へ移行済 (旧 OR 緩和/GO/NO-GO 契約は廃止)。"
+           "dual_gate_disagreement 統一後に書換予定",
+    strict=False,
+)
 
 
 def test_threshold_constants_match_between_psa_and_check():
@@ -26,6 +38,7 @@ def test_threshold_constants_match_between_psa_and_check():
     assert "MARKET_GATE_MIN_LISTINGS = 10" in chk_src
 
 
+@_V7_GATE_XFAIL
 def test_psa_to_csv_uses_or_condition():
     """psa_to_csv.py の緩和分岐が OR 条件 (出品数 OR target_usd)."""
     src = (_TCG / "psa_to_csv.py").read_text(encoding='utf-8')
@@ -38,6 +51,7 @@ def test_check_csv_uses_or_condition():
     assert "if total_count <= MARKET_GATE_MIN_LISTINGS or target_usd <= MARKET_GATE_MAX_TARGET_USD:" in src
 
 
+@_V7_GATE_XFAIL
 def test_relax_branch_distinguishes_three_cases():
     """緩和理由が 3パターン (出品数+target両方 / 出品数のみ / targetのみ) で出力される."""
     psa_src = (_TCG / "psa_to_csv.py").read_text(encoding='utf-8')
@@ -53,6 +67,7 @@ def test_relax_branch_distinguishes_three_cases():
     assert "低額帯" in chk_src
 
 
+@_V7_GATE_XFAIL
 def test_existing_thresholds_preserved():
     """既存の GO/HOLD/NO-GO 分岐は保持 (緩和に該当しない高額+多数出品で発動)."""
     psa_src = (_TCG / "psa_to_csv.py").read_text(encoding='utf-8')

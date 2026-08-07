@@ -37,8 +37,8 @@ def _hardcoded_fallback() -> Dict[str, Any]:
             "TCG(PSA10)":     {"fvf": 0.1325, "shipping_jpy": 2000},
             "G-SHOCK":        {"fvf": 0.1325, "shipping_jpy": 2000},
             "Tシャツ(UT)":    {"fvf": 0.153,  "shipping_jpy": 2000},
-            "Montbell(一般)": {"fvf": 0.153,  "shipping_jpy": 2000},
-            "Montbell(ジャケット)": {"fvf": 0.153, "shipping_jpy": 4500},
+            "Montbell(軽)":   {"fvf": 0.153,  "shipping_jpy": 2000},
+            "Montbell(重)":   {"fvf": 0.153,  "shipping_jpy": 4500},
             "一番くじ":       {"fvf": 0.1325, "shipping_jpy": 2500},
             "フィギュア":     {"fvf": 0.1325, "shipping_jpy": 3500},
             "ユニクロ(非UT)": {"fvf": 0.153,  "shipping_jpy": 2000},
@@ -105,6 +105,28 @@ def get_ddp_shipping_tiers() -> list:
 
 def get_return_profile(project: str) -> Optional[str]:
     return load().get("return_profiles", {}).get(project)
+
+
+def get_v5_pricing() -> Dict[str, Any]:
+    """V5 価格決定設定 (= 35% markup + IFS 利益率 + G-SHOCK 国別 FVF + 国別 fees)."""
+    return load().get("v5_pricing", {})
+
+
+def is_v5_pricing_enabled() -> bool:
+    return bool(get_v5_pricing().get("enabled", False))
+
+
+def get_v6_pricing() -> Dict[str, Any]:
+    """V6 価格決定設定 (= paid shipping + Policy tier + group A/B/C HTS).
+
+    V5 spreadsheet 1dFU-0Zl... 設定!HTS_RATE と完全一致。
+    profit_rate_ifs / country_fees / gshock_country_fvf / categories は v5_pricing を流用。
+    """
+    return load().get("v6_pricing", {})
+
+
+def is_v6_pricing_enabled() -> bool:
+    return bool(get_v6_pricing().get("enabled", False))
 
 
 if __name__ == "__main__":

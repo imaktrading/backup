@@ -1,0 +1,92 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452537 ITAJAGA DRAGON BALL VOL.8 [GOHAN & GOTEN & TRUNKS] #21 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 4,
+      "status": "pending"
+    },
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452535 ITAJAGA DRAGON BALL VOL.7 [GOKU & GOHAN] #28 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m97832784794",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m43247967215",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m73990682466",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m12748379095",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m17901877917",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m17327854170",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "mercari",
+      "item_id": "m50744263892",
+      "target_field": "C:Type",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "m29317393783",
+      "target_field": "C:Rarity",
+      "finding_type": "必須Item Specific",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 10
+  }
+}

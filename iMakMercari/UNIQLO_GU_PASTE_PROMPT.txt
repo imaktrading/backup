@@ -1,0 +1,43 @@
+========================================================================
+ UNIQLO / GU Tシャツ 出品 — 貼り付け用プロンプト
+ 使い方: 下の「===」から「===」までをコピーして、URLを差し替えて貼る。
+========================================================================
+
+=======================  ここからコピー  =======================
+UNIQLO/GU の T シャツを eBay 出品したい。着手前に必ず
+`C:\dev\iMak\iMakMercari\UNIQLO_GU_LISTING_RUNBOOK.md` を読んでから、その手順で作って。
+
+商品URL:
+<ここに UNIQLO/GU の商品URLを貼る>
+
+守ること:
+- サイズ実寸は推測せず `python C:\dev\iMak\iMakMercari\uniqlo_size_fetch.py {productId} {colorCode} {sizeCode}`
+  で全サイズ(XS〜3XL等)を公式から取得して使う(端サイズを欠かさない)。
+- タイトル ~80字SEO / Material は公式composition。
+- Item Specifics は eBay出品フォームの項目順で全項目を出力し、🔴 は product 固有の変更点だけ
+  付ける(Color / Fit / Theme=Anime / Pattern=Graphic Print / Country of Origin。カテゴリに
+  Character 欄があればそれも)。残りは固定テンプレ値(Runbook §5)。Women's Tops(53159)は
+  Character 欄が無いのでキャラはタイトルで担保。
+- Color は**公式の色名(colors[].name)をそのまま使う**。見た目で Light Blue 等に変えない(公式=Blue なら Blue)。
+- バリエーション出品(軸=Sizes)。既存例listingの形式を踏襲。
+- 商品説明(Description)は **コピペ用の完成HTMLをデスクトップに .html で出力**する
+  (`C:\Users\imax2\OneDrive\デスクトップ\` に。テンプレ踏襲・コラボ紹介/実測表/色/サイズを差替)。
+- **Sheerness(透け感)を Description に必ず含める**。値は**公式API `result.designDetail` の「透け感: 〇〇」から取る**
+  (なし→None / ややあり→Slight / あり→Yes)。推測禁止。designDetail には「トップスフィット」も入っていてFit判定にも使える。
+- 既存listingの改変を頼む場合は eBay item number も併記する。
+========================  ここまでコピー  ========================
+
+
+（既存listingのサイズ追加・作り変えを頼む時の版）
+=======================  ここからコピー  =======================
+この eBay listing を作り変えて。着手前に必ず
+`C:\dev\iMak\iMakMercari\UNIQLO_GU_LISTING_RUNBOOK.md` を読んで。
+
+eBay item number: <ここに item number>
+UNIQLO/GU URL: <ここにURL(あれば)>
+やりたいこと: <例: 全サイズ(XS〜3XL)に作り変え / 説明のサイズ表を全サイズに>
+
+守ること:
+- サイズ実寸は `uniqlo_size_fetch.py` で公式から全サイズ取得(推測禁止)。
+- 変更前に現状を GetItem で確認、変更後も GetItem で反映を検証して報告。
+========================  ここまでコピー  ========================

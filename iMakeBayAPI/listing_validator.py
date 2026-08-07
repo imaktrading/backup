@@ -6,6 +6,17 @@ iMak Trading Japan - リスティングCSV出力前セルフチェック
 """
 import re
 
+# セットコード接頭辞の語彙 (= catalog の product_id 実データから採取)。
+# 2026-08-01: ここが One Piece 専用 (OP|ST|EB|PRB) だったため、Gundam の
+#   title '#ST02-010' × PSA brand 'GUNDAM JAPANESE PB01-PREMIUM GOODS SET ...' が
+#   「PSA brand にセットコードが1つも無い」と誤判定され、正しいカード(catalog ST02-010_PB01)を
+#   reject していた (cert 154708676)。①catalog は正・②照合側の語彙不足 → ②を修正。
+#   Gundam: GD(1346) ST(905) EB(121) + 再録容器 PB01 / SC01 / PC1,PC2
+#   One Piece: OP(5869) ST(1510) EB(582) PRB(47)
+# 語彙は**明示リスト**にする ([A-Z]{2,4}\d{2} のワイルドカードは 'PSA10' 等に誤爆するため)。
+SET_CODE_PREFIXES = ("PRB", "OP", "ST", "EB", "GD", "PB", "SC", "PC")
+_SET_CODE_ALT = "|".join(SET_CODE_PREFIXES)   # 長い接頭辞を先に = PRB が PR|B に割れない
+
 
 def validate_title_against_psa(title, psa_brand, psa_card_number):
     """タイトル中のセットコード/番号がPSAデータと整合するか検証。
@@ -34,10 +45,10 @@ def validate_title_against_psa(title, psa_brand, psa_card_number):
     #   - 単語内部の "STOP15" の OP は隣接文字が word char で \b 無 → 非マッチ
     # 2026-04-25 ケース2 拡張:
     # PSA brand に set code が一切無い「プロモ命名のみ」のケースも _is_promo_dual_citizenship 経由で許容
-    psa_has_any_set_code = bool(re.search(r'\b(OP|ST|EB|PRB)(\d+)', psa_brand.upper()))
+    psa_has_any_set_code = bool(re.search(r'\b(%s)(\d+)' % _SET_CODE_ALT, psa_brand.upper()))
     promo_dual_reason = _is_promo_dual_citizenship(title, psa_brand)
 
-    for match in re.finditer(r'\b(OP|ST|EB|PRB)(\d+)(?:-?\d+)?\b', title_upper):
+    for match in re.finditer(r'\b(%s)(\d+)(?:-?\d+)?\b' % _SET_CODE_ALT, title_upper):
         prefix = match.group(1)
         num = match.group(2)
         code = f"{prefix}{num}"  # OP09
@@ -63,7 +74,7 @@ def validate_title_against_psa(title, psa_brand, psa_card_number):
                 )
 
     # 3. ハイフン形式のカード番号 (OP09-091等) の番号部分照合
-    for match in re.finditer(r'\b(?:OP|ST|EB|PRB)\d+-(\d+)\b', title_upper):
+    for match in re.finditer(r'\b(?:%s)\d+-(\d+)\b' % _SET_CODE_ALT, title_upper):
         title_num = match.group(1).lstrip('0')
         if psa_card_number:
             psa_num_str = str(psa_card_number).lstrip('0').split('/')[0]
@@ -371,6 +382,21 @@ _KNOWN_ACCEPTABLE_PATTERNS = [
         ),
         "Energy Marker Token (Bandai公式分類) vs タイトル 'Card' 表記（許容）"
     ),
+    # 2026-05-27 追加: One Piece TCG DON!! Card (= 特殊カード、 card_number 持たない)
+    # cert 156219827 (OP15 DON!! Card Alternate Art Gold) で 3AI BLOCK 多発 (= Card# 空が原因)
+    # DON!! Card は ゲーム中の DON 数管理用 special、 通常 card_number 体系外、 識別は brand + subject
+    (
+        lambda title, specs, brand, num: (
+            ("ONE PIECE" in (brand or "").upper())
+            and (
+                "DON!!" in (title or "").upper()
+                or "DON CARD" in (title or "").upper()
+                or "DON!!" in (specs.get("Character") or "").upper()
+                or "DON CARD" in (specs.get("Character") or "").upper()
+            )
+        ),
+        "One Piece TCG DON!! Card (= special、 card_number 持たない、 識別は brand+subject)"
+    ),
 ]
 
 
@@ -384,6 +410,8 @@ _PROMO_BRAND_KEYWORDS = [
     "ANNIVERSARY",                   # 25TH ANNIVERSARY 等
     "BEST SELECTION",
     "WEEKLY SHONEN JUMP",            # 雑誌付録
+    "ONE PIECE CARD THE BEST",       # 2026-05-27 追加: ST16-001 Uta 等の Catalog 補完 経路 (= PCC 再録元)
+    "STORAGE BOX SET",               # 2026-05-27 追加: 同上
 ]
 
 # 2026-04-25 ザル判定修正: ケース1 で許容するのは「既知のプロモ封入セットコード」のみ。
@@ -639,14 +667,23 @@ def _append_hold_log(idx, title, deliberation):
     return _HOLD_LOG_PATH
 
 
+# 2026-06-08: catalog ID完全一致 hit / 人手verify済 のカードは身元が SSOT で確定済 →
+# flaky な 3AI 合議 (API障害で誤BLOCT する) を通さず、決定論チェック(validate_row)のみで判定する。
+# rollback: この定数を False にすれば従来の「全カード 3AI 合議」に戻る。
+DETERMINISTIC_ON_CONFIRMED = True
+
+
 def validate_and_report(idx, title, specs, model, category, condition_id, price, pic_url, condition_desc="",
                         psa_brand=None, psa_card_number=None,
                         use_gemini=True, use_groq=True, intermediate=False,
-                        use_deliberation=True, override_context=None):
+                        use_deliberation=True, override_context=None,
+                        catalog_confirmed=False):
     """セルフチェック実行＋表示。
     - intermediate=True: 中間段階バリデーション（category/pic_url未確定OK）
     - use_deliberation=True: 3AI議論方式（Claude/Gemini/Groq、最大5R、HOLDで人間判断）
     - override_context: cert_overrides 適用時の人手検証コンテキスト (3AI への追加プロンプト)
+    - catalog_confirmed=True: catalog ID hit/人手verify済 → 3AI を skip し決定論のみで判定
+      (DETERMINISTIC_ON_CONFIRMED=True の時。誤出品しない: validate_row の error は依然 reject)
     Returns: bool (False=CSV除外、True=CSV出力)
     """
     errors, warnings = validate_row(
@@ -665,6 +702,15 @@ def validate_and_report(idx, title, specs, model, category, condition_id, price,
                 print(f"       ⚠️ {w}")
         print(f"    → この商品はCSVに含めません")
         return False
+
+    # catalog ID-hit / 人手verify済 → 身元は SSOT で確定。決定論チェック(validate_row)を通った時点で PASS。
+    # flaky な 3AI 合議は通さない (API障害による誤BLOCK を排除)。誤出品はしない: error は上で reject 済。
+    if catalog_confirmed and DETERMINISTIC_ON_CONFIRMED:
+        if warnings:
+            for w in warnings:
+                print(f"       ⚠️ {w}")
+        print(f"    ✅ catalog確定 → 決定論PASS (3AI skip)")
+        return True
 
     # 既知の許容パターンチェック（議論前のショートカット）
     if use_deliberation:

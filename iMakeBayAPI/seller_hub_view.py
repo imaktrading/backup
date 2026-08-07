@@ -39,6 +39,8 @@ except Exception:
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 
+from chrome_util import detect_chrome_major  # uc version_main を実Chromeから検出 (数値ハードコード禁止)
+
 EBAY_CHROME_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakInventory\chrome_profile_ebay"
 SNAPSHOT_DIR = r"C:\dev\iMak_data\seller_hub"
 
@@ -109,7 +111,7 @@ def open_listing_page(status: str, keyword: str | None, wait_seconds: int = 18,
     options.add_argument(f"--user-data-dir={EBAY_CHROME_PROFILE_DIR}")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    driver = uc.Chrome(options=options)
+    driver = uc.Chrome(options=options, version_main=detect_chrome_major())
     print(f"[INFO] open: {url}")
     driver.get(url)
     time.sleep(wait_seconds)
@@ -217,15 +219,21 @@ def parse_listing_row(row_text: str, status: str = "active",
         out["views"] = m.group(1)
 
     # 数字 line 配置 (UI 言語で異なる、item_id 12桁は除外):
-    # - 日本語 UI: [0]=Watchers, [1]=qty (views は "ビュー数N" regex で取得済)
+    # - 日本語 UI: num_lines = [0, qty, watchers, 0] の常に 4 件 (= 5/29 dump 検証済)
+    #   [0] = ad/offer flag? [3] = ad/priority flag? いずれも 0 default
+    #   views は "ビュー数N" regex で別途取得済
     # - 英語 UI (5/17 確認): [0]=Offer, [1]=qty, [2]=Views, [3]=Watchers
     # 判別: 日本語 UI なら regex で views 既に取得済 → out["views"] not empty
     num_lines = [l.strip() for l in lines if re.fullmatch(r"\d{1,5}", l.strip())]
     if out.get("views"):
         # 日本語 UI (= "ビュー数N" regex hit)
-        if len(num_lines) >= 2:
-            out["watchers"] = num_lines[0]
+        if len(num_lines) >= 3:
             out["quantity_available"] = num_lines[1]
+            out["watchers"] = num_lines[2]
+        elif len(num_lines) == 2:
+            # 想定外 fallback
+            out["quantity_available"] = num_lines[0]
+            out["watchers"] = num_lines[1]
         elif len(num_lines) == 1:
             out["watchers"] = num_lines[0]
     else:
@@ -297,15 +305,8 @@ def extract_listings(driver, status: str = "active",
         snapshot_date = datetime.now().strftime("%Y-%m-%d %H:%M")
     rows = driver.find_elements(By.CSS_SELECTOR, "tr.grid-row")
     items = []
-    dump_count = 0
     for r in rows:
         try:
-            # DEBUG: 最初の 3 row の raw text を console 出力
-            if dump_count < 3 and os.environ.get("SELLER_HUB_DUMP_ROW") == "1":
-                print(f"\n===== row {dump_count} raw text =====")
-                print(repr(r.text))
-                print("===== row end =====\n")
-                dump_count += 1
             parsed = parse_listing_row(r.text, status=status,
                                        search_keyword=search_keyword,
                                        snapshot_date=snapshot_date)
@@ -314,6 +315,15 @@ def extract_listings(driver, status: str = "active",
                 data_id = r.get_attribute("data-id") or ""
                 if re.fullmatch(r"\d{10,15}", data_id):
                     parsed["item_id"] = data_id
+            # 5/29: watchers は専用 td (= shui-dt-column__watchCount) で取得
+            # row.text には含まれないため td-level CSS selector で override
+            try:
+                _wc = r.find_element(By.CSS_SELECTOR, "td.shui-dt-column__watchCount")
+                _wt = (_wc.text or "").strip()
+                if re.fullmatch(r"\d+", _wt):
+                    parsed["watchers"] = _wt
+            except Exception:
+                pass
             if parsed["item_id"]:
                 items.append(parsed)
         except Exception:

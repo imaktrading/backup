@@ -34,14 +34,15 @@ def test_ichibankuji_disabled_in_config():
 
 
 def test_other_categories_still_enabled():
-    """副作用ゼロ: 他カテゴリの enabled 設定は変更前のまま."""
+    """副作用ゼロ: 他カテゴリの enabled 設定は変更前のまま.
+    (tshirt は 2026-06-21 に価格NO-GO廃止で False 化 → test_tshirt_gate_disabled_20260621 で別途検証)。"""
     from listing_common import PRICE_CHECK_CONFIG
     # True 維持
-    for cat in ("reel", "tshirt", "tomica", "montbell"):
+    for cat in ("reel", "tomica", "montbell"):
         assert PRICE_CHECK_CONFIG[cat]["enabled"] is True, f"{cat} should remain True"
-    # 元々 False
-    for cat in ("gshock", "porter"):
-        assert PRICE_CHECK_CONFIG[cat]["enabled"] is False, f"{cat} should remain False"
+    # False (gshock/porter 元々 / tshirt 2026-06-21廃止 / ichibankuji 本ファイル subject)
+    for cat in ("gshock", "porter", "tshirt"):
+        assert PRICE_CHECK_CONFIG[cat]["enabled"] is False, f"{cat} should be False"
 
 
 def test_audit_csv_row_does_not_gate_ichibankuji_alert():
@@ -63,20 +64,21 @@ def test_audit_csv_row_does_not_gate_ichibankuji_alert():
     assert price_errors == [], f"Expected no price ALERT error, got: {price_errors}"
 
 
-def test_audit_csv_row_still_gates_tshirt_alert():
-    """副作用ゼロ確認: tshirt の ALERT は従来通り error 化される."""
+def test_audit_csv_row_still_gates_enabled_category_alert():
+    """副作用ゼロ確認: enabled カテゴリ(reel)の ALERT は従来通り error 化される
+    (= gate 機構自体は生きてる。tshirt は 2026-06-21 に外したが reel/tomica/montbell は維持)。"""
     from listing_common import audit_csv_row
     row_data = {
-        "*Title": "UNIQLO UT Pokemon T-Shirt Black US L NWT Japan New",
-        "*Category": "260815",
+        "*Title": "Shimano Stradic Spinning Fishing Reel 2500 Japan New",
+        "*Category": "261052",
         "*StartPrice": "57.98",
         "ConditionID": "1000",
     }
     violations = audit_csv_row(
-        row_data, category="tshirt",
+        row_data, category="reel",
         price_status="ALERT", median_usd=18.46,
     )
-    # tshirt は依然 gate される
+    # reel は依然 gate される
     price_errors = [v for v in violations if v[0] == "*StartPrice" and v[2] == "error"
                     and "exceeds market" in v[1]]
-    assert len(price_errors) == 1, f"Expected 1 price ALERT error for tshirt, got: {price_errors}"
+    assert len(price_errors) == 1, f"Expected 1 price ALERT error for reel, got: {price_errors}"

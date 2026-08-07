@@ -103,10 +103,18 @@ def test_control_panel_category_structure():
 
 
 def test_control_panel_labelframe_layout():
-    """control_panel.py の描画ロジックが Labelframe + 新規/再出品 2 ボタン構成."""
+    """control_panel.py の描画ロジックが Labelframe + 新規/再出品 構成 (2026-06-04 2セクション化)."""
     src = (_HQ / "control_panel.py").read_text(encoding="utf-8")
     assert "ttk.LabelFrame" in src
-    assert 'text="新規"' in src
-    assert 'text="再出品"' in src
+    assert "再出品" in src  # f"{cat} 再出品" 形式 (既存メンテ section)
     # verified カテゴリの先頭並べ替え
     assert "_cat_verified" in src or "verified" in src
+    # 2026-06-04 再構成: 新規出品 / 既存メンテ を mode で分割 (2ボタン化)
+    assert 'mode="new"' in src and 'self.mode' in src
+    assert "新規出品" in src and "既存メンテ" in src
+    # 新規はカテゴリ名ラベルの大ボタン (text="新規" 固定でなく cat_name)
+    assert "text=cat_name" in src
+    # 既存メンテ: 分析 / 在庫あり(再出品/タイトル/価格) / 在庫なし(再仕入れ/整理) に分類
+    # (2026-06-05 在庫あり3ボタン集約で枠名「在庫あり — 直す」に変更)
+    assert "在庫あり — 直す" in src and "在庫なし — 再仕入れ" in src
+    assert "open_after" in src

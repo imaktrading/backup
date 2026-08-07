@@ -7,11 +7,71 @@ import os
 import re
 import json
 import time
+import sys as _sys_early
+# stdout/stderr を utf-8 に(cp932 コンソールで ✅ 等の絵文字 print が UnicodeEncodeError →
+# 成功なのに returncode=1 になり「中間CSVが古い」と誤判定する事故を防ぐ。2026-07-21)。
+for _s in (_sys_early.stdout, _sys_early.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import anthropic
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
+
+
+def _detect_chrome_major():
+    """インストール済 Chrome のメジャー版を取得(失敗時 None = uc 自動検出に委ねる)。
+
+    uc.Chrome の自動検出が driver 版を取り違える事故(2026-07-21 Chrome150 vs driver151)を防ぐため
+    レジストリ BLBeacon から実機版を読む。CLAUDE.md「version_main ハードコード禁止・レジストリ検出」準拠。
+    """
+    try:
+        import winreg
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                k = winreg.OpenKey(hive, r"Software\Google\Chrome\BLBeacon")
+                v, _ = winreg.QueryValueEx(k, "version")
+                winreg.CloseKey(k)
+                return int(str(v).split(".")[0])
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def _extract_first_json(text):
+    """Claude 応答から**最初の JSON オブジェクトだけ**を取り出す(純関数)。
+
+    Claude が JSON の後に説明文を付けて返すと json.loads が 'Extra data: line N' で落ち、
+    その景品が丸ごと脱落していた(2026-07-21 Baki 宮本武蔵/愚地克巳が間欠再発で脱落)。
+    先頭の ```json フェンス除去 + 最初の '{' から raw_decode(末尾の余分は無視)で堅牢化。
+    """
+    import json as _json
+    t = str(text or "").strip()
+    t = re.sub(r"^```json\s*", "", t)
+    t = re.sub(r"\s*```$", "", t)
+    i = t.find("{")
+    if i < 0:
+        raise ValueError("応答に JSON オブジェクト({...})が無い")
+    obj, _ = _json.JSONDecoder().raw_decode(t[i:])
+    return obj
+
+
+def _height_num(v):
+    """高さ文字列から**先頭の数値だけ**を取り出す(純関数)。
+
+    Claude が item_height_in に整形済み文字列(例 '8.5 in (21.5 cm)')を返すことがあり、
+    それをさらに ` in ({cm} cm)` で包むと 'X in (Y cm) in (Y cm)' と二重化する事故を防ぐ
+    (2026-07-21 rarara 検出。inch 値は 'X in (Y cm)' の先頭に来るので先頭数値=inch で正しい)。
+    """
+    import re as _re
+    m = _re.search(r"\d+(?:\.\d+)?", str(v or ""))
+    return m.group(0) if m else ""
+
 
 # ===== 設定 =====
 # API key.txt から読み込む（スクリプトと同じフォルダ、絶対パス参照）
@@ -36,7 +96,7 @@ from listing_common import (
     CONDITION_MASTER,
 )
 OUTPUT_CSV = _gcop("ichibankuji", "upload")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 SCHEDULE_WEEKS = 2
 DEFAULT_PRICE = 50.00  # 仕入不明時のフォールバック
 PROFIT_CATEGORY = "一番くじ"  # pricing_engine 用カテゴリ
@@ -93,10 +153,33 @@ def get_schedule_time():
     return future.strftime("%Y-%m-%d %H:%M:%S")
 
 def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "800-1000"
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由)."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, "一番くじ")
+    except Exception:
+        for threshold, policy in SHIPPING_POLICIES:
+            if price <= threshold:
+                return policy
+        return "800-1000"
+
+def _parse_release_year(page_text):
+    """発売年(YYYY)を返す。**「店頭販売：YYYY年MM月」を最優先**(=正規の発売日)。
+
+    旧実装は『ページ最初の YYYY年MM月』を取っていたが、ニュース/期間/別日付を誤取得しうる
+    (2026-06-25 ユーザー指摘: 公式に「店頭販売：」テキストあり)。店頭販売→オンライン販売→
+    最初のYYYY年 の順でフォールバック。見つからなければ ''。純関数(test可)。
+    """
+    if not page_text:
+        return ""
+    for pat in (r"店頭販売[^\d]{0,8}(\d{4})年\d{1,2}月",
+                r"オンライン販売[^\d]{0,8}(\d{4})年\d{1,2}月",
+                r"(\d{4})年\d{1,2}月"):
+        m = re.search(pat, page_text)
+        if m:
+            return m.group(1)
+    return ""
+
 
 def scrape_1kuji(driver, url):
     """1kuji.comから賞別データをSeleniumで取得"""
@@ -130,11 +213,8 @@ def scrape_1kuji(driver, url):
                 series_name = title.get_text(strip=True).replace('｜一番くじ倶楽部｜BANDAI SPIRITS公式 一番くじ情報サイト', '').strip()
 
         # 発売年・価格取得 (page_text = BS get_text 経由で安定 source)
-        release_date = ""
+        release_date = _parse_release_year(page_text)
         price_jpy = ""
-        date_m = re.search(r'(\d{4})年(\d{1,2})月', page_text)
-        if date_m:
-            release_date = date_m.group(1)
         price_m = re.search(r'1回(\d+)円', page_text)
         if price_m:
             price_jpy = price_m.group(1)
@@ -410,10 +490,7 @@ Return ONLY valid JSON:
                 max_tokens=800,
                 messages=messages,
             )
-            text = message.content[0].text.strip()
-            text = re.sub(r'^```json\s*', '', text)
-            text = re.sub(r'\s*```$', '', text)
-            result = json.loads(text)
+            result = _extract_first_json(message.content[0].text)
         except Exception as e:
             print(f"    Claude APIエラー (attempt {attempt+1}): {e}")
             return last_result
@@ -513,11 +590,12 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
 
     # === Title整合性 + 70字パディング (listing_common.normalize_title) ===
     # 一番くじは新品扱い (ConditionID=1000)
-    _is_specs = {  # build_row 内で参照可能な item_specifics 雛形
+    _is_specs = {  # build_row 内で参照可能な item_specifics 雛形 (pad 材料は実ファクトのみ)
         'Character': claude_result.get('character', ''),
         'Theme': 'Anime & Manga',
         'Type': 'Figure',
         'Franchise': claude_result.get('franchise', ''),
+        'Year Manufactured': claude_result.get('year', series_data.get('release_year', '')),
     }
     title = normalize_title(
         title, is_new=True, item_specifics=_is_specs,
@@ -527,7 +605,8 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
     character = claude_result.get('character', '')
     figure_type = claude_result.get('figure_type', 'Figure')
     year = claude_result.get('year', series_data.get('release_year', ''))
-    height_in = claude_result.get('item_height_in', '')
+    # Claude が 'X in (Y cm)' 等の整形済み文字列を返すことがあるので数値だけ抽出(二重化防止)。
+    height_in = _height_num(claude_result.get('item_height_in', ''))
     # フォールバック：Claudeが返せない場合はsize_cmから計算
     if not height_in and prize_data.get('size_cm'):
         try:
@@ -578,16 +657,19 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
         if prize_en.strip() == ' Prize':
             prize_en = character + ' Prize'
 
-    # C:Series：Claudeの結果を優先、なければフォールバック
+    # series_name_en は Description の Specs ブロック用(フル英語作品名)。
     if not series_name_en:
         series_name_en = f"Ichiban Kuji {franchise}"
-    # eBay Series field は 65 文字制限. 超過すると入稿失敗 (ErrorCode 21919308).
-    # word 境界で安全に短縮 (= eBay 仕様への上流防衛、listing_common 検証は二段防御).
     series_name_en = _truncate_at_word_boundary(series_name_en, max_len=65)
-    print(f"    → C:Series に設定: {series_name_en}")
+    # ★C:Series(eBay item specific)は "Ichiban Kuji" 固定。理由(2026-06-25 ユーザー合意):
+    #   261055 の Series は selection型で、フル作品名(自由文字列)は eBay に drop される
+    #   (既存出品が全て Series 空だった)。"Ichiban Kuji" は有効値で確実に載り、Series フィルタに
+    #   ヒット=回遊SEO。作品名/賞/キャラは Title・Franchise・TV Show・Character・説明文でカバー済。
+    SERIES_EBAY = "Ichiban Kuji"
+    print(f"    → C:Series: {SERIES_EBAY}(固定) / 作品名は説明文Specsへ: {series_name_en}")
 
     # Description生成
-    height_cm = claude_result.get('item_height_cm', prize_data.get('size_cm', ''))
+    height_cm = _height_num(claude_result.get('item_height_cm', prize_data.get('size_cm', '')))
     desc_data = {
         'series_name_en': series_name_en,
         'prize_en': prize_en,
@@ -623,6 +705,10 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
         "C:TV Show": claude_result.get('tv_show', franchise),
         "C:Movie": claude_result.get('tv_show', franchise),
         "C:Brand": "Bandai",
+        # Age Level: Bandai 一番くじ公式表記=対象年齢15才以上 → "15+"。CPSC(2026-07-08 eFiling)で
+        # 児童製品(≤12歳)扱いを外す宣言。※カテゴリ261055に Age Level の公式aspectは無い=カスタム
+        # 自由文字列として記載(フィルタ用でなく非児童製品の明示。2026-06-29 ユーザー指示)。
+        "C:Age Level": "15+",
         "C:Language": "Japanese",
         "C:Material": "Plastic",  # eBayフィルタ正規値（"PVC, ABS"はリスト無し）
         "C:Character": character,
@@ -645,7 +731,7 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
             else f"{height_cm} cm" if height_cm
             else ""
         ),
-        "C:Series": series_name_en,
+        "C:Series": SERIES_EBAY,   # "Ichiban Kuji" 固定(selection有効値・フィルタヒット)。作品名は説明文へ
         "StoreCategoryID": 42133037010,
         "StoreCategoryID2": STORE_CATEGORY2.get(franchise.lower(), STORE_CATEGORY2_DEFAULT),
     }
@@ -931,10 +1017,14 @@ def _process_sheet_to_ebay_csv():
             continue
         if category != "一番くじ":
             continue
+        # 仕入参考: N列 (実コスト) 優先 / F列 (商品価格) fallback (2026-05-18)
+        import sys as _sys_pc
+        _sys_pc.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+        from listing_common import pick_cost_jpy as _pick_cost
         targets.append({
             'sheet_row': i,
             'mercari_url': url,
-            'cost_jpy': re.sub(r'[^0-9]', '', row[5]) if row[5] else '',
+            'cost_jpy': _pick_cost(row),
             'image_url': row[6],
             # V-AB (index 21-27) ※ U(20)は追加日で metadata ではない
             'kuji_url': row[21],
@@ -986,7 +1076,9 @@ def _process_sheet_to_ebay_csv():
         try:
             options = uc.ChromeOptions()
             options.add_argument("--no-sandbox")
-            driver = uc.Chrome(options=options)
+            # Phase1 と同じく実機 Chrome major を渡す(uc 自動検出の版取り違え防止。2026-07-21)。
+            _maj = _detect_chrome_major()
+            driver = uc.Chrome(options=options, version_main=_maj) if _maj else uc.Chrome(options=options)
             try:
                 for url, ts in by_url.items():
                     sd = scrape_1kuji(driver, url)
@@ -1107,6 +1199,14 @@ def _process_sheet_to_ebay_csv():
             writer.writeheader()
             writer.writerows(all_rows)
         print(f"\n✅ eBay CSV出力: {OUTPUT_CSV}  ({len(all_rows)}件)")
+        # Free Shipping 移行 (2026-05-18)
+        try:
+            import sys as _sys_fs
+            _sys_fs.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            from freeshipping_postprocess import transform_csv_to_freeshipping
+            transform_csv_to_freeshipping(OUTPUT_CSV)
+        except Exception as _e:
+            print(f"⚠️ Free Shipping post-process 失敗 (ichibankuji): {type(_e).__name__}: {_e}")
         # Step 8 拡張: decision_log に config_version + 使用値を刻印
         try:
             import sys as _sys_dl
@@ -1117,6 +1217,14 @@ def _process_sheet_to_ebay_csv():
         except Exception as _e:
             print(f"⚠️ decision_log 失敗 (ichibankuji): {type(_e).__name__}: {_e}")
         print(f"   ※ 出品完了後、統合Hight B列にItemIDを手入力で「処理済」化")
+        # 生成時セルフ監査 (CSV監査くん) — 監査を待たず生成で品質確認
+        try:
+            import sys as _sys_sa
+            _sys_sa.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
+            from listing_common import run_self_audit
+            run_self_audit(OUTPUT_CSV)
+        except Exception as _e:
+            print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
     else:
         print("\n❌ eBay CSV対象行なし")
 
@@ -1142,7 +1250,11 @@ def main():
             return
         options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
-        driver = uc.Chrome(options=options)
+        # Chrome 実機のメジャー版を検出して渡す(uc 自動検出が driver 版を取り違える事故防止:
+        # 2026-07-21 Chrome150 に uc が 151 driver を掴んで SessionNotCreated。
+        # CLAUDE.md「version_main 数値ハードコード禁止・レジストリ検出」準拠)。
+        maj = _detect_chrome_major()
+        driver = uc.Chrome(options=options, version_main=maj) if maj else uc.Chrome(options=options)
         try:
             phase1_extract_intermediate(driver, urls)
         finally:

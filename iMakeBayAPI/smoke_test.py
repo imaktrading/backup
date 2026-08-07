@@ -35,7 +35,7 @@ def test_profit_params():
     src = p["source"]
     assert src.startswith(("gsheet", "excel")), f"パラメータ読込失敗 source={src}"
     assert len(p["categories"]) >= 10
-    for cat in ["TCG(PSA10)", "G-SHOCK", "Tシャツ(UT)", "Montbell(ジャケット)", "一番くじ"]:
+    for cat in ["TCG(PSA10)", "G-SHOCK", "Tシャツ(UT)", "Montbell(重)", "一番くじ"]:
         params = get_category_params(cat)
         assert params is not None, f"カテゴリ不在: {cat}"
         assert 0 < params["fvf"] < 0.3, f"{cat} FVF異常: {params['fvf']}"

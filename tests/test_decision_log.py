@@ -114,9 +114,10 @@ def test_log_csv_batch_all_4_projects(tmp_path):
         assert rec["extra"]["row_count"] == 10
         assert rec["extra"]["fvf_used"] is not None, f"{project}: FVF not captured"
         assert rec["extra"]["exchange_rate_used"] is not None
-        # config_version 刻印
+        # config_version 刻印: 版をハードコードせず SSOT (config_loader) の実値と一致を検証
         assert rec["config_version"] != "unknown"
-        assert "2026-04-25" in rec["config_version"]
+        import config_loader
+        assert rec["config_version"] == config_loader.get_version()
 
 
 def test_log_csv_batch_unknown_category_handled(tmp_path):

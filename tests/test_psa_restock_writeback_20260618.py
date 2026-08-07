@@ -1,0 +1,59 @@
+"""Regression: 2026-06-18 — RESTOCK スプシ書戻し(状態同期・送信後verify)。
+
+RESTOCK確定→Revise CSV→手動UL の後、実eBay qty を verify してからスプシ更新(fail-OPEN禁止)。
+qty>=1=実行済 / qty=0=入稿待ち(silentに済扱いしない) / None=不明(fail-closed: 済にしない)。
+"""
+import importlib.util
+from pathlib import Path
+
+_P = Path(__file__).resolve().parent.parent / "iMakHQ" / "tools" / "psa_restock_writeback.py"
+_spec = importlib.util.spec_from_file_location("psa_restock_writeback_t", _P)
+import sys
+sys.path.insert(0, str(_P.parent))
+wb = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(wb)
+
+
+def test_classify_by_actual_qty():
+    items = [{"itemID": "1"}, {"itemID": "2"}, {"itemID": "3"}, {"itemID": "4"}]
+    qty = {"1": 1, "2": 0, "3": None, "4": 5}
+    c = wb.classify_restock(items, qty)
+    assert c["done"] == ["1", "4"]       # qty>=1 = 実行済
+    assert c["pending"] == ["2"]         # qty=0 = 入稿待ち(済にしない)
+    assert c["unknown"] == ["3"]         # 取得不能 = 不明(fail-closed)
+    assert c["status"]["1"] == wb.ST_DONE
+    assert c["status"]["2"] == wb.ST_PENDING
+    assert c["status"]["3"] == wb.ST_UNKNOWN
+
+
+def test_empty_itemid_skipped():
+    c = wb.classify_restock([{"itemID": ""}, {"itemID": "x"}], {"x": 1})
+    assert c["done"] == ["x"] and "" not in c["status"]
+
+
+def test_qty_zero_never_marked_done():
+    # fail-OPEN防止: qty=0 は絶対 done にしない(未反映を済と書かない)
+    c = wb.classify_restock([{"itemID": "a"}], {"a": 0})
+    assert c["done"] == [] and c["pending"] == ["a"]
+
+
+def test_first_supply_url():
+    """2026-06-20 master同期: 確認済仕入URL(" | "連結)の先頭=主供給先 を取り出す。"""
+    assert wb.first_supply_url("https://a/1 | https://a/2 | https://a/3") == "https://a/1"
+    assert wb.first_supply_url("  | https://b/2") == "https://b/2"   # 空要素skip
+    assert wb.first_supply_url("") == ""
+    assert wb.first_supply_url(None) == ""
+
+
+def test_to_yen_int():
+    """2026-06-20 master N列同期: 最安¥(¥/カンマ混在)→ 数字のみ。V8コスト本体を揃える。"""
+    import importlib.util as _u
+    _sp = Path(__file__).resolve().parent.parent / "iMakHQ" / "tools" / "sheet_io.py"
+    _s = _u.spec_from_file_location("sheet_io_t", _sp)
+    sio = _u.module_from_spec(_s)
+    _s.loader.exec_module(sio)
+    assert sio._to_yen_int("45000") == "45000"
+    assert sio._to_yen_int("¥45,000") == "45000"
+    assert sio._to_yen_int("21,500") == "21500"
+    assert sio._to_yen_int("") == ""
+    assert sio._to_yen_int(None) == ""

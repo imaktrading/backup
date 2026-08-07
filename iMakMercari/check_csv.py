@@ -39,8 +39,23 @@ BANNED_TITLE_WORDS = [
 ]
 # 注: "japan" はMercari系（Porter/montbell/UT）では許可（Japan Exclusive等で使用）
 
-# 必須Item Specifics（空欄だと品質低下）
-REQUIRED_SPECIFICS = ["C:Brand", "C:Type", "C:Size", "C:Color", "C:Department"]
+# 必須Item Specifics（空欄だと品質低下）。カテゴリで適用specが異なる。
+# 2026-07-01: バッグ(57988/52357)に apparel spec の C:Type/C:Size を必須扱いしていたため
+# Porter が毎回「C:Type 空」で誤検出→監査くん再発の主因(9件)。category-aware 化して解消。
+# apparel(Clothing 11450 / T-shirts 15687)は従来通り C:Type/C:Size 必須。
+_REQUIRED_APPAREL = ["C:Brand", "C:Type", "C:Size", "C:Color", "C:Department"]
+_REQUIRED_BAGS = ["C:Brand", "C:Style", "C:Color", "C:Department"]  # C:Style=バッグの種別(=Type相当)
+_BAG_CATEGORIES = {"57988", "52357"}
+REQUIRED_SPECIFICS = _REQUIRED_APPAREL  # 後方互換(既定=apparel)
+
+
+def required_specifics_for(category):
+    """eBay category id に応じた必須Item Specifics(純関数, test可)。
+
+    バッグ(57988/52357)は apparel spec(C:Type/C:Size)が非該当なので除外し、
+    バッグの種別を表す C:Style を代替必須にする。それ以外(apparel)は従来通り。
+    """
+    return _REQUIRED_BAGS if str(category).strip() in _BAG_CATEGORIES else _REQUIRED_APPAREL
 # あると望ましいItem Specifics
 RECOMMENDED_SPECIFICS = [
     "C:Style", "C:Material", "C:Pattern", "C:Features", "C:Closure",
@@ -370,26 +385,34 @@ def validate_row(row, row_idx):
     if condition not in ("3000", "1000"):
         issues.append(("ERROR", f"ConditionID が 3000/1000 でない: {condition}"))
 
-    # --- 価格・送料整合性 ---
+    # --- 価格・送料整合性 (V6 mode: DDP-{group}-P{tier} / V5 mode: tier 名) ---
     try:
         price_f = float(price)
-        expected_policies = [
-            (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
-            (300, "200-300"), (400, "300-400"), (500, "400-500"),
-            (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
-        ]
-        expected = "800-1000"
-        for threshold, policy in expected_policies:
-            if price_f <= threshold:
-                expected = policy
-                break
+        try:
+            import sys, os
+            _eb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI")
+            if _eb not in sys.path:
+                sys.path.insert(0, _eb)
+            from listing_common import get_shipping_policy_name
+            expected = get_shipping_policy_name(price_f, "Tシャツ(UT)")
+        except Exception:
+            expected_policies = [
+                (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+                (300, "200-300"), (400, "300-400"), (500, "400-500"),
+                (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+            ]
+            expected = "800-1000"
+            for threshold, policy in expected_policies:
+                if price_f <= threshold:
+                    expected = policy
+                    break
         if shipping != expected:
             issues.append(("WARN", f"送料ポリシー '{shipping}' が価格${price}に対して不一致（期待: {expected}）"))
     except ValueError:
         issues.append(("ERROR", f"価格が数値でない: {price}"))
 
-    # --- 必須Item Specifics ---
-    for spec in REQUIRED_SPECIFICS:
+    # --- 必須Item Specifics (category-aware: バッグは C:Type/C:Size 非該当) ---
+    for spec in required_specifics_for(category):
         val = get_col(row, spec)
         if not val:
             issues.append(("WARN", f"必須Item Specific '{spec}' が空"))
@@ -559,12 +582,18 @@ LISTINGS:
 
 Review each listing for:
 1. TITLE QUALITY: Is it keyword-optimized? Does it include the most searchable terms? Max 80 chars.
-2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at or slightly below TOP seller median. For NO-GO items, recommend not listing.
+2. PRICING: Based on GATE analysis, suggest specific listing prices. For GO items, recommend price at
+   or slightly below TOP seller median. For 高め/NO-GO items (target > median 乖離超過): **DO list at the
+   cost-plus price** — 無在庫(drop-ship)= 在庫コストなし + cost-plus = 損なし。出品は free option
+   (売れれば利益、売れなくても損失なし)。**「出品しない/見送り」を推奨してはいけない**。値下げを
+   強制せず、既存メンテ追跡(sell-through 監視 / より安い仕入れ再探索 / median 上昇時に price-revise)を flag。
 3. ITEM SPECIFICS: Are important fields missing that competitors typically fill?
 4. OVERALL: Any patterns or systematic issues across all listings?
 
 Rules to enforce:
-- No forbidden words: Japanese, GEM MT, Japan, Mint, Graded, L@@K
+- Forbidden words (spam/redundant): GEM MT, Mint, Graded, L@@K
+  ★ "Japan" / "Japanese" は Mercari系(Porter/montbell/UNIQLO UT)では **許可**(Japan Exclusive 等で
+    使う有効な検索語)。禁止語ではない。タイトルから消すよう助言してはいけない。
 - Title should be 70-80 characters ideally
 
 Respond in Japanese. Be concise and actionable. Use bullet points.
@@ -573,7 +602,7 @@ Format: まず各リスティングの個別フィードバック、最後に全
     try:
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )

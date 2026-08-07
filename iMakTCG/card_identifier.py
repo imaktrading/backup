@@ -48,7 +48,7 @@ try:
 except FileNotFoundError:
     ANTHROPIC_API_KEY = None
 
-CLAUDE_MODEL = "claude-sonnet-4-20250514"  # psa_to_csv.py と統一
+CLAUDE_MODEL = "claude-sonnet-4-6"  # 全 TCG スクリプト共通の SSOT。モデル変更時はここ1箇所だけ直す
 
 
 # ============================================================================
@@ -125,8 +125,8 @@ def identify_from_image(
     Returns:
         {
             "confidence": "high" | "medium" | "low" | "failed",
-            "franchise": "One Piece TCG" | "Pokemon TCG" | "Gundam Card Game" |
-                         "Dragon Ball Super Card Game" | "",
+            "franchise": "One Piece" | "Pokemon" | "Gundam" | "Dragon Ball" | "",
+                         # 2026-05-31: short names (= internal key、 listing C:Game とは別軸)
             "card_number": str,    # 画像から読み取った正式番号 (例: "OP06-091SP", "PRB02-005")
             "character":   str,
             "set_name":    str,    # 英語セット名 (Vision が知ってれば)
@@ -176,17 +176,17 @@ IDENTIFICATION RULES:
 2. READ the printed character name (top of card area)
 3. READ the set indicator (bottom right corner symbol/text)
 4. READ the rarity marker (printed letter/symbol on card: SR/SEC/UC/R/C/L/SP/Promo/Art Rare 等)
-5. IDENTIFY the franchise from card design: One Piece TCG / Pokemon TCG /
-   Gundam Card Game / Dragon Ball Super Card Game
+5. IDENTIFY the franchise from card design (= short key for internal routing):
+   "One Piece" / "Pokemon" / "Gundam" / "Dragon Ball"
 6. IDENTIFY the color from card frame (Red/Blue/Green/Yellow/Black/Purple/Multi-Color)
 7. READ printed cost/power numbers if visible (top-left for One Piece, top-right HP for Pokemon)
 8. IDENTIFY the card_type from card layout:
-   - One Piece TCG: "Character" | "Leader" | "Event" | "Stage" | "Don"
+   - One Piece: "Character" | "Leader" | "Event" | "Stage" | "Don"
      (Leader カードは大型枠 + ライフ表示、Character は通常枠)
-   - Pokemon TCG: "Pokémon" | "Pokémon V" | "Pokémon ex" | "Pokémon VMAX" | "Pokémon VSTAR" | "Trainer" | "Energy"
+   - Pokemon: "Pokémon" | "Pokémon V" | "Pokémon ex" | "Pokémon VMAX" | "Pokémon VSTAR" | "Trainer" | "Energy"
      (HP表示あれば Pokémon 系、なければ Trainer/Energy)
-   - Dragon Ball SCG: "Battle" | "Leader" | "Extra" | "Energy Marker"
-   - Gundam Card Game: "Unit" | "Pilot" | "Command" | "Base" | "Resource"
+   - Dragon Ball: "Battle" | "Leader" | "Extra" | "Energy Marker"
+   - Gundam: "Unit" | "Pilot" | "Command" | "Base" | "Resource"
 
 CRITICAL CONSTRAINTS:
 - Only return values that are CLEARLY PRINTED on the card. Do NOT guess.
@@ -216,7 +216,7 @@ CONFIDENCE SCORING (be strict):
 Return ONLY valid JSON, no other text:
 {{
   "confidence": "high",
-  "franchise": "One Piece TCG",
+  "franchise": "One Piece",
   "card_number": "OP06-091SP",
   "character": "Rebecca",
   "set_name": "Wings of the Captain",

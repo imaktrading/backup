@@ -39,7 +39,7 @@ CATEGORY_FILTER = "アウトドア・ジャケット"  # R列(18)
 
 # 出力
 DESCRIPTION_FILE = os.path.join(SCRIPT_DIR, "USED.txt")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 SCHEDULE_WEEKS = 2
 
 # eBay固定値
@@ -362,7 +362,7 @@ def _build_listing_from_catalog(target: dict, catalog_result: dict, anthropic_ap
     }
 
 
-PROFIT_CATEGORY = "Montbell(ジャケット)"
+PROFIT_CATEGORY = "Montbell(重)"
 PRICE_FLOOR_USD = 50
 EXCHANGE_RATE = get_exchange_rate()
 SHIPPING_JPY = get_category_params(PROFIT_CATEGORY)["shipping_jpy"]
@@ -482,10 +482,16 @@ def get_schedule_time():
 
 
 def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "800-1000"
+    """V6/V5/Free モード別 Shipping Profile 名 (listing_common 経由).
+    Montbell はジャケット系のため Group C (= Montbell(重) と同 Policy 構造)."""
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, "Montbell(重)")
+    except Exception:
+        for threshold, policy in SHIPPING_POLICIES:
+            if price <= threshold:
+                return policy
+        return "800-1000"
 
 
 def load_description():
@@ -539,7 +545,10 @@ def get_listing_targets():
         title_jp = row[2] if len(row) > 2 else ""
         sold = row[3] if len(row) > 3 else ""
         condition = row[4] if len(row) > 4 else ""
-        price = row[5] if len(row) > 5 else ""
+        # 仕入参考: N列 (実コスト) 優先 / F列 (商品価格) fallback (2026-05-18)
+        sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI"))
+        from listing_common import pick_cost_jpy as _pick_cost
+        price = _pick_cost(row)  # 旧: row[5] (F商品価格のみ)
         photo_urls = row[6] if len(row) > 6 else ""
         description = row[7] if len(row) > 7 else ""
         model = row[8].strip() if len(row) > 8 else ""  # I列: 型番 (ユーザー手動入力, 7桁数字)
@@ -841,8 +850,11 @@ def main():
         # === Title整合性 + 70字パディング (listing_common.normalize_title) ===
         # Mont-bell は条件混在 (新品/中古)、condition_jp から判定
         is_new_montbell = is_new_condition(target.get("condition", ""))
+        # pad 材料: 公式 spec の 'Outer Shell Material'(GORE-TEX/Nylon 等=強い検索語) を
+        # pad の汎用キー 'Material' にエイリアスして渡す (specs 本体は汚さない、捏造しない)。
+        _mb_pad_specs = {**specs, "Material": material}
         title_en = normalize_title(
-            title_en, is_new=is_new_montbell, item_specifics=specs,
+            title_en, is_new=is_new_montbell, item_specifics=_mb_pad_specs,
             category="montbell", target_min=70, max_chars=80,
         )
         print(f"    ✨ {title_en} ({len(title_en)}字)")
@@ -863,25 +875,30 @@ def main():
         mercari_urls = [u.strip() for u in target["photo_urls"].split("|") if u.strip()]
         pic_url = mercari_urls[0] if mercari_urls else ""
 
-        # 出品価格
+        # 出品価格: compute_listing_price() dispatcher (V6/V5/V4 自動切替)
         price_str = re.sub(r"[^0-9]", "", target["price_jpy"])
         cost_jpy = int(price_str) if price_str else 5000
-        # SSOT: profit_params経由で利益計算シートv2から算出
-        min_price = compute_min_price_usd(cost_jpy, PROFIT_CATEGORY)
-        price = max(min_price, PRICE_FLOOR_USD)
-        price = round(price, 2)
-        price = int(price) + 0.98 if price > 10 else price
-        # 価格 status 判定（pricing_engine による相場乖離チェック - SSOT）
         _price_status = "GO"
+        price = None
         try:
             sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI"))
             from pricing_engine import compute_listing_price as _clp
             _pr = _clp(cost_jpy, ebay_median, PROFIT_CATEGORY)
+            price = _pr.get("price")
             _price_status = _pr.get("status", "GO")
             if _price_status == "ALERT":
                 print(f"    ⚠️ 価格ALERT: {_pr.get('alert_msg', '')}")
         except Exception as _pe:
-            pass
+            price = None
+        if price is None:
+            # fallback (= V4 simple)
+            try:
+                min_price = compute_min_price_usd(cost_jpy, PROFIT_CATEGORY)
+            except Exception:
+                min_price = PRICE_FLOOR_USD
+            price = max(min_price, PRICE_FLOOR_USD)
+            price = int(round(price, 2)) + 0.98 if price > 10 else round(price, 2)
+        price = max(price, PRICE_FLOOR_USD)
 
         shipping = get_shipping_policy(price)
         # CustomLabel: メルカリ itemID (TCG/Tshirt と同じ規則)、抽出失敗時は fallback
@@ -961,6 +978,12 @@ def main():
         with open(output_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
             writer.writerows(rows)
+        # Free Shipping 移行 (2026-05-18)
+        try:
+            from freeshipping_postprocess import transform_csv_to_freeshipping
+            transform_csv_to_freeshipping(output_file)
+        except Exception as _e:
+            print(f"⚠️ Free Shipping post-process 失敗 (Montbell): {type(_e).__name__}: {_e}")
         print(f"\n完了！出力: {output_file}")
         print(f"成功: {len(rows) - 1}件")
 
@@ -976,6 +999,13 @@ def main():
             )
         except Exception as e:
             print(f"⚠️ チェッカー実行エラー: {e}")
+
+        # 生成時セルフ監査 (CSV監査くん) — check_csv に加え 4観点(整合/形式/SEO/文字数) を確認
+        try:
+            from listing_common import run_self_audit
+            run_self_audit(output_file)
+        except Exception as _e:
+            print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
 
         print(f"\n出品後、スプシのB列にItemIDを手動入力してください。")
     else:

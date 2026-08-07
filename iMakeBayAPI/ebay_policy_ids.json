@@ -1,0 +1,569 @@
+﻿[
+    {
+        "name":  "DDP-A-P01",
+        "id":  "",
+        "cost":  3.34,
+        "status":  "NG",
+        "err":  null
+    },
+    {
+        "name":  "DDP-A-P02",
+        "id":  "262931433017",
+        "cost":  5.18,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P03",
+        "id":  "262931434017",
+        "cost":  7.01,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P04",
+        "id":  "262931435017",
+        "cost":  8.85,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P05",
+        "id":  "262931436017",
+        "cost":  10.69,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P06",
+        "id":  "262931437017",
+        "cost":  12.53,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P07",
+        "id":  "262931438017",
+        "cost":  14.36,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P08",
+        "id":  "262931439017",
+        "cost":  16.2,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P09",
+        "id":  "262931440017",
+        "cost":  18.04,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P10",
+        "id":  "262931441017",
+        "cost":  19.88,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P11",
+        "id":  "262931442017",
+        "cost":  23.55,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P12",
+        "id":  "262931443017",
+        "cost":  27.23,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P13",
+        "id":  "262931444017",
+        "cost":  30.9,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P14",
+        "id":  "262931445017",
+        "cost":  34.58,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P15",
+        "id":  "262931446017",
+        "cost":  38.26,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P16",
+        "id":  "262931447017",
+        "cost":  41.93,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P17",
+        "id":  "262931448017",
+        "cost":  45.61,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P18",
+        "id":  "262931450017",
+        "cost":  49.28,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P19",
+        "id":  "262931451017",
+        "cost":  52.96,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P20",
+        "id":  "262931452017",
+        "cost":  56.63,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P21",
+        "id":  "262931453017",
+        "cost":  65.82,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P22",
+        "id":  "262931455017",
+        "cost":  75.01,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P23",
+        "id":  "262931456017",
+        "cost":  84.2,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P24",
+        "id":  "262931457017",
+        "cost":  93.39,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P25",
+        "id":  "262931458017",
+        "cost":  102.58,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P26",
+        "id":  "262931459017",
+        "cost":  111.77,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P27",
+        "id":  "262931460017",
+        "cost":  130.15,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P28",
+        "id":  "262931462017",
+        "cost":  148.52,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P29",
+        "id":  "262931465017",
+        "cost":  166.9,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P30",
+        "id":  "262931466017",
+        "cost":  185.28,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-A-P31",
+        "id":  "262931467017",
+        "cost":  277.17,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P01",
+        "id":  "262931468017",
+        "cost":  4.56,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P02",
+        "id":  "262931469017",
+        "cost":  7.63,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P03",
+        "id":  "",
+        "cost":  10.69,
+        "status":  "NG",
+        "err":  "{\"errors\":[{\"errorId\":20400,\"domain\":\"API_ACCOUNT\",\"category\":\"REQUEST\",\"message\":\"Invalid request.\",\"longMessage\":\"Duplicate Policy\",\"inputRefIds\":[null],\"parameters\":[{\"name\":\"duplicatePolicyId\",\"value\":\"262931436017\"}]}]}"
+    },
+    {
+        "name":  "DDP-B-P04",
+        "id":  "262931470017",
+        "cost":  13.75,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P05",
+        "id":  "262931471017",
+        "cost":  16.81,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P06",
+        "id":  "",
+        "cost":  19.88,
+        "status":  "NG",
+        "err":  "{\"errors\":[{\"errorId\":20400,\"domain\":\"API_ACCOUNT\",\"category\":\"REQUEST\",\"message\":\"Invalid request.\",\"longMessage\":\"Duplicate Policy\",\"inputRefIds\":[null],\"parameters\":[{\"name\":\"duplicatePolicyId\",\"value\":\"262931441017\"}]}]}"
+    },
+    {
+        "name":  "DDP-B-P07",
+        "id":  "262931472017",
+        "cost":  22.94,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P08",
+        "id":  "262931473017",
+        "cost":  26,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P09",
+        "id":  "262931474017",
+        "cost":  29.07,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P10",
+        "id":  "262931475017",
+        "cost":  32.13,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P11",
+        "id":  "",
+        "cost":  38.26,
+        "status":  "NG",
+        "err":  "{\"errors\":[{\"errorId\":20400,\"domain\":\"API_ACCOUNT\",\"category\":\"REQUEST\",\"message\":\"Invalid request.\",\"longMessage\":\"Duplicate Policy\",\"inputRefIds\":[null],\"parameters\":[{\"name\":\"duplicatePolicyId\",\"value\":\"262931446017\"}]}]}"
+    },
+    {
+        "name":  "DDP-B-P12",
+        "id":  "262931476017",
+        "cost":  44.38,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P13",
+        "id":  "262931477017",
+        "cost":  50.51,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P14",
+        "id":  "",
+        "cost":  56.63,
+        "status":  "NG",
+        "err":  "{\"errors\":[{\"errorId\":20400,\"domain\":\"API_ACCOUNT\",\"category\":\"REQUEST\",\"message\":\"Invalid request.\",\"longMessage\":\"Duplicate Policy\",\"inputRefIds\":[null],\"parameters\":[{\"name\":\"duplicatePolicyId\",\"value\":\"262931452017\"}]}]}"
+    },
+    {
+        "name":  "DDP-B-P15",
+        "id":  "262931480017",
+        "cost":  62.76,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P16",
+        "id":  "262931481017",
+        "cost":  68.89,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P17",
+        "id":  "",
+        "cost":  75.01,
+        "status":  "NG",
+        "err":  "{\"errors\":[{\"errorId\":20400,\"domain\":\"API_ACCOUNT\",\"category\":\"REQUEST\",\"message\":\"Invalid request.\",\"longMessage\":\"Duplicate Policy\",\"inputRefIds\":[null],\"parameters\":[{\"name\":\"duplicatePolicyId\",\"value\":\"262931455017\"}]}]}"
+    },
+    {
+        "name":  "DDP-B-P18",
+        "id":  "262931483017",
+        "cost":  81.14,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P19",
+        "id":  "262931486017",
+        "cost":  87.26,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P20",
+        "id":  "",
+        "cost":  93.39,
+        "status":  "NG",
+        "err":  "{\"errors\":[{\"errorId\":20400,\"domain\":\"API_ACCOUNT\",\"category\":\"REQUEST\",\"message\":\"Invalid request.\",\"longMessage\":\"Duplicate Policy\",\"inputRefIds\":[null],\"parameters\":[{\"name\":\"duplicatePolicyId\",\"value\":\"262931457017\"}]}]}"
+    },
+    {
+        "name":  "DDP-B-P21",
+        "id":  "262931491017",
+        "cost":  108.7,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P22",
+        "id":  "262931493017",
+        "cost":  124.02,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P23",
+        "id":  "262931496017",
+        "cost":  139.33,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P24",
+        "id":  "262931499017",
+        "cost":  154.65,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P25",
+        "id":  "262931500017",
+        "cost":  169.96,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P26",
+        "id":  "",
+        "cost":  185.28,
+        "status":  "NG",
+        "err":  "{\"errors\":[{\"errorId\":20400,\"domain\":\"API_ACCOUNT\",\"category\":\"REQUEST\",\"message\":\"Invalid request.\",\"longMessage\":\"Duplicate Policy\",\"inputRefIds\":[null],\"parameters\":[{\"name\":\"duplicatePolicyId\",\"value\":\"262931466017\"}]}]}"
+    },
+    {
+        "name":  "DDP-B-P27",
+        "id":  "262931503017",
+        "cost":  215.91,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P28",
+        "id":  "262931508017",
+        "cost":  246.54,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P29",
+        "id":  "",
+        "cost":  277.17,
+        "status":  "NG",
+        "err":  "{\"errors\":[{\"errorId\":20400,\"domain\":\"API_ACCOUNT\",\"category\":\"REQUEST\",\"message\":\"Invalid request.\",\"longMessage\":\"Duplicate Policy\",\"inputRefIds\":[null],\"parameters\":[{\"name\":\"duplicatePolicyId\",\"value\":\"262931467017\"}]}]}"
+    },
+    {
+        "name":  "DDP-B-P30",
+        "id":  "262931511017",
+        "cost":  307.8,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-B-P31",
+        "id":  "262931512017",
+        "cost":  460.95,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P01",
+        "id":  "262931513017",
+        "cost":  3.7,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P02",
+        "id":  "262931514017",
+        "cost":  5.89,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P03",
+        "id":  "262931515017",
+        "cost":  8.09,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P04",
+        "id":  "262931516017",
+        "cost":  10.28,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P05",
+        "id":  "262931517017",
+        "cost":  12.48,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P06",
+        "id":  "262931519017",
+        "cost":  14.67,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P07",
+        "id":  "262931520017",
+        "cost":  16.87,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P08",
+        "id":  "262931521017",
+        "cost":  19.06,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P09",
+        "id":  "262931522017",
+        "cost":  21.26,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P10",
+        "id":  "262931523017",
+        "cost":  23.45,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P11",
+        "id":  "262931524017",
+        "cost":  27.84,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P12",
+        "id":  "262931525017",
+        "cost":  32.23,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P13",
+        "id":  "262931526017",
+        "cost":  36.62,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P14",
+        "id":  "262931527017",
+        "cost":  41.01,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P15",
+        "id":  "262931528017",
+        "cost":  45.4,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P16",
+        "id":  "262931529017",
+        "cost":  49.79,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P17",
+        "id":  "262931530017",
+        "cost":  54.18,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P18",
+        "id":  "262931532017",
+        "cost":  58.57,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P19",
+        "id":  "262931533017",
+        "cost":  62.96,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P20",
+        "id":  "262931534017",
+        "cost":  67.35,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P21",
+        "id":  "262931535017",
+        "cost":  78.33,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P22",
+        "id":  "262931536017",
+        "cost":  89.31,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P23",
+        "id":  "262931537017",
+        "cost":  100.28,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P24",
+        "id":  "262931539017",
+        "cost":  111.26,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P25",
+        "id":  "262931540017",
+        "cost":  122.23,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P26",
+        "id":  "262931541017",
+        "cost":  133.21,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P27",
+        "id":  "262931543017",
+        "cost":  155.16,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P28",
+        "id":  "262931544017",
+        "cost":  177.11,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P29",
+        "id":  "262931545017",
+        "cost":  199.06,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P30",
+        "id":  "262931546017",
+        "cost":  221.02,
+        "status":  "OK"
+    },
+    {
+        "name":  "DDP-C-P31",
+        "id":  "262931547017",
+        "cost":  330.77,
+        "status":  "OK"
+    }
+]

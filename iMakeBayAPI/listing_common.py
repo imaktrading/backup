@@ -199,6 +199,20 @@ def fetch_amazon_title(url: str) -> str:
 # ===================================================================
 # Title 整合性保証 (ConditionID ↔ Title)
 # ===================================================================
+def _truncate_at_word(s: str, n: int) -> str:
+    """n文字以内に **語境界** で切り詰める(語を途中で割らない)。純関数。
+
+    2026-06-21: title[:80] の文字切断が 'Japan New' を 'Ja New' に割る defect の是正。
+    n以内に収まる最後の空白で切る。空白が無ければやむなく文字切り(極端な長語のみ)。
+    """
+    s = (s or "").strip()
+    if len(s) <= n:
+        return s
+    cut = s[:n].rstrip()
+    sp = cut.rfind(" ")
+    return (cut[:sp].rstrip() if sp > 0 else cut)
+
+
 def enforce_title_coherence(title: str, is_new: bool = None, condition_id: int = None,
                              max_chars: int = 80) -> str:
     """旧シグネチャ(is_new)と新シグネチャ(condition_id)の両方に対応。
@@ -208,11 +222,11 @@ def enforce_title_coherence(title: str, is_new: bool = None, condition_id: int =
     if condition_id is None and is_new is not None:
         condition_id = 1000 if is_new else 3000
     if condition_id is None:
-        return title[:max_chars].strip()
+        return _truncate_at_word(title, max_chars)
 
     master = CONDITION_MASTER.get(condition_id)
     if not master:
-        return title[:max_chars].strip()
+        return _truncate_at_word(title, max_chars)
 
     # 反対側の marker を除去（新品なら Pre-owned系除去、中古なら Brand New系除去）
     if condition_id == 1000:
@@ -235,17 +249,19 @@ def enforce_title_coherence(title: str, is_new: bool = None, condition_id: int =
             has_marker = True
             break
     if has_marker:
-        return title[:max_chars].strip()
+        return _truncate_at_word(title, max_chars)
 
     # マーカーがない場合、最適なものを末尾付与
     current_len = len(title)
     best_marker = get_title_marker_for_condition(condition_id, max_chars - current_len)
     if best_marker:
-        return f"{title.strip()} {best_marker}"[:max_chars].strip()
+        # base を語境界で切り詰めてから marker 付与(marker は必ず残す。'Ja New' 切断を防ぐ)
+        base = _truncate_at_word(title.strip(), max_chars - len(best_marker) - 1)
+        return f"{base} {best_marker}".strip()
 
-    # スペース不足時の強制ねじ込み（最短 marker をねじ込み、タイトル末尾を削る）
+    # スペース不足時の強制ねじ込み（最短 marker をねじ込み、タイトル末尾を語境界で削る）
     shortest_marker = master["title_markers"][-1]
-    truncated_title = title[:(max_chars - len(shortest_marker) - 1)].strip()
+    truncated_title = _truncate_at_word(title, max_chars - len(shortest_marker) - 1)
     return f"{truncated_title} {shortest_marker}"
 
 
@@ -269,6 +285,9 @@ def pad_title_to_target(title: str, item_specifics: dict, category: str = None,
     pad_keys_priority = [
         'Item Weight', 'Gear Ratio', 'Maximum Drag',  # リール系
         'Color', 'Material', 'Size', 'Style',  # 全カテゴリ
+        'Water Resistance', 'Movement',  # 時計系 (G-SHOCK 等。検索語: water resistant / quartz)
+        'Theme', 'Franchise',  # フィギュア系 (一番くじ。検索語: anime & manga / 作品名)
+        'Type', 'Activity', 'Season',  # アパレル系 (Workman/montbell。検索語: jacket / outdoor 等)
         'Year Manufactured', 'Series',
     ]
     for key in pad_keys_priority:
@@ -296,13 +315,70 @@ def pad_title_to_target(title: str, item_specifics: dict, category: str = None,
 # ===================================================================
 # 統合: enforce + pad
 # ===================================================================
+# 重複しても自然なカード/商品用語(set名+品名で正当に再出現)。dedup しない。
+_TITLE_DEDUP_WHITELIST = {
+    'vmax', 'vstar', 'v', 'vunion', 'ex', 'gx', 'gex', 'x', 'break', 'go',
+    'tag', 'team', 'prime', 'star',
+}
+
+
+def dedup_title_words(title: str) -> str:
+    """タイトルの重複語の2回目以降を除去(2026-06-21)。純関数。
+
+    set名+言語/condition マーカーの重複('Japanese Japanese' / 'Japan Brand New Japan')是正。
+    whitelist のカード用語(VMAX/EX/V…)は set名+品名で正当に再出現するので残す。番号/記号は対象外。
+
+    ★2026-08-03: **連続した繰り返しは残す**。作品名そのものが同じ語を続けて含むケースを
+      壊していた (実害: 一番くじ 幽☆遊☆白書 の 'Yu Yu Hakusho' → 'Yu Hakusho' が2件。
+      検索キーワードそのものが消えるので露出が落ちる)。
+      この関数が本来直したいのは 'Japanese … Japanese' のような **離れた** 再出現であって、
+      隣り合う繰り返しではない。隣接は作品名の一部とみなして残す
+      (他例: 'Deux Deux' / 'Duran Duran' / 'Boutades Boutades' 等、固有名詞は珍しくない)。
+    """
+    seen, out = set(), []
+    prev_wl = None
+    for w in (title or "").split():
+        wl = w.lower()
+        is_word = wl.isalpha() and len(wl) > 1
+        if (is_word and wl not in _TITLE_DEDUP_WHITELIST and wl in seen
+                and wl != prev_wl):          # 隣接の繰り返し(= 作品名)は落とさない
+            prev_wl = wl
+            continue
+        out.append(w)
+        if is_word:
+            seen.add(wl)
+        prev_wl = wl
+    return ' '.join(out)
+
+
 def normalize_title(title: str, is_new: bool, item_specifics: dict, category: str = None,
                     target_min: int = 70, max_chars: int = 80) -> str:
-    """Title整合性保証 + 文字数パディングを一括実行（推奨API）。"""
+    """Title整合性保証 + 文字数パディング + 重複語除去を一括実行（推奨API）。"""
     title = enforce_title_coherence(title, is_new=is_new, max_chars=max_chars)
     title = pad_title_to_target(title, item_specifics, category=category,
                                  target_min=target_min, max_chars=max_chars)
+    title = dedup_title_words(title)
     return title
+
+
+def run_self_audit(csv_path):
+    """生成直後に CSV監査くん(csv_auditor)を自動実行し結果を表示する (報告のみ・非致命)。
+
+    監査を「待たず」生成時に品質確認する共通フック。全 listing 生成スクリプトの末尾から呼ぶ。
+    dry-run なので生成物は書き換えない。with_market=False で offline/高速 (eBay API を叩かない)。
+    """
+    import os as _os
+    import sys as _sys
+    try:
+        _tools = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                               "iMakHQ", "tools")
+        if _tools not in _sys.path:
+            _sys.path.insert(0, _tools)
+        import csv_auditor as _auditor
+        print("\n🔍 生成時セルフ監査 (CSV監査くん) ──────────")
+        _auditor.audit(csv_path, dry_run=True, with_market=False)
+    except Exception as _e:
+        print(f"⚠️ セルフ監査 失敗 (非致命): {type(_e).__name__}: {_e}")
 
 
 # ===================================================================
@@ -314,7 +390,8 @@ def normalize_title(title: str, is_new: bool, item_specifics: dict, category: st
 # ===================================================================
 PRICE_CHECK_CONFIG = {
     "reel":        {"enabled": True},
-    "tshirt":      {"enabled": True},
+    "tshirt":      {"enabled": False},  # 2026-06-21 価格NO-GO廃止(ユーザー指示「全て出品で」)。
+    #                                     cost-plus=損なし(無在庫)+ 高めは既存メンテ追跡。TCG本丸と同方針。
     "ichibankuji": {"enabled": False},  # 2026-05-10: collectibles 特性で median gate 無効化
     "tomica":      {"enabled": True},
     "gshock":      {"enabled": False},  # スクリプト未結線。price_status を渡す実装が入るまで False で統一
@@ -516,6 +593,150 @@ def gate_row_or_hold(row_data: dict, category: str = None,
 
 
 # ===================================================================
+# LOW スプシ 仕入値 抽出 (N列 > M列 > F列 優先順、2026-08-02 M列追加)
+# LOW スプシ には 3 つの仕入関連列があり:
+#   F (index 5)  = 商品価格      (= supplier listing 価格、取得時の値)
+#   M (index 12) = 現在価格      (= 監視くん更新の最新観測値・生きてる最安)
+#   N (index 13) = 仕入れ価格(円) (= SSOT (M or F)−K の ARRAYFORMULA 結果)
+# 優先順:
+#   1) N (SSOT) が数値で有れば N
+#   2) 空/#REF! なら M (最新観測値) — 2026-07-24 DON!! カード事故 (N#REF!→F の
+#      古い値 ¥23,000 拾い過大 pricing) の再発防止。SSOT 定義 N=(M or F)−K は M を
+#      F より優先するので、コード側も N空でも M を先に見る
+#   3) M も空なら F (取得時)
+# K (ポイント円) は reader 側で控除しない (N が生きている時は N=(M or F)−K で控除済。
+# 空フォールバック時に更に引くと二重控除で仕入¥過小 → 利益過大表示 → 赤字承諾方向 fail-safe と逆)
+# ===================================================================
+def pick_cost_jpy(row, f_idx: int = 5, n_idx: int = 13, m_idx: int = 12) -> str:
+    """LOW スプシ row から仕入値を抽出 (N列 > M列 > F列 優先順)。純関数。
+
+    Returns: 数値のみ抽出した string ("¥24,750" → "24750")。#REF!/非数値は自然に次候補へ。
+    全空なら "".
+    """
+    def _clean(s):
+        import re as _re
+        return _re.sub(r"[^0-9]", "", str(s or ""))
+    if n_idx is not None and len(row) > n_idx:
+        n_val = _clean(row[n_idx])
+        if n_val:
+            return n_val
+    if m_idx is not None and len(row) > m_idx:
+        m_val = _clean(row[m_idx])
+        if m_val:
+            return m_val
+    if f_idx is not None and len(row) > f_idx:
+        return _clean(row[f_idx])
+    return ""
+
+
+# ===================================================================
+# Free Shipping 移行 (2026-05-18)
+# 旧: item price + shipping cost (DDP profile 別行) → eBay 表示 = price + ship
+# 新: bundled price (item + DDP 加算) + Free Shipping profile → eBay 表示 = Free ship バッジ
+# eBay 公表 fee は (subtotal+ship+tax) 全てに乗るため買い手 total は実質変化なし、
+# Free Shipping バッジ表示で search 露出 + 転換率向上を狙う構造変更。
+# ===================================================================
+_DDP_TIERS_CACHE = None
+_FREE_SHIPPING_CFG_CACHE = None
+
+
+def _load_global_yaml() -> dict:
+    """global.yaml を 1 回ロードしてキャッシュ。"""
+    from pathlib import Path
+    import yaml
+    cfg_path = Path(__file__).resolve().parent / "config" / "global.yaml"
+    with cfg_path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def get_ddp_amount(base_price_usd: float) -> float:
+    """商品本体価格 ($) から DDP 加算額を返す (price tier 逆引き).
+    例: $45 → $20, $125 → $50, $700 → $210
+    """
+    global _DDP_TIERS_CACHE
+    if _DDP_TIERS_CACHE is None:
+        _DDP_TIERS_CACHE = _load_global_yaml().get("ddp_shipping_tiers", [])
+    for tier in _DDP_TIERS_CACHE:
+        if base_price_usd <= tier.get("max_usd", 0):
+            return float(tier.get("ddp_usd", 0))
+    # 範囲外 (>$1000) は最大 tier の ddp_usd を採用
+    return float(_DDP_TIERS_CACHE[-1].get("ddp_usd", 260)) if _DDP_TIERS_CACHE else 260.0
+
+
+def compute_free_shipping_price(base_price_usd: float) -> tuple:
+    """商品本体価格から Free Shipping 用 統合価格を計算.
+    Returns: (new_price_usd, ddp_amount_usd)
+    例: $45.00 → ($65.98, 20.0)  [= INT(45+20)+0.98, DDP $20]
+    """
+    ddp = get_ddp_amount(base_price_usd)
+    new_price = int(base_price_usd + ddp) + 0.98
+    return (new_price, ddp)
+
+
+def get_free_shipping_profile_name() -> str:
+    """global.yaml から Free Shipping policy 名を取得."""
+    global _FREE_SHIPPING_CFG_CACHE
+    if _FREE_SHIPPING_CFG_CACHE is None:
+        _FREE_SHIPPING_CFG_CACHE = _load_global_yaml()
+    return _FREE_SHIPPING_CFG_CACHE.get("free_shipping_profile", "Free")
+
+
+def is_free_shipping_mode() -> bool:
+    """Free Shipping mode が有効か (true = 新規 listing は Free Shipping)."""
+    global _FREE_SHIPPING_CFG_CACHE
+    if _FREE_SHIPPING_CFG_CACHE is None:
+        _FREE_SHIPPING_CFG_CACHE = _load_global_yaml()
+    return bool(_FREE_SHIPPING_CFG_CACHE.get("free_shipping_mode", True))
+
+
+def get_shipping_policy_name(price_usd: float, category: str) -> str:
+    """V6 / V5 / Free モード別に Shipping Profile 名を返す (listing scripts 共通).
+
+    優先順:
+      1. v6_pricing.enabled=true → "DDP-{group}-P{NN}" (= eBay Policy 名、B→A remap 適用)
+      2. free_shipping_mode=true → "Free" (= free_shipping_profile)
+      3. それ以外 → 旧 V5 価格帯 tier ("40-60" / "100-200" 等)
+
+    Args:
+      price_usd: listing 価格 (USD, INT+0.98 後)
+      category: v5_GS 設定 HTS_RATE のカテゴリ名 (例: "TCG(PSA10)", "Tシャツ(UT)")
+
+    Returns:
+      Shipping Profile 名 (eBay Business Policies に登録済の値)
+    """
+    import os, sys
+    _here = os.path.dirname(os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    import config_loader
+    # V6 mode
+    if config_loader.is_v6_pricing_enabled():
+        v6 = config_loader.get_v6_pricing()
+        group = v6.get("category_to_group", {}).get(category, "A")
+        uppers = v6.get("price_tier_uppers", [])
+        tier_name = "P31"
+        for i, upper in enumerate(uppers, 1):
+            if price_usd <= upper:
+                tier_name = f"P{i:02d}"
+                break
+        raw = v6.get("policy_name_format", "DDP-{group}-{tier}").format(group=group, tier=tier_name)
+        return v6.get("policy_remap", {}).get(raw, raw)
+    # Free Shipping mode (= V5 既存運用)
+    if is_free_shipping_mode():
+        return get_free_shipping_profile_name()
+    # 旧 V5 paid shipping tier (= fallback)
+    OLD_TIERS = [
+        (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+        (300, "200-300"), (400, "300-400"), (500, "400-500"),
+        (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+    ]
+    for threshold, name in OLD_TIERS:
+        if price_usd <= threshold:
+            return name
+    return "800-1000"
+
+
+# ===================================================================
 # Smoke tests (適用後の deterministic 動作確認)
 # ===================================================================
 if __name__ == "__main__":
@@ -595,5 +816,27 @@ if __name__ == "__main__":
     }
     allowed_bad, _ = gate_row_or_hold(row_fail, category="reel", mercari_state="新品", sku="TEST_FAIL")
     assert not allowed_bad, "Brand欠落の異常行が gate を通過した"
+
+    # 8. pick_cost_jpy (N列 優先 / F列 fallback)
+    # row: A=URL B=itemID C=title D=売切 E=状態 F=商品価格 G=写真URL H=説明 I=Title J=Desc K=未使用 L=ConditionID M=価格上昇 N=仕入れ価格
+    row_with_n = ["url","iid","title","","新品","￥24,750","","","","","","1000","","19,601"]
+    assert pick_cost_jpy(row_with_n) == "19601", pick_cost_jpy(row_with_n)
+    row_n_blank = ["url","iid","title","","新品","￥24,750","","","","","","1000","",""]
+    assert pick_cost_jpy(row_n_blank) == "24750", pick_cost_jpy(row_n_blank)
+    row_both_blank = ["url","iid","title","","新品","","","","","","","1000","",""]
+    assert pick_cost_jpy(row_both_blank) == ""
+    print(f"  [OK] pick_cost_jpy: N優先(19601) / F fallback(24750) / 両空(\"\") 全動作")
+
+    # 9. Free Shipping 関数 (2026-05-18 追加)
+    p1, d1 = compute_free_shipping_price(45.0)
+    assert p1 == 65.98 and d1 == 20.0, f"$45→$65.98 expected, got ({p1}, {d1})"
+    p2, d2 = compute_free_shipping_price(125.0)
+    assert p2 == 175.98 and d2 == 50.0, f"$125→$175.98 expected, got ({p2}, {d2})"
+    p3, d3 = compute_free_shipping_price(350.0)
+    assert p3 == 455.98 and d3 == 105.0, f"$350→$455.98 expected, got ({p3}, {d3})"
+    p4, d4 = compute_free_shipping_price(38.5)
+    assert p4 == 53.98 and d4 == 15.0, f"$38.5→$53.98 expected, got ({p4}, {d4})"
+    assert get_free_shipping_profile_name() == "Free"
+    assert is_free_shipping_mode() is True
 
     print("✅ All smoke tests passed. System is now deterministic.")

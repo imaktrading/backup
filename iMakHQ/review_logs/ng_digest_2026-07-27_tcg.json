@@ -1,0 +1,44 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452556 SUPER DRAGON BALL HEROES ULTRA GOD MISSION 1 [SON GOKU/VEGETA SECRET] #SEC2 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452557 SUPER DRAGON BALL HEROES BIG BANG MISSION 12 [SON GOKU HEROES BM12-SECRET] #SEC (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452563 SUPER DRAGON BALL HEROES ULTRA GOD MISSION 5 [SON GOKU HEROES UGM5] #017 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert153420191 ONE PIECE JAPANESE LET'S START CAMPAIGN PROMOTION PACK [PERONA LET'S START CP PR PCK-ALT ART] #077 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 4
+  }
+}

@@ -4,6 +4,7 @@
 
 追加方法: SCRIPTS リストに項目を1つ追加するだけ。
 """
+import csv
 import os
 import re
 import sys
@@ -68,10 +69,120 @@ CONSOLIDATED_SHEETS = {
     "hight": ("19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk", 851100680),  # 統合Hight
     "low":   ("1jF9vggbfUCddjneROMO2GGN-jTAPRbq6Qe2cbgr37B0", 851100680),  # 統合Low
 }
+# ★公式在庫要チェック シート1 (UT/Montbell/GU 等の公式在庫listing。統合と別管理→現在数に合算)
+#   構造: col1=title, col2=item ID, col5=仕入元URL。カテゴリは URL ドメインで判定。
+OFFICIAL_STOCK_SHEET_ID = "101KL6KxMugKqZeSp2W5L2ykTvT0Zwd3RzlfsHgiJsg0"
 # SHEET_CATEGORY_MAP は廃止（自動取得に変更）
 GSHEET_CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
 
+
+def _official_stock_category(url):
+    """公式在庫シートの仕入元URLから dashboard カテゴリを推定。"""
+    u = (url or "").lower()
+    if "montbell" in u:
+        return "アウトドア・ジャケット"
+    if "uniqlo" in u or "gu-global" in u or "gu.com" in u:
+        return "Tシャツ"
+    return "その他"
+
 # ============================================================================
+def summarize_audit_log(log: str) -> str:
+    """CSV監査くんの stdout から要点を抽出して短いサマリー文字列を返す (純関数・test可)。
+
+    出品くんが監査完走時にポップアップ表示する用 (対話セッションは外部から起こせないため、
+    結果報告を GUI 側で能動的に行う。2026-06-29)。抽出できなければ空文字。
+    """
+    if not log:
+        return ""
+    import re as _re
+    lines = []
+
+    def _find(pat):
+        m = _re.search(pat, log)
+        return m.group(1) if m else None
+
+    up = _find(r"CSV UPシグナル[^\n]*?(\d+)\s*件\s*入稿OK")
+    if up is not None:
+        lines.append(f"🟢 入稿OK: {up}件 → UPして")
+    excl = _find(r"除外\(出品しない\):\s*(\d+)\s*件")
+    if excl and excl != "0":
+        lines.append(f"❌ 出品除外: {excl}件 (CSVから物理除外済)")
+    # 重複除外は「捨てた」のでなく「弾いた2枚目の仕入元を primary の補URLに移した」= 供給を厚くした
+    # (hoju_url_from_dupes)。除外件数だけ報告すると機会損失に見えるので、補URL 追加とセットで出す。
+    dup = _find(r"removed \(真の重複[^\n]*?\):\s*(\d+)")
+    hoju_n = _re.search(r"追加対象primary\s*\d+\s*行\s*/\s*追加URL\s*(\d+)", log)
+    if dup and dup != "0":
+        if hoju_n and hoju_n.group(1) != "0":
+            lines.append(f"♻ 重複除外 {dup}件 → 補URL {hoju_n.group(1)}本 追加 (供給を厚くした)")
+        else:
+            lines.append(f"♻ 重複除外 {dup}件 (補URL 追加なし=既存収載 or 満杯)")
+    nogo = _find(r"❌NO-GO\s*(\d+)")
+    if nogo and nogo != "0":
+        lines.append(f"🚫 市場NO-GO: {nogo}件 (入稿前に要確認)")
+    cat = _find(r"カタログ修正依頼:\s*(\d+)\s*件")
+    if cat and cat != "0":
+        lines.append(f"📨 catalog依頼: {cat}件 (自動投入済)")
+    prog = _find(r"プログラム修正依頼:\s*(\d+)\s*件")
+    if prog and prog != "0":
+        lines.append(f"🛠 program修正NG: {prog}件")
+    backlog = _find(r"未対応 program修正 backlog\s*(\d+)\s*件")
+    if backlog and backlog != "0":
+        lines.append(f"🛠 program backlog: {backlog}件 (実装=HQ・要対応)")
+    recur = _find(r"再発finding[^\n]*?(\d+)\s*件")
+    if recur and recur != "0":
+        lines.append(f"🔁 再発: {recur}件 (catalog scope外中心・既知)")
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
+# catalog DB (drop原因分類の照会先・read-only)
+CATALOG_DB_PATH = r"C:/dev/iMak_data/catalog/products.sqlite"
+
+
+def build_problem_report(log: str, catalog_db_path: str = CATALOG_DB_PATH) -> str:
+    """生成+監査ログ → 統合「問題提起」テキスト (純関数寄り・catalog照会のみI/O)。
+
+    ユーザー方針(2026-06-30): 毎回の生成+監査後に、**CSV化分・非化分の両方**について
+    「原因→対策案」を自動で問題提起する(判断は人)。これが目的=PDCAのCheck→Act提起。
+      - CSV化分の問題: 監査findings(入稿可否/catalog依頼/program backlog/再発) = summarize_audit_log
+      - CSV非化分:     drop_classifier で原因分類(収録漏れ/scope外/promo衝突/目視未確定)+対策案
+    """
+    parts = []
+    audit = summarize_audit_log(log)
+    if audit:
+        parts.append("【CSV化分の問題(監査)】\n" + audit)
+    try:
+        import sys as _sys
+        _here = os.path.dirname(os.path.abspath(__file__))
+        _tools = os.path.join(_here, "tools")
+        for _p in (_here, _tools):
+            if _p not in _sys.path:
+                _sys.path.insert(0, _p)
+        import drop_classifier as _dc
+        se, ce = _dc.make_catalog_lookups(catalog_db_path)
+        # 生成 CSV 本文を渡すと drop 集合を「処理cert − CSV cert」の差分で確定できる
+        # (2026-08-01: 分類ルールの足し忘れで毎回 ⚠️件数不一致 が出ていたのの根本対策)。
+        _csv_text = None
+        try:
+            _csv_p = _dc.csv_path_from_log(log)
+            if _csv_p and os.path.isfile(_csv_p):
+                with open(_csv_p, "r", encoding="utf-8", errors="replace") as _f:
+                    _csv_text = _f.read()
+        except Exception:
+            _csv_text = None   # 読めなければ従来のパターン方式にフォールバック
+        _drops = _dc.classify_drops(log, set_exists=se, card_exists=ce, csv_text=_csv_text)
+        rep = _dc.render_problem_report(_drops)
+        if rep:
+            parts.append(rep)
+        recon = _dc.reconcile_counts(log, _drops, csv_text=_csv_text)   # 件数照合(silent drop検出)
+        if recon:
+            parts.append(recon)
+    except Exception as _e:
+        parts.append(f"⚠ drop原因分類 失敗(非致命): {type(_e).__name__}: {_e}")
+    return "\n\n".join(parts)
+
+
 # csv_postprocess_excluder helper (check_csv NO-GO 行を CSV から物理除外)
 # 2026-04-28 追加: dual_gate_disagreement.md CRITICAL 問題の応急対処.
 # psa_to_csv ↔ check_csv の市場ゲート判定矛盾で、check_csv が「除外済」表示しても
@@ -103,8 +214,9 @@ def _run_excluder_for_latest_csv(append_log_func, captured_stdout: str):
             sys.path.insert(0, excluder_dir)
         from excluder import exclude_from_check_csv_stdout, render_report
         result = exclude_from_check_csv_stdout(latest_csv, captured_stdout)
-        if result["removed"] > 0:
-            append_log_func("\n" + "=" * 70 + "\n▶ csv_postprocess_excluder (NO-GO 行物理除外)\n" + "=" * 70 + "\n")
+        # 2026-06-20 価格NO-GO廃止: 高め(旧NO-GO)は除外せず出品 + 既存メンテ追跡。記録のみ。
+        if result.get("high_count", 0) > 0:
+            append_log_func("\n" + "=" * 70 + "\n▶ 価格高め記録 (除外せず出品・既存メンテ追跡)\n" + "=" * 70 + "\n")
             append_log_func(render_report(result) + "\n")
     except Exception as e:
         append_log_func(f"\n⚠️ excluder 実行失敗: {type(e).__name__}: {e}\n")
@@ -163,6 +275,308 @@ def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
         # 失敗しても listing 出力には影響なし
 
 
+# ============================================================================
+# 重複くん dedupe_excluder helper (2026-05-27 追加)
+# 入稿前 CSV に対して (KEY1, KEY2) tuple 突合 + 真の重複行を物理除外.
+# - 既存 HIGH/LOW/公式 スプシの AI/AJ 列 (KEY1/KEY2) と突合
+# - variant 違い (= 通常版 vs Alt Art) は別商品扱いで残存 = false positive ゼロ
+# - 出品くん本体 (= psa_to_csv 等) 触らず、 chain 末尾 hook 追加で完結
+# ロールバック: この関数 + poll_queue 内呼出 1 行 をコメントアウトで完全復元.
+# ============================================================================
+DEDUPE_WORKTREE = r"C:\dev\iMak_dedupe\iMakDedupe"
+
+
+# ============================================================================
+# live重複除外 cert への KEY 書込 (浪費ループ対策・2026-07-18)
+# ----------------------------------------------------------------------------
+# 症状: 同一カードが既に live 出品済(例 Bloodmoon Ursaluna SV5a-091)だと、その2枚目の
+#   cert 行はスプシで KEY 空のまま抽出される → 生成 → Step 4a(check-csv)が「live重複」として
+#   物理除外 → KEY書込(4b)は deduped CSV を見るので cert に KEY が付かない → 次回also抽出。
+#   結果、1回10件の franchise 枠を毎回1つ浪費(2026-07-16/17 で Bloodmoon が連続空振り)。
+# 対策: 4a が消した cert にも KEY を書く。除外理由=live重複=出品済の兄弟がいる → KEY を書いても
+#   orphan掃除(psa_orphan_key_clean: listed兄弟が無い時のみ消す)に消されない=安全。
+# 重要な境界: intra-CSV間引き(4a-2)で消える分は兄弟が未出品なので KEY を書くと orphan 化する。
+#   ∴ 対象は **4a(check-csv)が消した分のみ**。4a-2 の前に diff を取って切り分ける。
+# ============================================================================
+def _row_label(header, row):
+    """CSV 行の一意ラベル(CustomLabel=PSA cert-sku)。純関数。"""
+    try:
+        i = header.index("CustomLabel")
+    except ValueError:
+        i = 0
+    return row[i].strip() if i < len(row) else ""
+
+
+def _read_csv_rows(path):
+    """CSV を (data_rows, header) に読む。純関数(I/Oのみ)。"""
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    return (rows[1:], rows[0]) if rows else ([], [])
+
+
+def _livedup_removed_rows(pre_rows, pre_header, post_rows, post_header):
+    """4a(live重複除外)で消えた行を返す(純関数・CustomLabel で突合・test可)。"""
+    post_labels = {_row_label(post_header, r) for r in post_rows}
+    return [r for r in pre_rows if _row_label(pre_header, r) not in post_labels]
+
+
+def _write_keys_for_livedup_removed(append_log_func, latest_csv, pre_rows, pre_header, env):
+    """4a が live重複として消した cert に KEY を書く(浪費ループ対策)。write-only・失敗許容。"""
+    if not pre_rows:
+        return
+    try:
+        post_rows, post_header = _read_csv_rows(latest_csv)
+    except Exception as e:
+        append_log_func(f"\n(live重複KEY書込: 事後読込失敗 skip: {type(e).__name__})\n")
+        return
+    removed = _livedup_removed_rows(pre_rows, pre_header, post_rows, post_header)
+    if not removed:
+        return
+    append_log_func("\n======================================================================\n")
+    append_log_func(f"▶ live重複除外 cert に KEY 書込 (浪費ループ対策・{len(removed)}件)\n")
+    append_log_func("======================================================================\n")
+    tmp = latest_csv + ".livedup_removed.csv"
+    try:
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+            w.writerow(pre_header)
+            w.writerows(removed)
+        r = subprocess.run(
+            [sys.executable, "-m", "dedupe.checker", "--write-keys-from-csv", tmp],
+            cwd=DEDUPE_WORKTREE, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180, env=env)
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ live重複KEY書込 returncode={r.returncode}(続行)\n")
+    except Exception as e:
+        append_log_func(f"\n⚠️ live重複KEY書込 失敗(続行): {type(e).__name__}: {e}\n")
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
+    """csv_output/ の最新 CSV に対して 重複くん --check-csv を実行 (= 物理除外)."""
+    csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
+    try:
+        csv_files = [
+            f for f in os.listdir(csv_dir)
+            if f.endswith(".csv") and not (".bak" in f) and not f.endswith("_cost.json")
+        ]
+        if not csv_files:
+            return
+        csv_files_with_mtime = [
+            (f, os.path.getmtime(os.path.join(csv_dir, f))) for f in csv_files
+        ]
+        csv_files_with_mtime.sort(key=lambda x: x[1], reverse=True)
+        latest_csv = os.path.join(csv_dir, csv_files_with_mtime[0][0])
+        if since_ts is not None and csv_files_with_mtime[0][1] < since_ts:
+            return  # listing script 起動前の古い CSV は skip
+    except Exception as e:
+        append_log_func(f"\n⚠️ dedupe hook CSV 探索失敗: {type(e).__name__}: {e}\n")
+        return
+
+    # Mercari 系(porter/montbell/tshirt/reel)は1点もの = catalog canonical KEY を持たない。
+    # KEY-based dedupe では全件「解決不能」となり destructive に全除外される
+    # (2026-06-16 Porter 10件全消し事故)。catalog-keyed (tcg/gshock/ichibankuji) のみ dedupe 実行。
+    # 「判定不能は破壊的動作に倒さない」(failclosed_must_skip) に従い Mercari 系は skip。
+    _base = os.path.basename(latest_csv).lower()
+    if any(_base.startswith(p) for p in ("porter_", "montbell_", "tshirt_", "reel_", "mercari")):
+        append_log_func(
+            f"\n(重複くん: {os.path.basename(latest_csv)} は1点もの(catalog KEY無)"
+            f" → KEY-based dedupe skip)\n"
+        )
+        return
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    # 浪費ループ対策(2026-07-18): Step 4a が消す前に CSV 全行を控える(4a diff 用)。
+    try:
+        _pre_rows, _pre_header = _read_csv_rows(latest_csv)
+    except Exception as _e_pre:
+        _pre_rows, _pre_header = [], []
+        append_log_func(f"\n(live重複KEY書込: 事前読込失敗 skip: {type(_e_pre).__name__})\n")
+
+    # Step 4a: 物理除外 (= Phase 1g、 真の重複 row を CSV から削除)
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 重複くん dedupe_excluder ((KEY1, KEY2) tuple 物理除外)\n")
+    append_log_func("======================================================================\n")
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "dedupe.checker", "--check-csv", latest_csv],
+            cwd=DEDUPE_WORKTREE,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=180, env=env,
+        )
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ dedupe excluder returncode={r.returncode}\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ dedupe hook (check-csv) 失敗: {type(e).__name__}: {e}\n")
+
+    # Step 4a-diff: 4a(live重複)で消えた cert に KEY を書く(浪費ループ対策)。
+    # 必ず 4a-2(intra間引き)の**前**に実行 = 4a が消した分だけを対象化(4a-2 分は兄弟未出品で対象外)。
+    _write_keys_for_livedup_removed(append_log_func, latest_csv, _pre_rows, _pre_header, env)
+
+    # Step 4a-2: CSV内 同design重複の間引き (2026-06-21)。重複くんは「既出品」としか照合せず
+    # 同一CSV内の同design複数コピー(別cert)を間引かない → 同じカードが複数枚出る。ここで
+    # (Game,Set,番号)が同一の行を1枚に絞る。KEY書込(4b)の前なので間引いた分は orphan にならない。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ CSV内 同design重複の間引き (同じカードは1枚のみ出品)\n")
+    append_log_func("======================================================================\n")
+    try:
+        idd = os.path.join(WORKSPACE, "iMakHQ", "tools", "tcg_intra_csv_dedup.py")
+        r = subprocess.run([sys.executable, idd, latest_csv, "--execute"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60, env=env)
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ 同design間引き returncode={r.returncode}(続行)\n")
+    except Exception as e:
+        append_log_func(f"\n⚠️ 同design間引き 失敗(続行): {type(e).__name__}: {e}\n")
+
+    # Step 4b: 入稿前 KEY 事前書込 (= Phase 1h、 HIGH I 列 cert 経由で AI/AJ 列補完)
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 重複くん write-keys-from-csv (HIGH I 列 cert 経由で KEY 事前書込)\n")
+    append_log_func("======================================================================\n")
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "dedupe.checker", "--write-keys-from-csv", latest_csv],
+            cwd=DEDUPE_WORKTREE,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=180, env=env,
+        )
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ dedupe write-keys returncode={r.returncode}\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ dedupe hook (write-keys) 失敗: {type(e).__name__}: {e}\n")
+        # 失敗しても listing 出力には影響なし
+
+    # Step 4b-2: KEY 補完の取りこぼし救済 + 入稿前 重複ガード (2026-07-26)
+    # - write-keys が skipped_no_resolution にする種別(DON!! カード等)は KEY が空のまま出品され、
+    #   重複くんの母集団から外れて **同一カード2枠 live** を生む(ガンダム RP-028 実例)。
+    #   → タイトルの #ID が catalog に完全一致する時だけ KEY を書く(ID-strict・推測なし)。
+    # - その上で「同じカードが既に live」を検出して警告する。**出品は止めない**
+    #   (仕入元が別なら健全。致命は「同じ仕入元URLを2出品が指す」方で、それは audit が見る)。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ dup_guard (KEY補完の取りこぼし救済 + 入稿前 同一カード検出)\n")
+    append_log_func("======================================================================\n")
+    # --audit --no-refresh = シートだけで完結(eBay API を叩かないので即時)。致命側である
+    # 「同じ仕入元URLを2出品が指す」を **毎サイクル** 0件であることの証跡にする。
+    for _mode in (["--fill-keys", latest_csv], ["--pre-upload", latest_csv],
+                  ["--audit", "--no-refresh"]):
+        try:
+            _dgp = os.path.join(WORKSPACE, "iMakHQ", "tools", "dup_guard.py")
+            r = subprocess.run([sys.executable, _dgp] + _mode,
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=180, env=env)
+            if r.stdout:
+                append_log_func(r.stdout)
+            if r.returncode != 0:
+                append_log_func(f"\n⚠️ dup_guard {_mode[0]} returncode={r.returncode}(続行)\n")
+                if r.stderr:
+                    append_log_func(r.stderr)
+        except Exception as e:
+            append_log_func(f"\n⚠️ dup_guard {_mode[0]} 失敗(続行): {type(e).__name__}: {e}\n")
+
+    # Step 4c: 補URL 自動追記 (2026-07-13)。write-keys で HIGHT に KEー書込済の直後に実行。
+    # 重複くんが弾いた「同KEー既出品の2枚目」の A列URL(実在の別個体=vetted supply)を、同KEー
+    # 出品中primary の 補URL(AC-AG)に **既存保持+冪等** で追加(= primary が売れたら再ソースする
+    # backup 供給源)。read-merge-write なので既存(SNKRDUNK/Mercari由来)は消さない。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 補URL 自動追記 (弾いた2枚目URL → 出品中primaryの補URL・既存保持+冪等)\n")
+    append_log_func("======================================================================\n")
+    try:
+        hoju = os.path.join(WORKSPACE, "iMakHQ", "tools", "hoju_url_from_dupes.py")
+        r = subprocess.run(
+            [sys.executable, hoju, "--write"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, env=env,
+        )
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ 補URL 追記 returncode={r.returncode}(続行)\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ 補URL 追記 失敗(続行): {type(e).__name__}: {e}\n")
+        # 失敗しても listing 出力には影響なし
+
+def _runs_new_listing_dedupe(script_entry):
+    """新規出品用の重複くん(KEY tuple excluder)を走らせてよいエントリかを返す(純関数)。
+
+    RESTOCK Revise(restock_revise)は **既存出品の Action=Revise 修正**(itemID指定で qty 0→1)で、
+    新しい出品を1件も作らない=重複は原理的に起き得ない。にもかかわらず新規出品用の重複くんを通すと、
+    RESTOCK 対象カードの **自分の既存出品 KEY**(商品管理シート AI列)と自己マッチして RESTOCK 行を
+    「真の重複」と誤判定し物理除外する(2026-06-22: OP02-036/S8b-187/ST29-016 の3件が自己重複で誤除外、
+    qty=0 の OP02-036 が再出品されない事故)。canonical 母集団は RESTOCK 対象自身を含むため、母集団から
+    自 itemID を除く改修は dedupe worktree 側になる。HQ 側の正しい境界は「RESTOCK は新規用 dedupe を
+    そもそも通さない」。skip_postprocess(監査/relist)も従来どおり走らせない。
+    """
+    if script_entry.get("skip_postprocess"):
+        return False
+    if script_entry.get("restock_revise"):
+        return False
+    return True
+
+
+# ============================================================================
+# RESTOCK Add→Revise 変換 helper (2026-06-20 追加)
+# post-chain (excluder/title-fix/dedup) の **後** に最終クリーン Add CSV を Revise 化。
+# 旧: psa_restock_build が dedup の **前** に変換し、赤字(NO-GO)/重複/旧タイトルが Revise に
+#     混入していた (2026-06-19 194513 で 11行=赤字3+重複 になった)。順序を保証する。
+# ============================================================================
+def _run_restock_revise_for_latest_csv(append_log_func, since_ts=None):
+    try:
+        csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
+        if not os.path.isdir(csv_dir):
+            return
+        cands = [f for f in os.listdir(csv_dir)
+                 if f.startswith("tcg_upload_") and f.endswith(".csv") and ".bak" not in f]
+        if not cands:
+            return
+        cm = sorted([(f, os.path.getmtime(os.path.join(csv_dir, f))) for f in cands],
+                    key=lambda x: x[1], reverse=True)
+        latest_csv = os.path.join(csv_dir, cm[0][0])
+        if since_ts is not None and cm[0][1] < since_ts:
+            append_log_func("\n(♻ RESTOCK Revise: 今回 listing で新規 CSV 出力なし → skip)\n")
+            return
+    except Exception as e:
+        append_log_func(f"\n⚠️ RESTOCK Revise CSV 探索失敗: {type(e).__name__}: {e}\n")
+        return
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ ♻ RESTOCK Add→Revise 変換 (post-chain後=最終クリーンCSV)\n")
+    append_log_func("======================================================================\n")
+    try:
+        _tools = os.path.join(WORKSPACE, "iMakHQ", "tools")
+        if _tools not in sys.path:
+            sys.path.insert(0, _tools)
+        import psa_restock_revise_csv as rv
+        desk = os.path.join(os.path.expanduser("~"), "OneDrive", "デスクトップ")
+        out_csv = os.path.join(desk, "RESTOCK_revise_"
+                               + os.path.basename(latest_csv).replace("tcg_upload_", ""))
+        n, sk = rv.convert_file(latest_csv, out_csv)
+        append_log_func(f"✅ Revise CSV生成: {out_csv} ({n}行 / 変換skip {len(sk)})\n")
+        for s in sk[:10]:
+            append_log_func(f"  ⏭ {s}\n")
+        append_log_func("→ check後、FileExchange に手動アップロード → 反映後に writeback(qty verify)\n")
+    except Exception as e:
+        append_log_func(f"\n⚠️ RESTOCK Revise 変換失敗: {type(e).__name__}: {e}\n")
+
+
 # ============ スクリプト登録 ============
 # 5/12: カテゴリ別に「新規 / 再出品」2ボタン構成 (パネル UI で Labelframe グループ化)
 # - category: グループ枠名 (None = utility 単独ボタン)
@@ -204,6 +618,13 @@ SCRIPTS = [
         "double_check": True,  # 2026-04-26 入稿前の人手ダブルチェック必須
         "cwd": f"{WORKSPACE}/iMakTCG",
         "cmd": ["python", "psa_to_csv.py"],
+        # 新コア ON = 本番が catalog 決定論コア (tcg_listing_fields/override) を使用。
+        # 2026-06-15 ユーザー明示 go で flip。根拠: Gemini 条件付きGO + parity REGRESSION 0 +
+        #   旧コアが毎回再発させる defect (Character/Card Name 汚染・rarity 推測'Common'・
+        #   Card Size 'Japanese') を構造的に解消。OFF 復帰は下行 "env" の削除のみ (psa_to_csv 無改変)。
+        # PSA_VERIFY_BEFORE_BUILD=1: 先に HTML 目視確認 → 確定したカードだけ CSV 生成
+        # (2026-06-15 ユーザー指示「目視確認してからCSV作成にして」)。OFF 復帰= この key 削除のみ。
+        "env": {"TCG_USE_NEW_GEN": "1", "PSA_VERIFY_BEFORE_BUILD": "1"},
         "params": [],
     },
     {
@@ -242,6 +663,18 @@ SCRIPTS = [
     # ===== Utility 単独ボタン (カテゴリなし) =====
     {
         "category": None, "type": "utility",
+        "label": "🔍 CSV監査くん",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "csv_auditor.py"],  # 引数なし=最新CSV自動。4軸監査+機械修正+依頼
+        "params": [],
+        # 監査=読取専用。後処理チェーン(excluder/dedupe/write-keys)を再実行させない。
+        # 再実行すると 直前 cycle で write-keys が書いた canonical KEY を dedupe が「既存」と
+        # 誤認し、未出品(itemID空)の自カードを自己重複として CSV から削除する (2026-06-10 発覚:
+        # 3件→1件に誤減。psa_to_csv の post-chain で既に1回処理済=2度目は不要)。
+        "skip_postprocess": True,
+    },
+    {
+        "category": None, "type": "utility",
         "label": "G-SHOCK 未出品モデル発見",
         "cwd": f"{WORKSPACE}/iMakG-shock/casio_finder",
         "cmd": ["python", "casio_finder.py"],
@@ -266,39 +699,228 @@ SCRIPTS = [
     },
     {
         "category": None, "type": "utility",
-        "label": "モンベル 取下げCSV生成",
-        "cwd": f"{WORKSPACE}/iMakMercari",
-        "cmd": ["python", "montbell_end_items.py"],
-        "params": [],
-    },
-    {
-        "category": None, "type": "utility",
         "label": "Mercari スカウト",
         "cwd": f"{WORKSPACE}/iMakMercari",
         "cmd": ["python", "mercari_scout.py"],
         "params": [],
     },
+    # 2026-06-04: 月次レポート生成 / 今、見る はパネルから削除 (ファネル分析が上位互換。.py は残置)
+    # 取下再出品 ①②③ を上段、✏️タイトル改修/💲値下げ余地 を下段に並べる (3列グリッド=d1)。
+    # 表示順は _ugroup "relist" 群の SCRIPTS 出現順なので ①②③→タイトル改修→値下げ余地 の順で置く。
     {
         "category": None, "type": "utility",
-        "label": "📊 月次レポート生成",
-        "cwd": f"{WORKSPACE}/iMakHQ",
-        "cmd": ["python", "monthly_report.py"],
-        "params": [],
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "📊 今、見る (Seller Hub 分析)",
-        "cwd": f"{WORKSPACE}/iMakHQ",
-        "cmd": ["python", "seller_hub_view.py", "--analyze"],
-        "custom_buttons": "seller_hub_view",
-    },
-    {
-        "category": None, "type": "utility",
-        "label": "取下再出品",
+        "label": "取下再出品① 取下げ(End)",
         "label_fg": "red",  # ボタンラベル赤文字 (取下→再出品のフロー起点を強調)
-        "cwd": f"{WORKSPACE}/iMakHQ",
-        "cmd": ["python", "dump_us_qty1_sku.py"],
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # ファネルRELIST候補→End CSV+保留リスト (再出品済は自動除外/初回・2回目END振分)。候補確認はスプシ「取下再出品」タブ
+        "cmd": ["python", "relist_from_funnel.py"],
         "params": [],
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "取下再出品② Add生成(即live)",
+        "label_fg": "red",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "relist_add_from_pending.py"],  # 保留リスト→カテゴリ振り分け→各--relist→Add CSV+skumap
+        "params": [],
+        # relist は同型番を意図的に再出品 → excluder/重複くん が「重複」誤判定で削除するのを防ぐ
+        "skip_postprocess": True,
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "取下再出品③ 書戻し(B列)",
+        "label_fg": "red",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # デスクトップの最新Add結果レポート自動検出→スプシB列に新ItemID上書き+ダッシュボード更新
+        "cmd": ["python", "relist_writeback.py", "--auto", "--execute"],
+        "params": [],
+    },
+    {
+        # NO_CONVERT 価格見直し (2026-07-01 price_resistance から差替。タイトル改修と順序入替=価格見直しを先に)。
+        # 利益率(V8・ライブUSD)算出 → 値下げ余地シート + B列pp(既定5/手動可) + AL列flag書込。
+        # リバイス君が週1で AL列を読み apply_pricedown_override を適用。旧 price_resistance は役割終了。
+        "category": None, "type": "utility",
+        "label": "💲 価格見直し",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "noconvert_pricedown.py"],
+        "params": [],
+        # 結果は「既存メンテ」スプシ 値下げ余地タブ(gid直開き) + 商品管理シート AL列(値下FLG)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=1187422007",
+    },
+    {
+        # ④: NO_CLICK ∩ watcher有 を手 revise 対象として CSV 出力 (2026-06-05)。①の下段
+        "category": None, "type": "utility",
+        "label": "✏️ タイトル改修",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "noclick_targets.py"],
+        "params": [],
+        # 結果は「既存メンテ」スプシ タイトル改修タブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
+    # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
+    # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
+    #       C:/dev/iMak_data/seller_hub/reports/ に置く (無ければデスクトップの所定フォルダ)
+    {
+        "category": None, "type": "utility",
+        "label": "📊 ファネル分析",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "listing_funnel.py"],
+        "params": [],
+        # 結果は「ファネル分析」スプシに集約 (xlsx廃止)。実行後そのスプシを開く
+        "open_url": "https://docs.google.com/spreadsheets/d/1UkaI4W6YCJgUbjgF7LLNN9_fHeVuz5qB4r9RqImElwg/edit",
+    },
+    {
+        # ①効果測定ループ: 直近2世代の funnel を突合し「直した結果が効いたか」を測る (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "📉 効果測定",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "funnel_diff.py"],
+        "params": [],
+        # 結果は「既存メンテ」スプシ 効果測定タブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "📈 需要・新規強化",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "demand_winners.py"],
+        "params": [],
+        # 結果は「既存メンテ」スプシ 需要・新規強化タブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
+    # 2026-06-04: G-SHOCK価格調査(amazon_v8_check/mercari_gshock_resource)とタイトル改修(title_keyword_proposal)は
+    #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
+    {
+        "category": None, "type": "utility",
+        "label": "🃏 PSA再仕入れ照合",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # 2チャネル(Mercari＆SNKRDUNK)ゲート。探索前に①現物(出品PSA)=②catalog の目視確認ゲートが
+        # ブラウザで開く→一致分だけ探索。不一致はPDCA台帳(原因別振り分け)。旧 mercari_psa_resource.py
+        # (Mercari単体・確認/PDCA無し)から張替 (2026-06-17)。
+        "cmd": ["python", "psa_resource_gate.py"],
+        "params": [],
+        # ★新規再仕入れ可が10件見つかるまで保留分を検索(2026-07-26 ユーザー要望「10件出したい」)。
+        # SNKRDUNK先取り→メルカリ保留分をtargetまで掘る。BAN上限=RESTOCK_MAX_SCRAPE(既定60)/1走行。
+        "env": {"RESTOCK_TARGET_NEW": "10"},
+        # 結果は「既存メンテ」スプシ PSA再仕入れタブに集約 (CSV廃止。再仕入れ系をシート統一)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
+    {
+        # RESTOCK後工程① 視覚確証で確定したカードを 新コア生成→Revise CSV化(手動UL用)。2026-06-18
+        "category": None, "type": "utility",
+        "label": "♻ RESTOCK Revise CSV生成",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_restock_build.py"],
+        "params": [],
+        # post-chain(excluder/title-fix/dedup)の **後** に Add→Revise 変換する(順序保証)。
+        # psa_restock_build は Add CSV 生成までで、Revise 化は control_panel が最終CSVに対して実施。
+        "restock_revise": True,
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/RESTOCK_revise_*.csv",
+    },
+    {
+        # RESTOCK後工程② アップロード反映後、実eBay qty を verify してスプシ書戻し(状態同期)。2026-06-18
+        "category": None, "type": "utility",
+        "label": "🔄 RESTOCK状態同期(書戻し)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_restock_writeback.py"],
+        "params": [],
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
+    # ★2026-07-31: 「💰 オファー判定(自動読込)」はここから撤去。
+    #   トップの nav に **青字「💰 オファー対応」**ボタンを新設し、そちらへ集約した
+    #   (同じ `offer_calc.py` を叩くだけの重複だった)。実装は HomePanel.open_offer_calc。
+    #   オファーは「既存メンテ」の作業ではなく、来たら即判断する独立の入口なので上段に置く。
+    # ---- 補URL能動充填 (2026-07-25 Phase1)。出品が「仕入元1本切れ」で死なないよう補URL(AC-AG)を厚く保つ。
+    #   夜=検索(無人・8件毎cacheコミット=途中死で残る) → 昼=視覚確証で正変種だけ補URL書込 → status=件数感。
+    #   RESTOCKゲートと同一 primitives・共有cache。設計: discussion/2026-07-24_psa_hoju_url_replenishment_design.md ----
+    {
+        "category": None, "type": "utility",
+        "label": "📊 補URL件数感(status)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "status"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # ★2026-07-28: **入稿して itemID を書き終えた直後に押す**ボタン。
+        # 補URL検索の対象は「itemID が入っている(=出品済)」行なので、CSV生成直後の自動実行では
+        # 当日の新規カードを拾えない(itemID がまだ無い)。itemID が付いた時点は人しか知らないため、
+        # 自動化せずボタンにする(ユーザー提案)。対象は新規優先の並びで先頭に来る。
+        "category": None, "type": "utility",
+        "label": "🆕 出品直後の補URL候補検索(当日分)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "search", "--limit=15"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # slice2: 補が薄い live PSA を mercari/snkrdunk 検索→候補+画像を cache(補URL列は触らない)。無人可・停止可。
+        "category": None, "type": "utility",
+        "label": "🔎 補URL夜間検索(slice2)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "search"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
+        "category": None, "type": "utility",
+        "label": "🩹 補URL補強(昼確認/slice3)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # ★2026-07-28: 1回10件ずつ(ユーザー要望「途中で辞められないから」)。
+        # 確証UIは全件まとめて送信する作り = 出した分は最後までやり切る必要がある。
+        # 補が埋まった行は次回 select_backfill_targets から自然に外れるので、押すたびに続きが出る。
+        "cmd": ["python", "psa_hoju_fill.py", "confirm", "--limit=10"],
+        "params": [],
+        "skip_postprocess": True,
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
+    # ---- 一番くじ 在庫補充 (PSA再仕入れの下に配置。2026-07-01 順序変更)。CLI: ichibankuji_restock.py ----
+    # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
+    {
+        "category": None, "type": "utility",
+        "label": "🎴一番くじ補充① supply確定",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ichibankuji_restock.py", "supply", "10"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "🎴一番くじ補充② 刷新→CSV",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ichibankuji_restock.py", "refresh-csv"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "🛒 在庫切れ再仕入れ",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "restock_worklist.py"],
+        "params": [],
+        # 結果は「既存メンテ」スプシ 再仕入れタブに集約 (CSV廃止)
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+    },
+    {
+        # B: CULL(在庫切れ&需要皆無) を age>=21・CAP50/回 で段階 End CSV 化 (2026-06-05)
+        "category": None, "type": "utility",
+        "label": "🗑 取下げ (50件/回)",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "cull_end.py"],
+        "params": [],
+        "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/CULL出品停止候補_*.csv",
     },
 ]
 
@@ -496,6 +1118,7 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
 
     # R列で自動グルーピング
     result = {}  # category → {current, monthly}
+    seen_ids = set()  # 公式在庫シートとの重複排除用
     for sheet_key, rows in sheet_data.items():
         for row in rows:
             row = list(row) + [''] * (21 - len(row))
@@ -510,8 +1133,24 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
                 result[cat] = {'current': 0, 'monthly': 0}
             if item_id and not sold:
                 result[cat]['current'] += 1
+                seen_ids.add(item_id)
             if added.startswith(month_yyyymm):
                 result[cat]['monthly'] += 1
+
+    # ★公式在庫要チェック シート1 を現在数に合算 (item ID で重複排除)
+    try:
+        ws2 = gc.open_by_key(OFFICIAL_STOCK_SHEET_ID).get_worksheet(0)  # シート1
+        for row in ws2.get_all_values()[1:]:
+            row = list(row) + [''] * 8
+            item_id = row[2].strip()
+            src_url = row[5].strip()
+            if not item_id or item_id in seen_ids:
+                continue
+            cat = _official_stock_category(src_url)
+            result.setdefault(cat, {'current': 0, 'monthly': 0})['current'] += 1
+            seen_ids.add(item_id)
+    except Exception as e:
+        print(f"⚠️ 公式在庫シート読込失敗: {e}")
 
     _CACHED_SHEET_COUNTS["data"] = result
     _CACHED_SHEET_COUNTS["ts"] = now
@@ -653,104 +1292,6 @@ class DashboardDialog(tk.Toplevel):
         self.after(0, apply)
 
 
-class URLInputDialog(tk.Toplevel):
-    """PSA TCG の URL 入力 GUI。
-    paste box 形式で複数URL一括登録、説明書き付き。
-    （一番くじは『一番くじ』枠内の専用ボタンに移設済み）"""
-
-    PSA_FILE = r"c:\dev\iMak\iMakTCG\certs.txt"
-    PSA_SCRIPT = r"c:\dev\iMak\iMakTCG\psa_to_csv.py"
-
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.title("📥 URL入力 - PSA TCG")
-        self.geometry("780x680")
-
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=8, pady=8)
-
-        # ===== PSA TCGタブ =====
-        psa_tab = ttk.Frame(nb)
-        nb.add(psa_tab, text="🃏 PSA TCG")
-        self._build_psa_tab(psa_tab)
-
-        ttk.Button(self, text="閉じる", command=self.destroy).pack(pady=4)
-
-    def _build_psa_tab(self, parent):
-        info = (
-            "【PSA TCG URL入力】\n"
-            "・1行に1件、以下の形式で入力（カンマ区切り）:\n"
-            "    PSA証明番号,仕入価格(円),メルカリURL,メルカリタイトル\n"
-            "・例: 148226751,23200,https://jp.mercari.com/item/m12345,Luffy 2nd Anniv\n"
-            "・最小入力: PSA証明番号 のみ（仕入値・URL・タイトルは省略可）\n"
-            "・「ファイルに追記」で certs.txt に保存\n"
-            "・「処理開始」で psa_to_csv.py を起動 → eBay CSV生成\n"
-            "・既にスプシに登録済みのURLを持つ証明番号は自動スキップ\n"
-            "・3AI議論方式（Claude/Gemini/Groq）でタイトル整合性検証"
-        )
-        info_frame = ttk.LabelFrame(parent, text="📖 説明書き", padding=6)
-        info_frame.pack(fill="x", padx=4, pady=4)
-        ttk.Label(info_frame, text=info, justify="left", foreground="#0066cc",
-                  font=("Yu Gothic UI", 9)).pack(anchor="w")
-
-        input_frame = ttk.LabelFrame(parent,
-                                      text="📝 cert,cost,url,title（カンマ区切り、1行1件）",
-                                      padding=6)
-        input_frame.pack(fill="both", expand=True, padx=4, pady=4)
-        self.psa_text = scrolledtext.ScrolledText(input_frame, wrap="word", height=12,
-                                                   font=("Consolas", 10))
-        self.psa_text.pack(fill="both", expand=True)
-
-        btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill="x", padx=4, pady=6)
-        ttk.Button(btn_frame, text=f"📂 既存ファイルを開く ({os.path.basename(self.PSA_FILE)})",
-                   command=lambda: self._open_file(self.PSA_FILE)).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="💾 ファイルに追記",
-                   command=self._psa_save).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="▶ 処理開始（CSV生成）",
-                   command=self._psa_run).pack(side="right", padx=2)
-
-    def _psa_save(self):
-        text = self.psa_text.get("1.0", "end").strip()
-        if not text:
-            messagebox.showwarning("入力なし", "データを貼り付けてください")
-            return
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        # 最低限cert番号が含まれてる行だけ
-        valid = [ln for ln in lines if ln.split(",")[0].strip().isdigit()]
-        if not valid:
-            messagebox.showwarning("無効", "1列目がPSA証明番号(数字)の行が見つかりません")
-            return
-        try:
-            with open(self.PSA_FILE, "a", encoding="utf-8") as f:
-                f.write("\n" + "\n".join(valid) + "\n")
-            messagebox.showinfo("追記完了", f"{len(valid)}件 を {self.PSA_FILE} に追記しました")
-            self.psa_text.delete("1.0", "end")
-        except Exception as e:
-            messagebox.showerror("エラー", f"ファイル書込失敗: {e}")
-
-    def _psa_run(self):
-        if not os.path.exists(self.PSA_SCRIPT):
-            messagebox.showerror("エラー", f"スクリプトなし: {self.PSA_SCRIPT}")
-            return
-        try:
-            subprocess.Popen(["python", self.PSA_SCRIPT],
-                              cwd=os.path.dirname(self.PSA_SCRIPT),
-                              creationflags=subprocess.CREATE_NEW_CONSOLE)
-            messagebox.showinfo("起動", "psa_to_csv.py を起動しました（別コンソール）")
-        except Exception as e:
-            messagebox.showerror("エラー", f"起動失敗: {e}")
-
-    def _open_file(self, path):
-        try:
-            if not os.path.exists(path):
-                # ファイルなければ空ファイル作成
-                open(path, "a", encoding="utf-8").close()
-            os.startfile(path)
-        except Exception as e:
-            messagebox.showerror("エラー", f"ファイル開けませんでした: {e}")
-
-
 class HomePanel:
     """トップページ: 進捗ダッシュボード中心。リスティング実行は別ウィンドウへ。"""
     def __init__(self, root):
@@ -766,13 +1307,24 @@ class HomePanel:
         ttk.Label(nav, text=" v2", font=("", 16, "bold"), foreground="#cc0000").pack(side="left")
         ttk.Label(nav, text=" [C:\\dev\\iMak]", font=("", 10, "bold"), foreground="#008000").pack(side="left")
         ttk.Label(nav, text="  ©iMak Trading", font=("", 10), foreground="gray").pack(side="left")
-        pending_count, _ = _read_pending_tasks()
-        task_label = f"📝 宿題 ({pending_count}件)" if pending_count else "📝 宿題"
-        ttk.Button(nav, text="📜 リスティングスクリプト一覧", command=self.open_listing).pack(side="right", padx=2)
-        ttk.Button(nav, text="📥 URL入力", command=self.open_url_input).pack(side="right", padx=2)
-        self.tasks_btn = ttk.Button(nav, text=task_label, command=self.open_tasks)
-        self.tasks_btn.pack(side="right", padx=2)
+        # 2026-06-04: 宿題ボタン撤去(open_tasks/TasksDialog は残置=戻せる)。
+        #   URL入力(TCG)は仕組みのレベルアップで不要化 → URLInputDialog/open_url_input ごと削除。
+        #   リスティングを 新規出品 / 既存メンテ の2ボタンに分割。
+        # ★2026-07-31: オファー対応 を 既存メンテ と 更新 の間に追加 (青字)。
+        #   side="right" は **pack した順に右から左へ**並ぶので、
+        #   見た目を 新規出品 → 既存メンテ → オファー対応 → 更新 にするには
+        #   この逆順 (更新 → オファー対応 → 既存メンテ → 新規出品) で pack する。
+        try:
+            ttk.Style().configure("Offer.TButton", foreground="#0066cc")
+        except Exception:                                     # noqa: BLE001
+            pass
         ttk.Button(nav, text="🔄 更新", command=self.refresh_dashboard).pack(side="right", padx=2)
+        ttk.Button(nav, text="⏰ 定期", command=self.open_schedules).pack(side="right", padx=2)
+        self.offer_btn = ttk.Button(nav, text="💰 オファー対応", style="Offer.TButton",
+                                    command=self.open_offer_calc)
+        self.offer_btn.pack(side="right", padx=2)
+        ttk.Button(nav, text="🔧 既存メンテ", command=lambda: self.open_listing("maint")).pack(side="right", padx=2)
+        ttk.Button(nav, text="🆕 新規出品", command=lambda: self.open_listing("new")).pack(side="right", padx=2)
 
         # ストア概要
         self.store_info_var = tk.StringVar(value="データ取得中...")
@@ -786,53 +1338,50 @@ class HomePanel:
                   foreground="#333333", justify="left").pack(anchor="w")
         self._update_clocks()
 
-        # === 総合進捗テーブル ===
-        dash_frame = ttk.LabelFrame(root, text="📊 総合進捗（カテゴリ別アクティブ出品数 vs 目標）", padding=6)
-        dash_frame.pack(fill="x", padx=10, pady=(6, 4))
+        # === 担当者の稼働状況 (2026-07-31) ===
+        #   worktree_board.py は前から在ったが **CLI にしか出ておらず、誰も見ていなかった**。
+        #   実際に「監視くんの依頼が6日前から相手ボールのまま」「ルーティング待ちが8時間放置」
+        #   が起きていた。トップに常設して、放置が目に入るようにする。
+        wt_frame = ttk.LabelFrame(root, text="👷 担当者の稼働状況", padding=6)
+        wt_frame.pack(fill="x", padx=10, pady=(0, 6))
+        self.wt_var = tk.StringVar(value="読込中…")
+        ttk.Label(wt_frame, textvariable=self.wt_var, font=("Consolas", 9),
+                  justify="left", foreground="#222222").pack(anchor="w")
+        threading.Thread(target=self._refresh_worktree_board, daemon=True).start()
 
+        # === 進捗テーブル (総合 / 今月 を横並び・各半幅) ===  推奨アクション枠は撤去
+        prog_row = ttk.Frame(root)
+        prog_row.pack(fill="x", padx=10, pady=(6, 8))
+        prog_row.columnconfigure(0, weight=1, uniform="prog")
+        prog_row.columnconfigure(1, weight=1, uniform="prog")
+
+        def _tags(tree):
+            for tag, bg, fg in (("done", "#d4ffd4", "#006600"), ("blue", "#d4e6ff", "#003366"),
+                                ("yel", "#fff4c4", "#806600"), ("red", "#ffd4d4", "#800000")):
+                tree.tag_configure(tag, background=bg, foreground=fg)
+            tree.tag_configure("total", background="#e0e0ff", foreground="#000066", font=("", 10, "bold"))
+
+        dash_frame = ttk.LabelFrame(prog_row, text="📊 総合進捗 (vs 目標)", padding=6)
+        dash_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         cols = ("カテゴリ", "目標", "現在", "不足", "進捗", "優先度")
-        self.tree = ttk.Treeview(dash_frame, columns=cols, show="headings", height=8)
-        widths = (200, 60, 60, 60, 360, 80)
-        for c, w in zip(cols, widths):
+        self.tree = ttk.Treeview(dash_frame, columns=cols, show="headings", height=9)
+        for c, w in zip(cols, (130, 44, 44, 44, 130, 50)):
             self.tree.heading(c, text=c)
             self.tree.column(c, width=w, anchor="w" if c in ("カテゴリ", "進捗") else "center")
-        self.tree.pack(fill="x")
-        # 進捗率による色分け（背景＋フォアグラウンド）
-        self.tree.tag_configure("done",  background="#d4ffd4", foreground="#006600")  # 100% 緑
-        self.tree.tag_configure("blue",  background="#d4e6ff", foreground="#003366")  # >66% 青
-        self.tree.tag_configure("yel",   background="#fff4c4", foreground="#806600")  # 33-66% 黄
-        self.tree.tag_configure("red",   background="#ffd4d4", foreground="#800000")  # <33% 赤
-        self.tree.tag_configure("total", background="#e0e0ff", foreground="#000066", font=("", 10, "bold"))
+        self.tree.pack(fill="both", expand=True)
+        _tags(self.tree)
 
-        # === 月次進捗テーブル ===
-        month_frame = ttk.LabelFrame(root, text="📅 今月の出品進捗（月次目標に対して）", padding=6)
-        month_frame.pack(fill="x", padx=10, pady=4)
-
+        month_frame = ttk.LabelFrame(prog_row, text="📅 今月の進捗 (月次目標)", padding=6)
+        month_frame.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
         mcols = ("カテゴリ", "目標", "現在", "不足", "進捗")
-        self.month_tree = ttk.Treeview(month_frame, columns=mcols, show="headings", height=8)
-        mwidths = (200, 80, 80, 60, 400)
-        for c, w in zip(mcols, mwidths):
+        self.month_tree = ttk.Treeview(month_frame, columns=mcols, show="headings", height=9)
+        for c, w in zip(mcols, (130, 54, 54, 44, 130)):
             self.month_tree.heading(c, text=c)
             self.month_tree.column(c, width=w, anchor="w" if c in ("カテゴリ", "進捗") else "center")
-        self.month_tree.pack(fill="x")
-        self.month_tree.tag_configure("done",  background="#d4ffd4", foreground="#006600")
-        self.month_tree.tag_configure("blue",  background="#d4e6ff", foreground="#003366")
-        self.month_tree.tag_configure("yel",   background="#fff4c4", foreground="#806600")
-        self.month_tree.tag_configure("red",   background="#ffd4d4", foreground="#800000")
-        self.month_tree.tag_configure("total", background="#e0e0ff", foreground="#000066", font=("", 10, "bold"))
+        self.month_tree.pack(fill="both", expand=True)
+        _tags(self.month_tree)
 
-        # 推奨メッセージ (スクロール対応 ScrolledText)
-        reco_frame = ttk.LabelFrame(root, text="💡 推奨アクション", padding=6)
-        reco_frame.pack(fill="x", padx=10, pady=(0, 10))
-        self.reco_text = scrolledtext.ScrolledText(
-            reco_frame, height=6, wrap="word",
-            font=("Yu Gothic UI", 10, "bold"),
-            fg="#cc5500", relief="flat", borderwidth=0,
-        )
-        self.reco_text.pack(fill="both", expand=True)
-        self.reco_text.config(state="disabled")
-
-        self.listing_window = None  # リスティング画面（別ウィンドウ、遅延生成）
+        self.listing_windows = {}  # mode("new"/"maint") → リスティング別ウィンドウ (遅延生成)
         self.root.after(300, self.refresh_dashboard)
 
     def _on_close(self):
@@ -840,11 +1389,8 @@ class HomePanel:
         self.root.destroy()
 
     def _set_reco(self, text, fg="#cc5500"):
-        """推奨アクション欄に文字列をセット (Text widget なので state 切替必要)。"""
-        self.reco_text.config(state="normal", fg=fg)
-        self.reco_text.delete("1.0", "end")
-        self.reco_text.insert("1.0", text)
-        self.reco_text.config(state="disabled")
+        """推奨アクション枠は 2026-06-04 撤去 (no-op。呼び出し側は残置)。"""
+        return
 
     def _update_clocks(self):
         """主要市場の現地時刻 + バイヤー活発時間カウントダウンを1秒ごと更新。
@@ -933,31 +1479,287 @@ class HomePanel:
     def open_tasks(self):
         TasksDialog(self.root)
 
-    def open_url_input(self):
-        URLInputDialog(self.root)
+    # schtasks の「前回の結果」で、失敗ではないもの
+    #   0          正常終了
+    #   267009     現在実行中          (0x41301)
+    #   267011     まだ一度も実行していない (0x41303)
+    #   -2147020576 既に実行中のインスタンスがある (0x800710E0)。常駐 watcher で普通に出る
+    _SCH_OK = {"0", "267009", "267011", "-2147020576"}
 
-    def open_listing(self):
-        """リスティングスクリプト一覧を別ウィンドウで開く（既にあれば前面表示）。"""
-        if self.listing_window is not None and tk.Toplevel.winfo_exists(self.listing_window):
-            self.listing_window.lift()
-            self.listing_window.focus_force()
+    # (対象, 何をしているか)
+    # ★schtasks の `Task To Run` と、呼ばれる .bat/.py の中身を **実際に読んで**書いた。
+    #   「一覧に無い = やっていない と判断されても文句言えない」(2026-07-31 ユーザー指摘) ので、
+    #   仕入元と対象範囲まで書く。全商品なのか一部なのかが分からないのが一番困る。
+    # ★2026-08-02: 表に無いタスクを「—」で静かに通していた。
+    #   実害: 8/2 に登録した `iMakCatalog_OpcgDumpRefresh` が担当者「—」で末尾に落ち、
+    #   何をする task なのか誰にも分からない状態でパネルに並んでいた。
+    #   タスクを登録したのに説明を書き忘れる = **見えないのと同じ**なので、
+    #   「—」ではなく **⚠️未登録** と出して、書けと促す。
+    _SCH_UNKNOWN = ("⚠️未登録", "—", "★このタスクの説明が無い。control_panel.py の _SCH_DESC に追記すること")
+
+    _SCH_DESC = {
+        # (担当者, 対象, 何をしている)
+        # ★担当者はユーザーの呼び方 (グローバル CLAUDE.md の呼称に合わせる):
+        #   監視くん=iMakInventory / 抽出くん=iMakHarvest / カタログ=iMakCatalog /
+        #   リバイスくん=iMakRevise / 出品くん=iMakHQ
+        "iMakHarvest_YodobashiSnapshot_0600": ("抽出くん", "G-shock", "ヨドバシ公式の在庫を撮る (1日3回の1回目)"),
+        "iMakHarvest_YodobashiSnapshot_1400": ("抽出くん", "G-shock", "ヨドバシ公式の在庫を撮る (2回目)"),
+        "iMakHarvest_YodobashiSnapshot_2200": ("抽出くん", "G-shock", "ヨドバシ公式の在庫を撮る (3回目)"),
+        "iMakHarvest_YodobashiHarvest_2100": ("抽出くん", "G-shock", "ヨドバシ公式から新規商品を拾う"),
+        "iMakHarvest_GshockMerge_2130": ("抽出くん", "G-shock", "Amazon + ヨドバシ公式 の2ソースを型番でまとめる"),
+        "iMakInventory_Cycle": ("監視くん", "出品中 全商品 (HIGHシート)",
+                                "公式(UNIQLO/GU・montbell)+メルカリ/Amazon/スニダン/ラクマ を見て 売切れたら取下げ"),
+        "iMakInventory_Cycle_LOW": ("監視くん", "出品中 全商品 (LOWシート)", "同上 (公式在庫も含む)"),
+        "iMakInventory_Monitor_Daily": ("監視くん", "出品中 全商品", "在庫監視の日次レポート (巡回結果のまとめ)"),
+        "iMakInventory_ReverseAudit_Daily": ("監視くん", "出品中 全商品", "意図 と 実eBay状態 の突合 (取下げ漏れ検出)"),
+        "iMakInventory_Backup": ("監視くん", "商品管理シート", "シート全体のバックアップ"),
+        "iMakRevise_DailyAutoRevise": ("リバイスくん", "出品中 全商品", "価格の自動改定"),
+        "iMakRevise_WeeklyReminder": ("リバイスくん", "—", "週次リマインダー ★巡回を定期化したので意図的に無効"),
+        "iMak_Catalog_prune_missing_models": ("カタログ", "カタログ宿題", "解決済みの宿題を掃除"),
+        "iMak_Catalog_set_name_audit_daily": ("カタログ", "カタログ 全カテゴリ", "set名 の整合を毎日監査"),
+        "iMak Catalog Integrity Weekly": ("カタログ", "カタログ 全カテゴリ", "整合監査 + 可視化スプシ更新 (週次)"),
+        "iMakCatalog_OpcgDumpRefresh": ("カタログ", "ONE PIECE 公式 dump",
+                                        "公式から dump を取り直す (月次)。壊れていたら巻き戻す"),
+        "iMakHQ_DispatchWatch": ("出品くん", "6担当の依頼箱", "依頼を検知して担当を自動起動する常駐watcher"),
+        "iMakHQ_ClerkPatrol": ("出品くん", "6担当の依頼箱", "滞留した依頼を集計・仕分け (事務員巡回)"),
+        "iMakHQ_HojuSearch_2330": ("出品くん", "PSA(TCG) + 一番くじ / 1回30件",
+                                   "補URL(仕入元の予備)を夜間に検索。補0本→補1本→再仕入れ の順"),
+    }
+
+    def open_schedules(self):
+        """定期スケジュールを別ウィンドウで一覧 (2026-07-31)。
+
+        `iMak Catalog Integrity Weekly` が 07-27 から結果=255 で失敗し続けていたのに
+        誰も気づいていなかった。schtasks を叩かないと分からない = 見えないのと同じ。
+        """
+        win = getattr(self, "_sched_win", None)
+        if win is not None and tk.Toplevel.winfo_exists(win):
+            win.lift()
+            win.focus_force()
             return
-        self.listing_window = tk.Toplevel(self.root)
-        self.listing_window.title("📜 リスティングスクリプト一覧")
-        self.listing_window.geometry(_load_geometry("listing", "1100x780"))
-        self.listing_window.protocol("WM_DELETE_WINDOW", self._on_close_listing)
-        ListingPanel(self.listing_window)
+        win = tk.Toplevel(self.root)
+        self._sched_win = win
+        win.title("⏰ 定期スケジュール")
+        win.geometry(_load_geometry("schedules", "1360x620"))
 
-    def _on_close_listing(self):
-        _save_geometry("listing", self.listing_window.geometry())
-        self.listing_window.destroy()
-        self.listing_window = None
+        head = ttk.Frame(win, padding=8)
+        head.pack(fill="x")
+        self.sch_head = tk.StringVar(value="読込中…")
+        ttk.Label(head, textvariable=self.sch_head, font=("", 11, "bold")).pack(side="left")
+        ttk.Button(head, text="🔄 更新",
+                   command=lambda: threading.Thread(
+                       target=self._refresh_schedules, daemon=True).start()).pack(side="right")
+        ttk.Label(head, text="🔵 正常   🟡 注意(無効/未実行)   🔴 失敗",
+                  foreground="#555").pack(side="right", padx=12)
+
+        cols = ("#", "状態", "担当者", "対象", "何をしている", "前回", "結果", "次回")
+        tree = ttk.Treeview(win, columns=cols, show="headings", height=20)
+        for c, w in zip(cols, (32, 44, 96, 190, 360, 112, 92, 112)):
+            tree.heading(c, text=c)
+            tree.column(c, width=w, anchor="w")
+        tree.tag_configure("ok", background="#e8f0ff", foreground="#003366")
+        tree.tag_configure("warn", background="#fff4c4", foreground="#806600")
+        tree.tag_configure("ng", background="#ffd4d4", foreground="#800000")
+        tree.tag_configure("hdr", background="#e0e0e0", foreground="#000000",
+                           font=("", 10, "bold"))
+        tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.sch_tree = tree
+        threading.Thread(target=self._refresh_schedules, daemon=True).start()
+
+    def _refresh_schedules(self):
+        """schtasks を読んで一覧を作る。信号は 🔵正常 / 🟡注意 / 🔴失敗。"""
+        import re
+        import subprocess
+
+        try:
+            r = subprocess.run(["schtasks", "/query", "/fo", "LIST", "/v"],
+                               capture_output=True, text=True,
+                               encoding="cp932", errors="replace", timeout=120)
+            seen = {}
+            for blk in (r.stdout or "").split("\n\n"):
+                d = {}
+                for ln in blk.splitlines():
+                    if ":" in ln:
+                        k, v = ln.split(":", 1)
+                        d[k.strip()] = v.strip()
+                name = d.get("TaskName") or d.get("タスク名") or ""
+                if not re.search(r"iMak", name, re.I):
+                    continue
+                seen[name.lstrip("\\")] = (
+                    d.get("Last Run Time") or d.get("前回の実行時刻") or "",
+                    d.get("Last Result") or d.get("前回の結果") or "",
+                    d.get("Next Run Time") or d.get("次回の実行時刻") or "",
+                    d.get("Scheduled Task State") or d.get("スケジュールされたタスクの状態") or "",
+                )
+
+            def _hm(s):                      # "2026/07/31 4:00:01" → "07/31 04:00"
+                m = re.search(r"(\d+)/(\d+)\s+(\d+):(\d+)", s or "")
+                return (f"{int(m.group(1)):02d}/{int(m.group(2)):02d} "
+                        f"{int(m.group(3)):02d}:{m.group(4)}") if m else "—"
+
+            # ★担当者ごとにまとめて並べる (2026-07-31 要望)。
+            #   担当内は 名前順。担当の並びは「毎日動く順」= 業務の流れに合わせて固定。
+            ORDER = ["抽出くん", "監視くん", "リバイスくん", "カタログ", "出品くん"]
+
+            def _key(item):
+                who = self._SCH_DESC.get(item[0], (_SCH_UNKNOWN[0],))[0]
+                return (ORDER.index(who) if who in ORDER else len(ORDER), who, item[0])
+
+            rows, ng, warn = [], 0, 0
+            prev_who = None
+            i = 0
+            for name, (last, res, nxt, state) in sorted(seen.items(), key=_key):
+                who, tgt, desc = self._SCH_DESC.get(name, _SCH_UNKNOWN)
+                if who != prev_who:                       # 担当の切れ目に見出し行
+                    rows.append(("hdr", ("", "", f"◆ {who}", "", "", "", "", "")))
+                    prev_who = who
+                i += 1
+                if state in ("無効", "Disabled"):
+                    sig, tag = "🟡 無効", "warn"
+                    warn += 1
+                elif res in self._SCH_OK:
+                    sig, tag = "🔵 正常", "ok"
+                else:
+                    sig, tag = "🔴 失敗", "ng"
+                    ng += 1
+                rows.append((tag, (i, sig, who, tgt, desc, _hm(last), res, _hm(nxt))))
+            head = (f"全 {len(seen)} 件   🔵 {len(seen) - ng - warn}   "
+                    f"🟡 {warn}   🔴 {ng}" + ("   ← 要対応" if ng else ""))
+        except Exception as e:                                # noqa: BLE001
+            rows, head = [], f"⚠️ 取得失敗: {e}"
+
+        def _apply():
+            if getattr(self, "sch_head", None) is not None:
+                self.sch_head.set(head)
+            t = getattr(self, "sch_tree", None)
+            if t is None or not t.winfo_exists():
+                return
+            t.delete(*t.get_children())
+            for tag, vals in rows:
+                t.insert("", "end", values=vals, tags=(tag,))
+
+        try:
+            self.root.after(0, _apply)
+        except Exception:                                     # noqa: BLE001
+            pass
+
+    def _refresh_worktree_board(self):
+        """`worktree_board.py` の集計を 1 行/担当 に畳んでトップに出す (2026-07-31)。
+
+        全文はボタンから開ける CLI があるので、ここは **放置が目に入る**ことだけを狙う。
+        赤 = 自分(窓口)が返す / ⏳ = 相手待ち / 🟡 = headless下書きのレビュー待ち。
+        """
+        import re
+        import subprocess
+
+        try:
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "tools", "worktree_board.py")
+            r = subprocess.run([sys.executable, "-X", "utf8", script],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=120,
+                               env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+            lines, route = [], 0
+            for ln in (r.stdout or "").splitlines():
+                s = ln.strip()
+                # ★🔀 行を先に判定する。この行も " — " を含むので、
+                #   一般の「## 名前 — 本文」パターンに先に食われる (2026-07-31 実測)
+                if s.startswith("## 🔀"):
+                    mm = re.search(r"(\d+)件", s)
+                    route = int(mm.group(1)) if mm else 0
+                    continue
+                m = re.match(r"^## (.+?) — (.*)$", s)
+                if m:
+                    name, body = m.group(1), m.group(2)
+                    # 「動きなし」以外で 要返球/相手待ち があれば目立たせる
+                    mark = "  "
+                    if re.search(r"自分が返す [1-9]", body):
+                        mark = "🔴"
+                    elif re.search(r"相手待ち [1-9]", body):
+                        mark = "⏳"
+                    elif re.search(r"レビュー待ち [1-9]", body):
+                        mark = "🟡"
+                    lines.append(f"{mark} {name:<12} {body}")
+            if route:
+                lines.append(f"🔀 ルーティング待ち {route}件 — 窓口が宛先を確認して投入")
+            txt = "\n".join(lines) if lines else "(集計できませんでした)"
+        except Exception as e:                                # noqa: BLE001
+            txt = f"⚠️ 取得失敗: {e}"
+        try:
+            self.root.after(0, lambda: self.wt_var.set(txt))
+        except Exception:                                     # noqa: BLE001
+            pass
+
+    def open_offer_calc(self):
+        """オファー判定 HTML を生成してブラウザで開く (2026-07-31)。
+
+        受信中の Best Offer を eBay から読み、**国・出品価格・仕入値**まで自動で埋める。
+        オファーは期限が短い (実例: 受信から丸1日) ので、人が探す時間がそのまま判断の遅れになる。
+        生成 → ブラウザ表示まで offer_calc.py 側でやるので、ここは起動するだけ。
+        """
+        import threading
+
+        # ★HomePanel には status_var が無い (別クラスのもの)。
+        #   進捗はボタン文言で出し、失敗時だけ messagebox で知らせる。
+        btn = getattr(self, "offer_btn", None)
+
+        def _label(text):
+            if btn is not None:
+                try:
+                    self.root.after(0, lambda: btn.config(text=text))
+                except Exception:                             # noqa: BLE001
+                    pass
+
+        def _run():
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "tools", "offer_calc.py")
+            env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+            _label("💰 取得中…")
+            try:
+                r = subprocess.run([sys.executable, "-X", "utf8", script],
+                                   cwd=os.path.dirname(script), env=env,
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", timeout=900)
+                if r.returncode != 0:
+                    raise RuntimeError((r.stdout or r.stderr or "")[-300:])
+            except Exception as e:                            # noqa: BLE001
+                self.root.after(0, lambda: messagebox.showerror(
+                    "オファー判定", f"起動に失敗しました:\n{e}"))
+            finally:
+                _label("💰 オファー対応")
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def open_listing(self, mode="new"):
+        """新規出品 / 既存メンテ を別ウィンドウで開く（既にあれば前面表示）。"""
+        win = self.listing_windows.get(mode)
+        if win is not None and tk.Toplevel.winfo_exists(win):
+            win.lift()
+            win.focus_force()
+            return
+        title = "🆕 新規出品" if mode == "new" else "🔧 既存メンテ"
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.geometry(_load_geometry(f"listing_{mode}", "1000x760"))
+        win.protocol("WM_DELETE_WINDOW", lambda: self._on_close_listing(mode))
+        self.listing_windows[mode] = win
+        ListingPanel(win, mode=mode)
+
+    def _on_close_listing(self, mode):
+        win = self.listing_windows.get(mode)
+        if win is not None:
+            _save_geometry(f"listing_{mode}", win.geometry())
+            win.destroy()
+            self.listing_windows[mode] = None
 
     def refresh_dashboard(self):
         self.store_info_var.set("取得中...")
         self.tree.delete(*self.tree.get_children())
         self.month_tree.delete(*self.month_tree.get_children())
         threading.Thread(target=self._fetch_and_update, daemon=True).start()
+        # 担当者の稼働状況も一緒に更新 (放置を見逃さないため)
+        self.wt_var.set("読込中…")
+        threading.Thread(target=self._refresh_worktree_board, daemon=True).start()
 
     def _fetch_and_update(self):
         import time as _time
@@ -1083,10 +1885,40 @@ class HomePanel:
         self.root.after(0, apply)
 
 
+def _kill_process_tree(proc, log=None):
+    """proc とその子孫を確実に終了 (Windows: taskkill /T で子=seller_hub_view/chromedriver も殺す)。
+    + 孤児化した Selenium(chromedriver) も停止 (取下再出品 --fresh-snapshot が止まらない対策)。
+    注: 監視くん cron 等が同時に Selenium 巡回中だとその chromedriver も止まる (停止ボタン押下時のみ)。"""
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    if proc and proc.poll() is None:
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                               capture_output=True, creationflags=flags)
+            else:
+                proc.terminate()
+        except Exception:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        if log:
+            log("\n🛑 停止 (プロセスツリー終了)\n")
+    else:
+        if log:
+            log("実行中スクリプトなし (Selenium が残っていれば下記で停止)\n")
+    if sys.platform == "win32":
+        r = subprocess.run(["taskkill", "/F", "/T", "/IM", "chromedriver.exe"],
+                           capture_output=True, creationflags=flags)
+        if r.returncode == 0 and log:
+            log("🛑 残存 Selenium(chromedriver) も停止\n")
+
+
 class ListingPanel:
     """従来の ControlPanel 相当（スクリプト一覧）。HomePanel から呼び出される。"""
-    def __init__(self, root):
+    def __init__(self, root, mode="new"):
         self.root = root
+        self.mode = mode  # "new"=新規出品 / "maint"=既存メンテ
 
         # ツールバー (共有 🛑 停止)
         toolbar = ttk.Frame(root, padding=(8, 4))
@@ -1097,14 +1929,26 @@ class ListingPanel:
         top_frame = ttk.LabelFrame(root, text="スクリプト一覧", padding=8)
         top_frame.pack(fill="x", padx=8, pady=(0, 4))
 
-        canvas = tk.Canvas(top_frame, height=320)
+        canvas = tk.Canvas(top_frame, height=470, highlightthickness=0)
         scrollbar = ttk.Scrollbar(top_frame, orient="vertical", command=canvas.yview)
         scroll_frame = ttk.Frame(canvas)
-        scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        def _fit_canvas(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # 内容が canvas(470) より低い場合(新規モード等)は内容高さまで縮め、下の空白を詰めて上段寄せ。
+            # 高い場合(既存メンテ)は 470 でクリップしスクロール。
+            canvas.configure(height=min(scroll_frame.winfo_reqheight(), 470))
+        scroll_frame.bind("<Configure>", _fit_canvas)
+        _win_id = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        # 内側フレームを canvas 幅いっぱいに広げる (= 右側の空白を無くし全幅レイアウトに)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(_win_id, width=e.width))
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        # マウスホイールでスクロール (カーソルが領域内のときだけ)
+        def _on_wheel(e):
+            canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         # 5/12 構成変更: カテゴリ別 Labelframe + 新規/再出品 2ボタン + Utility 単独ボタン
         # - 新規ボタン: verified=True → 青、それ以外 → 黒 (既存ルール維持)
@@ -1112,6 +1956,7 @@ class ListingPanel:
         # - verified カテゴリを先頭にまとめる (ユーザー要望)
         self.param_entries = {}
         self._run_log = None
+        self._run_log_path = None   # 完走後の要約はログ欄でなくこのファイルを読む(2026-08-03)
 
         # 1) SCRIPTS をカテゴリ別に分類
         categories: dict[str, dict[str, int]] = {}  # {category: {type: script_idx}}
@@ -1133,51 +1978,264 @@ class ListingPanel:
             return 0 if SCRIPTS[new_idx].get("verified", False) else 1
         cat_order = sorted(categories.keys(), key=_cat_verified)
 
-        # 2) カテゴリ別 Labelframe を 3 列で配置 (verified 先頭)
-        cat_outer = ttk.Frame(scroll_frame)
-        cat_outer.pack(fill="x", padx=4, pady=4)
-        n_cat_cols = 3
-        for col in range(n_cat_cols):
-            cat_outer.columnconfigure(col, weight=1, uniform="catcol")
-        for ci, cat_name in enumerate(cat_order):
-            actions = categories[cat_name]
-            r, c = divmod(ci, n_cat_cols)
-            frame = ttk.LabelFrame(cat_outer, text=cat_name, padding=4)
-            frame.grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
-            # 「新規」ボタン (verified=True → 青、それ以外 → 黒)
-            new_idx = actions.get("new")
-            if new_idx is not None:
-                new_color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
-                tk.Button(
-                    frame, text="新規", font=("", 10, "bold"),
-                    fg=new_color, width=10, height=1,
-                    command=lambda idx=new_idx: self.run_script(idx),
-                ).pack(side="left", padx=4, pady=2)
-            # 「再出品」ボタン (黒)
-            relist_idx = actions.get("relist")
-            if relist_idx is not None:
-                tk.Button(
-                    frame, text="再出品", font=("", 10, "bold"),
-                    fg="black", width=10, height=1,
-                    command=lambda idx=relist_idx: self.run_script(idx),
-                ).pack(side="left", padx=4, pady=2)
+        # 2) utility をグループ分類 (cmd のスクリプト名で判定)
+        def _ugroup(idx):
+            cmd = " ".join(SCRIPTS[idx].get("cmd", []))
+            if "csv_auditor" in cmd:
+                return "audit"     # 🔍 出品前チェック (新規パネルに表示)
+            if any(s in cmd for s in ("listing_funnel", "demand_winners", "funnel_diff")):
+                return "analyze"   # 📊 分析 (Plan/Check)
+            if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
+                return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
+            if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
+                return "discover"  # 新規ネタ探し
+            # ★2026-07-28: 出品直後に押す補URL2ボタン(🆕検索/🩹確証)は **新規出品パネル**に置く。
+            # 出品→itemID書込→補URL確保 は一連の流れなので、既存メンテ側に離すと導線が切れる
+            # (ユーザー指示)。件数感/夜間検索は定常運用なのでメンテ側に残す。
+            if "psa_hoju_fill.py" in cmd and "--limit=15" in cmd:
+                return "hoju"      # 🆕 は出品直後専用 = 新規パネルのみ
+            # 在庫あり listing を直す: 取下再出品①②③(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
+            if any(s in cmd for s in ("relist_from_funnel", "relist_add_from_pending",
+                                      "relist_writeback", "dump_us_qty1_sku",
+                                      "noclick_targets", "noconvert_pricedown")):
+                return "relist"
+            return "report"
+        ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": [],
+              "audit": [], "hoju": []}
+        for idx in utilities:
+            ug[_ugroup(idx)].append(idx)
 
-        # 3) Utility 単独ボタンは 4 列 grid で別枠
-        util_outer = ttk.LabelFrame(scroll_frame, text="Utility / 分析", padding=4)
-        util_outer.pack(fill="x", padx=4, pady=8)
-        n_util_cols = 4
-        for col in range(n_util_cols):
-            util_outer.columnconfigure(col, weight=1, uniform="utilcol")
-        for ui, idx in enumerate(utilities):
-            script = SCRIPTS[idx]
-            r, c = divmod(ui, n_util_cols)
-            # label_fg 指定優先 > verified の青 > black
-            label_color = script.get("label_fg") or ("#0066cc" if script.get("verified", False) else "black")
-            tk.Button(
-                util_outer, text=script["label"], font=("", 10, "bold"),
-                fg=label_color, width=20, height=2, wraplength=180, justify="center",
-                command=lambda i=idx: self.run_script(i),
-            ).grid(row=r, column=c, padx=4, pady=4, sticky="nsew")
+        # 共通: (label, idx) のリストを ncol 列グリッドで描画 (compact=詰めた配置)
+        def _grid_named(parent, items, ncol=4, compact=False):
+            # height=2 で2行ぶんの高さを確保 (ラベルが折返しても見切れない)。width は最小値=
+            # columnconfigure(weight) と sticky="nsew" で実幅は親いっぱいに伸びる。
+            w, h, pad, wl = (14, 2, 2, 150) if compact else (16, 2, 4, 230)
+            ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない (右の空セル防止)
+            for col in range(ncol):
+                parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
+            for k, (text, idx) in enumerate(items):
+                color = SCRIPTS[idx].get("label_fg") or ("#0066cc" if SCRIPTS[idx].get("verified", False) else "black")
+                tk.Button(parent, text=text, font=("", 9, "bold"), fg=color,
+                          width=w, height=h, wraplength=wl, justify="center",
+                          command=lambda i=idx: self.run_script(i)).grid(
+                    row=k // ncol, column=k % ncol, padx=pad, pady=pad, sticky="nsew")
+
+        if self.mode == "new":
+            # ===== 🆕 新規出品 (カテゴリ名ラベルの大ボタン・間隔詰め) =====
+            new_sec = ttk.LabelFrame(scroll_frame, text="🆕 新規出品 — カテゴリを選んで出品", padding=6)
+            new_sec.pack(fill="x", padx=4, pady=(4, 8))
+            cat_grid = ttk.Frame(new_sec)
+            cat_grid.pack(fill="x")
+            n_cat_cols = 4
+            for col in range(n_cat_cols):
+                cat_grid.columnconfigure(col, weight=1, uniform="catcol")
+            gi = 0
+            for cat_name in cat_order:
+                new_idx = categories[cat_name].get("new")
+                if new_idx is None:
+                    continue
+                color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
+                tk.Button(cat_grid, text=cat_name, font=("", 12, "bold"), fg=color,
+                          width=15, height=2, wraplength=150, justify="center",
+                          command=lambda idx=new_idx: self.run_script(idx)).grid(
+                    row=gi // n_cat_cols, column=gi % n_cat_cols, padx=2, pady=2, sticky="nsew")
+                gi += 1
+            if ug["discover"]:
+                disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)
+                disc.pack(fill="x", pady=(8, 0))
+                _grid_named(disc, [(SCRIPTS[i]["label"], i) for i in ug["discover"]])
+            if ug["audit"]:
+                aud = ttk.LabelFrame(new_sec, text="🔍 出品前チェック (CSV生成後に実行)", padding=4)
+                aud.pack(fill="x", pady=(8, 0))
+                _grid_named(aud, [(SCRIPTS[i]["label"], i) for i in ug["audit"]])
+            if ug["hoju"]:
+                hj = ttk.LabelFrame(
+                    new_sec, text="🔗 出品後 補URL確保 (入稿 → itemID書込 の後に実行)", padding=4)
+                hj.pack(fill="x", pady=(8, 0))
+                # 🩹(昼確認)は **メンテ側の定常消化でも使う**ので実体はメンテに残し、
+                # 新規パネルには同じ idx を並べて出す(導線を切らないための併置。2026-07-28)。
+                _confirm_idx = [i for i, sc in enumerate(SCRIPTS)
+                                if "psa_hoju_fill.py" in " ".join(sc.get("cmd", []))
+                                and "confirm" in sc.get("cmd", [])]
+                _grid_named(hj, [(SCRIPTS[i]["label"], i) for i in ug["hoju"] + _confirm_idx])
+        else:
+            # ===== 🔧 既存メンテ =====
+            REPORTS_DIR = r"C:/dev/iMak_data/seller_hub/reports"
+
+            def _open_sellerhub():
+                import webbrowser
+                webbrowser.open("https://www.ebay.com/sh/ovw")
+
+            def _open_reports():
+                os.makedirs(REPORTS_DIR, exist_ok=True)
+                os.startfile(REPORTS_DIR)
+
+            # 手順ガイド
+            guide = ttk.LabelFrame(scroll_frame, text="📋 レポート準備", padding=6)
+            guide.pack(fill="x", padx=4, pady=(4, 6))
+            hb = ttk.Frame(guide)
+            hb.pack(anchor="w")
+            tk.Button(hb, text="🌐 レポートDL", font=("", 10, "bold"),
+                      command=_open_sellerhub).pack(side="left", padx=(0, 6))
+            tk.Button(hb, text="📁 reports フォルダを開く", font=("", 10, "bold"),
+                      command=_open_reports).pack(side="left")
+            tk.Label(
+                guide, justify="left", anchor="w", font=("Yu Gothic UI", 10),
+                text=("Seller Hub で下記5レポートをDL → 📁reports フォルダに置く:\n"
+                      "  ・eBay-all-active-listings\n"
+                      "  ・ebay-all-orders-report\n"
+                      "  ・eBay-unsold-listings-report\n"
+                      "  ・Listing quality report\n"
+                      "  ・eBay-promoted-listing-general-listing-report (露出をorganic+PL累計で正す)"),
+            ).pack(anchor="w", pady=(4, 0))
+
+            # ② レポート鮮度: 各レポートの「内容の日付」が何日前か。古いまま判断する事故を防ぐ。
+            #   日付はファイル名から読む(eBay が report 生成日を埋める)。mtime はフォルダに
+            #   置き直すと更新され実態より新しく見えるので使わない。
+            def _file_report_date(path):
+                import datetime as _dt
+                b = os.path.basename(path)
+                m = re.search(r"(\d{4})-(\d{2})-(\d{2})", b)            # YYYY-MM-DD (active/orders/unsold)
+                if m:
+                    return _dt.date(int(m[1]), int(m[2]), int(m[3]))
+                m = re.search(r"(\d{2})_(\d{2})_(\d{4})", b)            # MM_DD_YYYY (quality)
+                if m:
+                    return _dt.date(int(m[3]), int(m[1]), int(m[2]))
+                return _dt.date.fromtimestamp(os.path.getmtime(path))   # fallback: mtime
+
+            def _report_freshness():
+                import glob as _glob
+                import datetime as _dt
+                pats = [("active", "eBay-all-active-listings-report*"),
+                        ("orders", "ebay-all-orders-report*"),
+                        ("unsold", "eBay-unsold-listings-report*"),
+                        ("quality", "Listing quality report*")]
+                today = _dt.date.today()
+                parts, worst = [], 0
+                for nm, pat in pats:
+                    fs = _glob.glob(os.path.join(REPORTS_DIR, pat))
+                    if not fs:
+                        parts.append(f"{nm} ✗無し")
+                        worst = 999
+                        continue
+                    newest = max(_file_report_date(p) for p in fs)
+                    ago = (today - newest).days
+                    parts.append(f"{nm} {ago}日前")
+                    worst = max(worst, ago)
+                return "📅 レポート鮮度:  " + "  /  ".join(parts), worst
+            try:
+                _fresh_txt, _worst = _report_freshness()
+                _fg = "red" if _worst >= 4 else "#0a0"
+                _tip = "  ← 古い。再DL推奨" if _worst >= 4 else ""
+                tk.Label(guide, anchor="w", font=("Yu Gothic UI", 9, "bold"),
+                         fg=_fg, text=_fresh_txt + _tip).pack(anchor="w", pady=(4, 0))
+            except Exception:
+                pass
+
+            # 📊 分析 (押すと結果ファイルが開く)
+            ana = ttk.LabelFrame(scroll_frame, text="📊 分析 (押すと結果ファイルが開く)", padding=4)
+            ana.pack(fill="x", padx=4, pady=(4, 0))
+            _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
+
+            # ファネル世代 + 効果測定の準備状況: 「前回いつファネルを回したか」「URL突合できる2世代が
+            #   揃ったか」を可視化。次にいつ押せばいいか分からない問題への対策。supply_url が両世代に
+            #   入って初めて relist(取下再出品=id/title変) 効果が📉効果測定で測れる。
+            def _funnel_generations():
+                import glob as _glob
+                import csv as _csv
+                import datetime as _dt
+                fs = _glob.glob(os.path.join(WORKSPACE, "iMakHQ", "funnel_output", "funnel_*.csv"))
+                gens = []
+                for p in fs:
+                    m = re.search(r"funnel_(\d{4})(\d{2})(\d{2})", os.path.basename(p))
+                    if m:
+                        gens.append((_dt.date(int(m[1]), int(m[2]), int(m[3])), p))
+                gens.sort(key=lambda x: x[0])
+
+                def _has_url(path):
+                    try:
+                        with open(path, encoding="utf-8") as f:
+                            rd = _csv.DictReader(f)
+                            if "supply_url" not in (rd.fieldnames or []):
+                                return False
+                            return any((r.get("supply_url") or "").strip() for r in rd)
+                    except Exception:
+                        return False
+                return [(d, _has_url(p)) for d, p in gens[-2:]]
+            try:
+                _g = _funnel_generations()
+                if not _g:
+                    _ftxt, _ffg = "📉 ファネル世代: まだ無し → ファネル分析を実行", "#444"
+                else:
+                    _ds = "  ←  ".join(f"{d:%m/%d}({'URL✓' if u else 'URL✗'})" for d, u in reversed(_g))
+                    if len(_g) >= 2 and _g[-1][1] and _g[-2][1]:
+                        _msg, _ffg = "効果測定OK (両世代URL✓=relist突合可)", "#0a0"
+                    elif _g[-1][1]:
+                        _msg, _ffg = "あと1回でペア成立 (次回ファネルから relist効果測定が有効)", "#c80"
+                    else:
+                        _msg, _ffg = "最新にURL無 → ネット接続環境でファネル再実行を", "red"
+                    _ftxt = f"📉 ファネル世代:  {_ds}   {_msg}"
+                # ana は _grid_named で grid 配置 → 同フレームに pack 不可 (混在TclError)。
+                # ③進捗行と同様 scroll_frame に直接 pack する。
+                tk.Label(scroll_frame, anchor="w", font=("Yu Gothic UI", 9, "bold"),
+                         fg=_ffg, text=_ftxt).pack(anchor="w", padx=4, pady=(2, 0))
+            except Exception:
+                pass
+
+            # 🔧 在庫あり / 📦 在庫なし を全幅で縦積み (横2分割の窮屈・ラベル見切れを解消)
+            relist_items = [(SCRIPTS[i]["label"], i) for i in ug["relist"]]
+            relist_items += [(f"{cat} 再出品", categories[cat]["relist"])
+                             for cat in cat_order if categories[cat].get("relist") is not None]
+            d1 = ttk.LabelFrame(scroll_frame, text="🔧 在庫あり — 直す (検索/タイトル/価格) 出品≥21日", padding=4)
+            d1.pack(fill="x", padx=4, pady=(6, 0))
+            # 3列: 上段①②③ / 下段✏️タイトル改修(①下)・💲値下げ余地(②下) が縦に揃う
+            _grid_named(d1, relist_items, ncol=3)
+            d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ / 整理", padding=4)
+            d2.pack(fill="x", padx=4, pady=(6, 0))
+            # d2 は 在庫補充(pack)を入れ子にするので、oosボタンは内側Frame(grid)に包む
+            # (同一親で grid と pack を混在させると tkinter が描画失敗する。2026-07-01 修正)
+            d2_oos = ttk.Frame(d2)
+            d2_oos.pack(fill="x")
+            _grid_named(d2_oos, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=4)
+
+            # ③ 在庫なし進捗: CULL停止の残件数(約何回分) と RESTOCK再仕入れ(US)商品数。
+            def _oos_progress():
+                import glob as _glob
+                import csv as _csv
+                fs = _glob.glob(os.path.join(WORKSPACE, "iMakHQ", "funnel_output", "funnel_*.csv"))
+                if not fs:
+                    return None
+                rows = list(_csv.DictReader(open(max(fs, key=os.path.getmtime), encoding="utf-8")))
+
+                def _fl(r):
+                    return (r.get("flags") or "").split("|")
+
+                def _ai(x):
+                    try:
+                        return int(float(x))
+                    except (ValueError, TypeError):
+                        return 0
+                cull = sum(1 for r in rows if "CULL" in _fl(r) and _ai(r.get("age_days")) >= 21)
+                restock = len({(r.get("title") or "").lower() for r in rows
+                               if "RESTOCK" in _fl(r) and r.get("site") == "US"})
+                return cull, restock
+            try:
+                _prog = _oos_progress()
+                if _prog:
+                    _cull_n, _rs_n = _prog
+                    _runs = -(-_cull_n // 50)  # ceil
+                    tk.Label(scroll_frame, anchor="w", font=("Yu Gothic UI", 9, "bold"),
+                             fg="#444", text=(f"   🛒 RESTOCK再仕入れ(US) {_rs_n}商品   "
+                                              f"｜   🧹 CULL停止 残 {_cull_n}件 (50件/回 = 約{_runs}回分)")
+                             ).pack(anchor="w", padx=4, pady=(2, 0))
+            except Exception:
+                pass
+
+            if ug["report"]:
+                # 在庫補充 は 在庫なし(d2)枠の中に入れ子(2026-07-01)。3列=PSA再仕入れ3が1行目・一番くじ①②が2行目。
+                rep = ttk.LabelFrame(d2, text="📦 在庫補充", padding=4)
+                rep.pack(fill="x", padx=4, pady=(6, 0))
+                _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]], ncol=3)
 
         # 状態ライン
         status_frame = ttk.Frame(root)
@@ -1231,6 +2289,59 @@ class ListingPanel:
         self.log.delete("1.0", "end")
         self.now_processing.set("")
 
+    def _run_psa_orphan_clean(self):
+        """PSA新規生成の前に orphan canonical KEY を掃除(歩留まり激減の恒久対策, 2026-06-21)。
+
+        未出品(B列空)なのに KEY が付いて dedup に誤ブロックされた在庫を出品対象に戻す。同期実行。
+        失敗しても新規生成は続行(掃除は best-effort)。dedupe/psa_to_csv は触らずスプシ AI列のみ。
+        """
+        self.append_log("\n🧹 orphan KEY 掃除(未出品なのに誤ブロックされた在庫を出品対象へ戻す)...\n")
+        try:
+            tool = os.path.join(WORKSPACE, "iMakHQ", "tools", "psa_orphan_key_clean.py")
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            r = subprocess.run([sys.executable, tool, "--execute"],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=180, creationflags=flags)
+            if r.stdout:
+                self.append_log(r.stdout)
+            if r.returncode != 0:
+                self.append_log(f"⚠️ orphan掃除 returncode={r.returncode}(新規生成は続行)\n")
+                if r.stderr:
+                    self.append_log(r.stderr[-500:] + "\n")
+        except Exception as e:
+            self.append_log(f"⚠️ orphan掃除 skip(新規生成は続行): {type(e).__name__}: {e}\n")
+
+    def _check_n_formula_guard(self):
+        """統合High/Low の N列(仕入値SSOT)関数の破損検知。壊れていたら False (=run 中止)。
+
+        2026-07-23 設計: N =(M=現在価格 or F)−K=ポイント の ARRAYFORMULA (N1 の1セル)。
+        どこかのプロセスが N セルに値を書くと関数が静かに壊れ、陳腐化した仕入値で誤価格
+        出品が続く (fail-OPEN)。listing 系 run の前に両シートを確認する。
+        LOW は gshock_to_csv 内にも同ガードあり (二重化)。HIGH の主要消費者 psa_to_csv は
+        no-touch 運用のため、HIGH はここが唯一のガード。
+        ネットワーク等でチェック自体が失敗した場合は警告のみで続行 (可用性優先。破損の
+        確証がある時だけ止める)。
+        """
+        try:
+            import gspread
+            from google.oauth2.service_account import Credentials
+            creds = Credentials.from_service_account_file(
+                GSHEET_CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+            gc = gspread.authorize(creds)
+            for label, (sid, gid) in CONSOLIDATED_SHEETS.items():
+                ws = gc.open_by_key(sid).get_worksheet_by_id(gid)
+                f = ws.acell("N1", value_render_option="FORMULA").value or ""
+                if not f.startswith("=ARRAYFORMULA"):
+                    self.append_log(
+                        f"🚫 {label} スプシ N列の仕入値関数が壊れています (N1={f[:40]!r})。\n"
+                        "   N セルに値を書いたプロセスを特定し、N1 に ARRAYFORMULA を再設置\n"
+                        "   してください (memory: amazon_points_net_cost_system 参照)。run 中止。\n")
+                    return False
+            return True
+        except Exception as e:
+            self.append_log(f"⚠️ N関数ガード チェック不能(続行): {type(e).__name__}: {e}\n")
+            return True
+
     def run_script(self, idx):
         script = SCRIPTS[idx]
         # 一番くじ: ウィザード式ダイアログを起動
@@ -1244,6 +2355,16 @@ class ListingPanel:
         if self.proc and self.proc.poll() is None:
             messagebox.showwarning("実行中", "他のスクリプトが実行中です。停止してから実行してください。")
             return
+        self._current_idx = idx  # 完了時 open_after 用
+        # PSA新規: 生成の前に orphan canonical KEY を自動掃除(2026-06-21 恒久対策)。
+        # write-keys が出品確定前に KEY を書く → 未出品在庫を dedup が誤ブロックし歩留まり激減する
+        # 問題を、毎回 生成前に掃除して再発防止。control_panel のみ・dedupe/psa_to_csv は不変。
+        if script.get("category") == "PSA TCG" and script.get("type") == "new":
+            self._run_psa_orphan_clean()
+        # listing 系 run 前の N列(仕入値SSOT)関数ガード (2026-07-23、両スプシ)
+        if script.get("type") == "new" and not self._check_n_formula_guard():
+            self.status_var.set("中止: N列関数の破損検知")
+            return
         cmd = list(script["cmd"])
         for pname, entry in self.param_entries[idx].items():
             v = entry.get().strip()
@@ -1256,6 +2377,10 @@ class ListingPanel:
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
+        # script 固有 env (例: PSA TCG の TCG_USE_NEW_GEN=1 新生成コア切替・2026-06-14 flip)
+        for _k, _v in (script.get("env") or {}).items():
+            env[_k] = _v
+            self.append_log(f"  env: {_k}={_v}\n")
         # subprocess stdout を永続化 (UI 閉じても残る、後追い解析可能)
         try:
             self._run_log, log_path = _open_run_log(script["label"])
@@ -1293,6 +2418,10 @@ class ListingPanel:
                     self._run_log.flush()
                 except Exception:
                     pass
+        try:
+            self.proc.wait(timeout=10)  # stdout 閉じた後にプロセス終了を待つ → returncode 確定 (None防止)
+        except subprocess.TimeoutExpired:
+            pass
         if self._run_log:
             try:
                 self._run_log.close()
@@ -1305,29 +2434,235 @@ class ListingPanel:
         """ListingPanel: rarara helper 呼出 (互換ラッパ)."""
         _run_rarara_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
 
+    def _run_log_text(self):
+        """今回の走行の stdout を **run log ファイル** から読む (2026-08-03)。
+
+        ログ欄(self.log)を読むと 2つの理由で **前の走行が混ざる**:
+          - クリアを押し忘れると前走行の全文が残る
+            (実害 2026-08-02: gshock の報告に TCG の「入稿OK6件」「#155393557」が混入)
+          - 5000行を超えると先頭1000行が削除される(control_panel.py の膨張防止)
+        run log は走行ごとに新規ファイルなので、どちらの影響も受けない。
+        読めない時だけ従来どおりログ欄にフォールバック (= 報告が消えるより混ざる方がまし)。
+        """
+        path = getattr(self, "_run_log_path", None)
+        if path:
+            try:
+                fh = getattr(self, "_run_log", None)
+                if fh and not fh.closed:
+                    fh.flush()
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    txt = f.read()
+                if txt.strip():
+                    return txt
+            except Exception as _e:
+                self.append_log(f"⚠️ run log 読取失敗 → ログ欄で代用: {type(_e).__name__}\n")
+        return self.log.get("1.0", "end") if hasattr(self, "log") else ""
+
+    def _show_audit_summary(self, captured_log):
+        """CSV監査くん完走 → 要点をポップアップ表示 (出品くん側の能動報告)."""
+        summary = summarize_audit_log(captured_log)
+        if not summary:
+            return
+        # ポップアップは廃止(2026-07-01 ユーザー: HQが対話で自動報告する方式に)。log には残す。
+        self.append_log("\n" + "=" * 70 + "\n📋 監査サマリー (要点)\n" + summary + "\n" + "=" * 70 + "\n")
+
+    def _show_problem_report(self, captured_log):
+        """新規生成完走 → 統合「問題提起」(CSV化分の監査問題 + 非化分の原因→対策案)を log に出力.
+
+        全カテゴリ共通。ポップアップは廃止(2026-07-01)、HQ が対話で自動報告する(判断・指示は人)."""
+        report = build_problem_report(captured_log)
+        if not report:
+            return
+        self.append_log("\n" + "=" * 70 + "\n" + report + "\n" + "=" * 70 + "\n")
+
     def poll_queue(self):
         try:
             while True:
                 item = self.queue.get_nowait()
                 if isinstance(item, tuple) and item[0] == "__done__":
                     self.append_log(f"\n--- 終了 (returncode={item[1]}) ---\n")
+                    # CSV監査くん 完走 → 要点サマリーをポップアップ (HQチャットの介在なしで結果を即可視化。
+                    # 2026-06-29: 対話セッションは外部から起こせないため、出品くん側で報告する)。
+                    try:
+                        _idx2 = getattr(self, "_current_idx", -1)
+                        _cmd2 = SCRIPTS[_idx2].get("cmd", []) if _idx2 >= 0 else []
+                        # 新規生成(全カテゴリ)完了時: 統合問題提起(CSV化分の監査問題 + 非化分の原因→対策案)。
+                        # 生成ログは drops + inline自己監査を含むので1本で両方カバー。
+                        if _idx2 >= 0 and SCRIPTS[_idx2].get("type") == "new":
+                            self._show_problem_report(self._run_log_text())
+                        elif any("csv_auditor.py" in str(c) for c in _cmd2):
+                            self._show_audit_summary(self._run_log_text())
+                    except Exception as _e:
+                        self.append_log(f"⚠️ サマリー表示失敗: {_e}\n")
+                    # open_after: 結果ファイル(最新)を自動で開く (ファネル分析/需要強化 等)
+                    _cur = SCRIPTS[getattr(self, "_current_idx", -1)] if getattr(self, "_current_idx", -1) >= 0 else {}
+                    _oa = _cur.get("open_after")
+                    # restock_revise は Revise CSV が post-chain(後段)で生成されるため、ここで開くと
+                    # 一つ前の古いCSVを掴む(2026-06-22 指摘)。生成後(Step4.5の後)に開く。
+                    if _oa and _cur.get("restock_revise"):
+                        _oa = None
+                    if _oa and item[1] in (0, None):  # None=returncode未確定でも完走時は開く
+                        try:
+                            import glob as _g
+                            hits = _g.glob(_oa)
+                            if hits:
+                                latest = max(hits, key=os.path.getmtime)
+                                os.startfile(latest)
+                                self.append_log(f"📂 開く: {os.path.basename(latest)}\n")
+                            else:
+                                self.append_log(f"⚠️ 出力ファイルが見つかりません: {_oa}\n")
+                        except Exception as _e:
+                            self.append_log(f"⚠️ ファイル起動失敗: {_e}\n")
+                    # open_url: 結果スプシ(URL)を自動で開く (集約方針=結果はスプシ。2026-06-07)
+                    _ou = _cur.get("open_url")
+                    if _ou and item[1] in (0, None):
+                        try:
+                            import webbrowser as _wb
+                            _wb.open(_ou)
+                            self.append_log(f"🌐 開く: {_ou}\n")
+                        except Exception as _e:
+                            self.append_log(f"⚠️ スプシ起動失敗: {_e}\n")
+                    # 取下再出品②(relist)は CSV破壊系の後処理をスキップ。
+                    # 理由: relist は「同じ型番を意図的に再出品」。重複くん/excluder は通常出品用で、
+                    #       取下げ前(=管理シート上はまだACTIVE)の同型番を「重複」と誤判定し CSV から物理削除する。
+                    _skip_pp = False
+                    try:
+                        _idx = getattr(self, "_current_idx", -1)
+                        _skip_pp = bool(_idx >= 0 and SCRIPTS[_idx].get("skip_postprocess"))
+                    except Exception:
+                        _skip_pp = False
+                    if _skip_pp:
+                        _skip_label = SCRIPTS[_idx].get("label", "") if _idx >= 0 else ""
+                        self.append_log(f"\n({_skip_label}: excluder/title-fix/重複くん の後処理をスキップ — skip_postprocess)\n")
                     # Step 2: csv_postprocess_excluder (check_csv NO-GO 行を CSV 物理除外)
                     # Step 2.5: post_title_fix (TCG タイトル長補強・PSA 名前正規化, 2026-05-02 追加)
                     # Step 3: rarara (CSV outlier 検出) - excluder 後の CSV を分析
+                    if not _skip_pp:
+                        try:
+                            captured_log = self._run_log_text()
+                            _run_excluder_for_latest_csv(self.append_log, captured_log)
+                        except Exception as _e:
+                            self.append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
+                    if not _skip_pp:
+                        try:
+                            _ptf_dir = os.path.join(WORKSPACE, "iMakTCG", "tools")
+                            if _ptf_dir not in sys.path:
+                                sys.path.insert(0, _ptf_dir)
+                            from post_title_fix import run_post_title_fix_for_latest_csv
+                            run_post_title_fix_for_latest_csv(self.append_log)
+                        except Exception as _e:
+                            self.append_log(f"\n⚠️ post_title_fix hook 失敗: {_e}\n")
+                    # rarara hook 削除 (= 5/28 ユーザー判断、 DON 仕様で WARN ばかり実害発見ゼロ)
+                    # 旧: self._run_rarara_after()
+                    # Step 4: dedupe_excluder (2026-05-27 追加、 重複くん (KEY1, KEY2) tuple 物理除外)
+                    # RESTOCK Revise は既存出品の修正=重複を作らないので新規用 dedupe を skip
+                    # (2026-06-22: 自己重複で RESTOCK 行が誤除外される事故の根治。_runs_new_listing_dedupe 参照)。
+                    _entry_now = SCRIPTS[_idx] if _idx >= 0 else {}
+                    if _runs_new_listing_dedupe(_entry_now):
+                        try:
+                            _run_dedupe_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
+                        except Exception as _e:
+                            self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
+                    elif _entry_now.get("restock_revise"):
+                        self.append_log(
+                            "\n(♻ RESTOCK: 新規出品用の重複くんを skip — Revise は既存出品の修正で重複を作らない。"
+                            "自己重複による誤除外を防止)\n")
+                    # Step 4.5: RESTOCK Revise 変換 (2026-06-20)。excluder/title-fix/dedup の **後** に、
+                    # 最終クリーンな Add CSV を Add→Revise 化する(順序保証=赤字/重複/旧タイトルを含めない)。
+                    # ♻ ボタン (restock_revise=True) の時のみ。旧: psa_restock_build が dedup 前に変換→混入バグ。
                     try:
-                        captured_log = self.log.get("1.0", "end") if hasattr(self, 'log') else ""
-                        _run_excluder_for_latest_csv(self.append_log, captured_log)
+                        _ridx = getattr(self, "_current_idx", -1)
+                        if _ridx >= 0 and SCRIPTS[_ridx].get("restock_revise"):
+                            _run_restock_revise_for_latest_csv(
+                                self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
+                            # CSV の open_after は post_psa_review の **後** に回す(同時オープン回避)。
+                            # 確認ブラウザが開く時は CSV を開かない(2026-06-22 指摘)。フラグだけ立てる。
+                            self._restock_open_after_pending = SCRIPTS[_ridx].get("open_after")
                     except Exception as _e:
-                        self.append_log(f"\n⚠️ excluder hook 失敗: {_e}\n")
+                        self.append_log(f"\n⚠️ RESTOCK Revise hook 失敗: {_e}\n")
+                    # Step 5: post_psa_review (2026-05-28 追加、 PSA TCG cert HTML viewer ユーザー判定 hook)
+                    # 5/29 修正: 今 cycle で生成された tcg_upload_*.csv のみ対象 (= TCG 以外 cycle で毎回 HTML 出る問題対策)
+                    # 2026-06-15: verify→build (PSA_VERIFY_BEFORE_BUILD=1) の時は CSV 生成 **前** に
+                    #   目視確認済 → この後付け hook は二重なので skip (HTML が CSV 後に出る問題の解消)。
+                    _verify_before_build = False
                     try:
-                        _ptf_dir = os.path.join(WORKSPACE, "iMakTCG", "tools")
-                        if _ptf_dir not in sys.path:
-                            sys.path.insert(0, _ptf_dir)
-                        from post_title_fix import run_post_title_fix_for_latest_csv
-                        run_post_title_fix_for_latest_csv(self.append_log)
+                        _vidx = getattr(self, "_current_idx", -1)
+                        _verify_before_build = bool(
+                            _vidx >= 0 and SCRIPTS[_vidx].get("env", {}).get("PSA_VERIFY_BEFORE_BUILD") == "1")
+                    except Exception:
+                        _verify_before_build = False
+                    # RESTOCK Revise は変種を確定KEIから forced 生成済み(既存出品の再出品)。
+                    # cert確認 viewer は無関係=Revise CSV は既に確定変種で生成済みなので出さない
+                    # (2026-07-24 ユーザー指摘: 無関係なら出すな)。
+                    _is_restock_revise = False
+                    try:
+                        _ridx2 = getattr(self, "_current_idx", -1)
+                        _is_restock_revise = bool(_ridx2 >= 0 and SCRIPTS[_ridx2].get("restock_revise"))
+                    except Exception:
+                        _is_restock_revise = False
+                    _skip_review = _verify_before_build or _is_restock_revise
+                    if _verify_before_build:
+                        self.append_log("\n(post_psa_review: verify→build で生成前に確認済 — 後付け hook skip)\n")
+                    elif _is_restock_revise:
+                        self.append_log("\n(post_psa_review: RESTOCK Revise は確定変種で生成済 — cert確認 hook skip)\n")
+                    try:
+                        _tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
+                        if _tools_dir not in sys.path:
+                            sys.path.insert(0, _tools_dir)
+                        from post_psa_review import run_post_psa_review
+                        _latest_csv = None
+                        _listing_start = getattr(self, '_listing_start_ts', None)
+                        _csv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "csv_output")
+                        if os.path.isdir(_csv_dir):
+                            _candidates = sorted(
+                                [os.path.join(_csv_dir, f) for f in os.listdir(_csv_dir) if f.startswith("tcg_upload_") and f.endswith(".csv")],
+                                key=os.path.getmtime,
+                                reverse=True,
+                            )
+                            if _candidates and _listing_start:
+                                # 今 cycle (= listing_start 以降に生成) のみ対象
+                                if os.path.getmtime(_candidates[0]) >= _listing_start:
+                                    _latest_csv = _candidates[0]
+                        # verify→build は生成前に確認済 → 後付け viewer は出さない (二重防止)。
+                        # _latest_csv の算出は Step 6 (no_go_sentinel) が使うため残す。
+                        _review_opened = False
+                        if _latest_csv and not _skip_review:
+                            _review_opened = bool(run_post_psa_review(_latest_csv, self.append_log))
+                        # RESTOCK CSV の open_after: 確認ブラウザを開いた時は開かない(同時オープン回避)。
+                        # 確認が無い時のみ最新CSVを開く(生成後=新しい方を掴む)。
+                        _pend_oa = getattr(self, "_restock_open_after_pending", None)
+                        if _pend_oa:
+                            self._restock_open_after_pending = None
+                            if _review_opened:
+                                self.append_log("📄 確認ブラウザを開いたため CSV自動オープンは保留(確認後に手動/同期で)\n")
+                            else:
+                                try:
+                                    import glob as _g2
+                                    _hits = _g2.glob(_pend_oa)
+                                    if _hits:
+                                        _latest_oa = max(_hits, key=os.path.getmtime)
+                                        os.startfile(_latest_oa)
+                                        self.append_log(f"📂 開く: {os.path.basename(_latest_oa)}\n")
+                                except Exception as _e3:
+                                    self.append_log(f"⚠️ open_after(restock) 失敗: {_e3}\n")
                     except Exception as _e:
-                        self.append_log(f"\n⚠️ post_title_fix hook 失敗: {_e}\n")
-                    self._run_rarara_after()
+                        self.append_log(f"\n⚠️ post_psa_review hook 失敗: {_e}\n")
+                    # Step 6: post_no_go_sentinel (2026-05-28 追加、 NO-GO 除外 cert にスプシ K 列 sentinel 赤字書込)
+                    # 5/29: Step 5 と同 _latest_csv 使用 (= 今 cycle TCG のみ。 Porter 等は None で skip)
+                    try:
+                        from post_no_go_sentinel import run_post_no_go_sentinel
+                        if _latest_csv:
+                            run_post_no_go_sentinel(_latest_csv, self.append_log)
+                    except Exception as _e:
+                        self.append_log(f"\n⚠️ post_no_go_sentinel hook 失敗: {_e}\n")
+                    # 全 process 完了通知 (= ユーザー要望 2026-05-31)
+                    self.append_log("\n" + "=" * 70 + "\n")
+                    self.append_log("🎉 全 process 完了 — 入稿準備 OK\n")
+                    if _latest_csv:
+                        self.append_log(f"   出力 CSV: {_latest_csv}\n")
+                    from datetime import datetime as _dt
+                    self.append_log(f"   終了時刻: {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    self.append_log("=" * 70 + "\n")
                     self.status_var.set("待機中")
                     self.now_processing.set("")
                 else:
@@ -1337,12 +2672,8 @@ class ListingPanel:
         self.root.after(100, self.poll_queue)
 
     def stop_script(self):
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
-            self.append_log("\n🛑 停止要求送信\n")
-            self.status_var.set("停止処理中")
-        else:
-            self.append_log("実行中のスクリプトはありません\n")
+        _kill_process_tree(self.proc, self.append_log)
+        self.status_var.set("停止処理中")
 
 
 class SellerHubCategoryDialog(tk.Toplevel):
@@ -1707,9 +3038,7 @@ class KujiWizardDialog(tk.Toplevel):
                 pass
 
     def _cancel_proc(self):
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
-            self._append_log("\n🛑 中止要求送信\n")
+        _kill_process_tree(self.proc, self._append_log)
 
 
 _SINGLE_INSTANCE_LOCK = None  # ソケットを参照保持してプロセス終了まで占有

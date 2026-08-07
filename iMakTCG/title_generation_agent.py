@@ -163,19 +163,54 @@ def _ensure_character_in_title(
     既にタイトル中にあれば何もしない (大半のカードはこのケース)。
     キャラ名追加で 80字超なら、末尾の filler ("Card"/"Holo"/"Foil") 1個を犠牲にして確保。
     それでも収まらなければ追加せず元 title を返す (中途半端な切り落とし禁止)。
+
+    Romaji 揺れ対応 (= 2026-05-23 追加): Kozuki vs Kouzuki, Yujiro vs Yuujirou 等の
+    Hepburn/Kunrei 表記差を吸収して 重複追加を防ぐ。
     """
     if not character:
         return title
     if character.lower() in title.lower():
         return title
-    candidate = f"{title} {character}"
+
+    # Romaji 揺れ吸収 (= 'ou'→'o', 'uu'→'u' 正規化で比較)
+    def _normalize_romaji(s: str) -> str:
+        s = s.lower()
+        s = re.sub(r'ou', 'o', s)
+        s = re.sub(r'uu', 'u', s)
+        s = re.sub(r'oo', 'o', s)
+        return s
+    if _normalize_romaji(character) in _normalize_romaji(title):
+        return title  # Kouzuki Hiyori → Kozuki Hiyori 既存と判定 → skip
+
+    # フル一致しない場合: character を token 分解し、title に未出の token だけ末尾追加.
+    # = キャラ名重複防止 (2026-06-13). 例 character='Scrafty Art' / title='... Scrafty Card'
+    #   → 'Scrafty' は既出 → drop、'Art' のみ追加 → '... Scrafty Card Art'
+    #   (旧実装は full 'Scrafty Art' を substring 不在として丸ごと追加 → 'Scrafty' 重複事故)
+    # dedupe 系 helper は character 追加より前に走るためここで防がないと重複が残る.
+    title_norm = _normalize_romaji(title)
+    title_tokens_norm = set(re.split(r"[\s\-/]+", title_norm))
+    missing = []
+    for tok in re.split(r"[\s/]+", character):
+        if not tok:
+            continue
+        tn = _normalize_romaji(tok).strip(".,;:'\"")
+        if not tn:
+            continue
+        if tn in title_tokens_norm or tn in title_norm:
+            continue  # 既に title 中にある token は再追加しない
+        missing.append(tok)
+    if not missing:
+        return title  # 追加すべき新 token なし (全部既出) = 重複させない
+
+    addition = " ".join(missing)
+    candidate = f"{title} {addition}"
     if len(candidate) <= target_max:
         return candidate
     # 80字超え → 末尾 filler 1個を捨てて再試行
     for filler in (" Card", " Cards", " Holo", " Foil"):
         if title.endswith(filler):
             stripped = title[: -len(filler)]
-            candidate2 = f"{stripped} {character}"
+            candidate2 = f"{stripped} {addition}"
             if len(candidate2) <= target_max:
                 return candidate2
     # それでもダメなら諦める (元 title 維持、SEO 機会損失だが破損より良い)

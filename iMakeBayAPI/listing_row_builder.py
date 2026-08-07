@@ -120,14 +120,18 @@ def build_listing_row(input_data: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _infer_game(psa_brand: str) -> str:
-    """PSA brand から eBay Game フィールドを推定（決定論的）"""
+    """PSA brand から eBay Game フィールドを推定（決定論的）.
+
+    2026-05-31: eBay 公式 API 正規値 (= getItemAspectsForCategory) に統一.
+    詳細: memory:official_x_ebay_filter_max_activation
+    """
     b = (psa_brand or "").upper()
     if "ONE PIECE" in b:
-        return "One Piece TCG"
+        return "One Piece CCG"  # eBay 正規値 (旧 "One Piece TCG" から修正)
     if "GUNDAM" in b:
-        return "Gundam Card Game"
+        return "Gundam Card Game"  # 当店 catalog 正規値 (= eBay 未登録、 FREE_TEXT B 案)
     if "DRAGON BALL" in b or "FUSION WORLD" in b:
-        return "Dragon Ball Super Card Game"
+        return "Dragon Ball Super Card Game"  # eBay 正規値 完全一致
     return ""
 
 

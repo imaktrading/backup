@@ -8,7 +8,23 @@ import time
 import requests
 from datetime import datetime, timedelta
 
+# ScheduleTime 制御。True=即live / False=2週間後スケジュール。
+# 2026-06-28: 取下再出品② も新規同様スケジュール出品に統一(ユーザー要望)。relist でも True にしない
+# (scheduled でも FileExchange Add は ItemID 即返す→③書戻しは回る)。
+# 価格/タイトル/item specifics は通常出品と同じ最新ロジックで再生成する(relistの狙い)。
+# コストは管理スプシの実コストを引くので正しく再算出される(据置はしない)。
+_IMMEDIATE_SCHEDULE = False
+
+# --relist 時 {supply_url: 元の old_item_id}。元listingの画像を GetItem で取得し PicURL に流用する
+# (999.png ダミーは新規出品用。relistは元の実画像を引き継ぐ=「画像現状流用」。2026-06-06 画像消失で新設)。
+_RELIST_OLD_ITEMID = {}
+
 def get_schedule_time():
+    if _IMMEDIATE_SCHEDULE:
+        # 即live = ScheduleTime 空欄 (アップ時に即出品)。
+        # ※過去時刻を入れると eBay は "scheduled time occurs in the past" で全件 reject する
+        #   (2026-06-06 実機で判明)。空欄が正しい即時出品。
+        return ""
     future = datetime.utcnow() + timedelta(weeks=SCHEDULE_WEEKS)
     return future.strftime("%Y-%m-%d %H:%M:%S")
 import undetected_chromedriver as uc
@@ -35,12 +51,57 @@ except Exception:
 
 # Phase 3-B (2026-04-29): iMakCatalog adapter — catalog hit 時に Selenium scrape を skip.
 # 失敗時 (iMakCatalog 未配置 / DB 未投入) は静かに None フォールバックして既存挙動を維持する.
+def _load_catalog_lookup():
+    """alias 対応 gshock_lookup を取得する.
+
+    2026-06-11: HQ側 c:/dev/iMak/iMakCatalog は alias_of 非対応の stale copy。
+    本番は別 worktree (C:/dev/iMak_catalog) の alias 対応版 (gshock_lookup + api) を
+    使う必要がある (短縮形→canonical を別名追跡しないと別名行をそのまま返す bug)。
+
+    ただし separated を global の 'gshock_lookup'/'api' 名で常駐させると、HQ側を
+    意図的に import する他コード/テスト (tests/test_gshock_lookup.py の
+    _generate_candidates 等) を壊す。よって separated を controlled-load し、
+    lookup 関数だけ捕捉して global cache / sys.path は元に戻す
+    (関数は load 時に separated api を捕捉済なので、復元後も正しく動く)。
+    """
+    sep_root = r"C:/dev/iMak_catalog/iMakCatalog"
+    sep_integ = sep_root + "/integrations"
+    if not _os.path.isdir(sep_integ):
+        # 別 worktree 不在環境: HQ側 (fallback)
+        _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                           "..", "iMakCatalog", "integrations"))
+        from gshock_lookup import lookup_gshock as _fn  # type: ignore
+        return _fn
+    import importlib
+    _saved = {_k: _sys.modules.get(_k) for _k in ("gshock_lookup", "api")}
+    _saved_path = list(_sys.path)
+    try:
+        for _p in (sep_root, sep_integ):
+            if _p not in _sys.path:
+                _sys.path.insert(0, _p)
+        for _k in ("gshock_lookup", "api"):
+            _sys.modules.pop(_k, None)
+        _mod = importlib.import_module("gshock_lookup")  # separated (+ separated api 捕捉)
+        return _mod.lookup_gshock
+    finally:
+        for _k in ("gshock_lookup", "api"):
+            _sys.modules.pop(_k, None)
+            if _saved[_k] is not None:
+                _sys.modules[_k] = _saved[_k]
+        _sys.path[:] = _saved_path
+
+
 try:
-    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
-                                       "..", "iMakCatalog", "integrations"))
-    from gshock_lookup import lookup_gshock as _catalog_lookup  # type: ignore
+    _catalog_lookup = _load_catalog_lookup()
 except Exception:
     _catalog_lookup = None
+
+# 2026-05-31: ebay_filter_masters (= 公式 × eBay フィルタ 最大活用 設計)
+# memory:official_x_ebay_filter_max_activation, TCG 完成 patterns 流用.
+# 別 worktree (= C:/dev/iMak_catalog/iMakCatalog) を優先参照 (= Catalog Claude 5/31 構築).
+_CATALOG_SEPARATED = r"C:/dev/iMak_catalog/iMakCatalog"
+if _os.path.isdir(_CATALOG_SEPARATED) and _CATALOG_SEPARATED not in _sys.path:
+    _sys.path.insert(0, _CATALOG_SEPARATED)
 
 URLS_FILE = "gshock_urls.txt"
 DESCRIPTION_FILE = "GSHOCK.txt"
@@ -61,18 +122,24 @@ CATEGORY = 31387
 SCHEDULE_WEEKS = 2
 PIC_URL = "https://raw.githubusercontent.com/imaktrading/imaktrading.github.io/main/999.png"
 
-# DDP送料テーブル（TCGと同じ）
-SHIPPING_POLICIES = [
-    (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
-    (300, "200-300"), (400, "300-400"), (500, "400-500"),
-    (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
-]
-
+# Shipping Profile 名 (= 価格 + カテゴリ から SSOT 経由で取得)
+# V6 mode: "DDP-A-P09" 等 / V5 Free mode: "Free" / fallback: 旧 V5 tier 名
+# 詳細: iMakeBayAPI/listing_common.get_shipping_policy_name()
 def get_shipping_policy(price):
-    for threshold, policy in SHIPPING_POLICIES:
-        if price <= threshold:
-            return policy
-    return "800-1000"
+    try:
+        from listing_common import get_shipping_policy_name
+        return get_shipping_policy_name(price, "G-SHOCK")
+    except Exception:
+        # fallback: 旧 V5 tier 名 (= freeshipping_postprocess で "Free" に置換される運用)
+        OLD_TIERS = [
+            (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+            (300, "200-300"), (400, "300-400"), (500, "400-500"),
+            (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+        ]
+        for threshold, policy in OLD_TIERS:
+            if price <= threshold:
+                return policy
+        return "800-1000"
 
 STORE_CATEGORIES = {
     # DW-6900系（GM-6900含む）
@@ -139,6 +206,83 @@ DIGITAL_COMMON_FEATURES = [
     "Day Indicator", "LED Display", "Multifunction", "Timer",
     "World Time", "Chronograph",
 ]
+
+# eBay カテゴリ 31387 の Features 正規値 (公式 API フィルタ値・2026-06-13 実機取得)。
+# これ以外の文字列は検索フィルタにヒットしない → 出さない (official_x_ebay_filter_max_activation)。
+EBAY_FEATURES_VALID = frozenset([
+    "12-Hour Dial", "24-Hour Dial", "Acrylic Crystal", "Alarm", "Altimeter",
+    "Annual Calendar", "Atomic/Radio Controlled", "Backlight", "Bluetooth", "Calculator",
+    "Central Second", "Chronograph", "Chronometer", "Co-Axial", "Compass",
+    "Date Indicator", "Day Indicator", "Day/Date", "Day/Night Indicator", "Diamond Accent",
+    "Easy to Read/Large Numerals", "Fixed Bezel", "GPS", "Gemmed", "Heart Rate Monitor",
+    "Helium Valve", "LCD Display", "LED Display", "Leap Year Indicator", "Limited Edition",
+    "Luminous Dial", "Luminous Hands", "Luminous Indexes", "Magnetic-Resistant",
+    "Mineral Crystal", "Month Indicator", "Moon Phase", "Multi-Dial", "Multifunction",
+    "Multiple Hands", "Perpetual Calendar", "Power Reserve Indicator", "Pulsometer",
+    "Push/Pull Crown", "Repeater", "Retrograde Date", "Rotating Bezel", "Sapphire Crystal",
+    "Scratch-Resistant", "Screwdown Crown", "Seconds Hand", "Self-Winding", "Shock-Resistant",
+    "Small Second", "Solar Powered", "Splash Proof", "Stop-Seconds Function", "Swiss Made",
+    "Swiss Movement", "Tachymeter", "Telemeter", "Thermometer", "Timer", "Tourbillon",
+    "Triple Calendar", "Water Resistance", "Water-Resistant", "World Time",
+])
+
+# catalog の生 feature コード (snake_case / 末尾に :_N の数量) → eBay 正規値。
+# 値 None = 明示的に drop (eBay フィルタに無い機能 = 記入しても検索ヒットせず空欄同等)。
+# key は「:_数量」を除いた base を小文字化したもの。clean だが eBay 不一致な値もここで矯正/除外。
+RAW_FEATURE_MAP = {
+    "world_time": "World Time", "cities": "World Time", "time_zones": "World Time",
+    "alarms": "Alarm", "alarm": "Alarm",
+    "bluetooth": "Bluetooth",
+    "tough_solar": "Solar Powered", "solar": "Solar Powered", "solar_powered": "Solar Powered",
+    "auto_light": "Backlight", "led": "LED Display",
+    "magnetic_resistance": "Magnetic-Resistant",
+    "multi_band_6": "Atomic/Radio Controlled", "radio_controlled": "Atomic/Radio Controlled",
+    "multi_timer": "Timer", "timer": "Timer",
+    "moon_graph": "Moon Phase", "moon": "Moon Phase",
+    "thermometer": "Thermometer", "altimeter": "Altimeter", "compass": "Compass",
+    "water_resistance": "Water-Resistant",
+    "stopwatch": "Chronograph", "chronograph": "Chronograph",
+    "gps": "GPS", "heart_rate": "Heart Rate Monitor",
+    # 明示 drop (eBay フィルタに無い = 検索ヒットしない)
+    "carbon_guard_core": None, "carbon_core_guard": None, "casio_watches": None,
+    "multi_date_format": None, "multi_day_format": None, "step_tracker": None,
+    "sunrise_sunset": None, "alphagel": None, "screw_back": None, "vibration": None,
+    "tide_graph": None, "mud_resistance": None, "g_shock_move": None, "countdown": None,
+    "neon_illuminator": None, "super_illuminator": "Backlight", "carbon_core_guard": None,
+}
+
+
+def normalize_features(features_str):
+    """catalog 生 feature コードを eBay 正規値に正規化し、不正/不明は drop。
+
+    - "alarms:_5" / "cities:_+300" のような数量サフィックスを除去
+    - RAW_FEATURE_MAP で生コード→正規値 (None は drop)
+    - 既に eBay 正規値ならそのまま採用
+    - G-Shock 共通機能を必ず付与
+    返り値: eBay 正規値のみの list (順不同・dedupe 済)。FREE_TEXT だが正規値に絞ることで
+    検索フィルタにヒットさせる (official_x_ebay_filter_max_activation / 推測で埋めない)。
+    """
+    out = []
+
+    def _push(v):
+        if v and v not in out:
+            out.append(v)
+
+    for raw in str(features_str or "").split(","):
+        tok = raw.strip()
+        if not tok:
+            continue
+        base = re.sub(r":_.*$", "", tok).strip()       # "alarms:_5" → "alarms"
+        if base in EBAY_FEATURES_VALID:                  # 既に正規値
+            _push(base); continue
+        key = re.sub(r"[\s\-]+", "_", base.lower())      # "Radio Controlled"→"radio_controlled"
+        if key in RAW_FEATURE_MAP:
+            _push(RAW_FEATURE_MAP[key])                  # None なら _push が無視=drop
+            continue
+        # 未知 = drop (推測で埋めない)
+    for f in GSHOCK_COMMON_FEATURES:                     # 共通機能は必ず付与
+        _push(f)
+    return out
 MOVEMENT_MAP = {
     # eBay Movement フィルタは Mechanical Automatic / Mechanical Manual / Quartz の3択のみ
     # G-Shockは全部Quartz（Solar/Radio Controlled はFeatures側に記録）
@@ -377,7 +521,8 @@ def get_default_weight(model):
     return ""
 
 def trim_features(features_str, max_len=65):
-    parts = [f.strip() for f in features_str.split(",")]
+    # まず eBay 正規値へ正規化 (生コード alarms:_5 等を除去・不明は drop)。
+    parts = normalize_features(features_str)
     sorted_parts = sorted(parts, key=lambda x: FEATURES_PRIORITY.index(x) if x in FEATURES_PRIORITY else 99)
     result = []
     for p in sorted_parts:
@@ -454,8 +599,96 @@ def extract_model_from_text(text):
     return None
 
 
-def load_targets_from_low_sheet():
-    """統合 LOW スプシから R='G-shock' AND B 列空 AND D 列空 の行を取込.
+def _listed_gshock_models(all_values):
+    """出品中(B=itemID有 AND D=売切空)の G-shock の型番集合を返す(純関数)。
+
+    2026-07-22: 同型番が既に live 出品済の「2枚目行」が B空のため毎回抽出→生成→dedupe除外を
+    繰り返し、1回10枠のうち数枠を空振りで浪費していた(この run で 3/10 枠)。抽出段階で
+    「出品中の型番」と突合して先に止める(PSA の既出品KEY除外と同思想)。
+    - 集合は AI列(canonical KEY)∪ タイトル等からの抽出型番(AI空でも取りこぼさない)。
+    - **動的判定**: live が売れて D=売切になれば次回から集合に入らず、2枚目が自動で再浮上する
+      (KEY書き戻し方式と違い解除操作が不要)。
+    """
+    listed = set()
+    for row in all_values[1:]:
+        cat = (row[17] if len(row) > 17 else '').strip()
+        b = (row[1] if len(row) > 1 else '').strip()
+        sold = (row[3] if len(row) > 3 else '').strip()
+        if cat != 'G-shock' or not b or sold:
+            continue
+        key = (row[34] if len(row) > 34 else '').strip()   # AI列 canonical KEY
+        if key:
+            listed.add(key.upper())
+        m = extract_model_from_text(
+            (row[2] if len(row) > 2 else '') + ' '
+            + (row[8] if len(row) > 8 else '') + ' '
+            + (row[7] if len(row) > 7 else ''))
+        if m:
+            listed.add(m.upper())
+    return listed
+
+
+def _assert_n_formula_intact(ws):
+    """LOW N列(仕入値SSOT)が ARRAYFORMULA であることを確認。壊れていたら即 abort。
+
+    2026-07-22 設計: N =(M=現在価格 or F)− K=ポイント のシート関数(N1 の ARRAYFORMULA)。
+    どこかのプロセスが N セルに値を書くと関数が静かに壊れ、仕入値が陳腐化したまま
+    誤った価格で出品される(fail-OPEN)。検知したら出品を止めるのが正(出品の正確性 > 継続)。
+    """
+    formula = ws.acell("N1", value_render_option="FORMULA").value or ""
+    if not formula.startswith("=ARRAYFORMULA"):
+        raise RuntimeError(
+            f"LOW N列の仕入値関数が壊れています (N1={formula[:50]!r})。"
+            "N セルに値を書いたプロセスを特定し、N1 に ARRAYFORMULA を再設置してください"
+            " (HQ daily_report 2026-07-22 参照)")
+
+
+def _select_gshock_row(row, only_urls=None, listed_models=None):
+    """1 スプシ行 → ((url, model, price_jpy_str), None) 採用 / (None, reason) 除外。
+
+    純粋関数 (network無し) — load_targets_from_low_sheet とテスト両方が使う。
+    reason: 'not_gshock'(URL無/R≠G-shock) | 'not_target'(B/D or only_urls不一致)
+            | 'no_model'(型番抽出失敗) | 'partial_model'(color suffix欠落)
+    """
+    from listing_common import pick_cost_jpy as _pick_cost
+    url      = (row[0]  if len(row) > 0  else '').strip()  # A
+    item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
+    title_jp = (row[2]  if len(row) > 2  else '').strip()  # C
+    sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ
+    price_f  = _pick_cost(row)                             # N列(実コスト)優先/F列fallback
+    desc     = (row[7]  if len(row) > 7  else '').strip()  # H 商品説明
+    title_en = (row[8]  if len(row) > 8  else '').strip()  # I Title
+    category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
+
+    if not url or category != 'G-shock':
+        return None, 'not_gshock'
+    if only_urls is not None:
+        # 取下再出品②: 指定URLのみ、B(itemID)/D(sold) フィルタは無視 (取下げ済を再出品)
+        if url not in only_urls:
+            return None, 'not_target'
+    elif item_id or sold:
+        # 通常: 未出品(B空)かつ売切れでない行のみ
+        return None, 'not_target'
+    model = extract_model_from_text(title_jp + ' ' + title_en + ' ' + desc)
+    if not model:
+        return None, 'no_model'
+    # color suffix 欠落 (例: GW-2320FP) は catalog の完全 ID と不一致 → SKIP (Precision 100%).
+    if not is_complete_gshock_model(model):
+        return None, 'partial_model'
+    # 同型番が既に live 出品済 → 2枚目行は抽出しない(毎回 dedupe 除外される空振り枠の根絶。
+    # 取下再出品(only_urls)時は明示指定なので適用しない)。live が消えれば次回自動で再浮上。
+    if only_urls is None and listed_models and model.upper() in listed_models:
+        return None, 'already_listed'
+    return (url, model, price_f), None
+
+
+def load_targets_from_low_sheet(only_urls=None):
+    """統合 LOW スプシから R='G-shock' 行を取込 (model/コストを抽出).
+
+    通常: B列空 AND D列空 (=未出品キュー) の行のみ。
+    only_urls 指定時 (取下再出品②): A列が only_urls に含まれる行だけを、B/D に
+      関係なく取込む (取下げ済の特定URLを再出品。コストは sheet から引くので
+      最新 pricing が正しく再計算される)。
 
     Returns:
         [(url, model, price_jpy_str), ...] のリスト
@@ -481,6 +714,7 @@ def load_targets_from_low_sheet():
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(GSHOCK_SHEET_ID)
         ws = sh.get_worksheet_by_id(GSHOCK_GID)
+        _assert_n_formula_intact(ws)   # N列(仕入値SSOT)の関数破損検知 (2026-07-22)
         all_values = ws.get_all_values()
     except Exception as e:
         print(f"⚠️ スプシ取込失敗: {type(e).__name__}: {e} → URL ファイル fallback")
@@ -489,35 +723,28 @@ def load_targets_from_low_sheet():
     targets = []
     skipped_no_model = 0
     skipped_partial_model = 0
+    skipped_listed = 0
+    listed_models = _listed_gshock_models(all_values)   # 出品中の型番(2枚目行の空振り防止)
     for row in all_values[1:]:
-        url      = (row[0]  if len(row) > 0  else '').strip()  # A
-        item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
-        title_jp = (row[2]  if len(row) > 2  else '').strip()  # C
-        sold     = (row[3]  if len(row) > 3  else '').strip()  # D 売り切れ
-        price_f  = (row[5]  if len(row) > 5  else '').strip()  # F 商品価格 (仕入参考)
-        desc     = (row[7]  if len(row) > 7  else '').strip()  # H 商品説明
-        title_en = (row[8]  if len(row) > 8  else '').strip()  # I Title
-        category = (row[17] if len(row) > 17 else '').strip()  # R カテゴリ
-
-        # 仕様: R 列='G-shock' 必須 (抽出くん側で必ず埋める).
-        # 他 listing スクリプト (Montbell/Tシャツ 等) と同じ運用.
-        if not url or item_id or sold or category != 'G-shock':
-            continue
-        # タイトル/説明から CASIO 型番抽出
-        text = title_jp + ' ' + title_en + ' ' + desc
-        model = extract_model_from_text(text)
-        if not model:
+        target, reason = _select_gshock_row(row, only_urls=only_urls, listed_models=listed_models)
+        if target:
+            targets.append(target)
+        elif reason == 'already_listed':
+            skipped_listed += 1
+        elif reason == 'no_model':
             skipped_no_model += 1
-            continue
-        # color suffix 欠落 (例: GW-2320FP) は catalog の完全 ID と不一致 → SKIP.
-        # Mercari title に色番抜きで書かれているケース (一括出品セラー等) で発生.
-        if not is_complete_gshock_model(model):
+        elif reason == 'partial_model':
+            model = extract_model_from_text(
+                (row[2] if len(row) > 2 else '') + ' '
+                + (row[8] if len(row) > 8 else '') + ' '
+                + (row[7] if len(row) > 7 else ''))
             skipped_partial_model += 1
             print(f"⚠️ partial model_id (color suffix 欠落): {model!r} → SKIP "
                   f"(Mercari title/desc に完全型番 (例: {model}-1A4JR) が無い)")
-            continue
-        targets.append((url, model, price_f))
 
+    if skipped_listed:
+        print(f"⏭️ 既出品(同型番が live 出品済)の2枚目を除外: {skipped_listed}件 "
+              f"(毎回 dedupe 除外される空振り枠の防止。live が消えれば自動再浮上)")
     if skipped_no_model:
         print(f"⚠️ {skipped_no_model} 件は型番抽出失敗で SKIP (Precision 100% 原則)")
     if skipped_partial_model:
@@ -1060,20 +1287,29 @@ def build_specs_html(data):
     year = data.get('year', '')
     display = data.get('display', 'Digital')
 
+    # 値が空の項目は行ごと出さない (2026-06-13: catalog 空欄が「Movement:」と裸で残る指摘)。
+    # 従来 Case Size 等だけ if ガードがあったのを全項目に統一。空欄=不足であって誤りでないが
+    # 見栄えが悪いので非表示にする (推測で埋めない=Precision 方針とも整合)。
     specs = []
-    specs.append(f"<li><b>Model:</b> {model}</li>")
-    specs.append(f"<li><b>Movement:</b> {movement}</li>")
-    specs.append(f"<li><b>Display:</b> {display}</li>")
-    specs.append(f"<li><b>Water Resistance:</b> {water}</li>")
-    specs.append(f"<li><b>Features:</b> {features}</li>")
-    if case_size: specs.append(f"<li><b>Case Size:</b> {case_size}</li>")
-    if thickness: specs.append(f"<li><b>Case Thickness:</b> {thickness}</li>")
-    if weight: specs.append(f"<li><b>Weight:</b> {weight}</li>")
-    specs.append(f"<li><b>Crystal:</b> {crystal}</li>")
-    specs.append(f"<li><b>Case Material:</b> {case_material}</li>")
-    specs.append(f"<li><b>Band Material:</b> {band_material}</li>")
-    if band_length: specs.append(f"<li><b>Band Length:</b> {band_length}</li>")
-    if year: specs.append(f"<li><b>Year:</b> {year}</li>")
+
+    def _add(label, val):
+        val = (str(val).strip() if val is not None else "")
+        if val:
+            specs.append(f"<li><b>{label}:</b> {val}</li>")
+
+    _add("Model", model)
+    _add("Movement", movement)
+    _add("Display", display)
+    _add("Water Resistance", water)
+    _add("Features", features)
+    _add("Case Size", case_size)
+    _add("Case Thickness", thickness)
+    _add("Weight", weight)
+    _add("Crystal", crystal)
+    _add("Case Material", case_material)
+    _add("Band Material", band_material)
+    _add("Band Length", band_length)
+    _add("Year", year)
 
     return f"""<p><span style="text-decoration: underline;"><strong><span style="vertical-align: inherit;"><span style="vertical-align: inherit;">Specifications</span></span></strong></span></p>
 <ul>
@@ -1093,6 +1329,168 @@ def build_description(data, base_html):
     if marker in base_html:
         return base_html.replace(marker, specs_html + '\n' + marker, 1)
     return base_html
+
+# 2026-05-31: eBay フィルタ validate (= TCG 完成 patterns 流用)
+# memory:official_x_ebay_filter_max_activation
+EBAY_SPEC_TO_CSV_GSHOCK = {
+    "Brand": "C:Brand",
+    "MPN": "C:MPN",
+    "Department": "C:Department",
+    "Type": "C:Type",
+    "Style": "C:Style",
+    "Display": "C:Display",
+    "Case Color": "C:Case Color",
+    "Band Color": "C:Band Color",
+    "Dial Color": "C:Dial Color",
+    "Bezel Color": "C:Bezel Color",
+    "Bezel Material": "C:Bezel Material",
+    "Bezel Type": "C:Bezel Type",
+    "Dial Pattern": "C:Dial Pattern",
+    "Band Material": "C:Band Material",
+    "Case Material": "C:Case Material",
+    "Features": "C:Features",
+    "Country of Origin": "C:Country of Origin",
+    "Movement": "C:Movement",
+    "Water Resistance": "C:Water Resistance",
+    "Model": "C:Model",
+    "Customized": "C:Customized",
+    "Case Size": "C:Case Size",
+    "Crystal": "C:Crystal",
+    "Year Manufactured": "C:Year Manufactured",
+    "Case Shape": "C:Case Shape",
+    "Watch Shape": "C:Watch Shape",
+    "Band/Strap": "C:Band/Strap",
+    "Closure": "C:Closure",
+    "Caseback": "C:Caseback",
+    "Indices": "C:Indices",
+    "Band Width": "C:Band Width",
+    "Lug Width": "C:Lug Width",
+    "Vintage": "C:Vintage",
+    "Handmade": "C:Handmade",
+    "With Original Box/Packaging": "C:With Original Box/Packaging",
+    "With Papers": "C:With Papers",
+    "Manufacturer Warranty": "C:Manufacturer Warranty",
+    "Band Length": "C:Band Length",
+    "Case Thickness": "C:Case Thickness",
+    "Item Weight": "C:Item Weight",
+}
+
+# SELECTION_ONLY だが eBay 受付ける特殊値 whitelist (= TCG 同パターン)
+EBAY_FILTER_SPECIAL_BYPASS_GSHOCK = {
+    "Country of Origin": {"does not apply"},
+}
+
+_EBAY_FILTER_AVAILABLE_GSHOCK = None
+_EBAY_FILTER_REPORT_GSHOCK = {
+    "validated": 0, "passthrough": 0, "blanked": 0, "truncated": 0, "required_blank": 0,
+    "blanked_samples": [], "truncated_samples": [], "required_blank_samples": [],
+}
+
+
+def _get_ebay_filter_gshock():
+    global _EBAY_FILTER_AVAILABLE_GSHOCK
+    if _EBAY_FILTER_AVAILABLE_GSHOCK is None:
+        try:
+            import ebay_filter_masters as _ef
+            _EBAY_FILTER_AVAILABLE_GSHOCK = _ef
+        except Exception as _e:
+            print(f"  ⚠️ ebay_filter_masters import 失敗 (= validate skip): {_e}")
+            _EBAY_FILTER_AVAILABLE_GSHOCK = False
+    return _EBAY_FILTER_AVAILABLE_GSHOCK if _EBAY_FILTER_AVAILABLE_GSHOCK else None
+
+
+def _sample_append_gshock(key, sample, cap=20):
+    if len(_EBAY_FILTER_REPORT_GSHOCK[key]) < cap:
+        _EBAY_FILTER_REPORT_GSHOCK[key].append(sample)
+
+
+def apply_ebay_filter_to_row_gshock(row, headers, category="gshock"):
+    """row 内 C:<aspect> 値を eBay 正規値 validate (= TCG psa_to_csv 同パターン).
+
+    3 ケース処理:
+      - 一致              → eBay 正規値 (= NFKC 正規化済 return)
+      - FREE_TEXT 不在    → catalog 値そのまま
+      - SELECTION_ONLY 不在 → 空欄 + whitelist bypass (= Country "Does not apply" 救済)
+
+    Gemini 改善 B 同梱:
+      - aspect_required + 空欄 → 警告 log
+      - 文字数制限超          → truncation
+    """
+    ef = _get_ebay_filter_gshock()
+    if ef is None:
+        return row
+    for aspect, csv_col in EBAY_SPEC_TO_CSV_GSHOCK.items():
+        if csv_col not in headers:
+            continue
+        idx = headers.index(csv_col)
+        if idx >= len(row):
+            continue
+        raw = str(row[idx] or "").strip()
+
+        if not raw:
+            try:
+                if ef.is_required(category, aspect):
+                    _EBAY_FILTER_REPORT_GSHOCK["required_blank"] += 1
+                    _sample_append_gshock("required_blank_samples", aspect)
+            except Exception:
+                pass
+            continue
+
+        try:
+            max_len = ef.get_max_length(category, aspect)
+        except Exception:
+            max_len = None
+        if max_len and len(raw) > max_len:
+            _EBAY_FILTER_REPORT_GSHOCK["truncated"] += 1
+            _sample_append_gshock("truncated_samples", f"{aspect}: {len(raw)}→{max_len}")
+            raw = raw[:max_len]
+
+        validated = ef.validate_value(category, aspect, raw)
+        if validated is None:
+            bypass_set = EBAY_FILTER_SPECIAL_BYPASS_GSHOCK.get(aspect, set())
+            if raw.lower() in bypass_set:
+                _EBAY_FILTER_REPORT_GSHOCK["passthrough"] += 1
+                row[idx] = raw
+            else:
+                _EBAY_FILTER_REPORT_GSHOCK["blanked"] += 1
+                _sample_append_gshock("blanked_samples", f"{aspect}={raw}")
+                row[idx] = ""
+        elif validated == raw:
+            _EBAY_FILTER_REPORT_GSHOCK["passthrough"] += 1
+            row[idx] = raw
+        else:
+            _EBAY_FILTER_REPORT_GSHOCK["validated"] += 1
+            row[idx] = validated
+    return row
+
+
+def print_ebay_filter_report_gshock():
+    r = _EBAY_FILTER_REPORT_GSHOCK
+    total = r["validated"] + r["passthrough"] + r["blanked"]
+    if total == 0 and r["required_blank"] == 0 and r["truncated"] == 0:
+        return
+    print()
+    print("=" * 60)
+    print("eBay フィルタ validate サマリー (G-shock = 3 ケース処理 + 改善 B)")
+    print("=" * 60)
+    print(f"  ✅ passthrough  (= 一致 or FREE_TEXT B 案 そのまま): {r['passthrough']}")
+    print(f"  🔧 validated    (= NFKC 正規化で eBay 正規表記に書換)  : {r['validated']}")
+    print(f"  ⬜ blanked      (= SELECTION_ONLY 不在で空欄)         : {r['blanked']}")
+    print(f"  ✂  truncated    (= 文字数制限超で切詰)                : {r['truncated']}")
+    print(f"  ⚠️ required_blank (= 必須 field が空欄 = 出品エラーリスク): {r['required_blank']}")
+    if r["blanked_samples"]:
+        print(f"  blanked samples (max 20):")
+        for s in r["blanked_samples"]:
+            print(f"    - {s}")
+    if r["truncated_samples"]:
+        print(f"  truncated samples:")
+        for s in r["truncated_samples"]:
+            print(f"    - {s}")
+    if r["required_blank_samples"]:
+        print(f"  required_blank samples:")
+        for s in r["required_blank_samples"]:
+            print(f"    - {s}")
+
 
 def build_row(url, price, data, base_desc):
     model_full = data.get('model_base', data.get('model', ''))
@@ -1117,16 +1515,22 @@ def build_row(url, price, data, base_desc):
 
     # === Title整合性 + 70字パディング (listing_common.normalize_title) ===
     # G-Shock は新品扱い (CASIO公式仕入)
+    style = get_style_by_model(model_base)  # シリーズ別: Mudmaster→Military / Frogman→Diver / MR-G→Luxury / 他→Sport
+    # pad 材料は実ファクトのみ (捏造禁止)。Color/Material は既にタイトルに在ること多 →
+    # Style / Water Resistance / Movement を足して 70-80字をバイヤー検索語で埋める。
+    _wr = re.search(r'(\d+)\s*m', str(data.get('water_resistance', '')))
     _gs_specs = {
-        'Color': band_color, 'Material': data.get('case_material', ''),
+        'Color': band_color,
+        'Material': data.get('case_material', ''),
+        'Style': style,                                              # Sport/Diver/Military/Luxury
+        'Water Resistance': f"{_wr.group(1)}M Water Resistant" if _wr else '',
+        'Movement': data.get('movement', ''),                       # Quartz 等 (eBay有効値)
         'Year Manufactured': year,
     }
     title = normalize_title(
         title, is_new=True, item_specifics=_gs_specs,
         category="gshock", target_min=70, max_chars=80,
     )
-
-    style = get_style_by_model(model_base)  # シリーズ別: Mudmaster→Military / Frogman→Diver / MR-G→Luxury / 他→Sport
     # Case Thickness: eBay フィルタは整数mm（5-20）。"12.4 mm" → "12 mm" に丸め
     case_thickness_raw = data.get('case_thickness', '')
     m_th = re.search(r'(\d+\.?\d*)', case_thickness_raw)
@@ -1174,39 +1578,144 @@ def build_row(url, price, data, base_desc):
         case_thickness,     # 整数mmに丸め
         data.get('weight', ''),
         "FixedPrice", "GTC", 1,
-        1, LOCATION, 1,
+        LOCATION, 1,   # *Location, BestOfferEnabled (PayPalAccepted 列は削除済=header と整合)
         "Does not apply",
         get_shipping_policy(price), RETURN_POLICY, PAYMENT_POLICY,
         get_store_category(model_full),
     ]
 
-def main():
-    print("=== iMak Trading Japan - G-SHOCK CASIO URL → eBay CSV ===\n")
-    # 2026-05-05: 入力経路を LOW スプシ駆動 (主) + URL ファイル (fallback) に拡張
-    # memory: dropshipping_model_premise (抽出くん収集 → 出品くん自動連動)
-    print("📊 LOW スプシから R='G-shock' 行を取込中...")
-    sheet_targets = load_targets_from_low_sheet()  # [(url, model), ...]
-    print(f"  スプシ取込: {len(sheet_targets)} 件")
+def append_skumap(pending_csv, sku, supply_url, category):
+    """取下再出品② — {supply_url → 実際に付与した sku} を skumap CSV に追記。
 
-    file_targets = []
-    try:
-        with open(URLS_FILE, "r", encoding="utf-8") as f:
-            file_urls = [l.strip() for l in f if l.strip() and l.startswith("http")]
-        for u in file_urls:
-            m = extract_model_from_url(u)
-            if m:
-                file_targets.append((u, m, ""))  # URL ファイル経由は price_jpy 空 (cost fallback)
-        print(f"  URL ファイル: {len(file_targets)} 件")
-    except FileNotFoundError:
-        print(f"  URL ファイル ({URLS_FILE}) なし → スプシのみ")
-
-    targets = sheet_targets + file_targets
-    if not targets:
-        print(f"エラー: 処理対象なし (スプシも URL ファイルも空)")
-        input("Enterで終了...")
+    出品くんが付けた CustomLabel が ③書戻しで ACTIVEレポートと照合する権威ある実値。
+    pending と同 dir に relist_skumap_<stamp>.csv として各カテゴリの --relist 実行が追記。
+    (mercari_to_ebay_csv.append_skumap と同仕様)。
+    """
+    if not pending_csv:
         return
+    path = pending_csv.replace("relist_pending_", "relist_skumap_")
+    new = not _os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+        if new:
+            w.writerow(["sku", "supply_url", "category"])
+        w.writerow([sku, supply_url, category])
 
-    print(f"\n合計 {len(targets)} 件を処理します。\n")
+
+def load_relist_targets(pending_csv):
+    """取下再出品② — 保留リストCSV(supply_url列)の G-shock 行を狙い撃ちで targets 化。
+
+    保留リストは「どのURLを再出品するか」の選定のみに使う。model/コストは管理スプシ
+    (load_targets_from_low_sheet) から通常出品と同じロジックで取得 → title/価格/item
+    specifics を全項目「最新ロジック」で再生成する (relistの狙い)。コストもスプシの
+    実コストを引くので最新 pricing が正しく算出される (¥5000 fallback の誤価格を回避)。
+
+    戻り: [(url, model, price_jpy_str), ...]
+    """
+    only_urls = set()
+    with open(pending_csv, "r", encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            if (row.get("category") or "").strip() not in ("G-shock", "Wristwatches"):
+                continue  # pending の category は col17 SSOT="G-shock"(2026-06-23統一)。旧"Wristwatches"
+                # 固定だと0件除外=取下げ済が再出品されず fail-OPEN(2026-06-28発覚)。両対応に。
+            url = (row.get("supply_url") or "").strip()
+            if url:
+                only_urls.add(url)
+                # 元listingの画像流用用に old_item_id を控える
+                oid = (row.get("old_item_id") or "").strip()
+                if oid:
+                    _RELIST_OLD_ITEMID[url] = oid
+    if not only_urls:
+        return []
+    targets = load_targets_from_low_sheet(only_urls=only_urls)
+    found = {t[0] for t in targets}
+    missing = only_urls - found
+    if missing:
+        # スプシに無い/型番抽出不可で取れなかったURL (silent cap禁止)
+        print(f"  ⚠️ スプシ照合/型番抽出で取れず除外 {len(missing)}件:")
+        for u in missing:
+            print(f"     - {u[:70]}")
+    return targets
+
+
+MAX_PER_RUN = 10  # 1回の出品実行で処理する最大件数 (2026-05-18 batch運用 / 2026-06-12 ランダム抽出化)
+
+
+def select_run_targets(targets, *, no_shuffle=False, max_per_run=MAX_PER_RUN, rng=None):
+    """未出品キュー targets から 1 回分を選ぶ (ランダム抽出 + 件数上限).
+
+    no_shuffle=False (既定): シャッフル後に先頭 max_per_run 件 (上位行偏り防止。TCG psa_to_csv 同仕様)。
+    no_shuffle=True: 従来の上から順 (環境変数 GSHOCK_NO_SHUFFLE=1 用)。
+    rng: テスト用に random.Random を注入可 (再現性確保)。
+    元の targets は破壊しない (コピーを返す)。
+    """
+    picked = list(targets)
+    if not no_shuffle:
+        import random as _random
+        (rng or _random).shuffle(picked)
+    return picked[:max_per_run]
+
+
+def main():
+    import argparse
+    global _IMMEDIATE_SCHEDULE
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--relist", default="",
+                    help="保留リストCSV(supply_url列) → 指定URLのみスケジュール再出品(2週間後・既存キュー無視)")
+    args, _ = ap.parse_known_args()
+    relist_mode = bool(args.relist)
+
+    print("=== iMak Trading Japan - G-SHOCK CASIO URL → eBay CSV ===\n")
+
+    if relist_mode:
+        # 取下再出品② — 既存キュー無視・指定URLのみ。2026-06-28: 即liveでなく新規同様スケジュール
+        # 出品(2週間後)に統一(ユーザー要望)。scheduled でも FileExchange は ItemID を即返すので
+        # ③書戻しは回る。→ _IMMEDIATE_SCHEDULE は True にしない(get_schedule_time が2週間後)。
+        _pending_name = args.relist.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        print(f"🔁 取下再出品②モード: {_pending_name} → 指定URLのみスケジュール再出品(2週間後)")
+        targets = load_relist_targets(args.relist)
+        print(f"  対象 G-shock = {len(targets)} 件 (既存スプシキューは無視)")
+        if not targets:
+            print("エラー: 保留リストに G-shock(Wristwatches) 対象なし")
+            return
+        print(f"\n合計 {len(targets)} 件を処理します (スケジュール2週間後)。\n")
+    else:
+        # 2026-05-05: 入力経路を LOW スプシ駆動 (主) + URL ファイル (fallback) に拡張
+        # memory: dropshipping_model_premise (抽出くん収集 → 出品くん自動連動)
+        print("📊 LOW スプシから R='G-shock' 行を取込中...")
+        sheet_targets = load_targets_from_low_sheet()  # [(url, model), ...]
+        print(f"  スプシ取込: {len(sheet_targets)} 件")
+
+        file_targets = []
+        try:
+            with open(URLS_FILE, "r", encoding="utf-8") as f:
+                file_urls = [l.strip() for l in f if l.strip() and l.startswith("http")]
+            for u in file_urls:
+                m = extract_model_from_url(u)
+                if m:
+                    file_targets.append((u, m, ""))  # URL ファイル経由は price_jpy 空 (cost fallback)
+            print(f"  URL ファイル: {len(file_targets)} 件")
+        except FileNotFoundError:
+            print(f"  URL ファイル ({URLS_FILE}) なし → スプシのみ")
+
+        targets = sheet_targets + file_targets
+        if not targets:
+            print(f"エラー: 処理対象なし (スプシも URL ファイルも空)")
+            input("Enterで終了...")
+            return
+
+        # 上から順でなくランダム抽出 + 10件キャップ (2026-06-12 ユーザー要望: 上位行に偏らず満遍なく出品。TCG psa_to_csv 同仕様)
+        # 環境変数 GSHOCK_NO_SHUFFLE=1 で従来の上から順に戻せる
+        # ※ _os は main() 後段 (whitelist 検証) で local import されるため、ここで先に local 束縛する
+        import os as _os
+        _no_shuffle = (_os.environ.get("GSHOCK_NO_SHUFFLE") == "1")
+        _total = len(targets)
+        targets = select_run_targets(targets, no_shuffle=_no_shuffle)
+        if _total > len(targets):
+            _how = "先頭" if _no_shuffle else "ランダム"
+            print(f"\n合計 {_total} 件中、{_how} {len(targets)} 件を処理します (残 {_total-len(targets)} 件は次回実行で)。\n")
+        else:
+            print(f"\n合計 {_total} 件を処理します。\n")
     # 2026-05-08: catalog 未登録 = SKIP 設計に変更したため scrape_casio 不要、Chrome 起動廃止
     # scrape_casio 関数自体は残置 (将来再利用の可能性、driver 引数のまま)
     driver = None
@@ -1230,7 +1739,11 @@ def main():
         "C:With Original Box/Packaging", "C:With Papers", "C:Manufacturer Warranty",
         "C:Band Length", "C:Case Thickness", "C:Item Weight",
         "*Format", "*Duration", "*Quantity",
-        "PayPalAccepted", "*Location", "BestOfferEnabled",
+        # PayPalAccepted 削除(2026-07-02): managed payments 完全移行後、eBay File Exchange が
+        # このレガシー決済列(=1)を検出するとビジネスポリシー無効の旧モードに落ち、送料プロファイルを
+        # 適用せず「有効な配送サービス無し(err 216118)」で全弾き。決済は PaymentProfileName(SALE)が担う。
+        # TCG generator は元々この列が無く無傷。実機検証: 本列除去で gshock 8件が Warning のみで出品成功。
+        "*Location", "BestOfferEnabled",
         "Product:UPC",
         "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
         "StoreCategoryID",
@@ -1260,6 +1773,9 @@ def main():
             try:
                 _cat_rec = _catalog_lookup(model)
                 if _cat_rec:
+                    # 2026-06-01: is_active_msrp による skip は REVERT 済.
+                    # 廃盤も Amazon 等で仕入可能、 listing 対象から勝手に外さない.
+                    # memory: no_listing_filter_without_user_instruction
                     data = _catalog_record_to_scrape_dict(_cat_rec, model)
                     if data:
                         print(" [catalog hit]", end="", flush=True)
@@ -1284,14 +1800,7 @@ def main():
                 _ps = re.sub(r"[^0-9]", "", price_jpy_str)
                 if _ps:
                     cost_jpy = int(_ps)
-            try:
-                min_price = compute_min_price_usd(cost_jpy, PROFIT_CATEGORY)
-            except Exception:
-                min_price = DEFAULT_PRICE
-            price = max(min_price, PRICE_FLOOR_USD)
-            price = round(price, 2)
-            price = int(price) + 0.98 if price > 10 else price
-            # eBay 中央値取得 (pricing_engine ALERT 判定用)
+            # eBay 中央値取得 (pricing_engine ALERT 判定 + V6 dispatcher で使用)
             ebay_median = 0.0
             if _fetch_ebay_median is not None:
                 try:
@@ -1304,16 +1813,28 @@ def main():
                         print(f"    📊 eBay {_ebay_hits}件 中央値${ebay_median:.0f}")
                 except Exception as _eme:
                     pass
-            # 価格 status 判定 (pricing_engine 相場乖離チェック)
+            # 価格決定: compute_listing_price() dispatcher (V6/V5/V4 自動切替) + status 判定
             _price_status = "GO"
+            price = None
             if _compute_listing_price is not None:
                 try:
                     _pr = _compute_listing_price(cost_jpy, ebay_median, PROFIT_CATEGORY)
+                    price = _pr.get("price")
                     _price_status = _pr.get("status", "GO")
                     if _price_status == "ALERT":
                         print(f"    ⚠️ 価格ALERT: {_pr.get('alert_msg', '')}")
                 except Exception:
-                    pass
+                    price = None
+            if price is None:
+                # fallback (= compute_listing_price 失敗時)
+                try:
+                    min_price = compute_min_price_usd(cost_jpy, PROFIT_CATEGORY)
+                except Exception:
+                    min_price = DEFAULT_PRICE
+                price = max(min_price, PRICE_FLOOR_USD)
+                price = int(round(price, 2)) + 0.98 if price > 10 else round(price, 2)
+            # floor 保証
+            price = max(price, PRICE_FLOOR_USD)
             print(f"    💲 ${price} (仕入¥{cost_jpy})")
             row = build_row(url, price, data, base_desc)
             # SKU 上書き: 共通ルール (TCG/Tshirt/Montbell と同じ、URL ベース).
@@ -1334,6 +1855,23 @@ def main():
                         _sku = _extract_sku_from_url(url, category="gshock")
                 if _sku:
                     row[6] = _sku  # CustomLabel
+
+            # 取下再出品② — 元listingの画像を流用 (PicURL=row[3])。
+            # 999.png ダミーは新規出品用。relistは元の実画像(eBay EPS)を引き継ぐ=「画像現状流用」。
+            if relist_mode:
+                _oldid = _RELIST_OLD_ITEMID.get(url, "")
+                _imgs = []
+                if _oldid:
+                    try:
+                        from ebay_getitem_images import fetch_listing_images
+                        _imgs = fetch_listing_images(_oldid)
+                    except Exception as _ie:
+                        print(f"    ⚠ 画像取得失敗({type(_ie).__name__})", end="")
+                if _imgs:
+                    row[3] = "|".join(_imgs[:24])  # FileExchange は PicURL を | 区切りで複数可
+                    print(f"    🖼 元画像 {len(_imgs)}枚 流用 (itemID {_oldid})")
+                else:
+                    print(f"    ⚠ 元画像取得不可(itemID {_oldid or '不明'}) → 999.png のまま")
 
             # 検証＋正規化（C: プレフィックス列のみ抽出）
             if _validate_specs:
@@ -1363,7 +1901,12 @@ def main():
                 print(f"    🟠 HOLD: {data.get('model_official','')} → {_errs}")
                 errors.append(url)
                 continue
+            # eBay フィルタ validate (= TCG 完成 patterns 流用、 2026-05-31)
+            apply_ebay_filter_to_row_gshock(row, headers, category="gshock")
             rows.append(row)
+            if relist_mode:
+                # 出品くんが付けた CustomLabel(row[6]) を skumap に記録 (③書戻しの照合キー)
+                append_skumap(args.relist, row[6], url, "Wristwatches")
         else:
             print(f" → 失敗")
             errors.append(url)
@@ -1378,6 +1921,16 @@ def main():
         writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
         writer.writerows(rows)
 
+    # eBay フィルタ validate サマリー (= 3 ケース処理 + Gemini 改善 B レポート)
+    print_ebay_filter_report_gshock()
+
+    # Free Shipping 移行 (2026-05-18)
+    try:
+        from freeshipping_postprocess import transform_csv_to_freeshipping
+        transform_csv_to_freeshipping(output_file)
+    except Exception as _e:
+        print(f"⚠️ Free Shipping post-process 失敗 (G-shock): {type(_e).__name__}: {_e}")
+
     # Step 8 拡張: decision_log に config_version + 使用値を刻印
     try:
         from decision_log import log_csv_batch as _log_batch
@@ -1388,6 +1941,13 @@ def main():
 
     print(f"\n完了！出力: {output_file}")
     print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")
+
+    # 生成時セルフ監査 (CSV監査くん) — 監査を待たず生成で品質確認
+    try:
+        from listing_common import run_self_audit
+        run_self_audit(output_file)
+    except Exception as _e:
+        print(f"⚠️ セルフ監査 起動失敗 (非致命): {type(_e).__name__}: {_e}")
 
     print("\n=== タイトル確認 ===")
     for row in rows[1:]:
@@ -1422,7 +1982,15 @@ def main():
             print(f"  - {m}")
         print(f"\n通知ファイル: {notify_path}")
 
-    input("\nEnterで終了...")
+    if not relist_mode:
+        # ★2026-08-01: 出品くん(control_panel)からの起動は stdin が無く EOFError → returncode=1。
+        #   直前の「Catalog 未登録」通知が表示されないまま落ちていた (psa_to_csv と同型・8cf56f2)。
+        #   Windows では isatty() が当てにならない (/dev/null でも True) ので except を最終防波堤にする。
+        if _sys.stdin and _sys.stdin.isatty():
+            try:
+                input("\nEnterで終了...")
+            except EOFError:
+                pass
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,563 @@
+[
+  {
+    "name": "DDP-B-P13",
+    "description": "V6 Group B MidTariff Tier P13 (up to 160 USD)",
+    "marketplaceId": "EBAY_US",
+    "categoryTypes": [
+      {
+        "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+        "default": false
+      }
+    ],
+    "handlingTime": {
+      "value": 7,
+      "unit": "DAY"
+    },
+    "shipToLocations": {
+      "regionIncluded": [
+        {
+          "regionName": "Worldwide"
+        }
+      ],
+      "regionExcluded": [
+        {
+          "regionName": "AF"
+        },
+        {
+          "regionName": "Africa"
+        },
+        {
+          "regionName": "Alaska/Hawaii"
+        },
+        {
+          "regionName": "AM"
+        },
+        {
+          "regionName": "APO/FPO"
+        },
+        {
+          "regionName": "AZ"
+        },
+        {
+          "regionName": "BD"
+        },
+        {
+          "regionName": "BN"
+        },
+        {
+          "regionName": "BT"
+        },
+        {
+          "regionName": "Central America and Caribbean"
+        },
+        {
+          "regionName": "CN"
+        },
+        {
+          "regionName": "GE"
+        },
+        {
+          "regionName": "IL"
+        },
+        {
+          "regionName": "IN"
+        },
+        {
+          "regionName": "IQ"
+        },
+        {
+          "regionName": "JP"
+        },
+        {
+          "regionName": "KG"
+        },
+        {
+          "regionName": "KH"
+        },
+        {
+          "regionName": "KZ"
+        },
+        {
+          "regionName": "LA"
+        },
+        {
+          "regionName": "LB"
+        },
+        {
+          "regionName": "LK"
+        },
+        {
+          "regionName": "MN"
+        },
+        {
+          "regionName": "MV"
+        },
+        {
+          "regionName": "NP"
+        },
+        {
+          "regionName": "PK"
+        },
+        {
+          "regionName": "PO Box"
+        },
+        {
+          "regionName": "RU"
+        },
+        {
+          "regionName": "South America"
+        },
+        {
+          "regionName": "TJ"
+        },
+        {
+          "regionName": "TM"
+        },
+        {
+          "regionName": "US Protectorates"
+        },
+        {
+          "regionName": "UZ"
+        },
+        {
+          "regionName": "YE"
+        }
+      ]
+    },
+    "shippingOptions": [
+      {
+        "optionType": "DOMESTIC",
+        "costType": "FLAT_RATE",
+        "shippingServices": [
+          {
+            "sortOrder": 1,
+            "shippingCarrierCode": "GENERIC",
+            "shippingServiceCode": "US_EconomySppedPAK",
+            "shippingCost": {
+              "value": "50.51",
+              "currency": "USD"
+            },
+            "additionalShippingCost": {
+              "value": "50.51",
+              "currency": "USD"
+            },
+            "freeShipping": false,
+            "buyerResponsibleForShipping": false,
+            "buyerResponsibleForPickup": false
+          }
+        ],
+        "shippingDiscountProfileId": "0",
+        "shippingPromotionOffered": false
+      },
+      {
+        "optionType": "INTERNATIONAL",
+        "costType": "FLAT_RATE",
+        "shippingServices": [
+          {
+            "sortOrder": 1,
+            "shippingCarrierCode": "GENERIC",
+            "shippingServiceCode": "StandardInternational",
+            "shippingCost": {
+              "value": "0.0",
+              "currency": "USD"
+            },
+            "additionalShippingCost": {
+              "value": "0.0",
+              "currency": "USD"
+            },
+            "freeShipping": false,
+            "shipToLocations": {
+              "regionIncluded": [
+                {
+                  "regionName": "Worldwide"
+                }
+              ]
+            },
+            "buyerResponsibleForShipping": false,
+            "buyerResponsibleForPickup": false
+          }
+        ],
+        "shippingDiscountProfileId": "0",
+        "shippingPromotionOffered": false
+      }
+    ],
+    "globalShipping": false,
+    "pickupDropOff": false,
+    "freightShipping": false,
+    "fulfillmentPolicyId": "262931477017"
+  },
+  {
+    "name": "DDP-A-P13",
+    "description": "V6 Group A LowTariff Tier P13 (up to 160 USD)",
+    "marketplaceId": "EBAY_US",
+    "categoryTypes": [
+      {
+        "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+        "default": false
+      }
+    ],
+    "handlingTime": {
+      "value": 7,
+      "unit": "DAY"
+    },
+    "shipToLocations": {
+      "regionIncluded": [
+        {
+          "regionName": "Worldwide"
+        }
+      ],
+      "regionExcluded": [
+        {
+          "regionName": "AF"
+        },
+        {
+          "regionName": "Africa"
+        },
+        {
+          "regionName": "Alaska/Hawaii"
+        },
+        {
+          "regionName": "AM"
+        },
+        {
+          "regionName": "APO/FPO"
+        },
+        {
+          "regionName": "AZ"
+        },
+        {
+          "regionName": "BD"
+        },
+        {
+          "regionName": "BN"
+        },
+        {
+          "regionName": "BT"
+        },
+        {
+          "regionName": "Central America and Caribbean"
+        },
+        {
+          "regionName": "CN"
+        },
+        {
+          "regionName": "GE"
+        },
+        {
+          "regionName": "IL"
+        },
+        {
+          "regionName": "IN"
+        },
+        {
+          "regionName": "IQ"
+        },
+        {
+          "regionName": "JP"
+        },
+        {
+          "regionName": "KG"
+        },
+        {
+          "regionName": "KH"
+        },
+        {
+          "regionName": "KZ"
+        },
+        {
+          "regionName": "LA"
+        },
+        {
+          "regionName": "LB"
+        },
+        {
+          "regionName": "LK"
+        },
+        {
+          "regionName": "MN"
+        },
+        {
+          "regionName": "MV"
+        },
+        {
+          "regionName": "NP"
+        },
+        {
+          "regionName": "PK"
+        },
+        {
+          "regionName": "PO Box"
+        },
+        {
+          "regionName": "RU"
+        },
+        {
+          "regionName": "South America"
+        },
+        {
+          "regionName": "TJ"
+        },
+        {
+          "regionName": "TM"
+        },
+        {
+          "regionName": "US Protectorates"
+        },
+        {
+          "regionName": "UZ"
+        },
+        {
+          "regionName": "YE"
+        }
+      ]
+    },
+    "shippingOptions": [
+      {
+        "optionType": "DOMESTIC",
+        "costType": "FLAT_RATE",
+        "shippingServices": [
+          {
+            "sortOrder": 1,
+            "shippingCarrierCode": "GENERIC",
+            "shippingServiceCode": "US_EconomySppedPAK",
+            "shippingCost": {
+              "value": "30.9",
+              "currency": "USD"
+            },
+            "additionalShippingCost": {
+              "value": "30.9",
+              "currency": "USD"
+            },
+            "freeShipping": false,
+            "buyerResponsibleForShipping": false,
+            "buyerResponsibleForPickup": false
+          }
+        ],
+        "shippingDiscountProfileId": "0",
+        "shippingPromotionOffered": false
+      },
+      {
+        "optionType": "INTERNATIONAL",
+        "costType": "FLAT_RATE",
+        "shippingServices": [
+          {
+            "sortOrder": 1,
+            "shippingCarrierCode": "GENERIC",
+            "shippingServiceCode": "StandardInternational",
+            "shippingCost": {
+              "value": "0.0",
+              "currency": "USD"
+            },
+            "additionalShippingCost": {
+              "value": "0.0",
+              "currency": "USD"
+            },
+            "freeShipping": false,
+            "shipToLocations": {
+              "regionIncluded": [
+                {
+                  "regionName": "Worldwide"
+                }
+              ]
+            },
+            "buyerResponsibleForShipping": false,
+            "buyerResponsibleForPickup": false
+          }
+        ],
+        "shippingDiscountProfileId": "0",
+        "shippingPromotionOffered": false
+      }
+    ],
+    "globalShipping": false,
+    "pickupDropOff": false,
+    "freightShipping": false,
+    "fulfillmentPolicyId": "262931444017"
+  },
+  {
+    "name": "DDP-C-P13",
+    "description": "V6 Group C HighTariff Tier P13 (up to 160 USD)",
+    "marketplaceId": "EBAY_US",
+    "categoryTypes": [
+      {
+        "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+        "default": false
+      }
+    ],
+    "handlingTime": {
+      "value": 7,
+      "unit": "DAY"
+    },
+    "shipToLocations": {
+      "regionIncluded": [
+        {
+          "regionName": "Worldwide"
+        }
+      ],
+      "regionExcluded": [
+        {
+          "regionName": "AF"
+        },
+        {
+          "regionName": "Africa"
+        },
+        {
+          "regionName": "Alaska/Hawaii"
+        },
+        {
+          "regionName": "AM"
+        },
+        {
+          "regionName": "APO/FPO"
+        },
+        {
+          "regionName": "AZ"
+        },
+        {
+          "regionName": "BD"
+        },
+        {
+          "regionName": "BN"
+        },
+        {
+          "regionName": "BT"
+        },
+        {
+          "regionName": "Central America and Caribbean"
+        },
+        {
+          "regionName": "CN"
+        },
+        {
+          "regionName": "GE"
+        },
+        {
+          "regionName": "IL"
+        },
+        {
+          "regionName": "IN"
+        },
+        {
+          "regionName": "IQ"
+        },
+        {
+          "regionName": "JP"
+        },
+        {
+          "regionName": "KG"
+        },
+        {
+          "regionName": "KH"
+        },
+        {
+          "regionName": "KZ"
+        },
+        {
+          "regionName": "LA"
+        },
+        {
+          "regionName": "LB"
+        },
+        {
+          "regionName": "LK"
+        },
+        {
+          "regionName": "MN"
+        },
+        {
+          "regionName": "MV"
+        },
+        {
+          "regionName": "NP"
+        },
+        {
+          "regionName": "PK"
+        },
+        {
+          "regionName": "PO Box"
+        },
+        {
+          "regionName": "RU"
+        },
+        {
+          "regionName": "South America"
+        },
+        {
+          "regionName": "TJ"
+        },
+        {
+          "regionName": "TM"
+        },
+        {
+          "regionName": "US Protectorates"
+        },
+        {
+          "regionName": "UZ"
+        },
+        {
+          "regionName": "YE"
+        }
+      ]
+    },
+    "shippingOptions": [
+      {
+        "optionType": "DOMESTIC",
+        "costType": "FLAT_RATE",
+        "shippingServices": [
+          {
+            "sortOrder": 1,
+            "shippingCarrierCode": "GENERIC",
+            "shippingServiceCode": "US_EconomySppedPAK",
+            "shippingCost": {
+              "value": "71.74",
+              "currency": "USD"
+            },
+            "additionalShippingCost": {
+              "value": "71.74",
+              "currency": "USD"
+            },
+            "freeShipping": false,
+            "buyerResponsibleForShipping": false,
+            "buyerResponsibleForPickup": false
+          }
+        ],
+        "shippingDiscountProfileId": "0",
+        "shippingPromotionOffered": false
+      },
+      {
+        "optionType": "INTERNATIONAL",
+        "costType": "FLAT_RATE",
+        "shippingServices": [
+          {
+            "sortOrder": 1,
+            "shippingCarrierCode": "GENERIC",
+            "shippingServiceCode": "StandardInternational",
+            "shippingCost": {
+              "value": "0.0",
+              "currency": "USD"
+            },
+            "additionalShippingCost": {
+              "value": "0.0",
+              "currency": "USD"
+            },
+            "freeShipping": false,
+            "shipToLocations": {
+              "regionIncluded": [
+                {
+                  "regionName": "Worldwide"
+                }
+              ]
+            },
+            "buyerResponsibleForShipping": false,
+            "buyerResponsibleForPickup": false
+          }
+        ],
+        "shippingDiscountProfileId": "0",
+        "shippingPromotionOffered": false
+      }
+    ],
+    "globalShipping": false,
+    "pickupDropOff": false,
+    "freightShipping": false,
+    "fulfillmentPolicyId": "262931526017"
+  }
+]

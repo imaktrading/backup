@@ -34,7 +34,29 @@ def test_known_main_sets_op_series():
 
 def test_known_starter_decks_st_series():
     assert _convert("ST-03") == "The Seven Warlords of the Sea"
-    assert _convert("ST-16") == "Uta"
+    # ★2026-08-02 更新: 旧 assertion は `ST-16 == "Uta"` だったが、これは **ST-11 (Uta) との
+    #   silent collision** をそのまま golden として固定していた (= defect を正としていた)。
+    #   公式を live 再取得したところ ST-11=`-Uta-` / ST-16=`-GREEN Uta-` で別セット。
+    #   カタログが色 prefix を付けて解消したので、期待値も公式に合わせる。
+    assert _convert("ST-16") == "GREEN Uta"
+
+
+def test_same_character_starter_decks_do_not_collapse():
+    """★同じキャラの別スターターが同じ値に潰れないこと (2026-08-02 追加).
+
+    ST-18/26/31 が3セットとも `Monkey D Luffy` になっており、4/26 から 8/2 まで
+    誰も気づかなかった。公式は色 (PURPLE / PURPLE/BLACK / RED) で区別している。
+    ここを golden で固定して、集約に戻るのを防ぐ。
+    """
+    groups = [
+        ["ST-08", "ST-18", "ST-26", "ST-31"],   # Monkey.D.Luffy 系
+        ["ST-11", "ST-16"],                     # Uta 系
+        ["ST-09", "ST-28"],                     # Yamato 系
+        ["ST-20", "ST-34"],                     # Charlotte Katakuri 系
+    ]
+    for g in groups:
+        vals = [_convert(c) for c in g]
+        assert len(set(vals)) == len(vals), f"別セットが同じ値に潰れている: {dict(zip(g, vals))}"
 
 
 def test_known_extra_booster_eb_series():

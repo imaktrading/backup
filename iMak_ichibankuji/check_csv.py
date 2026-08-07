@@ -362,19 +362,27 @@ def validate_row(row, row_idx):
     if condition != "1000":
         issues.append(("ERROR", f"ConditionID が 1000 でない: {condition}"))
 
-    # --- 価格・送料整合性 ---
+    # --- 価格・送料整合性 (V6 mode: DDP-{group}-P{tier} / V5 mode: tier 名) ---
     try:
         price_f = float(price)
-        expected_policies = [
-            (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
-            (300, "200-300"), (400, "300-400"), (500, "400-500"),
-            (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
-        ]
-        expected = "800-1000"
-        for threshold, policy in expected_policies:
-            if price_f <= threshold:
-                expected = policy
-                break
+        try:
+            import sys, os
+            _eb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI")
+            if _eb not in sys.path:
+                sys.path.insert(0, _eb)
+            from listing_common import get_shipping_policy_name
+            expected = get_shipping_policy_name(price_f, "一番くじ")
+        except Exception:
+            expected_policies = [
+                (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+                (300, "200-300"), (400, "300-400"), (500, "400-500"),
+                (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+            ]
+            expected = "800-1000"
+            for threshold, policy in expected_policies:
+                if price_f <= threshold:
+                    expected = policy
+                    break
         if shipping != expected:
             issues.append(("WARN", f"送料ポリシー '{shipping}' が価格${price}に対して不一致（期待: {expected}）"))
     except ValueError:
@@ -565,7 +573,7 @@ Format: まず各リスティングの個別フィードバック、最後に全
     try:
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )

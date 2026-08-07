@@ -38,8 +38,11 @@ BANNED_TITLE_WORDS = [
     "mint", "l@@k", "look", "wow", "nr",
 ]
 
-# 必須Item Specifics（空欄だと品質低下）
-REQUIRED_SPECIFICS = ["C:Brand", "C:Model", "C:Type", "C:Color", "C:Movement"]
+# 必須Item Specifics（eBay cat 31387 で aspect_required=True のもの＝Brand/Type）。
+# C:Color は eBay に "Color" aspect が存在しない(あるのは Dial/Band/Bezel/Case Color)ため
+# phantom 必須として除去 (2026-06-14)。Model/Movement は aspect_required=False だが
+# 品質欄として保持 (catalog で充填済)。実機: ebay_gshock_filter_lists_api.json。
+REQUIRED_SPECIFICS = ["C:Brand", "C:Model", "C:Type", "C:Movement"]
 # あると望ましいItem Specifics
 RECOMMENDED_SPECIFICS = [
     "C:Case Size", "C:Band Color", "C:Band Material", "C:Display", "C:Features",
@@ -366,19 +369,27 @@ def validate_row(row, row_idx):
     if condition != "1000":
         issues.append(("ERROR", f"ConditionID が 1000 でない: {condition}"))
 
-    # --- 価格・送料整合性 ---
+    # --- 価格・送料整合性 (V6 mode: DDP-{group}-P{tier} / V5 mode: tier 名) ---
     try:
         price_f = float(price)
-        expected_policies = [
-            (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
-            (300, "200-300"), (400, "300-400"), (500, "400-500"),
-            (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
-        ]
-        expected = "800-1000"
-        for threshold, policy in expected_policies:
-            if price_f <= threshold:
-                expected = policy
-                break
+        try:
+            import sys, os
+            _eb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI")
+            if _eb not in sys.path:
+                sys.path.insert(0, _eb)
+            from listing_common import get_shipping_policy_name
+            expected = get_shipping_policy_name(price_f, "G-SHOCK")
+        except Exception:
+            expected_policies = [
+                (39, "<39"), (60, "40-60"), (100, "60-100"), (200, "100-200"),
+                (300, "200-300"), (400, "300-400"), (500, "400-500"),
+                (600, "500-600"), (800, "600-800"), (1000, "800-1000"),
+            ]
+            expected = "800-1000"
+            for threshold, policy in expected_policies:
+                if price_f <= threshold:
+                    expected = policy
+                    break
         if shipping != expected:
             issues.append(("WARN", f"送料ポリシー '{shipping}' が価格${price}に対して不一致（期待: {expected}）"))
     except ValueError:
@@ -569,7 +580,7 @@ Format: まず各リスティングの個別フィードバック、最後に全
     try:
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )

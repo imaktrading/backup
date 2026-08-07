@@ -36,9 +36,11 @@ WHITELISTS = {
             "strict": True,
             "normalize": {"Tee": "T-Shirt", "T Shirt": "T-Shirt"},
         },
-        "Size Type": {"values": ["Regular", "Big & Tall", "Plus"], "strict": True},
+        # cat 15687=Men's T-Shirts。UNIQLO UT は men's/unisex のみ (2026-06-08 ユーザー確認)。
+        # 公式(15687)に無い Plus / Women / Boys / Girls / Unisex Kids は削除 (フィルタ不ヒット値)。
+        "Size Type": {"values": ["Regular", "Big & Tall"], "strict": True},
         "Department": {
-            "values": ["Men", "Women", "Unisex Adults", "Boys", "Girls", "Unisex Kids"],
+            "values": ["Men", "Unisex Adults"],
             "strict": True,
         },
         "Theme": {
@@ -133,8 +135,11 @@ WHITELISTS = {
             "normalize": {"XL": "Extra Large", "S": "Small", "M": "Medium", "L": "Large", "XS": "Mini"},
         },
         "Department": {
-            "values": ["Men", "Women", "Unisex Adults"],
+            # 公式 porter(bags 52357) SELECTION_ONLY = [Men, Unisex Adults]。Women は許容外
+            # → Unisex Adults へ正規化 (2026-06-08 whitelist_official_drift 検出)
+            "values": ["Men", "Unisex Adults"],
             "strict": True,
+            "normalize": {"Women": "Unisex Adults", "Unisex Adult": "Unisex Adults"},
         },
         "Occasion": {
             "values": ["Business", "Casual", "Formal", "Travel", "Workwear"],
@@ -378,7 +383,9 @@ WHITELISTS = {
         "Vintage": {"values": ["Yes", "No"], "strict": True},
         "Signed": {"values": ["Yes", "No"], "strict": True},
         "Original/Licensed Reproduction": {
-            "values": ["Original", "Licensed Reproduction", "Unauthorized Reproduction"],
+            # 公式 SELECTION_ONLY = [Original, Licensed Reproduction]。"Unauthorized Reproduction"
+            # は許容外かつ偽造示唆の悪値 → 削除 (2026-06-08 whitelist_official_drift 検出)
+            "values": ["Original", "Licensed Reproduction"],
             "strict": True,
         },
     },
@@ -679,6 +686,47 @@ _NORMALIZE_FUNCS = {
 
 
 # ===================================================================
+# 公式 Aspects JSON 照合 (生成を「最新の公式値」基準で検証 = 手動whitelistのドリフト後手を解消)
+# csv_auditor の監査と同じ値源(取得済 公式JSON)を使うので二重基準にならない。公式JSONがある分のみ。
+# ===================================================================
+_OFFICIAL_DIR = r"C:/dev/iMak_data/catalog/_input"
+_WL_OFFICIAL_JSON = {
+    "porter": "ebay_porter_filter_lists_api.json",
+    "ichibankuji": "ebay_ichibankuji_filter_lists_api.json",
+    "reel": "ebay_fishingreel_filter_lists_api.json",
+    "tshirt": "ebay_tshirt_filter_lists_api.json",  # 2026-06-08 取得 (UNIQLO UT, cat 15687)
+    # tomica: cat 222 は aspects API が 400 (非leaf?) → 未取得。取得でき次第ここに追加。
+}
+# eBay 普遍の特殊値 (values に載らないが許容される opt-out)
+_OFFICIAL_SPECIAL_OK = {"does not apply", "does not apply.", "n/a", "na", "", "unbranded", "no", "none", "yes"}
+_OFFICIAL_SEL_CACHE = {}
+
+
+def _official_sel_values(category):
+    """公式 Aspects JSON の SELECTION_ONLY aspect → {name: set(values)} (cache)。無ければ {}。"""
+    if category in _OFFICIAL_SEL_CACHE:
+        return _OFFICIAL_SEL_CACHE[category]
+    import json
+    import os
+    out = {}
+    fn = _WL_OFFICIAL_JSON.get(category)
+    if fn:
+        path = os.path.join(_OFFICIAL_DIR, fn)
+        if os.path.exists(path):
+            try:
+                asp = json.load(open(path, encoding="utf-8")).get("aspects", {})
+                for name, a in asp.items():
+                    if a.get("constraint", {}).get("aspect_mode") == "SELECTION_ONLY":
+                        vals = set(a.get("values", []))
+                        if vals:
+                            out[name] = vals
+            except Exception:
+                out = {}
+    _OFFICIAL_SEL_CACHE[category] = out
+    return out
+
+
+# ===================================================================
 # メイン検証関数
 # ===================================================================
 def validate_and_normalize(specs: dict, category: str) -> tuple[dict, list]:
@@ -821,6 +869,20 @@ def validate_and_normalize(specs: dict, category: str) -> tuple[dict, list]:
                 f"max_length={max_len}文字以内",
                 f"{len(current)}文字超過",
             ))
+
+    # === 公式 Aspects JSON 照合 (最新公式値で検証 = ドリフト後手の解消) ===
+    # 手動whitelist を通った値でも、公式 SELECTION_ONLY の許容外なら eBayフィルタに載らない → violation。
+    # これを retry feedback に乗せて生成が公式値へ自己修正する。公式JSONがあるカテゴリのみ。
+    off = _official_sel_values(category)
+    for field, allowed in off.items():
+        v = normalized.get(field)
+        if not v:
+            continue
+        # multi 値はカンマ分解して各部を判定
+        parts = [p.strip() for p in str(v).split(",")] if "," in str(v) else [str(v).strip()]
+        bad = [p for p in parts if p and p.lower() not in _OFFICIAL_SPECIAL_OK and p not in allowed]
+        if bad:
+            violations.append((field, v, "公式SELECTION_ONLY許容値", f"公式フィルタ許容外: {bad}"))
 
     return normalized, violations
 
