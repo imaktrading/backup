@@ -86,11 +86,18 @@ def test_empty_inputs_safe(tmp_path):
 # ===== NONE → catalog 宿題化 (= surface し続ける) =====
 
 def test_route_none_writes_missing_models(tmp_path):
-    """NONE cert が missing_models.csv に (category, model, detected_at) で書かれる."""
+    """NONE cert が missing_models.csv に (category, model, detected_at) で書かれる.
+
+    2026-08-07: catalog 実在 pre-check が追加された。この test は「行フォーマット
+    の固定」が趣旨で pre-check の挙動を見るものではないので、pre-check が
+    fail-closed で通す枝 (DB 不在) に確実に落ちるよう `catalog_db` を指定。
+    pre-check 本体の回帰は `test_route_none_catalog_precheck_20260807.py` 参照。
+    """
     missing = tmp_path / "missing_models.csv"
     recs = [{"cert": "999000111", "expected": "S-P-001",
              "category": "pokemon_tcg", "choice": "NONE"}]
-    n = ppr._route_none_to_catalog(recs, missing_path=str(missing), trigger_request=False)
+    n = ppr._route_none_to_catalog(recs, missing_path=str(missing), trigger_request=False,
+                                    catalog_db=str(tmp_path / "no_such_db.sqlite"))
     assert n == 1
     lines = missing.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "category,model,detected_at"
