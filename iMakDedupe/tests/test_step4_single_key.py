@@ -349,6 +349,7 @@ class TestUnresolvedNotRemoved:
         """CLI 経路 run_check_csv_canonical の既定が strict_mode=False を渡すこと.
 
         sheet_io を mock し、 check_csv_canonical に渡る strict_mode を捕捉して検証.
+        2026-08-07: load_live_itemid_set も mock (= 依頼書 §Q2 実装後の必要 mock).
         """
         path = tmp_path / "in.csv"
         _write_csv(path, [{"*Title": "x", "C:Card Number": "001"}])
@@ -363,7 +364,8 @@ class TestUnresolvedNotRemoved:
                 "removed_canonical_keys": [], "backup_path": "", "csv_path": str(path),
             }
 
-        with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
+        with patch("dedupe.sheet_io.load_live_itemid_set", return_value=frozenset({"999"})), \
+             patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
              patch("dedupe.sheet_io.open_spreadsheet", return_value=MagicMock()), \
              patch("dedupe.sheet_io.find_canonical_key_column", return_value=None), \
              patch("dedupe.csv_check.check_csv_canonical", side_effect=_spy):
@@ -372,7 +374,10 @@ class TestUnresolvedNotRemoved:
         assert captured["strict_mode"] is False  # 既定 = keep-unresolved
 
     def test_run_check_csv_canonical_forwards_strict_mode_true_optin(self, tmp_path):
-        """CLI 経路: strict_mode=True を明示すると check_csv_canonical に True が渡る (opt-in)."""
+        """CLI 経路: strict_mode=True を明示すると check_csv_canonical に True が渡る (opt-in).
+
+        2026-08-07: load_live_itemid_set も mock (= 依頼書 §Q2 実装後の必要 mock).
+        """
         path = tmp_path / "in.csv"
         _write_csv(path, [{"*Title": "x", "C:Card Number": "001"}])
 
@@ -386,7 +391,8 @@ class TestUnresolvedNotRemoved:
                 "removed_canonical_keys": [], "backup_path": "", "csv_path": str(path),
             }
 
-        with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
+        with patch("dedupe.sheet_io.load_live_itemid_set", return_value=frozenset({"999"})), \
+             patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
              patch("dedupe.sheet_io.open_spreadsheet", return_value=MagicMock()), \
              patch("dedupe.sheet_io.find_canonical_key_column", return_value=None), \
              patch("dedupe.csv_check.check_csv_canonical", side_effect=_spy):
@@ -397,10 +403,12 @@ class TestUnresolvedNotRemoved:
 
 
 # ============================================================================
-# 2026-07-13 BUILD: 既存判定 filter を itemID(B列) 基準に是正
-# 依頼: dedupe/requests/2026-07-13_dedup_livefilter_itemid_fix_build.md
-# orphan (A=URL有 B=itemID空 D=sold空 = 未出品キュー) を既存扱いしない。
-# 真の live (B非空 D空) は従来どおり除外。 removed は全て live 一致 → live_guaranteed=True。
+# 2026-07-13 BUILD → 2026-08-07 再是正: 既存判定 filter を eBay ActiveList (HQ cache) 基準に
+# 依頼: dedupe/requests/2026-08-04_live_definition_must_be_ebay_not_sold_column_response.md
+# 旧: itemID(B) 非空 AND sold(D) 空 = live proxy → 補URL 運用で D='○' でも eBay 側は live
+#     な行が 661 件、 これが誤脱落 → 重複素通り (8/03 8/04 の 2 件が実害)。
+# 新: itemID(B) が HQ live_listings_cache に含まれる行 = live の真実。
+#     orphan(B空) は従来どおり除外。 D 列は live 判定から外す (analysis 用途で残す)。
 # ============================================================================
 
 def _fake_ws(values):
@@ -414,8 +422,8 @@ class TestLiveFilterItemIdBuild:
     # 商品管理シート layout: A=URL, B=itemID, C=title, D=sold, E=KEY(canonical)
     _HEADER = ["URL", "itemID", "title", "売り切れ", "KEY"]
 
-    def _run_with_low_rows(self, tmp_path, low_rows, csv_resolves):
-        """LOW を fake ws にして run_check_csv_canonical を実走 (read_canonical_keys は本物)."""
+    def _run_with_low_rows(self, tmp_path, low_rows, csv_resolves, live_itemid_set):
+        """LOW を fake ws にして run_check_csv_canonical を実走 (実 sheet 読込は本物)."""
         from dedupe import sheet_io
         low_ws = _fake_ws([self._HEADER] + low_rows)
         high_ws = _fake_ws([self._HEADER])  # HIGH は空 (key_col None で skip)
@@ -435,7 +443,8 @@ class TestLiveFilterItemIdBuild:
             path,
             [{"*Title": f"cand{i}", "C:Card Number": ""} for i in range(len(csv_resolves))],
         )
-        with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
+        with patch("dedupe.sheet_io.load_live_itemid_set", return_value=live_itemid_set), \
+             patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
              patch("dedupe.sheet_io.open_spreadsheet", side_effect=_open), \
              patch("dedupe.sheet_io.find_canonical_key_column", side_effect=_findkey), \
              patch("dedupe.resolver_io.resolve_csv_row_with_category", side_effect=_rwc_side(csv_resolves)), \
@@ -443,26 +452,34 @@ class TestLiveFilterItemIdBuild:
             checker.run_check_csv_canonical(csv_path=str(path), dry_run=True)
         return spy.call_args
 
-    def test_existing_set_is_itemid_live_only(self, tmp_path):
-        """既存 set = live(B非空 D空)のみ。 orphan(B空) と sold(D非空) は除外."""
+    def test_existing_set_is_activelist_membership(self, tmp_path):
+        """新方針: 既存 set = itemID が HQ cache (eBay ActiveList) に含まれる row のみ.
+
+        D 列は無視 (= 2026-08-07 是正)。 orphan (B空) は従来どおり除外。
+        """
         low_rows = [
-            ["u1", "111", "t1", "", "LIVE-KEY"],       # live → 既存に入る
-            ["u2", "", "t2", "", "ORPHAN-KEY"],        # A有 B空 D空 = 未出品 → 除外
-            ["u3", "333", "t3", "○", "SOLD-KEY"],      # 売切 → 除外
+            ["u1", "111", "t1", "", "LIVE-KEY"],       # itemID live → 既存に入る
+            ["u2", "", "t2", "", "ORPHAN-KEY"],        # B空 = 未出品 → 除外
+            ["u3", "999", "t3", "", "DEAD-KEY"],       # itemID 非 live → 除外
+            ["u4", "333", "t4", "○", "STILL-LIVE-KEY"], # D='○' でも itemID live → 含む (★新方針)
         ]
-        call = self._run_with_low_rows(tmp_path, low_rows, csv_resolves=["X"])
+        live_set = frozenset({"111", "333"})  # 999 は無い (= eBay で終了)
+        call = self._run_with_low_rows(tmp_path, low_rows, csv_resolves=["X"], live_itemid_set=live_set)
         existing = call.kwargs["existing_canonical_keys"]
         assert "LIVE-KEY" in existing
-        assert "ORPHAN-KEY" not in existing  # orphan は既存扱いしない (= BUILD 中核)
-        assert "SOLD-KEY" not in existing
+        assert "ORPHAN-KEY" not in existing  # orphan (B空) 引き続き除外
+        assert "DEAD-KEY" not in existing    # eBay で終了 → 除外
+        assert "STILL-LIVE-KEY" in existing  # ★D='○' でも eBay live なら含む (本件の核)
 
     def test_live_candidate_removed_orphan_candidate_kept(self, tmp_path):
-        """新規候補: live 一致は除外 / orphan 一致は keep (= 誤ブロック解消)."""
+        """新規候補: live 一致は除外 / orphan 一致は keep (= 誤ブロック解消).
+
+        2026-08-07: live 判定は HQ cache 由来 (live_itemid_set) に切替済。
+        """
         low_rows = [
             ["u1", "111", "t1", "", "LIVE-KEY"],
             ["u2", "", "t2", "", "ORPHAN-KEY"],
         ]
-        # candidate 2 件: LIVE-KEY(既存 live) と ORPHAN-KEY(未出品)
         from dedupe import sheet_io
         low_ws = _fake_ws([self._HEADER] + low_rows)
         high_ws = _fake_ws([self._HEADER])
@@ -488,7 +505,8 @@ class TestLiveFilterItemIdBuild:
             captured["result"] = r
             return r
 
-        with patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
+        with patch("dedupe.sheet_io.load_live_itemid_set", return_value=frozenset({"111"})), \
+             patch("dedupe.sheet_io.authorize_client", return_value=MagicMock()), \
              patch("dedupe.sheet_io.open_spreadsheet", side_effect=_open), \
              patch("dedupe.sheet_io.find_canonical_key_column", side_effect=_findkey), \
              patch("dedupe.resolver_io.resolve_csv_row_with_category", side_effect=_rwc_side(["LIVE-KEY", "ORPHAN-KEY"])), \

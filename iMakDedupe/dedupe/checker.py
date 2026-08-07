@@ -1459,15 +1459,30 @@ def run_check_csv_canonical(
     from . import csv_check, sheet_io
 
     print(f"[*] CSV check (single-key mode, dry_run={dry_run}): {csv_path}", flush=True)
+
+    # 2026-08-07 是正 (依頼書 `..._live_definition_must_be_ebay_not_sold_column_response.md`):
+    #   HIGH/LOW から live filter を構築する SSOT を **eBay ActiveList** (= HQ cache) に切替。
+    #   旧: D 列 (仕入元売切) を live proxy → 補URL 運用で 661 件過小評価 (2026-08-07 実測)。
+    #   新: HQ live_listings_cache.json の itemID set = live の真実。
+    #   cache 無し/古い(> 6h)/壊れ → LiveCacheError で入稿停止 (fail-closed / 判定不能は破壊側に倒さない)。
+    try:
+        live_itemid_set = sheet_io.load_live_itemid_set()
+    except sheet_io.LiveCacheError as exc:
+        print(f"[FATAL] HQ live_listings_cache が使えない → CSV 触らず入稿停止:", file=sys.stderr)
+        print(f"  {exc}", file=sys.stderr)
+        return 2
+    print(f"[*] live itemID set (HQ cache SSOT): {len(live_itemid_set)} 件")
+
     client = sheet_io.authorize_client()
 
-    # HIGH/LOW から既存 canonical KEY set 構築 (= 真の live filter)
-    # 2026-07-13 是正 (BUILD `..._livefilter_itemid_fix_build.md`):
-    #   ACTIVE = **itemID(B)非空 AND sold(D)空** = 今 eBay に live 出品中の個体のみ。
-    #   旧: item_id_col=A(URL) 代用 → A(仕入元URL)だけ有り B 空の **未出品キュー行(orphan)** を
-    #       既存扱いに混入 → 未出品なのに新規候補を誤ブロック + 補URL の live 保証崩壊。
-    #   → item_id_col=B(itemID) に是正。 これで「弾いた = live 出品中」を構造保証。
+    # HIGH/LOW から既存 canonical KEY set 構築 (= 真の live filter = eBay ActiveList)
+    # itemID(B) 非空 AND itemID が HQ cache の live set に含まれる row のみ採用。
+    # D 列は仕入元 analysis 用途で残るが live 判定からは外す (= 2026-08-07 是正)。
+    # 2026-08-07 (依頼書 `..._dedupe_owns_both_key_and_cert_response.md`):
+    #   同時に cert 集合も HIGH の R='TCG' × live 行から集約。 dedupe が cert 判定も持つ
+    #   (= HQ dup_guard の cert 物理除外を将来畳む方針の下ごしらえ)。
     existing_keys: set = set()
+    existing_certs: set = set()
     for label, sid in [("HIGH", sheet_io.HIGH_SHEET_ID), ("LOW", sheet_io.LOW_SHEET_ID)]:
         sh = sheet_io.open_spreadsheet(sid, client=client)
         ws = sh.worksheet("商品管理シート")
@@ -1475,36 +1490,105 @@ def run_check_csv_canonical(
         if key_col is None:
             print(f"[{label}] KEY 列なし、 skip")
             continue
-        keys = sheet_io.read_canonical_keys(
+        keys = sheet_io.read_canonical_keys_by_live_itemids(
             ws,
             key_col=key_col,
-            active_only=True,
-            sold_col=sheet_io.LISTINGS_COL_SOLD,
-            item_id_col=sheet_io.LISTINGS_COL_ITEMID,  # B(itemID) = live の真実 (= 2026-07-13 是正)
+            item_id_col=sheet_io.LISTINGS_COL_ITEMID,
+            live_itemid_set=live_itemid_set,
         )
         for k in keys:
             if k:
                 existing_keys.add(k.strip())
-        print(f"[{label}] 既存 canonical KEY 数 (= live のみ): {len(keys)}")
+        print(f"[{label}] 既存 canonical KEY 数 (= eBay ActiveList 突合): {len(keys)}")
+
+        # 2026-08-07: cert 集約 (HIGH のみ = R='TCG' 想定)。 LOW は cert 列不使用でも
+        # 呼び方は同型にし、 R='TCG' filter で他 category (montbell 型番同居) を除外。
+        # 依頼書 §5「R='TCG' で絞らないと在庫のある別商品を誤って止める」。
+        certs_here = sheet_io.read_existing_certs(
+            ws,
+            cert_col=sheet_io.HIGH_COL_CERT_OR_ENGTITLE,
+            item_id_col=sheet_io.LISTINGS_COL_ITEMID,
+            live_itemid_set=live_itemid_set,
+            category_col=sheet_io.HIGH_COL_CATEGORY,
+            category_value=sheet_io.HIGH_CATEGORY_TCG_VALUE,
+        )
+        for c in certs_here:
+            existing_certs.add(c)
+        print(f"[{label}] 既存 cert 数 (R='TCG' × live): {len(certs_here)}")
+
+    # 2026-08-07: HQ live cache の SKUs (= CustomLabel `PSA10-<cert>`) から orphan 分を補完。
+    # 実測: live PSA10 654件のうち 36件がシート itemID 空 → cert 突合できない。
+    # 176/654 が CustomLabel から cert 回収可能。 orphan 残り (35件) は backlog (シート itemID
+    # 書き戻し) でしか埋まらない。 補完だが完全でないことを許容 (= 依頼書 §Q4 制約セクション)。
+    try:
+        sku_certs = sheet_io.load_live_cert_set_from_skus()
+    except Exception:
+        sku_certs = frozenset()
+    before = len(existing_certs)
+    existing_certs.update(sku_certs)
+    added_by_sku = len(existing_certs) - before
+    print(
+        f"[live cache SKU] cert 補完: sku 集合 {len(sku_certs)} 件 "
+        f"(orphan 埋め由来で +{added_by_sku} 件加算)"
+    )
+    print(f"[*] 既存 cert 合計 (sheet + SKU 補完): {len(existing_certs)} 件")
 
     result = csv_check.check_csv_canonical(
         csv_path=Path(csv_path),
         existing_canonical_keys=frozenset(existing_keys),
         dry_run=dry_run,
         strict_mode=strict_mode,
+        existing_cert_set=frozenset(existing_certs),
     )
 
-    # 2026-07-13: 既存 set は itemID(B) 基準 = live 出品中のみ で構築したため、
-    # removed_canonical_keys は **全て live 出品中の個体に一致** = 補URL の live 保証 True。
+    # 2026-08-07: 既存 set は itemID(B) 非空 AND HQ cache live set に含まれる row から構築 =
+    # live 出品中のみ。 removed_canonical_keys は全て live 出品中の個体に一致 = 補URL の live 保証 True。
     # HQ 側 補URL plumbing (= 除外KEY の live primary 行に補URL を貯める) で使う。
     result["live_guaranteed"] = True
     result["removed_keys_live"] = list(result.get("removed_canonical_keys") or [])
 
+    # 2026-08-07 依頼書 §3 (お願い #2): 除外した行は台帳に残す (窓口が後から件数を追えるように)。
+    # CSV と同じ dir に `<csv>.removed.json` を書出。 dry_run 時は書かない (書換もしないため)。
+    # 2026-08-07 (dedupe_owns_both_key_and_cert §「実装時のお願い」):
+    #   除外した行は **種別つき** で残す (cert / key)。 Q3 条件3「effective に働いた1件」
+    #   の判定を後で機械的に照会できる形式にする。
+    if not dry_run and (result.get("removed") or 0) > 0:
+        from datetime import datetime
+        ledger_path = Path(str(csv_path) + ".removed.json")
+        removed_by_type = result.get("removed_by_type") or {}
+        ledger = {
+            "csv_path": str(csv_path),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "existing_set_source": "HQ live_listings_cache (eBay ActiveList SSOT)",
+            "live_itemid_count": len(live_itemid_set),
+            "existing_cert_count": len(existing_certs),
+            "existing_cert_sku_supplement_count": len(sku_certs),
+            "total": result.get("total"),
+            "removed": result.get("removed"),
+            "kept": result.get("kept"),
+            "unknown": result.get("unknown"),
+            "removed_by_type": {
+                "cert": int(removed_by_type.get("cert", 0)),
+                "key": int(removed_by_type.get("key", 0)),
+            },
+            "removed_canonical_keys": list(result.get("removed_canonical_keys") or []),
+            "removed_certs": list(result.get("removed_certs") or []),
+            "removed_titles": list(result.get("removed_titles") or []),
+        }
+        import json as _json
+        with ledger_path.open("w", encoding="utf-8") as _f:
+            _json.dump(ledger, _f, ensure_ascii=False, indent=2)
+        result["ledger_path"] = str(ledger_path)
+        print(f"  ledger written  : {ledger_path}")
+
     print()
     print(f"  mode            : {'strict (unresolved も除外)' if strict_mode else 'keep-unresolved (= 既定、 除外は真の重複のみ)'}")
-    print(f"  existing set     : live のみ (= itemID(B)非空 AND sold(D)空)、 live_guaranteed={result['live_guaranteed']}")
+    print(f"  existing set     : live のみ (= itemID が HQ cache=eBay ActiveList に含まれる)、 live_guaranteed={result['live_guaranteed']}")
     print(f"  total           : {result['total']}")
     print(f"  removed (真の重複・全て live 一致): {result['removed']}")
+    _rbt = result.get("removed_by_type") or {}
+    print(f"    ├ cert 一致  : {_rbt.get('cert', 0)}  (= 同一物理 slab の二重出品防止・無条件除外)")
+    print(f"    └ KEY 一致   : {_rbt.get('key', 0)}   (= 同一カード種類の重複防止)")
     print(f"  kept (残存)     : {result['kept']}  (= unresolved {result['unknown']} 件を含む)" if not strict_mode else f"  kept (残存)     : {result['kept']}")
     print(f"  unknown (解決不能・keep): {result['unknown']}")
     print(f"  skipped_unresolved (= strict 除外): {result['skipped_unresolved']}")

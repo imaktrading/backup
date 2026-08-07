@@ -327,6 +327,7 @@ def check_csv_canonical(
     dry_run: bool = False,
     strict_mode: bool = False,
     migration_dual_match: bool = True,
+    existing_cert_set: Optional["frozenset[str]"] = None,
 ) -> Dict[str, Any]:
     """CSV を resolver 経由で canonical KEY 化 → 既存 set と単一突合 → 重複物理除外.
 
@@ -346,11 +347,23 @@ def check_csv_canonical(
       ※ 旧 6/10 既定。 出品可否の fail-closed は listing script 側で担保済のため dedup 段の
         unresolved 除外は原則 over-reach。 明示時のみ使う。
 
+    2026-08-07 (= 依頼書 `..._dedupe_owns_both_key_and_cert_response.md`):
+    - **existing_cert_set** 追加。 CSV row の cert (CDA:Certification Number 列) が
+      set に含まれれば **無条件除外** (= 同一物理 slab の二重出品防止)。
+    - 判定順序 = **cert → KEY**。 cert で確定した row は KEY 判定を実行しない (= SSOT)。
+    - token (= タイトル部分一致) は本関数では **落とさない** (= 別セット同番号巻き込み防止)。
+      warning-only 位置づけは呼出側 UX で扱う。
+    - 除外理由は result["removed_by_type"] = {"cert":N, "key":M} で内訳保持 (= 台帳監査用)。
+    - result["removed_certs"] に除外 cert list を保持 (= 台帳 audit 用)。
+
     Returns:
         {
           "total": int, "removed": int, "kept": int, "unknown": int,
           "removed_titles": [str, ...],
           "skipped_unresolved": int (= strict_mode で除外された件数),
+          "removed_canonical_keys": [str, ...],  (= KEY 一致で除外された canonical KEY)
+          "removed_certs": [str, ...],           (= cert 一致で除外された cert list)
+          "removed_by_type": {"cert": int, "key": int},  (= 除外理由の内訳)
           "backup_path": str (= dry_run 時 ""),
           "csv_path": str,
         }
@@ -374,6 +387,8 @@ def check_csv_canonical(
         "skipped_unresolved": 0,
         "removed_titles": [],
         "removed_canonical_keys": [],  # 2026-06-12 scope1: DUP マーカー書込用
+        "removed_certs": [],           # 2026-08-07: cert 一致で除外された cert list
+        "removed_by_type": {"cert": 0, "key": 0},  # 2026-08-07: 除外理由の内訳
         "backup_path": "",
         "csv_path": str(path),
     }
@@ -392,6 +407,10 @@ def check_csv_canonical(
     from .key_format import group_key, build_key
     existing_grouped = frozenset(group_key(k) for k in existing_canonical_keys)
 
+    # 2026-08-07: cert 集合 (= 同一物理 slab の識別子)。 None なら cert 判定 skip。
+    # 依頼書 §Q2: cert 一致 = 無条件除外 (二度売れたら履行不能 = BAN リスク)。
+    cert_set = existing_cert_set or frozenset()
+
     # 2026-07-27 Phase3 案2: 候補を **prefixed で解決**しつつ、既存 set とは
     # **prefixed 形 と bare(product_id) 形 の両方で照合** する移行 dual-mode。
     # - prefixed 形 → 新形式に振り直された既存とマッチ (= Phase2b/upgrade 済分)
@@ -399,6 +418,21 @@ def check_csv_canonical(
     # url-key は category="" で prefix されないため bare 形と一致 (= 従来どおり)。
     # 移行完了 (旧形式が枯れた) 後は migration_dual_match=False で bare 照合を落とす。
     for i, row in enumerate(rows, start=1):
+        # 2026-08-07: 判定順序 cert → KEY (= 上位で確定した row は下位を評価しない、 SSOT)。
+        # cert は resolver に渡さず直接 CSV の CDA 列を見る (= resolver 挙動に非依存)。
+        row_cert = (row.get(COL_CERT) or "").strip()
+        if row_cert and row_cert in cert_set:
+            # 同一 slab の二重出品 → 無条件除外 (依頼書 §Q2)
+            removed_indices.add(i)
+            result["removed_by_type"]["cert"] += 1
+            if row_cert not in result["removed_certs"]:
+                result["removed_certs"].append(row_cert)
+            title_preview = (row.get(COL_TITLE) or "")[:60]
+            result["removed_titles"].append(
+                f"[{i}] (cert={row_cert}) {title_preview}"
+            )
+            continue
+
         res = resolver_io.resolve_csv_row_with_category(row, purpose="dedup")
         pid = (res.get("product_id") or "").strip()
         cat = (res.get("category") or "").strip()
@@ -426,6 +460,7 @@ def check_csv_canonical(
             if canonical_key not in result["removed_canonical_keys"]:
                 result["removed_canonical_keys"].append(canonical_key)
             removed_indices.add(i)
+            result["removed_by_type"]["key"] += 1
             title_preview = (row.get(COL_TITLE) or "")[:60]
             result["removed_titles"].append(
                 f"[{i}] (KEY={canonical_key}) {title_preview}"

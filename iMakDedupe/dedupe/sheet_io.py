@@ -13,8 +13,11 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 
 import gspread
@@ -23,6 +26,21 @@ from google.oauth2.service_account import Credentials
 
 CREDS_PATH = r"c:\dev\iMak\double-hold-421922-7c0d38d3f73d.json"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+# === HQ live_listings_cache (= eBay ActiveList の SSOT、 dup_guard が更新) ===
+# 2026-08-07 (= 依頼書 `..._live_definition_must_be_ebay_not_sold_column_response.md`):
+#   D 列 (仕入元売切) を live proxy に使うと補URL 運用で live を過小評価 → 重複素通し。
+#   dedupe 側は HQ cache を SSOT として読む (= 独自 eBay fetch しない)。
+LIVE_CACHE_PATH = r"C:\dev\iMak_data\hq\live_listings_cache.json"
+LIVE_CACHE_MAX_AGE_HOURS = 6.0  # HQ 側 dup_guard.ensure_fresh_live_cache と同閾値
+
+
+class LiveCacheError(RuntimeError):
+    """HQ live_listings_cache が読めない/古い/壊れている.
+
+    重複くんは live 情報が信用できない時は CSV を触らない (= fail-closed)。
+    caller (= run_check_csv_canonical) は非ゼロ exit で入稿を止める。
+    """
 
 # === スプシ ID (Phase 1 依頼書 §1) ===
 INTERMEDIATE_SHEET_ID = "1hTdFVGkni4Ih4kZGsBgiCKxpTlOeoO_wJdk8Ek5n41Q"
@@ -1165,3 +1183,261 @@ def upgrade_bare_keys_to_category(
             ws.batch_update(updates[i : i + CHUNK], value_input_option="USER_ENTERED")
 
     return counts
+
+
+# ============================================================================
+# 2026-08-07: HQ live_listings_cache 読込 (= eBay ActiveList SSOT)
+# 依頼書 `..._live_definition_must_be_ebay_not_sold_column_response.md` 実装。
+# 旧: D列(仕入元売切) を live proxy → 補URL 運用で live を過小評価 (661件 誤脱落)。
+# 新: HQ cache (dup_guard が 6h 以内で更新保証) の itemID set を live の真として使う。
+# ============================================================================
+
+def load_live_itemid_set(
+    cache_path: Optional[str] = None,
+    max_age_hours: Optional[float] = None,
+    now: Optional[datetime] = None,
+) -> "frozenset[str]":
+    """HQ live_listings_cache から live itemID set を返す.
+
+    Args:
+        cache_path: cache json path (省略時 LIVE_CACHE_PATH)。
+        max_age_hours: 鮮度閾値 (省略時 LIVE_CACHE_MAX_AGE_HOURS=6h)。
+        now: 現在時刻 (test 用注入。 省略時 datetime.now())。
+
+    Returns:
+        frozenset[str] — cache["titles"] と cache["skus"] の keys 集合 (= 全 live itemID)。
+
+    Raises:
+        LiveCacheError — 以下いずれかで raise (= caller が非ゼロ exit で入稿停止):
+          - file 無し
+          - JSON parse エラー / 空 dict
+          - "titles" 欠落 or 空
+          - "generated_at" 欠落 or parse 不能
+          - generated_at が max_age_hours より古い
+
+    2026-08-07 制定 (= `..._response.md` §Q2/§Q3):
+        HQ cache は dup_guard.ensure_fresh_live_cache が 6h 以内で保証する前提。
+        ただし HQ が落ちた時の二重の網として dedupe 側でも古い/欠損は非ゼロ exit。
+    """
+    path = cache_path or LIVE_CACHE_PATH
+    threshold = max_age_hours if max_age_hours is not None else LIVE_CACHE_MAX_AGE_HOURS
+
+    if not os.path.exists(path):
+        raise LiveCacheError(
+            f"HQ live_listings_cache not found: {path}\n"
+            "→ HQ 側 dup_guard.ensure_fresh_live_cache が生成する。"
+            " CSV 触らず入稿停止 (fail-closed)。"
+        )
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveCacheError(
+            f"HQ live_listings_cache 読込 error: {path}: {exc}\n"
+            "→ JSON 壊れ/権限 issue の可能性。 CSV 触らず入稿停止。"
+        )
+
+    if not isinstance(data, dict) or not data:
+        raise LiveCacheError(
+            f"HQ live_listings_cache 空 or 非 dict: {path}\n"
+            "→ HQ 側 dup_guard を再走。 CSV 触らず入稿停止。"
+        )
+
+    generated_at_raw = data.get("generated_at")
+    if not generated_at_raw:
+        raise LiveCacheError(
+            f"HQ live_listings_cache に generated_at 無し: {path}\n"
+            "→ 判定不能 (「0時間前」扱いにしない)。 CSV 触らず入稿停止。"
+        )
+
+    try:
+        gen_dt = datetime.fromisoformat(str(generated_at_raw))
+    except ValueError as exc:
+        raise LiveCacheError(
+            f"HQ live_listings_cache generated_at parse 不能: {generated_at_raw!r}: {exc}\n"
+            "→ CSV 触らず入稿停止。"
+        )
+
+    # tz-naive 前提 (HQ 側も ISO8601 naive で書込)。 test は now= 注入で制御。
+    if gen_dt.tzinfo is not None:
+        gen_dt = gen_dt.astimezone(timezone.utc).replace(tzinfo=None)
+    current = now or datetime.now()
+    if current.tzinfo is not None:
+        current = current.astimezone(timezone.utc).replace(tzinfo=None)
+    age = current - gen_dt
+    if age > timedelta(hours=threshold):
+        raise LiveCacheError(
+            f"HQ live_listings_cache が古い: generated_at={generated_at_raw}, "
+            f"age={age} > {threshold}h\n"
+            "→ HQ 側 dup_guard を再走して cache 更新。 CSV 触らず入稿停止。"
+        )
+
+    titles = data.get("titles") or {}
+    skus = data.get("skus") or {}
+    if not isinstance(titles, dict):
+        raise LiveCacheError(
+            f"HQ live_listings_cache titles が dict でない: {path}"
+        )
+    if not titles:
+        raise LiveCacheError(
+            f"HQ live_listings_cache titles 空: {path}\n"
+            "→ eBay ActiveList 取得失敗の疑い。 CSV 触らず入稿停止。"
+        )
+
+    itemids = set(str(k) for k in titles.keys())
+    if isinstance(skus, dict):
+        itemids.update(str(k) for k in skus.keys())
+    return frozenset(itemids)
+
+
+def read_canonical_keys_by_live_itemids(
+    ws,
+    key_col: int,
+    item_id_col: int,
+    live_itemid_set: "frozenset[str]",
+) -> List[str]:
+    """canonical KEY を「行の itemID が live_itemid_set に居る」 filter で返す.
+
+    2026-08-07 (= 依頼書 `..._live_definition_must_be_ebay_not_sold_column_response.md`):
+        旧 D 列 (仕入元売切) filter は補URL 運用で live 過小評価 (661件 誤脱落)。
+        新 filter = itemID (B 列) が HQ cache の live itemID set に含まれる行のみ。
+        D 列は仕入元 analysis 用途で残るが、 live 判定からは外す。
+
+    Args:
+        ws: gspread worksheet (get_all_values を実装していれば mock 可)。
+        key_col: canonical KEY 列 (1-based)。
+        item_id_col: itemID 列 (1-based、 通常 LISTINGS_COL_ITEMID=2)。
+        live_itemid_set: HQ cache から得た live itemID の frozenset。
+
+    Returns:
+        list[str] — live 出品中の row の canonical KEY (空 KEY は "" のまま含む)。
+    """
+    values = ws.get_all_values()
+    if not values:
+        return []
+    out: List[str] = []
+    for row in values[1:]:
+        item_id = _safe_cell(row, item_id_col)
+        if not item_id:
+            continue
+        if item_id not in live_itemid_set:
+            continue
+        out.append(_safe_cell(row, key_col))
+    return out
+
+
+# ============================================================================
+# 2026-08-07: cert 集約 (= 依頼書 `..._dedupe_owns_both_key_and_cert_response.md`)
+# KEー と cert を両方 dedupe が持つ (= HQ dup_guard 側は畳む方向)。
+# cert は「同一の物理 slab」の識別子。 一致したら **無条件除外** (= 二度売れたら
+# 履行不能 = キャンセル = Defect = BAN)。
+# ============================================================================
+
+_CERT_SKU_RE = re.compile(r"^PSA10-(\d{6,})$", re.I)
+
+
+def read_existing_certs(
+    ws,
+    cert_col: int,
+    item_id_col: int,
+    live_itemid_set: "frozenset[str]",
+    category_col: Optional[int] = None,
+    category_value: Optional[str] = None,
+) -> "frozenset[str]":
+    """商品管理シートから live 出品済の cert 集合を返す.
+
+    2026-08-07 (= dedupe が cert 判定を持つための I/O helper):
+    - **live 判定**: itemID が live_itemid_set に含まれる row のみ (= KEー 集約と同基準)
+    - **カテゴリ限定**: category_col + category_value 指定時は当該列一致 row のみ (= R='TCG')
+      指定なしなら全 row (= 他 category は cert 列に別値が入る想定なので通常は指定必須)
+    - **空 cert は除外** (= 集合投入対象外)
+
+    依頼書 §5「シート I列 = cert。 ただし PSA 専用列ではない。 montbell は同じ列に
+    型番を入れており、 R列='TCG' で絞らないと在庫のある別商品を誤って止める」
+    → 呼出側で **category_col=HIGH_COL_CATEGORY, category_value='TCG' を必ず渡す**。
+
+    Args:
+        ws: gspread worksheet (get_all_values を実装していれば mock 可)。
+        cert_col: cert 列 (1-based、 HIGH は I=9)。
+        item_id_col: itemID 列 (1-based、 通常 B=2)。
+        live_itemid_set: HQ cache 由来の live itemID の frozenset。
+        category_col: カテゴリ列 (1-based、 HIGH は R=18)。 None なら filter しない。
+        category_value: 一致させる category 文字列 (例 'TCG')。 None なら filter しない。
+
+    Returns:
+        frozenset[str] — live 出品済の cert 番号 (= 6桁以上想定、 大文字化しない)。
+    """
+    values = ws.get_all_values()
+    if not values:
+        return frozenset()
+    out: set = set()
+    apply_category = category_col is not None and category_value is not None
+    for row in values[1:]:
+        item_id = _safe_cell(row, item_id_col)
+        if not item_id:
+            continue
+        if item_id not in live_itemid_set:
+            continue
+        if apply_category:
+            if _safe_cell(row, category_col) != category_value:
+                continue
+        cert = _safe_cell(row, cert_col)
+        if cert:
+            out.add(cert)
+    return frozenset(out)
+
+
+def certs_from_sku_map(sku_by_itemid: dict) -> "frozenset[str]":
+    """SKU (= eBay CustomLabel) dict から cert 集合を抽出.
+
+    HQ 側 sheet_io.certs_from_skus と同 regex (`^PSA10-<\\d{6,}>$` 大小無視) を使う。
+    live_listings_cache["skus"] は {itemID: sku_string} 形式。 マッチしない sku は無視。
+
+    HQ 版と揃える理由:
+    - `dedupe が持つ` = HQ 側判定と齟齬が出ないように同じ regex + 同じ入力型で書く
+    - 依頼書「二重実装は必ずズレる」 の直接対策 (= 同 regex を持つ)
+
+    Args:
+        sku_by_itemid: {itemID: sku_string} dict (= live_listings_cache["skus"])。 None 可。
+
+    Returns:
+        frozenset[str] — 抽出できた cert 番号集合。 sku_by_itemid が None/空でも空集合返す。
+    """
+    if not sku_by_itemid:
+        return frozenset()
+    out: set = set()
+    for sku in sku_by_itemid.values():
+        m = _CERT_SKU_RE.match((sku or "").strip())
+        if m:
+            out.add(m.group(1))
+    return frozenset(out)
+
+
+def load_live_cert_set_from_skus(
+    cache_path: Optional[str] = None,
+) -> "frozenset[str]":
+    """live_listings_cache["skus"] から cert 集合を返す (= 補完 = orphan 埋め).
+
+    HQ 側 sheet_io.live_listed_certs と同型 (= eBay を叩かず cache だけ読む)。
+    シート itemID 書き戻し漏れ (= orphan) 分を SKU 由来で補うために使う。
+
+    実測 (依頼書): live PSA10 654件のうち 36件がシート itemID 空 (orphan)。
+    その 36件のうち CustomLabel が `PSA10-<cert>` 形式の分だけ回収可能 (176/654)。
+    orphan 残り (35件) は「itemID をシートに書き戻す」 データ修復でしか埋まらない (別途 backlog)。
+
+    cache 無し/破損時は空集合を返す (= raise しない、 補完なので静かに失敗許容)。
+    ※ 本 helper は「補完」用。 load_live_itemid_set と違って厳格 fail-closed にしない。
+    """
+    path = cache_path or LIVE_CACHE_PATH
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return frozenset()
+    if not isinstance(data, dict):
+        return frozenset()
+    skus = data.get("skus") or {}
+    if not isinstance(skus, dict):
+        return frozenset()
+    return certs_from_sku_map(skus)
