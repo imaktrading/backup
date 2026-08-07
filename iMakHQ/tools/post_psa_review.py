@@ -969,10 +969,45 @@ def _remove_certs_from_csv(csv_path, certs_to_remove) -> int:
 
 
 _MISSING_MODELS_PATH = Path("C:/dev/iMak_data/catalog/missing_models.csv")
+_VIEWER_DISAGREEMENT_LOG_PATH = Path("C:/dev/iMak_data/catalog/viewer_disagreement.log")
+
+
+def _catalog_has_pid(category: str, pid: str, db_path=None) -> bool | None:
+    """catalog 実在 pre-check (canonical KEY 完全一致のみ, 名前検索禁止).
+
+    fail-closed 契約:
+      - True  = (category, product_id) の完全一致で catalog に存在
+      - False = 完全一致で見つからない
+      - None  = 判定不能 (pid 空/"無" / DB 不在 / 例外) → 呼出側は従来通り missing_models へ
+
+    2026-08-07: `_route_none_to_catalog` の catalog 実在 pre-check 用
+    (回答書 `2026-08-06_act_code_proposals_tcg_response.md` の実装 GO)。
+    canonical KEY の完全一致のみ (regex/名前一致で「実在扱い」しない = 見落とし側に倒さない)。
+    """
+    if not pid:
+        return None
+    pid = pid.strip()
+    if not pid or pid == "無":
+        return None
+    p = Path(db_path) if db_path else CATALOG_DB
+    try:
+        con = sqlite3.connect(str(p))
+        try:
+            row = con.execute(
+                "SELECT 1 FROM products WHERE category=? AND product_id=? LIMIT 1",
+                (category, pid),
+            ).fetchone()
+        finally:
+            con.close()
+        return row is not None
+    except Exception:
+        return None
 
 
 def _route_none_to_catalog(none_records: list[dict], missing_path=None,
-                           trigger_request: bool = True) -> int:
+                           trigger_request: bool = True,
+                           viewer_disagreement_path=None,
+                           catalog_db=None) -> int:
     """NONE/NG (= catalog 一致無し) cert を missing_models.csv に流し catalog 追加依頼を自動生成.
 
     NONE は『解決済』でなく『catalog で解決すべき宿題』。build_row の catalog-miss と同経路で
@@ -984,7 +1019,13 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
     build_row と乖離して毎日 Catalog に無駄な調査を積んでいた (2026-07-29 Advisor 発覚)。
     build_row と同じ真理表を SSOT (tcg_scope) から共有する。
 
-    Returns: missing_models.csv に書いた行数 (skip 済は含まない)。
+    2026-08-07: catalog 実在 pre-check を追加 (回答書
+    `2026-08-06_act_code_proposals_tcg_response.md` の実装 GO)。
+    expected PID が (category, product_id) 完全一致で catalog に在れば viewer/adapter 側の
+    食い違いなので **missing_models には書かず** viewer_disagreement.log に理由付きで残す。
+    fail-closed: 判定不能 (pid 空/"無"/DB不在) は従来通り missing_models へ (見落とし禁止)。
+
+    Returns: missing_models.csv に書いた行数 (viewer_disagreement / scope外 skip は含まない)。
     """
     if not none_records:
         return 0
@@ -992,6 +1033,7 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
     _ensure_tcg_path()
     from tcg_scope import is_out_of_scope, detect_franchise_from_brand
     path = Path(missing_path) if missing_path else _MISSING_MODELS_PATH
+    vd_path = Path(viewer_disagreement_path) if viewer_disagreement_path else _VIEWER_DISAGREEMENT_LOG_PATH
     written = 0
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1017,6 +1059,26 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                 if oos:
                     print(f"    ⏭️ Skip missing_models (scope外): cert{cert} {oos_reason}")
                     continue
+                # catalog 実在 pre-check (canonical KEY 完全一致のみ, 2026-08-07)。
+                # 実在 → viewer/adapter 側の食い違い。catalog に依頼を出さず別ログへ。
+                # 判定不能 (None) は従来通り missing_models へ (fail-closed = 見落とし禁止)。
+                if expected and expected != "無":
+                    exists = _catalog_has_pid(category, expected, db_path=catalog_db)
+                    if exists is True:
+                        try:
+                            vd_path.parent.mkdir(parents=True, exist_ok=True)
+                            with vd_path.open("a", encoding="utf-8") as vf:
+                                vf.write(
+                                    f"{ts}\tcert{cert}\t{category}\t{expected}"
+                                    f"\t{brand}\t{subject}\t#{cardno}\n"
+                                )
+                        except Exception:
+                            pass
+                        print(
+                            f"    ⏭️ Skip missing_models (catalog実在→viewer食い違い): "
+                            f"cert{cert} {category}:{expected}"
+                        )
+                        continue
                 model = (f"cert{cert} {brand} [{subject}] #{cardno} "
                          f"(auto候補{expected}=該当なし 要調査)").replace(",", " ")
                 model = " ".join(model.split())  # 連続空白圧縮
