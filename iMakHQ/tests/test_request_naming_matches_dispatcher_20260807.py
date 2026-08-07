@@ -88,3 +88,21 @@ class TestDocsWarnAboutIt:
         """担当→窓口の差し戻しには `_question` が正しい (消してしまわないこと)."""
         for p, s in _docs():
             assert "`_question.md` で指摘して止める" in s, p
+
+
+class TestStaleDraftIsMarked:
+    """★窓口が draft を寝かせると系全体が止まる。時間で自動的に目立たせる.
+
+    8/04 の重複くん回答を3日寝かせた間に、8/05・8/06 も重複が入稿CSVに載った。
+    「毎回見る」は口約束なので、時間で色を変える仕組みにする。
+    """
+
+    def test_threshold_exists(self):
+        assert wb.STALE_DRAFT_H > 0
+
+    def test_board_reports_stale_count(self):
+        src = open(os.path.join(os.path.dirname(__file__), "..", "tools",
+                                "worktree_board.py"), encoding="utf-8").read()
+        assert "grand_stale" in src
+        assert "時間以上 止めている" in src, "合計行に滞留件数を出すこと"
+        assert "放置" in src, "各行に放置時間を出すこと"

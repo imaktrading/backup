@@ -38,6 +38,9 @@ CLOSED_SUFFIXES = (
 )
 RECENT_DAYS = 21
 MAX_SHOW = 8
+# 窓口レビューがこの時間を超えたら「放置」として色を変える。
+# 8/04 の重複くん回答を3日寝かせ、その間 8/05・8/06 も重複が入稿CSVに載った。
+STALE_DRAFT_H = 24
 
 
 def _is_outbound(stem: str, worktree: str) -> bool:
@@ -241,7 +244,7 @@ def main() -> int:
             print(f"- **[{c.get('who', '?')}]**{mark} {it['title']} `{it['id']}`")
         print()
 
-    grand_mine = grand_theirs = 0
+    grand_mine = grand_theirs = grand_stale = 0
     desk = current_desk()          # 起票が自分の件に ★ を付けるため
 
     for wt, label in WORKTREES:
@@ -269,7 +272,16 @@ def main() -> int:
             tag = f" — 起票: **{req}**" if req else " — 起票者不明"
             if req and req == desk:
                 tag += " ★**あなたのボール**"
-            print(f"- 🟡 **レビュー待ち(headless下書き)** {p.name} ({_age(p.stat().st_mtime)}){tag}")
+            # ★2026-08-07: 滞留した draft を目立たせる。窓口が寝かせると **系全体が止まる**
+            #   (8/04 の重複くん回答を3日寝かせた間に、8/05・8/06 も重複が入稿CSVに載った)。
+            #   「毎回見る」は口約束なので、時間で自動的に色を変える。
+            _h = (time.time() - p.stat().st_mtime) / 3600
+            _mark = "🟡" if _h < STALE_DRAFT_H else ("🟠" if _h < STALE_DRAFT_H * 3 else "🔴")
+            _late = "" if _h < STALE_DRAFT_H else f" ⏰**{int(_h)}時間 放置**"
+            print(f"- {_mark} **レビュー待ち(headless下書き)** {p.name} "
+                  f"({_age(p.stat().st_mtime)}){tag}{_late}")
+            if _h >= STALE_DRAFT_H:
+                grand_stale += 1
         for p in mine[:MAX_SHOW]:
             print(f"- 🔴 **要返球** {p.name} ({_age(p.stat().st_mtime)})")
         if len(mine) > MAX_SHOW:
@@ -323,6 +335,9 @@ def main() -> int:
         print(f"dispatch watcher: 稼働中 (heartbeat {int(_watch_age)}秒前)\n")
 
     print(f"---\n**合計: 要返球 {grand_mine}件 / 相手ボール {grand_theirs}件**")
+    if grand_stale:
+        print(f"🔴 **窓口が {grand_stale}件のレビューを {STALE_DRAFT_H}時間以上 止めている** "
+              "— 止めると相手の worktree も止まる。先に返球すること")
     if grand_mine:
         print("→ 要返球を先に片付ける。**自分の回答待ちで他 worktree を止めない**。")
     if grand_theirs:
