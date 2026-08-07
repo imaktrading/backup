@@ -2683,6 +2683,21 @@ def load_targets_from_sheet_psa():
         print(f"  🚫 二重出品ガード: 同一cert が既に出品済 → 除外 {len(_skipped_cert)}件 "
               f"→ {_skipped_cert[:8]}{' …' if len(_skipped_cert) > 8 else ''}")
         print(f"     (同じ cert = 同じ現物。二度出すと片方は必ず履行できない)")
+        # ★2026-08-07 重複くん要望: 抽出段で落とした cert を **後から追える形**で残す。
+        #   抽出段は「目視削減の前段」であって判定の権威ではない。権威は重複くん。
+        #   痕跡が無いと重複くんが「本来自分が捕まえるべきだった件」を audit できない。
+        try:
+            import json as _json
+            from datetime import datetime as _dt
+            _tr = r"C:\dev\iMak_data\hq\extract_cert_skips.jsonl"
+            os.makedirs(os.path.dirname(_tr), exist_ok=True)
+            with open(_tr, "a", encoding="utf-8") as _f:
+                _f.write(_json.dumps({"ts": _dt.now().isoformat(timespec="seconds"),
+                                      "stage": "psa_to_csv.extract",
+                                      "reason": "same_cert_already_listed",
+                                      "certs": _skipped_cert}, ensure_ascii=False) + "\n")
+        except Exception as _e_tr:                      # 痕跡が残せなくても抽出は止めない
+            print(f"     ⚠️ 除外痕跡の記録に失敗(続行): {type(_e_tr).__name__}")
     if _skipped_listed:
         print(f"  ⏭️ 既出品(同KEYが出品済)の2枚目を除外: {_skipped_listed}件 "
               f"(viewer毎回再表示の浪費防止。dedupと二重ではなく抽出段階で先に止める)")
