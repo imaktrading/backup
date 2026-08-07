@@ -66,6 +66,65 @@ TITLE2CALC = [("psa", "TCG(PSA10)"), ("ichiban kuji", "一番くじ"), ("g-shock
               ("gshock", "G-SHOCK"), ("t-shirt", "Tシャツ(UT)"), ("tee", "Tシャツ(UT)")]
 
 
+def _norm_title(title):
+    """タイトル一致キー。前後空白除去 + 連続空白1つに畳む。大文字小文字は保持
+    (eBay の Title は US本体/ミラーで完全同一なので正規化は最小限で足りる)。"""
+    import re
+    return re.sub(r"\s+", " ", title or "").strip()
+
+
+def find_us_parent(title, us_parents_by_title):
+    """ミラーのタイトルから US本体の itemID を1つに特定する (2026-08-08)。
+
+    fail-closed: 0件 or 2件以上なら None を返す。部分一致は禁止
+    (別カードを掴むと **赤字承諾** の可能性)。
+    """
+    cands = us_parents_by_title.get(_norm_title(title), [])
+    return cands[0] if len(cands) == 1 else None
+
+
+def build_us_parents_index(fetch_page, max_pages=40):
+    """GetMyeBaySelling ActiveList を全ページ舐めて `title(正規化)→[{iid,url},...]` を作る.
+
+    fetch_page(page_num) → XML 文字列。テスト時は dict.get を渡す。
+
+    ★ページ打ち切りは **そのページの <Item> 総数** で判定する。US件数で判定すると
+      「そのページに US本体が無い」だけで停止してしまい、以降の US を見落とす
+      (実測 2026-08-08: page3〜5 が US 0件、page6 以降に US 1,737件残っていた =
+       全 US 1,846件のうち 94% を取りこぼしていた)。
+    ★`<Item>` の抽出は `<ActiveList>` スコープに限定する。TotalNumberOfPages が
+      ActiveList 以外の list の分も返る (実測: ['1','24','1','6']) のと同じ罠。
+    """
+    import re
+    us_parents_by_title = {}
+    for n in range(1, max_pages + 1):
+        t = fetch_page(n) or ""
+        al = re.search(r"<ActiveList>(.*?)</ActiveList>", t, re.S)
+        if not al:
+            break
+        page_items = re.findall(r"<Item>(.*?)</Item>", al.group(1), re.S)
+        if not page_items:
+            break
+        for it in page_items:
+            iid_m = re.search(r"<ItemID>(\d+)</ItemID>", it)
+            ti_m = re.search(r"<Title>(.*?)</Title>", it)
+            vu_m = re.search(r"<ViewItemURL>(.*?)</ViewItemURL>", it)
+            if not (iid_m and ti_m and vu_m):
+                continue
+            url = vu_m.group(1).replace("&amp;", "&")
+            # US本体のみ (`.ebay.com/` は `.ebay.com.au/` `.co.uk` `.ca` `.de` に当たらない)
+            if ".ebay.com/" not in url:
+                continue
+            key = _norm_title(ti_m.group(1).replace("&amp;", "&").replace("&apos;", "'"))
+            us_parents_by_title.setdefault(key, []).append(
+                {"iid": iid_m.group(1), "url": url})
+        pr = re.search(r"<ActiveList>.*?<PaginationResult>.*?"
+                       r"<TotalNumberOfPages>(\d+)</TotalNumberOfPages>", t, re.S)
+        if pr and n >= int(pr.group(1)):
+            break
+    return us_parents_by_title
+
+
 def parse_best_offers(xml, into=None):
     """GetBestOffers のレスポンス → {itemID: {"title", "xml"}} (純関数, test可)。
 
@@ -153,6 +212,27 @@ def fetch_offers():
     except Exception as e:                                    # noqa: BLE001
         print(f"⚠️ 商品管理シートが読めない ({e}) → 仕入値は 0 で出す")
 
+    # ★2026-08-08 追加: ミラー (ebay.de/uk/... ドメイン) → US本体 (ebay.com) の突合用に、
+    #   自 seller の US出品を1度だけ舐めて {title: [{iid,url},...]} を作る。
+    #   オファー無し listing も含めるため GetMyeBaySelling ActiveList が要る
+    #   (GetBestOffers はオファー付き listing しか返さない)。
+    #   fail-closed: 取得失敗時は空 dict → ミラーは従来どおり「手入力」表示に落ちるだけ。
+    def _fetch_active_page(n):
+        return fx.post("GetMyeBaySelling",
+                       "<ActiveList>"
+                       f"<Pagination><EntriesPerPage>200</EntriesPerPage>"
+                       f"<PageNumber>{n}</PageNumber></Pagination>"
+                       "<DetailLevel>ReturnAll</DetailLevel>"
+                       "</ActiveList>", tok, site="0")
+
+    try:
+        us_parents_by_title = build_us_parents_index(_fetch_active_page)
+        print(f"📇 US本体 index: {sum(len(v) for v in us_parents_by_title.values())} 件 "
+              f"/ {len(us_parents_by_title)} タイトル")
+    except Exception as e:                                    # noqa: BLE001
+        print(f"⚠️ US本体一覧の取得に失敗 ({e}) → ミラーの仕入値は手入力になります")
+        us_parents_by_title = {}
+
     def yen(v):
         try:
             return int(str(v).replace(",", "").replace("¥", "").strip() or 0)
@@ -190,30 +270,61 @@ def fetch_offers():
         # ★2026-08-02: 突合を3経路にした。従来は「SKU = 仕入元メルカリID」しか見ておらず、
         #   PSA (SKU=`PSA10-<cert>`) と ミラー (SKU 無し) では **黙って 0** になっていた。
         #   0 のまま採算を見ると赤字オファーを承諾しかねないので、取れない時は理由を出す。
+        # ★2026-08-08: 4段に拡張。①itemID完全一致 (offer.iid = B列) / ②cert / ③SKU→URL /
+        #   ④ミラー→US本体タイトル一致→US親iidでもう一度 ①。①は cert/SKU が無くても
+        #   自 seller の US出品に対して当たる (offer.iid が既に B列にあるケース)。
+        from listing_common import pick_cost_jpy
         _cert = ""
         mm = re.match(r"(?i)^PSA10?-(\d{6,10})$", sku or "")
         if mm:
             _cert = mm.group(1)
-        for r in rows:
-            hit = False
-            if _cert and len(r) > COL_CERT and (r[COL_CERT] or "").strip() == _cert:
-                hit, how = True, f"cert {_cert}"
-            elif not _cert and sku and len(r) > COL_URL and sku in (r[COL_URL] or ""):
-                hit, how = True, f"仕入元URL / SKU {sku}"
-            if not hit:
-                continue
-            # ★2026-08-02: yen(r[N]) を pick_cost_jpy(r) に統合。
-            #   N(SSOT)→M(現在価格)→F(取得時) で、N が #REF!/空でも M/F にフォールバック。
-            #   listing_common に 1 本化して、出品くん5系統+PSA+offer_calc が同一定義になる
-            #   (以前は三様: offer_calc=N only / _psa_cost_from_row=N→M→F / pick_cost_jpy=N→F)。
-            from listing_common import pick_cost_jpy
+
+        def _apply_row(r, how):
             _c = pick_cost_jpy(r)
-            cost = int(_c) if _c else 0
-            stock = r[COL_STOCKCHK] if len(r) > COL_STOCKCHK else ""
-            supply = sum(1 for i in COL_AUX if len(r) > i and (r[i] or "").strip())
-            cat_sheet = r[COL_CAT] if len(r) > COL_CAT else ""
-            cost_src = f"商品管理シート N→M→F ({how}) / itemID {r[COL_ITEMID]}"
+            return {
+                "cost": int(_c) if _c else 0,
+                "stock": r[COL_STOCKCHK] if len(r) > COL_STOCKCHK else "",
+                "supply": sum(1 for i in COL_AUX if len(r) > i and (r[i] or "").strip()),
+                "cat_sheet": r[COL_CAT] if len(r) > COL_CAT else "",
+                "cost_src": f"商品管理シート N→M→F ({how}) / itemID {r[COL_ITEMID]}",
+            }
+
+        for r in rows:
+            hit_how = None
+            if len(r) > COL_ITEMID and (r[COL_ITEMID] or "").strip() == iid:
+                hit_how = f"itemID {iid}"
+            elif _cert and len(r) > COL_CERT and (r[COL_CERT] or "").strip() == _cert:
+                hit_how = f"cert {_cert}"
+            elif not _cert and sku and len(r) > COL_URL and sku in (r[COL_URL] or ""):
+                hit_how = f"仕入元URL / SKU {sku}"
+            if not hit_how:
+                continue
+            d = _apply_row(r, hit_how)
+            cost, stock, supply, cat_sheet, cost_src = (
+                d["cost"], d["stock"], d["supply"], d["cat_sheet"], d["cost_src"])
             break
+
+        # ★2026-08-08 追加 (④): ミラーで①②③外れなら、US本体タイトル一致 → US親iidで再ルックアップ。
+        #   `358841114399`(uk) → `358600821584`(us) → row603 → 11999 の経路がここで通る。
+        if not cost_src and is_mirror:
+            parent = find_us_parent(meta["title"], us_parents_by_title)
+            if parent:
+                for r in rows:
+                    if len(r) > COL_ITEMID and (r[COL_ITEMID] or "").strip() == parent["iid"]:
+                        how = (f"ミラー {iid} → US本体 {parent['iid']} / タイトル一致")
+                        d = _apply_row(r, how)
+                        cost, stock, supply, cat_sheet, cost_src = (
+                            d["cost"], d["stock"], d["supply"], d["cat_sheet"], d["cost_src"])
+                        break
+                if not cost_src:
+                    cost_src = (f"⚠️ ミラー → US本体 {parent['iid']} を特定できたが "
+                                f"シートに該当行なし → **仕入値は手入力**")
+            else:
+                # 0件 or 2件以上 → fail-closed。黙って別カードを掴まない。
+                dup = len(us_parents_by_title.get(_norm_title(meta["title"]), []))
+                cost_src = (f"⚠️ ミラー → US本体を一意に特定できず (同名 {dup}件) "
+                            f"→ **仕入値は手入力**")
+
         if not cost_src:
             cost_src = ("⚠️ ミラー出品のためシートに無い → **仕入値は手入力**"
                         if is_mirror else
