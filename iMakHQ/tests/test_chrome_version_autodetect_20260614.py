@@ -48,3 +48,41 @@ def test_no_numeric_version_main_pin_on_master():
         for m in _NUMERIC_PIN.finditer(src):
             offenders.append(f"{rel}: {m.group(0)}")
     assert not offenders, "numeric version_main pin 残存: " + "; ".join(offenders)
+
+
+# ★2026-08-08: 名指し3本だけでは守れていなかった。Chrome が 151 に上がった日に
+#   `iMakCatalog/scrapers/_phase3_diag_series.py` と `_phase3_diag_state_pollution.py` が
+#   **146 固定のまま**残っているのが見つかった (2026-06-13 の一斉是正から漏れていた)。
+#   名指し方式は「新しく書かれたファイル」を永久に守れないので、**リポジトリ全体**を見る。
+#   ★対象は **git 管理下の .py だけ**にする。gitignore された使い捨て診断スクリプトまで
+#   見ると、他 worktree の手元ファイルで **pre-commit が全部止まる**新しい blocker になる
+#   (2026-08-04〜07 に重複くんが実際に止まったのと同型の事故を作らない)。
+def _tracked_py():
+    import subprocess
+    try:
+        out = subprocess.run(["git", "ls-files", "*.py"], cwd=_ROOT,
+                             capture_output=True, text=True, timeout=60)
+    except Exception:                                          # noqa: BLE001
+        return []
+    skip = os.path.join("iMakHQ", "tests").replace("\\", "/")
+    return [p for p in out.stdout.splitlines() if p and not p.startswith(skip)]
+
+
+def test_no_numeric_pin_anywhere_on_master():
+    """git 管理下の .py 全体に numeric pin が無いこと (名指し漏れを塞ぐ)。
+
+    テスト自身 (`iMakHQ/tests`) は正規表現の見本を持つので走査から除く。
+    """
+    files = _tracked_py()
+    assert files, "git ls-files が空 — 走査できていない (テストが無意味になっている)"
+    offenders = []
+    for rel in files:
+        try:
+            src = open(os.path.join(_ROOT, rel), encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for m in _NUMERIC_PIN.finditer(src):
+            offenders.append(f"{rel}: {m.group(0)}")
+    assert not offenders, (
+        "numeric version_main pin 残存 (Chrome 自動更新で driver 起動不能になる): "
+        + "; ".join(offenders))
