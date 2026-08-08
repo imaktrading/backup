@@ -98,6 +98,23 @@ def _zero_o_variants(set_code: str):
     return list(out)
 
 
+def _set_prefix_in_brand(product_id: str, brand: str) -> bool:
+    """候補の set 記号が brand 文字列にも出てくるか (純関数)。
+
+    `FB02-017` → 記号 `FB02`。brand に `FB02` が有れば「同じセットの索引不備」、
+    無ければ「番号とキャラ名が一致しただけの別セット」の疑い。
+    ここでは **判定しない**。仕分けて人に見せるだけ (断定は fail-closed に反する)。
+    """
+    pid = (product_id or "").strip()
+    b = (brand or "").upper()
+    if not pid or not b:
+        return False
+    head = pid.split("-")[0].upper()
+    if not head:
+        return False
+    return head in b
+
+
 def classify(cert: str, meta: dict, con: sqlite3.Connection):
     brand = meta.get("Brand", "") or ""
     subject = meta.get("Subject", "") or ""
@@ -150,10 +167,36 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
                     hits.append(pid)
     hits = sorted(set(hits))
     if hits:
-        # name+番号 で候補在り = 索引不備の疑いだが別セット同番号の偶然もある → 断定せず REVIEW
-        res["status"] = "REVIEW"; res["candidates"] = hits[:8]
-        res["reason"] = (f"set_code抽出={set_code} で外したが name+番号で候補在り"
-                         " (索引不備 or 別セット同番号 → 要判定)")
+        # name+番号 で候補在り = 索引不備の疑いだが別セット同番号の偶然もある → 断定せず REVIEW。
+        # ★2026-08-09: その「偶然」が実際に大量に出ていた。dragonball の brand は
+        #   `SON GOKU HEROES UGM5` (= SDBH) なのに、候補として `FB02-017` `SB01-017`
+        #   (= Fusion World) が並ぶ。catalog に SDBH は **0件** (UGM/BM/HG/GM/H2 いずれも 0)
+        #   なので、番号とキャラ名が一致しただけの **別ゲームのカード**。採用したら誤出品。
+        #   断定はしない (fail-closed 維持) が、**人が見た瞬間に区別できる形**に割る。
+        same = [p for p in hits if _set_prefix_in_brand(p, brand)]
+        other = [p for p in hits if p not in same]
+        prefixes = sorted({p.split("-")[0].upper() for p in hits if p})
+        res["status"] = "REVIEW"
+        res["candidates"] = (same + other)[:8]
+        res["same_series"] = same[:8]
+        res["other_series"] = other[:8]
+        res["prefixes"] = prefixes
+        if same:
+            res["risk"] = "index"
+            res["reason"] = (f"set_code抽出={set_code} だが **brand と同じセット記号** の候補在り"
+                             f" → 索引不備の可能性が高い (同系 {len(same)} / 別系 {len(other)})")
+        elif len(prefixes) == 1:
+            # 候補が1つのセットに収まる = 同じカードの変種違い (プロモ等で brand が
+            # 基本セット名を名乗らないケース。例 `CHAMPIONSHIP SET 2023` → OP03-001_*)。
+            res["risk"] = "variant"
+            res["reason"] = (f"set_code抽出={set_code}。候補は全て **{prefixes[0]}** の変種"
+                             f" ({len(hits)}件) → 同じカードの版違い。**目視でどの変種か確定**")
+        else:
+            # 候補が複数セットに散る = 番号とキャラ名が一致しただけ。別ゲーム混在の疑い。
+            res["risk"] = "cross-set"
+            res["reason"] = (f"set_code抽出={set_code}。候補が **{len(prefixes)}種類のセット** "
+                             f"({'/'.join(prefixes)}) に散っている = 番号とキャラ名が一致しただけの"
+                             " 別セット/別ゲームの疑い。**採用するな**")
         return res
     res["status"] = "GAP"; res["reason"] = f"recovery不一致 (set_code={set_code})"
     return res
