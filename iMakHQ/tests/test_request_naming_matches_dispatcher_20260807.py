@@ -66,6 +66,53 @@ class TestDispatcherContract:
         assert [p.name for p in wb.implement_for("wt")] == ["b_response.md"]
 
 
+class TestImplementMarkerMustBeItsOwnLine:
+    """★2026-08-08: マーカーを **話題にしただけ** で実装キューに入る誤爆.
+
+    実害: 窓口が「このファイルに `[IMPLEMENT-GO]` は入れていない = まだ着手しないこと」
+    と書いた回答が実装キューに入り、監視くん headless が **3 回空焚き**した
+    (「同じ空焚きが3度目」と督促を受けた)。部分一致 `marker in body` が原因。
+    規約 (CLAUDE.md) は「本文に **1行** 入れる」なので、行全体がマーカーの時だけ発火させる。
+    """
+
+    FIRE = [
+        "[IMPLEMENT-GO]",
+        "  [IMPLEMENT-GO]  ",
+        "> [IMPLEMENT-GO]",
+        "- [IMPLEMENT-GO]",
+        "**[IMPLEMENT-GO]**",
+        "`[IMPLEMENT-GO]`",
+        "前置き\n\n[IMPLEMENT-GO]\n\n本文",
+    ]
+    NO_FIRE = [
+        "このファイルに `[IMPLEMENT-GO]` は入れていない = まだ着手しないこと",
+        "実装まで求める案件は `_response.md` 本文に **`[IMPLEMENT-GO]`** を1行入れます。",
+        "本実装依頼を別途投入 (`[IMPLEMENT-GO]` 付き)",
+        "その依頼書に `[IMPLEMENT-GO]` を入れて初めて着手してください。",
+        "| B-1 | SERIES_LIST に6本追加 | ① | **[IMPLEMENT-GO]** |",
+        "前の [IMPLEMENT-GO] は取り下げ",
+        "実装 GO でお願いします",
+        "",
+    ]
+
+    def test_standalone_line_fires(self):
+        for body in self.FIRE:
+            assert wb.has_implement_go(body), f"発火すべきなのにしない: {body!r}"
+
+    def test_mention_in_prose_does_not_fire(self):
+        for body in self.NO_FIRE:
+            assert not wb.has_implement_go(body), f"誤爆した: {body!r}"
+
+    def test_implement_for_uses_the_line_rule(self, tmp_path, monkeypatch):
+        d = tmp_path / "wt" / "requests"
+        d.mkdir(parents=True)
+        (d / "mention_response.md").write_text(
+            "GO は入れていない (`[IMPLEMENT-GO]` を書いていない)", encoding="utf-8")
+        (d / "real_response.md").write_text("## 依頼\n\n[IMPLEMENT-GO]\n", encoding="utf-8")
+        monkeypatch.setattr(wb, "DATA_ROOT", tmp_path)
+        assert [p.name for p in wb.implement_for("wt")] == ["real_response.md"]
+
+
 class TestDocsWarnAboutIt:
     """規約側にも書いてあること (片方だけ直すと事故が再発する)."""
 

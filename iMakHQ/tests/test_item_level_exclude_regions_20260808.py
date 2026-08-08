@@ -108,9 +108,10 @@ def test_enumerate_does_not_stop_on_page_with_no_match(monkeypatch):
         return pages.get(n, "<ActiveList></ActiveList>")
 
     monkeypatch.setattr(EX.fx, "post", fake_post)
-    got = EX.enumerate_mirror("tok", "//www.ebay.de/")
+    got, total = EX.enumerate_mirror("tok", "//www.ebay.de/")
     assert seen == [1, 2, 3], f"3ページ目まで見ていない: {seen}"
     assert len(got) == 2, f"対象0件のページで打ち切った: {got}"
+    assert total == 3, "見た全item数を返していない"
 
 
 def test_enumerate_filters_by_domain_not_by_site():
@@ -122,7 +123,35 @@ def test_enumerate_filters_by_domain_not_by_site():
             "<PaginationResult><TotalNumberOfPages>1</TotalNumberOfPages></PaginationResult>"
             "</ActiveList>")
     EX.fx.post = lambda *a, **k: body
-    assert EX.enumerate_mirror("tok", "//www.ebay.de/") == ["1"]
+    got, total = EX.enumerate_mirror("tok", "//www.ebay.de/")
+    assert got == ["1"] and total == 3
+
+
+# ---- 事故4: 列挙できなかったのを「片付いた」と読まない (fail-OPEN 防止) ----
+
+
+def test_enumerate_reports_zero_total_when_api_fails():
+    """API が失敗して空が返ったら、全item数 0 を返す (呼出側が判定不能と読めるように)。
+
+    2026-08-08 に実際にやった事故: DE ミラーが 372件 生きているのに
+    `active 0 件 → ✅ 作業なし` と報告した。0件には
+    「本当に無い」と「読めていない」の2通りがあり、後者を成功に倒すと
+    **開いているのに完了扱い**になる (= 最も避けたい fail-OPEN)。
+    """
+    EX.fx.post = lambda *a, **k: "<Ack>Failure</Ack><Errors>auth token expired</Errors>"
+    got, total = EX.enumerate_mirror("tok", "//www.ebay.de/")
+    assert got == [] and total == 0
+
+
+def test_zero_total_is_distinguishable_from_zero_match():
+    """『全体は読めたがミラー0件』と『全体が読めない』を別物として返す。"""
+    body = ("<ActiveList>"
+            "<Item><ItemID>1</ItemID><ViewItemURL>https://www.ebay.com/itm/a</ViewItemURL></Item>"
+            "<PaginationResult><TotalNumberOfPages>1</TotalNumberOfPages></PaginationResult>"
+            "</ActiveList>")
+    EX.fx.post = lambda *a, **k: body
+    got, total = EX.enumerate_mirror("tok", "//www.ebay.de/")
+    assert got == [] and total == 1, "ミラー0件でも全体件数は残す"
 
 
 # ---- 対地の定義 -------------------------------------------------------------

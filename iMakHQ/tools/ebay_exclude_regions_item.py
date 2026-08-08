@@ -58,14 +58,20 @@ def snap_path(target: str) -> Path:
     return SNAP_DIR / f"item_exclude_snapshot_{target}.json"
 
 
-def enumerate_mirror(tok: str, domain: str) -> list[str]:
-    """ViewItemURL のドメインで active listing を絞る。
+def enumerate_mirror(tok: str, domain: str) -> tuple[list[str], int]:
+    """ViewItemURL のドメインで active listing を絞る。→ (該当ID, 見た全item数)
 
     ★ページ打ち切りは「そのページの **全 item 数**」で判定する。
       絞り込み後の件数で break すると、対象0件のページで止まって残りを全部見落とす
       (2026-08-08 に offer_calc で踏んだのと同型)。
+
+    ★全item数も返すのは **fail-OPEN 防止**のため。API が失敗して空が返った時に
+      「該当0件 = もう塞がっている」と読むと、**実際は開いているのに完了扱い**になる
+      (2026-08-08 に実際にやった: 372件あるのに『active 0件・作業なし ✅』と報告した)。
+      呼出側は「全item数が0 = 判定不能」として扱うこと。
     """
     out: list[str] = []
+    seen = 0
     for n in range(1, 60):
         inner = ("<ActiveList><Include>true</Include><Pagination>"
                  f"<EntriesPerPage>200</EntriesPerPage><PageNumber>{n}</PageNumber>"
@@ -78,6 +84,7 @@ def enumerate_mirror(tok: str, domain: str) -> list[str]:
         if not items:
             break
         for it in items:
+            seen += 1
             vu = re.search(r"<ViewItemURL>(.*?)</ViewItemURL>", it)
             iid = re.search(r"<ItemID>(\d+)</ItemID>", it)
             if vu and iid and domain in vu.group(1).replace("&amp;", "&"):
@@ -86,7 +93,7 @@ def enumerate_mirror(tok: str, domain: str) -> list[str]:
                        r"<TotalNumberOfPages>(\d+)</TotalNumberOfPages>", t, re.S)
         if tp and n >= int(tp.group(1)):
             break
-    return out
+    return out, seen
 
 
 def get_shipping(iid: str, tok: str, site: str) -> dict | None:
@@ -186,10 +193,16 @@ def main() -> int:
 
     print(f"=== {a.target.upper()} ミラー ({t['domain']}) / 追加する除外 {','.join(add)} ===")
     print(f"    理由: {t['why']}")
-    ids = enumerate_mirror(tok, t["domain"])
-    print(f"    active {len(ids)} 件")
+    ids, seen = enumerate_mirror(tok, t["domain"])
+    print(f"    出品全体 {seen} 件 / うちミラー {len(ids)} 件")
+    # ★fail-OPEN 防止。全体が0件 = API 側の失敗 (token 失効・レート上限・通信断) であって
+    #   「ミラーが無くなった」ではない。ここを ✅ で返すと **開いているのに完了扱い**になる。
+    if seen == 0:
+        print("  ❌ 出品を1件も列挙できていない = **判定不能**。"
+              "token 失効 / API レート上限 / 通信断を疑うこと。0件を『片付いた』と読まない")
+        return 1
     if not ids:
-        print("  ✅ ミラーの active が 0 件。作業なし")
+        print("  ✅ ミラーの active が 0 件 (出品自体は列挙できている)。作業なし")
         return 0
 
     if a.rollback:

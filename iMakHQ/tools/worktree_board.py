@@ -181,12 +181,36 @@ IMPLEMENT_MARKERS = ("[IMPLEMENT-GO]",)
 IMPLEMENT_DONE_SUFFIXES = ("_done", "_applied")
 
 
+def has_implement_go(body: str) -> bool:
+    """本文に **発火用の** 実装 GO 行があるか。
+
+    ★2026-08-08: 部分一致 (`marker in body`) は **マーカーの話をしただけで発火する**。
+      「このファイルに `[IMPLEMENT-GO]` は入れていない = まだ着手しないこと」と書いた
+      回答が実装キューに入り、担当 headless が 3 回空焚きした (監視くんから3度督促)。
+      CLAUDE.md の規約どおり **「本文に1行入れる」= その行がマーカーだけ** を条件にする。
+
+    許容する飾り: 前後の空白 / 引用 `>` / 箇条書き `- * +` / 強調 `* _` `。
+    許容しない: 表のセル内・文中の言及 (= 説明として書いた `[IMPLEMENT-GO]`)。
+
+    実データで検証 (2026-08-08): 正規の GO 26件はすべて「行全体がマーカー」で、
+    誤爆3件はすべて文中の言及だった。
+    """
+    for raw in body.splitlines():
+        line = raw.strip()
+        while line[:1] in (">", "-", "*", "+"):
+            line = line[1:].strip()
+        line = line.strip("*_` \t")
+        if line in IMPLEMENT_MARKERS:
+            return True
+    return False
+
+
 def implement_for(worktree: str, recent_days: int = RECENT_DAYS):
     """実装させるべき `_response.md` を返す (窓口が GO を書いたもの / 未完了のみ)。
 
     条件 (すべて満たすもののみ):
       - `*_response.md` である (= 窓口が検算して昇格させた正式回答)
-      - 本文に実装 GO の印がある (IMPLEMENT_MARKERS)
+      - 本文に実装 GO の印が **1行として** ある (`has_implement_go`)
       - `<stem>_done.md` / `_applied.md` がまだ無い
     """
     d = DATA_ROOT / worktree / "requests"
@@ -205,7 +229,7 @@ def implement_for(worktree: str, recent_days: int = RECENT_DAYS):
             body = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if any(m in body for m in IMPLEMENT_MARKERS):
+        if has_implement_go(body):
             out.append(p)
     return out
 
