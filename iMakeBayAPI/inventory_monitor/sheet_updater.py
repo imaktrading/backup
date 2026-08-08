@@ -66,6 +66,11 @@ SKU_COL_LISTING_ID = 4   # D
 # scrape は listing 単位で失敗するので、 該当 listing の全 SKU 行 (D列=listing_id) をマークする。
 SKU_COL_ERR_FLG = 20     # T
 SKU_ERR_FLG_HEADER = "巡回ERR"
+# U: 定価 (参考) — 2026-08-08 追加。base/promo を区別できる supplier (uniqlo/graniph) のみ書く。
+# J (仕入元価格) は実際に払う額 = promo が立てば promo、無ければ base に切替済 (main.py)。
+# セール中の delta を人が視認するための参考列。書式は数値 (¥/桁区切りなし)。
+# 未設定 supplier (workman/montbell/amazon) は空欄のまま = 「定価不明」であって 0円ではない。
+SKU_COL_LIST_PRICE = 21  # U
 
 
 # ============================================================================
@@ -151,12 +156,31 @@ def _domain_of(url: str) -> str:
         return ""
 
 
+# 2026-08-08 未対応 supplier の silent drop 可視化 (窓口 [IMPLEMENT-GO] 起票):
+# 未知ドメインが混入した際に何も出ないと「動いてるつもり」で在庫監視が抜ける事故が起きる。
+# read_main_active_rows の呼出ごとに本モジュール変数を上書き、main.py 側で
+# get_last_unsupported_rows() で取得して統合 report に露出する。
+_last_unsupported_rows: list = []
+
+
+def get_last_unsupported_rows() -> list:
+    """直近の read_main_active_rows で "other" 判定されて skip された行を返す (copy)."""
+    return list(_last_unsupported_rows)
+
+
 def read_main_active_rows(sh, supplier_filter: str = "all") -> list:
     """メインシートから FLG ≠ 1 (= active) の listing 行を抽出.
 
     Args:
-        supplier_filter: "uniqlo" / "montbell" / "all" (Phase 1 対応仕入元のみ)
+        supplier_filter: "uniqlo" / "montbell" / "amazon" / "gu" / "workman" /
+                         "graniph" / "all" (対応仕入元のみ)。
+                         対応ドメイン以外は "other" 扱いで silent drop されるが、
+                         drop した行は _last_unsupported_rows に記録され、
+                         get_last_unsupported_rows() で取得できる。
     """
+    global _last_unsupported_rows
+    _last_unsupported_rows = []
+
     main_ws = get_main_worksheet(sh)
     all_values = main_ws.get_all_values()
     if not all_values:
@@ -185,13 +209,23 @@ def read_main_active_rows(sh, supplier_filter: str = "all") -> list:
             supplier = "gu"
         elif "workman.jp" in domain:
             supplier = "workman"
+        elif "graniph.com" in domain:
+            # 2026-08-08 追加。graniph.jp は DNS 解決不能 (実機確認)、www.graniph.com のみ 200。
+            # 部分一致でよい (既存 uniqlo.com 判定と同形)。
+            supplier = "graniph"
         else:
             supplier = "other"
 
         if supplier_filter != "all" and supplier != supplier_filter:
             continue
         if supplier_filter == "all" and supplier == "other":
-            continue  # Phase 1 未対応の仕入元はスキップ
+            # silent drop の可視化: 記録 + 1 行ログ (呼出側 log 未接続でも stderr へ)
+            _last_unsupported_rows.append({
+                "row_index": idx, "url": url, "domain": domain,
+            })
+            print(f"[sheet_updater] 未対応 supplier skip: row={idx} "
+                  f"domain={domain!r} url={url[:80]}", flush=True)
+            continue
         rows.append({
             "row_index": idx,
             "listing_id": listing_id,
@@ -450,6 +484,15 @@ def update_sku_rows(sh, updates: list) -> dict:
         cell_updates.append({
             "range": f"Q{row_idx}",
             "values": [[prev_supplier_price]],
+        })
+        # 2026-08-08: U 列 (= 定価/参考) — 数値 or 空欄。base/promo を区別できる
+        # supplier (uniqlo/graniph) のみ list_price 送出、他は None → 空欄。
+        # 「空欄 = 定価不明」であって 0 円ではない (リバイス君が誤判定しないよう)。
+        list_price = u.get("list_price")
+        u_value = list_price if isinstance(list_price, (int, float)) else ""
+        cell_updates.append({
+            "range": f"U{row_idx}",
+            "values": [[u_value]],
         })
 
     sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")

@@ -252,6 +252,10 @@ def fetch_product_inventory(
             "quantity": qty,
             "price_jpy": int(base_price) if base_price is not None else None,
             "promo_price_jpy": int(promo_price) if promo_price is not None else None,
+            # 2026-08-08: sheet U 列 (定価/参考) 用に base を別 field で保持。
+            # base/promo を明確に区別できる supplier (uniqlo / graniph) のみ設定する。
+            # 区別できない supplier (workman/montbell/amazon) は本 field を出さず U 空欄とする。
+            "list_price_jpy": int(base_price) if base_price is not None else None,
             "sales_active": item.get("sales", True),
         })
 

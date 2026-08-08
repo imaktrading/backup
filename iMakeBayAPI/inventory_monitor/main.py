@@ -50,6 +50,7 @@ from uniqlo_scraper import fetch_product_inventory as fetch_uniqlo  # noqa: E402
 from gu_scraper import fetch_product_inventory as fetch_gu  # noqa: E402
 from workman_scraper import fetch_product_inventory as fetch_workman  # noqa: E402
 from montbell_scraper import fetch_product_inventory as fetch_montbell  # noqa: E402
+from graniph_scraper import fetch_product_inventory as fetch_graniph  # noqa: E402
 from ebay_sku_fetcher import get_skus_for_listing   # noqa: E402
 from sheet_updater import (                          # noqa: E402
     open_sheet,
@@ -149,6 +150,9 @@ def fetch_supplier_inventory(supplier: str, url: str, title: str) -> Optional[di
         # use_selenium_fallback=False で軽量 (requests のみ)、unqualifiedBuyBox 検出時は
         # fail-closed (= in_stock=False) で安全側に倒す
         return fetch_amazon(url, use_selenium_fallback=False)
+    elif supplier == "graniph":
+        # graniph 公式 (2026-08-08 追加). 1 URL = 1色 × N サイズ (uniqlo と同型)
+        return fetch_graniph(url)
     else:
         raise ValueError(f"未対応 supplier: {supplier}")
 
@@ -193,6 +197,12 @@ def match_supplier_skus_with_sheet(
                     existing = sh_sku
                     break
 
+        # 2026-08-08 J 列意味切替 (窓口 [IMPLEMENT-GO] 起票):
+        #   J (supplier_price) = 実際に払う額 = promo が立てば promo、無ければ base
+        #     → workman/montbell/amazon は promo が無い / base と同値 なので `or` で従来値
+        #   U (list_price) = 定価 (参考) = base
+        #     → uniqlo/graniph のみ設定。他は None (=シート空欄) にして「定価不明」を示す
+        supplier_price = sup.get("promo_price_jpy") or sup.get("price_jpy")
         matched.append({
             "row_index":         existing["row_index"] if existing else None,
             "sku_id":            existing["sku_id"] if existing else "",
@@ -200,7 +210,8 @@ def match_supplier_skus_with_sheet(
             "color":             sup.get("color_code") or listing_default_color,
             "supplier_in_stock": sup.get("in_stock", False),
             "supplier_quantity": sup.get("quantity", 0),
-            "supplier_price":    sup.get("price_jpy"),
+            "supplier_price":    supplier_price,
+            "list_price":        sup.get("list_price_jpy"),  # U 列 (定価) — 未設定 supplier は None
             "ebay_qty":          existing["ebay_qty"] if existing else 0,
             "uniqlo_l2id":       sup.get("l2Id", ""),
             "uniqlo_communication_code": sup.get("communication_code", ""),
@@ -323,6 +334,7 @@ def process_listing(sh, main_row: dict, dry_run: bool = False,
             "color":                color,
             "supplier_stock_mark":  "◎" if m["supplier_in_stock"] else "✕",
             "supplier_price":       m["supplier_price"],
+            "list_price":           m.get("list_price"),   # U 列 (定価)、None なら空欄
             "ebay_qty":             m["ebay_qty"],
             "auto_check_at":        auto_check_at,
             "needs_action":         needs_action,
@@ -586,7 +598,9 @@ def filter_restore_two_cycle_confirmed(current_updates: list) -> list:
 def main():
     parser = argparse.ArgumentParser(description="仕入元在庫監視 (Phase 1+2: UNIQLO + montbell)")
     parser.add_argument("--listing", help="特定 listing ID のみ処理")
-    parser.add_argument("--supplier", choices=["all", "uniqlo", "gu", "workman", "montbell", "amazon"], default="all",
+    parser.add_argument("--supplier",
+                        choices=["all", "uniqlo", "gu", "workman", "montbell", "amazon", "graniph"],
+                        default="all",
                         help="特定仕入元のみ処理 (default: all)")
     parser.add_argument("--dry-run", action="store_true", help="スプシ書込なし")
     parser.add_argument("--ebay-report",
@@ -720,6 +734,21 @@ def main():
     for r in main_rows:
         by_sup[r["supplier"]] = by_sup.get(r["supplier"], 0) + 1
     log(f"メインシート active 行: {len(main_rows)} 件 ({by_sup})")
+
+    # 2026-08-08 未対応 supplier の silent drop 可視化 (窓口 [IMPLEMENT-GO] 起票):
+    # read_main_active_rows 内で "other" 判定した行は従来 continue で無警告 skip されていた。
+    # コード対応前に行を追加すると「動いてるつもり」になる事故を避けるため、件数と例を露出する。
+    try:
+        import sheet_updater as _su  # noqa: PLC0415
+        unsupported = _su.get_last_unsupported_rows()
+    except Exception:
+        unsupported = []
+    if unsupported:
+        log(f"⚠️ 未対応 supplier: {len(unsupported)} 件 (silent drop)")
+        for u in unsupported[:5]:
+            log(f"    - row{u['row_index']} domain={u['domain']!r} url={u['url'][:80]}")
+        if len(unsupported) > 5:
+            log(f"    ... 他 {len(unsupported) - 5} 件")
 
     if args.listing:
         main_rows = [r for r in main_rows if r["listing_id"] == args.listing]
