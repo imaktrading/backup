@@ -73,11 +73,16 @@ def test_no_second_definition_of_genzaichi():
         assert "(= 現在地)" not in t, f"{s}: daily_report を『現在地』と呼ぶ二重定義が残っている"
 
 
-def test_new_desks_have_session_start_hook():
+def test_new_desks_have_session_start_hook(main_worktree_only):
     """指示文だけでは守られない。**hook で自動注入**されていること。
 
     2026-08-01: ALPHA/BRAVO には `.claude/settings.json` が無く SessionStart hook も無かったため、
     現在地の答えが本人任せになっていた (Advisor/出品専任 には元から hook が有る)。
+
+    ★2026-08-08: `.claude/` は `.gitignore:107` で **git 管理外**なので、
+    linked worktree には最初から存在しない。そこで落とすと 他5worktree の commit が
+    全部止まる (実際 8/04〜8/08 に重複くんが止まった) ので `main_worktree_only` で skip。
+    本元では従来どおり必ず実行される。
     """
     import json
     for s in ("iMakAdvisor", "iMakAlpha", "iMakBravo"):
