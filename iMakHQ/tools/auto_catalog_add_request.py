@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import csv
 import datetime
+import importlib.util
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -35,6 +37,105 @@ CATEGORY_LABELS: dict[str, str] = {
     "uniqlo_ut":      "UNIQLO UT",
     "workman":        "Workman",
 }
+
+
+# ---------------------------------------------------------------------------
+# catalog 実在 pre-check (2026-08-08)
+#
+# なぜ: `post_psa_review._route_none_to_catalog` にだけ pre-check があり (18b36a2)、
+#   **こちらの watcher が素通ししていた**ため、既に catalog にあるカードの追加依頼が
+#   毎日 catalog に届いていた。ここは書き手を問わない最終防衛線
+#   (psa_to_csv / psa_restock_csv / 将来の writer のどれから来ても引っかかる)。
+#
+# 依頼書: C:/dev/iMak_data/hq/requests/2026-08-08_auto_catalog_add_needs_same_precheck.md
+#
+# ★判定の定義は post_psa_review に SSOT。ここでは **再実装しない** (2箇所に書くと必ずズレる)。
+
+# `_route_none_to_catalog` が書く既知トークン `(auto候補<PID>=` の逆処理。
+# 名前検索でも曖昧一致でもなく、SSOT 側が埋めた literal を抜くだけ。
+_AUTO_CANDIDATE_RE = re.compile(r"\(auto候補([^=]+)=")
+
+
+def _extract_expected_pid(model: str) -> str | None:
+    """model 文字列から canonical PID を抜く。抜けなければ None (= 判定不能)。
+
+    missing_models.csv の model には2形式ある:
+      1. post_psa_review 由来 … `cert154233090 ONE PIECE … (auto候補OP07-118=該当なし 要調査)`
+         → `(auto候補<PID>=` に canonical PID が埋まっている
+      2. psa_to_csv 由来 … `ONE PIECE JAPANESE 3RD ANNIVERSARY SET-118`
+         → **canonical PID ではない**ので None を返し、従来通り依頼を出す (fail-closed)
+    """
+    if not model:
+        return None
+    m = _AUTO_CANDIDATE_RE.search(model)
+    if not m:
+        return None
+    return m.group(1).strip() or None
+
+
+def _load_catalog_probe():
+    """post_psa_review から `_catalog_has_pid` と log path を借りる (再実装しない)。
+
+    取れなければ (None, None) を返し、呼出側は **全件を従来通り依頼**に回す (fail-closed)。
+    """
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "post_psa_review_probe", str(Path(__file__).parent / "post_psa_review.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod._catalog_has_pid, mod._VIEWER_DISAGREEMENT_LOG_PATH
+    except Exception as e:      # noqa: BLE001  取れないこと自体は握りつぶさず表示する
+        print(f"[warn] catalog実在 pre-check を読み込めない ({e}) → 全件を従来通り依頼")
+        return None, None
+
+
+def _filter_catalog_present(new_by_cat: dict[str, list[dict]],
+                            unique: dict[tuple[str, str], dict] | None = None,
+                            db_path=None) -> int:
+    """catalog に実在する (category, model) を new_by_cat から取り除き、件数を返す。
+
+    fail-closed 契約 (18b36a2 準拠):
+      - `_catalog_has_pid` が **True の時だけ**除外する
+      - False (未収録) / None (pid 空・DB 不在・抽出不能) は従来通り依頼を出す
+      - 名前検索フォールバック禁止 (canonical KEY 完全一致のみ)
+      - 除外した件は理由付きで viewer_disagreement.log へ (18b36a2 と同じ log)
+
+    ★`unique` を渡すと missing_models.csv 側からも落とす。
+      落とさないと **毎日同じ行を再判定して log に同じ行を積む**ため
+      (「毎回検出して毎回捨てる」= 動いているのか壊れているのか読めなくなる)。
+      processed sentinel には入れない ので、catalog から消えれば次の検出でまた載る。
+    """
+    has_pid, vd_path = _load_catalog_probe()
+    if has_pid is None:
+        return 0
+
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    removed = 0
+    for category, rows in list(new_by_cat.items()):
+        kept: list[dict] = []
+        for r in rows:
+            pid = _extract_expected_pid(r["model"])
+            exists = has_pid(category, pid, db_path) if pid else None
+            if exists is not True:
+                kept.append(r)
+                continue
+            # viewer/adapter 側の食い違い → catalog に依頼を出さない
+            try:
+                vd_path.parent.mkdir(parents=True, exist_ok=True)
+                with vd_path.open("a", encoding="utf-8") as vf:
+                    vf.write(f"{ts}\t[auto_catalog_add_watcher]\t{category}\t{pid}"
+                             f"\tmodel={r['model']}\n")
+            except OSError:
+                pass
+            if unique is not None:
+                unique.pop((category, r["model"]), None)
+            print(f"    ⏭️ Skip auto_catalog_add (catalog実在): {category}:{pid}")
+            removed += 1
+        if kept:
+            new_by_cat[category] = kept
+        else:
+            del new_by_cat[category]
+    return removed
 
 
 def _load_processed() -> set[tuple[str, str]]:
@@ -148,6 +249,12 @@ def main() -> int:
     for k, r in unique.items():
         if k not in processed:
             new_by_cat[r["category"]].append(r)
+
+    # 2b. catalog 実在 pre-check (18b36a2 と同じ fail-closed 契約, 2026-08-08)
+    skipped_present = _filter_catalog_present(new_by_cat, unique)
+    if skipped_present:
+        print(f"[skip] catalog実在 pre-check で {skipped_present} 件除外 "
+              f"→ viewer_disagreement.log")
 
     # 3. category 別に依頼書投入
     REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
