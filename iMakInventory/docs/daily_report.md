@@ -1838,6 +1838,42 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   現時点で ×8 到達はゼロ = 今回の変更で消える行も増える行も無い (= 挙動の後退なし)。数日後に
   ×8 到達した行から自動的に別枠へ移る。
 
+## 2026-08-08 — 公式監視くん「要対処 +281」は誤報 (基準の上書き) + 実在した取下げ漏れ 9 件を閉鎖
+
+### ① アラート「前回 0 → 今回 281」は誤報。真の推移は 277→278→281 (+4/14h)
+- 決定: 17:06 のアラートを実データで否定。**急増していない**。
+  03:00 LIVE=277 / 11:00 LIVE=278 / 17:03=281 と横ばい。**取下げも一切発生していない**
+  (トリガーは手動 DRY RUN で、スプシ書込は skip)。
+- 真因: `alert_if_increased` が **DRY RUN でも / 部分実行でも 比較基準 state を上書き**していた。
+  当日の順序: 11:00 LIVE(278) → 16:31 dry-run 全件(184) が state を 184 に →
+  **16:34 dry-run `--listing` 1件(0) が state を 0 に** → 17:03 dry-run 全件(281) が
+  「前回 0 → +281」と通報。state 読取失敗時に `last=0` に倒す実装も誤報を増幅していた。
+- 変更 [main.py](../../iMakeBayAPI/inventory_monitor/main.py): `alert_if_increased(persist=, scope=)`。
+  **dry-run は基準を更新しない / 部分実行 (--listing・--supplier) は比較も更新もしない /
+  基準が読めない時は 0 と決めつけず初期化してアラートしない** (ログには必ず残す = silent 化しない)。
+- 検証: [tests/test_needs_action_alert_baseline.py](../../iMakeBayAPI/inventory_monitor/tests/test_needs_action_alert_baseline.py)
+  **7 件** (LIVE 全件で増加→通報 / 非増加 / dry-run は基準不触 / 部分実行は比較も更新もしない /
+  基準無・破損は誤報しない / **事故当日の順序を再現して誤報が出ないこと**)。既存 60 件 pass。
+
+### ② 「要対処 277」の内訳を実測 — 危険側の本体は 9 件だった
+- スプシ直読み: 対処要 277 = **仕入元✕ × K列 qty>0 が 181** / 仕入元◎ × qty=0 が 96。
+- ただし K 列 (eBay 現Qty) は同期カバレッジが低く **stale**。実 eBay report と突合する
+  `audit_sheet_vs_ebay` では **未対処 (対処要T+✕+qty>0) = 0 件**。
+  → 181 の大半は **K 列の古さによる偽陽性**であり、取下げ漏れではない。
+- ★ただし別枠で **取下げ未反映 (対処済T + ✕ + 実 eBay qty>0) = 9 件**が実在した (= 本物の fail-OPEN)。
+  variation 単位の実機突合でも montbell L/PRBL 等が buyable であることを確認。
+
+### ③ 取下げ漏れ 9 件を実対処 (+ 復活未反映 6 件)
+- `audit_and_heal.py --no-verify` を実行 → **取下げ 9/9 が ack=Success かつ GetItem で qty=0 verified**、
+  復活 6/6 も ack=Success + verified。対象は ウインドブラスト パーカ Men's/Women's (montbell) /
+  ウォッシュドグラフィックT EVANGELION / マンガUT SPY×FAMILY・BLEACH。
+- 再 audit は同じ 11:03 の eBay report を見るため 15 件のまま表示されるが、**revise ごとの
+  GetItem verify で実 eBay は qty=0 を確認済**。次 cycle (19:00) の新 report で解消するのを確認する。
+
+### ④ audit の alert メールが届いていなかった (silent) → 修正
+- `audit_sheet_vs_ebay.send_alert_email` が **sys.path に本体 dir を足しておらず**、単独起動では
+  常に `email module 不在` で送信 skip = **audit 不能が silent**。main.py と同じ解決方法に揃えた。
+
 ## 2026-08-03 — ヨドバシ判定に URL 逆引き fallback (窓口 IMPLEMENT-GO、AI列は不触)
 
 ### 背景 — AI列(型番)が空の 34 行が「在庫があっても永久に判定不能」だった

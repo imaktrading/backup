@@ -407,14 +407,39 @@ def __send_alert_email_real(subject: str, body: str) -> bool:
         return False
 
 
-def alert_if_increased(current: int, all_updates: Optional[list] = None) -> None:
-    """前回比較で要対処件数が増えてればコンソール強調 + メール送信 (Phase 5)."""
-    last = 0
+def alert_if_increased(current: int, all_updates: Optional[list] = None,
+                       persist: bool = True, scope: str = "full") -> None:
+    """前回比較で要対処件数が増えてればコンソール強調 + メール送信 (Phase 5).
+
+    Args:
+        persist: 比較基準 (state) を更新してよいか。**dry-run / 部分実行では False**。
+        scope:   "full" = 全 listing を回した実行。それ以外は部分実行 (比較の母数が違う)。
+
+    ★ 2026-08-08 誤報事故: DRY RUN と `--listing` 絞り込み実行が **本番の比較基準を上書き**して
+      いた。実際の推移は 03:00=277 / 11:00=278 / 17:03=281 (+4/14h) と横ばいだったのに、
+      16:34 の 1 listing だけの dry-run が state=0 を書き、17:03 の全件 dry-run が
+      「前回 0 → 今回 281 (+281)」という **存在しない急増**をメール通報した。
+      比較基準は「同じ母数の LIVE 全件実行」同士でしか意味を持たない。
+    """
+    last = None
     if NEEDS_ACTION_STATE.exists():
         try:
-            last = json.loads(NEEDS_ACTION_STATE.read_text(encoding="utf-8")).get("count", 0)
+            last = json.loads(NEEDS_ACTION_STATE.read_text(encoding="utf-8")).get("count")
+            last = int(last) if last is not None else None
         except Exception:
-            last = 0
+            last = None       # ★ 読めない時に 0 と決めつけない (0 に倒すと必ず誤報になる)
+
+    if scope != "full":
+        log(f"  要対処件数: {current} 件 (部分実行のため増加判定・基準更新ともスキップ)")
+        return
+    if last is None:
+        # silent にはしない: 基準が無い/壊れている事実をログに残し、次回から比較を再開する
+        log(f"  要対処件数: {current} 件 (前回値なし = 比較基準を初期化。今回はアラートしない)")
+        if persist:
+            NEEDS_ACTION_STATE.write_text(
+                json.dumps({"count": current, "checked_at": datetime.now().isoformat()},
+                           ensure_ascii=False), encoding="utf-8")
+        return
 
     if current > last:
         diff = current - last
@@ -461,10 +486,14 @@ def alert_if_increased(current: int, all_updates: Optional[list] = None) -> None
     else:
         log(f"  要対処件数: 前回 {last} → 今回 {current} (増加なし)")
 
-    NEEDS_ACTION_STATE.write_text(
-        json.dumps({"count": current, "checked_at": datetime.now().isoformat()}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    if persist:
+        NEEDS_ACTION_STATE.write_text(
+            json.dumps({"count": current, "checked_at": datetime.now().isoformat()},
+                       ensure_ascii=False),
+            encoding="utf-8",
+        )
+    else:
+        log(f"  (dry-run のため比較基準は更新しない: state={last} のまま)")
 
     # Phase 4a-3: 二段確認用に 対処要 SKU の集合を保存 (Phase 4 で利用)
     if all_updates is not None:
@@ -858,7 +887,11 @@ def main():
             except Exception as e:
                 log(f"  [!] T列 巡回ERR 書込失敗 (本筋に影響なし): {type(e).__name__}: {e}")
 
-    alert_if_increased(total_needs_action, all_updates=all_updates)
+    # ★ 比較基準は「LIVE の全件実行」同士でのみ意味を持つ (2026-08-08 誤報事故の対策)。
+    #   dry-run は基準を更新しない / listing・supplier で絞った実行は比較自体を行わない。
+    _scope = "full" if (not args.listing and args.supplier in (None, "all")) else "partial"
+    alert_if_increased(total_needs_action, all_updates=all_updates,
+                       persist=not args.dry_run, scope=_scope)
 
     log("=" * 60)
     log("完了")

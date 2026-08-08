@@ -132,6 +132,12 @@ def audit(report_path: Path) -> dict:
 def send_alert_email(result: dict, report_name: str):
     """不整合 件数 > 0 なら alert email 送信."""
     try:
+        # ★ 2026-08-08: sys.path に本体 dir を足していなかったため、単独起動 (別 cron / 手動) では
+        #   常に "email module 不在" で **audit の alert が届かなかった** (= audit 不能が silent)。
+        #   main.py の __send_alert_email_real と同じ解決方法に揃える (既存実績流用)。
+        inv_root = SCRIPT_DIR.parent.parent / "iMakInventory"
+        if str(inv_root) not in sys.path:
+            sys.path.insert(0, str(inv_root))
         from email_notifier import _send_via_gmail   # noqa: PLC0415
         from auth.encrypted_gmail import load_gmail_config   # noqa: PLC0415
     except Exception as e:
