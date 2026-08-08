@@ -31,11 +31,88 @@ def load_review_skips(path=REVIEW_SKIP_PATH):
         return {}
 
 
-def active_review_skips(skip_data, now, cooldown_days=REVIEW_SKIP_COOLDOWN_DAYS):
+def resolvable_now(certs, classify_fn=None):
+    """今 catalog で引ける cert の set を返す(= もう止める理由が無いもの)。
+
+    なぜ要るか (2026-08-09 実測):
+        目視で NONE を付けた**当時の**判断が台帳に焼き付き、その後 catalog が直っても
+        誰も見直していなかった。cooldown が切れるたびに同じ cert が浮上し、また
+        NONE 扱いで沈む。**台帳49件のうち29件は、その時点で既に resolver が
+        canonical product_id を返せた** (PERONA cert153420191 = 3ヶ月で20回以上
+        catalog に蒸し返された件も含む)。
+
+    判定は `iMakHQ/tools/psa_preflight.classify` に **SSOT**。ここで再実装しない
+    (出品と同じ resolver を使うことが「引ける」の定義)。
+
+    ★fail-closed: 判定できない時 (catalog import 不能 / cert cache 無し / 例外) は
+      **空 set を返す = 何も外さない**。取りこぼす方に倒す。誤って外すと目視の
+      再出題が増えるだけだが、判定不能を「引ける」に倒すと壊れた resolver で
+      出品側へ流れてしまう。
+    """
+    certs = [str(c) for c in (certs or [])]
+    if not certs:
+        return set()
+    if classify_fn is None:
+        classify_fn = load_resolver()
+    if classify_fn is None:
+        # ★黙って no-op にしない。ここが静かに死ぬと「自己修復を入れた」つもりのまま
+        #   14日ループが復活し、しかも誰も気づかない (= いちばん質の悪い壊れ方)。
+        print("  ⚠️ 目視skipの自己修復: 判定器を読めないので **1件も解除しません**"
+              " (psa_preflight/catalog の import を確認)")
+        return set()
+
+    out = set()
+    for cert in certs:
+        try:
+            if classify_fn(cert) == "RESOLVED":
+                out.add(cert)
+        except Exception:
+            continue                                     # 1件の失敗で全体を壊さない
+    return out
+
+
+def load_resolver():
+    """cert → 判定ステータス を返す callable。読めなければ None (呼び手が気づけるように)。
+
+    判定の定義は `iMakHQ/tools/psa_preflight.classify` に **SSOT**。
+    ここで resolver を再実装しない (出品と同じ引き方であることが「引ける」の意味)。
+    """
+    try:
+        import os as _os
+        import sqlite3 as _sq
+        import sys as _sys
+        _hq = _os.path.join(_os.path.dirname(_os.path.dirname(
+            _os.path.abspath(__file__))), "iMakHQ", "tools")
+        if _hq not in _sys.path:
+            _sys.path.insert(0, _hq)
+        import psa_preflight as _pf
+        _pf._ensure_catalog()                            # 遅延 import をここで確定させる
+        _con = _sq.connect(_pf.CATALOG_DB)
+    except Exception:
+        return None
+
+    def _classify(cert):
+        f = _pf.PSA_CERTS_DIR / f"{cert}.json"
+        if not f.exists():
+            return None                                  # cache 無し = 判定材料なし
+        meta = json.loads(f.read_text(encoding="utf-8"))
+        return _pf.classify(str(cert), meta, _con).get("status")
+
+    return _classify
+
+
+def active_review_skips(skip_data, now, cooldown_days=REVIEW_SKIP_COOLDOWN_DAYS,
+                        resolvable=None):
     """cooldown 期間内に NONE/NG 目視された cert の set を返す(= 今回スキップ対象)。
 
     at(ISO日時)が cooldown 内 → スキップ。経過/不明 → スキップしない(永久hide回避 = 再浮上させる)。
     now は datetime(test 用に注入可)。
+
+    ★2026-08-09: **今 catalog で引ける cert は cooldown 中でもスキップしない**。
+      「目視した時に引けなかった」は当時の事実であって、catalog が直った後も
+      止め続ける理由にはならない。これが無いと台帳が自己修復せず、
+      14日ごとに同じ cert が浮いては沈むループになる (実測 49件中29件が該当)。
+      resolvable=None なら resolvable_now() で自動判定 (判定不能なら何も外さない)。
     """
     import datetime as _dt
     out = set()
@@ -49,7 +126,10 @@ def active_review_skips(skip_data, now, cooldown_days=REVIEW_SKIP_COOLDOWN_DAYS)
             continue
         if (now - t).days < cooldown_days:
             out.add(str(cert))
-    return out
+    if not out:
+        return out
+    ok = resolvable_now(out) if resolvable is None else {str(c) for c in resolvable}
+    return out - ok
 
 
 def classify_franchise(title):
