@@ -60,6 +60,31 @@ def _pacing_sec() -> float:
 
 
 # ============================================================================
+# 仕入送料 (2026-08-08 窓口 [IMPLEMENT-GO] 追加)
+# ============================================================================
+# 公式 https://www.graniph.com/guide/guide-delivery より (2026-08-08 実取得):
+#   「送料について 全国一律440円（税込）です。
+#    ※1回の配送で商品代金とギフトバッグ料金の合計金額が5,000円（税込）以上の場合、
+#      送料無料となります。」
+# graniph は実店舗が近くにない → 必ず通販で仕入れる → 送料が毎回仕入コストに乗る。
+#
+# 相互参照: 出品側 `iMakMercari/graniph_csv_builder.py` にも同じ +440 規則が入る。
+# 片方だけ直る事故を防ぐため、両方を同じ定数・同じ関数で管理すること。
+PROCUREMENT_SHIPPING_JPY = 440       # 全国一律 (税込)
+FREE_SHIPPING_THRESHOLD_JPY = 5000   # 商品代金がこれ以上なら送料無料
+
+
+def _procurement_shipping(item_price_jpy: int) -> int:
+    """graniph 通販の仕入送料を返す (無料閾値判定は 商品代金=送料を足す前 で行う).
+
+    ★閾値の判定は必ず「送料を足す前の商品代金」で行う。足した後で判定すると
+    ¥4,999 の商品が ¥5,439 で無料判定に化ける。
+    ★セール中はセール価格が商品代金 (定価ではない)。
+    """
+    return 0 if item_price_jpy >= FREE_SHIPPING_THRESHOLD_JPY else PROCUREMENT_SHIPPING_JPY
+
+
+# ============================================================================
 # URL パーサ
 # ============================================================================
 _ITEM_URL_RE = re.compile(r"/item-detail/(\d{12})(?:[/?#]|$)")
@@ -248,6 +273,14 @@ def parse_graniph_html(html: str, url: str, now_ms: Optional[int] = None) -> dic
         else:
             promo_int = base_price_int
 
+        # 仕入送料 (2026-08-08 窓口): 「実際に払う額」= J 列 = 商品代金 + 送料
+        # 閾値判定は「送料を足す前の商品代金」で。セール中はセール価格が商品代金。
+        # base/promo それぞれ独立に閾値を評価 (base だけ高くて無料、みたいなケースを潰さない)
+        base_price_with_ship = (base_price_int + _procurement_shipping(base_price_int)
+                                if base_price_int is not None else None)
+        promo_with_ship = (promo_int + _procurement_shipping(promo_int)
+                           if promo_int is not None else None)
+
         skus_out.append({
             "size":              size_label,
             "size_display_code": size_code,
@@ -258,9 +291,9 @@ def parse_graniph_html(html: str, url: str, now_ms: Optional[int] = None) -> dic
             "stock_status":      inv_status,
             "stock_label":       stock_label,
             "quantity":          quantity,
-            "price_jpy":         base_price_int,
-            "promo_price_jpy":   promo_int,
-            "list_price_jpy":    base_price_int,          # sheet U 列 用 (base=定価)
+            "price_jpy":         base_price_with_ship,   # J 列 (+送料)
+            "promo_price_jpy":   promo_with_ship,        # J 列 (+送料、セール優先)
+            "list_price_jpy":    base_price_int,          # U 列 (定価、送料を乗せない)
             "sales_active":      _is_sales_active(sku_info, now_ms=now_ms),
             "color":             color_label,
             "color_code":        color_code,
@@ -323,8 +356,9 @@ if __name__ == "__main__":
     print(f"=== 在庫サマリー ({result['name']} / {result['color']}) ===")
     for sku in result["skus"]:
         mark = "◎" if sku["in_stock"] else "✕"
-        base = sku["price_jpy"]
+        # 表示上の「定価」= list_price_jpy (送料抜き). price_jpy は J 列用で送料込.
+        list_p = sku["list_price_jpy"]
         pay = sku["promo_price_jpy"]
-        price_str = f"¥{pay}" if pay == base else f"¥{pay} (定価 ¥{base})"
+        price_str = f"¥{pay}" if pay == list_p else f"¥{pay} (定価 ¥{list_p})"
         print(f"  {mark} {sku['size']:>3} ({sku['size_display_code']}) "
               f"{sku['stock_label']:>7} qty={sku['quantity']:>2} {price_str}")

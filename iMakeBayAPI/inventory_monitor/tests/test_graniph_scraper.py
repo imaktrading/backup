@@ -31,6 +31,9 @@ from graniph_scraper import (  # noqa: E402
     parse_graniph_url,
     _stock_label_from_class,
     _is_sales_active,
+    _procurement_shipping,
+    PROCUREMENT_SHIPPING_JPY,
+    FREE_SHIPPING_THRESHOLD_JPY,
 )
 
 
@@ -205,12 +208,15 @@ def test_parse_906300_M_XL_are_out_of_stock():
 
 
 def test_parse_906300_supplier_price_is_sale_price_when_sale_flg_true():
-    """§5 J = 実際に払う額: sale_flg=True → sale_price (7990)、base は list_price に温存."""
+    """§5 J = 実際に払う額: sale_flg=True → sale_price (7990)、base は list_price に温存.
+
+    906300 は base=8900 / sale=7990 いずれも ≥5000 なので **送料は乗らない** (窓口 §完成条件1)。
+    """
     r = parse_graniph_html(FIXTURE_906300, URL_906300)
     s = r["skus"][0]  # SS
-    assert s["price_jpy"] == 8900              # 定価 (base)
-    assert s["promo_price_jpy"] == 7990         # 実際に払う額 (sale)
-    assert s["list_price_jpy"] == 8900          # U 列用 (= base)
+    assert s["price_jpy"] == 8900              # 定価 (base)、8900 ≥ 5000 → 送料 0
+    assert s["promo_price_jpy"] == 7990         # 実際に払う額 (sale)、7990 ≥ 5000 → 送料 0
+    assert s["list_price_jpy"] == 8900          # U 列用 (= base、送料を乗せない)
 
 
 def test_parse_906300_sales_active_when_within_window():
@@ -239,11 +245,15 @@ def test_parse_all_soldout_page_does_not_leak_in_stock_from_js_template():
 
 
 def test_parse_all_soldout_sale_flg_false_uses_base_price():
+    """sale_flg=False → promo は base に落ちる。base=3000 は <5000 なので **+440 送料** が乗る。
+
+    U (list_price_jpy) には送料を乗せない (窓口 2026-08-08)。
+    """
     r = parse_graniph_html(FIXTURE_ALL_SOLDOUT, URL_ALL_SOLDOUT)
     s = r["skus"][0]
-    assert s["price_jpy"] == 3000
-    assert s["promo_price_jpy"] == 3000     # sale_flg=False → base に落ちる
-    assert s["list_price_jpy"] == 3000
+    assert s["price_jpy"] == 3440           # base 3000 + 送料 440 (<5000)
+    assert s["promo_price_jpy"] == 3440     # sale_flg=False → base に落ちる、+440
+    assert s["list_price_jpy"] == 3000      # U 列: 送料を乗せない
 
 
 # ---------------------------------------------------------------------------
@@ -306,3 +316,116 @@ def test_sales_active_false_after_end():
 
 def test_sales_active_false_when_sku_info_missing():
     assert _is_sales_active({}, now_ms=2000) is False
+
+
+# ---------------------------------------------------------------------------
+# 仕入送料 (2026-08-08 窓口 [IMPLEMENT-GO])
+# graniph は実店舗が近くにない → 通販の送料 ¥440 が仕入コストに乗る。
+# 5,000円以上は無料。閾値判定は「送料を足す前の商品代金」で。
+# ---------------------------------------------------------------------------
+def test_procurement_shipping_constants():
+    """公式 guide-delivery より (窓口実取得): ¥440 / 無料閾値 ¥5000."""
+    assert PROCUREMENT_SHIPPING_JPY == 440
+    assert FREE_SHIPPING_THRESHOLD_JPY == 5000
+
+
+def test_procurement_shipping_boundary_4999_adds_shipping():
+    """★§完成条件 3 (境界値): 4999 → +440."""
+    assert _procurement_shipping(4999) == 440
+
+
+def test_procurement_shipping_boundary_5000_no_shipping():
+    """★§完成条件 3 (境界値): 5000 ちょうど → +0."""
+    assert _procurement_shipping(5000) == 0
+
+
+def test_procurement_shipping_boundary_5001_no_shipping():
+    """★§完成条件 3 (境界値): 5001 → +0."""
+    assert _procurement_shipping(5001) == 0
+
+
+def test_procurement_shipping_low_price():
+    assert _procurement_shipping(1000) == 440
+
+
+def test_procurement_shipping_high_price():
+    assert _procurement_shipping(10000) == 0
+
+
+# ---------------------------------------------------------------------------
+# 019001564303 (定価¥4,900 / セール¥2,990) 相当の fixture: セール中は
+# 「セール価格が商品代金」→ 2990 < 5000 なので +440 → J = 3430 / U = 4900
+# ★窓口 §完成条件 2 の再現
+# ---------------------------------------------------------------------------
+FIXTURE_564303 = r"""<!doctype html>
+<html><head>
+<script type="application/ld+json">
+[{"@type": "ProductGroup", "name": "TEST-SALE-LOW", "productGroupID": "019001564",
+  "color": "ホワイト"}]
+</script></head><body>
+<label class="in-stock " for="03"><span translate="no">M</span>
+<span>在庫あり</span></label>
+<script>
+const stocks = {"01900156430303":{"sku_code":"01900156430303","inventory_status":"STOCKED","quantity":5,"real_quantity":5,"sku_info":{"status":"PUBLISHED","sales_start_timestamp":1761490800000,"sales_end_timestamp":4102412399000,"size_code":"03","size_label":"M","color_code":"303","color_label":"ホワイト"}}};
+const priceData = {"01900156430303":{"price":4900,"sale_flg":true,"sale_price":2990}};
+</script>
+</body></html>
+"""
+URL_564303 = "https://www.graniph.com/item-detail/019001564303"
+
+
+def test_parse_564303_sale_below_threshold_adds_shipping_to_promo():
+    """★§完成条件 2: 定価¥4,900 / セール¥2,990 → J=¥3,430 (=2990+440) / U=¥4,900.
+
+    セール中は「セール価格が商品代金」なので 2990<5000 で送料 +440。
+    定価 4900 も <5000 なので base+440=5340。U(list_price)は送料を乗せない。
+    """
+    r = parse_graniph_html(FIXTURE_564303, URL_564303)
+    assert len(r["skus"]) == 1
+    s = r["skus"][0]
+    assert s["price_jpy"] == 5340        # base 4900 + 440 (<5000)
+    assert s["promo_price_jpy"] == 3430   # sale 2990 + 440 (<5000)
+    assert s["list_price_jpy"] == 4900    # U 列: 送料を乗せない (定価そのまま)
+
+
+def test_parse_564303_U_column_never_includes_shipping():
+    """★§完成条件 4: U 列に送料が絶対に乗らないことの固定."""
+    r = parse_graniph_html(FIXTURE_564303, URL_564303)
+    s = r["skus"][0]
+    # U 列は「サイトの表示価格そのもの」(定価) = 4900、+440 されていない
+    assert s["list_price_jpy"] == 4900
+    # J (price_jpy/promo_price_jpy) との差は仕入送料の効果
+    assert s["price_jpy"] - s["list_price_jpy"] == 440
+    # U に送料が加算されていない (=5340 ではない) ことも念のため
+    assert s["list_price_jpy"] != s["price_jpy"]
+
+
+def test_parse_906300_U_column_never_includes_shipping():
+    """906300 は base≥5000 で送料が乗らないケース。U は base と一致し続ける."""
+    r = parse_graniph_html(FIXTURE_906300, URL_906300)
+    for s in r["skus"]:
+        assert s["list_price_jpy"] == 8900   # 定価そのまま
+        # base≥5000 なので price_jpy にも送料は乗らない
+        assert s["price_jpy"] == 8900
+
+
+def test_parse_threshold_judged_on_pre_shipping_amount_not_post():
+    """★窓口の警告: 送料を足した後で閾値判定すると ¥4,999→¥5,439 で無料化する事故が起きる.
+
+    足す前の商品代金 4999 で判定する = ここで境界フィクスチャで守る。
+    """
+    fixture = r"""<!doctype html><html><body>
+    <label class="in-stock " for="03"><span translate="no">M</span></label>
+    <script>
+    const stocks = {"09999999999903":{"sku_code":"09999999999903","inventory_status":"STOCKED","quantity":1,"real_quantity":1,"sku_info":{"status":"PUBLISHED","sales_start_timestamp":1761490800000,"sales_end_timestamp":4102412399000,"size_code":"03","size_label":"M","color_code":"999","color_label":"X"}}};
+    const priceData = {"09999999999903":{"price":4999,"sale_flg":false,"sale_price":""}};
+    </script></body></html>
+    """
+    r = parse_graniph_html(
+        fixture, "https://www.graniph.com/item-detail/099999999999",
+    )
+    s = r["skus"][0]
+    # 4999 で判定 → 送料あり (+440 → 5439)。もし post-shipping で判定していたら
+    # 4999+440=5439 で「無料判定」に化ける (=4999 のまま) はず。
+    assert s["price_jpy"] == 5439
+    assert s["list_price_jpy"] == 4999
