@@ -35,7 +35,50 @@ from graniph_scraper import GraniphProduct, scrape  # noqa: E402
 CATEGORY_MEN = 15687        # Men's Clothing > T-Shirts
 CATEGORY_WOMEN = 53159      # Women's Clothing > Tops
 
-# graniph JP size → US size (one-down, 回答書 Q3)
+# ----------------------------------------------------------------------------
+# 仕入送料 (graniph 公式 guide-delivery より、2026-08-08 実取得)
+#   https://www.graniph.com/guide/guide-delivery
+#   「送料について 全国一律440円（税込）です。
+#    ※1回の配送で商品代金とギフトバッグ料金の合計金額が5,000円（税込）以上の場合、
+#      送料無料となります。」
+# graniph は実店舗が近くにないので必ず通販 = 送料が仕入コストに乗る。
+# 相互参照: 監視くん側 iMakeBayAPI/inventory_monitor/graniph_scraper.py にも
+# 同じ規則あり (窓口が別途依頼)。片方だけ直る事故を防ぐため両方で同時に是正すること。
+# ----------------------------------------------------------------------------
+PROCUREMENT_SHIPPING_JPY = 440
+FREE_SHIPPING_THRESHOLD_JPY = 5000
+
+
+def procurement_shipping(item_price_jpy: int) -> int:
+    """graniph は実店舗が近くにないので必ず通販 = 送料が仕入コストに乗る。
+    公式 guide-delivery より 全国一律 ¥440 / ¥5,000 以上で無料 (2026-08-08 実取得)。
+    閾値の判定は「商品代金」で行う (ギフトバッグは使わない、セール中はセール価格が商品代金)。
+    """
+    return 0 if item_price_jpy >= FREE_SHIPPING_THRESHOLD_JPY else PROCUREMENT_SHIPPING_JPY
+
+
+# ----------------------------------------------------------------------------
+# US unisex T-shirt 標準チャート
+#   出典: Gildan 5000 Heavy Cotton Adult Unisex 公式スペック
+#          https://www.gildan.com/products/style-5000/G500
+#   body length HPS (inch) / chest width across (inch, half of circumference)
+#   graniph は unisex ラベル中心なので UNIQLO women's ではなくこのチャートを基準に取る。
+# ----------------------------------------------------------------------------
+US_UNISEX_TSHIRT_CHART = [
+    ("XS",  26.5, 16.5),
+    ("S",   28.0, 18.0),
+    ("M",   29.0, 20.0),
+    ("L",   30.0, 22.0),
+    ("XL",  31.0, 24.0),
+    ("2XL", 32.0, 26.0),
+    ("3XL", 33.0, 28.0),
+]
+# 距離計算の重み (chest = fit を決める / length = 二次的)
+_CHEST_WEIGHT = 2.0
+_LENGTH_WEIGHT = 1.0
+
+# graniph JP size → US size (フォールバックのみ、実寸が取れなかった時)
+# 実寸が取れる場合は `pick_us_size` 経由で Gildan チャート最近傍が使われる。
 SIZE_JP_TO_US = {
     "SS":  "XXS",
     "S":   "XS",
@@ -81,6 +124,46 @@ CSV_HEADERS = [
 
 def cm_to_inch(cm: float, precision: int = 1) -> str:
     return f"{cm / 2.54:.{precision}f}"
+
+
+def us_size_from_measurements(chest_inch: float, length_inch: float) -> str:
+    """chest & length (inch) を Gildan 5000 チャート最近傍にマップ."""
+    best = US_UNISEX_TSHIRT_CHART[0][0]
+    best_dist = float("inf")
+    for label, chart_len, chart_chest in US_UNISEX_TSHIRT_CHART:
+        dist = (_CHEST_WEIGHT * abs(chest_inch - chart_chest)
+                + _LENGTH_WEIGHT * abs(length_inch - chart_len))
+        if dist < best_dist:
+            best_dist = dist
+            best = label
+    return best
+
+
+def _chest_length_inch(size_table, size_jp: str):
+    """size_table から (chest_inch, length_inch) を取り出す。取れなければ (None, None)."""
+    chest_cm = None
+    length_cm = None
+    for row in size_table or []:
+        en = SIZE_LABEL_JP_TO_EN.get(row.label_jp)
+        val = row.values_cm.get(size_jp)
+        if val is None:
+            continue
+        if en == "Chest":
+            chest_cm = val
+        elif en == "Length":
+            length_cm = val
+    if chest_cm is None or length_cm is None:
+        return None, None
+    return chest_cm / 2.54, length_cm / 2.54
+
+
+def pick_us_size(size_jp: str, size_table) -> str:
+    """primary: 実測 (chest & length) から Gildan チャート最近傍。
+    fallback: 実寸が取れない時のみ固定テーブル SIZE_JP_TO_US (one-down)。"""
+    chest_in, length_in = _chest_length_inch(size_table, size_jp)
+    if chest_in is not None and length_in is not None:
+        return us_size_from_measurements(chest_in, length_in)
+    return SIZE_JP_TO_US.get(size_jp, size_jp)
 
 
 def _schedule_time(weeks: int = 2) -> str:
@@ -344,9 +427,13 @@ def compute_listing_price_usd(price_jpy: int) -> tuple:
     無いので "Tシャツ(UT)" (identical fvf/shipping/hts) を pass. yaml で
     category_to_group に "graniph": C を入れているのは、将来 gsheet 側に
     "graniph" を足したら第一級のカテゴリとして参照できるようにするため.
+
+    ★ 仕入送料 (¥440 / 商品代 ¥5,000+ で無料) を必ず cost に足してから pricing_engine
+      に渡す。関数外で足すのを忘れる事故を防ぐため、ここで一括加算する。
     """
     from pricing_engine import compute_listing_price
-    return compute_listing_price(price_jpy, 0, "Tシャツ(UT)")
+    total_cost_jpy = price_jpy + procurement_shipping(price_jpy)
+    return compute_listing_price(total_cost_jpy, 0, "Tシャツ(UT)")
 
 
 def pick_shipping_profile(price_usd: float) -> str:
@@ -372,7 +459,7 @@ def build_parent_row(
     closure = derive_closure(p.name_jp)
     neckline = derive_neckline(p.name_jp)
     size_pipe = ";".join(
-        f"{SIZE_JP_TO_US.get(s, s)} (JP {s})" for s in sizes_available
+        f"{pick_us_size(s, p.size_table)} (JP {s})" for s in sizes_available
     )
     color_en = color_jp_to_en(p.color_jp)
     rel_details = f"Size={size_pipe}"
@@ -419,7 +506,7 @@ def build_variation_rows(
 ) -> list:
     rows = []
     for jp_sz in sizes_available:
-        us_sz = SIZE_JP_TO_US.get(jp_sz, jp_sz)
+        us_sz = pick_us_size(jp_sz, p.size_table)
         size_display = f"{us_sz} (JP {jp_sz})"
         variant_sku = str(uuid.uuid4())  # 回答書指示: 14桁 sku_code ではなく UUID
         rows.append([

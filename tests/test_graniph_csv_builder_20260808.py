@@ -26,6 +26,13 @@ for _p in (_MERCARI, _API):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+# 2026-08-08: 他テスト (例 test_montbell_whitelist) が import 完了後に
+# iMakMercari を sys.path から remove するため、後続テストで
+# `import graniph_csv_builder` が失敗する。ここで先読みして sys.modules に
+# 焼き付ければ、以後の import はキャッシュ経由で解決される。
+import graniph_csv_builder  # noqa: E402,F401
+import graniph_scraper      # noqa: E402,F401
+
 
 # ---- HTML fixtures (最小構成、実 HTML から抽出) ----
 _HTML_FIXTURE = '''<html><head></head><body>
@@ -187,7 +194,8 @@ class TestScraper:
 
 # ---- CSV builder helper 単体 ----
 class TestBuilderHelpers:
-    def test_size_jp_to_us_one_down(self):
+    def test_size_jp_to_us_one_down_fallback_table(self):
+        """SIZE_JP_TO_US は fallback (実寸が取れない時のみ)。primary は pick_us_size 経由."""
         import graniph_csv_builder as b
         assert b.SIZE_JP_TO_US["SS"] == "XXS"
         assert b.SIZE_JP_TO_US["S"] == "XS"
@@ -296,10 +304,11 @@ class TestBuilderE2E:
         assert len(rows) == len(p.sizes)
         for r in rows:
             assert len(r) == len(b.CSV_HEADERS)
-        # Size 列に "US (JP)" 併記
+        # Size 列に "US (JP)" 併記 (実寸ベース、Gildan 5000 最近傍)
+        # SS (chest 20.9, length 24.6) → M / XL (chest 25.6, length 29.3) → 2XL
         idx_size = b.CSV_HEADERS.index("C:Size")
-        assert rows[0][idx_size] == "XXS (JP SS)"        # SS → XXS
-        assert rows[4][idx_size] == "L (JP XL)"          # XL → L
+        assert rows[0][idx_size] == "M (JP SS)"
+        assert rows[4][idx_size] == "2XL (JP XL)"
         # SKU は UUID 形式 (14桁 sku_code ではない)
         idx_sku = b.CSV_HEADERS.index("CustomLabel")
         assert re.match(r"^[0-9a-f]{8}-", rows[0][idx_sku]), \
@@ -317,14 +326,17 @@ class TestBuilderE2E:
         assert row[idx_brand] == "Graniph"
 
     def test_relationship_details_uses_us_jp_format(self, patched_scrape):
+        """RelationshipDetails は 実寸ベース (Gildan 5000 最近傍) で US ラベルを決める."""
         import graniph_csv_builder as b
         p = self._mk_product(patched_scrape)
         row = b.build_parent_row(p, p.sizes, 10.98, "60-100", "sku-parent")
         idx_rel = b.CSV_HEADERS.index("RelationshipDetails")
         rel = row[idx_rel]
         assert rel.startswith("Size=")
-        for jp, us in [("SS", "XXS"), ("S", "XS"), ("M", "S"), ("L", "M"), ("XL", "L")]:
-            assert f"{us} (JP {jp})" in rel
+        # fixture: SS(24.6,20.9)→M / S(25.8,22.0)→L / M(27.0,23.2)→L /
+        #          L(28.1,24.4)→XL / XL(29.3,25.6)→2XL
+        for jp, us in [("SS", "M"), ("S", "L"), ("M", "L"), ("L", "XL"), ("XL", "2XL")]:
+            assert f"{us} (JP {jp})" in rel, f"missing {us} (JP {jp}) in {rel!r}"
 
 
 # ---- category_to_group 追加確認 ----
@@ -350,3 +362,151 @@ def test_shipping_profile_uses_group_c_for_graniph():
     from listing_common import get_shipping_policy_name
     prof = get_shipping_policy_name(50.0, "graniph")
     assert prof.startswith("DDP-C-"), f"expected DDP-C-*, got {prof}"
+
+
+# ============================================================================
+# 2026-08-08 追加: 仕入送料上乗せ (依頼書 procurement_shipping_and_size_map_response)
+# ============================================================================
+class TestProcurementShipping:
+    """graniph 公式 ¥440 / ¥5,000+ 無料 の境界を固定する回帰テスト.
+    依頼書 §3.2: 境界値 ¥4,999 / ¥5,000 / ¥5,001 の3点を必ずカバー."""
+
+    def test_below_threshold_adds_440(self):
+        import graniph_csv_builder as b
+        assert b.procurement_shipping(4999) == 440
+
+    def test_exactly_at_threshold_is_free(self):
+        """¥5,000 以上で無料 (公式文言: '5,000円（税込）以上の場合')."""
+        import graniph_csv_builder as b
+        assert b.procurement_shipping(5000) == 0
+
+    def test_above_threshold_is_free(self):
+        import graniph_csv_builder as b
+        assert b.procurement_shipping(5001) == 0
+
+    def test_low_price_adds_440(self):
+        import graniph_csv_builder as b
+        assert b.procurement_shipping(2990) == 440
+
+    def test_zero_price_still_adds_440(self):
+        """商品代 ¥0 は無料閾値未満 → 送料込みで扱う (境界正規化)."""
+        import graniph_csv_builder as b
+        assert b.procurement_shipping(0) == 440
+
+    def test_high_price_free(self):
+        import graniph_csv_builder as b
+        assert b.procurement_shipping(20000) == 0
+
+    def test_constants_are_defined_once(self):
+        """定数は1箇所定義 (回答書: 「1箇所に定義してそこだけ見れば分かる形」)."""
+        import graniph_csv_builder as b
+        assert b.PROCUREMENT_SHIPPING_JPY == 440
+        assert b.FREE_SHIPPING_THRESHOLD_JPY == 5000
+
+    def test_compute_listing_price_adds_shipping_to_cost(self, monkeypatch):
+        """POC 対象 ¥2,990 → pricing_engine に ¥3,430 が渡ることを固定."""
+        import graniph_csv_builder as b
+        import pricing_engine
+        captured = {}
+
+        def _spy(cost_jpy, median_usd, category, *a, **kw):
+            captured["cost_jpy"] = cost_jpy
+            captured["category"] = category
+            return {"price": 72.98, "status": "GO"}
+
+        monkeypatch.setattr(pricing_engine, "compute_listing_price", _spy)
+        b.compute_listing_price_usd(2990)
+        assert captured["cost_jpy"] == 3430, (
+            f"expected 2990+440=3430, got {captured['cost_jpy']}"
+        )
+        assert captured["category"] == "Tシャツ(UT)"
+
+    def test_compute_listing_price_free_when_price_at_5000(self, monkeypatch):
+        """¥5,000 の商品は送料無料 → cost = 5000 (加算ゼロ)."""
+        import graniph_csv_builder as b
+        import pricing_engine
+        captured = {}
+
+        def _spy(cost_jpy, median_usd, category, *a, **kw):
+            captured["cost_jpy"] = cost_jpy
+            return {"price": 100.0, "status": "GO"}
+
+        monkeypatch.setattr(pricing_engine, "compute_listing_price", _spy)
+        b.compute_listing_price_usd(5000)
+        assert captured["cost_jpy"] == 5000
+
+
+# ============================================================================
+# 2026-08-08 追加: 実寸→US サイズ mapper (依頼書 §2)
+# ============================================================================
+class TestUsSizeFromMeasurements:
+    """Gildan 5000 チャート最近傍。POC 実測 (graniph 019001564303 SS) を固定."""
+
+    def test_gildan_chart_present_with_expected_labels(self):
+        import graniph_csv_builder as b
+        labels = [lbl for lbl, _, _ in b.US_UNISEX_TSHIRT_CHART]
+        assert labels == ["XS", "S", "M", "L", "XL", "2XL", "3XL"]
+
+    def test_ss_bigt_maps_to_m(self):
+        """graniph 019001564303 SS: chest 20.9 / length 24.6 → US M (Gildan 20/29)."""
+        import graniph_csv_builder as b
+        assert b.us_size_from_measurements(20.9, 24.6) == "M"
+
+    def test_standard_medium_maps_to_m(self):
+        """chart 上 M と完全一致 (20/29) → M."""
+        import graniph_csv_builder as b
+        assert b.us_size_from_measurements(20.0, 29.0) == "M"
+
+    def test_xxs_measurement_maps_to_xs(self):
+        """XS チャートよりさらに小さい → XS (最小サイズ)."""
+        import graniph_csv_builder as b
+        assert b.us_size_from_measurements(14.0, 24.0) == "XS"
+
+    def test_huge_measurement_maps_to_3xl(self):
+        import graniph_csv_builder as b
+        assert b.us_size_from_measurements(30.0, 34.0) == "3XL"
+
+
+class TestPickUsSize:
+    """primary=実測 / fallback=固定テーブル SIZE_JP_TO_US."""
+
+    def _fixture_table(self):
+        """POC target (019001564303) と同構造の size_table."""
+        from graniph_scraper import SizeRow
+        return [
+            SizeRow(label_jp="着丈", values_cm={"SS": 62.5, "S": 65.5, "M": 68.5, "L": 71.5, "XL": 74.5}),
+            SizeRow(label_jp="身幅", values_cm={"SS": 53.0, "S": 56.0, "M": 59.0, "L": 62.0, "XL": 65.0}),
+            SizeRow(label_jp="袖丈", values_cm={"SS": 22.0}),
+            SizeRow(label_jp="肩幅", values_cm={"SS": 49.5}),
+        ]
+
+    def test_uses_measurements_when_present(self):
+        import graniph_csv_builder as b
+        st = self._fixture_table()
+        # SS: chest 53cm→20.9in, length 62.5cm→24.6in → M
+        assert b.pick_us_size("SS", st) == "M"
+
+    def test_falls_back_when_size_table_empty(self):
+        import graniph_csv_builder as b
+        # 実寸ゼロ → SIZE_JP_TO_US (one-down)
+        assert b.pick_us_size("SS", []) == "XXS"
+        assert b.pick_us_size("L", None) == "M"
+
+    def test_falls_back_when_size_missing_from_table(self):
+        """size_table はあるが該当 JP size のセルが無い → fallback."""
+        import graniph_csv_builder as b
+        st = self._fixture_table()
+        # XXL は fixture 外 → fallback → XL
+        assert b.pick_us_size("XXL", st) == "XL"
+
+    def test_falls_back_when_only_length_present(self):
+        """chest が取れない (length のみ) → fallback (実寸不十分)."""
+        import graniph_csv_builder as b
+        from graniph_scraper import SizeRow
+        st = [SizeRow(label_jp="着丈", values_cm={"SS": 62.5})]
+        assert b.pick_us_size("SS", st) == "XXS"
+
+    def test_unknown_jp_size_returns_original(self):
+        """fallback table にも無い未知サイズ → 原文."""
+        import graniph_csv_builder as b
+        assert b.pick_us_size("MYSTERY", []) == "MYSTERY"
