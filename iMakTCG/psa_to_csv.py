@@ -589,6 +589,60 @@ def is_unidentifiable_don_card(subject, card_number):
     return "DON!!" in subj and not num
 
 
+# 目視で確定した cert → product_id の台帳。post_psa_review が書き、**ここが読む**。
+# ★2026-08-09 発見: 601件(うち593件が product_id 付き)が保存されているのに、
+#   同定側が誰も読んでいなかった。出せなかった DON!! 14件のうち **13件は既に人が
+#   選び終わっていて、catalog にも実在**していた (cert149436895→DON-PRB02-001 等)。
+#   同定を毎回ゼロからやり直す設計だったため、人の答えがその回限りで捨てられていた。
+#   memory: listing_data_is_permanent_asset (目視・探索の高コスト情報は資産化する)
+VERIFIED_CERTS_PATH = r"C:/dev/iMak_data/dedupe/verified_certs.json"
+_VERIFIED_CHOICES = ("CHOSEN", "OK")
+
+
+def confirmed_product_id(cert, path=VERIFIED_CERTS_PATH):
+    """目視で確定済みの product_id を返す。無ければ None (純関数寄り, test可)。
+
+    fail-closed:
+      - choice が CHOSEN / OK 以外 (NONE / NG 等) は **採用しない**
+      - product_id 空は None
+      - ファイルが読めない / 壊れている も None (推測しない)
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except Exception:
+        return None
+    rec = data.get(str(cert))
+    if not isinstance(rec, dict):
+        return None
+    if (rec.get("choice") or "").upper() not in _VERIFIED_CHOICES:
+        return None
+    pid = (rec.get("product_id") or "").strip()
+    return pid or None
+
+
+def confirmed_catalog_record(cert, category, path=VERIFIED_CERTS_PATH, lookup_fn=None):
+    """確定済み product_id を catalog で引き直したレコード。引けなければ None。
+
+    ★台帳を**そのまま信じない**。catalog に実在する時だけ返す (ID完全一致 lookup のみ)。
+      台帳は人の入力なので、catalog 側で消えた/変わった ID を掴んだまま出品しない。
+    """
+    pid = confirmed_product_id(cert, path)
+    if not pid:
+        return None
+    fn = lookup_fn
+    if fn is None:
+        try:
+            import api as _api                          # catalog の公開 API
+            fn = _api.lookup
+        except Exception:
+            return None
+    try:
+        return fn(category, pid) or None
+    except Exception:
+        return None
+
+
 def don_treatment_subject(subject, card_number, vision_result):
     """番号なし DON!! に Vision の treatment を連結した subject を返す (純関数, test可)。
 
@@ -1920,6 +1974,14 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                 _don_hit = catalog_psa.lookup_don(brand, _q_subj, vision_character=_vc or None)
             except Exception as _e_don:
                 print(f"    ⚠️ DON lookup 失敗: {type(_e_don).__name__}: {_e_don}")
+        if not _don_hit:
+            # ★resolver が外した時だけ、**過去に人が確定した product_id** を使う (2026-08-09)。
+            #   順番が大事: resolver を先に試し、それでも駄目な時の最後の手段にする
+            #   (台帳を先に見ると、catalog が直った後も古い人の判断で上書きしてしまう)。
+            _don_hit = confirmed_catalog_record(cert_number, "one_piece_tcg")
+            if _don_hit:
+                print(f"    🎯 DON: 目視確定済みの product_id を再利用 "
+                      f"(cert {cert_number} → {_don_hit.get('product_id')})")
         if _don_hit:
             subject = _q_subj
             _don_record = _don_hit   # 本流(lookup_one_piece)は DON を解決できないので record を持ち回る

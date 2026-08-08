@@ -98,6 +98,26 @@ def _zero_o_variants(set_code: str):
     return list(out)
 
 
+VERIFIED_CERTS = Path(r"C:/dev/iMak_data/dedupe/verified_certs.json")
+_VERIFIED_CACHE = None
+
+
+def _confirmed_pid(cert: str):
+    """目視で確定済みの product_id (CHOSEN/OK のみ)。無ければ None。"""
+    global _VERIFIED_CACHE
+    if _VERIFIED_CACHE is None:
+        try:
+            _VERIFIED_CACHE = json.loads(VERIFIED_CERTS.read_text(encoding="utf-8")) or {}
+        except Exception:
+            _VERIFIED_CACHE = {}
+    rec = _VERIFIED_CACHE.get(str(cert))
+    if not isinstance(rec, dict):
+        return None
+    if (rec.get("choice") or "").upper() not in ("CHOSEN", "OK"):
+        return None
+    return (rec.get("product_id") or "").strip() or None
+
+
 def _set_prefix_in_brand(product_id: str, brand: str) -> bool:
     """候補の set 記号が brand 文字列にも出てくるか (純関数)。
 
@@ -136,6 +156,16 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
     pid = (rec.get("card_id") or rec.get("product_id")) if rec else None
     if pid:
         res["status"] = "RESOLVED"; res["product_id"] = pid; return res
+    # 1b) resolver が外しても、**過去に人が目視で確定した product_id** があれば解決済み。
+    #     ★2026-08-09: verified_certs.json に 593件の product_id が保存されているのに
+    #       ここが読んでいなかったため、DON!! 13件を「GAP = catalog に無い」と誤報告し、
+    #       カタログに要らない依頼を出しかけた。台帳は catalog 実在確認つきで採用する。
+    vpid = _confirmed_pid(cert)
+    if vpid and con.execute("SELECT 1 FROM products WHERE category=? AND product_id=?",
+                            (cat, vpid)).fetchone():
+        res["status"] = "RESOLVED"; res["product_id"] = vpid
+        res["source"] = "verified_certs (目視確定の再利用)"
+        return res
     # 2) recovery — 索引不備 vs 真の未収録 を区別
     cur = con.cursor()
     # 2a) set_code の 0/O・大小 変種 で再 lookup
