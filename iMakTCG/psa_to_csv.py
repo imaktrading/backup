@@ -1875,7 +1875,7 @@ def _pad_title_with_facts(title, year, rarity_short, set_code, target_min=70, ma
     return title
 
 
-def build_row(cert_number, price, data, description, driver=None, catalog_misses=None):
+def build_row(cert_number, price, data, description, driver=None, catalog_misses=None, pid_by_cert=None):
     subject = data.get('Subject', 'Unknown')
     card_number = data.get('CardNumber', '')
     brand = data.get('Brand', '')
@@ -1929,6 +1929,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # 2026-05-28 variant_meta 連動用 初期化 (= 各 franchise hit block で値設定、 末尾で連動)
     _catalog_pid_for_variant = None
     _catalog_category_for_variant = None
+    # 2026-08-09 canonical product_id sidecar 用 (= build_row 内で catalog が返した card_id を
+    # ここに集める。CSV には列を足さず、caller が並置 JSON に書く。呼出元が dict を渡さない場合は
+    # no-op)。詳細: 2026-08-09_rarity_exclusion_needs_canonical_product_id_response.md
+    def _record_canonical_pid(pid):
+        if pid_by_cert is not None and pid:
+            pid_by_cert[str(cert_number)] = str(pid)
     game, set_name, franchise = detect_game_info(brand)
 
     # 2026-07-30: 共通ヘルパ tcg_scope.is_out_of_scope に SSOT 集約。
@@ -2064,6 +2070,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             bandai_card_id = bandai.get("card_id", "")
             if bandai_card_id:
                 official_card_number = re.sub(r'_.+$', '', bandai_card_id)
+                _record_canonical_pid(bandai_card_id)
+            elif bandai.get("product_id"):
+                # confirmed_catalog_record (_don_record → bandai 経路) は raw api.lookup 由来で
+                # card_id ではなく product_id を持つ。sidecar には両方拾う。
+                _record_canonical_pid(bandai.get("product_id"))
             # Set: adapter が ebay_filter_map で変換済み
             if bandai.get("set_name_ebay"):
                 set_name = bandai["set_name_ebay"]
@@ -2105,6 +2116,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # 2026-05-28 variant_meta 連動用 (= Features/Finish/Rarity 自動補完)
             _catalog_pid_for_variant = pokemon.get("card_id")
             _catalog_category_for_variant = "pokemon_tcg"
+            _record_canonical_pid(_catalog_pid_for_variant or pokemon.get("product_id"))
         elif catalog_misses is not None:
             catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}"))
 
@@ -2124,6 +2136,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             db_card = ENERGY_MARKER_DB[db_card_id]
             print(f"    🎯 Energy Marker DB (hardcoded): {db_card_id}")
             print(f"    ⚠️ Color は物理カード確認後に手動補完してください")
+            _record_canonical_pid(db_card_id)
             if db_card:
                 official_card_type = db_card.get("card_type", "")
                 official_rarity = db_card.get("rarity", "")
@@ -2148,6 +2161,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                 db_full_id = db_card.get("card_id", "")
                 if db_full_id:
                     official_card_number = re.sub(r'_.+$', '', db_full_id)
+                    _record_canonical_pid(db_full_id)
+                elif db_card.get("product_id"):
+                    _record_canonical_pid(db_card.get("product_id"))
                 if db_card.get("set_name_ebay"):
                     set_name = db_card["set_name_ebay"]
                 if db_card.get("card_name"):
@@ -2172,6 +2188,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             gd_card_id = gd_card.get("card_id", "")
             if gd_card_id:
                 official_card_number = re.sub(r'_.+$', '', gd_card_id)
+                _record_canonical_pid(gd_card_id)
+            elif gd_card.get("product_id"):
+                _record_canonical_pid(gd_card.get("product_id"))
             if gd_card.get("set_name_ebay"):
                 set_name = gd_card["set_name_ebay"]
             if gd_card.get("card_name"):
@@ -2924,6 +2943,10 @@ def main():
     rows = [headers]
     errors = []
     catalog_misses = []  # iMakCatalog 未登録 (要 Catalog Claude 拡充依頼) — gshock_to_csv と同パターン
+    # 2026-08-09 canonical product_id sidecar: build_row が catalog 由来の card_id をここに集める。
+    # CSV には列を足さず、生成末尾で `<basename>.canonical.json` として並置する。
+    # 詳細: 2026-08-09_rarity_exclusion_needs_canonical_product_id_response.md
+    pid_by_cert = {}
     # PSAデータ取得 → build_row（価格はデフォルト$100で仮生成）
     card_info = []  # (cert, data) を保持して後で価格更新
 
@@ -2969,7 +2992,7 @@ def main():
             print(f" → #{card_number} {subject} ✓")
             # SKU にメルカリ item ID を使うため、URL を data に注入（tshirt_listing_rules 準拠）
             data['_mercari_url'] = mercari_url_map.get(cert, '')
-            row = build_row(cert, DEFAULT_PRICE, data, description, driver=driver, catalog_misses=catalog_misses)
+            row = build_row(cert, DEFAULT_PRICE, data, description, driver=driver, catalog_misses=catalog_misses, pid_by_cert=pid_by_cert)
             if row is None:
                 # selfcheck弾かれ → rows/card_info の後段ループで None参照クラッシュを防ぐためスキップ
                 print(f"    ⚠️ Skipping #{cert}: selfcheck failed in build_row")
@@ -3219,6 +3242,23 @@ def main():
     with open(output_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
         writer.writerows(rows)
+
+    # 2026-08-09 canonical product_id sidecar (CSV に列を足さず並置 JSON)。
+    # 目的: rarity 除外や後段監査で「印刷番号 (101/184)」でなく canonical PID (S8b-101) で
+    # 判定できるようにする。個別 prefix 追加の後追いを止めて発生源を直す
+    # (2026-08-09_rarity_exclusion_needs_canonical_product_id_response.md)。
+    try:
+        from canonical_pid_sidecar import write_sidecar as _write_pid_sidecar
+        _certs_in_csv = {str(r[cert_col_idx]) for r in rows[1:]}
+        _sidecar_path = _write_pid_sidecar(
+            output_file,
+            pid_by_cert,
+            certs_in_csv=_certs_in_csv,
+            confirmed_pids=(_confirmed_pids if _verify_mode else None),
+        )
+        print(f"canonical PID sidecar: {_sidecar_path} ({len(pid_by_cert)} 件 tracked)")
+    except Exception as _e:
+        print(f"⚠️ canonical PID sidecar 失敗 (非致命): {type(_e).__name__}: {_e}")
 
     # Free Shipping 移行: post-processor で _free.csv 生成 (2026-05-18)
     # 既存 logic 触らず CSV のみ price+DDP 加算 & ShippingProfile=Free に置換
