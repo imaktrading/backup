@@ -1192,23 +1192,17 @@ def canonical_pid_for_item(item_id: str) -> str:
 
     canonical PID は `verified_certs.json` (目視確定台帳) が持っている。
     """
-    global _VERIFIED_PID_CACHE
     s = str(item_id or "")
     if not s.startswith("PSA10-"):
+        return ""                      # m* 等の非 PSA 行はここでは扱わない
+    # ★定義は listing_common に SSOT。ここで再実装しない
+    #   (canonical の意味が2箇所でズレるのが 2026-08-08 の真因そのものだった)。
+    try:
+        sys.path.insert(0, os.path.join(WORKSPACE, "iMakeBayAPI"))
+        from listing_common import canonical_pid_for_cert
+    except Exception:
         return ""
-    if _VERIFIED_PID_CACHE is None:
-        try:
-            import json as _json
-            with open(_VERIFIED_CERTS_PATH, encoding="utf-8") as f:
-                _VERIFIED_PID_CACHE = _json.load(f) or {}
-        except Exception:
-            _VERIFIED_PID_CACHE = {}
-    rec = _VERIFIED_PID_CACHE.get(s[len("PSA10-"):])
-    if not isinstance(rec, dict):
-        return ""
-    if (rec.get("choice") or "").upper() not in ("CHOSEN", "OK"):
-        return ""
-    return (rec.get("product_id") or "").strip()
+    return canonical_pid_for_cert(s)
 
 
 def _still_required_spec(card_number: str, card_name: str, field: str,

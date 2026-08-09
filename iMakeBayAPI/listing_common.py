@@ -689,6 +689,43 @@ def is_free_shipping_mode() -> bool:
     return bool(_FREE_SHIPPING_CFG_CACHE.get("free_shipping_mode", True))
 
 
+# ---------------------------------------------------------------------------
+# 目視で確定した cert → canonical product_id (2026-08-09)
+#
+# ★ここに置く理由: check_csv (検出側) と csv_auditor (退役側) の **両方**が要る。
+#   別々に実装すると「canonical とは何か」がズレる (それが 2026-08-08 の真因そのもの:
+#   除外リストは canonical PID で判定するのに、渡していたのは印刷番号 `746/742` だった)。
+_VERIFIED_CERTS_PATH = r"C:/dev/iMak_data/dedupe/verified_certs.json"
+_VERIFIED_PID_CACHE = None
+
+
+def canonical_pid_for_cert(cert) -> str:
+    """PSA cert → 目視で確定した canonical product_id。無ければ ""。
+
+    fail-closed: choice が CHOSEN/OK 以外 / product_id 空 / 台帳が読めない → "" を返し、
+    呼び手は従来どおり印刷番号で判定する (悪化させない)。
+    """
+    global _VERIFIED_PID_CACHE
+    c = str(cert or "").strip()
+    if c.startswith("PSA10-"):
+        c = c[len("PSA10-"):]
+    if not c:
+        return ""
+    if _VERIFIED_PID_CACHE is None:
+        try:
+            import json as _json
+            with open(_VERIFIED_CERTS_PATH, encoding="utf-8") as f:
+                _VERIFIED_PID_CACHE = _json.load(f) or {}
+        except Exception:
+            _VERIFIED_PID_CACHE = {}
+    rec = _VERIFIED_PID_CACHE.get(c)
+    if not isinstance(rec, dict):
+        return ""
+    if (rec.get("choice") or "").upper() not in ("CHOSEN", "OK"):
+        return ""
+    return (rec.get("product_id") or "").strip()
+
+
 def get_shipping_policy_name(price_usd: float, category: str) -> str:
     """V6 / V5 / Free モード別に Shipping Profile 名を返す (listing scripts 共通).
 

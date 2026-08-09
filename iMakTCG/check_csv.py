@@ -350,6 +350,21 @@ def _catalog_set_consistency(set_name, card_number, year=""):
         return None
 
 
+def _canonical_pid(cert):
+    """cert → 目視確定の canonical product_id。定義は listing_common に SSOT (再実装しない)。"""
+    try:
+        import os as _os
+        import sys as _sys
+        _api = _os.path.join(_os.path.dirname(_os.path.dirname(
+            _os.path.abspath(__file__))), "iMakeBayAPI")
+        if _api not in _sys.path:
+            _sys.path.insert(0, _api)
+        from listing_common import canonical_pid_for_cert
+        return canonical_pid_for_cert(cert)
+    except Exception:
+        return ""
+
+
 def validate_row(row, row_idx):
     """1行のCSVデータをバリデーション。問題リストを返す"""
     issues = []
@@ -418,7 +433,13 @@ def validate_row(row, row_idx):
         issues.append(("ERROR", f"価格が数値でない: {price}"))
 
     # --- 必須Item Specifics (card-aware: DON!!カードは C:Rarity 非該当) ---
-    for spec in required_specifics_for_card(get_col(row, "C:Card Number"),
+    # ★2026-08-09: 判定キーは **canonical product_id**。`C:Card Number` は
+    #   印刷された「番号/総数」(`746/742`) で、除外リストの prefix (`mc-`) と噛み合わない。
+    #   One Piece は `OP04-119` 形式なので偶然当たっていたが、**Pokemon は一度も
+    #   当たっていなかった** (7/29-7/30 に足した11個の prefix が全部死んでいた)。
+    #   canonical が引けなければ従来どおり印刷番号 (悪化させない)。
+    _card_key = _canonical_pid(cert) or get_col(row, "C:Card Number")
+    for spec in required_specifics_for_card(_card_key,
                                             get_col(row, "C:Card Type")):
         val = get_col(row, spec)
         if not val:
