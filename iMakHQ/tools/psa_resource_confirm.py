@@ -91,19 +91,69 @@ def psa_label_facts(cert, card_no=""):
             "brand": _s(d.get("Brand"))}
 
 
-def ebay_listing_image(item_id):
-    """eBay GetItem の出品画像1枚目(i.ebayimg.com)。自分の出品=必ず有る(ended後~90日も可)。失敗 ''。"""
+_REF_IMG_PATH = r"C:/dev/iMak_data/dedupe/psa_ref_image_cache.json"
+_REF_IMG = None
+
+
+def _ref_img_cache():
+    """itemID → 現物画像URL のディスクキャッシュ。出品画像は変わらないので永続でよい。
+
+    ★これが無いと「押したら何件目視できるか」を数えるだけで GetItem を対象数ぶん叩くことになり、
+      ボタンのラベルに正確な件数を出せない (2026-08-09)。
+    """
+    global _REF_IMG
+    if _REF_IMG is None:
+        try:
+            with open(_REF_IMG_PATH, encoding="utf-8") as f:
+                _REF_IMG = json.load(f)
+        except Exception:
+            _REF_IMG = {}
+    return _REF_IMG
+
+
+def _ref_img_save():
+    try:
+        os.makedirs(os.path.dirname(_REF_IMG_PATH), exist_ok=True)
+        tmp = _REF_IMG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_ref_img_cache(), f, ensure_ascii=False)
+        os.replace(tmp, _REF_IMG_PATH)
+    except Exception:
+        pass
+
+
+def ebay_listing_image(item_id, allow_fetch=True):
+    """eBay GetItem の出品画像1枚目(i.ebayimg.com)。自分の出品=必ず有る(ended後~90日も可)。失敗 ''。
+
+    allow_fetch=False = **ディスクキャッシュにある分だけ**返す (API を叩かない)。
+    件数を数えるだけの用途 (ボタンのラベル / status_now) で使う。
+    """
     if not item_id:
         return ""
+    key = str(item_id).strip()
+    hit = _ref_img_cache().get(key)
+    if hit and hit != "-":
+        return hit
+    if not allow_fetch:
+        return ""          # "-"(取得済だが画像なし) も "" = 呼出側は cert 画像に落ちる
     try:
         p = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakeBayAPI"))
         if p not in sys.path:
             sys.path.insert(0, p)
         from ebay_getitem_images import fetch_listing_images
         pics = fetch_listing_images(item_id)
-        return pics[0] if pics else ""
+        url = pics[0] if pics else ""
+        # 成功は URL、「取得できたが画像なし」は "-" を焼く。例外(通信失敗)は焼かない。
+        _ref_img_cache()[key] = url or "-"
+        _ref_img_save()
+        return url
     except Exception:
         return ""
+
+
+def ref_image_known(item_id):
+    """現物画像を **一度でも取りに行ったか**。件数計算が「未知」と「画像なし」を区別するため。"""
+    return str(item_id).strip() in _ref_img_cache()
 
 
 def _s(v):

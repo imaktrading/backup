@@ -49,17 +49,18 @@ def _backlog():
 
 
 def _hoju():
-    """補URL: 対象(補0本)の件数と内訳。catalog DB / スプシを読むので数十秒かかる場合あり。"""
+    """補URL: **押したら何件できるか**。catalog DB / スプシを読むので数十秒かかる場合あり。
+
+    ★2026-08-09: ここも「候補あり N件」= 足切りを通していない母数を出していた。
+      パネルのラベルと同じ count_workload() を使う (数字が2箇所で食い違わない)。
+    """
     code = (
-        "import sys;sys.path.insert(0,r'%s');"
-        "import psa_hoju_fill as H,datetime;"
-        "rows=H._read_high();cache=H._load_cache();today=datetime.date.today().isoformat();"
-        "tg=H.select_backfill_targets(rows,max_backups=1);"
-        "nc=sum(1 for t in tg if not (cache.get(t['itemID']) or {}).get('mercari'));"
-        "hc=sum(1 for t in tg if H._cache_candidate_urls(cache.get(t['itemID'])));"
-        "live=len(H.select_backfill_targets(rows,max_backups=99));"
-        "print(f'live PSA(TCG) {live}件 / 補0本 {len(tg)}件 "
-        "(未探索{nc} / 候補あり{hc} / 候補なし{len(tg)-nc-hc})')" % HERE
+        "import sys,json;sys.path.insert(0,r'%s');"
+        "import psa_hoju_fill as H;"
+        "w=H.count_workload();s=w['search'];c=w['confirm'];"
+        "print(f\"live PSA(TCG) {w['live_psa']}件 / 補0本 {w['targets']}件 \""
+        "f\"→ 目視できる {c['ready']}件 (絵柄が未判定 {c['unjudged']}) / \""
+        "f\"検索できる {s['can']}件 (探索不能 {s['no_cardno']} = 番号なし)\")" % HERE
     )
     return _run([sys.executable, "-c", code]).strip()
 

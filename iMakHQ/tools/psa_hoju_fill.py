@@ -565,6 +565,11 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
         print(f"   🧹 自分が起こした driver/chrome {_n_killed}個を終了(他ジョブには触らない)")
     print(f"✅ 補URLリサーチ完了: {len(searchable)}件 (mercari在庫あり{m_hit} / snkr在庫あり{s_hit}) "
           f"→ psa_research_cache.json 書込。補URL書込は slice3(昼確認)。")
+    # ★現物画像URLを焼いておく = 朝、ボタンのラベルが API 無しで正確に出せる (2026-08-09)。
+    try:
+        prime_ref_images(targets or [])
+    except Exception as _e:                                       # noqa: BLE001
+        print(f"  ⚠ 現物画像URLの先読みに失敗 (非致命): {type(_e).__name__}")
     return {"searched": len(searchable), "mercari_hit": m_hit, "snkr_hit": s_hit,
             "skipped": skipped, "no_query": no_query}
 
@@ -844,6 +849,239 @@ def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, au
     return aux_writeback, added_total, dropped_all
 
 
+def build_confirm_context(vals, cache, today, verbose=False):
+    """confirm の前提 (skip台帳 / 候補NG / 他出品が使用中のURL) を1回だけ作る。
+
+    ★2026-08-09: **ラベルの件数と本番 confirm が同じ前提を見る**ための1本化。
+      別々に数えていたせいで、パネルが「目視待ち32件」と出して実際に出るのは3件だった。
+      件数は段取りを決めるために見るものなので、母数を件数として出してはいけない。
+    """
+    try:
+        from sheet_io import read_tab
+        _skip_rows = read_tab(CONFIRM_SKIP_TAB)
+        skip_iids = _skip_iids_from_tab(_skip_rows, today=today)
+        _all_skip = _skip_iids_from_tab(_skip_rows)
+        _seen_urls = _seen_urls_by_iid(_skip_rows)
+        revived = len(_all_skip) - len(skip_iids)
+        # ★新供給が出ていれば cooldown 中でも出す (前回見せた候補に無いURLが在る)。
+        newsupply = {i for i in skip_iids
+                     if _has_new_supply(_seen_urls.get(i), _cache_candidate_urls(cache.get(i)))}
+        skip_iids -= newsupply
+    except Exception:
+        skip_iids, revived, newsupply = set(), 0, set()
+    try:
+        from sheet_io import read_tab
+        ng_by_iid = _ng_urls_by_iid(read_tab(NG_CAND_TAB))
+    except Exception:
+        ng_by_iid = {}
+    # ★他の出品が既に使っているURLは、目視に出す前に外す (どのみち書けない・2026-07-30)。
+    used_by_others, guard_ok = {}, True
+    try:
+        import dup_guard as _dg0
+        for _r in vals[1:]:
+            _iid0 = _cell(_r, B)
+            if not (_iid0 and not _cell(_r, D)):      # live 出品のみ
+                continue
+            for _u0 in [_cell(_r, A)] + [_cell(_r, AUX0 + k) for k in range(AUXN)]:
+                _n0 = _dg0.norm_url(_u0)
+                if _n0:
+                    used_by_others.setdefault(_n0, set()).add(_iid0)
+    except Exception as _e0:
+        if verbose:
+            print(f"  ⚠ 使用中URLマップを作れず、表示前の除外はskip ({type(_e0).__name__})")
+        used_by_others, guard_ok = {}, False
+    if verbose:
+        if revived:
+            print(f"  ♻ cooldown 満了 {revived}件 → 再表示対象に復帰 (台帳の行は残す)")
+        if newsupply:
+            print(f"  🆕 新しい供給が出た {len(newsupply)}件 → cooldown 中だが再表示する")
+    return {"skip_iids": skip_iids, "ng_by_iid": ng_by_iid, "used_by_others": used_by_others,
+            "revived": revived, "newsupply": newsupply, "guard_ok": guard_ok}
+
+
+# 足切りで止まった理由。**ラベル・status_now・confirm のログが同じ語彙を使う**。
+STOP_REASONS = ("skip_ledger", "no_cache", "no_cand", "no_cardno",
+                "all_known", "all_number", "all_ng", "all_used", "no_ref", "all_art")
+
+
+def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
+    """1件ぶんの足切りを通し (残った候補, ref, 止まった理由, 絵柄で落ちた候補) を返す。
+
+    ref_of(t)->画像URL / art_of(ref, cands, t)->(keep, dropped) を差し替えられる:
+      - 本番 confirm  = eBay GetItem + 絵柄判定(API)
+      - 件数の計算    = ディスクキャッシュのみ (APIを呼ばない)
+    どちらも **この関数を通る** ので、件数と実際に出る件数がずれない (2026-08-09)。
+    """
+    iid = t["itemID"]
+    if iid in ctx["skip_iids"]:
+        stats["skip_ledger"] += 1
+        return [], "", "skip_ledger", []
+    entry = cache.get(iid)
+    if not _entry_fresh(entry, today):   # 夜検索→翌朝確認の日跨ぎOK(same-dayより緩い窓)
+        stats["no_cache"] += 1
+        return [], "", "no_cache", []
+    mr = entry.get("mercari") or {}
+    import psa_resource_gate as gate
+    c = gate.combine(mr.get("best"), entry.get("snkrdunk"),
+                     mercari_cands=mr.get("cands"), max_aux=AUXN)
+    cands = gate._build_visual_candidates(mr, c)
+    if not cands:
+        stats["no_cand"] += 1
+        return [], "", "no_cand", []
+    # ★fail-closed: card_no が今取れない(探索不能)= stale cache の誤候補リスク(別カード/別ジャンル)
+    import mercari_psa_resource as mp
+    cn = build_search_query(t, mp).get("card_no") or ""
+    if not cn:
+        stats["no_cardno"] += 1
+        return [], "", "no_cardno", []
+    # ★既に自分が使っている供給(主URL/既存補URL)は出さない = 目視が成立しない
+    _row0 = t.get("row")
+    _rv0 = vals[_row0 - 1] if (_row0 and 0 < _row0 <= len(vals)) else []
+    _known = [_cell(_rv0, A)] + [_cell(_rv0, AUX0 + k) for k in range(AUXN)]
+    cands, dropped_known = filter_candidates_known_urls(cands, _known)
+    stats["cand_known"] += len(dropped_known)
+    if not cands:
+        stats["all_known"] += 1
+        return [], "", "all_known", []
+    cands, dropped = filter_candidates_by_number(cands, cn)
+    stats["cand_number"] += len(dropped)
+    if not cands:
+        stats["all_number"] += 1
+        return [], "", "all_number", []
+    # ★過去に人が「違う」と判定した候補は二度と出さない
+    cands, dropped_ng = filter_candidates_rejected(cands, ctx["ng_by_iid"].get(iid))
+    stats["cand_ng"] += len(dropped_ng)
+    if not cands:
+        stats["all_ng"] += 1
+        return [], "", "all_ng", []
+    if ctx["used_by_others"]:
+        _keep, _drop = filter_candidates_used_by_others(cands, ctx["used_by_others"], iid)
+        stats["cand_used"] += len(_drop)
+        cands = _keep
+        if not cands:
+            stats["all_used"] += 1
+            return [], "", "all_used", []
+    ref = ref_of(t)
+    if not ref:
+        stats["no_ref"] += 1
+        return [], "", "no_ref", []
+    cands, dropped_art = art_of(ref, cands, t)
+    stats["cand_art"] += len(dropped_art)
+    if not cands:
+        stats["all_art"] += 1
+        return [], ref, "all_art", dropped_art
+    return cands, ref, "", dropped_art
+
+
+def prime_ref_images(targets, verbose=True):
+    """対象の現物画像URLをディスクキャッシュに焼く (GetItem を1回ずつ)。
+
+    ★これをやっておくと、あとは **API 無しで「目視できる件数」を正確に数えられる**。
+      夜間検索の最後に回す = 朝ボタンを見た時点でラベルが正しい (2026-08-09)。
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import psa_resource_confirm as prc
+    todo = [t for t in targets if not prc.ref_image_known(t["itemID"])]
+    if not todo:
+        return 0
+    if verbose:
+        print(f"▶ 現物画像URLを {len(todo)}件 取得 (件数表示を正確にするため)", flush=True)
+    got = 0
+    for t in todo:
+        if prc.ebay_listing_image(t["itemID"]):
+            got += 1
+    if verbose:
+        print(f"  現物画像 {got}/{len(todo)}件 取得", flush=True)
+    return got
+
+
+def count_workload(max_backups=1, today=None):
+    """『押したら何件できるか』を **API/スクレイプ無し** で数える (SSOT)。
+
+    パネルのボタンラベルと status_now が両方これを使う。返り値:
+      {"targets", "search": {...}, "confirm": {...}}
+
+    ★confirm 側は本番と同じ足切り (confirm_survivors) を通す。絵柄判定は
+      **判定済みキャッシュだけ**読み、未判定は "unjudged" として別に数える
+      (押すまで確定しないものを「できる件数」に混ぜない)。
+    ★search 側は「探索不能(card番号が取れない)」を除く。ここを混ぜていたため
+      「未探索10件」と出して実際に検索できたのは2件だった (2026-08-09 実測)。
+    """
+    import datetime
+    import collections
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mercari_psa_resource as mp
+    import psa_art_match as art
+    import psa_resource_confirm as prc
+
+    today = today or datetime.date.today().isoformat()
+    vals = _read_high()
+    targets = select_backfill_targets(vals, max_backups=max_backups)
+    cache = _load_cache()
+    live = len(select_backfill_targets(vals, max_backups=AUXN + 1))
+
+    # --- 検索(slice2) 側 ---
+    s_can = s_nocardno = s_done = 0
+    for t in targets:
+        if _entry_complete(cache.get(t["itemID"]), today):
+            s_done += 1
+        elif (build_search_query(t, mp).get("card_no") or ""):
+            s_can += 1
+        else:
+            s_nocardno += 1
+
+    # --- 目視(slice3) 側 ---
+    ctx = build_confirm_context(vals, cache, today)
+    acache = art.load_cache()
+    stats = collections.Counter()
+
+    unknown_ref = set()
+
+    def _ref_of(t):
+        """ディスクキャッシュのみ (API を叩かない)。
+
+        まだ一度も取りに行っていない出品は、本番がどの画像を使うか分からない
+        = 絵柄判定のキーも決まらないので **未判定扱い**にする (勝手に cert 画像で
+        代用すると別のキーになり、判定済みでも「未判定」に見える)。
+        """
+        if not prc.ref_image_known(t["itemID"]):
+            unknown_ref.add(t["itemID"])
+        return (prc.ebay_listing_image(t["itemID"], allow_fetch=False)
+                or prc.psa_image_for_cert(t.get("cert") or None))
+
+    def _art_of(ref, cands, t):
+        if t["itemID"] in unknown_ref:      # ref が未知 = 判定キーが決まらない
+            return [dict(c, _art_unjudged=True) for c in cands], []
+        keep, dropped = [], []
+        for c in cands:
+            hit = art.cached_verdict(ref, c.get("image") or c.get("url") or "",
+                                     c.get("name") or "", acache)
+            if hit is None:
+                stats["cand_art_unjudged"] += 1
+                c = dict(c, _art_unjudged=True)
+                keep.append(c)
+            elif art.drop_reason(hit):
+                dropped.append(c)
+            else:
+                keep.append(c)
+        return keep, dropped
+
+    ready = unjudged = 0
+    for t in targets:
+        cands, _ref, _why, _ = confirm_survivors(
+            t, vals, cache, ctx, today, ref_of=_ref_of, art_of=_art_of, stats=stats)
+        if not cands:
+            continue
+        if any(c.get("_art_unjudged") for c in cands):
+            unjudged += 1        # 判定待ちが混ざる = 押すまで出るか確定しない
+        else:
+            ready += 1
+    return {"live_psa": live, "targets": len(targets),
+            "search": {"can": s_can, "no_cardno": s_nocardno, "done": s_done},
+            "confirm": {"ready": ready, "unjudged": unjudged,
+                        "blocked": {k: stats[k] for k in STOP_REASONS}}}
+
+
 def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     """昼の確認(impure)。slice2 が焼いた当日キャッシュから候補を出し、現物と視覚確証→
     確定URLを補URL(AC-AG)へ **既存保持+空き枠のみ** 冪等書込(hoju同規約)。主URL(A)は触らない。
@@ -864,64 +1102,16 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     targets = select_backfill_targets(vals, max_backups=max_backups)
     cache = _load_cache()
 
-    # スキップ台帳(見送り/違う)= cooldown 期間中だけ再表示しない (2026-07-29)。
-    # 期限なしで隠していたため、一度外した出品は永久に補URLが付かなかった。
-    # 「違う」の主因の一つは *その日* 正変種が売られていないことなので、時間で解決する。
-    try:
-        from sheet_io import read_tab
-        _skip_rows = read_tab(CONFIRM_SKIP_TAB)
-        skip_iids = _skip_iids_from_tab(_skip_rows, today=today)
-        _all_skip = _skip_iids_from_tab(_skip_rows)
-        _seen_urls = _seen_urls_by_iid(_skip_rows)
-        _revived = len(_all_skip) - len(skip_iids)
-        if _revived:
-            print(f"  ♻ cooldown 満了 {_revived}件 → 再表示対象に復帰 (台帳の行は残す)")
-        # ★新供給が出ていれば cooldown 中でも出す (前回見せた候補に無いURLが在る)。
-        # 「翌日再挑戦」を活かしつつ「同じ候補しか無いのに毎日出る」を防ぐ両立策。
-        _newsupply = {i for i in skip_iids
-                      if _has_new_supply(_seen_urls.get(i), _cache_candidate_urls(cache.get(i)))}
-        if _newsupply:
-            skip_iids -= _newsupply
-            print(f"  🆕 新しい供給が出た {len(_newsupply)}件 → cooldown 中だが再表示する")
-    except Exception:
-        skip_iids = set()
-
-    # 候補単位の「違う」= 負例。次回この出品にこのURLは出さない (人の1クリックを捨てない)。
-    try:
-        from sheet_io import read_tab
-        ng_by_iid = _ng_urls_by_iid(read_tab(NG_CAND_TAB))
-    except Exception:
-        ng_by_iid = {}
-    n_ng = 0
-
-    # ★2026-07-30: **他の出品が既に使っているURL**を、目視に出す前に外す。
-    #   従来は書込時にだけ弾いていた (`⛔ 補URL除外(他出品が使用中)`) ため、
-    #   **捨てる前提の候補を人に見せて判断させていた** (ユーザー指摘「さっきやったカードが出てくる」)。
-    #   同じカードの別出品が並ぶと候補集合がほぼ同じになり、同じものを何度も目視することになる。
-    #   同一URLを2出品が指すと両方売れた時に履行不能 → キャンセル → Defect なので、
-    #   どのみち書けない。**見せない方が正しい**。
-    _used_by_others = {}
-    try:
-        import dup_guard as _dg0
-        for _r in vals[1:]:
-            _iid0 = _cell(_r, B)
-            if not (_iid0 and not _cell(_r, D)):      # live 出品のみ
-                continue
-            for _u0 in [_cell(_r, A)] + [_cell(_r, AUX0 + k) for k in range(AUXN)]:
-                _n0 = _dg0.norm_url(_u0)
-                if _n0:
-                    _used_by_others.setdefault(_n0, set()).add(_iid0)
-    except Exception as _e0:
-        print(f"  ⚠ 使用中URLマップを作れず、表示前の除外はskip ({type(_e0).__name__})")
-        _used_by_others = {}
-    n_used = 0
+    # ★前提(skip台帳 cooldown / 候補NG / 他出品が使用中のURL)は build_confirm_context に1本化。
+    #   ラベルの件数計算も同じものを使う = 「32件と出て3件しか出ない」を構造的に防ぐ。
+    import collections
+    ctx = build_confirm_context(vals, cache, today, verbose=True)
+    skip_iids = ctx["skip_iids"]
+    stats = collections.Counter()
 
     # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
     items, item_targets = [], []
-    no_cache = no_cand = no_cardno = no_ref = 0
-    no_cand_after_filter = n_dropped = n_known = 0   # 足切りの計測(2026-07-28)
-    # 絵柄判定 (2026-08-02)。API キーが無ければ判定自体を回さず、従来どおり全候補を目視へ。
-    n_art_diff = art_all_dropped = 0
+    art_all_dropped = 0
     art_dropped_log = []
     try:
         import psa_art_match as _art
@@ -936,97 +1126,48 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     #   原因調査に時間を溶かした。動いていることが見えれば起きない誤解。
     print(f"▶ 目視候補を組み立て中… 対象 {len(targets)}件 "
           f"(1件ごとに 現物画像の取得 + 絵柄の照合。時間がかかります)", flush=True)
+    def _ref_of(t):
+        return (prc.ebay_listing_image(t["itemID"])
+                or prc.psa_image_for_cert(t.get("cert") or None))
+
+    def _art_of(ref, cands, t):
+        """本番の絵柄判定 (API)。判定不能は全候補を目視へ = 捨てる方向に倒さない。"""
+        if _art_cache is None:
+            return cands, []
+        # 現物の確定情報 (catalog/PSA) を渡す = モデルに推測させず「正」を与える
+        try:
+            _facts = dict(prc.psa_label_facts(t.get("cert"), t["_card_no"]))
+            _facts["set_name"] = (mp.card_meta_for_key(t.get("key")) or {}).get("set") or ""
+        except Exception:
+            _facts = {}
+        try:
+            return _art.annotate_candidates(ref, cands, cache=_art_cache, ref_facts=_facts)
+        except Exception as _e:
+            print(f"  ⚠️ 絵柄判定 失敗(非致命・全候補を目視へ): {type(_e).__name__}: {_e}")
+            return cands, []
+
     _scanned = 0
     for t in targets:
         _scanned += 1
         if _scanned % 10 == 0 or _scanned == len(targets):
             print(f"   … {_scanned}/{len(targets)}件 走査 "
-                  f"(確証対象 {len(items)}件 / 除外 絵柄{n_art_diff}・既知{n_known}・"
-                  f"番号不一致{n_dropped}・使用中{n_used})", flush=True)
+                  f"(確証対象 {len(items)}件 / 除外 絵柄{stats['cand_art']}・"
+                  f"既知{stats['cand_known']}・番号不一致{stats['cand_number']}・"
+                  f"使用中{stats['cand_used']})", flush=True)
         iid = t["itemID"]
-        if iid in skip_iids:
-            continue
-        entry = cache.get(iid)
-        if not _entry_fresh(entry, today):     # 夜検索→翌朝確認の日跨ぎOK(same-dayより緩い窓)
-            no_cache += 1
-            continue
-        mr = entry.get("mercari") or {}
-        c = gate.combine(mr.get("best"), entry.get("snkrdunk"),
-                         mercari_cands=mr.get("cands"), max_aux=AUXN)
-        cands = gate._build_visual_candidates(mr, c)
+        # ★足切りは confirm_survivors に1本化 (2026-08-09)。ラベルの件数計算も同じ関数を通る
+        #   ので、「目視待ち32件」と出して3件しか出ない、が構造的に起きない。
+        t["_card_no"] = build_search_query(t, mp).get("card_no") or ""
+        cands, ref, why, _dropped_art = confirm_survivors(
+            t, vals, cache, ctx, today, ref_of=_ref_of, art_of=_art_of, stats=stats)
+        for _c in _dropped_art:
+            art_dropped_log.append((iid, _c.get("url", ""),
+                                    _c.get("drop_why") or _c.get("art_reason", "")))
+        if why == "all_art":
+            art_all_dropped += 1
         if not cands:
-            no_cand += 1
             continue
-        # ★2026-07-26 fail-closed: card_no が今取れない(探索不能)= stale cache の誤候補リスク(別カード/別ジャンル)
-        # → 確証に出さない。9999ダミー等の「番号取り違えで焼かれた誤キャッシュ」(例 One Pieceにポケモン候補)を締め出す。
-        cn = build_search_query(t, mp).get("card_no") or ""
-        if not cn:
-            no_cardno += 1
-            continue
-        # ★現物画像(eBay GetItem or cert)が取れない = 視覚確証不能(ダミーitemID=9999 / GetItem失敗)
-        # → 確証に出さない(見えないカードを人に確定させない=fail-closed)。
-        # ★2026-07-28: 既に自分が使っている供給(主URL/既存補URL)は出さない。
-        # 主URLと同じ出品が出ると「現物と候補が同じ cert」になり目視が成立しない(実測18件)。
-        _row0 = t.get("row")
-        _rv0 = vals[_row0 - 1] if (_row0 and 0 < _row0 <= len(vals)) else []
-        _known = [_cell(_rv0, A)] + [_cell(_rv0, AUX0 + k) for k in range(AUXN)]
-        cands, dropped_known = filter_candidates_known_urls(cands, _known)
-        n_known += len(dropped_known)
-        if not cands:
-            no_cand_after_filter += 1
-            continue
-        # ★2026-07-28: 番号が明らかに違う候補を確証UIに出さない(足切り)。
-        # 「候補に明らかに別カードが混ざる」= 人が毎回目で弾いていた無駄。除外のみ・採用は有人のまま。
-        cands, dropped = filter_candidates_by_number(cands, cn)
-        n_dropped += len(dropped)
-        if not cands:
-            no_cand_after_filter += 1
-            continue
-        # ★過去に人が「違う」と判定した候補は二度と出さない (2026-07-29)。
-        cands, dropped_ng = filter_candidates_rejected(cands, ng_by_iid.get(iid))
-        n_ng += len(dropped_ng)
-        if not cands:
-            no_cand_after_filter += 1
-            continue
-        # ★他の出品が使用中のURLは **見せる前に**外す (どのみち書けない・2026-07-30)。
-        if _used_by_others:
-            _keep, _drop = filter_candidates_used_by_others(cands, _used_by_others, iid)
-            n_used += len(_drop)
-            cands = _keep
-            if not cands:
-                no_cand_after_filter += 1
-                continue
-        ref = prc.ebay_listing_image(iid) or prc.psa_image_for_cert(t.get("cert") or None)
-        if not ref:
-            no_ref += 1
-            continue
-        # ★2026-08-02: 現物 × 候補 の**絵柄**を先に突き合わせ、明らかに別の絵柄だけ省く。
-        #   ラベルの印字書式は同じカードでも変わるので (OP09-050 実物2枚で確認)、
-        #   人がラベルの見た目で「違う」を押すと使える仕入元を捨てる。判定は絵柄で行う。
-        #   same/unsure は全部出す = 自信が無いものは目視で落とす (ユーザー指示)。
-        # 現物の確定情報 (catalog/PSA) を渡す = モデルに推測させず「正」を与える
-        try:
-            _facts = dict(prc.psa_label_facts(t.get("cert"), cn))
-            _meta = mp.card_meta_for_key(t.get("key")) or {}
-            _facts["set_name"] = _meta.get("set") or ""
-        except Exception:
-            _facts = {}
-        _dropped_art = []
-        if _art_cache is not None:
-            try:
-                cands, _dropped_art = _art.annotate_candidates(
-                    ref, cands, cache=_art_cache, ref_facts=_facts)
-            except Exception as _e:
-                print(f"  ⚠️ 絵柄判定 失敗(非致命・全候補を目視へ): {type(_e).__name__}: {_e}")
-                _dropped_art = []
-            n_art_diff += len(_dropped_art)
-            for _c in _dropped_art:
-                art_dropped_log.append((iid, _c.get("url", ""),
-                                        _c.get("drop_why") or _c.get("art_reason", "")))
-            if not cands:
-                no_cand_after_filter += 1
-                art_all_dropped += 1
-                continue
+        cn = t["_card_no"]
         idx = len(items)
         # 多変種(同番号で catalog に2変種以上=別アート/色/パラレル/Gold)か → UI に⚠️バッジ出す。
         # 単一変種は番号一致=正なので流し見でOK、多変種だけ絵柄を要確認(「違う」の主因はここ)。
@@ -1059,13 +1200,18 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
                       "siblings": _sib, "psa_label": _lab})
         item_targets.append(t)
 
+    no_cache, no_cand = stats["no_cache"], stats["no_cand"]
+    no_cardno, no_ref = stats["no_cardno"], stats["no_ref"]
+    no_cand_after_filter = (stats["all_known"] + stats["all_number"] + stats["all_ng"]
+                            + stats["all_used"] + stats["all_art"])
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
-          f"既知URL除外 {n_known}候補 / 番号不一致で除外 {n_dropped}候補 / "
-          f"過去に「違う」除外 {n_ng}候補 / 他出品が使用中で除外 {n_used}候補 / "
-          f"絵柄が明らかに別で除外 {n_art_diff}候補"
+          f"既知URL除外 {stats['cand_known']}候補 / 番号不一致で除外 {stats['cand_number']}候補 / "
+          f"過去に「違う」除外 {stats['cand_ng']}候補 / "
+          f"他出品が使用中で除外 {stats['cand_used']}候補 / "
+          f"絵柄が明らかに別で除外 {stats['cand_art']}候補"
           f"(全滅skip {no_cand_after_filter}件) / "
-          f"台帳skip {len(skip_iids)} → 確証対象 {len(items)}件")
+          f"台帳skip {stats['skip_ledger']} → 確証対象 {len(items)}件")
     # ★省いた分は必ず表に出す (silent drop 禁止)。誤って捨てていないか人が検算できるようにする。
     if art_dropped_log:
         _tail = f" (うち全候補が別で {art_all_dropped}件は対象外)" if art_all_dropped else ""
@@ -1280,6 +1426,11 @@ def main():
             elif a.startswith("--limit="):
                 limit = int(a.split("=", 1)[1])
         run_daytime_confirm(max_backups=max_backups, limit=limit, dry_run=dry)
+        return
+    if "workload" in sys.argv:
+        # ボタンのラベル / status_now が使う件数を JSON で1行。**API/スクレイプ無し**。
+        import json as _json
+        print(_json.dumps(count_workload(), ensure_ascii=False))
         return
     if "status" in sys.argv:
         run_status()

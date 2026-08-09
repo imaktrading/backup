@@ -214,6 +214,26 @@ def extra_photo_urls(cand_url, n=2):
     return [f"{base}{i}.jpg" for i in range(2, 2 + max(0, n - 1))]
 
 
+def cached_verdict(ref_url, cand_url, cand_title="", cache=None):
+    """**キャッシュ済みの判定だけ**を返す (APIを呼ばない)。無ければ None。純関数。
+
+    ★ラベルの件数計算が「API を呼ばずに本番と同じ判定」を再現するための入口 (2026-08-09)。
+      パネルが「目視待ち32件」と出して実際は3件だった真因は、ラベルが足切りを一切通さない
+      母数を出していたこと。件数を本番と揃えるには判定を読む必要があるが、ラベルの更新で
+      API を叩くわけにいかないので **判定済みだけ読む**。未判定は呼出側が別枠で数える。
+    """
+    if cache is None or not ref_url or not cand_url:
+        return None
+    hit = cache.get(_cache_key(ref_url, cand_url, cand_title))
+    if hit is None:
+        # 旧バージョンの判定も拾う (compare_art と同じ規約)
+        for old in range(PROMPT_VERSION - 1, 0, -1):
+            hit = cache.get(_cache_key(ref_url, cand_url, cand_title, version=old))
+            if hit is not None:
+                break
+    return hit
+
+
 def compare_art(ref_url, cand_url, *, client=None, fetch=None, cache=None, api_key=None,
                 ref_facts=None, cand_title="", extra_photos=0):
     """現物 vs 候補 を3軸(絵柄/変種/配布)で判定 → dict + "cached"。

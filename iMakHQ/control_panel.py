@@ -2291,29 +2291,31 @@ class ListingPanel:
         if not self._hoju_btns:
             return
         code = (
-            "import sys;sys.path.insert(0,r'%s');"
+            "import sys,json;sys.path.insert(0,r'%s');"
             "import psa_hoju_fill as H;"
-            "rows=H._read_high();cache=H._load_cache();"
-            "tg=H.select_backfill_targets(rows,max_backups=1);"
-            "hc=sum(1 for t in tg if H._cache_candidate_urls(cache.get(t['itemID'])));"
-            "nc=sum(1 for t in tg if not (cache.get(t['itemID']) or {}).get('mercari'));"
-            "print(f'{len(tg)},{hc},{nc}')"
+            "print(json.dumps(H.count_workload()))"
             % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
         )
         try:
             r = subprocess.run([sys.executable, "-X", "utf8", "-c", code],
                                capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=120,
+                               errors="replace", timeout=180,
                                env=dict(os.environ, PYTHONIOENCODING="utf-8"))
-            tot, hc, nc = (r.stdout or "").strip().splitlines()[-1].split(",")
-            # ★役割ごとに出す数字を変える (2026-08-09)。
-            #   slice2=検索  は「まだ探しに行っていない件数」
-            #   slice3=昼確認 は「候補が揃っていて目視を待っている件数」
-            #   同じ数字を両方に出すと、どちらを押すべきか分からない。
-            by_kind = {
-                "hoju_search": "\n未探索 %s件 (補0本 %s件のうち)" % (nc, tot),
-                "hoju_confirm": "\n目視待ち %s件 (補0本 %s件のうち)" % (hc, tot),
-            }
+            w = json.loads((r.stdout or "").strip().splitlines()[-1])
+            tot = w["targets"]
+            # ★2026-08-09: **押したら何件できるか**を出す。母数を出してはいけない。
+            #   直前まで「目視待ち32件」と出して実際に出るのは3件だった (足切り8段を
+            #   一切通していない母数だったため)。件数は段取りを決めるために見るもので、
+            #   10倍ずれる数字はラベルとして意味がない、というユーザー指摘。
+            #   検索側も同じで、「未探索10件」の8件は card番号が無く**検索できない**。
+            s, cf = w["search"], w["confirm"]
+            s_txt = "\n検索できる %s件 (補0本 %s件のうち)" % (s["can"], tot)
+            if s["no_cardno"]:
+                s_txt += "\n※探索不能 %s件 (番号なし)" % s["no_cardno"]
+            c_txt = "\n目視できる %s件 (補0本 %s件のうち)" % (cf["ready"], tot)
+            if cf["unjudged"]:
+                c_txt += "\n※絵柄が未判定 %s件 (押すと判定)" % cf["unjudged"]
+            by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt}
         except Exception:                                         # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             by_kind = {"hoju_search": "\n(残件 取得できず)",
