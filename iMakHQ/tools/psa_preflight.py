@@ -30,7 +30,11 @@ from pathlib import Path
 _CATALOG_ROOT = r"C:/dev/iMak_catalog/iMakCatalog"
 PSA_CERTS_DIR = Path(r"C:/dev/iMak/iMakeBayAPI/cache/psa_certs")
 CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"
-REPORT_OUT = Path(r"C:/dev/iMak_data/catalog/requests/psa_preflight_report.md")
+# ★2026-08-09: 出力先を requests/ から出した。**診断レポートを依頼箱に置いていた**ため、
+#   dispatch watcher が「新規依頼」として catalog に配ってしまい、走らせるたびに
+#   カタログが回答を書く羽目になっていた (実害: psa_preflight_report_draft.md /
+#   _question.md が生成された)。レポートは依頼ではない。
+REPORT_OUT = Path(r"C:/dev/iMak_data/audit/psa_preflight_report.md")
 
 # catalog resolver は遅延 import (= 純関数の単体テスト時に重い catalog import を避ける +
 #  他テストとの psa_to_csv 名前衝突を回避)。
@@ -99,7 +103,22 @@ def _zero_o_variants(set_code: str):
 
 
 VERIFIED_CERTS = Path(r"C:/dev/iMak_data/dedupe/verified_certs.json")
+OUT_OF_SCOPE = Path(r"C:/dev/iMak_data/dedupe/psa_out_of_scope.json")
 _VERIFIED_CACHE = None
+_OOS_CACHE = None
+
+
+def _out_of_scope():
+    """参入しないゲーム/期の cert → 理由。`_` 始まりは注記なので除く。"""
+    global _OOS_CACHE
+    if _OOS_CACHE is None:
+        try:
+            d = json.loads(OUT_OF_SCOPE.read_text(encoding="utf-8")) or {}
+        except Exception:
+            d = {}
+        _OOS_CACHE = {str(k): v for k, v in d.items()
+                      if not str(k).startswith("_") and isinstance(v, dict)}
+    return _OOS_CACHE
 
 
 def _confirmed_pid(cert: str):
@@ -141,6 +160,13 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
     num = meta.get("CardNumber", "") or ""
     cat = detect_category(brand)
     res = {"cert": cert, "category": cat, "brand": brand, "subject": subject, "num": num}
+    # ★参入しないゲーム/期 は GAP (= catalog 未収録) と混ぜない。混ぜるとカタログに
+    #   「追加して」と依頼し続けることになる (921本スパイラルの作り方そのもの)。
+    oos = _out_of_scope().get(str(cert))
+    if oos:
+        res["status"] = "OUT-OF-SCOPE"
+        res["reason"] = f"{oos.get('reason', '')} — 参入しない (決定: {oos.get('decided_by', '')})"
+        return res
     if not cat:
         res["status"] = "CATEGORY-UNKNOWN"; return res
     _ensure_catalog()
@@ -256,20 +282,20 @@ def main():
     args = ap.parse_args()
     certs = load_certs(args.certs)
     con = sqlite3.connect(CATALOG_DB)
-    buckets = {"RESOLVED": [], "INDEX-FAILURE": [], "REVIEW": [], "GAP": [], "AMBIGUOUS": [], "CATEGORY-UNKNOWN": []}
+    ORDER = ("RESOLVED", "INDEX-FAILURE", "REVIEW", "GAP", "OUT-OF-SCOPE",
+             "AMBIGUOUS", "CATEGORY-UNKNOWN")
+    buckets = {k: [] for k in ORDER}
     for cert, meta in certs:
         r = classify(cert, meta, con)
         buckets.setdefault(r["status"], []).append(r)
     total = len(certs)
     print(f"PSA pre-flight: {total} certs")
-    for k in ("RESOLVED", "INDEX-FAILURE", "REVIEW", "GAP", "AMBIGUOUS", "CATEGORY-UNKNOWN"):
+    for k in ORDER:
         print(f"  {k:16}: {len(buckets[k])}")
     # report
     lines = [f"# PSA pre-flight report ({total} certs)", ""]
-    lines.append(f"- RESOLVED {len(buckets['RESOLVED'])} / INDEX-FAILURE {len(buckets['INDEX-FAILURE'])} / "
-                 f"GAP {len(buckets['GAP'])} / AMBIGUOUS {len(buckets['AMBIGUOUS'])} / "
-                 f"CATEGORY-UNKNOWN {len(buckets['CATEGORY-UNKNOWN'])}")
-    for k in ("INDEX-FAILURE", "REVIEW", "GAP", "AMBIGUOUS", "CATEGORY-UNKNOWN"):
+    lines.append(" / ".join(f"{k} {len(buckets[k])}" for k in ORDER))
+    for k in ("INDEX-FAILURE", "REVIEW", "GAP", "OUT-OF-SCOPE", "AMBIGUOUS", "CATEGORY-UNKNOWN"):
         lines.append("")
         lines.append(f"## {k} ({len(buckets[k])})")
         for r in buckets[k]:

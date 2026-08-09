@@ -37,13 +37,14 @@ def _ledger(*certs, days_ago=1):
 
 def test_resolvable_cert_is_not_skipped_even_inside_cooldown():
     skips = _ledger("111", "222", days_ago=1)
-    got = B.active_review_skips(skips, NOW, resolvable={"111"})
+    got = B.active_review_skips(skips, NOW, resolvable={"111"}, out_of_scope=set())
     assert got == {"222"}, "catalog で引けるのに止めている"
 
 
 def test_all_resolvable_means_nothing_is_skipped():
     skips = _ledger("111", "222", days_ago=3)
-    assert B.active_review_skips(skips, NOW, resolvable={"111", "222"}) == set()
+    assert B.active_review_skips(skips, NOW, resolvable={"111", "222"},
+                                 out_of_scope=set()) == set()
 
 
 # ---- 2. 引けないものは従来どおり ---------------------------------------------
@@ -51,7 +52,7 @@ def test_all_resolvable_means_nothing_is_skipped():
 
 def test_unresolvable_stays_skipped():
     skips = _ledger("333", days_ago=2)
-    assert B.active_review_skips(skips, NOW, resolvable=set()) == {"333"}
+    assert B.active_review_skips(skips, NOW, resolvable=set(), out_of_scope=set()) == {"333"}
 
 
 # ---- 3. cooldown 経過は従来どおり再浮上 --------------------------------------
@@ -59,7 +60,7 @@ def test_unresolvable_stays_skipped():
 
 def test_expired_cooldown_resurfaces_regardless():
     skips = _ledger("444", days_ago=99)
-    assert B.active_review_skips(skips, NOW, resolvable=set()) == set()
+    assert B.active_review_skips(skips, NOW, resolvable=set(), out_of_scope=set()) == set()
 
 
 # ---- 4. 判定不能は何も外さない (fail-closed) ---------------------------------
@@ -95,8 +96,60 @@ def test_empty_input_is_safe():
 
 
 def test_skip_ledger_empty_is_safe():
-    assert B.active_review_skips({}, NOW) == set()
-    assert B.active_review_skips(None, NOW) == set()
+    assert B.active_review_skips({}, NOW, out_of_scope=set()) == set()
+    assert B.active_review_skips(None, NOW, out_of_scope=set()) == set()
+
+
+# ---- 6. 恒久 対象外 は cooldown/自己修復と無関係に常に止める ------------------
+#
+# ★自己修復だけ入れると「永久に引けないカードが14日ごとに永久に浮上する」穴ができる。
+#   SDBH (スーパードラゴンボールヒーローズ) は catalog が「意図的な非対応」と回答済
+#   (Fusion World 専用 scraper / DB 0件 / filter_map にも無し)。引ける日は来ない。
+
+
+def test_out_of_scope_is_skipped_even_after_cooldown_expires():
+    skips = _ledger("777", days_ago=999)          # cooldown はとっくに切れている
+    got = B.active_review_skips(skips, NOW, resolvable=set(), out_of_scope={"777"})
+    assert got == {"777"}, "恒久対象外が cooldown 経過で浮上している"
+
+
+def test_out_of_scope_is_skipped_even_if_ledger_has_no_entry():
+    """台帳に載っていなくても、恒久対象外なら止める。"""
+    got = B.active_review_skips({}, NOW, resolvable=set(), out_of_scope={"777"})
+    assert got == {"777"}
+
+
+def test_out_of_scope_wins_over_self_heal():
+    """resolver がたまたま何か引いても、参入しないゲームは出さない。"""
+    skips = _ledger("777", days_ago=1)
+    got = B.active_review_skips(skips, NOW, resolvable={"777"}, out_of_scope={"777"})
+    assert got == {"777"}, "自己修復が恒久対象外を解除してしまっている"
+
+
+def test_out_of_scope_file_ignores_note_keys(tmp_path):
+    """`_note` のような注記キーを cert として扱わない。"""
+    p = tmp_path / "oos.json"
+    p.write_text('{"_note": "説明", "111": {"reason": "SDBH"}}', encoding="utf-8")
+    assert B.load_out_of_scope(str(p)) == {"111"}
+
+
+def test_out_of_scope_missing_file_is_empty():
+    """読めなければ空 = 誰も止めない側。勝手に出品を止めない。"""
+    assert B.load_out_of_scope(r"C:\nope\missing.json") == set()
+
+
+def test_real_out_of_scope_file_holds_sdbh_and_not_the_shenron_cert():
+    """実ファイルの中身を固定する。
+
+    cert158452540 (SHENRON ALTERNATE ART #FB07-097) は **入れてはいけない**。
+    catalog draft は SDBH として denylist 入りを提案してきたが、実測で
+    `FB07-097 = 神龍 / ブースターパック 神龍への願い[FB07]` が **10件実在**した。
+    Fusion World の正規カードなので、引き方 (②) を直す対象。
+    """
+    got = B.load_out_of_scope()
+    assert "158452540" not in got, "実在する Fusion World カードを恒久対象外にしている"
+    for sdbh in ("135885792", "91207615", "158452557", "158452575"):
+        assert sdbh in got, f"SDBH cert {sdbh} が恒久対象外に入っていない"
 
 
 # ---- 5. 判定を2箇所に実装していない ------------------------------------------

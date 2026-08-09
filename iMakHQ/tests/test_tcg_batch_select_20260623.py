@@ -74,7 +74,10 @@ def test_active_review_skips_within_cooldown():
         "c_noat": {"choice": "NONE"},                                   # 日時不明 → 再浮上(永久hide回避)
         "c_today": {"at": "2026-06-23T09:00:00", "choice": "NG"},      # 当日 → skip
     }
-    skips = bs.active_review_skips(data, now, cooldown_days=14)
+    # 2026-08-09: 自己修復(resolvable)と恒久対象外(out_of_scope)が入ったので、
+    # cooldown だけを見るこのテストは両方を空注入して切り離す (実ファイル非依存に保つ)。
+    skips = bs.active_review_skips(data, now, cooldown_days=14,
+                                   resolvable=set(), out_of_scope=set())
     assert skips == {"c_recent", "c_today"}
 
 
@@ -84,12 +87,14 @@ def test_active_review_skips_boundary():
         "c13": {"at": "2026-06-10T12:00:00", "choice": "NONE"},  # 13日前 → skip (<14)
         "c14": {"at": "2026-06-09T12:00:00", "choice": "NONE"},  # 14日前 → 再浮上 (>=14)
     }
-    skips = bs.active_review_skips(data, now, cooldown_days=14)
+    skips = bs.active_review_skips(data, now, cooldown_days=14,
+                                   resolvable=set(), out_of_scope=set())
     assert skips == {"c13"}
 
 
 def test_active_review_skips_empty_and_malformed():
     now = _dt.datetime(2026, 6, 23, 12, 0, 0)
-    assert bs.active_review_skips({}, now) == set()
-    assert bs.active_review_skips(None, now) == set()
-    assert bs.active_review_skips({"x": {"at": "ゴミ"}}, now) == set()   # 不正日時 → 再浮上
+    kw = {"resolvable": set(), "out_of_scope": set()}      # 実ファイル非依存にする
+    assert bs.active_review_skips({}, now, **kw) == set()
+    assert bs.active_review_skips(None, now, **kw) == set()
+    assert bs.active_review_skips({"x": {"at": "ゴミ"}}, now, **kw) == set()  # 不正日時 → 再浮上

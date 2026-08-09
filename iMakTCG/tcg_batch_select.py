@@ -31,6 +31,28 @@ def load_review_skips(path=REVIEW_SKIP_PATH):
         return {}
 
 
+# 参入しないゲーム/期の cert = **恒久**に出品対象外。cooldown とは別物。
+# ★2026-08-09: 自己修復 (resolvable_now) を入れた結果、**永久に引けないカードが
+#   14日ごとに永久に浮上する** 穴ができた。SDBH (スーパードラゴンボールヒーローズ) は
+#   catalog が「意図的な非対応」と回答済 (Fusion World 専用 scraper / DB 0件 /
+#   filter_map にも無し)。引ける日は来ないので、cooldown ではなく恒久に落とす。
+#   解除するのは「参入する」と決めた時だけ (理由と決定者をファイルに残す)。
+OUT_OF_SCOPE_PATH = r"C:/dev/iMak_data/dedupe/psa_out_of_scope.json"
+
+
+def load_out_of_scope(path=OUT_OF_SCOPE_PATH):
+    """恒久 対象外 cert の set。読めなければ空 (= 誰も止めない側に倒す)。
+
+    `_` 始まりのキーは注記なので除く。
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except Exception:
+        return set()
+    return {str(k) for k in data if not str(k).startswith("_")}
+
+
 def resolvable_now(certs, classify_fn=None):
     """今 catalog で引ける cert の set を返す(= もう止める理由が無いもの)。
 
@@ -102,11 +124,14 @@ def load_resolver():
 
 
 def active_review_skips(skip_data, now, cooldown_days=REVIEW_SKIP_COOLDOWN_DAYS,
-                        resolvable=None):
+                        resolvable=None, out_of_scope=None):
     """cooldown 期間内に NONE/NG 目視された cert の set を返す(= 今回スキップ対象)。
 
     at(ISO日時)が cooldown 内 → スキップ。経過/不明 → スキップしない(永久hide回避 = 再浮上させる)。
     now は datetime(test 用に注入可)。
+
+    ★2026-08-09b: **恒久 対象外 (参入しないゲーム)** は cooldown と無関係に常にスキップ。
+      自己修復と対にしないと、永久に引けないカードが14日ごとに永久に浮上する。
 
     ★2026-08-09: **今 catalog で引ける cert は cooldown 中でもスキップしない**。
       「目視した時に引けなかった」は当時の事実であって、catalog が直った後も
@@ -126,10 +151,13 @@ def active_review_skips(skip_data, now, cooldown_days=REVIEW_SKIP_COOLDOWN_DAYS,
             continue
         if (now - t).days < cooldown_days:
             out.add(str(cert))
+    # ★恒久 対象外は cooldown の外。自己修復でも解除しない。
+    #   これが無いと「永久に引けないカードが14日ごとに永久に浮上する」ことになる。
+    oos = load_out_of_scope() if out_of_scope is None else {str(c) for c in out_of_scope}
     if not out:
-        return out
+        return set(oos)
     ok = resolvable_now(out) if resolvable is None else {str(c) for c in resolvable}
-    return out - ok
+    return (out - ok) | oos
 
 
 def classify_franchise(title):
