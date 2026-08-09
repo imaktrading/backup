@@ -186,10 +186,49 @@ def _check_set_code_vocabulary():
     ), "カード番号不一致が検出されていない"
 
 
+def _check_brand_without_set_code_uses_catalog_set_name():
+    """PSA brand が **セット名のみでコードを持たない** 命名でも出品できること。
+
+    Gundam の PSA brand は 'GUNDAM JAPANESE NEWTYPE RISING' のようにセットコードを
+    含まない。この検査は「brand にコードが載っている」前提だったため、Gundam の通常セットが
+    **全弾き**になっていた (2026-08-09 cert 151333427 GD01-065 Freedom Gundam)。
+    catalog は正しく hit しているので ①は正 → ②(照合側)を修正した。
+
+    緩めた分の歯止め: **catalog の set_name_official が PSA brand と積極的に一致した時だけ**通す。
+    比較不能(catalog 名が日本語のみ / 未指定)は従来どおり ERROR = fail-OPEN にしない。
+    """
+    brand = "GUNDAM JAPANESE NEWTYPE RISING"
+    title = "PSA 10 Gundam TCG Newtype Rising #GD01-065 Freedom Legend Rare+ Card 2025"
+
+    assert validate_title_against_psa(
+        title, brand, "065", catalog_set_name="Newtype Rising [GD01]"
+    ) == [], "catalog set名が PSA brand と一致しているのに reject している (Gundam 全弾きの再発)"
+
+    assert validate_title_against_psa(
+        title, brand, "065", catalog_set_name="Dual Impact [GD02]"
+    ), "別セット名なのに通している (fail-OPEN)"
+
+    assert validate_title_against_psa(title, brand, "065"), \
+        "catalog set名が無い=比較不能。従来どおり落とすこと (fail-OPEN 禁止)"
+
+    assert validate_title_against_psa(
+        title, brand, "065", catalog_set_name="プロモーションカード"
+    ), "日本語のみ=比較不能。落とすこと (fail-OPEN 禁止)"
+
+    # 番号不一致は set名一致でも必ず落ちる (誤出品防止の本丸)
+    assert validate_title_against_psa(
+        title, brand, "066", catalog_set_name="Newtype Rising [GD01]"
+    ), "カード番号不一致が set名一致で握り潰されている"
+
+
 # pytest 用
 if _HAS_PYTEST:
     def test_set_code_vocabulary_is_cross_franchise():
         _check_set_code_vocabulary()
+
+
+    def test_brand_without_set_code_uses_catalog_set_name():
+        _check_brand_without_set_code_uses_catalog_set_name()
 
 
     @pytest.mark.parametrize("case", fixtures["SUCCESS_CASES"], ids=lambda c: c["name"])

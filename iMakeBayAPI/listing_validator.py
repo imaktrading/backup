@@ -18,9 +18,14 @@ SET_CODE_PREFIXES = ("PRB", "OP", "ST", "EB", "GD", "PB", "SC", "PC")
 _SET_CODE_ALT = "|".join(SET_CODE_PREFIXES)   # 長い接頭辞を先に = PRB が PR|B に割れない
 
 
-def validate_title_against_psa(title, psa_brand, psa_card_number):
+def validate_title_against_psa(title, psa_brand, psa_card_number, catalog_set_name=None):
     """タイトル中のセットコード/番号がPSAデータと整合するか検証。
     今回のOP09-091バグのような誤りを防ぐ。
+
+    catalog_set_name: catalog の set_name_official (= canonical)。validate_row が
+      Item Specifics の "Set" から渡す。PSA brand がセットコードを持たない命名の時に
+      **コードの代わりにセット名で突合**するために使う (2026-08-09、下記参照)。
+
     Returns: list[str] of error messages
     """
     errors = []
@@ -58,9 +63,21 @@ def validate_title_against_psa(title, psa_brand, psa_card_number):
                 # プロモ二重国籍パターン許容（ケース1: 別セットコード混在 / ケース2: PSA がプロモ命名のみ）
                 # ERROR にせず、ログにも残さない（既知の許容パターンとして黙認）
                 pass
+            elif _brand_confirms_set_name(psa_brand, catalog_set_name) is True:
+                # 2026-08-09: PSA brand が **セットコードを持たない命名** のケース。
+                # この検査は「PSA brand にセットコードが載っている」ことを前提にしているので、
+                # コードでは突合できない。代わりに **catalog の set_name_official で突合**する。
+                #   Gundam の PSA brand は 'GUNDAM JAPANESE NEWTYPE RISING' のように
+                #   セット名のみでコードを含まない → 従来は Gundam の通常セットが**全弾き**だった
+                #   (cert 151333427 GD01-065 Freedom Gundam。catalog は正しく hit している。
+                #    ①catalog は正 → ②照合側を修正)。
+                # **セット名が積極的に一致した時だけ通す**。比較不能(None)は従来どおり ERROR に
+                # 落とす (判定不能を通すと fail-OPEN になる = 出品の正確性原則に反する)。
+                pass
             else:
                 errors.append(
                     f"タイトルに'{code}'があるが PSA brand に存在しない: '{psa_brand}'"
+                    + (f" (catalog set='{catalog_set_name}' とも不一致)" if catalog_set_name else "")
                 )
 
     # 2. タイトル中の #数字 が PSA card_number と一致するか
@@ -99,7 +116,12 @@ def validate_row(title, specs, model, category, condition_id, price, pic_url, co
 
     # ===== PSA データとの整合性チェック (TCGリスティング限定) =====
     if psa_brand or psa_card_number:
-        psa_errors = validate_title_against_psa(title, psa_brand, psa_card_number)
+        # Item Specifics の "Set" は catalog の set_name_official (= canonical) がそのまま入る。
+        # PSA brand がセットコードを持たない命名の時の突合材料として渡す (2026-08-09)。
+        psa_errors = validate_title_against_psa(
+            title, psa_brand, psa_card_number,
+            catalog_set_name=(specs or {}).get("Set"),
+        )
         errors.extend(psa_errors)
 
     # ===== タイトル =====
@@ -423,6 +445,29 @@ _PROMO_BRAND_KEYWORDS = [
 KNOWN_PROMO_SET_CODES = {"OP11", "OP13"}
 
 
+def _brand_confirms_set_name(psa_brand, catalog_set_name):
+    """PSA brand (自由文) が catalog の set_name_official と同じセットを指しているか。
+
+    PSA brand にセットコードが1つも無い命名 (Gundam 'GUNDAM JAPANESE NEWTYPE RISING' 等)
+    のための突合。catalog 側 'Newtype Rising [GD01]' から [] 内のコードを落として
+    英数字だけにし、brand に含まれるかを見る。
+
+    Returns:
+        True : セット名一致 (= 同じセット)
+        False: 英語セット名が brand に無い (= 別セットの疑い → ERROR)
+        None : 比較不能 (catalog 名が日本語のみ / 空)。**判定不能は ERROR にしない**
+    """
+    if not psa_brand or not catalog_set_name:
+        return None
+    name = re.sub(r'\[[^\]]*\]', '', str(catalog_set_name))
+    name = re.sub(r'[^A-Za-z0-9]', '', name).upper()
+    if len(name) < 4:
+        # 'プロモーションカード' 等、英数字がほぼ無い → PSA brand(英語) と比較できない
+        return None
+    brand = re.sub(r'[^A-Za-z0-9]', '', psa_brand).upper()
+    return name in brand
+
+
 def _is_promo_dual_citizenship(title, psa_brand, psa_card_number=None):
     """PSA brand と title のセットコードが異なる「プロモ二重国籍」を許容する判定ヘルパ。
 
@@ -446,11 +491,14 @@ def _is_promo_dual_citizenship(title, psa_brand, psa_card_number=None):
         return ""
     title_upper = title.upper()
     brand_norm = psa_upper_full.replace('-', '').replace(' ', '')
+    # 2026-08-09: ここが One Piece 専用リテラル (OP|ST|EB|PRB) のまま残っていた。
+    # 2026-08-01 に SET_CODE_PREFIXES へ GD/PB/SC/PC を足したが**この2本が追随しておらず**、
+    # Gundam のプロモ二重国籍が ケース1/2 のどちらにも乗らなかった。SSOT に合わせる。
     psa_codes = set()
-    for m in re.finditer(r'(OP|ST|EB|PRB)(\d+)', brand_norm):
+    for m in re.finditer(r'(%s)(\d+)' % _SET_CODE_ALT, brand_norm):
         psa_codes.add(f"{m.group(1)}{m.group(2)}")
     title_codes = set()
-    for m in re.finditer(r'\b(OP|ST|EB|PRB)(\d+)', title_upper):
+    for m in re.finditer(r'\b(%s)(\d+)' % _SET_CODE_ALT, title_upper):
         title_codes.add(f"{m.group(1)}{m.group(2)}")
 
     # ケース1 (既存 + 白リスト制限): 両者に set code、title に PSA にないコード混入
