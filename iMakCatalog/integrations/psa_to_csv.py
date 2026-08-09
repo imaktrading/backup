@@ -841,6 +841,17 @@ def _search_one_piece_promo_by_number(
         # UTA は短語のため \bUTA\b 限定 + official 'ウタ'
         if re.search(r"\bUTA\b", hay) and "ウタ" in sn:
             edition_hit = True
+        # 2026-08-09 (psa_preflight_report_response §3, R1 PORTGAS ACE cert 153574704):
+        #   PSA "CHAMPIONSHIP SET YYYY" ↔ official "チャンピオンシップセットYYYY..." pair.
+        #   年号一致必須 = 別年の Championship Set (2022/2023/2024) への暴発防止。
+        #   English side は "SET" 必須で「チャンピオンシップYYYY 決勝」等の tournament 記念品
+        #   (OP01-004_p2 等) には発火しない (official も「チャンピオンシップセット」限定でヒット)。
+        #   両側 (英=CHAMPIONSHIP SET YYYY / 日=チャンピオンシップセットYYYY) 一致必須で
+        #   OP02-001_p3 (旧四皇 2023) と OP03-001_p2 (エース・サボ・ルフィ 2023) は
+        #   subject の name (Edward Newgate vs Portgas Ace) 側で分離される。
+        m_champ = re.search(r"CHAMPIONSHIP\s*SET\s*(\d{4})", hay)
+        if m_champ and re.search(rf"チャンピオンシップセット\s*{m_champ.group(1)}", sn):
+            edition_hit = True
         # 2026-08-01: 出力等価 tie の決定的採用 (下記) は **edition_hit した候補にのみ** 許可する。
         #   brand が edition/set を一意特定した時だけ「top tie = その product の変種」= 採用が安全。
         #   generic/ambiguous brand (edition句無し, edition_hit=False) の同点は従来どおり fail-closed
