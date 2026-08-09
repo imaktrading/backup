@@ -265,10 +265,39 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
     return results
 
 
+class _SafeStdout:
+    """catalog の lookup_* が出す絵文字ログで **答えごと落ちない** ようにする writer.
+
+    2026-08-09 実測: cp932 コンソールで `lookup_dragonball` が hit した直後の
+    `print("🎯 ... hit ...")` が UnicodeEncodeError を投げ、`_catalog_lookup_expected` の
+    except に吸われて **expected=None** になっていた。カタログは正しく引けているのに、
+    viewer は「期待値特定不能」と表示して人に選ばせる = 答えを持っているのに聞く、の別ルート。
+    (catalog worktree のコードは触れないので、こちら側で標準出力を包む)
+    """
+
+    def __init__(self, base):
+        self._base = base
+
+    def write(self, s):
+        try:
+            self._base.write(s)
+        except Exception:                                # noqa: BLE001
+            try:
+                enc = getattr(self._base, "encoding", None) or "utf-8"
+                self._base.write(s.encode(enc, "replace").decode(enc, "replace"))
+            except Exception:                            # noqa: BLE001
+                pass                                     # ログは捨ててよい。答えは捨てない
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+
 def _catalog_lookup_expected(brand: str, subject: str, card_number: str, category: str) -> str | None:
     """catalog lookup 経由で expected product_id 取得 (= 5/28 lookup_one_piece Promo 拡張 + lookup_don 等を活用)."""
     if not category:
         return None
+    _orig_stdout = sys.stdout
+    sys.stdout = _SafeStdout(_orig_stdout)
     try:
         # catalog 越境 import (= iMakCatalog/integrations)
         _cat_dir = r"C:/dev/iMak_catalog/iMakCatalog"
@@ -303,6 +332,8 @@ def _catalog_lookup_expected(brand: str, subject: str, card_number: str, categor
                 return rec.get("card_id") or rec.get("product_id")
     except Exception:
         pass
+    finally:
+        sys.stdout = _orig_stdout
     return None
 
 

@@ -93,6 +93,49 @@ def resolvable_now(certs, classify_fn=None):
     return out
 
 
+def resolved_pids_now(certs):
+    """cert → 今 resolver が返す product_id の dict。引けない/判定不能な cert は入れない。
+
+    なぜ要るか (2026-08-09 実測):
+        自己修復は「resolver が引ける = もう止める理由が無い」と見なすが、
+        **人が既にその答えを見て『該当なし』と言っている**場合、同じ提案を出し直す
+        だけになる。実測 cert158452539 は 7/23・8/06・8/09 の3回とも expected が
+        `FB01-071_PARA` で同一、cert138056958 は BDK-006 で同一。cooldown を
+        自己修復が毎回解除するので **毎日** 同じ問いが出る状態だった。
+
+    fail-closed: 判定できなければ空 dict (= 何も外さない) を返す。
+    """
+    certs = [str(c) for c in (certs or [])]
+    if not certs:
+        return {}
+    try:
+        import os as _os
+        import sqlite3 as _sq
+        import sys as _sys
+        _hq = _os.path.join(_os.path.dirname(_os.path.dirname(
+            _os.path.abspath(__file__))), "iMakHQ", "tools")
+        if _hq not in _sys.path:
+            _sys.path.insert(0, _hq)
+        import psa_preflight as _pf
+        _pf._ensure_catalog()
+        _con = _sq.connect(_pf.CATALOG_DB)
+    except Exception:
+        return {}
+    out = {}
+    for cert in certs:
+        try:
+            f = _pf.PSA_CERTS_DIR / f"{cert}.json"
+            if not f.exists():
+                continue
+            meta = json.loads(f.read_text(encoding="utf-8"))
+            r = _pf.classify(str(cert), meta, _con)
+            if r.get("status") == "RESOLVED" and r.get("product_id"):
+                out[str(cert)] = str(r["product_id"])
+        except Exception:
+            continue                                     # 1件の失敗で全体を壊さない
+    return out
+
+
 def load_resolver():
     """cert → 判定ステータス を返す callable。読めなければ None (呼び手が気づけるように)。
 
@@ -123,8 +166,36 @@ def load_resolver():
     return _classify
 
 
+def already_rejected_same_answer(skip_data, certs, resolved_pids=None):
+    """「人が既にその答えを見て断った」cert の set。= 自己修復で解除してはいけないもの。
+
+    台帳の `pid` (却下された product_id) と **今 resolver が返す product_id** が同じなら、
+    出し直しても同じ問いにしかならない。catalog か resolver が変わって答えが**変わった**
+    時だけ再出題する。
+
+    ★2026-08-09 実測: この歯止めが無いため cert158452539/158452540/140936782/138056958 が
+      毎回 RESOLVED 判定で cooldown を解除され、同一 expected のまま再出題されていた
+      (158452539 は4回・138056958 は4回)。
+
+    fail-closed: 台帳に `pid` が無い (旧形式) / 判定不能 → **この歯止めを効かせない**
+    (= 従来どおり自己修復が働く)。黙って永久 hide する方には倒さない。
+    """
+    certs = [str(c) for c in (certs or [])]
+    if not certs:
+        return set()
+    pids = resolved_pids_now(certs) if resolved_pids is None else {
+        str(k): str(v) for k, v in (resolved_pids or {}).items()}
+    out = set()
+    for cert in certs:
+        info = (skip_data or {}).get(cert) or {}
+        prev = (info.get("pid") or "").strip() if isinstance(info, dict) else ""
+        if prev and pids.get(cert) == prev:
+            out.add(cert)
+    return out
+
+
 def active_review_skips(skip_data, now, cooldown_days=REVIEW_SKIP_COOLDOWN_DAYS,
-                        resolvable=None, out_of_scope=None):
+                        resolvable=None, out_of_scope=None, resolved_pids=None):
     """cooldown 期間内に NONE/NG 目視された cert の set を返す(= 今回スキップ対象)。
 
     at(ISO日時)が cooldown 内 → スキップ。経過/不明 → スキップしない(永久hide回避 = 再浮上させる)。
@@ -157,6 +228,9 @@ def active_review_skips(skip_data, now, cooldown_days=REVIEW_SKIP_COOLDOWN_DAYS,
     if not out:
         return set(oos)
     ok = resolvable_now(out) if resolvable is None else {str(c) for c in resolvable}
+    # ★人が既に「その答え」を見て断っている cert は解除しない。解除すると同一 expected の
+    #   問いを毎日出し直すだけになる (2026-08-09 実測: 4件が毎回浮上していた)。
+    ok = ok - already_rejected_same_answer(skip_data, ok, resolved_pids=resolved_pids)
     return (out - ok) | oos
 
 
