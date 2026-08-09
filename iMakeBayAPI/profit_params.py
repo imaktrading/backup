@@ -99,9 +99,16 @@ def _load_from_gsheet():
         creds = Credentials.from_service_account_file(str(CREDS_PATH), scopes=GSCOPES)
         gc = gspread.authorize(creds)
         sh = gc.open_by_url(GSHEET_URL)
-        # 2026-05-18: V4 copy spreadsheet 採用、categories は row 11-28 に配置 (= V4 layout)
-        # row 29+ は国別マスタ section なので 28 までに限定 (= category 18 件 + 余裕)
-        ranges = ['設定!B2:B5', '設定!F2', '設定!H2', '設定!J2', '設定!A11:C28']
+        # 2026-05-18: V4 copy spreadsheet 採用、categories は row 11 から並ぶ (= V4 layout)
+        # ★2026-08-09: 上限を C28 → C33 に広げた。**シートが 20 カテゴリに増えていたのに
+        #   コードが 18 行しか読んでおらず、スニーカー(row29) と ゴルフ(row30) が
+        #   丸ごと落ちていた**。両カテゴリは live 出品 31件 (スニーカー23 / ゴルフ8) が在り、
+        #   `get_check_csv_params` が `ValueError: Unknown category` を投げる状態だった
+        #   (= 復活の採算 gate が skip_no_category で止まる)。
+        #   境界: row34 が「■ 国別 税率 + 手数料マスタ」の見出し。row31-33 は空きなので
+        #   33 まで読んでも国別マスタは混ざらない (空行は下の len<3 / try-except で捨てる)。
+        #   これ以上カテゴリが増えて row34 に達する時は、国別マスタを下へずらすこと。
+        ranges = ['設定!B2:B5', '設定!F2', '設定!H2', '設定!J2', '設定!A11:C33']
         result = sh.values_batch_get(ranges, params={'valueRenderOption': 'UNFORMATTED_VALUE'})
         vals = result['valueRanges']
         b_vals = vals[0].get('values', [])

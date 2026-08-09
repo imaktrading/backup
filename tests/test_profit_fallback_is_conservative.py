@@ -108,18 +108,25 @@ def test_yaml_categories_are_never_cheaper_than_live():
         + "\n  ".join(cheaper))
 
 
-def test_yaml_only_categories_are_documented():
-    """yaml にあって live に無いカテゴリは `get_check_csv_params` が例外になる.
+def test_no_yaml_only_categories():
+    """★yaml にあって live に無いカテゴリを残さない (2026-08-09 解消済).
 
-    2026-08-09 実測: スニーカー / ゴルフ が該当し `ValueError: Unknown category`。
-    yaml に書いてあるのに使えないので、**v8 スプシに追加するか yaml から消すか**の
-    どちらかが要る (残務として起票済)。ここでは「増えていないこと」だけ固定する。
+    そこにあると `get_check_csv_params` が `ValueError: Unknown category` を投げ、
+    復活の採算 gate が `skip_no_category` で止まる = 出品が戻らない。
+
+    経緯: スニーカー / ゴルフ が該当していた。原因は **v8 スプシではなく
+    `profit_params.GSHEET_URL` が指す v4copy (1P1yfz...) にその2行が無かった**こと
+    (コードが読むのは v4copy 側。v8 には元から在った)。
+    v4copy の row29/30 に追加 + 読取範囲を A11:C28 → A11:C33 に拡げて解消。
+    実測 live 出品 31件 (スニーカー23 / ゴルフ8) が対象だった。
+
+    ここが落ちたら、yaml にカテゴリを足して **シート側に足し忘れている**。
     """
     import pytest
     live = _live_categories()
     if not live:
         pytest.skip("live キャッシュが無い環境")
     yaml_only = sorted(set(config_loader.load()["categories"]) - set(live))
-    assert yaml_only == ["ゴルフ", "スニーカー"], (
-        f"yaml にあって live に無いカテゴリが変わった: {yaml_only}\n"
-        "増えていれば get_check_csv_params が例外になる経路が増えている")
+    assert yaml_only == [], (
+        f"yaml にあって live に無いカテゴリが残っている: {yaml_only}\n"
+        "profit_params が読むシート (GSHEET_URL = v4copy) の 設定!A11:C33 に足すこと")
