@@ -203,3 +203,79 @@ def test_render_and_empty():
     assert dc.render_problem_report([]) == ""
     rep = dc.render_problem_report([{"item": "X", "class": "収録漏れ", "cause": "c", "act": "a"}])
     assert "問題提起" in rep and "対策案" in rep
+
+
+# ===== 2026-08-09: 「落ち」の誤検出 =====
+# 実害: 10件処理の問題提起で 8件中 2件が誤りだった。CSV に載っている品を「未分類の落ち」と
+# 報告し、fallback で救済済の品を「promo衝突」と報告していた。しかも件数照合は
+# 「処理10 = CSV3 + 落ち7」と1件ズレたまま ✅OK と表示していた。
+
+def test_built_certs_reads_cert_column_not_only_custom_label():
+    """CustomLabel が仕入元 ID の行も「成功」に数えること。
+
+    CustomLabel は常に "PSA10-<cert>" ではない。mercari 由来の行は m36456934512 の
+    ような仕入元 ID が入る。形に依存すると **CSV に載っているのに落ち扱い**になる。
+    """
+    csv_text = (
+        '"CustomLabel","*Title","CDA:Certification Number"\n'
+        '"m36456934512","PSA 10 Pokemon Rowlet","154543135"\n'
+        '"PSA10-168231144","PSA 10 One Piece Boa Hancock","168231144"\n'
+    )
+    assert dc.built_certs(csv_text) == {"154543135", "168231144"}
+
+
+def test_rescued_by_promo_fallback_is_not_reported_as_drop():
+    """fallback 行の括弧内に続きがあっても救済と認識すること。
+
+    実ログは "(promo fallback, edition一致の同点 2 件…)" のように括弧内が続く。
+    `fallback)` と閉じ括弧直結を要求していたため救済を取りこぼし、build 成功した
+    Boa Hancock を「promo衝突」として問題提起していた。
+    """
+    log = (
+        "⚠️ iMakCatalog ID hit P-051 (Shanks) だが PSA Subject 'BOA HANCOCK' と名前不一致 → reject\n"
+        "🎯 iMakCatalog hit (promo fallback, edition一致の同点 2 件だが CSV 出力等価 → "
+        "決定的採用 min pid): OP07-051_p4\n"
+    )
+    assert dc.rescued_subjects(log) == {"BOA HANCOCK"}
+    drops = dc.classify_drops(log, set_exists=lambda p: True)
+    assert not any(d["class"] == "promo衝突" for d in drops), \
+        "fallback で救済済の品を落ちとして報告している"
+
+
+def test_scrape_failure_is_not_labelled_catalog_gap():
+    """PSA 取得失敗を「catalog欠」に化けさせないこと。
+
+    取得失敗した cert は目視一覧にも「未確定」で載る。目視未確定を先に決め打ちすると
+    catalog に無駄な調査を積み、原因も取り違える。失敗ログは PSA ページの内容が
+    数十行 dump された後に「失敗」が出るので、次の「取得中」までの範囲で探す。
+    """
+    log = (
+        "取得中(確認用): #143318406...\n"
+        "    [DEBUG] PSA Japan ホーム\nリクエストされたページが見つかりませんでした。\n"
+        "会社\nサポート\n 失敗\n"
+        "取得中(確認用): #151333427... ✓\n"
+        "スキップ(目視未確定): #143318406\n"
+    )
+    drops = dc.classify_drops(log, set_exists=lambda p: True)
+    by = {d.get("cert"): d for d in drops if d.get("cert")}
+    assert by["143318406"]["class"] == "PSA取得失敗", by["143318406"]
+
+
+def test_viewer_disagreement_and_missing_image_are_separated_from_catalog_gap():
+    """catalog に実在する件・画像欠の件を「catalog欠」と混ぜないこと。
+
+    混ぜると「カタログが直してくれない」に見えて原因を取り違える。
+    実際は ②(viewer/adapter の同定) と ①(画像欠) で直し先が違う。
+    """
+    log = (
+        "取得中(確認用): #140936782... ✓\n取得中(確認用): #158452540... ✓\n"
+        "    ⏭️ Skip missing_models (catalog実在→viewer食い違い): cert158452540 "
+        "dragonball_scg:FB07-097_p1\n"
+        "    📨 catalog依頼(画像が無く目視できない): cert140936782 pokemon_tcg:SM12a-214\n"
+        "スキップ(目視未確定): #158452540\nスキップ(目視未確定): #140936782\n"
+    )
+    drops = dc.classify_drops(log, set_exists=lambda p: True)
+    by = {d.get("cert"): d for d in drops if d.get("cert")}
+    assert by["158452540"]["class"] == "viewer食い違い(catalogに実在)"
+    assert "②" in by["158452540"]["act"]
+    assert by["140936782"]["class"] == "画像欠(catalogに実在)"

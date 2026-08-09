@@ -1208,6 +1208,9 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                 # 依頼書で一目で分かるように理由を書き分ける (2026-08-09)。
                 if pid_state is _PID_NO_IMAGE:
                     reason = f"catalog {expected} は在るが画像が無く目視できない 画像を追加してほしい"
+                    # 生成ログにも出す = 問題提起(drop_classifier)が「catalog欠」と混ぜずに
+                    # 「画像欠」として分類できる。ログに出さないと分類できない。
+                    print(f"    📨 catalog依頼(画像が無く目視できない): cert{cert} {category}:{expected}")
                 else:
                     reason = f"auto候補{expected}=該当なし 要調査"
                 model = (f"cert{cert} {brand} [{subject}] #{cardno} "

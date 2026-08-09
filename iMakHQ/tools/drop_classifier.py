@@ -13,6 +13,8 @@ drop 行を catalog 照会で分類:
 
 catalog 照会(set_exists/card_exists)は注入可=テスト可。
 """
+import csv
+import io
 import re
 
 # ============================================================================
@@ -48,8 +50,28 @@ def processed_certs(log):
 
 
 def built_certs(csv_text):
-    """CSV に載った cert (= 成功)。"""
-    return set(_CSV_CERT.findall(csv_text or ""))
+    """CSV に載った cert (= 成功)。
+
+    2026-08-09: CustomLabel は常に "PSA10-<cert>" ではない。仕入元が持つ ID
+    (mercari の m36456934512 等) がそのまま入る行があり、その行を「成功」に数えられず
+    **CSV に載っているのに落ちとして報告**していた (件数照合も 4→3 とズレたまま ✅OK と
+    表示していた)。CustomLabel の形に頼らず **cert 列から拾う**のを主にする。
+    """
+    certs = set(_CSV_CERT.findall(csv_text or ""))
+    if not csv_text:
+        return certs
+    try:
+        rows = list(csv.DictReader(io.StringIO(csv_text)))
+    except Exception:
+        return certs
+    for row in rows:
+        for key, val in (row or {}).items():
+            if not key or "Certification Number" not in key:
+                continue
+            v = str(val or "").strip()
+            if v.isdigit() and len(v) >= 6:
+                certs.add(v)
+    return certs
 
 
 def csv_path_from_log(log):
@@ -64,6 +86,29 @@ def drop_reason(log, cert):
     ここに該当が無くても **drop の集合からは外れない**。「未分類(要調査)」として出る。
     """
     c = re.escape(cert)
+
+    # ⓪ PSA 取得失敗 ("取得中(確認用): #cert... 失敗")。
+    #    取得できなかった cert は目視一覧にも「未確定」で載るため、①より先に判定しないと
+    #    「catalog欠」に化けて **catalog に無駄な調査を積む** (2026-08-09 #143318406)。
+    #    失敗時は PSA ページの内容が数十行 dump されてから「失敗」が出るので、
+    #    **次の「取得中」までの範囲**で探す (直後 1 行だけ見ると取りこぼす)。
+    if re.search(r"取得中(?:\(確認用\))?\s*[:：]\s*#%s(?:(?!取得中)[\s\S])*?失敗" % c, log):
+        return {"class": "PSA取得失敗",
+                "cause": "PSA サイトから cert データを取得できなかった(通信/Cloudflare/存在しない)",
+                "act": "再走で回復するか確認。恒常的なら scrape 側を調査"}
+
+    # ①-a catalog に実在するのに viewer が確定できなかった (= ②側の食い違い)。
+    #     catalog 欠と混ぜると「カタログが直してくれない」に見えて原因を取り違える。
+    if re.search(r"Skip missing_models \(catalog実在→viewer食い違い\)\D*?%s" % c, log):
+        return {"class": "viewer食い違い(catalogに実在)",
+                "cause": "catalog に該当カードが在るのに viewer 側で確定できなかった",
+                "act": "②を修正 — viewer/adapter の同定経路を生成器と揃える"}
+
+    # ①-b 画像が無くて目視できなかった (catalog 行は在るが images が空)。
+    if re.search(r"画像が無く目視できない[^\n]*%s" % c, log):
+        return {"class": "画像欠(catalogに実在)",
+                "cause": "catalog に行は在るが画像が無く、viewer で現物と照合できない",
+                "act": "catalog に画像追加を依頼 (自動で missing_models に流れる)"}
 
     # ① 目視未確定 (viewer で OK/CHOSEN が付かなかった) — psa_to_csv.py:2860
     if re.search(r"目視未確定\D*?%s" % c, log):
@@ -87,11 +132,7 @@ def drop_reason(log, cert):
                 "cause": f"出力直前の整合チェックで弾いた: {detail}",
                 "act": "1丁目1番地で判定 — ①catalog値が正なら②(照合ルール/タイトル生成)を修正"}
 
-    # ④ PSA 取得失敗 ("取得中(確認用): #cert... 失敗")
-    if re.search(r"取得中(?:\(確認用\))?\s*[:：]\s*#%s\s*\.{0,3}\s*失敗" % c, log):
-        return {"class": "PSA取得失敗",
-                "cause": "PSA サイトから cert データを取得できなかった(通信/Cloudflare/存在しない)",
-                "act": "再走で回復するか確認。恒常的なら scrape 側を調査"}
+    # ④ (PSA 取得失敗は ⓪ に移動 = 目視未確定より先に判定する)
 
     # ⑤ 理由不明 — **握り潰さない**。cert 付きで表に出して次の分類ルールの起点にする。
     return {"class": "未分類(要調査)",
@@ -138,7 +179,10 @@ def rescued_subjects(log):
         if not m:
             continue
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
-        if re.search(r"iMakCatalog hit \([^)]*fallback\)", nxt):
+        # 2026-08-09: `fallback)` と閉じ括弧直結を要求していたため、
+        # "(promo fallback, edition一致の同点 2 件…)" のように括弧内に続きがある行に
+        # マッチせず、**救済済みの品を落ちとして報告**していた (P-051 Boa Hancock)。
+        if re.search(r"iMakCatalog hit \([^)]*fallback[^)]*\)", nxt):
             rescued.add(m.group(2))
     return rescued
 
@@ -195,15 +239,20 @@ def classify_drops(log, *, set_exists, card_exists=None, csv_text=None):
             continue
 
         # ③ 目視未確定: "スキップ(目視未確定): #139291730" (区切り記号を跨いで cert番号を拾う)
+        #    2026-08-09: ここが「該当なし(catalog欠)」を決め打ちしていたため、
+        #    PSA取得失敗 / catalog実在なのに viewer が確定できなかった / 画像欠 が
+        #    **全部「カタログ欠」に化けて**いた。理由の判定は drop_reason に一本化する
+        #    (決め打ちすると catalog に無駄な調査を積み、原因も取り違える)。
         m = re.search(r"目視未確定\D*?(\d{6,})", s)
         if m:
             cid = "#" + m.group(1)
             if cid in seen:
                 continue
             seen.add(cid)
-            out.append({"item": cid, "class": "該当なし(catalog欠)", "cert": m.group(1),
-                        "cause": "viewer候補は出たが正カードがcatalogに無い(該当なし)",
-                        "act": "catalog拡充: 該当カードを追加(NONE→自動宿題化される運用)"})
+            d = dict(drop_reason(log, m.group(1)))
+            d["item"] = cid
+            d["cert"] = m.group(1)
+            out.append(d)
             continue
 
         # ④ 既出品/目視済 除外(件数行)= 正常
