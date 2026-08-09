@@ -316,6 +316,37 @@ def _get_psa_cache(cert: str) -> dict | None:
     return None
 
 
+def back_face_url(url: str) -> "str | None":
+    """両面カードの **裏面** 画像 URL を、表面 URL から導く。導けなければ None。
+
+    なぜ要るか (2026-08-09 実測):
+        Fusion World の LEADER は両面カード (表 = LEADER FRONT / 裏 = AWAKEN)。
+        PSA は AWAKEN 面を上にして slab することがあるのに、catalog は
+        **表面しか持っていない** (dragonball の LEADER 929件すべて裏面画像なし)。
+        表面だけ並べると写真と別の絵になるので、人は正しく「該当なし」を押す。
+        実害: cert158452539 が4回・cert158452540 が2回、同じ問いで NONE になった。
+
+    URL 規則は公式で実測済 (どちらも HTTP 200):
+        dbs-cardgame  .../FB01-071_f.webp     → .../FB01-071_b.webp
+                      .../FB01-071_f_p1.webp  → .../FB01-071_b_p1.webp
+        bandai-tcg    .../JP_FW_FB01-071_Leader_F_dummy.png
+                      → .../JP_FW_FB01-071_Leader_B_dummy.png
+    """
+    if not url or not isinstance(url, str):
+        return None
+    import re as _re
+    if "dbs-cardgame.com" in url:
+        # 末尾ファイル名の '_f' だけを '_b' に (path 側の 'f' を巻き込まない)
+        head, sep, name = url.rpartition("/")
+        if not sep:
+            return None
+        new = _re.sub(r"_f(?=(_p\d+)?\.)", "_b", name, count=1)
+        return f"{head}/{new}" if new != name else None
+    if "bandai-tcg-plus.com" in url and "_Leader_F_" in url:
+        return url.replace("_Leader_F_", "_Leader_B_", 1)
+    return None
+
+
 def _pick_image_by_language(imgs: list, lang_hint: str = "ja") -> str | None:
     """images list から language hint で 1 件選択. lang='ja' = OP-JA / pokemon-card.com 等 JA 系 URL 優先、 'en' = OP-EN 優先."""
     if not imgs:
@@ -661,11 +692,17 @@ def _generate_html(targets: list[dict]) -> None:
             html.append('<div class=label>📋 PSA cert (実物)</div>')
             if t.get("cert_image_url"):
                 html.append(f'<img src="{_img_url(t["cert_image_url"])}">')
+            # ★両面カードは PSA の裏写真が catalog の表面と一致する (2026-08-09)
+            if t.get("cert_image_url_back"):
+                html.append(f'<img src="{_img_url(t["cert_image_url_back"])}">')
             html.append('</div>')
             html.append('<div class=confirm-q>↔️<br>合ってる？</div>')
             html.append('<div>')
             html.append(f'<div class=label>📚 catalog: {t["csv_expected"]}</div>')
             html.append(f'<img src="{_img_url(expected_img)}">')
+            _eb = back_face_url(expected_img)
+            if _eb:
+                html.append(f'<img src="{_img_url(_eb)}">')
             html.append('</div>')
             html.append('</div>')
         else:
@@ -677,6 +714,8 @@ def _generate_html(targets: list[dict]) -> None:
                 html.append('<div>')
                 html.append('<div class=label>📋 PSA cert (実物)</div>')
                 html.append(f'<img src="{_img_url(t["cert_image_url"])}">')
+                if t.get("cert_image_url_back"):
+                    html.append(f'<img src="{_img_url(t["cert_image_url_back"])}">')
                 html.append('</div>')
             html.append('</div>')
 
@@ -712,8 +751,16 @@ def _generate_html(targets: list[dict]) -> None:
             html.append(f'<div class=num>#{i}</div>')
             if img_path and (img_path.startswith("http") or Path(img_path).exists()):
                 html.append(f'<img src="{_img_url(img_path)}">')
+                # ★両面カード (FW の LEADER 等) は裏面も並べる。catalog は表面しか
+                #   持っていないので URL 規則から導く (公式で 200 実測済)
+                _cb = back_face_url(img_path)
+                if _cb:
+                    html.append(f'<img src="{_img_url(_cb)}">')
             else:
-                html.append('<div style="padding:30px;color:#666">no image</div>')
+                # ★catalog に画像が無い = 人は照合できない。「no image」とだけ出すと
+                #   毎回「該当なし」を押させることになるので、理由を書く (2026-08-09)
+                html.append('<div style="padding:24px;color:#e57373;font-size:11px">'
+                            '画像なし<br>(catalog 未収録)<br>→ 照合不能</div>')
             # 現物(cert画像)と並べて拡大。カード自体は選択トグルなので、
             # ボタン側で preventDefault/stopPropagation して誤選択を防ぐ(viewer_zoom)。
             if img_path and (img_path.startswith("http") or Path(img_path).exists()):
@@ -875,7 +922,11 @@ def _record_review_skip(results: list[dict]) -> None:
         cert = (r.get("cert") or "").strip()
         choice = r.get("choice", "")
         if cert and choice in ("NONE", "NG"):
-            skips[cert] = {"at": now, "choice": choice}
+            # ★何を見せて断られたのか (= 却下された product_id) を残す。これが無いと
+            #   「resolver が引ける」だけを理由に自己修復が即解除し、**同じ提案を
+            #   毎日出し直す**ことになる (2026-08-09: cert158452539 が4回・
+            #   cert138056958 が4回、同一 expected で NONE になっていた)
+            skips[cert] = {"at": now, "choice": choice, "pid": (r.get("expected") or "")}
             changed = True
     if changed:
         try:
@@ -984,6 +1035,35 @@ def _catalog_has_pid(category: str, pid: str, db_path=None) -> bool | None:
     (回答書 `2026-08-06_act_code_proposals_tcg_response.md` の実装 GO)。
     canonical KEY の完全一致のみ (regex/名前一致で「実在扱い」しない = 見落とし側に倒さない)。
     """
+    state = _catalog_pid_state(category, pid, db_path=db_path)
+    if state is None:
+        return None
+    return state is not _PID_MISSING
+
+
+# catalog 行の状態 (目視に使えるか)。
+_PID_OK = "ok"              # 行あり + 画像あり = viewer で現物と照合できる
+_PID_NO_IMAGE = "no_image"  # 行あり + 画像なし = **目視できない** → catalog の宿題
+_PID_MISSING = "missing"    # 行なし
+
+
+def _catalog_pid_state(category: str, pid: str, db_path=None):
+    """catalog 行が **目視に使える状態か** を返す (canonical KEY 完全一致のみ, 名前検索禁止).
+
+    fail-closed 契約:
+      - _PID_OK        = 行が在り、画像も在る (= viewer が現物と並べられる)
+      - _PID_NO_IMAGE  = 行は在るが images が空 → viewer は "no image" しか出せず
+                         人は「該当なし」を押すしかない。**catalog の宿題として依頼に流す**
+      - _PID_MISSING   = 完全一致で見つからない
+      - None           = 判定不能 (pid 空/"無" / DB 不在 / 例外)
+
+    2026-08-09: 従来は「行が在るか」だけを見て「catalog は正しい」と判定し、依頼を出さずに
+    viewer_disagreement.log に流していた。しかし実際の詰まりは **画像が無くて目視できない**
+    ことで、行の存在とは別物。結果 8/7 以降 catalog 依頼が止まり、出品が毎回そこで削られていた
+    (2026-08-09 実測: 10件処理のうち pokemon_tcg:SM12a-214 / BDK-006 の2件。
+     pokemon_tcg 22,018件中 images 空はわずか17件で、その2件を引いていた)。
+    ①の範囲は catalog が管理しているもの全部 = 画像欠も①の誤り。
+    """
     if not pid:
         return None
     pid = pid.strip()
@@ -993,15 +1073,28 @@ def _catalog_has_pid(category: str, pid: str, db_path=None) -> bool | None:
     try:
         con = sqlite3.connect(str(p))
         try:
+            has_images_col = any(
+                r[1] == "images" for r in con.execute("PRAGMA table_info(products)")
+            )
+            col = "images" if has_images_col else "NULL"
             row = con.execute(
-                "SELECT 1 FROM products WHERE category=? AND product_id=? LIMIT 1",
+                f"SELECT {col} FROM products WHERE category=? AND product_id=? LIMIT 1",
                 (category, pid),
             ).fetchone()
         finally:
             con.close()
-        return row is not None
     except Exception:
         return None
+    if row is None:
+        return _PID_MISSING
+    if not has_images_col:
+        # 画像列が無い schema (旧 DB / テスト fixture) では画像の有無を判定できない。
+        # 判定できないことを理由に依頼を増やさない = 従来の「行が在れば OK」に倒す。
+        return _PID_OK
+    images = (row[0] or "").strip()
+    if not images or images in ("[]", "{}", "null"):
+        return _PID_NO_IMAGE
+    return _PID_OK
 
 
 def _route_none_to_catalog(none_records: list[dict], missing_path=None,
@@ -1062,9 +1155,10 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                 # catalog 実在 pre-check (canonical KEY 完全一致のみ, 2026-08-07)。
                 # 実在 → viewer/adapter 側の食い違い。catalog に依頼を出さず別ログへ。
                 # 判定不能 (None) は従来通り missing_models へ (fail-closed = 見落とし禁止)。
+                pid_state = None
                 if expected and expected != "無":
-                    exists = _catalog_has_pid(category, expected, db_path=catalog_db)
-                    if exists is True:
+                    pid_state = _catalog_pid_state(category, expected, db_path=catalog_db)
+                    if pid_state is _PID_OK:
                         try:
                             vd_path.parent.mkdir(parents=True, exist_ok=True)
                             with vd_path.open("a", encoding="utf-8") as vf:
@@ -1079,8 +1173,14 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                             f"cert{cert} {category}:{expected}"
                         )
                         continue
+                # 画像欠は「該当なし」ではなく「画像が無くて目視できない」。何を直せばよいかが
+                # 依頼書で一目で分かるように理由を書き分ける (2026-08-09)。
+                if pid_state is _PID_NO_IMAGE:
+                    reason = f"catalog {expected} は在るが画像が無く目視できない 画像を追加してほしい"
+                else:
+                    reason = f"auto候補{expected}=該当なし 要調査"
                 model = (f"cert{cert} {brand} [{subject}] #{cardno} "
-                         f"(auto候補{expected}=該当なし 要調査)").replace(",", " ")
+                         f"({reason})").replace(",", " ")
                 model = " ".join(model.split())  # 連続空白圧縮
                 f.write(f"{category},{model},{ts}\n")
                 written += 1
@@ -1220,7 +1320,11 @@ def _build_target_for_cert(cert: str):
     return {
         "cert": cert, "brand": brand, "subject": subject, "card_number": card_number,
         "category": category, "set_code": set_code, "csv_expected": csv_expected,
-        "cert_image_url": meta.get("CardImageUrl", ""), "candidates": candidates,
+        "cert_image_url": meta.get("CardImageUrl", ""),
+        # ★PSA は両面を撮っている。両面カード (FW の LEADER 等) では **裏写真の方が
+        #   catalog の表面画像と一致する**。片面しか出さないと照合できない (2026-08-09)
+        "cert_image_url_back": meta.get("CardImageUrlBack", ""),
+        "candidates": candidates,
         "is_promo": is_promo, "promo_proposed": promo_proposed,
     }
 
@@ -1447,6 +1551,7 @@ def run_post_psa_review(csv_path: str, append_log_func) -> bool:
             "set_code": set_code,
             "csv_expected": csv_expected,
             "cert_image_url": meta.get("CardImageUrl", ""),
+            "cert_image_url_back": meta.get("CardImageUrlBack", ""),
             "candidates": candidates,
         })
 
