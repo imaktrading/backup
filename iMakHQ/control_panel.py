@@ -755,7 +755,7 @@ SCRIPTS = [
         "cmd": ["python", "noclick_targets.py"],
         "params": [],
         # 結果は「既存メンテ」スプシ タイトル改修タブに集約 (CSV廃止)
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=903147763",  # タイトル改修
     },
     # ============ PDCA 出品改善 (Seller Hub 4レポート → ファネル分析) ============
     # 前提: Seller Hub の 4レポート(all-active/Listing quality/unsold/orders)を
@@ -768,7 +768,7 @@ SCRIPTS = [
         "cmd": ["python", "listing_funnel.py"],
         "params": [],
         # 結果は「ファネル分析」スプシに集約 (xlsx廃止)。実行後そのスプシを開く
-        "open_url": "https://docs.google.com/spreadsheets/d/1UkaI4W6YCJgUbjgF7LLNN9_fHeVuz5qB4r9RqImElwg/edit",
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=1505533226",  # 取下再出品
     },
     {
         # ①効果測定ループ: 直近2世代の funnel を突合し「直した結果が効いたか」を測る (2026-06-05)
@@ -779,7 +779,7 @@ SCRIPTS = [
         "cmd": ["python", "funnel_diff.py"],
         "params": [],
         # 結果は「既存メンテ」スプシ 効果測定タブに集約 (CSV廃止)
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=854452140",  # 効果測定
     },
     {
         "category": None, "type": "utility",
@@ -789,7 +789,7 @@ SCRIPTS = [
         "cmd": ["python", "demand_winners.py"],
         "params": [],
         # 結果は「既存メンテ」スプシ 需要・新規強化タブに集約 (CSV廃止)
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=69747990",  # 需要・新規強化
     },
     # 2026-06-04: G-SHOCK価格調査(amazon_v8_check/mercari_gshock_resource)とタイトル改修(title_keyword_proposal)は
     #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
@@ -806,7 +806,7 @@ SCRIPTS = [
         # SNKRDUNK先取り→メルカリ保留分をtargetまで掘る。BAN上限=RESTOCK_MAX_SCRAPE(既定60)/1走行。
         "env": {"RESTOCK_TARGET_NEW": "10"},
         # 結果は「既存メンテ」スプシ PSA再仕入れタブに集約 (CSV廃止。再仕入れ系をシート統一)
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+        
     },
     {
         # RESTOCK後工程① 視覚確証で確定したカードを 新コア生成→Revise CSV化(手動UL用)。2026-06-18
@@ -827,7 +827,7 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_restock_writeback.py"],
         "params": [],
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=2106548521",  # RESTOCK確定
     },
     # ★2026-07-31: 「💰 オファー判定(自動読込)」はここから撤去。
     #   トップの nav に **青字「💰 オファー対応」**ボタンを新設し、そちらへ集約した
@@ -852,6 +852,7 @@ SCRIPTS = [
         # 自動化せずボタンにする(ユーザー提案)。対象は新規優先の並びで先頭に来る。
         "category": None, "type": "utility",
         "label": "🆕 出品直後の補URL候補検索(当日分)",
+        "badge": "hoju_search",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_hoju_fill.py", "search", "--limit=15"],
@@ -862,6 +863,7 @@ SCRIPTS = [
         # slice2: 補が薄い live PSA を mercari/snkrdunk 検索→候補+画像を cache(補URL列は触らない)。無人可・停止可。
         "category": None, "type": "utility",
         "label": "🔎 補URL夜間検索(slice2)",
+        "badge": "hoju_search",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_hoju_fill.py", "search"],
@@ -872,6 +874,7 @@ SCRIPTS = [
         # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
         "category": None, "type": "utility",
         "label": "🩹 補URL補強(昼確認/slice3)",
+        "badge": "hoju_confirm",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         # ★2026-07-28: 1回10件ずつ(ユーザー要望「途中で辞められないから」)。
@@ -880,7 +883,11 @@ SCRIPTS = [
         "cmd": ["python", "psa_hoju_fill.py", "confirm", "--limit=10"],
         "params": [],
         "skip_postprocess": True,
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+        # ★2026-08-09: 従来は「既存メンテ」スプシの**先頭タブ(抽出ロジック)**を開いていた。
+        #   slice3 が書くのは **商品管理シートの補URL列(AC-AG)** なので、まったく関係ない
+        #   タブが開いていた。書いた結果をその場で確認できる場所へ飛ばす。
+        "open_url": ("https://docs.google.com/spreadsheets/d/"
+                     "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
     },
     # ---- 一番くじ 在庫補充 (PSA再仕入れの下に配置。2026-07-01 順序変更)。CLI: ichibankuji_restock.py ----
     # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
@@ -911,7 +918,7 @@ SCRIPTS = [
         "cmd": ["python", "restock_worklist.py"],
         "params": [],
         # 結果は「既存メンテ」スプシ 再仕入れタブに集約 (CSV廃止)
-        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit",
+        "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=373045082",  # 再仕入れ
     },
     {
         # B: CULL(在庫切れ&需要皆無) を age>=21・CAP50/回 で段階 End CSV 化 (2026-06-05)
@@ -1919,6 +1926,7 @@ class ListingPanel:
     def __init__(self, root, mode="new"):
         self.root = root
         self.mode = mode  # "new"=新規出品 / "maint"=既存メンテ
+        self._hoju_btns = []      # 残件をラベルに出すボタン [(widget, 元ラベル)]
 
         # ツールバー (共有 🛑 停止)
         toolbar = ttk.Frame(root, padding=(8, 4))
@@ -2015,10 +2023,15 @@ class ListingPanel:
                 parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
             for k, (text, idx) in enumerate(items):
                 color = SCRIPTS[idx].get("label_fg") or ("#0066cc" if SCRIPTS[idx].get("verified", False) else "black")
-                tk.Button(parent, text=text, font=("", 9, "bold"), fg=color,
-                          width=w, height=h, wraplength=wl, justify="center",
-                          command=lambda i=idx: self.run_script(i)).grid(
-                    row=k // ncol, column=k % ncol, padx=pad, pady=pad, sticky="nsew")
+                b = tk.Button(parent, text=text, font=("", 9, "bold"), fg=color,
+                              width=w, height=h, wraplength=wl, justify="center",
+                              command=lambda i=idx: self.run_script(i))
+                b.grid(row=k // ncol, column=k % ncol, padx=pad, pady=pad, sticky="nsew")
+                # ★残件をラベルに出すボタンは参照を持つ (2026-08-09 ユーザー要望)。
+                #   ログ末尾まで読まないと残件が分からず、押す前に「あと何回か」が見えなかった。
+                _bg = SCRIPTS[idx].get("badge")
+                if _bg in ("hoju_search", "hoju_confirm"):
+                    self._hoju_btns.append((b, text, _bg))
 
         if self.mode == "new":
             # ===== 🆕 新規出品 (カテゴリ名ラベルの大ボタン・間隔詰め) =====
@@ -2260,6 +2273,56 @@ class ListingPanel:
         self.proc = None
         self.queue = queue.Queue()
         self.root.after(100, self.poll_queue)
+        # ★補URL の残件をボタンに出す。UI を止めないよう別スレッドで後追い表示。
+        self.root.after(300, self.refresh_hoju_badge)
+
+    def refresh_hoju_badge(self):
+        """補URL の残件をボタンのラベルに出す (2026-08-09 ユーザー要望)。
+
+        ★同期で数えて焼き込む。スレッド + after ポーリングで4回失敗した:
+          Tk はスレッドセーフでなく、ワーカーからの after() は Windows で黙殺される。
+          メインスレッドのポーリングに寄せても、初期表示がシグナルを食う / 引数付きの
+          再帰予約が再スケジュールされない、と別の穴が出続けた。
+          所要は実測 3秒。起動が3秒延びるだけで、確実に出るほうを採る。
+
+        ★重い計算はしない。目視で片づく正確な残件は絵柄の照合まで通す必要があり
+          実測 10分近くかかる (= ラベルには載せられない)。status_now と同じ安い母数を出す。
+        """
+        if not self._hoju_btns:
+            return
+        code = (
+            "import sys;sys.path.insert(0,r'%s');"
+            "import psa_hoju_fill as H;"
+            "rows=H._read_high();cache=H._load_cache();"
+            "tg=H.select_backfill_targets(rows,max_backups=1);"
+            "hc=sum(1 for t in tg if H._cache_candidate_urls(cache.get(t['itemID'])));"
+            "nc=sum(1 for t in tg if not (cache.get(t['itemID']) or {}).get('mercari'));"
+            "print(f'{len(tg)},{hc},{nc}')"
+            % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
+        )
+        try:
+            r = subprocess.run([sys.executable, "-X", "utf8", "-c", code],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=120,
+                               env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+            tot, hc, nc = (r.stdout or "").strip().splitlines()[-1].split(",")
+            # ★役割ごとに出す数字を変える (2026-08-09)。
+            #   slice2=検索  は「まだ探しに行っていない件数」
+            #   slice3=昼確認 は「候補が揃っていて目視を待っている件数」
+            #   同じ数字を両方に出すと、どちらを押すべきか分からない。
+            by_kind = {
+                "hoju_search": "\n未探索 %s件 (補0本 %s件のうち)" % (nc, tot),
+                "hoju_confirm": "\n目視待ち %s件 (補0本 %s件のうち)" % (hc, tot),
+            }
+        except Exception:                                         # noqa: BLE001
+            # 数えられない時は**黙って0と出さない**。分からないと書く。
+            by_kind = {"hoju_search": "\n(残件 取得できず)",
+                       "hoju_confirm": "\n(残件 取得できず)"}
+        for b, base, kind in self._hoju_btns:
+            try:
+                b.config(text=base + by_kind.get(kind, ""))
+            except Exception:                                     # noqa: BLE001
+                pass
 
     def append_log(self, text):
         # tag判定
@@ -2665,6 +2728,11 @@ class ListingPanel:
                     self.append_log("=" * 70 + "\n")
                     self.status_var.set("待機中")
                     self.now_processing.set("")
+                    # ★走行後に残件を数え直す (押した分だけ減ったのが見える)
+                    try:
+                        self.refresh_hoju_badge()
+                    except Exception:                             # noqa: BLE001
+                        pass
                 else:
                     self.append_log(item)
         except queue.Empty:

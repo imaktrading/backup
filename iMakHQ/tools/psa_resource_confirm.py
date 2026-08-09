@@ -247,6 +247,9 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px}
 .cand:has(.ck:not(:checked)) .rsn{display:inline-flex}
 .rb{font-size:10px;padding:1px 5px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:pointer}
+/* 要調査 = 判断を保留して残す印。捨てる系(違う/見送り)と色で区別する */
+.rb.probe{border-color:#0a7;color:#076}
+.rb.probe.sel{background:#0a7;color:#fff}
 .vok{font-size:10px;padding:1px 5px;border-radius:3px;background:#2a7;color:#fff;font-weight:bold}
 .vng{font-size:10px;padding:1px 5px;border-radius:3px;background:#e80;color:#fff;font-weight:bold}
 .nng{font-size:10px;padding:1px 5px;border-radius:3px;background:#c00;color:#fff;font-weight:bold}
@@ -474,12 +477,14 @@ function setRsn(btn){var cand=btn.closest('.cand'); var ck=cand.querySelector('.
   ck.dataset.rsn=btn.dataset.r;
   cand.querySelectorAll('.rb').forEach(function(b){b.classList.toggle('sel', b.dataset.r===btn.dataset.r);});}
 function go(){
-  var conf=[]; var diffs=[]; var skip=0; var unset=0;
+  var conf=[]; var diffs=[]; var probes=[]; var skip=0; var unset=0;
   document.querySelectorAll('.card').forEach(function(c){
     var idx=parseInt(c.dataset.idx); var urls=[];
     c.querySelectorAll('.ck').forEach(function(ck){
       if(ck.checked){urls.push(ck.dataset.url);}
       else if(ck.dataset.rsn==='diff'){diffs.push({idx:idx, url:ck.dataset.url});}
+      /* ★要調査は「見送り」に混ぜない。混ぜると後で拾えず、印を付けた意味が消える */
+      else if(ck.dataset.rsn==='probe'){probes.push({idx:idx, url:ck.dataset.url});}
       else{skip++; if(!ck.dataset.rsn) unset++;}});
     if(urls.length) conf.push({idx:idx, urls:urls});
   });
@@ -487,13 +492,14 @@ function go(){
      (惰性で見送りが積まれると『違う』が defect 指標として機能しなくなる)。 */
   var msg=[];
   if(diffs.length) msg.push('違う(別商品)が'+diffs.length+'件 — 検索の精度事故=即対応対象です。');
+  if(probes.length) msg.push('要調査(同じかも)が'+probes.length+'件 — 台帳に記録します。補URLには書きません。');
   if(unset) msg.push('理由未選択が'+unset+'件 — 見送りとして記録します。別商品なら「違う」を押してください。');
   /* ★2026-08-01: ここは Python の**非 raw** 文字列なので \n と書くと本物の改行が埋まり、
      JS の文字列リテラルが行途中で切れて SyntaxError → この script ブロックの関数が
      **全部未定義**になる (zoom/upd/setAll/setRsn/go/imgFail が丸ごと死ぬ)。必ず \\n と書く。 */
   if(msg.length && !confirm(msg.join('\\n')+'\\n\\n確定しますか?')) return;
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({confirmed:conf, diffs:diffs, skip:skip})}).then(function(){
+    body:JSON.stringify({confirmed:conf, diffs:diffs, probes:probes, skip:skip})}).then(function(){
     document.getElementById('main').style.display='none';
     var d=document.getElementById('done'); d.style.display='block';
     d.textContent='✅ RESTOCK確定 '+conf.length+'件。ターミナルに戻ってください。';});
@@ -640,6 +646,12 @@ def build_restock_html(items):
                 f" title='別商品。鑑定会社違い(CGC/BGS等) / 別カード / 別変種'>違う(別商品)</button>"
                 f"<button type='button' class='rb' data-r='skip' onclick='setRsn(this)'"
                 f" title='商品は合っているが今回は買わない。高い / 納期 / 出品者不安'>見送り(商品は合っている)</button>"
+                # ★2026-08-09 ユーザー要望: 「ラベルの表記は違うが、同じカードの可能性が濃厚」を
+                #   その場で決めずに残す受け皿。「違う」に倒すと使える仕入元を捨て、
+                #   「仕入れる」に倒すと誤変種を掴む。**保留のまま印だけ付けて先に進む**。
+                f"<button type='button' class='rb probe' data-r='probe' onclick='setRsn(this)'"
+                f" title='ラベルの書き方は違うが同じカードの可能性が濃厚。今は判断せず、後で調べる印を付ける'>"
+                f"🔎 要調査(同じかも)</button>"
                 f"</span></span></label>")
         if not cand_html:
             cand_html = ["<div class='cph'>仕入候補なし</div>"]
@@ -743,7 +755,13 @@ def parse_restock_result(data):
             out.append({"idx": int(d["idx"]), "urls": urls})
     diffs = [{"idx": int(d["idx"]), "url": d.get("url", "")}
              for d in (data.get("diffs") or []) if d.get("idx") is not None]
-    return {"confirmed": out, "diffs": diffs, "skip": int(data.get("skip") or 0)}
+    # ★「ラベルの書き方は違うが同じカードの可能性が濃厚」= 後で調べる印 (2026-08-09 ユーザー要望)。
+    #   その場では判断せず、目視を止めない。「違う」に倒すと使える仕入元を捨て、
+    #   「仕入れる」に倒すと誤った変種を掴む。**保留のまま記録できる第3の受け皿**が要る。
+    probes = [{"idx": int(d["idx"]), "url": d.get("url", "")}
+              for d in (data.get("probes") or []) if d.get("idx") is not None]
+    return {"confirmed": out, "diffs": diffs, "probes": probes,
+            "skip": int(data.get("skip") or 0)}
 
 
 def restock_confirm(items, timeout=10800):   # 2026-07-24 ユーザー要望で 30分→3時間に延長

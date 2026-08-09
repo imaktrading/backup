@@ -625,6 +625,14 @@ def _norm_urls(urls):
 NG_CAND_TAB = "補URL候補NG"
 NG_CAND_HEADER = ["itemID", "cert", "url", "title", "日付"]
 
+# ★2026-08-09: 「ラベルの表記は違うが同じカードの可能性が濃厚」の受け皿。
+#   PSA は同じカードに複数の印字書式を使うため (OP09-050 ナミの実例: 現物 "ONE PIECE JPN." /
+#   候補 "ONE PIECE OP09 JP")、書式差だけで「違う」を押すと **使える仕入元を捨てる**。
+#   かといって「仕入れる」に倒すと誤変種を掴む。目視を止めずに保留できる第3の受け皿を置く。
+#   NG タブに入れない = 次回も候補に出る (調べる前に捨てない)。調べ終わったら行を消す。
+PROBE_TAB = "補URL要調査"
+PROBE_HEADER = ["itemID", "cert", "url", "title", "現物の番号", "現物の変種", "日付"]
+
 
 def _ng_urls_by_iid(rows):
     """候補NG台帳 → {itemID: {正規化URL}} (純関数)。"""
@@ -1081,7 +1089,25 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         print(f"  (limit={limit} → 今回 {len(items)}件 / 目視対象 計 {_ready}件"
               + (f" / **残り {_rest}件は次回以降**" if _rest else " / 残りなし") + ")")
     else:
+        _rest = 0
         print(f"  目視対象 計 {_ready}件 (limit 指定なし=全部出す)")
+
+    # ★「目視残」を最後にまとめて出す (2026-08-09 ユーザー要望)。
+    #   残は2種類あり、性質が違うので分けて書く:
+    #     ① 目視すれば片づく残り  … 次回以降このコマンドを回せば消える
+    #     ② 目視しても片づかない残 … 候補が1本も作れず**画面に出ない**ので、
+    #        人が何回まわしても永久に残る。card番号が取れない(catalog/KEY 待ち)。
+    #        ここを黙って落とすと「補URLゼロのまま放置」が見えなくなる。
+    _stuck = no_cardno + no_cache + no_cand + no_cand_after_filter + no_ref
+    print("──── 目視残 ────")
+    print(f"  ① 目視で片づく残り      : {_rest}件"
+          + (f"  (このコマンドをあと {-(-_rest // limit)}回で消化)" if (_rest and limit) else ""))
+    print(f"  ② 目視しても出てこない残: {_stuck}件  ← 画面に出ないので何回まわしても減らない")
+    if _stuck:
+        print(f"       内訳: 探索不能(card番号取れず) {no_cardno} / キャッシュ未取得 {no_cache} / "
+              f"候補なし {no_cand} / 絞り込みで全滅 {no_cand_after_filter} / 現物画像なし {no_ref}")
+        if no_cardno:
+            print(f"       ★探索不能 {no_cardno}件 は catalog/KEY の補完待ち。人手では解消しない")
     if not items:
         print("  確証対象なし。終了。")
         return {"confirmed": 0, "written_rows": 0, "added_urls": 0}
@@ -1180,6 +1206,33 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     if diffs:
         print(f"🚨 「違う」{len(diffs)}件 = 検索が別カード/別変種を拾った精度事故。"
               "slice2 の検索(kw/variant_hint)を要修正(残存=精度事故の放置)。")
+
+    # ★「ラベルの表記は違うが同じカードの可能性が濃厚」= 後で調べる印 (2026-08-09 ユーザー要望)。
+    #   NG には落とさない。NG にすると次回から候補に出なくなり、**調べる前に捨てる**ことになる。
+    #   見送りにも混ぜない (見送りは business 判断で、調査対象ではない)。専用タブに残す。
+    _probe_new = []
+    for _p in (res.get("probes") or []):
+        _i = _p.get("idx")
+        _u = (_p.get("url") or "").strip()
+        if _i is None or _i >= len(item_targets) or not _u:
+            continue
+        _t = item_targets[_i]
+        _lab = (_t.get("psa_label") or {}) if isinstance(_t.get("psa_label"), dict) else {}
+        _probe_new.append([_t["itemID"], _t.get("cert", ""), _u,
+                           (_t.get("title") or "")[:60],
+                           _lab.get("number", ""), _lab.get("variety", ""), today])
+    if _probe_new:
+        try:
+            from sheet_io import read_tab, write_rows_to_tab
+            _cur = read_tab(PROBE_TAB)
+            _seen = {(r[0], r[2]) for r in (_cur[1:] if _cur else []) if len(r) > 2}
+            _add = [r for r in _probe_new if (r[0], r[2]) not in _seen]
+            if _add:
+                write_rows_to_tab(PROBE_TAB, ([PROBE_HEADER] + (_cur[1:] if _cur else []) + _add))
+            print(f"  🔎 {PROBE_TAB}: +{len(_add)}件 記録"
+                  f"(ラベル表記は違うが同じかも。補URLには書いていない・調べたら行を消す)")
+        except Exception as e:
+            print(f"  ⚠ {PROBE_TAB} 記録skip ({type(e).__name__}: {e})")
 
     print(f"✅ 昼確認完了: 確証{len(confirmed)}件 → 補URL {written}行に {added_total}本追記。")
     return {"confirmed": len(confirmed), "written_rows": written, "added_urls": added_total}
