@@ -144,6 +144,38 @@ def test_no_candidates_is_still_gap(monkeypatch):
     assert res["status"] == "GAP"
 
 
+def test_pokemon_neo_era_is_out_of_scope():
+    """Pokemon Neo 期 (2000年) は catalog に 0件。実測で確定 (2026-08-09).
+
+    `set_name_official / set_name に neo` = 0 / `新世界` = 0。
+    ヘラクロス24件の最古も `L1-Bhg-012` `DPt-...` で neo 期は無い。
+    catalog も `prune_missing_models.py` で「Neo era」を対象外と宣言済。
+    """
+    why = P.out_of_scope_by_brand("POKEMON JAPANESE NEO")
+    assert why and "Neo" in why
+
+
+def test_neo_is_matched_as_a_word_not_substring():
+    """`NEON` のような語を巻き込まない。"""
+    assert P.out_of_scope_by_brand("POKEMON JAPANESE NEON GENESIS") is None
+
+
+def test_japanese_yugioh_is_out_of_scope():
+    """catalog の yugioh は英語版のみ (product_id に JP が0件 / EN が34,936件)。"""
+    why = P.out_of_scope_by_brand("YU-GI-OH! JAPANESE TDPP-PREMIUM PACK")
+    assert why and "Yu-Gi-Oh" in why
+
+
+def test_english_yugioh_is_not_excluded():
+    """英語版は catalog が持っているので落とさない。"""
+    assert P.out_of_scope_by_brand("YU-GI-OH! LEGENDARY COLLECTION") is None
+
+
+def test_modern_japanese_pokemon_is_not_excluded():
+    """現行の日本語 Pokemon を巻き込まない (これを落とすと出品が死ぬ)。"""
+    assert P.out_of_scope_by_brand("POKEMON JAPANESE SWORD & SHIELD VMAX CLIMAX") is None
+
+
 def test_sdbh_never_reaches_review(monkeypatch):
     """★SDBH は REVIEW/GAP に落とさず、入口で OUT-OF-SCOPE にする (2026-08-09).
 

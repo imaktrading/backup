@@ -157,6 +157,8 @@ def _set_prefix_in_brand(product_id: str, brand: str) -> bool:
 # ★2026-08-09: cert を1件ずつ台帳に足すのではなく **brand 文字列で構造的に落とす**。
 #   台帳方式だと同じ判断を毎回人がやることになり、増え続ける。
 _SDBH_RE = re.compile(r"HEROES|MISSION|HRS\.?UGM|SDBH")
+# `NEO` は語として見る (`NEON` 等を巻き込まない)
+_NEO_RE = re.compile(r"\bNEO\b")
 
 
 def out_of_scope_by_brand(brand: str):
@@ -182,6 +184,17 @@ def out_of_scope_by_brand(brand: str):
         return "SDBH (スーパードラゴンボールヒーローズ) — Fusion World とは別ゲームで catalog 対象外"
     if "POKEMON" in b and "JAPANESE" not in b:
         return "日本語版でない Pokemon — catalog の pokemon_tcg は language=ja のみ (en は0件)"
+    # ★2026-08-09 追加。同じく **catalog が構造的に持っていない**もの:
+    #   - Pokemon Neo 期 (2000年): catalog に neo 期の set は 0件。
+    #     実測 `set_name_official / set_name に neo` = 0 / `新世界` = 0。
+    #     ヘラクロス24件の最古も `L1-Bhg-012` `DPt-...` で neo は無い。
+    #     catalog 側も `prune_missing_models.py` で「Neo era」を対象外と宣言済。
+    #   - 日本語版 Yu-Gi-Oh: catalog の yugioh_tcg 50,098件は **product_id に JP が 0件 /
+    #     EN が 34,936件** = 英語版しか持っていない。PSA の `#JP018` 等は探しても在るはずがない。
+    if "POKEMON" in b and _NEO_RE.search(b):
+        return "Pokemon Neo 期 (2000年) — catalog に neo 期の set が 0件 (catalog も対象外と宣言済)"
+    if ("YU-GI-OH" in b or "YUGIOH" in b) and "JAPANESE" in b:
+        return "日本語版 Yu-Gi-Oh — catalog の yugioh_tcg は英語版のみ (product_id に JP は0件)"
     return None
 
 
