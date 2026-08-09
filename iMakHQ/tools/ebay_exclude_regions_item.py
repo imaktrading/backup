@@ -189,6 +189,13 @@ def main() -> int:
 
     t = TARGETS[a.target]
     add, site = t["add"], t["site"]
+    # ★2026-08-09: **必ず refresh してから token を取る**。
+    #   `fx.token()` は保存済 access_token を読むだけで期限を見ない。OAuth は数時間で切れる。
+    #   実害: 12:00 の `--verify` は 4,343件 列挙できたのに、12:20 の `--apply --limit 1` が
+    #   「出品全体 0 件 = 判定不能」で止まった。上限でも通信断でもなく **トークン失効**。
+    #   0件で止まるのは fail-closed として正しいが、**止まる必要が無かった**。
+    #   同 worktree の `itemid_writeback_audit._fetch_live` は先に refresh しており、そちらが正。
+    fx.refresh()
     tok = fx.token()
 
     print(f"=== {a.target.upper()} ミラー ({t['domain']}) / 追加する除外 {','.join(add)} ===")
