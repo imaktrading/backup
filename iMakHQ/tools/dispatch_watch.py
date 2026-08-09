@@ -152,6 +152,20 @@ def main() -> int:
     while True:
         beat()          # ★生存証明。これが止まった = watcher が死んだ
         try:
+            # ★2026-08-09: `_routing/` の草案を **窓口を通さず自動投入**する。
+            #   従来は窓口が手で `--inject` するまで相手に届かず、しかも `_routing/` は
+            #   draft_triage の対象外だったため **7日間 8件 溜まっても警告が出なかった**。
+            #   ここで流せば、以降は下の dispatch がそのまま担当を起こす。
+            try:
+                import route_inbox as ri
+                r = ri.auto_route()
+                for name, to in r["injected"]:
+                    log(f"routing 自動投入: {to} ← {name}")
+                for name in r["unknown"]:
+                    log(f"routing 宛先不明 (保留): {name}")
+            except Exception as _re:
+                log(f"!! routing 自動投入 skip: {type(_re).__name__}: {_re}")
+
             for wt in dw.TARGETS:
                 # ★2026-07-30: 担当ごとに **並行**で走らせる (従来は全体で1本の lock =
                 # 直列だったため、依頼を出した担当が前の担当の終了を数分待たされていた)。

@@ -29,6 +29,8 @@ ROUTING = DATA_ROOT / "_routing"
 ROUTED = ROUTING / "_routed"
 TARGETS = ("hq", "catalog", "dedupe", "inventory", "harvest", "revise")
 RE_TO = re.compile(r"_to_(" + "|".join(TARGETS) + r")(?:_|\.)", re.I)
+# `<日付>_<担当>_internal_<topic>` = 自分宛 (担当が自分の worktree に積む改善案)
+RE_INTERNAL = re.compile(r"_?(" + "|".join(TARGETS) + r")_internal_", re.I)
 
 
 def pending():
@@ -41,10 +43,13 @@ def pending():
 def target_of(path: Path) -> str:
     """file 名から宛先を判定。判定不能は "" (窓口が --to で明示する)."""
     m = RE_TO.search(path.name)
+    if m:
+        return m.group(1).lower()
+    m = RE_INTERNAL.search(path.name)
     return m.group(1).lower() if m else ""
 
 
-def inject(path: Path, to: str = "", dry_run: bool = False) -> dict:
+def inject(path: Path, to: str = "", dry_run: bool = False, auto: bool = False) -> dict:
     """草案を宛先の requests/ に投入する。戻り: {ok, target, dest, reason}."""
     to = (to or target_of(path)).lower()
     if to not in TARGETS:
@@ -54,9 +59,18 @@ def inject(path: Path, to: str = "", dry_run: bool = False) -> dict:
         return {"ok": False, "reason": f"宛先 dir が無い: {dest_dir}"}
     body = path.read_text(encoding="utf-8", errors="replace")
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    header = (f"> **窓口(Advisor)が宛先を確認して投入しました** ({stamp})。\n"
-              f"> 起案は他担当 (草案: `_routing/{path.name}`)。**担当どうしの直接投入は禁止**です"
-              f" (相互依頼のループを防ぐため)。\n\n")
+    if auto:
+        # ★2026-08-09: 窓口レビューを廃止し **自動投入**にした。
+        #   `_routing/` は仕分けツール (draft_triage) の対象外で、7日間 8件 溜まっても
+        #   誰にも警告が出ていなかった。届かない方が害が大きい (相手の作業が止まり、
+        #   止まっていることに誰も気づけない) というユーザー判断。
+        header = (f"> **自動投入** ({stamp}) — 起案は他担当 (草案: `_routing/{path.name}`)。\n"
+                  f"> 窓口レビューは通していません。宛先違いだと思ったら "
+                  f"`_question.md` で窓口に差し戻してください。\n\n")
+    else:
+        header = (f"> **窓口(Advisor)が宛先を確認して投入しました** ({stamp})。\n"
+                  f"> 起案は他担当 (草案: `_routing/{path.name}`)。**担当どうしの直接投入は禁止**です"
+                  f" (相互依頼のループを防ぐため)。\n\n")
     # file 名から `_to_<相手>` を落として、相手の requests/ での自然な名前にする
     stem = re.sub(r"_to_[a-z]+", "", path.stem, flags=re.I).strip("_")
     dest = dest_dir / ((stem + ".md") if stem else path.name)
@@ -68,6 +82,26 @@ def inject(path: Path, to: str = "", dry_run: bool = False) -> dict:
     return {"ok": True, "target": to, "dest": dest, "reason": ""}
 
 
+def auto_route(dry_run: bool = False) -> dict:
+    """未投入の草案を **全部** 宛先へ流す (窓口レビューなし)。
+
+    2026-08-09 ユーザー判断: 窓口を必ず通す設計は「届かない」失敗を作り、しかも
+    `_routing/` は仕分け対象外なので **誰も気づけない** (実際に 7日間 8件 滞留)。
+    仕分けも閾値も置かず、宛先が file 名から判る草案はそのまま投入する。
+    宛先が判らないものだけ残す (捨てない = silent drop しない)。
+    Returns: {"injected": [(name, target)], "unknown": [name]}
+    """
+    injected, unknown = [], []
+    for p in pending():
+        if not target_of(p):
+            unknown.append(p.name)
+            continue
+        r = inject(p, dry_run=dry_run, auto=True)
+        (injected if r["ok"] else unknown).append(
+            (p.name, r.get("target")) if r["ok"] else p.name)
+    return {"injected": injected, "unknown": unknown}
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -76,6 +110,15 @@ def main() -> int:
     ROUTING.mkdir(parents=True, exist_ok=True)
     args = sys.argv[1:]
     dry = "--dry-run" in args
+    if "--auto" in args:
+        r = auto_route(dry_run=dry)
+        for name, to in r["injected"]:
+            print(f"✅ 自動投入: {to} ← {name}")
+        for name in r["unknown"]:
+            print(f"⚠️ 宛先不明で保留: {name} (--inject <file> --to <worktree> で投入)")
+        if not r["injected"] and not r["unknown"]:
+            print("ルーティング待ちなし")
+        return 0
     if "--inject" in args:
         i = args.index("--inject")
         src = Path(args[i + 1]) if len(args) > i + 1 else None
