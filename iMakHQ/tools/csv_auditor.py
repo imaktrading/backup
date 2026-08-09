@@ -1173,7 +1173,46 @@ def _identity_from_csv_history(sku: str) -> str:
     return _load_csv_history_identities().get((sku or "").strip(), "")
 
 
-def _still_required_spec(card_number: str, card_name: str, field: str) -> bool:
+_VERIFIED_CERTS_PATH = r"C:/dev/iMak_data/dedupe/verified_certs.json"
+_VERIFIED_PID_CACHE = None
+
+
+def canonical_pid_for_item(item_id: str) -> str:
+    """`PSA10-<cert>` → 目視で確定した canonical product_id。無ければ ""。
+
+    ★2026-08-08 実測の真因: 除外リストは canonical product_id (`MC-746` `S8b-101`) で
+      判定するのに、渡していたのは identity 先頭 = CSV の `C:Card Number`
+      (= 印刷された「番号/総数」`746/742` `101/184`)。
+      One Piece / Gundam は `OP04-119` 形式なので偶然一致していたが、
+      **Pokemon は最初から一度も当たらない**。7/29-7/30 に足した
+      `mc-` `si-` `cp4-` `cp5-` `s8b-` `m2a-` `sm8b-` `sv4a-` `s6k-` `xy-` `hszm-` は
+      **1件も発火していなかった**。
+      結果、公式に rarity が無い Pokemon が毎日 defect に残り、catalog へ
+      draft を毎日投げ続けていた (「同じ件が何度も来る」の現役の発生源)。
+
+    canonical PID は `verified_certs.json` (目視確定台帳) が持っている。
+    """
+    global _VERIFIED_PID_CACHE
+    s = str(item_id or "")
+    if not s.startswith("PSA10-"):
+        return ""
+    if _VERIFIED_PID_CACHE is None:
+        try:
+            import json as _json
+            with open(_VERIFIED_CERTS_PATH, encoding="utf-8") as f:
+                _VERIFIED_PID_CACHE = _json.load(f) or {}
+        except Exception:
+            _VERIFIED_PID_CACHE = {}
+    rec = _VERIFIED_PID_CACHE.get(s[len("PSA10-"):])
+    if not isinstance(rec, dict):
+        return ""
+    if (rec.get("choice") or "").upper() not in ("CHOSEN", "OK"):
+        return ""
+    return (rec.get("product_id") or "").strip()
+
+
+def _still_required_spec(card_number: str, card_name: str, field: str,
+                         item_id: str = "") -> bool:
     """その spec が **今の監査ルール** でもまだ必須か (queue の退役判定用)。
 
     SSOT は check_csv.required_specifics_for_card (DON!!/RESOURCE/ENERGY MARKER/
@@ -1181,6 +1220,11 @@ def _still_required_spec(card_number: str, card_name: str, field: str) -> bool:
     identity の 2 番目 (カード名) を card_type として渡す: 非該当種別は name がそのまま
     種別名 ('Resource' / 'Energy Marker')。通常カードの名前は除外集合に無いので誤退役しない。
     import 不能・field が必須リスト管理外なら True (= 消さない、fail-closed)。
+
+    ★2026-08-09: **判定キーを canonical product_id にする**。identity 先頭は
+      印刷番号 (`746/742`) で、除外リストの prefix (`mc-`) と噛み合わない。
+      cert から canonical PID を引けたらそちらを使い、引けなければ従来どおり
+      identity 先頭で判定する (= 悪化させない)。
     """
     if not str(field or "").startswith("C:"):
         return True
@@ -1191,7 +1235,46 @@ def _still_required_spec(card_number: str, card_name: str, field: str) -> bool:
         return True
     if field not in REQUIRED_SPECIFICS:
         return True                       # そもそも必須リスト外 = ここで判定しない
-    return field in required_specifics_for_card(card_number, card_name)
+    pid = canonical_pid_for_item(item_id)
+    key = pid or card_number
+    if field not in required_specifics_for_card(key, card_name):
+        return False                      # set 単位で「公式に存在しない」= 退役
+    # ★set 単位のリストでは **1枚だけ公式に無い** ケースを表現できない (2026-08-09 実測)。
+    #   S10b は 93件中 85件 (91%) が rarity を持つので prefix 除外にすると
+    #   欠落85枚を永久に見逃す。一方 S10b-055 (かがやくイーブイ) は公式に rarity 表記が無い。
+    #   → **catalog にも値が無いなら defect ではない**。カード単位で判定する。
+    #   catalog に値が有るのに CSV が空 = generator 脱落 = 本物の defect なので残す。
+    if pid and not _catalog_has_spec_value(pid, field):
+        return False
+    return True
+
+
+_SPEC_TO_CATALOG_KEY = {"C:Rarity": "rarity"}          # 対応が確かなものだけ扱う
+
+
+def _catalog_has_spec_value(product_id: str, field: str) -> bool:
+    """catalog がその spec に値を持っているか。判定不能は True (= 消さない、fail-closed)。"""
+    key = _SPEC_TO_CATALOG_KEY.get(field)
+    if not key:
+        return True                       # 対応表に無い field は触らない
+    try:
+        import json as _json
+        import sqlite3 as _sq
+        con = _sq.connect(r"C:/dev/iMak_data/catalog/products.sqlite")
+        try:
+            row = con.execute(
+                "SELECT specs FROM products WHERE product_id=? LIMIT 1", (product_id,)).fetchone()
+        finally:
+            con.close()
+    except Exception:
+        return True
+    if not row:
+        return True                       # catalog に居ない → 判定不能
+    try:
+        v = (_json.loads(row[0] or "{}") or {}).get(key)
+    except Exception:
+        return True
+    return bool(str(v or "").strip())
 
 
 def _resolve_identity(sku: str, identity_by_sku: dict | None) -> str:

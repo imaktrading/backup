@@ -446,7 +446,14 @@ def prune_non_applicable_specs(con, still_required_fn, ts="", status="pending"):
         if not num and not name:
             continue                                   # 判定材料なし → 触らない
         try:
-            still = still_required_fn(num, name, r["target_field"])
+            # ★2026-08-09: item_id も渡す。identity 先頭は **印刷番号** (`746/742`) で、
+            #   除外リストの canonical prefix (`mc-`) と噛み合わない。呼び手側で
+            #   cert → canonical product_id を引けるようにするため。
+            #   旧シグネチャ (3引数) の実装も壊さない。
+            try:
+                still = still_required_fn(num, name, r["target_field"], r["item_id"])
+            except TypeError:
+                still = still_required_fn(num, name, r["target_field"])
         except Exception:
             still = True
         if not still:
