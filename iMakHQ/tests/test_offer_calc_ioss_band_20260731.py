@@ -6,30 +6,20 @@
       ≤€150 … IOSS/DDP。eBay が VAT を徴収し、**関税は当方負担**。SpeedPAK Economy
       >€150 … DDU。**買い手が着払いで関税を払う**ので当方コストに入れない。国際エアパケット
 
-★2026-07-31 夕: **送料の定義が確定**し、本テストの期待値を更新した (ユーザー確定・V9 実装済)。
+★2026-08-09: **DE 経路 (DE計算タブ) を撤去**したため、DE 建ての test を削除した。
+    DEミラーが 0件になった (live 4,343件の通貨内訳 USD/AUD/CAD/GBP のみ、**EUR 0**)。
+    存在しない経路の計算機を残すと、実在しない条件で採算を判断してしまう。
 
-    送料 = (その手段の実費 − 国際エアパケット実費) + 当方負担の関税
-
-  - 旧: 送料収入は**ポリシー値なので帯によらず一定** (€14.86/€17.49 固定)
-  - 新: 送料収入 = **DDPコスト − 想定送料 と同額**。**>€150 は €0** (送料無料)
-
-  → 帯をまたいだ時の利益改善は **旧より小さくなる**。DDPコストが消える一方で
-    **送料収入も同時に消える**ため。実測 (下記 test に固定):
-      DDPコスト差 = 3219 − 2000 = ¥1,219 (= €6.625 @184)
-      これが消えて +1,219、送料収入 ¥1,219 の手取り (手数料 ~33% 差引 ≈ ¥821) が消えて −821
-      → 差引 **+約398円**。旧テストの「1,500円以上」は旧定義の値なので不成立が正しい。
-
-  ★出品価格と成約価格で見る帯が違う (またぎ問題):
-    - **コスト側 (S)** は **成約額** の帯 … 実際にどう送るかで決まる
-    - **送料収入 (R)** は **出品価格** の帯 … ポリシーは出品時に決まり後から変えられない
-    >€150 で出した listing に €150 未満のオファーが来ると、Economy で送るのに送料収入 0
-    = DDP コストが全額持ち出し。これが「またぎ」。
+    **EU送料マスタ (P.eu / iossEur) と eucty セレクタは残っている。**
+    `US計算_非US` (US出品を米国外へ発送) が同じ値で DDP を計算しているため。
+    → 帯の切り替わりは **非US ルートで引き続き固定する** (下の
+      `test_nonus_band_uses_usd_threshold`)。ここが落ちたら EU送料マスタ側の退行。
 
 守りたい性質:
   1. しきい値は 成約額 (コスト側) / 出品価格 (送料収入側)
   2. >€150 は関税を上乗せしない
-  3. 送料収入は **帯で変わる** (旧: 変わらない ← 定義変更で反転)
-  4. VAT 率は仕向地連動 (DE 19% / AT 20% ← 実注文で確認)
+  3. 非US ルートのしきい値は €150 を **USD 換算**した値
+  4. DE 経路が復活していないこと (撤去の固定)
 """
 import sys
 from pathlib import Path
@@ -49,58 +39,9 @@ P = {
 }
 
 
-def de(price, cc="DE"):
-    return oc.calc_py(P, "DE計算", "TCG(PSA10)", "DE", price, cost=20000,
-                      promo_on=False, eu_country=cc)
-
-
-def nonus(price):
+def nonus(price, cc="DE"):
     return oc.calc_py(P, "US計算_非US", "TCG(PSA10)", "US", price, cost=20000,
-                      promo_on=False, eu_country="DE")
-
-
-def test_de_band_switches_at_150():
-    """€150 をまたぐと利益が改善する (DDP コストが消える)。
-
-    ただし送料収入も同時に消えるので、改善幅は DDP コスト全額ではない。
-    実測 +397.7円 (= 1219 − 821)。旧定義の「1,500円以上」は成立しない。
-    """
-    lo, hi = de(150), de(151)
-    gain = hi - lo
-    assert gain > 0, f"帯が切り替わっていない: {lo:.0f} → {hi:.0f}"
-    assert 300 < gain < 500, f"改善幅が想定外 (期待 ≈398円): {gain:.0f}"
-
-
-def test_de_ddu_drops_duty():
-    """>€150 は関税を当方コストに乗せない (買い手が着払い)。
-
-    全部 DDP 扱いにした場合と比べて DDU 側が有利であること。
-    実測 +251.7円 (DDPコスト 1219 が消え、送料収入の手取り ≈967 が消える差引)。
-    """
-    price = 200.0
-    profit = de(price)
-    ddp = oc.calc_py(dict(P, iossEur=1e9), "DE計算", "TCG(PSA10)", "DE", price,
-                     cost=20000, promo_on=False, eu_country="DE")
-    gain = profit - ddp
-    assert gain > 0, f"DDU が不利になっている: {gain:.0f}"
-    assert 150 < gain < 350, f"DDU の得が想定外 (期待 ≈252円): {gain:.0f}"
-
-
-def test_shipping_revenue_follows_the_band():
-    """★定義変更点: 送料収入は帯で変わる (旧は「ポリシー値で一定」だった)。
-
-    >€150 は送料無料なので、送料収入も VAT の基数も price のみになる。
-    コード側の実装 (R の三項演算) を固定して、元の「固定額」実装に戻ったら落とす。
-    """
-    assert "listedPrice" in oc.HTML, "出品価格で送料帯を見る関数が消えている"
-    assert "deShip" not in oc.HTML.split("function calc(")[1].split("const O =")[0], \
-        "送料収入が固定額 (deShip/atShip) に戻っている"
-
-
-def test_vat_follows_destination():
-    """AT は 20% (実注文 2026-07-12 €49.82 → €9.96 = 20% で確認)."""
-    d, a = de(100, "DE"), de(100, "AT")
-    assert d != a, "仕向地で VAT 率が変わっていない"
+                      promo_on=False, eu_country=cc)
 
 
 def test_nonus_band_uses_usd_threshold():
@@ -110,6 +51,48 @@ def test_nonus_band_uses_usd_threshold():
     gain = hi - lo
     assert gain > 0, f"USD 換算しきい値で切り替わっていない: {lo:.0f} → {hi:.0f}"
     assert 350 < gain < 650, f"改善幅が想定外 (期待 ≈488円): {gain:.0f}"
+
+
+def test_nonus_ddu_drops_duty():
+    """>€150 は関税を当方コストに乗せない (買い手が着払い)。
+
+    全部 DDP 扱い (iossEur を無限大) にした場合と比べて DDU 側が有利であること。
+    """
+    price = 300.0                     # $172.5 の帯より上
+    ddu = nonus(price)
+    ddp = oc.calc_py(dict(P, iossEur=1e9), "US計算_非US", "TCG(PSA10)", "US", price,
+                     cost=20000, promo_on=False, eu_country="DE")
+    assert ddu > ddp, f"DDU が不利になっている: DDU={ddu:.0f} / DDP={ddp:.0f}"
+
+
+def test_nonus_cost_follows_destination():
+    """仕向国で EU送料マスタ の実費が変わる (DE ¥3,219 / AT ¥4,130)."""
+    d, a = nonus(100, "DE"), nonus(100, "AT")
+    assert d != a, "仕向地で DDP コストが変わっていない (EU送料マスタが効いていない)"
+    assert d > a, "実費の高い AT の方が利益が大きくなっている"
+
+
+def test_de_route_is_gone():
+    """★DE 経路を復活させない (2026-08-09 撤去)。
+
+    EUR 建ての出品が 0 件なので、DE の計算機は「実在しない条件」を計算してしまう。
+    復活させるなら、まず EUR 建て出品が実在することを実測してから。
+    """
+    assert "DE" not in oc.ROUTES, "ROUTES に DE が戻っている"
+    assert "DE計算" not in oc.TABS, "TABS に DE計算 が戻っている"
+    assert "EUR" not in oc.CUR2DEST, "CUR2DEST に EUR が戻っている"
+    assert "tab === 'DE計算'" not in oc.HTML, "JS に DE計算 分岐が戻っている"
+
+
+def test_eu_master_is_kept_for_nonus():
+    """★EU送料マスタと eucty セレクタは **消さない**。
+
+    US計算_非US が p['eu'] / p['iossEur'] を使う。消すと生きている経路が壊れる
+    (残務 №95 の起票時に出品専任が明示した条件)。
+    """
+    assert "eucty" in oc.HTML, "EU仕向国セレクタが消えている"
+    assert "P.eu" in oc.HTML, "EU送料マスタの参照が消えている"
+    assert "iossEur" in oc.HTML, "IOSS しきい値が消えている"
 
 
 def test_html_documents_the_band_rule():

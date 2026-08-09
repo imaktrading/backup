@@ -27,14 +27,18 @@ OUT = Path(r"C:\dev\iMak_data\hq\offer_calc.html")
 # ★2026-07-31: DE計算 / US計算_非US を DDP構造版へ差替えたため gid が変わった
 #   (旧タブは *_bk20260731 として残置)。gid はタブを開くリンクにしか使わないが、
 #   古いままだと退避タブへ飛ぶので更新すること。
+# ★2026-08-09: DE 経路を撤去。DEミラーが 0件になったため (実測: live 4,343件の通貨内訳が
+#   USD 1854 / AUD 851 / CAD 845 / GBP 793 で **EUR 建ては 0**)。
+#   存在しない経路の計算機を残すと、使った人が実在しない条件で採算を判断してしまう。
+#   ★EU送料マスタ (p['eu'] / p['iossEur']) と eucty セレクタは **残す**。
+#     US計算_非US (US出品を米国外へ発送) が同じ値を使っており、消すと生きている経路が壊れる。
 TABS = {"US計算": 1508273141, "US計算_非US": 44630822, "UK計算": 5314130,
-        "DE計算": 793979528, "AU計算": 1197179659, "CA計算": 1530445170}
+        "AU計算": 1197179659, "CA計算": 1530445170}
 # 仕向地 → (タブ, 通貨記号, 為替キー)
 ROUTES = {
     "US": ("US計算", "$", "USD"),
     "CA": ("CA計算", "C$", "CAD"),
     "UK": ("UK計算", "£", "GBP"),
-    "DE": ("DE計算", "€", "EUR"),
     "AU": ("AU計算", "A$", "AUD"),
     "その他 (US出品・米国外へ発送)": ("US計算_非US", "$", "USD"),
 }
@@ -47,7 +51,7 @@ COL_URL, COL_ITEMID, COL_COST_N, COL_STOCKCHK, COL_CAT = 0, 1, 13, 14, 17
 # 前に定数が要るので、値をここに置きテストで一致を固定する)。
 COL_CERT = 8
 COL_AUX = range(28, 33)          # AC〜AG = 補URL 1〜5
-CUR2DEST = {"EUR": "DE", "GBP": "UK", "AUD": "AU", "CAD": "CA"}
+CUR2DEST = {"GBP": "UK", "AUD": "AU", "CAD": "CA"}   # EUR は DE 撤去に伴い削除 (2026-08-09)
 CAT2CALC = {"TCG": "TCG(PSA10)", "PSA": "TCG(PSA10)", "G-SHOCK": "G-SHOCK",
             "Tシャツ": "Tシャツ(UT)", "montbell": "Montbell(軽)", "一番くじ": "一番くじ"}
 
@@ -579,22 +583,9 @@ function calc(price){
     D = price * tax; E = price + D; F = price; G = E * fx; N = D * fx;
     K = (G - N) * fr + 0.4 * fx; L = (G - N) * promo; M = (G - N) * P.payo;
   }
-  /* ★DE計算だけ DDP構造を持つ。送料は固定額ではなく **DDPコストと同額**。
-     定義:「DDP分と日本郵便との差額 + 関税」を送料として徴収する。
-     J(設定の想定送料) は日本郵便で送った場合の想定で、本体価格に内包済。
-     >€150 は国際エアパケット = 送料無料 なので 0。 */
+  /* ★2026-08-09: DE計算 の分岐を撤去 (DEミラー 0件 = EUR建て出品が存在しない)。
+     S(DDPコスト) は DE 専用だったので常に 0。O の式を変えないため変数だけ残す。 */
   let S = 0;
-  if (tab === 'DE計算'){
-    const c2 = euCountry();
-    const e = P.eu[c2] || {cost: 3219};
-    const lim = P.iossEur || 150;
-    S = (price <= lim) ? (e.cost - J) : 0;              // DDPコスト。>€150 は想定送料Jで足りる
-    const R = (listedPrice(price) <= lim) ? (e.cost - J) / fx : 0;  // 送料収入 = 出品価格の帯
-    const vat = (c2 === 'AT') ? 0.20 : 0.19;            // 実注文で AT=20% を確認
-    D = (price + R) * vat;                              // VAT
-    E = price + R + D; F = price; G = E * fx; N = D * fx;
-    K = (G - N) * fr + 0.4 * fx; L = (G - N) * promo; M = (G - N) * P.payo;
-  }
   const O = cost - pt + J + K + L + M + N + S;
   return {tab, sym, cur, fx, fr, price, D, E, F, G, N, K, L, M, J, O,
           profit: G - O, margin: (G - O) / G, cost, pt};
@@ -788,7 +779,7 @@ def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False,
                 (2026-07-31: シートの r15/16 が $C$9 を見るのに合わせた)
     """
     cur = {"US計算": "USD", "US計算_非US": "USD", "UK計算": "GBP",
-           "DE計算": "EUR", "AU計算": "AUD", "CA計算": "CAD"}[tab]
+           "AU計算": "AUD", "CA計算": "CAD"}[tab]
     fx = p["fx"][cur]
     C = p["cats"][cat_key]
     ckey = "US" if tab.startswith("US") else dest_key
@@ -820,23 +811,6 @@ def calc_py(p, tab, cat_key, dest_key, price, cost, pt=0.0, promo_on=False,
             D = (e["cost"] - J) / fx if (listed if listed is not None else price) <= lim else 0.0
         G = (F + D) * fx
         K, L, M = G * fr + 0.4 * fx, G * promo, G * p["payo"]
-    elif tab == "DE計算":
-        # ★2026-07-31: DEミラーの送料は固定額 (€14.86/€17.49) ではなく **DDPコストと同額**。
-        #   定義: 「DDP分と日本郵便との差額 + 関税」を送料として徴収する。
-        #   J(設定の想定送料) は日本郵便で送った場合の想定で、本体価格に内包済。
-        #   >€150 は国際エアパケット = 送料無料 なので 0。
-        cc = eu_country or "DE"
-        e = (p.get("eu") or {}).get(cc, {"cost": 3219})
-        ioss = p.get("iossEur", 150)
-        S = (e["cost"] - J) if price <= ioss else 0.0       # コストは成約額の帯
-        # 送料を取れるかは **出品価格** の帯 (出品時のポリシーは後から変えられない)
-        R = (e["cost"] - J) / fx if (listed if listed is not None else price) <= ioss else 0.0
-        vat = 0.20 if cc == "AT" else 0.19          # 実注文で AT=20% を確認
-        D = (price + R) * vat
-        G = (price + R + D) * fx
-        N = D * fx
-        K, L, M = (G - N) * fr + 0.4 * fx, (G - N) * promo, (G - N) * p["payo"]
-        return (G - (cost - pt + J + K + L + M + N + S))
     else:
         D = price * c["tax"]
         G = (price + D) * fx
