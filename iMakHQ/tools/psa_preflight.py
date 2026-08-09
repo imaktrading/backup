@@ -154,6 +154,37 @@ def _set_prefix_in_brand(product_id: str, brand: str) -> bool:
     return head in b
 
 
+# ★2026-08-09: cert を1件ずつ台帳に足すのではなく **brand 文字列で構造的に落とす**。
+#   台帳方式だと同じ判断を毎回人がやることになり、増え続ける。
+_SDBH_RE = re.compile(r"HEROES|MISSION|HRS\.?UGM|SDBH")
+
+
+def out_of_scope_by_brand(brand: str):
+    """catalog が構造的に管理していないものを brand だけで判定する (純関数, test可)。
+
+    戻り: 理由の文字列 / 対象外でなければ None。
+
+    ここで落とす根拠 (2026-08-09 実データ):
+      - **SDBH (スーパードラゴンボールヒーローズ)**: Fusion World とは別ゲームで catalog 対象外。
+        PSA cache 924件のうち Dragon Ball 系 108件を判定すると SDBH 12件だけが当たり、
+        Fusion World 96件は**一件も当たらない** (Fusion World の brand に HEROES/MISSION は無い)。
+      - **日本語でない Pokemon**: `products` の `pokemon_tcg` は **language が ja 21,889 / 空 129 で
+        en は 0件** = catalog は日本語しか持っていない。KOREAN/ASIA/ENGLISH は探しても在るはずがない。
+        ★one_piece_tcg / dragonball_scg は en を持つので **Pokemon だけに適用する**。
+
+    これを入れないと、対象外カードが GAP (= catalog 未収録) に混ざり、
+    カタログへ「追加して」と依頼し続けることになる (921本スパイラルの作り方そのもの)。
+    """
+    b = (brand or "").upper()
+    if not b:
+        return None
+    if ("DRAGON BALL" in b or "DRAGONBALL" in b) and _SDBH_RE.search(b):
+        return "SDBH (スーパードラゴンボールヒーローズ) — Fusion World とは別ゲームで catalog 対象外"
+    if "POKEMON" in b and "JAPANESE" not in b:
+        return "日本語版でない Pokemon — catalog の pokemon_tcg は language=ja のみ (en は0件)"
+    return None
+
+
 def classify(cert: str, meta: dict, con: sqlite3.Connection):
     brand = meta.get("Brand", "") or ""
     subject = meta.get("Subject", "") or ""
@@ -166,6 +197,12 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
     if oos:
         res["status"] = "OUT-OF-SCOPE"
         res["reason"] = f"{oos.get('reason', '')} — 参入しない (決定: {oos.get('decided_by', '')})"
+        return res
+    # 台帳に無くても brand だけで構造的に判る対象外 (SDBH / 非日本語 Pokemon)
+    why = out_of_scope_by_brand(brand)
+    if why:
+        res["status"] = "OUT-OF-SCOPE"
+        res["reason"] = why
         return res
     if not cat:
         res["status"] = "CATEGORY-UNKNOWN"; return res

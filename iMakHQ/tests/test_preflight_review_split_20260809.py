@@ -89,9 +89,16 @@ def _classify(brand, subject, num, rows, monkeypatch):
 
 
 def test_candidates_across_multiple_sets_says_do_not_use(monkeypatch):
-    """SDBH の実例。候補が FB02 と SB01 に散る → 別ゲーム混在の疑い → 採用するな。"""
+    """候補が FB02 と SB01 に散る → 別ゲーム混在の疑い → 採用するな。
+
+    ★2026-08-09: brand を SDBH (`...HEROES UGM5`) から Fusion World に変えた。
+      SDBH は `out_of_scope_by_brand` が **classify の入口で** OUT-OF-SCOPE に落とすので、
+      この分岐まで到達しなくなったため (下の `test_sdbh_never_reaches_review` で固定)。
+      ここで見たいのは「候補が複数セットに散った時の扱い」であって SDBH ではない。
+    """
     rows = [("FB02-017", "Son Goku", "孫悟空"), ("SB01-017", "Son Goku (Great Ape)", "大猿孫悟空")]
-    res = _classify("DRAGON BALL SON GOKU HEROES UGM5", "SON GOKU", "017", rows, monkeypatch)
+    res = _classify("DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE AWAKENED PULSE",
+                    "SON GOKU", "017", rows, monkeypatch)
     assert res["status"] == "REVIEW"
     assert res["risk"] == "cross-set"
     assert res["same_series"] == []
@@ -131,5 +138,22 @@ def test_candidates_list_same_series_first(monkeypatch):
 
 
 def test_no_candidates_is_still_gap(monkeypatch):
-    res = _classify("DRAGON BALL SON GOKU HEROES UGM5", "SON GOKU", "017", [], monkeypatch)
+    """候補ゼロなら GAP のまま (★brand は SDBH でない Fusion World を使う。上と同じ理由)."""
+    res = _classify("DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE AWAKENED PULSE",
+                    "SON GOKU", "017", [], monkeypatch)
     assert res["status"] == "GAP"
+
+
+def test_sdbh_never_reaches_review(monkeypatch):
+    """★SDBH は REVIEW/GAP に落とさず、入口で OUT-OF-SCOPE にする (2026-08-09).
+
+    SDBH は Fusion World と別ゲームで catalog 対象外。候補が散っていようが居まいが
+    「目視で確定して」と人に見せる価値が無い。REVIEW に混ぜると、
+    catalog へ「追加して」と依頼し続けることになる (921本スパイラルの発生源)。
+    """
+    rows = [("FB02-017", "Son Goku", "孫悟空"), ("SB01-017", "Son Goku (Great Ape)", "大猿孫悟空")]
+    for brand in ("DRAGON BALL SON GOKU HEROES UGM5",
+                  "SUPER DRAGON BALL HEROES METEOR MISSION 2"):
+        res = _classify(brand, "SON GOKU", "017", rows, monkeypatch)
+        assert res["status"] == "OUT-OF-SCOPE", f"SDBH が REVIEW に落ちている: {brand}"
+        assert "SDBH" in res["reason"]
