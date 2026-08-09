@@ -923,7 +923,18 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     except Exception as _e_art:
         print(f"  ⚠️ 絵柄判定モジュール読込失敗 → skip ({type(_e_art).__name__})")
         _art, _art_cache = None, None
+    # ★進捗を出す (2026-08-09)。ここは 1件ずつ eBay 画像取得 + 絵柄をAI照合するため
+    #   対象が多いと **10分近く無言**になる。実際それを「ハングした」と誤診し、
+    #   原因調査に時間を溶かした。動いていることが見えれば起きない誤解。
+    print(f"▶ 目視候補を組み立て中… 対象 {len(targets)}件 "
+          f"(1件ごとに 現物画像の取得 + 絵柄の照合。時間がかかります)", flush=True)
+    _scanned = 0
     for t in targets:
+        _scanned += 1
+        if _scanned % 10 == 0 or _scanned == len(targets):
+            print(f"   … {_scanned}/{len(targets)}件 走査 "
+                  f"(確証対象 {len(items)}件 / 除外 絵柄{n_art_diff}・既知{n_known}・"
+                  f"番号不一致{n_dropped}・使用中{n_used})", flush=True)
         iid = t["itemID"]
         if iid in skip_iids:
             continue
@@ -1058,11 +1069,19 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     # same/unsure も含めて判定結果は保存 (同じ組を再問合せしない)
     if _art_cache is not None:
         _art.save_cache(_art_cache)
+    # ★目視の残件を必ず出す (2026-08-09 ユーザー要望)。
+    #   limit で切ると「今回出す分」しか見えず、**あと何件残っているか分からない**。
+    #   45件残っているのに10件見て終わりだと、終わったつもりで放置される。
+    _ready = len(items)
     if limit is not None:
         items, item_targets = items[:limit], item_targets[:limit]
         for n, it in enumerate(items):
             it["idx"] = n
-        print(f"  (limit={limit} → {len(items)}件)")
+        _rest = _ready - len(items)
+        print(f"  (limit={limit} → 今回 {len(items)}件 / 目視対象 計 {_ready}件"
+              + (f" / **残り {_rest}件は次回以降**" if _rest else " / 残りなし") + ")")
+    else:
+        print(f"  目視対象 計 {_ready}件 (limit 指定なし=全部出す)")
     if not items:
         print("  確証対象なし。終了。")
         return {"confirmed": 0, "written_rows": 0, "added_urls": 0}
