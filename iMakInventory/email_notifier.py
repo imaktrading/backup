@@ -15,9 +15,29 @@ from __future__ import annotations
 
 import smtplib
 import sys
+import time
+from datetime import datetime
 from email.mime.text import MIMEText
 from email.utils import formatdate
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+#: 送信リトライの待機秒 (この後にもう 1 回だけ試して打ち切る = 計 3 回)
+SEND_RETRY_WAITS = [5, 15]
+#: 送信結果の証跡 (成功も失敗も残す = 「送ったつもり」を後から検証できる)
+MAIL_LOG_PATH = Path(__file__).resolve().parent / "logs" / "mail_send.log"
+
+
+def _log_mail_result(ok: bool, subject: str, attempts: int, error: Optional[str]) -> None:
+    """送信結果を追記 (fail-safe: ログが書けなくても送信処理は止めない)。"""
+    try:
+        MAIL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tail = "" if ok else f" | {error}"
+        with open(MAIL_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{stamp}] {'OK' if ok else 'NG'} | attempts={attempts} | {subject}{tail}\n")
+    except Exception:
+        pass
 
 
 def _summarize_result_text(result_text: str) -> str:
@@ -727,16 +747,28 @@ def send_cycle_report(cycle_log: Dict[str, Any]) -> Dict[str, Any]:
 
     address, app_password, to = cfg
 
-    try:
-        subject = _format_subject(cycle_log)
-        body = _format_body(cycle_log)
-        _send_via_gmail(address, app_password, to, subject, body)
-        return {"sent": True, "skipped_reason": None, "error": None}
-    except Exception as e:
-        msg = f"send failed: {type(e).__name__}: {e}"
-        # cycle を止めないため stderr に warning のみ
-        print(f"  [!] email_notifier: {msg}", file=sys.stderr)
-        return {"sent": False, "skipped_reason": None, "error": msg}
+    subject = _format_subject(cycle_log)
+    body = _format_body(cycle_log)
+    last_err = None
+    # ★ 2026-08-09: 1 回きりの送信だったため SMTP の瞬断で通知が落ちていた
+    #   (08-09 14:45 cycle が desktop alert file 送りになった)。公式監視くん側は
+    #   2026-06-19 に retry 化済み (koshiki_mail_silent_fail_fixed)。同じ方式に揃える。
+    for attempt, wait in enumerate(SEND_RETRY_WAITS + [None], start=1):
+        try:
+            _send_via_gmail(address, app_password, to, subject, body)
+            _log_mail_result(True, subject, attempts=attempt, error=None)
+            return {"sent": True, "skipped_reason": None, "error": None, "attempts": attempt}
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            print(f"  [!] email_notifier: send failed (attempt {attempt}): {last_err}",
+                  file=sys.stderr)
+            if wait is None:
+                break
+            time.sleep(wait)
+    msg = f"send failed after {len(SEND_RETRY_WAITS) + 1} attempts: {last_err}"
+    _log_mail_result(False, subject, attempts=len(SEND_RETRY_WAITS) + 1, error=last_err)
+    return {"sent": False, "skipped_reason": None, "error": msg,
+            "attempts": len(SEND_RETRY_WAITS) + 1}
 
 
 # ----------------------------------------------------------------------------

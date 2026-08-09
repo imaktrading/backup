@@ -12,6 +12,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_mail_log(tmp_path, monkeypatch):
+    """送信証跡ログ (2026-08-09 追加) をテストが本番ファイルに書かないよう隔離する。"""
+    import email_notifier as _en
+    monkeypatch.setattr(_en, "MAIL_LOG_PATH", tmp_path / "mail_send.log")
+    monkeypatch.setattr(_en, "SEND_RETRY_WAITS", [0, 0])
+    monkeypatch.setattr(_en.time, "sleep", lambda _s: None)
+
+
 def _success_log():
     return {
         "ts_start": "2026-05-09T17:30:02",

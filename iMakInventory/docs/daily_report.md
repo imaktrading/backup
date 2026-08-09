@@ -1838,6 +1838,31 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   現時点で ×8 到達はゼロ = 今回の変更で消える行も増える行も無い (= 挙動の後退なし)。数日後に
   ×8 到達した行から自動的に別枠へ移る。
 
+## 2026-08-09 — cycle レポートメールの送信を retry 化 (一発勝負だった) + 送信証跡ログ新設
+
+### 事象 — 08-09 14:45 LOW cycle の通知が desktop alert file 送りになった
+- 決定: `ALERT_iMakInventory_mail_failed_2026-08-09_14.txt` を triage。
+  **cycle 自体は正常** (`low` / status=success / processed 836 / 売切10・復活8 / err 1 /
+  upload Warning 7 + safe Failure 3 + **action-needed 0** / pending_stuck 0 / action_required 0)
+  = **取下げ漏れなし**。落ちたのは通知経路だけ。
+- 前後の cycle (13:30、17:30) では alert file が出ていない = **単発の SMTP 瞬断**。
+  実機で現在の送信を試したところ **attempts=1 で成功** = 経路は健全。
+
+### 真因 — `send_cycle_report` に retry が無く 1 回失敗で即諦めていた
+- 公式監視くん側は 2026-06-19 に retry + mail_send.log 化済み ([[koshiki_mail_silent_fail_fixed]])
+  だったが、**本体 cycle のメール経路は一発勝負のまま**残っていた (同型の穴の残り)。
+- 変更 [email_notifier.py](../email_notifier.py):
+  - `SEND_RETRY_WAITS=[5,15]` で **計 3 回**まで再送 (公式側と同方式)。
+  - `MAIL_LOG_PATH = logs/mail_send.log` に **成功も失敗も追記** (`OK/NG | attempts=N | 件名`)。
+    「送ったつもり」を後から検証できるようにする。ログ書込失敗は送信を止めない。
+  - 戻り値に `attempts` を追加。opt-in 未設定は従来どおり「失敗ではない」扱い (desktop alert を出さない)。
+- 併せて既存 `tests/test_email_notifier.py` に autouse fixture を追加し、
+  **テストが本番の mail_send.log を汚さない**ように隔離 (実際に汚染が発生していたため)。
+- 検証: [tests/test_email_send_retry.py](../tests/test_email_send_retry.py) **5 件**
+  (初回成功 / **1 回目瞬断 → 2 回目で届く** / 3 回とも失敗で sent=False + NG 記録 /
+  opt-in 未設定は失敗扱いしない / ログ書込不能でも送信は成功)。
+  offline **209** / 非-live **648** 全 pass。**live 実送で attempts=1 成功も確認**。
+
 ## 2026-08-08 — 公式監視くん「要対処 +281」は誤報 (基準の上書き) + 実在した取下げ漏れ 9 件を閉鎖
 
 ### ① アラート「前回 0 → 今回 281」は誤報。真の推移は 277→278→281 (+4/14h)
