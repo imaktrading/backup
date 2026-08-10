@@ -65,6 +65,32 @@ def _hoju():
     return _run([sys.executable, "-c", code]).strip()
 
 
+VIEWER_DISAGREEMENT = r"C:\dev\iMak_data\catalog\viewer_disagreement.log"
+
+
+def _viewer_disagreement(limit=5):
+    """catalog に実在するのに viewer が確定できなかった件 (= ②の宿題)。
+
+    ★2026-08-09: このログは **書く側が2箇所あるのに読む側がゼロ**だった。
+      残務にも現在地にも出ないので、出品がここで削られていることに誰も気づけない
+      (8/7 に実在 pre-check が入って以降、catalog 依頼も出なくなっていた)。
+      現在地に出す = 毎セッション必ず目に入る形にする。
+    """
+    try:
+        with open(VIEWER_DISAGREEMENT, encoding="utf-8", errors="replace") as f:
+            rows = [ln.rstrip("\n") for ln in f if ln.strip()]
+    except OSError:
+        return []
+    out = []
+    for ln in rows[-limit:]:
+        c = ln.split("\t")
+        if len(c) >= 4:
+            out.append(f"{c[0]}  {c[1]}  {c[2]}:{c[3]}")
+        else:
+            out.append(ln)
+    return [f"計 {len(rows)}件 (直近 {len(out)}件)"] + out
+
+
 def _commits():
     out = _run(["git", "log", "--since=midnight",
                 "--format=%h %ad %s", "--date=format:%H:%M"])
@@ -101,6 +127,13 @@ def main():
 
     print("\n## 3. 出品の数字\n")
     print("  " + _hoju())
+
+    vd = _viewer_disagreement()
+    if vd:
+        print("\n## 3b. ②の宿題 — catalog に在るのに viewer が確定できなかった件\n")
+        for ln in vd:
+            print("  " + ln)
+        print("  → catalog の欠落ではない。同定経路(viewer/adapter)を直す side")
 
     print("\n## 4. 今日の commit\n")
     cs = _commits()
