@@ -188,6 +188,31 @@ set_name = result["set_name"]  # eBay フィルタ値で取れる
 - 公式DB値を推測で改変
 - listing script 内でハードコード辞書を使う (Canonical Map 等は ebay_filter_map に集約)
 
+### 画像 (images) の役割分担 — 両面カード規約 (2026-08-10 制定)
+
+**catalog は表面 (front) のみ持つ。裏面 (back) は listing 側で規則導出する**。
+根拠: 公式 API (bandai-tcg-plus.com/user/card/{id} 等) に back URL 独立フィールドが無い。
+catalog の SSOT は「公式値のミラー」であり、規則導出値は SSOT ではない。
+
+適用対象:
+- **Dragon Ball SCG LEADER 型カード** — 両面。裏面 URL は front URL の
+  `..._f.png` を `..._b.png` に置換で導出可能 (公式 dbs-cardgame.com / bandai-tcg-plus.com
+  双方で規則性確認済)。
+- 将来他カードで両面が増えた場合も同方針 (規則が壊れた時に案再検討)。
+
+listing 側 (post_psa_review / CSV 生成器) の責務:
+- `images[0]` は表面 URL とみなす
+- LEADER 型の裏面表示が必要なら `_f→_b` 派生で URL を組立てる
+- catalog record を勝手に mutate してはならない (SSOT は公式のみ)
+
+例外条件 (将来 back を catalog に持たせるべきになる case):
+- 公式 API が back URL 独立フィールドを追加
+- LEADER 以外の両面カードが増え、URL 規則が壊れた場合
+
+Why (履歴):
+- 2026-08-09 依頼 `card_images_leader_back_and_pokemon_missing`: LEADER 裏面 catalog に
+  0件 → HQ 側で規則導出済と確認 → catalog に持たせず listing 側の派生で完結、と方針明文化。
+
 ---
 
 ## Phase 計画
