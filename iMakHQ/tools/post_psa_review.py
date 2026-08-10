@@ -1125,7 +1125,26 @@ def _catalog_pid_state(category: str, pid: str, db_path=None):
     images = (row[0] or "").strip()
     if not images or images in ("[]", "{}", "null"):
         return _PID_NO_IMAGE
+    if _all_images_are_dummy(images):
+        # 2026-08-09: dragonball は images 空が **0件** なのに目視できない。中身が
+        # `JP_FW_FB07-097_Leader_F_PARA_dummy_s1.png` のようなダミー画像で、
+        # 「画像がある」と見なすと毎回 目視枠を食う (bandai_tcg_plus 由来 2,754件中
+        # 1,026件 = 37% が _dummy 系)。空と同じ扱いにして catalog に返す。
+        return _PID_NO_IMAGE
     return _PID_OK
+
+
+def _all_images_are_dummy(images_raw: str) -> bool:
+    """images の URL が **全部** ダミーなら True (1枚でも実画像があれば False)。
+
+    ダミー = ファイル名に `_dummy` を含む (`..._F_dummy.png` / `..._PARA_dummy_s1.png`)。
+    fail-closed 側: 判定に迷ったら False (= 画像あり扱い) にして依頼を量産しない。
+    """
+    import re as _re
+    urls = _re.findall(r'https?://[^"\'\s,\]]+', images_raw or "")
+    if not urls:
+        return False
+    return all("_dummy" in u.rsplit("/", 1)[-1].lower() for u in urls)
 
 
 def _route_none_to_catalog(none_records: list[dict], missing_path=None,
