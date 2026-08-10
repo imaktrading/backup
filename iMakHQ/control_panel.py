@@ -5,6 +5,9 @@
 追加方法: SCRIPTS リストに項目を1つ追加するだけ。
 """
 import csv
+import json          # ★module レベルに無く、`import json as _json` だけだった。
+                     #   補URL 残件バッジの `json.loads` が NameError → 握り潰されて
+                     #   「(残件 取得できず)」と出続けていた (2026-08-10)。
 import os
 import re
 import sys
@@ -2300,6 +2303,26 @@ class ListingPanel:
         # ★補URL の残件をボタンに出す。UI を止めないよう別スレッドで後追い表示。
         self.root.after(300, self.refresh_hoju_badge)
 
+    _HOJU_BADGE_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "review_logs", "hoju_badge_cache.json")
+
+    def _hoju_badge_cache(self, save=None):
+        """残件ラベルの前回値。Sheets API が一時的に弾いた時に「不明」で潰さないため。
+
+        save を渡せば保存、渡さなければ読み出し (無ければ None)。
+        """
+        try:
+            if save is not None:
+                os.makedirs(os.path.dirname(self._HOJU_BADGE_CACHE), exist_ok=True)
+                with open(self._HOJU_BADGE_CACHE, "w", encoding="utf-8") as f:
+                    json.dump(save, f, ensure_ascii=False)
+                return None
+            with open(self._HOJU_BADGE_CACHE, encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) and d else None
+        except Exception:                                         # noqa: BLE001
+            return None
+
     def refresh_hoju_badge(self):
         """補URL の残件をボタンのラベルに出す (2026-08-09 ユーザー要望)。
 
@@ -2320,12 +2343,37 @@ class ListingPanel:
             "print(json.dumps(H.count_workload()))"
             % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
         )
+        # ★2026-08-10: 「(残件 取得できず)」とだけ出て **理由が分からない**状態だった。
+        #   例外を握り潰していたので、原因が exit code なのか JSON なのか判別できない。
+        #   → 理由を短くラベルに出し、全文は log に流す。1回だけ retry する
+        #     (起動直後は他の集計と Sheets API が競合して弾かれることがあるため)。
+        err_reason = ""
+        w = None
+        for attempt in (1, 2):
+            try:
+                r = subprocess.run([sys.executable, "-X", "utf8", "-c", code],
+                                   capture_output=True, text=True, encoding="utf-8",
+                                   errors="replace", timeout=180,
+                                   env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+                out = (r.stdout or "").strip()
+                if r.returncode != 0 or not out:
+                    tail = (r.stderr or "").strip().splitlines()
+                    err_reason = (tail[-1][:60] if tail else f"exit={r.returncode} 出力なし")
+                    raise RuntimeError(err_reason)
+                w = json.loads(out.splitlines()[-1])
+                err_reason = ""
+                break
+            except subprocess.TimeoutExpired:
+                err_reason = "180秒でタイムアウト"
+            except json.JSONDecodeError:
+                err_reason = "JSON として読めない出力"
+            except Exception as e:                                # noqa: BLE001
+                err_reason = err_reason or f"{type(e).__name__}: {e}"[:60]
+            if attempt == 1:
+                time.sleep(2)                                     # 競合していれば2秒で解ける
         try:
-            r = subprocess.run([sys.executable, "-X", "utf8", "-c", code],
-                               capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=180,
-                               env=dict(os.environ, PYTHONIOENCODING="utf-8"))
-            w = json.loads((r.stdout or "").strip().splitlines()[-1])
+            if w is None:
+                raise RuntimeError(err_reason or "不明")
             tot = w["targets"]
             # ★2026-08-09: **押したら何件できるか**を出す。母数を出してはいけない。
             #   直前まで「目視待ち32件」と出して実際に出るのは3件だった (足切り8段を
@@ -2340,10 +2388,22 @@ class ListingPanel:
             if cf["unjudged"]:
                 c_txt += "\n※絵柄が未判定 %s件 (押すと判定)" % cf["unjudged"]
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt}
-        except Exception:                                         # noqa: BLE001
+        except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
-            by_kind = {"hoju_search": "\n(残件 取得できず)",
-                       "hoju_confirm": "\n(残件 取得できず)"}
+            # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。
+            why = err_reason or f"{type(e).__name__}"
+            cached = self._hoju_badge_cache()
+            if cached:
+                by_kind = {k: v + "\n※前回値" for k, v in cached.items()}
+            else:
+                msg = f"\n(残件 取得できず: {why[:40]})"
+                by_kind = {"hoju_search": msg, "hoju_confirm": msg}
+            try:
+                self.append_log(f"⚠️ 補URL 残件の取得に失敗: {why}\n")
+            except Exception:                                     # noqa: BLE001
+                pass
+        else:
+            self._hoju_badge_cache(by_kind)
         for b, base, kind in self._hoju_btns:
             try:
                 b.config(text=base + by_kind.get(kind, ""))
