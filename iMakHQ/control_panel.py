@@ -401,6 +401,30 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         _pre_rows, _pre_header = [], []
         append_log_func(f"\n(live重複KEY書込: 事前読込失敗 skip: {type(_e_pre).__name__})\n")
 
+    # Step 4-pre: live cache の新鮮さを **除外の前に** 保証する (2026-08-09)。
+    # 重複くん excluder は cache が 6h より古いと「[FATAL] 判定不能 → CSV 触らず入稿停止」で
+    # 除外を丸ごと skip する。cache を取り直す担当が後段の dup_guard しか居なかったため、
+    # 「excluder は素通り → 重複は後段が拾えた時だけ消える」順序になっていた
+    # (2026-08-09 実測: age=23.7h で excluder skip、重複2件は dup_guard が辛うじて物理除外)。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ live cache の鮮度確保 (除外の前に = excluder を素通りさせない)\n")
+    append_log_func("======================================================================\n")
+    try:
+        _dgp = os.path.join(WORKSPACE, "iMakHQ", "tools", "dup_guard.py")
+        r = subprocess.run([sys.executable, _dgp, "--refresh-cache"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=300, env=env)
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(
+                "\n⚠️ live cache を取り直せなかった → この後の重複除外は判定不能で skip される\n"
+                "   (入稿前に重複が残っていないか目視確認すること)\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ live cache 鮮度確保 失敗(続行): {type(e).__name__}: {e}\n")
+
     # Step 4a: 物理除外 (= Phase 1g、 真の重複 row を CSV から削除)
     append_log_func("\n======================================================================\n")
     append_log_func("▶ 重複くん dedupe_excluder ((KEY1, KEY2) tuple 物理除外)\n")

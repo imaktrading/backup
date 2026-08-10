@@ -836,6 +836,17 @@ def main():
     except Exception:
         pass
     args = sys.argv[1:]
+    if "--refresh-cache" in args:
+        # 入稿パイプラインの **先頭** で live cache の新鮮さを保証するためのモード
+        # (2026-08-09)。重複くん excluder は cache が 6h より古いと
+        # 「[FATAL] 判定不能 → CSV 触らず入稿停止」で **除外を丸ごと skip** する。
+        # 従来は cache を取り直すのが後段の dup_guard だけだったため、
+        # 「excluder は素通り・dup_guard がたまたま拾う」順序になっていた
+        # (2026-08-09 実測: age=23.7h で excluder が skip、重複2件は後段で辛うじて除外)。
+        _t, _s, ok = ensure_fresh_live_cache()
+        print(f"  live cache: {'最新' if ok else '⚠️ 取り直せず(古いまま)'}"
+              f" / {len(_t or {})} 件")
+        return 0 if ok else 2
     if "--audit" in args:
         audit(refresh_titles="--no-refresh" not in args)
     elif "--pre-upload" in args:
