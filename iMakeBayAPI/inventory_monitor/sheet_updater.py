@@ -173,7 +173,7 @@ def read_main_active_rows(sh, supplier_filter: str = "all") -> list:
 
     Args:
         supplier_filter: "uniqlo" / "montbell" / "amazon" / "gu" / "workman" /
-                         "graniph" / "all" (対応仕入元のみ)。
+                         "graniph" / "zozo" / "all" (対応仕入元のみ)。
                          対応ドメイン以外は "other" 扱いで silent drop されるが、
                          drop した行は _last_unsupported_rows に記録され、
                          get_last_unsupported_rows() で取得できる。
@@ -213,6 +213,10 @@ def read_main_active_rows(sh, supplier_filter: str = "all") -> list:
             # 2026-08-08 追加。graniph.jp は DNS 解決不能 (実機確認)、www.graniph.com のみ 200。
             # 部分一致でよい (既存 uniqlo.com 判定と同形)。
             supplier = "graniph"
+        elif "zozo.jp" in domain:
+            # 2026-08-10 追加 (窓口 [IMPLEMENT-GO]). zozo.jp/shop/<shop>/goods/<id>/?did=<sku>
+            # 非headless + 専用 profile 必須。詳細は zozo_scraper.py の module docstring 参照。
+            supplier = "zozo"
         else:
             supplier = "other"
 

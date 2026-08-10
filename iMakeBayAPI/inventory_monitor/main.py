@@ -51,6 +51,7 @@ from gu_scraper import fetch_product_inventory as fetch_gu  # noqa: E402
 from workman_scraper import fetch_product_inventory as fetch_workman  # noqa: E402
 from montbell_scraper import fetch_product_inventory as fetch_montbell  # noqa: E402
 from graniph_scraper import fetch_product_inventory as fetch_graniph  # noqa: E402
+from zozo_scraper import fetch_product_inventory as fetch_zozo  # noqa: E402
 from ebay_sku_fetcher import get_skus_for_listing   # noqa: E402
 from sheet_updater import (                          # noqa: E402
     open_sheet,
@@ -153,6 +154,12 @@ def fetch_supplier_inventory(supplier: str, url: str, title: str) -> Optional[di
     elif supplier == "graniph":
         # graniph 公式 (2026-08-08 追加). 1 URL = 1色 × N サイズ (uniqlo と同型)
         return fetch_graniph(url)
+    elif supplier == "zozo":
+        # ZOZO (2026-08-10 追加、窓口 [IMPLEMENT-GO]). 1 URL = 色×サイズの全 variation。
+        # ★ 非headless 固定 + ZOZO 専用 profile (mercari profile 共有禁止)。
+        #    PreOrder は variation 単位で excluded=True + in_stock=False にする
+        #    (in_stock=False で needs_action 判定は既存経路に乗る)。
+        return fetch_zozo(url)
     else:
         raise ValueError(f"未対応 supplier: {supplier}")
 
@@ -628,7 +635,7 @@ def main():
     parser = argparse.ArgumentParser(description="仕入元在庫監視 (Phase 1+2: UNIQLO + montbell)")
     parser.add_argument("--listing", help="特定 listing ID のみ処理")
     parser.add_argument("--supplier",
-                        choices=["all", "uniqlo", "gu", "workman", "montbell", "amazon", "graniph"],
+                        choices=["all", "uniqlo", "gu", "workman", "montbell", "amazon", "graniph", "zozo"],
                         default="all",
                         help="特定仕入元のみ処理 (default: all)")
     parser.add_argument("--dry-run", action="store_true", help="スプシ書込なし")
