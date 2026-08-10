@@ -726,6 +726,33 @@ def canonical_pid_for_cert(cert) -> str:
     return (rec.get("product_id") or "").strip()
 
 
+# ---------------------------------------------------------------------------
+# 禁止ワードの照合 (2026-08-09)
+#
+# ★ここに置く理由: 生成側 (psa_to_csv) は **単語境界**で照合していたのに、検査側
+#   (各カテゴリの check_csv) は素の `in` = **部分一致**だった。単語リストだけコピーして
+#   照合ルールをコピーしなかったのが原因。
+#   実害: "Shenron" の中の "nr" に反応して、¥79,000 / $799 の Dragon Ball が
+#   「禁止ワード 'nr'」で出品除外された (2026-08-09 の入稿。Shenron は DBSCG 頻出なので
+#   直すまで永久に出品されない状態だった)。
+#   4カテゴリが同じ間違いをしていたので、**照合そのものを1本化**する。
+def banned_title_words_in(title: str, banned_words) -> list:
+    """タイトルに含まれる禁止ワードを返す (単語境界・大小無視)。純関数。
+
+    境界は英数字で判定するので "l@@k" や "gem-mt" のような記号入りもそのまま扱える。
+    "Shenron" は "nr" に一致しない / "NR" 単独や "Near Mint" の "mint" は一致する。
+    """
+    t = str(title or "")
+    hits = []
+    for w in banned_words or []:
+        if not w:
+            continue
+        pat = r'(?i)(?<![A-Za-z0-9])' + re.escape(str(w)) + r'(?![A-Za-z0-9])'
+        if re.search(pat, t):
+            hits.append(w)
+    return hits
+
+
 def get_shipping_policy_name(price_usd: float, category: str) -> str:
     """V6 / V5 / Free モード別に Shipping Profile 名を返す (listing scripts 共通).
 

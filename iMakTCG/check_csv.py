@@ -41,6 +41,22 @@ BANNED_TITLE_WORDS = [
     "mint", "graded", "l@@k", "look", "wow", "nr",
 ]
 
+
+def _banned_title_words_in(title, words):
+    """禁止ワード照合。**定義は listing_common が SSOT** (単語境界・大小無視)。
+
+    ここで再実装しない。2026-08-09: 4カテゴリの check_csv が素の `in` (部分一致) で
+    照合していて "Shenron" の "nr" に反応していた。import 不能時も **部分一致には戻さない**。
+    """
+    import os as _o
+    import sys as _s
+    _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _p not in _s.path:
+        _s.path.insert(0, _p)
+    from listing_common import banned_title_words_in
+    return banned_title_words_in(title, words)
+
+
 # 必須Item Specifics（空欄だと品質低下）
 REQUIRED_SPECIFICS = ["C:Game", "C:Set", "C:Card Name", "C:Character", "C:Rarity"]
 
@@ -384,10 +400,11 @@ def validate_row(row, row_idx):
     if not title.startswith("PSA 10"):
         issues.append(("ERROR", "タイトルが 'PSA 10' で始まっていない"))
 
-    title_lower = title.lower()
-    for banned in BANNED_TITLE_WORDS:
-        if banned in title_lower:
-            issues.append(("ERROR", f"禁止ワード '{banned}' がタイトルに含まれている"))
+    # ★照合は listing_common に1本化 (2026-08-09)。素の `in` = 部分一致だったため
+    #   "Shenron" の中の "nr" に反応し、$799 の Dragon Ball を誤って出品除外していた。
+    #   生成 (psa_to_csv) は元から単語境界。リストだけ同期して照合ルールがズレていた。
+    for banned in _banned_title_words_in(title, BANNED_TITLE_WORDS):
+        issues.append(("ERROR", f"禁止ワード '{banned}' がタイトルに含まれている"))
 
     # 単語重複チェック
     words = title.lower().split()

@@ -38,6 +38,21 @@ BANNED_TITLE_WORDS = [
     "mint", "graded", "l@@k", "look", "wow", "nr",
 ]
 
+
+def _banned_title_words_in(title, words):
+    """禁止ワード照合。**定義は listing_common が SSOT** (単語境界・大小無視)。
+
+    ここで再実装しない (2026-08-09: 素の `in` = 部分一致で "Shenron" の "nr" に反応し、
+    TCG で $799 の出品が誤除外された。同じ照合を4カテゴリが持っていた)。
+    """
+    import os as _o
+    import sys as _s
+    _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _p not in _s.path:
+        _s.path.insert(0, _p)
+    from listing_common import banned_title_words_in
+    return banned_title_words_in(title, words)
+
 # 必須Item Specifics（空欄だと品質低下）
 REQUIRED_SPECIFICS = ["C:Brand", "C:Character", "C:Type", "C:Franchise"]
 # あると望ましいItem Specifics
@@ -342,10 +357,9 @@ def validate_row(row, row_idx):
     elif len(title) < IDEAL_TITLE_MIN:
         issues.append(("WARN", f"タイトル{len(title)}字 < 推奨{IDEAL_TITLE_MIN}字（キーワード不足の可能性）"))
 
-    title_lower = title.lower()
-    for banned in BANNED_TITLE_WORDS:
-        if banned in title_lower:
-            issues.append(("ERROR", f"禁止ワード '{banned}' がタイトルに含まれている"))
+    # ★照合は listing_common に1本化 (2026-08-09)。部分一致だと "Shenron" の "nr" 等に反応する。
+    for banned in _banned_title_words_in(title, BANNED_TITLE_WORDS):
+        issues.append(("ERROR", f"禁止ワード '{banned}' がタイトルに含まれている"))
 
     # 単語重複チェック
     words = title.lower().split()
