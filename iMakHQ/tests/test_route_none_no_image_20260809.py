@@ -113,26 +113,27 @@ def test_schema_without_images_column_does_not_add_requests(tmp_path):
         "images 列が無い schema で判定不能→依頼を量産してはいけない"
 
 
-# ===== dummy 画像 (2026-08-09 dragonball) =====
-# dragonball は images 空が 0件なのに目視できない。中身が
-# `JP_FW_FB07-097_Leader_F_PARA_dummy_s1.png` のようなダミー画像で、
-# 「画像がある」と見なすと毎回 目視枠を食う (dragonball 5,577件中 2,750件 = 49% が該当)。
-
-def test_all_dummy_images_count_as_no_image():
-    assert p._all_images_are_dummy(
-        '["https://files.bandai-tcg-plus.com/card_image/DBFW-JA/FB01/'
-        'JP_FW_FB01-071_Leader_F_PARA_dummy.png"]') is True
+# ===== 2026-08-10 撤回: `_dummy` を「画像なし」扱いにした判定は誤りだった =====
+# `_dummy` は bandai のファイル名規則で、中身は実画像 (Advisor が実取得して確認。
+# 4枚ともバイト数が違う = 共通 placeholder ではない)。そのまま入れていれば dragonball
+# 5,577件のうち 2,750件 (49.3%) を目視対象から外していた。
+# 教訓: ファイル名パターンだけで中身を判定しない (URL を開いて確かめる)。
 
 
-def test_one_real_image_is_enough():
-    """1枚でも実画像が在れば目視できる → 依頼を出さない (量産しない)。"""
-    assert p._all_images_are_dummy(
-        '["https://x/JP_FW_FB07-097_Leader_F_dummy_s.png",'
-        ' "https://www.dbs-cardgame.com/fw/images/cards/card/jp/FB07-097_f_p1.webp"]') is False
-
-
-def test_non_url_image_entry_is_not_treated_as_dummy():
-    """ローカルパス等 URL でない値は判定不能 → 画像あり側に倒す (fail-closed)。"""
-    assert p._all_images_are_dummy(
-        '["C:/dev/iMak_data/catalog/_don_images/DON-BASIC-001.png"]') is False
-    assert p._all_images_are_dummy("") is False
+def test_dummy_filename_is_not_treated_as_missing_image():
+    """ファイル名に `_dummy` が入っていても画像あり扱いのままであること (再発防止)。"""
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+    d = Path(tempfile.mkdtemp())
+    db = d / "products.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, category TEXT,"
+                 " product_id TEXT, name TEXT, images TEXT)")
+    conn.execute("INSERT INTO products(category,product_id,name,images) VALUES(?,?,?,?)",
+                 ("dragonball_scg", "FB01-071_PARA", "孫悟飯:少年期",
+                  '["https://files.bandai-tcg-plus.com/card_image/DBFW-JA/FB01/'
+                  'JP_FW_FB01-071_Leader_F_PARA_dummy.png"]'))
+    conn.commit(); conn.close()
+    assert p._catalog_pid_state("dragonball_scg", "FB01-071_PARA", db_path=db) is p._PID_OK,         "`_dummy` を placeholder と誤判定している (dragonball の 49.3% を目視から外す事故)"
+    assert not hasattr(p, "_all_images_are_dummy"),         "撤回した判定関数が復活している"
