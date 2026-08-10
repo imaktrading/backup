@@ -1255,6 +1255,45 @@ def lookup_dragonball(
                 if verbose:
                     print(f"    🎯 iMakCatalog (DBSCG) hit (full pid in card_number): {pid}")
                 return _to_legacy_dict_dragonball(record)
+
+        # 2026-08-10 (窓口GO §案C+Q2: chase_lookup_dragonball_dummy_s1_response.md):
+        #   明示 suffix 候補で hit しなかった時、prefix 検索で card_number 家族の全 variant を
+        #   列挙する。bandai_tcg_plus 由来の `_dummy_s1` / `_PARA_dummy_s1` / `_SB02_*` 系
+        #   suffix (現時点 bandai_tcg_plus 2,754件中 1,026件=37%) を CSV 生成器側の "知識" として
+        #   持たせないためのプレフィックス検索アプローチ。
+        #   Q2 対応 (sibling-based subject verification):
+        #     dummy 系 record は name='Dragon Ball' (product 名) で character 名でないため、
+        #     _record_name_matches_subject 単独では fail-closed で reject される。
+        #     ★同 card_number の siblings のいずれかが subject と一致すれば、family 全体を
+        #      同キャラと見なす (fail-closed を維持しつつ dummy 系を救出)。
+        family_pid_prefix = card_number + "_"
+        siblings = api.search_prefix(DRAGONBALL_CATEGORY, family_pid_prefix)
+        if siblings:
+            # sibling gate: subject に有意 token があるなら、siblings のうち少なくとも 1件が
+            # subject と一致することを要求 (fail-closed)。subject 空の場合は
+            # _record_name_matches_subject が全 True を返すので trivially pass.
+            family_verified = any(
+                _record_name_matches_subject(r, subject) for r in siblings
+            )
+            if family_verified:
+                # 優先順序:
+                #   (a) subject に直接 match するもの (dummy 系より正典 record 優先)
+                #   (b) dbfw_official > bandai_tcg_plus (rarity 保持の可能性大)
+                #   (c) _PARA 保持 (alt-art / rarity 情報あり)
+                #   (d) suffix depth の浅い順 (base 側)
+                #   (e) product_id alphabetical (安定 tiebreak)
+                def _priority(r: dict) -> tuple:
+                    pid = r["product_id"]
+                    direct = 0 if _record_name_matches_subject(r, subject) else 1
+                    source_rank = 0 if r.get("source") == "dbfw_official" else 1
+                    para_rank = 0 if "_PARA" in pid else 1
+                    depth = pid.count("_")
+                    return (direct, source_rank, para_rank, depth, pid)
+                best = sorted(siblings, key=_priority)[0]
+                if verbose:
+                    print(f"    🎯 iMakCatalog (DBSCG) hit (prefix search "
+                          f"{len(siblings)} siblings): {best['product_id']}")
+                return _to_legacy_dict_dragonball(best)
         # fall through to normal logic for further attempts
 
     set_code = extract_set_code_from_brand_dragonball(brand)

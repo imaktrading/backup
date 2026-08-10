@@ -107,6 +107,28 @@ def search(category: str, name: str, limit: int = 10) -> list[dict]:
         conn.close()
 
 
+def search_prefix(category: str, prefix: str, limit: int = 100) -> list[dict]:
+    """product_id が prefix で始まる record を全件返す (SSOT source を跨いだ variant 列挙用).
+
+    用途: bandai_tcg_plus/dbfw_official 両ソースにまたがる同一 card_number 系の全 variant を
+    lookup 側で列挙するとき (2026-08-10 dragonball dummy_s1 案C, 窓口GO).
+    副作用: LIKE 検索なので prefix 内の '%' / '_' メタ文字は escape しない (呼び出し側は
+    正規化された prefix を渡す).
+    """
+    if not prefix:
+        return []
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM products WHERE category = ? AND product_id LIKE ? "
+            "ORDER BY product_id LIMIT ?",
+            (category, f"{prefix}%", limit),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def upsert(
     category: str,
     product_id: str,
