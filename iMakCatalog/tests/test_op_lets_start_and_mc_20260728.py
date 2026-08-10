@@ -78,8 +78,17 @@ class TestDbscgVariantRarityBackfill(unittest.TestCase):
         self.assertEqual(rec["specs"].get("rarity_ebay"), "Super Rare")
 
     def test_number_divergence_stays_empty(self):
-        """FB07-025 base=Omega Shenron に sibling(Syn Shenron)の rarity を焼かない (name-guard)."""
+        """FB07-025 base=Omega Shenron に sibling(Syn Shenron)の rarity を name-guard 経由で焼かない.
+
+        ★2026-08-10 更新: FB07-025 は LEADER のため 2026-08-10 leader backfill (rule=LEADER→'L')
+        で rarity='L' / 'L★' が入る。ここでのテスト意図は
+        「sibling name-guard 経由 (spec_source='..._nameguard_...') では入らないこと」の確定。
+        LEADER の card_type→rarity 派生は sibling 参照しないので name-guard の safety に影響しない。
+        """
         from iMakCatalog import api
         for pid in ("FB07-025", "FB07-025_p1"):
             rec = api.lookup(category="dragonball_scg", product_id=pid)
-            self.assertFalse(rec["specs"].get("rarity"), pid)
+            spec_source = (rec["specs"].get("spec_source") or "")
+            self.assertNotIn("nameguard", spec_source, pid)
+            self.assertNotIn(
+                "dbscg_variant_rarity_nameguard_backfill_20260728", spec_source, pid)

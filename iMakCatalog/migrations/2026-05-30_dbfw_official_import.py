@@ -79,15 +79,57 @@ def _classify_variant(card_id: str, get_info: str) -> str | None:
     return None
 
 
+# 2026-08-10: LEADER rarity 導出の denylist (要 base) — 兄弟が L★ しか持たず 'L' 裏付け無し。
+# 依頼: requests/2026-08-09_audit_catalog_fix_tcg_response.md §FP-030 例外。
+# FP-030 は公式判断待ち。denylist に居る限り base LEADER rarity は空のまま (fail-closed)。
+LEADER_BASE_DERIVE_DENYLIST: frozenset[str] = frozenset({"FP-030"})
+
+
+def _derive_leader_rarity(card_id: str, specs: dict) -> tuple[str, str] | None:
+    """card_type='LEADER' で rarity が空なら (rarity, rarity_ebay) を導出.
+
+    依頼: requests/2026-08-09_audit_catalog_fix_tcg_response.md 窓口GO §B (再発防止 guard)。
+    dbfw 公式 detail は LEADER カードに rarity 欄を出さない仕様。取込時に導出しないと
+    2026-07-21 L→'Leader' 決定後の残置分が繰り返し発生する。
+      - alt_art (variant_type='alt_art') → ('L★','L★')  ; ★-strip 経由で SCR + Alt Art
+      - base (variant_type 無)          → ('L','Leader')
+      - denylist に居る base は None (= 導出しない、fail-closed)
+    """
+    if specs.get("card_type") != "LEADER":
+        return None
+    if specs.get("rarity") or specs.get("rarity_ebay"):
+        return None
+    vt = specs.get("variant_type")
+    if vt == "alt_art":
+        return ("L★", "L★")
+    # base
+    base_pid = card_id.split("_")[0] if card_id else ""
+    if base_pid in LEADER_BASE_DERIVE_DENYLIST:
+        return None
+    if vt in (None, "", "parallel"):
+        # parallel は "_pN suffix なし" のはずだが念のため base 扱いにするのは _classify_variant
+        # が返した variant_type=None のケースのみ。alt_art/promo/limited_product は上で処理済。
+        if vt is not None:
+            return None
+        return ("L", "Leader")
+    return None
+
+
 def _build_specs(entry, existing_specs):
     specs = dict(existing_specs) if existing_specs else {}
     for src_key, dst_key in FIELD_MAP.items():
         v = entry.get(src_key)
         if v and v != "-":
             specs[dst_key] = v
-    vt = _classify_variant(entry.get("card_id", ""), entry.get("入手情報", ""))
+    card_id = entry.get("card_id", "") or ""
+    vt = _classify_variant(card_id, entry.get("入手情報", ""))
     if vt and specs.get("variant_type") in (None, "parallel"):
         specs["variant_type"] = vt
+    # 2026-08-10 guard: LEADER rarity 空を派生 (窓口GO §B)
+    derived = _derive_leader_rarity(card_id, specs)
+    if derived:
+        specs["rarity"], specs["rarity_ebay"] = derived
+        specs["spec_source"] = "dbfw_leader_rarity_derived_on_ingest"
     return specs
 
 

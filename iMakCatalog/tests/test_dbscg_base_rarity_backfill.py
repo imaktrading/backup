@@ -36,11 +36,20 @@ class TestDbscgBaseRarityBackfill(unittest.TestCase):
 
     def test_number_divergence_not_backfilled(self):
         """FB07-025 base=Omega Shenron に _dummy_s1=Syn Shenron の rarity を注入しない
-        (同番だが別カード=番号分裂。名前ガードで弾く)."""
+        (同番だが別カード=番号分裂。名前ガードで弾く).
+
+        ★2026-08-10 更新: FB07-025 は LEADER のため 2026-08-10 leader backfill (rule=LEADER→'L')
+        で spec_source が入る。ここでのテスト意図は
+        「7/21 の name-guard sibling-backfill (spec_source='..._nameguard_...') が発火していないこと」。
+        LEADER 直接派生 (spec_source='dbscg_leader_rarity_backfill_20260810') は許容。
+        """
         rec = api.lookup(category=CAT, product_id="FB07-025")
         self.assertIsNotNone(rec)
-        # base の name は Omega Shenron 系。backfill provenance が付いていないこと。
-        self.assertNotIn("backfill", rec["specs"].get("spec_source", "") or "")
+        spec_source = (rec["specs"].get("spec_source") or "")
+        # name-guard sibling-backfill が発火していないこと (名前分裂は今も安全)
+        self.assertNotIn("nameguard", spec_source)
+        self.assertNotIn("dbscg_base_rarity_backfill_20260721", spec_source)
+        self.assertNotIn("dbscg_variant_rarity_nameguard_backfill_20260728", spec_source)
 
     def test_no_sibling_stays_empty_failclosed(self):
         """rarity を持つ bandai 兄弟が無い base は空のまま (fail-closed)."""
