@@ -349,6 +349,20 @@ def _build_implement_prompt(wt: str, responses: list) -> str:
     )
 
 
+def _active_session(wt: str):
+    """その worktree で稼働中の Claude セッション (対話含む)。判定不能なら None.
+
+    ★fail-open 側に倒す: beacon が読めない/壊れている時に「居る」と答えると、
+      全 worktree の dispatch が黙って止まる (2026-07-29 の孤児 lock で3時間全停止した前例)。
+      二重起動の害より「誰も動かない」害の方が大きい。
+    """
+    try:
+        import session_beacon
+        return session_beacon.active_session(wt)
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
 def _dispatch(wt: str, dry_run: bool, mode: str = "draft") -> dict:
     label = TARGETS[wt][2]
     if mode == "implement":
@@ -371,6 +385,16 @@ def _dispatch(wt: str, dry_run: bool, mode: str = "draft") -> dict:
     if not os.path.isdir(workdir):
         print(f"[{label}] ⚠️ 作業ディレクトリ不在: {workdir} → skip")
         return {"worktree": wt, "status": "skip-nodir", "n": len(mine)}
+
+    # ★2026-08-10: **人が開いた対話セッション**が同じ worktree に居るなら headless を立てない。
+    #   dispatch_<wt>.lock は headless 同士しか見ておらず、対話セッションは lock を取らないため
+    #   hub から見ると「誰も居ない」。実害: catalog で 12:09〜 対話が処理中の裏で headless が
+    #   12:35-37 に3コミットし、二重作業 + 誤コミットを誘発した (CLAUDE.md「1 worktree 1 branch」抵触)。
+    live = _active_session(wt)
+    if live:
+        print(f"[{label}] 対話セッションが稼働中 (pid={live.get('pid')} / {live.get('at')}) "
+              f"→ headless を立てない")
+        return {"worktree": wt, "status": "skip-session-live", "n": len(mine)}
 
     if dry_run:
         print(f"[{label}] dry-run: {len(mine)}件 を投げる予定 (cwd={workdir})")
