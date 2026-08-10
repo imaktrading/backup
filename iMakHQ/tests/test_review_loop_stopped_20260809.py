@@ -251,3 +251,79 @@ def test_catalog_lookup_restores_stdout():
     assert sys.stdout is before
     R._catalog_lookup_expected("X", "Y", "1", "")          # 早期 return 経路
     assert sys.stdout is before
+
+
+# ------------------------------------------------------------------ 候補を絞る (2026-08-10)
+
+def _make_dbscg_db(tmp_path):
+    """dragonball の実データ縮小版: 同一キャラ (Shenron) が別番号にも居る."""
+    import sqlite3
+    db = tmp_path / "cat.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE products (category TEXT, product_id TEXT, name_en TEXT, images TEXT)")
+    rows = [("dragonball_scg", "FB07-097", "Shenron", '["http://x/a.png"]'),
+            ("dragonball_scg", "FB07-097_p1", "Shenron", '["http://x/b.png"]'),
+            ("dragonball_scg", "FB07-097_PARA_dummy_s1", "Shenron", '["http://x/c.png"]')]
+    # 同じキャラだが別番号 = broad 検索だと混ざってくる側
+    rows += [("dragonball_scg", f"FB07-{n:03d}", "Shenron", '["http://x/z.png"]') for n in range(1, 40)]
+    conn.executemany("INSERT INTO products VALUES (?,?,?,?)", rows)
+    conn.commit(); conn.close()
+    return db
+
+
+def test_card_number_with_set_prefix_pinpoints(tmp_path):
+    """★PSA の CardNumber がセット込み ('FB07-097') でも番号一致が効く.
+
+    2026-08-10 実測: `%-FB07-097` は product_id が 'FB07-097...' なので**絶対に当たらず**、
+    dragonball は毎回 broad 検索に落ちて関係ないカードが40件並んでいた
+    (cert158452540=50件 / cert158452539=40件)。人は選べず「該当なし」を押すしかない。
+    """
+    R = _load_review()
+    R.CATALOG_DB = _make_dbscg_db(tmp_path)
+    cands = [p for p, _ in R._get_candidates(
+        "dragonball_scg", None, "FB07-097", brand="DRAGON BALL SUPER CARD GAME JAPANESE",
+        expected_product_id="FB07-097_p1", subject="SHENRON ALTERNATE ART")]
+    assert cands, "候補が空"
+    assert all(c.startswith("FB07-097") for c in cands), f"別番号が混ざっている: {cands}"
+    assert len(cands) <= 5, f"候補が多すぎる: {len(cands)}件"
+
+
+def test_bare_card_number_still_pinpoints(tmp_path):
+    """One Piece / Pokemon の裸番号 ('049') 側は従来どおり効く (両方の形を受ける)."""
+    R = _load_review()
+    R.CATALOG_DB = _make_db_op(tmp_path)
+    cands = [p for p, _ in R._get_candidates(
+        "one_piece_tcg", None, "049", brand="ONE PIECE",
+        expected_product_id=None, subject="Sabo")]
+    assert cands[0] == "OP10-049", f"番号 pinpoint が壊れた: {cands[:5]}"
+
+
+def _make_db_op(tmp_path):
+    import sqlite3
+    db = tmp_path / "op.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE products (category TEXT, product_id TEXT, name_en TEXT, images TEXT)")
+    conn.executemany("INSERT INTO products VALUES (?,?,?,?)", [
+        ("one_piece_tcg", "OP10-049", "Sabo", '["http://x/1.png"]'),
+        ("one_piece_tcg", "OP03-001", "Sabo", '["http://x/2.png"]'),
+        ("one_piece_tcg", "OP01-001", "Monkey.D.Luffy", '["http://x/3.png"]'),
+    ])
+    conn.commit(); conn.close()
+    return db
+
+
+def test_rescue_window_is_capped_but_not_removed(tmp_path):
+    """expected 解決済でも救済窓は残す。ただし 40件は足さない.
+
+    救済の目的は 2026-06-26 の Boa Hancock PRB01 (auto-pick が別 base の正解変種を外す) なので
+    窓自体は要る。窓を 0 にすると別の取りこぼしが復活する。
+    """
+    R = _load_review()
+    R.CATALOG_DB = _make_dbscg_db(tmp_path)
+    assert 0 < R._CHAR_RESCUE_LIMIT < 40
+    # 番号一致が取れない subject では broad に落ちるが、窓の上限で止まる
+    cands = [p for p, _ in R._get_candidates(
+        "dragonball_scg", None, "", brand="DRAGON BALL SUPER CARD GAME JAPANESE",
+        expected_product_id="FB07-097_p1", subject="SHENRON ALTERNATE ART")]
+    assert len(cands) <= 3 + R._CHAR_RESCUE_LIMIT, f"救済窓が効いていない: {len(cands)}件"
+    assert any(c.startswith("FB07-097") for c in cands)

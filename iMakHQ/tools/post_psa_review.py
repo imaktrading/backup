@@ -140,6 +140,12 @@ def _extract_set_code(brand: str, category: str) -> str | None:
     return None
 
 
+# expected が解決している時に、キャラ名 broad 検索から足す上限。
+# 目的は「auto-pick が別 base の変種を外した時の救済」(2026-06-26 Boa Hancock PRB01) なので、
+# 窓は要る。ただし 40 だと本命が埋もれる。
+_CHAR_RESCUE_LIMIT = 12
+
+
 def _get_candidates(category: str, set_code: str | None, card_number: str | None,
                     brand: str = "", expected_product_id: str | None = None,
                     subject: str = "") -> list[tuple[str, str]]:
@@ -214,13 +220,25 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
             if toks:
                 like = " OR ".join(["name_en LIKE ?"] * len(toks))
                 base = f"SELECT DISTINCT product_id FROM products WHERE category=? AND ({like})"
-                # card_number があれば番号末尾一致で pinpoint (例 Sabo + -049 → OP10-049)
+                # card_number があれば番号一致で pinpoint (例 Sabo + -049 → OP10-049)
+                # ★2026-08-10: PSA の CardNumber は **カテゴリで形が違う**。
+                #   One Piece / Pokemon = 裸の番号 ("049") → `%-049` で当たる
+                #   dragonball / gundam = セット込みの完全 ID ("FB07-097") → `%-FB07-097` は
+                #   **絶対に当たらない** (product_id は 'FB07-097...' で先頭に '-' が無い)。
+                #   そのため dragonball は毎回この pinpoint が 0件 → 下の broad に落ち、
+                #   関係ないカードが 40件 並んでいた (実測 cert158452540=50件 / 158452539=40件)。
+                #   人はそこから選べず「該当なし」を押すしかない。両方の形を受ける。
                 if card_number:
-                    cur.execute(base + " AND product_id LIKE ? ORDER BY product_id LIMIT 40",
-                                [category] + [f"%{t}%" for t in toks] + [f"%-{card_number}"])
+                    cur.execute(base + " AND (product_id LIKE ? OR product_id LIKE ?)"
+                                       " ORDER BY product_id LIMIT 40",
+                                [category] + [f"%{t}%" for t in toks]
+                                + [f"%-{card_number}", f"{card_number}%"])
                     char_rows = cur.fetchall()
                 if not char_rows:  # 番号一致なし → キャラ名のみで広く
-                    cur.execute(base + " ORDER BY product_id LIMIT 40",
+                    # ★expected が既に解れている時、この broad は「取りこぼし救済」でしかない。
+                    #   40件足すと本命が埋もれて選べなくなるので窓を絞る (救済自体は残す)。
+                    lim = _CHAR_RESCUE_LIMIT if rows else 40
+                    cur.execute(base + f" ORDER BY product_id LIMIT {int(lim)}",
                                 [category] + [f"%{t}%" for t in toks])
                     char_rows = cur.fetchall()
             if char_rows:
@@ -1125,26 +1143,14 @@ def _catalog_pid_state(category: str, pid: str, db_path=None):
     images = (row[0] or "").strip()
     if not images or images in ("[]", "{}", "null"):
         return _PID_NO_IMAGE
-    if _all_images_are_dummy(images):
-        # 2026-08-09: dragonball は images 空が **0件** なのに目視できない。中身が
-        # `JP_FW_FB07-097_Leader_F_PARA_dummy_s1.png` のようなダミー画像で、
-        # 「画像がある」と見なすと毎回 目視枠を食う (bandai_tcg_plus 由来 2,754件中
-        # 1,026件 = 37% が _dummy 系)。空と同じ扱いにして catalog に返す。
-        return _PID_NO_IMAGE
+    # ★2026-08-10 撤回: ここに「URL のファイル名が全部 `_dummy` なら画像なし扱い」を
+    #   入れたが **誤り**だった。`_dummy` は bandai のファイル名規則で、中身は実画像。
+    #   Advisor が実取得して確認済 (4枚ともバイト数が違う = 共通 placeholder ではない。
+    #   EN_FW_FS09-16_Battle_SR_dummy_s1.png = Vegito / JP_FW_FB01-071_Leader_F_PARA_dummy.png
+    #   = 孫悟飯:少年期 が読める)。そのまま入れていれば dragonball 5,577件のうち
+    #   **2,750件 (49.3%) を目視対象から外す** ところだった。
+    #   教訓: ファイル名パターンだけで中身を判定しない (URL を開いて確かめる)。
     return _PID_OK
-
-
-def _all_images_are_dummy(images_raw: str) -> bool:
-    """images の URL が **全部** ダミーなら True (1枚でも実画像があれば False)。
-
-    ダミー = ファイル名に `_dummy` を含む (`..._F_dummy.png` / `..._PARA_dummy_s1.png`)。
-    fail-closed 側: 判定に迷ったら False (= 画像あり扱い) にして依頼を量産しない。
-    """
-    import re as _re
-    urls = _re.findall(r'https?://[^"\'\s,\]]+', images_raw or "")
-    if not urls:
-        return False
-    return all("_dummy" in u.rsplit("/", 1)[-1].lower() for u in urls)
 
 
 def _route_none_to_catalog(none_records: list[dict], missing_path=None,
