@@ -1,0 +1,28 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "tcg",
+      "item_id": "m81161788422",
+      "target_field": "catalog_request",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452540 DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE WISH FOR SHENRON [SHENRON ALTERNATE ART] #FB07-097 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 2
+  }
+}

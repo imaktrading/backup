@@ -1,0 +1,28 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "dragonball_scg",
+      "item_id": "cert158452539 DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE AWAKENED PULSE [SON GOHAN : CHILDHOOD ALTERNATE ART] #FB01-071 (auto候補FB01-071_PARA=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert151546667 POKEMON JAPANESE SUN & MOON ALTER GENESIS [ARCS/DLGA/PALKIA GX ALTER GENESIS-FA-HYPER] #112 (auto候補SM12-112=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 2
+  }
+}

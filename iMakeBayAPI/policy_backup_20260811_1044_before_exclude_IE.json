@@ -1,0 +1,2212 @@
+{
+ "EBAY_GB": [
+  {
+   "name": "Free / 9F00 / JP / Free/10-20d / 71FB649",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 10,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": true,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "259237585017"
+  },
+  {
+   "name": "Flat: UK_EconomyShippingFromOutside free, 7 wo (264551369017)",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "AD"
+     },
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "AL"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "AT"
+     },
+     {
+      "regionName": "BA"
+     },
+     {
+      "regionName": "BE"
+     },
+     {
+      "regionName": "BG"
+     },
+     {
+      "regionName": "BY"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "CH"
+     },
+     {
+      "regionName": "CY"
+     },
+     {
+      "regionName": "CZ"
+     },
+     {
+      "regionName": "DE"
+     },
+     {
+      "regionName": "DK"
+     },
+     {
+      "regionName": "EE"
+     },
+     {
+      "regionName": "ES"
+     },
+     {
+      "regionName": "FI"
+     },
+     {
+      "regionName": "FR"
+     },
+     {
+      "regionName": "GG"
+     },
+     {
+      "regionName": "GI"
+     },
+     {
+      "regionName": "GR"
+     },
+     {
+      "regionName": "HR"
+     },
+     {
+      "regionName": "HU"
+     },
+     {
+      "regionName": "IE"
+     },
+     {
+      "regionName": "IS"
+     },
+     {
+      "regionName": "IT"
+     },
+     {
+      "regionName": "JE"
+     },
+     {
+      "regionName": "LI"
+     },
+     {
+      "regionName": "LT"
+     },
+     {
+      "regionName": "LU"
+     },
+     {
+      "regionName": "LV"
+     },
+     {
+      "regionName": "MC"
+     },
+     {
+      "regionName": "MD"
+     },
+     {
+      "regionName": "ME"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "MK"
+     },
+     {
+      "regionName": "MT"
+     },
+     {
+      "regionName": "NL"
+     },
+     {
+      "regionName": "NO"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PL"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "PT"
+     },
+     {
+      "regionName": "RO"
+     },
+     {
+      "regionName": "RS"
+     },
+     {
+      "regionName": "SE"
+     },
+     {
+      "regionName": "SI"
+     },
+     {
+      "regionName": "SJ"
+     },
+     {
+      "regionName": "SK"
+     },
+     {
+      "regionName": "SM"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     },
+     {
+      "regionName": "UA"
+     },
+     {
+      "regionName": "VA"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": true,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264551369017"
+  },
+  {
+   "name": "Free / 6CBD / JP / 0-18 USD/4- / EB50D51",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_StandardShippingFromOutside",
+       "shippingCost": {
+        "value": "13.42",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "13.42",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_IntlTrackedPostage",
+       "shippingCost": {
+        "value": "13.42",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "13.42",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264686728017"
+  },
+  {
+   "name": "DDP-A-P16 / A7A7 / JP / 0-41.93 USD / 41EC398",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": true,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264686729017"
+  },
+  {
+   "name": "B819: Free / 12-20d / 30d return / 32.23 USD/1 / 4B5FFC7",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "24.03",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "24.03",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264686741017"
+  },
+  {
+   "name": "3E9B: Free / 4-12d / 30d return / 0-18 USD/4- / DB70864",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_StandardShippingFromOutside",
+       "shippingCost": {
+        "value": "13.42",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_IntlTrackedPostage",
+       "shippingCost": {
+        "value": "13.42",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264687254017"
+  },
+  {
+   "name": "D84D: Free / 12-20d / no return / 34.58 USD/1 / A5E1FC0",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "25.79",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "25.79",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264687333017"
+  },
+  {
+   "name": "74E8: Free / 12-20d / no return / 41.93 USD/1 / 57F1CD0",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "31.27",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "31.27",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264687382017"
+  },
+  {
+   "name": "5029: Free / 12-20d / 30d return / 93.39 USD/1 / 39E2AE8",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "69.64",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "69.64",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264687477017"
+  },
+  {
+   "name": "C9CF: Free / 12-20d / 30d return / 56.63 USD/1 / BA1F45B",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "42.23",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "42.23",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264688161017"
+  },
+  {
+   "name": "9EE4: Free / 12-20d / 30d return / 27.84 USD/1 / B9F8E91",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "20.77",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "20.77",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "264727614017"
+  },
+  {
+   "name": "DDP-A-P15 / C50B / JP / Free/0d / J / 8A655A8",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_StandardShippingFromOutside",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": true,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "265067070017"
+  },
+  {
+   "name": "DDP-A-P19 / 7EE6 / JP / Free/0d / J / EF79ED6",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionExcluded": [
+     {
+      "regionName": "AD"
+     },
+     {
+      "regionName": "AF"
+     },
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "AL"
+     },
+     {
+      "regionName": "AM"
+     },
+     {
+      "regionName": "AT"
+     },
+     {
+      "regionName": "AZ"
+     },
+     {
+      "regionName": "BA"
+     },
+     {
+      "regionName": "BD"
+     },
+     {
+      "regionName": "BE"
+     },
+     {
+      "regionName": "BG"
+     },
+     {
+      "regionName": "BT"
+     },
+     {
+      "regionName": "BY"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "CH"
+     },
+     {
+      "regionName": "CN"
+     },
+     {
+      "regionName": "CY"
+     },
+     {
+      "regionName": "CZ"
+     },
+     {
+      "regionName": "DE"
+     },
+     {
+      "regionName": "DK"
+     },
+     {
+      "regionName": "EE"
+     },
+     {
+      "regionName": "ES"
+     },
+     {
+      "regionName": "FI"
+     },
+     {
+      "regionName": "FR"
+     },
+     {
+      "regionName": "GE"
+     },
+     {
+      "regionName": "GG"
+     },
+     {
+      "regionName": "GI"
+     },
+     {
+      "regionName": "GR"
+     },
+     {
+      "regionName": "HR"
+     },
+     {
+      "regionName": "HU"
+     },
+     {
+      "regionName": "IE"
+     },
+     {
+      "regionName": "IN"
+     },
+     {
+      "regionName": "IS"
+     },
+     {
+      "regionName": "IT"
+     },
+     {
+      "regionName": "JE"
+     },
+     {
+      "regionName": "JP"
+     },
+     {
+      "regionName": "KG"
+     },
+     {
+      "regionName": "KR"
+     },
+     {
+      "regionName": "KZ"
+     },
+     {
+      "regionName": "LI"
+     },
+     {
+      "regionName": "LK"
+     },
+     {
+      "regionName": "LT"
+     },
+     {
+      "regionName": "LU"
+     },
+     {
+      "regionName": "LV"
+     },
+     {
+      "regionName": "MC"
+     },
+     {
+      "regionName": "MD"
+     },
+     {
+      "regionName": "ME"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "MK"
+     },
+     {
+      "regionName": "MN"
+     },
+     {
+      "regionName": "MT"
+     },
+     {
+      "regionName": "MV"
+     },
+     {
+      "regionName": "NL"
+     },
+     {
+      "regionName": "NO"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "NP"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PK"
+     },
+     {
+      "regionName": "PL"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "PT"
+     },
+     {
+      "regionName": "RO"
+     },
+     {
+      "regionName": "RS"
+     },
+     {
+      "regionName": "RU"
+     },
+     {
+      "regionName": "SE"
+     },
+     {
+      "regionName": "SI"
+     },
+     {
+      "regionName": "SJ"
+     },
+     {
+      "regionName": "SK"
+     },
+     {
+      "regionName": "SM"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     },
+     {
+      "regionName": "TJ"
+     },
+     {
+      "regionName": "TM"
+     },
+     {
+      "regionName": "UA"
+     },
+     {
+      "regionName": "UZ"
+     },
+     {
+      "regionName": "VA"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_StandardShippingFromOutside",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": true,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "265141465017"
+  },
+  {
+   "name": "Flat: UK_EconomyShippingFromOutside free, 7 wo (265265345017)",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "AD"
+     },
+     {
+      "regionName": "AF"
+     },
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "AL"
+     },
+     {
+      "regionName": "AM"
+     },
+     {
+      "regionName": "AT"
+     },
+     {
+      "regionName": "AZ"
+     },
+     {
+      "regionName": "BA"
+     },
+     {
+      "regionName": "BD"
+     },
+     {
+      "regionName": "BE"
+     },
+     {
+      "regionName": "BG"
+     },
+     {
+      "regionName": "BT"
+     },
+     {
+      "regionName": "BY"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "CH"
+     },
+     {
+      "regionName": "CN"
+     },
+     {
+      "regionName": "CY"
+     },
+     {
+      "regionName": "CZ"
+     },
+     {
+      "regionName": "DE"
+     },
+     {
+      "regionName": "DK"
+     },
+     {
+      "regionName": "EE"
+     },
+     {
+      "regionName": "ES"
+     },
+     {
+      "regionName": "FI"
+     },
+     {
+      "regionName": "FR"
+     },
+     {
+      "regionName": "GE"
+     },
+     {
+      "regionName": "GG"
+     },
+     {
+      "regionName": "GI"
+     },
+     {
+      "regionName": "GR"
+     },
+     {
+      "regionName": "HR"
+     },
+     {
+      "regionName": "HU"
+     },
+     {
+      "regionName": "IE"
+     },
+     {
+      "regionName": "IN"
+     },
+     {
+      "regionName": "IS"
+     },
+     {
+      "regionName": "IT"
+     },
+     {
+      "regionName": "JE"
+     },
+     {
+      "regionName": "JP"
+     },
+     {
+      "regionName": "KG"
+     },
+     {
+      "regionName": "KR"
+     },
+     {
+      "regionName": "KZ"
+     },
+     {
+      "regionName": "LI"
+     },
+     {
+      "regionName": "LK"
+     },
+     {
+      "regionName": "LT"
+     },
+     {
+      "regionName": "LU"
+     },
+     {
+      "regionName": "LV"
+     },
+     {
+      "regionName": "MC"
+     },
+     {
+      "regionName": "MD"
+     },
+     {
+      "regionName": "ME"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "MK"
+     },
+     {
+      "regionName": "MN"
+     },
+     {
+      "regionName": "MT"
+     },
+     {
+      "regionName": "MV"
+     },
+     {
+      "regionName": "NL"
+     },
+     {
+      "regionName": "NO"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "NP"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PK"
+     },
+     {
+      "regionName": "PL"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "PT"
+     },
+     {
+      "regionName": "RO"
+     },
+     {
+      "regionName": "RS"
+     },
+     {
+      "regionName": "RU"
+     },
+     {
+      "regionName": "SE"
+     },
+     {
+      "regionName": "SI"
+     },
+     {
+      "regionName": "SJ"
+     },
+     {
+      "regionName": "SK"
+     },
+     {
+      "regionName": "SM"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     },
+     {
+      "regionName": "TJ"
+     },
+     {
+      "regionName": "TM"
+     },
+     {
+      "regionName": "UA"
+     },
+     {
+      "regionName": "UZ"
+     },
+     {
+      "regionName": "VA"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": true,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "265265345017"
+  },
+  {
+   "name": "Flat: UK_EconomyShippingFromOutside free, 7 wo (265265428017)",
+   "marketplaceId": "EBAY_GB",
+   "categoryTypes": [
+    {
+     "name": "ALL_EXCLUDING_MOTORS_VEHICLES",
+     "default": false
+    }
+   ],
+   "handlingTime": {
+    "value": 7,
+    "unit": "DAY"
+   },
+   "shipToLocations": {
+    "regionIncluded": [
+     {
+      "regionName": "Europe"
+     }
+    ],
+    "regionExcluded": [
+     {
+      "regionName": "Africa"
+     },
+     {
+      "regionName": "Asia"
+     },
+     {
+      "regionName": "Central America and Caribbean"
+     },
+     {
+      "regionName": "Europe"
+     },
+     {
+      "regionName": "IE"
+     },
+     {
+      "regionName": "Middle East"
+     },
+     {
+      "regionName": "North America"
+     },
+     {
+      "regionName": "Oceania"
+     },
+     {
+      "regionName": "PO Box"
+     },
+     {
+      "regionName": "South America"
+     },
+     {
+      "regionName": "Southeast Asia"
+     }
+    ]
+   },
+   "shippingOptions": [
+    {
+     "optionType": "DOMESTIC",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_EconomyShippingFromOutside",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": true,
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    },
+    {
+     "optionType": "INTERNATIONAL",
+     "costType": "FLAT_RATE",
+     "shippingServices": [
+      {
+       "sortOrder": 1,
+       "shippingCarrierCode": "GENERIC",
+       "shippingServiceCode": "UK_SellersStandardInternationalRate",
+       "shippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "additionalShippingCost": {
+        "value": "0.0",
+        "currency": "GBP"
+       },
+       "freeShipping": false,
+       "shipToLocations": {
+        "regionIncluded": [
+         {
+          "regionName": "Europe"
+         }
+        ]
+       },
+       "buyerResponsibleForShipping": false,
+       "buyerResponsibleForPickup": false
+      }
+     ],
+     "shippingDiscountProfileId": "0",
+     "shippingPromotionOffered": false
+    }
+   ],
+   "globalShipping": false,
+   "pickupDropOff": false,
+   "freightShipping": false,
+   "fulfillmentPolicyId": "265265428017"
+  }
+ ]
+}

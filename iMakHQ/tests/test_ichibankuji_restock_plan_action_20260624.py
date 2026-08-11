@@ -36,19 +36,24 @@ def test_empty_itemid_is_skip(monkeypatch):
     assert called["n"] == 0   # 空itemIDは GetItem 呼ばない
 
 
-def test_restock_reqs_write_cost_to_N():
-    """cost(新supply実価格)が N列(=col13)に入る。A/B/D も。"""
+def test_restock_reqs_write_cost_to_M():
+    """★2026-08-02: cost 書込先を N列→M列に切替 (BRAVO 依頼書 D 項)。
+    N列は ARRAYFORMULA (M or F)−K の spill 列で、1セル書込むと N1=#REF! で全空に
+    なる同型事故 (ichibankuji_restock 実害 2026-07-27〜08-02) の再発防止。M seed に
+    して監視くんの次巡回が上書きする一時 seed 運用に変更。"""
     reqs = r.build_restock_reqs({105: {"a": "https://x/mA", "b": "358111", "aux": [], "cost": 4500}})
     ranges = {q["range"]: q["values"][0][0] for q in reqs}
     assert ranges["A105"].endswith("mA")
     assert ranges["B105"] == "358111"
     assert ranges["D105"] == ""          # 売切解除
-    assert ranges["N105"] == 4500        # 仕入価格 → N列(V8 SSOT)
+    assert ranges["M105"] == 4500        # 仕入価格 → M列(seed。N は ARRAYFORMULA が拾う)
+    assert "N105" not in ranges          # ★N には二度と書かない (spill 破壊防止)
 
 
-def test_restock_reqs_no_cost_skips_N():
-    """cost 無/0 の行は N列を書かない(既存cost を誤って消さない)。"""
+def test_restock_reqs_no_cost_skips_M():
+    """cost 無/0 の行は M列を書かない(既存cost を誤って消さない)。"""
     reqs = r.build_restock_reqs({106: {"a": "u", "b": "x", "aux": [], "cost": 0}})
+    assert not any(q["range"].startswith("M") for q in reqs)
     assert not any(q["range"].startswith("N") for q in reqs)
 
 

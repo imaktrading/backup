@@ -1,0 +1,16 @@
+{
+  "project": "tcg",
+  "program_items": [
+    {
+      "sku": "PSA10-158452540",
+      "msg": "禁止ワード 'nr' がタイトルに含まれている"
+    }
+  ],
+  "log_signals": [],
+  "recurring_missing": [],
+  "counts": {
+    "program": 1,
+    "log": 0,
+    "recurring_missing": 0
+  }
+}
