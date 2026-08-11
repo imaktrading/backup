@@ -152,7 +152,7 @@ class TestReportOnly(unittest.TestCase):
         try:
             before = Path(db).read_bytes()
             with mock.patch.object(audit_mod, "DB_PATH", db):
-                era, inc, none_list, desync = audit_mod.audit(None)
+                era, inc, none_list, desync, empty_by_cat = audit_mod.audit(None)
             after = Path(db).read_bytes()
             self.assertEqual(before, after, "audit() must not mutate the DB")
             # 検出ロジックの正当性も担保 (回帰): SV5a→"Sword & Shield—..." は era mismatch

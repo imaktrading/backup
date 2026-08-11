@@ -40,19 +40,29 @@ class TestOpPromoSetBackfill(unittest.TestCase):
             self.assertEqual(rec["set_name"], ebay, pid)
 
 
-class TestAnniversarySetRevertRegression(unittest.TestCase):
-    """2026-07-30 revert 回帰: `2nd ANNIVERSARY SET` は eBay facet が箱名から
-    一意に決まらないため mapping を削除した。yaml 再追加/loader 再導入で
-    復活しないことを固定する。"""
+class TestAnniversarySetPromoCardsGuard(unittest.TestCase):
+    """2026-08-11 Advisor GO で 2nd ANNIVERSARY SET → Promo Cards に変更.
 
-    def test_to_ebay_value_returns_none(self):
-        # 直接 mapping 引き: None (削除済)
-        self.assertIsNone(
-            api.to_ebay_value("one_piece_tcg", "set", "2nd ANNIVERSARY SET")
-        )
+    経緯:
+      - 2026-07-30 revert: '2nd ANNIVERSARY SET' の mapping を削除 (箱名から一意 facet
+        決まらず 500 Years 誤 merge の実害があったため)。
+      - 2026-08-11 GO (op03_001_p2_set_name_ebay_empty_response.md): 全 promo/event
+        118 種を Promo Cards バケツで一括登録。'2nd ANNIVERSARY SET' もその中に含まれる。
+        Advisor は「event 記念品は Promo Cards 集約が既存 convention」に基づき承認。
+
+    本テストは新方針を固定する:
+      - '2nd ANNIVERSARY SET' → 'Promo Cards' に mapping されている
+      - OP06-118_p4 の set_name は依然として '500 Years in the Future' ではない
+        (誤 merge 防止 = 元 revert の主目的は今も守られる)。"""
+
+    def test_to_ebay_value_returns_promo_cards(self):
+        v = api.to_ebay_value("one_piece_tcg", "set", "2nd ANNIVERSARY SET")
+        self.assertEqual(v, "Promo Cards")
 
     def test_op06_118_p4_not_resolved_to_500_years(self):
-        # lookup の派生 set_name も '500 Years in the Future' であってはならない
+        # 元 revert の主目的 (500 Years への誤 merge 防止) は今も守る:
+        # OP06-118_p4 の set_name_official が '2nd ANNIVERSARY SET' なら
+        # Promo Cards に解決し、500 Years にはならない。
         rec = api.lookup(category="one_piece_tcg", product_id="OP06-118_p4")
         self.assertIsNotNone(rec, "OP06-118_p4 が DB に無い")
         self.assertNotEqual(

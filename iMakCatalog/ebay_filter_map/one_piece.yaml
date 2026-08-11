@@ -62,6 +62,364 @@ set:
   # 決まらず = mapping 誤り。埋めるには eBay facet 実確認が必要 (Wings/Promo 候補)。
   # 詳細: iMak_data/catalog/requests/2026-07-29_live_key_214_verdicts_response.md
 
+  # 2026-08-11 op03_001_p2 batch (Advisor GO) — promo/event/prize/etc 118種 338行を Promo Cards バケツで一括登録。
+  # 全て公式 EN 名未確認 (event 記念品/応募者サービス/付録/オフィシャルプレイマット 等)、既存 promo/event 慣例に合わせ Promo Cards 集約。
+  # 発生源: 依頼書 2026-08-11_op03_001_p2_set_name_ebay_empty_response.md 段1。全行 fail_closed_no_map 状態からの復旧が目的。
+  - source: "ファミリーデッキセット"
+    ebay: Promo Cards
+    note: promo/event (51 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プロモーションカードセット2026"
+    ebay: Promo Cards
+    note: promo/event (15 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プレミアムブースター ONE PIECE CARD THE BEST ストレージボックスセット"
+    ebay: Promo Cards
+    note: promo/event (14 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "『ONE PIECE FILM RED』入場者プレゼント フィナーレセット"
+    ebay: Promo Cards
+    note: promo/event (10 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プロモーションパックEX Vol.4"
+    ebay: Promo Cards
+    note: promo/event (9 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プロモーションパックEX Vol.1"
+    ebay: Promo Cards
+    note: promo/event (9 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "2nd ANNIVERSARY SET"
+    ebay: Promo Cards
+    note: promo/event (8 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECE カードゲーム English 2nd ANNIVERSARY SET"
+    ebay: Promo Cards
+    note: promo/event (8 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プロモーションパックEX Vol.3"
+    ebay: Promo Cards
+    note: promo/event (7 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プロモーションパックEX Vol.2"
+    ebay: Promo Cards
+    note: promo/event (7 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECEカードゲーム BASE SHOPリミテッドカードコレクションvol.1"
+    ebay: Promo Cards
+    note: promo/event (6 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ジャンプGIGA 2023 SPRING 応募者全員サービス"
+    ebay: Promo Cards
+    note: promo/event (6 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECEカードゲーム プロモーションパックVol.5"
+    ebay: Promo Cards
+    note: promo/event (6 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECEカードゲーム プロモーションパックVol.3"
+    ebay: Promo Cards
+    note: promo/event (6 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECE カードゲーム China 2nd ANNIVERSARY SET"
+    ebay: Promo Cards
+    note: promo/event (5 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "3周年！ワンピースカードトレジャーキャンペーンパック"
+    ebay: Promo Cards
+    note: promo/event (5 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プロモーションパックVol.8"
+    ebay: Promo Cards
+    note: promo/event (5 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プロモーションパックVol.9"
+    ebay: Promo Cards
+    note: promo/event (5 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "週刊少年ジャンプ応募者全員サービス"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "プレミアムカードコレクション-ウタ-"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.10"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.11"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパック Vol.15"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECEカードゲーム プロモーションパックVol.6"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパック Vol.3"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.6"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.4"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.12"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECEカードゲーム プロモーションパックVol.7"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパック Vol.13"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパック2022 Vol.2"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.5"
+    ebay: Promo Cards
+    note: promo/event (4 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "1st ANNIVERSARY SET"
+    ebay: Promo Cards
+    note: promo/event (3 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.9"
+    ebay: Promo Cards
+    note: promo/event (3 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパック2022 Vol.1"
+    ebay: Promo Cards
+    note: promo/event (3 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "『ONE PIECE FILM RED』入場者プレゼント アンコールパック"
+    ebay: Promo Cards
+    note: promo/event (3 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.7"
+    ebay: Promo Cards
+    note: promo/event (2 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトルパックVol.8"
+    ebay: Promo Cards
+    note: promo/event (2 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "「ONE PIECE CARD GAME 2nd ANNIVERSARY COMPLETE GUIDE」限定特典カード"
+    ebay: Promo Cards
+    note: promo/event (2 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "週刊少年ジャンプ19号応募者全員サービス（2025年4月7日売）"
+    ebay: Promo Cards
+    note: promo/event (2 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "Vジャンプ10月特大号 応募者全員サービス"
+    ebay: Promo Cards
+    note: promo/event (2 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "最強ジャンプ5月号応募者全員サービス（2025年4月4日売）"
+    ebay: Promo Cards
+    note: promo/event (2 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "オフィシャルプレイマット リミテッドエディション vol.5"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップセット2023(旧四皇)"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップセット2023（エース・サボ・ルフィ）"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECEカードゲーム オフィシャルプレイマット リミテッドエディション vol.3"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "オフィシャルプレイマット リミテッドエディション vol.4"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "オフィシャルプレイマット ネフェルタリ・ビビ"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "Vジャンプ10月特大号応募者全員サービス（2024年8月21日売）"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2024 4月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "エクストラグランドバトル2026 4月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECE CARD GAME 3rd ANNIVERSARY COMPLETE GUIDE付録"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 2025年3月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "8パックバトル 2026年4月"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2026 4月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2022 予選 ベスト32記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 9月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2023 4月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2024 1月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2023 10月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2023 7月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2023 1次予選エリア大会 ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2023 7月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2023 1次予選決勝大会 ベスト32記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2023 1次予選エリア大会 ベスト16記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2024 WAVE1 エリア大会 ベスト16記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2024 WAVE2 3on3 Autumn ベスト16記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2024 WAVE1 エリア大会 ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "8パックバトル 2023年優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 2024年12月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2024 7月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "8パックバトル 2025年10月"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 2025年6月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECEカードゲーム SOUND LOADER Volume.1 特典カード"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2024 WAVE2 3on3 Autumn ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2024 WAVE2 決勝大会 ベスト32記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECEカードゲーム SOUND LOADER Volume.2 特典カード"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 2024年9月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2024 4月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2024 1月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2025 1月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2024 10月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "シリアルナンバー入りナミ ゲットキャンペーン"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2024 10月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ25-26 Season 1 エリア決勝大会 ベスト32記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2025 1月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2025 10月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2025 4月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2025 4月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2026 1月 優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 2025年9月~11月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "『ONE PIECE学園 10巻』付録"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2026 1月 ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ25-26 Season2 決勝大会 ベスト32記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ25-26Season 2 決勝トーナメント上位記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ25-26Season 2 エリア決勝大会権利獲得記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "エクストラグランドバトル2026 4月上位記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 2026年3月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2026 4月上位記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2022 優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2022 ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 12月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ジャンプGIGA 2023 WINTER付録（2022年12月26日売）"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 2023年10月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2022 予選 ベスト16記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル 6月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "スタンダードバトル3月優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップセット2022"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "セブンイレブンタイアップキャンペーン オリジナルカード"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2023 4月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "フラッグシップバトル2023 10月ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "8パックバトル 2024年優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2023 2次予選決勝大会 ベスト16記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECE DAY’24 来場者特典"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2023 2次予選エリア大会 ベスト8記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "チャンピオンシップ2023 2次予選エリア大会 ベスト16記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "8パックバトル 2025年優勝記念品"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "ONE PIECE magazine 特集 週刊少年ジャンプとONE PIECE 020​ 付録"
+    ebay: Promo Cards
+    note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+
   # Vision OCR 由来の長文セット名 (PSA カード上の印刷名、bracket [...] 抜き)
   # 旧 psa_to_csv._ONEPIECE_SET_NAME_MAP の Vision エントリから移植
   - source: PREMIUM BOOSTER -ONE PIECE CARD THE BEST-

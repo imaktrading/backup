@@ -1,8 +1,9 @@
 """2026-08-01 窓口GO: OP promo set_name_ebay backfill 21件 の回帰テスト.
 
 - 4 promo set の空欄行が 'Promo Cards' で埋まっている (backfill 済)。
-- 【B】 OP05-119_p8 (English 2nd ANNIVERSARY SET) は mapping 無し = 空のまま (fail-closed)。
-- 327 Ultra Prism 誤マップ (pokemon_tcg) は埋め戻されず空欄のまま。
+- 【B】 OP05-119_p8 (English 2nd ANNIVERSARY SET) の mapping は 2026-08-11 Advisor GO で
+  Promo Cards に変更 (op03_001_p2 batch, 118種一括登録)。旧「空のまま」ガードは撤回。
+- 327 Ultra Prism 誤マップ (pokemon_tcg) は埋め戻されず空欄のまま (206 残)。
 """
 from __future__ import annotations
 
@@ -27,14 +28,18 @@ class TestOpPromoBackfill(unittest.TestCase):
             self.assertEqual(rec["specs"].get("set_name_ebay_source"),
                              "filter_map_backfill_20260801", pid)
 
-    def test_2nd_anniversary_stays_empty_no_map(self):
-        """【B】 mapping 無し → derive None、空のまま (推測で埋めない)。"""
-        self.assertIsNone(
-            api.derive_set_name_ebay(
-                "one_piece_tcg",
-                "ONE PIECE カードゲーム English 2nd ANNIVERSARY SET", "OP05-119_p8"))
+    def test_2nd_anniversary_maps_to_promo_cards(self):
+        """2026-08-11 Advisor GO で English 2nd ANNIVERSARY SET → Promo Cards に変更
+        (op03_001_p2_set_name_ebay_empty_response.md 段1 の 118 種一括登録)。
+        旧 2026-08-01 の「mapping 無しで空欄」ガードは意図的に撤回。
+        Why 変更: event/promo/prize 系は Promo Cards バケツに集約が既存 convention
+        (依頼書 draft の Q3 §『Why Promo Cards バケツ』参照)。"""
+        v = api.derive_set_name_ebay(
+            "one_piece_tcg",
+            "ONE PIECE カードゲーム English 2nd ANNIVERSARY SET", "OP05-119_p8")
+        self.assertEqual(v, "Promo Cards")
         rec = api.lookup(category="one_piece_tcg", product_id="OP05-119_p8")
-        self.assertFalse((rec or {}).get("specs", {}).get("set_name_ebay"))
+        self.assertEqual(rec["specs"].get("set_name_ebay"), "Promo Cards")
 
     def test_ultra_prism_206_still_blanked(self):
         """Ultra Prism 誤マップ空欄化の残 206件が blank のまま (推測で埋めない)。

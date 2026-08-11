@@ -14,6 +14,10 @@ HQ 照合ツール(出力CSV側) と二重で守る (= dual_gate)。
   4. name整合      : name_en ≠ specs.character_name (両方非空) を flag
                     (= romaji name_en 修正時の character_name 同期漏れ等。eBay C:Character は
                     character_name 由来のため不整合=誤出品。2026-06-13 HQ依頼で追加)。
+  5. empty棚卸し   : set_name_ebay='' (fail_closed_no_map / 単純空欄) の絶対数を category 別に集計。
+                    2026-08-11 依頼 (op03_001_p2_set_name_ebay_empty_response.md §段3) で追加。
+                    「214→423 に増えたのを誰も見ていなかった」の再発防止。
+                    ★0 になっても出し続ける (0 が続く証跡が再発しないことの唯一の証拠)。
 
 使い方:
   python iMakCatalog/tools/set_name_integrity_audit.py                # pokemon (既定)
@@ -84,6 +88,8 @@ def audit(categories):
     none_src = defaultdict(lambda: defaultdict(int))  # source=(none) 棚卸し
     era_mismatch = []  # (set_code, ebay, sc_era, ebay_era, count)
     name_desync = []  # (product_id, name_en, character_name)
+    # 5. empty棚卸し: category -> {'fail_closed_no_map': N, 'blank': M, 'total_empty': N+M}
+    empty_by_cat = defaultdict(lambda: {"fail_closed_no_map": 0, "blank": 0, "total_empty": 0})
 
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
@@ -98,6 +104,14 @@ def audit(categories):
             tmp_era[(sc, e)] += 1
             if src == "(none)":
                 none_src[sc][e] += 1
+        else:
+            # empty 側の内訳: fail_closed_no_map か、それ以外 (blank)
+            bucket = empty_by_cat[r["category"]]
+            if src == "fail_closed_no_map":
+                bucket["fail_closed_no_map"] += 1
+            else:
+                bucket["blank"] += 1
+            bucket["total_empty"] += 1
         # 4. name_en ↔ character_name 整合 (両方非空で不一致)
         #    接頭辞一致 ("Pikachu V" vs "Pikachu" の V/VMAX/ex 接尾差) は正当として除外し、
         #    真の名前相違 (romaji 同期漏れ等) のみ flag。
@@ -132,10 +146,10 @@ def audit(categories):
     none_list.sort(key=lambda x: -x[2])
     name_desync.sort(key=lambda x: x[0])
 
-    return era_mismatch, inconsistent, none_list, name_desync
+    return era_mismatch, inconsistent, none_list, name_desync, dict(empty_by_cat)
 
 
-def render(era_mismatch, inconsistent, none_list, name_desync, categories):
+def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat, categories):
     out = []
     cat_s = ",".join(categories) if categories else "all"
     out.append(f"# set_name_ebay integrity audit (cat={cat_s})\n")
@@ -167,6 +181,25 @@ def render(era_mismatch, inconsistent, none_list, name_desync, categories):
         out.append("(なし)\n")
     for pid, ne, cn in name_desync[:60]:
         out.append(f"- `{pid}`: name_en=`{ne}` ≠ character_name=`{cn}`\n")
+
+    # 5. empty 棚卸し (fail_closed_no_map + 単純空欄) を category 別に絶対数で。
+    #    ★ 0 になっても出し続ける (0 が続いている証跡が再発しないことの唯一の証拠)。
+    total_empty = sum(v["total_empty"] for v in empty_by_cat.values())
+    total_fail_closed = sum(v["fail_closed_no_map"] for v in empty_by_cat.values())
+    out.append(
+        f"\n## 5. set_name_ebay 空欄 棚卸し (絶対数・毎日出す) — "
+        f"合計 {total_empty} 件 (うち fail_closed_no_map {total_fail_closed})\n"
+    )
+    if not empty_by_cat:
+        out.append("(全カテゴリで空欄ゼロ)\n")
+    else:
+        out.append("| category | fail_closed_no_map | blank(other) | total_empty |\n")
+        out.append("|---|---:|---:|---:|\n")
+        for cat in sorted(empty_by_cat.keys()):
+            v = empty_by_cat[cat]
+            out.append(
+                f"| {cat} | {v['fail_closed_no_map']} | {v['blank']} | {v['total_empty']} |\n"
+            )
     return "".join(out)
 
 
@@ -187,8 +220,8 @@ def main():
     ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"{_START_MARK} {ts} (cat={cat_s}) ===")
 
-    era_mismatch, inconsistent, none_list, name_desync = audit(categories)
-    report = render(era_mismatch, inconsistent, none_list, name_desync, categories or [])
+    era_mismatch, inconsistent, none_list, name_desync, empty_by_cat = audit(categories)
+    report = render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat, categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)

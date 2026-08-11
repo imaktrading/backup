@@ -41,10 +41,12 @@ TARGETS = [
 # 対象外だがユニット化しておく (再発防止)
 OTHER_STARTER_DECK_SAMPLE = [
     # (set_name_official, expected_set_name_ebay)
-    # 段階3 (ST-31..36) は空欄維持なので expected=None
-    ("STARTER DECK -RED Monkey.D.Luffy- [ST-31]", None),
-    ("STARTER DECK -GREEN Roronoa Zoro- [ST-32]", None),
-    ("STARTER DECK -BLUE Kuzan- [ST-33]", None),
+    # 段階3 (ST-31..36) は 2026-08-11 Advisor GO で色 prefix 付き canonical に反映
+    # (op03_001_p2_set_name_ebay_empty_response.md 段2, Group A 85 行)。
+    # 旧 2026-08-01 の「fail_closed_no_map で空欄維持」は撤回。
+    ("STARTER DECK -RED Monkey.D.Luffy- [ST-31]", "RED Monkey D. Luffy"),
+    ("STARTER DECK -GREEN Roronoa Zoro- [ST-32]", "GREEN Roronoa Zoro"),
+    ("STARTER DECK -BLUE Kuzan- [ST-33]", "BLUE Kuzan"),
 ]
 
 # 段階2 (ST-18/ST-26) は保留=触らない
@@ -191,13 +193,17 @@ class TestStage3Untouched(unittest.TestCase):
         finally:
             con.close()
 
-    def test_stage3_starter_deck_body_rows_stay_empty(self):
-        """starter deck 本体 (STxx-NNN 型式) は空欄維持."""
+    def test_stage3_starter_deck_body_rows_filled_with_color_prefix(self):
+        """starter deck 本体 (STxx-NNN 型式) は 2026-08-11 の Advisor GO 以降、
+        色 prefix 付き canonical で埋まっている
+        (op03_001_p2_set_name_ebay_empty_response.md 段2, Group A の 85 行)。
+        Why 撤回: 2026-08-02 に yaml で ST-31..36 に色 prefix mapping を追加
+        (ST-08/18/26 collision 解消) → 現行 filter_map で自動導出可能に。"""
         import re
         body_re = re.compile(r"^ST3[1-6]-\d+$")
         con = sqlite3.connect(str(api._DB_PATH))
         try:
-            for set_official, _expected in OTHER_STARTER_DECK_SAMPLE:
+            for set_official, expected in OTHER_STARTER_DECK_SAMPLE:
                 rows = con.execute(
                     "SELECT product_id, specs FROM products "
                     "WHERE category=? AND set_name_official=?",
@@ -208,9 +214,9 @@ class TestStage3Untouched(unittest.TestCase):
                         continue  # P-xxx_STxx 再録は対象外
                     d = json.loads(specs_json) if specs_json else {}
                     val = d.get("set_name_ebay")
-                    self.assertIn(
-                        val, ("", None),
-                        f"{pid}: 段階3 本体行のはずが空欄でない ({val!r})")
+                    self.assertEqual(
+                        val, expected,
+                        f"{pid}: 段階3 本体行が canonical でない ({val!r} vs {expected!r})")
         finally:
             con.close()
 
