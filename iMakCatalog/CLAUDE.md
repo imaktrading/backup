@@ -213,6 +213,24 @@ Why (履歴):
 - 2026-08-09 依頼 `card_images_leader_back_and_pokemon_missing`: LEADER 裏面 catalog に
   0件 → HQ 側で規則導出済と確認 → catalog に持たせず listing 側の派生で完結、と方針明文化。
 
+### 画像 (images) の第三者 source 例外規約 (2026-08-10 制定)
+
+**原則**: images URL も SSOT = 公式のみ。第三者サイト由来を入れない。
+
+**例外条件 (全て満たす場合のみ)**:
+- 公式サイトに当該カードが**存在しない**ことが実測で確定している
+  (公式 API hitCnt=0 + カード名・収録番号でも hit しない)
+- 第三者サイトの画像内容が catalog の name / 収録番号 / セット と**全項目一致**することを
+  人手で確認している
+- 用途が**社内目視照合限定** (eBay 出品画像は PSA スラブ実写、この画像は表に出ない)
+- `source` に第三者由来と分かる印を含める (例: `..._pcg_search_confirmed_YYYYMMDD`)
+
+**適用実績**:
+- 2026-08-10: BDK-005 / BDK-006 (pcg-search.com / 依頼書
+  `2026-08-10_pcg_search_images_for_official_gaps.md`)
+
+**取ってよいのは画像のみ**。name / rarity / set 等の値は絶対に第三者から取らない。
+
 ---
 
 ## Phase 計画
