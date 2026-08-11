@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import datetime
 import importlib.util
+import json
 import re
 import sys
 from collections import defaultdict
@@ -26,6 +27,12 @@ DATA_ROOT = Path("C:/dev/iMak_data/catalog")
 MISSING_CSV = DATA_ROOT / "missing_models.csv"
 PROCESSED_CSV = DATA_ROOT / "missing_models_processed.csv"
 REQUESTS_DIR = DATA_ROOT / "requests"
+
+# A群 suppression list (2026-08-10): 公式が物理的に画像を持たない pid の外部宣言。
+# 該当 pid は毎日 missing_models.csv に再検出されても依頼書を出さない。
+# revalidation は entry を消して既存 rescue script を打つ手動運用 (定期 re-check なし)。
+# 回答書: hq/requests/2026-08-10_catalog_auto_request_suppress_known_no_image_response.md
+SUPPRESSION_JSON = Path(__file__).parent / "known_no_image_a_group.json"
 
 CATEGORY_LABELS: dict[str, str] = {
     "gshock":         "G-SHOCK 腕時計",
@@ -55,22 +62,35 @@ CATEGORY_LABELS: dict[str, str] = {
 # 名前検索でも曖昧一致でもなく、SSOT 側が埋めた literal を抜くだけ。
 _AUTO_CANDIDATE_RE = re.compile(r"\(auto候補([^=]+)=")
 
+# post_psa_review が _PID_NO_IMAGE で emit する note format `catalog <PID> は在るが画像が無く目視できない`。
+# 2026-08-10 追加: A群 suppression の pid 抽出用。**catalog_present 経路では使わない**
+# (NO_IMAGE 行を silent に catalog_present で drop すると 2026-08-09 の意図的 NO_IMAGE→catalog
+# 経路を破壊する。suppression list 明示照合だけに使う)。
+_NO_IMAGE_PID_RE = re.compile(r"catalog\s+(\S+?)\s+は在るが画像が無く目視できない")
+_NO_IMAGE_NOTE_MARK = "は在るが画像が無く目視できない"
+
 
 def _extract_expected_pid(model: str) -> str | None:
     """model 文字列から canonical PID を抜く。抜けなければ None (= 判定不能)。
 
-    missing_models.csv の model には2形式ある:
-      1. post_psa_review 由来 … `cert154233090 ONE PIECE … (auto候補OP07-118=該当なし 要調査)`
+    missing_models.csv の model には3形式ある:
+      1. post_psa_review 由来 (auto候補) … `cert… (auto候補OP07-118=該当なし 要調査)`
          → `(auto候補<PID>=` に canonical PID が埋まっている
-      2. psa_to_csv 由来 … `ONE PIECE JAPANESE 3RD ANNIVERSARY SET-118`
+      2. post_psa_review 由来 (NO_IMAGE, 2026-08-09〜) …
+         `cert… (catalog SM9a-067 は在るが画像が無く目視できない 画像を追加してほしい)`
+         → `catalog <PID> は` に canonical PID が埋まっている (A群 suppression 判定用)
+      3. psa_to_csv 由来 … `ONE PIECE JAPANESE 3RD ANNIVERSARY SET-118`
          → **canonical PID ではない**ので None を返し、従来通り依頼を出す (fail-closed)
     """
     if not model:
         return None
     m = _AUTO_CANDIDATE_RE.search(model)
-    if not m:
-        return None
-    return m.group(1).strip() or None
+    if m:
+        return m.group(1).strip() or None
+    m = _NO_IMAGE_PID_RE.search(model)
+    if m:
+        return m.group(1).strip() or None
+    return None
 
 
 def _load_catalog_probe():
@@ -114,6 +134,13 @@ def _filter_catalog_present(new_by_cat: dict[str, list[dict]],
     for category, rows in list(new_by_cat.items()):
         kept: list[dict] = []
         for r in rows:
+            # NO_IMAGE 形式 (2026-08-09〜) は行が catalog に「あるまま画像だけ欠けている」ことを
+            # 依頼する経路。行の存在を根拠に catalog_present で drop すると 2026-08-09 の
+            # 意図的な NO_IMAGE→catalog 依頼を毎日握り潰すことになる。
+            # A群 (補完不能) の除外は _filter_suppression が明示 list で担当する。
+            if _NO_IMAGE_NOTE_MARK in (r.get("model") or ""):
+                kept.append(r)
+                continue
             pid = _extract_expected_pid(r["model"])
             exists = has_pid(category, pid, db_path) if pid else None
             if exists is not True:
@@ -130,6 +157,106 @@ def _filter_catalog_present(new_by_cat: dict[str, list[dict]],
             if unique is not None:
                 unique.pop((category, r["model"]), None)
             print(f"    ⏭️ Skip auto_catalog_add (catalog実在): {category}:{pid}")
+            removed += 1
+        if kept:
+            new_by_cat[category] = kept
+        else:
+            del new_by_cat[category]
+    return removed
+
+
+# ---------------------------------------------------------------------------
+# A群 suppression (2026-08-10)
+#
+# なぜ: 公式 (pokemon-card.com 等) が物理的に持たない pid は catalog 側で埋めようがない。
+#   毎日 auto 依頼が再生成 → 毎日 catalog が「投入不要」を返す = 無駄ループ。
+#   HQ が「補完不能」と確定した pid を明示 list で持ち、依頼書生成前に落とす。
+# 元依頼: catalog/requests 経由 _routed/2026-08-10_catalog_to_hq_auto_request_suppress_known_no_image.md
+# 回答書: hq/requests/2026-08-10_catalog_auto_request_suppress_known_no_image_response.md
+# 判定は HQ 側運用ロジック (=②) の欠陥のため、Catalog worktree 変更なし。
+
+
+def _load_suppression(path: Path | None = None) -> dict[str, dict[str, dict]]:
+    """A群 suppression list を読む。JSON 破損 / ファイル不在は空 dict (fail-safe)。
+
+    構造: {category: {pid: {decided_at, reason, ref}}}
+    schema 検証:
+      - 未知カテゴリは受け入れる (将来カテゴリ追加時に手動追記できるように)
+      - pid が空 or decided_at が不正 ISO 日付なら entry を落として警告
+      - 全体を落とさない (1件壊れても他は活かす)
+    """
+    p = path if path is not None else SUPPRESSION_JSON
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except Exception as e:  # noqa: BLE001  JSON 破損等
+        print(f"[warn] suppression list を読めない ({p.name}: {e}) → 空として続行")
+        return {}
+    if not isinstance(raw, dict):
+        print(f"[warn] suppression list の構造が dict でない → 空として続行")
+        return {}
+    cleaned: dict[str, dict[str, dict]] = {}
+    for category, entries in raw.items():
+        if category.startswith("_"):  # `_comment` 等の meta キーは無視
+            continue
+        if not isinstance(entries, dict):
+            print(f"[warn] suppression {category}: entries が dict でない → 無視")
+            continue
+        cat_out: dict[str, dict] = {}
+        for pid, meta in entries.items():
+            if not pid or not isinstance(pid, str):
+                print(f"[warn] suppression {category}: 空 pid → 無視")
+                continue
+            if not isinstance(meta, dict):
+                print(f"[warn] suppression {category}:{pid}: meta が dict でない → 無視")
+                continue
+            decided_at = str(meta.get("decided_at", "")).strip()
+            try:
+                datetime.date.fromisoformat(decided_at[:10])
+            except Exception:
+                print(f"[warn] suppression {category}:{pid}: decided_at 不正 ({decided_at!r}) → 無視")
+                continue
+            cat_out[pid.strip()] = meta
+        if cat_out:
+            cleaned[category] = cat_out
+    return cleaned
+
+
+def _filter_suppression(new_by_cat: dict[str, list[dict]],
+                        unique: dict[tuple[str, str], dict] | None,
+                        suppression: dict[str, dict[str, dict]]) -> int:
+    """A群 suppression list に載る pid を new_by_cat + unique から取り除き、件数を返す。
+
+    fail-closed 契約 (catalog_present と同じ運用):
+      - pid が抽出できない (Case2 psa_to_csv 形式等) → 従来通り依頼 (silent drop しない)
+      - suppression に無い pid → 従来通り依頼
+      - **カテゴリ跨ぎで救わない**: pokemon の SM12-112 を one_piece の依頼で drop しない
+      - **viewer_disagreement.log には書かない**: A群は disagreement ではなく HQ 確定 skip
+
+    silent drop 防止: 落とした各行を print で必ず残す
+    (`failclosed_must_skip_not_destructive` と対、`no_partial_shipping_with_todo` に沿う)。
+    """
+    if not suppression:
+        return 0
+    removed = 0
+    for category, rows in list(new_by_cat.items()):
+        cat_supp = suppression.get(category) or {}
+        if not cat_supp:
+            continue
+        kept: list[dict] = []
+        for r in rows:
+            pid = _extract_expected_pid(r["model"])
+            if not pid or pid not in cat_supp:
+                kept.append(r)
+                continue
+            meta = cat_supp[pid]
+            reason = str(meta.get("reason") or "(reason unset)")
+            decided_at = str(meta.get("decided_at") or "?")
+            if unique is not None:
+                unique.pop((category, r["model"]), None)
+            print(f"    ⏭️ Skip auto_catalog_add (A群 known_no_image): "
+                  f"{category}:{pid} — {reason} (decided {decided_at})")
             removed += 1
         if kept:
             new_by_cat[category] = kept
@@ -255,6 +382,13 @@ def main() -> int:
     if skipped_present:
         print(f"[skip] catalog実在 pre-check で {skipped_present} 件除外 "
               f"→ viewer_disagreement.log")
+
+    # 2c. A群 suppression (公式が物理的に持たない pid → 毎日の再依頼を止める, 2026-08-10)
+    suppression = _load_suppression()
+    skipped_supp = _filter_suppression(new_by_cat, unique, suppression)
+    if skipped_supp:
+        print(f"[skip] A群 known_no_image で {skipped_supp} 件除外 "
+              f"→ {SUPPRESSION_JSON.name}")
 
     # 3. category 別に依頼書投入
     REQUESTS_DIR.mkdir(parents=True, exist_ok=True)

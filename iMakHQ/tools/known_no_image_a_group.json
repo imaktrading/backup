@@ -1,0 +1,14 @@
+{
+  "_comment": "A群 = catalog に行はあるが画像が物理的に取得できない pid の suppression list。auto_catalog_add_request.py が missing_models.csv 走査時、ここに載る pid は依頼書生成を skip する。将来 revalidation は entry を消して既存 rescue script (iMakCatalog/scrapers/pokemon_secret_rare_rescue.py 等) を打つ運用。定期 re-check は組まない。回答書: 2026-08-10_catalog_auto_request_suppress_known_no_image_response.md",
+  "pokemon_tcg": {
+    "SM11-112":  {"decided_at": "2026-08-10", "reason": "pokemon-card.com index 外 HR (Dragonite-GX)",           "ref": "done.md rescue not_found"},
+    "SM12-112":  {"decided_at": "2026-08-10", "reason": "pokemon-card.com index 外 HR (Arceus&Dialga&Palkia-GX)", "ref": "done.md rescue not_found"},
+    "SM12a-214": {"decided_at": "2026-08-10", "reason": "pokemon-card.com index 外 HR (Jirachi-GX)",              "ref": "done.md rescue not_found"},
+    "SM12a-224": {"decided_at": "2026-08-10", "reason": "pokemon-card.com index 外 UR (Lucario&Melmetal-GX)",     "ref": "done.md rescue not_found"},
+    "SM9a-067":  {"decided_at": "2026-08-10", "reason": "pokemon-card.com index 外 HR (Gardevoir&Sylveon-GX)",    "ref": "done.md rescue not_found"},
+    "CLF-002":   {"decided_at": "2026-08-10", "reason": "Classic デッキ 公式 index 外",                            "ref": "done.md 諦め6件 (CLF-002 auto 依頼で確定)"},
+    "CLF-015":   {"decided_at": "2026-08-10", "reason": "Classic デッキ 公式 index 外",                            "ref": "done.md 諦め6件"},
+    "CLK-008":   {"decided_at": "2026-08-10", "reason": "Classic デッキ 公式 index 外",                            "ref": "done.md 諦め6件"},
+    "EBB-045":   {"decided_at": "2026-08-10", "reason": "EX Battle Boost 公式 index 外",                           "ref": "done.md 諦め6件"}
+  }
+}
