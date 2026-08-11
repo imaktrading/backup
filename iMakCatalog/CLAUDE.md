@@ -231,6 +231,33 @@ Why (履歴):
 
 **取ってよいのは画像のみ**。name / rarity / set 等の値は絶対に第三者から取らない。
 
+### 画像 (images) を構造的に持たない internal dedup KEY 規約 (2026-08-11 制定)
+
+**catalog に画像が無いことが正しい record が一部ある**。以下の record は
+`images` が空のまま維持し、「画像欠損」として起票しない (=目視枠の対象外)。
+
+**該当条件**:
+- `source` が `HQ_vision_character_poc` 等、公式 card_number を持たない出所である
+- `specs.catalog_internal_key_note` に「公式 card_number 不明; Catalog 内で dedup KEY;
+  eBay 'C:Card Number' 列には送信しない、AI 索 = dedup index で利用」相当の
+  記述がある
+
+**該当実績**:
+- 2026-08-11: `DON-PRB02-BUGGY-GOLD` / `DON-PRB02-SHANKS-GOLD`
+  (依頼書 `2026-08-10_missing_images_blocking_listing_response.md` §「B群 4件着手 GO /
+  DON-*-GOLD は構造的に画像なしで正しい」で decisions 済)。
+
+**Why (背景)**:
+- これらは HQ 側 vision (PSA cert cache 実画像) で character 抽出し、dedup 用の
+  internal record として登録した KEY。公式 card_number が存在しないため公式画像も存在しない。
+- listing 生成器 (psa_to_csv 系) は `C:Card Number` にこれらを送信しない (dedup 索
+  のみで利用)。目視 viewer が空 images を「欠損」と判定して再起票する誤検知を防ぐため
+  明文化。
+
+**画像0件監視 (image_backfill 系) の対処**:
+- `source LIKE 'HQ_vision_%'` を除外条件に加える
+- viewer は該当 record を「目視対象外」ラベルで表示 (現時点は起票をスキップするだけで十分)
+
 ---
 
 ## Phase 計画
