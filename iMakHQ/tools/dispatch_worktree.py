@@ -41,11 +41,12 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -349,6 +350,57 @@ def _build_implement_prompt(wt: str, responses: list) -> str:
     )
 
 
+USAGE_LIMIT_FLAG = REVIEW_DIR / "usage_limit_until.txt"
+USAGE_LIMIT_FALLBACK_MIN = 60          # 時刻が読めない時の停止時間 (永久停止に倒さない)
+
+
+def _parse_reset_at(text: str, now=None):
+    """`You've hit your limit · resets 8:50pm` から**次の**リセット時刻を出す。
+
+    読めなければ None (呼び手が fallback 分だけ止める)。永久停止には倒さない。
+    """
+    m = re.search(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)", text or "", re.I)
+    if not m:
+        return None
+    h = int(m.group(1)) % 12
+    if m.group(3).lower() == "pm":
+        h += 12
+    now = now or datetime.now()
+    at = now.replace(hour=h, minute=int(m.group(2) or 0), second=0, microsecond=0)
+    return at if at > now else at + timedelta(days=1)    # 過ぎていれば翌日
+
+
+def _note_usage_limit(out: str, now=None) -> bool:
+    """出力が usage 上限なら、いつまで止めるかを記録して True."""
+    if "hit your limit" not in (out or ""):
+        return False
+    now = now or datetime.now()
+    until = _parse_reset_at(out, now) or (now + timedelta(minutes=USAGE_LIMIT_FALLBACK_MIN))
+    try:
+        USAGE_LIMIT_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        USAGE_LIMIT_FLAG.write_text(until.isoformat(timespec="seconds"), encoding="utf-8")
+    except OSError:
+        pass                                             # 記録できなくても判定は返す
+    return True
+
+
+def usage_limited_until(now=None):
+    """まだ止めているべきなら解除時刻。止める必要が無ければ None.
+
+    ★fail-open: flag が読めない/壊れている時は None (= 動かす)。
+      止める側に倒すと、誰も気づかないまま全 worktree が永久停止する。
+    """
+    try:
+        until = datetime.fromisoformat(USAGE_LIMIT_FLAG.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    now = now or datetime.now()
+    if now >= until:
+        USAGE_LIMIT_FLAG.unlink(missing_ok=True)         # 解除は自動 (人の操作を要らなくする)
+        return None
+    return until
+
+
 def _active_session(wt: str):
     """その worktree で稼働中の Claude セッション (対話含む)。判定不能なら None.
 
@@ -365,6 +417,11 @@ def _active_session(wt: str):
 
 def _dispatch(wt: str, dry_run: bool, mode: str = "draft") -> dict:
     label = TARGETS[wt][2]
+    # ★上限中は claude.exe を起こさない (起こしても 53バイトのログが増えるだけ)
+    until = usage_limited_until()
+    if until and not dry_run:
+        print(f"[{label}] ⛔ usage 上限中 (〜{until:%H:%M}) → 起動しない")
+        return {"worktree": wt, "status": "skip-usage-limit", "n": 0}
     if mode == "implement":
         if wt in NO_AUTO_IMPLEMENT:
             return {"worktree": wt, "status": "skip-no-auto-impl", "n": 0}
@@ -435,6 +492,15 @@ def _dispatch(wt: str, dry_run: bool, mode: str = "draft") -> dict:
     except subprocess.TimeoutExpired:
         out, status = "(timeout)", "timeout"
     log_path.write_text(out, encoding="utf-8")
+
+    # ★utilization 上限に当たったら、リセットまで**全 worktree の dispatch を止める**。
+    #   2026-08-10 実測: 17:45 に上限到達 → 20:49 まで3時間、15秒間隔で叩き続けて
+    #   **176本が「You've hit your limit」だけの 53バイトログ**になった (実走23本に対して)。
+    #   トークンは食わない (弾かれている) が、claude.exe を732回起こしており PC が無駄に回る。
+    if _note_usage_limit(out):
+        print(f"[{label}] ⛔ usage 上限。リセットまで dispatch を止めます")
+        return {"worktree": wt, "status": "usage-limit", "n": len(mine), "summary": "",
+                "log": str(log_path), "violations": []}
 
     # 実装モードでは `_response.md` の出現は正常 (窓口が書いたものを実装しただけ) なので検査しない
     violations = [] if mode == "implement" else _enforce_draft_only(wt, before)
