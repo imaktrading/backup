@@ -1400,3 +1400,28 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証✅ `git check-ignore -v .claude/settings.json` → `.gitignore:114:**/.claude/` (期待どおり untracked)
 - 検証⚠️ 「deny 発動の目視確認」は headless セッションでは実施不能 (現セッションが起動時に読み込んだ設定に基づく)。次の Catalog 通常セッションで `git push --force` を叩いて確認要 (`completion_must_be_proven`)
 - commit: 98caa61 (§2 revert), + 本 daily_report commit
+
+---
+
+## 2026-08-11 — SSOT契約 set_name_ebay canonical UPGRADE (churn 恒久停止の第1弾)
+
+### 決定事項
+- 決定1: 「修正が修正を生む」根因 = 派生値 set_name_ebay が公式でなく producer(catalog)⇔consumer(出品側)で ratify された契約無しの手動マップだった。**全4カテゴリで SSOT インターフェース契約 v1.1 を締結** ([[tcg_ssot_contract_initiative]])。Q0 確定=4ゲームとも eBay カテゴリ 183454 単一 (入稿CSV+生成器hardcode 実証) → master は tcg.json 1本。
+- 決定2: **3状態ルール** (master に canonical在→canonical / master無→英語自由文字列で維持(空より良い) / セット不明→空)。fail-closed は「カード同定」にのみ適用、Set等の説明文字列には適用しない (真値を捨てない)。旧「未マップ=空(2状態)」は誤り撤回。表記の正=長形(両形あれば人が読める形。A-2 集計で (b)410set が最大=canonical統一は不採用)。
+- 決定3: ★**master canonical が常に正しいとは限らない**。第1弾一括9,465行がテスト5件と衝突し撤回(backupから復元)。Golden Box(S8a-G)は「Collectionにするな」の明示テスト有=set code一致でも別セット。**テストゲートが止めた=契約CIゲートの意味**。Advisor GO: 長形22 / Golden Box・Si・CP4 現状維持(テストにwhy追記) / SM4p 121件 canonical。既出品 eBay revision は後回し(ユーザー決定)。
+
+### 変更
+- 変更: iMakCatalog/migrations/2026-08-10_ssot_canonical_upgrade_testgated.py 新規 — 現値ベース canonical UPGRADE 8,726行 (跨ぎ衝突=OP「25th Anniversary Collection」→Pokemon S8a をコード照合で機械除外 / blanked の set_code fallback 不採用=Golden Box 誤merge回避 / Si・CP4 除外)。commit 3382b46
+- 変更: iMakCatalog/migrations/2026-08-11_ssot_deferred_longform_and_sm4p.py 新規 — 長形15表記(Lost Origin→`Sword & Shield - Lost Origin`等)+ SM4p 121件(SM-P-145含)→`Sm4+: GX Battle Boost`。commit ea4367c、フォローアップ 2c1fda5
+- 変更: iMakCatalog/tests/ 4本更新 — test_op_promo_backfill/test_st21_22_25_restamp を Ultra Prism 327→206 (SM4p 意図的 un-blank) / test_op_lets_start_and_mc(Si)・test_batch_resolve(CP4) に「なぜこの値か」why-コメント追記 (master盲信の書換を却下する根拠=蒸し返し防止, Advisor依頼)。+ test_ssot_deferred_20260811.py 新規7 tests (2c1fda5)
+- 変更: (DB) set_name_ebay 計 **10,898行 canonical/長形化** (tag=ssot_canonical_upgrade_20260810)。Ultra Prism blanked 327→206。backup: pre_ssot_testgated_/pre_ssot_deferred_ + before-JSON 有
+
+### 検証(実出力)
+- 検証✅ pytest -q → **531 passed** (524 + 新規7) / pre-commit hook 231 pass
+- 検証✅ SM4p-001 → `Sm4+: GX Battle Boost` / ロストアビス → `Sword & Shield - Lost Origin` / 超電ブレイカー → `Sv8: Super Electric Breaker`
+- 検証✅ Ultra Prism blanked 残 = 206 (327-121 SM4p)
+- 検証✅ 跨ぎ衝突除外: S8a に化ける OP 行数 = 0 (コード照合が op06/eb01≠s8a を機械排除)
+- 検証✅ Advisor spot-check: 8,726行の危険語(Promo/Box/Anniversary/Collection/Deck/Champion) 該当4表記173行は全て実在セット名=Golden Box型ゼロ
+- 検証⚠️ 撤回1件: 第1弾一括9,465行はテスト衝突で全撤回(backup復元・524 green確認済)。教訓=systematic一括も盲目だと新churn
+- 未了(スコープ外): 導出化(焼き込み廃止=契約§1-5)は HQ co-sign 待ち。(b)自由文字列18,194/(c)判定不能3,853は3状態どおり不変
+- commit: 3382b46 / ea4367c / 2c1fda5 + 本 daily_report commit
