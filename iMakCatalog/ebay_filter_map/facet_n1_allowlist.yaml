@@ -23,16 +23,19 @@ pokemon_tcg:
   "Scarlet & Violet—Paradox Rift":
     - "拡張パック「古代の咆哮」"
     - "拡張パック「未来の一閃」"
-  "Sword & Shield—Astral Radiance":
+  # 2026-08-11: em-dash 表記 → 長形 (regular dash / bare) へ移行。理由 = Advisor 2026-08-11 §1
+  # (master に両形ある set は人が読める非-code 形を採る)。詳細は
+  # `test_ssot_deferred_20260811.py::TestLongform22Sets`.
+  "Astral Radiance":
     - "拡張パック「スペースジャグラー」"
     - "拡張パック「タイムゲイザー」"
-  "Sword & Shield—Chilling Reign":
+  "Sword & Shield - Chilling Reign":
     - "拡張パック「漆黒のガイスト」"
     - "拡張パック「白銀のランス」"
-  "Sword & Shield—Battle Styles":
+  "Sword & Shield - Battle Styles":
     - "拡張パック「一撃マスター」"
     - "拡張パック「連撃マスター」"
-    # 注: 「双璧のファイター」は Battle Styles か別セットか要確認 → allowlist 未登録 (候補で出す)
+    - "強化拡張パック「双璧のファイター」"  # 2026-08-11: 現行 DB で Battle Styles に統合済 (allowlist 登録)
   # ── XY: 英語1セット = JP 2 半セット ──
   "XY":
     - "拡張パック「コレクションX」"
@@ -87,7 +90,7 @@ pokemon_tcg:
   "Sun & Moon—Guardians Rising":   # SM2 = 月光+島々 (均衡 55/57)
     - "拡張パック「アローラの月光」"
     - "拡張パック「キミを待つ島々」"
-  "Sword & Shield—Lost Origin":    # ロストアビス
+  "Sword & Shield - Lost Origin":    # ロストアビス (2026-08-11 em-dash → regular dash)
     - "拡張パック「ロストアビス」"
   "Galactic's Conquest":           # ギンガの覇道
     - "拡張パック「ギンガの覇道」"
