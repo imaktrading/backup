@@ -115,16 +115,42 @@ def audit(report_path: Path) -> dict:
         elif needs and not done and stock == "✕" and ebay > 0:
             inconsistencies["pending_not_handled"].append(rec)
 
+    # ★ 2026-08-11: シート重複行 (同一 SKU が ✕/◎ 両方に登録) 由来の不整合を分離する。
+    #   heal 側 (audit_and_heal) は既に保留しているので、audit がこれを「不整合」として
+    #   毎回アラートすると **直せないものを鳴らし続ける = アラート疲労**になり、
+    #   本物の取下げ漏れが埋もれる。件数は消さずに「保留中」として別掲する (silent 化しない)。
+    try:
+        from audit_and_heal import find_conflicting_sku_rows  # noqa: PLC0415
+        conflicts = find_conflicting_sku_rows(sku_rows)
+    except Exception as e:
+        _log(f"  [WARN] conflict 判定 skip ({type(e).__name__}: {e}) = 従来どおり全件を不整合として扱う")
+        conflicts = []
+    conflict_keys = {(c["item_id"], c["sku"]) for c in conflicts}
+    held = {"zero_not_applied": [], "restore_not_applied": []}
+    if conflict_keys:
+        for key in held:
+            keep = [r for r in inconsistencies[key]
+                    if (r["item_id"], r["sku"]) not in conflict_keys]
+            held[key] = [r for r in inconsistencies[key]
+                         if (r["item_id"], r["sku"]) in conflict_keys]
+            inconsistencies[key] = keep
+
+    n_held = sum(len(v) for v in held.values())
     total_inconsistencies = sum(len(v) for v in inconsistencies.values())
     _log(f"\n=== 不整合 集計 ===")
     _log(f"  取下げ未反映 (対処済T+✕+qty>0): {len(inconsistencies['zero_not_applied'])} 件")
     _log(f"  復活未反映 (対処済T+◎+qty=0): {len(inconsistencies['restore_not_applied'])} 件")
     _log(f"  未対処 (対処要T+✕+qty>0): {len(inconsistencies['pending_not_handled'])} 件")
     _log(f"  計: {total_inconsistencies} 件")
+    if n_held:
+        _log(f"  (別掲) 重複行 conflict で保留中: {n_held} 件 / {len(conflicts)} 組 "
+             f"= シート側の重複解消待ち。heal も保留済のためアラート対象から除外")
 
     return {
         "total": total_inconsistencies,
         "details": inconsistencies,
+        "held_conflicts": held,
+        "conflict_pairs": len(conflicts),
         "ts": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -174,6 +200,18 @@ def send_alert_email(result: dict, report_name: str):
             )
         if len(items) > 20:
             body_lines.append(f"  ... +{len(items) - 20} 件")
+
+    # 保留中 (シート重複行 conflict) は別掲。件数は必ず見せる = silent drop しない
+    held = result.get("held_conflicts") or {}
+    n_held = sum(len(v) for v in held.values())
+    if n_held:
+        body_lines.append(f"\n[保留中: 重複行 conflict {n_held} 件 / {result.get('conflict_pairs', 0)} 組]")
+        body_lines.append("  同一 SKU が ✕/◎ 両方の行に登録されており、自動修復すると往復するため保留。")
+        body_lines.append("  → シート側の重複解消が必要 (依頼書: 2026-08-11_sku_sheet_duplicate_rows_conflict.md)")
+        for key in ("zero_not_applied", "restore_not_applied"):
+            for it in (held.get(key) or [])[:10]:
+                body_lines.append(f"  row{it['row']} {it['item_id']} ({it['size']}/{it['color']}) "
+                                  f"eBay_qty={it['ebay_qty']}")
 
     try:
         _send_via_gmail(addr, pw, to, subj, "\n".join(body_lines))
