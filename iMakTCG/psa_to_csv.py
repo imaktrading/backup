@@ -2890,7 +2890,7 @@ def main():
             sys.path.insert(0, _pf_dir)
         import psa_preflight as _pf
         _con = _sq3.connect(_pf.CATALOG_DB)
-        _drop, _kept, _unknown = {}, [], 0
+        _drop, _kept, _unknown, _cls = {}, [], 0, {}
         for _c in cert_numbers:
             _f = _pf.PSA_CERTS_DIR / f"{_c}.json"
             if not _f.exists():
@@ -2899,6 +2899,7 @@ def main():
                 _meta = json.loads(_f.read_text(encoding="utf-8"))
                 _r = _pf.classify(str(_c), _meta, _con)
                 _st = _r.get("status")
+                _cls[_c] = _r
             except Exception:
                 _kept.append(_c); _unknown += 1; continue      # 例外も残す
             if _st in ("GAP", "OUT-OF-SCOPE"):
@@ -2919,11 +2920,40 @@ def main():
                 except Exception:
                     pass                       # 読めなければ落とさない
             _kept.append(_c)
+        # ★2026-08-11: **live に同じカードが既にある cert** も枠の前で落とす。
+        #   後段の重複くん excluder が CSV から物理除外するので、枠に入れても必ず消える
+        #   (2026-08-10 実走: CSV 7件 → 重複除外 2件)。判定は dup_guard の live index
+        #   (= eBay ActiveList と突合済) を使い、出品側と同じ canonical KEY で見る。
+        try:
+            sys.path.insert(0, _pf_dir)
+            import dup_guard as _dg
+            import sheet_io as _si
+            _sheet_rows_for_dedupe = _si._product_ws().get_all_values()
+            _cache = _dg._load_live_cache() or {}
+            _titles = _cache.get("titles", _cache) if isinstance(_cache, dict) else {}
+            _active = set(_titles.keys())
+            if _active:
+                _idx, _ = _dg.live_card_index(_sheet_rows_for_dedupe, _titles, _active)
+                _dup = []
+                for _c in list(_kept):
+                    _r2 = _cls.get(_c)
+                    if not _r2 or not _r2.get("product_id"):
+                        continue                       # KEY を作れない = 判定不能 → 残す
+                    _k = _dg.group_key(f"{_r2.get('category')}:{_r2['product_id']}")
+                    if _k in _idx:
+                        _dup.append(_c); _kept.remove(_c)
+                if _dup:
+                    _drop["LIVE-DUP"] = _dup
+            else:
+                print("  ℹ️ live cache が空 → 重複の前置きは skip (判定不能を除外に倒さない)")
+        except Exception as _de:
+            print(f"  ⚠️ 重複の前置き skip: {type(_de).__name__}: {_de}")
         _con.close()
         if _drop:
             for _st, _cs in _drop.items():
                 _label = {"GAP": "catalog未収録", "OUT-OF-SCOPE": "参入しないゲーム",
-                          "NO-IMAGE": "catalogに画像が無く目視不能"}.get(_st, _st)
+                          "NO-IMAGE": "catalogに画像が無く目視不能",
+                          "LIVE-DUP": "同じカードが既に出品中(後段で必ず除外される)"}.get(_st, _st)
                 print(f"  ⏭️ 枠を選ぶ前に除外 [{_st}={_label}]: {len(_cs)}件 → {_cs[:6]}")
             print(f"     (従来は10件に絞った後で落ちていた分。GAP は missing_models 経由で catalog へ)")
             cert_numbers = _kept

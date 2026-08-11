@@ -113,3 +113,32 @@ def test_prefilter_drop_set_is_explicit():
     """落とす条件は3つだけ。増やす時はテストも増やす。"""
     for label in ("catalog未収録", "参入しないゲーム", "catalogに画像が無く目視不能"):
         assert label in SRC
+
+
+# ----- LIVE-DUP (2026-08-11: 後段で必ず消える分も枠の前で落とす) -----
+
+def test_live_dup_is_dropped_before_the_batch():
+    """live に同じカードがある cert は重複くんが CSV から物理除外する = 枠に入れても消える。
+
+    2026-08-10 実走: CSV 7件 → 重複除外 2件。枠を2つ無駄にしていた。
+    """
+    assert '"LIVE-DUP"' in SRC
+    assert "同じカードが既に出品中" in SRC
+
+
+def test_live_dup_uses_same_canonical_key_as_dedupe():
+    """判定は出品側と同じ canonical KEY (dup_guard.group_key)。独自実装しない。"""
+    assert "dup_guard as _dg" in SRC
+    assert "_dg.group_key(" in SRC
+    assert "_dg.live_card_index(" in SRC
+
+
+def test_live_dup_skipped_when_cache_is_empty():
+    """live cache が空 = 判定不能。除外に倒さない (0件を『重複なし』と誤読しない)。"""
+    assert "live cache が空 → 重複の前置きは skip" in SRC
+
+
+def test_live_dup_keeps_cert_without_product_id():
+    """KEY を作れない cert は残す (判定不能を落とさない)。"""
+    i = SRC.find("_r2 = _cls.get(_c)")
+    assert i > 0 and "KEY を作れない = 判定不能 → 残す" in SRC[i:i + 300]
