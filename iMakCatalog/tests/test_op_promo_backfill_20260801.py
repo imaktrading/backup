@@ -36,15 +36,18 @@ class TestOpPromoBackfill(unittest.TestCase):
         rec = api.lookup(category="one_piece_tcg", product_id="OP05-119_p8")
         self.assertFalse((rec or {}).get("specs", {}).get("set_name_ebay"))
 
-    def test_ultra_prism_327_not_refilled(self):
-        """327 (pokemon_tcg 誤マップ空欄化) が backfill で埋め戻されていない。"""
+    def test_ultra_prism_206_still_blanked(self):
+        """Ultra Prism 誤マップ空欄化の残 206件が blank のまま (推測で埋めない)。
+        当初327件だが、うち SM4p(GXバトルブースト)121件は SSOT契約(Advisor 2026-08-11 §4)で
+        canonical `Sm4+: GX Battle Boost`(master実在)へ意図的に再populate。327-121=206 が残 blank。
+        ウルトラサン/ムーン/フォースは master に canonical 無し=blank 維持が正。"""
         con = sqlite3.connect(str(api._DB_PATH))
         n = con.execute(
             "SELECT count(*) FROM products WHERE "
             "json_extract(specs,'$.set_name_ebay_source')="
             "'blanked_by_ultra_prism_mismap_20260731'").fetchone()[0]
         con.close()
-        self.assertEqual(n, 327)
+        self.assertEqual(n, 206)
 
 
 if __name__ == "__main__":

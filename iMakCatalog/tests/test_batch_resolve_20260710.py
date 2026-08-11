@@ -124,6 +124,8 @@ def test_cp4_075_m_lucario_ex_added():
     #   CP4 は printed rarity 無し(全リバースミラーホロ)= C:Rarity 空が正 (HQ 2026-07-02 確定)。
     r = P.lookup_pokemon("POKEMON JAPANESE PREMIUM CHAMPION PACK", "075", "M LUCARIO EX", verbose=False)
     assert r is not None and r["card_id"] == "CP4-075"
+    # なぜ 'Premium Champion Pack' か: 意図値。master の code形 'CP4: Premium Champion Pack'
+    # には寄せない (Advisor 2026-08-11 §3: 読める形を維持)。master 盲信の書換提案は却下 (蒸し返し防止)。
     assert r.get("set_name_ebay") == "Premium Champion Pack"
     assert not r.get("rarity")  # CP4 は rarity 記号を持たない
 

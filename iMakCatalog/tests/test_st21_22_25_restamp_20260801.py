@@ -132,9 +132,11 @@ class TestInvariantsUntouched(unittest.TestCase):
             con.close()
         return n
 
-    def test_ultra_prism_327_still_blanked(self):
+    def test_ultra_prism_206_still_blanked(self):
+        # 当初327。SM4p 121件は SSOT契約(Advisor 2026-08-11 §4)で canonical 再populate
+        # したため 327-121=206 が残 blank (ウルトラサン/ムーン/フォース = master に canonical 無し)。
         self.assertEqual(
-            self._count_tag("blanked_by_ultra_prism_mismap_20260731"), 327)
+            self._count_tag("blanked_by_ultra_prism_mismap_20260731"), 206)
 
     def test_backfill_21_still_promo_cards(self):
         self.assertEqual(

@@ -62,6 +62,9 @@ class TestSiStartDeck100(unittest.TestCase):
         r = pc.lookup_pokemon("POKEMON JAPANESE START DECK 100", "001", "VENUSAUR V")
         self.assertIsNotNone(r)
         self.assertEqual(r.get("card_id"), "SI-001")
+        # なぜ 'Start Deck 100' か: これは意図値。master の code形 'Si: Start Deck 100' には
+        # 寄せない (Advisor 2026-08-11 §3 + §1 convention=両形あれば人が読める形を採用)。
+        # master 盲信で 'Si:' に書換える提案が来ても却下 (蒸し返し防止)。
         self.assertEqual(r.get("set_name_ebay"), "Start Deck 100")
         self.assertFalse(r.get("rarity"))  # deck=印刷レアリティ無し=空欄が正
 
