@@ -1838,6 +1838,44 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   現時点で ×8 到達はゼロ = 今回の変更で消える行も増える行も無い (= 挙動の後退なし)。数日後に
   ×8 到達した行から自動的に別枠へ移る。
 
+## 2026-08-11 — 残務ゼロ化: 重複行の zero↔restore 往復を停止 + 持ち越し3件を実機で決着
+
+### ① ★重複行 conflict ガード新設 (heal の無限往復を停止)
+- 決定: audit の「取下げ未反映 9 件」が毎回出るので中身を追ったところ、**08-08 の 9 件とは別セット**
+  (重複ゼロ) で、**サイクルを跨いだ往復**だと判明。
+  真因は **SKU詳細シートの重複行**: 同一 eBay variation (listing_id, SKU UUID) を指す行が
+  size 表記違い ("L" と "L-R") で 2 つあり、**片方 ✕ / 片方 ◎**。
+  cycle1 で ✕ 行を見て qty=0 → cycle2 で ◎ 行が「復活未反映」になり qty=1 → cycle3 で…と往復する。
+  実測: **矛盾 12 組 / 重複そのものは 56 組 136 行**。
+- 実害: eBay API を毎 cycle 無駄打ち + **audit が永久に「不整合あり」= 本物の取下げ漏れが埋もれる**。
+- 変更 [audit_and_heal.py](../../iMakeBayAPI/inventory_monitor/audit_and_heal.py):
+  `find_conflicting_sku_rows()` (シートから ◎/✕ 同居の (listing, SKU) を検出) +
+  `filter_conflicting_targets()` (zero / restore の**両方から除去**)。
+  **`pending` (未対処の取下げ = 危険側) は除去しない**。相反する情報には自動アクションを取らない
+  (fail-closed)、件数は毎回ログに出す (silent 化しない)。
+- 検証: [tests/test_heal_conflict_guard.py](../../iMakeBayAPI/inventory_monitor/tests/test_heal_conflict_guard.py)
+  **8 件** (実測ケース L/L-R / 重複だが一致は止めない / listing 違いは別物 / 非UUID・空 mark 無視 /
+  除去 / 無関係な行は残す / pending は止めない / conflict 無しは no-op)。inventory_monitor **133 pass**。
+- **実機効果**: heal 対象 **16 件 → 4 件** (取下げ 9→4 / 復活 7→0、12 件を保留)。
+  残った 4 件 (listing 358793942242 の XS/S/M/L) は矛盾なしの本物 → **qty=0 + verify 済で閉鎖**。
+
+### ② K列同期のカバレッジ (293/1147) → **仕様どおり。バグではない**
+- `match_qty_updates` は **対処済 (B=TRUE) 行を意図的にスキップ**する (古い report で
+  auto_qty_zero の結果を巻き戻さないため)。実測: 対処済 TRUE 774 / FALSE 373 →
+  **同期対象は 373 行**で、うち report に載る 293 が match。sku_id 空は 15 行のみで無関係。
+- 結果として対処済行の K は stale になり、「仕入元✕ × K>0 = 181」の**表示上の偽陽性**を生むが、
+  実 report と突合する audit では **未対処 0 件**。取下げ漏れではない。調査完了として閉じる。
+
+### ③ 持ち越しの実機確認 (いずれも問題なし)
+- **ヨドバシ URL 逆引き (08-03 commit 3900ad9)**: 予告どおり効いていた。
+  row827 → D 解除 + **M=44,000** / row832 → D 解除 + **M=67,760** / row749 M=34,650 / row815 M=20,790。
+  row745 は snapshot にキー無し → **D=○ 維持 (誤復活なし)**。row834 は snapshot が
+  in_stock=True に変わったための正当な復活 (M=85,800)。
+- **08-08 の取下げ漏れ 9 件**: 08-11 の新しい report で突合し **当時の 9 件は 0 件** = 解消済み。
+- **ZOZO scraper (08-10 commit 08c8a03)**: 実 URL で live 実行し **8 SKU 取得成功**
+  (色2×サイズ4、in_stock/excluded 付き、error なし)。シート行は未登録のため巡回での確認は
+  HQ の出品後 (こちらの待ちではない)。
+
 ## 2026-08-09 — cycle レポートメールの送信を retry 化 (一発勝負だった) + 送信証跡ログ新設
 
 ### 事象 — 08-09 14:45 LOW cycle の通知が desktop alert file 送りになった

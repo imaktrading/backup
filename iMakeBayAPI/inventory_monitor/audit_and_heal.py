@@ -179,6 +179,51 @@ def verify_after_upload(report_path_new: Path, target_records: list,
     return {"confirmed": confirmed, "still_wrong": still_wrong}
 
 
+def find_conflicting_sku_rows(sku_rows: list) -> list:
+    """同じ eBay variation を指す行が複数あり、**仕入元判定が食い違っている**組を返す。
+
+    2026-08-11 実測: montbell の size "L" と "L-R" が同一 SKU UUID を共有し (56 組 136 行)、
+    片方 ✕ / 片方 ◎ になっていた。この状態を heal に通すと **サイクルを跨いで往復**する:
+      cycle1: ✕ の行を見て qty=0 → cycle2: ◎ の行が「復活未反映」になり qty=1 →
+      cycle3: ✕ の行が「取下げ未反映」になり qty=0 → …
+    eBay API を毎回無駄打ちし、audit が永久に「不整合あり」を出して本物の取下げ漏れを埋もれさせる。
+    相反する情報に対しては **どちらも自動実行しない** (fail-closed) のが正しい。
+
+    Returns: [{"item_id", "sku", "rows": [(row_index, mark), ...]}]
+    """
+    groups: dict = {}
+    for i, r in enumerate(sku_rows[1:], 2):
+        if len(r) < 12:
+            continue
+        iid, sku, mark = r[3].strip(), r[5].strip(), r[8].strip()
+        if not iid or not UUID_RE.match(sku) or mark not in ("◎", "✕"):
+            continue
+        groups.setdefault((iid, sku), []).append((i, mark))
+    out = []
+    for (iid, sku), rows in sorted(groups.items()):
+        if len({m for _, m in rows}) > 1:      # ◎ と ✕ が同居 = 矛盾
+            out.append({"item_id": iid, "sku": sku, "rows": rows})
+    return out
+
+
+def filter_conflicting_targets(inconsistencies: dict, conflicts: list) -> int:
+    """矛盾している (listing_id, SKU) を zero / restore の両方から除去する。
+
+    `pending` (対処要T+✕+qty>0 = 未対処の取下げ) は **除去しない**。
+    そこを止めると本物の取下げ漏れを見逃すため (危険側)。
+    """
+    keys = {(c["item_id"], c["sku"]) for c in conflicts}
+    if not keys:
+        return 0
+    removed = 0
+    for key in ("zero", "restore"):
+        before = len(inconsistencies.get(key, []))
+        inconsistencies[key] = [r for r in inconsistencies.get(key, [])
+                                if (r["item_id"], r["sku"]) not in keys]
+        removed += before - len(inconsistencies[key])
+    return removed
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="不整合 audit + 自動修復 + upload 後 検証")
@@ -214,8 +259,27 @@ def main():
     _log(f"  未対処 (対処要T+✕+qty>0): {n_pending} 件")
     total = n_zero + n_restore + n_pending
 
+    # ★ 2026-08-11: 同一 (listing_id, SKU UUID) が zero と restore の両方に載るケースを除外。
+    #   原因はシート側の重複行 (例 montbell の size "L" と "L-R" が同じ eBay variation を指し、
+    #   片方 ✕ / 片方 ◎)。そのまま heal すると **同じ variation を qty=0 にして直後に qty=1 に戻す**
+    #   往復になり、eBay API を毎 cycle 無駄打ちしたうえ audit が永久に「不整合あり」を出し続ける
+    #   (= 本物の取下げ漏れが埋もれる)。相反する指示に対して自動アクションは取らない (fail-closed)。
+    conflicts = find_conflicting_sku_rows(sku_rows)
+    if conflicts:
+        removed = filter_conflicting_targets(inconsistencies, conflicts)
+        _log(f"  ⚠️ 重複行 conflict {len(conflicts)} 組 (同一 SKU が ✕/◎ 両方に登録) → "
+             f"heal 対象から {removed} 件を保留。シート側の重複解消が必要")
+        for c in conflicts[:10]:
+            rows = " / ".join(f"row{i}={m}" for i, m in c["rows"])
+            _log(f"     listing {c['item_id']} sku={c['sku'][:8]} : {rows}")
+        n_zero = len(inconsistencies["zero"])
+        n_restore = len(inconsistencies["restore"])
+        _log(f"  → 保留後: 取下げ {n_zero} 件 / 復活 {n_restore} 件 (未対処 {n_pending} 件は不変)")
+    total = n_zero + n_restore + n_pending
+
     if total == 0:
-        _log("\n[OK] 不整合 0 件、 heal skip")
+        _log("\n[OK] 不整合 0 件、 heal skip"
+             + (f" (重複 conflict {len(conflicts)} 件は保留中 = 要シート修正)" if conflicts else ""))
         return
 
     if args.dry_run:
