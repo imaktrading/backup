@@ -9,6 +9,7 @@
 これは check_csv の出品時ゲートにも組込む想定 (fail-closed: 矛盾は出品ブロック)。
 """
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -20,22 +21,24 @@ except Exception:
 
 DB = r"C:\dev\iMak_data\catalog\products.sqlite"
 
-# set_name_ebay の世代プレフィックス → 妥当な発売年レンジ
-ERA_YEARS = {
-    "Black & White": (2011, 2014),
-    "XY": (2013, 2017),
-    "Sun & Moon": (2017, 2020),
-    "Sword & Shield": (2019, 2023),
-    "Scarlet & Violet": (2022, 2026),
-}
-
-# [3] 同一set複数total の whitelist (= verified-legit な多total。誤マップではない)。
-# 明示列挙のみ (logic を緩めない=未知の誤マップは引き続き検出)。各エントリに正当理由必須。
-_KNOWN_MULTI_TOTAL_OK = {
-    # 拡張パック「サン＆ムーン」(SM1p /051) と コレクションサン/ムーン (SM1S/SM1M /060) が
-    # 公式EN同名 "Sun & Moon"・別total で正当 (異なるJPセットだが英語名が同一)。2026-06-07 HQ確認。
-    "Sun & Moon",
-}
+# ============================================================================
+# 契約 v1.2 (2026-08-10 co-sign): set 整合の SSOT は iMakCatalog/set_reference.py に移設。
+# ここでは audit CLI / 内部 audit() のみ保持。set_total_reference / row_set_issue /
+# eb_era / card_total / ERA_YEARS は catalog helper から re-export する
+# (HQ 内他モジュールが古い import path で壊れないよう互換用の shim を残す)。
+# ============================================================================
+_CATALOG = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          "..", "..", "iMakCatalog"))
+if _CATALOG not in sys.path:
+    sys.path.insert(0, _CATALOG)
+from set_reference import (  # noqa: E402
+    ERA_YEARS,
+    _KNOWN_MULTI_TOTAL_OK,
+    card_total,
+    eb_era,
+    row_set_issue,
+    set_total_reference,
+)
 
 
 def _is_excluded_pid(pid):
@@ -64,14 +67,6 @@ def pid_era(pid):
     if re.match(r"^S\d", pid):
         return "Sword & Shield"
     return "?"
-
-
-def eb_era(eb):
-    """set_name_ebay → 世代 (prefix から)。"""
-    for era in ("Black & White", "XY", "Sun & Moon", "Sword & Shield", "Scarlet & Violet"):
-        if eb.startswith(era):
-            return era
-    return "bare/other"
 
 
 def audit(db=DB):
@@ -121,55 +116,6 @@ def audit(db=DB):
                     prefs = sorted(set(set_pids[eb][t]))
                     total_viol.append((eb, t, n, major, prefs))
     return era_viol, year_viol, total_viol
-
-
-def set_total_reference(db=DB):
-    """{set_name_ebay: 主流(最多) card_number_total} を返す。出品時の整合チェック用参照。
-
-    1セット=1total が原則なので、最多totalを「正」とする。check_csv が CSV各行の
-    C:Set ↔ カード番号total を照合して矛盾(誤マップ)を出品前に弾くのに使う。
-    """
-    import collections
-    con = sqlite3.connect(db)
-    con.row_factory = sqlite3.Row
-    tots = collections.defaultdict(collections.Counter)
-    for r in con.execute("SELECT specs FROM products WHERE category='pokemon_tcg'"):
-        try:
-            sp = json.loads(r["specs"]) if r["specs"] else {}
-        except Exception:
-            continue
-        eb = sp.get("set_name_ebay", "")
-        t = str(sp.get("card_number_total", "")).strip()
-        if eb and t:
-            tots[eb][t] += 1
-    return {eb: c.most_common(1)[0][0] for eb, c in tots.items()}
-
-
-def card_total(card_number):
-    """'097/080' → '080' (分母=セット総数, 先頭0保持でcatalog値と一致)。取れなければ ''。"""
-    m = re.search(r"/\s*(\d+)", str(card_number or ""))
-    return m.group(1) if m else ""
-
-
-def row_set_issue(set_name, card_number, ref):
-    """CSV1行の C:Set ↔ カード番号total 整合チェック。矛盾なら理由文字列、OKなら None。
-
-    ref = set_total_reference()。set が参照に無い/番号取れない場合は判定不能で None
-    (fail-closedは呼出側で「不明はskip」運用)。
-    """
-    set_name = (set_name or "").strip()
-    t = card_total(card_number)
-    if not set_name or not t or set_name not in ref:
-        return None
-    # verified-legit な多totalセット (異なるJPセットの公式EN同名等) は total 照合しない
-    # (= 少数派totalを誤ブロックしない。例 Sun & Moon の SM1p/051 を SM1S/060基準で弾かない)
-    if set_name in _KNOWN_MULTI_TOTAL_OK:
-        return None
-    exp = ref[set_name]
-    if t != exp:
-        return (f"Set↔カード番号 不整合: Set='{set_name}'(総数/{exp}) なのに カード/{t} "
-                f"→ set_name_ebay 誤マップ疑い (catalog要確認)")
-    return None
 
 
 def main():

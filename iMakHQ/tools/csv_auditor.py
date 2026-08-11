@@ -1217,8 +1217,11 @@ def _still_required_spec(card_number: str, card_name: str, field: str,
 
     ★2026-08-09: **判定キーを canonical product_id にする**。identity 先頭は
       印刷番号 (`746/742`) で、除外リストの prefix (`mc-`) と噛み合わない。
-      cert から canonical PID を引けたらそちらを使い、引けなければ従来どおり
-      identity 先頭で判定する (= 悪化させない)。
+    ★2026-08-11: 契約 v1.2 §追加条 (2026-08-10 co-sign) に従い、**カード番号 key に
+      印刷番号 fallback を使わない**。canonical PID を引けなければ card_number は空で
+      渡す (=数字 prefix ベースの除外は発火しない、card_type ベースの除外だけ生かす)。
+      → 印刷番号での偶発一致で生成側の脱線を隠すのを止めつつ、Energy Marker/Resource
+      等の card_type ベース除外 (canonical 不要) は退化させない。
     """
     if not str(field or "").startswith("C:"):
         return True
@@ -1230,9 +1233,11 @@ def _still_required_spec(card_number: str, card_name: str, field: str,
     if field not in REQUIRED_SPECIFICS:
         return True                       # そもそも必須リスト外 = ここで判定しない
     pid = canonical_pid_for_item(item_id)
-    key = pid or card_number
-    if field not in required_specifics_for_card(key, card_name):
-        return False                      # set 単位で「公式に存在しない」= 退役
+    # 印刷番号 fallback は使わない (契約 v1.2)。canonical が引けない時は card_number 空で
+    # 呼び、card_type ベースの除外 (Energy Marker / Resource 等) のみ生かす。
+    key_for_num = pid or ""
+    if field not in required_specifics_for_card(key_for_num, card_name):
+        return False                      # set/type 単位で「公式に存在しない」= 退役
     # ★set 単位のリストでは **1枚だけ公式に無い** ケースを表現できない (2026-08-09 実測)。
     #   S10b は 93件中 85件 (91%) が rarity を持つので prefix 除外にすると
     #   欠落85枚を永久に見逃す。一方 S10b-055 (かがやくイーブイ) は公式に rarity 表記が無い。

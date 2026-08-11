@@ -330,7 +330,32 @@ def load_cost_data(csv_path):
 
 
 # ===== 内部バリデーション =====
-_CATALOG_SET_REF = None  # {set_name_ebay: 主流total} を一度だけ catalog から構築・cache
+# ★2026-08-11: 契約 v1.2 (co-sign) に従い、set 整合の helper は **iMakCatalog 経由**で呼ぶ。
+#   旧 import path (iMakHQ/tools/catalog_set_audit) は catalog 境界を越えていたため廃止。
+#   catalog 側 (iMakCatalog/set_reference.py) が SSOT。ここでは cache だけ持つ。
+_CATALOG_SET_REF = None  # {set_name_ebay: 主流total} を一度だけ catalog helper から構築・cache
+_POKEMON_SET_MASTER = None  # category 183454 (Pokemon TCG) の master set_name_ebay 集合
+
+
+def _pokemon_set_master():
+    """catalog helper から Pokemon (183454) の master set_name_ebay 集合を取得。
+
+    ★2026-08-11: 契約 v1.2 §4 CI 「183454 master に無い値が CSV に出ていない」用。
+    生成側の脱線 (master 外の自由文字列が C:Set に混入) を出品前に弾く。
+    catalog 読取失敗時は空集合を返して判定を降ろす (fail-open で誤ブロック回避)。
+    """
+    global _POKEMON_SET_MASTER
+    if _POKEMON_SET_MASTER is None:
+        try:
+            import sys as _sys, os as _os
+            _cat = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakCatalog")
+            if _cat not in _sys.path:
+                _sys.path.insert(0, _cat)
+            from set_reference import pokemon_set_master
+            _POKEMON_SET_MASTER = pokemon_set_master()
+        except Exception:
+            _POKEMON_SET_MASTER = set()
+    return _POKEMON_SET_MASTER
 
 
 def _catalog_set_consistency(set_name, card_number, year=""):
@@ -342,10 +367,10 @@ def _catalog_set_consistency(set_name, card_number, year=""):
     global _CATALOG_SET_REF
     try:
         import sys as _sys, os as _os
-        _t = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakHQ", "tools")
-        if _t not in _sys.path:
-            _sys.path.insert(0, _t)
-        from catalog_set_audit import set_total_reference, row_set_issue, eb_era, ERA_YEARS
+        _cat = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakCatalog")
+        if _cat not in _sys.path:
+            _sys.path.insert(0, _cat)
+        from set_reference import set_total_reference, row_set_issue, eb_era, ERA_YEARS
         if _CATALOG_SET_REF is None:
             _CATALOG_SET_REF = set_total_reference()
         # (A) total 整合
@@ -450,12 +475,13 @@ def validate_row(row, row_idx):
         issues.append(("ERROR", f"価格が数値でない: {price}"))
 
     # --- 必須Item Specifics (card-aware: DON!!カードは C:Rarity 非該当) ---
-    # ★2026-08-09: 判定キーは **canonical product_id**。`C:Card Number` は
-    #   印刷された「番号/総数」(`746/742`) で、除外リストの prefix (`mc-`) と噛み合わない。
-    #   One Piece は `OP04-119` 形式なので偶然当たっていたが、**Pokemon は一度も
-    #   当たっていなかった** (7/29-7/30 に足した11個の prefix が全部死んでいた)。
-    #   canonical が引けなければ従来どおり印刷番号 (悪化させない)。
-    _card_key = _canonical_pid(cert) or get_col(row, "C:Card Number")
+    # ★2026-08-11: 契約 v1.2 §追加条 (2026-08-10 co-sign) に従い、判定キーは
+    #   **canonical product_id のみ**。印刷番号 (`746/742`) を fallback で使わない。
+    #   canonical が引けない場合は「除外を判定できない = 必須のまま扱う」に倒す
+    #   (fail-closed: 誤って rarity を消すより defect のまま残す方が安全)。
+    #   経緯: 7/29-7/30 に足した11個の Pokemon prefix が印刷番号では**1件も発火せず**、
+    #   同じ pattern を fallback で許すと生成側の脱線 (canonical 未登録) を隠す。
+    _card_key = _canonical_pid(cert)
     for spec in required_specifics_for_card(_card_key,
                                             get_col(row, "C:Card Type")):
         val = get_col(row, spec)
@@ -477,6 +503,18 @@ def validate_row(row, row_idx):
                                          get_col(row, "C:Year Manufactured"))
     if _setissue:
         issues.append(("ERROR", _setissue))
+
+    # --- 183454 master 突合 CI (契約 v1.2 §4, 2026-08-11) ---
+    # Pokemon (category 183454) の C:Set 値は必ず catalog master に存在すること。
+    # 生成側で master 外の自由文字列が混入していないかを毎行チェックする
+    # (master 読取失敗時=空集合の時はスキップ、fail-open で誤ブロック回避)。
+    if category == "183454":
+        c_set = (get_col(row, "C:Set") or "").strip()
+        master = _pokemon_set_master()
+        if c_set and master and c_set not in master:
+            issues.append(("ERROR",
+                f"C:Set='{c_set}' が catalog 183454 master に存在しない "
+                f"(生成側で master 外の値が混入)"))
 
     return issues
 
