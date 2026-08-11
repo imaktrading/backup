@@ -2877,9 +2877,66 @@ def main():
     except Exception as _e2:
         print(f"  ⚠️ 目視済スキップ読込失敗(無視して継続): {type(_e2).__name__}: {_e2}")
 
-    # 一回 10 件まで固定 (Cloudflare bot 検出回避、2026-05-06)
+    # ★2026-08-11: **枠を選ぶ前に** catalog で解決できない cert を落とす (Advisor 依頼)。
+    #   従来は 10件に絞ってから GAP/対象外が落ちていたので、**枠を食ってから消えて**
+    #   入稿が 2〜6件に張り付いていた。判定は psa_preflight.classify (出品と同一 resolver)。
+    #   落とすのは GAP (catalog 未収録) と OUT-OF-SCOPE (参入しないゲーム) だけ。
+    #   ★判定できないもの (PSA cache 無し / 例外) は **落とさない**。
+    #     「読めなかった」を「対象外」に倒すと出品機会を静かに失う (fail-closed の向きが逆)。
+    try:
+        import sqlite3 as _sq3
+        _pf_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakHQ", "tools")
+        if _pf_dir not in sys.path:
+            sys.path.insert(0, _pf_dir)
+        import psa_preflight as _pf
+        _con = _sq3.connect(_pf.CATALOG_DB)
+        _drop, _kept, _unknown = {}, [], 0
+        for _c in cert_numbers:
+            _f = _pf.PSA_CERTS_DIR / f"{_c}.json"
+            if not _f.exists():
+                _kept.append(_c); _unknown += 1; continue      # cache 無し = 判定不能 → 残す
+            try:
+                _meta = json.loads(_f.read_text(encoding="utf-8"))
+                _r = _pf.classify(str(_c), _meta, _con)
+                _st = _r.get("status")
+            except Exception:
+                _kept.append(_c); _unknown += 1; continue      # 例外も残す
+            if _st in ("GAP", "OUT-OF-SCOPE"):
+                _drop.setdefault(_st, []).append(_c)
+                continue
+            # ★2026-08-11: **catalog に画像が無いカードは目視で照合できず必ず落ちる**。
+            #   枠を食ってから消えるので先に除く (2026-08-10 実走: 10件中2件がこれで脱落)。
+            #   画像の有無は catalog の事実なので、判定できた時だけ落とす (取れなければ残す)。
+            _pid = _r.get("product_id") if isinstance(_r, dict) else None
+            if _pid:
+                try:
+                    _row = _con.execute(
+                        "SELECT images FROM products WHERE category=? AND product_id=?",
+                        (_r.get("category"), _pid)).fetchone()
+                    if _row is not None and len(json.loads(_row[0] or "[]")) == 0:
+                        _drop.setdefault("NO-IMAGE", []).append(_c)
+                        continue
+                except Exception:
+                    pass                       # 読めなければ落とさない
+            _kept.append(_c)
+        _con.close()
+        if _drop:
+            for _st, _cs in _drop.items():
+                _label = {"GAP": "catalog未収録", "OUT-OF-SCOPE": "参入しないゲーム",
+                          "NO-IMAGE": "catalogに画像が無く目視不能"}.get(_st, _st)
+                print(f"  ⏭️ 枠を選ぶ前に除外 [{_st}={_label}]: {len(_cs)}件 → {_cs[:6]}")
+            print(f"     (従来は10件に絞った後で落ちていた分。GAP は missing_models 経由で catalog へ)")
+            cert_numbers = _kept
+            cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
+        if _unknown:
+            print(f"  ℹ️ preflight 判定不能 {_unknown}件は **落とさず**残置 (cache無/例外)")
+    except Exception as _pfe:
+        print(f"  ⚠️ preflight 前置き skip (従来動作で継続): {type(_pfe).__name__}: {_pfe}")
+
+    # 一回 15 件まで固定 (Cloudflare bot 検出回避、2026-05-06 / 2026-08-11 に 10→15)
+    # ★上げたのは **上の preflight で無駄玉を先に落とした後**だから (先に上げると無駄玉が15件になる)
     # 残りは時間を置いて次回再走で順次処理
-    PSA_BATCH_LIMIT = 10
+    PSA_BATCH_LIMIT = 15
     if len(cert_numbers) > PSA_BATCH_LIMIT:
         # franchise 均等サンプリング (2026-06-23 ユーザー要望: Pokemon/One Piece/Dragon Ball 均等)
         # 在庫は Pokemon 大半 → 従来の全体 shuffle だと Pokemon ばかり選ばれ OP/DB が滞留。
