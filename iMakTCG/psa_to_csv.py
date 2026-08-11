@@ -2929,9 +2929,13 @@ def main():
             import dup_guard as _dg
             import sheet_io as _si
             _sheet_rows_for_dedupe = _si._product_ws().get_all_values()
-            _cache = _dg._load_live_cache() or {}
-            _titles = _cache.get("titles", _cache) if isinstance(_cache, dict) else {}
-            _active = set(_titles.keys())
+            # ★2026-08-11: **古い cache を live の根拠にしない**。
+            #   初版は _load_live_cache() を素で読み、24.5時間前の cache で判定していたため
+            #   5件を1件も検出できなかった (後段の excluder が拾って枠が5つ無駄になった)。
+            #   8/09 に excluder で直したのと同じ穴。取り直す担当をここにも置く。
+            _titles, _skus, _fresh_ok = _dg.ensure_fresh_live_cache()
+            _titles = _titles or {}
+            _active = set(_titles.keys()) if _fresh_ok else set()
             if _active:
                 _idx, _ = _dg.live_card_index(_sheet_rows_for_dedupe, _titles, _active)
                 _dup = []
@@ -2945,7 +2949,8 @@ def main():
                 if _dup:
                     _drop["LIVE-DUP"] = _dup
             else:
-                print("  ℹ️ live cache が空 → 重複の前置きは skip (判定不能を除外に倒さない)")
+                print("  ℹ️ live cache を新鮮化できず → 重複の前置きは skip "
+                      "(古い cache を live の根拠にしない = 誤除外も見逃しも作らない)")
         except Exception as _de:
             print(f"  ⚠️ 重複の前置き skip: {type(_de).__name__}: {_de}")
         _con.close()

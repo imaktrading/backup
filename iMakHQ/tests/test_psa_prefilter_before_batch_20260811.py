@@ -134,11 +134,28 @@ def test_live_dup_uses_same_canonical_key_as_dedupe():
 
 
 def test_live_dup_skipped_when_cache_is_empty():
-    """live cache が空 = 判定不能。除外に倒さない (0件を『重複なし』と誤読しない)。"""
-    assert "live cache が空 → 重複の前置きは skip" in SRC
+    """live cache が使えない = 判定不能。除外に倒さない (0件を『重複なし』と誤読しない)。"""
+    assert "重複の前置きは skip" in SRC
 
 
 def test_live_dup_keeps_cert_without_product_id():
     """KEY を作れない cert は残す (判定不能を落とさない)。"""
     i = SRC.find("_r2 = _cls.get(_c)")
     assert i > 0 and "KEY を作れない = 判定不能 → 残す" in SRC[i:i + 300]
+
+
+def test_live_dup_refreshes_cache_before_judging():
+    """★古い cache を live の根拠にしない。
+
+    2026-08-11 実走: prefilter 時点の cache が **24.5時間前**で、重複5件を1件も
+    検出できなかった (後段 excluder が拾い、枠が5つ無駄になった)。
+    2026-08-09 に excluder 側で直したのと同じ穴。取り直す担当をここにも置く。
+    """
+    assert "_dg.ensure_fresh_live_cache()" in SRC
+    assert "古い cache を live の根拠にしない" in SRC
+
+
+def test_live_dup_skips_when_refresh_failed():
+    """新鮮化に失敗したら判定しない (古い cache で誤除外も見逃しも作らない)。"""
+    assert "if _fresh_ok else set()" in SRC
+    assert "live cache を新鮮化できず" in SRC
