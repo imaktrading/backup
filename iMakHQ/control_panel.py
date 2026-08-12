@@ -916,6 +916,22 @@ SCRIPTS = [
         "open_url": ("https://docs.google.com/spreadsheets/d/"
                      "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
     },
+    {
+        # ★2026-08-13: 補URL確証で「違う(別商品)」「要調査」と捨てた候補を、**新規出品の種**に戻す。
+        #   「違う」は *その出品のカードでない* としか言っておらず、**別の実在カードの仕入元**である
+        #   ことが多い (= 出品していないカードの供給を毎日捨てていた)。
+        #   ただし同定は**ゼロからやり直す**: 候補タイトル→カード番号→catalog で版を引き、
+        #   版が複数ある時だけ絵柄で選ぶ。決まらなければ出品に回さない (fail-closed)。
+        "category": None, "type": "utility",
+        "label": "🌱 捨てた候補→新規出品の種",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "newcand_confirm.py", "--limit=20"],
+        "params": [],
+        "skip_postprocess": True,
+        "open_url": ("https://docs.google.com/spreadsheets/d/"
+                     "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
+    },
     # ---- 一番くじ 在庫補充 (PSA再仕入れの下に配置。2026-07-01 順序変更)。CLI: ichibankuji_restock.py ----
     # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
     {
