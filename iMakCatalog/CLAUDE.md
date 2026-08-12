@@ -188,6 +188,28 @@ set_name = result["set_name"]  # eBay フィルタ値で取れる
 - 公式DB値を推測で改変
 - listing script 内でハードコード辞書を使う (Canonical Map 等は ebay_filter_map に集約)
 
+### SSOT 契約 v1.2 §1-5 補足 — 導出化 = restamp + ズレ検知 (2026-08-12 制定)
+
+契約 v1.2 §1-5 の「焼き込み廃止 → 導出化」の**実現方式**を確定:
+
+**採用**: 現行の **migration restamp 方式**を正とする。
+- catalog 側に stored 済 (`specs.set_name_ebay` に焼く)、yaml/filter_map 更新時は migration で一括 restamp
+- scraper 側で毎回 `derive_set_name_ebay()` を呼ぶ (producer 側導出) はしない
+  (yaml 更新のたびに全 scraper 再走が要る = churn 復活のため)
+
+**却下**: producer 側導出 (scraper 埋め込み)。理由 = 上記トレードオフ。
+
+**「古い値が焼き付いたまま誰も気づかない」の対策**:
+- `set_name_integrity_audit.py` §6 canonical ズレ検知 (2026-08-12 実装) が担う。
+- 定義: `specs.set_name_ebay ≠ derive_set_name_ebay(cat, set_name_official, product_id)`
+  の行を category 別に絶対数で集計 (state (a) canonical のみ、state (b)/(c) は対象外)。
+- **可視化のみ・gate にはしない**。0 になっても出し続ける (0 が続く証跡が唯一の証拠)。
+- daily cron (2026-07-31 稼働) の完走マーカーに `canonical_drift=N` が出る (トレンド化)。
+
+**依頼書**:
+- `2026-08-10_ssot_contract_master_coverage_and_leaf_check_response_question_response.md`
+  §item 1 [IMPLEMENT-GO] / §item 3 (producer 側導出) やらない決定
+
 ### 画像 (images) の役割分担 — 両面カード規約 (2026-08-10 制定)
 
 **catalog は表面 (front) のみ持つ。裏面 (back) は listing 側で規則導出する**。

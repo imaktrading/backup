@@ -18,6 +18,15 @@ HQ 照合ツール(出力CSV側) と二重で守る (= dual_gate)。
                     2026-08-11 依頼 (op03_001_p2_set_name_ebay_empty_response.md §段3) で追加。
                     「214→423 に増えたのを誰も見ていなかった」の再発防止。
                     ★0 になっても出し続ける (0 が続く証跡が再発しないことの唯一の証拠)。
+  6. canonical ズレ検知: specs.set_name_ebay ≠ 今その場で yaml/filter_map から計算した canonical値
+                    の行数を category 別に絶対数で集計。
+                    2026-08-12 依頼 (_ssot_contract_master_coverage_and_leaf_check_response_question_response.md)
+                    契約 v1.2 §1-5 の「導出化 = restamp + ズレ検知」を実現する検出面。
+                    可視化のみ (gate にしない)。★0 になっても出し続ける (§5 と同じ規約)。
+                    定義: derive_set_name_ebay(cat, set_name_official, product_id) が
+                    非-None を返し、それが stored (specs.set_name_ebay) と異なる行だけを数える
+                    (= state (a) canonical のズレ)。state (b) 自由文字列 (filter_map 未収載) と
+                    state (c) 空 は drift 対象外 (契約 v1.2 §1-3 の 3 状態を尊重)。
 
 使い方:
   python iMakCatalog/tools/set_name_integrity_audit.py                # pokemon (既定)
@@ -40,6 +49,42 @@ _START_MARK = "=== set_name integrity audit START"
 _END_MARK = "=== set_name integrity audit COMPLETE"
 
 _ERAS = ["Scarlet & Violet", "Sword & Shield", "Sun & Moon", "Black & White", "XY"]
+
+# §6 canonical ズレ検知用 (api.derive_set_name_ebay と同じ 3 段 fallback を local に実装.
+#   api を import して api._DB_PATH に依存させると in-memory temp DB のテストが動かない.
+#   ロジック本体は api.derive_set_name_ebay と同順で保つ — 変更する場合は両方同時修正.)
+_SET_CODE_BRACKET_RE = re.compile(r"[\[【]([A-Z][A-Z0-9-]*)[\]】]")
+
+
+def _fmap_lookup(conn, category: str, field: str, source_value):
+    if not source_value:
+        return None
+    row = conn.execute(
+        "SELECT ebay_value FROM ebay_filter_map "
+        "WHERE category=? AND field=? AND source_value=?",
+        (category, field, source_value),
+    ).fetchone()
+    return row["ebay_value"] if row else None
+
+
+def _derive_set_name_ebay(conn, category: str, set_name_official, product_id):
+    """derive_set_name_ebay と同順 (①set_official ②[CODE] ③pid prefix) — 無ければ None."""
+    if set_name_official:
+        v = _fmap_lookup(conn, category, "set", set_name_official)
+        if v:
+            return v
+        m = _SET_CODE_BRACKET_RE.search(set_name_official)
+        if m:
+            v = _fmap_lookup(conn, category, "set_code", m.group(1))
+            if v:
+                return v
+    if product_id and "-" in product_id:
+        pref = product_id.split("-", 1)[0]
+        for cand in {pref, pref.upper(), pref.lower()}:
+            v = _fmap_lookup(conn, category, "set_code", cand)
+            if v:
+                return v
+    return None
 
 
 def setcode_era(sc: str):
@@ -72,14 +117,13 @@ def setcode_of(product_id: str, specs: dict) -> str:
 def audit(categories):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    q = "SELECT category, product_id, name_en, specs FROM products"
+    q = "SELECT category, product_id, name_en, set_name_official, specs FROM products"
     if categories:
         ph = ",".join("?" for _ in categories)
         q += f" WHERE category IN ({ph})"
         rows = conn.execute(q, categories).fetchall()
     else:
         rows = conn.execute(q).fetchall()
-    conn.close()
 
     # set_code -> {set_name_ebay -> count}, set_code -> source set, set_code -> category
     by_code = defaultdict(lambda: defaultdict(int))
@@ -90,6 +134,8 @@ def audit(categories):
     name_desync = []  # (product_id, name_en, character_name)
     # 5. empty棚卸し: category -> {'fail_closed_no_map': N, 'blank': M, 'total_empty': N+M}
     empty_by_cat = defaultdict(lambda: {"fail_closed_no_map": 0, "blank": 0, "total_empty": 0})
+    # 6. canonical ズレ検知: category -> drift 件数 (state (a) canonical のみ)
+    drift_by_cat = defaultdict(int)
 
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
@@ -120,6 +166,15 @@ def audit(categories):
         if ne and cn and ne != cn \
                 and not ne.startswith(cn) and not cn.startswith(ne):
             name_desync.append((r["product_id"], ne, cn))
+        # 6. canonical ズレ検知: 今その場で filter_map から計算し、stored と比較.
+        #    computed が非-None (= state (a) canonical に該当) かつ stored != computed の行のみ数える.
+        #    computed=None のケース (state (b) 自由文字列 / state (c) 空) は drift 対象外.
+        computed = _derive_set_name_ebay(conn, r["category"], r["set_name_official"],
+                                          r["product_id"])
+        if computed is not None and computed != e:
+            drift_by_cat[r["category"]] += 1
+
+    conn.close()
 
     # 1. era mismatch
     for (sc, e), cnt in tmp_era.items():
@@ -146,10 +201,12 @@ def audit(categories):
     none_list.sort(key=lambda x: -x[2])
     name_desync.sort(key=lambda x: x[0])
 
-    return era_mismatch, inconsistent, none_list, name_desync, dict(empty_by_cat)
+    return (era_mismatch, inconsistent, none_list, name_desync,
+            dict(empty_by_cat), dict(drift_by_cat))
 
 
-def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat, categories):
+def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
+           drift_by_cat, categories):
     out = []
     cat_s = ",".join(categories) if categories else "all"
     out.append(f"# set_name_ebay integrity audit (cat={cat_s})\n")
@@ -200,6 +257,28 @@ def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat, cat
             out.append(
                 f"| {cat} | {v['fail_closed_no_map']} | {v['blank']} | {v['total_empty']} |\n"
             )
+
+    # 6. canonical ズレ検知 (specs.set_name_ebay ≠ 今その場で filter_map から計算した canonical)
+    #    契約 v1.2 §1-5 (導出化=restamp+ズレ検知) の検出面。可視化のみ・gate にしない。
+    #    ★ 0 になっても出し続ける (§5 と同じ規約)。
+    #    state (a) canonical のズレのみ数える (computed が None = state (b)/(c) は除外)。
+    total_drift = sum(drift_by_cat.values())
+    out.append(
+        f"\n## 6. canonical ズレ検知 (絶対数・毎日出す) — "
+        f"合計 {total_drift} 件\n"
+    )
+    out.append(
+        "定義: derive_set_name_ebay(cat, set_name_official, product_id) が非-None で、"
+        "stored (specs.set_name_ebay) と異なる行 (= state (a) canonical のズレ)。"
+        "state (b) 自由文字列 / state (c) 空 は drift 対象外 (契約 v1.2 §1-3)。"
+        "★ gate にはしない (可視化のみ)。0 になっても出し続ける。\n"
+    )
+    if not drift_by_cat:
+        out.append("(全カテゴリで drift ゼロ)\n")
+    else:
+        out.append("| category | drift |\n|---|---:|\n")
+        for cat in sorted(drift_by_cat.keys()):
+            out.append(f"| {cat} | {drift_by_cat[cat]} |\n")
     return "".join(out)
 
 
@@ -220,8 +299,10 @@ def main():
     ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"{_START_MARK} {ts} (cat={cat_s}) ===")
 
-    era_mismatch, inconsistent, none_list, name_desync, empty_by_cat = audit(categories)
-    report = render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat, categories or [])
+    (era_mismatch, inconsistent, none_list, name_desync,
+     empty_by_cat, drift_by_cat) = audit(categories)
+    report = render(era_mismatch, inconsistent, none_list, name_desync,
+                    empty_by_cat, drift_by_cat, categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)
@@ -262,7 +343,8 @@ def main():
     print(
         f"{_END_MARK}: era={len(era_mismatch)} inconsistent={len(inconsistent)} "
         f"none_src={len(none_list)} name_desync={len(name_desync)} "
-        f"name_propagate_viol={len(name_viol)} facet_n1_candidates={len(facet_n1)} ==="
+        f"name_propagate_viol={len(name_viol)} facet_n1_candidates={len(facet_n1)} "
+        f"canonical_drift={sum(drift_by_cat.values())} ==="
     )
 
 

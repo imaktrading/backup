@@ -33,7 +33,11 @@ import set_name_integrity_audit as audit_mod  # type: ignore  # noqa: E402
 
 
 def _make_temp_db(rows):
-    """一時 sqlite に products テーブルを作り、rows を投入して path を返す."""
+    """一時 sqlite に products + ebay_filter_map テーブルを作り、rows を投入して path を返す.
+
+    §6 canonical ズレ検知が ebay_filter_map を参照するため空テーブルも用意する
+    (fmap 未収載 = derive が None を返す → drift 対象外、で安定).
+    """
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
     conn = sqlite3.connect(path)
@@ -43,17 +47,45 @@ def _make_temp_db(rows):
         "category TEXT NOT NULL,"
         "product_id TEXT NOT NULL,"
         "name_en TEXT,"
+        "set_name_official TEXT,"
         "specs TEXT NOT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE ebay_filter_map ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "category TEXT NOT NULL,"
+        "field TEXT NOT NULL,"
+        "source_value TEXT NOT NULL,"
+        "ebay_value TEXT NOT NULL,"
+        "UNIQUE(category, field, source_value))"
     )
     for r in rows:
         conn.execute(
-            "INSERT INTO products (category, product_id, name_en, specs) VALUES (?,?,?,?)",
+            "INSERT INTO products "
+            "(category, product_id, name_en, set_name_official, specs) "
+            "VALUES (?,?,?,?,?)",
             (r["category"], r["product_id"], r.get("name_en"),
+             r.get("set_name_official"),
              json.dumps(r.get("specs", {}))),
         )
+    for m in rows[0].get("_fmap", []) if rows else []:
+        pass  # not used; separate helper for maps below
     conn.commit()
     conn.close()
     return path
+
+
+def _insert_fmap(path, entries):
+    """ebay_filter_map に (category, field, source_value, ebay_value) を追加."""
+    conn = sqlite3.connect(path)
+    for e in entries:
+        conn.execute(
+            "INSERT INTO ebay_filter_map "
+            "(category, field, source_value, ebay_value) VALUES (?,?,?,?)",
+            e,
+        )
+    conn.commit()
+    conn.close()
 
 
 class TestCompletionMarker(unittest.TestCase):
@@ -102,10 +134,11 @@ class TestCompletionMarker(unittest.TestCase):
         self.assertIn("=== set_name integrity audit COMPLETE", out)
 
     def test_completion_marker_has_counts(self):
-        """マーカー行に era/inconsistent/none_src/name_desync の件数が出る (トレンド化用)."""
+        """マーカー行に era/inconsistent/none_src/name_desync/canonical_drift の件数が出る (トレンド化用)."""
         out = self._run_main(["--cat", "all"])
         last_line = [l for l in out.splitlines() if "COMPLETE" in l][-1]
-        for key in ("era=", "inconsistent=", "none_src=", "name_desync="):
+        for key in ("era=", "inconsistent=", "none_src=", "name_desync=",
+                    "canonical_drift="):
             self.assertIn(key, last_line, f"missing metric {key} in marker line")
 
     def test_out_file_mode_also_prints_marker_to_stdout(self):
@@ -152,7 +185,8 @@ class TestReportOnly(unittest.TestCase):
         try:
             before = Path(db).read_bytes()
             with mock.patch.object(audit_mod, "DB_PATH", db):
-                era, inc, none_list, desync, empty_by_cat = audit_mod.audit(None)
+                (era, inc, none_list, desync,
+                 empty_by_cat, drift_by_cat) = audit_mod.audit(None)
             after = Path(db).read_bytes()
             self.assertEqual(before, after, "audit() must not mutate the DB")
             # 検出ロジックの正当性も担保 (回帰): SV5a→"Sword & Shield—..." は era mismatch
@@ -160,6 +194,9 @@ class TestReportOnly(unittest.TestCase):
                             "era mismatch on SV5a must be detected")
             self.assertTrue(any(d[0] == "SV5a-001" for d in desync),
                             "name_en/character_name desync must be detected")
+            # §6 drift は fmap が空 (未収載) なので全部 None → drift 0 (state (b) 扱い)
+            self.assertEqual(dict(drift_by_cat), {},
+                             "drift_by_cat must be empty when fmap has no entries")
         finally:
             os.unlink(db)
 
