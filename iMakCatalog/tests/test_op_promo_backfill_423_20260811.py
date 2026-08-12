@@ -132,10 +132,15 @@ class TestYamlContainsPromoBatch(unittest.TestCase):
 class TestOtherCategoriesUnchanged(unittest.TestCase):
     """段2 副作用ゼロ検収: 他カテゴリの空欄件数が変わっていない (baseline)."""
 
+    # 2026-08-12 更新: specs_repopulate_from_fresh migration (Advisor GO) で gundam/dbscg の
+    # fresh_only 行を canonical で埋めたため、baseline が下がった:
+    #   gundam_tcg:      76 → 6   (canonical fresh 70 行を specs に populate、6 は非-canonical fresh で skip)
+    #   dragonball_scg: 139 → 136 (canonical fresh 3 行 populate、136 は非-canonical fresh で skip)
+    # 上記以外のカテゴリ (pokemon_tcg / yugioh_tcg) は本 migration の対象外なので不変.
     BASELINES = {
         "pokemon_tcg": 4084,
-        "gundam_tcg": 76,
-        "dragonball_scg": 139,
+        "gundam_tcg": 6,
+        "dragonball_scg": 136,
         "yugioh_tcg": 12150,
     }
 
@@ -153,7 +158,7 @@ class TestOtherCategoriesUnchanged(unittest.TestCase):
                 self.assertEqual(
                     n, expected,
                     f"{cat} 空欄 = {n} (baseline {expected}); "
-                    f"段2 が他カテゴリを触った疑い")
+                    f"想定外の他カテゴリ書換の疑い")
         finally:
             con.close()
 
