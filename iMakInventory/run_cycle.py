@@ -564,7 +564,8 @@ def _phase_monitor(
             grand["backup_clear_cleared"] += bc.get("cleared", 0)
             if bc.get("held") or bc.get("surge"):
                 grand["backup_clear_held"].append(
-                    {"sheet": label, "candidate_count": bc.get("candidate_count", 0)})
+                    {"sheet": label, "candidate_count": bc.get("candidate_count", 0),
+                     "new_count": bc.get("new_count", bc.get("candidate_count", 0))})
             for mm in (bc.get("skipped_mismatch") or []):
                 grand["backup_clear_mismatch"].append({**mm, "sheet": label})
         except Exception as e:
@@ -614,10 +615,12 @@ def _phase_monitor(
         if _held:
             _parts.append(
                 "【消込急増ガード HOLD】" + ", ".join(
-                    f"[{h['sheet']}] 候補{h['candidate_count']}件" for h in _held)
-                + " → 一括消込を保留 (閾値超で誤一括削除を防止)。\n"
-                "  ★ snkrdunk 判定は is_listing_live で正確化済のため、通常これは "
-                "**genuine な売切補URL backlog** (誤検知ではない)。対処:\n"
+                    f"[{h['sheet']}] 新規{h.get('new_count', '?')}件 (候補{h['candidate_count']}件)"
+                    for h in _held)
+                + " → 一括消込を保留 (誤一括削除を防止)。\n"
+                "  ★ 判定基準は **今 cycle 新規** (積み残しは cycle 毎に自動ドレインされるので "
+                "backlog では発火しない)。新規が一気に湧く = **scraper 系統崩壊の疑い** → "
+                "まず候補一覧の supplier 偏りと DOM 検体を確認。genuine と確認できたら:\n"
                 "    1) 確認: python -m tools.supervised_backup_drain\n"
                 "    2) 実削除: python -m tools.supervised_backup_drain --reverify-snkrdunk --execute\n"
                 "  (compare-and-clear + 復元アーカイブで安全。触るのは補URL(AC-AG)のみ)。\n"

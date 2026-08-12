@@ -114,7 +114,8 @@ LISTINGS_COL_CATEGORY = 18    # R
 # ── 補URL 売切消込 急増ガード (2026-07-25) ─────────────────────────────────
 # 1 cycle の補URL消込数が異常に多い = scraper の系統的誤 is_sold=True でデータ不具合の疑い
 # (2026-06-03 偽OOS 95件型)。閾値超で一括自動消込を止めて告知 (誤一括消去防止)。
-CLEAR_SURGE_THRESHOLD = 20    # 1 cycle でこの件数超の補URL消込が出たら HOLD + ALERT
+CLEAR_SURGE_THRESHOLD = 20    # 1 cycle で **新規** 補URL消込がこの件数超なら HOLD + ALERT
+CLEAR_DRAIN_CAP = 20          # 1 cycle で消し込む上限 (超過分は次 cycle へ繰越 = 自動ドレイン)
 
 # ── 価格急増ガード (M/K 書込側、2026-07-23) ──────────────────────────────
 # scraper の DOM 構造変化で 1 supplier が丸ごと誤パースし、多数行に「plausible だが誤った」
@@ -601,7 +602,9 @@ def paint_backup_url_cells(ws, paints: list) -> dict:
 
 
 def clear_sold_backup_cells(ws, clear_candidates: list,
-                            enable_surge_guard: bool = True) -> dict:
+                            enable_surge_guard: bool = True,
+                            new_count: int = None,
+                            drain_cap: int = None) -> dict:
     """売切確定 (is_sold=True) の補URL (AC-AG) セルを compare-and-clear で消込.
 
     ★ 2026-07-25 実装 (HQ 補URL能動充填 Phase2 の消し手)。役割分離: HQ=空き枠に足す /
@@ -613,25 +616,42 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
         URL 文字列とセル現在値が一致する時だけ消す。HQ が別の生きた新URLに差し替えていれば不一致 →
         消さない (skipped_mismatch = 要対応、silent drop しない)。役割分離のタイミングの穴を構造的に塞ぐ。
       - 主URL(col A) は対象外 (candidates は補URL 列のみ)。
-      - 消込急増ガード: 候補が CLEAR_SURGE_THRESHOLD 超なら一括自動消込を止めて HOLD (誤一括消去防止)。
+      - 消込急増ガード: **新規** 候補が CLEAR_SURGE_THRESHOLD 超なら一括自動消込を止めて HOLD
+        (誤一括消去防止)。★ 2026-08-12 改: 判定基準を「積み残し込みの総数」→「今 cycle 新規」に変更。
+        総数で見ると、一度 HOLD した瞬間に backlog が減らなくなり **恒久 HOLD (deadlock)** に落ちる
+        (実害: 08-09〜08-12 の 4日間、候補 30→75 に単調増加し 15 cycle 連続で同じ ALERT を発報)。
+        scraper 系統崩壊は「新規が一気に湧く」形で出るため、新規基準でも検知力は落ちない。
+      - ドレイン上限 (drain_cap): 閾値内でも 1 cycle の消込は drain_cap 件まで。超過は次 cycle 繰越
+        (deferred)。backlog は毎 cycle 自動で減り、人手のドレインは不要。
 
     Args:
         clear_candidates: [{"row_index": int, "slot": 0-4, "expected_url": str}]
                           slot 0-4 = AC-AG (列 29+slot)。expected_url = 監視が is_sold=True と見た URL。
+                          古い候補 (前 cycle からの積み残し) を先頭に並べると古い順にドレインされる。
         enable_surge_guard: 消込急増ガードを有効化 (default True、緊急 override 用に False 可)。
+        new_count: 今 cycle 初出の候補数 (急増ガードの判定基準)。None なら全件を新規扱い (後方互換)。
+        drain_cap: 1 cycle の消込上限。None なら無制限 (手動ドレイン tool 用)。
 
     Returns: {"cleared": N, "skipped_mismatch": [...], "held": bool,
-              "candidate_count": N, "surge": bool}
+              "candidate_count": N, "surge": bool, "deferred": N}
     """
     n = len(clear_candidates)
     if n == 0:
         return {"cleared": 0, "skipped_mismatch": [], "held": False,
-                "candidate_count": 0, "surge": False, "cleared_entries": []}
+                "candidate_count": 0, "surge": False, "cleared_entries": [], "deferred": 0}
 
-    # 消込急増ガード: 異常件数なら消込せず HOLD (caller が ALERT)。
-    if enable_surge_guard and n > CLEAR_SURGE_THRESHOLD:
+    # 消込急増ガード: 新規が異常件数なら消込せず HOLD (caller が ALERT)。
+    surge_basis = n if new_count is None else new_count
+    if enable_surge_guard and surge_basis > CLEAR_SURGE_THRESHOLD:
         return {"cleared": 0, "skipped_mismatch": [], "held": True,
-                "candidate_count": n, "surge": True, "cleared_entries": []}
+                "candidate_count": n, "surge": True, "cleared_entries": [],
+                "deferred": 0, "new_count": surge_basis}
+
+    # ドレイン上限: 超過分は次 cycle へ繰越 (取下げとは独立 = fail-OPEN ではない)。
+    deferred = 0
+    if drain_cap is not None and n > drain_cap:
+        deferred = n - drain_cap
+        clear_candidates = clear_candidates[:drain_cap]
 
     # 対象 row の AC-AG を書込直前に re-read (compare-and-clear)。
     rows = sorted({c["row_index"] for c in clear_candidates})
@@ -668,7 +688,9 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
         ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
 
     return {"cleared": cleared, "skipped_mismatch": skipped, "held": False,
-            "candidate_count": n, "surge": False, "cleared_entries": cleared_entries}
+            "candidate_count": n, "surge": False, "cleared_entries": cleared_entries,
+            "deferred": deferred,
+            "new_count": (n if new_count is None else new_count)}
 
 
 RESCUE_LOG_TAB = "補URL救済ログ"

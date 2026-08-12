@@ -153,7 +153,8 @@ def test_clear_empty_candidates_noop():
     ws = MagicMock()
     res = clear_sold_backup_cells(ws, [])
     assert res == {"cleared": 0, "skipped_mismatch": [], "held": False,
-                   "candidate_count": 0, "surge": False, "cleared_entries": []}
+                   "candidate_count": 0, "surge": False, "cleared_entries": [],
+                   "deferred": 0}
 
 
 def test_clear_empty_expected_never_clears():

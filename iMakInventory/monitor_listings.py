@@ -62,6 +62,7 @@ from sheet_updater import (  # noqa: E402
     update_listings_sold_marks,
     paint_backup_url_cells,
     clear_sold_backup_cells,
+    CLEAR_DRAIN_CAP,
     ensure_sold_at_header,
     append_rescue_log_rows,
     detect_supplier,
@@ -550,6 +551,57 @@ def save_rescue_state(sheet_label: str, keys: set) -> None:
     DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
     p = DECISION_LOG_DIR / f"rescue_state_{sheet_label}.json"
     p.write_text(json.dumps(sorted(keys), ensure_ascii=False), encoding="utf-8")
+
+
+def _backup_clear_seen_path(sheet_label: str):
+    return DECISION_LOG_DIR / f"backup_clear_seen_{sheet_label}.json"
+
+
+def load_backup_clear_seen(sheet_label: str) -> dict:
+    """補URL消込候補の初出時刻 {key: iso} を読む (急増ガードの「新規」判定基準)。
+
+    読み失敗は空 dict = 全件新規扱い → 急増ガードが厳しい側 (安全側) に倒れる。
+    """
+    p = _backup_clear_seen_path(sheet_label)
+    if p.exists():
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def save_backup_clear_seen(sheet_label: str, seen: dict) -> None:
+    """今 cycle の候補キーの初出時刻を保存 (消えた候補は落として肥大化防止)。"""
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    _backup_clear_seen_path(sheet_label).write_text(
+        json.dumps(seen, ensure_ascii=False, indent=0, sort_keys=True), encoding="utf-8")
+
+
+def _backup_clear_key(c: dict) -> str:
+    return f"{c['row_index']}:{c['slot']}:{c['expected_url']}"
+
+
+def order_backup_clear_candidates(candidates: list, seen: dict) -> tuple:
+    """候補を「初出が古い順」に並べ替え、今 cycle 新規の件数と更新後 seen を返す。
+
+    古い順 = ドレイン上限が効く時に、積み残しから先に消える (滞留の固定化を防ぐ)。
+
+    Returns: (ordered_candidates, new_count, updated_seen)
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    updated, new_count = {}, 0
+    for c in candidates:
+        k = _backup_clear_key(c)
+        first = seen.get(k)
+        if not isinstance(first, str):
+            first = now
+            new_count += 1
+        updated[k] = first
+    ordered = sorted(candidates, key=lambda c: (updated[_backup_clear_key(c)],
+                                                c["row_index"], c["slot"]))
+    return ordered, new_count, updated
 
 
 def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None:
@@ -1431,7 +1483,19 @@ def process_sheet(
             # ★ 補URL 売切消込 (compare-and-clear + 消込急増ガード)。sold_at と別 API (書込直前 re-read)。
             #   D/O(取下げ) は上で書けている = 消込の HOLD/mismatch は fail-OPEN ではない (延命枠の衛生管理)。
             if clear_candidates:
-                backup_clear_result = clear_sold_backup_cells(ws, clear_candidates)
+                # ★ 2026-08-12: 急増ガードは「今 cycle 新規」で判定し、積み残しは drain_cap 件/cycle
+                #   ずつ古い順に自動ドレイン。総数判定だと HOLD が自分で backlog を育てて恒久 HOLD に
+                #   なる (08-09〜08-12 に 15 cycle 連続 ALERT の実害)。
+                _seen = load_backup_clear_seen(sheet_label)
+                clear_candidates, _new_cnt, _seen_upd = order_backup_clear_candidates(
+                    clear_candidates, _seen)
+                backup_clear_result = clear_sold_backup_cells(
+                    ws, clear_candidates, new_count=_new_cnt, drain_cap=CLEAR_DRAIN_CAP)
+                try:
+                    save_backup_clear_seen(sheet_label, _seen_upd)
+                except Exception as _se:
+                    log(f"  [!] 消込 seen state 保存失敗 (次 cycle は全件新規扱い): "
+                        f"{type(_se).__name__}: {_se}")
                 # ★ 消したものを復元用アーカイブに追記 (データ安全: 誤削除でも URL を残す)。
                 _cleared_entries = backup_clear_result.get("cleared_entries") or []
                 if _cleared_entries:
@@ -1448,9 +1512,16 @@ def process_sheet(
                         log(f"  [!] 消込アーカイブ追記失敗 (削除は成功): {type(_ae).__name__}: {_ae}")
                 bc = backup_clear_result
                 if bc.get("surge") or bc.get("held"):
-                    log(f"  [★補URL消込 急増ガード発火] 候補 {bc['candidate_count']} 件 > 閾値 "
-                        f"→ 一括消込を保留。snkrdunk 正確化済のため通常 genuine backlog → "
-                        f"`python -m tools.supervised_backup_drain [--reverify-snkrdunk --execute]` で消込。")
+                    log(f"  [★補URL消込 急増ガード発火] 新規 {bc.get('new_count', '?')} 件 > 閾値 "
+                        f"(候補 {bc['candidate_count']} 件) → 一括消込を保留。"
+                        f"新規が一気に湧く = scraper 系統崩壊の疑い → 検体確認。"
+                        f"genuine と確認できたら "
+                        f"`python -m tools.supervised_backup_drain [--reverify-snkrdunk --execute]`。")
+                elif bc.get("deferred"):
+                    log(f"  [OK] 補URL消込: cleared={bc['cleared']} / candidate={bc['candidate_count']} "
+                        f"(新規 {bc.get('new_count', '?')}) / 次 cycle 繰越={bc['deferred']} "
+                        f"(1 cycle 上限 {CLEAR_DRAIN_CAP} 件、古い順にドレイン中) "
+                        f"/ skipped(HQ差替等 mismatch)={len(bc['skipped_mismatch'])}")
                 else:
                     log(f"  [OK] 補URL消込: cleared={bc['cleared']} / candidate={bc['candidate_count']} "
                         f"/ skipped(HQ差替等 mismatch)={len(bc['skipped_mismatch'])}")
