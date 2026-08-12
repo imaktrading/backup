@@ -8,7 +8,9 @@
 #
 # 役割:
 #   (1) 本元 worktree (C:/dev/iMak/) の master 固定 — 5/3, 5/4 朝事故の物理再発防止
-#   (2) 全テスト走行、失敗時は commit 拒否
+#   (2) **その worktree の担当分**テスト走行、失敗時は commit 拒否
+#       (2026-08-12 まで monorepo 全体を走らせており、linked worktree では他人の stale な
+#        テストで常に赤 = gate が最初から機能していなかった)
 
 set -e
 
@@ -55,19 +57,53 @@ if [ "$IS_HQ_HOME" = "1" ]; then
 fi
 
 # ============================================================================
-# (2) 全テスト走行
+# (2) テスト走行 — **その worktree が持っているものだけ** 走らせる
 # ============================================================================
-echo "[pre-commit] Running all tests..."
+# ★2026-08-12: 従来は全 worktree で `tests/ iMakHQ/tests/` (= monorepo 全体) を走らせていた。
+#   linked worktree にはその branch の**古いコピー**が入っているため、自分が触っていない
+#   プロジェクトのテストで赤くなり、gate が最初から機能していなかった。
+#   実測 (2026-08-08): 本元 master は 2029 passed / 0 failed、同じスコープが dedupe worktree では
+#   6 failed + 6 errors (montbell の import 時 TypeError / FVF 0.14 vs 0.1325 / 一番くじ N105 等)。
+#   結果、重複くんは 8/04 から commit できず、8/08 に --no-verify を例外許可して通した。
+#   リバイスくんも同じ理由で daily_report 1行の commit すら通せていない (561 commit 遅れ)。
+#
+#   → 走らせるのは **その worktree の担当分だけ**。他人のプロジェクトの stale なテストで
+#     止めない。本元 (HQ/Advisor) は従来どおり monorepo 全体を走らせる。
+case "$WORKTREE_TOPLEVEL" in
+    *"/dev/iMak"|*"/dev/iMak/")     SUITES="tests/ iMakHQ/tests/" ;;
+    *"/dev/iMak_catalog"*)          SUITES="iMakCatalog/tests" ;;
+    *"/dev/iMak_dedupe"*)           SUITES="iMakDedupe/tests" ;;
+    *"/dev/iMak_harvest"*)          SUITES="iMakHarvest/tests" ;;
+    *"/dev/iMak_revise"*)           SUITES="iMakRevise/tests" ;;
+    *"/dev/iMak_inventory"*)        SUITES="iMakInventory/tests" ;;
+    *)                              SUITES="" ;;
+esac
 
-PYTHONIOENCODING=utf-8 python -m pytest tests/ iMakHQ/tests/ --tb=short -q
-RESULT=$?
+# 実在するものだけに絞る (branch によって dir が無いことがある)
+FOUND=""
+for s in $SUITES; do
+    [ -d "$s" ] && FOUND="$FOUND $s"
+done
 
-if [ $RESULT -ne 0 ]; then
+if [ -n "$FOUND" ]; then
+    echo "[pre-commit] Running tests:$FOUND"
+    PYTHONIOENCODING=utf-8 python -m pytest $FOUND --tb=short -q
+    RESULT=$?
+
+    if [ $RESULT -ne 0 ]; then
+        echo ""
+        echo "[pre-commit] ❌ TESTS FAILED. Commit aborted."
+        echo "[pre-commit]    Fix the failing tests, then re-attempt commit."
+        echo "[pre-commit]    Bypass (use ONLY in emergency): git commit --no-verify"
+        exit 1
+    fi
+else
+    # ★silent に素通りさせない。gate が無い状態は必ず見えるようにする (fail-OPEN を隠さない)
     echo ""
-    echo "[pre-commit] ❌ TESTS FAILED. Commit aborted."
-    echo "[pre-commit]    Fix the failing tests, then re-attempt commit."
-    echo "[pre-commit]    Bypass (use ONLY in emergency): git commit --no-verify"
-    exit 1
+    echo "[pre-commit] ⚠️  この worktree にはテスト suite が見つかりません: $WORKTREE_TOPLEVEL"
+    echo "[pre-commit]    探した場所: $SUITES"
+    echo "[pre-commit]    **テスト gate 無しで commit します**。suite を用意してください。"
+    echo ""
 fi
 
 # ============================================================================
