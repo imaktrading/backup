@@ -3131,10 +3131,20 @@ def main():
 
     driver.quit()
 
-    # ===== eBay API で市場価格を取得し StartPrice を更新 =====
-    ebay_keys = load_ebay_keys()
+    # ===== StartPrice を決める =====
+    # 価格は cost-plus (pricing_engine) が SSOT。相場は 2026-08-13 に停止 (global.yaml
+    # market_lookup.enabled=false)。停止理由と実測は yaml のコメント参照。
+    try:
+        from config_loader import is_market_lookup_enabled as _mkt_on
+        _market_lookup = _mkt_on()
+    except Exception:
+        _market_lookup = False
+
+    ebay_keys = load_ebay_keys() if _market_lookup else {}
     ebay_token = None
-    if ebay_keys.get("AppID") and ebay_keys.get("AppSecret"):
+    if not _market_lookup:
+        print("\n💲 価格: cost-plus のみ (相場取得は停止中 — global.yaml market_lookup)")
+    elif ebay_keys.get("AppID") and ebay_keys.get("AppSecret"):
         try:
             ebay_token = get_ebay_oauth_token(ebay_keys["AppID"], ebay_keys["AppSecret"])
             print(f"\n✓ eBay API接続OK — 市場価格を取得します")
@@ -3172,6 +3182,33 @@ def main():
     shipping_col_idx = headers.index("ShippingProfileName")
     cert_col_idx = headers.index("CDA:Certification Number - (ID: 27503)")
     skip_certs = set()  # NO-GO(乖離30%超)のcert番号
+
+    def _cost_plus_price(cost_jpy):
+        """相場を見ずに価格を出す = 相場ありの時と**同じ式** (cost-plus / pricing_engine)。
+
+        相場ありの経路 (下の market 分岐) も price は target_usd で決めており、
+        median は表示にしか使っていない。ここはその式だけを取り出したもの。
+        仕入値が無い時だけ $100 (旧「競合0件 & 仕入値なし」と同値)。
+        """
+        if cost_jpy is None:
+            return 100.00
+        from pricing_engine import compute_listing_price as _pe
+        p = round(_pe(cost_jpy, 0, "TCG(PSA10)")["target_usd"], 2)
+        return int(p) + 0.98 if p > 10 else p
+
+    if not _market_lookup:
+        # 相場停止時: cost-plus だけで値付け (eBay API を1回も叩かない)
+        for _cert, _data in card_info:
+            if _data is None:
+                continue
+            _idx = next((ri for ri in range(1, len(rows))
+                         if str(rows[ri][cert_col_idx]) == str(_cert)), None)
+            if _idx is None:
+                continue
+            _price = _cost_plus_price(cost_map.get(_cert))
+            rows[_idx][price_col_idx] = _price
+            rows[_idx][shipping_col_idx] = get_shipping_policy(_price)
+            print(f"    #{_cert}: ${_price}")
 
     if ebay_token:
         card_seq = 0  # ナンバリング用
@@ -3378,9 +3415,12 @@ def main():
     print(f"\n完了！出力: {output_file}")
 
     # 生成時セルフ監査 (CSV監査くんを自動実行) — 監査項目を「待たず」生成で確認する。
+    # ★2026-08-13: 画面には**要点だけ**出す (brief)。走行の最後に同じ監査が本番で
+    #   もう一度走るので、ここで全文を出すと同じ内容が二重に画面を埋めていた。
+    #   呼び出し自体は残す = 生成器を単独で回した時にも監査が効く (fail-closed)。
     try:
         from listing_common import run_self_audit
-        run_self_audit(output_file)
+        run_self_audit(output_file, brief=True)
     except Exception as _e:
         print(f"⚠️ セルフ監査 失敗 (非致命): {type(_e).__name__}: {_e}")
     print(f"成功: {len(rows)-1}件 / 失敗: {len(errors)}件")

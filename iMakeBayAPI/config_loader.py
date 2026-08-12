@@ -107,6 +107,26 @@ def get_return_profile(project: str) -> Optional[str]:
     return load().get("return_profiles", {}).get(project)
 
 
+def is_market_lookup_enabled() -> bool:
+    """eBay の相場 (中央値/競合数) を取りに行くか (既定 False = 取りに行かない)。
+
+    ★2026-08-13 停止 (ユーザー確定)。理由は global.yaml の market_lookup 節に記載。
+      要点: 価格は cost-plus で決まり相場は価格に影響しない / 相場理由の出品停止は
+      81走行645行で0件 / 記録先 market_log.csv は 1,848行貯めて未使用。
+    yaml に節が無い環境でも **止まったまま**になるよう既定 False (= 余計な API を叩かない)。
+    """
+    return bool(load().get("market_lookup", {}).get("enabled", False))
+
+
+def is_ai_review_enabled() -> bool:
+    """Claude の「AI総合レビュー」を出すか (既定 False)。
+
+    ★2026-08-13 停止: 講評が post_title_fix で直る前の値を見ており、
+      解決済みの指摘 (「81字で超過」等) を毎回85行出していた。
+    """
+    return bool(load().get("ai_review", {}).get("enabled", False))
+
+
 def get_v5_pricing() -> Dict[str, Any]:
     """V5 価格決定設定 (= 35% markup + IFS 利益率 + G-SHOCK 国別 FVF + 国別 fees)."""
     return load().get("v5_pricing", {})

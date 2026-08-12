@@ -361,11 +361,21 @@ def normalize_title(title: str, is_new: bool, item_specifics: dict, category: st
     return title
 
 
-def run_self_audit(csv_path):
+# 生成時セルフ監査を brief 表示する時に**残す**行 (これ以外は畳む)。
+# 「何件で / いくつ落ちて / 誰に直してもらうか」だけ分かれば、生成時点の用は足りる。
+_SELF_AUDIT_BRIEF_MARKERS = ("対象行:", "❌ 除外", "📨 カタログ修正依頼", "🛠 プログラム修正依頼",
+                             "⚠️", "失敗")
+
+
+def run_self_audit(csv_path, brief=False):
     """生成直後に CSV監査くん(csv_auditor)を自動実行し結果を表示する (報告のみ・非致命)。
 
     監査を「待たず」生成時に品質確認する共通フック。全 listing 生成スクリプトの末尾から呼ぶ。
     dry-run なので生成物は書き換えない。with_market=False で offline/高速 (eBay API を叩かない)。
+
+    brief=True: 画面には要点行だけ出す (2026-08-13)。走行の最後に同じ監査が本番でもう一度
+    走るカテゴリ (TCG) では、全文を出すと同じ内容が二重に画面を埋めるため。
+    **検査そのものは何も減らしていない** — 表示だけを畳む。
     """
     import os as _os
     import sys as _sys
@@ -376,7 +386,17 @@ def run_self_audit(csv_path):
             _sys.path.insert(0, _tools)
         import csv_auditor as _auditor
         print("\n🔍 生成時セルフ監査 (CSV監査くん) ──────────")
-        _auditor.audit(csv_path, dry_run=True, with_market=False)
+        if not brief:
+            _auditor.audit(csv_path, dry_run=True, with_market=False)
+            return
+        import contextlib as _ctx
+        import io as _io
+        _buf = _io.StringIO()
+        with _ctx.redirect_stdout(_buf):
+            _auditor.audit(csv_path, dry_run=True, with_market=False)
+        for _line in _buf.getvalue().splitlines():
+            if any(_m in _line for _m in _SELF_AUDIT_BRIEF_MARKERS):
+                print(f"  {_line.strip()}")
     except Exception as _e:
         print(f"⚠️ セルフ監査 失敗 (非致命): {type(_e).__name__}: {_e}")
 

@@ -100,6 +100,22 @@ CATEGORY_MAP = {
 # importlib ロード時に sys.path へ足す共有 dir
 _SHARED_PATHS = [os.path.join(WORKSPACE, "iMakeBayAPI")]
 
+
+def _market_lookup_enabled():
+    """相場取得が有効か (SSOT = iMakeBayAPI/config/global.yaml の market_lookup)。
+
+    読めない環境では False = 叩かない (余計な API を出さない側に倒す)。
+    """
+    try:
+        import sys as _sys
+        for _p in _SHARED_PATHS:
+            if _p not in _sys.path:
+                _sys.path.insert(0, _p)
+        from config_loader import is_market_lookup_enabled
+        return is_market_lookup_enabled()
+    except Exception:
+        return False
+
 # project → 属する catalog category 集合 (recurring_missing の project-scoped filter 用・2026-07-25)。
 # missing_models.csv / pdca improvement_queue はプロジェクト横断のグローバル台帳のため、gshock 監査に
 # TCG由来(dragonball_scg 等)の recurring が混入していた(2026-07-25 ITAJAGA 誤検出)。監査対象プロジェクトの
@@ -769,7 +785,10 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
             exclude_idx.append(i)
 
     # --- 深い検査 (出品時チェックと同等: 市場ゲート / TOPセラーSEO / Claude AI総合レビュー) ---
-    deep = with_market and not is_generic
+    # ★2026-08-13: 相場取得は global.yaml (market_lookup) で停止中。
+    #   監査くんは **別プロセス**で走るので market_gate の in-memory cache が効かず、
+    #   生成側とは別にもう一周 eBay を叩いていた。ここも同じスイッチで止める。
+    deep = with_market and not is_generic and _market_lookup_enabled()
     dc = (deep_checks(mod, headers, rows, all_vr, project, csv_path) if deep
           else {"price_exclude": [], "seo": [], "gate_summary": [], "claude": ""})
     for idx in dc["price_exclude"]:          # 価格 NO-GO を除外に合流

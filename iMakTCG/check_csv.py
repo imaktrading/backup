@@ -33,6 +33,7 @@ API_KEY_FILE = "API key.txt"
 # タイトルルール
 MAX_TITLE_LEN = 80
 IDEAL_TITLE_MIN = 70
+PSA_IMG_HOST = "d1htnxwo4o0jhw.cloudfront.net"  # PSA 画像 CDN (psa_to_csv と同値)
 BANNED_TITLE_WORDS = [
     # 2026-06-08: psa_to_csv.py:721 と同期。"japanese"/"japan" は削除 (生成側は 2026-05-01 に既に削除済)。
     # JP 印刷版を eBay US で売る運用で事実情報・SEO価値高 (TOP競合多数が使用)。spam語のみ残す。
@@ -523,7 +524,105 @@ def validate_row(row, row_idx):
                 f"C:Set='{c_set}' が catalog 183454 master に存在しない "
                 f"(生成側で master 外の値が混入)"))
 
+    issues.extend(description_issues(get_col(row, "*Description")))
+    issues.extend(image_issues(get_col(row, "PicURL")))
+    issues.extend(specifics_sanity_issues(row, title))
+
     return issues
+
+
+# ===== 2026-08-13 追加の3チェック =====
+# いずれも「実際に出てしまった不良」から起こしたもの。推測で足したものは無い。
+
+# 商品説明テンプレは 13KB 前後。テンプレを読めなかった時の代替文は 72字。
+# 間を広く取って 2,000字を下限にする (テンプレ差替えで多少縮んでも誤検出しない)。
+_DESC_MIN_LEN = 2000
+
+
+def description_issues(desc):
+    """商品説明が「本物のテンプレ」になっているか (2026-08-13 実害から)。
+
+    ★実害: 2026-08-12 19:43 の走行で、テンプレ(PSA10_snkrdunk.txt)を読めなかった6件が
+      **1行のダミー文**(72字)のまま CSV に載り、監査も素通りして「入稿OK」になった。
+      psa_to_csv.load_description() が読取失敗を握り潰してダミーを返す作りだったため、
+      **誰も気づけない**(= fail-OPEN)。ユーザーが目視で発見した。
+      過去78本を調べた結果、ダミー化はこの1本だけ = 一過性だが、次に起きても分からない。
+    """
+    d = str(desc or "")
+    out = []
+    if not d.strip():
+        out.append(("ERROR", "商品説明が空 (テンプレ未挿入)"))
+        return out
+    if len(d) < _DESC_MIN_LEN:
+        out.append(("ERROR",
+                    f"商品説明が{len(d)}字しかない (テンプレ未挿入/読取失敗の疑い。"
+                    f"通常は{_DESC_MIN_LEN}字以上)"))
+    if "Specifications" not in d:
+        out.append(("ERROR", "商品説明に Specifications ブロックが無い"))
+    for tag in ("<ul>", "<li>"):
+        if tag not in d:
+            out.append(("ERROR", f"商品説明に {tag} が無い (HTML が壊れている疑い)"))
+            break
+    for op, cl in (("<ul>", "</ul>"), ("<li>", "</li>"), ("<p>", "</p>")):
+        if d.count(op) != d.count(cl):
+            out.append(("ERROR",
+                        f"商品説明の {op} と {cl} の数が合わない "
+                        f"({d.count(op)} vs {d.count(cl)})"))
+    return out
+
+
+def image_issues(pic_url):
+    """商品画像のチェック (2026-08-13 実害から)。
+
+    ★実害: PSA 画像 URL が /small/(380px) のまま出た行があった。380px では eBay の
+      ズームが効かず、スラブの状態が見えない (memory: psa_large_variant の経緯)。
+      /large/ が実在しない cert では /small/ のままが正しいので **WARN 止まり**。
+    """
+    urls = [u.strip() for u in str(pic_url or "").split("|") if u.strip()]
+    out = []
+    psa = [u for u in urls if PSA_IMG_HOST in u]
+    if not psa:
+        out.append(("ERROR", "PSA 画像が1枚も無い"))
+    small = [u for u in psa if "/small/" in u]
+    if small:
+        out.append(("WARN",
+                    f"PSA 画像 {len(small)}枚が /small/ (380px) のまま "
+                    f"= eBay のズームが効かない"))
+    return out
+
+
+def specifics_sanity_issues(row, title):
+    """Item Specifics に「変換前の生値」が残っていないか (2026-08-13 実害から)。
+
+    ★実害: ドラゴンボール FB01-071 の C:Rarity が catalog の生値 'L★' のまま入り、
+      post_title_fix が★を落として **'L'** になった。タイトルも「… Childhood L」で
+      終わり、買い手には意味不明。catalog の変換表は L★ → SCR と定めているのに
+      products 側が変換前の値を持っていた (= ①カタログのデータ側の誤り)。
+      同型は dragonball_scg 5,577件中 **1,164件**が★付きの生値。
+    ここは「eBay 正規値の一覧」と突合しない: ワンピは 'Rare'、ドラゴンボールは 'R' と
+    表記系が揃っておらず、突合すると正しい行まで落ちる。**明らかに壊れている形**だけ見る。
+    """
+    out = []
+    for col in ("C:Rarity", "C:Card Type", "C:Features"):
+        v = (get_col(row, col) or "").strip()
+        if not v:
+            continue
+        bad = [ch for ch in v if ord(ch) > 0x2000 and not ch.isalnum()]
+        if bad:
+            out.append(("ERROR",
+                        f"{col}='{v}' に変換前の記号が残っている ({''.join(bad)}) "
+                        f"= catalog の変換表を通していない値"))
+    rarity = (get_col(row, "C:Rarity") or "").strip()
+    if len(rarity) == 1 and rarity.isalpha():
+        out.append(("ERROR",
+                    f"C:Rarity='{rarity}' が1文字だけ "
+                    f"(記号が落ちて潰れた疑い。例 'L★'→'L')"))
+    t = str(title or "").strip()
+    last = t.split()[-1] if t.split() else ""
+    if len(last) == 1 and last.isalpha():
+        out.append(("ERROR",
+                    f"タイトルが1文字'{last}'で終わっている (末尾が欠けた疑い): {t}"))
+    return out
 
 
 # ===== 競合比較 =====
@@ -644,7 +743,18 @@ def load_anthropic_key():
 
 
 def claude_review(rows, all_issues, all_comp_findings, all_gates):
-    """Claude APIで総合レビュー"""
+    """Claude APIで総合レビュー (2026-08-13 既定 OFF)。
+
+    ★止めた理由: 講評が **post_title_fix で直る前の値**を見ており、
+      「81字で超過」「2022を削れ」等の**既に解決済みの指摘**を毎回85行出していた。
+      戻したい時は global.yaml の ai_review.enabled を true に。
+    """
+    try:
+        from config_loader import is_ai_review_enabled as _ai_on
+        if not _ai_on():
+            return None
+    except Exception:
+        return None
     api_key = load_anthropic_key()
     if not api_key:
         print("\n⚠️ Claude APIキーなし。AI総合レビューをスキップします。")
@@ -815,10 +925,17 @@ def main(csv_path: str | None = None):
     print(f"利益計算: 為替¥{p['exchange_rate']} | 手数料{p['ebay_fee_rate']:.1%}+プロモ{p['promo_rate']:.0%}+Payo{p['payo_rate']:.1%} | "
           f"net={net:.0%} | 送料¥{p['shipping_jpy']:,} | 目標利益=価格帯別")
 
-    # eBay API準備
-    ebay_keys = load_ebay_keys()
+    # eBay API準備 (= 競合比較 / GATE 用。相場停止中は接続もしない)
+    try:
+        from config_loader import is_market_lookup_enabled as _mkt_on
+        _market_lookup = _mkt_on()
+    except Exception:
+        _market_lookup = False
+    ebay_keys = load_ebay_keys() if _market_lookup else {}
     token = None
-    if ebay_keys.get("AppID") and ebay_keys.get("AppSecret"):
+    if not _market_lookup:
+        print("(相場取得は停止中 — 価格は cost-plus。global.yaml market_lookup)\n")
+    elif ebay_keys.get("AppID") and ebay_keys.get("AppSecret"):
         try:
             token = get_oauth_token(ebay_keys["AppID"], ebay_keys["AppSecret"])
             print("✓ eBay API 接続OK\n")
@@ -864,6 +981,8 @@ def main(csv_path: str | None = None):
             # 2026-06-15: TOPセラー Item Specifics 比較は廃止。生成は catalog(SSOT)決定論なので
             # 競合値は使わない(取り込むと catalog-official-only/fail-closed 違反)。市場は価格ゲートのみ参照。
             time.sleep(0.5)  # API rate limit
+        elif not _market_lookup:
+            pass  # 相場停止中 = 何も出さない (行ごとに同じ文言を並べない)
         else:
             comp_findings.append(("INFO", "eBay API未接続のため競合比較スキップ"))
 
