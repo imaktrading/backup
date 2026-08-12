@@ -147,6 +147,29 @@ def test_catalog_candidates_does_not_pad_when_number_matched(monkeypatch):
     assert [c["pid"] for c in out] == ["EB03-053"]
 
 
+def test_variant_prefix_excludes_other_numbers():
+    """★前方一致で拾った別番号 (OP05-0021) を版として混ぜない。"""
+    assert N._is_other_card("OP05-002", "OP05-002") is False
+    assert N._is_other_card("OP05-002_p1", "OP05-002") is False
+    assert N._is_other_card("OP05-002_EB02_LF", "OP05-002") is False
+    assert N._is_other_card("OP05-0021", "OP05-002") is True
+
+
+def test_catalog_variants_finds_suffixed_versions():
+    """★2026-08-13 実バグ: LIKE の `\\_` が SQLite で効かず、版が1件も引けていなかった。
+
+    実DBで確認する (版が複数あるカードの代表)。
+    """
+    import os
+    if not os.path.exists(N.DB_PATH):
+        import pytest
+        pytest.skip("catalog DB が無い環境")
+    pids = [c["pid"] for c in N.catalog_variants("OP05-002")]
+    assert "OP05-002" in pids
+    assert any(p.startswith("OP05-002_") for p in pids), f"版が引けていない: {pids}"
+    assert len(pids) >= 2
+
+
 def test_catalog_candidates_falls_back_to_name(monkeypatch):
     """番号が読めない/未収録なら名前で候補を出す (= 候補ゼロにしない)。"""
     monkeypatch.setattr(N, "catalog_variants", lambda no, db=None: [])

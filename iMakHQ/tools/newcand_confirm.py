@@ -152,6 +152,15 @@ _CAND_COLS = "product_id, category, name, name_en, images"
 _MAX_CANDS = 12
 
 
+def _is_other_card(pid, card_no):
+    """`OP05-002` の前方一致で拾った `OP05-0021` のような**別カード**か (純関数)。
+
+    版は `_p1` `_P` `_EB02_LF` のように **区切り記号**が続く。数字が続くのは別番号。
+    """
+    tail = str(pid or "")[len(card_no):]
+    return bool(tail) and tail[0].isdigit()
+
+
 def catalog_variants(card_no, db=DB_PATH):
     """カード番号 → 版の一覧 [{pid, category, name, image}]。無ければ []。
 
@@ -162,17 +171,22 @@ def catalog_variants(card_no, db=DB_PATH):
     con = sqlite3.connect(db)
     con.row_factory = sqlite3.Row
     try:
-        rows = con.execute(
-            f"SELECT {_CAND_COLS} FROM products "
-            "WHERE product_id = ? OR product_id LIKE ? ORDER BY LENGTH(product_id), product_id",
-            (card_no, card_no + "\\_%")).fetchall()
+        # ★2026-08-13 バグ修正: 以前は LIKE 'OP05-002\_%' と書いていたが、SQLite は
+        #   ESCAPE 句が無いと `\` を**ただの文字**として扱うため **1件も引けなかった**。
+        #   結果、版が複数あるカードでも候補が「1件」に見え、目視で選びようがなかった
+        #   (実測: EB03-053 は 1件→4件 / OP13-118 は 1件→7件)。
+        #   前方一致で取ってから、直後が数字のもの (OP05-0021 等の別カード) を落とす。
+        rows = [r for r in con.execute(
+            f"SELECT {_CAND_COLS} FROM products WHERE product_id LIKE ? "
+            "ORDER BY LENGTH(product_id), product_id", (card_no + "%",)).fetchall()
+            if not _is_other_card(r["product_id"], card_no)]
         if not rows:
             # ポケモンの印刷番号 (006/020) は product_id と別体系なので specs 側を見る
             rows = con.execute(
                 f"SELECT {_CAND_COLS} FROM products "
                 "WHERE specs LIKE ? ORDER BY product_id LIMIT 12",
                 (f'%"card_number": "{card_no}%',)).fetchall()
-        return [_row_to_cand(r) for r in rows]
+        return [_row_to_cand(r) for r in rows][:_MAX_CANDS]
     finally:
         con.close()
 
