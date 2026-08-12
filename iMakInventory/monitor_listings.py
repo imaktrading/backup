@@ -109,6 +109,15 @@ MERCARI_PREVENTIVE_RESTART_EVERY = 150
 
 
 def _log_path() -> Path:
+    """本番ログ path。★ 2026-08-13: pytest 実行中は別ファイルに逃がす。
+
+    test (driver crash / retry 系の検体) が本番ログに書き込むため、健全性を見ようとログの
+    エラー件数を数えると **テスト由来のエラーが本番の異常に見える**。実測: 08-12 の driver
+    crash 系 36 件のうち 34 件が [TEST] シート = pytest 由来だった (実シートは 2 件)。
+    ログが嘘をつくと「最近エラーが多い」の切り分けができなくなるので、物理的に分ける。
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return LOG_DIR / f"listings_TESTRUN_{datetime.now().strftime('%Y-%m-%d')}.log"
     return LOG_DIR / f"listings_{datetime.now().strftime('%Y-%m-%d')}.log"
 
 

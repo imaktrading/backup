@@ -996,6 +996,14 @@ def run_cycle(
                     _log("  [★ABORT] precheck 失敗 alert mail 送信", test_mode)
             except Exception as e:
                 _log(f"  [!] precheck abort mail 失敗: {type(e).__name__}: {e}", test_mode)
+            # ★ 2026-08-13: abort も cycle log に残す。残さないと decision_log 上は
+            #   「その時間の巡回が存在しない」ように見え、後から稼働率を数えた時に
+            #   停止していた事実が消える (08-13 01:30 の abort が履歴に無かった)。
+            cycle_log["ts_end"] = datetime.now().isoformat(timespec="seconds")
+            try:
+                _record_cycle_log(cycle_log)
+            except Exception as e:
+                _log(f"  [!] abort cycle log 記録失敗: {type(e).__name__}: {e}", test_mode)
             return cycle_log  # finally で lock release される
 
         # Phase 0.5: listing verifier (Phase 7e) — 前回 upload の eBay 反映確認 (4h ずらし)

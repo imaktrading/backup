@@ -162,7 +162,20 @@ def run_reverse_audit(
             }
 
     print("  [reverse_audit] Step 3: 乖離検出 (D=○ + eBay qty>0)...", flush=True)
-    items = []
+    # ★ 2026-08-13: 同一 item_id が複数行 (仕入元違い) で管理されることがある。
+    #   片方の仕入元が売切 (D=○) でも、**別行の仕入元にまだ在庫がある**なら eBay が active
+    #   なのは正しく、fail-OPEN ではない。これを乖離に数えていたため、3 件が 5 日連続で
+    #   MISMATCH として鳴り続けていた (08-09〜08-13、誰も対処できない = 無視される alert)。
+    #   在庫のある行は URL を持つものに限る (URL 空 + D 空欄 は「未設定」であって在庫ではない)。
+    alive_ids = {
+        (r.get("item_id") or "").strip()
+        for r in all_rows
+        if (r.get("item_id") or "").strip()
+        and (r.get("url") or "").strip()
+        and (r.get("current_sold") or "").strip() not in SOLD_MARKERS
+    }
+
+    items, suppressed = [], []
     for r in all_rows:
         iid = (r.get("item_id") or "").strip()
         d_col = (r.get("current_sold") or "").strip()
@@ -172,7 +185,7 @@ def run_reverse_audit(
             continue
         qty = qty_map.get(iid)
         if qty is not None and qty > 0:
-            items.append({
+            entry = {
                 "sheet":      r["sheet"],
                 "row_index":  r.get("row_index", -1),
                 "item_id":    iid,
@@ -180,7 +193,15 @@ def run_reverse_audit(
                 "supplier":   _detect_supplier(r.get("url", "")),
                 "url":        r.get("url", "")[:200],
                 "title":      (r.get("title") or "")[:80],
-            })
+            }
+            if iid in alive_ids:
+                # silent drop 禁止: 数えないが log には残す (後から検証できる形にする)
+                suppressed.append({**entry, "suppressed_reason": "other_row_in_stock"})
+            else:
+                items.append(entry)
+    if suppressed:
+        print(f"  [reverse_audit] 別行に在庫あり = 乖離ではない: {len(suppressed)} 件 "
+              f"(item_id {sorted({s['item_id'] for s in suppressed})})", flush=True)
 
     from collections import Counter  # noqa: PLC0415
     result = {
@@ -189,6 +210,7 @@ def run_reverse_audit(
         "by_sheet":    dict(Counter(it["sheet"] for it in items)),
         "by_supplier": dict(Counter(it["supplier"] for it in items)),
         "items":       items,
+        "suppressed":  suppressed,
         "elapsed_sec": time.time() - t0,
         "log_path":    None,
     }
@@ -206,11 +228,15 @@ def run_reverse_audit(
                 "mismatch_count": result["mismatch_count"],
                 "by_sheet": result["by_sheet"],
                 "by_supplier": result["by_supplier"],
+                "suppressed_count": len(suppressed),
                 "elapsed_sec": result["elapsed_sec"],
             }, ensure_ascii=False) + "\n")
             # 各 entry
             for it in items:
                 f.write(json.dumps({"kind": "mismatch", **it},
+                                    ensure_ascii=False) + "\n")
+            for it in suppressed:
+                f.write(json.dumps({"kind": "suppressed", **it},
                                     ensure_ascii=False) + "\n")
         result["log_path"] = str(log_path)
 

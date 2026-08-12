@@ -86,3 +86,17 @@ def test_timeout_budget_covers_observed_worst_case():
     import run_cycle as rc
     assert rc.PYTEST_PRECHECK_TIMEOUT_SEC >= 240
     assert rc.PYTEST_PRECHECK_ATTEMPTS >= 2
+
+
+@pytest.mark.offline
+def test_abort_is_recorded_in_cycle_log():
+    """precheck abort も cycle log に残す (停止した事実を履歴から消さない).
+
+    ★ 2026-08-13: 01:30 の abort が decision_log に無く、後から稼働率を数えた時に
+      「その時間の巡回は存在しない」ように見えた = 停止が履歴上 invisible だった。
+    """
+    import run_cycle as rc
+    src = Path(rc.__file__).read_text(encoding="utf-8")
+    abort_block = src.split('cycle_log["status"] = "aborted_pytest_precheck_failed"')[1]
+    abort_block = abort_block.split("return cycle_log")[0]
+    assert "_record_cycle_log(cycle_log)" in abort_block, "abort 経路で cycle log を記録していない"

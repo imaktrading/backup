@@ -151,6 +151,60 @@ def drain_pending_revive(consumed_item_ids: list[str]) -> int:
     return moved
 
 
+DISCARDED_REVIVE_FILE = DECISION_LOG_DIR / "discarded_revive.jsonl"
+REVIVE_PENDING_MAX_AGE_DAYS = 7
+
+
+def prune_unresolvable_pending_revive(skipped: list) -> int:
+    """シート上に itemID が存在しない古い entry を queue から退避する。
+
+    ★ 2026-08-13: pending_revive は「復活できた時」しか drain されない設計だったため、
+      行が消えた商品の entry が永久に残り、queue が単調増加していた (08-08→08-13 で 145 件)。
+      解決不能かつ古いものは archive に逃がす。誤って捨てても discarded_revive.jsonl から
+      復元できる (silent drop 禁止)。
+
+    条件: skip_reason が row_not_found_by_item_id で、queue 投入から
+          REVIVE_PENDING_MAX_AGE_DAYS 日以上経過。
+    """
+    stale_ids = set()
+    now = datetime.now()
+    for s in skipped:
+        if s.get("skip_reason") != "row_not_found_by_item_id":
+            continue
+        ts = (s.get("ts") or s.get("queue_ts") or "")[:19]
+        try:
+            age_days = (now - datetime.fromisoformat(ts)).days
+        except ValueError:
+            continue
+        if age_days >= REVIVE_PENDING_MAX_AGE_DAYS and s.get("item_id"):
+            stale_ids.add(s["item_id"])
+    if not stale_ids or not PENDING_REVIVE_FILE.exists():
+        return 0
+
+    moved, keep = 0, []
+    with open(PENDING_REVIVE_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                keep.append(line)
+                continue
+            if entry.get("item_id") in stale_ids:
+                entry["discarded_at"] = now.isoformat(timespec="seconds")
+                entry["discard_reason"] = "row_not_found_by_item_id_expired"
+                with open(DISCARDED_REVIVE_FILE, "a", encoding="utf-8") as af:
+                    af.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                moved += 1
+            else:
+                keep.append(line)
+    PENDING_REVIVE_FILE.write_text(
+        ("\n".join(keep) + "\n") if keep else "", encoding="utf-8")
+    return moved
+
+
 # ============================================================================
 # gate ② 3点セット (D=空 AND AK=空 AND O=直近 cycle 内)
 # ============================================================================
@@ -392,6 +446,29 @@ def _row_key(sheet_label: str, row_index: int) -> tuple:
     return (sheet_label, row_index)
 
 
+def _relocate_row(sheet_state: dict, label: str, item_id: str, url: str):
+    """row_index がずれた entry を itemID (+URL) でシート上から引き直す。
+
+    - itemID 一致が 1 行 → その行
+    - 複数行 (同 itemID を別仕入元で管理) → URL 一致で一意に決まればその行、
+      決まらなければ {"_ambiguous": True} (fail-closed: 誤った行で復活させない)
+    - 0 行 → None
+    """
+    if not item_id:
+        return None
+    hits = [r for k, r in sheet_state.items()
+            if k[0] == label and (r.get("item_id") or "").strip() == item_id]
+    if not hits:
+        return None
+    if len(hits) == 1:
+        return hits[0]
+    if url:
+        by_url = [r for r in hits if (r.get("url") or "").strip() == url]
+        if len(by_url) == 1:
+            return by_url[0]
+    return {"_ambiguous": True}
+
+
 def collect_from_pending_revive(
     sheet_filter: str = "both",
     high_sheet_id: Optional[str] = None,
@@ -459,12 +536,23 @@ def collect_from_pending_revive(
 
         key = _row_key(label, q.get("row_index", -1))
         cur_row = sheet_state.get(key)
-        if cur_row is None:
-            skipped.append({**q, "skip_reason": "row_not_found_in_sheet"})
-            continue
-        if cur_row.get("item_id", "") != q.get("item_id", ""):
-            skipped.append({**q, "skip_reason": "item_id_changed"})
-            continue
+        q_iid = (q.get("item_id") or "").strip()
+        if cur_row is not None and (cur_row.get("item_id") or "").strip() == q_iid:
+            pass                                   # 行が動いていない (fast path)
+        else:
+            # ★ 2026-08-13: row_index は当てにならない。シートは行の挿入/削除で常時ずれる
+            #   ので、queue に積んだ時の row_index は数日で別商品を指す。row_index だけで
+            #   突合していたため 145 件中 84 件が item_id_changed / row_not_found として
+            #   **永久に deferred**、6 日間 1 件も復活しなかった (在庫が戻っても qty=0 のまま)。
+            #   itemID (+ URL) で引き直す = シート上の identity で突合する。
+            cur_row = _relocate_row(sheet_state, label, q_iid, (q.get("url") or "").strip())
+            if cur_row is None:
+                skipped.append({**q, "skip_reason": "row_not_found_by_item_id"})
+                continue
+            if cur_row.get("_ambiguous"):
+                # 同 itemID 複数行で URL でも一意に決まらない → fail-closed (誤復活しない)
+                skipped.append({**q, "skip_reason": "ambiguous_rows_for_item_id"})
+                continue
         # 復活候補: シート最新の row をそのまま candidate に載せる (gate はここから読む)
         candidates.append({
             **cur_row,
@@ -711,6 +799,17 @@ def run(
     # 各 skip した pending entry を deferred に載せる (revive_csv の decision_log に写す)
     for s in skipped:
         deferred.append({**s, "gate": "pre_verify"})
+
+    # ★ 2026-08-13: 二度と解決しない entry を queue から落とす (肥大化・恒久 deferred 防止)。
+    #   itemID がシートのどこにも無い = 行が消えた/出品を畳んだ。復活のしようがないので
+    #   捨てる (証跡は discarded archive に残す = silent drop にしない)。
+    if not dry_run:
+        try:
+            n_pruned = prune_unresolvable_pending_revive(skipped)
+            if n_pruned:
+                print(f"  [prune] 解決不能な pending entry {n_pruned} 件を archive へ退避")
+        except Exception as e:
+            print(f"  [!] pending_revive prune 失敗: {type(e).__name__}: {e}")
 
     csv_path = None
     if not dry_run and allowed:
