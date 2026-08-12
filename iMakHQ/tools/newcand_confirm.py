@@ -131,11 +131,31 @@ def parse_result(data):
 # ---------------------------------------------------------------------------
 # catalog 参照 (I/O)
 # ---------------------------------------------------------------------------
+def _first_image(images_json):
+    try:
+        imgs = json.loads(images_json or "[]")
+    except Exception:
+        return ""
+    img = imgs[0] if isinstance(imgs, list) and imgs else ""
+    if isinstance(img, dict):
+        img = img.get("url") or ""
+    return img or ""
+
+
+def _row_to_cand(r):
+    return {"pid": r["product_id"], "category": r["category"],
+            "name": r["name_en"] or r["name"] or "", "name_jp": r["name"] or "",
+            "image": _first_image(r["images"])}
+
+
+_CAND_COLS = "product_id, category, name, name_en, images"
+_MAX_CANDS = 12
+
+
 def catalog_variants(card_no, db=DB_PATH):
     """カード番号 → 版の一覧 [{pid, category, name, image}]。無ければ []。
 
     `OP05-002` は `OP05-002` / `_p` / `_p1` / `_p2` / `_EB02_LF` のように**版が複数**ある。
-    ここで2件以上返った時だけ人が絵柄で選ぶ。
     """
     if not card_no:
         return []
@@ -143,29 +163,78 @@ def catalog_variants(card_no, db=DB_PATH):
     con.row_factory = sqlite3.Row
     try:
         rows = con.execute(
-            "SELECT product_id, category, name, name_en, images FROM products "
+            f"SELECT {_CAND_COLS} FROM products "
             "WHERE product_id = ? OR product_id LIKE ? ORDER BY LENGTH(product_id), product_id",
             (card_no, card_no + "\\_%")).fetchall()
         if not rows:
             # ポケモンの印刷番号 (006/020) は product_id と別体系なので specs 側を見る
             rows = con.execute(
-                "SELECT product_id, category, name, name_en, images FROM products "
+                f"SELECT {_CAND_COLS} FROM products "
                 "WHERE specs LIKE ? ORDER BY product_id LIMIT 12",
                 (f'%"card_number": "{card_no}%',)).fetchall()
-        out = []
-        for r in rows:
-            try:
-                imgs = json.loads(r["images"] or "[]")
-            except Exception:
-                imgs = []
-            img = imgs[0] if isinstance(imgs, list) and imgs else ""
-            if isinstance(img, dict):
-                img = img.get("url") or ""
-            out.append({"pid": r["product_id"], "category": r["category"],
-                        "name": r["name_en"] or r["name"] or "", "image": img})
-        return out
+        return [_row_to_cand(r) for r in rows]
     finally:
         con.close()
+
+
+_NAME_INDEX = None
+
+
+def _name_index(db=DB_PATH):
+    """{カード名(日本語): [行]} を1回だけ作る。名前引きの候補出し用 (I/O・cache)。
+
+    ★番号が読めない候補 (タイトルに `〈OP05-002〉` が無い等) でも、名前は書いてある。
+      名前で候補を出せば目視で選べる = 「候補が1件も出ない」を無くす。
+    """
+    global _NAME_INDEX
+    if _NAME_INDEX is None:
+        con = sqlite3.connect(db)
+        con.row_factory = sqlite3.Row
+        try:
+            idx = {}
+            for r in con.execute(
+                    f"SELECT {_CAND_COLS} FROM products "
+                    "WHERE category IN ('one_piece_tcg','pokemon_tcg','dragonball_scg','gundam_tcg')"):
+                nm = (r["name"] or "").strip()
+                if len(nm) >= 2:
+                    idx.setdefault(nm, []).append(_row_to_cand(r))
+            _NAME_INDEX = idx
+        finally:
+            con.close()
+    return _NAME_INDEX
+
+
+def catalog_by_name(title, limit=_MAX_CANDS, db=DB_PATH):
+    """候補タイトルに含まれるカード名で catalog を引く [{pid,...}]。
+
+    長い名前を優先 (「モンキー・D・ルフィ」が「ナミ」より先)。同名が大量にある場合は
+    limit で頭打ち = 目視で見比べられる数に抑える。
+    """
+    t = str(title or "")
+    if not t:
+        return []
+    hits = []
+    for nm in sorted(_name_index(db), key=len, reverse=True):
+        if nm in t:
+            hits.extend(_name_index(db)[nm])
+            if len(hits) >= limit:
+                break
+    return hits[:limit]
+
+
+def catalog_candidates(title, card_no, db=DB_PATH):
+    """目視画面に出す catalog 候補 (番号一致 → 足りなければ名前一致で補う)。
+
+    ★必ず**複数**出す。1つしか出さないと「これで合ってますね?」の確認にしかならず、
+      目視で特定する画面にならない (2026-08-13 ユーザー指摘)。
+    """
+    out = catalog_variants(card_no, db) if card_no else []
+    if out:
+        # 番号が一致した = その番号の版だけが候補。名前で水増ししない
+        # (関係ない同名カードを混ぜると、かえって選べなくなる)
+        return out[:_MAX_CANDS]
+    # 番号が読めない / 番号が catalog に無い → 名前で候補を出す (ここが目視の出番)
+    return catalog_by_name(title, _MAX_CANDS, db)
 
 
 def load_items(limit=0):
@@ -190,7 +259,7 @@ def load_items(limit=0):
     for p in pending_rows(src_rows, done):
         price, title = u2t.get(p["url"], (None, ""))
         card_no = extract_card_no(title)
-        variants = catalog_variants(card_no) if card_no else []
+        variants = catalog_candidates(title, card_no)
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants})
         items.append(p)
         if limit and len(items) >= limit:
@@ -215,12 +284,21 @@ h1{font-size:16px;margin:0 0 8px}
 .t{font-size:13px;font-weight:bold;margin-bottom:2px;word-break:break-all}
 .meta{font-size:11px;color:#666;margin-bottom:6px}
 .vs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
-.v{border:1px solid #ccc;border-radius:4px;padding:4px;cursor:pointer;text-align:center;font-size:10px;width:110px}
+.v{position:relative;border:1px solid #ccc;border-radius:4px;padding:4px;cursor:pointer;text-align:center;font-size:10px;width:112px}
 .v.sel{border-color:#0a7;background:#e7f7f1;box-shadow:0 0 0 1px #0a7 inset}
 .v img{width:100px;height:135px;object-fit:contain;background:#f7f7f7}
 .v .pid{font-weight:bold;word-break:break-all}
+.v .nm{color:#666}
+.v .zb{position:absolute;top:2px;right:2px;font-size:11px;padding:0 4px;line-height:16px}
 .one{font-size:12px;color:#076;font-weight:bold}
 .warn{font-size:12px;color:#a40}
+.zb2{font-size:11px;padding:1px 6px;margin-top:2px}
+/* 虫眼鏡: 候補写真とカタログ画像を並べて拡大 (2026-08-13 ユーザー要望) */
+#zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;
+     align-items:center;justify-content:center;gap:20px}
+#zov.on{display:flex}
+#zov .zc{color:#fff;font-size:12px;text-align:center;margin-bottom:4px}
+#zov img{max-height:82vh;max-width:44vw;object-fit:contain;background:#fff}
 .act{margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 button{font-size:12px;padding:3px 10px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer}
 button.go{border-color:#0a7;color:#065}
@@ -233,6 +311,22 @@ input.cert{font-size:12px;width:120px;padding:2px 4px}
 """
 
 _JS = """
+function zoom(ev, el, side){
+  ev.preventDefault(); ev.stopPropagation();
+  var box=el.closest('.it');
+  var o=document.getElementById('zov');
+  o.querySelector('#zl img').src = box.dataset.photo||'';
+  var cat = (side==='cat') ? el.dataset.img : (box.querySelector('.v.sel img')||{}).src;
+  o.querySelector('#zr img').src = cat||'';
+  o.querySelector('#zr .zc').textContent = 'カタログ ' + ((side==='cat')? (el.dataset.pid||'') :
+      ((box.querySelector('.v.sel')||{dataset:{}}).dataset.pid||'(未選択)'));
+  o.classList.add('on');
+}
+function zclose(){document.getElementById('zov').classList.remove('on');}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')zclose();});
+function imgFail(el){var d=document.createElement('div');
+  d.style.cssText='width:100px;height:135px;display:flex;align-items:center;justify-content:center;color:#999;border:1px dashed #ccc';
+  d.textContent='画像なし'; if(el.parentNode) el.parentNode.replaceChild(d,el);}
 function pickV(el){
   var box=el.closest('.it');
   box.querySelectorAll('.v').forEach(function(v){v.classList.remove('sel');});
@@ -284,34 +378,40 @@ def build_html(items):
         "(空でも記録はしますが、出品には回りません)。</div>",
     ]
     for it in items:
-        img = prc._proxied(it["url"])
+        photo = prc._proxied(it["url"])
         ph = (f"<div class='ph'><a href='{_html.escape(it['url'])}' target='_blank'>"
-              f"<img src='{_html.escape(img)}' loading='lazy'></a></div>")
+              f"<img src='{_html.escape(photo)}' loading='lazy' onerror='imgFail(this)'></a>"
+              f"<div><button class='zb2' onclick='zoom(event,this,\"cand\")'>🔍 拡大</button></div>"
+              f"</div>")
         price = f"¥{it['price']:,}" if isinstance(it["price"], int) else ""
         title = it["title"] or "(タイトル不明 — リンクを開いて確認)"
         vs = it["variants"]
-        if len(vs) == 1:
-            v = vs[0]
-            body_v = (f"<div class='one'>カタログで確定: {_html.escape(v['pid'])} "
-                      f"{_html.escape(v['name'])} ({_html.escape(v['category'])})</div>")
-            pid0, cat0 = v["pid"], v["category"]
-        elif vs:
+        if vs:
+            # ★必ず画像付きで並べる。1件でもカードとして出す (文字だけだと見比べられない)。
             cards = "".join(
                 f"<div class='v' data-pid=\"{_html.escape(v['pid'])}\" "
                 f"data-cat=\"{_html.escape(v['category'])}\" onclick='pickV(this)'>"
-                + (f"<img src='{_html.escape(prc._proxied(v['image']))}' loading='lazy'>"
-                   if v["image"] else "<div style='height:135px;color:#999'>画像なし</div>")
-                + f"<div class='pid'>{_html.escape(v['pid'])}</div></div>" for v in vs)
-            body_v = (f"<div class='warn'>版が {len(vs)} つあります — 絵柄で選んでください</div>"
-                      f"<div class='vs'>{cards}</div>")
-            pid0, cat0 = "", ""
+                + (f"<img src='{_html.escape(prc._proxied(v['image']))}' loading='lazy' "
+                   f"onerror='imgFail(this)'>"
+                   if v["image"] else
+                   "<div style='width:100px;height:135px;display:flex;align-items:center;"
+                   "justify-content:center;color:#999;border:1px dashed #ccc'>画像なし</div>")
+                + f"<div class='pid'>{_html.escape(v['pid'])}</div>"
+                + f"<div class='nm'>{_html.escape((v.get('name') or '')[:16])}</div>"
+                + f"<button class='zb' data-img=\"{_html.escape(prc._proxied(v['image']))}\" "
+                  f"data-pid=\"{_html.escape(v['pid'])}\" "
+                  f"onclick='zoom(event,this,\"cat\")'>🔍</button>"
+                + "</div>" for v in vs)
+            head = (f"<div class='one'>カタログ候補 {len(vs)}件 — 絵柄を見て選んでください</div>"
+                    if len(vs) > 1 else
+                    "<div class='one'>カタログ候補 1件 — 絵柄が合っていれば選んでください</div>")
+            body_v = head + f"<div class='vs'>{cards}</div>"
         else:
-            body_v = ("<div class='warn'>カタログに該当なし "
-                      "(番号が読めない/未収録)。出品には回せません</div>")
-            pid0, cat0 = "", ""
+            body_v = ("<div class='warn'>カタログ候補なし "
+                      "(番号も名前も読めない/未収録)。出品には回せません</div>")
         parts.append(
-            f"<div class='it' data-idx='{it['idx']}' data-pid=\"{_html.escape(pid0)}\" "
-            f"data-cat=\"{_html.escape(cat0)}\">{ph}<div class='body'>"
+            f"<div class='it' data-idx='{it['idx']}' data-pid='' data-cat='' "
+            f"data-photo=\"{_html.escape(photo)}\">{ph}<div class='body'>"
             f"<div class='t'>{_html.escape(title[:110])}</div>"
             f"<div class='meta'>{price} ｜ 番号 {_html.escape(it['card_no'] or '?')} ｜ "
             f"元 {_html.escape(it['src'])} (出品 {_html.escape(it['src_itemid'])})</div>"
@@ -321,6 +421,10 @@ def build_html(items):
             "<button class='ng' data-a='ng' onclick='setAct(this)'>該当なし</button>"
             "<button class='hold' data-a='hold' onclick='setAct(this)'>保留</button>"
             "</div></div></div>")
+    parts.append(
+        "<div id='zov' onclick='zclose()'>"
+        "<div id='zl'><div class='zc'>仕入候補の写真</div><img alt=''></div>"
+        "<div id='zr'><div class='zc'>カタログ</div><img alt=''></div></div>")
     parts.append(f"<button id='go' onclick='go()'>確定</button><script>{_JS}</script>")
     return "".join(parts).encode("utf-8")
 

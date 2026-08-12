@@ -113,11 +113,43 @@ def _item(idx, variants, title="PSA10 ナミ EB03-053", card_no="EB03-053"):
 
 
 def test_build_html_marks_single_multi_and_missing():
-    v1 = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
-    v2 = v1 + [{"pid": "EB03-053_p1", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
+    v1 = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami",
+           "image": "https://x/a.png"}]
+    v2 = v1 + [{"pid": "EB03-053_p1", "category": "one_piece_tcg", "name": "Nami",
+                "image": "https://x/b.png"}]
     page = N.build_html([_item(0, v1), _item(1, v2), _item(2, [], title="", card_no="")]).decode()
-    assert "カタログで確定: EB03-053" in page
-    assert "版が 2 つあります" in page
-    assert "カタログに該当なし" in page
+    assert "カタログ候補 1件" in page
+    assert "カタログ候補 2件" in page
+    assert "カタログ候補なし" in page
     assert "タイトル不明" in page
     assert page.count("data-a='go'") == 3, "全件に『出品する』ボタンが出る"
+
+
+def test_build_html_always_renders_catalog_images_and_zoom():
+    """★1件しか候補が無い時も**画像で**出す (文字だけだと見比べられない)。虫眼鏡も出す。"""
+    v1 = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami",
+           "image": "https://files.example/EB03-053.png"}]
+    page = N.build_html([_item(0, v1)]).decode()
+    assert "EB03-053.png" in page, "カタログ画像が埋まっていない"
+    assert page.count("class='v'") == 1
+    assert "id='zov'" in page, "拡大オーバーレイが無い"
+    assert "🔍" in page, "虫眼鏡ボタンが無い"
+
+
+def test_catalog_candidates_does_not_pad_when_number_matched(monkeypatch):
+    """番号が一致した時に同名カードで水増ししない (関係ない候補が混ざると選べない)。"""
+    monkeypatch.setattr(N, "catalog_variants",
+                        lambda no, db=None: [{"pid": "EB03-053", "category": "one_piece_tcg",
+                                              "name": "Nami", "image": ""}])
+    monkeypatch.setattr(N, "catalog_by_name",
+                        lambda t, limit=12, db=None: [{"pid": "OP01-016"}] * 12)
+    out = N.catalog_candidates("PSA10 ナミ EB03-053", "EB03-053")
+    assert [c["pid"] for c in out] == ["EB03-053"]
+
+
+def test_catalog_candidates_falls_back_to_name(monkeypatch):
+    """番号が読めない/未収録なら名前で候補を出す (= 候補ゼロにしない)。"""
+    monkeypatch.setattr(N, "catalog_variants", lambda no, db=None: [])
+    monkeypatch.setattr(N, "catalog_by_name",
+                        lambda t, limit=12, db=None: [{"pid": "A"}, {"pid": "B"}])
+    assert [c["pid"] for c in N.catalog_candidates("PSA10 ナミ", "")] == ["A", "B"]
