@@ -159,12 +159,40 @@ def test_offline_normal_not_misdetected_as_auction():
     assert verdict == "IN_STOCK", f"got {verdict} ({reason})"
 
 
+@pytest.mark.offline
+def test_offline_auction_without_bid_button_still_not_purchasable():
+    """auction 終了/入札不可でも checkout container 不在なら購入不可扱い (fail-OPEN 防止).
+
+    ★ 2026-08-12: bid-button の有無だけに依存すると、auction の状態遷移 (受付前/終了後) で
+      判定が IN_STOCK に戻り得る。購入導線が無いものを在庫ありと言わないことを固定する。
+    """
+    html = ('<div><h1>商品名</h1><div>オークションは終了しました</div>'
+            '<div data-testid="price">¥12,000</div></div>')
+    verdict, reason = _detect_from_html(html)
+    assert verdict != "IN_STOCK", f"got {verdict} ({reason})"
+
+
+@pytest.mark.offline
+def test_offline_bid_word_in_description_not_misdetected():
+    """説明文に「入札」の語があるだけの通常出品を AUCTION 誤判定しない (取下げ暴発防止)."""
+    html = ('<div data-testid="checkout-button-container">'
+            '<div data-testid="checkout-button" name="purchase">購入手続きへ</div></div>'
+            '<div id="item-info">他サイトの入札履歴あり。ノークレームノーリターン</div>')
+    verdict, reason = _detect_from_html(html)
+    assert verdict == "IN_STOCK", f"got {verdict} ({reason})"
+
+
 # Live: Takaaki さん目視確認の auction 化検体 (2026-06-10、 LOW/HIGH r468/r470)。
-# auction 終了で page が変わるため期限付き regression (KNOWN_SOLD_URLS と同性質)。
-KNOWN_AUCTION_URLS = [
+# ★ 2026-08-12: 両 URL とも出品自体が削除され status=DELETED になった (auction 終了 → 削除)。
+#   「今も AUCTION であること」を live に期待するのは検体の寿命に賭ける設計で、必ず腐って
+#   落ちっぱなしになる (= 誰も見なくなる)。よって live 側は **恒久に成り立つ性質だけ** を見る:
+#   「一度 購入不可 (auction/売切/削除) になった listing が再び購入可に戻らない」= fail-OPEN 防止。
+#   AUCTION の DOM 判定そのものは上の offline test で固定する (ネット非依存で腐らない)。
+KNOWN_NOT_PURCHASABLE_URLS = [
     ("r468", "https://jp.mercari.com/item/m18442750029"),
     ("r470", "https://jp.mercari.com/item/m69534401329"),
 ]
+TERMINAL_STATUSES = {"AUCTION", "DELETED", "SOLD_OUT"}
 
 
 # ============================================================================
@@ -183,16 +211,20 @@ def test_live_known_sold_urls(label, url):
 
 
 @pytest.mark.live
-@pytest.mark.parametrize("label,url", KNOWN_AUCTION_URLS)
-def test_live_auction_is_takedown(label, url):
-    """Live: auction 化 listing が status=AUCTION / in_stock=False (= 取下げ対象) か."""
+@pytest.mark.parametrize("label,url", KNOWN_NOT_PURCHASABLE_URLS)
+def test_live_not_purchasable_stays_takedown(label, url):
+    """Live: 購入不可になった listing が in_stock=False のままか (= 取下げ対象、fail-OPEN 防止).
+
+    元は auction 化検体。現在は削除済だが「購入不可 → 二度と在庫ありに戻らない」性質は不変
+    なので、検体が腐っても意味を持ち続ける形にしてある (2026-08-12)。
+    """
     from scrapers.mercari_scraper import fetch_product_inventory  # noqa: PLC0415
     info = fetch_product_inventory(url, use_selenium_fallback=True)
-    assert info is not None, f"{label}: scraper returned None (auction 未検知 = fail-OPEN)"
-    assert info["status"] == "AUCTION", f"{label}: got status={info['status']}"
+    assert info is not None, f"{label}: scraper returned None (未検知 = fail-OPEN)"
     assert info["skus"][0]["in_stock"] is False, (
-        f"{label}: auction なのに in_stock=True (取下げされない = fail-OPEN)"
+        f"{label}: 購入不可のはずが in_stock=True (取下げされない = fail-OPEN)"
     )
+    assert info["status"] in TERMINAL_STATUSES, f"{label}: got status={info['status']}"
 
 
 # ============================================================================
