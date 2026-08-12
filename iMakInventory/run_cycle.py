@@ -618,8 +618,8 @@ def _phase_monitor(
                 + " → 一括消込を保留 (閾値超で誤一括削除を防止)。\n"
                 "  ★ snkrdunk 判定は is_listing_live で正確化済のため、通常これは "
                 "**genuine な売切補URL backlog** (誤検知ではない)。対処:\n"
-                "    1) 確認: python -m tools.supervised_backup_drain --label HIGH\n"
-                "    2) 実削除: python -m tools.supervised_backup_drain --label HIGH --execute\n"
+                "    1) 確認: python -m tools.supervised_backup_drain\n"
+                "    2) 実削除: python -m tools.supervised_backup_drain --reverify-snkrdunk --execute\n"
                 "  (compare-and-clear + 復元アーカイブで安全。触るのは補URL(AC-AG)のみ)。\n"
                 "  ※ 万一 別supplier scraper の一斉偽sold崩壊の可能性が疑わしい時のみ、"
                 "先に候補一覧の supplier 偏りを確認すること。")

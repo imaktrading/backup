@@ -1450,7 +1450,7 @@ def process_sheet(
                 if bc.get("surge") or bc.get("held"):
                     log(f"  [★補URL消込 急増ガード発火] 候補 {bc['candidate_count']} 件 > 閾値 "
                         f"→ 一括消込を保留。snkrdunk 正確化済のため通常 genuine backlog → "
-                        f"`python -m tools.supervised_backup_drain --label HIGH [--execute]` で消込。")
+                        f"`python -m tools.supervised_backup_drain [--reverify-snkrdunk --execute]` で消込。")
                 else:
                     log(f"  [OK] 補URL消込: cleared={bc['cleared']} / candidate={bc['candidate_count']} "
                         f"/ skipped(HQ差替等 mismatch)={len(bc['skipped_mismatch'])}")
