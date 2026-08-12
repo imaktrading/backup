@@ -136,7 +136,12 @@ def _should_emit_backup_clear_alert(held_max: int, mismatch_n: int) -> bool:
         return emit
     except Exception:
         return True   # 判定失敗 → 保守的に告知 (silent 化しない)
-PYTEST_PRECHECK_TIMEOUT_SEC = 120  # 検体 42 件は 1 秒程度、120s で十分
+# 検体テスト自体は数秒だが、他 cycle / chrome / Defender と重なると実測 40s まで伸びる
+# (2026-08-13 01:30 は 120s を超えて timeout → 巡回 abort = 在庫監視 4h 空白)。
+# 余裕を持たせた上で、timeout は「検出ロジックが壊れた」証拠ではないので retry する。
+PYTEST_PRECHECK_TIMEOUT_SEC = 300
+PYTEST_PRECHECK_ATTEMPTS = 3       # timeout/実行不能 のみ retry (テスト failed は即 abort)
+PYTEST_PRECHECK_RETRY_WAIT_SEC = 30
 
 # Windows: 黒窓抑制用 flag (Phase 9 拡張 A2)
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -456,43 +461,57 @@ def _notify_toast(title: str, body: str):
 # Phase 7a: pytest precheck (offline marker)
 # ============================================================================
 def _phase_pytest_precheck(test_mode: bool) -> dict:
-    """巡回開始前に offline 検体テスト 42 件を実行。失敗時は巡回中止 (fail-closed).
+    """巡回開始前に offline 検体テストを実行。失敗時は巡回中止 (fail-closed).
 
     Returns: {"status": "passed" | "failed" | "error", "stdout_tail", "stderr_tail", "elapsed"}
     DOM 仕様変更で検出ロジックが壊れていないか cycle 前に物理担保する。
+
+    ★ 2026-08-13: timeout / 実行不能 (status=error) は **検出ロジックが壊れた証拠ではない**
+      (他 cycle と重なった時のマシン負荷等)。それで巡回ごと落とすと在庫監視が空白になり、
+      fail-OPEN 側に転ぶ。よって error のみ PYTEST_PRECHECK_ATTEMPTS 回まで retry する。
+      テストが実際に落ちた (failed) は DOM 仕様変更の疑い → retry せず即 abort (fail-closed 維持)。
     """
-    _log("=== Phase 0/4: pytest precheck (offline 検体 42件) ===", test_mode)
-    t0 = time.time()
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/", "-m", "offline", "-q",
-             "--tb=short", "--no-header"],
-            cwd=str(SCRIPT_DIR),
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=PYTEST_PRECHECK_TIMEOUT_SEC,
-            creationflags=_NO_WINDOW,
-        )
-        elapsed = time.time() - t0
-        if result.returncode == 0:
-            _log(f"  [OK] pytest precheck pass ({elapsed:.1f}s)", test_mode)
-            return {
-                "status": "passed",
-                "elapsed_sec": round(elapsed, 2),
-                "stdout_tail": (result.stdout or "")[-500:],
-            }
-        else:
+    _log("=== Phase 0/4: pytest precheck (offline 検体) ===", test_mode)
+    last_err = None
+    for attempt in range(1, PYTEST_PRECHECK_ATTEMPTS + 1):
+        t0 = time.time()
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", "tests/", "-m", "offline", "-q",
+                 "--tb=short", "--no-header"],
+                cwd=str(SCRIPT_DIR),
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=PYTEST_PRECHECK_TIMEOUT_SEC,
+                creationflags=_NO_WINDOW,
+            )
+            elapsed = time.time() - t0
+            if result.returncode == 0:
+                _log(f"  [OK] pytest precheck pass ({elapsed:.1f}s, attempt {attempt})", test_mode)
+                return {
+                    "status": "passed",
+                    "elapsed_sec": round(elapsed, 2),
+                    "attempts": attempt,
+                    "stdout_tail": (result.stdout or "")[-500:],
+                }
+            # テストが落ちた = 検出ロジック側の疑い → retry せず abort
             _log(f"  [NG] pytest precheck FAILED rc={result.returncode} ({elapsed:.1f}s)", test_mode)
             return {
                 "status": "failed",
                 "returncode": result.returncode,
                 "elapsed_sec": round(elapsed, 2),
+                "attempts": attempt,
                 "stdout_tail": (result.stdout or "")[-1500:],
                 "stderr_tail": (result.stderr or "")[-500:],
             }
-    except subprocess.TimeoutExpired as e:
-        return {"status": "error", "error": f"timeout {PYTEST_PRECHECK_TIMEOUT_SEC}s"}
-    except Exception as e:
-        return {"status": "error", "error": f"{type(e).__name__}: {e}"}
+        except subprocess.TimeoutExpired:
+            last_err = f"timeout {PYTEST_PRECHECK_TIMEOUT_SEC}s"
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+        _log(f"  [!] pytest precheck 実行不能 ({last_err}) attempt {attempt}"
+             f"/{PYTEST_PRECHECK_ATTEMPTS}", test_mode)
+        if attempt < PYTEST_PRECHECK_ATTEMPTS:
+            time.sleep(PYTEST_PRECHECK_RETRY_WAIT_SEC)
+    return {"status": "error", "error": last_err, "attempts": PYTEST_PRECHECK_ATTEMPTS}
 
 
 # ============================================================================
@@ -942,8 +961,18 @@ def run_cycle(
             # ★ 2026-06-20: 旧実装は toast のみ → pythonw (Task Scheduler) 下で誰も見ず、
             # precheck 失敗で HIGH/LOW 監視が 3 日 silent 停止した (a12b776 の検体 fail 由来)。
             # desktop ALERT file + email で必ず気づけるようにする (= silent 停止を絶対回避)。
+            # 原因で文面を変える: failed=検出ロジックの疑い / error=実行不能 (負荷・環境)。
+            # 一律「DOM 仕様変更」と書くと、実際は環境要因の時に scraper を疑って空振りする。
+            if precheck["status"] == "failed":
+                _cause = (" 検体テストが実際に落ちた → DOM 仕様変更 / scraper 修正が必要"
+                          " (下の tail に失敗テスト名)。")
+            else:
+                _cause = (f" pytest を {precheck.get('attempts', '?')} 回試して実行できず"
+                          f" ({precheck.get('error')})。検出ロジックの故障ではなく実行環境側"
+                          f" (負荷/timeout/python 環境) の疑い → 次 cycle で自動復帰する見込み。"
+                          f" 連続する場合のみ調査。")
             msg = (f"pytest precheck 失敗 (status={precheck['status']}) → 巡回 abort。"
-                   f" 在庫監視が停止 = fail-OPEN 露出。 検体 DOM 仕様変更 / scraper 修正が必要。")
+                   f" 在庫監視が停止 = fail-OPEN 露出。" + _cause)
             _log(f"  [★ABORT] {msg}", test_mode)
             _notify_toast("iMakInventory 巡回中止 (precheck失敗)", msg)
             _tail = (precheck.get("stdout_tail") or precheck.get("error") or "")[-1500:]
