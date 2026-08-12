@@ -338,15 +338,18 @@ def _apply_ebay_fields(legacy: dict, record: dict, category: str) -> dict:
     """
     specs = record.get("specs") or {}
     # === eBay 新 field ===
-    # set_name_ebay 採用順位 (= category 別):
-    #   Pokemon: specs.set_name_ebay 優先、 fallback で "" (= JP set_name は eBay 認識不能、 fallback NG)
-    #   OPCG/Gundam/DBFW: record.set_name (= 既存 ebay_filter_map 経由で正規化済) 優先、 fallback で specs
-    #   YGO: specs.set_name_ebay (= ygoprodeck set_name 由来) 優先、 fallback で record.set_name
+    # set_name_ebay 採用順位 (= category 別. SSOT 契約 §1-1 = specs.set_name_ebay が権威):
+    #   Pokemon: specs 優先、 fallback で "" (= JP set_name は eBay 認識不能、 fallback NG)
+    #   OPCG/Gundam/DBFW: **specs 優先**、 fallback で record.set_name
+    #     (2026-08-12 Advisor GO で反転. 前工事 = specs_repopulate_from_fresh migration
+    #      で specs を fresh (record.set_name) と一致させ、canonical row の出力は不変.
+    #      E01-* 24 行のみ Katakana 長形→英語 canonical に bug fix 変化.)
+    #   YGO: specs 優先、 fallback で record.set_name
     set_name_specs = specs.get("set_name_ebay")
     if category == "pokemon_tcg":
         legacy["set_name_ebay"] = set_name_specs or ""
     elif category in ("one_piece_tcg", "gundam_tcg", "dragonball_scg"):
-        legacy["set_name_ebay"] = record.get("set_name") or set_name_specs or ""
+        legacy["set_name_ebay"] = set_name_specs or record.get("set_name") or ""
     else:  # yugioh_tcg etc
         legacy["set_name_ebay"] = set_name_specs or record.get("set_name", "") or ""
     legacy["rarity_ebay"] = specs.get("rarity_ebay") or specs.get("rarity") or legacy.get("rarity", "")
