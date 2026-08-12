@@ -395,6 +395,47 @@ class TestNameVerification:
         assert result is not None
         assert result["card_id"] == "OP11-057"
 
+    def test_reprint_fallback_alt_art_prefers_illustration_type_original(self):
+        """cert155393557 事故対応 (2026-08-12 依頼
+        `2026-08-12_op_reprint_scoring_alt_art_response.md`):
+
+        PSA Brand 'PRB01' + card_number '024' + subject 'MONKEY D. LUFFY ALTERNATE ART'
+        の reprint fallback で、base `OP01-024_PRB01` (illustration_type='Anime') ではなく
+        ALT ART の `OP01-024_PRB01_p` (illustration_type='Original') が選ばれること.
+
+        旧 logic は _SP / _dummy / SP-rarity のいずれにも当たらず両候補 0 点同点 →
+        安定ソートで base が勝っていた. 新 logic は canonical な illustration_type='Original'
+        に +150 を与えて ALT を本命として当てる.
+        """
+        result = catalog_psa.lookup_one_piece(
+            brand="ONE PIECE JAPANESE PRB01",
+            card_number="024",
+            subject="MONKEY D. LUFFY ALTERNATE ART",
+            verbose=False,
+        )
+        assert result is not None
+        assert result["card_id"] == "OP01-024_PRB01_p", (
+            f"ALT ART should win over base, got {result['card_id']!r}"
+        )
+
+    def test_reprint_fallback_alt_art_score_function_direct(self):
+        """`_score` 単体: 同じ subject 'ALTERNATE ART' で
+        illustration_type='Original' の candidate が illustration_type='Anime' より
+        高得点になること (implementation detail の直接ガード)."""
+        # 実装確認: _score は _search_one_piece_reprint_by_number 内部関数のため、
+        # 実 DB record の相対 score を lookup_one_piece 経由で挙動検証する.
+        # OP01-024 candidates は 4 件 (dummy / P_dummy / PRB01 / PRB01_p) のうち、
+        # PRB01 filter (psa_set_code='PRB01') で PRB01 と PRB01_p のみ通過.
+        # illustration_type='Original' の PRB01_p が選ばれるはず.
+        result = catalog_psa.lookup_one_piece(
+            brand="ONE PIECE JAPANESE PRB01",
+            card_number="024",
+            subject="MONKEY D LUFFY ALT ART",  # 'ALT ART' でも同じ挙動
+            verbose=False,
+        )
+        assert result is not None
+        assert result["card_id"] == "OP01-024_PRB01_p"
+
 
 # ============================================================================
 # 2026-05-28: Promo brand 拡張 (= HIGH 615 Marco / set_code='P' 特別処理)

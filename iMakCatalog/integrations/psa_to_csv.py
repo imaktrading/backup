@@ -644,10 +644,19 @@ def _search_one_piece_reprint_by_number(
     # 同名 candidate が複数 → subject ヒントで base / SP Alt / parallel を選択
     subj_up = (subject or "").upper()
     wants_sp = any(k in subj_up for k in ("SPECIAL", "ALTERNATE", " SP", "ALT ART"))
+    # 2026-08-12 依頼 `2026-08-12_op_reprint_scoring_alt_art_response.md`:
+    # subject に 'ALTERNATE ART' / 'ALT ART' が入る場合、canonical な
+    # specs.illustration_type='Original' を本命として +150 加点。
+    # 文字列 suffix (_p) は illustration_type を持たない古い record の保険 (+100)。
+    # (`_dummy` を placeholder と誤判定 / `nr` 部分一致で $799 除外の事故を踏まえ、
+    #  canonical 属性を先に見る。文字列 suffix 判定は fallback に降ろす。)
+    wants_alt = "ALTERNATE ART" in subj_up or "ALT ART" in subj_up
+    _ALT_SUFFIXES = ("_p", "_p1", "_p2", "_p3", "_p4", "_p5")
 
     def _score(c: dict) -> int:
         pid = c.get("product_id", "")
-        rarity = (c.get("specs") or {}).get("Rarity", "")
+        specs = c.get("specs") or {}
+        rarity = specs.get("Rarity", "")
         s = 0
         # SP Alt ヒント時: '_SP' / '_dummy' suffix / rarity に 'SP' 含むものを優先
         if wants_sp:
@@ -657,7 +666,14 @@ def _search_one_piece_reprint_by_number(
                 s += 100
             if "SP" in (rarity or "").upper():
                 s += 50
-        else:
+        # ALT ART ヒント時: canonical な illustration_type で当てる (2026-08-12)
+        if wants_alt:
+            illus = specs.get("illustration_type")
+            if illus == "Original":
+                s += 150
+            elif not illus and any(pid.endswith(sfx) for sfx in _ALT_SUFFIXES):
+                s += 100
+        if not wants_sp and not wants_alt:
             # 通常: 短い product_id (base reprint) 優先
             s -= len(pid)
         return s
