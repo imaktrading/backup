@@ -113,18 +113,35 @@ def row_set_issue(set_name: str, card_number: str, ref: dict) -> Optional[str]:
 # ============================================================================
 # 契約 v1.2 §4: 「183454 master に無い値が CSV に出ていない」CI 用 helper
 # ============================================================================
-def pokemon_set_master(db: Optional[str] = None) -> set:
-    """category 183454 (Pokemon TCG) の master set_name_ebay 集合を返す。
+# eBay カテゴリ 183454 (CCG Individual Cards) に出品される catalog category。
+# ★ポケモンだけではない。Pokemon 専用 master を 183454 の全行に当てると、
+#   ワンピ/ドラゴンボールの正しい set_name_ebay が丸ごと「master に無い」になる。
+TCG_183454_CATEGORIES = (
+    "pokemon_tcg",
+    "one_piece_tcg",
+    "dragonball_scg",
+    "gundam_tcg",
+    "yugioh_tcg",
+)
 
-    CI が「CSV の C:Set 値が master に無い = 生成側の脱線」を検出するために使う。
-    空文字列は除外 (master に無いのと同義)。
+
+def tcg_set_master(categories=None, db: Optional[str] = None) -> set:
+    """eBay カテゴリ 183454 の master set_name_ebay 集合を返す。
+
+    CI が「CSV の C:Set 値が master に無い = 生成側の脱線 (自由文字列の混入)」を
+    検出するために使う。空文字列は除外 (master に無いのと同義)。
+
+    categories を省略すると 183454 に出す全 TCG category の和集合。
     """
+    cats = tuple(categories) if categories else TCG_183454_CATEGORIES
     path = db or str(_DB_PATH)
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
     try:
         out = set()
-        for r in con.execute("SELECT specs FROM products WHERE category='pokemon_tcg'"):
+        ph = ",".join("?" for _ in cats)
+        for r in con.execute(
+                f"SELECT specs FROM products WHERE category IN ({ph})", cats):
             try:
                 sp = json.loads(r["specs"]) if r["specs"] else {}
             except Exception:
@@ -137,11 +154,22 @@ def pokemon_set_master(db: Optional[str] = None) -> set:
         con.close()
 
 
+def pokemon_set_master(db: Optional[str] = None) -> set:
+    """Pokemon (category='pokemon_tcg') だけの master set_name_ebay 集合。
+
+    ★183454 の突合には使わない (183454 = 全 TCG 共通カテゴリ)。
+      用途が「ポケモンだけ見たい」時に限定される薄い wrapper。
+    """
+    return tcg_set_master(("pokemon_tcg",), db=db)
+
+
 __all__ = [
     "ERA_YEARS",
+    "TCG_183454_CATEGORIES",
     "card_total",
     "eb_era",
     "pokemon_set_master",
     "row_set_issue",
     "set_total_reference",
+    "tcg_set_master",
 ]

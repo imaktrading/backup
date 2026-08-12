@@ -4,9 +4,11 @@
 回答書:
   - 2026-08-10_catalog_tcg_ssot_interface_contract_all_categories_response.md §HQ-4
 
+★2026-08-12: master は `pokemon_set_master()` → `tcg_set_master()` に是正
+  (183454 は全 TCG 共通カテゴリ。詳細は test_183454_master_is_all_tcg_20260812.py)。
+
 固定する挙動:
-  1. Pokemon (category=183454) の C:Set 値は catalog `pokemon_set_master()` に存在する
-     もののみ許容する
+  1. 183454 の C:Set 値は catalog `tcg_set_master()` に存在するもののみ許容する
   2. master 外の C:Set が来たら check_csv.validate_row が ERROR を出す
      (生成側で自由文字列 / 表記揺れ / 廃止 set 名が混入していないかを毎行 gate)
   3. master 読取失敗 (helper 例外) は fail-open で判定を降ろす (誤ブロック回避)
@@ -56,9 +58,9 @@ def _make_row(*, c_set, category="183454", cert="199999999"):
 
 
 def _seed(monkeypatch, master_set):
-    """catalog helper の pokemon_set_master を差し替える (テストで DB を触らない)。"""
+    """catalog helper の tcg_set_master を差し替える (テストで DB を触らない)。"""
     import check_csv as C
-    monkeypatch.setattr(C, "_POKEMON_SET_MASTER", set(master_set), raising=False)
+    monkeypatch.setattr(C, "_TCG_SET_MASTER", set(master_set), raising=False)
     # HEADER_MAP を validate_row が参照するので、テスト用に埋めておく
     C.HEADER_MAP = {h: i for i, h in enumerate(_HEADERS)}
 
@@ -120,12 +122,12 @@ def test_non_pokemon_category_not_gated_by_pokemon_master(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 5. helper の pokemon_set_master 呼出契約
+# 5. helper の tcg_set_master 呼出契約
 # ---------------------------------------------------------------------------
 def test_check_csv_uses_catalog_helper_for_master():
-    """check_csv が iMakCatalog/set_reference.pokemon_set_master を経由している。"""
+    """check_csv が iMakCatalog/set_reference.tcg_set_master を経由している。"""
     with open(os.path.join(_TCG, "check_csv.py"), "r", encoding="utf-8") as f:
         src = f.read()
-    assert "from set_reference import pokemon_set_master" in src, (
-        "check_csv が catalog helper の pokemon_set_master を import していない"
+    assert "from set_reference import tcg_set_master" in src, (
+        "check_csv が catalog helper の tcg_set_master を import していない"
     )

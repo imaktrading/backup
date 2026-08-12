@@ -334,28 +334,35 @@ def load_cost_data(csv_path):
 #   旧 import path (iMakHQ/tools/catalog_set_audit) は catalog 境界を越えていたため廃止。
 #   catalog 側 (iMakCatalog/set_reference.py) が SSOT。ここでは cache だけ持つ。
 _CATALOG_SET_REF = None  # {set_name_ebay: 主流total} を一度だけ catalog helper から構築・cache
-_POKEMON_SET_MASTER = None  # category 183454 (Pokemon TCG) の master set_name_ebay 集合
+_TCG_SET_MASTER = None  # eBay カテゴリ 183454 の master set_name_ebay 集合
 
 
-def _pokemon_set_master():
-    """catalog helper から Pokemon (183454) の master set_name_ebay 集合を取得。
+def _tcg_set_master():
+    """catalog helper から 183454 の master set_name_ebay 集合を取得。
 
     ★2026-08-11: 契約 v1.2 §4 CI 「183454 master に無い値が CSV に出ていない」用。
     生成側の脱線 (master 外の自由文字列が C:Set に混入) を出品前に弾く。
     catalog 読取失敗時は空集合を返して判定を降ろす (fail-open で誤ブロック回避)。
+
+    ★2026-08-12 修正: 当初 `pokemon_set_master()` を使っていたが、183454 は
+      **全 TCG 共通**の eBay カテゴリ (ポケモン/ワンピ/ドラゴンボール/ガンダム/遊戯王)。
+      ポケモン専用 master を全行に当てていたため、catalog に実在する
+      'Awakened Pulse' (dragonball) や '500 Years in the Future' (one_piece) まで
+      「master に存在しない」で ERROR → 物理除外していた。
+      実害: 8/12 の入稿は残り6件が全部ワンピ/ドラゴンボールで、**入稿0件**になった。
     """
-    global _POKEMON_SET_MASTER
-    if _POKEMON_SET_MASTER is None:
+    global _TCG_SET_MASTER
+    if _TCG_SET_MASTER is None:
         try:
             import sys as _sys, os as _os
             _cat = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakCatalog")
             if _cat not in _sys.path:
                 _sys.path.insert(0, _cat)
-            from set_reference import pokemon_set_master
-            _POKEMON_SET_MASTER = pokemon_set_master()
+            from set_reference import tcg_set_master
+            _TCG_SET_MASTER = tcg_set_master()
         except Exception:
-            _POKEMON_SET_MASTER = set()
-    return _POKEMON_SET_MASTER
+            _TCG_SET_MASTER = set()
+    return _TCG_SET_MASTER
 
 
 def _catalog_set_consistency(set_name, card_number, year=""):
@@ -505,12 +512,12 @@ def validate_row(row, row_idx):
         issues.append(("ERROR", _setissue))
 
     # --- 183454 master 突合 CI (契約 v1.2 §4, 2026-08-11) ---
-    # Pokemon (category 183454) の C:Set 値は必ず catalog master に存在すること。
+    # 183454 (= 全 TCG 共通カテゴリ) の C:Set 値は必ず catalog master に存在すること。
     # 生成側で master 外の自由文字列が混入していないかを毎行チェックする
     # (master 読取失敗時=空集合の時はスキップ、fail-open で誤ブロック回避)。
     if category == "183454":
         c_set = (get_col(row, "C:Set") or "").strip()
-        master = _pokemon_set_master()
+        master = _tcg_set_master()
         if c_set and master and c_set not in master:
             issues.append(("ERROR",
                 f"C:Set='{c_set}' が catalog 183454 master に存在しない "
