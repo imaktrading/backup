@@ -120,14 +120,26 @@ def current_desk() -> str:
 
 
 def _draft_is_closed(path: Path, stems: set[str]) -> bool:
-    """draft / question の決着判定.
+    """draft の決着判定 (**`_question` には使わない**).
 
     `_is_closed` は `{stem}_*` (= draft 自身に closure が付いた形) しか見ないため、
     `X_draft.md` に対して **兄弟の `X_response.md`** が書かれた通常の decision フローを
     決着とみなせず、レビュー待ちに残り続けていた (2026-07-30: 実測12件を28件と表示)。
-    draft 側は **base stem (= draft/question 接尾を外した幹) に closure が付いたか**で見る。
+    draft 側は **base stem (= draft 接尾を外した幹) に closure が付いたか**で見る。
+
+    ★2026-08-12: `_question` を同じ扱いにしていたのが **fail-OPEN の穴**だった。
+      `_question` は「担当が分からないと言って止めた差し戻し」で、決着は
+      **窓口がその質問に答えた時だけ**。ところが base stem 判定だと、質問と無関係に
+      幹へ付いた `_done` / `_response` が質問を決着扱いにして board から消していた。
+      実害 (2026-08-11): catalog が adapter 反転に「1,016行が劣化する」と待ったをかけた
+      `..._response_question.md` が、同じ幹の `..._response_done.md` (別タスクの完了報告)
+      によって即座に board から消え、**窓口が指摘に気づけなかった**。
+      同型で 10件が既に埋もれていた (実測)。
+      → `_question` は `_is_closed` (= 自分自身に答えが付いたか) だけで判定する。
     """
     low = path.stem.lower()
+    if low.endswith("_question"):
+        return False
     base = None
     for suf in DRAFT_SUFFIXES:
         if low.endswith(suf):
