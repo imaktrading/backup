@@ -75,6 +75,46 @@ def split_subject_variety(subject):
     return s, ""
 
 
+# ★2026-08-13 ユーザー指摘「このてのラベル違いがちょいちょいある」。
+#   PSA は同じカードを**複数の書式**で印字する。実例 (今日 実物で確認):
+#     A: 1行目 "2023 ONE PIECE OP05 JP" / 3行目 "ALTERNATE ART"
+#     B: 1行目 "2023 ONE PIECE JPN."     / 3行目 "OP05-ALTERNATE ART"
+#   → **同じカード**なのに書式が違うだけ。人はこれを見て「違う」と押してしまい、
+#     使える仕入元を捨てていた (要調査を作ったが、見比べる材料が生のままで決着しなかった)。
+#   そこで **書式を畳んでから比べる**。畳んだ結果 (作品 / セット記号 / 変種 / 番号) が
+#   一致すれば同じカード、というのが判定の実体。
+_SET_CODE_RE = re.compile(r"\b((?:OP|EB|ST|PRB|P)-?\d{1,2})\b", re.I)
+
+
+def normalize_label(brand="", variety="", number=""):
+    """PSA ラベルの書式差を畳んで比較できる形にする **純関数**。
+
+    戻り: {"set": "OP05", "variety": "ALTERNATE ART", "number": "002"}
+    ★書式に依らず**中身**だけを残す。セット記号は brand 側にも variety 側にも入りうる
+      ("ONE PIECE OP05 JP" / "OP05-ALTERNATE ART") ので両方から拾う。
+    """
+    b, v = str(brand or "").upper(), str(variety or "").upper()
+    m = _SET_CODE_RE.search(b) or _SET_CODE_RE.search(v)
+    set_code = m.group(1).replace("-", "").upper() if m else ""
+    # 変種名からセット記号の接頭辞を落とす ("OP05-ALTERNATE ART" → "ALTERNATE ART")
+    v = re.sub(r"^\s*(?:OP|EB|ST|PRB|P)-?\d{1,2}\s*[-:/]\s*", "", v).strip()
+    num = re.sub(r"^#", "", str(number or "").strip()).lstrip("0") or str(number or "").strip()
+    return {"set": set_code, "variety": v, "number": num}
+
+
+def same_card_by_label(a, b):
+    """2つのラベル (normalize_label の戻り) が同じカードを指すか **純関数**。
+
+    セット記号・変種・番号がすべて一致 → 同じ。どれか欠けている時は False (推測しない)。
+    """
+    if not a or not b:
+        return False
+    keys = ("set", "variety", "number")
+    if any(not str(a.get(k, "")).strip() or not str(b.get(k, "")).strip() for k in keys):
+        return False
+    return all(str(a[k]).strip() == str(b[k]).strip() for k in keys)
+
+
 def psa_label_facts(cert, card_no=""):
     """cert → 目視照合に使う {number, variety, brand} (揺れないものだけ)。
 
@@ -735,9 +775,15 @@ def build_restock_html(items):
             _v = _s(_lab.get(_k))
             if _v:
                 idf.append(f"<b><i>{_cap}</i>{_html.escape(_v)}</b>")
+        # ★2026-08-13: 書式を畳んだ「照合ポイント」を出す。ラベルのどこに書いてあるかは
+        #   書式で変わる (1行目 "OP05 JP" / 3行目 "OP05-ALTERNATE ART") ので、
+        #   **探すべき3点**を先に示す。ユーザー指摘「このてのラベル違いがちょいちょいある」。
+        _nl = normalize_label(_lab.get("brand"), _lab.get("variety"), _lab.get("number"))
+        if _nl.get("set"):
+            idf.append(f"<b style='background:#06a'><i>セット記号</i>{_html.escape(_nl['set'])}</b>")
         idf_html = ("<div class='idf'>" + "".join(idf) +
-                    "<b style='background:#666'><i>照合</i>この番号+変種+絵柄が合えば同じカード"
-                    "(ラベルの書式違いは無関係)</b></div>") if idf else ""
+                    "<b style='background:#666'><i>照合</i>候補のラベルで <b>セット記号・変種・番号</b>"
+                    "の3点だけ見る (行の位置や書き方は無関係)</b></div>") if idf else ""
         # 全候補が同じ variant_ok = 見分けに使えないので、候補ごとのバッジではなく事情を1行で書く
         vuni_html = ""
         if _variant_uniform:
