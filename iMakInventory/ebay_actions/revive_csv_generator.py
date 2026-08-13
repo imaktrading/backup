@@ -41,7 +41,7 @@ import csv
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -90,9 +90,19 @@ DEFAULT_REVIVE_BURST_THRESHOLD = int(
     os.environ.get("INVENTORY_REVIVE_BURST_THRESHOLD", "10")
 )
 
-# per-cycle 上限。 初回スパイク (窓口処理済 97 件の残り) を 20 件ずつ流すため既定は None
-# (= 制限なし)。 CLI --max-per-cycle で override。
-DEFAULT_MAX_PER_CYCLE: Optional[int] = None
+# per-cycle 上限。 ★ 2026-08-13: 既定を None (無制限) → 10 に変更。
+# 復活は eBay を「買える状態」に戻す外向きの操作なので、backlog を一度に流さず毎 cycle
+# 少量ずつ出す。急増ガードを新規基準にする (下記) 代わりの安全弁。CLI --max-per-cycle で override。
+DEFAULT_MAX_PER_CYCLE: Optional[int] = int(
+    os.environ.get("INVENTORY_REVIVE_MAX_PER_CYCLE", "10")
+)
+
+# 急増ガードの「新規」判定窓。queue 投入がこの時間内のものを新規とみなす。
+# ★ 総数で判定すると、詰まった backlog 自体が毎 cycle ガードを発火させ、永久に 1 件も
+#   復活しない (08-08〜08-13 に実際そうなった)。系統崩壊は「新規が一気に湧く」形で出る。
+REVIVE_BURST_NEW_WINDOW_H = int(
+    os.environ.get("INVENTORY_REVIVE_BURST_WINDOW_H", "24")
+)
 
 _JST_DT_FMT = "%Y/%m/%d %H:%M:%S"
 
@@ -411,7 +421,11 @@ def _fetch_ebay_start_price_and_qty(item_id: str, token: str) -> tuple[Optional[
         f'<ItemID>{item_id}</ItemID></GetItemRequest>'
     )
     try:
-        res = _call_trading("GetItem", body, access_token=token)
+        # ★ 2026-08-13: raw_xml_cap 既定 2000 文字だと <StartPrice> が切り落とされ、
+        #   price=None → 採算 gate が skip_no_price で fail-closed → **復活が永久に 0 件**。
+        #   実測: 09:30 cycle の deferred 149 件中 61 件がこれ。GetItem の応答は 1 商品でも
+        #   2000 文字を軽く超える (同型: 単品 verify の QuantitySold 取りこぼし commit 0b7f566)。
+        res = _call_trading("GetItem", body, access_token=token, raw_xml_cap=None)
     except Exception:
         return None, None
     if res.get("error_code") == "17":
@@ -444,6 +458,23 @@ def _fetch_ebay_start_price_and_qty(item_id: str, token: str) -> tuple[Optional[
 # ============================================================================
 def _row_key(sheet_label: str, row_index: int) -> tuple:
     return (sheet_label, row_index)
+
+
+def count_new_candidates(candidates: list, cycle_started_at: datetime) -> int:
+    """queue 投入が直近 REVIVE_BURST_NEW_WINDOW_H 時間内の候補数 (急増ガードの判定基準)。
+
+    queue_ts が読めないものは安全側 (新規扱い) に倒す。
+    """
+    cutoff = cycle_started_at - timedelta(hours=REVIVE_BURST_NEW_WINDOW_H)
+    n = 0
+    for c in candidates:
+        ts = (c.get("queue_ts") or "")[:19]
+        try:
+            if datetime.fromisoformat(ts) >= cutoff:
+                n += 1
+        except ValueError:
+            n += 1
+    return n
 
 
 def _relocate_row(sheet_state: dict, label: str, item_id: str, url: str):
@@ -757,8 +788,10 @@ def run(
     # 急増ガード: gate 通過数が閾値超 → 全件 HOLD + action_required
     reason = "OK"
     burst_hold = []
-    if len(allowed_raw) > burst:
-        print(f"  [★revive burst guard 発火] allowed {len(allowed_raw)} 件 > 閾値 {burst} 件")
+    new_allowed = count_new_candidates(allowed_raw, cycle_started_at)
+    if new_allowed > burst:
+        print(f"  [★revive burst guard 発火] 新規 {new_allowed} 件 > 閾値 {burst} 件 "
+              f"(候補 {len(allowed_raw)} 件)")
         print(f"      (= 誤検知で大量復活疑い、 fail-closed で全件 HOLD → 履行不能 → BAN 直撃を防ぐ)")
         try:
             from monitor_listings import append_action_required  # noqa: PLC0415

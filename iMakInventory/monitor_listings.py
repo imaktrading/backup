@@ -795,9 +795,16 @@ def append_action_required(sheet_label: str, result: dict, reason: str,
       - "verify_qty_gt0_giveup"   : revise + in-cycle retry 後も eBay qty>0 残存
       - "supplier_not_supported"  : URL から supplier 判定不能
     """
-    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
     item_id = result.get("item_id") or ""
     row_index = result["row_index"]
+    # ★ 2026-08-13: dry-run は状態を変えない。従来は dry_run:true を付けて追記していたため、
+    #   検証目的の dry-run が「要対応」キューを膨らませ、cycle report の要対応件数が
+    #   実態より多く出た (11:46 の revive dry-run で 23 件混入)。dry-run は標準出力に出す。
+    if dry_run:
+        print(f"  [DRY RUN] action_required 記録 skip: {reason} "
+              f"row{row_index} {item_id or '(item_id 空)'}")
+        return
+    DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
     # ★ 2026-07-07: 冪等化 (dedup)。 burst guard は pending queue の同一 item を毎 cycle
     # HOLD するため、 dedup が無いと同一 (item, reason) が延々追記され肥大化 (実測 335 item /
     # 2227 entry = 平均 6.6 重複、 07-04〜07 の deadlock で発生)。 同一 keyの entry が既にあれば

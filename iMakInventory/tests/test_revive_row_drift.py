@@ -125,3 +125,61 @@ def test_prune_noop_when_nothing_expired(tmp_path):
                        encoding="utf-8")
     with patch.object(rg, "PENDING_REVIVE_FILE", pending):
         assert rg.prune_unresolvable_pending_revive([]) == 0
+
+
+# ============================================================================
+# GetItem の raw_xml cap (復活が永久 0 件になっていた最後の原因)
+# ============================================================================
+@pytest.mark.offline
+def test_start_price_parsed_when_tag_is_beyond_2000_chars():
+    """StartPrice が 2000 文字より後ろにあっても取れる (cap で切ってはいけない).
+
+    ★ 2026-08-13: raw_xml_cap 既定 2000 のまま GetItem を呼んでいたため price=None →
+      採算 gate が skip_no_price → 復活が実行されない。09:30 cycle の deferred 149 件中
+      61 件がこれだった。同型は単品 verify の QuantitySold 取りこぼし (commit 0b7f566)。
+    """
+    import ebay_actions.revive_csv_generator as rg
+    long_xml = ("<Item>" + "<Filler>x</Filler>" * 300
+                + "<StartPrice currencyID='USD'>255.98</StartPrice>"
+                + "<Quantity>1</Quantity><QuantitySold>0</QuantitySold></Item>")
+    assert long_xml.index("<StartPrice") > 2000        # 前提: cap の外側にある
+
+    captured = {}
+
+    def _fake_call(name, body, access_token=None, **kw):
+        captured.update(kw)
+        return {"success": True, "error_code": None, "raw_xml": long_xml}
+
+    import ebay_actions.trading_api_client as tc
+    with patch.object(tc, "_call_trading", _fake_call):
+        price, qty = rg._fetch_ebay_start_price_and_qty("358870181848", "tok")
+    assert captured.get("raw_xml_cap") is None, "raw_xml_cap を外していない (price が取れなくなる)"
+    assert price == 255.98
+
+
+# ============================================================================
+# 急増ガードは「新規」で判定する (backlog 自体で発火して永久 HOLD にしない)
+# ============================================================================
+@pytest.mark.offline
+def test_burst_guard_counts_only_new_candidates():
+    import ebay_actions.revive_csv_generator as rg
+    now = datetime(2026, 8, 13, 12, 0, 0)
+    old = (now - timedelta(days=4)).isoformat(timespec="seconds")
+    fresh = (now - timedelta(hours=2)).isoformat(timespec="seconds")
+    cands = [{"queue_ts": old} for _ in range(40)] + [{"queue_ts": fresh} for _ in range(3)]
+    assert rg.count_new_candidates(cands, now) == 3      # backlog 40 は数えない
+
+
+@pytest.mark.offline
+def test_unparseable_queue_ts_counts_as_new():
+    """queue_ts が読めないものは新規扱い = ガードが厳しい側に倒れる."""
+    import ebay_actions.revive_csv_generator as rg
+    now = datetime(2026, 8, 13, 12, 0, 0)
+    assert rg.count_new_candidates([{"queue_ts": ""}, {}], now) == 2
+
+
+@pytest.mark.offline
+def test_per_cycle_cap_is_bounded():
+    """外向き操作なので backlog を一度に流さない (既定で 1 cycle 上限あり)."""
+    import ebay_actions.revive_csv_generator as rg
+    assert rg.DEFAULT_MAX_PER_CYCLE is not None and rg.DEFAULT_MAX_PER_CYCLE <= 20

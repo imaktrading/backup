@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -96,3 +99,25 @@ def test_blank_item_id_newly_sold_is_detection_only(monkeypatch):
     assert pending_calls == [], "空欄行 newly_sold は pending に積まない (取下げ対象なし)"
     assert action_calls == [], "空欄行 newly_sold は action_required にしない (未出品=正常)"
     assert summary["newly_sold"] == 1, "売切自体は検知される (D列更新用)"
+
+
+@pytest.mark.offline
+def test_action_required_not_written_in_dry_run(tmp_path):
+    """dry-run は要対応キューを汚さない (検証実行で件数が水増しされない).
+
+    ★ 2026-08-13: revive の dry-run が action_required.jsonl に 23 件書き込み、
+      cycle report の「要対応」件数が実態より多く出た。dry-run は状態を変えない。
+    """
+    import monitor_listings as ml
+    f = tmp_path / "action_required.jsonl"
+    with patch.object(ml, "ACTION_REQUIRED_FILE", f):
+        ml.append_action_required(
+            sheet_label="SHEET",
+            result={"row_index": 1, "url": "https://x", "item_id": "IID", "title": "t"},
+            reason="revive_burst_guard_holdout", dry_run=True)
+        assert not f.exists(), "dry-run なのに要対応キューへ書き込んでいる"
+        ml.append_action_required(
+            sheet_label="SHEET",
+            result={"row_index": 1, "url": "https://x", "item_id": "IID", "title": "t"},
+            reason="revive_burst_guard_holdout", dry_run=False)
+        assert f.exists() and f.read_text(encoding="utf-8").strip()
