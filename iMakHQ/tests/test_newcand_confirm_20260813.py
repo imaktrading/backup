@@ -299,3 +299,26 @@ def test_save_writes_typed_card_numbers(monkeypatch):
     rows = written[N.CNO_TAB]
     assert rows[0] == N.CNO_HEADER
     assert rows[1][0] == "https://m/0" and rows[1][1] == "OP05-002"
+
+
+# ---------------------------------------------------------------------------
+# 10. この画面は「カードの特定」だけ (鑑定番号は出品直前に入れる)
+# ---------------------------------------------------------------------------
+def test_viewer_has_no_cert_input():
+    """ユーザー確定「出品までには鑑定番号を入れるから、今はカードを特定することに専念」。"""
+    v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
+    page = N.build_html([_item(0, v)]).decode()
+    assert "class='cert'" not in page, "鑑定番号の入力欄が残っている"
+    assert "class='cno'" in page, "カード番号の入力欄は要る"
+    assert "鑑定番号は出品の直前" in page
+
+
+def test_saved_row_leaves_cert_empty(monkeypatch):
+    written = {}
+    monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
+    items = [_item(0, [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami",
+                        "image": ""}])]
+    N.save(items, {"picks": [{"idx": 0, "pid": "EB03-053", "category": "one_piece_tcg",
+                              "cert": ""}],
+                   "catalog_reqs": [], "outs": [], "holds": [], "card_nos": []})
+    assert written[N.OUT_TAB][0][2] == "", "I列:cert は空のまま (出品直前に入れる)"

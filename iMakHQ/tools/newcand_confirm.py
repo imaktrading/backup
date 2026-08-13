@@ -454,16 +454,16 @@ function setAct(btn){
   box.classList.toggle('done', btn.dataset.a!=='go');
 }
 function go(){
-  var picks=[],creq=[],outs=[],holds=[],cnos=[],nocert=0,noreason=0;
+  var picks=[],creq=[],outs=[],holds=[],cnos=[],noreason=0;
   document.querySelectorAll('.it').forEach(function(b){
     var a=b.dataset.act||'';
     var idx=parseInt(b.dataset.idx,10);
     var cno=((b.querySelector('input.cno')||{}).value||'').trim();
     if(cno && cno!==(b.dataset.cno||'')) cnos.push({idx:idx, no:cno});
+    /* ★鑑定番号はここでは入れない (2026-08-13 ユーザー確定「出品までには入れるから、
+       今はカードを特定することに専念しよう」)。この画面の仕事は**版の確定**だけ。 */
     if(a==='go'){
-      var cert=(b.querySelector('input.cert')||{}).value||'';
-      if(!cert.replace(/\\D/g,'')) nocert++;
-      picks.push({idx:idx, pid:b.dataset.pid||'', category:b.dataset.cat||'', cert:cert});
+      picks.push({idx:idx, pid:b.dataset.pid||'', category:b.dataset.cat||'', cert:''});
     }
     else if(a==='cat'){creq.push(idx);}
     else if(a==='out'){
@@ -477,7 +477,6 @@ function go(){
   var msg='出品へ '+picks.length+'件 / カタログ追加依頼 '+creq.length+'件 / 対象外 '
           +outs.length+'件 / **未結論 '+holds.length+'件**';
   if(cnos.length) msg+='\\n\\nカード番号を入れた '+cnos.length+'件 — 次回はカタログ候補が並びます。';
-  if(nocert) msg+='\\n\\n鑑定番号が空 '+nocert+'件 — 空だと候補タブ止まりで出品に回りません。';
   if(noreason) msg+='\\n\\n対象外なのに理由が未選択 '+noreason+'件 — 理由が無いものは未結論に戻します。';
   if(holds.length) msg+='\\n\\n未結論は次回また出ます (ここを0にするのが目標)。';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?')) return;
@@ -500,8 +499,9 @@ def build_html(items):
         "<h1>捨てた仕入候補 → 新規出品の種</h1>",
         f"<div class='sum'>{len(items)}件 — カタログで1つに決まる <b>{n_one}</b> / "
         f"版が複数(絵柄で選ぶ) <b>{n_multi}</b> / カタログに無い <b>{n_zero}</b><br>"
-        "「出品する」を押した分だけ次に進みます。鑑定番号は写真のラベルを見て入れてください "
-        "(空でも記録はしますが、出品には回りません)。</div>",
+        "この画面の仕事は<b>どのカードか(版)を決めること</b>だけです。"
+        "鑑定番号は出品の直前に入れるので、ここでは要りません。<br>"
+        "番号が読めていない候補は、ページを開いて<b>カード番号</b>を打つと次回に版が並びます。</div>",
     ]
     for it in items:
         photo = prc._proxied(it["url"])
@@ -545,7 +545,6 @@ def build_html(items):
             f"{body_v}"
             f"<div class='act'>カード番号 <input class='cno' "
             f"value=\"{_html.escape(it['card_no'] or '')}\" placeholder='例 OP05-002'>"
-            "鑑定番号 <input class='cert' placeholder='写真のラベルから'>"
             "<button class='go' data-a='go' onclick='setAct(this)'>出品する</button>"
             "<button class='cat' data-a='cat' onclick='setAct(this)'>"
             "カタログに無い→追加依頼</button>"
@@ -613,9 +612,7 @@ def save(items, res):
         _append_tab(OUT_TAB, OUT_HEADER, picks)
         print(f"  ✅ {OUT_TAB}: +{len(picks)}件 "
               f"(見出しが貼り付け先の列名。商品管理シートに手でコピペしてください)")
-        _no_cert = [p for p in picks if not p[2]]
-        if _no_cert:
-            print(f"     ⚠ うち鑑定番号なし {len(_no_cert)}件 = 出品には回せない (候補タブ止まり)")
+        print("     ℹ I列:cert は空のまま = 出品直前に入れる (この画面の仕事は版の確定だけ)")
 
     creqs, creq_ng = [], []
     for i in res["catalog_reqs"]:
