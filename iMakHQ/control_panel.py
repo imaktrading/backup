@@ -929,8 +929,10 @@ SCRIPTS = [
         "cmd": ["python", "newcand_confirm.py", "--limit=20"],
         "params": [],
         "skip_postprocess": True,
+        # ★書込先は「既存メンテ」スプシの 新規出品候補 タブ (2026-08-13 修正)。
+        #   商品管理シートを開いていたが、このツールは本体に一切書かない = 別の場所を見せていた。
         "open_url": ("https://docs.google.com/spreadsheets/d/"
-                     "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
+                     "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=641366106"),
     },
     # ---- 一番くじ 在庫補充 (PSA再仕入れの下に配置。2026-07-01 順序変更)。CLI: ichibankuji_restock.py ----
     # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
