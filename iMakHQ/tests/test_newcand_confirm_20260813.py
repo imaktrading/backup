@@ -100,7 +100,7 @@ def test_parse_result_drops_pick_without_product_id():
 
 def test_parse_result_empty():
     res = N.parse_result({})
-    assert res == {"picks": [], "catalog_reqs": [], "outs": [], "holds": []}
+    assert res == {"picks": [], "catalog_reqs": [], "outs": [], "card_nos": [], "holds": []}
 
 
 # ---------------------------------------------------------------------------
@@ -268,3 +268,34 @@ def test_save_builds_paste_row(monkeypatch):
     assert row[2] == "147704361"                         # I列 = cert
     assert row[3] == "TCG"                               # R列 = カテゴリ
     assert row[4] == "one_piece_tcg:EB03-053_p1"         # AI列 = canonical KEY
+
+
+# ---------------------------------------------------------------------------
+# 9. タイトルが無い候補は「目視で番号を入れて次回引く」(2026-08-13 ユーザー指示)
+# ---------------------------------------------------------------------------
+def test_parse_result_collects_typed_card_numbers():
+    res = N.parse_result({"card_nos": [{"idx": 0, "no": " op05-002 "},
+                                       {"idx": 1, "no": ""},
+                                       {"no": "X"}]})
+    assert res["card_nos"] == [{"idx": 0, "no": "OP05-002"}], "大文字化 + 空は捨てる"
+
+
+def test_html_has_card_number_input_prefilled():
+    v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
+    page = N.build_html([_item(0, v)]).decode()
+    assert "class='cno'" in page, "カード番号の入力欄が無い"
+    assert 'value="EB03-053"' in page, "読み取れている番号を初期値に入れる"
+
+
+def test_save_writes_typed_card_numbers(monkeypatch):
+    written = {}
+    monkeypatch.setattr(N, "_append_tab", lambda *a: None)
+    monkeypatch.setattr(N.sheet_io, "read_tab", lambda tab: [])
+    monkeypatch.setattr(N.sheet_io, "write_rows_to_tab",
+                        lambda tab, rows: written.setdefault(tab, rows))
+    items = [_item(0, [], title="", card_no="")]
+    N.save(items, {"picks": [], "catalog_reqs": [], "outs": [], "holds": [0],
+                   "card_nos": [{"idx": 0, "no": "OP05-002"}]})
+    rows = written[N.CNO_TAB]
+    assert rows[0] == N.CNO_HEADER
+    assert rows[1][0] == "https://m/0" and rows[1][1] == "OP05-002"

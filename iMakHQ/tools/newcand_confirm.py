@@ -60,6 +60,12 @@ OUT_HEADER = ["A列:仕入元URL", "C列:タイトル", "I列:cert", "R列:カ�
 SHEET_CATEGORY = "TCG"   # 商品管理シート R列。PSA は 'TCG'
 NG_TAB = "新規候補NG"
 NG_HEADER = ["url", "理由", "日付", "候補タイトル"]
+# ★2026-08-13 ユーザー指示「カード番号とかを目視でいれて、次回にカタログから引けばいいのでは」。
+#   タイトルが残っていない候補 (実測32件) は機械では何も引けないが、**人がページを見れば
+#   番号は読める**。読んだ番号をここに置くと、次回の走行でカタログ候補が並ぶ。
+#   = 「タイトル不明のまま永遠に結論が出ない」を無くす経路。
+CNO_TAB = "候補カード番号"
+CNO_HEADER = ["url", "カード番号(目視)", "日付"]
 MISSING_CSV = r"C:/dev/iMak_data/catalog/missing_models.csv"
 
 # ★2026-08-13 ユーザー確定: **「該当なし」という着地を 0 にする。**
@@ -193,9 +199,15 @@ def parse_result(data):
     holds = [int(i) for i in (data.get("holds") or [])]
     holds += [int(d["idx"]) for d in (data.get("outs") or [])
               if d.get("idx") is not None and int(d["idx"]) not in out_idx]
+    cnos = []
+    for d in (data.get("card_nos") or []):
+        no = str(d.get("no") or "").strip().upper()
+        if d.get("idx") is not None and no:
+            cnos.append({"idx": int(d["idx"]), "no": no})
     return {"picks": picks,
             "catalog_reqs": [int(i) for i in (data.get("catalog_reqs") or [])],
             "outs": outs,
+            "card_nos": cnos,
             "holds": sorted(set(holds))}
 
 
@@ -333,6 +345,11 @@ def load_items(limit=0):
         for r in (sheet_io.read_tab(tab) or [])[1:]:
             if r and r[0]:
                 done.add(r[0].strip())
+    # 前回 目視で入れたカード番号 (タイトルが無くてもここから引ける)
+    typed_no = {}
+    for r in (sheet_io.read_tab(CNO_TAB) or [])[1:]:
+        if r and len(r) > 1 and r[0] and r[1]:
+            typed_no[r[0].strip()] = r[1].strip().upper()
     try:
         with open(CACHE_PATH, encoding="utf-8") as f:
             u2t = url_title_map(json.load(f))
@@ -350,7 +367,8 @@ def load_items(limit=0):
                 price = int(str(p.get("saved_price") or "").replace(",", "")) or price
             except Exception:
                 pass
-        card_no = extract_card_no(title)
+        # ★目視で入れた番号が最優先 (機械が読めなかった/読み違えた分を人が上書きできる)
+        card_no = typed_no.get(p["url"], "") or extract_card_no(title)
         variants = catalog_candidates(title, card_no)
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants})
         items.append(p)
@@ -436,10 +454,12 @@ function setAct(btn){
   box.classList.toggle('done', btn.dataset.a!=='go');
 }
 function go(){
-  var picks=[],creq=[],outs=[],holds=[],nocert=0,noreason=0;
+  var picks=[],creq=[],outs=[],holds=[],cnos=[],nocert=0,noreason=0;
   document.querySelectorAll('.it').forEach(function(b){
     var a=b.dataset.act||'';
     var idx=parseInt(b.dataset.idx,10);
+    var cno=((b.querySelector('input.cno')||{}).value||'').trim();
+    if(cno && cno!==(b.dataset.cno||'')) cnos.push({idx:idx, no:cno});
     if(a==='go'){
       var cert=(b.querySelector('input.cert')||{}).value||'';
       if(!cert.replace(/\\D/g,'')) nocert++;
@@ -456,12 +476,14 @@ function go(){
   });
   var msg='出品へ '+picks.length+'件 / カタログ追加依頼 '+creq.length+'件 / 対象外 '
           +outs.length+'件 / **未結論 '+holds.length+'件**';
+  if(cnos.length) msg+='\\n\\nカード番号を入れた '+cnos.length+'件 — 次回はカタログ候補が並びます。';
   if(nocert) msg+='\\n\\n鑑定番号が空 '+nocert+'件 — 空だと候補タブ止まりで出品に回りません。';
   if(noreason) msg+='\\n\\n対象外なのに理由が未選択 '+noreason+'件 — 理由が無いものは未結論に戻します。';
   if(holds.length) msg+='\\n\\n未結論は次回また出ます (ここを0にするのが目標)。';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?')) return;
   fetch('/',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({picks:picks,catalog_reqs:creq,outs:outs,holds:holds})}).then(function(){
+    body:JSON.stringify({picks:picks,catalog_reqs:creq,outs:outs,holds:holds,
+                         card_nos:cnos})}).then(function(){
     document.body.innerHTML='<h1>確定しました。ウィンドウを閉じてください。</h1>';});
 }
 """
@@ -515,12 +537,15 @@ def build_html(items):
                       "(番号も名前も読めない/未収録)。出品には回せません</div>")
         parts.append(
             f"<div class='it' data-idx='{it['idx']}' data-pid='' data-cat='' "
+            f"data-cno=\"{_html.escape(it['card_no'] or '')}\" "
             f"data-photo=\"{_html.escape(photo)}\">{ph}<div class='body'>"
             f"<div class='t'>{_html.escape(title[:110])}</div>"
             f"<div class='meta'>{price} ｜ 番号 {_html.escape(it['card_no'] or '?')} ｜ "
             f"元 {_html.escape(it['src'])} (出品 {_html.escape(it['src_itemid'])})</div>"
             f"{body_v}"
-            "<div class='act'>鑑定番号 <input class='cert' placeholder='写真のラベルから'>"
+            f"<div class='act'>カード番号 <input class='cno' "
+            f"value=\"{_html.escape(it['card_no'] or '')}\" placeholder='例 OP05-002'>"
+            "鑑定番号 <input class='cert' placeholder='写真のラベルから'>"
             "<button class='go' data-a='go' onclick='setAct(this)'>出品する</button>"
             "<button class='cat' data-a='cat' onclick='setAct(this)'>"
             "カタログに無い→追加依頼</button>"
@@ -617,6 +642,15 @@ def save(items, res):
     if outs:
         _append_tab(NG_TAB, NG_HEADER, outs)
         print(f"  🚫 対象外: +{len(outs)}件 (理由つきで記録・次回は出さない)")
+
+    cnos = [[by_idx[c["idx"]]["url"], c["no"], today]
+            for c in res.get("card_nos", []) if c["idx"] in by_idx]
+    if cnos:
+        cur = {r[0].strip(): r for r in (sheet_io.read_tab(CNO_TAB) or [])[1:] if r and r[0]}
+        for r in cnos:
+            cur[r[0]] = r                      # 同じ URL は最新の入力で上書き
+        sheet_io.write_rows_to_tab(CNO_TAB, [CNO_HEADER] + list(cur.values()))
+        print(f"  ✍ カード番号を記録: +{len(cnos)}件 → 次回はカタログ候補が並びます")
 
     n_hold = len([i for i in res["holds"] if i in by_idx])
     if n_hold:
