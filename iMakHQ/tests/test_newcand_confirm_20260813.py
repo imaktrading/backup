@@ -92,15 +92,15 @@ def test_parse_result_drops_pick_without_product_id():
     res = N.parse_result({"picks": [{"idx": 0, "pid": "", "cert": "12345678"},
                                     {"idx": 1, "pid": "OP05-002_p1", "category": "one_piece_tcg",
                                      "cert": "PSA 147704361"}],
-                          "rejects": [2], "holds": [3]})
+                          "outs": [{"idx": 2, "reason": "bundle"}], "holds": [3]})
     assert [p["idx"] for p in res["picks"]] == [1]
     assert res["picks"][0]["cert"] == "147704361", "cert は数字だけ取り出す"
-    assert res["rejects"] == [2] and res["holds"] == [3]
+    assert res["outs"] == [{"idx": 2, "reason": "bundle"}] and res["holds"] == [3]
 
 
 def test_parse_result_empty():
     res = N.parse_result({})
-    assert res == {"picks": [], "rejects": [], "holds": []}
+    assert res == {"picks": [], "catalog_reqs": [], "outs": [], "holds": []}
 
 
 # ---------------------------------------------------------------------------
@@ -199,3 +199,42 @@ def test_cand_info_by_url_is_pure():
     m = H.cand_info_by_url([{"url": "https://m/a", "name": "PSA10 ナミ", "price": 9000},
                             {"url": "", "name": "x"}, None])
     assert list(m.values()) == [("PSA10 ナミ", 9000)]
+
+
+# ---------------------------------------------------------------------------
+# 7. 「該当なし」という着地を作らない (2026-08-13 ユーザー確定)
+# ---------------------------------------------------------------------------
+def test_outcomes_are_three_plus_hold():
+    """結論は 出品 / カタログ追加依頼 / 対象外(理由必須) の3つ。それ以外は未結論。"""
+    res = N.parse_result({
+        "picks": [{"idx": 0, "pid": "EB03-053", "category": "one_piece_tcg", "cert": "1"}],
+        "catalog_reqs": [1],
+        "outs": [{"idx": 2, "reason": "bundle"}],
+        "holds": [3]})
+    assert [p["idx"] for p in res["picks"]] == [0]
+    assert res["catalog_reqs"] == [1]
+    assert res["outs"] == [{"idx": 2, "reason": "bundle"}]
+    assert res["holds"] == [3]
+
+
+def test_out_without_reason_becomes_hold_not_a_conclusion():
+    """★理由を選ばない『対象外』は結論ではない → 未結論に戻す (捨てさせない)。"""
+    res = N.parse_result({"outs": [{"idx": 5, "reason": ""},
+                                   {"idx": 6, "reason": "しらない値"}]})
+    assert res["outs"] == []
+    assert res["holds"] == [5, 6]
+
+
+def test_html_has_catalog_request_button_and_reasons():
+    v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": "https://x/a.png"}]
+    page = N.build_html([_item(0, v)]).decode()
+    assert "カタログに無い→追加依頼" in page
+    assert "まとめ売り" in page and "PSA10ではない" in page
+    assert "該当なし" not in page, "『該当なし』という着地を残さない"
+
+
+def test_guess_category_from_title():
+    assert N.guess_category("PSA10 ワンピースカード ナミ", []) == "one_piece_tcg"
+    assert N.guess_category("PSA10 ポケモンカード", []) == "pokemon_tcg"
+    assert N.guess_category("なぞの商品", []) == "", "分からない時は推測しない"
+    assert N.guess_category("なぞ", [{"category": "gundam_tcg"}]) == "gundam_tcg"

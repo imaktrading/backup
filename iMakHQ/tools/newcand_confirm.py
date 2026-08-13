@@ -53,7 +53,45 @@ SRC_TABS = ("補URL候補NG", "補URL要調査")
 OUT_TAB = "新規出品候補"
 OUT_HEADER = ["url", "category", "product_id", "cert", "候補タイトル", "元itemID", "日付"]
 NG_TAB = "新規候補NG"
-NG_HEADER = ["url", "理由", "日付"]
+NG_HEADER = ["url", "理由", "日付", "候補タイトル"]
+MISSING_CSV = r"C:/dev/iMak_data/catalog/missing_models.csv"
+
+# ★2026-08-13 ユーザー確定: **「該当なし」という着地を 0 にする。**
+#   どの候補にも必ず結論があるはず、という指示。結論は次の3つだけ:
+#     list    = カタログのカードと一致した → 出品候補へ
+#     catalog = 実在するがカタログに無い   → **カタログ追加依頼を出す** (後日出品できる)
+#     out     = そもそも出品対象でない     → 理由を必ず選ぶ (まとめ売り/PSA以外 等)
+#   旧「該当なし」は catalog と out が混ざっており、**カタログに足りないカードの情報を
+#   毎回捨てていた**。hold(保留) は結論ではないので、件数を必ず表示して 0 に寄せる。
+OUT_REASONS = [
+    ("bundle", "まとめ売り・複数枚"),
+    ("notpsa", "PSA10ではない (別グレード/未鑑定)"),
+    ("othergenre", "別ジャンル (対象外の商材)"),
+    ("gone", "ページが消えている・確認不能"),
+    ("other", "その他"),
+]
+
+# タイトルから作品を当てる (カタログ依頼の宛先カテゴリを決めるだけに使う)。
+# 当たらなければ空 = カテゴリ不明として依頼する (推測で誤ったカテゴリに入れない)。
+_CATEGORY_HINTS = (
+    ("one_piece_tcg", ("ワンピース", "ONE PIECE", "onepiece")),
+    ("pokemon_tcg", ("ポケモン", "POKEMON", "ポケカ")),
+    ("dragonball_scg", ("ドラゴンボール", "DRAGON BALL", "フュージョンワールド")),
+    ("gundam_tcg", ("ガンダム", "GUNDAM")),
+)
+
+
+def guess_category(title, variants=()):
+    """候補の作品カテゴリ (catalog 依頼の宛先)。分からなければ ""。純関数。"""
+    for v in (variants or []):
+        if v.get("category"):
+            return v["category"]
+    t = str(title or "")
+    up = t.upper()
+    for cat, keys in _CATEGORY_HINTS:
+        if any((k.upper() in up) for k in keys):
+            return cat
+    return ""
 
 # カード番号の書式。TCG は `OP05-002` / `FB01-071` 系、ポケモンは印刷番号 `006/020` 系。
 _CARD_NO_RE = re.compile(r"([A-Z]{1,4}\d{1,2}[a-z]?-\d{2,4}|\d{2,3}/\d{2,3})", re.I)
@@ -122,7 +160,13 @@ def pending_rows(src_rows, done_urls):
 
 
 def parse_result(data):
-    """POST(JSON) → {picks:[{idx,pid,category,cert}], rejects:[idx], holds:[idx]} (純関数)。"""
+    """POST(JSON) → 結論3種 + 保留 (純関数)。
+
+    {picks:[{idx,pid,category,cert}],       # 出品候補へ
+     catalog_reqs:[idx],                    # カタログ追加依頼へ
+     outs:[{idx,reason}],                   # 対象外 (理由必須)
+     holds:[idx]}                           # 未結論 (次回また出る)
+    """
     picks = []
     for d in (data.get("picks") or []):
         if d.get("idx") is None or not (d.get("pid") or "").strip():
@@ -130,9 +174,23 @@ def parse_result(data):
         picks.append({"idx": int(d["idx"]), "pid": d["pid"].strip(),
                       "category": (d.get("category") or "").strip(),
                       "cert": re.sub(r"\D", "", str(d.get("cert") or ""))})
+    valid = {k for k, _ in OUT_REASONS}
+    outs = []
+    for d in (data.get("outs") or []):
+        if d.get("idx") is None:
+            continue
+        r = (d.get("reason") or "").strip()
+        # 理由が無い/知らない値 = 結論になっていない → 保留に落とす (「該当なし」を作らない)
+        if r in valid:
+            outs.append({"idx": int(d["idx"]), "reason": r})
+    out_idx = {o["idx"] for o in outs}
+    holds = [int(i) for i in (data.get("holds") or [])]
+    holds += [int(d["idx"]) for d in (data.get("outs") or [])
+              if d.get("idx") is not None and int(d["idx"]) not in out_idx]
     return {"picks": picks,
-            "rejects": [int(i) for i in (data.get("rejects") or [])],
-            "holds": [int(i) for i in (data.get("holds") or [])]}
+            "catalog_reqs": [int(i) for i in (data.get("catalog_reqs") or [])],
+            "outs": outs,
+            "holds": sorted(set(holds))}
 
 
 # ---------------------------------------------------------------------------
@@ -331,9 +389,12 @@ h1{font-size:16px;margin:0 0 8px}
 button{font-size:12px;padding:3px 10px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer}
 button.go{border-color:#0a7;color:#065}
 button.go.sel{background:#0a7;color:#fff}
+button.cat{border-color:#a60;color:#a60}
+button.cat.sel{background:#a60;color:#fff}
 button.ng{border-color:#c33;color:#900}
 button.ng.sel{background:#c33;color:#fff}
 button.hold.sel{background:#888;color:#fff}
+select.rsn{font-size:11px}
 input.cert{font-size:12px;width:120px;padding:2px 4px}
 #go{position:fixed;right:14px;bottom:14px;font-size:15px;padding:10px 20px;background:#0a7;color:#fff;border:none;border-radius:6px}
 """
@@ -369,7 +430,7 @@ function setAct(btn){
   box.classList.toggle('done', btn.dataset.a!=='go');
 }
 function go(){
-  var picks=[],rejects=[],holds=[],nocert=0;
+  var picks=[],creq=[],outs=[],holds=[],nocert=0,noreason=0;
   document.querySelectorAll('.it').forEach(function(b){
     var a=b.dataset.act||'';
     var idx=parseInt(b.dataset.idx,10);
@@ -378,14 +439,23 @@ function go(){
       if(!cert.replace(/\\D/g,'')) nocert++;
       picks.push({idx:idx, pid:b.dataset.pid||'', category:b.dataset.cat||'', cert:cert});
     }
-    else if(a==='ng'){rejects.push(idx);}
+    else if(a==='cat'){creq.push(idx);}
+    else if(a==='out'){
+      var r=(b.querySelector('select.rsn')||{}).value||'';
+      if(!r) noreason++;
+      outs.push({idx:idx, reason:r});
+    }
     else if(a==='hold'){holds.push(idx);}
+    else {holds.push(idx);}   /* 未操作も未結論として数える */
   });
-  var msg='出品する '+picks.length+'件 / 該当なし '+rejects.length+'件 / 保留 '+holds.length+'件';
-  if(nocert) msg+='\\n\\n鑑定番号が空のものが '+nocert+'件あります。空のままだと候補タブ止まりで出品には回りません。';
+  var msg='出品へ '+picks.length+'件 / カタログ追加依頼 '+creq.length+'件 / 対象外 '
+          +outs.length+'件 / **未結論 '+holds.length+'件**';
+  if(nocert) msg+='\\n\\n鑑定番号が空 '+nocert+'件 — 空だと候補タブ止まりで出品に回りません。';
+  if(noreason) msg+='\\n\\n対象外なのに理由が未選択 '+noreason+'件 — 理由が無いものは未結論に戻します。';
+  if(holds.length) msg+='\\n\\n未結論は次回また出ます (ここを0にするのが目標)。';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?')) return;
   fetch('/',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({picks:picks,rejects:rejects,holds:holds})}).then(function(){
+    body:JSON.stringify({picks:picks,catalog_reqs:creq,outs:outs,holds:holds})}).then(function(){
     document.body.innerHTML='<h1>確定しました。ウィンドウを閉じてください。</h1>';});
 }
 """
@@ -446,7 +516,12 @@ def build_html(items):
             f"{body_v}"
             "<div class='act'>鑑定番号 <input class='cert' placeholder='写真のラベルから'>"
             "<button class='go' data-a='go' onclick='setAct(this)'>出品する</button>"
-            "<button class='ng' data-a='ng' onclick='setAct(this)'>該当なし</button>"
+            "<button class='cat' data-a='cat' onclick='setAct(this)'>"
+            "カタログに無い→追加依頼</button>"
+            "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
+            "<select class='rsn'><option value=''>理由を選ぶ</option>"
+            + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in OUT_REASONS)
+            + "</select>"
             "<button class='hold' data-a='hold' onclick='setAct(this)'>保留</button>"
             "</div></div></div>")
     parts.append(
@@ -466,10 +541,35 @@ def _append_tab(tab, header, new_rows):
     sheet_io.write_rows_to_tab(tab, [header] + body + new_rows)
 
 
+def append_missing_models(rows, path=MISSING_CSV):
+    """カタログ未収録として `missing_models.csv` に積む (I/O)。
+
+    ここに積むと既存の watcher (`auto_catalog_add_request.py`) が
+    カタログへの追加依頼書を自動で起票する = **捨てずに結論に変える**経路。
+    """
+    if not rows:
+        return 0
+    import csv as _csv
+    new = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        w = _csv.writer(f)
+        if new:
+            w.writerow(["category", "model", "detected_at"])
+        for r in rows:
+            w.writerow(r)
+    return len(rows)
+
+
 def save(items, res):
-    """確定結果を候補タブ / NGタブへ (I/O)。戻り: (確定件数, NG件数)。"""
+    """結論を書き分ける (I/O)。戻り: {list, catalog, out, hold} 件数。
+
+    ★「該当なし」という置き場は作らない (2026-08-13 ユーザー確定)。
+      カタログに無いなら**依頼**、対象外なら**理由つき**。どちらも結論。
+    """
     today = _today()
     by_idx = {it["idx"]: it for it in items}
+    reason_label = dict(OUT_REASONS)
+
     picks = []
     for p in res["picks"]:
         it = by_idx.get(p["idx"])
@@ -477,19 +577,45 @@ def save(items, res):
             continue
         picks.append([it["url"], p["category"], p["pid"], p["cert"],
                       (it["title"] or "")[:60], it["src_itemid"], today])
-    ngs = [[by_idx[i]["url"], "該当なし(目視)", today] for i in res["rejects"] if i in by_idx]
     if picks:
         _append_tab(OUT_TAB, OUT_HEADER, picks)
         print(f"  ✅ {OUT_TAB}: +{len(picks)}件")
         _no_cert = [p for p in picks if not p[3]]
         if _no_cert:
             print(f"     ⚠ うち鑑定番号なし {len(_no_cert)}件 = 出品には回せない (候補タブ止まり)")
-    if ngs:
-        _append_tab(NG_TAB, NG_HEADER, ngs)
-        print(f"  🚫 {NG_TAB}: +{len(ngs)}件 (次回は出さない)")
-    if res["holds"]:
-        print(f"  ⏸ 保留 {len(res['holds'])}件 (台帳はそのまま = 次回また出る)")
-    return len(picks), len(ngs)
+
+    creqs, creq_ng = [], []
+    for i in res["catalog_reqs"]:
+        it = by_idx.get(i)
+        if not it:
+            continue
+        cat = guess_category(it["title"], it["variants"])
+        model = (f"{it['card_no'] or '番号不明'} {it['title'][:60]} "
+                 f"(捨てた仕入候補の目視 {today} / {it['url']})")
+        creqs.append([cat, model, f"{today} 00:00:00"])
+        creq_ng.append([it["url"], "カタログ未収録 → 追加依頼を起票", today,
+                        (it["title"] or "")[:60]])
+    if creqs:
+        n = append_missing_models(creqs)
+        _append_tab(NG_TAB, NG_HEADER, creq_ng)
+        print(f"  📨 カタログ追加依頼: +{n}件 (missing_models.csv → 自動起票)")
+        _nocat = [c for c in creqs if not c[0]]
+        if _nocat:
+            print(f"     ℹ うち作品カテゴリ不明 {len(_nocat)}件 (依頼側で判別してもらう)")
+
+    outs = [[by_idx[o["idx"]]["url"], f"対象外: {reason_label.get(o['reason'], o['reason'])}",
+             today, (by_idx[o["idx"]]["title"] or "")[:60]]
+            for o in res["outs"] if o["idx"] in by_idx]
+    if outs:
+        _append_tab(NG_TAB, NG_HEADER, outs)
+        print(f"  🚫 対象外: +{len(outs)}件 (理由つきで記録・次回は出さない)")
+
+    n_hold = len([i for i in res["holds"] if i in by_idx])
+    if n_hold:
+        print(f"  ⏸ **未結論 {n_hold}件** — 次回また出ます。ここを0にするのが目標")
+    else:
+        print("  🎉 未結論 0件 — 全件に結論が付きました")
+    return {"list": len(picks), "catalog": len(creqs), "out": len(outs), "hold": n_hold}
 
 
 def main():
