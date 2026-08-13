@@ -1,5 +1,25 @@
 # iMakHarvest daily_report
 
+## 2026-08-13 — メルカリ フリマ検索でポーター抽出 新設 (user 依頼)
+
+- 決定: メルカリ フリマをキーワード検索して PORTER を収集 + フィルタ (評価数≥100 / 本人確認済 /
+  送料込み / 販売中 / 価格10000-30000)。
+- 変更 (新規):
+  - `scrapers/mercari_search.py`: 検索URL builder (shipping_payer_id=2/status/price) +
+    収集 (mercari_seller の _load_until_enough/_collect_listing_urls_from_page 流用) +
+    **セラー品質抽出** (商品ページ aria-label「N件のレビュー/5段階評価中X/本人確認済」を parse) +
+    passes_seller_filter (fail-closed: 評価数不明は reject)。
+  - `run_harvest_mercari_search.py`: 7クエリ (PORTER 組合せ) 収集 → 詳細フェッチで
+    販売中/評価数/本人確認 reject → keep を JSON/スプシ出力。
+  - test: `test_mercari_search.py` 9件 (URL/parse/filter)。
+- 検証 (POC・実機): 「PORTER ショルダーバッグ」headless で検索収集OK・ブロックなし。
+  keep2/reject4 (評価<100=3, 本人確認なし=1)。keep 例: PORTER ショルダーバッグ ¥10,000 評価323
+  本人確認✓ / タンカー ¥11,900 評価278 ✓。フィルタ正常。`pytest tests/` = 819 passed。
+- 未: 本番の出力先スプシ (Porter 用) を user 確認後に本実行。収集件数は フリマアシスト無しだと
+  少なめ (POC 6件) なので、本番は cap/scroll 調整の余地あり。
+
+
+
 ## 2026-07-28 — snapshot cron の silent失敗を修正 (06:00 が API503 で無flag失敗)
 
 - 事象: 07-28 06:00 の snapshot cron が Google Sheets API **503** で失敗 (Last Result=1)。
