@@ -320,7 +320,7 @@ def test_viewer_has_no_cert_input():
     page = N.build_html([_item(0, v)]).decode()
     assert "class='cert'" not in page, "鑑定番号の入力欄が残っている"
     assert "class='cno'" in page, "カード番号の入力欄は要る"
-    assert "鑑定番号は出品の直前" in page
+    assert "鑑定番号はここでは要りません" in page
 
 
 def test_saved_row_leaves_cert_empty(monkeypatch):
@@ -544,3 +544,20 @@ def test_typed_number_but_still_no_candidate_points_to_catalog_request():
     base = dict(_item(0, []), card_no="OP13-118", no_from_typed=True)
     page = N.build_html([base]).decode()
     assert "カタログに無い" in page and "OP13-118" in page
+
+
+# ---------------------------------------------------------------------------
+# 16. 画面の構成 (2026-08-13「何をしたらいいのか分かりやすい構成にしてな」)
+# ---------------------------------------------------------------------------
+def test_html_groups_items_by_what_to_do():
+    """やることが同じものをまとめて並べる (1件ずつ判断の種類が変わらない)。"""
+    v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
+    items = [dict(_item(0, []), card_no="", no_from_typed=False),          # ② 番号入力
+             dict(_item(1, v)),                                            # ① 版を選ぶ
+             dict(_item(2, []), card_no="OP13-118", no_from_typed=True)]   # ③ 追加依頼
+    page = N.build_html(items).decode()
+    i1 = page.index("① 絵柄を見て版を選ぶ")
+    i2 = page.index("② カード番号を入れるだけ")
+    i3 = page.index("③ カタログに無い")
+    assert i1 < i2 < i3, "①②③ の順に並んでいない"
+    assert page.index("data-idx='1'") < page.index("data-idx='0'") < page.index("data-idx='2'")

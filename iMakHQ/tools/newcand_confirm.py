@@ -493,6 +493,8 @@ h1{font-size:16px;margin:0 0 8px}
 #zov.on{display:flex}
 #zov .zc{color:#fff;font-size:12px;text-align:center;margin-bottom:4px}
 #zov img{max-height:82vh;max-width:44vw;object-fit:contain;background:#fff}
+h2.sec{font-size:15px;margin:18px 0 8px;padding:4px 8px;border-left:6px solid;background:#fff}
+h2.sec .note{font-size:11px;color:#555;font-weight:normal;margin-left:10px}
 .act{margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 button{font-size:12px;padding:3px 10px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer}
 button.go{border-color:#0a7;color:#065}
@@ -584,22 +586,42 @@ function go(){
 
 def build_html(items):
     """items → 目視ページ (bytes)。純関数。"""
-    n_one = sum(1 for it in items if len(it["variants"]) == 1)
-    n_multi = sum(1 for it in items if len(it["variants"]) > 1)
-    n_zero = sum(1 for it in items if not it["variants"])
+    # ★2026-08-13 ユーザー指示「何をしたらいいのか、分かりやすい構成にしてな」。
+    #   やることが同じものを**まとめて並べる**。1件ずつ判断の種類が変わると疲れる。
+    for it in items:
+        it["_state"] = ("pick" if it["variants"]
+                        else ("nocat" if it.get("no_from_typed") else "num"))
+    order = {"pick": 0, "num": 1, "nocat": 2}
+    items = sorted(items, key=lambda it: order[it["_state"]])
+    n = {k: sum(1 for it in items if it["_state"] == k) for k in order}
+    _SECTIONS = {
+        "pick": ("① 絵柄を見て版を選ぶ", "#0a7",
+                 f"{n['pick']}件 — 合っていれば版を押して「出品する」。"
+                 "違うカードなら理由を選ぶだけでOK"),
+        "num": ("② カード番号を入れるだけ", "#06a",
+                f"{n['num']}件 — リンクを開いて番号(例 OP05-002)を入れる。**ボタンは不要**。"
+                "次回この画面に版が並びます"),
+        "nocat": ("③ カタログに無い → 追加依頼", "#a60",
+                  f"{n['nocat']}件 — 番号を入れても候補が出なかった分。"
+                  "「カタログに無い→追加依頼」を押す"),
+    }
     parts = [
         "<!doctype html><meta charset='utf-8'><title>新規出品候補 目視</title>",
         f"<style>{_CSS}</style>",
         "<h1>捨てた仕入候補 → 新規出品の種</h1>",
-        f"<div class='sum'>{len(items)}件 — カタログで1つに決まる <b>{n_one}</b> / "
-        f"版が複数(絵柄で選ぶ) <b>{n_multi}</b> / カタログに無い <b>{n_zero}</b><br>"
-        "この画面の仕事は<b>どのカードか(版)を決めること</b>だけです。"
-        "鑑定番号は出品の直前に入れるので、ここでは要りません。<br>"
-        "番号が読めていない候補は、ページを開いて<b>カード番号</b>を打つと次回に版が並びます。<br>"
-        "<b>ページが消えていても(売り切れ)</b>、カードが特定できるなら「出品する」でOKです — "
+        f"<div class='sum'>全 {len(items)}件。<b>やることは3種類だけ</b>で、下に順に並んでいます。"
+        "<br>鑑定番号はここでは要りません (出品の直前に入れます)。"
+        "<b>ページが消えていても(売り切れ)</b>カードが分かるなら「出品する」でOK — "
         "無在庫なので仕入元は後で探し直せます。</div>",
     ]
+    shown = set()
     for it in items:
+        st = it["_state"]
+        if st not in shown:
+            shown.add(st)
+            ttl, col, note = _SECTIONS[st]
+            parts.append(f"<h2 class='sec' style='border-color:{col};color:{col}'>{ttl}"
+                         f"<span class='note'>{note}</span></h2>")
         photo = prc._proxied(it["url"])
         ph = (f"<div class='ph'><a href='{_html.escape(it['url'])}' target='_blank'>"
               f"<img src='{_html.escape(photo)}' loading='lazy' onerror='imgFail(this)'></a>"
