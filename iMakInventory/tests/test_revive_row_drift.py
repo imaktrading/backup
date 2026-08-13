@@ -179,7 +179,12 @@ def test_unparseable_queue_ts_counts_as_new():
 
 
 @pytest.mark.offline
-def test_per_cycle_cap_is_bounded():
-    """外向き操作なので backlog を一度に流さない (既定で 1 cycle 上限あり)."""
+def test_per_cycle_cap_is_bounded_but_not_crippling():
+    """上限は「暴走時の天井」であって backlog を何日も残す絞りではない.
+
+    ★ 2026-08-13: 一時 10 にしたが、約 50 件の backlog に 5 cycle (≒1日) かかる = その間
+      売れない。誤復活を止めるのは新規基準の急増ガード。上限は 1 cycle で通常量を捌ける値。
+    """
     import ebay_actions.revive_csv_generator as rg
-    assert rg.DEFAULT_MAX_PER_CYCLE is not None and rg.DEFAULT_MAX_PER_CYCLE <= 20
+    assert rg.DEFAULT_MAX_PER_CYCLE is not None      # 無制限にはしない
+    assert 30 <= rg.DEFAULT_MAX_PER_CYCLE <= 100

@@ -90,11 +90,12 @@ DEFAULT_REVIVE_BURST_THRESHOLD = int(
     os.environ.get("INVENTORY_REVIVE_BURST_THRESHOLD", "10")
 )
 
-# per-cycle 上限。 ★ 2026-08-13: 既定を None (無制限) → 10 に変更。
-# 復活は eBay を「買える状態」に戻す外向きの操作なので、backlog を一度に流さず毎 cycle
-# 少量ずつ出す。急増ガードを新規基準にする (下記) 代わりの安全弁。CLI --max-per-cycle で override。
+# per-cycle 上限。 ★ 2026-08-13: 既定 None (無制限) → 50。
+# 誤復活を止める本体は「新規基準の急増ガード」(下記) であって、この上限ではない。上限を
+# 絞りすぎると backlog の解消に何日もかかり、その間ずっと売れない (機会損失)。
+# 50 = 通常の新規発生 (実測 ~30/日) を 1 cycle で捌ける値。CLI --max-per-cycle で override。
 DEFAULT_MAX_PER_CYCLE: Optional[int] = int(
-    os.environ.get("INVENTORY_REVIVE_MAX_PER_CYCLE", "10")
+    os.environ.get("INVENTORY_REVIVE_MAX_PER_CYCLE", "50")
 )
 
 # 急増ガードの「新規」判定窓。queue 投入がこの時間内のものを新規とみなす。
