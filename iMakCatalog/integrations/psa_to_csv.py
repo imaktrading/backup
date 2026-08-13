@@ -846,6 +846,12 @@ def _search_one_piece_promo_by_number(
             #   p4/p5 が同点なら従来どおり fail-closed reject → HQ viewer が確定 (HQ 承認)。
             #   apostrophe 揺れ回避で英側は "START CAMPAIGN"、日側「始めようキャンペーン」両側必須。
             ("START CAMPAIGN", "始めようキャンペーン"),
+            # 2026-08-13 (auto依頼 cert160317119 SANJI #004 → ST10-004_p1):
+            #   「8パックバトル」大会記念品。PSA brand は "8 PACKS BATTLE-WINNER"。
+            #   両側一致必須なので汎用 promo (_P 'Promotion Card' 150) を上回り一意特定できる。
+            #   語順が違う「スタンダードバトルパック」(= バトルパック) には発火しない。
+            #   同じ #番号の 8パックバトル が別年に複数あれば同点 → 従来どおり fail-closed。
+            ("8 PACKS BATTLE", "8パックバトル"),
         ):
             if en in hay and (jp in sn or jp in sn_upper):
                 edition_hit = True
