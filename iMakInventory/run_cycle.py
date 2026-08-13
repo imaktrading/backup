@@ -101,6 +101,19 @@ BACKUP_CLEAR_ALERT_HEARTBEAT_HOURS = 24   # この時間経過で同条件でも
 BACKUP_CLEAR_ALERT_GROWTH = 20            # 候補がこの件数以上 増えたら悪化とみなし再告知
 
 
+def _is_benign_url_swap(mismatch: dict) -> bool:
+    """compare-and-clear mismatch が「HQ が別の生きた仕入元URLに差し替えた」だけか。
+
+    ★ 2026-08-13: この形は設計どおりの競合 (監視が売切と確認 → 消す直前に HQ が新URLを入れた)。
+      消さなかったのが正解で、次 cycle が新URLを普通に見る = **人が何もすることがない**。
+      対処不能な通知を鳴らすと、本当に見るべき通知まで無視されるようになる。
+      セル値が URL でない (空・壊れた値) 場合だけ要対応として扱う。
+    """
+    actual = (mismatch.get("actual") or "").strip()
+    expected = (mismatch.get("expected_url") or "").strip()
+    return bool(actual) and actual != expected and actual.startswith(("http://", "https://"))
+
+
 def _should_emit_backup_clear_alert(held_max: int, mismatch_n: int) -> bool:
     """desktop file+mail を出すべきか (throttle 判定)。ログ出力自体は常に行う想定。
 
@@ -629,7 +642,19 @@ def _phase_monitor(
     #   いずれも D/O(取下げ) は正常書込 = fail-OPEN ではない (延命枠の衛生管理レイヤ)。silent drop 禁止。
     if grand["backup_clear_held"] or grand["backup_clear_mismatch"]:
         _held = grand["backup_clear_held"]
-        _mm = grand["backup_clear_mismatch"]
+        _mm_all = grand["backup_clear_mismatch"]
+        # ★ 2026-08-13: mismatch のうち「セルが別の生きた仕入元URLに差し替わっている」ものは
+        #   HQ が補充した = 設計どおりの競合であり、**人が何もすることがない** (次 cycle が
+        #   新URLを普通に見る)。これで desktop ALERT を鳴らすと「対処不能な通知」になる。
+        #   数える・ログに出すのは続けるが、告知対象からは外す。
+        #   URL でないもの (空/壊れた値) は従来どおり要対応として告知する。
+        _mm = [m for m in _mm_all if not _is_benign_url_swap(m)]
+        _mm_swap = [m for m in _mm_all if _is_benign_url_swap(m)]
+        if _mm_swap:
+            _log(f"  [補URL消込] HQ差替による mismatch {len(_mm_swap)} 件 "
+                 f"(= 正常な競合、告知しない): "
+                 + ", ".join(f"row{m.get('row_index')}slot{m.get('slot')}" for m in _mm_swap[:10]),
+                 test_mode)
         _parts = []
         if _held:
             _parts.append(
@@ -651,12 +676,16 @@ def _phase_monitor(
             for m in _mm[:15]:
                 _parts.append(f"  - [{m.get('sheet')}] row{m.get('row_index')} "
                               f"slot{m.get('slot')}: expected={ (m.get('expected_url') or '')[:40]}")
+        if not _parts:
+            # 告知対象が「HQ差替だけ」= 対処不能な通知しか残らない → 発報しない (ログには出済)
+            _log("  [補URL消込] 告知対象なし (HQ差替のみ) → ALERT 発報しない", test_mode)
+            _parts = None
         _msg = ("補URL 売切消込で要対応が発生しました (D/O 取下げは正常 = fail-OPEN ではない)。\n\n"
-                + "\n".join(_parts))
+                + "\n".join(_parts)) if _parts else ""
         # ★ throttle: 既知 backlog の HOLD を毎 cycle 4h毎に desktop file+mail 量産するとアラート疲労。
         #   cycle ログには常に出す (非 silent 維持) が、desktop file+mail は「新規/悪化/24h経過/mismatch有」時のみ。
         _held_max = max((h.get("candidate_count", 0) for h in _held), default=0)
-        _emit = _should_emit_backup_clear_alert(_held_max, len(_mm))
+        _emit = bool(_msg) and _should_emit_backup_clear_alert(_held_max, len(_mm))
         if _emit:
             _log(f"  [★補URL消込] HOLD={len(_held)} / mismatch={len(_mm)} → ALERT 発報", test_mode)
             _notify_toast("iMakInventory 補URL消込 要対応", _msg[:200])

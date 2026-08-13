@@ -60,13 +60,17 @@ def test_backup_clear_surge_hold_alerts(monkeypatch, tmp_path):
 
 
 def test_backup_clear_mismatch_alerts(monkeypatch, tmp_path):
-    """compare-and-clear mismatch → 要対応 ALERT (silent drop 禁止)."""
+    """compare-and-clear mismatch のうち **要対応のものだけ** ALERT (silent drop 禁止)。
+
+    ★ 2026-08-13 改: セル値が「別の生きた URL」= HQ 差替は正常な競合で人の手が要らないため
+      告知しない。ここでは URL でない値が入った異常系を要対応として検証する。
+    """
     sent = {}
     run_cycle = _patch_common(monkeypatch, tmp_path, sent)
     stats = _base_stats(backup_clear={
         "cleared": 2,
         "skipped_mismatch": [{"row_index": 10, "slot": 1,
-                              "expected_url": "https://old", "actual": "https://new_hq"}],
+                              "expected_url": "https://old", "actual": "売切"}],
         "held": False, "candidate_count": 3, "surge": False})
     monkeypatch.setattr(run_cycle, "process_sheet", lambda **k: stats)
 
@@ -76,6 +80,30 @@ def test_backup_clear_mismatch_alerts(monkeypatch, tmp_path):
     assert len(grand["backup_clear_mismatch"]) == 1
     alerts = list((tmp_path / "OneDrive" / "デスクトップ").glob("ALERT_iMakInventory_backup_clear_*.txt"))
     assert len(alerts) == 1
+
+
+def test_backup_clear_hq_url_swap_does_not_alert(monkeypatch, tmp_path):
+    """HQ が別の生きた仕入元URLに差し替えただけ → 記録はするが ALERT は出さない。
+
+    ★ 2026-08-13: 18:49 にこれで desktop ALERT が出た。消さなかったのが正解で、次 cycle が
+      新URLを普通に見る = 人が何もすることがない通知だった。
+    """
+    sent = {}
+    run_cycle = _patch_common(monkeypatch, tmp_path, sent)
+    stats = _base_stats(backup_clear={
+        "cleared": 2,
+        "skipped_mismatch": [{"row_index": 1348, "slot": 1,
+                              "expected_url": "https://jp.mercari.com/shops/product/OLD",
+                              "actual": "https://jp.mercari.com/shops/product/NEW"}],
+        "held": False, "candidate_count": 3, "surge": False})
+    monkeypatch.setattr(run_cycle, "process_sheet", lambda **k: stats)
+
+    grand = run_cycle._phase_monitor(sheet="high", limit=None, test_mode=True,
+                                     single_sheet_id="dummy", single_sheet_label="HIGH")
+    assert len(grand["backup_clear_mismatch"]) == 1          # 記録は残す
+    alerts = list((tmp_path / "OneDrive" / "デスクトップ").glob("ALERT_iMakInventory_backup_clear_*.txt"))
+    assert alerts == []                                       # 告知はしない
+    assert not sent.get("mail")
 
 
 def test_backup_clear_clean_no_alert(monkeypatch, tmp_path):
