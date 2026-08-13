@@ -203,10 +203,11 @@ def audit(categories):
         computed_rarity = _derive_rarity_ebay(conn, r["category"], r_raw)
         if computed_rarity is not None and computed_rarity != r_stored:
             rarity_by_cat[r["category"]]["map_drift"] += 1
-        # unmapped = 生 rarity はあるのに filter_map に無い (= 新弾の新コード等)。
-        #   fail-closed で空欄になり出品されないので「事故」ではないが、放置すると
-        #   そのカードが永久に出ない。yaml に足すべき残件としてここで可視化する。
-        if r_raw and computed_rarity is None and r["category"] != "yugioh_tcg":
+        # unmapped = 生 rarity はあるのに変換先が無く、**stored も空** (= そのカードが出品されない)。
+        #   fail-closed なので誤出品はしないが、放置すると永久に出ないので残件として毎日出す。
+        #   個別に値を入れた行 (filter_map で表せない = カード名依存の LEGEND / Gold Star 等) は
+        #   stored が埋まっているので対象外。
+        if r_raw and not r_stored and computed_rarity is None and r["category"] != "yugioh_tcg":
             rarity_by_cat[r["category"]]["unmapped"] += 1
 
     conn.close()
