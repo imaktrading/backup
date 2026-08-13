@@ -51,7 +51,13 @@ DB_PATH = r"C:/dev/iMak_data/catalog/products.sqlite"
 
 SRC_TABS = ("補URL候補NG", "補URL要調査")
 OUT_TAB = "新規出品候補"
-OUT_HEADER = ["url", "category", "product_id", "cert", "候補タイトル", "元itemID", "日付"]
+# ★2026-08-13 ユーザー確定「商品管理シートへの追加は危険やから、どこかに保管されていたら
+#   コピペする」。なので **貼り付け先の列名をそのまま見出しにする**。
+#   商品管理シート: A=仕入元URL / B=itemID(出品後に入る=空のまま) / C=タイトル /
+#                   I=cert / R=カテゴリ('TCG') / AI=canonical KEY
+OUT_HEADER = ["A列:仕入元URL", "C列:タイトル", "I列:cert", "R列:カテゴリ",
+              "AI列:KEY", "product_id", "元itemID", "日付"]
+SHEET_CATEGORY = "TCG"   # 商品管理シート R列。PSA は 'TCG'
 NG_TAB = "新規候補NG"
 NG_HEADER = ["url", "理由", "日付", "候補タイトル"]
 MISSING_CSV = r"C:/dev/iMak_data/catalog/missing_models.csv"
@@ -575,12 +581,14 @@ def save(items, res):
         it = by_idx.get(p["idx"])
         if not it:
             continue
-        picks.append([it["url"], p["category"], p["pid"], p["cert"],
-                      (it["title"] or "")[:60], it["src_itemid"], today])
+        key = f"{p['category']}:{p['pid']}" if p["category"] else p["pid"]
+        picks.append([it["url"], (it["title"] or "")[:60], p["cert"], SHEET_CATEGORY,
+                      key, p["pid"], it["src_itemid"], today])
     if picks:
         _append_tab(OUT_TAB, OUT_HEADER, picks)
-        print(f"  ✅ {OUT_TAB}: +{len(picks)}件")
-        _no_cert = [p for p in picks if not p[3]]
+        print(f"  ✅ {OUT_TAB}: +{len(picks)}件 "
+              f"(見出しが貼り付け先の列名。商品管理シートに手でコピペしてください)")
+        _no_cert = [p for p in picks if not p[2]]
         if _no_cert:
             print(f"     ⚠ うち鑑定番号なし {len(_no_cert)}件 = 出品には回せない (候補タブ止まり)")
 

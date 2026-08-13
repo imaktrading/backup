@@ -238,3 +238,33 @@ def test_guess_category_from_title():
     assert N.guess_category("PSA10 ポケモンカード", []) == "pokemon_tcg"
     assert N.guess_category("なぞの商品", []) == "", "分からない時は推測しない"
     assert N.guess_category("なぞ", [{"category": "gundam_tcg"}]) == "gundam_tcg"
+
+
+# ---------------------------------------------------------------------------
+# 8. 保管は「貼り付け先の列名」で (商品管理シートへの自動追加はしない)
+# ---------------------------------------------------------------------------
+def test_out_header_is_paste_ready():
+    """ユーザー確定「シートへの追加は危険。保管されていたらコピペする」。
+
+    見出しが貼り付け先の列名になっていること + 自動 append をしていないこと。
+    """
+    assert N.OUT_HEADER[:5] == ["A列:仕入元URL", "C列:タイトル", "I列:cert",
+                                "R列:カテゴリ", "AI列:KEY"]
+    src = open(os.path.join(_TOOLS, "newcand_confirm.py"), encoding="utf-8").read()
+    assert "_product_ws" not in src, "商品管理シート本体を触ってはいけない"
+    assert "append_row" not in src
+
+
+def test_save_builds_paste_row(monkeypatch):
+    written = {}
+    monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
+    items = [_item(0, [{"pid": "EB03-053_p1", "category": "one_piece_tcg", "name": "Nami",
+                        "image": ""}])]
+    N.save(items, {"picks": [{"idx": 0, "pid": "EB03-053_p1", "category": "one_piece_tcg",
+                              "cert": "147704361"}],
+                   "catalog_reqs": [], "outs": [], "holds": []})
+    row = written[N.OUT_TAB][0]
+    assert row[0] == "https://m/0"                       # A列 = 仕入元URL
+    assert row[2] == "147704361"                         # I列 = cert
+    assert row[3] == "TCG"                               # R列 = カテゴリ
+    assert row[4] == "one_piece_tcg:EB03-053_p1"         # AI列 = canonical KEY
