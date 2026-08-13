@@ -993,8 +993,13 @@ def main(csv_path: str | None = None):
             print("  ✅ 問題なし")
 
     # === GATE判定サマリー ===
+    # ★2026-08-13: 相場停止中は判定していないので**判定行を出さない**。
+    #   出すと全行に「競合なし($100で先行出品)」と並び、実際の価格 (cost-plus で
+    #   $529.98 等) と食い違う **嘘のログ**になる (gate=None=未判定 を「競合なし」と
+    #   読み替えていたため)。
     print(f"\n{'═'*60}")
-    print("  🏁 GATE判定サマリー")
+    print("  🏁 GATE判定サマリー" if _market_lookup
+          else "  🏁 価格: cost-plus のみ (相場取得は停止中 = GATE判定なし)")
     print(f"{'═'*60}")
 
     go_count = 0
@@ -1003,7 +1008,7 @@ def main(csv_path: str | None = None):
     nogo_count = 0
     no_data_count = 0
 
-    for i, gate in enumerate(all_gates):
+    for i, gate in enumerate(all_gates if _market_lookup else []):
         title_short = get_col(rows[i], "*Title")[:40]
         if gate is None:
             no_data_count += 1

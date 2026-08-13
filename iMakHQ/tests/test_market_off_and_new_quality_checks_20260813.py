@@ -148,3 +148,14 @@ def test_title_ending_with_single_letter_is_error():
 def test_normal_row_is_clean():
     t = "PSA 10 One Piece Japanese 500 Years in the Future #OP07-047 Trafalgar Law Rare"
     assert _cc().specifics_sanity_issues(_row(), t) == []
+
+
+# ---------------------------------------------------------------------------
+# 5. 相場停止中に「競合なし($100で先行出品)」と嘘を出さない (2026-08-13 実走で発覚)
+# ---------------------------------------------------------------------------
+def test_gate_summary_not_printed_when_market_off():
+    """相場を止めている = 判定していない。未判定を『競合なし』と書くと
+    実際の価格 (cost-plus $529.98 等) と食い違う嘘のログになる。"""
+    src = open(os.path.join(_TCG, "check_csv.py"), encoding="utf-8").read()
+    assert "enumerate(all_gates if _market_lookup else [])" in src, "停止中も判定行を出している"
+    assert "相場取得は停止中 = GATE判定なし" in src
