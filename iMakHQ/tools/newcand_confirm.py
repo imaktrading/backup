@@ -166,25 +166,30 @@ def url_title_map(cache):
 def pending_rows(src_rows, done_urls):
     """台帳の行 → 未処理だけ (純関数)。done_urls に有る url は落とす。
 
-    src_rows: [(tab, row)] 形式。row は [itemID, cert, url, title, ...]。
+    src_rows: [(tab, header, row)] 形式。row は [itemID, cert, url, title, ...]。
+    ★列は**見出し名で引く**。位置で決め打ちすると、台帳に列が増えた時に別の列を
+      掴む (2026-08-13: 「状態」列を足した結果、候補タイトルの位置に状態が入り、
+      画面のタイトルが『新規出品候補へ (出品…)』になった)。
     """
     out, seen = [], set()
-    for tab, r in src_rows:
+    for entry in src_rows:
+        tab, head, r = entry if len(entry) == 3 else (entry[0], [], entry[1])
         if len(r) < 3:
             continue
         url = (r[2] or "").strip()
         if not url or url in done_urls or url in seen:
             continue
         seen.add(url)
-        # ★2026-08-13 以降の行は台帳に候補タイトル/価格を持つ (NG=6,7列目 / 要調査=8,9列目)。
-        #   それ以前の行は空なので探索cache から復元する (load_items 側)。
-        ct = (r[5] if tab.endswith("NG") and len(r) > 5 else
-              (r[7] if len(r) > 7 else "")) or ""
-        cp = (r[6] if tab.endswith("NG") and len(r) > 6 else
-              (r[8] if len(r) > 8 else "")) or ""
+
+        def by_name(name):
+            if name in (head or []):
+                i = head.index(name)
+                return (r[i] if len(r) > i else "") or ""
+            return ""
         out.append({"src": tab, "src_itemid": (r[0] or "").strip(),
                     "src_cert": (r[1] or "").strip(), "url": url,
-                    "saved_title": str(ct).strip(), "saved_price": str(cp).strip()})
+                    "saved_title": str(by_name("候補タイトル")).strip(),
+                    "saved_price": str(by_name("候補価格")).strip()})
     return out
 
 
@@ -379,12 +384,14 @@ def catalog_candidates(title, card_no, db=DB_PATH):
     return catalog_by_name(title, _MAX_CANDS, db)
 
 
-def load_items(limit=0):
+def load_items(limit=0, write=True):
     """台帳2本 → 目視対象 items (I/O)。候補タイトル復元 + カード番号抽出 + 版引きまで済ませる。"""
     src_rows = []
     for tab in SRC_TABS:
-        for r in (sheet_io.read_tab(tab) or [])[1:]:
-            src_rows.append((tab, r))
+        cur = sheet_io.read_tab(tab) or []
+        head = list(cur[0]) if cur else []
+        for r in cur[1:]:
+            src_rows.append((tab, head, r))
     done = set()
     for tab in (OUT_TAB, NG_TAB):
         for r in (sheet_io.read_tab(tab) or [])[1:]:
@@ -402,7 +409,10 @@ def load_items(limit=0):
         print(f"⚠ 探索cache を読めない ({type(e).__name__}) → タイトル復元なしで続行")
         u2t = {}
 
-    items = []
+    # 既に『出品』として結論が出ているカード (番号 → その時選んだ版)
+    decided = decided_cards()
+
+    all_items = []
     for p in pending_rows(src_rows, done):
         price, title = u2t.get(p["url"], (None, ""))
         # 台帳に保存済のタイトルがあればそちらが正 (押した時点の実物)
@@ -416,9 +426,36 @@ def load_items(limit=0):
         card_no = typed_no.get(p["url"], "") or extract_card_no(title)
         variants = catalog_candidates(title, card_no)
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants})
+        all_items.append(p)
+
+    # ★2026-08-13 ユーザー指摘「同じカードとか画像がないとか多いんだけど」。
+    #   同じカードの別の仕入元まで1件ずつ目視させていた。カードの判断は1回でよく、
+    #   残りの供給URLは**補URL**にすればいい (捨てない = 供給の厚み)。
+    #   ① 既に結論が出ているカード → 人に見せず自動で補URLへ
+    #   ② 今回まとめて出てくる同じカード → 先頭1件だけ見せ、残りは確定時に自動で補URLへ
+    auto_aux, items, groups = [], [], {}
+    for p in all_items:
+        no = p["card_no"]
+        if no and no in decided:
+            p["decided"] = decided[no]
+            auto_aux.append(p)
+            continue
+        if no and no in groups:
+            groups[no].append(p)
+            continue
+        if no:
+            groups[no] = []
+        p["dups"] = groups.get(no) if no else None
         items.append(p)
         if limit and len(items) >= limit:
             break
+    # limit で切った先の同カードも拾えるよう、items の分だけ dups を確定させる
+    for it in items:
+        it["dups"] = groups.get(it["card_no"], []) if it["card_no"] else []
+    if auto_aux and write:
+        save_auto_aux(auto_aux)
+    elif auto_aux:
+        print(f"  ♻ 結論済カードの別の仕入元 {len(auto_aux)}件 (DRY-RUN: 書かない)")
     for i, it in enumerate(items):
         it["idx"] = i
     return items
@@ -599,7 +636,10 @@ def build_html(items):
             f"data-photo=\"{_html.escape(photo)}\">{ph}<div class='body'>"
             f"<div class='t'>{_html.escape(title[:110])}</div>"
             f"<div class='meta'>{price} ｜ 番号 {_html.escape(it['card_no'] or '?')} ｜ "
-            f"元 {_html.escape(it['src'])} (出品 {_html.escape(it['src_itemid'])})</div>"
+            f"元 {_html.escape(it['src'])} (出品 {_html.escape(it['src_itemid'])})"
+            + (f" ｜ <b>同じカードの別の仕入元 {len(it.get('dups') or [])}件も同じ結論にします</b>"
+               if it.get("dups") else "")
+            + "</div>"
             f"{body_v}"
             f"<div class='act'>カード番号 <input class='cno' "
             f"value=\"{_html.escape(it['card_no'] or '')}\" placeholder='例 OP05-002'>"
@@ -667,6 +707,42 @@ def migrate_out_rows(cur):
     # 旧形式 (用途も無い)
     return mark_use([["", ""] + list(r[:3]) + [""] + list(r[3:]) for r in cur[1:] if r],
                     listed_keys=())
+
+
+def decided_cards():
+    """既に『出品』と結論を出したカード → {カード番号: (KEY, product_id, category)} (I/O)。
+
+    ★同じカードの別の仕入元を、毎回ゼロから目視させないため。カードの判断は1回でよく、
+      残りの供給URLは**補URL**に回せばいい (捨てない = 無在庫では供給が厚いほど良い)。
+    """
+    out = {}
+    for r in migrate_out_rows(sheet_io.read_tab(OUT_TAB) or []):
+        if len(r) <= OUT_KEY_COL + 1 or (r[0] or "").strip() != USE_LIST:
+            continue
+        pid = (r[OUT_KEY_COL + 1] or "").strip()
+        key = (r[OUT_KEY_COL] or "").strip()
+        no = extract_card_no(pid) or pid
+        if no:
+            out[no] = (key, pid, key.split(":")[0] if ":" in key else "")
+    return out
+
+
+def save_auto_aux(items):
+    """結論済カードの別の仕入元を、人に聞かず**補URL**として保存する (I/O)。"""
+    today = _today()
+    rows = []
+    for it in items:
+        key, pid, cat = it["decided"]
+        rows.append([USE_AUX, "", it["url"], (it["title"] or "")[:60],
+                     (it.get("price") if isinstance(it.get("price"), int) else ""),
+                     "", SHEET_CATEGORY, key, pid, it["src_itemid"], today])
+    if rows:
+        have = {_nurl(r[OUT_URL_COL]) for r in migrate_out_rows(sheet_io.read_tab(OUT_TAB) or [])
+                if len(r) > OUT_URL_COL}
+        rows = [r for r in rows if _nurl(r[OUT_URL_COL]) not in have]
+    if rows:
+        _append_tab(OUT_TAB, OUT_HEADER, rows)
+        print(f"  ♻ 結論済カードの別の仕入元 {len(rows)}件 → 補URL として自動保存 (目視不要)")
 
 
 def already_listed_keys():
@@ -789,6 +865,12 @@ def save(items, res):
         picks.append(["", "", it["url"], (it["title"] or "")[:60],
                       (it.get("price") if isinstance(it.get("price"), int) else ""),
                       p["cert"], SHEET_CATEGORY, key, p["pid"], it["src_itemid"], today])
+        # ★同じカードの別の仕入元も同じ結論にする (人に同じ判断を繰り返させない)。
+        #   捨てずに補URL = 供給の厚み。
+        for d in (it.get("dups") or []):
+            picks.append(["", "", d["url"], (d["title"] or "")[:60],
+                          (d.get("price") if isinstance(d.get("price"), int) else ""),
+                          "", SHEET_CATEGORY, key, p["pid"], d["src_itemid"], today])
     picks = mark_use(picks, already_listed_keys())
     if picks:
         _append_tab(OUT_TAB, OUT_HEADER, picks)
@@ -866,7 +948,7 @@ def main():
         sync_status()
         return 0
     sync_status()          # 走行前にも最新化 (手でHIGHに貼った分がすぐ反映される)
-    items = load_items(limit=a.limit)
+    items = load_items(limit=a.limit, write=not a.dry_run)
     if not items:
         print("  未処理の候補なし。")
         return 0

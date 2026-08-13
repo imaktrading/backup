@@ -74,11 +74,12 @@ def test_url_title_map_tolerates_garbage():
 # 3. 未処理だけ拾う
 # ---------------------------------------------------------------------------
 def test_pending_rows_skips_done_and_duplicates():
-    src = [("補URL候補NG", ["358_1", "111", "https://m/a", "t"]),
-           ("補URL候補NG", ["358_2", "222", "https://m/b", "t"]),
-           ("補URL要調査", ["358_3", "333", "https://m/a", "t"]),   # 重複 url
-           ("補URL候補NG", ["358_4", "444", "", "t"]),              # url 空
-           ("補URL候補NG", ["358_5"])]                              # 列不足
+    h = ["itemID", "cert", "url", "title"]
+    src = [("補URL候補NG", h, ["358_1", "111", "https://m/a", "t"]),
+           ("補URL候補NG", h, ["358_2", "222", "https://m/b", "t"]),
+           ("補URL要調査", h, ["358_3", "333", "https://m/a", "t"]),   # 重複 url
+           ("補URL候補NG", h, ["358_4", "444", "", "t"]),              # url 空
+           ("補URL候補NG", h, ["358_5"])]                              # 列不足
     out = N.pending_rows(src, done_urls={"https://m/b"})
     assert [o["url"] for o in out] == ["https://m/a"]
     assert out[0]["src"] == "補URL候補NG" and out[0]["src_cert"] == "111"
@@ -183,11 +184,14 @@ def test_catalog_candidates_falls_back_to_name(monkeypatch):
 # ---------------------------------------------------------------------------
 def test_pending_rows_reads_saved_candidate_title():
     """新形式 (候補タイトル/価格つき) の行はそこから読む。旧形式は空のまま。"""
-    src = [("補URL候補NG", ["358_1", "111", "https://m/a", "出品側t", "2026-08-13",
-                            "PSA10 ナミ EB03-053", 9000]),
-           ("補URL候補NG", ["358_2", "222", "https://m/b", "出品側t", "2026-07-30"]),
-           ("補URL要調査", ["358_3", "333", "https://m/c", "出品側t", "006/020", "AR",
-                            "2026-08-13", "PSA10 わるいヘルガー", 4200])]
+    ng_head = ["itemID", "cert", "url", "title", "日付", "候補タイトル", "候補価格"]
+    pr_head = ["itemID", "cert", "url", "title", "現物の番号", "現物の変種", "日付",
+               "候補タイトル", "候補価格"]
+    src = [("補URL候補NG", ng_head, ["358_1", "111", "https://m/a", "出品側t", "2026-08-13",
+                                     "PSA10 ナミ EB03-053", 9000]),
+           ("補URL候補NG", ng_head, ["358_2", "222", "https://m/b", "出品側t", "2026-07-30"]),
+           ("補URL要調査", pr_head, ["358_3", "333", "https://m/c", "出品側t", "006/020", "AR",
+                                     "2026-08-13", "PSA10 わるいヘルガー", 4200])]
     out = {o["url"]: o for o in N.pending_rows(src, done_urls=set())}
     assert out["https://m/a"]["saved_title"] == "PSA10 ナミ EB03-053"
     assert out["https://m/b"]["saved_title"] == ""      # 旧形式 = 空 (cache から復元する)
@@ -475,3 +479,36 @@ def test_migrate_out_rows_requires_exact_header():
     out = N.migrate_out_rows(old)
     assert len(out[0]) == len(N.OUT_HEADER), "新形式の列数に揃っていない"
     assert out[0][6] == "TCG", "R列の位置がずれている"
+
+
+# ---------------------------------------------------------------------------
+# 15. 同じカードを何度も目視させない (2026-08-13 ユーザー指摘)
+# ---------------------------------------------------------------------------
+def test_pending_rows_reads_columns_by_header_name():
+    """★列が増えても位置で決め打ちしない (状態列を足してタイトルが壊れた実バグ)。"""
+    head = ["itemID", "cert", "url", "title", "日付", "状態"]          # 候補タイトルが無い形
+    rows = [("補URL候補NG", head, ["i", "c", "https://m/a", "t", "d", "新規出品候補へ (出品)"])]
+    out = N.pending_rows(rows, done_urls=set())
+    assert out[0]["saved_title"] == "", "状態列をタイトルとして拾っている"
+    head2 = ["itemID", "cert", "url", "title", "日付", "候補タイトル", "候補価格", "状態"]
+    rows2 = [("補URL候補NG", head2, ["i", "c", "https://m/b", "t", "d", "PSA10 ナミ", 9000, "済"])]
+    out2 = N.pending_rows(rows2, done_urls=set())
+    assert out2[0]["saved_title"] == "PSA10 ナミ"
+    assert out2[0]["saved_price"] == "9000"
+
+
+def test_pick_applies_to_same_card_duplicates(monkeypatch):
+    """同じカードの別の仕入元は、同じ結論 (補URL) にして人に聞かない。"""
+    written = {}
+    monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
+    monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    it = _item(0, [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}])
+    it["dups"] = [{"url": "https://m/dup1", "title": "同じカード別出品", "price": 25000,
+                   "src_itemid": "358_1"}]
+    N.save([it], {"picks": [{"idx": 0, "pid": "EB03-053", "category": "one_piece_tcg",
+                             "cert": ""}],
+                  "catalog_reqs": [], "outs": [], "holds": [], "card_nos": []})
+    rows = written[N.OUT_TAB]
+    assert [r[0] for r in rows] == [N.USE_LIST, N.USE_AUX]
+    assert rows[1][2] == "https://m/dup1"
+    assert rows[1][7] == "one_piece_tcg:EB03-053", "同じ KEY を引き継いでいない"
