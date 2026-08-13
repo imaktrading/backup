@@ -248,7 +248,7 @@ def test_out_header_is_paste_ready():
 
     見出しが貼り付け先の列名になっていること + 自動 append をしていないこと。
     """
-    assert N.OUT_HEADER[:5] == ["A列:仕入元URL", "C列:タイトル", "I列:cert",
+    assert N.OUT_HEADER[:6] == ["用途", "A列:仕入元URL", "C列:タイトル", "I列:cert",
                                 "R列:カテゴリ", "AI列:KEY"]
     src = open(os.path.join(_TOOLS, "newcand_confirm.py"), encoding="utf-8").read()
     assert "_product_ws" not in src, "商品管理シート本体を触ってはいけない"
@@ -258,16 +258,18 @@ def test_out_header_is_paste_ready():
 def test_save_builds_paste_row(monkeypatch):
     written = {}
     monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
+    monkeypatch.setattr(N, "already_listed_keys", lambda: set())
     items = [_item(0, [{"pid": "EB03-053_p1", "category": "one_piece_tcg", "name": "Nami",
                         "image": ""}])]
     N.save(items, {"picks": [{"idx": 0, "pid": "EB03-053_p1", "category": "one_piece_tcg",
                               "cert": "147704361"}],
                    "catalog_reqs": [], "outs": [], "holds": []})
     row = written[N.OUT_TAB][0]
-    assert row[0] == "https://m/0"                       # A列 = 仕入元URL
-    assert row[2] == "147704361"                         # I列 = cert
-    assert row[3] == "TCG"                               # R列 = カテゴリ
-    assert row[4] == "one_piece_tcg:EB03-053_p1"         # AI列 = canonical KEY
+    assert row[0] == N.USE_LIST                          # 用途
+    assert row[1] == "https://m/0"                       # A列 = 仕入元URL
+    assert row[3] == "147704361"                         # I列 = cert
+    assert row[4] == "TCG"                               # R列 = カテゴリ
+    assert row[5] == "one_piece_tcg:EB03-053_p1"         # AI列 = canonical KEY
 
 
 # ---------------------------------------------------------------------------
@@ -316,12 +318,13 @@ def test_viewer_has_no_cert_input():
 def test_saved_row_leaves_cert_empty(monkeypatch):
     written = {}
     monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
+    monkeypatch.setattr(N, "already_listed_keys", lambda: set())
     items = [_item(0, [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami",
                         "image": ""}])]
     N.save(items, {"picks": [{"idx": 0, "pid": "EB03-053", "category": "one_piece_tcg",
                               "cert": ""}],
                    "catalog_reqs": [], "outs": [], "holds": [], "card_nos": []})
-    assert written[N.OUT_TAB][0][2] == "", "I列:cert は空のまま (出品直前に入れる)"
+    assert written[N.OUT_TAB][0][3] == "", "I列:cert は空のまま (出品直前に入れる)"
 
 
 # ---------------------------------------------------------------------------
@@ -360,3 +363,54 @@ def test_gone_reason_is_limited_to_unidentifiable():
     v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
     page = N.build_html([_item(0, v)]).decode()
     assert "無在庫なので仕入元は後で探し直せます" in page
+
+
+# ---------------------------------------------------------------------------
+# 12. 同じカードは1行だけ『出品』/ 入力番号を依頼に反映 (2026-08-13)
+# ---------------------------------------------------------------------------
+def test_mark_use_keeps_one_listing_per_card():
+    rows = [["", "u1", "t", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"],
+            ["", "u2", "t", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"],
+            ["", "u3", "t", "", "TCG", "one_piece_tcg:OP07-047", "OP07-047", "i", "d"]]
+    out = N.mark_use(rows, listed_keys=())
+    assert [r[0] for r in out] == [N.USE_LIST, N.USE_AUX, N.USE_LIST]
+
+
+def test_mark_use_respects_already_saved_keys():
+    """前回の走行で出品にした KEY は、今回は補URL に回す (二重出品を作らない)。"""
+    rows = [["", "u9", "t", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"]]
+    out = N.mark_use(rows, listed_keys={"one_piece_tcg:EB03-053"})
+    assert out[0][0] == N.USE_AUX
+
+
+def test_catalog_request_uses_typed_card_number(monkeypatch):
+    """★番号を打ったのに『番号不明』で依頼していた。打った番号を使う。"""
+    sent = {}
+    monkeypatch.setattr(N, "_append_tab", lambda *a: None)
+    monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    monkeypatch.setattr(N.sheet_io, "read_tab", lambda tab: [])
+    monkeypatch.setattr(N.sheet_io, "write_rows_to_tab", lambda tab, rows: None)
+    monkeypatch.setattr(N, "append_missing_models",
+                        lambda rows, path=None: sent.setdefault("rows", rows) or len(rows))
+    monkeypatch.setattr(N, "catalog_variants", lambda no, db=None: [])   # catalog に無い
+    items = [_item(0, [], title="PSA10 ワンピース", card_no="")]
+    N.save(items, {"picks": [], "catalog_reqs": [0], "outs": [], "holds": [],
+                   "card_nos": [{"idx": 0, "no": "OP13-118"}]})
+    assert "OP13-118" in sent["rows"][0][1]
+    assert "番号不明" not in sent["rows"][0][1]
+
+
+def test_catalog_request_skipped_when_typed_number_exists_in_catalog(monkeypatch):
+    """入力番号で catalog に在るなら依頼しない (無駄な依頼を出さない)。"""
+    called = {}
+    monkeypatch.setattr(N, "_append_tab", lambda *a: None)
+    monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    monkeypatch.setattr(N.sheet_io, "read_tab", lambda tab: [])
+    monkeypatch.setattr(N.sheet_io, "write_rows_to_tab", lambda tab, rows: None)
+    monkeypatch.setattr(N, "append_missing_models",
+                        lambda rows, path=None: called.setdefault("n", len(rows)))
+    monkeypatch.setattr(N, "catalog_variants", lambda no, db=None: [{"pid": "OP13-118"}])
+    items = [_item(0, [], title="PSA10 ワンピース", card_no="")]
+    N.save(items, {"picks": [], "catalog_reqs": [0], "outs": [], "holds": [],
+                   "card_nos": [{"idx": 0, "no": "OP13-118"}]})
+    assert "n" not in called, "catalog に在るのに依頼を出している"

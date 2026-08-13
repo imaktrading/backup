@@ -55,8 +55,11 @@ OUT_TAB = "新規出品候補"
 #   コピペする」。なので **貼り付け先の列名をそのまま見出しにする**。
 #   商品管理シート: A=仕入元URL / B=itemID(出品後に入る=空のまま) / C=タイトル /
 #                   I=cert / R=カテゴリ('TCG') / AI=canonical KEY
-OUT_HEADER = ["A列:仕入元URL", "C列:タイトル", "I列:cert", "R列:カテゴリ",
+OUT_HEADER = ["用途", "A列:仕入元URL", "C列:タイトル", "I列:cert", "R列:カテゴリ",
               "AI列:KEY", "product_id", "元itemID", "日付"]
+# 「用途」: 同じカード(KEY)が複数あっても **出品するのは1枚だけ**。
+#   2枚目以降は捨てず「補URL」= 供給の厚み (無在庫なので仕入元は多いほど良い)。
+USE_LIST, USE_AUX = "出品", "補URL(2枚目以降)"
 SHEET_CATEGORY = "TCG"   # 商品管理シート R列。PSA は 'TCG'
 NG_TAB = "新規候補NG"
 NG_HEADER = ["url", "理由", "日付", "候補タイトル"]
@@ -612,8 +615,49 @@ def build_html(items):
 # ---------------------------------------------------------------------------
 def _append_tab(tab, header, new_rows):
     cur = sheet_io.read_tab(tab) or []
-    body = cur[1:] if cur else []
+    body = migrate_out_rows(cur) if tab == OUT_TAB else (cur[1:] if cur else [])
     sheet_io.write_rows_to_tab(tab, [header] + body + new_rows)
+
+
+def mark_use(rows, listed_keys=(), key_col=5, use_col=0):
+    """同じカード(KEY)は1行だけ『出品』、残りは『補URL』にする (純関数)。
+
+    ★同じカードを2枚出品しない (重複くんが後で弾く前に、ここで用途を分けておく)。
+      捨てるのではなく**補URL**に回す = 供給の厚みとして残す (無在庫なので仕入元は多いほど良い)。
+    listed_keys: 既に出品中/候補済の KEY。含まれるカードは丸ごと補URL扱いにする。
+    """
+    seen = {str(k).strip() for k in (listed_keys or []) if str(k).strip()}
+    out = []
+    for r in rows:
+        r = list(r)
+        key = str(r[key_col] or "").strip()
+        r[use_col] = USE_AUX if (key and key in seen) else USE_LIST
+        if key:
+            seen.add(key)
+        out.append(r)
+    return out
+
+
+def migrate_out_rows(cur):
+    """旧8列 (用途なし) の保管行を新9列に移す (純関数)。
+
+    2026-08-13 に「用途」列を先頭に足した。既存行は列がずれるので、先頭に空を入れてから
+    同じ規則で 出品/補URL を振り直す。ヘッダが新形式ならそのまま返す。
+    """
+    if not cur or not cur[0]:
+        return []
+    if cur[0][0] == OUT_HEADER[0]:
+        return cur[1:]
+    return mark_use([[""] + list(r) for r in cur[1:] if r], listed_keys=())
+
+
+def already_listed_keys():
+    """既に『出品』として保管済の KEY (I/O)。走行をまたいでも二重に出品候補にしない。"""
+    keys = set()
+    for r in migrate_out_rows(sheet_io.read_tab(OUT_TAB) or []):
+        if len(r) > 5 and (r[0] or "").strip() == USE_LIST and (r[5] or "").strip():
+            keys.add(r[5].strip())
+    return keys
 
 
 def append_missing_models(rows, path=MISSING_CSV):
@@ -651,25 +695,39 @@ def save(items, res):
         if not it:
             continue
         key = f"{p['category']}:{p['pid']}" if p["category"] else p["pid"]
-        picks.append([it["url"], (it["title"] or "")[:60], p["cert"], SHEET_CATEGORY,
+        picks.append(["", it["url"], (it["title"] or "")[:60], p["cert"], SHEET_CATEGORY,
                       key, p["pid"], it["src_itemid"], today])
+    picks = mark_use(picks, already_listed_keys())
     if picks:
         _append_tab(OUT_TAB, OUT_HEADER, picks)
+        n_list = sum(1 for r in picks if r[0] == USE_LIST)
         print(f"  ✅ {OUT_TAB}: +{len(picks)}件 "
-              f"(見出しが貼り付け先の列名。商品管理シートに手でコピペしてください)")
+              f"(うち出品 {n_list}件 / 補URL {len(picks) - n_list}件)")
+        print("     ℹ 貼り付けるのは『用途=出品』の行だけ。残りは同じカードの別の仕入元です")
         print("     ℹ I列:cert は空のまま = 出品直前に入れる (この画面の仕事は版の確定だけ)")
 
+    # ★同じ確定で入力されたカード番号は、依頼を書く前に反映する (2026-08-13)。
+    #   番号を打ったのに「番号不明」で依頼を出していた。さらに、その番号で catalog に
+    #   **在る**なら依頼自体が不要 = 次回 候補が並ぶので未結論に戻す。
+    typed = {c["idx"]: c["no"] for c in res.get("card_nos", [])}
     creqs, creq_ng = [], []
+    n_recheck = 0
     for i in res["catalog_reqs"]:
         it = by_idx.get(i)
         if not it:
             continue
+        card_no = typed.get(i) or it["card_no"]
+        if typed.get(i) and catalog_variants(typed[i]):
+            n_recheck += 1          # 入力番号で catalog に在った → 依頼しない
+            continue
         cat = guess_category(it["title"], it["variants"])
-        model = (f"{it['card_no'] or '番号不明'} {it['title'][:60]} "
+        model = (f"{card_no or '番号不明'} {it['title'][:60]} "
                  f"(捨てた仕入候補の目視 {today} / {it['url']})")
         creqs.append([cat, model, f"{today} 00:00:00"])
         creq_ng.append([it["url"], "カタログ未収録 → 追加依頼を起票", today,
                         (it["title"] or "")[:60]])
+    if n_recheck:
+        print(f"  ↩ 入力された番号で catalog に在った {n_recheck}件 → 依頼せず次回に候補を出す")
     if creqs:
         n = append_missing_models(creqs)
         _append_tab(NG_TAB, NG_HEADER, creq_ng)
