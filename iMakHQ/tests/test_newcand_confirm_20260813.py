@@ -176,3 +176,26 @@ def test_catalog_candidates_falls_back_to_name(monkeypatch):
     monkeypatch.setattr(N, "catalog_by_name",
                         lambda t, limit=12, db=None: [{"pid": "A"}, {"pid": "B"}])
     assert [c["pid"] for c in N.catalog_candidates("PSA10 ナミ", "")] == ["A", "B"]
+
+
+# ---------------------------------------------------------------------------
+# 6. 台帳に候補タイトルを保存する (2026-08-13 追加分)
+# ---------------------------------------------------------------------------
+def test_pending_rows_reads_saved_candidate_title():
+    """新形式 (候補タイトル/価格つき) の行はそこから読む。旧形式は空のまま。"""
+    src = [("補URL候補NG", ["358_1", "111", "https://m/a", "出品側t", "2026-08-13",
+                            "PSA10 ナミ EB03-053", 9000]),
+           ("補URL候補NG", ["358_2", "222", "https://m/b", "出品側t", "2026-07-30"]),
+           ("補URL要調査", ["358_3", "333", "https://m/c", "出品側t", "006/020", "AR",
+                            "2026-08-13", "PSA10 わるいヘルガー", 4200])]
+    out = {o["url"]: o for o in N.pending_rows(src, done_urls=set())}
+    assert out["https://m/a"]["saved_title"] == "PSA10 ナミ EB03-053"
+    assert out["https://m/b"]["saved_title"] == ""      # 旧形式 = 空 (cache から復元する)
+    assert out["https://m/c"]["saved_title"] == "PSA10 わるいヘルガー"
+
+
+def test_cand_info_by_url_is_pure():
+    import psa_hoju_fill as H
+    m = H.cand_info_by_url([{"url": "https://m/a", "name": "PSA10 ナミ", "price": 9000},
+                            {"url": "", "name": "x"}, None])
+    assert list(m.values()) == [("PSA10 ナミ", 9000)]

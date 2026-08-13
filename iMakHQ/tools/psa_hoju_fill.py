@@ -628,7 +628,11 @@ def _norm_urls(urls):
 # 「押した1クリックが必ずどこかの改善につながる」ようにするため、負例として貯めて
 # 次回から出さない。出品単位の伏せ (CONFIRM_SKIP_TAB) とは別物 = 出品は伏せない。
 NG_CAND_TAB = "補URL候補NG"
-NG_CAND_HEADER = ["itemID", "cert", "url", "title", "日付"]
+# ★2026-08-13: 「候補タイトル」「候補価格」を追加。従来は url しか残しておらず、
+#   後から「この候補は何だったのか」を引く手段が無かった (= 捨てた候補を新規出品の種に
+#   戻す時に、URL を1件ずつ開くしかない)。実測で 144件中 32件が復元不能だった。
+#   旧5列の行はそのまま残る (末尾2列が空)。
+NG_CAND_HEADER = ["itemID", "cert", "url", "title", "日付", "候補タイトル", "候補価格"]
 
 # ★2026-08-09: 「ラベルの表記は違うが同じカードの可能性が濃厚」の受け皿。
 #   PSA は同じカードに複数の印字書式を使うため (OP09-050 ナミの実例: 現物 "ONE PIECE JPN." /
@@ -636,7 +640,22 @@ NG_CAND_HEADER = ["itemID", "cert", "url", "title", "日付"]
 #   かといって「仕入れる」に倒すと誤変種を掴む。目視を止めずに保留できる第3の受け皿を置く。
 #   NG タブに入れない = 次回も候補に出る (調べる前に捨てない)。調べ終わったら行を消す。
 PROBE_TAB = "補URL要調査"
-PROBE_HEADER = ["itemID", "cert", "url", "title", "現物の番号", "現物の変種", "日付"]
+PROBE_HEADER = ["itemID", "cert", "url", "title", "現物の番号", "現物の変種", "日付",
+                "候補タイトル", "候補価格"]   # ★2026-08-13 候補側も残す (NG_CAND と同じ理由)
+
+
+def cand_info_by_url(candidates):
+    """候補 list → {正規化URL: (タイトル, 価格)} (純関数)。
+
+    「違う」「要調査」を押した時に**候補側の情報も台帳に残す**ために使う。
+    押した瞬間しかこの情報は手元に無い (次回は検索し直しになる)。
+    """
+    out = {}
+    for c in (candidates or []):
+        u = (c or {}).get("url") or ""
+        if u:
+            out[_norm_url(u)] = ((c.get("name") or "")[:60], c.get("price") or "")
+    return out
 
 
 def _ng_urls_by_iid(rows):
@@ -1339,7 +1358,11 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         if _i is None or not _u or _i >= len(item_targets):
             continue
         _t = item_targets[_i]
-        _ng_new.append([_t["itemID"], _t.get("cert", ""), _u, (_t.get("title") or "")[:60], today])
+        # ★候補側の情報も残す。押した瞬間しか手元に無い (2026-08-13)
+        _ci = cand_info_by_url((items[_i] or {}).get("candidates")) if _i < len(items) else {}
+        _ct, _cp = _ci.get(_norm_url(_u), ("", ""))
+        _ng_new.append([_t["itemID"], _t.get("cert", ""), _u, (_t.get("title") or "")[:60],
+                        today, _ct, _cp])
     if _ng_new:
         try:
             from sheet_io import read_tab, write_rows_to_tab
@@ -1364,9 +1387,11 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
             continue
         _t = item_targets[_i]
         _lab = (_t.get("psa_label") or {}) if isinstance(_t.get("psa_label"), dict) else {}
+        _ci = cand_info_by_url((items[_i] or {}).get("candidates")) if _i < len(items) else {}
+        _ct, _cp = _ci.get(_norm_url(_u), ("", ""))
         _probe_new.append([_t["itemID"], _t.get("cert", ""), _u,
                            (_t.get("title") or "")[:60],
-                           _lab.get("number", ""), _lab.get("variety", ""), today])
+                           _lab.get("number", ""), _lab.get("variety", ""), today, _ct, _cp])
     if _probe_new:
         try:
             from sheet_io import read_tab, write_rows_to_tab

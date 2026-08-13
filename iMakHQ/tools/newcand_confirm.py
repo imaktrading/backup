@@ -109,8 +109,15 @@ def pending_rows(src_rows, done_urls):
         if not url or url in done_urls or url in seen:
             continue
         seen.add(url)
+        # ★2026-08-13 以降の行は台帳に候補タイトル/価格を持つ (NG=6,7列目 / 要調査=8,9列目)。
+        #   それ以前の行は空なので探索cache から復元する (load_items 側)。
+        ct = (r[5] if tab.endswith("NG") and len(r) > 5 else
+              (r[7] if len(r) > 7 else "")) or ""
+        cp = (r[6] if tab.endswith("NG") and len(r) > 6 else
+              (r[8] if len(r) > 8 else "")) or ""
         out.append({"src": tab, "src_itemid": (r[0] or "").strip(),
-                    "src_cert": (r[1] or "").strip(), "url": url})
+                    "src_cert": (r[1] or "").strip(), "url": url,
+                    "saved_title": str(ct).strip(), "saved_price": str(cp).strip()})
     return out
 
 
@@ -272,6 +279,13 @@ def load_items(limit=0):
     items = []
     for p in pending_rows(src_rows, done):
         price, title = u2t.get(p["url"], (None, ""))
+        # 台帳に保存済のタイトルがあればそちらが正 (押した時点の実物)
+        if p.get("saved_title"):
+            title = p["saved_title"]
+            try:
+                price = int(str(p.get("saved_price") or "").replace(",", "")) or price
+            except Exception:
+                pass
         card_no = extract_card_no(title)
         variants = catalog_candidates(title, card_no)
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants})

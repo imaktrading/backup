@@ -1222,7 +1222,11 @@ def _alert_restock_diffs(diffs, skip, restock_cands, today):
             rc = restock_cands[i] if isinstance(i, int) and 0 <= i < len(restock_cands) else {}
             iid, url = (rc.get("itemID") or "").strip(), (d.get("url") or "").strip()
             if iid and url:
-                _new.append([iid, "", url, (rc.get("title") or "")[:60], today])
+                # ★2026-08-13: 候補側のタイトル/価格も残す (NG_CAND_HEADER 7列)。
+                #   url しか無いと、後で「捨てた候補を新規出品の種に戻す」時に何だったか引けない。
+                _ci = _hf.cand_info_by_url(rc.get("candidates"))
+                _ct, _cp = _ci.get(_hf._norm_url(url), ("", ""))
+                _new.append([iid, "", url, (rc.get("title") or "")[:60], today, _ct, _cp])
         if _new:
             _wt(_hf.NG_CAND_TAB,
                 _hf._merge_ng_rows(_rt(_hf.NG_CAND_TAB), _new, _hf.NG_CAND_HEADER))
