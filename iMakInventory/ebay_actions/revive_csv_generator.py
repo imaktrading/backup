@@ -98,11 +98,13 @@ DEFAULT_MAX_PER_CYCLE: Optional[int] = int(
     os.environ.get("INVENTORY_REVIVE_MAX_PER_CYCLE", "50")
 )
 
-# 急増ガードの「新規」判定窓。queue 投入がこの時間内のものを新規とみなす。
+# 急増ガードの「新規」判定窓 (前回実行時刻が取れない初回のみの fallback)。
 # ★ 総数で判定すると、詰まった backlog 自体が毎 cycle ガードを発火させ、永久に 1 件も
 #   復活しない (08-08〜08-13 に実際そうなった)。系統崩壊は「新規が一気に湧く」形で出る。
+# 通常は revive_last_run.json の「前回実行以降」= 1 cycle 分で数える (24h 固定窓だと
+# 4〜8h 間隔の cycle 数回分をまとめて数えてしまい、正常でも閾値を超える)。
 REVIVE_BURST_NEW_WINDOW_H = int(
-    os.environ.get("INVENTORY_REVIVE_BURST_WINDOW_H", "24")
+    os.environ.get("INVENTORY_REVIVE_BURST_WINDOW_H", "8")
 )
 
 _JST_DT_FMT = "%Y/%m/%d %H:%M:%S"
@@ -461,12 +463,43 @@ def _row_key(sheet_label: str, row_index: int) -> tuple:
     return (sheet_label, row_index)
 
 
-def count_new_candidates(candidates: list, cycle_started_at: datetime) -> int:
-    """queue 投入が直近 REVIVE_BURST_NEW_WINDOW_H 時間内の候補数 (急増ガードの判定基準)。
+LAST_REVIVE_RUN_FILE = DECISION_LOG_DIR / "revive_last_run.json"
 
+
+def load_last_revive_run(label: str) -> Optional[datetime]:
+    """前回 revive を実行した時刻 (label 別)。無ければ None。"""
+    try:
+        d = json.loads(LAST_REVIVE_RUN_FILE.read_text(encoding="utf-8"))
+        return datetime.fromisoformat(d[label])
+    except Exception:
+        return None
+
+
+def save_last_revive_run(label: str, ts: datetime) -> None:
+    try:
+        d = {}
+        if LAST_REVIVE_RUN_FILE.exists():
+            d = json.loads(LAST_REVIVE_RUN_FILE.read_text(encoding="utf-8"))
+            if not isinstance(d, dict):
+                d = {}
+        d[label] = ts.isoformat(timespec="seconds")
+        DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        LAST_REVIVE_RUN_FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass          # state が書けなくても cycle は止めない (次回は時間窓 fallback)
+
+
+def count_new_candidates(candidates: list, cycle_started_at: datetime,
+                          since: Optional[datetime] = None) -> int:
+    """急増ガードの判定基準 = 「前回 revive 実行以降に queue へ入った候補」の数。
+
+    ★ 2026-08-13: 当初 24h 固定窓にしたが、cycle は 4〜8h 間隔で回るため 24h では
+      3〜6 cycle 分の到着をまとめて数えてしまい、正常運転でも閾値 10 を軽く超える
+      (13:30 cycle で 57 と数えて全件 HOLD した)。窓は「前回実行以降」= 1 cycle 分が正しい。
+    since が None (初回) のときのみ REVIVE_BURST_NEW_WINDOW_H の時間窓に fallback。
     queue_ts が読めないものは安全側 (新規扱い) に倒す。
     """
-    cutoff = cycle_started_at - timedelta(hours=REVIVE_BURST_NEW_WINDOW_H)
+    cutoff = since or (cycle_started_at - timedelta(hours=REVIVE_BURST_NEW_WINDOW_H))
     n = 0
     for c in candidates:
         ts = (c.get("queue_ts") or "")[:19]
@@ -521,6 +554,15 @@ def collect_from_pending_revive(
     queue = read_pending_revive()
     if not queue:
         return [], [], {}
+    # ★ 2026-08-13: 同一 itemID が cycle ごとに再投入され最大 7 重複していた。重複したまま
+    #   gate に流すと候補数も急増ガードの数え上げも水増しされる。itemID 単位で最新 1 件に畳む。
+    _dedup: dict = {}
+    for q in queue:
+        k = ((q.get("sheet") or ""), (q.get("item_id") or "").strip() or f"row:{q.get('row_index')}")
+        cur = _dedup.get(k)
+        if cur is None or (q.get("ts") or "") >= (cur.get("ts") or ""):
+            _dedup[k] = q
+    queue = list(_dedup.values())
 
     # sheet_state を label ごとに構築 (row_index → 最新 row dict)、
     # sheet_key_map も同時に構築
@@ -789,7 +831,9 @@ def run(
     # 急増ガード: gate 通過数が閾値超 → 全件 HOLD + action_required
     reason = "OK"
     burst_hold = []
-    new_allowed = count_new_candidates(allowed_raw, cycle_started_at)
+    _guard_label = single_sheet_label or sheet.upper()
+    new_allowed = count_new_candidates(allowed_raw, cycle_started_at,
+                                       since=load_last_revive_run(_guard_label))
     if new_allowed > burst:
         print(f"  [★revive burst guard 発火] 新規 {new_allowed} 件 > 閾値 {burst} 件 "
               f"(候補 {len(allowed_raw)} 件)")
@@ -876,6 +920,10 @@ def run(
     print(f"  decision_log: {log_path}")
     if hold_path:
         print(f"  price_hold_log: {hold_path}  (窓口 / リバイスくんが拾う)")
+
+    # 次回の急増ガードの基準時刻 (= ここまでに queue へ入ったものは以後 backlog 扱い)
+    if not dry_run:
+        save_last_revive_run(_guard_label, cycle_started_at)
 
     return {
         "candidates": len(candidates),

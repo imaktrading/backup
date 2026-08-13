@@ -188,3 +188,42 @@ def test_per_cycle_cap_is_bounded_but_not_crippling():
     import ebay_actions.revive_csv_generator as rg
     assert rg.DEFAULT_MAX_PER_CYCLE is not None      # 無制限にはしない
     assert 30 <= rg.DEFAULT_MAX_PER_CYCLE <= 100
+
+
+@pytest.mark.offline
+def test_queue_duplicates_collapse_to_latest():
+    """同 itemID の再投入は最新 1 件に畳む (候補数・ガード数え上げの水増し防止)."""
+    queue = [{"sheet": "SHEET", "row_index": 10, "item_id": "IID1", "url": "https://a",
+              "ts": "2026-08-10T00:00:00"},
+             {"sheet": "SHEET", "row_index": 10, "item_id": "IID1", "url": "https://a",
+              "ts": "2026-08-13T14:00:00"}]
+    rows = [_sheet_row(10, "IID1", "https://a")]
+    cands, skipped, _ = _collect(queue, rows)
+    assert len(cands) == 1
+    assert cands[0]["queue_ts"] == "2026-08-13T14:00:00"      # 最新を採用
+
+
+@pytest.mark.offline
+def test_burst_window_uses_last_run_not_fixed_24h():
+    """新規判定は「前回 revive 実行以降」。24h 固定窓だと数 cycle 分をまとめて数えてしまう."""
+    import ebay_actions.revive_csv_generator as rg
+    now = datetime(2026, 8, 13, 13, 30, 0)
+    last_run = datetime(2026, 8, 13, 9, 30, 0)               # 前 cycle
+    cands = ([{"queue_ts": "2026-08-13T07:30:00"} for _ in range(50)]   # 時間窓内だが前回実行より前
+             + [{"queue_ts": "2026-08-13T10:30:00"} for _ in range(2)])  # 前回実行以降 = 新規
+    assert rg.count_new_candidates(cands, now, since=last_run) == 2
+    # fallback (前回実行が記録されていない初回) は時間窓で数える = 同じ入力でも 52
+    assert rg.count_new_candidates(cands, now) == 52
+
+
+@pytest.mark.offline
+def test_last_run_state_roundtrip(tmp_path):
+    import ebay_actions.revive_csv_generator as rg
+    f = tmp_path / "revive_last_run.json"
+    ts = datetime(2026, 8, 13, 13, 30, 0)
+    with patch.object(rg, "LAST_REVIVE_RUN_FILE", f), \
+         patch.object(rg, "DECISION_LOG_DIR", tmp_path):
+        assert rg.load_last_revive_run("SHEET") is None
+        rg.save_last_revive_run("SHEET", ts)
+        assert rg.load_last_revive_run("SHEET") == ts
+        assert rg.load_last_revive_run("LOW") is None        # label 別に持つ
