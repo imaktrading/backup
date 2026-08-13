@@ -1055,12 +1055,13 @@ def main(csv_path: str | None = None):
         print("\n  🎉 全リスティング問題なし！")
 
     # === Claude AI 総合レビュー ===
-    print(f"\n{'═'*60}")
-    print("  🤖 AI総合レビュー")
-    print(f"{'═'*60}")
-
+    # ★2026-08-13: 停止中は**見出しも出さない**。中身が空なのに枠線+タイトルで3行使うのは
+    #   「無駄なログを消す」の趣旨に反する。
     review = claude_review(rows, all_issues, all_comp_findings, all_gates)
     if review:
+        print(f"\n{'═'*60}")
+        print("  🤖 AI総合レビュー")
+        print(f"{'═'*60}")
         print(f"\n{review}")
 
     print(f"\n{'═'*60}")

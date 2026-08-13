@@ -159,3 +159,29 @@ def test_gate_summary_not_printed_when_market_off():
     src = open(os.path.join(_TCG, "check_csv.py"), encoding="utf-8").read()
     assert "enumerate(all_gates if _market_lookup else [])" in src, "停止中も判定行を出している"
     assert "相場取得は停止中 = GATE判定なし" in src
+
+
+# ---------------------------------------------------------------------------
+# 6. 画面に出す量 (2026-08-13「無駄なログを消す」)
+# ---------------------------------------------------------------------------
+def test_ai_review_header_only_when_there_is_a_review():
+    """中身が無いのに枠線+タイトルで3行使わない。"""
+    src = open(os.path.join(_TCG, "check_csv.py"), encoding="utf-8").read()
+    i = src.index("# === Claude AI 総合レビュー ===")
+    block = src[i:i + 600]
+    assert block.index("review = claude_review") < block.index("AI総合レビュー\"")
+
+
+def test_dup_guard_list_is_opt_in():
+    """毎回同じ顔ぶれの26組を既定で出さない (63行 → 1行)。"""
+    src = open(r"C:\dev\iMak\iMakHQ\tools\dup_guard.py", encoding="utf-8").read()
+    assert 'DUP_GUARD_VERBOSE' in src
+    i = src.index("④ RESTOCK復活")
+    assert 'if _os.environ.get("DUP_GUARD_VERBOSE"):' in src[i:i + 700]
+
+
+def test_scrape_progress_is_one_line_per_card():
+    """1件ごとに改行して2〜3行使っていたのを1行にまとめる。"""
+    src = open(os.path.join(_TCG, "psa_to_csv.py"), encoding="utf-8").read()
+    assert 'print(" 📷2", end="", flush=True)' in src
+    assert 'print(f"    📷 PSA 画像 表+裏 取得 (2 枚)")' not in src

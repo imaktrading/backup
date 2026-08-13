@@ -625,9 +625,15 @@ def audit(refresh_titles=True):
     for f in frozen:
         print(f"    ⚠ row{f['row']:5} {f['itemID']} AN={f['an']:,} M={f['m']:,}  {f['title']}")
     coll = restock_collision(vals, titles)
-    print(f"④ RESTOCK復活で2枠になりうる組(取下げ中に同じカードが居る): {len(coll)}組")
-    for c in coll[:20]:
-        print(f"    - {c['card_key']:22} live={c['live']} 取下げ中={c['suspended']}")
+    # ★2026-08-13: 一覧は毎回同じ顔ぶれ (26組) で、その場で何かする類ではないので
+    #   **既定は件数だけ**。中身を見たい時は DUP_GUARD_VERBOSE=1 を付けて走らせる。
+    #   (「無駄なログを消す」ユーザー指示。63行 → 1行)
+    import os as _os
+    print(f"④ RESTOCK復活で2枠になりうる組(取下げ中に同じカードが居る): {len(coll)}組"
+          + ("" if _os.environ.get("DUP_GUARD_VERBOSE") else "  (一覧は DUP_GUARD_VERBOSE=1 で)"))
+    if _os.environ.get("DUP_GUARD_VERBOSE"):
+        for c in coll[:20]:
+            print(f"    - {c['card_key']:22} live={c['live']} 取下げ中={c['suspended']}")
     # ★2026-08-07: 「同じカードなのに KEY が違う」件数を毎回測る。
     #   カタログの canonical 統合 (EN源/JP源 の product_id 分裂 / alias_of は G-SHOCK 専用で
     #   TCG には0件) を直すかどうかの **判断材料**。実測すると今は

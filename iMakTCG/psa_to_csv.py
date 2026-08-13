@@ -1469,7 +1469,8 @@ def get_psa_data(driver, cert_number):
                 # 2枚取れた時だけ順序(表→裏)を信用する。実サンプルで [0]=表面を確認済。
                 data['CardImageUrlFront'] = card_image_urls[0]
                 data['CardImageUrlBack'] = card_image_urls[1]
-                print(f"    📷 PSA 画像 表+裏 取得 (2 枚)")
+                # ★2026-08-13: 1件ごとに2〜3行使っていたので、呼び手の行末に足す
+                print(" 📷2", end="", flush=True)
             else:
                 # ★2026-07-28: **1枚しか拾えなかった時は表面と断定しない**(fail-closed)。
                 # 実例 cert 150712284: 1枚だけ取れた画像が **裏面**(青いカード裏)だったのに
