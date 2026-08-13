@@ -156,7 +156,7 @@ def audit(categories):
     #      'U' / 'SPカード' / 'LR+' のような値が C:Rarity に出るのを毎日可視化する。
     #    map_drift = filter_map から今その場で計算した値 ≠ stored (契約 v1.2 §1-5 のズレ検知)。
     #      yaml 側が旧短縮コードのまま (pokemon/one_piece/gundam) なら大量に出る = yaml 未同期の指標。
-    rarity_by_cat = defaultdict(lambda: {"raw_stamped": 0, "map_drift": 0})
+    rarity_by_cat = defaultdict(lambda: {"raw_stamped": 0, "map_drift": 0, "unmapped": 0})
 
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
@@ -203,6 +203,11 @@ def audit(categories):
         computed_rarity = _derive_rarity_ebay(conn, r["category"], r_raw)
         if computed_rarity is not None and computed_rarity != r_stored:
             rarity_by_cat[r["category"]]["map_drift"] += 1
+        # unmapped = 生 rarity はあるのに filter_map に無い (= 新弾の新コード等)。
+        #   fail-closed で空欄になり出品されないので「事故」ではないが、放置すると
+        #   そのカードが永久に出ない。yaml に足すべき残件としてここで可視化する。
+        if r_raw and computed_rarity is None and r["category"] != "yugioh_tcg":
+            rarity_by_cat[r["category"]]["unmapped"] += 1
 
     conn.close()
 
@@ -315,6 +320,7 @@ def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
     #    同型の値が C:Rarity に出ていないかを毎日可視化。§6 と同じく可視化のみ・gate にしない。
     total_raw = sum(v["raw_stamped"] for v in rarity_by_cat.values())
     total_md = sum(v["map_drift"] for v in rarity_by_cat.values())
+    total_un = sum(v["unmapped"] for v in rarity_by_cat.values())
     out.append(
         f"\n## 7. rarity 生値焼き付き検知 (絶対数・毎日出す) — "
         f"raw_stamped 合計 {total_raw} 件 / map_drift 合計 {total_md} 件\n"
@@ -330,10 +336,10 @@ def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
     if not rarity_by_cat:
         out.append("(全カテゴリでゼロ)\n")
     else:
-        out.append("| category | raw_stamped | map_drift |\n|---|---:|---:|\n")
+        out.append("| category | raw_stamped | map_drift | unmapped |\n|---|---:|---:|---:|\n")
         for cat in sorted(rarity_by_cat.keys()):
             v = rarity_by_cat[cat]
-            out.append(f"| {cat} | {v['raw_stamped']} | {v['map_drift']} |\n")
+            out.append(f"| {cat} | {v['raw_stamped']} | {v['map_drift']} | {v['unmapped']} |\n")
     return "".join(out)
 
 
@@ -401,7 +407,8 @@ def main():
         f"name_propagate_viol={len(name_viol)} facet_n1_candidates={len(facet_n1)} "
         f"canonical_drift={sum(drift_by_cat.values())} "
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
-        f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} ==="
+        f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
+        f"rarity_unmapped={sum(v['unmapped'] for v in rarity_by_cat.values())} ==="
     )
 
 

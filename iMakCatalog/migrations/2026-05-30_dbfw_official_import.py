@@ -43,6 +43,7 @@ except Exception:
     pass
 
 DB_PATH = str(api._DB_PATH)
+CATEGORY = "dragonball_scg"
 DUMP_DIR = Path("C:/dev/iMak_data/catalog/_dbfw_official_dumps")
 NOW = datetime.now().isoformat()
 
@@ -91,9 +92,13 @@ def _derive_leader_rarity(card_id: str, specs: dict) -> tuple[str, str] | None:
     依頼: requests/2026-08-09_audit_catalog_fix_tcg_response.md 窓口GO §B (再発防止 guard)。
     dbfw 公式 detail は LEADER カードに rarity 欄を出さない仕様。取込時に導出しないと
     2026-07-21 L→'Leader' 決定後の残置分が繰り返し発生する。
-      - alt_art (variant_type='alt_art') → ('L★','L★')  ; ★-strip 経由で SCR + Alt Art
+      - alt_art (variant_type='alt_art') → ('L★', 'Leader')  ; ★ の意味は Features 側
       - base (variant_type 無)          → ('L','Leader')
       - denylist に居る base は None (= 導出しない、fail-closed)
+
+    ★2026-08-13: 旧実装は alt_art に ('L★','L★') を書いていた = **rarity_ebay に生値**。
+    これが cert158452539 の 'L★' → 禁止文字除去で 'L' 1文字 事故の再生産経路だった。
+    rarity_ebay は必ず api.derive_rarity_ebay() を通す (公式 rarity 語彙に ★ は無い)。
     """
     if specs.get("card_type") != "LEADER":
         return None
@@ -101,7 +106,7 @@ def _derive_leader_rarity(card_id: str, specs: dict) -> tuple[str, str] | None:
         return None
     vt = specs.get("variant_type")
     if vt == "alt_art":
-        return ("L★", "L★")
+        return ("L★", api.derive_rarity_ebay(CATEGORY, "L★"))
     # base
     base_pid = card_id.split("_")[0] if card_id else ""
     if base_pid in LEADER_BASE_DERIVE_DENYLIST:

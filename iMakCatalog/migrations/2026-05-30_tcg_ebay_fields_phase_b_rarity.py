@@ -118,20 +118,31 @@ CATEGORY_MAPPING = {
 
 
 def resolve_rarity_ebay(category: str, rarity_raw: str) -> str | None:
+    """rarity 生コード → eBay canonical。**未登録は None (fail-closed)**。
+
+    ★2026-08-13 是正 (ユーザー指示「生コードがそのまま eBay に出るのは問題」):
+    旧実装は最後に `return rarity_raw` していたため、辞書に無いコード
+    ('U' / 'C+' / 'SPカード' / 'L★' 等) が specs.rarity_ebay にそのまま焼かれ、
+    C:Rarity に生コードが出ていた (1,238 行)。新弾取込のたびに再発する経路だったので
+    fallback を廃止し、SSOT である ebay_filter_map (yaml) 一本に寄せる。
+
+    未登録コードは None = 空欄 = 出品側 fail-closed skip。
+    推測でマッピングを作らない (誤出品 > 出品数減 の原則)。
+    """
     if not rarity_raw:
         return None
     rarity_raw = rarity_raw.strip()
-    mapping = CATEGORY_MAPPING.get(category)
-    if mapping is None:  # YGO
-        return rarity_raw  # 既に英語、 そのまま採用
-    # 略語 → ロング
-    if rarity_raw in mapping:
-        return mapping[rarity_raw]
-    # 既に長い英語の可能性 (= 公式 import で投入された "Common" 等)
+    if CATEGORY_MAPPING.get(category, "__missing__") is None:  # YGO = 既に英語
+        return rarity_raw
+    # filter_map (yaml) から導出。マーカー (★/+) は api 側で落とす。
+    derived = api.derive_rarity_ebay(category, rarity_raw)
+    if derived:
+        return derived
+    # 既に canonical 長形が来ている場合はそのまま (公式 import 由来の "Common" 等)
+    mapping = CATEGORY_MAPPING.get(category) or {}
     if rarity_raw in mapping.values():
         return rarity_raw
-    # 不明: そのまま返す (= 後で manual review)
-    return rarity_raw
+    return None  # 未登録 = fail-closed (raw に degrade させない)
 
 
 def process(dry_run: bool):

@@ -81,9 +81,10 @@ class TestBackfillTargets:
 # B. ingest guard の unit test (_derive_leader_rarity)
 # ------------------------------------------------------------------
 class TestIngestGuard:
-    def test_alt_art_leader_derives_Lstar(self):
+    def test_alt_art_leader_derives_canonical_leader(self):
+        """rarity は公式生値 'L★'、rarity_ebay は canonical 'Leader' (2026-08-13 是正)."""
         specs = {"card_type": "LEADER", "variant_type": "alt_art"}
-        assert di._derive_leader_rarity("FB01-070_p1", specs) == ("L★", "L★")
+        assert di._derive_leader_rarity("FB01-070_p1", specs) == ("L★", "Leader")
 
     def test_base_leader_derives_L_Leader(self):
         specs = {"card_type": "LEADER"}
@@ -116,8 +117,9 @@ class TestIngestGuard:
         specs = di._build_specs(entry, existing_specs=None)
         assert specs.get("card_type") == "LEADER"
         assert specs.get("variant_type") == "alt_art"
-        assert specs.get("rarity") == "L★"
-        assert specs.get("rarity_ebay") == "L★"
+        assert specs.get("rarity") == "L★"          # 公式生値はミラーする
+        # 2026-08-13: rarity_ebay は canonical。旧 'L★' は生値漏れの再生産経路だった
+        assert specs.get("rarity_ebay") == "Leader"
         assert "derived" in (specs.get("spec_source") or "")
 
     def test_build_specs_applies_guard_on_leader_base(self):

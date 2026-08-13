@@ -109,12 +109,13 @@ class TestDbState:
 
         report = audit_mod.render(
             [], [], [], [], {}, {},
-            {"dragonball_scg": {"raw_stamped": 0, "map_drift": 0}},
+            {"dragonball_scg": {"raw_stamped": 0, "map_drift": 0, "unmapped": 0}},
             ["dragonball_scg"],
         )
         assert "## 7." in report
         assert "raw_stamped" in report
-        assert "| dragonball_scg | 0 | 0 |" in report
+        assert "unmapped" in report
+        assert "| dragonball_scg | 0 | 0 | 0 |" in report
 
     def test_base_card_has_no_alt_art_feature(self):
         specs = _specs("FB01-071")
