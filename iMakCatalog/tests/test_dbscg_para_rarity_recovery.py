@@ -34,11 +34,14 @@ def test_A_fb04_051_altart_prefers_para():
 
 
 def test_B_star_rarity_normalized_and_features():
-    # L★ → SCR に正規化、Features に 'Alternative Art'
+    # L★ → Leader + Features 'Alternative Art'
+    # (2026-08-13 是正: 公式 rarity 語彙は L/C/UC/R/SR/SCR/PR の 7 値のみで ★ は rarity ではない。
+    #  旧 L★→SCR は「Leader parallel を Secret Rare と名乗る」誤りだった。
+    #  変換は catalog 側 (specs.rarity_ebay) で完了済 = 契約 v1.2 §1-1)
     r = _db("DRAGON BALL SUPER CARD GAME FUSION WORLD JAPANESE AWAKENED PULSE",
             "FB01-071", "SON GOHAN CHILDHOOD ALTERNATE ART")
     assert "★" not in (r.get("rarity") or "")           # ★ 除去
-    assert r["rarity"] == "SCR"                          # L★ → SCR (既存yaml準拠)
+    assert r["rarity"] == "Leader"
     assert "Alternative Art" in (r.get("features") or [])
     # C:Rarity が非空 (fail-closed skip を回避 = 受け入れ条件1)
     assert r["rarity"]

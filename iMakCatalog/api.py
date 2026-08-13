@@ -259,6 +259,28 @@ def derive_set_name_ebay(category: str, set_name_official: Optional[str],
     return None
 
 
+_RARITY_STAR_RE = re.compile(r"[★☆]+\s*$")
+
+
+def derive_rarity_ebay(category: str, rarity_raw: Optional[str]) -> Optional[str]:
+    """公式 rarity コード → eBay canonical 値. filter_map miss は None (fail-closed).
+
+    ★ は **公式の rarity 語彙ではない**。公式 dbs-cardgame.com/fw の cardlist
+    rarity filter は L / C / UC / R / SR / SCR / PR の 7 値のみ (2026-08-13 実取得)。
+    ★ は parallel / alt-art の刷り違いを card list 表示上で示すマーカーなので、
+    base コードに落としてから filter_map を引く (★ の意味は Features 側で表現)。
+
+    derive_set_name_ebay と同じ SSOT 方針: 出品側は specs.rarity_ebay を
+    そのまま消費し、変換しない (契約 v1.2 §1-1)。
+    """
+    if not rarity_raw:
+        return None
+    base = _RARITY_STAR_RE.sub("", rarity_raw.strip()).strip()
+    if not base:
+        return None
+    return to_ebay_value(category, "rarity", base)
+
+
 # B層 verified status (= b_layer_status テーブル. 2026-06-07 新設)
 #   4状態: unverified / verified_auto / verified_manual / disputed
 #   出品ゲートは "強制" を listing/HQ 側が担い、ここは status の "参照" を提供する。

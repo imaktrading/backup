@@ -169,20 +169,23 @@ rarity:
       無い → 'Leader' 出力を正とする(空にすると fail-closed skip で Leader カードが誤除外)。
       旧決定 L→"" は是正。詳細 requests/2026-07-21_dbscg_leader_rarity_keep_response.md
   - source: C
-    ebay: C
+    ebay: Common
   - source: UC
-    ebay: UC
+    ebay: Uncommon
   - source: R
-    ebay: R
+    ebay: Rare
   - source: SR
-    ebay: SR
+    ebay: Super Rare
   - source: SCR
-    ebay: SCR
-  - source: "L★"
-    ebay: SCR
-    note: Leader Parallel
-  - source: "L★★"
-    ebay: SCR
-    note: Leader Super Parallel
+    ebay: Secret Rare
+  - source: PR
+    ebay: Promo
   - source: P
     ebay: Promo
+# ★ (L★ / SR★ / C★ …) は **公式 rarity ではない**。
+# 公式 dbs-cardgame.com/fw の cardlist rarity filter は L/C/UC/R/SR/SCR/PR の 7 値のみ
+# (2026-08-13 実取得)。★ は parallel / alt-art の刷り違いマーカーなので
+# api.derive_rarity_ebay() が base コードへ落としてから本 map を引く。
+# 旧 "L★ → SCR" / "L★★ → SCR" は「Leader parallel を Secret Rare と名乗る」誤りだったため削除
+# (migrations/2026-08-13_dbscg_rarity_ebay_canonical.py で DB 側も削除)。
+# ★ の意味は Features='Alternative Art' で表現する (2026-07-18 HQ 決定を producer 側へ移設)。

@@ -401,20 +401,12 @@ def _apply_ebay_fields(legacy: dict, record: dict, category: str) -> dict:
     legacy["game"] = specs.get("game_ebay") or legacy.get("game") or ""
     legacy["card_size"] = specs.get("card_size_ebay") or "Standard"
 
-    # 2026-07-18 (HQ依頼 dbscg_resolver_rarity_recovery B): DBSCG の parallel/alt-art は
-    #   rarity_ebay が '★' 付き JP コード (L★/SR★/C★ 等) で eBay facet 非正規。
-    #   ★ を除去して base コードへ正規化し、★の意味(alt-art)は Features='Alternative Art' で表現。
-    #   L★(Leader parallel)は base=Leader が rarity 非該当(空)のため、既存 yaml 決定に倣い SCR。
-    if category == "dragonball_scg" and isinstance(legacy.get("rarity"), str) and "★" in legacy["rarity"]:
-        base = legacy["rarity"].replace("★", "").strip()
-        norm = {"L": "SCR", "P": "Promo", "PR": "Promo"}.get(base, base)  # C/UC/R/SR/SCR は base 短縮コードのまま
-        legacy["rarity"] = norm
-        legacy["rarity_ebay"] = norm
-        legacy["rarity_en"] = norm
-        feats = list(legacy.get("features") or [])
-        if "Alternative Art" not in feats:
-            feats.append("Alternative Art")
-        legacy["features"] = feats
+    # 2026-08-13: ★正規化の consumer 側変換を **廃止** (契約 v1.2 §1-1 = 派生値は catalog が権威)。
+    #   ★ は公式 rarity 語彙に無い刷り違いマーカーで、catalog 側 api.derive_rarity_ebay() が
+    #   base canonical へ落とし、★の意味は specs.features の 'Alternative Art' が担う
+    #   (migrations/2026-08-13_dbscg_rarity_ebay_canonical.py で 995 行是正済)。
+    #   ここで再変換すると二重変換になるうえ、旧 L★→SCR は誤り (Leader parallel は Leader)。
+    #   万一 ★ が再流入したら値をそのまま通す = 出品側の記号ガードで fail-closed に落ちる。
     return legacy
 
 

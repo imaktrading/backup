@@ -87,6 +87,19 @@ def _derive_set_name_ebay(conn, category: str, set_name_official, product_id):
     return None
 
 
+_RARITY_STAR_RE = re.compile(r"[★☆]+\s*$")
+
+
+def _derive_rarity_ebay(conn, category: str, rarity_raw):
+    """api.derive_rarity_ebay と同順 (★ を落として filter_map) — 無ければ None."""
+    if not rarity_raw:
+        return None
+    base = _RARITY_STAR_RE.sub("", str(rarity_raw).strip()).strip()
+    if not base:
+        return None
+    return _fmap_lookup(conn, category, "rarity", base)
+
+
 def setcode_era(sc: str):
     sc = sc or ""
     if sc.startswith("SV"):
@@ -136,6 +149,13 @@ def audit(categories):
     empty_by_cat = defaultdict(lambda: {"fail_closed_no_map": 0, "blank": 0, "total_empty": 0})
     # 6. canonical ズレ検知: category -> drift 件数 (state (a) canonical のみ)
     drift_by_cat = defaultdict(int)
+    # 7. rarity 生値焼き付き検知 (2026-08-13): category -> {raw_stamped, map_drift}
+    #    raw_stamped = specs.rarity_ebay が公式生コードのまま (変換されていない) 行。
+    #      2026-08-13 の実害 (rarity_ebay='L★' → 禁止文字除去で 'L' 1文字) と同型で、
+    #      'U' / 'SPカード' / 'LR+' のような値が C:Rarity に出るのを毎日可視化する。
+    #    map_drift = filter_map から今その場で計算した値 ≠ stored (契約 v1.2 §1-5 のズレ検知)。
+    #      yaml 側が旧短縮コードのまま (pokemon/one_piece/gundam) なら大量に出る = yaml 未同期の指標。
+    rarity_by_cat = defaultdict(lambda: {"raw_stamped": 0, "map_drift": 0})
 
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
@@ -173,6 +193,15 @@ def audit(categories):
                                           r["product_id"])
         if computed is not None and computed != e:
             drift_by_cat[r["category"]] += 1
+        # 7. rarity 生値焼き付き / map ズレ (computed=None は filter_map 未登録 = 別問題)
+        r_raw, r_stored = s.get("rarity"), s.get("rarity_ebay")
+        # yugioh は生値が既に英語 canonical ("Secret Rare" 等) で passthrough が正 → 対象外
+        if r_raw and r_stored and r["category"] != "yugioh_tcg" \
+                and str(r_raw).strip() == str(r_stored).strip():
+            rarity_by_cat[r["category"]]["raw_stamped"] += 1
+        computed_rarity = _derive_rarity_ebay(conn, r["category"], r_raw)
+        if computed_rarity is not None and computed_rarity != r_stored:
+            rarity_by_cat[r["category"]]["map_drift"] += 1
 
     conn.close()
 
@@ -202,11 +231,11 @@ def audit(categories):
     name_desync.sort(key=lambda x: x[0])
 
     return (era_mismatch, inconsistent, none_list, name_desync,
-            dict(empty_by_cat), dict(drift_by_cat))
+            dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat))
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
-           drift_by_cat, categories):
+           drift_by_cat, rarity_by_cat, categories):
     out = []
     cat_s = ",".join(categories) if categories else "all"
     out.append(f"# set_name_ebay integrity audit (cat={cat_s})\n")
@@ -279,6 +308,31 @@ def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
         out.append("| category | drift |\n|---|---:|\n")
         for cat in sorted(drift_by_cat.keys()):
             out.append(f"| {cat} | {drift_by_cat[cat]} |\n")
+
+    # 7. rarity 生値焼き付き検知 (2026-08-13 追加)
+    #    2026-08-13 の実害 (cert158452539: rarity_ebay='L★' → 禁止文字除去で 'L' の1文字) と
+    #    同型の値が C:Rarity に出ていないかを毎日可視化。§6 と同じく可視化のみ・gate にしない。
+    total_raw = sum(v["raw_stamped"] for v in rarity_by_cat.values())
+    total_md = sum(v["map_drift"] for v in rarity_by_cat.values())
+    out.append(
+        f"\n## 7. rarity 生値焼き付き検知 (絶対数・毎日出す) — "
+        f"raw_stamped 合計 {total_raw} 件 / map_drift 合計 {total_md} 件\n"
+    )
+    out.append(
+        "- **raw_stamped** = specs.rarity_ebay が公式生コードのまま (= 変換されていない)。"
+        "'U' / 'LR+' / 'SPカード' 等がそのまま C:Rarity に出る = 2026-08-13 実害と同型。**要対応**。\n"
+        "- **map_drift** = derive_rarity_ebay(cat, specs.rarity) ≠ stored。"
+        "yaml/filter_map が旧短縮コードのままだと大量に出る (= yaml 未同期の指標)。\n"
+        "★ は公式 rarity 語彙に無い刷り違いマーカーなので落としてから引く"
+        "(公式 dbs-cardgame.com/fw の rarity filter = L/C/UC/R/SR/SCR/PR の 7 値, 2026-08-13 実取得)。\n"
+    )
+    if not rarity_by_cat:
+        out.append("(全カテゴリでゼロ)\n")
+    else:
+        out.append("| category | raw_stamped | map_drift |\n|---|---:|---:|\n")
+        for cat in sorted(rarity_by_cat.keys()):
+            v = rarity_by_cat[cat]
+            out.append(f"| {cat} | {v['raw_stamped']} | {v['map_drift']} |\n")
     return "".join(out)
 
 
@@ -300,9 +354,9 @@ def main():
     print(f"{_START_MARK} {ts} (cat={cat_s}) ===")
 
     (era_mismatch, inconsistent, none_list, name_desync,
-     empty_by_cat, drift_by_cat) = audit(categories)
+     empty_by_cat, drift_by_cat, rarity_by_cat) = audit(categories)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
-                    empty_by_cat, drift_by_cat, categories or [])
+                    empty_by_cat, drift_by_cat, rarity_by_cat, categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)
@@ -344,7 +398,9 @@ def main():
         f"{_END_MARK}: era={len(era_mismatch)} inconsistent={len(inconsistent)} "
         f"none_src={len(none_list)} name_desync={len(name_desync)} "
         f"name_propagate_viol={len(name_viol)} facet_n1_candidates={len(facet_n1)} "
-        f"canonical_drift={sum(drift_by_cat.values())} ==="
+        f"canonical_drift={sum(drift_by_cat.values())} "
+        f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
+        f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} ==="
     )
 
 

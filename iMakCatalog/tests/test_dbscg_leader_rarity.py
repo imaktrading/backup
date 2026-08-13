@@ -4,7 +4,10 @@
 - eBay Rarity facet(cat 183454)は FREE_TEXT で正規57値に Leader 相当が無い
   → 'Leader' 出力が正 (空にすると fail-closed skip で Leader カード誤除外)。
 - yaml `dragonball.yaml` の旧 `L→\"\"` は是正済 (L→Leader)。
-- L★ (parallel) は 7/18 決定どおり SCR + Features='Alternative Art' のまま (変更なし)。
+- L★ (parallel) は **2026-08-13 に SCR → Leader へ再是正**。公式 (dbs-cardgame.com/fw) の
+  rarity 語彙は L/C/UC/R/SR/SCR/PR の 7 値のみで ★ は rarity ではない (刷り違いマーカー)。
+  ★ の意味は Features='Alternative Art' が担う。
+  詳細 requests/2026-08-13_dbscg_rarity_ebay_raw_values_response.md
 """
 from __future__ import annotations
 
@@ -26,7 +29,12 @@ class TestLeaderRarityYaml(unittest.TestCase):
         data = loader.load_yaml(loader.YAML_DIR / "dragonball.yaml")
         m = {e["source"]: e["ebay"] for e in data["rarity"]}
         self.assertEqual(m["L"], "Leader")   # 旧 L→"" は Leader skip を生むため是正済
-        self.assertEqual(m["L★"], "SCR")     # parallel は 7/18 決定のまま不変
+        # ★ は公式 rarity ではない → yaml に ★ エントリを持たない (2026-08-13)
+        self.assertNotIn("L★", m)
+        self.assertNotIn("L★★", m)
+        # 短縮コードのままだった値も eBay master 実在値へ (2026-08-13)
+        self.assertEqual(m["C"], "Common")
+        self.assertEqual(m["SCR"], "Secret Rare")
 
 
 class TestLeaderCardsNotSkipped(unittest.TestCase):

@@ -159,13 +159,29 @@ class TestLegacyDictAltArtLeader:
             },
         }
 
-    def test_lstar_yields_scr_and_alternative_art(self):
+    def test_altart_leader_comes_from_catalog_not_consumer(self):
+        """2026-08-13: 変換は catalog 側で完了済 → consumer は再変換しない (契約 v1.2 §1-1).
+
+        alt-art LEADER の正は rarity_ebay='Leader' + Features='Alternative Art'。
+        両方 specs に入った状態で来るので、_to_legacy_dict_dragonball は素通しでよい。
+        """
         import psa_to_csv as pc  # type: ignore
-        rec = self._make_record("L★", "L★")
+        rec = self._make_record("L★", "Leader")
+        rec["specs"]["features"] = ["Alternative Art"]
         legacy = pc._to_legacy_dict_dragonball(rec)
-        assert legacy["rarity"] == "SCR"
-        assert legacy["rarity_ebay"] == "SCR"
+        assert legacy["rarity"] == "Leader"
+        assert legacy["rarity_ebay"] == "Leader"
         assert "Alternative Art" in (legacy.get("features") or [])
+
+    def test_consumer_does_not_reconvert_star(self):
+        """★ が再流入しても consumer は勝手に変換しない (旧 L★→SCR は誤りだった).
+
+        値はそのまま流れ、出品側の記号ガードで fail-closed に落ちる = 誤出品しない。
+        """
+        import psa_to_csv as pc  # type: ignore
+        legacy = pc._to_legacy_dict_dragonball(self._make_record("L★", "L★"))
+        assert legacy["rarity"] == "L★"
+        assert "SCR" not in str(legacy.get("rarity_ebay"))
 
     def test_L_yields_Leader_no_alt_art_feature(self):
         import psa_to_csv as pc  # type: ignore
@@ -194,13 +210,18 @@ REQUIRES_DB = pytest.mark.skipif(
 
 @REQUIRES_DB
 class TestFB07097P1LookupIntegration:
-    """cert 158452540 相当 (SHENRON alt art) が SCR + Alternative Art で返ること.
+    """cert 158452540 相当 (SHENRON alt art) が Leader + Alternative Art で返ること.
+
+    2026-08-13 是正: 期待値を SCR → Leader に変更。公式 rarity 語彙 (L/C/UC/R/SR/SCR/PR)
+    に ★ は無く、L★ は Leader の刷り違い。★ の意味は Features='Alternative Art' が担う。
+    requests/2026-08-13_dbscg_rarity_ebay_raw_values_response.md
+
 
     注: このテストは backfill 適用後にのみ pass する (それ以前は skip 相当の空を返す)。
     Backfill 未適用時は xfail ではなく skip として扱う (テストが「そこにあること」自体を確定させる)。
     """
 
-    def test_shenron_alt_art_lookup_returns_scr(self):
+    def test_shenron_alt_art_lookup_returns_leader(self):
         import psa_to_csv as pc  # type: ignore
         from iMakCatalog import api
 
@@ -218,5 +239,5 @@ class TestFB07097P1LookupIntegration:
         )
         assert r is not None
         assert r["card_id"] == "FB07-097_p1"
-        assert r.get("rarity_ebay") == "SCR"
+        assert r.get("rarity_ebay") == "Leader"
         assert "Alternative Art" in (r.get("features") or [])
