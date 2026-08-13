@@ -259,23 +259,33 @@ def derive_set_name_ebay(category: str, set_name_official: Optional[str],
     return None
 
 
-_RARITY_STAR_RE = re.compile(r"[★☆]+\s*$")
+# 刷り違い (parallel / alt-art) マーカー。**公式の rarity 語彙ではない**ので、
+# filter_map を引く前に落とす。意味は Features 側 ('Alternative Art') で表現する。
+#   ★ / ★★  … dragonball_scg (公式 dbs-cardgame.com/fw の rarity filter =
+#               L/C/UC/R/SR/SCR/PR の 7 値のみ, 2026-08-13 実取得)
+#   + / ++   … gundam_tcg (公式 gundam-gcg.com の rarity filter =
+#               C/U/R/LR/LKC/LKU/LKR/P の 8 値のみ, 2026-08-13 実取得)
+_RARITY_VARIANT_MARK_RE = re.compile(r"[★☆+]+\s*$")
+
+
+def has_rarity_variant_mark(rarity_raw: Optional[str]) -> bool:
+    """rarity 生値に刷り違いマーカー (★ / +) が付いているか."""
+    return bool(rarity_raw) and bool(_RARITY_VARIANT_MARK_RE.search(rarity_raw.strip()))
 
 
 def derive_rarity_ebay(category: str, rarity_raw: Optional[str]) -> Optional[str]:
     """公式 rarity コード → eBay canonical 値. filter_map miss は None (fail-closed).
 
-    ★ は **公式の rarity 語彙ではない**。公式 dbs-cardgame.com/fw の cardlist
-    rarity filter は L / C / UC / R / SR / SCR / PR の 7 値のみ (2026-08-13 実取得)。
-    ★ は parallel / alt-art の刷り違いを card list 表示上で示すマーカーなので、
-    base コードに落としてから filter_map を引く (★ の意味は Features 側で表現)。
+    マーカー (★ / +) を落としてから filter_map を引く。miss を raw に degrade
+    させないのが要点で、生コード ('U' / 'LR+' / 'SPカード') が C:Rarity に出る事故
+    (2026-08-13 cert158452539) はこの degrade が原因だった。
 
     derive_set_name_ebay と同じ SSOT 方針: 出品側は specs.rarity_ebay を
     そのまま消費し、変換しない (契約 v1.2 §1-1)。
     """
     if not rarity_raw:
         return None
-    base = _RARITY_STAR_RE.sub("", rarity_raw.strip()).strip()
+    base = _RARITY_VARIANT_MARK_RE.sub("", rarity_raw.strip()).strip()
     if not base:
         return None
     return to_ebay_value(category, "rarity", base)

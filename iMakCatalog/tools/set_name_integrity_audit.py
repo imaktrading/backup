@@ -87,11 +87,12 @@ def _derive_set_name_ebay(conn, category: str, set_name_official, product_id):
     return None
 
 
-_RARITY_STAR_RE = re.compile(r"[★☆]+\s*$")
+# api._RARITY_VARIANT_MARK_RE と同じ (★=dragonball / +=gundam の刷り違いマーカー)
+_RARITY_STAR_RE = re.compile(r"[★☆+]+\s*$")
 
 
 def _derive_rarity_ebay(conn, category: str, rarity_raw):
-    """api.derive_rarity_ebay と同順 (★ を落として filter_map) — 無ければ None."""
+    """api.derive_rarity_ebay と同順 (マーカーを落として filter_map) — 無ければ None."""
     if not rarity_raw:
         return None
     base = _RARITY_STAR_RE.sub("", str(rarity_raw).strip()).strip()

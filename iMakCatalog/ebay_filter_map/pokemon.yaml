@@ -347,41 +347,51 @@ rarity:
       ひかるポケモン (SM3+ ひかる伝説 等)。公式は rarity 画像 ic_hikaru.gif のみで文字コードを持たず、
       小売表記 [H] を JP コードとして採用 (2026-07-20)。eBay facet は 'Shiny Holo Rare'
       (× 'Shining Holo Rare')。
+  # 2026-08-13: 短縮コードのままだった値を canonical 化 (products 側は既に長形で保持していて
+  # yaml だけ旧短縮のまま = 乖離していた)。生コードが C:Rarity に出る事故の再発防止。
   - source: C
-    ebay: C
-    note: Common
+    ebay: Common
   - source: U
-    ebay: U
-    note: Uncommon
+    ebay: Uncommon
   - source: R
-    ebay: R
-    note: Rare
+    ebay: Rare
   - source: RR
-    ebay: RR
-    note: Double Rare (V/ex)
+    ebay: Double Rare
+    note: V/ex
   - source: RRR
-    ebay: RRR
-    note: Triple Rare
+    ebay: Triple Rare
   - source: SR
-    ebay: SR
-    note: Super Rare
+    ebay: Super Rare
   - source: SAR
-    ebay: SAR
-    note: Special Art Rare
+    ebay: Special Art Rare
   - source: AR
-    ebay: AR
-    note: Art Rare
+    ebay: Art Rare
   - source: UR
-    ebay: UR
-    note: Ultra Rare
+    ebay: Ultra Rare
   - source: HR
-    ebay: HR
-    note: Hyper Rare
+    ebay: Hyper Rare
+  - source: S
+    ebay: Shiny Rare
+  - source: SSR
+    ebay: Secret Super Rare
+  - source: CHR
+    ebay: Character Rare
+  - source: CSR
+    ebay: Character Super Rare
+  - source: TR
+    ebay: Trainer Rare
   - source: MA
-    ebay: MA
-    note: Mega Attack Rare
-  - source: MUR
-    ebay: MUR
-    note: Mega Ultra Rare
+    ebay: Master Ball
   - source: P
     ebay: Promo
+  # scraper 由来の別表記 (rarity 画像 ic_rare_c_c.gif 等の type marker 付き)。
+  # 本来は '_' 前だけを rarity とするが、取りこぼした行が残っているため alias で吸収する。
+  - source: C_C
+    ebay: Common
+  - source: U_C
+    ebay: Uncommon
+  - source: R_C
+    ebay: Rare
+  # MUR / SS / BWR / C2 / U2 は公式の長形名が確認できていないため **意図的に未登録**
+  # (= derive_rarity_ebay が None を返し C:Rarity 空欄 → 出品側で fail-closed skip)。
+  # 推測でマッピングを作らない (誤出品 > 出品数減 の原則)。

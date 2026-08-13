@@ -114,27 +114,31 @@ set_code:
 # 過去の bandai_tcg_plus.py GUNDAM_RARITY_MAP を参考
 # ============================================================================
 rarity:
+  # 公式 gundam-gcg.com の rarity filter = C / U / R / LR / LKC / LKU / LKR / P の 8 値のみ
+  # (2026-08-13 実取得)。'+' は刷り違い (parallel) マーカーで公式 rarity ではないため
+  # api.derive_rarity_ebay() が落としてから本 map を引く (意味は Features='Alternative Art')。
   - source: C
-    ebay: C
-    note: Common
+    ebay: Common
   - source: U
-    ebay: UC
-    note: Uncommon (Bandai 'U' → eBay 'UC')
+    ebay: Uncommon
   - source: R
-    ebay: R
-  - source: SR
-    ebay: SR
+    ebay: Rare
   - source: LR
-    ebay: LR
-    note: Legend Rare
+    ebay: Legend Rare
+    note: >-
+      公式 EN 商品ページ (gundam-gcg.com/en/products/gd01.html, 2026-08-13 実取得) が
+      "Legend Rare" と明記。旧 'Leader Rare' は One Piece の LR の意味を持ち込んだ誤りで是正。
+      Gundam に Leader カードは存在しない (Unit/Pilot/Command/Base)。
+  - source: SR
+    ebay: Super Rare
   - source: SPLR
-    ebay: SPLR
-    note: Special Legend Rare
-  - source: "SPLR+"
-    ebay: SPLR
-    note: SPLR variant + 印
-  - source: "LR+"
-    ebay: LR
-    note: LR parallel
+    ebay: Legend Rare
+    note: SP 商品収録の LR。刷り違いなので rarity は LR、SP の別は Features/set 側で表現
+  - source: SPR
+    ebay: Rare
+    note: SP 商品収録の R
+  - source: SPU
+    ebay: Uncommon
+    note: SP 商品収録の U
   - source: P
     ebay: Promo

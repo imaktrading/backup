@@ -347,14 +347,22 @@ class TestEbayFilterMap:
         r = api.lookup("one_piece_tcg", "ST16-005")
         assert r["set_name"] == "GREEN Uta"
 
-    def test_rarity_leader_returns_empty(self):
-        """L (Leader) → eBay rarity は空欄."""
-        assert api.to_ebay_value("one_piece_tcg", "rarity", "L") == ""
+    def test_rarity_leader_is_not_empty(self):
+        """L (Leader) → 'Leader'.
 
-    def test_rarity_short_codes_pass_through(self):
-        # TCG+ API は既に eBay 形式の short code を返す = identity
-        for r in ("C", "UC", "R", "SR"):
-            assert api.to_ebay_value("one_piece_tcg", "rarity", r) == r
+        2026-08-13 是正: 旧 L→"" (空欄) は dragonball で 2026-07-21 に是正したのと同型の地雷。
+        空欄は fail-closed skip になり Leader カードを丸ごと落とす。
+        """
+        assert api.to_ebay_value("one_piece_tcg", "rarity", "L") == "Leader"
+
+    def test_rarity_short_codes_are_canonical(self):
+        """短縮コードは eBay master 実在値へ変換する (identity は生値漏れの原因だった).
+
+        2026-08-13 是正: 旧 identity (C→C) のままだと C:Rarity に 'C' がそのまま出る。
+        """
+        for code, expected in (("C", "Common"), ("UC", "Uncommon"),
+                               ("R", "Rare"), ("SR", "Super Rare")):
+            assert api.to_ebay_value("one_piece_tcg", "rarity", code) == expected
 
     def test_unmapped_set_uses_raw_when_no_mapping(self):
         """yaml にも regex fallback にも該当しない値は raw を返す (None ではなく).

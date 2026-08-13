@@ -676,29 +676,37 @@ set_code:
 #     L (Leader) は card type なので rarity としては空欄。
 # ============================================================================
 rarity:
+  # 公式 cardlist (onepiece-cardgame.com / asia-en, 2026-08-13 実取得) の rarity 表示は
+  # C / UC / R / SR / SEC / L / SPカード(EN: "SP CARD") の 7 種。
   - source: L
-    ebay: ""
-    note: Leader = card type, not rarity → eBay rarity 欄は空欄
+    ebay: Leader
+    note: >-
+      2026-08-13 是正。旧 L→"" (空欄) は dragonball で 2026-07-21 に是正したのと同型の地雷
+      (空欄は fail-closed skip で Leader カードを丸ごと落とす)。products 側は既に 'Leader'。
   - source: C
-    ebay: C
+    ebay: Common
   - source: UC
-    ebay: UC
+    ebay: Uncommon
   - source: R
-    ebay: R
+    ebay: Rare
   - source: SR
-    ebay: SR
+    ebay: Super Rare
   - source: SEC
-    ebay: SEC
+    ebay: Secret Rare
   - source: P
     ebay: Promo
     note: Bandai "P" = eBay "Promo"
   - source: TR
-    ebay: TR
-    note: Treasure Rare
+    ebay: Treasure Rare
   - source: Special
-    ebay: SEC
-    note: Bandai "Special" = eBay "SEC" (parallel/alt-art 系)
+    ebay: Special
   - source: SP
-    ebay: SEC
+    ebay: Special
+  - source: SPカード
+    ebay: Special
+    note: >-
+      公式 JP 表示 "SPカード" / 公式 EN 表示 "SP CARD" (asia-en cardlist, 2026-08-13 実取得)。
+      eBay master (cat 183454) の canonical 57 値に 'SP CARD' は無く 'Special' が実在値なので
+      'Special' を採用。旧: 生値 'SPカード' が C:Rarity にそのまま出ていた (118件)。
   - source: DON!!
     ebay: DON!!
