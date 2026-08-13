@@ -248,8 +248,8 @@ def test_out_header_is_paste_ready():
 
     見出しが貼り付け先の列名になっていること + 自動 append をしていないこと。
     """
-    assert N.OUT_HEADER[:7] == ["用途", "HIGH転記", "A列:仕入元URL", "C列:タイトル",
-                                "I列:cert", "R列:カテゴリ", "AI列:KEY"]
+    assert N.OUT_HEADER[:8] == ["用途", "HIGH転記", "A列:仕入元URL", "C列:タイトル",
+                                "M列:仕入価格(円)", "I列:cert", "R列:カテゴリ", "AI列:KEY"]
     src = open(os.path.join(_TOOLS, "newcand_confirm.py"), encoding="utf-8").read()
     # 商品管理シートは **読むだけ** (転記済チェック用)。書き込み系は一切呼ばない。
     assert "append_row" not in src
@@ -271,9 +271,9 @@ def test_save_builds_paste_row(monkeypatch):
     row = written[N.OUT_TAB][0]
     assert row[0] == N.USE_LIST                          # 用途
     assert row[2] == "https://m/0"                       # A列 = 仕入元URL
-    assert row[4] == "147704361"                         # I列 = cert
-    assert row[5] == "TCG"                               # R列 = カテゴリ
-    assert row[6] == "one_piece_tcg:EB03-053_p1"         # AI列 = canonical KEY
+    assert row[5] == "147704361"                         # I列 = cert
+    assert row[6] == "TCG"                               # R列 = カテゴリ
+    assert row[7] == "one_piece_tcg:EB03-053_p1"         # AI列 = canonical KEY
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +328,7 @@ def test_saved_row_leaves_cert_empty(monkeypatch):
     N.save(items, {"picks": [{"idx": 0, "pid": "EB03-053", "category": "one_piece_tcg",
                               "cert": ""}],
                    "catalog_reqs": [], "outs": [], "holds": [], "card_nos": []})
-    assert written[N.OUT_TAB][0][4] == "", "I列:cert は空のまま (出品直前に入れる)"
+    assert written[N.OUT_TAB][0][5] == "", "I列:cert は空のまま (出品直前に入れる)"
 
 
 # ---------------------------------------------------------------------------
@@ -373,16 +373,16 @@ def test_gone_reason_is_limited_to_unidentifiable():
 # 12. 同じカードは1行だけ『出品』/ 入力番号を依頼に反映 (2026-08-13)
 # ---------------------------------------------------------------------------
 def test_mark_use_keeps_one_listing_per_card():
-    rows = [["", "", "u1", "t", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"],
-            ["", "", "u2", "t", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"],
-            ["", "", "u3", "t", "", "TCG", "one_piece_tcg:OP07-047", "OP07-047", "i", "d"]]
+    rows = [["", "", "u1", "t", "", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"],
+            ["", "", "u2", "t", "", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"],
+            ["", "", "u3", "t", "", "", "TCG", "one_piece_tcg:OP07-047", "OP07-047", "i", "d"]]
     out = N.mark_use(rows, listed_keys=())
     assert [r[0] for r in out] == [N.USE_LIST, N.USE_AUX, N.USE_LIST]
 
 
 def test_mark_use_respects_already_saved_keys():
     """前回の走行で出品にした KEY は、今回は補URL に回す (二重出品を作らない)。"""
-    rows = [["", "", "u9", "t", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"]]
+    rows = [["", "", "u9", "t", "", "", "TCG", "one_piece_tcg:EB03-053", "EB03-053", "i", "d"]]
     out = N.mark_use(rows, listed_keys={"one_piece_tcg:EB03-053"})
     assert out[0][0] == N.USE_AUX
 
@@ -424,8 +424,8 @@ def test_catalog_request_skipped_when_typed_number_exists_in_catalog(monkeypatch
 # 13. 「どこへ行ったか」を台帳で見えるようにする (2026-08-13)
 # ---------------------------------------------------------------------------
 def test_status_of_reports_destination():
-    out = [[N.USE_LIST, "済", "https://m/a", "t", "", "TCG", "k", "p", "i", "d"],
-           [N.USE_AUX, "", "https://m/b", "t", "", "TCG", "k", "p", "i", "d"]]
+    out = [[N.USE_LIST, "済", "https://m/a", "t", "", "", "TCG", "k", "p", "i", "d"],
+           [N.USE_AUX, "", "https://m/b", "t", "", "", "TCG", "k", "p", "i", "d"]]
     ng = [["https://m/c", "カタログ未収録 → 追加依頼を起票", "d", "t"]]
     assert "HIGH転記済" in N.status_of("https://m/a", out, ng)
     assert "補URL" in N.status_of("https://m/b", out, ng)
@@ -435,5 +435,43 @@ def test_status_of_reports_destination():
 
 
 def test_status_of_ignores_url_noise():
-    out = [[N.USE_LIST, "", "https://jp.mercari.com/item/m1/", "t", "", "TCG", "k", "p", "i", "d"]]
+    out = [[N.USE_LIST, "", "https://jp.mercari.com/item/m1/", "t", "", "", "TCG", "k", "p",
+            "i", "d"]]
     assert N.status_of("https://jp.mercari.com/item/m1?utm=x", out, []) != ""
+
+
+# ---------------------------------------------------------------------------
+# 14. 価格 (2026-08-13 ユーザー指摘「価格がないけど大丈夫かな」)
+# ---------------------------------------------------------------------------
+def test_out_header_has_price_column():
+    assert "M列:仕入価格(円)" in N.OUT_HEADER
+
+
+def test_save_writes_candidate_price(monkeypatch):
+    written = {}
+    monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
+    monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    items = [_item(0, [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami",
+                        "image": ""}])]
+    items[0]["price"] = 19999
+    N.save(items, {"picks": [{"idx": 0, "pid": "EB03-053", "category": "one_piece_tcg",
+                              "cert": ""}],
+                   "catalog_reqs": [], "outs": [], "holds": [], "card_nos": []})
+    assert written[N.OUT_TAB][0][4] == 19999, "M列に候補の価格が入っていない"
+
+
+def test_generator_skips_rows_without_cost():
+    """★価格が1つも無い行は出品しない (fail-closed)。$100固定で出す方が危険。"""
+    src = open(r"C:\dev\iMak\iMakTCG\psa_to_csv.py", encoding="utf-8").read()
+    assert "_skipped_nocost" in src
+    assert "仕入値なしガード" in src
+
+
+def test_migrate_out_rows_requires_exact_header():
+    """★列を足した時、先頭2列だけ見て素通りさせない (実際に列ズレを起こした)。"""
+    old = [["用途", "HIGH転記", "A列:仕入元URL", "C列:タイトル", "I列:cert", "R列:カテゴリ",
+            "AI列:KEY", "product_id", "元itemID", "日付"],
+           ["出品", "", "u", "t", "", "TCG", "k", "p", "i", "d"]]
+    out = N.migrate_out_rows(old)
+    assert len(out[0]) == len(N.OUT_HEADER), "新形式の列数に揃っていない"
+    assert out[0][6] == "TCG", "R列の位置がずれている"

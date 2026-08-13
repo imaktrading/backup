@@ -55,11 +55,16 @@ OUT_TAB = "新規出品候補"
 #   コピペする」。なので **貼り付け先の列名をそのまま見出しにする**。
 #   商品管理シート: A=仕入元URL / B=itemID(出品後に入る=空のまま) / C=タイトル /
 #                   I=cert / R=カテゴリ('TCG') / AI=canonical KEY
-OUT_HEADER = ["用途", "HIGH転記", "A列:仕入元URL", "C列:タイトル", "I列:cert", "R列:カテゴリ",
-              "AI列:KEY", "product_id", "元itemID", "日付"]
+OUT_HEADER = ["用途", "HIGH転記", "A列:仕入元URL", "C列:タイトル", "M列:仕入価格(円)",
+              "I列:cert", "R列:カテゴリ", "AI列:KEY", "product_id", "元itemID", "日付"]
+# ★2026-08-13 ユーザー指摘「価格がないけど大丈夫かな」。大丈夫ではない:
+#   商品管理シートに **価格(M/F/N)が無い行は、出品くんが $100 固定**で値付けする
+#   (`_cost_plus_price(None)` → 100.00)。¥40,000 のカードが $100 で出たら大赤字。
+#   候補の価格は分かっているので M列(現在価格) 用に出す。M は監視くんが毎cycle
+#   最安で上書きする列なので、seed として入れておけば以降は自動追随する。
 # ★2026-08-13 ユーザー指摘「HIGHへコピーしたかどうか分からなくない?」。
 #   商品管理シートの A列(仕入元URL) と突き合わせて **自動で印を付ける** (手でチェックしない)。
-OUT_URL_COL, OUT_KEY_COL, OUT_DONE_COL = 2, 6, 1
+OUT_URL_COL, OUT_KEY_COL, OUT_DONE_COL = 2, 7, 1
 # 元台帳 (補URL候補NG / 補URL要調査) に付ける結論の印。「どこへ行ったか」がその場で分かる。
 SRC_STATUS_HEADER = "状態"
 # 「用途」: 同じカード(KEY)が複数あっても **出品するのは1枚だけ**。
@@ -651,13 +656,17 @@ def migrate_out_rows(cur):
     """
     if not cur or not cur[0]:
         return []
-    head = cur[0]
-    if head[:2] == OUT_HEADER[:2]:
-        return cur[1:]
-    if head[0] == OUT_HEADER[0]:            # 用途はあるが HIGH転記 が無い (2026-08-13 途中形)
-        return [[r[0], ""] + list(r[1:]) for r in cur[1:] if r]
+    head = list(cur[0])
+    if head == OUT_HEADER:          # ★完全一致で判定する。先頭2列だけ見ると
+        return cur[1:]              #   列を足した時に古い行を素通りさせる (2026-08-13 実際に起きた)
+    if head[:2] == ["用途", "HIGH転記"] and "M列:仕入価格(円)" not in head:
+        # 価格列を足す前の形 (2026-08-13 途中形) → 4列目に空を差し込む
+        return [list(r[:4]) + [""] + list(r[4:]) for r in cur[1:] if r]
+    if head[0] == OUT_HEADER[0]:            # 用途はあるが HIGH転記 が無い
+        return [[r[0], ""] + list(r[1:4]) + [""] + list(r[4:]) for r in cur[1:] if r]
     # 旧形式 (用途も無い)
-    return mark_use([["", ""] + list(r) for r in cur[1:] if r], listed_keys=())
+    return mark_use([["", ""] + list(r[:3]) + [""] + list(r[3:]) for r in cur[1:] if r],
+                    listed_keys=())
 
 
 def already_listed_keys():
@@ -777,8 +786,9 @@ def save(items, res):
         if not it:
             continue
         key = f"{p['category']}:{p['pid']}" if p["category"] else p["pid"]
-        picks.append(["", "", it["url"], (it["title"] or "")[:60], p["cert"], SHEET_CATEGORY,
-                      key, p["pid"], it["src_itemid"], today])
+        picks.append(["", "", it["url"], (it["title"] or "")[:60],
+                      (it.get("price") if isinstance(it.get("price"), int) else ""),
+                      p["cert"], SHEET_CATEGORY, key, p["pid"], it["src_itemid"], today])
     picks = mark_use(picks, already_listed_keys())
     if picks:
         _append_tab(OUT_TAB, OUT_HEADER, picks)

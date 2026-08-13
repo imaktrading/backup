@@ -2714,6 +2714,7 @@ def load_targets_from_sheet_psa():
     title_map = {}
     _skipped_listed = 0
     _skipped_cert = []
+    _skipped_nocost = []
     for row in all_values[1:]:  # header 除外
         url      = (row[0]  if len(row) > 0  else '').strip()  # A
         item_id  = (row[1]  if len(row) > 1  else '').strip()  # B (空=未処理)
@@ -2753,13 +2754,24 @@ def load_targets_from_sheet_psa():
         # K 列 NO-GO sentinel (= 過去 cycle 価格 NO-GO 除外で書込) → 抽出対象外
         if no_go:
             continue
+        # 仕入値: N(SSOT)→ M(現在価格)→ F(取得時) の優先。N#REF!/空でも M(最新)を拾う。
+        _cost = _psa_cost_from_row(cost_n, price_m, price_f)
+        # ★2026-08-13: 仕入値が1つも無い行は **出品しない** (fail-closed)。
+        #   従来は cost なしでも通り、価格が $100 固定になっていた
+        #   (`_cost_plus_price(None)` → 100.00)。¥40,000 のカードが $100 で出れば大赤字。
+        #   実測: 未出品 356行のうち価格が1つも無い行は **0件** = 正常運用では影響しない。
+        #   手で行を足した時 (新規出品候補からの転記等) の取りこぼしを止めるためのガード。
+        if _cost is None:
+            _skipped_nocost.append(cert)
+            continue
         cert_numbers.append(cert)
         url_map[cert] = url
         title_map[cert] = title
-        # 仕入値: N(SSOT)→ M(現在価格)→ F(取得時) の優先。N#REF!/空でも M(最新)を拾う。
-        _cost = _psa_cost_from_row(cost_n, price_m, price_f)
-        if _cost is not None:
-            cost_map[cert] = _cost
+        cost_map[cert] = _cost
+    if _skipped_nocost:
+        print(f"  🚫 仕入値なしガード: F/M/N が全て空 → 除外 {len(_skipped_nocost)}件 "
+              f"→ {_skipped_nocost[:8]}{' …' if len(_skipped_nocost) > 8 else ''}")
+        print(f"     (価格が無いと $100 固定で値付けされる = 赤字出品になるため出さない)")
     if _skipped_cert:
         print(f"  🚫 二重出品ガード: 同一cert が既に出品済 → 除外 {len(_skipped_cert)}件 "
               f"→ {_skipped_cert[:8]}{' …' if len(_skipped_cert) > 8 else ''}")
