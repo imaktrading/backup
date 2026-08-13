@@ -118,11 +118,16 @@ def collect_search_listing_urls(
     cap: int = 150,
     max_scrolls: int = MS.DEFAULT_LOAD_MORE_SCROLLS,
     initial_wait_sec: int = MS.DEFAULT_INITIAL_PROFILE_WAIT_SEC,
+    manual: bool = False,
+    manual_done_event=None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """検索 URL にナビゲートし listing URL 一覧を収集 (mercari_seller の資産流用).
 
     driver は呼出側が用意 (= MS.create_anonymous_driver)。 1 driver を複数キーワードで使い回す。
+    manual=True: **フリマアシスト「もっと見る」を user 手動 click** して壁 (~15件) を破る mode
+      (= セラー抽出と同じ _wait_for_manual_load 流用、 非headless + 拡張機能必須)。
+    manual=False: 自動 scroll (フリマ anti-bot で ~15件 頭打ち、 少数高品質向け)。
     Returns: {"keyword", "url", "urls": list[str], "cap_hit": bool, "total_seen": int}
     """
     url = build_search_url(keyword, price_min, price_max)
@@ -137,22 +142,58 @@ def collect_search_listing_urls(
     except Exception:
         pass
     time.sleep(max(initial_wait_sec, MS.DEFAULT_INITIAL_PROFILE_WAIT_SEC))
-    total_seen = MS._load_until_enough(
-        driver, target_count=cap + 1, max_iterations=max_scrolls,
-    )
-    MS._drain_alerts(driver)
-    all_urls = MS._collect_listing_urls_from_page(driver)
+
+    if manual:
+        # フリマアシスト「もっと見る (N)」 の user 手動 click 完了待ち (= セラー抽出と同機構)。
+        MS._wait_for_manual_load(
+            driver, progress_callback=progress_callback, done_event=manual_done_event,
+        )
+        MS._drain_alerts(driver)
+        ordered = MS._collect_listing_urls_from_page(driver)
+    else:
+        # ★メルカリ検索は DOM 仮想化 (スクロールで画面外 item が DOM から外れ、 常に ~15 件しか
+        #   描画されない)。 「最後に1回 DOM を読む」では取りこぼすため、 **スクロールしながら
+        #   URL を逐次 union 蓄積**する (2026-08-13 low-yield 修正)。
+        seen: set[str] = set()
+        ordered = []
+        no_progress = 0
+        for _ in range(max_scrolls):
+            MS._drain_alerts(driver)
+            for u in MS._collect_listing_urls_from_page(driver):
+                if u not in seen:
+                    seen.add(u)
+                    ordered.append(u)
+            if len(ordered) >= cap:
+                break
+            before = len(ordered)
+            try:
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            except Exception:
+                pass
+            time.sleep(MS.DEFAULT_AFTER_CLICK_WAIT_SEC)
+            MS._drain_alerts(driver)
+            for u in MS._collect_listing_urls_from_page(driver):
+                if u not in seen:
+                    seen.add(u)
+                    ordered.append(u)
+            if len(ordered) == before:
+                no_progress += 1
+                if no_progress >= MS.DEFAULT_NO_PROGRESS_THRESHOLD:
+                    break
+            else:
+                no_progress = 0
+
     if progress_callback:
         try:
-            progress_callback(len(all_urls), f"keyword={keyword!r}: {len(all_urls)} 件")
+            progress_callback(len(ordered), f"keyword={keyword!r}: {len(ordered)} 件")
         except Exception:
             pass
     return {
         "keyword": keyword,
         "url": url,
-        "urls": all_urls[:cap],
-        "cap_hit": total_seen > cap,
-        "total_seen": total_seen,
+        "urls": ordered[:cap],
+        "cap_hit": len(ordered) > cap,
+        "total_seen": len(ordered),
     }
 
 
@@ -162,10 +203,12 @@ def collect_multi_keyword_urls(
     price_min: Optional[int] = None,
     price_max: Optional[int] = None,
     cap_per_keyword: int = 150,
+    manual: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """複数キーワードを順に検索し、 URL を横断 dedup で統合.
 
+    manual=True: 各キーワードでフリマアシスト手動 click 待ち (= volume 突破、 非headless)。
     Returns: {"urls": list[str] (dedup済), "by_keyword": {kw: 件数}, "total_raw": int}
     """
     seen: set[str] = set()
@@ -175,7 +218,7 @@ def collect_multi_keyword_urls(
     for kw in keywords:
         r = collect_search_listing_urls(
             kw, driver, price_min=price_min, price_max=price_max,
-            cap=cap_per_keyword, progress_callback=progress_callback,
+            cap=cap_per_keyword, manual=manual, progress_callback=progress_callback,
         )
         added = 0
         for u in r["urls"]:

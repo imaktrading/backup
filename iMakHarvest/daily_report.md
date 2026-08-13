@@ -15,8 +15,13 @@
 - 検証 (POC・実機): 「PORTER ショルダーバッグ」headless で検索収集OK・ブロックなし。
   keep2/reject4 (評価<100=3, 本人確認なし=1)。keep 例: PORTER ショルダーバッグ ¥10,000 評価323
   本人確認✓ / タンカー ¥11,900 評価278 ✓。フィルタ正常。`pytest tests/` = 819 passed。
-- 未: 本番の出力先スプシ (Porter 用) を user 確認後に本実行。収集件数は フリマアシスト無しだと
-  少なめ (POC 6件) なので、本番は cap/scroll 調整の余地あり。
+- 出力先: 中間スプシ `mercari_porter` タブ (sheet_writer_mercari_search.py、item_id dedup)。
+- ★件数の壁と解決 (user 指摘「メルカリスクレイプボタン」): 自動scrollは jp.mercari.com フリマの
+  anti-bot/仮想化で **~6-15件/キーワード 頭打ち**(mercari-shops.com は緩く759件取れるが別ドメイン、
+  PSA10=psacard/一番くじ=1kuji でメルカリ大量抽出の既存実装は無し)。**GUI のメルカリセラーボタンが
+  フリマアシスト手動click で壁を破っていた**のが正解 → 検索版に **`--manual` モード追加**
+  (`_wait_for_manual_load` 流用、非headless、キーワード毎に手動click)。要フリマアシスト install。
+  自動scrollは「少数高品質」、手動は「volume」の2モード。
 
 
 

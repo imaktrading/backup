@@ -49,20 +49,26 @@ def main(argv=None) -> int:
     ap.add_argument("--max-details", type=int, default=0, help="詳細フェッチ上限 (0=無制限、POC用)")
     ap.add_argument("--keywords", nargs="*", default=None, help="上書きキーワード")
     ap.add_argument("--headless", action="store_true")
+    ap.add_argument("--manual", action="store_true",
+                    help="フリマアシスト手動click で volume 突破 (非headless必須・キーワード毎に手動click)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--label", default="porter", help="中間スプシ tab suffix (= mercari_<label>)")
     args = ap.parse_args(argv)
 
     keywords = args.keywords or DEFAULT_KEYWORDS
+    headless = args.headless and not args.manual  # manual は非headless 必須
     _log(f"開始: keywords={len(keywords)} 価格={args.price_min}-{args.price_max} "
-         f"評価数>={args.min_rating} 本人確認={'不要' if args.no_identity else '必須'}")
+         f"評価数>={args.min_rating} 本人確認={'不要' if args.no_identity else '必須'} "
+         f"mode={'手動フリマアシスト' if args.manual else '自動scroll'}")
+    if args.manual:
+        _log("★手動モード: 各キーワードの検索画面でフリマアシスト「もっと見る」を click してください")
 
-    driver = MS.create_anonymous_driver(headless=args.headless)
+    driver = MS.create_anonymous_driver(headless=headless)
     kept, rej = [], {"sold": 0, "seller_rating": 0, "no_identity": 0, "fetch_fail": 0}
     try:
         collected = MSch.collect_multi_keyword_urls(
             keywords, driver, price_min=args.price_min, price_max=args.price_max,
-            cap_per_keyword=args.cap_per_keyword,
+            cap_per_keyword=args.cap_per_keyword, manual=args.manual,
             progress_callback=lambda n, m: _log(f"  収集 {m}"),
         )
         urls = collected["urls"]
