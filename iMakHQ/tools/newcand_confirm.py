@@ -424,6 +424,7 @@ def load_items(limit=0, write=True):
                 pass
         # ★目視で入れた番号が最優先 (機械が読めなかった/読み違えた分を人が上書きできる)
         card_no = typed_no.get(p["url"], "") or extract_card_no(title)
+        p["no_from_typed"] = bool(typed_no.get(p["url"]))
         variants = catalog_candidates(title, card_no)
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants})
         all_items.append(p)
@@ -637,9 +638,17 @@ def build_html(items):
                          "絵柄が合っていても<b>日本語版がカタログに未収録</b>なので、"
                          "「カタログに無い→追加依頼」を押してください</div>")
             body_v = head + f"<div class='vs'>{cards}</div>"
+        elif it.get("no_from_typed"):
+            # 番号を人が入れたのに候補ゼロ = catalog に無い、が確定した状態
+            body_v = ("<div class='warn'>⚠ 入力された番号 "
+                      f"<b>{_html.escape(it['card_no'])}</b> で探しても候補なし = "
+                      "<b>カタログに無い</b>。<br>"
+                      "→ 「カタログに無い→追加依頼」を押してください</div>")
         else:
-            body_v = ("<div class='warn'>カタログ候補なし "
-                      "(番号も名前も読めない/未収録)。出品には回せません</div>")
+            body_v = ("<div class='warn'>候補なし。<b>やることは1つ: カード番号を入れる</b><br>"
+                      "リンクを開いて番号(例 OP05-002)を下の欄に入れるだけ。ボタンは不要です。"
+                      "次回この画面に版が並びます。<br>"
+                      "番号が分からない/ページが見られない時だけ、理由から選んでください</div>")
         parts.append(
             f"<div class='it' data-idx='{it['idx']}' data-pid='' data-cat='' "
             f"data-cno=\"{_html.escape(it['card_no'] or '')}\" "

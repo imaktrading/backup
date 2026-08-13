@@ -121,7 +121,7 @@ def test_build_html_marks_single_multi_and_missing():
     page = N.build_html([_item(0, v1), _item(1, v2), _item(2, [], title="", card_no="")]).decode()
     assert "カタログ候補 1件" in page
     assert "カタログ候補 2件" in page
-    assert "カタログ候補なし" in page
+    assert "やることは1つ: カード番号を入れる" in page
     assert "タイトル不明" in page
     assert page.count("data-a='go'") == 3, "全件に『出品する』ボタンが出る"
 
@@ -529,3 +529,18 @@ def test_typed_number_is_not_counted_as_unresolved():
     page = N.build_html([_item(0, v)]).decode()
     assert "else if(cno && cno!==(b.dataset.cno||'')){ /* 次回へ */ }" in page
     assert "番号入力(次回へ)" in page
+
+
+def test_no_candidate_screen_tells_exactly_one_action():
+    """候補なしの時にやることは1つ (番号を入れる)。迷わせない。"""
+    base = dict(_item(0, []), card_no="", no_from_typed=False, title="")
+    page = N.build_html([base]).decode()
+    assert "やることは1つ: カード番号を入れる" in page
+    assert "ボタンは不要" in page
+
+
+def test_typed_number_but_still_no_candidate_points_to_catalog_request():
+    """番号を入れても候補が出ない = カタログに無い、が確定 → 追加依頼へ誘導。"""
+    base = dict(_item(0, []), card_no="OP13-118", no_from_typed=True)
+    page = N.build_html([base]).decode()
+    assert "カタログに無い" in page and "OP13-118" in page
