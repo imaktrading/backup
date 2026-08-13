@@ -562,11 +562,14 @@ function go(){
       outs.push({idx:idx, reason:r});
     }
     else if(a==='hold'){holds.push(idx);}
-    else {holds.push(idx);}   /* 未操作も未結論として数える */
+    /* ★カード番号を入れただけ = 「次回カタログから引く」という進捗。未結論に数えない
+       (数えると未結論0にできず、目標が意味を失う)。 */
+    else if(cno && cno!==(b.dataset.cno||'')){ /* 次回へ */ }
+    else {holds.push(idx);}   /* 未操作は未結論 */
   });
   var msg='出品へ '+picks.length+'件 / カタログ追加依頼 '+creq.length+'件 / 対象外 '
-          +outs.length+'件 / **未結論 '+holds.length+'件**';
-  if(cnos.length) msg+='\\n\\nカード番号を入れた '+cnos.length+'件 — 次回はカタログ候補が並びます。';
+          +outs.length+'件 / 番号入力(次回へ) '+cnos.length+'件 / **未結論 '+holds.length+'件**';
+  if(cnos.length) msg+='\\n\\nカード番号を入れた '+cnos.length+'件 — 次回はカタログ候補が並びます(未結論には数えません)。';
   if(noreason) msg+='\\n\\n対象外なのに理由が未選択 '+noreason+'件 — 理由が無いものは未結論に戻します。';
   if(holds.length) msg+='\\n\\n未結論は次回また出ます (ここを0にするのが目標)。';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?')) return;

@@ -521,3 +521,11 @@ def test_reason_select_sets_out_action():
     assert "onchange='pickRsn(this)'" in page
     assert "function pickRsn" in page
     assert "setAct(box.querySelector(\"button[data-a='out']\"))" in page
+
+
+def test_typed_number_is_not_counted_as_unresolved():
+    """★カード番号を入れただけ = 次回へ回す進捗。未結論に数えない。"""
+    v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
+    page = N.build_html([_item(0, v)]).decode()
+    assert "else if(cno && cno!==(b.dataset.cno||'')){ /* 次回へ */ }" in page
+    assert "番号入力(次回へ)" in page
