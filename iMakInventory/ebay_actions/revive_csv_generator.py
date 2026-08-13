@@ -463,13 +463,23 @@ def _row_key(sheet_label: str, row_index: int) -> tuple:
     return (sheet_label, row_index)
 
 
-LAST_REVIVE_RUN_FILE = DECISION_LOG_DIR / "revive_last_run.json"
+LAST_REVIVE_RUN_NAME = "revive_last_run.json"
+
+
+def _last_revive_run_file():
+    """★ 実行時に DECISION_LOG_DIR から解決する (module 定数にしない)。
+
+    定数にすると test が DECISION_LOG_DIR を差し替えても効かず、**test が本番の state を
+    書き換える** (2026-08-13: burst guard の test が本番 revive_last_run.json に
+    HIGH=2026-08-07 を書き込んだ)。同型はログ汚染 (listings_TESTRUN 隔離) と同じ。
+    """
+    return DECISION_LOG_DIR / LAST_REVIVE_RUN_NAME
 
 
 def load_last_revive_run(label: str) -> Optional[datetime]:
     """前回 revive を実行した時刻 (label 別)。無ければ None。"""
     try:
-        d = json.loads(LAST_REVIVE_RUN_FILE.read_text(encoding="utf-8"))
+        d = json.loads(_last_revive_run_file().read_text(encoding="utf-8"))
         return datetime.fromisoformat(d[label])
     except Exception:
         return None
@@ -477,14 +487,15 @@ def load_last_revive_run(label: str) -> Optional[datetime]:
 
 def save_last_revive_run(label: str, ts: datetime) -> None:
     try:
+        p = _last_revive_run_file()
         d = {}
-        if LAST_REVIVE_RUN_FILE.exists():
-            d = json.loads(LAST_REVIVE_RUN_FILE.read_text(encoding="utf-8"))
+        if p.exists():
+            d = json.loads(p.read_text(encoding="utf-8"))
             if not isinstance(d, dict):
                 d = {}
         d[label] = ts.isoformat(timespec="seconds")
         DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        LAST_REVIVE_RUN_FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass          # state が書けなくても cycle は止めない (次回は時間窓 fallback)
 

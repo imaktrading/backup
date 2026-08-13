@@ -218,12 +218,28 @@ def test_burst_window_uses_last_run_not_fixed_24h():
 
 @pytest.mark.offline
 def test_last_run_state_roundtrip(tmp_path):
+    """state は実行時に DECISION_LOG_DIR から解決する (= test が本番 state を汚さない).
+
+    ★ 2026-08-13: module 定数にしていたため、burst guard の test が本番の
+      revive_last_run.json に HIGH=2026-08-07 を書き込んでいた。
+    """
     import ebay_actions.revive_csv_generator as rg
-    f = tmp_path / "revive_last_run.json"
     ts = datetime(2026, 8, 13, 13, 30, 0)
-    with patch.object(rg, "LAST_REVIVE_RUN_FILE", f), \
-         patch.object(rg, "DECISION_LOG_DIR", tmp_path):
+    with patch.object(rg, "DECISION_LOG_DIR", tmp_path):
         assert rg.load_last_revive_run("SHEET") is None
         rg.save_last_revive_run("SHEET", ts)
         assert rg.load_last_revive_run("SHEET") == ts
         assert rg.load_last_revive_run("LOW") is None        # label 別に持つ
+
+
+@pytest.mark.offline
+def test_last_run_state_never_written_to_production_dir(tmp_path):
+    """DECISION_LOG_DIR を差し替えれば本番 decision_log には一切書かない."""
+    import ebay_actions.revive_csv_generator as rg
+    prod = rg.DECISION_LOG_DIR / rg.LAST_REVIVE_RUN_NAME
+    before = prod.read_text(encoding="utf-8") if prod.exists() else None
+    with patch.object(rg, "DECISION_LOG_DIR", tmp_path):
+        rg.save_last_revive_run("SHEET", datetime(2026, 8, 13, 13, 30, 0))
+        assert (tmp_path / rg.LAST_REVIVE_RUN_NAME).exists()
+    after = prod.read_text(encoding="utf-8") if prod.exists() else None
+    assert after == before, "本番の revive_last_run.json を書き換えている"
