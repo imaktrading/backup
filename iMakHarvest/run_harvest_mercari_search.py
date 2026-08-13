@@ -50,7 +50,7 @@ def main(argv=None) -> int:
     ap.add_argument("--keywords", nargs="*", default=None, help="上書きキーワード")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--sheet-id", default=None, help="出力スプシ ID (本番)")
+    ap.add_argument("--label", default="porter", help="中間スプシ tab suffix (= mercari_<label>)")
     args = ap.parse_args(argv)
 
     keywords = args.keywords or DEFAULT_KEYWORDS
@@ -114,17 +114,20 @@ def main(argv=None) -> int:
                                ensure_ascii=False, indent=2), encoding="utf-8")
     _log(f"[FILE] JSON dump: {dump}")
 
-    if args.dry_run or not args.sheet_id:
-        _log("dry-run / sheet-id 未指定 → スプシ書込なし")
+    if args.dry_run:
+        _log("dry-run → 中間スプシ書込なし")
         return 0
-    from sheet_writer import write_to_sheet  # noqa: PLC0415
+    if not kept:
+        _log("keep 0 件 → 書込なし")
+        return 0
+    from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
     items = [{
         "url": k["url"], "title": k.get("title"), "condition": k.get("condition"),
         "price_jpy": k.get("price_jpy"), "image_urls": k.get("image_urls"),
         "description": k.get("description"), "size": k.get("size"),
         "color": k.get("color"),
     } for k in kept]
-    res = write_to_sheet(items, spreadsheet_id=args.sheet_id)
+    res = append_mercari_search_items(items, label=args.label)
     _log(f"[SHEET] {res}")
     return 0
 
