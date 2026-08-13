@@ -55,8 +55,13 @@ OUT_TAB = "新規出品候補"
 #   コピペする」。なので **貼り付け先の列名をそのまま見出しにする**。
 #   商品管理シート: A=仕入元URL / B=itemID(出品後に入る=空のまま) / C=タイトル /
 #                   I=cert / R=カテゴリ('TCG') / AI=canonical KEY
-OUT_HEADER = ["用途", "A列:仕入元URL", "C列:タイトル", "I列:cert", "R列:カテゴリ",
+OUT_HEADER = ["用途", "HIGH転記", "A列:仕入元URL", "C列:タイトル", "I列:cert", "R列:カテゴリ",
               "AI列:KEY", "product_id", "元itemID", "日付"]
+# ★2026-08-13 ユーザー指摘「HIGHへコピーしたかどうか分からなくない?」。
+#   商品管理シートの A列(仕入元URL) と突き合わせて **自動で印を付ける** (手でチェックしない)。
+OUT_URL_COL, OUT_KEY_COL, OUT_DONE_COL = 2, 6, 1
+# 元台帳 (補URL候補NG / 補URL要調査) に付ける結論の印。「どこへ行ったか」がその場で分かる。
+SRC_STATUS_HEADER = "状態"
 # 「用途」: 同じカード(KEY)が複数あっても **出品するのは1枚だけ**。
 #   2枚目以降は捨てず「補URL」= 供給の厚み (無在庫なので仕入元は多いほど良い)。
 USE_LIST, USE_AUX = "出品", "補URL(2枚目以降)"
@@ -619,7 +624,7 @@ def _append_tab(tab, header, new_rows):
     sheet_io.write_rows_to_tab(tab, [header] + body + new_rows)
 
 
-def mark_use(rows, listed_keys=(), key_col=5, use_col=0):
+def mark_use(rows, listed_keys=(), key_col=OUT_KEY_COL, use_col=0):
     """同じカード(KEY)は1行だけ『出品』、残りは『補URL』にする (純関数)。
 
     ★同じカードを2枚出品しない (重複くんが後で弾く前に、ここで用途を分けておく)。
@@ -646,18 +651,95 @@ def migrate_out_rows(cur):
     """
     if not cur or not cur[0]:
         return []
-    if cur[0][0] == OUT_HEADER[0]:
+    head = cur[0]
+    if head[:2] == OUT_HEADER[:2]:
         return cur[1:]
-    return mark_use([[""] + list(r) for r in cur[1:] if r], listed_keys=())
+    if head[0] == OUT_HEADER[0]:            # 用途はあるが HIGH転記 が無い (2026-08-13 途中形)
+        return [[r[0], ""] + list(r[1:]) for r in cur[1:] if r]
+    # 旧形式 (用途も無い)
+    return mark_use([["", ""] + list(r) for r in cur[1:] if r], listed_keys=())
 
 
 def already_listed_keys():
     """既に『出品』として保管済の KEY (I/O)。走行をまたいでも二重に出品候補にしない。"""
     keys = set()
     for r in migrate_out_rows(sheet_io.read_tab(OUT_TAB) or []):
-        if len(r) > 5 and (r[0] or "").strip() == USE_LIST and (r[5] or "").strip():
-            keys.add(r[5].strip())
+        if (len(r) > OUT_KEY_COL and (r[0] or "").strip() == USE_LIST
+                and (r[OUT_KEY_COL] or "").strip()):
+            keys.add(r[OUT_KEY_COL].strip())
     return keys
+
+
+def _nurl(u):
+    """URL 比較用の正規化 (末尾スラッシュ/クエリ/大小を無視)。純関数。"""
+    u = str(u or "").strip().split("?")[0].rstrip("/")
+    return u.lower()
+
+
+def status_of(url, out_rows, ng_rows):
+    """元台帳の1行が **どこへ行ったか** (純関数)。未処理なら ""。
+
+    ★2026-08-13 ユーザー指摘「新規出品候補へコピーとかあった方が分かりやすい」。
+      台帳を見ただけで結論が分かるようにする (別タブと突き合わせないと分からない状態をやめる)。
+    """
+    u = _nurl(url)
+    for r in out_rows:
+        if len(r) > OUT_URL_COL and _nurl(r[OUT_URL_COL]) == u:
+            use = (r[0] or "").strip() or USE_LIST
+            done = (r[OUT_DONE_COL] or "").strip() if len(r) > OUT_DONE_COL else ""
+            return f"新規出品候補へ ({use}{'・HIGH転記済' if done else ''})"
+    for r in ng_rows:
+        if r and _nurl(r[0]) == u:
+            return (r[1] or "結論済").strip()
+    return ""
+
+
+def sync_status():
+    """(1) 新規出品候補に **HIGH転記済** の印を付け、(2) 元台帳に **結論** を書き戻す (I/O)。
+
+    どちらも突き合わせて機械が付ける (人がチェックを付けない = 付け忘れが起きない)。
+    """
+    out_rows = migrate_out_rows(sheet_io.read_tab(OUT_TAB) or [])
+    ng_rows = [r for r in (sheet_io.read_tab(NG_TAB) or [])[1:] if r]
+
+    # (1) 商品管理シートの A列(仕入元URL) に在れば「転記済」
+    n_done = 0
+    try:
+        prod = {_nurl(r[0]) for r in sheet_io._product_ws().get_all_values()[1:] if r and r[0]}
+    except Exception as e:
+        print(f"  ⚠ 商品管理シートを読めず転記チェック skip ({type(e).__name__})")
+        prod = None
+    if prod is not None and out_rows:
+        for r in out_rows:
+            while len(r) < len(OUT_HEADER):
+                r.append("")
+            mark = "済" if _nurl(r[OUT_URL_COL]) in prod else ""
+            r[OUT_DONE_COL] = mark
+            n_done += 1 if mark else 0
+        sheet_io.write_rows_to_tab(OUT_TAB, [OUT_HEADER] + out_rows)
+        print(f"  🔖 {OUT_TAB}: HIGH転記済 {n_done}/{len(out_rows)}件")
+
+    # (2) 元台帳に結論を書き戻す
+    for tab in SRC_TABS:
+        cur = sheet_io.read_tab(tab) or []
+        if not cur:
+            continue
+        head = list(cur[0])
+        if SRC_STATUS_HEADER not in head:
+            head.append(SRC_STATUS_HEADER)
+        si = head.index(SRC_STATUS_HEADER)
+        body, n = [], 0
+        for r in cur[1:]:
+            r = list(r)
+            while len(r) <= si:
+                r.append("")
+            if len(r) > 2 and r[2]:
+                st = status_of(r[2], out_rows, ng_rows)
+                r[si] = st
+                n += 1 if st else 0
+            body.append(r)
+        sheet_io.write_rows_to_tab(tab, [head] + body)
+        print(f"  🔖 {tab}: 結論つき {n}/{len(body)}件")
 
 
 def append_missing_models(rows, path=MISSING_CSV):
@@ -695,7 +777,7 @@ def save(items, res):
         if not it:
             continue
         key = f"{p['category']}:{p['pid']}" if p["category"] else p["pid"]
-        picks.append(["", it["url"], (it["title"] or "")[:60], p["cert"], SHEET_CATEGORY,
+        picks.append(["", "", it["url"], (it["title"] or "")[:60], p["cert"], SHEET_CATEGORY,
                       key, p["pid"], it["src_itemid"], today])
     picks = mark_use(picks, already_listed_keys())
     if picks:
@@ -765,9 +847,15 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="先頭N件だけ見る (0=全部)")
     ap.add_argument("--timeout", type=int, default=10800)
     ap.add_argument("--dry-run", action="store_true", help="件数と内訳だけ出して終わる")
+    ap.add_argument("--sync-only", action="store_true",
+                    help="目視は開かず、HIGH転記済/結論の印だけ付け直す")
     a = ap.parse_args()
 
     print("▶ 捨てた仕入候補 → 新規出品の種 (目視)")
+    if a.sync_only:
+        sync_status()
+        return 0
+    sync_status()          # 走行前にも最新化 (手でHIGHに貼った分がすぐ反映される)
     items = load_items(limit=a.limit)
     if not items:
         print("  未処理の候補なし。")
@@ -785,6 +873,7 @@ def main():
         print("  確定されなかった (タイムアウト/未操作) → 何も書かない")
         return 1
     save(items, res)
+    sync_status()          # 確定直後に印を更新 (どこへ行ったかを台帳で見えるようにする)
     return 0
 
 
