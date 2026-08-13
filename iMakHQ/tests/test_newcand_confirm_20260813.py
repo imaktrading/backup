@@ -267,6 +267,7 @@ def test_save_builds_paste_row(monkeypatch):
     written = {}
     monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
     monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    monkeypatch.setattr(N, "live_key_set", lambda: set())
     items = [_item(0, [{"pid": "EB03-053_p1", "category": "one_piece_tcg", "name": "Nami",
                         "image": ""}])]
     N.save(items, {"picks": [{"idx": 0, "pid": "EB03-053_p1", "category": "one_piece_tcg",
@@ -327,6 +328,7 @@ def test_saved_row_leaves_cert_empty(monkeypatch):
     written = {}
     monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
     monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    monkeypatch.setattr(N, "live_key_set", lambda: set())
     items = [_item(0, [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami",
                         "image": ""}])]
     N.save(items, {"picks": [{"idx": 0, "pid": "EB03-053", "category": "one_piece_tcg",
@@ -396,6 +398,7 @@ def test_catalog_request_uses_typed_card_number(monkeypatch):
     sent = {}
     monkeypatch.setattr(N, "_append_tab", lambda *a: None)
     monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    monkeypatch.setattr(N, "live_key_set", lambda: set())
     monkeypatch.setattr(N.sheet_io, "read_tab", lambda tab: [])
     monkeypatch.setattr(N.sheet_io, "write_rows_to_tab", lambda tab, rows: None)
     monkeypatch.setattr(N, "append_missing_models",
@@ -413,6 +416,7 @@ def test_catalog_request_skipped_when_typed_number_exists_in_catalog(monkeypatch
     called = {}
     monkeypatch.setattr(N, "_append_tab", lambda *a: None)
     monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    monkeypatch.setattr(N, "live_key_set", lambda: set())
     monkeypatch.setattr(N.sheet_io, "read_tab", lambda tab: [])
     monkeypatch.setattr(N.sheet_io, "write_rows_to_tab", lambda tab, rows: None)
     monkeypatch.setattr(N, "append_missing_models",
@@ -455,6 +459,7 @@ def test_save_writes_candidate_price(monkeypatch):
     written = {}
     monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
     monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    monkeypatch.setattr(N, "live_key_set", lambda: set())
     items = [_item(0, [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami",
                         "image": ""}])]
     items[0]["price"] = 19999
@@ -502,6 +507,7 @@ def test_pick_applies_to_same_card_duplicates(monkeypatch):
     written = {}
     monkeypatch.setattr(N, "_append_tab", lambda tab, h, rows: written.setdefault(tab, rows))
     monkeypatch.setattr(N, "already_listed_keys", lambda: set())
+    monkeypatch.setattr(N, "live_key_set", lambda: set())
     it = _item(0, [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}])
     it["dups"] = [{"url": "https://m/dup1", "title": "同じカード別出品", "price": 25000,
                    "src_itemid": "358_1"}]
@@ -581,3 +587,15 @@ def test_live_cards_registers_printed_number(monkeypatch):
     out = N.live_cards()
     assert "SV1V-102" in out
     assert "102/078" in out, f"印刷番号が入口になっていない: {list(out)}"
+
+
+def test_live_key_set_keeps_every_variant(monkeypatch):
+    """★live_cards() は番号→代表KEYなので版が漏れる (OP05-119 が実際に漏れた)。
+    用途の判定には KEY をそのまま集めた集合を使う。"""
+    rows = [["u", "358a", "t"] + [""] * 31 + ["one_piece_tcg:OP05-119_p8"],
+            ["u", "358b", "t"] + [""] * 31 + ["one_piece_tcg:OP05-119"],
+            ["u", "", "t"] + [""] * 31 + ["one_piece_tcg:NOT-LISTED"]]
+    monkeypatch.setattr(N.sheet_io, "_product_ws",
+                        lambda: type("W", (), {"get_all_values": lambda self: [[]] + rows})())
+    ks = N.live_key_set()
+    assert ks == {"one_piece_tcg:OP05-119_p8", "one_piece_tcg:OP05-119"}

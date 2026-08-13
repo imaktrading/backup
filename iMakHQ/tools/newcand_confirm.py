@@ -807,6 +807,20 @@ def live_cards():
     return out
 
 
+def live_key_set():
+    """出品中の canonical KEY の集合 (I/O)。
+
+    ★live_cards() は「カード番号 → 代表KEY」なので、同じ番号に版が複数あると
+      1つしか残らない (実際 OP05-119 が漏れた)。用途の判定にはこちらを使う。
+    """
+    try:
+        vals = sheet_io._product_ws().get_all_values()
+    except Exception:
+        return set()
+    return {(r[34] or "").strip() for r in vals[1:]
+            if len(r) > 34 and (r[34] or "").strip() and len(r) > 1 and (r[1] or "").strip()}
+
+
 def decided_cards():
     """既に『出品』と結論を出したカード → {カード番号: (KEY, product_id, category)} (I/O)。
 
@@ -969,7 +983,7 @@ def save(items, res):
             picks.append(["", "", d["url"], (d["title"] or "")[:60],
                           (d.get("price") if isinstance(d.get("price"), int) else ""),
                           "", SHEET_CATEGORY, key, p["pid"], d["src_itemid"], today])
-    picks = mark_use(picks, already_listed_keys())
+    picks = mark_use(picks, already_listed_keys() | live_key_set())
     if picks:
         _append_tab(OUT_TAB, OUT_HEADER, picks)
         n_list = sum(1 for r in picks if r[0] == USE_LIST)
