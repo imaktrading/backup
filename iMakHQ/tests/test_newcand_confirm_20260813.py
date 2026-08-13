@@ -322,3 +322,41 @@ def test_saved_row_leaves_cert_empty(monkeypatch):
                               "cert": ""}],
                    "catalog_reqs": [], "outs": [], "holds": [], "card_nos": []})
     assert written[N.OUT_TAB][0][2] == "", "I列:cert は空のまま (出品直前に入れる)"
+
+
+# ---------------------------------------------------------------------------
+# 11. 英語版の扱い (2026-08-13 ユーザー指摘)
+# ---------------------------------------------------------------------------
+def test_first_image_prefers_japanese_and_same_variant():
+    """★catalog の images は英語版が先頭。日本語 + その版の絵を選ぶ。"""
+    imgs = ('["https://files.bandai-tcg-plus.com/card_image/OP-EN/EB03/batch_EB03-053_p2.png",'
+            ' "https://files.bandai-tcg-plus.com/card_image/OP-JA/EB03/batch_EB03-053.png",'
+            ' "https://www.onepiece-cardgame.com/images/cardlist/card/EB03-053_p2.png"]')
+    assert N._first_image(imgs, "EB03-053_p2").endswith("EB03-053_p2.png")
+    # 版指定なしでも英語は避ける
+    assert "OP-EN" not in N._first_image(imgs)
+
+
+def test_is_en_only():
+    assert N.is_en_only("en") is True
+    assert N.is_en_only("both") is False
+    assert N.is_en_only("ja") is False
+    assert N.is_en_only(None) is False, "未設定は日本語あり扱い (捨てない)"
+
+
+def test_html_flags_english_only_and_pushes_catalog_request():
+    """英語版しか無い = 日本語版が未収録 → 追加依頼へ誘導する (黙って消さない)。"""
+    en = [{"pid": "EB03-053_p2", "category": "one_piece_tcg", "name": "Nami",
+           "image": "https://x/a.png", "en_only": True}]
+    page = N.build_html([_item(0, en)]).decode()
+    assert "英語版のみ" in page
+    assert "日本語版がカタログに未収録" in page
+
+
+def test_gone_reason_is_limited_to_unidentifiable():
+    """「ページが消えている」は売り切れ。カードが特定できるなら出品候補にしてよい。"""
+    labels = dict(N.OUT_REASONS)
+    assert "カードも特定できない" in labels["gone"]
+    v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
+    page = N.build_html([_item(0, v)]).decode()
+    assert "無在庫なので仕入元は後で探し直せます" in page

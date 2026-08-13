@@ -79,7 +79,11 @@ OUT_REASONS = [
     ("bundle", "まとめ売り・複数枚"),
     ("notpsa", "PSA10ではない (別グレード/未鑑定)"),
     ("othergenre", "別ジャンル (対象外の商材)"),
-    ("gone", "ページが消えている・確認不能"),
+    # ★2026-08-13 ユーザー指摘「ページが消えている=売り切れってことだよね?」。その通りで、
+    #   消えているのは**その仕入元URL**だけ。カードが特定できるなら出品候補に入れてよい
+    #   (無在庫なので仕入元は後で探し直せる)。だから「対象外」に落とすのは
+    #   **カードも特定できない時だけ**、と文言で限定する。
+    ("gone", "供給が消えた(売り切れ) & カードも特定できない"),
     ("other", "その他"),
 ]
 
@@ -214,24 +218,52 @@ def parse_result(data):
 # ---------------------------------------------------------------------------
 # catalog 参照 (I/O)
 # ---------------------------------------------------------------------------
-def _first_image(images_json):
+# ★2026-08-13 ユーザー指摘「候補の中に英語版がある」。
+#   catalog の images は **英語版が先頭**に入っていることが多く (例 EB03-053 は
+#   OP-EN → OP-JA の順)、先頭を採ると英語の絵が並ぶ。売っているのは日本語版なので、
+#   絵柄を見比べる相手が違ってしまう。日本語の画像を優先して選ぶ。
+_JA_IMG_HINTS = ("-JA/", "/JA/", "onepiece-cardgame.com", "pokemon-card.com",
+                 "dbs-cardgame", "gundam-gcg.com")
+
+
+def _first_image(images_json, pid=""):
+    """カード画像 (日本語版を優先。同じ版の絵を選ぶ)。純関数。
+
+    ★注意: 英語版のみの行は images に「**基本版**の日本語画像」が混ざっていることがある
+      (例 EB03-053_p2 → OP-JA/batch_EB03-053.png = パラレルでない絵)。
+      日本語を優先しつつ、**ファイル名に版のIDを含むもの**を先に選ぶ。
+    """
     try:
         imgs = json.loads(images_json or "[]")
     except Exception:
         return ""
-    img = imgs[0] if isinstance(imgs, list) and imgs else ""
-    if isinstance(img, dict):
-        img = img.get("url") or ""
-    return img or ""
+    urls = []
+    for x in (imgs if isinstance(imgs, list) else []):
+        u = x.get("url") if isinstance(x, dict) else x
+        if u:
+            urls.append(str(u))
+    ja = [u for u in urls if any(h.upper() in u.upper() for h in _JA_IMG_HINTS)]
+    p = str(pid or "").upper()
+    if p:
+        for u in ja:
+            if p in u.upper().rsplit("/", 1)[-1]:
+                return u
+    return (ja or urls or [""])[0]
+
+
+def is_en_only(lang):
+    """catalog の language が英語版のみか (純関数)。'both'/'ja'/未設定 は日本語あり扱い。"""
+    return str(lang or "").strip().lower() == "en"
 
 
 def _row_to_cand(r):
     return {"pid": r["product_id"], "category": r["category"],
             "name": r["name_en"] or r["name"] or "", "name_jp": r["name"] or "",
-            "image": _first_image(r["images"])}
+            "lang": (r["language"] or ""), "en_only": is_en_only(r["language"]),
+            "image": _first_image(r["images"], r["product_id"])}
 
 
-_CAND_COLS = "product_id, category, name, name_en, images"
+_CAND_COLS = "product_id, category, name, name_en, images, language"
 _MAX_CANDS = 12
 
 
@@ -399,6 +431,7 @@ h1{font-size:16px;margin:0 0 8px}
 .v img{width:100px;height:135px;object-fit:contain;background:#f7f7f7}
 .v .pid{font-weight:bold;word-break:break-all}
 .v .nm{color:#666}
+.v .en{color:#a40;font-weight:bold}   /* 英語版のみ = 日本語版が catalog に無い印 */
 .v .zb{position:absolute;top:2px;right:2px;font-size:11px;padding:0 4px;line-height:16px}
 .one{font-size:12px;color:#076;font-weight:bold}
 .warn{font-size:12px;color:#a40}
@@ -501,7 +534,9 @@ def build_html(items):
         f"版が複数(絵柄で選ぶ) <b>{n_multi}</b> / カタログに無い <b>{n_zero}</b><br>"
         "この画面の仕事は<b>どのカードか(版)を決めること</b>だけです。"
         "鑑定番号は出品の直前に入れるので、ここでは要りません。<br>"
-        "番号が読めていない候補は、ページを開いて<b>カード番号</b>を打つと次回に版が並びます。</div>",
+        "番号が読めていない候補は、ページを開いて<b>カード番号</b>を打つと次回に版が並びます。<br>"
+        "<b>ページが消えていても(売り切れ)</b>、カードが特定できるなら「出品する」でOKです — "
+        "無在庫なので仕入元は後で探し直せます。</div>",
     ]
     for it in items:
         photo = prc._proxied(it["url"])
@@ -513,6 +548,11 @@ def build_html(items):
         title = it["title"] or "(タイトル不明 — リンクを開いて確認)"
         vs = it["variants"]
         if vs:
+            # ★2026-08-13 ユーザー指摘「英語版では一致しているけど、日本語版が候補にない」。
+            #   英語版だけしか無い = **日本語版がカタログに未収録** ということ。
+            #   英語版を黙って消すと手掛かりが消えるので、印を付けて残し、
+            #   「カタログに無い→追加依頼」に誘導する (= それも立派な結論)。
+            no_ja = vs and all(v.get("en_only") for v in vs)
             # ★必ず画像付きで並べる。1件でもカードとして出す (文字だけだと見比べられない)。
             cards = "".join(
                 f"<div class='v' data-pid=\"{_html.escape(v['pid'])}\" "
@@ -524,6 +564,7 @@ def build_html(items):
                    "justify-content:center;color:#999;border:1px dashed #ccc'>画像なし</div>")
                 + f"<div class='pid'>{_html.escape(v['pid'])}</div>"
                 + f"<div class='nm'>{_html.escape((v.get('name') or '')[:16])}</div>"
+                + ("<div class='en'>英語版のみ</div>" if v.get("en_only") else "")
                 + f"<button class='zb' data-img=\"{_html.escape(prc._proxied(v['image']))}\" "
                   f"data-pid=\"{_html.escape(v['pid'])}\" "
                   f"onclick='zoom(event,this,\"cat\")'>🔍</button>"
@@ -531,6 +572,10 @@ def build_html(items):
             head = (f"<div class='one'>カタログ候補 {len(vs)}件 — 絵柄を見て選んでください</div>"
                     if len(vs) > 1 else
                     "<div class='one'>カタログ候補 1件 — 絵柄が合っていれば選んでください</div>")
+            if no_ja:
+                head += ("<div class='warn'>⚠ 候補が<b>英語版しかありません</b>。"
+                         "絵柄が合っていても<b>日本語版がカタログに未収録</b>なので、"
+                         "「カタログに無い→追加依頼」を押してください</div>")
             body_v = head + f"<div class='vs'>{cards}</div>"
         else:
             body_v = ("<div class='warn'>カタログ候補なし "
