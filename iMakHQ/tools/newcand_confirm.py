@@ -530,10 +530,17 @@ function pickV(el){
   box.dataset.pid=el.dataset.pid; box.dataset.cat=el.dataset.cat;
   setAct(box.querySelector('button.go'));
 }
+/* ★理由を選んだら、そのまま「対象外」に確定する (ボタンと理由の二度手間をなくす)。
+   逆に、対象外以外を選び直したら理由は消す (残っていると誤解のもと)。 */
+function pickRsn(sel){
+  var box=sel.closest('.it');
+  if(sel.value){ setAct(box.querySelector("button[data-a='out']")); }
+}
 function setAct(btn){
   var box=btn.closest('.it');
   box.querySelectorAll('.act button').forEach(function(b){b.classList.remove('sel');});
   btn.classList.add('sel'); box.dataset.act=btn.dataset.a;
+  if(btn.dataset.a!=='out'){ var s2=box.querySelector('select.rsn'); if(s2) s2.value=''; }
   box.classList.toggle('done', btn.dataset.a!=='go');
 }
 function go(){
@@ -647,7 +654,8 @@ def build_html(items):
             "<button class='cat' data-a='cat' onclick='setAct(this)'>"
             "カタログに無い→追加依頼</button>"
             "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
-            "<select class='rsn'><option value=''>理由を選ぶ</option>"
+            "<select class='rsn' onchange='pickRsn(this)'>"
+            "<option value=''>理由を選ぶ</option>"
             + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in OUT_REASONS)
             + "</select>"
             "<button class='hold' data-a='hold' onclick='setAct(this)'>保留</button>"

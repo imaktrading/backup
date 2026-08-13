@@ -512,3 +512,12 @@ def test_pick_applies_to_same_card_duplicates(monkeypatch):
     assert [r[0] for r in rows] == [N.USE_LIST, N.USE_AUX]
     assert rows[1][2] == "https://m/dup1"
     assert rows[1][7] == "one_piece_tcg:EB03-053", "同じ KEY を引き継いでいない"
+
+
+def test_reason_select_sets_out_action():
+    """理由を選んだだけで『対象外』に確定する (ボタン+理由の二度手間をなくす)。"""
+    v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
+    page = N.build_html([_item(0, v)]).decode()
+    assert "onchange='pickRsn(this)'" in page
+    assert "function pickRsn" in page
+    assert "setAct(box.querySelector(\"button[data-a='out']\"))" in page
