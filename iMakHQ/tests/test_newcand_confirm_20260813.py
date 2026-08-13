@@ -599,3 +599,12 @@ def test_live_key_set_keeps_every_variant(monkeypatch):
                         lambda: type("W", (), {"get_all_values": lambda self: [[]] + rows})())
     ks = N.live_key_set()
     assert ks == {"one_piece_tcg:OP05-119_p8", "one_piece_tcg:OP05-119"}
+
+
+def test_foreign_language_has_its_own_reason():
+    """★外国語版を「別ジャンル」に混ぜない。何件捨てているか数えられる形で残す。"""
+    labels = dict(N.OUT_REASONS)
+    assert "foreign" in labels
+    assert "外国語版" in labels["foreign"]
+    v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
+    assert "外国語版" in N.build_html([_item(0, v)]).decode()
