@@ -1208,11 +1208,32 @@ def build_title(game, set_name, card_number, subject, finish=""):
     return f"{prefix} {game_short} #{card_number}"[:80]
 
 def load_description():
+    """商品説明テンプレを読む。**読めなければ例外で止める** (2026-08-13)。
+
+    ★以前は読取失敗を握りつぶして 1行の代用文を返していた。呼び手は本物か代用文か
+      区別できないため、**その走行の全カードの説明が72字の1行**になり、そのまま
+      「入稿OK」まで通った (2026-08-12 19:43 の走行、6件)。ユーザーが目視で発見。
+      黙って代用するくらいなら **止めて気づかせる** 方が安全 (fail-closed)。
+    ★パスは **このスクリプトの場所を基準にした絶対パス**。相対パスだと実行時の
+      カレントディレクトリ次第で開けなくなる (読めなかった原因の第一候補)。
+    """
+    path = DESCRIPTION_FILE
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
     try:
-        with open(DESCRIPTION_FILE, "r", encoding="utf-8") as f:
-            return f.read()
-    except:
-        return "PSA graded card shipped from Japan. Grade and cert number are as listed."
+        with open(path, "r", encoding="utf-8") as f:
+            body = f.read()
+    except OSError as e:
+        raise RuntimeError(
+            f"商品説明テンプレを読めません: {path} ({type(e).__name__}: {e}) "
+            f"  → 代用文で出品すると全カードの説明が1行になるため、ここで止めます。"
+        ) from e
+    if len(body) < 2000:
+        raise RuntimeError(
+            f"商品説明テンプレが短すぎます: {path} ({len(body)}字) "
+            f"  → 壊れている疑い。通常は 13,000字前後。ここで止めます。"
+        )
+    return body
 
 
 # 商品説明 Specs ブロックのヘルパは新コア(tcg_listing_fields)に集約=SSOT。旧コアも同一を使う
