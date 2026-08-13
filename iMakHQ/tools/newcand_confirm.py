@@ -409,8 +409,10 @@ def load_items(limit=0, write=True):
         print(f"⚠ 探索cache を読めない ({type(e).__name__}) → タイトル復元なしで続行")
         u2t = {}
 
-    # 既に『出品』として結論が出ているカード (番号 → その時選んだ版)
-    decided = decided_cards()
+    # 既に結論が出ているカード + **既に eBay に出品中**のカード
+    #   どちらも「人に見せる必要が無い」= 供給URLだけ補URLとして拾えばいい。
+    decided = dict(live_cards())
+    decided.update(decided_cards())      # 目視で決めた版を優先
 
     all_items = []
     for p in pending_rows(src_rows, done):
@@ -749,6 +751,60 @@ def migrate_out_rows(cur):
     # 旧形式 (用途も無い)
     return mark_use([["", ""] + list(r[:3]) + [""] + list(r[3:]) for r in cur[1:] if r],
                     listed_keys=())
+
+
+def live_cards():
+    """**既に eBay に出品中**のカード → {カード番号: (KEY, product_id, category)} (I/O)。
+
+    ★2026-08-13: 目視画面に「既に出品しているカード」を出していた。人は eBay の在庫を
+      覚えていられないので (ユーザー指摘「そんなのこっちでは分からないやん」)、
+      **機械が突き合わせて外す**。供給は捨てず補URLに回す (既存出品の仕入元が厚くなる)。
+    """
+    out = {}
+    try:
+        vals = sheet_io._product_ws().get_all_values()
+    except Exception as e:
+        print(f"  ⚠ 商品管理シートを読めず 出品中チェック skip ({type(e).__name__})")
+        return out
+    for r in vals[1:]:
+        key = (r[34] if len(r) > 34 else "").strip()
+        iid = (r[1] if len(r) > 1 else "").strip()
+        if not key or not iid:
+            continue
+        pid = key.split(":", 1)[1] if ":" in key else key
+        no = extract_card_no(pid) or pid
+        if no:
+            out.setdefault(no, (key, pid, key.split(":")[0] if ":" in key else ""))
+    # ★ポケモンは **印刷番号 (102/078) と product_id (SV1V-102) が別体系**。
+    #   product_id だけで持つと、タイトルから取れる印刷番号と突き合わない
+    #   (実際 SV1V-102 ミライドンex が出品中なのに目視に出ていた)。catalog の
+    #   card_number も同じカードの入口として登録する。
+    pids = [v[1] for v in out.values()]
+    if pids:
+        try:
+            con = sqlite3.connect(DB_PATH)
+            for i in range(0, len(pids), 500):
+                chunk = pids[i:i + 500]
+                ph = ",".join("?" for _ in chunk)
+                for pid, specs in con.execute(
+                        f"SELECT product_id, specs FROM products WHERE product_id IN ({ph})",
+                        chunk):
+                    try:
+                        _sp = json.loads(specs or "{}")
+                        # ポケモンは印刷番号が card_number_text ('102/078')
+                        cn = (_sp.get("card_number") or _sp.get("card_number_text")
+                              or "").strip()
+                    except Exception:
+                        continue
+                    if cn:
+                        for v in out.values():
+                            if v[1] == pid:
+                                out.setdefault(cn.upper(), v)
+                                break
+            con.close()
+        except Exception as e:
+            print(f"  ⚠ 出品中カードの印刷番号を引けず ({type(e).__name__})")
+    return out
 
 
 def decided_cards():

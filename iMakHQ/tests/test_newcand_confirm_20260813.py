@@ -561,3 +561,23 @@ def test_html_groups_items_by_what_to_do():
     i3 = page.index("③ カタログに無い")
     assert i1 < i2 < i3, "①②③ の順に並んでいない"
     assert page.index("data-idx='1'") < page.index("data-idx='0'") < page.index("data-idx='2'")
+
+
+# ---------------------------------------------------------------------------
+# 17. 既に出品中のカードは目視に出さない (2026-08-13)
+# ---------------------------------------------------------------------------
+def test_live_cards_is_used_before_showing(monkeypatch):
+    """ユーザー指摘「そんなのこっちでは分からないやん」= 機械が突き合わせて外す。"""
+    src = open(os.path.join(_TOOLS, "newcand_confirm.py"), encoding="utf-8").read()
+    assert "def live_cards()" in src
+    assert "decided = dict(live_cards())" in src, "出品中カードを除外していない"
+
+
+def test_live_cards_registers_printed_number(monkeypatch):
+    """★ポケモンは印刷番号(102/078)と product_id(SV1V-102)が別体系。両方を入口にする。"""
+    rows = [["url", "358xxxx", "t"] + [""] * 31 + ["pokemon_tcg:SV1V-102"]]
+    monkeypatch.setattr(N.sheet_io, "_product_ws",
+                        lambda: type("W", (), {"get_all_values": lambda self: [[]] + rows})())
+    out = N.live_cards()
+    assert "SV1V-102" in out
+    assert "102/078" in out, f"印刷番号が入口になっていない: {list(out)}"
