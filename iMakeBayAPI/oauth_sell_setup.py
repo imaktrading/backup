@@ -57,6 +57,10 @@ SCOPES = [
     # 2026-07-06: eBaymag出品の inline 配送を ReviseItem(Trading, IAFトークン)で SpeedPAK に
     # 書換えるため sell.inventory 追加。
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
+    # 2026-08-14: 広告 (Promoted Listings) のキャンペーンと、そこに入っている商品を
+    # API で読むため追加。画面では「どの出品が広告に入っていないか」を追えない
+    # (キャンペーン7本で計 1,700件 / 出品総数はそれより多い)。**読取のみ**。
+    "https://api.ebay.com/oauth/api_scope/sell.marketing.readonly",
 ]
 
 
@@ -129,6 +133,11 @@ def cmd_refresh(args):
     if not os.path.exists(SELL_TOKEN_FILE):
         sys.exit("先に exchange で token を取得してください。")
     tok = json.load(open(SELL_TOKEN_FILE, encoding="utf-8"))
+    # ★2026-08-14: refresh に送るのは **実際に同意済みの scope** (token 自身が持っている値)。
+    #   SCOPES を直接送ると、コード側に scope を1つ足した瞬間に「まだ同意していない権限」を
+    #   要求する形になり、**再同意を済ませるまで refresh が全部 500/invalid_scope で落ちる**。
+    #   refresh は eBaymag 配送書換え等の稼働経路が2時間ごとに使うので、そこを道連れにしない。
+    granted = (tok.get("scope") or "").strip() or " ".join(SCOPES)
     resp = requests.post(
         OAUTH_TOKEN,
         headers={
@@ -138,7 +147,7 @@ def cmd_refresh(args):
         data={
             "grant_type": "refresh_token",
             "refresh_token": tok["refresh_token"],
-            "scope": " ".join(SCOPES),
+            "scope": granted,
         },
         timeout=20,
     )
