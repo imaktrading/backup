@@ -75,9 +75,16 @@ def campaigns(marketplace: str) -> list[dict]:
     return out
 
 
-def ads_of(campaign_id: str, marketplace: str) -> set[str]:
-    """キャンペーンに入っている listingId 集合 (ページング込み)."""
-    ids: set[str] = set()
+def ads_of(campaign_id: str, marketplace: str) -> dict[str, str]:
+    """キャンペーンの {listingId: 広告率} (ページング込み)。
+
+    ★2026-08-14: 率は **広告1件ごと** に付いている。キャンペーンの
+      `fundingStrategy.bidPercentage` は「新しく追加した時の既定値」でしかなく、
+      **実際に課金される率ではない**。既定値だけ見て「9%が1,433件 / 5%が448件」と
+      報告したが、実測は 8% が 1,441件で、残りが 2〜10% に9種類バラけていた。
+      キャンペーンの既定値を書き換えても **既存の広告の率は変わらない**。
+    """
+    out: dict[str, str] = {}
     offset = 0
     while True:
         d = _get(f"ad_campaign/{campaign_id}/ad", marketplace,
@@ -86,12 +93,12 @@ def ads_of(campaign_id: str, marketplace: str) -> set[str]:
         for a in got:
             lid = a.get("listingId")
             if lid:
-                ids.add(str(lid))
+                out[str(lid)] = str(a.get("bidPercentage"))
         offset += len(got)
         total = int(d.get("total") or 0)
         if len(got) < PAGE or offset >= total:
             break
-    return ids
+    return out
 
 
 def live_listings() -> tuple[dict, float]:
@@ -161,21 +168,25 @@ def main() -> int:
     uncovered_all: list[str] = []
     for mkt in targets:
         cs = campaigns(mkt)
-        promoted: set[str] = set()
-        rates: dict[str, int] = {}
+        rate_of: dict[str, str] = {}
         for c in cs:
-            ids = ads_of(c["campaignId"], mkt)
-            promoted |= ids
-            # 率が混在していると同じ商品でも手数料が違う。**必ず見えるようにする**
-            rate = (c.get("fundingStrategy") or {}).get("bidPercentage", "?")
-            rates[str(rate)] = rates.get(str(rate), 0) + len(ids)
+            rate_of.update(ads_of(c["campaignId"], mkt))
+        promoted = set(rate_of)
         mine = by_mkt.get(mkt, set())
         r = coverage(mine, promoted)
         pct = r["covered"] / r["live"] * 100 if r["live"] else 0
-        rate_txt = " / ".join(f"{k}%={v}件" for k, v in sorted(rates.items()))
-        print(f"## {mkt}   キャンペーン {len(cs)}本   広告率 {rate_txt}")
-        if len([k for k, v in rates.items() if v]) > 1:
-            print("   ⚠️ 広告率が混在しています (同じ商品でも手数料が違う)")
+        # ★率は広告1件ごと。キャンペーンの既定値ではなく、実際に課金される値を数える
+        rates: dict[str, int] = {}
+        for lid in mine & promoted:
+            rates[rate_of[lid]] = rates.get(rate_of[lid], 0) + 1
+        rate_txt = " / ".join(f"{k}%={v}件" for k, v in
+                              sorted(rates.items(), key=lambda kv: -kv[1]))
+        print(f"## {mkt}   キャンペーン {len(cs)}本")
+        print(f"   広告率(生きてる分): {rate_txt}")
+        if len(rates) > 1:
+            top = max(rates, key=lambda k: rates[k])
+            print(f"   ⚠️ 率が {len(rates)}種類に散っています "
+                  f"({top}% 以外が {sum(rates.values()) - rates[top]}件)")
         print(f"   live {r['live']:>5} / 広告に入っている {r['covered']:>5} ({pct:.0f}%) / "
               f"入っていない {len(r['uncovered']):>4} / 終了済が残留 "
               f"{len(r['stale_in_campaign']):>4}")
