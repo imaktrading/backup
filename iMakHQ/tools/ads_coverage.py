@@ -105,8 +105,28 @@ def live_listings() -> tuple[dict, float]:
     return json.loads(LIVE_CACHE.read_text(encoding="utf-8")), age_h
 
 
+# ★2026-08-14: **サイトを揃えずに突合しない**。
+#   初回に US のキャンペーンだけ集めて live 全件 (US + eBaymag ミラー GB/AU/CA) と
+#   引き算し、「2,500件が未広告」と誤報告した。実際はミラー分がそれぞれ自分のサイトの
+#   キャンペーンに入っており、未広告は 11件だった。母数と分子のサイトを必ず合わせる。
+CCY_TO_MARKETPLACE = {
+    "USD": "EBAY_US", "GBP": "EBAY_GB", "AUD": "EBAY_AU",
+    "CAD": "EBAY_CA", "EUR": "EBAY_DE",
+}
+MARKETPLACES = ["EBAY_US", "EBAY_GB", "EBAY_AU", "EBAY_CA", "EBAY_DE"]
+
+
+def split_live_by_marketplace(live: dict) -> dict[str, set[str]]:
+    """live 出品を通貨からサイト別に分ける (純関数)。未知通貨は '?' に落とす."""
+    out: dict[str, set[str]] = {}
+    for iid, v in live.items():
+        mkt = CCY_TO_MARKETPLACE.get((v or {}).get("cur") or "", "?")
+        out.setdefault(mkt, set()).add(str(iid))
+    return out
+
+
 def coverage(live_ids: set[str], promoted: set[str]) -> dict:
-    """純関数。live と 広告入り の差分を出す."""
+    """純関数。**同じサイトの** live と 広告入り の差分を出す."""
     covered = live_ids & promoted
     return {
         "live": len(live_ids),
@@ -124,37 +144,46 @@ def main() -> int:
     except Exception:
         pass
     ap = argparse.ArgumentParser()
-    ap.add_argument("--marketplace", default="EBAY_US")
+    ap.add_argument("--marketplace", default=None,
+                    help="1サイトだけ見る (既定は US + ミラー全部)")
     ap.add_argument("--list", action="store_true", help="広告に入っていない itemID を列挙")
     a = ap.parse_args()
 
-    cs = campaigns(a.marketplace)
-    print(f"# 広告カバレッジ ({a.marketplace})\n")
-    print(f"RUNNING キャンペーン: {len(cs)}本")
-    promoted: set[str] = set()
-    for c in cs:
-        ids = ads_of(c["campaignId"], a.marketplace)
-        fs = c.get("fundingStrategy") or {}
-        print(f"  - {c['campaignName'][:44]:<44} {len(ids):>5}件  "
-              f"{fs.get('bidPercentage', '?')}% / {fs.get('fundingModel', '?')}")
-        promoted |= ids
-
     live, age_h = live_listings()
-    print(f"\nlive 出品: {len(live)}件 (キャッシュ {age_h:.0f}時間前)")
+    by_mkt = split_live_by_marketplace(live)
+    targets = [a.marketplace] if a.marketplace else MARKETPLACES
+
+    print(f"# 広告カバレッジ  (live {len(live)}件 / キャッシュ {age_h:.0f}時間前)\n")
     if age_h > 24:
-        print("  ⚠️ キャッシュが古い。数字は目安。更新は itemid_writeback_audit を走らせる")
+        print("⚠️ キャッシュが古い。数字は目安。更新は itemid_writeback_audit を走らせる\n")
 
-    r = coverage(set(live), promoted)
-    pct = r["covered"] / r["live"] * 100 if r["live"] else 0
-    print(f"\n広告に入っている : {r['covered']:>6} / {r['live']} 件 ({pct:.0f}%)")
-    print(f"入っていない     : {len(r['uncovered']):>6} 件  ← 広告が一切当たっていない")
-    print(f"終了済なのに残留 : {len(r['stale_in_campaign']):>6} 件  ← キャンペーン側の掃除候補")
+    total_live = total_cov = 0
+    uncovered_all: list[str] = []
+    for mkt in targets:
+        cs = campaigns(mkt)
+        promoted: set[str] = set()
+        for c in cs:
+            promoted |= ads_of(c["campaignId"], mkt)
+        mine = by_mkt.get(mkt, set())
+        r = coverage(mine, promoted)
+        pct = r["covered"] / r["live"] * 100 if r["live"] else 0
+        print(f"## {mkt}   キャンペーン {len(cs)}本")
+        print(f"   live {r['live']:>5} / 広告に入っている {r['covered']:>5} ({pct:.0f}%) / "
+              f"入っていない {len(r['uncovered']):>4} / 終了済が残留 "
+              f"{len(r['stale_in_campaign']):>4}")
+        total_live += r["live"]
+        total_cov += r["covered"]
+        uncovered_all += r["uncovered"]
+        if a.list and r["uncovered"]:
+            for iid in r["uncovered"]:
+                print(f"     {iid}  {(live.get(iid) or {}).get('title', '')[:66]}")
 
-    if a.list:
-        print("\n## 広告に入っていない itemID")
-        for iid in r["uncovered"]:
-            t = (live.get(iid) or {}).get("title", "")
-            print(f"  {iid}  {t[:70]}")
+    unknown = by_mkt.get("?", set())
+    print(f"\n合計: live {total_live} / 広告に入っている {total_cov} / "
+          f"入っていない {len(uncovered_all)}")
+    if unknown:
+        print(f"⚠️ 通貨からサイトを判定できない出品が {len(unknown)}件 "
+              f"(集計から漏れている。CCY_TO_MARKETPLACE に足すこと)")
     return 0
 
 
