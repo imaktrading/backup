@@ -2405,6 +2405,19 @@ class ListingPanel:
             c_txt = "\n目視できる %s件 (補0本 %s件のうち)" % (cf["ready"], tot)
             if cf["unjudged"]:
                 c_txt += "\n※絵柄が未判定 %s件 (押すと判定)" % cf["unjudged"]
+            # ★2026-08-14: 0件の時に**理由**を出す。件数だけだと「候補は37件ある」のに
+            #   押して空振りする (status の安い母数と、足切り後の実数が食い違うため)。
+            #   何で消えたのかが分かれば、次に何をすべきかが決まる。
+            if not cf["ready"] and not cf["unjudged"]:
+                _lbl = {"all_art": "絵柄違い", "all_ng": "候補NG済", "no_cand": "候補なし",
+                        "all_known": "収載済", "no_cache": "未検索", "all_number": "番号違い",
+                        "skip_ledger": "見送り済", "all_used": "使用済",
+                        "no_ref": "現物画像なし", "no_cardno": "番号なし"}
+                _b = sorted(((v, _lbl.get(k, k)) for k, v in (cf.get("blocked") or {}).items()
+                             if v), reverse=True)
+                if _b:
+                    c_txt += "\n※押しても0件 (" + " / ".join(
+                        "%s%s" % (v, n) for v, n in _b[:4]) + ")"
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。

@@ -185,3 +185,17 @@ def test_scrape_progress_is_one_line_per_card():
     src = open(os.path.join(_TCG, "psa_to_csv.py"), encoding="utf-8").read()
     assert 'print(" 📷2", end="", flush=True)' in src
     assert 'print(f"    📷 PSA 画像 表+裏 取得 (2 枚)")' not in src
+
+
+# ---------------------------------------------------------------------------
+# 7. 補URL ボタンの残件ラベル (2026-08-14)
+# ---------------------------------------------------------------------------
+def test_hoju_badge_explains_zero():
+    """★「目視できる0件」の時に理由を出す。件数だけだと押して空振りする
+    (status の安い母数 37件 と、足切り後の実数 0件 が食い違うため)。"""
+    src = open(r"C:\dev\iMak\iMakHQ\control_panel.py", encoding="utf-8").read()
+    i = src.index("目視できる %s件")
+    block = src[i:i + 1400]
+    assert "押しても0件" in block
+    for k in ("絵柄違い", "候補NG済", "候補なし", "未検索"):
+        assert k in block, f"{k} の内訳が出ない"
