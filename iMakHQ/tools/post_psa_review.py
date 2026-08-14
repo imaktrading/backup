@@ -324,11 +324,16 @@ def _catalog_lookup_expected(brand: str, subject: str, card_number: str, categor
         from integrations import psa_to_csv as _cat_psa
         subj_up = (subject or "").upper()
         if category == "one_piece_tcg":
-            if "DON" in subj_up:
+            # ★2026-08-14 実バグ: `"DON" in subject` は **DONQUIXOTE(ドフラミンゴ)** にも当たる。
+            #   cert 165788214 'DONQUIXOTE DOFLAMINGO WANTED ALTERNATE ART' が DON!!カード扱いで
+            #   専用検索に入り、そこで失敗 → **候補ゼロ**。生成器は ST03-009_OP03 と解決できて
+            #   いるのに目視だけ確定できず、毎回同じカードを聞いていた (2走行連続)。
+            #   DON!!カードの Subject は必ず "DON!! CARD"。`!!` まで見る。
+            #   さらに DON 検索が外れたら **通常検索に落とす** (return None で打ち切らない)。
+            if "DON!!" in subj_up:
                 rec = _cat_psa.lookup_don(brand, subject)
                 if rec:
                     return rec.get("product_id")
-                return None
             rec = _cat_psa.lookup_one_piece(brand, card_number, subject)
             if rec:
                 return rec.get("card_id") or rec.get("product_id")
