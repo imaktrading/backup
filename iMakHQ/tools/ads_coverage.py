@@ -162,12 +162,20 @@ def main() -> int:
     for mkt in targets:
         cs = campaigns(mkt)
         promoted: set[str] = set()
+        rates: dict[str, int] = {}
         for c in cs:
-            promoted |= ads_of(c["campaignId"], mkt)
+            ids = ads_of(c["campaignId"], mkt)
+            promoted |= ids
+            # 率が混在していると同じ商品でも手数料が違う。**必ず見えるようにする**
+            rate = (c.get("fundingStrategy") or {}).get("bidPercentage", "?")
+            rates[str(rate)] = rates.get(str(rate), 0) + len(ids)
         mine = by_mkt.get(mkt, set())
         r = coverage(mine, promoted)
         pct = r["covered"] / r["live"] * 100 if r["live"] else 0
-        print(f"## {mkt}   キャンペーン {len(cs)}本")
+        rate_txt = " / ".join(f"{k}%={v}件" for k, v in sorted(rates.items()))
+        print(f"## {mkt}   キャンペーン {len(cs)}本   広告率 {rate_txt}")
+        if len([k for k, v in rates.items() if v]) > 1:
+            print("   ⚠️ 広告率が混在しています (同じ商品でも手数料が違う)")
         print(f"   live {r['live']:>5} / 広告に入っている {r['covered']:>5} ({pct:.0f}%) / "
               f"入っていない {len(r['uncovered']):>4} / 終了済が残留 "
               f"{len(r['stale_in_campaign']):>4}")
