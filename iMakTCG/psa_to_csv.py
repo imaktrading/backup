@@ -42,6 +42,8 @@ from chrome_util import detect_chrome_major  # uc version_main を実Chromeか�
 
 # ===== 設定 =====
 CERTS_FILE = "certs.txt"
+PSA_IMAGE_OVERRIDE_PATH = r"C:/dev/iMak_data/dedupe/psa_image_override.json"
+PSA_IMAGE_OVERRIDE_PATH = r"C:/dev/iMak_data/dedupe/psa_image_override.json"
 DESCRIPTION_FILE = "PSA10_snkrdunk.txt"  # 防衛テンプレ (= Stock Photo + cert 違う可能性 明記) を全 TCG listing 適用
 DEFAULT_PRICE = 100.00
 SCHEDULE_WEEKS = 2
@@ -1207,6 +1209,38 @@ def build_title(game, set_name, card_number, subject, finish=""):
 
     return f"{prefix} {game_short} #{card_number}"[:80]
 
+def psa_image_substitute(cert):
+    """PSA に画像が無い cert → **代わりに使う cert** (無ければ "")。純関数に近い I/O。
+
+    ★PSA 側に画像が存在しない個体があり、何度走っても取れない (実例 102629645)。
+      同じカードの別 cert の画像を使う。商品説明に「証明番号が異なる個体が届くことがある」
+      と明記しているので、これで齟齬は生じない (2026-08-14 ユーザー確定)。
+    """
+    try:
+        with open(PSA_IMAGE_OVERRIDE_PATH, encoding="utf-8") as f:
+            m = json.load(f) or {}
+    except Exception:
+        return ""
+    v = m.get(str(cert or "").strip()) or {}
+    return str(v.get("from_cert") or "").strip()
+
+
+def psa_image_substitute(cert):
+    """PSA に画像が無い cert → **代わりに使う cert** (無ければ "")。
+
+    ★PSA 側に画像が存在しない個体があり、何度走っても取れない (実例 102629645)。
+      同じカードの別 cert の画像を使う。商品説明に「証明番号が異なる個体が届くことが
+      ある」と明記しているので齟齬は生じない (2026-08-14 ユーザー確定)。
+    """
+    try:
+        with open(PSA_IMAGE_OVERRIDE_PATH, encoding="utf-8") as f:
+            m = json.load(f) or {}
+    except Exception:
+        return ""
+    v = m.get(str(cert or "").strip()) or {}
+    return str(v.get("from_cert") or "").strip()
+
+
 def load_description():
     """商品説明テンプレを読む。**読めなければ例外で止める** (2026-08-13)。
 
@@ -1478,6 +1512,25 @@ def get_psa_data(driver, cert_number):
                 # Front を空にすることで build_pic_url が載せず、目視で気づける。
                 data['CardImageUrlUnknownSide'] = card_image_urls[0]
                 print(f"    ⚠️ PSA 画像 1 枚のみ = 表裏不明 → 商品画像に使わない (面確定できず)")
+        # ★2026-08-14: **PSA に画像が無い個体**がある (実例 cert 102629645 ボア・ハンコック
+        #   OP07-038 = 文字情報は取れるのに画像URLが1つも無い)。取得失敗ではなく PSA 側に
+        #   無いので、次回走っても永久に取れず、毎回1枠を食って除外されていた (2日連続)。
+        #   → **同じカードの別 cert の画像**を代わりに使う (ユーザー確定)。商品説明に
+        #     「証明番号が異なる個体が届くことがある」と明記済なので齟齬は生じない。
+        #   対応表: iMak_data/dedupe/psa_image_override.json  {cert: {"from_cert": "…"}}
+        if not data.get('CardImageUrlFront'):
+            _sub = psa_image_substitute(cert_number)
+            if _sub:
+                _sd = cache.get(_sub) or get_psa_data(driver, _sub)
+                if _sd and _sd.get('CardImageUrlFront'):
+                    data['CardImageUrl'] = _sd.get('CardImageUrl')
+                    data['CardImageUrlFront'] = _sd['CardImageUrlFront']
+                    data['CardImageUrlBack'] = _sd.get('CardImageUrlBack')
+                    data['CardImageFromCert'] = _sub
+                    print(f' 📷代替(cert {_sub})', end='', flush=True)
+                else:
+                    print(f'    ⚠️ 代替画像 cert {_sub} からも取れず', flush=True)
+
         if not data.get('Subject'):
             print(f"\n    [DEBUG] {body[:400]}")
             return None
