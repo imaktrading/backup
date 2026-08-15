@@ -1,5 +1,18 @@
 # iMakHarvest daily_report
 
+## 2026-08-15 (続) — ポーター抽出を「PORTER タンカー限定」に是正 (user 確定)
+
+- user 確定: 欲しいのは **「PORTER タンカー + カテゴリ」** = TANKER シリーズ限定。ポーターなら
+  何でも NG。カテゴリ = ヘルメット/ボディ/ショルダー/ビジネスバッグ。
+- 変更:
+  - DEFAULT_KEYWORDS を `PORTER タンカー <4カテゴリ>` に再構成 (旧 `PORTER <cat>` + 広すぎる
+    PORTER/ポーター単独 を廃止)。
+  - `is_tanker()` 追加 (タンカー/TANKER 必須) → runner で not_tanker reject。
+  - `_OFFTARGET_RE` に **別ブランド混入** (FADEN/NORTH FACE 等、「検ポーター」タグ付き) を追加。
+  - test: is_tanker 5件 + other_brand 2件。
+- 是正: `mercari_porter` 52 → (バッグ絞り41) → **タンカー限定20行** に書き直し。全て PORTER TANKER
+  バッグ (トート/ショルダー/ボディ/2way・3way)、別ブランド0。
+
 ## 2026-08-13 — メルカリ フリマ検索でポーター抽出 新設 (user 依頼)
 
 - 決定: メルカリ フリマをキーワード検索して PORTER を収集 + フィルタ (評価数≥100 / 本人確認済 /

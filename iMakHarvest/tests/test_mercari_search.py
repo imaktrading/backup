@@ -79,3 +79,24 @@ def test_passes_seller_filter_identity_optional():
 def test_is_target_bag(title, expected):
     from scrapers.mercari_search import is_target_bag
     assert is_target_bag(title) is expected
+
+
+@pytest.mark.parametrize("title,expected", [
+    ("PORTER タンカー ショルダーバッグ 黒", True),
+    ("ポーター TANKER ボディバッグ", True),
+    ("PORTER ボストンバッグ ブラック", False),          # 非タンカー
+    ("PORTER フレーム ヘルメットバッグ", False),         # 別シリーズ
+    ("", False),
+])
+def test_is_tanker(title, expected):
+    from scrapers.mercari_search import is_tanker
+    assert is_tanker(title) is expected
+
+
+@pytest.mark.parametrize("title", [
+    "FADEN 2WAY ショルダーバッグ 検ポーター",      # 別ブランド
+    "《THE NORTH FACE》ヘルメットバッグ 検ポーター",  # 別ブランド
+])
+def test_other_brand_excluded(title):
+    from scrapers.mercari_search import is_target_bag
+    assert is_target_bag(title) is False

@@ -77,20 +77,30 @@ _BAG_POSITIVE_RE = re.compile(
     r"クラッチ|ダレス|ブリーフ|\bBAG\b|WAIST",
     re.IGNORECASE,
 )
-# 除外 (= 財布/革小物 / リュック・ナップサック / 他ブランドコラボ)。
+# 除外 (= 財布/革小物 / リュック・ナップサック / 他ブランドコラボ / 別ブランド混入)。
+# 別ブランド: 「検ポーター」(= 検索タグ) を付けた FADEN/NORTH FACE 等が混入 (2026-08-15)。
 _OFFTARGET_RE = re.compile(
     r"財布|ウォレット|ウオレット|wallet|コインケース|カードケース|キーケース|名刺入れ|"
     r"パスケース|マネークリップ|ラウンドファスナー|小銭入れ|札入れ|"
     r"リュック|ナップサック|バックパック|デイパック|"
-    r"TENDERLOIN|テンダーロイン|別注|digawel",
+    r"TENDERLOIN|テンダーロイン|別注|digawel|"
+    r"FADEN|ファーデン|NORTH\s*FACE|ノースフェイス|ザ・?ノース",
     re.IGNORECASE,
 )
+# タンカー (= PORTER TANKER シリーズ) 必須 (2026-08-15 user 確定: ポーターなら何でもは NG)。
+_TANKER_RE = re.compile(r"タンカー|TANKER", re.IGNORECASE)
+
+
+def is_tanker(title: str) -> bool:
+    """title に タンカー/TANKER を含むか (= PORTER TANKER シリーズ限定)."""
+    return bool(_TANKER_RE.search(title or ""))
 
 
 def is_target_bag(title: str) -> bool:
-    """title が 目的のバッグ (バッグ語あり かつ 財布/リュック/コラボ語なし) なら True.
+    """title が 目的のバッグ (バッグ語あり かつ 財布/リュック/コラボ/別ブランド語なし) なら True.
 
     fail-closed: バッグ語が無い、 または 除外語を含む → False (= reject)。
+    ※ タンカー限定は is_tanker で別途判定 (呼出側で AND)。
     """
     t = title or ""
     if _OFFTARGET_RE.search(t):

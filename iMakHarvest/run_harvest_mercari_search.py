@@ -26,11 +26,13 @@ from scrapers import mercari_search as MSch  # noqa: E402
 from scrapers import mercari_seller as MS  # noqa: E402
 from scrapers import mercari_item_detail  # noqa: E402
 
-# user 指定 (2026-08-10): PORTER 組合せで精度確保
+# user 確定 (2026-08-15): 「PORTER タンカー + カテゴリ」= タンカーシリーズ限定。
+# ポーターなら何でも NG。 収集後に is_tanker + is_target_bag で二重に絞る。
 DEFAULT_KEYWORDS = [
-    "PORTER", "ポーター",
-    "PORTER タンカー", "PORTER ヘルメットバッグ", "PORTER ボディバッグ",
-    "PORTER ショルダーバッグ", "PORTER ビジネスバッグ",
+    "PORTER タンカー ヘルメットバッグ",
+    "PORTER タンカー ボディバッグ",
+    "PORTER タンカー ショルダーバッグ",
+    "PORTER タンカー ビジネスバッグ",
 ]
 DUMP_DIR = Path(r"c:\dev\iMak_data\catalog\_amazon_jp_dumps")
 
@@ -64,8 +66,8 @@ def main(argv=None) -> int:
         _log("★手動モード: 各キーワードの検索画面でフリマアシスト「もっと見る」を click してください")
 
     driver = MS.create_anonymous_driver(headless=headless)
-    kept, rej = [], {"sold": 0, "not_target_bag": 0, "seller_rating": 0,
-                     "no_identity": 0, "fetch_fail": 0}
+    kept, rej = [], {"sold": 0, "not_tanker": 0, "not_target_bag": 0,
+                     "seller_rating": 0, "no_identity": 0, "fetch_fail": 0}
     try:
         collected = MSch.collect_multi_keyword_urls(
             keywords, driver, price_min=args.price_min, price_max=args.price_max,
@@ -86,8 +88,13 @@ def main(argv=None) -> int:
             if not detail.get("in_stock"):
                 rej["sold"] += 1
                 continue
-            # タイトル・カテゴリ絞り (バッグのみ、 財布/リュック/コラボ を除外)
-            if not MSch.is_target_bag(detail.get("title") or ""):
+            title = detail.get("title") or ""
+            # タンカー限定 (= PORTER TANKER シリーズ以外を除外)
+            if not MSch.is_tanker(title):
+                rej["not_tanker"] += 1
+                continue
+            # バッグのみ (財布/リュック/コラボ/別ブランド を除外)
+            if not MSch.is_target_bag(title):
                 rej["not_target_bag"] += 1
                 continue
             q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから
