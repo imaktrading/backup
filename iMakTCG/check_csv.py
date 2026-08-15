@@ -74,9 +74,18 @@ NO_RARITY_CARD_TYPES = {"don", "resource", "ex resource", "ex base", "energy mar
 #   MC-* / SI-*  : スタートデッキ100 系 (1,185件)。デッキ収録カードは印刷レアリティ記号なし
 #   CP4-* / CP5- : Classic 系 (件数未確認、要実測)。印刷レアリティ表記なし
 # 番号 prefix 単位で判定 (C:Set の表記依存は禁止=Advisor 明示指示)。
+# ★2026-08-15 追加: Pokemon の **スターターセット / スターターデッキ**。
+#   Catalog 起票「公式にレアリティが無いカードをどうするか」への HQ 判断:
+#   **値は作らない (空欄が正)。落としているのは監査の必須リストの方**。
+#   7/21 の DBSCG Leader は カードに 'L' が **印字されている**ので写しただけで、
+#   無いものを埋めた事例ではない (同 response の末尾も「DON / Resource / ENERGY MARKER は
+#   rarity 空が正」と明記)。実測: 該当5 prefix 208件は **rarity 保有 0件** = 構造的に非該当。
+#     SD(Starter Deck 127) / SLD(Darkrai VSTAR 20) / SLL(Lucario VSTAR 21) /
+#     SVEL・SVEM(Mewtwo ex 各20)
 NO_RARITY_NUMBER_PREFIXES = (
     "don-", "rp-",                 # One Piece DON!! / Gundam リソース
     "mc-", "si-", "cp4-", "cp5-",  # Pokemon スタートデッキ100 / Classic 系 (2026-07-30)
+    "sd-", "sld-", "sll-", "svel-", "svem-",   # Pokemon スターターセット系 (2026-08-15)
 )
 # キャラクター概念が無い種別 (name='リソース' / 'エナジーマーカー')
 NO_CHARACTER_CARD_TYPES = {"resource", "ex resource", "ex base", "energy marker"}
