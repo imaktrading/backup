@@ -67,3 +67,32 @@ def test_night_search_filters_before_the_limit():
     i_dry = src.index("空振り続き")
     i_lim = src.index("todo = todo[:limit]", src.index("def run_night_search"))
     assert i_dry < i_lim, "間引きが limit の後に来ている"
+
+
+# ---------------------------------------------------------------------------
+# 丸腰の内訳は「待ち / 手が打てる」の2分類で出す (2026-08-15)
+# ---------------------------------------------------------------------------
+def test_split_blocked_groups_into_two():
+    """★内部の理由名 (all_art / all_ng …) をそのまま出すと読めない。
+    実測で確かめた通り、これらの大半は『その版が市場に無い』という同じ事情。"""
+    b = {"all_art": 13, "all_ng": 8, "no_cand": 8, "all_known": 5,
+         "no_cache": 6, "all_number": 1}
+    sp = H.split_blocked(b)
+    assert sp["wait"] == 34
+    assert sp["act"] == 7
+    assert sp["wait_detail"][0] == ("絵柄が別カード", 13)
+    assert dict(sp["act_detail"])["未検索(今夜の巡回で解決)"] == 6
+
+
+def test_split_blocked_handles_empty():
+    sp = H.split_blocked({})
+    assert sp == {"wait": 0, "act": 0, "wait_detail": [], "act_detail": []}
+    assert H.split_blocked(None)["wait"] == 0
+
+
+def test_status_uses_the_two_way_split():
+    src = open(r"C:\dev\iMak\iMakHQ\tools\psa_hoju_fill.py", encoding="utf-8").read()
+    assert "市場にその版が無い(待ち)" in src
+    # 旧表示は print から消えていること (コメント内の言及は経緯なので許す)
+    prints = [l for l in src.splitlines() if l.strip().startswith("print(")]
+    assert not any("確証待ち(キャッシュ済)" in l for l in prints), "安い母数の表示が残っている"

@@ -2408,16 +2408,24 @@ class ListingPanel:
             # ★2026-08-14: 0件の時に**理由**を出す。件数だけだと「候補は37件ある」のに
             #   押して空振りする (status の安い母数と、足切り後の実数が食い違うため)。
             #   何で消えたのかが分かれば、次に何をすべきかが決まる。
+            # ★2026-08-15: 内部の理由名を並べても読めない (ユーザー指摘「ん?ってなる」)。
+            #   **「市場にその版が無い(待ち)」と「手が打てる」** の2分類で出す。
+            #   語彙は psa_hoju_fill.split_blocked が SSOT (status と同じ言葉になる)。
             if not cf["ready"] and not cf["unjudged"]:
-                _lbl = {"all_art": "絵柄違い", "all_ng": "候補NG済", "no_cand": "候補なし",
-                        "all_known": "収載済", "no_cache": "未検索", "all_number": "番号違い",
-                        "skip_ledger": "見送り済", "all_used": "使用済",
-                        "no_ref": "現物画像なし", "no_cardno": "番号なし"}
-                _b = sorted(((v, _lbl.get(k, k)) for k, v in (cf.get("blocked") or {}).items()
-                             if v), reverse=True)
-                if _b:
-                    c_txt += "\n※押しても0件 (" + " / ".join(
-                        "%s%s" % (v, n) for v, n in _b[:4]) + ")"
+                try:
+                    import psa_hoju_fill as _H
+                    _sp = _H.split_blocked(cf.get("blocked") or {})
+                    c_txt += "\n※押しても0件"
+                    if _sp["wait"]:
+                        c_txt += "\n  市場にその版が無い %s件 (%s)" % (
+                            _sp["wait"],
+                            " / ".join("%s%s" % (n, m) for m, n in _sp["wait_detail"][:3]))
+                    if _sp["act"]:
+                        c_txt += "\n  手が打てる %s件 (%s)" % (
+                            _sp["act"],
+                            " / ".join("%s%s" % (n, m) for m, n in _sp["act_detail"][:3]))
+                except Exception:                                 # noqa: BLE001
+                    pass
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。

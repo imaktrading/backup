@@ -929,9 +929,29 @@ def run_status(max_backups=1):
     targets = select_backfill_targets(vals, max_backups=max_backups)
     ready = sum(1 for t in targets if _entry_fresh(cache.get(t["itemID"]), today))
     need = sum(1 for t in targets if not _entry_fresh(cache.get(t["itemID"]), today))
-    print(f"\n=== 対象(補<{max_backups}) {len(targets)}件 ===")
-    print(f"  確証待ち(キャッシュ済) : {ready}件  → `confirm` で視覚確証→補URL書込")
-    print(f"  未検索(要 slice2)     : {need}件  → `search` で夜間検索")
+    print(f"\n=== 丸腰(補<{max_backups}) {len(targets)}件 の内訳 ===")
+    # ★2026-08-15: 「確証待ち(キャッシュ済) 35件」のような**安い母数**は出さない。
+    #   実際に押して出る数と10倍ずれ、空振りさせていた。足切りを通した実数を、
+    #   **「今すぐ手が打てる」/「市場にその版が無い(待ち)」** の2分類で出す。
+    #   内部の理由名 (all_art / all_ng …) をそのまま出すと「ん?」となるので和名にする。
+    try:
+        w = count_workload(max_backups=max_backups, today=today)
+        cf = w["confirm"]
+        sp = split_blocked(cf["blocked"])
+        print(f"  ■ 今すぐ手が打てる : {cf['ready'] + cf['unjudged'] + sp['act']}件")
+        if cf["ready"]:
+            print(f"      目視で埋まる       {cf['ready']}件  → `confirm` (🩹ボタン)")
+        if cf["unjudged"]:
+            print(f"      絵柄を判定すれば   {cf['unjudged']}件  → 押すと判定される")
+        for name, n in sp["act_detail"]:
+            print(f"      {name:<18}{n}件")
+        print(f"  ■ 市場にその版が無い(待ち) : {sp['wait']}件")
+        for name, n in sp["wait_detail"]:
+            print(f"      {name:<18}{n}件")
+        print("      ※ こちらの作業では動きません。供給が出れば毎晩の巡回が拾います")
+    except Exception as e:                                        # noqa: BLE001
+        print(f"  (内訳を出せず: {type(e).__name__}) キャッシュ有 {ready} / 未検索 {need}"
+              f"  ※これは足切り前の母数。実数ではない")
 
 
 def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, aux_max=None):
@@ -1015,6 +1035,35 @@ def build_confirm_context(vals, cache, today, verbose=False):
 # 足切りで止まった理由。**ラベル・status_now・confirm のログが同じ語彙を使う**。
 STOP_REASONS = ("skip_ledger", "no_cache", "no_cand", "no_cardno",
                 "all_known", "all_number", "all_ng", "all_used", "no_ref", "all_art")
+
+# ★2026-08-15 ユーザー指示「そういう分類にしてくれないと、ん?ってなる」。
+#   内部の理由名 (all_art / all_ng / no_cand …) をそのまま出していたので読めなかった。
+#   1件ずつ画像で確かめた結果、これらの大半は **その版が市場に出ていない** という
+#   同じ1つの事情だった (実証: ステューシー OP07-085 の候補3件は全部 OP11 の
+#   SPECIAL ALTERNATE ART = 別カード。人の「違う」判断は正しかった)。
+#   なので **「待ち」か「手が打てる」か** の2つに畳んで出す。
+WAIT_REASONS = ("all_art", "all_ng", "no_cand", "all_known", "all_used")   # 市場にその版が無い
+ACT_REASONS = ("no_cache", "all_number", "no_cardno", "skip_ledger")       # こちらで動かせる
+_REASON_JA = {"all_art": "絵柄が別カード", "all_ng": "過去に別カードと確認済",
+              "no_cand": "候補が出ない", "all_known": "候補が主URLと同じ",
+              "all_used": "既に使用済", "no_cache": "未検索(今夜の巡回で解決)",
+              "all_number": "番号違い", "no_cardno": "カード番号が取れない",
+              "skip_ledger": "見送り中(翌日復活)", "no_ref": "現物画像が無い"}
+
+
+def split_blocked(blocked):
+    """止まっている理由を「市場待ち / 手が打てる」に畳む (純関数)。
+
+    Returns: {"wait": n, "act": n, "wait_detail": [(和名, n)], "act_detail": [...]}
+    """
+    b = blocked or {}
+
+    def _d(keys):
+        return [(_REASON_JA.get(k, k), int(b.get(k) or 0)) for k in keys if b.get(k)]
+    wd, ad = _d(WAIT_REASONS), _d(ACT_REASONS)
+    return {"wait": sum(n for _, n in wd), "act": sum(n for _, n in ad),
+            "wait_detail": sorted(wd, key=lambda x: -x[1]),
+            "act_detail": sorted(ad, key=lambda x: -x[1])}
 
 
 def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):

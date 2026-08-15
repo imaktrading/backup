@@ -197,5 +197,6 @@ def test_hoju_badge_explains_zero():
     i = src.index("目視できる %s件")
     block = src[i:i + 1400]
     assert "押しても0件" in block
-    for k in ("絵柄違い", "候補NG済", "候補なし", "未検索"):
-        assert k in block, f"{k} の内訳が出ない"
+    assert "市場にその版が無い" in block, "待ち/手が打てる の2分類で出していない"
+    assert "手が打てる" in block
+    assert "split_blocked" in block, "語彙が psa_hoju_fill と別定義になっている"
