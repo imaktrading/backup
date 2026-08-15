@@ -21,6 +21,7 @@ slice2 = 夜間検索(無人・throttle・キャッシュ書込のみ。補URL�
   - 補URL(AC-AG) 実数 < max_backups
   - KEY(AI) or cert あり = 供給検索の起点が要る
 """
+import json
 import os
 import re
 import sys
@@ -183,6 +184,68 @@ def _search_age_key(entry, today):
         return (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(d)).days
     except Exception:
         return float("inf")
+
+
+# ---------------------------------------------------------------------------
+# 空振りの記録 (2026-08-15)
+# ---------------------------------------------------------------------------
+# ★ユーザー指摘「全然減らない気がする」。実測で 8/09〜8/15 の7日間、補0本が 41〜46件で
+#   横ばい。毎晩30件を叩いているのに埋まらない。ログを見ると同じカードが7日連続で並び、
+#   毎晩「多変種で変種確証不可」または絵柄不一致で候補ゼロになっていた。
+#   = **市場にその版が出ていない**カードを毎晩探し直し、30枠の半分以上を食っていた。
+#   絵柄判定は正しく働いている (実測 same 514 / different 199、理由も具体的) ので、
+#   判定を緩めてはいけない。**枠の使い方**を変える。
+DRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hoju_dry_streak.json")
+DRY_SKIP_AFTER = 3      # 何夜連続で候補ゼロなら毎晩の枠から外すか
+DRY_RETRY_DAYS = 7      # 外した後、何日おきに再挑戦するか (供給は後から湧くので捨てない)
+
+
+def load_dry(path=None):
+    try:
+        with open(path or DRY_PATH, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def save_dry(d, path=None):
+    try:
+        with open(path or DRY_PATH, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        print(f"  ⚠ 空振り台帳を書けず ({type(e).__name__})")
+
+
+def _days_between(a, b):
+    import datetime as _dt
+    try:
+        return (_dt.date.fromisoformat(b) - _dt.date.fromisoformat(a)).days
+    except Exception:
+        return 999
+
+
+def should_skip_dry(entry, today, skip_after=DRY_SKIP_AFTER, retry_days=DRY_RETRY_DAYS):
+    """空振り続きの対象を今夜の枠から外すか (純関数)。
+
+    連続空振りが skip_after 以上、かつ最後の挑戦から retry_days 未満なら外す。
+    **捨てるのではなく間隔を空けるだけ** — 供給は後から湧くので、週1では必ず戻る。
+    """
+    if not entry:
+        return False
+    if int(entry.get("streak") or 0) < skip_after:
+        return False
+    return _days_between(str(entry.get("last") or ""), today) < retry_days
+
+
+def update_dry(dry, itemid, has_cand, today, card_no=""):
+    """1件の結果を台帳に反映 (純関数)。候補が出たら streak を 0 に戻す。"""
+    e = dict(dry.get(itemid) or {})
+    e["streak"] = 0 if has_cand else int(e.get("streak") or 0) + 1
+    e["last"] = today
+    if card_no:
+        e["card_no"] = card_no
+    dry[itemid] = e
+    return dry
 
 
 def targets_needing_search(targets, cache, today):
@@ -499,6 +562,17 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
     todo = targets if fresh else targets_needing_search(targets, cache, today)
     total_targets = len(targets)
     skipped = total_targets - len(todo)
+    # ★2026-08-15: 空振りが続く対象を今夜の枠から外す (limit を切る前に間引く)。
+    #   毎晩30枠の半分以上を「市場にその版が無いカード」が食い、7日間 補0本が横ばいだった。
+    #   捨てるのではなく間隔を空けるだけ (DRY_RETRY_DAYS ごとに必ず戻る)。
+    dry = load_dry()
+    _dry_out = [t for t in todo if should_skip_dry(dry.get(t.get("itemID")), today)]
+    if _dry_out:
+        _skip_ids = {t.get("itemID") for t in _dry_out}
+        todo = [t for t in todo if t.get("itemID") not in _skip_ids]
+        print(f"  ⏭ 空振り続き {len(_dry_out)}件を今夜は外す "
+              f"({DRY_SKIP_AFTER}夜連続で候補ゼロ → {DRY_RETRY_DAYS}日おきに再挑戦)。"
+              f"空いた枠は未探索の出品に回る")
     if limit is not None:
         todo = todo[:limit]
     print(f"夜間検索: 対象({label}) {total_targets}件 / 当日済skip {skipped}件 / 今回 {len(todo)}件"
@@ -565,6 +639,26 @@ def run_night_search(max_backups=1, limit=None, fresh=False, snkr_sleep=1.0, com
         print(f"   🧹 自分が起こした driver/chrome {_n_killed}個を終了(他ジョブには触らない)")
     print(f"✅ 補URLリサーチ完了: {len(searchable)}件 (mercari在庫あり{m_hit} / snkr在庫あり{s_hit}) "
           f"→ psa_research_cache.json 書込。補URL書込は slice3(昼確認)。")
+    # ★2026-08-15: 今夜の結果を空振り台帳に反映する。候補が1件でも出れば streak を 0 に戻す。
+    #   (候補が出たかどうかだけを見る。使えるかは slice3 の絵柄判定が決める)
+    try:
+        _c2 = _load_cache()
+        _n_dry = 0
+        for _i in searchable:
+            _t = todo[_i]
+            _iid = _t.get("itemID")
+            _e = (_c2.get(_iid) or {})
+            _mr = _e.get("mercari") or {}
+            _has = bool(_mr.get("all_cands") or _mr.get("cands") or _mr.get("best")
+                        or ((_e.get("snkrdunk") or {}).get("available")))
+            update_dry(dry, _iid, _has, today, queries[_i].get("card_no") or "")
+            _n_dry += 0 if _has else 1
+        save_dry(dry)
+        if _n_dry:
+            print(f"  📉 今夜 候補ゼロ {_n_dry}件 を空振り台帳に記録 "
+                  f"({DRY_SKIP_AFTER}夜連続で毎晩の枠から外れる)")
+    except Exception as _e:                                       # noqa: BLE001
+        print(f"  ⚠ 空振り台帳の更新に失敗 (非致命): {type(_e).__name__}")
     # ★現物画像URLを焼いておく = 朝、ボタンのラベルが API 無しで正確に出せる (2026-08-09)。
     try:
         prime_ref_images(targets or [])
