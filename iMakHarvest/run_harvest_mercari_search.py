@@ -64,7 +64,8 @@ def main(argv=None) -> int:
         _log("★手動モード: 各キーワードの検索画面でフリマアシスト「もっと見る」を click してください")
 
     driver = MS.create_anonymous_driver(headless=headless)
-    kept, rej = [], {"sold": 0, "seller_rating": 0, "no_identity": 0, "fetch_fail": 0}
+    kept, rej = [], {"sold": 0, "not_target_bag": 0, "seller_rating": 0,
+                     "no_identity": 0, "fetch_fail": 0}
     try:
         collected = MSch.collect_multi_keyword_urls(
             keywords, driver, price_min=args.price_min, price_max=args.price_max,
@@ -84,6 +85,10 @@ def main(argv=None) -> int:
                 continue
             if not detail.get("in_stock"):
                 rej["sold"] += 1
+                continue
+            # タイトル・カテゴリ絞り (バッグのみ、 財布/リュック/コラボ を除外)
+            if not MSch.is_target_bag(detail.get("title") or ""):
+                rej["not_target_bag"] += 1
                 continue
             q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから
             if not MSch.passes_seller_filter(

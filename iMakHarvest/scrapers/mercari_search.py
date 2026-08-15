@@ -68,6 +68,36 @@ def extract_seller_quality(driver) -> dict:
     return q
 
 
+# タイトル・カテゴリ絞り (2026-08-15 user 指摘: 財布/リュック/コラボ品が混入)。
+# メルカリ検索は曖昧マッチのため、 収集後に **バッグ語を含み** かつ **除外語を含まない**
+# 物だけ keep する (= user が渡したキーワード=バッグカテゴリを合格条件にする)。
+_BAG_POSITIVE_RE = re.compile(
+    r"バッグ|バック|ショルダー|ボディ|ビジネスバッグ|ヘルメット|トート|ボストン|"
+    r"ウエストポーチ|ウエストバッグ|サコッシュ|メッセンジャー|\d\s*WAY|２WAY|ダッフル|"
+    r"クラッチ|ダレス|ブリーフ|\bBAG\b|WAIST",
+    re.IGNORECASE,
+)
+# 除外 (= 財布/革小物 / リュック・ナップサック / 他ブランドコラボ)。
+_OFFTARGET_RE = re.compile(
+    r"財布|ウォレット|ウオレット|wallet|コインケース|カードケース|キーケース|名刺入れ|"
+    r"パスケース|マネークリップ|ラウンドファスナー|小銭入れ|札入れ|"
+    r"リュック|ナップサック|バックパック|デイパック|"
+    r"TENDERLOIN|テンダーロイン|別注|digawel",
+    re.IGNORECASE,
+)
+
+
+def is_target_bag(title: str) -> bool:
+    """title が 目的のバッグ (バッグ語あり かつ 財布/リュック/コラボ語なし) なら True.
+
+    fail-closed: バッグ語が無い、 または 除外語を含む → False (= reject)。
+    """
+    t = title or ""
+    if _OFFTARGET_RE.search(t):
+        return False
+    return bool(_BAG_POSITIVE_RE.search(t))
+
+
 def passes_seller_filter(quality: dict, min_rating_count: int = 100,
                          require_identity: bool = True) -> bool:
     """セラー品質が閾値を満たすか (fail-closed: 評価数不明は False)."""

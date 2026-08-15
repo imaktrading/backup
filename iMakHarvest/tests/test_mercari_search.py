@@ -56,3 +56,26 @@ def test_passes_seller_filter_identity_optional():
     assert passes_seller_filter(
         {"rating_count": 150, "identity_verified": False},
         require_identity=False) is True
+
+
+@pytest.mark.parametrize("title,expected", [
+    # 本命バッグ → keep
+    ("PORTER ポーター ショルダーバッグ 黒", True),
+    ("PORTER タンカー ボディバック 斜め掛け", True),      # バック表記ゆれ
+    ("PORTER / HEAT WAIST BAG BLACK", True),               # 英語BAG
+    ("希少 PORTER タンカー 3WAY セージグリーン", True),   # 3WAY
+    ("PORTER ボストンバッグ ブラック", True),
+    ("PORTER ボディバッグ ウエストポーチ オリーブ", True),
+    # off-target → reject
+    ("新品 PORTER カレント ラウンドファスナー ブラック", False),  # 財布
+    ("PORTER タンカー リュック 黒", False),                        # リュック
+    ("[極美品] PORTER タンカー バックパック", False),              # バックパック
+    ("レア TENDERLOIN PORTER バックパック リュック", False),       # コラボ
+    ("PORTER digawel 別注 ナップサック", False),                    # 別注/ナップサック
+    ("PORTER タンカー マルチポーチ ブラック", False),              # 小物ポーチ(バッグ語なし)
+    ("PORTER 財布 二つ折り", False),
+    ("", False),
+])
+def test_is_target_bag(title, expected):
+    from scrapers.mercari_search import is_target_bag
+    assert is_target_bag(title) is expected
