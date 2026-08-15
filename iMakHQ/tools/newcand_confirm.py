@@ -30,8 +30,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import html as _html
+import io
 import json
 import os
 import re
@@ -390,8 +392,12 @@ def catalog_candidates(title, card_no, db=DB_PATH):
     return catalog_by_name(title, _MAX_CANDS, db)
 
 
-def load_items(limit=0, write=True):
-    """台帳2本 → 目視対象 items (I/O)。候補タイトル復元 + カード番号抽出 + 版引きまで済ませる。"""
+def load_items(limit=0, write=True, resolve=True, stats=None):
+    """台帳2本 → 目視対象 items (I/O)。候補タイトル復元 + カード番号抽出 + 版引きまで済ませる。
+
+    resolve=False で catalog の版引きを省く (件数を数えるだけの時に速い)。
+    stats に dict を渡すと内訳 (pending/show/auto) を書き込む。
+    """
     src_rows = []
     for tab in SRC_TABS:
         cur = _read_tab(tab)
@@ -435,7 +441,7 @@ def load_items(limit=0, write=True):
         # ★目視で入れた番号が最優先 (機械が読めなかった/読み違えた分を人が上書きできる)
         card_no = typed_no.get(p["url"], "") or extract_card_no(title)
         p["no_from_typed"] = bool(typed_no.get(p["url"]))
-        variants = catalog_candidates(title, card_no)
+        variants = catalog_candidates(title, card_no) if resolve else []
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants})
         all_items.append(p)
 
@@ -469,6 +475,8 @@ def load_items(limit=0, write=True):
         print(f"  ♻ 結論済カードの別の仕入元 {len(auto_aux)}件 (DRY-RUN: 書かない)")
     for i, it in enumerate(items):
         it["idx"] = i
+    if stats is not None:
+        stats.update({"pending": len(all_items), "show": len(items), "auto": len(auto_aux)})
     return items
 
 
@@ -999,6 +1007,23 @@ def append_missing_models(rows, path=MISSING_CSV):
         for r in rows:
             w.writerow(r)
     return len(rows)
+
+
+def count_workload(limit=0):
+    """ボタンのラベル用の残件 (I/O)。{"show": 目視で出る件数, "auto": 自動で補URL, "pending": 未結論}。
+
+    ★2026-08-15 ユーザー要望「ラベルに残件数出せる? 押すかどうかの判断になる」。
+      **押したら何件 目視が出るか**を出す (母数ではない)。未結論の大半は
+      結論済カードの別の仕入元で、人に見せずに補URL へ回るため、
+      未結論の数をそのまま出すと 10倍ずれる (補URL のラベルで一度やった失敗)。
+      版引き (catalog) は数に影響しないので省いて速く数える。
+    """
+    st = {}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        load_items(limit=limit, write=False, resolve=False, stats=st)
+    return {"show": st.get("show", 0), "auto": st.get("auto", 0),
+            "pending": st.get("pending", 0)}
 
 
 def save(items, res):

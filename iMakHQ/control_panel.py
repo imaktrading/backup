@@ -925,6 +925,7 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "🌱 捨てた候補→新規出品の種",
         "label_fg": "#0a7",
+        "badge": "newcand",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "newcand_confirm.py", "--limit=20"],
         "params": [],
@@ -2355,10 +2356,19 @@ class ListingPanel:
         """
         if not self._hoju_btns:
             return
+        # ★2026-08-15: 🌱(捨てた候補→新規出品の種) の残件も同じ subprocess で数える
+        #   (ユーザー要望「押すかどうかの判断になる」)。片方が転んでも
+        #   もう片方のラベルは出す。
         code = (
-            "import sys,json;sys.path.insert(0,r'%s');"
-            "import psa_hoju_fill as H;"
-            "print(json.dumps(H.count_workload()))"
+            "import sys,json;sys.path.insert(0,r'%s')\n"
+            "import psa_hoju_fill as H\n"
+            "d={'hoju':H.count_workload()}\n"
+            "try:\n"
+            "    import newcand_confirm as N\n"
+            "    d['newcand']=N.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['newcand']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            "print(json.dumps(d))"
             % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
         )
         # ★2026-08-10: 「(残件 取得できず)」とだけ出て **理由が分からない**状態だった。
@@ -2392,6 +2402,7 @@ class ListingPanel:
         try:
             if w is None:
                 raise RuntimeError(err_reason or "不明")
+            w, nc = w["hoju"], (w.get("newcand") or {})
             tot = w["targets"]
             # ★2026-08-09: **押したら何件できるか**を出す。母数を出してはいけない。
             #   直前まで「目視待ち32件」と出して実際に出るのは3件だった (足切り8段を
@@ -2426,7 +2437,17 @@ class ListingPanel:
                             " / ".join("%s%s" % (n, m) for m, n in _sp["act_detail"][:3]))
                 except Exception:                                 # noqa: BLE001
                     pass
-            by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt}
+            # 🌱: **押したら何件 目視が出るか**を出す (未結論の母数ではない)。
+            #   未結論の大半は結論済カードの別の仕入元で、人に見せず補URLに回る。
+            if nc.get("error"):
+                n_txt = "\n(残件 取得できず: %s)" % str(nc["error"])[:40]
+            elif not nc.get("show") and not nc.get("auto"):
+                n_txt = "\n※押しても0件 (全部 結論済)"
+            else:
+                n_txt = "\n目視 %s件" % nc.get("show", 0)
+                if nc.get("auto"):
+                    n_txt += " (+自動で補URL %s件)" % nc["auto"]
+            by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。
@@ -2436,7 +2457,7 @@ class ListingPanel:
                 by_kind = {k: v + "\n※前回値" for k, v in cached.items()}
             else:
                 msg = f"\n(残件 取得できず: {why[:40]})"
-                by_kind = {"hoju_search": msg, "hoju_confirm": msg}
+                by_kind = {"hoju_search": msg, "hoju_confirm": msg, "newcand": msg}
             try:
                 self.append_log(f"⚠️ 補URL 残件の取得に失敗: {why}\n")
             except Exception:                                     # noqa: BLE001

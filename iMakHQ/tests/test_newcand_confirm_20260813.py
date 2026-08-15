@@ -19,6 +19,7 @@ import sys
 
 import pytest
 
+_ROOT = r"C:\dev\iMak"
 _TOOLS = r"C:\dev\iMak\iMakHQ\tools"
 if _TOOLS not in sys.path:
     sys.path.insert(0, _TOOLS)
@@ -646,3 +647,43 @@ def test_saved_candidates_are_not_shown_again(monkeypatch):
     monkeypatch.setattr(N, "catalog_candidates", lambda *a, **k: [])
     urls = [it["url"] for it in N.load_items(write=False)]
     assert urls == ["https://jp.mercari.com/item/m333"], f"結論済がまた出ている: {urls}"
+
+
+def test_count_workload_reports_what_pressing_gives(monkeypatch):
+    """★2026-08-15 ユーザー要望「ラベルに残件数出せる? 押すかどうかの判断になる」。
+
+    出すのは **押したら目視が何件出るか**。未結論の母数を出すと、その大半が
+    結論済カードの別の仕入元 (= 人に見せず補URLへ回る) なので桁がずれる。
+    """
+    seen = "https://jp.mercari.com/item/m900"
+    tabs = {
+        N.OUT_TAB: [N.OUT_HEADER,
+                    [N.USE_LIST, "", "https://jp.mercari.com/item/m1", "t", "", "", "TCG",
+                     "one_piece_tcg:OP01-001", "OP01-001", "358a", "2026-08-14"]],
+        N.NG_TAB: [N.NG_HEADER], N.CNO_TAB: [N.CNO_HEADER],
+        "補URL候補NG": [["itemID", "cert", "url", "候補タイトル"],
+                        # 結論済カード(OP01-001) の別の仕入元 → 自動で補URL
+                        ["358b", "1", seen, "PSA10 モンキー・D・ルフィ OP01-001"],
+                        # 未結論のカード → 目視に出る
+                        ["358c", "2", "https://jp.mercari.com/item/m901",
+                         "PSA10 ゾロ OP02-002"]],
+        "補URL要調査": [["itemID", "cert", "url", "候補タイトル"]],
+    }
+    wrote = []
+    monkeypatch.setattr(N.sheet_io, "read_tab", lambda tab, *a, **k: tabs.get(tab, []))
+    monkeypatch.setattr(N.sheet_io, "write_rows_to_tab",
+                        lambda *a, **k: wrote.append(a[0]))
+    monkeypatch.setattr(N.sheet_io, "_product_ws",
+                        lambda: type("W", (), {"get_all_values": lambda self: [[]]})())
+    monkeypatch.setattr(N, "catalog_candidates", lambda *a, **k: [])
+    w = N.count_workload()
+    assert w == {"show": 1, "auto": 1, "pending": 2}, w
+    assert not wrote, "数えるだけなのに書いている"
+
+
+def test_panel_shows_seed_backlog_on_the_button():
+    """ボタンのラベルに残件を出す配線 (押す前に判断できる)。"""
+    src = open(os.path.join(_ROOT, "iMakHQ", "control_panel.py"), encoding="utf-8").read()
+    assert '"badge": "newcand"' in src, "🌱 ボタンに badge が付いていない"
+    assert "d['newcand']=N.count_workload()" in src, "残件を数えていない"
+    assert '"newcand": n_txt' in src, "ラベルに反映していない"
