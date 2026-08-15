@@ -1443,12 +1443,44 @@ def _save_psa_cache(cache):
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
+def _apply_image_substitute(driver, cert_number, data, cache):
+    """画像が無い cert に **同じカードの別 cert の画像**を当てる (I/O)。
+
+    対応表: iMak_data/dedupe/psa_image_override.json。表に無ければ何もしない。
+    ★scrape 経路と **キャッシュ hit 経路の両方**から呼ぶこと (2026-08-15)。
+      片方だけだと、既にキャッシュに居る cert (= まさに画像が無いもの) が素通りする。
+    """
+    sub = psa_image_substitute(cert_number)
+    if not sub:
+        return data
+    sd = (cache or {}).get(sub)
+    if not (sd and sd.get('CardImageUrlFront')) and driver is not None:
+        sd = get_psa_data(driver, sub)
+    if sd and sd.get('CardImageUrlFront'):
+        data = dict(data)
+        data['CardImageUrl'] = sd.get('CardImageUrl')
+        data['CardImageUrlFront'] = sd['CardImageUrlFront']
+        data['CardImageUrlBack'] = sd.get('CardImageUrlBack')
+        data['CardImageFromCert'] = sub
+        print(f"    📷 画像は cert {sub} から借用 (この cert は PSA に画像が無い)", flush=True)
+    else:
+        print(f"    ⚠️ 代替画像 cert {sub} からも取れず", flush=True)
+    return data
+
+
 def get_psa_data(driver, cert_number):
     # キャッシュチェック
     cache = _load_psa_cache()
     if cert_number in cache:
         cached = cache[cert_number]
         if cached and cached.get('Subject'):
+            # ★2026-08-15: **キャッシュ hit でも代替画像を当てる**。
+            #   前回 (8/14) は scrape 経路にだけ入れたので、既にキャッシュにある cert
+            #   (= まさに画像が無い 102629645) は早期 return で素通りし、3日連続で
+            #   「PSA 画像が1枚も無い」で除外され続けた。画像が無いのは PSA 側の事情なので
+            #   キャッシュを消しても直らない。読み出し口で当てるのが正しい。
+            if not cached.get('CardImageUrlFront'):
+                cached = _apply_image_substitute(driver, cert_number, cached, cache)
             # iMakeBayAPI 共有 cache にも投入 (= local cache hit でも、 共有 cache 未登録なら書込)
             try:
                 import psa_api as _ihq_psa_api
@@ -1519,17 +1551,7 @@ def get_psa_data(driver, cert_number):
         #     「証明番号が異なる個体が届くことがある」と明記済なので齟齬は生じない。
         #   対応表: iMak_data/dedupe/psa_image_override.json  {cert: {"from_cert": "…"}}
         if not data.get('CardImageUrlFront'):
-            _sub = psa_image_substitute(cert_number)
-            if _sub:
-                _sd = cache.get(_sub) or get_psa_data(driver, _sub)
-                if _sd and _sd.get('CardImageUrlFront'):
-                    data['CardImageUrl'] = _sd.get('CardImageUrl')
-                    data['CardImageUrlFront'] = _sd['CardImageUrlFront']
-                    data['CardImageUrlBack'] = _sd.get('CardImageUrlBack')
-                    data['CardImageFromCert'] = _sub
-                    print(f' 📷代替(cert {_sub})', end='', flush=True)
-                else:
-                    print(f'    ⚠️ 代替画像 cert {_sub} からも取れず', flush=True)
+            data = _apply_image_substitute(driver, cert_number, data, cache)
 
         if not data.get('Subject'):
             print(f"\n    [DEBUG] {body[:400]}")

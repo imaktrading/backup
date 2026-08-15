@@ -72,3 +72,31 @@ def test_override_entries_explain_themselves():
     for cert, v in m.items():
         assert v.get("from_cert"), cert
         assert v.get("why"), f"{cert} に理由が無い"
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-15: キャッシュ hit でも代替を当てる
+# ---------------------------------------------------------------------------
+def test_substitute_applies_on_cache_hit():
+    """★前回はscrape経路にだけ入れたため、既にキャッシュにある cert
+    (= まさに画像が無い 102629645) が早期 return で素通りし、3日連続で除外され続けた。"""
+    src = open(os.path.join(_TCG, "psa_to_csv.py"), encoding="utf-8").read()
+    i = src.index("if cert_number in cache:")
+    block = src[i:i + 900]
+    assert "_apply_image_substitute" in block, "キャッシュ hit 経路で代替を当てていない"
+
+
+def test_apply_image_substitute_borrows_from_cache():
+    m = _mod()
+    cache = {"149777037": {"CardImageUrl": "u0", "CardImageUrlFront": "u1",
+                           "CardImageUrlBack": "u2"}}
+    out = m._apply_image_substitute(None, "102629645", {"Subject": "BOA"}, cache)
+    assert out["CardImageUrlFront"] == "u1"
+    assert out["CardImageUrlBack"] == "u2"
+    assert out["CardImageFromCert"] == "149777037"
+
+
+def test_apply_image_substitute_is_noop_when_not_registered():
+    m = _mod()
+    src = {"Subject": "X"}
+    assert m._apply_image_substitute(None, "999999999", src, {}) is src
