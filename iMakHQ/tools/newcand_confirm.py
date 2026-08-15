@@ -172,6 +172,7 @@ def pending_rows(src_rows, done_urls):
     """台帳の行 → 未処理だけ (純関数)。done_urls に有る url は落とす。
 
     src_rows: [(tab, header, row)] 形式。row は [itemID, cert, url, title, ...]。
+    done_urls は `_nurl()` 済の集合 (末尾スラッシュ/クエリ違いで取り逃さない)。
     ★列は**見出し名で引く**。位置で決め打ちすると、台帳に列が増えた時に別の列を
       掴む (2026-08-13: 「状態」列を足した結果、候補タイトルの位置に状態が入り、
       画面のタイトルが『新規出品候補へ (出品…)』になった)。
@@ -182,7 +183,7 @@ def pending_rows(src_rows, done_urls):
         if len(r) < 3:
             continue
         url = (r[2] or "").strip()
-        if not url or url in done_urls or url in seen:
+        if not url or _nurl(url) in done_urls or url in seen:
             continue
         seen.add(url)
 
@@ -397,11 +398,13 @@ def load_items(limit=0, write=True):
         head = list(cur[0]) if cur else []
         for r in cur[1:]:
             src_rows.append((tab, head, r))
-    done = set()
-    for tab in (OUT_TAB, NG_TAB):
-        for r in _read_tab(tab)[1:]:
-            if r and r[0]:
-                done.add(r[0].strip())
+    # ★2026-08-15: **結論済の候補がまた出ていた** (ユーザー「今出ているカード、以前やったよ」)。
+    #   新規出品候補タブは 8/13 に「用途 / HIGH転記」を先頭に足したので **URL は3列目**。
+    #   なのに 1列目 (=「出品」等の文字) を URL として集めており、
+    #   **保管済 URL が1件も除外されていなかった**。列は名前/定数で引く。
+    done = {_nurl(r[OUT_URL_COL]) for r in migrate_out_rows(_read_tab(OUT_TAB))
+            if len(r) > OUT_URL_COL and r[OUT_URL_COL]}
+    done |= {_nurl(r[0]) for r in _read_tab(NG_TAB)[1:] if r and r[0]}
     # 前回 目視で入れたカード番号 (タイトルが無くてもここから引ける)
     typed_no = {}
     for r in (_read_tab(CNO_TAB))[1:]:

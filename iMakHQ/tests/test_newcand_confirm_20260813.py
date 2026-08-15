@@ -619,3 +619,30 @@ def test_foreign_language_has_its_own_reason():
     assert "外国語版" in labels["foreign"]
     v = [{"pid": "EB03-053", "category": "one_piece_tcg", "name": "Nami", "image": ""}]
     assert "外国語版" in N.build_html([_item(0, v)]).decode()
+
+
+def test_saved_candidates_are_not_shown_again(monkeypatch):
+    """★2026-08-15 ユーザー「今出ているカード、以前やったよ」。
+
+    新規出品候補タブは 8/13 に先頭へ「用途 / HIGH転記」を足したので **URL は3列目**。
+    1列目を URL とみなしていたため、保管済の候補が1件も除外されず毎回また出ていた。
+    """
+    saved = "https://jp.mercari.com/item/m111"
+    tabs = {
+        N.OUT_TAB: [N.OUT_HEADER,
+                    [N.USE_LIST, "", saved, "t", "", "", "TCG",
+                     "one_piece_tcg:OP01-001", "OP01-001", "358a", "2026-08-14"]],
+        N.NG_TAB: [N.NG_HEADER, ["https://jp.mercari.com/item/m222", "対象外", "2026-08-14", "t"]],
+        N.CNO_TAB: [N.CNO_HEADER],
+        "補URL候補NG": [["itemID", "cert", "url", "候補タイトル"],
+                        ["358a", "1", saved + "/", "t1"],
+                        ["358b", "2", "https://jp.mercari.com/item/m222", "t2"],
+                        ["358c", "3", "https://jp.mercari.com/item/m333", "t3"]],
+        "補URL要調査": [["itemID", "cert", "url", "候補タイトル"]],
+    }
+    monkeypatch.setattr(N.sheet_io, "read_tab", lambda tab, *a, **k: tabs.get(tab, []))
+    monkeypatch.setattr(N.sheet_io, "_product_ws",
+                        lambda: type("W", (), {"get_all_values": lambda self: [[]]})())
+    monkeypatch.setattr(N, "catalog_candidates", lambda *a, **k: [])
+    urls = [it["url"] for it in N.load_items(write=False)]
+    assert urls == ["https://jp.mercari.com/item/m333"], f"結論済がまた出ている: {urls}"
