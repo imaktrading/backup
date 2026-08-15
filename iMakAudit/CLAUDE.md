@@ -29,6 +29,19 @@ iMakAudit/
 3. **session_end**: セッション終了前の最終確認
 4. **targeted**: 特定決定事項の個別検証
 
+## Gemini 二次監査 (2026-08-15 追記: 実態が抜けていた)
+
+Claude 監査官のレポートだけで終わらせない。**必ず Gemini に二次監査させる**:
+
+```
+python iMakAudit/gemini_verifier.py iMakAudit/audit_logs/claude_audit_<timestamp>.md
+```
+
+Gemini が各判定に AGREE / PARTIAL / DISPUTE / UNVERIFIABLE を付ける。
+Claude 監査官の虚偽・見落としを検出する最後の砦なので、**省略禁止**
+(グローバル CLAUDE.md の「独立実装監査官」節と同じ手順。ここに書いていなかったので追記)。
+結果は `audit_logs/gemini_verdict_*.md` に残る (実績 28ファイル)。
+
 ## レポート保存ルール
 
 監査官が出したレポートは、HQが `audit_logs/audit_YYYYMMDD_HHMMSS.md` として保存する。

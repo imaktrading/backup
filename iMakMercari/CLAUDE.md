@@ -33,7 +33,11 @@
 
 ### DDP送料テーブル（全プロジェクト共通）
 
-価格帯に応じた ShippingProfileName: <39, 40-60, 60-100, 100-200, 200-300, 300-400, 400-500, 500-600, 600-800, 800-1000
+ShippingProfileName は **`DDP-{group}-P{tier}`** 形式。実例: DDP-B-P16 / DDP-C-P06 等 (Porter=B、Tシャツ=C、montbell=C)。
+group = HTS 関税グループ、tier = 価格帯。値は `iMakeBayAPI/config/global.yaml` の
+`v6_pricing` が SSOT で、`listing_common.get_shipping_policy_name(price_usd, category)`
+が唯一の決定口。**手で価格帯名を組み立てない**
+(旧 `<39, 40-60, …` は V5 時代の名前。2026-08-15 実CSVで確認して訂正)
 
 ## 商品特定ルール
 
@@ -109,7 +113,8 @@
 - ConditionID: 3000 (Pre-owned)
 - Location: Japan
 - StoreCategoryID: 41828940010 (Backpacks & Bags)
-- ShippingProfileName: 60-100（固定）
+- ShippingProfileName: **固定しない**。`get_shipping_policy_name(price_usd, "Porter")` が決める
+  (実CSV 2026-07-13 は DDP-B-P15〜P19 が混在。「60-100 固定」は V5 時代の記述。2026-08-15 訂正)
 
 ## Description生成（Porter固有）
 
