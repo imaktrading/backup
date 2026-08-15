@@ -8,6 +8,7 @@
 import functools
 import os
 import re as _re
+import time as _t
 
 MAINT_SHEET_ID = "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4"   # 「既存メンテ」スプシ
 MAINT_URL = f"https://docs.google.com/spreadsheets/d/{MAINT_SHEET_ID}/edit"
@@ -431,18 +432,42 @@ def restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost=None)
     return n
 
 
-def read_tab(tab, sheet_id=MAINT_SHEET_ID):
-    """スプシ tab を 2d list で返す (I/O)。タブが無ければ []。PDCA台帳の前回値読込に使う。"""
+def _open(sheet_id=MAINT_SHEET_ID):
+    """スプシを開く (I/O)。読み書き共通の入口 = ここを差し替えれば test できる。"""
     import gspread
     from google.oauth2.service_account import Credentials
     creds = Credentials.from_service_account_file(
         CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
-    try:
-        return sh.worksheet(tab).get_all_values()
-    except gspread.WorksheetNotFound:
-        return []
+    return gspread.authorize(creds).open_by_key(sheet_id)
+
+
+def is_quota_error(e):
+    """Sheets API の読み取り上限 (429) か (純関数)。"""
+    return "429" in str(e) or "Quota exceeded" in str(e)
+
+
+def read_tab(tab, sheet_id=MAINT_SHEET_ID, retries=3):
+    """スプシ tab を 2d list で返す (I/O)。タブが無ければ []。
+
+    ★2026-08-15: **429 (1分あたりの読み取り上限) で落ちていた**。
+      同じ走行が同じタブを何度も読むと、他ジョブと合わさって上限に当たる。
+      上限は「1分あたり」なので **待てば必ず開く** → 落とさずに待って再試行する。
+      (待たずに落とすと、目視の途中で全部やり直しになる)
+    """
+    import gspread
+    sh = _open(sheet_id)
+    for attempt in range(retries + 1):
+        try:
+            return sh.worksheet(tab).get_all_values()
+        except gspread.WorksheetNotFound:
+            return []
+        except Exception as e:                                    # noqa: BLE001
+            if not is_quota_error(e) or attempt == retries:
+                raise
+            wait = 20 * (attempt + 1)
+            print(f"  ⏳ Sheets 読み取り上限 (429) → {wait}秒待って再試行 "
+                  f"({attempt + 1}/{retries}) tab={tab}", flush=True)
+            _t.sleep(wait)
 
 
 def write_rows_to_tab(tab, rows2d, sheet_id=MAINT_SHEET_ID):

@@ -393,18 +393,18 @@ def load_items(limit=0, write=True):
     """台帳2本 → 目視対象 items (I/O)。候補タイトル復元 + カード番号抽出 + 版引きまで済ませる。"""
     src_rows = []
     for tab in SRC_TABS:
-        cur = sheet_io.read_tab(tab) or []
+        cur = _read_tab(tab)
         head = list(cur[0]) if cur else []
         for r in cur[1:]:
             src_rows.append((tab, head, r))
     done = set()
     for tab in (OUT_TAB, NG_TAB):
-        for r in (sheet_io.read_tab(tab) or [])[1:]:
+        for r in _read_tab(tab)[1:]:
             if r and r[0]:
                 done.add(r[0].strip())
     # 前回 目視で入れたカード番号 (タイトルが無くてもここから引ける)
     typed_no = {}
-    for r in (sheet_io.read_tab(CNO_TAB) or [])[1:]:
+    for r in (_read_tab(CNO_TAB))[1:]:
         if r and len(r) > 1 and r[0] and r[1]:
             typed_no[r[0].strip()] = r[1].strip().upper()
     try:
@@ -713,9 +713,10 @@ def build_html(items):
 # 書込 (I/O)
 # ---------------------------------------------------------------------------
 def _append_tab(tab, header, new_rows):
-    cur = sheet_io.read_tab(tab) or []
+    cur = _read_tab(tab)
     body = migrate_out_rows(cur) if tab == OUT_TAB else (cur[1:] if cur else [])
     sheet_io.write_rows_to_tab(tab, [header] + body + new_rows)
+    _invalidate_cache(tab)
 
 
 def mark_use(rows, listed_keys=(), key_col=OUT_KEY_COL, use_col=0):
@@ -767,7 +768,7 @@ def live_cards():
     """
     out = {}
     try:
-        vals = sheet_io._product_ws().get_all_values()
+        vals = _read_product()
     except Exception as e:
         print(f"  ⚠ 商品管理シートを読めず 出品中チェック skip ({type(e).__name__})")
         return out
@@ -819,7 +820,7 @@ def live_key_set():
       1つしか残らない (実際 OP05-119 が漏れた)。用途の判定にはこちらを使う。
     """
     try:
-        vals = sheet_io._product_ws().get_all_values()
+        vals = _read_product()
     except Exception:
         return set()
     return {(r[34] or "").strip() for r in vals[1:]
@@ -833,7 +834,7 @@ def decided_cards():
       残りの供給URLは**補URL**に回せばいい (捨てない = 無在庫では供給が厚いほど良い)。
     """
     out = {}
-    for r in migrate_out_rows(sheet_io.read_tab(OUT_TAB) or []):
+    for r in migrate_out_rows(_read_tab(OUT_TAB)):
         if len(r) <= OUT_KEY_COL + 1 or (r[0] or "").strip() != USE_LIST:
             continue
         pid = (r[OUT_KEY_COL + 1] or "").strip()
@@ -854,7 +855,7 @@ def save_auto_aux(items):
                      (it.get("price") if isinstance(it.get("price"), int) else ""),
                      "", SHEET_CATEGORY, key, pid, it["src_itemid"], today])
     if rows:
-        have = {_nurl(r[OUT_URL_COL]) for r in migrate_out_rows(sheet_io.read_tab(OUT_TAB) or [])
+        have = {_nurl(r[OUT_URL_COL]) for r in migrate_out_rows(_read_tab(OUT_TAB))
                 if len(r) > OUT_URL_COL}
         rows = [r for r in rows if _nurl(r[OUT_URL_COL]) not in have]
     if rows:
@@ -865,11 +866,45 @@ def save_auto_aux(items):
 def already_listed_keys():
     """既に『出品』として保管済の KEY (I/O)。走行をまたいでも二重に出品候補にしない。"""
     keys = set()
-    for r in migrate_out_rows(sheet_io.read_tab(OUT_TAB) or []):
+    for r in migrate_out_rows(_read_tab(OUT_TAB)):
         if (len(r) > OUT_KEY_COL and (r[0] or "").strip() == USE_LIST
                 and (r[OUT_KEY_COL] or "").strip()):
             keys.add(r[OUT_KEY_COL].strip())
     return keys
+
+
+# ★2026-08-15: **同じ走行で同じタブを何度も読んでいた** (sync_status → load_items で
+#   OUT/NG/元台帳/商品管理シートを二重に読む)。他ジョブと合わさって Sheets の
+#   「1分あたりの読み取り上限」に当たり、目視の途中で 429 で落ちた。
+#   1走行の中では中身が変わらないので **1回読んだら使い回す**。
+_TAB_CACHE = {}
+_PROD_CACHE = None
+
+
+def _read_tab(tab):
+    if tab not in _TAB_CACHE:
+        _TAB_CACHE[tab] = sheet_io.read_tab(tab) or []
+    return _TAB_CACHE[tab]
+
+
+def _read_product():
+    global _PROD_CACHE
+    if _PROD_CACHE is None:
+        _PROD_CACHE = sheet_io._product_ws().get_all_values()
+    return _PROD_CACHE
+
+
+def reset_cache():
+    """1走行分のキャッシュを捨てる (test / 長時間プロセス用)。"""
+    global _PROD_CACHE
+    _TAB_CACHE.clear()
+    _PROD_CACHE = None
+
+
+def _invalidate_cache(*tabs):
+    """書いたタブだけキャッシュを捨てる (書込後に古い値を使わない)。"""
+    for t in tabs:
+        _TAB_CACHE.pop(t, None)
 
 
 def _nurl(u):
@@ -901,13 +936,13 @@ def sync_status():
 
     どちらも突き合わせて機械が付ける (人がチェックを付けない = 付け忘れが起きない)。
     """
-    out_rows = migrate_out_rows(sheet_io.read_tab(OUT_TAB) or [])
-    ng_rows = [r for r in (sheet_io.read_tab(NG_TAB) or [])[1:] if r]
+    out_rows = migrate_out_rows(_read_tab(OUT_TAB))
+    ng_rows = [r for r in (_read_tab(NG_TAB))[1:] if r]
 
     # (1) 商品管理シートの A列(仕入元URL) に在れば「転記済」
     n_done = 0
     try:
-        prod = {_nurl(r[0]) for r in sheet_io._product_ws().get_all_values()[1:] if r and r[0]}
+        prod = {_nurl(r[0]) for r in _read_product()[1:] if r and r[0]}
     except Exception as e:
         print(f"  ⚠ 商品管理シートを読めず転記チェック skip ({type(e).__name__})")
         prod = None
@@ -923,7 +958,7 @@ def sync_status():
 
     # (2) 元台帳に結論を書き戻す
     for tab in SRC_TABS:
-        cur = sheet_io.read_tab(tab) or []
+        cur = _read_tab(tab)
         if not cur:
             continue
         head = list(cur[0])
@@ -1037,7 +1072,7 @@ def save(items, res):
     cnos = [[by_idx[c["idx"]]["url"], c["no"], today]
             for c in res.get("card_nos", []) if c["idx"] in by_idx]
     if cnos:
-        cur = {r[0].strip(): r for r in (sheet_io.read_tab(CNO_TAB) or [])[1:] if r and r[0]}
+        cur = {r[0].strip(): r for r in (_read_tab(CNO_TAB))[1:] if r and r[0]}
         for r in cnos:
             cur[r[0]] = r                      # 同じ URL は最新の入力で上書き
         sheet_io.write_rows_to_tab(CNO_TAB, [CNO_HEADER] + list(cur.values()))

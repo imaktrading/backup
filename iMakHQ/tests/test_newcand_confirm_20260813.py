@@ -17,6 +17,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 _TOOLS = r"C:\dev\iMak\iMakHQ\tools"
 if _TOOLS not in sys.path:
     sys.path.insert(0, _TOOLS)
@@ -107,6 +109,15 @@ def test_parse_result_empty():
 # ---------------------------------------------------------------------------
 # 5. HTML が3つの状態を出し分ける
 # ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def reset_sheet_cache():
+    """★2026-08-15: 1走行のシート読取キャッシュを入れたので、test 間で持ち越さない
+    (持ち越すと前の test の monkeypatch した値を掴む)。"""
+    N.reset_cache()
+    yield
+    N.reset_cache()
+
+
 def _item(idx, variants, title="PSA10 ナミ EB03-053", card_no="EB03-053"):
     return {"idx": idx, "url": f"https://m/{idx}", "src": "補URL候補NG", "src_itemid": "358_1",
             "src_cert": "111", "price": 9000, "title": title, "card_no": card_no,
