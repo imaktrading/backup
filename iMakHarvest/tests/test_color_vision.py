@@ -487,13 +487,24 @@ class TestExtractKatakanaColorFromText:
             title="メンズシャツ", description="サイズ M、新品",
         ) == ""
 
-    def test_kanji_color_not_extracted(self):
-        # 漢字色名 (「赤」「緑」等) は whitelist 対象外、抽出しない
-        # AI fallback に委ねる (AI もカタカナで答える)
+    def test_kanji_color_extracted_to_canonical(self):
+        # 2026-08-15: 単漢字色は canonical katakana へ確定写像 (旧: Vision委譲→「クロ」等誤り)。
         from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
-        assert extract_katakana_color_from_text(
-            title="赤いセーター", description="サイズ L",
-        ) == ""
+        assert extract_katakana_color_from_text("赤いセーター", "サイズ L") == "レッド"
+        assert extract_katakana_color_from_text("PORTER タンカー 黒 旧型", "") == "ブラック"
+        assert extract_katakana_color_from_text("タンカー 紺 ボディ", "") == "ネイビー"
+        assert extract_katakana_color_from_text("黒色 バッグ", "") == "ブラック"
+
+    def test_kanji_color_compound_not_false_matched(self):
+        # 熟語の一部 (抹茶/黒革) は誤検出しない (境界厳密、 fail-closed)。
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        assert extract_katakana_color_from_text("抹茶ラテ 一番くじ", "") == ""
+        assert extract_katakana_color_from_text("黒革 財布", "") == ""
+
+    def test_katakana_takes_priority_over_kanji(self):
+        from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415
+        # カタカナ色があれば漢字より優先 (原文表記尊重)
+        assert extract_katakana_color_from_text("ネイビー 黒 タンカー", "") == "ネイビー"
 
     def test_empty_inputs(self):
         from scrapers.color_vision import extract_katakana_color_from_text  # noqa: PLC0415

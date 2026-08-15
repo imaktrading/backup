@@ -145,6 +145,8 @@ EXTENDED_KATAKANA_COLORS = (
     "オリーブ",
     "バーガンディ",
     "セージ",
+    "セージグリーン",   # 2026-08-15 Porter TANKER 定番色 (セージ より優先=longest-first)
+    "シルバーグレー",   # 2026-08-15 Porter TANKER 色
     "ミスト",
 )
 
@@ -237,7 +239,49 @@ def extract_katakana_color_from_text(title: str, description: str) -> str:
                     return color
                 # 次の候補位置へ
                 idx = source.find(color, idx + 1)
+    # カタカナで拾えない時のみ 漢字色 → canonical katakana へ (2026-08-15)。
+    # 出品タイトルが漢字色 (「黒」「紺」等) の場合、 従来は Vision に落ちて「クロ」等
+    # 非 canonical 値になっていた。 境界付きで確定的に canonical へ写す。
+    kanji = _extract_kanji_color(title, description)
+    return kanji
+
+
+# 漢字色 → canonical katakana (2026-08-15: メルカリ Porter で「黒」→ Vision「クロ」誤り対策)。
+# 単漢字色のみ (誤解の少ないもの)。 茶/緑 等は 抹茶/深緑 等の compound を境界で除外。
+_KANJI_COLOR_MAP = {
+    "黒": "ブラック", "白": "ホワイト", "赤": "レッド", "青": "ブルー",
+    "緑": "グリーン", "黄": "イエロー", "橙": "オレンジ", "桃": "ピンク",
+    "紫": "パープル", "茶": "ブラウン", "灰": "グレー", "紺": "ネイビー",
+    "銀": "シルバー", "金": "ゴールド",
+}
+
+
+def _extract_kanji_color(title: str, description: str) -> str:
+    """title/desc から 単漢字色を canonical katakana で抽出 (境界厳密、 fail-closed).
+
+    境界: 漢字色 C の 前後が別の漢字でない (= 熟語の一部でない) 場合のみ採用。
+      - "…吉田カバン 黒 旧型" → 黒 (前後 空白/カナ) → ブラック
+      - "抹茶" の 茶 → 前が 抹(漢字) → 不採用 (誤検出防止)
+      - "黒革" の 黒 → 後が 革(漢字) → 不採用 (安全側、 Vision に委ねる)
+      - "黒色" は許可 (後続 色 は熟語でなく接尾辞)
+    どこにも無ければ 空文字。
+    """
+    for source in (title or "", description or ""):
+        for i, ch in enumerate(source):
+            if ch not in _KANJI_COLOR_MAP:
+                continue
+            prev = source[i - 1] if i > 0 else ""
+            nxt = source[i + 1] if i + 1 < len(source) else ""
+            if _is_han(prev):
+                continue
+            if _is_han(nxt) and nxt != "色":
+                continue
+            return _KANJI_COLOR_MAP[ch]
     return ""
+
+
+def _is_han(c: str) -> bool:
+    return bool(c) and ("一" <= c <= "鿿")
 
 
 # 漢字 reject 用: Han ideograph (CJK Unified Ideographs) range

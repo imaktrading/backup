@@ -1,5 +1,18 @@
 # iMakHarvest daily_report
 
+## 2026-08-15 (続2) — 色抽出の誤り修正 (漢字色→canonical / Vision ゴミ排除)
+
+- user 指摘: mercari_porter の色が違う (クロ/シブラック/オレンジ等)。根因: `extract_katakana_color_from_text`
+  が漢字色(黒/紺等)を拾わず Vision に落ち、 Vision が「クロ」「シブラック」等の非 canonical/ゴミを返す。
+- 変更 (`scrapers/color_vision.py`、 共有):
+  - `_extract_kanji_color()` 追加: 単漢字色→canonical katakana (黒→ブラック等)。境界厳密
+    (抹茶/黒革 は熟語で不採用)、 カタカナ優先。Step1 で確定抽出 → Vision 不要に。
+  - whitelist に `セージグリーン` `シルバーグレー` 追加 (Porter TANKER 定番色)。
+  - test 更新 (旧 kanji_not_extracted → kanji→canonical / compound安全 / katakana優先)。
+- 是正: mercari_porter 76件の S列を title 再判定で修正 (クロ→ブラック 12件、 セージグリーン/
+  シルバーグレー 復元、 シブラック/末尾欠け は空欄=fail-closed)。最終: ブラック62/ネイビー3/
+  セージグリーン2 等、 空2 (ゴミ除去)、 オレンジ1 (内側色誤認=目視対応)。`pytest tests/` 全緑。
+
 ## 2026-08-15 (続) — ポーター抽出を「PORTER タンカー限定」に是正 (user 確定)
 
 - user 確定: 欲しいのは **「PORTER タンカー + カテゴリ」** = TANKER シリーズ限定。ポーターなら
