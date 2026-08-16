@@ -96,3 +96,45 @@ def test_daytime_screen_is_assembled_at_night():
     assert "psa_hoju_fill.py confirm --dry-run" in bat, "昼の組み立てを夜に回していない"
     # 候補が無いと組み立てられないので、検索より後に置く
     assert bat.index("confirm --dry-run") > bat.index("psa_hoju_fill.py search --limit=30")
+
+
+def _naked():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_hq_naked_sheet", os.path.join(_TOOLS, "hoju_naked_sheet.py"))
+    m = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = m
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_naked_list_uses_the_same_three_words():
+    """★2026-08-17: 丸腰の一覧タブ。状態は3つだけで、語彙はボタンと揃える。
+
+    ユーザー「42件はどこにあるの?」→ 商品管理シートに散っていて見えなかった。
+    内部の理由名 (all_art / no_cand …) をそのまま出すと読めない、は 8/15 に指摘済み。
+    """
+    N = _naked()
+    assert N.classify("all_art", False, False)[0] == N.WAIT
+    assert N.classify("no_cand", False, False)[0] == N.WAIT
+    assert N.classify("no_cache", False, False)[0] == N.ACT
+    assert N.classify("all_number", False, False)[0] == N.ACT
+    assert N.classify("", True, False) == (N.READY, "候補あり")
+    assert "未判定" in N.classify("", True, True)[1]
+    # 理由は日本語 (内部名を出さない)
+    assert N.classify("all_art", False, False)[1] == "絵柄が別カード"
+
+
+def test_naked_list_is_sorted_action_first():
+    """押せば片づくものを上に、待つしかないものを下に。"""
+    N = _naked()
+    tg = [{"row": 1, "itemID": "a", "cert": "1", "title": "t", "n_backups": 0}]
+    rows = N.build_rows(tg, [(tg[0], [], "all_art", False),
+                             (tg[0], [{"x": 1}], "", False),
+                             (tg[0], [], "no_cache", False)], "2026-08-17")
+    assert [r[0] for r in rows[1:]] == [N.READY, N.ACT, N.WAIT]
+
+
+def test_naked_list_runs_every_night():
+    bat = open(os.path.join(_TOOLS, "run_hoju_search.bat"), encoding="ascii").read()
+    assert "hoju_naked_sheet.py" in bat

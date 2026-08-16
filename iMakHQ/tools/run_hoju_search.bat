@@ -92,6 +92,12 @@ REM        are on disk, so the daytime run is then near-instant.
 echo [confirm-warm] %date% %time% >> "%LOG%"
 python -u psa_hoju_fill.py confirm --dry-run >> "%LOG%" 2>&1
 
+REM --- 7) write the "no backup URL at all" listings into one tab so they can be
+REM        seen at a glance (they are scattered rows in the master sheet).
+REM        Writes only that tab; never touches the master sheet.
+echo [naked-list] %date% %time% >> "%LOG%"
+python -u hoju_naked_sheet.py >> "%LOG%" 2>&1
+
 :done
 echo [end] %date% %time% >> "%LOG%"
 endlocal
