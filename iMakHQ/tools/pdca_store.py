@@ -11,6 +11,7 @@
 from __future__ import annotations
 import os
 import re
+import re as _re
 import sqlite3
 from pathlib import Path
 
@@ -325,6 +326,35 @@ def prune_stale_findings(con, today, max_age_days=21, sources=None):
     return {"pruned": pruned, "checked": len(rows)}
 
 
+# ★2026-08-16: **カタログに在るのに「未登録」と5日連続で言い続けていた**。
+#   queue の item_id は `missing_models.csv` 由来の **崩れた長文字列**
+#   (例: "OP12-034 psa10 ペローナ SR [OP12-034](プロモ…)") で、resolver は product_id の
+#   完全一致しか見ていなかったため永久に外れる。実測: OP12-034 も CLF-001 も catalog に実在。
+#   → 突合用の候補を **文字列から取り出してから**照合する。
+_SETCODE_RE = _re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?-\d{1,4})\b", _re.I)
+_PRINTNO_RE = _re.compile(r"\b(\d{2,3}/[A-Z0-9\-]{2,6})\b", _re.I)
+_SETHINT_RE = _re.compile(r"\b([A-Z]{2,4}\d?)\b")
+
+
+def candidate_ids(item_id):
+    """queue の item_id → catalog 突合に使う候補 (純関数)。
+
+    戻り: {"ids": [product_id 候補], "numbers": [印刷番号], "hints": [セット記号]}
+    """
+    s = str(item_id or "").strip()
+    ids = [s] if s else []
+    ids += [m.group(1).upper() for m in _SETCODE_RE.finditer(s)]
+    nums = [m.group(1).upper() for m in _PRINTNO_RE.finditer(s)]
+    hints = [h.upper() for h in _SETHINT_RE.findall(s.upper())
+             if not any(h in i for i in ids[1:])]
+    seen, out = set(), []
+    for v in ids:
+        if v and v not in seen:
+            seen.add(v); out.append(v)
+    return {"ids": out, "numbers": list(dict.fromkeys(nums)),
+            "hints": list(dict.fromkeys(hints))[:6]}
+
+
 def make_catalog_resolver(catalog_db):
     """catalog products.sqlite を引いて (category,item_id)->bool を返す resolve_fn を生成。
 
@@ -341,9 +371,26 @@ def make_catalog_resolver(catalog_db):
         key = (category, item_id)
         if key in cache:
             return cache[key]
-        hit = con.execute(
-            "SELECT 1 FROM products WHERE (product_id=? OR alias_of=?) LIMIT 1",
-            (item_id, item_id)).fetchone() is not None
+        c = candidate_ids(item_id)
+        hit = False
+        for cid in c["ids"]:
+            if con.execute("SELECT 1 FROM products WHERE (product_id=? OR alias_of=?) LIMIT 1",
+                           (cid, cid)).fetchone():
+                hit = True
+                break
+        # 印刷番号 (001/032) はセット記号と組でだけ照合する。番号だけで当てると
+        # 別セットの同番号を「解決済」にしてしまう (fail-closed)。
+        if not hit:
+            for num in c["numbers"]:
+                for hint in c["hints"]:
+                    if con.execute(
+                            "SELECT 1 FROM products WHERE product_id LIKE ? "
+                            "AND json_extract(specs,'$.card_number_text')=? LIMIT 1",
+                            (hint + "-%", num)).fetchone():
+                        hit = True
+                        break
+                if hit:
+                    break
         cache[key] = hit
         return hit
 

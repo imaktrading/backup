@@ -1210,22 +1210,6 @@ def build_title(game, set_name, card_number, subject, finish=""):
     return f"{prefix} {game_short} #{card_number}"[:80]
 
 def psa_image_substitute(cert):
-    """PSA に画像が無い cert → **代わりに使う cert** (無ければ "")。純関数に近い I/O。
-
-    ★PSA 側に画像が存在しない個体があり、何度走っても取れない (実例 102629645)。
-      同じカードの別 cert の画像を使う。商品説明に「証明番号が異なる個体が届くことがある」
-      と明記しているので、これで齟齬は生じない (2026-08-14 ユーザー確定)。
-    """
-    try:
-        with open(PSA_IMAGE_OVERRIDE_PATH, encoding="utf-8") as f:
-            m = json.load(f) or {}
-    except Exception:
-        return ""
-    v = m.get(str(cert or "").strip()) or {}
-    return str(v.get("from_cert") or "").strip()
-
-
-def psa_image_substitute(cert):
     """PSA に画像が無い cert → **代わりに使う cert** (無ければ "")。
 
     ★PSA 側に画像が存在しない個体があり、何度走っても取れない (実例 102629645)。
