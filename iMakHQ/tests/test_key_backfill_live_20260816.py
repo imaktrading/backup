@@ -82,3 +82,17 @@ def test_it_runs_every_night():
     assert "key_backfill_live.py" in bat
     assert bat.index("key_backfill_live.py") < bat.index("psa_hoju_fill.py search --limit=30"), \
         "補URL検索より前に埋めないと、その晩は探索不能のまま飛ばされる"
+
+
+def test_daytime_screen_is_assembled_at_night():
+    """★昼のボタンは「表示するだけ」にする (2026-08-16)。
+
+    実測: 🩹 は8分のうち約7分が「対象49件を1件ずつ eBay画像取得 + 絵柄をAI照合」で、
+    画面に出たのは10件。人がいなくてもできる作業なので夜に回す。
+    --dry-run は同じ組み立てを行い、ブラウザを開かず書込もしないので、
+    画像キャッシュと絵柄キャッシュだけが温まる。
+    """
+    bat = open(os.path.join(_TOOLS, "run_hoju_search.bat"), encoding="ascii").read()
+    assert "psa_hoju_fill.py confirm --dry-run" in bat, "昼の組み立てを夜に回していない"
+    # 候補が無いと組み立てられないので、検索より後に置く
+    assert bat.index("confirm --dry-run") > bat.index("psa_hoju_fill.py search --limit=30")

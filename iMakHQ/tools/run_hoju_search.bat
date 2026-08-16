@@ -75,6 +75,16 @@ REM        must be stocked BEFORE the supplier dies, so give live its own step.
 echo [ichibankuji] prefetch-live %date% %time% >> "%LOG%"
 python -u ichibankuji_restock.py prefetch-live 10 >> "%LOG%" 2>&1
 
+REM --- 6) warm the daytime review screen (candidates -> ref image -> art match).
+REM        2026-08-16: pressing the daytime button spent ~7 of its 8 minutes
+REM        assembling the screen (fetch the listing image and AI-compare the art
+REM        for every target), and only ~10 rows survived. None of that needs a
+REM        human, so do it here. --dry-run does the same assembly but opens no
+REM        browser and writes nothing; both caches (listing image / art match)
+REM        are on disk, so the daytime run is then near-instant.
+echo [confirm-warm] %date% %time% >> "%LOG%"
+python -u psa_hoju_fill.py confirm --dry-run >> "%LOG%" 2>&1
+
 :done
 echo [end] %date% %time% >> "%LOG%"
 endlocal
