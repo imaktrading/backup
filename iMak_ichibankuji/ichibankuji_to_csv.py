@@ -401,6 +401,13 @@ TITLE RULES (厳守):
   - Character 必須（買い手はキャラ名で検索）
 - "Bandai" は文字数に余裕があれば入れる（ブランド検索する人もいる）
 - figure_type が prize name にあれば必ず入れる（Masterlise / EXPIECE / Gracemaster 等）
+- **キャラの形態・バージョン表記は Character の一部。絶対に落とすな**
+  （ギア5→"Gear 5" / 仙人モード→"Sage Mode" / 超サイヤ人3→"Super Saiyan 3" /
+    妖狐の衣→"Nine Tails Cloak" / 野球ver.→"Baseball Ver" / (1993) は数字のまま）
+  理由: 同じ一番くじに**同じキャラの別形態が複数賞ある**（例: ワンピース B賞=ルフィ ギア5 /
+  ラストワン=ルフィ ギア5 野球ver.）。形態を落とすと **どの賞の景品か区別できない**
+  = 誤認で買われる。検索語としても "luffy gear 5" は強い。
+  形態は figure_type や "Bandai" より優先して残す（削る順: Bandai → New → figure_type → 形態）
 - **「Japan」は入れない**（出品者の調査語であり買い手の検索語ではない）
 - 79字超過時は "Bandai" → "New" の順に削る
 - Example: "Ichiban Kuji My Hero Academia A Prize Izuku Midoriya Masterlise Figure New"

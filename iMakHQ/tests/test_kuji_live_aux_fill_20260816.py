@@ -100,3 +100,30 @@ def test_button_and_nightly_are_wired():
     assert '"ichibankuji_restock.py", "hoju", "10"' in panel, "目視ボタンが無い"
     bat = open(os.path.join(_TOOLS, "run_hoju_search.bat"), encoding="ascii").read()
     assert "ichibankuji_restock.py prefetch-live" in bat, "夜間の候補集めが無い"
+
+
+def test_title_must_keep_character_form():
+    """★キャラの形態 (ギア5 / 仙人モード等) をタイトルから落とさない (2026-08-16)。
+
+    実害: ワンピース B賞「ルフィ ギア5」の刷新タイトルが `Monkey D Luffy` だけになった。
+    同じくじの **ラストワン賞も「ルフィ ギア5 野球ver.」** なので、形態を落とすと
+    どちらの景品か区別できない = 誤認で買われる。検索語としても弱くなる。
+    """
+    src = open(r"C:\dev\iMak\iMak_ichibankuji\ichibankuji_to_csv.py",
+               encoding="utf-8", errors="replace").read()
+    assert "形態・バージョン表記は Character の一部" in src, "形態を残す指示が無い"
+    assert "Gear 5" in src and "Sage Mode" in src, "具体例が無いと落ちる"
+
+
+def test_generated_csv_keeps_gear5():
+    """出力済CSVで実際に残っていること (指示を書いただけで終わらせない)。"""
+    import csv
+    import io
+    import os
+    p = r"C:\dev\iMak\iMakHQ\csv_output\ichibankuji_restock_revise.csv"
+    if not os.path.exists(p):
+        return                                  # まだ生成していない環境では検査しない
+    titles = [r.get("*Title", "") for r in csv.DictReader(io.open(p, encoding="utf-8"))]
+    luffy = [t for t in titles if "Luffy" in t]
+    for t in luffy:
+        assert "Gear" in t, f"形態が落ちている: {t}"
