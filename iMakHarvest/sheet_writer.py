@@ -16,7 +16,8 @@
   F: 価格                ← Harvest が書込
   G: 画像 URL            ← Harvest が書込 (`|` 区切り)
   H: 商品説明            ← Harvest が書込
-  I-R: Harvest 不可侵 (空欄)
+  I: PSA cert 番号       ← Harvest が書込 (PSA10 収集のみ。 それ以外は空欄)
+  J-R: Harvest 不可侵 (空欄)
   S: 色                  ← Harvest が書込 (Phase 1d)
   T: サイズ              ← Harvest が書込 (Phase 1d)
 
@@ -53,6 +54,11 @@ COL_CONDITION = 5      # E: 商品状態            - Harvest が書込
 COL_PRICE = 6          # F: 価格                - Harvest が書込
 COL_IMAGES = 7         # G: 画像 URL            - Harvest が書込 (`|` 区切り)
 COL_DESCRIPTION = 8    # H: 商品説明            - Harvest が書込
+# I 列は出品くん (iMakTCG psa_to_csv) の入口。
+# `I列(cert#)非空 AND B列(itemID)空 AND A列(URL)非空` の行を PSA 出品対象として拾うので、
+# メルカリ PSA10 収集はここに cert を入れれば下流にそのまま繋がる (2026-08-17)。
+# **cert を持つ item のときだけ**書く。 他カテゴリの収集は従来どおり空欄のまま。
+COL_CERT = 9           # I: PSA cert 番号      - Harvest が書込 (PSA10 収集のみ)
 COL_COLOR = 19         # S: 色                  - Harvest が書込 (Phase 1d)
 COL_SIZE = 20          # T: サイズ              - Harvest が書込 (Phase 1d)
 COL_AUX_URL_1 = 29     # AC: 補仕入 URL 1       - Harvest 抽出くん 補仕入連携時に書込
@@ -189,7 +195,11 @@ def _build_row(item: dict) -> list:
     row[COL_PRICE - 1] = price_str
     row[COL_IMAGES - 1] = image_str
     row[COL_DESCRIPTION - 1] = description
-    # I-R (9-18) は空欄
+    # I (9): cert を持つ item のみ。 無ければ空欄のまま (他カテゴリの挙動を変えない)
+    cert = str(item.get("cert") or "").strip()
+    if cert:
+        row[COL_CERT - 1] = cert
+    # J-R (10-18) は空欄
     row[COL_COLOR - 1] = color
     row[COL_SIZE - 1] = size
     # U-AB (21-28) は空欄
@@ -218,10 +228,11 @@ def append_new_urls(
                    "description"?: str,
                    "color"?: str,              # Phase 1d (Vision AI 判定、不明なら空)
                    "size"?: str,               # Phase 1d (Mercari 構造化フィールド)
+                   "cert"?: str,               # PSA cert 番号 (PSA10 収集のみ、I 列)
                  },
                  ...
                ]
-        column_count: 書く列数 (default 20 = A〜T、B/D/I-R は空欄)
+        column_count: 書く列数 (default 20 = A〜T、B/D/J-R は空欄)
 
     Returns: {"appended": N, "skipped_existing": M, "input": K}
     """

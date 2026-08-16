@@ -9,17 +9,20 @@
             → スラブ写真から cert を読み (psa_slab_vision)、 PSA 公式で引いて
               ラベル項目が一致した物だけ通す (psa_cert.verify)
 
-出品くん (iMakTCG) の入口が cert 番号なので、 確定した cert を渡せば下流はそのまま繋がる。
+★出力先 = HIGH スプシ (19kj8... gid=851100680) の **A 列 (メルカリ URL) + I 列 (cert)**。
+出品くん (iMakTCG psa_to_csv) が `I列(cert#)非空 AND B列(itemID)空 AND A列(URL)非空`
+の行を PSA 出品対象として拾うので、 この 2 列を埋めれば下流にそのまま流れる。
 
-★2段構成にしてある理由: PSA 照合は psacard.com の レート制限が厳しく (2026-08-17 実測で
-数発で 429、 復帰まで分単位)、 ここだけ時間がかかる。 収集結果を先に JSON へ落とし、
-照合は `--verify-from-json` で何度でも再開できる (snkrdunk の --write-from-json と同方針)。
-429 で確認できなかった cert は **通さない**。 未確認は「保留」であって「合格」ではない。
+★PSA 公式照会は既定で **やらない** (2026-08-17 方針確定)。
+psacard.com は Cloudflare で弾かれるが、 出品くん側に既に対策が入っている
+(起動時に画面ありブラウザで 1 回手動突破 → 同 driver 使い回し + 1 件 15 秒間隔)。
+同じ所を Harvest からも叩くと制限を食い合うだけなので、 **公式照会は出品くんに 1 本化**する。
+Harvest 側は通信の要らない事前ゲート (psa_cert.local_gate) までを担当する。
+先に確定させたい時だけ `--verify` を付ける (要 Cloudflare 突破、 1 件 5 分間隔)。
 
 使い方:
-  # ① 収集 + Vision 読取 (PSA 照合まで通しでやる)
-  python run_harvest_mercari_psa10.py --dry-run --cap-per-keyword 20 --max-details 10
-  # ② 照合だけ再開 (429 で落ちた分を後から埋める)
+  python run_harvest_mercari_psa10.py --keywords "PSA10 ワンピースカード" --dry-run  # 確認
+  python run_harvest_mercari_psa10.py --keywords "PSA10 ワンピースカード"            # 本番
   python run_harvest_mercari_psa10.py --verify-from-json debug/mercari_psa10_<ts>.json
 """
 from __future__ import annotations
@@ -203,37 +206,62 @@ def main(argv=None) -> int:
                     help="ラベル一致に要求する系統数 (既定2 = 1桁誤読を落とす)")
     ap.add_argument("--verify-from-json", default=None,
                     help="収集をやり直さず、 JSON の未照合分だけ PSA 照合し直す")
-    ap.add_argument("--skip-verify", action="store_true",
-                    help="収集と Vision 読取だけ行い PSA 照合はしない (後で再開)")
+    ap.add_argument("--verify", action="store_true",
+                    help="Harvest 側でも PSA 公式照会して先に確定させる "
+                         "(既定 OFF = 出品くん側に 1 本化)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
     if args.verify_from_json:
         path = Path(args.verify_from_json)
         payload = json.loads(path.read_text(encoding="utf-8"))
-        stats = verify_all(payload["candidates"], args.psa_interval, args.min_signals)
-        payload["verify_stats"] = stats
+        payload["verify_stats"] = verify_all(payload["candidates"], args.psa_interval,
+                                             args.min_signals)
         _dump(payload, path)
     else:
         payload = collect(args)
         path = DUMP_DIR / f"mercari_psa10_{datetime.now():%Y%m%dT%H%M%S}.json"
-        _dump(payload, path)  # 照合前に必ず保存 (429 で落ちても収集をやり直さない)
-        if args.skip_verify:
-            _log("--skip-verify → PSA 照合は未実施。 --verify-from-json で再開できます")
-            return 0
-        stats = verify_all(payload["candidates"], args.psa_interval, args.min_signals)
-        payload["verify_stats"] = stats
-        _dump(payload, path)
+        _dump(payload, path)  # 照合/書込の前に必ず保存 (落ちても収集をやり直さない)
+        if args.verify:
+            payload["verify_stats"] = verify_all(payload["candidates"],
+                                                 args.psa_interval, args.min_signals)
+            _dump(payload, path)
 
-    kept = [c for c in payload["candidates"] if (c.get("psa") or {}).get("ok")]
-    _log(f"確定 (出品候補): {len(kept)} 件 / 照合内訳={payload['verify_stats']}")
+    cands = payload["candidates"]
+    if payload.get("verify_stats"):
+        # --verify を通した時は 公式照会で確定した物だけ渡す
+        kept = [c for c in cands if (c.get("psa") or {}).get("ok")]
+        _log(f"確定 (公式照会済): {len(kept)}/{len(cands)} 件 "
+             f"/ 内訳={payload['verify_stats']}")
+    else:
+        # 既定: 公式照会は出品くん側の 1 本化に任せる。 Harvest は事前ゲート通過分を渡す
+        kept = cands
+        _log(f"候補 (事前ゲート通過): {len(kept)} 件 — 公式照会と確定は出品くん側で実施")
+
     for c in kept:
-        info = c["psa"]["info"]
-        _log(f"  cert={c['psa']['cert']} ¥{c.get('price_jpy')} "
-             f"{info.get('subject')} #{info.get('card_number')} {c['url']}")
+        _log(f"  cert={c['vision']['cert']} ¥{c.get('price_jpy')} "
+             f"{(c.get('title') or '')[:32]} {c['url']}")
 
     if args.dry_run:
         _log("dry-run → 書込なし")
+        return 0
+    if not kept:
+        _log("0 件 → 書込なし")
+        return 0
+
+    from sheet_writer import (  # noqa: PLC0415
+        HIGH_SHEET_ID, LISTINGS_GID, append_new_urls, get_listings_worksheet,
+        open_sheet_by_id,
+    )
+    items = [{
+        "url": c["url"], "title": c.get("title"), "condition": c.get("condition"),
+        "price_jpy": c.get("price_jpy"), "image_urls": c.get("image_urls"),
+        "description": c.get("description"),
+        "cert": c["vision"]["cert"],  # I 列 = 出品くんの入口
+    } for c in kept]
+    ws = get_listings_worksheet(open_sheet_by_id(HIGH_SHEET_ID), LISTINGS_GID)
+    res = append_new_urls(ws, items)
+    _log(f"[SHEET] HIGH 商品管理シート: {res}")
     return 0
 
 

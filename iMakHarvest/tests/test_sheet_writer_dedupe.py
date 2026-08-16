@@ -12,6 +12,7 @@ import pytest
 from sheet_writer import (
     COL_AUX_URL_1,
     COL_AUX_URL_5,
+    COL_CERT,
     DEFAULT_COLUMN_COUNT,
     WITH_AUX_COLUMN_COUNT,
     _build_row,
@@ -480,3 +481,43 @@ class TestAppendWithAuxiliary:
         assert appended_rows[0][COL_AUX_URL_1 - 1] == ""
         # aux あり row の AC に URL
         assert appended_rows[1][COL_AUX_URL_1 - 1] == "https://snkrdunk.com/apparels/1/used/3"
+
+
+# --------------------------------------------------------------------------
+# _build_row + cert (= メルカリ PSA10 収集 → 出品くん iMakTCG の入口)
+# --------------------------------------------------------------------------
+class TestBuildRowCert:
+    """I 列 = 出品くん psa_to_csv の入口。
+
+    `I列(cert#)非空 AND B列(itemID)空 AND A列(URL)非空` の行を PSA 出品対象として拾うので、
+    ここを埋めれば下流に流れる。 逆に他カテゴリの収集で誤って埋まると **PSA でない商品が
+    PSA 出品ラインに乗る** ので、 cert を持つ item のときだけ書くことを固定する。
+    """
+
+    def test_cert_written_to_col_i(self):
+        row = _build_row({"url": "https://jp.mercari.com/item/m1", "cert": "153420191"})
+        assert row[COL_CERT - 1] == "153420191"
+
+    def test_cert_absent_leaves_col_i_empty(self):
+        # 他カテゴリ (Porter / G-shock / 一番くじ 等) の収集は従来どおり空欄
+        row = _build_row({"url": "https://jp.mercari.com/item/m1", "title": "PORTER"})
+        assert row[COL_CERT - 1] == ""
+
+    def test_cert_empty_string_leaves_col_i_empty(self):
+        row = _build_row({"url": "https://jp.mercari.com/item/m1", "cert": ""})
+        assert row[COL_CERT - 1] == ""
+
+    def test_cert_is_stripped(self):
+        row = _build_row({"url": "https://jp.mercari.com/item/m1", "cert": " 153420191 "})
+        assert row[COL_CERT - 1] == "153420191"
+
+    def test_cert_does_not_touch_neighbouring_columns(self):
+        # H (説明) と J-R は空欄のまま = 既存の列レイアウトを壊さない
+        row = _build_row({"url": "https://jp.mercari.com/item/m1", "cert": "153420191"})
+        assert row[COL_CERT - 2] == ""  # H
+        for col in range(COL_CERT + 1, 19):  # J-R
+            assert row[col - 1] == ""
+
+    def test_cert_row_keeps_default_width(self):
+        row = _build_row({"url": "https://jp.mercari.com/item/m1", "cert": "153420191"})
+        assert len(row) == DEFAULT_COLUMN_COUNT
