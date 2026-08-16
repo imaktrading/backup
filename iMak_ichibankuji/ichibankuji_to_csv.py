@@ -322,10 +322,16 @@ def _load_collectibles_keywords(top_n=30):
     err = None
     try:
         import subprocess as _sp
-        import shutil as _shutil
-        if not _shutil.which("pdftotext"):
-            raise RuntimeError("pdftotext not in PATH")
-        r = _sp.run(["pdftotext", "-layout", pdf_path, "-"],
+        import sys as _sys
+        _api = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "iMakeBayAPI")
+        if _api not in _sys.path:
+            _sys.path.insert(0, _api)
+        from listing_core import pdftotext_exe as _pdfexe   # 解決口は1つ (二重実装しない)
+        _exe = _pdfexe()
+        if not _exe:
+            raise RuntimeError("pdftotext が見つからない (PATH / Git 同梱ともに無し)")
+        r = _sp.run([_exe, "-layout", pdf_path, "-"],
                     capture_output=True, text=True, encoding="utf-8", timeout=10)
         if r.returncode != 0:
             raise RuntimeError(f"pdftotext returncode={r.returncode}: {r.stderr[:200]}")

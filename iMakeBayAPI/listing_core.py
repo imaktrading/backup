@@ -52,6 +52,25 @@ KEYWORD_PDF_MAP = {
 }
 
 
+def pdftotext_exe():
+    """`pdftotext` の実行パス (無ければ None)。
+
+    ★2026-08-16: PATH に無いだけで **キーワードPDFを毎回諦めていた**。
+      Git Bash からは動くので「読める環境なのに読んでいない」状態だった
+      (一番くじの刷新が埋め込み top30 にフォールバックして走っていた)。
+      Windows の Git 同梱 poppler も見に行く。
+    """
+    import shutil as _sh
+    exe = _sh.which("pdftotext")
+    if exe:
+        return exe
+    for base in (r"C:\Program Files", r"C:\Program Files (x86)"):
+        c = os.path.join(base, "Git", "mingw64", "bin", "pdftotext.exe")
+        if os.path.exists(c):
+            return c
+    return None
+
+
 def load_keyword_pdf(project, top_n=30):
     """
     プロジェクト名からPDFを引き、該当サブカテゴリセクション内の上位N件を返す。
@@ -69,8 +88,11 @@ def load_keyword_pdf(project, top_n=30):
     if not pdf_path.exists():
         return []
     try:
+        _exe = pdftotext_exe()
+        if not _exe:
+            return []
         result = subprocess.run(
-            ["pdftotext", "-layout", str(pdf_path), "-"],
+            [_exe, "-layout", str(pdf_path), "-"],
             capture_output=True, timeout=30,
         )
         if result.returncode != 0:
