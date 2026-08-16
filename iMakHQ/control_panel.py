@@ -2077,12 +2077,19 @@ class ListingPanel:
         def _grid_named(parent, items, ncol=4, compact=False):
             # height=2 で2行ぶんの高さを確保 (ラベルが折返しても見切れない)。width は最小値=
             # columnconfigure(weight) と sticky="nsew" で実幅は親いっぱいに伸びる。
-            w, h, pad, wl = (14, 2, 2, 150) if compact else (16, 2, 4, 230)
+            # ★2026-08-16 ユーザー指示「ラベルがボタンからはみ出ている」。
+            #   2行では残件ラベル(最大4行)が見切れる → 3行ぶん確保し、折返し幅も広げる。
+            #   残件つきボタンは refresh_hoju_badge が行数に合わせて更に伸ばす。
+            w, h, pad, wl = (16, 3, 2, 170) if compact else (18, 3, 4, 250)
             ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない (右の空セル防止)
             for col in range(ncol):
                 parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
             for k, (text, idx) in enumerate(items):
-                color = SCRIPTS[idx].get("label_fg") or ("#0066cc" if SCRIPTS[idx].get("verified", False) else "black")
+                # ★2026-08-16 ユーザー指示: **既定は全部黒**。青は「今押すといい」だけに使う
+                #   (色が意味を持たないと、どれを押せばいいか分からない)。
+                #   青にするのは残件ラベルを持つボタンだけで、refresh_hoju_badge が
+                #   「押して出てくる件数 > 0」の時に切替える。
+                color = "black"
                 b = tk.Button(parent, text=text, font=("", 9, "bold"), fg=color,
                               width=w, height=h, wraplength=wl, justify="center",
                               command=lambda i=idx: self.run_script(i))
@@ -2090,7 +2097,7 @@ class ListingPanel:
                 # ★残件をラベルに出すボタンは参照を持つ (2026-08-09 ユーザー要望)。
                 #   ログ末尾まで読まないと残件が分からず、押す前に「あと何回か」が見えなかった。
                 _bg = SCRIPTS[idx].get("badge")
-                if _bg in ("hoju_search", "hoju_confirm"):
+                if _bg:                      # ★badge を持つボタンは全部登録 (newcand も)
                     self._hoju_btns.append((b, text, _bg))
 
         if self.mode == "new":
@@ -2107,9 +2114,9 @@ class ListingPanel:
                 new_idx = categories[cat_name].get("new")
                 if new_idx is None:
                     continue
-                color = "#0066cc" if SCRIPTS[new_idx].get("verified", False) else "black"
-                tk.Button(cat_grid, text=cat_name, font=("", 12, "bold"), fg=color,
-                          width=15, height=2, wraplength=150, justify="center",
+                # ★2026-08-16: カテゴリも既定は黒 (色は「今押すといい」の意味だけに使う)
+                tk.Button(cat_grid, text=cat_name, font=("", 12, "bold"), fg="black",
+                          width=16, height=2, wraplength=170, justify="center",
                           command=lambda idx=new_idx: self.run_script(idx)).grid(
                     row=gi // n_cat_cols, column=gi % n_cat_cols, padx=2, pady=2, sticky="nsew")
                 gi += 1
@@ -2462,10 +2469,16 @@ class ListingPanel:
                 if nc.get("auto"):
                     n_txt += " (+自動で補URL %s件)" % nc["auto"]
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt}
+            # ★2026-08-16: **押すと何か出てくる時だけ青**。0件なら黒のまま
+            #   (「いつ押せばいいのか分からない」への答え。色 = 今やる価値があるか)。
+            act_kind = {"hoju_search": bool(s.get("can")),
+                        "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
+                        "newcand": bool(nc.get("show") or nc.get("auto"))}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。
             why = err_reason or f"{type(e).__name__}"
+            act_kind = {}
             cached = self._hoju_badge_cache()
             if cached:
                 by_kind = {k: v + "\n※前回値" for k, v in cached.items()}
@@ -2480,7 +2493,10 @@ class ListingPanel:
             self._hoju_badge_cache(by_kind)
         for b, base, kind in self._hoju_btns:
             try:
-                b.config(text=base + by_kind.get(kind, ""))
+                txt = base + by_kind.get(kind, "")
+                # 行数ぶん高さを確保 (ラベルがボタンからはみ出さない)
+                b.config(text=txt, height=max(3, min(7, txt.count(chr(10)) + 2)),
+                         fg=("#0066cc" if act_kind.get(kind) else "black"))
             except Exception:                                     # noqa: BLE001
                 pass
 
