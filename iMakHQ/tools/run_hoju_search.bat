@@ -15,6 +15,7 @@ REM   1) zero-backup listings first  : search --limit=30
 REM   2) top-up (1 backup)           : search --max-backups=2 --limit=10
 REM   3) restock prefetch            : search-restock --limit=20
 REM   4) ichibankuji prefetch        : ichibankuji_restock.py prefetch 10
+REM   5) ichibankuji live aux        : ichibankuji_restock.py prefetch-live 10
 REM   30 items per run = slow and steady, to keep the BAN risk low.
 REM   Google Sheets API can return 503, so step 1 retries up to 3 times.
 REM ---------------------------------------------------------------------------
@@ -55,6 +56,13 @@ python -u psa_hoju_fill.py search-restock --limit=20 >> "%LOG%" 2>&1
 REM --- 4) prefetch for ichibankuji aux URLs (candidates only, no UI, no sheet)
 echo [ichibankuji] prefetch %date% %time% >> "%LOG%"
 python -u ichibankuji_restock.py prefetch 10 >> "%LOG%" 2>&1
+
+REM --- 5) prefetch for ichibankuji LIVE listings that are thin on aux URLs
+REM        2026-08-16: step 4 fills out-of-stock rows first and there are ~50 of
+REM        them, so live listings never got a slot. Aux URLs are insurance and
+REM        must be stocked BEFORE the supplier dies, so give live its own step.
+echo [ichibankuji] prefetch-live %date% %time% >> "%LOG%"
+python -u ichibankuji_restock.py prefetch-live 10 >> "%LOG%" 2>&1
 
 :done
 echo [end] %date% %time% >> "%LOG%"

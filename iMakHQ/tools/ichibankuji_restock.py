@@ -1000,9 +1000,16 @@ def pass_prefetch(n, cand_n, max_backups=1):
 
 
 # ---------------- パス ----------------
-def pass_identify(n, cand_n):
-    targets = get_oos_ichibankuji(n)
-    print(f"画像特定(パスA): OOS一番くじ {len(targets)}件 (各最安{cand_n}候補)")
+def pass_identify(n, cand_n, live=False):
+    """live=True: **まだ生きている**出品の補URL補充 (切れる前に予備を貯める)。
+
+    ★2026-08-16 ユーザー指示。PSA と同じ2段 (夜に候補・昼に目視) を一番くじにも。
+      対象は live のうち補URLが5本未満。A列/B列/売り切れ印は一切触らない。
+    """
+    targets = (get_thin_backup_ichibankuji(n, max_backups=AUX_MAX) if live
+               else get_oos_ichibankuji(n))
+    print(f"画像特定(パスA): {'live補URL補充' if live else 'OOS'}一番くじ "
+          f"{len(targets)}件 (各最安{cand_n}候補)")
     if not targets:
         print("対象なし"); return
     items = _identify_scrape(targets, cand_n)
@@ -1142,6 +1149,54 @@ def _load_confirmed():
     return {int(k): v for k, v in (d.get("items") or {}).items()}
 
 
+def build_owner_by_url(vals):
+    """生きている行の 仕入元URL → それを使っている itemID (純関数)。
+
+    ★同じ仕入元URLを2出品が指すと、両方売れた時に片方が履行不能 → キャンセル → Defect。
+      PSA の補URL補充と同じガードを使う (二重実装しない)。
+    """
+    import dup_guard as _dg
+    owner = {}
+    for r in vals[1:]:
+        def g(j, _r=r):
+            return ((_r[j] if len(_r) > j else "") or "").strip()
+        iid = g(1)
+        if not iid or g(COL_SOLD):
+            continue
+        for u in [g(0)] + [g(AUX_COL0 + k) for k in range(AUX_MAX)]:
+            n = _dg.norm_url(u)
+            if n:
+                owner.setdefault(n, set()).add(iid)
+    return {k: sorted(v) for k, v in owner.items()}
+
+
+def plan_live_aux(rows, vals, owner_by_url):
+    """live 行の補URL を **既存保持・空き枠のみ** の形にする (純関数)。
+
+    ★write_aux_urls は AC-AG を5枠まるごと上書きするので、新しく選んだ分だけ渡すと
+      **既に貯めてある補URLが消える**。既存を先に置いて、空き枠にだけ足す。
+    戻り: (row→[URL×5], 追加本数, 落としたURL [(url, [owner...])])
+    """
+    from psa_hoju_fill import compute_backurl_additions
+    import dup_guard as _dg
+    plan, added_total, dropped_all = {}, 0, []
+    for row, d in rows.items():
+        if d.get("kind") != "live_thin":
+            continue
+        r = vals[row - 1] if 0 < row <= len(vals) else []
+
+        def g(j, _r=r):
+            return ((_r[j] if len(_r) > j else "") or "").strip()
+        urls, dropped = _dg.filter_urls_owned_by_others(d.get("aux") or [], owner_by_url, g(1))
+        dropped_all.extend(dropped)
+        existing = [g(AUX_COL0 + k) for k in range(AUX_MAX) if g(AUX_COL0 + k)]
+        full, added = compute_backurl_additions(existing, urls, AUX_MAX)
+        if added:
+            plan[row] = full
+            added_total += len(added)
+    return plan, added_total, dropped_all
+
+
 def _write_supplies(confirmed):
     """confirmed → **スプシのみ記録**(eBayは触らない)。戻り: 記録件数。
 
@@ -1161,6 +1216,25 @@ def _write_supplies(confirmed):
         else:
             print(f"  📝 row{row}: スプシ記録(eBay未変更) itemID={sheet_rows[row]['b']} "
                   f"cost¥{d.get('cost') or '?'}")
+    # ★2026-08-16: live 行は **既存の補URLを消さない**(空き枠だけ埋める) + 他出品が
+    #   使用中のURLを掴まない。判定不能なら **書かない**(fail-closed)。
+    if any(d.get("kind") == "live_thin" for d in sheet_rows.values()):
+        try:
+            vals = sheet_io._product_ws().get_all_values()
+            owner = build_owner_by_url(vals)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠️要対応 URL共有ガードを組めず **live行の補URL書込を中止**: {type(e).__name__}")
+            for r, d in sheet_rows.items():
+                if d.get("kind") == "live_thin":
+                    d["aux"] = []
+        else:
+            plan, n_add, dropped = plan_live_aux(sheet_rows, vals, owner)
+            for u, own in dropped:
+                print(f"  ⛔ 補URL除外(他出品が使用中 {own}): {u[:70]}")
+            for r, d in sheet_rows.items():
+                if d.get("kind") == "live_thin":
+                    d["aux"] = plan.get(r, [])
+            print(f"  🔗 live行の補URL: 追加 {n_add}本 (既存保持・空き枠のみ)")
     return _retry(lambda: write_restock(sheet_rows), what="スプシ書込")
 
 
@@ -1606,6 +1680,25 @@ def main():
             refresh_write()
         else:
             pass_refresh()
+    elif mode == "hoju":
+        # ★ボタン: live(生きている出品)の補URL補充。夜間 prefetch-live の候補を即表示。
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        pass_identify(n, cand_n=10, live=True)
+        if os.path.exists(PICKS_FILE) and json.load(open(PICKS_FILE, encoding="utf-8")):
+            pass_expand(cand_n=10, dry=False)
+        else:
+            print("識別0件 → expand skip")
+    elif mode == "prefetch-live":
+        # 夜間: live 補URL補充の候補だけ貯める(目視UIを開かない・書込もしない)。
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        targets = get_thin_backup_ichibankuji(n, max_backups=AUX_MAX)
+        print(f"候補先読み(live補URL): {len(targets)}件")
+        if targets:
+            items = _identify_scrape(targets, 10)
+            n_cand = sum(len(it.get("candidates") or []) for it in items)
+            print(f"✅ 先読み完了: {len(items)}件 / 候補 {n_cand}件 → {IDENTIFY_CACHE}")
+        else:
+            print("対象なし")
     elif mode == "prefetch":
         # 夜間: 候補だけ貯める(目視UIを開かない・スプシに書かない)。昼の identify が即表示になる。
         n = int(sys.argv[2]) if len(sys.argv) > 2 else 10

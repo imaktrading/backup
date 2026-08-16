@@ -947,6 +947,20 @@ SCRIPTS = [
         "skip_postprocess": True,
     },
     {
+        # ★2026-08-16 ユーザー要望「PSA のように補URLを補充するボタンが欲しい」。
+        #   従来の①②は **切れてから**探す事後型で、生きている出品の予備は貯まらなかった
+        #   (実測 live 30件中 補0本が10件)。補URLは切れた時の保険なので、切れる前に貯める。
+        #   夜間 (run_hoju_search.bat step5) が候補を貯め、このボタンは目視だけ = 待ち時間ゼロ。
+        #   A列/B列/売り切れ印は触らない (触ると出品との紐付けが切れる)。
+        "category": None, "type": "utility",
+        "label": "🎴一番くじ 補URL補充(目視)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ichibankuji_restock.py", "hoju", "10"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
         "category": None, "type": "utility",
         "label": "🎴一番くじ補充② 刷新→CSV",
         "label_fg": "#0a7",
