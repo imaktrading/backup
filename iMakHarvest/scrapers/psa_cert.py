@@ -123,14 +123,27 @@ def fetch_cert(cert: str, timeout: int = 20, retries: int = 2,
 _NORM_RE = re.compile(r"[^A-Z0-9]+")
 # ラベルに頻出で識別力の無い語 (一致判定から除く)
 _STOPWORDS = {
-    "THE", "AND", "CARD", "GAME", "JAPANESE", "JAPAN", "TCG", "PROMO", "PROMOTION",
-    "PACK", "SET", "EDITION", "ART", "ALT", "RARE", "SUPER", "PR", "CP", "NO",
+    "THE", "AND", "CARD", "CARDS", "GAME", "JAPANESE", "JAPAN", "JPN", "JP",
+    "TCG", "PROMO", "PROMOTION", "PACK", "SET", "EDITION", "ART", "ALT",
+    "RARE", "SUPER", "PR", "CP", "NO",
+}
+# ★ゲーム(フランチャイズ)名。 同じゲーム内で探している以上、 ここが一致しても
+# 「同じカード」 の根拠にならない。 2026-08-17: これを数えていたため
+# 「Monkey D. Luffy」 と 「Portgas D. Ace」 が brand 一致してしまった。
+_FRANCHISE_WORDS = {
+    "ONE", "PIECE", "POKEMON", "DRAGON", "BALL", "GUNDAM", "DIGIMON",
+    "YUGIOH", "YUGI", "WEISS", "SCHWARZ",
 }
 
 
 def _tokens(s: str) -> set[str]:
+    """比較用トークン。 1 文字の語と 定型語・ゲーム名は落とす.
+
+    1 文字を残すと "Monkey **D.** Luffy" と "Portgas **D.** Ace" が
+    カード名一致になる (2026-08-17 にテストで検出)。 識別力が無いので除く。
+    """
     return {w for w in _NORM_RE.sub(" ", (s or "").upper()).split()
-            if w and w not in _STOPWORDS}
+            if len(w) > 1 and w not in _STOPWORDS and w not in _FRANCHISE_WORDS}
 
 
 def _norm_num(s: str) -> str:

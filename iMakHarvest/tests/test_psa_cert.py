@@ -118,6 +118,35 @@ def test_match_brand_needs_two_token_overlap():
     assert "brand" not in P.match_signals(VISION_OK, info)["signals"]
 
 
+def test_match_ignores_single_letter_tokens():
+    """"Monkey **D.** Luffy" と "Portgas **D.** Ace" が名前一致してはいけない.
+
+    2026-08-17: 1 文字トークン "D" を数えていたため、 ワンピースの "D の一族" 同士が
+    どれでもカード名一致した。 別カードを掴む = 誤出品なので、 1 文字は識別力なしとして除く。
+    """
+    v = dict(VISION_OK, label="2024 ONE PIECE JP MONKEY D. LUFFY")
+    assert "subject" not in P.match_signals(v, _info(subject="PORTGAS D. ACE"))["signals"]
+
+
+def test_match_ignores_franchise_name_in_brand():
+    """ゲーム名 ("ONE PIECE") の一致は 「同じカード」 の根拠にならない.
+
+    同じゲーム内で探しているのだから当たり前に一致する。 2026-08-17: これを数えたため
+    別カードが 2 系統一致で通ってしまった。
+    """
+    v = dict(VISION_OK, label="2024 ONE PIECE JP PROMO CARDS MONKEY D. LUFFY",
+             card_number="119", year="2023")
+    m = P.match_signals(v, _info(subject="PORTGAS D. ACE",
+                                 brand="ONE PIECE CARD GAME PROMO CARDS",
+                                 card_number="074", year="2024"))
+    assert m["count"] == 0
+
+
+def test_match_still_fires_on_set_specific_words():
+    # ゲーム名を除いても、 弾固有の語 (LET'S START CAMPAIGN) は残って brand 一致する
+    assert "brand" in P.match_signals(VISION_OK, _info())["signals"]
+
+
 def test_match_card_number_normalizes_zero_padding():
     v = dict(VISION_OK, label="", year="")
     assert "card_number" in P.match_signals(v, _info(card_number="#77"))["signals"]
