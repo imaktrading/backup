@@ -54,6 +54,15 @@ DEFAULT_KEYWORDS = [
 DUMP_DIR = ROOT / "debug"
 
 
+# Windows の既定コンソールは cp932。 収集も書込も終わった後に ログ 1 行の
+# UnicodeEncodeError で落ちると、 何件通ったのか分からなくなる (2026-08-17 に発生)。
+# stdout を UTF-8 にして、 それでも駄目な文字は化けさせてでも処理を続ける。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # noqa: BLE001 - reconfigure 不可の環境でも処理は続ける
+    pass
+
+
 def _log(m: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {m}", flush=True)
 
