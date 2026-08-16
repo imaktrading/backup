@@ -10,7 +10,8 @@ REM   destroyed, nothing ran, no log was written, and the task still reported
 REM   exit code 0 = "success". It had never run since it was created on 07-28.
 REM   Keeping this file ASCII-only makes it codepage-independent.
 REM
-REM What it does (all read-only: caches candidates, never writes the sheet):
+REM What it does (step 0 writes the KEY column; the rest only caches candidates):
+REM   0) fill blank canonical KEY  : key_backfill_live.py
 REM   1) zero-backup listings first  : search --limit=30
 REM   2) top-up (1 backup)           : search --max-backups=2 --limit=10
 REM   3) restock prefetch            : search-restock --limit=20
@@ -31,6 +32,16 @@ set LOG=C:\dev\iMak\iMakHQ\review_logs\hoju_search_cron_%TODAY%.log
 if not exist C:\dev\iMak\iMakHQ\review_logs mkdir C:\dev\iMak\iMakHQ\review_logs
 
 echo [start] %date% %time% >> "%LOG%"
+
+REM --- 0) fill the canonical KEY of live listings that are still blank.
+REM        2026-08-16: KEY was only filled for rows in that day's CSV, so a row
+REM        missed at listing time stayed blank forever. A blank KEY makes the
+REM        aux-URL search skip the row ("no card number") and disables the
+REM        duplicate check. The value comes from the cert (already confirmed by
+REM        a human at listing time), so no review is needed. fail-closed: it
+REM        writes nothing when the cert cannot be resolved.
+echo [keyfill] %date% %time% >> "%LOG%"
+python -u key_backfill_live.py >> "%LOG%" 2>&1
 
 REM --- 1) zero-backup listings (a listing whose only supplier died = instant death)
 for %%i in (1 2 3) do (
