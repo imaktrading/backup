@@ -1230,7 +1230,10 @@ def main():
                 if k not in all_keys:
                     all_keys.append(k)
 
-        with open(OUTPUT_CSV, "w", encoding="utf-8-sig", newline="") as f:
+        # ★2026-08-17: eBay 入稿CSV は **BOM なし** で統一 (規約)。utf-8-sig だと先頭の
+        #   見えない3バイトが1列目の見出し `*Action(...)` にくっつき、eBay 側から別の
+        #   列名に見える (認識されないとその列が丸ごと無視される)。PSA 側は BOM なし。
+        with open(OUTPUT_CSV, "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction='ignore')
             writer.writeheader()
             writer.writerows(results)
