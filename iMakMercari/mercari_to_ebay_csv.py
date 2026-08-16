@@ -41,6 +41,9 @@ SHEET_REGISTRY = {
         "ebay_category": 52357,
         "store_category": 41828940010,
         "profit_category": "Porter",
+        # ★2026-08-17 ユーザー指示「15件で」。1回の生成はここまで (件数は if 分岐でなく
+        #   カテゴリ設定に持たせる)。--limit で上書きできる。
+        "max_items": 15,
         "condition_id": 3000,
         "description_template": "USED.txt",
         "extra_pics": PORTER_EXTRA_PICS,   # 実写の後に 999.png + preowned banner を末尾追加
@@ -737,6 +740,8 @@ If OFFICIAL SPECS section is provided, those values are authoritative for Item S
             return last_result
         except Exception as e:
             print(f"    APIエラー詳細 (attempt {attempt+1}): {type(e).__name__}: {e}")
+            if is_fatal_api_error(e):
+                raise FatalApiError(str(e)[:200])   # 直らない → 走行ごと止める
             return last_result
 
         # 検証無しなら即返却
@@ -844,6 +849,23 @@ def load_targets_from_sheet(sheet_cfg, only_urls=None):
     return targets
 
 
+def is_fatal_api_error(e):
+    """リトライしても直らない API エラーか (純関数)。
+
+    ★2026-08-17 実害: 残高切れ (credit balance is too low) で **76件中70件が全部失敗**した。
+      直らないエラーなのに1件ずつ画像を取り直して最後まで走り、30分近く空振りした。
+      課金・認証・権限は人が直すまで永久に失敗するので、**1件目で止めて知らせる**。
+    """
+    m = str(e).lower()
+    return any(k in m for k in ("credit balance is too low", "billing", "quota exceeded",
+                                "invalid x-api-key", "authentication_error",
+                                "permission_error"))
+
+
+class FatalApiError(RuntimeError):
+    """人が直すまで復旧しない API エラー (走行を止める)。"""
+
+
 def main():
     print("=== iMak Trading Japan - メルカリ → eBay CSV 自動生成 ===\n")
 
@@ -852,6 +874,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sheet", choices=list(SHEET_REGISTRY.keys()),
                         help="読込スプシ (porter/tomica)。指定なしは商品管理シート.csv (ローカル)")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="1回に生成する件数の上限 (0=カテゴリ設定に従う)")
     parser.add_argument("--relist", default="",
                         help="取下再出品②: 保留リストCSV(supply_url列) → 指定URLのみスケジュール再出品(2週間後・既存キュー無視)")
     args, _ = parser.parse_known_args()
@@ -900,7 +924,15 @@ def main():
             input("Enterで終了...")
             return
 
-    print(f"{len(rows)}件を処理します。\n")
+    # 1回に作る件数の上限。--limit > カテゴリ設定 (max_items) > 無制限 の順で決まる。
+    _cap = args.limit if args.limit else (
+        (SHEET_REGISTRY.get(args.sheet) or {}).get("max_items") if args.sheet else None)
+    if _cap and len(rows) > _cap:
+        print(f"{len(rows)}件のうち **先頭{_cap}件** を処理します "
+              f"(1回の上限。残り{len(rows) - _cap}件は次回)\n")
+        rows = rows[:_cap]
+    else:
+        print(f"{len(rows)}件を処理します。\n")
 
     # リール用: Daiwa公式スペック取得用 driver を共有（Selenium起動コスト分散）
     spec_driver = None
@@ -985,8 +1017,18 @@ def main():
         # Claude API呼び出し（--sheet 指定時はカテゴリ名をホワイトリスト検証に渡す）
         validate_category = args.sheet if args.sheet in ("porter", "reel", "tomica", "ichibankuji") else None
         print(f"    Claude API送信中（画像{len(images_b64)}枚, 検証={validate_category or 'なし'}）...")
-        result = call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b64,
-                                 official_specs=official_specs, category=validate_category)
+        try:
+            result = call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b64,
+                                     official_specs=official_specs, category=validate_category)
+        except FatalApiError as _e:
+            # ★直らないエラー (残高切れ等) → 残りを回さずここで止める。
+            #   ここまでに出来た分は下で CSV に書き出す (捨てない)。
+            print("")
+            print(f"🛑 API が復旧しないので中止します: {_e}")
+            print(f"   ここまで {len(results)}件 生成 / 残り {len(rows) - idx} 件は未処理。"
+                  f"課金を直してから もう一度実行してください")
+            break
+
 
         if result:
             title_en = result.get('title', '')
