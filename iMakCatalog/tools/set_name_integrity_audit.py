@@ -156,7 +156,8 @@ def audit(categories):
     #      'U' / 'SPカード' / 'LR+' のような値が C:Rarity に出るのを毎日可視化する。
     #    map_drift = filter_map から今その場で計算した値 ≠ stored (契約 v1.2 §1-5 のズレ検知)。
     #      yaml 側が旧短縮コードのまま (pokemon/one_piece/gundam) なら大量に出る = yaml 未同期の指標。
-    rarity_by_cat = defaultdict(lambda: {"raw_stamped": 0, "map_drift": 0, "unmapped": 0})
+    rarity_by_cat = defaultdict(lambda: {"raw_stamped": 0, "map_drift": 0, "unmapped": 0,
+                                     "accepted_blank": 0})
 
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
@@ -208,7 +209,12 @@ def audit(categories):
         #   個別に値を入れた行 (filter_map で表せない = カード名依存の LEGEND / Gold Star 等) は
         #   stored が埋まっているので対象外。
         if r_raw and not r_stored and computed_rarity is None and r["category"] != "yugioh_tcg":
-            rarity_by_cat[r["category"]]["unmapped"] += 1
+            # 「出さないと決めた」行 (HQ 判断 2026-08-16) は残件ではないので別枠。
+            # これで unmapped は **新規に出た未変換だけ** を意味する = 増えたら合図。
+            if s.get("rarity_ebay_status"):
+                rarity_by_cat[r["category"]]["accepted_blank"] += 1
+            else:
+                rarity_by_cat[r["category"]]["unmapped"] += 1
 
     conn.close()
 
@@ -322,25 +328,34 @@ def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
     total_raw = sum(v["raw_stamped"] for v in rarity_by_cat.values())
     total_md = sum(v["map_drift"] for v in rarity_by_cat.values())
     total_un = sum(v["unmapped"] for v in rarity_by_cat.values())
+    total_ab = sum(v["accepted_blank"] for v in rarity_by_cat.values())
     out.append(
         f"\n## 7. rarity 生値焼き付き検知 (絶対数・毎日出す) — "
-        f"raw_stamped 合計 {total_raw} 件 / map_drift 合計 {total_md} 件\n"
+        f"raw_stamped {total_raw} / map_drift {total_md} / unmapped {total_un} "
+        f"/ accepted_blank {total_ab} 件\n"
     )
     out.append(
         "- **raw_stamped** = specs.rarity_ebay が公式生コードのまま (= 変換されていない)。"
         "'U' / 'LR+' / 'SPカード' 等がそのまま C:Rarity に出る = 2026-08-13 実害と同型。**要対応**。\n"
         "- **map_drift** = derive_rarity_ebay(cat, specs.rarity) ≠ stored。"
         "yaml/filter_map が旧短縮コードのままだと大量に出る (= yaml 未同期の指標)。\n"
-        "★ は公式 rarity 語彙に無い刷り違いマーカーなので落としてから引く"
-        "(公式 dbs-cardgame.com/fw の rarity filter = L/C/UC/R/SR/SCR/PR の 7 値, 2026-08-13 実取得)。\n"
+        "- **unmapped** = 生 rarity は有るが変換先が無く stored も空 (= そのカードが出品されない)。"
+        "fail-closed なので誤出品はしない。**1 でも増えたら新規の未変換が出た合図**。\n"
+        "- **accepted_blank** = 出さないと決めた行 (specs.rarity_ebay_status 有り)。残件ではない。"
+        "HQ 判断 2026-08-16 (requests/2026-08-16_rarity_absent_switch_response.md §③④)。\n"
+        "★ / + は公式 rarity 語彙に無い刷り違いマーカーなので落としてから引く"
+        "(公式 dbs-cardgame.com/fw = L/C/UC/R/SR/SCR/PR の 7 値, gundam-gcg.com = "
+        "C/U/R/LR/LKC/LKU/LKR/P の 8 値, いずれも 2026-08-13 実取得)。\n"
     )
     if not rarity_by_cat:
         out.append("(全カテゴリでゼロ)\n")
     else:
-        out.append("| category | raw_stamped | map_drift | unmapped |\n|---|---:|---:|---:|\n")
+        out.append("| category | raw_stamped | map_drift | unmapped | accepted_blank |\n"
+                   "|---|---:|---:|---:|---:|\n")
         for cat in sorted(rarity_by_cat.keys()):
             v = rarity_by_cat[cat]
-            out.append(f"| {cat} | {v['raw_stamped']} | {v['map_drift']} | {v['unmapped']} |\n")
+            out.append(f"| {cat} | {v['raw_stamped']} | {v['map_drift']} | {v['unmapped']} "
+                       f"| {v['accepted_blank']} |\n")
     return "".join(out)
 
 
@@ -409,7 +424,8 @@ def main():
         f"canonical_drift={sum(drift_by_cat.values())} "
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
-        f"rarity_unmapped={sum(v['unmapped'] for v in rarity_by_cat.values())} ==="
+        f"rarity_unmapped={sum(v['unmapped'] for v in rarity_by_cat.values())} "
+        f"rarity_accepted_blank={sum(v['accepted_blank'] for v in rarity_by_cat.values())} ==="
     )
 
 
