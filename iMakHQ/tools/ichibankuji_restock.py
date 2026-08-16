@@ -841,12 +841,57 @@ def _parse_cond_ship(s):
 MIN_SELLER_REVIEWS = 100          # PSA 補URL と同値 (mercari_psa_resource の既定)
 
 
-def _cond_ship(drv, url):
+# ★2026-08-16: **詳細ページ訪問がボタンの時間の大半**だった (実測 ①supply 22分)。
+#   候補1件ずつ開いて 3秒待つので 90候補で6分以上。状態/送料/評価は出品の固定属性で
+#   毎回取り直す必要がない → ディスクにキャッシュし、夜に先に埋めておく。
+#   (在庫の有無はここでは見ていないので、キャッシュしても「売り切れを在庫あり」にはならない)
+DETAIL_CACHE = r"C:/dev/iMak_data/dedupe/ichibankuji_detail_cache.json"
+DETAIL_TTL_DAYS = 7
+
+
+def _detail_cache_load(path=DETAIL_CACHE):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _detail_cache_save(cache, path=DETAIL_CACHE):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def detail_cache_fresh(entry, today=None, ttl_days=DETAIL_TTL_DAYS):
+    """キャッシュが使えるか (純関数)。取得失敗を焼いた分は使わない。"""
+    if not isinstance(entry, dict) or not entry.get("date"):
+        return False
+    if not entry.get("cond"):
+        return False                      # 取れなかった分は再取得 (失敗を焼き付けない)
+    today = today or _today()
+    try:
+        d0 = datetime.date.fromisoformat(entry["date"])
+        d1 = datetime.date.fromisoformat(today)
+    except Exception:
+        return False
+    return 0 <= (d1 - d0).days <= ttl_days
+
+
+def _cond_ship(drv, url, cache=None):
     """商品詳細ページから (状態, 送料負担, 評価件数) を取得。失敗は ('','',None)。
 
     評価件数は PSA 側と同じ parser を使う(二重実装しない)。取れない=None は個人セラーなら
     不合格側に倒す(fail-closed。呼び手の candidate_passes_filter が判定)。
+    cache を渡すと ディスクキャッシュを読み書きする (夜に温めた分はページを開かない)。
     """
+    if cache is not None:
+        e = cache.get(url)
+        if detail_cache_fresh(e):
+            return (e.get("cond", ""), e.get("ship", ""), e.get("reviews"))
     try:
         drv.get(url)
         time.sleep(3)
@@ -857,6 +902,8 @@ def _cond_ship(drv, url):
             reviews = mp._parse_seller_reviews(src)
         except Exception:
             reviews = None
+        if cache is not None and cond:
+            cache[url] = {"cond": cond, "ship": ship, "reviews": reviews, "date": _today()}
         return (cond, ship, reviews)
     except Exception:
         return ("", "", None)
@@ -877,9 +924,11 @@ def _filter_new_freeship(drv, raw):
         import mercari_psa_resource as mp
     except Exception:
         mp = None
+    cache = _detail_cache_load()
+    n0 = len(cache)
     kept = []
     for c in raw:
-        cond, ship, reviews = _cond_ship(drv, c["href"])
+        cond, ship, reviews = _cond_ship(drv, c["href"], cache)
         if cond not in _KEEP_COND:
             continue
         if mp is not None:
@@ -892,6 +941,8 @@ def _filter_new_freeship(drv, raw):
             continue
         c["cond"], c["ship"], c["reviews"] = cond, ship, reviews
         kept.append(c)
+    if len(cache) != n0:
+        _detail_cache_save(cache)
     return kept
 
 
@@ -1688,6 +1739,34 @@ def main():
             pass_expand(cand_n=10, dry=False)
         else:
             print("識別0件 → expand skip")
+    elif mode == "prefetch-detail":
+        # ★夜間: 貯めた候補の詳細ページ(状態/送料/評価)を先に取る。
+        #   昼のボタンで一番時間を食っていた部分 (実測 ①supply 22分の大半) を無人化する。
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 120
+        cache = _detail_cache_load()
+        urls, seen = [], set()
+        for _iid, ent in (_identify_cache_load() or {}).items():
+            for c in ((ent or {}).get("candidates") or []):
+                u = (c or {}).get("url")
+                if u and u not in seen and not detail_cache_fresh(cache.get(u)):
+                    seen.add(u); urls.append(u)
+        urls = urls[:n]
+        print(f"候補の詳細を先読み: {len(urls)}件 (キャッシュ済は開かない)")
+        if not urls:
+            print("対象なし"); return
+        drv = _make_driver()
+        try:
+            drv.set_page_load_timeout(50)
+            for i, u in enumerate(urls, 1):
+                _cond_ship(drv, u, cache)
+                if i % 10 == 0:
+                    _detail_cache_save(cache)
+                    print(f"  {i}/{len(urls)}", flush=True)
+        finally:
+            try: drv.quit()
+            except Exception: pass
+        _detail_cache_save(cache)
+        print(f"✅ 先読み完了: {len(urls)}件 → {DETAIL_CACHE}")
     elif mode == "prefetch-live":
         # 夜間: live 補URL補充の候補だけ貯める(目視UIを開かない・書込もしない)。
         n = int(sys.argv[2]) if len(sys.argv) > 2 else 10

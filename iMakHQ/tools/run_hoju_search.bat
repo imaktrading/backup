@@ -75,6 +75,13 @@ REM        must be stocked BEFORE the supplier dies, so give live its own step.
 echo [ichibankuji] prefetch-live %date% %time% >> "%LOG%"
 python -u ichibankuji_restock.py prefetch-live 10 >> "%LOG%" 2>&1
 
+REM --- 5b) pre-open the candidate detail pages (condition / shipping / seller
+REM         reviews). 2026-08-16: this was most of the 22 minutes the ichibankuji
+REM         restock button took (9 items x 10 candidates, 3s wait each). Those
+REM         fields never change, so cache them here and the button only shows.
+echo [ichibankuji] prefetch-detail %date% %time% >> "%LOG%"
+python -u ichibankuji_restock.py prefetch-detail 120 >> "%LOG%" 2>&1
+
 REM --- 6) warm the daytime review screen (candidates -> ref image -> art match).
 REM        2026-08-16: pressing the daytime button spent ~7 of its 8 minutes
 REM        assembling the screen (fetch the listing image and AI-compare the art

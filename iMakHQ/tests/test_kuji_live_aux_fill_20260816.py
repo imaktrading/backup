@@ -127,3 +127,24 @@ def test_generated_csv_keeps_gear5():
     luffy = [t for t in titles if "Luffy" in t]
     for t in luffy:
         assert "Gear" in t, f"形態が落ちている: {t}"
+
+
+def test_detail_cache_is_used_and_fail_closed():
+    """★候補の詳細ページ訪問をキャッシュする (2026-08-16)。
+
+    実測: ①supply 22分の大半が「候補1件ずつ開いて3秒待つ」(9件×10候補)。
+    状態/送料/評価は出品の固定属性なので取り直す必要がない。
+    ただし **取れなかった分は焼かない** (失敗を『新品でない』として固定しない)。
+    """
+    assert K.detail_cache_fresh({"cond": "新品、未使用", "date": K._today()})
+    assert not K.detail_cache_fresh({"cond": "", "date": K._today()}), "取得失敗を焼いている"
+    assert not K.detail_cache_fresh({"cond": "新品、未使用", "date": "2020-01-01"})
+    assert not K.detail_cache_fresh(None)
+
+
+def test_detail_prefetch_runs_at_night():
+    """夜に先読みする導線があること。"""
+    src = open(os.path.join(_TOOLS, "ichibankuji_restock.py"), encoding="utf-8").read()
+    assert 'mode == "prefetch-detail"' in src
+    bat = open(os.path.join(_TOOLS, "run_hoju_search.bat"), encoding="ascii").read()
+    assert "ichibankuji_restock.py prefetch-detail" in bat
