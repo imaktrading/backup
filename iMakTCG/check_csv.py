@@ -108,6 +108,53 @@ NO_RARITY_POKEMON_SET_PREFIXES = (
 )
 
 
+# ★2026-08-16: prefix のハードコードをやめ、**カタログのデータで判定**する。
+#   Catalog 回答 (2026-08-15_pokemon_no_rarity_policy_response_processed.md):
+#     - `specs.rarity` が空 = **公式にレアリティ表記が無い** (全カテゴリ全行にある)
+#     - セット単位では判定できない (同じセット内に有と無が混在。pokemon だけで 67セット)
+#   実測: 公式に無いカードは pokemon 9,590 / one_piece 267 / gundam 229 / dragonball 307。
+#   prefix を手で足す方式では、足し忘れた分が**黙って出品されない** (発端の SMI-007 が
+#   まさにそれで、5 prefix を足した後も出せないままだった)。
+_RARITY_ABSENT_CACHE = None
+
+
+def _rarity_absent_pids(db_path=None):
+    """公式にレアリティ表記が無い product_id の集合 (I/O・1回だけ読む)。
+
+    読めない時は None を返す = **判定不能**。呼び手は必須のまま扱う (fail-closed)。
+    """
+    global _RARITY_ABSENT_CACHE
+    if _RARITY_ABSENT_CACHE is not None:
+        return _RARITY_ABSENT_CACHE
+    import json as _json
+    import sqlite3 as _sq
+    path = db_path or r"C:/dev/iMak_data/catalog/products.sqlite"
+    absent, present = set(), set()
+    try:
+        con = _sq.connect(f"file:{path}?mode=ro", uri=True)
+        for pid, specs in con.execute("SELECT product_id, specs FROM products"):
+            try:
+                r = (_json.loads(specs or "{}").get("rarity") or "").strip()
+            except Exception:
+                r = "?"                      # 読めない = 有る側に倒す (勝手に免除しない)
+            (absent if not r else present).add((pid or "").strip())
+        con.close()
+    except Exception:
+        return None
+    # 同じ product_id が別カテゴリにも在り、片方に rarity が有るなら免除しない
+    _RARITY_ABSENT_CACHE = absent - present
+    return _RARITY_ABSENT_CACHE
+
+
+def rarity_absent_official(product_id, db_path=None):
+    """このカードは **公式にレアリティ表記が無い** か (I/O。判定不能なら False)。"""
+    pid = str(product_id or "").strip()
+    if not pid:
+        return False
+    absent = _rarity_absent_pids(db_path)
+    return bool(absent) and pid in absent
+
+
 def required_specifics_for_card(card_number, card_type=""):
     """カード種別に応じた必須Item Specifics(純関数, test可)。
 
@@ -134,6 +181,9 @@ def required_specifics_for_card(card_number, card_type=""):
     # で追加/削除の粒度が違う。監査ノイズ削減目的の除外は catalog の rarity 有無に追随して
     # 頻繁に更新される見込み。
     if num.startswith(NO_RARITY_POKEMON_SET_PREFIXES):
+        drop.add("C:Rarity")
+    # ★カタログが「公式に rarity 表記なし」と持っている行 (prefix より広く・正確)
+    if rarity_absent_official(card_number):
         drop.add("C:Rarity")
     if ctype in NO_CHARACTER_CARD_TYPES:
         drop.add("C:Character")

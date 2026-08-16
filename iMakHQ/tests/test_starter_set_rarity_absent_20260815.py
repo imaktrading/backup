@@ -54,3 +54,56 @@ def test_no_invented_rarity_value_is_introduced():
     src = open(os.path.join(_TCG, "check_csv.py"), encoding="utf-8", errors="replace").read()
     for bad in ('"Common"', "'Common'", '"Not specified"', '"Does not apply"'):
         assert f"C:Rarity\"] = {bad}" not in src and f"rarity = {bad}" not in src
+
+
+def test_rule_reads_catalog_not_a_prefix_list(tmp_path):
+    """★2026-08-16: prefix ハードコードをやめ、カタログの `specs.rarity` で判定する。
+
+    Catalog 回答: 「1枚も rarity を持たないセットが 215個 / 5,294件。prefix を手で足す限り
+    足し忘れた分が黙って出品されない」。実際、発端の SMI-007 は 8/15 に 5 prefix を足した
+    後も出せないままだった。
+    """
+    import json
+    import sqlite3
+    db = tmp_path / "products.sqlite"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE products (product_id TEXT, specs TEXT)")
+    con.executemany("INSERT INTO products VALUES (?,?)", [
+        ("SMI-007", json.dumps({"rarity": ""})),        # 公式に表記なし
+        ("SV9a-091", json.dumps({"rarity": "UR"})),     # 公式に有り
+    ])
+    con.commit(); con.close()
+    C._RARITY_ABSENT_CACHE = None
+    try:
+        assert C.rarity_absent_official("SMI-007", db_path=str(db)) is True
+        assert C.rarity_absent_official("SV9a-091", db_path=str(db)) is False
+    finally:
+        C._RARITY_ABSENT_CACHE = None
+
+
+def test_unreadable_catalog_does_not_exempt(tmp_path):
+    """カタログを読めない時は免除しない (判定不能を『無い』に倒さない)。"""
+    C._RARITY_ABSENT_CACHE = None
+    try:
+        assert C.rarity_absent_official("SMI-007", db_path=str(tmp_path / "nope.sqlite")) is False
+    finally:
+        C._RARITY_ABSENT_CACHE = None
+
+
+def test_same_id_in_two_categories_is_not_exempted(tmp_path):
+    """同じ product_id が別カテゴリにも在り、片方に rarity が有るなら免除しない。"""
+    import json
+    import sqlite3
+    db = tmp_path / "p.sqlite"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE products (product_id TEXT, specs TEXT)")
+    con.executemany("INSERT INTO products VALUES (?,?)", [
+        ("P-001", json.dumps({"rarity": ""})),
+        ("P-001", json.dumps({"rarity": "SR"})),
+    ])
+    con.commit(); con.close()
+    C._RARITY_ABSENT_CACHE = None
+    try:
+        assert C.rarity_absent_official("P-001", db_path=str(db)) is False
+    finally:
+        C._RARITY_ABSENT_CACHE = None
