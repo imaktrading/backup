@@ -35,7 +35,8 @@ import psa_hoju_fill as H                              # noqa: E402
 import sheet_io                                        # noqa: E402
 
 TAB = "補URL丸腰"
-HEADER = ["状態", "理由", "行", "itemID", "cert", "タイトル", "補URL本数", "更新日"]
+HEADER = ["状態", "理由", "行", "itemID", "cert", "タイトル",
+          "AI列:KEY", "A列:仕入元URL(メルカリ)", "補URL本数", "更新日"]
 READY, WAIT, ACT = "目視できる", "市場に版が無い(待ち)", "手が打てる"
 _ORDER = {READY: 0, ACT: 1, WAIT: 2}
 
@@ -55,13 +56,19 @@ def classify(why, has_cands, unjudged):
     return ACT, ja                       # no_ref 等は こちらで直せる側に寄せる
 
 
-def build_rows(targets, survivors, today):
-    """[(target, cands, why, unjudged)] → シートに書く2次元配列 (純関数)。"""
+def build_rows(targets, survivors, today, url_by_row=None):
+    """[(target, cands, why, unjudged)] → シートに書く2次元配列 (純関数)。
+
+    url_by_row={行: 仕入元URL} を渡すと A列(メルカリ等の主URL)も出す。
+    KEY はどのカードかの確定値 (空 = 補URL探索も重複チェックも効かない印)。
+    """
+    url_by_row = url_by_row or {}
     rows = []
     for t, cands, why, unjudged in survivors:
         st, ja = classify(why, bool(cands), unjudged)
         rows.append([st, ja, t.get("row", ""), t.get("itemID", ""), t.get("cert", ""),
-                     (t.get("title") or "")[:60], t.get("n_backups", 0), today])
+                     (t.get("title") or "")[:60], t.get("key", ""),
+                     url_by_row.get(t.get("row"), ""), t.get("n_backups", 0), today])
     rows.sort(key=lambda r: (_ORDER.get(r[0], 9), r[1]))
     return [HEADER] + rows
 
@@ -111,7 +118,9 @@ def main():
             t, vals, cache, ctx, today, ref_of=_ref_of, art_of=_art_of, stats=stats)
         survivors.append((t, cands, why, any(c.get("_art_unjudged") for c in cands)))
 
-    rows = build_rows(targets, survivors, today)
+    url_by_row = {i: ((r[0] if r else "") or "").strip()
+                  for i, r in enumerate(vals, start=1)}
+    rows = build_rows(targets, survivors, today, url_by_row)
     n = collections.Counter(r[0] for r in rows[1:])
     print(f"▶ 補URLが1本も無い出品: {len(rows) - 1}件")
     for k in (READY, ACT, WAIT):
