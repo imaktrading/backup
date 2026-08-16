@@ -46,6 +46,11 @@ COL_CONDITION = 5      # E: 商品状態
 COL_PRICE = 6          # F: 価格
 COL_IMAGES = 7         # G: 画像 URL
 COL_DESCRIPTION = 8    # H: 商品説明
+# I 列は本番 (HIGH 商品管理シート) では出品くん iMakTCG の入口
+# (`I列(cert#)非空 AND B列(itemID)空 AND A列(URL)非空` を PSA 出品対象として拾う)。
+# 中間スプシでも同じ位置に入れておけば、本番へ移す時に列を組み替えなくて済む。
+# **cert を持つ item のときだけ**書く (2026-08-17)。
+COL_CERT = 9           # I: PSA cert 番号 - メルカリ PSA10 収集のみ
 COL_POINTS = 11        # K: ポイント(円) - 2026-07-26 追加 (中間スプシで仕入原価比較用)
 COL_COLOR = 19         # S: 色                  - Phase 1d (Amazon は基本空欄)
 COL_SIZE = 20          # T: サイズ              - Phase 1d (Amazon は基本空欄)
@@ -147,11 +152,15 @@ def _build_row(item: dict) -> list:
     row[COL_PRICE - 1] = price_str
     row[COL_IMAGES - 1] = image_str
     row[COL_DESCRIPTION - 1] = description
+    # I (9): PSA cert。 cert を持つ item のみ (他カテゴリの収集は空欄のまま)
+    cert = str(item.get("cert") or "").strip()
+    if cert:
+        row[COL_CERT - 1] = cert
     # K (11): ポイント(円) - 2026-07-26 追加。 item に points_jpy があれば書く
     # (中間スプシで 仕入原価比較 = 価格−ポイント のため。 無ければ空欄 fail-closed)。
     points = item.get("points_jpy")
     row[COL_POINTS - 1] = "" if points in (None, "") else str(int(points))
-    # I,J,L-R は空欄
+    # J,L-R は空欄
     row[COL_COLOR - 1] = color
     row[COL_SIZE - 1] = size
     # U (21): バナー価格 列 (= 既存 mercari format)、 Amazon は空

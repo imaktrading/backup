@@ -286,3 +286,40 @@ class TestBuildRowPoints:
         from sheet_writer_amazon import COL_POINTS, _build_row
         row = _build_row({"url": "x", "points_jpy": None})
         assert row[COL_POINTS - 1] == ""
+
+
+class TestBuildRowCert:
+    """_build_row が I(9) 列に PSA cert を書く (2026-08-17 追加、中間スプシ共通).
+
+    中間スプシは本番 (HIGH 商品管理シート) と同じ列位置にしておき、本番へ移す時に
+    組み替えが要らないようにする。本番では I 列が出品くん psa_to_csv の入口
+    (`I列(cert#)非空 AND B列(itemID)空 AND A列(URL)非空` を PSA 出品対象として拾う) なので、
+    **cert を持つ item のときだけ**書くことを固定する。Amazon / Porter 等の収集で
+    誤って埋まると、PSA でない商品が PSA 出品ラインに乗る。
+    """
+
+    def test_cert_written_to_col_i(self):
+        from sheet_writer_amazon import COL_CERT, _build_row
+        row = _build_row({"url": "https://jp.mercari.com/item/m1", "cert": "153420191"})
+        assert row[COL_CERT - 1] == "153420191"
+
+    def test_cert_blank_when_absent(self):
+        from sheet_writer_amazon import COL_CERT, _build_row
+        row = _build_row({"url": "https://www.amazon.co.jp/dp/B08N5WRWNW"})
+        assert row[COL_CERT - 1] == ""
+
+    def test_cert_blank_when_empty_string(self):
+        from sheet_writer_amazon import COL_CERT, _build_row
+        assert _build_row({"url": "x", "cert": ""})[COL_CERT - 1] == ""
+
+    def test_cert_is_stripped(self):
+        from sheet_writer_amazon import COL_CERT, _build_row
+        assert _build_row({"url": "x", "cert": " 153420191 "})[COL_CERT - 1] == "153420191"
+
+    def test_cert_does_not_disturb_points_or_neighbours(self):
+        from sheet_writer_amazon import COL_CERT, COL_POINTS, _build_row
+        row = _build_row({"url": "x", "cert": "153420191", "points_jpy": 1066})
+        assert row[COL_CERT - 1] == "153420191"
+        assert row[COL_POINTS - 1] == "1066"
+        assert row[COL_CERT - 2] == ""       # H (説明)
+        assert row[COL_CERT] == ""           # J

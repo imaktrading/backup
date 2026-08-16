@@ -9,9 +9,12 @@
             → スラブ写真から cert を読み (psa_slab_vision)、 PSA 公式で引いて
               ラベル項目が一致した物だけ通す (psa_cert.verify)
 
-★出力先 = HIGH スプシ (19kj8... gid=851100680) の **A 列 (メルカリ URL) + I 列 (cert)**。
-出品くん (iMakTCG psa_to_csv) が `I列(cert#)非空 AND B列(itemID)空 AND A列(URL)非空`
-の行を PSA 出品対象として拾うので、 この 2 列を埋めれば下流にそのまま流れる。
+★出力先 = 中間スプシの `mercari_psa10` タブ (= ポーターの `mercari_porter` と同じ扱い)。
+本番 (HIGH 商品管理シート) には直接入れない。 user 判断 (2026-08-17): まず中間で見る。
+列は本番と同じ位置に入れてあるので、 移す時に組み替えは要らない:
+  A 列 = メルカリ URL / I 列 = cert。
+本番へ移すと、 出品くん (iMakTCG psa_to_csv) が
+`I列(cert#)非空 AND B列(itemID)空 AND A列(URL)非空` の行を PSA 出品対象として拾う。
 
 ★PSA 公式照会は既定で **やらない** (2026-08-17 方針確定)。
 psacard.com は Cloudflare で弾かれるが、 出品くん側に既に対策が入っている
@@ -215,6 +218,8 @@ def main(argv=None) -> int:
                     help="ラベル一致に要求する系統数 (既定2 = 1桁誤読を落とす)")
     ap.add_argument("--verify-from-json", default=None,
                     help="収集をやり直さず、 JSON の未照合分だけ PSA 照合し直す")
+    ap.add_argument("--label", default="psa10",
+                    help="中間スプシ tab suffix (= mercari_<label>)")
     ap.add_argument("--verify", action="store_true",
                     help="Harvest 側でも PSA 公式照会して先に確定させる "
                          "(既定 OFF = 出品くん側に 1 本化)")
@@ -258,19 +263,15 @@ def main(argv=None) -> int:
         _log("0 件 → 書込なし")
         return 0
 
-    from sheet_writer import (  # noqa: PLC0415
-        HIGH_SHEET_ID, LISTINGS_GID, append_new_urls, get_listings_worksheet,
-        open_sheet_by_id,
-    )
+    from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
     items = [{
         "url": c["url"], "title": c.get("title"), "condition": c.get("condition"),
         "price_jpy": c.get("price_jpy"), "image_urls": c.get("image_urls"),
         "description": c.get("description"),
-        "cert": c["vision"]["cert"],  # I 列 = 出品くんの入口
+        "cert": c["vision"]["cert"],  # I 列 (本番へ移した時の出品くんの入口)
     } for c in kept]
-    ws = get_listings_worksheet(open_sheet_by_id(HIGH_SHEET_ID), LISTINGS_GID)
-    res = append_new_urls(ws, items)
-    _log(f"[SHEET] HIGH 商品管理シート: {res}")
+    res = append_mercari_search_items(items, label=args.label)
+    _log(f"[SHEET] {res}")
     return 0
 
 
