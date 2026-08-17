@@ -1,5 +1,16 @@
 # iMakHarvest daily_report
 
+## 2026-08-18 — 鑑定番号が読めなかった出品も I列空欄で投入 (user 指示)
+
+- 決定 (user): 写真から cert が読めなかった分 (前回76件) は捨てずに中間スプシへ入れる。
+  **I列は空欄**にしておき、目視で確認する。grade が PSA10 でない等「対象外と分かった」分は従来通り捨てる。
+- 安全性: 出品くんの入口は `I列(cert#)非空 AND B列空 AND A列非空`。I列空欄で入れる限り
+  自動では出品に回らないので、目視で番号を入れて初めて対象になる。
+- 変更 (`run_harvest_mercari_psa10.py`): `unreadable` を候補と別に持ち回り (途中セーブ/再開にも載せる) /
+  `build_sheet_items()` を純関数として切り出し、読めなかった分は cert="" で書込 / ログに「番号読めず N件」。
+- 検証: offline test 838 passed (+4、うち1本は「読めなかった行に他候補の cert が紛れない」回帰)。
+  実機 dry-run (OP01・5件) で新経路の走行を確認。
+
 ## 2026-08-17 (続2) — PSA10 ワンピース49語 本走行 完了
 
 - 実行: `python run_harvest_mercari_psa10.py --games onepiece --save-every 10` (19:51-21:36、非headless)。

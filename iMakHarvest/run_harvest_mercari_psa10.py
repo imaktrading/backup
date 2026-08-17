@@ -98,12 +98,15 @@ def collect(args, dump_path=None, resume=None) -> dict:
                       "vision_error": 0, "already_claimed_url": 0,
                       "already_claimed_cert": 0, "item_error": 0}
     vision_errors: list[str] = []
+    # 鑑定番号が読めなかった分 (= I列空欄でスプシに入れて目視で拾う。 2026-08-18 user 指示)
+    unreadable: list[dict] = []
     by_keyword: dict = {}
 
     # 再開: 前回の JSON にある URL は処理済として飛ばす (収集自体は速いのでやり直す)
     done_urls: set[str] = set()
     if resume:
         cands = list(resume.get("candidates") or [])
+        unreadable = list(resume.get("unreadable") or [])
         for k, v in (resume.get("collect_reject") or {}).items():
             rej[k] = rej.get(k, 0) + v
         done_urls = set(resume.get("processed_urls") or [])
@@ -115,7 +118,7 @@ def collect(args, dump_path=None, resume=None) -> dict:
         """途中経過を JSON に落とす。 これが 1 回だけだったのが 2026-08-17 の事故。"""
         if not dump_path:
             return
-        _dump({"candidates": cands, "collect_reject": rej,
+        _dump({"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
                "vision_errors": sorted(set(vision_errors)),
                "processed_urls": processed, "truncated": state["truncated"],
                "by_keyword": by_keyword}, dump_path, quiet=True)
@@ -178,11 +181,12 @@ def collect(args, dump_path=None, resume=None) -> dict:
                 continue
             processed.append(url)
             if kept is not None:
-                cands.append(kept)
+                (cands if kept.get("cert_readable", True) else unreadable).append(kept)
             if len(processed) % args.save_every == 0:
                 _save()
             if i % 5 == 0 or i == len(urls):
-                _log(f"  詳細 {i}/{len(urls)} (cert読取={len(cands)} rej={rej})")
+                _log(f"  詳細 {i}/{len(urls)} (cert読取={len(cands)} "
+                     f"番号読めず={len(unreadable)} rej={rej})")
             time.sleep(1.0)
     finally:
         _save()  # 例外で抜けても保存する
@@ -192,14 +196,15 @@ def collect(args, dump_path=None, resume=None) -> dict:
             pass
 
     _log(f"収集完了{'(途中まで)' if state['truncated'] else ''}: "
-         f"cert読取={len(cands)} / reject={rej}")
+         f"cert読取={len(cands)} / 番号読めず={len(unreadable)} (I列空欄で投入) "
+         f"/ reject={rej}")
     if vision_errors:
         uniq = sorted(set(vision_errors))
         _log(f"⚠️ 要対応: Vision が {rej['vision_error']} 件で失敗 (= 判定できていない)。 "
              f"原因: {uniq[:3]}")
     if state["truncated"]:
         _log("⚠️ 要対応: 途中で打ち切りました。 --resume-from-json で続きから再開できます")
-    return {"candidates": cands, "collect_reject": rej,
+    return {"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
             "vision_errors": sorted(set(vision_errors)),
             "processed_urls": processed, "truncated": state["truncated"],
             "by_keyword": by_keyword}
@@ -242,6 +247,11 @@ def _process_one(url, driver, args, claimed, rej, vision_errors):
     if not gate["ok"]:
         key = gate["reason"].split(":")[0]
         rej[key] = rej.get(key, 0) + 1
+        # ★user 指示 (2026-08-18): 鑑定番号が読めなかった分は捨てずに I列空欄で入れる
+        # (目視で拾うため)。 grade が PSA10 でない等 「対象外と分かった」 物は従来通り捨てる。
+        if key == "cert_unreadable":
+            return _build_candidate(url, detail, q, images, vision,
+                                    cert_readable=False)
         return None
     # 同じ現物が別 URL で再出品されている場合は URL 突合では捕まらない。
     # cert は現物 1 枚に 1 つなので、 既知なら二重に押さえない
@@ -249,6 +259,14 @@ def _process_one(url, driver, args, claimed, rej, vision_errors):
         rej["already_claimed_cert"] += 1
         return None
 
+    return _build_candidate(url, detail, q, images, vision)
+
+
+def _build_candidate(url, detail, q, images, vision, cert_readable: bool = True) -> dict:
+    """候補 dict を組み立てる.
+
+    cert_readable=False は 「鑑定番号が写真から読めなかった」 = I列空欄で入れる分。
+    """
     return {
         "url": url,
         "title": detail.get("title"),
@@ -260,7 +278,27 @@ def _process_one(url, driver, args, claimed, rej, vision_errors):
         "seller_star": q.get("star"),
         "identity_verified": q.get("identity_verified"),
         "vision": vision,
+        "cert_readable": cert_readable,
     }
+
+
+def build_sheet_items(kept: list[dict], unreadable: list[dict]) -> list[dict]:
+    """スプシ書込用 item を作る (純関数).
+
+    - kept: 事前ゲート通過分 → I列に cert を入れる (出品くんの入口)
+    - unreadable: 鑑定番号が読めなかった分 → **I列は空欄** (目視で確認するため)
+    """
+    def _one(c: dict, cert: str) -> dict:
+        return {
+            "url": c["url"], "title": c.get("title"), "condition": c.get("condition"),
+            "price_jpy": c.get("price_jpy"), "image_urls": c.get("image_urls"),
+            "description": c.get("description"),
+            "cert": cert,  # I 列 (本番へ移した時の出品くんの入口)
+        }
+
+    items = [_one(c, (c.get("vision") or {}).get("cert") or "") for c in kept]
+    items += [_one(c, "") for c in unreadable]
+    return items
 
 # ---------------------------------------------------------------------------
 # ② 照合: PSA 公式で cert を引いて カードを確定 (レート制限あり・再開可)
@@ -382,20 +420,23 @@ def main(argv=None) -> int:
         _log(f"  cert={c['vision']['cert']} ¥{c.get('price_jpy')} "
              f"{(c.get('title') or '')[:32]} {c['url']}")
 
+    # 鑑定番号が読めなかった分 (I列空欄で投入 = 目視で確認する。 2026-08-18 user 指示)
+    unreadable = payload.get("unreadable") or []
+    if unreadable:
+        _log(f"番号読めず (I列空欄で投入): {len(unreadable)} 件 — 目視で確認")
+        for c in unreadable:
+            _log(f"  cert=?? ¥{c.get('price_jpy')} "
+                 f"{(c.get('title') or '')[:32]} {c['url']}")
+
     if args.dry_run:
         _log("dry-run → 書込なし")
         return 0
-    if not kept:
+    if not kept and not unreadable:
         _log("0 件 → 書込なし")
         return 0
 
     from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
-    items = [{
-        "url": c["url"], "title": c.get("title"), "condition": c.get("condition"),
-        "price_jpy": c.get("price_jpy"), "image_urls": c.get("image_urls"),
-        "description": c.get("description"),
-        "cert": c["vision"]["cert"],  # I 列 (本番へ移した時の出品くんの入口)
-    } for c in kept]
+    items = build_sheet_items(kept, unreadable)
     res = append_mercari_search_items(items, label=args.label)
     _log(f"[SHEET] {res}")
     return 0
