@@ -926,6 +926,21 @@ SCRIPTS = [
         "skip_postprocess": True,
     },
     {
+        # ★2026-08-17: **入稿した直後に押す**ボタン。手でやっていた「itemID をスプシに書込」の自動化。
+        # 突合キーは既に両側にある (eBay の SKU = `PSA10-<cert>` / シート I列 = 同じ cert) ので、
+        # 新しい台帳を作らず既存の突合ツールに任せる。何度押しても同じ結果 (冪等)。
+        # itemID が無い行は監視くんが取り下げられない = 売り切れても売れる状態で残る (fail-OPEN)
+        # ので、入稿と書込の間を空けない。
+        "category": None, "type": "utility",
+        "label": "📥 入稿後: itemID をスプシに書込",
+        "badge": "itemid_writeback",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "itemid_writeback_audit.py", "--apply"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
         # ★2026-07-28: **入稿して itemID を書き終えた直後に押す**ボタン。
         # 補URL検索の対象は「itemID が入っている(=出品済)」行なので、CSV生成直後の自動実行では
         # 当日の新規カードを拾えない(itemID がまだ無い)。itemID が付いた時点は人しか知らないため、
