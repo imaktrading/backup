@@ -1425,3 +1425,62 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証⚠️ 撤回1件: 第1弾一括9,465行はテスト衝突で全撤回(backup復元・524 green確認済)。教訓=systematic一括も盲目だと新churn
 - 未了(スコープ外): 導出化(焼き込み廃止=契約§1-5)は HQ co-sign 待ち。(b)自由文字列18,194/(c)判定不能3,853は3状態どおり不変
 - commit: 3382b46 / ea4367c / 2c1fda5 + 本 daily_report commit
+
+---
+
+## 2026-08-13〜08-16 — rarity 生値の eBay 漏れ 完治 (1,238行 + 再流入経路2本)
+
+### 決定事項
+- 決定1 (①②判定): **① カタログの誤り / ② 出品側は正**。出品側は契約 v1.2 §1-1 どおり `specs.rarity_ebay` を素通ししており正しい。誤っていたのは catalog が派生値を作りきれず raw fallback で生コードを焼いていたこと。実害 = cert158452539 (FB01-071_PARA) の C:Rarity が `L★` → 禁止文字除去で `L` の1文字になり出品取り止め。
+- 決定2: **★ / + は公式 rarity 語彙ではない**。公式を実取得 (2026-08-13): dbs-cardgame.com/fw = `L/C/UC/R/SR/SCR/PR` の7値のみ、gundam-gcg.com = `C/U/R/LR/LKC/LKU/LKR/P` の8値のみ。★/+ は刷り違い(parallel/alt-art)マーカーなので落として base を出し、意味は Features='Alternative Art' が持つ。旧 yaml `L★→SCR` は「Leader の刷り違いを Secret Rare と名乗る」誤りで廃止。
+- 決定3: **gundam `LR` = "Legend Rare"** (公式EN gundam-gcg.com/en/products/gd01.html)。旧 `Leader Rare` は One Piece の LR を持ち込んだ誤り (Gundam に Leader カードは無い) → 337行是正。**one_piece `SPカード`** は公式EN "SP CARD" (asia-en 実取得) → eBay master 実在値 `Special` を採用 (118行が日本語のまま出ていた)。
+- 決定4: **公式の長形名が確認できない code は推測で埋めず空欄** (MUR/BWR/C2/U2 等)。公式ポケカは rarity をアイコン画像でしか持たず名前が存在しないことを実測確認 → 「公式名が取れ次第」は永久に来ないため待ち方針を撤回。HQ 判断 (2026-08-16) で pokemon 10件は出さないで確定、one_piece 7件 (`_OP11_dummy`) は重複整理の別件へ。`SS` 12件はカード名に印字がある (`Ho-Oh LEGEND` / `Flareon Star`) ので写して `LEGEND` / `Gold Star` を投入 (HQ 承認済)。
+- 決定5: データを直しても**取込側が raw を書き戻すなら新弾ごとに再発する**ため、入口を fail-closed 化した (下記変更3)。
+
+### 変更
+- 変更: iMakCatalog/api.py:271-297 — `derive_rarity_ebay()` / `has_rarity_variant_mark()` 新設 (★/+ を落として filter_map、miss は None = fail-closed。raw に degrade させない)
+- 変更: iMakCatalog/ebay_filter_map/{dragonball,gundam,one_piece,pokemon}.yaml — rarity を eBay master 実在値へ canonical 化。★/+ 付き source は削除 (DB 側も migration で削除)。one_piece `L→""` (空=Leader 丸ごと skip の地雷) を `Leader` に是正
+- 変更: iMakCatalog/migrations/2026-08-13_dbscg_rarity_ebay_canonical.py 新規 — dragonball 995行 (★921 + 短縮SCR74)、★残存0、921行に Features 追加。commit 22bca8e
+- 変更: iMakCatalog/migrations/2026-08-13_tcg_rarity_ebay_canonical_all.py 新規 — gundam 1,045 / one_piece 126 / pokemon 67 = 1,238行。うち公式長形名不明の29行は空欄化 (fail-closed)。commit a8b920c
+- 変更: iMakCatalog/migrations/2026-05-30_tcg_ebay_fields_phase_b_rarity.py — `resolve_rarity_ebay()` 末尾の `return rarity_raw` (raw fallback) 廃止 → filter_map 一本化、未登録は None。**新弾取込フローが毎回走らせる migration = 再流入の主犯**
+- 変更: iMakCatalog/migrations/2026-05-30_dbfw_official_import.py:88-115 — `_derive_leader_rarity()` が alt_art LEADER に `('L★','L★')` と生値を書いていたのを `api.derive_rarity_ebay` 経由 (`('L★','Leader')`) に。commit 71db664
+- 変更: iMakCatalog/integrations/psa_to_csv.py:404-410 — consumer 側の ★ 再変換を削除 (契約 v1.2 §1-1)。同ファイル edition pair に `8 PACKS BATTLE ↔ 8パックバトル` 追加で cert160317119 SANJI #004 → ST10-004_p1 を一意特定 (score=280、データ追加なし)。commit 19ec633
+- 変更: iMakCatalog/migrations/2026-08-13_pokemon_ss_legend_goldstar.py 新規 — `SS` 12行 (LEGEND 9 / Gold Star 3)。commit a41442c
+- 変更: iMakCatalog/migrations/2026-08-16_rarity_accepted_blank_mark.py 新規 — 出さないと決めた17行に `specs.rarity_ebay_status='accepted_blank_20260816'` (値は入れない)。commit ebb4414
+- 変更: iMakCatalog/tools/set_name_integrity_audit.py — §7 新設 (`raw_stamped` / `map_drift` / `unmapped` / `accepted_blank` を毎日出す)。★0 でも出し続ける規約は §5§6 と同じ
+- 変更: iMakCatalog/scripts/add_clf001_bulbasaur_20260815.py 新規 — Classic `CLF-001` フシギダネ 001/032 追加 (公式はカードリスト非公開のため先行3枚と同じく小売2社クロス確認、rarity 空が正)。commit 3f16b86
+- 変更: 回帰テスト 5本追加 (test_dbscg_rarity_ebay_canonical_20260813 / test_tcg_rarity_ebay_canonical_all_20260813 / test_rarity_ingest_no_raw_regression_20260813 / test_op_8packs_battle_promo_20260813 / test_dbscg_leader_rarity_backfill 他)、旧挙動を固定していた既存6件を是正
+
+### 検証(実出力)
+- 検証✅ pytest -q → **607 passed** (231→607)。pre-commit hook 全 commit で green
+- 検証✅ 監査マーカー: `rarity_raw_stamped=0 rarity_map_drift=0 rarity_unmapped=0 rarity_accepted_blank=17` (生コード漏れ **4カテゴリとも0件**)
+- 検証✅ 公式再取得: dbs-cardgame.com/fw の rarity filter 7値 / gundam-gcg.com 8値 / asia-en.onepiece-cardgame.com "SP CARD" / pokemon-card.com card/35904 に rarity アイコン無し
+- 検証✅ 実害カード FB01-071_PARA → `rarity_ebay='Leader'` + Features 'Alternative Art'、公式生値 `rarity='L★'` は保持 (SSOT は公式のミラー)
+- 検証✅ phase_b migration `--probe` → 全カテゴリ 0件更新 (churn 無し = 現DBと入口ロジックが一致)
+- 検証✅ 他 facet 点検: `*_ebay` に日本語混入 0 / 未変換 0 (identity は数値・英語で正常)
+- 検証✅ cert160317119 → `ST10-004_p1 / Promo Cards / Common` (17候補中 score=280)
+- 未了(HQ判断済でクローズ): pokemon 10件・one_piece 7件は空欄のまま = 出品されない。値が要るようになったら HQ から値付きで依頼が来る
+- commit: 22bca8e / 19ec633 / a8b920c / 71db664 / a41442c / 3f16b86 / ebb4414 + 本 daily_report commit
+
+## 2026-08-17 — /doctor: Claude Code 環境の健全化 + CLAUDE.md 導出可能内容の削除
+
+### 決定事項
+- 決定1: プロジェクト CLAUDE.md から**コードを読めば分かる内容は削る**。ディレクトリ構成 (`ls`)・SQLite スキーマDDL (`db/schema.sql` に実物)・API コード例 (`api.py` に実装、しかも4関数しか書かれておらず実物は13関数)・完了済 Phase 計画。残すのは決定事項・安全規則・非自明な運用 (禁止事項 / SSOT契約 / 画像規約 / 運用ルール)。
+- 決定2: **Worktree 分離ルールの節を削除**。グローバル `~/.claude/CLAUDE.md` に同内容があり、**しかもプロジェクト側は branch 名が `feature/catalog-phase2` のまま陳腐化**していた (実機・グローバルとも `feature/uniqlo-ut`)。重複を消すことで矛盾も解消。
+- 決定3: npm 版 Claude Code (2.1.136) は **Node.js/npm 自体がこのPCに無い**ため `claude update` が構造的に成功しない → ネイティブ版へ移行 (`claude install`)。
+
+### 変更
+- 変更: iMakCatalog/CLAUDE.md — 328行 → **185行** (10,943→5,862字、143行削除、est. -1,270 tok/セッション)。削除5ブロック = Worktree節 L3-28 / ディレクトリ構成 L64-92 / スキーマDDL L93-130 / APIコード例 L131-166 / Phase計画 L285-298
+- 変更: (環境) Claude Code を native 2.1.233 へ移行 (`C:/Users/imax2/.local/bin/claude.exe`)。`installMethod` = native。旧 npm 版 432MB (`%APPDATA%/npm`) 削除。ユーザーPATH を `.local/bin` 1本に整理
+- 変更: (環境) `~/.claude.json` `autoUpdates` を false → **true** に復帰 (インストーラ副作用で無効化されていた)。backup: `.claude.json.bak_doctor_20260817174759`
+- 変更: (環境) `~/.claude/settings.json` `permissions.defaultMode` = `auto` (走査時は `bypassPermissions`)。allow 1216件 / hooks は保持。backup: `settings.json.bak_doctor_20260817173416`
+- 未変更(意図的): `C:/dev/iMak_catalog/.claude/settings.json` の `defaultMode=bypassPermissions` は checked-in のため触らず。**このプロジェクトでは user scope の auto は効かない**
+
+### 検証(実出力)
+- 検証✅ `claude --version` → **2.1.233 (Claude Code)** / 解決先 `C:\Users\imax2\.local\bin\claude.exe`
+- 検証✅ pytest -q → 607 passed (CLAUDE.md 削除後も回帰なし)
+- 検証✅ `git diff --stat iMakCatalog/CLAUDE.md` → 143 deletions のみ (追加0)
+- 検証✅ 削除前に `db/schema.sql` (6,428字/3 CREATE TABLE) と `api.py` の13関数の実在を確認 = 導出可能性の裏取り
+- 検証⚠️ SessionStart フック `session_beacon.py` (timeout 20s): 18回中 median 0.9-1.2s だが **最大 29.7s** (resume時) / 11.8s (起動時)。セッション開始が待たされる。非同期化かキャッシュを要検討 (今回は未修正)
+- 検証⚠️ 走査は直近50セッション/9プロジェクト/4日間。全1,979セッション中の一部
+- commit: 本 CLAUDE.md trim commit + 本 daily_report commit
