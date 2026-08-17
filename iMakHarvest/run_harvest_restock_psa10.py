@@ -52,6 +52,19 @@ def _log(m: str) -> None:
     print(f"[{datetime.now():%H:%M:%S}] {m}", flush=True)
 
 
+def _dump(payload: dict, path: Path, quiet: bool = False) -> None:
+    """JSON へ書き出す。 途中セーブは quiet=True (ログで埋めない).
+
+    tmp に書いてから replace するので、 書込中に落ちても前回分を壊さない。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    if not quiet:
+        _log(f"[FILE] {path}")
+
+
 def collect_sold_cards(days: int, max_cards: int) -> list[dict]:
     """①② 売れた出品 → PSA10 カードの identity 一覧."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)
@@ -82,28 +95,54 @@ def collect_sold_cards(days: int, max_cards: int) -> list[dict]:
     return cards
 
 
-def find_replacements(cards: list[dict], args) -> list[dict]:
-    """③〜⑤ カードごとにメルカリを探して 同一カードの別個体を拾う."""
+def find_replacements(cards: list[dict], args, dump_path=None) -> list[dict]:
+    """③〜⑤ カードごとにメルカリを探して 同一カードの別個体を拾う.
+
+    ★カード 1 枚ぶん終わるたびに保存する (2026-08-17 の事故対策)。
+    保存が全ループ終了後の 1 回だけだと、 ドライバのタイムアウト 1 回で
+    それまでの詳細フェッチと Vision 読取 (= 課金済) が全部消える。
+    1 枚の処理で落ちてもその 1 枚だけ飛ばし、 連続で落ちたら打ち切って保存する。
+    """
     driver = MS.create_anonymous_driver(headless=False)  # メルカリは非 headless 必須
     found = []
+    done_cards: list[str] = []
+
+    def _save():
+        if dump_path:
+            _dump({"cards": cards, "found": found, "done_cards": done_cards}, dump_path,
+                  quiet=True)
+
+    consecutive_errors = 0
     try:
         for n, card in enumerate(cards, 1):
             kws = psa_restock.build_keywords(card)
             if not kws:
                 _log(f"[{n}/{len(cards)}] 番号が無く探せない: {card['ebay_title'][:40]}")
+                done_cards.append(card["sold_item_id"])
                 continue
             _log(f"[{n}/{len(cards)}] {card['card_name']} {card['card_number']} "
                  f"({card['set_name'][:24]}) ← {kws}")
 
-            collected = MSch.collect_multi_keyword_urls(
-                kws, driver, price_min=args.price_min, price_max=args.price_max,
-                cap_per_keyword=args.cap_per_keyword,
-            )
-            urls = collected["urls"][:args.max_details] if args.max_details \
-                else collected["urls"]
             rej = {"sold": 0, "seller": 0, "fetch_fail": 0, "no_image": 0,
                    "vision_error": 0, "cert_unreadable": 0, "same_individual": 0,
                    "other_card": 0}
+            try:
+                collected = MSch.collect_multi_keyword_urls(
+                    kws, driver, price_min=args.price_min, price_max=args.price_max,
+                    cap_per_keyword=args.cap_per_keyword,
+                )
+            except Exception as e:  # noqa: BLE001 - 1枚の失敗で走行全体を殺さない
+                consecutive_errors += 1
+                _log(f"    ⚠️ 検索エラー ({consecutive_errors}連続): {type(e).__name__}")
+                _save()
+                if consecutive_errors >= args.max_consecutive_errors:
+                    _log("    連続失敗 → ここで打ち切り "
+                         "(--resume-from-json で続きから再開できます)")
+                    break
+                continue
+            consecutive_errors = 0
+            urls = collected["urls"][:args.max_details] if args.max_details \
+                else collected["urls"]
 
             for url in urls:
                 detail = mercari_item_detail.fetch_detail(driver, url)
@@ -160,7 +199,11 @@ def find_replacements(cards: list[dict], args) -> list[dict]:
                      f"({'/'.join(m['signals'])}) {url}")
                 time.sleep(1.0)
             _log(f"    収集{len(urls)} → 候補{len([f for f in found if f['sold_item_id'] == card['sold_item_id']])} / reject={rej}")
+            # ★カード1枚ぶん終わったら保存 (ここが「最後に1回だけ」だったのが事故の原因)
+            done_cards.append(card["sold_item_id"])
+            _save()
     finally:
+        _save()  # 例外で抜けても保存する
         try:
             driver.quit()
         except Exception:
@@ -182,20 +225,32 @@ def main(argv=None) -> int:
     ap.add_argument("--min-signals", type=int, default=2,
                     help="同一カード判定に要求する一致系統数")
     ap.add_argument("--label", default="restock_psa10")
+    ap.add_argument("--max-consecutive-errors", type=int, default=3,
+                    help="連続失敗で打ち切る回数 (既定3)")
+    ap.add_argument("--resume-from-json", default=None,
+                    help="前回の JSON から再開 (処理済カードを飛ばす)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
-    cards = collect_sold_cards(args.days, args.max_cards)
+    # ★再開: 前回の JSON があれば 対象カードと既知の候補を引き継ぐ。
+    # eBay を再取得しないので GetItem の叩き直しも省ける。
+    prev_found: list[dict] = []
+    if args.resume_from_json:
+        path = Path(args.resume_from_json)
+        prev = json.loads(path.read_text(encoding="utf-8"))
+        cards = [c for c in prev["cards"]
+                 if c["sold_item_id"] not in set(prev.get("done_cards") or [])]
+        prev_found = prev.get("found") or []
+        _log(f"再開: 未処理 {len(cards)} 件 / 既知の候補 {len(prev_found)} 件")
+    else:
+        path = DUMP_DIR / f"restock_psa10_{datetime.now():%Y%m%dT%H%M%S}.json"
+        cards = collect_sold_cards(args.days, args.max_cards)
     if not cards:
         _log("対象カード 0 件 → 終了")
         return 0
 
-    found = find_replacements(cards, args)
-    path = DUMP_DIR / f"restock_psa10_{datetime.now():%Y%m%dT%H%M%S}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"cards": cards, "found": found},
-                               ensure_ascii=False, indent=2), encoding="utf-8")
-    _log(f"[FILE] {path}")
+    found = prev_found + find_replacements(cards, args, dump_path=path)
+    _dump({"cards": cards, "found": found}, path)
 
     covered = {f["sold_item_id"] for f in found}
     _log(f"結果: 売れたカード {len(cards)} 件中 {len(covered)} 件に代替候補あり "

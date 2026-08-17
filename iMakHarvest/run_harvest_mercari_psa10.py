@@ -70,20 +70,55 @@ def _log(m: str) -> None:
 # ---------------------------------------------------------------------------
 # ① 収集: メルカリ検索 → 詳細 → セラーフィルタ → Vision でラベル読取
 # ---------------------------------------------------------------------------
-def collect(args) -> dict:
+def collect(args, dump_path=None, resume=None) -> dict:
+    """収集 → 詳細 → Vision。
+
+    ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
+    ドライバとの通信が 1 回タイムアウトしただけで走行全体が例外死し、 詳細 145 件
+    (Vision 読取 111 回 = 課金済) が丸ごと消えた。 原因は 2 つ:
+      ① 保存が全ループ終了後の 1 回だけだった
+      ② 1 件の失敗が走行全体を殺していた
+    → `--save-every` 件ごとに JSON へ保存し、 1 件の失敗はその 1 件だけ落とす。
+      連続で失敗したらドライバを作り直し、 それでも駄目なら **そこまでを保存して
+      「途中まで」と明示して**終わる (黙って正常終了しない)。
+    """
     keywords = args.keywords or psa_search_terms.build_keywords(args.games)
     headless = args.headless and not args.manual  # manual は非 headless 必須
     _log(f"収集開始: keywords={len(keywords)} 価格={args.price_min}-{args.price_max} "
          f"評価数>={args.min_rating} mode={'手動フリマアシスト' if args.manual else '自動scroll'}")
 
-    driver = MS.create_anonymous_driver(headless=headless)
+    def _new_driver():
+        return MS.create_anonymous_driver(headless=headless)
+
+    driver = _new_driver()
     # vision_error は 「写真が読めない (= 正常な reject)」 とは別枠。 混ぜると API 障害を
     # 「不鮮明が多かった」 と読み違える (2026-08-17 に残高切れで実際に起きた)
     cands, rej = [], {"sold": 0, "seller_rating": 0, "no_identity": 0,
                       "fetch_fail": 0, "no_image": 0, "cert_unreadable": 0,
                       "vision_error": 0, "already_claimed_url": 0,
-                      "already_claimed_cert": 0}
+                      "already_claimed_cert": 0, "item_error": 0}
     vision_errors: list[str] = []
+    by_keyword: dict = {}
+
+    # 再開: 前回の JSON にある URL は処理済として飛ばす (収集自体は速いのでやり直す)
+    done_urls: set[str] = set()
+    if resume:
+        cands = list(resume.get("candidates") or [])
+        for k, v in (resume.get("collect_reject") or {}).items():
+            rej[k] = rej.get(k, 0) + v
+        done_urls = set(resume.get("processed_urls") or [])
+        _log(f"再開: 処理済 {len(done_urls)} URL / 既存候補 {len(cands)} 件")
+    processed: list[str] = list(done_urls)
+    state = {"truncated": False}
+
+    def _save():
+        """途中経過を JSON に落とす。 これが 1 回だけだったのが 2026-08-17 の事故。"""
+        if not dump_path:
+            return
+        _dump({"candidates": cands, "collect_reject": rej,
+               "vision_errors": sorted(set(vision_errors)),
+               "processed_urls": processed, "truncated": state["truncated"],
+               "by_keyword": by_keyword}, dump_path, quiet=True)
 
     # 本番で既に押さえてある仕入元は拾い直さない (URL は詳細フェッチの前に落とすので
     # 1 件あたり 約10秒 と Vision 1 回分が丸ごと浮く)
@@ -92,6 +127,8 @@ def collect(args) -> dict:
         from sheet_writer import load_claimed_supply  # noqa: PLC0415
         claimed = load_claimed_supply()
         _log(f"既知の仕入元: URL {len(claimed['urls'])} 件 / cert {len(claimed['certs'])} 件")
+
+    from sheet_writer import dedupe_key  # noqa: PLC0415
     try:
         collected = MSch.collect_multi_keyword_urls(
             keywords, driver, price_min=args.price_min, price_max=args.price_max,
@@ -100,88 +137,130 @@ def collect(args) -> dict:
             progress_callback=lambda n, m: _log(f"  収集 {m}"),
         )
         urls = collected["urls"]
-        _log(f"収集: {len(urls)} URL (dedup後) / by_keyword={collected['by_keyword']}")
+        by_keyword = collected["by_keyword"]
+        _log(f"収集: {len(urls)} URL (dedup後) / by_keyword={by_keyword}")
         if args.max_details:
             urls = urls[:args.max_details]
             _log(f"詳細フェッチ上限 {args.max_details} 件に制限")
+        _save()  # 収集直後に保存 (詳細で落ちても URL 収集をやり直さない)
 
-        from sheet_writer import dedupe_key  # noqa: PLC0415
+        consecutive_errors = 0
         for i, url in enumerate(urls, 1):
+            if url in done_urls:
+                continue
             if dedupe_key(url) in claimed["urls"]:
                 rej["already_claimed_url"] += 1
+                processed.append(url)
                 continue
-            detail = mercari_item_detail.fetch_detail(driver, url)
-            if not detail:
-                rej["fetch_fail"] += 1
+            try:
+                kept = _process_one(url, driver, args, claimed, rej, vision_errors)
+                consecutive_errors = 0
+            except Exception as e:  # noqa: BLE001 - 1 件の失敗で走行全体を殺さない
+                rej["item_error"] += 1
+                consecutive_errors += 1
+                _log(f"  ⚠️ {i}/{len(urls)} 取得エラー ({consecutive_errors}連続): "
+                     f"{type(e).__name__}")
+                _save()
+                if consecutive_errors >= args.max_consecutive_errors:
+                    # ドライバが死んでいる可能性が高い。 作り直して続行を試す
+                    _log("  ドライバを作り直します")
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+                    try:
+                        driver = _new_driver()
+                        consecutive_errors = 0
+                    except Exception as e2:  # noqa: BLE001
+                        state["truncated"] = True
+                        _log(f"  ドライバ再生成も失敗 ({type(e2).__name__}) → ここで打ち切り")
+                        break
                 continue
-            if not detail.get("in_stock"):
-                rej["sold"] += 1
-                continue
-
-            q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから
-            if not MSch.passes_seller_filter(
-                q, min_rating_count=args.min_rating,
-                require_identity=not args.no_identity,
-            ):
-                key = ("seller_rating" if (q.get("rating_count") or 0) < args.min_rating
-                       else "no_identity")
-                rej[key] += 1
-                continue
-
-            images = [u for u in (detail.get("image_urls") or []) if u.startswith("http")]
-            if not images:
-                rej["no_image"] += 1
-                continue
-
-            vision = psa_slab_vision.read_slab(images)
-            if vision.get("error"):
-                # こちらの障害 (残高切れ / rate limit 等)。 出品しない点は同じだが、
-                # 黙って「不鮮明」に混ぜず 障害として最後に報告する
-                rej["vision_error"] += 1
-                vision_errors.append(vision["error"])
-                continue
-            # 通信なしで落とせる分はここで落とす (公式照会は 1 cert 1 回に抑えたいため)
-            gate = psa_cert.local_gate(vision, detail.get("title") or "")
-            if not gate["ok"]:
-                key = gate["reason"].split(":")[0]
-                rej[key] = rej.get(key, 0) + 1
-                continue
-            # 同じ現物が別 URL で再出品されている場合は URL 突合では捕まらない。
-            # cert は現物 1 枚に 1 つなので、 既知なら二重に押さえない
-            if vision["cert"] in claimed["certs"]:
-                rej["already_claimed_cert"] += 1
-                continue
-
-            cands.append({
-                "url": url,
-                "title": detail.get("title"),
-                "price_jpy": detail.get("price_jpy"),
-                "condition": detail.get("condition"),
-                "description": detail.get("description"),
-                "image_urls": images,
-                "seller_rating_count": q.get("rating_count"),
-                "seller_star": q.get("star"),
-                "identity_verified": q.get("identity_verified"),
-                "vision": vision,
-            })
+            processed.append(url)
+            if kept is not None:
+                cands.append(kept)
+            if len(processed) % args.save_every == 0:
+                _save()
             if i % 5 == 0 or i == len(urls):
                 _log(f"  詳細 {i}/{len(urls)} (cert読取={len(cands)} rej={rej})")
             time.sleep(1.0)
     finally:
+        _save()  # 例外で抜けても保存する
         try:
             driver.quit()
         except Exception:
             pass
 
-    _log(f"収集完了: cert読取={len(cands)} / reject={rej}")
+    _log(f"収集完了{'(途中まで)' if state['truncated'] else ''}: "
+         f"cert読取={len(cands)} / reject={rej}")
     if vision_errors:
         uniq = sorted(set(vision_errors))
         _log(f"⚠️ 要対応: Vision が {rej['vision_error']} 件で失敗 (= 判定できていない)。 "
              f"原因: {uniq[:3]}")
+    if state["truncated"]:
+        _log("⚠️ 要対応: 途中で打ち切りました。 --resume-from-json で続きから再開できます")
     return {"candidates": cands, "collect_reject": rej,
             "vision_errors": sorted(set(vision_errors)),
-            "by_keyword": collected["by_keyword"]}
+            "processed_urls": processed, "truncated": state["truncated"],
+            "by_keyword": by_keyword}
 
+
+def _process_one(url, driver, args, claimed, rej, vision_errors):
+    """1 件を判定して 候補 dict を返す (対象外なら None)。 例外は呼出側で捕まえる."""
+    detail = mercari_item_detail.fetch_detail(driver, url)
+    if not detail:
+        rej["fetch_fail"] += 1
+        return None
+    if not detail.get("in_stock"):
+        rej["sold"] += 1
+        return None
+
+    q = MSch.extract_seller_quality(driver)  # 直前に開いた商品ページから
+    if not MSch.passes_seller_filter(
+        q, min_rating_count=args.min_rating,
+        require_identity=not args.no_identity,
+    ):
+        key = ("seller_rating" if (q.get("rating_count") or 0) < args.min_rating
+               else "no_identity")
+        rej[key] += 1
+        return None
+
+    images = [u for u in (detail.get("image_urls") or []) if u.startswith("http")]
+    if not images:
+        rej["no_image"] += 1
+        return None
+
+    vision = psa_slab_vision.read_slab(images)
+    if vision.get("error"):
+        # こちらの障害 (残高切れ / rate limit 等)。 出品しない点は同じだが、
+        # 黙って「不鮮明」に混ぜず 障害として最後に報告する
+        rej["vision_error"] += 1
+        vision_errors.append(vision["error"])
+        return None
+    # 通信なしで落とせる分はここで落とす (公式照会は 1 cert 1 回に抑えたいため)
+    gate = psa_cert.local_gate(vision, detail.get("title") or "")
+    if not gate["ok"]:
+        key = gate["reason"].split(":")[0]
+        rej[key] = rej.get(key, 0) + 1
+        return None
+    # 同じ現物が別 URL で再出品されている場合は URL 突合では捕まらない。
+    # cert は現物 1 枚に 1 つなので、 既知なら二重に押さえない
+    if vision["cert"] in claimed["certs"]:
+        rej["already_claimed_cert"] += 1
+        return None
+
+    return {
+        "url": url,
+        "title": detail.get("title"),
+        "price_jpy": detail.get("price_jpy"),
+        "condition": detail.get("condition"),
+        "description": detail.get("description"),
+        "image_urls": images,
+        "seller_rating_count": q.get("rating_count"),
+        "seller_star": q.get("star"),
+        "identity_verified": q.get("identity_verified"),
+        "vision": vision,
+    }
 
 # ---------------------------------------------------------------------------
 # ② 照合: PSA 公式で cert を引いて カードを確定 (レート制限あり・再開可)
@@ -210,10 +289,19 @@ def verify_all(cands: list[dict], interval: float, min_signals: int) -> dict:
     return stats
 
 
-def _dump(payload: dict, path: Path) -> None:
+def _dump(payload: dict, path: Path, quiet: bool = False) -> None:
+    """JSON へ書き出す。 quiet=True は 途中セーブ (毎回ログを出すと埋まるため黙る).
+
+    ★同じ path に上書きし続ける。 途中セーブの目的は「落ちた時に続きから再開できること」
+    なので、 常に最新の 1 ファイルがあれば足りる。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    _log(f"[FILE] {path}")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    # 書込中に落ちても前回分を壊さない (tmp に書いてから置換)
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    if not quiet:
+        _log(f"[FILE] {path}")
 
 
 def main(argv=None) -> int:
@@ -247,6 +335,13 @@ def main(argv=None) -> int:
                          "(既定 OFF = 出品くん側に 1 本化)")
     ap.add_argument("--no-dedupe", action="store_true",
                     help="本番スプシとの重複チェックを行わない (調査用)")
+    # ★長時間走行の作業を捨てないための3点 (2026-08-17: 145件分を失った事故の対策)
+    ap.add_argument("--save-every", type=int, default=10,
+                    help="何件ごとに途中セーブするか (既定10)")
+    ap.add_argument("--max-consecutive-errors", type=int, default=3,
+                    help="連続失敗が何回でドライバを作り直すか (既定3)")
+    ap.add_argument("--resume-from-json", default=None,
+                    help="前回の JSON から再開 (処理済 URL を飛ばす)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
@@ -257,9 +352,16 @@ def main(argv=None) -> int:
                                              args.min_signals)
         _dump(payload, path)
     else:
-        payload = collect(args)
-        path = DUMP_DIR / f"mercari_psa10_{datetime.now():%Y%m%dT%H%M%S}.json"
-        _dump(payload, path)  # 照合/書込の前に必ず保存 (落ちても収集をやり直さない)
+        # ★保存先を collect() に渡す = 走行中ずっと途中セーブされる。
+        # 再開時は同じファイルを上書きし続けるので、 何度落ちても続きから積み上がる。
+        resume = None
+        if args.resume_from_json:
+            path = Path(args.resume_from_json)
+            resume = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            path = DUMP_DIR / f"mercari_psa10_{datetime.now():%Y%m%dT%H%M%S}.json"
+        payload = collect(args, dump_path=path, resume=resume)
+        _dump(payload, path)
         if args.verify:
             payload["verify_stats"] = verify_all(payload["candidates"],
                                                  args.psa_interval, args.min_signals)
