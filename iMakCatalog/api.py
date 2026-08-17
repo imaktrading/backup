@@ -442,6 +442,22 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     set_official = g("set_name_official")
     set_raw = g("set_name") or set_official
     category = g("category")
+    specs_obj = json.loads(g("specs")) if g("specs") else {}
+
+    # 2026-08-17: 導出が空振りした時の fallback に stored (specs.set_name_ebay) を挟む。
+    # 従来は 導出 → raw だったため、導出できない行で **生の日本語セット名** または
+    # **None** が C:Set に流れていた (2026-08-17 実測 pokemon 8,367 行:
+    #   生日本語 6,653 例 M1L-001 '拡張パック「メガブレイブ」'
+    #             (stored は 'Scarlet & Violet—Mega Brave')
+    #   None     1,714 例 SVM-001 (stored は 'Scarlet & Violet Promo')
+    #                    ← 「C:Set が空」の発生源のひとつ)
+    # ★導出と stored が **両方とも非空で食い違う** 行 (pokemon 7,408) はここでは触らない。
+    #   どちらが正かは facet ごとに逆転する (MC-* は stored が正 / S4a-* は yaml が正)
+    #   ため、推測で寄せずに従来どおり導出を優先する。棚卸しは
+    #   tools/set_name_integrity_audit.py §6 canonical drift と
+    #   requests/2026-08-16_pdca_catalog_queue_tcg_response.md を参照。
+    stored_ebay = (specs_obj.get("set_name_ebay") or "").strip()
+
     set_ebay = None
     if set_official and category:
         # 1st: 公式原文ベタ一致 (例: "BOOSTER PACK -WINGS OF THE CAPTAIN- [OP-06]" → "Wings of the Captain")
@@ -481,11 +497,12 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "name_jp": g("name_jp"),
         "name_en": g("name_en"),                   # NULL なら呼び出し側で fallback
         "name_en_source": g("name_en_source"),     # 出典 / 翻訳手段の透明化
-        "set_name": set_ebay or set_raw,           # eBay 値があれば優先、なければ raw
+        # 導出 > stored (焼かれた canonical) > raw
+        "set_name": set_ebay or stored_ebay or set_raw,
         "set_name_official": set_official,
         "card_set_id": g("card_set_id"),
         "language": g("language"),
-        "specs": json.loads(g("specs")) if g("specs") else {},
+        "specs": specs_obj,
         "images": json.loads(g("images")) if g("images") else [],
         "source": g("source"),
         "source_url": g("source_url"),
