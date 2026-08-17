@@ -542,6 +542,30 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         append_log_func(f"\n⚠️ 補URL 追記 失敗(続行): {type(e).__name__}: {e}\n")
         # 失敗しても listing 出力には影響なし
 
+    # Step 4s (sold): 仕入元が売り切れた行を CSV から落とす (2026-08-17)。
+    # 人が入稿前に手でやっていた「HIGHT で売り切れを確認 → 売り切れは出品しない」の自動化。
+    # 売り切れた現物を出すと仕入れられず、キャンセル = Defect Rate 直行。
+    # 根拠はシートの売り切れ欄 (監視くんの巡回結果)。**出品後**の売り切れは監視くんの担当なので
+    # ここでは触らない。CSV を変える最後の step にしてある (監査くんは後段でこの CSV を見る)。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 仕入元が売り切れた行を除外 (入稿前チェック)\n")
+    append_log_func("======================================================================\n")
+    try:
+        drop = os.path.join(WORKSPACE, "iMakHQ", "tools", "csv_drop_sold_rows.py")
+        r = subprocess.run(
+            [sys.executable, drop, latest_csv, "--write"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=180, env=env,
+        )
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ 売り切れ除外 returncode={r.returncode}(続行)\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ 売り切れ除外 失敗(続行): {type(e).__name__}: {e}\n")
+
     # Step 4e: 「出せるか」(AP列) の塗り直し (2026-08-17)。
     # ★4d は欠番。2026-07-28 に撤去した「補URL候補検索の自動実行」がその名前で、
     #   復活していないことを test_control_panel_hoju_search_hook_20260728 が
