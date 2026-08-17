@@ -35,6 +35,28 @@ def build_mercari_tab_name(label: str) -> str:
     return f"mercari_{safe}" if safe else "mercari_unknown"
 
 
+def load_keys_all_tabs(sh, prefix: str = "mercari_") -> set:
+    """中間スプシの **全 mercari_* タブ** から dedupe key を集める.
+
+    タブをゲーム毎に分けた (2026-08-18) ため、 自タブだけ見ると
+    同じ出品が別タブに二重に入る。 書込前に横断で突合する。
+    """
+    keys: set = set()
+    for ws in sh.worksheets():
+        if not (ws.title or "").startswith(prefix):
+            continue
+        try:
+            rows = ws.get_all_values()
+        except Exception:  # noqa: BLE001 - 1 タブ読めなくても他は突合する
+            continue
+        for row in rows[1:]:
+            if len(row) >= COL_URL:
+                k = dedupe_key((row[COL_URL - 1] or "").strip())
+                if k:
+                    keys.add(k)
+    return keys
+
+
 def _get_or_create_tab(sh, label: str):
     from sheet_writer_mercari_seller import (  # noqa: PLC0415
         _create_from_template,
@@ -54,10 +76,12 @@ def append_mercari_search_items(
     items: list[dict],
     label: str = "porter",
     column_count: int = DEFAULT_COLUMN_COUNT,
+    cross_tab_dedupe: bool = True,
 ) -> dict:
     """メルカリ検索収集を `mercari_<label>` タブに append (item_id dedup).
 
     items: [{url, title?, price_jpy?, condition?, image_urls?, description?, size?, color?}]
+    cross_tab_dedupe: True なら 全 mercari_* タブ横断で重複を落とす (既定)
     Returns: {"tab": str, "appended": N, "skipped_existing": M, "input": K}
     """
     from sheet_writer_mercari_seller import (  # noqa: PLC0415
@@ -73,16 +97,23 @@ def append_mercari_search_items(
     ws = _get_or_create_tab(sh, label)
 
     existing: set[str] = set()
-    try:
-        all_values = ws.get_all_values()
-        if len(all_values) >= 2:
-            for row in all_values[1:]:
-                if len(row) >= COL_URL:
-                    k = dedupe_key((row[COL_URL - 1] or "").strip())
-                    if k:
-                        existing.add(k)
-    except Exception:
-        pass
+    if cross_tab_dedupe:
+        # 全 mercari_* タブ横断 (= 別ゲームのタブに同じ出品が入るのを防ぐ)
+        try:
+            existing = load_keys_all_tabs(sh)
+        except Exception:  # noqa: BLE001
+            existing = set()
+    if not existing:
+        try:
+            all_values = ws.get_all_values()
+            if len(all_values) >= 2:
+                for row in all_values[1:]:
+                    if len(row) >= COL_URL:
+                        k = dedupe_key((row[COL_URL - 1] or "").strip())
+                        if k:
+                            existing.add(k)
+        except Exception:
+            pass
 
     new_rows: list[list[str]] = []
     skipped = 0

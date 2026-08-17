@@ -31,7 +31,9 @@ DEMAND_MAP_OK_MARKS = ("🔵", "🟢")
 
 # カード番号 (例 OP08-106 / GD02-072 / SB02-001 / SV4a-123)。
 # 弾コード = 英字2-4 + 数字2 (+ 英小文字1)、 通し番号 = 数字3。
-_CARD_NO_RE = re.compile(r"\b([A-Z]{2,4}\d{2}[A-Za-z]?)[-‐ ]?(\d{3})\b")
+# 境界は \b ではなく ASCII 英数字の有無で見る。 日本語タイトルでは \b が効かず
+# 「ボア・ハンコック_ST17-004」「パラレルST30-001」 を取り逃がす (2026-08-18 実測)。
+_CARD_NO_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{2,4}\d{2}[A-Za-z]?)[-‐ ]?(\d{3})(?![0-9])")
 
 # ゲームごとに番号表記が違うので受け皿を用意する (2026-08-18 実測: この2つで
 # 「番号が取れない」52件のうち 29件が拾えた)。
@@ -235,6 +237,22 @@ def load_name_map(db_path: str = CATALOG_DB,
             en = (name_en or name or "").strip().upper()
             if len(en) >= _MIN_NAME_LEN:
                 out[cat].setdefault(en, name_jp)
+    finally:
+        con.close()
+    return out
+
+
+def load_ja_names(db_path: str = CATALOG_DB, categories=tuple(GAME_HINTS)) -> dict:
+    """カタログから {category: set(和名)} を読む (ゲーム判定用、 read only)."""
+    import sqlite3  # noqa: PLC0415
+
+    out: dict[str, set] = {c: set() for c in categories}
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        q = ("select category, name_jp from products "
+             f"where category in ({','.join('?' * len(categories))}) and name_jp != ''")
+        for cat, name_jp in con.execute(q, tuple(categories)):
+            out[cat].add(name_jp.strip())
     finally:
         con.close()
     return out

@@ -44,6 +44,7 @@ from scrapers import mercari_item_detail  # noqa: E402
 from scrapers import mercari_search as MSch  # noqa: E402
 from scrapers import mercari_seller as MS  # noqa: E402
 from scrapers import psa_cert  # noqa: E402
+from scrapers import psa_game  # noqa: E402
 from scrapers import psa_search_terms  # noqa: E402
 from scrapers import psa_slab_vision  # noqa: E402
 
@@ -292,6 +293,43 @@ def _build_candidate(url, detail, q, images, vision, cert_readable: bool = True)
     }
 
 
+_JA_GAMES: dict | None = None
+
+
+def _ja_name_games() -> dict:
+    """カタログの 和名 → ゲーム 表 (1 回だけ読む)。 読めなければ空 = 判定は他の材料だけで行う."""
+    global _JA_GAMES  # noqa: PLW0603
+    if _JA_GAMES is None:
+        try:
+            from scrapers import demand_keywords  # noqa: PLC0415
+            _JA_GAMES = psa_game.build_ja_name_games(demand_keywords.load_ja_names())
+        except Exception:  # noqa: BLE001 - カタログが無くても収集は続ける
+            _JA_GAMES = {}
+    return _JA_GAMES
+
+
+def item_game(c: dict) -> str:
+    """候補 1 件のゲームを判定する (タイトル + Vision のラベル + カタログの和名)."""
+    v = c.get("vision") or {}
+    return psa_game.detect_item_game(title=c.get("title") or "",
+                                     label=v.get("label") or "",
+                                     card_number=v.get("card_number") or "",
+                                     ja_name_games=_ja_name_games())
+
+
+def group_by_game(kept: list[dict], unreadable: list[dict]) -> dict:
+    """{game: (候補, 番号読めず)} に振り分ける (純関数).
+
+    ゲームが判らない物は "other" に入れる。 **どのゲームにも入らず消える事は無い**。
+    """
+    out: dict[str, tuple[list, list]] = {}
+    for c in kept:
+        out.setdefault(item_game(c), ([], []))[0].append(c)
+    for c in unreadable:
+        out.setdefault(item_game(c), ([], []))[1].append(c)
+    return out
+
+
 def build_sheet_items(kept: list[dict], unreadable: list[dict]) -> list[dict]:
     """スプシ書込用 item を作る (純関数).
 
@@ -452,9 +490,12 @@ def main(argv=None) -> int:
         return 0
 
     from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
-    items = build_sheet_items(kept, unreadable)
-    res = append_mercari_search_items(items, label=args.label)
-    _log(f"[SHEET] {res}")
+    # ゲーム毎にタブを分ける (2026-08-18 user 指示)。 判らない物は _other へ (捨てない)。
+    # 重複は 全 mercari_* タブ横断 + 本番 (HIGH/LOW) で見る。
+    for game, (k_g, u_g) in group_by_game(kept, unreadable).items():
+        items = build_sheet_items(k_g, u_g)
+        res = append_mercari_search_items(items, label=psa_game.tab_label(args.label, game))
+        _log(f"[SHEET] {res}")
     return 0
 
 
