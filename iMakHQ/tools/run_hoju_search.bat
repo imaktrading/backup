@@ -92,6 +92,16 @@ REM        are on disk, so the daytime run is then near-instant.
 echo [confirm-warm] %date% %time% >> "%LOG%"
 python -u psa_hoju_fill.py confirm --dry-run >> "%LOG%" 2>&1
 
+REM --- 6b) mark which unlisted rows can actually be listed (AP column), so the
+REM         master sheet stops looking like "plenty of candidates left".
+REM         2026-08-17: of 58 rows with a blank itemID and not sold out, only 13
+REM         could ever be listed; the other 45 are a second copy of a card that
+REM         is already live. The blank itemID read as "candidate", so the call
+REM         "no need to restock yet" was made on a false picture. A grey cell in
+REM         the itemID column now means "this row will never become a listing".
+echo [listable-flag] %date% %time% >> "%LOG%"
+python -u sheet_listable_flag.py --write >> "%LOG%" 2>&1
+
 REM --- 7) write the "no backup URL at all" listings into one tab so they can be
 REM        seen at a glance (they are scattered rows in the master sheet).
 REM        Writes only that tab; never touches the master sheet.
