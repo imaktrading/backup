@@ -81,3 +81,38 @@ def test_書込先はAP列():
     """列がずれると既存列 (AO=売切日時) を壊すので固定する。"""
     assert _col_a1(FLAG_COL) == "AP"
     assert _col_a1(0) == "A" and _col_a1(25) == "Z" and _col_a1(26) == "AA"
+
+
+# ── 前段フィルタ (2026-08-17 二度目の修正) ───────────────────────────────
+# 実害: 初版は「出せる14件」と書いたのに CSV は0件だった。抽出を通っても出品くんは
+# 枠を選ぶ前に 目視済/対象外/画像なし/live重複 を落とすので、そこまで揃えないと
+# 直そうとした見間違いがそのまま残る。
+from sheet_listable_flag import (downgrade_by_preflight,  # noqa: E402
+                                REVIEW_SKIP, GAP, OUT_OF_SCOPE, NO_IMAGE)
+
+
+def test_目視済クールダウン中は出せない():
+    assert downgrade_by_preflight("c1", {"c1"}, {"status": "OK"}, True, False) == REVIEW_SKIP
+
+
+def test_カタログ未収録と参入しないゲーム():
+    assert downgrade_by_preflight("c1", set(), {"status": "GAP"}, True, False) == GAP
+    assert downgrade_by_preflight("c1", set(), {"status": "OUT-OF-SCOPE"}, True, False) == OUT_OF_SCOPE
+
+
+def test_画像が無い時だけ落とす_読めない時は落とさない():
+    assert downgrade_by_preflight("c1", set(), {"status": "OK"}, False, False) == NO_IMAGE
+    assert downgrade_by_preflight("c1", set(), {"status": "OK"}, None, False) == ""
+
+
+def test_liveに同じカードが居れば2枚目扱い():
+    assert downgrade_by_preflight("c1", set(), {"status": "OK"}, True, True) == SECOND
+
+
+def test_判定不能は出せるまま_機会を静かに失わない():
+    """PSA cache 無し / 例外 = cls None。落とすと出品機会を黙って失うので残す。"""
+    assert downgrade_by_preflight("c1", set(), None, None, False) == ""
+
+
+def test_通ったものは空文字_OKのまま():
+    assert downgrade_by_preflight("c1", set(), {"status": "OK"}, True, False) == ""

@@ -41,6 +41,14 @@ SOLD = "売切"
 MIOKURI = "見送り"
 NO_COST = "仕入値なし"
 
+# ★2026-08-17 二度目の修正: 抽出を通っても、出品くんは **枠を選ぶ前に** さらに4つ落とす。
+#   初版はそれを見ていなかったので「出せる14件」と出したのに CSV は0件だった
+#   (= 直そうとした見間違いを、小さくして残していた)。同じ判定関数を使って揃える。
+REVIEW_SKIP = "目視で該当なし(待機)"
+GAP = "カタログ未収録"
+OUT_OF_SCOPE = "参入しないゲーム"
+NO_IMAGE = "画像が無く目視できない"
+
 
 def _cell(row, idx):
     return (row[idx].strip() if len(row) > idx else "")
@@ -77,6 +85,95 @@ def classify_all(rows2d, listed_certs, listed_keys, already_listed_reason):
     for row in rows2d[1:]:
         out.append(classify_row(row, listed_certs, listed_keys, already_listed_reason))
     return out
+
+
+def downgrade_by_preflight(cert, skips, cls, has_image, live_dup):
+    """「出せる」行を、出品くんの前段フィルタで落ちるなら理由に差し替える (純関数)。
+
+    cls=None (PSA cache 無し / 例外) は **判定不能なので落とさない**。
+    「読めなかった」を「対象外」に倒すと出品機会を静かに失う (向きを間違えない)。
+    """
+    if cert in skips:
+        return REVIEW_SKIP
+    if cls is None:
+        return ""
+    st = (cls or {}).get("status")
+    if st == "GAP":
+        return GAP
+    if st == "OUT-OF-SCOPE":
+        return OUT_OF_SCOPE
+    if has_image is False:              # None (読めない) では落とさない
+        return NO_IMAGE
+    if live_dup:
+        return SECOND
+    return ""
+
+
+def _preflight_pass(vals, flags):
+    """「出せる」判定の行に前段フィルタを当てる (I/O 有り・失敗しても flags を壊さない)。"""
+    import datetime as _dt
+    import json
+    import sqlite3
+    targets = [(i, _cell(vals[i], I)) for i, f in enumerate(flags) if f == OK and i < len(vals)]
+    if not targets:
+        return flags, {}
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "..", "..", "iMakTCG"))
+        from tcg_batch_select import load_review_skips, active_review_skips
+        skips = active_review_skips(load_review_skips(), _dt.datetime.now())
+    except Exception as e:
+        print(f"  ⚠️ 目視済スキップ読込失敗(続行): {type(e).__name__}")
+        skips = set()
+    try:
+        import psa_preflight as pf
+        con = sqlite3.connect(pf.CATALOG_DB)
+    except Exception as e:
+        print(f"  ⚠️ preflight 読込失敗 → 前段フィルタ skip: {type(e).__name__}")
+        return flags, {}
+
+    # live に同じカードが居るか (出品くんと同じ dup_guard の index を使う)
+    live_idx, group_key = None, None
+    try:
+        import dup_guard as dg
+        titles, _skus, fresh = dg.ensure_fresh_live_cache()
+        if fresh and titles:
+            live_idx, _ = dg.live_card_index(vals, titles, set(titles.keys()))
+            group_key = dg.group_key
+    except Exception as e:
+        print(f"  ⚠️ live 重複の前置き skip (古い cache を根拠にしない): {type(e).__name__}")
+
+    changed = {}
+    for i, cert in targets:
+        cls = None
+        has_image = None
+        f = pf.PSA_CERTS_DIR / f"{cert}.json"
+        if f.exists():
+            try:
+                cls = pf.classify(str(cert), json.loads(f.read_text(encoding="utf-8")), con)
+            except Exception:
+                cls = None
+        pid = (cls or {}).get("product_id")
+        if pid:
+            try:
+                row = con.execute("SELECT images FROM products WHERE category=? AND product_id=?",
+                                  ((cls or {}).get("category"), pid)).fetchone()
+                if row is not None:
+                    has_image = len(json.loads(row[0] or "[]")) > 0
+            except Exception:
+                has_image = None
+        live_dup = False
+        if pid and live_idx is not None and group_key is not None:
+            try:
+                live_dup = group_key(f"{cls.get('category')}:{pid}") in live_idx
+            except Exception:
+                live_dup = False
+        new = downgrade_by_preflight(cert, skips, cls, has_image, live_dup)
+        if new:
+            flags[i] = new
+            changed[cert] = new
+    con.close()
+    return flags, changed
 
 
 def _col_a1(idx0):
@@ -120,6 +217,10 @@ def main():
     listed_keys = sheet_io.listed_key_forms(vals)
     listed_certs = sheet_io.listed_certs(vals) | sheet_io.live_listed_certs()
     flags = classify_all(vals, listed_certs, listed_keys, sheet_io.already_listed_reason)
+    flags, changed = _preflight_pass(vals, flags)
+    if changed:
+        print(f"  🔎 前段フィルタで {len(changed)}件を「{OK}」から外した "
+              f"(出品くんが枠を選ぶ前に落とす分)")
 
     counts = {}
     for f in flags[1:]:
