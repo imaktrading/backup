@@ -1,5 +1,16 @@
 # iMakHarvest daily_report
 
+## 2026-08-17 (続2) — PSA10 ワンピース49語 本走行 完了
+
+- 実行: `python run_harvest_mercari_psa10.py --games onepiece --save-every 10` (19:51-21:36、非headless)。
+  途中落ち無し (`item_error` 6件は 1件ずつ隔離されて走行は継続 = 8/17 の crash-safety 修正が効いた)。
+- 結果: 収集 487件 → **候補 224件を `mercari_psa10` に投入** (合計230行、H列/I列とも全行充足)。
+  reject: grade_not_psa10 60 / cert_unreadable 76 / seller_rating 51 / already_claimed 22 / sold 8 /
+  title_cert_conflict 3。vision_error 0 (Vision は事前に実機で読取確認済)。
+- ★**残務 (user 判断: 次回でよい)**: **ページ取得に失敗した42件が未判定** (fetch_fail 36 + item_error 6)。
+  取りこぼしなので次回走行で拾う。対象 URL は `debug/mercari_psa10_20260817T195108.json` に残っている。
+- 残務 (継続): pokemon/dragonball/gundam の本走行は未実施。
+
 ## 2026-08-17 (続) — ポーターの H列 (商品説明) 空欄を是正 (user 指摘)
 
 - 事象: `mercari_porter` 76行中 56行の H列が空欄。8/15 19:09 の走行分が全件空 (JSON dump でも 0/61)。
