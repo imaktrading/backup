@@ -140,6 +140,12 @@ ebay_oauth_token.json
 *oauth_token*.json
 *_token.json
 *.pem
+# ★2026-08-17: 上の3行は **.json で終わる名前しか**弾かない。実際に
+#   `ebay_oauth_token_sell.json.bak_20260814` が野放しになっていた (トークン実体入り)。
+#   トークンを退避した控えも同じ危険度なので、後ろに何が付いても弾く。
+*oauth_token*.json.*
+*_token.json.*
+*_token.json.bak*
 
 # === 運用データ / 再生成可 出力 (2026-06-14 本元整理) ===
 # funnel 分析出力 (relist ファネル分析の per-run CSV、再生成可)
