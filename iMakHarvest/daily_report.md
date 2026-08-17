@@ -1,5 +1,18 @@
 # iMakHarvest daily_report
 
+## 2026-08-17 (続) — ポーターの H列 (商品説明) 空欄を是正 (user 指摘)
+
+- 事象: `mercari_porter` 76行中 56行の H列が空欄。8/15 19:09 の走行分が全件空 (JSON dump でも 0/61)。
+  8/15 18:23 の走行分 (20行) は全件入っている。コードは 5/5 から無変更 = 環境要因。
+- 根因: 説明が購入ボタンより遅れて描画されると、`_extract_description` が一発 find で空文字を返し、
+  **そのまま空欄で書かれて「正常終了」していた** (silent 空欄 = fail-OPEN)。実測で説明は
+  購入ボタンの 0.03〜0.17 秒後に出る (今日の実機3件) ので、負荷が高い時に落ちる。
+- 変更: `_extract_description` を出現待ち (5秒 poll) + `.text` が空なら `textContent` で拾う /
+  取れなければ `description_missing=True` を返す / porter runner が ⚠️要対応として件数と URL を出す。
+  `tools/backfill_mercari_description.py` 新設 (H列空欄の行を URL から埋め直す)。
+- 是正: 56行を埋め直して **75/76 に回復**。残り1件 (`m35430690763`) は出品が削除済で取得不能。
+- 検証: 実機で headless / 非headless とも説明取得OK。offline test 834 passed (+4)。
+
 ## 2026-08-17 — メルカリ PSA10 収集 + 売れたPSA10の再仕入れ を新設 (user 依頼)
 
 ### ① メルカリ PSA10 収集 (「ポーターのように PSA10 も」)

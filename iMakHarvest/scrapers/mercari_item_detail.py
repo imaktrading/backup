@@ -63,6 +63,12 @@ _MERCARI_PRODUCT_IMAGE_RE = re.compile(
 DETAIL_WAIT_SEC = 20
 DETAIL_POLL_INTERVAL = 0.5
 
+# 商品説明は購入ボタン (checkout-button-container) より遅れて描画されることがある。
+# 一発 find_element だと空文字になり、 スプシ H列が silent に空欄で入る
+# (2026-08-15 のポーター走行で 56行が全部空欄)。 出現を待ってから諦める。
+DESCRIPTION_WAIT_SEC = 5.0
+DESCRIPTION_POLL_INTERVAL = 0.2
+
 
 def fetch_detail(driver, url: str) -> Optional[dict]:
     """driver で url を開いて商品詳細を取得.
@@ -116,6 +122,7 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
             "price_jpy": None,
             "condition": "",
             "description": "",
+            "description_missing": False,  # 削除済ページ = 説明が無いのが正常
             "image_urls": [],
             "in_stock": False,
             "status": "DELETED",
@@ -166,6 +173,9 @@ def fetch_detail(driver, url: str) -> Optional[dict]:
         "price_jpy": price_jpy,
         "condition": condition,
         "description": description,
+        # 待っても説明が取れなかった = こちら側の取得失敗。 呼出側で要対応として数える
+        # (空欄のままスプシに入れて「正常」と言わないため)。
+        "description_missing": not description,
         "image_urls": image_urls,
         "in_stock": bool(in_stock),
         "status": "ON_SALE" if in_stock else "SOLD_OUT",
@@ -242,22 +252,33 @@ def _extract_condition(driver) -> str:
     return ""
 
 
-def _extract_description(driver) -> str:
+def _extract_description(driver, wait_sec: float = DESCRIPTION_WAIT_SEC) -> str:
+    """商品説明を取得. 出現が遅れることがあるので wait_sec まで待つ.
+
+    空文字を返すのは「待っても出なかった」時だけ (= 呼出側は要対応として扱う)。
+    """
     from selenium.webdriver.common.by import By  # noqa: PLC0415
 
-    for sel in (
-        'pre[data-testid="description"]',
-        '[data-testid="description"]',
-        "mer-show-more",
-    ):
-        try:
-            elem = driver.find_element(By.CSS_SELECTOR, sel)
-            t = (elem.text or "").strip()
-            if t:
-                return t
-        except Exception:
-            continue
-    return ""
+    end_at = time.time() + max(0.0, wait_sec)
+    while True:
+        for sel in (
+            'pre[data-testid="description"]',
+            '[data-testid="description"]',
+            "mer-show-more",
+        ):
+            try:
+                elem = driver.find_element(By.CSS_SELECTOR, sel)
+                t = (elem.text or "").strip()
+                if not t:
+                    # 描画途中は text が空でも textContent には入っていることがある
+                    t = (elem.get_attribute("textContent") or "").strip()
+                if t:
+                    return t
+            except Exception:
+                continue
+        if time.time() >= end_at:
+            return ""
+        time.sleep(DESCRIPTION_POLL_INTERVAL)
 
 
 def _extract_size(driver) -> str:

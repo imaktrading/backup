@@ -68,6 +68,7 @@ def main(argv=None) -> int:
     driver = MS.create_anonymous_driver(headless=headless)
     kept, rej = [], {"sold": 0, "not_tanker": 0, "not_target_bag": 0,
                      "seller_rating": 0, "no_identity": 0, "fetch_fail": 0}
+    desc_missing: list[str] = []  # 説明が取れなかった URL (= H列が空欄で入る、 要対応)
     try:
         collected = MSch.collect_multi_keyword_urls(
             keywords, driver, price_min=args.price_min, price_max=args.price_max,
@@ -109,6 +110,8 @@ def main(argv=None) -> int:
                 continue
             item = dict(detail)
             item["url"] = url
+            if detail.get("description_missing"):
+                desc_missing.append(url)
             item["seller_rating_count"] = q.get("rating_count")
             item["seller_star"] = q.get("star")
             item["identity_verified"] = q.get("identity_verified")
@@ -123,6 +126,11 @@ def main(argv=None) -> int:
             pass
 
     _log(f"完了: 収集{len(collected['urls'])} → keep={len(kept)} / reject={rej}")
+    if desc_missing:
+        _log(f"⚠️要対応: 商品説明が取れなかった {len(desc_missing)}件 (H列が空欄で入る)。"
+             f" 後で `python tools/backfill_mercari_description.py --label {args.label}` で埋め直す")
+        for u in desc_missing[:10]:
+            _log(f"    {u}")
 
     DUMP_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
