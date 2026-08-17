@@ -83,6 +83,16 @@ def collect(args, dump_path=None, resume=None) -> dict:
       「途中まで」と明示して**終わる (黙って正常終了しない)。
     """
     keywords = args.keywords or psa_search_terms.build_keywords(args.games)
+    # 需要実証済 (ファネル分析 RESTOCK = 在庫切れ ∩ 需要あり) のカードを検索語に足す。
+    # 弾コード総当たりは「市場にある物」しか見ていないので、 需要側から刻む
+    # (2026-08-18 user 指摘)。 番号が取れない行は語にしない = 推測で検索しない。
+    if getattr(args, "from_demand", False):
+        from scrapers import demand_keywords  # noqa: PLC0415
+        demand = demand_keywords.build_demand_keywords(
+            limit=getattr(args, "demand_limit", 0))
+        added = [k for k in demand if k not in keywords]
+        _log(f"需要ベースのキーワード: {len(demand)} 語 (うち新規 {len(added)} 語)")
+        keywords = demand if getattr(args, "demand_only", False) else keywords + added
     headless = args.headless and not args.manual  # manual は非 headless 必須
     _log(f"収集開始: keywords={len(keywords)} 価格={args.price_min}-{args.price_max} "
          f"評価数>={args.min_rating} mode={'手動フリマアシスト' if args.manual else '自動scroll'}")
@@ -355,6 +365,12 @@ def main(argv=None) -> int:
     ap.add_argument("--games", nargs="*", default=None,
                     choices=list(psa_search_terms.GAMES),
                     help=f"対象ゲーム (既定=全部: {', '.join(psa_search_terms.GAMES)})")
+    ap.add_argument("--from-demand", action="store_true",
+                    help="ファネル分析 RESTOCK (在庫切れ∩需要あり) のカード番号を検索語に足す")
+    ap.add_argument("--demand-only", action="store_true",
+                    help="需要ベースの語だけで収集する (弾コード総当たりを使わない)")
+    ap.add_argument("--demand-limit", type=int, default=0,
+                    help="需要ベースの語を上位N語に絞る (0=全部)")
     ap.add_argument("--keyword-interval", type=float, default=8.0,
                     help="語間の待機秒 (2026-08-17 実測: 8秒空ければ件数が落ちない)")
     ap.add_argument("--headless", action="store_true")

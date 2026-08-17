@@ -1,5 +1,20 @@
 # iMakHarvest daily_report
 
+## 2026-08-18 (続) — 需要実証済カードから収集キーワードを作る (user 指摘)
+
+- user 指摘「出品していないカードやファネル分析でニーズのあるカードが追加されるとよい」
+  →「そのための分析では？」。**HQ のファネル分析スプシに必要な数字は既にあった**
+  (`1UkaI4W6YCJgUbjgF7LLNN9_fHeVuz5qB4r9RqImElwg`: impr / watch / ctr / sales90 とバケツ分類)。
+  Harvest 側の「閲覧数は Analytics API が要る・未確認」は誤り (実測して訂正)。
+- 実測: `RESTOCK` (在庫=0 ∩ 需要>0) 262件 → PSA 81件 → **タイトルからカード番号が取れた 29件**。
+  29語すべて既存の弾コード語と重複なし。★`SB02` など **今の SET_CODES に無い弾**が需要側から出た。
+- 変更: `scrapers/demand_keywords.py` 新設 (RESTOCK → カード番号 → 検索語、実売>watch>露出 の順に並べる)。
+  runner に `--from-demand` / `--demand-only` / `--demand-limit`。
+  **番号が取れない行 (キャラ名だけ等) は語にしない** = 推測で検索して別カードを拾わない。
+- 検証: offline test 845 passed (+7)。実機で 29語を生成、既存語との重複0を確認。
+- 残務: RESTOCK の PSA 81件中 **52件は番号が取れない** (英語カード名のみ)。カタログの
+  `products` と突合すれば番号に変換できる可能性がある。需要マップ側のキャラ軸 (Luffy/Nami/Boa) も未活用。
+
 ## 2026-08-18 — 鑑定番号が読めなかった出品も I列空欄で投入 (user 指示)
 
 - 決定 (user): 写真から cert が読めなかった分 (前回76件) は捨てずに中間スプシへ入れる。
