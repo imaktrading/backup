@@ -73,24 +73,6 @@ iMakInventory のコード資産を 70% 流用可能:
 
 ---
 
-## ディレクトリ構成 (想定)
-
-```
-iMakHarvest/
-├── CLAUDE.md
-├── scrapers/
-│   ├── mercari_likes.py        ← メルカリ いいね収集
-│   ├── mercari_shops_likes.py  ← Mercari Shops 収集
-│   └── amazon_wishlist.py      ← Amazon ウィッシュリスト
-├── sheet_writer.py             ← スプシ書込
-├── run_harvest.py              ← エントリポイント
-├── control_panel.py            ← GUI (Phase 2)
-├── tests/
-└── decision_log/
-```
-
----
-
 ## NG (やってはいけないこと)
 
 - 出品作業 (各カテゴリ listing project に任せる)

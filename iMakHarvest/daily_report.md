@@ -1,5 +1,95 @@
 # iMakHarvest daily_report
 
+## 2026-08-17 — メルカリ PSA10 収集 + 売れたPSA10の再仕入れ を新設 (user 依頼)
+
+### ① メルカリ PSA10 収集 (「ポーターのように PSA10 も」)
+
+- 決定: ポーターと同じ流れ (検索→詳細→セラーフィルタ→中間スプシ) で、**カード特定の段だけ追加**。
+  「どのカードか」が確証できない物は通さない (出品正確性原則)。
+- 変更: `scrapers/psa_slab_vision.py` (スラブ写真から Vision でラベル読取) /
+  `scrapers/psa_cert.py` (psacard.com 照会 + ラベル多信号突合 + 通信不要の `local_gate`) /
+  `run_harvest_mercari_psa10.py` 新設。`sheet_writer*.py` に `COL_CERT` (I列) 追加。
+- 検証: 実走で ワンピース19件収集 → 候補6件を中間スプシ `mercari_psa10` に投入 (appended=6)。
+  6件とも Vision が読んだ英字ラベルと日本語出品名が弾番号込みで一致。offline test 830 passed。
+
+- 決定 (2026-06-24 の PSA cert OCR 保留を解除): **公式照会は出品くん (iMakTCG) に 1本化**。
+  user 指摘「PSAの新規出品でもブロック対策しているでしょ」を受けて `psa_to_csv.py` を確認したところ、
+  Cloudflare 対策 (`_psa_cloudflare_warmup`: visible 起動→user 手動突破→同driver流用 + 1件15秒) と
+  入口 (`I列(cert#)非空 AND B列空 AND A列非空`) が既にあった。同じIPで二重に叩くと制限を食い合う。
+- 変更: Harvest 側の PSA 照会は既定 OFF (`--verify` で任意)。Harvest は通信不要の事前ゲート
+  (cert桁数 / ラベルのグレード / 出品タイトル末尾4桁 vs cert末尾4桁) までを担当。
+- 検証: 生HTTPは 200/404 を返すが数発で 429 (7分待っても復帰せず)、uc.Chrome でも同じ壁 = IP単位。
+  公式APIは要トークンで無料枠不明。→ 叩かない方針が正しいことを実測で確認。
+
+### ② 件数の壁の実測とキーワード設計
+
+- 決定: 件数を増やす手は **キーワードを増やすことだけ**。フィルタは緩めても増えないので遠慮なく掛ける。
+- 変更: `scrapers/psa_search_terms.py` 新設 (弾コードから自動生成: onepiece 49語 / pokemon 24語 /
+  dragonball 12語 / gundam 5語 = 計88語)。`mercari_search` に `shipping_payer_id` /
+  `sleep_between_sec` を通せるようにした (既定は従来動作、ポーターの挙動は変えない)。
+- 検証 (`debug/probe_psa10_volume.py` / `probe_psa10_keywords.py`): 1語 15件で頭打ち。
+  価格帯・送料込みを外しても増えない (21→10件)。一方 弾コード10語 → ユニーク148件 (重複2件のみ)。
+  語間8秒なら10語連続でも 15件/語 を維持。
+
+### ③ 重複防止 (user 指摘「既に抽出済と重複もあるんだろうなー」)
+
+- 決定: 中間スプシ内の dedupe だけでは足りない。**本番で既に押さえている仕入元**と突合する。
+- 変更: `sheet_writer.load_claimed_supply()` 新設 (HIGH/LOW の A列 + AC-AG列 URL、I列 cert)。
+  URL 突合は詳細フェッチの**前** (1件約10秒 + Vision 1回が浮く)、cert 突合は Vision の後
+  (同じ現物が別URLで再出品されると URL では捕まらない)。
+- 検証: 実測で既知 仕入元URL 3,116件 / cert 1,044件。I列は PSA 専用でない (montbell は型番) ため
+  cert 形式のみ採用。test +6。
+
+### ④ 売れた PSA10 の別個体を探す (「売れた商品の補充」)
+
+- 決定: 入力は **eBay 側を SSOT** にする。売れた行は HIGH に残らない (直近90日の注文30件中4件のみ)。
+- 変更: `scrapers/ebay_sold.py` (getOrders + GetItem)、`scrapers/psa_restock.py`、
+  `run_harvest_restock_psa10.py` 新設。カード名は英語なので日本語出品を引けない →
+  **カード番号**を検索軸にする (ポケモンの "310/190" は前半のみ)。
+- 検証: 注文取得は既存の user token でそのまま使えた (`sell.fulfillment.readonly`)。
+  ★`GetItem` は `DetailLevel=ReturnAll` だけでは ItemSpecifics が返らず `IncludeItemSpecifics=true`
+  が必要。実走で 売れたPSA10 3件 → 3件全部に代替個体を発見 (候補6件)。90日実績: 注文30件
+  (UNIQLO/GU 15 / PSA10 11 / その他4 / G-SHOCK 1) = 月10件ペース。
+
+- ★**別カードを掴むバグをテストが検出** (`psa_cert.match_signals`): 「Monkey D. Luffy」と
+  「Portgas D. Ace」が2系統一致で通っていた。原因は ①1文字トークン "D" を数えていた
+  ②ゲーム名 "ONE PIECE" の一致を数えていた。どちらも識別力が無いので除外し回帰テストを追加。
+  誤出品に直結する穴だった。
+
+### ⑤ 長時間走行の作業を捨てない (user 指摘・事故対応)
+
+- 事故: ワンピース49語の走行で 収集487件 → 詳細145件まで進んだ時点で chromedriver への
+  read timeout。例外が走行全体を殺し、**JSON 保存が全ループ終了後の1回だけ**だったため
+  145件分 (Vision 読取111回 = 課金済 約$0.8、所要1.5時間) が全部消えた。
+- 決定: 原因は 2つとも設計の欠陥。①保存が最後の1回だけ ②1件の失敗が走行全体を殺す。
+- 変更 (両 runner): `--save-every` 件ごとに途中セーブ (収集直後にも1回) / `_dump` を
+  tmp→replace の原子的書込 / 1件の失敗はその1件だけ (item_error) / 連続失敗でドライバ再生成 /
+  それも失敗なら `truncated=True` で打ち切って保存 (黙って正常終了しない) /
+  `--resume-from-json` で再開。`collect()` は継ぎ足し patch で壊れたため書き直し、
+  1件処理を `_process_one()` に分離。
+- 検証: `tests/test_psa10_crash_safety.py` 8本追加 (途中セーブ/原子性/1件失敗の隔離/
+  ドライバ再生成/truncated/再開)。offline 830 passed、pre-commit 945 passed。
+
+### ⑥ Vision 障害を「写真が不鮮明」と混ぜない
+
+- 事故: 実走で12件全部が cert 読取失敗。原因は Anthropic API の残高切れだったが、
+  `read_slab` が空 dict を返す実装のため「不鮮明が多い」と見分けられなかった。
+- 決定: 「読めなかった」(写真の問題=正常な reject) と「確認できなかった」(こちらの障害) を分ける。
+- 変更: `psa_slab_vision` に `error` フィールド。runner は `vision_error` として別枠で数え、
+  ⚠️要対応として報告 (silent drop 禁止)。★色判定 (`color_vision`) は同じキーを使うが未対応 = 残務。
+- 検証: 残高復活後 既知画像 5/5 読取 (cert/grade/label/番号/年 全項目)、末尾4桁も全件一致。
+
+### 出した依頼書 / 残務
+
+- `iMak_data/hq/requests/2026-08-17_psa_cert_lookup_rate_limit.md` — I列に cert 行が増える件の確認。
+- `iMak_data/hq/requests/2026-08-17_backup_url_restock_qty1.md` — **補URLが生きているのに取り下げている**。
+  監視くん (`monitor_listings.py:378-388`) が検出して `補URL救済ログ` に999行 (うちPSA 955行) 書いているが
+  **測定用シグナルのみで action が無い**。PSA cert行1077件中 補URLあり288件(27%) は在庫1に戻すだけで済む
+  (Description に「different certificate number」の開示があり cert 書換不要 — live 3件で実確認)。
+  残り789件(73%) が Harvest 担当。
+- 残務: ①ワンピース49語の本走行 (未実施、約2時間) ②`color_vision` の障害/不鮮明の切り分け
+  ③`--verify` 経路は IP ブロック中で未検証。
+
 ## 2026-08-15 (続2) — 色抽出の誤り修正 (漢字色→canonical / Vision ゴミ排除)
 
 - user 指摘: mercari_porter の色が違う (クロ/シブラック/オレンジ等)。根因: `extract_katakana_color_from_text`
