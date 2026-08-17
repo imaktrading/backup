@@ -22,6 +22,13 @@ FUNNEL_SHEET_ID = "1UkaI4W6YCJgUbjgF7LLNN9_fHeVuz5qB4r9RqImElwg"
 RESTOCK_TAB = "RESTOCK"
 PREFIX = "PSA10"
 
+# 需要マップ (HQ 「既存メンテ」スプシ) の キャラ軸。
+# 「国内で在庫が切れていて需要がある キャラ」 が判定付きで出ている。
+MAINTENANCE_SHEET_ID = "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4"
+DEMAND_MAP_TAB = "需要マップ"
+# 採用する判定。 🔴死筋 と 判定なし は採らない (= 判定が出ていない物を勝手に拾わない)
+DEMAND_MAP_OK_MARKS = ("🔵", "🟢")
+
 # カード番号 (例 OP08-106 / GD02-072 / SB02-001 / SV4a-123)。
 # 弾コード = 英字2-4 + 数字2 (+ 英小文字1)、 通し番号 = 数字3。
 _CARD_NO_RE = re.compile(r"\b([A-Z]{2,4}\d{2}[A-Za-z]?)[-‐ ]?(\d{3})\b")
@@ -135,6 +142,66 @@ def build_keywords_from_rows(rows: list[dict], prefix: str = PREFIX,
     return [f"{prefix} {c}" for c in ordered]
 
 
+def parse_demand_map(values: list[list[str]]) -> list[dict]:
+    """需要マップ シートの 「属性別詳細」 表を dict 列にする (純関数).
+
+    上に系統サマリー等が乗っているので、 `観点` 見出しの行を探して そこから読む。
+    """
+    head_i = next((i for i, r in enumerate(values) if r and r[0].strip() == "観点"), -1)
+    if head_i < 0:
+        return []
+    header = [c.strip() for c in values[head_i]]
+    return [dict(zip(header, r)) for r in values[head_i + 1:] if any(r)]
+
+
+def _name_map_all(name_map: dict) -> dict:
+    """{category: {英名: 和名}} を 1 枚に潰す。 和名が割れる英名は捨てる (fail-closed)."""
+    seen: dict[str, set] = {}
+    for table in (name_map or {}).values():
+        for en, jp in table.items():
+            seen.setdefault(en, set()).add(jp)
+    return {en: next(iter(jps)) for en, jps in seen.items() if len(jps) == 1}
+
+
+def build_character_keywords(rows: list[dict], name_map: dict,
+                             prefix: str = PREFIX, limit: int = 0) -> list[str]:
+    """需要マップの キャラ軸から検索キーワードを作る (純関数).
+
+    - 判定が 🔵国内実需 / 🟢売れ筋 の行だけ採る (🔴死筋・判定なしは採らない)
+    - 英名 → 和名 は **カタログの lookup のみ**。 表に無いキャラは語にしない
+    - 国内OOS数 (= 在庫切れの本数) が多い順
+    """
+    table = _name_map_all(name_map)
+    picked: dict[str, float] = {}
+    for r in rows:
+        if (r.get("観点") or "").strip() != "キャラ":
+            continue
+        verdict = (r.get("判定") or "").strip()
+        if not verdict.startswith(DEMAND_MAP_OK_MARKS):
+            continue
+        jp = table.get((r.get("値") or "").strip().upper())
+        if not jp:
+            continue
+        try:
+            oos = float(str(r.get("国内OOS数") or 0).replace(",", ""))
+        except ValueError:
+            oos = 0.0
+        if oos > picked.get(jp, -1.0):
+            picked[jp] = oos
+    ordered = sorted(picked, key=lambda j: (-picked[j], j))
+    if limit:
+        ordered = ordered[:limit]
+    return [f"{prefix} {j}" for j in ordered]
+
+
+def fetch_demand_map_rows(sheet_id: str = MAINTENANCE_SHEET_ID,
+                          tab: str = DEMAND_MAP_TAB) -> list[dict]:
+    """需要マップ タブを読む (通信あり)."""
+    import sheet_writer  # noqa: PLC0415
+
+    return parse_demand_map(sheet_writer.open_sheet_by_id(sheet_id).worksheet(tab).get_all_values())
+
+
 def fetch_restock_rows(sheet_id: str = FUNNEL_SHEET_ID, tab: str = RESTOCK_TAB) -> list[dict]:
     """ファネル分析スプシの RESTOCK タブを読む (通信あり)."""
     import sheet_writer  # noqa: PLC0415
@@ -174,11 +241,15 @@ def load_name_map(db_path: str = CATALOG_DB,
 
 
 def build_demand_keywords(sheet_id: str = FUNNEL_SHEET_ID, prefix: str = PREFIX,
-                          limit: int = 0, use_catalog: bool = True) -> list[str]:
-    """ファネル分析から 需要実証済カードの検索キーワードを作る (通信あり).
+                          limit: int = 0, use_catalog: bool = True,
+                          include_characters: bool = True) -> list[str]:
+    """需要側の検索キーワードを作る (通信あり).
 
-    use_catalog=True なら、 番号が取れない行を カタログ引き当ての和名で拾う。
-    カタログが読めなければ 番号が取れた行だけで続行する (止めない)。
+    ① ファネル分析 RESTOCK (在庫切れ ∩ 需要あり) のカード単位
+    ② 需要マップ キャラ軸 (国内で在庫が切れていて需要があるキャラ)
+
+    use_catalog=True なら 英名→和名 の変換にカタログを使う。
+    カタログや需要マップが読めなければ、 取れた分だけで続行する (止めない)。
     """
     name_map: dict = {}
     if use_catalog:
@@ -186,5 +257,13 @@ def build_demand_keywords(sheet_id: str = FUNNEL_SHEET_ID, prefix: str = PREFIX,
             name_map = load_name_map()
         except Exception:  # noqa: BLE001 - カタログが無くても収集は続ける
             name_map = {}
-    return build_keywords_from_rows(fetch_restock_rows(sheet_id), prefix=prefix,
-                                    limit=limit, name_map=name_map)
+    out = build_keywords_from_rows(fetch_restock_rows(sheet_id), prefix=prefix,
+                                   limit=limit, name_map=name_map)
+    if include_characters and name_map:
+        try:
+            chars = build_character_keywords(fetch_demand_map_rows(), name_map,
+                                             prefix=prefix)
+        except Exception:  # noqa: BLE001 - 需要マップが読めなくても収集は続ける
+            chars = []
+        out += [k for k in chars if k not in out]
+    return out

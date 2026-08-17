@@ -124,3 +124,58 @@ def test_number_wins_over_name():
 def test_name_used_when_no_number():
     rows = [_row("One Piece Card Game Nico Robin Promotion Set PSA 10", watch=1)]
     assert build_keywords_from_rows(rows, name_map=NAME_MAP) == ["PSA10 ニコ・ロビン"]
+
+
+# --------------------------------------------------------------------------
+# キャラ軸 (需要マップ)
+# --------------------------------------------------------------------------
+DEMAND_MAP_VALUES = [
+    ["需要マップ (eBay実績 ∥ 国内OOS)"],
+    ["【系統サマリー】"],
+    ["系統", "判定", "出品数"],
+    ["PSA card", "⚠改善", "1045"],
+    [""],
+    ["【属性別詳細】"],
+    ["観点", "値", "判定", "出品数", "eBay需要スコア", "実売", "watch", "impr",
+     "国内OOS数", "RESTOCK", "CULL"],
+    ["キャラ", "Nico Robin", "🔵国内実需:再仕入/増やす", "13", "0", "0", "2", "0", "13", "5", "8"],
+    ["キャラ", "Haman Karn", "🟢売れ筋/再仕入", "9", "0", "1", "1", "0", "20", "6", "9"],
+    ["キャラ", "Carrot", "🔴死筋:出さない", "5", "0", "0", "0", "0", "5", "0", "5"],
+    ["キャラ", "Ho-Oh", "", "4", "0", "0", "0", "0", "4", "0", "4"],
+    ["キャラ", "Unknown Guy", "🔵国内実需:再仕入/増やす", "7", "0", "0", "0", "0", "7", "2", "5"],
+    ["色", "Black", "🔵国内実需:再仕入/増やす", "312", "0", "5", "86", "0", "127", "58", "69"],
+]
+
+
+def test_parse_demand_map_finds_detail_table():
+    from scrapers.demand_keywords import parse_demand_map
+
+    rows = parse_demand_map(DEMAND_MAP_VALUES)
+    assert len(rows) == 6
+    assert rows[0]["観点"] == "キャラ" and rows[0]["値"] == "Nico Robin"
+
+
+def test_character_keywords_filter_and_order():
+    """🔵🟢 だけ採り、 国内OOS数 の多い順。 死筋・判定なし・カタログ外は採らない."""
+    from scrapers.demand_keywords import build_character_keywords, parse_demand_map
+
+    rows = parse_demand_map(DEMAND_MAP_VALUES)
+    got = build_character_keywords(rows, NAME_MAP)
+    assert got == ["PSA10 ハマーン・カーン", "PSA10 ニコ・ロビン"]
+
+
+def test_character_keywords_skip_ambiguous_name():
+    """同じ英名で和名が割れる場合は語にしない (どちらか判らないため)."""
+    from scrapers.demand_keywords import build_character_keywords, parse_demand_map
+
+    ambiguous = {"one_piece_tcg": {"NICO ROBIN": "ニコ・ロビン"},
+                 "gundam_tcg": {"NICO ROBIN": "別人ロビン"}}
+    rows = parse_demand_map(DEMAND_MAP_VALUES)
+    assert build_character_keywords(rows, ambiguous) == []
+
+
+def test_character_keywords_ignore_other_axes():
+    from scrapers.demand_keywords import build_character_keywords, parse_demand_map
+
+    rows = [r for r in parse_demand_map(DEMAND_MAP_VALUES) if r["観点"] == "色"]
+    assert build_character_keywords(rows, NAME_MAP) == []
