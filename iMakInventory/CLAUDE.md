@@ -68,37 +68,6 @@ iMakCatalog Phase 3 (G-shock) と同じパターン:
 4. **通知** (Slack/Discord/メール)
 5. **スプシ状態同期** (在庫変化 → スプシ FLG 更新)
 
-## ディレクトリ構成
-
-```
-iMakInventory/
-├── CLAUDE.md                    # このファイル
-├── scrapers/                    # サイト別在庫スクレイパー
-│   ├── mercari_scraper.py       # メルカリ商品ページ → 売り切れ判定
-│   ├── amazon_scraper.py        # Amazon → 在庫判定 (PA-API or scrape)
-│   ├── rakuma_scraper.py        # ラクマ
-│   └── yahoo_auc_scraper.py     # ヤフオク
-├── ebay_actions/                # eBay 自動取り下げ
-│   ├── sell_api_client.py       # Sell API ラッパー
-│   └── revise_inventory.py      # qty=0 化 / 取り下げ
-├── monitor.py                   # 監視オーケストレーション (cron)
-├── notifier.py                  # 通知 (Slack/Discord/メール)
-└── tests/
-```
-
-## Phase 計画
-
-| Phase | 内容 | 期間 |
-|---|---|---|
-| **0** | 設計フェーズ (構造調査 + 設計案) | 1-2日 |
-| **1** | メルカリ在庫スクレイパー (主力商材最多) | 2-3日 |
-| **2** | Amazon 在庫スクレイパー | 2-3日 |
-| **3** | eBay 自動取り下げ (Sell API) | 3-5日 |
-| **4** | ラクマ / ヤフオク / 他サイト追加 | 各 2-3日 |
-| **5** | 統合運用 (cron / 通知 / スプシ連携) | 3-5日 |
-
-合計想定: **3-4週間**
-
 ## 運用ルール
 
 - 各 scraper は単独実行可能 (offline テスト想定)

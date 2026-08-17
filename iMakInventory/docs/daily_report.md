@@ -1838,6 +1838,115 @@ amazon 16 件は **scraper returned None (= 判定不能)**。 真因 = **amazon
   現時点で ×8 到達はゼロ = 今回の変更で消える行も増える行も無い (= 挙動の後退なし)。数日後に
   ×8 到達した行から自動的に別枠へ移る。
 
+## 2026-08-17 — 総点検: 「対処不能な通知」3種を停止 + 6日止まっていた復活を通した + 要対応の閉じ処理
+
+ユーザー指摘「エラーメッセが最近多い。**出ないのが普通だと思うけど**」が発端。実測すると、
+鳴っていた通知は全て「見ても人にできることが無い」もので、その裏で**復活 (qty=1 復帰) が
+6日間 1件も実行されていない**ことが判明した。
+
+### ① 通知が「対処不能」だった 3 件 — いずれも鳴らないのが正常
+
+- 決定: 通知は**対処できるものだけ鳴らす**。積み残しの HOLD・環境要因の timeout・
+  HQ 差替による mismatch は、いずれも人の手が要らない → 鳴らさない。
+- 変更 (a) 補URL消込の恒久 HOLD: [sheet_updater.py:117](../sheet_updater.py#L117) +
+  [monitor_listings.py](../monitor_listings.py) — 急増ガードの判定基準を「積み残し込みの総数」→
+  **「今 cycle 新規」**に変更 + 1 cycle 20 件の自動ドレイン + 繰越は ALERT にしない (commit 5563d1a)。
+  実害: 08-09 22:53 に 30 件で HOLD → **4日間・15 cycle 連続**で同じデスクトップ ALERT、
+  候補は 30→75 に単調増加 (ガードが自分で backlog を育てて自分で鳴り続ける構造)。
+- 変更 (b) precheck の timeout で巡回ごと中止: [run_cycle.py:139](../run_cycle.py#L139) —
+  timeout 120→300s、status=error は 3 回まで retry、failed (検体が実際に落ちた) は従来どおり即 abort
+  (commit 6bb610f)。実害: 08-13 01:30 に 120s timeout → 巡回 abort → **在庫監視 4h 空白**。
+  検体自体は健全 (同日 00:00 は 6.4s、21:30 は 40.2s で pass) = 実行できなかっただけで落としていた。
+- 変更 (c) HQ の補URL差替による mismatch: [run_cycle.py](../run_cycle.py) `_is_benign_url_swap()` —
+  セル値が別の有効な URL に変わっている = 消さなかったのが正解 → 告知しない。空/URL でない異常系は
+  従来どおり告知 (commit 1d0ae6a)。
+- 検証: [tests/test_backup_clear_drain_no_deadlock.py](../tests/test_backup_clear_drain_no_deadlock.py) 8 件
+  (backlog が cycle を重ねて 0 に収束するループで実証) /
+  [tests/test_pytest_precheck_retry.py](../tests/test_pytest_precheck_retry.py) 6 件 /
+  [tests/test_backup_clear_mismatch_alert_scope.py](../tests/test_backup_clear_mismatch_alert_scope.py) 5 件。
+  **実機実証**: 08-14 22:48 に HOLD (新規21) → 08-15 02:46 に自動ドレイン開始 (30件中20件、10件繰越)
+  → 06:45 に14件 → **人手介入ゼロで解消**。08-13〜08-17 のデスクトップ ALERT = **0 件**。
+
+### ② 逆方向 audit の「取下げ漏れ4件」は誤報 (5日連続)
+
+- 決定: 同一 itemID が複数行 (仕入元違い) で管理されている時、**片方が売切でも別行に在庫が
+  あれば eBay active は正しい** = fail-OPEN ではない。乖離に数えない。
+- 変更: [reverse_audit.py](../reverse_audit.py) — URL を持ち D が売切でない行がある itemID を
+  suppressed として除外 (log には残す)。URL 空 + D 空欄 は在庫の根拠にしない (fail-OPEN 防止)。
+- 検証: [tests/test_reverse_audit_multi_row_item.py](../tests/test_reverse_audit_multi_row_item.py) 4 件。
+  実機再実行で **mismatch 4 → 1** (残り1は承認済み既知偽陽性 358645217419) = status OK_ACK_ONLY。
+  08-13〜08-17 の daily audit は 5 日連続 OK_ACK_ONLY / 未承認 0。
+
+### ③ ★復活 (qty=1) が 6 日間 1 件も動いていなかった — 機会損失
+
+- 決定: **row_index は identity ではない**。シートは行の挿入/削除で常時ずれるので、queue に
+  積んだ row_index は数日で別商品を指す。突合は itemID (+URL) で行う。
+- 変更 (a) [ebay_actions/revive_csv_generator.py](../ebay_actions/revive_csv_generator.py)
+  `_relocate_row()` — itemID で引き直し。同 itemID 複数行は URL で一意に決まる時のみ採用、
+  決まらなければ fail-closed。**145件中84件が item_id_changed / row_not_found で永久 deferred** だった。
+- 変更 (b) 同ファイル `_fetch_ebay_start_price_and_qty()` — GetItem の `raw_xml_cap` 既定 2000 文字で
+  **`<StartPrice>` が切り落とされ** price=None → 採算 gate が skip_no_price → 復活 0 件。cap 解除。
+  deferred 149 件中 **61 件がこれ**。同型は単品 verify の QuantitySold 取りこぼし (commit 0b7f566)。
+- 変更 (c) 急増ガードを「前回 revive 実行以降」基準に (`revive_last_run.json`、label 別)。
+  24h 固定窓では 4〜8h 間隔の cycle 数回分をまとめて数え、**正常運転でも 57 件と数えて全件 HOLD** した。
+  1 cycle 上限は 10 → **50** (上限は暴走時の天井であって backlog を数日残す絞りではない)。
+- 変更 (d) queue の同一 itemID 重複 (最大7重複、145 entry → 実質69) を最新1件に畳む +
+  シートに存在しない itemID は 7 日経過で archive 退避。
+- 検証: [tests/test_revive_row_drift.py](../tests/test_revive_row_drift.py) 13 件 /
+  [tests/test_revive_burst_guard.py](../tests/test_revive_burst_guard.py) に「積み残しでは発火しない」を追加。
+  **実機**: 08-13 14:45 cycle で **18件**、17:30 cycle で **52件** upload 成功 (ng=0) = 6日ぶりに qty=1 復帰。
+  08-13〜08-17 の復活累計 **154件 / 失敗 0**。
+
+### ④ 要対応キューが嘘をついていた (閉じ処理が無かった)
+
+- 決定: 積んだ理由が解消したら**閉じる**。閉じないと片付いた項目が残り続け、本当の要対応が埋もれる。
+- 変更: [monitor_listings.py](../monitor_listings.py) `resolve_action_required()` — revive 成功時に
+  holdout entry を `action_required_resolved.jsonl` へ退避 (silent 削除しない)。
+  別 reason の entry は閉じない / dry_run はファイルを触らない (commit 72c1f91)。
+- 検証: [tests/test_action_required_close_out.py](../tests/test_action_required_close_out.py) 4 件。
+  実データで **要対応 22 → 0** (22件は全て 08-13〜08-16 に復活成功済だったのに 5 日間表示され続けていた)。
+
+### ⑤ 判定材料そのものが汚れていた (テスト由来のエラーが本番ログに)
+
+- 決定: テストの書込は本番と物理的に分ける。ログが嘘をつくと切り分けができない。
+- 変更: [monitor_listings.py](../monitor_listings.py) `_log_path()` — pytest 実行中は
+  `logs/listings_TESTRUN_*.log` へ隔離。`revive_last_run.json` の path も実行時解決に変更
+  (module 定数だと test が本番 state を書き換えていた)。
+  [pytest.ini](../pytest.ini) に `addopts = -m "not live"` — live test (網+chrome profile 必須) が
+  pre-commit で走り、巡回と重なると driver 起動不能で落ちていた (単独 36 passed / 巡回中 11 failed)
+  = commit の可否が巡回タイミング次第の非決定 gate だった。
+- 検証: [tests/test_log_isolation_under_pytest.py](../tests/test_log_isolation_under_pytest.py) 3 件。
+  実測の裏付け: 08-12 の driver crash 系 36 件のうち **34 件が [TEST] シート由来** (実シートは 2 件)。
+
+### 稼働実績 (08-13〜08-17、上記修正の後)
+
+| 日 | cycle | 取下げ | 復活 | チェック行 | エラー |
+|---|---|---|---|---|---|
+| 08-13 | 8 / 全成功 | 50 (失敗0) | 80 (失敗0) | 9,296 | 46 |
+| 08-14 | 8 / 全成功 | 35 (失敗0) | 18 (失敗0) | 9,351 | 5 |
+| 08-15 | 9 / 全成功 | 54 (失敗0) | 22 (失敗0) | 10,917 | 13 |
+| 08-16 | 9 / 全成功 | 44 (失敗0) | 24 (失敗0) | 10,932 | 17 |
+| 08-17 | 6 / 全成功 | 37 (失敗0) | 10 (失敗0) | 7,445 | 5 |
+
+デスクトップ ALERT 0 件 / 逆方向 audit 5 日連続 OK / 滞留 (pending_stuck) 0 / 要対応 0。
+
+### HQ 依頼への回答
+
+- `2026-08-17_hoju_url_dead_count_and_161_drain_status.md` → `_response.md` で回答。
+  **売切残り 8 件** (HIGH 7 / LOW 1)、161件は 07-27 に完了 (07-25 107件 + 07-27 48件、
+  自動消込 801件 = 累計 1031 スロット解放)。**7/25 以降 報告を出していなかったのはこちらの落ち**。
+  溢れた row1341 (358849395215) は 5 枠すべて実測で在庫あり = 死URL滞留ではないので消込では
+  解決しないことを指摘し、溢れ頻度の提供を依頼。
+
+### 設定の整理 (/doctor)
+
+- 決定: 常時読み込みの CLAUDE.md から「出品作業の時だけ必要な参照」を外す。
+- 変更: [CLAUDE.md](../CLAUDE.md) からディレクトリ構成 (実在しないファイル5個を含んでいた) と
+  Phase 計画 (4月の予定、全 Phase 完了済) を削除 = 31 行。
+  グローバル `~/.claude/CLAUDE.md` の eBay 入稿CSV 系 5 節を skill `ebay-csv-listing` へ移設
+  (「テンプレ読めなければ止める」「送料名を手で組み立てない」の 2 つの禁止事項だけ常駐側に残置)。
+- 検証: 実測で約 710 est. tokens/セッション削減。offline gate 236 / 全 698 pass。
+
 ## 2026-08-12 — 保留13件の中に本物の取下げ漏れ2件 + 終了済 listing 行 440 を退避して削除
 
 ### ① ★保留 conflict の中に fail-OPEN が隠れていた (user 指摘「ん？」が発端)
