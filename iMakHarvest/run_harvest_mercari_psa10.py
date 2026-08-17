@@ -44,16 +44,13 @@ from scrapers import mercari_item_detail  # noqa: E402
 from scrapers import mercari_search as MSch  # noqa: E402
 from scrapers import mercari_seller as MS  # noqa: E402
 from scrapers import psa_cert  # noqa: E402
+from scrapers import psa_search_terms  # noqa: E402
 from scrapers import psa_slab_vision  # noqa: E402
 
-# iMakTCG が扱う 4 ゲーム (= ストアカテゴリがある物) に絞る。
-# 「PSA10」 表記ゆれ (PSA10 / PSA 10) は メルカリ検索側が吸収するため片方で足りる。
-DEFAULT_KEYWORDS = [
-    "PSA10 ワンピースカード",
-    "PSA10 ドラゴンボール カード",
-    "PSA10 ガンダム カード",
-    "PSA10 ポケモンカード",
-]
+# キーワードは psa_search_terms が弾コード単位で組む。
+# 2026-08-17 実測: メルカリ検索は 1 語 15 件で頭打ち (価格・送料条件を外しても増えない) だが、
+# **語を増やすとほぼ線形に積み上がる** (弾コード 10 語 → 148 件、 重複 2 件のみ)。
+# ゲーム名だけの 4 語だと 60 件が上限になるので、 弾コードで刻む。
 DUMP_DIR = ROOT / "debug"
 
 
@@ -74,7 +71,7 @@ def _log(m: str) -> None:
 # ① 収集: メルカリ検索 → 詳細 → セラーフィルタ → Vision でラベル読取
 # ---------------------------------------------------------------------------
 def collect(args) -> dict:
-    keywords = args.keywords or DEFAULT_KEYWORDS
+    keywords = args.keywords or psa_search_terms.build_keywords(args.games)
     headless = args.headless and not args.manual  # manual は非 headless 必須
     _log(f"収集開始: keywords={len(keywords)} 価格={args.price_min}-{args.price_max} "
          f"評価数>={args.min_rating} mode={'手動フリマアシスト' if args.manual else '自動scroll'}")
@@ -90,6 +87,7 @@ def collect(args) -> dict:
         collected = MSch.collect_multi_keyword_urls(
             keywords, driver, price_min=args.price_min, price_max=args.price_max,
             cap_per_keyword=args.cap_per_keyword, manual=args.manual,
+            sleep_between_sec=args.keyword_interval,
             progress_callback=lambda n, m: _log(f"  収集 {m}"),
         )
         urls = collected["urls"]
@@ -208,7 +206,13 @@ def main(argv=None) -> int:
     ap.add_argument("--no-identity", action="store_true", help="本人確認済 要件を外す")
     ap.add_argument("--cap-per-keyword", type=int, default=100)
     ap.add_argument("--max-details", type=int, default=0, help="詳細フェッチ上限 (0=無制限)")
-    ap.add_argument("--keywords", nargs="*", default=None)
+    ap.add_argument("--keywords", nargs="*", default=None,
+                    help="上書きキーワード (既定は弾コードから自動生成)")
+    ap.add_argument("--games", nargs="*", default=None,
+                    choices=list(psa_search_terms.GAMES),
+                    help=f"対象ゲーム (既定=全部: {', '.join(psa_search_terms.GAMES)})")
+    ap.add_argument("--keyword-interval", type=float, default=8.0,
+                    help="語間の待機秒 (2026-08-17 実測: 8秒空ければ件数が落ちない)")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--manual", action="store_true",
                     help="フリマアシスト手動click で volume 突破 (非headless必須)")

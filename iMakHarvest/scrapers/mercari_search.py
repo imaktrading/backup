@@ -160,6 +160,7 @@ def collect_search_listing_urls(
     initial_wait_sec: int = MS.DEFAULT_INITIAL_PROFILE_WAIT_SEC,
     manual: bool = False,
     manual_done_event=None,
+    shipping_payer_id: Optional[int] = SHIPPING_PAYER_SELLER,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """検索 URL にナビゲートし listing URL 一覧を収集 (mercari_seller の資産流用).
@@ -170,7 +171,9 @@ def collect_search_listing_urls(
     manual=False: 自動 scroll (フリマ anti-bot で ~15件 頭打ち、 少数高品質向け)。
     Returns: {"keyword", "url", "urls": list[str], "cap_hit": bool, "total_seen": int}
     """
-    url = build_search_url(keyword, price_min, price_max)
+    # shipping_payer_id=None で「送料込み」条件を外せる (既定は従来どおり 送料込みのみ)
+    url = build_search_url(keyword, price_min, price_max,
+                           shipping_payer_id=shipping_payer_id)
     driver.get(url)
     # seller profile と同じく foreground 化 + hydration 待機 (5/26 fix と同思想)
     try:
@@ -244,21 +247,29 @@ def collect_multi_keyword_urls(
     price_max: Optional[int] = None,
     cap_per_keyword: int = 150,
     manual: bool = False,
+    shipping_payer_id: Optional[int] = SHIPPING_PAYER_SELLER,
+    sleep_between_sec: float = 0.0,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """複数キーワードを順に検索し、 URL を横断 dedup で統合.
 
     manual=True: 各キーワードでフリマアシスト手動 click 待ち (= volume 突破、 非headless)。
+    sleep_between_sec: 語間の待機。 語を大量に流す時は空けた方が件数が落ちない
+      (2026-08-17 実測: 8 秒空けて 10 語連続でも 15 件/語 を維持。 既定 0 = 従来動作)。
     Returns: {"urls": list[str] (dedup済), "by_keyword": {kw: 件数}, "total_raw": int}
     """
     seen: set[str] = set()
     merged: list[str] = []
     by_keyword: dict[str, int] = {}
     total_raw = 0
-    for kw in keywords:
+    for idx, kw in enumerate(keywords):
+        if idx and sleep_between_sec > 0:
+            time.sleep(sleep_between_sec)
         r = collect_search_listing_urls(
             kw, driver, price_min=price_min, price_max=price_max,
-            cap=cap_per_keyword, manual=manual, progress_callback=progress_callback,
+            cap=cap_per_keyword, manual=manual,
+            shipping_payer_id=shipping_payer_id,
+            progress_callback=progress_callback,
         )
         added = 0
         for u in r["urls"]:
