@@ -115,8 +115,22 @@ def demand_score(row: dict) -> float:
     return _num("sales90") * 100 + _num("watch") * 10 + _num("impr") / 1000.0
 
 
+# カタログの category → 収集側のゲーム名 (`psa_search_terms.GAMES` と同じ綴り)
+CATEGORY_TO_GAME = {
+    "one_piece_tcg": "onepiece",
+    "pokemon_tcg": "pokemon",
+    "dragonball_scg": "dragonball",
+    "gundam_tcg": "gundam",
+}
+
+
+def _game_of(title: str) -> str:
+    return CATEGORY_TO_GAME.get(detect_game(title), "")
+
+
 def build_keywords_from_rows(rows: list[dict], prefix: str = PREFIX,
-                             limit: int = 0, name_map: dict | None = None) -> list[str]:
+                             limit: int = 0, name_map: dict | None = None,
+                             games=None) -> list[str]:
     """RESTOCK 行から検索キーワードを作る (純関数).
 
     Args:
@@ -127,10 +141,13 @@ def build_keywords_from_rows(rows: list[dict], prefix: str = PREFIX,
     Returns:
         需要の強い順・重複なしの検索キーワード (例 "PSA10 OP08-106" / "PSA10 ニコ・ロビン")
     """
+    want = set(games) if games else None
     best: dict[str, float] = {}
     for r in rows:
         title = r.get("title") or ""
         if not _PSA_RE.search(title):
+            continue
+        if want is not None and _game_of(title) not in want:
             continue
         code = extract_card_number(title) or resolve_japanese_name(title, name_map or {})
         if not code:
@@ -156,24 +173,31 @@ def parse_demand_map(values: list[list[str]]) -> list[dict]:
     return [dict(zip(header, r)) for r in values[head_i + 1:] if any(r)]
 
 
-def _name_map_all(name_map: dict) -> dict:
-    """{category: {英名: 和名}} を 1 枚に潰す。 和名が割れる英名は捨てる (fail-closed)."""
+def _name_map_all(name_map: dict, games=None) -> dict:
+    """{category: {英名: 和名}} を 1 枚に潰す。 和名が割れる英名は捨てる (fail-closed).
+
+    games を渡すと そのゲームのカタログだけ使う。
+    """
+    want = set(games) if games else None
     seen: dict[str, set] = {}
-    for table in (name_map or {}).values():
+    for cat, table in (name_map or {}).items():
+        if want is not None and CATEGORY_TO_GAME.get(cat, cat) not in want:
+            continue
         for en, jp in table.items():
             seen.setdefault(en, set()).add(jp)
     return {en: next(iter(jps)) for en, jps in seen.items() if len(jps) == 1}
 
 
 def build_character_keywords(rows: list[dict], name_map: dict,
-                             prefix: str = PREFIX, limit: int = 0) -> list[str]:
+                             prefix: str = PREFIX, limit: int = 0,
+                             games=None) -> list[str]:
     """需要マップの キャラ軸から検索キーワードを作る (純関数).
 
     - 判定が 🔵国内実需 / 🟢売れ筋 の行だけ採る (🔴死筋・判定なしは採らない)
     - 英名 → 和名 は **カタログの lookup のみ**。 表に無いキャラは語にしない
     - 国内OOS数 (= 在庫切れの本数) が多い順
     """
-    table = _name_map_all(name_map)
+    table = _name_map_all(name_map, games=games)
     picked: dict[str, float] = {}
     for r in rows:
         if (r.get("観点") or "").strip() != "キャラ":
@@ -260,7 +284,7 @@ def load_ja_names(db_path: str = CATALOG_DB, categories=tuple(GAME_HINTS)) -> di
 
 def build_demand_keywords(sheet_id: str = FUNNEL_SHEET_ID, prefix: str = PREFIX,
                           limit: int = 0, use_catalog: bool = True,
-                          include_characters: bool = True) -> list[str]:
+                          include_characters: bool = True, games=None) -> list[str]:
     """需要側の検索キーワードを作る (通信あり).
 
     ① ファネル分析 RESTOCK (在庫切れ ∩ 需要あり) のカード単位
@@ -276,11 +300,11 @@ def build_demand_keywords(sheet_id: str = FUNNEL_SHEET_ID, prefix: str = PREFIX,
         except Exception:  # noqa: BLE001 - カタログが無くても収集は続ける
             name_map = {}
     out = build_keywords_from_rows(fetch_restock_rows(sheet_id), prefix=prefix,
-                                   limit=limit, name_map=name_map)
+                                   limit=limit, name_map=name_map, games=games)
     if include_characters and name_map:
         try:
             chars = build_character_keywords(fetch_demand_map_rows(), name_map,
-                                             prefix=prefix)
+                                             prefix=prefix, games=games)
         except Exception:  # noqa: BLE001 - 需要マップが読めなくても収集は続ける
             chars = []
         out += [k for k in chars if k not in out]

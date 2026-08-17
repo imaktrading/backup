@@ -89,8 +89,9 @@ def collect(args, dump_path=None, resume=None) -> dict:
     # (2026-08-18 user 指摘)。 番号が取れない行は語にしない = 推測で検索しない。
     if getattr(args, "from_demand", False):
         from scrapers import demand_keywords  # noqa: PLC0415
+        # --games を指定していれば 需要語も同じゲームに絞る (混ざると走行時間が読めない)
         demand = demand_keywords.build_demand_keywords(
-            limit=getattr(args, "demand_limit", 0))
+            limit=getattr(args, "demand_limit", 0), games=getattr(args, "games", None))
         added = [k for k in demand if k not in keywords]
         _log(f"需要ベースのキーワード: {len(demand)} 語 (うち新規 {len(added)} 語)")
         keywords = demand if getattr(args, "demand_only", False) else keywords + added
