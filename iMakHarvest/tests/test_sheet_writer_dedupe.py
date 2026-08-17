@@ -521,3 +521,80 @@ class TestBuildRowCert:
     def test_cert_row_keeps_default_width(self):
         row = _build_row({"url": "https://jp.mercari.com/item/m1", "cert": "153420191"})
         assert len(row) == DEFAULT_COLUMN_COUNT
+
+
+class TestLoadClaimedSupply:
+    """本番で既に押さえている仕入元を集める (2026-08-17、収集の重複防止).
+
+    中間スプシ側の dedupe は「そのタブに同じ URL があるか」しか見ないので、本番で
+    使用中の仕入元を何度でも拾い直してしまう (実測: HIGH+LOW で URL 3,116件 /
+    cert 1,044件が既に押さえられている)。URL と cert の 2 本立てなのは、
+    **同じ現物が別 URL で再出品される**と URL 突合では捕まらないため。
+    """
+
+    def _patch(self, monkeypatch, sheets: dict):
+        import sheet_writer as SW
+
+        monkeypatch.setattr(SW, "open_sheet_by_id", lambda sid: sid)
+        monkeypatch.setattr(
+            SW, "get_listings_worksheet",
+            lambda sh, gid: _MockWorksheet(sheets.get(sh, [])))
+        return SW
+
+    def test_collects_main_and_aux_urls(self, monkeypatch):
+        SW = self._patch(monkeypatch, {"S1": [
+            ["URL"] + [""] * 34,
+            ["https://jp.mercari.com/item/m111"] + [""] * 27
+            + ["https://jp.mercari.com/item/m222", "", "", "", ""],
+        ]})
+        got = SW.load_claimed_supply(["S1"])
+        assert got["urls"] == {"m111", "m222"}
+
+    def test_collects_cert_from_col_i(self, monkeypatch):
+        row = [""] * 35
+        row[0] = "https://jp.mercari.com/item/m111"
+        row[8] = "153420191"
+        SW = self._patch(monkeypatch, {"S1": [["h"] * 35, row]})
+        assert SW.load_claimed_supply(["S1"])["certs"] == {"153420191"}
+
+    def test_ignores_non_cert_values_in_col_i(self, monkeypatch):
+        # I 列は PSA 専用ではない (montbell は型番が入る)。cert 形式だけ拾う
+        rows = [["h"] * 35]
+        for v in ("1128625", "WB-1234", "", "Title"):
+            r = [""] * 35
+            r[0] = f"https://jp.mercari.com/item/m{len(rows)}"
+            r[8] = v
+            rows.append(r)
+        SW = self._patch(monkeypatch, {"S1": rows})
+        assert SW.load_claimed_supply(["S1"])["certs"] == set()
+
+    def test_merges_multiple_sheets(self, monkeypatch):
+        def row(url):
+            r = [""] * 35
+            r[0] = url
+            return r
+        SW = self._patch(monkeypatch, {
+            "HIGH": [["h"] * 35, row("https://jp.mercari.com/item/m111")],
+            "LOW": [["h"] * 35, row("https://jp.mercari.com/item/m222")],
+        })
+        assert SW.load_claimed_supply(["HIGH", "LOW"])["urls"] == {"m111", "m222"}
+
+    def test_unreadable_sheet_does_not_stop_collection(self, monkeypatch):
+        """片方が読めなくても、読めた分で重複判定する (収集自体は止めない)."""
+        import sheet_writer as SW
+
+        def boom(sid):
+            if sid == "BAD":
+                raise RuntimeError("network")
+            return sid
+        monkeypatch.setattr(SW, "open_sheet_by_id", boom)
+        r = [""] * 35
+        r[0] = "https://jp.mercari.com/item/m111"
+        monkeypatch.setattr(SW, "get_listings_worksheet",
+                            lambda sh, gid: _MockWorksheet([["h"] * 35, r]))
+        assert SW.load_claimed_supply(["BAD", "OK"])["urls"] == {"m111"}
+
+    def test_empty_sheet_returns_empty_sets(self, monkeypatch):
+        SW = self._patch(monkeypatch, {"S1": []})
+        got = SW.load_claimed_supply(["S1"])
+        assert got == {"urls": set(), "certs": set()}

@@ -81,8 +81,17 @@ def collect(args) -> dict:
     # 「不鮮明が多かった」 と読み違える (2026-08-17 に残高切れで実際に起きた)
     cands, rej = [], {"sold": 0, "seller_rating": 0, "no_identity": 0,
                       "fetch_fail": 0, "no_image": 0, "cert_unreadable": 0,
-                      "vision_error": 0}
+                      "vision_error": 0, "already_claimed_url": 0,
+                      "already_claimed_cert": 0}
     vision_errors: list[str] = []
+
+    # 本番で既に押さえてある仕入元は拾い直さない (URL は詳細フェッチの前に落とすので
+    # 1 件あたり 約10秒 と Vision 1 回分が丸ごと浮く)
+    claimed = {"urls": set(), "certs": set()}
+    if not args.no_dedupe:
+        from sheet_writer import load_claimed_supply  # noqa: PLC0415
+        claimed = load_claimed_supply()
+        _log(f"既知の仕入元: URL {len(claimed['urls'])} 件 / cert {len(claimed['certs'])} 件")
     try:
         collected = MSch.collect_multi_keyword_urls(
             keywords, driver, price_min=args.price_min, price_max=args.price_max,
@@ -96,7 +105,11 @@ def collect(args) -> dict:
             urls = urls[:args.max_details]
             _log(f"詳細フェッチ上限 {args.max_details} 件に制限")
 
+        from sheet_writer import dedupe_key  # noqa: PLC0415
         for i, url in enumerate(urls, 1):
+            if dedupe_key(url) in claimed["urls"]:
+                rej["already_claimed_url"] += 1
+                continue
             detail = mercari_item_detail.fetch_detail(driver, url)
             if not detail:
                 rej["fetch_fail"] += 1
@@ -132,6 +145,11 @@ def collect(args) -> dict:
             if not gate["ok"]:
                 key = gate["reason"].split(":")[0]
                 rej[key] = rej.get(key, 0) + 1
+                continue
+            # 同じ現物が別 URL で再出品されている場合は URL 突合では捕まらない。
+            # cert は現物 1 枚に 1 つなので、 既知なら二重に押さえない
+            if vision["cert"] in claimed["certs"]:
+                rej["already_claimed_cert"] += 1
                 continue
 
             cands.append({
@@ -227,6 +245,8 @@ def main(argv=None) -> int:
     ap.add_argument("--verify", action="store_true",
                     help="Harvest 側でも PSA 公式照会して先に確定させる "
                          "(既定 OFF = 出品くん側に 1 本化)")
+    ap.add_argument("--no-dedupe", action="store_true",
+                    help="本番スプシとの重複チェックを行わない (調査用)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 

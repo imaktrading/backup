@@ -165,6 +165,46 @@ def read_existing_dedupe_keys(ws) -> set[str]:
     return keys
 
 
+def load_claimed_supply(sheet_ids=None) -> dict:
+    """本番スプシで **既に仕入元として押さえてある** URL と cert を集める.
+
+    2026-08-17 新設。 収集の重複防止。 中間スプシ側の dedupe は「そのタブに同じ URL が
+    既にあるか」しか見ないので、 本番で既に使っている仕入元を何度でも拾い直してしまう
+    (実測: HIGH+LOW で 仕入元URL 3,116 件 / cert 1,044 件が既に押さえられている)。
+
+    2 種類の鍵を返す。 URL だけでは足りない:
+      - urls:  A 列 (主仕入元) + AC-AG 列 (補仕入 URL) の dedupe_key
+      - certs: I 列の PSA cert。 **同じ現物が別 URL で再出品される**ことがあるため、
+               URL が違っても cert が既知なら同じ 1 枚 = 二重に押さえない
+
+    Returns: {"urls": set[str], "certs": set[str]}
+    """
+    ids = sheet_ids if sheet_ids is not None else (HIGH_SHEET_ID, LOW_SHEET_ID)
+    urls: set[str] = set()
+    certs: set[str] = set()
+    for sid in ids:
+        try:
+            ws = get_listings_worksheet(open_sheet_by_id(sid), LISTINGS_GID)
+            rows = ws.get_all_values()
+        except Exception:
+            # 片方が読めなくても、 読めた分だけで重複判定する (収集自体は止めない)
+            continue
+        for r in rows[1:]:
+            k = dedupe_key((r[COL_URL - 1] if len(r) >= COL_URL else "").strip())
+            if k:
+                urls.add(k)
+            for c in range(COL_AUX_URL_1, COL_AUX_URL_5 + 1):
+                if len(r) >= c and r[c - 1].strip():
+                    k2 = dedupe_key(r[c - 1].strip())
+                    if k2:
+                        urls.add(k2)
+            cert = (r[COL_CERT - 1] if len(r) >= COL_CERT else "").strip()
+            # I 列は PSA 専用ではない (montbell は型番が入る)。 cert 形式のものだけ拾う
+            if cert.isdigit() and len(cert) >= 8:
+                certs.add(cert)
+    return {"urls": urls, "certs": certs}
+
+
 def _build_row(item: dict) -> list:
     """item dict から行データを構築 (default 20 列 = A〜T、auxiliary_urls あれば 33 列 = A〜AG).
 
