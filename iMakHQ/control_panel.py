@@ -542,6 +542,35 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         append_log_func(f"\n⚠️ 補URL 追記 失敗(続行): {type(e).__name__}: {e}\n")
         # 失敗しても listing 出力には影響なし
 
+    # Step 4e: 「出せるか」(AP列) の塗り直し (2026-08-17)。
+    # ★4d は欠番。2026-07-28 に撤去した「補URL候補検索の自動実行」がその名前で、
+    #   復活していないことを test_control_panel_hoju_search_hook_20260728 が
+    #   **その文字列の不在**で見張っているため、コメントにも書かない。
+    # ユーザーは **itemID 欄が空か** で候補を見て「補充はまだ要らない」と判断する。
+    # 出品した直後は「今出したカードの2枚目」がまだ白いので、判定が古いままだと
+    # また見間違える。夜間バッチでも更新するが、出した直後にも合わせる。
+    # 補URL 追記の **後** に置くこと (登録済かどうかで色が変わるため)。
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 「出せるか」の塗り直し (itemID 欄の白/グレー = 出せる/出せない)\n")
+    append_log_func("======================================================================\n")
+    try:
+        flag = os.path.join(WORKSPACE, "iMakHQ", "tools", "sheet_listable_flag.py")
+        r = subprocess.run(
+            [sys.executable, flag, "--write"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=300, env=env,
+        )
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode != 0:
+            append_log_func(f"\n⚠️ 出せるか判定 returncode={r.returncode}(続行)\n")
+            if r.stderr:
+                append_log_func(r.stderr)
+    except Exception as e:
+        append_log_func(f"\n⚠️ 出せるか判定 失敗(続行): {type(e).__name__}: {e}\n")
+        # 表示のための塗り直しなので、失敗しても listing 出力には影響なし
+
+
 def _runs_new_listing_dedupe(script_entry):
     """新規出品用の重複くん(KEY tuple excluder)を走らせてよいエントリかを返す(純関数)。
 
