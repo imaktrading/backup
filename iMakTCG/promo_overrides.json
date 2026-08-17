@@ -2,7 +2,7 @@
   "items": {
     "P-043": {
       "promo": "Weekly Shonen Jump-#36-37",
-      "updated_at": "2026-06-27"
+      "updated_at": "2026-08-14"
     },
     "P-001": {
       "promo": "Monkey D Luffy",
@@ -54,7 +54,7 @@
     },
     "OP05-060_P": {
       "promo": "Sound Loader Volume.1",
-      "updated_at": "2026-08-05"
+      "updated_at": "2026-08-14"
     },
     "P-096": {
       "promo": "Op Mag EX \"op Fan Letter\"",
@@ -67,6 +67,54 @@
     "OP12-031_p2": {
       "promo": "Official Event Prize",
       "updated_at": "2026-08-11"
+    },
+    "ST13-015_p2": {
+      "promo": "",
+      "updated_at": "2026-08-12"
+    },
+    "ST10-004_p1": {
+      "promo": "8 Packs Battle-Winner",
+      "updated_at": "2026-08-13"
+    },
+    "ST01-008_p1": {
+      "promo": "",
+      "updated_at": "2026-08-15"
+    },
+    "ST18-002_p1": {
+      "promo": "O-Nami 8 Packs Battle-Winner",
+      "updated_at": "2026-08-14"
+    },
+    "OP10-111_L": {
+      "promo": "",
+      "updated_at": "2026-08-14"
+    },
+    "ST04-005_p2": {
+      "promo": "Official Event Prize",
+      "updated_at": "2026-08-14"
+    },
+    "ST01-012_p5": {
+      "promo": "Standard Battle Winner",
+      "updated_at": "2026-08-15"
+    },
+    "ST01-010_p1": {
+      "promo": "",
+      "updated_at": "2026-08-15"
+    },
+    "OP01-013_p1": {
+      "promo": "",
+      "updated_at": "2026-08-15"
+    },
+    "OP01-022_p1": {
+      "promo": "",
+      "updated_at": "2026-08-15"
+    },
+    "ST01-005_p1": {
+      "promo": "",
+      "updated_at": "2026-08-15"
+    },
+    "OP09-001_p3": {
+      "promo": "",
+      "updated_at": "2026-08-16"
     }
   }
 }

@@ -88,7 +88,15 @@
       "Bash(PYTHONIOENCODING=utf-8 python -c \"import ast;ast.parse\\(open\\('psa_to_csv.py',encoding='utf-8'\\).read\\(\\)\\);print\\('構文OK'\\)\")",
       "Bash(PYTHONIOENCODING=utf-8 python -m pytest tests/test_psa_prefilter_before_batch_20260811.py -q)",
       "Bash(PYTHONIOENCODING=utf-8 timeout 280 python -)",
-      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/imax2/AppData/Local/Temp/claude/c--dev-iMak-iMakHQ/734dce07-a670-4bff-acbc-3900aa2b73cf/scratchpad/fix_dr.py\")"
+      "Bash(PYTHONIOENCODING=utf-8 python \"C:/Users/imax2/AppData/Local/Temp/claude/c--dev-iMak-iMakHQ/734dce07-a670-4bff-acbc-3900aa2b73cf/scratchpad/fix_dr.py\")",
+      "PowerShell(Get-ScheduledTask | Where-Object {$_.TaskName -match 'iMak|PSA|hoju|補|Daily|Revise|Inventory'} | Select-Object TaskName, State | Format-Table -AutoSize)",
+      "Bash(timeout 180 schtasks /query /fo csv /nh)",
+      "PowerShell($t = Get-ScheduledTask -TaskName 'iMakHQ_HojuSearch_2330'; $t.Actions | Format-List Execute, Arguments, WorkingDirectory | Out-String -Width 200; $t.Triggers | Format-List | Out-String -Width 200; \\(Get-ScheduledTask -TaskName 'iMakHQ_HojuSearch_2330'\\).Principal | Format-List | Out-String -Width 200)",
+      "Bash(timeout 120 bash -lc 'which pdftotext')",
+      "PowerShell($c = Get-Command claude -ErrorAction SilentlyContinue; if \\($c\\) { \"PATH: \" + $c.Source } else { \"claude not on PATH\" }; try { \\(claude --version\\) 2>$null | Select-Object -First 1 } catch { \"version lookup failed\" })",
+      "Bash(timeout 120 git diff --stat iMakHQ/CLAUDE.md)",
+      "Bash(timeout 120 git diff --stat iMakHQ/.claude/settings.json iMakTCG/promo_overrides.json)",
+      "Bash(timeout 120 git diff -U0 iMakHQ/.claude/settings.json)"
     ],
     "deny": [
       "Bash(python*fix_de_speedpak_shipping.py*)",
