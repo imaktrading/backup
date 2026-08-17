@@ -524,6 +524,10 @@ PENDING_REVISE_FILE = DECISION_LOG_DIR / "pending_revise.jsonl"
 # HQ 2026-06-10 FINAL 指示 B: silent 除外を禁止。 newly_sold だが item_id 空欄等で
 # revise 不能な entry は action_required.jsonl に記録、 cycle report で要対応として明示
 ACTION_REQUIRED_FILE = DECISION_LOG_DIR / "action_required.jsonl"
+# 解決済 action_required の退避先 (2026-08-17)。要対応キューは「解決したら閉じる」まで
+# やらないと、片付いた項目が残り続けて件数が嘘をつく (08-13 の revive HOLD 22件が
+# 全て復活済なのに 5 日間「要対応 22件」と出続けた)。
+ACTION_REQUIRED_RESOLVED_FILE = DECISION_LOG_DIR / "action_required_resolved.jsonl"
 # 補URL救済ログ (フック2、2026-07-25)。救済 = 主URL死 AND 補URL≥1本 在庫あり (Phase1 救済率 signal)。
 RESCUE_EVENTS_FILE = DECISION_LOG_DIR / "rescue_events.jsonl"   # 監査用 (実書込の証跡)
 # 補URL消込の復元用アーカイブ (2026-07-25)。消したセル (row/slot/col/url) を全て記録 →
@@ -781,6 +785,47 @@ def confirm_and_enqueue_revive(
         "cleared": cleared,
         "stayed": stayed,
     }
+
+
+def resolve_action_required(item_ids, reason: str, dry_run: bool = False) -> int:
+    """解決した要対応 entry を action_required から外し、resolved archive に退避する。
+
+    ★ 2026-08-17: 要対応キューは「積む」側しか無く、片付いても残り続けていた。
+      08-13 の revive burst HOLD 22件は全件その後復活成功したのに、5 日間
+      「要対応 22件」と表示され続けた (キューが嘘をつく = 本当の要対応が埋もれる)。
+      積んだ理由が解消した時点で必ず閉じる。証跡は resolved archive に残す。
+
+    Args:
+        item_ids: 解決した item_id の集合/リスト
+        reason:   閉じる対象の reason (他の理由で載っている entry は残す)
+
+    Returns: 閉じた件数
+    """
+    ids = {str(i).strip() for i in (item_ids or []) if str(i).strip()}
+    if not ids or not ACTION_REQUIRED_FILE.exists():
+        return 0
+    keep, closed = [], []
+    for line in ACTION_REQUIRED_FILE.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            keep.append(line)
+            continue
+        if e.get("reason") == reason and (e.get("item_id") or "").strip() in ids:
+            closed.append(e)
+        else:
+            keep.append(line)
+    if not closed or dry_run:
+        return len(closed)
+    with open(ACTION_REQUIRED_RESOLVED_FILE, "a", encoding="utf-8") as af:
+        for e in closed:
+            e["resolved_at"] = datetime.now().isoformat(timespec="seconds")
+            af.write(json.dumps(e, ensure_ascii=False) + "\n")
+    ACTION_REQUIRED_FILE.write_text(
+        ("\n".join(keep) + "\n") if keep else "", encoding="utf-8")
+    return len(closed)
 
 
 def append_action_required(sheet_label: str, result: dict, reason: str,

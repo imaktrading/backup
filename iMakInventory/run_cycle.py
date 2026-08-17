@@ -1284,6 +1284,14 @@ def run_cycle(
                         _log(f"  pending_revive → processed_revive archive: {moved} 件 "
                              f"(失敗 {failed_kept} 件は pending 残置 → 次 cycle で retry)",
                              test_mode)
+                        # ★ 2026-08-17: 復活できた = 急増ガードで HOLD した理由が消えた。
+                        #   要対応キューを閉じる (閉じないと片付いた項目が残り続け件数が嘘をつく)。
+                        from monitor_listings import resolve_action_required  # noqa: PLC0415
+                        _closed = resolve_action_required(
+                            succ_ids, "revive_burst_guard_holdout", dry_run=dry_run)
+                        if _closed:
+                            _log(f"  要対応 close: revive 成功で {_closed} 件を解決済に退避",
+                                 test_mode)
                     except Exception as e:
                         _log(f"  [!] drain_pending_revive 失敗: {type(e).__name__}: {e}",
                              test_mode)
