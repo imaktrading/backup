@@ -1,5 +1,20 @@
 # iMakHarvest daily_report
 
+## 2026-08-18 (続3) — ポケモン PSA10 本走行 (user 指示)
+
+- 実行: `--games pokemon --from-demand --save-every 10` (08:43-09:51 + 再開 10:05-12:42)。
+  キーワード 64語 = 弾コード24 + **需要40** (ポケモンだけに絞る `--games` 連動を追加)。
+- 結果: 収集 **791件** (ワンピース49語の487件より多い) → 候補 **348件** + 番号読めず **106件**。
+  投入先: `mercari_psa10_pokemon` 452行 (cert入り347 / 目視待ち105) / `_dragonball` 2 / `_other` 1。
+  ゲーム毎タブ分割と 全タブ横断 dedupe が実走で機能 (再開時 skipped_existing=75)。
+- reject: grade_not_psa10 128 / seller_rating 140 / no_identity 7 / sold 6 /
+  already_claimed_url 8 / title_cert_conflict 6。vision_error 0。
+- ★**途中で chromedriver が 3連続 ReadTimeout → 再生成も失敗 (SessionNotCreatedException)** で
+  121/791 で打ち切り。**途中セーブのおかげで 75件は保存済**、`--resume-from-json` で
+  処理済118 URL を飛ばして再開できた (8/17 に入れた crash-safety が初めて実戦で効いた)。
+- ⚠️**要対応: ページ取得に失敗した 92件が未判定** (fetch_fail 80 + item_error 12)。
+  ドライバが不安定だった時間帯に集中。ワンピースの42件と合わせて **134件が未判定**。
+
 ## 2026-08-18 (続2) — 中間スプシをゲーム毎タブに分割 + 重複を全タブ横断に (user 指示)
 
 - 決定 (user): 中間スプシは **ゲーム毎に4タブ** (`mercari_psa10_onepiece` 等)、
