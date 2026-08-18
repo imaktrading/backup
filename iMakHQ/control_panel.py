@@ -966,6 +966,19 @@ SCRIPTS = [
         "skip_postprocess": True,
     },
     {
+        # ★2026-08-18: 手でやっていた「プロモを8%に」。itemID 書込の**後**に押す。
+        # 受け皿は 165535464010 (US の RUNNING 6本のうち 8.0% で完全に揃っている唯一の
+        # キャンペーン・8/2 開始で最新)。既に広告に入っている出品の率は触らない。
+        "category": None, "type": "utility",
+        "label": "📣 入稿後: 新規分を広告8%に",
+        "badge": "ads_8pct",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ads_add_new_listings.py", "--write"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
         # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
         "category": None, "type": "utility",
         "label": "🩹 補URL補強(昼確認/slice3)",

@@ -21,14 +21,15 @@ def test_marketing_readonly_scope_present():
     assert "sell.marketing.readonly" in _src()
 
 
-def test_marketing_write_scope_not_requested():
-    """読取だけでよい。広告の書換え権限は取らない (誤操作の余地を作らない)."""
-    src = _src()
-    for line in src.splitlines():
-        s = line.strip()
-        if not s.startswith('"https://api.ebay.com/oauth/api_scope/sell.marketing'):
-            continue
-        assert "readonly" in s, f"広告の書込 scope を要求している: {s}"
+def test_marketing_write_scope_present():
+    """★2026-08-18 方針変更: 入稿後の「プロモを8%に」を API でやるため **書込も取る**。
+
+    2026-08-14 時点は「読取だけ・誤操作の余地を作らない」だったが、手作業を無くす方が
+    価値が高いとユーザーが判断 (同日 同意取得済)。誤操作の防止は scope を持たないことでは
+    なく、**道具側の作り**で担保する (ads_add_new_listings: 既定 dry-run / 既存の率は
+    書き換えない) → test_ads_add_new_listings_20260818。
+    """
+    assert '"https://api.ebay.com/oauth/api_scope/sell.marketing",' in _src()
 
 
 def test_existing_scopes_kept():

@@ -61,6 +61,11 @@ SCOPES = [
     # API で読むため追加。画面では「どの出品が広告に入っていないか」を追えない
     # (キャンペーン7本で計 1,700件 / 出品総数はそれより多い)。**読取のみ**。
     "https://api.ebay.com/oauth/api_scope/sell.marketing.readonly",
+    # 2026-08-18: 入稿後に手でやっていた「プロモを8%に」を API でやるため **書込**を追加。
+    #   readonly のままだと ad rate を設定できない (実測: refresh grant に write scope を
+    #   要求すると invalid_scope が返る = 未同意)。read も兼ねるが、既存の readonly は
+    #   他ツール (ads_coverage) の前提なので消さずに併記する。
+    "https://api.ebay.com/oauth/api_scope/sell.marketing",
 ]
 
 
