@@ -59,10 +59,14 @@ DEFAULT_WINDOW_SIZE = (820, 640)
 DEFAULT_WINDOW_POSITION = (40, 40)
 
 # ★収集中の Chrome が画面に出て作業の邪魔になる (2026-08-18 user 指摘)。
-# headless にすると件数が激減する (1語 15件 → 6件) ので、 **画面外に置く**。
-# 最小化 (minimize) は Chrome が描画を止めて lazy load が進まなくなるので使わない。
+# headless にすると件数が激減する (1語 15件 → 6件) ので使えない。
+# 画面外へ飛ばすのも **Windows が可視領域に引き戻す** ので効かなかった
+# (2026-08-19 実測: -32000 指定でも実際の位置は L=-7)。
+# → **ウィンドウごと隠す (ShowWindow SW_HIDE)**。 描画は
+# `--disable-features=CalculateNativeWinOcclusion` で継続する (最小化と違い件数が落ちない)。
 # 環境変数 IMAK_CHROME_ONSCREEN=1 で 従来どおり画面に出す (デバッグ用)。
 OFFSCREEN_POSITION = (-32000, -32000)
+_SW_HIDE = 0
 
 
 def _offscreen_enabled() -> bool:
@@ -173,7 +177,51 @@ def create_driver(
             driver.set_window_position(wp[0], wp[1])
         except Exception:
             pass
+        # 画面から消す (位置指定は Windows に引き戻されるため)
+        try:
+            hide_browser_window(driver)
+        except Exception:  # noqa: BLE001 - 隠せなくても収集は続ける
+            pass
     return driver
+
+
+def hide_browser_window(driver) -> bool:
+    """収集用 Chrome のウィンドウを隠す (Windows のみ). 隠せたら True.
+
+    ウィンドウの特定は **一意なタイトルを自分で付けて探す**。 PID 経由だと
+    chrome の子プロセス構成に依存して当たらないことがある。
+    """
+    if os.name != "nt" or not _offscreen_enabled():
+        return False
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    token = f"IMAK_HARVEST_{os.getpid()}"
+    try:
+        driver.execute_script("document.title = arguments[0];", token)
+    except Exception:  # noqa: BLE001
+        return False
+
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _cb(hwnd, _lparam):
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length:
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            if token in buf.value:
+                found.append(hwnd)
+        return True
+
+    try:
+        user32.EnumWindows(_cb, 0)
+        for hwnd in found:
+            user32.ShowWindow(hwnd, _SW_HIDE)
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(found)
 
 
 def _wait_for_likes_anchor(driver, timeout_sec: int) -> bool:
