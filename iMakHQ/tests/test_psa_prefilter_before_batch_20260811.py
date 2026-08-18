@@ -103,9 +103,13 @@ def test_no_image_is_dropped_before_the_batch():
 
 
 def test_no_image_check_only_drops_when_images_are_readable():
-    """images が読めなかった時は落とさない (catalog の事実が取れた時だけ判断する)。"""
+    """images が読めなかった時は落とさない (catalog の事実が取れた時だけ判断する)。
+
+    ★2026-08-18: 窓を 400→900字に広げた。落とす所で「catalog へ依頼を積む」処理を
+      足したぶん、同じ except 節までの距離が伸びただけ。見ている性質は変えていない。
+    """
     i = SRC.find('_drop.setdefault("NO-IMAGE"')
-    tail = SRC[i:i + 400]
+    tail = SRC[i:i + 900]
     assert "except Exception:" in tail and "読めなければ落とさない" in tail
 
 

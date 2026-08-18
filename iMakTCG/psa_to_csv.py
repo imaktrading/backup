@@ -2612,6 +2612,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         for _e in _errors:
             print(f"       ❌ {_e}")
         print(f"    → この商品はCSVに含めません")
+        # ★2026-08-18: ここで落ちた分は **ログに出るだけ** で誰にも届いていなかった。
+        #   タイトル生成の不具合で毎回同じカードが落ちていても、人がログを読むまで
+        #   分からない (cert151235549 ヤマトが実際にそうだった)。症状で dedup して積む。
+        _queue_finding("tcg", f"selfcheck:{str(_errors[0])[:60]}", "program_fix",
+                       f"#{cert_number}: {' / '.join(str(e) for e in _errors)[:100]}",
+                       layer="code", finding_type="program_fix")
         return None
 
     # ===== Card Name/Character の variant suffix 剥がし (新ルーチン、独立) =====
@@ -2925,6 +2931,35 @@ def _psa_cloudflare_warmup():
     print("✅ Cloudflare warmup 完了、 psa_to_csv 続行\n")
 
 
+def _queue_finding(category, item_id, field, evidence, *, layer="A",
+                   finding_type="catalog_gap", identity=""):
+    """弾いた理由を改善キューに積む (= 次の監査で依頼/残務に流れる)。
+
+    ★2026-08-18: 出品くんが弾いたもののうち、**画像が無い / 自己チェックで落ちた** は
+      どこにも記録されず、ログに出るだけで消えていた。
+      実害 (cert151235549 ヤマト): タイトル生成の不具合で毎回落ちていたが、
+      人がログを読むまで誰も知らなかった。同じカードが毎日静かに落ち続ける。
+      弾くのは正しい。**弾いた事実を誰かに渡していない**のが問題。
+    失敗しても出品を止めない (記録は出品より優先しない)。
+    """
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "..", "iMakHQ", "tools"))
+        import pdca_store as _pdca
+        con = _pdca.connect()
+        _pdca.upsert_improvement(con, category, item_id, field, "",
+                                 evidence=str(evidence)[:120], source="generator",
+                                 layer=layer, finding_type=finding_type,
+                                 identity=identity,
+                                 ts=datetime.now().strftime("%Y-%m-%d"))
+        con.commit()
+        con.close()
+        return True
+    except Exception as e:                                     # noqa: BLE001
+        print(f"    ⚠️ 記録できず (出品は継続): {type(e).__name__}: {e}")
+        return False
+
+
 def _keys_for_dropped_dupes(sheet_rows, certs, cls, cert_col=8, key_col=34):
     """枠の前で落とす重複 cert → シートに書くべき ({join: row}, {join: KEY})。純関数.
 
@@ -3034,6 +3069,11 @@ def main():
                         (_r.get("category"), _pid)).fetchone()
                     if _row is not None and len(json.loads(_row[0] or "[]")) == 0:
                         _drop.setdefault("NO-IMAGE", []).append(_c)
+                        # ★画像が無いのは catalog の欠落。黙って落とすと **誰も足さない**ので
+                        #   依頼キューに積む (次の監査で catalog へ集約発行される)。
+                        _queue_finding(_r.get("category"), f"PSA10-{_c}", "images",
+                                       "catalog に画像が無く目視できないので出品できない",
+                                       identity=f"{_pid} | (画像なし) | {_r.get('category')}")
                         continue
                 except Exception:
                     pass                       # 読めなければ落とさない

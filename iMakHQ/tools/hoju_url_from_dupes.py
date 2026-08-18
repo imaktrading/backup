@@ -114,13 +114,54 @@ def main():
     if do_write:
         row_to_urls = {row: (v["existing"] + v["add"])[:AUXN] for row, v in plan.items() if v["add"]}
         n = sheet_io.write_aux_urls(row_to_urls)
-        print(f"=== 実書込 完了: {n} 行 (既存保持+新規追加) ===")
-        _record(n, total_add, urgent, len(warns))
+        missing = verify_written(row_to_urls)
+        if missing:
+            # ★2026-08-18: 書込の戻り値を信じない。実測で「16行 完了」と出たのに
+            #   1行分が入っていなかった (row 1341)。事後確認が無いので誰も気づけなかった。
+            #   規約「送った後に実状態を verify し、漏れは同サイクル内で完結」に合わせる。
+            print(f"⚠️ 書けていない行 {len(missing)}件 → もう一度書きます")
+            sheet_io.write_aux_urls({row: row_to_urls[row] for row in missing})
+            missing = verify_written({row: row_to_urls[row] for row in missing})
+        print(f"=== 実書込 完了: {n} 行 (既存保持+新規追加)"
+              + (f" / ⚠️**{len(missing)}行は書けていません (要対応)**" if missing else " / 全行 確認済")
+              + " ===")
+        for row in missing:
+            print(f"  ⚠️ row {row}: {row_to_urls[row]}")
+        _record(n, total_add, urgent, len(warns), unverified=len(missing))
     else:
         print("=== dry-run 終了(書込なし)。実書込は --write ===")
 
 
-def _record(rows, added, urgent, warns):
+def diff_written(intended, actual):
+    """書いたつもり vs 実際 → 入っていない行番号 (純関数)。
+
+    ★2026-08-18: 「書込 完了 16行」と出たのに 1行分が実際には入っていなかった。
+      戻り値は「API を呼んだ数」であって「入った数」ではない。実物を読んで確かめる。
+    """
+    out = []
+    for row, urls in (intended or {}).items():
+        have = set(actual.get(row) or [])
+        if [u for u in urls if u and u not in have]:
+            out.append(row)
+    return sorted(out)
+
+
+def verify_written(row_to_urls):
+    """シートを読み直して、入っていない行を返す (I/O)。読めなければ空 (= 判定不能)。"""
+    if not row_to_urls:
+        return []
+    try:
+        vals = sheet_io._product_ws().get_all_values()
+    except Exception:                                          # noqa: BLE001
+        return []
+    actual = {}
+    for row in row_to_urls:
+        r = vals[row - 1] if 0 < row <= len(vals) else []
+        actual[row] = [u for u in (_cell(r, AUX0 + k) for k in range(AUXN)) if u]
+    return diff_written(row_to_urls, actual)
+
+
+def _record(rows, added, urgent, warns, unverified=0):
     """走行結果を1ファイルに残す (最新で上書き)。
 
     ★2026-08-18: この step は出品くんの画面にしか出ず、**走ったのか止まったのかを
@@ -136,8 +177,8 @@ def _record(rows, added, urgent, warns):
         with open(out, "w", encoding="utf-8") as f:
             json.dump({"at": datetime.now().isoformat(timespec="seconds"),
                        "rows": rows, "added": added,
-                       "urgent_supply_dead": urgent, "warns": warns}, f,
-                      ensure_ascii=False, indent=2)
+                       "urgent_supply_dead": urgent, "warns": warns,
+                       "unverified": unverified}, f, ensure_ascii=False, indent=2)
     except Exception:                                          # noqa: BLE001
         pass
 

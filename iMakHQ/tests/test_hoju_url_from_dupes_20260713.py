@@ -126,6 +126,24 @@ def test_仕入元切れの補充本数を出す():
     assert "urgent" in src and "仕入元が死んでいる出品への補充" in src
 
 
+def test_書けたか読み直して確かめる():
+    """戻り値は『API を呼んだ数』で『入った数』ではない。実測で1行 落ちていた。"""
+    from hoju_url_from_dupes import diff_written
+    intended = {10: ["a", "b"], 11: ["c"]}
+    assert diff_written(intended, {10: ["a", "b"], 11: ["c"]}) == []
+    assert diff_written(intended, {10: ["a"], 11: ["c"]}) == [10]
+    assert diff_written(intended, {}) == [10, 11]
+    assert diff_written({}, {}) == []
+
+
+def test_書けていない行を要対応として出す():
+    import io, os
+    src = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                               "tools", "hoju_url_from_dupes.py"), encoding="utf-8").read()
+    assert "verify_written(" in src and "要対応" in src
+    assert src.index("verify_written(row_to_urls)") > src.index("write_aux_urls(row_to_urls)")
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))
