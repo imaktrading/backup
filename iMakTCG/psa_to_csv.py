@@ -2925,6 +2925,31 @@ def _psa_cloudflare_warmup():
     print("✅ Cloudflare warmup 完了、 psa_to_csv 続行\n")
 
 
+def _keys_for_dropped_dupes(sheet_rows, certs, cls, cert_col=8, key_col=34):
+    """枠の前で落とす重複 cert → シートに書くべき ({join: row}, {join: KEY})。純関数.
+
+    ★2026-08-18: KEY を書く処理は「その日のCSVに載った行」しか見ない。枠の前で落とすと
+      KEY が空のまま残り、補URL追記が拾えず **生きた仕入元を1本捨てる**。
+      落とす前にここで KEY を作って書く。
+      既に KEY がある行は触らない (人が確定した値を上書きしない)。
+      product_id を引けない cert も書かない (推測で埋めない)。
+    """
+    row_by_cert = {}
+    for n, r in enumerate(sheet_rows[1:], start=2):
+        c = (r[cert_col].strip() if len(r) > cert_col else "")
+        if c and c not in row_by_cert:
+            row_by_cert[c] = (n, (r[key_col].strip() if len(r) > key_col else ""))
+    rows, keys = {}, {}
+    for cert in certs:
+        rec = (cls or {}).get(cert) or {}
+        pid, cat = rec.get("product_id"), rec.get("category")
+        hit = row_by_cert.get(str(cert))
+        if not (pid and cat and hit) or hit[1]:
+            continue                       # 引けない / 行が無い / 既にKEYあり → 触らない
+        rows[cert], keys[cert] = hit[0], f"{cat}:{pid}"
+    return rows, keys
+
+
 def main():
     print("=== iMak Trading Japan - PSA → eBay CSV Generator ===\n")
     _psa_cloudflare_warmup()
@@ -3041,6 +3066,22 @@ def main():
                         _dup.append(_c); _kept.remove(_c)
                 if _dup:
                     _drop["LIVE-DUP"] = _dup
+                    # ★2026-08-18: 落とす前に **KEY をシートに書く**。
+                    #   KEY を書く処理は「その日のCSVに載った行」しか見ないので、枠の前で
+                    #   落とすと KEY が永久に空のまま残る。KEY が空だと補URL追記
+                    #   (hoju_url_from_dupes) が拾えず、**生きた仕入元を1本捨てる**。
+                    #   = 早く落とすほど供給が痩せる。夜間の PSA 先貯めで早期除外が
+                    #   増えるので、ここを塞いでおかないと逆効果になる。
+                    #   実測 2026-08-18: 前段で落ちた cert153574704 の行は KEY 空のまま、
+                    #   後段で落ちた5件は KEY が入り補URLに回っていた (同じ重複なのに差が出た)。
+                    try:
+                        _krows, _kkeys = _keys_for_dropped_dupes(
+                            _sheet_rows_for_dedupe, _dup, _cls)
+                        if _kkeys:
+                            _si.write_keys(_krows, _kkeys)
+                            print(f"  🔗 補URL に回すため KEY を先に書込: {len(_kkeys)}件")
+                    except Exception as _ke:                   # noqa: BLE001
+                        print(f"  ⚠️ KEY 先行書込 skip: {type(_ke).__name__}: {_ke}")
             else:
                 print("  ℹ️ live cache を新鮮化できず → 重複の前置きは skip "
                       "(古い cache を live の根拠にしない = 誤除外も見逃しも作らない)")
