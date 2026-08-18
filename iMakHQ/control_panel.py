@@ -827,8 +827,10 @@ SCRIPTS = [
         "cmd": ["python", "psa_to_csv.py"],
         # ★2026-08-18 ユーザー指示「自動だけ20件」。手動 (PSA TCG) は既定 15 のまま。
         #   値は env で注入 = コード側に「自動なら〜」の分岐を作らない。
+        # PSA_REVIEW_ALL=1: 確定済 cert も毎回目視に出す。cert 入力ミスは
+        #   「仕入元の写真 ↔ PSA写真」の見比べでしか弾けず、自動はここが最後の砦。
         "env": {"TCG_USE_NEW_GEN": "1", "PSA_VERIFY_BEFORE_BUILD": "1",
-                "PSA_BATCH_LIMIT": "20"},
+                "PSA_BATCH_LIMIT": "20", "PSA_REVIEW_ALL": "1"},
         "params": [],
         "auto_full": True,
     },

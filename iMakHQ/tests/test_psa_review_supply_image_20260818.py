@@ -69,3 +69,37 @@ def test_仕入元はシートから引く_失敗しても止めない():
     body = src[i:src.index("\ndef ", i + 1)]
     assert "except Exception" in body and "従来どおり続行" in body
     assert "_SUPPLY_PIC_CACHE" in body, "シートは1回だけ読む"
+
+
+# ── cert 訂正欄 (2026-08-18 ユーザー指示) ─────────────────────────────
+def _src_text():
+    return open(R.__file__, encoding="utf-8").read()
+
+
+def test_目視画面にcert訂正欄がある():
+    s = _src_text()
+    assert 'id="certfix_{cert}"' in s or "certfix_" in s
+    assert "正しい cert 番号" in s
+
+
+def test_訂正された行は出品しない():
+    """今回取得済の PSA データは**誤った番号のカード**のものなので、
+    それで出品すると別カードを出すことになる。番号だけ直して次回に回す。"""
+    s = _src_text()
+    i = s.index("    # cert 訂正:")
+    body = s[i:s.index("parsed, none_records = parse_confirmations", i)]
+    assert "cert_fix" in body
+    assert "_PRE_BUILD_RESULTS = [r for r in _PRE_BUILD_RESULTS" in body, "訂正行を build から外す"
+
+
+def test_訂正はシートのI列に書く():
+    s = _src_text()
+    i = s.index("def _apply_cert_fixes")
+    body = s[i:s.index("\ndef ", i + 1)]
+    assert 'update_acell(f"I{hit}", right)' in body
+    assert "except Exception" in body, "書込に失敗しても走行を止めない"
+
+
+def test_同じ番号を入れても訂正扱いしない():
+    s = _src_text()
+    assert 'cin.value.trim() !== t.cert' in s

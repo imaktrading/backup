@@ -677,6 +677,8 @@ def _generate_html(targets: list[dict]) -> None:
         '    var o = Object.assign({cert: t.cert, expected: t.expected, category: t.category}, ANSWERS[t.cert] || {choice: "PENDING"});',
         '    var pin = document.getElementById("promo_" + t.cert);',   # promo 入力(promo系のみ存在)
         '    if (pin) { o.is_promo = true; o.promo = pin.value.trim(); }',
+        '    var cin = document.getElementById("certfix_" + t.cert);',   # cert 訂正欄
+        '    if (cin && cin.value.trim() && cin.value.trim() !== t.cert) { o.cert_fix = cin.value.trim(); }',
         '    return o;',
         '  });',
         '  document.getElementById("dl-btn").disabled = true;',
@@ -789,6 +791,17 @@ def _generate_html(targets: list[dict]) -> None:
             html.append(f'<input id="promo_{cert}" type="text" value="{pv}" placeholder="例: Ichiban Kuji Purchase Bonus" '
                         'style="width:90%;padding:5px;font-size:14px" />')
             html.append('</div>')
+
+        # cert 訂正欄 (2026-08-18 ユーザー指示)
+        # 仕入元の写真と PSA写真が別物 = シートの cert 番号の打ち間違い。
+        # その場で正しい番号を入れられるようにする (入れた行は出品しない = 次回その番号で取り直す)。
+        html.append('<div class="certfix-box" style="margin:8px 0;padding:8px;background:#33241f;'
+                    'border:1px solid #b06a4a;border-radius:6px">')
+        html.append('<div class=label>🔢 仕入元の現物と PSA が別物 → 正しい cert 番号 '
+                    '(入れた行は今回出品せず、番号だけ直します)</div>')
+        html.append(f'<input id="certfix_{cert}" type="text" value="" placeholder="例: 153025508" '
+                    'style="width:40%;padding:5px;font-size:14px" />')
+        html.append('</div>')
 
         # 候補 list
         is_open = not (t.get("csv_expected") and expected_img)
@@ -1488,7 +1501,14 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         _vc = json.loads(VERIFIED_CERTS_FILE.read_text(encoding="utf-8")) if VERIFIED_CERTS_FILE.exists() else {}
     except Exception:
         _vc = {}
-    confirmed, _viewer_certs = split_verified(certs, _vc)
+    # ★2026-08-18 ユーザー指示 (🤖自動): 一度確定した cert も**毎回**目視に出す。
+    #   確定の記録は cert 番号がキーなので、番号を打ち間違えた先がたまたま過去に
+    #   確定済の cert だと、目視を飛ばして**別のカードとして**出品されてしまう。
+    #   自動は人が最後に見る場所がここしかないので、入力ミスはここで弾く。
+    if os.environ.get("PSA_REVIEW_ALL") == "1":
+        confirmed, _viewer_certs = {}, [str(c).strip() for c in certs if str(c).strip()]
+    else:
+        confirmed, _viewer_certs = split_verified(certs, _vc)
     n_cache = len(confirmed)
     targets = []
     for cert in _viewer_certs:
@@ -1544,8 +1564,21 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         append_log_func("  ⚠️ 確認 timeout/未送信 → 確定済 cert のみ build (未確認は出品しない)\n")
         return confirmed
 
+    # cert 訂正: 打ち間違いの申告があった行は **出品しない** (今のPSAデータは別カードのもの)。
+    # シートの番号だけ直して、次回の走行で正しい番号として取り直す。
+    fixes = [(str(r.get("cert")).strip(), str(r.get("cert_fix")).strip())
+             for r in (_PRE_BUILD_RESULTS or [])
+             if r.get("cert_fix") and str(r.get("cert_fix")).strip() != str(r.get("cert")).strip()]
+    if fixes:
+        n = _apply_cert_fixes(fixes, append_log_func)
+        append_log_func(f"  🔢 cert 訂正 {len(fixes)}件 (シート書込 {n}件) → 該当行は今回出品しない\n")
+        _PRE_BUILD_RESULTS = [r for r in _PRE_BUILD_RESULTS
+                              if str(r.get("cert")).strip() not in {c for c, _ in fixes}]
+
     parsed, none_records = parse_confirmations(_PRE_BUILD_RESULTS)
     confirmed.update(parsed)
+    for _c, _ in fixes:
+        confirmed.pop(_c, None)
     # promo (配布元名) 確定 → per-card override に保存 (build のタイトル生成がこれを読む)
     try:
         _write_promo_overrides(_PRE_BUILD_RESULTS, confirmed, append_log_func)
@@ -1560,6 +1593,35 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
             append_log_func(f"  ⚠️ catalog route 失敗: {type(_e).__name__}: {_e}\n")
     append_log_func(f"  ✅ 目視確定: {len(confirmed)} 件を build へ (未確定は除外)\n")
     return confirmed
+
+
+def _apply_cert_fixes(fixes, append_log_func=lambda *_: None) -> int:
+    """[(誤cert, 正cert)] → シート I列 を書き換える。書けた件数を返す。
+
+    番号を直すだけで、出品はしない。今回取得済の PSA データは**誤った番号のカード**の
+    ものなので、それを使って出品すると別カードを出すことになる (2026-08-18)。
+    """
+    written = 0
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import sheet_io
+        ws = sheet_io._product_ws()
+        vals = ws.get_all_values()
+        for wrong, right in fixes:
+            hit = None
+            for i, r in enumerate(vals[1:], start=2):
+                if (r[8].strip() if len(r) > 8 else "") == wrong:
+                    hit = i
+                    break
+            if not hit:
+                append_log_func(f"  ⚠️ cert {wrong}: シートに該当行が無く訂正できず\n")
+                continue
+            ws.update_acell(f"I{hit}", right)
+            append_log_func(f"  🔢 row{hit}: cert {wrong} → {right}\n")
+            written += 1
+    except Exception as e:
+        append_log_func(f"  ⚠️ cert 訂正の書込に失敗: {type(e).__name__}: {e}\n")
+    return written
 
 
 def _start_review_server(port: int = SERVER_PORT) -> tuple[HTTPServer, threading.Thread, str]:
