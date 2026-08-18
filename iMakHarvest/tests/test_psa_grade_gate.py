@@ -28,7 +28,6 @@ def test_psa10_variants_pass(title):
     "【最安値】ピカチュウ CHR ダークファンタズマ 073/071 PSA9",
     "リザードン BGS 9.5 GEM MINT",
     "ピカチュウ ARS10 鑑定品",
-    "ナミ CCG10 ワンピースカード",
     "ルフィ SGC 10",
     "PSA 8 ミュウツー 旧裏",
 ])
@@ -57,3 +56,29 @@ def test_other_grader_wins_over_psa10_text():
 
 def test_card_number_ending_in_10_is_not_a_grade():
     assert not looks_like_psa10(title="ルフィ ST04-10 パラレル")
+
+
+# --------------------------------------------------------------------------
+# 2026-08-19 是正: CGC (鑑定会社) と CCG (Collectible Card Game) の取り違え
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("title", [
+    "CGC10 PSA10 相当　S-スネーク R-P 受け継がれる意志",
+    "【CGC10 psa10相当】ラブーン SR-P [EB01-048]",
+    "PSA10 ボア・ハンコック OP13-051 R パラレル CGC10",
+    "CGC 10 PSA10相当 チョッパー C ST01-006 a510",
+    "ピカチュウ ARS10 鑑定品",
+])
+def test_cgc_and_ars_are_rejected_even_with_psa10_text(title):
+    """"CGC10 PSA10相当" のような併記出品を通さない。  は数字が続くと立たない."""
+    assert not looks_like_psa10(title=title)
+
+
+def test_ccg_is_not_a_grader():
+    """"Gundam CCG Edition Beta" は ガンダムの正規タイトル (Collectible Card Game)."""
+    assert looks_like_psa10(
+        title="Gundam CCG Edition Beta Promos #006 EX BASE PSA 10 GEM MT")
+
+
+def test_letters_around_do_not_false_match():
+    """STARS の ARS 等に当たらない."""
+    assert looks_like_psa10(title="PSA10 STARS ルフィ OP01-024")
