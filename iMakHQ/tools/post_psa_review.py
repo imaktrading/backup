@@ -599,9 +599,14 @@ def _generate_html(targets: list[dict]) -> None:
         # **7/25 時点に完全復帰**。sticky は 7/28 に撤回済だったが `max-height:42vh;overflow:auto`
         # が消し残っており、現物(比較元)が画面の42%に押し込まれてスクロールが要る状態だった。
         # 現物は縦に伸ばして原寸で見せる。ここを触らないこと(2回不可の判定が出ている)。
-        '.confirm{display:flex;gap:24px;align-items:flex-start;margin:14px 0;padding:14px;background:#1f3a1f;border-radius:6px;border:2px solid #4caf50}',
+        '.confirm{display:flex;flex-wrap:nowrap;gap:14px;align-items:flex-start;margin:14px 0;padding:14px;background:#1f3a1f;border-radius:6px;border:2px solid #4caf50}',
+        # ★2026-08-18: 1列=1画像で横一列に固定 (仕入元/PSA表/PSA裏/catalog の4枚)。
+        #   旧版は PSA の表裏を1列に積んでいたため、仕入元を足すと縦にも横にも崩れた。
+        #   ★内側スクロール/sticky は 2026-07-28 にユーザーが不可と判定済 → 付けない。
+        #   4枚 (300px) + 隙間 = 約1,300px なので通常の画面幅に収まる。
+        '.confirm .col{flex:0 0 auto;display:flex;flex-direction:column;align-items:center}',
         '.confirm .label{font-size:18px;color:#9fffa0;font-weight:bold;margin-bottom:6px}',
-        '.confirm img{max-width:380px;border:1px solid #444;border-radius:4px}',
+        '.confirm img{max-width:300px;max-height:430px;border:1px solid #444;border-radius:4px}',
         '.confirm-q{font-size:24px;color:#ffd700;font-weight:bold;margin:8px 0;text-align:center;align-self:center}',
         '.no-expected{background:#3a1f1f;border-color:#f44336;color:#ffaaaa}',
         '.no-expected .label{color:#ffaaaa}',
@@ -742,35 +747,29 @@ def _generate_html(targets: list[dict]) -> None:
         # 「合ってる？」 確認部
         if t.get("csv_expected") and expected_img:
             html.append('<div class="confirm">')
-            html.append('<div>')
-            html.append('<div class=label>📋 PSA cert (実物)</div>')
-            if t.get("cert_image_url"):
-                html.append(f'<img src="{_img_url(t["cert_image_url"])}">')
-            # ★両面カードは PSA の裏写真が catalog の表面と一致する (2026-08-09)
-            if t.get("cert_image_url_back"):
-                html.append(f'<img src="{_img_url(t["cert_image_url_back"])}">')
-            html.append('</div>')
-            html.append('<div class=confirm-q>↔️<br>合ってる？</div>')
-            html.append('<div>')
-            html.append(f'<div class=label>📚 catalog: {t["csv_expected"]}</div>')
-            html.append(f'<img src="{_img_url(expected_img)}">')
-            _eb = back_face_url(expected_img)
-            if _eb:
-                html.append(f'<img src="{_img_url(_eb)}">')
-            html.append('</div>')
+            for _label, _url in confirm_columns(t, expected_img):
+                html.append('<div class=col>')
+                html.append(f'<div class=label>{_label}</div>')
+                html.append(f'<img src="{_img_url(_url)}">')
+                html.append('</div>')
+                # 仕入元とPSAの間だけ「同じ現物？」、PSA と catalog の間に「合ってる？」
+                if _label.startswith("🛒"):
+                    html.append('<div class=confirm-q>↔️<br>同じ現物？</div>')
+                elif _label == "📋 PSA 裏" or (_label == "📋 PSA 表" and not t.get("cert_image_url_back")):
+                    html.append('<div class=confirm-q>↔️<br>合ってる？</div>')
             html.append('</div>')
         else:
             html.append('<div class="confirm no-expected">')
             html.append(f'<div class=label>⚠️ catalog 期待値特定不能 ({t.get("csv_expected") or "未取得"}) → 候補から選択してください</div>')
             # 2026-06-11: no-expected 分岐でも PSA 実物画像を表示 (= 期待値不明時こそ実物↔候補の
             # 見比べが要る。旧版は実物画像を出さず「元画像すらない」状態だった)
-            if t.get("cert_image_url"):
-                html.append('<div>')
-                html.append('<div class=label>📋 PSA cert (実物)</div>')
-                html.append(f'<img src="{_img_url(t["cert_image_url"])}">')
-                if t.get("cert_image_url_back"):
-                    html.append(f'<img src="{_img_url(t["cert_image_url_back"])}">')
+            for _label, _url in confirm_columns(t, ""):
+                html.append('<div class=col>')
+                html.append(f'<div class=label>{_label}</div>')
+                html.append(f'<img src="{_img_url(_url)}">')
                 html.append('</div>')
+                if _label.startswith("🛒"):
+                    html.append('<div class=confirm-q>↔️<br>同じ現物？</div>')
             html.append('</div>')
 
         # 回答ボタン
@@ -1360,6 +1359,56 @@ def parse_confirmations(results):
     return confirmed, none_records
 
 
+# ── 仕入元 (メルカリ) の写真 ─────────────────────────────────────────
+# ★2026-08-18: 目視画面は PSA写真 ↔ カタログ の2者だけで、**仕入元の写真が無かった**。
+#   そのため cert 番号を打ち間違えても画面は最後まで整合して見え、
+#   「手元に届く現物」とのズレは人にも機械にも見えなかった (ユーザー指摘)。
+#   シートの写真URL欄をそのまま1枚出すだけなので追加コストは無い。
+_SUPPLY_PIC_CACHE = None
+
+
+def _supply_pic_by_cert(cert: str) -> str:
+    """cert → 仕入元の1枚目の写真URL (シートは1回だけ読む)。取れなければ空。"""
+    global _SUPPLY_PIC_CACHE
+    if _SUPPLY_PIC_CACHE is None:
+        _SUPPLY_PIC_CACHE = {}
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import sheet_io
+            for r in sheet_io._product_ws().get_all_values()[1:]:
+                g = lambda i: (r[i].strip() if len(r) > i else "")
+                c, pics = g(8), g(6)
+                if c and pics:
+                    first = pics.split("|")[0].strip()
+                    if first.startswith("http"):
+                        _SUPPLY_PIC_CACHE.setdefault(c, first)
+        except Exception as e:
+            print(f"  ⚠️ 仕入元写真を取得できず (目視は従来どおり続行): {type(e).__name__}: {e}")
+    return _SUPPLY_PIC_CACHE.get(str(cert).strip(), "")
+
+
+def confirm_columns(target: dict, expected_img: str) -> list:
+    """目視画面に横一列で並べる画像 [(見出し, URL)] を決める (純関数・test可)。
+
+    並びは買う物 → 鑑定された物 → カタログ上の正体、の時系列:
+      🛒仕入元 / 📋PSA表 / 📋PSA裏 / 📚catalog(表) [/ 📚catalog(裏)]
+    無い画像の列は作らない (空枠で横幅を食わない)。
+    """
+    cols = []
+    if target.get("supply_image_url"):
+        cols.append(("🛒 仕入元 (現物)", target["supply_image_url"]))
+    if target.get("cert_image_url"):
+        cols.append(("📋 PSA 表", target["cert_image_url"]))
+    if target.get("cert_image_url_back"):
+        cols.append(("📋 PSA 裏", target["cert_image_url_back"]))
+    if expected_img:
+        cols.append((f"📚 catalog: {target.get('csv_expected') or ''}", expected_img))
+        back = back_face_url(expected_img)
+        if back:
+            cols.append(("📚 catalog 裏", back))
+    return cols
+
+
 def _build_target_for_cert(cert: str):
     """cert (PSA cache 由来) から HTML viewer の target dict を作る。CSV 非依存。
 
@@ -1384,6 +1433,7 @@ def _build_target_for_cert(cert: str):
     return {
         "cert": cert, "brand": brand, "subject": subject, "card_number": card_number,
         "category": category, "set_code": set_code, "csv_expected": csv_expected,
+        "supply_image_url": _supply_pic_by_cert(cert),
         "cert_image_url": meta.get("CardImageUrl", ""),
         # ★PSA は両面を撮っている。両面カード (FW の LEADER 等) では **裏写真の方が
         #   catalog の表面画像と一致する**。片面しか出さないと照合できない (2026-08-09)
@@ -1614,7 +1664,8 @@ def run_post_psa_review(csv_path: str, append_log_func) -> bool:
             "category": category,
             "set_code": set_code,
             "csv_expected": csv_expected,
-            "cert_image_url": meta.get("CardImageUrl", ""),
+            "supply_image_url": _supply_pic_by_cert(cert),
+        "cert_image_url": meta.get("CardImageUrl", ""),
             "cert_image_url_back": meta.get("CardImageUrlBack", ""),
             "candidates": candidates,
         })
