@@ -1,0 +1,20 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert160317119 ONE PIECE JAPANESE PROMOS [SANJI 8 PACKS BATTLE-WINNER] #004 (auto候補PROMOS-004=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 1
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert150639361 POKEMON SWORD AND SHIELD CROWN ZENITH [FA/SUICUNE V CROWN ZENITH] #GG38 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 5,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "012/172  (捨てた仕入候補の目視 2026-08-15 / https://jp.mercari.com/item/m62052158191)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "012/172  (捨てた仕入候補の目視 2026-08-15 / https://jp.mercari.com/item/m53731037142)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 3
+  }
+}
