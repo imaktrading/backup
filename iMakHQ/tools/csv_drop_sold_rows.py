@@ -21,10 +21,13 @@
 """
 import csv
 import datetime
+import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sheet_io  # noqa: E402
@@ -93,9 +96,42 @@ def plan(csv_rows, header, index, today):
     return keep, dropped, stale, unknown
 
 
+STOCK_CLI_DIR = r"C:/dev/iMak_inventory/iMakInventory"
+
+
+def live_stock(urls):
+    """監視くんの在庫チェックCLIを叩く → {url: "sold"|"in_stock"|"unknown"} (2026-08-18)。
+
+    **その瞬間**の在庫。生成〜入稿の間に売れた分はシートの巡回結果では止められないので、
+    入稿の直前にこれを叩く (2026-08-17 に cert 153025508 が実際にすり抜けた)。
+    判定は監視くん側の実装をそのまま使う (HQ で作ると二重実装 + 偽陽性の元)。
+    取れなければ空を返す = 呼び出し側はシートの巡回結果にそのまま落ちる。
+    """
+    if not urls:
+        return {}
+    tmpdir = tempfile.mkdtemp(prefix="stockchk_")
+    ufile = os.path.join(tmpdir, "urls.txt")
+    ofile = os.path.join(tmpdir, "out.json")
+    with open(ufile, "w", encoding="utf-8") as f:
+        f.write("\n".join(urls))
+    try:
+        subprocess.run([sys.executable, "-m", "tools.stock_check_cli",
+                        "--urls", ufile, "--json", ofile],
+                       cwd=STOCK_CLI_DIR, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=900)
+        if not os.path.exists(ofile):
+            return {}
+        return {r.get("url"): (r.get("status") or "unknown")
+                for r in json.load(open(ofile, encoding="utf-8"))}
+    except Exception as e:
+        print(f"  ⚠️ 在庫チェックCLI を呼べず、巡回結果で判定します: {type(e).__name__}: {e}")
+        return {}
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     do_write = "--write" in sys.argv
+    use_live = "--no-live" not in sys.argv
     if not args:
         print("使い方: python csv_drop_sold_rows.py <csv> [--write]")
         return 2
@@ -108,6 +144,37 @@ def main():
     header, body = rows[0], rows[1:]
 
     index = supply_index(sheet_io._product_ws().get_all_values())
+
+    # ★入稿直前の実在庫で index を上書き (シートの巡回結果は1日古いことがある)
+    if use_live:
+        try:
+            li = header.index("CustomLabel")
+        except ValueError:
+            li = -1
+        urls, by_url = [], {}
+        for row in body:
+            label = row[li].strip() if 0 <= li < len(row) else ""
+            info = index.get(cert_from_label(label) or "") or index.get(label)
+            if info and info["url"]:
+                urls.append(info["url"])
+                by_url.setdefault(info["url"], []).append(info)
+        live = live_stock(sorted(set(urls)))
+        n_live = n_sold = n_unk = 0
+        for url, st in live.items():
+            for info in by_url.get(url, []):
+                if st == "sold":
+                    info["sold"] = True
+                    info["checked"] = datetime.date.today().strftime("%Y-%m-%d")
+                    n_sold += 1
+                elif st == "in_stock":
+                    info["sold"] = False
+                    info["checked"] = datetime.date.today().strftime("%Y-%m-%d")
+                    n_live += 1
+                else:
+                    n_unk += 1        # unknown は触らない = 巡回結果のまま (落とさない)
+        if live:
+            print(f"  🔎 入稿直前の在庫確認: 在庫あり {n_live} / 売切 {n_sold} / 判定不能 {n_unk}")
+
     keep, dropped, stale, unknown = plan(body, header, index, datetime.date.today())
 
     print(f"=== 売り切れ行の除外 [{'実書込' if do_write else 'dry-run'}] {os.path.basename(path)} ===")

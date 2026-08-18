@@ -106,3 +106,27 @@ def test_出品くんのチェーンに組み込まれている():
     # CSV を変える最後の step であること (この後に CSV を書き換える step を足すと、
     # 監査くんが見る CSV と落とした結果がズレる)
     assert src.index("csv_drop_sold_rows.py") > src.index("hoju_url_from_dupes.py")
+
+
+# ── 入稿直前の実在庫 (監視くんCLI・2026-08-18) ────────────────────────
+def test_在庫CLIの呼び先が監視くん():
+    """HQ で在庫判定を作らない (二重実装 + 偽陽性の元)。"""
+    import csv_drop_sold_rows as M
+    assert M.STOCK_CLI_DIR.endswith("iMakInventory")
+    src = open(M.__file__, encoding="utf-8").read()
+    assert "tools.stock_check_cli" in src
+
+
+def test_CLIが呼べない時は巡回結果に落ちる():
+    """CLI が無い環境でも走行を止めない (空 dict = シートの値のまま)。"""
+    import csv_drop_sold_rows as M
+    assert M.live_stock([]) == {}
+
+
+def test_判定不能は上書きしない():
+    """unknown を sold に寄せると出せたはずの商品を捨てる (監視くんの念押し)。"""
+    src = open(__import__("csv_drop_sold_rows").__file__, encoding="utf-8").read()
+    i = src.index("if use_live:")
+    body = src[i:src.index("keep, dropped, stale, unknown = plan(", i)]
+    assert 'st == "sold"' in body and 'st == "in_stock"' in body
+    assert "unknown は触らない" in body
