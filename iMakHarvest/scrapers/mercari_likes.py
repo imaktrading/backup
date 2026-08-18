@@ -58,6 +58,16 @@ DEBUG_DUMP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
 DEFAULT_WINDOW_SIZE = (820, 640)
 DEFAULT_WINDOW_POSITION = (40, 40)
 
+# ★収集中の Chrome が画面に出て作業の邪魔になる (2026-08-18 user 指摘)。
+# headless にすると件数が激減する (1語 15件 → 6件) ので、 **画面外に置く**。
+# 最小化 (minimize) は Chrome が描画を止めて lazy load が進まなくなるので使わない。
+# 環境変数 IMAK_CHROME_ONSCREEN=1 で 従来どおり画面に出す (デバッグ用)。
+OFFSCREEN_POSITION = (-32000, -32000)
+
+
+def _offscreen_enabled() -> bool:
+    return os.environ.get("IMAK_CHROME_ONSCREEN", "").strip() not in ("1", "true", "yes")
+
 
 def parse_item_id(url: str) -> Optional[str]:
     """メルカリ商品 URL から item_id (m\\d+) を抽出. shop/product は対象外 (本モジュールは通常品のみ)."""
@@ -144,7 +154,8 @@ def create_driver(
     else:
         # visible モード時のみ window-size / position を反映 (visible で小さく)
         ws = window_size or DEFAULT_WINDOW_SIZE
-        wp = window_position or DEFAULT_WINDOW_POSITION
+        wp = window_position or (OFFSCREEN_POSITION if _offscreen_enabled()
+                                 else DEFAULT_WINDOW_POSITION)
         options.add_argument(f"--window-size={ws[0]},{ws[1]}")
         options.add_argument(f"--window-position={wp[0]},{wp[1]}")
 
@@ -156,7 +167,8 @@ def create_driver(
         # 念のため明示で再設定 (画面右下じゃなく左上にしないと visible でも作業の邪魔にしにくい)
         try:
             ws = window_size or DEFAULT_WINDOW_SIZE
-            wp = window_position or DEFAULT_WINDOW_POSITION
+            wp = window_position or (OFFSCREEN_POSITION if _offscreen_enabled()
+                                     else DEFAULT_WINDOW_POSITION)
             driver.set_window_size(ws[0], ws[1])
             driver.set_window_position(wp[0], wp[1])
         except Exception:
