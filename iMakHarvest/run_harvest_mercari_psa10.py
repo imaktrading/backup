@@ -45,6 +45,7 @@ from scrapers import mercari_search as MSch  # noqa: E402
 from scrapers import mercari_seller as MS  # noqa: E402
 from scrapers import psa_cert  # noqa: E402
 from scrapers import psa_game  # noqa: E402
+from scrapers import psa_grade_gate  # noqa: E402
 from scrapers import psa_search_terms  # noqa: E402
 from scrapers import psa_slab_vision  # noqa: E402
 
@@ -311,11 +312,22 @@ def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
         # ★user 指示 (2026-08-18): 鑑定番号が読めなかった分は捨てずに I列空欄で入れる
         # (目視で拾うため)。 grade が PSA10 でない等 「対象外と分かった」 物は従来通り捨てる。
         if key == "cert_unreadable":
+            # ★グレードを見ずに入れると PSA9 / BGS / ARS / CCG / 生カードまで並ぶ
+            # (2026-08-18 user 指摘)。 PSA10 の確証が無い物は 目視待ちにも入れない。
+            if not psa_grade_gate.looks_like_psa10(title=detail.get("title") or "",
+                                                   label=vision.get("label") or ""):
+                rej["not_psa10_listing"] = rej.get("not_psa10_listing", 0) + 1
+                return None
             return _build_candidate(url, detail, q, images, vision,
                                     cert_readable=False)
         return None
     # 同じ現物が別 URL で再出品されている場合は URL 突合では捕まらない。
     # cert は現物 1 枚に 1 つなので、 既知なら二重に押さえない
+    if not psa_grade_gate.looks_like_psa10(title=detail.get("title") or "",
+                                           label=vision.get("label") or "",
+                                           grade=vision.get("grade") or ""):
+        rej["not_psa10_listing"] = rej.get("not_psa10_listing", 0) + 1
+        return None
     if vision["cert"] in claimed["certs"]:
         rej["already_claimed_cert"] += 1
         return None
