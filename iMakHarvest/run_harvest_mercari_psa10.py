@@ -95,7 +95,8 @@ def retry_urls_from(payload: dict, exclude: set | None = None) -> list[str]:
     return out
 
 
-def collect(args, dump_path=None, resume=None, urls_override=None) -> dict:
+def collect(args, dump_path=None, resume=None, urls_override=None,
+            on_flush=None) -> dict:
     """収集 → 詳細 → Vision。
 
     ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
@@ -152,6 +153,7 @@ def collect(args, dump_path=None, resume=None, urls_override=None) -> dict:
         _log(f"再開: 処理済 {len(done_urls)} URL / 既存候補 {len(cands)} 件")
     processed: list[str] = list(done_urls)
     state = {"truncated": False}
+    flushed = {"c": 0, "u": 0}  # スプシへ書き終えた位置
 
     def _save():
         """途中経過を JSON に落とす。 これが 1 回だけだったのが 2026-08-17 の事故。"""
@@ -230,6 +232,13 @@ def collect(args, dump_path=None, resume=None, urls_override=None) -> dict:
                 (cands if kept.get("cert_readable", True) else unreadable).append(kept)
             if len(processed) % args.save_every == 0:
                 _save()
+            # ★スプシへも走行中に書く。 最後にまとめて書くと、 プロセスが落ちた時に
+            # その走行の成果が 1 行も残らない (2026-08-18 user 指示「途中で保存してよ」)。
+            if on_flush and len(processed) % args.sheet_every == 0:
+                n_c, n_u = on_flush(cands[flushed["c"]:], unreadable[flushed["u"]:])
+                flushed["c"], flushed["u"] = len(cands), len(unreadable)
+                if n_c or n_u:
+                    _log(f"  [SHEET] 途中書込: 候補{n_c} / 目視待ち{n_u}")
             if i % 5 == 0 or i == len(urls):
                 _log(f"  詳細 {i}/{len(urls)} (cert読取={len(cands)} "
                      f"番号読めず={len(unreadable)} rej={rej})")
@@ -371,6 +380,13 @@ def group_by_game(kept: list[dict], unreadable: list[dict]) -> dict:
     return out
 
 
+def _append_items(items: list[dict], base_label: str, game: str) -> dict:
+    """ゲーム毎タブへ append する (途中書込と最終書込で同じ経路を通す)."""
+    from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
+
+    return append_mercari_search_items(items, label=psa_game.tab_label(base_label, game))
+
+
 def build_sheet_items(kept: list[dict], unreadable: list[dict]) -> list[dict]:
     """スプシ書込用 item を作る (純関数).
 
@@ -469,6 +485,8 @@ def main(argv=None) -> int:
     ap.add_argument("--no-dedupe", action="store_true",
                     help="本番スプシとの重複チェックを行わない (調査用)")
     # ★長時間走行の作業を捨てないための3点 (2026-08-17: 145件分を失った事故の対策)
+    ap.add_argument("--sheet-every", type=int, default=30,
+                    help="何件ごとに中間スプシへ途中書込するか (既定30)")
     ap.add_argument("--save-every", type=int, default=10,
                     help="何件ごとに途中セーブするか (既定10)")
     ap.add_argument("--max-consecutive-errors", type=int, default=3,
@@ -512,8 +530,24 @@ def main(argv=None) -> int:
             resume = json.loads(path.read_text(encoding="utf-8"))
         else:
             path = DUMP_DIR / f"mercari_psa10_{datetime.now():%Y%m%dT%H%M%S}.json"
+        written: set = set()
+
+        def _flush(new_cands, new_unreadable):
+            """走行中に中間スプシへ書く。 返り値は (書いた候補数, 書いた目視待ち数)."""
+            if args.dry_run or (not new_cands and not new_unreadable):
+                return 0, 0
+            n_c = n_u = 0
+            for game, (k_g, u_g) in group_by_game(new_cands, new_unreadable).items():
+                items = build_sheet_items(k_g, u_g)
+                res = _append_items(items, args.label, game)
+                n_c += len(k_g)
+                n_u += len(u_g)
+                written.update(i["url"] for i in items)
+                _log(f"  [SHEET] {res}")
+            return n_c, n_u
+
         payload = collect(args, dump_path=path, resume=resume,
-                          urls_override=urls_override)
+                          urls_override=urls_override, on_flush=_flush)
         _dump(payload, path)
         if args.verify:
             payload["verify_stats"] = verify_all(payload["candidates"],
@@ -550,12 +584,16 @@ def main(argv=None) -> int:
         _log("0 件 → 書込なし")
         return 0
 
-    from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
     # ゲーム毎にタブを分ける (2026-08-18 user 指示)。 判らない物は _other へ (捨てない)。
     # 重複は 全 mercari_* タブ横断 + 本番 (HIGH/LOW) で見る。
-    for game, (k_g, u_g) in group_by_game(kept, unreadable).items():
-        items = build_sheet_items(k_g, u_g)
-        res = append_mercari_search_items(items, label=psa_game.tab_label(args.label, game))
+    # 走行中に書いた分 (written) は飛ばす = 同じ行を二度出さない。
+    rest_k = [c for c in kept if c.get("url") not in written]
+    rest_u = [c for c in unreadable if c.get("url") not in written]
+    if not rest_k and not rest_u:
+        _log("[SHEET] 走行中に全部書込済")
+        return 0
+    for game, (k_g, u_g) in group_by_game(rest_k, rest_u).items():
+        res = _append_items(build_sheet_items(k_g, u_g), args.label, game)
         _log(f"[SHEET] {res}")
     return 0
 
