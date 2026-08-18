@@ -595,6 +595,42 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         # 表示のための塗り直しなので、失敗しても listing 出力には影響なし
 
 
+def _run_auto_full_tail(append_log_func, env):
+    """🤖PSA自動 の締め: 前回入稿分の後始末 → CSV監査くん (2026-08-18)。
+
+    人が毎回やっていた手順のうち、機械にできる分をこの1押しに畳む。
+    ① itemID をスプシに書込   ② 新規分を広告8%に   ③ CSV監査くん
+
+    ①② が **今回の CSV でなく前回入稿分に効く**のは意図どおり。itemID は入稿しないと
+    発行されないので、今回生成した分にはまだ付いていない。どちらも冪等なので、
+    毎回押せば「入稿済なのに書き戻していない/広告に入っていない」分が必ず片付く。
+    (itemID が無い行は監視くんが取り下げられない = 売り切れても売れる状態で残るため、
+     放置が一番危ない)
+    ③ は最後。①②はシートと広告しか触らないので CSV の監査結果に影響しない。
+    """
+    tools = os.path.join(WORKSPACE, "iMakHQ", "tools")
+    steps = [
+        ("入稿済みの itemID をスプシに書込", [sys.executable, "itemid_writeback_audit.py", "--apply"]),
+        ("入稿済みの新規分を広告8%に", [sys.executable, "ads_add_new_listings.py", "--write"]),
+        ("CSV監査くん", [sys.executable, "csv_auditor.py"]),
+    ]
+    for label, cmd in steps:
+        append_log_func("\n======================================================================\n")
+        append_log_func(f"▶ {label}\n")
+        append_log_func("======================================================================\n")
+        try:
+            r = subprocess.run(cmd, cwd=tools, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=1800, env=env)
+            if r.stdout:
+                append_log_func(r.stdout)
+            if r.returncode != 0:
+                append_log_func(f"\n⚠️ {label} returncode={r.returncode}(続行)\n")
+                if r.stderr:
+                    append_log_func(r.stderr[-2000:])
+        except Exception as e:
+            append_log_func(f"\n⚠️ {label} 失敗(続行): {type(e).__name__}: {e}\n")
+
+
 def _runs_new_listing_dedupe(script_entry):
     """新規出品用の重複くん(KEY tuple excluder)を走らせてよいエントリかを返す(純関数)。
 
@@ -706,6 +742,19 @@ SCRIPTS = [
         # (2026-06-15 ユーザー指示「目視確認してからCSV作成にして」)。OFF 復帰= この key 削除のみ。
         "env": {"TCG_USE_NEW_GEN": "1", "PSA_VERIFY_BEFORE_BUILD": "1"},
         "params": [],
+    },
+    {
+        # ★2026-08-18 ユーザー指示「PSA TCG の横に PSA自動を1つだけ。CSV監査くんもセットで」。
+        # 中身は 新規 と同じ生成 + 後処理チェーン。違いは締めに auto_full の3手が付くこと
+        # (itemID書込 → 広告8% → CSV監査くん)。押すのは1回でよくなる。
+        "category": "PSA TCG", "type": "new", "label": "🤖 PSA自動",
+        "verified": True,
+        "double_check": True,
+        "cwd": f"{WORKSPACE}/iMakTCG",
+        "cmd": ["python", "psa_to_csv.py"],
+        "env": {"TCG_USE_NEW_GEN": "1", "PSA_VERIFY_BEFORE_BUILD": "1"},
+        "params": [],
+        "auto_full": True,
     },
     {
         "category": "リール", "type": "new", "label": "新規",
@@ -2883,6 +2932,15 @@ class ListingPanel:
                             _run_dedupe_for_latest_csv(self.append_log, since_ts=getattr(self, '_listing_start_ts', None))
                         except Exception as _e:
                             self.append_log(f"\n⚠️ dedupe hook 失敗: {_e}\n")
+                        # 🤖PSA自動 だけ: 締めに itemID書込 → 広告8% → CSV監査くん (2026-08-18)
+                        if _entry_now.get("auto_full"):
+                            try:
+                                _envf = os.environ.copy()
+                                _envf["PYTHONIOENCODING"] = "utf-8"
+                                _envf["PYTHONUNBUFFERED"] = "1"
+                                _run_auto_full_tail(self.append_log, _envf)
+                            except Exception as _e:
+                                self.append_log(f"\n⚠️ PSA自動の締め 失敗: {_e}\n")
                     elif _entry_now.get("restock_revise"):
                         self.append_log(
                             "\n(♻ RESTOCK: 新規出品用の重複くんを skip — Revise は既存出品の修正で重複を作らない。"
