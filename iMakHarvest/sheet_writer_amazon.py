@@ -138,7 +138,12 @@ def _build_row(item: dict) -> list:
     price = item.get("price_jpy")
     price_str = "" if price is None else str(int(price))
     images = item.get("image_urls") or []
-    image_str = "|".join(str(u) for u in images if u)
+    # ★str をそのまま渡されたら 1 文字ずつ join してしまう ("h|t|t|p|s|:|..." になる)。
+    # 2026-08-18 に移送ツールが スプシのセル (str) を渡して 219 行を壊した。
+    if isinstance(images, str):
+        image_str = images
+    else:
+        image_str = "|".join(str(u) for u in images if u)
     description = str(item.get("description") or "")
     color = str(item.get("color") or "")
     size = str(item.get("size") or "")
