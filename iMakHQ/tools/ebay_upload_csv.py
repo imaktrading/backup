@@ -24,6 +24,7 @@
 import argparse
 import csv as _csv
 import html
+import json
 import os
 import re
 import sys
@@ -159,6 +160,41 @@ def parse_ack(resp):
             " / ".join(m.strip()[:160] for m in msgs[:3]))
 
 
+def build_result(csv_path, write, ok, ng, listed, failed, stopped_early=False):
+    """出品結果 (純関数・test 可)。`control_panel.build_upload_mail` が読む形。"""
+    return {
+        "csv": os.path.basename(csv_path or ""),
+        "write": bool(write),
+        "ok": int(ok),
+        "ng": int(ng),
+        "stopped_early": bool(stopped_early),
+        "listed": [{"label": l, "item_id": i} for l, i in listed],
+        "failed": [{"label": l, "error": e} for l, e in failed],
+    }
+
+
+def write_result(path, result):
+    """結果を JSON で残す。**空振りでも必ず書く**。
+
+    ★2026-08-18: `--result-json` は受け取るだけで **一度も書いていなかった**。
+      結果ファイルが無いと control_panel の `_mail_upload_result` が黙って return し、
+      **自動出品のメールが永久に飛ばない** (人は「まだ動いている」と思って待つ)。
+      失敗・0件の走行でも書く。書かないと「何も起きなかった」と「走らなかった」の
+      区別が付かない ([[failclosed_must_skip_not_destructive]] と同じ理由)。
+    書込に失敗しても出品結果は変わらないので、例外は握って警告だけ出す。
+    """
+    if not path:
+        return False
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  ⚠️ 出品結果を書けなかった ({type(e).__name__}: {e}) → メールは飛びません")
+        return False
+
+
 # ── 実行 ────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser()
@@ -182,14 +218,16 @@ def main():
     print(f"=== eBay 出品 [{'本番' if a.write else '検証のみ(出品しない)'}] {os.path.basename(a.csv)} "
           f"/ {len(rows)}件 ===")
     ok = ng = 0
-    listed = []
+    listed, failed, stopped_early = [], [], False
     for i, row in enumerate(rows, 1):
         label = (row.get("CustomLabel") or "").strip()
         miss = missing_fields(row)
         if miss:
             print(f"  ❌ [{i}] {label} 値が足りない: {', '.join(miss)} → 出さない")
             ng += 1
+            failed.append((label, "値が足りない: " + ", ".join(miss)))
             if not a.keep_going:
+                stopped_early = True
                 break
             continue
         inner = ("<ErrorLanguage>en_US</ErrorLanguage><WarningLevel>High</WarningLevel>"
@@ -206,12 +244,18 @@ def main():
                 listed.append((label, iid))
         else:
             ng += 1
+            failed.append((label, f"{ack}: {err}"))
             print(f"  ❌ [{i}] {label} {ack}: {err}")
             if not a.keep_going:
                 print("     → 1件目の失敗で停止 (半端に出さない。--keep-going で続行)")
+                stopped_early = True
                 break
 
     print(f"\n  結果: OK {ok} / NG {ng}")
+    # ★結果は **必ず** 残す (0件でも失敗でも)。ここを書かないとメールが飛ばない。
+    if write_result(a.result_json, build_result(a.csv, a.write, ok, ng, listed,
+                                                failed, stopped_early)):
+        print(f"  📝 結果を書きました: {a.result_json}")
     if a.write and listed:
         print("  ✏️ ItemID をシートに書き戻します")
         import subprocess

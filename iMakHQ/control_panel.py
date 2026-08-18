@@ -618,6 +618,12 @@ def _run_auto_full_tail(append_log_func, env):
     except Exception:
         latest = ""
     result_json = os.path.join(csv_dir, "last_upload_result.json")
+    # ★前回の結果を先に消す。残っていると、今回の入稿が結果を残さずに終わった時に
+    #   **前回の出品を今回の結果としてメールしてしまう** (古い成功で失敗が隠れる)。
+    try:
+        os.remove(result_json)
+    except OSError:
+        pass
     steps = [
         # ★順番が意味を持つ: 監査 → 入稿 → 書戻し → 広告 → メール。
         #   監査は **入稿前の関所**なので必ず先。itemID は入稿しないと出ないので書戻しは後。
@@ -649,16 +655,31 @@ def _run_auto_full_tail(append_log_func, env):
 
 
 def build_upload_mail(result):
-    """出品結果 → (件名, 本文) (純関数・test可)。件数と出品URLだけの短い本文。"""
+    """出品結果 → (件名, 本文) (純関数・test可)。件数と出品URLだけの短い本文。
+
+    ★0件でも送る。**「走ったが0件」と「走らなかった」を区別できる**のがこのメールの用途で、
+      黙るとそこが分からなくなる (2026-08-18: 結果ファイルを書いていなかったため
+      メールが一度も飛ばず、人が「まだ動いている」と思って待っていた)。
+    """
     listed = result.get("listed") or []
+    failed = result.get("failed") or []
     ng = int(result.get("ng") or 0)
-    subject = f"[自動出品] {len(listed)}件 出品" + (f" / {ng}件 失敗" if ng else "")
-    lines = [f"自動出品 {len(listed)}件"]
+    verify_only = not result.get("write", True)
+    head = "[検証のみ] " if verify_only else ""
+    subject = f"[自動出品] {head}{len(listed)}件 出品" + (f" / {ng}件 失敗" if ng else "")
+    lines = [f"自動出品 {len(listed)}件" + ("  ※検証のみ (出品していません)" if verify_only else "")]
     if ng:
-        lines.append(f"失敗 {ng}件 (走行ログを確認してください)")
+        lines.append(f"失敗 {ng}件")
+    if result.get("stopped_early"):
+        lines.append("⚠️ 失敗で途中停止しました (残りは出していません)")
     lines.append("")
     for it in listed:
         lines.append(f"{it.get('label', '')}  https://www.ebay.com/itm/{it.get('item_id', '')}")
+    if failed:
+        lines.append("")
+        lines.append("― 失敗 ―")
+        for it in failed:
+            lines.append(f"{it.get('label', '')}  {it.get('error', '')}")
     return subject, "\n".join(lines)
 
 
@@ -670,13 +691,14 @@ def _mail_upload_result(append_log_func, result_json, env):
     """
     import json as _json
     if not os.path.exists(result_json):
+        # ★ここに来る = 入稿が結果を残さなかった。黙ると「まだ動いている」と誤解される。
+        append_log_func("\n⚠️ 出品結果ファイルが無い → メールを送れません "
+                        f"({result_json})\n")
         return
     try:
         result = _json.load(open(result_json, encoding="utf-8"))
     except Exception as e:
         append_log_func(f"\n⚠️ 出品結果を読めずメール skip: {type(e).__name__}\n")
-        return
-    if not (result.get("listed") or result.get("ng")):
         return
     subject, body = build_upload_mail(result)
     body_file = os.path.join(os.path.dirname(result_json), "last_upload_mail.txt")
