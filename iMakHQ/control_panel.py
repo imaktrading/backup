@@ -747,7 +747,7 @@ SCRIPTS = [
         # ★2026-08-18 ユーザー指示「PSA TCG の横に PSA自動を1つだけ。CSV監査くんもセットで」。
         # 中身は 新規 と同じ生成 + 後処理チェーン。違いは締めに auto_full の3手が付くこと
         # (itemID書込 → 広告8% → CSV監査くん)。押すのは1回でよくなる。
-        "category": "PSA TCG", "type": "new", "label": "🤖 PSA自動",
+        "category": "PSA TCG", "type": "auto", "label": "🤖自動",
         "verified": True,
         "double_check": True,
         "cwd": f"{WORKSPACE}/iMakTCG",
@@ -2216,11 +2216,24 @@ class ListingPanel:
                 new_idx = categories[cat_name].get("new")
                 if new_idx is None:
                     continue
+                # ★2026-08-18: 1セル = カテゴリボタン (+ あれば 🤖自動)。
+                #   カテゴリは type ごとに1つしか持てないので、自動は **別 type** で登録する
+                #   (同じ "new" で足すと後勝ちでカテゴリボタンを乗っ取る。実際に一度やった)
+                cell = ttk.Frame(cat_grid)
+                cell.grid(row=gi // n_cat_cols, column=gi % n_cat_cols,
+                          padx=2, pady=2, sticky="nsew")
+                auto_idx = categories[cat_name].get("auto")
                 # ★2026-08-16: カテゴリも既定は黒 (色は「今押すといい」の意味だけに使う)
-                tk.Button(cat_grid, text=cat_name, font=("", 12, "bold"), fg="black",
-                          width=16, height=2, wraplength=170, justify="center",
-                          command=lambda idx=new_idx: self.run_script(idx)).grid(
-                    row=gi // n_cat_cols, column=gi % n_cat_cols, padx=2, pady=2, sticky="nsew")
+                tk.Button(cell, text=cat_name, font=("", 12, "bold"), fg="black",
+                          width=16 if auto_idx is None else 11, height=2,
+                          wraplength=170, justify="center",
+                          command=lambda idx=new_idx: self.run_script(idx)).pack(
+                    side="left", fill="both", expand=True)
+                if auto_idx is not None:
+                    tk.Button(cell, text=SCRIPTS[auto_idx]["label"], font=("", 10, "bold"),
+                              fg="black", width=6, height=2, wraplength=70, justify="center",
+                              command=lambda idx=auto_idx: self.run_script(idx)).pack(
+                        side="left", fill="both")
                 gi += 1
             if ug["discover"]:
                 disc = ttk.LabelFrame(new_sec, text="発見・巡回 (新規ネタ探し)", padding=4)

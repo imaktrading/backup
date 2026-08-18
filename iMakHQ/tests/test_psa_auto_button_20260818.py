@@ -20,13 +20,15 @@ def _src():
 
 def _entry():
     s = _src()
-    i = s.index('"label": "🤖 PSA自動"')
+    i = s.index('"label": "🤖自動"')
     return s[s.rindex("    {\n", 0, i):s.index("    },\n", i)]
 
 
 def test_PSA_TCGの行にある():
     e = _entry()
-    assert '"category": "PSA TCG"' in e and '"type": "new"' in e
+    assert '"category": "PSA TCG"' in e
+    # ★同じ type で足すと後勝ちでカテゴリボタンを乗っ取る (2026-08-18 に実際にやった)
+    assert '"type": "auto"' in e
 
 
 def test_生成の中身は新規と同じ():
@@ -63,3 +65,27 @@ def test_締めが失敗しても走行を止めない():
     i = s.index("def _run_auto_full_tail")
     body = s[i:s.index("\ndef ", i + 1)]
     assert "続行" in body and "except Exception" in body
+
+
+def test_同じカテゴリでtypeが重複していない():
+    """categories[cat][type] は後勝ちで上書きされるので、重複すると片方が消える。
+
+    実害 (2026-08-18): 🤖自動 を type="new" で足したら PSA TCG のカテゴリボタンが
+    自動の方を指すようになり、新規ボタンが画面から消えた。
+    """
+    src = _src()
+    pairs = re.findall(r'"category":\s*("[^"]+"|None),\s*"type":\s*"([a-z_]+)"', src)
+    seen = {}
+    for cat, typ in pairs:
+        if cat == "None" or typ == "utility":
+            continue
+        key = (cat, typ)
+        assert key not in seen, f"{cat} に type={typ} が2つある = 片方がボタンから消える"
+        seen[key] = True
+
+
+def test_自動ボタンが描画される():
+    """カテゴリのセルに 自動 を並べる分岐が消えていないこと。"""
+    s = _src()
+    assert 'categories[cat_name].get("auto")' in s
+    assert 'SCRIPTS[auto_idx]["label"]' in s
