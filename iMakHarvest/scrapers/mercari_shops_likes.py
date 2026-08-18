@@ -136,6 +136,12 @@ def create_driver(
             driver.set_window_position(wp[0], wp[1])
         except Exception:
             pass
+    # 収集中は画面に出さない (2026-08-19 制定。 全 driver 共通)
+    from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
+    try:
+        hide_browser_window(driver)
+    except Exception:  # noqa: BLE001 - 隠せなくても処理は続ける
+        pass
     return driver
 
 

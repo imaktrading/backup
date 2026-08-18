@@ -179,49 +179,11 @@ def create_driver(
             pass
         # 画面から消す (位置指定は Windows に引き戻されるため)
         try:
+            from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
             hide_browser_window(driver)
         except Exception:  # noqa: BLE001 - 隠せなくても収集は続ける
             pass
     return driver
-
-
-def hide_browser_window(driver) -> bool:
-    """収集用 Chrome のウィンドウを隠す (Windows のみ). 隠せたら True.
-
-    ウィンドウの特定は **一意なタイトルを自分で付けて探す**。 PID 経由だと
-    chrome の子プロセス構成に依存して当たらないことがある。
-    """
-    if os.name != "nt" or not _offscreen_enabled():
-        return False
-    import ctypes  # noqa: PLC0415
-    from ctypes import wintypes  # noqa: PLC0415
-
-    token = f"IMAK_HARVEST_{os.getpid()}"
-    try:
-        driver.execute_script("document.title = arguments[0];", token)
-    except Exception:  # noqa: BLE001
-        return False
-
-    user32 = ctypes.windll.user32
-    found = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def _cb(hwnd, _lparam):
-        length = user32.GetWindowTextLengthW(hwnd)
-        if length:
-            buf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buf, length + 1)
-            if token in buf.value:
-                found.append(hwnd)
-        return True
-
-    try:
-        user32.EnumWindows(_cb, 0)
-        for hwnd in found:
-            user32.ShowWindow(hwnd, _SW_HIDE)
-    except Exception:  # noqa: BLE001
-        return False
-    return bool(found)
 
 
 def _wait_for_likes_anchor(driver, timeout_sec: int) -> bool:

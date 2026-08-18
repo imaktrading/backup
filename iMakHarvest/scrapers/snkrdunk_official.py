@@ -201,6 +201,12 @@ def create_driver(headless: bool = False, profile_dir: Optional[str] = None):
     # 実機 Chrome を自動検出 (= 自動更新で陳腐化しない)。 検出不可なら fallback 定数。
     version_main = detect_chrome_major_version() or CHROME_VERSION_MAIN
     driver = uc.Chrome(options=options, version_main=version_main)
+    # 収集中は画面に出さない (2026-08-19 制定。 全 driver 共通)
+    from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
+    try:
+        hide_browser_window(driver)
+    except Exception:  # noqa: BLE001 - 隠せなくても処理は続ける
+        pass
     return driver
 
 

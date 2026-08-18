@@ -53,8 +53,15 @@ def attach_to_existing_chrome(port: int = 9222):
 
     options = uc.ChromeOptions()
     options.add_experimental_option("debuggerAddress", f"localhost:{port}")
-    return uc.Chrome(options=options,
-                     version_main=detect_chrome_major() or CHROME_VERSION_MAIN)
+    driver = uc.Chrome(options=options,
+                       version_main=detect_chrome_major() or CHROME_VERSION_MAIN)
+    # 収集中は画面に出さない (2026-08-19 制定。 全 driver 共通)
+    from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
+    try:
+        hide_browser_window(driver)
+    except Exception:  # noqa: BLE001 - 隠せなくても処理は続ける
+        pass
+    return driver
 
 
 def _create_driver_with_retry(headless: bool, retries: int = 3):

@@ -134,6 +134,12 @@ def create_casio_driver(headless: bool = False):
     # Chrome 実バージョン自動検出 (= 固定値の陳腐化防止、 fallback 148)
     from scrapers._chrome_util import detect_chrome_major  # noqa: PLC0415
     driver = uc.Chrome(options=options, version_main=detect_chrome_major() or 148)
+    # 収集中は画面に出さない (2026-08-19 制定。 全 driver 共通)
+    from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
+    try:
+        hide_browser_window(driver)
+    except Exception:  # noqa: BLE001 - 隠せなくても処理は続ける
+        pass
     return driver
 
 
