@@ -63,8 +63,9 @@ def test_広告ゼロなら全部追加対象():
     assert to_add == found and already == []
 
 
-def test_パネルのボタンに載っている():
-    """手順の自動化なので、押せる場所に無いと意味が無い。"""
+def test_PSA自動の締めに載っている():
+    """単独ボタンは 2026-08-18 に撤去 (ユーザー指示「1つだけにまとめて」)。
+    🤖PSA自動 の締めから呼ばれる形なので、そこに無いと動かない。"""
     cp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "control_panel.py")
     src = open(cp, encoding="utf-8").read()
     assert "ads_add_new_listings.py" in src
