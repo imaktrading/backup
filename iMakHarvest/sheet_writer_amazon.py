@@ -52,6 +52,12 @@ COL_DESCRIPTION = 8    # H: 商品説明
 # **cert を持つ item のときだけ**書く (2026-08-17)。
 COL_CERT = 9           # I: PSA cert 番号 - メルカリ PSA10 収集のみ
 COL_POINTS = 11        # K: ポイント(円) - 2026-07-26 追加 (中間スプシで仕入原価比較用)
+# 本番 (HIGH) では 下の3列が **PSA行 1,310件すべてで埋まっている** (2026-08-18 実測)。
+# 中間スプシが空のままだと 行ごとコピーした時に落ちるので、 収集側で埋める。
+COL_PURCHASE_PRICE = 14  # N: 仕入れ価格(円)      - 新規行は 商品価格と同じ
+# ★P列 (CTR) は書かない。 HIGH 側は `=countif(A:A,A<row>)` の数式で、
+#   値を貼ると重複検出が壊れる (2026-08-18 実測)。
+COL_CATEGORY = 18        # R: カテゴリ            - PSA は全件 "TCG"
 COL_COLOR = 19         # S: 色                  - Phase 1d (Amazon は基本空欄)
 COL_SIZE = 20          # T: サイズ              - Phase 1d (Amazon は基本空欄)
 COL_MONTHLY_SALES = 22 # V: Amazon 月販売数     - 2026-06-11 user 指示: 生 verbatim 「過去1ヶ月で N 点以上購入」
@@ -166,6 +172,15 @@ def _build_row(item: dict) -> list:
     points = item.get("points_jpy")
     row[COL_POINTS - 1] = "" if points in (None, "") else str(int(points))
     # J,L-R は空欄
+    # N/P/R: 渡された時だけ書く (既存の収集の挙動は変えない)
+    purchase = item.get("purchase_price_jpy")
+    if purchase in (None, ""):
+        purchase = price if item.get("fill_high_columns") else None
+    if purchase not in (None, ""):
+        row[COL_PURCHASE_PRICE - 1] = str(int(purchase))
+    category = item.get("category") or ""
+    if category:
+        row[COL_CATEGORY - 1] = str(category)
     row[COL_COLOR - 1] = color
     row[COL_SIZE - 1] = size
     # U (21): バナー価格 列 (= 既存 mercari format)、 Amazon は空

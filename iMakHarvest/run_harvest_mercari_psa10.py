@@ -392,11 +392,17 @@ def group_by_game(kept: list[dict], unreadable: list[dict]) -> dict:
     return out
 
 
-def _append_items(items: list[dict], base_label: str, game: str) -> dict:
-    """ゲーム毎タブへ append する (途中書込と最終書込で同じ経路を通す)."""
+def _append_items(items: list[dict], base_label: str, game: str,
+                  known_keys: set | None = None) -> dict:
+    """ゲーム毎タブへ append する (途中書込と最終書込で同じ経路を通す).
+
+    known_keys を渡すと 全タブ読み直しをしない (走行中に何度も書くと
+    Google の読取上限に当たって走行が落ちる。 2026-08-18 に 429 で実際に落ちた)。
+    """
     from sheet_writer_mercari_search import append_mercari_search_items  # noqa: PLC0415
 
-    return append_mercari_search_items(items, label=psa_game.tab_label(base_label, game))
+    return append_mercari_search_items(items, label=psa_game.tab_label(base_label, game),
+                                       known_keys=known_keys)
 
 
 def build_sheet_items(kept: list[dict], unreadable: list[dict]) -> list[dict]:
@@ -411,6 +417,10 @@ def build_sheet_items(kept: list[dict], unreadable: list[dict]) -> list[dict]:
             "price_jpy": c.get("price_jpy"), "image_urls": c.get("image_urls"),
             "description": c.get("description"),
             "cert": cert,  # I 列 (本番へ移した時の出品くんの入口)
+            # 本番 (HIGH) で全 PSA 行が埋まっている列。 行ごとコピーで済むよう先に埋める
+            # (2026-08-18 実測: N 1310/1310、 R 1310/1310)。 P列は HIGH 側の数式なので触らない。
+            "fill_high_columns": True,   # N: 仕入れ価格 = 商品価格
+            "category": "TCG",           # R: カテゴリ
         }
 
     items = [_one(c, (c.get("vision") or {}).get("cert") or "") for c in kept]
@@ -549,15 +559,32 @@ def main(argv=None) -> int:
         else:
             path = DUMP_DIR / f"mercari_psa10_{datetime.now():%Y%m%dT%H%M%S}.json"
         written: set = set()
+        known: set = set()
+        try:
+            from sheet_writer_mercari_search import load_keys_all_tabs  # noqa: PLC0415
+            from sheet_writer_mercari_seller import (  # noqa: PLC0415
+                open_seller_staging_sheet,
+            )
+            known = load_keys_all_tabs(open_seller_staging_sheet())
+        except Exception as e:  # noqa: BLE001
+            _log(f"⚠️ 既存キーを読めず (途中書込は自タブ dedupe のみ): {type(e).__name__}")
 
         def _flush(new_cands, new_unreadable):
-            """走行中に中間スプシへ書く。 返り値は (書いた候補数, 書いた目視待ち数)."""
+            """走行中に中間スプシへ書く。 返り値は (書いた候補数, 書いた目視待ち数).
+
+            ★スプシ側のエラーで走行を殺さない。 書けなかった分は written に入れないので
+            次の書込 or 最終書込で拾い直される。
+            """
             if args.dry_run or (not new_cands and not new_unreadable):
                 return 0, 0
             n_c = n_u = 0
             for game, (k_g, u_g) in group_by_game(new_cands, new_unreadable).items():
                 items = build_sheet_items(k_g, u_g)
-                res = _append_items(items, args.label, game)
+                try:
+                    res = _append_items(items, args.label, game, known_keys=known)
+                except Exception as e:  # noqa: BLE001
+                    _log(f"  ⚠️ スプシ書込に失敗 ({type(e).__name__}) → 後でまとめて書く")
+                    continue
                 n_c += len(k_g)
                 n_u += len(u_g)
                 written.update(i["url"] for i in items)

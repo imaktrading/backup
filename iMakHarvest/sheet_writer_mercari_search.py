@@ -77,11 +77,15 @@ def append_mercari_search_items(
     label: str = "porter",
     column_count: int = DEFAULT_COLUMN_COUNT,
     cross_tab_dedupe: bool = True,
+    known_keys: set | None = None,
 ) -> dict:
     """メルカリ検索収集を `mercari_<label>` タブに append (item_id dedup).
 
     items: [{url, title?, price_jpy?, condition?, image_urls?, description?, size?, color?}]
     cross_tab_dedupe: True なら 全 mercari_* タブ横断で重複を落とす (既定)
+    known_keys: 呼出側が持っている既知キー。 渡すと **タブを読み直さない**
+                (走行中に何度も書く時、 毎回全タブを読むと Google の読取上限に当たる。
+                 2026-08-18 に 429 で走行が落ちた)。 append した分は呼出側の set に足す。
     Returns: {"tab": str, "appended": N, "skipped_existing": M, "input": K}
     """
     from sheet_writer_mercari_seller import (  # noqa: PLC0415
@@ -97,7 +101,9 @@ def append_mercari_search_items(
     ws = _get_or_create_tab(sh, label)
 
     existing: set[str] = set()
-    if cross_tab_dedupe:
+    if known_keys is not None:
+        existing = set(known_keys)
+    elif cross_tab_dedupe:
         # 全 mercari_* タブ横断 (= 別ゲームのタブに同じ出品が入るのを防ぐ)
         try:
             existing = load_keys_all_tabs(sh)
@@ -145,5 +151,7 @@ def append_mercari_search_items(
         values=new_rows,
         value_input_option="USER_ENTERED",
     )
+    if known_keys is not None:
+        known_keys.update(seen_in_batch)
     return {"tab": tab_name, "appended": len(new_rows),
             "skipped_existing": skipped, "input": len(items)}
