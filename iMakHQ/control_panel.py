@@ -1894,7 +1894,7 @@ class HomePanel:
         """`worktree_board.py` の集計を 1 行/担当 に畳んでトップに出す (2026-07-31)。
 
         全文はボタンから開ける CLI があるので、ここは **放置が目に入る**ことだけを狙う。
-        赤 = 自分(窓口)が返す / ⏳ = 相手待ち / 🟡 = headless下書きのレビュー待ち。
+        赤 = 窓口が返す (担当宛の未処理 / 窓口宛の依頼) / 🟡 = headless下書きのレビュー待ち。
         """
         import re
         import subprocess
@@ -1918,12 +1918,12 @@ class HomePanel:
                 m = re.match(r"^## (.+?) — (.*)$", s)
                 if m:
                     name, body = m.group(1), m.group(2)
-                    # 「動きなし」以外で 要返球/相手待ち があれば目立たせる
+                    # 「動きなし」以外で 要返球/窓口宛 があれば目立たせる
                     mark = "  "
                     if re.search(r"自分が返す [1-9]", body):
                         mark = "🔴"
-                    elif re.search(r"相手待ち [1-9]", body):
-                        mark = "⏳"
+                    elif re.search(r"窓口宛 [1-9]", body):
+                        mark = "🔴"
                     elif re.search(r"レビュー待ち [1-9]", body):
                         mark = "🟡"
                     lines.append(f"{mark} {name:<12} {body}")

@@ -32,6 +32,25 @@ RE_TO = re.compile(r"_to_(" + "|".join(TARGETS) + r")(?:_|\.)", re.I)
 # `<日付>_<担当>_internal_<topic>` = 自分宛 (担当が自分の worktree に積む改善案)
 RE_INTERNAL = re.compile(r"_?(" + "|".join(TARGETS) + r")_internal_", re.I)
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worktree_board as wb  # noqa: E402
+
+
+def delivery_safe_stem(stem: str) -> str:
+    """**配達されない名前を作らせない** (2026-08-18).
+
+    `worktree_board` は名前の末尾で「決着済」(`_response` `_done` `_verdict` …) と
+    「窓口レビュー待ち」(`_draft` `_question`) を判定する。草案の**話題**がその語で
+    終わっていると、投入した瞬間に **誰にも配られない依頼**になる。
+    実害: `2026-08-17_hq_machine_readable_verdict.md` (回答書に機械可読な結論行を
+    足してほしい、という依頼) は投入直後から決着済扱いで、catalog に一度も配られなかった。
+    → 末尾が判定語になる時だけ `_req` を足す。中身も宛先も変えない。
+    """
+    low = stem.lower()
+    if low.endswith(wb.CLOSED_SUFFIXES) or low.endswith(wb.DRAFT_SUFFIXES):
+        return stem + "_req"
+    return stem
+
 
 def pending():
     """未投入の草案 (_routed に移していないもの)."""
@@ -73,6 +92,7 @@ def inject(path: Path, to: str = "", dry_run: bool = False, auto: bool = False) 
                   f" (相互依頼のループを防ぐため)。\n\n")
     # file 名から `_to_<相手>` を落として、相手の requests/ での自然な名前にする
     stem = re.sub(r"_to_[a-z]+", "", path.stem, flags=re.I).strip("_")
+    stem = delivery_safe_stem(stem) if stem else ""
     dest = dest_dir / ((stem + ".md") if stem else path.name)
     if dry_run:
         return {"ok": True, "target": to, "dest": dest, "reason": "(dry-run)"}

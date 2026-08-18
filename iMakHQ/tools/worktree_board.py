@@ -10,8 +10,8 @@
     調整に必要な情報 (依頼・回答・その連鎖) は全部そこに出るので、実務上これで足りる。
 
 出力: worktree ごとに
-    - 未処理 (自分が返すべき) requests
-    - 相手ボール (こちらが出して回答待ち) の依頼
+    - 未処理 (= その担当が処理すべき) requests。dispatch はここを配る
+    - 窓口宛 (担当が窓口に書いた依頼) = 窓口が返す。担当には配らない
     - 直近の動き (最終更新ファイルと経過時間)
 """
 from __future__ import annotations
@@ -43,10 +43,39 @@ MAX_SHOW = 8
 STALE_DRAFT_H = 24
 
 
-def _is_outbound(stem: str, worktree: str) -> bool:
-    """こちら (HQ/Advisor) が出した側か = 相手ボール."""
-    low = stem.lower()
-    return worktree != "hq" and (low.startswith("hq_") or "_hq_" in low)
+# ★2026-08-18: 名前に `hq` が入るだけで「相手ボール」に落ち、**dispatch 対象から外れて
+#   担当に一度も配られない**穴を塞いだ。旧実装は `hq_` で始まる / `_hq_` を含む stem を
+#   全部 outbound にしていた。
+#   実害: 2026-08-03 の ALT ART 実装依頼が **9日** 未配達 (当の依頼書自身に
+#   「ファイル名に `_hq_` が入っていたため9日間配達されていませんでした」と書かれている)、
+#   2026-08-01 の pdca resolver が **11日** 未配達。
+#   しかも `route_inbox.inject()` は `_to_<相手>` を名前から落とすので
+#   `hq_to_catalog_<topic>` → `hq_<topic>` になる。**自動投入した依頼ほど確実に埋まる**構造。
+#   → 判定を「名前に hq が出るか」ではなく **「宛先が窓口だと明示されているか」** に変える。
+#     `<wt>/requests/` に在る依頼は、そう書かれていない限り **その worktree のボール**。
+RE_TO_HQ_NAME = re.compile(r"(?:^|_)(?:to|for)_hq(?:_|$)", re.I)
+# 本文の先頭で宛先を名乗っているもの (`【Catalog → HQ】` / `- 宛先: Advisor`)。
+# 名前だけで判ると思うのをやめる = 名前づけの流儀が変わっても壊れない。
+RE_TO_DESK_BODY = re.compile(
+    r"(?:(?:→|->|⇒)\s*\**\s*|宛先\s*[:：]\s*\**\s*)(?:HQ|Advisor|ALPHA|BRAVO|窓口)", re.I)
+HEAD_LINES = 20        # 宛先は冒頭に書く規約。本文中の引用で誤判定しないため範囲を切る
+
+
+def _addressed_to_desk(path: Path) -> bool:
+    """依頼書の冒頭が「宛先 = 窓口 (HQ/Advisor/…)」と名乗っているか."""
+    try:
+        head = path.read_text(encoding="utf-8", errors="replace")[:2000]
+    except OSError:
+        return False
+    lines = [ln for ln in head.splitlines() if ln.strip()][:HEAD_LINES]
+    return any(RE_TO_DESK_BODY.search(ln) for ln in lines)
+
+
+def _is_outbound(path: Path, worktree: str) -> bool:
+    """窓口 (HQ/Advisor) 宛か = 相手ボール (= その worktree には配らない)."""
+    if worktree == "hq":
+        return False
+    return bool(RE_TO_HQ_NAME.search(path.stem)) or _addressed_to_desk(path)
 
 
 def _is_closed(path: Path, stems: set[str]) -> bool:
@@ -158,7 +187,11 @@ def _draft_is_closed(path: Path, stems: set[str]) -> bool:
 
 
 def pending_for(worktree: str, recent_days: int = RECENT_DAYS):
-    """(自分が返すべき, 相手ボール, 窓口レビュー待ち) の Path list を返す."""
+    """(担当が処理する, 窓口が返す, 窓口レビュー待ち) の Path list を返す.
+
+    1つ目が dispatch 対象。2つ目は **担当に配らない** (自分の質問を処理させても
+    答えは出ない = 空焚き)。
+    """
     d = DATA_ROOT / worktree / "requests"
     if not d.is_dir():
         return [], [], []
@@ -175,7 +208,7 @@ def pending_for(worktree: str, recent_days: int = RECENT_DAYS):
             continue
         if _is_closed(p, stems):
             continue
-        (theirs if _is_outbound(p.stem, worktree) else mine).append(p)
+        (theirs if _is_outbound(p, worktree) else mine).append(p)
     return mine, theirs, drafts
 
 
@@ -299,7 +332,7 @@ def main() -> int:
 
         grand_mine += len(mine)
         grand_theirs += len(theirs)
-        print(f"## {label} — 自分が返す {len(mine)}件 / 相手待ち {len(theirs)}件"
+        print(f"## {label} — 自分が返す {len(mine)}件 / 窓口宛 {len(theirs)}件"
               f" / レビュー待ち {len(drafts)}件 (最終 {_age(latest)})")
         for p in drafts[:MAX_SHOW]:
             # ★起票した窓口を必ず出す。書いていない依頼は「起票者不明」と出して、
@@ -323,7 +356,10 @@ def main() -> int:
         if len(mine) > MAX_SHOW:
             print(f"  …他{len(mine) - MAX_SHOW}件")
         for p in theirs[:MAX_SHOW]:
-            print(f"- ⏳ 相手ボール {p.name} ({_age(p.stat().st_mtime)})")
+            # ★2026-08-18: この枠の意味を変えた。旧「HQ が出して相手の回答待ち」→
+            #   **「担当が窓口宛に書いた依頼」= 窓口が返す**。担当には配らない (配ると
+            #   担当が自分の質問を処理させられて空焚きになる)。
+            print(f"- 🔴 **要返球(窓口宛)** {p.name} ({_age(p.stat().st_mtime)})")
         if len(theirs) > MAX_SHOW:
             print(f"  …他{len(theirs) - MAX_SHOW}件")
         print()
@@ -370,15 +406,13 @@ def main() -> int:
     else:
         print(f"dispatch watcher: 稼働中 (heartbeat {int(_watch_age)}秒前)\n")
 
-    print(f"---\n**合計: 要返球 {grand_mine}件 / 相手ボール {grand_theirs}件**")
+    print(f"---\n**合計: 要返球 {grand_mine + grand_theirs}件"
+          f" (うち窓口宛 {grand_theirs}件)**")
     if grand_stale:
         print(f"🔴 **窓口が {grand_stale}件のレビューを {STALE_DRAFT_H}時間以上 止めている** "
               "— 止めると相手の worktree も止まる。先に返球すること")
-    if grand_mine:
+    if grand_mine or grand_theirs:
         print("→ 要返球を先に片付ける。**自分の回答待ちで他 worktree を止めない**。")
-    if grand_theirs:
-        print("→ 相手ボールが長く動いていなければ督促するか、"
-              "headless で当該 worktree を起動して処理させる (Phase2)。")
     return 0
 
 

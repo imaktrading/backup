@@ -239,10 +239,12 @@ def request_items() -> list[dict]:
     out: list[dict] = []
     for wt, label in wb.WORKTREES:
         try:
-            mine, _theirs, drafts = wb.pending_for(wt)
+            mine, theirs, drafts = wb.pending_for(wt)
         except Exception:                                      # noqa: BLE001
             continue
-        for kind, paths in (("要返球", mine), ("レビュー待ち", drafts)):
+        # ★2026-08-18: `theirs` (= 担当が窓口宛に書いた依頼) も要返球に載せる。
+        #   担当には配らない枠なので、窓口が拾わないと **誰も触らない**。
+        for kind, paths in (("要返球", mine + theirs), ("レビュー待ち", drafts)):
             for p in paths:
                 # 依頼書は本文冒頭に `- 担当: 出品専任` を書ける。宛先が書いてあるものを
                 # 別の窓口に渡さない (8/1 の実害。依頼書には書いてあったのに読んでいなかった)。
