@@ -1295,6 +1295,31 @@ def _catalog_has_spec_value(product_id: str, field: str) -> bool:
     return bool(str(v or "").strip())
 
 
+def _core_fills_spec(item_id: str, field: str):
+    """その spec を **今の出品コア**で作り直したら埋まるか (queue を閉じる判定用)。
+
+    「今日そのSKUが CSV に載ったか」に依存せず判定できるのが要点。
+    `close_not_redetected` は母集団をその日のCSVに絞るため、別の日のCSV由来の指摘は
+    再検出されず 21日の stale 退役まで残り、その間カタログに同じ質問が毎日飛んでいた
+    (OP02-059 / OP03-001 の C:Set を4日連続で質問した)。
+
+    SSOT は出品側と同じ `tcg_listing_fields.build_listing_fields` (ここに判定を複製しない)。
+    Returns: True (埋まる) / False (まだ空) / None (判定不能 = 触らない)。
+    """
+    s = str(item_id or "")
+    if not str(field or "").startswith("C:") or not s.startswith("PSA10-"):
+        return None                       # cert が取れない (m* 等) = 判定不能
+    try:
+        sys.path.insert(0, os.path.join(WORKSPACE, "iMakTCG"))
+        from tcg_listing_fields import build_listing_fields
+        fields, err = build_listing_fields(s[len("PSA10-"):])
+    except Exception:
+        return None
+    if err or not fields:
+        return None                       # 同定不能なら「直った」とは言えない
+    return bool(str(fields.get(field, "") or "").strip())
+
+
 def _resolve_identity(sku: str, identity_by_sku: dict | None) -> str:
     """identity_by_sku の値を優先し、空なら PSA cache fallback (純関数寄り)。
 
@@ -1375,6 +1400,14 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
                 print(f"  ⏭ 再検出なしclose: {_nr['skipped_reason']}")
         except Exception as _ce:
             print(f"  ⚠️ 再検出なしclose skip: {type(_ce).__name__}: {_ce}")
+        # 今のコアで作り直したら埋まる指摘を閉じる (2026-08-18)。
+        # 上の close は「その日のCSVに載ったSKU」しか閉じられないので、別の日のCSV由来は
+        # 21日 stale まで残り、その間カタログに同じ質問が毎日飛んでいた。
+        fixed = 0
+        try:
+            fixed = _pdca.close_if_core_fills(con, project, _core_fills_spec, ts=ts)["closed"]
+        except Exception as _fe:
+            print(f"  ⚠️ 新コアclose skip: {type(_fe).__name__}: {_fe}")
         # 既存行の identity 後埋め (解決経路を後から実装した分の救済 2026-08-01)。
         # これを通さないと、7/31 以前に積まれた PSA cert 行は再検出まで (不明) のまま出続ける。
         filled = 0
@@ -1398,9 +1431,9 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
             _pdca.write_unresolved_note(held, UNRESOLVED_IDENTITY_PATH, ts, category=project)
         except Exception as _we:
             print(f"  ⚠️ 未解決リスト書込 skip: {type(_we).__name__}: {_we}")
-        if emitted or synced or pruned or staled or filled or nonapp or nored:
+        if emitted or synced or pruned or staled or filled or nonapp or nored or fixed:
             print(f"  📊 PDCA: 集約発行 {emitted} 件 / 完了同期 {synced} 件 / "
-                  f"再検出なしclose {nored} 件 / "
+                  f"再検出なしclose {nored} 件 / 新コアで解消close {fixed} 件 / "
                   f"解決済prune {pruned} 件 / 長期stale退役 {staled} 件 / identity後埋め {filled} 件 / "
                   f"非該当spec退役 {nonapp} 件 (dedup済)")
         if held:

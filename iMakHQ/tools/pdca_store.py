@@ -295,6 +295,54 @@ def close_not_redetected(con, category, seen_dkeys, audited_item_ids, ts="", *,
     return {"closed": closed, "checked": len(rows), "skipped_reason": ""}
 
 
+def close_if_core_fills(con, category, core_fills_fn, ts="", *,
+                        sources=("auditor",), finding_types=("必須Item Specific",)):
+    """**今のコアで作り直したら埋まる** spec 指摘を閉じる (証拠で閉じる / 再検出を待たない)。
+
+    ★2026-08-18: `close_not_redetected` は母集団を「その日のCSV1本」に絞っている
+      (別の日のCSV由来の未解決を全消ししないため。これは正しい)。その代償として
+      **別の日のCSVで見つかった指摘は二度と再検出されず、21日の stale 退役まで pending に残る**。
+      その間ずっと `emit_consolidated_request` が毎日カタログに同じ質問を出す。
+      実害: OP02-059 / OP03-001 の `C:Set` 空を **4日連続**で catalog に聞いた
+      (2026-08-17 に手で close: queue_id 550/560)。
+
+      → 「今日そのSKUを監査したか」ではなく **「今のコードで生成し直したら埋まるか」** で閉じる。
+        CSV に載っていなくても判定できるので、待ち時間がゼロになる。
+
+    core_fills_fn: (item_id, target_field) -> True (今は埋まる) / False (まだ空) /
+      None (判定不能)。**None と例外は触らない** (fail-closed = 消さずに残す)。
+
+    status は `close_not_redetected` と同じ **'done'** にする。'resolved'/'stale' は
+    `upsert_improvement` が復活させない sticky な状態なので、ここで使うと
+    **同じ不具合が再発しても二度と上がってこない** (fail-OPEN)。
+    Returns: {"closed": n, "checked": m}
+    """
+    ph = ",".join("?" * len(sources))
+    sql = ("SELECT queue_id, item_id, target_field, evidence FROM improvement_queue "
+           f"WHERE status='pending' AND category=? AND source IN ({ph})")
+    args = [category, *sources]
+    if finding_types:
+        sql += " AND finding_type IN (%s)" % ",".join("?" * len(finding_types))
+        args += list(finding_types)
+    rows = con.execute(sql, tuple(args)).fetchall()
+    closed = 0
+    for r in rows:
+        try:
+            ok = core_fills_fn(r["item_id"], r["target_field"])
+        except Exception:
+            ok = None
+        if ok is not True:
+            continue
+        note = f"auto-closed: 今のコアで再生成したら埋まった ({str(ts)[:10]})"
+        ev = (r["evidence"] or "").strip()
+        con.execute("UPDATE improvement_queue SET status='done', evidence=?, updated_ts=? "
+                    "WHERE queue_id=?",
+                    ((ev + " / " + note) if ev else note, ts, r["queue_id"]))
+        closed += 1
+    con.commit()
+    return {"closed": closed, "checked": len(rows)}
+
+
 def prune_stale_findings(con, today, max_age_days=21, sources=None):
     """長期未解決の pending を 'stale' に退役させる(digest の恒久ノイズを断つ=K1/K5)。
 
