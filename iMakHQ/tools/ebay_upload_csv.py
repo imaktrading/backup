@@ -166,6 +166,7 @@ def main():
     ap.add_argument("--write", action="store_true", help="実際に出品する (既定は検証のみ)")
     ap.add_argument("--limit", type=int, default=0, help="先頭N件だけ")
     ap.add_argument("--keep-going", action="store_true", help="失敗しても続ける")
+    ap.add_argument("--result-json", default="", help="出品結果 (label/itemID) の書き出し先")
     a = ap.parse_args()
 
     with open(a.csv, newline="", encoding="utf-8") as f:

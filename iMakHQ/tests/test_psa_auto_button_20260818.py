@@ -42,17 +42,6 @@ def test_目視ダブルチェックを外していない():
     assert '"double_check": True' in _entry()
 
 
-def test_締めの3手がこの順で並ぶ():
-    s = _src()
-    i = s.index("def _run_auto_full_tail")
-    body = s[i:s.index("\ndef ", i + 1)]
-    order = [m.start() for m in re.finditer(
-        r'itemid_writeback_audit\.py|ads_add_new_listings\.py|csv_auditor\.py', body)]
-    names = re.findall(r'itemid_writeback_audit\.py|ads_add_new_listings\.py|csv_auditor\.py', body)
-    assert names == ["itemid_writeback_audit.py", "ads_add_new_listings.py", "csv_auditor.py"]
-    assert order == sorted(order)
-
-
 def test_締めはauto_fullのときだけ():
     s = _src()
     assert 'if _entry_now.get("auto_full"):' in s
@@ -89,3 +78,47 @@ def test_自動ボタンが描画される():
     s = _src()
     assert 'categories[cat_name].get("auto")' in s
     assert 'SCRIPTS[auto_idx]["label"]' in s
+
+
+# ── 完全自動 (A) の順番とメール (2026-08-18) ──────────────────────────
+def test_締めの順番は監査_入稿_書戻し_広告():
+    """監査は入稿前の関所なので必ず先。itemID は入稿しないと出ないので書戻しは後。"""
+    s = _src()
+    i = s.index("def _run_auto_full_tail")
+    body = s[i:s.index("\ndef ", i + 1)]
+    names = re.findall(
+        r'csv_auditor\.py|ebay_upload_csv\.py|itemid_writeback_audit\.py|ads_add_new_listings\.py',
+        body)
+    assert names == ["csv_auditor.py", "ebay_upload_csv.py",
+                     "itemid_writeback_audit.py", "ads_add_new_listings.py"]
+
+
+def test_出品は本番モードで呼ぶ():
+    s = _src()
+    i = s.index("def _run_auto_full_tail")
+    body = s[i:s.index("\ndef ", i + 1)]
+    assert '"--write"' in body and "--result-json" in body
+
+
+def test_メール送信の失敗を握り潰さない():
+    """『飛ばなかったのに成功扱い』が一番まずい失敗 (監視くんの申し送り)。"""
+    s = _src()
+    i = s.index("def _mail_upload_result")
+    body = s[i:s.index("\ndef ", i + 1)]
+    assert "returncode == 0" in body and "メール送信に失敗しました" in body
+
+
+def test_メール本文は件数とURL():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cp", CP)
+    # control_panel は tkinter を import するので、純関数だけ切り出して評価する
+    src = _src()
+    i = src.index("def build_upload_mail")
+    ns = {}
+    exec(src[i:src.index("\ndef ", i + 1)], ns)
+    subject, body = ns["build_upload_mail"](
+        {"listed": [{"label": "PSA10-1", "item_id": "820013549916"}], "ng": 0})
+    assert "1件" in subject
+    assert "https://www.ebay.com/itm/820013549916" in body
+    subject_ng, body_ng = ns["build_upload_mail"]({"listed": [], "ng": 2})
+    assert "失敗" in subject_ng and "失敗 2件" in body_ng

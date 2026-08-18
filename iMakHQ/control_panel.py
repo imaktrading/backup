@@ -609,12 +609,28 @@ def _run_auto_full_tail(append_log_func, env):
     ③ は最後。①②はシートと広告しか触らないので CSV の監査結果に影響しない。
     """
     tools = os.path.join(WORKSPACE, "iMakHQ", "tools")
+    csv_dir = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
+    latest = ""
+    try:
+        cands = [os.path.join(csv_dir, f) for f in os.listdir(csv_dir)
+                 if f.startswith("tcg_upload_") and f.endswith(".csv")]
+        latest = max(cands, key=os.path.getmtime) if cands else ""
+    except Exception:
+        latest = ""
+    result_json = os.path.join(csv_dir, "last_upload_result.json")
     steps = [
-        ("入稿済みの itemID をスプシに書込", [sys.executable, "itemid_writeback_audit.py", "--apply"]),
-        ("入稿済みの新規分を広告8%に", [sys.executable, "ads_add_new_listings.py", "--write"]),
-        ("CSV監査くん", [sys.executable, "csv_auditor.py"]),
+        # ★順番が意味を持つ: 監査 → 入稿 → 書戻し → 広告 → メール。
+        #   監査は **入稿前の関所**なので必ず先。itemID は入稿しないと出ないので書戻しは後。
+        ("CSV監査くん (入稿前チェック)", [sys.executable, "csv_auditor.py"]),
+        ("eBay へ出品 (API)", [sys.executable, "ebay_upload_csv.py", latest, "--write",
+                                "--result-json", result_json] if latest else []),
+        ("itemID をスプシに書込", [sys.executable, "itemid_writeback_audit.py", "--apply"]),
+        ("新規分を広告8%に", [sys.executable, "ads_add_new_listings.py", "--write"]),
     ]
     for label, cmd in steps:
+        if not cmd:
+            append_log_func(f"\n⚠️ {label}: 対象CSVが見つからず skip\n")
+            continue
         append_log_func("\n======================================================================\n")
         append_log_func(f"▶ {label}\n")
         append_log_func("======================================================================\n")
@@ -629,6 +645,63 @@ def _run_auto_full_tail(append_log_func, env):
                     append_log_func(r.stderr[-2000:])
         except Exception as e:
             append_log_func(f"\n⚠️ {label} 失敗(続行): {type(e).__name__}: {e}\n")
+    _mail_upload_result(append_log_func, result_json, env)
+
+
+def build_upload_mail(result):
+    """出品結果 → (件名, 本文) (純関数・test可)。件数と出品URLだけの短い本文。"""
+    listed = result.get("listed") or []
+    ng = int(result.get("ng") or 0)
+    subject = f"[自動出品] {len(listed)}件 出品" + (f" / {ng}件 失敗" if ng else "")
+    lines = [f"自動出品 {len(listed)}件"]
+    if ng:
+        lines.append(f"失敗 {ng}件 (走行ログを確認してください)")
+    lines.append("")
+    for it in listed:
+        lines.append(f"{it.get('label', '')}  https://www.ebay.com/itm/{it.get('item_id', '')}")
+    return subject, "\n".join(lines)
+
+
+def _mail_upload_result(append_log_func, result_json, env):
+    """出品結果をメールで送る (監視くんの共用CLIを使う・2026-08-18)。
+
+    ★送信失敗を握り潰さない。「メールが飛ばなかったのに成功扱い」が一番まずい失敗
+    (監視くんの申し送り)。exit 1 はそのまま画面に出す。
+    """
+    import json as _json
+    if not os.path.exists(result_json):
+        return
+    try:
+        result = _json.load(open(result_json, encoding="utf-8"))
+    except Exception as e:
+        append_log_func(f"\n⚠️ 出品結果を読めずメール skip: {type(e).__name__}\n")
+        return
+    if not (result.get("listed") or result.get("ng")):
+        return
+    subject, body = build_upload_mail(result)
+    body_file = os.path.join(os.path.dirname(result_json), "last_upload_mail.txt")
+    with open(body_file, "w", encoding="utf-8") as f:
+        f.write(body)
+    append_log_func("\n======================================================================\n")
+    append_log_func("▶ 出品結果をメール送信\n")
+    append_log_func("======================================================================\n")
+    try:
+        r = subprocess.run([sys.executable, r"C:\dev\iMak_data\tools\send_mail.py",
+                            "--subject", subject, "--body-file", body_file],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=300, env=env)
+        if r.stdout:
+            append_log_func(r.stdout)
+        if r.returncode == 0:
+            append_log_func(f"  ✅ 送信しました: {subject}\n")
+        else:
+            append_log_func(f"  ❌ **メール送信に失敗しました** (exit {r.returncode})。"
+                            f"出品自体は完了しています。ログ: "
+                            f"C:/dev/iMak_data/tools/logs/send_mail.log\n")
+            if r.stderr:
+                append_log_func(r.stderr[-800:])
+    except Exception as e:
+        append_log_func(f"  ❌ **メール送信に失敗しました**: {type(e).__name__}: {e}\n")
 
 
 def _runs_new_listing_dedupe(script_entry):
