@@ -53,7 +53,7 @@ def compute_additions(vals, live_ids=None):
         if live_ids is not None and iid not in live_ids:
             continue                      # eBay に無い = 出品が終わっている → 足す先でない
         live_by_key.setdefault(key, []).append((i, r))
-    plan, warns = {}, []
+    plan, warns, assigned = {}, [], set()
     for i, r in enumerate(vals[1:], start=2):
         iid, url, cert, key, sold = _cell(r, B), _cell(r, A), _cell(r, I), _cell(r, KEY), _cell(r, D)
         # 2枚目 = B空 + url/cert/KEY有。sold(D='○')の 2枚目 = 供給が死んでる → 補URLに入れない。
@@ -62,10 +62,12 @@ def compute_additions(vals, live_ids=None):
         primaries = live_by_key.get(key, [])
         if not primaries:
             continue
+        if url in assigned:
+            continue          # 1本の仕入元を2出品に付けない (両方売れたら片方 履行不能)
+        prow, pr = pick_primary(primaries, plan)
         if len(primaries) > 1:
-            warns.append(f"KEY={key} live primary 複数({len(primaries)}) → 曖昧skip (2枚目 cert={cert})")
-            continue
-        prow, pr = primaries[0]
+            warns.append(f"KEY={key} live出品 {len(primaries)}件 → row {prow} に付けた "
+                         f"(渇いている順 / 2枚目 cert={cert})")
         existing = [u for u in (_cell(pr, AUX0 + k) for k in range(AUXN)) if u]
         d = plan.setdefault(prow, {"itemid": _cell(pr, B), "existing": existing,
                                    "add": [], "skip": [],
@@ -77,7 +79,31 @@ def compute_additions(vals, live_ids=None):
             warns.append(f"row {prow}(itemID={_cell(pr,B)}) 補URL満杯(5) → url={url} 溢れ(売切上書きは未実装)")
         elif url not in d["add"]:
             d["add"].append(url)
+            assigned.add(url)
     return plan, warns
+
+
+def pick_primary(primaries, plan):
+    """同じカードの live 出品が複数ある時、**1つだけ**選ぶ (純関数)。
+
+    ★2026-08-18: 以前は「どちらに付けるか決められない」として丸ごと skip していた。
+      その結果、生きた仕入元を1本捨てていた (49種が該当)。
+      **付けないより、渇いている方に付ける方が良い**。
+
+    選ぶ順 (上から):
+      1. 仕入元が死んでいる出品 (= 今まさに供給ゼロ)
+      2. 予備の少ない出品
+      3. 行番号の小さい方 (毎回同じ答えになるように)
+
+    **全部には付けない**。1本の仕入元を2出品の予備にすると、両方売れた時に片方が
+    履行不能になる (dup_guard が消して回っているのと同じ状態を自分で作ることになる)。
+    """
+    def rank(pr_):
+        row, r = pr_
+        n_aux = len(plan.get(row, {}).get("add", [])) + sum(
+            1 for k in range(AUXN) if _cell(r, AUX0 + k))
+        return (0 if _cell(r, D) else 1, n_aux, row)
+    return min(primaries, key=rank)
 
 
 def load_live_ids():

@@ -91,14 +91,21 @@ def test_missing_cache_does_not_stop_additions():
     assert plan[2]["add"] == ["https://m/dup1"]
 
 
-def test_multiple_live_primary_ambiguous_skip():
+def test_multiple_live_primary_now_picks_one():
+    """★2026-08-18 方針転換: 複数 live でも **捨てずに1つ選んで付ける**。
+
+    旧: 「どちらに付けるか決められない」→ 丸ごと skip = 生きた仕入元を捨てていた (49種)。
+    新: 渇いている順に1つだけ選ぶ。**全部には付けない** (1本を2出品の予備にすると
+        両方売れた時に片方が履行不能になる)。詳細は Test複数live出品にどう付けるか。
+    """
     vals = [HEADER,
             _row(itemid="358a", cert="c1", key="M3-086"),               # live 1
             _row(itemid="358b", cert="c2", key="M3-086"),               # live 2(同KEー)
             _row(url="https://m/dup1", cert="c3", key="M3-086")]        # 2枚目
     plan, warns = compute_additions(vals)
-    assert all(v["add"] == [] for v in plan.values())
-    assert any("複数" in w for w in warns)
+    added = [u for v in plan.values() for u in v["add"]]
+    assert added == ["https://m/dup1"]
+    assert any("live出品 2件" in w for w in warns)
 
 
 def test_urlkey_and_missing_fields_ignored():
@@ -142,6 +149,48 @@ def test_書けていない行を要対応として出す():
                                "tools", "hoju_url_from_dupes.py"), encoding="utf-8").read()
     assert "verify_written(" in src and "要対応" in src
     assert src.index("verify_written(row_to_urls)") > src.index("write_aux_urls(row_to_urls)")
+
+
+class Test複数live出品にどう付けるか:
+    """★2026-08-18: 以前は『どちらに付けるか決められない』で丸ごと捨てていた (49種)。"""
+
+    def _rows(self, aux_a=None, aux_b=None, sold_a="", sold_b=""):
+        return [HEADER,
+                _row(itemid="358a", sold=sold_a, cert="c1", key="K", aux=aux_a or []),
+                _row(itemid="358b", sold=sold_b, cert="c2", key="K", aux=aux_b or []),
+                _row(url="https://m/dup1", cert="c9", key="K")]
+
+    def test_渇いている方に付ける(self):
+        plan, warns = compute_additions(self._rows(sold_b="○"))
+        assert plan[3]["add"] == ["https://m/dup1"]          # row3 = 仕入元が死んでいる方
+        assert plan.get(2, {}).get("add", []) == []
+        assert any("live出品 2件" in w for w in warns)
+
+    def test_同条件なら予備の少ない方(self):
+        plan, _ = compute_additions(self._rows(aux_a=["x", "y"], aux_b=["x"]))
+        assert plan[3]["add"] == ["https://m/dup1"]
+
+    def test_それも同じなら行番号順で毎回同じ答え(self):
+        for _ in range(3):
+            plan, _ = compute_additions(self._rows())
+            assert plan[2]["add"] == ["https://m/dup1"]
+
+    def test_1本を2出品には付けない(self):
+        """両方売れたら片方 履行不能。dup_guard が消して回っている状態を自分で作らない。"""
+        plan, _ = compute_additions(self._rows())
+        added = [u for v in plan.values() for u in v["add"]]
+        assert added == ["https://m/dup1"]
+
+    def test_2枚目が2本あれば別々の出品に配る(self):
+        vals = [HEADER,
+                _row(itemid="358a", cert="c1", key="K"),
+                _row(itemid="358b", cert="c2", key="K"),
+                _row(url="https://m/dup1", cert="c9", key="K"),
+                _row(url="https://m/dup2", cert="c8", key="K")]
+        plan, _ = compute_additions(vals)
+        assert sorted(u for v in plan.values() for u in v["add"]) == \
+            ["https://m/dup1", "https://m/dup2"]
+        assert all(len(v["add"]) == 1 for v in plan.values() if v["add"])
 
 
 if __name__ == "__main__":
