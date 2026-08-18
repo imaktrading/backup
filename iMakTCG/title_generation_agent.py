@@ -217,24 +217,52 @@ def _ensure_character_in_title(
     return title
 
 
-def _strip_non_card_hashes(title: str, card_number: Optional[str]) -> str:
-    """title 中の '#XXX' のうち、card_number 以外を全部除去.
+_HASH_TOKEN = r"(?:'?\d{2}\s*-\s*)?#[A-Za-z0-9\-]+"
 
-    build_title は card# を最初の '#' 位置に置く慣習なので、最初の1つだけ残し、
-    2つ目以降の '#XX' (例: 雑誌号数 '#35', カード序列 '#1 of 100') を削除。
-    既存 selfcheck の「card# 不一致」誤検出 (Bonney "Weekly Shonen Jump '24-#35" 事故) を回避。
+
+def _hash_is_card_number(token: str, card_number: Optional[str]) -> bool:
+    """'#022' / '#OP06-022' が card_number ('022' や '022/078') を指しているか."""
+    # card_number は '022' / '022/078' / 'OP06-022' のどれで渡ってくるか呼び元次第なので、
+    # **両側とも数字の末尾だけ**で比べる (先頭ゼロも無視)。
+    num = str(card_number or "").split("/")[0].strip().split("-")[-1].lstrip("0")
+    if not num:
+        return False
+    tok = token[token.index("#") + 1:] if "#" in token else token
+    return tok.split("-")[-1].lstrip("0") == num
+
+
+def _strip_non_card_hashes(title: str, card_number: Optional[str]) -> str:
+    """title 中の '#XXX' のうち、card_number を指すもの **だけ** 残す.
+
+    ★2026-08-18: 旧実装は「最初の1つを残す」だった。build_title が card# を先頭に置く
+      前提だったが、**セット名側に号数が入ると先頭が号数になる**。
+      実害 (cert 151235549 / OP06-022 ヤマト):
+        build_title  "… Wkly Shonen Jump '24-#36-37 #OP06-022 Yamato Promo Cards"
+        旧 strip     "… Wkly Shonen Jump '24-#36-37 Yamato Promo Cards"
+                     ↑ 雑誌の号数を残して **本物のカード番号を消した**
+        → selfcheck が '#36' を card# と読んで 022 と不一致 → 出品されず (毎回)
+      card_number は引数で渡ってきているので、位置ではなく **中身で選ぶ**。
+      指すものが1つも無い時だけ従来どおり先頭を残す (振る舞いを変えない)。
+
+    削除時は直前の '24- のような号数の残骸も一緒に落とす
+    (Bonney 事故で末尾だけ `_trim_trailing_orphans` が拾っていたが、語中には残っていた)。
     """
     if not title:
         return title
+    tokens = re.findall(_HASH_TOKEN, title)
+    keep = next((t for t in tokens if _hash_is_card_number(t, card_number)), None)
+    if keep is None:
+        keep = tokens[0] if tokens else None
     seen = False
+
     def repl(m):
         nonlocal seen
-        if seen:
-            return ""
-        seen = True
-        return m.group(0)
-    result = re.sub(r"#[A-Za-z0-9\-]+", repl, title)
-    return result
+        if not seen and m.group(0) == keep:
+            seen = True
+            return m.group(0)
+        return ""
+
+    return re.sub(r"\s{2,}", " ", re.sub(_HASH_TOKEN, repl, title)).strip()
 
 
 def _trim_trailing_orphans(title: str) -> str:
