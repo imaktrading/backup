@@ -111,6 +111,58 @@ def _next_actions():
     return [ln for ln in m.group(1).split("\n") if ln.strip()]
 
 
+STALL_DAYS = 7
+
+
+def stalled_lines(rows, today, days=STALL_DAYS):
+    """**詰まった時だけ** 出す1行 (純関数)。動いていれば空 = 常時は何も出さない.
+
+    ★2026-08-18 ユーザー判断: 「PDCA が回っているなら見えなくていい。
+      ただし止まった時に気づける必要はある」。一覧は増やさず、閾値を超えた時だけ出す。
+      今日見つけた3件 (出品結果メール / 補URL追記 / レビュー待ち) は全部
+      「壊れていた」のではなく **止まっているのが見えなかった** だけだった。
+
+    rows: [{"updated_ts": "YYYY-MM-DD", ...}] の未対応リスト。
+    日付が読めない行は数えない (推測で警告を出さない)。
+    """
+    import datetime as _dt
+    try:
+        base = _dt.date.fromisoformat(str(today)[:10])
+    except Exception:                                          # noqa: BLE001
+        return []
+    old = []
+    for r in rows or []:
+        ts = str((r or {}).get("updated_ts") or "")[:10]
+        try:
+            d = _dt.date.fromisoformat(ts)
+        except Exception:                                      # noqa: BLE001
+            continue
+        if (base - d).days >= days:
+            old.append((d, r))
+    if not old:
+        return []
+    old.sort()
+    d0, r0 = old[0]
+    return [f"⚠️ program修正の未対応が {len(old)}件、"
+            f"最長 {(base - d0).days}日 動いていません "
+            f"(`python iMakHQ/tools/program_fix_backlog.py` で中身)"]
+
+
+def _stalled():
+    """pdca の program修正 pending から、止まっている分だけ拾う (I/O)。"""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import pdca_store as _p
+        con = _p.connect()
+        rows = [dict(r) for r in con.execute(
+            "SELECT item_id, updated_ts FROM improvement_queue "
+            "WHERE status='pending' AND finding_type='program_fix'")]
+        con.close()
+        return stalled_lines(rows, datetime.date.today().isoformat())
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -134,6 +186,9 @@ def main():
         for ln in vd:
             print("  " + ln)
         print("  → catalog の欠落ではない。同定経路(viewer/adapter)を直す side")
+
+    for ln in _stalled():          # 動いている限り何も出ない (常時表示しない)
+        print("\n" + ln)
 
     print("\n## 4. 今日の commit\n")
     cs = _commits()
