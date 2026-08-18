@@ -71,7 +71,31 @@ def _log(m: str) -> None:
 # ---------------------------------------------------------------------------
 # ① 収集: メルカリ検索 → 詳細 → セラーフィルタ → Vision でラベル読取
 # ---------------------------------------------------------------------------
-def collect(args, dump_path=None, resume=None) -> dict:
+def retry_urls_from(payload: dict, exclude: set | None = None) -> list[str]:
+    """前回の走行で **候補にも 目視待ちにもならなかった URL** を拾い直す対象にする (純関数).
+
+    取得失敗 (fetch_fail / item_error) は URL を残していなかったので
+    (2026-08-18 の反省)、 処理済から 成果物を引いて再処理する。
+    exclude (= 既に中間スプシに入っている URL) は除く: 再取得しても同じ行になるだけで、
+    Vision 課金と時間を捨てることになるため。
+    """
+    from sheet_writer import dedupe_key  # noqa: PLC0415
+
+    done = set()
+    for c in (payload.get("candidates") or []) + (payload.get("unreadable") or []):
+        k = dedupe_key(c.get("url") or "")
+        if k:
+            done.add(k)
+    skip = set(exclude or set())
+    out = []
+    for url in payload.get("processed_urls") or []:
+        k = dedupe_key(url)
+        if k and k not in done and k not in skip:
+            out.append(url)
+    return out
+
+
+def collect(args, dump_path=None, resume=None, urls_override=None) -> dict:
     """収集 → 詳細 → Vision。
 
     ★途中で落ちても作業を捨てない (2026-08-17 の事故対策)。
@@ -110,6 +134,8 @@ def collect(args, dump_path=None, resume=None) -> dict:
                       "vision_error": 0, "already_claimed_url": 0,
                       "already_claimed_cert": 0, "item_error": 0}
     vision_errors: list[str] = []
+    # 未判定 (取得できなかった) URL。 件数だけ出して URL を捨てると拾い直せない
+    failed_urls: list[str] = []
     # 鑑定番号が読めなかった分 (= I列空欄でスプシに入れて目視で拾う。 2026-08-18 user 指示)
     unreadable: list[dict] = []
     by_keyword: dict = {}
@@ -119,6 +145,7 @@ def collect(args, dump_path=None, resume=None) -> dict:
     if resume:
         cands = list(resume.get("candidates") or [])
         unreadable = list(resume.get("unreadable") or [])
+        failed_urls = list(resume.get("failed_urls") or [])
         for k, v in (resume.get("collect_reject") or {}).items():
             rej[k] = rej.get(k, 0) + v
         done_urls = set(resume.get("processed_urls") or [])
@@ -131,6 +158,7 @@ def collect(args, dump_path=None, resume=None) -> dict:
         if not dump_path:
             return
         _dump({"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
+               "failed_urls": failed_urls,
                "vision_errors": sorted(set(vision_errors)),
                "processed_urls": processed, "truncated": state["truncated"],
                "by_keyword": by_keyword}, dump_path, quiet=True)
@@ -145,15 +173,19 @@ def collect(args, dump_path=None, resume=None) -> dict:
 
     from sheet_writer import dedupe_key  # noqa: PLC0415
     try:
-        collected = MSch.collect_multi_keyword_urls(
-            keywords, driver, price_min=args.price_min, price_max=args.price_max,
-            cap_per_keyword=args.cap_per_keyword, manual=args.manual,
-            sleep_between_sec=args.keyword_interval,
-            progress_callback=lambda n, m: _log(f"  収集 {m}"),
-        )
-        urls = collected["urls"]
-        by_keyword = collected["by_keyword"]
-        _log(f"収集: {len(urls)} URL (dedup後) / by_keyword={by_keyword}")
+        if urls_override is not None:
+            urls = list(urls_override)
+            _log(f"拾い直し: {len(urls)} URL (検索はしない)")
+        else:
+            collected = MSch.collect_multi_keyword_urls(
+                keywords, driver, price_min=args.price_min, price_max=args.price_max,
+                cap_per_keyword=args.cap_per_keyword, manual=args.manual,
+                sleep_between_sec=args.keyword_interval,
+                progress_callback=lambda n, m: _log(f"  収集 {m}"),
+            )
+            urls = collected["urls"]
+            by_keyword = collected["by_keyword"]
+            _log(f"収集: {len(urls)} URL (dedup後) / by_keyword={by_keyword}")
         if args.max_details:
             urls = urls[:args.max_details]
             _log(f"詳細フェッチ上限 {args.max_details} 件に制限")
@@ -168,10 +200,12 @@ def collect(args, dump_path=None, resume=None) -> dict:
                 processed.append(url)
                 continue
             try:
-                kept = _process_one(url, driver, args, claimed, rej, vision_errors)
+                kept = _process_one(url, driver, args, claimed, rej, vision_errors,
+                                    failed=failed_urls)
                 consecutive_errors = 0
             except Exception as e:  # noqa: BLE001 - 1 件の失敗で走行全体を殺さない
                 rej["item_error"] += 1
+                failed_urls.append(url)
                 consecutive_errors += 1
                 _log(f"  ⚠️ {i}/{len(urls)} 取得エラー ({consecutive_errors}連続): "
                      f"{type(e).__name__}")
@@ -217,16 +251,22 @@ def collect(args, dump_path=None, resume=None) -> dict:
     if state["truncated"]:
         _log("⚠️ 要対応: 途中で打ち切りました。 --resume-from-json で続きから再開できます")
     return {"candidates": cands, "unreadable": unreadable, "collect_reject": rej,
+            "failed_urls": failed_urls,
             "vision_errors": sorted(set(vision_errors)),
             "processed_urls": processed, "truncated": state["truncated"],
             "by_keyword": by_keyword}
 
 
-def _process_one(url, driver, args, claimed, rej, vision_errors):
-    """1 件を判定して 候補 dict を返す (対象外なら None)。 例外は呼出側で捕まえる."""
+def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
+    """1 件を判定して 候補 dict を返す (対象外なら None)。 例外は呼出側で捕まえる.
+
+    failed: 取得できなかった URL を貯めるリスト (= 未判定。 件数だけでなく URL を残す)。
+    """
     detail = mercari_item_detail.fetch_detail(driver, url)
     if not detail:
         rej["fetch_fail"] += 1
+        if failed is not None:
+            failed.append(url)
         return None
     if not detail.get("in_stock"):
         rej["sold"] += 1
@@ -435,6 +475,8 @@ def main(argv=None) -> int:
                     help="連続失敗が何回でドライバを作り直すか (既定3)")
     ap.add_argument("--resume-from-json", default=None,
                     help="前回の JSON から再開 (処理済 URL を飛ばす)")
+    ap.add_argument("--retry-from-json", default=None,
+                    help="前回 未判定だった URL を拾い直す (検索はやり直さない)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
@@ -448,12 +490,30 @@ def main(argv=None) -> int:
         # ★保存先を collect() に渡す = 走行中ずっと途中セーブされる。
         # 再開時は同じファイルを上書きし続けるので、 何度落ちても続きから積み上がる。
         resume = None
-        if args.resume_from_json:
+        urls_override = None
+        if args.retry_from_json:
+            # 未判定 (取得できなかった) 分の拾い直し。 検索はやり直さない。
+            src = json.loads(Path(args.retry_from_json).read_text(encoding="utf-8"))
+            exclude = set()
+            try:
+                from sheet_writer_mercari_search import load_keys_all_tabs  # noqa: PLC0415
+                from sheet_writer_mercari_seller import (  # noqa: PLC0415
+                    open_seller_staging_sheet,
+                )
+                exclude = load_keys_all_tabs(open_seller_staging_sheet())
+                _log(f"中間スプシに既に入っている URL: {len(exclude)} 件 (拾い直しから除く)")
+            except Exception as e:  # noqa: BLE001 - 読めなくても拾い直しはできる
+                _log(f"⚠️ 中間スプシを読めず除外なしで続行: {type(e).__name__}")
+            urls_override = retry_urls_from(src, exclude=exclude)
+            path = DUMP_DIR / f"mercari_psa10_retry_{datetime.now():%Y%m%dT%H%M%S}.json"
+            _log(f"拾い直し対象: {len(urls_override)} URL (元 {args.retry_from_json})")
+        elif args.resume_from_json:
             path = Path(args.resume_from_json)
             resume = json.loads(path.read_text(encoding="utf-8"))
         else:
             path = DUMP_DIR / f"mercari_psa10_{datetime.now():%Y%m%dT%H%M%S}.json"
-        payload = collect(args, dump_path=path, resume=resume)
+        payload = collect(args, dump_path=path, resume=resume,
+                          urls_override=urls_override)
         _dump(payload, path)
         if args.verify:
             payload["verify_stats"] = verify_all(payload["candidates"],

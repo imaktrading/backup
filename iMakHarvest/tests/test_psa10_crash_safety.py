@@ -72,7 +72,7 @@ def test_saves_partway_not_only_at_the_end(monkeypatch, stub, tmp_path):
     """save_every 件ごとに JSON が育つ (= 落ちても直前までが残る)."""
     seen_counts = []
 
-    def one(url, driver, args, claimed, rej, vision_errors):
+    def one(url, driver, args, claimed, rej, vision_errors, failed=None):
         # 保存済ファイルの候補数を毎回記録する
         if dump.exists():
             seen_counts.append(len(json.loads(dump.read_text(encoding="utf-8"))["candidates"]))
@@ -113,7 +113,7 @@ def test_dump_is_atomic(monkeypatch, stub, tmp_path):
 # --------------------------------------------------------------------------
 
 def test_one_bad_item_does_not_kill_the_run(monkeypatch, stub, tmp_path):
-    def one(url, driver, args, claimed, rej, vision_errors):
+    def one(url, driver, args, claimed, rej, vision_errors, failed=None):
         if url.endswith("m2"):
             raise RuntimeError("read timeout")  # 事故と同じ形
         return _candidate(url)
@@ -134,7 +134,7 @@ def test_driver_is_recreated_after_consecutive_failures(monkeypatch, stub, tmp_p
 
     calls = {"n": 0}
 
-    def one(url, driver, args, claimed, rej, vision_errors):
+    def one(url, driver, args, claimed, rej, vision_errors, failed=None):
         calls["n"] += 1
         if calls["n"] <= 3:
             raise RuntimeError("chrome not reachable")
@@ -176,7 +176,7 @@ def test_resume_skips_already_processed_urls(monkeypatch, stub, tmp_path):
 
     touched = []
 
-    def one(url, driver, args, claimed, rej, vision_errors):
+    def one(url, driver, args, claimed, rej, vision_errors, failed=None):
         touched.append(url)
         return _candidate(url)
 
