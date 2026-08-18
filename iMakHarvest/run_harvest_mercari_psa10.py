@@ -509,6 +509,8 @@ def main(argv=None) -> int:
         # 再開時は同じファイルを上書きし続けるので、 何度落ちても続きから積み上がる。
         resume = None
         urls_override = None
+        # 拾い直しの途中で落ちた時は --retry-from-json と --resume-from-json を併用する
+        # (拾い直し対象は元 JSON から作り、 処理済は再開 JSON から飛ばす)。
         if args.retry_from_json:
             # 未判定 (取得できなかった) 分の拾い直し。 検索はやり直さない。
             src = json.loads(Path(args.retry_from_json).read_text(encoding="utf-8"))
@@ -523,7 +525,11 @@ def main(argv=None) -> int:
             except Exception as e:  # noqa: BLE001 - 読めなくても拾い直しはできる
                 _log(f"⚠️ 中間スプシを読めず除外なしで続行: {type(e).__name__}")
             urls_override = retry_urls_from(src, exclude=exclude)
-            path = DUMP_DIR / f"mercari_psa10_retry_{datetime.now():%Y%m%dT%H%M%S}.json"
+            if args.resume_from_json:
+                path = Path(args.resume_from_json)
+                resume = json.loads(path.read_text(encoding="utf-8"))
+            else:
+                path = DUMP_DIR / f"mercari_psa10_retry_{datetime.now():%Y%m%dT%H%M%S}.json"
             _log(f"拾い直し対象: {len(urls_override)} URL (元 {args.retry_from_json})")
         elif args.resume_from_json:
             path = Path(args.resume_from_json)
