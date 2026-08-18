@@ -825,7 +825,10 @@ SCRIPTS = [
         "double_check": True,
         "cwd": f"{WORKSPACE}/iMakTCG",
         "cmd": ["python", "psa_to_csv.py"],
-        "env": {"TCG_USE_NEW_GEN": "1", "PSA_VERIFY_BEFORE_BUILD": "1"},
+        # ★2026-08-18 ユーザー指示「自動だけ20件」。手動 (PSA TCG) は既定 15 のまま。
+        #   値は env で注入 = コード側に「自動なら〜」の分岐を作らない。
+        "env": {"TCG_USE_NEW_GEN": "1", "PSA_VERIFY_BEFORE_BUILD": "1",
+                "PSA_BATCH_LIMIT": "20"},
         "params": [],
         "auto_full": True,
     },

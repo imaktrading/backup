@@ -122,3 +122,20 @@ def test_メール本文は件数とURL():
     assert "https://www.ebay.com/itm/820013549916" in body
     subject_ng, body_ng = ns["build_upload_mail"]({"listed": [], "ng": 2})
     assert "失敗" in subject_ng and "失敗 2件" in body_ng
+
+
+def test_自動だけ20件_手動は既定のまま():
+    """ユーザー指示 (2026-08-18)。上限はコード分岐でなく env で注入する。"""
+    e = _entry()
+    assert '"PSA_BATCH_LIMIT": "20"' in e
+    src = _src()
+    i = src.index('"category": "PSA TCG", "type": "new"')
+    manual = src[i:src.index("    },\n", i)]
+    assert "PSA_BATCH_LIMIT" not in manual, "手動側に上限を足さない (既定15のまま)"
+
+
+def test_生成側は環境変数で上限を読む():
+    gen = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "iMakTCG", "psa_to_csv.py")
+    s = io.open(gen, encoding="utf-8").read()
+    assert 'os.environ.get("PSA_BATCH_LIMIT") or 15' in s, "既定は 15 のまま"

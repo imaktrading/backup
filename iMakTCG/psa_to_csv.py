@@ -3064,7 +3064,13 @@ def main():
     # 一回 15 件まで固定 (Cloudflare bot 検出回避、2026-05-06 / 2026-08-11 に 10→15)
     # ★上げたのは **上の preflight で無駄玉を先に落とした後**だから (先に上げると無駄玉が15件になる)
     # 残りは時間を置いて次回再走で順次処理
-    PSA_BATCH_LIMIT = 15
+    # ★2026-08-18: 🤖自動 だけ 20 件にする (ユーザー指示)。値は **外から注入** し、
+    #   コードに「自動なら〜」の分岐を作らない。手動 (PSA TCG) は既定の 15 のまま。
+    #   上げすぎると Cloudflare の bot 検出に触れるので、既定値は動かさない。
+    try:
+        PSA_BATCH_LIMIT = max(1, int(os.environ.get("PSA_BATCH_LIMIT") or 15))
+    except ValueError:
+        PSA_BATCH_LIMIT = 15
     if len(cert_numbers) > PSA_BATCH_LIMIT:
         # franchise 均等サンプリング (2026-06-23 ユーザー要望: Pokemon/One Piece/Dragon Ball 均等)
         # 在庫は Pokemon 大半 → 従来の全体 shuffle だと Pokemon ばかり選ばれ OP/DB が滞留。
