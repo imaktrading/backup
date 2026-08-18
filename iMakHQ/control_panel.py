@@ -2195,6 +2195,10 @@ class ListingPanel:
         toolbar.pack(fill="x")
         ttk.Button(toolbar, text="🛑 実行中を停止", width=18,
                    command=self.stop_script).pack(side="right")
+        # ★2026-08-18: 開く時は前回値を出すだけにしたので、数え直す口をここに置く。
+        #   このパネルには「更新」が無く、走行後 (poll_queue) までラベルが古いままになるため。
+        ttk.Button(toolbar, text="🔄 残件を数え直す (約20秒)", width=26,
+                   command=self._recount_hoju).pack(side="right", padx=4)
 
         top_frame = ttk.LabelFrame(root, text="スクリプト一覧", padding=8)
         top_frame.pack(fill="x", padx=8, pady=(0, 4))
@@ -2555,8 +2559,9 @@ class ListingPanel:
         self.proc = None
         self.queue = queue.Queue()
         self.root.after(100, self.poll_queue)
-        # ★補URL の残件をボタンに出す。UI を止めないよう別スレッドで後追い表示。
-        self.root.after(300, self.refresh_hoju_badge)
+        # ★補URL の残件は **前回値をそのまま出す** (計算しない = 一瞬で開く)。
+        #   数え直しは 🔄 を押した時と走行の後。2026-08-18 実測: 数え直すと 18秒 固まる。
+        self.root.after(300, self.show_cached_hoju_badge)
 
     _HOJU_BADGE_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      "review_logs", "hoju_badge_cache.json")
@@ -2577,6 +2582,45 @@ class ListingPanel:
             return d if isinstance(d, dict) and d else None
         except Exception:                                         # noqa: BLE001
             return None
+
+    def _recount_hoju(self):
+        """🔄 押下: 数え直す。押した本人は待つと分かっているので同期でよい。"""
+        try:
+            self.status_var.set("残件を数え直しています…")
+            self.root.update_idletasks()
+        except Exception:                                         # noqa: BLE001
+            pass
+        try:
+            self.refresh_hoju_badge()
+        finally:
+            try:
+                self.status_var.set("待機中")
+            except Exception:                                     # noqa: BLE001
+                pass
+
+    def paint_hoju_badge(self, by_kind, act_kind=None):
+        """数えた結果をボタンのラベルに焼く (計算しない・純粋な描画)。"""
+        act_kind = act_kind or {}
+        for b, base, kind in self._hoju_btns:
+            try:
+                txt = base + by_kind.get(kind, "")
+                b.config(text=txt, height=max(3, min(7, txt.count(chr(10)) + 2)),
+                         fg=("#0066cc" if act_kind.get(kind) else "black"))
+            except Exception:                                     # noqa: BLE001
+                pass
+
+    def show_cached_hoju_badge(self):
+        """前回の数字をそのまま出す (計算しない = 一瞬)。
+
+        ★2026-08-18: 開いた時に数え直していたので **18秒 画面が固まっていた**
+          (書いた当時は実測3秒。データが増えて伸びた)。ホーム・新規出品・既存メンテの
+          どれを開いても同じ待ちが出ていた。
+          開く時は前回値、数え直すのは 🔄 を押した時と走行の後 (どうせ画面を見ていない時間)。
+          裏スレッドには回さない — 過去に4回失敗している (Tk はスレッドセーフでない)。
+        """
+        cached = self._hoju_badge_cache()
+        if cached:
+            self.paint_hoju_badge({k: v + "\n※前回値 (🔄 で更新)" for k, v in cached.items()})
 
     def refresh_hoju_badge(self):
         """補URL の残件をボタンのラベルに出す (2026-08-09 ユーザー要望)。
@@ -2706,14 +2750,7 @@ class ListingPanel:
                 pass
         else:
             self._hoju_badge_cache(by_kind)
-        for b, base, kind in self._hoju_btns:
-            try:
-                txt = base + by_kind.get(kind, "")
-                # 行数ぶん高さを確保 (ラベルがボタンからはみ出さない)
-                b.config(text=txt, height=max(3, min(7, txt.count(chr(10)) + 2)),
-                         fg=("#0066cc" if act_kind.get(kind) else "black"))
-            except Exception:                                     # noqa: BLE001
-                pass
+        self.paint_hoju_badge(by_kind, act_kind)
 
     def append_log(self, text):
         # tag判定
