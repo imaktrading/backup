@@ -392,6 +392,22 @@ rarity:
     ebay: Uncommon
   - source: R_C
     ebay: Rare
-  # MUR / SS / BWR / C2 / U2 は公式の長形名が確認できていないため **意図的に未登録**
+  # 公式は rarity をアイコン画像 (ic_rare_*.gif) でしか持たず長形名が存在しないため、
+  # eBay 表記は HQ 裁定 2026-08-18
+  # (requests/2026-08-13_rarity_17rows_naming_decision_req_response.md) で確定。
+  # 全値とも eBay master (cat 183454) の canonical 57 値に実在することを HQ が確認済。
+  - source: MUR
+    ebay: Ultra Rare
+    note: ic_rare_MUR.gif (M Zygarde-ex 117/080 等 Mega ex 期のセット番号超え, 6件)。UR と同列。
+  - source: BWR
+    ebay: Secret Rare
+    note: ic_rare_bwr.gif (Zekrom ex 174/086 ブラックボルト / Reshiram ex ホワイトフレア, 2件)。
+  - source: C2
+    ebay: Common
+    note: ic_rare_c2.gif (Charmander DP 期)。
+  - source: U2
+    ebay: Uncommon
+    note: ic_rare_u2.gif (Charmeleon DP 期)。
+  # SS は公式の長形名も HQ 裁定も無いため **意図的に未登録**
   # (= derive_rarity_ebay が None を返し C:Rarity 空欄 → 出品側で fail-closed skip)。
   # 推測でマッピングを作らない (誤出品 > 出品数減 の原則)。

@@ -91,14 +91,33 @@ def _derive_set_name_ebay(conn, category: str, set_name_official, product_id):
 _RARITY_STAR_RE = re.compile(r"[★☆+]+\s*$")
 
 
-def _derive_rarity_ebay(conn, category: str, rarity_raw):
-    """api.derive_rarity_ebay と同順 (マーカーを落として filter_map) — 無ければ None."""
+def _rarity_lookup_keys(rarity_raw):
+    """api.rarity_lookup_keys と同じ (①マーカー除去した生値 ②'<基底> SP' なら基底).
+
+    HQ 裁定 2026-08-18 (2026-08-13_rarity_17rows_naming_decision_req_response.md)。
+    api を import しない理由は上の §6 と同じ (in-memory temp DB のテスト)。
+    ★変更する場合は api.rarity_lookup_keys と両方同時に直す
+      (tests/test_rarity_sp_composite_20260818.py が両者の一致を毎回検査する)。
+    """
     if not rarity_raw:
-        return None
+        return []
     base = _RARITY_STAR_RE.sub("", str(rarity_raw).strip()).strip()
     if not base:
-        return None
-    return _fmap_lookup(conn, category, "rarity", base)
+        return []
+    keys = [base]
+    toks = base.split()
+    if len(toks) == 2 and sum(1 for t in toks if t.upper() == "SP") == 1:
+        keys.append(next(t for t in toks if t.upper() != "SP"))
+    return keys
+
+
+def _derive_rarity_ebay(conn, category: str, rarity_raw):
+    """api.derive_rarity_ebay と同順 (候補キーを順に filter_map) — 無ければ None."""
+    for key in _rarity_lookup_keys(rarity_raw):
+        v = _fmap_lookup(conn, category, "rarity", key)
+        if v:
+            return v
+    return None
 
 
 def setcode_era(sc: str):

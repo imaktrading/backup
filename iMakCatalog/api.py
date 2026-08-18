@@ -273,6 +273,31 @@ def has_rarity_variant_mark(rarity_raw: Optional[str]) -> bool:
     return bool(rarity_raw) and bool(_RARITY_VARIANT_MARK_RE.search(rarity_raw.strip()))
 
 
+def rarity_lookup_keys(rarity_raw: Optional[str]) -> list:
+    """filter_map を引く候補キーを優先順で返す (先に当たったものを採る).
+
+    ① マーカー (★ / +) を落とした生値そのもの
+    ② 空白区切りの '<基底コード> SP' 複合なら基底コード
+       HQ 裁定 2026-08-18 (requests/2026-08-13_rarity_17rows_naming_decision_req_response.md):
+       「生コードが <基底コード> SP の複合なら、基底コードのマップ値を採る。
+         SP 単独 (SP / SPカード) だけ Special」
+       → SR SP=Super Rare / SEC SP=Secret Rare / R SP=Rare / SP P=Promo。
+       SP 単独は ① が yaml の 'SP' / 'SPカード' に当たるのでここには来ない。
+       gundam の連結形 (SPLR / SPR / SPU) は yaml に個別登録済で、ここは空白区切りだけを見る。
+    基底が未登録なら None のまま = fail-closed 空欄 (推測でマッピングを作らない)。
+    """
+    if not rarity_raw:
+        return []
+    base = _RARITY_VARIANT_MARK_RE.sub("", str(rarity_raw).strip()).strip()
+    if not base:
+        return []
+    keys = [base]
+    toks = base.split()
+    if len(toks) == 2 and sum(1 for t in toks if t.upper() == "SP") == 1:
+        keys.append(next(t for t in toks if t.upper() != "SP"))
+    return keys
+
+
 def derive_rarity_ebay(category: str, rarity_raw: Optional[str]) -> Optional[str]:
     """公式 rarity コード → eBay canonical 値. filter_map miss は None (fail-closed).
 
@@ -280,15 +305,16 @@ def derive_rarity_ebay(category: str, rarity_raw: Optional[str]) -> Optional[str
     させないのが要点で、生コード ('U' / 'LR+' / 'SPカード') が C:Rarity に出る事故
     (2026-08-13 cert158452539) はこの degrade が原因だった。
 
+    候補キーの順は rarity_lookup_keys() が SSOT (複合 '<基底> SP' を含む)。
+
     derive_set_name_ebay と同じ SSOT 方針: 出品側は specs.rarity_ebay を
     そのまま消費し、変換しない (契約 v1.2 §1-1)。
     """
-    if not rarity_raw:
-        return None
-    base = _RARITY_VARIANT_MARK_RE.sub("", rarity_raw.strip()).strip()
-    if not base:
-        return None
-    return to_ebay_value(category, "rarity", base)
+    for key in rarity_lookup_keys(rarity_raw):
+        v = to_ebay_value(category, "rarity", key)
+        if v:
+            return v
+    return None
 
 
 # B層 verified status (= b_layer_status テーブル. 2026-06-07 新設)

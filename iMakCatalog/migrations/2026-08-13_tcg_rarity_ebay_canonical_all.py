@@ -59,9 +59,11 @@ ALT_ART_EQUIV = {"Alternative Art", "Alt Art"}
 # yaml から外した「変換になっていない」エントリ (source == ebay の生コード) を DB からも消す。
 # loader は upsert なので yaml で消しただけでは DB に残り、生値漏れが続くため。
 # 注: 恒等でも 'Special'→'Special' のように eBay master 実在値なら正しいので個別に指定する。
-BAD_MAP_ENTRIES = [
-    ("pokemon_tcg", "MUR"),   # 公式長形名を確認できず → 未登録にして fail-closed 空欄へ
-]
+# ★2026-08-18 空にした: 唯一の要素だった ("pokemon_tcg", "MUR") は HQ 裁定
+# (requests/2026-08-13_rarity_17rows_naming_decision_req_response.md) で
+# 'Ultra Rare' として yaml に正式登録された。この migration を再実行すると
+# その登録を黙って消してしまうため、要素を残さない。
+BAD_MAP_ENTRIES: list[tuple[str, str]] = []
 
 
 def process(commit: bool) -> int:

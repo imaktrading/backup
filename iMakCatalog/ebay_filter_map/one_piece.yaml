@@ -708,5 +708,9 @@ rarity:
       公式 JP 表示 "SPカード" / 公式 EN 表示 "SP CARD" (asia-en cardlist, 2026-08-13 実取得)。
       eBay master (cat 183454) の canonical 57 値に 'SP CARD' は無く 'Special' が実在値なので
       'Special' を採用。旧: 生値 'SPカード' が C:Rarity にそのまま出ていた (118件)。
+  # 複合コード '<基底> SP' (SP 再録: SR SP / SEC SP / R SP / SP P) は個別登録しない。
+  # api.rarity_lookup_keys() が基底コード側 (SR / SEC / R / P) を引く。
+  # HQ 裁定 2026-08-18 requests/2026-08-13_rarity_17rows_naming_decision_req_response.md
+  # 「SP 単独 (SP / SPカード) だけ Special」= 上の 2 entry がそれ。
   - source: DON!!
     ebay: DON!!

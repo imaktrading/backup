@@ -11,7 +11,8 @@
   - pokemon   C_C / U_C / R_C は rarity 画像の type marker 付き別表記 (= C/U/R)
 
 不変条件: **specs.rarity_ebay に公式生コードがそのまま入っている行は 0 件**。
-公式長形名が確認できない code (MUR/SS/BWR/C2/U2) は推測せず空欄 = fail-closed。
+裁定も公式長形名も無い code (SS 等) は推測せず空欄 = fail-closed。
+(MUR/BWR/C2/U2 は 2026-08-18 の HQ 裁定で確定 → test_rarity_sp_composite_20260818.py)
 """
 from __future__ import annotations
 
@@ -95,8 +96,13 @@ class TestDerive:
         assert api.derive_rarity_ebay("pokemon_tcg", "R_C") == "Rare"
 
     def test_unknown_codes_stay_fail_closed(self):
-        """公式長形名を確認できない code は推測せず None (= 空欄 → 出品側 skip)."""
-        for code in ("MUR", "SS", "BWR", "C2", "U2"):
+        """裁定も公式長形名も無い code は推測せず None (= 空欄 → 出品側 skip).
+
+        ★2026-08-18: MUR / BWR / C2 / U2 は HQ 裁定で eBay 表記が確定したのでこの
+        リストから外した (requests/2026-08-13_rarity_17rows_naming_decision_req_response.md、
+        アンカーは tests/test_rarity_sp_composite_20260818.py)。SS は未裁定のまま。
+        """
+        for code in ("SS", "ZZZ"):
             assert api.derive_rarity_ebay("pokemon_tcg", code) is None, code
 
     def test_filter_map_has_no_marked_source(self):

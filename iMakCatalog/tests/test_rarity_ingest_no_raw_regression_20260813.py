@@ -35,9 +35,13 @@ class TestPhaseBNoRawFallback:
         self.m = _load("migrations/2026-05-30_tcg_ebay_fields_phase_b_rarity.py", "_phase_b")
 
     def test_unknown_code_is_none_not_raw(self):
-        """辞書にも filter_map にも無いコードは None。raw を返さない."""
-        for cat, code in (("gundam_tcg", "ZZZ"), ("pokemon_tcg", "MUR"),
-                          ("one_piece_tcg", "SR SP"), ("dragonball_scg", "QQ")):
+        """辞書にも filter_map にも無いコードは None。raw を返さない.
+
+        ★2026-08-18: pokemon 'MUR' / one_piece 'SR SP' は HQ 裁定で map 済になったので
+        未登録サンプルを差し替えた (test_rarity_sp_composite_20260818.py が裁定側を検査)。
+        """
+        for cat, code in (("gundam_tcg", "ZZZ"), ("pokemon_tcg", "SS"),
+                          ("one_piece_tcg", "ZZZ SP"), ("dragonball_scg", "QQ")):
             assert self.m.resolve_rarity_ebay(cat, code) is None, (cat, code)
 
     def test_marker_codes_are_canonical(self):
@@ -48,6 +52,9 @@ class TestPhaseBNoRawFallback:
 
     def test_known_codes_still_resolve(self):
         assert self.m.resolve_rarity_ebay("one_piece_tcg", "SEC") == "Secret Rare"
+        # '<基底> SP' 複合は基底に落ちる (HQ 裁定 2026-08-18)。取込経路でも効くこと
+        assert self.m.resolve_rarity_ebay("one_piece_tcg", "SR SP") == "Super Rare"
+        assert self.m.resolve_rarity_ebay("pokemon_tcg", "MUR") == "Ultra Rare"
         assert self.m.resolve_rarity_ebay("one_piece_tcg", "SPカード") == "Special"
         assert self.m.resolve_rarity_ebay("pokemon_tcg", "RR") == "Double Rare"
         assert self.m.resolve_rarity_ebay("gundam_tcg", "LR") == "Legend Rare"
