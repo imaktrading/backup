@@ -22,7 +22,82 @@ category: pokemon_tcg
 # Set (公式原文ベタ一致) — Pokemon は『拡張パック「XXX」』『ハイクラスパック「YYY」』 形式
 # 必要な promo / 特殊 set 用. 通常 set は set_code 経路を使う.
 # ============================================================================
-set: []
+set:
+  # ── 表記規約22セット (現行 20 official / 15 set / 2,051行) ─────────────────
+  # master に「コード形」と「長形/素名」が併存するセットは **コード形** を採る。
+  # HQ 裁定 2026-08-18
+  # (requests/2026-08-10_tcg_ssot_a4_result_and_one_decision_req_response.md)
+  # 根拠は eBay 本番 API 実測 (cat 183454 / EBAY_US) の出品件数:
+  #   Lost Origin      171,639 (コード形) vs 22,904 (`Sword & Shield - Lost Origin`) = 7.5倍
+  #   Obsidian Flames  176,034          vs 23,179                                   = 7.6倍
+  #   対抗が素名なら差 10% 以内 → コード形は最悪でも引き分け、長形相手には圧勝。
+  #
+  # ★値は eBay master (cat 183454 / 2,290値) の **verbatim**。組み立てないこと
+  #   (`SV02:` は master に無く `Sv02:` が正)。1文字違っても eBay はエラーを返さず
+  #   カテゴリ全件 (29,506,821件) が返る = 絞り込めていないのに正常応答に見える。
+  #   `Swsh12: Sword & Shield - Silver Tempest` のようにコード形自体がシリーズ名を
+  #   含む値もあるが、master 実在値なのでそのまま使う (整形しない)。
+  # 回帰: tests/test_set_name_codeform_20260818.py
+  - source: "強化拡張パック「Pokémon GO」"
+    ebay: "S10b: Pokémon GO"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Pokémon GO", 101行)
+  - source: "拡張パック「黒炎の支配者」"
+    ebay: "SV03: Obsidian Flames"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Scarlet & Violet - Obsidian Flames", 141行)
+  - source: "拡張パック「摩天パーフェクト」"
+    ebay: "SWSH07: Evolving Skies"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Evolving Skies", 79行)
+  - source: "強化拡張パック「ひかる伝説」"
+    ebay: "Sm3+: Shining Legends"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Shining Legends", 77行)
+  - source: "拡張パック「ひかる伝説」"
+    ebay: "Sm3+: Shining Legends"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Shining Legends", 2行)
+  - source: "拡張パック「バトルパートナーズ」"
+    ebay: "Sv09: Journey Together"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Journey Together", 132行)
+  - source: "ハイクラスパック「テラスタルフェスex」"
+    ebay: "Sv: Prismatic Evolutions"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Prismatic Evolutions", 237行)
+  - source: "拡張パック「反逆クラッシュ」"
+    ebay: "Swsh02: Rebel Clash"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Rebel Clash", 106行)
+  - source: "拡張パック「ムゲンゾーン」"
+    ebay: "Swsh03: Darkness Ablaze"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Darkness Ablaze", 110行)
+  - source: "拡張パック「仰天のボルテッカー」"
+    ebay: "Swsh04: Vivid Voltage"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Vivid Voltage", 111行)
+  - source: "強化拡張パック「双璧のファイター」"
+    ebay: "Swsh05: Battle Styles"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Battle Styles", 84行)
+  - source: "拡張パック「一撃マスター」"
+    ebay: "Swsh05: Battle Styles"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Battle Styles", 81行)
+  - source: "拡張パック「連撃マスター」"
+    ebay: "Swsh05: Battle Styles"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Battle Styles", 81行)
+  - source: "拡張パック「漆黒のガイスト」"
+    ebay: "Swsh06: Sword & Shield - Chilling Reign"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Chilling Reign", 83行)
+  - source: "拡張パック「白銀のランス」"
+    ebay: "Swsh06: Sword & Shield - Chilling Reign"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Chilling Reign", 83行)
+  - source: "拡張パック「フュージョンアーツ」"
+    ebay: "Swsh08: Fusion Strike"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Fusion Strike", 115行)
+  - source: "拡張パック「スペースジャグラー」"
+    ebay: "Swsh10: Astral Radiance"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Astral Radiance", 88行)
+  - source: "拡張パック「タイムゲイザー」"
+    ebay: "Swsh10: Astral Radiance"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Astral Radiance", 88行)
+  - source: "拡張パック「ロストアビス」"
+    ebay: "Swsh11: Lost Origin"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Lost Origin", 127行)
+  - source: "拡張パック「パラダイムトリガー」"
+    ebay: "Swsh12: Sword & Shield - Silver Tempest"
+    note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Silver Tempest", 125行)
 
 # ============================================================================
 # Set code — DB の product_id prefix から抽出. api._row_to_dict が自動でフォールバック

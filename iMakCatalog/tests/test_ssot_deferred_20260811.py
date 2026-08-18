@@ -1,12 +1,12 @@
 """SSOT deferred 反映 (2026-08-11 Advisor GO) の回帰テスト.
 
 依頼: iMak_data/catalog/requests/2026-08-11_tcg_ssot_apply_result_and_deferred_response.md
-  §1 表記規約22セット → 長形 (人が読める非-code 形)
+  §1 表記規約22セット → **コード形** (2026-08-18 HQ 裁定で長形から変更)
   §4 SM4p 121件 (SM4p-* 120 + SM-P-145 1) → canonical `Sm4+: GX Battle Boost`
       + b_layer_status を unverified → verified_auto
 
 このテストが守る不変条件:
-  A) 22セットの現行 set_name_ebay が長形 (em-dash / code 形 でない)
+  A) 22セットの現行 set_name_ebay が master verbatim の**コード形**
   B) SM4p+SM-P-145 の 121行が canonical `Sm4+: GX Battle Boost`
   C) blanked_by_ultra_prism_mismap_20260731 の残りが 206 (327 - 121)
   D) SM4p の b_layer_status が verified_auto
@@ -25,35 +25,50 @@ sys.path.insert(0, str(_REPO))
 import api  # type: ignore  # noqa: E402
 
 
-# §1 長形適用の期待値 (set_name_official → expected set_name_ebay).
-# 4 群 (Sword & Shield - X / Scarlet & Violet - X) は master に regular-dash 版が在り、
-# 残り 11 群は master に bare 版のみ (Astral Radiance / Fusion Strike 等) が在る。
-LONGFORM_EXPECTED = {
-    "拡張パック「ロストアビス」":         "Sword & Shield - Lost Origin",
-    "拡張パック「漆黒のガイスト」":        "Sword & Shield - Chilling Reign",
-    "拡張パック「白銀のランス」":         "Sword & Shield - Chilling Reign",
-    "拡張パック「一撃マスター」":         "Sword & Shield - Battle Styles",
-    "拡張パック「連撃マスター」":         "Sword & Shield - Battle Styles",
-    "強化拡張パック「双璧のファイター」":    "Sword & Shield - Battle Styles",
-    "拡張パック「パラダイムトリガー」":     "Sword & Shield - Silver Tempest",
-    "拡張パック「黒炎の支配者」":         "Scarlet & Violet - Obsidian Flames",
-    "拡張パック「スペースジャグラー」":     "Astral Radiance",
-    "拡張パック「タイムゲイザー」":        "Astral Radiance",
-    "拡張パック「バトルパートナーズ」":     "Journey Together",
-    "拡張パック「フュージョンアーツ」":     "Fusion Strike",
-    "拡張パック「ムゲンゾーン」":         "Darkness Ablaze",
-    "拡張パック「仰天のボルテッカー」":     "Vivid Voltage",
-    "拡張パック「反逆クラッシュ」":        "Rebel Clash",
-    "拡張パック「摩天パーフェクト」":       "Evolving Skies",
-    "強化拡張パック「Pokémon GO」":     "Pokémon GO",
-    "強化拡張パック「ひかる伝説」":        "Shining Legends",
-    "拡張パック「ひかる伝説」":          "Shining Legends",
+# §1 コード形適用の期待値 (set_name_official → expected set_name_ebay).
+#
+# ★2026-08-18 変更: 長形 → コード形。
+#   本テストは元々 2026-08-11 の Advisor 暫定 GO (長形) を守っていたが、その暫定 GO 自身が
+#   「どちらの表記に出品が多く集まっているかは測れていません (eBay 検索は 403)。
+#     **後で分かれば戻せる範囲の判断です**」と明記していた。
+#   HQ が 2026-08-18 に eBay 本番 API (cat 183454 / EBAY_US) で実測し、
+#   長形が相手のときコード形が 7.5倍 (Lost Origin 171,639 vs 22,904 /
+#   Obsidian Flames 176,034 vs 23,179)、素名が相手なら差 10% 以内 = 最悪でも引き分け。
+#   → コード形で確定。回答書:
+#      requests/2026-08-10_tcg_ssot_a4_result_and_one_decision_req_response.md [IMPLEMENT-GO]
+#
+# 値は eBay master (cat 183454 / 2,290値) の **verbatim**。組み立てない
+# (`SV02:` は master に無く `Sv02:` が正)。1文字違うと eBay はエラーを返さず
+# カテゴリ全件が返る = 絞り込めていないのに正常応答に見える。
+# `Swsh12: Sword & Shield - Silver Tempest` のようにコード形自体がシリーズ名を含む値もそのまま。
+CODEFORM_EXPECTED = {
+    "拡張パック「ロストアビス」":         "Swsh11: Lost Origin",
+    "拡張パック「漆黒のガイスト」":        "Swsh06: Sword & Shield - Chilling Reign",
+    "拡張パック「白銀のランス」":         "Swsh06: Sword & Shield - Chilling Reign",
+    "拡張パック「一撃マスター」":         "Swsh05: Battle Styles",
+    "拡張パック「連撃マスター」":         "Swsh05: Battle Styles",
+    "強化拡張パック「双璧のファイター」":    "Swsh05: Battle Styles",
+    "拡張パック「パラダイムトリガー」":     "Swsh12: Sword & Shield - Silver Tempest",
+    "拡張パック「黒炎の支配者」":         "SV03: Obsidian Flames",
+    "拡張パック「スペースジャグラー」":     "Swsh10: Astral Radiance",
+    "拡張パック「タイムゲイザー」":        "Swsh10: Astral Radiance",
+    "拡張パック「バトルパートナーズ」":     "Sv09: Journey Together",
+    "拡張パック「フュージョンアーツ」":     "Swsh08: Fusion Strike",
+    "拡張パック「ムゲンゾーン」":         "Swsh03: Darkness Ablaze",
+    "拡張パック「仰天のボルテッカー」":     "Swsh04: Vivid Voltage",
+    "拡張パック「反逆クラッシュ」":        "Swsh02: Rebel Clash",
+    "拡張パック「摩天パーフェクト」":       "SWSH07: Evolving Skies",
+    "強化拡張パック「Pokémon GO」":     "S10b: Pokémon GO",
+    "強化拡張パック「ひかる伝説」":        "Sm3+: Shining Legends",
+    "拡張パック「ひかる伝説」":          "Sm3+: Shining Legends",
+    # 2026-08-18 追加: HQ 実測表に在るが 08-11 の長形リストから漏れていた 1 群
+    "ハイクラスパック「テラスタルフェスex」":  "Sv: Prismatic Evolutions",
 }
-LONGFORM_TOTAL_ROWS = 1814     # 実測値 (19 (set_official, se) pairs 合計)
+CODEFORM_TOTAL_ROWS = 2051     # 実測値 (20 official 合計. 旧 19 official=1814 + テラスタルフェスex 237)
 
 
-class TestLongform22Sets(unittest.TestCase):
-    """§1: 22セット (現行 15群 populated) が長形になっている."""
+class TestCodeform22Sets(unittest.TestCase):
+    """§1: 22セット (現行 20 official / 15 set) が master verbatim のコード形になっている."""
 
     def _rows_by_official(self, set_official: str):
         con = sqlite3.connect(str(api._DB_PATH))
@@ -65,8 +80,8 @@ class TestLongform22Sets(unittest.TestCase):
         finally:
             con.close()
 
-    def test_each_official_maps_to_expected_longform(self):
-        for set_official, expected in LONGFORM_EXPECTED.items():
+    def test_each_official_maps_to_expected_codeform(self):
+        for set_official, expected in CODEFORM_EXPECTED.items():
             rows = self._rows_by_official(set_official)
             self.assertGreater(len(rows), 0, f"{set_official}: 0行")
             values = Counter(r[1] for r in rows)
@@ -74,18 +89,18 @@ class TestLongform22Sets(unittest.TestCase):
                 dict(values), {expected: len(rows)},
                 f"{set_official}: 期待 {expected!r} 単独。実測 {dict(values)}")
 
-    def test_total_longform_row_count(self):
-        """19 (set_official, se) pairs の合計行数 = 1814 (実測 baseline)."""
+    def test_total_codeform_row_count(self):
+        """20 official の合計行数 = 2051 (実測 baseline)."""
         con = sqlite3.connect(str(api._DB_PATH))
         try:
             n = 0
-            for set_official in LONGFORM_EXPECTED:
+            for set_official in CODEFORM_EXPECTED:
                 n += con.execute(
                     "SELECT count(*) FROM products WHERE category='pokemon_tcg' "
                     "AND set_name_official=?", (set_official,)).fetchone()[0]
         finally:
             con.close()
-        self.assertEqual(n, LONGFORM_TOTAL_ROWS)
+        self.assertEqual(n, CODEFORM_TOTAL_ROWS)
 
     def test_no_emdash_pokemon_rows_in_dual_scope(self):
         """22 dual 群の tail に該当する em-dash 形が pokemon_tcg に残っていない.
