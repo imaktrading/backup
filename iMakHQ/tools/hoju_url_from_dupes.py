@@ -24,18 +24,35 @@ def _cell(row, idx):
     return (row[idx].strip() if len(row) > idx else "")
 
 
-def compute_additions(vals):
+def compute_additions(vals, live_ids=None):
     """(pure) rows2d(header含む) → (plan, warns)。I/O 無しで test 可能。
 
-    plan = {primary_row(1-indexed): {'itemid','existing','add','skip'}}。
-    2枚目 = B空 AND url非空 AND cert非空 AND KEY非空 AND その KEY が live(B非空 D空)行を持つ。
+    plan = {primary_row(1-indexed): {'itemid','existing','add','skip','supply_dead'}}。
+    2枚目 = B空 AND url非空 AND cert非空 AND KEY非空 AND その KEY が出品中(B非空)行を持つ。
     add = 2枚目URL が primary の既存補URL(AC-AG)に無く、空き枠がある時のみ。
+
+    ★2026-08-18: primary の条件から **D(売り切れ)が空** を外した。
+      D は **仕入元** が売り切れた印であって、eBay の出品が終わった印ではない。
+      外すまでは「eBay に出ているのに仕入元が死んでいる」出品にだけ新しい供給を
+      足せなかった。**そこが一番足すべき相手**だった (売れたら仕入不能 →
+      キャンセル → Defect Rate)。
+      実測 2026-08-18: `pokemon_tcg:SMP2-014` (itemID 358738073108) と
+      `pokemon_tcg:SV8a-203` (358683996599) はどちらも eBay live で D=○。
+      同じカードの生きた仕入元をその日に見つけていたのに、この条件で捨てていた。
+      2枚目側の D 判定はそのまま残す (死んだURLを足しても意味がない)。
+
+    live_ids: eBay に live な itemID の集合 (dup_guard の live cache = SSOT)。
+      渡された場合はこれで primary を絞る。None なら itemID のある行を primary とみなす
+      (cache が無くても止めない。補URL を足す行為自体は無害なので fail-open で良い)。
     """
     live_by_key = {}
     for i, r in enumerate(vals[1:], start=2):
-        iid, key, sold = _cell(r, B), _cell(r, KEY), _cell(r, D)
-        if iid and key and not key.startswith(("item:", "shops:")) and not sold:
-            live_by_key.setdefault(key, []).append((i, r))
+        iid, key = _cell(r, B), _cell(r, KEY)
+        if not (iid and key) or key.startswith(("item:", "shops:")):
+            continue
+        if live_ids is not None and iid not in live_ids:
+            continue                      # eBay に無い = 出品が終わっている → 足す先でない
+        live_by_key.setdefault(key, []).append((i, r))
     plan, warns = {}, []
     for i, r in enumerate(vals[1:], start=2):
         iid, url, cert, key, sold = _cell(r, B), _cell(r, A), _cell(r, I), _cell(r, KEY), _cell(r, D)
@@ -50,7 +67,10 @@ def compute_additions(vals):
             continue
         prow, pr = primaries[0]
         existing = [u for u in (_cell(pr, AUX0 + k) for k in range(AUXN)) if u]
-        d = plan.setdefault(prow, {"itemid": _cell(pr, B), "existing": existing, "add": [], "skip": []})
+        d = plan.setdefault(prow, {"itemid": _cell(pr, B), "existing": existing,
+                                   "add": [], "skip": [],
+                                   # primary の仕入元が死んでいる = 補充が最優先の行
+                                   "supply_dead": bool(_cell(pr, D))})
         if url in existing:
             d["skip"].append(url)
         elif len(existing) + len(d["add"]) >= AUXN:
@@ -60,25 +80,66 @@ def compute_additions(vals):
     return plan, warns
 
 
+def load_live_ids():
+    """eBay に live な itemID の集合。取れなければ None (= 絞り込まない)。"""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import dup_guard
+        with open(dup_guard.LIVE_CACHE, encoding="utf-8") as f:
+            import json
+            return set((json.load(f).get("titles") or {}).keys()) or None
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
 def main():
     do_write = "--write" in sys.argv
     vals = sheet_io._product_ws().get_all_values()
-    plan, warns = compute_additions(vals)
+    live_ids = load_live_ids()
+    plan, warns = compute_additions(vals, live_ids)
     mode = "実書込" if do_write else "dry-run"
     total_add = sum(len(v["add"]) for v in plan.values())
+    urgent = sum(len(v["add"]) for v in plan.values() if v["add"] and v.get("supply_dead"))
     print(f"=== 補URL 追記 [{mode}] (2枚目→primary補URL・既存保持+冪等) ===")
-    print(f"シート行数 {len(vals)} / 追加対象primary {sum(1 for v in plan.values() if v['add'])}行 / 追加URL {total_add}")
+    print(f"シート行数 {len(vals)} / live判定 "
+          f"{'eBay実在 ' + str(len(live_ids)) + '件' if live_ids else '(cache無し=itemIDのある行すべて)'}")
+    print(f"追加対象primary {sum(1 for v in plan.values() if v['add'])}行 / 追加URL {total_add}"
+          + (f" / うち **仕入元が死んでいる出品への補充 {urgent}本**" if urgent else ""))
     for row, v in sorted(plan.items()):
         if v["add"]:
-            print(f"  row {row} (itemID={v['itemid']}): 既存{len(v['existing'])}件 → 追加 {v['add']}")
+            mark = " 🚨仕入元切れ" if v.get("supply_dead") else ""
+            print(f"  row {row} (itemID={v['itemid']}){mark}: 既存{len(v['existing'])}件 → 追加 {v['add']}")
     for w in warns[:30]:
         print("  ⚠️", w)
     if do_write:
         row_to_urls = {row: (v["existing"] + v["add"])[:AUXN] for row, v in plan.items() if v["add"]}
         n = sheet_io.write_aux_urls(row_to_urls)
         print(f"=== 実書込 完了: {n} 行 (既存保持+新規追加) ===")
+        _record(n, total_add, urgent, len(warns))
     else:
         print("=== dry-run 終了(書込なし)。実書込は --write ===")
+
+
+def _record(rows, added, urgent, warns):
+    """走行結果を1ファイルに残す (最新で上書き)。
+
+    ★2026-08-18: この step は出品くんの画面にしか出ず、**走ったのか止まったのかを
+      後から誰も確認できなかった**。実際 22本が溜まったまま気づかれていなかった。
+      書けなくても本処理は成功しているので、失敗しても黙って続ける。
+    """
+    try:
+        import json
+        from datetime import datetime
+        out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "review_logs", "hoju_from_dupes_last.json")
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump({"at": datetime.now().isoformat(timespec="seconds"),
+                       "rows": rows, "added": added,
+                       "urgent_supply_dead": urgent, "warns": warns}, f,
+                      ensure_ascii=False, indent=2)
+    except Exception:                                          # noqa: BLE001
+        pass
 
 
 if __name__ == "__main__":
