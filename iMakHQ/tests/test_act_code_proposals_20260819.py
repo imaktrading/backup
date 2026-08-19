@@ -232,6 +232,7 @@ def _acar():
     # 2026-08-17 に実際に出た依頼書 (カテゴリ欄が空・本文が「`` カテゴリの…」)
     ("", "番号不明  (捨てた仕入候補の目視 2026-08-17 / https://jp.mercari.com/item/m62052158191)"),
     ("one_piece_tcg", "番号不明  (捨てた仕入候補の目視 2026-08-17 / https://jp.mercari.com/item/m53731037142)"),
+    # カード名が無い行。**URL の domain ではなく「タイトル空」で弾く** (2026-08-19 撤回後)
     ("tcg", "OP05-002 (捨てた仕入候補の目視 2026-08-14 / https://snkrdunk.com/apparels/12345)"),
 ])
 def test_entry_check_rejects(category, model):
@@ -242,8 +243,12 @@ def test_entry_check_rejects(category, model):
     ("one_piece_tcg", "OP05-002 モンキー・D・ルフィ (捨てた仕入候補の目視 2026-08-19 / https://jp.mercari.com/item/m1)"),
     ("pokemon_tcg", "cert152136358 POKEMON JAPANESE SV4A [PIKACHU] #014 (auto候補SV4A-014=該当なし 要調査)"),
     ("one_piece_tcg", "ONE PIECE JAPANESE 3RD ANNIVERSARY SET-118"),
-    # TCG 以外なら apparels URL は正当
     ("uniqlo_ut", "UT-001 ワンピース Tシャツ (https://snkrdunk.com/apparels/12345)"),
+    # ★2026-08-19 撤回した rule の回帰ガード: snkrdunk はトレカも `/apparels/` で配信する
+    #   (`snkrdunk_psa_resource.py:35`)。TCG 行の主URL 45件がこの形なので**弾いてはいけない**。
+    #   依頼書: hq/requests/2026-08-19_snkrdunk_apparels_overblock.md
+    ("tcg", "OP05-002 ルフィ (捨てた仕入候補の目視 2026-08-14 / https://snkrdunk.com/apparels/12345)"),
+    ("one_piece_tcg", "OP05-002 ルフィ (https://snkrdunk.com/apparels/12345)"),
 ])
 def test_entry_check_passes(category, model):
     assert _acar().reject_reason(category, model) is None, f"正当な行を弾いている: {model!r}"

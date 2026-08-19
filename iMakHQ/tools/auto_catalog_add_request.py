@@ -181,20 +181,20 @@ def _filter_catalog_present(new_by_cat: dict[str, list[dict]],
 #
 # なぜ: カード名もセット名も空の依頼書が実際に出た
 #   (`2026-08-17_auto_catalog_add_.md` = category 欄が空、本文が「`` カテゴリの…」)。
-#   snkrdunk の apparels(衣料品) URL が TCG の missing_models に入り、2日間 catalog に
-#   dispatch され続けた例もある。**catalog が調べようのない依頼は出さない** = fail-closed。
+#   **catalog が調べようのない依頼は出さない** = fail-closed。
 #   書き手 (newcand_confirm / post_psa_review / psa_to_csv) を問わない最終防衛線なのでここに置く。
 # 回答書: hq/requests/2026-08-19_act_code_proposals_tcg_response.md の 5
+#
+# ★2026-08-19 撤回: ここに URL の domain rule
+#   (`snkrdunk.com/apparels/` を TCG では弾く) を一度入れたが、**誤りなので消した**。
+#   snkrdunk はトレカを `/apparels/` パスで配信している (自社の仕入コードがそれを使っている:
+#   `snkrdunk_psa_resource.py:35` `CARD_PAGE_TMPL = ".../apparels/{card_id}"`)。
+#   実測 TCG 行の主URL 45件 / 補URL 270件がこの形。衣料品専用パスではない。
+#   **URL の形では衣料品とトレカを区別できない。同種の rule を足さないこと。**
+#   元の実害 (空の依頼書) は下の カテゴリ空 / タイトル空 の2つで足りている。
+#   依頼書: hq/requests/2026-08-19_snkrdunk_apparels_overblock.md
 
 REJECTED_LOG = Path(__file__).parent.parent / "logs" / "missing_models_rejected.log"
-
-_TCG_CATEGORIES = {"tcg", "pokemon_tcg", "one_piece_tcg", "dragonball_scg",
-                   "gundam_tcg", "yugioh_tcg"}
-
-# domain rule は hardcode で可 (回答書 5)。「この URL はこのカテゴリに置けない」だけを書く。
-_URL_DOMAIN_RULES = [
-    ("snkrdunk.com/apparels/", "snkrdunk の apparels(衣料品) URL は TCG カテゴリに置けない"),
-]
 
 # model 末尾の注記 `(…)` を剥がす。注記に nest した括弧は現状どの書き手も出さない。
 _NOTE_TAIL_RE = re.compile(r"\s*\([^()]*\)\s*$")
@@ -219,10 +219,6 @@ def reject_reason(category: str, model: str) -> str | None:
         return "カテゴリ空 (どの作品か判らない依頼は catalog 側で調べようがない)"
     if not title_part(model):
         return "タイトル空 (カード名が無い依頼は catalog 側で調べようがない)"
-    low = (model or "").lower()
-    for frag, why in _URL_DOMAIN_RULES:
-        if frag in low and cat in _TCG_CATEGORIES:
-            return why
     return None
 
 
