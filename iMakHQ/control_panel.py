@@ -654,6 +654,77 @@ def _run_auto_full_tail(append_log_func, env):
     _mail_upload_result(append_log_func, result_json, env)
 
 
+def _exclusion_sources(csv_dir):
+    """メールの内訳に使う素材を集める (I/O)。読めないものは空で返す。"""
+    import glob as _glob
+    import json as _json
+
+    def _newest(pat):
+        f = sorted(_glob.glob(pat), key=os.path.getmtime, reverse=True)
+        return f[0] if f else ""
+
+    def _read(p, as_json=False):
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                return _json.load(f) if as_json else f.read()
+        except Exception:                                     # noqa: BLE001
+            return {} if as_json else ""
+
+    log = _read(_newest(os.path.join(WORKSPACE, "iMakHQ", "run_logs", "*.log")))
+    removed = _read(_newest(os.path.join(csv_dir, "*.csv.removed.json")), as_json=True)
+    hoju = _read(os.path.join(WORKSPACE, "iMakHQ", "review_logs",
+                              "hoju_from_dupes_last.json"), as_json=True)
+    return log, removed, hoju
+
+
+def build_exclusion_lines(log_text="", removed=None, hoju=None):
+    """出品されなかった分の「件数 / 中身 / その後どうなるか」(純関数・test 可)。
+
+    ★2026-08-19 ユーザー要望: メールに **除かれた件数と内容、対応状況** を載せる。
+      それまでメールは出品できた分しか書いておらず、落ちた分は走行ログを開かないと
+      分からなかった (8/19 は 20件中6件が未回答で落ちたのに気づけなかった)。
+
+    log_text: その走行のログ全文 / removed: `*.csv.removed.json` / hoju: 補URL の記録。
+    読めない項目は **黙って省く** (推測で書かない)。
+    """
+    import re as _re
+    out = []
+
+    def n(pat):
+        m = _re.search(pat, log_text or "")
+        return int(m.group(1)) if m else 0
+
+    # 「見送り」は 未回答 + 該当なし の合計なので、引いてから出す (二重に数えない)
+    none_ng = n(r"NONE/NG\s*(\d+)\s*件\s*→\s*catalog")
+    pend = max(0, n(r"目視未確定で出品見送り:\s*(\d+)\s*件") - none_ng)
+    if pend:
+        out.append(f"・目視で未回答 {pend}件 → 次の走行でまた候補に戻ります")
+    if none_ng:
+        out.append(f"・「該当なし」 {none_ng}件 → カタログに依頼。1日後にまた出ます")
+    for label, why in (("NO-IMAGE", "カタログに画像が無い"),
+                       ("OUT-OF-SCOPE", "参入しないゲーム"),
+                       ("GAP", "カタログに未収録")):
+        c = n(r"\[%s=[^\]]*\]:\s*(\d+)\s*件" % label)
+        if c:
+            after = {"NO-IMAGE": "カタログに依頼済",
+                     "OUT-OF-SCOPE": "対象外 (今後も出しません)",
+                     "GAP": "カタログに依頼済"}[label]
+            out.append(f"・{why} {c}件 → {after}")
+    self_ng = len(_re.findall(r"selfcheck failed in build_row", log_text or ""))
+    if self_ng:
+        out.append(f"・自己チェックで不一致 {self_ng}件 → 残務に記録済 (こちらの不具合)")
+
+    rm = (removed or {}).get("removed") or 0
+    if rm:
+        names = [t.split(") ", 1)[-1][:44] for t in ((removed or {}).get("removed_titles") or [])]
+        tail = f" — {' / '.join(names[:3])}" + (" ほか" if len(names) > 3 else "") if names else ""
+        added = (hoju or {}).get("added")
+        after = (f"仕入元は補URLに回しました (今回 {added}本 追加)"
+                 if added else "仕入元は補URLの対象になります")
+        out.append(f"・同じカードが既に出品中 {rm}件 → {after}{tail}")
+    return out
+
+
 def build_upload_mail(result):
     """出品結果 → (件名, 本文) (純関数・test可)。件数と出品URLだけの短い本文。
 
@@ -680,6 +751,11 @@ def build_upload_mail(result):
         lines.append("― 失敗 ―")
         for it in failed:
             lines.append(f"{it.get('label', '')}  {it.get('error', '')}")
+    excl = result.get("excluded_lines") or []
+    if excl:
+        lines.append("")
+        lines.append("― 出品しなかった分 ―")
+        lines.extend(excl)
     return subject, "\n".join(lines)
 
 
@@ -700,6 +776,13 @@ def _mail_upload_result(append_log_func, result_json, env):
     except Exception as e:
         append_log_func(f"\n⚠️ 出品結果を読めずメール skip: {type(e).__name__}\n")
         return
+    # ★2026-08-19: 出品できた分だけでなく **落ちた分と その後どうなるか** も載せる。
+    #   読めなかった素材は省くだけで、メール自体は必ず出す。
+    try:
+        result["excluded_lines"] = build_exclusion_lines(
+            *_exclusion_sources(os.path.dirname(result_json)))
+    except Exception as e:                                    # noqa: BLE001
+        append_log_func(f"\n(メールの除外内訳は付けられず: {type(e).__name__})\n")
     subject, body = build_upload_mail(result)
     body_file = os.path.join(os.path.dirname(result_json), "last_upload_mail.txt")
     with open(body_file, "w", encoding="utf-8") as f:
