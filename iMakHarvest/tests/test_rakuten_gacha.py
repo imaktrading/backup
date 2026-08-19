@@ -211,3 +211,42 @@ def test_extract_images_returns_empty_when_nothing_certain():
     from scrapers.rakuten_item import extract_images
     html = '<img src="https://image.rakuten.co.jp/mirakikaku/cabinet/rkanban.jpg">'
     assert extract_images(html, "https://item.rakuten.co.jp/mirakikaku/2608001/") == []
+
+
+# --------------------------------------------------------------------------
+# 商品説明 / JAN / メーカー欄 (2026-08-20)
+# --------------------------------------------------------------------------
+DESC_HTML = '''
+<meta itemprop="gtin13" content="4573611790708">
+<td class="item_desc"><b>アイマイナ めじるしマスコット</b><br>
+メーカー：フクヤ<br>ラインナップ 1.ノーマル 2.神っぽいな<br>■サイズ：約14.0cm
+&#9758;&emsp;この商品のセット、単品一覧を見る</td>
+'''
+
+
+def test_extract_description_keeps_lineup_and_drops_related_links():
+    from scrapers.rakuten_item import extract_description
+    d = extract_description(DESC_HTML)
+    assert "ラインナップ" in d and "約14.0cm" in d
+    assert "この商品のセット" not in d      # 末尾の関連商品リンクは落とす
+    assert "<" not in d                     # タグは残さない
+
+
+def test_extract_jan():
+    from scrapers.rakuten_item import extract_jan
+    assert extract_jan(DESC_HTML) == "4573611790708"
+    assert extract_jan("<html></html>") == ""
+
+
+def test_maker_from_description_covers_shops_without_maker_in_title():
+    """mirakikaku 等 タイトルにメーカーが入らない店は 説明の メーカー欄 で拾う."""
+    from gacha_maker import official_url
+    from scrapers.rakuten_item import extract_description
+    d = extract_description(DESC_HTML)
+    assert official_url("アイマイナ めじるしマスコット 全5種セット", d).startswith(
+        "https://www.fancy-fukuya.co.jp/")
+
+
+def test_unknown_maker_in_description_is_still_blank():
+    from gacha_maker import official_url
+    assert official_url("どうぶつの森 全8種セット", "メーカー：日本オート玩具 ラインナップ") == ""

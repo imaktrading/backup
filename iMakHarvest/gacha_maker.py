@@ -93,17 +93,30 @@ def extract_maker_text(title: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def resolve_maker(title: str) -> str:
-    """タイトル -> 正のメーカー名. 判定できなければ空文字."""
-    slot = _norm(extract_maker_text(title))
-    if not slot:
-        return ""
-    for alias, maker in ALIASES.items():
-        if _norm(alias) in slot:
-            return maker
+_DESC_MAKER_RE = re.compile(r"メーカー\s*[：:]\s*([^\s。、]{2,20})")
+
+
+def maker_from_description(description: str) -> str:
+    """商品説明の `メーカー：<名前>` 欄を返す (無ければ空).
+
+    mirakikaku など **タイトルにメーカー名を入れない店**はここに書いている
+    (実測: `メーカー：日本オート玩具`)。
+    """
+    m = _DESC_MAKER_RE.search(description or "")
+    return m.group(1).strip() if m else ""
+
+
+def resolve_maker(title: str, description: str = "") -> str:
+    """タイトル (と 商品説明の メーカー欄) -> 正のメーカー名. 判定できなければ空文字."""
+    for slot in (_norm(extract_maker_text(title)), _norm(maker_from_description(description))):
+        if not slot:
+            continue
+        for alias, maker in ALIASES.items():
+            if _norm(alias) in slot:
+                return maker
     return ""
 
 
-def official_url(title: str) -> str:
-    """タイトル -> メーカー公式URL. 判定できなければ空文字 (推測しない)."""
-    return MAKER_OFFICIAL.get(resolve_maker(title), "")
+def official_url(title: str, description: str = "") -> str:
+    """メーカー公式URL. 判定できなければ空文字 (推測しない)."""
+    return MAKER_OFFICIAL.get(resolve_maker(title, description), "")

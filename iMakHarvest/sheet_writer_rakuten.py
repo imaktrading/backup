@@ -71,7 +71,8 @@ def build_row(item: dict, column_count: int = DEFAULT_COLUMN_COUNT) -> list:
     row[COL_PRICE - 1] = price
     row[COL_IMAGES - 1] = image_str
     row[COL_DESCRIPTION - 1] = str(item.get("description") or "")
-    row[COL_OFFICIAL_URL - 1] = official_url(item.get("title") or "")  # I: 判定できた時だけ
+    row[COL_OFFICIAL_URL - 1] = official_url(item.get("title") or "",
+                                             str(item.get("description") or ""))  # I: 判定できた時だけ
     row[COL_CURRENT_PRICE - 1] = price          # M: 数値のみ
     row[COL_CATEGORY - 1] = CATEGORY            # R
     return row

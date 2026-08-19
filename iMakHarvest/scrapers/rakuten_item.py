@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import re
+from html import unescape
 
 DETAIL_WAIT_SEC = 8
 
@@ -94,6 +95,37 @@ def extract_images(html: str, url: str) -> list[str]:
     return uniq[:8]
 
 
+_DESC_RE = re.compile(r'class="item_desc"(.{0,12000}?)</td>', re.S)
+_DESC_END = re.compile(r"(この商品の(セット|単品)|同シリーズ|関連商品一覧|商品番号[：:]|レビューを見る)")
+_JAN_RE = re.compile(r'itemprop="gtin13"\s+content="(\d{8,14})"')
+
+
+def extract_jan(html: str) -> str:
+    """楽天が出す `itemprop="gtin13"` = JAN. 無ければ空."""
+    m = _JAN_RE.search(html or "")
+    return m.group(1) if m else ""
+
+
+def extract_description(html: str) -> str:
+    """商品説明 (ラインナップ / サイズ / 注意書き) を平文で返す.
+
+    2026-08-20 新設。 それまで H列は空だった。 出品に要る「全何種の内訳」と
+    「サイズ」はここにしか無い (タイトルには入らない)。
+    末尾の 関連商品リンク (「この商品のセット、単品一覧を見る」等) は落とす。
+    """
+    m = _DESC_RE.search(html or "")
+    if not m:
+        return ""
+    txt = re.sub(r"<[^>]+>", " ", m.group(1))
+    txt = unescape(txt)
+    txt = re.sub(r"[ -‏﻿]", " ", txt)
+    txt = re.sub(r"\s+", " ", txt).strip(" >　")
+    cut = _DESC_END.search(txt)
+    if cut:
+        txt = txt[:cut.start()].strip()
+    return txt[:1200]
+
+
 def _text_of(driver) -> str:
     try:
         return driver.find_element("tag name", "body").text or ""
@@ -129,6 +161,10 @@ def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | No
     images = extract_images(html, url)
 
     res = judge(text)
+    desc = extract_description(html)
+    jan = extract_jan(html)
+    if jan:
+        desc = (desc + f" JAN: {jan}").strip()
     res.update({"url": url, "price_jpy": price, "title": title,
-                "image_urls": images[:8], "description": ""})
+                "image_urls": images[:8], "description": desc, "jan": jan})
     return res
