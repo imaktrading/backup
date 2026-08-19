@@ -576,6 +576,22 @@ def fetch_external_image(src, retries=4, opener=None, sleep=time.sleep):
     return None
 
 
+def run_storage_key(targets) -> str:
+    """その走行だけの保存キー (純関数・test 可)。
+
+    ★2026-08-19: 回答の保存キーが固定 ("psa_review_answers") で、**走行をまたいで
+      消えなかった**。画面を開いた時点で前回の回答が復元され、目視を飛ばしたまま
+      送信できてしまう (8/19: 20件中12件が復元、白紙の6件は静かに出品対象から落ちた)。
+      8/18 に入れた「自動は確定済も毎回目視」も、これに打ち消されていた。
+
+    出題の中身 (cert の並び) から作る。**同じ出題なら同じキー** = 再読込や誤って
+    閉じた時の復旧は効いたまま、別の走行の回答は引き継がない。
+    """
+    import hashlib
+    certs = ",".join(str((t or {}).get("cert", "")) for t in (targets or []))
+    return hashlib.sha1(certs.encode("utf-8")).hexdigest()[:12]
+
+
 def _generate_html(targets: list[dict]) -> None:
     # JS で targets info (= cert / expected) を保持、 結果 collect 用
     targets_json = json.dumps([{
@@ -583,6 +599,7 @@ def _generate_html(targets: list[dict]) -> None:
         "expected": t.get("csv_expected", ""),
         "category": t["category"],
     } for t in targets], ensure_ascii=False)
+    run_key = run_storage_key(targets)
 
     html = [
         '<!DOCTYPE html><html><head><meta charset=utf-8><title>PSA Review (latest cycle)</title>',
@@ -638,6 +655,21 @@ def _generate_html(targets: list[dict]) -> None:
         '<script>',
         f'var TARGETS = {targets_json};',
         'var ANSWERS = {};',
+        # ★2026-08-19: 回答の保存先を **その走行だけの箱** にする。
+        #   旧実装は "psa_review_answers" 固定キーで、走行をまたいで消えなかった。
+        #   そのため画面を開いた時点で過去の回答が復元され、**目視を飛ばしたまま送信**できた
+        #   (8/19: 20件中12件が復元、6件は白紙のまま出品対象から落ちた)。
+        #   8/18 に入れた「自動は確定済も毎回目視」も、これに打ち消されていた。
+        #   走行ごとに違うキーにすれば、書きかけの復旧 (再読込・誤って閉じた) は効いたまま、
+        #   前回の回答は持ち越さない。
+        f'var STORE_KEY = "psa_review_answers_{run_key}";',
+        'try {',
+        '  for (var i = localStorage.length - 1; i >= 0; i--) {',
+        '    var k = localStorage.key(i);',
+        '    if (k && k.indexOf("psa_review_answers") === 0 && k !== STORE_KEY)'
+        ' { localStorage.removeItem(k); }',
+        '  }',
+        '} catch(e) {}',
         '',
         'function answer(cert, choice) {',
         '  ANSWERS[cert] = {choice: choice};',
@@ -722,7 +754,7 @@ def _generate_html(targets: list[dict]) -> None:
         '',
         '// load saved (= localStorage)',
         'window.addEventListener("DOMContentLoaded", function() {',
-        '  var saved = localStorage.getItem("psa_review_answers");',
+        '  var saved = localStorage.getItem(STORE_KEY);',
         '  if (saved) {',
         '    try { ANSWERS = JSON.parse(saved); } catch(e) {}',
         '  }',
@@ -742,7 +774,7 @@ def _generate_html(targets: list[dict]) -> None:
         '});',
         '',
         '// auto save',
-        'setInterval(function() { localStorage.setItem("psa_review_answers", JSON.stringify(ANSWERS)); }, 2000);',
+        'setInterval(function() { localStorage.setItem(STORE_KEY, JSON.stringify(ANSWERS)); }, 2000);',
         '</script>',
         '</head><body>',
         '<div class=toolbar>',

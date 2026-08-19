@@ -29,6 +29,18 @@ def _js():
     return io.open(SRC, encoding="utf-8").read()
 
 
+_src = _js
+
+
+def _fn(name):
+    """post_psa_review は重い import を持つので、純関数だけ切り出して評価する."""
+    src = _js()
+    i = src.index(f"def {name}")
+    ns = {}
+    exec(src[i:src.index("\ndef ", i + 1)], ns)                # noqa: S102
+    return ns[name]
+
+
 class TestUnansweredIsVisible:
     def test_status_shows_the_remaining_count(self):
         s = _js()
@@ -83,3 +95,39 @@ class TestPendingStillMeansNotListed:
         """fail-closed は維持 (未回答を出品に倒さない)."""
         s = _js()
         assert re.search(r"NONE/NG/PENDING.*(入れない|build しない)", s)
+
+class Test前回の回答を持ち越さない:
+    """★2026-08-19: 保存キーが固定で、走行をまたいで回答が復元されていた。
+
+    実害 (8/19): 画面を開いた時点で12件が過去の回答で埋まっており、白紙の6件は
+    気づかれないまま送信 → 静かに出品対象から落ちた。8/18 に入れた
+    「自動は確定済も毎回目視」も、これに打ち消されていた。
+    """
+
+    def test_出題が違えばキーも違う(self):
+        f = _fn("run_storage_key")
+        a = f([{"cert": "1"}, {"cert": "2"}])
+        b = f([{"cert": "1"}, {"cert": "3"}])
+        assert a and b and a != b
+
+    def test_同じ出題なら同じキー(self):
+        """再読込・誤って閉じた時の復旧は効かせたまま."""
+        f = _fn("run_storage_key")
+        t = [{"cert": "1"}, {"cert": "2"}]
+        assert f(t) == f(list(t))
+
+    def test_空でも落ちない(self):
+        f = _fn("run_storage_key")
+        assert f([]) and f(None)
+
+    def test_他の走行の箱は消す(self):
+        s = _src()
+        assert 'localStorage.removeItem(k)' in s
+        assert 'k.indexOf("psa_review_answers") === 0' in s
+        assert 'k !== STORE_KEY' in s
+
+    def test_固定キーはもう使わない(self):
+        s = _src()
+        assert 'localStorage.getItem("psa_review_answers")' not in s
+        assert 'localStorage.setItem("psa_review_answers"' not in s
+        assert "localStorage.getItem(STORE_KEY)" in s
