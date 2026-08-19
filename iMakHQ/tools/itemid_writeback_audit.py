@@ -56,6 +56,63 @@ def build_live_index(live: dict) -> tuple[dict, dict]:
     return by_cert, by_supply
 
 
+CSV_CERT_COL = "CDA:Certification Number - (ID: 27503)"
+
+
+def just_listed_live(result: dict, csv_rows: list) -> dict:
+    """出品API の応答を live 一覧と同じ形にする (純関数・test可)。
+
+    ★2026-08-19 実害: この道具が見る live 一覧は **2時間キャッシュ** なので、
+      出品した直後に走らせても「たった今出した分」が入っていない。18:20 に出した12件が
+      書き戻されず、B列が空のまま残った → 翌走行で同じ行がもう一度候補に入り、
+      二重出品しようとして eBay に弾かれ、そこで走行が停止した (20件処理して新規5件)。
+      itemID は **出品の応答で既に手元にある**。取り直さず、それをそのまま使う。
+
+    result: last_upload_result.json (listed[].label / item_id)
+    csv_rows: 同じ走行の入稿CSV (DictReader の行。CustomLabel と cert を持つ)
+    戻り: {item_id: {"avail":1, "cur":"USD", "sku":..., "title":...}}
+    """
+    meta = {}
+    for r in (csv_rows or []):
+        lb = (r.get("CustomLabel") or "").strip()
+        if lb:
+            meta[lb] = ((r.get(CSV_CERT_COL) or "").strip(),
+                        (r.get("*Title") or r.get("Title") or "").strip())
+    out = {}
+    for it in ((result or {}).get("listed") or []):
+        iid = str(it.get("item_id") or "").strip()
+        lb = str(it.get("label") or "").strip()
+        if not iid or not lb:
+            continue
+        cert, title = meta.get(lb, ("", ""))
+        out[iid] = {"avail": 1, "cur": "USD",
+                    "sku": f"PSA10-{cert}" if cert else lb,
+                    "title": title or lb}
+    return out
+
+
+def _load_just_listed(csv_dir: Path, max_age_sec: int = 24 * 3600) -> dict:
+    """`last_upload_result.json` + その CSV を読んで live 相当にする (I/O・失敗は空)。
+
+    古い結果 (既定 24h 超) は使わない。その頃には live 一覧に載っているので、
+    取り下げ済みの出品を「販売中」と誤って復活させない。
+    """
+    import csv as _csv
+    import json as _json
+    import time as _time
+    try:
+        f = csv_dir / "last_upload_result.json"
+        if not f.exists() or _time.time() - f.stat().st_mtime > max_age_sec:
+            return {}
+        res = _json.loads(f.read_text(encoding="utf-8"))
+        cp = csv_dir / (res.get("csv") or "")
+        rows = list(_csv.DictReader(cp.open(encoding="utf-8-sig"))) if cp.is_file() else []
+        return just_listed_live(res, rows)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"(出品直後の itemID を読めず、live 一覧だけで判定: {type(e).__name__})")
+        return {}
+
+
 def find_missing(rows: list, by_cert: dict, by_supply: dict, sheet: str) -> list:
     """B列が空だが live listing が実在する行を返す (純関数, test 可)。
 
@@ -92,6 +149,7 @@ class IncompleteFetch(RuntimeError):
 
 
 CACHE = Path(r"C:\dev\iMak_data\hq\itemid_audit_live_cache.json")
+CSV_DIR = Path(r"C:\dev\iMak\iMakHQ\csv_output")
 CACHE_MAX_AGE_SEC = 2 * 3600      # 2h 以内なら再取得しない
 
 
@@ -185,6 +243,11 @@ def main() -> int:
         print(f"★中断: {e}")
         print("  取得が不完全なので判定しない。**0件=正常ではない**。時間をおいて再実行すること")
         return 2
+    # ★出品した直後の分は live 一覧 (2時間キャッシュ) に載っていない。応答から足す。
+    fresh = {k: v for k, v in _load_just_listed(CSV_DIR).items() if k not in live}
+    if fresh:
+        live.update(fresh)
+        print(f"出品直後の itemID を応答から追加: {len(fresh)} 件 (API 消費ゼロ)")
     by_cert, by_supply = build_live_index(live)
     print(f"索引: cert {len(by_cert)} + 仕入元 {len(by_supply)}")
     if not by_cert:
