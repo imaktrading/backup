@@ -39,9 +39,10 @@ MAKER_OFFICIAL: dict[str, str] = {
     "いきもん": "https://naturetechni.com/",
     # ↓ 楽天の実データに多く出るが user リスト外だったメーカー (2026-08-20 実地確認)
     "ケイカンパニー": "https://kcompany.co.jp/",
-    "フクヤ": "https://www.fancy-fukuya.co.jp/topics/c/cat06/",
+    "フクヤ": "https://www.fancy-fukuya.co.jp/goods/gc/%E3%82%AB%E3%83%97%E3%82%BB%E3%83%AB%E3%83%88%E3%82%A4/",
     "ケーツーステーション": "https://capsule.k2-st.co.jp/",
     "ベネリック": "https://benelic.com/capsuletoy/",
+    "ブライトリンク": "https://brightlink.co.jp/capsultoy/",
 }
 
 # 楽天タイトルに出てくる表記ゆれ -> 正のメーカー名
@@ -70,6 +71,7 @@ ALIASES: dict[str, str] = {
     "フクヤ": "フクヤ", "FUKUYA": "フクヤ",
     "ケーツーステーション": "ケーツーステーション", "K2STATION": "ケーツーステーション",
     "ベネリック": "ベネリック", "BENELIC": "ベネリック",
+    "ブライトリンク": "ブライトリンク", "BRIGHTLINK": "ブライトリンク",
 }
 
 # メーカー名が入るスロット: 「…セット <メーカー> ガチャポン…」

@@ -55,6 +55,45 @@ def judge(text: str) -> dict:
     return {"in_stock_now": False, "shipping": "", "reason": "no_shipping_info"}
 
 
+_IMG_RE = re.compile(r"https://(?:tshop|shop|image)\.r?10?s?\.?(?:rakuten\.co\.jp|jp)/[^\"'\s]+?\.(?:jpg|jpeg|png)",
+                     re.IGNORECASE)
+_CODE_RE = re.compile(r"item\.rakuten\.co\.jp/[a-z0-9_-]+/([a-z0-9_-]+)", re.IGNORECASE)
+
+
+def extract_images(html: str, url: str) -> list[str]:
+    """商品ページから **その商品の写真だけ** を返す.
+
+    2026-08-20 修正 (user 指摘「画像も取れない」)。 以前は `image.rakuten.co.jp` の
+    URL を出現順に 8枚取っていたが、 楽天の店舗テンプレは **ヘッダ/サイドのバナーが
+    先に並ぶ**ため、 実測 93件中 93件が バナーだけだった (商品写真 0枚)。
+
+    確実に商品の物と言えるのは次の 2つだけ。 それ以外は入れない (fail-closed):
+      ① `og:image` (= 楽天が出す代表画像)
+      ② ファイル名に **商品コード** を含む画像 (例 `.../g260736s02t.jpg`,
+         `.../2608001_c0.jpg`)。 バナーは `parts/header/...` `common1.jpg` 等で該当しない
+    """
+    out: list[str] = []
+    m = re.search(r"""property=["']og:image["'][^>]*content=["']([^"']+)""", html)
+    if m:
+        out.append(m.group(1))
+    cm = _CODE_RE.search(url or "")
+    code = (cm.group(1) if cm else "").lower()
+    if code:
+        for u in _IMG_RE.findall(html):
+            name = u.rsplit("/", 1)[-1].lower()
+            if code in name:
+                out.append(u)
+    # 同じ写真が shop/tshop の両ドメインで出るので ファイル名で重複を潰す
+    seen, uniq = set(), []
+    for u in out:
+        k = u.rsplit("/", 1)[-1].lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        uniq.append(u)
+    return uniq[:8]
+
+
 def _text_of(driver) -> str:
     try:
         return driver.find_element("tag name", "body").text or ""
@@ -87,8 +126,7 @@ def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | No
     m = re.search(r'property="og:title" content="([^"]{5,120})"', html)
     if m:
         title = re.sub(r"^【楽天市場】", "", m.group(1)).strip()
-    images = list(dict.fromkeys(re.findall(
-        r"https://image\.rakuten\.co\.jp/[^\"'\s]+?\.(?:jpg|jpeg|png)", html)))
+    images = extract_images(html, url)
 
     res = judge(text)
     res.update({"url": url, "price_jpy": price, "title": title,

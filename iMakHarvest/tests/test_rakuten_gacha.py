@@ -173,3 +173,41 @@ def test_toy_word_is_required_not_just_food_word_absence():
     """おもちゃ語が無ければ通さない (fail-closed)."""
     from scrapers.rakuten_search import is_toy
     assert not is_toy("サンリオ 全5種セット")
+
+
+# --------------------------------------------------------------------------
+# 商品画像 (2026-08-20 user 指摘「画像も取れない」)
+# --------------------------------------------------------------------------
+ITEM_HTML = '''
+<meta property="og:image" content="https://shop.r10s.jp/auc-yuyou/cabinet/2607/g260736s02t.jpg" />
+<img src="https://image.rakuten.co.jp/auc-yuyou/cabinet/parts/header/menu0.jpg">
+<img src="https://image.rakuten.co.jp/auc-yuyou/cabinet/parts/side-l/bn_math.jpg">
+<img src="https://tshop.r10s.jp/auc-yuyou/cabinet/2607/g260736s02t.jpg">
+<img src="https://tshop.r10s.jp/auc-yuyou/cabinet/2607/g260736s02t_2.jpg">
+<img src="https://tshop.r10s.jp/auc-yuyou/cabinet/2605/g26053fs01.jpg">
+'''
+
+
+def test_extract_images_drops_shop_banners():
+    """店のヘッダ/サイドのバナーは商品写真ではない (実測 93件全部がこれだった)."""
+    from scrapers.rakuten_item import extract_images
+    got = extract_images(ITEM_HTML, "https://item.rakuten.co.jp/auc-yuyou/g260736s02t/")
+    assert all("parts/" not in u for u in got)
+    assert got[0].endswith("/g260736s02t.jpg")
+    # 商品コードを含む別カットは拾う / 他商品 (g26053fs01) は拾わない
+    assert any(u.endswith("g260736s02t_2.jpg") for u in got)
+    assert not any("g26053fs01" in u for u in got)
+
+
+def test_extract_images_dedupes_shop_and_tshop():
+    from scrapers.rakuten_item import extract_images
+    got = extract_images(ITEM_HTML, "https://item.rakuten.co.jp/auc-yuyou/g260736s02t/")
+    names = [u.rsplit("/", 1)[-1] for u in got]
+    assert len(names) == len(set(names))
+
+
+def test_extract_images_returns_empty_when_nothing_certain():
+    """og:image も 商品コード付き画像も無ければ 空 (バナーで埋めない)."""
+    from scrapers.rakuten_item import extract_images
+    html = '<img src="https://image.rakuten.co.jp/mirakikaku/cabinet/rkanban.jpg">'
+    assert extract_images(html, "https://item.rakuten.co.jp/mirakikaku/2608001/") == []
