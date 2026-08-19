@@ -946,6 +946,7 @@ def run_cycle(
     sheet_label: Optional[str] = None,
     high_sheet_id: Optional[str] = None,
     low_sheet_id: Optional[str] = None,
+    lock_wait_minutes: Optional[int] = None,
 ) -> dict:
     cycle_log = {
         "ts_start": datetime.now().isoformat(timespec="seconds"),
@@ -961,10 +962,15 @@ def run_cycle(
     }
 
     # lock 保持中でも即諦めず解放を待つ (前 cycle の長期化で巡回が丸ごと落ちるのを自己回復)
-    if not _acquire_lock(test_mode, wait_minutes=0 if test_mode else LOCK_WAIT_MINUTES):
+    # ★ 2026-08-19: 待ち時間を label ごとに変えられるようにした。SHEET 巡回が 85分→167分と
+    #   伸びた結果、その 75 分後に始まる LOW が 45 分待っても解放されず 2 回連続 skip し、
+    #   LOW シート 512 行が 19.5h 監視されなかった (= 取下げ漏れリスク)。LOW は待てば走れるので
+    #   待ち上限だけ伸ばす (Task Scheduler 側で --lock-wait-minutes 150 を渡す)。
+    wait_min = LOCK_WAIT_MINUTES if lock_wait_minutes is None else max(0, lock_wait_minutes)
+    if not _acquire_lock(test_mode, wait_minutes=0 if test_mode else wait_min):
         cycle_log["status"] = "skipped_lock_held"
         cycle_log["ts_end"] = datetime.now().isoformat(timespec="seconds")
-        cycle_log["waited_minutes"] = 0 if test_mode else LOCK_WAIT_MINUTES
+        cycle_log["waited_minutes"] = 0 if test_mode else wait_min
         path = _record_cycle_log(cycle_log)
         _notify_toast("iMakInventory: skipped",
                       f"lock 保持中、巡回 skip ({path.name})")
@@ -1580,6 +1586,9 @@ def main():
                         help="HIGH 用 spreadsheet ID 上書き (env: INVENTORY_HIGH_SHEET_ID)")
     parser.add_argument("--low-sheet-id", default=os.environ.get("INVENTORY_LOW_SHEET_ID"),
                         help="LOW 用 spreadsheet ID 上書き (env: INVENTORY_LOW_SHEET_ID)")
+    parser.add_argument("--lock-wait-minutes", type=int, default=None,
+                        help=f"lock 解放待ちの上限 (default {LOCK_WAIT_MINUTES} 分)。"
+                             "先行 cycle が長い枠 (LOW 等) では伸ばす")
     args = parser.parse_args()
 
     if args.sheet_id and (args.high_sheet_id or args.low_sheet_id):
@@ -1596,6 +1605,7 @@ def main():
         sheet_label=args.sheet_label,
         high_sheet_id=args.high_sheet_id,
         low_sheet_id=args.low_sheet_id,
+        lock_wait_minutes=args.lock_wait_minutes,
     )
     print()
     print("=== final cycle_log ===")
