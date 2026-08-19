@@ -353,6 +353,9 @@ def main() -> int:
     ap.add_argument("--tab", default=STAGING_TAB)
     ap.add_argument("--limit", type=int, default=0, help="この件数だけ作る (0=全部)")
     ap.add_argument("--list", action="store_true", help="出せる行を見るだけ (CSV作らない)")
+    ap.add_argument("--no-review", action="store_true",
+                    help="目視を飛ばす (★検証用。出品に使ってはいけない)")
+    ap.add_argument("--no-browser", action="store_true", help="ブラウザを自動で開かない")
     a = ap.parse_args()
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -390,6 +393,19 @@ def main() -> int:
     if not items:
         print("出せる行が0件 → CSVは作りません")
         return 0
+
+    # ★対象年齢は機械的に取れない (2026-08-20 実測: 楽天HTMLにもメーカー公式HTMLにも
+    #   記載なし。印字は台紙の写真の中)。人が見て 15才以上と確認した物だけ出す。
+    if not a.no_review:
+        import gacha_review as R
+        ledger = R.run_review(items, open_browser=not a.no_browser)
+        for why, n in R.skipped_reasons(items, ledger).items():
+            print(f"  ⏭️ 出しません {n}件: {why}")
+        items = R.confirmed(items, ledger)
+        print(f"  ✅ 目視で15才以上と確認: {len(items)}件")
+        if not items:
+            print("出せる行が0件 → CSVは作りません")
+            return 0
 
     en = translate(items)
     if not en:
