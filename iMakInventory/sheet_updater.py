@@ -769,7 +769,7 @@ def _domain_of(url: str) -> str:
 
 def detect_supplier(domain: str) -> str:
     """URL ドメインから supplier 名を判定.
-    対応: uniqlo / montbell / mercari / amazon / fril / other (= 未対応)
+    対応: uniqlo / montbell / mercari / amazon / fril / snkrdunk / yodobashi / rakuten / other
     """
     d = (domain or "").lower()
     if "uniqlo.com" in d:
@@ -784,6 +784,9 @@ def detect_supplier(domain: str) -> str:
         return "fril"
     if "snkrdunk.com" in d:
         return "snkrdunk"
+    # 楽天市場の商品ページのみ対象 (books/travel 等 他の rakuten ドメインは未対応=判定不能)
+    if "item.rakuten.co.jp" in d:
+        return "rakuten"
     if "yodobashi.com" in d:
         return "yodobashi"   # G-shock 補仕入元 (Harvest の HTTP snapshot を型番で lookup、2026-07-26)
     return "other"
@@ -803,6 +806,7 @@ _RESTOCKABLE_HOST_KEYS = (
     "montbell.jp",       # montbell 公式
     "workman.jp",        # ワークマン 公式
     "gu-global.com",     # GU 公式
+    "item.rakuten.co.jp",  # 楽天ショップ (量産品、在庫数を持つ。2026-08-19 カプセルトイ)
 )
 
 # 1点もの (= 売切→復活が原理的に無い) URL 群。 巡回対象からも外す。

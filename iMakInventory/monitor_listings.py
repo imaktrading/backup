@@ -80,6 +80,7 @@ from scrapers.amazon_scraper import fetch_product_inventory as fetch_amazon  # n
 from scrapers.amazon_scraper import create_amazon_driver  # noqa: E402
 from scrapers.fril_scraper import fetch_product_inventory as fetch_fril  # noqa: E402
 from scrapers.snkrdunk_scraper import fetch_product_inventory as fetch_snkrdunk  # noqa: E402
+from scrapers.rakuten_scraper import fetch_product_inventory as fetch_rakuten  # noqa: E402
 
 LOG_DIR = SCRIPT_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -281,6 +282,12 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
         except Exception as e:
             out["error"] = f"{type(e).__name__}: {e}"
             return out
+    elif supplier == "rakuten":
+        try:
+            info = fetch_rakuten(url)
+        except Exception as e:
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
     else:
         out["error"] = f"unsupported supplier: {supplier} ({domain})"
         return out
@@ -305,6 +312,16 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
     in_stock = bool(raw_in_stock)
     out["is_sold"] = not in_stock
     out["raw_status"] = info.get("status") or ("in_stock" if in_stock else "out_of_stock")
+
+    # ★ 2026-08-19 楽天: 在庫ありでも「予約 (未発売)」なら売れても発送できない
+    #   (= キャンセル → Defect Rate)。入稿時は即納品だけだが、後から予約に切り替わる。
+    #   売切ではないので **取下げはしない**。無言で流さず、気づく口を残す。
+    if info.get("is_preorder") is True:
+        out["preorder"] = True
+        out["delivery_message"] = info.get("delivery_message", "")
+        out["raw_status"] = f"{out['raw_status']}(予約:{out['delivery_message'][:20]})"
+        log(f"    [!] 予約に切替: {url} / {out['delivery_message'][:40]} "
+            f"(在庫ありだが発送不可、取下げはしない)")
 
     raw_price = skus[0].get("price_jpy")
     if isinstance(raw_price, int) and not isinstance(raw_price, bool) and raw_price >= 0:
