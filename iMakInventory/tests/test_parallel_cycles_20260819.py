@@ -104,3 +104,16 @@ def test_partial_profiles_do_not_enable_parallel(monkeypatch):
     _patch_defaults(monkeypatch, existing_dirs=(A_DEFAULT + "_LOW",))   # mercari 側が無い
 
     assert ml.resolve_profile_dirs("LOW") == (M_DEFAULT, A_DEFAULT)
+
+
+def test_scrape_log_is_split_per_parallel_label(monkeypatch):
+    """並走する label はログを分ける (1 本に交互で書かれると読めない).
+
+    HIGH は従来の名前のまま (既存の運用/grep を壊さない)。
+    """
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr(ml, "_LOG_LABEL", "")
+    assert ml._log_path().name.startswith("listings_2")
+
+    monkeypatch.setattr(ml, "_LOG_LABEL", "LOW")
+    assert ml._log_path().name.startswith("listings_LOW_")

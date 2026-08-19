@@ -109,6 +109,10 @@ AMAZON_RESTART_THRESHOLD = 3
 MERCARI_PREVENTIVE_RESTART_EVERY = 150
 
 
+#: ログを分けたい label (空 = 従来どおり listings_<date>.log)。process_sheet が設定する。
+_LOG_LABEL = ""
+
+
 def _log_path() -> Path:
     """本番ログ path。★ 2026-08-13: pytest 実行中は別ファイルに逃がす。
 
@@ -119,7 +123,11 @@ def _log_path() -> Path:
     """
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return LOG_DIR / f"listings_TESTRUN_{datetime.now().strftime('%Y-%m-%d')}.log"
-    return LOG_DIR / f"listings_{datetime.now().strftime('%Y-%m-%d')}.log"
+    # ★ 2026-08-19 並走: HIGH と LOW が同時に走ると 1 本のログに交互に書き込まれ、
+    #   「どちらの巡回が何をしたか」が読めなくなる。並走する label は別ファイルに分ける
+    #   (既定 = HIGH は従来の名前のまま)。
+    suffix = f"_{_LOG_LABEL}" if _LOG_LABEL else ""
+    return LOG_DIR / f"listings{suffix}_{datetime.now().strftime('%Y-%m-%d')}.log"
 
 
 def log(msg: str):
@@ -1037,6 +1045,8 @@ def process_sheet(
     progress_callback=None,
     supplier_filter: str = "all",
 ):
+    global _LOG_LABEL
+    _LOG_LABEL = "" if (sheet_label or "").upper() in ("", "HIGH", "SHEET") else sheet_label.upper()
     log("=" * 60)
     log(f"商品管理シート [{sheet_label}] 開始 (sheet_id={sheet_id[:20]}..., dry_run={dry_run})")
     log("=" * 60)

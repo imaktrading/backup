@@ -82,6 +82,7 @@ def _load_health() -> dict:
 
 
 def _save_health(health: dict) -> None:
+    # 並走 cycle と同時に書くと連続失敗カウンタが巻き戻り、鳴るべき警告が鳴らなくなる
     DECISION_LOG_DIR.mkdir(parents=True, exist_ok=True)
     HEALTH_FILE.write_text(
         json.dumps(health, ensure_ascii=False, indent=2),
@@ -222,6 +223,24 @@ def record_upload_result(
 
     Returns: {"alert_fired": bool, "reason": str, "health": dict}
     """
+    # ★ 2026-08-19: 並走 cycle と「読む→数える→書く」が交錯すると連続失敗の
+    #   カウンタが巻き戻り、鳴るべき警告 (ログイン切れ等) が鳴らなくなる。
+    #   load〜save を 1 単位で排他する。lock が取れなければ従来どおり実行する
+    #   (カウンタの精度 < 巡回の継続)。
+    from ledger_lock import ledger_lock, LedgerBusy  # noqa: PLC0415
+    try:
+        with ledger_lock(timeout_sec=30):
+            return _record_upload_result_locked(upload_result, csv_path, csv_lines, cycle_ts)
+    except LedgerBusy:
+        return _record_upload_result_locked(upload_result, csv_path, csv_lines, cycle_ts)
+
+
+def _record_upload_result_locked(
+    upload_result: dict,
+    csv_path: Optional[str] = None,
+    csv_lines: Optional[int] = None,
+    cycle_ts: Optional[str] = None,
+) -> dict:
     cycle_ts = cycle_ts or datetime.now().isoformat(timespec="seconds")
     health = _load_health()
 

@@ -108,6 +108,54 @@ CHROMIUM_PORTABLE_VERSION = 136   # chromep.exe 136.0.7103.93 同梱
 TRABAJO_CHROMEDRIVER_PATH = r"C:\トラバホセット\BoostListing（出品・在庫管理一体型ツール）\BoostListing\BoostListing\dll\chromedriver.exe"   # v136.0.7103.92
 
 
+def _kill_orphan_driver_processes() -> int:
+    """親が既に居ない chromedriver/uc process だけを kill する (稼働中は触らない).
+
+    並走 cycle の driver を巻き込まないための限定 kill。判定できない時は何もしない
+    (= 誤って生きている driver を殺すより、cache 削除を諦める方が安全)。
+    """
+    import subprocess  # noqa: PLC0415
+
+    ps = (
+        "Get-CimInstance Win32_Process -Filter \"Name='chromedriver.exe' OR "
+        "Name='undetected_chromedriver.exe' OR Name='chromep.exe'\" | "
+        "Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress"
+    )
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                           capture_output=True, text=True, timeout=30)
+        procs = json.loads((r.stdout or "").strip() or "[]")
+    except Exception:
+        return 0
+    if isinstance(procs, dict):
+        procs = [procs]
+
+    alive = _alive_pids()
+    orphans = [p["ProcessId"] for p in procs
+               if isinstance(p, dict) and p.get("ParentProcessId") not in alive]
+    if not orphans:
+        return 0
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                        "Stop-Process -Id " + ",".join(str(i) for i in orphans) +
+                        " -Force -ErrorAction SilentlyContinue"],
+                       capture_output=True, timeout=30)
+    except Exception:
+        return 0
+    return len(orphans)
+
+
+def _alive_pids() -> set:
+    import subprocess  # noqa: PLC0415
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                            "Get-Process | Select-Object -ExpandProperty Id"],
+                           capture_output=True, text=True, timeout=30)
+        return {int(x) for x in (r.stdout or "").split() if x.strip().isdigit()}
+    except Exception:
+        return set()
+
+
 def _cleanup_uc_patched_driver_cache() -> bool:
     """undetected_chromedriver の patched driver cache を削除.
 
@@ -141,12 +189,11 @@ def _cleanup_uc_patched_driver_cache() -> bool:
         return False
 
     # 2026-05-28: cache 内 file lock を握りうる残骸 process を kill
-    for procname in ("undetected_chromedriver.exe", "chromedriver.exe", "chromep.exe"):
-        try:
-            subprocess.run(["taskkill", "/F", "/IM", procname],
-                           capture_output=True, timeout=5)
-        except Exception:
-            pass
+    # ★ 2026-08-19: 旧実装は名前で全部 kill していた (taskkill /IM chromedriver.exe)。
+    #   HIGH/LOW 並走では、片方の upload がもう片方の**稼働中**の driver を殺してしまう
+    #   (= 相手の巡回が盲目化)。親プロセスが既に居ない「孤児」だけを kill する。
+    #   lock を握っているのは残骸なので、これで元の目的 (cache 削除) は達成できる。
+    _kill_orphan_driver_processes()
     _time.sleep(1)   # process 終了待ち
 
     # rmtree 試行 (= 最大 3 回 retry、 lock 解放待ち)
@@ -1034,14 +1081,19 @@ def upload_one_csv(
     print(f"  decision_log: {log_path}")
 
     if result.get("success") and not dry_run:
-        state = load_upload_state()
-        state["uploaded"].append({
-            "ts":         datetime.now().isoformat(timespec="seconds"),
-            "csv_path":   str(csv_path),
-            "csv_lines":  csv_lines,
-            "page_url":   result.get("page_url", ""),
-        })
-        save_upload_state(state)
+        # ★ 2026-08-19: 並走 cycle と同時に append すると片方の記録が消え、
+        #   その upload は次 cycle の verify 対象から漏れる (= 取下げが効いたか
+        #   確認されないまま流れる)。読み〜書きを排他する。
+        from ledger_lock import ledger_lock  # noqa: PLC0415
+        with ledger_lock():
+            state = load_upload_state()
+            state["uploaded"].append({
+                "ts":         datetime.now().isoformat(timespec="seconds"),
+                "csv_path":   str(csv_path),
+                "csv_lines":  csv_lines,
+                "page_url":   result.get("page_url", ""),
+            })
+            save_upload_state(state)
 
     return {**result, "log_path": str(log_path), "csv_lines": csv_lines}
 

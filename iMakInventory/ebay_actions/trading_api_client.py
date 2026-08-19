@@ -41,9 +41,25 @@ API_USAGE_PATH = Path(__file__).resolve().parent.parent / "decision_log" / "ebay
 
 
 def record_api_call(call_name: str, n: int = 1, today: Optional[str] = None) -> dict:
-    """日次 API 呼出数をカウントして返す (日付が変われば自動リセット)。fail-safe。"""
+    """日次 API 呼出数をカウントして返す (日付が変われば自動リセット)。fail-safe。
+
+    ★ 2026-08-19: HIGH/LOW 並走で「読んで +1 して書く」が交錯すると増分が消え、
+      日次上限 (5000) の警告が出るべき時に出なくなる。排他してから数える。
+      lock が取れなくても呼出自体は止めない (カウントの精度 < 巡回の継続)。
+    """
     from datetime import datetime as _dt  # noqa: PLC0415
     day = today or _dt.now().strftime("%Y-%m-%d")
+    try:
+        from ledger_lock import ledger_lock, LedgerBusy  # noqa: PLC0415
+        with ledger_lock(timeout_sec=15):
+            return _record_api_call_locked(call_name, n, day)
+    except LedgerBusy:
+        return _record_api_call_locked(call_name, n, day)   # 数え落ちても呼出は続ける
+    except Exception:
+        return _record_api_call_locked(call_name, n, day)
+
+
+def _record_api_call_locked(call_name: str, n: int, day: str) -> dict:
     data = {"date": day, "total": 0, "by_call": {}}
     try:
         if API_USAGE_PATH.exists():

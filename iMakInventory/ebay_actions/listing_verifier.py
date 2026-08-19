@@ -93,10 +93,16 @@ def get_already_verified() -> set[str]:
 
 
 def mark_verified(item_ids: list[str]):
-    state = {"verified_item_ids": list(get_already_verified() | set(item_ids))}
-    VERIFY_STATE_FILE.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    # 並走 cycle と同時に書くと片方の verify 済みが消える (= 二度手間)。排他する。
+    from ledger_lock import ledger_lock, LedgerBusy  # noqa: PLC0415
+    try:
+        with ledger_lock():
+            state = {"verified_item_ids": list(get_already_verified() | set(item_ids))}
+            VERIFY_STATE_FILE.write_text(
+                json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+    except LedgerBusy:
+        pass    # 記録できなくても実害は「次 cycle で再 verify」だけ (安全側)
 
 
 # ============================================================================
