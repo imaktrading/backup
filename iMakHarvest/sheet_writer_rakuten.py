@@ -12,6 +12,7 @@
 | F | 商品価格 |
 | G | 写真URL |
 | H | 商品説明 (無ければ空) |
+| I | メーカー公式URL (判定できた時だけ。 `gacha_maker`) |
 | M | 現在価格(円) 数値のみ |
 | R | `カプセルトイ` |
 
@@ -25,6 +26,7 @@ import re
 
 import gspread
 
+from gacha_maker import official_url
 from sheet_writer_amazon import (
     COL_CATEGORY, COL_CONDITION, COL_DESCRIPTION, COL_IMAGES, COL_PRICE,
     COL_TITLE, COL_URL, DEFAULT_COLUMN_COUNT,
@@ -33,6 +35,9 @@ from sheet_writer_amazon import (
 CATEGORY = "カプセルトイ"     # R列 (HQ 確認: 表記ゆれ禁止。 ガシャポン/ガチャガチャ は別扱い)
 CONDITION = "新品"
 COL_CURRENT_PRICE = 13        # M: 現在価格(円) - 監視くんが使う列。 書込可
+COL_OFFICIAL_URL = 9          # I: メーカー公式URL (2026-08-20 user 依頼)。
+                              #    ★本番 HIGH では I = PSA cert 列。 ガチャ行を HIGH へ
+                              #    コピーする時は I を持ち込まない (HQ へ連絡済)
 
 _ITEM_RE = re.compile(r"item\.rakuten\.co\.jp/([a-z0-9_-]+)/([a-z0-9_-]+)")
 
@@ -66,6 +71,7 @@ def build_row(item: dict, column_count: int = DEFAULT_COLUMN_COUNT) -> list:
     row[COL_PRICE - 1] = price
     row[COL_IMAGES - 1] = image_str
     row[COL_DESCRIPTION - 1] = str(item.get("description") or "")
+    row[COL_OFFICIAL_URL - 1] = official_url(item.get("title") or "")  # I: 判定できた時だけ
     row[COL_CURRENT_PRICE - 1] = price          # M: 数値のみ
     row[COL_CATEGORY - 1] = CATEGORY            # R
     return row
