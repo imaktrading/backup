@@ -1,0 +1,23 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [
+    "catalog miss: 1件",
+    "error: 2件"
+  ],
+  "recurring_missing": [
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert146117881 ONE PIECE WAFERS JAPANESE 20TH ANNIVERSARY [PORTGAS D. ACE 20TH ANNIVERSARY] #13 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 2,
+    "recurring_missing": 1
+  }
+}
