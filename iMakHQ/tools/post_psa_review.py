@@ -1520,6 +1520,60 @@ def parse_confirmations(results):
     return confirmed, none_records
 
 
+# 目視で出品に進まなかった理由 (表示順は固定)。
+_SKIP_REASONS = (
+    "cert番号の訂正 (今回は出品しない)",
+    "目視に出せなかった (PSAデータ/カテゴリ不明)",
+    "該当なし (カタログに依頼)",
+    "保留 (次の走行でまた出ます)",
+    "未回答",
+)
+
+
+def viewer_skip_reasons(certs, confirmed, results, fixes=(), unavailable=()):
+    """目視で出品に進まなかった cert を **理由ごと** にまとめる (純関数・test可)。
+
+    ★2026-08-19: それまで理由は **引き算** で作っていた (見送り N件 − 該当なし M件 = 未回答)。
+      8/19 は viewer に出せなかった1件 (PSAデータが取れず) が「未回答」と表示され、
+      人が「自分が答え忘れた」と読む状態になった。理由は引かずに、その場で記録する。
+
+    certs: 今回の対象 cert 全部 / confirmed: build に進む {cert: pid}
+    results: viewer からの回答 list / fixes: [(誤cert, 正cert)] / unavailable: 目視に出せなかった cert
+    戻り: [(理由, [cert, ...])] — 理由が付かない cert は1件も無い。
+    """
+    by = {str(r.get("cert", "")).strip(): (r.get("choice") or "")
+          for r in (results or [])}
+    fixed = {str(c).strip() for c, _ in (fixes or ())}
+    unavail = {str(c).strip() for c in (unavailable or ())}
+    buckets = {k: [] for k in _SKIP_REASONS}
+    for cert in [str(c).strip() for c in (certs or []) if str(c).strip()]:
+        if cert in (confirmed or {}):
+            continue
+        if cert in fixed:
+            r = "cert番号の訂正 (今回は出品しない)"
+        elif cert in unavail:
+            r = "目視に出せなかった (PSAデータ/カテゴリ不明)"
+        elif by.get(cert) in ("NONE", "NG"):
+            r = "該当なし (カタログに依頼)"
+        elif by.get(cert):
+            r = "保留 (次の走行でまた出ます)"
+        else:
+            r = "未回答"
+        buckets[r].append(cert)
+    return [(k, v) for k, v in buckets.items() if v]
+
+
+def render_skip_reasons(pairs):
+    """viewer_skip_reasons() → 走行ログに出す行 (純関数)。メールと監査がこれを読む。"""
+    if not pairs:
+        return []
+    out = ["  ⏭️ 目視で出品しなかった内訳 (引き算せず記録した理由):"]
+    for label, certs in pairs:
+        out.append("     ・%s: %d件 [%s]"
+                   % (label, len(certs), ", ".join("#" + c for c in certs)))
+    return out
+
+
 # ── 仕入元 (メルカリ) の写真 ─────────────────────────────────────────
 # ★2026-08-18: 目視画面は PSA写真 ↔ カタログ の2者だけで、**仕入元の写真が無かった**。
 #   そのため cert 番号を打ち間違えても画面は最後まで整合して見え、
@@ -1659,17 +1713,30 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         confirmed, _viewer_certs = split_verified(certs, _vc)
     n_cache = len(confirmed)
     targets = []
+    _unavailable = []          # 目視に出せなかった cert (= 未回答ではない・2026-08-19)
     for cert in _viewer_certs:
         t = _build_target_for_cert(cert)
         if t is None:
             append_log_func(f"  ⚠️ cert {cert}: cache miss/category不明/対象外 → 目視対象外 (build skip)\n")
+            _unavailable.append(cert)
             continue
         targets.append(t)
+
+    def _log_skips(_results=None, _fixes=()):
+        """出品に進まなかった cert を **理由付きで** 走行ログに残す。
+
+        メール(内訳)と監査(問題提起)はこの行を読む。理由を引き算で作らせないための記録。
+        """
+        for _ln in render_skip_reasons(viewer_skip_reasons(
+                certs, confirmed, _results, _fixes, _unavailable)):
+            append_log_func(_ln + "\n")
+
     if n_cache:
         append_log_func(f"  ✅ verified_certs から自動確定(viewer再表示せず build): {n_cache}件 / viewer目視対象: {len(targets)}件\n")
 
     if not targets:
         append_log_func("  ✅ 目視確認対象 cert なし (全件 cache miss/対象外)、viewer skip\n")
+        _log_skips()
         return confirmed
 
     _generate_html(targets)
@@ -1690,6 +1757,7 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
     if not server:
         append_log_func("  ⚠️ server 起動失敗 → build skip (確定 cert のみ)\n")
         _PRE_BUILD_MODE = False
+        _log_skips()
         return confirmed
 
     if open_browser:
@@ -1710,6 +1778,7 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         pass
     if not got or _PRE_BUILD_RESULTS is None:
         append_log_func("  ⚠️ 確認 timeout/未送信 → 確定済 cert のみ build (未確認は出品しない)\n")
+        _log_skips(_PRE_BUILD_RESULTS)
         return confirmed
 
     # cert 訂正: 打ち間違いの申告があった行は **出品しない** (今のPSAデータは別カードのもの)。
@@ -1740,6 +1809,7 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         except Exception as _e:
             append_log_func(f"  ⚠️ catalog route 失敗: {type(_e).__name__}: {_e}\n")
     append_log_func(f"  ✅ 目視確定: {len(confirmed)} 件を build へ (未確定は除外)\n")
+    _log_skips(_PRE_BUILD_RESULTS, fixes)
     return confirmed
 
 

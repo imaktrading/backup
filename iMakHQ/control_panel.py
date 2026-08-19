@@ -174,7 +174,16 @@ def build_problem_report(log: str, catalog_db_path: str = CATALOG_DB_PATH) -> st
                     _csv_text = _f.read()
         except Exception:
             _csv_text = None   # 読めなければ従来のパターン方式にフォールバック
-        _drops = _dc.classify_drops(log, set_exists=se, card_exists=ce, csv_text=_csv_text)
+        # 生成後に落ちた分は走行ログに出ない (ログが閉じた後の処理)。CSV 並置の記録を読む。
+        _extra = {}
+        try:
+            import json as _json
+            with open(_csv_p + ".excluded.json", encoding="utf-8") as _f:
+                _extra = _dc.post_drop_reasons(_json.load(_f))
+        except Exception:
+            _extra = {}
+        _drops = _dc.classify_drops(log, set_exists=se, card_exists=ce,
+                                    csv_text=_csv_text, extra=_extra)
         rep = _dc.render_problem_report(_drops)
         if rep:
             parts.append(rep)
@@ -323,6 +332,51 @@ def _livedup_removed_rows(pre_rows, pre_header, post_rows, post_header):
     return [r for r in pre_rows if _row_label(pre_header, r) not in post_labels]
 
 
+# 入稿CSVの cert 列 (drop の記録は cert を鍵にする = メールも監査も同じ物を数える)
+CSV_CERT_COL = "CDA:Certification Number - (ID: 27503)"
+
+
+def _row_cert(header, row):
+    """行の cert (無ければ空)。純関数。"""
+    i = header.index(CSV_CERT_COL) if CSV_CERT_COL in header else -1
+    return (row[i].strip() if 0 <= i < len(row) else "")
+
+
+def build_post_drops(pre_header, livedup_rows, mid_header, intra_rows):
+    """生成後に落ちた行 → [{cert, title, reason}] (純関数・test可)。
+
+    ★2026-08-19: 生成後の間引きは **どこにも記録されず** メールにも監査にも出なかった。
+      8/19 は CSV内に同じカードが2枚入って1枚を落としたが、その1件だけ行方不明になり
+      「処理20 = 出品12 + 落ち7」と数が合わなくなった (ユーザー指摘)。落ちたら必ず記録する。
+    """
+    out = []
+    for header, rows, reason in ((pre_header, livedup_rows, "live-dup"),
+                                 (mid_header, intra_rows, "intra-dup")):
+        ti = header.index("*Title") if "*Title" in (header or []) else -1
+        for r in (rows or []):
+            out.append({"cert": _row_cert(header, r),
+                        "title": (r[ti].strip() if 0 <= ti < len(r) else ""),
+                        "reason": reason})
+    return out
+
+
+def _write_post_drops(append_log_func, latest_csv, drops):
+    """生成後 drop を CSV 並置の `<csv>.excluded.json` に残す (失敗許容)。"""
+    import json as _json
+    from datetime import datetime as _dt
+    try:
+        with open(latest_csv + ".excluded.json", "w", encoding="utf-8") as f:
+            _json.dump({"at": _dt.now().isoformat(timespec="seconds"),
+                        "csv": os.path.basename(latest_csv),
+                        "drops": drops}, f, ensure_ascii=False, indent=1)
+        n = {}
+        for d in drops:
+            n[d["reason"]] = n.get(d["reason"], 0) + 1
+        append_log_func(f"\n  📝 生成後に落ちた分を記録: {n or '0件'}\n")
+    except Exception as e:                                     # noqa: BLE001
+        append_log_func(f"\n(生成後 drop の記録に失敗: {type(e).__name__})\n")
+
+
 def _write_keys_for_livedup_removed(append_log_func, latest_csv, pre_rows, pre_header, env):
     """4a が live重複として消した cert に KEY を書く(浪費ループ対策)。write-only・失敗許容。"""
     if not pre_rows:
@@ -452,6 +506,16 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     # 必ず 4a-2(intra間引き)の**前**に実行 = 4a が消した分だけを対象化(4a-2 分は兄弟未出品で対象外)。
     _write_keys_for_livedup_removed(append_log_func, latest_csv, _pre_rows, _pre_header, env)
 
+    # ★2026-08-19: 生成後に落ちた行を cert 単位で記録する。ここを記録しないと
+    #   メール(内訳)も監査(問題提起)も 4a/4a-2 の間引きを数えられず、毎回 件数が合わない。
+    try:
+        _mid_rows, _mid_header = _read_csv_rows(latest_csv)
+        _livedup = (_livedup_removed_rows(_pre_rows, _pre_header, _mid_rows, _mid_header)
+                    if _pre_rows else [])
+    except Exception as _e:
+        append_log_func(f"(live重複の記録: 読込失敗 {type(_e).__name__})\n")
+        _mid_rows, _mid_header, _livedup = [], [], []
+
     # Step 4a-2: CSV内 同design重複の間引き (2026-06-21)。重複くんは「既出品」としか照合せず
     # 同一CSV内の同design複数コピー(別cert)を間引かない → 同じカードが複数枚出る。ここで
     # (Game,Set,番号)が同一の行を1枚に絞る。KEY書込(4b)の前なので間引いた分は orphan にならない。
@@ -469,6 +533,16 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
             append_log_func(f"\n⚠️ 同design間引き returncode={r.returncode}(続行)\n")
     except Exception as e:
         append_log_func(f"\n⚠️ 同design間引き 失敗(続行): {type(e).__name__}: {e}\n")
+
+    try:
+        _post_rows, _post_header = _read_csv_rows(latest_csv)
+        _intra = (_livedup_removed_rows(_mid_rows, _mid_header, _post_rows, _post_header)
+                  if _mid_rows else [])
+    except Exception as _e:
+        append_log_func(f"(CSV内重複の記録: 読込失敗 {type(_e).__name__})\n")
+        _intra = []
+    _write_post_drops(append_log_func, latest_csv,
+                      build_post_drops(_pre_header, _livedup, _mid_header, _intra))
 
     # Step 4b: 入稿前 KEY 事前書込 (= Phase 1h、 HIGH I 列 cert 経由で AI/AJ 列補完)
     append_log_func("\n======================================================================\n")
@@ -674,18 +748,27 @@ def _exclusion_sources(csv_dir):
     removed = _read(_newest(os.path.join(csv_dir, "*.csv.removed.json")), as_json=True)
     hoju = _read(os.path.join(WORKSPACE, "iMakHQ", "review_logs",
                               "hoju_from_dupes_last.json"), as_json=True)
-    return log, removed, hoju
+    # 生成後に落ちた分 (live重複 / CSV内重複)。走行ログが閉じた後の処理なので log には出ない。
+    post = _read(_newest(os.path.join(csv_dir, "*.csv.excluded.json")), as_json=True)
+    return log, removed, hoju, post
 
 
-def build_exclusion_lines(log_text="", removed=None, hoju=None):
+def build_exclusion_lines(log_text="", removed=None, hoju=None, post_drops=None):
     """出品されなかった分の「件数 / 中身 / その後どうなるか」(純関数・test 可)。
 
     ★2026-08-19 ユーザー要望: メールに **除かれた件数と内容、対応状況** を載せる。
       それまでメールは出品できた分しか書いておらず、落ちた分は走行ログを開かないと
       分からなかった (8/19 は 20件中6件が未回答で落ちたのに気づけなかった)。
 
-    log_text: その走行のログ全文 / removed: `*.csv.removed.json` / hoju: 補URL の記録。
-    読めない項目は **黙って省く** (推測で書かない)。
+    ★2026-08-19 追記 (ユーザー指摘「件数が合わないよね」): 内訳を足しても処理件数に届かなかった。
+      原因は2つとも **記録していない物を推測で書いていた** こと:
+        1. 生成後の間引き (CSV内に同じカードが2枚) はどこにも記録されず、内訳から丸ごと欠けた
+        2. 目視の理由を「見送り − 該当なし = 未回答」と **引き算** で作っていた。
+           実際には viewer に出せなかった1件が「未回答」と表示され、人が答え忘れたように見えた
+      → 理由は記録した物だけを書く。記録が無ければ **書かない** (推測しない)。
+
+    log_text: その走行のログ全文 / removed: `*.csv.removed.json`
+    hoju: 補URL の記録 / post_drops: `*.csv.excluded.json` (生成後に落ちた分)。
     """
     import re as _re
     out = []
@@ -698,37 +781,65 @@ def build_exclusion_lines(log_text="", removed=None, hoju=None):
     #   「20件の中で落ちた分」と「20件を選ぶ前に候補から外した分」を混ぜたため、
     #   足すと 24件 になり 20件を超えていた (ユーザー指摘)。節を分ける。
     batch = n(r"(\d+)件を処理します")
-    # --- ① 今回の枠の中の内訳 (足すと batch になる) ---
-    none_ng = n(r"NONE/NG\s*(\d+)\s*件\s*→\s*catalog")
-    pend = max(0, n(r"目視未確定で出品見送り:\s*(\d+)\s*件") - none_ng)
-    rm = (removed or {}).get("removed") or 0
-    if pend:
-        out.append(f"・目視で未回答 {pend}件 → 次の走行でまた候補に戻ります")
-    if none_ng:
-        out.append(f"・「該当なし」 {none_ng}件 → カタログに依頼。1日後にまた出ます")
+    # --- (1) 今回の枠の中の内訳 (足すと batch になる) ---
+    # 目視で進まなかった分: post_psa_review が理由ごとに記録した行をそのまま読む。
+    after = {"該当なし": "カタログに依頼。1日後にまた出ます",
+             "未回答": "次の走行でまた候補に戻ります",
+             "保留": "次の走行でまた候補に戻ります",
+             "目視に出せなかった": "PSAデータを取り直して次の走行で出します",
+             "cert番号の訂正": "番号をシートに直しました。次の走行で取り直します"}
+    name = {"該当なし": "「該当なし」", "未回答": "目視で未回答"}
+    seen_reasons = _re.findall(r"^\s*・(.+?): (\d+)件 \[#", log_text or "", _re.M)
+    if seen_reasons:
+        for label, cnt in seen_reasons:
+            k = label.split(" (")[0]
+            out.append("・%s %s件 → %s" % (name.get(k, k), cnt,
+                                           after.get(k, "次の走行でまた候補に戻ります")))
+    else:
+        # 旧い走行ログ (理由の記録が無い) 向けの読み方。**新しい走行では通らない**。
+        none_ng = n(r"NONE/NG\s*(\d+)\s*件\s*→\s*catalog")
+        pend = max(0, n(r"目視未確定で出品見送り:\s*(\d+)\s*件") - none_ng)
+        if pend:
+            out.append("・目視で未回答 %d件 → 次の走行でまた候補に戻ります" % pend)
+        if none_ng:
+            out.append("・「該当なし」 %d件 → カタログに依頼。1日後にまた出ます" % none_ng)
     self_ng = len(_re.findall(r"selfcheck failed in build_row", log_text or ""))
     if self_ng:
-        out.append(f"・自己チェックで不一致 {self_ng}件 → 残務に記録済 (こちらの不具合)")
-    if rm:
-        names = [t.split(") ", 1)[-1][:44] for t in ((removed or {}).get("removed_titles") or [])]
-        tail = f" — {' / '.join(names[:3])}" + (" ほか" if len(names) > 3 else "") if names else ""
+        out.append("・自己チェックで不一致 %d件 → 残務に記録済 (こちらの不具合)" % self_ng)
+    # 生成後に落ちた分 (走行ログには出ない = 記録を読むしかない)。
+    # 記録 (excluded.json) があればそれを正とし、無ければ従来の removed.json で live重複だけ出す。
+    drops = (post_drops or {}).get("drops")
+    if drops is None:
+        live_n = int((removed or {}).get("removed") or 0)
+        live_titles = list((removed or {}).get("removed_titles") or [])
+        intra_n = 0
+    else:
+        live = [d for d in drops if d.get("reason") == "live-dup"]
+        live_n, live_titles = len(live), [d.get("title") or "" for d in live]
+        intra_n = sum(1 for d in drops if d.get("reason") == "intra-dup")
+    if live_n:
+        names = [t.split(") ", 1)[-1][:44] for t in live_titles if t]
+        tail = (" — " + " / ".join(names[:3]) + (" ほか" if len(names) > 3 else "")) if names else ""
         added = (hoju or {}).get("added")
-        after = (f"仕入元は補URLに回しました (今回 {added}本 追加)"
-                 if added else "仕入元は補URLの対象になります")
-        out.append(f"・同じカードが既に出品中 {rm}件 → {after}{tail}")
+        aft = ("仕入元は補URLに回しました (今回 %s本 追加)" % added
+               if added else "仕入元は補URLの対象になります")
+        out.append("・同じカードが既に出品中 %d件 → %s%s" % (live_n, aft, tail))
+    if intra_n:
+        out.append("・同じカードが今回2枚 %d件 → 1枚だけ出品しました "
+                   "(残りは次の走行で候補に戻ります)" % intra_n)
     if out and batch:
-        out.insert(0, f"(今回の {batch}件 の内訳)")
-    # --- ② 枠に入る前に候補から外した分 (母数は候補全体。①とは別勘定) ---
+        out.insert(0, "(今回の %d件 の内訳)" % batch)
+    # --- (2) 枠に入る前に候補から外した分 (母数は候補全体。(1)とは別勘定) ---
     pre = []
     for label, why in (("NO-IMAGE", "カタログに画像が無い"),
                        ("OUT-OF-SCOPE", "参入しないゲーム"),
                        ("GAP", "カタログに未収録")):
         c = n(r"\[%s=[^\]]*\]:\s*(\d+)\s*件" % label)
         if c:
-            after = {"NO-IMAGE": "カタログに依頼済",
-                     "OUT-OF-SCOPE": "対象外 (今後も出しません)",
-                     "GAP": "カタログに依頼済"}[label]
-            pre.append(f"・{why} {c}件 → {after}")
+            aft = {"NO-IMAGE": "カタログに依頼済",
+                   "OUT-OF-SCOPE": "対象外 (今後も出しません)",
+                   "GAP": "カタログに依頼済"}[label]
+            pre.append("・%s %d件 → %s" % (why, c, aft))
     if pre:
         out.append("")
         out.append("(枠に入る前に候補から外した分 — 上の内訳とは別勘定)")

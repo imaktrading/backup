@@ -80,11 +80,16 @@ def csv_path_from_log(log):
     return m.group(1).strip() if m else ""
 
 
-def drop_reason(log, cert):
+def drop_reason(log, cert, extra=None):
     """cert 1件が CSV に載らなかった理由をログから引く (純関数)。
 
     ここに該当が無くても **drop の集合からは外れない**。「未分類(要調査)」として出る。
     """
+    # ⓪ 記録済みの理由 (生成後に落ちた分 = `<csv>.excluded.json`)。走行ログが閉じた後の
+    #   処理なので log には出ない。記録があるならログ推定より **記録を優先**する。
+    if (extra or {}).get(str(cert)):
+        return dict(extra[str(cert)])
+
     c = re.escape(cert)
 
     # ⓪ PSA 取得失敗 ("取得中(確認用): #cert... 失敗")。
@@ -109,6 +114,13 @@ def drop_reason(log, cert):
         return {"class": "画像欠(catalogに実在)",
                 "cause": "catalog に行は在るが画像が無く、viewer で現物と照合できない",
                 "act": "catalog に画像追加を依頼 (自動で missing_models に流れる)"}
+
+    # ①-c そもそも目視に出せなかった (PSAデータ/カテゴリが取れず viewer に載らなかった)。
+    #     人は何も聞かれていないので「未回答」でも「該当なし」でもない (2026-08-19)。
+    if re.search(r"cert \s*%s[:：][^\n]*(?:cache miss|目視対象外)" % c, log):
+        return {"class": "目視に出せず(PSAデータ/カテゴリ不明)",
+                "cause": "PSAデータかカテゴリが取れず viewer に出せなかった(人は未回答ではない)",
+                "act": "cert cache を取り直す。恒常的なら scrape/カテゴリ判定側を調査"}
 
     # ① 目視未確定 (viewer で OK/CHOSEN が付かなかった) — psa_to_csv.py:2860
     if re.search(r"目視未確定\D*?%s" % c, log):
@@ -140,7 +152,30 @@ def drop_reason(log, cert):
             "act": f"生成ログで #{cert} を検索し、原因行を drop_reason() に分類ルール追加"}
 
 
-def structural_drops(log, csv_text):
+def post_drop_reasons(post):
+    """`<csv>.excluded.json` → {cert: 理由} (純関数・test可)。
+
+    生成後の間引き (live重複 / CSV内の同じカード2枚) は走行ログが閉じた後に走るので、
+    ログからは絶対に説明できない。記録を読ませて「未分類(要調査)」に化けるのを止める
+    (2026-08-19: 落ち8件のうち5件が未分類のまま報告され、件数も合わなかった)。
+    """
+    out = {}
+    for d in ((post or {}).get("drops") or []):
+        cert = str(d.get("cert") or "").strip()
+        if not cert:
+            continue
+        if d.get("reason") == "live-dup":
+            out[cert] = {"class": "正常(既に出品中)",
+                         "cause": "同じカードが既に出品中のため除外",
+                         "act": "対応不要(正常)。仕入元は補URLに回る"}
+        elif d.get("reason") == "intra-dup":
+            out[cert] = {"class": "正常(今回2枚)",
+                         "cause": "同じカードが今回のCSVに2枚入り、1枚だけ出品した",
+                         "act": "対応不要(正常)。残りは次の走行で候補に戻る"}
+    return out
+
+
+def structural_drops(log, csv_text, extra=None):
     """universe − CSV = 落ちの実体 (cert単位)。理由を付けて返す。"""
     universe = processed_certs(log)
     if not universe or csv_text is None:
@@ -150,7 +185,7 @@ def structural_drops(log, csv_text):
     for cert in universe:
         if cert in ok:
             continue
-        d = dict(drop_reason(log, cert))
+        d = dict(drop_reason(log, cert, extra))
         d["item"] = "#" + cert
         d["cert"] = cert
         out.append(d)
@@ -187,7 +222,7 @@ def rescued_subjects(log):
     return rescued
 
 
-def classify_drops(log, *, set_exists, card_exists=None, csv_text=None):
+def classify_drops(log, *, set_exists, card_exists=None, csv_text=None, extra=None):
     """生成ログ → [{item, class, cause, act}] (純関数, catalog照会は注入)。
 
     set_exists(prefix)->bool: そのセット接頭辞のカードが catalog に1件でも在るか。
@@ -249,7 +284,7 @@ def classify_drops(log, *, set_exists, card_exists=None, csv_text=None):
             if cid in seen:
                 continue
             seen.add(cid)
-            d = dict(drop_reason(log, m.group(1)))
+            d = dict(drop_reason(log, m.group(1), extra))
             d["item"] = cid
             d["cert"] = m.group(1)
             out.append(d)
@@ -282,7 +317,7 @@ def classify_drops(log, *, set_exists, card_exists=None, csv_text=None):
     #    パターン側だけに在って universe に無い finding (収録漏れ/scope外/promo衝突 = card_id 単位)
     #    は **その drop の理由説明** として残す (件数は cert 側で数えるので二重計上しない)。
     already = {d.get("cert") for d in out if d.get("cert")}
-    for d in structural_drops(log, csv_text):
+    for d in structural_drops(log, csv_text, extra):
         if d["cert"] not in already:
             out.append(d)
     return out
@@ -292,7 +327,7 @@ def render_problem_report(drops):
     """分類済み drop → 問題提起テキスト(原因+対策案)。class順にまとめる。"""
     if not drops:
         return ""
-    actionable = [d for d in drops if d["class"] != "正常"]
+    actionable = [d for d in drops if not d["class"].startswith("正常")]
     lines = ["📋 問題提起: CSVにならなかった分 — 原因と対策案(判断は人)"]
     from collections import Counter
     cnt = Counter(d["class"] for d in drops)
