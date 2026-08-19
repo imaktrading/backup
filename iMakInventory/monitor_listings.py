@@ -73,6 +73,7 @@ from sheet_updater import (  # noqa: E402
 from err_flag import (  # noqa: E402
     build_err_marker, marker_count, PERSISTENT_THRESHOLD, DEAD_SOURCE_THRESHOLD,
 )
+from ledger_lock import ledger_lock, LedgerBusy  # noqa: E402
 from scrapers.mercari_scraper import fetch_product_inventory as fetch_mercari  # noqa: E402
 from scrapers.mercari_scraper import create_driver as create_mercari_driver  # noqa: E402
 from scrapers.amazon_scraper import fetch_product_inventory as fetch_amazon  # noqa: E402
@@ -633,8 +634,11 @@ def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None
         "raw_status":   result["raw_status"],
         "dry_run":      dry_run,
     }
-    with open(PENDING_REVISE_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    # 並走 cycle が同じ台帳を書き直している最中に append すると、その行ごと消える
+    # (= 取下げ待ちの silent 消失 = fail-OPEN)。書き直し側と同じ lock で直列化する。
+    with ledger_lock():
+        with open(PENDING_REVISE_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 # ============================================================================
@@ -682,8 +686,9 @@ def append_pending_revive(sheet_label: str, result: dict, dry_run: bool) -> None
         "raw_status":   result.get("raw_status", ""),
         "dry_run":      dry_run,
     }
-    with open(PENDING_REVIVE_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    with ledger_lock():   # 並走 cycle の書き直しと直列化 (append 消失の防止)
+        with open(PENDING_REVIVE_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def confirm_and_enqueue_revive(
@@ -804,28 +809,35 @@ def resolve_action_required(item_ids, reason: str, dry_run: bool = False) -> int
     ids = {str(i).strip() for i in (item_ids or []) if str(i).strip()}
     if not ids or not ACTION_REQUIRED_FILE.exists():
         return 0
-    keep, closed = [], []
-    for line in ACTION_REQUIRED_FILE.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            e = json.loads(line)
-        except json.JSONDecodeError:
-            keep.append(line)
-            continue
-        if e.get("reason") == reason and (e.get("item_id") or "").strip() in ids:
-            closed.append(e)
-        else:
-            keep.append(line)
-    if not closed or dry_run:
-        return len(closed)
-    with open(ACTION_REQUIRED_RESOLVED_FILE, "a", encoding="utf-8") as af:
-        for e in closed:
-            e["resolved_at"] = datetime.now().isoformat(timespec="seconds")
-            af.write(json.dumps(e, ensure_ascii=False) + "\n")
-    ACTION_REQUIRED_FILE.write_text(
-        ("\n".join(keep) + "\n") if keep else "", encoding="utf-8")
-    return len(closed)
+    # 読んでから書き直すまでを排他する (並走 cycle の append を巻き込んで消さない)。
+    # lock を取れなければ閉じない = キューは残る (安全側)。次 cycle が再度閉じにくる。
+    try:
+        with ledger_lock():
+            keep, closed = [], []
+            for line in ACTION_REQUIRED_FILE.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    keep.append(line)
+                    continue
+                if e.get("reason") == reason and (e.get("item_id") or "").strip() in ids:
+                    closed.append(e)
+                else:
+                    keep.append(line)
+            if not closed or dry_run:
+                return len(closed)
+            with open(ACTION_REQUIRED_RESOLVED_FILE, "a", encoding="utf-8") as af:
+                for e in closed:
+                    e["resolved_at"] = datetime.now().isoformat(timespec="seconds")
+                    af.write(json.dumps(e, ensure_ascii=False) + "\n")
+            ACTION_REQUIRED_FILE.write_text(
+                ("\n".join(keep) + "\n") if keep else "", encoding="utf-8")
+            return len(closed)
+    except LedgerBusy as e:
+        log(f"  [!] 要対応キューの整理を skip (台帳 lock 取得失敗: {e})")
+        return 0
 
 
 def append_action_required(sheet_label: str, result: dict, reason: str,
@@ -855,34 +867,37 @@ def append_action_required(sheet_label: str, result: dict, reason: str,
     # 2227 entry = 平均 6.6 重複、 07-04〜07 の deadlock で発生)。 同一 keyの entry が既にあれば
     # 追記しない (= 記録は 1 度きり、 silent 化はしない)。 key は item_id 優先、 空欄は row_index。
     dedup_key = (item_id or f"row:{row_index}", reason)
-    if ACTION_REQUIRED_FILE.exists():
-        try:
-            for line in ACTION_REQUIRED_FILE.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    e = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                ek = (e.get("item_id") or f"row:{e.get('row_index')}", e.get("reason"))
-                if ek == dedup_key:
-                    return  # 既記録 = 追記 skip (dedup)
-        except Exception:
-            pass  # 読込失敗時は保守的に追記 (silent 化しない方を優先)
-    entry = {
-        "ts":           datetime.now().isoformat(timespec="seconds"),
-        "sheet":        sheet_label,
-        "row_index":    row_index,
-        "url":          result["url"],
-        "item_id":      item_id,
-        "title":        result.get("title", ""),
-        "supplier":     result.get("supplier", ""),
-        "raw_status":   result.get("raw_status", ""),
-        "reason":       reason,
-        "dry_run":      dry_run,
-    }
-    with open(ACTION_REQUIRED_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    # dedup 判定 (読み) と追記の間に並走 cycle が書き直すと重複/消失が起きるので、
+    # 判定〜追記を 1 つの lock 区間にまとめる (下の append まで同じ with の中)。
+    with ledger_lock():
+        if ACTION_REQUIRED_FILE.exists():
+            try:
+                for line in ACTION_REQUIRED_FILE.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ek = (e.get("item_id") or f"row:{e.get('row_index')}", e.get("reason"))
+                    if ek == dedup_key:
+                        return  # 既記録 = 追記 skip (dedup)
+            except Exception:
+                pass  # 読込失敗時は保守的に追記 (silent 化しない方を優先)
+        entry = {
+            "ts":           datetime.now().isoformat(timespec="seconds"),
+            "sheet":        sheet_label,
+            "row_index":    row_index,
+            "url":          result["url"],
+            "item_id":      item_id,
+            "title":        result.get("title", ""),
+            "supplier":     result.get("supplier", ""),
+            "raw_status":   result.get("raw_status", ""),
+            "reason":       reason,
+            "dry_run":      dry_run,
+        }
+        with open(ACTION_REQUIRED_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 # ============================================================================

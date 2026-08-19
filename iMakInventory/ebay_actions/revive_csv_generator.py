@@ -55,6 +55,7 @@ _PRICING_ENGINE_PATH = ROOT_DIR.parent / "iMakeBayAPI"
 if str(_PRICING_ENGINE_PATH) not in sys.path:
     sys.path.insert(0, str(_PRICING_ENGINE_PATH))
 
+from ledger_lock import remove_entries  # noqa: E402
 from sheet_updater import (  # noqa: E402
     HIGH_SHEET_ID,
     LOW_SHEET_ID,
@@ -138,30 +139,12 @@ def drain_pending_revive(consumed_item_ids: list[str]) -> int:
     if not PENDING_REVIVE_FILE.exists() or not consumed_item_ids:
         return 0
     consumed = set(consumed_item_ids)
-    moved = 0
-    keep = []
-    with open(PENDING_REVIVE_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                keep.append(line)
-                continue
-            if entry.get("item_id") in consumed:
-                entry["consumed_at"] = datetime.now().isoformat(timespec="seconds")
-                with open(PROCESSED_REVIVE_FILE, "a", encoding="utf-8") as af:
-                    af.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                moved += 1
-            else:
-                keep.append(line)
-    PENDING_REVIVE_FILE.write_text(
-        ("\n".join(keep) + "\n") if keep else "",
-        encoding="utf-8",
+    return remove_entries(              # 並走 cycle の append を巻き込まない書換え
+        PENDING_REVIVE_FILE,
+        lambda e: e.get("item_id") in consumed,
+        archive_path=PROCESSED_REVIVE_FILE,
+        stamp_field="consumed_at",
     )
-    return moved
 
 
 DISCARDED_REVIVE_FILE = DECISION_LOG_DIR / "discarded_revive.jsonl"
@@ -194,28 +177,13 @@ def prune_unresolvable_pending_revive(skipped: list) -> int:
     if not stale_ids or not PENDING_REVIVE_FILE.exists():
         return 0
 
-    moved, keep = 0, []
-    with open(PENDING_REVIVE_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                keep.append(line)
-                continue
-            if entry.get("item_id") in stale_ids:
-                entry["discarded_at"] = now.isoformat(timespec="seconds")
-                entry["discard_reason"] = "row_not_found_by_item_id_expired"
-                with open(DISCARDED_REVIVE_FILE, "a", encoding="utf-8") as af:
-                    af.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                moved += 1
-            else:
-                keep.append(line)
-    PENDING_REVIVE_FILE.write_text(
-        ("\n".join(keep) + "\n") if keep else "", encoding="utf-8")
-    return moved
+    return remove_entries(
+        PENDING_REVIVE_FILE,
+        lambda e: e.get("item_id") in stale_ids,
+        archive_path=DISCARDED_REVIVE_FILE,
+        stamp_field="discarded_at",
+        stamp_extra={"discard_reason": "row_not_found_by_item_id_expired"},
+    )
 
 
 # ============================================================================

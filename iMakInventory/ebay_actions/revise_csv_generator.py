@@ -51,6 +51,7 @@ ROOT_DIR = SCRIPT_DIR.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from ledger_lock import remove_entries  # noqa: E402
 from sheet_updater import (  # noqa: E402
     HIGH_SHEET_ID,
     LOW_SHEET_ID,
@@ -425,48 +426,45 @@ def prune_discarded_entries(skipped: list[dict]) -> dict:
         return _ebay_current_qty(iid, token)
 
     # pending 全行を走査、 target 該当 entry のみ eBay qty 確認
+    # ★ 並走 cycle 対応 (2026-08-19): eBay 確認は lock の外で済ませ、
+    #   「消す entry の key」だけを決める。台帳の書換えは remove_entries が
+    #   lock 内で読み直してから行う (判定中に別 cycle が append した行を消さない)。
     archived = 0
     kept_qty_gt0 = 0
     reincluded = []
-    keep_lines = []
-    with open(PENDING_REVISE_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                keep_lines.append(line)
-                continue
-            key = (entry.get("sheet", ""), entry.get("row_index", -1),
-                   entry.get("item_id", ""))
-            if key not in targets:
-                keep_lines.append(line)
-                continue
-            # eBay qty 確認 (= fail-CLOSED 設計の核)
-            iid = entry.get("item_id", "")
-            qty = _ebay_qty(iid)
-            if qty == 0:
-                # 既 qty=0 → 安全に discard
-                entry["discarded_at"] = datetime.now().isoformat(timespec="seconds")
-                entry["discard_reason"] = "ebay_qty_zero_confirmed"
-                with open(DISCARDED_REVISE_FILE, "a", encoding="utf-8") as af:
-                    af.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                archived += 1
-            elif qty is None:
-                # API 失敗 → 保守的に pending 残置
-                keep_lines.append(line)
-            else:
-                # qty > 0 → sheet 状態が誤、 pending 残置 + 再 include 候補に格上げ
-                kept_qty_gt0 += 1
-                reincluded.append(entry)
-                keep_lines.append(line)
+    discard_keys = set()
+    for line in PENDING_REVISE_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        key = (entry.get("sheet", ""), entry.get("row_index", -1),
+               entry.get("item_id", ""))
+        if key not in targets:
+            continue
+        # eBay qty 確認 (= fail-CLOSED 設計の核)
+        qty = _ebay_qty(entry.get("item_id", ""))
+        if qty == 0:
+            discard_keys.add(key)      # 既 qty=0 → 安全に discard
+        elif qty is None:
+            pass                       # API 失敗 → 保守的に pending 残置
+        else:
+            # qty > 0 → sheet 状態が誤、 pending 残置 + 再 include 候補に格上げ
+            kept_qty_gt0 += 1
+            reincluded.append(entry)
 
-    PENDING_REVISE_FILE.write_text(
-        ("\n".join(keep_lines) + "\n") if keep_lines else "",
-        encoding="utf-8",
-    )
+    if discard_keys:
+        archived = remove_entries(
+            PENDING_REVISE_FILE,
+            lambda e: (e.get("sheet", ""), e.get("row_index", -1),
+                       e.get("item_id", "")) in discard_keys,
+            archive_path=DISCARDED_REVISE_FILE,
+            stamp_field="discarded_at",
+            stamp_extra={"discard_reason": "ebay_qty_zero_confirmed"},
+        )
     return {
         "discarded": archived,
         "kept_qty_gt0": kept_qty_gt0,
@@ -490,33 +488,12 @@ def drain_pending_queue(consumed_item_ids: list[str]) -> int:
         return 0
 
     consumed = set(consumed_item_ids)
-    moved = 0
-    keep = []
-    with open(PENDING_REVISE_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                # 壊れた行は維持 (debug 可能にする)
-                keep.append(line)
-                continue
-            if entry.get("item_id") in consumed:
-                # archive
-                entry["consumed_at"] = datetime.now().isoformat(timespec="seconds")
-                with open(PROCESSED_REVISE_FILE, "a", encoding="utf-8") as af:
-                    af.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                moved += 1
-            else:
-                keep.append(line)
-
-    PENDING_REVISE_FILE.write_text(
-        ("\n".join(keep) + "\n") if keep else "",
-        encoding="utf-8",
+    return remove_entries(
+        PENDING_REVISE_FILE,
+        lambda e: e.get("item_id") in consumed,
+        archive_path=PROCESSED_REVISE_FILE,
+        stamp_field="consumed_at",
     )
-    return moved
 
 
 def prune_taken_down_candidates(
