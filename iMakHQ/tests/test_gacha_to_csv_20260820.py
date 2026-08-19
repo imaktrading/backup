@@ -90,7 +90,10 @@ class TestRowsAreDroppedFailClosed:
 
 
 class TestShopBannersAreNotProductPhotos:
-    """★1枚目は eBay のギャラリー画像。バナーを出すと商品が写らない."""
+    """バナー判定は残す (目視画面での並べ順やチェックの既定に使う)。
+
+    ただし **行は落とさない** — G列は人が見て選ぶ (下の pass-through テスト)。
+    """
 
     def test_known_banners_are_detected(self):
         assert G.is_banner("https://image.rakuten.co.jp/x/bn_math20130901tate.jpg")
@@ -99,13 +102,15 @@ class TestShopBannersAreNotProductPhotos:
     def test_product_photos_are_kept(self):
         assert not G.is_banner("https://image.rakuten.co.jp/x/cabinet/g260736s02t.jpg")
 
-    def test_banner_is_stripped_from_the_row(self):
+    def test_the_g_column_is_passed_through_untouched(self):
+        """★2026-08-20 user 指示: G列は間引かず全部 目視画面に出す。
+
+        744枚中667枚が店の部品だったが、機械には選り分けられない
+        (`parts/header/menu0.jpg` のような物まで在る)。人が見て選ぶ。
+        """
         it = G.parse_row(_row(title=TITLE,
                               pics="https://x/bn_math1.jpg|https://x/item1.jpg"))
-        assert it["pics"] == ["https://x/item1.jpg"]
-
-    def test_a_row_with_only_banners_is_dropped(self):
-        assert G.parse_row(_row(title=TITLE, pics="https://x/bn_math1.jpg")) is None
+        assert it["pics"] == ["https://x/bn_math1.jpg", "https://x/item1.jpg"]
 
 
 class TestTitleAndDedup:

@@ -139,9 +139,9 @@ def parse_row(row: list) -> dict | None:
     cost = re.sub(r"[^\d]", "", g(12) or g(5))
     if not cost:
         return None
-    pics = [p for p in g(6).split("|") if p.startswith("http") and not is_banner(p)]
-    if not pics:
-        return None                      # 商品写真が1枚も無い = 出さない
+    # ★2026-08-20 user 指示: G列は **そのまま全部** 目視画面に出す。
+    #   どれが商品写真かは人が見て選ぶ (こちらで間引くと、隠れて見えなくなる)。
+    pics = [p for p in g(6).split("|") if p.startswith("http")]
     return {"url": url, "title_jp": strip_shop_suffix(title), "pieces": n,
             "with_board": has_display_board(title), "series_jp": series_jp(title),
             "maker_jp": maker_jp(title), "cost_jpy": int(cost), "pics": pics}
@@ -399,10 +399,10 @@ def main() -> int:
     if not a.no_review:
         import gacha_review as R
         ledger = R.run_review(items, open_browser=not a.no_browser)
-        for why, n in R.skipped_reasons(items, ledger).items():
-            print(f"  ⏭️ 出しません {n}件: {why}")
+        for title, why in R.skipped_reasons(items, ledger):
+            print(f"  ⏭️ 出しません: {title} — {why}")
         items = R.confirmed(items, ledger)
-        print(f"  ✅ 目視で15才以上と確認: {len(items)}件")
+        print(f"  ✅ 目視で「出品する」: {len(items)}件")
         if not items:
             print("出せる行が0件 → CSVは作りません")
             return 0
