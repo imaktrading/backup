@@ -97,6 +97,8 @@ def plan(csv_rows, header, index, today):
 
 
 STOCK_CLI_DIR = r"C:/dev/iMak_inventory/iMakInventory"
+# 在庫チェックCLI に与える上限。おまけの確認なので、ここで粘らない
+STOCK_CLI_MAX_SEC = 300
 
 
 def live_stock(urls):
@@ -112,20 +114,55 @@ def live_stock(urls):
     tmpdir = tempfile.mkdtemp(prefix="stockchk_")
     ufile = os.path.join(tmpdir, "urls.txt")
     ofile = os.path.join(tmpdir, "out.json")
+    logf = os.path.join(tmpdir, "cli.log")
     with open(ufile, "w", encoding="utf-8") as f:
         f.write("\n".join(urls))
+    budget = min(STOCK_CLI_MAX_SEC, 60 + 30 * len(urls))
+    proc = None
     try:
-        subprocess.run([sys.executable, "-m", "tools.stock_check_cli",
-                        "--urls", ufile, "--json", ofile],
-                       cwd=STOCK_CLI_DIR, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=900)
+        # ★2026-08-19: ここは capture_output=True + timeout=900 だった。問題が2つ:
+        #   1. 900秒は長すぎる。これは「巡回結果が1日古いかも」を補う **おまけ** なので、
+        #      取れなければシートの巡回結果に落ちれば済む。件数に見合う budget にする
+        #   2. パイプで受けると、CLI が起動した Chrome が残っている限り timeout を過ぎても
+        #      run() が返らない (孫プロセスがパイプを掴んだまま)。実測: 2URLで420秒 無応答・
+        #      出力ゼロ。→ 出力はファイルに逃がし、時間切れは **プロセスツリーごと** 落とす
+        with open(logf, "w", encoding="utf-8") as lf:
+            proc = subprocess.Popen([sys.executable, "-m", "tools.stock_check_cli",
+                                     "--urls", ufile, "--json", ofile],
+                                    cwd=STOCK_CLI_DIR, stdout=lf,
+                                    stderr=subprocess.STDOUT)
+            proc.wait(timeout=budget)
         if not os.path.exists(ofile):
+            print("  ⚠️ 在庫チェックCLI が結果を返しませんでした → 巡回結果で判定します")
             return {}
         return {r.get("url"): (r.get("status") or "unknown")
                 for r in json.load(open(ofile, encoding="utf-8"))}
+    except subprocess.TimeoutExpired:
+        print("  ⚠️ 在庫チェックCLI が %d秒 で終わらず → 巡回結果で判定します "
+              "(監視くんに調査依頼済)" % budget)
+        _kill_tree(proc)
+        return {}
     except Exception as e:
         print(f"  ⚠️ 在庫チェックCLI を呼べず、巡回結果で判定します: {type(e).__name__}: {e}")
+        _kill_tree(proc)
         return {}
+
+
+def _kill_tree(proc):
+    """自分が起動した CLI を **子ごと** 落とす (掴んだままの Chrome を残さない)。
+
+    落とすのは自分の PID の下だけ。他の worktree が動かしている driver は触らない。
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       capture_output=True, timeout=30)
+    except Exception:                                          # noqa: BLE001
+        try:
+            proc.kill()
+        except Exception:                                      # noqa: BLE001
+            pass
 
 
 def main():

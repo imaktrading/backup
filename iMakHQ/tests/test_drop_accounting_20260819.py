@@ -50,7 +50,8 @@ class TestPostDropsAreRecorded:
     """生成後に落ちた行は cert 付きで記録される (= メールと監査が同じ物を数える)."""
 
     def test_both_steps_are_recorded_with_cert_and_reason(self):
-        _row_cert, build_post_drops = _fn("_row_cert", "build_post_drops")
+        _row_cert, drop_records, build_post_drops = _fn(
+            "_row_cert", "drop_records", "build_post_drops")
         live = [_row("PSA 10 Ace", "m1", "111111")]
         intra = [_row("PSA 10 Arbok", "m2", "222222")]
         got = build_post_drops(HEADER, live, HEADER, intra)
@@ -59,13 +60,15 @@ class TestPostDropsAreRecorded:
         assert got[1]["title"] == "PSA 10 Arbok", "何が落ちたか分かるように中身も残す"
 
     def test_nothing_removed_records_nothing(self):
-        _row_cert, build_post_drops = _fn("_row_cert", "build_post_drops")
+        _row_cert, drop_records, build_post_drops = _fn(
+            "_row_cert", "drop_records", "build_post_drops")
         assert build_post_drops(HEADER, [], HEADER, []) == []
 
     def test_the_two_dedupe_steps_are_diffed_separately(self):
         """★8/19 の実体: 17行 → live重複4 → 13行 → CSV内重複1 → 12行."""
-        _row_label, livedup, _row_cert, build_post_drops = _fn(
-            "_row_label", "_livedup_removed_rows", "_row_cert", "build_post_drops")
+        _row_label, livedup, _row_cert, drop_records, build_post_drops = _fn(
+            "_row_label", "_livedup_removed_rows", "_row_cert", "drop_records",
+            "build_post_drops")
         pre = [_row("t%d" % i, "m%d" % i, "%06d" % i) for i in range(17)]
         mid = [r for r in pre if r[1] not in ("m3", "m4", "m8", "m16")]
         post = [r for r in mid if r[1] != "m14"]

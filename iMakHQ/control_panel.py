@@ -349,26 +349,39 @@ def build_post_drops(pre_header, livedup_rows, mid_header, intra_rows):
       8/19 は CSV内に同じカードが2枚入って1枚を落としたが、その1件だけ行方不明になり
       「処理20 = 出品12 + 落ち7」と数が合わなくなった (ユーザー指摘)。落ちたら必ず記録する。
     """
-    out = []
-    for header, rows, reason in ((pre_header, livedup_rows, "live-dup"),
-                                 (mid_header, intra_rows, "intra-dup")):
-        ti = header.index("*Title") if "*Title" in (header or []) else -1
-        for r in (rows or []):
-            out.append({"cert": _row_cert(header, r),
-                        "title": (r[ti].strip() if 0 <= ti < len(r) else ""),
-                        "reason": reason})
-    return out
+    return (drop_records(pre_header, livedup_rows, "live-dup")
+            + drop_records(mid_header, intra_rows, "intra-dup"))
 
 
-def _write_post_drops(append_log_func, latest_csv, drops):
-    """生成後 drop を CSV 並置の `<csv>.excluded.json` に残す (失敗許容)。"""
+def drop_records(header, rows, reason):
+    """落ちた行 → [{cert, title, reason}] (純関数)。"""
+    ti = header.index("*Title") if "*Title" in (header or []) else -1
+    return [{"cert": _row_cert(header, r),
+             "title": (r[ti].strip() if 0 <= ti < len(r) else ""),
+             "reason": reason} for r in (rows or [])]
+
+
+def _write_post_drops(append_log_func, latest_csv, drops, **extra):
+    """生成後 drop を CSV 並置の `<csv>.excluded.json` に **追記** する (失敗許容)。
+
+    工程ごと (重複除外 / 売り切れ除外 …) に呼ばれるので、前の工程の記録を消さない。
+    """
     import json as _json
     from datetime import datetime as _dt
+    f_path = latest_csv + ".excluded.json"
     try:
-        with open(latest_csv + ".excluded.json", "w", encoding="utf-8") as f:
-            _json.dump({"at": _dt.now().isoformat(timespec="seconds"),
-                        "csv": os.path.basename(latest_csv),
-                        "drops": drops}, f, ensure_ascii=False, indent=1)
+        with open(f_path, encoding="utf-8") as f:
+            prev = _json.load(f)
+    except Exception:                                          # noqa: BLE001
+        prev = {}
+    try:
+        drops = (prev.get("drops") or []) + list(drops or [])
+        rec = dict(prev)
+        rec.update(extra)
+        rec.update({"at": _dt.now().isoformat(timespec="seconds"),
+                    "csv": os.path.basename(latest_csv), "drops": drops})
+        with open(f_path, "w", encoding="utf-8") as f:
+            _json.dump(rec, f, ensure_ascii=False, indent=1)
         n = {}
         for d in drops:
             n[d["reason"]] = n.get(d["reason"], 0) + 1
@@ -624,21 +637,46 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("\n======================================================================\n")
     append_log_func("▶ 仕入元が売り切れた行を除外 (入稿前チェック)\n")
     append_log_func("======================================================================\n")
+    # ★2026-08-19: ここは timeout=180 だった。中で呼ぶ在庫チェックCLI (ブラウザを1件ずつ
+    #   開く) は自前で 900秒 待っていたので、**外側が先に殺す** = 売り切れ除外が毎回
+    #   まるごと走らない状態だった (8/19 実測 TimeoutExpired)。シートの巡回結果による
+    #   除外まで一緒に消えるのが実害。内側を 300秒 上限にしたので、外はその分 + シート読み。
+    _sold_ok, _sold_why = False, ""
+    _pre_sold, _pre_sold_h = [], []
+    try:
+        _pre_sold, _pre_sold_h = _read_csv_rows(latest_csv)
+    except Exception:                                          # noqa: BLE001
+        pass
     try:
         drop = os.path.join(WORKSPACE, "iMakHQ", "tools", "csv_drop_sold_rows.py")
         r = subprocess.run(
             [sys.executable, drop, latest_csv, "--write"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=180, env=env,
+            timeout=420, env=env,
         )
         if r.stdout:
             append_log_func(r.stdout)
-        if r.returncode != 0:
-            append_log_func(f"\n⚠️ 売り切れ除外 returncode={r.returncode}(続行)\n")
+        _sold_ok = r.returncode == 0
+        if not _sold_ok:
+            _sold_why = "returncode=%s" % r.returncode
+            append_log_func("\n⚠️ 売り切れ除外 returncode=%s(続行)\n" % r.returncode)
             if r.stderr:
                 append_log_func(r.stderr)
     except Exception as e:
-        append_log_func(f"\n⚠️ 売り切れ除外 失敗(続行): {type(e).__name__}: {e}\n")
+        _sold_why = type(e).__name__
+        append_log_func(
+            "\n🚨 **売り切れ除外が走っていません** (続行するが要確認): %s: %s\n"
+            "   仕入元が売り切れた行が入稿CSVに残る = キャンセル risk。"
+            "入稿前に目視で確認すること\n" % (type(e).__name__, e))
+    try:
+        _post_sold, _post_sold_h = _read_csv_rows(latest_csv)
+        _sold_rows = (_livedup_removed_rows(_pre_sold, _pre_sold_h, _post_sold, _post_sold_h)
+                      if _pre_sold else [])
+    except Exception:                                          # noqa: BLE001
+        _sold_rows = []
+    _write_post_drops(append_log_func, latest_csv,
+                      drop_records(_pre_sold_h, _sold_rows, "sold-out"),
+                      soldcheck=("ok" if _sold_ok else (_sold_why or "failed")))
 
     # Step 4e: 「出せるか」(AP列) の塗り直し (2026-08-17)。
     # ★4d は欠番。2026-07-28 に撤去した「補URL候補検索の自動実行」がその名前で、
@@ -753,7 +791,7 @@ def _exclusion_sources(csv_dir):
     return log, removed, hoju, post
 
 
-def build_exclusion_lines(log_text="", removed=None, hoju=None, post_drops=None):
+def build_exclusion_lines(log_text="", removed=None, hoju=None, post_drops=None, upload=None):
     """出品されなかった分の「件数 / 中身 / その後どうなるか」(純関数・test 可)。
 
     ★2026-08-19 ユーザー要望: メールに **除かれた件数と内容、対応状況** を載せる。
@@ -827,6 +865,24 @@ def build_exclusion_lines(log_text="", removed=None, hoju=None, post_drops=None)
     if intra_n:
         out.append("・同じカードが今回2枚 %d件 → 1枚だけ出品しました "
                    "(残りは次の走行で候補に戻ります)" % intra_n)
+    sold_n = sum(1 for d in (drops or []) if d.get("reason") == "sold-out")
+    if sold_n:
+        out.append("・仕入元が売り切れ %d件 → 出品しません (仕入れられないため)" % sold_n)
+    # 入稿の段で出せなかった分。★2026-08-19: ここが内訳に無く、20件が
+    #   出品5 + 該当なし5 + 既出品8 = 18 にしかならなかった (ユーザー指摘)。
+    #   eBay に弾かれた分と、停止で試行すらしなかった分を必ず書く。
+    up = upload or {}
+    n_ng = int(up.get("failed") or 0)
+    if n_ng:
+        out.append("・eBayに弾かれた %d件 → 理由は上の「失敗」を見てください" % n_ng)
+    n_rest = max(0, int(up.get("rows") or 0) - int(up.get("listed") or 0) - n_ng)
+    if n_rest:
+        out.append("・途中で止まって出せなかった %d件 → 次の走行でまた候補に戻ります" % n_rest)
+    # 在庫チェックが走らなかった時は黙らない (売り切れた物が入稿CSVに残っている)
+    sc = (post_drops or {}).get("soldcheck")
+    if sc and sc != "ok":
+        out.append("・⚠️ 仕入元の在庫チェックが走っていません (%s)。"
+                   "売り切れた物が混ざっている可能性があります" % sc)
     if out and batch:
         out.insert(0, "(今回の %d件 の内訳)" % batch)
     # --- (2) 枠に入る前に候補から外した分 (母数は候補全体。(1)とは別勘定) ---
@@ -901,8 +957,19 @@ def _mail_upload_result(append_log_func, result_json, env):
     # ★2026-08-19: 出品できた分だけでなく **落ちた分と その後どうなるか** も載せる。
     #   読めなかった素材は省くだけで、メール自体は必ず出す。
     try:
+        _csv_dir = os.path.dirname(result_json)
+        _rows = 0
+        try:
+            import csv as _csv
+            with open(os.path.join(_csv_dir, result.get("csv") or ""),
+                      encoding="utf-8-sig") as _f:
+                _rows = sum(1 for _ in _csv.DictReader(_f))
+        except Exception:                                      # noqa: BLE001
+            _rows = 0
         result["excluded_lines"] = build_exclusion_lines(
-            *_exclusion_sources(os.path.dirname(result_json)))
+            *_exclusion_sources(_csv_dir),
+            upload={"rows": _rows, "listed": len(result.get("listed") or []),
+                    "failed": len(result.get("failed") or [])})
     except Exception as e:                                    # noqa: BLE001
         append_log_func(f"\n(メールの除外内訳は付けられず: {type(e).__name__})\n")
     subject, body = build_upload_mail(result)
