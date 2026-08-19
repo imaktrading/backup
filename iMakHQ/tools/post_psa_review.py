@@ -152,6 +152,71 @@ def _base_pid(pid):
     return _re.split(r"_", str(pid or ""), 1)[0]
 
 
+def name_match_first(rows, subject):
+    """PSA の Subject に **名前がぴったり一致する** カードを先に並べる (純関数)。
+
+    rows: [(product_id, name_en)] / 戻り: product_id の list (件数は変えない・順番だけ)。
+
+    ★2026-08-19: キャラ名 LIKE で広く拾うと「New を含むだけ」の何十枚かが product_id 順で
+      前に来て、**名前がそのものずばりのカード**が枠から落ちていた
+      (cert84299672 Subject='NEW GENESIS' → 正解 ST11-004_p1 の name_en='New Genesis' が
+       候補に1件も出ず、人は選びようがなかった)。
+    """
+    import re as _re
+
+    def norm(x):
+        return _re.sub(r"[^A-Z0-9]", "", str(x or "").upper())
+
+    subj = norm(subject)
+
+    def rank(name):
+        n = norm(name)
+        if not n or not subj:
+            return 2
+        if n == subj:
+            return 0                      # 完全一致 = そのカード
+        if subj.startswith(n) or n in subj:
+            return 1                      # Subject が名前 + 修飾語 (ALTERNATE ART 等)
+        return 2
+
+    return [pid for pid, _ in sorted(
+        [(r[0], r[1] if len(r) > 1 else "") for r in (rows or [])],
+        key=lambda t: rank(t[1]))]
+
+
+def synthesized_expected(set_code, card_number):
+    """catalog で引けなかった時に「セット記号-番号」で期待値を組む (純関数)。組めなければ None。
+
+    ★2026-08-19: set_code が PROMOS / EVENT のような **商品の呼び名** の時にも組んでいたため、
+      `PROMOS-003` という **存在しない ID** が期待値として人に提示されていた
+      (cert168157629 チョッパー)。候補の prefix 検索も 0件になり、DON!! の山に落ちる。
+      実在しうる形 (OP07 / ST13 / EB02 / PRB01 / SV7 …) の時だけ組む。
+    """
+    import re as _re
+    if not set_code or not card_number:
+        return None
+    if not _re.fullmatch(r"(OP|ST|EB|PRB|SV|S)\d+[A-Za-z]?", str(set_code)):
+        return None
+    return f"{set_code}-{card_number}"
+
+
+def exact_name_pids(rows, subject):
+    """PSA の Subject と name_en が **完全一致** する product_id (純関数)。
+
+    完全一致 = 「同じカードの別の刷り」。人が見比べたいのはまさにここなので、
+    幹ごとの上限 (diversify_by_base) を少し緩める対象にする。
+    """
+    import re as _re
+
+    def norm(x):
+        return _re.sub(r"[^A-Z0-9]", "", str(x or "").upper())
+
+    subj = norm(subject)
+    if not subj:
+        return set()
+    return {r[0] for r in (rows or []) if len(r) > 1 and norm(r[1]) == subj}
+
+
 def promo_first(pids, prefer_promo):
     """PSA が PROMOS と言っているなら promo の行を先に並べる (純関数)。
 
@@ -222,19 +287,36 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
             )
             rows = cur.fetchall()
 
+        # 優先度1 (= 期待値の prefix) で埋まったかどうか。下の救済枠の広さを決める。
+        rows_from_expected = bool(rows)
+
         # === 優先度 2: set_code 絞込 (= 既存挙動 fallback) ===
         if not rows:
             if category == "one_piece_tcg":
-                if set_code and set_code not in ("PROMOS", "EVENT"):
+                # ★2026-08-19: set_code が **取れなかった時** (None) に PROMOS と同じ扱いをして
+                #   DON!! カードを30枚並べていた。実害 (cert84299672 FILM RED アンコールパック):
+                #   brand から set_code を取れず候補62件のうち50件が DON!! で埋まり、catalog に
+                #   在る正解 ST11-004_p1 が1件も出なかった。取れない時は **何も足さない**
+                #   (下のキャラ名救済に広い枠で任せる)。
+                if not set_code:
+                    pass
+                elif set_code not in ("PROMOS", "EVENT"):
                     cur.execute(
                         "SELECT product_id FROM products WHERE category=? AND product_id LIKE ? ORDER BY product_id LIMIT 30",
                         (category, f"%{set_code}%")
                     )
+                elif "DON!!" in (subject or "").upper():
+                    # DON!! カードは DON!! の一覧から選ぶ
+                    cur.execute(
+                        "SELECT product_id FROM products WHERE category=? AND product_id LIKE 'DON-%' ORDER BY product_id LIMIT 30",
+                        (category,)
+                    )
                 else:
-                    # PROMOS / EVENT は全 DON + 全 promo
+                    # PROMOS / EVENT。★2026-08-19: ここで DON!! を30枚混ぜていたため、
+                    #   DON!! ではない promo (チョッパー等) の候補が DON!! で埋まっていた。
                     cur.execute(
                         # '_' は LIKE ワイルドカードなので escape (literal '_P' promo suffix のみ狙う。'OP##' 誤マッチ防止)
-                        r"SELECT product_id FROM products WHERE category=? AND (product_id LIKE 'DON-%' OR product_id LIKE '%\_P%' ESCAPE '\') ORDER BY product_id LIMIT 50",
+                        r"SELECT product_id FROM products WHERE category=? AND (product_id LIKE 'P-%' OR product_id LIKE '%\_P%' ESCAPE '\') ORDER BY product_id LIMIT 50",
                         (category,)
                     )
             elif category == "pokemon_tcg" and set_code:
@@ -289,19 +371,39 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
                 if True:  # 番号一致に加えて、キャラ名で広く
                     # ★expected が既に解れている時、この broad は「取りこぼし救済」でしかない。
                     #   40件足すと本命が埋もれて選べなくなるので窓を絞る (救済自体は残す)。
-                    lim = _CHAR_RESCUE_LIMIT if rows else 40
+                    # ★2026-08-19: ここは `if rows` だったため、優先度2の広い網
+                    #   (DON!! 30件等) が入っただけで枠が 40→12 に縮み、正解が落ちていた。
+                    #   狭めてよいのは **期待値が解けている時だけ** (本命を埋もれさせない目的)。
+                    lim = _CHAR_RESCUE_LIMIT if rows_from_expected else 40
                     # ★2026-08-19: 広めに取ってから **カードを散らして** lim 件に絞る。
                     #   そのまま LIMIT すると同じカードの変種で枠が埋まる (下記 diversify)。
-                    cur.execute(base + " ORDER BY product_id LIMIT 300",
+                    # ★2026-08-19: product_id 順のままだと **名前がぴったり一致するカードが
+                    #   後ろに回って枠から落ちる**。実害 (cert84299672 新時代/NEW GENESIS):
+                    #   name_en が "New Genesis" そのものの ST11-004_p1 (= 正解) が、
+                    #   "New" を含むだけの OP02/OP03 に押し出されて1件も出なかった。
+                    #   名前が一致する物を先に並べる (落とすものは無い。順番だけ)。
+                    cur.execute(base.replace("SELECT DISTINCT product_id",
+                                             "SELECT DISTINCT product_id, name_en")
+                                + " ORDER BY product_id LIMIT 300",
                                 [category] + [f"%{t}%" for t in toks])
-                    _broad = promo_first([r[0] for r in cur.fetchall()],
-                                        "PROMO" in (brand or "").upper())
+                    _all = cur.fetchall()
+                    _exact = exact_name_pids(_all, subject)
+                    _broad = promo_first(name_match_first(_all, subject),
+                                         "PROMO" in (brand or "").upper())
                     _seen = {r[0] for r in char_rows}
                     # 合計を lim に収める (番号一致で既に埋まっている分を引く)。
                     _room = max(0, int(lim) - len(char_rows))
-                    char_rows = char_rows + [
-                        (pid,) for pid in diversify_by_base(
-                            [x for x in _broad if x not in _seen], _room)]
+                    _cands = [x for x in _broad if x not in _seen]
+                    # ★2026-08-19: 名前が **完全一致** する物は「同じカードの別の刷り」=
+                    #   人が見比べたいものそのものなので、幹の上限をかけない。ここを2件で
+                    #   切ったため cert84299672 は ST11-004_D / _P に枠を取られ、
+                    #   **正解 ST11-004_p1 が落ちて**いた。
+                    #   名前が違う物 (= 別のカード) は従来どおり2件までで散らす
+                    #   (cert168157629 チョッパーの「変種で枠が埋まる」対策はそちらが担う)。
+                    _head = [x for x in _cands if x in _exact][:_room]
+                    _tail = diversify_by_base([x for x in _cands if x not in _exact],
+                                              max(0, _room - len(_head)))
+                    char_rows = char_rows + [(pid,) for pid in _head + _tail]
             if char_rows:
                 if expected_product_id:
                     # expected (prefix hit) を先頭に保ち、キャラ候補を後ろに追加 (取りこぼし救済)。
@@ -356,8 +458,10 @@ class _SafeStdout:
 
     def __init__(self, base):
         self._base = base
+        self.seen = []            # catalog が何と言ったか (確信度の判定に使う)
 
     def write(self, s):
+        self.seen.append(s)
         try:
             self._base.write(s)
         except Exception:                                # noqa: BLE001
@@ -371,12 +475,42 @@ class _SafeStdout:
         return getattr(self._base, name)
 
 
+# promo fallback (= ID で引けず、名前と商品名の近さで当てにいく経路) を採用する下限。
+# ★2026-08-19 実測 (人の目視回答 771件のうち、この経路を通った one_piece 66件):
+#     score 10  : 人の答えと一致 0 / 不一致 1     ← 当てずっぽう
+#     score 150 : 一致 13 / 不一致 0
+#     score 300 : 一致 41 / 不一致 2 / 該当なし 1
+#     それ以上  : 一致 8 / 不一致 0
+# 実害 (cert154233090 3rd ANNIVERSARY SET のサボ): 公式にまだ載っていない商品なので
+# catalog に在るはずがないのに、score=10 で別の刷り (OP07-118 = 500年後の未来) を
+# 「期待値」に据えていた。人が✅を押せば **別のカードとして出品される**。
+# 弱い時は期待値を空にして人に選ばせる (= 該当なし側に倒す)。
+_PROMO_FALLBACK_MIN_SCORE = 100
+
+
+def weak_promo_guess(log_text: str, min_score: int = _PROMO_FALLBACK_MIN_SCORE) -> bool:
+    """catalog のログが「弱い promo fallback で当てた」と言っているか (純関数・test可)。"""
+    import re as _re
+    m = _re.search(r"promo fallback\)[^\n]*?score=(\d+)", log_text or "")
+    return bool(m) and int(m.group(1)) < min_score
+
+
 def _catalog_lookup_expected(brand: str, subject: str, card_number: str, category: str) -> str | None:
     """catalog lookup 経由で expected product_id 取得 (= 5/28 lookup_one_piece Promo 拡張 + lookup_don 等を活用)."""
     if not category:
         return None
     _orig_stdout = sys.stdout
-    sys.stdout = _SafeStdout(_orig_stdout)
+    _tee = _SafeStdout(_orig_stdout)
+    sys.stdout = _tee
+
+    def _keep(pid):
+        """弱い当てずっぽうなら採らない (= 期待値なしで人に選ばせる)。"""
+        if pid and weak_promo_guess("".join(_tee.seen)):
+            _orig_stdout.write(
+                "    ⚠️ 確信が持てないので期待値にしない (promo fallback が弱い): %s\n" % pid)
+            return None
+        return pid
+
     try:
         # catalog 越境 import (= iMakCatalog/integrations)
         _cat_dir = r"C:/dev/iMak_catalog/iMakCatalog"
@@ -394,26 +528,26 @@ def _catalog_lookup_expected(brand: str, subject: str, card_number: str, categor
             if "DON!!" in subj_up:
                 rec = _cat_psa.lookup_don(brand, subject)
                 if rec:
-                    return rec.get("product_id")
+                    return _keep(rec.get("product_id"))
             rec = _cat_psa.lookup_one_piece(brand, card_number, subject)
             if rec:
-                return rec.get("card_id") or rec.get("product_id")
+                return _keep(rec.get("card_id") or rec.get("product_id"))
         elif category == "pokemon_tcg":
             rec = _cat_psa.lookup_pokemon(brand, card_number, subject)
             if rec:
-                return rec.get("card_id") or rec.get("product_id")
+                return _keep(rec.get("card_id") or rec.get("product_id"))
         elif category == "dragonball_scg":
             rec = _cat_psa.lookup_dragonball(brand, card_number, subject)
             if rec:
-                return rec.get("card_id") or rec.get("product_id")
+                return _keep(rec.get("card_id") or rec.get("product_id"))
         elif category == "gundam_tcg":
             rec = _cat_psa.lookup_gundam(brand, card_number, subject)
             if rec:
-                return rec.get("card_id") or rec.get("product_id")
+                return _keep(rec.get("card_id") or rec.get("product_id"))
         elif category == "yugioh_tcg":
             rec = _cat_psa.lookup_yugioh(brand, card_number, subject)
             if rec:
-                return rec.get("card_id") or rec.get("product_id")
+                return _keep(rec.get("card_id") or rec.get("product_id"))
     except Exception:
         pass
     finally:
@@ -1640,8 +1774,8 @@ def _build_target_for_cert(cert: str):
         return None
     set_code = _extract_set_code(brand, category)
     csv_expected = _catalog_lookup_expected(brand, subject, card_number, category)
-    if not csv_expected and set_code and card_number:
-        csv_expected = f"{set_code}-{card_number}"
+    if not csv_expected:
+        csv_expected = synthesized_expected(set_code, card_number)
     candidates = _get_candidates(category, set_code, card_number, brand=brand,
                                  expected_product_id=csv_expected, subject=subject)
     is_promo, promo_proposed = _promo_for(category, csv_expected, subject)
