@@ -19,7 +19,11 @@ _PRIMARY = ("Pokemon", "OnePiece", "DragonBall")
 # post_psa_review が NONE/NG 判定時に追記、psa_to_csv.main() が選定プールから除外する。
 # (2026-06-23 ユーザー要望: 一度目視したカードがちょいちょい再出現する → 再表示防止)
 REVIEW_SKIP_PATH = r"C:/dev/iMak_data/dedupe/psa_review_skip.json"
-REVIEW_SKIP_COOLDOWN_DAYS = 14   # この期間は再出題しない。経過後は再浮上(catalog修正済なら今度は出品可)
+# この期間は再出題しない。経過後は再浮上 (catalog 修正済なら今度は出品可)。
+# ★2026-08-19 ユーザー指示で 14日 → 1日。catalog への依頼は当日中に処理されることが
+#   多いので、2週間も伏せておくと直った後も出てこない = 出せるカードを寝かせる。
+#   毎日また出てくることになるが、直っていなければ目視で1秒 弾くだけで済む。
+REVIEW_SKIP_COOLDOWN_DAYS = 1
 
 
 def load_review_skips(path=REVIEW_SKIP_PATH):

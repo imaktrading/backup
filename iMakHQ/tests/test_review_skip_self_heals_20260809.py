@@ -36,8 +36,11 @@ def _ledger(*certs, days_ago=1):
 
 
 def test_resolvable_cert_is_not_skipped_even_inside_cooldown():
-    skips = _ledger("111", "222", days_ago=1)
-    got = B.active_review_skips(skips, NOW, resolvable={"111"}, out_of_scope=set())
+    # ★2026-08-19: cooldown を 14日 → 1日 にしたので、cooldown 内であることを
+    #   日数で表さず **明示** する (この test が見ているのは自己修復であって長さではない)。
+    skips = _ledger("111", "222", days_ago=0)
+    got = B.active_review_skips(skips, NOW, resolvable={"111"}, out_of_scope=set(),
+                                cooldown_days=B.REVIEW_SKIP_COOLDOWN_DAYS)
     assert got == {"222"}, "catalog で引けるのに止めている"
 
 
@@ -51,7 +54,7 @@ def test_all_resolvable_means_nothing_is_skipped():
 
 
 def test_unresolvable_stays_skipped():
-    skips = _ledger("333", days_ago=2)
+    skips = _ledger("333", days_ago=0)          # cooldown 内 (長さに依存させない)
     assert B.active_review_skips(skips, NOW, resolvable=set(), out_of_scope=set()) == {"333"}
 
 

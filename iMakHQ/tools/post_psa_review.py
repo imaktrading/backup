@@ -668,11 +668,28 @@ def _generate_html(targets: list[dict]) -> None:
         'function updateStatus() {',
         '  var done = Object.keys(ANSWERS).length;',
         '  var total = TARGETS.length;',
-        '  document.getElementById("status").textContent = done + "/" + total + " 回答済";',
+        '  var left = total - done;',
+        # ★2026-08-19: 未回答の数を **赤で** 出す。"12/20 回答済" だけだと、残り8件が
+        #   出品されないことに気づかないまま送信できてしまう (実際に 8/19 に起きた)。
+        '  var el = document.getElementById("status");',
+        '  el.textContent = done + "/" + total + " 回答済"'
+        ' + (left > 0 ? ("  ⚠️ 未回答 " + left + "件 (このままだと出品されません)") : "  ✅ 全部 回答済");',
+        '  el.style.color = (left > 0 ? "#ff6b6b" : "#7CFC00");',
         '  document.getElementById("dl-btn").disabled = (done === 0);',
         '}',
         '',
         'function submitResults() {',
+        # ★2026-08-19: 未回答があるまま黙って送らせない。
+        #   実害 (8/19): 20件中6件が未回答のまま送信され、その6件は静かに出品対象から
+        #   外れた。本人に心当たりが無い = 気づけない作りだった。止めはしないが、
+        #   **何件が出品されなくなるか**を数えて確認する。
+        '  var pending = TARGETS.filter(function(t){ return !ANSWERS[t.cert]; });',
+        '  if (pending.length > 0) {',
+        '    var names = pending.slice(0, 8).map(function(t){ return t.cert; }).join(", ");',
+        '    if (!confirm("未回答が " + pending.length + "件 あります。\\n"',
+        '        + "このまま送ると、その " + pending.length + "件は出品されません。\\n\\n"',
+        '        + names + (pending.length > 8 ? " ほか" : "") + "\\n\\n送信しますか?")) { return; }',
+        '  }',
         '  var results = TARGETS.map(function(t) {',
         '    var o = Object.assign({cert: t.cert, expected: t.expected, category: t.category}, ANSWERS[t.cert] || {choice: "PENDING"});',
         '    var pin = document.getElementById("promo_" + t.cert);',   # promo 入力(promo系のみ存在)

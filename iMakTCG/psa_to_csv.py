@@ -3025,7 +3025,8 @@ def main():
             _b = len(cert_numbers)
             cert_numbers = [c for c in cert_numbers if c not in _skips]
             if _b != len(cert_numbers):
-                print(f"  ⏭️ 目視済(NONE/NG, {14}日以内)を除外: {_b-len(cert_numbers)}件 "
+                from tcg_batch_select import REVIEW_SKIP_COOLDOWN_DAYS as _CD
+                print(f"  ⏭️ 目視済(NONE/NG, {_CD}日以内)を除外: {_b-len(cert_numbers)}件 "
                       f"(catalog宿題は依頼書で追跡。cooldown後に再浮上)")
     except Exception as _e2:
         print(f"  ⚠️ 目視済スキップ読込失敗(無視して継続): {type(_e2).__name__}: {_e2}")
