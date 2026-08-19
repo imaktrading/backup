@@ -1929,6 +1929,16 @@ _RARITY_TO_FEATURES = {
     "UR": "Ultra Rare", "HR": "Hyper Rare", "MA": "Mega Attack Rare",
     "RR": "Double Rare", "RRR": "Triple Rare", "SSR": "Shiny Super Rare",
 }
+# ★2026-08-19: 上の表のキーは**略号**だが、Pokemon の official_rarity は lookup_pokemon が
+#   既に eBay 綴りに展開して返す (`'Special Art Rare'`)。そのため Pokemon では 100% 空振りし、
+#   直近12CSV の Pokemon 23行中18行が C:Features 空だった (One Piece は略号のままなので当たる)。
+#   `'SPECIAL ART RARE': …` を手で足すと**表が2つに増えて片方だけ更新される**ので、
+#   値側もキーにした派生辞書を1本だけ作る (SSOT は上の表のまま)。
+#   回答書: hq/requests/2026-08-19_act_code_proposals_tcg_response.md の 8
+_RARITY_FEATURES_LOOKUP = {
+    **_RARITY_TO_FEATURES,
+    **{v.upper(): v for v in _RARITY_TO_FEATURES.values()},
+}
 
 
 def _pad_title_with_facts(title, year, rarity_short, set_code, target_min=70, max_chars=80):
@@ -2023,8 +2033,20 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # 加えて post_psa_review._route_none_to_catalog が同じ真理表を持たず missing_models.csv に
     # SCG 対象外を毎日書き込んでいた (2026-07-29 Advisor 発覚)。片方だけ塞ぐと次に scope を
     # 変えた時にまた乖離するので、両方から 1 か所を呼ぶ形に統一。DIVERS も本 helper で新規除外。
+    # ★2026-08-19: 言語ゲートが tcg_scope に入った (非日本語 Pokemon)。build_row は
+    #   従来どおり catalog-aware にする = 日本版 catalog に解決できるなら skip しない。
+    #   これを渡さないと cert142931332 (POKEMON ASIA 25TH ANNIVERSARY PROMO = 日本版
+    #   S8a-G-005) が下の should_skip_out_of_scope_language の逃がし口に届かず落ちる。
     from tcg_scope import is_out_of_scope as _is_out_of_scope
-    _oos, _oos_reason = _is_out_of_scope(franchise, brand)
+
+    def _catalog_resolves_ja():
+        try:
+            return bool(catalog_psa.lookup_pokemon(brand, card_number, subject))
+        except Exception:
+            return False
+
+    _oos, _oos_reason = _is_out_of_scope(franchise, brand,
+                                         catalog_resolves=_catalog_resolves_ja)
     if _oos:
         print(f"    ⏭️ Skip: {_oos_reason} (cert {cert_number}, {subject})")
         return None
@@ -2681,7 +2703,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # 2026-06-09: Features がまだ空なら catalog rarity から導出 (TOPセラーは rarity を Features に入れる)。
     # 実属性なので捏造でない。variant (Alt Art 等) が取れてる時は上書きしない。
     if not features:
-        _feat = _RARITY_TO_FEATURES.get((official_rarity or "").upper().strip(), "")
+        _feat = _RARITY_FEATURES_LOOKUP.get((official_rarity or "").upper().strip(), "")
         if _feat:
             features = _feat
             print(f"    🔧 Features 補完(catalog rarity {official_rarity!r}→{features!r})")

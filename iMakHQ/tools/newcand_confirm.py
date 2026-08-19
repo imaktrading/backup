@@ -322,11 +322,14 @@ def catalog_variants(card_no, db=DB_PATH):
             "ORDER BY LENGTH(product_id), product_id", (card_no + "%",)).fetchall()
             if not _is_other_card(r["product_id"], card_no)]
         if not rows:
-            # ポケモンの印刷番号 (006/020) は product_id と別体系なので specs 側を見る
+            # ポケモンの印刷番号 (006/020) は product_id と別体系なので specs 側を見る。
+            # ★2026-08-19 バグ修正: `card_number` を引いていたが catalog に**そのキーは
+            #   1件も無い** (実測 0件 / `card_number_text` は 37,387件)。番号が product_id と
+            #   別体系のカードは候補が常に0件で、目視が開けなかった。
             rows = con.execute(
                 f"SELECT {_CAND_COLS} FROM products "
-                "WHERE specs LIKE ? ORDER BY product_id LIMIT 12",
-                (f'%"card_number": "{card_no}%',)).fetchall()
+                "WHERE json_extract(specs, '$.card_number_text') = ? "
+                "ORDER BY product_id LIMIT 12", (card_no,)).fetchall()
         return [_row_to_cand(r) for r in rows][:_MAX_CANDS]
     finally:
         con.close()

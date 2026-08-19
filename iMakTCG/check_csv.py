@@ -194,6 +194,32 @@ RECOMMENDED_SPECIFICS = [
     "C:Cost", "C:Attack/Power",
 ]
 
+# C:Game の eBay 正規値のうち Pokemon を指すもの (自由文ではなく canonical 値で判定する)。
+POKEMON_GAME_VALUES = {"pokemon", "pokémon tcg", "pokemon tcg"}
+
+
+def recommended_specifics_for_card(card_number, card_type="", game=""):
+    """カード種別/作品に応じた推奨Item Specifics (純関数, test可)。
+
+    必須側 `required_specifics_for_card` と同じ「drop set を作って除く」形に揃える。
+    平坦リストのままだと、**構造的に必ず空の項目**が毎行 INFO を出して、本当に拾いたい
+    `C:Features` が同じ1行に埋もれる (実測 12/12行が `Finish` で発報)。
+
+    落とすもの:
+      - `C:Finish` … **常時**。generator が投入禁止 (rarity や見た目から推測すると SNAD 直結)
+        なので永久に空で、警告が原理的に無意味。
+      - `C:Cost` / `C:Attribute/MTG:Color` … Pokemon にコスト/属性の概念が無い
+        (One Piece / MTG の項目)。実測 pokemon_tcg 3,000件サンプルで cost 非空 0件。
+
+    `game` が空 (canonical 値が引けない) 時は Pokemon 除外を効かせない = 従来どおり警告する
+    (fail-closed: 判定できないことを理由に警告を消さない)。
+    回答書: hq/requests/2026-08-19_act_code_proposals_tcg_response.md の 9
+    """
+    drop = {"C:Finish"}
+    if str(game or "").strip().lower() in POKEMON_GAME_VALUES:
+        drop |= {"C:Cost", "C:Attribute/MTG:Color"}
+    return [s for s in RECOMMENDED_SPECIFICS if s not in drop]
+
 # ===== 利益計算パラメータ（SSOT 抽象化: profit_params.get_check_csv_params 経由） =====
 # 2026-04-24 二重基準解消、2026-04-25 Step 7 SSOT 抽象化で再リファクタ:
 #   各プロジェクトはカテゴリ名を渡すだけ。共通モジュール側に if 分岐は持たない。
@@ -555,8 +581,12 @@ def validate_row(row, row_idx):
         if not val:
             issues.append(("WARN", f"必須Item Specific '{spec}' が空"))
 
-    # --- 推奨Item Specifics ---
-    empty_recommended = [s for s in RECOMMENDED_SPECIFICS if not get_col(row, s)]
+    # --- 推奨Item Specifics (必須側と同じく card-aware, 2026-08-19) ---
+    empty_recommended = [
+        s for s in recommended_specifics_for_card(_card_key,
+                                                  get_col(row, "C:Card Type"),
+                                                  get_col(row, "C:Game"))
+        if not get_col(row, s)]
     if empty_recommended:
         names = ", ".join(s.replace("C:", "") for s in empty_recommended)
         issues.append(("INFO", f"推奨Item Specifics が空: {names}"))

@@ -3,9 +3,15 @@
 
 回答書: `2026-08-06_act_code_proposals_tcg_response.md` (提案1 実装 GO).
 
+★2026-08-19 契約更新 (`2026-08-19_act_code_proposals_tcg_response.md` の 4):
+  1 は **skip をやめた**。log には catalog 依頼へ昇格する経路が無く握り潰しだったため、
+  「行は在るのに人が該当なしと言う = variant (別絵柄) 欠落の疑い」として
+  missing_models にも理由付きで流す。log は経緯用に残す。
+
 固定する挙動 (3-way + fail-closed):
   1. expected PID が catalog に (category, product_id) 完全一致で存在 →
-     missing_models.csv には書かず、viewer_disagreement.log に理由付きで残す
+     viewer_disagreement.log に残し、**かつ** missing_models.csv に
+     `variant欠落の疑い` の理由で書く
   2. expected PID が catalog に無い (= adapter 提案 PID が本当に未収録) →
      従来どおり missing_models.csv に書く (auto_catalog_add 経路に流す)
   3. expected == "無" (adapter が候補すら出せなかった真の gap) →
@@ -61,7 +67,11 @@ def _seed_catalog(tmp_path: Path) -> Path:
 def stub_meta(monkeypatch):
     """`_get_psa_cache` を差し替え (in-scope brand を返す = tcg_scope で弾かれない)."""
     def _fake(cert):
-        return {"Brand": "POKEMON", "Subject": "TEST", "CardNumber": "001"}
+        # ★2026-08-19: brand は **実データと同じ形** (`POKEMON JAPANESE …`) にする。
+        #   裸の `POKEMON` は psa_cache 1,070件に1件も無く、非日本語 Pokemon の
+        #   scope gate (回答書 2026-08-19 の 2) に引っかかって全件 skip されてしまう。
+        return {"Brand": "POKEMON JAPANESE SV4A SHINY TREASURE EX",
+                "Subject": "TEST", "CardNumber": "001"}
     monkeypatch.setattr(p, "_get_psa_cache", _fake)
 
 
@@ -77,8 +87,12 @@ def paths(tmp_path):
 # --- tests: catalog 実在 pre-check ------------------------------------------
 
 
-def test_expected_exists_in_catalog_is_skipped(stub_meta, paths):
-    """1) expected PID が catalog に実在 → missing_models 書かず viewer_disagreement へ."""
+def test_expected_exists_in_catalog_is_routed_as_variant_gap(stub_meta, paths):
+    """1) expected PID が catalog に実在 → log に残し、**かつ** variant 欠落として流す.
+
+    ★2026-08-19 変更前は written==0 (握り潰し) だった。log の読み手は status_now の
+      表示5行だけで catalog 依頼へ昇格する経路が0本 = 人の「該当なし」が捨てられていた。
+    """
     recs = [{"cert": "158452539", "category": "pokemon_tcg", "expected": "XY-030"}]
     written = p._route_none_to_catalog(
         recs,
@@ -87,12 +101,12 @@ def test_expected_exists_in_catalog_is_skipped(stub_meta, paths):
         viewer_disagreement_path=paths["vd"],
         catalog_db=paths["db"],
     )
-    assert written == 0, "実在 PID は missing_models に書かれない"
-    # missing_models は書かれていない (or header だけ)
-    if paths["missing"].exists():
-        lines = paths["missing"].read_text(encoding="utf-8").splitlines()
-        assert not any("158452539" in ln for ln in lines)
-    # viewer_disagreement に理由付きで残る
+    assert written == 1, "実在 PID を握り潰している (旧 continue が残っている)"
+    body = paths["missing"].read_text(encoding="utf-8")
+    assert "cert158452539" in body
+    assert "variant欠落の疑い" in body, f"理由が書き分けられていない: {body}"
+    assert "auto候補XY-030=該当なし" not in body, "未収録と同じ理由文にしない"
+    # 経緯用の viewer_disagreement は残す
     assert paths["vd"].exists()
     vd = paths["vd"].read_text(encoding="utf-8")
     assert "cert158452539" in vd
@@ -165,7 +179,10 @@ def test_cross_category_pid_collision_is_not_saved(stub_meta, paths):
 
 
 def test_mixed_batch_partitions_correctly(stub_meta, paths):
-    """混在 batch: 実在1 / 未収録1 / 無1 → missing_models=2, viewer_disagreement=1."""
+    """混在 batch: 実在1 / 未収録1 / 無1 → **3件とも** missing_models、log は実在1件のみ.
+
+    ★2026-08-19: 実在1件も流すようになったので 2 → 3。理由文だけが違う。
+    """
     recs = [
         {"cert": "111", "category": "pokemon_tcg", "expected": "SM12-112"},  # 実在 → skip
         {"cert": "222", "category": "pokemon_tcg", "expected": "XX-000"},    # 未収録 → 書く
@@ -178,10 +195,10 @@ def test_mixed_batch_partitions_correctly(stub_meta, paths):
         viewer_disagreement_path=paths["vd"],
         catalog_db=paths["db"],
     )
-    assert written == 2
+    assert written == 3
     body = paths["missing"].read_text(encoding="utf-8")
-    assert "cert111" not in body
-    assert "cert222" in body
+    assert "cert111" in body and "variant欠落の疑い" in body
+    assert "cert222" in body and "auto候補XX-000=該当なし" in body
     assert "cert333" in body
     vd = paths["vd"].read_text(encoding="utf-8")
     assert "cert111" in vd

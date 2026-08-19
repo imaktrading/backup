@@ -444,6 +444,33 @@ def _find_expected_image(category: str, product_id: str, brand: str = "") -> str
     return None
 
 
+def variant_base(product_id: str) -> str:
+    """product_id から版サフィックスを落とした base を返す (純関数, test可).
+
+    `OP05-002_p1` / `EB02-003_EB02_LF` → `OP05-002` / `EB02-003`。`_` 無しはそのまま。
+    """
+    return (product_id or "").strip().split("_")[0]
+
+
+def has_sibling_variants(expected_pid: str, candidate_pids) -> bool:
+    """expected と同じ base を持つ**別の**候補が在るか (純関数, test可).
+
+    ★2026-08-19 (回答書 2026-08-19_act_code_proposals_tcg_response.md の 3)。
+      候補欄は `csv_expected` の画像が出せた時点で閉じていた。だが `<base>_*` の
+      兄弟 variant (別絵柄) が在るカードは、期待値の画像が出ていても**それが現物とは
+      限らない**。人は畳まれた候補を開かないまま「合ってる」を押し、別絵柄で出品されるか、
+      「該当なし」→ catalog へ誤起票される。
+      開く条件に絵柄語のリスト (`ALTERNATE ART` / `PROMO` …) は使わない。載っていない語で
+      必ず同じ穴が開くため、**`<base>_*` が実在するかどうかだけ**で決める。
+    """
+    base = variant_base(expected_pid)
+    if not base:
+        return False
+    exp = (expected_pid or "").strip()
+    return any((pid or "").strip() != exp and variant_base(pid) == base
+               for pid in candidate_pids)
+
+
 def _img_url(src: str) -> str:
     """画像 src を /img/<urlencoded> に変換 (= local file + 外部 URL 両対応)."""
     if not src:
@@ -853,7 +880,9 @@ def _generate_html(targets: list[dict]) -> None:
         html.append('</div>')
 
         # 候補 list
-        is_open = not (t.get("csv_expected") and expected_img)
+        is_open = (not (t.get("csv_expected") and expected_img)
+                   or has_sibling_variants(t.get("csv_expected"),
+                                           [p for p, _ in t["candidates"]]))
         html.append(f'<div class=candidates-toggle onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</div>')
         cls = "candidates show" if is_open else "candidates"
         html.append(f'<div id="cands_{cert}" class="{cls}">')
@@ -1236,11 +1265,15 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
 
     2026-08-07: catalog 実在 pre-check を追加 (回答書
     `2026-08-06_act_code_proposals_tcg_response.md` の実装 GO)。
-    expected PID が (category, product_id) 完全一致で catalog に在れば viewer/adapter 側の
-    食い違いなので **missing_models には書かず** viewer_disagreement.log に理由付きで残す。
+    expected PID が (category, product_id) 完全一致で catalog に在れば viewer_disagreement.log に残す。
     fail-closed: 判定不能 (pid 空/"無"/DB不在) は従来通り missing_models へ (見落とし禁止)。
 
-    Returns: missing_models.csv に書いた行数 (viewer_disagreement / scope外 skip は含まない)。
+    2026-08-19: その catalog 実在ケースを **skip するのをやめた** (回答書
+    `2026-08-19_act_code_proposals_tcg_response.md` の 4)。log には昇格経路が無く握り潰しに
+    なっていた。行が在るのに人が「該当なし」と言うのは variant (別絵柄) 欠落の疑いなので、
+    _PID_NO_IMAGE と同じく **理由を書き分けて missing_models に流す**。log は経緯用に残す。
+
+    Returns: missing_models.csv に書いた行数 (scope外 skip は含まない)。
     """
     if not none_records:
         return 0
@@ -1275,12 +1308,18 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                     print(f"    ⏭️ Skip missing_models (scope外): cert{cert} {oos_reason}")
                     continue
                 # catalog 実在 pre-check (canonical KEY 完全一致のみ, 2026-08-07)。
-                # 実在 → viewer/adapter 側の食い違い。catalog に依頼を出さず別ログへ。
                 # 判定不能 (None) は従来通り missing_models へ (fail-closed = 見落とし禁止)。
                 pid_state = None
                 if expected and expected != "無":
                     pid_state = _catalog_pid_state(category, expected, db_path=catalog_db)
                     if pid_state is _PID_OK:
+                        # ★2026-08-19 (回答書 2026-08-19_act_code_proposals_tcg_response.md の 4):
+                        #   ここは以前 `continue` = **握り潰し**だった。log の読み手は
+                        #   status_now の表示5行だけで、catalog 依頼へ昇格する経路が0本。
+                        #   人が「該当なし」と言ったのに catalog に行が在るなら、それは
+                        #   *人が間違い* ではなく **兄弟 variant (別絵柄) が catalog に無い**
+                        #   疑いなので、_PID_NO_IMAGE と同じ流儀で **理由を書き分けて必ず流す**。
+                        #   log 自体は経緯が追えるので残す。
                         try:
                             vd_path.parent.mkdir(parents=True, exist_ok=True)
                             with vd_path.open("a", encoding="utf-8") as vf:
@@ -1290,11 +1329,6 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                                 )
                         except Exception:
                             pass
-                        print(
-                            f"    ⏭️ Skip missing_models (catalog実在→viewer食い違い): "
-                            f"cert{cert} {category}:{expected}"
-                        )
-                        continue
                 # 画像欠は「該当なし」ではなく「画像が無くて目視できない」。何を直せばよいかが
                 # 依頼書で一目で分かるように理由を書き分ける (2026-08-09)。
                 if pid_state is _PID_NO_IMAGE:
@@ -1302,6 +1336,10 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                     # 生成ログにも出す = 問題提起(drop_classifier)が「catalog欠」と混ぜずに
                     # 「画像欠」として分類できる。ログに出さないと分類できない。
                     print(f"    📨 catalog依頼(画像が無く目視できない): cert{cert} {category}:{expected}")
+                elif pid_state is _PID_OK:
+                    reason = (f"catalog {expected} は在る(画像あり)が人が現物と別絵柄と判断 "
+                              f"variant欠落の疑い")
+                    print(f"    📨 catalog依頼(variant欠落の疑い): cert{cert} {category}:{expected}")
                 else:
                     reason = f"auto候補{expected}=該当なし 要調査"
                 model = (f"cert{cert} {brand} [{subject}] #{cardno} "

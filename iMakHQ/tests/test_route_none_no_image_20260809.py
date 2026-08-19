@@ -11,8 +11,12 @@
   2026-08-09 実測: 10件処理のうち pokemon_tcg:SM12a-214 / BDK-006 の2件が該当。
   pokemon_tcg 22,018件中 images 空はわずか17件で、その17件を引いていた。
 
+★2026-08-19 契約更新 (`2026-08-19_act_code_proposals_tcg_response.md` の 4):
+  1 も **依頼を出す**ようになった。理由を「variant (別絵柄) 欠落の疑い」に書き分けるだけで、
+  _PID_NO_IMAGE と同じ「理由を書き分けて必ず流す」流儀に揃える。
+
 固定する挙動:
-  1. 行あり + 画像あり  → 依頼を出さない (viewer 側の食い違い。従来どおり)
+  1. 行あり + 画像あり  → **依頼を出す** (理由=variant欠落の疑い)。log にも残す
   2. 行あり + 画像なし  → **依頼を出す**。理由に「画像が無く目視できない」と書く
   3. 行なし             → 従来どおり依頼を出す
   4. images 列が無い schema → 画像の有無を判定できない。依頼を増やさない側に倒す
@@ -97,9 +101,13 @@ def test_no_image_is_routed_to_catalog(paths):
     assert "画像" in body, "依頼書に『画像が無い』という理由が書かれていない"
 
 
-def test_row_with_image_is_not_routed(paths):
+def test_row_with_image_is_routed_as_variant_gap(paths):
+    """★2026-08-19: 行も画像も在るのに人が NONE = variant 欠落の疑い → 流す (旧: written==0)。"""
     written = _route(_rec("154543135", "M3-082"), paths)
-    assert written == 0, "画像が在る = viewer 側の食い違い。catalog に依頼を出さないこと"
+    assert written == 1, "握り潰している (log には catalog 依頼への昇格経路が0本)"
+    body = paths["missing"].read_text(encoding="utf-8")
+    assert "M3-082" in body and "variant欠落の疑い" in body
+    assert "画像が無く" not in body, "画像欠と理由を取り違えている"
     assert paths["vd"].exists() and "M3-082" in paths["vd"].read_text(encoding="utf-8")
 
 

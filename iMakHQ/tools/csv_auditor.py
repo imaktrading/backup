@@ -816,7 +816,7 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # --- 依頼書 / 生成ログ ---
     cat_req = write_catalog_request(project, catalog_items, dry_run)
     prog_req = write_program_request(project, program_items, dry_run)
-    log_signals = _scan_log(log_path) if log_path else []
+    log_signals = _scan_log(log_path, csv_path)
 
     # ★AI 段 (TitleAgent / Vision / AI総合レビュー) が落ちていないか。落ちていれば緑で終わらせない。
     degraded = ai_degraded(log_path, dc.get("claude", ""), csv_path)
@@ -1578,12 +1578,14 @@ def generation_logs_for(csv_path, run_logs_dir=""):
     return sorted(hits, key=os.path.getmtime)
 
 
-def ai_degraded(log_path="", claude_text="", csv_path="", run_logs_dir=""):
-    """AI 段が **呼べたのに失敗した** 証拠を返す (純関数寄り・test可)。
+def read_run_logs(log_path="", csv_path="", run_logs_dir=""):
+    """`--log` と **その CSV を生成した走行のログ**を全部読んで連結する (ログ探索の SSOT)。
 
-    自分の run log だけでなく、**その CSV を生成した走行のログ**も見る
-    (TitleAgent / Vision は生成側で動くので、監査くんのログには何も出ない)。
-    戻り: ["APIクレジット不足: 9件", ...]。空 = 劣化なし (= 緑で終わってよい)。
+    ★2026-08-19: `_scan_log` と `ai_degraded` が別々にログを探しており、`_scan_log` だけが
+      `--log` 依存だった。自動パイプライン (`control_panel.py` の `csv_auditor.py` 起動) は
+      `--log` を渡さないので、digest の logシグナルが恒久的に空 = 「ログはきれい」ではなく
+      「誰も見ていない」= fail-OPEN だった。探索を1本にして片方だけズレるのを止める。
+      回答書: hq/requests/2026-08-19_act_code_proposals_tcg_response.md の 6
     """
     paths = [p for p in ([log_path] + generation_logs_for(csv_path, run_logs_dir)) if p]
     txt = ""
@@ -1594,6 +1596,17 @@ def ai_degraded(log_path="", claude_text="", csv_path="", run_logs_dir=""):
             txt += open(p, encoding="utf-8", errors="replace").read() + "\n"
         except OSError:
             continue
+    return txt
+
+
+def ai_degraded(log_path="", claude_text="", csv_path="", run_logs_dir=""):
+    """AI 段が **呼べたのに失敗した** 証拠を返す (純関数寄り・test可)。
+
+    自分の run log だけでなく、**その CSV を生成した走行のログ**も見る
+    (TitleAgent / Vision は生成側で動くので、監査くんのログには何も出ない)。
+    戻り: ["APIクレジット不足: 9件", ...]。空 = 劣化なし (= 緑で終わってよい)。
+    """
+    txt = read_run_logs(log_path, csv_path, run_logs_dir)
     txt += "\n" + (claude_text or "")
     out = []
     for label, pat in AI_FAIL_PATS:
@@ -1605,21 +1618,22 @@ def ai_degraded(log_path="", claude_text="", csv_path="", run_logs_dir=""):
     return out
 
 
-def _scan_log(log_path):
-    if not log_path or not os.path.exists(log_path):
+def _scan_log(log_path="", csv_path="", run_logs_dir=""):
+    """logシグナルを拾う。`--log` が無くても **生成ログを自力で見つけて**読む (2026-08-19)。
+
+    `read_run_logs` が探索の SSOT。`--log` は明示指定の上書きとして残す。
+    """
+    txt = read_run_logs(log_path, csv_path, run_logs_dir)
+    if not txt:
         return []
     sig = []
     pats = [("catalog miss", r"missing_models|未登録|見つかりません"),
             ("HOLD/gate", r"HOLD|gate_row_or_hold|csv_hold"),
             ("error", r"❌|Traceback|ERROR")]
-    try:
-        txt = open(log_path, encoding="utf-8", errors="replace").read()
-        for label, p in pats:
-            n = len(re.findall(p, txt))
-            if n:
-                sig.append(f"{label}: {n}件")
-    except Exception:
-        pass
+    for label, p in pats:
+        n = len(re.findall(p, txt))
+        if n:
+            sig.append(f"{label}: {n}件")
     return sig
 
 

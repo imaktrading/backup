@@ -69,6 +69,13 @@ _AUTO_CANDIDATE_RE = re.compile(r"\(auto候補([^=]+)=")
 _NO_IMAGE_PID_RE = re.compile(r"catalog\s+(\S+?)\s+は在るが画像が無く目視できない")
 _NO_IMAGE_NOTE_MARK = "は在るが画像が無く目視できない"
 
+# post_psa_review が _PID_OK で emit する note (2026-08-19)。
+# `catalog <PID> は在る(画像あり)が人が現物と別絵柄と判断 variant欠落の疑い`
+# NO_IMAGE と同じく **行が catalog に在ることを前提に出す依頼**なので、catalog_present で
+# drop すると意図した依頼を毎日握り潰すことになる。
+_VARIANT_GAP_PID_RE = re.compile(r"catalog\s+(\S+?)\s+は在る\(画像あり\)")
+_VARIANT_GAP_NOTE_MARK = "variant欠落の疑い"
+
 
 def _extract_expected_pid(model: str) -> str | None:
     """model 文字列から canonical PID を抜く。抜けなければ None (= 判定不能)。
@@ -88,6 +95,9 @@ def _extract_expected_pid(model: str) -> str | None:
     if m:
         return m.group(1).strip() or None
     m = _NO_IMAGE_PID_RE.search(model)
+    if m:
+        return m.group(1).strip() or None
+    m = _VARIANT_GAP_PID_RE.search(model)
     if m:
         return m.group(1).strip() or None
     return None
@@ -138,7 +148,8 @@ def _filter_catalog_present(new_by_cat: dict[str, list[dict]],
             # 依頼する経路。行の存在を根拠に catalog_present で drop すると 2026-08-09 の
             # 意図的な NO_IMAGE→catalog 依頼を毎日握り潰すことになる。
             # A群 (補完不能) の除外は _filter_suppression が明示 list で担当する。
-            if _NO_IMAGE_NOTE_MARK in (r.get("model") or ""):
+            _model = r.get("model") or ""
+            if _NO_IMAGE_NOTE_MARK in _model or _VARIANT_GAP_NOTE_MARK in _model:
                 kept.append(r)
                 continue
             pid = _extract_expected_pid(r["model"])
@@ -162,6 +173,94 @@ def _filter_catalog_present(new_by_cat: dict[str, list[dict]],
             new_by_cat[category] = kept
         else:
             del new_by_cat[category]
+    return removed
+
+
+# ---------------------------------------------------------------------------
+# 入口検査 (2026-08-19, 提案C)
+#
+# なぜ: カード名もセット名も空の依頼書が実際に出た
+#   (`2026-08-17_auto_catalog_add_.md` = category 欄が空、本文が「`` カテゴリの…」)。
+#   snkrdunk の apparels(衣料品) URL が TCG の missing_models に入り、2日間 catalog に
+#   dispatch され続けた例もある。**catalog が調べようのない依頼は出さない** = fail-closed。
+#   書き手 (newcand_confirm / post_psa_review / psa_to_csv) を問わない最終防衛線なのでここに置く。
+# 回答書: hq/requests/2026-08-19_act_code_proposals_tcg_response.md の 5
+
+REJECTED_LOG = Path(__file__).parent.parent / "logs" / "missing_models_rejected.log"
+
+_TCG_CATEGORIES = {"tcg", "pokemon_tcg", "one_piece_tcg", "dragonball_scg",
+                   "gundam_tcg", "yugioh_tcg"}
+
+# domain rule は hardcode で可 (回答書 5)。「この URL はこのカテゴリに置けない」だけを書く。
+_URL_DOMAIN_RULES = [
+    ("snkrdunk.com/apparels/", "snkrdunk の apparels(衣料品) URL は TCG カテゴリに置けない"),
+]
+
+# model 末尾の注記 `(…)` を剥がす。注記に nest した括弧は現状どの書き手も出さない。
+_NOTE_TAIL_RE = re.compile(r"\s*\([^()]*\)\s*$")
+# 数字を含む語 / `番号不明` は「名前」ではない (cert151234 / OP05-002 / #013 / 番号不明)。
+_NUMBERISH_RE = re.compile(r"^(番号不明|(?=.*\d)[A-Za-z0-9\-/_#\.]+)$")
+
+
+def title_part(model: str) -> str:
+    """model から「カード名らしい語」だけ残す (純関数, test可)。空文字なら名前が無い。"""
+    s = (model or "").strip()
+    prev = None
+    while prev != s:                      # 注記が複数付いていても全部剥がす
+        prev = s
+        s = _NOTE_TAIL_RE.sub("", s).strip()
+    return " ".join(t for t in s.split() if not _NUMBERISH_RE.match(t))
+
+
+def reject_reason(category: str, model: str) -> str | None:
+    """依頼を起票してはいけない行なら理由、問題なければ None (純関数, test可)。"""
+    cat = (category or "").strip()
+    if not cat:
+        return "カテゴリ空 (どの作品か判らない依頼は catalog 側で調べようがない)"
+    if not title_part(model):
+        return "タイトル空 (カード名が無い依頼は catalog 側で調べようがない)"
+    low = (model or "").lower()
+    for frag, why in _URL_DOMAIN_RULES:
+        if frag in low and cat in _TCG_CATEGORIES:
+            return why
+    return None
+
+
+def _filter_invalid_entries(new_by_cat: dict[str, list[dict]],
+                            unique: dict[tuple[str, str], dict] | None = None,
+                            log_path: Path | None = None) -> int:
+    """入口検査に落ちた行を new_by_cat + unique から取り除き、件数を返す。
+
+    silent drop しない: 落とした行は必ず理由付きで log と stdout に残す
+    (`failclosed_must_skip_not_destructive`)。
+    """
+    path = log_path if log_path is not None else REJECTED_LOG
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    removed = 0
+    lines: list[str] = []
+    for category, rows in list(new_by_cat.items()):
+        kept: list[dict] = []
+        for r in rows:
+            why = reject_reason(category, r.get("model") or "")
+            if not why:
+                kept.append(r)
+                continue
+            lines.append(f"{ts}\t{category or '(空)'}\t{why}\t{r.get('model') or ''}\n")
+            if unique is not None:
+                unique.pop((category, r["model"]), None)
+            print(f"    ⏭️ Skip auto_catalog_add (入口検査): {category or '(空)'} — {why}")
+            removed += 1
+        if kept:
+            new_by_cat[category] = kept
+        else:
+            del new_by_cat[category]
+    if lines:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.writelines(lines)
+        except OSError as e:      # noqa: BLE001  log が書けなくても除外自体は続ける
+            print(f"[warn] {path.name} に書けない ({e})")
     return removed
 
 
@@ -269,7 +368,9 @@ def _load_processed() -> set[tuple[str, str]]:
     if not PROCESSED_CSV.exists():
         return set()
     keys: set[tuple[str, str]] = set()
-    with PROCESSED_CSV.open(encoding="utf-8") as f:
+    # ★2026-08-19: BOM 付きで書かれた行があると 1列目のキーが "﻿category" になり
+    #   KeyError で watcher ごと止まる。読む側だけ utf-8-sig にする (書く側は触らない)。
+    with PROCESSED_CSV.open(encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             keys.add((r["category"], r["model"]))
     return keys
@@ -357,7 +458,7 @@ def main() -> int:
 
     # 1. missing_models 全行読込 + (cat, model) dedup
     unique: dict[tuple[str, str], dict] = {}
-    with MISSING_CSV.open(encoding="utf-8") as f:
+    with MISSING_CSV.open(encoding="utf-8-sig") as f:   # BOM 付き行で止まらない (2026-08-19)
         for r in csv.DictReader(f):
             k = (r["category"], r["model"])
             if k not in unique or r["detected_at"] > unique[k]["detected_at"]:
@@ -376,6 +477,11 @@ def main() -> int:
     for k, r in unique.items():
         if k not in processed:
             new_by_cat[r["category"]].append(r)
+
+    # 2a. 入口検査 (2026-08-19, 提案C): catalog が調べようのない依頼を起票しない
+    skipped_invalid = _filter_invalid_entries(new_by_cat, unique)
+    if skipped_invalid:
+        print(f"[skip] 入口検査で {skipped_invalid} 件除外 → {REJECTED_LOG.name}")
 
     # 2b. catalog 実在 pre-check (18b36a2 と同じ fail-closed 契約, 2026-08-08)
     skipped_present = _filter_catalog_present(new_by_cat, unique)
