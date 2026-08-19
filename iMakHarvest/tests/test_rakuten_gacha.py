@@ -133,3 +133,43 @@ def test_build_row_never_writes_formula_columns():
                      "price_jpy": "1000"})
     assert row[COL_PURCHASE_PRICE - 1] == ""
     assert row[COL_CTR - 1] == ""
+
+
+# --------------------------------------------------------------------------
+# 2026-08-19 user 指摘: 送料込み価格で見る / 実際の食べ物は扱わない
+# --------------------------------------------------------------------------
+def test_free_shipping_is_the_default():
+    """送料無料だけを対象にする = 表示価格がそのまま総額になる."""
+    from scrapers.rakuten_search import FREE_SHIPPING_PARAM, SEARCH_URL, search_shop
+    import inspect
+
+    assert FREE_SHIPPING_PARAM == "&f=2"
+    assert "{extra}" in SEARCH_URL
+    assert inspect.signature(search_shop).parameters["free_shipping"].default is True
+
+
+@pytest.mark.parametrize("title", [
+    "サンリオ キャラクターズ ミニチュア 全5種セット",
+    "おこさまランチマスコット10 全5種セット",
+    "駄菓子 ミニチュア チャーム 全6種セット コンプ",
+])
+def test_toy_titles_pass(title):
+    from scrapers.rakuten_search import is_toy
+    assert is_toy(title)
+
+
+@pytest.mark.parametrize("title", [
+    "人気駄菓子 詰め合わせ 全5種セット",
+    "訳あり お菓子 業務用 全4種",
+    "チョコレート 賞味期限2026年 全5種セット",
+])
+def test_real_food_is_rejected(title):
+    """実際の食べ物は通さない (輸出・出品の制約が別物)."""
+    from scrapers.rakuten_search import is_toy
+    assert not is_toy(title)
+
+
+def test_toy_word_is_required_not_just_food_word_absence():
+    """おもちゃ語が無ければ通さない (fail-closed)."""
+    from scrapers.rakuten_search import is_toy
+    assert not is_toy("サンリオ 全5種セット")

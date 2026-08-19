@@ -18,7 +18,12 @@ import time
 import urllib.parse
 import urllib.request
 
-SEARCH_URL = "https://search.rakuten.co.jp/search/mall/{kw}/?sid={sid}&s={sort}&p={page}"
+SEARCH_URL = ("https://search.rakuten.co.jp/search/mall/{kw}/"
+              "?sid={sid}&s={sort}&p={page}{extra}")
+# 送料無料だけに絞る (実測 2026-08-19: `&f=2` で サンリオ 381件 → 232件)。
+# ★仕入原価は「商品価格 + 送料」でなければならない (user 指摘)。 送料は都道府県で変わり
+# 商品ページからも簡単には出ないので、 **送料無料の物だけ扱う** = 表示価格が総額。
+FREE_SHIPPING_PARAM = "&f=2"
 SORT_NEWEST = 4
 PER_PAGE = 45
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -40,6 +45,15 @@ _COUNT_RE = re.compile(r"([0-9,]+)件")
 PREORDER_RE = re.compile(r"予約|発売予定|入荷予定|再入荷|[0-9０-９]{1,2}月→")
 # コンプ品の目印 (3店とも「全N種セット」「コンプ」を必ず入れる)
 COMPLETE_RE = re.compile(r"全\s*[0-9０-９]{1,2}\s*種|コンプ")
+
+# ★実際の食べ物は扱わない (user 指摘 2026-08-19)。 食品は輸出・出品の制約が別物。
+# 「お菓子のミニチュア」は扱うので、 **おもちゃを示す語がある物だけ通す** (fail-closed)。
+TOY_RE = re.compile(
+    r"ミニチュア|フィギュア|マスコット|チャーム|キーホルダー|ガチャ|ガシャポン|"
+    r"ぬいぐるみ|アクリル|ポーチ|バッグ|コレクション|スタンド|クリップ|リング|"
+    r"カプセル|レプリカ|模型")
+# 明らかに実食品を指す語 (あれば通さない)
+REAL_FOOD_RE = re.compile(r"賞味期限|内容量|詰め合わせ|お徳用|業務用|生菓子|食品")
 
 
 def fetch(url: str, timeout: int = 30) -> str:
@@ -82,6 +96,14 @@ def is_complete_set(title: str) -> bool:
     return bool(COMPLETE_RE.search(title or ""))
 
 
+def is_toy(title: str) -> bool:
+    """おもちゃ (ミニチュア等) と分かるか。 実食品を通さないための正の条件."""
+    t = title or ""
+    if REAL_FOOD_RE.search(t):
+        return False
+    return bool(TOY_RE.search(t))
+
+
 def looks_preorder(title: str) -> bool:
     """タイトルで分かる予約品か (安い一次フィルタ)."""
     return bool(PREORDER_RE.search(title or ""))
@@ -89,8 +111,12 @@ def looks_preorder(title: str) -> bool:
 
 def search_shop(shop: str, keyword: str, max_pages: int = 3,
                 sort: int = SORT_NEWEST, sleep_sec: float = 1.2,
-                progress=None) -> list[dict]:
-    """店舗内をキーワード検索して {url, code, title, shop} を返す (新着順)."""
+                progress=None, free_shipping: bool = True) -> list[dict]:
+    """店舗内をキーワード検索して {url, code, title, shop} を返す (新着順).
+
+    free_shipping=True (既定) は **送料無料の商品だけ**。 仕入原価を
+    「表示価格 = 総額」で扱えるようにするため (user 指摘 2026-08-19)。
+    """
     sid = SHOP_IDS.get(shop)
     if not sid:
         raise ValueError(f"未知のショップ: {shop}")
@@ -98,7 +124,9 @@ def search_shop(shop: str, keyword: str, max_pages: int = 3,
     out: list[dict] = []
     seen: set[str] = set()
     for page in range(1, max_pages + 1):
-        html = fetch(SEARCH_URL.format(kw=kw, sid=sid, sort=sort, page=page))
+        html = fetch(SEARCH_URL.format(
+            kw=kw, sid=sid, sort=sort, page=page,
+            extra=FREE_SHIPPING_PARAM if free_shipping else ""))
         rows = parse_results(html, shop)
         if not rows:
             break

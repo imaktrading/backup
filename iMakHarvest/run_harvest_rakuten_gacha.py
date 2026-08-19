@@ -63,7 +63,8 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
     """検索とタイトル判定まで (無料の範囲) をやる."""
     from sheet_writer_rakuten import dedupe_key  # noqa: PLC0415
 
-    rej = {"not_complete": 0, "preorder_title": 0, "already_claimed": 0, "dup": 0}
+    rej = {"not_complete": 0, "not_toy": 0, "preorder_title": 0,
+           "already_claimed": 0, "dup": 0}
     out: list[dict] = []
     seen: set[str] = set()
     for label, keyword, quota in THEMES:
@@ -74,6 +75,7 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
             try:
                 rows = rakuten_search.search_shop(
                     shop, keyword, max_pages=args.max_pages,
+                    free_shipping=not args.include_paid_shipping,
                     progress=lambda m: _log(f"  収集 {m}"))
             except Exception as e:  # noqa: BLE001 - 1店が落ちても他店は続ける
                 _log(f"  ⚠️ {shop} '{keyword}' 検索失敗: {type(e).__name__}")
@@ -85,6 +87,10 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
                     continue
                 if not rakuten_search.is_complete_set(r["title"]):
                     rej["not_complete"] += 1
+                    continue
+                if not rakuten_search.is_toy(r["title"]):
+                    # 実際の食べ物は扱わない (user 指摘 2026-08-19)。 ミニチュアは可
+                    rej["not_toy"] += 1
                     continue
                 if rakuten_search.looks_preorder(r["title"]):
                     rej["preorder_title"] += 1
@@ -111,6 +117,8 @@ def main(argv=None) -> int:
     ap.add_argument("--sheet-every", type=int, default=10, help="何件ごとにスプシへ書くか")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--no-dedupe", action="store_true", help="本番との重複チェックをしない")
+    ap.add_argument("--include-paid-shipping", action="store_true",
+                    help="送料有料の商品も対象にする (既定は送料無料のみ = 表示価格が総額)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
