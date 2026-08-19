@@ -284,8 +284,13 @@ def test_card_number_with_set_prefix_pinpoints(tmp_path):
         "dragonball_scg", None, "FB07-097", brand="DRAGON BALL SUPER CARD GAME JAPANESE",
         expected_product_id="FB07-097_p1", subject="SHENRON ALTERNATE ART")]
     assert cands, "候補が空"
-    assert all(c.startswith("FB07-097") for c in cands), f"別番号が混ざっている: {cands}"
-    assert len(cands) <= 5, f"候補が多すぎる: {len(cands)}件"
+    # ★2026-08-19: 番号一致が当たっても **同じキャラの別セット/別promo も候補に足す**
+    #   ようにした (cert168157629 チョッパーで、同じカードの変種3件しか出ず人が選べなかった)。
+    #   よって「全部 FB07-097」ではなくなる。守るのは
+    #     (a) 本命 (番号一致) が先頭に来る  (b) 人が選べる件数に収まる
+    #   の2つ。関係ないカードが並ぶ問題は「同じキャラだけ」で担保する。
+    assert cands[0].startswith("FB07-097"), f"本命が先頭でない: {cands}"
+    assert len(cands) <= 12, f"候補が多すぎる: {len(cands)}件"
 
 
 def test_bare_card_number_still_pinpoints(tmp_path):

@@ -146,6 +146,53 @@ def _extract_set_code(brand: str, category: str) -> str | None:
 _CHAR_RESCUE_LIMIT = 12
 
 
+def _base_pid(pid):
+    """変種 suffix を落とした幹 (`EB01-006_PRB01_comi_dummy` → `EB01-006`)。純関数."""
+    import re as _re
+    return _re.split(r"_", str(pid or ""), 1)[0]
+
+
+def promo_first(pids, prefer_promo):
+    """PSA が PROMOS と言っているなら promo の行を先に並べる (純関数)。
+
+    ★2026-08-19: キャラ名で広く拾っても `ORDER BY product_id` だと EB / OP が先に来て、
+      枠が埋まって **`P-065` / `P-089` / `P-101` が1件も出ない** (cert168157629 チョッパー)。
+      PSA brand が PROMOS の cert で promo が候補に出ないのは本末転倒なので、並びを変える。
+      落とすものは無い (順番だけ)。
+    """
+    if not prefer_promo:
+        return list(pids or [])
+    def rank(pid):
+        u = str(pid or "").upper()
+        if u.startswith("P-"):
+            return 0          # 素の promo (P-065 等) = PROMOS cert の第一候補
+        if "_P" in u:
+            return 1          # 通常カードの promo 刷り
+        return 2
+    return sorted(pids or [], key=rank)
+
+
+def diversify_by_base(pids, limit, per_base=2):
+    """**同じカードの変種で枠を埋めない** (純関数)。
+
+    ★2026-08-19 ユーザー指摘「CHOPPER と分かっているなら CHOPPER を全部候補に出せば」。
+      実害 (cert168157629 チョッパー): キャラ名で引いた候補12件が **すべて EB01-006 の変種**
+      (_P / _PRB01 / _p1 / _p2 …) で埋まり、`EB02-003` / `P-065` / `P-089` / `P-101` が
+      1件も出なかった。人は選びようがなく「該当なし」しか押せない。
+      枠は **別のカード**に配る。同じ幹は per_base 件までにする。
+    """
+    out, cnt = [], {}
+    for pid in pids or []:
+        b = _base_pid(pid)
+        if cnt.get(b, 0) >= per_base:
+            continue
+        cnt[b] = cnt.get(b, 0) + 1
+        out.append(pid)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _get_candidates(category: str, set_code: str | None, card_number: str | None,
                     brand: str = "", expected_product_id: str | None = None,
                     subject: str = "") -> list[tuple[str, str]]:
@@ -234,13 +281,27 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
                                 [category] + [f"%{t}%" for t in toks]
                                 + [f"%-{card_number}", f"{card_number}%"])
                     char_rows = cur.fetchall()
-                if not char_rows:  # 番号一致なし → キャラ名のみで広く
+                # ★2026-08-19: 番号一致が当たっても **キャラ名の広い候補も必ず足す**。
+                #   番号は「そのカードの番号」なので、同じキャラの別セット/別promo は
+                #   絶対に当たらない。実害 (cert168157629 チョッパー): 番号 003 で
+                #   EB02-003 の変種3件だけが出て、P-065 / P-089 / P-101 が1件も出ず、
+                #   人は「該当なし」しか押せなかった (正解は catalog 未収録の第4絵柄)。
+                if True:  # 番号一致に加えて、キャラ名で広く
                     # ★expected が既に解れている時、この broad は「取りこぼし救済」でしかない。
                     #   40件足すと本命が埋もれて選べなくなるので窓を絞る (救済自体は残す)。
                     lim = _CHAR_RESCUE_LIMIT if rows else 40
-                    cur.execute(base + f" ORDER BY product_id LIMIT {int(lim)}",
+                    # ★2026-08-19: 広めに取ってから **カードを散らして** lim 件に絞る。
+                    #   そのまま LIMIT すると同じカードの変種で枠が埋まる (下記 diversify)。
+                    cur.execute(base + " ORDER BY product_id LIMIT 300",
                                 [category] + [f"%{t}%" for t in toks])
-                    char_rows = cur.fetchall()
+                    _broad = promo_first([r[0] for r in cur.fetchall()],
+                                        "PROMO" in (brand or "").upper())
+                    _seen = {r[0] for r in char_rows}
+                    # 合計を lim に収める (番号一致で既に埋まっている分を引く)。
+                    _room = max(0, int(lim) - len(char_rows))
+                    char_rows = char_rows + [
+                        (pid,) for pid in diversify_by_base(
+                            [x for x in _broad if x not in _seen], _room)]
             if char_rows:
                 if expected_product_id:
                     # expected (prefix hit) を先頭に保ち、キャラ候補を後ろに追加 (取りこぼし救済)。
