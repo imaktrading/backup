@@ -26,6 +26,7 @@ def _fn(name):
 
 
 LOG = """
+  20件を処理します。（仕入値あり: 20件）
   ⏭️ 枠を選ぶ前に除外 [OUT-OF-SCOPE=参入しないゲーム]: 3件 → ['1','2','3']
   ⏭️ 枠を選ぶ前に除外 [NO-IMAGE=catalogに画像が無く目視不能]: 1件 → ['9']
   📨 NONE/NG 2 件 → catalog 宿題化 (1 件記録)
@@ -46,8 +47,25 @@ class TestCounts:
 
     def test_every_kind_appears_once(self):
         got = _fn("build_exclusion_lines")(LOG, REMOVED, HOJU)
-        assert len(got) == 6                     # 未回答/該当なし/画像なし/対象外/自己チェック/重複
         assert sum("画像" in x for x in got) == 1
+        assert sum(x.startswith("・") for x in got) == 6
+
+    def test_batch_and_pool_are_separate_sections(self):
+        """★母数が違うものを同じ並びに書かない。混ぜると足して 20件を超える (実害)."""
+        got = _fn("build_exclusion_lines")(LOG, REMOVED, HOJU)
+        assert got[0] == "(今回の 20件 の内訳)"
+        i = got.index("(枠に入る前に候補から外した分 — 上の内訳とは別勘定)")
+        batch, pool = got[1:i - 1], got[i + 1:]
+        assert all("参入しない" not in x and "画像" not in x for x in batch)
+        assert all("未回答" not in x and "既に出品中" not in x for x in pool)
+
+    def test_batch_lines_add_up_to_the_batch_size(self):
+        """内訳 + 出品数 = 処理した件数 になること (今回 6+2+1+4 + 出品7 = 20)."""
+        import re
+        got = _fn("build_exclusion_lines")(LOG, REMOVED, HOJU)
+        i = got.index("(枠に入る前に候補から外した分 — 上の内訳とは別勘定)")
+        nums = [int(re.search(r"(\d+)件", x).group(1)) for x in got[1:i - 1] if "件" in x]
+        assert sum(nums) == 13 and 13 <= 20
 
     def test_duplicates_show_where_the_supply_went(self):
         got = "\n".join(_fn("build_exclusion_lines")(LOG, REMOVED, HOJU))

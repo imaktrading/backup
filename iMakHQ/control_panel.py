@@ -694,13 +694,32 @@ def build_exclusion_lines(log_text="", removed=None, hoju=None):
         m = _re.search(pat, log_text or "")
         return int(m.group(1)) if m else 0
 
-    # 「見送り」は 未回答 + 該当なし の合計なので、引いてから出す (二重に数えない)
+    # ★2026-08-19: **母数の違うものを同じ並びに書かない**。
+    #   「20件の中で落ちた分」と「20件を選ぶ前に候補から外した分」を混ぜたため、
+    #   足すと 24件 になり 20件を超えていた (ユーザー指摘)。節を分ける。
+    batch = n(r"(\d+)件を処理します")
+    # --- ① 今回の枠の中の内訳 (足すと batch になる) ---
     none_ng = n(r"NONE/NG\s*(\d+)\s*件\s*→\s*catalog")
     pend = max(0, n(r"目視未確定で出品見送り:\s*(\d+)\s*件") - none_ng)
+    rm = (removed or {}).get("removed") or 0
     if pend:
         out.append(f"・目視で未回答 {pend}件 → 次の走行でまた候補に戻ります")
     if none_ng:
         out.append(f"・「該当なし」 {none_ng}件 → カタログに依頼。1日後にまた出ます")
+    self_ng = len(_re.findall(r"selfcheck failed in build_row", log_text or ""))
+    if self_ng:
+        out.append(f"・自己チェックで不一致 {self_ng}件 → 残務に記録済 (こちらの不具合)")
+    if rm:
+        names = [t.split(") ", 1)[-1][:44] for t in ((removed or {}).get("removed_titles") or [])]
+        tail = f" — {' / '.join(names[:3])}" + (" ほか" if len(names) > 3 else "") if names else ""
+        added = (hoju or {}).get("added")
+        after = (f"仕入元は補URLに回しました (今回 {added}本 追加)"
+                 if added else "仕入元は補URLの対象になります")
+        out.append(f"・同じカードが既に出品中 {rm}件 → {after}{tail}")
+    if out and batch:
+        out.insert(0, f"(今回の {batch}件 の内訳)")
+    # --- ② 枠に入る前に候補から外した分 (母数は候補全体。①とは別勘定) ---
+    pre = []
     for label, why in (("NO-IMAGE", "カタログに画像が無い"),
                        ("OUT-OF-SCOPE", "参入しないゲーム"),
                        ("GAP", "カタログに未収録")):
@@ -709,19 +728,11 @@ def build_exclusion_lines(log_text="", removed=None, hoju=None):
             after = {"NO-IMAGE": "カタログに依頼済",
                      "OUT-OF-SCOPE": "対象外 (今後も出しません)",
                      "GAP": "カタログに依頼済"}[label]
-            out.append(f"・{why} {c}件 → {after}")
-    self_ng = len(_re.findall(r"selfcheck failed in build_row", log_text or ""))
-    if self_ng:
-        out.append(f"・自己チェックで不一致 {self_ng}件 → 残務に記録済 (こちらの不具合)")
-
-    rm = (removed or {}).get("removed") or 0
-    if rm:
-        names = [t.split(") ", 1)[-1][:44] for t in ((removed or {}).get("removed_titles") or [])]
-        tail = f" — {' / '.join(names[:3])}" + (" ほか" if len(names) > 3 else "") if names else ""
-        added = (hoju or {}).get("added")
-        after = (f"仕入元は補URLに回しました (今回 {added}本 追加)"
-                 if added else "仕入元は補URLの対象になります")
-        out.append(f"・同じカードが既に出品中 {rm}件 → {after}{tail}")
+            pre.append(f"・{why} {c}件 → {after}")
+    if pre:
+        out.append("")
+        out.append("(枠に入る前に候補から外した分 — 上の内訳とは別勘定)")
+        out.extend(pre)
     return out
 
 
