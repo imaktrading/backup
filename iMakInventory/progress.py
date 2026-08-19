@@ -113,8 +113,9 @@ def read_latest_progress() -> Optional[dict]:
 
     複数 progress_*.jsonl がある場合は cycle_ts 降順で最新。
     """
-    lock_path = DECISION_LOG_DIR / ".cycle.lock"
-    if not lock_path.exists():
+    # ★ 2026-08-19: HIGH/LOW 並走のため lock は label 別 (.cycle.lock / .cycle_LOW.lock)。
+    #   どれか 1 つでも生きていれば cycle 進行中。
+    if not any(DECISION_LOG_DIR.glob(".cycle*.lock")):
         # process 死亡で lock release 済 + progress file が残骸 → stale 扱い
         return None
 

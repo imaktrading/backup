@@ -200,6 +200,37 @@ def _log(msg: str, test_mode: bool = False):
 # ============================================================================
 # Lock file
 # ============================================================================
+#: この cycle が使う lock (None なら既定 = LOCK_FILE)。_set_active_lock() が決める。
+_ACTIVE_LOCK_FILE: Optional[Path] = None
+
+
+def _lock_path() -> Path:
+    return _ACTIVE_LOCK_FILE or LOCK_FILE
+
+
+def _set_active_lock(sheet: str, sheet_id: Optional[str] = None) -> Path:
+    """label 別の lock を選ぶ (= HIGH/LOW 並走の可否をここで決める).
+
+    ★ 2026-08-19: 専用 chrome profile が用意できている label だけ別 lock にする。
+      profile が共有のままだと、並走した瞬間に Chrome の起動が衝突し、さらに
+      cycle 開始時の残骸掃除が相手の稼働中 Chrome を殺す。「隔離できている時だけ
+      並走を許す」ことで、profile 準備前に誤って並走が始まるのを防ぐ。
+    """
+    global _ACTIVE_LOCK_FILE
+    label = "LOW" if str(sheet or "").lower() == "low" else "SHEET"
+    _ACTIVE_LOCK_FILE = None      # None = 既定 (LOCK_FILE) を都度参照する
+    if label != "SHEET" and not sheet_id:
+        try:
+            from monitor_listings import (  # noqa: PLC0415
+                resolve_profile_dirs, _default_profile_dirs,
+            )
+            if resolve_profile_dirs(label) != _default_profile_dirs():
+                _ACTIVE_LOCK_FILE = DECISION_LOG_DIR / f".cycle_{label}.lock"
+        except Exception:
+            pass    # 判定できなければ従来どおり共有 lock (= 直列 = 安全側)
+    return _lock_path()
+
+
 def _lock_pid_alive(content: str) -> Optional[bool]:
     """lock 内容の pid/host からプロセス生存を判定。True=生存 / False=死亡 / None=判定不能。
 
@@ -258,26 +289,27 @@ def _acquire_lock(test_mode: bool = False, wait_minutes: int = 0) -> bool:
 
 def _try_acquire_lock(test_mode: bool = False) -> bool:
     """1 回だけ lock 取得を試みる (待たない)。"""
-    if LOCK_FILE.exists():
+    lock_file = _lock_path()
+    if lock_file.exists():
         try:
-            age = time.time() - LOCK_FILE.stat().st_mtime
-            content = LOCK_FILE.read_text(encoding="utf-8", errors="replace")[:200]
+            age = time.time() - lock_file.stat().st_mtime
+            content = lock_file.read_text(encoding="utf-8", errors="replace")[:200]
             # ★ PID 生存チェック優先: プロセスが死んでいれば age に依らず stale (再起動/クラッシュ即復帰)
             alive = _lock_pid_alive(content)
             if alive is False:
                 _log(f"[!] stale lock 検出 (pid 死亡 = 再起動/クラッシュ)、削除して続行 (content: {content})", test_mode)
-                LOCK_FILE.unlink(missing_ok=True)
+                lock_file.unlink(missing_ok=True)
             elif age < LOCK_STALE_HOURS * 3600:
                 # 生存 or 判定不能 かつ 6h 未満 → 保持中とみなす (誤って二重起動しない安全側)
                 _log(f"[!] lock 保持中 (pid_alive={alive}, age {age/60:.1f} min < {LOCK_STALE_HOURS}h, content: {content})", test_mode)
                 return False
             else:
                 _log(f"[!] stale lock 検出 ({age/3600:.1f}h > {LOCK_STALE_HOURS}h)、削除して続行", test_mode)
-                LOCK_FILE.unlink(missing_ok=True)
+                lock_file.unlink(missing_ok=True)
         except Exception as e:
             _log(f"[!] lock check 失敗: {e}", test_mode)
             return False
-    LOCK_FILE.write_text(
+    lock_file.write_text(
         f"pid={os.getpid()} host={socket.gethostname()} ts={datetime.now().isoformat()}\n",
         encoding="utf-8",
     )
@@ -286,7 +318,8 @@ def _try_acquire_lock(test_mode: bool = False) -> bool:
 
 def _release_lock(test_mode: bool = False):
     try:
-        LOCK_FILE.unlink(missing_ok=True)
+        lock_file = _lock_path()
+        lock_file.unlink(missing_ok=True)
     except Exception as e:
         _log(f"[!] lock release 失敗: {e}", test_mode)
 
@@ -966,6 +999,7 @@ def run_cycle(
     #   伸びた結果、その 75 分後に始まる LOW が 45 分待っても解放されず 2 回連続 skip し、
     #   LOW シート 512 行が 19.5h 監視されなかった (= 取下げ漏れリスク)。LOW は待てば走れるので
     #   待ち上限だけ伸ばす (Task Scheduler 側で --lock-wait-minutes 150 を渡す)。
+    _set_active_lock(sheet, sheet_id)
     wait_min = LOCK_WAIT_MINUTES if lock_wait_minutes is None else max(0, lock_wait_minutes)
     if not _acquire_lock(test_mode, wait_minutes=0 if test_mode else wait_min):
         cycle_log["status"] = "skipped_lock_held"

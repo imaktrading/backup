@@ -444,7 +444,8 @@ def _fetch_via_requests(url: str) -> Optional[dict]:
 # ============================================================================
 # Driver factory + Selenium fallback
 # ============================================================================
-def create_amazon_driver(headless: bool = True, use_login_profile: bool = True):
+def create_amazon_driver(headless: bool = True, use_login_profile: bool = True,
+                         profile_dir: str = None):
     """Amazon 用 Chrome driver. Takaaki さんが手動 login したプロファイルを使用.
 
     Args:
@@ -465,8 +466,11 @@ def create_amazon_driver(headless: bool = True, use_login_profile: bool = True):
     options.add_argument("--lang=ja-JP")
     options.add_argument("--start-maximized")
     if use_login_profile:
-        os.makedirs(EBAY_AMAZON_PROFILE_DIR, exist_ok=True)
-        options.add_argument(f"--user-data-dir={EBAY_AMAZON_PROFILE_DIR}")
+        # ★ 2026-08-19: profile_dir で上書き可 (HIGH/LOW 並走用。同一 profile の
+        #   Chrome は 2 つ同時に起動できないため label ごとに別 profile を使う)
+        _profile = profile_dir or EBAY_AMAZON_PROFILE_DIR
+        os.makedirs(_profile, exist_ok=True)
+        options.add_argument(f"--user-data-dir={_profile}")
     if headless:
         options.add_argument("--headless=new")
 

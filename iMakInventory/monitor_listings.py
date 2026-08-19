@@ -903,16 +903,48 @@ def append_action_required(sheet_label: str, result: dict, reason: str,
 # ============================================================================
 # orphan chrome 一掃 (cycle 開始時の clean slate 確保、2026-06-12)
 # ============================================================================
+# ★ 2026-08-19 HIGH/LOW 並走: label ごとに別の chrome profile を使う。
+#   同じ profile を指す Chrome は 2 つ同時に起動できず、さらに cycle 開始時の
+#   「自分の残骸 chrome の掃除」が相手の稼働中 chrome を殺してしまうため。
+#   既定 (HIGH/SHEET) は従来の profile をそのまま使い、他 label は "<既定>_<LABEL>"。
+_ACTIVE_PROFILE_DIRS: tuple = ()
+
+
+def _default_profile_dirs() -> tuple:
+    from scrapers import mercari_scraper, amazon_scraper  # noqa: PLC0415
+    return (getattr(mercari_scraper, "CHROME_PROFILE_DIR", "") or "",
+            getattr(amazon_scraper, "EBAY_AMAZON_PROFILE_DIR", "") or "")
+
+
+def resolve_profile_dirs(sheet_label: str) -> tuple:
+    """(mercari_profile, amazon_profile) を label 別に決める.
+
+    専用 profile がまだ用意されていない label は既定にフォールバックする
+    (= 従来どおり直列でしか走れないが、動きはする)。
+    """
+    m_default, a_default = _default_profile_dirs()
+    label = (sheet_label or "").strip().upper()
+    if label in ("", "HIGH", "SHEET", "TEST"):
+        return m_default, a_default
+    # ★ 全部揃っている時だけ専用に切替える (片方だけ専用 = もう片方は共有のまま
+    #   並走が始まる = Chrome 衝突。中途半端な隔離は「隔離なし」と同じ扱いにする)
+    dedicated = tuple(f"{base}_{label}" for base in (m_default, a_default))
+    if all(os.path.isdir(d) for d in dedicated):
+        return dedicated
+    return m_default, a_default
+
+
+def set_active_profile_dirs(sheet_label: str) -> tuple:
+    """この cycle が使う profile を確定して記録する (kill 対象の限定にも使う)."""
+    global _ACTIVE_PROFILE_DIRS
+    _ACTIVE_PROFILE_DIRS = resolve_profile_dirs(sheet_label)
+    return _ACTIVE_PROFILE_DIRS
+
+
 # 自分の scraper が使う chrome profile (= kill 対象を自分の資産に限定するための指紋)
 def _own_profile_dirs() -> tuple:
-    from scrapers import mercari_scraper, amazon_scraper  # noqa: PLC0415
-    dirs = []
-    for mod, attr in ((mercari_scraper, "CHROME_PROFILE_DIR"),
-                      (amazon_scraper, "EBAY_AMAZON_PROFILE_DIR")):
-        v = getattr(mod, attr, None)
-        if isinstance(v, str) and v.strip():
-            dirs.append(v.strip().lower())
-    return tuple(dirs)
+    dirs = _ACTIVE_PROFILE_DIRS or _default_profile_dirs()
+    return tuple(d.strip().lower() for d in dirs if isinstance(d, str) and d.strip())
 
 
 def _select_stale_scraper_pids(procs, profile_dirs, self_pid: int = 0) -> list:
@@ -1054,6 +1086,11 @@ def process_sheet(
     # の二重バグで一つも kill できていなかった。 driver 生成"前"(= 並走 driver 皆無の安全な
     # 時点) に、 --headless chrome (= scraper 専用、 ユーザーの通常ブラウザは非 headless で温存)
     # と undetected_chromedriver を確実に kill する。
+    # この cycle が使う profile を確定 (掃除も driver 起動もこの profile に限定する)
+    mercari_profile, amazon_profile = set_active_profile_dirs(sheet_label)
+    m_def, a_def = _default_profile_dirs()
+    if (mercari_profile, amazon_profile) != (m_def, a_def):
+        log(f"  profile: 専用 ({Path(mercari_profile).name} / {Path(amazon_profile).name})")
     _kill_stale_scraper_chrome(log)
 
     # Mercari URL がある場合は driver を 1 つ生成して再利用 (起動コスト削減)
@@ -1062,7 +1099,8 @@ def process_sheet(
     if needs_mercari:
         log("  Mercari driver 起動中...")
         try:
-            mercari_driver = create_mercari_driver(headless=True)
+            mercari_driver = create_mercari_driver(headless=True,
+                                                   profile_dir=mercari_profile)
             log("  [OK] Mercari driver 起動完了 (再利用 mode)")
         except Exception as e:
             log(f"  [!] Mercari driver 起動失敗: {type(e).__name__}: {e}")
@@ -1080,7 +1118,8 @@ def process_sheet(
         last_err = None
         for attempt in (1, 2):
             try:
-                amazon_driver = create_amazon_driver(headless=True, use_login_profile=True)
+                amazon_driver = create_amazon_driver(headless=True, use_login_profile=True,
+                                                     profile_dir=amazon_profile)
                 log(f"  [OK] Amazon driver 起動完了 (login profile 再利用、 attempt={attempt})")
                 break
             except Exception as e:
@@ -1088,13 +1127,12 @@ def process_sheet(
                 log(f"  [!] Amazon driver 起動失敗 attempt={attempt}: {type(e).__name__}: {str(e)[:120]}")
                 if attempt == 1:
                     # chrome process kill (= profile lock 解放)
+                    # ★ 2026-08-19: 旧実装は chromedriver.exe を名前で全部 kill していた。
+                    #   並走 cycle の driver まで巻き込むため、自分の profile 配下だけを
+                    #   殺す共通処理に寄せる (掃除の対象限定は _own_profile_dirs が担保)。
                     try:
-                        import subprocess  # noqa: PLC0415
-                        subprocess.run(["taskkill", "/F", "/IM", "chromedriver.exe"],
-                                       capture_output=True, timeout=10)
-                        subprocess.run(["taskkill", "/F", "/IM", "chrome.exe", "/FI", "WINDOWTITLE eq *iMakInventory*"],
-                                       capture_output=True, timeout=10)
-                        log("     → chrome/chromedriver process kill 実行、 5s wait で retry")
+                        _kill_stale_scraper_chrome(log)
+                        log("     → 自分の profile 配下の chrome/driver を kill、 5s wait で retry")
                         time.sleep(5)
                     except Exception as ke:
                         log(f"     → kill 失敗 ({type(ke).__name__}): {ke}")

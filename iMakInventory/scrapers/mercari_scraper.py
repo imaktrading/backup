@@ -132,7 +132,8 @@ def _check_404(url: str) -> Optional[bool]:
 # ============================================================================
 # Selenium driver factory
 # ============================================================================
-def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
+def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True,
+                  profile_dir: str = None):
     """undetected_chromedriver の driver を生成して返す.
 
     Phase 9 修正 履歴 (2026-04-30):
@@ -168,8 +169,11 @@ def create_driver(headless: bool = True, use_iMakMercari_profile: bool = True):
     # eager でも壊れない (= load 完了に依存しない)。 関連: [[scraper_price_vulnerability]]
     options.page_load_strategy = "eager"
     # 明示指定された場合のみ profile 共有 (Phase 6 までの旧動作互換)
-    if use_iMakMercari_profile and os.path.isdir(CHROME_PROFILE_DIR):
-        options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR}")
+    # ★ 2026-08-19: profile_dir で上書きできるようにした。同じ profile を指す Chrome は
+    #   2 つ同時に起動できないため、HIGH/LOW を並走させるには label ごとに別 profile が要る。
+    _profile = profile_dir or CHROME_PROFILE_DIR
+    if use_iMakMercari_profile and os.path.isdir(_profile):
+        options.add_argument(f"--user-data-dir={_profile}")
     if headless:
         options.add_argument("--headless=new")
 

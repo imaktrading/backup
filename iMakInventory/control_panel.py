@@ -487,9 +487,12 @@ class ControlPanel:
         Returns: True なら kill 実行 / lock 削除した。False なら lock 不在。
         """
         from pathlib import Path  # noqa: PLC0415
-        lock = SCRIPT_DIR / "decision_log" / ".cycle.lock"
-        if not lock.exists():
+        # ★ 2026-08-19: lock は label 別 (.cycle.lock / .cycle_LOW.lock)。
+        #   走っているものを 1 つ取る (複数走行中なら押すたびに 1 本ずつ止まる)。
+        locks = sorted((SCRIPT_DIR / "decision_log").glob(".cycle*.lock"))
+        if not locks:
             return False
+        lock = locks[0]
         try:
             content = lock.read_text(encoding="utf-8", errors="replace")
         except OSError:
