@@ -83,6 +83,21 @@ def condition_descriptors(row):
     return out
 
 
+def schedule_time_of(row):
+    """CSV の ScheduleTime → eBay に渡す GMT 表記。無ければ空 (= 即時公開)。
+
+    ★2026-08-20: CSV に ScheduleTime を書いていても **eBay には送っていなかった**
+      (呼び出し側が build_item_xml に渡していなかった)。予約のつもりで即時公開に
+      なっていたので、`--schedule` を付けた時だけ渡すようにした。
+      既定を変えないのは PSA など既存フローの挙動を動かさないため。
+    """
+    v = (row.get("ScheduleTime") or "").strip()
+    if not v:
+        return ""
+    v = v.replace("/", "-").replace(" ", "T")
+    return v if v.endswith("Z") else v + "Z"
+
+
 def build_item_xml(row, schedule_time=""):
     """CSV 1行 → AddFixedPriceItem の <Item> XML (純関数)。
 
@@ -203,6 +218,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="先頭N件だけ")
     ap.add_argument("--keep-going", action="store_true", help="失敗しても続ける")
     ap.add_argument("--result-json", default="", help="出品結果 (label/itemID) の書き出し先")
+    ap.add_argument("--schedule", action="store_true",
+                    help="CSV の ScheduleTime で **予約出品** にする "
+                         "(既定は即時公開 = 従来どおり。PSA 等の既存フローを変えない)")
     a = ap.parse_args()
 
     with open(a.csv, newline="", encoding="utf-8") as f:
@@ -231,7 +249,7 @@ def main():
                 break
             continue
         inner = ("<ErrorLanguage>en_US</ErrorLanguage><WarningLevel>High</WarningLevel>"
-                 + build_item_xml(row))
+                 + build_item_xml(row, schedule_time_of(row) if a.schedule else ""))
         resp = fx.post(call, inner, tok, site=SITE_US)
         ack, iid, err = parse_ack(resp)
         if ack in ("Success", "Warning"):
