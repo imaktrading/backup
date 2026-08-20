@@ -29,12 +29,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from gacha_age import fetch_age, is_too_young  # noqa: E402
+from gacha_age import fetch_age, fetch_age_by_title, is_too_young  # noqa: E402
 from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
 
 DUMP_DIR = ROOT / "debug"
-SHOPS = ("auc-yuyou", "kidsroom", "mirakikaku")
+SHOPS = ("auc-yuyou", "mirakikaku", "jugem2020", "smltrading")
+# kidsroom は 2026-08-20 に外した (どの検索でも0件)。
+# jugem2020 / smltrading は バンダイのコンプ品が多い店として追加。
 
 # テーマ = (ラベル, 検索語, 枠). 枠 = 採用する上限件数
 THEMES = [
@@ -222,6 +224,9 @@ def main(argv=None) -> int:
                 # バンダイだけ 対象年齢を公式で確認できる (JAN 直引き)。
                 # 15才未満と**分かった**物は入れない。読めなければ目視に回す
                 age = fetch_age(detail.get("jan") or "")
+                if age is None:
+                    # JAN を出さない店 (実測 jugem2020) は 公式カタログの商品名で引く
+                    age = fetch_age_by_title(item["title"])
                 if is_too_young(age):
                     detail_rej["age_ng"] += 1
                     _log(f"  対象年齢 {age}才 → 除外 {item['title'][:30]}")

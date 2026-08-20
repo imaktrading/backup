@@ -28,3 +28,27 @@ def test_unknown_age_is_not_dropped():
     """読めない = 不明。 落とさず 目視に回す (HQ と分担合意済)."""
     assert is_too_young(None) is False
     assert MIN_AGE == 15
+
+
+# --------------------------------------------------------------------------
+# JAN を出さない店向け: 公式カタログの商品名で引く
+# --------------------------------------------------------------------------
+from gacha_age import normalize_name
+
+_NAMES = [("リラックマ×チュッパチャプス マスコットスイング", "4582769916625000"),
+          ("まったく別のシリーズ ますこっと", "1111111111111000")]
+CATALOG = [(normalize_name(n), code, n) for n, code in _NAMES]
+
+
+def test_find_by_title_matches_official_name(monkeypatch):
+    import gacha_age
+    monkeypatch.setattr(gacha_age, "fetch_catalog", lambda *a, **k: CATALOG)
+    t = "【全5種コンプリートセット】リラックマ×チュッパチャプス マスコットスイング バンダイ ガチャ"
+    assert gacha_age.find_by_title(t) == "4582769916625000"
+
+
+def test_find_by_title_is_blank_when_no_official_name_matches(monkeypatch):
+    """当たらなければ空。 部分一致で別商品の年齢を貼らない."""
+    import gacha_age
+    monkeypatch.setattr(gacha_age, "fetch_catalog", lambda *a, **k: CATALOG)
+    assert gacha_age.find_by_title("まったく別の商品 全5種セット バンダイ") == ""
