@@ -122,7 +122,7 @@ class TestTitleAndDedup:
     def test_題材が先頭_メーカーは後ろ(self):
         t = G.build_title("VIRUSWEETS Sweets Shop", 6, "Bandai", "Miniature Figure")
         assert t.startswith("VIRUSWEETS Sweets Shop")
-        assert "Complete Set 6" in t and t.rstrip().endswith(("Gashapon", "Capsule Toy"))
+        assert "Complete Set 6" in t and "Bandai Gashapon" in t
 
     def test_商標はメーカーで使い分ける(self):
         """`Gashapon` はバンダイの登録商標。他社商品に付けない."""

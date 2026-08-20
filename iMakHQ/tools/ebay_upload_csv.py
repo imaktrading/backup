@@ -140,6 +140,11 @@ def build_item_xml(row, schedule_time=""):
     cds = f"<ConditionDescriptors>{cds}</ConditionDescriptors>" if cds else ""
     sched = f"<ScheduleTime>{_esc(schedule_time)}</ScheduleTime>" if schedule_time else ""
     pld = product_listing_details(row)
+    # ★2026-08-21: CSV の `BestOfferEnabled` を **送っていなかった**。
+    #   ベストオファーが付かないまま出ていて、オファー対応の導線が死んでいた
+    #   (ScheduleTime / Product:EAN と同じ「CSVに書いてあるのに写していない」型)。
+    bo = ("<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>"
+          if str(row.get("BestOfferEnabled") or "").strip() in ("1", "true", "True") else "")
     return (
         "<Item>"
         f"<Title>{_esc(row.get('*Title'))}</Title>"
@@ -167,6 +172,7 @@ def build_item_xml(row, schedule_time=""):
         f"<ItemSpecifics>{specs}</ItemSpecifics>"
         f"{cds}"
         f"{pld}"
+        f"{bo}"
         f"{sched}"
         "</Item>"
     )

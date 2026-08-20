@@ -56,3 +56,21 @@ class TestOptIn:
         src = inspect.getsource(U)
         assert '"--schedule"' in src and 'action="store_true"' in src
         assert "schedule_time_of(row) if a.schedule else \"\"" in src
+
+
+class TestBestOffer:
+    """★CSV の `BestOfferEnabled` を eBay に送っていなかった (2026-08-21).
+
+    ScheduleTime / Product:EAN と同じ型で、**CSV に書いてあるのに写していなかった**。
+    ベストオファーが付かないまま出ていたので、オファー対応の導線が死んでいた。
+    """
+
+    def test_csvで1なら送る(self):
+        x = U.build_item_xml({"*Title": "t", "BestOfferEnabled": "1"})
+        assert "<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled>" in x
+
+    def test_指定が無ければ送らない(self):
+        assert "BestOffer" not in U.build_item_xml({"*Title": "t"})
+
+    def test_ゼロなら送らない(self):
+        assert "BestOffer" not in U.build_item_xml({"*Title": "t", "BestOfferEnabled": "0"})

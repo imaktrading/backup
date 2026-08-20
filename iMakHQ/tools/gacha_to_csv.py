@@ -7,7 +7,7 @@ VIRUSWEETS フィギュアコレクション) を eBay から読んで写した:
     カテゴリ 69528 / ストアカテゴリ 41827562010 / SKU = 仕入元ID
     Set=Complete Set / Number of Pieces=N / Material=PVC / Age Level=15+ /
     Type=Mini Figure / Brand / Series / Character / Franchise / Theme /
-    Country of Origin=Japan / MPN=Does not apply
+    Country of Origin=Does not apply / MPN は公式品番が取れた物だけ
     タイトル: "<シリーズ> Full Set of N Gashapon NEW"
 
 入力は中間スプシ (Harvest が入れる) か HIGH の商品管理シート。列は PSA10 と同じ:
@@ -217,9 +217,13 @@ def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = ""
       - 80字を超える時に削るのは **後ろから** (題材は絶対に切らない)
     """
     maker = re.sub(r"\s*A\.?R\.?T\.?S\.?\s*$", "", maker_en or "", flags=re.I).strip()
-    head = " ".join(x for x in (series_en, extra) if x).strip()
-    # 後ろから順に削る候補 (左ほど優先して残す)
     term = capsule_term(maker_en)
+    seen, subject = set(), []
+    for w in (series_en or "").split():
+        if w.lower() not in seen:
+            seen.add(w.lower())
+            subject.append(w)
+    extras = [w for w in (extra or "").split() if w.lower() not in seen]
     tails = ["Complete Set %d Types %s %s Japan" % (pieces, maker, term),
              "Complete Set %d Types %s %s" % (pieces, maker, term),
              "Complete Set %d %s %s" % (pieces, maker, term),
@@ -228,21 +232,19 @@ def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = ""
              "Complete Set %d %s %s" % (pieces, maker, term.split()[0]),
              "Complete Set %d %s" % (pieces, term),
              "Complete Set %d Capsule Toy" % pieces]
-    seen, words = set(), []
-    for w in head.split():                       # 同じ語の重複を落とす
-        if w.lower() not in seen:
-            seen.add(w.lower())
-            words.append(w)
+    # 削る順: ① おまけの語(extra)を後ろから ② それでも入らなければ後ろの飾りを落とす。
+    #   題材(subject)は最後まで守る。切れると別商品と区別が付かなくなる
     for tail in tails:
         tail = re.sub(r"\s+", " ", tail).strip()
-        t = ("%s %s" % (" ".join(words), tail)).strip()
-        if len(t) <= 80:
-            return t
-    # ここまで来たら題材が長すぎる。**後ろ**を残して題材側を語単位で削る
+        for k in range(len(extras), -1, -1):
+            t = " ".join(subject + extras[:k] + [tail])
+            if len(t) <= 80:
+                return t
     tail = re.sub(r"\s+", " ", tails[-1]).strip()
-    while words and len("%s %s" % (" ".join(words), tail)) > 80:
+    words = list(subject)
+    while words and len(" ".join(words + [tail])) > 80:
         words.pop()
-    return ("%s %s" % (" ".join(words), tail)).strip()
+    return " ".join(words + [tail])
 
 
 def official_mpn(item: dict) -> str:
@@ -356,6 +358,12 @@ def load_description() -> str:
     return open(p, encoding="utf-8").read()
 
 
+def _age_en(age_jp: str) -> str:
+    """公式の対象年齢 (`15才以上`) → `15+`。読めなければ空 (推測しない)。"""
+    m = re.search(r"(\d+)\s*[才歳]", age_jp or "")
+    return "%s+" % m.group(1) if m else ""
+
+
 def build_description(item: dict, series_en: str, maker_en: str, base: str) -> str:
     """テンプレに Specifications を差し込む。公式から取れた事実だけを書く。"""
     off = item.get("official") or {}
@@ -366,11 +374,15 @@ def build_description(item: dict, series_en: str, maker_en: str, base: str) -> s
     if item.get("character_en"):
         specs.append(f"<li><b>Character:</b> {item['character_en']}</li>")
     specs.append("<li><b>Material:</b> PVC</li>")
-    if off.get("released"):
-        specs.append(f"<li><b>Released:</b> {_html_escape(off['released'])}</li>")
-    if off.get("age"):
-        specs.append(f"<li><b>Age Level:</b> {_html_escape(off['age'])} (manufacturer)</li>")
-    specs.append("<li><b>Country of Origin:</b> Japan</li>")
+    # ★公式の「2022年6月 第4週」をそのまま出していた。買い手は読めないので西暦だけ
+    if _release_year(off.get("released")):
+        specs.append("<li><b>Released:</b> %s</li>" % _release_year(off.get("released")))
+    # ★公式の「15才以上」をそのまま出して **商品説明に日本語が混ざっていた**。
+    #   買い手は読めない。数字だけ取って英語表記にする
+    if _age_en(off.get("age")):
+        specs.append("<li><b>Age Level:</b> %s (manufacturer)</li>" % _age_en(off.get("age")))
+    # ★原産国は公式に記載が無い。Item Specifics 側は Does not apply にしたのに
+    #   説明文だけ `Japan` と書いたままだった (2026-08-21 に外した)
     if item["with_board"]:
         specs.append("<li><b>Includes:</b> Display board</li>")
     html = ('<p><span style="text-decoration: underline;"><strong>Specifications'
@@ -405,6 +417,9 @@ def build_row(item: dict, en: dict, base_desc: str) -> dict:
     #   80字に収まらず、題材が語の途中で切れる (`... Frilled` で Lizard が消えた)。
     #   長いシリーズ名は C:Series に残し、タイトルには短く言い直した物を使う
     subject = (en.get("title_subject") or "").strip() or series
+    # 題材が長いと、後ろの `Bandai Gashapon` (よく検索される語) が入らなくなる。
+    # 6語まで。それ以上は C:Series が持っているので落としてよい
+    subject = " ".join(subject.split()[:6])
     title = build_title(subject, item["pieces"], maker, en.get("title_extra") or "")
     return {
         "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)": "Add",
@@ -425,8 +440,8 @@ def build_row(item: dict, en: dict, base_desc: str) -> dict:
         "ReturnProfileName": "customer1",
         "PaymentProfileName": "SALE",
         # ★JAN(13桁) は EAN-13 そのもの。持っているのに "Does not apply" で捨てていた。
-        #   eBay が商品を特定できると検索にも効く。取れない行だけ Does not apply
-        "Product:EAN": _jan(item) or "Does not apply",
+        #   eBay が商品を特定できると検索にも効く。取れない物は **項目ごと出さない**
+        "Product:EAN": _jan(item),
         "C:Set": "Complete Set",
         "C:Number of Pieces": item["pieces"],
         "C:Material": "PVC",
@@ -445,9 +460,10 @@ def build_row(item: dict, en: dict, base_desc: str) -> dict:
         #   共通ルールどおり「確認できないなら Does not apply」。空欄にすると
         #   eBay が勝手に Japan を補完するので、明示的に入れる
         "C:Country of Origin": "Does not apply",
-        # ★公式に品番があるなら入れる。無い物だけ Does not apply
-        #   (空欄にすると eBay が勝手に埋めるので、明示的に入れる)
-        "C:MPN": official_mpn(item) or "Does not apply",
+        # ★品番が取れた物にだけ入れる。取れないなら **項目ごと出さない**
+        #   (`Does not apply` を並べても買い手にも eBay にも何も伝わらない。
+        #    2026-08-21 ユーザー指示)
+        "C:MPN": official_mpn(item),
         # ★eBay の項目名は `Year Manufactured` (一番くじの出品はこれを使っている)。
         #   `Release Year` は存在しない項目名で、フィルタに当たらなかった
         "C:Year Manufactured": _release_year(off.get("released")),
@@ -465,6 +481,9 @@ def main() -> int:
     ap.add_argument("--no-review", action="store_true",
                     help="目視を飛ばす (★検証用。出品に使ってはいけない)")
     ap.add_argument("--no-browser", action="store_true", help="ブラウザを自動で開かない")
+    ap.add_argument("--reviewed-only", action="store_true",
+                    help="目視で「出品する」と答えた物だけ作る "
+                         "(TEST中はここから少しずつ出す。2026-08-20 ユーザー指示)")
     a = ap.parse_args()
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -490,6 +509,13 @@ def main() -> int:
     if before != len(items):
         print(f"  ⏭️ 台紙あり/なしの重複を寄せた: {before} → {len(items)}件")
     print(f"  ✅ 出せる: {len(items)}件")
+    if a.reviewed_only:
+        import gacha_review as R
+        led = R.load_ledger()
+        before = len(items)
+        items = [it for it in items
+                 if (led.get(it.get("url", "")) or {}).get("decision") == "list"]
+        print(f"  🔎 目視で「出品する」と答えた物だけ: {before} → {len(items)}件")
     if a.limit:
         items = items[:a.limit]
 
