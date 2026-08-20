@@ -852,6 +852,14 @@ def _search_one_piece_promo_by_number(
             #   語順が違う「スタンダードバトルパック」(= バトルパック) には発火しない。
             #   同じ #番号の 8パックバトル が別年に複数あれば同点 → 従来どおり fail-closed。
             ("8 PACKS BATTLE", "8パックバトル"),
+            # 2026-08-21 (cert145597172 / 155606219 MONKEY D. LUFFY #003 → ST13-003_7E01):
+            #   PSA Variety "7-ELEVEN CAMPAIGN"。official は「セブンイレブンタイアップ
+            #   キャンペーン オリジナルカード」。両側一致必須なので、同じ #003 の
+            #   P-003_p3 (ユースタス・キッド) には subject 名で、ST13-003_P (ドルトムント
+            #   collab promo) には official 'Promotion Card' 側で発火せず分離される。
+            #   ★これが無いと汎用 promo (_P score150) が勝ち、**別絵柄の ST13-003_P を
+            #     返す** = 誤出品側に倒れる (2026-08-20 に実測)。
+            ("7-ELEVEN", "セブンイレブン"),
         ):
             if en in hay and (jp in sn or jp in sn_upper):
                 edition_hit = True
