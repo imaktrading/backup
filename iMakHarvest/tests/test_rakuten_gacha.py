@@ -250,3 +250,14 @@ def test_maker_from_description_covers_shops_without_maker_in_title():
 def test_unknown_maker_in_description_is_still_blank():
     from gacha_maker import official_url
     assert official_url("どうぶつの森 全8種セット", "メーカー：日本オート玩具 ラインナップ") == ""
+
+
+def test_shipping_without_leading_date():
+    """「13:00までの注文で最短8/22お届け」= 頭の日付が出ない表示 (2026-08-20 実測).
+
+    日付必須にしていたため auc-yuyou が丸ごと no_shipping_info で落ちていた。
+    """
+    from scrapers.rakuten_item import extract_shipping, judge
+    t = "配送予定 13:00までの注文で最短8/22お届け ※お届け日は目安のため"
+    assert extract_shipping(t) == "8/22"
+    assert judge(t)["in_stock_now"] is True
