@@ -1550,6 +1550,7 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
     "BLASTOISE & SUICUNE":   "CLK",     # ポケカ クラシック カメックス&スイクンexデッキ (CLK-008=ラプラス実在). 他Classicデッキ(Charizard/Venusaur)と衝突しないdeck名で限定
     "PLASMA GALE":           "BW7-B",   # プラズマゲイル (BW7-B-035=ギラティナ 実在)
     "VENUSAUR & LUGIA":      "CLF",     # ポケカ クラシック フシギバナ&ルギアexデッキ (CLF-002=フシギソウ). JP は /032 (英語版 CLV /034 と別採番)
+    "CHARIZARD & HO-OH":     "CLL",     # ポケカ クラシック リザードン&ホウオウexデッキ (2026-08-21 に3デッキ96枚を一括投入). 他Classicデッキと衝突しないdeck名で限定
     "GG END":            "SM10a",  # ジージーエンド
     "DETECTIVE PIKACHU": "SMP2",   # 名探偵ピカチュウ (スペシャルパック)
     "ULTRA MOON":        "SM5M",   # ウルトラムーン
@@ -1617,6 +1618,12 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     #    新 starter set 追加時はここに 1 行追記 (誤マッチ防止に \b...\b で token 限定)。
     letter_only_codes = [
         (r"\bMBD\b", "MBD"),   # メガブレイブ Mega Diancie EX スターターセット
+        # 2026-08-21: PSA brand が "POKEMON JAPANESE CLL-TRADING CARD GAME CLASSIC ..." の
+        #   形で set_code を直接名乗る Classic 3デッキ。deck 名 (CHARIZARD & HO-OH 等) が
+        #   brand に無い綴りで来ても拾えるようにする。
+        (r"\bCLF\b", "CLF"),   # クラシック フシギバナ&ルギアexデッキ
+        (r"\bCLK\b", "CLK"),   # クラシック カメックス&スイクンexデッキ
+        (r"\bCLL\b", "CLL"),   # クラシック リザードン&ホウオウexデッキ
     ]
     for pattern, code in letter_only_codes:
         if re.search(pattern, b):
