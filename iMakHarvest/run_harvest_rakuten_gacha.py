@@ -34,7 +34,9 @@ from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
 
 DUMP_DIR = ROOT / "debug"
-SHOPS = ("jugem2020", "auc-toysanta", "auc-yuyou", "mirakikaku", "smltrading")
+SHOPS = ("auc-toysanta", "auc-yuyou", "mirakikaku", "smltrading")
+# ★jugem2020 は外した (2026-08-20)。 検索には出るのに商品ページが全部 404 で、
+#   開くと店トップへ転送される。 集めた32件は全滅だった。
 # kidsroom は 2026-08-20 に外した (どの検索でも0件)。
 # jugem2020 / smltrading は バンダイのコンプ品が多い店として追加。
 
@@ -70,6 +72,8 @@ def build_themes(args) -> list[tuple[str, str, int]]:
     **メーカー名で探していないので取りこぼす**。 実測でブシロード258件・バンダイ240件が
     テーマ4本には1件も出てこなかった。 メーカー名で引く方が素直。
     """
+    if args.keyword:
+        return [(args.keyword, args.keyword, args.quota or 100)]
     if args.maker:
         return [(args.maker, f"{args.maker} コンプリート", args.quota or 100)]
     return THEMES
@@ -89,8 +93,8 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
         # 1店で枠を食い切らないよう **店ごとに上限**を置く。
         # 2026-08-20: これが無いと auc-yuyou だけで枠が埋まり、
         # 後ろの店 (jugem2020 等) を一度も検索しないまま終わっていた
-        per_shop = max(1, int(cap / len(SHOPS)) + 1)
-        for shop in SHOPS:
+        per_shop = max(1, int(cap / (1 if args.shop else len(SHOPS))) + 1)
+        for shop in (args.shop,) if args.shop else SHOPS:
             if picked >= cap:
                 break
             picked_here = 0
@@ -154,6 +158,8 @@ def main(argv=None) -> int:
     ap.add_argument("--oversample", type=float, default=2.0,
                     help="枠の何倍まで候補を集めるか (配送予定で落ちる分の余裕)")
     ap.add_argument("--label", default="gacha", help="中間スプシ tab (= rakuten_<label>)")
+    ap.add_argument("--shop", default="", help="この店だけを見る (例 auc-toysanta)")
+    ap.add_argument("--keyword", default="", help="検索語を指定する (店独自の言い回し用)")
     ap.add_argument("--maker", default="",
                     help="メーカー名で狙い撃ちする (例 バンダイ)。 テーマ枠は使わない。"
                          " auc-yuyou はタイトルにメーカー名を書くので、"

@@ -176,6 +176,17 @@ def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | No
     except Exception:  # noqa: BLE001
         return None
     time.sleep(wait_sec)
+
+    # ★消えた商品は **店トップへ飛ばされる** (2026-08-20 実測: jugem2020 の32件が
+    #   検索には出るのに商品ページは 404 → `https://www.rakuten.co.jp/<shop>/` に転送)。
+    #   気づかずに店トップの文言を商品情報として拾っていた。 URL が変わっていたら捨てる。
+    try:
+        now = driver.current_url or ""
+    except Exception:  # noqa: BLE001
+        now = ""
+    if now and not now.startswith(url.split("?")[0].rstrip("/")):
+        return None
+
     text = _text_of(driver)
     if not text:
         return None

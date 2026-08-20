@@ -295,3 +295,16 @@ def test_build_row_puts_total_in_m_and_breakdown_in_h():
 def test_looks_soldout(title, out):
     from scrapers.rakuten_search import looks_soldout
     assert looks_soldout(title) is out
+
+
+def test_fetch_detail_rejects_redirect_to_shop_top():
+    """消えた商品は店トップへ飛ばされる。 その文言を商品情報として拾わない."""
+    from scrapers import rakuten_item
+
+    class _Dead:
+        current_url = "https://www.rakuten.co.jp/jugem2020/"
+        def get(self, url): pass
+        def find_element(self, *a): raise AssertionError("本文を読んではいけない")
+
+    assert rakuten_item.fetch_detail(_Dead(), "https://item.rakuten.co.jp/jugem2020/x1/",
+                                     wait_sec=0) is None
