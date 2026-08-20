@@ -261,3 +261,37 @@ def test_shipping_without_leading_date():
     t = "配送予定 13:00までの注文で最短8/22お届け ※お届け日は目安のため"
     assert extract_shipping(t) == "8/22"
     assert judge(t)["in_stock_now"] is True
+
+
+# --------------------------------------------------------------------------
+# 送料 (2026-08-20 user 指示: 送料無料縛りをやめて 価格+送料 で見る)
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("text,fee", [
+    ("配送情報 送料680円 宅配便[特定送料] 送料無料ライン対象外 6,500円以上で送料無料", 680),
+    ("配送情報 送料330円 追跡可能メール便[特定送料](ヤマト運輸) 送料無料ライン対象外", 330),
+    ("配送情報 送料無料 宅配便(佐川急便) 送料無料ライン対象", 0),
+    # 読めない = None。 「6,500円以上で送料無料」を送料と誤読しない
+    ("配送情報 追跡可能メール便 ※離島･一部地域は追加送料がかかる場合があります。", None),
+    ("在庫について", None),
+])
+def test_extract_shipping_fee(text, fee):
+    from scrapers.rakuten_item import extract_shipping_fee
+    assert extract_shipping_fee(text) == fee
+
+
+def test_build_row_puts_total_in_m_and_breakdown_in_h():
+    from sheet_writer_rakuten import COL_CURRENT_PRICE, COL_DESCRIPTION, build_row
+    row = build_row({"url": "https://item.rakuten.co.jp/auc-toysanta/x1/",
+                     "title": "テスト 全5種セット", "price_jpy": "2820",
+                     "shipping_fee": 680, "total_jpy": "3500", "description": "説明"})
+    assert row[COL_CURRENT_PRICE - 1] == "3500"          # M = 送料込み総額
+    assert "本体2820円 + 送料680円 = 3500円" in row[COL_DESCRIPTION - 1]
+
+
+@pytest.mark.parametrize("title,out", [
+    ("【品切中】【送料無料】【全部揃ってます!!】葬送のフリーレン [全25種セット]", True),
+    ("【送料無料】【全部揃ってます!!】カービィのエアライダー [全20種セット]", False),
+])
+def test_looks_soldout(title, out):
+    from scrapers.rakuten_search import looks_soldout
+    assert looks_soldout(title) is out

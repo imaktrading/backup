@@ -41,6 +41,11 @@ SHOP_IDS = {
     # ★kidsroom はどの検索でも0件 (実質死んでいる)。
     "jugem2020": 379420,
     "smltrading": 409614,
+    # 2026-08-20 追加 (user 指定 sid=243227)。 トイサンタ。
+    # 「全部揃ってます」で **8,990件** = 全部コンプ品。 説明にメーカー欄あり
+    # (8件中7件がバンダイ)。 ★食玩 (シールウエハース / カードソフトクッキー) が
+    # 大量に混ざるので おもちゃ語ゲートは外さないこと。 【品切中】表記も混ざる
+    "auc-toysanta": 243227,
 }
 
 _PAIR_RE = re.compile(
@@ -50,6 +55,8 @@ _COUNT_RE = re.compile(r"([0-9,]+)件")
 
 # 予約品を落とす語 (タイトルで分かる分。 最終判定は商品ページの配送予定で行う)
 PREORDER_RE = re.compile(r"予約|発売予定|入荷予定|再入荷|[0-9０-９]{1,2}月→")
+# 買えない物 (auc-toysanta は タイトルに 【品切中】 を入れる。 2026-08-20 実測)
+SOLDOUT_RE = re.compile(r"品切|売切|売り切れ|完売|在庫切れ")
 # コンプ品の目印 (3店とも「全N種セット」「コンプ」を必ず入れる)
 COMPLETE_RE = re.compile(r"全\s*[0-9０-９]{1,2}\s*種|コンプ")
 
@@ -114,6 +121,11 @@ def is_toy(title: str) -> bool:
 def looks_preorder(title: str) -> bool:
     """タイトルで分かる予約品か (安い一次フィルタ)."""
     return bool(PREORDER_RE.search(title or ""))
+
+
+def looks_soldout(title: str) -> bool:
+    """タイトルで分かる品切れか (auc-toysanta の 【品切中】 等)."""
+    return bool(SOLDOUT_RE.search(title or ""))
 
 
 def search_shop(shop: str, keyword: str, max_pages: int = 3,

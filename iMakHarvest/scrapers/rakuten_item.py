@@ -129,6 +129,34 @@ def extract_description(html: str) -> str:
     return txt[:1200]
 
 
+# 「配送情報」欄に出る送料。 実測 2026-08-20 (auc-toysanta):
+#   送料無料 → 「配送情報 送料無料 宅配便(佐川急便) 送料無料ライン対象」
+#   有料     → 「配送情報 送料680円 宅配便[特定送料] 送料無料ライン対象外 6,500円以上で送料無料」
+# ★「送料無料ライン対象外」「6,500円以上で送料無料」に引っかからないよう、
+#   **金額表記を先に見る**。 どちらも読めなければ None (= 分からない) を返す。
+_FEE_RE = re.compile(r"送料\s*([0-9][0-9,]*)\s*円")
+_FREE_RE = re.compile(r"^[\s　]*送料無料")
+
+
+def extract_shipping_fee(text: str) -> int | None:
+    """画面テキストから **その商品の送料 (円)** を返す. 読めなければ None.
+
+    仕入原価は「商品価格 + 送料」で見る (user 指示 2026-08-20)。
+    表示は既定の配送先のもの。 離島等は別途かかる。
+    """
+    t = text or ""
+    i = t.find("配送情報")
+    if i < 0:
+        return None
+    seg = t[i + len("配送情報"):i + 400]
+    m = _FEE_RE.search(seg)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    if _FREE_RE.search(seg):
+        return 0
+    return None
+
+
 def _text_of(driver) -> str:
     try:
         return driver.find_element("tag name", "body").text or ""
@@ -168,6 +196,11 @@ def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | No
     jan = extract_jan(html)
     if jan:
         desc = (desc + f" JAN: {jan}").strip()
+    fee = extract_shipping_fee(text)
+    total = ""
+    if price.isdigit() and fee is not None:
+        total = str(int(price) + fee)
     res.update({"url": url, "price_jpy": price, "title": title,
-                "image_urls": images[:8], "description": desc, "jan": jan})
+                "image_urls": images[:8], "description": desc, "jan": jan,
+                "shipping_fee": fee, "total_jpy": total})
     return res

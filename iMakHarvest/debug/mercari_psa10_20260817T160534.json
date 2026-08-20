@@ -1,0 +1,18 @@
+{
+  "candidates": [],
+  "collect_reject": {
+    "sold": 0,
+    "seller_rating": 1,
+    "no_identity": 0,
+    "fetch_fail": 0,
+    "no_image": 0,
+    "cert_unreadable": 1,
+    "vision_error": 0,
+    "already_claimed_url": 0,
+    "already_claimed_cert": 0
+  },
+  "vision_errors": [],
+  "by_keyword": {
+    "PSA10 OP13": 19
+  }
+}

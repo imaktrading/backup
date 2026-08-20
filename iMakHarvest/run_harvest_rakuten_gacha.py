@@ -34,7 +34,7 @@ from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
 
 DUMP_DIR = ROOT / "debug"
-SHOPS = ("auc-yuyou", "mirakikaku", "jugem2020", "smltrading")
+SHOPS = ("jugem2020", "auc-toysanta", "auc-yuyou", "mirakikaku", "smltrading")
 # kidsroom は 2026-08-20 に外した (どの検索でも0件)。
 # jugem2020 / smltrading は バンダイのコンプ品が多い店として追加。
 
@@ -85,13 +85,19 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
     seen: set[str] = set()
     for label, keyword, quota in build_themes(args):
         picked = 0
+        cap = quota * args.oversample
+        # 1店で枠を食い切らないよう **店ごとに上限**を置く。
+        # 2026-08-20: これが無いと auc-yuyou だけで枠が埋まり、
+        # 後ろの店 (jugem2020 等) を一度も検索しないまま終わっていた
+        per_shop = max(1, int(cap / len(SHOPS)) + 1)
         for shop in SHOPS:
-            if picked >= quota * args.oversample:
+            if picked >= cap:
                 break
+            picked_here = 0
             try:
                 rows = rakuten_search.search_shop(
                     shop, keyword, max_pages=args.max_pages,
-                    free_shipping=not args.include_paid_shipping,
+                    free_shipping=args.free_shipping_only,
                     progress=lambda m: _log(f"  収集 {m}"))
             except Exception as e:  # noqa: BLE001 - 1店が落ちても他店は続ける
                 _log(f"  ⚠️ {shop} '{keyword}' 検索失敗: {type(e).__name__}")
@@ -110,6 +116,10 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
                     continue
                 if rakuten_search.looks_preorder(r["title"]):
                     rej["preorder_title"] += 1
+                    continue
+                if rakuten_search.looks_soldout(r["title"]):
+                    # 【品切中】等がタイトルに入る店がある (auc-toysanta)
+                    rej["soldout_title"] = rej.get("soldout_title", 0) + 1
                     continue
                 if key in claimed_urls or r["url"] in claimed_urls:
                     rej["already_claimed"] += 1
@@ -130,7 +140,8 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
                 r["theme"] = label
                 out.append(r)
                 picked += 1
-                if picked >= quota * args.oversample:
+                picked_here += 1
+                if picked >= cap or picked_here >= per_shop:
                     break
         _log(f"テーマ '{label}': 候補 {picked} 件 (枠 {quota})")
     return out, rej
@@ -150,6 +161,8 @@ def main(argv=None) -> int:
     ap.add_argument("--sheet-every", type=int, default=10, help="何件ごとにスプシへ書くか")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--no-dedupe", action="store_true", help="本番との重複チェックをしない")
+    ap.add_argument("--free-shipping-only", action="store_true",
+                    help="送料無料の商品だけにする (既定は 送料込みの総額で扱う)")
     ap.add_argument("--include-paid-shipping", action="store_true",
                     help="送料有料の商品も対象にする (既定は送料無料のみ = 表示価格が総額)")
     ap.add_argument("--dry-run", action="store_true")
@@ -161,7 +174,18 @@ def main(argv=None) -> int:
         claimed = load_claimed_supply()["urls"]
         _log(f"本番で押さえ済の仕入元 URL: {len(claimed)} 件")
 
-    cands, rej = collect_candidates(args, claimed)
+    known: set = set()
+    if not args.dry_run:
+        try:
+            from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
+            from sheet_writer_rakuten import load_keys_all_tabs  # noqa: PLC0415
+            known = load_keys_all_tabs(open_seller_staging_sheet())
+            _log(f"中間スプシに既にある楽天商品: {len(known)} 件")
+        except Exception as e:  # noqa: BLE001
+            _log(f"⚠️ 既存キーを読めず: {type(e).__name__}")
+
+    # 既に集めた物は **詳細を見に行かない** (1件6秒が丸ごと無駄になる)
+    cands, rej = collect_candidates(args, claimed | known)
     _log(f"検索完了: 候補 {len(cands)} 件 / 落とした内訳={rej}")
     if not cands:
         _log("候補 0 件 → 終了")
@@ -178,25 +202,23 @@ def main(argv=None) -> int:
     quota_left = {label: quota for label, _, quota in build_themes(args)}
     detail_rej = {"preorder": 0, "no_shipping_info": 0, "fetch_fail": 0, "quota_full": 0,
                   "maker_ng": 0, "age_ng": 0}
-    known: set = set()
-    if not args.dry_run:
-        try:
-            from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
-            from sheet_writer_rakuten import load_keys_all_tabs  # noqa: PLC0415
-            known = load_keys_all_tabs(open_seller_staging_sheet())
-            _log(f"中間スプシに既にある楽天商品: {len(known)} 件")
-        except Exception as e:  # noqa: BLE001
-            _log(f"⚠️ 既存キーを読めず: {type(e).__name__}")
+    def _flush(rows: list[dict]) -> bool:
+        """書けたら True。 **書けなかったら False を返し、 呼出側は溜めたまま次に回す**。
 
-    def _flush(rows: list[dict]) -> None:
+        2026-08-20 修正: 以前は失敗しても呼出側が pending を捨てていたため、
+        1回の ConnectionError で **10件が黙って消えていた** (実測)。
+        取りこぼしを黙って落とすのは禁止 (グローバル規約「silent drop 禁止」)。
+        """
         if args.dry_run or not rows:
-            return
+            return True
         from sheet_writer_rakuten import append_items  # noqa: PLC0415
         try:
             res = append_items(rows, label=args.label, known_keys=known)
             _log(f"  [SHEET] {res}")
+            return True
         except Exception as e:  # noqa: BLE001 - 書込失敗で走行を殺さない
-            _log(f"  ⚠️ スプシ書込に失敗 ({type(e).__name__}) → 後でまとめて書く")
+            _log(f"  ⚠️ スプシ書込に失敗 ({type(e).__name__}) → 溜めたまま次に回す ({len(rows)}件)")
+            return False
 
     pending: list[dict] = []
     try:
@@ -212,9 +234,14 @@ def main(argv=None) -> int:
             if not detail["in_stock_now"]:
                 detail_rej[detail["reason"]] = detail_rej.get(detail["reason"], 0) + 1
                 continue
+            if detail.get("shipping_fee") is None or not detail.get("total_jpy"):
+                # 仕入原価 (商品価格 + 送料) が確定しない物は採らない (推測で足さない)
+                detail_rej["fee_unknown"] = detail_rej.get("fee_unknown", 0) + 1
+                continue
             item = dict(c)
             item.update({k: detail[k] for k in
-                         ("price_jpy", "image_urls", "description", "shipping")})
+                         ("price_jpy", "image_urls", "description", "shipping",
+                          "shipping_fee", "total_jpy")})
             item["title"] = detail["title"] or c["title"]
             if not is_allowed(item["title"], item["description"]):
                 # 商品説明の「メーカー：」まで見て、対象メーカーでなければ採らない
@@ -236,10 +263,10 @@ def main(argv=None) -> int:
             kept.append(item)
             pending.append(item)
             quota_left[c["theme"]] -= 1
-            _log(f"  即納 {len(kept)}件目 [{c['theme']}] ¥{item['price_jpy']} "
+            _log(f"  即納 {len(kept)}件目 [{c['theme']}] ¥{item['total_jpy']}"
+                 f"(本体{item['price_jpy']}+送料{item['shipping_fee']}) "
                  f"{item['shipping']} {item['title'][:34]}")
-            if len(pending) >= args.sheet_every:
-                _flush(pending)
+            if len(pending) >= args.sheet_every and _flush(pending):
                 pending = []
             _dump({"kept": kept, "failed_urls": failed, "detail_reject": detail_rej,
                    "search_reject": rej}, dump_path)
@@ -248,7 +275,11 @@ def main(argv=None) -> int:
                 break
             time.sleep(1.0)
     finally:
-        _flush(pending)
+        if not _flush(pending) and pending:
+            # 最後まで書けなかった分は **消さずに** ファイルへ落として、次回に回す
+            leftover = DUMP_DIR / f"rakuten_gacha_unwritten_{ts}.json"
+            _dump({"unwritten": pending}, leftover)
+            _log(f"  ⚠️ 書けなかった {len(pending)}件を {leftover.name} に退避 (要再投入)")
         _dump({"kept": kept, "failed_urls": failed, "detail_reject": detail_rej,
                "search_reject": rej}, dump_path)
         try:

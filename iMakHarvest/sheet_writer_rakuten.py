@@ -13,7 +13,7 @@
 | G | 写真URL |
 | H | 商品説明 (無ければ空) |
 | I | メーカー公式URL (判定できた時だけ。 `gacha_maker`) |
-| M | 現在価格(円) 数値のみ |
+| M | **仕入原価 = 商品価格 + 送料** (数値のみ) |
 | R | `カプセルトイ` |
 
 ★**N (仕入れ価格) と P (CTR) には書かない**。 本番 HIGH ではどちらも数式で、
@@ -62,6 +62,8 @@ def build_row(item: dict, column_count: int = DEFAULT_COLUMN_COUNT) -> list:
     """1 行を組み立てる (純関数). N と P は空のまま."""
     row = [""] * column_count
     price = str(item.get("price_jpy") or "").replace(",", "").strip()
+    # M列は **送料込みの総額**。 送料が読めなかった物はそもそも採らない (runner 側で落とす)
+    total = str(item.get("total_jpy") or "").replace(",", "").strip() or price
     images = item.get("image_urls") or []
     image_str = images if isinstance(images, str) else "|".join(str(u) for u in images if u)
 
@@ -70,10 +72,14 @@ def build_row(item: dict, column_count: int = DEFAULT_COLUMN_COUNT) -> list:
     row[COL_CONDITION - 1] = CONDITION
     row[COL_PRICE - 1] = price
     row[COL_IMAGES - 1] = image_str
-    row[COL_DESCRIPTION - 1] = str(item.get("description") or "")
+    desc = str(item.get("description") or "")
+    fee = item.get("shipping_fee")
+    if fee is not None and price:
+        desc = f"{desc} 仕入原価: 本体{price}円 + 送料{fee}円 = {total}円".strip()
+    row[COL_DESCRIPTION - 1] = desc
     row[COL_OFFICIAL_URL - 1] = official_url(item.get("title") or "",
                                              str(item.get("description") or ""))  # I: 判定できた時だけ
-    row[COL_CURRENT_PRICE - 1] = price          # M: 数値のみ
+    row[COL_CURRENT_PRICE - 1] = total          # M: 送料込みの総額 (数値のみ)
     row[COL_CATEGORY - 1] = CATEGORY            # R
     return row
 
