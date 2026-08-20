@@ -166,38 +166,102 @@ def is_banner(url: str) -> bool:
 
 
 def supply_sku(url: str) -> str:
-    """仕入元URL → SKU (既存出品と同じ規約: 仕入元の商品ID)。"""
+    """仕入元URL → SKU = **URL の商品ID部分だけ** (店名は入れない)。
+
+    メルカリ  https://jp.mercari.com/item/m35315305722      → m35315305722
+    楽天      https://item.rakuten.co.jp/auc-yuyou/g22062cs02/ → g22062cs02
+
+    ★2026-08-20 ユーザー確定。以前は楽天だけ `auc-yuyou-g22062cs02` と
+      **店名を頭に付けて**いた。他カテゴリ (PSA / 一番くじ) は商品IDだけなので
+      規約がガチャだけ違っていた。
+    """
     m = re.search(r"/item/(m\d+)", url or "")
     if m:
         return m.group(1)
-    m = re.search(r"item\.rakuten\.co\.jp/([^/]+)/([^/?#]+)", url or "")
-    return f"{m.group(1)}-{m.group(2)}" if m else ""
+    m = re.search(r"item\.rakuten\.co\.jp/[^/]+/([^/?#]+)", url or "")
+    return m.group(1) if m else ""
+
+
+def capsule_term(maker_en: str) -> str:
+    """メーカーに合ったカプセルトイの呼び方 (純関数)。
+
+    ★`Gashapon` は **バンダイの登録商標**。タカラトミーアーツの商品に付けると
+      他社の商標を使うことになる (逆に `ガチャ/ガチャガチャ` はタカラトミーの登録商標)。
+      2026-08-20 まで全77件が `Gashapon` 固定だった。
+
+    `Capsule Toy` はどのメーカーでも使える一般名詞なので必ず後ろに残す
+    (商標の語を使えない商品でも検索から漏れないように)。
+    """
+    m = (maker_en or "").lower()
+    if "bandai" in m:
+        return "Gashapon Capsule Toy"
+    if "takara" in m or "tomy" in m:
+        return "Gacha Capsule Toy"
+    return "Capsule Toy"
 
 
 def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = "") -> str:
-    """英語タイトル (80字以内)。既存出品と同じ形。
+    """英語タイトル (80字以内)。
 
-    "VIRUSWEETS Figure Collection Sweets Shop Full Set of 6 Gashapon NEW"
+    形: `<題材/シリーズ(英語)> <形態> Complete Set N Types <メーカー> Gashapon Japan`
+    例: `Isekai Neko Fantasy Cat Mini Figure Complete Set 5 Types Takara Tomy Gashapon`
 
-    ★2026-08-20: 55〜70字にしかならず推奨の70〜79字に届いていなかった。
-      公式説明から拾った語 (素材・形状・用途) を、入る分だけ後ろに足す。
+    ★2026-08-20 にユーザーが実際に売れている出品を提示して確定した形。
+      それまでは **メーカー名を先頭**に置いていて (`Takara Tomy A.R.T.S ...`)、
+      先頭20字を検索されない語が占領した結果、肝心の題材が途中で切れていた
+      (`... Figure Series Li` = Lizard が切れる / 2件が同じタイトルになる)。
+
+    決まり:
+      - 先頭は **買い手が検索する英語**。ローマ字のシリーズ名だけで埋めない
+      - メーカーは後ろ。`A.R.T.S` のような検索されない部分は落とす
+      - 80字を超える時に削るのは **後ろから** (題材は絶対に切らない)
     """
-    tail = "Full Set of %d Gashapon NEW" % pieces
-    head = " ".join(x for x in (maker_en, series_en) if x).strip()
-    t = ("%s %s" % (head, tail)).strip()
-    for w in (extra or "").split():
-        if w.lower() in t.lower():
-            continue
-        cand = "%s %s %s" % (head, w, tail)
-        if len(cand) <= 80:
-            head = "%s %s" % (head, w)
-            t = cand
-        else:
-            break
-    if len(t) <= 80:
-        return t
-    room = 80 - len(tail) - 1
-    return (head[:room].rstrip() + " " + tail).strip()
+    maker = re.sub(r"\s*A\.?R\.?T\.?S\.?\s*$", "", maker_en or "", flags=re.I).strip()
+    head = " ".join(x for x in (series_en, extra) if x).strip()
+    # 後ろから順に削る候補 (左ほど優先して残す)
+    term = capsule_term(maker_en)
+    tails = ["Complete Set %d Types %s %s Japan" % (pieces, maker, term),
+             "Complete Set %d Types %s %s" % (pieces, maker, term),
+             "Complete Set %d %s %s" % (pieces, maker, term),
+             # 字数が苦しい時、`Capsule Toy` より **メーカー名+商標語** を残す
+             # (`Bandai Gashapon` の方が検索される)
+             "Complete Set %d %s %s" % (pieces, maker, term.split()[0]),
+             "Complete Set %d %s" % (pieces, term),
+             "Complete Set %d Capsule Toy" % pieces]
+    seen, words = set(), []
+    for w in head.split():                       # 同じ語の重複を落とす
+        if w.lower() not in seen:
+            seen.add(w.lower())
+            words.append(w)
+    for tail in tails:
+        tail = re.sub(r"\s+", " ", tail).strip()
+        t = ("%s %s" % (" ".join(words), tail)).strip()
+        if len(t) <= 80:
+            return t
+    # ここまで来たら題材が長すぎる。**後ろ**を残して題材側を語単位で削る
+    tail = re.sub(r"\s+", " ", tails[-1]).strip()
+    while words and len("%s %s" % (" ".join(words), tail)) > 80:
+        words.pop()
+    return ("%s %s" % (" ".join(words), tail)).strip()
+
+
+def official_mpn(item: dict) -> str:
+    """公式ページのURLに入っているメーカー品番 (純関数)。無ければ空。
+
+    タカラトミーアーツ: `...item.html?n=Y095122` → `Y095122`
+    バンダイ (gashapon.jp): 公式ページに品番の記載が無い → 空
+      (画像URLの数字は商品ごとに複数あり品番ではない。**推測で入れない**)
+    """
+    u = item.get("official_url") or ((item.get("official") or {}).get("url") or "")
+    m = re.search(r"[?&]n=([A-Za-z]\d{4,})", u)
+    return m.group(1) if m else ""
+
+
+def _jan(item: dict) -> str:
+    """商品の JAN (EAN-13)。H列の商品説明末尾に入っている。無ければ空。"""
+    import gacha_official as _o
+    j = _o.jan_from_text(item.get("desc_jp", "") or "")
+    return j if len(j) == 13 else ""
 
 
 def _release_year(released: str) -> str:
@@ -337,7 +401,11 @@ def build_row(item: dict, en: dict, base_desc: str) -> dict:
     off = item.get("official") or {}
     series = en.get("series_en") or ""
     maker = en.get("maker_en") or ""
-    title = build_title(series, item["pieces"], maker, en.get("title_extra") or "")
+    # ★タイトルの先頭は **短い英語の題材**。ローマ字のシリーズ名をそのまま置くと
+    #   80字に収まらず、題材が語の途中で切れる (`... Frilled` で Lizard が消えた)。
+    #   長いシリーズ名は C:Series に残し、タイトルには短く言い直した物を使う
+    subject = (en.get("title_subject") or "").strip() or series
+    title = build_title(subject, item["pieces"], maker, en.get("title_extra") or "")
     return {
         "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)": "Add",
         "*Category": EBAY_CATEGORY,
@@ -356,7 +424,9 @@ def build_row(item: dict, en: dict, base_desc: str) -> dict:
         "ShippingProfileName": get_shipping_policy_name(price, PROFIT_CATEGORY),
         "ReturnProfileName": "customer1",
         "PaymentProfileName": "SALE",
-        "Product:UPC": "Does not apply",
+        # ★JAN(13桁) は EAN-13 そのもの。持っているのに "Does not apply" で捨てていた。
+        #   eBay が商品を特定できると検索にも効く。取れない行だけ Does not apply
+        "Product:EAN": _jan(item) or "Does not apply",
         "C:Set": "Complete Set",
         "C:Number of Pieces": item["pieces"],
         "C:Material": "PVC",
@@ -370,9 +440,18 @@ def build_row(item: dict, en: dict, base_desc: str) -> dict:
         "C:Theme": en.get("theme") or "",
         "C:Genre": en.get("genre") or "",
         "C:Original/Licensed Reproduction": "Original",
-        "C:Country of Origin": "Japan",
-        "C:MPN": "Does not apply",
-        "C:Release Year": _release_year(off.get("released")),
+        # ★原産国は公式に記載が無い (バンダイ gashapon.jp / タカラトミーアーツ とも)。
+        #   カプセルトイは中国・ベトナム製造が普通で、Japan は推測でしかない。
+        #   共通ルールどおり「確認できないなら Does not apply」。空欄にすると
+        #   eBay が勝手に Japan を補完するので、明示的に入れる
+        "C:Country of Origin": "Does not apply",
+        # ★公式に品番があるなら入れる。無い物だけ Does not apply
+        #   (空欄にすると eBay が勝手に埋めるので、明示的に入れる)
+        "C:MPN": official_mpn(item) or "Does not apply",
+        # ★eBay の項目名は `Year Manufactured` (一番くじの出品はこれを使っている)。
+        #   `Release Year` は存在しない項目名で、フィルタに当たらなかった
+        "C:Year Manufactured": _release_year(off.get("released")),
+        "C:Color": "Multicolor",
         "StoreCategoryID": STORE_CATEGORY,
     }
 

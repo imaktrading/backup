@@ -114,16 +114,26 @@ class TestShopBannersAreNotProductPhotos:
 
 
 class TestTitleAndDedup:
-    def test_title_matches_the_existing_listing_shape(self):
-        assert (G.build_title("VIRUSWEETS Figure Collection Sweets Shop", 6)
-                == "VIRUSWEETS Figure Collection Sweets Shop Full Set of 6 Gashapon NEW")
+    # ★2026-08-20 にタイトルの形を入れ替えた (ユーザーが実際の出品を提示して確定)。
+    #   旧: `<メーカー> <シリーズ> Full Set of N Gashapon NEW`
+    #       → 先頭20字を検索されない語が占領し、題材が途中で切れていた
+    #   新: `<題材(英語)> <形態> Complete Set N <メーカー> <カプセルの呼び方>`
 
-    def test_maker_goes_first(self):
-        assert G.build_title("Animal Stool 2", 5, "D.I.S").startswith("D.I.S Animal Stool 2")
+    def test_題材が先頭_メーカーは後ろ(self):
+        t = G.build_title("VIRUSWEETS Sweets Shop", 6, "Bandai", "Miniature Figure")
+        assert t.startswith("VIRUSWEETS Sweets Shop")
+        assert "Complete Set 6" in t and t.rstrip().endswith(("Gashapon", "Capsule Toy"))
+
+    def test_商標はメーカーで使い分ける(self):
+        """`Gashapon` はバンダイの登録商標。他社商品に付けない."""
+        assert "Gashapon" in G.build_title("X Figure", 5, "Bandai")
+        t = G.build_title("X Figure", 5, "Takara Tomy A.R.T.S")
+        assert "Gashapon" not in t and "Gacha" in t
+        assert "Capsule Toy" in G.build_title("X Figure", 5, "Kitan Club")
 
     def test_title_stays_within_80(self):
         t = G.build_title("A" * 120, 5, "B" * 20)
-        assert len(t) <= 80 and t.endswith("Full Set of 5 Gashapon NEW")
+        assert len(t) <= 80 and "Complete Set 5" in t
 
     def test_board_variants_collapse_to_one(self):
         """同じ商品の台紙あり/なしは1本に寄せる (同じ絵柄で2出品しない)."""
@@ -141,7 +151,7 @@ class TestTitleAndDedup:
 class TestSku:
     def test_rakuten_url(self):
         assert G.supply_sku("https://item.rakuten.co.jp/auc-yuyou/g260736s02t/") \
-            == "auc-yuyou-g260736s02t"
+            == "g260736s02t"     # ★店名は入れない (2026-08-20 ユーザー確定)
 
     def test_mercari_url_keeps_the_existing_convention(self):
         assert G.supply_sku("https://jp.mercari.com/item/m86586660368") == "m86586660368"

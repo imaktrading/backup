@@ -98,6 +98,28 @@ def schedule_time_of(row):
     return v if v.endswith("Z") else v + "Z"
 
 
+def product_listing_details(row):
+    """CSV の `Product:EAN` / `Product:UPC` → <ProductListingDetails> (純関数)。
+
+    ★2026-08-20: CSV に書いていても **eBay には送っていなかった** (この関数が無く、
+      build_item_xml が写していなかった)。ガチャは JAN(=EAN-13) を持っているのに
+      捨てていた。バーコードが付くと eBay が商品を特定でき、検索にも効く。
+
+    `IncludeeBayProductDetails` を false にするのは、eBay のカタログが
+    タイトルや画像を**上書きしてくるのを防ぐ**ため (値の決定は生成側の責任)。
+    """
+    out = []
+    for col, tag in (("Product:EAN", "EAN"), ("Product:UPC", "UPC")):
+        v = (row.get(col) or "").strip()
+        if v:
+            out.append(f"<{tag}>{_esc(v)}</{tag}>")
+    if not out:
+        return ""
+    return ("<ProductListingDetails>" + "".join(out)
+            + "<IncludeeBayProductDetails>false</IncludeeBayProductDetails>"
+            + "</ProductListingDetails>")
+
+
 def build_item_xml(row, schedule_time=""):
     """CSV 1行 → AddFixedPriceItem の <Item> XML (純関数)。
 
@@ -117,6 +139,7 @@ def build_item_xml(row, schedule_time=""):
         for n, v, free in condition_descriptors(row))
     cds = f"<ConditionDescriptors>{cds}</ConditionDescriptors>" if cds else ""
     sched = f"<ScheduleTime>{_esc(schedule_time)}</ScheduleTime>" if schedule_time else ""
+    pld = product_listing_details(row)
     return (
         "<Item>"
         f"<Title>{_esc(row.get('*Title'))}</Title>"
@@ -143,6 +166,7 @@ def build_item_xml(row, schedule_time=""):
         f"<PictureDetails>{pics}</PictureDetails>"
         f"<ItemSpecifics>{specs}</ItemSpecifics>"
         f"{cds}"
+        f"{pld}"
         f"{sched}"
         "</Item>"
     )

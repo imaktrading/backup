@@ -28,10 +28,14 @@ _RULES = """- series_en: シリーズ名 (公式商品名の英語表記。公�
   **アニメ作品でない物に Anime & Manga を付けない**
 - genre: eBay の Genre。Animation / Collectible / Novelty から実態に合う物
 - title_extra: eBay タイトルに足すと検索に効く英単語を2〜4語 (素材・形状・用途。
-  例 Miniature Charm Keychain Food)。シリーズ名の繰り返しは不可"""
+  例 Miniature Charm Keychain Food)。シリーズ名の繰り返しは不可
+- title_subject: **タイトルの先頭に置く英語 2〜5語**。「これは何か」が一目で分かる語にする。
+  ローマ字のシリーズ名をそのまま入れてはいけない (買い手は読めない)。
+  例 `Asoberu Seibutsu Figure Series Lizard Kingdom Frilled Lizard` → `Frilled Lizard Reptile`
+  作品物なら作品名+キャラ名 (例 `Jujutsu Kaisen Gojo Satoru`)。**35字以内**"""
 
 FIELDS = ("series_en", "maker_en", "character_en", "franchise_en",
-          "theme", "genre", "title_extra")
+          "theme", "genre", "title_extra", "title_subject")
 
 
 def build_prompt(items: list) -> str:
@@ -57,7 +61,7 @@ def build_prompt(items: list) -> str:
         + "\n\n".join(blocks) + "\n\n"
         'JSON配列だけを返してください: '
         '[{"n":1,"series_en":"","maker_en":"","character_en":"","franchise_en":"",'
-        '"theme":"","genre":"","title_extra":""}]')
+        '"theme":"","genre":"","title_extra":"","title_subject":""}]')
 
 
 def parse_reply(text: str, items: list) -> dict:
