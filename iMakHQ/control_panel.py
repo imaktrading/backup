@@ -1530,6 +1530,45 @@ def _read_pending_tasks():
     return len(rows), body
 
 
+
+_NIGHTLY_TASK = r"\iMakHQ_HojuSearch_2330"
+_NIGHTLY_CACHE = {}
+
+
+def nightly_search_state(task=_NIGHTLY_TASK):
+    """補URL夜間検索の定期タスクの状態 (1セッション1回だけ見る)。
+
+    戻り: {"ok": bool, "at": "23:30", "why": 理由}
+    ★止まっている時に「自動で走ります」と出すと、誰も押さないまま止まり続ける。
+      状態を見てから文言を決める (ラベルに嘘を書かない)。
+    """
+    if _NIGHTLY_CACHE:
+        return _NIGHTLY_CACHE
+    out = {"ok": False, "at": "23:30", "why": "確認できず"}
+    try:
+        import subprocess
+        r = subprocess.run(["schtasks", "/query", "/tn", task, "/fo", "csv"],
+                           capture_output=True, timeout=15)
+        txt = r.stdout.decode("cp932", errors="replace")
+        if r.returncode != 0:
+            out["why"] = "タスクがありません"
+        else:
+            line = [x for x in txt.splitlines() if task.lstrip("\\") in x]
+            cells = line[0].split('","') if line else []
+            state = cells[2].strip('"') if len(cells) > 2 else ""
+            nxt = cells[1].strip('"') if len(cells) > 1 else ""
+            if "無効" in state or "Disabled" in state:
+                out["why"] = "無効になっています"
+            else:
+                out["ok"] = True
+                if " " in nxt:
+                    out["at"] = nxt.split(" ")[1][:5]
+    except Exception as e:                                    # noqa: BLE001
+        out["why"] = "%s" % type(e).__name__
+    _NIGHTLY_CACHE.update(out)
+    return out
+
+
 class TasksDialog(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -2962,7 +3001,15 @@ class ListingPanel:
             #   10倍ずれる数字はラベルとして意味がない、というユーザー指摘。
             #   検索側も同じで、「未探索10件」の8件は card番号が無く**検索できない**。
             s, cf = w["search"], w["confirm"]
-            s_txt = "\n検索できる %s件 (補0本 %s件のうち)" % (s["can"], tot)
+            # ★2026-08-21: 件数だけ出すと「押さないといけないのか」と思わせる (ユーザー指摘)。
+            #   slice2 は **毎晩23:30 に自動で走る**ので、押す必要は無い。
+            #   ただし自動が止まっている時は押す必要があるので、その時だけそう出す。
+            nightly = nightly_search_state()
+            if nightly["ok"]:
+                s_txt = "\n夜間%sに自動 (押す必要なし)\n今夜の対象 %s件" % (nightly["at"], s["can"])
+            else:
+                s_txt = "\n⚠️ 夜間自動が止まっています (%s)\n押して検索できる %s件" % (
+                    nightly["why"], s["can"])
             if s["no_cardno"]:
                 s_txt += "\n※探索不能 %s件 (番号なし)" % s["no_cardno"]
             c_txt = "\n目視できる %s件 (補0本 %s件のうち)" % (cf["ready"], tot)
