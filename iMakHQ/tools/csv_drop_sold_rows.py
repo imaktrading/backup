@@ -73,8 +73,16 @@ def _is_stale(checked, today, days=STALE_DAYS):
     return (today - d).days > days
 
 
-def plan(csv_rows, header, index, today):
-    """(pure) CSV行 → (残す行, 落とす[(label,url)], 古い[(label,日付)], 照合不能[label])。"""
+def plan(csv_rows, header, index, today, live_ok=True):
+    """(pure) CSV行 → (残す行, 落とす[(label,url,理由)], 古い[(label,日付)], 照合不能[label])。
+
+    ★2026-08-20: `live_ok=False` (= 入稿直前の在庫確認that が動かなかった) の時、
+      巡回結果まで古い行は **落とす**。
+
+      それまでは「出すが注意」と1行出して **そのまま出品していた**。確認できていない物を
+      出すのは fail-OPEN そのもので、仕入れられなければキャンセル → Defect Rate に直結する。
+      直前確認が動いていれば従来どおり (古くても実在庫で上書きされるので落とさない)。
+    """
     try:
         li = header.index("CustomLabel")
     except ValueError:
@@ -88,9 +96,14 @@ def plan(csv_rows, header, index, today):
             keep.append(row)
             continue
         if info["sold"]:
-            dropped.append((label, info["url"]))
+            dropped.append((label, info["url"], "仕入元が売り切れ"))
             continue
         if _is_stale(info["checked"], today):
+            if not live_ok:
+                dropped.append((label, info["url"],
+                                "直前の在庫確認が動かず、巡回も古い (%s)"
+                                % (info["checked"] or "記録なし")))
+                continue
             stale.append((label, info["checked"] or "(記録なし)"))
         keep.append(row)
     return keep, dropped, stale, unknown
@@ -183,6 +196,7 @@ def main():
     index = supply_index(sheet_io._product_ws().get_all_values())
 
     # ★入稿直前の実在庫で index を上書き (シートの巡回結果は1日古いことがある)
+    live_ok = True                    # 直前の在庫確認が動いたか (動かなければ古い行を落とす)
     if use_live:
         try:
             li = header.index("CustomLabel")
@@ -196,6 +210,7 @@ def main():
                 urls.append(info["url"])
                 by_url.setdefault(info["url"], []).append(info)
         live = live_stock(sorted(set(urls)))
+        live_ok = bool(live)
         n_live = n_sold = n_unk = 0
         for url, st in live.items():
             for info in by_url.get(url, []):
@@ -212,12 +227,13 @@ def main():
         if live:
             print(f"  🔎 入稿直前の在庫確認: 在庫あり {n_live} / 売切 {n_sold} / 判定不能 {n_unk}")
 
-    keep, dropped, stale, unknown = plan(body, header, index, datetime.date.today())
+    keep, dropped, stale, unknown = plan(body, header, index, datetime.date.today(),
+                                         live_ok=live_ok)
 
     print(f"=== 売り切れ行の除外 [{'実書込' if do_write else 'dry-run'}] {os.path.basename(path)} ===")
     print(f"  対象 {len(body)}行 → 残す {len(keep)} / 落とす {len(dropped)}")
-    for label, url in dropped:
-        print(f"  🚫 {label} 仕入元が売り切れ → 出品しない  {url}")
+    for label, url, why in dropped:
+        print(f"  🚫 {label} {why} → 出品しない  {url}")
     for label, checked in stale:
         print(f"  ⚠️ {label} 在庫の確認が古い ({checked}) → 出すが注意")
     for label in unknown:

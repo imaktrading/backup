@@ -130,3 +130,45 @@ def test_判定不能は上書きしない():
     body = src[i:src.index("keep, dropped, stale, unknown = plan(", i)]
     assert 'st == "sold"' in body and 'st == "in_stock"' in body
     assert "unknown は触らない" in body
+
+
+# ── 直前の在庫確認が動かなかった時 (2026-08-20 追記) ────────────────────
+#
+# ★実機で確認した事実: 監視くんの在庫チェックCLI は 2件のURLに対して 240秒 かけて
+#   **出力ゼロ・結果ファイル無し** で終わる (orphan Chrome を掃除しても同じ)。
+#   つまり入稿直前の在庫確認は **今まったく効いていない**。
+#
+#   それ自体は監視くん側の修正だが、HQ 側の問題は
+#   「確認できなかった時に、古い巡回結果のまま出品していた」こと。
+#   確認できていない物を出して仕入れられなければキャンセル → Defect Rate。
+
+def test_直前確認が動かず巡回も古いなら落とす():
+    sheet = _sheet([("https://jp.mercari.com/item/m111", "", "", "999", "2026-08-01")])
+    keep, dropped, stale, _u = plan(_csv(["PSA10-999"]), HEADER,
+                                    supply_index(sheet), TODAY, live_ok=False)
+    assert keep == [] and len(dropped) == 1
+    assert "直前の在庫確認が動かず" in dropped[0][2]
+    assert stale == []                      # 警告で済ませず、落とした
+
+
+def test_直前確認が動いていれば古くても落とさない():
+    """実在庫で上書きされているので、巡回の日付が古いこと自体は問題にしない."""
+    sheet = _sheet([("https://jp.mercari.com/item/m111", "", "", "999", "2026-08-01")])
+    keep, dropped, stale, _u = plan(_csv(["PSA10-999"]), HEADER,
+                                    supply_index(sheet), TODAY, live_ok=True)
+    assert len(keep) == 1 and dropped == [] and len(stale) == 1
+
+
+def test_確認が動かなくても巡回が新しければ出す():
+    """出品を止めないため。3日以内の巡回結果は使える."""
+    sheet = _sheet([("https://jp.mercari.com/item/m111", "", "", "999", TODAY.strftime("%Y-%m-%d"))])
+    keep, dropped, _s, _u = plan(_csv(["PSA10-999"]), HEADER,
+                                 supply_index(sheet), TODAY, live_ok=False)
+    assert len(keep) == 1 and dropped == []
+
+
+def test_落とした理由が必ず付く():
+    """メールの内訳が『引き算』にならないよう、落ちた行は理由付きで返す."""
+    sheet = _sheet([("https://jp.mercari.com/item/m111", "", "○", "999", "2026-08-17")])
+    _k, dropped, _s, _u = plan(_csv(["PSA10-999"]), HEADER, supply_index(sheet), TODAY)
+    assert dropped[0][2] == "仕入元が売り切れ"
