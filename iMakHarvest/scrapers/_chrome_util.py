@@ -108,3 +108,31 @@ def hide_browser_window(driver) -> bool:
     except Exception:  # noqa: BLE001
         return False
     return bool(found)
+
+
+# ---------------------------------------------------------------------------
+# 走行開始時の掃除 (2026-08-20 制定)
+# ---------------------------------------------------------------------------
+# 前の走行が異常終了すると chrome が profile を掴んだまま残り、 次の driver 起動が
+# `SessionNotCreatedException` / `NoSuchDriverException` で落ちる (実測 2026-08-20:
+# 残留15プロセス → 候補90件が全部 fetch_fail)。 **自分の profile を使っている
+# chrome だけ**を落とす (ユーザーの通常ブラウザは触らない)。
+def kill_chrome_for_profile(profile_dir: str) -> int:
+    """`--user-data-dir` が profile_dir の chrome を落として、 落とした数を返す."""
+    if os.name != "nt" or not profile_dir:
+        return 0
+    import subprocess  # noqa: PLC0415
+
+    key = os.path.basename(os.path.normpath(profile_dir))
+    ps = (
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{key}*' }}; "
+        "$p | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }; "
+        "($p | Measure-Object).Count"
+    )
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                             capture_output=True, text=True, timeout=60)
+        return int((out.stdout or "0").strip().splitlines()[-1] or 0)
+    except Exception:  # noqa: BLE001 - 掃除に失敗しても走行は続ける
+        return 0

@@ -159,7 +159,8 @@ def main(argv=None) -> int:
                          " auc-yuyou はタイトルにメーカー名を書くので、"
                          " **タイトルでそのメーカーと分かる物だけ**を候補にする")
     ap.add_argument("--quota", type=int, default=0, help="--maker 時に集める上限件数")
-    ap.add_argument("--sheet-every", type=int, default=10, help="何件ごとにスプシへ書くか")
+    ap.add_argument("--sheet-every", type=int, default=5,
+                    help="何件ごとにスプシへ書くか (こけた時に失う分を小さくする)")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--no-dedupe", action="store_true", help="本番との重複チェックをしない")
     ap.add_argument("--free-shipping-only", action="store_true",
@@ -197,6 +198,11 @@ def main(argv=None) -> int:
 
     # ④ 配送予定で即納だけ残す (ここだけブラウザ)
     from scrapers import mercari_seller as MS  # noqa: PLC0415  (匿名ドライバを流用)
+    from scrapers._chrome_util import kill_chrome_for_profile  # noqa: PLC0415
+    # 前回の残骸が profile を掴んでいると driver が起動できない (実測: 候補90件が全滅)
+    killed = kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+    if killed:
+        _log(f"前回の残留 chrome を {killed} 個 片付けました")
     driver = MS.create_anonymous_driver(headless=args.headless)
     kept: list[dict] = []
     failed: list[str] = []
@@ -222,6 +228,8 @@ def main(argv=None) -> int:
             return False
 
     pending: list[dict] = []
+    consecutive_fail = 0     # ドライバが死ぬと全件 fetch_fail になるので見張る
+    restarts = 0
     try:
         for i, c in enumerate(cands, 1):
             if quota_left.get(c["theme"], 0) <= 0:
@@ -231,7 +239,30 @@ def main(argv=None) -> int:
             if detail is None:
                 detail_rej["fetch_fail"] += 1
                 failed.append(c["url"])
+                consecutive_fail += 1
+                # ★連続で失敗する = ドライバが死んでいる。 実測 2026-08-20 では
+                #   これに気づかず 90件を空振りし続けて走行が終わっていた。
+                #   **溜めた分を先に保存してから** 再起動を試す。
+                if consecutive_fail >= 5:
+                    if pending and _flush(pending):
+                        pending = []
+                    if restarts < 2:
+                        restarts += 1
+                        _log(f"  ⚠️ 連続 {consecutive_fail} 件失敗 → ドライバを再起動 "
+                             f"({restarts}回目)")
+                        try:
+                            driver.quit()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        kill_chrome_for_profile(MS.CHROME_PROFILE_DIR_ANON)
+                        driver = MS.create_anonymous_driver(headless=args.headless)
+                        consecutive_fail = 0
+                    else:
+                        _log("  ⚠️ 再起動しても直らないので中断します "
+                             f"(ここまでの {len(kept)}件は保存済)")
+                        break
                 continue
+            consecutive_fail = 0
             if not detail["in_stock_now"]:
                 detail_rej[detail["reason"]] = detail_rej.get(detail["reason"], 0) + 1
                 continue
