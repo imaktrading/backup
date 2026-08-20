@@ -1,0 +1,20 @@
+{
+  "kept": [],
+  "failed_urls": [],
+  "detail_reject": {
+    "preorder": 0,
+    "no_shipping_info": 50,
+    "fetch_fail": 0,
+    "quota_full": 0,
+    "maker_ng": 0,
+    "age_ng": 0
+  },
+  "search_reject": {
+    "not_complete": 0,
+    "not_toy": 40,
+    "preorder_title": 0,
+    "already_claimed": 0,
+    "dup": 0,
+    "maker_ng": 0
+  }
+}

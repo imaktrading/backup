@@ -308,3 +308,14 @@ def test_fetch_detail_rejects_redirect_to_shop_top():
 
     assert rakuten_item.fetch_detail(_Dead(), "https://item.rakuten.co.jp/jugem2020/x1/",
                                      wait_sec=0) is None
+
+
+@pytest.mark.parametrize("text,ok", [
+    # auc-toysanta の2形式 (2026-08-21 実測)
+    ("配送予定 即納｜営業日14時までのご注文で当日出荷 配送情報 送料330円", True),
+    ("配送予定 14:00までの注文で最短8/22(翌日)お届け ※お届け日は目安", True),
+    ("配送情報 送料680円 ※離島", False),
+])
+def test_shipping_formats_of_toysanta(text, ok):
+    from scrapers.rakuten_item import judge
+    assert judge(text)["in_stock_now"] is ok
