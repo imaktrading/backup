@@ -70,15 +70,29 @@ TOY_RE = re.compile(
 REAL_FOOD_RE = re.compile(r"賞味期限|内容量|詰め合わせ|お徳用|業務用|生菓子|食品")
 
 
-def fetch(url: str, timeout: int = 30) -> str:
-    """HTTP GET (楽天は User-Agent 等が無いと 503 を返す)."""
+def fetch(url: str, timeout: int = 30, tries: int = 3) -> str:
+    """HTTP GET (楽天は User-Agent 等が無いと 503 を返す).
+
+    2026-08-20: 名前解決が単発で落ちることがあり (`URLError: getaddrinfo failed`)、
+    **1回失敗しただけで その店の検索が丸ごと 0件**になっていた
+    (実測: auc-toysanta の走行が候補0件で終了)。 数回リトライする。
+    """
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     })
-    with urllib.request.urlopen(req, timeout=timeout) as res:
-        raw = res.read()
+    last: Exception | None = None
+    for n in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as res:
+                raw = res.read()
+            break
+        except Exception as e:  # noqa: BLE001 - 一時的な失敗は待って引き直す
+            last = e
+            time.sleep(1.5 * (n + 1))
+    else:
+        raise last if last else RuntimeError("fetch failed")
     for enc in ("utf-8", "euc_jp", "cp932"):
         try:
             return raw.decode(enc)
