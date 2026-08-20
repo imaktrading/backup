@@ -126,10 +126,11 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
                     continue
                 maker = resolve_maker(r["title"])
                 if args.maker:
-                    # 狙い撃ちモード: タイトルで **そのメーカーと分かる物だけ**。
-                    # (メーカー名を書かない店は検索語を無視して全件返すため、
-                    #  ここを緩めると詳細取得が数百件に膨らむ)
-                    if maker != args.maker:
+                    # 狙い撃ちモード: タイトルで **別のメーカーと分かる物**だけ落とす。
+                    # タイトルにメーカーを書かない店 (mirakikaku / auc-toysanta) は
+                    # 商品説明の「メーカー：」で決まるので、詳細まで持っていく。
+                    # (店ごとの上限があるので詳細取得が膨らみすぎることはない)
+                    if maker and maker != args.maker:
                         rej["maker_ng"] += 1
                         continue
                 elif maker and maker not in ALLOWED_MAKERS:
