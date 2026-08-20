@@ -84,9 +84,11 @@ def test_visual_confirm_paths_are_the_only_writers():
     - `ichibankuji_restock.py`… 一番くじ 補URL特定 (目視UI。夜間cronは候補を貯めるだけ)
     - `dup_guard.py`          … 削除方向のみ (共有URLを外す = 供給が減るだけ・安全)
     - `hoju_url_from_dupes.py`… cert/KEY で特定済みの実在個体を同KEYに紐づけるだけ
+    - `kuji_hoju_fill.py`     … 一番くじ 補URL (目視UI。候補を写真・価格付きで並べて人が選ぶ。
+                                2026-08-20 追加。検索は文字列一致なので **目視が唯一の担保**)
     """
     allowed = {"psa_hoju_fill.py", "ichibankuji_restock.py",
-               "dup_guard.py", "hoju_url_from_dupes.py",
+               "dup_guard.py", "hoju_url_from_dupes.py", "kuji_hoju_fill.py",
                "sheet_io.py",                 # 定義そのもの (書き手ではない)
                "ichibankuji_restock_poc.py"}  # POC。本番フローから呼ばれない
     offenders = {}

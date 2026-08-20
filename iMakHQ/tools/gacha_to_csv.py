@@ -116,7 +116,7 @@ def maker_jp(title: str) -> str:
     return "" if w in _NOISE else w
 
 
-def parse_row(row: list) -> dict | None:
+def parse_row(row: list, row_no: int = 0) -> dict | None:
     """シート1行 → 中間表現。出せない行は None。
 
     row は PSA10 と同じ列並び (A=0 / C=2 / E=4 / F=5 / G=6 / M=12 / R=17)。
@@ -142,9 +142,15 @@ def parse_row(row: list) -> dict | None:
     # ★2026-08-20 user 指示: G列は **そのまま全部** 目視画面に出す。
     #   どれが商品写真かは人が見て選ぶ (こちらで間引くと、隠れて見えなくなる)。
     pics = [p for p in g(6).split("|") if p.startswith("http")]
-    return {"url": url, "title_jp": strip_shop_suffix(title), "pieces": n,
+    # H列 = 商品説明 + JAN + 対象年齢 (Harvest が公式から取れた分だけ書く)。
+    # I列 = メーカー公式URL。どちらも 2026-08-20 の入れ替えで入った。
+    desc = g(7)
+    m = re.search(r"対象年齢[:：]?\s*([^\s/、]+)", desc)
+    return {"row": row_no, "url": url, "title_jp": strip_shop_suffix(title), "pieces": n,
             "with_board": has_display_board(title), "series_jp": series_jp(title),
-            "maker_jp": maker_jp(title), "cost_jpy": int(cost), "pics": pics}
+            "maker_jp": maker_jp(title), "cost_jpy": int(cost), "pics": pics,
+            "desc_jp": desc, "official_url": g(8),
+            "age_official": m.group(1) if m else ""}
 
 
 def is_banner(url: str) -> bool:
@@ -168,18 +174,36 @@ def supply_sku(url: str) -> str:
     return f"{m.group(1)}-{m.group(2)}" if m else ""
 
 
-def build_title(series_en: str, pieces: int, maker_en: str = "") -> str:
+def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = "") -> str:
     """英語タイトル (80字以内)。既存出品と同じ形。
 
     "VIRUSWEETS Figure Collection Sweets Shop Full Set of 6 Gashapon NEW"
+
+    ★2026-08-20: 55〜70字にしかならず推奨の70〜79字に届いていなかった。
+      公式説明から拾った語 (素材・形状・用途) を、入る分だけ後ろに足す。
     """
-    tail = f"Full Set of {pieces} Gashapon NEW"
+    tail = "Full Set of %d Gashapon NEW" % pieces
     head = " ".join(x for x in (maker_en, series_en) if x).strip()
-    t = f"{head} {tail}".strip()
+    t = ("%s %s" % (head, tail)).strip()
+    for w in (extra or "").split():
+        if w.lower() in t.lower():
+            continue
+        cand = "%s %s %s" % (head, w, tail)
+        if len(cand) <= 80:
+            head = "%s %s" % (head, w)
+            t = cand
+        else:
+            break
     if len(t) <= 80:
         return t
     room = 80 - len(tail) - 1
     return (head[:room].rstrip() + " " + tail).strip()
+
+
+def _release_year(released: str) -> str:
+    """公式の発売時期 (2024年12月 第2週) → 西暦。取れなければ空。"""
+    m = re.search(r"(\d{4})", released or "")
+    return m.group(1) if m else ""
 
 
 def dedup_board_variants(items: list) -> list:
@@ -199,6 +223,36 @@ def dedup_board_variants(items: list) -> list:
 
 
 # ── I/O ────────────────────────────────────────────────────────────
+
+
+def write_official_urls(items: list, ledger: dict, sheet_id: str, tab: str) -> int:
+    """目視画面で人が貼った公式URLを、中間スプシの **I列** に書き戻す (2026-08-20 user 指示)。
+
+    次回以降その行は公式URLを持った状態で回る (毎回貼り直さなくてよい)。
+    既に同じ値が入っている行は触らない。失敗しても走行は止めない。
+    """
+    plan = []
+    for it in items:
+        u = ((ledger or {}).get(it.get("url", "")) or {}).get("official_url", "").strip()
+        if u and u != (it.get("official_url") or "").strip() and it.get("row"):
+            plan.append((it["row"], u))
+    if not plan:
+        return 0
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        import dns_cache                                        # noqa: F401
+        import sheet_io as S
+        gc = gspread.authorize(Credentials.from_service_account_file(
+            S.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
+        ws = next(w for w in gc.open_by_key(sheet_id).worksheets() if w.title == tab)
+        ws.batch_update([{"range": "I%d" % r, "values": [[u]]} for r, u in plan],
+                        value_input_option="RAW")
+        print("  ✏️ 公式URLを中間スプシ I列に書きました: %d行" % len(plan))
+        return len(plan)
+    except Exception as e:                                      # noqa: BLE001
+        print("  ⚠️ 公式URLを書けず (走行は継続): %s: %s" % (type(e).__name__, e))
+        return 0
 
 
 def read_sheet(sheet_id: str, tab: str) -> list:
@@ -224,74 +278,45 @@ def _api_key() -> str:
     raise SystemExit("★中止: ANTHROPIC_API_KEY が無く 'API key.txt' も読めません")
 
 
-def translate(items: list) -> dict:
-    """日本語のシリーズ名/メーカーを英語にする (Claude)。{jp: en}。
-
-    取れなければ空 dict を返す = 呼び側は日本語のまま出さずに skip する
-    (推測でローマ字化しない)。
-    """
-    if not items:
-        return {}
-    import anthropic
-    pairs = sorted({(it["series_jp"], it["maker_jp"]) for it in items})
-    listing = "\n".join(f"{i+1}. series={s} / maker={m or '(なし)'}"
-                        for i, (s, m) in enumerate(pairs))
-    prompt = (
-        "以下は日本のガチャポン (カプセルトイ) の商品名です。eBay の英語タイトルに使う"
-        "英語表記に直してください。\n\n"
-        "ルール:\n"
-        "- 公式の英語名がある物 (キャラクター名・作品名・メーカー名) は公式表記を使う\n"
-        "- 無い物はローマ字ではなく **意味の通る英語** にする\n"
-        "- 「全N種」「ガチャ」等の語は入れない (別に付ける)\n"
-        "- 分からない物は空文字にする。**推測で埋めない**\n\n"
-        f"{listing}\n\n"
-        'JSON だけを返す: [{"series_jp": "...", "series_en": "...", '
-        '"maker_jp": "...", "maker_en": "..."}]'
-    )
-    try:
-        client = anthropic.Anthropic(api_key=_api_key())
-        r = client.messages.create(
-            model=MODEL, max_tokens=8000,
-            thinking={"type": "adaptive"},
-            output_config={"effort": "medium"},
-            messages=[{"role": "user", "content": prompt}])
-        txt = next((b.text for b in r.content if b.type == "text"), "")
-        m = re.search(r"\[.*\]", txt, re.S)
-        rows = json.loads(m.group(0)) if m else []
-        return {(x.get("series_jp", ""), x.get("maker_jp", "")):
-                (x.get("series_en", "").strip(), x.get("maker_en", "").strip())
-                for x in rows}
-    except Exception as e:                                      # noqa: BLE001
-        print(f"  ⚠️ 英訳できず ({type(e).__name__}: {e}) → CSVは作りません")
-        return {}
-
-
 def load_description() -> str:
-    """説明文テンプレ。読めなければ **止める** (黙って代替文を使わない)。"""
-    for name in ("GACHA.txt", "ICHIBANKUJI.txt"):
-        for d in (SCRIPT_DIR, os.path.dirname(SCRIPT_DIR),
-                  r"C:\dev\iMak\iMak_ichibankuji"):
-            p = os.path.join(d, name)
-            if os.path.isfile(p):
-                return open(p, encoding="utf-8").read()
-    raise SystemExit("★中止: 説明文テンプレ (GACHA.txt / ICHIBANKUJI.txt) が見つかりません")
+    """`iMakHQ/GACHA.txt` を読む。読めなければ **止める**。
+
+    ★2026-08-20: ここは無ければ ICHIBANKUJI.txt を使う作りで、最初の5件は
+      一番くじ用の説明文のまま公開された。skill `ebay-csv-listing` に
+      「テンプレが読めなければ止める。黙って代替文を使わない」と書いてある通りにする
+      (2026-08-12 にダミー説明6件が入稿OKまで通った実害の再発)。
+    """
+    p = os.path.join(os.path.dirname(SCRIPT_DIR), "GACHA.txt")   # スクリプト基準の絶対パス
+    if not os.path.isfile(p):
+        raise SystemExit(f"★中止: 説明文テンプレが見つかりません: {p}")
+    return open(p, encoding="utf-8").read()
 
 
 def build_description(item: dict, series_en: str, maker_en: str, base: str) -> str:
-    specs = [
-        f"<li><b>Series:</b> {series_en}</li>",
-        f"<li><b>Set:</b> Complete Set ({item['pieces']} pcs)</li>",
-        "<li><b>Material:</b> PVC</li>",
-        "<li><b>Country of Origin:</b> Japan</li>",
-    ]
+    """テンプレに Specifications を差し込む。公式から取れた事実だけを書く。"""
+    off = item.get("official") or {}
+    specs = [f"<li><b>Series:</b> {series_en}</li>",
+             f"<li><b>Set:</b> Complete Set ({item['pieces']} pcs)</li>"]
     if maker_en:
         specs.insert(1, f"<li><b>Manufacturer:</b> {maker_en}</li>")
+    if item.get("character_en"):
+        specs.append(f"<li><b>Character:</b> {item['character_en']}</li>")
+    specs.append("<li><b>Material:</b> PVC</li>")
+    if off.get("released"):
+        specs.append(f"<li><b>Released:</b> {_html_escape(off['released'])}</li>")
+    if off.get("age"):
+        specs.append(f"<li><b>Age Level:</b> {_html_escape(off['age'])} (manufacturer)</li>")
+    specs.append("<li><b>Country of Origin:</b> Japan</li>")
     if item["with_board"]:
         specs.append("<li><b>Includes:</b> Display board</li>")
     html = ('<p><span style="text-decoration: underline;"><strong>Specifications'
             "</strong></span></p>\n<ul>\n" + "\n".join(specs) + "\n</ul>")
     marker = '<p><span style="text-decoration: underline;"><strong>Shipping'
     return base.replace(marker, html + "\n" + marker, 1) if marker in base else base + html
+
+def _html_escape(s):
+    import html as _h
+    return _h.escape(str(s or ""))
 
 
 def price_usd(cost_jpy: int) -> float:
@@ -305,14 +330,19 @@ def schedule_time() -> str:
     return t.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def build_row(item: dict, series_en: str, maker_en: str, base_desc: str) -> dict:
+def build_row(item: dict, en: dict, base_desc: str) -> dict:
+    """FileExchange CSV 1行。埋まらない Item Specifics は **空欄**にする (推測で埋めない)。"""
     from listing_common import get_shipping_policy_name
     price = price_usd(item["cost_jpy"])
+    off = item.get("official") or {}
+    series = en.get("series_en") or ""
+    maker = en.get("maker_en") or ""
+    title = build_title(series, item["pieces"], maker, en.get("title_extra") or "")
     return {
         "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)": "Add",
         "*Category": EBAY_CATEGORY,
-        "*Title": build_title(series_en, item["pieces"], maker_en),
-        "*Description": build_description(item, series_en, maker_en, base_desc),
+        "*Title": title,
+        "*Description": build_description(item, series, maker, base_desc),
         "PicURL": "|".join(item["pics"][:12]),
         "*StartPrice": price,
         "ConditionID": CONDITION_ID,
@@ -330,19 +360,19 @@ def build_row(item: dict, series_en: str, maker_en: str, base_desc: str) -> dict
         "C:Set": "Complete Set",
         "C:Number of Pieces": item["pieces"],
         "C:Material": "PVC",
-        # 対象年齢: パッケージ表記が15才以上の物だけ出す運用 (目視で確認)。
-        # CPSC eFiling で児童製品 (12歳以下) 扱いを外す宣言。一番くじと同じ。
+        # 対象年齢: 公式で確認できた物はその値、無ければ目視で15才以上を確認した物だけ
         "C:Age Level": "15+",
         "C:Type": "Mini Figure",
-        "C:Brand": maker_en or "",
-        "C:Series": series_en,
-        "C:Character": series_en,
-        "C:Franchise": series_en,
-        "C:Theme": "Anime & Manga",
+        "C:Brand": maker,
+        "C:Series": series,
+        "C:Character": en.get("character_en") or "",
+        "C:Franchise": en.get("franchise_en") or "",
+        "C:Theme": en.get("theme") or "",
+        "C:Genre": en.get("genre") or "",
         "C:Original/Licensed Reproduction": "Original",
         "C:Country of Origin": "Japan",
         "C:MPN": "Does not apply",
-        "C:Language": "Japanese",
+        "C:Release Year": _release_year(off.get("released")),
         "StoreCategoryID": STORE_CATEGORY,
     }
 
@@ -365,13 +395,13 @@ def main() -> int:
     rows = read_sheet(a.sheet, a.tab)
     print(f"シート {a.tab}: {len(rows)}行")
     items, blocked = [], {}
-    for r in rows:
+    for n, r in enumerate(rows, start=2):     # ヘッダ込みの行番号 (I列書込に使う)
         t = (r[2].strip() if len(r) > 2 else "")
         why = blocked_reason(t)
         if why:
             blocked[why] = blocked.get(why, 0) + 1
             continue
-        it = parse_row(r)
+        it = parse_row(r, n)
         if it:
             items.append(it)
     for why, n in blocked.items():
@@ -394,32 +424,55 @@ def main() -> int:
         print("出せる行が0件 → CSVは作りません")
         return 0
 
-    # ★対象年齢は機械的に取れない (2026-08-20 実測: 楽天HTMLにもメーカー公式HTMLにも
-    #   記載なし。印字は台紙の写真の中)。人が見て 15才以上と確認した物だけ出す。
+    # ① 公式の商品ページを見に行く (バンダイは JAN から直行できる)
+    import gacha_official as O
+    n_off = 0
+    for it in items:
+        it["official"] = O.lookup(it)
+        if it["official"].get("name"):
+            n_off += 1
+            # 公式の商品画像を出品写真に足す (楽天は1枚しか無い)
+            it["pics"] = list(dict.fromkeys(it["pics"] + it["official"]["images"][:11]))
+    print("  🔎 公式ページが取れた: %d / %d件" % (n_off, len(items)))
+
+    # ② 対象年齢。公式で 15才以上 と確認できた物は目視を飛ばす
     if not a.no_review:
         import gacha_review as R
-        ledger = R.run_review(items, open_browser=not a.no_browser)
-        for title, why in R.skipped_reasons(items, ledger):
-            print(f"  ⏭️ 出しません: {title} — {why}")
-        items = R.confirmed(items, ledger)
-        print(f"  ✅ 目視で「出品する」: {len(items)}件")
+        need = [it for it in items if "15" not in (it.get("age_official") or "")
+                and "15" not in ((it.get("official") or {}).get("age") or "")]
+        auto = [it for it in items if it not in need]
+        if auto:
+            print("  ✅ 対象年齢を公式で確認済 (目視不要): %d件" % len(auto))
+        if need:
+            ledger = R.run_review(need, open_browser=not a.no_browser)
+            for title, why in R.skipped_reasons(need, ledger):
+                print("  ⏭️ 出しません: %s — %s" % (title, why))
+            items = auto + R.confirmed(need, ledger)
+            write_official_urls(need, ledger, a.sheet, a.tab)
+        else:
+            items = auto
+        print("  ✅ 出品に回す: %d件" % len(items))
         if not items:
             print("出せる行が0件 → CSVは作りません")
             return 0
 
-    en = translate(items)
-    if not en:
+    # ③ 公式+楽天 → 英語の項目 (Character / Franchise / Theme / Genre / タイトル語)
+    import gacha_enrich as E
+    en_by_url = E.enrich(items, _api_key())
+    if not en_by_url:
+        print("英語の項目が作れませんでした → CSVは作りません")
         return 1
     base_desc = load_description()
     out, skipped = [], []
     for it in items:
-        s_en, m_en = en.get((it["series_jp"], it["maker_jp"]), ("", ""))
-        if not s_en:
+        en = en_by_url.get(it["url"]) or {}
+        if not en.get("series_en"):
             skipped.append(it["series_jp"])
-            continue                    # 英語名が取れない = 出さない (推測しない)
-        out.append(build_row(it, s_en, m_en, base_desc))
-    for s in skipped:
-        print(f"  ⏭️ 英語名が取れず skip: {s[:50]}")
+            continue                    # シリーズ名が無い = 出さない (推測しない)
+        it["character_en"] = en.get("character_en") or ""
+        out.append(build_row(it, en, base_desc))
+    for x in skipped:
+        print("  ⏭️ 英語名が取れず skip: %s" % x[:50])
     if not out:
         print("英語名が取れた行が0件 → CSVは作りません")
         return 1

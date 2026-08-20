@@ -134,6 +134,15 @@ def build_html(items: list) -> str:
             f'<label class="p"><input type="checkbox" name="pic{i}" value="{_html.escape(u)}">'
             f'<img src="{proxy(u)}" loading="lazy" title="{_html.escape(u)}"></label>'
             for u in pics) or '<span class="no">G列に写真がありません</span>'
+        official = it.get("official_url")
+        off = (f'<a href="{_html.escape(official)}" target="_blank">公式ページ</a>'
+               if official else '<span class="no">公式リンクなし</span>')
+        # 公式で対象年齢が取れている行は そう出す (押すだけで済む)
+        age = it.get("age_official")
+        age_html = (f'<div class="age ok">対象年齢 <b>{_html.escape(age)}</b> — 公式で確認済</div>'
+                    if age else
+                    '<div class="age ng">対象年齢は公式で取れていません — '
+                    '<b>写真の台紙で確認してください</b></div>')
         cards.append(f"""
 <div class="card" id="c{i}" data-url="{_html.escape(it.get('url',''))}">
   <h2>{i+1}. {_html.escape(it.get('title_jp',''))}</h2>
@@ -141,7 +150,11 @@ def build_html(items: list) -> str:
     / {_html.escape(it.get('maker_jp') or 'メーカー不明')}
     &nbsp;|&nbsp; <a href="{_html.escape(it.get('url',''))}" target="_blank">仕入元(楽天)を開く</a>
     &nbsp;|&nbsp; <a href="https://www.google.com/search?q={urllib.parse.quote((it.get('maker_jp','') + ' ' + it.get('series_jp','')).strip())}"
-       target="_blank">公式を検索</a></div>
+       target="_blank">公式を検索</a>
+    &nbsp;|&nbsp; {off}</div>
+  {age_html}
+  <details class="dsc"><summary>商品説明 (全何種の内訳・サイズ)</summary>
+    <div>{_html.escape((it.get('desc_jp') or '')[:1200])}</div></details>
   <div class="lbl">G列の写真 ({len(pics)}枚) — 出品に使う物にチェック (1枚目がギャラリー画像)</div>
   <div class="pics">{thumbs}</div>
   <div class="lbl">公式の商品ページURL (あれば。送信時にここから画像も取ります)</div>
