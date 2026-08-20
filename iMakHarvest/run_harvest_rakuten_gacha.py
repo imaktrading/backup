@@ -29,6 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
 
 DUMP_DIR = ROOT / "debug"
@@ -64,7 +65,7 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
     from sheet_writer_rakuten import dedupe_key  # noqa: PLC0415
 
     rej = {"not_complete": 0, "not_toy": 0, "preorder_title": 0,
-           "already_claimed": 0, "dup": 0}
+           "already_claimed": 0, "dup": 0, "maker_ng": 0}
     out: list[dict] = []
     seen: set[str] = set()
     for label, keyword, quota in THEMES:
@@ -97,6 +98,11 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
                     continue
                 if key in claimed_urls or r["url"] in claimed_urls:
                     rej["already_claimed"] += 1
+                    continue
+                maker = resolve_maker(r["title"])
+                if maker and maker not in ALLOWED_MAKERS:
+                    # タイトルでメーカーが分かって対象外 → ここで落とす (詳細を見に行かない)
+                    rej["maker_ng"] += 1
                     continue
                 seen.add(key)
                 r["theme"] = label
@@ -143,7 +149,8 @@ def main(argv=None) -> int:
     kept: list[dict] = []
     failed: list[str] = []
     quota_left = {label: quota for label, _, quota in THEMES}
-    detail_rej = {"preorder": 0, "no_shipping_info": 0, "fetch_fail": 0, "quota_full": 0}
+    detail_rej = {"preorder": 0, "no_shipping_info": 0, "fetch_fail": 0, "quota_full": 0,
+                  "maker_ng": 0}
     known: set = set()
     if not args.dry_run:
         try:
@@ -182,6 +189,10 @@ def main(argv=None) -> int:
             item.update({k: detail[k] for k in
                          ("price_jpy", "image_urls", "description", "shipping")})
             item["title"] = detail["title"] or c["title"]
+            if not is_allowed(item["title"], item["description"]):
+                # 商品説明の「メーカー：」まで見て、対象メーカーでなければ採らない
+                detail_rej["maker_ng"] += 1
+                continue
             kept.append(item)
             pending.append(item)
             quota_left[c["theme"]] -= 1

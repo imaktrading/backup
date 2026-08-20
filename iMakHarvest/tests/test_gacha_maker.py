@@ -74,3 +74,33 @@ def test_all_urls_are_https_or_http_and_unique():
     for name, url in MAKER_OFFICIAL.items():
         assert url.startswith(("http://", "https://")), name
     assert len(set(MAKER_OFFICIAL.values())) == len(MAKER_OFFICIAL)
+
+
+# --------------------------------------------------------------------------
+# 収集対象メーカーの絞り込み (2026-08-20 user 確定)
+# --------------------------------------------------------------------------
+def test_allowed_makers_is_the_five_user_chose():
+    from gacha_maker import ALLOWED_MAKERS
+    assert ALLOWED_MAKERS == frozenset({
+        "バンダイ", "タカラトミーアーツ", "クオリア", "キタンクラブ", "ブシロードクリエイティブ"})
+
+
+@pytest.mark.parametrize("title,ok", [
+    ("サンリオ ハローキティ 全4種+ディスプレイ台紙セット タカラトミーアーツ ガチャポン コンプリート", True),
+    ("なにか 全5種セット キタンクラブ ガチャポン コンプリート", True),
+    ("なにか 全5種セット ブシロード ガチャポン コンプリート", True),
+    # 対象外メーカー
+    ("サンリオ 全4種+ディスプレイ台紙セット ご当地本舗夢屋 ガチャポン コンプリート", False),
+    ("なにか 全5種+ディスプレイ台紙セット トイズスピリッツ ガチャポン コンプリート", False),
+    # メーカーが分からない物も採らない (fail-closed)
+    ("ゆらゆら おなまえ札めじるしチャーム2 全6種セット コンプ", False),
+])
+def test_is_allowed(title, ok):
+    from gacha_maker import is_allowed
+    assert is_allowed(title) is ok
+
+
+def test_is_allowed_uses_description_maker_field():
+    from gacha_maker import is_allowed
+    assert is_allowed("どうぶつの森 全8種セット", "メーカー：クオリア ラインナップ") is True
+    assert is_allowed("どうぶつの森 全8種セット", "メーカー：日本オート玩具") is False

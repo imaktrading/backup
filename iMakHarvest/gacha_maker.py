@@ -20,6 +20,13 @@ from __future__ import annotations
 
 import re
 
+# ★収集対象にするメーカー (2026-08-20 user 確定)。 ここに無いメーカーは集めない。
+# 理由: 公式サイトで商品情報 (対象年齢/画像) を裏取りできる大手・中堅に絞る。
+# 判定できないメーカーも **集めない** (fail-closed)。
+ALLOWED_MAKERS: frozenset = frozenset({
+    "バンダイ", "タカラトミーアーツ", "クオリア", "キタンクラブ", "ブシロードクリエイティブ",
+})
+
 # メーカー名 (正) -> 公式URL (公式サイト または カプセルトイ専用ページ)
 MAKER_OFFICIAL: dict[str, str] = {
     "バンダイ": "https://gashapon.jp/",
@@ -120,3 +127,8 @@ def resolve_maker(title: str, description: str = "") -> str:
 def official_url(title: str, description: str = "") -> str:
     """メーカー公式URL. 判定できなければ空文字 (推測しない)."""
     return MAKER_OFFICIAL.get(resolve_maker(title, description), "")
+
+
+def is_allowed(title: str, description: str = "") -> bool:
+    """収集対象のメーカーか. 判定できないものは False (fail-closed)."""
+    return resolve_maker(title, description) in ALLOWED_MAKERS
