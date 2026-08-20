@@ -29,6 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+from gacha_age import fetch_age, is_too_young  # noqa: E402
 from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
 
@@ -150,7 +151,7 @@ def main(argv=None) -> int:
     failed: list[str] = []
     quota_left = {label: quota for label, _, quota in THEMES}
     detail_rej = {"preorder": 0, "no_shipping_info": 0, "fetch_fail": 0, "quota_full": 0,
-                  "maker_ng": 0}
+                  "maker_ng": 0, "age_ng": 0}
     known: set = set()
     if not args.dry_run:
         try:
@@ -193,6 +194,16 @@ def main(argv=None) -> int:
                 # 商品説明の「メーカー：」まで見て、対象メーカーでなければ採らない
                 detail_rej["maker_ng"] += 1
                 continue
+            if resolve_maker(item["title"], item["description"]) == "バンダイ":
+                # バンダイだけ 対象年齢を公式で確認できる (JAN 直引き)。
+                # 15才未満と**分かった**物は入れない。読めなければ目視に回す
+                age = fetch_age(detail.get("jan") or "")
+                if is_too_young(age):
+                    detail_rej["age_ng"] += 1
+                    _log(f"  対象年齢 {age}才 → 除外 {item['title'][:30]}")
+                    continue
+                if age is not None:
+                    item["description"] = f"{item['description']} 対象年齢: {age}才以上".strip()
             kept.append(item)
             pending.append(item)
             quota_left[c["theme"]] -= 1
