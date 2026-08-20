@@ -61,6 +61,18 @@ def _dump(payload: dict, path: Path) -> None:
     tmp.replace(path)
 
 
+def build_themes(args) -> list[tuple[str, str, int]]:
+    """走行の枠を決める. `--maker` があれば そのメーカー1本に置き換える.
+
+    2026-08-20: 5メーカーに絞った以降、 テーマ検索 (サンリオ/めじるし/…) では
+    **メーカー名で探していないので取りこぼす**。 実測でブシロード258件・バンダイ240件が
+    テーマ4本には1件も出てこなかった。 メーカー名で引く方が素直。
+    """
+    if args.maker:
+        return [(args.maker, f"{args.maker} コンプリート", args.quota or 100)]
+    return THEMES
+
+
 def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
     """検索とタイトル判定まで (無料の範囲) をやる."""
     from sheet_writer_rakuten import dedupe_key  # noqa: PLC0415
@@ -69,7 +81,7 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
            "already_claimed": 0, "dup": 0, "maker_ng": 0}
     out: list[dict] = []
     seen: set[str] = set()
-    for label, keyword, quota in THEMES:
+    for label, keyword, quota in build_themes(args):
         picked = 0
         for shop in SHOPS:
             if picked >= quota * args.oversample:
@@ -101,7 +113,14 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
                     rej["already_claimed"] += 1
                     continue
                 maker = resolve_maker(r["title"])
-                if maker and maker not in ALLOWED_MAKERS:
+                if args.maker:
+                    # 狙い撃ちモード: タイトルで **そのメーカーと分かる物だけ**。
+                    # (メーカー名を書かない店は検索語を無視して全件返すため、
+                    #  ここを緩めると詳細取得が数百件に膨らむ)
+                    if maker != args.maker:
+                        rej["maker_ng"] += 1
+                        continue
+                elif maker and maker not in ALLOWED_MAKERS:
                     # タイトルでメーカーが分かって対象外 → ここで落とす (詳細を見に行かない)
                     rej["maker_ng"] += 1
                     continue
@@ -121,6 +140,11 @@ def main(argv=None) -> int:
     ap.add_argument("--oversample", type=float, default=2.0,
                     help="枠の何倍まで候補を集めるか (配送予定で落ちる分の余裕)")
     ap.add_argument("--label", default="gacha", help="中間スプシ tab (= rakuten_<label>)")
+    ap.add_argument("--maker", default="",
+                    help="メーカー名で狙い撃ちする (例 バンダイ)。 テーマ枠は使わない。"
+                         " auc-yuyou はタイトルにメーカー名を書くので、"
+                         " **タイトルでそのメーカーと分かる物だけ**を候補にする")
+    ap.add_argument("--quota", type=int, default=0, help="--maker 時に集める上限件数")
     ap.add_argument("--sheet-every", type=int, default=10, help="何件ごとにスプシへ書くか")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--no-dedupe", action="store_true", help="本番との重複チェックをしない")
@@ -149,7 +173,7 @@ def main(argv=None) -> int:
     driver = MS.create_anonymous_driver(headless=args.headless)
     kept: list[dict] = []
     failed: list[str] = []
-    quota_left = {label: quota for label, _, quota in THEMES}
+    quota_left = {label: quota for label, _, quota in build_themes(args)}
     detail_rej = {"preorder": 0, "no_shipping_info": 0, "fetch_fail": 0, "quota_full": 0,
                   "maker_ng": 0, "age_ng": 0}
     known: set = set()
