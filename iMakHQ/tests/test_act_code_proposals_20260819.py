@@ -283,13 +283,43 @@ def test_scan_log_finds_generation_log_without_log_flag(tmp_path):
     run_logs = tmp_path / "run_logs"
     run_logs.mkdir()
     csv_path = str(tmp_path / "tcg_20260819.csv")
+    # ★2026-08-21: fixture を **実ログの文言** に直した。
+    #   `catalog miss` の検出は 2026-08-21 に「missing_models という語」から
+    #   「書き込んだログ行 (`Catalog 未登録カード N 件`)」へ意図的に変えている
+    #   (語だけ見ているとパスやコメントを拾って毎回1件と数えていたため)。
+    #   fixture が旧文言のままだったので、**正しい実装なのにテストだけ赤かった**。
+    #   実物: `⚠️ Catalog 未登録カード 1 件 (…)` (iMakTCG/psa_to_csv.py:3639 / run_logs に61件)
     (run_logs / "gen.log").write_text(
-        "出力: " + os.path.basename(csv_path) + "\nmissing_models に追記\n❌ Traceback\n",
+        "出力: " + os.path.basename(csv_path)
+        + "\n⚠️ Catalog 未登録カード 2 件 (Catalog Claude に追加依頼してください)"
+        + "\n❌ Traceback\n",
         encoding="utf-8")
     sig = ca._scan_log("", csv_path, str(run_logs))
     assert sig, "--log 無しだと生成ログを見ていない (digest の logシグナルが恒久的に空)"
     assert any("catalog miss" in s for s in sig)
     assert any("error" in s for s in sig)
+
+
+def test_scan_log_ignores_zero_count_and_bare_word(tmp_path):
+    """0件の行と「語が出ただけ」の行を数えない (2026-08-21 の変更点そのもの)。
+
+    実害: 3ヒット中3件とも中身は 0件 の行だった (`❌ 除外(出品しない): 0件` 等)。
+    「ログはきれい」ではなく「数え方が間違っている」状態で digest が埋まっていた。
+    """
+    ca = _load("csv_auditor_t6b", os.path.join(_TOOLS, "csv_auditor.py"))
+    run_logs = tmp_path / "run_logs"
+    run_logs.mkdir()
+    csv_path = str(tmp_path / "tcg_20260819.csv")
+    (run_logs / "gen.log").write_text(
+        "出力: " + os.path.basename(csv_path)
+        + "\n❌ 除外(出品しない): 0件 (行 [])"
+        + "\n❌ エラー: 0件"
+        + "\nmissing_models.csv に追記しました"
+        + "\n⚠️ Catalog 未登録カード 0 件\n",
+        encoding="utf-8")
+    sig = ca._scan_log("", csv_path, str(run_logs))
+    assert not any("catalog miss" in x for x in sig), "語だけ/0件を catalog miss に数えている"
+    assert not any("error" in x for x in sig), "0件の行を error に数えている"
 
 
 def test_scan_log_and_ai_degraded_share_one_finder():

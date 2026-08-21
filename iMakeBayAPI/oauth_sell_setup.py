@@ -41,6 +41,24 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KEYS_FILE = os.path.join(SCRIPT_DIR, "ebay keys.txt")
 SELL_TOKEN_FILE = os.path.join(SCRIPT_DIR, "ebay_oauth_token_sell.json")
 
+# ★2026-08-21: 鍵を共有領域にも置いた (他 worktree から使うため)。
+#   トークンは使うたびに更新されるので、**2か所に置いたまま片方だけ更新されると腐る**
+#   (今日1日はまった「同じものが2か所にあって片方だけ直る」と同じ形)。
+#   書き手はこのファイルだけなので、**書いたら必ず両方に同じ内容を置く**。
+SHARED_DIR = r"C:/dev/iMak_data/credentials"
+
+
+def save_token(tok):
+    """トークンを保存する。**共有側にも必ず同じ内容を書く** (片方だけ新しくしない)。"""
+    for path in (SELL_TOKEN_FILE, os.path.join(SHARED_DIR, "ebay_oauth_token_sell.json")):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(tok, f, ensure_ascii=False, indent=2)
+        except Exception as e:                                 # noqa: BLE001
+            # 共有側に書けなくても本体の更新は止めない。ただし黙らない
+            print("⚠️ トークンを保存できませんでした: %s (%s)" % (path, e))
+
 OAUTH_AUTHORIZE = "https://auth.ebay.com/oauth2/authorize"
 OAUTH_TOKEN = "https://api.ebay.com/identity/v1/oauth2/token"
 
@@ -126,9 +144,8 @@ def cmd_exchange(args):
         print(resp.text)
         sys.exit(1)
     tok = resp.json()
-    with open(SELL_TOKEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(tok, f, ensure_ascii=False, indent=2)
-    print("✅ 保存:", SELL_TOKEN_FILE)
+    save_token(tok)
+    print("✅ 保存:", SELL_TOKEN_FILE, "+ 共有領域")
     print("scope:", tok.get("scope", "(なし)"))
     print("refresh 有効期限(s):", tok.get("refresh_token_expires_in"))
 
@@ -162,9 +179,8 @@ def cmd_refresh(args):
     new = resp.json()
     tok["access_token"] = new["access_token"]
     tok["expires_in"] = new.get("expires_in")
-    with open(SELL_TOKEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(tok, f, ensure_ascii=False, indent=2)
-    print("✅ access_token 更新済")
+    save_token(tok)
+    print("✅ access_token 更新済 (共有領域にも保存)")
 
 
 def main():

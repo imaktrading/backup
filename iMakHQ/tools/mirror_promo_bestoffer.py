@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import time
 
 import requests
 
@@ -77,12 +78,24 @@ def parse_active(xml):
     return out
 
 
-def plan(items, advertised, only=""):
+def plan(items, advertised, only="", bo_state=None):
     """やることを決める (純関数)。戻り: {site: {promo, bo, ad_exists, bo_exists}}。
 
     既に広告に入っている物・既にベストオファーが付いている物は **触らない**。
     """
     out = {k: {"promo": [], "bo": [], "ad_exists": 0, "bo_exists": 0} for k in SITES}
+    # ★2026-08-21: ActiveList は同じ出品を複数ページに返すことがある (実測 6,837 対
+    #   GetSellerList 4,898)。重複を残したまま bulk API に渡すと
+    #   `errorId 35018 There are duplicate listing` で **チャンク丸ごと 400** になり、
+    #   1件も追加されない。3サイトとも きっかり 200件 残っていたのはこれが原因。
+    seen_ids = set()
+    uniq = []
+    for it in items:
+        if it["item_id"] in seen_ids:
+            continue
+        seen_ids.add(it["item_id"])
+        uniq.append(it)
+    items = uniq
     for it in items:
         s = it["site"]
         if not s or (only and s != only):
@@ -91,7 +104,12 @@ def plan(items, advertised, only=""):
             out[s]["ad_exists"] += 1
         else:
             out[s]["promo"].append(it["item_id"])
-        if it["best_offer"]:
+        # ★状態表があればそれを真とする (ActiveList は BestOfferEnabled を返さない)。
+        #   表に無い = 分からない → 付ける側に倒す (付け直しは無害、付け漏れは機会損失)
+        has_bo = it["best_offer"]
+        if bo_state is not None:
+            has_bo = bo_state.get(it["item_id"], False)
+        if has_bo:
             out[s]["bo_exists"] += 1
         else:
             out[s]["bo"].append(it["item_id"])
@@ -127,6 +145,45 @@ def fetch_active(fx, tok):
     return items
 
 
+def fetch_best_offer_state(fx, tok, windows=4):
+    """{itemID: ベストオファーが付いているか} を GetSellerList で取る。
+
+    ★2026-08-21: `GetMyeBaySelling(ActiveList)` は **BestOfferEnabled を返さない**。
+      それに気づかず ActiveList で判定していたので、全件が「付いていない」に見え、
+      **毎回 3,504件を送り直す**作りになっていた (前回 1,787件は実際には成功していたのに、
+      再走行でまた全部送るところだった)。GetSellerList は GranularityLevel=Fine で返す。
+      取得は 200件/ページなので、3,504回の書込を数十回の読取に置き換えられる。
+
+    EndTime の窓は eBay 側の上限が 121日なので、110日ずつ前に進めて足す。
+    """
+    import datetime
+    out = {}
+    now = datetime.datetime.utcnow()
+    for w in range(windows):
+        lo = now + datetime.timedelta(days=110 * w - 1)
+        hi = now + datetime.timedelta(days=110 * (w + 1) - 1)
+        for page in range(1, 60):
+            inner = ("<GranularityLevel>Fine</GranularityLevel>"
+                     "<EndTimeFrom>%sZ</EndTimeFrom><EndTimeTo>%sZ</EndTimeTo>"
+                     "<Pagination><EntriesPerPage>200</EntriesPerPage>"
+                     "<PageNumber>%d</PageNumber></Pagination>"
+                     % (lo.strftime("%Y-%m-%dT%H:%M:%S"),
+                        hi.strftime("%Y-%m-%dT%H:%M:%S"), page))
+            xml = fx.post("GetSellerList", inner, tok, site="0")
+            if "<Ack>Failure</Ack>" in (xml or ""):
+                break
+            got = 0
+            for it in re.findall(r"<Item>(.*?)</Item>", xml or "", re.S):
+                iid = re.search(r"<ItemID>(\d+)</ItemID>", it)
+                bo = re.search(r"<BestOfferEnabled>(\w+)</BestOfferEnabled>", it)
+                if iid:
+                    got += 1
+                    out[iid.group(1)] = bool(bo) and bo.group(1).lower() == "true"
+            if got < 200:
+                break
+    return out
+
+
 def fetch_advertised(tok):
     """RUNNING キャンペーン全部の ad を {listingId: 率} に畳む (サイト横断)。"""
     out = {}
@@ -152,23 +209,90 @@ def fetch_advertised(tok):
     return out
 
 
+ADS_CHUNK = 200      # bulk API の1回あたり上限。超えた分は黙って捨てられる
+
+
 def add_ads(tok, site_key, item_ids):
-    """10% で そのサイトのキャンペーンに追加 → [(itemID, 結果)]。"""
+    """10% で そのサイトのキャンペーンに追加 → [(itemID, 結果)]。
+
+    ★2026-08-21: 全件を1回の POST に詰めていたため、上限を超えた分が**応答にも現れず
+      黙って落ちて**いた (3サイトとも きっかり 200件だけ残っていたのが症状)。
+      chunk に割り、**送った数と返ってきた数が合わない時は明示的に NG にする**。
+    """
     _d, _s, mk, camp = SITES[site_key]
-    body = {"requests": [{"listingId": i, "bidPercentage": BID} for i in item_ids]}
-    r = requests.post(API + "/ad_campaign/%s/bulk_create_ads_by_listing_id" % camp,
-                      headers=_mk_headers(tok, mk), data=json.dumps(body), timeout=120)
-    if r.status_code not in (200, 201, 207):
-        return [(i, "HTTP %d: %s" % (r.status_code, r.text[:110])) for i in item_ids]
     out = []
-    for res in r.json().get("responses", []):
-        i = str(res.get("listingId"))
-        if res.get("statusCode") in (200, 201):
-            out.append((i, "OK"))
-        else:
-            errs = "; ".join(e.get("message", "") for e in (res.get("errors") or []))
-            out.append((i, "NG %s: %s" % (res.get("statusCode"), errs[:90])))
+    for k in range(0, len(item_ids), ADS_CHUNK):
+        chunk = item_ids[k:k + ADS_CHUNK]
+        body = {"requests": [{"listingId": i, "bidPercentage": BID} for i in chunk]}
+        r = requests.post(API + "/ad_campaign/%s/bulk_create_ads_by_listing_id" % camp,
+                          headers=_mk_headers(tok, mk), data=json.dumps(body), timeout=120)
+        if r.status_code not in (200, 201, 207):
+            out += [(i, "HTTP %d: %s" % (r.status_code, r.text[:110])) for i in chunk]
+            continue
+        seen = set()
+        for res in r.json().get("responses", []):
+            i = str(res.get("listingId"))
+            seen.add(i)
+            if res.get("statusCode") in (200, 201):
+                out.append((i, "OK"))
+            else:
+                errs = "; ".join(e.get("message", "") for e in (res.get("errors") or []))
+                out.append((i, "NG %s: %s" % (res.get("statusCode"), errs[:90])))
+        # 応答が返ってこなかった分を「成功」に数えない (silent drop を作らない)
+        for i in chunk:
+            if i not in seen:
+                out.append((i, "NG: 応答に含まれず (上限で落ちた可能性)"))
     return out
+
+
+TOKEN_MAX_AGE_SEC = 40 * 60      # 実測で ~2h 有効。余裕を持って 40分で取り直す
+PROGRESS_LOG = r"C:\dev\iMak_data\hq\mirror_bestoffer_progress.jsonl"
+
+
+class TradingToken:
+    """Trading API のトークンを **時間が経ったら自分で取り直す** 係。
+
+    ★2026-08-21 の実害: 3,504件を1件ずつ ReviseFixedPriceItem で送ると2時間を超え、
+      最初に取ったトークンが途中で失効して **1,717件が丸ごと失敗**した
+      (`IAF token supplied is expired`)。取り直す作りになっていなかった。
+      長時間ループで最初のトークンを持ち回すのは、必ずこの形で壊れる。
+    """
+
+    def __init__(self, fx):
+        self.fx = fx
+        self.value = fx.token()
+        self.at = time.time()
+        self.refreshed = 0
+
+    def get(self):
+        if time.time() - self.at >= TOKEN_MAX_AGE_SEC:
+            self.force()
+        return self.value
+
+    def force(self):
+        self.fx.refresh()
+        self.value = self.fx.token()
+        self.at = time.time()
+        self.refreshed += 1
+        print("    (トークンを取り直しました %d回目)" % self.refreshed, flush=True)
+
+
+def _log_progress(site_key, item_id, res):
+    """1件ごとに追記する。**途中で落ちても どこまで済んだか残す**ため。"""
+    try:
+        os.makedirs(os.path.dirname(PROGRESS_LOG), exist_ok=True)
+        with open(PROGRESS_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                "site": site_key, "item_id": item_id,
+                                "result": res}, ensure_ascii=False) + chr(10))
+    except OSError:
+        pass                                     # 記録できなくても本処理は続ける
+
+
+def _is_token_error(res):
+    """失効・認証エラーか (純関数)。文言が変わっても拾えるよう緩めに見る。"""
+    low = (res or "").lower()
+    return ("token" in low and ("expire" in low or "invalid" in low or "auth" in low))         or "iaf token" in low
 
 
 def enable_best_offer(fx, tok, site_key, item_id):
@@ -199,15 +323,19 @@ def main():
     import ads_add_new_listings as ADS
     import fix_de_speedpak_shipping as fx
     fx.refresh()
-    trading_tok = fx.token()
+    trading = TradingToken(fx)
+    trading_tok = trading.get()
     sell_tok = ADS._token()
 
     items = fetch_active(fx, trading_tok)
     print("出品中 %d件 を確認" % len(items))
     advertised = fetch_advertised(sell_tok)
     print("すでに広告に入っている出品 %d件 (サイト横断・eBaymag 分を含む)" % len(advertised))
+    bo_state = fetch_best_offer_state(fx, trading.get())
+    print("ベストオファーの状態を取得: %d件 (うち付いている %d件)"
+          % (len(bo_state), sum(1 for v in bo_state.values() if v)))
 
-    todo = plan(items, advertised, a.only)
+    todo = plan(items, advertised, a.only, bo_state)
     for key in SITES:
         d = todo[key]
         if a.limit:
@@ -231,13 +359,25 @@ def main():
                     ng += 1
                     print("  ⚠️ %s 広告 %s: %s" % (key, i, res))
             print("  ✅ %s 広告10%%: %d件 送信" % (key.upper(), len(d["promo"])))
-        for i in d["bo"]:
-            res = enable_best_offer(fx, trading_tok, key, i)
-            if res != "OK":
+        done = 0
+        for n, i in enumerate(d["bo"], 1):
+            res = enable_best_offer(fx, trading.get(), key, i)
+            if _is_token_error(res):
+                # 失効を掴んだら **その場で取り直して1回だけやり直す** (次の周回に送らない)
+                trading.force()
+                res = enable_best_offer(fx, trading.get(), key, i)
+            ok = res == "OK"
+            done += ok
+            if not ok:
                 ng += 1
-                print("  ⚠️ %s ベストオファー %s: %s" % (key, i, res))
+                print("  ⚠️ %s ベストオファー %s: %s" % (key, i, res), flush=True)
+            _log_progress(key, i, res)
+            if n % 100 == 0:
+                print("    %s %d/%d 済 (成功 %d)" % (key.upper(), n, len(d["bo"]), done),
+                      flush=True)
         if d["bo"]:
-            print("  ✅ %s ベストオファー: %d件 送信" % (key.upper(), len(d["bo"])))
+            print("  ✅ %s ベストオファー: %d件中 %d件 成功" % (key.upper(), len(d["bo"]), done),
+                  flush=True)
     print(("\n失敗 %d件" % ng) if ng else "\n全件 成功")
     return 1 if ng else 0
 
