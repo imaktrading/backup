@@ -126,3 +126,34 @@ def test_系統ごとに並ぶ():
     # PSA (kuji でない物) を先に、一番くじを後ろに置いている
     assert body.index('"kuji_hoju_fill.py" not in') < body.index('_confirm_idx')
     assert body.rindex('"kuji_hoju_fill.py" in') > body.index('_confirm_idx')
+
+
+# ── 件数はヒントへ / 押すべき時は青 (2026-08-22 ユーザー指示) ────────────
+
+def test_件数をラベルに焼かない():
+    """★以前は件数をラベルに足していたのでボタンが4〜7行に伸び、
+    何のボタンか読めなかった。ラベルは固定にする."""
+    i = SRC.index("def paint_hoju_badge")
+    body = SRC[i:i + 1400]
+    assert "b.config(text=base, height=3," in body
+    assert "base + by_kind" not in body
+
+
+def test_件数はヒントに出す():
+    i = SRC.index("def paint_hoju_badge")
+    body = SRC[i:i + 1400]
+    assert "set_tip(" in body
+
+
+def test_押すべき時だけ青():
+    """色が「今押すといい」の合図。件数が0なら黒のまま."""
+    i = SRC.index("def paint_hoju_badge")
+    body = SRC[i:i + 1400]
+    assert '"#0066cc" if act_kind.get(kind) else "black"' in body
+
+
+def test_ヒントは後から差し替えられる():
+    """件数は起動後に数えるので、固定文では出せない."""
+    i = SRC.index("def _attach_tip")
+    body = SRC[i:i + 1600]
+    assert "def set_text" in body and "return set_text" in body

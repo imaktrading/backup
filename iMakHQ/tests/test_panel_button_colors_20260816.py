@@ -47,7 +47,15 @@ def test_every_badge_button_is_registered():
 
 
 def test_label_fits_in_the_button():
-    """ラベルがボタンからはみ出さない (行数ぶん高さを確保する)。"""
+    """ラベルがボタンからはみ出さない。
+
+    ★2026-08-22 に作りを変えた。以前は件数をラベルに焼いていたので行数が伸び、
+      高さを行数に合わせて広げていた (max(3, min(7, ...)))。
+      いまは **件数をヒントに逃がしてラベルは固定** なので、高さも固定でよい。
+      ユーザー指示「ラベルはシンプルにして、押すべき時は青色に。
+      件数や詳細はヒントテキストに移行」。
+    """
     src = _src()
-    assert "height=max(3, min(7, txt.count(chr(10)) + 2))" in src, "行数に応じた高さ調整が無い"
+    assert "b.config(text=base, height=3," in src, "ラベルを固定にしていない"
+    assert "set_tip(" in src, "件数をヒントに回していない"
     assert "(16, 3, 2, 170) if compact else (18, 3, 4, 250)" in src, "既定の高さ/折返し幅が小さいまま"

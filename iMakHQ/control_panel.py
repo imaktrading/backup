@@ -1613,7 +1613,7 @@ def _attach_tip(widget, text):
     表示に失敗しても**ボタンの動作は妨げない** (装飾なので握って良い)。
     """
     import tkinter as _tk
-    state = {"win": None}
+    state = {"win": None, "text": text}
 
     def show(_e=None):
         if state["win"] is not None:
@@ -1624,7 +1624,7 @@ def _attach_tip(widget, text):
             w = _tk.Toplevel(widget)
             w.wm_overrideredirect(True)
             w.wm_geometry("+%d+%d" % (x, y))
-            _tk.Label(w, text=text, justify="left", background="#ffffe0",
+            _tk.Label(w, text=state["text"], justify="left", background="#ffffe0",
                       relief="solid", borderwidth=1, font=("", 9),
                       wraplength=420, padx=6, pady=4).pack()
             state["win"] = w
@@ -1643,6 +1643,11 @@ def _attach_tip(widget, text):
     widget.bind("<Enter>", show)
     widget.bind("<Leave>", hide)
     widget.bind("<ButtonPress>", hide)
+
+    def set_text(t):
+        """件数など、後から変わる内容を差し替える (2026-08-22)。"""
+        state["text"] = t
+    return set_text
 
 
 class TasksDialog(tk.Toplevel):
@@ -2752,11 +2757,10 @@ class ListingPanel:
                 #   ログ末尾まで読まないと残件が分からず、押す前に「あと何回か」が見えなかった。
                 # ★2026-08-22 ユーザー要望「詳細はヒントテキストにしてラベルはシンプルに」
                 _tip = SCRIPTS[idx].get("tip")
-                if _tip:
-                    _attach_tip(b, _tip)
+                _set_tip = _attach_tip(b, _tip) if _tip else None
                 _bg = SCRIPTS[idx].get("badge")
                 if _bg:                      # ★badge を持つボタンは全部登録 (newcand も)
-                    self._hoju_btns.append((b, text, _bg))
+                    self._hoju_btns.append((b, text, _bg, _set_tip, _tip or ""))
 
         if self.mode == "new":
             # ===== 🆕 新規出品 (カテゴリ名ラベルの大ボタン・間隔詰め) =====
@@ -3058,13 +3062,21 @@ class ListingPanel:
                 pass
 
     def paint_hoju_badge(self, by_kind, act_kind=None):
-        """数えた結果をボタンのラベルに焼く (計算しない・純粋な描画)。"""
+        """数えた結果を **色とヒント** に出す (計算しない・純粋な描画)。
+
+        ★2026-08-22 ユーザー指示「ラベルはシンプルにして、押すべき時は青色に。
+          件数や詳細はヒントテキストに移行」。
+          以前は件数をラベルに焼いていたので、ボタンが4〜7行に伸びて何のボタンか
+          読めなかった。**色 = 今押すべきか / ヒント = 何件あるか**に分けた。
+        """
         act_kind = act_kind or {}
-        for b, base, kind in self._hoju_btns:
+        for b, base, kind, set_tip, tip in self._hoju_btns:
             try:
-                txt = base + by_kind.get(kind, "")
-                b.config(text=txt, height=max(3, min(7, txt.count(chr(10)) + 2)),
+                b.config(text=base, height=3,
                          fg=("#0066cc" if act_kind.get(kind) else "black"))
+                if set_tip:
+                    n = (by_kind.get(kind) or "").strip()
+                    set_tip((tip + chr(10) + chr(10) + n) if n else tip)
             except Exception:                                     # noqa: BLE001
                 pass
 
