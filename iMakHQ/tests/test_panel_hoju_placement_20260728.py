@@ -43,19 +43,19 @@ def _group_of(label):
 
 def test_search_button_is_new_panel_only():
     """🆕 は出品直後専用。"""
-    assert _group_of("🆕 出品直後の補URL候補検索(当日分)") == "hoju"
+    assert _group_of("🆕 補URL 当日分") == "hoju"
 
 
 def test_confirm_button_stays_in_maintenance_and_is_also_shown_in_new_panel():
     """🩹 は既存backlogの定常消化でも使うのでメンテ側に残し、新規パネルには併置する。"""
-    assert _group_of("🩹 補URL補強(昼確認/slice3)") == "report"   # 実体はメンテ側
+    assert _group_of("🩹 補URL slice3") == "report"   # 実体はメンテ側
     src = open(os.path.join(HQ, "control_panel.py"), encoding="utf-8").read()
     assert "_confirm_idx" in src                                  # 新規パネルにも並べている
 
 
 def test_routine_buttons_stay_in_maintenance():
     assert _group_of("📊 補URL件数感(status)") == "report"
-    assert _group_of("🔎 補URL夜間検索(slice2)") == "report"
+    assert _group_of("🔎 補URL slice2") == "report"
 
 
 def test_new_panel_renders_the_hoju_group():

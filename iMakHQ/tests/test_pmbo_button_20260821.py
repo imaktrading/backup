@@ -57,20 +57,20 @@ def test_失敗を黙って飲まない():
 # PSA と同じ 2段 (夜=検索 / 昼=目視)。画面も PSA の確証UI をそのまま使う。
 
 def test_一番くじの補URLボタンが2つある():
-    assert "🎴 くじ補URL 夜間検索" in SRC
-    assert "🎴 くじ補URL 昼確認" in SRC
+    assert "🎴 くじ補URL slice2" in SRC
+    assert "🎴 くじ補URL slice3" in SRC
 
 
 def test_ラベルが長すぎない():
     """★2026-08-22「ラベルがボタンからはみ出ていて、どのボタンが何かわからない」。
     PSA の一番長いラベル (20字) 以下に収める."""
-    for lb in ("🎴 くじ補URL 夜間検索", "🎴 くじ補URL 昼確認"):
+    for lb in ("🎴 くじ補URL slice2", "🎴 くじ補URL slice3"):
         assert len(lb) <= 20, lb
 
 
 def test_一番くじは絵文字で見分けられる():
     """★PSA と混ざって見えた。一番くじは 🎴 を頭に付けて系統を揃える."""
-    for lb in ("🎴 くじ補URL 夜間検索", "🎴 くじ補URL 昼確認"):
+    for lb in ("🎴 くじ補URL slice2", "🎴 くじ補URL slice3"):
         assert lb.startswith("🎴")
 
 
@@ -91,3 +91,38 @@ def test_昼は件数を区切る():
     PSA と同じく1回10件ずつ."""
     i = SRC.index('"kuji_hoju_fill.py", "--confirm"')
     assert "--limit=10" in SRC[i:i + 120]
+
+
+# ── ラベルを短く / 詳細はヒント / 系統ごとに並べる (2026-08-22 ユーザー指摘) ──
+
+def test_ラベルは短い():
+    """★「ラベルがボタンからはみ出ていて、どのボタンが何かわからない」."""
+    import re
+    for m in re.finditer(r'"label": "([^"]*補URL[^"]*)"', SRC):
+        assert len(m.group(1)) <= 17, m.group(1)
+
+
+def test_詳細はヒントに逃がしている():
+    """★「詳細はヒントテキストにしてボタンのラベルはシンプルに」."""
+    assert "_attach_tip" in SRC
+    for lb in ("🔎 補URL slice2", "🩹 補URL slice3",
+               "🎴 くじ補URL slice2", "🎴 くじ補URL slice3"):
+        i = SRC.index('"label": "%s"' % lb)
+        assert '"tip"' in SRC[i:i + 400], lb
+
+
+def test_ヒントが出せなくてもボタンは動く():
+    """装飾なので、表示に失敗しても押せなくならない."""
+    i = SRC.index("def _attach_tip")
+    body = SRC[i:i + 1400]
+    assert "except Exception" in body
+
+
+def test_系統ごとに並ぶ():
+    """★「ボタン配置が、PSA、一番くじ、一番くじ、PSA になっている」.
+    PSA をまとめてから 一番くじ。"""
+    i = SRC.index("_order = (")
+    body = SRC[i:i + 600]
+    # PSA (kuji でない物) を先に、一番くじを後ろに置いている
+    assert body.index('"kuji_hoju_fill.py" not in') < body.index('_confirm_idx')
+    assert body.rindex('"kuji_hoju_fill.py" in') > body.index('_confirm_idx')

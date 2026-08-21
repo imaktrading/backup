@@ -144,6 +144,17 @@ def test_no_candidates_is_still_gap(monkeypatch):
     assert res["status"] == "GAP"
 
 
+def oos(brand):
+    """psa_preflight が実際に使う scope 判定 (= tcg_scope 1本 / 2026-08-21)。
+
+    `out_of_scope_by_brand` は削除。真理表を2箇所に持っていたせいで tcg_scope 側の
+    修正が preflight に届いていなかった (回答書
+    2026-08-19_psa_preflight_scope_ssot_gap_response.md)。
+    """
+    fired, why = P.is_out_of_scope(P.detect_franchise_from_brand(brand), brand)
+    return why if fired else None
+
+
 def test_pokemon_neo_era_is_out_of_scope():
     """Pokemon Neo 期 (2000年) は catalog に 0件。実測で確定 (2026-08-09).
 
@@ -151,29 +162,37 @@ def test_pokemon_neo_era_is_out_of_scope():
     ヘラクロス24件の最古も `L1-Bhg-012` `DPt-...` で neo 期は無い。
     catalog も `prune_missing_models.py` で「Neo era」を対象外と宣言済。
     """
-    why = P.out_of_scope_by_brand("POKEMON JAPANESE NEO")
+    why = oos("POKEMON JAPANESE NEO")
     assert why and "Neo" in why
 
 
 def test_neo_is_matched_as_a_word_not_substring():
     """`NEON` のような語を巻き込まない。"""
-    assert P.out_of_scope_by_brand("POKEMON JAPANESE NEON GENESIS") is None
+    assert oos("POKEMON JAPANESE NEON GENESIS") is None
 
 
 def test_japanese_yugioh_is_out_of_scope():
     """catalog の yugioh は英語版のみ (product_id に JP が0件 / EN が34,936件)。"""
-    why = P.out_of_scope_by_brand("YU-GI-OH! JAPANESE TDPP-PREMIUM PACK")
-    assert why and "Yu-Gi-Oh" in why
+    why = oos("YU-GI-OH! JAPANESE TDPP-PREMIUM PACK")
+    assert why and "遊戯王" in why
 
 
-def test_english_yugioh_is_not_excluded():
-    """英語版は catalog が持っているので落とさない。"""
-    assert P.out_of_scope_by_brand("YU-GI-OH! LEGENDARY COLLECTION") is None
+def test_english_yugioh_is_also_out_of_scope():
+    """★2026-08-21 で挙動が変わった箇所。英語版 Yu-Gi-Oh も対象外になる。
+
+    旧 `out_of_scope_by_brand` は「日本語版 Yu-Gi-Oh だけ」対象外にしていたが、
+    SSOT の tcg_scope は **遊戯王を丸ごと対象外**にしている (catalog日本版未収録)。
+    委譲した結果、preflight のラベルが tcg_scope に揃う。
+    出品は増減しない: `build_row` は前から tcg_scope で遊戯王を skip しており、
+    英語版 Yu-Gi-Oh は元々1件も出品されていない。変わるのは preflight のラベルだけ。
+    """
+    why = oos("YU-GI-OH! LEGENDARY COLLECTION")
+    assert why and "遊戯王" in why
 
 
 def test_modern_japanese_pokemon_is_not_excluded():
     """現行の日本語 Pokemon を巻き込まない (これを落とすと出品が死ぬ)。"""
-    assert P.out_of_scope_by_brand("POKEMON JAPANESE SWORD & SHIELD VMAX CLIMAX") is None
+    assert oos("POKEMON JAPANESE SWORD & SHIELD VMAX CLIMAX") is None
 
 
 def test_sdbh_never_reaches_review(monkeypatch):

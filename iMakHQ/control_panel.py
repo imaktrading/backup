@@ -1359,7 +1359,8 @@ SCRIPTS = [
         # 当日の新規カードを拾えない(itemID がまだ無い)。itemID が付いた時点は人しか知らないため、
         # 自動化せずボタンにする(ユーザー提案)。対象は新規優先の並びで先頭に来る。
         "category": None, "type": "utility",
-        "label": "🆕 出品直後の補URL候補検索(当日分)",
+        "label": "🆕 補URL 当日分",
+        "tip": "出品した直後に押す。その日に出した分だけ、仕入元の候補を今すぐ検索する。夜間検索(slice2)を待たずに供給を確保したい時に使う。",
         "badge": "hoju_search",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
@@ -1370,7 +1371,8 @@ SCRIPTS = [
     {
         # slice2: 補が薄い live PSA を mercari/snkrdunk 検索→候補+画像を cache(補URL列は触らない)。無人可・停止可。
         "category": None, "type": "utility",
-        "label": "🔎 補URL夜間検索(slice2)",
+        "label": "🔎 補URL slice2",
+        "tip": "夜間検索。補URLが薄い出品の仕入元候補を探して溜めるだけで、補URL欄には書かない。毎晩23:30 に自動で走るので、普段は押す必要がない。",
         "badge": "hoju_search",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
@@ -1381,7 +1383,8 @@ SCRIPTS = [
     {
         # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
         "category": None, "type": "utility",
-        "label": "🩹 補URL補強(昼確認/slice3)",
+        "label": "🩹 補URL slice3",
+        "tip": "昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。1回10件ずつ。出した分は最後までやり切る作り。",
         "badge": "hoju_confirm",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
@@ -1420,7 +1423,8 @@ SCRIPTS = [
         # ★2026-08-22: 一番くじの補URLも PSA と同じ 2段 (夜=検索 / 昼=目視) にした。
         #   画面は PSA の確証UI をそのまま使う (見た目・操作が分かれないように)。
         "category": None, "type": "utility",
-        "label": "🎴 くじ補URL 夜間検索",
+        "label": "🎴 くじ補URL slice2",
+        "tip": "一番くじ版の夜間検索。PSA の slice2 と同じ動き。候補を溜めるだけで補URL欄には書かない。",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "kuji_hoju_fill.py", "--search"],
@@ -1430,7 +1434,8 @@ SCRIPTS = [
     {
         # slice3: 夜に貯めた候補を現物と見比べて、選んだ分だけ補URL(AC-AG)へ書く。主URL不可触。
         "category": None, "type": "utility",
-        "label": "🎴 くじ補URL 昼確認",
+        "label": "🎴 くじ補URL slice3",
+        "tip": "一番くじ版の昼の目視確認。画面は PSA と同じ物を使う。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。1回10件ずつ。",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         # PSA と同じく1回10件ずつ (確証UIは全件まとめて送信する = 出した分はやり切る)。
@@ -1599,6 +1604,45 @@ def nightly_search_state(task=_NIGHTLY_TASK):
         out["why"] = "%s" % type(e).__name__
     _NIGHTLY_CACHE.update(out)
     return out
+
+
+def _attach_tip(widget, text):
+    """ボタンにカーソルを乗せたら説明を出す (2026-08-22 ユーザー要望)。
+
+    ラベルを短くする代わりに、長い説明はここへ逃がす。
+    表示に失敗しても**ボタンの動作は妨げない** (装飾なので握って良い)。
+    """
+    import tkinter as _tk
+    state = {"win": None}
+
+    def show(_e=None):
+        if state["win"] is not None:
+            return
+        try:
+            x = widget.winfo_rootx() + 12
+            y = widget.winfo_rooty() + widget.winfo_height() + 4
+            w = _tk.Toplevel(widget)
+            w.wm_overrideredirect(True)
+            w.wm_geometry("+%d+%d" % (x, y))
+            _tk.Label(w, text=text, justify="left", background="#ffffe0",
+                      relief="solid", borderwidth=1, font=("", 9),
+                      wraplength=420, padx=6, pady=4).pack()
+            state["win"] = w
+        except Exception:                                     # noqa: BLE001
+            state["win"] = None
+
+    def hide(_e=None):
+        w = state["win"]
+        state["win"] = None
+        if w is not None:
+            try:
+                w.destroy()
+            except Exception:                                 # noqa: BLE001
+                pass
+
+    widget.bind("<Enter>", show)
+    widget.bind("<Leave>", hide)
+    widget.bind("<ButtonPress>", hide)
 
 
 class TasksDialog(tk.Toplevel):
@@ -2706,6 +2750,10 @@ class ListingPanel:
                 b.grid(row=k // ncol, column=k % ncol, padx=pad, pady=pad, sticky="nsew")
                 # ★残件をラベルに出すボタンは参照を持つ (2026-08-09 ユーザー要望)。
                 #   ログ末尾まで読まないと残件が分からず、押す前に「あと何回か」が見えなかった。
+                # ★2026-08-22 ユーザー要望「詳細はヒントテキストにしてラベルはシンプルに」
+                _tip = SCRIPTS[idx].get("tip")
+                if _tip:
+                    _attach_tip(b, _tip)
                 _bg = SCRIPTS[idx].get("badge")
                 if _bg:                      # ★badge を持つボタンは全部登録 (newcand も)
                     self._hoju_btns.append((b, text, _bg))
@@ -2760,7 +2808,14 @@ class ListingPanel:
                 _confirm_idx = [i for i, sc in enumerate(SCRIPTS)
                                 if "psa_hoju_fill.py" in " ".join(sc.get("cmd", []))
                                 and "confirm" in sc.get("cmd", [])]
-                _grid_named(hj, [(SCRIPTS[i]["label"], i) for i in ug["hoju"] + _confirm_idx])
+                # ★2026-08-22: 並びが PSA / くじ / くじ / PSA になっていた (ユーザー指摘)。
+                #   `ug["hoju"]` の後ろに PSA の昼確認を足していたため。**系統ごとに固める**。
+                _order = ([i for i in ug["hoju"] if "kuji_hoju_fill.py" not in
+                           " ".join(SCRIPTS[i].get("cmd", []))]
+                          + _confirm_idx
+                          + [i for i in ug["hoju"] if "kuji_hoju_fill.py" in
+                             " ".join(SCRIPTS[i].get("cmd", []))])
+                _grid_named(hj, [(SCRIPTS[i]["label"], i) for i in _order])
         else:
             # ===== 🔧 既存メンテ =====
             REPORTS_DIR = r"C:/dev/iMak_data/seller_hub/reports"
