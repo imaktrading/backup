@@ -1900,6 +1900,11 @@ class HomePanel:
             pass
         ttk.Button(nav, text="🔄 更新", command=self.refresh_dashboard).pack(side="right", padx=2)
         ttk.Button(nav, text="⏰ 定期", command=self.open_schedules).pack(side="right", padx=2)
+        # ★2026-08-21: UK/AU/CA のミラー出品に 広告10% と ベストオファー を付ける。
+        #   人が3サイトの画面を回って手でやっていた作業 (ユーザー依頼)。
+        self.pmbo_btn = ttk.Button(nav, text="📣 Pm/Bo", style="Offer.TButton",
+                                   command=self.open_mirror_pmbo)
+        self.pmbo_btn.pack(side="right", padx=2)
         self.offer_btn = ttk.Button(nav, text="💰 オファー対応", style="Offer.TButton",
                                     command=self.open_offer_calc)
         self.offer_btn.pack(side="right", padx=2)
@@ -2309,6 +2314,58 @@ class HomePanel:
                 _label("💰 オファー対応")
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def open_mirror_pmbo(self):
+        """UK/AU/CA のミラー出品に 広告10% と ベストオファー を付ける (2026-08-21)。
+
+        ★いきなり書かない。**まず対象を数えて見せて、人が了解してから**実行する。
+          3,500件規模を1件ずつ書き換える処理なので、押し間違いで走らせない。
+        """
+        import threading
+
+        btn = getattr(self, "pmbo_btn", None)
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "tools", "mirror_promo_bestoffer.py")
+
+        def _label(text):
+            if btn is not None:
+                try:
+                    self.root.after(0, lambda: btn.config(text=text))
+                except Exception:                             # noqa: BLE001
+                    pass
+
+        def _run(write):
+            env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+            args = [sys.executable, "-X", "utf8", script] + (["--write"] if write else [])
+            _label("📣 実行中…" if write else "📣 数えています…")
+            try:
+                r = subprocess.run(args, cwd=os.path.dirname(script), env=env,
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   timeout=10800 if write else 1800)
+                out = (r.stdout or "") + (r.stderr or "")
+                if r.returncode not in (0, 1):
+                    raise RuntimeError(out[-400:])
+            except Exception as e:                            # noqa: BLE001
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Pm/Bo", f"失敗しました:\n{e}"))
+                _label("📣 Pm/Bo")
+                return
+            _label("📣 Pm/Bo")
+            if write:
+                self.root.after(0, lambda: messagebox.showinfo("Pm/Bo 完了", out[-1500:]))
+                return
+            # 一覧を見せて、了解が取れた時だけ本番へ
+            summary = "\n".join(ln for ln in out.splitlines()
+                                 if ln.strip() and not ln.startswith("→"))
+
+            def _ask():
+                if messagebox.askyesno("Pm/Bo — この内容で付けますか",
+                                       summary[-1500:] + "\n\n実行しますか?"):
+                    threading.Thread(target=_run, args=(True,), daemon=True).start()
+            self.root.after(0, _ask)
+
+        threading.Thread(target=_run, args=(False,), daemon=True).start()
 
     def open_listing(self, mode="new"):
         """新規出品 / 既存メンテ を別ウィンドウで開く（既にあれば前面表示）。"""
