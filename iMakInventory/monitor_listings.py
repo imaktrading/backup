@@ -316,12 +316,26 @@ def _check_single_url(url: str, sleep_sec: float = DEFAULT_SLEEP_SEC,
     # ★ 2026-08-19 楽天: 在庫ありでも「予約 (未発売)」なら売れても発送できない
     #   (= キャンセル → Defect Rate)。入稿時は即納品だけだが、後から予約に切り替わる。
     #   売切ではないので **取下げはしない**。無言で流さず、気づく口を残す。
-    if info.get("is_preorder") is True:
-        out["preorder"] = True
-        out["delivery_message"] = info.get("delivery_message", "")
-        out["raw_status"] = f"{out['raw_status']}(予約:{out['delivery_message'][:20]})"
-        log(f"    [!] 予約に切替: {url} / {out['delivery_message'][:40]} "
-            f"(在庫ありだが発送不可、取下げはしない)")
+    # ★ 2026-08-21 窓口 GO (`2026-08-19_rakuten_delivery_wording_ssot_response.md`):
+    #   **None (= 即納と読めない) も要対応に上げる**。旧実装は True しか拾わず、条件表に
+    #   当たらない文言 (取寄せ・入荷次第・文言変更) が無言で通っていた (= fail-OPEN)。
+    #   None を素通しすると「即納として監視し続ける」= 売れてから発送不能が発覚する。
+    #   楽天以外の scraper は is_preorder を返さない (= 常に None) ので supplier で限定する。
+    if supplier == "rakuten":
+        is_pre = info.get("is_preorder")
+        if is_pre is True:
+            out["preorder"] = True
+            out["delivery_message"] = info.get("delivery_message", "")
+            out["raw_status"] = f"{out['raw_status']}(予約:{out['delivery_message'][:20]})"
+            log(f"    [!] 予約に切替: {url} / {out['delivery_message'][:40]} "
+                f"(在庫ありだが発送不可、取下げはしない)")
+        elif is_pre is None:
+            out["preorder"] = None
+            out["delivery_message"] = info.get("delivery_message", "")
+            out["raw_status"] = f"{out['raw_status']}(即納不明:{out['delivery_message'][:20]})"
+            log(f"    [!] 即納か判定不能: {url} / "
+                f"{out['delivery_message'][:40] or '(配送メッセージ無し)'} "
+                f"(要対応 — 取下げはしない)")
 
     raw_price = skus[0].get("price_jpy")
     if isinstance(raw_price, int) and not isinstance(raw_price, bool) and raw_price >= 0:

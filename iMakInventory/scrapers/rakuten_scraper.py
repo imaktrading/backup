@@ -28,9 +28,11 @@ HQ 2026-08-19 依頼 (`inventory/requests/2026-08-19_gacha_capsule_stock_watch*.
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import requests
@@ -66,8 +68,43 @@ PRICE_RE = re.compile(r'itemprop="price"[^>]*content="(\d+)"')
 NAME_RE = re.compile(r'<meta[^>]+itemprop="name"[^>]+content="([^"]{1,200})"')
 DELIVERY_RE = re.compile(r'["\']deliveryMessage["\']\s*:\s*["\']([^"\']{0,80})')
 
-#: 予約 (未発売) を示す語。これが配送メッセージにあれば「まだ発送できない」。
-PREORDER_MARKERS = ("発売予定", "予約", "入荷予定", "発送予定日未定")
+# ============================================================================
+# 即納/予約 の条件表 (SSOT) — 2026-08-21 窓口 GO
+#   `2026-08-19_rakuten_delivery_wording_ssot_response.md`
+#   ★ 正規表現をここに書き写さない。監視くん・抽出くん・出品側が同じ JSON を読む。
+#   旧実装は「否定語が無ければ即納」で、取寄せ・入荷次第を即納と誤判定していた (fail-OPEN)。
+#   新: DENY に当たれば予約 / IMMEDIATE に当たれば即納 / どちらも当たらなければ **判定不能**。
+# ============================================================================
+DELIVERY_RULE_PATH = Path(r"C:/dev/iMak_data/shared/rakuten_delivery_rule.json")
+
+_RULE_CACHE: Optional[tuple] = None
+
+
+def _delivery_patterns() -> tuple:
+    """(deny_re, immediate_re) を返す。条件表が読めなければ (None, None).
+
+    読めない = 判定できない。即納だと決めつけず全件「判定不能」に倒す (fail-closed)。
+    """
+    global _RULE_CACHE
+    if _RULE_CACHE is None:
+        try:
+            rule = json.loads(DELIVERY_RULE_PATH.read_text(encoding="utf-8"))
+            _RULE_CACHE = (re.compile(rule["deny"]), re.compile(rule["immediate"]))
+        except Exception:
+            _RULE_CACHE = (None, None)
+    return _RULE_CACHE
+
+
+def judge_delivery(msg: str) -> Optional[bool]:
+    """配送メッセージ → True=予約 / False=即納 / None=判定不能 (呼出側で skip)."""
+    deny_re, imm_re = _delivery_patterns()
+    if deny_re is None or imm_re is None or not msg:
+        return None
+    if deny_re.search(msg):
+        return True
+    if imm_re.search(msg):
+        return False
+    return None            # 即納と読めない = 掴まない (取寄せ等がここに落ちる)
 
 
 def parse_product_id(url: str) -> Optional[str]:
@@ -110,12 +147,15 @@ def detect_stock(html: str) -> tuple[Optional[bool], str]:
 
 
 def detect_preorder(html: str) -> tuple[Optional[bool], str]:
-    """(is_preorder, delivery_message)。メッセージが無ければ (None, "")."""
+    """(is_preorder, delivery_message)。True=予約 / False=即納 / None=判定不能.
+
+    メッセージ欠落・decode 失敗の残骸・条件表に当たらない文言は全て None。
+    """
     m = DELIVERY_RE.search(html or "")
     if not m:
         return None, ""
     msg = m.group(1).strip()
-    return any(k in msg for k in PREORDER_MARKERS), msg
+    return judge_delivery(msg), msg
 
 
 def _extract_price_jpy(html: str) -> Optional[int]:
