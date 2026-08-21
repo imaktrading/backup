@@ -98,6 +98,10 @@ def shape(aspects: list) -> dict:
                 "usage": c.get("aspectUsage"),
                 "mode": c.get("aspectMode"),
                 "data_type": c.get("aspectDataType"),
+                # ★2026-08-22 追加: 複数値を入れてよい aspect かどうか。
+                #   これを落とすと Features のような項目で「1つしか入れられない」と
+                #   誤解する (旧マスタには在ったのに新しい取得で落ちていた)。
+                "cardinality": c.get("itemToAspectCardinality"),
             },
         }
     return out
