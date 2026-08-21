@@ -169,10 +169,17 @@ def test_real_food_is_rejected(title):
     assert not is_toy(title)
 
 
-def test_toy_word_is_required_not_just_food_word_absence():
-    """おもちゃ語が無ければ通さない (fail-closed)."""
+def test_toy_word_is_no_longer_required():
+    """★2026-08-21 方針変更: おもちゃ語の白リストはやめた。
+
+    白リスト方式は **菓子と無関係のただの玩具を大量に落としていた**
+    (実測 auc-toysanta 180件中91件が not_toy、うち約60件が玩具)。
+    `is_toy` を呼ぶ前に `is_complete_set` (= ガチャのコンプ品) が通っているので、
+    見るべきは「食べ物が入っているか」だけ。
+    """
     from scrapers.rakuten_search import is_toy
-    assert not is_toy("サンリオ 全5種セット")
+    assert is_toy("サンリオ 全5種セット")
+    assert not is_toy("サンリオ 全5種セット お菓子 詰め合わせ")
 
 
 # --------------------------------------------------------------------------
@@ -347,3 +354,34 @@ def test_shop_of_and_tab_name():
     assert shop_of(u) == "auc-toysanta"
     assert build_tab_name(shop_of(u)) == "rakuten_auc_toysanta"
     assert shop_of("https://example.com/x") == ""
+
+
+# --------------------------------------------------------------------------
+# 食べ物の扱い (2026-08-21 改訂)
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("title,keep", [
+    # お菓子の **ミニチュア** は玩具 (user 確定 2026-08-19)
+    ("ぷるんと蒟蒻ゼリー ミニチュアチャーム 全5種セット", True),
+    ("つぶグミ ミニチュアチャーム 全7種セット", True),
+    # おもちゃ語が無くても、 コンプ品と分かっていれば通す (2026-08-21 改訂)
+    ("溶けてる！猫ちゃあぁぁん [全5種セット(フルコンプ)]", True),
+    ("ちいかわ きゃらまかろん(再販) [全4種セット(フルコンプ)]", True),
+    ("Capsule Flockies パペットスンスン [全4種セット(フルコンプ)]", True),
+    # 実際にお菓子が入っている物は落とす (テンプレ対応まで)
+    ("おぱんちゅうさぎとわんころマスコット ビスケットつき 全10種セット", False),
+    ("ワンピース大海賊シールウエハースLOG.15 全38種セット", False),
+    ("ズートピア カードソフトクッキー 全33種セット", False),
+    # 実食品そのもの
+    ("お菓子 詰め合わせ 業務用 全5種", False),
+    ("駄菓子 内容量 500g 全5種", False),
+])
+def test_is_toy_blocks_only_real_food(title, keep):
+    from scrapers.rakuten_search import is_toy
+    assert is_toy(title) is keep
+
+
+def test_is_snack_toy_marks_candy_included():
+    """テンプレに「お菓子は付けません」が入ったら通す候補を数えられるようにする."""
+    from scrapers.rakuten_search import is_snack_toy
+    assert is_snack_toy("ワンピース大海賊シールウエハース 全38種セット") is True
+    assert is_snack_toy("ぷるんと蒟蒻ゼリー ミニチュアチャーム 全5種セット") is False
