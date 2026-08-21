@@ -34,9 +34,12 @@ from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
 
 DUMP_DIR = ROOT / "debug"
-SHOPS = ("auc-toysanta", "auc-yuyou", "mirakikaku", "smltrading")
-# ★jugem2020 は外した (2026-08-20)。 検索には出るのに商品ページが全部 404 で、
-#   開くと店トップへ転送される。 集めた32件は全滅だった。
+SHOPS = ("auc-toysanta", "auc-yuyou", "mirakikaku")
+# ★外した店 (2026-08-21):
+#   jugem2020  … 検索には出るのに商品ページが全部404。開くと店トップへ転送される
+#                (集めた32件は全滅)
+#   smltrading … 開いた3件が3件とも予約品。採用実績0
+#   kidsroom   … どの検索でも0件
 # kidsroom は 2026-08-20 に外した (どの検索でも0件)。
 # jugem2020 / smltrading は バンダイのコンプ品が多い店として追加。
 
