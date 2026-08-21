@@ -1380,6 +1380,78 @@ def _catalog_has_pid(category: str, pid: str, db_path=None) -> bool | None:
     return state is not _PID_MISSING
 
 
+def _ident_norm(v):
+    """同定の突合用に正規化 (純関数)。記号と大小と空白の差だけを吸収する。"""
+    import re as _re
+    import unicodedata as _ud
+    # ★アクセントを落とす。落とさないと Pokemon(PSA) と Pokémon(catalog) が
+    #   別物になり、一致するはずの行が「不一致」に倒れる (2026-08-21 実測)
+    v = _ud.normalize("NFKD", (v or "").strip().lower())
+    v = "".join(ch for ch in v if not _ud.combining(ch))
+    return _re.sub(r"[^a-z0-9]+", "", v)
+
+
+def identity_matches(psa: dict, cat: dict) -> bool:
+    """PSA の Subject / CardNumber / Brand が catalog 行と **全部一致**するか (純関数)。
+
+    ★2026-08-21: 目視で「該当なし」と押されると、catalog に行が在っても
+      「兄弟 variant が欠けている」と断定して catalog 依頼に流していた。
+      実測 (不一致台帳18件) では 17件が本物の variant 欠落だったが、
+      1件 (cert78976849 かがやくイーブイ) は **人の見間違い**だった。
+      公式スキャンはホロの虹格子で絵柄が白飛びし、PSA 実写はスラブ越しで
+      自然発色するので、同じカードが別絵柄に見える。
+
+      求めている variant が実在しないので、この依頼は **永久に閉じられない**。
+      3つとも一致する時は catalog に流さず、人にもう一度見てもらう。
+
+    照合に使うのは PSA が持っている構造化フィールドだけ。絵柄語のリストは使わない
+    (載っていない語で穴が開くため。2026-08-19 の既存判断と同じ)。
+    """
+    subj = _ident_norm(psa.get("subject"))
+    if not subj or subj != _ident_norm(cat.get("name_en")):
+        return False
+    no = _ident_norm(psa.get("card_number"))
+    cno = _ident_norm((cat.get("card_number_text") or "").split("/")[0])
+    if not no or no != cno:
+        return False
+    brand = _ident_norm(psa.get("brand"))
+    if not brand:
+        return False
+    return any(brand == _ident_norm(cat.get(k)) or
+               (_ident_norm(cat.get(k)) and _ident_norm(cat.get(k)) in brand) or
+               (brand and brand in _ident_norm(cat.get(k)))
+               for k in ("set_name", "set_name_official", "set_name_ebay")
+               if cat.get(k))
+
+
+def catalog_identity(category: str, pid: str, db_path=None):
+    """catalog 行の同定用フィールドを返す。取れなければ None (推測しない)。"""
+    if not pid or pid.strip() in ("", "無"):
+        return None
+    p = Path(db_path) if db_path else CATALOG_DB
+    try:
+        con = sqlite3.connect(str(p))
+        try:
+            row = con.execute(
+                "select name_en, set_name, set_name_official, specs from products "
+                "where category=? and product_id=?", (category, pid.strip())).fetchone()
+        finally:
+            con.close()
+    except Exception:                                          # noqa: BLE001
+        return None
+    if not row:
+        return None
+    out = {"name_en": row[0], "set_name": row[1], "set_name_official": row[2]}
+    try:
+        import json as _json
+        sp = _json.loads(row[3] or "{}")
+        out["card_number_text"] = sp.get("card_number_text") or ""
+        out["set_name_ebay"] = sp.get("set_name_ebay") or ""
+    except Exception:                                          # noqa: BLE001
+        out["card_number_text"] = ""
+    return out
+
+
 # catalog 行の状態 (目視に使えるか)。
 _PID_OK = "ok"              # 行あり + 画像あり = viewer で現物と照合できる
 _PID_NO_IMAGE = "no_image"  # 行あり + 画像なし = **目視できない** → catalog の宿題
@@ -1524,6 +1596,16 @@ def _route_none_to_catalog(none_records: list[dict], missing_path=None,
                                 )
                         except Exception:
                             pass
+                        # ★2026-08-21: PSA の同定が catalog 行と全部一致するなら、
+                        #   欠けている variant は存在しない = この依頼は永久に閉じられない。
+                        #   catalog へ流さず、人にもう一度見てもらう側に回す。
+                        _cat = catalog_identity(category, expected, db_path=catalog_db)
+                        if _cat and identity_matches(
+                                {"subject": subject, "card_number": cardno,
+                                 "brand": brand}, _cat):
+                            print(f"    🔁 catalog依頼にしない (PSAの同定が catalog と全一致 "
+                                  f"= 人の見間違いの可能性): cert{cert} {category}:{expected}")
+                            continue
                 # 画像欠は「該当なし」ではなく「画像が無くて目視できない」。何を直せばよいかが
                 # 依頼書で一目で分かるように理由を書き分ける (2026-08-09)。
                 if pid_state is _PID_NO_IMAGE:
