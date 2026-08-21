@@ -81,6 +81,30 @@ set_name = result["set_name"]  # eBay フィルタ値で取れる
 - `2026-08-10_ssot_contract_master_coverage_and_leaf_check_response_question_response.md`
   §item 1 [IMPLEMENT-GO] / §item 3 (producer 側導出) やらない決定
 
+### Finish (キラかどうか) は空欄が正 — 埋めようとしない (2026-08-22 ユーザー確定)
+
+**`specs.finish` は空欄のままにする。レアリティやセットから推測して埋めてはいけない。**
+
+理由: **現物を見ないと決まらないから**。公式データに foil/holo を示す項目が無い
+(one_piece の specs 33キーを全部見て確認済み)。
+
+★レアリティからの推測は**できない**。同じカードにキラ版と通常版があり、
+  **レアリティは同じ**。eBay の Finish は4値 (`Foil` / `Holo` / `Regular` / `Reverse Holo`) で
+  `Holo` と `Reverse Holo` は別の値なので、レアリティで決めると誤った値が混ざる。
+
+**例外**: 公式が「全カード foil」等と明記している商品だけ入れてよい。
+実績 (2026-08-22 時点で 136行のみ):
+
+    Holo             92行  ポケモンカードゲーム クラシック 3デッキ (公式が「all as foil cards」と明記)
+    Holo             24行  プロモカードパック 25th (公式サイトで確認)
+    Mirror Holofoil  13行  pokemon_card_jp が返した値
+
+#### 蒸し返し防止
+
+監査や棚卸しで「Finish が 0%」と出ても、**それは穴ではなく仕様**。
+埋める提案が来たら、この節を示して却下してよい。
+根拠が変わる条件は1つだけ: **公式データに foil/holo の項目が増えた時**。
+
 ### eBay "Set" 欄に何を入れるか — ルール案 (2026-08-21 / ★未確定・データ修正は禁止)
 
 > **状態: 出品くんの回答待ち。** Gemini 二次検証は通したが、eBay の Set 値リストと
