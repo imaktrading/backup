@@ -1,0 +1,96 @@
+{
+  "kept": [
+    {
+      "url": "https://item.rakuten.co.jp/jugem2020/202608071052/",
+      "code": "202608071052",
+      "title": "【全4種コンプリートセット】体格ブラザーズ ビッグボディー?コレクション タカラトミーアーツ ガチャガチャ カプセルトイ：JUGEM　楽天市場店",
+      "shop": "jugem2020",
+      "theme": "コンプリート",
+      "price_jpy": "6480",
+      "image_urls": [
+        "https://shop.r10s.jp/jugem2020/cabinet/12637066/imgrc0138207455.jpg"
+      ],
+      "description": "【全4種コンプリートセット】 秋山さん（リュウ）BIGフィギュア 平子さん（ユウ）BIGフィギュア 秋山さん（リュウ）額装キーホルダー 平子さん（ユウ）額装キーホルダー ※カプセルは付属しません。",
+      "shipping": "2～5日以内に発送",
+      "shipping_fee": 0,
+      "total_jpy": "6480"
+    },
+    {
+      "url": "https://item.rakuten.co.jp/jugem2020/202607301455/",
+      "code": "202607301455",
+      "title": "【全5種コンプリートセット】サンリオキャラクターズ きらきらこんぺいとうチャーム タカラトミーアーツ ガチャガチャ ガシャポン カプセルトイ 金平糖：JUGEM　楽天市場店",
+      "shop": "jugem2020",
+      "theme": "コンプリート",
+      "price_jpy": "4500",
+      "image_urls": [
+        "https://shop.r10s.jp/jugem2020/cabinet/12637066/imgrc0137824898.jpg"
+      ],
+      "description": "【全5種コンプリートセット】 ハローキティ シナモロール ポムポムプリン クロミ マイメロディ ※カプセルは付属しません。",
+      "shipping": "2～5日以内に発送",
+      "shipping_fee": 0,
+      "total_jpy": "4500"
+    },
+    {
+      "url": "https://item.rakuten.co.jp/jugem2020/202607271230/",
+      "code": "202607271230",
+      "title": "【全7種コンプリートセット】CHUMSおにぎりフレンズつながリングチャーム タカラトミーアーツ ガチャガチャ ガシャポン カプセルトイ チャムス：JUGEM　楽天市場店",
+      "shop": "jugem2020",
+      "theme": "コンプリート",
+      "price_jpy": "6800",
+      "image_urls": [
+        "https://shop.r10s.jp/jugem2020/cabinet/12637066/imgrc0136681381.jpg"
+      ],
+      "description": "【全7種類コンプリートセット】 「おにぎり」 「うめ」 「てんむす」 「しそ」 「まめ」 「やき」 「しお」 ※カプセルは付属しません。",
+      "shipping": "2～5日以内に発送",
+      "shipping_fee": 0,
+      "total_jpy": "6800"
+    },
+    {
+      "url": "https://item.rakuten.co.jp/jugem2020/202607141604/",
+      "code": "202607141604",
+      "title": "【全8種コンプリートセット】つながリングチャーム どうぶつの森 タカラトミーアーツ ガチャガチャ ガチャポン ガシャポン カプセルトイ：JUGEM　楽天市場店",
+      "shop": "jugem2020",
+      "theme": "コンプリート",
+      "price_jpy": "8800",
+      "image_urls": [
+        "https://shop.r10s.jp/jugem2020/cabinet/12637066/imgrc0135940721.jpg"
+      ],
+      "description": "【全8種コンプリートセット】 「しずえ」 「まめきち」 「とたけけ」 「ブーケ」 「ハムスケ」 「ララミー」 「ゆきだるま」 「はにわ」 ※カプセルは付属しません。",
+      "shipping": "2～5日以内に発送",
+      "shipping_fee": 0,
+      "total_jpy": "8800"
+    },
+    {
+      "url": "https://item.rakuten.co.jp/jugem2020/0324042200000/",
+      "code": "0324042200000",
+      "title": "【全4種コンプリートセット】サンリオキャラクターズ なかよしドロップチャーム タカラトミーアーツ ガチャガチャ ガチャポン ガシャポン カプセルトイ キーホルダー ハローキティ マイメロディ クロミ キキララ ポムポムプリン ガチャ",
+      "shop": "jugem2020",
+      "theme": "コンプリート",
+      "price_jpy": "2980",
+      "image_urls": [
+        "https://shop.r10s.jp/jugem2020/cabinet/12637066/imgrc0121627844.jpg"
+      ],
+      "description": "本体サイズは約3cm。 「ハローキティ×ハローミミィ」 「マイメロディ×クロミ」 「ポムポムプリン×チームプリン」 「リトルツインスターズ」の全4種。 【全4種コンプリートセット】 ※カプセルは付属しません。",
+      "shipping": "2～5日以内に発送",
+      "shipping_fee": 0,
+      "total_jpy": "2980"
+    }
+  ],
+  "failed_urls": [],
+  "detail_reject": {
+    "preorder": 0,
+    "no_shipping_info": 2,
+    "fetch_fail": 0,
+    "quota_full": 0,
+    "maker_ng": 4,
+    "age_ng": 0
+  },
+  "search_reject": {
+    "not_complete": 4,
+    "not_toy": 2,
+    "preorder_title": 0,
+    "already_claimed": 0,
+    "dup": 0,
+    "maker_ng": 0
+  }
+}

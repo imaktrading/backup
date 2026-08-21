@@ -319,3 +319,22 @@ def test_fetch_detail_rejects_redirect_to_shop_top():
 def test_shipping_formats_of_toysanta(text, ok):
     from scrapers.rakuten_item import judge
     assert judge(text)["in_stock_now"] is ok
+
+
+# --------------------------------------------------------------------------
+# 検索語の組み立て (2026-08-21 user 確定: メーカー名で引く)
+# --------------------------------------------------------------------------
+def test_query_is_built_per_shop():
+    from run_harvest_rakuten_gacha import query_for
+    assert query_for("auc-yuyou", "バンダイ") == "バンダイ コンプリート"
+    assert query_for("mirakikaku", "バンダイ") == "バンダイ コンプリート"
+    # トイサンタだけ言い回しが違う
+    assert query_for("auc-toysanta", "バンダイ") == "バンダイ 全部揃ってます"
+
+
+def test_makers_cover_the_five_allowed():
+    from gacha_maker import ALLOWED_MAKERS
+    from run_harvest_rakuten_gacha import MAKERS
+    assert {label for label, _, _ in MAKERS} == set(ALLOWED_MAKERS)
+    # ブシロードは正式名では検索できない (タイトルは「ブシロード」)
+    assert dict((l, w) for l, w, _ in MAKERS)["ブシロードクリエイティブ"] == "ブシロード"

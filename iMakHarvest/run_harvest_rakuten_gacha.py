@@ -45,13 +45,28 @@ SHOPS = ("auc-toysanta", "auc-yuyou", "mirakikaku", "jugem2020")
 # kidsroom は 2026-08-20 に外した (どの検索でも0件)。
 # jugem2020 / smltrading は バンダイのコンプ品が多い店として追加。
 
-# テーマ = (ラベル, 検索語, 枠). 枠 = 採用する上限件数
-THEMES = [
-    ("サンリオ", "サンリオ コンプリート", 40),
-    ("めじるし", "めじるし コンプリート", 30),
-    ("猫・動物", "動物 フィギュア コンプリート", 20),
-    ("お菓子ミニチュア", "ミニチュア お菓子 コンプリート", 10),
+# 検索は **メーカー名で引く** (2026-08-21 user 確定)。
+# 理由は実測: テーマ (サンリオ/めじるし/動物/お菓子) で引くと、 5社に絞った後に残るのは
+# 39件しかなく、 ディズニー93 / 仮面ライダー70 / ポケモン35 が **1件も出てこなかった**。
+# 5社しか採らないのだから メーカー名で引く方が素直。
+# (ラベル, 検索に使う語, 枠)。 ラベルは正のメーカー名、 語はタイトルに出る書き方。
+MAKERS = [
+    ("バンダイ", "バンダイ", 40),
+    ("タカラトミーアーツ", "タカラトミーアーツ", 30),
+    ("クオリア", "クオリア", 10),
+    ("キタンクラブ", "キタンクラブ", 10),
+    ("ブシロードクリエイティブ", "ブシロード", 10),
 ]
+
+# 店ごとの言い回し。 トイサンタは全コンプ品に「全部揃ってます」が付く
+SHOP_QUERY = {"auc-toysanta": "{word} 全部揃ってます"}
+DEFAULT_QUERY = "{word} コンプリート"
+
+
+def query_for(shop: str, word: str) -> str:
+    """その店で使う検索語を組み立てる."""
+    return SHOP_QUERY.get(shop, DEFAULT_QUERY).format(word=word)
+
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -78,10 +93,12 @@ def build_themes(args) -> list[tuple[str, str, int]]:
     テーマ4本には1件も出てこなかった。 メーカー名で引く方が素直。
     """
     if args.keyword:
-        return [(args.keyword, args.keyword, args.quota or 100)]
+        # 語を直接指定した時は 店ごとの言い回しを使わない (そのまま引く)
+        return [(args.keyword, None, args.quota or 100)]
     if args.maker:
-        return [(args.maker, f"{args.maker} コンプリート", args.quota or 100)]
-    return THEMES
+        word = next((w for label, w, _ in MAKERS if label == args.maker), args.maker)
+        return [(args.maker, word, args.quota or 100)]
+    return MAKERS
 
 
 def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
@@ -92,7 +109,7 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
            "already_claimed": 0, "dup": 0, "maker_ng": 0}
     out: list[dict] = []
     seen: set[str] = set()
-    for label, keyword, quota in build_themes(args):
+    for label, word, quota in build_themes(args):
         picked = 0
         cap = quota * args.oversample
         # 1店で枠を食い切らないよう **店ごとに上限**を置く。
@@ -104,6 +121,7 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
                 break
             picked_here = 0
             try:
+                keyword = query_for(shop, word) if word else label
                 rows = rakuten_search.search_shop(
                     shop, keyword, max_pages=args.max_pages,
                     free_shipping=args.free_shipping_only,
