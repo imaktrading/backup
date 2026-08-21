@@ -15,7 +15,9 @@ import time
 
 import requests
 
-_KEYS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ebay keys.txt")
+from credentials import keys_path as _keys_path   # noqa: E402
+# ★2026-08-21: 鍵の場所は credentials.py が決める (共有領域が本物)
+_KEYS_PATH = _keys_path()
 _ENDPOINT = "https://api.ebay.com/ws/api.dll"
 _COMPAT = "967"
 

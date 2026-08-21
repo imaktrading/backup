@@ -34,7 +34,10 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import dns_cache  # noqa
 import requests
 
-TOKF = 'ebay_oauth_token_sell.json'
+# ★2026-08-21: トークンの場所は credentials.py が決める (共有領域が本物)。
+#   2か所に置いたまま片方だけ更新されると腐るため (カタログ依頼)。
+from credentials import token_path as _token_path   # noqa: E402
+TOKF = _token_path('sell')
 EP = 'https://api.ebay.com/ws/api.dll'
 SD = ('<ShippingDetails><ShippingType>Flat</ShippingType>'
       '<ShippingServiceOptions><ShippingService>DE_EconomySppedPAK</ShippingService>'

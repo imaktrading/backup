@@ -23,7 +23,9 @@ import base64
 import requests
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-EBAY_KEYS_FILE = os.path.join(SCRIPT_DIR, "ebay keys.txt")
+from credentials import keys_path as _keys_path   # noqa: E402
+# ★2026-08-21: 鍵の場所は credentials.py が決める (共有領域が本物)
+EBAY_KEYS_FILE = _keys_path()
 
 # 価格帯別TIERパラメータ: SSOT 抽象化 (profit_params.get_tier_params)
 # 旧: 本ファイルにも TIER_PARAMS 定義あり (6ファイル重複の1つ)

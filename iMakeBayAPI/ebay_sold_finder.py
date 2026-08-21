@@ -20,7 +20,9 @@ except ImportError:
     HAS_UC = False
 
 # --- 設定 ---
-KEYS_FILE = "ebay keys.txt"
+# ★2026-08-21: 鍵の場所は credentials.py が決める (共有領域が本物)
+from credentials import keys_path as _keys_path   # noqa: E402
+KEYS_FILE = _keys_path()
 
 def load_keys():
     keys = {}

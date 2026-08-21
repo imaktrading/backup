@@ -34,7 +34,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
                                 "iMakeBayAPI"))
 import requests  # noqa: E402
 
-TOKEN_FILE = Path(r"C:\dev\iMak\iMakeBayAPI\ebay_oauth_token_sell.json")
+# ★2026-08-21: トークンの場所は credentials.py が決める (共有領域が本物)
+sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
+try:
+    from credentials import token_path as _token_path
+    TOKEN_FILE = Path(_token_path("sell"))
+except Exception:                                             # noqa: BLE001
+    TOKEN_FILE = Path(r"C:\dev\iMak\iMakeBayAPI\ebay_oauth_token_sell.json")
 LIVE_CACHE = Path(r"C:\dev\iMak_data\hq\itemid_audit_live_cache.json")
 API = "https://api.ebay.com/sell/marketing/v1"
 PAGE = 500

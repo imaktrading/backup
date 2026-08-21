@@ -25,7 +25,14 @@ except Exception:
 
 WORKSPACE = r"c:/dev/iMak"
 EBAY_SELLER = "imax-64"
-EBAY_KEYS_FILE = f"{WORKSPACE}/iMakeBayAPI/ebay keys.txt"
+# ★2026-08-21: 鍵の場所は credentials.py が決める (共有領域が本物)。
+#   2か所に置いたまま片方だけ更新されると腐るため (カタログ依頼)。
+sys.path.insert(0, f"{WORKSPACE}/iMakeBayAPI")
+try:
+    from credentials import keys_path as _keys_path
+    EBAY_KEYS_FILE = _keys_path()
+except Exception:                                        # noqa: BLE001
+    EBAY_KEYS_FILE = f"{WORKSPACE}/iMakeBayAPI/ebay keys.txt"
 
 # 各 listing run の subprocess stdout を永続化する log dir
 # (ListingPanel / KujiWizardDialog から共通利用、ウィザード閉じても残る)

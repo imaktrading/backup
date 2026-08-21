@@ -35,8 +35,16 @@ API = "https://api.ebay.com/sell/marketing/v1"
 MARKETPLACE = "EBAY_US"
 CAMPAIGN_ID = "165535464010"     # 8.0% で揃っている受け皿 (2026-08-18 実測で選定)
 BID = "8.0"
-TOKEN_FILE = r"C:\dev\iMak\iMakeBayAPI\ebay_oauth_token_sell.json"
-KEYS_FILE = r"C:\dev\iMak\iMakeBayAPI\ebay keys.txt"
+# ★2026-08-21: 鍵とトークンの場所は credentials.py が決める (共有領域が本物)。
+#   2か所に置いたまま片方だけ更新されると腐るため (カタログ依頼)。
+sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
+try:
+    from credentials import keys_path as _keys_path, token_path as _token_path
+    TOKEN_FILE = _token_path("sell")
+    KEYS_FILE = _keys_path()
+except Exception:                                             # noqa: BLE001
+    TOKEN_FILE = r"C:\dev\iMak\iMakeBayAPI\ebay_oauth_token_sell.json"
+    KEYS_FILE = r"C:\dev\iMak\iMakeBayAPI\ebay keys.txt"
 
 
 # ── 純関数 (test 可) ────────────────────────────────────────────────

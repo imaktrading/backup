@@ -38,7 +38,8 @@ except Exception:
     pass
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-KEYS_FILE = os.path.join(SCRIPT_DIR, "ebay keys.txt")
+from credentials import keys_path as _keys_path   # noqa: E402
+KEYS_FILE = _keys_path()
 SELL_TOKEN_FILE = os.path.join(SCRIPT_DIR, "ebay_oauth_token_sell.json")
 
 # ★2026-08-21: 鍵を共有領域にも置いた (他 worktree から使うため)。

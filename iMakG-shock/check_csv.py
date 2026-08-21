@@ -25,9 +25,15 @@ except Exception:
     pass
 
 # ===== 設定 =====
-EBAY_KEYS_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI", "ebay keys.txt"
-)
+# ★2026-08-21: 鍵の場所は credentials.py が決める (共有領域が本物)。
+#   2か所に置いたまま片方だけ更新されると腐るため (カタログ依頼)。
+sys.path.insert(0, r"C:\\dev\\iMak\\iMakeBayAPI")
+try:
+    from credentials import keys_path as _keys_path
+    EBAY_KEYS_FILE = _keys_path()
+except Exception:                                        # noqa: BLE001
+    EBAY_KEYS_FILE = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI", "ebay keys.txt")
 API_KEY_FILE = "API key.txt"
 
 # タイトルルール
