@@ -26,10 +26,15 @@ from typing import Optional
 
 import requests
 
-# 認証情報は本元 (C:/dev/iMak) 側にある。 sheet_writer.CREDS_PATH と同じ参照の仕方。
-EBAY_DIR = Path(r"C:/dev/iMak/iMakeBayAPI")
-KEYS_PATH = EBAY_DIR / "ebay keys.txt"
-SELL_TOKEN_PATH = EBAY_DIR / "ebay_oauth_token_sell.json"
+# 認証情報の置き場所は **`iMakeBayAPI/credentials.py` が唯一の決定口** (2026-08-21 HQ 依頼)。
+# トークンは使うたびに書き戻されるので、 参照先が2か所あると片方が腐る。
+# ★自分でパスを組み立てない。 共有領域か従来かの判断は credentials.py がやる。
+import sys as _sys  # noqa: E402
+_sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "iMakeBayAPI"))
+from credentials import keys_path, token_path  # noqa: E402
+
+KEYS_PATH = Path(keys_path())
+SELL_TOKEN_PATH = Path(token_path("sell"))
 
 ORDERS_URL = "https://api.ebay.com/sell/fulfillment/v1/order"
 TRADING_ENDPOINT = "https://api.ebay.com/ws/api.dll"

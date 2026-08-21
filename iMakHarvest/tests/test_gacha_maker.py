@@ -55,17 +55,12 @@ def test_other_item_in_title_is_not_picked_up():
     assert resolve_maker(t) == ""
 
 
-def test_maker_official_url_is_not_written_to_the_sheet():
-    """★2026-08-21 変更: メーカーの **トップページ** はスプシに入れない (HQ 指摘)。
-
-    I列は出品くんの英語タイトル列で、 トップページでは見比べにも画像取得にも使えない。
-    スプシに入れるのは **公式の商品ページ** (V列) だけ。
-    `gacha_maker.official_url` はメーカー判定の道具として残す。
-    """
+def test_maker_official_url_goes_to_column_i():
+    """公式URL は I列 (user 確定)。 商品ページが無ければ メーカー公式サイト."""
     row = build_row({"url": "https://item.rakuten.co.jp/auc-yuyou/g26074js01t/",
                      "title": "虚無 KYOMU 全5種セット エール ガチャポン コンプリート",
                      "price_jpy": "2820"})
-    assert row[8] == ""
+    assert row[8] == "https://yell-world.jp/"
 
 
 def test_all_urls_are_https_or_http_and_unique():

@@ -83,15 +83,20 @@ def test_official_page_url_is_a_product_page():
     assert product_page_url("") == ""
 
 
-def test_official_columns_are_v_and_w():
-    """列位置は HQ に伝える約束。 変えたら知らせること."""
-    from sheet_writer_rakuten import COL_OFFICIAL_IMAGES, COL_OFFICIAL_PAGE
-    assert (COL_OFFICIAL_PAGE, COL_OFFICIAL_IMAGES) == (22, 23)   # V, W
-
-
-def test_i_column_is_left_for_hq():
-    """I列は出品くんの英語タイトル列。 こちらは書かない."""
-    from sheet_writer_rakuten import build_row
+def test_official_url_goes_to_column_i():
+    """★公式URL は I列 (2026-08-21 user 確定)。 HQ 依頼で V に移したが user 指示で戻した."""
+    from sheet_writer_rakuten import COL_OFFICIAL_IMAGES, COL_OFFICIAL_PAGE, build_row
+    assert (COL_OFFICIAL_PAGE, COL_OFFICIAL_IMAGES) == (9, 23)    # I, W
     row = build_row({"url": "https://item.rakuten.co.jp/x/y/", "title": "t 全5種",
-                     "price_jpy": "100", "official_page": "https://gashapon.jp/x"})
-    assert row[8] == ""
+                     "price_jpy": "100",
+                     "official_page": "https://gashapon.jp/products/detail.php?jan_code=1"})
+    assert row[8] == "https://gashapon.jp/products/detail.php?jan_code=1"
+
+
+def test_official_url_falls_back_to_maker_site():
+    """商品ページが取れない (タカラトミーアーツ等) 時は メーカー公式サイトを入れる."""
+    from sheet_writer_rakuten import build_row
+    row = build_row({"url": "https://item.rakuten.co.jp/x/y/",
+                     "title": "虚無 KYOMU 全5種セット エール ガチャポン コンプリート",
+                     "price_jpy": "100"})
+    assert row[8] == "https://yell-world.jp/"
