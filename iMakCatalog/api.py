@@ -298,6 +298,30 @@ def rarity_lookup_keys(rarity_raw: Optional[str]) -> list:
     return keys
 
 
+_GAME_EBAY = {
+    "pokemon_tcg": "Pokémon TCG",
+    "one_piece_tcg": "One Piece CCG",
+    "gundam_tcg": "Gundam Card Game",
+    "dragonball_scg": "Dragon Ball Super Card Game",
+    "yugioh_tcg": "Yu-Gi-Oh! TCG",
+}
+
+
+def derive_game_ebay(category):
+    """category -> eBay の Game 値. 未知の category は None (fail-closed).
+
+    Game は **eBay で唯一の必須項目**。scraper が stamp し忘れると空欄のまま出品に流れる
+    (2026-08-22 実測: 2,835行が空欄だった)。category から一意に決まる値なので、
+    specs に無ければ読み出し側で埋める。
+
+    ★'Gundam Card Game' は eBay の Game 一覧 (168値) に**無い**。
+      一覧にあるのは 'Gundam War TCG' = 1990年代の別ゲームで、寄せてはいけない。
+      他セラーも自由入力で 'Gundam Card Game' を出しており、それに揃える
+      (ユーザー確認 2026-08-22)。絞り込みには乗らないが、必須項目は埋まる。
+    """
+    return _GAME_EBAY.get(category)
+
+
 def derive_rarity_ebay(category: str, rarity_raw: Optional[str]) -> Optional[str]:
     """公式 rarity コード → eBay canonical 値. filter_map miss は None (fail-closed).
 
@@ -483,6 +507,13 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     #   tools/set_name_integrity_audit.py §6 canonical drift と
     #   requests/2026-08-16_pdca_catalog_queue_tcg_response.md を参照。
     stored_ebay = (specs_obj.get("set_name_ebay") or "").strip()
+
+    # Game は eBay で唯一の必須項目。scraper が stamp し忘れた行は空欄のまま
+    # 出品に流れる (2026-08-22 実測 2,835行)。category から一意に決まるので読み出しで埋める。
+    if category and not (specs_obj.get("game_ebay") or "").strip():
+        _game = derive_game_ebay(category)   # ★g は行の getter なので名前を避ける
+        if _game:
+            specs_obj["game_ebay"] = _game
 
     set_ebay = None
     if set_official and category:
