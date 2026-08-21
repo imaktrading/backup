@@ -180,7 +180,8 @@ def main(argv=None) -> int:
     ap.add_argument("--max-pages", type=int, default=2, help="1店1語あたりの検索ページ数")
     ap.add_argument("--oversample", type=float, default=2.0,
                     help="枠の何倍まで候補を集めるか (配送予定で落ちる分の余裕)")
-    ap.add_argument("--label", default="gacha", help="中間スプシ tab (= rakuten_<label>)")
+    ap.add_argument("--label", default="",
+                    help="中間スプシ tab を固定する (既定は **店ごと** = rakuten_<店>)")
     ap.add_argument("--shop", default="", help="この店だけを見る (例 auc-toysanta)")
     ap.add_argument("--keyword", default="", help="検索語を指定する (店独自の言い回し用)")
     ap.add_argument("--maker", default="",
@@ -247,14 +248,22 @@ def main(argv=None) -> int:
         """
         if args.dry_run or not rows:
             return True
-        from sheet_writer_rakuten import append_items  # noqa: PLC0415
-        try:
-            res = append_items(rows, label=args.label, known_keys=known)
-            _log(f"  [SHEET] {res}")
-            return True
-        except Exception as e:  # noqa: BLE001 - 書込失敗で走行を殺さない
-            _log(f"  ⚠️ スプシ書込に失敗 ({type(e).__name__}) → 溜めたまま次に回す ({len(rows)}件)")
-            return False
+        from sheet_writer_rakuten import append_items, shop_of  # noqa: PLC0415
+        # 既定は **店ごとのタブ** に分ける (user 確定 2026-08-21)。
+        # 送料の有無や仕入条件が店単位で違うため。
+        groups: dict[str, list[dict]] = {}
+        for r in rows:
+            groups.setdefault(args.label or shop_of(r.get("url", "")) or "gacha", []).append(r)
+        ok = True
+        for label, part in groups.items():
+            try:
+                res = append_items(part, label=label, known_keys=known)
+                _log(f"  [SHEET] {res}")
+            except Exception as e:  # noqa: BLE001 - 書込失敗で走行を殺さない
+                _log(f"  ⚠️ スプシ書込に失敗 ({type(e).__name__}) → 溜めたまま次に回す "
+                     f"({len(part)}件 / {label})")
+                ok = False
+        return ok
 
     pending: list[dict] = []
     consecutive_fail = 0     # ドライバが死ぬと全件 fetch_fail になるので見張る

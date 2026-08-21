@@ -338,3 +338,12 @@ def test_makers_cover_the_five_allowed():
     assert {label for label, _, _ in MAKERS} == set(ALLOWED_MAKERS)
     # ブシロードは正式名では検索できない (タイトルは「ブシロード」)
     assert dict((l, w) for l, w, _ in MAKERS)["ブシロードクリエイティブ"] == "ブシロード"
+
+
+def test_shop_of_and_tab_name():
+    """タブは **店ごと** (user 確定 2026-08-21)。 送料や仕入条件が店単位で違うため."""
+    from sheet_writer_rakuten import build_tab_name, shop_of
+    u = "https://item.rakuten.co.jp/auc-toysanta/abc123/"
+    assert shop_of(u) == "auc-toysanta"
+    assert build_tab_name(shop_of(u)) == "rakuten_auc_toysanta"
+    assert shop_of("https://example.com/x") == ""

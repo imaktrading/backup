@@ -52,6 +52,12 @@ def dedupe_key(url: str) -> str:
     return url.strip().split("?")[0].rstrip("/").lower()
 
 
+def shop_of(url: str) -> str:
+    """楽天の商品URLから 店ID を返す (取れなければ空)."""
+    m = _ITEM_RE.search(url or "")
+    return m.group(1) if m else ""
+
+
 def build_tab_name(label: str) -> str:
     safe = re.sub(r"[^\w]", "_", (label or "").strip())
     safe = re.sub(r"_+", "_", safe).strip("_")
