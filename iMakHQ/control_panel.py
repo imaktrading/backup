@@ -21,7 +21,7 @@ except Exception:
 WORKSPACE = r"c:/dev/iMak"
 KEYWORDS_DIR = f"{WORKSPACE}/iMakKeywords"
 EBAY_SELLER = "imax-64"
-EBAY_KEYS_FILE = f"{WORKSPACE}/iMakeBayAPI/ebay keys.txt"
+EBAY_KEYS_FILE = _ebay_keys_path()
 
 # ============ 進捗ダッシュボード: カテゴリ定義 ============
 # (ラベル, 検索キーワード, eBayカテゴリID, 目標出品数, 月次追加目標)
@@ -667,6 +667,19 @@ LOG_TAGS = [
 
 # ============ ウィンドウサイズ保存・復元 ============
 import json as _json
+# 2026-08-21: 鍵の場所は iMakeBayAPI/credentials.py が唯一の決定口。
+#   ここで自前にパスを組み立てない (12ファイル16箇所に散っていたのを1本化)。
+
+
+def _ebay_keys_path():
+    """eBay 鍵の場所。決定口は iMakeBayAPI/credentials.py の1か所だけ."""
+    import sys as _sys, os as _os
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+    from credentials import keys_path as _kp
+    return str(_kp())
+
 WINDOW_GEOMETRY_FILE = f"{WORKSPACE}/iMakHQ/.window_geometry.json"
 
 

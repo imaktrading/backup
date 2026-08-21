@@ -25,9 +25,7 @@ except Exception:
     pass
 
 # ===== 設定 =====
-EBAY_KEYS_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI", "ebay keys.txt"
-)
+EBAY_KEYS_FILE = _ebay_keys_path()
 API_KEY_FILE = "API key.txt"
 
 # タイトルルール
@@ -57,6 +55,19 @@ PROFIT_PARAMS = _gccp_pp("一番くじ")
 # (中央値上限, 目標利益率, 許容乖離率)
 # 価格帯別パラメータ: SSOT 抽象化 (profit_params.get_tier_params 経由)
 from profit_params import get_tier_params  # noqa: F401
+# 2026-08-21: 鍵の場所は iMakeBayAPI/credentials.py が唯一の決定口。
+#   ここで自前にパスを組み立てない (12ファイル16箇所に散っていたのを1本化)。
+
+
+def _ebay_keys_path():
+    """eBay 鍵の場所。決定口は iMakeBayAPI/credentials.py の1か所だけ."""
+    import sys as _sys, os as _os
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+    from credentials import keys_path as _kp
+    return str(_kp())
+
 
 # TOPセラー判定閾値
 TOP_SELLER_MIN_FEEDBACK = 500       # 取引実績500件以上

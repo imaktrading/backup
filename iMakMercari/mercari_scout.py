@@ -42,7 +42,7 @@ INVENTORY_SHEET_IDS = [
 ]
 
 # eBay API
-EBAY_KEYS_FILE = os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI", "ebay keys.txt")
+EBAY_KEYS_FILE = _ebay_keys_path()
 
 # 利益計算パラメータ（SSOT 抽象化: profit_params.get_check_csv_params 経由）
 # 2026-04-25 Step 7 拡張: ハードコード撲滅、yaml(SSOT) 注入型に統一。
@@ -63,6 +63,19 @@ NET_RATIO = 1 - EBAY_FEE - PROMO_RATE - PAYO_RATE
 # 旧: 本ファイル内に TIER_PARAMS リスト定義 (6ファイル重複)
 # 新: yaml(global.yaml) の pricing_tiers を SSOT、共通 API で取得
 from profit_params import get_tier_params  # noqa: F401  (re-export for back-compat)
+# 2026-08-21: 鍵の場所は iMakeBayAPI/credentials.py が唯一の決定口。
+#   ここで自前にパスを組み立てない (12ファイル16箇所に散っていたのを1本化)。
+
+
+def _ebay_keys_path():
+    """eBay 鍵の場所。決定口は iMakeBayAPI/credentials.py の1か所だけ."""
+    import sys as _sys, os as _os
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+    from credentials import keys_path as _kp
+    return str(_kp())
+
 
 
 # ===== Chromeプロファイル管理 =====

@@ -32,6 +32,19 @@ except Exception:
 # build_row() 等で動的 import されるため、モジュールロード時にパスを通しておく必要あり
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI"))
 from listing_core import get_csv_output_path as _gcop  # CSV出力先の中央集約用 (iMakHQ/csv_output/<project>_upload_<ts>.csv)
+# 2026-08-21: 鍵の場所は iMakeBayAPI/credentials.py が唯一の決定口。
+#   ここで自前にパスを組み立てない (12ファイル16箇所に散っていたのを1本化)。
+
+
+def _ebay_keys_path():
+    """eBay 鍵の場所。決定口は iMakeBayAPI/credentials.py の1か所だけ."""
+    import sys as _sys, os as _os
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+    from credentials import keys_path as _kp
+    return str(_kp())
+
 
 # ===== 設定 =====
 CERTS_FILE = "certs.txt"
@@ -68,9 +81,7 @@ SHIPPING_POLICIES = [
 ]
 
 # ===== eBay API 市場価格取得 =====
-EBAY_KEYS_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "iMakeBayAPI", "ebay keys.txt"
-)
+EBAY_KEYS_FILE = _ebay_keys_path()
 # TOPセラー判定閾値
 TOP_SELLER_MIN_FEEDBACK = 500
 TOP_SELLER_MIN_PERCENTAGE = 98.0

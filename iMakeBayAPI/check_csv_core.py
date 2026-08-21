@@ -23,7 +23,10 @@ import base64
 import requests
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-EBAY_KEYS_FILE = os.path.join(SCRIPT_DIR, "ebay keys.txt")
+# 2026-08-21: 鍵の場所は iMakeBayAPI/credentials.py が唯一の決定口。
+#   ここで自前にパスを組み立てない (12ファイル16箇所に散っていたのを1本化)。
+from credentials import keys_path as _keys_path
+EBAY_KEYS_FILE = str(_keys_path())
 
 # 価格帯別TIERパラメータ: SSOT 抽象化 (profit_params.get_tier_params)
 # 旧: 本ファイルにも TIER_PARAMS 定義あり (6ファイル重複の1つ)

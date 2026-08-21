@@ -20,7 +20,10 @@ except ImportError:
     HAS_UC = False
 
 # --- 設定 ---
-KEYS_FILE = "ebay keys.txt"
+# 2026-08-21: 鍵の場所は iMakeBayAPI/credentials.py が唯一の決定口。
+#   ここで自前にパスを組み立てない (12ファイル16箇所に散っていたのを1本化)。
+from credentials import keys_path as _keys_path
+KEYS_FILE = str(_keys_path())
 
 def load_keys():
     keys = {}

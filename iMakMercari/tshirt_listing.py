@@ -101,6 +101,19 @@ from listing_common import (
     fetch_amazon_title, extract_sku_from_url as _extract_sku,
     CONDITION_MASTER,
 )
+
+# 2026-08-21: 鍵の場所は iMakeBayAPI/credentials.py が唯一の決定口。
+#   ここで自前にパスを組み立てない (12ファイル16箇所に散っていたのを1本化)。
+
+
+def _ebay_keys_path():
+    """eBay 鍵の場所。決定口は iMakeBayAPI/credentials.py の1か所だけ."""
+    import sys as _sys, os as _os
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "iMakeBayAPI")
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+    from credentials import keys_path as _kp
+    return str(_kp())
 PROFIT_CATEGORY = "Tシャツ(UT)"
 PRICE_FLOOR_USD = 30
 # 後方互換用（既存コードが参照していた場合のため）
@@ -111,7 +124,7 @@ SHIPPING_JPY = get_category_params(PROFIT_CATEGORY)["shipping_jpy"]
 UNIQLO_API = "https://www.uniqlo.com/jp/api/commerce/v5/ja/products"
 
 # eBay API（Item Specifics参照のみ。価格計算には使わない）
-EBAY_KEYS_FILE = os.path.join(SCRIPT_DIR, "..", "iMakeBayAPI", "ebay keys.txt")
+EBAY_KEYS_FILE = _ebay_keys_path()
 TOP_SELLER_MIN_FEEDBACK = 500
 TOP_SELLER_MIN_PERCENTAGE = 98.0
 
