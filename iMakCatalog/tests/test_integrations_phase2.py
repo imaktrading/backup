@@ -304,7 +304,10 @@ class TestPokemonSetCodeToEbay:
         assert catalog_psa.set_code_to_ebay_name_pokemon("M2a") == "Mega Dream ex"
 
     def test_s8a_25th(self):
-        assert catalog_psa.set_code_to_ebay_name_pokemon("S8a") == "25th Anniversary Collection"
+        # 2026-08-21: eBay の Set 一覧に在る綴りへ引き当てた (3者合意 [IMPLEMENT-GO])。
+        #   eBay は日本版ポケモンのセットに弾番号を付けている ('S8a: 25th Anniversary Collection')。
+        #   ここを素の名前に戻すと、eBay の絞り込みに載らない値へ逆戻りする。
+        assert catalog_psa.set_code_to_ebay_name_pokemon("S8a") == "S8a: 25th Anniversary Collection"
 
     def test_case_insensitive(self):
         # PSA brand は大文字 → 末尾小文字版を試行する

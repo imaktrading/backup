@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""ebay_filter_map の値を eBay 公式 aspect リストに照合する (A/B/C 判定 + 綴り引き当て).
+
+決定: requests/2026-08-21_set_rarity_final_plan_response_go.md [IMPLEMENT-GO]
+      (ユーザー委任 → 出品くん / カタログ / Gemini の3者合意)
+
+## 何をするか
+eBay の getItemAspectsForCategory(183454) の返り (_input/ebay_tcg_filter_lists_api.json)
+を唯一の照合相手にして、変換表の各値を3状態に分ける。
+
+  A = eBay のリストにその綴りが在る                       → 触らない
+  B = リストに無いが公式データに実在するセット/レアリティ → 値は変えない。印だけ付ける
+  C = リストにも公式データにも裏が無い                    → 要確認 (ここだけが人の仕事)
+
+## ★規則で変換しない (3者合意 #2)
+eBay の綴りは一貫していない:
+    S6a: Eevee Heroes        ← 弾番号つきしか無い
+    Shiny Star V             ← 素の名前で在る
+「頭に弾番号を付ける」を規則にすると、素の名前で既に一致している値を壊す。
+**リストに在る綴りをそのまま採る (引き当て)**。無ければ触らない。
+
+## ★fuzzy で寄せない (3者合意 #4)
+GX Battle Boost (SM4+) と Ex Battle Boost (EXバトルブースト BW期) は別セット。
+綴りが似ているだけで寄せると別セットとして出品される。
+引き当ては「弾番号を外した部分が完全一致」かつ「候補が1つだけ」の時のみ採る。
+
+## 凍結 (3者合意 #3)
+one_piece_tcg / gundam_tcg / dragonball_scg は eBay にセット名がほぼ無いので値を触らない。
+引き当ての対象は pokemon_tcg のみ。
+
+実行:
+  python tools/ebay_value_reconcile.py            # 一覧を出すだけ (既定)
+  python tools/ebay_value_reconcile.py --commit   # status 列 + ポケモンの綴り引き当てを適用
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sqlite3
+import sys
+from collections import Counter
+from datetime import datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import api  # noqa: E402
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+EBAY_JSON = Path(r"C:\dev\iMak_data\catalog\_input\ebay_tcg_filter_lists_api.json")
+OUT_MD = Path(r"C:\dev\iMak_data\catalog\requests\2026-08-21_ebay_value_reconcile_report.md")
+NOW = datetime.now().isoformat()
+
+ADOPT_CATEGORIES = {"pokemon_tcg"}       # 引き当て対象。他は凍結
+SET_FIELDS = ("set", "set_code")
+CATS = ("one_piece_tcg", "pokemon_tcg", "dragonball_scg", "gundam_tcg")
+
+PREFIX_RE = re.compile(r"^[A-Za-z]{1,4}\d*[A-Za-z+]*:\s*")
+
+
+def norm(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def load_ebay():
+    d = json.loads(EBAY_JSON.read_text(encoding="utf-8"))
+
+    def vals(aspect):
+        return [v.strip() for v in d["aspects"][aspect]["values"]
+                if isinstance(v, str) and v.strip()]
+
+    return vals("Set"), vals("Rarity")
+
+
+def build_index(values):
+    idx = {}
+    for v in values:
+        idx.setdefault(norm(PREFIX_RE.sub("", v)), []).append(v)
+    return idx
+
+
+def real_sources(db):
+    official = {r[0] for r in db.execute(
+        "SELECT DISTINCT set_name_official FROM products WHERE set_name_official IS NOT NULL")}
+    prefixes = {r[0] for r in db.execute(
+        "SELECT DISTINCT substr(product_id,1,instr(product_id,'-')-1) FROM products "
+        "WHERE instr(product_id,'-')>0")}
+    brackets = set()
+    for s in official:
+        brackets.update(re.findall(r"[\[\u3010]([A-Z0-9-]+)[\]\u3011]", s or ""))
+    return official, prefixes, brackets
+
+
+def classify(db):
+    set_vals, rar_vals = load_ebay()
+    set_exact, rar_exact = set(set_vals), set(rar_vals)
+    set_low = {v.lower(): v for v in set_vals}
+    rar_low = {v.lower(): v for v in rar_vals}
+    set_idx = build_index(set_vals)
+    official, prefixes, brackets = real_sources(db)
+
+    used_rarity = {}
+    for cat in CATS:
+        used_rarity[cat] = {r[0] for r in db.execute(
+            "SELECT DISTINCT json_extract(specs,'$.rarity') FROM products WHERE category=? "
+            "AND json_extract(specs,'$.rarity') IS NOT NULL "
+            "AND json_extract(specs,'$.rarity')<>''", (cat,))}
+
+    out = []
+    for r in db.execute("SELECT id, category, field, source_value, ebay_value FROM ebay_filter_map "
+                        "ORDER BY category, field, source_value"):
+        ev = (r["ebay_value"] or "").strip()
+        if not ev:
+            continue
+        is_set = r["field"] in SET_FIELDS
+        exact = set_exact if is_set else rar_exact
+        low = set_low if is_set else rar_low
+        proposal = None
+
+        if ev in exact:
+            status = "A"
+        elif ev.lower() in low:
+            status, proposal = "A", low[ev.lower()]
+        else:
+            if is_set:
+                s = r["source_value"]
+                is_real = (s in official) or (s in prefixes) or (s in brackets) \
+                    or (s.replace("-", "") in prefixes)
+            else:
+                is_real = r["source_value"] in used_rarity.get(r["category"], set())
+            status = "B" if is_real else "C"
+            if is_set and r["category"] in ADOPT_CATEGORIES:
+                cands = set_idx.get(norm(ev), [])
+                if len(cands) == 1 and cands[0] != ev:
+                    proposal = cands[0]
+        out.append(dict(id=r["id"], category=r["category"], field=r["field"],
+                        source_value=r["source_value"], ebay_value=ev,
+                        status=status, proposal=proposal))
+    return out
+
+
+def ensure_columns(db):
+    cols = {c[1] for c in db.execute("PRAGMA table_info(ebay_filter_map)")}
+    for name in ("status", "verified_at", "verify_source"):
+        if name not in cols:
+            db.execute("ALTER TABLE ebay_filter_map ADD COLUMN %s TEXT" % name)
+
+
+def write_report(rows, prop, cs):
+    OUT_MD.parent.mkdir(parents=True, exist_ok=True)
+    with OUT_MD.open("w", encoding="utf-8") as f:
+        f.write("# eBay 値 照合レポート (書込前の一覧)\n\n")
+        f.write("生成: %s\n\n照合相手: `%s`\n\n" % (NOW, EBAY_JSON))
+        f.write("## status 内訳\n\n| category | A | B | C | 引き当て |\n|---|--:|--:|--:|--:|\n")
+        for cat in CATS:
+            c = Counter(x["status"] for x in rows if x["category"] == cat)
+            adopt = sum(1 for x in rows if x["category"] == cat and x["proposal"])
+            f.write("| %s | %d | %d | %d | %d |\n" % (cat, c["A"], c["B"], c["C"], adopt))
+        f.write("\n- **A** = eBay のリストに在る綴り。触らない\n")
+        f.write("- **B** = リストに無いが公式データに実在。値は変えず印だけ (eBay への追加申請候補)\n")
+        f.write("- **C** = 裏が取れない。**ここだけが人の確認対象**\n")
+        f.write("\n## eBay の綴りに寄せる候補 (%d 件 / pokemon のみ)\n\n" % len(prop))
+        f.write("| category | field | 今の値 | eBay の綴り |\n|---|---|---|---|\n")
+        for x in prop:
+            f.write("| %s | %s | `%s` | `%s` |\n"
+                    % (x["category"], x["field"], x["ebay_value"], x["proposal"]))
+        f.write("\n## C = 要確認 (%d 件)\n\n" % len(cs))
+        f.write("| category | field | 値 | 変換元 |\n|---|---|---|---|\n")
+        for x in cs:
+            f.write("| %s | %s | `%s` | `%s` |\n"
+                    % (x["category"], x["field"], x["ebay_value"], x["source_value"]))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--commit", action="store_true")
+    args = ap.parse_args()
+
+    db = sqlite3.connect(api._DB_PATH)
+    db.row_factory = sqlite3.Row
+    rows = classify(db)
+    prop = [x for x in rows if x["proposal"]]
+    cs = [x for x in rows if x["status"] == "C"]
+
+    print("=== ebay_filter_map 照合 (%s) ===" % ("APPLY" if args.commit else "REPORT"))
+    print("対象 %d 行 / 照合相手 %s\n" % (len(rows), EBAY_JSON.name))
+    for cat in CATS:
+        c = Counter(x["status"] for x in rows if x["category"] == cat)
+        adopt = sum(1 for x in rows if x["category"] == cat and x["proposal"])
+        frozen = "" if cat in ADOPT_CATEGORIES else "  (凍結=引き当てなし)"
+        print("  %-16s A%4d B%4d C%4d   引き当て %3d%s"
+              % (cat, c["A"], c["B"], c["C"], adopt, frozen))
+
+    print("\n--- eBay の綴りに寄せる候補 %d 件 (pokemon のみ) ---" % len(prop))
+    for x in prop:
+        print("  %-9s %r -> %r" % (x["field"], x["ebay_value"], x["proposal"]))
+
+    print("\n--- C (裏が取れない) %d 件 = 要確認 ---" % len(cs))
+    for x in cs:
+        print("  %-14s %-9s %r  <- %r"
+              % (x["category"], x["field"], x["ebay_value"], x["source_value"]))
+
+    write_report(rows, prop, cs)
+    print("\nレポート: %s" % OUT_MD)
+
+    if args.commit:
+        ensure_columns(db)
+        for x in rows:
+            ev = x["proposal"] or x["ebay_value"]
+            db.execute("UPDATE ebay_filter_map SET ebay_value=?, status=?, verified_at=?, "
+                       "verify_source=? WHERE id=?",
+                       (ev, x["status"], NOW,
+                        "ebay_getItemAspectsForCategory_183454", x["id"]))
+        db.commit()
+        print("[OK] 適用 (status %d 行 / 綴り引き当て %d 行)" % (len(rows), len(prop)))
+    else:
+        print("(report のみ — --commit で適用)")
+    db.close()
+
+
+if __name__ == "__main__":
+    main()
