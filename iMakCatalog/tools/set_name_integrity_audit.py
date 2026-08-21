@@ -46,6 +46,20 @@ DB_PATH = "C:/dev/iMak_data/catalog/products.sqlite"
 # 完走マーカー (途中で死んだ = マーカーが出ない = ログ検知できる).
 # prune_daily.log と同型の「=== ... ===」規約に合わせる (2026-07-31 daily cron 化).
 _START_MARK = "=== set_name integrity audit START"
+_RARITY_WORDS = ("rare", "common", "uncommon", "promo", "holo", "secret", "foil",
+                 "print", "gold", "silver", "bronze", "token", "land", "special",
+                 "legend", "mythic", "fabled", "majestic", "enchanted", "leader",
+                 "master ball", "shiny", "starlight", "prismatic", "parallel")
+
+
+def _looks_like_rarity(v):
+    """レアリティ語を含むか。含まなければ そもそもレアリティでない 疑い."""
+    s = (v or "").strip().lower()
+    if not s:
+        return True
+    return any(w in s for w in _RARITY_WORDS)
+
+
 _END_MARK = "=== set_name integrity audit COMPLETE"
 
 _ERAS = ["Scarlet & Violet", "Sword & Shield", "Sun & Moon", "Black & White", "XY"]
@@ -175,6 +189,7 @@ def audit(categories):
     #      'U' / 'SPカード' / 'LR+' のような値が C:Rarity に出るのを毎日可視化する。
     #    map_drift = filter_map から今その場で計算した値 ≠ stored (契約 v1.2 §1-5 のズレ検知)。
     #      yaml 側が旧短縮コードのまま (pokemon/one_piece/gundam) なら大量に出る = yaml 未同期の指標。
+    not_rarity = defaultdict(int)
     rarity_by_cat = defaultdict(lambda: {"raw_stamped": 0, "map_drift": 0, "unmapped": 0,
                                      "accepted_blank": 0})
 
@@ -234,6 +249,12 @@ def audit(categories):
                 rarity_by_cat[r["category"]]["accepted_blank"] += 1
             else:
                 rarity_by_cat[r["category"]]["unmapped"] += 1
+        # 8. レアリティでない値が C:Rarity に出ていないか (2026-08-21 追加)
+        #    遊戯王は「生値が canonical だから passthrough で正」として §7 から除外して
+        #    いたが、その前提で 2 / New / European debut / force-SMW のような
+        #    レアリティですらない値が 118行 流れていた。
+        if r_stored and not _looks_like_rarity(r_stored):
+            not_rarity[(r["category"], r_stored)] += 1
 
     conn.close()
 
@@ -263,11 +284,11 @@ def audit(categories):
     name_desync.sort(key=lambda x: x[0])
 
     return (era_mismatch, inconsistent, none_list, name_desync,
-            dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat))
+            dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity))
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
-           drift_by_cat, rarity_by_cat, categories):
+           drift_by_cat, rarity_by_cat, not_rarity, categories):
     out = []
     cat_s = ",".join(categories) if categories else "all"
     out.append(f"# set_name_ebay integrity audit (cat={cat_s})\n")
@@ -353,6 +374,22 @@ def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
         f"raw_stamped {total_raw} / map_drift {total_md} / unmapped {total_un} "
         f"/ accepted_blank {total_ab} 件\n"
     )
+    total_nr = sum(not_rarity.values())
+    out.append(
+        f"\n## 8. レアリティでない値の検知 (絶対数・毎日出す) — {total_nr} 件\n"
+    )
+    out.append(
+        "- レアリティ語を1つも含まない specs.rarity_ebay。2 / New / European debut のような、"
+        "そもそもレアリティでない値が C:Rarity に出ていないか。\n"
+        "- 2026-08-21 に遊戯王で 118行 発見 (取り込み元の生値を passthrough していた)。"
+        "1 でも増えたら取り込み側の穴。\n"
+    )
+    if not_rarity:
+        out.append("| category | 値 | 件数 |\n|---|---|--:|\n")
+        for (cat, v), n in sorted(not_rarity.items(), key=lambda x: -x[1])[:20]:
+            out.append(f"| {cat} | `{v}` | {n} |\n")
+    else:
+        out.append("(なし)\n")
     out.append(
         "- **raw_stamped** = specs.rarity_ebay が公式生コードのまま (= 変換されていない)。"
         "'U' / 'LR+' / 'SPカード' 等がそのまま C:Rarity に出る = 2026-08-13 実害と同型。**要対応**。\n"
@@ -396,9 +433,9 @@ def main():
     print(f"{_START_MARK} {ts} (cat={cat_s}) ===")
 
     (era_mismatch, inconsistent, none_list, name_desync,
-     empty_by_cat, drift_by_cat, rarity_by_cat) = audit(categories)
+     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity) = audit(categories)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
-                    empty_by_cat, drift_by_cat, rarity_by_cat, categories or [])
+                    empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity, categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)
@@ -444,7 +481,8 @@ def main():
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
         f"rarity_unmapped={sum(v['unmapped'] for v in rarity_by_cat.values())} "
-        f"rarity_accepted_blank={sum(v['accepted_blank'] for v in rarity_by_cat.values())} ==="
+        f"rarity_accepted_blank={sum(v['accepted_blank'] for v in rarity_by_cat.values())} "
+        f"not_a_rarity={sum(not_rarity.values())} ==="
     )
 
 

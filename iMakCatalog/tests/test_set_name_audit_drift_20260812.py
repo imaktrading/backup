@@ -110,7 +110,7 @@ class TestDriftDetection(unittest.TestCase):
         )
         try:
             with mock.patch.object(audit_mod, "DB_PATH", db):
-                (_, _, _, _, _, drift_by_cat, _rarity) = audit_mod.audit(None)
+                (_, _, _, _, _, drift_by_cat, _rarity, *_extra) = audit_mod.audit(None)
             self.assertEqual(drift_by_cat.get("pokemon_tcg"), 1,
                              "state (a) drift must be counted for pokemon_tcg")
         finally:
@@ -135,7 +135,7 @@ class TestDriftDetection(unittest.TestCase):
         )
         try:
             with mock.patch.object(audit_mod, "DB_PATH", db):
-                (_, _, _, _, _, drift_by_cat, _rarity) = audit_mod.audit(None)
+                (_, _, _, _, _, drift_by_cat, _rarity, *_extra) = audit_mod.audit(None)
             self.assertEqual(drift_by_cat, {},
                              "no drift when stored matches computed canonical")
         finally:
@@ -157,7 +157,7 @@ class TestDriftDetection(unittest.TestCase):
         )
         try:
             with mock.patch.object(audit_mod, "DB_PATH", db):
-                (_, _, _, _, _, drift_by_cat, _rarity) = audit_mod.audit(None)
+                (_, _, _, _, _, drift_by_cat, _rarity, *_extra) = audit_mod.audit(None)
             self.assertEqual(drift_by_cat, {},
                              "state (b) free_text (fmap-miss) must not be drift")
         finally:
@@ -179,7 +179,7 @@ class TestDriftDetection(unittest.TestCase):
         )
         try:
             with mock.patch.object(audit_mod, "DB_PATH", db):
-                (_, _, _, _, _, drift_by_cat, _rarity) = audit_mod.audit(None)
+                (_, _, _, _, _, drift_by_cat, _rarity, *_extra) = audit_mod.audit(None)
             self.assertEqual(drift_by_cat, {},
                              "state (c) empty must not be drift")
         finally:
@@ -307,7 +307,7 @@ class TestDriveBySetCodeFallback(unittest.TestCase):
         )
         try:
             with mock.patch.object(audit_mod, "DB_PATH", db):
-                (_, _, _, _, _, drift_by_cat, _rarity) = audit_mod.audit(None)
+                (_, _, _, _, _, drift_by_cat, _rarity, *_extra) = audit_mod.audit(None)
             self.assertEqual(drift_by_cat.get("one_piece_tcg"), 1,
                              "drift must be caught via [CODE] fallback derive")
         finally:
@@ -331,7 +331,7 @@ class TestDriveBySetCodeFallback(unittest.TestCase):
         )
         try:
             with mock.patch.object(audit_mod, "DB_PATH", db):
-                (_, _, _, _, _, drift_by_cat, _rarity) = audit_mod.audit(None)
+                (_, _, _, _, _, drift_by_cat, _rarity, *_extra) = audit_mod.audit(None)
             self.assertEqual(drift_by_cat.get("pokemon_tcg"), 1,
                              "drift must be caught via product_id prefix fallback derive")
         finally:

@@ -111,6 +111,7 @@ class TestDbState:
             [], [], [], [], {}, {},
             {"dragonball_scg": {"raw_stamped": 0, "map_drift": 0, "unmapped": 0,
                                 "accepted_blank": 0}},
+            {},  # 2026-08-21 追加: not_rarity (レアリティでない値の検知)
             ["dragonball_scg"],
         )
         assert "## 7." in report
