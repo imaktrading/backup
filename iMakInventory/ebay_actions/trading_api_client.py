@@ -3,9 +3,11 @@
 監視くんの listing 取得 / 取下げ を Trading API で実装するための薄いクライアント。
 他 worktree (iMakRevise) を import しないで完結する (worktree 分離ルール遵守)。
 
-OAuth token は 全 worktree 共有領域 `c:/dev/iMak/iMakeBayAPI/ebay_oauth_token.json`
-を参照 (= データ共有領域、 cross-worktree read/write 可)。 expired 時は refresh_token
-で自動 refresh + file 更新。
+OAuth token / 鍵の置き場所は `iMakeBayAPI/credentials.py` が 1 か所で決める
+(2026-08-21 HQ 依頼で共有領域 `C:/dev/iMak_data/credentials/` に移行)。
+トークンは使うたびに書き戻されるので、参照先が worktree ごとに割れると
+**片方だけ新しくなってもう片方が腐る**。だから自分で path を書かない。
+expired 時は refresh_token で自動 refresh + file 更新 (書き戻し先も同じ 1 か所)。
 
 提供 API:
 - load_access_token() / refresh_access_token()
@@ -22,9 +24,15 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# 共有領域参照 (= HQ 全 worktree 共有 token)
-OAUTH_TOKEN_PATH = Path(r"c:/dev/iMak/iMakeBayAPI/ebay_oauth_token.json")
-EBAY_KEYS_PATH = Path(r"c:/dev/iMak/iMakeBayAPI/ebay keys.txt")
+# 置き場所は credentials.py が決める (自分で path を書かない = 2 か所に割れない)
+import sys as _sys  # noqa: E402
+_EBAY_API_DIR = Path(__file__).resolve().parent.parent.parent / "iMakeBayAPI"
+if str(_EBAY_API_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_EBAY_API_DIR))
+from credentials import keys_path as _keys_path, token_path as _token_path  # noqa: E402
+
+OAUTH_TOKEN_PATH = Path(_token_path("trading"))
+EBAY_KEYS_PATH = Path(_keys_path())
 TRADING_API_URL = "https://api.ebay.com/ws/api.dll"
 OAUTH_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 COMPATIBILITY_LEVEL = "967"

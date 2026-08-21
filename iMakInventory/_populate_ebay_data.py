@@ -74,7 +74,7 @@ def get_variations(listing_id: str) -> list:
     app_id = keys.get("AppID")
     app_secret = keys.get("CertID") or keys.get("AppSecret")
     if not (app_id and app_secret):
-        raise RuntimeError("eBay API credentials 未設定 (iMakeBayAPI/ebay keys.txt)")
+        raise RuntimeError("eBay API credentials 未設定 (場所は iMakeBayAPI/credentials.py が決める。python iMakeBayAPI/credentials.py で確認)")
 
     token = get_oauth_token(app_id, app_secret)
     url = "https://api.ebay.com/buy/browse/v1/item/get_items_by_item_group"
