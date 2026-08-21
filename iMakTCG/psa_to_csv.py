@@ -1452,6 +1452,31 @@ def _apply_image_substitute(driver, cert_number, data, cache):
     return data
 
 
+def _upgrade_cached_images(cert_number, cached, cache):
+    """キャッシュ済の PSA 画像 URL を /large/ に上げて書き戻す。
+
+    上げられなければ元のまま (404 を PicURL に載せない)。純粋な関数ではないが、
+    差し替えの判断自体は `upgrade_psa_images` (純関数) が持つ。
+    """
+    keys = ("CardImageUrl", "CardImageUrlFront", "CardImageUrlBack")
+    urls = [cached.get(k) or "" for k in keys]
+    if not any("/small/" in u for u in urls):
+        return cached
+    upgraded = upgrade_psa_images(urls, _url_exists)
+    if upgraded == urls:
+        return cached
+    cached = dict(cached)
+    for k, u in zip(keys, upgraded):
+        if u:
+            cached[k] = u
+    try:
+        cache[cert_number] = cached
+        _save_psa_cache(cache)
+    except Exception:                                          # noqa: BLE001
+        pass
+    return cached
+
+
 def get_psa_data(driver, cert_number):
     # キャッシュチェック
     cache = _load_psa_cache()
@@ -1465,6 +1490,12 @@ def get_psa_data(driver, cert_number):
             #   キャッシュを消しても直らない。読み出し口で当てるのが正しい。
             if not cached.get('CardImageUrlFront'):
                 cached = _apply_image_substitute(driver, cert_number, cached, cache)
+            # ★2026-08-21: /large/ 化が **scrape 経路にしか入っていなかった**。
+            #   8/14 以前にキャッシュされた cert は /small/(380x640) のまま PicURL に載り、
+            #   eBay のズーム (1600px 以上が必要) が効かない。高額行ほど効く
+            #   (実例 2026-08-20: cert140936782 ジラーチGX $781.98)。
+            #   読み出し口で上げて **キャッシュに書き戻す** = 次回から HEAD も飛ばない。
+            cached = _upgrade_cached_images(cert_number, cached, cache)
             # iMakeBayAPI 共有 cache にも投入 (= local cache hit でも、 共有 cache 未登録なら書込)
             try:
                 import psa_api as _ihq_psa_api
