@@ -1416,6 +1416,31 @@ SCRIPTS = [
         "open_url": ("https://docs.google.com/spreadsheets/d/"
                      "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=641366106"),
     },
+    {
+        # ★2026-08-22: 一番くじの補URLも PSA と同じ 2段 (夜=検索 / 昼=目視) にした。
+        #   画面は PSA の確証UI をそのまま使う (見た目・操作が分かれないように)。
+        "category": None, "type": "utility",
+        "label": "🔎 一番くじ 補URL夜間検索(slice2)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "kuji_hoju_fill.py", "--search"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        # slice3: 夜に貯めた候補を現物と見比べて、選んだ分だけ補URL(AC-AG)へ書く。主URL不可触。
+        "category": None, "type": "utility",
+        "label": "🩹 一番くじ 補URL補強(昼確認/slice3)",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        # PSA と同じく1回10件ずつ (確証UIは全件まとめて送信する = 出した分はやり切る)。
+        "cmd": ["python", "kuji_hoju_fill.py", "--confirm", "--limit=10"],
+        "params": [],
+        "skip_postprocess": True,
+        # 書いた結果 (商品管理シートの補URL列) をその場で見られるようにする。
+        "open_url": ("https://docs.google.com/spreadsheets/d/"
+                     "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
+    },
     # ---- 一番くじ 在庫補充 (PSA再仕入れの下に配置。2026-07-01 順序変更)。CLI: ichibankuji_restock.py ----
     # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
     {
@@ -2643,6 +2668,10 @@ class ListingPanel:
             # (ユーザー指示)。件数感/夜間検索は定常運用なのでメンテ側に残す。
             if "psa_hoju_fill.py" in cmd and "--limit=15" in cmd:
                 return "hoju"      # 🆕 は出品直後専用 = 新規パネルのみ
+            # ★2026-08-22: 一番くじの補URL2ボタンも **新規出品パネル**に置く
+            #   (ユーザー指示)。PSA と同じ導線 = 出品→itemID→補URL確保 の並び。
+            if "kuji_hoju_fill.py" in cmd:
+                return "hoju"
             # 在庫あり listing を直す: 取下再出品①②③(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
             if any(s in cmd for s in ("relist_from_funnel", "relist_add_from_pending",
                                       "relist_writeback", "dump_us_qty1_sku",

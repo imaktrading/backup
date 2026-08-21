@@ -49,3 +49,32 @@ def test_同じ道具を呼んでいる():
 def test_失敗を黙って飲まない():
     body = SRC[SRC.index("def open_mirror_pmbo"):SRC.index("def open_listing")]
     assert "showerror" in body
+
+
+# ── 一番くじの補URL 2ボタン (2026-08-22 ユーザー指示) ──────────────────
+#
+# 「PSA で実績があるので、ボタンを作って」「新規出品パネルにね」
+# PSA と同じ 2段 (夜=検索 / 昼=目視)。画面も PSA の確証UI をそのまま使う。
+
+def test_一番くじの補URLボタンが2つある():
+    assert "🔎 一番くじ 補URL夜間検索(slice2)" in SRC
+    assert "🩹 一番くじ 補URL補強(昼確認/slice3)" in SRC
+
+
+def test_夜と昼で別のコマンド():
+    assert '"kuji_hoju_fill.py", "--search"' in SRC
+    assert '"kuji_hoju_fill.py", "--confirm"' in SRC
+
+
+def test_新規出品パネルに置かれる():
+    """★出品→itemID書込→補URL確保 は一連の流れ。既存メンテ側に離すと導線が切れる
+    (PSA の 🆕/🩹 と同じ扱い)."""
+    i = SRC.index('if "kuji_hoju_fill.py" in cmd:')
+    assert 'return "hoju"' in SRC[i:i + 200]
+
+
+def test_昼は件数を区切る():
+    """確証UIは全件まとめて送信する = 出した分はやり切る必要がある。
+    PSA と同じく1回10件ずつ."""
+    i = SRC.index('"kuji_hoju_fill.py", "--confirm"')
+    assert "--limit=10" in SRC[i:i + 120]
