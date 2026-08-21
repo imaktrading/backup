@@ -20,6 +20,8 @@ import urllib.request
 
 SEARCH_URL = ("https://search.rakuten.co.jp/search/mall/{kw}/"
               "?sid={sid}&s={sort}&p={page}{extra}")
+# 店を限定しない検索 (= 楽天全体)。 商品ラインを起点に探す時に使う
+MALL_URL = "https://search.rakuten.co.jp/search/mall/{kw}/?s={sort}&p={page}{extra}"
 # 送料無料だけに絞る (実測 2026-08-19: `&f=2` で サンリオ 381件 → 232件)。
 # ★仕入原価は「商品価格 + 送料」でなければならない (user 指摘)。 送料は都道府県で変わり
 # 商品ページからも簡単には出ないので、 **送料無料の物だけ扱う** = 表示価格が総額。
@@ -203,5 +205,33 @@ def search_shop(shop: str, keyword: str, max_pages: int = 3,
             progress(f"{shop} '{keyword}' p{page}: {len(rows)}件 (累計 {len(out)})")
         if len(rows) < PER_PAGE:
             break
+        time.sleep(sleep_sec)
+    return out
+
+
+def search_mall(keyword: str, max_pages: int = 2, sort: int = SORT_NEWEST,
+                sleep_sec: float = 1.0, free_shipping: bool = False) -> list[dict]:
+    """**店を限定せず** 楽天全体を検索する.
+
+    2026-08-21 新設。 「公式にあるこの商品を、 どこの店でもいいから買いたい」
+    という探し方 (商品ライン起点) に使う。 店内検索 (`search_shop`) は
+    店を先に決める探し方なので、 目的が違う。
+    """
+    kw = urllib.parse.quote(keyword)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for page in range(1, max_pages + 1):
+        html = fetch(MALL_URL.format(
+            kw=kw, sort=sort, page=page,
+            extra=FREE_SHIPPING_PARAM if free_shipping else ""))
+        rows = _PAIR_RE.findall(html)
+        if not rows:
+            break
+        for url, shop, code, title in rows:
+            key = f"{shop}/{code}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"url": url, "shop": shop, "code": code, "title": title.strip()})
         time.sleep(sleep_sec)
     return out

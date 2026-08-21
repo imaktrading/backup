@@ -101,6 +101,18 @@ def find_by_title(title: str) -> str:
     return best_code if best else ""
 
 
+def fetch_age_by_code(code: str, timeout: int = 15) -> int | None:
+    """公式カタログの jan_code (末尾000 付き) から 対象年齢 を引く."""
+    if not (code or "").isdigit():
+        return None
+    try:
+        req = urllib.request.Request(GASHAPON_JAN_URL.format(code=code), headers=UA)
+        html = urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "ignore")
+    except Exception:  # noqa: BLE001
+        return None
+    return parse_age(html)
+
+
 def fetch_age_by_title(title: str, timeout: int = 15) -> int | None:
     """JAN が無い時に 商品名で 対象年齢 を引く. 当たらなければ None."""
     code = find_by_title(title)
