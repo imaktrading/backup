@@ -329,6 +329,60 @@ def derive_game_ebay(category):
     return _GAME_EBAY.get(category)
 
 
+_MANUFACTURER = {
+    "pokemon_tcg": "The Pokémon Company",
+    "one_piece_tcg": "Bandai",
+    "dragonball_scg": "Bandai",
+    "gundam_tcg": "Bandai",
+    "yugioh_tcg": "Konami",
+}
+
+
+def derive_manufacturer(category):
+    """category -> eBay の Manufacturer 値. 未知は None (fail-closed).
+
+    eBay の Manufacturer は 711値 の RECOMMENDED 項目で、綴りは実在確認済:
+      'The Pokémon Company' / 'Bandai' / 'Konami'
+    category から一意に決まるので推測ではない。
+    """
+    return _MANUFACTURER.get(category)
+
+
+# eBay の Speciality 12値。**VSTAR は無い** (V / VMAX はある) ので出さない。
+_SPECIALITY_SUFFIX = (
+    ("TAG TEAM", (" tag team",)),
+    ("VMAX", (" vmax",)),
+    ("BREAK", (" break",)),
+    ("LEGEND", (" legend",)),
+    ("PRIME", (" prime",)),
+    ("MEGA", (" mega",)),
+    ("GX", ("-gx", " gx")),
+    ("EX", (" ex",)),
+    ("V", (" v",)),
+)
+
+
+def derive_speciality(category, name_en):
+    """カード名の**末尾**から eBay の Speciality を決める. 決まらなければ None.
+
+    ★末尾一致だけを見る。名前の途中に 'ex' を含むカード
+      ('Ex Machina' 等) に誤爆させないため。
+    ★VSTAR は eBay の Speciality 一覧に**無い**ので空欄のまま
+      (V に寄せると別の仕様を名乗ることになる)。
+    ★ポケモン以外はこの語彙を持たないので None。
+    """
+    if category != "pokemon_tcg" or not name_en:
+        return None
+    n = " " + str(name_en).strip().lower()
+    if n.endswith(" vstar"):
+        return None                      # eBay に値が無い = 空欄が正
+    for label, sufs in _SPECIALITY_SUFFIX:
+        for s in sufs:
+            if n.endswith(s):
+                return label
+    return None
+
+
 def derive_rarity_ebay(category: str, rarity_raw: Optional[str]) -> Optional[str]:
     """公式 rarity コード → eBay canonical 値. filter_map miss は None (fail-closed).
 
