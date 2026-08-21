@@ -190,97 +190,6 @@ def drop_own_urls(cands: list, own: str, existing: list) -> list:
         out.append(c)
     return out
 
-
-def build_html(items: list) -> str:
-    """目視画面 (純関数)。候補の写真・価格・タイトルを並べて選ばせる。
-
-    検索だけでは **別のくじ / 別の賞 / 付属品だけ** が混ざる (実測: 「一番くじ
-    シャンクス A賞」で 大海賊 と 新四皇 と 専用台座 が同時に出た)。だから人が見る。
-    """
-    cards = []
-    for i, it in enumerate(items):
-        cands = it.get("candidates") or []
-        thumbs = "\n".join(
-            f'<label class="p"><input type="checkbox" name="c{i}" value="{_html.escape(c.get("href",""))}">'
-            f'<img src="/img/{urllib.parse.quote(c.get("img") or "", safe="")}" loading="lazy">'
-            f'<span class="cap">¥{c.get("price", 0):,}<br>{_html.escape((c.get("name") or "")[:46])}</span>'
-            f'</label>' for c in cands) or '<span class="no">候補が見つかりませんでした</span>'
-        own_src = it.get("own_img") or ""
-        own = (f'<a href="{_html.escape(it.get("supply_url",""))}" target="_blank">'
-               f'<img src="/img/{urllib.parse.quote(own_src, safe="")}" loading="lazy"></a>'
-               if own_src else '<span class="no">写真が無い (シートG列が空)</span>')
-        cards.append(f"""
-<div class="card" id="c{i}" data-row="{it.get('row')}">
-  <h2>{i+1}. {_html.escape(it.get('title',''))}</h2>
-  <div class="meta">補 {it.get('n_backups',0)}/{AUX_MAX}本
-    &nbsp;|&nbsp; 検索語: <b>{_html.escape(it.get('query',''))}</b>
-    &nbsp;|&nbsp; <a href="{_html.escape(it.get('supply_url',''))}" target="_blank">今の仕入元</a>
-    &nbsp;|&nbsp; <a href="https://jp.mercari.com/search?keyword={urllib.parse.quote(it.get('query',''))}"
-       target="_blank">メルカリで開く</a></div>
-  <div class="cmp">
-    <div class="own"><div class="ownlbl">今 出している物</div>{own}</div>
-    <div class="cands">
-      <div class="lbl">同じ物にチェック ({len(cands)}件・安い順)。別のくじ・別の賞・付属品だけ が混ざります</div>
-      <div class="pics">{thumbs}</div>
-    </div>
-  </div>
-  <div class="btns"><button onclick="done({i})">この行は決めた</button>
-    <span class="state" id="s{i}"></span></div>
-</div>""")
-    return """<!doctype html><meta charset="utf-8"><title>一番くじ 補URL 目視</title>
-<style>
-body{font-family:system-ui,sans-serif;margin:16px;background:#f6f6f6}
-.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px;margin:0 0 16px}
-h2{font-size:15px;margin:0 0 4px}
-.meta{font-size:12px;color:#555;margin-bottom:6px}
-.lbl{font-size:12px;font-weight:700;margin:6px 0 4px}
-.no{color:#a00;font-size:13px}
-.cmp{display:flex;gap:14px;align-items:flex-start}
-.own{flex:0 0 190px}
-.ownlbl{font-size:12px;font-weight:700;margin:6px 0 4px;color:#a00}
-.own img{width:190px;height:190px;object-fit:contain;background:#fff;
-         border:3px solid #a00;border-radius:4px}
-.cands{flex:1;min-width:0}
-.pics{display:flex;flex-wrap:wrap;gap:8px}
-.p{position:relative;display:inline-block;width:160px}
-.p img{width:160px;height:160px;object-fit:contain;background:#fff;border:2px solid #ccc;border-radius:4px}
-.p input{position:absolute;top:4px;left:4px;transform:scale(1.6);z-index:2}
-.p input:checked+img{border-color:#0a0;border-width:3px}
-.cap{display:block;font-size:11px;line-height:1.3;color:#333}
-button{font-size:14px;padding:6px 12px;border-radius:5px;border:1px solid #999;background:#dfd;cursor:pointer}
-.state{font-weight:700;margin-left:8px}
-#bar{position:sticky;top:0;background:#222;color:#fff;padding:10px;border-radius:6px;margin-bottom:12px;z-index:9}
-#send{background:#fff;color:#000;font-weight:700}
-</style>
-<div id="bar"><span id="cnt">0</span> / __N__ 行 決定
-  <button id="send" onclick="send()">✉️ HQ に送信</button><span id="msg"></span></div>
-__CARDS__
-<script>
-const D={};
-function done(i){
-  const c=document.getElementById('c'+i);
-  const n=c.querySelectorAll('input:checked').length;
-  D[i]=1; document.getElementById('s'+i).textContent=n+'件を補URLに';
-  document.getElementById('cnt').textContent=Object.keys(D).length;
-  const nx=document.getElementById('c'+(i+1)); if(nx) nx.scrollIntoView({behavior:'smooth'});
-}
-function send(){
-  const out=[];
-  document.querySelectorAll('.card').forEach((c,i)=>{
-    if(!(i in D)) return;
-    out.push({row:+c.dataset.row,
-      urls:[...c.querySelectorAll('input:checked')].map(x=>x.value)});
-  });
-  if(!out.length){document.getElementById('msg').textContent=' 1行も決めていません';return;}
-  fetch('/submit',{method:'POST',body:JSON.stringify(out)})
-    .then(r=>r.text()).then(t=>document.getElementById('msg').textContent=' '+t);
-}
-</script>""".replace("__CARDS__", "\n".join(cards)).replace("__N__", str(len(items)))
-
-
-# ── I/O ────────────────────────────────────────────────────────────
-
-
 def load_cache():
     try:
         with open(CACHE_PATH, encoding="utf-8") as f:
@@ -360,82 +269,104 @@ def _image_map(src: str) -> dict:
         out["https://jp.mercari.com" + m.group(1)] = m.group(3)
     return out
 
+# ── slice3: 昼の確認 (PSA と同じ画面・同じ操作) ──────────────────────
+#
+# ★2026-08-22 ユーザー指示「同じにしてといっている。HTMLの見た目も全て。
+#   やりやすくて機能的なPSAに合わせてくれ」。
+#   自前の HTML を捨てて、PSA の確証UI (`psa_resource_confirm.restock_confirm`) を
+#   そのまま呼ぶ。画面・操作・「違う/見送り」の受け皿まで PSA と同一になる。
+def build_items(targets: list, cache: dict) -> tuple:
+    """キャッシュ済の候補から、PSA の確証UI に渡す items を作る。
 
-class _Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):                                  # noqa: D102
-        pass
-
-    def do_GET(self):                                           # noqa: N802
-        if self.path.startswith("/img/"):
-            u = urllib.parse.unquote(self.path[5:])
-            try:
-                data = urllib.request.urlopen(
-                    urllib.request.Request(u, headers=_UA), timeout=20).read()
-                self.send_response(200)
-                self.send_header("Content-Type", "image/jpeg")
-                self.end_headers()
-                self.wfile.write(data)
-            except Exception:                                   # noqa: BLE001
-                self.send_response(404)
-                self.end_headers()
-            return
-        body = build_html(_STATE["items"]).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_POST(self):                                          # noqa: N802
-        n = int(self.headers.get("Content-Length") or 0)
-        try:
-            _STATE["result"] = json.loads(self.rfile.read(n).decode("utf-8"))
-        except Exception:                                       # noqa: BLE001
-            _STATE["result"] = []
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.end_headers()
-        self.wfile.write("受け取りました。閉じてOK".encode("utf-8"))
-        _EVENT.set()
-
-
-def run_review(items: list, open_browser: bool = True, timeout_sec: int = 10800):
-    _STATE["items"], _STATE["result"] = items, None
-    _EVENT.clear()
-    server = None
-    for p in range(SERVER_PORT, SERVER_PORT + 10):
-        try:
-            server = HTTPServer(("127.0.0.1", p), _Handler)
-            break
-        except OSError:
+    items の形は PSA と同じ:
+      {idx, title, card_no, ebay_url, ref_image, candidates:[{channel,url,price}]}
+    `card_no` は一番くじに品番が無いので **賞名** を入れる (画面では同じ位置に出る)。
+    """
+    import psa_resource_confirm as prc
+    items, item_targets = [], []
+    for t in targets:
+        entry = cache.get(t["itemID"])
+        # ★旧形式 (list をそのまま入れていた) のキャッシュが残っている。壊さず読む
+        cands = entry if isinstance(entry, list) else ((entry or {}).get("candidates") or [])
+        cands = drop_own_urls(cands, t.get("supply_url", ""), t.get("existing", []))
+        if not cands:
             continue
-    if not server:
-        print("  ⚠️ 画面を出せませんでした → 書込なし")
-        return []
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_port}/"
-    print(f"  🌐 目視画面: {url}  ({len(items)}行)")
-    if open_browser:
-        try:
-            import subprocess
-            subprocess.run(["cmd", "/c", "start", "", url], check=False)
-        except Exception:                                       # noqa: BLE001
-            pass
-    got = _EVENT.wait(timeout=timeout_sec)
-    try:
-        server.shutdown()
-    except Exception:                                           # noqa: BLE001
-        pass
-    if not got or not _STATE["result"]:
-        print("  ⚠️ 回答が来ませんでした → 書込なし")
-        return []
-    return _STATE["result"]
+        ref = t.get("own_img") or prc.ebay_listing_image(t["itemID"])
+        if not ref:
+            continue                       # 現物が見えない = 目視できない (推測で通さない)
+        idx = len(items)
+        items.append({
+            "idx": idx, "title": (t.get("title") or "")[:90],
+            "card_no": parse_title(t.get("title", ""))[1] or "",
+            "ebay_url": "https://www.ebay.com/itm/%s" % t["itemID"],
+            "ref_image": ref,
+            "candidates": [{"channel": "mercari", "url": c.get("href", ""),
+                            "price": c.get("price", 0)} for c in cands],
+        })
+        item_targets.append(t)
+    return items, item_targets
+
+
+def run_search(targets: list) -> int:
+    """slice2: 夜間検索 (無人)。候補をキャッシュに貯めるだけ。**補URLは書かない**。"""
+    import datetime
+    found = search_candidates(targets)
+    cache = load_cache()
+    today = datetime.date.today().isoformat()
+    n = 0
+    for t in targets:
+        cands = found.get(t["itemID"]) or []
+        cache[t["itemID"]] = {"date": today, "query": t.get("query", ""),
+                              "candidates": cands}
+        n += 1 if cands else 0
+    save_cache(cache)
+    print("  💾 キャッシュに保存: %d件 (候補あり %d件)" % (len(targets), n))
+    print("     → 翌日 `--confirm` で目視して補URLに書きます")
+    return 0
+
+
+def run_confirm(targets: list, dry_run: bool = False) -> int:
+    """slice3: 昼の確認。PSA と同じ画面で目視 → 選ばれた分だけ補URLへ書く。"""
+    import psa_resource_confirm as prc
+    cache = load_cache()
+    items, item_targets = build_items(targets, cache)
+    if not items:
+        print("  目視できる行がありません (夜間検索がまだ / 候補が全部除外)")
+        return 0
+    print("  🌐 目視 %d件: ブラウザで確認 → 送信" % len(items))
+    if dry_run:
+        return 0
+    res = prc.restock_confirm(items)
+    if res is None:
+        print("  ⏹ 未確定のまま閉じられました。何も書いていません")
+        return 0
+    confirmed = res.get("confirmed") or []
+    if not confirmed:
+        print("  選ばれた候補が0件でした。何も書いていません")
+        return 0
+    plan = {}
+    for c in confirmed:
+        t = item_targets[c["idx"]]
+        plan[t["row"]] = P.compute_backurl_additions(t.get("existing", []), c["urls"])
+    import sheet_io as S
+    S.write_aux_urls(plan)
+    print("  ✏️ 補URLを書きました: %d行" % len(plan))
+    if res.get("diffs"):
+        print("  ⚠️ 「違う」と判定された候補 %d件 (検索が別の物を拾っている)"
+              % len(res["diffs"]))
+    return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="一番くじの補URL補充。PSA と同じ 2段 (夜に検索 → 昼に目視)")
     ap.add_argument("--list", action="store_true", help="対象と検索語を見るだけ")
+    ap.add_argument("--search", action="store_true",
+                    help="slice2: 夜間検索 (無人・キャッシュに貯めるだけ)")
+    ap.add_argument("--confirm", action="store_true",
+                    help="slice3: 昼の確認 (PSA と同じ画面。選んだ分を補URLへ書く)")
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--dry-run", action="store_true", help="件数だけ見る (書かない)")
     a = ap.parse_args()
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -444,8 +375,12 @@ def main() -> int:
 
     vals = P._read_high()
     targets = select_targets(vals)
-    print(f"一番くじ: 補<{AUX_MAX}本 の live 出品 {len(targets)}件 "
-          f"(うち補0本 {sum(1 for t in targets if t['n_backups'] == 0)}件)")
+    for t in targets:
+        row = vals[t["row"] - 1] if 0 < t["row"] <= len(vals) else []
+        t["existing"] = [P._cell(row, P.AUX0 + k) for k in range(P.AUXN)]
+        t["existing"] = [u for u in t["existing"] if u]
+    print("一番くじ: 補<%d本 の live 出品 %d件 (うち補0本 %d件)"
+          % (AUX_MAX, len(targets), sum(1 for t in targets if t["n_backups"] == 0)))
     if a.limit:
         targets = targets[:a.limit]
     if a.list:
@@ -455,78 +390,12 @@ def main() -> int:
         return 0
     if not targets:
         return 0
-
-    # ★2026-08-22: シートG列は半分以上が空か OGP 画像なので、
-    #   足りない分は **eBay に出している写真** で埋める (買い手が見ている物)。
-    need = [t for t in targets if not t.get("own_img")]
-    if need:
-        try:
-            sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
-            import fix_de_speedpak_shipping as _fx
-            _fx.refresh()
-            _tok = _fx.token()
-            got = 0
-            for t in need:
-                t["own_img"] = ebay_photo(t["itemID"], _fx.post, _tok)
-                got += 1 if t["own_img"] else 0
-            print("  🖼️ 元画像を eBay から取得: %d/%d件" % (got, len(need)))
-        except Exception as e:                                  # noqa: BLE001
-            print("  ⚠️ 元画像を eBay から取れませんでした (%s)。"
-                  "写真の無い行は目視で判断できないので注意" % type(e).__name__)
-
-    found = search_candidates(targets)
-    items = []
-    for t in targets:
-        r = vals[t["row"] - 1] if 0 < t["row"] <= len(vals) else []
-        existing = [P._cell(r, P.AUX0 + k) for k in range(AUX_MAX)]
-        cands = drop_own_urls(found.get(t["itemID"]) or [], t["supply_url"], existing)
-        items.append(dict(t, candidates=cands))
-    save_cache({t["itemID"]: t.get("candidates") for t in items})
-
-    res = run_review(items, open_browser=not a.no_browser)
-    if not res:
-        return 0
-
-    confirmed = {}
-    item_targets = {}
-    by_row = {it["row"]: k for k, it in enumerate(items)}
-    for r in res:
-        k = by_row.get(r.get("row"))
-        if k is None or not r.get("urls"):
-            continue
-        confirmed[k] = r["urls"]
-        item_targets[k] = items[k]
-    if not confirmed:
-        print("  選ばれた候補が0件 → 書込なし")
-        return 0
-
-    # 他の出品が使っているURLは掴まない (両方売れたら片方が履行不能 = Defect)
-    guard_ok, owner = True, {}
-    try:
-        import dup_guard as _dg
-        for _r in vals[1:]:
-            if not (P._cell(_r, P.B) and not P._cell(_r, P.D)):
-                continue
-            for _u in [P._cell(_r, P.A)] + [P._cell(_r, P.AUX0 + k) for k in range(P.AUXN)]:
-                n = _dg.norm_url(_u)
-                if n:
-                    owner.setdefault(n, set()).add(P._cell(_r, P.B))
-        owner = {k: sorted(v) for k, v in owner.items()}
-    except Exception as e:                                      # noqa: BLE001
-        print(f"⚠️要対応 URL共有ガードを組めず **書込を中止**: {type(e).__name__}: {e}")
-        guard_ok = False
-
-    plan, added, dropped = P.plan_aux_writeback(
-        confirmed, item_targets, vals, owner, guard_ok, aux_max=AUX_MAX)
-    for u, own in dropped:
-        print(f"  ⛔ 補URL除外(他出品が使用中 {own}): {u[:70]}")
-    if not plan:
-        print("  書込対象なし (全て既存収載 or 満杯 or ガード不成立)")
-        return 0
-    from sheet_io import write_aux_urls
-    n = write_aux_urls(plan)
-    print(f"🔗 補URL(AC-AG) 書込: {n}行 / 追加 {added}本 (既存保持・空き枠のみ)")
-    return 0
+    if a.search:
+        return run_search(targets)
+    if a.confirm:
+        return run_confirm(targets, dry_run=a.dry_run)
+    print("  --search (夜間検索) か --confirm (昼の目視) を指定してください")
+    return 2
 
 
 if __name__ == "__main__":

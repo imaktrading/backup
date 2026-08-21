@@ -112,37 +112,38 @@ class TestCandidateFiltering:
         assert len(K.drop_own_urls(c, "", [])) == 1
 
 
-class TestOnlyTheVisualPathWrites:
-    def test_this_tool_has_a_visual_ui(self):
-        """★補URLを書いてよいのは目視UIを持つツールだけ (2026-08-03 ユーザー指示)。
+class TestSamePhasesAsPSA:
+    """★2026-08-22 ユーザー指示「同じにして。HTMLの見た目も全て。PSA に合わせて」。
 
-        検索は文字列一致なので別のくじ・別の賞が混ざる。目視が唯一の担保。
-        `test_no_unconfirmed_aux_url_20260803` の許可リストに載せた根拠がこれ。
-        """
-        assert hasattr(K, "build_html") and hasattr(K, "run_review")
+    PSA は 夜(検索・無人) と 昼(目視・人) の2段。一番くじは1回で全部やっていたので
+    **夜間の定期実行に載せられなかった** (目視画面が立ち上がるため)。
+    """
 
-    def test_nothing_is_written_without_a_choice(self):
-        """選ばれた候補が0件なら書かない (無回答を『たぶん合っている』に倒さない)."""
+    def test_二段に分かれている(self):
+        assert hasattr(K, "run_search") and hasattr(K, "run_confirm")
+
+    def test_夜は書かない(self):
+        """slice2 は候補を貯めるだけ。補URLを書いたら無人で誤りが入る."""
         import inspect
-        src = inspect.getsource(K.main)
-        assert "選ばれた候補が0件" in src and "return 0" in src
+        src = inspect.getsource(K.run_search)
+        assert "save_cache" in src
+        assert "write_aux_urls" not in src
 
+    def test_自前のHTMLを持たない(self):
+        """★PSA と同じ画面を使う。自前で持つと見た目と操作が分かれる."""
+        assert not hasattr(K, "build_html")
+        import inspect
+        assert "psa_resource_confirm" in inspect.getsource(K.run_confirm)
 
-class TestScreen:
-    ITEM = {"row": 5, "itemID": "820", "title": "A賞 シャンクス", "n_backups": 1,
-            "query": "一番くじ シャンクス A賞", "supply_url": "https://x/1",
-            "candidates": [{"href": "https://jp.mercari.com/item/m9", "name": "一番くじ シャンクス",
-                            "price": 1750, "img": "https://x/i.jpg"}]}
+    def test_現物が見えない行は目視に出さない(self):
+        """写真が無いと「同じ物か」を判断できない (2026-08-22 ユーザー指摘)."""
+        import inspect
+        assert "目視できない" in inspect.getsource(K.build_items)
 
-    def test_candidates_are_selectable_with_price_and_name(self):
-        h = K.build_html([self.ITEM])
-        assert 'type="checkbox"' in h and "1,750" in h and "一番くじ シャンクス" in h
-
-    def test_the_query_is_shown_so_a_bad_one_is_visible(self):
-        assert "一番くじ シャンクス A賞" in K.build_html([self.ITEM])
-
-    def test_no_candidates_says_so(self):
-        assert "候補が見つかりませんでした" in K.build_html([dict(self.ITEM, candidates=[])])
+    def test_選ばれなければ書かない(self):
+        import inspect
+        src = inspect.getsource(K.run_confirm)
+        assert "選ばれた候補が0件" in src and "未確定" in src
 
 
 # ── 目視画面に「今 出している物」の写真を出す (2026-08-22 ユーザー指摘) ──────
@@ -182,11 +183,20 @@ class TestEbayPhoto:
 
 
 class TestScreenShowsOwn:
-    def test_画面に元画像が出る(self):
-        h = K.build_html([dict(TestScreen.ITEM, own_img="https://x/own.jpg")])
-        assert "今 出している物" in h and "own.jpg" in h
+    """★「元画像がないから、判断できない」(2026-08-22)。
 
-    def test_写真が無ければそう書く(self):
-        """黙って空欄にすると「候補が無い」のか「写真が無い」のか分からない."""
-        h = K.build_html([dict(TestScreen.ITEM, own_img="")])
-        assert "写真が無い" in h
+    現物の写真は PSA の確証UI が `ref_image` として出す。ここでは
+    **その値を必ず用意していること**を見る (画面の描画は PSA 側の責任)。
+    """
+
+    def test_現物の写真をitemsに入れている(self):
+        import inspect
+        src = inspect.getsource(K.build_items)
+        assert '"ref_image"' in src
+        # シートG列 → 無ければ eBay の写真、の順
+        assert "own_img" in src and "ebay_listing_image" in src
+
+    def test_写真が無ければ目視に出さない(self):
+        """出しても判断できない。推測で通すより出さない."""
+        import inspect
+        assert "continue" in inspect.getsource(K.build_items)
