@@ -1577,33 +1577,12 @@ ENERGY_MARKER_DB = {
 }
 
 
-DRAGONBALL_SET_PREFIX = {
-    "AWAKENED PULSE": "FB01",
-    "BLAZING AURA": "FB02",
-    "RAGING ROAR": "FB03",
-    "FUSION SURGE": "FB04",
-    "RISING SPARK": "FB05",
-    # Manga Booster
-    "MANGA BOOSTER": "SB01",
-    "MANGA BOOSTER 02": "SB02",
-    # Starter
-    "STARTER DECK": "FS",
-}
+# ★2026-08-21: この6表は psa_to_csv.py / psa_restock_csv.py に **同じ内容で2本**あった。
+#   片方だけ直せば即ズレるので1本化した。実体は tcg_set_rarity_maps.py。
+from tcg_set_rarity_maps import (  # noqa: E402,F401
+    _DRAGONBALL_SET_NAME_MAP, _RARITY_FULL_FOR_TITLE, _RARITY_TO_FEATURES,
+    DRAGONBALL_SET_PREFIX, GUNDAM_SET_PREFIX, POKEMON_SET_NAME_MAP)
 
-GUNDAM_SET_PREFIX = {
-    # 2026-04-24 修正: DUAL IMPACT を GD01 → GD02 に訂正（Bandai TCG+ 実DB検証済）
-    # GD02-069=Zeta Gundam, GD02-072=Hyaku-Shiki 等が Dual Impact 収録と判明。
-    # 旧マッピングで GD01 に誤誘導された結果、PSA "DUAL IMPACT" のカードが
-    # 別カード（Strike Rouge, Launcher Strike Gundam 等）の Item Specifics を引いていた（SNAD直結）。
-    "NEWTYPE RISING": "GD01",
-    "DUAL IMPACT":    "GD02",
-    # 以下は未検証: 実DB突き合わせしていない推測マッピング（次セッション要検証）
-    "STEEL REQUIEM":     "GD02",
-    "HEROIC BEGINNINGS": "GD02",
-    "WINGS OF ADVANCE":  "GD03",
-    "SEED STRIKE":       "GD03",
-    "IRON BLOOM":        "GD04",
-}
 
 
 def _dragonball_card_id(brand, card_number):
@@ -1660,32 +1639,6 @@ def _gundam_card_id(brand, card_number):
 # Bandai TCG+ API は "BOOSTER PACK -AWAKENED PULSE- [FB01]" のような生表記を返すが
 # eBay の C:Set フィルタは Title Case の短縮名 (例: "Awakened Pulse") を要求。
 # 完全一致マップ + 汎用クリーンアップ (角括弧除去 + ハイフン区切り部分抽出 + Title Case) のフォールバック。
-_DRAGONBALL_SET_NAME_MAP = {
-    # Booster Pack
-    "BOOSTER PACK -AWAKENED PULSE- [FB01]": "Awakened Pulse",
-    "BOOSTER PACK -BLAZING AURA- [FB02]":   "Blazing Aura",
-    "BOOSTER PACK -RAGING ROAR- [FB03]":    "Raging Roar",
-    "BOOSTER PACK -FUSION SURGE- [FB04]":   "Fusion Surge",
-    "BOOSTER PACK -RISING SPARK- [FB05]":   "Rising Spark",
-    "BOOSTER PACK -PERFECT COMBINATION- [FB06]": "Perfect Combination",
-    "BOOSTER PACK -ULTRA LIMIT- [FB07]":    "Ultra Limit",
-    "BOOSTER PACK -SECRET OF EVOLUTION- [FB08]": "Secret of Evolution",
-    "BOOSTER PACK -DESTINED RIVALS- [FB09]": "Destined Rivals",
-    # Manga Booster
-    "MANGA BOOSTER 02 [SB02]":              "Manga Booster 02",
-    "MANGA BOOSTER 01 [SB01]":              "Manga Booster 01",
-    "MANGA BOOSTER -CRITICAL BLOW- [SB02]": "Critical Blow",
-    # Starter Deck
-    "STARTER DECK SAIYAN GENESIS [FS01]":   "Starter Deck Saiyan Genesis",
-    "STARTER DECK BUDOKAI WARRIORS [FS02]": "Starter Deck Budokai Warriors",
-    "STARTER DECK PERFECTION [FS03]":       "Starter Deck Perfection",
-    "STARTER DECK FRIEZA [FS04]":           "Starter Deck Frieza",
-    "STARTER DECK ANDROIDS [FS05]":         "Starter Deck Androids",
-    "STARTER DECK PIRATES [FS06]":          "Starter Deck Pirates",
-    "STARTER DECK ULTIMATE WARRIORS [FS07]": "Starter Deck Ultimate Warriors",
-    "STARTER DECK MAJIN BUU [FS08]":        "Starter Deck Majin Buu",
-    "STARTER DECK EX SHALLOT [FS09]":       "Starter Deck EX Shallot",
-}
 
 
 def _strip_variant_from_character(name):
@@ -1784,14 +1737,6 @@ def _dragonball_set_name_to_ebay(raw_set_name):
 
 
 # ===== Pokemon Item Specifics整形 =====
-POKEMON_SET_NAME_MAP = {
-    "M2A-MEGA DREAM EX": "M2a: High Class Pack: Mega Dream Ex",
-    "M2A": "M2a: High Class Pack: Mega Dream Ex",
-    # 2026-05-01 18:46 観測: PSA brand "POKEMON GO JAPANESE" → fallback で "Go Japanese"
-    # になり eBay 公式フィルタ値 "Pokémon GO" と乖離. dict 経由で正規化.
-    "GO JAPANESE": "Pokémon GO",
-    # 今後追加
-}
 
 
 def _pokemon_set_name(brand):
@@ -1921,14 +1866,8 @@ def _build_pic_url(data):
 
 # 2026-06-09: 短タイトル(<70)を catalog の実ファクトだけで補強 (year/rarity/set code)。
 # 捏造しない: facts が無ければ伸ばさない。refine_title の後 (= 短縮されない最終段) で適用。
-_RARITY_FULL_FOR_TITLE = {"AR": "Art Rare", "SR": "Super Rare", "SAR": "Special Art Rare"}
 # catalog rarity short code → eBay Features 値 (TOPセラーは rarity descriptor を Features に入れる慣習)。
 # Features が variant/PSA Subject から取れない時のフォールバック (= 実属性、捏造でない)。
-_RARITY_TO_FEATURES = {
-    "AR": "Art Rare", "SR": "Super Rare", "SAR": "Special Art Rare",
-    "UR": "Ultra Rare", "HR": "Hyper Rare", "MA": "Mega Attack Rare",
-    "RR": "Double Rare", "RRR": "Triple Rare", "SSR": "Shiny Super Rare",
-}
 # ★2026-08-19: 上の表のキーは**略号**だが、Pokemon の official_rarity は lookup_pokemon が
 #   既に eBay 綴りに展開して返す (`'Special Art Rare'`)。そのため Pokemon では 100% 空振りし、
 #   直近12CSV の Pokemon 23行中18行が C:Features 空だった (One Piece は略号のままなので当たる)。
