@@ -41,6 +41,23 @@ except Exception:
     pass
 
 NOW = datetime.now().isoformat()
+
+MASTER = Path(r"C:\dev\iMak_data\catalog\_input\ebay_aspects_183454_latest.json")
+GAME_OF = {"pokemon_tcg": "Pokémon TCG", "one_piece_tcg": "One Piece CCG",
+           "dragonball_scg": "Dragon Ball Super Card Game"}
+_EBAY_OK = {}
+
+
+def _load_ebay_ok():
+    """category -> eBay の Set 一覧 (Game 別)。格下げ禁止の判定に使う."""
+    if _EBAY_OK:
+        return
+    node = json.loads(MASTER.read_text(encoding="utf-8"))["aspects"]["Set"]
+    for cat, game in GAME_OF.items():
+        _EBAY_OK[cat] = set(node["by_game"].get(game) or [])
+
+
+
 SOURCE = "restamp_from_filter_map_20260821"
 
 
@@ -60,7 +77,8 @@ def main():
         rows = db.execute("SELECT id, category, product_id, set_name_official, specs FROM products "
                           "WHERE category=? AND set_name_official IS NOT NULL", (args.category,))
 
-    pairs, updates, skipped_none = Counter(), [], 0
+    _load_ebay_ok()
+    pairs, updates, skipped_none, kept = Counter(), [], 0, 0
     for r in rows:
         s = json.loads(r["specs"] or "{}")
         stored = s.get("set_name_ebay") or ""
@@ -69,6 +87,14 @@ def main():
             skipped_none += 1
             continue
         if derived == stored:
+            continue
+        # ★格下げ禁止 (2026-08-22): 今の値が **既に eBay の一覧に在る** なら触らない。
+        #   具体的なセット名を汎用のプロモ枠に落としても絞り込みは良くならず、情報だけ失う。
+        #   例: SM-P-069 'Sm3h: to Have Seen the Battle Rainbow' (公式 拡張パック「闘う虹を見たか」)
+        #       -> 'Sm-P: Sun & Moon Promos' は改悪。
+        #   上書きしてよいのは 空欄 か 一覧外の値 のときだけ。
+        if stored and stored in _EBAY_OK.get(r["category"], set()):
+            kept += 1
             continue
         pairs[(stored or "(空)", derived)] += 1
         s["set_name_ebay"] = derived

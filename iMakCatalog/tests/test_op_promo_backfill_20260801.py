@@ -52,7 +52,13 @@ class TestOpPromoBackfill(unittest.TestCase):
             "json_extract(specs,'$.set_name_ebay_source')="
             "'blanked_by_ultra_prism_mismap_20260731'").fetchone()[0]
         con.close()
-        self.assertEqual(n, 206)
+                # 2026-08-22: SM-P-xxx の promo 14行が eBay の canonical
+        #   'Sm-P: Sun & Moon Promos' に埋まったため 206 -> 192。
+        #   残 192 は SM5S/SM5M/SM5p 本体で、こちらも同日に
+        #   Sm5s: Ultra Sun / Sm5m: Ultra Moon / Sm5+: Ultra Force へ埋めた → 0。
+        #   当時「master に canonical 無し」としたのは旧マスタ (全ゲーム混在) の
+        #   ためで、Game 別マスタには在った。
+        self.assertEqual(n, 0)
 
 
 if __name__ == "__main__":

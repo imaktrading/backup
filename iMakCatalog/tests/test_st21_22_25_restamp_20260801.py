@@ -138,7 +138,10 @@ class TestInvariantsUntouched(unittest.TestCase):
         # 当初327。SM4p 121件は SSOT契約(Advisor 2026-08-11 §4)で canonical 再populate
         # したため 327-121=206 が残 blank (ウルトラサン/ムーン/フォース = master に canonical 無し)。
         self.assertEqual(
-            self._count_tag("blanked_by_ultra_prism_mismap_20260731"), 206)
+        # 2026-08-22: 残 192 (SM5S/SM5M/SM5p) も eBay の Game 別マスタに canonical が
+        #   在ったため埋めた -> 0。当時「canonical 無し」としたのは旧マスタ
+        #   (全ゲーム混在) を見ていたためで、前提が変わった。
+            self._count_tag("blanked_by_ultra_prism_mismap_20260731"), 0)
 
     def test_backfill_21_still_promo_cards(self):
         self.assertEqual(

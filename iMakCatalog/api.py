@@ -252,7 +252,14 @@ def derive_set_name_ebay(category: str, set_name_official: Optional[str],
                 return v
     if product_id and "-" in product_id:
         pref = product_id.split("-", 1)[0]
-        for cand in {pref, pref.upper(), pref.lower()}:
+        cands = {pref, pref.upper(), pref.lower()}
+        # ★プロモは set_code が 'SM-P' / 'S-P' / 'SV-P' のように **ハイフンを含む**。
+        #   最初のハイフンで切ると 'SM' / 'S' になり、変換表に在っても引けない
+        #   (2026-08-22 実測: SM-P の 365行が古い値のまま残っていた原因)。
+        if product_id.count("-") >= 2:
+            head = product_id.rsplit("-", 1)[0]      # 'SM-P-052' -> 'SM-P'
+            cands |= {head, head.upper(), head.lower()}
+        for cand in cands:
             v = to_ebay_value(category, "set_code", cand)
             if v:
                 return v
@@ -533,8 +540,15 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
             pid = g("product_id") or ""
             if "-" in pid:
                 pid_prefix = pid.split("-", 1)[0]
-                # Pokemon set_code は大文字小文字混在 (M2a, S8a, SV4 等) → 複数表記試行
-                for cand in {pid_prefix, pid_prefix.upper(), pid_prefix.lower()}:
+                # ★プロモは set_code が 'SM-P' / 'S-P' / 'SV-P' のように **ハイフンを含む**。
+                #   最初のハイフンで切ると 'SM' / 'S' になり、変換表に在っても引けない
+                #   (2026-08-22 実測: SM-P の 365行が古い値のまま残っていた原因)。
+                #   末尾の連番を落とした形も候補に入れる。
+                cands = {pid_prefix, pid_prefix.upper(), pid_prefix.lower()}
+                if pid.count("-") >= 2:
+                    head = pid.rsplit("-", 1)[0]          # 'SM-P-052' -> 'SM-P'
+                    cands |= {head, head.upper(), head.lower()}
+                for cand in cands:
                     set_ebay = to_ebay_value(category, "set_code", cand)
                     if set_ebay:
                         break

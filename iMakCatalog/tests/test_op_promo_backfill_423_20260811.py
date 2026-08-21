@@ -139,7 +139,8 @@ class TestOtherCategoriesUnchanged(unittest.TestCase):
     # 上記以外のカテゴリ (pokemon_tcg / yugioh_tcg) は本 migration の対象外なので不変.
     BASELINES = {
         # 2026-08-21: 25th ANNIVERSARY GOLDEN BOX の1行に値が入り、空欄が1つ減った
-        "pokemon_tcg": 4083,
+        # 2026-08-22: プロモ弾番号 (S-P/BWP/SV-P) と Ultra 3セットを埋めて 296行 減
+        "pokemon_tcg": 3787,
         "gundam_tcg": 6,
         "dragonball_scg": 136,
         "yugioh_tcg": 12150,

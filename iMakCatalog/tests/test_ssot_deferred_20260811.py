@@ -167,7 +167,7 @@ class TestSm4pCanonicalPopulated(unittest.TestCase):
                 "'blanked_by_ultra_prism_mismap_20260731'").fetchone()[0]
         finally:
             con.close()
-        self.assertEqual(n, 206)
+        self.assertEqual(n, 0)
 
     def test_sm4p_b_layer_status_verified(self):
         """SM4p+SM-P-145 の b_layer_status が verified_auto (blanking 時の unverified から回復)."""

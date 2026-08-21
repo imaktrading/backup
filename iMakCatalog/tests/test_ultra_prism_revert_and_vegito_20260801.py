@@ -18,9 +18,15 @@ class TestUltraPrismReverted(unittest.TestCase):
                       "and json_extract(specs,'$.set_name_ebay')='Sun & Moon—Ultra Prism'").fetchone()[0]
         self.assertEqual(n, 0)
 
-    def test_resolver_csset_empty_for_blanked(self):
+    def test_resolver_csset_for_ultra_sun(self):
+        """2026-08-22: eBay の Game 別マスタに 'Sm5s: Ultra Sun' が在ったので埋めた.
+
+        2026-07-31 に空欄化したのは「master に canonical 無し」と判断したためだが、
+        当時見ていたのは全ゲーム混在の旧マスタだった。前提が変わったので期待値も変わる。
+        ★空欄に戻してはいけない (eBay の絞り込みに載らない値へ逆戻りする)。
+        """
         r = pc.lookup_pokemon("POKEMON JAPANESE ULTRA SUN", "001", "", verbose=False)
-        self.assertEqual((r or {}).get("set_name_ebay"), "")
+        self.assertEqual((r or {}).get("set_name_ebay"), "Sm5s: Ultra Sun")
 
 
 class TestVegitoFix(unittest.TestCase):
