@@ -64,6 +64,17 @@ NG_PLUSH = ("ぬいぐるみ", "マスコット", "フロッキー", "パペッ�
 _NOISE = ("ガチャポン", "ガチャガチャ", "コンプリート", "コンプ", "ガチャ",
           "カプセルトイ", "コンプリートセット")
 
+# ★食玩 (シールウエハース等)。2026-08-21 回答書
+#   `2026-08-21_gacha_food_toy_disclaimer_response.md` で扱えるようになった。
+#   カプセルトイ前提の語・説明文・年齢確認を **全部** 切り替える必要がある。
+#   どの行が食玩かは **中間スプシ S列の印だけ** で決める (タイトルから当てない。
+#   「チョコ」等の語はキャラ名にも出るので、当てにいくと必ず誤判定する)。
+FOOD_TOY_COL = 18                # S列
+FOOD_TOY_MARK = "食玩"            # 空 = 通常のカプセルトイ
+# `Gashapon` / `Capsule Toy` はどちらも食玩に使えない (カプセルに入っていない)。
+# `Shokugan` は日本語そのままの一般名、`Candy Toy` はバンダイ自身が英語で使う一般名。
+FOOD_TOY_TERM = "Shokugan Candy Toy"
+
 
 # ── 純関数 (test 可) ────────────────────────────────────────────────
 
@@ -98,6 +109,20 @@ def blocked_reason(title: str):
     return None
 
 
+def food_toy_mark(cell: str):
+    """S列の印 → True(食玩) / False(通常) / None(意味が取れない = 出さない)。
+
+    fail-closed: 印が読めない行を「たぶん通常」に倒すと、カプセルトイ前提の
+    タイトルと説明文のまま食玩が出る (= 嘘の説明で出品する)。
+    """
+    v = (cell or "").strip()
+    if not v:
+        return False
+    if FOOD_TOY_MARK in v:
+        return True
+    return None
+
+
 def series_jp(title: str) -> str:
     """日本語タイトルからシリーズ名だけ取り出す (全N種より前 − ノイズ)。"""
     head = re.split(r"全\s*\d+\s*種", strip_shop_suffix(title))[0]
@@ -127,6 +152,9 @@ def parse_row(row: list, row_no: int = 0) -> dict | None:
     url, title, cat = g(0), g(2), g(17)
     if not url or not title:
         return None
+    food_toy = food_toy_mark(g(FOOD_TOY_COL))
+    if food_toy is None:
+        return None                      # S列の印が読めない = 出さない (fail-closed)
     if cat != SHEET_CATEGORY:
         return None
     if g(1):
@@ -149,7 +177,7 @@ def parse_row(row: list, row_no: int = 0) -> dict | None:
     return {"row": row_no, "url": url, "title_jp": strip_shop_suffix(title), "pieces": n,
             "with_board": has_display_board(title), "series_jp": series_jp(title),
             "maker_jp": maker_jp(title), "cost_jpy": int(cost), "pics": pics,
-            "desc_jp": desc, "official_url": g(8),
+            "desc_jp": desc, "official_url": g(8), "food_toy": food_toy,
             "age_official": m.group(1) if m else ""}
 
 
@@ -182,7 +210,7 @@ def supply_sku(url: str) -> str:
     return m.group(1) if m else ""
 
 
-def capsule_term(maker_en: str) -> str:
+def capsule_term(maker_en: str, food_toy: bool = False) -> str:
     """メーカーに合ったカプセルトイの呼び方 (純関数)。
 
     ★`Gashapon` は **バンダイの登録商標**。タカラトミーアーツの商品に付けると
@@ -192,6 +220,8 @@ def capsule_term(maker_en: str) -> str:
     `Capsule Toy` はどのメーカーでも使える一般名詞なので必ず後ろに残す
     (商標の語を使えない商品でも検索から漏れないように)。
     """
+    if food_toy:
+        return FOOD_TOY_TERM             # 食玩はカプセルに入っていない
     m = (maker_en or "").lower()
     if "bandai" in m:
         return "Gashapon Capsule Toy"
@@ -200,7 +230,8 @@ def capsule_term(maker_en: str) -> str:
     return "Capsule Toy"
 
 
-def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = "") -> str:
+def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = "",
+                food_toy: bool = False) -> str:
     """英語タイトル (80字以内)。
 
     形: `<題材/シリーズ(英語)> <形態> Complete Set N Types <メーカー> Gashapon Japan`
@@ -217,7 +248,7 @@ def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = ""
       - 80字を超える時に削るのは **後ろから** (題材は絶対に切らない)
     """
     maker = re.sub(r"\s*A\.?R\.?T\.?S\.?\s*$", "", maker_en or "", flags=re.I).strip()
-    term = capsule_term(maker_en)
+    term = capsule_term(maker_en, food_toy)
     seen, subject = set(), []
     for w in (series_en or "").split():
         if w.lower() not in seen:
@@ -231,7 +262,8 @@ def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = ""
              # (`Bandai Gashapon` の方が検索される)
              "Complete Set %d %s %s" % (pieces, maker, term.split()[0]),
              "Complete Set %d %s" % (pieces, term),
-             "Complete Set %d Capsule Toy" % pieces]
+             # 最後の砦。ここも食玩に `Capsule Toy` を出してはいけない
+             "Complete Set %d %s" % (pieces, "Shokugan" if food_toy else "Capsule Toy")]
     # 削る順: ① おまけの語(extra)を後ろから ② それでも入らなければ後ろの飾りを落とす。
     #   題材(subject)は最後まで守る。切れると別商品と区別が付かなくなる
     for tail in tails:
@@ -245,6 +277,18 @@ def build_title(series_en: str, pieces: int, maker_en: str = "", extra: str = ""
     while words and len(" ".join(words + [tail])) > 80:
         words.pop()
     return " ".join(words + [tail])
+
+
+def needs_review(it: dict) -> bool:
+    """目視が要るか (純関数)。
+
+    ★食玩は **必ず要る**。gashapon.jp はカプセルトイの商品DBなので対象年齢が
+      取れず、H列の `対象年齢` も付かない (2026-08-21 回答書)。
+    """
+    if it.get("food_toy"):
+        return True
+    return ("15" not in (it.get("age_official") or "")
+            and "15" not in ((it.get("official") or {}).get("age") or ""))
 
 
 def official_mpn(item: dict) -> str:
@@ -355,7 +399,33 @@ def load_description() -> str:
     p = os.path.join(os.path.dirname(SCRIPT_DIR), "GACHA.txt")   # スクリプト基準の絶対パス
     if not os.path.isfile(p):
         raise SystemExit(f"★中止: 説明文テンプレが見つかりません: {p}")
-    return open(p, encoding="utf-8").read()
+    text = open(p, encoding="utf-8").read()
+    # ★2026-08-21: 品目別の文が消えていたら止める。黙って進むと、食玩に
+    #   カプセルトイ用の文が付いたまま (または注意節ごと空で) 出てしまう
+    for v in VARIANTS:
+        if 'data-when="%s"' % v not in text:
+            raise SystemExit(f"★中止: {p} に {v} 用の文がありません")
+    return text
+
+
+VARIANTS = ("capsule", "foodtoy")
+_VARIANT_TAG = re.compile(r'<(p|li)\b[^>]*\bdata-when="([^"]*)"[^>]*>.*?</\1>', re.S | re.I)
+
+
+def select_variant(base: str, variant: str) -> str:
+    """説明文テンプレから、その品目に当てはまる文だけ残す (純関数)。
+
+    `data-when="capsule"` / `"foodtoy"` の付いた文は一致した方だけ残る。
+    属性の無い文は両方に出る。2026-08-21 回答書:
+      - 食玩では「カプセルは入れません」「説明書はカプセル内で折れている」を出さない
+      - 食玩では冒頭の `All original packaging ... present and intact.` も出さない
+        (菓子を抜くため外装を開けるので、同じ説明文の中で矛盾する)
+    """
+    if variant not in VARIANTS:
+        raise ValueError("知らない品目です: %r" % variant)
+    out = _VARIANT_TAG.sub(lambda m: m.group(0) if m.group(2).strip() == variant else "",
+                           base or "")
+    return re.sub(r'\s*\bdata-when="[^"]*"', "", out)
 
 
 def _age_en(age_jp: str) -> str:
@@ -366,6 +436,7 @@ def _age_en(age_jp: str) -> str:
 
 def build_description(item: dict, series_en: str, maker_en: str, base: str) -> str:
     """テンプレに Specifications を差し込む。公式から取れた事実だけを書く。"""
+    base = select_variant(base, "foodtoy" if item.get("food_toy") else "capsule")
     off = item.get("official") or {}
     specs = [f"<li><b>Series:</b> {series_en}</li>",
              f"<li><b>Set:</b> Complete Set ({item['pieces']} pcs)</li>"]
@@ -420,7 +491,8 @@ def build_row(item: dict, en: dict, base_desc: str) -> dict:
     # 題材が長いと、後ろの `Bandai Gashapon` (よく検索される語) が入らなくなる。
     # 6語まで。それ以上は C:Series が持っているので落としてよい
     subject = " ".join(subject.split()[:6])
-    title = build_title(subject, item["pieces"], maker, en.get("title_extra") or "")
+    title = build_title(subject, item["pieces"], maker, en.get("title_extra") or "",
+                        food_toy=bool(item.get("food_toy")))
     return {
         "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)": "Add",
         "*Category": EBAY_CATEGORY,
@@ -499,6 +571,10 @@ def main() -> int:
         if why:
             blocked[why] = blocked.get(why, 0) + 1
             continue
+        if food_toy_mark(r[FOOD_TOY_COL] if len(r) > FOOD_TOY_COL else "") is None:
+            why = "S列の印が読めない (食玩か通常か決まらない)"
+            blocked[why] = blocked.get(why, 0) + 1
+            continue
         it = parse_row(r, n)
         if it:
             items.append(it)
@@ -543,9 +619,8 @@ def main() -> int:
     # ② 対象年齢。公式で 15才以上 と確認できた物は目視を飛ばす
     if not a.no_review:
         import gacha_review as R
-        need = [it for it in items if "15" not in (it.get("age_official") or "")
-                and "15" not in ((it.get("official") or {}).get("age") or "")]
-        auto = [it for it in items if it not in need]
+        need = [it for it in items if needs_review(it)]
+        auto = [it for it in items if not needs_review(it)]
         if auto:
             print("  ✅ 対象年齢を公式で確認済 (目視不要): %d件" % len(auto))
         if need:

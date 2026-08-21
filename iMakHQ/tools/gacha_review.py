@@ -131,8 +131,11 @@ def build_html(items: list) -> str:
     for i, it in enumerate(items):
         pics = it.get("pics") or []
         thumbs = "\n".join(
-            f'<label class="p"><input type="checkbox" name="pic{i}" value="{_html.escape(u)}">'
+            f'<div class="p">'
+            f'<label><input type="checkbox" name="pic{i}" value="{_html.escape(u)}">'
             f'<img src="{proxy(u)}" loading="lazy" title="{_html.escape(u)}"></label>'
+            f'<a class="zoom" href="{proxy(u)}" target="_blank" rel="noopener">🔍 原寸</a>'
+            f'</div>'
             for u in pics) or '<span class="no">G列に写真がありません</span>'
         official = it.get("official_url")
         off = (f'<a href="{_html.escape(official)}" target="_blank">公式ページ</a>'
@@ -155,7 +158,7 @@ def build_html(items: list) -> str:
   {age_html}
   <details class="dsc"><summary>商品説明 (全何種の内訳・サイズ)</summary>
     <div>{_html.escape((it.get('desc_jp') or '')[:1200])}</div></details>
-  <div class="lbl">G列の写真 ({len(pics)}枚) — 出品に使う物にチェック (1枚目がギャラリー画像)</div>
+  <div class="lbl">G列の写真 ({len(pics)}枚) — 写真を押すと選択 / 🔍原寸 で別タブに元の大きさ。出品に使う物にチェック (1枚目がギャラリー画像)</div>
   <div class="pics">{thumbs}</div>
   <div class="lbl">公式の商品ページURL (あれば。送信時にここから画像も取ります)</div>
   <input class="off" id="o{i}" type="url" placeholder="https://... 公式の商品ページ">
@@ -177,9 +180,15 @@ h2{font-size:15px;margin:0 0 4px}
 .no{color:#a00;font-size:13px}
 .pics{display:flex;flex-wrap:wrap;gap:6px}
 .p{position:relative;display:inline-block}
-.p img{width:140px;height:140px;object-fit:contain;background:#fff;border:2px solid #ccc;border-radius:4px}
-.p input{position:absolute;top:4px;left:4px;transform:scale(1.6);z-index:2}
+/* ★2026-08-21: 140px では台紙の「対象年齢」の印字が読めず、写真は足りているのに
+   目視が通らなかった。楽天の元画像は 500x500 なので、そこまで出す。
+   🔍原寸 は別タブで元の大きさ (画面より大きい写真のため)。 */
+.p img{width:480px;height:480px;object-fit:contain;background:#fff;border:2px solid #ccc;border-radius:4px}
+.p label{display:block}
+.p input{position:absolute;top:6px;left:6px;transform:scale(2.2);z-index:2}
 .p input:checked+img{border-color:#0a0;border-width:3px}
+.zoom{position:absolute;top:6px;right:6px;z-index:3;background:rgba(0,0,0,.65);color:#fff;font-size:12px;padding:3px 8px;border-radius:4px;text-decoration:none}
+@media (max-width:1040px){.p img{width:92vw;height:92vw}}
 .off{width:60%;padding:6px;font-size:13px}
 .rsn{width:38%;padding:6px;font-size:13px;margin-left:8px}
 .btns{margin-top:10px}

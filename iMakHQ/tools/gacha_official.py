@@ -34,8 +34,15 @@ def jan_from_text(text: str) -> str:
     return m.group(1) if m else ""
 
 
-def official_url(jan: str, maker_url: str = "") -> str:
-    """商品ページのURL。バンダイは JAN から作れる。それ以外は空 (トップページは返さない)。"""
+def official_url(jan: str, maker_url: str = "", food_toy: bool = False) -> str:
+    """商品ページのURL。バンダイは JAN から作れる。それ以外は空 (トップページは返さない)。
+
+    ★2026-08-21: **食玩は空を返す**。gashapon.jp はカプセルトイの商品DBで、
+      食玩 (シールウエハース等) は載っていない。JAN で引くと別商品を掴むか
+      空振りする。食玩の対象年齢は自動では取れない = **全件 目視**に回す。
+    """
+    if food_toy:
+        return ""
     if jan and "gashapon.jp" in (maker_url or "gashapon.jp"):
         return BANDAI_DETAIL % jan
     return ""
@@ -90,7 +97,7 @@ def fetch(url: str, timeout: int = 25) -> str:
 def lookup(item: dict) -> dict:
     """1商品 → 公式から取れた情報。取れなければ {} (楽天の情報だけで進む)。"""
     jan = jan_from_text(item.get("desc_jp", ""))
-    url = official_url(jan, item.get("official_url", ""))
+    url = official_url(jan, item.get("official_url", ""), bool(item.get("food_toy")))
     if not url:
         return {}
     info = parse_bandai(fetch(url))
