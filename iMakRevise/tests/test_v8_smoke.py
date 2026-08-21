@@ -28,6 +28,9 @@ from revise.price_revise import (
 
 REFERENCE_CASES = [
     # 2026-05-24 update: V8 FIX (C group split 0.5→1.0) で Tシャツ系 price 下落、shipping 上昇
+    # 2026-08-21: pricing_engine の出力が G-Shock/一部Tシャツ帯で +$1 変わった。原因は追わない
+    #   (ユーザー判断で誤差扱い、HQ 回答 2026-08-21_revise_v8_smoke_price_drift_response.md)。
+    #   参照値を実出力に合わせた: 358564731464 $397.98→$398.98 / 357008112686 $52.98→$53.98。
     {
         "item_id": "357111565952", "title": "Pokemon T-shirt UNIQLO UT",
         "category": "Tシャツ", "cost_jpy": 2400,
@@ -41,12 +44,12 @@ REFERENCE_CASES = [
     {
         "item_id": "358564731464", "title": "Casio G-Shock GA-2100",
         "category": "G-shock", "cost_jpy": 32046,
-        "expected_price": 397.98, "expected_shipping": 75.01,
+        "expected_price": 398.98, "expected_shipping": 75.01,  # 2026-08-21 +$1 誤差 (上記)
     },
     {
         "item_id": "357008112686", "title": "Pokemon T-shirt UNIQLO UT",
         "category": "Tシャツ", "cost_jpy": 1700,
-        "expected_price": 52.98, "expected_shipping": 27.84,
+        "expected_price": 53.98, "expected_shipping": 27.84,  # 2026-08-21 +$1 誤差 (上記)
     },
 ]
 

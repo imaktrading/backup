@@ -68,7 +68,10 @@ class TestDetectCandidatesVariation:
         row[COL_CATEGORY] = "Tシャツ(UT)"
         row[COL_VAR_SKU] = "53b869de-..."
         row[COL_VAR_SIZE] = "US XS(JP S)"
-        c = detect_candidates([row], source_sheet="公式")
+        # 本番と同じく schema="official" を渡す (公式シートは variation 列を読む)。
+        # 2026-08-21: schema 未指定 (default high_low) だと変異列を読まず is_variation False で
+        #   落ちていた = テスト側の不備。本番は load_sheet_rows 由来の schema を必ず渡している。
+        c = detect_candidates([row], source_sheet="公式", schema="official")
         assert len(c) == 1
         assert c[0].is_variation is True
         assert c[0].sku == "53b869de-..."
