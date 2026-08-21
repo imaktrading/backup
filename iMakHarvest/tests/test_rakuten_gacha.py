@@ -396,3 +396,21 @@ def test_is_snack_toy_marks_candy_included():
 def test_shipping_formats_of_smltrading(text, ok):
     from scrapers.rakuten_item import judge
     assert judge(text)["in_stock_now"] is ok
+
+
+# --------------------------------------------------------------------------
+# 台紙あり/なしの重複 (HQ 依頼 2026-08-20)
+# --------------------------------------------------------------------------
+def test_base_title_key_treats_board_variants_as_same():
+    from sheet_writer_rakuten import base_title_key, has_board
+    a = "ちいさな アニマル スツール 2 全5種セット：遊you 楽天市場店"
+    b = "ちいさな アニマル スツール 2 全5種+ディスプレイ台紙セット：遊you 楽天市場店"
+    assert base_title_key(a) == base_title_key(b)
+    assert has_board(b) and not has_board(a)
+
+
+def test_base_title_key_keeps_different_products_apart():
+    from sheet_writer_rakuten import base_title_key
+    assert base_title_key("A 全5種セット") != base_title_key("B 全5種セット")
+    # 弾違いは別物
+    assert base_title_key("めじるし 2 全5種セット") != base_title_key("めじるし 3 全5種セット")

@@ -223,7 +223,32 @@ def main(argv=None) -> int:
             _log(f"⚠️ 既存キーを読めず: {type(e).__name__}")
 
     # 既に集めた物は **詳細を見に行かない** (1件6秒が丸ごと無駄になる)
+    known_bases: set = set()
+    if not args.dry_run:
+        try:
+            from sheet_writer_mercari_seller import open_seller_staging_sheet  # noqa: PLC0415
+            from sheet_writer_rakuten import load_base_titles  # noqa: PLC0415
+            known_bases = load_base_titles(open_seller_staging_sheet())
+        except Exception as e:  # noqa: BLE001
+            _log(f"⚠️ 既存タイトルを読めず: {type(e).__name__}")
+
     cands, rej = collect_candidates(args, claimed | known)
+
+    # ★同じ商品の「台紙あり/なし」は片方だけ (HQ 依頼 2026-08-20)。 台紙なしを残す
+    from sheet_writer_rakuten import base_title_key, has_board  # noqa: PLC0415
+    cands.sort(key=lambda r: has_board(r["title"]))   # 台紙なしを先に
+    uniq, seen_base, dropped_board = [], set(known_bases), 0
+    for c in cands:
+        b = base_title_key(c["title"])
+        if b in seen_base:
+            dropped_board += 1
+            continue
+        seen_base.add(b)
+        uniq.append(c)
+    if dropped_board:
+        rej["board_dup"] = dropped_board
+        _log(f"台紙あり/なしの重複を {dropped_board} 件落としました")
+    cands = uniq
     _log(f"検索完了: 候補 {len(cands)} 件 / 落とした内訳={rej}")
     if not cands:
         _log("候補 0 件 → 終了")

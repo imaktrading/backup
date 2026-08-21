@@ -55,6 +55,41 @@ def dedupe_key(url: str) -> str:
     return url.strip().split("?")[0].rstrip("/").lower()
 
 
+_BOARD_RE = re.compile(r"\+?\s*ディスプレイ台紙")
+
+
+def base_title_key(title: str) -> str:
+    """同じ商品の「台紙あり/なし」を **同じ物** とみなすキー.
+
+    2026-08-22: 同じ絵柄で2出品すると重複になるので片方だけ入れる (HQ 依頼)。
+    店名 (`：<店名>`) と 台紙表記と空白を落として比べる。
+    """
+    t = (title or "").split("：")[0]
+    t = _BOARD_RE.sub("", t)
+    return re.sub(r"[\s　+＋]", "", t)
+
+
+def has_board(title: str) -> bool:
+    """「+ディスプレイ台紙セット」表記があるか."""
+    return bool(_BOARD_RE.search(title or ""))
+
+
+def load_base_titles(sh, prefix: str = "rakuten_") -> set:
+    """既に入っている商品の base キーを全タブから集める."""
+    keys: set = set()
+    for ws in sh.worksheets():
+        if not (ws.title or "").startswith(prefix):
+            continue
+        try:
+            rows = ws.get_all_values()
+        except Exception:  # noqa: BLE001
+            continue
+        for row in rows[1:]:
+            if len(row) >= COL_TITLE and row[COL_TITLE - 1].strip():
+                keys.add(base_title_key(row[COL_TITLE - 1]))
+    return keys
+
+
 def shop_of(url: str) -> str:
     """楽天の商品URLから 店ID を返す (取れなければ空)."""
     m = _ITEM_RE.search(url or "")
