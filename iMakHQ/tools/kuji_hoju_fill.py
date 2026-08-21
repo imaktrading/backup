@@ -121,6 +121,37 @@ def build_query(title: str) -> str:
     return " ".join(x for x in ("一番くじ", chara, prize) if x)
 
 
+# シートG列に入っている「写真ではない物」。サイトの OGP 画像が入っている行がある
+# (実測 2026-08-22: 36件中15件だけ値が在り、その多くが `1kuji.com/ogp.jpg`)。
+_NOT_A_PHOTO = ("ogp.jpg", "ogp.png", "noimage", "no_image", "placeholder")
+
+
+def own_photo(cell: str) -> str:
+    """シートG列 → 今出している物の写真1枚 (純関数)。無ければ空。
+
+    ★サイト共通の OGP 画像は **写真ではない**。出すと全部同じ絵になって、
+      人が「同じ物か」を判断できない (ユーザー指摘で発覚)。
+    """
+    for u in (cell or "").split("|"):
+        u = u.strip()
+        if u and not any(k in u.lower() for k in _NOT_A_PHOTO):
+            return u
+    return ""
+
+
+def ebay_photo(item_id: str, post, tok) -> str:
+    """eBay に出している写真の1枚目。取れなければ空 (推測しない)。
+
+    シートG列は半分以上が空か OGP なので、**買い手が実際に見ている写真**を使う。
+    """
+    try:
+        xml = post("GetItem", "<ItemID>%s</ItemID>" % item_id, tok, site="0")
+        m = re.search(r"<PictureURL>(.*?)</PictureURL>", xml or "")
+        return _html.unescape(m.group(1)) if m else ""
+    except Exception:                                          # noqa: BLE001
+        return ""
+
+
 def select_targets(rows2d: list, max_backups: int = AUX_MAX) -> list:
     """R列=一番くじ の live 行のうち、補が max_backups 未満の物 (新規優先)。純関数。"""
     out = []
@@ -135,6 +166,9 @@ def select_targets(rows2d: list, max_backups: int = AUX_MAX) -> list:
             continue
         title = P._cell(r, 2)
         out.append({"row": i, "itemID": iid, "title": title,
+                    # ★2026-08-22: 目視画面に **今出している物の写真** を出す。
+                    #   候補だけ並べても「同じ物か」を判断できない (ユーザー指摘)。
+                    "own_img": own_photo(P._cell(r, 6)),
                     "supply_url": P._cell(r, P.A), "n_backups": nb,
                     "query": build_query(title),
                     "listed_at": P._listed_sort_key(r)})
@@ -171,6 +205,10 @@ def build_html(items: list) -> str:
             f'<img src="/img/{urllib.parse.quote(c.get("img") or "", safe="")}" loading="lazy">'
             f'<span class="cap">¥{c.get("price", 0):,}<br>{_html.escape((c.get("name") or "")[:46])}</span>'
             f'</label>' for c in cands) or '<span class="no">候補が見つかりませんでした</span>'
+        own_src = it.get("own_img") or ""
+        own = (f'<a href="{_html.escape(it.get("supply_url",""))}" target="_blank">'
+               f'<img src="/img/{urllib.parse.quote(own_src, safe="")}" loading="lazy"></a>'
+               if own_src else '<span class="no">写真が無い (シートG列が空)</span>')
         cards.append(f"""
 <div class="card" id="c{i}" data-row="{it.get('row')}">
   <h2>{i+1}. {_html.escape(it.get('title',''))}</h2>
@@ -179,8 +217,13 @@ def build_html(items: list) -> str:
     &nbsp;|&nbsp; <a href="{_html.escape(it.get('supply_url',''))}" target="_blank">今の仕入元</a>
     &nbsp;|&nbsp; <a href="https://jp.mercari.com/search?keyword={urllib.parse.quote(it.get('query',''))}"
        target="_blank">メルカリで開く</a></div>
-  <div class="lbl">同じ物にチェック ({len(cands)}件・安い順)。別のくじ・別の賞・付属品だけ が混ざります</div>
-  <div class="pics">{thumbs}</div>
+  <div class="cmp">
+    <div class="own"><div class="ownlbl">今 出している物</div>{own}</div>
+    <div class="cands">
+      <div class="lbl">同じ物にチェック ({len(cands)}件・安い順)。別のくじ・別の賞・付属品だけ が混ざります</div>
+      <div class="pics">{thumbs}</div>
+    </div>
+  </div>
   <div class="btns"><button onclick="done({i})">この行は決めた</button>
     <span class="state" id="s{i}"></span></div>
 </div>""")
@@ -192,6 +235,12 @@ h2{font-size:15px;margin:0 0 4px}
 .meta{font-size:12px;color:#555;margin-bottom:6px}
 .lbl{font-size:12px;font-weight:700;margin:6px 0 4px}
 .no{color:#a00;font-size:13px}
+.cmp{display:flex;gap:14px;align-items:flex-start}
+.own{flex:0 0 190px}
+.ownlbl{font-size:12px;font-weight:700;margin:6px 0 4px;color:#a00}
+.own img{width:190px;height:190px;object-fit:contain;background:#fff;
+         border:3px solid #a00;border-radius:4px}
+.cands{flex:1;min-width:0}
 .pics{display:flex;flex-wrap:wrap;gap:8px}
 .p{position:relative;display:inline-block;width:160px}
 .p img{width:160px;height:160px;object-fit:contain;background:#fff;border:2px solid #ccc;border-radius:4px}
@@ -406,6 +455,24 @@ def main() -> int:
         return 0
     if not targets:
         return 0
+
+    # ★2026-08-22: シートG列は半分以上が空か OGP 画像なので、
+    #   足りない分は **eBay に出している写真** で埋める (買い手が見ている物)。
+    need = [t for t in targets if not t.get("own_img")]
+    if need:
+        try:
+            sys.path.insert(0, r"C:\dev\iMak\iMakeBayAPI")
+            import fix_de_speedpak_shipping as _fx
+            _fx.refresh()
+            _tok = _fx.token()
+            got = 0
+            for t in need:
+                t["own_img"] = ebay_photo(t["itemID"], _fx.post, _tok)
+                got += 1 if t["own_img"] else 0
+            print("  🖼️ 元画像を eBay から取得: %d/%d件" % (got, len(need)))
+        except Exception as e:                                  # noqa: BLE001
+            print("  ⚠️ 元画像を eBay から取れませんでした (%s)。"
+                  "写真の無い行は目視で判断できないので注意" % type(e).__name__)
 
     found = search_candidates(targets)
     items = []

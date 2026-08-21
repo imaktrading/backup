@@ -143,3 +143,50 @@ class TestScreen:
 
     def test_no_candidates_says_so(self):
         assert "候補が見つかりませんでした" in K.build_html([dict(self.ITEM, candidates=[])])
+
+
+# ── 目視画面に「今 出している物」の写真を出す (2026-08-22 ユーザー指摘) ──────
+#
+# ★「元画像がないから、判断できない」。候補だけ並べても、同じ物かどうかは分からない。
+#   PSA の目視は現物と並べているのに、一番くじは候補だけ出していた。
+
+class TestOwnPhoto:
+    def test_OGP画像は写真として使わない(self):
+        """★サイト共通の OGP を出すと全部同じ絵になり、判断できない。
+        実測 2026-08-22: 対象36件中15件しか値が無く、その多くが 1kuji.com/ogp.jpg."""
+        assert K.own_photo("https://1kuji.com/ogp.jpg") == ""
+        assert K.own_photo("https://x/noimage.png") == ""
+
+    def test_複数あれば1枚目(self):
+        assert K.own_photo("https://x/a.jpg|https://x/b.jpg") == "https://x/a.jpg"
+
+    def test_OGPを飛ばして次を使う(self):
+        assert K.own_photo("https://1kuji.com/ogp.jpg|https://x/b.jpg") == "https://x/b.jpg"
+
+    def test_空なら空(self):
+        assert K.own_photo("") == "" and K.own_photo(None) == ""
+
+
+class TestEbayPhoto:
+    def test_eBayの写真を1枚取る(self):
+        xml = "<Item><PictureURL>https://i.ebayimg.com/a.jpg</PictureURL></Item>"
+        assert K.ebay_photo("1", lambda *a, **k: xml, "t") == "https://i.ebayimg.com/a.jpg"
+
+    def test_取れなければ空(self):
+        """★推測でURLを作らない (壊れた画像を出すより出さない方がよい)."""
+        assert K.ebay_photo("1", lambda *a, **k: "<Item/>", "t") == ""
+
+        def boom(*a, **k):
+            raise RuntimeError("x")
+        assert K.ebay_photo("1", boom, "t") == ""
+
+
+class TestScreenShowsOwn:
+    def test_画面に元画像が出る(self):
+        h = K.build_html([dict(TestScreen.ITEM, own_img="https://x/own.jpg")])
+        assert "今 出している物" in h and "own.jpg" in h
+
+    def test_写真が無ければそう書く(self):
+        """黙って空欄にすると「候補が無い」のか「写真が無い」のか分からない."""
+        h = K.build_html([dict(TestScreen.ITEM, own_img="")])
+        assert "写真が無い" in h
