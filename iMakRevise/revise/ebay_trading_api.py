@@ -1,8 +1,8 @@
 """ebay_trading_api.py - eBay Trading API GetItem (旧 Policy 名 取得用).
 
 最低限の実装: ItemID → ShippingProfileName のみ。
-OAuth token は `c:\\dev\\iMak\\iMakeBayAPI\\ebay_oauth_token.json` (HQ 共有) を参照。
-expired 時は refresh_token で 自動再取得 + token file 更新。
+OAuth token / 鍵の参照先は credentials.py が決定 (共有 C:/dev/iMak_data/credentials を優先)。
+expired 時は refresh_token で 自動再取得 + token file 更新 (書戻し先も credentials 経由)。
 
 注意:
 - Trading API は legacy SOAP/XML、新規実装は本来非推奨
@@ -13,14 +13,36 @@ expired 時は refresh_token で 自動再取得 + token file 更新。
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
+import os
 import re
 import time
 from pathlib import Path
 from typing import Optional
 
-OAUTH_TOKEN_PATH = Path(r"c:/dev/iMak/iMakeBayAPI/ebay_oauth_token.json")
-EBAY_KEYS_PATH = Path(r"c:/dev/iMak/iMakeBayAPI/ebay keys.txt")
+# ── 鍵/トークンの参照先は credentials.py が一元決定 (共有領域を優先) ──────────
+# 2026-08-21 HQ 依頼「② 参照先が誤り」の是正: 従来 c:/dev/iMak/iMakeBayAPI を直参照
+# していたが、token は使うたびに書き戻されるため、参照先がズレると片方が腐る。
+# 共有 C:/dev/iMak_data/credentials を本物とする credentials.py 経由に切替える。
+# credentials.py は master から取得した worktree コピー (iMak_revise/iMakeBayAPI/) を、
+# sys.path 汚染・同名別実装の混入を避けるため importlib で明示 path ロードする。
+_CREDS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "iMakeBayAPI",
+)
+_spec = importlib.util.spec_from_file_location(
+    "revise_ebay_credentials", os.path.join(_CREDS_DIR, "credentials.py")
+)
+_credentials = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_credentials)
+ebay_keys = _credentials.ebay_keys
+keys_path = _credentials.keys_path
+token_path = _credentials.token_path
+
+# Trading API 用トークン (= ebay_oauth_token.json)。expired 時は refresh + 書戻し。
+OAUTH_TOKEN_PATH = Path(token_path("trading"))
+EBAY_KEYS_PATH = Path(keys_path())
 TRADING_API_URL = "https://api.ebay.com/ws/api.dll"
 OAUTH_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 COMPATIBILITY_LEVEL = "967"
@@ -39,13 +61,7 @@ def _save_token_data(data: dict):
 
 
 def _load_app_credentials() -> tuple:
-    if not EBAY_KEYS_PATH.exists():
-        raise FileNotFoundError(f"eBay keys file が見つかりません: {EBAY_KEYS_PATH}")
-    keys = {}
-    for line in EBAY_KEYS_PATH.read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            k, v = line.split("=", 1)
-            keys[k.strip()] = v.strip()
+    keys = ebay_keys()  # credentials 経由 (共有優先・鍵欠落なら例外、推測しない)
     return keys["AppID"], keys["AppSecret"]
 
 
