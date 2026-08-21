@@ -34,13 +34,14 @@ from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
 
 DUMP_DIR = ROOT / "debug"
-SHOPS = ("auc-toysanta", "auc-yuyou", "mirakikaku", "jugem2020")
+SHOPS = ("auc-toysanta", "auc-yuyou", "mirakikaku", "jugem2020", "smltrading")
 # ★jugem2020 は使える (2026-08-21 再確認)。 8/20 に集めた32件が全部404だったのは
 #   **楽天の検索インデックスに 削除済み商品が残っていた**ため。 その後 index が
 #   更新され、 今の検索結果 17件は 17件とも生きている。
 #   死んだ商品を掴む対策は `fetch_detail` の URL 変化チェックで入れてある。
 # ★外した店 (2026-08-21):
-#   smltrading … 開いた3件が3件とも予約品。採用実績0
+#   (smltrading は 2026-08-21 に戻した。 めじるしアクセサリーが43件あり、
+#    うち19件が予約でない。 ただし「入荷待ち」表記が多いので実際に採れるのは一部)
 #   kidsroom   … どの検索でも0件
 # kidsroom は 2026-08-20 に外した (どの検索でも0件)。
 # jugem2020 / smltrading は バンダイのコンプ品が多い店として追加。

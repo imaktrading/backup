@@ -385,3 +385,14 @@ def test_is_snack_toy_marks_candy_included():
     from scrapers.rakuten_search import is_snack_toy
     assert is_snack_toy("ワンピース大海賊シールウエハース 全38種セット") is True
     assert is_snack_toy("ぷるんと蒟蒻ゼリー ミニチュアチャーム 全5種セット") is False
+
+
+@pytest.mark.parametrize("text,ok", [
+    # smltrading の2形式 (2026-08-21 実測)
+    ("配送予定 翌営業日までに発送 配送情報 送料無料", True),
+    # ★「入荷待ち」は即納ではない。 読めないまま落とすのが正しい
+    ("配送予定 入荷待ち ※注文個数によりお届け日が変わることがあります。 配送情報 送料無料", False),
+])
+def test_shipping_formats_of_smltrading(text, ok):
+    from scrapers.rakuten_item import judge
+    assert judge(text)["in_stock_now"] is ok
