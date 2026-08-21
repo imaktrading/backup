@@ -145,6 +145,10 @@ def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
                 if rakuten_search.looks_preorder(r["title"]):
                     rej["preorder_title"] += 1
                     continue
+                if rakuten_search.is_excluded_category(r["title"]):
+                    # サンリオ / ぬいぐるみ系は出せない (HQ 2026-08-20)
+                    rej["excluded"] = rej.get("excluded", 0) + 1
+                    continue
                 if rakuten_search.looks_soldout(r["title"]):
                     # 【品切中】等がタイトルに入る店がある (auc-toysanta)
                     rej["soldout_title"] = rej.get("soldout_title", 0) + 1

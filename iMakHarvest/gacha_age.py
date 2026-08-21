@@ -101,6 +101,42 @@ def find_by_title(title: str) -> str:
     return best_code if best else ""
 
 
+# 公式ページの商品画像は akamai。 同じページに **関連商品の画像も並ぶ**ので、
+# 1枚目と同じ model id の物だけを その商品の写真として採る (2026-08-21 実測)。
+_OFFICIAL_IMG_RE = re.compile(
+    r"https://bandai-a\.akamaihd\.net/bc/img/model/[^\"'\s]+?\.(?:jpg|jpeg|png)")
+
+
+def product_page_url(code: str) -> str:
+    """公式の **商品ページ** URL (トップページではない)."""
+    return GASHAPON_JAN_URL.format(code=code) if (code or "").isdigit() else ""
+
+
+def parse_official_images(html: str) -> list[str]:
+    """公式ページから **その商品の** 写真だけ返す (関連商品は混ぜない)."""
+    urls = list(dict.fromkeys(_OFFICIAL_IMG_RE.findall(html or "")))
+    if not urls:
+        return []
+    m = re.search(r"/(\d{6,})_\d+\.", urls[0])
+    if not m:
+        return urls[:8]
+    model = m.group(1)
+    return [u for u in urls if f"/{model}_" in u][:8]
+
+
+def fetch_official(code: str, timeout: int = 20) -> dict:
+    """公式の商品ページを1回だけ引いて {age, images, url} を返す."""
+    url = product_page_url(code)
+    if not url:
+        return {"age": None, "images": [], "url": ""}
+    try:
+        req = urllib.request.Request(url, headers=UA)
+        html = urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "ignore")
+    except Exception:  # noqa: BLE001
+        return {"age": None, "images": [], "url": ""}
+    return {"age": parse_age(html), "images": parse_official_images(html), "url": url}
+
+
 def fetch_age_by_code(code: str, timeout: int = 15) -> int | None:
     """公式カタログの jan_code (末尾000 付き) から 対象年齢 を引く."""
     if not (code or "").isdigit():

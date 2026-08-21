@@ -169,6 +169,23 @@ def looks_preorder(title: str) -> bool:
     return bool(PREORDER_RE.search(title or ""))
 
 
+# ★出品できない区分 (HQ 依頼 2026-08-20 `gacha_recollect_spec`)。 **収集の時点で落とす**。
+#   ① サンリオ … user 判断で今後扱わない (2026-06-29)
+#   ② ぬいぐるみ系 … 米 CPSC は stuffed animals を **対象年齢の印字と無関係に**
+#      児童製品と扱う。 第三者試験 + CPC が要る (実害: サンリオぬいぐるみ22件を取下げ)
+# 語は **増やすのは可、 減らすのは不可**。 迷ったら落とす側。
+EXCLUDED_RE = re.compile(
+    r"サンリオ|ハローキティ|キティちゃん|マイメロ|クロミ|シナモロール|ポムポムプリン|"
+    r"ハンギョドン|けろけろけろっぴ|ぐでたま|はぴだんぶい|リトルツインスターズ|"
+    r"ぬいぐるみ|マスコット|フロッキー|パペット|もこもこ|ふわふわ|プラッシュ|"
+    r"ぬい活|もふもふ|クッション")
+
+
+def is_excluded_category(title: str) -> bool:
+    """出せない区分 (サンリオ / ぬいぐるみ系) か。 True なら収集しない."""
+    return bool(EXCLUDED_RE.search(title or ""))
+
+
 def looks_soldout(title: str) -> bool:
     """タイトルで分かる品切れか (auc-toysanta の 【品切中】 等)."""
     return bool(SOLDOUT_RE.search(title or ""))

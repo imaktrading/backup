@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from gacha_maker import MAKER_OFFICIAL, extract_maker_text, official_url, resolve_maker
-from sheet_writer_rakuten import COL_OFFICIAL_URL, build_row
+from sheet_writer_rakuten import build_row
 
 pytestmark = pytest.mark.offline
 
@@ -55,19 +55,17 @@ def test_other_item_in_title_is_not_picked_up():
     assert resolve_maker(t) == ""
 
 
-def test_build_row_puts_official_url_in_col_i():
-    row = build_row({
-        "url": "https://item.rakuten.co.jp/auc-yuyou/g26074js01t/",
-        "title": "虚無 KYOMU 全5種+ディスプレイ台紙セット エール ガチャポン ガチャガチャ コンプリート",
-        "price_jpy": "2820",
-    })
-    assert row[COL_OFFICIAL_URL - 1] == "https://yell-world.jp/"
+def test_maker_official_url_is_not_written_to_the_sheet():
+    """★2026-08-21 変更: メーカーの **トップページ** はスプシに入れない (HQ 指摘)。
 
-
-def test_build_row_leaves_col_i_blank_when_unknown():
-    row = build_row({"url": "https://item.rakuten.co.jp/mirakikaku/c2511162/",
-                     "title": "ゆらゆら おなまえ札めじるしチャーム2 全6種セット コンプ"})
-    assert row[COL_OFFICIAL_URL - 1] == ""
+    I列は出品くんの英語タイトル列で、 トップページでは見比べにも画像取得にも使えない。
+    スプシに入れるのは **公式の商品ページ** (V列) だけ。
+    `gacha_maker.official_url` はメーカー判定の道具として残す。
+    """
+    row = build_row({"url": "https://item.rakuten.co.jp/auc-yuyou/g26074js01t/",
+                     "title": "虚無 KYOMU 全5種セット エール ガチャポン コンプリート",
+                     "price_jpy": "2820"})
+    assert row[8] == ""
 
 
 def test_all_urls_are_https_or_http_and_unique():

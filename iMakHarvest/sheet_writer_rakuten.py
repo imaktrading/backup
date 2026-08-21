@@ -12,7 +12,8 @@
 | F | 商品価格 |
 | G | 写真URL |
 | H | 商品説明 (無ければ空) |
-| I | メーカー公式URL (判定できた時だけ。 `gacha_maker`) |
+| V | **公式の商品ページURL** (トップページは入れない。 無ければ空) |
+| W | 公式の商品画像URL (`|` 区切り。 無ければ空) |
 | M | **仕入原価 = 商品価格 + 送料** (数値のみ) |
 | R | `カプセルトイ` |
 
@@ -26,7 +27,6 @@ import re
 
 import gspread
 
-from gacha_maker import official_url
 from sheet_writer_amazon import (
     COL_CATEGORY, COL_CONDITION, COL_DESCRIPTION, COL_IMAGES, COL_PRICE,
     COL_TITLE, COL_URL, DEFAULT_COLUMN_COUNT,
@@ -35,9 +35,11 @@ from sheet_writer_amazon import (
 CATEGORY = "カプセルトイ"     # R列 (HQ 確認: 表記ゆれ禁止。 ガシャポン/ガチャガチャ は別扱い)
 CONDITION = "新品"
 COL_CURRENT_PRICE = 13        # M: 現在価格(円) - 監視くんが使う列。 書込可
-COL_OFFICIAL_URL = 9          # I: メーカー公式URL (2026-08-20 user 依頼)。
-                              #    ★本番 HIGH では I = PSA cert 列。 ガチャ行を HIGH へ
-                              #    コピーする時は I を持ち込まない (HQ へ連絡済)
+# ★I列には書かない (2026-08-21 HQ 指摘)。 I は出品くんが英語タイトルを作る列で、
+#   本番 HIGH では PSA cert 列。 メーカーのトップページを入れても使い道が無い。
+#   公式は **商品ページ** を V列に入れる (HQ 依頼 `gacha_recollect_spec`)。
+COL_OFFICIAL_PAGE = 22        # V: 公式の商品ページURL (無ければ空。 推測URLは入れない)
+COL_OFFICIAL_IMAGES = 23      # W: 公式の商品画像URL (`|` 区切り)
 
 _ITEM_RE = re.compile(r"item\.rakuten\.co\.jp/([a-z0-9_-]+)/([a-z0-9_-]+)")
 
@@ -83,8 +85,10 @@ def build_row(item: dict, column_count: int = DEFAULT_COLUMN_COUNT) -> list:
     if fee is not None and price:
         desc = f"{desc} 仕入原価: 本体{price}円 + 送料{fee}円 = {total}円".strip()
     row[COL_DESCRIPTION - 1] = desc
-    row[COL_OFFICIAL_URL - 1] = official_url(item.get("title") or "",
-                                             str(item.get("description") or ""))  # I: 判定できた時だけ
+    row[COL_OFFICIAL_PAGE - 1] = str(item.get("official_page") or "")     # V
+    imgs = item.get("official_images") or []
+    row[COL_OFFICIAL_IMAGES - 1] = (imgs if isinstance(imgs, str)
+                                    else "|".join(str(u) for u in imgs if u))  # W
     row[COL_CURRENT_PRICE - 1] = total          # M: 送料込みの総額 (数値のみ)
     row[COL_CATEGORY - 1] = CATEGORY            # R
     return row

@@ -108,6 +108,10 @@ def main(argv=None) -> int:
                 continue
             if rakuten_search.looks_preorder(t) or rakuten_search.looks_soldout(t):
                 continue
+            if (rakuten_search.is_excluded_category(t)
+                    or rakuten_search.is_excluded_category(name)):
+                # サンリオ / ぬいぐるみ系は出せない (HQ 2026-08-20)
+                continue
             k = dedupe_key(r["url"])
             if k in claimed or k in known or r["url"] in claimed:
                 continue
@@ -158,7 +162,8 @@ def main(argv=None) -> int:
             if detail.get("shipping_fee") is None or not detail.get("total_jpy"):
                 rej["fee_unknown"] = rej.get("fee_unknown", 0) + 1
                 continue
-            age = gacha_age.fetch_age_by_code(c["jan_code"])
+            off = gacha_age.fetch_official(c["jan_code"])
+            age = off["age"]
             if gacha_age.is_too_young(age):
                 rej["age_ng"] = rej.get("age_ng", 0) + 1
                 _log(f"  対象年齢 {age}才 → 除外 {c['official_name'][:28]}")
@@ -168,6 +173,8 @@ def main(argv=None) -> int:
                          ("price_jpy", "image_urls", "description", "shipping",
                           "shipping_fee", "total_jpy")})
             item["title"] = detail["title"] or c["title"]
+            item["official_page"] = off["url"]        # V列: 公式の商品ページ
+            item["official_images"] = off["images"]   # W列: 公式の商品画像
             if age is not None:
                 item["description"] = f"{item['description']} 対象年齢: {age}才以上".strip()
             kept.append(item)
