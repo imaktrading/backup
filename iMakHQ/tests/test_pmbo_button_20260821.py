@@ -57,8 +57,21 @@ def test_失敗を黙って飲まない():
 # PSA と同じ 2段 (夜=検索 / 昼=目視)。画面も PSA の確証UI をそのまま使う。
 
 def test_一番くじの補URLボタンが2つある():
-    assert "🔎 一番くじ 補URL夜間検索(slice2)" in SRC
-    assert "🩹 一番くじ 補URL補強(昼確認/slice3)" in SRC
+    assert "🎴 くじ補URL 夜間検索" in SRC
+    assert "🎴 くじ補URL 昼確認" in SRC
+
+
+def test_ラベルが長すぎない():
+    """★2026-08-22「ラベルがボタンからはみ出ていて、どのボタンが何かわからない」。
+    PSA の一番長いラベル (20字) 以下に収める."""
+    for lb in ("🎴 くじ補URL 夜間検索", "🎴 くじ補URL 昼確認"):
+        assert len(lb) <= 20, lb
+
+
+def test_一番くじは絵文字で見分けられる():
+    """★PSA と混ざって見えた。一番くじは 🎴 を頭に付けて系統を揃える."""
+    for lb in ("🎴 くじ補URL 夜間検索", "🎴 くじ補URL 昼確認"):
+        assert lb.startswith("🎴")
 
 
 def test_夜と昼で別のコマンド():

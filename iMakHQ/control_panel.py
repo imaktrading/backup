@@ -1420,7 +1420,7 @@ SCRIPTS = [
         # ★2026-08-22: 一番くじの補URLも PSA と同じ 2段 (夜=検索 / 昼=目視) にした。
         #   画面は PSA の確証UI をそのまま使う (見た目・操作が分かれないように)。
         "category": None, "type": "utility",
-        "label": "🔎 一番くじ 補URL夜間検索(slice2)",
+        "label": "🎴 くじ補URL 夜間検索",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "kuji_hoju_fill.py", "--search"],
@@ -1430,7 +1430,7 @@ SCRIPTS = [
     {
         # slice3: 夜に貯めた候補を現物と見比べて、選んだ分だけ補URL(AC-AG)へ書く。主URL不可触。
         "category": None, "type": "utility",
-        "label": "🩹 一番くじ 補URL補強(昼確認/slice3)",
+        "label": "🎴 くじ補URL 昼確認",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         # PSA と同じく1回10件ずつ (確証UIは全件まとめて送信する = 出した分はやり切る)。
