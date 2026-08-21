@@ -222,3 +222,42 @@ def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | No
                 "image_urls": images[:8], "description": desc, "jan": jan,
                 "shipping_fee": fee, "total_jpy": total})
     return res
+
+
+# ---------------------------------------------------------------------------
+# HTTP だけで取る (2026-08-22。 窓口 依頼 `gacha_next_steps`)
+# ---------------------------------------------------------------------------
+# `deliveryMessage` と `postageIncluded` は **静的HTMLに入っている**ので、
+# 即納判定と「送料無料か」はブラウザ無しで分かる (実測 2026-08-22)。
+# 1件6秒 -> 1秒未満。 ★送料の **金額** だけは静的HTMLに無いので、
+# 送料無料でない物は 呼出側がブラウザで開き直す (`fetch_detail`)。
+_DELIVERY_MSG_RE = re.compile(r'"deliveryMessage"\s*:\s*"([^"]*)"')
+_POSTAGE_INC_RE = re.compile(r'"shipping":\{"postageIncluded":(true|false)')
+_PRICE_RE = re.compile(r'itemprop="price"[^>]*content="([0-9]+)"')
+_OG_TITLE_RE = re.compile(r'property="og:title" content="([^"]{5,200})"')
+
+
+def parse_detail_html(html: str, url: str) -> dict:
+    """商品ページの HTML から 判定に要る物を取り出す (純関数).
+
+    Returns: {delivery_message, postage_included, price_jpy, title,
+              image_urls, description, jan}
+    """
+    m = _DELIVERY_MSG_RE.search(html or "")
+    inc = _POSTAGE_INC_RE.search(html or "")
+    price = _PRICE_RE.search(html or "")
+    title = _OG_TITLE_RE.search(html or "")
+    desc = extract_description(html)
+    jan = extract_jan(html)
+    if jan:
+        desc = (desc + f" JAN: {jan}").strip()
+    return {
+        "url": url,
+        "delivery_message": m.group(1) if m else "",
+        "postage_included": (inc.group(1) == "true") if inc else None,
+        "price_jpy": price.group(1) if price else "",
+        "title": re.sub(r"^【楽天市場】", "", title.group(1)).strip() if title else "",
+        "image_urls": extract_images(html, url),
+        "description": desc,
+        "jan": jan,
+    }

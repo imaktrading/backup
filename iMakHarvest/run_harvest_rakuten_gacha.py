@@ -29,6 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+import rakuten_delivery  # noqa: E402
 from gacha_age import fetch_age, fetch_age_by_title, is_too_young  # noqa: E402
 from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
@@ -278,7 +279,29 @@ def main(argv=None) -> int:
             if quota_left.get(c["theme"], 0) <= 0:
                 detail_rej["quota_full"] += 1
                 continue
-            detail = rakuten_item.fetch_detail(driver, c["url"])
+            # ① まず HTTP だけで見る (1秒未満)。 即納でない物はここで落ちるので
+            #    ブラウザを開くのは **送料の金額が要る物だけ** で済む (2026-08-22)
+            try:
+                pre = rakuten_item.parse_detail_html(
+                    rakuten_search.fetch(c["url"]), c["url"])
+            except Exception:  # noqa: BLE001 - 取れなければブラウザに任せる
+                pre = None
+            if pre is not None:
+                verdict = rakuten_delivery.judge_message(pre["delivery_message"])
+                if verdict != rakuten_delivery.IMMEDIATE:
+                    detail_rej[verdict] = detail_rej.get(verdict, 0) + 1
+                    continue
+                if pre["postage_included"] and pre["price_jpy"]:
+                    # 送料無料 = 表示価格が総額。 ブラウザは要らない
+                    detail = dict(pre)
+                    detail.update({"in_stock_now": True, "reason": "ok",
+                                   "shipping": pre["delivery_message"],
+                                   "shipping_fee": 0, "total_jpy": pre["price_jpy"]})
+                    detail_rej["http_ok"] = detail_rej.get("http_ok", 0) + 1
+                else:
+                    detail = rakuten_item.fetch_detail(driver, c["url"])
+            else:
+                detail = rakuten_item.fetch_detail(driver, c["url"])
             if detail is None:
                 detail_rej["fetch_fail"] += 1
                 failed.append(c["url"])
