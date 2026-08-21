@@ -65,7 +65,8 @@ class TestSiStartDeck100(unittest.TestCase):
         # なぜ 'Start Deck 100' か: これは意図値。master の code形 'Si: Start Deck 100' には
         # 寄せない (Advisor 2026-08-11 §3 + §1 convention=両形あれば人が読める形を採用)。
         # master 盲信で 'Si:' に書換える提案が来ても却下 (蒸し返し防止)。
-        self.assertEqual(r.get("set_name_ebay"), "Start Deck 100")
+        # 2026-08-21 窓口確定: code 形が正 (素の名前ではなく eBay の綴りを出す)
+        self.assertEqual(r.get("set_name_ebay"), "Si: Start Deck 100")
         self.assertFalse(r.get("rarity"))  # deck=印刷レアリティ無し=空欄が正
 
 

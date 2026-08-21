@@ -52,7 +52,12 @@ try:
 except Exception:
     pass
 
-EBAY_JSON = Path(r"C:\dev\iMak_data\catalog\_input\ebay_tcg_filter_lists_api.json")
+EBAY_JSON = Path(r"C:\dev\iMak_data\catalog\_input\ebay_183454_facet_master_20260821.json")
+# 2026-08-21 窓口確定: Game で絞れる新マスタを正とする (旧 ebay_tcg_filter_lists_api.json は
+# 全ゲーム混在の 2,290値で、ポケモン以外のセット名まで候補に入っていた)。
+# category -> eBay の Game 名。ここに無いカテゴリは all を使う。
+GAME_OF = {"pokemon_tcg": "Pokémon TCG", "one_piece_tcg": "One Piece CCG",
+           "dragonball_scg": "Dragon Ball Super Card Game"}
 OUT_MD = Path(r"C:\dev\iMak_data\catalog\requests\2026-08-21_ebay_value_reconcile_report.md")
 NOW = datetime.now().isoformat()
 
@@ -68,13 +73,16 @@ def norm(s):
 
 
 def load_ebay():
+    """(Set 全体, Rarity 全体, Game 別 Set) を返す."""
     d = json.loads(EBAY_JSON.read_text(encoding="utf-8"))
 
-    def vals(aspect):
-        return [v.strip() for v in d["aspects"][aspect]["values"]
-                if isinstance(v, str) and v.strip()]
+    def vals(node):
+        return [v.strip() for v in node if isinstance(v, str) and v.strip()]
 
-    return vals("Set"), vals("Rarity")
+    st = d["aspects"]["Set"]
+    ra = d["aspects"]["Rarity"]
+    by_game = {g: vals(v) for g, v in st.get("by_game", {}).items()}
+    return vals(st["all"]), vals(ra["all"]), by_game
 
 
 def build_index(values):
@@ -97,7 +105,7 @@ def real_sources(db):
 
 
 def classify(db):
-    set_vals, rar_vals = load_ebay()
+    set_vals, rar_vals, by_game = load_ebay()
     set_exact, rar_exact = set(set_vals), set(rar_vals)
     set_low = {v.lower(): v for v in set_vals}
     rar_low = {v.lower(): v for v in rar_vals}
@@ -126,12 +134,30 @@ def classify(db):
         if not ev:
             continue
         is_set = r["field"] in SET_FIELDS
-        exact = set_exact if is_set else rar_exact
-        low = set_low if is_set else rar_low
+        # ★Game で絞る (2026-08-21 窓口確定)。よそのゲームのセット名に当たらないようにする。
+        game = GAME_OF.get(r["category"])
+        if is_set:
+            # ★Game 別リストしか使わない。全ゲーム混在の all を使うと、
+            #   'Promo Cards' が Final Fantasy の 'FF: Promo Cards' に寄る (2026-08-21 実測)。
+            #   Game が無いカテゴリ (gundam) は「eBay に一覧が無い」扱い = 全部 B/U 判定へ。
+            gvals = by_game.get(game) or []
+            exact = set(gvals)
+            low = {v.lower(): v for v in gvals}
+            gidx = build_index(gvals)
+        else:
+            gvals = []
+            exact, low, gidx = rar_exact, rar_low, {}
         proposal = None
 
         if ev in exact:
             status = "A"
+            # ★code 形が正 (2026-08-21 窓口確定)。素の名前と code 付きが両方在るなら
+            #   code 付きを採る。日本語版カードは日本語版セットの code 形で出す。
+            if r["category"] in ADOPT_CATEGORIES:
+                cands = gidx.get(norm(ev), [])
+                pref = [c for c in cands if PREFIX_RE.match(c)]
+                if pref and not PREFIX_RE.match(ev):
+                    proposal = sorted(pref)[0]
         elif ev.lower() in low:
             status, proposal = "A", low[ev.lower()]
         else:
@@ -149,7 +175,7 @@ def classify(db):
             else:
                 status = "U"
             if is_set and r["category"] in ADOPT_CATEGORIES:
-                cands = set_idx.get(norm(ev), [])
+                cands = gidx.get(norm(ev), [])
                 if len(cands) == 1 and cands[0] != ev:
                     proposal = cands[0]
         out.append(dict(id=r["id"], category=r["category"], field=r["field"],

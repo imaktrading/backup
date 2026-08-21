@@ -53,9 +53,12 @@ CODEFORM = {
 EXPECTED_ROWS = 2051
 
 # 「表記の選択」ではないので巻き込んではいけない値 (2026-08-11 回答 §2/§3 + 別名ケース)
+# ★2026-08-21 窓口確定で 'Start Deck 100' / 'Premium Champion Pack' の carve-out は解除。
+#   code 形が正 (hq/requests/2026-08-21_set_name_and_name_en_need_ebay_facet_response.md §2)。
+#   2026-08-11 §3 の「読める形を維持」は、eBay の Game 別マスタが手元に無かった時点の判断。
 UNTOUCHED = {
-    "Start Deck 100":              "2026-08-11 §3 現状維持 (テスト在り=意図値)",
-    "Premium Champion Pack":       "2026-08-11 §3 現状維持 (テスト在り=意図値)",
+    "Si: Start Deck 100":          "2026-08-21 窓口確定 (code 形)",
+    "CP4: Premium Champion Pack":  "2026-08-21 窓口確定 (code 形)",
     "25th Anniversary Golden Box": "2026-08-11 §2 現状維持",
     "Double Crisis":               "master 対抗値は別名 (CP1: Magma Gang vs Aqua Gang: …) = 保留",
 }

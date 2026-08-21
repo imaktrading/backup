@@ -138,7 +138,8 @@ class TestOtherCategoriesUnchanged(unittest.TestCase):
     #   dragonball_scg: 139 → 136 (canonical fresh 3 行 populate、136 は非-canonical fresh で skip)
     # 上記以外のカテゴリ (pokemon_tcg / yugioh_tcg) は本 migration の対象外なので不変.
     BASELINES = {
-        "pokemon_tcg": 4084,
+        # 2026-08-21: 25th ANNIVERSARY GOLDEN BOX の1行に値が入り、空欄が1つ減った
+        "pokemon_tcg": 4083,
         "gundam_tcg": 6,
         "dragonball_scg": 136,
         "yugioh_tcg": 12150,
