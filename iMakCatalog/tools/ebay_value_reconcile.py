@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ebay_filter_map の値を eBay 公式 aspect リストに照合する (A/B/C 判定 + 綴り引き当て).
+"""ebay_filter_map の値を eBay 公式 aspect リストに照合する (A/B/U 判定 + 綴り引き当て).
 
 決定: requests/2026-08-21_set_rarity_final_plan_response_go.md [IMPLEMENT-GO]
       (ユーザー委任 → 出品くん / カタログ / Gemini の3者合意)
@@ -8,9 +8,9 @@
 eBay の getItemAspectsForCategory(183454) の返り (_input/ebay_tcg_filter_lists_api.json)
 を唯一の照合相手にして、変換表の各値を3状態に分ける。
 
-  A = eBay のリストにその綴りが在る                       → 触らない
-  B = リストに無いが公式データに実在するセット/レアリティ → 値は変えない。印だけ付ける
-  C = リストにも公式データにも裏が無い                    → 要確認 (ここだけが人の仕事)
+  A = eBay のリストにその綴りが在る          → 触らない
+  B = リストに無いが **実際に出品データに載っている** → 値は変えない。印だけ (追加申請候補)
+  U = リストにも無く、まだどの行にも載っていない      → **誤りではなく未使用**
 
 ## ★規則で変換しない (3者合意 #2)
 eBay の綴りは一貫していない:
@@ -104,12 +104,20 @@ def classify(db):
     set_idx = build_index(set_vals)
     official, prefixes, brackets = real_sources(db)
 
-    used_rarity = {}
+    # 実際に products に載っている値 (= 出品に出る値)。B / U の判定はこれで行う。
+    # ★source_value が公式セット名と一致するかで見ると、set_code 経由の正しい行や
+    #   DON!! のような行まで「裏が取れない」に落ちる (2026-08-21 実測。890行 使われている
+    #   'Premium Booster One Piece The Best' が C に入っていた)。
+    used_set, used_rar = {}, {}
     for cat in CATS:
-        used_rarity[cat] = {r[0] for r in db.execute(
-            "SELECT DISTINCT json_extract(specs,'$.rarity') FROM products WHERE category=? "
-            "AND json_extract(specs,'$.rarity') IS NOT NULL "
-            "AND json_extract(specs,'$.rarity')<>''", (cat,))}
+        used_set[cat] = {r[0] for r in db.execute(
+            "SELECT DISTINCT json_extract(specs,'$.set_name_ebay') FROM products WHERE category=? "
+            "AND json_extract(specs,'$.set_name_ebay') IS NOT NULL "
+            "AND json_extract(specs,'$.set_name_ebay')<>''", (cat,))}
+        used_rar[cat] = {r[0] for r in db.execute(
+            "SELECT DISTINCT json_extract(specs,'$.rarity_ebay') FROM products WHERE category=? "
+            "AND json_extract(specs,'$.rarity_ebay') IS NOT NULL "
+            "AND json_extract(specs,'$.rarity_ebay')<>''", (cat,))}
 
     out = []
     for r in db.execute("SELECT id, category, field, source_value, ebay_value FROM ebay_filter_map "
@@ -127,13 +135,19 @@ def classify(db):
         elif ev.lower() in low:
             status, proposal = "A", low[ev.lower()]
         else:
-            if is_set:
-                s = r["source_value"]
-                is_real = (s in official) or (s in prefixes) or (s in brackets) \
-                    or (s.replace("-", "") in prefixes)
+            # B = eBay のリストには無いが **実際に出品データに載っている** = 正しい値。凍結
+            # U = まだどの行にも載っていない = **誤りではなく未使用**
+            #     (HQ 2026-08-21: 消すと、そのカードが入った時にまた同じ変換を書くことになる)
+            used = used_set if is_set else used_rar
+            if ev in used.get(r["category"], set()):
+                status = "B"
+            elif is_set and ((r["source_value"] in official)
+                             or (r["source_value"] in prefixes)
+                             or (r["source_value"] in brackets)
+                             or (r["source_value"].replace("-", "") in prefixes)):
+                status = "B"
             else:
-                is_real = r["source_value"] in used_rarity.get(r["category"], set())
-            status = "B" if is_real else "C"
+                status = "U"
             if is_set and r["category"] in ADOPT_CATEGORIES:
                 cands = set_idx.get(norm(ev), [])
                 if len(cands) == 1 and cands[0] != ev:
@@ -156,20 +170,21 @@ def write_report(rows, prop, cs):
     with OUT_MD.open("w", encoding="utf-8") as f:
         f.write("# eBay 値 照合レポート (書込前の一覧)\n\n")
         f.write("生成: %s\n\n照合相手: `%s`\n\n" % (NOW, EBAY_JSON))
-        f.write("## status 内訳\n\n| category | A | B | C | 引き当て |\n|---|--:|--:|--:|--:|\n")
+        f.write("## status 内訳\n\n| category | A | B | U(未使用) | 引き当て |\n|---|--:|--:|--:|--:|\n")
         for cat in CATS:
             c = Counter(x["status"] for x in rows if x["category"] == cat)
             adopt = sum(1 for x in rows if x["category"] == cat and x["proposal"])
-            f.write("| %s | %d | %d | %d | %d |\n" % (cat, c["A"], c["B"], c["C"], adopt))
+            f.write("| %s | %d | %d | %d | %d |\n" % (cat, c["A"], c["B"], c["U"], adopt))
         f.write("\n- **A** = eBay のリストに在る綴り。触らない\n")
         f.write("- **B** = リストに無いが公式データに実在。値は変えず印だけ (eBay への追加申請候補)\n")
-        f.write("- **C** = 裏が取れない。**ここだけが人の確認対象**\n")
+        f.write("- **U** = eBay にも無く、まだどの行にも載っていない。**誤りではなく未使用**。\n")
+        f.write("  消すと、そのカードが入ってきた時にまた同じ変換を書くことになる (HQ 2026-08-21)\n")
         f.write("\n## eBay の綴りに寄せる候補 (%d 件 / pokemon のみ)\n\n" % len(prop))
         f.write("| category | field | 今の値 | eBay の綴り |\n|---|---|---|---|\n")
         for x in prop:
             f.write("| %s | %s | `%s` | `%s` |\n"
                     % (x["category"], x["field"], x["ebay_value"], x["proposal"]))
-        f.write("\n## C = 要確認 (%d 件)\n\n" % len(cs))
+        f.write("\n## U = まだ使われていない (%d 件) ※誤りではない\n\n" % len(cs))
         f.write("| category | field | 値 | 変換元 |\n|---|---|---|---|\n")
         for x in cs:
             f.write("| %s | %s | `%s` | `%s` |\n"
@@ -185,7 +200,7 @@ def main():
     db.row_factory = sqlite3.Row
     rows = classify(db)
     prop = [x for x in rows if x["proposal"]]
-    cs = [x for x in rows if x["status"] == "C"]
+    cs = [x for x in rows if x["status"] == "U"]
 
     print("=== ebay_filter_map 照合 (%s) ===" % ("APPLY" if args.commit else "REPORT"))
     print("対象 %d 行 / 照合相手 %s\n" % (len(rows), EBAY_JSON.name))
@@ -193,14 +208,14 @@ def main():
         c = Counter(x["status"] for x in rows if x["category"] == cat)
         adopt = sum(1 for x in rows if x["category"] == cat and x["proposal"])
         frozen = "" if cat in ADOPT_CATEGORIES else "  (凍結=引き当てなし)"
-        print("  %-16s A%4d B%4d C%4d   引き当て %3d%s"
-              % (cat, c["A"], c["B"], c["C"], adopt, frozen))
+        print("  %-16s A%4d B%4d U%4d   引き当て %3d%s"
+              % (cat, c["A"], c["B"], c["U"], adopt, frozen))
 
     print("\n--- eBay の綴りに寄せる候補 %d 件 (pokemon のみ) ---" % len(prop))
     for x in prop:
         print("  %-9s %r -> %r" % (x["field"], x["ebay_value"], x["proposal"]))
 
-    print("\n--- C (裏が取れない) %d 件 = 要確認 ---" % len(cs))
+    print("\n--- U (まだ使われていない) %d 件 ※誤りではない ---" % len(cs))
     for x in cs:
         print("  %-14s %-9s %r  <- %r"
               % (x["category"], x["field"], x["ebay_value"], x["source_value"]))
