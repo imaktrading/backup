@@ -60,6 +60,23 @@ class TestPaths:
         assert k.get("AppID") and k.get("AppSecret")
 
 
+class TestSingleSource:
+    """★2026-08-21 夜: 全 worktree が共有側を見たので、本体側のファイルを消して
+    二重書きもやめた。書き先が2か所に戻ったら、いつか片方だけ古くなる."""
+
+    def test_本体側にファイルが無い(self):
+        for n in ("ebay keys.txt", "ebay_oauth_token_sell.json", "ebay_oauth_token.json"):
+            p = os.path.join(r"C:\dev\iMak\iMakeBayAPI", n)
+            assert not os.path.exists(p), "本体側に残っている: " + p
+
+    def test_書き先は1か所だけ(self):
+        import io as _io
+        src = _io.open(r"C:\dev\iMak\iMakeBayAPI\oauth_sell_setup.py", encoding="utf-8").read()
+        body = src[src.index("def save_token"):src.index("def basic_auth")]
+        assert "_token_path" in body
+        assert "for path in" not in body, "二重書きに戻っている"
+
+
 class TestParse:
     def test_key_value形式(self):
         assert C.parse_keys("AppID=a\nAppSecret=b\n# comment\n") == {"AppID": "a", "AppSecret": "b"}

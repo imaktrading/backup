@@ -40,7 +40,8 @@ except Exception:
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 from credentials import keys_path as _keys_path   # noqa: E402
 KEYS_FILE = _keys_path()
-SELL_TOKEN_FILE = os.path.join(SCRIPT_DIR, "ebay_oauth_token_sell.json")
+from credentials import token_path as _token_path   # noqa: E402
+SELL_TOKEN_FILE = _token_path("sell")
 
 # ★2026-08-21: 鍵を共有領域にも置いた (他 worktree から使うため)。
 #   トークンは使うたびに更新されるので、**2か所に置いたまま片方だけ更新されると腐る**
@@ -50,15 +51,18 @@ SHARED_DIR = r"C:/dev/iMak_data/credentials"
 
 
 def save_token(tok):
-    """トークンを保存する。**共有側にも必ず同じ内容を書く** (片方だけ新しくしない)。"""
-    for path in (SELL_TOKEN_FILE, os.path.join(SHARED_DIR, "ebay_oauth_token_sell.json")):
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(tok, f, ensure_ascii=False, indent=2)
-        except Exception as e:                                 # noqa: BLE001
-            # 共有側に書けなくても本体の更新は止めない。ただし黙らない
-            print("⚠️ トークンを保存できませんでした: %s (%s)" % (path, e))
+    """トークンを保存する。**書き先は1か所だけ** (`credentials.token_path`)。
+
+    ★2026-08-21 の経緯:
+      共有領域に移す途中は、本体と共有の**両方に**書いていた (移行期の保険)。
+      全 worktree (カタログ / 監視くん / 抽出くん / リバイスくん) が共有側を見たことを
+      確認したので、本体側のファイルを消して二重書きもやめた。
+      2か所に書き続けると、いつか片方だけ古くなる。書き先は1か所が正しい。
+    """
+    path = _token_path("sell")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(tok, f, ensure_ascii=False, indent=2)
 
 OAUTH_AUTHORIZE = "https://auth.ebay.com/oauth2/authorize"
 OAUTH_TOKEN = "https://api.ebay.com/identity/v1/oauth2/token"
