@@ -26,6 +26,16 @@ import sys
 import sqlite3
 from pathlib import Path
 
+# ★2026-08-21: scope 判定は `iMakTCG/tcg_scope` 1本 (SSOT)。ここに二つ目の真理表を
+#   置いていたため、8/19 に tcg_scope へ入れた修正が preflight に届かず、ウエハースが
+#   `GAP`(catalog未収録) のまま落ちて毎日カタログへ誤依頼していた。
+#   真理表を2箇所に増やしたのが原因なので、**足すのではなく捨てて委譲する**。
+#   回答書: 2026-08-19_psa_preflight_scope_ssot_gap_response.md
+_TCG_DIR = str(Path(__file__).resolve().parents[2] / "iMakTCG")
+if _TCG_DIR not in sys.path:
+    sys.path.insert(0, _TCG_DIR)
+from tcg_scope import detect_franchise_from_brand, is_out_of_scope  # noqa: E402
+
 # ---- paths ----
 _CATALOG_ROOT = r"C:/dev/iMak_catalog/iMakCatalog"
 PSA_CERTS_DIR = Path(r"C:/dev/iMak/iMakeBayAPI/cache/psa_certs")
@@ -154,48 +164,11 @@ def _set_prefix_in_brand(product_id: str, brand: str) -> bool:
     return head in b
 
 
-# ★2026-08-09: cert を1件ずつ台帳に足すのではなく **brand 文字列で構造的に落とす**。
-#   台帳方式だと同じ判断を毎回人がやることになり、増え続ける。
-_SDBH_RE = re.compile(r"HEROES|MISSION|HRS\.?UGM|SDBH")
-# `NEO` は語として見る (`NEON` 等を巻き込まない)
-_NEO_RE = re.compile(r"\bNEO\b")
-
-
-def out_of_scope_by_brand(brand: str):
-    """catalog が構造的に管理していないものを brand だけで判定する (純関数, test可)。
-
-    戻り: 理由の文字列 / 対象外でなければ None。
-
-    ここで落とす根拠 (2026-08-09 実データ):
-      - **SDBH (スーパードラゴンボールヒーローズ)**: Fusion World とは別ゲームで catalog 対象外。
-        PSA cache 924件のうち Dragon Ball 系 108件を判定すると SDBH 12件だけが当たり、
-        Fusion World 96件は**一件も当たらない** (Fusion World の brand に HEROES/MISSION は無い)。
-      - **日本語でない Pokemon**: `products` の `pokemon_tcg` は **language が ja 21,889 / 空 129 で
-        en は 0件** = catalog は日本語しか持っていない。KOREAN/ASIA/ENGLISH は探しても在るはずがない。
-        ★one_piece_tcg / dragonball_scg は en を持つので **Pokemon だけに適用する**。
-
-    これを入れないと、対象外カードが GAP (= catalog 未収録) に混ざり、
-    カタログへ「追加して」と依頼し続けることになる (921本スパイラルの作り方そのもの)。
-    """
-    b = (brand or "").upper()
-    if not b:
-        return None
-    if ("DRAGON BALL" in b or "DRAGONBALL" in b) and _SDBH_RE.search(b):
-        return "SDBH (スーパードラゴンボールヒーローズ) — Fusion World とは別ゲームで catalog 対象外"
-    if "POKEMON" in b and "JAPANESE" not in b:
-        return "日本語版でない Pokemon — catalog の pokemon_tcg は language=ja のみ (en は0件)"
-    # ★2026-08-09 追加。同じく **catalog が構造的に持っていない**もの:
-    #   - Pokemon Neo 期 (2000年): catalog に neo 期の set は 0件。
-    #     実測 `set_name_official / set_name に neo` = 0 / `新世界` = 0。
-    #     ヘラクロス24件の最古も `L1-Bhg-012` `DPt-...` で neo は無い。
-    #     catalog 側も `prune_missing_models.py` で「Neo era」を対象外と宣言済。
-    #   - 日本語版 Yu-Gi-Oh: catalog の yugioh_tcg 50,098件は **product_id に JP が 0件 /
-    #     EN が 34,936件** = 英語版しか持っていない。PSA の `#JP018` 等は探しても在るはずがない。
-    if "POKEMON" in b and _NEO_RE.search(b):
-        return "Pokemon Neo 期 (2000年) — catalog に neo 期の set が 0件 (catalog も対象外と宣言済)"
-    if ("YU-GI-OH" in b or "YUGIOH" in b) and "JAPANESE" in b:
-        return "日本語版 Yu-Gi-Oh — catalog の yugioh_tcg は英語版のみ (product_id に JP は0件)"
-    return None
+# ★2026-08-21: ここに在った `out_of_scope_by_brand` (SDBH / 非日本語Pokemon / Neo期 /
+#   日本語遊戯王 の4本) を **削除**した。同じ判定を tcg_scope が8本持っており、
+#   増えた5本 (DIVERS / ITAJAGA / FAMILY POKEMON / ウエハース / Web期) が
+#   こちらへ届かないまま毎日 GAP になっていた。真理表は1本だけにする。
+#   Neo 期はこちらにしか無かったので tcg_scope へ移設済 (tcg_scope.py の (d))。
 
 
 def classify(cert: str, meta: dict, con: sqlite3.Connection):
@@ -211,9 +184,9 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
         res["status"] = "OUT-OF-SCOPE"
         res["reason"] = f"{oos.get('reason', '')} — 参入しない (決定: {oos.get('decided_by', '')})"
         return res
-    # 台帳に無くても brand だけで構造的に判る対象外 (SDBH / 非日本語 Pokemon)
-    why = out_of_scope_by_brand(brand)
-    if why:
+    # 台帳に無くても brand だけで構造的に判る対象外 → 判定は tcg_scope 1本 (SSOT)
+    oos_flag, why = is_out_of_scope(detect_franchise_from_brand(brand), brand)
+    if oos_flag and why:
         res["status"] = "OUT-OF-SCOPE"
         res["reason"] = why
         return res

@@ -15,6 +15,7 @@ Catalog に無駄な調査依頼が量産される事故 (2026-07-29 発覚) の
 - 非日本語 Pokemon ......... catalog の pokemon_tcg は日本語のみ (2026-08-19 実測 en 0件)
 - ONE PIECE ウエハース ..... 2019年の菓子付録カード。OPTCG(2022年開始)とは別物
 - Pokemon Web 期 ........... 2001年。catalog 0件
+- Pokemon Neo 期 ........... 2000年。catalog 0件 (2026-08-21 psa_preflight から移設)
 
 pokemon_out_of_scope (psa_to_csv.py) との関係:
 本モジュールは pokemon_out_of_scope に依存しない (循環 import 回避)。真理表 (FAMILY のみ
@@ -27,8 +28,11 @@ from __future__ import annotations
 
 import re
 
-# `WEB` / `NEO` 等は語として見る (`WEBBED` を巻き込まない)
+# `WEB` / `NEO` 等は語として見る (`WEBBED` / `NEON` を巻き込まない)
 _WEB_RE = re.compile(r"\bWEB\b")
+_NEO_RE = re.compile(r"\bNEO\b")
+# SDBH の PSA 表記ゆれ (`... HEROES UGM5` / `... BIG BANG MISSION 12` 等)
+_SDBH_RE = re.compile(r"HEROES|MISSION|HRS\.?UGM|SDBH")
 
 
 def _tokens(brand: str) -> set:
@@ -58,6 +62,14 @@ def is_out_of_scope(franchise: str, brand: str, catalog_resolves=None) -> tuple[
     if franchise == "Yu-Gi-Oh!":
         return True, "遊戯王は現在対象外(catalog日本版未収録)"
     if franchise == "Dragon Ball Heroes":
+        return True, "SDBH=アーケード=SCG対象外"
+    # ★2026-08-21: `DRAGON BALL SON GOKU HEROES UGM5` のように **HEROES が
+    #   DRAGON BALL と離れて出る** PSA 表記は detect_franchise_from_brand が
+    #   "Dragon Ball" を返すため上の枝に入らない。psa_preflight が持っていた規則を
+    #   ここへ移設 (真理表を1本にする一環)。誤爆しないことは実測済:
+    #   psa cache 1,144件でこの規則が当たるのは SDBH の9表記だけで、
+    #   Fusion World は一件も当たらない。
+    if ("DRAGON BALL" in b or "DRAGONBALL" in b) and _SDBH_RE.search(b):
         return True, "SDBH=アーケード=SCG対象外"
     if franchise == "Itajaga":
         return True, "ITAJAGA=食玩プロモ=公式TCGカタログ対象外"
@@ -89,6 +101,14 @@ def is_out_of_scope(franchise: str, brand: str, catalog_resolves=None) -> tuple[
     #   (c) Pokemon Web 期 (2001年): catalog の pokemon_tcg に 0件。Neo 期と同じ形。
     if franchise == "Pokemon" and _WEB_RE.search(b):
         return True, "Pokemon Web期(2001年)=catalog 0件(Neo期と同じく対象外)"
+    #   (d) Pokemon Neo 期 (2000年): psa_preflight.out_of_scope_by_brand が別に持っていた
+    #       真理表をここへ移設 (2026-08-21)。理由文は preflight の文言をそのまま使う。
+    #       実測: `set_name_official / set_name に neo` = 0件。catalog 側も
+    #       prune_missing_models.py で「Neo era」を対象外と宣言済。
+    #       ★これを足さずに preflight を委譲すると、`157799487 POKEMON JAPANESE NEO` が
+    #         静かに対象内へ戻る (回答書 2026-08-19_psa_preflight_scope_ssot_gap_response.md)。
+    if franchise == "Pokemon" and _NEO_RE.search(b):
+        return True, "Pokemon Neo 期 (2000年) — catalog に neo 期の set が 0件 (catalog も対象外と宣言済)"
     return False, ""
 
 
