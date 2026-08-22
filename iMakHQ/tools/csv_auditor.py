@@ -34,6 +34,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1018,7 +1019,7 @@ def _act_disabled(dry_run):
             or "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST")))
 
 
-def _detached_spawn(argv, stdout_path=None):
+def _detached_spawn(argv, stdout_path=None, lock_path=None):
     """argv を tree-kill 耐性で BG 起動 (中継 python が DETACHED 起動して即終了)。
 
     control_panel は csv_auditor 終了後 taskkill /F /T でツリー一括kill する。直接 Popen だと
@@ -1027,10 +1028,13 @@ def _detached_spawn(argv, stdout_path=None):
     """
     payload = list(argv)
     launcher = (
-        "import subprocess,sys,json\n"
+        "import subprocess,sys,json,time,datetime\n"
         "argv=json.loads(sys.argv[1]); logp=sys.argv[2] or None\n"
         "out=open(logp,'w',encoding='utf-8') if logp else subprocess.DEVNULL\n"
-        "subprocess.Popen(argv,stdout=out,stderr=subprocess.STDOUT,"
+        # ★2026-08-21: lock_path があれば、起動した **相手の pid** を lock に書き直す。
+        #   csv_auditor 自身の pid のままだと監査終了と同時に「死んだ lock」になり、
+        #   数分後の2本目が奪って起動する = 二重起動が直らない (回答書 B)。
+        "p=subprocess.Popen(argv,stdout=out,stderr=subprocess.STDOUT,"
         # ★2026-07-31: DETACHED_PROCESS(0x08) をやめ CREATE_NO_WINDOW(0x08000000) に。
         #   DETACHED はコンソールを継承しないだけで、コンソールアプリ(claude.exe)には
         #   Windows が **新しいコンソールを割り当てる** → 監査終了ごとに CMD がちらつく
@@ -1038,10 +1042,15 @@ def _detached_spawn(argv, stdout_path=None):
         #   tree-kill 耐性は「中継が即終了して孤児化する」ことで担保しており DETACHED に
         #   依存していない。実験で両 flags とも中継終了後に子が生存することを確認済。
         "creationflags=0x00000200|0x08000000)\n"   # CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW
+        "lk=sys.argv[3] if len(sys.argv)>3 else ''\n"
+        "if lk:\n"
+        "    json.dump({'pid':p.pid,'ts':time.time(),"
+        "'started':datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')},"
+        "open(lk,'w',encoding='utf-8'))\n"
     )
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    subprocess.Popen([sys.executable, "-c", launcher, json.dumps(payload), stdout_path or ""],
-                     creationflags=flags)
+    subprocess.Popen([sys.executable, "-c", launcher, json.dumps(payload),
+                      stdout_path or "", lock_path or ""], creationflags=flags)
 
 
 def _signal_csv_up(csv_path, n_listable, dry_run, degraded=()):
@@ -1071,6 +1080,111 @@ def _signal_csv_up(csv_path, n_listable, dry_run, degraded=()):
         return f"error:{type(_e).__name__}"
 
 
+# ★2026-08-21: 同じ CSV に対して Act(headless) が2つ起動していた
+#   (2026-08-20 実測: 18:52 と 18:55 に2プロセス。両方が同じ CSV / missing_models.csv /
+#    同じ ng_act_*.md を書き、**後勝ちで片方の記録が消える**)。CSV ごとの lock で1本にする。
+#   ★lock に期限を付けるのが肝。Act や PC が落ちて lock が残ると、以後その CSV の NG が
+#     誰にも処理されない = **黙って止まる**、いちばん困る失敗になる。
+#     有効なのは「pid が生きている **かつ** 30分以内」だけ。それ以外は上書きして起動する。
+#   回答書: 2026-08-20_hq_act_proposals_ebay_norm_and_act_lock_response.md (B)
+ACT_LOCK_TTL_SEC = 30 * 60
+
+
+def _act_lock_path(csv_path):
+    """CSV ごとの Act lock file path (純関数)。"""
+    base = os.path.splitext(os.path.basename(csv_path or "unknown"))[0]
+    return os.path.join(REVIEW_DIR, ".act_%s.lock" % re.sub(r"[^0-9A-Za-z_.-]", "_", base))
+
+
+def _pid_alive(pid):
+    """pid が生きているか。**判定できない時は生きている扱い** (純関数寄り、test は monkeypatch)。
+
+    ★迷ったら「生きている」に倒す。死んでいるのを生きていると誤れば Act が最大30分遅れる
+      だけだが、生きているのを死んだと誤ると **二重起動が復活**する。
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True            # 権限が無い等 = 居る
+        return True
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        # ★Windows で os.kill(pid, 0) を使ってはいけない。Python は signal 0 でも
+        #   TerminateProcess を呼ぶので **相手を殺す**。OpenProcess で問い合わせる。
+        h = k.OpenProcess(0x1000, False, pid)     # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False                          # もう居ない
+        try:
+            code = ctypes.c_ulong(0)
+            if k.GetExitCodeProcess(h, ctypes.byref(code)):
+                return code.value == 259          # STILL_ACTIVE
+            return True
+        finally:
+            k.CloseHandle(h)
+    except Exception:
+        return True                               # 判定できない = 生きている扱い
+
+
+def _read_act_lock(path):
+    """lock file の中身 (dict)。読めなければ None (= 無効な lock として奪う)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            info = json.load(f)
+        return info if isinstance(info, dict) else None
+    except Exception:
+        return None
+
+
+def _act_lock_live(info, now=None, ttl=ACT_LOCK_TTL_SEC):
+    """既存 lock がまだ有効か (純関数, test可)。有効 = pid が生きている **かつ** ttl 以内。"""
+    if not isinstance(info, dict):
+        return False
+    try:
+        ts = float(info.get("ts", 0))
+    except (TypeError, ValueError):
+        return False
+    if abs((time.time() if now is None else now) - ts) > ttl:
+        return False                               # 期限切れ (or 時計が飛んだ) → 奪う
+    return _pid_alive(info.get("pid"))
+
+
+def _acquire_act_lock(csv_path, ttl=ACT_LOCK_TTL_SEC):
+    """Act の single-flight。戻り: (lock path or None, 取れなかった理由)。"""
+    path = _act_lock_path(csv_path)
+    os.makedirs(REVIEW_DIR, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            info = _read_act_lock(path)
+            if _act_lock_live(info, ttl=ttl):
+                return None, "pid=%s が %s から処理中" % ((info or {}).get("pid", "?"),
+                                                        (info or {}).get("started", "?"))
+            try:
+                os.remove(path)                    # 死んでいる/期限切れ → 奪って起動する
+            except OSError as e:
+                return None, "古い lock を消せない (%s)" % type(e).__name__
+            continue
+        except OSError as e:
+            return None, "lock を作れない (%s)" % type(e).__name__
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(), "ts": time.time(),
+                       "started": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                       "csv": csv_path}, f)
+        return path, ""
+    return None, "lock を取り直せなかった"
+
+
 def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", digest=None):
     """監査完了後に headless Claude を BG 起動して NG対応(Act)を回す (ユーザー要望 2026-06-26)。
 
@@ -1087,6 +1201,13 @@ def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", dig
     """
     if _act_disabled(dry_run):
         return "skipped"
+    # ★同じ CSV の Act は1本だけ (2026-08-21)。取れなかったら **必ず1行残す**。
+    #   無言 skip にすると「Act が動いたのか止められたのか」が誰にも分からなくなる。
+    lock_path, why_locked = _acquire_act_lock(csv_path)
+    if not lock_path:
+        print("  ⏭️ Act は既に走っているので起動しない (%s) → %s"
+              % (why_locked, os.path.basename(_act_lock_path(csv_path))))
+        return "locked"
     try:
         claude_exe = _resolve_claude_exe(shutil.which("claude"))
         if not claude_exe or not os.path.exists(claude_exe):
@@ -1102,7 +1223,7 @@ def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", dig
         _detached_spawn(
             [claude_exe, "-p", prompt,
              "--dangerously-skip-permissions", "--add-dir", r"C:\dev\iMak_data", "--add-dir", WORKSPACE],
-            stdout_path=log_file)
+            stdout_path=log_file, lock_path=lock_path)
         print(f"  🤖 Act(③依頼/コード提案)を headless にBG委譲(tree-kill耐性) → "
               f"review_logs/ng_act_{_today()}_{project}.md")
         return "spawned"
@@ -1626,12 +1747,44 @@ def _scan_log(log_path="", csv_path="", run_logs_dir=""):
     txt = read_run_logs(log_path, csv_path, run_logs_dir)
     if not txt:
         return []
+    return scan_log_lines(txt)
+
+
+# ★2026-08-21: 「ラベルの出現」ではなく「**0でない件数**」を数える。
+#   実害 (2026-08-19 18:04 の走行): 3ヒット中 3件とも中身は0件の行だった。
+#     error | ❌ 除外(出品しない): 0件 (行 [])
+#     error | ❌ エラー: 0件
+#   `catalog miss` は「missing_models」という語ではなく **書き込んだログ行** を見る
+#   (パスやコメントに語が出るだけで毎回1件と数えていた)。
+#   回答書: 2026-08-19_psa_preflight_scope_ssot_gap_response.md (2件目)
+_LINE_COUNT_RE = re.compile(r"(\d+)\s*件")
+_CATALOG_MISS_RE = re.compile(r"Catalog\s*未登録カード\s*(\d+)\s*件")
+_SCAN_PATS = [("HOLD/gate", re.compile(r"HOLD|gate_row_or_hold|csv_hold")),
+              ("error", re.compile(r"❌|Traceback|ERROR"))]
+
+
+def line_is_signal(line, pat):
+    """ログ1行を数えるか (純関数, test可)。
+
+    件数表記 (`N件`) がある行は **N>0 のときだけ**数える。件数表記が無い行
+    (素の `Traceback` 等) はそのまま数える。
+    """
+    if not pat.search(line or ""):
+        return False
+    m = _LINE_COUNT_RE.search(line or "")
+    return int(m.group(1)) > 0 if m else True
+
+
+def scan_log_lines(txt):
+    """生成ログ本文 → logシグナル list (純関数, test可)。"""
+    lines = (txt or "").splitlines()
     sig = []
-    pats = [("catalog miss", r"missing_models|未登録|見つかりません"),
-            ("HOLD/gate", r"HOLD|gate_row_or_hold|csv_hold"),
-            ("error", r"❌|Traceback|ERROR")]
-    for label, p in pats:
-        n = len(re.findall(p, txt))
+    n_miss = sum(1 for ln in lines
+                 for m in [_CATALOG_MISS_RE.search(ln)] if m and int(m.group(1)) > 0)
+    if n_miss:
+        sig.append(f"catalog miss: {n_miss}件")
+    for label, pat in _SCAN_PATS:
+        n = sum(1 for ln in lines if line_is_signal(ln, pat))
         if n:
             sig.append(f"{label}: {n}件")
     return sig
