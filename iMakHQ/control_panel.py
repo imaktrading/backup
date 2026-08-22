@@ -3091,9 +3091,16 @@ class ListingPanel:
           開く時は前回値、数え直すのは 🔄 を押した時と走行の後 (どうせ画面を見ていない時間)。
           裏スレッドには回さない — 過去に4回失敗している (Tk はスレッドセーフでない)。
         """
-        cached = self._hoju_badge_cache()
-        if cached:
-            self.paint_hoju_badge({k: v + "\n※前回値 (🔄 で更新)" for k, v in cached.items()})
+        cached = self._hoju_badge_cache() or {}
+        # ★2026-08-22: ボタンの種類が増えた時、前回値には入っていないので
+        #   **何も出ないまま**になる (一番くじを足した日に実際に起きた)。
+        #   前回値が無い種類は「まだ数えていません」と書く。空欄にしない。
+        out = {}
+        for _b, _base, kind, _st, _tip in self._hoju_btns:
+            v = cached.get(kind)
+            out[kind] = (v + "\n※前回値 (🔄 で更新)") if v else "\nまだ数えていません (🔄 で更新)"
+        if out:
+            self.paint_hoju_badge(out)
 
     def refresh_hoju_badge(self):
         """補URL の残件をボタンのラベルに出す (2026-08-09 ユーザー要望)。
