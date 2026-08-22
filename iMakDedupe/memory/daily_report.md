@@ -224,3 +224,13 @@
 - 決定: `C:/dev/iMak_dedupe/.claude/settings.json` を作成 (defaultMode=bypassPermissions + git force-push/reset --hard/rm -rf のみ deny)。dedupe は eBay 触らないので eBay 系 deny 不要、スプシ書込は本業なので deny 対象外 (Advisor GO §4 承認済)
 - 変更: `.claude/settings.json` 新規 (.gitignore 対象=commit 対象外)。回答書 `2026-07-29_permission_deny_for_irreversible_ops_response.md` の draft JSON をそのまま採用
 - 検証: file 実在 (`ls C:/dev/iMak_dedupe/.claude/`)、`git check-ignore` で ignore 確認済
+
+---
+
+## 2026-08-23
+
+### Catalog依頼: cert168544559 の skip 削除要請 → 削除せず (自然復帰する作り)
+
+- 決定: psa_review_skip.json は触らない。実行系 master の挙動を実機確認し「cooldown 1日 + self-heal(2026-08-09) で自動復帰」と回答。Catalog の Q2「catalog追加で自動skip解除」は self-heal で既に自動化済 (PERONA蒸し返し対策)。今後同型の依頼は不要と伝達
+- 変更: なし (回答のみ: 2026-08-23_psa_review_skip_clear_cert168544559_response.md)。データ・コード非変更
+- 検証: master `iMakTCG/tcg_batch_select.py` REVIEW_SKIP_COOLDOWN_DAYS=1・active_review_skips が resolvable_now で self-heal (dedupe worktree copy は古い14・self-heal無=runtime非該当)。cross-check として EB02-003_CH01 追加後に resolver が cert→_CH01 一意解決できるか (基本形EB02-003 誤解決だと誤出品) を①側に確認要請
