@@ -39,6 +39,11 @@ _SPEC_TO_COL = {
     "finish":          "C:Finish",
     "illustrator":     "C:Illustrator",
     "card_size_ebay":  "C:Card Size",
+    # 2026-08-22 契約 (_contract_aspects.yaml): 値と eBay 語彙への正規化は catalog が持つ。
+    # 出品くんは写すだけ (旧: Manufacturer は franchise 判定のハードコード、
+    #  Country of Origin は「One Piece なら Japan」の自前ルールだった)。
+    "manufacturer_ebay":      "C:Manufacturer",
+    "country_of_origin_ebay": "C:Country of Origin",
 }
 # eBay 正規化フィールド (catalog SSOT)。col → 候補 spec key 優先順 (先頭の非空を採用)。
 # 方針: 値の正しさ・eBay語彙への正規化は **catalog 側 (`*_ebay`)** が持つ。generator は copy のみ。
@@ -114,6 +119,7 @@ _ALL_COLS = [
     "C:Game", "C:Set", "C:Card Type", "C:Card Name", "C:Character",
     "C:Card Number", "C:Rarity", "C:Features", "C:Finish", "C:Illustrator",
     "C:Language", "C:Year Manufactured", "C:Card Size",
+    "C:Manufacturer", "C:Country of Origin",
     # eBay 正規化フィールド (catalog *_ebay 由来。CSV列は既存 / C:HP・C:Stage は psa_to_csv 追加待ち)
     "C:Cost", "C:Attack/Power", "C:Defense/Toughness", "C:Attribute/MTG:Color",
     "C:HP", "C:Stage",
@@ -249,10 +255,15 @@ def map_specs_to_fields(specs: dict, year: str = ""):
     fields["C:Card Name"] = name_en or char_nm
     fields["C:Character"] = char_nm or name_en
 
-    # 3) Features は eBay TCG facet 正規値に正規化 (生値 'Art Card' 等は drop)。
-    norm_feats = normalize_tcg_features(specs.get("features"))
-    if norm_feats:
-        fields["C:Features"] = ", ".join(norm_feats)
+    # 3) Features は catalog の features_ebay を写すだけ (2026-08-22 契約)。
+    #    生の features を出品側の表で正規化するのは廃止 (= 語彙の判断は catalog が持つ)。
+    #    空なら **空欄で出す**。旧値で埋め戻さない (埋めると catalog の穴が見えなくなる &
+    #    レアリティ語が Features に載る事故が 2026-08-22 に 4件出た)。
+    _fe = specs.get("features_ebay")
+    _vals = ([str(v).strip() for v in _fe if str(v).strip()] if isinstance(_fe, list)
+             else ([str(_fe).strip()] if _fe else []))
+    if _vals:
+        fields["C:Features"] = ", ".join(_vals)
 
     # 4) Language (catalog language=ja → eBay 'Japanese')
     lang = (specs.get("language") or specs.get("_language") or "").strip().lower()

@@ -366,10 +366,16 @@ def test_rarity_features_lookup_accepts_both_spellings():
         assert lut[k] == v and lut[v.upper()] == v
 
 
-def test_features_fallback_uses_derived_lookup():
+def test_features_are_not_derived_from_rarity():
+    """★2026-08-22 反転: rarity から Features を埋める処理そのものを撤去した。
+
+    元の指摘 (8/19) は「略号の表しか引かず Pokemon で空振りする」だったが、そもそも
+    レアリティ語は Features ではない (eBay の Features 39値に無い)。8/22 の契約で
+    Features は catalog の features_ebay だけになった。
+    """
     src = _read("psa_to_csv.py")
-    assert "_RARITY_FEATURES_LOOKUP.get((official_rarity" in src, \
-        "Features 補完がまだ略号だけの表を引いている (Pokemon で100%空振り)"
+    assert "_RARITY_FEATURES_LOOKUP.get((official_rarity" not in src, \
+        "rarity から Features を埋める処理が復活している (2026-08-22 契約違反)"
 
 
 # =============================================================================

@@ -168,12 +168,17 @@ def test_features_overridden_when_new_has_value(monkeypatch):
     assert out[fi] == "Alternative Art"      # 正規化値で上書き
 
 
-def test_features_kept_when_new_blank(monkeypatch):
-    # 新コアが drop して空なら value-only で旧値温存 (回帰なし)
+def test_features_blanked_when_catalog_blank(monkeypatch):
+    """★2026-08-22 反転: 新コア (catalog features_ebay) が空なら **空欄で出す**。
+
+    旧仕様は value-only で旧コアの値を温存していたが、旧コアは Features を rarity から
+    埋めていたため、8/22 の入稿で C:Features='Art Rare' / 'Super Rare' が 4件 eBay に出た。
+    契約 (_contract_aspects.yaml): Features の値は catalog だけが持つ。空欄も権威。
+    """
     fields = {"C:Set": "VMAX Climax", "C:Features": "", "_card_id": "x"}
     _patch(monkeypatch, fields)
     row = _row()
     fi = HEADERS.index("C:Features")
     row[fi] = "OldFeat"
     out = OV.apply_new_gen_override(row, HEADERS, "123", override_title=False)
-    assert out[fi] == "OldFeat"              # 新コア空 → 旧のまま
+    assert out[fi] == ""                     # catalog が空 → 空欄 (旧値で埋め戻さない)

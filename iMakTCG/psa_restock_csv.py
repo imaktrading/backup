@@ -246,12 +246,8 @@ EBAY_SPEC_TO_CSV = {
     "Language": "C:Language",
     "Year Manufactured": "C:Year Manufactured",
     "Country of Origin": "C:Country of Origin",
-    "Franchise": "C:Franchise",
-    "Autographed": "C:Autographed",
-    "Vintage": "C:Vintage",
-    "Material": "C:Material",
+    # 2026-08-22 契約: Franchise / Autographed / Vintage / Material / Customized は出さない
     "Card Size": "C:Card Size",
-    "Customized": "C:Customized",
     "Finish": "C:Finish",
     "Attribute/MTG:Color": "C:Attribute/MTG:Color",
     "Illustrator": "C:Illustrator",
@@ -267,8 +263,7 @@ EBAY_SPEC_TO_CSV = {
 SPEC_NO_OVERRIDE = {
     "C:Grade", "C:Professional Grader", "C:Graded",
     "C:Manufacturer", "C:Language", "C:Country of Origin",
-    "C:Year Manufactured", "C:Autographed",
-    "C:Vintage", "C:Material", "C:Customized",
+    "C:Year Manufactured",
 }
 
 
@@ -1873,77 +1868,13 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     finish    = official_finish      # Claude 追放 + Subject キーワード判定も廃止
     attribute = official_color or official_attribute  # Claude 追放
 
-    # 2026-04-24 Canonical Map (Phase 1): eBay フィルタ正規値へ無言整形
-    # 2026-04-25 Phase 2: Card Type / Rarity 拡張、Leader Cost 空欄化、One Piece Set 補完
-    _CANONICAL_FEATURES = {
-        "Alternate Art": "Alternative Art",
-        "Alt Art":       "Alternative Art",
-        "Alt. Art":      "Alternative Art",
-    }
-    _CANONICAL_CARD_TYPE = {
-        "Leader Card":    "Leader",
-        "Character Card": "Character",
-        "Event Card":     "Event",
-        "Stage Card":     "Stage",
-        "Battle Card":    "Battle",
-        "Extra Card":     "Extra",
-        "Don Card":       "DON",
-    }
-    # ONE PIECE rarity 略号 → eBay 正規綴り
-    _CANONICAL_RARITY_ONEPIECE = {
-        "C":   "Common",
-        "UC":  "Uncommon",
-        "R":   "Rare",
-        "SR":  "Super Rare",
-        "SEC": "Secret Rare",
-        "L":   "Leader",
-        "P":   "Promo",
-        "SP":  "Special",
-        "SP CARD": "Special",
-    }
-    # DRAGON BALL rarity 略号 → eBay 正規綴り
-    # 2026-04-26: Bandai TCG+ API は SR/UC/PR★ 等の略号/特殊記号を返すが eBay フィルタ非対応
-    _CANONICAL_RARITY_DRAGONBALL = {
-        "C":    "Common",
-        "UC":   "Uncommon",
-        "R":    "Rare",
-        "SR":   "Super Rare",
-        "SCR":  "Secret Rare",
-        "PR":   "Promo",
-        "PR★":  "Promo",  # ★ は eBay フィルタ非対応
-        "L":    "Leader",
-    }
-    if features in _CANONICAL_FEATURES:
-        _new = _CANONICAL_FEATURES[features]
-        print(f"    [AUTO-FIX] Features: {features!r} -> {_new!r} (Canonical Map)")
-        features = _new
-    if card_type in _CANONICAL_CARD_TYPE:
-        _new = _CANONICAL_CARD_TYPE[card_type]
-        print(f"    [AUTO-FIX] Card Type: {card_type!r} -> {_new!r} (Canonical Map)")
-        card_type = _new
-    # Rarity 正規化 (フランチャイズ別マップ)
-    if franchise == "One Piece" and rarity:
-        _ru = rarity.strip().upper()
-        if _ru in _CANONICAL_RARITY_ONEPIECE:
-            _new = _CANONICAL_RARITY_ONEPIECE[_ru]
-            if _new != rarity:
-                print(f"    [AUTO-FIX] Rarity: {rarity!r} -> {_new!r} (Canonical Map)")
-            rarity = _new
-    elif franchise == "Dragon Ball" and rarity:
-        _ru = rarity.strip().upper()
-        if _ru in _CANONICAL_RARITY_DRAGONBALL:
-            _new = _CANONICAL_RARITY_DRAGONBALL[_ru]
-            if _new != rarity:
-                print(f"    [AUTO-FIX] Rarity: {rarity!r} -> {_new!r} (Canonical Map)")
-            rarity = _new
+    # 2026-08-22 撤去: Canonical Map。catalog が rarity_ebay / card_type_ebay /
+    # features_ebay に eBay の綴りを持つ (契約: _contract_aspects.yaml)。
 
     # 2026-04-25: Leader カードは Cost / Power が無い設計
     # 　Bandai 側で誤って数値が入って返ってくるケースあり (例: cert 149801531 Shanks Cost=5)
     # 　→ Leader 確定なら強制空欄化（公式仕様準拠）
-    if card_type == "Leader":
-        if cost not in ("", None):
-            print(f"    [AUTO-FIX] Leader Cost: {cost!r} -> '' (Leader はコスト持たない仕様)")
-            cost = ""
+    # 2026-08-22 撤去: Leader の cost 強制空欄 (catalog が cost を life へ移した)。
 
     # 2026-06-08: 出品は「参照のみ」化 (SSOT)。set_name は catalog lookup の
     # set_name_ebay (Catalog #1a で clean な eBay facet 名を確定保存済) をそのまま使う。
@@ -2116,9 +2047,6 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # 2026-04-28 Bug #2 fix (defensive): catalog_reference 側でも Leader cost を skip するが、
     # 万一 Leader card_type で cost に値が残っている場合に備え、CSV 書き出し直前で再強制空欄化.
     # Fix A (catalog_reference) と二重防御 (案 C: A+B).
-    if card_type == "Leader" and cost not in ("", None):
-        print(f"    [AUTO-FIX] Leader Cost (post-catalog): {cost!r} -> '' (Leader はコスト持たない仕様)")
-        cost = ""
 
     # 2026-05-28 variant_meta 連動 (= ① Phase A.1 Pokemon catalog で投入済の variant メタ活用)
     # PSA Subject から variant_code 抽出 → catalog 公式値で Features/Finish/Rarity 補完
@@ -2142,11 +2070,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
 
     # 2026-06-09: Features がまだ空なら catalog rarity から導出 (TOPセラーは rarity を Features に入れる)。
     # 実属性なので捏造でない。variant (Alt Art 等) が取れてる時は上書きしない。
-    if not features:
-        _feat = _RARITY_TO_FEATURES.get((official_rarity or "").upper().strip(), "")
-        if _feat:
-            features = _feat
-            print(f"    🔧 Features 補完(catalog rarity {official_rarity!r}→{features!r})")
+    # 2026-08-22 撤去: 「Features が空なら rarity から埋める」。レアリティ語は Features ではない。
 
     # 商品説明に個別 Specifications ブロックを挿入 (listing の Item Specifics と同値を転記・空欄skip)
     description = insert_tcg_specs(description, build_tcg_specs_html([
@@ -2161,14 +2085,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         "FixedPrice", "GTC", 1, LOCATION, 1,
         shipping, RETURN_POLICY, PAYMENT_POLICY,
         game, set_name, card_type, card_name, character, card_number,
-        # Country of Origin: One Piece は card に made in japan 印字で日本製造が確実 → "Japan"
-        # (2026-06-10 ユーザー指示・まず OP から)。他は "Does not apply"（製造国を特定できない
-        # 場合の eBay AI 勝手な Japan 補完を明示的に塞ぐ＝従来方針）。
         rarity, features, manufacturer, "Japanese", year,
-        ("Japan" if franchise == "One Piece" else "Does not apply"), franchise,
+        # Country of Origin は catalog の country_of_origin_ebay が SSOT (2026-08-22 契約)
+        "",
         # Age Level 列は出力しない (2026-06-29 CPSC対応): PSA鑑定品=コレクター市場=非児童製品。
-        # PSA公式店も Age Level 未設定が業界標準。"6+"=児童製品扱い→7/8 eFiling 通関リスク回避。
-        "No", "No", "Card Stock", card_size, "No",
+        card_size,
         finish, attribute, illustrator, cost, power, "",
         "", "",   # C:HP / C:Stage (旧コアは空・新コアが catalog hp_ebay/stage_ebay から充填)
         "Near Mint or Better", "10",
@@ -2387,8 +2308,8 @@ def main():
         "BestOfferEnabled", "ShippingProfileName", "ReturnProfileName", "PaymentProfileName",
         "C:Game", "C:Set", "C:Card Type", "C:Card Name", "C:Character", "C:Card Number",
         "C:Rarity", "C:Features", "C:Manufacturer", "C:Language", "C:Year Manufactured",
-        "C:Country of Origin", "C:Franchise", "C:Autographed",
-        "C:Vintage", "C:Material", "C:Card Size", "C:Customized",
+        # Franchise / Autographed / Vintage / Material / Customized は 2026-08-22 契約で廃止
+        "C:Country of Origin", "C:Card Size",
         "C:Finish", "C:Attribute/MTG:Color", "C:Illustrator", "C:Cost", "C:Attack/Power", "C:Defense/Toughness",
         # C:HP / C:Stage は新コアが catalog hp_ebay/stage_ebay から充填 (2026-06-15 最大活用)。
         # 旧コアは空 (build_row が "" を出す)。catalog *_ebay 充填まで空欄 (回帰なし)。

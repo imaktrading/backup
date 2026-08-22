@@ -34,7 +34,11 @@ _NO_OVERRIDE = set()
 #   C:Rarity: 旧コアは rarity 不明時に推測で 'Common' を埋める既知バグ (#1)。新コアは catalog
 #   rarity_ebay 無→空欄が正。value-only だと旧 'Common' が温存され #1 が直らない (Gemini DISPUTE
 #   2026-06-15) ため、rarity だけは新コアの判定 (空欄含む) を権威として常に反映する。
-_ALWAYS_OVERWRITE = {"C:Rarity"}
+#   C:Features: 2026-08-22 契約で「catalog の features_ebay だけを出す」に変更。value-only だと
+#     新コアが空の時に **旧コアがレアリティ語で埋めた値**が残り、8/22 の入稿で
+#     C:Features='Art Rare' / 'Super Rare' が 4件 eBay に出た。空欄も権威として反映する。
+#   C:Manufacturer / C:Country of Origin: 旧コアはハードコード。catalog が値を持つので空欄が正。
+_ALWAYS_OVERWRITE = {"C:Rarity", "C:Features", "C:Manufacturer", "C:Country of Origin"}
 
 
 def _log(msg):
