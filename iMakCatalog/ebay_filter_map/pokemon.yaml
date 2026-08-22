@@ -336,6 +336,26 @@ set:
     ebay: "Cs1: Journey Partners Collection Sheet"
     note: "2026-08-22 eBay master 実在値 (name 一致 / 3行)"
 
+  # ── 2026-08-23 英語版セット名/別セット名になっていた分を是正 ──────────────
+  - source: "拡張パック「裂空のカリスマ」"
+    ebay: "Sm7: Sky-Splitting Charisma"
+    note: "2026-08-23 ① eBay に日本語版セットの値が在る"
+  - source: "拡張パック「キミを待つ島々」"
+    ebay: "Sm2k: Islands Await You"
+    note: "2026-08-23 ① 同上"
+  - source: "拡張パック「アローラの月光」"
+    ebay: "Sm2l: Alolan Moonlight"
+    note: "2026-08-23 ① 同上"
+  - source: "拡張パック「メガブレイブ」"
+    ebay: "Mega Brave"
+    note: "2026-08-23 ② eBay に値が無いので日本語セット名の英語表記"
+  - source: "拡張パック「メガシンフォニア」"
+    ebay: "Mega Symphonia"
+    note: "2026-08-23 ② 同上"
+  - source: "エクストラバトルの日"
+    ebay: "Extra Battle Day"
+    note: "2026-08-23 ② 同上。XY-003 等の product_id が set_code 'XY' に当たって 'The Best of XY' (別セット) になっていた"
+
 # ============================================================================
 # Set code — DB の product_id prefix から抽出. api._row_to_dict が自動でフォールバック
 # ============================================================================
@@ -459,11 +479,13 @@ set_code:
     note: 拡張パック「ホワイトフレア」 — REVIEW eBay 値
     year: 2025
   - source: SVD
-    ebay: Promo
+    ebay: "Sv: Ex Start Decks"
+    note: "2026-08-23 是正 (① eBay の実在値 (exスタートデッキ)、旧 'Promo')"
     note: SV プロモ系
     year: 2023
   - source: SVM
-    ebay: Promo
+    ebay: "Start Deck Generations"
+    note: "2026-08-23 是正 (② eBay に値が無いので日本語セット名の英語表記 (スタートデッキGenerations)、旧 'Promo')"
     note: SV プロモ系
     year: 2023
 
@@ -653,9 +675,9 @@ set_code:
   - source: SD
     ebay: Starter Deck
     note: 各種 starter deck (汎用) — REVIEW eBay 値
-  - source: MC
-    ebay: Movie Promo
-    note: 映画特典プロモ系 — REVIEW eBay 値
+  # MC -> 'Movie Promo' の行は削除 (2026-08-23 / HQ 裁定 2026-08-21_c36)。
+  #   誤りで、素の restamp を流すと スタートデッキ100 バトルコレクション の
+  #   766行を塗り潰していた。正しい MC は上の 'Start Deck 100 Battle Collection'。
   - source: CP1
     ebay: Double Crisis
     note: コンセプトパック マグマ団VSアクア団 ダブルクライシス — eBay/TCGplayer慣行値 (2026-06-21 web確証)

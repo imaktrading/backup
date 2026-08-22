@@ -53,12 +53,15 @@ def _row(**kw):
 
 def test_stored_used_instead_of_raw_japanese():
     """導出が空振りした行で、生の日本語ではなく stored の eBay 値を返す."""
+    # ★2026-08-23: 元は 拡張パック「メガブレイブ」 を使っていたが、変換表に行を足した
+    #   ので導出が当たるようになった (= このテストの前提から外れた)。
+    #   導出が空振りする弾に差し替える。値は stored がそのまま返ることだけを見る。
     d = api._row_to_dict(_row(
-        product_id="M1L-001",
-        set_name_official="拡張パック「メガブレイブ」",
-        specs='{"set_name_ebay": "Scarlet & Violet—Mega Brave"}',
+        product_id="ZZZ-001",
+        set_name_official="拡張パック「変換表に無い弾」",
+        specs='{"set_name_ebay": "Some Stored Value"}',
     ))
-    assert d["set_name"] == "Scarlet & Violet—Mega Brave"
+    assert d["set_name"] == "Some Stored Value"
 
 
 def test_stored_fills_when_derive_is_none():
