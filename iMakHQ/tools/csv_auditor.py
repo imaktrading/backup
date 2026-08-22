@@ -102,6 +102,9 @@ CATEGORY_MAP = {
 _SHARED_PATHS = [os.path.join(WORKSPACE, "iMakeBayAPI")]
 
 
+from aspect_contract import contract_findings, load_contract   # 2026-08-22 契約照合
+
+
 def _market_lookup_enabled():
     """相場取得が有効か (SSOT = iMakeBayAPI/config/global.yaml の market_lookup)。
 
@@ -188,6 +191,13 @@ def classify_finding(severity, msg):
     test_csv_auditor が全パターンを固定 (文言変更の回帰検知)。
     """
     m = msg or ""
+    # --- 契約表 (カタログの決定表) 由来 ---
+    # 出さないと決めた項目に値が入っている = 出品側の作り込みミス → 止めて報告
+    if m.startswith("契約で出さないと決めた項目"):
+        return REPORT_PROGRAM
+    # 空欄 / 表に無い項目 は **数えるだけ**。監査くんは判定しない (2026-08-22 役割確定)
+    if m.startswith("空欄です (契約では出す項目)") or m.startswith("契約表に無い項目"):
+        return INFO_ONLY
     # --- データ誤り (catalog) ---
     if "不整合" in m or "誤マップ" in m:
         return EXCLUDE_CATALOG
@@ -740,6 +750,14 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # 必須spec空で除外するか (apparel系は specが商品に合わず全滅するので False=報告のみ)
     spec_excl = (not is_generic) and CATEGORY_MAP.get(project, {}).get("spec_empty_excludes", True)
 
+    # --- カタログの決定表を読む (読めなければ照合しない = 従来の検査だけ動く) ---
+    _contract = load_contract()
+    if _contract:
+        print(f"  📖 カタログの決定表: {len(_contract)} 項目 (共有領域から読込)")
+    else:
+        print("  ⚠️ カタログの決定表が読めません → 契約照合はスキップ "
+              "(C:/dev/iMak_data/catalog/_contract_aspects.yaml)")
+
     # --- 行ごとに findings → disposition 集約 ---
     exclude_idx = []          # 1-based 除外行
     catalog_items, program_items = [], []
@@ -753,7 +771,8 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
         else:
             vr = list(mod.validate_row(row, i))
             all_vr.append(vr)
-            findings = vr + native_findings(headers, row)
+            findings = vr + native_findings(headers, row) + contract_findings(
+                headers, row, _contract)
         disps = [classify_finding(sev, msg) for sev, msg in findings]
         sku = _row_sku(headers, row)
         _ident = card_identity(headers, row)

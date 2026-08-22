@@ -248,7 +248,7 @@ EBAY_SPEC_TO_CSV = {
     "Country of Origin": "C:Country of Origin",
     # 2026-08-22 契約: Franchise / Autographed / Vintage / Material / Customized は出さない
     "Card Size": "C:Card Size",
-    "Finish": "C:Finish",
+    # 2026-08-22 契約: Finish は出さない (現物を見ないと決まらない)
     "Attribute/MTG:Color": "C:Attribute/MTG:Color",
     "Illustrator": "C:Illustrator",
     "Cost": "C:Cost",
@@ -2090,7 +2090,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         "",
         # Age Level 列は出力しない (2026-06-29 CPSC対応): PSA鑑定品=コレクター市場=非児童製品。
         card_size,
-        finish, attribute, illustrator, cost, power, "",
+        attribute, illustrator, cost, power, "",
         "", "",   # C:HP / C:Stage (旧コアは空・新コアが catalog hp_ebay/stage_ebay から充填)
         "Near Mint or Better", "10",
         "Professional Sports Authenticator (PSA)", "Yes",
@@ -2310,7 +2310,7 @@ def main():
         "C:Rarity", "C:Features", "C:Manufacturer", "C:Language", "C:Year Manufactured",
         # Franchise / Autographed / Vintage / Material / Customized は 2026-08-22 契約で廃止
         "C:Country of Origin", "C:Card Size",
-        "C:Finish", "C:Attribute/MTG:Color", "C:Illustrator", "C:Cost", "C:Attack/Power", "C:Defense/Toughness",
+        "C:Attribute/MTG:Color", "C:Illustrator", "C:Cost", "C:Attack/Power", "C:Defense/Toughness",
         # C:HP / C:Stage は新コアが catalog hp_ebay/stage_ebay から充填 (2026-06-15 最大活用)。
         # 旧コアは空 (build_row が "" を出す)。catalog *_ebay 充填まで空欄 (回帰なし)。
         "C:HP", "C:Stage",
