@@ -191,7 +191,7 @@ aspects:
     ebay_value_count: 37
     ebay_by_game: 0
     source: "release_year"
-    filled_pct: 15
+    filled_pct: 29
     filter_map_field: null   # 変換表なし
   - ebay_aspect: "Franchise"
     required: false

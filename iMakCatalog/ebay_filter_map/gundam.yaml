@@ -45,16 +45,16 @@ set_code:
   # ----- Booster Pack (GD) -----
   - source: GD01
     ebay: Newtype Rising
-    year: 2024
+    year: 2025   # 2026-08-22 実発売日で是正 (2025-07-26 発売、旧 2024)
   - source: GD02
     ebay: Dual Impact
-    year: 2024
+    year: 2025   # 2026-08-22 実発売日で是正 (2025-10-25 発売、旧 2024)
   - source: GD03
     ebay: Steel Requiem
-    year: 2025
+    year: 2026   # 2026-08-22 実発売日で是正 (2026-01-31 発売、旧 2025)
   - source: GD04
     ebay: Phantom Aria
-    year: 2025
+    year: 2026   # 2026-08-22 実発売日で是正 (2026-04-25 発売、旧 2025)
   - source: GD05
     ebay: Freedom Ascension
     year: 2026
@@ -69,16 +69,16 @@ set_code:
   # ----- Starter Deck (ST) -----
   - source: ST01
     ebay: Heroic Beginnings
-    year: 2024
+    year: 2025   # 2026-08-22 実発売日で是正 (2025-07-12 発売、旧 2024)
   - source: ST02
     ebay: Wings of Advance
-    year: 2024
+    year: 2025   # 2026-08-22 実発売日で是正 (2025-07-12 発売、旧 2024)
   - source: ST03
     ebay: "Zeon's Rush"
-    year: 2024
+    year: 2025   # 2026-08-22 実発売日で是正 (2025-07-12 発売、旧 2024)
   - source: ST04
     ebay: SEED Strike
-    year: 2024
+    year: 2025   # 2026-08-22 実発売日で是正 (2025-07-12 発売、旧 2024)
   - source: ST05
     ebay: Iron Bloom
     year: 2025
@@ -87,10 +87,10 @@ set_code:
     year: 2025
   - source: ST07
     ebay: Celestial Drive
-    year: 2025
+    year: 2026   # 2026-08-22 実発売日で是正 (2026-01-17 発売、旧 2025)
   - source: ST08
     ebay: Flash of Radiance
-    year: 2025
+    year: 2026   # 2026-08-22 実発売日で是正 (2026-01-17 発売、旧 2025)
   - source: ST09
     ebay: Destiny Ignition
     year: 2026
