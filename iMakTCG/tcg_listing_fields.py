@@ -44,6 +44,9 @@ _SPEC_TO_COL = {
     #  Country of Origin は「One Piece なら Japan」の自前ルールだった)。
     "manufacturer_ebay":      "C:Manufacturer",
     "country_of_origin_ebay": "C:Country of Origin",
+    # ポケモンのカード種別の接尾語 (EX/V/GX/VMAX 等・eBay の12値に一致するものだけ)。
+    # 2026-08-23 カタログ回答: ポケモン 2,324行。他ゲームには該当が無く空欄。
+    "speciality_ebay":        "C:Speciality",
 }
 # eBay 正規化フィールド (catalog SSOT)。col → 候補 spec key 優先順 (先頭の非空を採用)。
 # 方針: 値の正しさ・eBay語彙への正規化は **catalog 側 (`*_ebay`)** が持つ。generator は copy のみ。
@@ -119,7 +122,7 @@ _ALL_COLS = [
     "C:Game", "C:Set", "C:Card Type", "C:Card Name", "C:Character",
     "C:Card Number", "C:Rarity", "C:Features", "C:Finish", "C:Illustrator",
     "C:Language", "C:Year Manufactured", "C:Card Size",
-    "C:Manufacturer", "C:Country of Origin",
+    "C:Manufacturer", "C:Country of Origin", "C:Speciality",
     # eBay 正規化フィールド (catalog *_ebay 由来。CSV列は既存 / C:HP・C:Stage は psa_to_csv 追加待ち)
     "C:Cost", "C:Attack/Power", "C:Defense/Toughness", "C:Attribute/MTG:Color",
     "C:HP", "C:Stage",

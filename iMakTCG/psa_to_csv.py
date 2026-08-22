@@ -287,6 +287,7 @@ EBAY_SPEC_TO_CSV = {
     "HP": "C:HP",
     "Stage": "C:Stage",
     "Card Condition": "C:Card Condition",
+    "Speciality": "C:Speciality",
 }
 
 # TOPセラーの値で上書きしない項目（PSA/システムが決める値）
@@ -2671,7 +2672,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         # Age Level 列は出力しない (2026-06-29 CPSC対応): PSA鑑定品=コレクター市場=非児童製品。
         card_size,
         attribute, illustrator, cost, power, "",
-        "", "",   # C:HP / C:Stage (旧コアは空・新コアが catalog hp_ebay/stage_ebay から充填)
+        "", "", "",   # C:HP / C:Stage / C:Speciality (旧コアは空・新コアが catalog hp_ebay/stage_ebay から充填)
         "Near Mint or Better", "10",
         "Professional Sports Authenticator (PSA)", "Yes",
         store_cat_id,
@@ -3173,6 +3174,9 @@ def main():
         # C:HP / C:Stage は新コアが catalog hp_ebay/stage_ebay から充填 (2026-06-15 最大活用)。
         # 旧コアは空 (build_row が "" を出す)。catalog *_ebay 充填まで空欄 (回帰なし)。
         "C:HP", "C:Stage",
+        # C:Speciality = ポケモンの EX/V/GX/VMAX 等 (catalog speciality_ebay)。
+        # 旧コアは空、新コアが充填 (2026-08-23 契約 emit=true)。
+        "C:Speciality",
         "C:Card Condition", "C:Grade", "C:Professional Grader", "C:Graded", "StoreCategoryID",
     ]
 

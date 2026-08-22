@@ -81,15 +81,25 @@ def classify_off(val, facet_raw_lower):
     return "absent"
 
 
+# 公式の弾コードが取れなかったカードに、カタログが暫定で付けている参照用のキー。
+# 出品には使えない (弾コードが無いので引き当てられない) ので、空欄の母数から外す。
+# カタログ回答 2026-08-23 (`2026-08-23_set_name_layer_and_cardid_rows_response.md`):
+#   「使わないでください。無いものとして扱ってOK。監査の空欄カウントから外してください」
+#   実測 pokemon 1,559行 / うち 704行は set_name_ebay も空。
+_PROVISIONAL_PID_PREFIX = "cardID"
+
+
 def audit_category(con, cat, facets, facets_raw_lower):
-    rows = con.execute(
-        "SELECT specs,name_en,name_en_source FROM products WHERE category=?", (cat,)).fetchall()
+    rows = [r for r in con.execute(
+        "SELECT specs,name_en,name_en_source,product_id FROM products WHERE category=?",
+        (cat,)).fetchall()
+        if not str(r[3] or "").startswith(_PROVISIONAL_PID_PREFIX)]
     n = len(rows)
     field_stat = {f: {"blank": 0, "in": 0, "off": 0, "off_vals": collections.Counter()}
                   for f in FIELD_TO_ASPECT}
     src_tally = collections.Counter()
     nameen_blank = 0
-    for sp, name_en, ne_src in rows:
+    for sp, name_en, ne_src, _pid in rows:
         try:
             d = json.loads(sp) if sp else {}
         except Exception:

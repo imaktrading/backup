@@ -94,3 +94,27 @@ def test_features_are_authoritative_even_when_empty():
         assert col in always, (
             f"{col} が value-only のままだと、catalog が空の時に旧コアの値が残る "
             "(2026-08-22 に C:Features='Art Rare' が 4件 eBay に出た)")
+
+
+# =============================================================================
+# 2026-08-23 追記: カタログ回答を受けた2件
+#   - C:Speciality (ポケモンの EX/V/GX/VMAX 等) の列を足した
+#   - catalog_audit の空欄カウントから暫定キー (cardID-*) を外した
+# 出典: catalog/requests/2026-08-23_set_name_layer_and_cardid_rows_response.md
+# =============================================================================
+
+def test_speciality_column_exists_and_reads_catalog():
+    for gen in GENERATORS:
+        headers, row = _headers_and_row(_source(gen))
+        assert "C:Speciality" in headers, f"{gen}: C:Speciality の列が無い (契約 emit=true)"
+        assert len(headers) == len(row), f"{gen}: 列と値がずれている"
+    src = _source("tcg_listing_fields.py")
+    assert '"speciality_ebay":' in src, "Speciality は catalog の speciality_ebay から読む"
+
+
+def test_provisional_cardid_rows_are_excluded_from_blank_count():
+    tools = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools")
+    src = io.open(os.path.join(tools, "catalog_audit.py"), encoding="utf-8").read()
+    assert '_PROVISIONAL_PID_PREFIX = "cardID"' in src, "暫定キーの定義が消えている"
+    assert "startswith(_PROVISIONAL_PID_PREFIX)" in src, \
+        "cardID-* を母数から外していない (カタログ回答 2026-08-23: 無いものとして扱う)"
