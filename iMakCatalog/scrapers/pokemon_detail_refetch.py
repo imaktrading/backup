@@ -135,7 +135,13 @@ def main():
 
         parsed = _parse_detail_html(html, cid) or {}
         parsed.update(_extra_from_html(html))
-        s = json.loads(r["specs"] or "{}")
+        # ★2026-08-23: 9時間走る間に別の migration が同じ行を直すことがある。
+        #   起動時に読んだスナップショットを書き戻すと **その修正を巻き戻す**
+        #   (実害: 8/22 に直した SV4K/SV4M/SV9 の 322行が戻った)。
+        #   書く直前に必ず読み直す。
+        cur_row = db.execute("SELECT specs, set_name_official, images FROM products "
+                             "WHERE id=?", (r["id"],)).fetchone()
+        s = json.loads(cur_row["specs"] or "{}")
         touched = False
         for k in FIELDS:
             v = parsed.get(k)
@@ -143,13 +149,13 @@ def main():
                 s[k] = v
                 filled[k] += 1
                 touched = True
-        sno = r["set_name_official"]
+        sno = cur_row["set_name_official"]
         new_sno = None
         if not sno and parsed.get("set_name_official"):
             new_sno = parsed["set_name_official"]
             filled["set_name_official"] += 1
             touched = True
-        imgs = json.loads(r["images"] or "[]") if r["images"] else []
+        imgs = json.loads(cur_row["images"] or "[]") if cur_row["images"] else []
         new_imgs = None
         if not imgs and parsed.get("image_url"):
             new_imgs = json.dumps([parsed["image_url"]], ensure_ascii=False)
@@ -158,7 +164,7 @@ def main():
         if touched:
             s["detail_refetch_source"] = SOURCE
             updates.append((json.dumps(s, ensure_ascii=False),
-                            new_sno or sno, new_imgs or r["images"],
+                            new_sno or sno, new_imgs or cur_row["images"],
                             datetime.now().isoformat(timespec="seconds"), r["id"]))
         if args.commit and len(updates) >= 200:
             _commit(db, updates)

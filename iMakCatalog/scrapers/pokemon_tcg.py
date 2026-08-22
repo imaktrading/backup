@@ -71,6 +71,18 @@ JP_TYPE_TO_EN = {
 # rarity 画像が `ic_rare_*.gif` 命名でない系統 (公式の少数例外) → JP rarity コード
 #   ic_hikaru.gif = ひかるポケモン (SM3+「ひかる伝説」等)。公式はマーク画像のみで
 #   文字コードを持たないため、小売表記 [H] (遊々亭/カーナベル) を JP コードとして採用。
+# 公式 (pokemon-card.com) の タイプアイコンの class 名 -> eBay の Attribute 値。
+# ★公式の綴りは lightning/darkness/metal ではなく **electric/dark/steel**。
+#   'none' は無色 (Colorless)。'void' はタイプ欄以外で使われるので入れない。
+_TYPE_CLASS_TO_EN = {
+    "grass": "Grass", "fire": "Fire", "water": "Water", "electric": "Lightning",
+    "psychic": "Psychic", "fighting": "Fighting", "dark": "Darkness",
+    "steel": "Metal", "dragon": "Dragon", "fairy": "Fairy", "none": "Colorless",
+}
+_EN_TO_JP_TYPE = {"Grass": "草", "Fire": "炎", "Water": "水", "Lightning": "雷",
+                  "Psychic": "超", "Fighting": "闘", "Darkness": "悪", "Metal": "鋼",
+                  "Dragon": "ドラゴン", "Fairy": "フェアリー", "Colorless": "無色"}
+
 _RARITY_IMG_ALT = {
     "hikaru": "H",
 }
@@ -300,31 +312,26 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
     if m:
         out["stage"] = re.sub(r"\s+", "", m.group(1)).strip()
 
-    # Type icon — 2 形式対応:
-    #   旧 (BW/XY/SM 系): alt="炎" 等
-    #   新 (SV 系):       class="icon-psychic icon"
-    type_imgs = re.findall(r'alt="(草|炎|水|雷|超|闘|悪|鋼|フェアリー|ドラゴン|無色)"', html_decoded)
-    if type_imgs:
-        out["type_jp"] = type_imgs[0]
-        out["type_en"] = JP_TYPE_TO_EN.get(type_imgs[0], type_imgs[0])
+    # Type icon — ★2026-08-23 全面差替え。
+    #   旧実装の誤り2つ (実測: ピカチュウ 6,138枚が 'Fighting' になっていた):
+    #     ① 公式のクラス名は `icon-electric` / `icon-dark` / `icon-steel` / `icon-none` で、
+    #        旧実装が探していた lightning / darkness / metal / colorless は **存在しない**
+    #     ② HTML 全体から最初に当たったアイコンを採っていたので、タイプ欄が読めない時に
+    #        **弱点のアイコン**を拾っていた (ピカチュウの弱点=闘 → Fighting)
+    #   → タイプ欄 (`<span class="hp-type">タイプ</span>` の直後) に **アンカーして**取る。
+    #     タイプ欄が無いカード (トレーナーズ / エネルギー) は空のままが正しい。
+    m_type = re.search(r'hp-type">\s*タイプ\s*</span>\s*<span class="icon-([a-z]+)', html_decoded)
+    if m_type:
+        en = _TYPE_CLASS_TO_EN.get(m_type.group(1))
+        if en:
+            out["type_en"] = en
+            out["type_jp"] = _EN_TO_JP_TYPE.get(en, "")
     else:
-        icon_class = re.search(
-            r'class="icon-(grass|fire|water|lightning|psychic|fighting|darkness|metal|fairy|dragon|colorless)\s+icon"',
-            html_decoded,
-            re.IGNORECASE,
-        )
-        if icon_class:
-            en_type = icon_class.group(1).lower()
-            _EN_TYPE_NAMES = {
-                "grass": "Grass", "fire": "Fire", "water": "Water",
-                "lightning": "Lightning", "psychic": "Psychic",
-                "fighting": "Fighting", "darkness": "Darkness",
-                "metal": "Metal", "fairy": "Fairy", "dragon": "Dragon",
-                "colorless": "Colorless",
-            }
-            _EN_TO_JP = {v: k for k, v in JP_TYPE_TO_EN.items()}
-            out["type_en"] = _EN_TYPE_NAMES.get(en_type, en_type.capitalize())
-            out["type_jp"] = _EN_TO_JP.get(out["type_en"], "")
+        # 旧世代ページは alt="炎" 形式
+        type_imgs = re.findall(r'alt="(草|炎|水|雷|超|闘|悪|鋼|フェアリー|ドラゴン|無色)"', html_decoded)
+        if type_imgs:
+            out["type_jp"] = type_imgs[0]
+            out["type_en"] = JP_TYPE_TO_EN.get(type_imgs[0], type_imgs[0])
 
     # Set name — 構造セレクタ優先、regex は fallback。
     #   2026-08-01 差替 (窓口回答書 §C-2/C-3): 公式 detail HTML は set 名を構造化した

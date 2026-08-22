@@ -1,0 +1,321 @@
+# eBay aspect を網羅した変換表の枠 (自動生成 / 手で編集しない)
+# 生成: 2026-08-23   取得マスタ: ebay_aspects_183454_latest.json (fetched 2026-08-22)
+# 目的: バイヤーの検索にできるだけ乗せる。**正しい値であることが大前提**。
+# 根拠の無いものは空欄のままにする (推測で埋めない)。
+
+aspects:
+  - ebay_aspect: "Game"
+    required: true
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 168
+    ebay_by_game: 0
+    source: "game_ebay"
+    filled_pct: 100
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Card Name"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 49333
+    ebay_by_game: 0
+    source: ":name_en"
+    filled_pct: 99
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Set"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 2290
+    ebay_by_game: 25
+    source: "set_name_ebay"
+    filled_pct: 84
+    filter_map_field: "set / set_code"
+  - ebay_aspect: "Character"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 2052
+    ebay_by_game: 0
+    source: "character_name"
+    filled_pct: 96
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Manufacturer"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 711
+    ebay_by_game: 0
+    source: "manufacturer_ebay"
+    filled_pct: 100
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Creature/Monster Type"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 307
+    ebay_by_game: 0
+    source: "creature_type_ebay"
+    filled_pct: 35
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Card Type"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 74
+    ebay_by_game: 5
+    source: "card_type_ebay"
+    filled_pct: 83
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Rarity"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 57
+    ebay_by_game: 0
+    source: "rarity_ebay"
+    filled_pct: 75
+    filter_map_field: "rarity"
+  - ebay_aspect: "Features"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 39
+    ebay_by_game: 0
+    source: "features_ebay"
+    filled_pct: 14
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Attribute/MTG:Color"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 27
+    ebay_by_game: 0
+    source: "color_ebay"
+    filled_pct: 71
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Speciality"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 12
+    ebay_by_game: 0
+    source: "speciality_ebay"
+    filled_pct: 2
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Age Level"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 6
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Finish"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 4
+    ebay_by_game: 0
+    source: "finish"
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Autographed"
+    required: false
+    usage: RECOMMENDED
+    mode: SELECTION_ONLY
+    ebay_value_count: 2
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Card Number"
+    required: false
+    usage: RECOMMENDED
+    mode: FREE_TEXT
+    ebay_value_count: 0
+    ebay_by_game: 0
+    source: "card_number_text"
+    filled_pct: 43
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Signed By"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 1216
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Illustrator"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 492
+    ebay_by_game: 0
+    source: "illustrator"
+    filled_pct: 23
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Country of Origin"
+    required: false
+    usage: OPTIONAL
+    mode: SELECTION_ONLY
+    ebay_value_count: 244
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Convention/Event"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 100
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Language"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 38
+    ebay_by_game: 0
+    source: "language"
+    filled_pct: 96
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Year Manufactured"
+    required: false
+    usage: OPTIONAL
+    mode: SELECTION_ONLY
+    ebay_value_count: 37
+    ebay_by_game: 0
+    source: "release_year"
+    filled_pct: 29
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Franchise"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 37
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Autograph Authentication"
+    required: false
+    usage: OPTIONAL
+    mode: SELECTION_ONLY
+    ebay_value_count: 12
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Stage"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 9
+    ebay_by_game: 0
+    source: "stage"
+    filled_pct: 20
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Material"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 6
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Card Size"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 3
+    ebay_by_game: 0
+    source: "card_size_ebay"
+    filled_pct: 96
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Autograph Format"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 3
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Vintage"
+    required: false
+    usage: OPTIONAL
+    mode: SELECTION_ONLY
+    ebay_value_count: 2
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Customized"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 2
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "HP"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 0
+    ebay_by_game: 0
+    source: "hp_ebay"
+    filled_pct: 18
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Attack/Power"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 0
+    ebay_by_game: 0
+    source: "attack_power_ebay"
+    filled_pct: 24
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Defense/Toughness"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 0
+    ebay_by_game: 0
+    source: "defense_toughness_ebay"
+    filled_pct: 1
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "California Prop 65 Warning"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 0
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Cost"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 0
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし
+  - ebay_aspect: "Autograph Authentication Number"
+    required: false
+    usage: OPTIONAL
+    mode: FREE_TEXT
+    ebay_value_count: 0
+    ebay_by_game: 0
+    source: null   # 未対応
+    filled_pct: 0
+    filter_map_field: null   # 変換表なし

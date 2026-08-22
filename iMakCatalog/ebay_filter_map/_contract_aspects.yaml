@@ -62,7 +62,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 2290
-    filled: 74931/89138
+    filled: 74966/89138
     decided: "2026-08-21 HQ 裁定 (コード形)"
   - ebay_aspect: "Rarity"
     source: specs.rarity_ebay
@@ -104,7 +104,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 27
-    filled: 47594/89138
+    filled: 64166/89138
     reason: "ポケモンのタイプはここ (取得中)"
     decided: "2026-08-22"
   - ebay_aspect: "Creature/Monster Type"
@@ -130,7 +130,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    filled: 37481/89138
+    filled: 38353/89138
     decided: "2026-08-22"
   - ebay_aspect: "Language"
     source: specs.language
@@ -170,7 +170,7 @@ aspects:
     owner: catalog
     mode: SELECTION_ONLY
     ebay_values: 244
-    filled: 32606/89138
+    filled: 21465/89138
     decided: "2026-08-22 HQ Q4 で確定 (language=Japanese の行に Japan)"
   - ebay_aspect: "Vintage"
     source: null
@@ -234,7 +234,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 492
-    filled: 21130/89138
+    filled: 21140/89138
     decided: "2026-08-22 綴りを eBay に合わせた"
   - ebay_aspect: "HP"
     source: specs.hp_ebay
@@ -242,7 +242,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    filled: 16614/89138
+    filled: 16622/89138
     decided: "2026-08-22"
   - ebay_aspect: "Attack/Power"
     source: specs.attack_power_ebay
@@ -250,7 +250,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    filled: 13038/89138
+    filled: 21766/89138
     decided: "2026-08-22"
   - ebay_aspect: "Defense/Toughness"
     source: specs.defense_toughness_ebay
