@@ -55,6 +55,28 @@ class TestAspectContract(unittest.TestCase):
         finally:
             db.close()
 
+    def test_features_values_are_ebay_vocabulary(self):
+        """features_ebay は eBay の39値のみ / 必ずリスト.
+
+        2026-08-22: 'Promo, Alternative Art' のようにカンマで繋いだ1つの文字列に
+        なっていた行が 1,184行あった。MULTI なので繋いではいけない。
+        """
+        FE = set(json.loads(MASTER.read_text(encoding="utf-8"))["aspects"]["Features"]["all"])
+        db = sqlite3.connect(r"C:/dev/iMak_data/catalog/products.sqlite")
+        bad = []
+        try:
+            for (sp,) in db.execute("SELECT specs FROM products "
+                                    "WHERE json_extract(specs, '$.features_ebay') IS NOT NULL"):
+                v = json.loads(sp or "{}").get("features_ebay")
+                if isinstance(v, str):
+                    v = [v]
+                for x in v or []:
+                    if x not in FE:
+                        bad.append(x)
+        finally:
+            db.close()
+        self.assertEqual(bad[:5], [], f"eBay の Features に無い値: {set(bad[:20])}")
+
 
 if __name__ == "__main__":
     unittest.main()

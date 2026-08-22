@@ -80,8 +80,8 @@ aspects:
     mode: FREE_TEXT
     ebay_values: 39
     filled: 13195/89138
-    reason: "Holo/Reverse Holo は Features に無い (Finish の値)"
-    decided: "2026-08-22"
+    reason: "Holo/Reverse Holo は Features に無い (Finish の値)。値は必ずリストで持つ"
+    decided: "2026-08-22 出品側の39値表は廃止"
   - ebay_aspect: "Manufacturer"
     source: specs.manufacturer_ebay
     emit: true
@@ -141,14 +141,13 @@ aspects:
     filled: 86279/89138
     decided: "2026-08-22"
   - ebay_aspect: "Year Manufactured"
-    source: specs.release_year
+    source: psa_cert
     emit: true
-    owner: catalog
+    owner: listing
     mode: SELECTION_ONLY
     ebay_values: 37
-    filled: 26543/89138
-    reason: "変換表に year の無い弾は空欄 (推測しない)"
-    decided: "2026-08-22"
+    reason: "PSA ラベルの年 (現物に打たれた年)"
+    decided: "2026-08-22 HQ Q2 で確定"
   - ebay_aspect: "Stage"
     source: specs.stage_ebay
     emit: true
@@ -166,21 +165,21 @@ aspects:
     filled: 86279/89138
     decided: "2026-08-22"
   - ebay_aspect: "Country of Origin"
-    source: fixed:Japan
-    emit: false
-    owner: listing
+    source: specs.country_of_origin_ebay
+    emit: true
+    owner: catalog
     mode: SELECTION_ONLY
     ebay_values: 244
-    reason: "PSA10 運用の固定値。出品側が持つ"
-    decided: "2026-08-22"
+    filled: 36181/89138
+    decided: "2026-08-22 HQ Q4 で確定 (language=Japanese の行に Japan)"
   - ebay_aspect: "Vintage"
     source: null
     emit: false
     owner: catalog
     mode: SELECTION_ONLY
     ebay_values: 2
-    reason: "定義が曖昧。出さない"
-    decided: "2026-08-22"
+    reason: "定義が曖昧。固定値で出さない (出品側の固定出力を止める)"
+    decided: "2026-08-22 HQ Q4"
   - ebay_aspect: "Signed By"
     source: null
     emit: false
@@ -195,8 +194,8 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 6
-    reason: "扱いが無い"
-    decided: "2026-08-22"
+    reason: "根拠が無い。固定値で出さない (出品側の固定出力を止める)"
+    decided: "2026-08-22 HQ Q4"
   - ebay_aspect: "Convention/Event"
     source: null
     emit: false
@@ -211,8 +210,8 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 37
-    reason: "Game で足りる"
-    decided: "2026-08-22"
+    reason: "eBay の37値は Disney Lorcana の作品名だけ。TCG に該当が無い (実取得で確認)"
+    decided: "2026-08-22 HQ Q4"
   - ebay_aspect: "Autograph Authentication"
     source: null
     emit: false
@@ -270,13 +269,13 @@ aspects:
     reason: "出品側の運用"
     decided: "2026-08-22"
   - ebay_aspect: "Cost"
-    source: null
-    emit: false
+    source: specs.cost
+    emit: true
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    reason: "eBay に値リストが無く、カード種別で意味が違う"
-    decided: "2026-08-22"
+    filled: 12853/89138
+    decided: "2026-08-22 HQ Q3 で確定 (出す)"
   - ebay_aspect: "Autograph Authentication Number"
     source: null
     emit: false
@@ -291,5 +290,5 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 2
-    reason: "扱いが無い"
-    decided: "2026-08-22"
+    reason: "扱いが無い。固定値で出さない (出品側の固定出力を止める)"
+    decided: "2026-08-22 HQ Q4"
