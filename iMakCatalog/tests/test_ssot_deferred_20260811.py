@@ -42,24 +42,26 @@ import api  # type: ignore  # noqa: E402
 # カテゴリ全件が返る = 絞り込めていないのに正常応答に見える。
 # `Swsh12: Sword & Shield - Silver Tempest` のようにコード形自体がシリーズ名を含む値もそのまま。
 CODEFORM_EXPECTED = {
-    "拡張パック「ロストアビス」":         "Swsh11: Lost Origin",
-    "拡張パック「漆黒のガイスト」":        "Swsh06: Sword & Shield - Chilling Reign",
-    "拡張パック「白銀のランス」":         "Swsh06: Sword & Shield - Chilling Reign",
-    "拡張パック「一撃マスター」":         "Swsh05: Battle Styles",
-    "拡張パック「連撃マスター」":         "Swsh05: Battle Styles",
-    "強化拡張パック「双璧のファイター」":    "Swsh05: Battle Styles",
-    "拡張パック「パラダイムトリガー」":     "Swsh12: Sword & Shield - Silver Tempest",
+    "拡張パック「ロストアビス」":         "S11: Lost Abyss",
+    "拡張パック「漆黒のガイスト」":        "S6k: Jet-Black Spirit",
+    "拡張パック「白銀のランス」":         "S6h: Silver Lance",
+    "拡張パック「一撃マスター」":         "S5i: Single Strike Master",
+    "拡張パック「連撃マスター」":         "S5r: Rapid Strike Master",
+    "強化拡張パック「双璧のファイター」":    "S5a: Peerless Fighters",
+    "拡張パック「パラダイムトリガー」":     "S12: Paradigm Trigger",
     "拡張パック「黒炎の支配者」":         "SV03: Obsidian Flames",
-    "拡張パック「スペースジャグラー」":     "Swsh10: Astral Radiance",
-    "拡張パック「タイムゲイザー」":        "Swsh10: Astral Radiance",
+    "拡張パック「スペースジャグラー」":     "S10p: Space Juggler",
+    "拡張パック「タイムゲイザー」":        "S10d: Time Gazer",
     # ★2026-08-22 是正: 英語版 SV09 の名前が入っていた (別セット)。
     #   日本語版の刷りには 'Sv9: Battle Partners' (eBay master に実在) が正しい。
+    # 2026-08-23 ユーザー確定「シンプルが一番」: 日本語版セットは自分の値を使う。
+    #   英語版セット名の流用 (08-18 の例外14セット) は廃止した。
     "拡張パック「バトルパートナーズ」":     "Sv9: Battle Partners",
-    "拡張パック「フュージョンアーツ」":     "Swsh08: Fusion Strike",
-    "拡張パック「ムゲンゾーン」":         "Swsh03: Darkness Ablaze",
-    "拡張パック「仰天のボルテッカー」":     "Swsh04: Vivid Voltage",
-    "拡張パック「反逆クラッシュ」":        "Swsh02: Rebel Clash",
-    "拡張パック「摩天パーフェクト」":       "SWSH07: Evolving Skies",
+    "拡張パック「フュージョンアーツ」":     "S8: Fusion Arts",
+    "拡張パック「ムゲンゾーン」":         "S3: Infinity Zone",
+    "拡張パック「仰天のボルテッカー」":     "S4: Amazing Volt Tackle",
+    "拡張パック「反逆クラッシュ」":        "S2: Rebellion Crash",
+    "拡張パック「摩天パーフェクト」":       "S7d: Skyscraping Perfection",
     "強化拡張パック「Pokémon GO」":     "S10b: Pokémon GO",
     "強化拡張パック「ひかる伝説」":        "Sm3+: Shining Legends",
     "拡張パック「ひかる伝説」":          "Sm3+: Shining Legends",

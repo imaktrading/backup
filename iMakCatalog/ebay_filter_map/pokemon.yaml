@@ -45,7 +45,8 @@ set:
     ebay: "SV03: Obsidian Flames"
     note: HQ 2026-08-18 コード形裁定 (旧 "Scarlet & Violet - Obsidian Flames", 141行)
   - source: "拡張パック「摩天パーフェクト」"
-    ebay: "SWSH07: Evolving Skies"
+    ebay: "S7d: Skyscraping Perfection"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'SWSH07: Evolving Skies' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Evolving Skies", 79行)
   - source: "強化拡張パック「ひかる伝説」"
     ebay: "Sm3+: Shining Legends"
@@ -61,43 +62,56 @@ set:
     ebay: "Sv: Prismatic Evolutions"
     note: HQ 2026-08-18 コード形裁定 (旧 "Prismatic Evolutions", 237行)
   - source: "拡張パック「反逆クラッシュ」"
-    ebay: "Swsh02: Rebel Clash"
+    ebay: "S2: Rebellion Crash"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh02: Rebel Clash' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Rebel Clash", 106行)
   - source: "拡張パック「ムゲンゾーン」"
-    ebay: "Swsh03: Darkness Ablaze"
+    ebay: "S3: Infinity Zone"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh03: Darkness Ablaze' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Darkness Ablaze", 110行)
   - source: "拡張パック「仰天のボルテッカー」"
-    ebay: "Swsh04: Vivid Voltage"
+    ebay: "S4: Amazing Volt Tackle"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh04: Vivid Voltage' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Vivid Voltage", 111行)
   - source: "強化拡張パック「双璧のファイター」"
-    ebay: "Swsh05: Battle Styles"
+    ebay: "S5a: Peerless Fighters"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh05: Battle Styles' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Battle Styles", 84行)
   - source: "拡張パック「一撃マスター」"
-    ebay: "Swsh05: Battle Styles"
+    ebay: "S5i: Single Strike Master"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh05: Battle Styles' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Battle Styles", 81行)
   - source: "拡張パック「連撃マスター」"
-    ebay: "Swsh05: Battle Styles"
+    ebay: "S5r: Rapid Strike Master"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh05: Battle Styles' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Battle Styles", 81行)
   - source: "拡張パック「漆黒のガイスト」"
-    ebay: "Swsh06: Sword & Shield - Chilling Reign"
+    ebay: "S6k: Jet-Black Spirit"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh06: Sword & Shield - Chilling Reign' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Chilling Reign", 83行)
   - source: "拡張パック「白銀のランス」"
-    ebay: "Swsh06: Sword & Shield - Chilling Reign"
+    ebay: "S6h: Silver Lance"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh06: Sword & Shield - Chilling Reign' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Chilling Reign", 83行)
   - source: "拡張パック「フュージョンアーツ」"
-    ebay: "Swsh08: Fusion Strike"
+    ebay: "S8: Fusion Arts"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh08: Fusion Strike' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Fusion Strike", 115行)
   - source: "拡張パック「スペースジャグラー」"
-    ebay: "Swsh10: Astral Radiance"
+    ebay: "S10p: Space Juggler"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh10: Astral Radiance' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Astral Radiance", 88行)
   - source: "拡張パック「タイムゲイザー」"
-    ebay: "Swsh10: Astral Radiance"
+    ebay: "S10d: Time Gazer"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh10: Astral Radiance' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Astral Radiance", 88行)
   - source: "拡張パック「ロストアビス」"
-    ebay: "Swsh11: Lost Origin"
+    ebay: "S11: Lost Abyss"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh11: Lost Origin' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Lost Origin", 127行)
   - source: "拡張パック「パラダイムトリガー」"
-    ebay: "Swsh12: Sword & Shield - Silver Tempest"
+    ebay: "S12: Paradigm Trigger"
+    note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh12: Sword & Shield - Silver Tempest' = 英語版セット)。例外は作らない"
     note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Silver Tempest", 125行)
 
   # ── 2026-08-22 未マップ弾の仕分けで追加 (71種 / 1,872行) ──────────────────

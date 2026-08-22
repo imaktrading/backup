@@ -34,10 +34,10 @@ CATEGORY = "pokemon_tcg"
 
 # 旧表記 → 決定したコード形 (master verbatim)
 CODEFORM = {
-    "Sword & Shield - Battle Styles":     "Swsh05: Battle Styles",
-    "Sword & Shield - Chilling Reign":    "Swsh06: Sword & Shield - Chilling Reign",
-    "Sword & Shield - Lost Origin":       "Swsh11: Lost Origin",
-    "Sword & Shield - Silver Tempest":    "Swsh12: Sword & Shield - Silver Tempest",
+    # "Sword & Shield - Battle Styles":     "Swsh05: Battle Styles",   # 2026-08-23 廃止 (英語版セット名は使わない)
+    # "Sword & Shield - Chilling Reign":    "Swsh06: Sword & Shield - Chilling Reign",   # 2026-08-23 廃止 (英語版セット名は使わない)
+    # "Sword & Shield - Lost Origin":       "Swsh11: Lost Origin",   # 2026-08-23 廃止 (英語版セット名は使わない)
+    # "Sword & Shield - Silver Tempest":    "Swsh12: Sword & Shield - Silver Tempest",   # 2026-08-23 廃止 (英語版セット名は使わない)
     "Scarlet & Violet - Obsidian Flames": "SV03: Obsidian Flames",
     "Prismatic Evolutions":               "Sv: Prismatic Evolutions",
     # ★2026-08-22 取り下げ: JP の 拡張パック「バトルパートナーズ」に英語版 SV09 の名前を
@@ -45,16 +45,16 @@ CODEFORM = {
     #   'Sv9: Battle Partners' が別値として在り、日本語版の刷りにはそちらが正しい。
     #   → この行は CODEFORM から外し、期待値を 'Sv9: Battle Partners' とする。
     #   "Journey Together":                 "Sv09: Journey Together",
-    "Astral Radiance":                    "Swsh10: Astral Radiance",
-    "Fusion Strike":                      "Swsh08: Fusion Strike",
-    "Vivid Voltage":                      "Swsh04: Vivid Voltage",
-    "Darkness Ablaze":                    "Swsh03: Darkness Ablaze",
-    "Rebel Clash":                        "Swsh02: Rebel Clash",
-    "Evolving Skies":                     "SWSH07: Evolving Skies",
+    # "Astral Radiance":                    "Swsh10: Astral Radiance",   # 2026-08-23 廃止 (英語版セット名は使わない)
+    # "Fusion Strike":                      "Swsh08: Fusion Strike",   # 2026-08-23 廃止 (英語版セット名は使わない)
+    # "Vivid Voltage":                      "Swsh04: Vivid Voltage",   # 2026-08-23 廃止 (英語版セット名は使わない)
+    # "Darkness Ablaze":                    "Swsh03: Darkness Ablaze",   # 2026-08-23 廃止 (英語版セット名は使わない)
+    # "Rebel Clash":                        "Swsh02: Rebel Clash",   # 2026-08-23 廃止 (英語版セット名は使わない)
+    # "Evolving Skies":                     "SWSH07: Evolving Skies",   # 2026-08-23 廃止 (英語版セット名は使わない)
     "Shining Legends":                    "Sm3+: Shining Legends",
     "Pokémon GO":                         "S10b: Pokémon GO",
 }
-EXPECTED_ROWS = 1919   # 2026-08-22: バトルパートナーズ 132行を Sv9: Battle Partners へ移した
+EXPECTED_ROWS = 558    # 2026-08-23: 英語版セット名の流用 (Swsh 系 14セット/1,361行) を廃止
 
 # 「表記の選択」ではないので巻き込んではいけない値 (2026-08-11 回答 §2/§3 + 別名ケース)
 # ★2026-08-21 窓口確定で 'Start Deck 100' / 'Premium Champion Pack' の carve-out は解除。
