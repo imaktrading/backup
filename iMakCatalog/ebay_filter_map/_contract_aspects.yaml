@@ -292,3 +292,43 @@ aspects:
     ebay_values: 2
     reason: "扱いが無い。固定値で出さない (出品側の固定出力を止める)"
     decided: "2026-08-22 HQ Q4"
+  - ebay_aspect: "Graded"
+    source: fixed:Yes
+    emit: true
+    owner: listing
+    mode: N/A (eBay の aspect 一覧に無い列)
+    ebay_values: 0
+    reason: "PSA10 運用の固定値"
+    decided: "2026-08-22"
+  - ebay_aspect: "Grade"
+    source: psa_cert
+    emit: true
+    owner: listing
+    mode: N/A (eBay の aspect 一覧に無い列)
+    ebay_values: 0
+    reason: "cert から取る"
+    decided: "2026-08-22"
+  - ebay_aspect: "Professional Grader"
+    source: fixed:PSA
+    emit: true
+    owner: listing
+    mode: N/A (eBay の aspect 一覧に無い列)
+    ebay_values: 0
+    reason: "PSA10 運用の固定値"
+    decided: "2026-08-22"
+  - ebay_aspect: "Certification Number"
+    source: psa_cert
+    emit: true
+    owner: listing
+    mode: N/A (eBay の aspect 一覧に無い列)
+    ebay_values: 0
+    reason: "cert から取る"
+    decided: "2026-08-22"
+  - ebay_aspect: "Card Condition"
+    source: fixed:Near Mint or Better
+    emit: true
+    owner: listing
+    mode: N/A (eBay の aspect 一覧に無い列)
+    ebay_values: 0
+    reason: "PSA10 運用の固定値"
+    decided: "2026-08-22"

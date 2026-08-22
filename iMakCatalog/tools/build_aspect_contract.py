@@ -126,7 +126,11 @@ def main():
         "",
         "aspects:",
     ]
-    for asp in aspects:
+    # ★2026-08-23: eBay の 35項目に無いが **CSV には実際に出している** 列も表に載せる
+    #   (PSA の cert 由来と PSA10 運用の固定値)。載せないと監査くんが毎回
+    #   「表に無い項目」と言い続ける (HQ 指摘 2026-08-22)。
+    extra = [a for a in D if a not in aspects]
+    for asp in list(aspects) + extra:
         src, emit, owner, reason, decided = D.get(asp, (None, False, "catalog", "未決定", ""))
         n, t = fill.get(asp, (0, 0))
         lines += [
@@ -134,8 +138,8 @@ def main():
             f'    source: {src if src else "null"}',
             f'    emit: {"true" if emit else "false"}',
             f'    owner: {owner}',
-            f'    mode: {aspects[asp]["constraint"].get("mode")}',
-            f'    ebay_values: {len(aspects[asp]["all"])}',
+            f'    mode: {aspects[asp]["constraint"].get("mode") if asp in aspects else "N/A (eBay の aspect 一覧に無い列)"}',
+            f'    ebay_values: {len(aspects[asp]["all"]) if asp in aspects else 0}',
         ]
         if t:
             lines.append(f'    filled: {n}/{t}')

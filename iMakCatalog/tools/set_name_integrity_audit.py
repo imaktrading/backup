@@ -134,6 +134,19 @@ def _derive_rarity_ebay(conn, category: str, rarity_raw):
     return None
 
 
+# 弾番号つき eBay 値の接頭辞 (Sv4k: / Swsh06: / Sm3h: …)
+_PREFIX_RE = re.compile(r"^([A-Za-z]+[0-9][0-9A-Za-z]*)\s*:")
+
+
+def _norm_code(c: str) -> str:
+    """弾コードを比べる形に揃える (大小 + 0埋めの違いは同じものとして扱う).
+
+    `SV3` と `SV03` / `CP4` と `Cp4` は同じ弾。別セットかどうかだけを見たいので潰す。
+    """
+    c = (c or "").upper()
+    return re.sub(r"^([A-Z]+)0+(?=[0-9])", lambda m: m.group(1), c)
+
+
 def setcode_era(sc: str):
     sc = sc or ""
     if sc.startswith("SV"):
@@ -193,6 +206,12 @@ def audit(categories):
     rarity_by_cat = defaultdict(lambda: {"raw_stamped": 0, "map_drift": 0, "unmapped": 0,
                                      "accepted_blank": 0})
 
+    # 8. 弾コード食い違い検知 (2026-08-23 / HQ 提供の条件をそのまま常設化)
+    #    eBay 値の頭に付く弾番号 (例 'Sv4k:') は **その商品の弾コードと一致するはず**。
+    #    食い違い = 別セットの名前が入っている。2026-08-22 に SV4K/SV4M/SV9 の 322枚で発生。
+    #    ★これは §6 の canonical ズレ検知では捕まらない: 変換表そのものが誤っていると
+    #      「今その場で計算した値」も同じ誤りになるため一致してしまう。
+    prefix_mismatch = []          # (product_id, set_code, set_name_ebay)
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
         s = json.loads(r["specs"])
@@ -229,6 +248,16 @@ def audit(categories):
                                           r["product_id"])
         if computed is not None and computed != e:
             drift_by_cat[r["category"]] += 1
+        m_pref = _PREFIX_RE.match(e)
+        pre_n, sc_n = _norm_code(m_pref.group(1)) if m_pref else "", _norm_code(sc)
+        # 片方がもう片方の頭になっているのは同じ弾 (CS1t / CS1p / CS1m は同じ `Cs1:` を共有)。
+        same = pre_n and (sc_n.startswith(pre_n) or pre_n.startswith(sc_n))
+        if m_pref and sc and not same:
+            # Swsh 系は英語セット番号 (日本の2セットが英語版1セットに併合される)。
+            # 2026-08-18 の HQ 裁定どおりなので対象外。
+            # `cardID-*` は弾コードを持たない暫定キー (別件のバックログ)。ここでは見ない。
+            if not m_pref.group(1).upper().startswith("SWSH")                     and not str(r["product_id"] or "").startswith("cardID-"):
+                prefix_mismatch.append((r["product_id"], sc, e))
         # 7. rarity 生値焼き付き / map ズレ (computed=None は filter_map 未登録 = 別問題)
         r_raw, r_stored = s.get("rarity"), s.get("rarity_ebay")
         # yugioh は生値が既に英語 canonical ("Secret Rare" 等) で passthrough が正 → 対象外
@@ -284,12 +313,24 @@ def audit(categories):
     name_desync.sort(key=lambda x: x[0])
 
     return (era_mismatch, inconsistent, none_list, name_desync,
-            dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity))
+            dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
+            prefix_mismatch)
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
-           drift_by_cat, rarity_by_cat, not_rarity, categories):
+           drift_by_cat, rarity_by_cat, not_rarity, prefix_mismatch, categories):
     out = []
+    NL = chr(10)
+    out.append(f"## 0. 弾コード食い違い (別セットの名前) — {len(prefix_mismatch)} 件" + NL)
+    out.append("eBay 値の頭の弾番号 (例 `Sv4k:`) と商品の弾コードが違う行。"
+               "**0件で維持する**。変換表が誤っていると §6 では捕まらないので、この面で見る。" + NL)
+    if not prefix_mismatch:
+        out.append("(なし)" + NL)
+    for pid, sc, e in prefix_mismatch[:40]:
+        out.append(f"- ⚠️ `{pid}` (弾={sc}) → `{e}`" + NL)
+    if len(prefix_mismatch) > 40:
+        out.append(f"- … 他 {len(prefix_mismatch) - 40} 件" + NL)
+    out.append(NL)
     cat_s = ",".join(categories) if categories else "all"
     out.append(f"# set_name_ebay integrity audit (cat={cat_s})\n")
     out.append(f"## 1. era 不一致 (別era set名への誤map疑い) — {len(era_mismatch)} 件\n")
@@ -433,9 +474,11 @@ def main():
     print(f"{_START_MARK} {ts} (cat={cat_s}) ===")
 
     (era_mismatch, inconsistent, none_list, name_desync,
-     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity) = audit(categories)
+     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
+     prefix_mismatch) = audit(categories)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
-                    empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity, categories or [])
+                    empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
+                    prefix_mismatch, categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)
