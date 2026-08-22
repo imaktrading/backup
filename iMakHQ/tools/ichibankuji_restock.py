@@ -431,6 +431,9 @@ def get_thin_backup_ichibankuji(limit, max_backups=1):
         if n_aux >= max_backups:
             continue
         cand.append({"row": i, "item_id": g(1).strip(), "title": g(2).strip(),
+                     # ★2026-08-22: 今の仕入元 (A列) も持って回る。目視画面に
+                     #   「今どこから買っているか」の写真を並べるため (ユーザー要望)。
+                     "supply_url": g(0).strip(),
                      "kind": "live_thin", "n_aux": n_aux})
     kept, n_cd = filter_cooldown(cand, _load_cooldown(), _today())
     if n_cd:
@@ -826,6 +829,34 @@ _KEEP_COND = ("新品、未使用", "未使用に近い")   # 新品扱い。こ
 _COND_VALUES = r"(新品、未使用|未使用に近い|目立った傷や汚れなし|やや傷や汚れあり|傷や汚れあり|全体的に状態が悪い)"
 
 
+# ★2026-08-22 ユーザー要望「セラー名、星、評価数、商品の状態、発送までの日数」。
+#   状態/送料/評価件数は既に取っていたので、**セラー名・星・発送までの日数** を足す。
+#   取れなければ空 (推測しない)。判定には使わず **画面に出すだけ** = 人が決める材料。
+def _parse_seller_name(s):
+    """page_source → 出品者名 (純関数)。取れなければ空。"""
+    m = re.search(r'"seller"\s*:\s*\{[^}]*?"name"\s*:\s*"([^"]{1,40})"', s or "", re.S)
+    if m:
+        return m.group(1)
+    m = re.search(r"([^<>\"]{1,30})\s*の(?:出品|プロフィール)", s or "")
+    return m.group(1).strip() if m else ""
+
+
+def _parse_seller_star(s):
+    """page_source → 星 (5段階の平均・float) (純関数)。取れなければ None。"""
+    m = re.search(r"5段階評価中(\d(?:\.\d)?)", s or "")
+    return float(m.group(1)) if m else None
+
+
+def _parse_ship_days(s):
+    """page_source → 発送までの日数の表示 (純関数)。取れなければ空。
+
+    メルカリは『発送までの日数』の直後に「1〜2日で発送」等が入る。
+    ラベル直後だけ見る (全ページ grep は関連商品を拾う。`_parse_cond_ship` と同じ理由)。
+    """
+    m = re.search(r"発送までの日数.{0,80}?(\d+[〜～\-]?\d*日で発送)", s or "", re.S)
+    return m.group(1) if m else ""
+
+
 def _parse_cond_ship(s):
     """page_source → (状態, 送料負担)。**ラベル直後の値だけ**見る(純関数・test可)。
 
@@ -903,7 +934,13 @@ def _cond_ship(drv, url, cache=None):
         except Exception:
             reviews = None
         if cache is not None and cond:
-            cache[url] = {"cond": cond, "ship": ship, "reviews": reviews, "date": _today()}
+            # ★2026-08-22: 画面に出す材料も一緒に貯める (セラー名/星/発送までの日数)。
+            #   判定には使わない。人が「買うか」を決めるための情報。
+            cache[url] = {"cond": cond, "ship": ship, "reviews": reviews,
+                          "seller": _parse_seller_name(src),
+                          "star": _parse_seller_star(src),
+                          "ship_days": _parse_ship_days(src),
+                          "date": _today()}
         return (cond, ship, reviews)
     except Exception:
         return ("", "", None)
@@ -1002,6 +1039,7 @@ def _identify_scrape(targets, cand_n, use_cache=True):
                 _it = {k: ent[k] for k in
                        ("row", "item_id", "title", "prize", "ref_image", "candidates")}
                 _it["kind"] = t.get("kind", "oos")   # kind は対象側の属性(cacheに焼かない)
+                _it["supply_url"] = t.get("supply_url", "")   # 同上 (2026-08-22)
                 items.append(_it)
                 continue
             pics = fetch_listing_images(t["item_id"])
@@ -1016,7 +1054,10 @@ def _identify_scrape(targets, cand_n, use_cache=True):
                   "prize": prize, "ref_image": pics[0] if pics else "",
                   "candidates": [{"url": c["href"], "price": c["price"],
                                   "image": c.get("image", "")} for c in raw]}
-            items.append({**it, "kind": t.get("kind", "oos")})
+            # ★2026-08-22: supply_url は **対象側の属性** なので cache に焼かない
+            #   (仕入元は日々変わる)。kind と同じ扱い。
+            items.append({**it, "kind": t.get("kind", "oos"),
+                          "supply_url": t.get("supply_url", "")})
             cache[iid] = {**it, "date": today}   # kind は焼かない(対象側の属性で日々変わる)
             _identify_cache_save(cache)      # 1件ごとに保存(途中死しても貯めた分は残す)
     finally:
@@ -1108,6 +1149,30 @@ def pass_identify(n, cand_n, live=False):
     print("   次: python ichibankuji_restock.py expand")
 
 
+def _cand_for_view(c, detail):
+    """候補1件 → 目視画面に渡す形 (純関数)。
+
+    ★2026-08-22 ユーザー要望「セラー情報 セラー名、星、評価数、商品の状態、
+      発送までの日数を追加して」。**判定には使わず、人が決める材料として出す**。
+      取れていない項目は出さない (空欄を埋めない)。
+    """
+    url = c.get("url") or ""
+    d = (detail or {}).get(url) or {}
+    bits = []
+    if d.get("seller"):
+        bits.append(d["seller"][:16])
+    if d.get("star") is not None:
+        bits.append("★%s" % d["star"])
+    if d.get("reviews") is not None:
+        bits.append("評価%d" % d["reviews"])
+    if d.get("cond"):
+        bits.append(d["cond"])
+    if d.get("ship_days"):
+        bits.append(d["ship_days"])
+    return {"channel": "mercari", "url": url, "price": c.get("price", 0),
+            "name": " / ".join(bits)}
+
+
 def pass_hoju_psa_style(n, cand_n=10):
     """live の補URL補充を **PSA と同じ1画面** でやる (2026-08-22 ユーザー指示)。
 
@@ -1129,6 +1194,7 @@ def pass_hoju_psa_style(n, cand_n=10):
         print("対象なし")
         return
     scraped = _identify_scrape(targets, cand_n)
+    detail = _detail_cache_load()          # 夜に温めた セラー/状態/発送 の情報
     items, item_rows = [], []
     for it in scraped:
         cands = it.get("candidates") or []
@@ -1139,8 +1205,11 @@ def pass_hoju_psa_style(n, cand_n=10):
                       "card_no": it.get("prize") or "",
                       "ebay_url": "https://www.ebay.com/itm/%s" % it.get("item_id"),
                       "ref_image": ref,
-                      "candidates": [{"channel": "mercari", "url": c.get("url"),
-                                      "price": c.get("price", 0)} for c in cands]})
+                      # ★2026-08-22: 今の仕入元の写真も並べる (ユーザー要望)。
+                      #   出品の写真だけだと「今どこから買っているか」が見えない。
+                      "supply_image": it.get("supply_image") or "",
+                      "supply_url": it.get("supply_url") or "",
+                      "candidates": [_cand_for_view(c, detail) for c in cands]})
         item_rows.append(it)
     if not items:
         print("目視できる行がありません (候補なし / 現物画像なし)")

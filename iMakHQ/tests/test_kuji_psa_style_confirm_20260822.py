@@ -82,3 +82,55 @@ def test_件数を数えられる():
     assert hasattr(R, "count_workload")
     src = inspect.getsource(R.count_workload)
     assert "_identify_cache_fresh" in src
+
+
+# ── 目視画面の材料を増やす (2026-08-22 ユーザー要望) ────────────────────
+#
+# 「ebay出品の仕入元写真を追加して」
+# 「仕入候補に、セラー情報 セラー名、星、評価数、商品の状態、発送までの日数を追加して」
+
+class TestSupplyPhoto:
+    def test_今の仕入元をitemsに渡す(self):
+        assert "supply_url" in inspect.getsource(R.pass_hoju_psa_style)
+
+    def test_対象に仕入元URLを持たせている(self):
+        assert '"supply_url": g(0).strip()' in inspect.getsource(R.get_thin_backup_ichibankuji)
+
+    def test_仕入元はキャッシュに焼かない(self):
+        """★仕入元は日々変わる。焼くと古い仕入元を出し続ける (kind と同じ扱い)."""
+        src = inspect.getsource(R._identify_scrape)
+        assert "supply_url" in src and "cacheに焼かない" in src
+
+
+class TestSellerInfo:
+    def _d(self, **kw):
+        base = {"seller": "たろう", "star": 4.9, "reviews": 320,
+                "cond": "新品、未使用", "ship_days": "1〜2日で発送"}
+        base.update(kw)
+        return {"https://x/1": base}
+
+    def test_5項目を並べる(self):
+        got = R._cand_for_view({"url": "https://x/1", "price": 3500}, self._d())["name"]
+        for w in ("たろう", "★4.9", "評価320", "新品、未使用", "1〜2日で発送"):
+            assert w in got, w
+
+    def test_取れていない項目は出さない(self):
+        """★空欄を埋めない。無い物を「不明」と書くより出さない."""
+        got = R._cand_for_view({"url": "https://x/1", "price": 1},
+                               self._d(star=None, ship_days=""))["name"]
+        assert "★" not in got and "日で発送" not in got
+        assert "たろう" in got
+
+    def test_情報が無くても壊れない(self):
+        assert R._cand_for_view({"url": "https://y/9", "price": 1}, {})["name"] == ""
+
+
+class TestParsers:
+    def test_星を取る(self):
+        assert R._parse_seller_star("この出品者は5段階評価中4.8") == 4.8
+        assert R._parse_seller_star("なし") is None
+
+    def test_発送日数はラベル直後だけ見る(self):
+        """★全ページ grep は関連商品を拾う (_parse_cond_ship と同じ理由)."""
+        assert R._parse_ship_days("発送までの日数</span><span>1〜2日で発送") == "1〜2日で発送"
+        assert R._parse_ship_days("関連商品 4〜7日で発送") == ""

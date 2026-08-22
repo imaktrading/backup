@@ -643,6 +643,16 @@ def build_restock_html(items):
         ref = it.get("ref_image") or ""
         ref_tag = (f"<img src='{_proxied(ref)}' loading='lazy' onerror='imgFail(this,1)'>" if ref
                    else "<div class='ph'>現物画像なし</div>")
+        # ★2026-08-22 ユーザー要望「ebay出品の仕入元写真を追加して」。
+        #   ① は eBay に出している写真。**今どこから買っているか**が見えないと、
+        #   候補が「今より良いか」を判断できない。持っている呼出だけ出す (後方互換)。
+        _sup = it.get("supply_image") or it.get("supply_url") or ""
+        sup_col = ""
+        if _sup:
+            _slink = it.get("supply_url") or ""
+            _simg = (f"<img src='{_proxied(_sup)}' loading='lazy' onerror='imgFail(this,1)'>")
+            _simg = f"<a href='{_html.escape(_slink)}' target='_blank'>{_simg}</a>" if _slink else _simg
+            sup_col = (f"<div class='col psa'><div class='cap'>② 今の仕入元</div>{_simg}</div>")
         # ★2026-08-02: 全候補が同じ variant_ok なら、そのバッジは**見分ける情報を持っていない**。
         #   実例 (itemID 358600821598 / OP09-050 ナミ): 8候補すべて「⚠️変種未確認」で、
         #   タイトルに「新たなる皇帝」と書いてある候補まで未確認だった (_variant_matches の
@@ -809,6 +819,7 @@ def build_restock_html(items):
             f"<div class='t'>{_html.escape(_s(it.get('title')))}</div>{v8_html}"
             f"<a href='{_html.escape(_s(it.get('ebay_url')))}' target='_blank'>元eBay出品</a>"
             f"<div class='pair'><div class='col psa'><div class='cap'>① 現物(出品)</div>{ref_tag}</div>"
+            f"{sup_col}"
             f"<div class='col cat'><div class='cap'>仕入候補(チェック=買う / 外す=仕入見送り)</div>"
             f"<div class='cands'>{''.join(cand_html)}</div></div></div>"
             "</div>")
