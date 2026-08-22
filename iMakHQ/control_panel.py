@@ -1459,20 +1459,11 @@ SCRIPTS = [
         "params": [],
         "skip_postprocess": True,
     },
-    {
-        # ★2026-08-16 ユーザー要望「PSA のように補URLを補充するボタンが欲しい」。
-        #   従来の①②は **切れてから**探す事後型で、生きている出品の予備は貯まらなかった
-        #   (実測 live 30件中 補0本が10件)。補URLは切れた時の保険なので、切れる前に貯める。
-        #   夜間 (run_hoju_search.bat step5) が候補を貯め、このボタンは目視だけ = 待ち時間ゼロ。
-        #   A列/B列/売り切れ印は触らない (触ると出品との紐付けが切れる)。
-        "category": None, "type": "utility",
-        "label": "🎴一番くじ 補URL補充(目視)",
-        "label_fg": "#0a7",
-        "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "ichibankuji_restock.py", "hoju", "10"],
-        "params": [],
-        "skip_postprocess": True,
-    },
+    # ★2026-08-22: 「🎴一番くじ 補URL補充(目視)」を撤去。
+    #   2026-08-16 に作ったが、2026-08-22 に「🎴 くじ補URL slice3」を同じ `hoju` に
+    #   向け直した結果、**まったく同じコマンドのボタンが2つ**になった。
+    #   同じ物が2つあると、どちらを押せばいいか分からない (ユーザー指摘)。
+    #   役割は slice2 (夜=候補集め) / slice3 (昼=目視して書く) の2つで足りる。
     {
         "category": None, "type": "utility",
         "label": "🎴一番くじ補充② 刷新→CSV",

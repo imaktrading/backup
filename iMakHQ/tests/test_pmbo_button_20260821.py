@@ -191,3 +191,14 @@ def test_前回値が無い種類は空欄にしない():
     body = SRC[i:i + 1200]
     assert "まだ数えていません" in body
     assert "for _b, _base, kind" in body, "前回値の側だけを見ている (新しい種類が漏れる)"
+
+
+def test_一番くじの補URLボタンは2つだけ():
+    """★2026-08-22: slice3 を既存の `hoju` に向け直した結果、
+    「🎴一番くじ 補URL補充(目視)」と **同じコマンドのボタンが2つ**になった。
+    同じ物が2つあると、どちらを押せばいいか分からない (ユーザー指摘で撤去)。"""
+    # (撤去の経緯はコメントに残してあるので、**ラベル定義**が無いことを見る)
+    assert '"label": "🎴一番くじ 補URL補充(目視)"' not in SRC
+    import re
+    n = len(re.findall(r'"ichibankuji_restock\.py", "hoju", "10"', SRC))
+    assert n == 1, "hoju を呼ぶボタンが %d 個ある" % n
