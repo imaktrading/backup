@@ -40,7 +40,11 @@ CODEFORM = {
     "Sword & Shield - Silver Tempest":    "Swsh12: Sword & Shield - Silver Tempest",
     "Scarlet & Violet - Obsidian Flames": "SV03: Obsidian Flames",
     "Prismatic Evolutions":               "Sv: Prismatic Evolutions",
-    "Journey Together":                   "Sv09: Journey Together",
+    # ★2026-08-22 取り下げ: JP の 拡張パック「バトルパートナーズ」に英語版 SV09 の名前を
+    #   入れていた (HQ 依頼 2026-08-22_hq_set_name_ebay_wrong_set_322)。eBay master には
+    #   'Sv9: Battle Partners' が別値として在り、日本語版の刷りにはそちらが正しい。
+    #   → この行は CODEFORM から外し、期待値を 'Sv9: Battle Partners' とする。
+    #   "Journey Together":                 "Sv09: Journey Together",
     "Astral Radiance":                    "Swsh10: Astral Radiance",
     "Fusion Strike":                      "Swsh08: Fusion Strike",
     "Vivid Voltage":                      "Swsh04: Vivid Voltage",
@@ -50,7 +54,7 @@ CODEFORM = {
     "Shining Legends":                    "Sm3+: Shining Legends",
     "Pokémon GO":                         "S10b: Pokémon GO",
 }
-EXPECTED_ROWS = 2051
+EXPECTED_ROWS = 1919   # 2026-08-22: バトルパートナーズ 132行を Sv9: Battle Partners へ移した
 
 # 「表記の選択」ではないので巻き込んではいけない値 (2026-08-11 回答 §2/§3 + 別名ケース)
 # ★2026-08-21 窓口確定で 'Start Deck 100' / 'Premium Champion Pack' の carve-out は解除。

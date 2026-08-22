@@ -54,8 +54,9 @@ set:
     ebay: "Sm3+: Shining Legends"
     note: HQ 2026-08-18 コード形裁定 (旧 "Shining Legends", 2行)
   - source: "拡張パック「バトルパートナーズ」"
-    ebay: "Sv09: Journey Together"
-    note: HQ 2026-08-18 コード形裁定 (旧 "Journey Together", 132行)
+    ebay: "Sv9: Battle Partners"
+    note: "2026-08-22 是正: 08-18 のコード形裁定が **英語版の別セット** Sv09: Journey Together を
+      選んでいた。JP SV9 = バトルパートナーズ の master 実在値は Sv9: Battle Partners"
   - source: "ハイクラスパック「テラスタルフェスex」"
     ebay: "Sv: Prismatic Evolutions"
     note: HQ 2026-08-18 コード形裁定 (旧 "Prismatic Evolutions", 237行)
@@ -360,16 +361,15 @@ set_code:
     note: "2026-08-22 eBay master verbatim へ (旧 'Raging Surf')"
     note: REVIEW eBay 値
     year: 2023
-  - source: SV4
-    ebay: Future Flash
-    note: REVIEW eBay 値
-    year: 2023
+  # SV4 は削除 (2026-08-22): JP に単独パックが無いコード。値も 1行ずれて Future Flash が入っていた。使用 0枚。HQ 依頼 Q1 で確認
   - source: SV4K
-    ebay: Wild Force
+    ebay: "Sv4k: Ancient Roar"
+    note: "2026-08-22 是正 (SV4K=古代の咆哮。Wild Force は SV5K の名前、旧 'Wild Force')"
     note: REVIEW eBay 値
     year: 2024
   - source: SV4M
-    ebay: Cyber Judge
+    ebay: "Sv4m: Future Flash"
+    note: "2026-08-22 是正 (SV4M=未来の一閃。Cyber Judge は SV5M の名前、旧 'Cyber Judge')"
     note: REVIEW eBay 値
     year: 2024
   - source: SV4a
@@ -421,7 +421,8 @@ set_code:
     note: ハイクラスパック「テラスタルフェスex」 — REVIEW eBay 値
     year: 2024
   - source: SV9
-    ebay: Battle Partners
+    ebay: "Sv9: Battle Partners"
+    note: "2026-08-22 是正 (master verbatim (弾番号つき)、旧 'Battle Partners')"
     note: 拡張パック「バトルパートナーズ」 — REVIEW eBay 値
     year: 2025
   - source: SV9a
@@ -671,6 +672,43 @@ set_code:
   - source: P
     ebay: Promo
     note: 一般プロモ
+
+  # ── 2026-08-22 yaml 未記載だった DB 行を SSOT 化 (HQ 依頼 Q2) ──────────────
+  #   2026-08-10 の回答書で「DB のみ・yaml 未記載が残っている。同じ事故が起きうる」と
+  #   書いていたとおりの事故が SV4K/SV4M で起きたので、全部 yaml に落とす。
+  - source: "SM11a"
+    ebay: "Sm11a: Remix Bout"
+    note: "year=2019; catalog '拡張パック「リミックスバウト」' 一致 (= product_id SM11a-*); dedupe 2026-05-27 追加; v1 'Remix Bout' → eBay s"
+  - source: "S10b"
+    ebay: "S10b: Pokémon GO"
+    note: "year=2022; catalog 93 件 '拡張パック「Pokémon GO」' 一致; dedupe 2026-05-27 追加; v1 'Pokémon GO' → eBay set aspect 実値 (= "
+  - source: "M-P"
+    ebay: "M-P: Mega Promos"
+    note: "2026-08-21 HQ 決定・eBay 未収録のため自製"
+  - source: "s1-CORO"
+    ebay: "Sword & Shield Start Deck 100 Corocoro Comics Promotion"
+    note: "virtual set_code; Sword & Shield Start Deck 100 + Corocoro promo 系。 catalog 未投入、 後日 scrape 後 set_code 修正推奨; de"
+  - source: "SM-P"
+    ebay: "Sm-P: Sun & Moon Promos"
+    note: "Sun & Moon Promo prefix; catalog product_id NNN/SM-P 形式と整合; dedupe cache 'Sm Promo' 確認済; dedupe SM-P + M-P 202"
+  - source: "S-P"
+    ebay: "S-P: Sword & Shield Promos"
+    note: "2026-08-22 プロモ弾番号 (eBay の <era>-P 系に一致)"
+  - source: "BWP"
+    ebay: "BW-P Promotional cards"
+    note: "2026-08-22 プロモ弾番号 (eBay の <era>-P 系に一致)"
+  - source: "SV-P"
+    ebay: "Sv-P Promotional Cards"
+    note: "2026-08-22 プロモ弾番号 (eBay の <era>-P 系に一致)"
+  - source: "SM5S"
+    ebay: "Sm5s: Ultra Sun"
+    note: "2026-08-22 プロモ弾番号 (eBay の <era>-P 系に一致)"
+  - source: "SM5M"
+    ebay: "Sm5m: Ultra Moon"
+    note: "2026-08-22 プロモ弾番号 (eBay の <era>-P 系に一致)"
+  - source: "SM5p"
+    ebay: "Sm5+: Ultra Force"
+    note: "2026-08-22 プロモ弾番号 (eBay の <era>-P 系に一致)"
 
 # ============================================================================
 # Rarity (Pokemon 公式画像ファイル名から抽出した short code)

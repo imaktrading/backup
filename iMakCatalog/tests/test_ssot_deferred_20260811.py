@@ -52,7 +52,9 @@ CODEFORM_EXPECTED = {
     "拡張パック「黒炎の支配者」":         "SV03: Obsidian Flames",
     "拡張パック「スペースジャグラー」":     "Swsh10: Astral Radiance",
     "拡張パック「タイムゲイザー」":        "Swsh10: Astral Radiance",
-    "拡張パック「バトルパートナーズ」":     "Sv09: Journey Together",
+    # ★2026-08-22 是正: 英語版 SV09 の名前が入っていた (別セット)。
+    #   日本語版の刷りには 'Sv9: Battle Partners' (eBay master に実在) が正しい。
+    "拡張パック「バトルパートナーズ」":     "Sv9: Battle Partners",
     "拡張パック「フュージョンアーツ」":     "Swsh08: Fusion Strike",
     "拡張パック「ムゲンゾーン」":         "Swsh03: Darkness Ablaze",
     "拡張パック「仰天のボルテッカー」":     "Swsh04: Vivid Voltage",
