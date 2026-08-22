@@ -1484,3 +1484,82 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - 検証⚠️ SessionStart フック `session_beacon.py` (timeout 20s): 18回中 median 0.9-1.2s だが **最大 29.7s** (resume時) / 11.8s (起動時)。セッション開始が待たされる。非同期化かキャッシュを要検討 (今回は未修正)
 - 検証⚠️ 走査は直近50セッション/9プロジェクト/4日間。全1,979セッション中の一部
 - commit: 本 CLAUDE.md trim commit + 本 daily_report commit
+
+---
+
+## 2026-08-21〜08-22 — 変換表を「推測」から「eBay 実データ照合」へ切替 (Catalog)
+
+### 決定事項
+- 決定1: **変換表の出所を eBay の Taxonomy API に固定する**。従来は
+  `ebay_filter_map/pokemon.yaml` 冒頭に「eBay 値は推測含む、定期的に eBay UI で確認」と
+  書かれたとおり推測ベースだった。`set_name_ebay` 絡みの依頼は4ヶ月で **269本**
+  (うち裁定を含むもの165本) で、それでも 8月が最多。個別裁定では収束しないと判断。
+- 決定2: **鍵を共有領域に置き、カタログが自分で eBay から取得する**
+  (ユーザー実施)。以後「一覧をください」の往復が不要。
+- 決定3: **表記は code 形が正** (`Si: Start Deck 100` / `S12a: Vstar Universe`)。
+  窓口 Advisor 確定。2026-08-11 §3 の carve-out (`Start Deck 100` 等を読める形で維持) は
+  **解除**。§3 は Game 別マスタが手元に無かった時点の判断のため。
+- 決定4: **日本語版カードは日本語版セット名**。`Crown Zenith` 等の英語版名は誤記載。
+  eBay には両方在るのでフィルタの都合では決まらず、**正確性だけで決まる**。
+- 決定5: **埋めない項目を確定** — Finish (現物依存) / Age Level (CPSC) /
+  Autographed (取扱なし)。監査で 0% と出ても穴ではない。
+- 決定6: **変換表をブラッシュする手順を確立** (CLAUDE.md に記録)。
+  空欄を見つけてもいきなり埋めず、理由を5つに分けてから動く。
+
+### 変更
+- 変更: `iMakCatalog/tools/fetch_ebay_aspects.py` — eBay の 35 aspect を自分で取得。
+  取得日つきで保存し上書きしない (`_input/ebay_aspects_183454_<日付>.json`)
+- 変更: `iMakCatalog/tools/build_aspect_frame.py` — 35項目を網羅した枠を生成。
+  それまで変換表は **Set / Rarity の2項目しか無く**、残り33項目は素通しだった
+- 変更: `iMakCatalog/tools/ebay_value_reconcile.py` — 変換表を eBay 一覧に照合し
+  A(一覧に在る) / B(実際に使われている) / U(未使用) を自動判定。手で status を書けない
+- 変更: `iMakCatalog/tools/restamp_set_name_ebay.py` — 変換表から引き直す。
+  **格下げ禁止** (今の値が既に一覧に在るなら触らない)
+- 変更: `iMakCatalog/api.py` — `derive_game_ebay` / `derive_manufacturer` /
+  `derive_speciality` 新設。プロモの弾番号切り出しを修正 (`SM-P-052` を `SM` と
+  切っていた。**同じロジックが2か所にコピー**されており両方直した)
+- 変更: `iMakeBayAPI/credentials.py` — 鍵/トークンの置き場を決める口を1か所に
+  (12ファイル16箇所が自前でパスを組み立てていた)。両方に在って中身が違えば警告
+- 変更: `iMakCatalog/tools/set_name_integrity_audit.py` — §8「レアリティでない値の検知」
+  追加。遊戯王も除外しない
+- 変更: データ — 日本語セット名復元 2,652行 / code 形統一 1,121行 /
+  Game 空欄 2,835行 / Manufacturer 89,138行 / Features 10,756行 /
+  Speciality 2,324行 / プロモ弾番号 647行 / レアリティでない値の空欄化 118行
+
+### 検証
+- 検証: 657 tests green (pre-commit で全実行)
+- 検証: canonical_drift **7,583 → 175** (`set_name_integrity_audit` 実測)
+- 検証: `not_a_rarity=0` / `rarity_unmapped=0` / `rarity_raw_stamped=0` (日次マーカー)
+- 検証: Game 空欄 **0** (全5カテゴリ / test_game_ebay_required_20260822)
+- 検証: eBay API から 35 aspect 取得成功 (OAuth + Taxonomy、実走)
+- 検証: `credentials.py` の二重配置警告が鳴ることを、古いファイルを置いて実測
+
+### 止めた事故 (誤出品になっていたもの)
+- 7-ELEVEN ルフィ #003 が **別カード** (`ST13-003_P` = ドルトムント collab) を返していた。
+  PSA スラブ実写で券面 `ST13-003` を確認し `ST13-003_7E01` を追加 + edition pair で一意特定
+- **2セットが1つに潰れていた** 265行 (フリーズボルト/コールドフレア、ガイアボルケーノ/
+  タイダルストーム、コレクションX/Y、ハートゴールド/ソウルシルバー)
+- レアリティ欄に **レアリティでない値** 118行 (`2` / `New` / `European debut` / `force-SMW`)
+- 類似照合の暴発を3回阻止: `GX Battle Boost`→`Ex Battle Boost` (別セット) /
+  `Sm Promo`→`Sm` (プロモ352件を通常セットへ) / `Promo Cards`→`FF: Promo Cards` (別ゲーム)
+- **766行の塗り潰し**: 変換表の `MC → Movie Promo` が誤りで、一括適用していたら
+  正しい値を消していた。dry-run の一覧で発見
+
+### 未了 / 次セッションへの引き継ぎ
+- **未回答の依頼 7本** (`iMak_data/catalog/requests/`)。今日の作業中に届いた通常分
+- **766行の確認1件** — スタートデッキ100 バトルコレクション (MC) を `Si: Start Deck 100` に
+  寄せるか。**別商品**で eBay に Battle Collection が無い。現状は分けたまま。窓口回答待ち
+- **英語カード名** — `Ultra Ball` (英語版券面) か `Hyper Ball` (catalog 他 set) か。未回答
+- **鍵の切替が未了の worktree** — 監視くん・抽出くん・リバイスくん。
+  全員が共有側を見るまで本体側のファイルは消せない
+- **ポケモンの Attribute/Color 0%** (22,111行) — eBay 側に受け皿が在り、他3カテゴリは
+  100%一致。**こちらがタイプを持っていないだけ**。公式から取り直せば埋まる。今日の残件で最大
+- **Grade / Card Condition の一覧が取れていない** — 35 aspect に含まれず。
+  リスト外だと出品が弾かれる項目で、PSA10 を売る以上毎回使う。要調査
+
+### 天井 (これ以上やっても伸びない)
+- ワンピース / ガンダム / ドラゴンボールの **Set・Character・Card Name** — eBay に値が無い。
+  `Luffy` は eBay の全2,052キャラを探しても `Fluffy` しか出てこない
+- **DBSCG の Card Type** — eBay の Card Type はマジック/遊戯王/ポケモン/デジモン専用
+- **Rarity の空欄** (ポケモン 8,515行) — 公式がレアリティを出していない。
+  変換の取りこぼしは **0行**
