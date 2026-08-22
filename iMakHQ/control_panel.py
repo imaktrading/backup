@@ -1424,6 +1424,7 @@ SCRIPTS = [
         #   画面は PSA の確証UI をそのまま使う (見た目・操作が分かれないように)。
         "category": None, "type": "utility",
         "label": "🎴 くじ補URL slice2",
+        "badge": "kuji_search",
         "tip": "一番くじ版の夜間検索。PSA の slice2 と同じ動き。候補を溜めるだけで補URL欄には書かない。",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
@@ -1435,6 +1436,7 @@ SCRIPTS = [
         # slice3: 夜に貯めた候補を現物と見比べて、選んだ分だけ補URL(AC-AG)へ書く。主URL不可触。
         "category": None, "type": "utility",
         "label": "🎴 くじ補URL slice3",
+        "badge": "kuji_confirm",
         "tip": "一番くじ版の昼の目視確認。画面は PSA と同じ物を使う。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。1回10件ずつ。",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
@@ -3119,6 +3121,13 @@ class ListingPanel:
             "    d['newcand']=N.count_workload()\n"
             "except Exception as e:\n"
             "    d['newcand']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # ★2026-08-22: 一番くじも同じ subprocess で数える (ユーザー要望)。
+            #   片方が転んでも もう片方のヒントは出す。
+            "try:\n"
+            "    import kuji_hoju_fill as KJ\n"
+            "    d['kuji']=KJ.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['kuji']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             "print(json.dumps(d))"
             % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
         )
@@ -3153,6 +3162,7 @@ class ListingPanel:
         try:
             if w is None:
                 raise RuntimeError(err_reason or "不明")
+            w0 = w                       # ★上書き前の全体 (kuji もここから取る)
             w, nc = w["hoju"], (w.get("newcand") or {})
             tot = w["targets"]
             # ★2026-08-09: **押したら何件できるか**を出す。母数を出してはいけない。
@@ -3206,12 +3216,31 @@ class ListingPanel:
                 n_txt = "\n目視 %s件" % nc.get("show", 0)
                 if nc.get("auto"):
                     n_txt += " (+自動で補URL %s件)" % nc["auto"]
-            by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt}
+            # 🎴 一番くじ: PSA と同じ考え方 (押したら何件できるか)。2026-08-22 ユーザー要望
+            kj = (w0.get("kuji") or {}) if isinstance(w0, dict) else {}
+            if kj.get("error"):
+                k_s = k_c = "\n(残件 取得できず: %s)" % str(kj["error"])[:40]
+            elif kj:
+                k_s = "\n今夜の対象 %s件 (補0本 %s件)" % (
+                    (kj.get("search") or {}).get("can", 0), kj.get("zero", 0))
+                if (kj.get("search") or {}).get("no_query"):
+                    k_s += "\n※検索語が作れない %s件" % kj["search"]["no_query"]
+                k_c = "\n目視できる %s件" % (kj.get("confirm") or {}).get("ready", 0)
+                if not (kj.get("confirm") or {}).get("ready"):
+                    k_c += "\n※先に slice2 (夜間検索) を回してください"
+            else:
+                k_s = k_c = ""
+            by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
+                       "kuji_search": k_s, "kuji_confirm": k_c}
             # ★2026-08-16: **押すと何か出てくる時だけ青**。0件なら黒のまま
             #   (「いつ押せばいいのか分からない」への答え。色 = 今やる価値があるか)。
             act_kind = {"hoju_search": bool(s.get("can")),
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
-                        "newcand": bool(nc.get("show") or nc.get("auto"))}
+                        "newcand": bool(nc.get("show") or nc.get("auto")),
+                        # 夜間検索は自動で走るので、押す必要がある時だけ青
+                        "kuji_search": bool(not nightly["ok"]
+                                            and (kj.get("search") or {}).get("can")),
+                        "kuji_confirm": bool((kj.get("confirm") or {}).get("ready"))}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。

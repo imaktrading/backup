@@ -307,6 +307,36 @@ def build_items(targets: list, cache: dict) -> tuple:
     return items, item_targets
 
 
+def count_workload() -> dict:
+    """『押したら何件できるか』を **検索せずに** 数える (パネルのヒント用)。
+
+    PSA の `psa_hoju_fill.count_workload` と同じ役割。
+    ★母数を出してはいけない。slice2 は「検索語が作れる件数」、
+      slice3 は「当日のキャッシュに候補が在る件数」を返す
+      (押して0件だった、を起こさない)。
+    """
+    import datetime
+    vals = P._read_high()
+    targets = select_targets(vals)
+    today = datetime.date.today().isoformat()
+    cache = load_cache()
+    can_search = sum(1 for t in targets if t.get("query"))
+    no_query = len(targets) - can_search
+    ready = 0
+    for t in targets:
+        e = cache.get(t["itemID"])
+        cands = e if isinstance(e, list) else ((e or {}).get("candidates") or [])
+        if not cands:
+            continue
+        if isinstance(e, dict) and e.get("date") and e["date"] != today:
+            continue                      # 古いキャッシュは「押せる」に数えない
+        ready += 1
+    return {"targets": len(targets),
+            "zero": sum(1 for t in targets if t["n_backups"] == 0),
+            "search": {"can": can_search, "no_query": no_query},
+            "confirm": {"ready": ready}}
+
+
 def run_search(targets: list) -> int:
     """slice2: 夜間検索 (無人)。候補をキャッシュに貯めるだけ。**補URLは書かない**。"""
     import datetime

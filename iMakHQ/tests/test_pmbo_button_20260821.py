@@ -157,3 +157,28 @@ def test_ヒントは後から差し替えられる():
     i = SRC.index("def _attach_tip")
     body = SRC[i:i + 1600]
     assert "def set_text" in body and "return set_text" in body
+
+
+# ── 一番くじも件数を出す (2026-08-22 ユーザー要望) ──────────────────────
+
+def test_一番くじにも件数の印がある():
+    for b in ("kuji_search", "kuji_confirm"):
+        assert '"badge": "%s"' % b in SRC
+
+
+def test_一番くじの件数を同じ集計で数える():
+    """★片方が転んでも もう片方のヒントは出す (PSA/🌱 と同じ作り)."""
+    i = SRC.index("import kuji_hoju_fill as KJ")
+    assert "d['kuji']=KJ.count_workload()" in SRC[i:i + 200]
+    assert "d['kuji']={'error'" in SRC[i:i + 400]
+
+
+def test_一番くじの夜間は自動が動いていれば黒():
+    """★PSA と同じ。自動で走るものを毎日青くすると、色が合図として死ぬ."""
+    i = SRC.index('"kuji_search": bool(')
+    assert 'not nightly["ok"]' in SRC[i:i + 160]
+
+
+def test_目視0件なら次に何をするか書く():
+    """0件とだけ出ると、何をすればいいのか分からない."""
+    assert "先に slice2 (夜間検索) を回してください" in SRC
