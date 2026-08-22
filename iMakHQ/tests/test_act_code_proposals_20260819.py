@@ -412,7 +412,15 @@ def test_recommended_specifics_keeps_warning_when_game_unknown():
     assert "C:Cost" in unknown
 
 
-def test_check_csv_routes_through_helper():
+def test_check_csv_no_longer_reports_recommended_blanks():
+    """★2026-08-23 反転: 「推奨Item Specifics が空」の報告を撤去した。
+
+    空欄の報告は契約表 (tools/aspect_contract.py) が一本で担当する。check_csv に
+    別基準の「推奨」を残すと、カタログの表に載っていない判断が復活するため。
+    helper 自体 (recommended_specifics_for_card) は csv_auditor の退役判定が使うので残す。
+    """
     src = _read("check_csv.py")
-    assert "recommended_specifics_for_card(_card_key" in src, \
-        "check_csv が推奨側を helper 経由にしていない"
+    assert 'f"推奨Item Specifics が空' not in src, \
+        "推奨spec の空欄報告が復活している (2026-08-22 役割確定に反する)"
+    cc = _check_csv()
+    assert callable(cc.recommended_specifics_for_card), "helper は残す"

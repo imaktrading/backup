@@ -834,7 +834,14 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
         excl_result = _exclude(csv_path, exclude_idx)   # 物理除外+backup
 
     # --- 依頼書 / 生成ログ ---
-    cat_req = write_catalog_request(project, catalog_items, dry_run)
+    # 2026-08-23: **カタログへの自動投函をやめた**。
+    # 値の正しさはカタログの持ち物 (2026-08-22 役割確定)。監査くんは気づいたことを
+    # レポートに載せるだけで、依頼にするかはカタログが決める。
+    # (在庫に無いカードの追加依頼は別経路 auto_catalog_add_request.py が担当。
+    #  そちらは 2026-08-22 に resolver ゲートを入れて誤検出を止めてある)
+    cat_req = None
+    if catalog_items:
+        print(f"  📝 カタログ向けの気づき {len(catalog_items)}件 (依頼書は出しません・レポートに記載)")
     prog_req = write_program_request(project, program_items, dry_run)
     log_signals = _scan_log(log_path, csv_path)
 

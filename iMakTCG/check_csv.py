@@ -581,25 +581,20 @@ def validate_row(row, row_idx):
         if not val:
             issues.append(("WARN", f"必須Item Specific '{spec}' が空"))
 
-    # --- 推奨Item Specifics (必須側と同じく card-aware, 2026-08-19) ---
-    empty_recommended = [
-        s for s in recommended_specifics_for_card(_card_key,
-                                                  get_col(row, "C:Card Type"),
-                                                  get_col(row, "C:Game"))
-        if not get_col(row, s)]
-    if empty_recommended:
-        names = ", ".join(s.replace("C:", "") for s in empty_recommended)
-        issues.append(("INFO", f"推奨Item Specifics が空: {names}"))
+    # --- 2026-08-23 撤去: 「推奨Item Specifics が空」の報告 ---
+    # 空欄の報告は契約表 (tools/aspect_contract.py) が一本で担当する。ここに別基準の
+    # 「推奨」を持つと、表に載っていない判断が復活する (2026-08-22 役割確定)。
+    # `recommended_specifics_for_card` は残す (csv_auditor の退役判定が使う)。
 
     # --- PSA鑑定番号 ---
     if not cert or not cert.isdigit():
         issues.append(("ERROR", f"PSA鑑定番号が不正: {cert}"))
 
-    # --- カタログ内部整合: Set↔カード番号total / Set世代↔Year (2026-06-07 set誤マップ事故対策) ---
-    _setissue = _catalog_set_consistency(get_col(row, "C:Set"), get_col(row, "C:Card Number"),
-                                         get_col(row, "C:Year Manufactured"))
-    if _setissue:
-        issues.append(("ERROR", _setissue))
+    # --- 2026-08-23 撤去: Set↔カード番号total / Set世代↔Year の判定 ---
+    # 根拠が `iMakCatalog/set_reference.py` (本元の写し) で、最終更新が 2026-08-12。
+    # カタログは自分の worktree で毎日直しているので、**11日前のコピーで「カタログが違う」**
+    # と言っていた。値の正しさはカタログの持ち物 (2026-08-22 役割確定) なので、
+    # カタログ内部の突合はカタログ側で常設してもらう (依頼: 2026-08-23_set_name_layer…)。
 
     # --- 183454 master 突合 CI (契約 v1.2 §4, 2026-08-11) ---
     # 183454 (= 全 TCG 共通カテゴリ) の C:Set 値は必ず catalog master に存在すること。
