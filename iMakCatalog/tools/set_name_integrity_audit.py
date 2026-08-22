@@ -40,6 +40,7 @@ import re
 import sqlite3
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 DB_PATH = "C:/dev/iMak_data/catalog/products.sqlite"
 
@@ -138,6 +139,31 @@ def _derive_rarity_ebay(conn, category: str, rarity_raw):
 _PREFIX_RE = re.compile(r"^([A-Za-z]+[0-9][0-9A-Za-z]*)\s*:")
 
 
+_MASTER_PATH = Path(r"C:/dev/iMak_data/catalog/_input/ebay_aspects_183454_latest.json")
+_ALLOW_PATH = Path(__file__).resolve().parent.parent / "ebay_filter_map" / "_free_text_set_values.yaml"
+_GAME_OF = {"pokemon_tcg": "Pokémon TCG", "one_piece_tcg": "One Piece CCG",
+            "dragonball_scg": "Dragon Ball Super Card Game", "gundam_tcg": None}
+
+
+def _load_allowed():
+    """① eBay master の値 と ② 自由入力の登録簿 を category 別に読む."""
+    master, allow = {}, {}
+    try:
+        by_game = json.loads(_MASTER_PATH.read_text(encoding="utf-8"))["aspects"]["Set"]["by_game"]
+    except Exception:
+        by_game = {}
+    for cat, game in _GAME_OF.items():
+        master[cat] = set(by_game.get(game or "", []))
+    try:
+        import yaml
+        doc = yaml.safe_load(_ALLOW_PATH.read_text(encoding="utf-8")) or {}
+        for e in doc.get("values") or []:
+            allow.setdefault(e.get("category"), set()).add(e.get("value"))
+    except Exception:
+        pass
+    return master, allow
+
+
 def _norm_code(c: str) -> str:
     """弾コードを比べる形に揃える (大小 + 0埋めの違いは同じものとして扱う).
 
@@ -212,6 +238,14 @@ def audit(categories):
     #    ★これは §6 の canonical ズレ検知では捕まらない: 変換表そのものが誤っていると
     #      「今その場で計算した値」も同じ誤りになるため一致してしまう。
     prefix_mismatch = []          # (product_id, set_code, set_name_ebay)
+    # 0b. 未登録値の検知 (2026-08-23)
+    #    set_name_ebay に入ってよいのは ① eBay master に在る値 か
+    #    ② `_free_text_set_values.yaml` に登録した値 だけ。どちらでもない = 未登録。
+    #    ★「Swsh で始まる値」のような**見た目の条件**での確認は、条件を思いつけるかに
+    #      依存するので必ず漏れる (2026-08-23 に実際に漏れて 1,729行が誤った値のまま出ていた)。
+    #      許可された値の一覧と突き合わせる形にして、思いつきに依存させない。
+    unregistered = defaultdict(lambda: defaultdict(int))   # category -> value -> count
+    _master, _allow = _load_allowed()
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
         s = json.loads(r["specs"])
@@ -248,6 +282,8 @@ def audit(categories):
                                           r["product_id"])
         if computed is not None and computed != e:
             drift_by_cat[r["category"]] += 1
+        if e and e not in _master.get(r["category"], set())                 and e not in _allow.get(r["category"], set()):
+            unregistered[r["category"]][e] += 1
         m_pref = _PREFIX_RE.match(e)
         pre_n, sc_n = _norm_code(m_pref.group(1)) if m_pref else "", _norm_code(sc)
         # 片方がもう片方の頭になっているのは同じ弾 (CS1t / CS1p / CS1m は同じ `Cs1:` を共有)。
@@ -314,11 +350,11 @@ def audit(categories):
 
     return (era_mismatch, inconsistent, none_list, name_desync,
             dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
-            prefix_mismatch)
+            prefix_mismatch, {k: dict(v) for k, v in unregistered.items()})
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
-           drift_by_cat, rarity_by_cat, not_rarity, prefix_mismatch, categories):
+           drift_by_cat, rarity_by_cat, not_rarity, prefix_mismatch, unregistered, categories):
     out = []
     NL = chr(10)
     out.append(f"## 0. 弾コード食い違い (別セットの名前) — {len(prefix_mismatch)} 件" + NL)
@@ -330,6 +366,17 @@ def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
         out.append(f"- ⚠️ `{pid}` (弾={sc}) → `{e}`" + NL)
     if len(prefix_mismatch) > 40:
         out.append(f"- … 他 {len(prefix_mismatch) - 40} 件" + NL)
+    out.append(NL)
+    n_unreg = sum(sum(v.values()) for v in (unregistered or {}).values())
+    out.append(f"## 0b. 未登録のセット名 — {n_unreg} 行" + NL)
+    out.append("set_name_ebay に入ってよいのは ① eBay master に在る値 か "
+               "② `_free_text_set_values.yaml` に登録した値 だけ。"
+               "**0件で維持する**。新しい誤った値は登録されていないので必ずここに出る。" + NL)
+    if not n_unreg:
+        out.append("(なし)" + NL)
+    for _c, _vals in (unregistered or {}).items():
+        for _v, _n in sorted(_vals.items(), key=lambda x: -x[1])[:20]:
+            out.append(f"- ⚠️ {_c}: `{_v}` × {_n}件" + NL)
     out.append(NL)
     cat_s = ",".join(categories) if categories else "all"
     out.append(f"# set_name_ebay integrity audit (cat={cat_s})\n")
@@ -475,10 +522,10 @@ def main():
 
     (era_mismatch, inconsistent, none_list, name_desync,
      empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
-     prefix_mismatch) = audit(categories)
+     prefix_mismatch, unregistered) = audit(categories)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
                     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
-                    prefix_mismatch, categories or [])
+                    prefix_mismatch, unregistered, categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)

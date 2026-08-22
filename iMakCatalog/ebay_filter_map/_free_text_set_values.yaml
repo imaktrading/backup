@@ -1,0 +1,659 @@
+# ルール② で入れている「eBay の一覧に無い自由入力」の登録簿 (自動生成)
+# 生成: tools/build_free_text_registry.py
+#
+# set_name_ebay に入ってよいのは ① eBay master に在る値 か ② ここに在る値 だけ。
+# どちらでもない値は監査 §0b が毎日拾う。**見た目の条件で確認しない**ための仕組み。
+# 英語版シリーズ名で始まる値は生成時に弾く (ルール③)。
+
+values:
+  # ── pokemon_tcg ──
+  - value: "Start Deck 100 Battle Collection"
+    category: pokemon_tcg
+    rows: 766
+    jp_set: "スタートデッキ100 バトルコレクション"
+  - value: "XY Promo"
+    category: pokemon_tcg
+    rows: 275
+    jp_set: "ポケモンカードゲーム教室2013 参加賞"
+  - value: "Mega Dream ex"
+    category: pokemon_tcg
+    rows: 250
+    jp_set: "ハイクラスパック 「MEGAドリームex」"
+  - value: "Extra Battle Day"
+    category: pokemon_tcg
+    rows: 201
+    jp_set: "エクストラバトルの日"
+  - value: "Start Deck Generations"
+    category: pokemon_tcg
+    rows: 175
+    jp_set: "スタートデッキGenerations ピカチュウex・カビゴンex"
+  - value: "Galactic's Conquest"
+    category: pokemon_tcg
+    rows: 146
+    jp_set: "ポケモンカードゲームDPt 拡張パック「ギンガの覇道」"
+  - value: "Mask of Change"
+    category: pokemon_tcg
+    rows: 133
+    jp_set: "拡張パック「変幻の仮面」"
+  - value: "Rocket Gang's Glory"
+    category: pokemon_tcg
+    rows: 132
+    jp_set: "拡張パック「ロケット団の栄光」"
+  - value: "Beat of the Frontier"
+    category: pokemon_tcg
+    rows: 132
+    jp_set: "ポケモンカードゲームDPt 対戦スターターパックSP「ガブリアスVSリザードン」（ガブリアスデッキ）"
+  - value: "SM Promos"
+    category: pokemon_tcg
+    rows: 131
+    jp_set: "ポケモンカードゲーム サン&ムーン GXスタートデッキ「草ラランテス」"
+  - value: "Starter Deck"
+    category: pokemon_tcg
+    rows: 127
+    jp_set: "Vスタートデッキ草 フシギバナ"
+  - value: "Bonds to the End of Time"
+    category: pokemon_tcg
+    rows: 126
+    jp_set: "ポケモンカードゲームDPt 対戦スターターパックSP「ゴウカザルVSエルレイド」（ゴウカザルデッキ）"
+  - value: "Advent of Arceus"
+    category: pokemon_tcg
+    rows: 124
+    jp_set: "ポケモンカードゲームDPt 構築スタンダードデッキ「アルセウスLV.X草＆炎」"
+  - value: "Ninja Spinner"
+    category: pokemon_tcg
+    rows: 120
+    jp_set: "拡張パック「ニンジャスピナー」"
+  - value: "Nihil Zero"
+    category: pokemon_tcg
+    rows: 117
+    jp_set: "拡張パック「ムニキスゼロ」"
+  - value: "Inferno X"
+    category: pokemon_tcg
+    rows: 116
+    jp_set: "拡張パック「インフェルノX」"
+  - value: "Pokemon Card Game Classic"
+    category: pokemon_tcg
+    rows: 96
+    jp_set: "ポケモンカードゲーム クラシック カメックス&スイクンexデッキ"
+  - value: "Mega Brave"
+    category: pokemon_tcg
+    rows: 92
+    jp_set: "拡張パック「メガブレイブ」"
+  - value: "Mega Symphonia"
+    category: pokemon_tcg
+    rows: 92
+    jp_set: "拡張パック「メガシンフォニア」"
+  - value: "20th Anniversary"
+    category: pokemon_tcg
+    rows: 91
+    jp_set: "ポケモンカードゲームXY BREAK コンセプトパック「ポケットモンスターカードゲーム 拡張パック 20th Anniversary」"
+  - value: "Wild Blaze"
+    category: pokemon_tcg
+    rows: 85
+    jp_set: "ポケモンカードゲームXY 拡張パック「ワイルドブレイズ」"
+  - value: "Rage of the Broken Heavens"
+    category: pokemon_tcg
+    rows: 81
+    jp_set: "ポケモンカードゲームXY BREAK 拡張パック「破天の怒り」"
+  - value: "Abyss Eye"
+    category: pokemon_tcg
+    rows: 81
+    jp_set: "拡張パック「アビスアイ」"
+  - value: "Gaia Volcano"
+    category: pokemon_tcg
+    rows: 76
+    jp_set: "ポケモンカードゲームXY 拡張パック「ガイアボルケーノ」"
+  - value: "Tidal Storm"
+    category: pokemon_tcg
+    rows: 76
+    jp_set: "ポケモンカードゲームXY 拡張パック「タイダルストーム」"
+  - value: "M-P: Mega Promos"
+    category: pokemon_tcg
+    rows: 75
+    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
+  - value: "Reviving Legends"
+    category: pokemon_tcg
+    rows: 74
+    jp_set: "ポケモンカードゲームLEGEND 拡張パック「よみがえる伝説」"
+  - value: "HeartGold Collection"
+    category: pokemon_tcg
+    rows: 68
+    jp_set: "ポケモンカードゲームLEGEND 拡張パック「ハートゴールドコレクション」"
+  - value: "SoulSilver Collection"
+    category: pokemon_tcg
+    rows: 68
+    jp_set: "ポケモンカードゲームLEGEND 拡張パック「ソウルシルバーコレクション」"
+  - value: "Collection X"
+    category: pokemon_tcg
+    rows: 62
+    jp_set: "ポケモンカードゲームXY 拡張パック「コレクションX」"
+  - value: "Collection Y"
+    category: pokemon_tcg
+    rows: 62
+    jp_set: "ポケモンカードゲームXY 拡張パック「コレクションY」"
+  - value: "Family Pokemon Card Game"
+    category: pokemon_tcg
+    rows: 53
+    jp_set: "ファミリーポケモンカードゲーム"
+  - value: "Mewtwo ex Starter Deck"
+    category: pokemon_tcg
+    rows: 40
+    jp_set: "スターターセット テラスタル「ミュウツーex」「ラウドボーンex」"
+  - value: "Promo"
+    category: pokemon_tcg
+    rows: 25
+    jp_set: "ポケモンカードゲームBW 「プラズマ団パワードデッキ30」"
+  - value: "Tapu Bulu GX Deck"
+    category: pokemon_tcg
+    rows: 23
+    jp_set: "ポケモンカードゲーム サン&ムーン「スターターセット改造「カプ・ブルルGX」」"
+  - value: "Lucario VSTAR Starter Set"
+    category: pokemon_tcg
+    rows: 22
+    jp_set: "スターターセットVSTAR「ルカリオ」"
+  - value: "Darkrai VSTAR Starter Set"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "スターターセットVSTAR「ダークライ」"
+  - value: "Flareon GX Deck"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "スターターセット「炎のブースターGX」"
+  - value: "Solgaleo GX & Lunala GX Deck"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "ポケモンカードゲーム サン＆ムーン スターターセット伝説「ソルガレオGX ルナアーラGX」"
+  - value: "Umbreon & Darkrai GX Tag Team Deck"
+    category: pokemon_tcg
+    rows: 20
+    jp_set: "スターターセット TAG TEAM GX 「ブラッキー&ダークライGX」"
+  - value: "25th Anniversary Golden Box"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "25th ANNIVERSARY GOLDEN BOX"
+  - value: "Espeon & Deoxys GX Tag Team Deck"
+    category: pokemon_tcg
+    rows: 13
+    jp_set: "スターターセット TAG TEAM GX 「エーフィ&デオキシスGX」"
+  - value: "Extra Regulation Box"
+    category: pokemon_tcg
+    rows: 12
+    jp_set: "「エクストラレギュレーションBOX」"
+  - value: "Vaporeon GX Deck"
+    category: pokemon_tcg
+    rows: 11
+    jp_set: "スターターセット「水のシャワーズGX」"
+  - value: "Jolteon GX Deck"
+    category: pokemon_tcg
+    rows: 8
+    jp_set: "スターターセット「雷のサンダースGX」"
+  - value: "Sm Promo"
+    category: pokemon_tcg
+    rows: 5
+  # ── one_piece_tcg ──
+  - value: "Promo Cards"
+    category: one_piece_tcg
+    rows: 1477
+    jp_set: "プロモーションカード"
+  - value: "Premium Booster One Piece The Best"
+    category: one_piece_tcg
+    rows: 890
+    jp_set: "PREMIUM BOOSTER -ONE PIECE CARD THE BEST- [PRB01]"
+  - value: "Premium Booster Vol.2"
+    category: one_piece_tcg
+    rows: 771
+    jp_set: "PREMIUM BOOSTER -ONE PIECE CARD THE BEST Vol.2- [PRB-02]"
+  - value: "Paramount War"
+    category: one_piece_tcg
+    rows: 462
+    jp_set: "BOOSTER PACK -PARAMOUNT WAR- [OP-02]"
+  - value: "Romance Dawn"
+    category: one_piece_tcg
+    rows: 429
+    jp_set: "BOOSTER PACK -ROMANCE DAWN- [OP-01]"
+  - value: "Kingdoms of Intrigue"
+    category: one_piece_tcg
+    rows: 329
+    jp_set: "BOOSTER PACK -KINGDOMS OF INTRIGUE- [OP-04]"
+  - value: "The Azure Sea's Seven Heroes"
+    category: one_piece_tcg
+    rows: 219
+    jp_set: "BOOSTER PACK THE AZURE SEA’S SEVEN- [OP14-EB04]"
+  - value: "Carrying On His Will"
+    category: one_piece_tcg
+    rows: 215
+    jp_set: "BOOSTER PACK -CARRYING ON HIS WILL-[OP-13]"
+  - value: "Adventure on Kami's Island"
+    category: one_piece_tcg
+    rows: 212
+    jp_set: "BOOSTER PACK -ADVENTURE ON KAMI’S ISLAND- [OP15-EB04]"
+  - value: "A Fist of Divine Speed"
+    category: one_piece_tcg
+    rows: 199
+    jp_set: "BOOSTER -A FIST OF DIVINE SPEED- [OP-11]"
+  - value: "Emperors in the New World"
+    category: one_piece_tcg
+    rows: 196
+    jp_set: "BOOSTER -EMPERORS IN THE NEW WORLD- [OP-09]"
+  - value: "Awakening of the New Era"
+    category: one_piece_tcg
+    rows: 195
+    jp_set: "BOOSTER PACK -AWAKENING OF THE NEW ERA- [OP-05]"
+  - value: "500 Years in the Future"
+    category: one_piece_tcg
+    rows: 193
+    jp_set: "BOOSTER PACK -500 YEARS IN THE FUTURE- [OP07]"
+  - value: "Royal Blood"
+    category: one_piece_tcg
+    rows: 192
+    jp_set: "BOOSTER -ROYAL BLOOD-[OP-10]"
+  - value: "Wings of the Captain"
+    category: one_piece_tcg
+    rows: 189
+    jp_set: "BOOSTER PACK -WINGS OF THE CAPTAIN- [OP-06]"
+  - value: "Two Legends"
+    category: one_piece_tcg
+    rows: 185
+    jp_set: "BOOSTER -TWO LEGENDS-[OP-08]"
+  - value: "The Time of Battle"
+    category: one_piece_tcg
+    rows: 182
+    jp_set: "ブースターパック 決戦の刻【OP-16】"
+  - value: "Legacy of the Master"
+    category: one_piece_tcg
+    rows: 165
+    jp_set: "BOOSTER PACK -LEGACY OF THE MASTER- [OP-12]"
+  - value: "25th Anniversary Collection"
+    category: one_piece_tcg
+    rows: 150
+    jp_set: "EXTRA BOOSTER -Anime 25th Collection- [EB-02]"
+  - value: "Memorial Collection"
+    category: one_piece_tcg
+    rows: 117
+    jp_set: "EXTRA BOOSTER -MEMORIAL COLLECTION- [EB-01]"
+  - value: "ONE PIECE Heroines Edition"
+    category: one_piece_tcg
+    rows: 107
+    jp_set: "EXTRA BOOSTER -ONE PIECE HEROINES EDITION- [EB-03]"
+  - value: "Ace & Newgate"
+    category: one_piece_tcg
+    rows: 59
+    jp_set: "STARTER DECK -Ace & Newgate- [ST-22]"
+  - value: "The Three Brothers"
+    category: one_piece_tcg
+    rows: 51
+    jp_set: "ULTRA DECK -The Three Brothers- [ST-13]"
+  - value: "ONE PIECE FILM edition"
+    category: one_piece_tcg
+    rows: 51
+    jp_set: "STARTER DECK -ONE PIECE FILM edition- [ST-05]"
+  - value: "Animal Kingdom Pirates"
+    category: one_piece_tcg
+    rows: 51
+    jp_set: "STARTER DECK -Animal Kingdom Pirates- [ST-04]"
+  - value: "The Seven Warlords of the Sea"
+    category: one_piece_tcg
+    rows: 51
+    jp_set: "STARTER DECK -The Seven Warlords of the Sea- [ST-03]"
+  - value: "Worst Generation"
+    category: one_piece_tcg
+    rows: 51
+    jp_set: "STARTER DECK -Worst Generation- [ST-02]"
+  - value: "Egghead Crisis"
+    category: one_piece_tcg
+    rows: 50
+    jp_set: "エクストラブースター EGGHEAD CRISIS【EB-04】"
+  - value: "DON Card"
+    category: one_piece_tcg
+    rows: 50
+    jp_set: "通常デザイン"
+  - value: "Egghead"
+    category: one_piece_tcg
+    rows: 46
+    jp_set: "STARTER DECK -Egghead- [ST-29]"
+  - value: "Straw Hat Crew"
+    category: one_piece_tcg
+    rows: 46
+    jp_set: "STARTER DECK -Straw Hat Crew- [ST-01]"
+  - value: "Gear 5"
+    category: one_piece_tcg
+    rows: 45
+    jp_set: "STARTER DECK EX -GEAR5- [ST-21]"
+  - value: "Yamato"
+    category: one_piece_tcg
+    rows: 45
+    jp_set: "STARTER DECK -Yamato- [ST-09]"
+  - value: "Monkey D. Luffy"
+    category: one_piece_tcg
+    rows: 45
+    jp_set: "STARTER DECK -Monkey.D.Luffy- [ST-08]"
+  - value: "The Three Captains"
+    category: one_piece_tcg
+    rows: 39
+    jp_set: "ULTRA DECK -The Three Captains- [ST-10]"
+  - value: "Luffy & Ace"
+    category: one_piece_tcg
+    rows: 35
+    jp_set: "スタートデッキEX ルフィ&エース【ST-30】"
+  - value: "Big Mom Pirates"
+    category: one_piece_tcg
+    rows: 34
+    jp_set: "STARTER DECK -Big Mom Pirates- [ST-07]"
+  - value: "Absolute Justice"
+    category: one_piece_tcg
+    rows: 34
+    jp_set: "STARTER DECK -Absolute Justice- [ST-06]"
+  - value: "Uta"
+    category: one_piece_tcg
+    rows: 30
+    jp_set: "STARTER DECK -Uta- [ST-11]"
+  - value: "GREEN/YELLOW Yamato"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -GREEN/YELLOW Yamato- [ST-28]"
+  - value: "GREEN Uta"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -GREEN Uta- [ST-16]"
+  - value: "BLACK Marshall D. Teach"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -BLACK Marshall.D.Teach- [ST-27]"
+  - value: "PURPLE/BLACK Monkey D. Luffy"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -PURPLE/BLACK Monkey.D.Luffy- [ST-26]"
+  - value: "Buggy"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -BLUE Buggy- [ST-25]"
+  - value: "Jewelry Bonney"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -GREEN Jewelry Bonney- [ST-24]"
+  - value: "Shanks"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -RED Shanks- [ST-23]"
+  - value: "YELLOW Charlotte Katakuri"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -YELLOW Charlotte Katakuri- [ST-20]"
+  - value: "Smoker"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -BLACK Smoker- [ST-19]"
+  - value: "PURPLE Monkey D. Luffy"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -PURPLE Monkey.D.Luffy- [ST-18]"
+  - value: "Donquixote Doflamingo"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -BLUE Donquixote Doflamingo- [ST-17]"
+  - value: "Edward Newgate"
+    category: one_piece_tcg
+    rows: 25
+    jp_set: "STARTER DECK -RED Edward.Newgate- [ST-15]"
+  - value: "3D2Y"
+    category: one_piece_tcg
+    rows: 17
+    jp_set: "STARTER DECK -3D2Y-[ST-14]"
+  - value: "Zoro and Sanji"
+    category: one_piece_tcg
+    rows: 17
+    jp_set: "STARTER DECK -Zoro and Sanji- [ST-12]"
+  - value: "YELLOW Eustass \"Captain\" Kid"
+    category: one_piece_tcg
+    rows: 15
+    jp_set: "STARTER DECK -YELLOW Eustass\"Captain\"Kid- [ST-36]"
+  - value: "RED/BLACK Sabo"
+    category: one_piece_tcg
+    rows: 15
+    jp_set: "STARTER DECK -RED/BLACK Sabo- [ST-35]"
+  - value: "PURPLE Charlotte Katakuri"
+    category: one_piece_tcg
+    rows: 15
+    jp_set: "STARTER DECK -PURPLE Charlotte Katakuri- [ST-34]"
+  - value: "BLUE Kuzan"
+    category: one_piece_tcg
+    rows: 15
+    jp_set: "STARTER DECK -BLUE Kuzan- [ST-33]"
+  - value: "GREEN Roronoa Zoro"
+    category: one_piece_tcg
+    rows: 15
+    jp_set: "STARTER DECK -GREEN Roronoa Zoro- [ST-32]"
+  - value: "RED Monkey D. Luffy"
+    category: one_piece_tcg
+    rows: 15
+    jp_set: "STARTER DECK -RED Monkey.D.Luffy- [ST-31]"
+  - value: "Premium Card Collection - Best Selection vol.4"
+    category: one_piece_tcg
+    rows: 12
+    jp_set: "プレミアムカードコレクション - ベストセレクション vol.4 -"
+  - value: "Premium Card Collection - Best Selection vol.5"
+    category: one_piece_tcg
+    rows: 12
+    jp_set: "プレミアムカードコレクション - ベストセレクション vol.5 -"
+  - value: "Premium Card Collection - Best Selection vol.6"
+    category: one_piece_tcg
+    rows: 12
+    jp_set: "プレミアムカードコレクション - ベストセレクション vol.6 -"
+  - value: "Premium Card Collection - Best Selection vol.1"
+    category: one_piece_tcg
+    rows: 12
+    jp_set: "プレミアムカードコレクション - ベストセレクションvol.1 -"
+  - value: "Premium Card Collection - Best Selection vol.2"
+    category: one_piece_tcg
+    rows: 12
+    jp_set: "プレミアムカードコレクション - ベストセレクションvol.2 -"
+  - value: "Premium Card Collection - Best Selection vol.3"
+    category: one_piece_tcg
+    rows: 12
+    jp_set: "プレミアムカードコレクション-ベストセレクションvol.3-"
+  - value: "Admirable Collection vol.1"
+    category: one_piece_tcg
+    rows: 2
+    jp_set: "Admirable Collection vol.1"
+  # ── dragonball_scg ──
+  - value: "Promo Cards"
+    category: dragonball_scg
+    rows: 1592
+    jp_set: "Promotion Cards"
+  - value: "Blazing Aura"
+    category: dragonball_scg
+    rows: 394
+    jp_set: "BOOSTER PACK -BLAZING AURA- [FB02]"
+  - value: "Manga Booster 02"
+    category: dragonball_scg
+    rows: 394
+    jp_set: "MANGA BOOSTER 02 [SB02]"
+  - value: "New Adventure"
+    category: dragonball_scg
+    rows: 365
+    jp_set: "BOOSTER PACK -NEW ADVENTURE- [FB05]"
+  - value: "Manga Booster 01"
+    category: dragonball_scg
+    rows: 326
+    jp_set: "MANGA BOOSTER 01 [SB01]"
+  - value: "Wish for Shenron"
+    category: dragonball_scg
+    rows: 310
+    jp_set: "BOOSTER PACK -WISH FOR SHENRON- [FB07]"
+  - value: "Rivals Clash"
+    category: dragonball_scg
+    rows: 309
+    jp_set: "BOOSTER PACK -RIVALS CLASH- [FB06]"
+  - value: "Raging Roar"
+    category: dragonball_scg
+    rows: 240
+    jp_set: "BOOSTER PACK -RAGING ROAR- [FB03]"
+  - value: "Dual Evolution"
+    category: dragonball_scg
+    rows: 223
+    jp_set: "BOOSTER PACK -DUAL EVOLUTION- [FB09]"
+  - value: "Ultra Limit"
+    category: dragonball_scg
+    rows: 220
+    jp_set: "BOOSTER PACK -ULTRA LIMIT- [FB04]"
+  - value: "Awakened Pulse"
+    category: dragonball_scg
+    rows: 208
+    jp_set: "BOOSTER PACK -AWAKENED PULSE- [FB01]"
+  - value: "Cross Force"
+    category: dragonball_scg
+    rows: 188
+    jp_set: "BOOSTER PACK CROSS FORCE [FB10]"
+  - value: "Saiyan's Pride"
+    category: dragonball_scg
+    rows: 187
+    jp_set: "BOOSTER PACK -SAIYAN’S PRIDE- [FB08]"
+  - value: "Starter Deck EX The Phase of Evolution"
+    category: dragonball_scg
+    rows: 60
+    jp_set: "STARTER DECK EX THE PHASE OF EVOLUTION [FS11]"
+  - value: "Starter Deck EX The Beat of Ki"
+    category: dragonball_scg
+    rows: 59
+    jp_set: "STARTER DECK EX THE BEAT OF KI [FS12]"
+  - value: "Starter Deck EX Giblet"
+    category: dragonball_scg
+    rows: 54
+    jp_set: "STARTER DECK EX GIBLET [FS10]"
+  - value: "Starter Deck EX Shallot"
+    category: dragonball_scg
+    rows: 54
+    jp_set: "STARTER DECK EX SHALLOT [FS09]"
+  - value: "Starter Deck Vegeta (Mini) Super Saiyan 3"
+    category: dragonball_scg
+    rows: 39
+    jp_set: "STARTER DECK -VEGETA(MINI) SUPER SAIYAN 3- [FS08]"
+  - value: "Starter Deck Son Goku"
+    category: dragonball_scg
+    rows: 32
+    jp_set: "STARTER DECK SON GOKU [FS01]"
+  - value: "Starter Deck Vegeta"
+    category: dragonball_scg
+    rows: 29
+    jp_set: "STARTER DECK VEGETA [FS02]"
+  - value: "Starter Deck Bardock"
+    category: dragonball_scg
+    rows: 28
+    jp_set: "STARTER DECK BARDOCK [FS05]"
+  - value: "Starter Deck Frieza"
+    category: dragonball_scg
+    rows: 28
+    jp_set: "STARTER DECK FRIEZA [FS04]"
+  - value: "Starter Deck Broly"
+    category: dragonball_scg
+    rows: 28
+    jp_set: "STARTER DECK BROLY [FS03]"
+  - value: "Starter Deck Vegeta (Mini)"
+    category: dragonball_scg
+    rows: 24
+    jp_set: "STARTER DECK -VEGETA(MINI)- [FS07]"
+  - value: "Energy Marker Pack 01"
+    category: dragonball_scg
+    rows: 24
+    jp_set: "エナジーマーカーパック01"
+  - value: "Starter Deck Son Goku (Mini)"
+    category: dragonball_scg
+    rows: 23
+    jp_set: "STARTER DECK -SON GOKU(MINI)- [FS06]"
+  - value: "CHAMPIONSHIP 2025-2026 JAPAN FINALS TOP4"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "CHAMPIONSHIP 2025-2026 JAPAN FINALS TOP4"
+  - value: "CHAMPIONSHIP 26-27 WAVE1"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "CHAMPIONSHIP 26-27 WAVE1"
+  - value: "2nd ANNIVERSARY SET"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "2nd ANNIVERSARY SET"
+  # ── gundam_tcg ──
+  - value: "Promo Cards"
+    category: gundam_tcg
+    rows: 403
+    jp_set: "Promotion Card"
+  - value: "Steel Requiem"
+    category: gundam_tcg
+    rows: 260
+    jp_set: "Steel Requiem[GD03]"
+  - value: "Newtype Rising"
+    category: gundam_tcg
+    rows: 257
+    jp_set: "Newtype Rising [GD01]"
+  - value: "Phantom Aria"
+    category: gundam_tcg
+    rows: 238
+    jp_set: "Phantom Aria [GD04]"
+  - value: "Dual Impact"
+    category: gundam_tcg
+    rows: 229
+    jp_set: "Dual Impact [GD02]"
+  - value: "Limited Box Beta Ver."
+    category: gundam_tcg
+    rows: 162
+    jp_set: "リミテッドBOX Ver.β"
+  - value: "Freedom Ascension"
+    category: gundam_tcg
+    rows: 135
+    jp_set: "Freedom Ascension [GD05]"
+  - value: "Eternal Nexus"
+    category: gundam_tcg
+    rows: 125
+    jp_set: "Eternal Nexus [EB01]"
+  - value: "SEED Strike"
+    category: gundam_tcg
+    rows: 92
+    jp_set: "SEED Strike [ST04]"
+  - value: "Zeon's Rush"
+    category: gundam_tcg
+    rows: 92
+    jp_set: "Zeon's Rush [ST03]"
+  - value: "Heroic Beginnings"
+    category: gundam_tcg
+    rows: 92
+    jp_set: "Heroic Beginnings [ST01]"
+  - value: "Wings of Advance"
+    category: gundam_tcg
+    rows: 88
+    jp_set: "Wings of Advance [ST02]"
+  - value: "Iron Bloom"
+    category: gundam_tcg
+    rows: 87
+    jp_set: "Iron Bloom [ST05]"
+  - value: "Edition Beta"
+    category: gundam_tcg
+    rows: 79
+    jp_set: "Edition Beta"
+  - value: "Destiny Ignition"
+    category: gundam_tcg
+    rows: 62
+    jp_set: "Destiny Ignition [ST09]"
+  - value: "Flash of Radiance"
+    category: gundam_tcg
+    rows: 53
+    jp_set: "Flash of Radiance [ST08]"
+  - value: "Celestial Drive"
+    category: gundam_tcg
+    rows: 51
+    jp_set: "Celestial Drive [ST07]"
+  - value: "Clan Unity"
+    category: gundam_tcg
+    rows: 51
+    jp_set: "Clan Unity [ST06]"
+  - value: "Generation Pulse"
+    category: gundam_tcg
+    rows: 51
+    jp_set: "Generation Pulse [ST10]"
+  - value: "Premium Card Collection GQuuuuuuX"
+    category: gundam_tcg
+    rows: 7
+    jp_set: "Premium Card Collection GUNDAM ASSEMBLE Set -Mobile Suit Gundam GQuuuuuuX- [PC02A]"
+  - value: "Premium Card Collection IBO"
+    category: gundam_tcg
+    rows: 7
+    jp_set: "Premium Card Collection GUNDAM ASSEMBLE Set -Mobile Suit Gundam IRON-BLOODED ORPHANS- [PC01A]"

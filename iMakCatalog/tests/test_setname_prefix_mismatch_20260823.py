@@ -30,7 +30,7 @@ class TestPrefixMismatch(unittest.TestCase):
         """本番データで 0件 (増えたら別セットの名前が入っている)."""
         for cat in ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg"):
             res = audit_mod.audit([cat])
-            prefix_mismatch = res[-1]
+            prefix_mismatch = res[-2]  # 末尾は unregistered (§0b)
             self.assertEqual(prefix_mismatch, [], f"{cat}: 別セット名 {prefix_mismatch[:3]}")
 
 
