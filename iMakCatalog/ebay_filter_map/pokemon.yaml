@@ -99,25 +99,251 @@ set:
     ebay: "Swsh12: Sword & Shield - Silver Tempest"
     note: HQ 2026-08-18 コード形裁定 (旧 "Sword & Shield - Silver Tempest", 125行)
 
+  # ── 2026-08-22 未マップ弾の仕分けで追加 (71種 / 1,872行) ──────────────────
+  #   出典: eBay master (cat 183454 / EBAY_US / 2026-08-22 取得) の verbatim。
+  #   `_input/ebay_aspects_183454_2026-08-22.json` の Set.by_game['Pokémon TCG'] に
+  #   実在する値だけを採った (完全一致のみ。似ている値は採っていない)。
+  #   仕分け: requests/2026-08-21_hq_unmapped_sets_175_response.md
+  #   ★ set_code ではなく set (公式名ベタ一致) で登録する。コードは衝突する
+  #     (SC = シャイニーコレクション と スターターセットVMAX、Bk = バトルスタート
+  #      デッキ と バトル強化デッキ が同じ頭字)。
+  - source: "ポケモンカードゲーム ワールドチャンピオンズパック"
+    ebay: "World Champions Pack"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 108行)"
+  - source: "ポケモンカードゲームBW コンセプトパック「EXバトルブースト」"
+    ebay: "Ex Battle Boost"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 93行)"
+  - source: "「ファミリーポケモンカードゲーム」"
+    ebay: "Sml: Sun & Moon Family Pokemon Card Game"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 57行)"
+  - source: "ポケモンカードゲームXY 「メガマスターデッキビルドBOX パワースタイル」"
+    ebay: "M Master Deck Build Box Power Style"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 57行)"
+  - source: "ポケモンカードゲームXY 「メガマスターデッキビルドBOX スピードスタイル」"
+    ebay: "M Master Deck Build Box Speed Style"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 57行)"
+  - source: "ポケモンカードゲームBW みんなのWAKUWAKUバトル"
+    ebay: "Everyone's Exciting Battle"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 55行)"
+  - source: "スターターデッキ＆ビルドセット「古代のコライドンex」"
+    ebay: "Sv: Ancient Koraidon Ex Starter Deck & Build Set"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 53行)"
+  - source: "スターターデッキ＆ビルドセット「未来のミライドンex」"
+    ebay: "Sv: Future Miraidon Ex Starter Deck & Build Set"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 53行)"
+  - source: "スペシャルデッキセットex フシギバナ・リザードン・カメックス"
+    ebay: "Sv: Venusaur, Charizard & Blastoise Special Deck Set"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 52行)"
+  - source: "ポケモンカードゲームBW 「トッププレイヤーが選ぶ100＋40枚 マスターデッキビルドBOX EX」"
+    ebay: "Master Deck Build Box Ex"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 51行)"
+  - source: "デッキビルドBOX「バトルパートナーズ」"
+    ebay: "SVN: Battle Partners Deck Build Box"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 45行)"
+  - source: "ポケモンカードゲームXY はじめてセット"
+    ebay: "Xy Beginning Set"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 45行)"
+  - source: "デッキビルドBOX ステラミラクル"
+    ebay: "Sv: Stellar Miracle Deck Build Box"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 44行)"
+  - source: "スターターセットVMAX リザードン"
+    ebay: "SC: Charizard Starter Set Vmax"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 42行)"
+  - source: "ポケモンカードゲーム 強化パック「ロストリンク」"
+    ebay: "Ll: Lost Link"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 38行)"
+  - source: "デッキビルドBOX 黒炎の支配者"
+    ebay: "Sv: Ruler of the Black Flame Deck Build Box"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 38行)"
+  - source: "プレミアムトレーナーボックス TAG TEAM GX"
+    ebay: "Smj: Tag Team GX Premium Trainer Box"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 35行)"
+  - source: "プレミアムトレーナーボックス ICHIGEKI、RENGEKI"
+    ebay: "SF: Single Strike & Rapid Strike Premium Trainer Boxes"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 33行)"
+  - source: "ポケモンワールドチャンピオンシップス2023横浜 記念デッキ「ピカチュウ」"
+    ebay: "Wcs23: 2023 World Championships Yokohama Deck: Pikachu"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 32行)"
+  - source: "トレーナーバトルデッキ：ハナダシティジムのカスミ"
+    ebay: "SMK: Trainer Battle Decks"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 31行)"
+  - source: "ポケモンカードゲーム サン＆ムーン 30枚デッキ対戦セット「サトシVSロケット団」"
+    ebay: "Ash vs Team Rocket Deck Kit (Jp Exclusive)"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 30行)"
+  - source: "デッキビルドBOX「TAG TEAM GX」"
+    ebay: "Smn: Tag Team GX Deck Build Box"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 29行)"
+  - source: "プレミアムトレーナーボックスex"
+    ebay: "Sv: Premium Trainer Box Ex"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 28行)"
+  - source: "ポケモンカードゲームXY BREAK メガバトルデッキ60「メガタブンネEX」"
+    ebay: "Xyh: M Audino-Ex Mega Battle Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 26行)"
+  - source: "ポケモンカードゲームXY 対戦スタートセット30「エンブオーEX VS トゲキッスEX」"
+    ebay: "Xye: Emboar-Ex vs Togekiss-Ex Deck Kit"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 26行)"
+  - source: "ポケモンカードゲームXY スーパーレジェンドセット60「ゼルネアスEX・イベルタルEX」"
+    ebay: "Xyc: Super Legend Set: Xerneas-Ex & Yveltal-Ex"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 25行)"
+  - source: "プレミアムトレーナーボックス ソード＆シールド"
+    ebay: "Sb: Sword & Shield Premium Trainer Box"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 24行)"
+  - source: "ポケモンカードゲームBW バトルテーマデッキ「ビクティニ」"
+    ebay: "Battle Theme Deck: Victini"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 24行)"
+  - source: "ポケモンカードゲームXY メガバトルデッキ60「リザードンEX」"
+    ebay: "Xya: M Charizard-Ex Mega Battle Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 22行)"
+  - source: "スターターセット テラスタイプ：ステラ ニンフィアex"
+    ebay: "Sv: Sylveon Ex Stellar Tera Type Starter Set"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 22行)"
+  - source: "スターターセット テラスタイプ：ステラ ソウブレイズex"
+    ebay: "Sv: Ceruledge Ex Stellar Tera Type Starter Set"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 22行)"
+  - source: "バトルマスターデッキテラスタルリザードンex"
+    ebay: "Sv: Terastal Charizard Ex Battle Master Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 21行)"
+  - source: "スターターセットex ピカチュウex&パーモット"
+    ebay: "Sv: Ex Starter Set Pikachu Ex & Pawmot"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 21行)"
+  - source: "ポケモンカードゲームBW バトル強化デッキ60「レシラムEX」"
+    ebay: "Bkr: Reshiram-Ex Battle Strength Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 20行)"
+  - source: "ポケモンカードゲームBW バトル強化デッキ60「ゼクロムEX」"
+    ebay: "Bkz: Zekrom-Ex Battle Strength Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 20行)"
+  - source: "ポケモンカードゲームBW バトル強化デッキ60「ブラックキュレムEX」"
+    ebay: "Bkb: Black Kyurem-Ex Battle Strength Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 20行)"
+  - source: "ポケモンカードゲームBW バトル強化デッキ60「ホワイトキュレムEX」"
+    ebay: "Bkw: White Kyurem-Ex Battle Strength Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 20行)"
+  - source: "スターターセットex マリィのモルペコ＆オーロンゲex"
+    ebay: "Sv: Ex Starter Set Marnie's Morpeko & Grimmsnarl Ex"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 20行)"
+  - source: "ポケモンカードゲームXY BREAK パーフェクトバトルデッキ60「ジガルデEX」"
+    ebay: "Xyg: Zygarde-Ex Perfect Battle Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 19行)"
+  - source: "ポケモンカードゲームXY メガバトルデッキ60「レックウザEX」"
+    ebay: "Xyd: M Rayquaza-Ex Mega Battle Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 19行)"
+  - source: "ポケモンカードゲームXY ハイパーメタルチェーンデッキ60「ディアルガEX+ギルガルドEX」"
+    ebay: "Xyb: Dialga-Ex + Aegislash-Ex Hyper Metal Chain Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 19行)"
+  - source: "スターターセットex ダイゴのダンバル＆メタグロスex"
+    ebay: "Sv: Ex Starter Set Steven's Beldum & Metagross Ex"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 19行)"
+  - source: "バトルマスターデッキパオジアンex"
+    ebay: "Sv: Chien-Pao Ex Battle Master Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 19行)"
+  - source: "ポケモンカードゲームBW 「最強爆流コンボデッキ60 カメックス＋キュレムEX」"
+    ebay: "Blastoise + Kyurem-Ex Combo Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 19行)"
+  - source: "ポケモンカードゲームBW 「サザンドラデッキ30」"
+    ebay: "Hydreigon Half Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 18行)"
+  - source: "ポケモンカードゲームBW 「ガブリアスデッキ30」"
+    ebay: "Garchomp Half Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 18行)"
+  - source: "ポケモンカードゲームBW バトル強化デッキ30「ケルディオ」"
+    ebay: "Keldeo Battle Strength Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 18行)"
+  - source: "ポケモンカードゲームBW プラズマ団バトルギフトセット"
+    ebay: "Team Plasma Battle Gift Set"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 18行)"
+  - source: "ポケモンカードゲームXY BREAK コンボデッキ60「ゴルダックBREAK+パルキアEX」"
+    ebay: "Xyf: Golduck Break + Palkia-Ex Combo Deck"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 16行)"
+  - source: "ポケモンカードゲームBW バトルギフトセット「ボルトロスVSトルネロス」 （トルネロスデッキ）"
+    ebay: "Battle Gift Set: Thundurus vs Tornadus"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 16行)"
+  - source: "ポケモンカードゲームBW バトルギフトセット「ボルトロスVSトルネロス」 （ボルトロスデッキ）"
+    ebay: "Battle Gift Set: Thundurus vs Tornadus"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 16行)"
+  - source: "ポケモンカードゲームXY 「ゼルネアスデッキ30」"
+    ebay: "Xerneas Half Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 15行)"
+  - source: "ポケモンカードゲームXY 「イベルタルデッキ30」"
+    ebay: "Yveltal Half Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 15行)"
+  - source: "ポケモンカードゲーム エキスパートデッキ リーフィアVSメタグロス ＋Online（リーフィアデッキ）"
+    ebay: "Leafeon vs Metagross Expert Deck (Leafeon)"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 15行)"
+  - source: "ポケモンカードゲームBW バトル強化デッキ ビリジオン"
+    ebay: "BK: Virizion Battle Strength Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 14行)"
+  - source: "ポケモンカードゲームBW バトル強化デッキ テラキオン"
+    ebay: "BK: Terrakion Battle Strength Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 14行)"
+  - source: "ポケモンカードゲームBW バトル強化デッキ コバルオン"
+    ebay: "BK: Cobalion Battle Strength Deck"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 14行)"
+  - source: "ポケモンカードゲーム コレクションパック レジギガスLV.X"
+    ebay: "Ptr: Regigigas Lv.X Collection Pack"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 12行)"
+  - source: "ポケモンカードゲーム コレクションパック シェイミLV.X"
+    ebay: "Pts: Shaymin Lv.X Collection Pack"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 12行)"
+  - source: "ポケモンカードゲーム コレクションパック ミュウツーLV.X"
+    ebay: "Ptm: Mewtwo Lv.X Collection Pack"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 12行)"
+  - source: "ポケモンカードゲーム バトルスタートデッキ ライチュウ"
+    ebay: "Battle Starter Deck (Raichu)"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 11行)"
+  - source: "ポケモンカードゲーム バトルスタートデッキ ドダイトス"
+    ebay: "Battle Starter Deck (Torterra)"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 10行)"
+  - source: "ポケモンカードゲームXY BREAK 進化パック「ライチュウBREAK」"
+    ebay: "Snp: Raichu Break Evolution Pack"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 9行)"
+  - source: "ポケモンカードゲームXY BREAK 進化パック「オンバーンBREAK」"
+    ebay: "Snp: Noivern Break Evolution Pack"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 9行)"
+  - source: "ポケモンカードゲーム バトルスタートデッキ ブーバーン"
+    ebay: "Battle Starter Deck (Magmortar)"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 9行)"
+  - source: "VMAXスペシャルセット"
+    ebay: "Sp2: Vmax Special Set"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 8行)"
+  - source: "「ザシアン＋ザマゼンタBOX」"
+    ebay: "Sp1: Zacian + Zamazenta Box"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 7行)"
+  - source: "ポケモンカードゲーム サン&ムーン ピカチュウと新しい仲間たち"
+    ebay: "Sm0: Pikachu's New Friends"
+    note: "2026-08-22 eBay master 実在値 (code 一致 / 4行)"
+  - source: "ポケモンカードゲームBW コレクションシート 旅立ちの仲間 ツタージャ"
+    ebay: "Cs1: Journey Partners Collection Sheet"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 3行)"
+  - source: "ポケモンカードゲームBW コレクションシート 旅立ちの仲間 ポカブ"
+    ebay: "Cs1: Journey Partners Collection Sheet"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 3行)"
+  - source: "ポケモンカードゲームBW コレクションシート 旅立ちの仲間 ミジュマル"
+    ebay: "Cs1: Journey Partners Collection Sheet"
+    note: "2026-08-22 eBay master 実在値 (name 一致 / 3行)"
+
 # ============================================================================
 # Set code — DB の product_id prefix から抽出. api._row_to_dict が自動でフォールバック
 # ============================================================================
 set_code:
   # ----- Scarlet & Violet (SV / SVxx) -----
   - source: SV1V
-    ebay: Violet ex
+    ebay: "Sv1v: Violet Ex"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Violet ex')"
     note: REVIEW eBay 値
     year: 2023
   - source: SV1S
-    ebay: Scarlet ex
+    ebay: "Sv1s: Scarlet Ex"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Scarlet ex')"
     note: REVIEW eBay 値
     year: 2023
   - source: SV2D
-    ebay: Clay Burst
+    ebay: "Sv2d: Clay Burst"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Clay Burst')"
     note: REVIEW eBay 値
     year: 2023
   - source: SV2P
-    ebay: Snow Hazard
+    ebay: "Sv2p: Snow Hazard"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Snow Hazard')"
     note: REVIEW eBay 値
     year: 2023
   - source: SV2a
@@ -125,11 +351,13 @@ set_code:
     note: 拡張パック「ポケモンカード151」 — REVIEW eBay 値
     year: 2023
   - source: SV3
-    ebay: Ruler of the Black Flame
+    ebay: "Sv3: Ruler of the Black Flame"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Ruler of the Black Flame')"
     note: 拡張パック「黒炎の支配者」
     year: 2023
   - source: SV3a
-    ebay: Raging Surf
+    ebay: "Sv3a: Raging Surf"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Raging Surf')"
     note: REVIEW eBay 値
     year: 2023
   - source: SV4
@@ -145,19 +373,23 @@ set_code:
     note: REVIEW eBay 値
     year: 2024
   - source: SV4a
-    ebay: Shiny Treasure ex
+    ebay: "Sv4a: Shiny Treasure Ex"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Shiny Treasure ex')"
     note: ハイクラスパック「シャイニートレジャーex」
     year: 2023
   - source: SV5K
-    ebay: Wild Force
+    ebay: "Sv5k: Wild Force"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Wild Force')"
     note: REVIEW eBay 値
     year: 2024
   - source: SV5M
-    ebay: Cyber Judge
+    ebay: "Sv5m: Cyber Judge"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Cyber Judge')"
     note: REVIEW eBay 値
     year: 2024
   - source: SV5a
-    ebay: Crimson Haze
+    ebay: "Sv5a: Crimson Haze"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Crimson Haze')"
     note: REVIEW eBay 値
     year: 2024
   - source: SV6
@@ -165,19 +397,23 @@ set_code:
     note: 拡張パック「変幻の仮面」 — REVIEW eBay 値
     year: 2024
   - source: SV6a
-    ebay: Night Wanderer
+    ebay: "Sv6a: Night Wanderer"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Night Wanderer')"
     note: REVIEW eBay 値
     year: 2024
   - source: SV7
-    ebay: Stellar Miracle
+    ebay: "Sv7: Stellar Miracle"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Stellar Miracle')"
     note: 拡張パック「ステラミラクル」 — REVIEW eBay 値
     year: 2024
   - source: SV7a
-    ebay: Paradise Dragona
+    ebay: "Sv7a: Paradise Dragona"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Paradise Dragona')"
     note: REVIEW eBay 値
     year: 2024
   - source: SV8
-    ebay: Super Electric Breaker
+    ebay: "Sv8: Super Electric Breaker"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Super Electric Breaker')"
     note: 拡張パック「超電ブレイカー」 — REVIEW eBay 値
     year: 2024
   - source: SV8a
@@ -189,7 +425,8 @@ set_code:
     note: 拡張パック「バトルパートナーズ」 — REVIEW eBay 値
     year: 2025
   - source: SV9a
-    ebay: Heat Wave Arena
+    ebay: "Sv9a: Heat Wave Arena"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Heat Wave Arena')"
     note: REVIEW eBay 値
     year: 2025
   - source: SV10
@@ -197,11 +434,13 @@ set_code:
     note: 拡張パック「ロケット団の栄光」 — REVIEW eBay 値
     year: 2025
   - source: SV11B
-    ebay: Black Bolt
+    ebay: "SV11B: Black Bolt"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Black Bolt')"
     note: 拡張パック「ブラックボルト」 — REVIEW eBay 値
     year: 2025
   - source: SV11W
-    ebay: White Flare
+    ebay: "SV11W: White Flare"
+    note: "2026-08-22 eBay master verbatim へ (旧 'White Flare')"
     note: 拡張パック「ホワイトフレア」 — REVIEW eBay 値
     year: 2025
   - source: SVD
@@ -215,11 +454,13 @@ set_code:
 
   # ----- Sword & Shield (S / Sxa) -----
   - source: S1H
-    ebay: Shield
+    ebay: "S1h: Shield"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Shield')"
     note: 拡張パック「シールド」(catalog set_name 裏取り 2026-06-21、旧swap是正)
     year: 2019
   - source: S1W
-    ebay: Sword
+    ebay: "S1w: Sword"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Sword')"
     note: 拡張パック「ソード」(catalog set_name 裏取り 2026-06-21、旧swap是正)
     year: 2019
   - source: S4a
@@ -227,51 +468,63 @@ set_code:
     note: ハイクラスパック「シャイニースターV」
     year: 2020
   - source: S6a
-    ebay: Eevee Heroes
+    ebay: "S6a: Eevee Heroes"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Eevee Heroes')"
     note: 拡張パック「イーブイヒーローズ」 — REVIEW eBay 値
     year: 2021
   - source: S7R
-    ebay: Blue Sky Stream
+    ebay: "S7r: Blue Sky Stream"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Blue Sky Stream')"
     note: 拡張パック「蒼空ストリーム」 — HQ web確定 2026-06-07 (旧"Skyscraping Perfect"はS7D摩天の名=汚染→訂正)
     year: 2021
   - source: S8a
-    ebay: 25th Anniversary Collection
+    ebay: "S8a: 25th Anniversary Collection"
+    note: "2026-08-22 eBay master verbatim へ (旧 '25th Anniversary Collection')"
     note: ハイクラスパック「25thアニバーサリーコレクション」
     year: 2021
   - source: S8b
-    ebay: VMAX Climax
+    ebay: "S8b: Vmax Climax"
+    note: "2026-08-22 eBay master verbatim へ (旧 'VMAX Climax')"
     note: ハイクラスパック「VMAXクライマックス」
     year: 2021
   - source: S9
-    ebay: Star Birth
+    ebay: "S9: Star Birth"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Star Birth')"
     note: 拡張パック「スターバース」
     year: 2022
   - source: S9a
-    ebay: Battle Region
+    ebay: "S9a: Battle Region"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Battle Region')"
     note: REVIEW eBay 値
     year: 2022
   - source: S10D
-    ebay: Time Gazer
+    ebay: "S10d: Time Gazer"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Time Gazer')"
     note: REVIEW eBay 値
     year: 2022
   - source: S10P
-    ebay: Space Juggler
+    ebay: "S10p: Space Juggler"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Space Juggler')"
     note: REVIEW eBay 値
     year: 2022
   - source: S10a
-    ebay: Dark Phantasma
+    ebay: "S10a: Dark Phantasma"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Dark Phantasma')"
     note: REVIEW eBay 値
     year: 2022
   - source: S11
-    ebay: Lost Abyss
+    ebay: "S11: Lost Abyss"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Lost Abyss')"
     note: 拡張パック「ロストアビス」
     year: 2022
   - source: S11a
-    ebay: Incandescent Arcana
+    ebay: "S11a: Incandescent Arcana"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Incandescent Arcana')"
     note: REVIEW eBay 値
     year: 2022
   - source: S12
-    ebay: Paradigm Trigger
+    ebay: "S12: Paradigm Trigger"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Paradigm Trigger')"
     note: 拡張パック「パラダイムトリガー」
     year: 2022
   - source: S12a
@@ -285,7 +538,8 @@ set_code:
     note: ハイクラスパック「TAG TEAM GX タッグオールスターズ」
     year: 2019
   - source: SM8b
-    ebay: GX Ultra Shiny
+    ebay: "Sm8b: GX Ultra Shiny"
+    note: "2026-08-22 eBay master verbatim へ (旧 'GX Ultra Shiny')"
     note: ハイクラスパック「GXウルトラシャイニー」
     year: 2018
   - source: SM4p
@@ -325,7 +579,8 @@ set_code:
       = "Abyss Eye" (TCGplayer 'M5: Abyss Eye' / pokemon-card.com/ex/m5 で確認 2026-07-24)。
     year: 2026
   - source: SI
-    ebay: Start Deck 100
+    ebay: "Si: Start Deck 100"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Start Deck 100')"
     note: >-
       スタートデッキ100 (/414, 419件)。set 全欠を Advisor 監査で検出 → set backfill (2026-07-28)。
       eBay/TCGplayer facet = "Start Deck 100" (TCGplayer 'Venusaur V - SI: Start Deck 100' で確認)。
@@ -354,7 +609,8 @@ set_code:
     note: 拡張パック「ガイアボルケーノ」
     year: 2015
   - source: BW6
-    ebay: Freeze Bolt
+    ebay: "Bw6: Freeze Bolt"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Freeze Bolt')"
     note: REVIEW eBay 値
     year: 2012
   - source: DPt
@@ -390,18 +646,22 @@ set_code:
     note: コンセプトパック マグマ団VSアクア団 ダブルクライシス — eBay/TCGplayer慣行値 (2026-06-21 web確証)
     year: 2014
   - source: CP2
-    ebay: Legendary Shine Collection
+    ebay: "CP2: Legendary Shine Collection"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Legendary Shine Collection')"
     note: コンセプトパック レジェンドキラコレクション — eBay/TCGplayer慣行値 (2026-06-21 web確証)
     year: 2015
   - source: CP3
-    ebay: PokeKyun Collection
+    ebay: "CP3: PokeKyun Collection"
+    note: "2026-08-22 eBay master verbatim へ (旧 'PokeKyun Collection')"
     note: コンセプトパック ポケキュンコレクション — eBay/TCGplayer慣行値 (2026-06-21 web確証)
     year: 2015
   - source: CP4
-    ebay: Premium Champion Pack
+    ebay: "CP4: Premium Champion Pack"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Premium Champion Pack')"
     note: REVIEW eBay 値
   - source: CP5
-    ebay: Mythical & Legendary Dream Shine Collection
+    ebay: "Cp5: Mythical & Legendary Dream Shine Collection"
+    note: "2026-08-22 eBay master verbatim へ (旧 'Mythical & Legendary Dream Shine Collection')"
     note: コンセプトパック 幻・伝説ドリームキラコレクション — eBay/TCGplayer慣行値 (2026-06-21 web確証)
     year: 2016
   - source: CP6

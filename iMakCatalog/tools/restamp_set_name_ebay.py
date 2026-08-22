@@ -64,6 +64,8 @@ SOURCE = "restamp_from_filter_map_20260821"
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--only-empty", action="store_true",
+                    help="今の値が空欄の行だけ埋める (既存値は一切上書きしない)")
     ap.add_argument("--category", default="pokemon_tcg",
                     help="'all' で全カテゴリ (既定: pokemon_tcg のみ。他は凍結)")
     args = ap.parse_args()
@@ -94,6 +96,14 @@ def main():
         #       -> 'Sm-P: Sun & Moon Promos' は改悪。
         #   上書きしてよいのは 空欄 か 一覧外の値 のときだけ。
         if stored and stored in _EBAY_OK.get(r["category"], set()):
+            kept += 1
+            continue
+        # --only-empty: 空欄を埋めるだけ。既存値には触らない。
+        #   ★変換表に推測 (REVIEW) 行が残っている間の安全弁。実例 (2026-08-22):
+        #     set_code 'MC' -> 'Movie Promo' は誤りで、`スタートデッキ100 バトル
+        #     コレクション` の 766行を塗り潰す。一覧外の値なので上の格下げ禁止では
+        #     止まらない。
+        if args.only_empty and stored:
             kept += 1
             continue
         pairs[(stored or "(空)", derived)] += 1

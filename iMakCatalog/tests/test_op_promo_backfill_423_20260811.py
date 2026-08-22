@@ -140,7 +140,9 @@ class TestOtherCategoriesUnchanged(unittest.TestCase):
     BASELINES = {
         # 2026-08-21: 25th ANNIVERSARY GOLDEN BOX の1行に値が入り、空欄が1つ減った
         # 2026-08-22: プロモ弾番号 (S-P/BWP/SV-P) と Ultra 3セットを埋めて 296行 減
-        "pokemon_tcg": 3787,
+        # 2026-08-22: 未マップ弾の仕分けで 71種 (1,872行) を変換表に登録し空欄を埋めた
+        #   (3787 → 1915)。requests/2026-08-21_hq_unmapped_sets_175_response.md
+        "pokemon_tcg": 1915,
         "gundam_tcg": 6,
         "dragonball_scg": 136,
         "yugioh_tcg": 12150,
