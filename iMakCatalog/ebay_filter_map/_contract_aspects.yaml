@@ -1,0 +1,295 @@
+# eBay 35項目の決定表 (2026-08-22 制定) — **ここが唯一の口**
+#
+# 出品くん: emit=true の項目を source から読むだけ。自前で書き換えない
+# カタログ: owner=catalog の項目を埋める。出す/出さないを都度判断しない
+# 監査:     emit=false は穴として起票しない (reason が天井の根拠)
+#
+# 変えるときは この表の1行を、証拠 (実取得の出力) と日付を付けて変える。
+# 生成: tools/build_aspect_contract.py
+
+aspects:
+  - ebay_aspect: "Game"
+    source: specs.game_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 168
+    filled: 89138/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Card Name"
+    source: column.name_en
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 49333
+    filled: 88490/89138
+    decided: "2026-08-22 綴りを eBay に合わせた"
+  - ebay_aspect: "Character"
+    source: specs.character_name
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 2052
+    filled: 86403/89138
+    decided: "2026-05-30 日本語混入禁止"
+  - ebay_aspect: "Card Type"
+    source: specs.card_type_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 74
+    filled: 74412/89138
+    decided: "2026-08-22 自由入力と確認 (一覧外の値も出す)"
+  - ebay_aspect: "Age Level"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 6
+    reason: "CPSC (米国消費者製品安全委員会) の関係"
+    decided: "2026-08-22 ユーザー確定"
+  - ebay_aspect: "Speciality"
+    source: specs.speciality_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 12
+    filled: 2324/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Set"
+    source: specs.set_name_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 2290
+    filled: 74931/89138
+    decided: "2026-08-21 HQ 裁定 (コード形)"
+  - ebay_aspect: "Rarity"
+    source: specs.rarity_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 57
+    filled: 67552/89138
+    reason: "空欄8,515行は公式にレアリティ表示が無い=天井"
+    decided: "2026-08-22 実取得で確認"
+  - ebay_aspect: "Features"
+    source: specs.features_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 39
+    filled: 13195/89138
+    reason: "Holo/Reverse Holo は Features に無い (Finish の値)"
+    decided: "2026-08-22"
+  - ebay_aspect: "Manufacturer"
+    source: specs.manufacturer_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 711
+    filled: 89138/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Finish"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 4
+    reason: "現物を見ないと決まらない。公式データに foil/holo の項目が無い"
+    decided: "2026-08-22 ユーザー確定"
+  - ebay_aspect: "Attribute/MTG:Color"
+    source: specs.color_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 27
+    filled: 47594/89138
+    reason: "ポケモンのタイプはここ (取得中)"
+    decided: "2026-08-22"
+  - ebay_aspect: "Creature/Monster Type"
+    source: specs.creature_type_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 307
+    filled: 31937/89138
+    reason: "遊戯王のみ。ポケモンのタイプはここではない"
+    decided: "2026-08-22"
+  - ebay_aspect: "Autographed"
+    source: null
+    emit: false
+    owner: catalog
+    mode: SELECTION_ONLY
+    ebay_values: 2
+    reason: "サイン入りの取り扱いが無い"
+    decided: "2026-08-22 ユーザー確定"
+  - ebay_aspect: "Card Number"
+    source: specs.card_number_text
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 0
+    filled: 37481/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Language"
+    source: specs.language
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 38
+    filled: 86279/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Year Manufactured"
+    source: specs.release_year
+    emit: true
+    owner: catalog
+    mode: SELECTION_ONLY
+    ebay_values: 37
+    filled: 26543/89138
+    reason: "変換表に year の無い弾は空欄 (推測しない)"
+    decided: "2026-08-22"
+  - ebay_aspect: "Stage"
+    source: specs.stage_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 9
+    filled: 16673/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Card Size"
+    source: specs.card_size_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 3
+    filled: 86279/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Country of Origin"
+    source: fixed:Japan
+    emit: false
+    owner: listing
+    mode: SELECTION_ONLY
+    ebay_values: 244
+    reason: "PSA10 運用の固定値。出品側が持つ"
+    decided: "2026-08-22"
+  - ebay_aspect: "Vintage"
+    source: null
+    emit: false
+    owner: catalog
+    mode: SELECTION_ONLY
+    ebay_values: 2
+    reason: "定義が曖昧。出さない"
+    decided: "2026-08-22"
+  - ebay_aspect: "Signed By"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 1216
+    reason: "同上"
+    decided: "2026-08-22"
+  - ebay_aspect: "Material"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 6
+    reason: "扱いが無い"
+    decided: "2026-08-22"
+  - ebay_aspect: "Convention/Event"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 100
+    reason: "扱いが無い"
+    decided: "2026-08-22"
+  - ebay_aspect: "Franchise"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 37
+    reason: "Game で足りる"
+    decided: "2026-08-22"
+  - ebay_aspect: "Autograph Authentication"
+    source: null
+    emit: false
+    owner: catalog
+    mode: SELECTION_ONLY
+    ebay_values: 12
+    reason: "同上"
+    decided: "2026-08-22"
+  - ebay_aspect: "Autograph Format"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 3
+    reason: "同上"
+    decided: "2026-08-22"
+  - ebay_aspect: "Illustrator"
+    source: specs.illustrator
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 492
+    filled: 21130/89138
+    decided: "2026-08-22 綴りを eBay に合わせた"
+  - ebay_aspect: "HP"
+    source: specs.hp_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 0
+    filled: 16614/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Attack/Power"
+    source: specs.attack_power_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 0
+    filled: 13038/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "Defense/Toughness"
+    source: specs.defense_toughness_ebay
+    emit: true
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 0
+    filled: 1612/89138
+    decided: "2026-08-22"
+  - ebay_aspect: "California Prop 65 Warning"
+    source: null
+    emit: false
+    owner: listing
+    mode: FREE_TEXT
+    ebay_values: 0
+    reason: "出品側の運用"
+    decided: "2026-08-22"
+  - ebay_aspect: "Cost"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 0
+    reason: "eBay に値リストが無く、カード種別で意味が違う"
+    decided: "2026-08-22"
+  - ebay_aspect: "Autograph Authentication Number"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 0
+    reason: "同上"
+    decided: "2026-08-22"
+  - ebay_aspect: "Customized"
+    source: null
+    emit: false
+    owner: catalog
+    mode: FREE_TEXT
+    ebay_values: 2
+    reason: "扱いが無い"
+    decided: "2026-08-22"

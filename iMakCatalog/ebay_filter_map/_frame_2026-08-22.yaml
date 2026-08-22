@@ -55,8 +55,8 @@ aspects:
     mode: FREE_TEXT
     ebay_value_count: 307
     ebay_by_game: 0
-    source: null   # 未対応
-    filled_pct: 0
+    source: "creature_type_ebay"
+    filled_pct: 35
     filter_map_field: null   # 変換表なし
   - ebay_aspect: "Card Type"
     required: false
@@ -92,7 +92,7 @@ aspects:
     ebay_value_count: 27
     ebay_by_game: 0
     source: "color_ebay"
-    filled_pct: 17
+    filled_pct: 53
     filter_map_field: null   # 変換表なし
   - ebay_aspect: "Speciality"
     required: false
