@@ -1,0 +1,52 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "one_piece_tcg",
+      "item_id": "PSA10-86028605",
+      "target_field": "images",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "PSA10-156684617",
+      "target_field": "images",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert155570650 ONE PIECE JAPANESE 3RD ANNIVERSARY SET [SABO] #118 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert168157614 ONE PIECE JAPANESE PROMOS [TONY TONY CHOPPER ONE PIECE CHOPPER'S 1] #003 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert163920916 POKEMON JAPANESE SWORD & SHIELD VSTAR UNIVERSE [FA/RAYQUAZA VMAX VSTAR UNIVERSE] #108 (catalog S12a-108 は在る(画像あり)が人が現物と別絵柄と判断 variant欠落の疑い)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 5
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [
+    "catalog miss: 4件",
+    "error: 2件"
+  ],
+  "recurring_missing": [
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert155606219 ONE PIECE JAPANESE PROMOS [MONKEY D. LUFFY 7-ELEVEN CAMPAIGN] #003 (catalog ST13-003_P は在る(画像あり)が人が現物と別絵柄と判断 variant欠落の疑い)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 5,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert86028605 ONE PIECE JAPANESE PREMIUM CARD COLLECTION -GIRLS EDITION- [PERONA] #077 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 5,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert156684617 POKEMON JAPANESE CLL-TRADING CARD GAME CLASSIC CHARIZARD & HO-OH EX DECK [CHARMELEON] #002 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 5,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert155040105 ONE PIECE JAPANESE PREMIUM BOOSTER -ONE PIECE CARD THE BEST- STORAGE BOX SET [BOA HANCOCK] #004 (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 2,
+    "recurring_missing": 4
+  }
+}
