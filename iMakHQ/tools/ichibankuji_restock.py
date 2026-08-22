@@ -1051,6 +1051,25 @@ def pass_prefetch(n, cand_n, max_backups=1):
 
 
 # ---------------- パス ----------------
+def count_workload():
+    """『押したら何件できるか』を **検索せずに** 数える (パネルのヒント用・2026-08-22)。
+
+    PSA の `psa_hoju_fill.count_workload` と同じ役割。母数ではなく **押して出る件数**。
+    """
+    import datetime
+    try:
+        targets = get_thin_backup_ichibankuji(9999, max_backups=AUX_MAX)
+    except Exception as e:                                     # noqa: BLE001
+        return {"error": "%s: %s" % (type(e).__name__, e)}
+    today = datetime.date.today().isoformat()
+    cache = _identify_cache_load() or {}
+    ready = sum(1 for t in targets
+                if _identify_cache_fresh(cache.get(str(t["item_id"])), today)
+                and (cache.get(str(t["item_id"])) or {}).get("candidates"))
+    return {"targets": len(targets), "search": {"can": len(targets)},
+            "confirm": {"ready": ready}}
+
+
 def pass_identify(n, cand_n, live=False):
     """live=True: **まだ生きている**出品の補URL補充 (切れる前に予備を貯める)。
 

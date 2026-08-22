@@ -75,22 +75,22 @@ def test_一番くじは絵文字で見分けられる():
 
 
 def test_夜と昼で別のコマンド():
-    assert '"kuji_hoju_fill.py", "--search"' in SRC
-    assert '"kuji_hoju_fill.py", "--confirm"' in SRC
+    assert '"ichibankuji_restock.py", "prefetch-live"' in SRC
+    assert '"ichibankuji_restock.py", "hoju"' in SRC
 
 
 def test_新規出品パネルに置かれる():
     """★出品→itemID書込→補URL確保 は一連の流れ。既存メンテ側に離すと導線が切れる
     (PSA の 🆕/🩹 と同じ扱い)."""
-    i = SRC.index('if "kuji_hoju_fill.py" in cmd:')
+    i = SRC.index('if "ichibankuji_restock.py" in cmd and (')
     assert 'return "hoju"' in SRC[i:i + 200]
 
 
 def test_昼は件数を区切る():
     """確証UIは全件まとめて送信する = 出した分はやり切る必要がある。
     PSA と同じく1回10件ずつ."""
-    i = SRC.index('"kuji_hoju_fill.py", "--confirm"')
-    assert "--limit=10" in SRC[i:i + 120]
+    i = SRC.index('"ichibankuji_restock.py", "hoju"')
+    assert '"10"' in SRC[i:i + 120]
 
 
 # ── ラベルを短く / 詳細はヒント / 系統ごとに並べる (2026-08-22 ユーザー指摘) ──
@@ -124,8 +124,8 @@ def test_系統ごとに並ぶ():
     i = SRC.index("_order = (")
     body = SRC[i:i + 600]
     # PSA (kuji でない物) を先に、一番くじを後ろに置いている
-    assert body.index('"kuji_hoju_fill.py" not in') < body.index('_confirm_idx')
-    assert body.rindex('"kuji_hoju_fill.py" in') > body.index('_confirm_idx')
+    assert body.index('"ichibankuji_restock.py" not in') < body.index('_confirm_idx')
+    assert body.rindex('"ichibankuji_restock.py" in') > body.index('_confirm_idx')
 
 
 # ── 件数はヒントへ / 押すべき時は青 (2026-08-22 ユーザー指示) ────────────
@@ -168,7 +168,7 @@ def test_一番くじにも件数の印がある():
 
 def test_一番くじの件数を同じ集計で数える():
     """★片方が転んでも もう片方のヒントは出す (PSA/🌱 と同じ作り)."""
-    i = SRC.index("import kuji_hoju_fill as KJ")
+    i = SRC.index("import ichibankuji_restock as KJ")
     assert "d['kuji']=KJ.count_workload()" in SRC[i:i + 200]
     assert "d['kuji']={'error'" in SRC[i:i + 400]
 

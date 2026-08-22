@@ -1425,10 +1425,10 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "🎴 くじ補URL slice2",
         "badge": "kuji_search",
-        "tip": "一番くじ版の夜間検索。PSA の slice2 と同じ動き。候補を溜めるだけで補URL欄には書かない。",
+        "tip": "一番くじ版の夜間検索。候補と、その詳細 (新品か/送料込みか/セラー評価) を先に取って溜める。補URL欄には書かない。",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "kuji_hoju_fill.py", "--search"],
+        "cmd": ["python", "ichibankuji_restock.py", "prefetch-live", "40"],
         "params": [],
         "skip_postprocess": True,
     },
@@ -1437,11 +1437,11 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "🎴 くじ補URL slice3",
         "badge": "kuji_confirm",
-        "tip": "一番くじ版の昼の目視確認。画面は PSA と同じ物を使う。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。1回10件ずつ。",
+        "tip": "一番くじ版の昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。新品・送料込み・セラー評価で先に絞ってある。1回10件ずつ。",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         # PSA と同じく1回10件ずつ (確証UIは全件まとめて送信する = 出した分はやり切る)。
-        "cmd": ["python", "kuji_hoju_fill.py", "--confirm", "--limit=10"],
+        "cmd": ["python", "ichibankuji_restock.py", "hoju", "10"],
         "params": [],
         "skip_postprocess": True,
         # 書いた結果 (商品管理シートの補URL列) をその場で見られるようにする。
@@ -2721,7 +2721,7 @@ class ListingPanel:
                 return "hoju"      # 🆕 は出品直後専用 = 新規パネルのみ
             # ★2026-08-22: 一番くじの補URL2ボタンも **新規出品パネル**に置く
             #   (ユーザー指示)。PSA と同じ導線 = 出品→itemID→補URL確保 の並び。
-            if "kuji_hoju_fill.py" in cmd:
+            if "ichibankuji_restock.py" in cmd and ("prefetch-live" in cmd or "hoju" in cmd):
                 return "hoju"
             # 在庫あり listing を直す: 取下再出品①②③(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
             if any(s in cmd for s in ("relist_from_funnel", "relist_add_from_pending",
@@ -2816,10 +2816,10 @@ class ListingPanel:
                                 and "confirm" in sc.get("cmd", [])]
                 # ★2026-08-22: 並びが PSA / くじ / くじ / PSA になっていた (ユーザー指摘)。
                 #   `ug["hoju"]` の後ろに PSA の昼確認を足していたため。**系統ごとに固める**。
-                _order = ([i for i in ug["hoju"] if "kuji_hoju_fill.py" not in
+                _order = ([i for i in ug["hoju"] if "ichibankuji_restock.py" not in
                            " ".join(SCRIPTS[i].get("cmd", []))]
                           + _confirm_idx
-                          + [i for i in ug["hoju"] if "kuji_hoju_fill.py" in
+                          + [i for i in ug["hoju"] if "ichibankuji_restock.py" in
                              " ".join(SCRIPTS[i].get("cmd", []))])
                 _grid_named(hj, [(SCRIPTS[i]["label"], i) for i in _order])
         else:
@@ -3131,7 +3131,7 @@ class ListingPanel:
             # ★2026-08-22: 一番くじも同じ subprocess で数える (ユーザー要望)。
             #   片方が転んでも もう片方のヒントは出す。
             "try:\n"
-            "    import kuji_hoju_fill as KJ\n"
+            "    import ichibankuji_restock as KJ\n"
             "    d['kuji']=KJ.count_workload()\n"
             "except Exception as e:\n"
             "    d['kuji']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
