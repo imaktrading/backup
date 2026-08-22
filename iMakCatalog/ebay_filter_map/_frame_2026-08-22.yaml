@@ -1,5 +1,5 @@
 # eBay aspect を網羅した変換表の枠 (自動生成 / 手で編集しない)
-# 生成: 2026-08-22   取得マスタ: ebay_aspects_183454_latest.json (fetched 2026-08-21)
+# 生成: 2026-08-22   取得マスタ: ebay_aspects_183454_latest.json (fetched 2026-08-22)
 # 目的: バイヤーの検索にできるだけ乗せる。**正しい値であることが大前提**。
 # 根拠の無いものは空欄のままにする (推測で埋めない)。
 
@@ -29,7 +29,7 @@ aspects:
     ebay_value_count: 2290
     ebay_by_game: 25
     source: "set_name_ebay"
-    filled_pct: 81
+    filled_pct: 84
     filter_map_field: "set / set_code"
   - ebay_aspect: "Character"
     required: false
@@ -46,8 +46,8 @@ aspects:
     mode: FREE_TEXT
     ebay_value_count: 711
     ebay_by_game: 0
-    source: null   # 未対応
-    filled_pct: 0
+    source: "manufacturer_ebay"
+    filled_pct: 100
     filter_map_field: null   # 変換表なし
   - ebay_aspect: "Creature/Monster Type"
     required: false
@@ -82,8 +82,8 @@ aspects:
     mode: FREE_TEXT
     ebay_value_count: 39
     ebay_by_game: 0
-    source: null   # 未対応
-    filled_pct: 0
+    source: "features_ebay"
+    filled_pct: 12
     filter_map_field: null   # 変換表なし
   - ebay_aspect: "Attribute/MTG:Color"
     required: false
@@ -100,8 +100,8 @@ aspects:
     mode: FREE_TEXT
     ebay_value_count: 12
     ebay_by_game: 0
-    source: null   # 未対応
-    filled_pct: 0
+    source: "speciality_ebay"
+    filled_pct: 2
     filter_map_field: null   # 変換表なし
   - ebay_aspect: "Age Level"
     required: false
@@ -190,8 +190,8 @@ aspects:
     mode: SELECTION_ONLY
     ebay_value_count: 37
     ebay_by_game: 0
-    source: null   # 未対応
-    filled_pct: 0
+    source: "release_year"
+    filled_pct: 15
     filter_map_field: null   # 変換表なし
   - ebay_aspect: "Franchise"
     required: false
