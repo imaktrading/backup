@@ -6,8 +6,9 @@
   ① 店舗内検索 (HTTP・無料) を **新着順**で引く
   ② タイトルで落とす: コンプ品でない / 予約表記あり
   ③ 本番 (HIGH/LOW) に既にある仕入元 URL を落とす
-  ④ 残りだけ **ブラウザで開いて配送予定を読む** (1件6秒)。
-     発送日が読めた物だけ即納として採用。 読めなければ **入れない** (HQ 指示: 迷ったら落とす)
+  ④ 残りは **HTTP で商品ページを取り**、 パンくず「ガチャガチャ」+ 共有の条件表で
+     即納と読めた物だけ採用。 読めなければ **入れない** (HQ 指示: 迷ったら落とす)。
+     ブラウザを開くのは **送料の金額が要る物だけ** (静的HTMLに金額が無い)
   ⑤ 中間スプシ `rakuten_gacha` に append (M列に価格 / R列に カプセルトイ)
 
 テーマ別の枠は user 確定 (2026-08-19): サンリオ40 / めじるし30 / 猫・動物20 / お菓子10。
@@ -101,6 +102,21 @@ def build_themes(args) -> list[tuple[str, str, int]]:
         word = next((w for label, w, _ in MAKERS if label == args.maker), args.maker)
         return [(args.maker, word, args.quota or 100)]
     return MAKERS
+
+
+def detail_verdict(pre: dict) -> tuple[bool, str]:
+    """HTTP で取った商品ページを採るか。 (採る, 理由) を返す (純関数).
+
+    拾う条件は **両方**が要る (窓口 回答 `2026-08-19_gacha_implement_go_response`):
+      ① パンくずが「ガチャガチャ」   ② タイトルに 全N種 / コンプ (収集の段で済み)
+    その上で 即納だけ採る。 判定は共有の条件表 (`rakuten_delivery_rule.json`)。
+    """
+    if not pre.get("is_gacha_category"):
+        return False, "not_gacha_category"
+    verdict = rakuten_delivery.judge_message(pre.get("delivery_message") or "")
+    if verdict != rakuten_delivery.IMMEDIATE:
+        return False, verdict
+    return True, "ok"
 
 
 def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
@@ -309,23 +325,28 @@ def main(argv=None) -> int:
             try:
                 pre = rakuten_item.parse_detail_html(
                     rakuten_search.fetch(c["url"]), c["url"])
-            except Exception:  # noqa: BLE001 - 取れなければブラウザに任せる
+            except Exception:  # noqa: BLE001
                 pre = None
-            if pre is not None:
-                verdict = rakuten_delivery.judge_message(pre["delivery_message"])
-                if verdict != rakuten_delivery.IMMEDIATE:
-                    detail_rej[verdict] = detail_rej.get(verdict, 0) + 1
-                    continue
-                if pre["postage_included"] and pre["price_jpy"]:
-                    # 送料無料 = 表示価格が総額。 ブラウザは要らない
-                    detail = dict(pre)
-                    detail.update({"in_stock_now": True, "reason": "ok",
-                                   "shipping": pre["delivery_message"],
-                                   "shipping_fee": 0, "total_jpy": pre["price_jpy"]})
-                    detail_rej["http_ok"] = detail_rej.get("http_ok", 0) + 1
-                else:
-                    detail = rakuten_item.fetch_detail(driver, c["url"])
+            if pre is None:
+                # ★HTML が取れない = パンくずも配送予定も確かめられない。
+                #   ブラウザで開き直して自前判定に落とす道は塞いだ (共有表の迂回になる)。
+                #   黙って消さず **要対応**として数える (silent drop 禁止)。
+                detail_rej["fetch_fail"] += 1
+                failed.append(c["url"])
+                continue
+            ok, why = detail_verdict(pre)
+            if not ok:
+                detail_rej[why] = detail_rej.get(why, 0) + 1
+                continue
+            if pre["postage_included"] and pre["price_jpy"]:
+                # 送料無料 = 表示価格が総額。 ブラウザは要らない
+                detail = dict(pre)
+                detail.update({"in_stock_now": True, "reason": "ok",
+                               "shipping": pre["delivery_message"],
+                               "shipping_fee": 0, "total_jpy": pre["price_jpy"]})
+                detail_rej["http_ok"] = detail_rej.get("http_ok", 0) + 1
             else:
+                # ここでブラウザを開くのは **送料の金額** を読むためだけ
                 detail = rakuten_item.fetch_detail(driver, c["url"])
             if detail is None:
                 detail_rej["fetch_fail"] += 1

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from scrapers.rakuten_item import extract_shipping, judge
 from scrapers.rakuten_search import (
     is_complete_set, looks_preorder, parse_results, parse_total,
 )
@@ -71,39 +70,139 @@ def test_normal_title_is_not_preorder():
 
 
 # --------------------------------------------------------------------------
-# 即納判定 (配送予定)
+# 即納判定 — **共有の条件表だけ** を使う (2026-08-22 窓口回答)
+#   `2026-08-19_inventory_rakuten_delivery_static_response`
+#   自前の正規表現 (画面テキストの「最短8/22お届け」等) は捨てた。 残しておくと
+#   HTTP が取れなかった時に そちらだけで即納と判定でき、 共有表を迂回する
 # --------------------------------------------------------------------------
-def test_shipping_date_formats_from_real_pages():
-    assert extract_shipping("配送予定 8/20 9:00までの注文で最短8/23お届け") == "8/23"
-    assert extract_shipping("配送予定 1～2営業日内に発送") == "1～2営業日内に発送"
-    assert extract_shipping("配送予定 1〜2日以内に発送") == "1〜2日以内に発送"
+def test_self_written_shipping_regex_is_gone():
+    """判定口は1つ。 `judge` / `extract_shipping` を復活させない."""
+    from scrapers import rakuten_item
+    assert not hasattr(rakuten_item, "judge")
+    assert not hasattr(rakuten_item, "extract_shipping")
+    assert not hasattr(rakuten_item, "SHIP_DATE_RE")
 
 
-def test_judge_in_stock():
-    r = judge("配送予定\n8/20 9:00までの注文で最短8/23お届け\n配送情報")
-    assert r["in_stock_now"] and r["reason"] == "ok"
+class _Driver:
+    """`fetch_detail` に渡す最小のドライバ (ブラウザは開かない)."""
+
+    def __init__(self, html: str, text: str = "配送情報 送料無料"):
+        self.page_source = html
+        self._text = text
+        self.current_url = ""
+
+    def get(self, url):
+        self.current_url = url
+
+    def find_element(self, *a):
+        return type("E", (), {"text": self._text})()
 
 
-@pytest.mark.parametrize("text", [
-    "★こちらの商品は【2026年11月入荷予定の予約商品】です。",
-    "発売予定：2026年8月",
-    "発売予定　予約入荷待ち",
+def _page(msg: str, category: str = "553785", name: str = "ガチャガチャ") -> str:
+    """商品ページの HTML (要る所だけ). 改行は実物どおり ld+json の中に入れる."""
+    crumb = ('{"item": {"@id": "https://www.rakuten.co.jp/category/CID/"\n'
+             '   ,"name": "NAME"}}')
+    crumbs = (crumb.replace("CID", "101164").replace("NAME", "ホビー") + "\n ,"
+              + crumb.replace("CID", category).replace("NAME", name))
+    return ('<script type="application/ld+json">\n {"@type": "BreadcrumbList"\n'
+            f' ,"itemListElement": [{crumbs}]}}\n</script>'
+            'itemprop="availability" content="InStock"'
+            'itemprop="price" content="2820"'
+            f'"deliveryMessage":"{msg}"')
+
+
+_VERDICT_TO_REASON = {"immediate": ("ok", True),
+                      "preorder": ("preorder", False),
+                      "skip": ("no_shipping_info", False)}
+
+
+def _cases():
+    """ケースは **共有の条件表から読む** (窓口 回答の指示)."""
+    from rakuten_delivery import load_rule
+    return [(c["msg"], c["expect"]) for c in load_rule()["cases"]]
+
+
+@pytest.mark.parametrize("msg,expect", _cases())
+def test_fetch_detail_judges_only_by_the_shared_table(msg, expect):
+    """ブラウザ経由でも 判定は共有表と同じ結果になる."""
+    from scrapers import rakuten_item
+    reason, in_stock = _VERDICT_TO_REASON[expect]
+    d = _Driver(_page(msg))
+    res = rakuten_item.fetch_detail(d, "https://item.rakuten.co.jp/auc-yuyou/x1/", wait_sec=0)
+    assert res["in_stock_now"] is in_stock and res["reason"] == reason
+
+
+@pytest.mark.parametrize("msg", [
+    # 以前 **自前の正規表現が即納として拾っていた** 書き方。
+    # 今は共有表の答えに従う (表が後で直っても このテストは追従する)
+    "13:00までの注文で最短8/22お届け",
+    "即納｜営業日14時までのご注文で当日出荷",   # auc-toysanta 実測 2026-08-22 (30/30件)
+    "翻営業日までに発送",
 ])
-def test_judge_preorder_is_rejected(text):
-    r = judge(f"配送予定\n{text}")
-    assert not r["in_stock_now"] and r["reason"] == "preorder"
-
-
-def test_judge_without_shipping_info_is_rejected():
-    """発送日が読めない = 確証なし。 通さない (HQ 指示: 迷ったら落とす)."""
-    r = judge("配送予定\n※お届け日は目安のため、正確な情報は注文確認画面で")
-    assert not r["in_stock_now"] and r["reason"] == "no_shipping_info"
+def test_store_specific_wording_follows_the_table_not_our_own_regex(msg):
+    from rakuten_delivery import judge_message
+    from scrapers import rakuten_item
+    reason, in_stock = _VERDICT_TO_REASON[judge_message(msg)]
+    d = _Driver(_page(msg))
+    res = rakuten_item.fetch_detail(d, "https://item.rakuten.co.jp/auc-yuyou/x1/", wait_sec=0)
+    assert res["in_stock_now"] is in_stock and res["reason"] == reason
 
 
 def test_availability_instock_is_not_used():
     """在庫マークだけでは通さない (予約品も InStock を返すため)."""
-    r = judge("availability InStock 在庫あり")
-    assert not r["in_stock_now"]
+    from scrapers import rakuten_item
+    d = _Driver(_page("2026年10月発売予定"))
+    res = rakuten_item.fetch_detail(d, "https://item.rakuten.co.jp/auc-yuyou/x1/", wait_sec=0)
+    assert res["in_stock_now"] is False
+
+
+# --------------------------------------------------------------------------
+# パンくず「ガチャガチャ」 — 拾う条件のもう片方 (2026-08-22 窓口回答)
+#   `2026-08-19_gacha_implement_go_response`
+# 実測 2026-08-22 (5店40件): ガチャガチャ = カテゴリ id 553785
+# --------------------------------------------------------------------------
+def test_breadcrumb_is_parsed():
+    from scrapers.rakuten_item import parse_breadcrumb
+    assert parse_breadcrumb(_page("1〜2営業日内に発送")) == [
+        ("101164", "ホビー"), ("553785", "ガチャガチャ")]
+
+
+@pytest.mark.parametrize("category,name,ok", [
+    ("553785", "ガチャガチャ", True),
+    ("406810", "食玩・おまけ", False),      # ガチャガチャでない楽天カテゴリの例
+    ("112203", "フィギュア", False),
+])
+def test_gacha_category_gate(category, name, ok):
+    from scrapers.rakuten_item import is_gacha_category
+    assert is_gacha_category(_page("1〜2営業日内に発送", category, name)) is ok
+
+
+def test_gacha_category_is_false_when_breadcrumb_missing():
+    """読めない物を通さない (fail-closed)."""
+    from scrapers.rakuten_item import is_gacha_category
+    assert is_gacha_category('"deliveryMessage":"1〜2営業日内に発送"') is False
+    assert is_gacha_category("") is False
+
+
+def test_parse_detail_html_exposes_the_gate():
+    from scrapers.rakuten_item import parse_detail_html
+    d = parse_detail_html(_page("1〜2営業日内に発送"), "https://item.rakuten.co.jp/a/b/")
+    assert d["is_gacha_category"] is True
+    assert d["breadcrumb"] == ["ホビー", "ガチャガチャ"]
+
+
+@pytest.mark.parametrize("category,msg,ok,why", [
+    ("553785", "1〜2営業日内に発送", True, "ok"),
+    # ★条件は **両方**。 即納でもカテゴリが違えば採らない
+    ("406810", "1〜2営業日内に発送", False, "not_gacha_category"),
+    ("553785", "2026年10月発売予定", False, "preorder"),
+    ("553785", "", False, "skip"),
+])
+def test_detail_verdict_needs_both_conditions(category, msg, ok, why):
+    from run_harvest_rakuten_gacha import detail_verdict
+    from scrapers.rakuten_item import parse_detail_html
+    pre = parse_detail_html(_page(msg, category, "x"), "https://item.rakuten.co.jp/a/b/")
+    assert detail_verdict(pre) == (ok, why)
 
 
 # --------------------------------------------------------------------------
@@ -259,17 +358,6 @@ def test_unknown_maker_in_description_is_still_blank():
     assert official_url("どうぶつの森 全8種セット", "メーカー：日本オート玩具 ラインナップ") == ""
 
 
-def test_shipping_without_leading_date():
-    """「13:00までの注文で最短8/22お届け」= 頭の日付が出ない表示 (2026-08-20 実測).
-
-    日付必須にしていたため auc-yuyou が丸ごと no_shipping_info で落ちていた。
-    """
-    from scrapers.rakuten_item import extract_shipping, judge
-    t = "配送予定 13:00までの注文で最短8/22お届け ※お届け日は目安のため"
-    assert extract_shipping(t) == "8/22"
-    assert judge(t)["in_stock_now"] is True
-
-
 # --------------------------------------------------------------------------
 # 送料 (2026-08-20 user 指示: 送料無料縛りをやめて 価格+送料 で見る)
 # --------------------------------------------------------------------------
@@ -315,17 +403,6 @@ def test_fetch_detail_rejects_redirect_to_shop_top():
 
     assert rakuten_item.fetch_detail(_Dead(), "https://item.rakuten.co.jp/jugem2020/x1/",
                                      wait_sec=0) is None
-
-
-@pytest.mark.parametrize("text,ok", [
-    # auc-toysanta の2形式 (2026-08-21 実測)
-    ("配送予定 即納｜営業日14時までのご注文で当日出荷 配送情報 送料330円", True),
-    ("配送予定 14:00までの注文で最短8/22(翌日)お届け ※お届け日は目安", True),
-    ("配送情報 送料680円 ※離島", False),
-])
-def test_shipping_formats_of_toysanta(text, ok):
-    from scrapers.rakuten_item import judge
-    assert judge(text)["in_stock_now"] is ok
 
 
 # --------------------------------------------------------------------------
@@ -387,17 +464,6 @@ def test_is_snack_toy_marks_candy_included():
     assert is_snack_toy("ぷるんと蒟蒻ゼリー ミニチュアチャーム 全5種セット") is False
 
 
-@pytest.mark.parametrize("text,ok", [
-    # smltrading の2形式 (2026-08-21 実測)
-    ("配送予定 翌営業日までに発送 配送情報 送料無料", True),
-    # ★「入荷待ち」は即納ではない。 読めないまま落とすのが正しい
-    ("配送予定 入荷待ち ※注文個数によりお届け日が変わることがあります。 配送情報 送料無料", False),
-])
-def test_shipping_formats_of_smltrading(text, ok):
-    from scrapers.rakuten_item import judge
-    assert judge(text)["in_stock_now"] is ok
-
-
 # --------------------------------------------------------------------------
 # 台紙あり/なしの重複 (HQ 依頼 2026-08-20)
 # --------------------------------------------------------------------------
@@ -414,3 +480,15 @@ def test_base_title_key_keeps_different_products_apart():
     assert base_title_key("A 全5種セット") != base_title_key("B 全5種セット")
     # 弾違いは別物
     assert base_title_key("めじるし 2 全5種セット") != base_title_key("めじるし 3 全5種セット")
+
+
+def test_k_column_point_is_left_empty():
+    """K列 (ポイント) は **空**で確定 (窓口 回答 `2026-08-19_gacha_implement_go_response`).
+
+    確定値が静的HTMLに無いので推測で入れない。 ポイントのために Selenium は足さない。
+    """
+    from sheet_writer_rakuten import build_row
+    row = build_row({"url": "https://item.rakuten.co.jp/auc-yuyou/x1/",
+                     "title": "テスト 全5種セット", "price_jpy": "2820",
+                     "shipping_fee": 0, "total_jpy": "2820"})
+    assert row[11 - 1] == ""

@@ -5,66 +5,27 @@
 ★**在庫マーク (availability) は使えない**。 予約品も `InStock` を返す (実測21/21件)。
   予約品もカートに入るので当然で、 「買えるか」ではなく「いつ発送されるか」を見る必要がある。
 
-★**配送予定は JS 描画後にしか出ない**ので、 ここだけブラウザが要る (1件6秒)。
-  実測 (2026-08-19):
-    即納  kidsroom   「8/20 9:00までの注文で最短8/23お届け」
-    即納  mirakikaku 「1～2営業日内に発送」
-    即納  auc-yuyou  「1〜2日以内に発送」
-    予約  auc-yuyou  「★こちらの商品は【2026年11月入荷予定の予約商品】です。」
-    予約  kidsroom   配送予定の下は注意書きのみ (日付が出ない)
+★**即納判定は `deliveryMessage` (静的HTML) と 共有の条件表だけ**で決める
+  (`C:/dev/iMak_data/shared/rakuten_delivery_rule.json` / 窓口 8ケース検算済み)。
+  2026-08-22: ブラウザで描画後の「配送予定」欄を **自前の正規表現**で読む道が
+  残っており、 HTTP が取れなかった時にそちらだけで即納と判定できてしまっていた
+  (= 共有表を迂回する fail-OPEN)。 判定口を1つに寄せた
+  (窓口 回答 `2026-08-19_inventory_rakuten_delivery_static_response`)。
+  ブラウザは **送料の金額を読むためだけ** に使う (静的HTMLに金額が無い)。
 
-判定は fail-closed。 **発送日が読めた物だけ即納**とし、 読めなければ通さない。
+判定は fail-closed。 読めなければ通さない。
 """
 from __future__ import annotations
 
 import re
+import sys
 from html import unescape
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import rakuten_delivery  # noqa: E402
 
 DETAIL_WAIT_SEC = 8
-
-# 「配送予定」ブロックの後ろに出る発送日の表記
-SHIP_DATE_RE = re.compile(
-    # 「(8/21) 13:00までの注文で最短 8/22 お届け」。 **頭の日付は出ない日がある**
-    # (2026-08-20 実測: 「13:00までの注文で最短8/22お届け」だけの表示。 日付必須にしていた
-    #  ため auc-yuyou が丸ごと no_shipping_info で落ちていた)
-    # 日付の後ろに 「(翌日)」 が入る店がある (2026-08-21 実測 auc-toysanta)
-    r"(?:[0-9]{1,2}/[0-9]{1,2}\s*)?[0-9]{1,2}[:：][0-9]{2}\s*までの注文で最短\s*"
-    r"([0-9]{1,2}/[0-9]{1,2})\s*(?:[（(][^）)]{1,8}[）)])?\s*お届け"
-    # 「即納｜営業日14時までのご注文で当日出荷」 という書き方もある (同 auc-toysanta)
-    r"|(即納.{0,40}当日出荷)"
-    # 「翌営業日までに発送」 (2026-08-21 実測 smltrading)。
-    # ★同じ店の 「入荷待ち」 は即納ではないので **読めないまま落とす** のが正しい
-    r"|(翌営業日?(?:まで)?に?発送)"
-    r"|([0-9０-９]{1,2}\s*[〜～]?\s*[0-9０-９]{0,2}\s*(?:営業)?日以内?に発送)"
-    r"|([0-9０-９]{1,2}\s*[〜～]\s*[0-9０-９]{1,2}\s*営業日内に発送)"
-)
-# 予約と明記されている表記 (配送予定欄にも本文にも出る)
-PREORDER_RE = re.compile(
-    r"入荷予定の予約商品|予約商品です|発売予定[：: ]?\s*[0-9０-９]{4}年|予約入荷待ち"
-)
-
-
-def extract_shipping(text: str) -> str:
-    """画面テキストから発送日の表記を返す (取れなければ "")."""
-    m = SHIP_DATE_RE.search(text or "")
-    if not m:
-        return ""
-    return next((g for g in m.groups() if g), "").strip()
-
-
-def judge(text: str) -> dict:
-    """商品ページの画面テキストから 即納かどうかを判定する (純関数).
-
-    Returns: {"in_stock_now": bool, "shipping": str, "reason": str}
-      in_stock_now=True は **発送日が読めた** 時だけ。
-    """
-    if PREORDER_RE.search(text or ""):
-        return {"in_stock_now": False, "shipping": "", "reason": "preorder"}
-    ship = extract_shipping(text)
-    if ship:
-        return {"in_stock_now": True, "shipping": ship, "reason": "ok"}
-    return {"in_stock_now": False, "shipping": "", "reason": "no_shipping_info"}
-
 
 _IMG_RE = re.compile(r"https://(?:tshop|shop|image)\.r?10?s?\.?(?:rakuten\.co\.jp|jp)/[^\"'\s]+?\.(?:jpg|jpeg|png)",
                      re.IGNORECASE)
@@ -172,8 +133,10 @@ def _text_of(driver) -> str:
 
 
 def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | None:
-    """ブラウザで商品ページを開いて 即納判定 + 価格 + 画像を返す.
+    """ブラウザで商品ページを開いて 送料 + 価格 + 画像 + 即納判定を返す.
 
+    即納判定は **静的HTMLの `deliveryMessage` を共有の条件表にかけた結果**。
+    ブラウザが要るのは **送料の金額** (静的HTMLに無い) と画面テキストのため。
     Returns None は「ページを開けなかった」= 未判定 (呼出側で要対応として数える)。
     """
     import time  # noqa: PLC0415
@@ -209,7 +172,21 @@ def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | No
         title = re.sub(r"^【楽天市場】", "", m.group(1)).strip()
     images = extract_images(html, url)
 
-    res = judge(text)
+    # ★即納判定は **共有の条件表** だけ。 画面テキストの自前パターンは使わない
+    #   (2026-08-22 窓口回答)。 予約品を即納と誤ると 無在庫でキャンセル -> BAN。
+    msg = ""
+    mm = _DELIVERY_MSG_RE.search(html)
+    if mm:
+        msg = mm.group(1)
+    verdict = rakuten_delivery.judge_message(msg)
+    res = {"in_stock_now": verdict == rakuten_delivery.IMMEDIATE,
+           "shipping": msg if verdict == rakuten_delivery.IMMEDIATE else "",
+           "reason": "ok" if verdict == rakuten_delivery.IMMEDIATE
+                     else ("preorder" if verdict == rakuten_delivery.PREORDER
+                           else "no_shipping_info"),
+           "delivery_message": msg,
+           "breadcrumb": [n for _c, n in parse_breadcrumb(html)],
+           "is_gacha_category": is_gacha_category(html)}
     desc = extract_description(html)
     jan = extract_jan(html)
     if jan:
@@ -231,6 +208,27 @@ def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | No
 # 即納判定と「送料無料か」はブラウザ無しで分かる (実測 2026-08-22)。
 # 1件6秒 -> 1秒未満。 ★送料の **金額** だけは静的HTMLに無いので、
 # 送料無料でない物は 呼出側がブラウザで開き直す (`fetch_detail`)。
+# パンくず (ld+json)。 **収集条件の片方** = 楽天のカテゴリが「ガチャガチャ」か
+# (窓口 回答 `2026-08-19_gacha_implement_go_response`: パンくず「ガチャガチャ」+
+#  タイトルに 全N種/コンプ の **両方**が立つ物だけ拾う)。
+# 実測 2026-08-22 (40件): 楽天市場 > ホビー > コレクション > ガチャガチャ (id 553785)。
+_BREADCRUMB_ITEM_RE = re.compile(
+    r'"@id"\s*:\s*"https://www\.rakuten\.co\.jp/category/(\d+)/"\s*,\s*"name"\s*:\s*"([^"]+)"')
+GACHA_CATEGORY_ID = "553785"
+GACHA_CATEGORY_NAME = "ガチャガチャ"
+
+
+def parse_breadcrumb(html: str) -> list[tuple[str, str]]:
+    """商品ページの ld+json から [(カテゴリID, 名前), ...] を返す (純関数)."""
+    return _BREADCRUMB_ITEM_RE.findall(html or "")
+
+
+def is_gacha_category(html: str) -> bool:
+    """パンくずが「ガチャガチャ」か。 **読めなければ False** (fail-closed)."""
+    return any(cid == GACHA_CATEGORY_ID or name == GACHA_CATEGORY_NAME
+               for cid, name in parse_breadcrumb(html))
+
+
 _DELIVERY_MSG_RE = re.compile(r'"deliveryMessage"\s*:\s*"([^"]*)"')
 _POSTAGE_INC_RE = re.compile(r'"shipping":\{"postageIncluded":(true|false)')
 _PRICE_RE = re.compile(r'itemprop="price"[^>]*content="([0-9]+)"')
@@ -241,7 +239,7 @@ def parse_detail_html(html: str, url: str) -> dict:
     """商品ページの HTML から 判定に要る物を取り出す (純関数).
 
     Returns: {delivery_message, postage_included, price_jpy, title,
-              image_urls, description, jan}
+              image_urls, description, jan, breadcrumb, is_gacha_category}
     """
     m = _DELIVERY_MSG_RE.search(html or "")
     inc = _POSTAGE_INC_RE.search(html or "")
@@ -260,4 +258,6 @@ def parse_detail_html(html: str, url: str) -> dict:
         "image_urls": extract_images(html, url),
         "description": desc,
         "jan": jan,
+        "breadcrumb": [name for _cid, name in parse_breadcrumb(html)],
+        "is_gacha_category": is_gacha_category(html),
     }
