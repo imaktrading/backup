@@ -38,7 +38,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 74
-    filled: 74412/89138
+    filled: 77165/89138
     decided: "2026-08-22 自由入力と確認 (一覧外の値も出す)"
   - ebay_aspect: "Age Level"
     source: null
@@ -79,7 +79,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 39
-    filled: 13195/89138
+    filled: 13399/89138
     reason: "Holo/Reverse Holo は Features に無い (Finish の値)。値は必ずリストで持つ"
     decided: "2026-08-22 出品側の39値表は廃止"
   - ebay_aspect: "Manufacturer"
@@ -170,7 +170,7 @@ aspects:
     owner: catalog
     mode: SELECTION_ONLY
     ebay_values: 244
-    filled: 21465/89138
+    filled: 36181/89138
     decided: "2026-08-22 HQ Q4 で確定 (language=Japanese の行に Japan)"
   - ebay_aspect: "Vintage"
     source: null
