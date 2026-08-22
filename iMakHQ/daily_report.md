@@ -1563,3 +1563,76 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 - **DBSCG の Card Type** — eBay の Card Type はマジック/遊戯王/ポケモン/デジモン専用
 - **Rarity の空欄** (ポケモン 8,515行) — 公式がレアリティを出していない。
   変換の取りこぼしは **0行**
+
+---
+
+## 2026-08-23 — 出品項目をカタログに一本化 / 誤ったセット名の検知を常設
+
+### 決定事項
+- 決定1 (ユーザー確定「シンプルが一番」): eBay の Set に入れる値は3行のルールだけ。
+  ① eBay master に在る値 → verbatim / ② 無ければ日本語セット名の英語表記 (空欄にしない) /
+  ③ 英語版の別セット名は禁止。**例外は作らない** (2026-08-18 の英語版セット14種の裁定を廃止)
+- 決定2 (ユーザー確定): 公式が印刷番号を打っていないカード (基本エネルギー等) は先回りで
+  登録しない。PSA の cert が候補に出た時だけ1枚ずつ内部キーで登録する
+- 決定3 (HQ Q2): `Year Manufactured` は **PSA の鑑定年** (owner=listing)。catalog の
+  `release_year` は社内用に残すが eBay には出さない
+- 決定4 (HQ Q3/Q4): Cost / Attack/Power / HP / Stage は出す。Country of Origin はカタログが持つ。
+  Franchise / Autographed / Vintage / Material / Customized は**出すのをやめてもらう**
+  (Franchise の eBay 37値は Disney Lorcana の作品名だけで TCG に該当が無い — 実取得で確認)
+- 決定5: 出品側と監査側がスリム化した分、**誤りの検知はカタログが持つ**
+
+### 変更
+- 変更: `ebay_filter_map/_contract_aspects.yaml` 新設 (35項目 + 出品側5列 = 40行)。
+  source / emit / owner / reason / decided を固定。共有領域 `iMak_data/catalog/` にも出力
+- 変更: `scrapers/_raw_store.py` 新設 — 取った生データを gzip で保管 (取り直しを不要にする)
+- 変更: `scrapers/pokemon_detail_refetch.py` — 公式21,982枚を取り直し (失敗0)。
+  regulation_set +15,679 / type_en +11,637 / attack_name +8,558 / set_name_official +1,886
+- 変更: `scrapers/pokemon_tcg.py` — タイプ判定を `hp-type` 直後にアンカー。公式のクラス名は
+  electric / dark / steel / none (lightning 等は存在しない)
+- 変更: `migrations/2026-08-23_pokemon_type_reparse.py` — 生HTMLから 6,393行を再解釈 (通信0)
+- 変更: `migrations/2026-08-23_dbscg_card_type_from_raw.py` — 生JSONから 2,753行 (50%→99%)
+- 変更: `migrations/2026-08-23_jp_sets_use_own_value.py` — 英語版セット名 1,361行を日本語版の値へ
+- 変更: `tools/set_name_integrity_audit.py` — §0 弾コード食い違い / §0b 未登録のセット名 を新設
+- 変更: `tools/build_free_text_registry.py` + `_free_text_set_values.yaml` (162値) 新設
+- 変更: Windows タスク `iMakCatalog_OfficialSiteRawArchive_Once` 登録 (8/24 01:12 / 約2,460URL)
+
+### 検証
+- 検証✅: `pytest tests/` **671 passed**
+- 検証✅: 監査 §0 弾コード食い違い **0件** (4ゲーム)
+- 検証✅: 監査 §0b 未登録のセット名 **0件** (4ゲーム)
+- 検証✅: `type_en` に11タイプすべて出る (Psychic 2,271 … Fairy 270)。
+  ピカチュウ=Lightning / ヤミラミ=Darkness / ハガネール=Metal を実データで確認
+- 検証✅: Card Type ワンピ100% / DBSCG 99% / ポケモン98% / ガンダム96%
+- 検証✅: Attribute 17% → 71% (ポケモンのタイプが入った)
+- 検証✅: 生データ倉庫 34,049ファイル / 75MB (ポケモン21,982 / ワンピ6,273 / DB3,985 / ガンダム1,808)
+
+### 止めた事故 (誤出品になっていたもの)
+- **ピカチュウ 6,138枚が「闘タイプ」** — 公式のクラス名が `icon-electric` なのに `lightning` を
+  探しており、見つからないと **弱点のアイコン**を拾っていた (ピカチュウの弱点=闘)
+- **エクストラバトルの日 201行が別セット `The Best of XY`** — product_id `XY-003` が
+  set_code `XY` に当たっていた (以前から危険視されていた「XY衝突」が実際に発生)
+- **英語版セット名 1,729行** — `Sun & Moon—Celestial Storm` / `Scarlet & Violet—Mega Brave` 等
+- **長時間走行が他の修正を巻き戻していた** — 取り直しツールが起動時のスナップショットを
+  書き戻すため、走行中に直した 322行 + 14,716行が元に戻っていた
+- **ワンピの Leader 503行が公式に無い cost を持っていた** — 公式 API の `Cost/Life` は
+  Leader の場合ライフ。出品側が「読むだけ」になった瞬間に出るところだった
+
+### 反省 (仕組みで潰した)
+- 「`Swsh` で始まる値」という**思いついた条件**で確認して「0行」と報告した。実際には
+  1,729行が誤っていた。**条件を思いつけるかに依存する確認は必ず漏れる**。
+  → 許可された値の一覧 (① master + ② 登録簿) と突き合わせる §0b を常設。
+  新しい誤りは登録されていないので必ず出る
+
+### 未了 / 次セッションへの引き継ぎ
+- **git push が未実行** — Claude Code の auto mode で拒否された。手動 push が要る (21 commit)
+- 今夜 01:12 の生データ保管 (Windows タスク登録済・自動)
+- `ST13-008_P1` (大文字) / `_p1` (小文字) の重複統合 — HQ に約束済
+- クローン行の画像2件 (`ST07-008_GE` / `ST13-003_7E01`) — 公式ページの特定待ち
+- Features 19% — レアリティからの `Full Art` 推定は**やらない** (裏が取れない)
+
+### 天井 (これ以上やっても伸びない)
+- ポケモンの Rarity 空欄 8,515行 — 公式ページにレアリティ表示が無い (実取得で確認)
+- ワンピ / DBSCG / ガンダムの Set — eBay 側に受け皿が無い (DBSCG の37値は旧作のもの)
+- Finish / Age Level / Autographed など13項目 — 出さないと決めたもの
+- ★訂正: **DBSCG の Card Type は天井ではなかった**。eBay の Card Type は自由入力で、
+  一覧に無い値も出せる。50% → 99% まで埋まった (8/22 のこちらの回答が誤り)
