@@ -1365,9 +1365,46 @@ def is_psa10_or_unknown(title, psa_grade=None):
     return True
 
 
+# PSA cert ページの「項目名 → 次の行が値」形式 (2026-08-23 実取得で確認 / cert158363091)。
+#   Item Grade        GEM MT 10
+#   Variety/Pedigree  ALTERNATE ART
+#   Label Type        W/ FUGITIVE INK TECHNOLOGY
+#   PSA POPULATION    836   /   PSA POP HIGHER   0
+# ★グレードは従来 **Claude にラベル画像を読ませて**いた (推測)。ページに書いてあるので
+#   そちらを一次情報として使う (2026-08-23 ユーザー承認)。
+_PSA_PAGE_FIELDS = {
+    "Item Grade":       "Grade",
+    "Variety/Pedigree": "Variety",
+    "Label Type":       "LabelType",
+    "PSA POPULATION":   "Population",
+    "PSA POP HIGHER":   "PopHigher",
+}
+
+
+def _value_after_label(lines, label):
+    """`label` と完全一致する行の次の行を返す (無ければ "")。純関数。"""
+    lab = label.strip().lower()
+    for i, line in enumerate(lines):
+        if line.strip().lower() == lab and i + 1 < len(lines):
+            return lines[i + 1].strip()
+    return ""
+
+
+def grade_number(item_grade):
+    """'GEM MT 10' → '10' / 'MINT 9' → '9' / 読めなければ '' (純関数)。"""
+    m = re.search(r"(\d+(?:\.\d+)?)\s*$", str(item_grade or "").strip())
+    return m.group(1) if m else ""
+
+
 def parse_psa_page(text):
     data = {}
     lines = [l.strip() for l in text.split('\n') if l.strip()]
+
+    # ページに明記されている項目 (グレード / 版 / ラベル種別 / POP) をそのまま拾う
+    for _label, _key in _PSA_PAGE_FIELDS.items():
+        _v = _value_after_label(lines, _label)
+        if _v:
+            data[_key] = _v
 
     for i, line in enumerate(lines):
         # "2025 GUNDAM JAPANESE DUAL IMPACT #055 GUNDAM GUSION REBAKE" パターン
@@ -2354,8 +2391,17 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     except Exception as _e:
         print(f"    ⚠️ subject 正規化失敗、生 subject 使用: {type(_e).__name__}: {_e}")
         subject_clean = subject
-    claude_result = generate_title_with_claude(game, set_name, official_card_number, subject_clean, franchise, card_image_url)
-    claude_result = claude_result or {}
+    # ★2026-08-23: 本番 (TCG_USE_NEW_GEN=1) はタイトルを新コアが catalog 値で作り直すため、
+    #   ここで作った Claude タイトルは捨てられていた (8/22 の走行で 19件中 19件)。
+    #   グレードは PSA ページ本文の `Item Grade` から読めるので、画像を読む必要も無い。
+    #   → 新コア有効 かつ グレードが読めた時は **API を呼ばない**。
+    #   読めなかった時だけ従来どおり画像でラベルを確認する (fail-closed 維持)。
+    _page_grade = grade_number(data.get("Grade"))
+    if os.environ.get("TCG_USE_NEW_GEN") == "1" and _page_grade:
+        claude_result = {}
+    else:
+        claude_result = generate_title_with_claude(
+            game, set_name, official_card_number, subject_clean, franchise, card_image_url) or {}
 
     # Item Specifics: 公式DB のみ採用 (2026-04-24 物理強制化、Claude フォールバック全廃)
     # グローバル CLAUDE.md「確証なきは空欄、公式サイトからの推定は不可」+ memory `enforce_in_python_not_prompt`
@@ -2437,10 +2483,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # ★PSA10 以外は出品しない (2026-07-27 事故: PSA9 が PSA10 として出かかった)。
     #   タイトル/CustomLabel/C:Grade/市場検索が全て PSA10 固定なので、非PSA10 は
     #   グレード誤表示 + 相場誤参照 になる。現物ラベルを読めた時だけ確実に止める。
-    _vision_grade = (claude_result or {}).get('psa_grade') if claude_result else None
+    # PSA ページに書いてある値を最優先 (一次情報)。無ければ従来どおり画像判定の値。
+    _vision_grade = _page_grade or ((claude_result or {}).get('psa_grade') if claude_result else None)
     if not is_psa10_or_unknown(claude_title, _vision_grade):
         _g = (str(_vision_grade or "").strip() or detected_grade_from_title(claude_title))
-        print(f"    🚫 PSA{_g} を検出(ラベル画像) → **出品しない** (本 pipeline は PSA10 限定運用。"
+        _src = "PSAページ" if _page_grade else "ラベル画像"
+        print(f"    🚫 PSA{_g} を検出({_src}) → **出品しない** (本 pipeline は PSA10 限定運用。"
               f"グレード誤表示 + PSA10 相場の誤参照になるため fail-closed)")
         return None
     if claude_title:
