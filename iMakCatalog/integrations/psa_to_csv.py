@@ -863,6 +863,15 @@ def _search_one_piece_promo_by_number(
             #   ★これが無いと汎用 promo (_P score150) が勝ち、**別絵柄の ST13-003_P を
             #     返す** = 誤出品側に倒れる (2026-08-20 に実測)。
             ("7-ELEVEN", "セブンイレブン"),
+            # 2026-08-23 (cert168544559 TONY TONY CHOPPER #003 → EB02-003_CH01):
+            #   単行本『ONE PIECE CHOPPER’s 1』(集英社 2026-04-23) 同梱 promo。
+            #   PSA Variety は "ONE PIECE CHOPPER'S 1" (ASCII ')、official は
+            #   『ONE PIECE CHOPPER’s 1』付録 (U+2019 ’) なので両側を別表記で持つ。
+            #   ★巻数 " 1" を含めるのが要点: 2巻以降の同梱 promo と混ざらない。
+            #   これが無いと base EB02-003 (suffix 無し +10) が勝ち、**通常版(アニメ絵)を
+            #   返す** = Set が '25th Anniversary Collection' の誤出品側に倒れる
+            #   (2026-08-23 実測: EB02-003_CH01 登録直後もこの誤解決が残っていた)。
+            ("CHOPPER'S 1", "CHOPPER’s 1"),
         ):
             if en in hay and (jp in sn or jp in sn_upper):
                 edition_hit = True
