@@ -39,6 +39,11 @@ except Exception:
 
 MASTER = Path(r"C:\dev\iMak_data\catalog\_input\ebay_aspects_183454_latest.json")
 OUT = ROOT / "ebay_filter_map" / "_contract_aspects.yaml"
+# ★共有領域にも同じものを置く (2026-08-22 HQ 依頼)。
+#   worktree 分離のルールで他セッションはこちらの worktree を読めないため、
+#   出品くん・監査くんはこのコピーを読む。**書き手はカタログだけ**。
+SHARED = Path(r"C:/dev/iMak_data/catalog/_contract_aspects.yaml")
+NL = chr(10)
 CATS = ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg", "yugioh_tcg")
 
 # ★ここが人の決定。ここ以外に判断を置かない
@@ -138,9 +143,14 @@ def main():
             lines.append(f'    reason: "{reason}"')
         if decided:
             lines.append(f'    decided: "{decided}"')
-    OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    body = NL.join(lines) + NL
+    OUT.write_text(body, encoding="utf-8")
+    SHARED.write_text(body, encoding="utf-8")
+    OUT.write_text(body, encoding="utf-8")
+    SHARED.write_text(body, encoding="utf-8")
     miss = [a for a in aspects if a not in D]
     print(f"決定表を書きました: {OUT}")
+    print(f"                    {SHARED} (共有コピー)")
     print(f"  35項目中 決定済 {len(aspects) - len(miss)} / 未決定 {len(miss)} {miss}")
     print(f"  出す {sum(1 for a in aspects if D.get(a, (0, False))[1])} / 出さない "
           f"{sum(1 for a in aspects if not D.get(a, (0, False))[1])}")

@@ -170,7 +170,7 @@ aspects:
     owner: catalog
     mode: SELECTION_ONLY
     ebay_values: 244
-    filled: 36181/89138
+    filled: 32606/89138
     decided: "2026-08-22 HQ Q4 で確定 (language=Japanese の行に Japan)"
   - ebay_aspect: "Vintage"
     source: null
