@@ -77,6 +77,22 @@ def _extra_from_html(html: str) -> dict:
     return out
 
 
+def _commit(db, updates):
+    """ロックされていたら少し待って粘る (最大5回)."""
+    for attempt in range(5):
+        try:
+            db.executemany("UPDATE products SET specs=?, set_name_official=?, images=?, "
+                           "updated_at=? WHERE id=?", updates)
+            db.commit()
+            return True
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or attempt == 4:
+                raise
+            print(f"   ! DB ロック中。{(attempt + 1) * 10}秒待って再試行", flush=True)
+            time.sleep((attempt + 1) * 10)
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -84,7 +100,10 @@ def main():
     ap.add_argument("--refetch", action="store_true", help="生HTMLが有っても取り直す")
     args = ap.parse_args()
 
-    db = sqlite3.connect(api._DB_PATH)
+    # ★2026-08-22: 9時間走る間に別の migration が同じ DB を書くと
+    #   'database is locked' で落ちる (実際に 6,400/21,982 で落ちた)。
+    #   待ち時間を伸ばし、commit は数回まで粘る。
+    db = sqlite3.connect(api._DB_PATH, timeout=120)
     db.row_factory = sqlite3.Row
     rows = db.execute(
         "SELECT id, product_id, source_url, set_name_official, images, specs "
@@ -142,9 +161,7 @@ def main():
                             new_sno or sno, new_imgs or r["images"],
                             datetime.now().isoformat(timespec="seconds"), r["id"]))
         if args.commit and len(updates) >= 200:
-            db.executemany("UPDATE products SET specs=?, set_name_official=?, images=?, "
-                           "updated_at=? WHERE id=?", updates)
-            db.commit()
+            _commit(db, updates)
             updates = []
         if i % 200 == 0:
             el = time.time() - t0
@@ -152,9 +169,7 @@ def main():
                   f"経過{el/60:.1f}分  埋めた: {dict(filled.most_common(5))}", flush=True)
 
     if args.commit and updates:
-        db.executemany("UPDATE products SET specs=?, set_name_official=?, images=?, "
-                       "updated_at=? WHERE id=?", updates)
-        db.commit()
+        _commit(db, updates)
     print(f"\n=== {'APPLY' if args.commit else 'DRY-RUN'} 完了 {len(rows)}枚 ===")
     print(f"  取得 {fetched} / 手元の生HTML {from_disk} / 失敗 {failed}")
     for k, n in filled.most_common():
