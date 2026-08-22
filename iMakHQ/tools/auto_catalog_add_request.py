@@ -176,6 +176,75 @@ def _filter_catalog_present(new_by_cat: dict[str, list[dict]],
     return removed
 
 
+_CERT_RE = re.compile(r"cert(\d{6,})")
+
+# 「同じカードが catalog に別の id で在る」時に依頼を出さないための最終ゲート (2026-08-22)。
+#
+# なぜ: 2026-08-21 に「catalog 未登録」として 5件の追加依頼を出したが、
+#   3件は当日 catalog に登録済、2件は **こちら側が組み立てた id** (`PRB01-004`) で
+#   探していただけで、実体は `ST17-004_p1` として在った。catalog から2本の訂正が返り、
+#   同じ日に「訂正の訂正」まで出している。
+#   下の `_filter_catalog_present` は **期待 pid の完全一致**しか見ないので、
+#   別 id で在るケースを素通りさせる。
+#
+# 何を見るか: 出品と同じ resolver (`psa_preflight.classify`)。
+#   RESOLVED (解決した) / INDEX-FAILURE (索引の揺れで在った) / REVIEW (候補が在る)
+#   のどれかなら **catalog に不足は無い** ので依頼しない。GAP の時だけ依頼する。
+#
+# fail-closed: cert が抜けない / cache が無い / 例外 → **従来どおり依頼を出す**。
+def _filter_resolver_resolves(new_by_cat: dict[str, list[dict]],
+                              unique: dict[tuple[str, str], dict] | None = None) -> int:
+    """catalog に別 id で実在するものを落とし、件数を返す (判定不能は残す)。"""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import psa_preflight as _pf
+        import sqlite3
+        con = sqlite3.connect(_pf.CATALOG_DB)
+    except Exception as e:      # noqa: BLE001
+        print(f"[warn] resolver pre-check を読み込めない ({e}) → 全件を従来通り依頼")
+        return 0
+
+    removed = 0
+    try:
+        for category, rows in list(new_by_cat.items()):
+            kept: list[dict] = []
+            for r in rows:
+                model = r.get("model") or ""
+                # 画像が無い / variant 欠落 は「行は在るが中身が足りない」依頼なので触らない
+                if _NO_IMAGE_NOTE_MARK in model or _VARIANT_GAP_NOTE_MARK in model:
+                    kept.append(r)
+                    continue
+                m = _CERT_RE.search(model)
+                meta_path = (Path(_pf.PSA_CERTS_DIR) / f"{m.group(1)}.json") if m else None
+                if not (meta_path and meta_path.exists()):
+                    kept.append(r)                      # cert 不明 / cache 無 → 従来どおり
+                    continue
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    res = _pf.classify(m.group(1), meta, con)
+                except Exception:
+                    kept.append(r)                      # 判定不能 → 従来どおり
+                    continue
+                status = res.get("status")
+                if status not in ("RESOLVED", "INDEX-FAILURE", "REVIEW"):
+                    kept.append(r)
+                    continue
+                found = (res.get("product_id") or res.get("recovered")
+                         or ", ".join(res.get("candidates") or []))
+                print(f"    ⏭️ Skip auto_catalog_add (別 id で catalog に在る): "
+                      f"{category} cert{m.group(1)} → {status} {found}")
+                if unique is not None:
+                    unique.pop((category, model), None)
+                removed += 1
+            if kept:
+                new_by_cat[category] = kept
+            else:
+                del new_by_cat[category]
+    finally:
+        con.close()
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # 入口検査 (2026-08-19, 提案C)
 #
@@ -484,6 +553,12 @@ def main() -> int:
     if skipped_present:
         print(f"[skip] catalog実在 pre-check で {skipped_present} 件除外 "
               f"→ viewer_disagreement.log")
+
+    # 2b-2. resolver pre-check (2026-08-22): 別 id で catalog に在るものを落とす
+    skipped_resolved = _filter_resolver_resolves(new_by_cat, unique)
+    if skipped_resolved:
+        print(f"[skip] resolver pre-check で {skipped_resolved} 件除外 "
+              f"(catalog に別 id で在る)")
 
     # 2c. A群 suppression (公式が物理的に持たない pid → 毎日の再依頼を止める, 2026-08-10)
     suppression = _load_suppression()
