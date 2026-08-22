@@ -113,12 +113,44 @@ def _clean(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\wぁ-んァ-ヶ一-龥ー&・]+", " ", s or "")).strip()
 
 
-def build_query(title: str) -> str:
-    """検索語。キャラが取れなければ空 = 探索不能 (推測で検索しない)。"""
+# ★2026-08-22: 一番くじは **同じキャラが同じ賞で何度も出る**。
+#   シャンクスの A賞 だけで「新四皇」「大海賊」「マリンフォード最終決戦編」
+#   「エモーショナルストーリーズ」「赤髪海賊団」…と複数ある。
+#   「一番くじ + キャラ + 賞」では絞れず、候補が全部別のくじになっていた (実測)。
+#   くじの名前は **W列に最初から入っていた** (V列=公式ページ / W列=くじ名)。
+_KUJI_NAME_COL = 22            # W列
+_SERIES_URL_COL = 21           # V列 (1kuji.com の商品ページ)
+
+
+def series_name(cell: str) -> str:
+    """W列のくじ名 → 検索に効く部分だけ (純関数)。
+
+    `一番くじ ワンピース 赤髪海賊団` → `赤髪海賊団`
+    先頭の「一番くじ」と作品名は、キャラ名で既に効いているので落とす。
+    残りが無ければ空 (推測しない)。
+    """
+    v = _clean(cell or "")
+    v = re.sub(r"^一番くじ\s*", "", v)
+    # 作品名 (ワンピース / 刃牙 等) は次の語まで。区切りが無ければ丸ごと使う
+    parts = [x for x in re.split(r"[\s　]+", v) if x]
+    if not parts:
+        return ""
+    # ★語を足しすぎると today 0件になる。**特徴的な1語**まで
+    #   (`-エルバフ編- GIANT BASH!! Vol.1` → `エルバフ編`)。
+    return parts[1] if len(parts) > 1 else parts[0]
+
+
+def build_query(title: str, kuji_name: str = "") -> str:
+    """検索語。キャラが取れなければ空 = 探索不能 (推測で検索しない)。
+
+    ★くじ名を入れないと絞れない。同じキャラの同じ賞が別のくじで何度も出るため
+      (実測 2026-08-22: 「一番くじ シャンクス A賞」で 新四皇 / 大海賊 /
+       マリンフォード最終決戦編 / エモーショナルストーリーズ が同時に出た)。
+    """
     chara, prize = parse_title(title)
     if not chara:
         return ""
-    return " ".join(x for x in ("一番くじ", chara, prize) if x)
+    return " ".join(x for x in ("一番くじ", series_name(kuji_name), chara, prize) if x)
 
 
 # シートG列に入っている「写真ではない物」。サイトの OGP 画像が入っている行がある
@@ -170,7 +202,9 @@ def select_targets(rows2d: list, max_backups: int = AUX_MAX) -> list:
                     #   候補だけ並べても「同じ物か」を判断できない (ユーザー指摘)。
                     "own_img": own_photo(P._cell(r, 6)),
                     "supply_url": P._cell(r, P.A), "n_backups": nb,
-                    "query": build_query(title),
+                    "series": series_name(P._cell(r, _KUJI_NAME_COL)),
+                    "series_url": P._cell(r, _SERIES_URL_COL),
+                    "query": build_query(title, P._cell(r, _KUJI_NAME_COL)),
                     "listed_at": P._listed_sort_key(r)})
     out.sort(key=lambda t: (t["listed_at"], -t["row"]), reverse=True)
     return out
@@ -286,8 +320,13 @@ def build_items(targets: list, cache: dict) -> tuple:
     items, item_targets = [], []
     for t in targets:
         entry = cache.get(t["itemID"])
-        # ★旧形式 (list をそのまま入れていた) のキャッシュが残っている。壊さず読む
-        cands = entry if isinstance(entry, list) else ((entry or {}).get("candidates") or [])
+        # ★2026-08-22: **検索語が変わった行は出さない**。くじ名を入れる前の候補は
+        #   別のくじが混ざっており (実測: シャンクスA賞に 新四皇/大海賊/マリンフォード)、
+        #   目視の時間を捨てることになる。
+        #   旧形式 (list をそのまま入れていた) は検索語を持たないので **全部 古い扱い**。
+        cands = [] if not isinstance(entry, dict) else (entry.get("candidates") or [])
+        if isinstance(entry, dict) and entry.get("query") != t.get("query"):
+            cands = []
         cands = drop_own_urls(cands, t.get("supply_url", ""), t.get("existing", []))
         if not cands:
             continue
@@ -325,11 +364,12 @@ def count_workload() -> dict:
     ready = 0
     for t in targets:
         e = cache.get(t["itemID"])
-        cands = e if isinstance(e, list) else ((e or {}).get("candidates") or [])
-        if not cands:
-            continue
-        if isinstance(e, dict) and e.get("date") and e["date"] != today:
+        if not isinstance(e, dict) or not (e.get("candidates") or []):
+            continue                      # 旧形式 = 検索語を持たない = 古い扱い
+        if e.get("date") and e["date"] != today:
             continue                      # 古いキャッシュは「押せる」に数えない
+        if e.get("query") != t.get("query"):
+            continue                      # 検索語が変わった = 別のくじが混ざった候補
         ready += 1
     return {"targets": len(targets),
             "zero": sum(1 for t in targets if t["n_backups"] == 0),
@@ -346,6 +386,7 @@ def run_search(targets: list) -> int:
     n = 0
     for t in targets:
         cands = found.get(t["itemID"]) or []
+        # ★検索語ごと保存する。語が変われば古い候補は使えない (別のくじが入っている)
         cache[t["itemID"]] = {"date": today, "query": t.get("query", ""),
                               "candidates": cands}
         n += 1 if cands else 0
