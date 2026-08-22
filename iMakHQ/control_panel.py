@@ -1428,7 +1428,9 @@ SCRIPTS = [
         "tip": "一番くじ版の夜間検索。候補と、その詳細 (新品か/送料込みか/セラー評価) を先に取って溜める。補URL欄には書かない。",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "ichibankuji_restock.py", "prefetch-live", "40"],
+        # ★2026-08-22: 候補 (prefetch-live) だけでは セラー名/星/発送日数 が入らない。
+        #   詳細ページの先読み (prefetch-detail) まで通して初めて画面に出る。
+        "cmd": ["python", "run_kuji_night.py"],
         "params": [],
         "skip_postprocess": True,
     },

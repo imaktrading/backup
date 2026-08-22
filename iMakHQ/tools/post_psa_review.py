@@ -135,7 +135,25 @@ def _extract_set_code(brand: str, category: str) -> str | None:
         m = re.search(r"\b(OP\d+|ST\d+|EB\d+|PRB\d+|RP|EVENT|PROMOS|STORAGE|KUMAMON|GRAND-ASIA|ANNIV)\b", b)
         return m.group(1) if m else None
     if category == "pokemon_tcg":
+        # ★2026-08-21: **英字だけの set_code** (`CLL-` `CLK-` `CLF-` = Classic コレクション)
+        #   を拾う枝が無かった。実害 (cert未確定 CHARMELEON):
+        #   brand `POKEMON JAPANESE CLL-TRADING CARD GAME CLASSIC ...` は先頭に CLL と
+        #   書いてあるのに読めず、候補が番号一致だけになっていた。catalog には在る
+        #   (2026-08-21 実測 `CLL-%` = 32件 / CLL-002 = Charmeleon)。
+        #   数字混じりの code を先に見る (`SV8A-` 等を 3文字規則に食わせない)。
+        #   回答書: 2026-08-20_hq_act_proposals_ebay_norm_and_act_lock_response.md (C)
         m = re.search(r"\b(SV\d+[A-Z]?|S\d+[a-z]?|S-P|SV-P|M-P|SM-P|XY-P|BW-P|DP-P|M\d+L?|HG\w*|LL\w*|SoulSilver|HS)\b", b)
+        if m:
+            return m.group(1)
+        # 英字3文字 + ハイフン。**語頭 (JAPANESE の直後) だけ**を見る。
+        # ★どこでも拾うと 'SKY-SPLITTING CHARISMA'→'SKY' / 'JET-BLACK SPIRIT'→'JET' を
+        #   set_code と誤読する (2026-08-21 実測: PSA cache の pokemon brand 113種のうち、
+        #   拾えるのは MBD/CLF/CLK/CLL の4種、誤読は SKY/JET の2種)。誤読すると
+        #   `LIKE 'SKY-%'` が 0件になり **番号一致の候補まで消える** = 改悪になる。
+        #   PSA は 'POKEMON JAPANESE <CODE>-<セット名>' と書くので、その位置だけ見る。
+        #   外しても実害は小さい (候補の絞込に使うだけで、`synthesized_expected` は
+        #   英数字の形しか期待値に昇格させない)。
+        m = re.search(r"\bJAPANESE\s+([A-Z]{3})-", b)
         return m.group(1) if m else None
     return None
 
@@ -331,6 +349,29 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
                     (category, f"%-{card_number}")
                 )
             rows = cur.fetchall()
+
+        # === 優先度 2b: set_code が取れない時の「名前ぴったり + 番号一致」 ===
+        # ★2026-08-21: set_code を取れないと打ち切って候補ゼロになり、catalog に在る
+        #   カードでも毎回「auto候補無=該当なし 要調査」として catalog 依頼になっていた。
+        #   実害 (cert84299672 FILM RED アンコールパック):
+        #     brand 'ONE PIECE JAPANESE FILM RED: ENCORE PACK' から set_code が取れず、
+        #     catalog に在る ST11-004 系 (name_en='New Genesis') が1件も出なかった。
+        #   `name_en が Subject と完全一致` かつ `番号が一致` に絞る = 弱い当てずっぽうでは
+        #   なく「同じ名前・同じ番号のカード」だけを人に見せる。**自動採用はしない**
+        #   (ここは候補 list であって expected ではない)。
+        #   実測 2026-08-21: 番号 004 の 208行 → 完全一致 6行 (ST11-004 / _D / _P /
+        #   _ST16 / _p1 / _p2) = 提案どおり ST11-004 系6行が出る。
+        #   回答書: 2026-08-20_hq_act_proposals_ebay_norm_and_act_lock_response.md (C)
+        if not rows and not set_code and card_number and subject:
+            _esc = chr(92)
+            cur.execute(
+                "SELECT DISTINCT product_id, name_en FROM products WHERE category=? "
+                "AND (product_id LIKE ? OR product_id LIKE ? ESCAPE '" + _esc + "') "
+                "ORDER BY product_id LIMIT 500",
+                (category, f"%-{card_number}", f"%-{card_number}{_esc}_%"))
+            _by_num = cur.fetchall()
+            _exact_num = exact_name_pids(_by_num, subject)
+            rows = [(pid,) for pid, _n in _by_num if pid in _exact_num][:30]
 
         # === 優先度 3: character 名 (subject) で候補を surface ===
         # set_code 抽出漏れ・promo・新セット・ID lookup 失敗 (= miss) でも、catalog に

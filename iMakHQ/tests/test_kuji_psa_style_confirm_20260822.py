@@ -134,3 +134,77 @@ class TestParsers:
         """★全ページ grep は関連商品を拾う (_parse_cond_ship と同じ理由)."""
         assert R._parse_ship_days("発送までの日数</span><span>1〜2日で発送") == "1〜2日で発送"
         assert R._parse_ship_days("関連商品 4〜7日で発送") == ""
+
+
+class TestCostAndWidth:
+    """★2026-08-22 ユーザー要望「今の仕入値段を出してほしい」
+    「価格とか評価とかが見づらいから、横に枠を広げて。今の横幅の1.5倍くらい」。"""
+
+    def test_今の仕入値を渡す(self):
+        assert '"cost_now"' in inspect.getsource(R.pass_hoju_psa_style)
+
+    def test_対象に仕入値と出品価格を持たせている(self):
+        src = inspect.getsource(R.get_thin_backup_ichibankuji)
+        assert '"cost_now": g(13).strip()' in src      # N列
+        assert '"price_now": g(12).strip()' in src     # M列
+
+    def test_仕入値はキャッシュに焼かない(self):
+        """★値段は日々変わる。焼くと古い値で判断させることになる (kind と同じ扱い)."""
+        assert "cost_now" in inspect.getsource(R._identify_scrape)
+
+    def test_画面が広い(self):
+        import io as _io
+        css = _io.open(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "tools", "psa_resource_confirm.py"),
+            encoding="utf-8").read()
+        assert ".card{width:1350px" in css, "1.5倍に広げていない"
+        assert ".card{width:900px" not in css
+
+
+class TestFilterRestored:
+    """★2026-08-22 の実害: 絞り込みは画像検索の段 (pass_expand) の中にしか無く、
+    その段を廃止した時に **絞りごと消えた**。新品でない物・評価100未満の個人セラーが
+    目視画面に並んだ (ユーザー指摘「新品未使用だけにして、評価100以下も含まれている」)。"""
+
+    D = {"a": {"cond": "新品、未使用", "ship": "送料込み", "reviews": 320},
+         "b": {"cond": "目立った傷や汚れなし", "ship": "送料込み", "reviews": 320},
+         "c": {"cond": "新品、未使用", "ship": "着払い", "reviews": 320},
+         "d": {"cond": "新品、未使用", "ship": "送料込み", "reviews": 30},
+         "e": {"cond": "新品、未使用", "ship": "送料込み", "reviews": None}}
+
+    def _run(self, keys):
+        return [x["url"] for x in
+                R.filter_by_detail_cache([{"url": k} for k in keys], self.D)]
+
+    def test_新品未使用だけ通す(self):
+        assert self._run(["a", "b"]) == ["a"]
+
+    def test_着払いは落とす(self):
+        """実原価が過小表示になる (既存の規約)."""
+        assert self._run(["c"]) == []
+
+    def test_評価100未満の個人は落とす(self):
+        assert self._run(["d"]) == []
+
+    def test_評価が取れない個人は落とす(self):
+        """★判定不能を通すと、評価の無いセラーが素通りする (fail-closed)."""
+        assert self._run(["e"]) == []
+
+    def test_キャッシュに無い候補は落とす(self):
+        assert self._run(["zzz"]) == []
+
+    def test_Shopsは評価不問(self):
+        d = {"https://jp.mercari.com/shops/product/x":
+             {"cond": "新品、未使用", "ship": "送料込み", "reviews": None}}
+        got = R.filter_by_detail_cache(
+            [{"url": "https://jp.mercari.com/shops/product/x"}], d)
+        assert len(got) == 1
+
+    def test_目視に出す前に落としている(self):
+        src = inspect.getsource(R.pass_hoju_psa_style)
+        assert "filter_by_detail_cache" in src
+        assert src.index("filter_by_detail_cache") < src.index("restock_confirm")
+
+    def test_落とした件数を出す(self):
+        """黙って減らすと「候補が少ない」の理由が分からない."""
+        assert "条件で落とした候補" in inspect.getsource(R.pass_hoju_psa_style)

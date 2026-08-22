@@ -94,13 +94,37 @@ def extract_prize(c_title, ebay_title=""):
     return ""
 
 
-def build_keyword(c_title, ebay_title=""):
+def series_name(cell):
+    """W列のくじ名 → 検索に効く1語 (純関数)。
+
+    `一番くじ ワンピース 赤髪海賊団` → `赤髪海賊団`
+    `一番くじ ワンピース -エルバフ編- GIANT BASH!! Vol.1` → `エルバフ編`
+    先頭の「一番くじ」と作品名は、キャラ名で既に効いているので落とす。
+    語を足しすぎると 0件になるので **1語だけ**。取れなければ空 (推測しない)。
+    """
+    v = clean_kw(cell or "")
+    v = re.sub(r"^一番くじ\s*", "", v)
+    v = re.sub(r"[-‐―–—]", " ", v)          # `-エルバフ編-` の囲みを外す
+    parts = [x for x in re.split(r"[\s　]+", v) if x]
+    if not parts:
+        return ""
+    return parts[1] if len(parts) > 1 else parts[0]
+
+
+def build_keyword(c_title, ebay_title="", kuji_name=""):
     """検索語を組む。戻り: (keyword, prize)。一番くじ必須 + 賞必須(取れれば付与)。
 
     prize='' のときは賞不明(検索が通常フィギュアと混ざる恐れ)→ 呼出側でフラグ表示。
+
+    ★2026-08-22: **くじ名 (W列) を入れないと絞れない**。一番くじは同じキャラが同じ賞で
+      何度も出る。実測: 「一番くじ シャンクス A賞」で 新四皇 / 大海賊 /
+      マリンフォード最終決戦編 / エモーショナルストーリーズ が同時に出た。
     """
     kw = clean_kw(c_title)
     prize = extract_prize(c_title, ebay_title)
+    sn = series_name(kuji_name)
+    if sn and sn not in kw:
+        kw = kw + " " + sn
     if prize and prize not in kw:
         kw = kw + " " + prize
     return kw, prize
@@ -434,6 +458,9 @@ def get_thin_backup_ichibankuji(limit, max_backups=1):
                      # ★2026-08-22: 今の仕入元 (A列) も持って回る。目視画面に
                      #   「今どこから買っているか」の写真を並べるため (ユーザー要望)。
                      "supply_url": g(0).strip(),
+                     "kuji_name": g(22).strip(),      # W列 = くじの名前 (2026-08-22)
+                     "cost_now": g(13).strip(),       # N列 = 今の仕入れ値
+                     "price_now": g(12).strip(),      # M列 = 今の出品価格
                      "kind": "live_thin", "n_aux": n_aux})
     kept, n_cd = filter_cooldown(cand, _load_cooldown(), _today())
     if n_cd:
@@ -833,11 +860,17 @@ _COND_VALUES = r"(新品、未使用|未使用に近い|目立った傷や汚れ
 #   状態/送料/評価件数は既に取っていたので、**セラー名・星・発送までの日数** を足す。
 #   取れなければ空 (推測しない)。判定には使わず **画面に出すだけ** = 人が決める材料。
 def _parse_seller_name(s):
-    """page_source → 出品者名 (純関数)。取れなければ空。"""
-    m = re.search(r'"seller"\s*:\s*\{[^}]*?"name"\s*:\s*"([^"]{1,40})"', s or "", re.S)
-    if m:
-        return m.group(1)
-    m = re.search(r"([^<>\"]{1,30})\s*の(?:出品|プロフィール)", s or "")
+    """page_source → 出品者名 (純関数)。取れなければ空。
+
+    ★出品者リンクの `aria-label` から取る。実レンダで
+      `aria-label="できそこない@断捨離中, 36件のレビュー, 5段階評価中4.5, 本人確認済"`
+      の形 (`/user/profile/…` の a タグ)。**1か所しか出ない**ので一意。
+
+      2026-08-22 に「〜の出品」で拾う fallback を書いたら、
+      ページの注意書き (「…個別商品」等) を名前として拾った。
+      緩い正規表現で拾うくらいなら **取れない方がまし**なので消した。
+    """
+    m = re.search(r'/user/profile/\d+"[^>]*aria-label="([^",]{1,40})[,"]', s or "")
     return m.group(1).strip() if m else ""
 
 
@@ -1040,11 +1073,14 @@ def _identify_scrape(targets, cand_n, use_cache=True):
                        ("row", "item_id", "title", "prize", "ref_image", "candidates")}
                 _it["kind"] = t.get("kind", "oos")   # kind は対象側の属性(cacheに焼かない)
                 _it["supply_url"] = t.get("supply_url", "")   # 同上 (2026-08-22)
+                _it["cost_now"] = t.get("cost_now", "")
+                _it["price_now"] = t.get("price_now", "")
                 items.append(_it)
                 continue
             pics = fetch_listing_images(t["item_id"])
             et = _ebay_title(t["item_id"])             # 一番くじ+賞は生成済eBayタイトルが確実
-            kw, prize = build_keyword(t["title"], et)  # C列(日本語作品/キャラ)+一番くじ+賞
+            # C列(日本語作品/キャラ) + くじ名(W列) + 一番くじ + 賞
+            kw, prize = build_keyword(t["title"], et, t.get("kuji_name", ""))
             print(f"  [{i}/{len(targets)}] 賞={prize or '不明'} kw={kw[:32]}", flush=True)
             try:
                 raw = kw_search(drv, kw, cand_n)
@@ -1057,7 +1093,9 @@ def _identify_scrape(targets, cand_n, use_cache=True):
             # ★2026-08-22: supply_url は **対象側の属性** なので cache に焼かない
             #   (仕入元は日々変わる)。kind と同じ扱い。
             items.append({**it, "kind": t.get("kind", "oos"),
-                          "supply_url": t.get("supply_url", "")})
+                          "supply_url": t.get("supply_url", ""),
+                          "cost_now": t.get("cost_now", ""),
+                          "price_now": t.get("price_now", "")})
             cache[iid] = {**it, "date": today}   # kind は焼かない(対象側の属性で日々変わる)
             _identify_cache_save(cache)      # 1件ごとに保存(途中死しても貯めた分は残す)
     finally:
@@ -1149,6 +1187,38 @@ def pass_identify(n, cand_n, live=False):
     print("   次: python ichibankuji_restock.py expand")
 
 
+def filter_by_detail_cache(cands, detail, keep_cond=None, min_reviews=None):
+    """**ページを開かず** 詳細キャッシュだけで候補を絞る (純関数・test可)。
+
+    ★2026-08-22 の実害: 絞り込み (`_filter_new_freeship`) は画像検索の段
+      (`pass_expand`) の中にしか無く、その段を廃止した時に **絞りごと消えた**。
+      新品でない物・評価100未満の個人セラーが目視画面に並んだ (ユーザー指摘)。
+
+    規約は既存と同じ (二重実装しない):
+      - 状態  : 新品、未使用 / 未使用に近い のみ
+      - 送料  : 送料込みのみ (着払いは実原価が過小表示になる)
+      - セラー: 個人は評価件数≥100 / Shops(業者)は評価不問
+    ★キャッシュに無い = 判定不能 → **落とす** (fail-closed)。
+      夜間の先読みで温めてあるので、通常はほぼ全件そろっている。
+    """
+    import mercari_psa_resource as mp
+    keep_cond = keep_cond or _KEEP_COND
+    min_reviews = MIN_SELLER_REVIEWS if min_reviews is None else min_reviews
+    out = []
+    for c in cands:
+        url = c.get("url") or c.get("href") or ""
+        d = (detail or {}).get(url)
+        if not isinstance(d, dict) or not d.get("cond"):
+            continue                      # 判定不能 = 落とす
+        if d["cond"] not in keep_cond:
+            continue
+        if not mp.candidate_passes_filter(d["cond"], d.get("ship", ""), d.get("reviews"),
+                                          mp._is_shops_url(url), min_reviews=min_reviews):
+            continue
+        out.append(c)
+    return out
+
+
 def _cand_for_view(c, detail):
     """候補1件 → 目視画面に渡す形 (純関数)。
 
@@ -1195,9 +1265,15 @@ def pass_hoju_psa_style(n, cand_n=10):
         return
     scraped = _identify_scrape(targets, cand_n)
     detail = _detail_cache_load()          # 夜に温めた セラー/状態/発送 の情報
+    n_drop = 0
     items, item_rows = [], []
     for it in scraped:
         cands = it.get("candidates") or []
+        # ★2026-08-22: 新品/送料込み/セラー評価で絞る。**目視に出す前に**落とす。
+        #   画像検索の段を廃止した時、その中にあった絞りごと消えていた (ユーザー指摘)。
+        n_before = len(cands)
+        cands = filter_by_detail_cache(cands, detail)
+        n_drop += n_before - len(cands)
         ref = it.get("ref_image") or ""
         if not cands or not ref:
             continue                    # 現物が見えない / 候補が無い行は目視に出さない
@@ -1209,11 +1285,19 @@ def pass_hoju_psa_style(n, cand_n=10):
                       #   出品の写真だけだと「今どこから買っているか」が見えない。
                       "supply_image": it.get("supply_image") or "",
                       "supply_url": it.get("supply_url") or "",
+                      # ★2026-08-22: 今の仕入値 (N列) と 出品価格 (M列) を出す。
+                      #   候補の価格と見比べて「今より安い供給か」が一目で分かる
+                      #   (PSA の目視画面と同じ)。
+                      "cost_now": it.get("cost_now") or "",
+                      "price_now": it.get("price_now") or "",
                       "candidates": [_cand_for_view(c, detail) for c in cands]})
         item_rows.append(it)
     if not items:
         print("目視できる行がありません (候補なし / 現物画像なし)")
         return
+    if n_drop:
+        print("  ⏭️ 条件で落とした候補 %d件 (新品/送料込み/評価100以上 でない・判定不能)"
+              % n_drop)
     print("  🌐 目視 %d件: ブラウザで確認 → 送信" % len(items))
     res = prc.restock_confirm(items)
     if res is None:

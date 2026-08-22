@@ -75,7 +75,9 @@ def test_一番くじは絵文字で見分けられる():
 
 
 def test_夜と昼で別のコマンド():
-    assert '"ichibankuji_restock.py", "prefetch-live"' in SRC
+    # ★2026-08-22: 夜は候補 (prefetch-live) だけでなく詳細 (prefetch-detail) も要る。
+    #   2つで1組なので run_kuji_night.py にまとめた。
+    assert '"run_kuji_night.py"' in SRC
     assert '"ichibankuji_restock.py", "hoju"' in SRC
 
 
