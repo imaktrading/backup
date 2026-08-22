@@ -1108,6 +1108,88 @@ def pass_identify(n, cand_n, live=False):
     print("   次: python ichibankuji_restock.py expand")
 
 
+def pass_hoju_psa_style(n, cand_n=10):
+    """live の補URL補充を **PSA と同じ1画面** でやる (2026-08-22 ユーザー指示)。
+
+    ★いいとこ取り。ロジックは既存のまま (キーワード検索 → 新品/送料込み/セラー評価で
+      絞る → 夜間キャッシュ → 見送りのクールダウン)。**画面だけ PSA の確証UI**に
+      差し替え、候補を **複数選べる** ようにした。
+
+      従来 (identify → expand) は「1つ選んで、それを種に画像検索でさらに探す」の2段で、
+      人が2回見る必要があった。補URLは複数本 貯めるものなので、1画面で複数選ぶ方が合う。
+      画像検索の段は落とす (ユーザー判断 2026-08-22)。
+
+    書込は既存の `plan_live_aux` を通す = 既存の補URLを消さない / 空き枠だけ /
+    他の出品が使っているURLは掴まない。
+    """
+    import psa_resource_confirm as prc
+    targets = get_thin_backup_ichibankuji(n, max_backups=AUX_MAX)
+    print("補URL補充 (live): %d件 (各最安%d候補)" % (len(targets), cand_n))
+    if not targets:
+        print("対象なし")
+        return
+    scraped = _identify_scrape(targets, cand_n)
+    items, item_rows = [], []
+    for it in scraped:
+        cands = it.get("candidates") or []
+        ref = it.get("ref_image") or ""
+        if not cands or not ref:
+            continue                    # 現物が見えない / 候補が無い行は目視に出さない
+        items.append({"idx": len(items), "title": (it.get("title") or "")[:90],
+                      "card_no": it.get("prize") or "",
+                      "ebay_url": "https://www.ebay.com/itm/%s" % it.get("item_id"),
+                      "ref_image": ref,
+                      "candidates": [{"channel": "mercari", "url": c.get("url"),
+                                      "price": c.get("price", 0)} for c in cands]})
+        item_rows.append(it)
+    if not items:
+        print("目視できる行がありません (候補なし / 現物画像なし)")
+        return
+    print("  🌐 目視 %d件: ブラウザで確認 → 送信" % len(items))
+    res = prc.restock_confirm(items)
+    if res is None:
+        print("  ⏹ 未確定のまま閉じられました。何も書いていません")
+        return
+    confirmed = res.get("confirmed") or []
+    if not confirmed:
+        print("  選ばれた候補が0件でした。何も書いていません")
+        _add_cooldown([it["item_id"] for it in item_rows], reason="hoju:見送り")
+        return
+    # 既存の書込口へ渡す (kind=live_thin なら plan_live_aux が空き枠だけ埋める)
+    sheet_rows = {}
+    picked_ids = set()
+    for c in confirmed:
+        it = item_rows[c["idx"]]
+        picked_ids.add(it["item_id"])
+        sheet_rows[int(it["row"])] = {"kind": "live_thin", "b": it["item_id"],
+                                      "aux": list(c.get("urls") or [])}
+    skipped = [it["item_id"] for it in item_rows if it["item_id"] not in picked_ids]
+    if skipped:
+        _add_cooldown(skipped, reason="hoju:見送り")
+    _write_supplies_live(sheet_rows)
+    if res.get("diffs"):
+        print("  ⚠️ 「違う」と判定された候補 %d件 (検索が別の物を拾っている)"
+              % len(res["diffs"]))
+
+
+def _write_supplies_live(sheet_rows):
+    """live 行の補URLだけ書く。**既存の書込経路 (plan_live_aux) をそのまま使う**。"""
+    try:
+        vals = sheet_io._product_ws().get_all_values()
+        owner = build_owner_by_url(vals)
+    except Exception as e:                                     # noqa: BLE001
+        print("  ⚠️要対応 URL共有ガードを組めず **補URL書込を中止**: %s" % type(e).__name__)
+        return
+    plan, n_add, dropped = plan_live_aux(sheet_rows, vals, owner)
+    for u, own in dropped:
+        print("  ⛔ 補URL除外(他出品が使用中 %s): %s" % (own, u[:70]))
+    if not plan:
+        print("  追加する補URLがありませんでした (既に満杯 / 全部 他出品が使用中)")
+        return
+    sheet_io.write_aux_urls(plan)
+    print("  ✏️ 補URL: %d行 / 追加 %d本 (既存保持・空き枠のみ)" % (len(plan), n_add))
+
+
 def pass_expand(cand_n, dry=False):
     if not os.path.exists(PICKS_FILE):
         print(f"picks がありません。先に identify を実行: {PICKS_FILE}"); return
@@ -1752,12 +1834,10 @@ def main():
             pass_refresh()
     elif mode == "hoju":
         # ★ボタン: live(生きている出品)の補URL補充。夜間 prefetch-live の候補を即表示。
+        #   2026-08-22: 画面を PSA と同じ1画面(複数選択)に統一。
+        #   identify→expand の2段(1つ選んで画像検索)は廃止 (ユーザー判断)。
         n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-        pass_identify(n, cand_n=10, live=True)
-        if os.path.exists(PICKS_FILE) and json.load(open(PICKS_FILE, encoding="utf-8")):
-            pass_expand(cand_n=10, dry=False)
-        else:
-            print("識別0件 → expand skip")
+        pass_hoju_psa_style(n, cand_n=10)
     elif mode == "prefetch-detail":
         # ★夜間: 貯めた候補の詳細ページ(状態/送料/評価)を先に取る。
         #   昼のボタンで一番時間を食っていた部分 (実測 ①supply 22分の大半) を無人化する。
