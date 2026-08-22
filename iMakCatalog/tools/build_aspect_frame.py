@@ -66,6 +66,7 @@ SOURCE_OF = {
     "Attack/Power": "attack_power_ebay",
     "Defense/Toughness": "defense_toughness_ebay",
     "Attribute/MTG:Color": "color_ebay",
+    "Creature/Monster Type": "creature_type_ebay",
     # 2026-08-22: 埋めたのに枠が「未対応」と出ていたので実キーに繋ぐ
     "Manufacturer": "manufacturer_ebay",
     "Features": "features_ebay",
