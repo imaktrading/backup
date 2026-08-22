@@ -384,7 +384,10 @@ def _apply_ebay_fields(legacy: dict, record: dict, category: str) -> dict:
     if "power" in legacy and not legacy.get("power"):
         legacy["power"] = specs.get("power") or ""
     if "life_or_cost" in legacy and not legacy.get("life_or_cost"):
-        legacy["life_or_cost"] = specs.get("cost") or ""
+        # ★2026-08-22: Leader は cost を持たない。公式 API の "Cost/Life" は Leader の場合
+        #   **ライフ**なので catalog は `life` に入れている (HQ 指摘 → 503行是正済)。
+        #   この欄は「ライフ or コスト」なのでどちらでもよい。life を先に見る。
+        legacy["life_or_cost"] = specs.get("life") or specs.get("cost") or ""
     if "cost" in legacy and not legacy.get("cost"):
         legacy["cost"] = specs.get("cost") or specs.get("energy") or ""
     if "counter" in legacy and not legacy.get("counter"):

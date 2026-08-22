@@ -52,11 +52,23 @@ MAPPING = {
     "Attribute": "attribute",
     "Rarity": "rarity",
     "Power": "power",
-    "Cost/Life": "cost",
+    # ★2026-08-22 是正: Leader の "Cost/Life" は **ライフ** であってコストではない。
+    #   公式 API (bandai-tcg-plus /api/user/card/66038 = OP06-022 Yamato) が
+    #   Card Type=Leader / Cost/Life=4 を返す。この 4 はライフ。
+    #   旧コメントは「leader Life ≈ cost 同等」と書いて cost に寄せていたが、
+    #   出品に出すと **公式に無いコストを出す**ことになる (HQ 指摘 2026-08-22)。
+    #   → Leader は life、それ以外は cost に入れる (_key_for_cost_life)。
+    "Cost/Life": "__cost_or_life__",
     "Counter+": "counter",
     "Illust Type": "illustration_type",
     "Type": "card_characteristics",
 }
+
+
+def _key_for_cost_life(specs: dict) -> str:
+    """Leader なら life、そうでなければ cost."""
+    ct = str(specs.get("card_type") or specs.get("Card Type") or "").upper()
+    return "life" if "LEADER" in ct else "cost"
 
 
 def normalize_specs(specs: dict) -> tuple[dict, dict]:
@@ -66,6 +78,8 @@ def normalize_specs(specs: dict) -> tuple[dict, dict]:
     for old_key, new_key in MAPPING.items():
         if old_key not in out:
             continue
+        if new_key == "__cost_or_life__":
+            new_key = _key_for_cost_life(out)
         old_val = out.pop(old_key)
         changes["deleted"] += 1
         # 既存 new_key に値があれば、 上書きしない (= 小文字 snake_case の方を信頼)
