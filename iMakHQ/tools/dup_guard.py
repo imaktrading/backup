@@ -137,6 +137,51 @@ def shared_supply_urls(rows2d):
     return {u: sorted(v) for u, v in owner.items() if len(v) > 1}
 
 
+def supply_url_taken_by_live(rows, header, rows2d):
+    """CSV の各行の仕入元URLが **既に出品中の行に使われていないか** (純関数)。
+
+    ★2026-08-23 ユーザー確認「連番等の複数枚」。
+      同じ仕入元URLを2つの出品が指していると、**1つ買っても2つは埋められない**
+      (1つのメルカリ出品に複数枚入っているケース含む) → 片方はキャンセル → Defect。
+      これまで検出はあったが `audit()` の中だけで、**出品した後**にしか見ていなかった。
+      入稿の前に同じことを見る。
+
+    rows/header: これから入稿する CSV / rows2d: 商品管理シート (header 含む)。
+    戻り: [{'row': CSV行index, 'label':…, 'cert':…, 'url':…, 'owner': [itemID,…]}]
+    """
+    owner = {}
+    for r in rows2d[1:]:
+        if not _is_active(r):
+            continue
+        iid = _cell(r, B)
+        for u in [_cell(r, A)] + [_cell(r, AUX0 + k) for k in range(AUXN)]:
+            n = norm_url(u)
+            if n:
+                owner.setdefault(n, set()).add(iid)
+
+    # cert → その行の主URL (これから出す行は itemID が空なので owner には居ない)
+    url_by_cert = {}
+    for r in rows2d[1:]:
+        c = _cell(r, CERT)
+        if c and not _cell(r, B):
+            url_by_cert[c] = norm_url(_cell(r, A))
+
+    hi = {n: i for i, n in enumerate(header)}
+    li, ci = hi.get(CSV_LABEL), hi.get(CSV_CERT)
+    out = []
+    for i, r in enumerate(rows):
+        cert = (r[ci] or "").strip() if ci is not None and ci < len(r) else ""
+        u = url_by_cert.get(cert, "")
+        if not u:
+            continue
+        holders = sorted(owner.get(u, ()))
+        if holders:
+            out.append({"row": i, "cert": cert, "url": u, "owner": holders,
+                        "label": (r[li] or "").strip()
+                                 if li is not None and li < len(r) else ""})
+    return out
+
+
 def plan_shared_url_cleanup(rows2d):
     """共有された仕入元URLを **補URL側から外す**修正計画を作る (純関数)。
 
@@ -718,6 +763,29 @@ def pre_upload(csv_path, use_cache_only=True):
         if not rows:
             print("  (同一cert 除外の結果 CSV が空になりました)")
             return {"rows": 0, "dups": 0, "same_cert": len(severe)}
+
+    # ★仕入元URLが既に出品中の行に取られていないか (2026-08-23)。
+    #   1つのメルカリ出品に複数枚入っている / 連番でまとめ売りされている時、
+    #   2つの出品が同じURLを指すと **1つ買っても2つは埋められない** → キャンセル → Defect。
+    taken = supply_url_taken_by_live(rows, header, vals)
+    if taken:
+        print(f"■ 🔴 dup_guard: **仕入元URLが既に出品中の行に使われている** {len(taken)}件 "
+              f"→ CSV から物理除外します")
+        for t in taken:
+            print(f"    🚫 {t['label']:18} cert={t['cert']} 既存={t['owner']}")
+            print(f"       {t['url'][:74]}")
+        print("       (1つ買っても2つは埋められない = 片方はキャンセル → Defect)")
+        drop = {t["row"] for t in taken}
+        kept = [r for i, r in enumerate(rows) if i not in drop]
+        _strip_rows(csv_path, header, kept)
+        _ledger("pre_upload_stripped_shared_url",
+                {"csv": os.path.basename(csv_path),
+                 "taken": [{k: t[k] for k in ("label", "cert", "url", "owner")}
+                           for t in taken]})
+        rows = kept
+        if not rows:
+            print("  (仕入元URL共有の除外の結果 CSV が空になりました)")
+            return {"rows": 0, "dups": 0, "shared_url": len(taken)}
 
     # ★live の真は eBay ActiveList (シートの D列は「仕入元が売切」であって出品終了ではない)
     index, _unkeyed = live_card_index(vals, titles, active_ids=set(titles) or None)
