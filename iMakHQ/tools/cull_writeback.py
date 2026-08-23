@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""CULL で取り下げた後の管理スプシ後始末 (取下再出品の③に相当)。
+
+なぜ必要か (2026-08-24 ユーザー決定):
+    `cull_end.py` はスプシを触らないので、取り下げても **B列に死んだ itemID が残る**。
+    このシステムは **B列が埋まっている = 出品済み** として動くので、
+    仕入元が復活しても「もう出している」と判断されて二度と出品されない
+    (実測: 361件 End のうち 167件 がスプシに残っていた)。
+
+決めたこと (案C):
+    - **B列は空にする** … 仕入元が復活したら出品候補に戻す
+    - **Q列(FLG)に `CULL <日付>` を残す** … 取り下げた事実を消さない
+    - **2回目に CULL されたら `CULL×2`** … 1回目は「時期が悪かった」可能性を残し、
+      2回繰り返したものは諦める (在庫切れ中は検索から隠れるので、1回の低評価は不当かもしれない)
+
+使い方:
+    python cull_writeback.py                      # 一覧を出すだけ
+    python cull_writeback.py --commit             # 書く
+    python cull_writeback.py --from-backup <json> # B列を先に空にしてしまった時の後追い
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import datetime
+import glob
+import io
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+FLG_COL = 17          # Q列「FLG」(1始まり)。全行 空なのを確認済 (2026-08-24)
+ITEM_COL = 2          # B列「itemID」
+RESULT_DIRS = [
+    os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "デスクトップ", "新しいフォルダー"),
+    os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "デスクトップ"),
+]
+
+
+def _col_letter(n):
+    return chr(64 + n) if n <= 26 else "A" + chr(64 + n - 26)
+
+
+def next_flag(current, today):
+    """Q列の次の値を決める (純関数, test可)。
+
+    空          → "CULL <日付>"
+    CULL が1回  → "CULL×2 <日付>"   ← もう出さない印
+    CULL×2 以上 → そのまま (増やさない)
+    """
+    cur = (current or "").strip()
+    if not cur:
+        return f"CULL {today}"
+    if cur.startswith("CULL×2"):
+        return cur
+    if cur.startswith("CULL"):
+        return f"CULL×2 {today}"
+    return f"{cur} / CULL {today}"          # 他の印が入っていたら壊さず足す
+
+
+def ended_ids_from_results(paths):
+    """eBay の End 結果 CSV 群 → 成功した itemID 集合 (純関数寄り, test可)。"""
+    out = set()
+    for p in paths:
+        try:
+            for r in csv.DictReader(io.open(p, encoding="utf-8-sig")):
+                if r.get("Status") == "Success" and (r.get("ItemID") or "").strip():
+                    out.add(r["ItemID"].strip())
+        except OSError:
+            continue
+    return out
+
+
+def find_result_files(days=2):
+    """直近の End 結果 CSV を探す (cull_end_ で始まるアップ結果)。"""
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
+    hits = []
+    for d in RESULT_DIRS:
+        if not os.path.isdir(d):
+            continue
+        for p in glob.glob(os.path.join(d, "cull_end_*.csv")):
+            try:
+                if datetime.datetime.fromtimestamp(os.path.getmtime(p)) >= cutoff:
+                    hits.append(p)
+            except OSError:
+                continue
+    return sorted(set(hits))
+
+
+def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:                                          # noqa: BLE001
+        pass
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--commit", action="store_true", help="実際に書く (既定は一覧のみ)")
+    ap.add_argument("--from-backup", default="", help="B列を先に空にした時の控え JSON")
+    a = ap.parse_args()
+
+    import gspread
+    from google.oauth2.service_account import Credentials
+    from relist_writeback import CREDS_PATH, SHEETS
+
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    cr = Credentials.from_service_account_file(
+        CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    gc = gspread.authorize(cr)
+
+    # 対象の作り方は2通り。既定は eBay の結果 CSV。
+    by_row = {}                        # (label, row) → itemID
+    if a.from_backup:
+        for b in json.load(io.open(a.from_backup, encoding="utf-8")):
+            by_row[(b["sheet"], b["row"])] = b["item_id"]
+        print(f"控えから {len(by_row)}件 (B列は既に空の想定)")
+    else:
+        files = find_result_files()
+        if not files:
+            sys.exit("End 結果 CSV が見つかりません (デスクトップ / 新しいフォルダー を見ます)")
+        ended = ended_ids_from_results(files)
+        print(f"End 結果 {len(files)}ファイル → 成功 {len(ended)}件")
+        for f in files:
+            print(f"  {os.path.basename(f)[:60]}")
+
+    plan = []
+    for cfg in SHEETS:
+        ws = gc.open_by_key(cfg["id"]).get_worksheet_by_id(cfg["gid"])
+        vals = ws.get_all_values()
+        rows = []
+        for n, row in enumerate(vals[1:], start=2):
+            cur_flg = row[FLG_COL - 1].strip() if len(row) >= FLG_COL else ""
+            if a.from_backup:
+                if (cfg["label"], n) not in by_row:
+                    continue
+            else:
+                b = row[ITEM_COL - 1].strip() if len(row) >= ITEM_COL else ""
+                if not b or b not in ended:
+                    continue
+            rows.append((n, cur_flg, next_flag(cur_flg, today)))
+        plan.append((cfg, ws, rows))
+        n2 = sum(1 for _n, c, _v in rows if c.strip())
+        print(f"  {cfg['label'][:30]:<32} 対象 {len(rows):>4}件 (うち2回目 {n2}件)")
+
+    total = sum(len(r) for _c, _w, r in plan)
+    print(f"\n対象 合計 {total}件")
+    if not total:
+        return 0
+    if not a.commit:
+        for _c, _w, rows in plan:
+            for n, cur, new in rows[:4]:
+                print(f"    {n}行目  Q: {cur!r} → {new!r}")
+            break
+        print("→ 実際に書くには --commit")
+        return 0
+
+    for cfg, ws, rows in plan:
+        if not rows:
+            continue
+        ups = [{"range": f"{_col_letter(FLG_COL)}{n}", "values": [[v]]} for n, _c, v in rows]
+        if not a.from_backup:                      # 結果 CSV 経由なら B列も空にする
+            ups += [{"range": f"{_col_letter(ITEM_COL)}{n}", "values": [[""]]}
+                    for n, _c, _v in rows]
+        ws.batch_update(ups)
+        print(f"  {cfg['label'][:30]:<32} {len(rows)}件 書きました")
+    print("完了")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
