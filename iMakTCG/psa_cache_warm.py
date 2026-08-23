@@ -41,7 +41,14 @@ DEFAULT_LIMIT = 40
 
 
 def pending_certs(all_certs, is_cached):
-    """まだ PSA データが無い cert (順序は入力のまま = 再現可能)。純関数・test 可."""
+    """まだ PSA データが揃っていない cert (順序は入力のまま = 再現可能)。純関数・test 可.
+
+    ★2026-08-23: 「PSA10のみ出品する」を規定にしたので、**グレードが入っていない保存分も
+      ここで拾う**。8/23 朝に「グレードは PSA のページから読む」を入れたが、既に保存済の
+      cert は読み出し口で素通りしていて、その日出した9件は全てグレード未取得だった。
+      朝の走行で取り直すと 20件ぶん待たされるので、夜のうちに貯めておく。
+    is_cached: cert → 「もう十分持っている」なら True。
+    """
     seen, out = set(), []
     for c in all_certs:
         c = str(c or "").strip()
@@ -50,6 +57,19 @@ def pending_certs(all_certs, is_cached):
         seen.add(c)
         out.append(c)
     return out
+
+
+def has_everything_we_need(meta):
+    """保存分だけで出品判断まで足りるか (純関数)。
+
+    Subject が無い = そもそもデータ無し。Grade の欄が無い = グレード未取得
+    (空文字は「取りに行ったが PSA のページに無かった」なので、もう取り直さない)。
+    """
+    if not meta:
+        return False
+    if not meta.get("Subject"):
+        return False
+    return "Grade" in meta
 
 
 def _record(payload):
@@ -73,9 +93,9 @@ def main() -> int:
     import psa_to_csv as P
 
     certs, _cost, _url, _title = P.load_targets_from_sheet_psa()
-    todo = pending_certs(certs, lambda c: psa_api.get_cached(c) is not None)
+    todo = pending_certs(certs, lambda c: has_everything_we_need(psa_api.get_cached(c)))
     print(f"=== PSA データの先貯め ===")
-    print(f"出品候補 {len(certs)}件 / データ有 {len(certs) - len(todo)}件 "
+    print(f"出品候補 {len(certs)}件 / データ揃い {len(certs) - len(todo)}件 "
           f"/ 無 {len(todo)}件 → 今回 {min(a.limit, len(todo))}件")
     if a.dry_run or not todo:
         _record({"mode": "dry-run" if a.dry_run else "empty",

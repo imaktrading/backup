@@ -1301,20 +1301,36 @@ def _url_exists(url, timeout=8):
 
 
 _SUPPLIER_NON_PSA10 = re.compile(r"PSA\s*[・･]?\s*([1-9])(?![0-9])", re.IGNORECASE)
+# PSA 以外の鑑定会社。当店は **PSA10 のみ**を出すので、仕入元が他社と明記していたら入口で落とす。
+# ★2026-08-23 ユーザー規定「PSA10のみの出品」。番号だけ入力されると PSA のサイトを引いてしまい、
+#   たまたま同じ番号の別カードが返ると **別カードとして出品**される (最も危険な型)。
+#   BGS/CGC は数字グレードを併記するので `PSA n` の正規表現では拾えない。
+_SUPPLIER_OTHER_GRADER = re.compile(
+    r"(?<![A-Za-z])(BGS|CGC|SGC|ARS|AGS|HGA|GRAAD|TAG)(?![A-Za-z])", re.IGNORECASE)
+_SUPPLIER_PSA10 = re.compile(r"PSA\s*[・･]?\s*10(?![0-9])", re.IGNORECASE)
 
 
 def supplier_grade_hint(supplier_title):
-    """仕入元タイトル(商品管理シート C列)から PSA グレード表記を拾う (純関数)。
+    """仕入元タイトル(商品管理シート C列)から「PSA10 でない」根拠を拾う (純関数)。
 
     ★これが 2026-07-27 の誤出品 6件を実際に発見した信号。
       例: 「【PSA9・ワンオーナー】バギー 金ドン スーパーパラレルドン ワンピースカード」
     `PSA10` は 10 なので拾わない (`[1-9](?![0-9])` で 1 桁のみ)。
-    戻り: '9' 等 / 表記なしは None。
+    戻り: '9' 等のグレード / 'CGC' 等の他社名 / どちらも無ければ None。
     """
     if not supplier_title:
         return None
-    m = _SUPPLIER_NON_PSA10.search(str(supplier_title))
-    return m.group(1) if m else None
+    t = str(supplier_title)
+    m = _SUPPLIER_NON_PSA10.search(t)
+    if m:
+        return m.group(1)
+    # 他社名は「PSA10 と書かれていない時」だけ根拠にする。
+    # 「PSA10 CGCカードローダー付き」のように **付属品として他社名が出る**ことがあり、
+    # そこで落とすと本物の PSA10 を1枠捨てることになる (グレードは後段で PSA ページから確かめる)。
+    if _SUPPLIER_PSA10.search(t):
+        return None
+    m2 = _SUPPLIER_OTHER_GRADER.search(t)
+    return m2.group(1).upper() if m2 else None
 
 
 def non_psa10_certs(title_map):
@@ -1351,19 +1367,36 @@ def detected_grade_from_title(title):
     return m.group(1) if m else None
 
 
-def is_psa10_or_unknown(title, psa_grade=None):
-    """出品してよいか (= PSA10 と読めた or 読めなかった) を返す (純関数)。
+def is_psa10_confirmed(title, psa_grade=None):
+    """**PSA10 だと確かめられた時だけ True** (純関数)。
 
-    判定材料は2つ。**どちらかが「10でない」と言ったら出品しない**(fail-closed):
-      1. `psa_grade` = LLM が **PSA ラベル画像から直接読んだ**グレード (最も確か。画像が真実)
-      2. `title` 冒頭の `PSA <n>` (副次。prompt の書式に依存する)
-    読めない時は従来どおり続行する (pipeline は PSA10 前提で、全部止めると出品がゼロになる)。
-    = 「判っている誤りだけを確実に止める」。
+    ★2026-08-23 ユーザー規定「PSA10のみの出品と規定したらいい」。
+      それまでは「10 でないと読めた時だけ止める / 読めなければ通す」だった (fail-open)。
+      グレードが読めない個体は素通りしていて、タイトル・C:Grade・相場が全部 "10" 固定の
+      このパイプラインでは **グレード誤表示のまま出る**。読めないものは出さないに反転する。
+
+    判定材料 (どちらかが '10' と言えば確定。片方でも '10 以外' なら不可):
+      1. `psa_grade` = PSA のページの Item Grade (一次情報)。無ければラベル画像の読み
+      2. `title` 冒頭の `PSA <n>` (副次。こちらの生成物なので単独では根拠にしない)
+    どちらも読めなければ False = 出さない。
     """
-    for g in (str(psa_grade or "").strip(), detected_grade_from_title(title)):
-        if g and g != "10":
-            return False
-    return True
+    grades = [str(psa_grade or "").strip(), detected_grade_from_title(title) or ""]
+    if any(g and g != "10" for g in grades):
+        return False
+    # ★タイトルは自分で組んだ文字列なので、単独では「確かめた」ことにしない。
+    #   現物由来 (PSAページ / ラベル画像) の psa_grade が 10 と言った時だけ確定。
+    return str(psa_grade or "").strip() == "10"
+
+
+def is_psa10_or_unknown(title, psa_grade=None):
+    """[旧仕様・2026-08-23 に廃止] 読めなければ通していた頃の判定。
+
+    残してあるのは、どこかで呼ばれていた時に **黙って挙動が変わらない**ようにするため。
+    新しい規定は `is_psa10_confirmed`。
+    """
+    raise RuntimeError(
+        "is_psa10_or_unknown は廃止 (2026-08-23 ユーザー規定: PSA10 のみ出品)。"
+        "is_psa10_confirmed を使うこと")
 
 
 # PSA cert ページの「項目名 → 次の行が値」形式 (2026-08-23 実取得で確認 / cert158363091)。
@@ -1373,12 +1406,27 @@ def is_psa10_or_unknown(title, psa_grade=None):
 #   PSA POPULATION    836   /   PSA POP HIGHER   0
 # ★グレードは従来 **Claude にラベル画像を読ませて**いた (推測)。ページに書いてあるので
 #   そちらを一次情報として使う (2026-08-23 ユーザー承認)。
+#
+# ★2026-08-23 修正: **出品くんが見に行くのは日本語ページ** (`/ja-JP/cert/...`)。
+#   英語の見出しだけを書いていたので一度も一致せず、グレードは常に空だった
+#   (実測: 保存済 1,203件すべて Grade 無し / 実際に取り直しても空)。
+#   日本語ページの実物 (cert158363091 を 2026-08-23 に取得):
+#       グレード / GEM MT 10
+#       ラベルタイプ / フュージティブインク技術搭載
+#       バラエティ / ALTERNATE ART
+#       グレーディング枚数 / 836      より高評価のグレーディング枚数 / 0
+#   英語見出しも残す (URL を英語に戻しても動くように)。
 _PSA_PAGE_FIELDS = {
-    "Item Grade":       "Grade",
-    "Variety/Pedigree": "Variety",
-    "Label Type":       "LabelType",
-    "PSA POPULATION":   "Population",
-    "PSA POP HIGHER":   "PopHigher",
+    "グレード":            "Grade",
+    "Item Grade":          "Grade",
+    "バラエティ":          "Variety",
+    "Variety/Pedigree":    "Variety",
+    "ラベルタイプ":        "LabelType",
+    "Label Type":          "LabelType",
+    "グレーディング枚数":  "Population",
+    "PSA POPULATION":      "Population",
+    "より高評価のグレーディング枚数": "PopHigher",
+    "PSA POP HIGHER":      "PopHigher",
 }
 
 
@@ -1517,7 +1565,14 @@ def get_psa_data(driver, cert_number):
     cache = _load_psa_cache()
     if cert_number in cache:
         cached = cache[cert_number]
-        if cached and cached.get('Subject'):
+        # ★2026-08-23: **グレードが入っていない保存分は取り直す**。
+        #   「PSA10 のみ出品」を規定した以上、グレードは必須項目。8/23 朝に
+        #   「グレードは PSA のページから読む」を入れたが、保存済の cert は早期 return で
+        #   素通りしていて、その日出した9件すべてグレード未取得だった (= 規定が効かない)。
+        #   1 cert につき一度だけ取り直せば、以降は保存分で足りる。
+        if cached and cached.get('Subject') and 'Grade' not in cached:
+            print(f"    ↻ グレード未取得のため PSA を取り直します (#{cert_number})")
+        elif cached and cached.get('Subject'):
             # ★2026-08-15: **キャッシュ hit でも代替画像を当てる**。
             #   前回 (8/14) は scrape 経路にだけ入れたので、既にキャッシュにある cert
             #   (= まさに画像が無い 102629645) は早期 return で素通りし、3日連続で
@@ -1575,6 +1630,10 @@ def get_psa_data(driver, cert_number):
             print(f"\n    画像取得エラー: {e}")
 
         data = parse_psa_page(body)
+        # ★取りに行った事実を残す。ページに Item Grade が無い個体で
+        #   「未取得だから取り直す」が毎回起きて無限に叩きに行くのを防ぐ。
+        #   空のまま = グレード不明 → PSA10 と確かめられないので出品はしない。
+        data.setdefault('Grade', '')
         if card_image_urls:
             # ★取得時点で /large/(1140x1920) に上げる。PicURL(eBay商品画像)・Vision同定・
             #   psa_cache・viewer が同じ URL を共有するので、ここ1箇所で全部に効く。
@@ -2498,11 +2557,16 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     #   グレード誤表示 + 相場誤参照 になる。現物ラベルを読めた時だけ確実に止める。
     # PSA ページに書いてある値を最優先 (一次情報)。無ければ従来どおり画像判定の値。
     _vision_grade = _page_grade or ((claude_result or {}).get('psa_grade') if claude_result else None)
-    if not is_psa10_or_unknown(claude_title, _vision_grade):
+    if not is_psa10_confirmed(claude_title, _vision_grade):
         _g = (str(_vision_grade or "").strip() or detected_grade_from_title(claude_title))
-        _src = "PSAページ" if _page_grade else "ラベル画像"
-        print(f"    🚫 PSA{_g} を検出({_src}) → **出品しない** (本 pipeline は PSA10 限定運用。"
-              f"グレード誤表示 + PSA10 相場の誤参照になるため fail-closed)")
+        _src = "PSAページ" if _page_grade else ("ラベル画像" if _vision_grade else "")
+        if _g and _g != "10":
+            print(f"    🚫 PSA{_g} を検出({_src}) → **出品しない** (PSA10 のみ出品する規定。"
+                  f"グレード誤表示 + PSA10 相場の誤参照になるため)")
+        else:
+            # ★読めなかった分も必ず理由を出す。黙って落とすと「なぜ減ったか」が分からない
+            print(f"    🚫 グレードを確かめられなかった → **出品しない** "
+                  f"(PSA10 のみ出品する規定・2026-08-23)。PSA ページの Item Grade が読めていません")
         return None
     if claude_title:
         title = strip_banned_words(claude_title)

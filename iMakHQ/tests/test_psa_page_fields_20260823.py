@@ -91,9 +91,15 @@ def test_grade_number(mod, raw, want):
 
 
 def test_psa9_is_rejected(mod):
-    assert mod.is_psa10_or_unknown("PSA 10 何か", "9") is False
-    assert mod.is_psa10_or_unknown("PSA 10 何か", "10") is True
-    assert mod.is_psa10_or_unknown("PSA 10 何か", "") is True   # 読めない = 従来どおり続行
+    """★2026-08-23 午後 ユーザー規定「PSA10のみの出品」で **読めない時も出さない**に反転。
+
+    それまでは「読めない = 従来どおり続行」だった。ところがグレードは保存済データに
+    入っておらず、その日出した9件は一度も確かめていなかった (= 事実上ノーガード)。
+    タイトルも C:Grade も相場も "10" 固定なので、確かめずに出すのは誤表示のまま出すこと。
+    """
+    assert mod.is_psa10_confirmed("PSA 10 何か", "9") is False
+    assert mod.is_psa10_confirmed("PSA 10 何か", "10") is True
+    assert mod.is_psa10_confirmed("PSA 10 何か", "") is False   # 読めない = 出さない
 
 
 def test_missing_labels_do_not_break(mod):
