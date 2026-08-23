@@ -210,9 +210,16 @@ def classify_finding(severity, msg):
     # --- 機械的修正 ---
     if m.startswith("送料ポリシー") and "不一致" in m:
         return MECH_FIX
-    # --- 生成プログラムのバグ (誤出品直結 → 除外+報告) ---
-    if m.startswith("PSAの現物と"):
+    # --- PSA の現物と食い違う (2026-08-23 新設・2026-08-24 行き先を分けた) ---
+    # ★どちらも出品は止める。**直す担当が違う**ので行き先を分ける:
+    #   別ゲーム   = こちらが別カードを掴んだ (2026-08-23 の ST02-001 = ワンピ↔ガンダム) → ②
+    #   名前が違う = カタログの英名が別人/直訳 (ジニア・ポケモンごっこ・オルティガ) → ①
+    # 名前の方を program に入れていたため、**カタログのデータ誤りが HQ の修正待ちとして
+    # 積み上がっていた** (2026-08-24 ユーザー指摘)。実測3件とも catalog 側の誤りだった。
+    if m.startswith("PSAの現物と別ゲーム"):
         return REPORT_PROGRAM
+    if m.startswith("PSAの現物と名前が一致しない"):
+        return EXCLUDE_CATALOG
     if "禁止ワード" in m:
         return REPORT_PROGRAM
     if "上限" in m and "タイトル" in m:        # タイトルN字 > 上限80字
@@ -753,6 +760,19 @@ def write_catalog_request(project, items, dry_run):
     for sku, reason in items:
         body.append(f"| {sku} | {reason} |")
     body.append("\n※catalogに値が在るのにCSVが空なら generator 脱落の可能性 (要切り分け)。")
+    # ★2026-08-24: 名前の食い違いは **決めつけない**。catalog の英名が誤っている事もあれば、
+    #   こちらが別の版を掴んでいる事もある。CLAUDE.md「安易にカタログが間違っていると
+    #   判断して修正依頼を出すな」に沿って、観測した事実と両方の可能性を書く。
+    if any("名前が一致しない" in r for _sku, r in items):
+        body.append(
+            "\n### 名前の食い違いについて (決めつけていません)\n"
+            "PSA のラベル (現物) と catalog の `name_en`/`character_name` が "
+            "**1語も一致しない** 行です。原因は2つ考えられます:\n"
+            "1. catalog の英名が誤り (別人の名前 / 日本語名の直訳)\n"
+            "2. こちらが **別の版** を掴んでいる (resolver が違う variant を選んだ)\n\n"
+            "どちらか判断できないので、**そちらの見解を聞かせてください**。"
+            "2 だと分かった場合は「引き方が誤り」として突き返してください。こちらで直します。\n"
+            "該当行は入稿から除外済みなので、誤った内容で出品されてはいません。")
     text = "\n".join(body)
     if not dry_run:
         os.makedirs(CATALOG_REQ_DIR, exist_ok=True)
