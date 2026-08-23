@@ -704,8 +704,18 @@ def specifics_sanity_issues(row, title):
     t = str(title or "").strip()
     last = t.split()[-1] if t.split() else ""
     if len(last) == 1 and last.isalpha():
-        out.append(("ERROR",
-                    f"タイトルが1文字'{last}'で終わっている (末尾が欠けた疑い): {t}"))
+        # ★2026-08-23: **カード名そのものが1文字で終わる**ことがある。
+        #   ポケモンの「Pikachu V」「Charizard V」「Aegislash V」は V まで含めて名前で、
+        #   欠けているわけではない。実測 605タイトル中 8件が該当し、うち4件が この型。
+        #   8/23 の走行では Flying Pikachu V が「末尾が欠けた疑い」で **出品除外**された。
+        #   カタログの名前の末尾と一致するなら、それは欠けではなく名前。
+        names = " ".join(filter(None, [
+            (get_col(row, "C:Card Name") or "").strip(),
+            (get_col(row, "C:Character") or "").strip()]))
+        name_tail = {w for w in names.split() if len(w) == 1 and w.isalpha()}
+        if last.lower() not in {w.lower() for w in name_tail}:
+            out.append(("ERROR",
+                        f"タイトルが1文字'{last}'で終わっている (末尾が欠けた疑い): {t}"))
     return out
 
 
