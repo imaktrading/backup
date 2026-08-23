@@ -27,6 +27,7 @@ import collections
 import csv as _csv
 import datetime
 import glob
+import hashlib
 import importlib.util
 import json
 import os
@@ -2112,6 +2113,65 @@ def _report(project, csv_path, dry_run, n_rows, exclude_idx, ship_fixes,
         print(f"\n  レポート: {rp}")
 
 
+# 「そのCSVの中身を、もう監査したか」の控え (2026-08-23)。
+# ★なぜ要るか: 🤖自動 は入稿の前に監査くんを走らせている。その後で 🔍CSV監査くん を
+#   押しても同じことの2回目にしかならない (8/20-8/23 の4走行とも実際にそうなっていた)。
+#   人が「今押すべきか」を毎回判断しなくて済むように、機械が「もう見た」と言う。
+# ★中身 (バイト列) で見る。ファイル名や時刻ではなく中身なので、1行でも直せば必ず見直す。
+_AUDITED_MEMO = r"C:/dev/iMak_data/hq/audited_csv_fingerprints.json"
+_AUDITED_KEEP = 50          # 直近このファイル数だけ覚える (無限に太らせない)
+
+
+def csv_fingerprint(csv_path):
+    """CSV の中身の指紋。読めなければ "" (= 覚えない・素通りさせる)。"""
+    try:
+        with open(csv_path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except Exception:
+        return ""
+
+
+def _load_audited(memo_path=None):
+    try:
+        with open(memo_path or _AUDITED_MEMO, encoding="utf-8") as f:
+            got = json.load(f)
+        return got if isinstance(got, dict) else {}
+    except Exception:
+        return {}
+
+
+def already_audited(csv_path, memo_path=None):
+    """同じ中身を監査済なら、その時刻の文字列を返す。未監査なら ""。"""
+    fp = csv_fingerprint(csv_path)
+    if not fp:
+        return ""
+    rec = _load_audited(memo_path).get(os.path.basename(csv_path)) or {}
+    return rec.get("at", "") if rec.get("sha") == fp else ""
+
+
+def remember_audited(csv_path, memo_path=None, now=None):
+    """このCSVの中身を「見た」と控える。書けなくても監査結果は変わらないので握る。"""
+    fp = csv_fingerprint(csv_path)
+    if not fp:
+        return False
+    path = memo_path or _AUDITED_MEMO
+    memo = _load_audited(path)
+    memo[os.path.basename(csv_path)] = {
+        "sha": fp,
+        "at": (now or datetime.datetime.now()).strftime("%Y-%m-%d %H:%M"),
+    }
+    if len(memo) > _AUDITED_KEEP:                 # 古い順に捨てる
+        for k in sorted(memo, key=lambda k: memo[k].get("at", ""))[:-_AUDITED_KEEP]:
+            memo.pop(k, None)
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(memo, f, ensure_ascii=False, indent=1)
+        return True
+    except Exception:
+        return False
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default="")
@@ -2120,13 +2180,25 @@ def main(argv=None):
     # --quick で機械ルールのみ(API不要・高速)に。
     ap.add_argument("--quick", action="store_true", help="市場ゲート/SEO/Claude を省く(高速)")
     ap.add_argument("--log", default="")
+    ap.add_argument("--force", action="store_true",
+                    help="同じ中身を見たことがあっても、もう一度監査する")
     args = ap.parse_args(argv)
     csv_path = args.csv or find_latest_csv()
     if not csv_path or not os.path.exists(csv_path):
         print("❌ 監査対象CSVが見つかりません (--csv で指定)")
         return 2
-    return audit(csv_path, dry_run=args.dry_run, with_market=(not args.quick),
-                 log_path=args.log or None)
+    seen = already_audited(csv_path)
+    if seen and not args.force and not args.dry_run:
+        print(f"✅ もう見ています。押す必要はありません ({os.path.basename(csv_path)} / "
+              f"前回 {seen})")
+        print("   中身が1文字でも変われば、次に押した時にちゃんと見ます "
+              "(どうしても今もう一度見たい時は --force)")
+        return 0
+    rc = audit(csv_path, dry_run=args.dry_run, with_market=(not args.quick),
+               log_path=args.log or None)
+    if not args.dry_run:
+        remember_audited(csv_path)
+    return rc
 
 
 if __name__ == "__main__":
