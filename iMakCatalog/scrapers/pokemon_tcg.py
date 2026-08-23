@@ -21,6 +21,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import sys
@@ -307,10 +308,21 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
     if m:
         out["hp"] = m.group(1)
 
-    # Stage (進化段階) — text 順序で一番近いものを優先
-    m = re.search(r"(2\s*進化|1\s*進化|たね|基本|MEGA|VMAX|VSTAR|ex\s*進化)", text)
-    if m:
-        out["stage"] = re.sub(r"\s+", "", m.group(1)).strip()
+    # Stage (進化段階) — ★2026-08-23 全面差替え。
+    #   旧実装は **ページ全文** から進化段階の語を探していたので、進化段階の欄を持たない
+    #   トレーナーズ/エネルギーで **効果テキストやセット名**に当たっていた (実測 2,366行):
+    #     M4-074 変化の書   「自分のトラッシュから たね ポケモンを1枚選び」      -> 'たね'
+    #     MC-650 ハイパーアロマ「自分の山札から 1進化 ポケモンを3枚まで選び」    -> '1進化'
+    #     M2a-148 改造ハンマー「ハイクラスパック 『MEGAドリームex』」          -> 'MEGA'
+    #   同日に直したタイプ取り違え (ピカチュウ 6,138枚が Fighting) と同じ形。
+    #   → 進化段階の欄 `<span class="type">たね</span>` に **アンカーして**取る。
+    #     欄が無いカード (トレーナーズ/エネルギー) は空のままが正しい。
+    #   ★実体参照を戻してから空白を落とす (公式は `1&nbsp;進化` と書いている)。
+    m_stage = re.search(r'<span class="type">([^<]*)</span>', html_decoded)
+    if m_stage:
+        v = re.sub(r"\s+", "", html.unescape(m_stage.group(1))).strip()
+        if v:
+            out["stage"] = v
 
     # Type icon — ★2026-08-23 全面差替え。
     #   旧実装の誤り2つ (実測: ピカチュウ 6,138枚が 'Fighting' になっていた):

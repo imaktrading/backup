@@ -153,6 +153,7 @@ class AuditResult(NamedTuple):
     prefix_mismatch: list
     unregistered: dict
     code_value_mismatch: list
+    stage_on_non_pokemon: list
 
 
 # 弾番号つき eBay 値の接頭辞 (Sv4k: / Swsh06: / Sm3h: …)
@@ -289,6 +290,11 @@ def audit(categories):
     #      - 値の頭が弾コードの細分 (`S8a-P:` は S8a の promo pack) → 同じ弾扱い
     #      - `_free_text_set_values.yaml` に登録済の自由入力 (`25th Anniversary Golden Box`)
     code_value_mismatch = []      # (product_id, set_code, stored, [その弾の master 値])
+    # 9. 進化段階を持たない種別に stage が入っていないか (2026-08-23 追加)
+    #    取り込みが **ページ全文** から進化段階の語を探していたため、トレーナーズ/
+    #    エネルギーで効果テキストやセット名に当たっていた (2,366行)。
+    #    `<span class="type">` にアンカーして取り直したので、以後は 0 で維持する。
+    stage_on_non_pokemon = []     # (product_id, card_type_ebay, stage)
     _master, _allow = _load_allowed()
     # 弾コード -> その弾の eBay 値 (category 別)
     _by_code = defaultdict(lambda: defaultdict(set))
@@ -380,6 +386,13 @@ def audit(categories):
         if r_stored and not _looks_like_rarity(r_stored):
             not_rarity[(r["category"], r_stored)] += 1
 
+        # 9. 進化段階を持たない種別に stage が入っている (ポケモンのみ)
+        if r["category"] == "pokemon_tcg":
+            _ct = s.get("card_type_ebay")
+            if _ct in ("Trainer", "Energy") and (s.get("stage") or s.get("stage_ebay")):
+                stage_on_non_pokemon.append(
+                    (r["product_id"], _ct, s.get("stage") or s.get("stage_ebay")))
+
     conn.close()
 
     # 1. era mismatch
@@ -411,7 +424,7 @@ def audit(categories):
         era_mismatch, inconsistent, none_list, name_desync,
         dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
         prefix_mismatch, {k: dict(v) for k, v in unregistered.items()},
-        code_value_mismatch)
+        code_value_mismatch, stage_on_non_pokemon)
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
@@ -601,7 +614,8 @@ def main():
 
     (era_mismatch, inconsistent, none_list, name_desync,
      empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
-     prefix_mismatch, unregistered, code_value_mismatch) = audit(categories)
+     prefix_mismatch, unregistered, code_value_mismatch,
+     stage_on_non_pokemon) = audit(categories)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
                     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
                     prefix_mismatch, unregistered, code_value_mismatch,
@@ -649,6 +663,7 @@ def main():
         f"name_propagate_viol={len(name_viol)} facet_n1_candidates={len(facet_n1)} "
         f"canonical_drift={sum(drift_by_cat.values())} "
         f"code_value_mismatch={len(code_value_mismatch)} "
+        f"stage_on_non_pokemon={len(stage_on_non_pokemon)} "
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
         f"rarity_unmapped={sum(v['unmapped'] for v in rarity_by_cat.values())} "

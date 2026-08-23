@@ -31,7 +31,16 @@ BAK_PATH = Path("C:/dev/iMak_data/catalog/_bak/tcg_ebay_normalized_fields_before
 _JP_COLOR = {"赤": "Red", "青": "Blue", "緑": "Green", "黄": "Yellow",
              "黒": "Black", "紫": "Purple", "白": "White"}
 _EN_COLOR_OK = {"Red", "Blue", "Green", "Yellow", "Black", "Purple", "White", "Colorless"}
-_STAGE = {"たね": "Basic", "1進化": "Stage 1", "2進化": "Stage 2", "MEGA": "Mega"}
+# ★2026-08-23: 公式の進化段階の欄 (`<span class="type">`) から取り直したので、鍵を
+#   公式の語彙に合わせた。実測 21,982枚に出る値は次の11種:
+#     たね 9906 / (空) 5411 / 1進化 4750 / 2進化 1484 / V進化 276 /
+#     レベルアップ 72 / BREAK進化 43 / 復元 14 / M進化 11 / 伝説 9 / V-UNION 6
+#   旧鍵 'MEGA' は公式に存在せず、効果テキスト等の誤読 (98行中96行) だった → 'M進化' に。
+#   ★残り (V進化/レベルアップ/BREAK進化/復元/伝説/V-UNION) は **意図的に空欄**。
+#     eBay の Stage は FREE_TEXT で正解表が無く (2026-08-23 取得の 35 aspect で確認)、
+#     英語表記をこちらで作ると推測になる。特に 'V進化' は VMAX / VSTAR / V-UNION の
+#     どれかを区別できない。今も空欄なので、出さないことで失うものは無い。
+_STAGE = {"たね": "Basic", "1進化": "Stage 1", "2進化": "Stage 2", "M進化": "Mega"}
 
 
 def norm_color(raw):
