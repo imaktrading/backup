@@ -370,10 +370,15 @@ def _token_matches(psa_word: str, csv_words: set) -> bool:
     """
     if psa_word in csv_words:
         return True
-    if len(psa_word) < 4:
+    # ★略記として認めるのは 5文字以上。4文字まで許すと `poke` が `pokemon` に含まれ、
+    #   `POKE KID` が `Imitation Pokémon` と一致した扱いになる (2026-08-23 の見逃し。
+    #   S4a-197 の公式名は Poké Kid で catalog の Imitation Pokémon が誤り)。
+    #   6文字以上に絞ると今度は `UMBRN.`(=Umbreon) のような実在の略記を弾く。
+    #   実データ 927行で、5文字が誤検出0・見逃し0 の境目だった。
+    if len(psa_word) < 5:
         return False
     return any(_is_subseq(psa_word, c) or _is_subseq(c, psa_word)
-               for c in csv_words if len(c) >= 4)
+               for c in csv_words if len(c) >= 5)
 
 
 def psa_identity_findings(headers, row, meta):

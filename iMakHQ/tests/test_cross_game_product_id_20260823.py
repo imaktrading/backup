@@ -172,6 +172,37 @@ def test_auditor_tolerates_psa_abbreviations():
     assert A.psa_identity_findings(_HDRS, row, meta) == []
 
 
+def test_auditor_catches_translated_instead_of_official_name():
+    """★2026-08-23 実測の見逃し。公式名は Poké Kid なのに catalog が直訳を持っていた。
+
+    最初は略記の許容が緩く (4文字以上)、`poke` が `pokemon` に含まれてしまうため
+    「一致した」ことになって素通りしていた (S4a-197 / 出品中1件)。
+    """
+    import csv_auditor as A
+
+    meta = {"Brand": "POKEMON JAPANESE SWORD & SHIELD SHINY STAR V",
+            "Subject": "FA/POKE KID SHINY STAR V", "CardNumber": "197"}
+    row = _row("PSA 10 Pokemon Japanese Shining Fates #197/190 Imitation Pokémon",
+               "Pokémon TCG", "Imitation Pokémon", "Imitation Pokémon", cert="144091892")
+    out = A.psa_identity_findings(_HDRS, row, meta)
+    assert out and "名前が一致しない" in out[0][1]
+
+
+def test_auditor_still_allows_real_abbreviations():
+    """5文字以上の略記は今までどおり通す (UMBRN. = Umbreon)。
+
+    ここを6文字に絞ると、実在するこの略記まで止めてしまう。
+    実データ 927行で 5文字が「誤検出0・見逃し0」の境目だった。
+    """
+    import csv_auditor as A
+
+    meta = {"Brand": "POKEMON JAPANESE SM12A-TAG TEAM GX ALL STARS",
+            "Subject": "FA/UMBRN. & DRKR. GX TAG TEAM", "CardNumber": "181"}
+    row = _row("PSA 10 Pokemon Japanese Tag Team GX All Stars #181 Umbreon & Darkrai GX",
+               "Pokémon TCG", "Umbreon & Darkrai GX", "", cert="1")
+    assert A.psa_identity_findings(_HDRS, row, meta) == []
+
+
 def test_auditor_silent_without_psa_data():
     """PSA データが無い行は何も言わない (推測で止めない)。"""
     import csv_auditor as A
