@@ -21,6 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import api  # noqa: E402
+import clone_rows  # noqa: E402
 from scrapers import pokemon_tcg as P  # noqa: E402
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -46,7 +47,7 @@ def main():
 
     con = sqlite3.connect(str(api._DB_PATH)); con.row_factory = sqlite3.Row; cur = con.cursor()
     rows = cur.execute(
-        "SELECT id, product_id, name_jp, name_en, specs FROM products "
+        "SELECT id, product_id, name_jp, name_en, specs, source FROM products "
         "WHERE category=? AND (images IS NULL OR images IN ('','[]')) ORDER BY product_id", (CAT,)
     ).fetchall()
     print(f"空 images pokemon: {len(rows)} 件")
@@ -54,6 +55,11 @@ def main():
     backfill, unverified, skip = [], [], []
     for r in rows:
         pid = r["product_id"]
+        # clone 行 (base のコピーで作った variant) は **必ず飛ばす** — clone_rows.py の規約。
+        # 別絵柄の行に親の絵が入ると目視照合が誤る (2026-08-22 OP01-077_GE)。
+        if clone_rows.is_clone(r["specs"], r["source"]):
+            skip.append((pid, f"clone 行 (base={clone_rows.cloned_from(r['specs'], r['source'])})"))
+            continue
         if pid.startswith("cardID-"):
             skip.append((pid, "cardID-fallback (公式noimage/番号体系外)")); continue
         m = re.match(r"^(.*)-(\d+)$", pid)

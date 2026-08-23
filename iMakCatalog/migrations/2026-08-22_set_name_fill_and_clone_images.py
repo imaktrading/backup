@@ -34,6 +34,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import api  # noqa: E402
+import clone_rows  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -77,8 +78,19 @@ def main():
         updates_sn.append((r["set_name_official"], NOW, r["id"]))
 
     # 2. クローン行の画像
-    for r in db.execute("SELECT id, product_id, source_url, images FROM products "
+    #
+    # ★2026-08-23 撤回。ここは **必ず何もしない**。
+    #   clone 行の source_url は親の series ページだったので、下の official_image() は
+    #   `product_id` の `_` より前 (= 親のカード番号) の画像を取り、結果として
+    #   **親カードの絵**が入っていた (OP01-077_GE。3日連続で「画像なし」と指摘された)。
+    #   規約は clone_rows.py に一本化した: 画像補完は clone 行を必ず飛ばす。
+    #   公式が別絵柄を出していない限り images は空が正しい (目視不能 = 出品しない)。
+    #   回答書 requests/2026-08-23_hq_go_cll_images_and_clone_hardening_response.md §2
+    for r in db.execute("SELECT id, product_id, source, source_url, images, specs FROM products "
                         "WHERE category='one_piece_tcg' AND source LIKE '%clone_%'"):
+        if clone_rows.is_clone(r["specs"], r["source"]):
+            n["clone 行なので画像を入れない"] += 1
+            continue
         if r["images"] and r["images"] != "[]":
             continue
         base = str(r["product_id"]).split("_")[0]
