@@ -60,6 +60,43 @@ def _load_ebay_ok():
 
 SOURCE = "restamp_from_filter_map_20260821"
 
+_BY_CODE = {}
+
+
+def _own_code_values(category: str, product_id: str, specs: dict) -> set:
+    """その商品の弾コードで始まる eBay 値 (監査 §0c と同じ引き方)."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import set_name_integrity_audit as _A  # noqa: E402
+    if not _BY_CODE:
+        for _cat, _vals in _EBAY_OK.items():
+            d = {}
+            for _v in _vals:
+                m = _A._PREFIX_RE.match(_v)
+                if m:
+                    d.setdefault(_A._norm_code(m.group(1)), set()).add(_v)
+            _BY_CODE[_cat] = d
+    sc = _A._norm_code(_A.setcode_of(product_id, specs))
+    return _BY_CODE.get(category, {}).get(sc, set())
+
+
+def _is_other_set_value(category: str, product_id: str, specs: dict,
+                        stored: str, derived: str) -> bool:
+    """今の値が **別の弾のセット名** か (= 置き換えても格下げにならない).
+
+    条件は監査 §0c と同じ: eBay に その弾自身の値が在るのに stored がそれでない。
+    加えて derived が その弾の値であること (でなければ従来どおり守る)。
+    ★stored がその弾自身の名前で始まる時は別商品なので対象外 (`S8a-P: …`)。
+    """
+    sys.path.insert(0, str(ROOT / "tools"))
+    import set_name_integrity_audit as _A  # noqa: E402
+    own = _own_code_values(category, product_id, specs)
+    if not own or not derived:
+        return False
+    sc = _A.setcode_of(product_id, specs)
+    if _A.names_own_setcode(stored, sc):
+        return False
+    return stored not in own and derived in own
+
 
 def _abc_state(category: str, value) -> str:
     """契約 v1.2 §1-3 の 3 状態を返す (窓口 2026-08-21 の a/b/c と同じ)。
@@ -119,7 +156,14 @@ def main():
         #   例: SM-P-069 'Sm3h: to Have Seen the Battle Rainbow' (公式 拡張パック「闘う虹を見たか」)
         #       -> 'Sm-P: Sun & Moon Promos' は改悪。
         #   上書きしてよいのは 空欄 か 一覧外の値 のときだけ。
-        if stored and stored in _EBAY_OK.get(r["category"], set()):
+        #   ★例外 (2026-08-23): stored が **別の弾の値** なら格下げではない。
+        #     `Sun & Moon - Team Up` は eBay の一覧に在るが英語版 SM9 の名前で、
+        #     日本語版 SM9 (タッグボルト) の刷りには誤り (ルール③)。
+        #     eBay に **その弾自身の値が在り**、derived がそれなら、置き換えは格上げ。
+        #     判定は監査 §0c と同じ条件を使う (2つの面で条件がずれないように共有)。
+        if stored and stored in _EBAY_OK.get(r["category"], set()) \
+                and not _is_other_set_value(r["category"], r["product_id"], s,
+                                            stored, derived):
             kept += 1
             continue
         # --only-empty: 空欄を埋めるだけ。既存値には触らない。

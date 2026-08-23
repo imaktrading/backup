@@ -66,7 +66,8 @@ CODEFORM_EXPECTED = {
     "強化拡張パック「ひかる伝説」":        "Sm3+: Shining Legends",
     "拡張パック「ひかる伝説」":          "Sm3+: Shining Legends",
     # 2026-08-18 追加: HQ 実測表に在るが 08-11 の長形リストから漏れていた 1 群
-    "ハイクラスパック「テラスタルフェスex」":  "Sv: Prismatic Evolutions",
+    # 2026-08-23: 英語版の別セット名 (Sv: Prismatic Evolutions) をやめ、JP SV8a 自身の値に
+    "ハイクラスパック「テラスタルフェスex」":  "Sv8a: Terastal Fest Ex",
 }
 CODEFORM_TOTAL_ROWS = 2051     # 実測値 (20 official 合計. 旧 19 official=1814 + テラスタルフェスex 237)
 

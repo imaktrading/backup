@@ -58,9 +58,84 @@ set:
     ebay: "Sv9: Battle Partners"
     note: "2026-08-22 是正: 08-18 のコード形裁定が **英語版の別セット** Sv09: Journey Together を
       選んでいた。JP SV9 = バトルパートナーズ の master 実在値は Sv9: Battle Partners"
+  - source: "拡張パック「タッグボルト」"
+    ebay: "Sm9: Tag Bolt"
+    note: >-
+      2026-08-23 §0c 是正 (109行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "拡張パック「ミラクルツイン」"
+    ebay: "Sm11: Miracle Twin"
+    note: >-
+      2026-08-23 §0c 是正 (107行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "拡張パック「ダブルブレイズ」"
+    ebay: "Sm10: Double Blaze"
+    note: >-
+      2026-08-23 §0c 是正 (107行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "ポケモンカードゲームXY BREAK コンセプトパック「ポケットモンスターカードゲーム 拡張パック 20th Anniversary」"
+    ebay: "Cp6: Expansion Pack 20th Anniversary"
+    note: >-
+      2026-08-23 §0c 是正 (91行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "ポケモンカードゲームLEGEND 拡張パック「頂上大激突」"
+    ebay: "L3: Clash at the Summit"
+    note: >-
+      2026-08-23 §0c 是正 (74行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "ポケモンカードゲームBW 拡張パック「プラズマゲイル」"
+    ebay: "Bw7: Plasma Gale"
+    note: >-
+      2026-08-23 §0c 是正 (70行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "ポケモンカードゲームBW 拡張パック「ダークラッシュ」"
+    ebay: "Bw4: Dark Rush"
+    note: >-
+      2026-08-23 §0c 是正 (69行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "拡張パック「コレクション サン」"
+    ebay: "Sm1s: Collection Sun"
+    note: >-
+      2026-08-23 §0c 是正 (66行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "ポケモンカードゲーム サン&ムーン 拡張パック「コレクション ムーン」"
+    ebay: "Sm1m: Collection Moon"
+    note: >-
+      2026-08-23 §0c 是正 (66行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "ポケモンカードゲームBW 拡張パック「レッドコレクション」"
+    ebay: "Bw2: Red Collection"
+    note: >-
+      2026-08-23 §0c 是正 (66行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "ポケモンカードゲームXY コンセプトパック「マグマ団VSアクア団 ダブルクライシス」"
+    ebay: "CP1: Magma Gang vs Aqua Gang: Double Crisis"
+    note: >-
+      2026-08-23 §0c 是正 (34行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
+  - source: "ムービースペシャルパック「名探偵ピカチュウ」"
+    ebay: "Smp2: Great Detective Pikachu"
+    note: >-
+      2026-08-23 §0c 是正 (25行): 英語版の別セット名が焼かれていた。
+      eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
+      ルール① どおり verbatim で入れる
   - source: "ハイクラスパック「テラスタルフェスex」"
-    ebay: "Sv: Prismatic Evolutions"
-    note: HQ 2026-08-18 コード形裁定 (旧 "Prismatic Evolutions", 237行)
+    ebay: "Sv8a: Terastal Fest Ex"
+    note: >-
+      2026-08-23 是正 (237行): 旧値 "Sv: Prismatic Evolutions" は **英語版の別セット**。
+      JP SV8a = テラスタルフェスex の master 実在値は "Sv8a: Terastal Fest Ex"。
+      §0c (弾自身の値が在るのに別の値) で検出。ルール③違反だった
   - source: "拡張パック「反逆クラッシュ」"
     ebay: "S2: Rebellion Crash"
     note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'Swsh02: Rebel Clash' = 英語版セット)。例外は作らない"

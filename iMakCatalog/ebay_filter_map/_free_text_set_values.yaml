@@ -83,10 +83,6 @@ values:
     category: pokemon_tcg
     rows: 92
     jp_set: "拡張パック「メガシンフォニア」"
-  - value: "20th Anniversary"
-    category: pokemon_tcg
-    rows: 91
-    jp_set: "ポケモンカードゲームXY BREAK コンセプトパック「ポケットモンスターカードゲーム 拡張パック 20th Anniversary」"
   - value: "Wild Blaze"
     category: pokemon_tcg
     rows: 85
@@ -193,7 +189,7 @@ values:
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg
-    rows: 1477
+    rows: 1478
     jp_set: "プロモーションカード"
   - value: "Premium Booster One Piece The Best"
     category: one_piece_tcg

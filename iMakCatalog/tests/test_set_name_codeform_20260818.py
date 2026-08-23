@@ -39,7 +39,7 @@ CODEFORM = {
     # "Sword & Shield - Lost Origin":       "Swsh11: Lost Origin",   # 2026-08-23 廃止 (英語版セット名は使わない)
     # "Sword & Shield - Silver Tempest":    "Swsh12: Sword & Shield - Silver Tempest",   # 2026-08-23 廃止 (英語版セット名は使わない)
     "Scarlet & Violet - Obsidian Flames": "SV03: Obsidian Flames",
-    "Prismatic Evolutions":               "Sv: Prismatic Evolutions",
+    # "Prismatic Evolutions":               "Sv: Prismatic Evolutions",   # 2026-08-23 廃止 (英語版セット名は使わない。JP SV8a=テラスタルフェスex は Sv8a: Terastal Fest Ex)
     # ★2026-08-22 取り下げ: JP の 拡張パック「バトルパートナーズ」に英語版 SV09 の名前を
     #   入れていた (HQ 依頼 2026-08-22_hq_set_name_ebay_wrong_set_322)。eBay master には
     #   'Sv9: Battle Partners' が別値として在り、日本語版の刷りにはそちらが正しい。
@@ -54,7 +54,7 @@ CODEFORM = {
     "Shining Legends":                    "Sm3+: Shining Legends",
     "Pokémon GO":                         "S10b: Pokémon GO",
 }
-EXPECTED_ROWS = 558    # 2026-08-23: 英語版セット名の流用 (Swsh 系 14セット/1,361行) を廃止
+EXPECTED_ROWS = 321    # 2026-08-23: さらに Prismatic Evolutions (JP SV8a 237行) を廃止
 
 # 「表記の選択」ではないので巻き込んではいけない値 (2026-08-11 回答 §2/§3 + 別名ケース)
 # ★2026-08-21 窓口確定で 'Start Deck 100' / 'Premium Champion Pack' の carve-out は解除。
@@ -64,7 +64,8 @@ UNTOUCHED = {
     "Si: Start Deck 100":          "2026-08-21 窓口確定 (code 形)",
     "CP4: Premium Champion Pack":  "2026-08-21 窓口確定 (code 形)",
     "25th Anniversary Golden Box": "2026-08-11 §2 現状維持",
-    "Double Crisis":               "master 対抗値は別名 (CP1: Magma Gang vs Aqua Gang: …) = 保留",
+    # 2026-08-23 保留を解除: §0c で「CP1 自身の値が eBay に在る」と確認できたので、「マグマ団VSアクア団 ダブルクライシス」は CP1: Magma Gang vs Aqua Gang: Double Crisis が正。
+    # "Double Crisis":               "… = 保留",
 }
 
 
