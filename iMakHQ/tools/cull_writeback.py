@@ -126,6 +126,43 @@ def find_result_files(days=2):
     return sorted(set(hits))
 
 
+def apply(ended_ids, commit=False, today=None):
+    """取り下げ済みの itemID 集合 → B列を空 + Q列に印。処理した行数を返す。
+
+    ★2026-08-24: 取下げを API 直送にしたので、**結果ファイルを介さずその場で呼べる**
+      入口が要る (どれが成功したかは送った側が知っている)。
+      main() はこれを結果ファイル/控え経由で呼ぶだけにする。
+    """
+    import gspread
+    from google.oauth2.service_account import Credentials
+    from relist_writeback import CREDS_PATH, SHEETS
+
+    ended = {str(i).strip() for i in ended_ids if str(i).strip()}
+    if not ended:
+        return 0
+    today = today or datetime.date.today().strftime("%Y-%m-%d")
+    cr = Credentials.from_service_account_file(
+        CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    gc = gspread.authorize(cr)
+    done = 0
+    for cfg in SHEETS:
+        ws = gc.open_by_key(cfg["id"]).get_worksheet_by_id(cfg["gid"])
+        vals = ws.get_all_values()
+        ups = []
+        for n, row in enumerate(vals[1:], start=2):
+            b = row[ITEM_COL - 1].strip() if len(row) >= ITEM_COL else ""
+            if not b or b not in ended:
+                continue
+            cur = row[FLG_COL - 1].strip() if len(row) >= FLG_COL else ""
+            ups.append({"range": f"{_col_letter(FLG_COL)}{n}",
+                        "values": [[next_flag(cur, today)]]})
+            ups.append({"range": f"{_col_letter(ITEM_COL)}{n}", "values": [[""]]})
+        if ups and commit:
+            ws.batch_update(ups)
+        done += len(ups) // 2
+    return done
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")

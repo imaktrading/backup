@@ -211,6 +211,40 @@ def _fetch_active_live():
     return out
 
 
+def end_on_ebay(picked, post_fn=None, token_fn=None):
+    """1件ずつ eBay に取り下げを送る → (成功した itemID list, [(itemID, 失敗理由)])。
+
+    ★2026-08-24: FileExchange を介さず直接送る (ユーザー指示「ボタンは元々自動」)。
+      直前に verify_oos で 1件ずつ実状態を見ているので、ここは送るだけ。
+      **「既に終了済み」は成功に数える** (目的は達成されている)。
+      通信で落ちた分は失敗として残し、成功に混ぜない (silent drop を作らない)。
+    """
+    import re as _re
+    if post_fn is None:
+        sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "..", "iMakeBayAPI")))
+        import fix_de_speedpak_shipping as fx
+        fx.refresh()
+        tok = fx.token()
+        post_fn, token_fn = fx.post, (lambda: tok)
+    tok = token_fn()
+    ok, ng = [], []
+    for n, r in enumerate(picked, 1):
+        iid = r["item_id"]
+        xml = post_fn("EndFixedPriceItem",
+                      f"<ItemID>{iid}</ItemID><EndingReason>NotAvailable</EndingReason>", tok)
+        ack = _re.search(r"<Ack>(\w+)</Ack>", xml or "")
+        msgs = _re.findall(r"<LongMessage>(.*?)</LongMessage>", xml or "")
+        if ack and ack.group(1) in ("Success", "Warning"):
+            ok.append(iid)
+        elif msgs and "already been closed" in msgs[0]:
+            ok.append(iid)                     # 目的は達成済み
+        else:
+            ng.append((iid, msgs[0][:80] if msgs else "応答不明"))
+        if n % 50 == 0:
+            print(f"    {n}/{len(picked)} 送信済 (成功 {len(ok)})", flush=True)
+    return ok, ng
+
+
 def writeback_previous():
     """**前回アップした分**のスプシ後始末を先に済ませる (2026-08-24)。
 
@@ -331,11 +365,32 @@ def main():
         for r in picked:
             w.writerow(r)
 
-    print(f"\nEnd CSV (eBayアップで取下げ): {end_path}")
+    print(f"\nEnd CSV (控え): {end_path}")
     print(f"確認用一覧: {cand_path}")
-    print(f"\n▶ End CSV を eBay FileExchange に手動アップ → {len(picked)}件 終了")
+
+    if "--csv-only" in argv:
+        print(f"\n▶ --csv-only: eBay へは送りません。FileExchange に手動アップ → {len(picked)}件")
+        return
+
+    # ★2026-08-24 ユーザー指示: **ボタンは元々自動**。FileExchange を経由せず直接送る。
+    #   2026-06-05 の「自動アップ無し」を外す判断の根拠:
+    #     - 送る直前に **1件ずつ eBay の実状態を見ている** (今日も 在庫復活6件 / 終了済115件 が外れた)
+    #     - 対象は CULL のみ / $100以上 / 14日以上 / 1回 CAP件 まで
+    #     - qty=0 = そもそも買えない出品なので、売上を失わない
+    #   人が事前に中身を見る機会は無くなるので、確認用一覧は残す (事後に見る)。
+    ok_ids, ng = end_on_ebay(picked)
+    print(f"\n▶ eBay に送信 → 成功 {len(ok_ids)}件 / {len(picked)}件")
+    for iid, msg in ng[:8]:
+        print(f"   ⚠ {iid}: {msg}")
+    if ok_ids:
+        try:
+            import cull_writeback as CW
+            n = CW.apply(set(ok_ids), commit=True)
+            print(f"▶ スプシ更新 → {n}件 (B列を空 + Q列に印)")
+        except Exception as e:                                 # noqa: BLE001
+            print(f"   ⚠ スプシ更新が最後まで行きませんでした (次回の押下で拾います): "
+                  f"{type(e).__name__}: {e}")
     print(f"▶ 残りは レポート再DL → ファネル再実行 → 本ツール再走 で段階的に (1回{CAP}件まで)")
-    print("※ 在庫切れ(qty=0)=購入不可なので急がなくてよい。誤判定混入を避け少量ずつ。")
 
 
 if __name__ == "__main__":
