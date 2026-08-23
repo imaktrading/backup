@@ -11,8 +11,8 @@
 決めたこと (案C):
     - **B列は空にする** … 仕入元が復活したら出品候補に戻す
     - **Q列(FLG)に `CULL <日付>` を残す** … 取り下げた事実を消さない
-    - **2回目に CULL されたら `CULL×2`** … 1回目は「時期が悪かった」可能性を残し、
-      2回繰り返したものは諦める (在庫切れ中は検索から隠れるので、1回の低評価は不当かもしれない)
+    - **回数を数える** … `CULL <日付>` → `CULL 2 <日付>` → `CULL 3 <日付>` …
+      何回で諦めるかは後からデータを見て決める (印の側で打ち切らない)
 
 使い方:
     python cull_writeback.py                      # 一覧を出すだけ
@@ -28,6 +28,7 @@ import glob
 import io
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -40,6 +41,12 @@ RESULT_DIRS = [
 ]
 
 
+# ★2026-08-24: 番号は **日付の手前の1〜3桁** に限る。`CULL\s*(\d*)` だと
+#   `CULL 2026-08-24` の「2026」を回数として読んでしまう (実際に踏んだ)。
+#   日付を必須にすることで、番号のある/なしを取り違えない。
+_CULL_RE = re.compile(r"CULL(?:\s+(\d{1,3}))?\s+\d{4}-\d{2}-\d{2}")
+
+
 def _col_letter(n):
     return chr(64 + n) if n <= 26 else "A" + chr(64 + n - 26)
 
@@ -47,18 +54,30 @@ def _col_letter(n):
 def next_flag(current, today):
     """Q列の次の値を決める (純関数, test可)。
 
-    空          → "CULL <日付>"
-    CULL が1回  → "CULL×2 <日付>"   ← もう出さない印
-    CULL×2 以上 → そのまま (増やさない)
+    ★2026-08-24 ユーザー決定: **回数を数える**。上限で止めない。
+      `CULL <日付>` → `CULL 2 <日付>` → `CULL 3 <日付>` …
+      「何回で諦めるか」は後からデータを見て決めたいので、印の側では打ち切らない
+      (×2 で止めると、そこから先の情報が消える)。
+      1回目は番号なし = 既に書いた 167件をそのまま1回目として使える。
     """
     cur = (current or "").strip()
     if not cur:
         return f"CULL {today}"
-    if cur.startswith("CULL×2"):
-        return cur
-    if cur.startswith("CULL"):
-        return f"CULL×2 {today}"
-    return f"{cur} / CULL {today}"          # 他の印が入っていたら壊さず足す
+    m = _CULL_RE.search(cur)
+    if not m:
+        return f"{cur} / CULL {today}"          # 他の印は壊さず足す
+    n = int(m.group(1)) if m.group(1) else 1
+    nxt = f"CULL {n + 1} {today}"
+    head = cur[:m.start()].strip(" /")
+    return f"{head} / {nxt}" if head else nxt
+
+
+def cull_count(current):
+    """Q列の値 → これまでに CULL された回数 (0 = 一度もない)。純関数。"""
+    m = _CULL_RE.search(current or "")
+    if not m:
+        return 0
+    return int(m.group(1)) if m.group(1) else 1
 
 
 def ended_ids_from_results(paths):

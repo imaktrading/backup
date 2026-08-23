@@ -6,8 +6,8 @@ B列が埋まっている = 出品済み としてシステムが動くので、
 決めたこと:
   - B列は空にする (復活したら出品候補に戻す)
   - Q列に `CULL <日付>` を残す (取り下げた事実を消さない)
-  - 2回目は `CULL×2` (在庫切れ中は検索から隠れるので、1回目の低評価は不当かもしれない。
-    1回はやり直しの機会を与え、2回繰り返したら諦める)
+  - **回数を数える** `CULL <日付>` → `CULL 2 <日付>` → `CULL 3 <日付>` …
+    何回で諦めるかは後からデータを見て決める (印の側で打ち切らない)
 """
 import os
 import sys
@@ -23,14 +23,6 @@ def test_first_cull_stamps_date():
     assert W.next_flag(None, T) == "CULL 2026-08-24"
 
 
-def test_second_cull_becomes_x2():
-    """★1回目 → 2回目で印が変わる (これが「もう出さない」の根拠になる)."""
-    assert W.next_flag("CULL 2026-07-01", T) == "CULL×2 2026-08-24"
-
-
-def test_third_time_does_not_grow():
-    """×3 ×4 と増やさない (印は2段階で十分)."""
-    assert W.next_flag("CULL×2 2026-08-01", T) == "CULL×2 2026-08-01"
 
 
 def test_other_flag_is_not_destroyed():
@@ -57,3 +49,32 @@ def test_flg_column_is_q():
     assert W.FLG_COL == 17
     assert W._col_letter(17) == "Q"
     assert W.ITEM_COL == 2 and W._col_letter(2) == "B"
+
+def test_count_increments_each_time():
+    """★1回目は番号なし、以降は 2, 3, 4 … と増える."""
+    cur = ""
+    got = []
+    for d in ("2026-08-24", "2026-09-15", "2026-10-02", "2026-11-08"):
+        cur = W.next_flag(cur, d)
+        got.append((cur, W.cull_count(cur)))
+    assert got[0] == ("CULL 2026-08-24", 1)
+    assert got[1] == ("CULL 2 2026-09-15", 2)
+    assert got[2] == ("CULL 3 2026-10-02", 3)
+    assert got[3] == ("CULL 4 2026-11-08", 4)
+
+
+def test_year_is_not_read_as_count():
+    r"""★`CULL\s*(\d*)` だと `CULL 2026-08-24` の「2026」を回数として読む (実際に踏んだ)。
+    番号は日付の手前の1〜3桁に限る."""
+    assert W.cull_count("CULL 2026-08-24") == 1
+    assert W.cull_count("CULL 2 2026-09-15") == 2
+
+
+def test_count_zero_when_no_cull():
+    assert W.cull_count("") == 0
+    assert W.cull_count("要確認") == 0
+
+
+def test_existing_167_rows_count_as_first():
+    """8/24 に書いた 167件 (番号なし) を書き直さずに使えること."""
+    assert W.next_flag("CULL 2026-08-24", "2026-09-01") == "CULL 2 2026-09-01"
