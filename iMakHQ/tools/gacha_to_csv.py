@@ -39,9 +39,14 @@ for _p in (SCRIPT_DIR, r"C:\dev\iMak\iMakeBayAPI"):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-# 中間スプシ (Harvest が rakuten_gacha タブに入れる)
+# 中間スプシ。★2026-08-23: 抽出くんは **店ごとにタブを分けて**書いている
+#   (rakuten_auc_yuyou / rakuten_auc_toysanta / rakuten_mirakikaku / rakuten_jugem2020 /
+#    rakuten_mejirushi)。ここは `rakuten_gacha` 1本を決め打ちしていたので、そんなタブは
+#   無く read_sheet が StopIteration で落ち、**ガチャの出品CSVが1件も作れなかった**。
+#   タブ名を並べて持つと店が増えるたびに両者で書き写すことになるので、**前方一致で拾う**。
 STAGING_SHEET_ID = "1hTdFVGkni4Ih4kZGsBgiCKxpTlOeoO_wJdk8Ek5n41Q"
-STAGING_TAB = "rakuten_gacha"
+STAGING_TAB_PREFIX = "rakuten_"
+STAGING_TAB = ""            # 空 = 前方一致で全部。--tab で1本に絞れる
 
 OUTPUT_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "csv_output")
 
@@ -341,11 +346,13 @@ def write_official_urls(items: list, ledger: dict, sheet_id: str, tab: str) -> i
     次回以降その行は公式URLを持った状態で回る (毎回貼り直さなくてよい)。
     既に同じ値が入っている行は触らない。失敗しても走行は止めない。
     """
-    plan = []
+    # ★2026-08-23: 行番号は **タブごと**。まとめて1タブに書くと別の店の行を潰す。
+    by_tab = {}
     for it in items:
         u = ((ledger or {}).get(it.get("url", "")) or {}).get("official_url", "").strip()
         if u and u != (it.get("official_url") or "").strip() and it.get("row"):
-            plan.append((it["row"], u))
+            by_tab.setdefault(it.get("tab") or tab, []).append((it["row"], u))
+    plan = [(r, u) for v in by_tab.values() for r, u in v]
     if not plan:
         return 0
     try:
@@ -355,17 +362,41 @@ def write_official_urls(items: list, ledger: dict, sheet_id: str, tab: str) -> i
         import sheet_io as S
         gc = gspread.authorize(Credentials.from_service_account_file(
             S.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
-        ws = next(w for w in gc.open_by_key(sheet_id).worksheets() if w.title == tab)
-        ws.batch_update([{"range": "I%d" % r, "values": [[u]]} for r, u in plan],
-                        value_input_option="RAW")
-        print("  ✏️ 公式URLを中間スプシ I列に書きました: %d行" % len(plan))
-        return len(plan)
+        sh = gc.open_by_key(sheet_id)
+        ws_by_title = {w.title: w for w in sh.worksheets()}
+        written = 0
+        for t, rows in by_tab.items():
+            ws = ws_by_title.get(t)
+            if ws is None:
+                print(f"  ⚠️ タブ {t} が見つからず書けません ({len(rows)}行)")
+                continue
+            ws.batch_update([{"range": "I%d" % r, "values": [[u]]} for r, u in rows],
+                            value_input_option="RAW")
+            written += len(rows)
+            print(f"  ✏️ 公式URLを I列に書きました: {t} {len(rows)}行")
+        return written
     except Exception as e:                                      # noqa: BLE001
         print("  ⚠️ 公式URLを書けず (走行は継続): %s: %s" % (type(e).__name__, e))
         return 0
 
 
-def read_sheet(sheet_id: str, tab: str) -> list:
+def pick_tabs(all_titles, tab: str = "", prefix: str = STAGING_TAB_PREFIX) -> list:
+    """読むタブを決める (純関数)。tab 指定があればそれだけ、無ければ前方一致で全部。
+
+    店が増えても両者で名前を書き写さなくて済むように、並べず前方一致にする。
+    順番は固定 (実行のたびに変わると I列の書き戻し先が動く)。
+    """
+    if tab:
+        return [t for t in all_titles if t == tab]
+    return sorted(t for t in all_titles if t.startswith(prefix))
+
+
+def read_sheet(sheet_id: str, tab: str = "") -> list:
+    """中間スプシを読む。戻りは [{'tab':…, 'row':…, 'cells':[…]}]。
+
+    行番号は **タブごと**に振られているので、どのタブの何行目かを持っていないと
+    I列 (公式URL) の書き戻しが別のタブの行を潰す。
+    """
     import gspread
     from google.oauth2.service_account import Credentials
     import dns_cache                                            # noqa: F401
@@ -373,8 +404,21 @@ def read_sheet(sheet_id: str, tab: str) -> list:
     gc = gspread.authorize(Credentials.from_service_account_file(
         S.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]))
     sh = gc.open_by_key(sheet_id)
-    ws = next(w for w in sh.worksheets() if w.title == tab)
-    return ws.get_all_values()[1:]
+    titles = [w.title for w in sh.worksheets()]
+    want = pick_tabs(titles, tab)
+    if not want:
+        raise SystemExit(
+            f"★中止: 読むタブがありません (指定={tab!r} / 前方一致={STAGING_TAB_PREFIX!r})。"
+            f"実在するタブ: {titles}")
+    out = []
+    for w in sh.worksheets():
+        if w.title not in want:
+            continue
+        vals = w.get_all_values()[1:]
+        print(f"  📄 {w.title}: {len(vals)}行")
+        for i, row in enumerate(vals, start=2):     # ヘッダ込みの行番号
+            out.append({"tab": w.title, "row": i, "cells": row})
+    return out
 
 
 def _api_key() -> str:
@@ -563,9 +607,10 @@ def main() -> int:
         pass
 
     rows = read_sheet(a.sheet, a.tab)
-    print(f"シート {a.tab}: {len(rows)}行")
+    print(f"中間スプシ 合計 {len(rows)}行")
     items, blocked = [], {}
-    for n, r in enumerate(rows, start=2):     # ヘッダ込みの行番号 (I列書込に使う)
+    for rec in rows:
+        r, n, tab = rec["cells"], rec["row"], rec["tab"]
         t = (r[2].strip() if len(r) > 2 else "")
         why = blocked_reason(t)
         if why:
@@ -577,6 +622,7 @@ def main() -> int:
             continue
         it = parse_row(r, n)
         if it:
+            it["tab"] = tab          # I列の書き戻しは **そのタブの**その行に返す
             items.append(it)
     for why, n in blocked.items():
         print(f"  ⏭️ 出さない {n}件: {why}")
