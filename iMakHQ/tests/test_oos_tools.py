@@ -3,12 +3,15 @@
 """在庫切れ対応ツール A(restock_worklist) / B(cull_end) の回帰テスト。
 
 B の安全策 (2026-06-05 ユーザー合意) が崩れないことを固定する:
-  - age>=21日 のみ (NEW_WAIT補正)
+  - age>=14日 のみ (NEW_WAIT補正。2026-08-24 に 21→14)
   - age 不明(0)は fail-closed で対象外
+  - **$100未満は対象外** (2026-08-24。枠は金額で詰まっており安い出品を落としても効かない)
   - CAP 200件/回 (burst禁止。2026-08-23 に 50→200)
-  - age 降順・同 age は価格昇順
+  - **今月出品分を先に (金額の大きい順)** → それ以外は age 降順・同 age は価格昇順
+    (当月の枠が戻るのは今月出品した分だけ。実測: 古い順だけでは 1.5% しか戻らなかった)
 A: G-SHOCK は型番=完全一致キーワード / dedup は title で集約。
 """
+import datetime as _dt
 import importlib.util
 import os
 
@@ -29,7 +32,11 @@ price_res = _load("price_resistance")
 relist_tool = _load("relist_from_funnel")
 
 
-def _row(item_id, flags="CULL", age=100, price=10.0, **kw):
+# 「当月出品」の並びを検証しない test 用の固定日 (どの行も先月以前になる)
+_OLD = _dt.date(2030, 1, 15)
+
+
+def _row(item_id, flags="CULL", age=100, price=200.0, **kw):
     r = {"item_id": item_id, "flags": flags, "age_days": str(age), "price": str(price),
          "title": kw.get("title", "x"), "site": kw.get("site", "US"),
          "sold_qty": str(kw.get("sold", 0)), "sales90": "0", "watch": str(kw.get("watch", 0))}
@@ -40,15 +47,26 @@ def _row(item_id, flags="CULL", age=100, price=10.0, **kw):
 def test_cull_excludes_young_and_unknown_age():
     rows = [
         _row("a", age=100),          # OK
-        _row("b", age=20),           # age<21 → 除外
+        _row("b", age=13),           # age<14 → 除外
         _row("c", age=0),            # age不明 → fail-closed 除外
-        _row("d", age=21),           # 境界 OK
+        _row("d", age=14),           # 境界 OK
         _row("e", flags="RESTOCK", age=100),  # CULL でない → 除外
     ]
-    _cull, eligible, picked = cull_end.select(rows)
+    _cull, eligible, picked = cull_end.select(rows, today=_OLD)
     ids = {r["item_id"] for r in eligible}
     assert ids == {"a", "d"}
-    assert all(cull_end._i(r["age_days"]) >= 21 for r in picked)
+    assert all(cull_end._i(r["age_days"]) >= 14 for r in picked)
+
+
+def test_cull_excludes_cheap():
+    """★$100未満は対象外 (2026-08-24)。
+
+    枠は **金額** で詰まっており (点数は半分以上 余っている)、安い出品を落としても効かない。
+    実測: $100 で切ると件数は 1,449→1,203 に減るのに金額は $356,660→$339,453 とほぼ落ちない。
+    """
+    rows = [_row("cheap", price=99), _row("ok", price=100)]
+    _cull, eligible, _p = cull_end.select(rows, today=_OLD)
+    assert [r["item_id"] for r in eligible] == ["ok"]
 
 
 def test_cull_cap_limits_50():
@@ -64,17 +82,33 @@ def test_cull_cap_limits_50():
 
 def test_cull_order_oldest_then_cheapest():
     rows = [
-        _row("old_cheap", age=300, price=50),
+        _row("old_cheap", age=300, price=150),
         _row("old_exp", age=300, price=200),
-        _row("new", age=30, price=5),
+        _row("new", age=30, price=120),
     ]
-    _cull, _elig, picked = cull_end.select(rows)
+    _cull, _elig, picked = cull_end.select(rows, today=_OLD)
     assert [r["item_id"] for r in picked] == ["old_cheap", "old_exp", "new"]
+
+
+def test_this_month_comes_first_and_by_price():
+    """★当月出品分を先に、金額の大きい順 (2026-08-24)。
+
+    当月の枠が戻るのは今月出品した分だけ。古い順だけで 361件 落として、
+    当月に戻ったのは 1.5% だった。
+    """
+    today = _dt.date(2026, 8, 24)
+    rows = [
+        _row("old", age=300, price=900),       # 先月以前
+        _row("cur_small", age=20, price=150),  # 今月 (8/4)
+        _row("cur_big", age=15, price=800),    # 今月 (8/9)
+    ]
+    _c, _e, picked = cull_end.select(rows, today=today)
+    assert [r["item_id"] for r in picked] == ["cur_big", "cur_small", "old"]
 
 
 def test_cull_custom_cap():
     rows = [_row(str(i), age=30 + i) for i in range(10)]
-    _cull, _elig, picked = cull_end.select(rows, cap=3)
+    _cull, _elig, picked = cull_end.select(rows, cap=3, today=_OLD)
     assert len(picked) == 3
 
 

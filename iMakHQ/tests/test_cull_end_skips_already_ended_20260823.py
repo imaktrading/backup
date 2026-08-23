@@ -88,7 +88,7 @@ def _live(*items):
     return lambda: list(items)
 
 
-def _it(i, avail=0, sold=0, watch=0, age=99, price=10.0):
+def _it(i, avail=0, sold=0, watch=0, age=99, price=200.0):
     return {"item_id": i, "avail": avail, "sold": sold, "watch": watch,
             "age_days": age, "price": price, "title": "t"}
 
@@ -105,10 +105,11 @@ def test_live_picks_only_dead_ones():
 
 def test_live_rows_feed_select_unchanged():
     """live の行が既存の select() にそのまま通ること (下流を作り直さない)。"""
+    import datetime
     rows = C.rows_from_live(_live(_it("a", age=99), _it("b", age=5)))
-    cull, eligible, picked = C.select(rows)
+    cull, eligible, picked = C.select(rows, today=datetime.date(2030, 1, 15))
     assert len(cull) == 2
-    assert [r["item_id"] for r in eligible] == ["a"], "21日未満を拾っている"
+    assert [r["item_id"] for r in eligible] == ["a"], "14日未満を拾っている"
 
 
 def test_live_missing_fields_mean_zero():

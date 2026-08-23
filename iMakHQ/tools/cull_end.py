@@ -8,7 +8,8 @@ CULL = qty=0 ∩ 一度も売れず watcher も付かず。掲載しても無害
 安全策 (2026-06-05 ユーザー合意):
   1. age>=21日 の行のみ (NEW_WAIT補正: 出品から時間不足の良品を巻き込まない)。
      age 不明(0)は fail-closed で対象外 (判定不能を破壊側に倒さない)。
-  2. CAP=200件/回 (burst禁止: 1755件一括 END はしない。2026-08-23 に 50→200)。
+  2. $100未満は対象外 (枠は金額で詰まっており、安い出品を落としても効かない)
+  3. CAP=200件/回 (burst禁止: 1755件一括 END はしない。2026-08-23 に 50→200)。
   3. 自動アップ無し (End CSV を生成するのみ。eBay FileExchange へは人が手動アップ)。
   並び: age 降順 (最も長く需要0=最も確実に dead を先に) → 同 age は価格昇順 (損失小を先に)。
 
@@ -39,7 +40,17 @@ END_DIR = r"C:\dev\iMak_data\revise"
 #   誤取下げの守りは件数と独立: 毎回 eBay の実在庫を見て、復活していた行を除外する
 #   (2026-08-23 の1回目は 50件中 11件が復活で除外された)。
 CAP = 200
-MIN_AGE = 21      # これ未満(日)は新規=時間不足の可能性 → 対象外 (NEW_WAIT補正)
+# ★2026-08-24 ユーザー指示で 21 → 14。理由: 取り下げで **当月の枠が戻るのは
+#   「その月に出品したもの」だけ**なので、21日待つと月の前半に出した分しか間に合わない。
+#   14日なら月の中旬に出した分まで当月中に判断できる。
+MIN_AGE = 14      # これ未満(日)は新規=時間不足の可能性 → 対象外 (NEW_WAIT補正)
+
+# ★2026-08-24 ユーザー指示: **金額が小さいものは対象にしない**。
+#   枠は金額で詰まっており (点数は半分以上 余っている)、安い出品を落としても効かない。
+#   実測: $100 で切ると 件数は 1,449→1,203 に減るのに、金額は $356,660→$339,453 と
+#   ほぼ落ちない (T-Shirts は1件あたり $64 等)。カテゴリ名で列挙しないのは、
+#   ガチャ等の新商材が増えるたびに書き足す運用にしないため。
+MIN_PRICE = 100.0
 
 # relist_from_funnel / seller_hub_relist と統一
 END_HEADER = ["*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)", "ItemID", "EndCode"]
@@ -60,14 +71,38 @@ def _f(v):
         return 0.0
 
 
-def select(rows, cap=CAP, min_age=MIN_AGE):
+def listed_this_month(row, today=None):
+    """その出品を **今月** 出したか (純関数, test可)。
+
+    当月の枠が戻るのは今月出品した分だけなので、そこを先に処理したい。
+    age_days が無い/読めない行は False (先頭に持ってこない)。
+    """
+    today = today or datetime.date.today()
+    age = _i(row.get("age_days"))
+    if age <= 0:
+        return False
+    d = today - datetime.timedelta(days=age)
+    return (d.year, d.month) == (today.year, today.month)
+
+
+def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None):
     """CULL ∩ age>=min_age を age降順・価格昇順で並べ、先頭 cap 件。
 
     age 不明(0)は対象外 (fail-closed)。テスト可能なよう純関数化。
     """
     cull = [r for r in rows if "CULL" in (r.get("flags") or "").split("|")]
-    eligible = [r for r in cull if _i(r.get("age_days")) >= min_age]
-    eligible.sort(key=lambda r: (-_i(r.get("age_days")), _f(r.get("price"))))
+    eligible = [r for r in cull
+                if _i(r.get("age_days")) >= min_age and _f(r.get("price")) >= min_price]
+    # ★2026-08-24: **今月出品した分を先に**。当月の枠が戻るのはそこだけ
+    #   (実測: 古い順だけで 361件 落として当月に戻ったのは 1.5%)。
+    #   今月分は金額の大きい順 = 戻る額を最大化。それ以前は従来どおり age 降順
+    #   (最も長く需要0 = 最も確実に dead) → 価格昇順。
+    def _key(r):
+        cur = listed_this_month(r, today)
+        if cur:
+            return (0, -_f(r.get("price")), 0.0)
+        return (1, -_i(r.get("age_days")), _f(r.get("price")))
+    eligible.sort(key=_key)
     return cull, eligible, eligible[:cap]
 
 
@@ -193,11 +228,11 @@ def main():
 
     print(f"対象 funnel: {src}")
     print(f"CULL(在庫切れ&需要皆無) = {len(cull)}件")
-    print(f"  うち age>={MIN_AGE}日 (NEW_WAIT補正後) = {len(eligible)}件")
+    print(f"  うち age>={MIN_AGE}日 かつ ${MIN_PRICE:.0f}以上 = {len(eligible)}件")
     print(f"  今回 End 対象 (CAP {CAP}/回, age降順) = {len(picked)}件")
     skipped_young = len(cull) - len(eligible)
     if skipped_young:
-        print(f"  ※ age<{MIN_AGE}日 or age不明で対象外 = {skipped_young}件 (新規=時間不足を保護)")
+        print(f"  ※ age<{MIN_AGE}日 / age不明 / ${MIN_PRICE:.0f}未満 で対象外 = {skipped_young}件")
     if not picked:
         print("対象なし。処理終了。")
         return
