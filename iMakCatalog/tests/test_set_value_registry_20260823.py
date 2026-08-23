@@ -35,7 +35,7 @@ class TestSetValueRegistry(unittest.TestCase):
     def test_no_unregistered_values(self):
         """未登録のセット名が 0件 (増えたら新しい誤りが入った合図)."""
         for cat in CATS:
-            unregistered = audit_mod.audit([cat])[-1]
+            unregistered = audit_mod.audit([cat]).unregistered  # 位置ではなく名前で受ける
             n = sum(sum(v.values()) for v in unregistered.values())
             self.assertEqual(n, 0, f"{cat}: 未登録の値 {list(unregistered.get(cat, {}))[:3]}")
 

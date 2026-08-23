@@ -40,6 +40,7 @@ import re
 import sqlite3
 import sys
 from collections import defaultdict
+from typing import NamedTuple
 from pathlib import Path
 
 DB_PATH = "C:/dev/iMak_data/catalog/products.sqlite"
@@ -135,6 +136,25 @@ def _derive_rarity_ebay(conn, category: str, rarity_raw):
     return None
 
 
+class AuditResult(NamedTuple):
+    """audit() の戻り。**位置ではなく名前で参照する**.
+
+    2026-08-23: §0c を足した時、`res[-1]` / `res[-2]` で受けていた test が3本壊れた。
+    節を足すたびに末尾がずれるため、以後は名前で受ける (位置互換も維持している)。
+    """
+    era_mismatch: list
+    inconsistent: list
+    none_list: list
+    name_desync: list
+    empty_by_cat: dict
+    drift_by_cat: dict
+    rarity_by_cat: dict
+    not_rarity: dict
+    prefix_mismatch: list
+    unregistered: dict
+    code_value_mismatch: list
+
+
 # 弾番号つき eBay 値の接頭辞 (Sv4k: / Swsh06: / Sm3h: …)
 _PREFIX_RE = re.compile(r"^([A-Za-z]+[0-9][0-9A-Za-z]*)\s*:")
 
@@ -200,6 +220,19 @@ def setcode_of(product_id: str, specs: dict) -> str:
     return specs.get("set_code") or (product_id.split("-")[0] if product_id else "")
 
 
+def names_own_setcode(value: str, set_code: str) -> bool:
+    """焼いてある値が **その弾自身の名前で始まっている** か (`S8a-P: …` は S8a の別商品).
+
+    §0c の唯一の除外。`_PREFIX_RE` は `S8a-P:` (弾コードに '-' を含む形) を拾えないので、
+    値の頭を弾コードと直接比べる。`Noble Victories` は `BW2` で始まらないので除外されない。
+
+    ★product_id 側を細かく切る形 (`BW2-B-001` -> `BW2B`) は**採らない**。`-B-` が別商品を
+      意味するとは限らず、2026-08-23 に実測したら L3/BW2/BW4/BW7 の 279行を取りこぼした。
+    """
+    v, sc = (value or "").upper(), (set_code or "").upper()
+    return bool(sc) and v.startswith(sc)
+
+
 def audit(categories):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -245,7 +278,25 @@ def audit(categories):
     #      依存するので必ず漏れる (2026-08-23 に実際に漏れて 1,729行が誤った値のまま出ていた)。
     #      許可された値の一覧と突き合わせる形にして、思いつきに依存させない。
     unregistered = defaultdict(lambda: defaultdict(int))   # category -> value -> count
+    # 0c. 別セットの名前 (弾番号が付いていない形) の検知 (2026-08-23)
+    #    §0 は **値の頭に弾番号が付いている時しか**比べられない (`Sv4k:` 等)。
+    #    `Roaring Skies` / `Sun & Moon` / `Triumphant` のような英語版セット名は弾番号が
+    #    無いので §0 を素通りし、eBay の一覧に実在する値なので §0b も通る。
+    #    → 「eBay master に **その商品の弾コードで始まる値が在る**のに、焼いてある値が
+    #      それでない」を見る。実測 2026-08-23: pokemon_tcg で 1,798行 (日本語版の刷りに
+    #      英語版セット名が載っている = ルール③違反)。
+    #    除外は2つだけ (どちらも「同じ弾の別商品」で誤りではない):
+    #      - 値の頭が弾コードの細分 (`S8a-P:` は S8a の promo pack) → 同じ弾扱い
+    #      - `_free_text_set_values.yaml` に登録済の自由入力 (`25th Anniversary Golden Box`)
+    code_value_mismatch = []      # (product_id, set_code, stored, [その弾の master 値])
     _master, _allow = _load_allowed()
+    # 弾コード -> その弾の eBay 値 (category 別)
+    _by_code = defaultdict(lambda: defaultdict(set))
+    for _cat, _vals in _master.items():
+        for _v in _vals:
+            _m = _PREFIX_RE.match(_v)
+            if _m:
+                _by_code[_cat][_norm_code(_m.group(1))].add(_v)
     tmp_era = defaultdict(int)  # (set_code,ebay) count for era check
     for r in rows:
         s = json.loads(r["specs"])
@@ -294,6 +345,14 @@ def audit(categories):
             # `cardID-*` は弾コードを持たない暫定キー (別件のバックログ)。ここでは見ない。
             if not m_pref.group(1).upper().startswith("SWSH")                     and not str(r["product_id"] or "").startswith("cardID-"):
                 prefix_mismatch.append((r["product_id"], sc, e))
+        # 0c. その弾の値が eBay に在るのに、別の値が焼いてある
+        #    ★自由入力の登録簿 (`_free_text_set_values.yaml`) は **免罪符にしない**。
+        #      登録簿はルール② (eBay に値が無い弾) のためのもので、値が在る弾に登録が
+        #      あるなら、その登録自体が誤り (実測 2026-08-23: `Mask of Change` /
+        #      `Rocket Gang's Glory` / `20th Anniversary` の3値が該当し、356行を隠していた)。
+        _cand = _by_code.get(r["category"], {}).get(sc_n) if (e and sc_n) else None
+        if _cand and e not in _cand and not names_own_setcode(e, sc):
+            code_value_mismatch.append((r["product_id"], sc, e, sorted(_cand)))
         # 7. rarity 生値焼き付き / map ズレ (computed=None は filter_map 未登録 = 別問題)
         r_raw, r_stored = s.get("rarity"), s.get("rarity_ebay")
         # yugioh は生値が既に英語 canonical ("Secret Rare" 等) で passthrough が正 → 対象外
@@ -348,13 +407,16 @@ def audit(categories):
     none_list.sort(key=lambda x: -x[2])
     name_desync.sort(key=lambda x: x[0])
 
-    return (era_mismatch, inconsistent, none_list, name_desync,
-            dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
-            prefix_mismatch, {k: dict(v) for k, v in unregistered.items()})
+    return AuditResult(
+        era_mismatch, inconsistent, none_list, name_desync,
+        dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
+        prefix_mismatch, {k: dict(v) for k, v in unregistered.items()},
+        code_value_mismatch)
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
-           drift_by_cat, rarity_by_cat, not_rarity, prefix_mismatch, unregistered, categories):
+           drift_by_cat, rarity_by_cat, not_rarity, prefix_mismatch, unregistered,
+           code_value_mismatch, categories):
     out = []
     NL = chr(10)
     out.append(f"## 0. 弾コード食い違い (別セットの名前) — {len(prefix_mismatch)} 件" + NL)
@@ -366,6 +428,23 @@ def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
         out.append(f"- ⚠️ `{pid}` (弾={sc}) → `{e}`" + NL)
     if len(prefix_mismatch) > 40:
         out.append(f"- … 他 {len(prefix_mismatch) - 40} 件" + NL)
+    out.append(NL)
+    out.append(f"## 0c. 別セットの名前 (弾番号が付いていない形) — {len(code_value_mismatch)} 行" + NL)
+    out.append("eBay に **その弾自身の値が在る**のに、別の値が焼いてある行。"
+               "`Sun & Moon` / `Triumphant` のような英語版セット名は弾番号が無いので "
+               "§0 を素通りし、eBay に実在する値なので §0b も通る。**0件で維持する**。" + NL)
+    if not code_value_mismatch:
+        out.append("(なし)" + NL)
+    else:
+        _agg = defaultdict(int)
+        _cand_of = {}
+        for pid, sc, e, cand in code_value_mismatch:
+            _agg[(sc, e)] += 1
+            _cand_of[(sc, e)] = cand
+        for (sc, e), n in sorted(_agg.items(), key=lambda kv: -kv[1])[:40]:
+            out.append(f"- ⚠️ 弾={sc} `{e}` {n}行 → eBay に在る値: {_cand_of[(sc, e)]}" + NL)
+        if len(_agg) > 40:
+            out.append(f"- … 他 {len(_agg) - 40} 組" + NL)
     out.append(NL)
     n_unreg = sum(sum(v.values()) for v in (unregistered or {}).values())
     out.append(f"## 0b. 未登録のセット名 — {n_unreg} 行" + NL)
@@ -522,10 +601,11 @@ def main():
 
     (era_mismatch, inconsistent, none_list, name_desync,
      empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
-     prefix_mismatch, unregistered) = audit(categories)
+     prefix_mismatch, unregistered, code_value_mismatch) = audit(categories)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
                     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
-                    prefix_mismatch, unregistered, categories or [])
+                    prefix_mismatch, unregistered, code_value_mismatch,
+                    categories or [])
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)
@@ -568,6 +648,7 @@ def main():
         f"none_src={len(none_list)} name_desync={len(name_desync)} "
         f"name_propagate_viol={len(name_viol)} facet_n1_candidates={len(facet_n1)} "
         f"canonical_drift={sum(drift_by_cat.values())} "
+        f"code_value_mismatch={len(code_value_mismatch)} "
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
         f"rarity_unmapped={sum(v['unmapped'] for v in rarity_by_cat.values())} "

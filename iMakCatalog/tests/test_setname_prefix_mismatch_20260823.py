@@ -29,8 +29,8 @@ class TestPrefixMismatch(unittest.TestCase):
     def test_live_zero(self):
         """本番データで 0件 (増えたら別セットの名前が入っている)."""
         for cat in ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg"):
-            res = audit_mod.audit([cat])
-            prefix_mismatch = res[-2]  # 末尾は unregistered (§0b)
+            # ★位置 (res[-2]) で受けない。節を足すたびにずれる (2026-08-23 に実際にずれた)
+            prefix_mismatch = audit_mod.audit([cat]).prefix_mismatch
             self.assertEqual(prefix_mismatch, [], f"{cat}: 別セット名 {prefix_mismatch[:3]}")
 
 

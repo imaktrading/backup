@@ -114,6 +114,7 @@ class TestDbState:
             {},  # 2026-08-21 追加: not_rarity (レアリティでない値の検知)
             [],  # 2026-08-23 追加: prefix_mismatch (§0 弾コード食い違い)
             {},  # 2026-08-23 追加: unregistered (§0b 未登録のセット名)
+            [],  # 2026-08-23 追加: code_value_mismatch (§0c 別セットの名前)
             ["dragonball_scg"],
         )
         assert "## 7." in report
