@@ -404,7 +404,7 @@ BUCKET_REMEDY_BUTTON = {
     "NO_CONVERT": "💲 価格抵抗",
     "RELIST":     "取下再出品①②③ (End→Add→書戻し)",
     "RESTOCK":    "🛒 在庫切れ再仕入れ (PSA/一番くじは専用補充)",
-    "CULL":       "🧹 CULL停止 (50件/回)",
+    "CULL":       "🗑 取下げ (200件/回・月末までに)",   # 2026-08-23: 50→200 / 名前もパネルと一致させた
 }
 
 
@@ -583,7 +583,13 @@ def main():
         sys.exit(f"all-active CSV が {data_dir} に見つかりません。")
 
     # レポート鮮度ガード: 古いまま走らせると funnel世代/効果測定が無意味になる → 中断 (2026-06-07)
-    _worst = worst_report_age([f_active, f_quality, f_unsold, f_promoted, f_orders])
+    # ★2026-08-23: **LQR を鮮度判定から外す**。Listing quality report は eBay が週次でしか
+    #   作らないので、他4本を今日落としても必ず数日古く、毎回この gate に引っかかる
+    #   (実際 8/23 に5本そろえても「最古4日前」で中断し、--force が要った)。
+    #   毎回 --force を打たせると gate の意味が無くなるので、**日次で取れる4本だけ**で見る。
+    #   LQR 自体の古さは下の表示で分かる。
+    _worst = worst_report_age([f_active, f_unsold, f_promoted, f_orders])
+    _lqr_age = worst_report_age([f_quality]) if f_quality else None
     if _worst >= STALE_REPORT_DAYS and not args.force:
         sys.exit(
             f"⛔ 中断: レポートが古いです (最古 {_worst}日前 ≥ {STALE_REPORT_DAYS}日)。\n"
@@ -599,7 +605,9 @@ def main():
         print(f"  ⚠ archive skip(非致命): {type(_ae).__name__}: {_ae}")
     print(f"data-dir: {data_dir}  (レポート最古 {_worst}日前)")
     print(f"  active  : {os.path.basename(f_active)}")
-    print(f"  quality : {os.path.basename(f_quality) if f_quality else '(なし=簡易判定)'}")
+    print(f"  quality : {os.path.basename(f_quality) if f_quality else '(なし=簡易判定)'}"
+          + (f"  ← {_lqr_age}日前 (eBayが週次でしか作らないので数日古いのが普通)"
+             if _lqr_age else ""))
     print(f"  unsold  : {os.path.basename(f_unsold) if f_unsold else '(なし)'}")
     print(f"  promoted: {os.path.basename(f_promoted) if f_promoted else '(なし=organic限定の旧判定)'}")
 

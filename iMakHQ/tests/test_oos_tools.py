@@ -5,7 +5,7 @@
 B の安全策 (2026-06-05 ユーザー合意) が崩れないことを固定する:
   - age>=21日 のみ (NEW_WAIT補正)
   - age 不明(0)は fail-closed で対象外
-  - CAP 50件/回 (burst禁止)
+  - CAP 200件/回 (burst禁止。2026-08-23 に 50→200)
   - age 降順・同 age は価格昇順
 A: G-SHOCK は型番=完全一致キーワード / dedup は title で集約。
 """
@@ -52,11 +52,15 @@ def test_cull_excludes_young_and_unknown_age():
 
 
 def test_cull_cap_limits_50():
-    rows = [_row(str(i), age=30 + i) for i in range(120)]
-    _cull, eligible, picked = cull_end.select(rows)
-    assert len(eligible) == 120
-    assert len(picked) == 50
+    """1回あたりの件数に上限があること (burst 禁止)。
 
+    ★2026-08-23 ユーザー指示で 50 → 200。理由: eBay 公式のとおり **月末時点で
+      生きている出品は翌月の枠にも計上される** ので、月末までに落とせるかで
+      翌月の出発点が変わる。残り約1,800件を 50/回 では間に合わない。
+      上限そのものは残す (一括 End はしない)。
+    """
+    import cull_end
+    assert cull_end.CAP == 200
 
 def test_cull_order_oldest_then_cheapest():
     rows = [

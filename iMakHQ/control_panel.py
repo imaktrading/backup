@@ -1503,9 +1503,11 @@ SCRIPTS = [
         "open_url": "https://docs.google.com/spreadsheets/d/1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=373045082",  # 再仕入れ
     },
     {
-        # B: CULL(在庫切れ&需要皆無) を age>=21・CAP50/回 で段階 End CSV 化 (2026-06-05)
+        # B: CULL(在庫切れ&需要皆無) を age>=21・CAP/回 で段階 End CSV 化 (2026-06-05)
+        # ★2026-08-23: 50→200 (件数は cull_end.CAP が正)。**月末までに落とすと翌月の枠が空く**
+        #   — eBay 公式「月末時点で生きている出品は翌月の枠にも計上される」。
         "category": None, "type": "utility",
-        "label": "🗑 取下げ (50件/回)",
+        "label": "🗑 取下げ (200件/回・月末までに)",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "cull_end.py"],
         "params": [],
@@ -2996,10 +2998,18 @@ class ListingPanel:
                 _prog = _oos_progress()
                 if _prog:
                     _cull_n, _rs_n = _prog
-                    _runs = -(-_cull_n // 50)  # ceil
+                    # ★1回あたりの件数は cull_end 側が正 (2026-08-23 に 50→200)。
+                    #   ここに数字を書き写すと、片方だけ変えた時に嘘の回数が出る。
+                    try:
+                        import cull_end as _ce
+                        _cap = _ce.CAP
+                    except Exception:                              # noqa: BLE001
+                        _cap = 200
+                    _runs = -(-_cull_n // _cap)  # ceil
                     tk.Label(scroll_frame, anchor="w", font=("Yu Gothic UI", 9, "bold"),
                              fg="#444", text=(f"   🛒 RESTOCK再仕入れ(US) {_rs_n}商品   "
-                                              f"｜   🧹 CULL停止 残 {_cull_n}件 (50件/回 = 約{_runs}回分)")
+                                              f"｜   🧹 CULL停止 残 {_cull_n}件 "
+                                              f"({_cap}件/回 = 約{_runs}回分)")
                              ).pack(anchor="w", padx=4, pady=(2, 0))
             except Exception:
                 pass
