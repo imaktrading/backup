@@ -1867,6 +1867,21 @@ def lookup_pokemon(
                   f"(subject={subject!r})")
         return None
 
+    # ★2026-08-24 追加: PSA Subject と名前が交差しなければ reject (fail-closed)。
+    #   他の3カテゴリ (one_piece / gundam / dragonball) は前からこの照合を持っていたが、
+    #   **Pokemon だけ 0 箇所**で、番号さえ合えば別カードでも通る状態だった。
+    #   実測 (2026-08-24 / 目視 OK が付いた Pokemon cert 20件で検証):
+    #     誤って弾く行 0 件 / 本物の誤りを 1 件検出 (cert80181108 SV3-130 が
+    #     'Arven'(=ペパー) になっていた = 別人の名前。同日 'Ortega' に是正)。
+    #   _record_name_matches_subject は subject からトークンが取れない時 True を返すので、
+    #   ラベルが薄い cert を巻き込むことはない。
+    if not _record_name_matches_subject(record, subject):
+        if verbose:
+            print(f"    ⚠️ iMakCatalog (Pokemon) ID hit {record['product_id']} "
+                  f"({record.get('name_en') or record['name']}) だが PSA Subject "
+                  f"{subject!r} と名前不一致 → reject")
+        return None
+
     if verbose and record["product_id"] != "":
         # promo hit はすでにログ済 → base hit のみログ
         if not record["product_id"].startswith(tuple(f"{p}-" for p in _POKEMON_PROMO_SET_CODES)):
