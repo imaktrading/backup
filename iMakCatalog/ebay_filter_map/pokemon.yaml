@@ -130,6 +130,56 @@ set:
       2026-08-23 §0c 是正 (25行): 英語版の別セット名が焼かれていた。
       eBay master (Pokémon TCG / fetched 2026-08-22) にこの弾自身の値が在るので、
       ルール① どおり verbatim で入れる
+  - source: "拡張パック「変幻の仮面」"
+    ebay: "Sv6: Transformation Mask"
+    note: >-
+      2026-08-23 §0c 是正 (133行): 英語版の別セット名が焼かれていた。対抗の 'Sv06: Twilight Masquerade' は英語版 SV の名前。日本語版 SV6 は 変幻の仮面。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "拡張パック「ロケット団の栄光」"
+    ebay: "Sv10: The Glory of Team Rocket"
+    note: >-
+      2026-08-23 §0c 是正 (132行): 英語版の別セット名が焼かれていた。対抗の 'Sv10: Destined Rivals' は英語版の名前。日本語版 SV10 は ロケット団の栄光。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "ポケモンカードゲームBW 拡張パック「ブラックコレクション」"
+    ebay: "Bw1: Black Collection"
+    note: >-
+      2026-08-23 §0c 是正 (53行): 英語版の別セット名が焼かれていた。BW1 は2種同時発売。ホワイトコレクションと取り違えないこと。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "ポケモンカードゲームBW 拡張パック「ホワイトコレクション」"
+    ebay: "Bw1: White Collection"
+    note: >-
+      2026-08-23 §0c 是正 (53行): 英語版の別セット名が焼かれていた。BW1 は2種同時発売。ブラックコレクションと取り違えないこと。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "ポケモンカードゲームBW 拡張パック「サイコドライブ」"
+    ebay: "Bw3: Psycho Drive"
+    note: >-
+      2026-08-23 §0c 是正 (52行): 英語版の別セット名が焼かれていた。BW3 は2種同時発売 (対: ヘイルブリザード)。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "ポケモンカードゲームBW 拡張パック「ヘイルブリザード」"
+    ebay: "Bw3: Hail Blizzard"
+    note: >-
+      2026-08-23 §0c 是正 (52行): 英語版の別セット名が焼かれていた。BW3 は2種同時発売 (対: サイコドライブ)。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "ポケモンカードゲームBW 拡張パック「ラセンフォース」"
+    ebay: "Bw8: Spiral Force"
+    note: >-
+      2026-08-23 §0c 是正 (51行): 英語版の別セット名が焼かれていた。ラセン=Spiral。BW8 は2種同時発売 (対: ライデンナックル=Thunder Knuckle)。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "ポケモンカードゲームBW 拡張パック「ライデンナックル」"
+    ebay: "Bw8: Thunder Knuckle"
+    note: >-
+      2026-08-23 §0c 是正 (51行): 英語版の別セット名が焼かれていた。ライデン=Thunder。BW8 は2種同時発売 (対: ラセンフォース=Spiral Force)。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "ポケモンカードゲームBW 拡張パック「リューズブラスト」"
+    ebay: "Bw5: Dragon Blast"
+    note: >-
+      2026-08-23 §0c 是正 (50行): 英語版の別セット名が焼かれていた。★ブラスト=Blast。リューノブレード(Blade)と1文字違いなので取り違え注意。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
+  - source: "ポケモンカードゲームBW 拡張パック「リューノブレード」"
+    ebay: "Bw5: Dragon Blade"
+    note: >-
+      2026-08-23 §0c 是正 (50行): 英語版の別セット名が焼かれていた。★ブレード=Blade。リューズブラスト(Blast)と1文字違いなので取り違え注意。
+      eBay master (Pokémon TCG / fetched 2026-08-23) の verbatim
   - source: "ハイクラスパック「テラスタルフェスex」"
     ebay: "Sv8a: Terastal Fest Ex"
     note: >-
