@@ -2028,9 +2028,20 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     # 2026-08-09 canonical product_id sidecar 用 (= build_row 内で catalog が返した card_id を
     # ここに集める。CSV には列を足さず、caller が並置 JSON に書く。呼出元が dict を渡さない場合は
     # no-op)。詳細: 2026-08-09_rarity_exclusion_needs_canonical_product_id_response.md
-    def _record_canonical_pid(pid):
+    def _record_canonical_pid(pid, category=""):
+        """sidecar に載せる canonical PID を控える。
+
+        ★2026-08-23: **category を前置きして `{category}:{product_id}` で控える**。
+        product_id だけだとワンピ↔ガンダムで同じ ID が両方に在り (283件)、後段が
+        別ゲームの行を引く。実害: cert154825163 (ワンピ) が `ST02-001` として控えられ、
+        Item Specifics とタイトルが Gundam Wing Gundam になって出品された。
+        枝番 (_p1 / _OTHER PRODUCT CARD_En 等) も落とさずそのまま持つ。
+        """
         if pid_by_cert is not None and pid:
-            pid_by_cert[str(cert_number)] = str(pid)
+            pid = str(pid)
+            if category and ":" not in pid:
+                pid = f"{category}:{pid}"
+            pid_by_cert[str(cert_number)] = pid
     game, set_name, franchise = detect_game_info(brand)
 
     # 2026-07-30: 共通ヘルパ tcg_scope.is_out_of_scope に SSOT 集約。
@@ -2178,11 +2189,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             bandai_card_id = bandai.get("card_id", "")
             if bandai_card_id:
                 official_card_number = re.sub(r'_.+$', '', bandai_card_id)
-                _record_canonical_pid(bandai_card_id)
+                _record_canonical_pid(bandai_card_id, "one_piece_tcg")
             elif bandai.get("product_id"):
                 # confirmed_catalog_record (_don_record → bandai 経路) は raw api.lookup 由来で
                 # card_id ではなく product_id を持つ。sidecar には両方拾う。
-                _record_canonical_pid(bandai.get("product_id"))
+                _record_canonical_pid(bandai.get("product_id"), "one_piece_tcg")
             # Set: adapter が ebay_filter_map で変換済み
             if bandai.get("set_name_ebay"):
                 set_name = bandai["set_name_ebay"]
@@ -2224,7 +2235,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # 2026-05-28 variant_meta 連動用 (= Features/Finish/Rarity 自動補完)
             _catalog_pid_for_variant = pokemon.get("card_id")
             _catalog_category_for_variant = "pokemon_tcg"
-            _record_canonical_pid(_catalog_pid_for_variant or pokemon.get("product_id"))
+            _record_canonical_pid(_catalog_pid_for_variant or pokemon.get("product_id"),
+                                  "pokemon_tcg")
         elif catalog_misses is not None:
             catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}"))
 
@@ -2244,7 +2256,7 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             db_card = ENERGY_MARKER_DB[db_card_id]
             print(f"    🎯 Energy Marker DB (hardcoded): {db_card_id}")
             print(f"    ⚠️ Color は物理カード確認後に手動補完してください")
-            _record_canonical_pid(db_card_id)
+            _record_canonical_pid(db_card_id, "dragonball_scg")
             if db_card:
                 official_card_type = db_card.get("card_type", "")
                 official_rarity = db_card.get("rarity", "")
@@ -2269,9 +2281,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                 db_full_id = db_card.get("card_id", "")
                 if db_full_id:
                     official_card_number = re.sub(r'_.+$', '', db_full_id)
-                    _record_canonical_pid(db_full_id)
+                    _record_canonical_pid(db_full_id, "dragonball_scg")
                 elif db_card.get("product_id"):
-                    _record_canonical_pid(db_card.get("product_id"))
+                    _record_canonical_pid(db_card.get("product_id"), "dragonball_scg")
                 if db_card.get("set_name_ebay"):
                     set_name = db_card["set_name_ebay"]
                 if db_card.get("card_name"):
@@ -2296,9 +2308,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             gd_card_id = gd_card.get("card_id", "")
             if gd_card_id:
                 official_card_number = re.sub(r'_.+$', '', gd_card_id)
-                _record_canonical_pid(gd_card_id)
+                _record_canonical_pid(gd_card_id, "gundam_tcg")
             elif gd_card.get("product_id"):
-                _record_canonical_pid(gd_card.get("product_id"))
+                _record_canonical_pid(gd_card.get("product_id"), "gundam_tcg")
             if gd_card.get("set_name_ebay"):
                 set_name = gd_card["set_name_ebay"]
             if gd_card.get("card_name"):

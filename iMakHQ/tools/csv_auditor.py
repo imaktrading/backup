@@ -210,6 +210,8 @@ def classify_finding(severity, msg):
     if m.startswith("送料ポリシー") and "不一致" in m:
         return MECH_FIX
     # --- 生成プログラムのバグ (誤出品直結 → 除外+報告) ---
+    if m.startswith("PSAの現物と"):
+        return REPORT_PROGRAM
     if "禁止ワード" in m:
         return REPORT_PROGRAM
     if "上限" in m and "タイトル" in m:        # タイトルN字 > 上限80字
@@ -290,6 +292,8 @@ def find_latest_csv():
 
 # 出品で実際に使う列名
 COL_TITLE = "*Title"
+# PSA 鑑定番号の列 (= その行がどの現物か)。PSA cache を引く鍵。
+CERT_COL = "CDA:Certification Number - (ID: 27503)"
 COL_PRICE = "*StartPrice"
 COL_SHIP = "ShippingProfileName"
 _JP_RE = re.compile(r"[ぁ-んァ-ヶ一-龠]")
@@ -307,6 +311,106 @@ def native_findings(headers, row):
     title = str(row[ti]).strip() if ti is not None and ti < len(row) else ""
     if _JP_RE.search(title):
         out.append(("ERROR", f"タイトルに日本語文字が混入: {title!r}"))
+    return out
+
+
+# ============================================================================
+# PSA の現物 ↔ CSV の中身 (2026-08-23 新設)
+# ============================================================================
+# これまでの照合は「CSV と カタログ」「タイトル と Item Specifics」= **生成物どうし**で、
+# 生成が最初から別のカードを掴んでいると全部つじつまが合ってしまう。
+# 2026-08-23: ワンピの現物 (cert154825163 Eustass "Captain" Kid) が product_id `ST02-001`
+# だけで引かれ、同じ番号がガンダムにも在るため **Gundam / Wing Gundam** として出品された
+# (ItemID 820036000051)。カタログ照合も タイトル↔spec 整合も、両方 通っている。
+# ここで見るのは **PSA が現物のラベルに何と書いているか** だけ。唯一の外部の事実。
+_PSA_GAME_WORDS = (
+    ("pokemon", "pokemon"), ("one piece", "one piece"), ("gundam", "gundam"),
+    ("dragon ball", "dragon ball"), ("yu-gi-oh", "yu-gi-oh"), ("yugioh", "yu-gi-oh"),
+    ("union arena", "union arena"),
+)
+
+# PSA ラベルの Subject に付く「カードの状態/種別」語。人物名の照合から外す。
+_PSA_SUBJECT_NOISE = {
+    "super", "rare", "art", "special", "alternate", "alt", "holo", "foil", "promo",
+    "promotion", "card", "cards", "set", "vol", "the", "and", "of", "no", "full",
+    "secret", "ultra", "double", "triple", "hyper", "character", "leader", "parallel",
+    "reverse", "shiny", "gold", "silver", "sr", "ssr", "ur", "hr", "ar", "sar",
+}
+
+
+def _psa_game(text: str) -> str:
+    t = (text or "").lower().replace("é", "e")
+    for needle, game in _PSA_GAME_WORDS:
+        if needle in t:
+            return game
+    return ""
+
+
+def _name_tokens(text: str) -> set:
+    t = (text or "").lower().replace("é", "e").replace("’", "'")
+    t = re.sub(r"'s", "", t)
+    return {w for w in re.split(r"[^a-z0-9]+", t)
+            if len(w) >= 3 and w not in _PSA_SUBJECT_NOISE}
+
+
+def _is_subseq(short: str, long: str) -> bool:
+    """short の文字が long にこの順で現れるか (PSA の母音抜き略記を吸収する)。"""
+    it = iter(long)
+    return all(ch in it for ch in short)
+
+
+def _token_matches(psa_word: str, csv_words: set) -> bool:
+    """PSA ラベルの語が CSV 側の語のどれかと同じものを指しているか。
+
+    PSA のラベルは幅が足りないと母音を落として略す ('RESHRM. & CHARZRD.GX' =
+    Reshiram & Charizard-GX)。完全一致だけで見ると、正しい行を「名前が違う」と
+    誤って止めてしまう (2026-07-26 の実データで確認)。4文字以上の語は
+    「文字がこの順に出てくるか」で照合し、3文字の語は完全一致だけにする。
+    """
+    if psa_word in csv_words:
+        return True
+    if len(psa_word) < 4:
+        return False
+    return any(_is_subseq(psa_word, c) or _is_subseq(c, psa_word)
+               for c in csv_words if len(c) >= 4)
+
+
+def psa_identity_findings(headers, row, meta):
+    """PSA ラベル (meta) と CSV 行が **同じカードを指しているか**。純関数。
+
+    meta: PSA cache の dict (Brand / Subject / CardNumber)。無ければ何も言わない。
+    見るのは2つだけ。どちらも「間違いなく違う」時しか鳴らさない (誤検出を出さない):
+      ① ゲームが違う   … PSA の Brand と CSV の C:Game が別ゲーム名
+      ② 名前がかすりもしない … PSA の Subject の語が CSV の名前/タイトルに1つも無い
+    """
+    if not meta:
+        return []
+    hm = {h: i for i, h in enumerate(headers)}
+
+    def _cell(name):
+        i = hm.get(name)
+        return str(row[i]).strip() if i is not None and i < len(row) else ""
+
+    out = []
+    brand = (meta.get("Brand") or "").strip()
+    subject = (meta.get("Subject") or "").strip()
+
+    psa_game = _psa_game(brand)
+    csv_game = _psa_game(_cell("C:Game") or _cell(COL_TITLE))
+    if psa_game and csv_game and psa_game != csv_game:
+        out.append(("ERROR",
+                    f"PSAの現物と別ゲーム: PSA={psa_game!r} ({brand}) だが "
+                    f"CSVは{csv_game!r} (C:Game={_cell('C:Game')!r} / {_cell('C:Card Name')!r})"))
+        return out            # ゲームが違う時点で名前照合は無意味
+
+    want = _name_tokens(subject)
+    if want:
+        have = _name_tokens(" ".join([_cell("C:Card Name"), _cell("C:Character"),
+                                      _cell(COL_TITLE)]))
+        if have and not any(_token_matches(w, have) for w in want):
+            out.append(("ERROR",
+                        f"PSAの現物と名前が一致しない: PSA Subject={subject!r} の語が "
+                        f"CSVの名前/タイトルに1つも無い (C:Card Name={_cell('C:Card Name')!r})"))
     return out
 
 
@@ -773,6 +877,12 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
             all_vr.append(vr)
             findings = vr + native_findings(headers, row) + contract_findings(
                 headers, row, _contract)
+            # PSA の現物と CSV が同じカードか (生成物どうしの照合では絶対に出ない誤り)
+            _cert_i = {h: i for i, h in enumerate(headers)}.get(CERT_COL)
+            _cert = (str(row[_cert_i]).strip()
+                     if _cert_i is not None and _cert_i < len(row) else "")
+            if _cert:
+                findings += psa_identity_findings(headers, row, _psa_meta(_cert))
         disps = [classify_finding(sev, msg) for sev, msg in findings]
         sku = _row_sku(headers, row)
         _ident = card_identity(headers, row)
@@ -1259,6 +1369,20 @@ def _signal_claude_act(project, csv_path, log_path, dry_run, digest_path="", dig
 
 
 _PSA_CACHE_DIR = os.path.join(WORKSPACE, "iMakeBayAPI", "cache", "psa_certs")
+
+
+def _psa_meta(cert: str):
+    """PSA cache の生 dict (Brand/Subject/CardNumber)。無ければ None。"""
+    if not cert:
+        return None
+    path = os.path.join(_PSA_CACHE_DIR, f"{cert}.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _identity_from_psa_cache(cert: str) -> str:

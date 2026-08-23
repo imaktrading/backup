@@ -115,15 +115,26 @@ def _resolve_card_id(cert: str, franchise: str):
     return (rec.get("card_id") or rec.get("id")), None
 
 
-def _catalog_record(card_id: str):
+def _catalog_record(card_id: str, category: str = ""):
+    """catalog の1行。**category を添えて引く** (2026-08-23)。
+
+    product_id はカタログ全体で一意ではない。ワンピとガンダムは採番が同じで
+    `ST02-001` `EB01-003` など 283 件が両方に実在する。category 無しで引くと
+    別ゲームの別カードが返り、監査が「合っている」と誤判定する。
+    category 無しで複数カテゴリに当たったら **選ばずに None** (fail-closed)。
+    """
     con = sqlite3.connect(CATALOG_DB)
     con.row_factory = sqlite3.Row
-    row = con.execute(
-        "SELECT product_id,name_en,name,set_name_official,specs,language "
-        "FROM products WHERE product_id=?", (card_id,)).fetchone()
+    sql = ("SELECT product_id,name_en,name,set_name_official,specs,language "
+           "FROM products WHERE product_id=?")
+    if category:
+        rows = con.execute(sql + " AND category=?", (card_id, category)).fetchall()
+    else:
+        rows = con.execute(sql, (card_id,)).fetchall()
     con.close()
-    if not row:
+    if not rows or len(rows) > 1:
         return None
+    row = rows[0]
     specs = {}
     try:
         specs = json.loads(row["specs"] or "{}")
@@ -196,7 +207,7 @@ def audit_row(row, headers):
     card_id, err = _resolve_card_id(cert, franchise)
     if err:
         return [("UNRESOLVED", f"cert {cert} → catalog 解決不能 ({err})")], None
-    rec = _catalog_record(card_id)
+    rec = _catalog_record(card_id, franchise)
     if not rec:
         return [("UNRESOLVED", f"card_id {card_id} が catalog に無い")], None
 

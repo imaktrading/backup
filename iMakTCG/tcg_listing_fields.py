@@ -129,14 +129,51 @@ _ALL_COLS = [
 ]
 
 
-def _catalog_specs(card_id: str):
+def _split_category(card_id: str):
+    """`one_piece_tcg:ST02-001_x` → ("one_piece_tcg", "ST02-001_x")。前置きが無ければ ("", pid)。
+
+    KEY 列 / sidecar は `{category}:{product_id}` 形式。catalog を引く時にこの前半を
+    捨てると別ゲームの行が返るので、必ずここで分けて両方を持ち回る。
+    """
+    s = (card_id or "").strip()
+    if ":" in s:
+        cat, _, pid = s.partition(":")
+        if cat and pid:
+            return cat.strip(), pid.strip()
+    return "", s
+
+
+def _catalog_specs(card_id: str, category: str = ""):
+    """catalog の1行を引く。**category を必ず添えて引く** (2026-08-23)。
+
+    product_id はカタログ全体では一意でない。ワンピとガンダムは採番規則が同じで、
+    `ST02-001` `EB01-003` のように **283 件が両方に実在**する。category を付けずに
+    `WHERE product_id=?` で引くと先に入っている行 (= 別ゲームの別カード) が返り、
+    その値がそのまま Item Specifics とタイトルになる。
+
+    実害 2026-08-23: cert154825163 (ワンピ Eustass "Captain" Kid) が
+    `ST02-001` で引かれ **Gundam / Wing Gundam** として出品された (ItemID 820036000051)。
+
+    category が空で、その product_id が複数カテゴリに在る時は **どれかを選ばない**。
+    None を返して呼出側に解決不能として扱わせる (fail-closed)。
+    """
     con = sqlite3.connect(CATALOG_DB)
     con.row_factory = sqlite3.Row
-    row = con.execute(
-        "SELECT name_en, language, specs FROM products WHERE product_id=?", (card_id,)).fetchone()
+    if category:
+        rows = con.execute(
+            "SELECT name_en, language, specs FROM products "
+            "WHERE product_id=? AND category=?", (card_id, category)).fetchall()
+    else:
+        rows = con.execute(
+            "SELECT name_en, language, specs FROM products "
+            "WHERE product_id=?", (card_id,)).fetchall()
     con.close()
-    if not row:
+    if not rows:
         return None
+    if len(rows) > 1:
+        # category 無しで複数カテゴリに当たった = どちらのゲームか決められない
+        return None
+    row = rows[0]
     try:
         specs = json.loads(row["specs"] or "{}")
     except Exception:
@@ -163,17 +200,8 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
       (= 人が HTML 目視確認で確定/選び直した product_id を権威として採用。verify→build フロー用)。
     Returns: (fields: dict[C:列→値], err: str|None)。err 時 fields は {}。
     """
-    if forced_card_id:
-        # 人が確定した card_id を直接採用 (Vision/自動解決を経由しない)
-        specs = _catalog_specs(forced_card_id)
-        if specs is None:
-            return {}, f"forced card_id {forced_card_id} が catalog に無い"
-        fields = map_specs_to_fields(specs, _psa_year(cert))
-        fields["_card_id"] = forced_card_id
-        _fill_game_fallback(fields, game_hint)
-        _attach_promo(fields, specs, forced_card_id)
-        return fields, None
-
+    # ★どの経路でも先に「どのゲームか」を確定させる。product_id だけで catalog を引くと
+    #   ワンピ↔ガンダムで別カードが返る (_catalog_specs の docstring)。
     franchise = _detect_franchise(game_hint, "")
     if not franchise:
         # game_hint 無→ PSA cache の Brand から判定
@@ -184,13 +212,29 @@ def build_listing_fields(cert: str, game_hint: str = "", forced_card_id: str = "
                 franchise = _detect_franchise("", brand)
             except Exception:
                 pass
+
+    if forced_card_id:
+        # 人が確定した card_id を直接採用 (Vision/自動解決を経由しない)。
+        # ただし **どのゲームかは PSA/row 由来で押さえたまま**引く。
+        cat, pid = _split_category(forced_card_id)
+        specs = _catalog_specs(pid, cat or franchise or "")
+        if specs is None:
+            return {}, (f"forced card_id {forced_card_id} が catalog に無い"
+                        if (cat or franchise)
+                        else f"forced card_id {forced_card_id} がどのゲームか決まらない")
+        fields = map_specs_to_fields(specs, _psa_year(cert))
+        fields["_card_id"] = pid
+        _fill_game_fallback(fields, game_hint)
+        _attach_promo(fields, specs, pid)
+        return fields, None
+
     if not franchise:
         return {}, "franchise 判定不能"
 
     card_id, err = _resolve_card_id(cert, franchise)
     if err:
         return {}, f"catalog 解決不能 ({err})"
-    specs = _catalog_specs(card_id)
+    specs = _catalog_specs(card_id, franchise)
     if specs is None:
         return {}, f"card_id {card_id} が catalog に無い"
 

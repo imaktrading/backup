@@ -714,6 +714,22 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         # 表示のための塗り直しなので、失敗しても listing 出力には影響なし
 
 
+def unlisted_from_result(result, started_ts=None, file_mtime=None):
+    """出品結果 JSON → 出せずに残った行の list (純関数・test 可)。
+
+    ★2026-08-23: 走行の締めは出品の成否を見ておらず、9件中2件しか出ていない走行でも
+      「🎉 全 process 完了 — 入稿準備 OK」と出していた。ここで拾って締めを変える。
+    検証のみ (write=False) の走行は出品していないので対象外。
+    前回の走行が残した JSON を今回の結果と読み違えないよう、走行開始より古い
+    ファイルは無視する。
+    """
+    if not isinstance(result, dict) or not result.get("write"):
+        return []
+    if started_ts and file_mtime and file_mtime < started_ts:
+        return []
+    return [str(x) for x in (result.get("unlisted") or []) if str(x).strip()]
+
+
 def _run_auto_full_tail(append_log_func, env):
     """🤖PSA自動 の締め: 前回入稿分の後始末 → CSV監査くん (2026-08-18)。
 
@@ -3664,8 +3680,28 @@ class ListingPanel:
                     except Exception as _e:
                         self.append_log(f"\n⚠️ post_no_go_sentinel hook 失敗: {_e}\n")
                     # 全 process 完了通知 (= ユーザー要望 2026-05-31)
+                    # ★2026-08-23: 出品が途中で止まっていても、ここは常に「🎉 完了」と出ていた。
+                    #   9件中2件しか出ていない走行が成功に見えた。出し残しがあるなら締めを変える。
+                    _left = []
+                    try:
+                        _rj = os.path.join(WORKSPACE, "iMakHQ", "csv_output",
+                                           "last_upload_result.json")
+                        if os.path.isfile(_rj):
+                            with open(_rj, encoding="utf-8") as _f:
+                                _left = unlisted_from_result(
+                                    json.load(_f),
+                                    started_ts=getattr(self, "_listing_start_ts", None),
+                                    file_mtime=os.path.getmtime(_rj))
+                    except Exception as _e:
+                        self.append_log(f"\n⚠️ 出品結果の読取に失敗 (締めの判定のみ): {_e}\n")
                     self.append_log("\n" + "=" * 70 + "\n")
-                    self.append_log("🎉 全 process 完了 — 入稿準備 OK\n")
+                    if _left:
+                        self.append_log(
+                            f"⚠️ 出品できていない行が {len(_left)}件 あります — 完了していません\n")
+                        self.append_log(f"   {', '.join(_left[:20])}\n")
+                        self.append_log("   原因を潰してから、この分だけ出し直してください\n")
+                    else:
+                        self.append_log("🎉 全 process 完了 — 入稿準備 OK\n")
                     if _latest_csv:
                         self.append_log(f"   出力 CSV: {_latest_csv}\n")
                     from datetime import datetime as _dt

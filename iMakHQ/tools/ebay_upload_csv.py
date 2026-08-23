@@ -205,7 +205,42 @@ def parse_ack(resp):
             " / ".join(m.strip()[:160] for m in msgs[:3]))
 
 
-def build_result(csv_path, write, ok, ng, listed, failed, stopped_early=False):
+# eBay 側の一時的な不調。内容の不備ではないので、同じ行をそのまま出し直せば通る。
+# 2026-08-23: 9件中3件目で "System error. Unable to process your request." が返り、
+# そこで止まって **残り7件が未出品のまま** 走行が「完了」と表示された。同じ行を
+# 一切変えずに出し直したら通った (ItemID 820035999681)。だから待って出し直す。
+_TRANSIENT_PAT = re.compile(
+    r"system error|unable to process your request|please try again|internal error"
+    r"|service unavailable|try again later", re.I)
+
+
+def is_transient(ack, err):
+    """eBay の一時的な不調か (= 同じ内容で出し直す価値があるか)。純関数。"""
+    if ack in ("Success", "Warning"):
+        return False
+    return bool(_TRANSIENT_PAT.search(err or ""))
+
+
+def send_with_retry(post_fn, call, inner, tok, site, *, tries=3, sleep_fn=None,
+                    wait_sec=20, log=print):
+    """1件送る。一時的な不調なら **同じ走行の中で** 間を空けて出し直す。
+
+    次の走行に送らない (待つ間に売り切れる/在庫が動く)。戻りは parse_ack と同じ3つ組。
+    """
+    import time
+    sleep_fn = sleep_fn or time.sleep
+    ack = iid = err = ""
+    for n in range(1, max(1, tries) + 1):
+        ack, iid, err = parse_ack(post_fn(call, inner, tok, site=site))
+        if not is_transient(ack, err) or n == tries:
+            return ack, iid, err
+        log(f"      ⏳ eBay の一時エラー ({err[:60]}) → {wait_sec}秒あけて {n + 1}回目")
+        sleep_fn(wait_sec)
+    return ack, iid, err
+
+
+def build_result(csv_path, write, ok, ng, listed, failed, stopped_early=False,
+                 unlisted=()):
     """出品結果 (純関数・test 可)。`control_panel.build_upload_mail` が読む形。"""
     return {
         "csv": os.path.basename(csv_path or ""),
@@ -215,6 +250,9 @@ def build_result(csv_path, write, ok, ng, listed, failed, stopped_early=False):
         "stopped_early": bool(stopped_early),
         "listed": [{"label": l, "item_id": i} for l, i in listed],
         "failed": [{"label": l, "error": e} for l, e in failed],
+        # 出さずに終わった行。**締めの表示がこれを見て「完了」と言うか決める**
+        # (2026-08-23: 9件中2件しか出ていない走行が「🎉 完了」と出ていた)
+        "unlisted": [str(x) for x in (unlisted or [])],
     }
 
 
@@ -280,8 +318,7 @@ def main():
             continue
         inner = ("<ErrorLanguage>en_US</ErrorLanguage><WarningLevel>High</WarningLevel>"
                  + build_item_xml(row, schedule_time_of(row) if a.schedule else ""))
-        resp = fx.post(call, inner, tok, site=SITE_US)
-        ack, iid, err = parse_ack(resp)
+        ack, iid, err = send_with_retry(fx.post, call, inner, tok, SITE_US)
         if ack in ("Success", "Warning"):
             ok += 1
             mark = f" → ItemID {iid}" if iid and a.write else ""
@@ -300,9 +337,20 @@ def main():
                 break
 
     print(f"\n  結果: OK {ok} / NG {ng}")
+    # ★出さずに終わった行を **必ず名前で出す**。件数だけだと「全部出た」と読める。
+    #   2026-08-23: 3件目で止まって残り7件が未出品なのに、走行の締めは
+    #   「🎉 全 process 完了 / 🟢 入稿OK 9件」で成功したように見えた。
+    left = []
+    if a.write:
+        done = {lb for lb, _ in listed}
+        left = [(r.get("CustomLabel") or "").strip() for r in rows
+                if (r.get("CustomLabel") or "").strip() not in done]
+        if left:
+            print(f"  ⚠️ 未出品のまま残った行: {len(left)}件 → {', '.join(left)}")
+            print("     (この分は出品されていません。原因を潰してから出し直してください)")
     # ★結果は **必ず** 残す (0件でも失敗でも)。ここを書かないとメールが飛ばない。
     if write_result(a.result_json, build_result(a.csv, a.write, ok, ng, listed,
-                                                failed, stopped_early)):
+                                                failed, stopped_early, unlisted=left)):
         print(f"  📝 結果を書きました: {a.result_json}")
     if a.write and listed:
         print("  ✏️ ItemID をシートに書き戻します")
