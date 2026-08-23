@@ -16,6 +16,7 @@
 | W | 公式の商品画像URL (`|` 区切り。 無ければ空) |
 | M | **仕入原価 = 商品価格 + 送料** (数値のみ) |
 | R | `カプセルトイ` |
+| S | **食玩** (お菓子付き) の行だけ `食玩`。 通常は空欄 |
 
 ★**N (仕入れ価格) と P (CTR) には書かない**。 本番 HIGH ではどちらも数式で、
 値を貼ると列全体が壊れる (N は ARRAYFORMULA の spill、 P は countif)。
@@ -41,6 +42,10 @@ COL_CURRENT_PRICE = 13        # M: 現在価格(円) - 監視くんが使う列�
 #   入れる中身は 公式の **商品ページ** を優先し、 無ければメーカー公式サイト。
 COL_OFFICIAL_PAGE = 9         # I: 公式URL (商品ページ優先。 推測URLは入れない)
 COL_OFFICIAL_IMAGES = 23      # W: 公式の商品画像URL (`|` 区切り)
+# S: 食玩の印 (2026-08-23 HQ 依頼 `2026-08-22_hq_gacha_foodtoy_column_response`)。
+# 出品くん `gacha_to_csv.py` の `FOOD_TOY_COL = 18` (0起点) が読む列。
+#   空欄 → 通常のカプセルトイ / `食玩` → 食玩 / それ以外 → 出品側で落とす (fail-closed)
+COL_FOOD_TOY = 19
 
 _ITEM_RE = re.compile(r"item\.rakuten\.co\.jp/([a-z0-9_-]+)/([a-z0-9_-]+)")
 
@@ -130,6 +135,9 @@ def build_row(item: dict, column_count: int = DEFAULT_COLUMN_COUNT) -> list:
                                     else "|".join(str(u) for u in imgs if u))  # W
     row[COL_CURRENT_PRICE - 1] = total          # M: 送料込みの総額 (数値のみ)
     row[COL_CATEGORY - 1] = CATEGORY            # R
+    # S: 食玩の印。 判定は収集側 (`rakuten_item.classify_food_toy`) で済ませてある。
+    # ここでタイトルから当て直さない (「チョコ」等はキャラ名にも出る = 必ず誤判定する)
+    row[COL_FOOD_TOY - 1] = str(item.get("food_toy") or "").strip()
     return row
 
 

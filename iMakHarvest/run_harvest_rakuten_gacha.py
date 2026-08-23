@@ -36,6 +36,10 @@ from gacha_maker import ALLOWED_MAKERS, is_allowed, resolve_maker  # noqa: E402
 from scrapers import rakuten_item, rakuten_search  # noqa: E402
 
 DUMP_DIR = ROOT / "debug"
+# 食玩の枠。 gashapon.jp に載らないので対象年齢が **全件 目視**になる。
+# 目視の枠を食うので少数から (窓口 回答 `2026-08-22_hq_gacha_foodtoy_column_response`:
+# 「枠は auc-toysanta 10件から」)。
+FOODTOY_QUOTA = 10
 SHOPS = ("auc-toysanta", "auc-yuyou", "mirakikaku", "jugem2020", "smltrading")
 # ★jugem2020 は使える (2026-08-21 再確認)。 8/20 に集めた32件が全部404だったのは
 #   **楽天の検索インデックスに 削除済み商品が残っていた**ため。 その後 index が
@@ -110,13 +114,27 @@ def detail_verdict(pre: dict) -> tuple[bool, str]:
     拾う条件は **両方**が要る (窓口 回答 `2026-08-19_gacha_implement_go_response`):
       ① パンくずが「ガチャガチャ」   ② タイトルに 全N種 / コンプ (収集の段で済み)
     その上で 即納だけ採る。 判定は共有の条件表 (`rakuten_delivery_rule.json`)。
+
+    2026-08-23 (窓口 回答 `2026-08-22_hq_gacha_foodtoy_column_response`):
+    ①を **auc-toysanta に限り**「ガチャガチャ または 食玩・おまけ」に広げた。
+    合わせて 商品説明の `■分類：` を見る。 `ガチャガチャ` / `食玩` 以外の値と、
+    **欄を書く店で欄が無い物**は採らない (fail-closed)。
     """
-    if not pre.get("is_gacha_category"):
+    if not pre.get("is_collectable_category"):
         return False, "not_gacha_category"
+    ok, _mark, why = rakuten_item.classify_food_toy(
+        pre.get("description") or "", pre.get("url") or "")
+    if not ok:
+        return False, why
     verdict = rakuten_delivery.judge_message(pre.get("delivery_message") or "")
     if verdict != rakuten_delivery.IMMEDIATE:
         return False, verdict
     return True, "ok"
+
+
+def foodtoy_over_quota(mark: str, kept: int, quota: int) -> bool:
+    """食玩の枠を超えたか (純関数). 通常のカプセルトイは枠に関係ない."""
+    return mark == rakuten_item.FOOD_TOY_MARK and kept >= quota
 
 
 def collect_candidates(args, claimed_urls: set) -> tuple[list[dict], dict]:
@@ -211,6 +229,9 @@ def main(argv=None) -> int:
                          " auc-yuyou はタイトルにメーカー名を書くので、"
                          " **タイトルでそのメーカーと分かる物だけ**を候補にする")
     ap.add_argument("--quota", type=int, default=0, help="--maker 時に集める上限件数")
+    ap.add_argument("--foodtoy-quota", type=int, default=FOODTOY_QUOTA,
+                    help="食玩 (お菓子付き) を1走行で採る上限。 対象年齢が公式で取れず"
+                         " **全件 目視**になるため 少数から (HQ 依頼 2026-08-22)")
     ap.add_argument("--sheet-every", type=int, default=5,
                     help="何件ごとにスプシへ書くか (こけた時に失う分を小さくする)")
     ap.add_argument("--headless", action="store_true")
@@ -285,7 +306,9 @@ def main(argv=None) -> int:
     failed: list[str] = []
     quota_left = {label: quota for label, _, quota in build_themes(args)}
     detail_rej = {"preorder": 0, "no_shipping_info": 0, "fetch_fail": 0, "quota_full": 0,
-                  "maker_ng": 0, "age_ng": 0}
+                  "maker_ng": 0, "age_ng": 0, "class_ng": 0, "class_missing": 0,
+                  "foodtoy_quota_full": 0}
+    foodtoy_kept = 0
     def _flush(rows: list[dict]) -> bool:
         """書けたら True。 **書けなかったら False を返し、 呼出側は溜めたまま次に回す**。
 
@@ -338,6 +361,13 @@ def main(argv=None) -> int:
             if not ok:
                 detail_rej[why] = detail_rej.get(why, 0) + 1
                 continue
+            # S列に書く印。 判定はここ (収集側) で決めきる。 出品側はタイトルから当てない
+            _ok, food_toy, _why = rakuten_item.classify_food_toy(
+                pre.get("description") or "", pre.get("url") or "")
+            if foodtoy_over_quota(food_toy, foodtoy_kept, args.foodtoy_quota):
+                # 食玩は対象年齢が全件目視。 枠を超えた分は今回は採らない
+                detail_rej["foodtoy_quota_full"] += 1
+                continue
             if pre["postage_included"] and pre["price_jpy"]:
                 # 送料無料 = 表示価格が総額。 ブラウザは要らない
                 detail = dict(pre)
@@ -387,11 +417,16 @@ def main(argv=None) -> int:
                          ("price_jpy", "image_urls", "description", "shipping",
                           "shipping_fee", "total_jpy")})
             item["title"] = detail["title"] or c["title"]
+            item["food_toy"] = food_toy        # S列
             if not is_allowed(item["title"], item["description"]):
                 # 商品説明の「メーカー：」まで見て、対象メーカーでなければ採らない
                 detail_rej["maker_ng"] += 1
                 continue
-            if resolve_maker(item["title"], item["description"]) == "バンダイ":
+            if (resolve_maker(item["title"], item["description"]) == "バンダイ"
+                    and food_toy != rakuten_item.FOOD_TOY_MARK):
+                # ★食玩は gashapon.jp (カプセルトイのカタログ) に載らない。 商品名で引くと
+                #   **別商品の年齢を書いてしまう** ので引かない。 食玩の対象年齢は
+                #   全件 目視 (HQ 依頼 `2026-08-22_hq_gacha_foodtoy_column`)。
                 # バンダイだけ 対象年齢を公式で確認できる (JAN 直引き)。
                 # 15才未満と**分かった**物は入れない。読めなければ目視に回す
                 age = fetch_age(detail.get("jan") or "")
@@ -406,6 +441,8 @@ def main(argv=None) -> int:
                     item["description"] = f"{item['description']} 対象年齢: {age}才以上".strip()
             kept.append(item)
             pending.append(item)
+            if food_toy == rakuten_item.FOOD_TOY_MARK:
+                foodtoy_kept += 1
             quota_left[c["theme"]] -= 1
             _log(f"  即納 {len(kept)}件目 [{c['theme']}] ¥{item['total_jpy']}"
                  f"(本体{item['price_jpy']}+送料{item['shipping_fee']}) "

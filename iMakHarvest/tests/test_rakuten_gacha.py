@@ -492,3 +492,116 @@ def test_k_column_point_is_left_empty():
                      "title": "テスト 全5種セット", "price_jpy": "2820",
                      "shipping_fee": 0, "total_jpy": "2820"})
     assert row[11 - 1] == ""
+
+
+# --------------------------------------------------------------------------
+# 食玩 (お菓子付き) — 2026-08-23
+#   窓口 回答 `2026-08-22_hq_gacha_foodtoy_column_response` の3点:
+#     ① パンくずの許可を **auc-toysanta に限り**「ガチャガチャ または 食玩・おまけ」に
+#     ② S列に `■分類：` から `食玩` / 空欄。 それ以外と 欄が無い物は採らない
+#     ③ 枠は auc-toysanta 10件から
+#   実測 (2026-08-23 実サイト HTTP 取得):
+#     食玩 bs-5l8y0019a7-011 → パンくず 406810 食玩・おまけ / `■分類：食玩`
+#     ガチャ g-5l90001975-007 → 553785 ガチャガチャ / `■分類：ガチャガチャ`
+#     BOX  b-5l660018zm-009  → 112203 フィギュア     / `■分類：BOXフィギュア`
+# --------------------------------------------------------------------------
+_TOYSANTA = "https://item.rakuten.co.jp/auc-toysanta/bs-1/"
+_YUYOU = "https://item.rakuten.co.jp/auc-yuyou/x1/"
+
+
+def test_foodtoy_breadcrumb_is_recognised():
+    from scrapers.rakuten_item import is_foodtoy_category, is_gacha_category
+    html = _page("1〜2営業日内に発送", "406810", "食玩・おまけ")
+    assert is_foodtoy_category(html) is True
+    assert is_gacha_category(html) is False        # ガチャガチャ判定は据え置き
+
+
+@pytest.mark.parametrize("category,name,url,ok", [
+    # ガチャガチャは全店
+    ("553785", "ガチャガチャ", _TOYSANTA, True),
+    ("553785", "ガチャガチャ", _YUYOU, True),
+    # 食玩・おまけ は auc-toysanta だけ
+    ("406810", "食玩・おまけ", _TOYSANTA, True),
+    ("406810", "食玩・おまけ", _YUYOU, False),
+    # どちらでもない区分は どの店でも採らない
+    ("112203", "フィギュア", _TOYSANTA, False),
+])
+def test_foodtoy_breadcrumb_is_allowed_only_for_toysanta(category, name, url, ok):
+    from scrapers.rakuten_item import is_collectable_category
+    assert is_collectable_category(_page("1〜2営業日内に発送", category, name), url) is ok
+
+
+def test_collectable_category_is_false_when_breadcrumb_missing():
+    """読めなければ通さない (fail-closed)."""
+    from scrapers.rakuten_item import is_collectable_category
+    assert is_collectable_category("", _TOYSANTA) is False
+
+
+@pytest.mark.parametrize("desc,url,ok,mark,why", [
+    ("■分類：食玩 ■メーカー：バンダイ", _TOYSANTA, True, "食玩", "ok"),
+    ("■分類：ガチャガチャ ■メーカー：バンダイ", _TOYSANTA, True, "", "ok"),
+    # それ以外の値は採らない
+    ("■分類：BOXフィギュア", _TOYSANTA, False, "", "class_ng"),
+    # 欄を書く店で 欄が無ければ採らない
+    ("メーカー：バンダイ", _TOYSANTA, False, "", "class_missing"),
+    # 欄そのものが無い店は 今までどおり (S列は空欄)
+    ("メーカー：バンダイ", _YUYOU, True, "", "ok"),
+])
+def test_classify_food_toy(desc, url, ok, mark, why):
+    from scrapers.rakuten_item import classify_food_toy
+    assert classify_food_toy(desc, url) == (ok, mark, why)
+
+
+def test_food_toy_is_never_guessed_from_title():
+    """タイトルの「チョコ」等では 食玩にしない (キャラ名にも出るので必ず誤判定する)."""
+    from scrapers.rakuten_item import classify_food_toy
+    ok, mark, _why = classify_food_toy(
+        "■分類：ガチャガチャ チョコレートマスコット 全5種セット", _TOYSANTA)
+    assert (ok, mark) == (True, "")
+
+
+def test_parse_detail_html_exposes_food_toy_gate():
+    from scrapers.rakuten_item import parse_detail_html
+    d = parse_detail_html(
+        _page("1〜2営業日内に発送", "406810", "食玩・おまけ")
+        + '<td class="item_desc">■分類：食玩 ■メーカー：バンダイ</td>', _TOYSANTA)
+    assert d["is_collectable_category"] is True
+    assert d["is_foodtoy_category"] is True
+    assert d["item_class"] == "食玩"
+
+
+@pytest.mark.parametrize("category,name,desc,url,ok,why", [
+    ("406810", "食玩・おまけ", "■分類：食玩", _TOYSANTA, True, "ok"),
+    ("406810", "食玩・おまけ", "■分類：食玩", _YUYOU, False, "not_gacha_category"),
+    ("553785", "ガチャガチャ", "■分類：BOXフィギュア", _TOYSANTA, False, "class_ng"),
+    ("553785", "ガチャガチャ", "メーカー：バンダイ", _TOYSANTA, False, "class_missing"),
+    ("553785", "ガチャガチャ", "メーカー：バンダイ", _YUYOU, True, "ok"),
+])
+def test_detail_verdict_covers_food_toy(category, name, desc, url, ok, why):
+    from run_harvest_rakuten_gacha import detail_verdict
+    from scrapers.rakuten_item import parse_detail_html
+    pre = parse_detail_html(
+        _page("1〜2営業日内に発送", category, name)
+        + f'<td class="item_desc">{desc}</td>', url)
+    assert detail_verdict(pre) == (ok, why)
+
+
+def test_build_row_writes_s_column():
+    """S列 = 出品くん `gacha_to_csv.py` の FOOD_TOY_COL(18, 0起点) が読む列."""
+    from sheet_writer_rakuten import COL_FOOD_TOY, build_row
+    assert COL_FOOD_TOY == 19
+    base = {"url": _TOYSANTA, "title": "テスト 全5種セット", "price_jpy": "2820",
+            "shipping_fee": 0, "total_jpy": "2820"}
+    assert build_row({**base, "food_toy": "食玩"})[COL_FOOD_TOY - 1] == "食玩"
+    assert build_row({**base, "food_toy": ""})[COL_FOOD_TOY - 1] == ""
+    assert build_row(base)[COL_FOOD_TOY - 1] == ""     # 印が無ければ空欄 = 通常
+
+
+def test_food_toy_quota_defaults_to_ten():
+    """食玩は対象年齢が全件目視。 枠は 10件から (窓口 回答 ③)."""
+    from run_harvest_rakuten_gacha import FOODTOY_QUOTA, foodtoy_over_quota
+    assert FOODTOY_QUOTA == 10
+    assert foodtoy_over_quota("食玩", 9, 10) is False
+    assert foodtoy_over_quota("食玩", 10, 10) is True
+    # 通常のカプセルトイは 食玩の枠に食われない
+    assert foodtoy_over_quota("", 999, 10) is False

@@ -186,7 +186,9 @@ def fetch_detail(driver, url: str, wait_sec: int = DETAIL_WAIT_SEC) -> dict | No
                            else "no_shipping_info"),
            "delivery_message": msg,
            "breadcrumb": [n for _c, n in parse_breadcrumb(html)],
-           "is_gacha_category": is_gacha_category(html)}
+           "is_gacha_category": is_gacha_category(html),
+           "is_foodtoy_category": is_foodtoy_category(html),
+           "is_collectable_category": is_collectable_category(html, url)}
     desc = extract_description(html)
     jan = extract_jan(html)
     if jan:
@@ -229,6 +231,79 @@ def is_gacha_category(html: str) -> bool:
                for cid, name in parse_breadcrumb(html))
 
 
+# 食玩・おまけ (id 406810)。 **auc-toysanta だけ** ここも通す
+# (窓口 回答 2026-08-22 `hq_gacha_foodtoy_column_response`)。
+# ★このパンくずは「食玩かどうかの印にはならない」(窓口も了承済)。 菓子と無関係の
+#   チャームが同じ区分に入る。 食玩かどうかは 商品説明の `■分類：` で決める。
+FOODTOY_CATEGORY_ID = "406810"
+FOODTOY_CATEGORY_NAME = "食玩・おまけ"
+FOODTOY_SHOPS = ("auc-toysanta",)
+
+_SHOP_RE = re.compile(r"item\.rakuten\.co\.jp/([a-z0-9_-]+)/", re.IGNORECASE)
+
+
+def shop_of_url(url: str) -> str:
+    """楽天の商品URLから 店ID を返す (取れなければ空)."""
+    m = _SHOP_RE.search(url or "")
+    return m.group(1) if m else ""
+
+
+def is_foodtoy_category(html: str) -> bool:
+    """パンくずが「食玩・おまけ」か。 **読めなければ False** (fail-closed)."""
+    return any(cid == FOODTOY_CATEGORY_ID or name == FOODTOY_CATEGORY_NAME
+               for cid, name in parse_breadcrumb(html))
+
+
+def is_collectable_category(html: str, url: str = "") -> bool:
+    """パンくずで拾ってよい商品か。
+
+    「ガチャガチャ」は全店。 「食玩・おまけ」は `FOODTOY_SHOPS` の店だけ。
+    どちらでもない (フィギュア等) / 読めない → False (fail-closed)。
+    """
+    if is_gacha_category(html):
+        return True
+    return (shop_of_url(url) in FOODTOY_SHOPS) and is_foodtoy_category(html)
+
+
+# ---------------------------------------------------------------------------
+# 食玩かどうか = 商品説明の `■分類：` (2026-08-23。 窓口 回答 `..._foodtoy_column_response`)
+# ---------------------------------------------------------------------------
+# 中間スプシ S列 に書く値。 出品くん (`gacha_to_csv.py` FOOD_TOY_COL=18) が読む:
+#   空欄 → 通常のカプセルトイ / `食玩` → 食玩 / それ以外 → 出さない (fail-closed)
+FOOD_TOY_MARK = "食玩"
+# `■分類：` の値 → S列に書く値。 **ここに無い値の行は採らない**
+CLASS_TO_COLUMN = {"ガチャガチャ": "", "食玩": FOOD_TOY_MARK}
+# `■分類：` を必ず書いている店。 この店で欄が無い行は採らない (fail-closed)。
+# ★他店は欄そのものが無い (実測 2026-08-23 の debug dump: auc-toysanta 178/178件が
+#   欄あり、 auc-yuyou/mirakikaku/jugem2020/smltrading/kidsroom は 641/641件が欄なし)。
+#   よって「欄が無い = 採らない」を全店に効かせると 他4店が全滅する。 欄を書く店にだけ効かせる。
+CLASS_REQUIRED_SHOPS = ("auc-toysanta",)
+
+_CLASS_RE = re.compile(r"■\s*分類\s*[：:]\s*(\S+)")
+
+
+def parse_item_class(description: str) -> str:
+    """商品説明の `■分類：` の値を返す (無ければ空)."""
+    m = _CLASS_RE.search(description or "")
+    return m.group(1) if m else ""
+
+
+def classify_food_toy(description: str, url: str = "") -> tuple[bool, str, str]:
+    """(採るか, S列に書く値, 理由) を返す (純関数).
+
+    `■分類：ガチャガチャ` → 空欄 / `■分類：食玩` → `食玩` /
+    それ以外の値 → 採らない / 欄が無い → `CLASS_REQUIRED_SHOPS` の店なら採らない。
+    """
+    raw = parse_item_class(description)
+    if not raw:
+        if shop_of_url(url) in CLASS_REQUIRED_SHOPS:
+            return False, "", "class_missing"
+        return True, "", "ok"
+    if raw not in CLASS_TO_COLUMN:
+        return False, "", "class_ng"
+    return True, CLASS_TO_COLUMN[raw], "ok"
+
+
 _DELIVERY_MSG_RE = re.compile(r'"deliveryMessage"\s*:\s*"([^"]*)"')
 _POSTAGE_INC_RE = re.compile(r'"shipping":\{"postageIncluded":(true|false)')
 _PRICE_RE = re.compile(r'itemprop="price"[^>]*content="([0-9]+)"')
@@ -239,7 +314,8 @@ def parse_detail_html(html: str, url: str) -> dict:
     """商品ページの HTML から 判定に要る物を取り出す (純関数).
 
     Returns: {delivery_message, postage_included, price_jpy, title,
-              image_urls, description, jan, breadcrumb, is_gacha_category}
+              image_urls, description, jan, breadcrumb, is_gacha_category,
+              is_foodtoy_category, is_collectable_category, item_class}
     """
     m = _DELIVERY_MSG_RE.search(html or "")
     inc = _POSTAGE_INC_RE.search(html or "")
@@ -260,4 +336,7 @@ def parse_detail_html(html: str, url: str) -> dict:
         "jan": jan,
         "breadcrumb": [name for _cid, name in parse_breadcrumb(html)],
         "is_gacha_category": is_gacha_category(html),
+        "is_foodtoy_category": is_foodtoy_category(html),
+        "is_collectable_category": is_collectable_category(html, url),
+        "item_class": parse_item_class(desc),
     }
