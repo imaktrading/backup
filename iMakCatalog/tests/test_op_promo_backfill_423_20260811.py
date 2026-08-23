@@ -79,13 +79,22 @@ class TestYamlContainsPromoBatch(unittest.TestCase):
     """段1 検収: one_piece.yaml の set: セクションに 118 件の新規追加."""
 
     def test_yaml_has_133_set_entries(self):
+        """8/11 の 133件 (旧15 + 新118) が **減っていない** ことを見る.
+
+        ★2026-08-23: 完全一致 (== 133) から下限 (>= 133) に変えた。
+          この検収の意図は「118件の追加が入ったか」であって
+          「二度と1行も足すな」ではない。完全一致だと正当な追加
+          (『ONE PIECE CHOPPER’s 1』付録 = EB02-003_CH01) のたびに落ちて、
+          テストを直すためだけの commit が増える。
+          消えたら落ちる (= 検収の目的) 性質は下限でも保たれる。
+        """
         import yaml
         yaml_path = _REPO / "ebay_filter_map" / "one_piece.yaml"
         with yaml_path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        self.assertEqual(
+        self.assertGreaterEqual(
             len(data["set"]), 133,
-            f"one_piece.yaml set: entries = {len(data['set'])} (期待 133 = 旧15 + 新118)")
+            f"one_piece.yaml set: entries = {len(data['set'])} (8/11 検収の 133 を下回った)")
 
     def test_key_promo_sources_present(self):
         """依頼書 Q1 で名指しされたキー例が yaml と DB に登録されている."""

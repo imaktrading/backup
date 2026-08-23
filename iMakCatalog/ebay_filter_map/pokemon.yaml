@@ -382,8 +382,13 @@ set_code:
     note: REVIEW eBay 値
     year: 2023
   - source: SV2a
-    ebay: Pokemon 151
-    note: 拡張パック「ポケモンカード151」 — REVIEW eBay 値
+    ebay: "Sv2a: Pokemon Card 151"
+    note: >-
+      強化拡張パック「ポケモンカード151（イチゴーイチ）」。2026-08-23 に eBay master
+      (Pokémon TCG 537値) を突合し verbatim 一致を確認。旧値 'Pokemon 151' は master に
+      無く (REVIEW のまま残っていた)、derive だけが古い値を返して stored とズレていた。
+      ★英語版 MEW の 'Sv: Scarlet & Violet 151' は別セット。当てない。
+      依頼 requests/2026-08-19_set_name_151_form_response.md
     year: 2023
   - source: SV3
     ebay: "Sv3: Ruler of the Black Flame"

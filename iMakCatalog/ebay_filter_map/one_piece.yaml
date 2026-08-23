@@ -341,6 +341,13 @@ set:
   - source: "『ONE PIECE学園 10巻』付録"
     ebay: Promo Cards
     note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "『ONE PIECE CHOPPER’s 1』付録"
+    ebay: Promo Cards
+    note: >-
+      EB02-003_CH01 (集英社『ONE PIECE CHOPPER’s 1』同梱カード / NOT FOR SALE).
+      2026-08-23 に集英社 (isbn 978-4-08-884100-7) を実取得し、書名の
+      apostrophe が U+2019 '’' であることを確認して公式表記どおりにした。
+      依頼 requests/2026-08-19_auto_catalog_add_one_piece_tcg_response.md
   - source: "フラッグシップバトル2026 1月 ベスト8記念品"
     ebay: Promo Cards
     note: promo/event (1 rows) - added 2026-08-11 op03_001_p2 batch

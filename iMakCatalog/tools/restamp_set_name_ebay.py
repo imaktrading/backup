@@ -61,6 +61,21 @@ def _load_ebay_ok():
 SOURCE = "restamp_from_filter_map_20260821"
 
 
+def _abc_state(category: str, value) -> str:
+    """契約 v1.2 §1-3 の 3 状態を返す (窓口 2026-08-21 の a/b/c と同じ)。
+
+    (a) canonical … eBay master (Game 別) に在る値。code 形
+    (b) free_text … master に無い。公式のセット名を自由文字列で維持
+    (c) empty     … セット自体が不明 → 空 (derive が None = fail-closed)
+
+    ★格下げ禁止・only-empty で触らなかった行も、行き先はこの3状態で数える。
+      窓口が「a/b/c の内訳を出せ」と言っているのはこの分類 (2026-08-19_set_name_151_form_response.md)。
+    """
+    if not value:
+        return "c"
+    return "a" if value in _EBAY_OK.get(category, set()) else "b"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -81,10 +96,19 @@ def main():
 
     _load_ebay_ok()
     pairs, updates, skipped_none, kept = Counter(), [], 0, 0
+    abc_now, abc_after = Counter(), Counter()   # 契約 v1.2 §1-3 の 3 状態 (窓口が要求した内訳)
     for r in rows:
         s = json.loads(r["specs"] or "{}")
         stored = s.get("set_name_ebay") or ""
         derived = api.derive_set_name_ebay(r["category"], r["set_name_official"], r["product_id"])
+        abc_now[_abc_state(r["category"], stored)] += 1
+        # 既定の行き先は「触らない」= stored のまま。下で更新対象になった行だけ derived に替える。
+        _final = stored
+        if derived is not None and derived != stored:
+            _demote = bool(stored) and stored in _EBAY_OK.get(r["category"], set())
+            if not (_demote or (args.only_empty and stored)):
+                _final = derived
+        abc_after[_abc_state(r["category"], _final)] += 1
         if derived is None:
             skipped_none += 1
             continue
@@ -120,6 +144,16 @@ def main():
         print("%-40s %-42s %d" % (st[:39], de[:41], n))
     if len(pairs) > 40:
         print("... 他 %d 組" % (len(pairs) - 40))
+
+    # 契約 v1.2 §1-3 の 3 状態。窓口 2026-08-19_set_name_151_form_response.md が
+    # 「a/b/c の内訳を出して一度止めろ」と指定した面。
+    total = sum(abc_now.values())
+    print("\n--- a/b/c 内訳 (%d 行) ---" % total)
+    print("%-38s %8s %8s" % ("", "今", "引き直し後"))
+    for k, label in (("a", "(a) canonical  eBay master に在る"),
+                     ("b", "(b) 自由文字列 master に無い"),
+                     ("c", "(c) 空         セット不明")):
+        print("%-38s %8d %8d" % (label, abc_now[k], abc_after[k]))
 
     if args.commit and updates:
         db.executemany("UPDATE products SET specs=?, updated_at=? WHERE id=?", updates)
