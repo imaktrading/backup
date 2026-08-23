@@ -93,8 +93,23 @@ def ended_ids_from_results(paths):
     return out
 
 
+def is_result_file(path):
+    """eBay の **アップ結果** か (こちらが作った End CSV と区別する)。純関数寄り, test可。
+
+    ★2026-08-24: 自分で作った `cull_end_YYYYMMDD.csv` まで拾っていた。
+      中身が違う (Status 列が無い) ので実害は無いが、件数が合わず紛らわしい。
+      結果ファイルには **Status 列がある** ので、そこで見分ける。
+    """
+    try:
+        with io.open(path, encoding="utf-8-sig") as f:
+            head = f.readline()
+    except OSError:
+        return False
+    return "Status" in head.split(",")
+
+
 def find_result_files(days=2):
-    """直近の End 結果 CSV を探す (cull_end_ で始まるアップ結果)。"""
+    """直近の End 結果 CSV を探す (eBay のアップ結果だけ)。"""
     cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
     hits = []
     for d in RESULT_DIRS:
@@ -102,10 +117,12 @@ def find_result_files(days=2):
             continue
         for p in glob.glob(os.path.join(d, "cull_end_*.csv")):
             try:
-                if datetime.datetime.fromtimestamp(os.path.getmtime(p)) >= cutoff:
-                    hits.append(p)
+                if datetime.datetime.fromtimestamp(os.path.getmtime(p)) < cutoff:
+                    continue
             except OSError:
                 continue
+            if is_result_file(p):
+                hits.append(p)
     return sorted(set(hits))
 
 

@@ -78,3 +78,23 @@ def test_count_zero_when_no_cull():
 def test_existing_167_rows_count_as_first():
     """8/24 に書いた 167件 (番号なし) を書き直さずに使えること."""
     assert W.next_flag("CULL 2026-08-24", "2026-09-01") == "CULL 2 2026-09-01"
+
+
+
+def test_result_file_is_told_apart_from_our_own_csv(tmp_path):
+    """★こちらが作った End CSV を「アップ結果」と取り違えない (2026-08-24)。
+
+    どちらも cull_end_*.csv という名前になる。結果ファイルには Status 列がある。
+    """
+    ours = tmp_path / "cull_end_20260824.csv"
+    ours.write_text("*Action(SiteID=US|...),ItemID,EndCode" + chr(10)
+                    + "End,111,OtherListingError" + chr(10), encoding="utf-8")
+    result = tmp_path / "cull_end_20260824-Aug-2026.csv"
+    result.write_text("Line Number,Action,Status,ErrorCode,ItemID" + chr(10)
+                      + "2,End,Success,,111" + chr(10), encoding="utf-8")
+    assert W.is_result_file(str(result)) is True
+    assert W.is_result_file(str(ours)) is False
+
+
+def test_missing_file_is_not_a_result():
+    assert W.is_result_file("C:/no/such.csv") is False

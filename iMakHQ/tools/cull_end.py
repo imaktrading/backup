@@ -211,8 +211,44 @@ def _fetch_active_live():
     return out
 
 
+def writeback_previous():
+    """**前回アップした分**のスプシ後始末を先に済ませる (2026-08-24)。
+
+    End しても `cull_end` はスプシを触らないので、B列に死んだ itemID が残る。
+    このシステムは **B列が埋まっている = 出品済み** として動くため、仕入元が復活しても
+    二度と出品されない (実測: 8/23 の 361件 のうち 167件 が残っていた)。
+
+    ★別ボタンを増やさず、**取下げボタンを押すたびに前回分を掃除する**形にした。
+      押す順番が「掃除 → 次の CSV」で固定されるので、やり忘れが起きない。
+      失敗しても本処理は止めない (掃除は次回また拾える。CSV が出ないほうが困る)。
+    """
+    try:
+        import cull_writeback as CW
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 後始末 skip (読込失敗): {type(e).__name__}: {e}")
+        return
+    files = CW.find_result_files()
+    if not files:
+        print("  (前回の End 結果ファイルは見つかりませんでした → 後始末なし)")
+        return
+    print(f"  前回分の後始末: End 結果 {len(files)}ファイルを反映します", flush=True)
+    try:
+        sys.argv = [sys.argv[0], "--commit"]
+        CW.main()
+    except SystemExit:
+        pass
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 後始末が最後まで行きませんでした (次回また拾います): "
+              f"{type(e).__name__}: {e}")
+
+
 def main():
-    live = "--live" in sys.argv
+    argv = list(sys.argv)
+    live = "--live" in argv
+    if "--no-writeback" not in argv:
+        writeback_previous()
+        sys.argv = argv                       # writeback で書き換えた分を戻す
+        print()
     if live:
         print("出品中の一覧を eBay から直接取得します (funnel CSV は使いません)...", flush=True)
         rows = rows_from_live(_fetch_active_live)
