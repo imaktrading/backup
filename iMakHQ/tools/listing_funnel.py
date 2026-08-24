@@ -165,6 +165,44 @@ def _report_date_or_none(path):
     return None
 
 
+def _title_key(t):
+    """ミラーと親を突き合わせるキー。eBaymag はタイトルをそのまま複製する。純関数。"""
+    return re.sub(r"[^a-z0-9]+", "", (t or "").lower())
+
+
+def absorb_mirror_demand(rows):
+    """ミラー (UK/AU/CA) の需要を **親の US 行に足してから** ミラーを捨てる (2026-08-25)。
+
+    ★なぜ: ミラーは触れないので行動対象から外すのは正しい。しかし
+      **そこで付いた watcher と売上は本物の需要**で、捨てると US で誰も見ていない商品が
+      「需要ゼロ = 取り下げ候補 (CULL)」に落ちる。
+      実測 2026-08-23: ミラー 2,977件 のうち需要シグナル 67件、そのうち
+      **39件は US 親が 0** だった (= US だけ見ると畳んでしまう)。
+
+    足すのは sold_qty / sales90 / watch の3つ。露出 (impr/CTR) は LQR が US しか
+    出さないので足せない = 触らない。
+    戻り: (US だけの rows, 吸い上げた件数, 需要が付いた US 行の数)。純関数。
+    """
+    us, mirror = [], []
+    for r in rows:
+        (us if (r.get("site") or "").upper() == "US" else mirror).append(r)
+    by_title = {}
+    for r in us:
+        by_title.setdefault(_title_key(r.get("title")), []).append(r)
+    gained = set()
+    for m in mirror:
+        parents = by_title.get(_title_key(m.get("title")))
+        if not parents:
+            continue                      # 親が見つからない = 足せない (作り話をしない)
+        p = parents[0]
+        for k in ("sold_qty", "sales90", "watch"):
+            add = _i(m.get(k))
+            if add:
+                p[k] = _i(p.get(k)) + add
+                gained.add(id(p))
+    return us, len(mirror), len(gained)
+
+
 def find_file(data_dir, pattern):
     """レポートを1本選ぶ。**日付フォルダの中も探す** (2026-08-25)。
 
@@ -679,13 +717,15 @@ def main():
     #   実測 2026-08-25: DEAD_SIMPLE 2,055件のうち **2,043件がミラー** で、
     #   CULL 1,518件のうち 867件、OUT_OF_STOCK 1,993件のうち 887件がミラーだった。
     from collections import Counter
-    site_all = Counter(r["site"] for r in rows)
-    _mirror = [r for r in rows if (r.get("site") or "").upper() != "US"]
-    rows = [r for r in rows if (r.get("site") or "").upper() == "US"]
-    if _mirror:
-        print(f"  🪞 eBaymag のミラーを除外: {len(_mirror)}件 "
-              f"({dict(Counter(r['site'] for r in _mirror))}) "
+    _mirror_sites = dict(Counter(r["site"] for r in rows
+                                 if (r.get("site") or "").upper() != "US"))
+    rows, _n_mirror, _n_gained = absorb_mirror_demand(rows)
+    if _n_mirror:
+        print(f"  🪞 eBaymag のミラー {_n_mirror}件 ({_mirror_sites}) を除外 "
               f"— 親の US を操作すれば付いてくるので、こちらからは触らない")
+        print(f"     ただし **需要 (watcher/売上) は親の US に足してから** 捨てた: "
+              f"{_n_gained}件の US 行に上乗せ (海外だけで売れている物を "
+              f"『需要ゼロ』にしないため)")
     site_c = Counter(r["site"] for r in rows)
     oos = sum(1 for r in rows if r["qty"] == 0)
     in_stock = [r for r in rows if r["qty"] != 0]
@@ -694,10 +734,11 @@ def main():
     summary_lines = [
         f"対象レポート: {os.path.basename(f_active)} 他",
         f"分析対象は **US のみ** {len(rows)}件 "
-        f"(eBaymag のミラー {len(_mirror)}件 を除外: "
-        f"{dict((k, v) for k, v in site_all.items() if k != 'US')})",
+        f"(eBaymag のミラー {_n_mirror}件 を除外: {_mirror_sites})",
         "  ※ミラーは親の US 出品から自動で作られるもので、こちらから取り下げも修正もできない。"
         "混ぜると手を出せない行がバケツを埋めて件数が意味を持たなくなる",
+        f"  ※ただし **ミラーの需要 (watcher/売上) は親の US に足してから**捨てている "
+        f"({_n_gained}件に上乗せ)。海外だけで売れている物を『需要ゼロ』にしないため",
         f"在庫切れqty0={oos}件({oos*100//n}%)  在庫あり={len(in_stock)}件  LQR深掘り対象(US)={lqr_n}件",
     ]
     print(f"\n出品物フルファネル分析 (Seller Hub レポート版・API不使用)")

@@ -35,12 +35,12 @@ _SRC = open(os.path.join(_TOOLS, "listing_funnel.py"), encoding="utf-8").read()
 
 def test_mirrors_are_dropped_before_classification():
     """バケツに入る前に落とす (後から各タブで絞ると必ず漏れる)。"""
-    assert 'rows = [r for r in rows if (r.get("site") or "").upper() == "US"]' in _SRC
+    assert "rows, _n_mirror, _n_gained = absorb_mirror_demand(rows)" in _SRC
 
 
 def test_how_many_were_excluded_is_printed():
     """黙って減らさない。何件をなぜ外したか出す。"""
-    assert "eBaymag のミラーを除外" in _SRC
+    assert "eBaymag のミラー" in _SRC and "を除外" in _SRC
 
 
 def test_summary_says_us_only():
@@ -51,7 +51,7 @@ def test_summary_says_us_only():
 
 def test_site_breakdown_is_kept_for_the_summary():
     """除外した内訳 (CA/UK/AU が何件か) は残す。消えたのか元々無いのか分かるように。"""
-    assert "site_all = Counter" in _SRC
+    assert "_mirror_sites = dict(Counter(" in _SRC
 
 
 # ── 実データで確かめる ────────────────────────────────────────────
@@ -87,3 +87,64 @@ def test_dead_simple_is_no_longer_a_mirror_dump():
     assert all((r.get("site") or "").upper() == "US" for r in ds)
     # ミラーを混ぜていた頃は 2,000件超。US だけならごく少数のはず
     assert len(ds) < 200, f"DEAD_SIMPLE が {len(ds)}件 = まだミラーが混ざっている疑い"
+
+
+# ── ミラーの需要は捨てずに親へ足す (2026-08-25) ────────────────────
+# > 確かに US以外のニーズを無視しているね
+#
+# ミラーは触れないので行動対象から外すのは正しいが、そこで付いた watcher と売上は
+# 本物の需要。捨てると「US で誰も見ていない商品」が需要ゼロ = 取り下げ候補に落ちる。
+# 実測 2026-08-23: ミラー 2,977件 中 需要シグナル 67件、うち 39件は US 親が 0 だった。
+
+
+def _F():
+    import listing_funnel
+    return listing_funnel
+
+
+def test_watchers_and_sales_roll_up_to_the_parent():
+    F = _F()
+    rows = [{"site": "US", "title": "Card A", "sold_qty": 0, "watch": 0, "sales90": 0},
+            {"site": "UK", "title": "Card A", "sold_qty": 1, "watch": 5, "sales90": 0},
+            {"site": "AU", "title": "Card A", "sold_qty": 0, "watch": 2, "sales90": 3}]
+    us, n_mirror, n_gained = F.absorb_mirror_demand(rows)
+    assert len(us) == 1 and n_mirror == 2 and n_gained == 1
+    assert us[0]["sold_qty"] == 1 and us[0]["watch"] == 7 and us[0]["sales90"] == 3
+
+
+def test_mirror_without_a_parent_is_just_dropped():
+    """親が見つからないミラーの需要は **どこにも足さない** (作り話をしない)。"""
+    F = _F()
+    rows = [{"site": "US", "title": "Card A", "sold_qty": 0, "watch": 0, "sales90": 0},
+            {"site": "CA", "title": "Card X", "sold_qty": 0, "watch": 9, "sales90": 0}]
+    us, _n, gained = F.absorb_mirror_demand(rows)
+    assert us[0]["watch"] == 0 and gained == 0
+
+
+def test_no_demand_no_change():
+    """需要ゼロのミラーは何も足さない (件数だけ数える)。"""
+    F = _F()
+    rows = [{"site": "US", "title": "A", "sold_qty": 0, "watch": 0, "sales90": 0},
+            {"site": "UK", "title": "A", "sold_qty": 0, "watch": 0, "sales90": 0}]
+    us, n_mirror, gained = F.absorb_mirror_demand(rows)
+    assert n_mirror == 1 and gained == 0 and us[0]["watch"] == 0
+
+
+def test_exposure_is_not_rolled_up():
+    """露出 (impr/CTR) は LQR が US しか出さないので足さない (足すと嘘になる)。"""
+    F = _F()
+    import inspect
+    src = inspect.getsource(F.absorb_mirror_demand)
+    assert '("sold_qty", "sales90", "watch")' in src
+    assert "impr" not in src.split('"""')[2]      # 実装部に impr を触る行が無い
+
+
+def test_title_key_matches_mirror_to_parent():
+    F = _F()
+    assert F._title_key("PSA 10 One Piece — Card!") == F._title_key("psa10onepiececard")
+
+
+def test_funnel_reports_how_much_was_absorbed():
+    """黙って足さない。何件の US 行に上乗せしたか出す。"""
+    src = open(os.path.join(_TOOLS, "listing_funnel.py"), encoding="utf-8").read()
+    assert "件の US 行に上乗せ" in src
