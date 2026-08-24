@@ -112,7 +112,28 @@ _DEDUP_WHITELIST = {
 _INITIAL_RE = re.compile(r"^[A-Za-z]\.?$")
 
 
-def remove_duplicate_words(title):
+def _protected_span(parts, card_name):
+    """タイトル内で **カード名そのもの** が並んでいる範囲 (最後の出現) の index 集合。
+
+    カード名に同じ語が2回入るものがある (`Tony Tony Chopper` / `Dr. Doctor` 等)。
+    重複語除去はそれを「重複」と見なして削り、**別人の名前にしてしまう**。
+    2026-08-24 実害: `Tony Tony Chopper` → `Tony Chopper` のまま出品された
+    (ItemID 820041238874)。カタログの名前は写すだけの値なので、ここで削ってはいけない。
+
+    最後の出現を守るのは、セット名の中に同じ語が入る形 (`Great Detective Pikachu` +
+    `Detective Pikachu`) で、**カード名の側**を残すため。純関数。
+    """
+    name = [w.lower() for w in (card_name or "").split() if w]
+    if not name:
+        return set()
+    low = [w.lower() for w in parts]
+    for i in range(len(low) - len(name), -1, -1):          # 後ろから探す
+        if low[i:i + len(name)] == name:
+            return set(range(i, i + len(name)))
+    return set()
+
+
+def remove_duplicate_words(title, card_name=""):
     """タイトル内の **重複語の2回目以降を除去** (2026-06-21)。
 
     語が既出と完全一致 (大小無視) なら削除。ただし上記カード用語 whitelist は残す
@@ -125,9 +146,13 @@ def remove_duplicate_words(title):
     parts = title.split()
     seen = set()
     drop = [False] * len(parts)
+    keep = _protected_span(parts, card_name)     # カード名そのものは触らない
     for i, w in enumerate(parts):
         wl = w.lower()
         is_word = wl.isalpha() and len(wl) > 1   # 英字語のみ (番号/記号は常に残す)
+        if i in keep:
+            seen.add(wl)
+            continue
         if is_word and wl not in _DEDUP_WHITELIST and wl in seen:
             drop[i] = True                        # 重複語 (非whitelist) → 削除
             continue
@@ -260,7 +285,7 @@ def pad_title(title, language='', rarity='',
     return title, applied
 
 
-def fix_title(title, language, rarity, rescues):
+def fix_title(title, language, rarity, rescues, card_name=""):
     """1タイトルに対する全処理パイプライン.
 
     Returns:
@@ -276,7 +301,7 @@ def fix_title(title, language, rarity, rescues):
     log['pokemon_dedup'] = deduped
 
     # 汎用の重複語除去 (Japanese Japanese / Japan…Japan 等。カード用語は whitelist で残す)
-    title, word_deduped = remove_duplicate_words(title)
+    title, word_deduped = remove_duplicate_words(title, card_name=card_name)
     log['word_dedup'] = word_deduped
 
     # 日本語混入を pad の「前」に除去 (TitleAgent が JP名でパディングした分)。
@@ -320,6 +345,8 @@ def process_csv(csv_path, rescues, log_func=print):
 
     # item specifics 列 (C:*) = eBay 禁止文字サニタイズ対象。title と別軸で、
     # 全 C: 列 (C:Rarity='C★' 等) から ★ 等を除去 (ErrorCode 240 の入稿失敗を防ぐ)。
+    # カード名 = 重複語除去で削ってはいけない語 (Tony Tony Chopper 等)
+    name_idx = header.index('C:Card Name') if 'C:Card Name' in header else None
     spec_idxs = [j for j, h in enumerate(header) if h.startswith('C:')]
     # Description(HTML)内の Specs ブロックにも rarity 'C★' 等が反映される。240 の対象
     # (title/description) なので除去。ただし HTML なので空白は collapse しない。
@@ -334,6 +361,7 @@ def process_csv(csv_path, rescues, log_func=print):
             language=row[lang_idx] if lang_idx < len(row) else '',
             rarity=row[rarity_idx] if rarity_idx < len(row) else '',
             rescues=rescues,
+            card_name=(row[name_idx] if name_idx is not None and name_idx < len(row) else ''),
         )
 
         if log['rescue']:

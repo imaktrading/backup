@@ -94,3 +94,52 @@ def test_no_change_on_past_output():
                 changed += 1
     if n:                       # csv_output が空の環境では素通り
         assert changed == 0, f"{n}件中 {changed}件が変わった"
+
+
+# ── カード名そのものを壊さない (2026-08-24 夜 実害) ────────────────
+# `Tony Tony Chopper` は Tony が2回入るのが正式名。重複語除去が2つ目の Tony を消し、
+# `Tony Chopper` = **別の名前**のまま出品された (ItemID 820041238874 / 修正済)。
+# カタログの名前は写すだけの値なので、後処理で削ってはいけない。
+
+
+def test_doubled_word_in_the_card_name_survives():
+    got, _ = R("PSA 10 One Piece Japanese One Piece Chopper's 1 "
+               "#EB02-003 Tony Tony Chopper Rare", card_name="Tony Tony Chopper")
+    assert "Tony Tony Chopper" in got, got
+
+
+def test_set_name_dedup_still_happens_around_the_protected_name():
+    """名前を守っても、セット名側の重複は今までどおり消えること。"""
+    got, changed = R("PSA 10 One Piece Japanese One Piece Chopper's 1 "
+                     "#EB02-003 Tony Tony Chopper Rare", card_name="Tony Tony Chopper")
+    assert changed and got.count("One Piece") == 1
+
+
+def test_card_name_inside_the_set_name_is_not_stripped():
+    """セット名にカード名が入る形 (`Great Detective Pikachu` + `Detective Pikachu`)。
+
+    どちらかを消すと、セット名かカード名のどちらかが壊れる。両方残す。
+    """
+    got, changed = R("PSA 10 Pokemon Japanese Smp2: Great Detective Pikachu "
+                     "#014/024 Detective Pikachu", card_name="Detective Pikachu")
+    assert not changed and got.endswith("#014/024 Detective Pikachu")
+
+
+def test_protects_the_last_occurrence():
+    """守るのは **カード名の側** (後ろ)。前に出る同じ語はセット名の一部。"""
+    import post_title_fix as M
+    parts = "A Great Detective Pikachu X Detective Pikachu".split()
+    assert M._protected_span(parts, "Detective Pikachu") == {5, 6}
+
+
+def test_no_card_name_behaves_as_before():
+    """名前が渡らない時は従来どおり (呼び出し側が古くても壊れない)。"""
+    got, changed = R("PSA 10 One Piece Japanese Booster One Piece The Best "
+                     "#DON-PRB01-020 DON!! Card")
+    assert changed and got.count("One Piece") == 1
+
+
+def test_card_name_not_present_in_title_is_a_noop():
+    got, changed = R("PSA 10 Pokemon Japanese Set #001 Pikachu",
+                     card_name="Charizard ex")
+    assert not changed
