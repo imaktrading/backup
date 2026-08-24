@@ -672,7 +672,20 @@ def main():
         r["supply_url"] = supply.get(iid, "")     # relist で ItemID/title が変わっても不変の商品キー
         rows.append(r)
 
+    # ★2026-08-25 ユーザー指示: **US だけを分析対象にする**。
+    #   UK / AU / CA は eBaymag が US の親出品から作るミラーで、こちらから End も Revise も
+    #   できない (グローバル CLAUDE.md「eBaymag のミラー — 直接 触るな」)。
+    #   混ぜると、手を出せない行がバケツを埋めて件数が意味を持たなくなる。
+    #   実測 2026-08-25: DEAD_SIMPLE 2,055件のうち **2,043件がミラー** で、
+    #   CULL 1,518件のうち 867件、OUT_OF_STOCK 1,993件のうち 887件がミラーだった。
     from collections import Counter
+    site_all = Counter(r["site"] for r in rows)
+    _mirror = [r for r in rows if (r.get("site") or "").upper() != "US"]
+    rows = [r for r in rows if (r.get("site") or "").upper() == "US"]
+    if _mirror:
+        print(f"  🪞 eBaymag のミラーを除外: {len(_mirror)}件 "
+              f"({dict(Counter(r['site'] for r in _mirror))}) "
+              f"— 親の US を操作すれば付いてくるので、こちらからは触らない")
     site_c = Counter(r["site"] for r in rows)
     oos = sum(1 for r in rows if r["qty"] == 0)
     in_stock = [r for r in rows if r["qty"] != 0]
@@ -680,7 +693,11 @@ def main():
     n = max(len(rows), 1)
     summary_lines = [
         f"対象レポート: {os.path.basename(f_active)} 他",
-        f"listing={len(rows)}  サイト別={dict(site_c)}",
+        f"分析対象は **US のみ** {len(rows)}件 "
+        f"(eBaymag のミラー {len(_mirror)}件 を除外: "
+        f"{dict((k, v) for k, v in site_all.items() if k != 'US')})",
+        "  ※ミラーは親の US 出品から自動で作られるもので、こちらから取り下げも修正もできない。"
+        "混ぜると手を出せない行がバケツを埋めて件数が意味を持たなくなる",
         f"在庫切れqty0={oos}件({oos*100//n}%)  在庫あり={len(in_stock)}件  LQR深掘り対象(US)={lqr_n}件",
     ]
     print(f"\n出品物フルファネル分析 (Seller Hub レポート版・API不使用)")
