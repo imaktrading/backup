@@ -53,6 +53,16 @@ MIN_AGE = 14      # これ未満(日)は新規=時間不足の可能性 → 対�
 #   ガチャ等の新商材が増えるたびに書き足す運用にしないため。
 MIN_PRICE = 100.0
 
+# ★2026-08-24 ユーザー指示: **US の出品だけを対象にする**。
+#   UK / AU / CA は **eBaymag が US の親出品から作るミラー**で、こちらの持ち物ではない
+#   (`ApplicationData=ebaymag.com-...` / SKU も eBaymag の内部番号でシートに存在しない)。
+#   ミラーを直接落としても、親が生きていれば mag がまた作る = 意味がない。
+#   親 (US) を落とせばミラーは付いてくる。
+#   ★これは 8/24 まで抜けていた。実測 1,408件のうち **643件がミラー** だった
+#   (CA 246 / AU 241 / UK 156)。隣の RESTOCK は 063b626 で US 限定済みだったが、
+#   CULL には入っていなかった。
+TARGET_SITE = "US"
+
 # relist_from_funnel / seller_hub_relist と統一
 END_HEADER = ["*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)", "ItemID", "EndCode"]
 END_CODE = "OtherListingError"
@@ -116,16 +126,28 @@ def listed_this_month(row, today=None):
     return (d.year, d.month) == (today.year, today.month)
 
 
+def is_target_site(row, site=TARGET_SITE):
+    """落としてよい出品か (= US の親出品か)。純関数。
+
+    UK / AU / CA は eBaymag のミラーなので落とさない (TARGET_SITE の注記参照)。
+    site 欄が空の行は **落とさない** (fail-closed)。ミラーかどうか分からないものを
+    落とす方が高くつく。
+    """
+    return (row.get("site") or "").strip().upper() == site
+
+
 def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None,
-           done_ids=None):
-    """CULL ∩ age>=min_age を age降順・価格昇順で並べ、先頭 cap 件。
+           done_ids=None, site=TARGET_SITE):
+    """CULL ∩ US ∩ age>=min_age を age降順・価格昇順で並べ、先頭 cap 件。
 
     age 不明(0)は対象外 (fail-closed)。テスト可能なよう純関数化。
+    site=None で サイトの絞りを外す (件数の把握用。取り下げには使わない)。
     """
     cull = [r for r in rows if "CULL" in (r.get("flags") or "").split("|")]
     done = done_ids or set()
     eligible = [r for r in cull
-                if _i(r.get("age_days")) >= min_age and _f(r.get("price")) >= min_price
+                if (site is None or is_target_site(r, site))
+                and _i(r.get("age_days")) >= min_age and _f(r.get("price")) >= min_price
                 and r.get("item_id") not in done]
     # ★2026-08-24: **今月出品した分を先に**。当月の枠が戻るのはそこだけ
     #   (実測: 古い順だけで 361件 落として当月に戻ったのは 1.5%)。
@@ -217,14 +239,17 @@ def rows_from_live(fetch_active_fn):
       **ActiveList から全部取れる**ので、レポート無しで最新の対象を出せるようにする。
       eBay は 0 の要素を省くので、**QuantitySold / WatchCount が無い = 0** と読む。
 
-    fetch_active_fn: () -> [{item_id, avail, sold, watch, age_days, price, title}]
+    fetch_active_fn: () -> [{item_id, avail, sold, watch, age_days, price, title, site}]
     戻り: funnel CSV と同じ形の dict list (flags に CULL を立てる)。純関数寄り (test 可)。
+    ★site が取れない古い呼出のために既定 "US" を入れる (この経路は件数把握のみで、
+      取り下げには使わない。空にすると US 限定の絞りで常に0件になる)。
     """
     out = []
     for it in fetch_active_fn():
         if it["avail"] > 0 or it["sold"] > 0 or it["watch"] > 0:
             continue                      # 買える / 売れた / 見られている → CULL ではない
         out.append({"item_id": it["item_id"], "title": it.get("title", ""),
+                    "site": it.get("site") or TARGET_SITE,
                     "price": str(it.get("price", 0)), "age_days": str(it["age_days"]),
                     "flags": "CULL"})
     return out
@@ -270,6 +295,7 @@ def _fetch_active_live():
                         "watch": _i(g("WatchCount")),
                         "age_days": age,
                         "price": float(price.group(1)) if price else 0.0,
+                        "site": (g("Site") or TARGET_SITE).strip(),
                         "title": g("Title")})
     return out
 
@@ -362,10 +388,14 @@ def main():
 
     print(f"対象 funnel: {src}")
     print(f"CULL(在庫切れ&需要皆無) = {len(cull)}件")
+    _mirror = sum(1 for r in cull if not is_target_site(r))
+    if _mirror:
+        print(f"  ※ US 以外 (eBaymag のミラー) を除外 = {_mirror}件 "
+              f"(親の US を落とせば付いてくる)")
     if done_ids:
         print(f"  ※ 既に落とした分を除外 = {len(done_ids)}件 "
               f"(押すたびに次の{CAP}件が出ます)")
-    print(f"  うち age>={MIN_AGE}日 かつ ${MIN_PRICE:.0f}以上 = {len(eligible)}件")
+    print(f"  うち US かつ age>={MIN_AGE}日 かつ ${MIN_PRICE:.0f}以上 = {len(eligible)}件")
     print(f"  今回 End 対象 (CAP {CAP}/回, age降順) = {len(picked)}件")
     skipped_young = len(cull) - len(eligible)
     if skipped_young:

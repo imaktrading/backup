@@ -15,8 +15,8 @@ import datetime
 _OLD = datetime.date(2030, 1, 15)
 
 
-def _row(i, age=100, price=200.0):
-    return {"item_id": i, "flags": "CULL", "age_days": str(age), "price": str(price),
+def _row(i, age=100, price=200.0, site="US"):
+    return {"item_id": i, "flags": "CULL", "site": site, "age_days": str(age), "price": str(price),
             "title": "t"}
 
 

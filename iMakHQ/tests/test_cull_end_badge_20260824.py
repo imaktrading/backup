@@ -27,7 +27,7 @@ import cull_end as C  # noqa: E402
 
 def _funnel(tmp_path, rows):
     p = tmp_path / "funnel_20260824.csv"
-    cols = ["item_id", "title", "price", "age_days", "flags"]
+    cols = ["item_id", "title", "price", "age_days", "flags", "site"]
     lines = [",".join(cols)]
     for r in rows:
         lines.append(",".join(str(r.get(c, "")) for c in cols))
@@ -35,9 +35,9 @@ def _funnel(tmp_path, rows):
     return str(tmp_path)
 
 
-def _row(iid, age=60, price=150, flags="CULL"):
+def _row(iid, age=60, price=150, flags="CULL", site="US"):
     return {"item_id": iid, "title": f"t{iid}", "price": price,
-            "age_days": age, "flags": flags}
+            "age_days": age, "flags": flags, "site": site}
 
 
 def test_counts_what_the_button_will_actually_do(tmp_path, monkeypatch):
@@ -118,3 +118,42 @@ def test_panel_counts_and_paints():
 def test_blue_only_when_something_will_happen(ce, blue):
     """0件なら黒のまま (色 = 今押す価値があるか、という既存の約束)。"""
     assert bool(ce.get("remaining")) is blue
+
+
+# ── US 限定 (2026-08-24 ユーザー指摘) ──────────────────────────────
+# > CULL取下げって、USのみで作らなかった？ … だって、ebaymagだから、US以外を触っても意味ない
+#
+# UK / AU / CA は eBaymag が US の親出品から作るミラー。親を落とせば付いてくるので、
+# ミラーを直接落としても意味がない (親が生きていれば mag がまた作る)。
+# 履歴を追ったところ US 限定になっていたのは隣の RESTOCK (063b626) だけで、
+# CULL には入っていなかった。実測 1,408件のうち 643件がミラーだった。
+
+
+def test_mirrors_are_not_touched(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "load_done", lambda: set())
+    d = _funnel(tmp_path, [_row("us1"), _row("uk1", site="UK"),
+                           _row("au1", site="AU"), _row("ca1", site="CA")])
+    got = C.count_workload(funnel_dir=d)
+    assert got["remaining"] == 1, "ミラーを落とそうとしている"
+
+
+def test_unknown_site_is_not_touched(tmp_path, monkeypatch):
+    """site が空 = ミラーか判らない → 落とさない (fail-closed)。"""
+    monkeypatch.setattr(C, "load_done", lambda: set())
+    d = _funnel(tmp_path, [_row("x", site="")])
+    assert C.count_workload(funnel_dir=d)["remaining"] == 0
+
+
+@pytest.mark.parametrize("site,want", [
+    ("US", True), ("us", True), (" US ", True),
+    ("UK", False), ("AU", False), ("CA", False), ("DE", False), ("", False), (None, False),
+])
+def test_is_target_site(site, want):
+    assert C.is_target_site({"site": site}) is want
+
+
+def test_cull_total_still_counts_every_site(tmp_path, monkeypatch):
+    """CULL 全体 (母数) は絞らない。何件がミラーで除外されたかを言えるように。"""
+    monkeypatch.setattr(C, "load_done", lambda: set())
+    d = _funnel(tmp_path, [_row("us1"), _row("uk1", site="UK")])
+    assert C.count_workload(funnel_dir=d)["cull"] == 2
