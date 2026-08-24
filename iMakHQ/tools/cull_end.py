@@ -20,6 +20,7 @@ CULL = qty=0 ∩ 一度も売れず watcher も付かず。掲載しても無害
 import csv
 import datetime
 import glob
+import io
 import os
 import sys
 
@@ -71,6 +72,36 @@ def _f(v):
         return 0.0
 
 
+# ★2026-08-24: 落とした itemID を憶える。itemID は一度終了したら二度と復活しないので、
+#   永久に候補から外してよい。憶えないと、静的な funnel CSV の上位を済みが占領し続け、
+#   毎回ほぼ空振りする (実測: 200件選んで 158件が済み、実際に進んだのは 37件)。
+#   これがあると **レポートを取り直さなくても押すたびに次の200件**が出る。
+DONE_FILE = os.path.join(END_DIR, "cull_done_item_ids.txt")
+
+
+def load_done():
+    """これまでに落とした itemID (読めなければ空)。"""
+    try:
+        with io.open(DONE_FILE, encoding="utf-8") as f:
+            return {ln.strip() for ln in f if ln.strip()}
+    except OSError:
+        return set()
+
+
+def remember_done(ids):
+    """落とした分を追記する。書けなくても本処理は止めないが黙らない。"""
+    ids = [str(i).strip() for i in ids if str(i).strip()]
+    if not ids:
+        return
+    try:
+        os.makedirs(os.path.dirname(DONE_FILE), exist_ok=True)
+        with io.open(DONE_FILE, "a", encoding="utf-8") as f:
+            for i in ids:
+                f.write(i + chr(10))
+    except OSError as e:
+        print(f"  ⚠ 済みリストに書けませんでした (次回また候補に出ます): {e}")
+
+
 def listed_this_month(row, today=None):
     """その出品を **今月** 出したか (純関数, test可)。
 
@@ -85,14 +116,17 @@ def listed_this_month(row, today=None):
     return (d.year, d.month) == (today.year, today.month)
 
 
-def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None):
+def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None,
+           done_ids=None):
     """CULL ∩ age>=min_age を age降順・価格昇順で並べ、先頭 cap 件。
 
     age 不明(0)は対象外 (fail-closed)。テスト可能なよう純関数化。
     """
     cull = [r for r in rows if "CULL" in (r.get("flags") or "").split("|")]
+    done = done_ids or set()
     eligible = [r for r in cull
-                if _i(r.get("age_days")) >= min_age and _f(r.get("price")) >= min_price]
+                if _i(r.get("age_days")) >= min_age and _f(r.get("price")) >= min_price
+                and r.get("item_id") not in done]
     # ★2026-08-24: **今月出品した分を先に**。当月の枠が戻るのはそこだけ
     #   (実測: 古い順だけで 361件 落として当月に戻ったのは 1.5%)。
     #   今月分は金額の大きい順 = 戻る額を最大化。それ以前は従来どおり age 降順
@@ -294,10 +328,14 @@ def main():
         src = max(fs, key=os.path.getmtime)
         rows = list(csv.DictReader(open(src, encoding="utf-8")))
         src = os.path.basename(src)
-    cull, eligible, picked = select(rows)
+    done_ids = load_done()
+    cull, eligible, picked = select(rows, done_ids=done_ids)
 
     print(f"対象 funnel: {src}")
     print(f"CULL(在庫切れ&需要皆無) = {len(cull)}件")
+    if done_ids:
+        print(f"  ※ 既に落とした分を除外 = {len(done_ids)}件 "
+              f"(押すたびに次の{CAP}件が出ます)")
     print(f"  うち age>={MIN_AGE}日 かつ ${MIN_PRICE:.0f}以上 = {len(eligible)}件")
     print(f"  今回 End 対象 (CAP {CAP}/回, age降順) = {len(picked)}件")
     skipped_young = len(cull) - len(eligible)
@@ -399,6 +437,7 @@ def main():
     #     - qty=0 = そもそも買えない出品なので、売上を失わない
     #   人が事前に中身を見る機会は無くなるので、確認用一覧は残す (事後に見る)。
     ok_ids, ng = end_on_ebay(picked)
+    remember_done(ok_ids)                      # 次回から候補に出さない
     print(f"\n▶ eBay に送信 → 成功 {len(ok_ids)}件 / {len(picked)}件")
     for iid, msg in ng[:8]:
         print(f"   ⚠ {iid}: {msg}")
