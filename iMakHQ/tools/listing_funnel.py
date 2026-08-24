@@ -596,8 +596,12 @@ def main():
                     help="レポートが古くても強制実行 (既定: 古いと中断)")
     args = ap.parse_args()
 
-    data_dir = args.data_dir or (DEFAULT_DATA_DIR if os.path.isdir(DEFAULT_DATA_DIR)
-                                 and glob.glob(os.path.join(DEFAULT_DATA_DIR, "*active*")) else FALLBACK_DATA_DIR)
+    # ★2026-08-25: ここも直下しか見ていなかったので、レポートが日付フォルダに入った
+    #   時点で「既定の置き場は空」と判断し、存在しないデスクトップの旧フォルダに
+    #   フォールバックして止まっていた。find_file と同じく再帰で見る。
+    _has_reports = os.path.isdir(DEFAULT_DATA_DIR) and glob.glob(
+        os.path.join(DEFAULT_DATA_DIR, "**", "*active*"), recursive=True)
+    data_dir = args.data_dir or (DEFAULT_DATA_DIR if _has_reports else FALLBACK_DATA_DIR)
     if not os.path.isdir(data_dir):
         sys.exit(f"data-dir が見つかりません: {data_dir}\n--data-dir で4レポートのフォルダを指定してください。")
 
