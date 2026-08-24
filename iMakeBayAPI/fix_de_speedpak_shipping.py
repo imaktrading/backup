@@ -60,7 +60,47 @@ def refresh():
         time.sleep(3)
 
 
+# ── 1日の呼出回数を数える (2026-08-24 監視くん依頼) ────────────────────────
+# ★なぜ: 8/24 11:00 に eBay の1日上限 (518) に当たり、16:00 の回復まで **取下げが
+#   1件も送れなかった**。仕入元が売切なのに買える出品が6件残った (キャンセル→Defect 直前)。
+#   鍵は 8/21 に1本化済みで、**誰か1つが使い切ると全員止まる**。ところが監視くん以外は
+#   誰も自分の消費を数えていないため、犯人が分からなかった。
+#   eBay の使用量照会 (GetApiAccessRules) は廃止済 (HTTP 410) なので、自分で数えるしかない。
+# ★eBay の1日は **日本時間 16:00 区切り**。集計もその境界に合わせる。
+_USAGE_PATH = r"C:\dev\iMak_data\hq\ebay_api_usage.json"
+
+
+def ebay_day(now=None):
+    """eBay の「1日」(日本時間 16:00 区切り) の日付文字列。純関数。"""
+    from datetime import datetime, timedelta
+    return ((now or datetime.now()) - timedelta(hours=16)).strftime('%Y-%m-%d')
+
+
+def _record_call(callname, path=None, now=None):
+    """呼出を1件数える。数えられなくても API 呼出は止めない (補助なので)。"""
+    path = path or _USAGE_PATH
+    day = ebay_day(now)
+    try:
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f) or {}
+        except Exception:
+            data = {}
+        bucket = data.setdefault(day, {})
+        bucket[callname] = int(bucket.get(callname, 0)) + 1
+        bucket['_total'] = int(bucket.get('_total', 0)) + 1
+        for old in sorted(data)[:-14]:          # 直近14日だけ残す
+            data.pop(old, None)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=1, sort_keys=True)
+        return bucket['_total']
+    except Exception:                                          # noqa: BLE001
+        return 0
+
+
 def post(callname, inner, tok, site='0'):
+    _record_call(callname)
     hdr = {'X-EBAY-API-CALL-NAME': callname, 'X-EBAY-API-SITEID': site,
            'X-EBAY-API-COMPATIBILITY-LEVEL': '1271', 'X-EBAY-API-IAF-TOKEN': tok, 'Content-Type': 'text/xml'}
     body = (f'<?xml version="1.0" encoding="utf-8"?><{callname}Request xmlns="urn:ebay:apis:eBLBaseComponents">'
