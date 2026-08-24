@@ -375,6 +375,11 @@ def main():
                                                     fetch_listing_status)
         if ended:
             print(f"  ⏭ 既に終了済みで除外 = {len(ended)}件 (前回までに End 済)")
+            # ★2026-08-24: **自分が落としたもの以外も憶える**。出品期間の満了などで
+            #   自然に終わった分は済みリストに載らず、毎回 候補の枠を食い続けていた
+            #   (実測: 同じ43件が3回連続で除外され、その分だけ処理量が減っていた)。
+            #   終わっている事実は同じなので、記録して二度と拾わない。
+            remember_done([r["item_id"] for r in ended])
         if revived:
             print(f"  ⚠ 在庫復活で除外 = {len(revived)}件 (補充された listing の誤取下げ防止)")
             for r in revived:

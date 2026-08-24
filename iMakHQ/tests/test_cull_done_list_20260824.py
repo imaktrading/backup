@@ -67,3 +67,17 @@ def test_main_remembers_only_successful_sends():
                encoding="utf-8").read()
     assert "remember_done(ok_ids)" in src
     assert "remember_done(picked" not in src
+
+
+
+def test_naturally_ended_items_are_also_remembered():
+    """★自分が落としたもの以外も憶える。
+
+    出品期間の満了などで自然に終わった分は済みリストに載らず、毎回 候補の枠を
+    食い続けていた (実測: 同じ43件が3回連続で除外され、その分 処理量が減った)。
+    """
+    src = open(os.path.join(os.path.dirname(__file__), "..", "tools", "cull_end.py"),
+               encoding="utf-8").read()
+    i = src.find("既に終了済みで除外")
+    assert i > 0
+    assert "remember_done" in src[i:i + 500], "終了済みを記録していない"
