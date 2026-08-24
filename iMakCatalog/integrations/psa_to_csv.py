@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
@@ -160,6 +161,21 @@ _SUBJECT_STOPWORDS = {
 }
 
 
+def _fold_ascii(s: str) -> str:
+    """アクセント記号や ♀♂ を落として ASCII に畳む (`Flabébé` → `FLABEBE`).
+
+    2026-08-24 追加。PSA のラベルは ASCII でしか書けないので、catalog 側の `é` を
+    そのまま比べると当たらない。実測 (全 22,111行に「PSA が name_en を ASCII で
+    書いた」擬似 subject を当てた): 畳まないと 25行が誤 reject —
+      Flabébé 13 / Pokédex 8 / PokéVital A 2 / PokéNav 1 / PokéHealer+ 1
+    (`Poké Ball` `Pokémon Catcher` 等 298行は2語目が当たって通るので、é 一語で
+     完結する上の5種だけが落ちる)。ASCII の名前は畳んでも変わらないので他 franchise に
+    副作用は無い。
+    """
+    return (unicodedata.normalize("NFKD", s or "")
+            .encode("ascii", "ignore").decode("ascii").upper())
+
+
 def _subject_tokens(subject: str) -> set[str]:
     """PSA Subject から名前検証に使う有意トークンを抽出 (3文字以上、stopword/数字除外)."""
     if not subject:
@@ -264,6 +280,14 @@ def _record_name_matches_subject(record: dict, subject: str) -> bool:
     combined = name_en + " " + (record.get("name_en") or "").upper() + " " + name_jp.upper()
     if any(t in combined for t in tokens):
         return True
+    # 1b. アクセント畳み (2026-08-24 追加)。PSA ラベルは ASCII なので `Flabébé` は
+    #     `FLABEBE` としか書けない。畳んだ形でもう一度だけ比べる (JA は 2. が見る)。
+    #     ★畳んで空になったトークンは捨てる。空文字は必ず部分一致して素通りになる。
+    folded_combined = _fold_ascii(combined)
+    if folded_combined:
+        folded_tokens = {f for f in (_fold_ascii(t) for t in tokens) if len(f) >= 3}
+        if any(t in folded_combined for t in folded_tokens):
+            return True
     # 2. JA-only record: 日本語名 → 想定 EN tokens に変換して照合
     expected = _JA_CHAR_TO_EN_TOKENS.get(name_jp, set())
     if expected & tokens:
