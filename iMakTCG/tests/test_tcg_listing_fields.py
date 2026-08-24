@@ -40,11 +40,13 @@ def test_no_subject_pollution_in_name_and_character():
 
 # features list → 連結
 def test_features_list_joined():
-    # 2026-06-14: features は eBay facet 正規化される。facet 値の list は ", " 連結。
+    # 2026-08-22 契約: Features は catalog の features_ebay だけを写す (生 features は使わない)。
+    # 2026-08-25: 複数値の区切りは **縦棒**。読点だと eBay が1値の自由文として持ち、
+    #             正規値の絞り込みに当たらない (実測 itemID 820035999901)。
     specs = {"_name_en": "Scrafty", "character_name": "Scrafty",
-             "rarity_ebay": "Art Rare", "features": ["Full Art", "Promo"]}
+             "rarity_ebay": "Art Rare", "features_ebay": ["Full Art", "Promo"]}
     f = map_specs_to_fields(specs)
-    assert f["C:Features"] == "Full Art, Promo"
+    assert f["C:Features"] == "Full Art|Promo"
 
 
 # name_en ≠ character_name (romaji 修正漏れ) → そのまま出して可視化 (papering over しない)
@@ -222,11 +224,19 @@ def test_specs_pairs_language_not_forced_japanese():
 
 
 def test_map_specs_features_normalized_in_field():
+    """★2026-08-22 契約: 出品側で生 features を正規化しない (語彙の判断は catalog の持ち物)。
+
+    生 features しか無い行は **空欄**で出す。旧の変換表で埋め戻すと catalog の穴が見えなくなり、
+    レアリティ語が Features に載る事故が起きた (2026-08-22 に 4件)。
+    """
     specs = {"_name_en": "Scrafty", "character_name": "Scrafty",
              "set_name_ebay": "Scarlet & Violet—White Flare", "rarity_ebay": "Art Rare",
              "features": ["Art Card"], "_language": "ja"}
     f = map_specs_to_fields(specs, "2025")
-    assert f["C:Features"] == ""              # 'Art Card' は drop → 空欄 (旧の非facet値を出さない)
+    assert f["C:Features"] == ""              # 生値は使わない → 空欄
     specs["features"] = ["Alt Art"]
     f2 = map_specs_to_fields(specs, "2025")
-    assert f2["C:Features"] == "Alternative Art"
+    assert f2["C:Features"] == ""             # 出品側で 'Alternative Art' に化けさせない
+    specs["features_ebay"] = "Alternative Art"   # catalog が決めた値なら str 単値でもそのまま写す
+    f3 = map_specs_to_fields(specs, "2025")
+    assert f3["C:Features"] == "Alternative Art"

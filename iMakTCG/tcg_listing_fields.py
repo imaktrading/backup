@@ -309,8 +309,12 @@ def map_specs_to_fields(specs: dict, year: str = ""):
     _fe = specs.get("features_ebay")
     _vals = ([str(v).strip() for v in _fe if str(v).strip()] if isinstance(_fe, list)
              else ([str(_fe).strip()] if _fe else []))
+    #    ★2026-08-25: 区切りは **縦棒 `|`** (eBay 入稿CSVの複数値の区切り)。
+    #    読点で繋いでいた間、eBay 側は 1値の自由文として持っていた (実測: GetItem 820035999901
+    #    → <Value>Promo, Alternative Art</Value>)。Features は cardinality=MULTI なので
+    #    2値に分けないと買い手の絞り込み (正規値39個) に当たらない。
     if _vals:
-        fields["C:Features"] = ", ".join(_vals)
+        fields["C:Features"] = "|".join(_vals)
 
     # 4) Language (catalog language=ja → eBay 'Japanese')
     lang = (specs.get("language") or specs.get("_language") or "").strip().lower()
@@ -417,8 +421,11 @@ def build_title_from_fields(fields: dict, grade: str = "10") -> str:
     if fields.get("C:Rarity") and not _word_overlap(fields["C:Rarity"], core_text):
         optional.append(fields["C:Rarity"])
     if fields.get("C:Features"):
-        feat = fields["C:Features"]
-        if not _word_overlap(feat, " ".join(core + optional)):
+        # ★2026-08-25: タイトルに入れるのは **先頭1値だけ**。join 済み文字列をそのまま足していた
+        #   ため 'Common Promo, Alternative Art 2026' のように読点がタイトルに出ていた
+        #   (実測: itemID 820035999901 + eBaymag ミラー3件)。Item Specifics 側は全値のまま残す。
+        feat = fields["C:Features"].split("|")[0].strip()
+        if feat and not _word_overlap(feat, " ".join(core + optional)):
             optional.append(feat)
     if fields.get("C:Year Manufactured"):
         optional.append(fields["C:Year Manufactured"])
