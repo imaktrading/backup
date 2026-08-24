@@ -820,9 +820,19 @@ def _phase_upload(csv_path_str: str, test_mode: bool) -> dict:
         result = upload_csv_via_trading_api(Path(csv_path_str), dry_run=False)
         # 既存 cycle log schema 互換: success + error フィールド
         if not result.get("success"):
+            # ★ 2026-08-24: 失敗の理由を error 文字列に載せる。載っていないと
+            #   アラートが「upload 失敗」としか言えず、eBay の日次API上限 (518) と
+            #   本当の障害 (ログイン切れ等) を人が区別できない。
+            #   実害: 08-24 は 11:00 に上限到達 → 取下げが 4 件 出品されたまま 5 時間残った。
+            rate_limited = int(result.get("rate_limited_failure") or 0)
+            cause = ""
+            if rate_limited and rate_limited >= int(result.get("ng") or 0):
+                cause = " / 全件 ebay_api_daily_limit_518"
+            elif rate_limited:
+                cause = f" / 内 ebay_api_daily_limit_518 {rate_limited}"
             result["error"] = (
                 f"Trading API revise: total={result.get('total')} "
-                f"ok={result.get('ok')} ng={result.get('ng')}"
+                f"ok={result.get('ok')} ng={result.get('ng')}{cause}"
             )
         return result
     except Exception as e:

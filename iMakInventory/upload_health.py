@@ -42,6 +42,10 @@ CRITICAL_ERRORS = {
     # 2026-05-08 flaky 撲滅改造で追加:
     "result_not_in_history",   # eBay 履歴に出てこない = 真の未送信 (= ネット障害 / Submit 不達)
     "action_needed_failure",   # 写真要件 / invalid ItemID 等の手動対応必要 Failure (substring)
+    # ★ 2026-08-24: eBay 日次 API 上限 (518)。時間で回復するが、回復するまで取下げが
+    #   1 件も送れない = 売切品が買える状態で残る。「upload 失敗」と混ぜず即座に名指しする
+    #   (08-24 は 11:00 到達 → 4 件が 5 時間 買える状態で残った)。
+    "ebay_api_daily_limit_518",
 }
 
 # 「連続検知」する error と発火閾値
@@ -105,7 +109,21 @@ def _critical_alert_message(error: str, csv_path: str, csv_lines: int,
         f"cycle_ts: {cycle_ts}\n"
     )
 
-    if "session_expired" in err or "not_logged_in" in err or "not logged in" in err:
+    if "ebay_api_daily_limit_518" in err or "call usage limit" in err:
+        title = f"[!] iMakInventory: eBay の1日の API 上限に達しました ({streak} 回目)"
+        body = (
+            "取下げの送信が eBay 側で拒否されています (エラー 518 = 1日の呼出上限)。\n"
+            "**こちらの不具合ではありません。上限は毎日 16:00 頃 (米国 0:00) に回復します。**\n"
+            f"error: {error}"
+            + common_footer
+            + "取下げの義務は消えていません。キューに残っていて、回復後の巡回で自動再送されます。\n"
+            + "対応:\n"
+            + "  ・回復まで待つのが基本。急ぐなら `python -m tools.drain_pending_takedowns --execute`\n"
+            + "  ・毎日出るようなら、上限を使い切っているのは別プロジェクトの可能性 (鍵は共有)。\n"
+            + "    誰が使っているかを窓口に確認する\n"
+            + "★売り切れた商品が eBay で買える状態のまま残る時間が延びます (キャンセル → Defect Rate)。"
+        )
+    elif "session_expired" in err or "not_logged_in" in err or "not logged in" in err:
         title = f"[STOP] iMakInventory: 真のログイン切れ ({streak} 回目)"
         body = (
             f"eBay 専用 chrome profile のセッションが切れました。\n"
