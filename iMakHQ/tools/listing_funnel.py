@@ -125,8 +125,10 @@ def archive_generation(data_dir, report_paths):
     2026-07-24 制定: Seller Hub 生CSV/xlsx を世代ごとに貯めれば、後からどんなトレンド分析も
     遡って作れる(見られ続けない出品 / ずっと再仕入れ価値 / カテゴリ別 sell-through 推移 等)。
     派生分類を貯めるより生データ archive が完全・将来対応。日付は active レポートの内容日付
-    (ファイル名 YYYY-MM-DD)。既に同名があれば skip(冪等)。funnel の入力(直下 loose)は
-    そのまま残す(funnel は直下を読むため)。戻り: (archive_dir, copied件数)。
+    (ファイル名 YYYY-MM-DD)。既に同名があれば skip(冪等)。
+    ★2026-08-25: funnel は **日付フォルダの中も再帰で読む**ようになったので、
+      「直下に loose で置く」必要は無くなった (find_file 参照)。直接 日付フォルダに
+      入れる運用でも動く。戻り: (archive_dir, copied件数)。
     """
     import shutil
     active = next((p for p in report_paths if p and "active-listings" in os.path.basename(p)), None)
@@ -151,9 +153,34 @@ def archive_generation(data_dir, report_paths):
     return (adir, copied)
 
 
+def _report_date_or_none(path):
+    """ファイル名から「内容の日付」を読む。読めなければ None (純関数)。"""
+    b = os.path.basename(path)
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", b)            # YYYY-MM-DD
+    if m:
+        return datetime.date(int(m[1]), int(m[2]), int(m[3]))
+    m = re.search(r"(\d{2})_(\d{2})_(\d{4})", b)            # MM_DD_YYYY (quality)
+    if m:
+        return datetime.date(int(m[3]), int(m[1]), int(m[2]))
+    return None
+
+
 def find_file(data_dir, pattern):
-    hits = glob.glob(os.path.join(data_dir, pattern))
-    return max(hits, key=os.path.getmtime) if hits else None
+    """レポートを1本選ぶ。**日付フォルダの中も探す** (2026-08-25)。
+
+    ★レポートは `reports/20260823/...` のように日付フォルダに入れて溜めていく運用。
+      直下しか見ていなかったため **1件も見つからず**、ファネル分析が動かなかった
+      (funnel CSV が 7/23 のまま古かったのはこれが原因)。今後フォルダが増えても、
+      `**` で探すので何もしなくてよい。
+
+    ★選ぶ基準は **ファイル名の日付**。mtime はフォルダに置き直すと更新され、
+      古いレポートが最新に見える (この方針は _report_age_days と同じ)。
+    """
+    hits = glob.glob(os.path.join(data_dir, "**", pattern), recursive=True)
+    if not hits:
+        return None
+    return max(hits, key=lambda p: (_report_date_or_none(p) or datetime.date.min,
+                                    os.path.getmtime(p)))
 
 
 STALE_REPORT_DAYS = 4   # 主要レポートがこれ以上古い → ファネル分析を中断 (古いと世代/効果測定が無意味)

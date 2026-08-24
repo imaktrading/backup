@@ -237,7 +237,10 @@ def facets(vein, title):
 
 def load_orders():
     out, seen = [], set()
-    for p in sorted(glob.glob(os.path.join(REPORTS_DIR, "*orders*.csv"))):
+    # ★2026-08-25: レポートは日付フォルダに入れて溜める運用。直下しか見ていないと
+    #   1件も拾えない (ファネルの鮮度表示が更新されなかったのと同じ原因)。
+    for p in sorted(glob.glob(os.path.join(REPORTS_DIR, "**", "*orders*.csv"),
+                              recursive=True)):
         rows = list(csv.reader(open(p, encoding="utf-8-sig", errors="replace")))
         if len(rows) < 2:
             continue

@@ -2898,7 +2898,11 @@ class ListingPanel:
                 today = _dt.date.today()
                 parts, worst = [], 0
                 for nm, pat in pats:
-                    fs = _glob.glob(os.path.join(REPORTS_DIR, pat))
+                    # ★2026-08-25: レポートは **日付フォルダの中**に置かれている
+                    #   (reports/20260823/eBay-all-active-... 等)。直下しか見ていなかったので
+                    #   4種とも 0件 = 常に「✗無し」で、鮮度が一度も更新されなかった。
+                    #   どこに置いても拾えるよう再帰で探す。
+                    fs = _glob.glob(os.path.join(REPORTS_DIR, "**", pat), recursive=True)
                     if not fs:
                         parts.append(f"{nm} ✗無し")
                         worst = 999
