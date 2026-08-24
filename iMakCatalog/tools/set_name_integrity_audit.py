@@ -155,6 +155,7 @@ class AuditResult(NamedTuple):
     code_value_mismatch: list
     stage_on_non_pokemon: list
     card_type_unknown: list
+    const_violation: list
     name_en_collision: list
 
 
@@ -335,6 +336,11 @@ def audit(categories):
     #    実害: 取り込みがカード名に「エネルギー」が入るかで種別を決めていたため、
     #    グッズの「エネルギー回収」等が Energy になり、`Energy` は eBay に無い値だった。
     card_type_unknown = []        # (product_id, card_type_ebay)
+    # 11. 定数項目の点検 (2026-08-25 追加)
+    #    Game / Manufacturer / Card Size は **category ごとに1値**しか取らない。
+    #    2値以上に割れる = 取り込みの取りこぼしか誤り。空欄も同じ。
+    #    実測 2026-08-25: card_size_ebay だけ 2,859行が空だった (値は Standard の1種類のみ)。
+    const_split = defaultdict(lambda: defaultdict(int))   # (cat,key) -> value -> count
     _ctype_ok = _load_card_types()
     # 0d. 同じ英名を複数の日本語名が使っている (2026-08-24)
     name_en_collision = []        # (category, name_en, {name_jp: count})
@@ -442,6 +448,9 @@ def audit(categories):
                     (r["product_id"], _ct, s.get("stage") or s.get("stage_ebay")))
 
         # 10. Card Type が eBay の値表に無い (値表を持つ category のみ)
+        for _k in ("game_ebay", "manufacturer_ebay", "card_size_ebay"):
+            const_split[(r["category"], _k)][s.get(_k) or "(空)"] += 1
+
         _ok = _ctype_ok.get(r["category"]) or set()
         _ctv = s.get("card_type_ebay")
         if _ok and _ctv and _ctv not in _ok:
@@ -480,12 +489,18 @@ def audit(categories):
             name_en_collision.append((cat, en, dict(jps)))
     name_en_collision.sort(key=lambda x: -sum(x[2].values()))
 
+    const_violation = []          # (category, key, {値: 件数})
+    for (cat_, key_), vals in const_split.items():
+        if len(vals) > 1:
+            const_violation.append((cat_, key_, dict(vals)))
+    const_violation.sort(key=lambda x: -sum(x[2].values()))
+
     return AuditResult(
         era_mismatch, inconsistent, none_list, name_desync,
         dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
         prefix_mismatch, {k: dict(v) for k, v in unregistered.items()},
         code_value_mismatch, stage_on_non_pokemon, card_type_unknown,
-        name_en_collision)
+        const_violation, name_en_collision)
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
@@ -693,11 +708,13 @@ def main():
     (era_mismatch, inconsistent, none_list, name_desync,
      empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
      prefix_mismatch, unregistered, code_value_mismatch,
-     stage_on_non_pokemon, card_type_unknown, name_en_collision) = (
+     stage_on_non_pokemon, card_type_unknown, const_violation,
+     name_en_collision) = (
         res.era_mismatch, res.inconsistent, res.none_list, res.name_desync,
         res.empty_by_cat, res.drift_by_cat, res.rarity_by_cat, res.not_rarity,
         res.prefix_mismatch, res.unregistered, res.code_value_mismatch,
-        res.stage_on_non_pokemon, res.card_type_unknown, res.name_en_collision)
+        res.stage_on_non_pokemon, res.card_type_unknown, res.const_violation,
+        res.name_en_collision)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
                     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
                     prefix_mismatch, unregistered, code_value_mismatch,
@@ -747,6 +764,7 @@ def main():
         f"code_value_mismatch={len(code_value_mismatch)} "
         f"stage_on_non_pokemon={len(stage_on_non_pokemon)} "
         f"card_type_unknown={len(card_type_unknown)} "
+        f"const_violation={len(const_violation)} "
         f"name_en_collision={len(name_en_collision)} "
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
