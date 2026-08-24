@@ -154,6 +154,7 @@ class AuditResult(NamedTuple):
     unregistered: dict
     code_value_mismatch: list
     stage_on_non_pokemon: list
+    card_type_unknown: list
     name_en_collision: list
 
 
@@ -184,6 +185,20 @@ def _load_allowed():
     except Exception:
         pass
     return master, allow
+
+
+def _load_card_types():
+    """eBay の Card Type の値表を category 別に読む (Game 別)。
+
+    2026-08-25 実測: 値表を持つのは **Pokémon TCG だけ** (11値)。
+    ワンピ / ガンダム / DBSCG は eBay 側に一覧が無いので自由入力 = 照合しない。
+    """
+    try:
+        node = json.loads(_MASTER_PATH.read_text(encoding="utf-8"))["aspects"]["Card Type"]
+        by_game = node.get("by_game") or {}
+    except Exception:
+        by_game = {}
+    return {cat: set(by_game.get(game or "") or []) for cat, game in _GAME_OF.items()}
 
 
 def _norm_code(c: str) -> str:
@@ -315,6 +330,12 @@ def audit(categories):
     #    エネルギーで効果テキストやセット名に当たっていた (2,366行)。
     #    `<span class="type">` にアンカーして取り直したので、以後は 0 で維持する。
     stage_on_non_pokemon = []     # (product_id, card_type_ebay, stage)
+    # 10. Card Type が eBay の値表に無い (2026-08-25 追加)
+    #    Set と同じ「一覧と突き合わせる」形。値表を持つのは Pokémon TCG だけ。
+    #    実害: 取り込みがカード名に「エネルギー」が入るかで種別を決めていたため、
+    #    グッズの「エネルギー回収」等が Energy になり、`Energy` は eBay に無い値だった。
+    card_type_unknown = []        # (product_id, card_type_ebay)
+    _ctype_ok = _load_card_types()
     # 0d. 同じ英名を複数の日本語名が使っている (2026-08-24)
     name_en_collision = []        # (category, name_en, {name_jp: count})
     _en_to_jp = defaultdict(lambda: defaultdict(int))   # (category, name_en) -> {name_jp: n}
@@ -420,6 +441,12 @@ def audit(categories):
                 stage_on_non_pokemon.append(
                     (r["product_id"], _ct, s.get("stage") or s.get("stage_ebay")))
 
+        # 10. Card Type が eBay の値表に無い (値表を持つ category のみ)
+        _ok = _ctype_ok.get(r["category"]) or set()
+        _ctv = s.get("card_type_ebay")
+        if _ok and _ctv and _ctv not in _ok:
+            card_type_unknown.append((r["product_id"], _ctv))
+
     conn.close()
 
     # 1. era mismatch
@@ -457,7 +484,8 @@ def audit(categories):
         era_mismatch, inconsistent, none_list, name_desync,
         dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
         prefix_mismatch, {k: dict(v) for k, v in unregistered.items()},
-        code_value_mismatch, stage_on_non_pokemon, name_en_collision)
+        code_value_mismatch, stage_on_non_pokemon, card_type_unknown,
+        name_en_collision)
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
@@ -660,10 +688,16 @@ def main():
     ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"{_START_MARK} {ts} (cat={cat_s}) ===")
 
+    # ★位置で受けない (節を足すたびにずれる。2026-08-23 / 08-25 に実際にずれた)
+    res = audit(categories)
     (era_mismatch, inconsistent, none_list, name_desync,
      empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
      prefix_mismatch, unregistered, code_value_mismatch,
-     stage_on_non_pokemon, name_en_collision) = audit(categories)
+     stage_on_non_pokemon, card_type_unknown, name_en_collision) = (
+        res.era_mismatch, res.inconsistent, res.none_list, res.name_desync,
+        res.empty_by_cat, res.drift_by_cat, res.rarity_by_cat, res.not_rarity,
+        res.prefix_mismatch, res.unregistered, res.code_value_mismatch,
+        res.stage_on_non_pokemon, res.card_type_unknown, res.name_en_collision)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
                     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
                     prefix_mismatch, unregistered, code_value_mismatch,
@@ -712,6 +746,7 @@ def main():
         f"canonical_drift={sum(drift_by_cat.values())} "
         f"code_value_mismatch={len(code_value_mismatch)} "
         f"stage_on_non_pokemon={len(stage_on_non_pokemon)} "
+        f"card_type_unknown={len(card_type_unknown)} "
         f"name_en_collision={len(name_en_collision)} "
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "

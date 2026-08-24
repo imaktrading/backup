@@ -84,6 +84,17 @@ _EN_TO_JP_TYPE = {"Grass": "草", "Fire": "炎", "Water": "水", "Lightning": "�
                   "Psychic": "超", "Fighting": "闘", "Darkness": "悪", "Metal": "鋼",
                   "Dragon": "ドラゴン", "Fairy": "フェアリー", "Colorless": "無色"}
 
+# 公式の種別見出しの語彙 (2026-08-25 実測: 公式HTML 21,982枚に出るのはこの7つだけ)。
+#   eBay の Card Type (Pokémon TCG) の値と 1対1 で対応する。
+_OFFICIAL_CARD_TYPES = ("グッズ", "サポート", "スタジアム", "ポケモンのどうぐ",
+                        "基本エネルギー", "特殊エネルギー", "ポケモン")
+_CARD_TYPE_TO_EBAY = {
+    "ポケモン": "Pokémon", "ポケモンのどうぐ": "Pokémon Tool",
+    "グッズ": "Trainer-Item", "サポート": "Trainer-Supporter",
+    "スタジアム": "Trainer-Stadium",
+    "基本エネルギー": "Energy-Basic", "特殊エネルギー": "Energy-Special",
+}
+
 _RARITY_IMG_ALT = {
     "hikaru": "H",
 }
@@ -320,9 +331,22 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
     #   ★実体参照を戻してから空白を落とす (公式は `1&nbsp;進化` と書いている)。
     m_stage = re.search(r'<span class="type">([^<]*)</span>', html_decoded)
     if m_stage:
-        v = re.sub(r"\s+", "", html.unescape(m_stage.group(1))).strip()
+        v = re.sub(r"\s+", "", html_mod.unescape(m_stage.group(1))).strip()
         if v:
             out["stage"] = v
+
+    # 種別 (グッズ / サポート / スタジアム / ポケモンのどうぐ / 基本エネルギー / 特殊エネルギー)
+    #   公式は見出しに出す: `<h2>グッズ</h2>`。ポケモンには種別の見出しが無いので、
+    #   進化段階の欄 (`span.type`) が在るかで判定する。
+    #   実測 (2026-08-25 / 公式HTML 21,982枚): 語彙はこの7つだけ。
+    for _h2 in re.findall(r"<h2[^>]*>(.*?)</h2>", html_decoded, re.DOTALL):
+        _v = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", html_mod.unescape(_h2))).strip()
+        if _v in _OFFICIAL_CARD_TYPES:
+            out["card_type_official"] = _v
+            break
+    else:
+        if out.get("stage"):
+            out["card_type_official"] = "ポケモン"
 
     # Type icon — ★2026-08-23 全面差替え。
     #   旧実装の誤り2つ (実測: ピカチュウ 6,138枚が 'Fighting' になっていた):
@@ -469,14 +493,13 @@ def build_specs(detail: dict) -> dict:
             specs[key] = v
     illustrator = detail.get("illustrator")
     specs["illustrator"] = illustrator if illustrator else None
-    # eBay Item Specifics 用 card_type 推定
-    name = (detail.get("name") or "")
-    if detail.get("hp"):
-        specs["card_type"] = "Pokémon"
-    elif "エネルギー" in name:
-        specs["card_type"] = "Energy"
-    else:
-        specs["card_type"] = "Trainer"
+    # card_type — ★2026-08-25 全面差替え。
+    #   旧実装は **カード名に「エネルギー」が入っているか**で決めていたので、
+    #   グッズの「エネルギー回収」「エネルギーつけかえ」等 127行を Energy にしていた。
+    #   Stage / タイプ の取り違えと同じ形 (ページの文字から推定していた)。
+    #   → 公式の種別見出し `<h2>グッズ</h2>` から取る。公式の語彙は7つだけで、
+    #     eBay の Card Type (Pokémon TCG) の値と 1対1 で対応する。
+    specs["card_type"] = detail.get("card_type_official") or specs.get("card_type")
     return specs
 
 
