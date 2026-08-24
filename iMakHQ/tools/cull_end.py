@@ -342,7 +342,16 @@ def main():
             for r in revived:
                 print(f"     復活: {r['item_id']} {(r.get('title') or '')[:45]}")
         if failed:
-            print(f"  ⚠ qty取得失敗で除外 (fail-closed) = {len(failed)}件")
+            print(f"  ⚠ 状態を取れず除外 (fail-closed) = {len(failed)}件")
+            # ★2026-08-24: 失敗が半分を超えたら **API の日次上限**を疑う (実際に踏んだ:
+            #   GetItem が ErrorCode 518 で全滅し、149/200 が「取れない」に落ちた)。
+            #   そのまま続けると「確認できた少数だけ」を送る形になり、判断の母数が壊れる。
+            #   上限は日付が変わる (米国太平洋時間の0時 = 日本時間 16時ごろ) と戻る。
+            if len(failed) > len(picked) + len(revived) + len(ended):
+                print("  ⛔ 半数以上が取れていません。**eBay API の1日の上限**の可能性が高いです。")
+                print("     このまま送ると母数が壊れるので中止します。")
+                print("     → 日本時間 16時ごろに上限が戻ります。それから押し直してください。")
+                return
         print(f"  → End 確定 (qty=0 実機確認済) = {len(picked)}件")
         if not picked:
             print("実機確認後の End 対象なし。処理終了。")
@@ -357,13 +366,24 @@ def main():
         for r in picked:
             w.writerow(["End", r["item_id"], END_CODE])
 
+    # ★2026-08-24: 確認用一覧は **おまけ**。開きっぱなしだと PermissionError で落ち、
+    #   その後の送信まで巻き添えにしていた (実際に踏んだ)。書けなくても本処理は続ける。
     cand_path = os.path.join(DESK, f"CULL出品停止候補_{stamp}.csv")
     fields = ["item_id", "title", "site", "category", "price", "age_days", "watch", "ebay_url"]
-    with open(cand_path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        w.writeheader()
-        for r in picked:
-            w.writerow(r)
+    for attempt, path in enumerate((cand_path,
+                                    os.path.join(END_DIR, f"CULL候補_{stamp}.csv"))):
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+                w.writeheader()
+                for r in picked:
+                    w.writerow(r)
+            cand_path = path
+            break
+        except OSError as e:
+            print(f"  ⚠ 確認用一覧を書けません ({type(e).__name__})。"
+                  f"{'別の場所に出します' if attempt == 0 else '一覧なしで続行します'}")
+            cand_path = "(出せませんでした)"
 
     print(f"\nEnd CSV (控え): {end_path}")
     print(f"確認用一覧: {cand_path}")

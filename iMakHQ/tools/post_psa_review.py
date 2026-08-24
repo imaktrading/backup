@@ -276,6 +276,12 @@ def diversify_by_base(pids, limit, per_base=2):
     return out
 
 
+def _esc_attr(v) -> str:
+    """HTML に出す前の最低限のエスケープ (セット名に `"` や `&` が入る)。純関数。"""
+    return (str(v or "").replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
 def _get_candidates(category: str, set_code: str | None, card_number: str | None,
                     brand: str = "", expected_product_id: str | None = None,
                     subject: str = "") -> list[tuple[str, str]]:
@@ -464,6 +470,21 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
             rows = cur.fetchall()
 
         for (pid,) in rows:
+            # ★2026-08-24 カタログ依頼: **セット名も出す**。
+            #   PSA ラベルと catalog のセット名は文字で一致するので、
+            #   公式に絵が無いカードでも選べる (例 EB02-003_CH01 =『ONE PIECE CHOPPER's 1』付録)。
+            #   これが無いと「絵が無い → 毎回 該当なし」になっていた。
+            #   セット名が取れなくても候補一覧は出す (飾りのために選べなくなる方が悪い)。
+            set_label = ""
+            try:
+                cur3 = conn.cursor()
+                cur3.execute("SELECT set_name_official, set_name FROM products "
+                             "WHERE product_id=? AND category=?", (pid, category))
+                srow = cur3.fetchone()
+                set_label = ((srow[0] if srow else "") or (srow[1] if srow else "")
+                             or "").strip()
+            except Exception:                                  # noqa: BLE001
+                set_label = ""
             # DON 系は専用切出画像、 他は catalog images 列の URL を使う
             if pid.startswith("DON-"):
                 img = str(DON_IMAGES_DIR / f"{pid}.png")
@@ -481,7 +502,7 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
                             img = _pick_image_by_language(imgs, lang) or imgs[0]
                     except Exception:
                         pass
-            results.append((pid, img))
+            results.append((pid, img, set_label))
     finally:
         conn.close()
     return results
@@ -899,6 +920,9 @@ def _generate_html(targets: list[dict]) -> None:
         '.btn.active{box-shadow:0 0 0 3px #fff}',
         '.candidates-toggle{cursor:pointer;color:#80c0ff;text-decoration:underline;font-size:13px;margin:8px 0}',
         '.candidates{display:none;margin-top:8px}',
+        # ★セット名は長いので折り返して全部見せる (PSA ラベルと文字で比べるため)
+        '.setname{font-size:11px;color:#9ad;margin-top:2px;line-height:1.25;'
+        'word-break:break-word;max-width:150px}',
         '.candidates.show{display:block}',
         '.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}',
         '.cand{border:2px solid #555;padding:8px;background:#333;text-align:center;border-radius:6px;cursor:pointer;transition:all 0.15s}',
@@ -1118,13 +1142,16 @@ def _generate_html(targets: list[dict]) -> None:
         # 候補 list
         is_open = (not (t.get("csv_expected") and expected_img)
                    or has_sibling_variants(t.get("csv_expected"),
-                                           [p for p, _ in t["candidates"]]))
+                                           [c[0] for c in t["candidates"]]))
         html.append(f'<div class=candidates-toggle onclick="toggleCands(\'{cert}\')">▼ 候補 {len(t["candidates"])} 件 表示/非表示</div>')
         cls = "candidates show" if is_open else "candidates"
         html.append(f'<div id="cands_{cert}" class="{cls}">')
         html.append('<div class=grid>')
         import re as _re
-        for i, (pid, img_path) in enumerate(t["candidates"], 1):
+        for i, cand in enumerate(t["candidates"], 1):
+            # 候補は (pid, 画像, セット名)。古い2要素も読めるようにしておく
+            pid, img_path = cand[0], cand[1]
+            set_label = cand[2] if len(cand) > 2 else ""
             css_class = "cand expected-pid" if pid == t.get("csv_expected") else "cand"
             safe_pid_id = _re.sub(r'[^a-zA-Z0-9]', '_', pid)
             html.append(f'<div id="cand_{cert}_{safe_pid_id}" class="{css_class}" onclick="selectCand(\'{cert}\', \'{pid}\')">')
@@ -1145,7 +1172,13 @@ def _generate_html(targets: list[dict]) -> None:
             # ボタン側で preventDefault/stopPropagation して誤選択を防ぐ(viewer_zoom)。
             if img_path and (img_path.startswith("http") or Path(img_path).exists()):
                 html.append(zoom_button(_img_url(img_path), _img_url(t.get("cert_image_url") or "")))
-            html.append(f'<div class=pid>{pid}</div></div>')
+            html.append(f'<div class=pid>{pid}</div>')
+            # ★セット名 (2026-08-24)。PSA ラベルと文字で突き合わせられる唯一の手掛かり。
+            #   絵が無い候補ほど効くので、画像の有無にかかわらず必ず出す。
+            if set_label:
+                html.append(f'<div class=setname title="{_esc_attr(set_label)}">'
+                            f'{_esc_attr(set_label)}</div>')
+            html.append('</div>')
         html.append('</div></div>')
         html.append('</div>')
 

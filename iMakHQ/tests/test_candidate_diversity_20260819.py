@@ -80,7 +80,7 @@ class Test実データで直っていること:
     def test_チョッパーのpromoが候補に出る(self):
         """cert168157629 の再現。3件 → 別カードが並ぶ状態になっていること."""
         from post_psa_review import _get_candidates
-        got = [p for p, _img in _get_candidates(
+        got = [c[0] for c in _get_candidates(
             "one_piece_tcg", "PROMOS", "003", brand="ONE PIECE JAPANESE PROMOS",
             expected_product_id="EB02-003",
             subject="TONY TONY CHOPPER ONE PIECE CHOPPER'S 1")]

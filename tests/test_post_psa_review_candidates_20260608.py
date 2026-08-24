@@ -44,14 +44,14 @@ def test_character_candidate_surfaces_on_miss(tmp_path):
     # miss: set_code無し / expected無し / subject=Sabo / card_number=049
     cands = R._get_candidates("one_piece_tcg", None, "049",
                               brand="ONE PIECE", expected_product_id=None, subject="Sabo")
-    pids = [p for p, _img in cands]
+    pids = [c[0] for c in cands]
     assert pids and pids[0] == "OP10-049", f"Sabo #049 が先頭に出ない: {pids[:5]}"
 
 
 def test_character_only_when_no_number(tmp_path):
     R = _load()
     R.CATALOG_DB = _make_db(tmp_path)
-    cands = [p for p, _ in R._get_candidates("one_piece_tcg", None, "",
+    cands = [c[0] for c in R._get_candidates("one_piece_tcg", None, "",
              brand="ONE PIECE", expected_product_id=None, subject="Sabo")]
     assert "OP10-049" in cands and "OP03-001" in cands   # Sabo 両方出る
     assert "OP01-001" not in cands                        # 別キャラ(Luffy)は出ない
@@ -61,7 +61,7 @@ def test_no_subject_no_character_search(tmp_path):
     R = _load()
     R.CATALOG_DB = _make_db(tmp_path)
     # subject無し → character検索しない (従来挙動: 全件safety net)
-    cands = [p for p, _ in R._get_candidates("one_piece_tcg", None, "049",
+    cands = [c[0] for c in R._get_candidates("one_piece_tcg", None, "049",
              brand="ONE PIECE", expected_product_id=None, subject="")]
     assert cands  # safety net で何かは出る
     assert cands[0] != "OP10-049"  # character pinpoint はしていない

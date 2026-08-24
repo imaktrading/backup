@@ -2942,22 +2942,44 @@ def load_targets_from_sheet_psa():
         # ★2026-08-07 重複くん要望: 抽出段で落とした cert を **後から追える形**で残す。
         #   抽出段は「目視削減の前段」であって判定の権威ではない。権威は重複くん。
         #   痕跡が無いと重複くんが「本来自分が捕まえるべきだった件」を audit できない。
-        try:
-            import json as _json
-            from datetime import datetime as _dt
-            _tr = r"C:\dev\iMak_data\hq\extract_cert_skips.jsonl"
-            os.makedirs(os.path.dirname(_tr), exist_ok=True)
-            with open(_tr, "a", encoding="utf-8") as _f:
-                _f.write(_json.dumps({"ts": _dt.now().isoformat(timespec="seconds"),
-                                      "stage": "psa_to_csv.extract",
-                                      "reason": "same_cert_already_listed",
-                                      "certs": _skipped_cert}, ensure_ascii=False) + "\n")
-        except Exception as _e_tr:                      # 痕跡が残せなくても抽出は止めない
-            print(f"     ⚠️ 除外痕跡の記録に失敗(続行): {type(_e_tr).__name__}")
+        record_cert_skips("same_cert_already_listed", _skipped_cert)
     if _skipped_listed:
         print(f"  ⏭️ 既出品(同KEYが出品済)の2枚目を除外: {_skipped_listed}件 "
               f"(viewer毎回再表示の浪費防止。dedupと二重ではなく抽出段階で先に止める)")
     return cert_numbers, cost_map, url_map, title_map
+
+
+CERT_SKIP_LEDGER = r"C:\dev\iMak_data\hq\extract_cert_skips.jsonl"
+
+
+def record_cert_skips(reason, certs, detail=None, path=None, now=None, print_fn=print):
+    """枠を選ぶ前に落とした cert を **後から追える形**で残す (2026-08-07 / 2026-08-24 拡張)。
+
+    ★なぜ: 抽出段は「目視を減らすための前段」であって判定の権威ではない。痕跡が無いと
+      「出せるはずなのに目視に出てこない」を誰も追えず、そのたびに人が往復する
+      (2026-08-24 重複くん依頼: cert168544559 が出てこない件の問合せ)。
+    detail: {cert: 根拠} を渡すと一緒に残す (例 {"86028605": "2枚"})。
+    書けなくても抽出は止めない (痕跡は補助であって本処理ではない)。
+    """
+    certs = [str(c) for c in (certs or [])]
+    if not certs:
+        return False
+    import json as _json
+    from datetime import datetime as _dt
+    path = path or CERT_SKIP_LEDGER
+    rec = {"ts": (now or _dt.now()).isoformat(timespec="seconds"),
+           "stage": "psa_to_csv.extract", "reason": reason, "certs": certs}
+    if detail:
+        keep = set(certs)
+        rec["detail"] = {str(k): v for k, v in detail.items() if str(k) in keep}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
+        return True
+    except Exception as e:                                     # noqa: BLE001
+        print_fn(f"     ⚠️ 除外痕跡の記録に失敗(続行): {type(e).__name__}")
+        return False
 
 
 _PSA_PROFILE_DIR = r"C:\Users\imax2\local_data\iMakHQ\chrome_profile_psa"
@@ -3088,6 +3110,7 @@ def main():
             print(f"  🚫 PSA10以外(仕入元表記)を除外: {len(_hit)}件 "
                   f"→ {[f'#{c}=PSA{_non10[str(c)]}' for c in _hit]}")
             print("     (本 pipeline は PSA10 限定運用。グレード誤表示 + PSA10相場の誤参照になるため)")
+            record_cert_skips("not_psa10_by_supply_title", _hit, detail=_non10)
             cert_numbers = [c for c in cert_numbers if str(c) not in _non10]
 
     # ★まとめ売り / 連番スラブ は出さない (2026-08-23 ユーザー確認)。
@@ -3100,6 +3123,7 @@ def main():
             print(f"  🚫 まとめ売り/連番を除外: {len(_hit)}件 "
                   f"→ {[f'#{c}({_lots[str(c)]})' for c in _hit]}")
             print("     (1枚だけ買えない = 仕入値が想定と違う。単品の個体を待つ)")
+            record_cert_skips("multi_card_lot_by_supply_title", _hit, detail=_lots)
             cert_numbers = [c for c in cert_numbers if str(c) not in _lots]
 
     # 目視済(NONE/NG=識別不能)cert を cooldown 期間スキップ (2026-06-23 再表示防止)

@@ -84,7 +84,7 @@ class TestSetCodeMissFallback:
         cands = R._get_candidates("one_piece_tcg", None, "004",
                                   brand="ONE PIECE JAPANESE FILM RED: ENCORE PACK",
                                   subject="NEW GENESIS")
-        pids = [pid for pid, _img in cands]
+        pids = [c[0] for c in cands]
         assert pids, "候補ゼロで打ち切っている"
         for want in ("ST11-004", "ST11-004_p1", "ST11-004_p2",
                      "ST11-004_D", "ST11-004_P", "ST11-004_ST16"):
@@ -95,7 +95,7 @@ class TestSetCodeMissFallback:
         cands = R._get_candidates("one_piece_tcg", None, "004",
                                   brand="ONE PIECE JAPANESE FILM RED: ENCORE PACK",
                                   subject="NEW GENESIS")
-        pids = [pid for pid, _img in cands]
+        pids = [c[0] for c in cands]
         assert "OP01-004" not in pids and "OP02-004" not in pids, pids
         # ※'New World' (EB01-004) はこの fallback の対象外 (完全一致でない) だが、
         #   優先度3 のキャラ名検索が 'New' で拾うので候補には出る。
@@ -106,7 +106,7 @@ class TestSetCodeMissFallback:
         cands = R._get_candidates("one_piece_tcg", None, "004",
                                   brand="ONE PIECE JAPANESE FILM RED: ENCORE PACK",
                                   subject="")
-        assert [pid for pid, _ in cands] != ["ST11-004"], "名前検証なしで絞ってはいけない"
+        assert [c[0] for c in cands] != ["ST11-004"], "名前検証なしで絞ってはいけない"
 
 
 class TestWeakGuessIsUnchanged:

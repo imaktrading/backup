@@ -74,7 +74,7 @@ def test_film_red_candidates_are_not_empty():
     """set_code を取れない brand でも候補が出る。ST11-004 系が並ぶこと。"""
     sc = R._extract_set_code(FILM_RED, "one_piece_tcg")
     assert sc is None                      # ここは取れないままで正しい
-    pids = [p for p, _ in R._get_candidates(
+    pids = [c[0] for c in R._get_candidates(
         "one_piece_tcg", sc, "004", brand=FILM_RED, subject="NEW GENESIS")]
     assert pids, "候補ゼロ"
     assert [p for p in pids if p.startswith("ST11-004")], pids[:10]
@@ -84,7 +84,7 @@ def test_film_red_candidates_are_not_empty():
 def test_cll_candidates_are_not_empty():
     """CLL を読めたので CLL-002 (Charmeleon) が候補に出る。"""
     sc = R._extract_set_code(CLL, "pokemon_tcg")
-    pids = [p for p, _ in R._get_candidates(
+    pids = [c[0] for c in R._get_candidates(
         "pokemon_tcg", sc, "002", brand=CLL, subject="CHARMELEON")]
     assert "CLL-002" in pids, pids[:10]
 
@@ -100,7 +100,7 @@ def test_exact_name_plus_number_is_the_only_path_when_subject_has_no_tokens():
     guard = "if not rows and not set_code and card_number and subject:"
     assert guard in src, "優先度2b が無い"
 
-    pids = [p for p, _ in R._get_candidates(
+    pids = [c[0] for c in R._get_candidates(
         "one_piece_tcg", None, "014", brand=FILM_RED, subject="A.O.")]
     assert pids, "候補ゼロ"
     assert all(p.startswith("ST22-014") for p in pids), pids[:10]

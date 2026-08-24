@@ -280,7 +280,7 @@ def test_card_number_with_set_prefix_pinpoints(tmp_path):
     """
     R = _load_review()
     R.CATALOG_DB = _make_dbscg_db(tmp_path)
-    cands = [p for p, _ in R._get_candidates(
+    cands = [c[0] for c in R._get_candidates(
         "dragonball_scg", None, "FB07-097", brand="DRAGON BALL SUPER CARD GAME JAPANESE",
         expected_product_id="FB07-097_p1", subject="SHENRON ALTERNATE ART")]
     assert cands, "候補が空"
@@ -297,7 +297,7 @@ def test_bare_card_number_still_pinpoints(tmp_path):
     """One Piece / Pokemon の裸番号 ('049') 側は従来どおり効く (両方の形を受ける)."""
     R = _load_review()
     R.CATALOG_DB = _make_db_op(tmp_path)
-    cands = [p for p, _ in R._get_candidates(
+    cands = [c[0] for c in R._get_candidates(
         "one_piece_tcg", None, "049", brand="ONE PIECE",
         expected_product_id=None, subject="Sabo")]
     assert cands[0] == "OP10-049", f"番号 pinpoint が壊れた: {cands[:5]}"
@@ -327,7 +327,7 @@ def test_rescue_window_is_capped_but_not_removed(tmp_path):
     R.CATALOG_DB = _make_dbscg_db(tmp_path)
     assert 0 < R._CHAR_RESCUE_LIMIT < 40
     # 番号一致が取れない subject では broad に落ちるが、窓の上限で止まる
-    cands = [p for p, _ in R._get_candidates(
+    cands = [c[0] for c in R._get_candidates(
         "dragonball_scg", None, "", brand="DRAGON BALL SUPER CARD GAME JAPANESE",
         expected_product_id="FB07-097_p1", subject="SHENRON ALTERNATE ART")]
     assert len(cands) <= 3 + R._CHAR_RESCUE_LIMIT, f"救済窓が効いていない: {len(cands)}件"
