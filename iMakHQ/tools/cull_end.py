@@ -140,6 +140,35 @@ def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None,
     return cull, eligible, eligible[:cap]
 
 
+def count_workload(funnel_dir=None, today=None):
+    """押したら何件落とせるか / あと何件残っているか (2026-08-24 ユーザー要望)。
+
+    ★ボタンのラベルとヒントに出すためのもの。**eBay を1回も叩かない**。
+      材料は funnel CSV (ローカル) と 済み台帳だけで、main() の既定経路と同じ数え方。
+      (8/24 に API の1日上限で取下げが5時間止まったので、表示のために叩かない)
+
+    戻り: {"remaining": 残り全部, "next": 今回押したら出る件数, "cap": 1回の上限,
+           "done": これまでに落とした数, "cull": CULL 全体, "src": 使った funnel,
+           "error": 読めなかった理由}
+    """
+    out = {"remaining": 0, "next": 0, "cap": CAP, "done": 0, "cull": 0,
+           "src": "", "error": ""}
+    try:
+        fs = glob.glob(os.path.join(funnel_dir or FUNNEL_DIR, "funnel_*.csv"))
+        if not fs:
+            out["error"] = "funnel_*.csv がありません (先に『📊 ファネル分析』)"
+            return out
+        src = max(fs, key=os.path.getmtime)
+        rows = list(csv.DictReader(open(src, encoding="utf-8")))
+        done = load_done()
+        cull, eligible, picked = select(rows, done_ids=done, today=today)
+        out.update(remaining=len(eligible), next=len(picked), done=len(done),
+                   cull=len(cull), src=os.path.basename(src))
+    except Exception as e:                                     # noqa: BLE001
+        out["error"] = f"{type(e).__name__}: {e}"[:60]
+    return out
+
+
 def verify_oos(picked, fetch_fn, status_fn=None):
     """各 picked の現eBay 状態を実機確認し、**まだ生きていて qty==0** のものだけ残す。
 

@@ -1515,6 +1515,12 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "cull_end.py"],
         "params": [],
+        # ★2026-08-24 ユーザー要望: 対象が出たらラベルを青に、残数はヒントに出す。
+        #   数えるのは funnel CSV と済み台帳だけで **eBay は1回も叩かない**
+        #   (同日に API の1日上限で取下げが5時間止まったため、表示のために使わない)。
+        "badge": "cull_end",
+        "tip": "在庫切れ&需要皆無の出品を取り下げます。押すだけで完結 "
+               "(1件ずつ実状態を確認 → eBay に送る → スプシ更新)。",
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/CULL出品停止候補_*.csv",
     },
 ]
@@ -3158,6 +3164,14 @@ class ListingPanel:
             "    d['kuji']=KJ.count_workload()\n"
             "except Exception as e:\n"
             "    d['kuji']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # ★2026-08-24: 取下げ(CULL)の残数も同じ subprocess で数える。
+            #   材料は funnel CSV と 済み台帳だけで **eBay は1回も叩かない**
+            #   (同日に API の1日上限で取下げが5時間止まったため、表示のために使わない)。
+            "try:\n"
+            "    import cull_end as CE\n"
+            "    d['cull']=CE.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['cull']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             "print(json.dumps(d))"
             % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
         )
@@ -3260,8 +3274,23 @@ class ListingPanel:
                     k_c += "\n※先に slice2 (夜間検索) を回してください"
             else:
                 k_s = k_c = ""
+            # 🗑 取下げ (CULL): 押したら何件落ちるか + あと何件残っているか
+            #   (2026-08-24 ユーザー要望「対象が出たら青、残数はヒントに」)
+            ce = (w0.get("cull") or {}) if isinstance(w0, dict) else {}
+            if ce.get("error"):
+                ce_txt = "\n(残件 取得できず: %s)" % str(ce["error"])[:40]
+            elif ce:
+                ce_txt = "\n今回 %s件 落とせます (残り %s件)" % (
+                    ce.get("next", 0), ce.get("remaining", 0))
+                if ce.get("remaining", 0) > ce.get("cap", 0):
+                    ce_txt += "\n※1回 %s件までなので あと %s回" % (
+                        ce["cap"], -(-ce["remaining"] // ce["cap"]))
+                if not ce.get("remaining"):
+                    ce_txt += "\n※押しても0件 (これまでに %s件 落とし済み)" % ce.get("done", 0)
+            else:
+                ce_txt = ""
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
-                       "kuji_search": k_s, "kuji_confirm": k_c}
+                       "kuji_search": k_s, "kuji_confirm": k_c, "cull_end": ce_txt}
             # ★2026-08-16: **押すと何か出てくる時だけ青**。0件なら黒のまま
             #   (「いつ押せばいいのか分からない」への答え。色 = 今やる価値があるか)。
             act_kind = {"hoju_search": bool(s.get("can")),
@@ -3270,7 +3299,9 @@ class ListingPanel:
                         # 夜間検索は自動で走るので、押す必要がある時だけ青
                         "kuji_search": bool(not nightly["ok"]
                                             and (kj.get("search") or {}).get("can")),
-                        "kuji_confirm": bool((kj.get("confirm") or {}).get("ready"))}
+                        "kuji_confirm": bool((kj.get("confirm") or {}).get("ready")),
+                        # 落とすものが在る時だけ青 (0件なら押す意味が無い)
+                        "cull_end": bool(ce.get("remaining"))}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。
