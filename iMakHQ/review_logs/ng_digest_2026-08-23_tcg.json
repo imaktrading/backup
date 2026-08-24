@@ -1,0 +1,54 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [
+    "error: 3件"
+  ],
+  "recurring_missing": [
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert163920916 POKEMON JAPANESE SWORD & SHIELD VSTAR UNIVERSE [FA/RAYQUAZA VMAX VSTAR UNIVERSE] #108 (catalog S12a-108 は在る(画像あり)が人が現物と別絵柄と判断 variant欠落の疑い)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 5,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "PSA10-86028605",
+      "target_field": "images",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert156843873 ONE PIECE JAPANESE PREMIUM CARD COLLECTION -ONE PIECE DAY'24- [DON!! CARD] # (auto候補無=該当なし 要調査)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert147708482 POKEMON JAPANESE SV8A-TERASTAL FEST EX [CERULEDGE EX SPECIAL ART] #203 (catalog SV8a-203 は在る(画像あり)が人が現物と別絵柄と判断 variant欠落の疑い)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "PSA10-156684617",
+      "target_field": "images",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 1,
+    "recurring_missing": 5
+  }
+}

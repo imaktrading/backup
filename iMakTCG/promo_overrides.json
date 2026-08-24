@@ -50,7 +50,7 @@
     },
     "ST02-010_P": {
       "promo": "Heero Yuy",
-      "updated_at": "2026-07-24"
+      "updated_at": "2026-08-23"
     },
     "OP05-060_P": {
       "promo": "Sound Loader Volume.1",
@@ -74,7 +74,7 @@
     },
     "ST10-004_p1": {
       "promo": "8 Packs Battle-Winner",
-      "updated_at": "2026-08-13"
+      "updated_at": "2026-08-24"
     },
     "ST01-008_p1": {
       "promo": "",
@@ -98,7 +98,7 @@
     },
     "ST01-010_p1": {
       "promo": "",
-      "updated_at": "2026-08-22"
+      "updated_at": "2026-08-24"
     },
     "OP01-013_p1": {
       "promo": "",
@@ -131,6 +131,26 @@
     "ST03-005_p2": {
       "promo": "Standard Battle Winner",
       "updated_at": "2026-08-22"
+    },
+    "ST21-014_P": {
+      "promo": "One Piece Magazine Vol.20",
+      "updated_at": "2026-08-23"
+    },
+    "OP05-119_p8": {
+      "promo": "",
+      "updated_at": "2026-08-23"
+    },
+    "OP01-021_p5": {
+      "promo": "Promotion Card Set 3",
+      "updated_at": "2026-08-23"
+    },
+    "OP08-084_p2": {
+      "promo": "Official Event Prize",
+      "updated_at": "2026-08-23"
+    },
+    "EB02-003_CH01": {
+      "promo": "One Piece Chopper's 1",
+      "updated_at": "2026-08-24"
     }
   }
 }

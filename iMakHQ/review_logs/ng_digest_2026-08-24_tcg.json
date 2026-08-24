@@ -1,0 +1,30 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [
+    "catalog miss: 1件"
+  ],
+  "recurring_missing": [
+    {
+      "category": "one_piece_tcg",
+      "item_id": "PSA10-168157614",
+      "target_field": "images",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "PSA10-168544559",
+      "target_field": "images",
+      "finding_type": "catalog_gap",
+      "seen_count": 3,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 1,
+    "recurring_missing": 2
+  }
+}
