@@ -35,6 +35,7 @@ import os
 import re
 import statistics
 import sys
+import urllib.parse
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -377,6 +378,32 @@ def load_promoted(path):
     return out
 
 
+# ★2026-08-25 ユーザー指示: **同じ個体を二度と買えない仕入元は、需要があっても再仕入れに置かない**。
+#   仕入元が個人の中古出品 (メルカリ/ラクマ/ヤフオクの個別ページ) だと、売れた時点でその個体は
+#   消える。代わりを探す仕組みを持っているのは PSA10 (補URL) と一番くじ (景品の代替探索) だけで、
+#   それ以外は誰も拾わないまま枠を食い続ける。
+#   実測 (2026-08-25): Porter 139件中 128件が在庫切れ、うち **102件が RESTOCK に滞留**。
+#   放置日数の中央値81日・最長166日。仕入元は 107件が jp.mercari.com の個別出品。
+#   ★量産品の仕入元 (amazon / 公式サイト / snkrdunk のように同じ品を複数出品者が出す場) は対象外。
+#   ★仕入元URLが空の行は **触らない** (fail-closed。分からないものを落とす方が高くつく)。
+_ONE_OFF_SUPPLY_HOSTS = ("jp.mercari.com", "item.fril.jp",
+                         "auctions.yahoo.co.jp", "page.auctions.yahoo.co.jp")
+
+
+def is_one_off_supply(r):
+    """仕入元が「中古1点もの」か (純関数, test可)。
+
+    再仕入れの仕組みを持つ商材 (PSA10 / 一番くじ) は呼び出し側で先に除外する。
+    """
+    url = (r.get("supply_url") or "").strip().lower()
+    if not url:
+        return False                      # 仕入元不明 → 判定しない (fail-closed)
+    if "ichiban" in (r.get("title") or "").lower():
+        return False                      # 一番くじは景品の代替を探す仕組みがある
+    host = urllib.parse.urlparse(url).netloc
+    return host in _ONE_OFF_SUPPLY_HOSTS
+
+
 def classify(rows):
     """在庫(qty!=0)限定でファネル段階別に分類。LQR データ有り=詳細、無し=簡易。"""
     in_stock = [r for r in rows if r["qty"] != 0]
@@ -403,6 +430,8 @@ def classify(rows):
     def _worth_restock(r):
         if is_psa10(r.get("title", "")):
             return _real_demand(r)
+        if is_one_off_supply(r):
+            return False        # 同じ個体は二度と買えない → 需要があっても再仕入れできない
         return _demand(r) > 0 or r.get("impr_total", 0) > 0
     restock = [r for r in oos if _worth_restock(r)]
     cull = [r for r in oos if not _worth_restock(r)]
@@ -565,6 +594,43 @@ def _funnel_vals(r):
             r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
 
 
+def _cull_end():
+    """cull_end モジュール (取り下げの門と台帳の持ち主)。読めなければ None。"""
+    try:
+        d = os.path.dirname(os.path.abspath(__file__))
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        import cull_end
+        return cull_end
+    except Exception as e:
+        print(f"  [WARN] cull_end が読めません → 状態は簡易表示になります: {e}")
+        return None
+
+
+def load_cull_done():
+    """これまでに取り下げた itemID (cull_end の台帳)。読めなければ空 = 全部「未」と出す。"""
+    m = _cull_end()
+    if m is None:
+        return set()
+    return {str(i) for i in m.load_done()}
+
+
+def oos_status(r, cull_ids, done_ids):
+    """在庫なしタブの S列「状態」。どのバケツか / CULL なら取り下げ済か (純関数, test可)。
+
+    ★2026-08-25 ユーザー要望。CULL の門 (US限定 / 出品日数 / 金額) は `cull_end` が持つので、
+      理由の文言はそこから貰う。ここで条件を書き直すと必ずズレる。
+    """
+    if str(r.get("item_id")) not in cull_ids:
+        return "🛒 再仕入れ"
+    m = _cull_end()
+    if m is None:
+        return "🗑 取下げ 済" if str(r.get("item_id")) in done_ids else "🗑 取下げ 未"
+    return m.end_status({"item_id": str(r.get("item_id")), "site": r.get("site"),
+                         "age_days": r.get("age_days"), "price": r.get("price")},
+                        done_ids=done_ids)
+
+
 def write_funnel_to_sheet(rows, c, summary_lines):
     """ファネル全結果を「ファネル分析」スプシのタブに書く (Summary + 在庫あり/なし + 全9バケツ)。
 
@@ -599,7 +665,11 @@ def write_funnel_to_sheet(rows, c, summary_lines):
     instock = sorted([r for r in rows if r["qty"] != 0], key=lambda x: (-x["impr"], -x["watch"]))
     oos = sorted([r for r in rows if r["qty"] == 0], key=lambda x: -(x["sold_qty"] + x["watch"]))
     write_tab("在庫あり", [FUNNEL_COLS] + [_funnel_vals(r) for r in instock])
-    write_tab("在庫なし", [FUNNEL_COLS] + [_funnel_vals(r) for r in oos])
+    # 在庫なしタブだけ S列に「状態」を足す (2026-08-25 ユーザー要望)。
+    cull_ids = {str(r["item_id"]) for r in c.get("CULL", [])}
+    done_ids = load_cull_done()
+    write_tab("在庫なし", [FUNNEL_COLS + ["状態"]]
+              + [_funnel_vals(r) + [oos_status(r, cull_ids, done_ids)] for r in oos])
 
     # 9 バケツ (空でもヘッダのみ書いてタブを安定させる)
     for name, _, _ in FUNNEL_BUCKETS:

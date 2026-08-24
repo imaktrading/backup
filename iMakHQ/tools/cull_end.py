@@ -162,6 +162,26 @@ def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None,
     return cull, eligible, eligible[:cap]
 
 
+def end_status(row, done_ids=None, today=None, min_age=MIN_AGE, min_price=MIN_PRICE,
+               site=TARGET_SITE):
+    """その CULL 行が **落ちたのか / まだなら何が理由で残っているのか** (純関数, test可)。
+
+    ★2026-08-25 ユーザー要望: 在庫なしシートに「どのバケツか / CULL なら取下げ済か」を出す。
+      門は `select()` と同じものを同じ順で見る。表示側で条件を書き直すと必ずズレるので、
+      **判定はここ (門の持ち主) に置き、表示側は文字列を写すだけ**にする。
+    """
+    if row.get("item_id") in (done_ids or set()):
+        return "🗑 取下げ 済"
+    if site is not None and not is_target_site(row, site):
+        return "🗑 取下げ 未 (US以外 = eBaymag のミラー。親を落とせば消える)"
+    age = _i(row.get("age_days"))
+    if age < min_age:
+        return f"🗑 取下げ 未 (出品 {min_age}日未満)" if age > 0 else "🗑 取下げ 未 (出品日 不明)"
+    if _f(row.get("price")) < min_price:
+        return f"🗑 取下げ 未 (${min_price:.0f} 未満は枠に効かない)"
+    return "🗑 取下げ 未 (次回の対象)"
+
+
 def count_workload(funnel_dir=None, today=None):
     """押したら何件落とせるか / あと何件残っているか (2026-08-24 ユーザー要望)。
 
