@@ -107,6 +107,11 @@ _DEDUP_WHITELIST = {
 }
 
 
+# 単独では意味を持たない「イニシャル」(D. / D / J. 等)。名前が重複除去で消えた時に
+# 取り残されると `#OP05-060 D.` のような壊れた末尾になる (2026-08-24 実害)。
+_INITIAL_RE = re.compile(r"^[A-Za-z]\.?$")
+
+
 def remove_duplicate_words(title):
     """タイトル内の **重複語の2回目以降を除去** (2026-06-21)。
 
@@ -119,16 +124,31 @@ def remove_duplicate_words(title):
     """
     parts = title.split()
     seen = set()
-    out = []
-    for w in parts:
+    drop = [False] * len(parts)
+    for i, w in enumerate(parts):
         wl = w.lower()
         is_word = wl.isalpha() and len(wl) > 1   # 英字語のみ (番号/記号は常に残す)
         if is_word and wl not in _DEDUP_WHITELIST and wl in seen:
-            continue                              # 重複語 (非whitelist) → 削除
-        out.append(w)
+            drop[i] = True                        # 重複語 (非whitelist) → 削除
+            continue
         if is_word:
             seen.add(wl)
-    new = ' '.join(out)
+    # ★2026-08-24: 消した語の隣に **イニシャルだけが取り残される**。
+    #   'PURPLE Monkey D. Luffy #OP05-060 Monkey D. Luffy' で 2つ目の Monkey と Luffy が
+    #   重複として消え、`D.` は英字語でないので残り、`#OP05-060 D.` という壊れた末尾で
+    #   **eBay に出てしまった** (ItemID 820038886892 / 修正済)。
+    #   イニシャルは単独では意味を持たないので、**続く名前が消えた時だけ**一緒に落とす。
+    #   「次が消えた時だけ」なのが肝で、`Flying Pikachu V` の V (カード名の一部) は残る。
+    changed = True
+    while changed:
+        changed = False
+        for i, w in enumerate(parts):
+            if drop[i] or not _INITIAL_RE.match(w):
+                continue
+            if i + 1 < len(parts) and drop[i + 1]:
+                drop[i] = True
+                changed = True
+    new = ' '.join(w for i, w in enumerate(parts) if not drop[i]).strip()
     return new, new != title
 
 
