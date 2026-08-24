@@ -37,18 +37,23 @@ except Exception:
 
 NOW = datetime.now().isoformat(timespec="seconds")
 JP, WRONG, RIGHT = "オルティガ", "Arven", "Ortega"
+# 出所は回答書 `2026-08-24_hq_ortega_is_not_arven_response.md` §1 が指定した形にする
+# (PSA cert80181108 Subject="ORTEGA SUPER" が根拠。cert 番号を出所に残す)。
+SOURCE = "psa_label_cert80181108"
 
 
 def run(commit: bool) -> None:
     db = sqlite3.connect(Path(api._DB_PATH))
     db.row_factory = sqlite3.Row
-    rows = db.execute("SELECT id, product_id, name, name_en, specs FROM products "
+    rows = db.execute("SELECT id, product_id, name, name_en, name_en_source, specs "
+                      "FROM products "
                       "WHERE category='pokemon_tcg' AND name=?", (JP,)).fetchall()
     print(f"=== {JP} {len(rows)} 行 ({'APPLY' if commit else 'DRY-RUN'}) ===")
     n = 0
     for r in rows:
         s = json.loads(r["specs"] or "{}")
-        if r["name_en"] == RIGHT and s.get("character_name") == RIGHT:
+        if (r["name_en"] == RIGHT and s.get("character_name") == RIGHT
+                and r["name_en_source"] == SOURCE):
             print(f"  - {r['product_id']:12s} 既に {RIGHT} → skip")
             continue
         print(f"  + {r['product_id']:12s} {r['name_en']!r} / char={s.get('character_name')!r} -> {RIGHT!r}")
@@ -58,7 +63,7 @@ def run(commit: bool) -> None:
         if commit:
             db.execute("UPDATE products SET name_en=?, name_en_source=?, specs=?, "
                        "updated_at=? WHERE id=?",
-                       (RIGHT, "psa_slab_confirmed_20260824",
+                       (RIGHT, SOURCE,
                         json.dumps(s, ensure_ascii=False), NOW, r["id"]))
     # 本物のペパー (Arven) を壊していないことを確認
     keep = db.execute("SELECT COUNT(*) FROM products WHERE category='pokemon_tcg' "

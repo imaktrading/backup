@@ -154,6 +154,7 @@ class AuditResult(NamedTuple):
     unregistered: dict
     code_value_mismatch: list
     stage_on_non_pokemon: list
+    name_en_collision: list
 
 
 # 弾番号つき eBay 値の接頭辞 (Sv4k: / Swsh06: / Sm3h: …)
@@ -192,6 +193,20 @@ def _norm_code(c: str) -> str:
     """
     c = (c or "").upper()
     return re.sub(r"^([A-Z]+)0+(?=[0-9])", lambda m: m.group(1), c)
+
+
+# §0d — 同じ英名を複数の日本語名が使っている (2026-08-24 常設)
+#   別人の英名は必ず本人の行と衝突するので、この1本で発生源が塞がる。
+#   オルティガ (`Arven` ← {ペパー, オルティガ}) はこの向きでしか掛からない
+#   (逆向き = 同じ日本語名が複数の英名を持つ、では 3行とも `Arven` で揃っていて出ない)。
+#   ★WARN のみ。**自動修正しない**。表記ゆれの同一人物を誤って直す方が害が大きい
+#     (回答書 2026-08-24_hq_ortega_is_not_arven_response.md §2)。
+_JP_VARIANT_NOISE = re.compile(r"[\[［(（].*?[\]］)）]|[☆★♂♀\s]+")
+
+
+def jp_name_key(name_jp: str) -> str:
+    """表記ゆれの同一人物を1つに畳む (`ナッシー[Exeggutor]` / `シャワーズ☆` → 本体)."""
+    return _JP_VARIANT_NOISE.sub("", name_jp or "")
 
 
 def setcode_era(sc: str):
@@ -237,7 +252,12 @@ def names_own_setcode(value: str, set_code: str) -> bool:
 def audit(categories):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    q = "SELECT category, product_id, name_en, set_name_official, specs FROM products"
+    # name_jp は §0d でしか使わない。**列が無い DB でも落とさない**
+    # (test の最小 fixture は products を 5列だけで作る。2026-08-24 にここで 14本落とした)
+    _cols = {r[1] for r in conn.execute("PRAGMA table_info(products)")}
+    _jp = "name_jp" if "name_jp" in _cols else "'' AS name_jp"
+    q = (f"SELECT category, product_id, name_en, {_jp}, set_name_official, specs "
+         f"FROM products")
     if categories:
         ph = ",".join("?" for _ in categories)
         q += f" WHERE category IN ({ph})"
@@ -295,6 +315,9 @@ def audit(categories):
     #    エネルギーで効果テキストやセット名に当たっていた (2,366行)。
     #    `<span class="type">` にアンカーして取り直したので、以後は 0 で維持する。
     stage_on_non_pokemon = []     # (product_id, card_type_ebay, stage)
+    # 0d. 同じ英名を複数の日本語名が使っている (2026-08-24)
+    name_en_collision = []        # (category, name_en, {name_jp: count})
+    _en_to_jp = defaultdict(lambda: defaultdict(int))   # (category, name_en) -> {name_jp: n}
     _master, _allow = _load_allowed()
     # 弾コード -> その弾の eBay 値 (category 別)
     _by_code = defaultdict(lambda: defaultdict(set))
@@ -386,6 +409,10 @@ def audit(categories):
         if r_stored and not _looks_like_rarity(r_stored):
             not_rarity[(r["category"], r_stored)] += 1
 
+        # 0d. 同じ英名を複数の日本語名が使っていないか (別人の英名が混ざっている合図)
+        if (r["name_en"] or "").strip() and (r["name_jp"] or "").strip():
+            _en_to_jp[(r["category"], r["name_en"].strip())][r["name_jp"].strip()] += 1
+
         # 9. 進化段階を持たない種別に stage が入っている (ポケモンのみ)
         if r["category"] == "pokemon_tcg":
             _ct = s.get("card_type_ebay")
@@ -420,18 +447,39 @@ def audit(categories):
     none_list.sort(key=lambda x: -x[2])
     name_desync.sort(key=lambda x: x[0])
 
+    # 0d. 表記ゆれを畳んでも2人以上残る英名だけを出す (同一人物の書き方違いは誤りではない)
+    for (cat, en), jps in _en_to_jp.items():
+        if len({jp_name_key(j) for j in jps}) >= 2:
+            name_en_collision.append((cat, en, dict(jps)))
+    name_en_collision.sort(key=lambda x: -sum(x[2].values()))
+
     return AuditResult(
         era_mismatch, inconsistent, none_list, name_desync,
         dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
         prefix_mismatch, {k: dict(v) for k, v in unregistered.items()},
-        code_value_mismatch, stage_on_non_pokemon)
+        code_value_mismatch, stage_on_non_pokemon, name_en_collision)
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
            drift_by_cat, rarity_by_cat, not_rarity, prefix_mismatch, unregistered,
-           code_value_mismatch, categories):
+           code_value_mismatch, categories, name_en_collision=()):
     out = []
     NL = chr(10)
+    out.append(f"## 0d. 同じ英名を複数の日本語名が使っている — "
+               f"{len(name_en_collision)} 組 / "
+               f"{sum(sum(v.values()) for _, _, v in name_en_collision)} 行" + NL)
+    out.append("別人の英名が入っていると、必ず本人の行と衝突してここに出る "
+               "(`Arven` ← {ペパー, オルティガ} = 2026-08-24 のオルティガ)。"
+               "**WARN のみ・自動修正しない**。表記ゆれの同一人物 (`ナッシー[Exeggutor]`) は "
+               "畳んでから比べているので出ない。" + NL)
+    if not name_en_collision:
+        out.append("(なし)" + NL)
+    for cat, en, jps in list(name_en_collision)[:40]:
+        _s = ", ".join(f"{j}:{n}" for j, n in sorted(jps.items(), key=lambda kv: -kv[1]))
+        out.append(f"- ⚠️ [{cat}] `{en}` <- {{{_s}}}" + NL)
+    if len(name_en_collision) > 40:
+        out.append(f"- … 他 {len(name_en_collision) - 40} 組" + NL)
+    out.append(NL)
     out.append(f"## 0. 弾コード食い違い (別セットの名前) — {len(prefix_mismatch)} 件" + NL)
     out.append("eBay 値の頭の弾番号 (例 `Sv4k:`) と商品の弾コードが違う行。"
                "**0件で維持する**。変換表が誤っていると §6 では捕まらないので、この面で見る。" + NL)
@@ -615,11 +663,11 @@ def main():
     (era_mismatch, inconsistent, none_list, name_desync,
      empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
      prefix_mismatch, unregistered, code_value_mismatch,
-     stage_on_non_pokemon) = audit(categories)
+     stage_on_non_pokemon, name_en_collision) = audit(categories)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
                     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
                     prefix_mismatch, unregistered, code_value_mismatch,
-                    categories or [])
+                    categories or [], name_en_collision)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(report)
@@ -664,6 +712,7 @@ def main():
         f"canonical_drift={sum(drift_by_cat.values())} "
         f"code_value_mismatch={len(code_value_mismatch)} "
         f"stage_on_non_pokemon={len(stage_on_non_pokemon)} "
+        f"name_en_collision={len(name_en_collision)} "
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
         f"rarity_unmapped={sum(v['unmapped'] for v in rarity_by_cat.values())} "
