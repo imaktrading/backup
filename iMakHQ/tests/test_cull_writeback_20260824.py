@@ -31,13 +31,21 @@ def test_other_flag_is_not_destroyed():
     assert "要確認" in got and "CULL 2026-08-24" in got
 
 
-def test_ended_ids_reads_only_success(tmp_path):
+def test_ended_ids_reads_ended_not_only_success(tmp_path):
+    """★2026-08-25 反転: **1047 (既に閉じている) も済み扱い**。
+
+    自然終了した出品に End を送ると 1047 が返る。ここで後始末を飛ばすと B列に死んだ
+    itemID が残り、仕入元が戻ってもその商品は二度と出品されない
+    (実害: 356901060098 G-SHOCK RANGEMAN が 8/15 に自然終了 → 8/23 に取りこぼし)。
+    本当に失敗した行 (444) は従来どおり触らない。
+    """
     p = tmp_path / "r.csv"
     p.write_text("Line Number,Action,Status,ErrorCode,ItemID\n"
                  "2,End,Success,,111\n"
                  "3,End,Failure,1047,222\n"
-                 "4,End,Success,,333\n", encoding="utf-8")
-    assert W.ended_ids_from_results([str(p)]) == {"111", "333"}
+                 "4,End,Success,,333\n"
+                 "5,End,Failure,931,444\n", encoding="utf-8")
+    assert W.ended_ids_from_results([str(p)]) == {"111", "222", "333"}
 
 
 def test_ended_ids_missing_file_is_ignored():

@@ -80,13 +80,33 @@ def cull_count(current):
     return int(m.group(1)) if m.group(1) else 1
 
 
+# ★2026-08-25: **「既に閉じている」は成功と同じ**。目的 (出品が生きていない) は達成済み。
+#   実害: 356901060098 (G-SHOCK RANGEMAN GW-9400J-1JF) は 8/15 に自然終了しており、
+#   8/23 の取下げで 1047 が返った。Status=Success の行しか後始末しなかったので
+#   **B列に死んだ itemID が残り**、仕入元が戻ってもこの商品は二度と出品されない状態だった。
+#   取下げ側 (cull_end) は 8/24 に同じ穴を塞いだが、スプシの後始末側が残っていた。
+_ALREADY_ENDED_CODE = "1047"
+
+
+def is_ended_row(r):
+    """End 結果 CSV の1行 → その出品はもう生きていないか (純関数, test可)。"""
+    if not (r.get("ItemID") or "").strip():
+        return False
+    if r.get("Status") == "Success":
+        return True
+    if (r.get("ErrorCode") or "").strip() == _ALREADY_ENDED_CODE:
+        return True
+    msg = ((r.get("ErrorMessage") or "") + (r.get("Message") or "")).lower()
+    return "already been closed" in msg or "already closed" in msg
+
+
 def ended_ids_from_results(paths):
-    """eBay の End 結果 CSV 群 → 成功した itemID 集合 (純関数寄り, test可)。"""
+    """eBay の End 結果 CSV 群 → **もう生きていない** itemID 集合 (純関数寄り, test可)。"""
     out = set()
     for p in paths:
         try:
             for r in csv.DictReader(io.open(p, encoding="utf-8-sig")):
-                if r.get("Status") == "Success" and (r.get("ItemID") or "").strip():
+                if is_ended_row(r):
                     out.add(r["ItemID"].strip())
         except OSError:
             continue
