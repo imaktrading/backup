@@ -533,6 +533,16 @@ def main():
         except Exception as e:                                 # noqa: BLE001
             print(f"   ⚠ スプシ更新が最後まで行きませんでした (次回の押下で拾います): "
                   f"{type(e).__name__}: {e}")
+        # ★2026-08-25: 在庫なしシートの「状態」列を実態に戻す。押した瞬間に済みが増えるので、
+        #   ここで直さないと落とした行が「未 (次回の対象)」のまま残る (実際に 122件 残った)。
+        #   eBay は叩かない (funnel CSV と 済み台帳だけ)。
+        try:
+            import oos_status_refresh as OS
+            src = OS.latest_funnel_csv()
+            if src:
+                OS.main_commit(src)
+        except Exception as e:                                 # noqa: BLE001
+            print(f"   ⚠ 在庫なしシートの状態列は次回に持ち越します: {type(e).__name__}: {e}")
     print(f"▶ 残りは レポート再DL → ファネル再実行 → 本ツール再走 で段階的に (1回{CAP}件まで)")
 
 
