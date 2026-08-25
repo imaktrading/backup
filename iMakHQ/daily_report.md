@@ -1717,3 +1717,57 @@ Gemini は pipeline の各コンポーネント（listing_validator, psa_to_csv 
 
 **Features 1項目のみ。** カタログ側は完了 (リスト外0行)。HQ 側の区切り文字
 (`,` → `|`、commit `11d4b22`) を次の入稿で実物確認するのを待っている。
+
+---
+
+## 2026-08-25 追補 — 決定表 (`_contract_aspects.yaml`) を今日の内容に更新
+
+### 背景 (ユーザー指摘)
+
+> 「表はどう整理された？」
+
+**整理できていなかった。** 役割表で「カタログが決めること = `_contract_aspects.yaml` が唯一の表」と
+決めているのに、08-24〜08-25 の作業が反映されておらず `decided` が全項目 `2026-08-22` のままだった。
+数字も **16項目でズレ**ていた (Language 86,279→89,139 / Card Size 同 /
+Country of Origin 36,181→39,041 / Stage 16,673→16,152 / HP 16,622→16,579 / Cost 12,853→12,749 ほか)。
+
+### 決定事項
+
+- 決定1: **作業のたびに表を更新する**。表を直さずにデータだけ直すと、次に見た人が古い前提で判断する
+- 決定2: 決定表の `reason` 欄に **監査の節番号**を書く (§9〜§13)。どの面が見張っているかを表から辿れるようにする
+
+### 変更
+
+- 変更: `tools/build_aspect_contract.py` — 決定表の14項目に理由と日付を入れ直した
+- 変更: `ebay_filter_map/_contract_aspects.yaml` — 再生成 (共有コピー
+  `iMak_data/catalog/_contract_aspects.yaml` も同時更新)
+
+### 検証
+
+- 検証✅: `decided` が `2026-08-25` の項目 = 14 (Game / Card Type / Speciality / Features /
+  Manufacturer / Creature/Monster Type / Card Number / Language / Stage / Card Size /
+  Illustrator / HP / Attack/Power / Defense/Toughness)
+- 検証✅: 35項目中 決定済35 / 未決定0 / 出す22 / 出さない13
+- 検証✅: pytest 773 passed / 1 skipped
+- 検証✅: push 済 (`bfa1480..9a2d2f5`)
+
+### 反省 (本日4回目の同型ミス)
+
+**`Creature/Monster Type` を「全カテゴリ0%」として閉じたが、見ていた列が誤りだった。**
+
+```
+見ていた列: specs.creature_monster_type_ebay  → 0行
+実際の列  : specs.creature_type_ebay          → 遊戯王 31,937行
+```
+
+閉じる判断そのものは変わらない (当社は遊戯王を1枚も出していない) が、**理由が誤り**だった。
+
+本日の測り間違いは計4回で、全部「列名・キーを確かめずに測った」もの:
+
+1. 券面番号を文字列比較 → 「不一致 21,515件」(正しくは0件)
+2. `attribute_ebay` / `cost_ebay` → 「全カテゴリ0」(実列は `color_ebay` / `cost`)
+3. eBay 値リストを `values` で読む → 「一覧は2項目だけ」(正しいキーは `all`、実際は16項目)
+4. `creature_monster_type_ebay` → 「全カテゴリ0%」(実列は `creature_type_ebay`)
+
+**対策: 測る前に決定表の `source` 列を見る。** 表に正しい列名が書いてあるので、
+そこから読めば4回とも防げた。表を「更新する対象」ではなく「**最初に引く場所**」として使う。
