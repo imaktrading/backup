@@ -81,7 +81,8 @@ def test_mass_produced_out_of_stock_still_restock():
 
 def test_status_restock():
     r = _row(item_id="9")
-    assert LF.oos_status(r, cull_ids=set(), done_ids=set()) == "🛒 再仕入れ"
+    # Porter は戻す仕組みが無い → 「再仕入れ」とは書かない (戻る予定に見えるため)
+    assert LF.oos_status(r, cull_ids=set(), done_ids=set()) == "🛒 在庫切れ (戻す口が無い)"
 
 
 def test_status_cull_done():

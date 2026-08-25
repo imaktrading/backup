@@ -31,7 +31,7 @@ def _csv(tmp_path):
 def test_ended_row_becomes_done(tmp_path):
     m = R.build_status_map(_csv(tmp_path), done_ids={"111"})
     assert m["111"] == "🗑 取下げ 済"
-    assert m["222"] == "🛒 再仕入れ"
+    assert m["222"] == "🛒 在庫切れ (戻す口が無い)"   # G-Shock = 戻す仕組みが無い
     assert "取下げ 未" in m["333"]        # $100未満で対象外のまま
 
 
@@ -39,7 +39,7 @@ def test_plan_only_touches_changed_rows(tmp_path):
     m = R.build_status_map(_csv(tmp_path), done_ids={"111"})
     sheet = [["item_id"] + [""] * 17 + ["状態"],
              ["111"] + [""] * 17 + ["🗑 取下げ 未 (次回の対象)"],   # 古い = 直す
-             ["222"] + [""] * 17 + ["🛒 再仕入れ"]]                # 合っている = 触らない
+             ["222"] + [""] * 17 + ["🛒 在庫切れ (戻す口が無い)"]]   # 合っている = 触らない
     ch = R.plan(sheet, m)
     assert ch == [(2, "🗑 取下げ 済")]
 
@@ -48,7 +48,7 @@ def test_row_missing_from_csv_is_left_alone(tmp_path):
     """CSV に無い行は触らない (作り話をしない)。"""
     m = R.build_status_map(_csv(tmp_path), done_ids=set())
     sheet = [["item_id"] + [""] * 17 + ["状態"],
-             ["999"] + [""] * 17 + ["🛒 再仕入れ"]]
+             ["999"] + [""] * 17 + ["🛒 在庫切れ (戻す口が無い)"]]
     assert R.plan(sheet, m) == []
 
 
@@ -70,3 +70,31 @@ def test_ended_row_shows_done_even_if_bucket_moved(tmp_path):
                  "111,Porter Bag,US,189,90,OUT_OF_STOCK|RESTOCK\n", encoding="utf-8")
     m = R.build_status_map(str(p), done_ids={"111"})
     assert m["111"] == "🗑 取下げ 済"
+
+
+# ---- 「再仕入れ」の中身を書き分ける (2026-08-25 ユーザー要望: S列のメンテ) ----
+
+def _funnel(tmp_path, title, flags="OUT_OF_STOCK|RESTOCK"):
+    p = tmp_path / "funnel_20260825.csv"
+    p.write_text("item_id,title,site,price,age_days,flags\n"
+                 f"111,{title},US,189,90,{flags}\n", encoding="utf-8")
+    return str(p)
+
+
+def test_psa10_shows_who_restocks_it(tmp_path):
+    m = R.build_status_map(
+        _funnel(tmp_path, "PSA 10 Pokemon Japanese Charizard #003/184"), done_ids=set())
+    assert m["111"] == "🛒 再仕入れ (PSA10)"
+
+
+def test_ichibankuji_shows_who_restocks_it(tmp_path):
+    m = R.build_status_map(
+        _funnel(tmp_path, "Ichiban Kuji One Piece A Prize Luffy"), done_ids=set())
+    assert m["111"] == "🛒 再仕入れ (一番くじ)"
+
+
+def test_no_owner_is_named_as_such(tmp_path):
+    """戻す口が無いものを「再仕入れ」と書かない (戻る予定に見えてしまう)。"""
+    m = R.build_status_map(
+        _funnel(tmp_path, "CASIO G-Shock GA-B2100BEG-1AJF"), done_ids=set())
+    assert m["111"] == "🛒 在庫切れ (戻す口が無い)"

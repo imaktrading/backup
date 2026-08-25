@@ -627,6 +627,26 @@ def load_cull_done():
     return {str(i) for i in m.load_done()}
 
 
+def restock_owner(r):
+    """在庫切れから **戻す仕組みを持っている担当** の名前。無ければ空文字 (純関数, test可)。
+
+    ★これが「戻せるか」の唯一の判断材料 (2026-08-25 ユーザー確定)。
+      1点ものかどうかは見ない。量産品でも戻す口が無ければ同じように居座るため
+      (実測: Porter 102件 / Amazon 仕入れの G-SHOCK 99件 が誰にも拾われず滞留)。
+    """
+    title = r.get("title") or ""
+    try:
+        from mercari_psa_resource import is_psa10
+    except Exception:
+        def is_psa10(_t):
+            return False
+    if is_psa10(title):
+        return "PSA10"
+    if "ichiban" in title.lower():
+        return "一番くじ"
+    return ""
+
+
 def oos_status(r, cull_ids, done_ids):
     """在庫なしタブの S列「状態」。どのバケツか / CULL なら取り下げ済か (純関数, test可)。
 
@@ -639,7 +659,11 @@ def oos_status(r, cull_ids, done_ids):
     if str(r.get("item_id")) in done_ids:
         return "🗑 取下げ 済"
     if str(r.get("item_id")) not in cull_ids:
-        return "🛒 再仕入れ"
+        # ★2026-08-25: 「再仕入れ」とだけ出すと、**誰も戻さない行まで戻る予定に見える**。
+        #   戻す仕組みを持っているのは PSA10 (補URL) と 一番くじ (景品の代替探索) の2つだけ。
+        #   それ以外は在庫切れのまま居座るので、そう書く (実測 296件中 172件が該当)。
+        owner = restock_owner(r)
+        return f"🛒 再仕入れ ({owner})" if owner else "🛒 在庫切れ (戻す口が無い)"
     m = _cull_end()
     if m is None:
         return "🗑 取下げ 済" if str(r.get("item_id")) in done_ids else "🗑 取下げ 未"
