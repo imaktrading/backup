@@ -48,29 +48,29 @@ CATS = ("pokemon_tcg", "one_piece_tcg", "dragonball_scg", "gundam_tcg", "yugioh_
 
 # ★ここが人の決定。ここ以外に判断を置かない
 D = {
-    "Game":               ("specs.game_ebay", True, "catalog", "", "2026-08-22"),
+    "Game":               ("specs.game_ebay", True, "catalog", "category ごとに1値の定数。監査 §11 で見張る", "2026-08-25"),
     "Card Name":          ("column.name_en", True, "catalog", "", "2026-08-22 綴りを eBay に合わせた"),
     "Set":                ("specs.set_name_ebay", True, "catalog", "", "2026-08-21 HQ 裁定 (コード形)"),
     "Character":          ("specs.character_name", True, "catalog", "", "2026-05-30 日本語混入禁止"),
-    "Manufacturer":       ("specs.manufacturer_ebay", True, "catalog", "", "2026-08-22"),
-    "Card Type":          ("specs.card_type_ebay", True, "catalog", "", "2026-08-22 自由入力と確認 (一覧外の値も出す)"),
+    "Manufacturer":       ("specs.manufacturer_ebay", True, "catalog", "category ごとに1値の定数。監査 §11 で見張る", "2026-08-25"),
+    "Card Type":          ("specs.card_type_ebay", True, "catalog", "公式の種別見出し (<h2>グッズ</h2>) から取る。語彙7つが eBay の Pokémon TCG 11値と1対1。監査 §10 で見張る", "2026-08-25 名前からの推定を廃止 (5,561行)"),
     "Rarity":             ("specs.rarity_ebay", True, "catalog", "空欄8,515行は公式にレアリティ表示が無い=天井", "2026-08-22 実取得で確認"),
-    "Creature/Monster Type": ("specs.creature_type_ebay", True, "catalog", "遊戯王のみ。ポケモンのタイプはここではない", "2026-08-22"),
+    "Creature/Monster Type": ("specs.creature_type_ebay", True, "catalog", "遊戯王のみ 31,937行。当社は遊戯王を1枚も出していないので実質使わない。ポケモンのタイプはここではない", "2026-08-25 閉じた"),
     "Attribute/MTG:Color": ("specs.color_ebay", True, "catalog", "ポケモンのタイプはここ (取得中)", "2026-08-22"),
-    "Features":           ("specs.features_ebay", True, "catalog", "Holo/Reverse Holo は Features に無い (Finish の値)。値は必ずリストで持つ", "2026-08-22 出品側の39値表は廃止"),
-    "Speciality":         ("specs.speciality_ebay", True, "catalog", "", "2026-08-22"),
-    "Card Number":        ("specs.card_number_text", True, "catalog", "", "2026-08-22"),
-    "Language":           ("specs.language", True, "catalog", "", "2026-08-22"),
-    "Card Size":          ("specs.card_size_ebay", True, "catalog", "", "2026-08-22"),
-    "Illustrator":        ("specs.illustrator", True, "catalog", "", "2026-08-22 綴りを eBay に合わせた"),
+    "Features":           ("specs.features_ebay", True, "catalog", "Holo/Reverse Holo は Features に無い (Finish の値)。値は必ずリストで持つ。使用4値は eBay の39値内 (リスト外0行)", "2026-08-25 カタログ側は完了。HQ の区切り文字 (, -> |) 確認待ち"),
+    "Speciality":         ("specs.speciality_ebay", True, "catalog", "ポケモンだけ (EX/V/GX/VMAX/BREAK)。他ゲームに相当する概念が無い", "2026-08-25 閉じた"),
+    "Card Number":        ("specs.card_number_text", True, "catalog", "券面の番号。書式はゲームで違う (ポケモン 001/083 / ワンピ EB02-003) ので数字部分で突合。空欄はすべて cardID-* で公式に番号が刷られていない", "2026-08-25 §12 で見張る (食い違い0)"),
+    "Language":           ("specs.language", True, "catalog", "現物が何語で刷られているか。日本語版4カテゴリは Japanese の定数。遊戯王は English。監査 §11 で見張る", "2026-08-25 空欄2,859行を穴埋め"),
+    "Card Size":          ("specs.card_size_ebay", True, "catalog", "Standard の1値のみ。特大カードの区別はしない (元データに大きさの項目が無い)。監査 §11 で見張る", "2026-08-25 空欄2,859行を穴埋め"),
+    "Illustrator":        ("specs.illustrator", True, "catalog", "取れるカテゴリだけ。ポケモン 21,140/22,111 / ワンピは元データに項目が無く 0", "2026-08-25 閉じた"),
     # ★2026-08-22 変更: 出どころは **PSA の鑑定ラベルの年**。現物に打たれた年で、
     #   cert がある出品では 100% 取れる (catalog の release_year は弾単位の推定で欠けがある)。
     #   catalog の release_year は社内用に残すが eBay には出さない。
     "Year Manufactured":  ("psa_cert", True, "listing", "PSA ラベルの年 (現物に打たれた年)", "2026-08-22 HQ Q2 で確定"),
-    "Stage":              ("specs.stage_ebay", True, "catalog", "", "2026-08-22"),
-    "HP":                 ("specs.hp_ebay", True, "catalog", "", "2026-08-22"),
-    "Attack/Power":       ("specs.attack_power_ebay", True, "catalog", "", "2026-08-22"),
-    "Defense/Toughness":  ("specs.defense_toughness_ebay", True, "catalog", "", "2026-08-22"),
+    "Stage":              ("specs.stage_ebay", True, "catalog", "公式の欄 (span.type) から取る。eBay の9値のうちポケモン向けは Basic/Stage 1/Stage 2/Mega の4つで全部使用済。V進化/レベルアップ/BREAK進化/復元/伝説/V-UNION は**対応する値が無い**ので空欄が正 (Champion/Rookie 等はデジモンの段階)", "2026-08-25 §9/§13 で見張る"),
+    "HP":                 ("specs.hp_ebay", True, "catalog", "ポケモンだけ。Trainer/Energy は持たない (化石の効果文 HP60 を拾っていた 43行を是正)。監査 §13 で見張る", "2026-08-25"),
+    "Attack/Power":       ("specs.attack_power_ebay", True, "catalog", "種別が持たない組み合わせは §13 で見張る。「一部だけ持つ」は正常なこともある (ガンダムの Pilot 等)", "2026-08-25"),
+    "Defense/Toughness":  ("specs.defense_toughness_ebay", True, "catalog", "ガンダムのみ。監査 §13 で見張る", "2026-08-25"),
     # --- 出さないと決めたもの (監査で 0% と出ても穴ではない) ---
     "Finish":             (None, False, "catalog", "現物を見ないと決まらない。公式データに foil/holo の項目が無い", "2026-08-22 ユーザー確定"),
     "Age Level":          (None, False, "catalog", "CPSC (米国消費者製品安全委員会) の関係", "2026-08-22 ユーザー確定"),
