@@ -157,6 +157,7 @@ class AuditResult(NamedTuple):
     card_type_unknown: list
     const_violation: list
     card_number_mismatch: list
+    type_forbidden: list
     name_en_collision: list
 
 
@@ -187,6 +188,24 @@ def _load_allowed():
     except Exception:
         pass
     return master, allow
+
+
+# 13. その種別が持ち得ない項目 (2026-08-25 制定)。
+#   「Trainer に HP は無い」のように **外の正解表が要らない**面。Stage の §9 と同じ形。
+#   実測で見つけた誤り: ポケモン Trainer-Item の hp 43行 (化石の効果文 "HP60" を拾っていた) /
+#   ワンピ Leader の cost 105行 (Leader はライフを持つ。8/22 の修正が variant を取りこぼし)。
+#   ★「一部だけ持っている」は正常なこともある (ガンダムの Pilot は AP/HP 修正を持つ個体が在る)
+#     ので、**0 でなければならない組み合わせだけ**を書く。
+_TYPE_FORBIDDEN = {
+    ("pokemon_tcg", "Trainer-Item"): ("hp", "hp_ebay"),
+    ("pokemon_tcg", "Trainer-Supporter"): ("hp", "hp_ebay"),
+    ("pokemon_tcg", "Trainer-Stadium"): ("hp", "hp_ebay"),
+    ("pokemon_tcg", "Energy-Basic"): ("hp", "hp_ebay", "attack_power_ebay"),
+    ("pokemon_tcg", "Energy-Special"): ("hp", "hp_ebay", "attack_power_ebay"),
+    ("one_piece_tcg", "Leader"): ("cost",),
+    ("one_piece_tcg", "DON!! Card"): ("cost", "attack_power_ebay"),
+    ("dragonball_scg", "Energy Marker"): ("cost", "attack_power_ebay"),
+}
 
 
 def _load_card_types():
@@ -348,6 +367,7 @@ def audit(categories):
     #    product_id の末尾番号が券面のどれかの数字と一致しない = どちらかが誤り。
     #    ★`cardID-*` は券面番号を持たない暫定キーなので対象外 (別件のバックログ)。
     card_number_mismatch = []     # (product_id, card_number_text)
+    type_forbidden = []           # (product_id, card_type_ebay, key, 値)
     _ctype_ok = _load_card_types()
     # 0d. 同じ英名を複数の日本語名が使っている (2026-08-24)
     name_en_collision = []        # (category, name_en, {name_jp: count})
@@ -455,6 +475,14 @@ def audit(categories):
                     (r["product_id"], _ct, s.get("stage") or s.get("stage_ebay")))
 
         # 10. Card Type が eBay の値表に無い (値表を持つ category のみ)
+        # 13. その種別が持ち得ない項目
+        _keys = _TYPE_FORBIDDEN.get((r["category"], s.get("card_type_ebay")))
+        if _keys:
+            for _k in _keys:
+                if s.get(_k) not in (None, "", []):
+                    type_forbidden.append(
+                        (r["product_id"], s.get("card_type_ebay"), _k, s.get(_k)))
+
         # 12. 券面番号 vs product_id
         _cnt = (s.get("card_number_text") or "").strip()
         _base = (r["product_id"] or "").split("_", 1)[0]
@@ -519,7 +547,8 @@ def audit(categories):
         dict(empty_by_cat), dict(drift_by_cat), dict(rarity_by_cat), dict(not_rarity),
         prefix_mismatch, {k: dict(v) for k, v in unregistered.items()},
         code_value_mismatch, stage_on_non_pokemon, card_type_unknown,
-        const_violation, card_number_mismatch, name_en_collision)
+        const_violation, card_number_mismatch, type_forbidden,
+        name_en_collision)
 
 
 def render(era_mismatch, inconsistent, none_list, name_desync, empty_by_cat,
@@ -728,12 +757,12 @@ def main():
      empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
      prefix_mismatch, unregistered, code_value_mismatch,
      stage_on_non_pokemon, card_type_unknown, const_violation,
-     card_number_mismatch, name_en_collision) = (
+     card_number_mismatch, type_forbidden, name_en_collision) = (
         res.era_mismatch, res.inconsistent, res.none_list, res.name_desync,
         res.empty_by_cat, res.drift_by_cat, res.rarity_by_cat, res.not_rarity,
         res.prefix_mismatch, res.unregistered, res.code_value_mismatch,
         res.stage_on_non_pokemon, res.card_type_unknown, res.const_violation,
-        res.card_number_mismatch, res.name_en_collision)
+        res.card_number_mismatch, res.type_forbidden, res.name_en_collision)
     report = render(era_mismatch, inconsistent, none_list, name_desync,
                     empty_by_cat, drift_by_cat, rarity_by_cat, not_rarity,
                     prefix_mismatch, unregistered, code_value_mismatch,
@@ -785,6 +814,7 @@ def main():
         f"card_type_unknown={len(card_type_unknown)} "
         f"const_violation={len(const_violation)} "
         f"card_number_mismatch={len(card_number_mismatch)} "
+        f"type_forbidden={len(type_forbidden)} "
         f"name_en_collision={len(name_en_collision)} "
         f"rarity_raw_stamped={sum(v['raw_stamped'] for v in rarity_by_cat.values())} "
         f"rarity_map_drift={sum(v['map_drift'] for v in rarity_by_cat.values())} "
