@@ -56,3 +56,17 @@ def test_button_refreshes_the_column():
     """取下げボタン (cull_end) が最後に状態列を直すこと。"""
     src = open(os.path.join(_TOOLS, "cull_end.py"), encoding="utf-8").read()
     assert "oos_status_refresh" in src and "main_commit" in src
+
+
+def test_ended_row_shows_done_even_if_bucket_moved(tmp_path):
+    """★落とした事実が最優先。
+
+    取り下げるとスプシの B列が空になり、次の走行では仕入元URLが取れないので、同じ行が
+    RESTOCK に振り直される。バケツで先に判定すると、もう終わっている出品が
+    「🛒 再仕入れ」に見える (実測 133件)。
+    """
+    p = tmp_path / "funnel_20260825.csv"
+    p.write_text("item_id,title,site,price,age_days,flags\n"
+                 "111,Porter Bag,US,189,90,OUT_OF_STOCK|RESTOCK\n", encoding="utf-8")
+    m = R.build_status_map(str(p), done_ids={"111"})
+    assert m["111"] == "🗑 取下げ 済"

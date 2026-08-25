@@ -111,3 +111,28 @@ def test_status_uses_cull_end_gates_not_a_copy():
     body = src[i:i + 1200]
     assert "MIN_AGE" not in body and "MIN_PRICE" not in body, (
         "しきい値を表示側に持たない (cull_end.end_status を呼ぶ)")
+
+
+# ---- ★2026-08-25 追記: メルカリShops を巻き込んだ事故の再発防止 ----
+
+def test_mercari_shops_is_not_one_off():
+    """メルカリShops は **店舗**。量産品を売っているので仕入れ直せる。
+
+    初版はホスト名 (jp.mercari.com) だけで判定したため Shops を1点もの扱いし、
+    8/25 の取下げで 17件を巻き込んだ (うち5件は watcher 付き)。
+    実例: 356886563534 CASIO G-SHOCK DW-9052-1V (watcher 3)。
+    """
+    assert not LF.is_one_off_supply(
+        _row(supply_url="https://jp.mercari.com/shops/product/NeE5M3KATkUHc66gC8oQiV"))
+
+
+def test_mercari_individual_listing_is_still_one_off():
+    """個人の個別出品はこれまでどおり1点もの。"""
+    assert LF.is_one_off_supply(_row(supply_url="https://jp.mercari.com/item/m72314289533"))
+
+
+def test_shops_out_of_stock_stays_restock():
+    w = _row(item_id="356886563534", title="CASIO G-SHOCK DW-9052-1V", watch=3,
+             supply_url="https://jp.mercari.com/shops/product/NeE5M3KATkUHc66gC8oQiV")
+    c = LF.classify([w])
+    assert w in c["RESTOCK"] and w not in c["CULL"]

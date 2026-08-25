@@ -386,8 +386,17 @@ def load_promoted(path):
 #   放置日数の中央値81日・最長166日。仕入元は 107件が jp.mercari.com の個別出品。
 #   ★量産品の仕入元 (amazon / 公式サイト / snkrdunk のように同じ品を複数出品者が出す場) は対象外。
 #   ★仕入元URLが空の行は **触らない** (fail-closed。分からないものを落とす方が高くつく)。
-_ONE_OFF_SUPPLY_HOSTS = ("jp.mercari.com", "item.fril.jp",
-                         "auctions.yahoo.co.jp", "page.auctions.yahoo.co.jp")
+#   ★2026-08-25 修正: **ホスト名だけで判定してはいけない**。メルカリは同じ jp.mercari.com に
+#     個人の個別出品 (`/item/m…`) と **店舗 (メルカリShops `/shops/product/…`)** が同居する。
+#     Shops は量産品を売る店なので仕入れ直せる。ホストだけで見た初版は Shops を1点もの扱いし、
+#     8/25 の取下げで **17件を巻き込んだ** (うち5件は watcher 付き。
+#     例 356886563534 G-SHOCK DW-9052-1V / watcher 3)。**パスまで見る**。
+_ONE_OFF_HOST_PATHS = {
+    "jp.mercari.com": ("/item/",),        # 個人の個別出品だけ。/shops/ は店舗なので除く
+    "item.fril.jp": ("/",),               # ラクマは個別出品
+    "auctions.yahoo.co.jp": ("/",),
+    "page.auctions.yahoo.co.jp": ("/",),
+}
 
 
 def is_one_off_supply(r):
@@ -400,8 +409,11 @@ def is_one_off_supply(r):
         return False                      # 仕入元不明 → 判定しない (fail-closed)
     if "ichiban" in (r.get("title") or "").lower():
         return False                      # 一番くじは景品の代替を探す仕組みがある
-    host = urllib.parse.urlparse(url).netloc
-    return host in _ONE_OFF_SUPPLY_HOSTS
+    p = urllib.parse.urlparse(url)
+    prefixes = _ONE_OFF_HOST_PATHS.get(p.netloc)
+    if not prefixes:
+        return False
+    return any(p.path.startswith(x) for x in prefixes)
 
 
 def classify(rows):
@@ -621,6 +633,11 @@ def oos_status(r, cull_ids, done_ids):
     ★2026-08-25 ユーザー要望。CULL の門 (US限定 / 出品日数 / 金額) は `cull_end` が持つので、
       理由の文言はそこから貰う。ここで条件を書き直すと必ずズレる。
     """
+    # ★2026-08-25: **落とした事実が最優先**。取り下げるとスプシの B列が空になり、次の走行では
+    #   仕入元URLが取れない → バケツが RESTOCK に振り直される。バケツで先に見ると、
+    #   もう終わっている出品が「🛒 再仕入れ」に見える (実測 133件)。
+    if str(r.get("item_id")) in done_ids:
+        return "🗑 取下げ 済"
     if str(r.get("item_id")) not in cull_ids:
         return "🛒 再仕入れ"
     m = _cull_end()
