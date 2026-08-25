@@ -40,7 +40,17 @@ def test_psa_with_real_demand_stays_restock():
     assert _flags([psa2], psa2) == "RESTOCK"
 
 
-def test_non_psa_impr_total_stays_restock():
-    # 非PSA は従来通り impr_total>0 だけで RESTOCK (この変更で壊さない)
+def test_ichibankuji_impr_total_stays_restock():
+    # 一番くじ (戻す仕組みあり) は従来通り impr_total>0 だけで RESTOCK
+    k = _row("Ichiban Kuji Dragon Ball A Prize", impr_total=50.0)
+    assert _flags([k], k) == "RESTOCK"
+
+
+def test_no_restock_owner_is_cull():
+    """★2026-08-25: 戻す仕組みが無いものは、表示があっても CULL。
+
+    旧テストは「非PSA は impr_total>0 で RESTOCK」を守っていたが、その結果
+    G-SHOCK 99件・Porter 102件 が誰にも拾われず滞留した (放置日数の中央値81日)。
+    """
     gs = _row("Casio G-Shock GA-2100", impr_total=50.0)
-    assert _flags([gs], gs) == "RESTOCK"
+    assert _flags([gs], gs) == "CULL"

@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
-"""在庫切れの「中古1点もの」を再仕入れ待ちに置かない + 在庫なしシートに状態を出す (2026-08-25)。
+"""在庫切れを「戻す口があるか」だけで振り分ける + 在庫なしシートの状態列 (2026-08-25)。
 
 ## 何が起きていたか
-Porter (吉田カバン) は中古の1点もので、仕入元はメルカリの個別出品。売れた時点でその個体は
-消えるので、在庫切れになったら二度と戻せない。それなのに「広告の表示があった」だけで
-RESTOCK (再仕入れ待ち) に入り、誰も拾わないまま出品枠を食い続けていた。
+在庫切れの出品が「広告で1回でも表示された」だけで RESTOCK (再仕入れ待ち) に入り、
+誰も拾わないまま出品枠を食い続けていた。実測 (US 1,843件):
+  - Porter 139件中 128件が在庫切れ、うち 102件が RESTOCK。放置日数の中央値81日・最長166日
+  - Amazon 仕入れの G-SHOCK も 99件が同じ状態
+  - 再仕入れの仕組みがあるのは PSA10 (補URL) と 一番くじ (景品の代替探索) の2つだけ
 
-実測 (2026-08-25 のファネル, US 1,843件):
-  - Porter 139件のうち 128件が在庫切れ。うち **102件が RESTOCK**、CULL はわずか 26件
-  - 放置日数の中央値 81日・最長 166日。仕入元は 107件が jp.mercari.com の個別出品
-  - 再仕入れの仕組みがあるのは PSA10 (補URL) と一番くじ (景品の代替探索) だけ
+## 遠回りした経緯 (同じ失敗をしないため残す)
+最初は「中古1点ものか」を仕入元URLの形で見分けようとした。これは2回外している:
+  1. ホスト名だけで見て **メルカリShops (店舗)** を1点もの扱いし、8/25 の取下げで15件を巻き込んだ
+  2. パスまで見るように直したが、店舗が売る **中古リール** は依然1点もので、見分けられない
 
-## 決めたこと (ユーザー指示)
-- 仕入元が中古の個別出品なら、需要があっても RESTOCK に置かず CULL に落とす
-- 量産品の仕入元 (amazon / 公式 / snkrdunk) はこれまでどおり
-- 仕入元URLが空の行は触らない (fail-closed)
-- 在庫なしシートの S列に「どのバケツか / CULL なら取り下げ済か」を出す
+## 決めたこと (ユーザー確定)
+**1点ものかどうかは見ない。** 量産品でも戻す口が無ければ同じように居座る。
+判定は「在庫切れ ∩ 戻す仕組みが無い → 畳む」の一行。
 """
 import os
 import sys
@@ -36,45 +36,58 @@ def _row(**kw):
     return r
 
 
-# ---- 仕入元が中古1点ものか ----
+# ---- 戻す口 (再仕入れの担当) があるか ----
 
-def test_mercari_item_is_one_off():
-    assert LF.is_one_off_supply(_row(supply_url="https://jp.mercari.com/item/m72314289533"))
-    assert LF.is_one_off_supply(_row(supply_url="https://item.fril.jp/abc123"))
-
-
-def test_mass_produced_supply_is_not_one_off():
-    """量産品の仕入元は戻せる → これまでどおり再仕入れ待ちに残す。"""
-    assert not LF.is_one_off_supply(_row(supply_url="https://www.amazon.co.jp/dp/B0XXXX"))
-    assert not LF.is_one_off_supply(_row(supply_url="https://snkrdunk.com/products/1234"))
+def test_owner_is_psa10():
+    assert LF.restock_owner(_row(title="PSA 10 Pokemon Japanese Charizard #003/184")) == "PSA10"
 
 
-def test_unknown_supply_is_left_alone():
-    """仕入元が分からない行は触らない (fail-closed)。"""
-    assert not LF.is_one_off_supply(_row(supply_url=""))
+def test_owner_is_ichibankuji():
+    assert LF.restock_owner(_row(title="Ichiban Kuji One Piece A Prize Luffy")) == "一番くじ"
 
 
-def test_ichibankuji_is_exempt():
-    """一番くじは景品の代替を探す仕組みがあるので1点もの扱いしない。"""
-    assert not LF.is_one_off_supply(
-        _row(title="Ichiban Kuji Dragon Ball Figure", supply_url="https://jp.mercari.com/item/m1"))
+def test_no_owner_for_everything_else():
+    """量産品でも戻す口が無ければ同じ。仕入元URLの形は見ない。"""
+    assert LF.restock_owner(_row(title="YOSHIDA PORTER Tanker Shoulder Bag",
+                                 supply_url="https://jp.mercari.com/item/m1")) == ""
+    assert LF.restock_owner(_row(title="CASIO G-Shock GA-B2100BEG-1AJF",
+                                 supply_url="https://www.amazon.co.jp/dp/B0XXXX")) == ""
+    assert LF.restock_owner(_row(title="Shimano 24 SLX 70HG Baitcast Reel",
+                                 supply_url="https://jp.mercari.com/shops/product/x")) == ""
 
 
 # ---- バケツ振り分け ----
 
-def test_one_off_out_of_stock_goes_to_cull_even_with_demand():
-    porter = _row(item_id="820011324380", supply_url="https://jp.mercari.com/item/m7", watch=18)
+def test_no_owner_out_of_stock_goes_to_cull_even_with_demand():
+    """戻す口が無ければ、需要があっても畳む (誰も戻さないので居座るだけ)。"""
+    porter = _row(item_id="820011324380", watch=18,
+                  supply_url="https://jp.mercari.com/item/m7")
     c = LF.classify([porter])
-    assert porter in c["CULL"], "中古1点ものは需要があっても取下げ側"
-    assert porter not in c["RESTOCK"]
+    assert porter in c["CULL"] and porter not in c["RESTOCK"]
 
 
-def test_mass_produced_out_of_stock_still_restock():
-    gshock = _row(item_id="2", title="CASIO G-Shock GW-M5610", watch=5,
-                  supply_url="https://www.amazon.co.jp/dp/B0XXXX")
-    c = LF.classify([gshock])
-    assert gshock in c["RESTOCK"], "量産品は再仕入れで戻せる"
-    assert gshock not in c["CULL"]
+def test_mass_produced_without_owner_also_culled():
+    """Amazon 仕入れの G-SHOCK も同じ。品は戻せても戻す仕組みが無い (実測99件が滞留)。"""
+    g = _row(item_id="2", title="CASIO G-Shock GW-M5610", watch=5,
+             supply_url="https://www.amazon.co.jp/dp/B0XXXX")
+    c = LF.classify([g])
+    assert g in c["CULL"] and g not in c["RESTOCK"]
+
+
+def test_ichibankuji_with_demand_stays_restock():
+    k = _row(item_id="3", title="Ichiban Kuji Dragon Ball F Prize Goku", watch=4,
+             supply_url="https://jp.mercari.com/item/m9")
+    c = LF.classify([k])
+    assert k in c["RESTOCK"] and k not in c["CULL"]
+
+
+def test_psa10_keeps_the_real_demand_gate():
+    """PSA10 は従来どおり実需 (広告だけの表示では戻さない)。"""
+    weak = _row(item_id="4", title="PSA 10 Pokemon Japanese Pikachu #001/100",
+                watch=0, impr=0, impr_total=900)
+    strong = _row(item_id="5", title="PSA 10 Pokemon Japanese Pikachu #002/100", watch=2)
+    c = LF.classify([weak, strong])
+    assert weak in c["CULL"] and strong in c["RESTOCK"]
 
 
 # ---- 在庫なしシート S列 ----
@@ -112,28 +125,3 @@ def test_status_uses_cull_end_gates_not_a_copy():
     body = src[i:i + 1200]
     assert "MIN_AGE" not in body and "MIN_PRICE" not in body, (
         "しきい値を表示側に持たない (cull_end.end_status を呼ぶ)")
-
-
-# ---- ★2026-08-25 追記: メルカリShops を巻き込んだ事故の再発防止 ----
-
-def test_mercari_shops_is_not_one_off():
-    """メルカリShops は **店舗**。量産品を売っているので仕入れ直せる。
-
-    初版はホスト名 (jp.mercari.com) だけで判定したため Shops を1点もの扱いし、
-    8/25 の取下げで 17件を巻き込んだ (うち5件は watcher 付き)。
-    実例: 356886563534 CASIO G-SHOCK DW-9052-1V (watcher 3)。
-    """
-    assert not LF.is_one_off_supply(
-        _row(supply_url="https://jp.mercari.com/shops/product/NeE5M3KATkUHc66gC8oQiV"))
-
-
-def test_mercari_individual_listing_is_still_one_off():
-    """個人の個別出品はこれまでどおり1点もの。"""
-    assert LF.is_one_off_supply(_row(supply_url="https://jp.mercari.com/item/m72314289533"))
-
-
-def test_shops_out_of_stock_stays_restock():
-    w = _row(item_id="356886563534", title="CASIO G-SHOCK DW-9052-1V", watch=3,
-             supply_url="https://jp.mercari.com/shops/product/NeE5M3KATkUHc66gC8oQiV")
-    c = LF.classify([w])
-    assert w in c["RESTOCK"] and w not in c["CULL"]

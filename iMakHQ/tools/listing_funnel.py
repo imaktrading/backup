@@ -35,7 +35,6 @@ import os
 import re
 import statistics
 import sys
-import urllib.parse
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -378,42 +377,14 @@ def load_promoted(path):
     return out
 
 
-# ★2026-08-25 ユーザー指示: **同じ個体を二度と買えない仕入元は、需要があっても再仕入れに置かない**。
-#   仕入元が個人の中古出品 (メルカリ/ラクマ/ヤフオクの個別ページ) だと、売れた時点でその個体は
-#   消える。代わりを探す仕組みを持っているのは PSA10 (補URL) と一番くじ (景品の代替探索) だけで、
-#   それ以外は誰も拾わないまま枠を食い続ける。
-#   実測 (2026-08-25): Porter 139件中 128件が在庫切れ、うち **102件が RESTOCK に滞留**。
-#   放置日数の中央値81日・最長166日。仕入元は 107件が jp.mercari.com の個別出品。
-#   ★量産品の仕入元 (amazon / 公式サイト / snkrdunk のように同じ品を複数出品者が出す場) は対象外。
-#   ★仕入元URLが空の行は **触らない** (fail-closed。分からないものを落とす方が高くつく)。
-#   ★2026-08-25 修正: **ホスト名だけで判定してはいけない**。メルカリは同じ jp.mercari.com に
-#     個人の個別出品 (`/item/m…`) と **店舗 (メルカリShops `/shops/product/…`)** が同居する。
-#     Shops は量産品を売る店なので仕入れ直せる。ホストだけで見た初版は Shops を1点もの扱いし、
-#     8/25 の取下げで **17件を巻き込んだ** (うち5件は watcher 付き。
-#     例 356886563534 G-SHOCK DW-9052-1V / watcher 3)。**パスまで見る**。
-_ONE_OFF_HOST_PATHS = {
-    "jp.mercari.com": ("/item/",),        # 個人の個別出品だけ。/shops/ は店舗なので除く
-    "item.fril.jp": ("/",),               # ラクマは個別出品
-    "auctions.yahoo.co.jp": ("/",),
-    "page.auctions.yahoo.co.jp": ("/",),
-}
-
-
-def is_one_off_supply(r):
-    """仕入元が「中古1点もの」か (純関数, test可)。
-
-    再仕入れの仕組みを持つ商材 (PSA10 / 一番くじ) は呼び出し側で先に除外する。
-    """
-    url = (r.get("supply_url") or "").strip().lower()
-    if not url:
-        return False                      # 仕入元不明 → 判定しない (fail-closed)
-    if "ichiban" in (r.get("title") or "").lower():
-        return False                      # 一番くじは景品の代替を探す仕組みがある
-    p = urllib.parse.urlparse(url)
-    prefixes = _ONE_OFF_HOST_PATHS.get(p.netloc)
-    if not prefixes:
-        return False
-    return any(p.path.startswith(x) for x in prefixes)
+# ★2026-08-25 ユーザー確定: **在庫切れを戻せるかどうかは「戻す仕組みがあるか」だけで決まる**。
+#   1点ものかどうかは見ない。量産品でも戻す口が無ければ同じように居座るため
+#   (実測: Porter 102件 / Amazon 仕入れの G-SHOCK 99件 が誰にも拾われず滞留。
+#    放置日数の中央値81日・最長166日)。URL の形で1点ものを見分けようとした前の判定は誤りで、
+#    メルカリの店舗が売る中古リールを取りこぼした (8/25 に 15件を巻き込んだ)。
+#   戻す仕組みを持つのは **PSA10 (補URL) と 一番くじ (景品の代替探索)** の2つだけ。
+#   → 戻す口が無い在庫切れは、需要の有無に関わらず 畳む (CULL)。
+#   担当の判定は `restock_owner()` が唯一の口 (S列の表示と同じものを使う = ズレない)。
 
 
 def classify(rows):
@@ -433,17 +404,14 @@ def classify(rows):
     #   すると、再仕入れにも乗らず CULL にも落ちず宙ぶらりんになる(2026-06-28 実データ 211件)。
     #   → PSA は real_demand(=PSA再仕入れと同基準)で判定し、実需ゼロなら CULL(畳む)に落とす。
     #   非PSA は従来通り impr_total>0 を RESTOCK とみなす(各カテゴリの再仕入れ運用に委ねる)。
-    try:
-        from mercari_psa_resource import is_psa10
-    except Exception:
-        def is_psa10(_t): return False
     def _real_demand(r):
         return _demand(r) > 0 or r.get("impr", 0) >= 1   # organic のみ (impr_total=広告は除外)
     def _worth_restock(r):
-        if is_psa10(r.get("title", "")):
+        owner = restock_owner(r)
+        if not owner:
+            return False        # 戻す口が無い → 需要があっても誰も戻さない = 畳む
+        if owner == "PSA10":
             return _real_demand(r)
-        if is_one_off_supply(r):
-            return False        # 同じ個体は二度と買えない → 需要があっても再仕入れできない
         return _demand(r) > 0 or r.get("impr_total", 0) > 0
     restock = [r for r in oos if _worth_restock(r)]
     cull = [r for r in oos if not _worth_restock(r)]
@@ -533,8 +501,8 @@ def write_xlsx(path, rows, c, summary_lines):
         ("OVERPRICED", "適正価格より高い (値下げ余地)"),
         ("NEW_WAIT", "新規出品でimpr低 (時間不足=様子見・改修対象外)"),
         ("RELIST", "取下げ再出品候補 (在庫あり・検索露出ゼロ・watcher無)"),
-        ("RESTOCK", "在庫切れだが需要実証済 (再仕入れ優先)"),
-        ("CULL", "在庫切れ&需要皆無 (出品停止候補)"),
+        ("RESTOCK", "在庫切れ・戻す仕組みあり (PSA10/一番くじ)"),
+        ("CULL", "在庫切れ・戻す口が無い or 需要皆無 (出品停止候補)"),
         ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)"),
     ]
     r0 = 3 + len(summary_lines) + 1
@@ -588,8 +556,8 @@ FUNNEL_BUCKETS = [
     ("OVERPRICED", "適正価格より高い (値下げ余地)", "在庫>0 ∩ 価格>適正価格×1.05"),
     ("NEW_WAIT", "新規出品でimpr低 (時間不足=様子見)", "在庫>0 ∩ 出品 0<age<21日"),
     ("RELIST", "取下げ再出品候補 (露出ゼロ)", "NO_SEARCH ∪ NO_CLICK"),
-    ("RESTOCK", "在庫切れだが需要実証済 (再仕入れ)", "在庫=0 ∩ 需要>0 (生涯販売+watch+90d)"),
-    ("CULL", "在庫切れ&需要皆無 (出品停止候補)", "在庫=0 ∩ 需要=0 (+End時 age≥21)"),
+    ("RESTOCK", "在庫切れ・戻す仕組みあり (PSA10/一番くじ)", "在庫=0 ∩ 戻す担当あり ∩ 需要>0"),
+    ("CULL", "在庫切れ・戻す口が無い or 需要皆無", "在庫=0 ∩ (戻す担当なし or 需要=0)"),
     ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)", "判定基盤無 ∩ 販売0 ∩ watch0"),
 ]
 FUNNEL_COLS = ["item_id", "title", "site", "category", "price", "trend_price", "qty",

@@ -17,8 +17,8 @@ classify = mod.classify
 
 
 def _row(item_id, impr=0.0, ctr=0.0, sold=0, sales90=0, watch=0, qty=1,
-         price=100.0, trend=0.0, has_lqr=True, age=60, site="US"):
-    return {"item_id": item_id, "title": item_id, "site": site, "category": "X",
+         price=100.0, trend=0.0, has_lqr=True, age=60, site="US", title=None):
+    return {"item_id": item_id, "title": title or item_id, "site": site, "category": "X",
             "qty": qty, "sold_qty": sold, "sales90": sales90, "watch": watch,
             "price": price, "trend_price": trend, "impr": impr, "ctr": ctr,
             "has_lqr": has_lqr, "age_days": age, "photos": 3, "keywords": 8}
@@ -114,17 +114,23 @@ def test_relist_is_all_nosearch_and_noclick():
 
 
 def test_out_of_stock_split_restock_vs_cull():
-    """在庫切れは需要シグナルで分岐: 過去販売/watch/90d販売 有=RESTOCK, 皆無=CULL。需要大きい順。"""
+    """在庫切れの分岐 (★2026-08-25 改訂)。
+
+    まず **戻す仕組みがあるか**。仕組みを持つのは PSA10 と 一番くじ の2つだけで、
+    そこで初めて需要シグナル (過去販売/watch/90d販売) を見る。仕組みが無いものは
+    需要があっても誰も戻さないので CULL (実測: Porter 102件 / G-SHOCK 99件 が滞留していた)。
+    """
     rows = [
-        _row("sold_oos", qty=0, sold=3, watch=0),     # 過去販売 → RESTOCK
-        _row("watch_oos", qty=0, sold=0, watch=5),    # watcher → RESTOCK
-        _row("s90_oos", qty=0, sold=0, watch=0, sales90=2),  # 90d販売 → RESTOCK
-        _row("dead_oos", qty=0, sold=0, watch=0, sales90=0),  # 需要皆無 → CULL
+        _row("sold_oos", qty=0, sold=3, watch=0, title="Ichiban Kuji A Prize"),
+        _row("watch_oos", qty=0, sold=0, watch=5, title="Ichiban Kuji B Prize"),
+        _row("s90_oos", qty=0, sold=0, watch=0, sales90=2, title="Ichiban Kuji C Prize"),
+        _row("dead_oos", qty=0, sold=0, watch=0, sales90=0, title="Ichiban Kuji D Prize"),
+        _row("no_owner", qty=0, sold=0, watch=9, title="YOSHIDA PORTER Tanker Bag"),
     ]
     c = classify(rows)
     assert {r["item_id"] for r in c["RESTOCK"]} == {"sold_oos", "watch_oos", "s90_oos"}
-    assert {r["item_id"] for r in c["CULL"]} == {"dead_oos"}
-    # 需要大きい順: sold_oos(3)+? ... watch_oos(5) が先頭
+    assert {r["item_id"] for r in c["CULL"]} == {"dead_oos", "no_owner"}
+    # 需要大きい順: watch_oos(5) が先頭
     assert c["RESTOCK"][0]["item_id"] == "watch_oos"
 
 

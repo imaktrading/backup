@@ -8,6 +8,11 @@
 (実測: CULL 1755中 474件が impr_total>=10。Luffy/Ace/Uta/Boa 等の人気どころ)。
 修正: impr_total>=10(eBayが十分表示=関連性) を需要シグナルとして RESTOCK。露出もほぼ無い
 (impr_total<10)かつ販売/watch/90d=0 だけが真の死筋=CULL。
+
+★2026-08-25 改訂: この露出ルールは **戻す仕組みを持つ商材 (PSA10 / 一番くじ) にだけ**効く。
+  仕組みが無いものは需要があっても誰も戻さず居座るので CULL に落ちる
+  (実測: Porter 102件 / Amazon 仕入れの G-SHOCK 99件 が放置日数の中央値81日で滞留)。
+  よって以下のテストは 一番くじ のタイトルで書く (露出ルール自体は変えていない)。
 """
 import importlib.util
 import os
@@ -19,7 +24,7 @@ _spec.loader.exec_module(lf)
 
 
 def _oos(iid, **kw):
-    r = {"item_id": iid, "qty": 0, "sold_qty": 0, "watch": 0, "sales90": 0, "age_days": 60,
+    r = {"item_id": iid, "title": "Ichiban Kuji A Prize Figure", "qty": 0, "sold_qty": 0, "watch": 0, "sales90": 0, "age_days": 60,
          "price": 100.0, "trend_price": 0.0, "impr": 0.0, "ctr": 0.0,
          "impr_total": 0.0, "ctr_total": 0.0, "has_lqr": False, "has_pl": False}
     r.update(kw)
@@ -60,3 +65,15 @@ def test_oos_with_watch_still_restock():
     f = _flags(c, "watched")
     assert "RESTOCK" in f
     assert "CULL" not in f
+
+
+def test_no_restock_owner_is_cull_even_with_exposure():
+    """★2026-08-25: 戻す仕組みが無ければ、いくら表示されていても CULL。
+
+    誰も戻さないので、置いておくと出品枠を食うだけ (この行が今回の変更の本体)。
+    """
+    c = lf.classify([_oos("porter", title="YOSHIDA PORTER Tanker Bag",
+                          impr_total=1000, watch=5)])
+    f = _flags(c, "porter")
+    assert "CULL" in f
+    assert "RESTOCK" not in f
