@@ -14,8 +14,8 @@
       空いた分を成績の良いカテゴリに回す。
 
 落とす順 (上から埋めて、目標額に達したら止める):
-    ① 仕入元が死んでいる   … 買えないので稼ぎようがない。空く額の大きい順
-    ② 出品30日超・未販売   … **アクセス (累計表示) の少ない順**
+    ① 仕入元が死んでいる   … 買えないので稼ぎようがない。**全カテゴリ**。空く額の大きい順
+    ② 出品30日超・未販売   … **TCG と G-SHOCK だけ**。アクセス (累計表示) の少ない順
 
     ★閾値は設けない (2026-08-26 ユーザー確定)。「表示◯回以上なら」という線は
       カテゴリごとに桁が違って必ずどちらかを取りこぼすので、順位で決める。
@@ -25,6 +25,7 @@
 触らない:
     ・出品30日未満 (まだ判定できない)
     ・売れた実績あり
+    ・TCG / G-SHOCK 以外で仕入元が活きているもの (稼いでいるカテゴリを減らさない)
     ・US 以外 (UK/AU/CA は eBaymag のミラー。親を落とせば消える)
 
 使い方:
@@ -48,7 +49,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cull_end as CE          # noqa: E402
 import listing_funnel as LF    # noqa: E402
 
-RATIO = 1.3          # 出品額に対して落とす倍率
+# 出品額に対して落とす倍率。1.0 = 出した分だけ入れ替える (棚は一定)。
+# ★1.3 (棚を空ける) から 1.0 に戻した (2026-08-26 ユーザー確定)。空きが要らない状況で
+#   余計に落とすと、並べていれば売れたかもしれないものを捨てることになる。
+#   月末にリミットが迫った時など、空けたい時だけ --ratio を上げる。
+RATIO = 1.0
 REPORT_GLOB = r"C:\dev\iMak_data\seller_hub\reports\**\eBay-all-active-listings-report-*.csv"
 CSV_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "csv_output"))
 
@@ -57,6 +62,12 @@ TIER_NAME = {TIER_OOS: "① 仕入元が死んでいる",
              TIER_STALE: "② 30日超・未販売 (アクセスの少ない順)"}
 # 出品からこれ未満は「まだ判定できない」ので触らない。
 MIN_AGE_DAYS = 30
+# ★②(仕入元が活きている分)を落とすカテゴリ (2026-08-26 ユーザー確定)。
+#   棚の86%を占めるのがこの2つで、ここを入れ替えないと新規を出す場所が作れない。
+#   Tシャツ等は棚$1,000あたり利益 ¥3,501 と一番稼いでいるので触らない
+#   (実測: TCG ¥97 / G-SHOCK ¥0 に対して36倍)。
+#   ①(仕入元が死んでいる)は **全カテゴリ**が対象。買えないものを残す意味は無い。
+STALE_CATEGORIES = ("TCG", "G-shock")
 
 
 def _f(v):
@@ -66,23 +77,28 @@ def _f(v):
         return 0.0
 
 
-def tier_of(row, min_age=MIN_AGE_DAYS):
+def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIES):
     """その出品を落とす順の何番に置くか。触らないものは None (純関数, test可)。
 
-    ★2026-08-26 ユーザー確定: **閾値を設けない**。表示回数がいくつ以上なら…という線は引かず、
-      「30日超・未販売」を対象にして、その中を **アクセスの少ない順** に落とす。
-      固定の閾値はカテゴリごとに桁が違って必ずどちらかを取りこぼす。
+    ★2026-08-26 ユーザー確定:
+      ・**閾値を設けない**。「表示◯回以上なら」の線はカテゴリごとに桁が違って必ず取りこぼす。
+        「30日超・未販売」を対象にして、その中を **アクセスの少ない順** に落とす。
+      ・**仕入元が死んでいる分は全カテゴリ**。買えないものを残す意味は無い。
+      ・**仕入元が活きている分は TCG と G-SHOCK だけ**。棚の86%がこの2つで、
+        稼いでいるカテゴリ (Tシャツ等) を減らすのは目的に反する。
     """
     if _f(row.get("qty")) == 0:
-        return TIER_OOS                   # 買えないので稼ぎようがない
+        return TIER_OOS                   # 買えないので稼ぎようがない (全カテゴリ)
     if _f(row.get("sold_qty")) + _f(row.get("sales90")) > 0:
         return None                       # 売れた実績あり
     if _f(row.get("age_days")) < min_age:
         return None                       # まだ判定できない
+    if stale_cats and category not in stale_cats:
+        return None                       # 稼いでいるカテゴリは触らない
     return TIER_STALE
 
 
-def pick(rows, target, shelf_of):
+def pick(rows, target, shelf_of, cat_of=None):
     """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。
 
     ① は空く額の大きい順 (1件で空く額が大きいほうが先)。
@@ -90,7 +106,7 @@ def pick(rows, target, shelf_of):
     """
     cand = []
     for r in rows:
-        t = tier_of(r)
+        t = tier_of(r, category=(cat_of(r) if cat_of else None))
         if t is None:
             continue
         rank = -shelf_of(r) if t == TIER_OOS else _f(r.get("impr_total"))
@@ -123,7 +139,7 @@ def listed_today_amount(csv_dir=CSV_DIR, today=None):
 
 
 def _load():
-    """(funnel の US 行, itemID→ミラー込み棚額) を返す。"""
+    """(funnel の US 行, itemID→ミラー込み棚額, 行→カテゴリ) を返す。"""
     done = CE.load_done()
     fr = [r for r in csv.DictReader(
         open(sorted(glob.glob(os.path.join(LF.OUT_DIR, "funnel_*.csv")))[-1],
@@ -139,9 +155,28 @@ def _load():
             seen.add(i)
             if (r.get("Listing site") or "").strip() != "US":
                 mir[LF._title_key(r.get("Title"))] += _f(r.get("Current price"))
+
     def shelf_of(row):
         return _f(row.get("price")) + mir.get(LF._title_key(row.get("title")), 0.0)
-    return fr, shelf_of
+
+    # カテゴリは商品管理シートの R列が正 (funnel の eBay カテゴリは混在して信用できない)。
+    import gspread
+    from google.oauth2.service_account import Credentials
+    gc = gspread.authorize(Credentials.from_service_account_file(
+        LF.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets",
+                               "https://www.googleapis.com/auth/drive"]))
+    by_item = {}
+    for sid in LF.SHEET_IDS:
+        for row in gc.open_by_key(sid).get_worksheet_by_id(LF.SHEET_GID).get_all_values()[1:]:
+            iid = (row[1] if len(row) > 1 else "").strip()
+            c = (row[17] if len(row) > 17 else "").strip()
+            if iid.isdigit() and c:
+                by_item[iid] = c
+
+    def cat_of(row):
+        return by_item.get(row.get("item_id"))
+
+    return fr, shelf_of, cat_of
 
 
 def main():
@@ -155,15 +190,16 @@ def main():
     except Exception:                                          # noqa: BLE001
         pass
 
-    rows, shelf_of = _load()
+    rows, shelf_of, cat_of = _load()
     listed = listed_today_amount()
     target = a.amount if a.amount is not None else listed * a.ratio
     print(f"今日の出品額 ${listed:,.0f} × {a.ratio} = **落とす目標 ${target:,.0f}**")
-    print(f"対象: 仕入元が死んでいるもの → 出品{MIN_AGE_DAYS}日超で未販売のものを アクセスの少ない順")
+    print(f"対象: 仕入元が死んでいるもの(全カテゴリ) → {'/'.join(STALE_CATEGORIES)} の"
+          f"出品{MIN_AGE_DAYS}日超・未販売を アクセスの少ない順")
     if target <= 0:
         print("  今日はまだ出品していないので、落とす分もありません")
         return 0
-    picked, total = pick(rows, target, shelf_of)
+    picked, total = pick(rows, target, shelf_of, cat_of)
     if not picked:
         print("  落とせる候補がありません")
         return 0
