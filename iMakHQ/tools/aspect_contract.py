@@ -13,6 +13,7 @@
     - emit=false の項目に値が入っている        → 止める (ERROR)
     - emit=true の項目が空                     → カタログの空欄として数える (INFO)
     - 表に無い項目                             → 判定しない。カタログに投げる (INFO)
+    - 値はあるが catalog の値と違う            → 止める (ERROR)  ← 2026-08-26 追加
 
 表が読めない時は **何も言わない** (従来の検査だけが動く)。表の不在を根拠に
 出品を止めると、カタログ側の一時的な不調で出品が止まるため。
@@ -84,4 +85,69 @@ def contract_findings(headers, row, contract=None):
             src = str(rec.get("source") or "")
             out.append(("INFO",
                         f"空欄です (契約では出す項目): {aspect} — 担当={owner} 出どころ={src}"))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 「値はあるが catalog の値と違う」の照合 (2026-08-26)
+#
+# なぜ: 8/25 の入稿で 7セルの誤値 (C:Attack/Power に HP / C:Cost に Leader の LIFE /
+#   C:Attribute に Vision の色) を通したのに、監査くんは「除外0 / カタログ依頼0 /
+#   プログラム依頼0」だった。`contract_findings` は ①出さない項目に値 ②出す項目が空
+#   ③表に無い項目 の3つしか見ておらず、**catalog の値と違う** を見ていなかった。
+#   突合に要る canonical sidecar (`*.canonical.json`) は毎回出ている。
+#
+# ここでも判断は持たない。**expected は呼び出し側が catalog から作って渡す**
+# (この module は表と2つの値を比べるだけ)。
+# 依頼書: hq/requests/2026-08-25_act_code_proposals_tcg.md 提案5
+# ---------------------------------------------------------------------------
+
+def _values(v):
+    """CSV の複数値 (`Promo|Alternative Art`) と catalog の list を同じ形にする。"""
+    if v is None:
+        return set()
+    parts = ([str(x) for x in v] if isinstance(v, (list, tuple))
+             else str(v).split("|"))
+    return {p.strip() for p in parts if p.strip()}
+
+
+def is_catalog_owned(col: str, contract) -> bool:
+    """その列の値を catalog が決めるか (emit=true かつ source が specs.*)。"""
+    rec = (contract or {}).get(aspect_of(col))
+    if not rec or not rec.get("emit"):
+        return False
+    return str(rec.get("source") or "").startswith("specs.")
+
+
+def catalog_mismatch_findings(headers, row, contract=None, expected=None):
+    """CSV の値と catalog の値の差だけを返す [(severity, msg)] (純関数)。
+
+    expected: {CSV列名: catalog 由来の値}。**引けなかった列は入れない** —
+      入っていない列は判定しない (catalog を引けなかったことを「不一致」に倒さない)。
+    """
+    if contract is None or not expected:
+        return []
+    out = []
+    for idx, col in enumerate(headers):
+        if not col.startswith(_PREFIX) or col not in expected:
+            continue
+        if not is_catalog_owned(col, contract):
+            continue
+        got = _values(row[idx] if idx < len(row) else "")
+        want = _values(expected[col])
+        if got == want:
+            continue
+        aspect = aspect_of(col)
+        if got and not want:
+            out.append(("ERROR",
+                        f"カタログが持たない値が入っています: {aspect}="
+                        f"{'|'.join(sorted(got))!r} — カタログは空欄"))
+        elif got:
+            out.append(("ERROR",
+                        f"カタログの値と違います: {aspect}={'|'.join(sorted(got))!r} "
+                        f"— カタログ={'|'.join(sorted(want))!r}"))
+        else:
+            out.append(("ERROR",
+                        f"カタログの値を写せていません: {aspect} が空欄 "
+                        f"— カタログ={'|'.join(sorted(want))!r}"))
     return out

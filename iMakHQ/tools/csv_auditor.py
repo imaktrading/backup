@@ -103,7 +103,58 @@ CATEGORY_MAP = {
 _SHARED_PATHS = [os.path.join(WORKSPACE, "iMakeBayAPI")]
 
 
-from aspect_contract import contract_findings, load_contract   # 2026-08-22 契約照合
+from aspect_contract import (catalog_mismatch_findings,       # 2026-08-26 値の照合
+                             contract_findings, load_contract)  # 2026-08-22 契約照合
+
+
+# ---------------------------------------------------------------------------
+# canonical sidecar → catalog の値 (2026-08-26)
+#
+# なぜ: 8/25 の入稿で 7セルの誤値を通したのに「除外0 / カタログ依頼0 / プログラム依頼0」
+#   だった。契約照合が「値はあるが catalog と違う」を見ていなかったため。
+#   出品CSVと並置の `<basename>.canonical.json` が cert → `category:product_id` を
+#   持っているので、突合に必要な物はそろっている。
+# 依頼書: hq/requests/2026-08-25_act_code_proposals_tcg.md 提案5
+# ---------------------------------------------------------------------------
+_CATALOG_DB_PATH = r"C:/dev/iMak_data/catalog/products.sqlite"
+
+
+def load_canonical_sidecar(csv_path):
+    """`<basename>.canonical.json` の cert → `category:product_id`。無ければ {}。"""
+    try:
+        p = (csv_path[:-4] if str(csv_path).endswith(".csv") else str(csv_path)) \
+            + ".canonical.json"
+        with open(p, encoding="utf-8") as f:
+            return {str(k): str(v) for k, v in (json.load(f).get("by_cert") or {}).items()}
+    except Exception:                                   # noqa: BLE001
+        return {}
+
+
+def catalog_expected_fields(key):
+    """`category:product_id` → 出品くんが catalog から作るはずの列の値。
+
+    引けない時は {} (= 照合しない)。**判定は増やさない** — 変換規則は出品くんの
+    `tcg_listing_fields.map_specs_to_fields` に SSOT。ここで書き直すと 2箇所に真理表が
+    できて必ずズレる (psa_preflight の scope で 2026-08-21 に起きた事故と同型)。
+    """
+    if not key or ":" not in key:
+        return {}                                       # 旧 sidecar (category 無し) は照合しない
+    cat, _, pid = key.partition(":")
+    try:
+        import sqlite3
+        sys.path.insert(0, os.path.join(WORKSPACE, "iMakTCG"))
+        from tcg_listing_fields import map_specs_to_fields
+        con = sqlite3.connect(_CATALOG_DB_PATH)
+        row = con.execute("SELECT specs, name_en, language FROM products "
+                          "WHERE category=? AND product_id=?", (cat, pid)).fetchone()
+        con.close()
+        if not row:
+            return {}
+        specs = json.loads(row[0] or "{}")
+        specs["_name_en"], specs["_language"] = row[1] or "", row[2] or ""
+        return map_specs_to_fields(specs)
+    except Exception:                                   # noqa: BLE001
+        return {}
 
 
 def _market_lookup_enabled():
@@ -199,6 +250,12 @@ def classify_finding(severity, msg):
     # 空欄 / 表に無い項目 は **数えるだけ**。監査くんは判定しない (2026-08-22 役割確定)
     if m.startswith("空欄です (契約では出す項目)") or m.startswith("契約表に無い項目"):
         return INFO_ONLY
+    # ★2026-08-26: catalog の値と食い違う = **写し方 (②) の誤り**なので program。
+    #   カタログに投げない (表の値は正で、出品側が別の値を載せている)。
+    #   依頼書: hq/requests/2026-08-25_act_code_proposals_tcg.md 提案5
+    if (m.startswith("カタログが持たない値") or m.startswith("カタログの値と違います")
+            or m.startswith("カタログの値を写せていません")):
+        return REPORT_PROGRAM
     # --- データ誤り (catalog) ---
     if "不整合" in m or "誤マップ" in m:
         return EXCLUDE_CATALOG
@@ -888,6 +945,15 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
         print("  ⚠️ カタログの決定表が読めません → 契約照合はスキップ "
               "(C:/dev/iMak_data/catalog/_contract_aspects.yaml)")
 
+    # --- 値そのものを catalog と突き合わせる (canonical sidecar 経由・2026-08-26) ---
+    _sidecar = {} if is_generic else load_canonical_sidecar(csv_path)
+    if _contract and not is_generic:
+        if _sidecar:
+            print(f"  🔎 catalog と値を突合: {len(_sidecar)} 件 (canonical sidecar)")
+        else:
+            print("  ⚠️ canonical sidecar が無い → 値の突合はスキップ "
+                  "(<CSV名>.canonical.json)")
+
     # --- 行ごとに findings → disposition 集約 ---
     exclude_idx = []          # 1-based 除外行
     catalog_items, program_items = [], []
@@ -909,6 +975,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
                      if _cert_i is not None and _cert_i < len(row) else "")
             if _cert:
                 findings += psa_identity_findings(headers, row, _psa_meta(_cert))
+                if _sidecar.get(_cert):
+                    findings += catalog_mismatch_findings(
+                        headers, row, _contract, catalog_expected_fields(_sidecar[_cert]))
         disps = [classify_finding(sev, msg) for sev, msg in findings]
         sku = _row_sku(headers, row)
         _ident = card_identity(headers, row)
