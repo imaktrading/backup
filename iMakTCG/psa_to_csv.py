@@ -3079,7 +3079,7 @@ def _psa_cloudflare_warmup():
 
 
 def _queue_finding(category, item_id, field, evidence, *, layer="A",
-                   finding_type="catalog_gap", identity=""):
+                   finding_type="catalog_gap", identity="", reopen_closed=False):
     """弾いた理由を改善キューに積む (= 次の監査で依頼/残務に流れる)。
 
     ★2026-08-18: 出品くんが弾いたもののうち、**画像が無い / 自己チェックで落ちた** は
@@ -3098,7 +3098,8 @@ def _queue_finding(category, item_id, field, evidence, *, layer="A",
                                  evidence=str(evidence)[:120], source="generator",
                                  layer=layer, finding_type=finding_type,
                                  identity=identity,
-                                 ts=datetime.now().strftime("%Y-%m-%d"))
+                                 ts=datetime.now().strftime("%Y-%m-%d"),
+                                 reopen_closed=reopen_closed)
         con.commit()
         con.close()
         return True
@@ -3219,6 +3220,15 @@ def main():
                 _kept.append(_c); _unknown += 1; continue      # 例外も残す
             if _st in ("GAP", "OUT-OF-SCOPE"):
                 _drop.setdefault(_st, []).append(_c)
+                # ★2026-08-26: **今日また落ちた**という観測をキューに積む。クローズ済でも
+                #   pending に戻す (閉じたのに直っていない、を見えるようにする)。
+                #   OUT-OF-SCOPE は「参入しない」と決めた分なので積まない。
+                #   依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (付随)
+                if _st == "GAP":
+                    _queue_finding(_r.get("category") or "tcg", f"cert{_c}", "catalog_add",
+                                   f"今日も除外: {_r.get('reason', 'GAP')}"[:120],
+                                   identity=f"{_r.get('brand', '')} #{_r.get('num', '')}"[:200],
+                                   reopen_closed=True)
                 continue
             # ★2026-08-11: **catalog に画像が無いカードは目視で照合できず必ず落ちる**。
             #   枠を食ってから消えるので先に除く (2026-08-10 実走: 10件中2件がこれで脱落)。

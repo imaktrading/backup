@@ -192,6 +192,46 @@ _CERT_RE = re.compile(r"cert(\d{6,})")
 #   のどれかなら **catalog に不足は無い** ので依頼しない。GAP の時だけ依頼する。
 #
 # fail-closed: cert が抜けない / cache が無い / 例外 → **従来どおり依頼を出す**。
+#
+# ★2026-08-26: **人が既に「該当なし (NONE)」と答えた cert では REVIEW を落とさない**。
+#   cert163955605 は目視で NONE と答えられ missing_models.csv に載ったが、その直後に
+#   ここが `REVIEW P-001, P-001_B, …` を根拠に「別 id で catalog に在る」と判断して
+#   行を消した。結果、missing_models / processed / viewer_disagreement / pdca queue の
+#   **どこにも残らなかった**。人が見て「違う」と言っている以上、候補が在ることは反証に
+#   ならない (しかも正解 `ST21-001_p2` は候補に出ていなかった)。
+#   落とす時も viewer_disagreement.log だけにせず、pdca queue に pending で積む
+#   (= 再発が digest に載る)。
+#   依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (b)
+def _human_said_none(cert: str) -> bool:
+    """目視台帳で `NONE` (該当なし) と答えられた cert か。読めなければ False。"""
+    try:
+        d = json.loads(Path(r"C:/dev/iMak_data/dedupe/verified_certs.json")
+                       .read_text(encoding="utf-8")) or {}
+    except Exception:                       # noqa: BLE001
+        return False
+    rec = d.get(str(cert))
+    return isinstance(rec, dict) and (rec.get("choice") or "").upper() == "NONE"
+
+
+def _queue_resolver_drop(category: str, cert: str, model: str, status: str, found: str):
+    """resolver を根拠に落とした件を pdca queue に pending で積む (握り潰し禁止)。"""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import pdca_store as _p
+        con = _p.connect()
+        _p.upsert_improvement(
+            con, category, f"cert{cert}", "catalog_add",
+            evidence=f"resolver={status} 候補={found} (依頼は出さずここに積んだ)",
+            source="missing_models", finding_type="catalog_gap",
+            identity=model[:200],
+            ts=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            reopen_closed=True)
+        con.commit()
+        con.close()
+    except Exception as e:                  # noqa: BLE001
+        print(f"[warn] pdca queue へ積めなかった cert{cert}: {e}")
+
+
 def _filter_resolver_resolves(new_by_cat: dict[str, list[dict]],
                               unique: dict[tuple[str, str], dict] | None = None) -> int:
     """catalog に別 id で実在するものを落とし、件数を返す (判定不能は残す)。"""
@@ -229,10 +269,18 @@ def _filter_resolver_resolves(new_by_cat: dict[str, list[dict]],
                 if status not in ("RESOLVED", "INDEX-FAILURE", "REVIEW"):
                     kept.append(r)
                     continue
+                cert = m.group(1)
+                if status == "REVIEW" and _human_said_none(cert):
+                    # 人が「該当なし」と答えている。候補が在ることは反証にならない
+                    print(f"    ⏳ 落とさない (人が NONE と答えた cert): "
+                          f"{category} cert{cert} → REVIEW")
+                    kept.append(r)
+                    continue
                 found = (res.get("product_id") or res.get("recovered")
                          or ", ".join(res.get("candidates") or []))
                 print(f"    ⏭️ Skip auto_catalog_add (別 id で catalog に在る): "
-                      f"{category} cert{m.group(1)} → {status} {found}")
+                      f"{category} cert{cert} → {status} {found}")
+                _queue_resolver_drop(category, cert, model, status, found)
                 if unique is not None:
                     unique.pop((category, model), None)
                 removed += 1

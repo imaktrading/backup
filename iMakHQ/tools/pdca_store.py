@@ -53,9 +53,34 @@ def compute_priority(finding_type: str, seen_count: int = 1, confidence: float =
     return round(sev * sc * (0.5 + 0.5 * cf) * ai, 3)
 
 
+# item_id に混ざる cert 番号。ここから先の言い回しは鍵に入れない (2026-08-26)。
+_CERT_IN_ITEM_RE = re.compile(r"cert(\d{6,})")
+
+
+def normalize_item_key(item_id: str) -> str:
+    """同じカードを指す item_id を1つの鍵に揃える (純関数)。
+
+    ★2026-08-26: item_id が missing_models.csv 由来の **長文**で、依頼文の言い回しが
+      変わるたびに別の鍵になっていた。実測 cert139291730 は
+        queue 444 (…(auto△=該当なし 要調査))      seen 26 / scope_out
+        queue 529 (…(auto…SM9a-067=該当なし …))    seen  1 / done
+        queue 561 (…(catalog SM9a-067 は在るが…))  seen  1 / done
+      の **3行に割れて全部クローズ済**。それでも同じ cert が毎日落ちていたのに、
+      再発 (`status='pending' AND seen_count>=2`) には構造的に載らない。
+      cert が読み取れる item_id は `cert<番号>` だけを鍵にする。
+      依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (付随)
+    """
+    s = (item_id or "").strip()
+    m = _CERT_IN_ITEM_RE.search(s)
+    return f"cert{m.group(1)}" if m else s
+
+
 def dedup_key(category: str, item_id: str, target_field: str, suggested_value: str = "") -> str:
-    """改善キューの重複判定キー (純関数)。同一 item×field×値 は1件に集約。"""
-    return "|".join([(category or "").strip(), (item_id or "").strip(),
+    """改善キューの重複判定キー (純関数)。同一 item×field×値 は1件に集約。
+
+    item_id に cert 番号が在る時は **(category, cert)** だけで揃える (言い回しは入れない)。
+    """
+    return "|".join([(category or "").strip(), normalize_item_key(item_id),
                      (target_field or "").strip(), (suggested_value or "").strip()])
 
 
@@ -161,10 +186,18 @@ def upsert_gap_keyword(con, card_id, keyword, rate, ts=""):
 
 def upsert_improvement(con, category, item_id, target_field, suggested_value="", *,
                        evidence="", source="", layer="A", confidence=1.0,
-                       finding_type="other", identity="", ts=""):
+                       finding_type="other", identity="", ts="", reopen_closed=False):
     """改善候補を upsert。既存(同 dkey)なら seen_count++ で再発を数え priority 再計算。
 
     done 済の dkey が再発したら status を pending に戻す (= 直したのにまた出た → 再発行対象)。
+
+    reopen_closed=True: **今日また実際に落ちた**という新しい観測を積む時だけ渡す。
+      done 以外のクローズ済 (scope_out / stale / resolved) からも pending に戻す。
+      ★2026-08-26: cert139291730 は 3行に割れて全部クローズ済のまま、毎日 GAP で
+        落ち続けていた。「閉じたのに直っていない」を見えるようにする。
+        既定 False = 従来どおり (missing_models.csv の毎日の再 import で stale が
+        復活する オシレーションは起こさない)。
+      依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (付随)
 
     identity: item_id が何の商品かを Catalog が解決できる手掛かり (TCG なら
       「カード番号 | カード名 | セット名」)。item_id (m*/PSA10-* = 出品ID) 単体では
@@ -177,7 +210,11 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
                       (dk,)).fetchone()
     if row:
         seen = (row["seen_count"] or 1) + 1
-        new_status = "pending" if row["status"] == "done" else row["status"]
+        _closed = ("done", "scope_out", "stale", "resolved", "resolver_gap")
+        new_status = ("pending"
+                      if row["status"] == "done"
+                      or (reopen_closed and row["status"] in _closed)
+                      else row["status"])
         pri = compute_priority(finding_type, seen, confidence)
         # identity は「空の既存行に埋める / 新しい値で更新」。取得できなかった時に
         # 既存の解決手掛かりを空で潰さない (fail-closed)。

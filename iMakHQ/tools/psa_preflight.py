@@ -175,6 +175,24 @@ def _set_prefix_in_brand(product_id: str, brand: str) -> bool:
     return head in b
 
 
+def _brand_matches_set_name(brand: str, set_name_official: str) -> bool:
+    """PSA の Brand と catalog の set_name_official が同じセットを指すか (純関数)。
+
+    ★2026-08-26: cert163955605 の正解 `ST21-001_p2` は set_name_official が
+      `ONE PIECEカードゲーム BASE SHOPリミテッドカードコレクションvol.1`、
+      PSA Brand が `ONE PIECE JAPANESE LIMITED CARD COLLECTION VOL.1`。
+      catalog 側は日本語混じりなので、**ASCII の語だけ**を突き合わせる。
+      共通語が1つでも在れば候補を前に出す。**断定はしない** (順番を変えるだけで、
+      採用するのは人)。noise 語 (CARD/SET/COLLECTION/JAPANESE 等) は既存の
+      `_NOISE` で落とすので、`ONE PIECE` のようにゲーム名しか合わない時でも
+      catalog の大半 (set_name_official が日本語) とは区別できる。
+      依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (a)
+    """
+    a = {t.upper() for t in re.findall(r"[A-Za-z]{3,}", brand or "")} - _NOISE
+    b = {t.upper() for t in re.findall(r"[A-Za-z]{3,}", set_name_official or "")} - _NOISE
+    return bool(a and b and (a & b))
+
+
 # ★2026-08-21: ここに在った `out_of_scope_by_brand` (SDBH / 非日本語Pokemon / Neo期 /
 #   日本語遊戯王 の4本) を **削除**した。同じ判定を tcg_scope が8本持っており、
 #   増えた5本 (DIVERS / ITAJAGA / FAMILY POKEMON / ウエハース / Web期) が
@@ -253,15 +271,18 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
     # 2b) name + number ピンポイント (catalog に同名・同番号が在るか)
     toks = _subject_tokens(subject)
     hits = []
+    set_name_by_pid = {}
     if num and toks:
         for pat in (f"%-{num}", f"%-{num}\\_%"):
             for r in cur.execute(
-                "SELECT product_id,name_en,name FROM products WHERE category=? AND product_id LIKE ? ESCAPE '\\'",
+                "SELECT product_id,name_en,name,set_name_official FROM products "
+                "WHERE category=? AND product_id LIKE ? ESCAPE '\\'",
                 (cat, pat)).fetchall():
                 pid, nen, njp = r[0], (r[1] or ""), (r[2] or "")
                 hay = (nen + " " + njp).lower()
                 if any(t.lower() in hay for t in toks):
                     hits.append(pid)
+                    set_name_by_pid[pid] = r[3] or ""
     hits = sorted(set(hits))
     if hits:
         # name+番号 で候補在り = 索引不備の疑いだが別セット同番号の偶然もある → 断定せず REVIEW。
@@ -271,14 +292,31 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
         #   なので、番号とキャラ名が一致しただけの **別ゲームのカード**。採用したら誤出品。
         #   断定はしない (fail-closed 維持) が、**人が見た瞬間に区別できる形**に割る。
         same = [p for p in hits if _set_prefix_in_brand(p, brand)]
-        other = [p for p in hits if p not in same]
+        # ★2026-08-26: **セット名でも照合する**。cert163955605 は PSA Brand が
+        #   `ONE PIECE JAPANESE LIMITED CARD COLLECTION VOL.1` で、catalog にその
+        #   セットが実在する (Luffy は `ST21-001_p2` の1枚だけ・画像あり)。
+        #   ところが候補は card_number `001` からプロモ `P-` を仮定した `P-001*` 8件で
+        #   埋まり、正解が **一度も画面に出ていなかった**。人が「該当なし」と答えるのは当然。
+        #   番号の綴りだけで系列を決めず、Brand ↔ set_name_official が一致する候補を先に出す。
+        #   依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (a)
+        by_set = [p for p in hits
+                  if p not in same and _brand_matches_set_name(brand, set_name_by_pid.get(p))]
+        other = [p for p in hits if p not in same and p not in by_set]
         prefixes = sorted({p.split("-")[0].upper() for p in hits if p})
         res["status"] = "REVIEW"
-        res["candidates"] = (same + other)[:8]
+        # セット名一致を **先頭** に置く。`_set_prefix_in_brand` は記号が1文字だと
+        # 効かない (`P-001` の頭は `P` で、`ONE PIECE` にも含まれてしまう)。
+        # cert163955605 はこれで `P-001*` が 8枠を埋め、正解が画面に出なかった。
+        res["candidates"] = (by_set + same + other)[:8]
         res["same_series"] = same[:8]
+        res["set_name_match"] = by_set[:8]
         res["other_series"] = other[:8]
         res["prefixes"] = prefixes
-        if same:
+        if by_set:
+            res["risk"] = "set-name"
+            res["reason"] = (f"set_code抽出={set_code} だが **PSA の Brand と同じセット名** の"
+                             f" 候補在り ({', '.join(by_set[:3])}) → まずこれを目視で見る")
+        elif same:
             res["risk"] = "index"
             res["reason"] = (f"set_code抽出={set_code} だが **brand と同じセット記号** の候補在り"
                              f" → 索引不備の可能性が高い (同系 {len(same)} / 別系 {len(other)})")
