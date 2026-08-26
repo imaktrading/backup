@@ -1935,8 +1935,14 @@ def _scan_log(log_path="", csv_path="", run_logs_dir=""):
 #   回答書: 2026-08-19_psa_preflight_scope_ssot_gap_response.md (2件目)
 _LINE_COUNT_RE = re.compile(r"(\d+)\s*件")
 _CATALOG_MISS_RE = re.compile(r"Catalog\s*未登録カード\s*(\d+)\s*件")
+# ★2026-08-26: Selenium の失敗が **1つも当たっていなかった**。8/26 の走行は
+#   `Error: Message: invalid session id` が 18行あるのに log_signals は空で、
+#   その日の監査は「異常なし」から始まっている (実際は 20件中 19件が落ちていた)。
+#   実ログの表記は `Error:` (先頭大文字) と `Stacktrace:` (Selenium は Traceback を
+#   出さない)。`失敗` は正常系の日本語にも出るので **文脈付き**でだけ数える。
+#   依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案1
 _SCAN_PATS = [("HOLD/gate", re.compile(r"HOLD|gate_row_or_hold|csv_hold")),
-              ("error", re.compile(r"❌|Traceback|ERROR"))]
+              ("error", re.compile(r"❌|Traceback|Stacktrace|[Ee]rror:|ERROR|取得中.*失敗"))]
 
 
 def line_is_signal(line, pat):
