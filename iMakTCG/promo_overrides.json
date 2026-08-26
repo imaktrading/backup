@@ -54,7 +54,7 @@
     },
     "OP05-060_P": {
       "promo": "Sound Loader Volume.1",
-      "updated_at": "2026-08-14"
+      "updated_at": "2026-08-26"
     },
     "P-096": {
       "promo": "Op Mag EX \"op Fan Letter\"",
@@ -118,7 +118,7 @@
     },
     "OP01-016_p1": {
       "promo": "",
-      "updated_at": "2026-08-17"
+      "updated_at": "2026-08-25"
     },
     "OP06-022_P": {
       "promo": "Wkly Shonen Jump '24-#36-37",
@@ -151,6 +151,26 @@
     "EB02-003_CH01": {
       "promo": "One Piece Chopper's 1",
       "updated_at": "2026-08-24"
+    },
+    "OP04-083_p3": {
+      "promo": "8 Packs Battle-Winner",
+      "updated_at": "2026-08-25"
+    },
+    "OP11-010_p2": {
+      "promo": "Official Event Prize",
+      "updated_at": "2026-08-25"
+    },
+    "ST21-001_p2": {
+      "promo": "",
+      "updated_at": "2026-08-26"
+    },
+    "ST10-006_p3": {
+      "promo": "One Piece Day",
+      "updated_at": "2026-08-26"
+    },
+    "P-041": {
+      "promo": "Bandai Card Game Fest",
+      "updated_at": "2026-08-26"
     }
   }
 }
