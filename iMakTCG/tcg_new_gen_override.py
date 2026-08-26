@@ -38,7 +38,63 @@ _NO_OVERRIDE = set()
 #     新コアが空の時に **旧コアがレアリティ語で埋めた値**が残り、8/22 の入稿で
 #     C:Features='Art Rare' / 'Super Rare' が 4件 eBay に出た。空欄も権威として反映する。
 #   C:Manufacturer / C:Country of Origin: 旧コアはハードコード。catalog が値を持つので空欄が正。
-_ALWAYS_OVERWRITE = {"C:Rarity", "C:Features", "C:Manufacturer", "C:Country of Origin"}
+#
+# ★2026-08-26: **列を1つずつ足すのはやめた**。事故のたびに 1列ずつ増えており
+#   (Rarity=06-15 / Features・Manufacturer・Country=08-22)、まだ足していない列で
+#   同じ事故が出続けていた (8/23〜8/26 の入稿 4本で C:Cost 21 / C:Attack/Power 18 /
+#   C:Attribute 2 = 41セルが catalog に無い値)。
+#   これ以降は **契約表 (_contract_aspects.yaml) で `source: specs.*` の項目に当たる列**を
+#   まとめてカタログ権威 (空欄も反映) にする。下の集合は表が読めない時の退避値。
+#   依頼書: hq/requests/2026-08-25_act_code_proposals_tcg.md 提案4
+_ALWAYS_OVERWRITE_FALLBACK = {"C:Rarity", "C:Features", "C:Manufacturer", "C:Country of Origin"}
+
+# 契約表の場所は監査くんと同じ 1 箇所 (aspect_contract.CONTRACT_PATH) を使う。
+_HQ_TOOLS = os.path.join(os.path.dirname(_HERE), "iMakHQ", "tools")
+
+_AUTH_COLS_CACHE = None
+
+
+def contract_authoritative_cols(contract=None, cols=None):
+    """カタログ権威の CSV 列 (= 新コアが空なら空欄化する列) を契約表から決める。
+
+    表が読めない / 1列も当たらない時は `_ALWAYS_OVERWRITE_FALLBACK` を返す
+    (= 従来挙動。表の一時的な不在で 8/22 に直した事故を再発させない)。純関数に近い
+    (I/O は aspect_contract.load_contract 側)。
+    """
+    if cols is None:
+        from tcg_listing_fields import _ALL_COLS
+        cols = _ALL_COLS
+    if contract is None:
+        try:
+            if _HQ_TOOLS not in sys.path:
+                sys.path.insert(0, _HQ_TOOLS)
+            from aspect_contract import load_contract
+            contract = load_contract()
+        except Exception:                       # noqa: BLE001
+            contract = None
+    if not contract:
+        return set(_ALWAYS_OVERWRITE_FALLBACK)
+    try:
+        from aspect_contract import aspect_of
+    except Exception:                           # noqa: BLE001
+        return set(_ALWAYS_OVERWRITE_FALLBACK)
+    out = set()
+    for col in cols:
+        rec = contract.get(aspect_of(col))
+        if not rec or not rec.get("emit"):
+            continue
+        if str(rec.get("source") or "").startswith("specs."):
+            out.add(col)
+    return out or set(_ALWAYS_OVERWRITE_FALLBACK)
+
+
+def always_overwrite_cols():
+    """`contract_authoritative_cols` の結果を1走行ぶん cache して返す。"""
+    global _AUTH_COLS_CACHE
+    if _AUTH_COLS_CACHE is None:
+        _AUTH_COLS_CACHE = contract_authoritative_cols()
+        _log(f"カタログ権威の列 {len(_AUTH_COLS_CACHE)}: {sorted(_AUTH_COLS_CACHE)}")
+    return _AUTH_COLS_CACHE
 
 
 def _log(msg):
@@ -89,6 +145,7 @@ def apply_new_gen_override(row, headers, cert, *, blank_missing=None,
         return row
 
     new = list(row)
+    _authoritative = always_overwrite_cols()
     for col, val in fields.items():
         if col.startswith("_"):          # _card_id 等の内部キーは除外
             continue
@@ -100,8 +157,8 @@ def apply_new_gen_override(row, headers, cert, *, blank_missing=None,
         val = (val or "").strip()
         if val:
             new[idx] = val
-        elif blank_missing or col in _ALWAYS_OVERWRITE:
-            new[idx] = ""               # 厳格モード or 常時上書き列 (rarity 推測除去 #1) は空欄化
+        elif blank_missing or col in _authoritative:
+            new[idx] = ""               # 厳格モード or カタログ権威列 は空欄化 (catalog の空を写す)
         # 既定: 新コアが空 → 旧値を残す (回帰防止)
 
     if override_title:

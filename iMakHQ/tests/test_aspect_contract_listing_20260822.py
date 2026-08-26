@@ -82,14 +82,12 @@ def test_features_come_from_catalog_features_ebay_only():
 
 
 def test_features_are_authoritative_even_when_empty():
-    src = _source("tcg_new_gen_override.py")
-    tree = ast.parse(src)
-    always = None
-    for n in ast.walk(tree):
-        if (isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "_ALWAYS_OVERWRITE"
-                and isinstance(n.value, ast.Set)):
-            always = {e.value for e in n.value.elts if isinstance(e, ast.Constant)}
-    assert always, "_ALWAYS_OVERWRITE が見つからない"
+    # ★2026-08-26: 列を1つずつ足す運用をやめ、契約表から決めるようにした
+    #   (2026-08-25_act_code_proposals_tcg.md 提案4)。ここは AST ではなく
+    #   **実際に使われる集合** を見る (足し忘れを構造ごと検出する)。
+    import tcg_new_gen_override as O
+    always = O.always_overwrite_cols()
+    assert always, "カタログ権威の列が空 (契約表も退避値も読めていない)"
     for col in ("C:Features", "C:Rarity", "C:Manufacturer", "C:Country of Origin"):
         assert col in always, (
             f"{col} が value-only のままだと、catalog が空の時に旧コアの値が残る "
