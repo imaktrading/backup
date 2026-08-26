@@ -24,14 +24,16 @@ def test_zero_o_variants_covers_0_and_O():
     v = P._zero_o_variants("SV0M")
     # SV0M(数字0) から SVOM(英字O) を生成できること (= Marnie 0/O 索引不備の核)
     assert "SVOM" in v
-    assert "SV0M" not in v  # 自身は除外
+    # ★2026-08-26: 自身も残す。resolver は product_id 直引きではないので「試し済」ではない
+    #   (2026-08-26_act_code_proposals_tcg.md 提案3)
+    assert "SV0M" in v
 
 
 def test_zero_o_variants_no_0o_has_no_swap():
     P = _load()
     # 0/O を含まない set_code は 0<->O swap 変種を生まない (case変種のみ)
     v = P._zero_o_variants("ST7")
-    assert "ST7" not in v  # 自身は除外
+    assert "ST7" in v       # ★2026-08-26: 自身も残す
     assert all("0" not in x and "O" not in x for x in v)  # 0/O swap 由来は無い
 
 

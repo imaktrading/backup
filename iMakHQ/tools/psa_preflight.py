@@ -94,7 +94,18 @@ def _subject_tokens(subject: str):
 
 
 def _zero_o_variants(set_code: str):
-    """set_code の 0<->O 全組合せ + 大小 を生成."""
+    """set_code の 0<->O 全組合せ + 大小 を生成 (**元の綴りも含む**)。
+
+    ★2026-08-26: 末尾で `out.discard(set_code)` して**元の綴りを捨てていた**。
+      「1回目の resolver で試し済」のつもりだったが、resolver は product_id 直引きでは
+      ないので `SM9a-067` は一度も引かれない。catalog の Pokemon は `SM9a` `S8a` `S11a`
+      のように小文字混じりの set_code が普通なので、この形が全部すり抜けていた。
+      実測: cert139291730 / 141196085 / 143402937 / 143595907 の4件が
+      「catalog 未収録 (GAP)」で毎日落ちていたが、4件とも catalog に実在する。
+      cert139291730 は 6/30・7/26・8/10 と 3回 catalog に依頼済。
+      判定: ①カタログは正しい → ②引き方を直す。
+      依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案3
+    """
     if not set_code:
         return []
     out = set()
@@ -108,7 +119,7 @@ def _zero_o_variants(set_code: str):
             s[i] = "O" if (mask >> k) & 1 else "0"
         v = "".join(s)
         out.add(v); out.add(v.upper()); out.add(v.lower())
-    out.discard(set_code)
+    out.add(set_code)
     return list(out)
 
 
@@ -225,12 +236,19 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
         except Exception:
             set_code = None
     if set_code and num:
+        # ★2026-08-26: 比較を **大小を無視**した一致にする。SQLite の `=` は大小を
+        #   区別するので、catalog の `SM9a-067` は `sm9a-067` でも `SM9A-067` でも
+        #   引けなかった。**自動採用はしない** — 実在したら GAP ではなく INDEX-FAILURE
+        #   (= 目視に回る) に落とすだけ。fail-closed は変えていない。
         for v in _zero_o_variants(set_code):
-            r = cur.execute("SELECT product_id,name_en FROM products WHERE category=? AND product_id=?",
-                            (cat, f"{v}-{num}")).fetchone()
+            r = cur.execute(
+                "SELECT product_id,name_en FROM products "
+                "WHERE category=? AND UPPER(product_id)=UPPER(?)",
+                (cat, f"{v}-{num}")).fetchone()
             if r:
                 res["status"] = "INDEX-FAILURE"; res["recovered"] = r[0]
-                res["reason"] = f"set_code 0/O・表記揺れ (抽出={set_code} → 実在={v})"
+                res["reason"] = (f"set_code の表記揺れ (抽出={set_code} → 実在={r[0]})"
+                                 " — 目視で確認してから使う")
                 return res
     # 2b) name + number ピンポイント (catalog に同名・同番号が在るか)
     toks = _subject_tokens(subject)
