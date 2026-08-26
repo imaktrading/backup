@@ -574,12 +574,12 @@ def lookup_one_piece(
                               f"{_alt['product_id']} (base {base_pid} は "
                               f"{_base_sn!r} で edition 不一致)")
                     record = _alt
-                elif re.search(r"LIMITED\s*CARD\s*COLLECTION\s*VOL\.?\s*\d+", _hay):
-                    # vol.N を名指しされたのに その vol の行が無い (= 未収録の新 vol 等)。
-                    # ここで base P-{番号} を返すと **別カードを出品**する。番号と名前が
-                    # 合っているぶん人も気づけないので fail-closed で落とす。
+                elif _op_brand_demands_edition(_hay):
+                    # その商品限定のカードを名指しされたのに、対応する行が catalog に無い。
+                    # ここで base を返すと **別カードを出品**する (番号も名前も合うので
+                    # 人も気づけない) → fail-closed。行を足せば自然に解決する。
                     if verbose:
-                        print(f"    ⚠️ {brand!r} の vol が catalog に無い → Skip "
+                        print(f"    ⚠️ {brand!r} の行が catalog に無い → Skip "
                               f"(base {base_pid} は別カード)")
                     return None
 
@@ -735,6 +735,22 @@ def _search_one_piece_reprint_by_number(
               f"{chosen['name']} (PSA set={psa_set_code} の再録版、{len(candidates)}件中"
               f"{', SP Alt 優先' if wants_sp else ''})")
     return chosen
+
+
+# PSA brand が「その商品限定のカード」を名指ししている形 (= 通常弾の同番号カードとは
+# 別の物理カード)。ここに当たる brand で edition 一致の行が無い時は、汎用 promo や
+# 通常弾の base に落とさず **fail-closed** にする (2026-08-26)。
+#   実測: cert151301749 ルフィ #079 / cert155570650 サボ #118 (3rd ANNIVERSARY SET) が
+#   ブースターの OP12-079 / OP07-118 を返していた。絵柄が別 (漫画調パラレル) なので
+#   そのまま出すと誤出品。番号も名前も合うぶん、人も気づけない。
+_EDITION_DEMANDING_BRAND = re.compile(
+    r"\d+\s*(?:ST|ND|RD|TH)\s*ANNIVERSARY\s*SET"
+    r"|LIMITED\s*CARD\s*COLLECTION\s*VOL\.?\s*\d+")
+
+
+def _op_brand_demands_edition(hay: str) -> bool:
+    """brand が「その商品にしか無いカード」を名指ししているか (= base に落としてはいけない)."""
+    return bool(_EDITION_DEMANDING_BRAND.search(hay or ""))
 
 
 def _op_edition_matches(hay: str, sn: str) -> bool:
@@ -1022,6 +1038,14 @@ def _search_one_piece_promo_by_number(
         return None
 
     chosen = scored[0][1]
+    if not chosen.get("_edition_hit") and _op_brand_demands_edition(
+            (brand or "").upper() + " " + (subject or "").upper()):
+        # brand がその商品限定のカードを名指ししているのに、edition 一致の行が無い。
+        # 同番号の通常弾/汎用 promo は **別の物理カード** なので出さない (2026-08-26)。
+        if verbose:
+            print(f"    ⚠️ {brand!r} の行が catalog に無い → Skip "
+                  f"(最有力は {chosen['product_id']} だが別カード)")
+        return None
     if verbose:
         pid = chosen["product_id"]
         print(f"    🎯 iMakCatalog hit (promo fallback): {pid} "

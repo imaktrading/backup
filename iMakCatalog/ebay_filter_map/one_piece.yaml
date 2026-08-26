@@ -164,6 +164,12 @@ set:
   - source: "1st ANNIVERSARY SET"
     ebay: Promo Cards
     note: promo/event (3 rows) - added 2026-08-11 op03_001_p2 batch
+  - source: "3rd ANNIVERSARY SET"
+    ebay: Promo Cards
+    note: |
+      プレミアムバンダイ限定 (2025-08-29 抽選 / 2026-02 発送) のプロモ10種。
+      公式カードリストに未収録なので 1st/2nd と違って行が自動で入らない。
+      PSA の cert が出た1枚ずつ内部ID (_AN03) で登録する — 2026-08-26 追加
   - source: "スタンダードバトルパックVol.9"
     ebay: Promo Cards
     note: promo/event (3 rows) - added 2026-08-11 op03_001_p2 batch
