@@ -1596,6 +1596,45 @@ def _upgrade_cached_images(cert_number, cached, cache):
     return cached
 
 
+# ★2026-08-26: **Chrome のセッションが死んだら作り直す**。
+#   実害: 8/26 の走行で 3件目の途中で `invalid session id` になり、そこから先の 13件が
+#   1件ずつ同じエラーで空振りした (20件中 出品できたのは 1件)。セッションが死んだ後は
+#   何度呼んでも回復しないので、**気づいて作り直す**しかない。
+_DEAD_SESSION_MARKERS = ("invalid session id", "no such window", "chrome not reachable",
+                         "disconnected", "target window already closed",
+                         "session deleted", "browser has closed")
+
+
+def is_dead_session(exc):
+    """その例外は「ブラウザが死んだ」か (純関数, test可)。"""
+    m = f"{type(exc).__name__}: {exc}".lower()
+    return any(k in m for k in _DEAD_SESSION_MARKERS)
+
+
+def restart_psa_driver(old=None):
+    """PSA 用の Chrome を作り直して返す。失敗したら例外を投げる (呼び手が止める)。"""
+    global _psa_warmup_driver
+    try:
+        if old is not None:
+            old.quit()
+    except Exception:
+        pass
+    os.makedirs(_PSA_PROFILE_DIR, exist_ok=True)
+    options = uc.ChromeOptions()
+    options.add_argument("--no-sandbox")
+    options.add_argument(f"--user-data-dir={_PSA_PROFILE_DIR}")
+    options.add_argument("--disable-features=CalculateNativeWinOcclusion")
+    options.add_argument("--window-size=800,600")
+    options.add_argument("--window-position=100,100")
+    d = uc.Chrome(options=options, version_main=detect_chrome_major())
+    try:
+        d.minimize_window()
+    except Exception:
+        pass
+    _psa_warmup_driver = d
+    return d
+
+
 def get_psa_data(driver, cert_number):
     # キャッシュチェック
     cache = _load_psa_cache()
@@ -1713,6 +1752,8 @@ def get_psa_data(driver, cert_number):
             pass  # fail-closed (= 共有 cache 失敗で既存 cycle 止めない)
         return data
     except Exception as e:
+        if is_dead_session(e):
+            raise                      # 呼び手が Chrome を作り直して やり直す
         print(f"    Error: {e}")
         return None
 
@@ -3348,7 +3389,23 @@ def main():
         print("\n🔎 verify→build モード: 先に scrape → 目視確認 → 確定カードのみ生成")
         for cert in cert_numbers:
             print(f"取得中(確認用): #{cert}...", end="", flush=True)
-            d = get_psa_data(driver, cert)
+            try:
+                d = get_psa_data(driver, cert)
+            except Exception as _e:
+                if not is_dead_session(_e):
+                    print(f" 失敗 ({type(_e).__name__})")
+                    _prescraped[cert] = None
+                    continue
+                # ★ブラウザが死んだ → 作り直して この cert からやり直す。
+                #   ここで作り直さないと、残り全部が同じエラーで空振りする (8/26 に13件)。
+                print(" ⟳ Chrome が落ちたので起動し直します...", flush=True)
+                try:
+                    driver = restart_psa_driver(driver)
+                    d = get_psa_data(driver, cert)
+                except Exception as _e2:
+                    print(f" ✗ 起動し直しても取れません ({type(_e2).__name__}) → 以降は中止")
+                    _prescraped[cert] = None
+                    break
             _prescraped[cert] = d
             print(" ✓" if d else " 失敗")
         try:
