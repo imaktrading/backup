@@ -2010,7 +2010,11 @@ _CATALOG_MISS_RE = re.compile(r"Catalog\s*未登録カード\s*(\d+)\s*件")
 #   実ログの表記は `Error:` (先頭大文字) と `Stacktrace:` (Selenium は Traceback を
 #   出さない)。`失敗` は正常系の日本語にも出るので **文脈付き**でだけ数える。
 #   依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案1
-_SCAN_PATS = [("HOLD/gate", re.compile(r"HOLD|gate_row_or_hold|csv_hold")),
+# ★2026-08-26: `HOLD` に語境界が無く、**語の途中**を拾って毎回ニセの HOLD が出ていた
+#   (`G-HOLD-ENGO` = GHOLDENGO)。相場ゲートは 2026-08-13 に停止済なので本物の HOLD は
+#   まず出ない。常時ニセ1件が乗ると、本物が来ても見分けがつかない (狼少年 = fail-OPEN)。
+#   依頼書: hq/requests/2026-08-24_act_code_proposals_tcg.md ①
+_SCAN_PATS = [("HOLD/gate", re.compile(r"\bHOLD\b|gate_row_or_hold|csv_hold")),
               ("error", re.compile(r"❌|Traceback|Stacktrace|[Ee]rror:|ERROR|取得中.*失敗"))]
 
 
