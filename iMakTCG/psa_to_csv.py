@@ -2355,7 +2355,11 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         pokemon = catalog_psa.lookup_pokemon(brand, card_number, subject)
         if pokemon:
             official_rarity = pokemon.get("rarity", "")
-            official_power = pokemon.get("hp", "")
+            # ★2026-08-26 撤去: `official_power = pokemon.get("hp")`。
+            #   HP を C:Attack/Power に写していたので、catalog の attack_power_ebay が
+            #   空のポケモン行で **C:HP と同じ数字**が C:Attack/Power に出ていた
+            #   (8/25 の入稿 17行中 6行)。HP は C:HP が持っている。
+            #   依頼書: hq/requests/2026-08-25_act_code_proposals_tcg.md 提案1
             # 2026-05-31: adapter 経由 finish / card_size を listing に反映 (game は rollback)
             official_finish = pokemon.get("finish") or ""
             official_card_size = pokemon.get("card_size") or ""
