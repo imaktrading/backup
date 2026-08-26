@@ -132,7 +132,14 @@ def _extract_set_code(brand: str, category: str) -> str | None:
     import re
     b = brand.upper()
     if category == "one_piece_tcg":
-        m = re.search(r"\b(OP\d+|ST\d+|EB\d+|PRB\d+|RP|EVENT|PROMOS|STORAGE|KUMAMON|GRAND-ASIA|ANNIV)\b", b)
+        # ★2026-08-26: `STORAGE` を外した。PSA の brand
+        #   'PREMIUM BOOSTER -ONE PIECE CARD THE BEST- STORAGE BOX SET' の商品名を
+        #   set_code と誤読し、`LIKE '%STORAGE%'` が DON-STORAGE-001〜010 を返して
+        #   候補枠を食っていた (実害 cert149779654: 正解 ST17-004_L 系が1件も出ず)。
+        #   PSA cache 実測 (2026-08-26): STORAGE にマッチする one_piece cert 4件は
+        #   **全部この誤読**で、set_code として正しい例は1件も無い。
+        #   回答書: 2026-08-24_cert149779654_correct_rows_not_offered_response.md
+        m = re.search(r"\b(OP\d+|ST\d+|EB\d+|PRB\d+|RP|EVENT|PROMOS|KUMAMON|GRAND-ASIA|ANNIV)\b", b)
         return m.group(1) if m else None
     if category == "pokemon_tcg":
         # ★2026-08-21: **英字だけの set_code** (`CLL-` `CLK-` `CLF-` = Classic コレクション)
@@ -404,11 +411,23 @@ def _get_candidates(category: str, set_code: str | None, card_number: str | None
                 #   そのため dragonball は毎回この pinpoint が 0件 → 下の broad に落ち、
                 #   関係ないカードが 40件 並んでいた (実測 cert158452540=50件 / 158452539=40件)。
                 #   人はそこから選べず「該当なし」を押すしかない。両方の形を受ける。
+                # ★2026-08-26: 番号一致が **変種 suffix 付き** (`ST17-004_L` `_p1` 等) を
+                #   拾えていなかった。`%-004` は末尾完全一致なので `_L` が付くと外れる。
+                #   優先度2b (:371) には同じ形が既にあるが、set_code が取れた時は
+                #   そちらを通らない。実害 (cert149779654 BOA HANCOCK):
+                #   catalog に在る ST17-004_L / _L_haku / _p1 / _p2 の4行が候補51件に
+                #   1件も出ず、人が絵を見て選ぶことすらできなかった。
+                #   `_` は LIKE ワイルドカードなので ESCAPE で literal 化する (:371 と同じ書き方)。
+                #   回答書: 2026-08-24_cert149779654_correct_rows_not_offered_response.md
                 if card_number:
-                    cur.execute(base + " AND (product_id LIKE ? OR product_id LIKE ?)"
+                    _esc = chr(92)
+                    cur.execute(base + " AND (product_id LIKE ? OR product_id LIKE ?"
+                                       " OR product_id LIKE ? ESCAPE '" + _esc + "'"
+                                       " OR product_id LIKE ? ESCAPE '" + _esc + "')"
                                        " ORDER BY product_id LIMIT 40",
                                 [category] + [f"%{t}%" for t in toks]
-                                + [f"%-{card_number}", f"{card_number}%"])
+                                + [f"%-{card_number}", f"{card_number}%",
+                                   f"%-{card_number}{_esc}_%", f"{card_number}{_esc}_%"])
                     char_rows = cur.fetchall()
                 # ★2026-08-19: 番号一致が当たっても **キャラ名の広い候補も必ず足す**。
                 #   番号は「そのカードの番号」なので、同じキャラの別セット/別promo は
