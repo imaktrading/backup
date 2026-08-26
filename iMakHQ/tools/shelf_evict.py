@@ -14,14 +14,17 @@
       空いた分を成績の良いカテゴリに回す。
 
 落とす順 (上から埋めて、目標額に達したら止める):
-    ① 仕入元が死んでいる      … 買えないので稼ぎようがない
-    ② 見せたのに watcher 0    … 表示は足りているのに反応が無い
-    ③ watcher 1 で未販売      … 反応が薄い
-    同順位内は **ミラー込みで空く額** の大きい順 (US価格で並べると効き目を読み違える)。
+    ① 仕入元が死んでいる   … 買えないので稼ぎようがない。空く額の大きい順
+    ② 出品30日超・未販売   … **アクセス (累計表示) の少ない順**
+
+    ★閾値は設けない (2026-08-26 ユーザー確定)。「表示◯回以上なら」という線は
+      カテゴリごとに桁が違って必ずどちらかを取りこぼすので、順位で決める。
+    ★空く額は **ミラー込み** で数える。US価格だけ見ると効き目を読み違える
+      (実測: ある層は US $63,808 に対し棚は $272,890 空く)。
 
 触らない:
-    ・表示が足りない (見せ足りないだけ。落とすのでなく露出を作る相手)
-    ・watcher 2以上 / 売れた実績あり
+    ・出品30日未満 (まだ判定できない)
+    ・売れた実績あり
     ・US 以外 (UK/AU/CA は eBaymag のミラー。親を落とせば消える)
 
 使い方:
@@ -49,13 +52,11 @@ RATIO = 1.3          # 出品額に対して落とす倍率
 REPORT_GLOB = r"C:\dev\iMak_data\seller_hub\reports\**\eBay-all-active-listings-report-*.csv"
 CSV_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "csv_output"))
 
-TIER_OOS, TIER_NO_WATCH, TIER_THIN = 1, 2, 3
+TIER_OOS, TIER_STALE = 1, 2
 TIER_NAME = {TIER_OOS: "① 仕入元が死んでいる",
-             TIER_NO_WATCH: "② 見せたのに watcher 0",
-             TIER_THIN: "③ watcher 1 で未販売"}
-# 「見せた」と言える表示回数。カテゴリで桁が違うので、**カテゴリ内の中央値**を使う
-# (固定値で切ると片方のカテゴリだけ落ちる)。中央値以上なら「見せた」と扱う。
-MIN_SHOWN_FLOOR = 300        # ただし絶対にこれ未満は「見せ足りない」
+             TIER_STALE: "② 30日超・未販売 (アクセスの少ない順)"}
+# 出品からこれ未満は「まだ判定できない」ので触らない。
+MIN_AGE_DAYS = 30
 
 
 def _f(v):
@@ -65,44 +66,42 @@ def _f(v):
         return 0.0
 
 
-def tier_of(row, shown_floor):
-    """その出品を落とす順の何番に置くか。触らないものは None (純関数, test可)。"""
+def tier_of(row, min_age=MIN_AGE_DAYS):
+    """その出品を落とす順の何番に置くか。触らないものは None (純関数, test可)。
+
+    ★2026-08-26 ユーザー確定: **閾値を設けない**。表示回数がいくつ以上なら…という線は引かず、
+      「30日超・未販売」を対象にして、その中を **アクセスの少ない順** に落とす。
+      固定の閾値はカテゴリごとに桁が違って必ずどちらかを取りこぼす。
+    """
     if _f(row.get("qty")) == 0:
-        return TIER_OOS
+        return TIER_OOS                   # 買えないので稼ぎようがない
     if _f(row.get("sold_qty")) + _f(row.get("sales90")) > 0:
         return None                       # 売れた実績あり
-    watch = _f(row.get("watch"))
-    if watch >= 2:
-        return None
-    if _f(row.get("impr_total")) < shown_floor:
-        return None                       # 見せ足りない = 落とす相手ではない
-    return TIER_NO_WATCH if watch == 0 else TIER_THIN
+    if _f(row.get("age_days")) < min_age:
+        return None                       # まだ判定できない
+    return TIER_STALE
 
 
-def shown_floor_for(rows, floor=MIN_SHOWN_FLOOR):
-    """「見せた」と言える表示回数 = 在庫ありの表示の中央値 (下限つき)。純関数, test可。"""
-    vals = sorted(_f(r.get("impr_total")) for r in rows if _f(r.get("qty")) != 0)
-    if not vals:
-        return floor
-    med = vals[len(vals) // 2]
-    return max(med, floor)
+def pick(rows, target, shelf_of):
+    """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。
 
-
-def pick(rows, target, shelf_of, shown_floor):
-    """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。"""
+    ① は空く額の大きい順 (1件で空く額が大きいほうが先)。
+    ② は **アクセス (累計表示) の少ない順**。見てもらえていないものから畳む。
+    """
     cand = []
     for r in rows:
-        t = tier_of(r, shown_floor)
+        t = tier_of(r)
         if t is None:
             continue
-        cand.append((t, -shelf_of(r), r))
+        rank = -shelf_of(r) if t == TIER_OOS else _f(r.get("impr_total"))
+        cand.append((t, rank, r))
     cand.sort(key=lambda x: (x[0], x[1]))
     picked, total = [], 0.0
-    for t, negv, r in cand:
+    for t, _rank, r in cand:
         if total >= target:
             break
         picked.append((t, r))
-        total += -negv
+        total += shelf_of(r)
     return picked, total
 
 
@@ -159,13 +158,12 @@ def main():
     rows, shelf_of = _load()
     listed = listed_today_amount()
     target = a.amount if a.amount is not None else listed * a.ratio
-    floor = shown_floor_for(rows)
     print(f"今日の出品額 ${listed:,.0f} × {a.ratio} = **落とす目標 ${target:,.0f}**")
-    print(f"「見せた」と言える表示回数: {floor:,.0f} 回以上 (在庫ありの中央値)")
+    print(f"対象: 仕入元が死んでいるもの → 出品{MIN_AGE_DAYS}日超で未販売のものを アクセスの少ない順")
     if target <= 0:
         print("  今日はまだ出品していないので、落とす分もありません")
         return 0
-    picked, total = pick(rows, target, shelf_of, floor)
+    picked, total = pick(rows, target, shelf_of)
     if not picked:
         print("  落とせる候補がありません")
         return 0
