@@ -137,6 +137,11 @@ def extract_set_code_from_brand(brand: str) -> Optional[str]:
         # PSA brand 'MINI-TIN VOL.2 ROKUSHIRO' 等が認識されず PSA Subject にフォールバック →
         # C:Card Name 汚染 / P- prefix 欠落の連鎖.
         "MINI-TIN", "MINI TIN",
+        # 2026-08-26: cert163955605 ルフィ #001 が候補に出なかった (set_code 抽出失敗).
+        # PSA brand 'ONE PIECE JAPANESE LIMITED CARD COLLECTION VOL.1' =
+        # 公式「ONE PIECEカードゲーム BASE SHOPリミテッドカードコレクションvol.1」(LEADER 6枚)。
+        # 券面番号は原典のまま (ST21-001 等) なので 'P' + promo fallback に番号で解かせる。
+        "LIMITED CARD COLLECTION",
     ]
     if any(k in b for k in promo_keywords):
         return "P"
@@ -552,6 +557,32 @@ def lookup_one_piece(
                 print(f"    ⚠️ iMakCatalog ID hit {base_pid} ({record['name']}) "
                       f"だが PSA Subject {subject!r} と名前不一致 → reject")
             record = None
+        # ★ base `P-{番号}` は **汎用 promo の器**。PSA brand が edition を名指ししていて、
+        #   その edition が base の official set 名と一致しない時は、edition 一致の変種を優先する。
+        #   2026-08-26 (cert163955605 ルフィ #001): base P-001 も「モンキー・D・ルフィ」なので
+        #   名前検証を素通りし、**別カードの P-001 を返していた**。番号と名前が合っても
+        #   edition が違えば別の物理カード = 誤出品。
+        if record is not None:
+            _hay = (brand or "").upper() + " " + (subject or "").upper()
+            _base_sn = record.get("set_name_official") or record.get("set_name") or ""
+            if not _op_edition_matches(_hay, _base_sn):
+                _alt = _search_one_piece_promo_by_number(
+                    card_number, subject, brand=brand, verbose=False)
+                if _alt is not None and _alt.get("_edition_hit"):
+                    if verbose:
+                        print(f"    🎯 iMakCatalog hit (edition 一致を優先): "
+                              f"{_alt['product_id']} (base {base_pid} は "
+                              f"{_base_sn!r} で edition 不一致)")
+                    record = _alt
+                elif re.search(r"LIMITED\s*CARD\s*COLLECTION\s*VOL\.?\s*\d+", _hay):
+                    # vol.N を名指しされたのに その vol の行が無い (= 未収録の新 vol 等)。
+                    # ここで base P-{番号} を返すと **別カードを出品**する。番号と名前が
+                    # 合っているぶん人も気づけないので fail-closed で落とす。
+                    if verbose:
+                        print(f"    ⚠️ {brand!r} の vol が catalog に無い → Skip "
+                              f"(base {base_pid} は別カード)")
+                    return None
+
         if record is None:
             # step 3: 全 set 横断 _P_* variant 検索
             record = _search_one_piece_promo_by_number(
@@ -706,6 +737,111 @@ def _search_one_piece_reprint_by_number(
     return chosen
 
 
+def _op_edition_matches(hay: str, sn: str) -> bool:
+    """PSA brand+subject (hay) と catalog の official set 名 (sn) が **同じ edition を
+    名指ししているか**.
+
+    2026-08-26 に `_promo_score` の中から切り出した (中身は不変)。切り出した理由:
+    promo brand の base `P-{番号}` 短絡 (下記 lookup_one_piece) でも同じ判定が要るため。
+    「英語句が hay に在る **かつ** 対応する日本語句が official に在る」の両側一致が原則で、
+    片側だけでは発火しない (= 同番号の別 edition への暴発防止)。
+    """
+    sn_upper = (sn or "").upper()
+    edition_hit = False
+    m_bs = re.search(r"BEST\s*SELECTION\s*VOL\.?\s*(\d+)", hay)
+    if m_bs and "ベストセレクション" in sn and re.search(rf"vol\.?\s*{m_bs.group(1)}\b", sn, re.IGNORECASE):
+        edition_hit = True
+    if re.search(r"25TH|25\s*周年", hay) and "25周年" in sn:
+        edition_hit = True
+    # 2026-07-02: "Nth ANNIVERSARY SET" edition (cert84400496 OTAMA #006 → OP01-006_p4).
+    #   汎用promo(_P 'Promotion Card' score150)に本命(_p4 'Nst ANNIVERSARY SET')が
+    #   負けて沈む問題を是正。**ordinal番号一致必須** = 1st/2nd/3rd の別anniversary set への
+    #   暴発防止(番号違いなら発火せず、既存の keyword +60 のみ)。
+    m_anniv = re.search(r"(\d+)\s*(?:ST|ND|RD|TH)\s*ANNIVERSARY", hay)
+    if m_anniv and re.search(rf"\b{m_anniv.group(1)}\s*(?:st|nd|rd|th)\s*ANNIVERSARY", sn, re.IGNORECASE):
+        edition_hit = True
+    # edition/event pair (両方一致必須=暴発防止)。英keyword in hay かつ 日keyword in official。
+    for en, jp in (
+        ("FILM RED", "FILM RED"),
+        ("ONE PIECE DAY", "ONE PIECE DAY"),
+        ("PROMOTION CARD SET", "プロモーションカードセット"),
+        ("STANDARD BATTLE", "スタンダードバトル"),
+        ("EVENT PRIZE", "記念品"),
+        # 2026-07-10 (cert85592405 Pudding #008 → ST07-008_GE): プレミアムカードコレクション
+        #   -GIRLS EDITION- 収録 parallel。official set_name に 'GIRLS EDITION' を持つ変種のみ +250。
+        #   両側一致必須なので base ST07-008/他promo(_P 等)には発火しない。
+        ("GIRLS EDITION", "GIRLS EDITION"),
+        # 2026-06-12 収録: ADMIRABLE COLLECTION vol.N 封入 promo (cert 151477459 Reiju #068
+        #   → OP06-068_AC01)。official set_name に "Admirable Collection" を持つ変種のみ +250。
+        #   両側一致必須なので別 #068 変種(PRB01/p1 等)には発火しない。
+        ("ADMIRABLE COLLECTION", "ADMIRABLE COLLECTION"),
+        # 2026-06-12 REVIEW: nth ANNIVERSARY COMPLETE GUIDE 収録特典 promo.
+        #   official は英語表記 "Nth ANNIVERSARY COMPLETE GUIDE" を含むため en=jp 同句で
+        #   両側一致照合。PSA brand は "ANV." 略記なので distinctive token "COMPLETE GUIDE"
+        #   で照合する。例 cert 148642488 ZORO 2ND ANV. COMPLETE GUIDE #067 → OP05-067_p2
+        #   (#067 候補中 official に COMPLETE GUIDE を持つのは _p2 のみ = 一意特定)。
+        ("COMPLETE GUIDE", "COMPLETE GUIDE"),
+        # 2026-07-27 (HQ verdict cert153420191 Perona #077 → OP01-077_p4/_p5):
+        #   「始めようキャンペーン プロモーションパック」(英 PSA brand "LET'S START CAMPAIGN
+        #   PROMOTION PACK")。official に「始めようキャンペーン」を持つ p4/p5 のみ +250 で、
+        #   汎用 _P 'Promotion Card' を上回らせる。★(p4=無/p5=有)の判別は画像のみ可のため、
+        #   p4/p5 が同点なら従来どおり fail-closed reject → HQ viewer が確定 (HQ 承認)。
+        #   apostrophe 揺れ回避で英側は "START CAMPAIGN"、日側「始めようキャンペーン」両側必須。
+        ("START CAMPAIGN", "始めようキャンペーン"),
+        # 2026-08-13 (auto依頼 cert160317119 SANJI #004 → ST10-004_p1):
+        #   「8パックバトル」大会記念品。PSA brand は "8 PACKS BATTLE-WINNER"。
+        #   両側一致必須なので汎用 promo (_P 'Promotion Card' 150) を上回り一意特定できる。
+        #   語順が違う「スタンダードバトルパック」(= バトルパック) には発火しない。
+        #   同じ #番号の 8パックバトル が別年に複数あれば同点 → 従来どおり fail-closed。
+        ("8 PACKS BATTLE", "8パックバトル"),
+        # 2026-08-21 (cert145597172 / 155606219 MONKEY D. LUFFY #003 → ST13-003_7E01):
+        #   PSA Variety "7-ELEVEN CAMPAIGN"。official は「セブンイレブンタイアップ
+        #   キャンペーン オリジナルカード」。両側一致必須なので、同じ #003 の
+        #   P-003_p3 (ユースタス・キッド) には subject 名で、ST13-003_P (ドルトムント
+        #   collab promo) には official 'Promotion Card' 側で発火せず分離される。
+        #   ★これが無いと汎用 promo (_P score150) が勝ち、**別絵柄の ST13-003_P を
+        #     返す** = 誤出品側に倒れる (2026-08-20 に実測)。
+        ("7-ELEVEN", "セブンイレブン"),
+        # 2026-08-23 (cert168544559 TONY TONY CHOPPER #003 → EB02-003_CH01):
+        #   単行本『ONE PIECE CHOPPER’s 1』(集英社 2026-04-23) 同梱 promo。
+        #   PSA Variety は "ONE PIECE CHOPPER'S 1" (ASCII ')、official は
+        #   『ONE PIECE CHOPPER’s 1』付録 (U+2019 ’) なので両側を別表記で持つ。
+        #   ★巻数 " 1" を含めるのが要点: 2巻以降の同梱 promo と混ざらない。
+        #   これが無いと base EB02-003 (suffix 無し +10) が勝ち、**通常版(アニメ絵)を
+        #   返す** = Set が '25th Anniversary Collection' の誤出品側に倒れる
+        #   (2026-08-23 実測: EB02-003_CH01 登録直後もこの誤解決が残っていた)。
+        ("CHOPPER'S 1", "CHOPPER’s 1"),
+    ):
+        if en in hay and (jp in sn or jp in sn_upper):
+            edition_hit = True
+    # UTA は短語のため \bUTA\b 限定 + official 'ウタ'
+    if re.search(r"\bUTA\b", hay) and "ウタ" in sn:
+        edition_hit = True
+    # 2026-08-09 (psa_preflight_report_response §3, R1 PORTGAS ACE cert 153574704):
+    #   PSA "CHAMPIONSHIP SET YYYY" ↔ official "チャンピオンシップセットYYYY..." pair.
+    #   年号一致必須 = 別年の Championship Set (2022/2023/2024) への暴発防止。
+    #   English side は "SET" 必須で「チャンピオンシップYYYY 決勝」等の tournament 記念品
+    #   (OP01-004_p2 等) には発火しない (official も「チャンピオンシップセット」限定でヒット)。
+    #   両側 (英=CHAMPIONSHIP SET YYYY / 日=チャンピオンシップセットYYYY) 一致必須で
+    #   OP02-001_p3 (旧四皇 2023) と OP03-001_p2 (エース・サボ・ルフィ 2023) は
+    #   subject の name (Edward Newgate vs Portgas Ace) 側で分離される。
+    m_champ = re.search(r"CHAMPIONSHIP\s*SET\s*(\d{4})", hay)
+    if m_champ and re.search(rf"チャンピオンシップセット\s*{m_champ.group(1)}", sn):
+        edition_hit = True
+    # 2026-08-26 (cert163955605 MONKEY D. LUFFY #001 → ST21-001_p2):
+    #   PSA "LIMITED CARD COLLECTION VOL.N" ↔ official「BASE SHOPリミテッドカード
+    #   コレクションvol.N」pair。収録6枚は券面番号が原典のまま (ST21-001 / OP08-001 等)
+    #   なので、番号だけでは同番号の別 promo と区別できない。
+    #   ★vol 番号一致必須 = vol.2 以降が出ても混ざらない。
+    #   これが無いと #001 は ST21-001_P 等 汎用 promo ('Promotion Card' +150) が勝ち、
+    #   **別絵柄を返す**か同点 fail-closed で候補に出ない (2026-08-26 実測: 候補0)。
+    m_lcc = re.search(r"LIMITED\s*CARD\s*COLLECTION\s*VOL\.?\s*(\d+)", hay)
+    if m_lcc and "リミテッドカードコレクション" in sn and re.search(
+            rf"vol\.?\s*{m_lcc.group(1)}\b", sn, re.IGNORECASE):
+        edition_hit = True
+    return edition_hit
+
+
 def _search_one_piece_promo_by_number(
     card_number: str,
     subject: str,
@@ -832,87 +968,7 @@ def _search_one_piece_promo_by_number(
         #    例: BEST SELECTION VOL.4↔ベストセレクション vol.4(Sabo) / 25TH ANNIVERSARY↔25周年(Chopper ST01-006_p1)
         #    2026-06-10 拡張(HQ greenlight unresolved17 (I)): edition/event の brand英↔official日 pair。
         #    照合は hay(brand+subject) で行う(edition/event語は subject 側のことが多い)。
-        edition_hit = False
-        m_bs = re.search(r"BEST\s*SELECTION\s*VOL\.?\s*(\d+)", hay)
-        if m_bs and "ベストセレクション" in sn and re.search(rf"vol\.?\s*{m_bs.group(1)}\b", sn, re.IGNORECASE):
-            edition_hit = True
-        if re.search(r"25TH|25\s*周年", hay) and "25周年" in sn:
-            edition_hit = True
-        # 2026-07-02: "Nth ANNIVERSARY SET" edition (cert84400496 OTAMA #006 → OP01-006_p4).
-        #   汎用promo(_P 'Promotion Card' score150)に本命(_p4 'Nst ANNIVERSARY SET')が
-        #   負けて沈む問題を是正。**ordinal番号一致必須** = 1st/2nd/3rd の別anniversary set への
-        #   暴発防止(番号違いなら発火せず、既存の keyword +60 のみ)。
-        m_anniv = re.search(r"(\d+)\s*(?:ST|ND|RD|TH)\s*ANNIVERSARY", hay)
-        if m_anniv and re.search(rf"\b{m_anniv.group(1)}\s*(?:st|nd|rd|th)\s*ANNIVERSARY", sn, re.IGNORECASE):
-            edition_hit = True
-        # edition/event pair (両方一致必須=暴発防止)。英keyword in hay かつ 日keyword in official。
-        for en, jp in (
-            ("FILM RED", "FILM RED"),
-            ("ONE PIECE DAY", "ONE PIECE DAY"),
-            ("PROMOTION CARD SET", "プロモーションカードセット"),
-            ("STANDARD BATTLE", "スタンダードバトル"),
-            ("EVENT PRIZE", "記念品"),
-            # 2026-07-10 (cert85592405 Pudding #008 → ST07-008_GE): プレミアムカードコレクション
-            #   -GIRLS EDITION- 収録 parallel。official set_name に 'GIRLS EDITION' を持つ変種のみ +250。
-            #   両側一致必須なので base ST07-008/他promo(_P 等)には発火しない。
-            ("GIRLS EDITION", "GIRLS EDITION"),
-            # 2026-06-12 収録: ADMIRABLE COLLECTION vol.N 封入 promo (cert 151477459 Reiju #068
-            #   → OP06-068_AC01)。official set_name に "Admirable Collection" を持つ変種のみ +250。
-            #   両側一致必須なので別 #068 変種(PRB01/p1 等)には発火しない。
-            ("ADMIRABLE COLLECTION", "ADMIRABLE COLLECTION"),
-            # 2026-06-12 REVIEW: nth ANNIVERSARY COMPLETE GUIDE 収録特典 promo.
-            #   official は英語表記 "Nth ANNIVERSARY COMPLETE GUIDE" を含むため en=jp 同句で
-            #   両側一致照合。PSA brand は "ANV." 略記なので distinctive token "COMPLETE GUIDE"
-            #   で照合する。例 cert 148642488 ZORO 2ND ANV. COMPLETE GUIDE #067 → OP05-067_p2
-            #   (#067 候補中 official に COMPLETE GUIDE を持つのは _p2 のみ = 一意特定)。
-            ("COMPLETE GUIDE", "COMPLETE GUIDE"),
-            # 2026-07-27 (HQ verdict cert153420191 Perona #077 → OP01-077_p4/_p5):
-            #   「始めようキャンペーン プロモーションパック」(英 PSA brand "LET'S START CAMPAIGN
-            #   PROMOTION PACK")。official に「始めようキャンペーン」を持つ p4/p5 のみ +250 で、
-            #   汎用 _P 'Promotion Card' を上回らせる。★(p4=無/p5=有)の判別は画像のみ可のため、
-            #   p4/p5 が同点なら従来どおり fail-closed reject → HQ viewer が確定 (HQ 承認)。
-            #   apostrophe 揺れ回避で英側は "START CAMPAIGN"、日側「始めようキャンペーン」両側必須。
-            ("START CAMPAIGN", "始めようキャンペーン"),
-            # 2026-08-13 (auto依頼 cert160317119 SANJI #004 → ST10-004_p1):
-            #   「8パックバトル」大会記念品。PSA brand は "8 PACKS BATTLE-WINNER"。
-            #   両側一致必須なので汎用 promo (_P 'Promotion Card' 150) を上回り一意特定できる。
-            #   語順が違う「スタンダードバトルパック」(= バトルパック) には発火しない。
-            #   同じ #番号の 8パックバトル が別年に複数あれば同点 → 従来どおり fail-closed。
-            ("8 PACKS BATTLE", "8パックバトル"),
-            # 2026-08-21 (cert145597172 / 155606219 MONKEY D. LUFFY #003 → ST13-003_7E01):
-            #   PSA Variety "7-ELEVEN CAMPAIGN"。official は「セブンイレブンタイアップ
-            #   キャンペーン オリジナルカード」。両側一致必須なので、同じ #003 の
-            #   P-003_p3 (ユースタス・キッド) には subject 名で、ST13-003_P (ドルトムント
-            #   collab promo) には official 'Promotion Card' 側で発火せず分離される。
-            #   ★これが無いと汎用 promo (_P score150) が勝ち、**別絵柄の ST13-003_P を
-            #     返す** = 誤出品側に倒れる (2026-08-20 に実測)。
-            ("7-ELEVEN", "セブンイレブン"),
-            # 2026-08-23 (cert168544559 TONY TONY CHOPPER #003 → EB02-003_CH01):
-            #   単行本『ONE PIECE CHOPPER’s 1』(集英社 2026-04-23) 同梱 promo。
-            #   PSA Variety は "ONE PIECE CHOPPER'S 1" (ASCII ')、official は
-            #   『ONE PIECE CHOPPER’s 1』付録 (U+2019 ’) なので両側を別表記で持つ。
-            #   ★巻数 " 1" を含めるのが要点: 2巻以降の同梱 promo と混ざらない。
-            #   これが無いと base EB02-003 (suffix 無し +10) が勝ち、**通常版(アニメ絵)を
-            #   返す** = Set が '25th Anniversary Collection' の誤出品側に倒れる
-            #   (2026-08-23 実測: EB02-003_CH01 登録直後もこの誤解決が残っていた)。
-            ("CHOPPER'S 1", "CHOPPER’s 1"),
-        ):
-            if en in hay and (jp in sn or jp in sn_upper):
-                edition_hit = True
-        # UTA は短語のため \bUTA\b 限定 + official 'ウタ'
-        if re.search(r"\bUTA\b", hay) and "ウタ" in sn:
-            edition_hit = True
-        # 2026-08-09 (psa_preflight_report_response §3, R1 PORTGAS ACE cert 153574704):
-        #   PSA "CHAMPIONSHIP SET YYYY" ↔ official "チャンピオンシップセットYYYY..." pair.
-        #   年号一致必須 = 別年の Championship Set (2022/2023/2024) への暴発防止。
-        #   English side は "SET" 必須で「チャンピオンシップYYYY 決勝」等の tournament 記念品
-        #   (OP01-004_p2 等) には発火しない (official も「チャンピオンシップセット」限定でヒット)。
-        #   両側 (英=CHAMPIONSHIP SET YYYY / 日=チャンピオンシップセットYYYY) 一致必須で
-        #   OP02-001_p3 (旧四皇 2023) と OP03-001_p2 (エース・サボ・ルフィ 2023) は
-        #   subject の name (Edward Newgate vs Portgas Ace) 側で分離される。
-        m_champ = re.search(r"CHAMPIONSHIP\s*SET\s*(\d{4})", hay)
-        if m_champ and re.search(rf"チャンピオンシップセット\s*{m_champ.group(1)}", sn):
-            edition_hit = True
+        edition_hit = _op_edition_matches(hay, sn)
         # 2026-08-01: 出力等価 tie の決定的採用 (下記) は **edition_hit した候補にのみ** 許可する。
         #   brand が edition/set を一意特定した時だけ「top tie = その product の変種」= 採用が安全。
         #   generic/ambiguous brand (edition句無し, edition_hit=False) の同点は従来どおり fail-closed
