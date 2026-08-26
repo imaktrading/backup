@@ -2519,8 +2519,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         # ①「参照のみ」に反する ②catalog 意図的空欄(JP限定)を上書きしてしまう → 廃止。
         if v.get("rarity") and not official_rarity:
             official_rarity = v["rarity"]
-        if v.get("color") and not official_color:
-            official_color = v["color"]
+        # ★2026-08-26 撤去: Vision が読んだ色での official_color 補完。
+        #   契約 (_contract_aspects.yaml) の Attribute/MTG:Color は `specs.color_ebay` だけ。
+        #   catalog が色を持たない Trainer / Energy 行 (実測 3,998行) に Vision の色が
+        #   載っていた。8/25 は日本語 ('サポート') だったので日本語ガードが空欄化して
+        #   助かっただけで、card_identifier_cache には 'Purple' 等の英語も入っている。
+        #   依頼書: hq/requests/2026-08-25_act_code_proposals_tcg.md 提案3
         if v.get("card_type") and not official_card_type:
             official_card_type = v["card_type"]
         if v.get("cost") not in (None, "") and official_cost in (None, ""):
