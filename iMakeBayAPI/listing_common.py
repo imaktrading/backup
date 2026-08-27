@@ -773,6 +773,86 @@ def banned_title_words_in(title: str, banned_words) -> list:
     return hits
 
 
+# ---------------------------------------------------------------------------
+# シングルカードのカテゴリ (183454) で **タイトルに出してはいけない** 語 (2026-08-27)
+#
+# eBay は "Pack" / "Box" 等が入ったタイトルを「複数枚まとめて売っている」と読み、
+# ErrorCode 240 (LP_SBM_Miscat_Trading_Cards_in_single_cat) で入稿を弾く。
+#   実測 cert158394314: タイトルの `Pack` 1語だけで ack=Failure / 語を抜くと通る。
+# 公式のセット名に本当に `Card Pack` が入っている
+# (`S8a-P: Promo Card Pack 25th Anniversary Edition`) ので **カタログは正しい**。
+# 誤っているのは、それをシングルのタイトルにそのまま出している側 (= 引き方)。
+# ★Item Specifics の `C:Set` は実測で通るので **落とさない** (契約どおりカタログ値を写す)。
+# 依頼書: hq/requests/2026-08-27_title_pack_word_miscat_240.md
+#
+# 照合ルールは banned_title_words_in と同じ単語境界。2026-08-09 の教訓
+# (語リストだけコピーして照合が部分一致にズレた) を繰り返さないため、
+# **語も除去関数もここが SSOT**。post_title_fix / csv_auditor は import して使う。
+MISCAT_TITLE_WORDS = ("pack", "packs", "box", "boxes", "lot", "lots",
+                      "bundle", "bundles", "set of")
+SINGLES_CATEGORY = "183454"
+
+_MISCAT_RE = re.compile(
+    r'(?<![A-Za-z0-9])(?:'
+    # re.escape は空白も escape する (`set\ of`) ので、escape 後に置換する
+    + '|'.join(re.escape(w).replace('\\ ', r'\s+') for w in MISCAT_TITLE_WORDS)
+    + r')(?![A-Za-z0-9])', re.IGNORECASE)
+
+
+def _card_name_spans(title: str, card_name: str) -> list:
+    """タイトル内で **カード名そのもの** が占める文字範囲を全部返す。
+
+    ★カード名に miscat 語が入るものが実在する: `Iron Bundle` (Pokemon SV4M #071/066)。
+      2026-08-25 に出品済で **240 は出ていない** (eBay は名前の Bundle を咎めない)。
+      ここを落とすと `Iron Art Rare` = **別のカード名**になって出る。
+      Tony Tony Chopper を Tony Chopper にして出した 2026-08-24 と同型の事故なので、
+      カード名の範囲は絶対に触らない。
+    """
+    n = str(card_name or "").strip()
+    if not n:
+        return []
+    pat = r'(?<![A-Za-z0-9])' + r'\s+'.join(re.escape(w) for w in n.split()) + r'(?![A-Za-z0-9])'
+    return [m.span() for m in re.finditer(pat, str(title or ""), re.IGNORECASE)]
+
+
+def miscat_title_words_in(title: str, card_name: str = "") -> list:
+    """タイトルに含まれる miscat 語を返す (単語境界・大小無視)。純関数。
+
+    "Boxer" / "Packrat" には一致しない。"Boxes" / "Set of" には一致する。
+    card_name (= C:Card Name) の範囲内の語は **返さない** (Iron Bundle 等)。
+    """
+    t = str(title or "")
+    keep = _card_name_spans(t, card_name)
+    return [m.group(0) for m in _MISCAT_RE.finditer(t)
+            if not any(a < m.end() and m.start() < b for a, b in keep)]
+
+
+def strip_miscat_title_words(title: str, card_name: str = ""):
+    """タイトルから miscat 語を落とす。純関数。
+
+    セット名の残りはそのまま活かす
+    (`... Japanese Card Pack 25th Anniversary Edition ...`
+     → `... Japanese Card 25th Anniversary Edition ...`)。
+    card_name の範囲は落とさない (`Iron Bundle` は丸ごと残す)。
+
+    Returns: (新タイトル, 落としたか bool)
+    """
+    t = str(title or "")
+    keep = _card_name_spans(t, card_name)
+
+    def _sub(m):
+        if any(a < m.end() and m.start() < b for a, b in keep):
+            return m.group(0)                        # カード名の一部 → 残す
+        return ''
+
+    new = _MISCAT_RE.sub(_sub, t)
+    if new == t:
+        return title, False
+    new = re.sub(r'\s+', ' ', new).strip()
+    new = re.sub(r'[\s:\-]+$', '', new).strip()      # 'Collection Pack' → 末尾に ':' 等を残さない
+    return new, new != title
+
+
 def get_shipping_policy_name(price_usd: float, category: str) -> str:
     """V6 / V5 / Free モード別に Shipping Profile 名を返す (listing scripts 共通).
 

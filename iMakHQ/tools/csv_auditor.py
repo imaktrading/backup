@@ -366,16 +366,46 @@ _JP_RE = re.compile(r"[ぁ-んァ-ヶ一-龠]")
 
 _MAX_TITLE = 80
 IDEAL_TITLE_LEN = 70   # これ未満は「80字を活かしきれてない」= 短タイトル (PDCA KPI)
+SINGLES_CATEGORY = "183454"   # TCG シングルカード (= miscat 語の検査対象)
+
+
+def _miscat_title_words(title, card_name=""):
+    """シングルのタイトルに出してはいけない語 (Pack/Box/Lot/Bundle/Set of) を返す。
+
+    ★語も照合も listing_common が SSOT。ここで再実装しない (2026-08-09 の
+    「語リストだけコピーして照合がズレる」事故と同型を作らないため)。
+    card_name の範囲は除外される (`Iron Bundle` = 実在のカード名で 240 も出ていない)。
+    """
+    p = os.path.join(WORKSPACE, "iMakeBayAPI")
+    if p not in sys.path:
+        sys.path.insert(0, p)
+    from listing_common import miscat_title_words_in
+    return miscat_title_words_in(title, card_name=card_name)
 
 
 def native_findings(headers, row):
-    """check_csv に無い csv_auditor 独自検査 (日本語混入)。check_csv 経路で validate_row に上乗せ。"""
+    """check_csv に無い csv_auditor 独自検査 (日本語混入 / miscat 語)。
+    check_csv 経路で validate_row に上乗せ。"""
     out = []
     hm = {h: i for i, h in enumerate(headers)}
     ti = hm.get(COL_TITLE)
     title = str(row[ti]).strip() if ti is not None and ti < len(row) else ""
     if _JP_RE.search(title):
         out.append(("ERROR", f"タイトルに日本語文字が混入: {title!r}"))
+    # ★2026-08-27: シングルのカテゴリで Pack/Box 等がタイトルに残っていると、eBay が
+    #   「複数枚売っている」と読んで ErrorCode 240 で入稿を弾く。今日は eBay に投げるまで
+    #   分からず、9件目で走行が止まって残り3件が未出品になった → **入稿前に検出する**。
+    #   依頼書: hq/requests/2026-08-27_title_pack_word_miscat_240.md
+    ci = hm.get("*Category")
+    cat = str(row[ci]).strip() if ci is not None and ci < len(row) else ""
+    if cat == SINGLES_CATEGORY and title:
+        ni = hm.get("C:Card Name")
+        cname = str(row[ni]).strip() if ni is not None and ni < len(row) else ""
+        for w in _miscat_title_words(title, card_name=cname):
+            out.append(("ERROR",
+                        f"禁止ワード '{w}' がタイトルに含まれている "
+                        f"(シングルのカテゴリ {SINGLES_CATEGORY} = eBay ErrorCode 240 で"
+                        f"カテゴリ違い判定。C:Set からは落とさない)"))
     return out
 
 

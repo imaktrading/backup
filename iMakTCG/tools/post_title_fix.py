@@ -35,6 +35,18 @@ CSV_DIR = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
 CSV_GLOB = "tcg_upload_*.csv"
 RECENT_THRESHOLD_SEC = 600  # 10分以内の CSV のみ対象 (古い CSV を二重処理しない)
 SHORT_TITLE_THRESHOLD = 60  # 60字未満を補強対象
+# ★2026-08-27: Pack/Box/Lot/Bundle/Set of の除去は **listing_common が SSOT**。
+#   ここで語リストも照合も再実装しない (2026-08-09 に語だけコピーして照合ルールがズレ、
+#   "Shenron" の "nr" で $799 のカードを誤除外した同型事故を繰り返さないため)。
+#   import できない = miscat 語が素通りする (= eBay ErrorCode 240 で入稿が止まる) ので
+#   握り潰さず落とす (fail-closed)。
+_EBAY_API_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    'iMakeBayAPI')
+if _EBAY_API_DIR not in sys.path:
+    sys.path.insert(0, _EBAY_API_DIR)
+from listing_common import SINGLES_CATEGORY, strip_miscat_title_words  # noqa: E402
+
 TARGET_TITLE_LEN = 72  # 補強の目標 (達したら追加停止). 既存 pad_title (psa_to_csv.py:681) と同値
 MAX_TITLE_LEN = 80  # eBay の上限
 
@@ -236,7 +248,7 @@ def strip_japanese(title):
     return new, new != title
 
 
-def pad_title(title, language='', rarity='',
+def pad_title(title, language='', rarity='', year='',
               min_len=SHORT_TITLE_THRESHOLD, target_len=TARGET_TITLE_LEN,
               max_len=MAX_TITLE_LEN):
     """短タイトルに Item Specifics ベースで補強.
@@ -244,7 +256,8 @@ def pad_title(title, language='', rarity='',
     優先順位 (2026-05-31 改訂: 'TCG' filler 廃止 = PDF Rank 圏外 + game 表記重複リスク):
         1. Rarity (RARITY_TO_TITLE にマップあるもの)
         2. Language が Japanese なら "Japanese"
-        3. "Card" (TCG カードは事実)
+        3. year (= C:Year Manufactured)。miscat 語を落とした行だけ渡される (2026-08-27)
+        4. "Card" (TCG カードは事実)
 
     既に title 内にある語はスキップ. max_len を超える追加もスキップ.
     target_len に達したら追加停止. min_len 未満のみ補強対象.
@@ -265,7 +278,12 @@ def pad_title(title, language='', rarity='',
     # 2. Language
     if language and language.strip().lower() == 'japanese':
         candidates.append('Japanese')
-    # 3. Card (= TCG カードは事実)
+    # 3. 年号 (2026-08-27)。miscat 語 (Pack/Box 等) を落として短くなった時だけ
+    #    呼び出し側が渡す。C:Year Manufactured = カタログの値なので推測フィラーではない。
+    _y = str(year or '').strip()
+    if _y.isdigit():
+        candidates.append(_y)
+    # 4. Card (= TCG カードは事実)
     candidates.append('Card')
 
     title_lower = title.lower()
@@ -285,14 +303,14 @@ def pad_title(title, language='', rarity='',
     return title, applied
 
 
-def fix_title(title, language, rarity, rescues, card_name=""):
+def fix_title(title, language, rarity, rescues, card_name="", category="", year=""):
     """1タイトルに対する全処理パイプライン.
 
     Returns:
         (新タイトル, 操作ログ dict)
     """
     log = {'rescue': [], 'pokemon_dedup': False, 'word_dedup': False, 'pad': [],
-           'jp_strip': False, 'banned_strip': False}
+           'jp_strip': False, 'banned_strip': False, 'miscat_strip': []}
 
     title, rescue_applied = apply_rescue(title, rescues)
     log['rescue'] = rescue_applied
@@ -311,9 +329,24 @@ def fix_title(title, language, rarity, rescues, card_name=""):
 
     # eBay 禁止文字 (★ 等) を pad の前に除去 (rarity 'C★' 由来のタイトル混入を潰す)。
     title, banned_stripped = strip_ebay_banned_chars(title)
-    log['banned_strip'] = banned_stripped
 
-    title, pad_applied = pad_title(title, language=language, rarity=rarity)
+    # ★2026-08-27: 同じ「禁止」の口で、シングルのカテゴリ (183454) のタイトルからは
+    #   Pack / Box / Lot / Bundle / Set of も落とす。eBay がこれを「複数枚売っている」と
+    #   読んで ErrorCode 240 (miscat) で入稿を弾くため。
+    #   ★C:Set は落とさない (実測で通る)。ここは title だけ。
+    miscat_hits = []
+    if str(category or '').strip() == SINGLES_CATEGORY:
+        before = title
+        title, miscat_stripped = strip_miscat_title_words(title, card_name=card_name)
+        if miscat_stripped:
+            miscat_hits = [before, title]
+            banned_stripped = True          # 既存の banned_strip の口に合流 (分岐を増やさない)
+    log['banned_strip'] = banned_stripped
+    log['miscat_strip'] = miscat_hits
+
+    # 落として短くなった分は年号等で補う (miscat を落とした行だけ year を渡す)
+    title, pad_applied = pad_title(title, language=language, rarity=rarity,
+                                   year=(year if miscat_hits else ''))
     log['pad'] = pad_applied
 
     return title, log
@@ -347,6 +380,10 @@ def process_csv(csv_path, rescues, log_func=print):
     # 全 C: 列 (C:Rarity='C★' 等) から ★ 等を除去 (ErrorCode 240 の入稿失敗を防ぐ)。
     # カード名 = 重複語除去で削ってはいけない語 (Tony Tony Chopper 等)
     name_idx = header.index('C:Card Name') if 'C:Card Name' in header else None
+    # miscat 語 (Pack/Box 等) 除去はシングルのカテゴリ限定 → *Category を見る (2026-08-27)
+    cat_idx = header.index('*Category') if '*Category' in header else None
+    year_idx = (header.index('C:Year Manufactured')
+                if 'C:Year Manufactured' in header else None)
     spec_idxs = [j for j, h in enumerate(header) if h.startswith('C:')]
     # Description(HTML)内の Specs ブロックにも rarity 'C★' 等が反映される。240 の対象
     # (title/description) なので除去。ただし HTML なので空白は collapse しない。
@@ -362,6 +399,8 @@ def process_csv(csv_path, rescues, log_func=print):
             rarity=row[rarity_idx] if rarity_idx < len(row) else '',
             rescues=rescues,
             card_name=(row[name_idx] if name_idx is not None and name_idx < len(row) else ''),
+            category=(row[cat_idx] if cat_idx is not None and cat_idx < len(row) else ''),
+            year=(row[year_idx] if year_idx is not None and year_idx < len(row) else ''),
         )
 
         if log['rescue']:
@@ -381,7 +420,8 @@ def process_csv(csv_path, rescues, log_func=print):
             log_func(f"  [#{i}] 🚫 日本語除去: {original[:50]!r} → {new_title[:50]!r}")
         if log['banned_strip']:
             stats['banned_stripped'] += 1
-            log_func(f"  [#{i}] 🚫 eBay禁止文字除去(title): {original!r} → {new_title!r}")
+            _what = "禁止語(Pack/Box等)" if log['miscat_strip'] else "禁止文字"
+            log_func(f"  [#{i}] 🚫 eBay{_what}除去(title): {original!r} → {new_title!r}")
 
         if new_title != original:
             row[title_idx] = new_title
