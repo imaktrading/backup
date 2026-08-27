@@ -234,3 +234,17 @@
 - 決定: psa_review_skip.json は触らない。実行系 master の挙動を実機確認し「cooldown 1日 + self-heal(2026-08-09) で自動復帰」と回答。Catalog の Q2「catalog追加で自動skip解除」は self-heal で既に自動化済 (PERONA蒸し返し対策)。今後同型の依頼は不要と伝達
 - 変更: なし (回答のみ: 2026-08-23_psa_review_skip_clear_cert168544559_response.md)。データ・コード非変更
 - 検証: master `iMakTCG/tcg_batch_select.py` REVIEW_SKIP_COOLDOWN_DAYS=1・active_review_skips が resolvable_now で self-heal (dedupe worktree copy は古い14・self-heal無=runtime非該当)。cross-check として EB02-003_CH01 追加後に resolver が cert→_CH01 一意解決できるか (基本形EB02-003 誤解決だと誤出品) を①側に確認要請
+
+---
+
+## 2026-08-27
+
+### 目視画面の再掲 診断 (Catalog依頼) → feasibility回答 + HQへBUILD転送
+
+- 決定: 「同cert再掲」は verified_certs の OK/CHOSEN が使われていないのではなく、フィルタは効くのに live画面が出す=回帰。8/24 master変更 85504cb「前段で落とした cert の痕跡を残す」が最有力被疑 (152976751 は7/14決定→6週間静か→8/25再燃で時期一致)
+- 変更: なし (診断+可否のみ)。回答 2026-08-27_review_html_repeats_same_items_response.md / HQ BUILD転送 hq/requests/2026-08-27_build_review_dedup_verified_and_presort.md
+- 検証: 実データで split_verified(実cert)→confirmed=viewer非表示 を確認 (フィルタ正常)。再掲7件全て verified_certs に OK/CHOSEN+有効pid。実行系は master(HQ領域)・dedupe checkout は古い版と判明→実装はHQ。①決定済はviewer非表示(buildは維持)②別個体同カードは既定選択で下・消さない、両方可(小)
+
+### 注記: /doctor の CLAUDE.md trim 未コミット
+
+- CLAUDE.md は前回 /doctor で古いディレクトリツリー27行を削除済 (作業ツリー・ユーザーレビュー用)。本日の commit には含めない
