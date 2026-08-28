@@ -1386,6 +1386,47 @@ def non_psa10_certs(title_map):
     return out
 
 
+# PSA cache の「写真がある」を表す key。どれか1つでも URL があれば照合できる。
+_PSA_IMAGE_KEYS = ("CardImageUrl", "CardImageUrlFront", "CardImageUrlBack")
+
+
+def has_psa_photo(meta) -> bool:
+    """PSA cache 1件に写真 URL があるか (純関数)。"""
+    if not isinstance(meta, dict):
+        return False
+    return any(str(meta.get(k) or "").strip() for k in _PSA_IMAGE_KEYS)
+
+
+def no_psa_photo_certs(certs, cache, substitute_fn=None):
+    """**PSA 側に写真が無い** cert の {cert: 理由} (純関数)。
+
+    ★2026-08-28: PSA が写真を残していない個体があり、何度取り直しても増えない。
+      実測 psa_cache.json 1,308件のうち写真ゼロは **5件** (0.4%) で、いずれも 2020年前後の
+      古い cert。この個体は目視で現物と照合できないので枠を食う前に落とす。
+      **プログラムの不具合ではない**ので program_fix には積まない (狼少年になる)。
+      依頼書: hq/requests/2026-08-28_act_code_proposals_tcg.md 提案1
+
+    判定できないもの (cache に無い) は **含めない** = 落とさない (fail-closed の向きを守る)。
+    代替画像 (psa_image_override.json) が在る cert も落とさない (写真は手に入る)。
+    """
+    sub = substitute_fn if substitute_fn is not None else psa_image_substitute
+    out = {}
+    for cert in (certs or []):
+        c = str(cert)
+        meta = (cache or {}).get(c)
+        if not isinstance(meta, dict) or not meta:
+            continue                      # cache 無し = 判定不能 → 触らない
+        if has_psa_photo(meta):
+            continue
+        try:
+            if sub(c):
+                continue                  # 別 cert から借りられる
+        except Exception:                                      # noqa: BLE001
+            pass
+        out[c] = "PSA に写真が無い個体 (取り直しても増えない)"
+    return out
+
+
 def detected_grade_from_title(title):
     """LLM が現物ラベルから読んだタイトル冒頭の "PSA <n>" から グレードを取る (純関数)。
 
@@ -3175,6 +3216,19 @@ def main():
             print("     (1枚だけ買えない = 仕入値が想定と違う。単品の個体を待つ)")
             record_cert_skips("multi_card_lot_by_supply_title", _hit, detail=_lots)
             cert_numbers = [c for c in cert_numbers if str(c) not in _lots]
+
+    # ★PSA に写真が無い個体を落とす (2026-08-28)。
+    #   写真が無いと目視で現物と照合できず、必ず「該当なし」になって枠を1つ潰す。
+    #   PSA 側の事情で取り直しても増えない (実測 1,308件中5件・2020年前後の古い cert)。
+    #   代替画像が用意されている cert は落とさない。
+    #   依頼書: hq/requests/2026-08-28_act_code_proposals_tcg.md 提案1
+    _nophoto = no_psa_photo_certs(cert_numbers, _load_psa_cache())
+    if _nophoto:
+        print(f"  🚫 PSA に写真が無い個体を除外: {len(_nophoto)}件 → {sorted(_nophoto)[:6]}")
+        print("     (照合できないので目視に出しても必ず『該当なし』になる。"
+              "プログラムの不具合ではないので修正依頼にはしない)")
+        record_cert_skips("no_psa_photo", list(_nophoto), detail=_nophoto)
+        cert_numbers = [c for c in cert_numbers if str(c) not in _nophoto]
 
     # 目視済(NONE/NG=識別不能)cert を cooldown 期間スキップ (2026-06-23 再表示防止)
     # post_psa_review が NONE/NG 判定を skip 台帳に記録 → 一定期間 再出題しない。

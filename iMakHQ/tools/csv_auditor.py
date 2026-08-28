@@ -296,6 +296,30 @@ def classify_finding(severity, msg):
     return REPORT_PROGRAM if severity == "ERROR" else SEO_NOTE
 
 
+# check_csv が出す「PSA 画像が1枚も無い」の文言 (image_issues 由来)。
+NO_PSA_PHOTO_MSG = "PSA 画像が1枚も無い"
+_PSA_IMAGE_KEYS = ("CardImageUrl", "CardImageUrlFront", "CardImageUrlBack")
+
+
+def no_psa_photo_disposition(msg, disp, psa_meta):
+    """「PSA 画像が1枚も無い」が **PSA 側に写真が無い個体** なら program にしない (純関数)。
+
+    ★2026-08-28: PSA が写真を残していない cert が実測5件あり、毎回この指摘が
+      program_fix (= HQ が直すべきコードの不具合) として積まれていた。直すコードは無いので
+      永遠に閉じず、狼少年になる。出品は止めたまま (写真無しでは出せない) 依頼だけ止める。
+      PSA に写真が **有る** のに CSV に載っていないなら、それは本当に生成バグなので従来どおり。
+      判定できない (cache が無い) 時も従来どおり = 生成バグの可能性を消さない (fail-closed)。
+      依頼書: hq/requests/2026-08-28_act_code_proposals_tcg.md 提案1
+    """
+    if not str(msg or "").startswith(NO_PSA_PHOTO_MSG):
+        return disp
+    if not isinstance(psa_meta, dict) or not psa_meta:
+        return disp
+    if any(str(psa_meta.get(k) or "").strip() for k in _PSA_IMAGE_KEYS):
+        return disp
+    return EXCLUDE_FAILCLOSED
+
+
 def row_disposition(dispositions):
     """1行の複数 disposition を優先度で集約 → 代表処置を返す。"""
     if not dispositions:
@@ -990,7 +1014,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     identity_by_sku = {}      # sku(出品ID) → 商品identity。Catalog が依頼から対象を引くため
     seo_notes = []
     all_vr = []               # 各行 validate_row 結果 (Claude総合レビュー文脈用)
+    nophoto_skus = []         # PSA 側に写真が無くて除外した行 (黙って落とさないため数える)
     for i, row in enumerate(rows, 1):
+        _psa_cache_meta = None
         if is_generic:
             findings = generic_findings(headers, row)
             all_vr.append([])
@@ -1004,11 +1030,18 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
             _cert = (str(row[_cert_i]).strip()
                      if _cert_i is not None and _cert_i < len(row) else "")
             if _cert:
-                findings += psa_identity_findings(headers, row, _psa_meta(_cert))
+                _psa_cache_meta = _psa_meta(_cert)
+                findings += psa_identity_findings(headers, row, _psa_cache_meta)
                 if _sidecar.get(_cert):
                     findings += catalog_mismatch_findings(
                         headers, row, _contract, catalog_expected_fields(_sidecar[_cert]))
         disps = [classify_finding(sev, msg) for sev, msg in findings]
+        # PSA 側に写真が無い個体は出品しないが **プログラム修正依頼にはしない** (2026-08-28)
+        _disps2 = [no_psa_photo_disposition(m, d, _psa_cache_meta)
+                   for (_s, m), d in zip(findings, disps)]
+        if _disps2 != disps:
+            nophoto_skus.append(_row_sku(headers, row))
+        disps = _disps2
         sku = _row_sku(headers, row)
         _ident = card_identity(headers, row)
         if _ident and not identity_by_sku.get(sku):
@@ -1075,6 +1108,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # (在庫に無いカードの追加依頼は別経路 auto_catalog_add_request.py が担当。
     #  そちらは 2026-08-22 に resolver ゲートを入れて誤検出を止めてある)
     cat_req = None
+    if nophoto_skus:
+        print(f"  📷 PSA に写真が無い個体で除外: {len(nophoto_skus)}件 → {nophoto_skus[:6]}")
+        print("     (PSA 側に写真が存在しない = 直すコードが無いので program修正依頼にはしません)")
     if catalog_items:
         print(f"  📝 カタログ向けの気づき {len(catalog_items)}件 (依頼書は出しません・レポートに記載)")
     prog_req = write_program_request(project, program_items, dry_run)

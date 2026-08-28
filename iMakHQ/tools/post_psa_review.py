@@ -1107,7 +1107,7 @@ def _generate_html(targets: list[dict]) -> None:
             for _label, _url in confirm_columns(t, expected_img):
                 html.append('<div class=col>')
                 html.append(f'<div class=label>{_label}</div>')
-                html.append(f'<img src="{_img_url(_url)}">')
+                html.append(_confirm_cell(_url))
                 html.append('</div>')
                 # 仕入元とPSAの間だけ「同じ現物？」、PSA と catalog の間に「合ってる？」
                 if _label.startswith("🛒"):
@@ -1123,7 +1123,7 @@ def _generate_html(targets: list[dict]) -> None:
             for _label, _url in confirm_columns(t, ""):
                 html.append('<div class=col>')
                 html.append(f'<div class=label>{_label}</div>')
-                html.append(f'<img src="{_img_url(_url)}">')
+                html.append(_confirm_cell(_url))
                 html.append('</div>')
                 if _label.startswith("🛒"):
                     html.append('<div class=confirm-q>↔️<br>同じ現物？</div>')
@@ -1923,6 +1923,12 @@ def confirm_columns(target: dict, expected_img: str) -> list:
         cols.append(("🛒 仕入元 (現物)", target["supply_image_url"]))
     if target.get("cert_image_url"):
         cols.append(("📋 PSA 表", target["cert_image_url"]))
+    elif target.get("cert") and not target.get("cert_image_url_back"):
+        # ★2026-08-28: PSA に写真が無い cert は列を **黙って出さない**ため、人は仕入元と
+        #   catalog だけを見比べて「別絵柄」と判断していた (cert55281762 の誤依頼の原因)。
+        #   照合できないという事実を画面に出す。URL は空 = 画像を描かない印。
+        #   依頼書: hq/requests/2026-08-28_act_code_proposals_tcg.md 提案1
+        cols.append(("📋 PSA 写真なし = 照合不能", ""))
     if target.get("cert_image_url_back"):
         cols.append(("📋 PSA 裏", target["cert_image_url_back"]))
     if expected_img:
@@ -1931,6 +1937,20 @@ def confirm_columns(target: dict, expected_img: str) -> list:
         if back:
             cols.append(("📚 catalog 裏", back))
     return cols
+
+
+def _confirm_cell(url: str) -> str:
+    """確認列の中身 (純関数)。URL が空 = 画像が存在しない列 → 理由を文字で出す。
+
+    ★2026-08-28: 空URL で `<img>` を書くと壊れた画像枠になるだけで、人には
+      「なぜ無いのか」が伝わらない。写真が無いこと自体が判断材料なので文字で書く。
+    """
+    if not url:
+        return ('<div style="padding:40px 16px;color:#ffb3b3;font-size:13px;'
+                'border:1px dashed #a55;border-radius:4px;max-width:300px;text-align:center">'
+                'PSA に写真が無い個体<br>(取り直しても増えません)<br>'
+                '→ 仕入元の写真だけでは絵柄を確定できません</div>')
+    return f'<img src="{_img_url(url)}">'
 
 
 def _build_target_for_cert(cert: str):
