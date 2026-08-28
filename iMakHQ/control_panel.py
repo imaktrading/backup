@@ -1492,6 +1492,18 @@ SCRIPTS = [
         "skip_postprocess": True,
     },
     {
+        # 売れた分を入口にする唯一のボタン (2026-08-28)。他の補充系は全部ファネル起点で、
+        # 売れて閉じた出品は RESTOCK に乗らないため一覧に出てこなかった (実測: 8/27 の PSA 4枚)。
+        # 作り直さない = Relist/Revise で qty=1 + 仕入値から出した価格/送料ポリシーを送るだけ。
+        # 既定は「何をやるか出すだけ」。実行は --write (パネルからは params で渡す)。
+        "category": None, "type": "utility",
+        "label": "🔁 売れた分を補充",
+        "label_fg": "blue",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "sold_restock.py"],
+        "params": [],
+    },
+    {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
         "category": None, "type": "utility",
         "label": "🛒 在庫切れ再仕入れ",
