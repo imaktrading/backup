@@ -1557,7 +1557,12 @@ def build_row(url, price, data, base_desc):
         "Does not apply",   # C:Country of Origin
         data.get('movement', 'Quartz'),  # eBay有効値はQuartzのみ（Solar/RadioはFeatures側）
         data.get('water_resistance', '200 m (20 ATM)'),
-        get_ebay_model_filter(model_base) or model_base, "No",  # C:Model = eBayシリーズフィルタ値（"G-SHOCK 5600"等）
+        # C:Model = eBayシリーズフィルタ値（"G-SHOCK 5600"等）
+        # C:Customized は **空欄で出す**。契約 (_contract_aspects.yaml) が emit:false
+        # 「扱いが無い。固定値で出さない (出品側の固定出力を止める)」2026-08-22 決定。
+        # 固定の "No" を出していたため監査くんが契約違反として全行を除外していた
+        # (2026-08-28: 売れた GA-010GGB-1A9 の補充が出せなかった)。
+        get_ebay_model_filter(model_base) or model_base, "",
         data.get('case_size', ''),
         data.get('crystal', 'Mineral Crystal'),
         year,
@@ -1569,7 +1574,7 @@ def build_row(url, price, data, base_desc):
         "Arabic Numerals",  # C:Indices
         band_width,         # C:Band Width
         lug_width,          # C:Lug Width (= Band Width, G-Shock一体型バンド)
-        "No",               # C:Vintage
+        "",                 # C:Vintage — 契約 emit:false 「定義が曖昧。固定値で出さない」(2026-08-22)
         "No",               # C:Handmade
         "Yes",              # C:With Original Box/Packaging
         "Yes",              # C:With Papers (新品 = 日本語マニュアル付属、英語版なしは Description に注記)
