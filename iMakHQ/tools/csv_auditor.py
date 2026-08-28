@@ -1870,7 +1870,20 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
         except Exception as _ne:
             print(f"  ⚠️ 非該当spec prune skip: {type(_ne).__name__}: {_ne}")
         held = []
-        emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts, held_out=held)
+        # 発行の直前に catalog を読み直す (行や画像はその日のうちに入ることがある。
+        # OP12-079_AN03 は 18:49 投入済なのに 19:12 に起票されていた)。
+        # 依頼書: hq/requests/2026-08-28_catalog_pdca_requeue_closed_items.md (3)
+        _verify = None
+        try:
+            _verify = _pdca.make_pre_emit_verifier(CATALOG_DB)
+        except Exception as _ve:
+            print(f"  ⚠️ 発行直前の catalog 読み直し skip: {type(_ve).__name__}: {_ve}")
+        _emit_stats = {}
+        emitted = _pdca.emit_consolidated_request(con, project, CATALOG_REQ_DIR, ts, held_out=held,
+                                                  verify_fn=_verify, stats=_emit_stats)
+        if _emit_stats.get("verified_closed") or _emit_stats.get("folded"):
+            print(f"  🔁 発行前 読み直しclose {_emit_stats.get('verified_closed', 0)} 件 / "
+                  f"重複畳み {_emit_stats.get('folded', 0)} 件")
         con.commit()
         con.close()
         # 送らなかった分は毎回全件を残件リストに再掲 (黙って落とさない)。

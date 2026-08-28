@@ -9,6 +9,7 @@
 純関数 (compute_priority / dedup_key / parse_request_md) は DB 非依存=テスト可能。
 """
 from __future__ import annotations
+import json
 import os
 import re
 import re as _re
@@ -128,12 +129,14 @@ CREATE TABLE IF NOT EXISTS improvement_queue (
   finding_type TEXT, seen_count INTEGER DEFAULT 1, seen_days INTEGER DEFAULT 1, priority REAL,
   status TEXT DEFAULT 'pending',
   identity TEXT DEFAULT '',
+  catalog_state TEXT DEFAULT '',
   created_ts TEXT, updated_ts TEXT, reviewed_ts TEXT
 );
 """
 
 # 既存DBに後付けする列 (CREATE TABLE IF NOT EXISTS は既存テーブルを変更しないため)
-_ADD_COLUMNS = {"identity": "TEXT DEFAULT ''", "seen_days": "INTEGER DEFAULT 1"}
+_ADD_COLUMNS = {"identity": "TEXT DEFAULT ''", "seen_days": "INTEGER DEFAULT 1",
+                "catalog_state": "TEXT DEFAULT ''"}
 
 # 列を足した直後だけ流す backfill (冪等: 列が既に有れば実行されない)。
 _BACKFILL = {
@@ -201,9 +204,50 @@ def upsert_gap_keyword(con, card_id, keyword, rate, ts=""):
         (card_id, keyword, rate, ts))
 
 
+def should_reopen(row, observed_ts="", catalog_state="", reopen_closed=False):
+    """閉じた行を pending に戻してよいか (純関数)。
+
+    ★2026-08-28: 「不要」で閉じた行が翌日また起票され、tcg の層A は 8/26・8/27・8/28 と
+      **3日連続で同じ中身**になっていた。全件 catalog に行が在り、毎回「不要」で返させていた。
+      戻してよいのは次の2つが揃った時だけ:
+        (a) **新しい観測**である (閉じた日より後に見た)。
+            `missing_models.csv` のような **消えない台帳**は毎回読み直されるので、
+            古い行の再読込を「今日また落ちた」と解釈すると永久に復活し続ける。
+        (b) **カタログ側が閉じた時と変わっている** (catalog_state が違う)。
+            同じ状態のまま送り直しても、返ってくる答えは前回と同じ「不要」。
+      catalog_state を渡さない呼び出しは (b) を判定できないので (a) だけで決める
+      (従来の挙動を残す)。
+      依頼書: hq/requests/2026-08-28_catalog_pdca_requeue_closed_items.md /
+              2026-08-28_act_code_proposals_tcg.md 提案4
+    """
+    status = (row["status"] if row else "") or ""
+    closed = ("done", "scope_out", "stale", "resolved", "resolver_gap")
+    if not (status == "done" or (reopen_closed and status in closed)):
+        return False
+    closed_day = day_of(row["reviewed_ts"] if _has(row, "reviewed_ts") else "") \
+        or day_of(row["updated_ts"])
+    obs_day = day_of(observed_ts)
+    if obs_day and closed_day and obs_day <= closed_day:
+        return False                     # (a) 閉じた後の新しい観測ではない
+    prev_state = (row["catalog_state"] if _has(row, "catalog_state") else "") or ""
+    now_state = (catalog_state or "").strip()
+    if now_state and prev_state and now_state == prev_state:
+        return False                     # (b) カタログ側が閉じた時から変わっていない
+    return True
+
+
+def _has(row, col):
+    """sqlite3.Row にその列が在るか (古い DB / 部分 SELECT を跨いでも落ちない)。"""
+    try:
+        return col in row.keys()
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
 def upsert_improvement(con, category, item_id, target_field, suggested_value="", *,
                        evidence="", source="", layer="A", confidence=1.0,
-                       finding_type="other", identity="", ts="", reopen_closed=False):
+                       finding_type="other", identity="", ts="", reopen_closed=False,
+                       observed_ts=None, catalog_state=""):
     """改善候補を upsert。既存(同 dkey)なら seen_count++ で再発を数え priority 再計算。
 
     done 済の dkey が再発したら status を pending に戻す (= 直したのにまた出た → 再発行対象)。
@@ -223,7 +267,8 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
       再検出時に空の既存行へ後から埋まる)。
     """
     dk = dedup_key(category, item_id, target_field, suggested_value)
-    row = con.execute("SELECT queue_id, seen_count, seen_days, status, identity, updated_ts"
+    row = con.execute("SELECT queue_id, seen_count, seen_days, status, identity, updated_ts,"
+                      " reviewed_ts, catalog_state"
                       " FROM improvement_queue WHERE dkey=?",
                       (dk,)).fetchone()
     if row:
@@ -236,28 +281,33 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
         _today, _last = day_of(ts), day_of(row["updated_ts"])
         if _today and _today != _last:
             days += 1
-        _closed = ("done", "scope_out", "stale", "resolved", "resolver_gap")
+        # observed_ts を渡さない呼び出し = 「今その場で再検出した」ので観測日で止めない
+        # (止めると close_if_core_fills で閉じた行が同じ日の再発を拾えなくなる = fail-OPEN)。
+        _obs = observed_ts
         new_status = ("pending"
-                      if row["status"] == "done"
-                      or (reopen_closed and row["status"] in _closed)
+                      if should_reopen(row, _obs, catalog_state, reopen_closed)
                       else row["status"])
         pri = compute_priority(finding_type, seen, confidence)
         # identity は「空の既存行に埋める / 新しい値で更新」。取得できなかった時に
         # 既存の解決手掛かりを空で潰さない (fail-closed)。
         ident = (identity or "").strip() or (row["identity"] or "")
+        state = (catalog_state or "").strip() or (
+            (row["catalog_state"] if _has(row, "catalog_state") else "") or "")
         con.execute(
             "UPDATE improvement_queue SET seen_count=?, seen_days=?, priority=?, status=?, evidence=?,"
-            " confidence=?, identity=?, updated_ts=? WHERE queue_id=?",
-            (seen, days, pri, new_status, evidence, confidence, ident, ts, row["queue_id"]))
+            " confidence=?, identity=?, catalog_state=?, updated_ts=? WHERE queue_id=?",
+            (seen, days, pri, new_status, evidence, confidence, ident, state, ts,
+             row["queue_id"]))
         return row["queue_id"]
     pri = compute_priority(finding_type, 1, confidence)
     cur = con.execute(
         "INSERT INTO improvement_queue (dkey, category, item_id, target_field, suggested_value,"
         " evidence, source, layer, confidence, finding_type, seen_count, seen_days, priority, status,"
-        " identity, created_ts, updated_ts)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,1,1,?, 'pending', ?, ?, ?)",
+        " identity, catalog_state, created_ts, updated_ts)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,1,1,?, 'pending', ?, ?, ?, ?)",
         (dk, category, item_id, target_field, suggested_value, evidence, source, layer,
-         confidence, finding_type, pri, (identity or "").strip(), ts, ts))
+         confidence, finding_type, pri, (identity or "").strip(),
+         (catalog_state or "").strip(), ts, ts))
     return cur.lastrowid
 
 
@@ -280,12 +330,17 @@ def prune_resolved_gaps(con, resolve_fn, ts="", sources=("missing_models",)):
     """
     ph = ",".join("?" * len(sources))
     rows = con.execute(
-        f"SELECT queue_id, category, item_id FROM improvement_queue "
+        f"SELECT queue_id, category, item_id, identity, evidence FROM improvement_queue "
         f"WHERE status='pending' AND source IN ({ph})", tuple(sources)).fetchall()
     pruned = 0
     for r in rows:
+        # 候補 pid は identity/evidence に書いてあるので resolver に渡す (2026-08-28)。
+        hints = f"{r['identity'] or ''} {r['evidence'] or ''}".strip()
         try:
-            ok = resolve_fn(r["category"], r["item_id"])
+            try:
+                ok = resolve_fn(r["category"], r["item_id"], hints)
+            except TypeError:
+                ok = resolve_fn(r["category"], r["item_id"])   # 旧2引数の resolve_fn
         except Exception:
             ok = False                       # 解決判定失敗は触らない(fail-closed=残す)
         if ok:
@@ -443,6 +498,11 @@ def prune_stale_findings(con, today, max_age_days=21, sources=None):
 #   完全一致しか見ていなかったため永久に外れる。実測: OP12-034 も CLF-001 も catalog に実在。
 #   → 突合用の候補を **文字列から取り出してから**照合する。
 _SETCODE_RE = _re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?-\d{1,4})\b", _re.I)
+# ★2026-08-28: 変種つき product_id (`ST17-004_p1` `OP12-079_AN03`)。`_SETCODE_RE` は
+#   末尾 `\b` が `_` の前で成立せず **1件も拾えなかった**。queue の evidence/identity には
+#   候補 pid がそのまま書いてあるのに、resolver がそれを見ていなかった
+#   (実測: `('one_piece_tcg','cert155040105')` → False で永久に auto-close されない)。
+_PID_VARIANT_RE = _re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?-\d{1,4}(?:_[A-Za-z0-9]+)+)", _re.I)
 _PRINTNO_RE = _re.compile(r"\b(\d{2,3}/[A-Z0-9\-]{2,6})\b", _re.I)
 _SETHINT_RE = _re.compile(r"\b([A-Z]{2,4}\d?)\b")
 
@@ -454,6 +514,8 @@ def candidate_ids(item_id):
     """
     s = str(item_id or "").strip()
     ids = [s] if s else []
+    # 変種つき pid を先に (`ST17-004_p1` は `ST17-004` より具体的)
+    ids += [m.group(1) for m in _PID_VARIANT_RE.finditer(s)]
     ids += [m.group(1).upper() for m in _SETCODE_RE.finditer(s)]
     nums = [m.group(1).upper() for m in _PRINTNO_RE.finditer(s)]
     hints = [h.upper() for h in _SETHINT_RE.findall(s.upper())
@@ -478,11 +540,16 @@ def make_catalog_resolver(catalog_db):
     con.row_factory = sqlite3.Row
     cache = {}
 
-    def _resolve(category, item_id):
-        key = (category, item_id)
+    def _resolve(category, item_id, hints=""):
+        """hints: identity / evidence 等、**候補 pid が書かれている文字列** (2026-08-28)。
+
+        cert 番号を鍵にした行は item_id からは何も引けないが、evidence に
+        `候補=ST17-004_p1` と書いてある。それを見れば catalog に在ることが分かる。
+        """
+        key = (category, item_id, hints)
         if key in cache:
             return cache[key]
-        c = candidate_ids(item_id)
+        c = candidate_ids(f"{item_id} {hints}".strip() if hints else item_id)
         hit = False
         for cid in c["ids"]:
             if con.execute("SELECT 1 FROM products WHERE (product_id=? OR alias_of=?) LIMIT 1",
@@ -506,6 +573,86 @@ def make_catalog_resolver(catalog_db):
         return hit
 
     return _resolve
+
+
+# item_id に書かれた cert 番号 (`cert155040105` / `PSA10-151301749` の両方)。
+_CERT_ANY_RE = _re.compile(r"(?:cert|PSA10-)(\d{6,})", _re.I)
+
+
+def cert_number(item_id) -> str:
+    """item_id から PSA cert 番号を取り出す。無ければ '' (純関数)。"""
+    m = _CERT_ANY_RE.search(str(item_id or ""))
+    return m.group(1) if m else ""
+
+
+def row_solved_in_catalog(row, *, resolve_fn=None, images_fn=None, cert_fn=None):
+    """発行の直前に「その行はもう catalog で解決している」かを判定する (純関数・I/Oは引数)。
+
+    ★2026-08-28: 走行の頭で作った判定のまま送っていたので、その日のうちに入った行や画像を
+      「無い」と聞き直していた (OP12-079_AN03 は 18:49 投入済なのに 19:12 に起票)。
+      catalog を見て分かるものだけを見る:
+        - `catalog_add` … 候補 pid か **cert を引き直して** 行が在るか
+        - `images`      … その pid に画像が入ったか
+      program_fix 等 catalog では判定できない行は触らない (False=送る / fail-closed)。
+      依頼書: hq/requests/2026-08-28_catalog_pdca_requeue_closed_items.md (3)
+    """
+    if (row.get("finding_type") or "").strip() != "catalog_gap":
+        return False
+    cat = (row.get("category") or "").strip()
+    item = str(row.get("item_id") or "")
+    hints = f"{row.get('identity') or ''} {row.get('evidence') or ''}".strip()
+    field = (row.get("target_field") or "").strip()
+    if field in ("images", "image"):
+        return bool(images_fn) and bool(images_fn(cat, f"{item} {hints}".strip()))
+    if field != "catalog_add":
+        return False
+    if resolve_fn and resolve_fn(cat, item, hints):
+        return True
+    cert = cert_number(item)
+    return bool(cert) and bool(cert_fn) and bool(cert_fn(cert))
+
+
+def make_pre_emit_verifier(catalog_db, classify_fn=None, certs_dir=None):
+    """`emit_consolidated_request(verify_fn=...)` に渡す「catalog 読み直し」判定を作る。
+
+    cert 鍵の行は catalog を product_id で引いても永久に当たらないので、PSA cache から
+    **preflight で引き直す** (実測: cert155040105 → RESOLVED ST17-004_p1)。
+    preflight が使えない環境では cert 判定だけ落とす (他の判定は動く)。
+    """
+    con = sqlite3.connect(catalog_db)
+    con.row_factory = sqlite3.Row
+    resolve_fn = make_catalog_resolver(catalog_db)
+
+    def _images(category, text):
+        for cid in candidate_ids(text)["ids"]:
+            r = con.execute("SELECT images FROM products WHERE (product_id=? OR alias_of=?) LIMIT 1",
+                            (cid, cid)).fetchone()
+            if r and str(r["images"] or "").strip() not in ("", "[]", "null"):
+                return True
+        return False
+
+    _classify, _dir = classify_fn, certs_dir
+    if _classify is None:
+        try:
+            import psa_preflight as _pf                        # 同 dir (iMakHQ/tools)
+            _classify, _dir = _pf.classify, (_dir or _pf.PSA_CERTS_DIR)
+        except Exception:                                      # noqa: BLE001
+            _classify = None
+
+    def _cert(cert):
+        if _classify is None or not _dir:
+            return False
+        f = Path(_dir) / f"{cert}.json"
+        if not f.is_file():
+            return False
+        try:
+            meta = json.loads(f.read_text(encoding="utf-8"))
+            return (_classify(str(cert), meta, con) or {}).get("status") == "RESOLVED"
+        except Exception:                                      # noqa: BLE001
+            return False
+
+    return lambda row: row_solved_in_catalog(
+        row, resolve_fn=resolve_fn, images_fn=_images, cert_fn=_cert)
 
 
 def list_queue(con, status=None, limit=200):
@@ -692,7 +839,32 @@ def category_in_project(cat, project):
     return False
 
 
-def emit_consolidated_request(con, category, out_dir, today, held_out=None):
+def dedupe_queue_items(items):
+    """同じカードを指す行を1行に畳む (純関数)。残すのは priority が高い方。
+
+    ★2026-08-28 Catalog 指摘: 同じ依頼の中に S4a-323 が **pri20 と pri5 の2行**在った。
+      dkey が (category, item_id, field) で、item_id が producer ごとに
+      `cert55281762` / `cert55281762 <brand> [SUBJ] #323 (…)` と別物になるため。
+      `normalize_item_key` で cert を取り出せば同じ鍵になる。
+      依頼書: hq/requests/2026-08-28_catalog_pdca_requeue_closed_items.md (2)
+    戻り: (残す行, 畳んだ行数)
+    """
+    best, order = {}, []
+    for r in items or []:
+        k = ((r.get("category") or "").strip(),
+             normalize_item_key(r.get("item_id")),
+             (r.get("target_field") or "").strip())
+        cur = best.get(k)
+        if cur is None:
+            best[k] = r
+            order.append(k)
+        elif (r.get("priority") or 0) > (cur.get("priority") or 0):
+            best[k] = r
+    return [best[k] for k in order], max(0, len(items or []) - len(order))
+
+
+def emit_consolidated_request(con, category, out_dir, today, held_out=None, verify_fn=None,
+                              stats=None):
     """pending 改善候補を **1本の dedup済 catalog 依頼 .md** に集約発行 (Phase2/3・自動)。
 
     層A(客観ギャップ=即対応)と層B(競合intel候補=要裏取り)を分節で出力。
@@ -702,6 +874,29 @@ def emit_consolidated_request(con, category, out_dir, today, held_out=None):
     """
     pend_all = [r for r in list_queue(con, status="pending", limit=10000)
                 if r.get("source") != "md_import" and category_in_project(r.get("category"), category)]
+    # ★2026-08-28: **発行の直前に catalog を読み直す**。画像や行はその日のうちに入ることが
+    #   あり (OP12-079_AN03 は 18:49 投入済なのに 19:12 に起票された)、
+    #   走行の頭で作った判定のまま送ると「もう在るもの」を聞くことになる。
+    #   依頼書: hq/requests/2026-08-28_catalog_pdca_requeue_closed_items.md (3)
+    _closed = 0
+    if verify_fn is not None:
+        _fresh = []
+        for r in pend_all:
+            try:
+                solved = verify_fn(r)
+            except Exception:                                  # noqa: BLE001
+                solved = False               # 判定できなければ送る (fail-closed=握り潰さない)
+            if solved:
+                set_status(con, r["queue_id"], "done", today)
+                _closed += 1
+            else:
+                _fresh.append(r)
+        pend_all = _fresh
+    # 同じカードが別 item_id で2行に割れている分を畳む (pri の高い方を残す)
+    pend_all, _folded = dedupe_queue_items(pend_all)
+    if stats is not None:
+        stats["verified_closed"] = _closed
+        stats["folded"] = _folded
     # identity 未解決 (出品IDのみ) は送らない = Catalog が着手不能な依頼を積まない。
     # 落とした分は held_out で呼出側へ返し、残件リストに毎回再掲する (silent drop 禁止)。
     pend, held = partition_by_identity(pend_all)
@@ -806,11 +1001,15 @@ def import_missing_models(con, path, ts=""):
                 if not model:
                     continue
                 ident = parse_missing_model_identity(model)
+                # ★2026-08-28: missing_models.csv は **消えない台帳**で毎回全行読み直す。
+                #   行の detected_at を「いつ見たか」として渡し、閉じた後の新しい観測でない
+                #   限り pending に戻さない (3日連続で同じ依頼を送っていた原因の1つ)。
                 upsert_improvement(con, category, model, "catalog_add", "",
                                    evidence="missing_models (catalog未登録→入稿せず)",
                                    source="missing_models", layer="A",
                                    finding_type="catalog_gap",
-                                   identity=ident, ts=ts)
+                                   identity=ident, ts=ts,
+                                   observed_ts=(row.get("detected_at") or "").strip())
                 n += 1
     except Exception:
         return n

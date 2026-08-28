@@ -3156,7 +3156,8 @@ def gap_queue_target(res):
 
 
 def _queue_finding(category, item_id, field, evidence, *, layer="A",
-                   finding_type="catalog_gap", identity="", reopen_closed=False):
+                   finding_type="catalog_gap", identity="", reopen_closed=False,
+                   catalog_state=""):
     """弾いた理由を改善キューに積む (= 次の監査で依頼/残務に流れる)。
 
     ★2026-08-18: 出品くんが弾いたもののうち、**画像が無い / 自己チェックで落ちた** は
@@ -3176,7 +3177,8 @@ def _queue_finding(category, item_id, field, evidence, *, layer="A",
                                  layer=layer, finding_type=finding_type,
                                  identity=identity,
                                  ts=datetime.now().strftime("%Y-%m-%d"),
-                                 reopen_closed=reopen_closed)
+                                 reopen_closed=reopen_closed,
+                                 catalog_state=catalog_state)
         con.commit()
         con.close()
         return True
@@ -3327,7 +3329,10 @@ def main():
                                    f"{_pre}: {_r.get('reason', 'GAP')}"[:120],
                                    layer=_lyr, finding_type=_ft,
                                    identity=f"{_r.get('brand', '')} #{_r.get('num', '')}"[:200],
-                                   reopen_closed=True)
+                                   reopen_closed=True,
+                                   # 閉じた時と **カタログの見え方が同じ**なら送り直さない
+                                   # (同じ状態で聞き直しても答えは前回と同じ「不要」)
+                                   catalog_state=f"{_st}|{_r.get('reason', '')}"[:200])
                 continue
             # ★2026-08-11: **catalog に画像が無いカードは目視で照合できず必ず落ちる**。
             #   枠を食ってから消えるので先に除く (2026-08-10 実走: 10件中2件がこれで脱落)。
