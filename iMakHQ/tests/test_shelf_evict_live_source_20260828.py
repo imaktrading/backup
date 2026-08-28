@@ -72,3 +72,26 @@ class TestTierStillHolds:
 
     def test_売れた実績があるものは触らない(self):
         assert E.tier_of({"qty": 1, "sold_qty": 1, "age_days": 99}) is None
+
+
+class TestApparelIsNeverEvicted:
+    """アパレルは落とさない (2026-08-28 ユーザー確定)。
+
+    公式在庫が戻れば監視くんが**数量を戻す**。出品が生きていれば復活できるが、
+    取り下げると戻せない (出し直しになる)。数量0 でも触らない。
+    """
+
+    def test_UNIQLO_GU_は候補にしない(self):
+        live = {"820000000009": {"cur": "USD", "avail": 0, "usd": 30.0,
+                                 "title": "UNIQLO UT Pokemon 30th Anniversary Tee",
+                                 "start": "2026-06-01T00:00:00.000Z"}}
+        assert E.rows_from_live(live, set(), KEY, now=NOW) == []
+
+    def test_銘柄を問わず衣類を守る(self):
+        # UNIQLO/GU 以外の T シャツも同じ性質 (公式在庫が戻る)
+        assert E.is_protected("Dragon Ball DAIMA Goku T-Shirt, 3XL, Black, Anime Graphic")
+        assert E.is_protected("GU Hiromichi Yokochi Sukajan Dragon T-Shirt")
+
+    def test_カードや時計は守らない(self):
+        assert not E.is_protected("PSA 10 Pokemon Japanese Sv9 #105 Lillie's Ribombee")
+        assert not E.is_protected("CASIO G-Shock GA-010GGB-1A9 Mens Watch")

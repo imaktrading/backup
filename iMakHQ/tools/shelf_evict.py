@@ -138,6 +138,23 @@ def listed_today_amount(csv_dir=CSV_DIR, today=None):
     return total
 
 
+# ★落とさないカテゴリ (2026-08-28 ユーザー確定)。
+#   アパレル (UNIQLO/GU) はバリエーション出品で、**公式在庫が戻れば監視くんが数量を戻す**。
+#   出品が生きていれば復活できるが、**取り下げると戻せない** (出し直しになる)。
+#   数量0 でも触らない。タイトルで判定するのは、台帳に行が無い出品 (実測で存在) でも
+#   守れるようにするため (fail-closed = 迷ったら落とさない)。
+#   ★衣類は銘柄を問わず守る。UNIQLO/GU 以外の T シャツ (例: Dragon Ball DAIMA) も
+#     同じ性質 (公式在庫が戻る) なので、迷ったら落とさない側に倒す。
+#     守り過ぎても候補は 200件以上 残るので、棚が空かなくなる心配はない。
+PROTECTED_TITLE = re.compile(
+    r"UNIQLO|GU|AIRism|Sukajan|Graphic Tee|T-?Shirt|Tee|Hoodie|Sweat", re.I)
+
+
+def is_protected(title):
+    """落としてはいけない出品か (純関数, test 可)。"""
+    return bool(PROTECTED_TITLE.search(title or ""))
+
+
 def age_days_of(start_iso, now=None):
     """出品日 ISO → 経過日数 (純関数, test 可)。読めなければ 0。"""
     import datetime as _dt
@@ -173,6 +190,8 @@ def rows_from_live(live, done, title_key, now=None):
             continue
         if int(v.get("avail") or 0) > 0:
             continue                      # まだ売れる = 棚を空ける対象ではない
+        if is_protected(v.get("title")):
+            continue                      # アパレル = 監視くんが数量を戻すので落とさない
         out.append({"item_id": iid, "title": v.get("title") or "",
                     "price": float(v.get("usd") or 0), "qty": 0,
                     "sold_qty": 0, "sales90": 0, "impr_total": 0,
