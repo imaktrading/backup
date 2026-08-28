@@ -200,6 +200,46 @@ def _brand_matches_set_name(brand: str, set_name_official: str) -> bool:
 #   Neo 期はこちらにしか無かったので tcg_scope へ移設済 (tcg_scope.py の (d))。
 
 
+def pids_by_subject(cur, cat: str, subject: str, brand: str = "", limit: int = 8):
+    """**番号を使わず** subject 名だけで catalog を引いた候補 pid (I/O は cur 経由)。
+
+    ★2026-08-28: `GAP` を「catalog 未収録」と断定していたため、**行は在るのに
+      adapter が引けないだけ**の cert が毎日カタログへ飛んでいた。今日カタログに送った
+      層A 6行は **6行とも catalog に実在** (STORAGE BOX SET / ONE PIECE DAY'24 など)。
+      未収録と言い切る前に、名前で1回引いて行の有無を見る。
+      行が在れば「引けなかっただけ」= 目視へ回す (採用はしない = fail-closed は維持)。
+      依頼書: hq/requests/2026-08-28_act_code_proposals_tcg.md 提案2
+
+    brand とセット名が一致する候補を先に並べる (人が上から見るため)。
+    """
+    toks = _subject_tokens(subject)
+    if not toks or not cat:
+        return []
+    order, set_name, score = [], {}, {}
+    for t in toks:
+        try:
+            rows = cur.execute(
+                "SELECT product_id,name_en,set_name_official FROM products "
+                "WHERE category=? AND name_en LIKE ? LIMIT 50",
+                (cat, f"%{t}%")).fetchall()
+        except Exception:                                      # noqa: BLE001
+            return []
+        for r in rows:
+            pid = r[0]
+            if not pid:
+                continue
+            if pid not in score:
+                order.append(pid)
+                set_name[pid] = (r[2] if len(r) > 2 else "") or ""
+                score[pid] = 0
+            score[pid] += 1
+    # 並び: brand とセット名が一致 → 一致した語が多い → 見つけた順 (安定)
+    seq = {p: i for i, p in enumerate(order)}
+    order.sort(key=lambda p: (0 if _brand_matches_set_name(brand, set_name.get(p)) else 1,
+                              -score[p], seq[p]))
+    return order[:limit]
+
+
 def classify(cert: str, meta: dict, con: sqlite3.Connection):
     brand = meta.get("Brand", "") or ""
     subject = meta.get("Subject", "") or ""
@@ -333,7 +373,30 @@ def classify(cert: str, meta: dict, con: sqlite3.Connection):
                              f"({'/'.join(prefixes)}) に散っている = 番号とキャラ名が一致しただけの"
                              " 別セット/別ゲームの疑い。**採用するな**")
         return res
-    res["status"] = "GAP"; res["reason"] = f"recovery不一致 (set_code={set_code})"
+    # 2c) 番号で引けなくても **名前で catalog に行が在る** なら「未収録」ではない。
+    #     カタログに送らず目視へ回す (2026-08-28 提案2)。
+    # 名前で引けたか (= 「未収録」と言ってよいか) を呼び出し側に渡す。
+    # 照合できる語が無い subject (`DON!! CARD` 等) は **確かめていない**ので断定しない。
+    res["name_checked"] = bool(_subject_tokens(subject))
+    subj_hits = pids_by_subject(cur, cat, subject, brand)
+    if subj_hits:
+        res["status"] = "REVIEW"
+        res["risk"] = "unresolved"
+        res["candidates"] = subj_hits
+        res["set_name_match"] = subj_hits
+        res["reason"] = (f"catalog に **同じ名前の行が在る** ({', '.join(subj_hits[:3])})。"
+                         f" 未収録ではなく番号/セット記号で引けなかっただけ"
+                         f" (set_code={set_code}) → 目視で確定する")
+        return res
+    res["status"] = "GAP"
+    if res["name_checked"]:
+        res["reason"] = (f"recovery不一致 (set_code={set_code}) — 名前でも catalog に行が無い"
+                         " (= 未収録の疑い)")
+    else:
+        # subject に照合できる語が無い = **確かめられなかった**。未収録と言い切らない。
+        res["risk"] = "unchecked"
+        res["reason"] = (f"recovery不一致 (set_code={set_code}) — subject に照合できる語が無く"
+                         " 名前でも引けない (未収録かどうかは未確認)")
     return res
 
 

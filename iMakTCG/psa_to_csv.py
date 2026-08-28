@@ -3119,6 +3119,22 @@ def _psa_cloudflare_warmup():
     print("✅ Cloudflare warmup 完了、 psa_to_csv 続行\n")
 
 
+def gap_queue_target(res):
+    """preflight が GAP と言った cert の **積み先** を決める (純関数)。
+
+    ★2026-08-28: GAP を「catalog 未収録」と断定してカタログへ送っていたため、
+      今日カタログに飛んだ層A 6行が **6行とも誤り** (全部 catalog に実在) だった。
+      名前で catalog を引いて **行が無いことを確かめた時だけ** カタログへ送る。
+      確かめられていない分は「引き方 (②)」の課題なので HQ 側のキューに積む。
+      依頼書: hq/requests/2026-08-28_act_code_proposals_tcg.md 提案2
+
+    戻り: (target_field, layer, finding_type, evidence の頭)
+    """
+    if (res or {}).get("name_checked"):
+        return ("catalog_add", "A", "catalog_gap", "今日も除外")
+    return ("program_fix", "code", "program_fix", "引けないが未収録とは確認できていない")
+
+
 def _queue_finding(category, item_id, field, evidence, *, layer="A",
                    finding_type="catalog_gap", identity="", reopen_closed=False):
     """弾いた理由を改善キューに積む (= 次の監査で依頼/残務に流れる)。
@@ -3279,8 +3295,10 @@ def main():
                 #   OUT-OF-SCOPE は「参入しない」と決めた分なので積まない。
                 #   依頼書: hq/requests/2026-08-26_act_code_proposals_tcg.md 提案4 (付随)
                 if _st == "GAP":
-                    _queue_finding(_r.get("category") or "tcg", f"cert{_c}", "catalog_add",
-                                   f"今日も除外: {_r.get('reason', 'GAP')}"[:120],
+                    _fld, _lyr, _ft, _pre = gap_queue_target(_r)
+                    _queue_finding(_r.get("category") or "tcg", f"cert{_c}", _fld,
+                                   f"{_pre}: {_r.get('reason', 'GAP')}"[:120],
+                                   layer=_lyr, finding_type=_ft,
                                    identity=f"{_r.get('brand', '')} #{_r.get('num', '')}"[:200],
                                    reopen_closed=True)
                 continue
@@ -3356,7 +3374,8 @@ def main():
         _con.close()
         if _drop:
             for _st, _cs in _drop.items():
-                _label = {"GAP": "catalog未収録", "OUT-OF-SCOPE": "参入しないゲーム",
+                _label = {"GAP": "catalog に行が無い(未収録の疑い)",
+                          "OUT-OF-SCOPE": "参入しないゲーム",
                           "NO-IMAGE": "catalogに画像が無く目視不能",
                           "LIVE-DUP": "同じカードが既に出品中(後段で必ず除外される)"}.get(_st, _st)
                 print(f"  ⏭️ 枠を選ぶ前に除外 [{_st}={_label}]: {len(_cs)}件 → {_cs[:6]}")

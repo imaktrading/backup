@@ -114,9 +114,15 @@ def test_no_image_check_only_drops_when_images_are_readable():
 
 
 def test_prefilter_drop_set_is_explicit():
-    """落とす条件は3つだけ。増やす時はテストも増やす。"""
-    for label in ("catalog未収録", "参入しないゲーム", "catalogに画像が無く目視不能"):
+    """落とす条件は3つだけ。増やす時はテストも増やす。
+
+    ★2026-08-28: GAP の見出しを「catalog未収録」→「catalog に行が無い(未収録の疑い)」に
+      変えた。名前で引いて確かめるまで未収録と断定しないため (提案2)。条件の数は同じ。
+    """
+    for label in ("catalog に行が無い(未収録の疑い)", "参入しないゲーム",
+                  "catalogに画像が無く目視不能"):
         assert label in SRC
+    assert "catalog未収録" not in SRC, "断定する言い回しが復活している"
 
 
 # ----- LIVE-DUP (2026-08-11: 後段で必ず消える分も枠の前で落とす) -----
