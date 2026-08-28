@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS improvement_queue (
   dkey TEXT UNIQUE,
   category TEXT, item_id TEXT, target_field TEXT, suggested_value TEXT,
   evidence TEXT, source TEXT, layer TEXT, confidence REAL,
-  finding_type TEXT, seen_count INTEGER DEFAULT 1, priority REAL,
+  finding_type TEXT, seen_count INTEGER DEFAULT 1, seen_days INTEGER DEFAULT 1, priority REAL,
   status TEXT DEFAULT 'pending',
   identity TEXT DEFAULT '',
   created_ts TEXT, updated_ts TEXT, reviewed_ts TEXT
@@ -133,7 +133,16 @@ CREATE TABLE IF NOT EXISTS improvement_queue (
 """
 
 # 既存DBに後付けする列 (CREATE TABLE IF NOT EXISTS は既存テーブルを変更しないため)
-_ADD_COLUMNS = {"identity": "TEXT DEFAULT ''"}
+_ADD_COLUMNS = {"identity": "TEXT DEFAULT ''", "seen_days": "INTEGER DEFAULT 1"}
+
+# 列を足した直後だけ流す backfill (冪等: 列が既に有れば実行されない)。
+_BACKFILL = {
+    # seen_days の初期値は「作った日と最後に見た日が違うなら 2」。
+    # 一律 1 にすると、既に何日も消えていない既存の再発が全部 消えてしまう。
+    "seen_days": "UPDATE improvement_queue SET seen_days = 2"
+                 " WHERE substr(COALESCE(created_ts,''),1,10)"
+                 "    <> substr(COALESCE(updated_ts,''),1,10)",
+}
 
 
 def _migrate(con):
@@ -142,6 +151,14 @@ def _migrate(con):
     for col, decl in _ADD_COLUMNS.items():
         if col not in have:
             con.execute(f"ALTER TABLE improvement_queue ADD COLUMN {col} {decl}")
+            if col in _BACKFILL:
+                con.execute(_BACKFILL[col])
+                con.commit()   # UPDATE はトランザクションを開くので commit しないと消える
+
+
+def day_of(ts) -> str:
+    """ts ('2026-08-28' / '2026-08-28 15:08') → 日付部分。取れなければ '' (純関数)。"""
+    return str(ts or "").strip()[:10]
 
 
 def connect(db_path: str = None) -> sqlite3.Connection:
@@ -206,10 +223,19 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
       再検出時に空の既存行へ後から埋まる)。
     """
     dk = dedup_key(category, item_id, target_field, suggested_value)
-    row = con.execute("SELECT queue_id, seen_count, status, identity FROM improvement_queue WHERE dkey=?",
+    row = con.execute("SELECT queue_id, seen_count, seen_days, status, identity, updated_ts"
+                      " FROM improvement_queue WHERE dkey=?",
                       (dk,)).fetchone()
     if row:
         seen = (row["seen_count"] or 1) + 1
+        # ★2026-08-28: 同じCSVをその日に2回監査しただけで「再発」にしない。
+        #   seen_count は観測回数のまま (優先度の材料)。「複数日 消えていない」は
+        #   seen_days で数える。日付が取れない時は増やさない (水増ししない側に倒す)。
+        #   出典: hq/requests/2026-08-28_act_code_proposals_gshock_response.md 提案3
+        days = int(row["seen_days"] or 1)
+        _today, _last = day_of(ts), day_of(row["updated_ts"])
+        if _today and _today != _last:
+            days += 1
         _closed = ("done", "scope_out", "stale", "resolved", "resolver_gap")
         new_status = ("pending"
                       if row["status"] == "done"
@@ -220,16 +246,16 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
         # 既存の解決手掛かりを空で潰さない (fail-closed)。
         ident = (identity or "").strip() or (row["identity"] or "")
         con.execute(
-            "UPDATE improvement_queue SET seen_count=?, priority=?, status=?, evidence=?,"
+            "UPDATE improvement_queue SET seen_count=?, seen_days=?, priority=?, status=?, evidence=?,"
             " confidence=?, identity=?, updated_ts=? WHERE queue_id=?",
-            (seen, pri, new_status, evidence, confidence, ident, ts, row["queue_id"]))
+            (seen, days, pri, new_status, evidence, confidence, ident, ts, row["queue_id"]))
         return row["queue_id"]
     pri = compute_priority(finding_type, 1, confidence)
     cur = con.execute(
         "INSERT INTO improvement_queue (dkey, category, item_id, target_field, suggested_value,"
-        " evidence, source, layer, confidence, finding_type, seen_count, priority, status,"
+        " evidence, source, layer, confidence, finding_type, seen_count, seen_days, priority, status,"
         " identity, created_ts, updated_ts)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,1,?, 'pending', ?, ?, ?)",
+        " VALUES (?,?,?,?,?,?,?,?,?,?,1,1,?, 'pending', ?, ?, ?)",
         (dk, category, item_id, target_field, suggested_value, evidence, source, layer,
          confidence, finding_type, pri, (identity or "").strip(), ts, ts))
     return cur.lastrowid

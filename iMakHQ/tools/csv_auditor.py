@@ -1118,33 +1118,48 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
 
 
 def recurring_findings(rows, min_seen=2):
-    """再発(複数ラン消えない)findings を抽出 (純関数, test可)。
+    """再発(複数日 消えない)findings を抽出 (純関数, test可)。
 
-    rows = [{"category","item_id","target_field","finding_type","seen_count","status"}] (pdca由来)。
-    pending かつ seen_count>=min_seen = catalog依頼/修正を重ねても消えていない
+    rows = [{"category","item_id","target_field","finding_type","seen_count","seen_days","status"}]。
+    pending かつ **seen_days>=min_seen** = catalog依頼/修正を重ねても消えていない
     = 構造/コードの疑い(誤カテゴリ/adapter抽出不能/スコープ外/generator脱落の常習)。
     ※missing_models.csv は (cat,model) dedup されるので再発検出に使えない → pdca.db improvement_queue
-      の seen_count(再発で++)を真の再発ソースとする。
-    戻り: seen_count 降順 list。
+      を真の再発ソースとする。
+
+    ★2026-08-28: 判定を seen_count から seen_days に変えた。seen_count は「監査した回数」
+      なので、同じCSVを その日のうちに 2回 (upload + recheck) 監査しただけで 2 になり、
+      1日で「再発」に化けていた (8/28 の G-shock queue_id 618/619 = created も updated も同日)。
+      「複数日 消えていない」という定義と一致するのは seen_days の方。
+      seen_days が無い古い行は seen_count で代替する (欠測で取りこぼさない)。
+      出典: hq/requests/2026-08-28_act_code_proposals_gshock_response.md 提案3
+    戻り: seen_days 降順 list。
     """
+    def _days(r):
+        d = r.get("seen_days")
+        return int(d) if d not in (None, "") else int(r.get("seen_count") or 0)
+
     out = [r for r in rows
-           if (r.get("status") == "pending" and int(r.get("seen_count") or 0) >= min_seen)]
-    out.sort(key=lambda r: int(r.get("seen_count") or 0), reverse=True)
+           if (r.get("status") == "pending" and _days(r) >= min_seen)]
+    out.sort(key=_days, reverse=True)
     return out
 
 
 def _load_pdca_recurring(min_seen=2, limit=25):
-    """pdca.db improvement_queue から再発(pending・seen_count>=min_seen)を取得 (I/O・失敗は [])。"""
+    """pdca.db improvement_queue から再発(pending・seen_days>=min_seen)を取得 (I/O・失敗は [])。
+
+    ★2026-08-28: 条件を seen_count から seen_days に変えた (同日の再監査を再発にしない)。
+    """
     try:
         import pdca_store as _pdca
         con = _pdca.connect()
         cur = con.execute(
-            "SELECT category,item_id,target_field,finding_type,seen_count,status "
-            "FROM improvement_queue WHERE status='pending' AND seen_count>=? "
-            "ORDER BY seen_count DESC LIMIT ?", (min_seen, limit))
+            "SELECT category,item_id,target_field,finding_type,seen_count,seen_days,status "
+            "FROM improvement_queue WHERE status='pending' AND seen_days>=? "
+            "ORDER BY seen_days DESC, seen_count DESC LIMIT ?", (min_seen, limit))
         rows = [{"category": r["category"], "item_id": r["item_id"],
                  "target_field": r["target_field"], "finding_type": r["finding_type"],
-                 "seen_count": r["seen_count"], "status": r["status"]} for r in cur.fetchall()]
+                 "seen_count": r["seen_count"], "seen_days": r["seen_days"],
+                 "status": r["status"]} for r in cur.fetchall()]
         con.close()
         return rows
     except Exception as _e:
