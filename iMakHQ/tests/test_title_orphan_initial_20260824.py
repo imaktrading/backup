@@ -109,10 +109,17 @@ def test_doubled_word_in_the_card_name_survives():
 
 
 def test_set_name_dedup_still_happens_around_the_protected_name():
-    """名前を守っても、セット名側の重複は今までどおり消えること。"""
-    got, changed = R("PSA 10 One Piece Japanese One Piece Chopper's 1 "
+    """名前を守っても、セット名でない並びの重複は今までどおり消えること。
+
+    ★2026-08-28 に題材を差し替えた。元は `One Piece Chopper's 1` を使い、そこから
+      `One Piece` が消えることを期待していたが、これは **確定済のセット名**
+      (promo_overrides.json) で、消すと別のセット名になる = 直した側の不具合。
+      題材だけ「カタログにもプロモにも無い並び」に替え、assert は緩めていない。
+    """
+    got, changed = R("PSA 10 One Piece Japanese Booster One Piece The Best "
                      "#EB02-003 Tony Tony Chopper Rare", card_name="Tony Tony Chopper")
     assert changed and got.count("One Piece") == 1
+    assert "Tony Tony Chopper" in got, got
 
 
 def test_card_name_inside_the_set_name_is_not_stripped():

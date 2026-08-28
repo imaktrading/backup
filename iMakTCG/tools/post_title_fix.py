@@ -124,6 +124,79 @@ _DEDUP_WHITELIST = {
 _INITIAL_RE = re.compile(r"^[A-Za-z]\.?$")
 
 
+# ── セット名は「1語のまとまり」として守る (2026-08-28) ─────────────────
+# セット名の中にゲーム名がもう一度入る形 (`One Piece Day` / `Premium Booster One Piece
+# The Best`) を、先頭のゲーム名と重複していると見なして削っていた。
+#   PSA 10 One Piece Japanese One Piece Day #ST10-006 …  → `One Piece Day` が `Day` になる
+# `Tony Tony Chopper` (a72586f) / 末尾 `D.` (1919b22) と同じ形の3回目なので、
+# **カード個別ではなく発生源** (= 何がセット名かを知らないこと) を直す。
+#
+# 何がセット名かは **カタログの set_name_ebay** と、プロモ配布元名の確定値
+# (tcg_promo_store。PSA ラベル由来なので catalog には置けない値) が持っている。
+# タイトルはその文字列から組んでいるので、同じ語列がタイトルに並んでいたら触らない。
+_SET_PHRASE_INDEX = None
+
+
+def known_set_phrase_index():
+    """{先頭語(小文字): [語列 tuple, …]} = タイトル内で守るセット名の並び。
+
+    出典は **カタログの set_name_ebay** (iMakCatalog/set_reference.tcg_set_master) と
+    **確定済 promo 名** (iMakTCG/promo_overrides.json) だけ。ここで語を足さない。
+    1語のセット名は「まとまりが壊れる」形が無いので入れない (= 副作用を最小に)。
+
+    ★読めなければ **例外で落とす**。空集合に倒すと守りが黙って消えて、同じ事故が
+      再発しても誰も気づかない (listing_common の import と同じ fail-closed)。
+      呼び元 (control_panel) は try/except で包んでいるので、落ちても元 CSV は無傷。
+    """
+    global _SET_PHRASE_INDEX
+    if _SET_PHRASE_INDEX is not None:
+        return _SET_PHRASE_INDEX
+
+    _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for _p in (os.path.join(_root, 'iMakCatalog'), os.path.join(_root, 'iMakTCG')):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+    from set_reference import tcg_set_master          # カタログ (公式値)
+    from tcg_promo_store import load_all              # promo 配布元名 (HQ 所有)
+
+    phrases = set(tcg_set_master())
+    for rec in load_all().values():
+        v = (rec.get('promo') if isinstance(rec, dict) else rec) or ''
+        if isinstance(v, str) and v.strip():
+            phrases.add(v.strip())
+
+    index = {}
+    for p in phrases:
+        toks = tuple(w.lower() for w in p.split())
+        if len(toks) >= 2:
+            index.setdefault(toks[0], []).append(toks)
+    _SET_PHRASE_INDEX = index
+    return _SET_PHRASE_INDEX
+
+
+def _set_phrase_spans(parts):
+    """タイトル内で **セット名の語列** が並んでいる範囲の index 集合。純関数。
+
+    守るのは **最初に見つかった1つ** (同じ位置なら最長)。タイトルに載るセット名は
+    1つだけで、必ずゲーム名の後・カード番号の前に来るため。
+    ★全出現を守ると、**セット名と同じ名前のカード** で末尾が守られてしまう
+      (`PURPLE Monkey D. Luffy` は catalog の set_name_ebay にも在る)。
+      2026-08-24 の壊れた末尾 `#OP05-060 D.` は末尾側を消して直したものなので、
+      そこを守ると あの修正が無効になる。
+    """
+    low = [w.lower() for w in parts]
+    index = known_set_phrase_index()
+    for i, w in enumerate(low):
+        best = 0
+        for toks in index.get(w, ()):
+            j = i + len(toks)
+            if len(toks) > best and j <= len(low) and tuple(low[i:j]) == toks:
+                best = len(toks)
+        if best:
+            return set(range(i, i + best))
+    return set()
+
+
 def _protected_span(parts, card_name):
     """タイトル内で **カード名そのもの** が並んでいる範囲 (最後の出現) の index 集合。
 
@@ -158,7 +231,8 @@ def remove_duplicate_words(title, card_name=""):
     parts = title.split()
     seen = set()
     drop = [False] * len(parts)
-    keep = _protected_span(parts, card_name)     # カード名そのものは触らない
+    # カード名そのもの + セット名の語列は触らない (どちらも catalog の値を写しただけ)
+    keep = _protected_span(parts, card_name) | _set_phrase_spans(parts)
     for i, w in enumerate(parts):
         wl = w.lower()
         is_word = wl.isalpha() and len(wl) > 1   # 英字語のみ (番号/記号は常に残す)
