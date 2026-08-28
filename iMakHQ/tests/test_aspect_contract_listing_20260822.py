@@ -19,17 +19,48 @@ import sys
 
 import pytest
 
-_TCG = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))), "iMakTCG")
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_TCG = os.path.join(_ROOT, "iMakTCG")
 if _TCG not in sys.path:
     sys.path.insert(0, _TCG)
 
 DROPPED = ["C:Franchise", "C:Autographed", "C:Vintage", "C:Material", "C:Customized"]
 GENERATORS = ["psa_to_csv.py", "psa_restock_csv.py"]
 
+# ★2026-08-28: 8/22 の契約変更を TCG にだけ入れて G-shock に入れず、6日後の初走行で
+#   G-shock が全行除外された。テストが TCG 固定パスだったので緑のままだった。
+#   出典: hq/requests/2026-08-28_act_code_proposals_gshock_response.md 提案1・2
+#   → (プロジェクトdir, ファイル名) の組にして 全 generator を見る。
+ALL_GENERATORS = (
+    [("iMakTCG", g) for g in GENERATORS]
+    + [("iMakG-shock", "gshock_to_csv.py"),
+       ("iMak_ichibankuji", "ichibankuji_to_csv.py")]
+)
+# headers/build_row(list) 形ではなく build_row が dict を返す generator
+_DICT_ROW_GENERATORS = {("iMak_ichibankuji", "ichibankuji_to_csv.py")}
 
-def _source(name):
-    return io.open(os.path.join(_TCG, name), encoding="utf-8").read()
+
+def _source(name, proj="iMakTCG"):
+    return io.open(os.path.join(_ROOT, proj, name), encoding="utf-8").read()
+
+
+def _dict_row_keys(src):
+    """build_row が dict を返す generator の CSV 列名 (= dict のキー) を取る。"""
+    tree = ast.parse(src)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.FunctionDef) and n.name == "build_row":
+            for m in ast.walk(n):
+                if isinstance(m, ast.Return) and isinstance(m.value, ast.Dict):
+                    return [k.value for k in m.value.keys if isinstance(k, ast.Constant)]
+    return None
+
+
+def _csv_columns(proj, gen):
+    """generator が出す CSV の列名一覧 (list 形 / dict 形 どちらも)。"""
+    src = _source(gen, proj)
+    if (proj, gen) in _DICT_ROW_GENERATORS:
+        return _dict_row_keys(src)
+    return _headers_and_row(src)[0]
 
 
 def _headers_and_row(src):
@@ -116,3 +147,27 @@ def test_provisional_cardid_rows_are_excluded_from_blank_count():
     assert '_PROVISIONAL_PID_PREFIX = "cardID"' in src, "暫定キーの定義が消えている"
     assert "startswith(_PROVISIONAL_PID_PREFIX)" in src, \
         "cardID-* を母数から外していない (カタログ回答 2026-08-23: 無いものとして扱う)"
+
+
+# =============================================================================
+# 2026-08-28 追記: 契約の照合を TCG 以外の generator にも掛ける
+#   出典: hq/requests/2026-08-28_act_code_proposals_gshock_response.md 提案1・2
+# =============================================================================
+
+@pytest.mark.parametrize("proj,gen", ALL_GENERATORS)
+def test_dropped_columns_are_gone_all_generators(proj, gen):
+    cols = _csv_columns(proj, gen)
+    assert cols, f"{proj}/{gen}: CSV の列名が取れない"
+    for col in DROPPED:
+        assert col not in cols, (
+            f"{proj}/{gen}: {col} は 2026-08-22 契約で出さない列 "
+            "(値が入っていると監査くんが全行除外する)")
+
+
+@pytest.mark.parametrize("proj,gen", [pair for pair in ALL_GENERATORS
+                                      if pair not in _DICT_ROW_GENERATORS])
+def test_headers_and_row_have_same_length_all_generators(proj, gen):
+    headers, row = _headers_and_row(_source(gen, proj))
+    assert headers and row, f"{proj}/{gen}: headers / build_row の return が見つからない"
+    assert len(headers) == len(row), (
+        f"{proj}/{gen}: ヘッダ {len(headers)} 列 vs 行 {len(row)} 値 — 列と値がずれている")
