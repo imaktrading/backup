@@ -14,23 +14,29 @@ import snkrdunk_psa_resource as sp
 import psa_resource_gate as gate
 
 
+# ★2026-08-28: 採用条件が「番号一致 かつ set 確証」になったので、name に set 名を入れ
+#   hint を渡して呼ぶ (依頼書 hq/requests/2026-08-28_restock_search_returned_wrong_cards.md)。
+_HINT_OP11 = ["BOOSTER -A FIST OF DIVINE SPEED- [OP-11]", "ブースターパック 神速の拳【OP-11】",
+              "A Fist of Divine Speed", "", "R", "ゾロ"]
+
 _SEARCH = {
     "tradingCards": [
-        {"id": 520553, "productNumber": "OP11-106", "name": "[OP11-106] ゾロ",
+        {"id": 520553, "productNumber": "OP11-106",
+         "name": '[OP11-106] ゾロ (Booster Pack "A Fist of Divine Speed")',
          "thumbnailUrl": "https://cdn.snkrdunk.com/upload_bg_removed/zoro.webp?size=m"},
     ]
 }
 
 
 def test_match_item_returns_item_with_thumbnail():
-    it = sp._match_item(_SEARCH, "OP11-106")
+    it = sp._match_item(_SEARCH, "OP11-106", variant_hint=_HINT_OP11)
     assert it["id"] == 520553
     assert it["thumbnailUrl"].endswith("zoro.webp?size=m")
 
 
 def test_parse_search_for_card_still_returns_id():
     """後方互換: parse_search_for_card は従来どおり id (int) を返す。"""
-    assert sp.parse_search_for_card(_SEARCH, "OP11-106") == 520553
+    assert sp.parse_search_for_card(_SEARCH, "OP11-106", variant_hint=_HINT_OP11) == 520553
 
 
 def test_resolve_card_id_fills_meta_thumbnail(monkeypatch):
@@ -40,7 +46,7 @@ def test_resolve_card_id_fills_meta_thumbnail(monkeypatch):
             return _SEARCH
     monkeypatch.setattr(sp.requests, "get", lambda *a, **k: _R())
     meta = {}
-    cid = sp.resolve_card_id("OP11-106", _meta=meta)
+    cid = sp.resolve_card_id("OP11-106", _meta=meta, variant_hint=_HINT_OP11)
     assert cid == 520553
     assert meta["thumbnail"].endswith("zoro.webp?size=m")
 

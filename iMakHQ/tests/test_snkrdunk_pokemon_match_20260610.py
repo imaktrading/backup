@@ -23,20 +23,39 @@ def test_norm_cardnum_variants():
     assert sp._norm_cardnum("") == ""
 
 
+# ★2026-08-28: 採用は「番号一致 かつ set 確証」の両方になった。番号突合そのものは
+#   _bracket_matches / _norm_cardnum で見る (このファイルの主題)。採用の可否は別。
+#   依頼書: hq/requests/2026-08-28_restock_search_returned_wrong_cards.md
+_SVP291 = 'Pikachu P [SV-P 291](Promotional Cards "SV-P")'
+
+
 def test_pokemon_promo_match_svp():
-    """SV-P-291 (catalog KEY) → name [SV-P 291] に突合 (484 Pikachu)。"""
-    data = {"streetwears": [
-        {"id": 705192, "productNumber": "", "name": 'Pikachu P [SV-P 291](Promotional Cards "SV-P")'},
-    ], "sneakers": []}
-    assert sp.parse_search_for_card(data, "SV-P-291") == 705192
+    """SV-P-291 (catalog KEY) → name [SV-P 291] に番号突合 (484 Pikachu)。"""
+    assert sp._bracket_matches(_SVP291.upper(), sp._norm_cardnum("SV-P-291")) is True
+
+
+def test_pokemon_promo_is_failclosed_without_set():
+    """promo は set 名が「Promotional Cards」しか無く確証材料ゼロ → 候補にしない。
+
+    catalog 実測 (2026-08-28): SV-P-291 の hint は set_name_ebay='Promo' だけ。
+    OP01-061 (多変種プロモ→手動仕入れ) と同じ扱いに揃える。
+    """
+    data = {"streetwears": [{"id": 705192, "productNumber": "", "name": _SVP291}]}
+    assert sp.set_confirm_tokens(["", "", "Promo"]) == []
+    assert sp.parse_search_for_card(data, "SV-P-291", variant_hint=["", "", "Promo"]) is None
 
 
 def test_pokemon_set_card_match_with_total():
-    """SV2a-201 → name [SV2a 201/165] (番号/総数 形式) に突合。"""
-    data = {"streetwears": [
-        {"id": 128117, "productNumber": "", "name": "Charizard ex SAR [SV2a 201/165](Enhanced Expansion Pack)"},
-    ]}
-    assert sp.parse_search_for_card(data, "SV2a-201") == 128117
+    """SV2a-201 → name [SV2a 201/165] (番号/総数 形式) に突合 + set 確証で採用。"""
+    name = 'Charizard ex SAR [SV2a 201/165](Enhanced Expansion Pack "Pokemon Card 151")'
+    assert sp._bracket_matches(name.upper(), sp._norm_cardnum("SV2a-201")) is True
+    data = {"streetwears": [{"id": 128117, "productNumber": "", "name": name}]}
+    hint = ["拡張パック「ポケモンカード151（イチゴーイチ）」", "", "Sv2a: Pokemon Card 151"]
+    # 「ポケモンカード」だけでは確証にならない (どの出品にも出る語)
+    assert sp.parse_search_for_card(data, "SV2a-201", variant_hint=hint) is None
+    named = 'Charizard ex SAR [SV2a 201/165](拡張パック ポケモンカード151 イチゴーイチ)'
+    data2 = {"streetwears": [{"id": 128117, "productNumber": "", "name": named}]}
+    assert sp.parse_search_for_card(data2, "SV2a-201", variant_hint=hint) == 128117
 
 
 def test_pokemon_setcode_prefix_diff_failclosed():
@@ -56,22 +75,32 @@ def test_pokemon_promo_series_not_confused():
 
 
 def test_pokemon_picks_correct_among_multiple():
-    """同番号 291 で SV-P と SM-P が並ぶ中、SV-P-291 は SV-P の方を選ぶ。"""
-    data = {"streetwears": [
-        {"id": 705192, "productNumber": "", "name": 'Pikachu P [SV-P 291](Promotional Cards "SV-P")'},
-        {"id": 9, "productNumber": "", "name": "Pikachu: PROMO[SM-P 291](SM-P Promotional cards)"},
-    ]}
-    assert sp.parse_search_for_card(data, "SV-P-291") == 705192
+    """同番号 291 で SV-P と SM-P が並んでも、番号突合が当たるのは SV-P の方だけ。
+
+    (採用まで行くには別途 set 確証が要る。ここで見るのは set-code 込みの番号突合。)
+    """
+    assert sp._bracket_matches('PIKACHU P [SV-P 291](PROMOTIONAL CARDS "SV-P")',
+                               sp._norm_cardnum("SV-P-291")) is True
+    assert sp._bracket_matches("PIKACHU: PROMO[SM-P 291](SM-P PROMOTIONAL CARDS)",
+                               sp._norm_cardnum("SV-P-291")) is False
 
 
 def test_onepiece_regression_still_matches():
-    """既存 OnePiece (productNumber/bracket) 経路が回帰しない。"""
+    """既存 OnePiece (productNumber/bracket) 経路が回帰しない (set 確証込み)。"""
+    hint11 = ["BOOSTER -A FIST OF DIVINE SPEED- [OP-11]", "ブースターパック 神速の拳【OP-11】",
+              "A Fist of Divine Speed"]
     data = {"streetwears": [
-        {"id": 520553, "productNumber": "", "name": "Zeus R-P [OP11-106](Booster Pack)"},
+        {"id": 520553, "productNumber": "",
+         "name": 'Zeus R-P [OP11-106](Booster Pack "A Fist of Divine Speed")'},
     ]}
-    assert sp.parse_search_for_card(data, "OP11-106") == 520553
-    data2 = {"streetwears": [{"id": 111, "productNumber": "ST07-008", "name": "Pudding"}]}
-    assert sp.parse_search_for_card(data2, "ST07-008") == 111
+    assert sp.parse_search_for_card(data, "OP11-106", variant_hint=hint11) == 520553
+    hint07 = ["PREMIUM CARD COLLECTION -GIRLS EDITION-", "",
+              "Premium Card Collection Girls Edition"]
+    data2 = {"streetwears": [
+        {"id": 111, "productNumber": "ST07-008",
+         "name": "Charlotte Pudding C [ST07-008] ( Premium Card Collection Girls Edition)"},
+    ]}
+    assert sp.parse_search_for_card(data2, "ST07-008", variant_hint=hint07) == 111
 
 
 # ---- gate 側 KEY→card番号 導出 ----

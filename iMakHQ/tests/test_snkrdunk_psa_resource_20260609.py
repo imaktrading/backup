@@ -50,18 +50,38 @@ def test_empty_response():
     assert r["available"] is False and r["psa10_price_jpy"] is None
 
 
+# ★2026-08-28: 採用条件は「番号一致 かつ set 確証」。set 名の入った実観測 name を使う。
+#   依頼書: hq/requests/2026-08-28_restock_search_returned_wrong_cards.md
+_HINT_OP11 = ["BOOSTER -A FIST OF DIVINE SPEED- [OP-11]", "ブースターパック 神速の拳【OP-11】",
+              "A Fist of Divine Speed", "", "R", "ゼウス"]
+_HINT_ST07 = ["PREMIUM CARD COLLECTION -GIRLS EDITION-", "", "Premium Card Collection Girls Edition",
+              "", "C", "シャーロット・プリン"]
+
+
 def test_resolve_search_match_by_bracket():
     """search レスポンスから [CARD番号] を含む name で id 突合 (id-strict)。"""
     data = {"streetwears": [
         {"id": 999, "productNumber": "", "name": "Other R-P [OP99-999](X)"},
-        {"id": 520553, "productNumber": "", "name": "Zeus R-P [OP11-106](Booster Pack)"},
+        {"id": 520553, "productNumber": "",
+         "name": 'Zeus R-P [OP11-106](Booster Pack "A Fist of Divine Speed")'},
     ], "sneakers": []}
-    assert sp.parse_search_for_card(data, "OP11-106") == 520553
+    assert sp.parse_search_for_card(data, "OP11-106", variant_hint=_HINT_OP11) == 520553
+
+
+def test_resolve_bracket_match_without_set_is_failclosed():
+    """番号は当たるが set を確証できない → 採らない (別セットの同番号よけ)。"""
+    data = {"streetwears": [
+        {"id": 520553, "productNumber": "", "name": "Zeus R-P [OP11-106](Booster Pack)"},
+    ]}
+    assert sp.parse_search_for_card(data, "OP11-106", variant_hint=_HINT_OP11) is None
 
 
 def test_resolve_match_by_product_number():
-    data = {"streetwears": [{"id": 111, "productNumber": "ST07-008", "name": "Pudding"}]}
-    assert sp.parse_search_for_card(data, "ST07-008") == 111
+    data = {"streetwears": [
+        {"id": 111, "productNumber": "ST07-008",
+         "name": "Charlotte Pudding C [ST07-008] ( Premium Card Collection Girls Edition)"},
+    ]}
+    assert sp.parse_search_for_card(data, "ST07-008", variant_hint=_HINT_ST07) == 111
 
 
 def test_resolve_no_match_returns_none():

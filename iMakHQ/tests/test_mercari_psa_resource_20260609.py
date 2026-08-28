@@ -11,8 +11,12 @@
 """
 import importlib.util
 import os
+import sys
 
-_MOD = os.path.join(os.path.dirname(__file__), "..", "tools", "mercari_psa_resource.py")
+_TOOLS = os.path.join(os.path.dirname(__file__), "..", "tools")
+sys.path.insert(0, _TOOLS)      # _variant_matches が snkrdunk_psa_resource を lazy import する
+
+_MOD = os.path.join(_TOOLS, "mercari_psa_resource.py")
 _spec = importlib.util.spec_from_file_location("mercari_psa_resource", _MOD)
 m = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(m)
@@ -55,15 +59,20 @@ def test_name_matches_card_rejects_yugioh_substring():
 
 
 # ---------- ③ オークション除外 ----------
+# ★2026-08-28: 採用条件が「番号一致 かつ set 確証」になったので、fixture の出品名にも
+#   セット名 (神速の拳) を入れ、hint を渡して呼ぶ。番号だけの出品はもう候補にならない
+#   (別セットの同番号を掴む経路だったため)。依頼書 2026-08-28_restock_search_returned_wrong_cards.md
+HINT_SHINSOKU = ["ブースターパック 神速の拳【OP-11】", "", "A Fist of Divine Speed", "", "R", "サボ"]
+
 FIXTURE = "<html>" + "".join([
     # 最安だがオークション (itemtype は MERCARI でも除外されるべき)
-    _cell("ITEM_TYPE_MERCARI", "サボ OP11-106 PSA10", "3,000", "/item/mAUC11", auction=True),
+    _cell("ITEM_TYPE_MERCARI", "サボ OP11-106 神速の拳 PSA10", "3,000", "/item/mAUC11", auction=True),
     # 別カード (id-strict で除外)
     _cell("ITEM_TYPE_MERCARI", "ルフィ OP11-001 PSA10", "4,000", "/item/mWRONG2"),
     # 本命 (通常出品)
-    _cell("ITEM_TYPE_MERCARI", "サボ OP11-106 PSA10", "6,000", "/item/mRIGHT3"),
+    _cell("ITEM_TYPE_MERCARI", "サボ OP11-106 神速の拳 PSA10", "6,000", "/item/mRIGHT3"),
     # Shops の本命 (高い)
-    _cell("ITEM_TYPE_BEYOND", "サボ OP11-106 PSA10", "7,000", "/shops/product/SABO4"),
+    _cell("ITEM_TYPE_BEYOND", "サボ OP11-106 神速の拳 PSA10", "7,000", "/shops/product/SABO4"),
 ]) + "</html>"
 
 
@@ -78,21 +87,23 @@ def test_parse_excludes_auction_by_marker():
 def test_parse_aligns_name_price_href():
     items = m.parse_mercari_items(FIXTURE)
     right = items[1]
-    assert right["name"] == "サボ OP11-106 PSA10"
+    assert right["name"] == "サボ OP11-106 神速の拳 PSA10"
     assert right["price"] == 6000
     assert right["href"] == "https://jp.mercari.com/item/mRIGHT3"
     assert items[2]["href"] == "https://jp.mercari.com/shops/product/SABO4"
 
 
 def test_pick_skips_auction_and_wrong_card():
-    best = m.pick_cheapest_psa10(m.parse_mercari_items(FIXTURE), "OP11-106")
+    best = m.pick_cheapest_psa10(m.parse_mercari_items(FIXTURE), "OP11-106",
+                             variant_hint=HINT_SHINSOKU)
     # ¥3000オークション と ¥4000別カード を飛ばして本命 ¥6000
     assert best is not None and best[0] == 6000
     assert best[1] == "https://jp.mercari.com/item/mRIGHT3"
 
 
 def test_pick_none_when_no_match():
-    assert m.pick_cheapest_psa10(m.parse_mercari_items(FIXTURE), "OP99-999") is None
+    assert m.pick_cheapest_psa10(m.parse_mercari_items(FIXTURE), "OP99-999",
+                                 variant_hint=HINT_SHINSOKU) is None
 
 
 # ---------- ④ 相当除外 ----------
@@ -104,10 +115,11 @@ def test_is_psa10_excludes_souto():
 
 def test_pick_skips_souto():
     html = "<html>" + "".join([
-        _cell("ITEM_TYPE_MERCARI", "サボ OP11-106 psa10相当", "2,000", "/item/mSOUTO"),
-        _cell("ITEM_TYPE_MERCARI", "サボ OP11-106 PSA10", "6,000", "/item/mREAL"),
+        _cell("ITEM_TYPE_MERCARI", "サボ OP11-106 神速の拳 psa10相当", "2,000", "/item/mSOUTO"),
+        _cell("ITEM_TYPE_MERCARI", "サボ OP11-106 神速の拳 PSA10", "6,000", "/item/mREAL"),
     ]) + "</html>"
-    best = m.pick_cheapest_psa10(m.parse_mercari_items(html), "OP11-106")
+    best = m.pick_cheapest_psa10(m.parse_mercari_items(html), "OP11-106",
+                             variant_hint=HINT_SHINSOKU)
     assert best is not None and best[0] == 6000
 
 

@@ -11,9 +11,25 @@ def _data(*items):
     return {"tradingCards": list(items)}
 
 
-def test_single_match_resolves():
-    d = _data({"id": 111, "productNumber": "OP08-106", "name": "ナミ [OP08-106]"})
-    assert sp.parse_search_for_card(d, "OP08-106") == 111
+# catalog 実測 (2026-08-28): OP08-106 = BOOSTER -TWO LEGENDS-[OP-08] / ナミ SR
+_HINT_OP08 = ["BOOSTER -TWO LEGENDS-[OP-08]", "ブースターパック 二つの伝説【OP-08】",
+              "Two Legends", "", "SR", "ナミ"]
+
+
+def test_single_match_needs_set_confirm():
+    """★2026-08-28 改訂: 一致が1件でも **番号一致だけでは採らない**。
+
+    旧挙動は「単一一致=確定」。実測 (SNKRDUNK 実 API 2026-08-28) では OP08-106 に
+    9件が並び、"Two Legends" 以外に "Promotion Pack EX Vol.3" / "Emperors In The
+    New World" / キャンペーン品が居る。市場に1件しか出ていない日でも、それが自分の
+    変種とは限らない。依頼書: hq/requests/2026-08-28_restock_search_returned_wrong_cards.md
+    """
+    bare = _data({"id": 111, "productNumber": "OP08-106", "name": "ナミ [OP08-106]"})
+    assert sp.parse_search_for_card(bare, "OP08-106", variant_hint=_HINT_OP08) is None
+    assert sp.parse_search_for_card(bare, "OP08-106") is None
+    named = _data({"id": 111, "productNumber": "OP08-106",
+                   "name": 'Nami SR [OP08-106](Booster Pack "Two Legends")'})
+    assert sp.parse_search_for_card(named, "OP08-106", variant_hint=_HINT_OP08) == 111
 
 
 def test_no_match_failclosed():

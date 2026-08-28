@@ -31,10 +31,14 @@ def test_hint_picks_cheap_variant_when_that_is_target():
     assert got is not None and got[0] == 45000
 
 
-def test_no_hint_falls_back_to_cheapest():
-    """hint無(KEY未解決)は従来どおり番号一致の最安。"""
-    got = mp.pick_cheapest_psa10(ITEMS, "OP11-106")
-    assert got is not None and got[0] == 45000
+def test_no_hint_is_failclosed():
+    """[2026-08-28 改訂] hint無(KEY未解決) = 確証材料ゼロ → 候補を出さない。
+
+    旧挙動は「番号一致の最安」を返していた。同じ番号は別セットにも在るので、
+    これが別カードを目視候補に載せる経路だった (SM10-076/OP06-093 等4件)。
+    依頼書: hq/requests/2026-08-28_restock_search_returned_wrong_cards.md
+    """
+    assert mp.pick_cheapest_psa10(ITEMS, "OP11-106") is None
 
 
 def test_multi_variant_hint_no_match_failclosed():

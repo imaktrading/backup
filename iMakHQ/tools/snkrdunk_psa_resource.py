@@ -97,6 +97,72 @@ def _hint_tokens(variant_hint):
     return toks
 
 
+# 「どのセットにも出てくる語」= セットの確証にならない。これを確証に数えると、同じ番号の
+# **別セット**のカードが「セット確証済」として候補に載る (2026-08-28 の精度事故)。
+# 選定根拠: catalog の distinct set名 2,553件でトークン頻度を実測し、20件以上のセット名に
+# 出る語のうち **構造語** (パック/デッキ/プロモ 等) だけを採った。内容語 (XYBREAK/MEGA/伝説 等)
+# は残す = セットを言い当てられる語だから。
+GENERIC_SET_TOKENS = frozenset({
+    # 日本語 (構造語)
+    "パック", "拡張", "強化拡張", "ブースターパック", "ブースター",
+    "スタートデッキ", "スターターセット", "スターター", "デッキ", "セット",
+    "カード", "ポケモンカード", "ポケモンカードゲーム", "限定",
+    # Latin (構造語)。_norm_match 後の形で持つ (空白/ハイフン/THE 除去済)
+    "BOOSTERPACK", "BOOSTER", "PACK", "EXPANSIONPACK", "EXPANSION",
+    "STARTERDECK", "STRUCTUREDECK", "DECK", "SET", "CARD", "CARDS",
+    "PROMOTIONALCARD", "PROMOTIONALCARDS", "PROMOTIONCARD", "PROMOTIONCARDS",
+    "PROMOTIONAL", "PROMOTION", "PROMO", "SPECIALEDITION", "BOX", "VOL", "ISSUE",
+    "POKEMONCARD", "POKEMONCARDGAME",
+})
+
+
+def _norm_match(s):
+    """set 照合用の正規形 (純関数)。大文字化 + 空白/ハイフン除去 + 冠詞 THE 除去。
+
+    THE を落とすのは表記ゆれ吸収のため。catalog `WINGS OF THE CAPTAIN` と
+    SNKRDUNK `Wings of Captain` は同じセットだが、そのままだと一致しない。
+    hint 側と商品名側の**両方**に同じ正規化をかけるので非対称にはならない。
+    """
+    return (s or "").upper().replace(" ", "").replace("-", "").replace("THE", "")
+
+
+def set_confirm_tokens(variant_hint):
+    """variant_hint → **そのセットを言い当てられる**確証トークン list (純関数・正規化済)。
+
+    候補採用の唯一の基準。空 list = 確証不能 → 呼出側は候補を出さない (fail-closed)。
+    - hint の先頭3 (set_name / get_info=入手元set / set_name_ebay) だけ見る。
+      キャラ名 (index5) は同キャラ別変種で必ず一致し誤確証するので使わない。
+    - set-code (OP11/EB04 等) はカード番号と被って誤確証するので落とす。
+    - 一般語 (GENERIC_SET_TOKENS) は落とす。残らなければ「番号一致だけ」= 確証不能。
+    """
+    if not variant_hint:
+        return []
+    set_part = (list(variant_hint)[:3]
+                if isinstance(variant_hint, (list, tuple)) else variant_hint)
+    out = []
+    for t in _hint_tokens(set_part):
+        if re.fullmatch(r"[A-Z]{2,}\d{1,3}", t):      # set-code = 番号と被る
+            continue
+        if t in GENERIC_SET_TOKENS:
+            continue
+        n = _norm_match(t)
+        if not n or n in GENERIC_SET_TOKENS or n in out:
+            continue
+        if n.isascii() and len(n) < 3:
+            continue      # THE 除去で短くなった Latin 断片は部分一致で誤爆する
+        out.append(n)
+    return out
+
+
+def set_confirmed(name, variant_hint):
+    """商品名が hint のセットと一致するか (純関数)。確証トークン0 → False (fail-closed)。"""
+    toks = set_confirm_tokens(variant_hint)
+    if not toks:
+        return False
+    nm = _norm_match(name)
+    return any(t in nm for t in toks)
+
+
 def _print_signal(variant_hint):
     """canonical変種の print種別を返す: 'SPC'(SP/特別) / 'P'(パラレル/alt art) / ''(通常)。
 
@@ -163,9 +229,11 @@ def _match_item(data, card_number, variant_hint=None, multi_variant=False):
     SNKRDUNK は鑑定カードを streetwears/sneakers バケツに入れる。name 中の `[CARD_NUMBER]`
     か productNumber 完全一致で突合。Pokemon は productNumber が空+番号が name の
     `[SV-P 291]`/`[SV2a 201/165]` に埋まるため、正規化(set-code+番号の完全一致)でも突合。
-    Step6 P3: **同番号に複数 print** がある時(変種非決定性)、variant_hint(canonical変種の
-    set/name トークン)で正しい product を選ぶ。決め手が無い複数一致は None (fail-closed=誤variant買わない)。
-    一致が無ければ None (fail-closed)。
+    採用条件 (2026-08-28 以降): **番号一致 + set 確証** の両方。variant_hint から
+    `set_confirm_tokens` が取れない / 商品名がその set と一致しない → None (fail-closed)。
+    一致件数は問わない (1件でも番号だけでは採らない)。同 set に複数 print が残る時だけ
+    print種別で tie-break し、一意化できなければ None。
+    multi_variant は後方互換のため残しているが判定には使わない (件数に関わらず確証必須)。
     """
     if not isinstance(data, dict):
         return None
@@ -192,24 +260,17 @@ def _match_item(data, card_number, variant_hint=None, multi_variant=False):
             matches.append(it)
     if not matches:
         return None
-    if len(matches) == 1:
-        # ★2026-07-24 多変種プロモ(P-066/P-041 等)は、市場に1件だけあっても それが自出品と同じ
-        # 変種とは限らない → 番号一致だけで確定せず hint(入手元set)確証を必須にする(fail-closed)。
-        # 単一変種カードは従来どおり番号一致=確定(hint不問)。
-        if multi_variant and variant_hint:
-            # set部分(hint先頭3=set_name/get_info/set_ebay)のみで確証。キャラ名(name_jp=index5)は
-            # 同キャラ別変種で必ずマッチし誤確証するので使わない(_variant_matches と同基準)。
-            set_part = list(variant_hint)[:3] if isinstance(variant_hint, (list, tuple)) else variant_hint
-            toks = [t for t in _hint_tokens(set_part) if not re.fullmatch(r"[A-Z]{2,}\d{1,3}", t)]
-            nm = (matches[0].get("name") or "").upper().replace(" ", "").replace("-", "")
-            if toks and not any(t in nm for t in toks):
-                return None                    # 番号一致だが変種(set)未確証 → 誤variant掴まない
-        return matches[0]                      # 単一一致 = 確定
-    # 複数 print (変種非決定性): ①set トークンで絞る → ②同setで残れば print種別で tie-break
-    toks = _hint_tokens(variant_hint)
+    # ★2026-08-28: **番号一致だけでは採らない**(件数に関わらず)。市場に1件しか無くても、
+    # それが自出品と同じセット/変種とは限らない(同じ番号は別セットにも在る)。set を確証
+    # できなければ候補を出さない = OP01-061 と同じ fail-closed に揃える。
+    # 依頼書: hq/requests/2026-08-28_restock_search_returned_wrong_cards.md
+    toks = set_confirm_tokens(variant_hint)
     if not toks:
-        return None                            # hint無で複数 = 曖昧 → fail-closed
-    scored = [(sum(1 for t in toks if t in (it.get("name") or "").upper().replace(" ", "").replace("-", "")), it)
+        return None                            # 確証材料が無い → 番号一致だけ = 採らない
+    if len(matches) == 1:
+        return matches[0] if set_confirmed(matches[0].get("name"), variant_hint) else None
+    # 複数 print (変種非決定性): ①set トークンで絞る → ②同setで残れば print種別で tie-break
+    scored = [(sum(1 for t in toks if t in _norm_match(it.get("name"))), it)
               for it in matches]
     top_score = max(s for s, _ in scored)
     if top_score <= 0:

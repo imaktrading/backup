@@ -547,30 +547,28 @@ def parse_mercari_items(src):
 def _variant_matches(items, card_no, variant_hint=None, market_no=None):
     """価格昇順 items から PSA10 かつ対象カード番号一致の **正変種** 候補を昇順 list で返す(純関数)。
 
-    Step6 P3: variant_hint(canonical変種の get_info=入手元set 等)があれば、番号一致の中で
-    hint(セット名/コード)に一致する正変種に絞る。SNKRDUNK と同じ思想・画像不要。
+    採用条件 (2026-08-28 以降): **番号一致 + set 確証** の両方。番号一致だけでは採らない
+    (同じ番号は別セットにも在り、別カードを掴む)。確証材料が無ければ [] = 候補を出さない。
+    依頼書: hq/requests/2026-08-28_restock_search_returned_wrong_cards.md
     - hint一致あり → その候補群 (正変種, 価格昇順)
-    - hint一致無し + 候補単一 → その1件 (変種曖昧なし。seller がset未記載なだけ)
-    - hint一致無し + 候補複数 → [] (誤variant買わない fail-closed)
-    - hint無 (KEY未解決) → 番号一致の全候補 (価格昇順)
+    - hint一致無し → [] (件数に関わらず。誤variant買わない fail-closed)
+    - hint無 / set トークン取れず (KEY未解決・一般語のみ) → [] (確証不能)
     """
     matches = [it for it in items  # DOM順 = 価格昇順
                if it["price"] > 0 and is_psa10(it["name"])
                and _name_matches_card(it["name"], card_no, market_no)]
     if not matches:
         return []
-    if not variant_hint:
-        return matches
-    from snkrdunk_psa_resource import _hint_tokens, _print_signal, _item_print
+    from snkrdunk_psa_resource import (_item_print, _norm_match, _print_signal,
+                                       set_confirm_tokens)
     # set 確証は **set 部分(hint先頭3=set_name/get_info/set_ebay)のみ**で行う。キャラ名(name_jp)を
-    # 含めると同キャラ別変種を誤確証する(2026-06-19 ゼウス/ナミ等)。set-code(OP11等)は番号と被るので除外。
-    # kw_variant_confident と同一基準に揃える。
-    set_part = list(variant_hint)[:3] if isinstance(variant_hint, (list, tuple)) else variant_hint
-    toks = [t for t in _hint_tokens(set_part) if not re.fullmatch(r"[A-Z]{2,}\d{1,3}", t)]
+    # 含めると同キャラ別変種を誤確証する(2026-06-19 ゼウス/ナミ等)。set-code(OP11等)は番号と被り、
+    # 一般語(拡張/パック/BOOSTER PACK 等)はどのセットにも出るので、どちらも確証に数えない。
+    toks = set_confirm_tokens(variant_hint)
     if not toks:
-        return matches                    # set トークン取れず → 従来最安群
+        return []                         # 確証材料が無い → 番号一致だけ = 採らない
     # ①set トークン採点で最高スコア群(=正set)に絞る → ②同setで複数なら print種別で tie-break。
-    scored = [(sum(1 for t in toks if t in (it["name"] or "").upper().replace(" ", "").replace("-", "")), it)
+    scored = [(sum(1 for t in toks if t in _norm_match(it["name"])), it)
               for it in matches]   # matches は価格昇順を保持
     top = max(s for s, _ in scored)
     if top == 0:
@@ -597,19 +595,13 @@ def kw_variant_confident(name, variant_hint):
     if not variant_hint:
         return False
     # set語のみで確証(名前/番号/rarity は同名別setの誤variantを見逃すため使わない)。
-    # hint = [set_name, get_info, set_name_ebay, variant_type, rarity, name_jp, key] の前3つ=set。
-    set_part = list(variant_hint)[:3] if isinstance(variant_hint, (list, tuple)) else variant_hint
+    # set-code(番号と重複)と一般語(拡張/パック/BOOSTER PACK=どのセットにも出る)は確証に数えない。
+    # _variant_matches / snkrdunk._match_item と **同じ** set_confirm_tokens に揃える。
     try:
-        from snkrdunk_psa_resource import _hint_tokens
-        toks = _hint_tokens(set_part)
+        from snkrdunk_psa_resource import set_confirmed
     except Exception:
         return False
-    # set-code(OP11/EB04 等)はカード番号と重複し誤確証するので除外。set名の語(漢字/カナ/Latin)で確証。
-    toks = [t for t in toks if not re.fullmatch(r"[A-Z]{2,}\d{1,3}", t)]
-    if not toks:
-        return False
-    norm = (name or "").upper().replace(" ", "").replace("-", "")
-    return any(t in norm for t in toks)
+    return set_confirmed(name, variant_hint)
 
 
 def pick_cheapest_psa10(items, card_no, variant_hint=None):
@@ -885,9 +877,11 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
                 # item-cell 単位で抽出 (name·price·href 対応保証 + 通常出品のみ=オークション除外)
                 items = parse_mercari_items(drv.page_source)
                 cands = pick_psa10_candidates(items, card_no, c.get("hint"))   # 正変種 価格昇順 最大5
-                # all_cands = 同番号の **全変種**(variant_hint無)。視覚確証で「どの変種か」を人が選べる
-                # ように並べる用(同番号別変種の取り違え→違う再検索ループ防止。2026-06-22)。
-                all_cands = pick_psa10_candidates(items, card_no, None, limit=8)
+                # all_cands = 視覚確証に並べる枠 (cands より広め=最大8)。
+                # ★2026-08-28: ここは以前 variant_hint 無し = **番号一致だけ**で拾っていた。
+                #   同じ番号は別セットにも在るので、別カードが目視候補に載っていた(精度事故)。
+                #   hint を渡して set 確証を通す = 確証できなければ候補を出さない(fail-closed)。
+                all_cands = pick_psa10_candidates(items, card_no, c.get("hint"), limit=8)
                 best = cands[0] if cands else None
                 via = "kw"
                 # keyword で変種を確証できない(0件 or set語不一致=違うカードを掴むリスク)→ 画像検索。
@@ -899,6 +893,7 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
                     # 候補を出さない(手動仕入れに倒す)。単一変種のみ画像検索OK(番号一致=正)。
                     best = None
                     cands = []
+                    all_cands = []      # 目視枠も出さない(OP01-061 の扱いに揃える・2026-08-28)
                     via = "多変種fail-closed(画像検索skip)"
                     print(f"  [{i+1}/{len(cards)}] {card_no}: 多変種で変種確証不可→候補出さず(手動仕入れ)", flush=True)
                 elif _unconfident and eid:

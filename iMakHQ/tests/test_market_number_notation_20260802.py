@@ -52,10 +52,26 @@ def test_one_piece_notation_is_unchanged():
     assert "OP06-080" in q["kw"]
 
 
+# catalog 実測 (2026-08-28): XY11-034 = 拡張パック「冷酷の反逆者」/ XY - Steam Siege
+_HINT_XY11 = ["拡張パック「冷酷の反逆者」", "", "XY - Steam Siege", "", "RR", "イベルタルBREAK"]
+
+
 def test_candidates_pick_up_market_notation_titles():
+    """★2026-08-28: 市場表記で番号が当たっても、採用には set 確証が要る。
+
+    「拡張パック」「ポケモンカード」はどのセットにも出るので確証にならない。
+    依頼書: hq/requests/2026-08-28_restock_search_returned_wrong_cards.md
+    """
     items = [{"price": 12000, "href": "https://jp.mercari.com/item/m1",
-              "name": "PSA10 イベルタルBREAK 034/054 RR 1ED ポケモンカード"},
+              "name": "PSA10 イベルタルBREAK 034/054 RR 1ED 冷酷の反逆者 ポケモンカード"},
              {"price": 9000, "href": "https://jp.mercari.com/item/m2",
               "name": "PSA10 別のカード 035/054"}]
-    got = mp.pick_psa10_candidates(items, "XY11-034", None, 5, "034/054")
+    got = mp.pick_psa10_candidates(items, "XY11-034", _HINT_XY11, 5, "034/054")
     assert [g[1] for g in got] == ["https://jp.mercari.com/item/m1"]
+
+
+def test_market_notation_alone_is_not_enough():
+    """番号(市場表記)は当たるが set 名が無い出品は候補にしない (別セットの同番号よけ)。"""
+    items = [{"price": 12000, "href": "https://jp.mercari.com/item/m1",
+              "name": "PSA10 イベルタルBREAK 034/054 RR 1ED ポケモンカード"}]
+    assert mp.pick_psa10_candidates(items, "XY11-034", _HINT_XY11, 5, "034/054") == []

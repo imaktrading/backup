@@ -34,12 +34,24 @@ def test_snkrdunk_single_match_multivariant_needs_hint():
     assert got is None, "多変種で変種未確証の単一候補を掴んではいけない"
 
 
-def test_snkrdunk_single_match_singlevariant_ok():
-    """単一変種カードは番号一致=確定(hint不問・従来どおり)。"""
+def test_snkrdunk_single_match_singlevariant_now_needs_hint_too():
+    """★2026-08-28 改訂: 単一変種カードでも **番号一致だけでは採らない**。
+
+    旧挙動は「catalog に1変種しか無い番号なら hint 不問で確定」。だが catalog の変種数は
+    市場に何が並ぶかを保証しない (SNKRDUNK 実測 2026-08-28: OP08-106 に9件、SB02-053 に5件)。
+    set を確証できた時だけ採る = 別セットの同番号を掴まない。
+    依頼書: hq/requests/2026-08-28_restock_search_returned_wrong_cards.md
+    """
     sp = _load("snkrdunk_psa_resource")
-    data = _data("[OP13-004] サボ PSA10")
-    got = sp._match_item(data, "OP13-004", variant_hint=None, multi_variant=False)
-    assert got is not None and got["name"].startswith("[OP13-004]")
+    hint = ["BOOSTER -A FIST OF DIVINE SPEED- [OP-13]", "", "A Fist of Divine Speed",
+            "", "R", "サボ"]
+    assert sp._match_item(_data("[OP13-004] サボ PSA10"), "OP13-004",
+                          variant_hint=None, multi_variant=False) is None
+    assert sp._match_item(_data("[OP13-004] サボ PSA10"), "OP13-004",
+                          variant_hint=hint, multi_variant=False) is None
+    ok = sp._match_item(_data('[OP13-004] サボ (Booster Pack "A Fist of Divine Speed") PSA10'),
+                        "OP13-004", variant_hint=hint, multi_variant=False)
+    assert ok is not None and ok["name"].startswith("[OP13-004]")
 
 
 def test_snkrdunk_single_match_multivariant_hint_confirmed():

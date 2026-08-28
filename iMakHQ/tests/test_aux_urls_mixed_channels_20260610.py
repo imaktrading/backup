@@ -74,20 +74,32 @@ def _items(*pairs):
     return [{"price": p, "href": h, "name": n} for p, h, n in pairs]
 
 
+# ★2026-08-28: 候補採用は「番号一致 かつ set 確証」。出品名に set 名 (神速の拳) を入れ、
+#   hint を渡して呼ぶ。番号だけの出品は候補にならない
+#   (依頼書 hq/requests/2026-08-28_restock_search_returned_wrong_cards.md)。
+_HINT_OP11 = ["ブースターパック 神速の拳【OP-11】", "", "A Fist of Divine Speed", "", "R", "ゼウス"]
+
+
 def test_pick_candidates_returns_multiple_price_asc():
-    items = _items((14000, "h1", "Luffy PSA10 [OP11-106]"),
-                   (16000, "h2", "Luffy PSA10 [OP11-106]"),
-                   (2000, "h3", "raw card OP11-106"))  # PSA10でない→除外
-    got = mp.pick_psa10_candidates(items, "OP11-106", limit=5)
+    items = _items((14000, "h1", "Luffy PSA10 [OP11-106] 神速の拳"),
+                   (16000, "h2", "Luffy PSA10 [OP11-106] 神速の拳"),
+                   (2000, "h3", "raw card OP11-106 神速の拳"))  # PSA10でない→除外
+    got = mp.pick_psa10_candidates(items, "OP11-106", _HINT_OP11, limit=5)
     assert [g[0] for g in got] == [14000, 16000]
     assert got[0][1] == "h1"
 
 
 def test_pick_candidates_respects_limit():
-    items = _items(*[(1000 * k, f"h{k}", f"PSA10 [OP11-106] #{k}") for k in range(1, 9)])
-    got = mp.pick_psa10_candidates(items, "OP11-106", limit=3)
+    items = _items(*[(1000 * k, f"h{k}", f"PSA10 [OP11-106] 神速の拳 #{k}") for k in range(1, 9)])
+    got = mp.pick_psa10_candidates(items, "OP11-106", _HINT_OP11, limit=3)
     assert len(got) == 3
     assert [g[0] for g in got] == [1000, 2000, 3000]
+
+
+def test_pick_candidates_number_only_is_failclosed():
+    """set 名の無い出品 = 番号一致だけ → 候補に出さない。"""
+    items = _items((14000, "h1", "Luffy PSA10 [OP11-106]"))
+    assert mp.pick_psa10_candidates(items, "OP11-106", _HINT_OP11, limit=5) == []
 
 
 def test_pick_candidates_failclosed_empty():
