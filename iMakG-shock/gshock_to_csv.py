@@ -1558,11 +1558,8 @@ def build_row(url, price, data, base_desc):
         data.get('movement', 'Quartz'),  # eBay有効値はQuartzのみ（Solar/RadioはFeatures側）
         data.get('water_resistance', '200 m (20 ATM)'),
         # C:Model = eBayシリーズフィルタ値（"G-SHOCK 5600"等）
-        # C:Customized は **空欄で出す**。契約 (_contract_aspects.yaml) が emit:false
-        # 「扱いが無い。固定値で出さない (出品側の固定出力を止める)」2026-08-22 決定。
-        # 固定の "No" を出していたため監査くんが契約違反として全行を除外していた
-        # (2026-08-28: 売れた GA-010GGB-1A9 の補充が出せなかった)。
-        get_ebay_model_filter(model_base) or model_base, "",
+        # Customized / Vintage は 2026-08-22 契約で廃止 (列ごと落とす。TCG と同じ形)
+        get_ebay_model_filter(model_base) or model_base,
         data.get('case_size', ''),
         data.get('crystal', 'Mineral Crystal'),
         year,
@@ -1574,7 +1571,6 @@ def build_row(url, price, data, base_desc):
         "Arabic Numerals",  # C:Indices
         band_width,         # C:Band Width
         lug_width,          # C:Lug Width (= Band Width, G-Shock一体型バンド)
-        "",                 # C:Vintage — 契約 emit:false 「定義が曖昧。固定値で出さない」(2026-08-22)
         "No",               # C:Handmade
         "Yes",              # C:With Original Box/Packaging
         "Yes",              # C:With Papers (新品 = 日本語マニュアル付属、英語版なしは Description に注記)
@@ -1736,11 +1732,12 @@ def main():
         "C:Bezel Type", "C:Dial Pattern",
         "C:Band Material", "C:Case Material",
         "C:Features", "C:Country of Origin", "C:Movement",
-        "C:Water Resistance", "C:Model", "C:Customized",
+        # Customized / Vintage は 2026-08-22 契約で廃止
+        "C:Water Resistance", "C:Model",
         "C:Case Size", "C:Crystal", "C:Year Manufactured",
         "C:Case Shape", "C:Watch Shape",
         "C:Band/Strap", "C:Closure", "C:Caseback", "C:Indices", "C:Band Width", "C:Lug Width",
-        "C:Vintage", "C:Handmade",
+        "C:Handmade",
         "C:With Original Box/Packaging", "C:With Papers", "C:Manufacturer Warranty",
         "C:Band Length", "C:Case Thickness", "C:Item Weight",
         "*Format", "*Duration", "*Quantity",
