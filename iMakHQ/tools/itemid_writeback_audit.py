@@ -139,6 +139,26 @@ def find_missing(rows: list, by_cert: dict, by_supply: dict, sheet: str) -> list
     return out
 
 
+def writable(miss: list, live: dict) -> list:
+    """書き戻してよい行だけ返す (純関数, test 可)。**qty=0 は戻さない**。
+
+    ★2026-08-27: 取下げ (`cull_end.py`) は落とした行の **B列を空にする**。その直後に
+      この道具を `--apply` で回すと、live 一覧は 2時間キャッシュなので **まだその出品が
+      載っており**、「B が空なのに live に在る = 書き戻し漏れ」と誤判定して itemID を
+      書き戻す。台帳が「出品中」に戻り、**取下げが無かったことになる** (fail-OPEN)。
+
+      実測 (2026-08-27 19:42 の CULL 101件 の直後、同じキャッシュで判定):
+          HIGH missing=0 / LOW missing=34 → 34件すべてが直前に落とした行、全て avail=0
+
+      並びは人が選べない。書き戻しは **出品くんのボタンの中の1ステップ**で、取下げボタンとは
+      別に走るため「取下げの後に書き戻さない」という運用では守れない。だからここで塞ぐ。
+
+      qty=0 = そもそも買えない出品なので、台帳に「出品中」として戻す理由がない。
+      本当の漏れ (出したのに B列が空) は必ず avail>0 なので、これで取りこぼさない。
+    """
+    return [m for m in miss if (live.get(m["item_id"]) or {}).get("avail", 0) > 0]
+
+
 class IncompleteFetch(RuntimeError):
     """live 一覧を取り切れなかった。**0件を「正常」と報告しないため**に必ず投げる。
 
@@ -264,18 +284,23 @@ def main() -> int:
         ws = [w for w in gc.open_by_key(sid).worksheets() if w.id == 851100680][0]
         rows = ws.get_all_values()
         miss = find_missing(rows, by_cert, by_supply, name)
-        total += len(miss)
-        sellable += sum(1 for m in miss if live[m["item_id"]]["avail"] > 0)
-        print(f"\n=== {name}: 書き戻し漏れ {len(miss)} 件")
+        wr = writable(miss, live)
+        skipped = len(miss) - len(wr)
+        total += len(wr)
+        sellable += len(wr)
+        print(f"\n=== {name}: 書き戻し漏れ {len(wr)} 件")
         for m in miss:
             av = live[m["item_id"]]["avail"]
             mark = "★販売可能" if av > 0 else "  qty=0  "
             print(f"   row{m['row']:<6} {m['item_id']}  cert={m['cert'] or '-':<10}"
                   f" {mark} {live[m['item_id']]['title'][:44]}")
-        if miss and args.apply:
+        if skipped:
+            print(f"   ⏭ qty=0 で見送り {skipped} 件 "
+                  f"(取下げ済 = 台帳に戻さない。戻すと取下げが無かったことになる)")
+        if wr and args.apply:
             ws.batch_update([{"range": f"B{m['row']}", "values": [[m["item_id"]]]}
-                             for m in miss], value_input_option="RAW")
-            print(f"   → B列に {len(miss)} 件 書き込みました")
+                             for m in wr], value_input_option="RAW")
+            print(f"   → B列に {len(wr)} 件 書き込みました")
 
     print(f"\n合計 {total} 件 (うち販売可能 {sellable} 件 = 取下げ不能だった行)")
     if total and not args.apply:
