@@ -105,6 +105,14 @@ def extract_set_code_from_brand(brand: str) -> Optional[str]:
     # 2026-05-11: PSA cert #156485701 Vinsmoke Reiju #063 'ONE PIECE JAPANESE
     # ADMIRABLE COLLECTION VOL 1 ...' が catalog miss → OP12-063 (Legacy of the
     # Master 同名 SR 既存) と照合できず.
+    # ★「ストレージボックスセット」は marketing 名より先に見る (2026-08-28)。
+    #   brand に 'ONE PIECE CARD THE BEST' を含むので、下の marketing 表だと PRB01 を
+    #   組み立てて PRB01-004 で Skip していた。実際は **収録元セットごとに set_code が違う**
+    #   合本 (ST16/ST17/OP08/OP05/EB01/ST01/ST10) で、brand から set_code は作れない。
+    #   'P' にして promo fallback に番号 + edition 照合で解かせる。
+    #   依頼: requests/2026-08-27_hq_storagebox_set_resolver.md (初出 2026-05-25、cert 4件)
+    if "STORAGE BOX" in b:
+        return "P"
     marketing_name_to_set = [
         # (PSA brand regex, Bandai 公式 set_code)
         # Admirable Collection vol.1 = 原典番号を保持する多元再録 (4 promo card)。番号で原典set
@@ -827,6 +835,11 @@ def _op_edition_matches(hay: str, sn: str) -> bool:
         #   返す** = Set が '25th Anniversary Collection' の誤出品側に倒れる
         #   (2026-08-23 実測: EB02-003_CH01 登録直後もこの誤解決が残っていた)。
         ("CHOPPER'S 1", "CHOPPER’s 1"),
+        # 2026-08-28 (cert155040105 ボア・ハンコック #004 → ST17-004_p1 等):
+        #   「プレミアムブースター ONE PIECE CARD THE BEST ストレージボックスセット」
+        #   (7枚 × _p1/_p2)。PSA brand は "... STORAGE BOX SET"。
+        #   両側一致必須なので、同番号の PRB01 収録カードや通常弾には発火しない。
+        ("STORAGE BOX SET", "ストレージボックスセット"),
     ):
         if en in hay and (jp in sn or jp in sn_upper):
             edition_hit = True
@@ -997,6 +1010,12 @@ def _search_one_piece_promo_by_number(
         if "WINNER" in hay and "優勝" in sn:
             score += 30
         if "PREMIUM CARD COLL" in hay and "プレミアムカードコレクション" in sn:
+            score += 30
+        # 2026-08-28: 合本「ストレージボックスセット」は、同じ番号に **同名の別カード**
+        #   が居ることがある (#001 ウタ = ST16-001_p1/_p2 と ST11-001「Side ウタ」)。
+        #   ウタ等の1語ルールでも edition_hit が立つので、合本側を +30 で分ける。
+        #   これが無いと suffix 無し base の +10 が勝って **別カードを返す**。
+        if "STORAGE BOX" in hay and "ストレージボックス" in sn:
             score += 30
         # 8) cross-set 誤選択防止: brand が MEMORIAL/EB を明示しないのに EB(Memorial由来)
         #    promo が原典set(ST/OP)の promo と同点になる誤マッチ (Chopper EB01-006_P_treasure)

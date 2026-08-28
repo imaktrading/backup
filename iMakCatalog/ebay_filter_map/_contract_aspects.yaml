@@ -7,6 +7,13 @@
 # 変えるときは この表の1行を、証拠 (実取得の出力) と日付を付けて変える。
 # 生成: tools/build_aspect_contract.py
 
+# ★この表は **TCG (eBay category 183454 = CCG Individual Cards) の表**。
+#   40項目すべて 183454 の aspect で、時計 (G-shock, cat 31387) の aspect は1つも無い。
+#   2026-08-28: 宣言が無かったため TCG の表が G-shock CSV にも当たり、
+#   `Customized` / `Vintage` (31387 では正規の Yes/No) が全行 ERROR になった
+#   (依頼 requests/2026-08-28_hq_contract_scope.md)。読む側は必ずここで絞ること。
+ebay_category: "183454"
+
 aspects:
   - ebay_aspect: "Game"
     source: specs.game_ebay
@@ -14,7 +21,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 168
-    filled: 89139/89139
+    filled: 89141/89141
     reason: "category ごとに1値の定数。監査 §11 で見張る"
     decided: "2026-08-25"
   - ebay_aspect: "Card Name"
@@ -23,7 +30,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 49333
-    filled: 88491/89139
+    filled: 88493/89141
     decided: "2026-08-22 綴りを eBay に合わせた"
   - ebay_aspect: "Character"
     source: specs.character_name
@@ -31,7 +38,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 2052
-    filled: 86404/89139
+    filled: 86406/89141
     decided: "2026-05-30 日本語混入禁止"
   - ebay_aspect: "Card Type"
     source: specs.card_type_ebay
@@ -39,7 +46,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 74
-    filled: 77405/89139
+    filled: 77407/89141
     reason: "公式の種別見出し (<h2>グッズ</h2>) から取る。語彙7つが eBay の Pokémon TCG 11値と1対1。監査 §10 で見張る"
     decided: "2026-08-25 名前からの推定を廃止 (5,561行)"
   - ebay_aspect: "Age Level"
@@ -56,7 +63,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 12
-    filled: 2324/89139
+    filled: 2324/89141
     reason: "ポケモンだけ (EX/V/GX/VMAX/BREAK)。他ゲームに相当する概念が無い"
     decided: "2026-08-25 閉じた"
   - ebay_aspect: "Set"
@@ -65,7 +72,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 2290
-    filled: 74971/89139
+    filled: 74973/89141
     decided: "2026-08-21 HQ 裁定 (コード形)"
   - ebay_aspect: "Rarity"
     source: specs.rarity_ebay
@@ -73,7 +80,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 57
-    filled: 67553/89139
+    filled: 67555/89141
     reason: "空欄8,515行は公式にレアリティ表示が無い=天井"
     decided: "2026-08-22 実取得で確認"
   - ebay_aspect: "Features"
@@ -82,7 +89,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 39
-    filled: 13399/89139
+    filled: 13399/89141
     reason: "Holo/Reverse Holo は Features に無い (Finish の値)。値は必ずリストで持つ。使用4値は eBay の39値内 (リスト外0行)"
     decided: "2026-08-25 カタログ側は完了。HQ の区切り文字 (, -> |) 確認待ち"
   - ebay_aspect: "Manufacturer"
@@ -91,7 +98,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 711
-    filled: 89139/89139
+    filled: 89141/89141
     reason: "category ごとに1値の定数。監査 §11 で見張る"
     decided: "2026-08-25"
   - ebay_aspect: "Finish"
@@ -108,7 +115,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 27
-    filled: 64167/89139
+    filled: 64169/89141
     reason: "ポケモンのタイプはここ (取得中)"
     decided: "2026-08-22"
   - ebay_aspect: "Creature/Monster Type"
@@ -117,7 +124,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 307
-    filled: 31937/89139
+    filled: 31937/89141
     reason: "遊戯王のみ 31,937行。当社は遊戯王を1枚も出していないので実質使わない。ポケモンのタイプはここではない"
     decided: "2026-08-25 閉じた"
   - ebay_aspect: "Autographed"
@@ -134,7 +141,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    filled: 38354/89139
+    filled: 38356/89141
     reason: "券面の番号。書式はゲームで違う (ポケモン 001/083 / ワンピ EB02-003) ので数字部分で突合。空欄はすべて cardID-* で公式に番号が刷られていない"
     decided: "2026-08-25 §12 で見張る (食い違い0)"
   - ebay_aspect: "Language"
@@ -143,7 +150,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 38
-    filled: 89139/89139
+    filled: 89141/89141
     reason: "現物が何語で刷られているか。日本語版4カテゴリは Japanese の定数。遊戯王は English。監査 §11 で見張る"
     decided: "2026-08-25 空欄2,859行を穴埋め"
   - ebay_aspect: "Year Manufactured"
@@ -160,7 +167,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 9
-    filled: 16152/89139
+    filled: 16152/89141
     reason: "公式の欄 (span.type) から取る。eBay の9値のうちポケモン向けは Basic/Stage 1/Stage 2/Mega の4つで全部使用済。V進化/レベルアップ/BREAK進化/復元/伝説/V-UNION は**対応する値が無い**ので空欄が正 (Champion/Rookie 等はデジモンの段階)"
     decided: "2026-08-25 §9/§13 で見張る"
   - ebay_aspect: "Card Size"
@@ -169,7 +176,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 3
-    filled: 89139/89139
+    filled: 89141/89141
     reason: "Standard の1値のみ。特大カードの区別はしない (元データに大きさの項目が無い)。監査 §11 で見張る"
     decided: "2026-08-25 空欄2,859行を穴埋め"
   - ebay_aspect: "Country of Origin"
@@ -178,7 +185,7 @@ aspects:
     owner: catalog
     mode: SELECTION_ONLY
     ebay_values: 244
-    filled: 39041/89139
+    filled: 39043/89141
     decided: "2026-08-22 HQ Q4 で確定 (language=Japanese の行に Japan)"
   - ebay_aspect: "Vintage"
     source: null
@@ -242,7 +249,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 492
-    filled: 21140/89139
+    filled: 21140/89141
     reason: "取れるカテゴリだけ。ポケモン 21,140/22,111 / ワンピは元データに項目が無く 0"
     decided: "2026-08-25 閉じた"
   - ebay_aspect: "HP"
@@ -251,7 +258,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    filled: 16579/89139
+    filled: 16579/89141
     reason: "ポケモンだけ。Trainer/Energy は持たない (化石の効果文 HP60 を拾っていた 43行を是正)。監査 §13 で見張る"
     decided: "2026-08-25"
   - ebay_aspect: "Attack/Power"
@@ -260,7 +267,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    filled: 21767/89139
+    filled: 21768/89141
     reason: "種別が持たない組み合わせは §13 で見張る。「一部だけ持つ」は正常なこともある (ガンダムの Pilot 等)"
     decided: "2026-08-25"
   - ebay_aspect: "Defense/Toughness"
@@ -269,7 +276,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    filled: 1612/89139
+    filled: 1612/89141
     reason: "ガンダムのみ。監査 §13 で見張る"
     decided: "2026-08-25"
   - ebay_aspect: "California Prop 65 Warning"
@@ -286,7 +293,7 @@ aspects:
     owner: catalog
     mode: FREE_TEXT
     ebay_values: 0
-    filled: 12749/89139
+    filled: 12751/89141
     decided: "2026-08-22 HQ Q3 で確定 (出す)"
   - ebay_aspect: "Autograph Authentication Number"
     source: null

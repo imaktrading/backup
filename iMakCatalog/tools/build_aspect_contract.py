@@ -124,6 +124,13 @@ def main():
         "# 変えるときは この表の1行を、証拠 (実取得の出力) と日付を付けて変える。",
         "# 生成: tools/build_aspect_contract.py",
         "",
+        "# ★この表は **TCG (eBay category 183454 = CCG Individual Cards) の表**。",
+        "#   40項目すべて 183454 の aspect で、時計 (G-shock, cat 31387) の aspect は1つも無い。",
+        "#   2026-08-28: 宣言が無かったため TCG の表が G-shock CSV にも当たり、",
+        "#   `Customized` / `Vintage` (31387 では正規の Yes/No) が全行 ERROR になった",
+        "#   (依頼 requests/2026-08-28_hq_contract_scope.md)。読む側は必ずここで絞ること。",
+        'ebay_category: "183454"',
+        "",
         "aspects:",
     ]
     # ★2026-08-23: eBay の 35項目に無いが **CSV には実際に出している** 列も表に載せる
