@@ -18,6 +18,7 @@ import os
 import sys
 import csv
 import json
+import re as _re_mod
 import os
 import sqlite3
 import sys
@@ -287,6 +288,38 @@ def _esc_attr(v) -> str:
     """HTML に出す前の最低限のエスケープ (セット名に `"` や `&` が入る)。純関数。"""
     return (str(v or "").replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+# どのセットにも出てくる語。これで一致と言うと、別セットまで「合っている」ことになる。
+_SETNAME_GENERIC = {
+    "ONE", "PIECE", "POKEMON", "DRAGON", "BALL", "SUPER", "FUSION", "WORLD",
+    "JAPANESE", "ENGLISH", "TCG", "CARD", "CARDS", "GAME", "THE", "OF", "AND",
+    "BOOSTER", "PACK", "SET", "DECK", "EDITION", "COLLECTION", "PRODUCT", "OTHER",
+    "PROMO", "PROMOS", "PROMOTION", "SERIES", "VOL",
+}
+
+
+def _setname_tokens(text) -> set:
+    """セット名/PSA ラベルから 突き合わせに使う語だけ取り出す (純関数・英数のみ)。"""
+    toks = _re_mod.findall(r"[A-Za-z0-9]+", str(text or "").upper())
+    return {t for t in toks if len(t) >= 2 and t not in _SETNAME_GENERIC}
+
+
+def set_matches_psa_label(psa_brand, set_label):
+    """候補のセット名が PSA ラベルと合うか。True/False/None (判定不能) を返す純関数。
+
+    ★2026-08-27 カタログ依頼: cert151301749 は PSA ラベルが `3RD ANNIVERSARY SET` なのに
+      候補が `OP12-079` (BOOSTER PACK -LEGACY OF THE MASTER-) の1件だけで、**文字は
+      食い違っているのに画面上は同じ重み**で並んでいた。絵が似ているので選んでしまう。
+      ⚠ を出すだけ。**候補からは消さない** (消すとカタログの登録漏れ時に何も出なくなる)。
+    判定できない時 (セット名が日本語だけ / `Promotion Card` のような一般語だけ) は
+    None を返して印を出さない。狼少年にしない方を優先する。
+    """
+    b = _setname_tokens(psa_brand)
+    s = _setname_tokens(set_label)
+    if not b or not s:
+        return None
+    return bool(b & s)
 
 
 def _get_candidates(category: str, set_code: str | None, card_number: str | None,
@@ -902,6 +935,9 @@ def _generate_html(targets: list[dict]) -> None:
         "expected": t.get("csv_expected", ""),
         "category": t["category"],
     } for t in targets], ensure_ascii=False)
+    # 前に答えた cert は「前回の答え」を既定選択にする (2026-08-27 重複くん依頼)
+    prior_json = json.dumps({t["cert"]: t["prior_choice"] for t in targets
+                             if t.get("prior_choice")}, ensure_ascii=False)
     run_key = run_storage_key(targets)
 
     html = [
@@ -951,6 +987,12 @@ def _generate_html(targets: list[dict]) -> None:
         '.cand .num{font-size:16px;color:#ffd700;font-weight:bold}',
         '.cand .pid{font-size:11px;color:#aaa;word-break:break-all;margin-top:4px}',
         '.cand.expected-pid{border-color:#9fffa0;background:#2c3c2c}',
+        # ★2026-08-27: PSA ラベルと文字が食い違う候補は目立たせる (消しはしない)
+        '.cand.label-miss{border-color:#e57373}',
+        '.setmiss{font-size:12px;color:#ff8a80;font-weight:bold;margin-top:3px}',
+        # 既決 (前に答えた) cert は下に置き、そうと分かる帯を出す
+        '.prior-note{background:#3a3320;border:1px solid #b8952e;color:#ffe08a;'
+        'padding:6px 10px;border-radius:5px;font-size:13px;margin:6px 0}',
         ZOOM_CSS,
         'h1{color:#ffd700}',
         '.toolbar{position:sticky;top:0;background:#1a1a1a;padding:10px;border-bottom:1px solid #444;z-index:100;display:flex;gap:14px;align-items:center}',
@@ -960,6 +1002,7 @@ def _generate_html(targets: list[dict]) -> None:
         '</style>',
         '<script>',
         f'var TARGETS = {targets_json};',
+        f'var PRIOR = {prior_json};',
         'var ANSWERS = {};',
         # ★2026-08-19: 回答の保存先を **その走行だけの箱** にする。
         #   旧実装は "psa_review_answers" 固定キーで、走行をまたいで消えなかった。
@@ -1076,6 +1119,13 @@ def _generate_html(targets: list[dict]) -> None:
         '      if (b) { b.classList.add("active"); document.getElementById("target_" + cert).className = "target answered-" + a.choice.toLowerCase(); }',
         '    }',
         '  }',
+        # 前回の答えを既定選択にする (書きかけの回答が在る cert には触らない)。
+        '  for (var pc in PRIOR) {',
+        '    if (ANSWERS[pc]) { continue; }',
+        '    var p = PRIOR[pc];',
+        '    if (p.choice === "CHOSEN") { selectCand(pc, p.product_id); }',
+        '    else { answer(pc, "OK"); }',
+        '  }',
         '  updateStatus();',
         '});',
         '',
@@ -1100,6 +1150,13 @@ def _generate_html(targets: list[dict]) -> None:
         html.append(f'<h2>cert {cert} — {t["category"]}</h2>')
         html.append(f'<div class=cert-info><b>Brand:</b> {t["brand"]}</div>')
         html.append(f'<div class=cert-info><b>Subject:</b> {t["subject"]}</div>')
+        # 既決の再確認: 前回の答えを見せて既定選択にする (毎回まっさらで聞き直さない)
+        _pc = t.get("prior_choice")
+        if _pc:
+            _at = f' ({_esc_attr(_pc.get("verified_at"))})' if _pc.get("verified_at") else ""
+            html.append(f'<div class=prior-note>🕘 前に決めた答え: '
+                        f'{_esc_attr(_pc.get("choice"))} / {_esc_attr(_pc.get("product_id"))}'
+                        f'{_at} — 既定で選んであります。違っていれば押し直してください</div>')
 
         # 「合ってる？」 確認部
         if t.get("csv_expected") and expected_img:
@@ -1171,7 +1228,12 @@ def _generate_html(targets: list[dict]) -> None:
             # 候補は (pid, 画像, セット名)。古い2要素も読めるようにしておく
             pid, img_path = cand[0], cand[1]
             set_label = cand[2] if len(cand) > 2 else ""
+            # ★2026-08-27 カタログ依頼: PSA ラベルとセット名が食い違う候補は目立たせる。
+            #   判定できない (日本語だけ / 一般語だけ) 時は印を出さない。消しはしない。
+            label_ok = set_matches_psa_label(t.get("brand", ""), set_label)
             css_class = "cand expected-pid" if pid == t.get("csv_expected") else "cand"
+            if label_ok is False:
+                css_class += " label-miss"
             safe_pid_id = _re.sub(r'[^a-zA-Z0-9]', '_', pid)
             html.append(f'<div id="cand_{cert}_{safe_pid_id}" class="{css_class}" onclick="selectCand(\'{cert}\', \'{pid}\')">')
             html.append(f'<div class=num>#{i}</div>')
@@ -1197,6 +1259,8 @@ def _generate_html(targets: list[dict]) -> None:
             if set_label:
                 html.append(f'<div class=setname title="{_esc_attr(set_label)}">'
                             f'{_esc_attr(set_label)}</div>')
+            if label_ok is False:
+                html.append('<div class=setmiss>⚠ ラベルと違う商品</div>')
             html.append('</div>')
         html.append('</div></div>')
         html.append('</div>')
@@ -2013,6 +2077,43 @@ def split_verified(certs, vc):
     return confirmed, viewer
 
 
+def prior_choices(certs, vc) -> dict:
+    """人が前に出した答え (OK/CHOSEN + product_id) を cert ごとに拾う (純関数)。
+
+    ★2026-08-27 重複くん依頼: 既決の cert が目視画面の上に並び、毎回また聞かれていた。
+      既定では出さない (split_verified) が、`PSA_REVIEW_ALL=1` の再確認では出す。
+      その時は **前回の答えを既定選択にして下に置く** = 聞き直しであることが分かる。
+    """
+    out = {}
+    for cert in certs or []:
+        cert = str(cert).strip()
+        rec = (vc or {}).get(cert) or {}
+        pid = (rec.get("product_id") or "").strip()
+        if cert and rec.get("choice") in ("OK", "CHOSEN") and pid:
+            out[cert] = {"choice": rec["choice"], "product_id": pid,
+                         "verified_at": (rec.get("verified_at") or "")[:10]}
+    return out
+
+
+def prior_answer_for(target, prior) -> dict | None:
+    """target に前回の答えを紐づける (純関数)。候補にも期待値にも無い pid は付けない。"""
+    rec = (prior or {}).get(str(target.get("cert") or "").strip())
+    if not rec:
+        return None
+    pid = rec.get("product_id") or ""
+    pids = [c[0] for c in (target.get("candidates") or [])]
+    if pid in pids:
+        return {"choice": "CHOSEN", "product_id": pid, "verified_at": rec.get("verified_at", "")}
+    if pid and pid == (target.get("csv_expected") or ""):
+        return {"choice": "OK", "product_id": pid, "verified_at": rec.get("verified_at", "")}
+    return None
+
+
+def sort_targets_prior_last(targets):
+    """初見を上・既決を下に並べ替える (安定ソート・純関数)。"""
+    return sorted(targets or [], key=lambda t: 1 if t.get("prior_choice") else 0)
+
+
 def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_sec=10800) -> dict:
     """【verify→build】CSV 生成の **前** に HTML 目視確認を回し、確定 product_id を返す。
 
@@ -2050,6 +2151,19 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
             _unavailable.append(cert)
             continue
         targets.append(t)
+
+    # ★2026-08-27 重複くん依頼: 再確認で出す既決 cert は **前回の答えを既定選択にして下に**。
+    #   人が一度出した答えを毎回まっさらで聞き直さない (回答書:
+    #   hq/requests/2026-08-27_build_review_dedup_verified_and_presort_response.md)。
+    _prior = prior_choices(_viewer_certs, _vc)
+    for t in targets:
+        pa = prior_answer_for(t, _prior)
+        if pa:
+            t["prior_choice"] = pa
+    targets = sort_targets_prior_last(targets)
+    _n_prior = sum(1 for t in targets if t.get("prior_choice"))
+    if _n_prior:
+        append_log_func(f"  🕘 再確認 (前回の答えを既定選択にして下に置く): {_n_prior}件\n")
 
     def _log_skips(_results=None, _fixes=()):
         """出品に進まなかった cert を **理由付きで** 走行ログに残す。
