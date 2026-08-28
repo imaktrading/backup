@@ -138,6 +138,67 @@ def listed_today_amount(csv_dir=CSV_DIR, today=None):
     return total
 
 
+def age_days_of(start_iso, now=None):
+    """出品日 ISO → 経過日数 (純関数, test 可)。読めなければ 0。"""
+    import datetime as _dt
+    if not start_iso:
+        return 0
+    try:
+        t = _dt.datetime.strptime(start_iso[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return 0
+    return max(0, ((now or _dt.datetime.utcnow()) - t).days)
+
+
+def rows_from_live(live, done, title_key, now=None):
+    """live 出品一覧 → ①(数量0)の行 (純関数, test 可)。**レポートも funnel も要らない**。
+
+    ★2026-08-28 ユーザー指摘「手動で毎回最新をDLする方が非効率でしょ」。
+      ①(数量0) は毎回取り直している live 一覧から直接わかるので、Seller Hub の
+      レポート/ファネルを待つ必要がない。レポートが要るのは ②(表示回数の少ない順) の
+      並び順だけで、そこは日々変わらない。
+      実害 (2026-08-28): 5日前のレポートで、在庫が戻った出品を候補に挙げていた。
+
+    棚額はミラー込み (US 価格だけ見ると効き目を読み違える)。ミラーは通貨が違うので
+    USD 換算値 (`usd`) を足す。
+    """
+    import collections as _c
+    mir = _c.defaultdict(float)
+    for v in live.values():
+        if (v.get("cur") or "") != "USD":
+            mir[title_key(v.get("title") or "")] += float(v.get("usd") or 0)
+    out = []
+    for iid, v in live.items():
+        if (v.get("cur") or "") != "USD" or iid in done:
+            continue
+        if int(v.get("avail") or 0) > 0:
+            continue                      # まだ売れる = 棚を空ける対象ではない
+        out.append({"item_id": iid, "title": v.get("title") or "",
+                    "price": float(v.get("usd") or 0), "qty": 0,
+                    "sold_qty": 0, "sales90": 0, "impr_total": 0,
+                    "age_days": age_days_of(v.get("start"), now),
+                    "_mirror": mir.get(title_key(v.get("title") or ""), 0.0)})
+    return out
+
+
+def _load_live():
+    """live 一覧から ①の行 + 棚額 (I/O)。取れなければ ([], None)。"""
+    import itemid_writeback_audit as A
+    try:
+        live = A._fetch_live(use_cache=True)
+    except Exception as e:                                         # noqa: BLE001
+        print(f"  ⚠ live 一覧を取れず、ファネルだけで判定します: {type(e).__name__}")
+        return [], None
+    rows = rows_from_live(live, CE.load_done(), LF._title_key)
+
+    def shelf_of(row):
+        return _f(row.get("price")) + _f(row.get("_mirror"))
+
+    print(f"  live 一覧から ①(数量0) {len(rows)}件 "
+          f"(レポート不要・常に最新)")
+    return rows, shelf_of
+
+
 def _load():
     """(funnel の US 行, itemID→ミラー込み棚額, 行→カテゴリ) を返す。"""
     done = CE.load_done()
@@ -190,10 +251,27 @@ def main():
     except Exception:                                          # noqa: BLE001
         pass
 
-    rows, shelf_of, cat_of = _load()
     listed = listed_today_amount()
     target = a.amount if a.amount is not None else listed * a.ratio
     print(f"今日の出品額 ${listed:,.0f} × {a.ratio} = **落とす目標 ${target:,.0f}**")
+
+    # ★まず live 一覧で ①(数量0) を埋める。ここはレポートもファネルも要らず常に最新。
+    #   足りない時だけ ②(表示回数の少ない順) のためにファネルを読む (古ければそう出す)。
+    rows, shelf_of = _load_live()
+    cat_of = None
+    if rows and shelf_of and sum(shelf_of(r) for r in rows) >= target:
+        print("  → ①だけで目標に届くので、レポート/ファネルは読みません")
+    else:
+        if rows:
+            print("  → ①だけでは足りないので、②のためにファネルも読みます")
+        frows, fshelf, cat_of = _load()
+        seen = {r["item_id"] for r in rows}
+        rows = rows + [r for r in frows if r.get("item_id") not in seen]
+        _live_shelf = shelf_of
+
+        def shelf_of(row, _l=_live_shelf, _f2=fshelf):            # noqa: F811
+            return _l(row) if "_mirror" in row else _f2(row)
+
     print(f"対象: 仕入元が死んでいるもの(全カテゴリ) → {'/'.join(STALE_CATEGORIES)} の"
           f"出品{MIN_AGE_DAYS}日超・未販売を アクセスの少ない順")
     if target <= 0:

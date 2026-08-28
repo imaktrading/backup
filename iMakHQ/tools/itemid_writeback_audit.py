@@ -226,11 +226,20 @@ def _fetch_live(use_cache: bool = True):
             qs = re.search(r'<QuantitySold>(\d+)</QuantitySold>', it)
             sku = re.search(r'<SKU>(.*?)</SKU>', it, re.S)
             cur = re.search(r'<CurrentPrice currencyID="(\w+)">([\d.]+)</CurrentPrice>', it)
+            # ★2026-08-28: 棚割 (shelf_evict) が「レポートを落とさずに」棚額を出せるように
+            #   価格も持たせる。ミラーは通貨が違うので USD 換算の方を優先する。
+            conv = re.search(r'<ConvertedCurrentPrice currencyID="\w+">([\d.]+)'
+                             r'</ConvertedCurrentPrice>', it)
+            start = re.search(r'<TimeLeft>|<StartTime>(.*?)</StartTime>', it)
             ttl = re.search(r'<Title>(.*?)</Title>', it, re.S)
             if m:
                 live[m.group(1)] = {
                     "avail": (int(q.group(1)) if q else 0) - (int(qs.group(1)) if qs else 0),
                     "sku": (sku.group(1) if sku else ""), "cur": (cur.group(1) if cur else ""),
+                    "price": float(cur.group(2)) if cur else 0.0,
+                    "usd": float(conv.group(1)) if conv else (
+                        float(cur.group(2)) if cur and cur.group(1) == "USD" else 0.0),
+                    "start": (start.group(1) or "") if start else "",
                     "title": (ttl.group(1) if ttl else "")}
         if len(items) < 200:
             break
