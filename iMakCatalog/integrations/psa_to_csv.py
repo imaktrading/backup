@@ -2233,6 +2233,38 @@ def lookup_yugioh(
 # ============================================================================
 # DON Card lookup (= ONE PIECE TCG special、 公式 card_number 不在)
 # ============================================================================
+def _don_norm(t: str) -> str:
+    """DON 照合用の正規化: 大文字化 + アポストロフィ/ダッシュ等を空白にして詰める.
+
+    2026-08-28。PSA は `-ONE PIECE DAY'24-`、catalog の hint は `ONE PIECE DAY 24` と
+    書き方が違うだけで同じものを指す。記号の違いで当たらないのを直す。
+    """
+    t = (t or "").upper()
+    t = re.sub(r"[’‘'`\-–—_/,.]", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+# brand (英) ↔ catalog の商品名 (日) の言い換え。**tie の時だけ**使う (誤マッチ防止)。
+#   例 cert156843873: subject が 'DON!! CARD' だけなので、DAY'24 の3枚
+#   (SPECIAL LIVE Day1 / Day2 / プレミアムドンコレクション) が同点になる。
+#   brand の 'PREMIUM ... COLLECTION' で プレミアム…コレクション 側を選ぶ。
+_DON_BRAND_OFFICIAL_PAIRS = [
+    ("PREMIUM", "プレミアム"),
+    ("COLLECTION", "コレクション"),
+    ("SPECIAL LIVE", "SPECIAL LIVE"),
+    ("STORAGE BOX", "ストレージボックス"),
+    ("ANNIVERSARY", "ANNIVERSARY"),
+]
+
+
+def _don_brand_bonus(brand: str, official: str) -> int:
+    """brand と商品名が同じことを言っている数 (tie の分離だけに使う)."""
+    b = (brand or "").upper()
+    o = official or ""
+    return sum(1 for en, jp in _DON_BRAND_OFFICIAL_PAIRS
+               if en in b and (jp in o or jp in o.upper()))
+
+
 def lookup_don(
     brand: str,
     subject: str,
@@ -2337,6 +2369,7 @@ def lookup_don(
                   f"({len(char_matches)} 件) → hint scoring へフォールスルー")
 
     # 3) 各候補を hint keyword で scoring
+    hay = _don_norm((brand or "") + " " + (subject or ""))
     best_score = 0
     best_records: list[dict] = []
     for r in rows:
@@ -2347,7 +2380,11 @@ def lookup_don(
         hints = specs.get("psa_subject_hint") or []
         if not hints:
             continue
-        score = sum(1 for h in hints if isinstance(h, str) and h.upper() in subj_upper)
+        # 2026-08-28: 照合先を **brand + subject** にした。PSA は DON の商品名を brand 側に
+        #   置き (subject は 'DON!! CARD' だけのことが多い)、subject だけ見ると score=0 で
+        #   全部 fail-closed になっていた (cert156843873)。記号違いは _don_norm で吸収。
+        score = sum(1 for h in hints
+                    if isinstance(h, str) and _don_norm(h) and _don_norm(h) in hay)
         if score > best_score:
             best_score = score
             best_records = [r]
@@ -2361,6 +2398,23 @@ def lookup_don(
             print(f"    🎯 iMakCatalog (DON) hit: {record['product_id']} "
                   f"(score={best_score}, brand={brand!r}, subject={subject!r})")
         return record
+
+    # 4.5) tie → brand が商品名を言い当てているもので分ける (2026-08-28)
+    #      **同点の中だけ**で使う。分けきれなければ従来どおり image → fail-closed。
+    if len(best_records) > 1:
+        bonus = [( _don_brand_bonus(brand, r["set_name_official"] or r["set_name"] or ""), r)
+                 for r in best_records]
+        top = max(b for b, _ in bonus)
+        if top > 0:
+            winners = [r for b, r in bonus if b == top]
+            if len(winners) == 1:
+                record = api._row_to_dict(winners[0])
+                if verbose:
+                    print(f"    🎯 iMakCatalog (DON) hit: {record['product_id']} "
+                          f"(同点 {len(best_records)} 件を brand の商品名で分離, "
+                          f"brand={brand!r})")
+                return record
+            best_records = winners
 
     # 5) tie + image_url 提供 → image hash disambiguate (2026-05-28 拡張)
     if image_url and len(best_records) > 1:
