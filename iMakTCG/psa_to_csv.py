@@ -3119,6 +3119,26 @@ def _psa_cloudflare_warmup():
     print("✅ Cloudflare warmup 完了、 psa_to_csv 続行\n")
 
 
+def keep_for_vision(res, meta=None):
+    """preflight が引けなくても **Vision なら決まる見込み**がある cert か (純関数)。
+
+    ★2026-08-28: 番号なし DON!! (`cert156843873` 等) が毎回「枠を選ぶ前に除外 [GAP]」で
+      落ちていた。PSA が番号もキャラ名も出さないので文字情報だけでは原理的に決まらない
+      (実測 `lookup_don(brand,'DON!! CARD')` → score=0 / 候補267件)。
+      だが PSA 写真があれば Vision が色とキャラを読めて、
+      `lookup_don(vision_character=...)` で解ける経路が既に在る (psa_to_csv:2276)。
+      今の順序では **Vision に届く前に**落ちていた。
+      写真が無ければ Vision も使えないので従来どおり落とす (fail-closed)。
+      依頼書: hq/requests/2026-08-28_act_code_proposals_tcg.md 提案3
+    """
+    r = res or {}
+    if r.get("status") != "GAP":
+        return False
+    if not is_unidentifiable_don_card(r.get("subject") or "", r.get("num") or ""):
+        return False
+    return has_psa_photo(meta)
+
+
 def gap_queue_target(res):
     """preflight が GAP と言った cert の **積み先** を決める (純関数)。
 
@@ -3277,6 +3297,7 @@ def main():
         import psa_preflight as _pf
         _con = _sq3.connect(_pf.CATALOG_DB)
         _drop, _kept, _unknown, _cls = {}, [], 0, {}
+        _vision_keep = []          # 文字では決まらないが写真なら決まる (番号なし DON!!)
         for _c in cert_numbers:
             _f = _pf.PSA_CERTS_DIR / f"{_c}.json"
             if not _f.exists():
@@ -3289,6 +3310,12 @@ def main():
             except Exception:
                 _kept.append(_c); _unknown += 1; continue      # 例外も残す
             if _st in ("GAP", "OUT-OF-SCOPE"):
+                # ★番号なし DON!! は文字では決まらないが写真なら決まる → Vision まで残す
+                #   (2026-08-28 提案3)。ここで落とすと Vision に一度も届かない。
+                if keep_for_vision(_r, _meta):
+                    _kept.append(_c)
+                    _vision_keep.append(_c)
+                    continue
                 _drop.setdefault(_st, []).append(_c)
                 # ★2026-08-26: **今日また落ちた**という観測をキューに積む。クローズ済でも
                 #   pending に戻す (閉じたのに直っていない、を見えるようにする)。
@@ -3382,6 +3409,10 @@ def main():
             print(f"     (従来は10件に絞った後で落ちていた分。GAP は missing_models 経由で catalog へ)")
             cert_numbers = _kept
             cost_map = {c: cost_map[c] for c in cert_numbers if c in cost_map}
+        if _vision_keep:
+            print(f"  🔍 番号なし DON!! は **落とさず Vision に回す**: {len(_vision_keep)}件 "
+                  f"→ {_vision_keep[:6]}")
+            print("     (PSA が番号もキャラ名も出さないので文字では決まらない。写真から色/キャラを読む)")
         if _unknown:
             print(f"  ℹ️ preflight 判定不能 {_unknown}件は **落とさず**残置 (cache無/例外)")
     except Exception as _pfe:
