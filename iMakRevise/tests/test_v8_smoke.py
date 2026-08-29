@@ -28,9 +28,10 @@ from revise.price_revise import (
 
 REFERENCE_CASES = [
     # 2026-05-24 update: V8 FIX (C group split 0.5→1.0) で Tシャツ系 price 下落、shipping 上昇
-    # 2026-08-21: pricing_engine の出力が G-Shock/一部Tシャツ帯で +$1 変わった。原因は追わない
-    #   (ユーザー判断で誤差扱い、HQ 回答 2026-08-21_revise_v8_smoke_price_drift_response.md)。
-    #   参照値を実出力に合わせた: 358564731464 $397.98→$398.98 / 357008112686 $52.98→$53.98。
+    # ★2026-08-21: 一時「+$1 ドリフト」に見えたが、正体は FX 非決定 (exchange_rate が
+    #   pricing gsheet の生値で入り毎回ぶれる)。pricing_engine は変わっていない。
+    #   REFERENCE_FX_USD=159.245 に pin すれば下記の 2026-05-24 値に完全一致する (検証済)。
+    #   → 参照値は元のまま据置。値は書き換えない (書き換えると FX 追従になり再び腐る)。
     {
         "item_id": "357111565952", "title": "Pokemon T-shirt UNIQLO UT",
         "category": "Tシャツ", "cost_jpy": 2400,
@@ -44,14 +45,48 @@ REFERENCE_CASES = [
     {
         "item_id": "358564731464", "title": "Casio G-Shock GA-2100",
         "category": "G-shock", "cost_jpy": 32046,
-        "expected_price": 398.98, "expected_shipping": 75.01,  # 2026-08-21 +$1 誤差 (上記)
+        "expected_price": 397.98, "expected_shipping": 75.01,
     },
     {
         "item_id": "357008112686", "title": "Pokemon T-shirt UNIQLO UT",
         "category": "Tシャツ", "cost_jpy": 1700,
-        "expected_price": 53.98, "expected_shipping": 27.84,  # 2026-08-21 +$1 誤差 (上記)
+        "expected_price": 52.98, "expected_shipping": 27.84,
     },
 ]
+
+
+# 基準 FX (固定)。yaml exchange_rate_usd と同じ「現在値に追随させない」参照レート。
+# ★2026-08-21: exchange_rate は pricing gsheet の生値で入るため、これを固定しないと
+#   同一入力でも FX tick ごとに新USD/送料USD が数ドルぶれ、完全一致テストが恒常的に
+#   赤くなる (「+$1 誤差」に見えていた正体はこれ)。参照値更新では直らない。FX を pin して決定化する。
+REFERENCE_FX_USD = 159.245
+
+
+@pytest.fixture(autouse=True)
+def _pin_fx():
+    """profit_params の実効 exchange_rate を REFERENCE_FX_USD に固定 (テスト決定化)。
+
+    他パラメータ (fvf / 送料 / 手数料 / カテゴリ) は実値のまま、FX だけ差し替える。
+    """
+    # 本元 iMakeBayAPI を path に確保 (fixture 順序で未追加でも動くように)。
+    _api = r"C:/dev/iMak/iMakeBayAPI"
+    if _api not in sys.path:
+        sys.path.insert(0, _api)
+    try:
+        import profit_params as pp
+    except ImportError:
+        pytest.skip("profit_params import 不可")
+
+    real = dict(pp._load())  # 実パラメータ取得 (categories / fees 等)
+    for k in ("exchange_rate", "exchange_rate_eur", "exchange_rate_gbp", "exchange_rate_aud"):
+        real.pop(k, None)
+    real["exchange_rate"] = REFERENCE_FX_USD
+    saved = pp._cache
+    pp._cache = real
+    try:
+        yield
+    finally:
+        pp._cache = saved
 
 
 @pytest.fixture(scope="module")
