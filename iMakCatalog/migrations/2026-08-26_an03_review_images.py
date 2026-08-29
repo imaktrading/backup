@@ -54,6 +54,10 @@ ROWS = [
     ("OP07-118_AN03", "155570650",
      "https://d1htnxwo4o0jhw.cloudfront.net/cert/206211964/large/f29FWqRctkyIO1vw6PU_WQ.jpg",
      "C:/dev/iMak_data/catalog/_psa_cert155570650_op07_118_an03.jpg"),
+    # 2026-08-29 追記
+    ("ST15-005_AN03", "152977069",
+     "https://d1htnxwo4o0jhw.cloudfront.net/cert/204192857/large/YYnjXBOb2kWdfg2eIl9Hrw.jpg",
+     "C:/dev/iMak_data/catalog/_psa_cert152977069_st15_005_an03.jpg"),
 ]
 
 
