@@ -243,3 +243,11 @@ return_profiles:
   iMakG-shock: "customer1"
   iMakMercari: "customer1"
   iMak_ichibankuji: "customer1"
+
+# 絵柄の自動判定 (psa_art_match) — 目視画面に出す前に「同じ絵柄か」を Claude に見せる。
+# ★2026-08-30 ユーザー確定「目視したらいいだけなら、無駄な課金はやめたい」→ 停止。
+#   判定済み 1,544組のキャッシュは enabled と無関係に使う (無料)。
+#   止めると候補が約25%多く画面に並ぶ (実測: 1,544組中 different 388組が表示前に消えていた)。
+#   悩んだ時は1件だけ手で回す: python iMakHQ/tools/psa_art_match.py --pair <現物URL> <候補URL>
+art_match:
+  enabled: false

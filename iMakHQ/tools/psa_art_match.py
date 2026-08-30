@@ -97,6 +97,29 @@ def build_prompt(ref_facts=None, cand_title=""):
     return "".join(lines)
 
 
+def art_match_enabled(cfg_path=None):
+    """絵柄の自動判定を **API を叩いてまで** やるか (I/O は yaml 読みのみ)。
+
+    ★2026-08-30 ユーザー確定「目視したらいいだけなら、無駄な課金はやめたい」。
+      既定 false。判定済みキャッシュ (1,544組) は enabled と無関係に使う = 無料。
+      戻す時は `iMakeBayAPI/config/global.yaml` の `art_match.enabled: true`。
+
+    経緯: この判定は 2026-08-02 のユーザー報告
+      「画像は酷似していてラベルが違えば、違うカードと目視で判別してしまう」
+      (= 使える仕入元を捨てる) で入った。止めると候補が約25%多く画面に並ぶ
+      (実測: 判定済み1,544組のうち different 388組 = 表示前に消えていた分)。
+    """
+    import os as _os
+    p = cfg_path or _os.path.join(_os.path.dirname(_os.path.dirname(
+        _os.path.dirname(_os.path.abspath(__file__)))), "iMakeBayAPI", "config", "global.yaml")
+    try:
+        import yaml
+        with open(p, encoding="utf-8") as f:
+            return bool(((yaml.safe_load(f) or {}).get("art_match") or {}).get("enabled", False))
+    except Exception:                                              # noqa: BLE001
+        return False
+
+
 def _load_key():
     try:
         with open(_KEY_FILE, encoding="utf-8") as f:
@@ -268,6 +291,16 @@ def compare_art(ref_url, cand_url, *, client=None, fetch=None, cache=None, api_k
             return prc._fetch_image(prc._resolve_image_url(u))
 
     if client is None:
+        # ★2026-08-30 ユーザー確定「目視したらいいだけなら、無駄な課金はやめたい」。
+        #   **新しい判定はしない** (課金しない)。既に判定済みの 1,544組はこの上の
+        #   キャッシュ枝で無料のまま使える。
+        #   戻すには global.yaml の art_match.enabled を true に。
+        #   ★止めていることを画面で分かるようにするため、reason に理由を入れて返す
+        #   (黙って消えると「切れているのに気づけない」= 8/2〜8/30 に実際そうなった)。
+        if not art_match_enabled():
+            r = dict(out_unsure)
+            r["reason"] = "絵柄の自動判定は停止中 (課金しない設定)。目で見て判断してください"
+            return r
         key = api_key or _load_key()
         if not key:
             return out_unsure
@@ -358,3 +391,39 @@ def annotate_candidates(ref_url, cands, *, client=None, fetch=None, cache=None, 
         else:
             keep.append(c)
     return keep, dropped
+
+
+def _cli():
+    """悩んだ時に **1組だけ** 判定する (2026-08-30 ユーザー「悩むときは個別に聞くわ」)。
+
+        python psa_art_match.py --pair <現物の画像URL> <候補の画像URL> [候補タイトル]
+
+    既定オフ (`global.yaml art_match.enabled: false`) を**この呼び方だけ無視する**。
+    普段は課金せず、必要な1件だけ人の求めに応じて判定するため。
+    """
+    import sys as _sys
+    a = _sys.argv[1:]
+    if "--pair" not in a:
+        print(__doc__.strip().splitlines()[0])
+        print("使い方: python psa_art_match.py --pair <現物URL> <候補URL> [候補タイトル]")
+        return 2
+    i = a.index("--pair")
+    rest = a[i + 1:]
+    if len(rest) < 2:
+        print("URL を2つ渡してください (現物 / 候補)")
+        return 2
+    ref, cand = rest[0], rest[1]
+    title = rest[2] if len(rest) > 2 else ""
+    key = _load_key()
+    if not key:
+        print("API key.txt が読めません")
+        return 2
+    r = compare_art(ref, cand, cand_title=title, api_key=key)
+    print(f"判定: {r.get('verdict')}  一致度: {r.get('pct', '—')}")
+    print(f"理由: {r.get('reason')}")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys as _s
+    _s.exit(_cli())
