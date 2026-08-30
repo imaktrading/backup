@@ -657,12 +657,33 @@ def order_backup_clear_candidates(candidates: list, seen: dict) -> tuple:
     return ordered, new_count, updated
 
 
+#: 本番の台帳 (import 時に確定)。test が差し替えた path と区別するために使う。
+_PROD_LEDGER_PATHS = frozenset({PENDING_REVISE_FILE, PENDING_REVIVE_FILE, ACTION_REQUIRED_FILE})
+
+
+def _ledger_path(path: Path) -> Path:
+    """pytest 実行中は本番の台帳に書かない (test の偽 entry が実運用のキューに混ざる).
+
+    ★ 2026-08-30: test が本番の pending_revise.jsonl に item_id="a"/"b"/"new1" 等を
+      書き込んでいた。実在しない itemID なので eBay 照会が必ず失敗し、取下げツールが
+      毎回「未完了あり」と言い続ける = **警告が嘘をつく**状態になった。
+      test が path を差し替えている場合はそのまま使う (tmp への書込は正しい)。
+    """
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return path
+    # 差し替えられた path (tmp 等) はそのまま。import 時に確定した本番の台帳だけを逃がす
+    if path not in _PROD_LEDGER_PATHS:
+        return path
+    return path.with_name(path.stem + "_TESTRUN" + path.suffix)
+
+
 def read_pending_item_ids() -> set:
     """取下げ待ちキューに今ある item_id (重複積み防止用)."""
-    if not PENDING_REVISE_FILE.exists():
+    pending = _ledger_path(PENDING_REVISE_FILE)
+    if not pending.exists():
         return set()
     out = set()
-    for line in PENDING_REVISE_FILE.read_text(encoding="utf-8").splitlines():
+    for line in pending.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -695,7 +716,7 @@ def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None
     # 並走 cycle が同じ台帳を書き直している最中に append すると、その行ごと消える
     # (= 取下げ待ちの silent 消失 = fail-OPEN)。書き直し側と同じ lock で直列化する。
     with ledger_lock():
-        with open(PENDING_REVISE_FILE, "a", encoding="utf-8") as f:
+        with open(_ledger_path(PENDING_REVISE_FILE), "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
@@ -745,7 +766,7 @@ def append_pending_revive(sheet_label: str, result: dict, dry_run: bool) -> None
         "dry_run":      dry_run,
     }
     with ledger_lock():   # 並走 cycle の書き直しと直列化 (append 消失の防止)
-        with open(PENDING_REVIVE_FILE, "a", encoding="utf-8") as f:
+        with open(_ledger_path(PENDING_REVIVE_FILE), "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
