@@ -657,6 +657,25 @@ def order_backup_clear_candidates(candidates: list, seen: dict) -> tuple:
     return ordered, new_count, updated
 
 
+def read_pending_item_ids() -> set:
+    """取下げ待ちキューに今ある item_id (重複積み防止用)."""
+    if not PENDING_REVISE_FILE.exists():
+        return set()
+    out = set()
+    for line in PENDING_REVISE_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        iid = str(e.get("item_id", "")).strip()
+        if iid:
+            out.add(iid)
+    return out
+
+
 def append_pending_revise(sheet_label: str, result: dict, dry_run: bool) -> None:
     """delta="newly_sold" の行を pending queue に append.
     dry_run でも記録する (queue 状態の追跡用、ただし Phase 3 側で dry_run flag を尊重)。

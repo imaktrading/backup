@@ -92,6 +92,78 @@ def _fetch_ebay_qty_map() -> dict:
     return qty_map
 
 
+#: 監査の検出結果を自動で取下げキューに積む上限。これを超えたら積まずに人へ回す。
+#: 大量に出る = 判定の系統異常の疑い (2026-06-03 の偽 OOS 95 件と同型) なので、
+#: 機械的に一括取下げしない (誤った一括取下げの方が損害が大きい)。
+ENQUEUE_CAP = 10
+
+
+def _enqueue_takedowns(unack_items: list, cap: int = ENQUEUE_CAP) -> dict:
+    """未承認の乖離 (D=○ なのに eBay で買える) を取下げキューに積む.
+
+    ★ 2026-08-30 追加。それまで監査は「見つけて報告」までで、**誰も直さなかった**。
+      実際 08-29 に 3 件を報告したまま翌日も同じ 3 件が残り、その間ずっと
+      「売切なのに買える」状態だった (無在庫なので売れたら履行不能)。
+      報告するだけの監査は、fail-OPEN を記録に残すだけで閉じない。
+
+    積むだけで送信はしない (送るのは巡回の取下げ処理 = 既存の経路と guard を通す)。
+    Returns: {"enqueued": [item_id...], "skipped_already_queued": [...], "held": bool}
+    """
+    from monitor_listings import (  # noqa: PLC0415
+        append_pending_revise, read_pending_item_ids,
+    )
+
+    out = {"enqueued": [], "skipped_already_queued": [], "held": False}
+    if not unack_items:
+        return out
+    if len(unack_items) > cap:
+        out["held"] = True          # 多すぎ = 系統異常の疑い。人が見るまで積まない
+        return out
+
+    already = read_pending_item_ids()
+    for it in unack_items:
+        iid = str(it.get("item_id", "")).strip()
+        if not iid:
+            continue
+        if iid in already:
+            out["skipped_already_queued"].append(iid)
+            continue
+        append_pending_revise(it.get("sheet", "SHEET"), {
+            "row_index": it.get("row_index"),
+            "url": it.get("url", ""),
+            "item_id": iid,
+            "title": it.get("title", ""),
+            "supplier": it.get("supplier", ""),
+            "raw_status": "reverse_audit_mismatch",   # 出所が分かる形で残す
+        }, dry_run=False)
+        out["enqueued"].append(iid)
+    return out
+
+
+def _read_sheet_rows_with_retry(sid, label: str, only_with_url: bool, attempts: int = 3):
+    """スプシ読込を数回試す → (spreadsheet, rows)。全部失敗したら最後の例外を投げる。
+
+    ★ 2026-08-30: 1 回失敗しただけで audit 全体を中断していた (08-20 / 08-30 に発生)。
+      監査は読むだけなので、瞬断で「乖離ゼロを証明できない日」を作る方が損。
+      Sheets 側の一時エラー (429 / 5xx) は数十秒で戻るので、間隔を空けて取り直す。
+      巡回と時間帯が重なると読み取りが混むため、待ち時間は長めに取る。
+    """
+    last = None
+    for i in range(attempts):
+        try:
+            sh = open_sheet_by_id(sid)
+            ws = get_listings_worksheet(sh)
+            return sh, read_listings_rows(ws, only_with_url=only_with_url)
+        except Exception as e:
+            last = e
+            wait = 15 * (i + 1)     # 15/30s
+            if i < attempts - 1:
+                print(f"  [!] [{label}] 読込失敗 ({type(e).__name__}: {str(e)[:80]}) "
+                      f"→ {wait}s 待って再試行 {i + 2}/{attempts}", flush=True)
+                time.sleep(wait)
+    raise last
+
+
 def run_reverse_audit(
     high_sheet_id: Optional[str] = None,
     low_sheet_id: Optional[str] = None,
@@ -144,9 +216,8 @@ def run_reverse_audit(
     all_rows = []
     for label, sid in [("HIGH", h_id), ("LOW", l_id)]:
         try:
-            sh = open_sheet_by_id(sid)
-            ws = get_listings_worksheet(sh)
-            rows = read_listings_rows(ws, only_with_url=False)
+            _sh, rows = _read_sheet_rows_with_retry(
+                sid, f"reverse_audit {label}", only_with_url=False)
             for r in rows:
                 all_rows.append({"sheet": label, **r})
             print(f"  [reverse_audit] {label}: {len(rows)} 行", flush=True)
@@ -156,7 +227,8 @@ def run_reverse_audit(
             return {
                 "ts": datetime.now().isoformat(timespec="seconds"),
                 "mismatch_count": -1,
-                "error": f"sheet_read_failed: {label} {type(e).__name__}",
+                "error": (f"sheet_read_failed: {label} {type(e).__name__}: "
+                          f"{str(e)[:200]}"),
                 "elapsed_sec": time.time() - t0,
                 "log_path": None,
             }
@@ -327,9 +399,8 @@ def run_ebay_down_sheet_active_audit(
     all_rows = []
     for label, sid in [("HIGH", h_id), ("LOW", l_id)]:
         try:
-            sh = open_sheet_by_id(sid)
-            ws = get_listings_worksheet(sh)
-            rows = read_listings_rows(ws, only_with_url=False)
+            sh, rows = _read_sheet_rows_with_retry(
+                sid, f"ebay_down_audit {label}", only_with_url=False)
             sheets[label] = sh
             for r in rows:
                 all_rows.append({"sheet": label, **r})
@@ -339,7 +410,8 @@ def run_ebay_down_sheet_active_audit(
             return {
                 "ts": datetime.now().isoformat(timespec="seconds"),
                 "orphan_count": -1,
-                "error": f"sheet_read_failed: {label} {type(e).__name__}",
+                "error": (f"sheet_read_failed: {label} {type(e).__name__}: "
+                          f"{str(e)[:200]}"),
                 "elapsed_sec": time.time() - t0,
                 "log_path": None,
             }
@@ -575,15 +647,35 @@ def _run_daily_audit() -> dict:
     #   mc == -1 = audit 不能 (eBay 取得失敗 / sheet 読込失敗) = 検出網が動かなかった → critical
     #   ebay_down orphan は review シートに書出済 = 自動で害なし → heartbeat のみ (alert しない)
     #   承認済みのみ (unack=0) → critical alert は出さない (= 既知ノイズで本物を埋もれさせない)
+    # ★ 2026-08-30: 見つけたら **取下げキューに積む** (報告だけで放置しない)。
+    #   08-29 に 3 件検出 → 誰も触らず、08-30 も同じ 3 件が「売切なのに買える」まま残った。
+    #   送信自体は巡回の取下げ処理に任せる (既存の guard を素通りさせない)。
+    enq = {"enqueued": [], "skipped_already_queued": [], "held": False}
+    if unack_count > 0:
+        try:
+            enq = _enqueue_takedowns(unack_items)
+        except Exception as e:
+            print(f"  [!] 取下げキューへの積込み失敗: {type(e).__name__}: {e}", flush=True)
+
     if unack_count > 0 or mc == -1:
         if unack_count > 0:
             from collections import Counter  # noqa: PLC0415
             by_sheet = dict(Counter(it["sheet"] for it in unack_items))
             by_supplier = dict(Counter(it.get("supplier", "?") for it in unack_items))
+            if enq["held"]:
+                next_step = (f"★{unack_count} 件は多すぎるので自動では積みませんでした "
+                             f"(判定の系統異常の疑い)。中身を確認してください。\n")
+            elif enq["enqueued"]:
+                next_step = (f"取下げキューに {len(enq['enqueued'])} 件積みました "
+                             f"(次の巡回で取下げます)。急ぐなら "
+                             f"`python -m tools.drain_pending_takedowns --execute`\n")
+            else:
+                next_step = "既に取下げキューに入っています (次の巡回で取下げます)。\n"
             subj = f"[iMakInventory] ⚠️ reverse_audit 乖離 {unack_count} 件 (取下げ漏れ疑い)"
             body = (f"reverse_audit が D=○ × eBay qty>0 の未承認乖離を {unack_count} 件検出。\n"
                     f"sheet 別: {by_sheet}\nsupplier 別: {by_supplier}\n"
                     f"= 売切マーク済なのに eBay で買える状態 = 無在庫履行不能 → 要対応。\n"
+                    + next_step
                     + (f"(別途 承認済み既知偽陽性 {len(ack_items)} 件 {ack_ids} は抑制)\n" if ack_items else "")
                     + f"log: {rev.get('log_path')}\n")
         else:
@@ -605,7 +697,8 @@ def _run_daily_audit() -> dict:
         print(f"  ✓ reverse_audit 乖離 0 件 (= 継続証跡を 1 件積上げ)", flush=True)
 
     return {"ts": ts, "status": status, "reverse": rev, "ebay_down": edn,
-            "unack_count": unack_count, "ack_count": len(ack_items), "ack_ids": ack_ids}
+            "unack_count": unack_count, "ack_count": len(ack_items), "ack_ids": ack_ids,
+            "enqueued": enq}
 
 
 if __name__ == "__main__":
