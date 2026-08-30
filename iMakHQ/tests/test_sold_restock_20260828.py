@@ -106,3 +106,35 @@ class TestCostSource:
 
     def test_番号が無ければ空(self):
         assert R.card_no_of({"Item Title": "CASIO G-Shock GA-010GGB-1A9"}) == ""
+
+
+class TestNoDoubleListingOfSameCard:
+    """同じカードが既に live なら補充しない (2026-08-30)。
+
+    補充は「その行の B列が空か」だけで判断していたため、**別の行に同じカードの
+    生きた出品があっても もう1本出していた** (Giratina が2本 live になった)。
+    出品くん本体は同じカードの二重出品を3段で止めているが、補充は eBay を
+    直接叩くのでそのどれも通らない。ここで同じ判定をする。
+    """
+
+    KEY, ITEM = 34, 1
+
+    def _row(self, item_id, key):
+        r = [""] * 40
+        r[self.ITEM] = item_id
+        r[self.KEY] = key
+        return r
+
+    def test_live_な出品の_KEY_を集める(self):
+        sheets = [("スプシ1", [["h"], self._row("820045155453", "pokemon_tcg:SM10a-016")])]
+        got = R.live_keys(sheets, {"820045155453"}, key_col=self.KEY, item_col=self.ITEM)
+        assert got == {"pokemon_tcg:SM10a-016"}
+
+    def test_live_でない出品は数えない(self):
+        # B列に itemID が在っても eBay に無ければ live ではない (取下げ済など)
+        sheets = [("スプシ1", [["h"], self._row("820045155453", "pokemon_tcg:SM10a-016")])]
+        assert R.live_keys(sheets, set(), key_col=self.KEY, item_col=self.ITEM) == set()
+
+    def test_KEY_が空の行は数えない(self):
+        sheets = [("スプシ1", [["h"], self._row("820045155453", "")])]
+        assert R.live_keys(sheets, {"820045155453"}, key_col=self.KEY, item_col=self.ITEM) == set()

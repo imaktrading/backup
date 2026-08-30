@@ -152,6 +152,28 @@ def card_no_of(order):
     return m.group(1) if m else ""
 
 
+def live_keys(sheets, live_ids, key_col=S.PRODUCT_COL_KEY,
+              item_col=S.PRODUCT_COL_ITEMID):
+    """**同じカードが既に live** な KEY の集合 (純関数, test 可)。
+
+    ★2026-08-30: 補充は「その行の B列が空か」だけで未補充と判断していたため、
+      **別の行に同じカードの生きた出品があっても もう1本出してしまった**。
+      実害: Giratina (pokemon_tcg:SM10a-016) が 820057636763 と 820045155453 の2本 live。
+
+      出品くん本体は同じカードの二重出品を3段で止めている
+      (抽出時の「同KEYが出品済の2枚目を除外」/ 重複くん excluder / dup_guard)。
+      補充は eBay を直接叩くのでそのどれも通らない。**ここで同じ判定をする**。
+    """
+    out = set()
+    for _label, rows in sheets:
+        for r in rows[1:]:
+            b = (r[item_col] or "").strip() if len(r) > item_col else ""
+            k = (r[key_col] or "").strip() if len(r) > key_col else ""
+            if b and k and b in live_ids:
+                out.add(k)
+    return out
+
+
 def _cost_from_row(row):
     """台帳の行 → 仕入値¥ (既存の pick_cost をそのまま借りる)。"""
     try:
@@ -190,6 +212,16 @@ def main():
     except Exception:                                              # noqa: BLE001
         fresh = {}
     print(f"今の仕入値 (🃏 PSA再仕入れ照合 の最安¥): {len(fresh)}件")
+    # ★同じカードが既に live なら補充しない (本体と同じ判定)
+    try:
+        import json as _json
+        import itemid_writeback_audit as _A
+        _live = set(_json.loads(_A.CACHE.read_text(encoding="utf-8")))
+        already = live_keys(sheets, _live)
+    except Exception:                                              # noqa: BLE001
+        already = set()
+        print("  ⚠ live 一覧を読めず、同じカードの二重出品チェックを飛ばします")
+    print(f"  既に live なカード: {len(already)}種類")
     # ★eBay の口は **今日の出品で実績のある** fix_de_speedpak_shipping を使う
     #   (ichibankuji_restock._sell_token は別 worktree のトークン path を見ていて動かない)
     import ebay_upload_csv as U
@@ -210,6 +242,11 @@ def main():
         state, _aux = W.classify(row)
         if state == "補充済":
             done += 1
+            continue
+        _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
+        if _key and _key in already:
+            print(f"  ⏭ [{cat}] 同じカードが既に出品中 ({_key}) → 補充しない: {title}")
+            skipped += 1
             continue
 
         cost = cost_override.get(sku) or cost_override.get(

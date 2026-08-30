@@ -72,11 +72,20 @@ def test_normal_dedup_still_works():
 
 
 def test_no_change_on_past_output():
-    """過去に出したタイトル 614件に当てて、1件も変わらないこと (回帰なし)。"""
+    """過去に出したタイトルに当てて、1件も変わらないこと (回帰なし)。
+
+    ★2026-08-30: **本番と同じ引数で呼ぶ**。`remove_duplicate_words` はカード名を
+      受け取って、その語列を守る作り (`_protected_span`)。テストが card_name を
+      渡していなかったため、守られるはずの語が落ちて赤くなっていた。
+      実例: `... Monkey D Luffy #ST10-006 Monkey D. Luffy ...` (セット名がカード名と同じ)。
+      本番の走行では `word_dedup=0` = 変わっていない (2026-08-30 の入稿ログ)。
+      引数を渡さない呼び方を守っても本番の役に立たないので、CSV の `C:Card Name` を渡す。
+    """
     import csv
     import glob
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     n = changed = 0
+    bad = []
     for f in glob.glob(os.path.join(root, "iMakHQ", "csv_output", "tcg_upload_*.csv")):
         try:
             rows = list(csv.reader(open(f, newline="", encoding="utf-8")))
@@ -85,15 +94,18 @@ def test_no_change_on_past_output():
         if len(rows) < 2 or "*Title" not in rows[0]:
             continue
         ti = rows[0].index("*Title")
+        ci = rows[0].index("C:Card Name") if "C:Card Name" in rows[0] else None
         for r in rows[1:]:
             t = (r[ti] if ti < len(r) else "").strip()
             if not t:
                 continue
+            name = (r[ci] if ci is not None and ci < len(r) else "").strip()
             n += 1
-            if R(t)[1]:
+            if R(t, name)[1]:
                 changed += 1
+                bad.append(f"{os.path.basename(f)}: {t}")
     if n:                       # csv_output が空の環境では素通り
-        assert changed == 0, f"{n}件中 {changed}件が変わった"
+        assert changed == 0, f"{n}件中 {changed}件が変わった: " + " / ".join(bad[:3])
 
 
 # ── カード名そのものを壊さない (2026-08-24 夜 実害) ────────────────
