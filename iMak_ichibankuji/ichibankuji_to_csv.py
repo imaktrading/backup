@@ -714,8 +714,7 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
         "PaymentProfileName": "SALE",
         "Product:UPC": "Does not apply",
         # Item Specifics — TOPセラー(fb>900)構成準拠
-        # Franchise / Material / Vintage は 2026-08-22 契約で廃止 (列ごと落とす。TCG と同じ形)
-        # 出典: hq/requests/2026-08-28_act_code_proposals_gshock_response.md 提案2
+        "C:Franchise": franchise,
         "C:TV Show": claude_result.get('tv_show', franchise),
         "C:Movie": claude_result.get('tv_show', franchise),
         "C:Brand": "Bandai",
@@ -724,6 +723,7 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
         # 自由文字列として記載(フィルタ用でなく非児童製品の明示。2026-06-29 ユーザー指示)。
         "C:Age Level": "15+",
         "C:Language": "Japanese",
+        "C:Material": "Plastic",  # eBayフィルタ正規値（"PVC, ABS"はリスト無し）
         "C:Character": character,
         "C:Color": "Multicolor",
         "C:Theme": "Anime & Manga",
@@ -735,6 +735,7 @@ def build_row(series_data, prize_data, claude_result, price, base_desc):
         "C:Features": figure_type if figure_type and figure_type.upper() not in ('FIGURE','') else "",
         "C:Original/Licensed Reproduction": "Original",
         "C:Signed": "No",
+        "C:Vintage": "No",
         # Item Height: "X.X in (Y cm)" 併記. inch + cm 双方ある時のみ括弧付き、
         # 片方のみなら単独表示、両方無ければ空欄.
         "C:Item Height": (
