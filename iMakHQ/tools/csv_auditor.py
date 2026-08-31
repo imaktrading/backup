@@ -991,13 +991,20 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # 必須spec空で除外するか (apparel系は specが商品に合わず全滅するので False=報告のみ)
     spec_excl = (not is_generic) and CATEGORY_MAP.get(project, {}).get("spec_empty_excludes", True)
 
-    # --- カタログの決定表を読む (読めなければ照合しない = 従来の検査だけ動く) ---
-    _contract = load_contract()
+    # --- カタログの決定表を読む (表は TCG=183454 専用。他カテゴリには当てない・fail-closed) ---
+    # 2026-08-28: category で絞らず全カテゴリに当てていたため、G-shock/一番くじが
+    # 表 (183454 専用) で全行 ERROR になった (回答書: hq/requests/2026-08-28_
+    # act_code_proposals_gshock_response_question_response.md)。
+    _contract_category = (None if is_generic else
+                           (CATEGORY_MAP.get(project, {}) or {}).get("ebay_categories", [None])[0])
+    _contract = load_contract(ebay_category=_contract_category)
     if _contract:
-        print(f"  📖 カタログの決定表: {len(_contract)} 項目 (共有領域から読込)")
+        print(f"  📖 カタログの決定表: {len(_contract)} 項目 (cat {_contract_category})")
+    elif is_generic:
+        pass  # generic は元々対象外
     else:
-        print("  ⚠️ カタログの決定表が読めません → 契約照合はスキップ "
-              "(C:/dev/iMak_data/catalog/_contract_aspects.yaml)")
+        print(f"  ⚠️ カタログの決定表は cat {_contract_category} に無い、または読めません "
+              "→ 契約照合はスキップ (C:/dev/iMak_data/catalog/_contract_aspects.yaml)")
 
     # --- 値そのものを catalog と突き合わせる (canonical sidecar 経由・2026-08-26) ---
     _sidecar = {} if is_generic else load_canonical_sidecar(csv_path)

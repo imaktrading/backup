@@ -35,14 +35,24 @@ _COL_TO_ASPECT = {
 }
 
 
-def load_contract(path=None):
-    """表を読んで {項目名: row} を返す。読めなければ None (= 照合しない)。"""
+def load_contract(path=None, ebay_category=None):
+    """表を読んで {項目名: row} を返す。読めなければ None (= 照合しない)。
+
+    ebay_category を渡すと、表の適用範囲 (yaml トップレベルの `ebay_category`)
+    と一致しない時も None を返す (= その category には当てない。fail-closed)。
+    2026-08-28: この絞りが無く、TCG (183454) 専用の表が G-shock/一番くじにも
+    当たって全行 ERROR になった (回答書: hq/requests/2026-08-28_..._response_question_response.md)。
+    """
     p = Path(path) if path else CONTRACT_PATH
     try:
         import yaml
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     except Exception:
         return None
+    if ebay_category is not None:
+        table_category = str(data.get("ebay_category") or "").strip()
+        if not table_category or table_category != str(ebay_category).strip():
+            return None
     rows = data.get("aspects") or []
     out = {}
     for r in rows:

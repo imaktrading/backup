@@ -27,15 +27,14 @@ if _TCG not in sys.path:
 DROPPED = ["C:Franchise", "C:Autographed", "C:Vintage", "C:Material", "C:Customized"]
 GENERATORS = ["psa_to_csv.py", "psa_restock_csv.py"]
 
-# ★2026-08-28: 8/22 の契約変更を TCG にだけ入れて G-shock に入れず、6日後の初走行で
-#   G-shock が全行除外された。テストが TCG 固定パスだったので緑のままだった。
-#   出典: hq/requests/2026-08-28_act_code_proposals_gshock_response.md 提案1・2
-#   → (プロジェクトdir, ファイル名) の組にして 全 generator を見る。
-ALL_GENERATORS = (
-    [("iMakTCG", g) for g in GENERATORS]
-    + [("iMakG-shock", "gshock_to_csv.py"),
-       ("iMak_ichibankuji", "ichibankuji_to_csv.py")]
-)
+# ★2026-08-28→2026-09-01: 8/22 の契約変更を TCG にだけ入れて G-shock に入れず、6日後の
+#   初走行で G-shock が全行除外された…と思われたが、真因は表を TCG 以外にも当てていた側
+#   (csv_auditor.py) にあった。表は TCG (183454) 専用と 8/31 にカタログが宣言し、
+#   load_contract(ebay_category=...) で category を絞るようにしたため、DROPPED 列を
+#   G-shock/一番くじの generator から落とす必要はない (表がそもそも当たらない)。
+#   ALL_GENERATORS は TCG だけに戻す。
+#   出典: hq/requests/2026-08-28_act_code_proposals_gshock_response_question_response.md
+ALL_GENERATORS = [("iMakTCG", g) for g in GENERATORS]
 # headers/build_row(list) 形ではなく build_row が dict を返す generator
 _DICT_ROW_GENERATORS = {("iMak_ichibankuji", "ichibankuji_to_csv.py")}
 

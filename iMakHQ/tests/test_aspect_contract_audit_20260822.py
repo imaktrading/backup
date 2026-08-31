@@ -98,5 +98,47 @@ def test_auditor_classifies_contract_findings():
 
 def test_auditor_calls_contract_findings():
     src = open(os.path.join(_TOOLS, "csv_auditor.py"), encoding="utf-8").read()
-    assert "contract_findings(" in src and "load_contract()" in src, \
+    assert "contract_findings(" in src and "load_contract(ebay_category=" in src, \
         "audit() から呼ばれていないと、表は審判にならない"
+
+
+# =============================================================================
+# 2026-09-01 追記: 表は TCG (183454) 専用。他カテゴリに当てない (fail-closed)
+#   経緯: category で絞らず全カテゴリに当てていたため、G-shock/一番くじの CSV が
+#   TCG 専用の表 (Customized/Vintage 等) で全行 ERROR になった。
+#   回答書: hq/requests/2026-08-28_act_code_proposals_gshock_response_question_response.md
+# =============================================================================
+
+_TCG_CATEGORY = "183454"
+_ICHIBANKUJI_CATEGORY = "261055"
+
+
+def test_load_contract_scopes_to_declared_ebay_category(tmp_path):
+    p = tmp_path / "contract.yaml"
+    p.write_text(
+        'ebay_category: "183454"\n'
+        'aspects:\n'
+        '  - ebay_aspect: "Vintage"\n'
+        '    emit: false\n',
+        encoding="utf-8")
+    assert AC.load_contract(p, ebay_category=_TCG_CATEGORY) is not None
+    # わざと TCG 以外 (一番くじ) に当てる → 表は当たらない (None)
+    assert AC.load_contract(p, ebay_category=_ICHIBANKUJI_CATEGORY) is None
+
+
+def test_load_contract_with_no_category_arg_ignores_scope(tmp_path):
+    """ebay_category を渡さない旧来呼び出しは従来どおり絞らない (後方互換)。"""
+    p = tmp_path / "contract.yaml"
+    p.write_text('ebay_category: "183454"\naspects:\n  - ebay_aspect: "Vintage"\n    emit: false\n',
+                 encoding="utf-8")
+    assert AC.load_contract(p) is not None
+
+
+def test_shared_table_does_not_apply_outside_tcg():
+    """実物の共有表 (置かれていない環境では skip) が TCG 以外に当たらないことを見る。"""
+    c_tcg = AC.load_contract(ebay_category=_TCG_CATEGORY)
+    if c_tcg is None:
+        import pytest
+        pytest.skip("共有領域に決定表がまだ置かれていない")
+    assert AC.load_contract(ebay_category=_ICHIBANKUJI_CATEGORY) is None, (
+        "TCG 専用の表が一番くじ (261055) にも当たっている")
