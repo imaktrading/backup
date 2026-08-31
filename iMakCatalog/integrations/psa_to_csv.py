@@ -1696,6 +1696,33 @@ _POKEMON_SET_NAME_TO_CODE: dict[str, str] = {
 }
 
 
+_POKEMON_SET_CODE_CACHE: Optional[dict] = None
+
+
+def _pokemon_set_code_in_catalog(code: str) -> Optional[str]:
+    """catalog に実在する pokemon の set_code なら、**catalog の綴りで**返す (無ければ None).
+
+    2026-08-31 追加。PSA brand 先頭の `XXX-` から set_code を拾う時の裏取りに使う。
+    綴りをそのまま返すのは、catalog に `DPtP` / `HSm` のような大小混在があるため
+    (大文字のまま返すと product_id の完全一致 lookup が外れる)。
+    """
+    global _POKEMON_SET_CODE_CACHE
+    if _POKEMON_SET_CODE_CACHE is None:
+        conn = api._connect()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT substr(product_id, 1, instr(product_id,'-')-1) "
+                "FROM products WHERE category='pokemon_tcg' AND instr(product_id,'-')>1"
+            ).fetchall()
+        finally:
+            conn.close()
+        _POKEMON_SET_CODE_CACHE = {}
+        for (pref,) in rows:
+            if pref and pref.isalpha():
+                _POKEMON_SET_CODE_CACHE.setdefault(pref.upper(), pref)
+    return _POKEMON_SET_CODE_CACHE.get((code or "").upper())
+
+
 def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     """PSA Brand → Pokemon 公式 set_code 抽出.
 
@@ -1763,6 +1790,17 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     for pattern, code in letter_only_codes:
         if re.search(pattern, b):
             return code
+    # 0d) 2026-08-31: PSA は数字を持たない set_code を **brand の先頭で dash 付き**に書く
+    #     ('POKEMON JAPANESE MBG-MEGA STARTER SET MEGA GENGAR EX' → 'MBG')。
+    #     上の表は 1行ずつ足す作りで、足し忘れると新しいスターターセットが丸ごと引けない
+    #     (cert MBG-003 メガゲンガーex が pdca queue に「catalog 未登録」で載った。実際は在る)。
+    #     ★ catalog に **その set_code の行が実在する時だけ** 採る (fail-closed)。
+    #       綴りは catalog に入っている通りに返す (DPtP / HSm のような大小混在があるため)。
+    m_lead = re.match(r"^POKEMON\s+JAPANESE\s+([A-Z]{2,5})-", b)
+    if m_lead:
+        stored = _pokemon_set_code_in_catalog(m_lead.group(1))
+        if stored:
+            return stored
     # 1) Standard alphanumeric set codes
     m = re.search(r"\b(SV[0-9]+[A-Z]?|S[0-9]+[A-Z]?|M[0-9]+[A-Z]?|SM[0-9]+|XY[0-9]+|BW[0-9]+|HGSS[0-9]?|DP[0-9]+)\b", b)
     if m:
