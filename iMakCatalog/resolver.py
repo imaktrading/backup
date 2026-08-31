@@ -48,6 +48,10 @@ _CATEGORY_ALIASES = {
 }
 
 
+# DON カードの subject 印。'DON' 単体では見ない (キャラ名 ドンキホーテ 等に当たるため)。
+_DON_SUBJECT = re.compile(r"DON\s*!!|DON\s+CARD")
+
+
 def _norm_category(c: str | None) -> str:
     c = (c or "").strip().lower()
     return _CATEGORY_ALIASES.get(c, c)
@@ -122,6 +126,15 @@ def _resolve_impl(context: dict) -> tuple[str, str]:
     if _detected:
         cat = _detected
     subject = signals.get("subject") or ""
+    # ★DON カードは brand が必ず "ONE PIECE ..." なので、上の検出で cat が
+    #   one_piece_tcg に塗り替えられ、番号を要る lookup_one_piece に回って必ず '' になる。
+    #   DON は番号を持たない (product_id は catalog 内部 KEY) ので別 dispatch が要る。
+    #   2026-08-31: cert156843873 (ONE PIECE DAY'24 の DON) が lookup_don では引けるのに
+    #   resolve() が '' を返し、出品側で毎日除外され続けていた (pdca queue に8/26〜8/30 連日)。
+    #   ★判定は subject の 'DON!!' / 'DON CARD' に限る。'DON' だけで見ると
+    #     ドンキホーテ・ドフラミンゴ等の **キャラ名**に当たる (誤 dispatch)。
+    if _DON_SUBJECT.search(subject.upper()) or _norm_category(context.get("category")) == "don":
+        cat = "don"
     card_no = signals.get("card_no") or ""
     url = signals.get("url")
     image = signals.get("image")

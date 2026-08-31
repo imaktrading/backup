@@ -67,3 +67,31 @@ class TestStillFailClosed(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestResolverDispatch(unittest.TestCase):
+    """★2026-08-31: `lookup_don` で引けても `resolve()` が '' を返していた.
+
+    brand は必ず "ONE PIECE ..." なので brand→category 検出が `one_piece_tcg` に
+    塗り替え、番号が要る `lookup_one_piece` に回って必ず fail-closed になっていた。
+    DON は番号を持たない (product_id は catalog 内部 KEY) ので dispatch を分ける。
+    """
+
+    def _resolve(self, category, brand, subject, card_no=""):
+        import resolver  # noqa: E402
+        return resolver.resolve({"category": category,
+                                 "signals": {"brand": brand, "subject": subject,
+                                             "card_no": card_no}})
+
+    def test_don_resolves_even_when_category_says_one_piece(self):
+        for cat in ("don", "one_piece_tcg"):
+            with self.subTest(category=cat):
+                self.assertEqual(
+                    self._resolve(cat, DAY24_BRAND, "DON!! CARD"), "DON-OP-DAY-24-003")
+
+    def test_character_named_don_is_not_dispatched_to_don(self):
+        """回帰: 'DONQUIXOTE DOFLAMINGO' 等 **キャラ名** を DON 扱いしない."""
+        self.assertEqual(
+            self._resolve("one_piece_tcg", "ONE PIECE JAPANESE OP01-ROMANCE DAWN",
+                          "DONQUIXOTE DOFLAMINGO", "060"),
+            "OP01-060")
