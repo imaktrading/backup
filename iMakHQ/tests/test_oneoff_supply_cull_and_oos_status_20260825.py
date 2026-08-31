@@ -117,8 +117,9 @@ def test_status_cull_pending_reasons():
     known_young = LF.oos_status(_row(item_id="9", age_days=1), cull_ids={"9"}, done_ids=set())
     assert "次回" in known_young, "既知の年齢 (1日) は、もう待たされない"
 
-    cheap = LF.oos_status(_row(item_id="9", price=20), cull_ids={"9"}, done_ids=set())
-    assert "未満は枠に効かない" in cheap
+    # ★2026-08-31: MIN_PRICE (旧$100) を撤廃。在庫0×需要ゼロは価格を問わず対象。
+    known_cheap = LF.oos_status(_row(item_id="9", price=20), cull_ids={"9"}, done_ids=set())
+    assert "次回" in known_cheap, "既知の安さで、もう待たされない"
 
     mirror = LF.oos_status(_row(item_id="9", site="CA"), cull_ids={"9"}, done_ids=set())
     assert "ミラー" in mirror

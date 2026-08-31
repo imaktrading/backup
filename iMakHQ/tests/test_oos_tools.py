@@ -62,15 +62,16 @@ def test_cull_excludes_unknown_age():
     assert all(cull_end._i(r["age_days"]) >= cull_end.MIN_AGE for r in picked)
 
 
-def test_cull_excludes_cheap():
-    """★$100未満は対象外 (2026-08-24)。
+def test_cull_no_longer_excludes_cheap():
+    """★$100未満の対象外は 2026-08-24 に導入 → 2026-08-31 に撤廃。
 
-    枠は **金額** で詰まっており (点数は半分以上 余っている)、安い出品を落としても効かない。
-    実測: $100 で切ると件数は 1,449→1,203 に減るのに金額は $356,660→$339,453 とほぼ落ちない。
+    元の理由 (枠は金額で詰まっており、安い出品を落としても枠は空かない) は
+    「枠を空げたいから安い物は後回し」の基準であって、在庫0×需要ゼロ (CULLフラグ)
+    で何も手当てが無いまま居座るだけの出品には無関係。待たせない。
     """
     rows = [_row("cheap", price=99), _row("ok", price=100)]
     _cull, eligible, _p = cull_end.select(rows, today=_OLD)
-    assert [r["item_id"] for r in eligible] == ["ok"]
+    assert {r["item_id"] for r in eligible} == {"cheap", "ok"}
 
 
 def test_cull_cap_limits_50():
