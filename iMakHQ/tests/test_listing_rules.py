@@ -15,6 +15,7 @@ import os
 
 # プロジェクト相対パス: iMakHQ/tests/ から iMakeBayAPI/ へ
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'iMakeBayAPI')))
+import listing_common as _listing_common
 from listing_common import audit_csv_row, gate_row_or_hold
 from listing_validator import _is_promo_dual_citizenship, validate_title_against_psa
 
@@ -109,13 +110,25 @@ def _check_gate_blocks_alert():
         "C:Brand": "Shimano",
         "CustomLabel": "GATE-BLOCK-TEST",
     }
-    allowed, violations = gate_row_or_hold(
-        bad_row,
-        category="reel",
-        sku="GATE-BLOCK-TEST",
-        price_status="ALERT",
-        median_usd=500,
-    )
+    # ★2026-08-31: この test は本物の gate_row_or_hold() を呼ぶので、放っておくと
+    #   毎回の pytest 実行 (= pre-commit のたび) で **本番の HOLD キュー**
+    #   (iMakHQ/review_logs/csv_hold_queue.jsonl) に GATE-BLOCK-TEST が追記され続ける。
+    #   実測: 2026-04-23 の初回検証以来 1,858行のうち大半がこの test の重複書込で、
+    #   本物の HOLD 60件が埋もれていた。書込先だけ tmp に逃がす。
+    import tempfile as _tempfile
+    _orig_path = _listing_common._HOLD_QUEUE_PATH
+    _listing_common._HOLD_QUEUE_PATH = os.path.join(
+        _tempfile.gettempdir(), "test_gate_row_or_hold_queue.jsonl")
+    try:
+        allowed, violations = gate_row_or_hold(
+            bad_row,
+            category="reel",
+            sku="GATE-BLOCK-TEST",
+            price_status="ALERT",
+            median_usd=500,
+        )
+    finally:
+        _listing_common._HOLD_QUEUE_PATH = _orig_path
     assert allowed is False, "gate_row_or_hold must block when enabled category receives ALERT"
     assert any(v[2] == "error" and "pricing_engine ALERT" in v[1] for v in violations), \
         f"violations must contain ALERT-origin error, got: {violations}"

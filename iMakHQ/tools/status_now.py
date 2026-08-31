@@ -120,6 +120,110 @@ def _zero_qty_ghost_certs(limit=5):
         f"cert{c}  最終検知 {latest[c]}" for c in ordered[:limit]]
 
 
+DUP_GUARD_LEDGER = r"C:\dev\iMak_data\hq\dup_guard_ledger.jsonl"
+
+
+def _chronic_dup_guard_strips(min_repeats=2, limit=8):
+    """入稿直前ガードで**何度も**弾かれている cert/label = 慢性的におかしい (2026-08-31)。
+
+    ★cert152976751 の横展開。dup_guard.py の pre_upload_stripped* は run のたびに
+      コンソールへ印字して jsonl に記録するが、**集計して見せる側が無かった**
+      (1回だけの発動は正常動作。何度も同じ物が弾かれ続けている時だけ異常)。
+      1回で弾かれるのは正しい二重出品ガードなので、min_repeats 未満は出さない
+      (毎回全件出すと「いつもの動作」に埋もれて、慢性化した1件が見えなくなる)。
+    """
+    import json as _json
+    from collections import Counter as _Counter
+    try:
+        with open(DUP_GUARD_LEDGER, encoding="utf-8", errors="replace") as f:
+            recs = [_json.loads(ln) for ln in f if ln.strip()]
+    except OSError:
+        return []
+    cnt = _Counter()
+    last_ts = {}
+    for r in recs:
+        kind = r.get("kind")
+        if kind == "pre_upload_stripped":
+            items = [("cert", s.get("cert")) for s in r.get("same_cert") or []]
+        elif kind == "pre_upload_stripped_shared_url":
+            items = [("cert", t.get("cert")) for t in r.get("taken") or []]
+        elif kind == "pre_upload_stripped_samekey":
+            items = [("label", d.get("label")) for d in r.get("dups") or []]
+        else:
+            continue
+        for k in items:
+            if not k[1]:
+                continue
+            cnt[k] += 1
+            last_ts[k] = r.get("ts", "")
+    chronic = [(k, n) for k, n in cnt.items() if n >= min_repeats]
+    if not chronic:
+        return []
+    chronic.sort(key=lambda kv: kv[1], reverse=True)
+    return [f"計 {len(chronic)}件が{min_repeats}回以上、入稿直前で弾かれ続けている"] + [
+        f"{typ}{val}  {n}回 (最終 {last_ts[(typ, val)]})" for (typ, val), n in chronic[:limit]]
+
+
+CSV_HOLD_QUEUE = r"C:\dev\iMak\iMakHQ\review_logs\csv_hold_queue.jsonl"
+
+
+def _csv_hold_queue(limit=5):
+    """CSV監査くんが入稿直前でHOLDした行 = ②の宿題 (2026-08-31)。
+
+    ★これまで csv_auditor.py は生成ログのテキストを grep して**件数だけ**
+      (`HOLD/gate: N件`) を出しており、**何が・なぜHOLDされたか**は
+      csv_hold_queue.jsonl に書かれたまま誰も読んでいなかった。
+
+    ★合わせて発覚: `tests/test_listing_rules.py` の物理ゲート検証が本物の
+      gate_row_or_hold() を呼んでおり、**pytest を回すたび**(= pre-commit のたび)に
+      本番のこのファイルへ `GATE-BLOCK-TEST` を書き足していた。1,858行のうち
+      1,747行がこの test 汚染で、本物の HOLD 111行が埋もれていた
+      (test 側は 2026-08-31 に書込先を tmp へ退避済。既存の汚染分もここで除去済)。
+    """
+    import json as _json
+    try:
+        with open(CSV_HOLD_QUEUE, encoding="utf-8", errors="replace") as f:
+            recs = [_json.loads(ln) for ln in f if ln.strip()]
+    except OSError:
+        return []
+    recs = [r for r in recs if r.get("sku") not in ("GATE-BLOCK-TEST", "TEST_FAIL")]
+    if not recs:
+        return []
+    last = recs[-1]
+    out = [f"計 {len(recs)}件 (最終 {last.get('ts', '')[:19]})"]
+    for r in recs[-limit:][::-1]:
+        issues = "; ".join((v.get("issue") or "")[:50] for v in (r.get("violations") or [])[:2])
+        out.append(f"{r.get('sku', '?')}  {(r.get('title') or '')[:40]}  [{issues}]")
+    return out
+
+
+REJECTED_MISSING_MODELS_LOG = r"C:\dev\iMak\iMakHQ\logs\missing_models_rejected.log"
+
+
+def _rejected_missing_models(limit=5):
+    """catalog 依頼の入口検査で弾いた行 = ②の宿題 (2026-08-31)。
+
+    ★auto_catalog_add_request.py は「silent drop しない」とコメントに書いて
+      stdout と log の両方に残す設計だったが、**log を読む側が無かった**
+      (=書く側の意図は正しかったが半分しか実装されていなかった)。
+      `missing_models.csv` は毎日同じモデルを再検出するので、`reject_reason()` の
+      誤判定 (例: カテゴリ空/タイトル空の判定ミス) があると同じ行が気づかれずに
+      毎日弾かれ続ける。
+    """
+    try:
+        with open(REJECTED_MISSING_MODELS_LOG, encoding="utf-8", errors="replace") as f:
+            lines = [ln.rstrip("\n") for ln in f if ln.strip()]
+    except OSError:
+        return []
+    if not lines:
+        return []
+    out = [f"計 {len(lines)}行 (直近 {min(limit, len(lines))}行)"]
+    for ln in lines[-limit:]:
+        parts = ln.split("\t")
+        out.append("  ".join(parts) if len(parts) >= 3 else ln)
+    return out
+
+
 def _commits():
     out = _run(["git", "log", "--since=midnight",
                 "--format=%h %ad %s", "--date=format:%H:%M"])
@@ -223,6 +327,29 @@ def main():
             print("  " + ln)
         print("  → 二重出品ガードで毎回黙って落ちている。RESTOCK で数量を戻すか、"
               "器を終了して出し直すか決めること")
+
+    cg = _chronic_dup_guard_strips()
+    if cg:
+        print("\n## 3d. ②の宿題 — 入稿直前ガードで何度も弾かれ続けている cert/label\n")
+        for ln in cg:
+            print("  " + ln)
+        print("  → 1回の発動は正常 (二重出品ガードが仕事をしている)。何度も同じ物が"
+              "弾かれる時だけ、ガードの根拠 (KEY/cert/URL) が古い/誤っていないか確認すること")
+
+    hq = _csv_hold_queue()
+    if hq:
+        print("\n## 3e. ②の宿題 — CSV監査くんが入稿直前でHOLDした行 (詳細は今まで非表示だった)\n")
+        for ln in hq:
+            print("  " + ln)
+        print("  → 直近が2ヶ月以上前なら、HOLD自体が起きていないのか検知が止まっているのか"
+              "を一度確認すること")
+
+    rm = _rejected_missing_models()
+    if rm:
+        print("\n## 3f. ②の宿題 — catalog依頼の入口検査で弾いた行 (今まで非表示だった)\n")
+        for ln in rm:
+            print("  " + ln)
+        print("  → 同じ行が毎日弾かれ続けているなら、reject_reason() の誤判定を疑うこと")
 
     for ln in _stalled():          # 動いている限り何も出ない (常時表示しない)
         print("\n" + ln)
