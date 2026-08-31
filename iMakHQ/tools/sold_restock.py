@@ -188,6 +188,64 @@ def _cost_from_row(row):
     return None
 
 
+def count_workload():
+    """押したら何件・何が起きるか (2026-08-31・ラベル/ヒント用)。
+
+    ★eBay の per-item 状態確認 (ebay_status) はしない。live キャッシュ
+      (itemid_writeback_audit、2時間以内なら再取得しない) があればそれで判定し、
+      無ければ「要確認」として **actionable には数えない** (cull_end / shelf_evict と
+      同じ理由: 表示のために API 枠を使わない。2026-08-24 に表示目的の取得で
+      取下げが5時間止まった実害がある)。
+
+    戻り: {report: 注文レポートが在るか, actionable: 今すぐ送れる件数
+           (live キャッシュで Active&qty=0 と確認できた分), unknown: キャッシュに無く
+           判定できない件数 (Completed=要 relist の可能性。押せば分かる), done: 既に補充済,
+           error: 読めなかった理由}"""
+    out = {"report": False, "actionable": 0, "unknown": 0, "done": 0, "error": ""}
+    try:
+        src = W._find_desk_report()
+        if not src:
+            out["error"] = "注文レポートがありません (デスクトップの ebay-all-orders-report-*.csv)"
+            return out
+        out["report"] = True
+        pairs = [(o, W.category_of(o.get("Item Title") or "")) for o in W.read_orders(src)]
+        want = [(o, c) for o, c in pairs if c]
+        if not want:
+            return out
+        sheets = W._sheets()
+        cache_raw = {}
+        try:
+            import json as _json
+            import itemid_writeback_audit as _A
+            if _A.CACHE.exists():
+                cache_raw = _json.loads(_A.CACHE.read_text(encoding="utf-8"))
+        except Exception:                                          # noqa: BLE001
+            cache_raw = {}
+        already = live_keys(sheets, set(cache_raw.keys())) if cache_raw else set()
+        for o, cat in want:
+            sku = (o.get("Custom Label") or "").strip()
+            iid = (o.get("Item Number") or "").strip()
+            label, n, row = W.find_row(sheets, sku, iid)
+            if row is None:
+                continue
+            state, _aux = W.classify(row)
+            if state == "補充済":
+                out["done"] += 1
+                continue
+            _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
+            if _key and _key in already:
+                continue
+            info = cache_raw.get(iid)
+            if info is None:
+                out["unknown"] += 1
+            elif int(info.get("avail") or 0) == 0:
+                out["actionable"] += 1
+            # avail > 0 = 既に在庫あり (noop)。候補にも数えない。
+    except Exception as e:                                          # noqa: BLE001
+        out["error"] = f"{type(e).__name__}: {e}"[:60]
+    return out
+
+
 def main():
     argv = sys.argv[1:]
     write = "--write" in argv

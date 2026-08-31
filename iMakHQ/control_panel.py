@@ -1504,6 +1504,9 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "🔁 売れた分を補充",
         "label_fg": "blue",
+        "badge": "sold_restock",
+        "tip": "PSA/G-Shock/一番くじで売れた分を、作り直さず qty=1 に戻すだけで補充します。"
+               "対象外(アパレル等)は監視くんが在庫を見て自動で戻します。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "sold_restock.py"],
         "params": [],
@@ -3224,6 +3227,14 @@ class ListingPanel:
             "    d['shelf']=SE.count_workload()\n"
             "except Exception as e:\n"
             "    d['shelf']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # ★2026-08-31 ユーザー要望「放置しちゃう」: 売れた分の補充も同じ subprocess で数える。
+            #   count_workload は eBay を叩かない (live キャッシュがあれば使う・無ければ
+            #   unknown として数え、押すまで actionable と言い切らない)。
+            "try:\n"
+            "    import sold_restock as SR\n"
+            "    d['restock']=SR.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['restock']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             "print(json.dumps(d))"
             % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
         )
@@ -3365,9 +3376,25 @@ class ListingPanel:
                     se_label = "対象なし"
             else:
                 se_txt = se_label = ""
+            # 🔁 売れた分を補充: 押したら何件アクションが起きるか
+            #   (2026-08-31 ユーザー要望「放置しちゃう」)。
+            sr = (w0.get("restock") or {}) if isinstance(w0, dict) else {}
+            if sr.get("error"):
+                sr_txt = "\n(残件 取得できず: %s)" % str(sr["error"])[:40]
+            elif sr:
+                if not sr.get("report"):
+                    sr_txt = "\n※注文レポート未DL (デスクトップに ebay-all-orders-report-*.csv)"
+                else:
+                    sr_txt = "\n今すぐ送れる %s件 (要確認 %s件・補充済 %s件)" % (
+                        sr.get("actionable", 0), sr.get("unknown", 0), sr.get("done", 0))
+                    if sr.get("unknown"):
+                        sr_txt += "\n※要確認は押すと分かります (売切れ終了→出し直しの可能性)"
+            else:
+                sr_txt = ""
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
                        "kuji_search": k_s, "kuji_confirm": k_c, "cull_end": ce_txt,
-                       "shelf_evict": se_txt, "shelf_evict_label": se_label}
+                       "shelf_evict": se_txt, "shelf_evict_label": se_label,
+                       "sold_restock": sr_txt}
             # ★2026-08-16: **押すと何か出てくる時だけ青**。0件なら黒のまま
             #   (「いつ押せばいいのか分からない」への答え。色 = 今やる価値があるか)。
             act_kind = {"hoju_search": bool(s.get("can")),
@@ -3379,7 +3406,8 @@ class ListingPanel:
                         "kuji_confirm": bool((kj.get("confirm") or {}).get("ready")),
                         # 落とすものが在る時だけ青 (0件なら押す意味が無い)
                         "cull_end": bool(ce.get("remaining")),
-                        "shelf_evict": bool(se.get("picked"))}
+                        "shelf_evict": bool(se.get("picked")),
+                        "sold_restock": bool(sr.get("actionable") or sr.get("unknown"))}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。
