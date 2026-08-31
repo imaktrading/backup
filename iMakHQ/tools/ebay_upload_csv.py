@@ -256,6 +256,36 @@ def build_result(csv_path, write, ok, ng, listed, failed, stopped_early=False,
     }
 
 
+DEFAULT_RESULT_NAME = "last_upload_result.json"
+
+
+def result_paths(result_json, csv_path):
+    """結果 JSON を書く先を全部返す (純関数・test 可)。
+
+    ★2026-08-27: `--result-json` に既定名以外を渡すと、書き戻し
+      (`itemid_writeback_audit._load_just_listed`) が読むのは **固定名
+      `last_upload_result.json`** なので、出品直後の itemID を拾えず
+      **黙って空振り**する (今日 再出しの3件がそうなり、`--apply --no-cache` で拾い直した)。
+      指定先に書くだけでなく、**CSV と同じ場所の既定名にも必ず書く**。
+      同じ場所を指していれば1回だけ書く (二重書き込みしない)。
+    """
+    out = []
+    cands = [result_json or ""]
+    if csv_path:
+        cands.append(os.path.join(os.path.dirname(os.path.abspath(csv_path)),
+                                  DEFAULT_RESULT_NAME))
+    seen = set()
+    for p in cands:
+        if not p:
+            continue
+        key = os.path.normcase(os.path.abspath(p))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
 def write_result(path, result):
     """結果を JSON で残す。**空振りでも必ず書く**。
 
@@ -349,9 +379,12 @@ def main():
             print(f"  ⚠️ 未出品のまま残った行: {len(left)}件 → {', '.join(left)}")
             print("     (この分は出品されていません。原因を潰してから出し直してください)")
     # ★結果は **必ず** 残す (0件でも失敗でも)。ここを書かないとメールが飛ばない。
-    if write_result(a.result_json, build_result(a.csv, a.write, ok, ng, listed,
-                                                failed, stopped_early, unlisted=left)):
-        print(f"  📝 結果を書きました: {a.result_json}")
+    #   既定名にも必ず書く (書き戻しが読むのは固定名なので、別名だけだと空振りする)
+    _res = build_result(a.csv, a.write, ok, ng, listed,
+                        failed, stopped_early, unlisted=left)
+    for _p in result_paths(a.result_json, a.csv):
+        if write_result(_p, _res):
+            print(f"  📝 結果を書きました: {_p}")
     if a.write and listed:
         print("  ✏️ ItemID をシートに書き戻します")
         import subprocess

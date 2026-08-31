@@ -74,7 +74,10 @@ class TestResultIsAlwaysWritten:
     def test_main_writes_the_result(self):
         src = io.open(os.path.join(os.path.dirname(__file__), "..", "tools",
                                    "ebay_upload_csv.py"), encoding="utf-8").read()
-        assert "write_result(a.result_json" in src, \
+        # 2026-08-27: one path -> every path returned by result_paths().
+        # Same invariant: never accept --result-json without writing it.
+        assert "if write_result(_p, _res):" in src
+        assert "for _p in result_paths(a.result_json, a.csv):" in src, \
             "--result-json を受け取るだけで書いていない (メールが飛ばない)"
 
 
