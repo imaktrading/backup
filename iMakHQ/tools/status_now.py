@@ -224,6 +224,35 @@ def _rejected_missing_models(limit=5):
     return out
 
 
+VERIFIED_CERTS_FILE = r"C:\dev\iMak_data\dedupe\verified_certs.json"
+
+
+def _chronic_reverified_certs(min_times=2, limit=8):
+    """識別は毎回OKなのに、何度も目視に出され続けている cert = ②の宿題 (2026-09-01)。
+
+    ★cert152976751/150181360 (ユーザー指摘)「新規時の目視HTMLに何回も出てくる、
+      出品されてんの? カウンターでもつけて、複数回なら根本原因解決したら?」。
+      識別 (OK/CHOSEN) は毎回同じ答えで、本当の理由は識別ではなく別の所
+      (今回は二重出品ガード。post_psa_review.run_pre_build_verify で直接スキップに
+      した) にあることが多い。個別に直しても**別の理由**で同じ形が再発しうるので、
+      「何度も再確認され続けている」こと自体を汎用に検知して現在地に出す。
+    """
+    import json as _json
+    try:
+        with open(VERIFIED_CERTS_FILE, encoding="utf-8", errors="replace") as f:
+            data = _json.loads(f.read())
+    except OSError:
+        return []
+    chronic = [(c, v) for c, v in data.items()
+               if isinstance(v, dict) and int(v.get("times", 0)) >= min_times]
+    if not chronic:
+        return []
+    chronic.sort(key=lambda cv: cv[1].get("times", 0), reverse=True)
+    return [f"計 {len(chronic)}件が{min_times}回以上、識別OKのまま再確認され続けている"] + [
+        f"cert{c}  {v.get('times')}回 (最終 {v.get('verified_at', '')}  product_id={v.get('product_id', '')})"
+        for c, v in chronic[:limit]]
+
+
 def _commits():
     out = _run(["git", "log", "--since=midnight",
                 "--format=%h %ad %s", "--date=format:%H:%M"])
@@ -350,6 +379,14 @@ def main():
         for ln in rm:
             print("  " + ln)
         print("  → 同じ行が毎日弾かれ続けているなら、reject_reason() の誤判定を疑うこと")
+
+    cr = _chronic_reverified_certs()
+    if cr:
+        print("\n## 3g. ②の宿題 — 識別OKのまま何度も目視に出され続けている cert\n")
+        for ln in cr:
+            print("  " + ln)
+        print("  → 識別は疑わなくてよい (毎回同じ答え)。build できない別の理由"
+              "(二重出品/在庫等) を疑うこと")
 
     for ln in _stalled():          # 動いている限り何も出ない (常時表示しない)
         print("\n" + ln)

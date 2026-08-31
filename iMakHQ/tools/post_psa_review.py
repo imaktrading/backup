@@ -1445,8 +1445,17 @@ def _record_verified(results: list[dict]) -> None:
         # verified に入れると HTML viewer で二度と表示されず宿題が埋もれる。OK/CHOSEN のみ確定。
         if choice in ("OK", "CHOSEN"):
             pid = r.get("selected_pid") if choice == "CHOSEN" else r.get("expected")
+            # ★2026-09-01 ユーザー要望 (cert152976751/150181360): 「新規時の目視HTMLに
+            #   何回も出てくる、カウンターでもつけて、複数回なら根本原因解決したら?」。
+            #   従来は verified[cert] を毎回まるごと上書きしており、**同じ cert が何回
+            #   verify されたか**が記録に残らなかった。8/31 の一括 verify で 152976751 /
+            #   150181360 が同じ timestamp で1回だけ記録され、それ以前の再出題履歴
+            #   (7回) は跡形も無かった。既存キーを引き継ぎ、times を積む。
+            prev = verified.get(cert) or {}
             verified[cert] = {
                 "verified_at": now,
+                "first_verified_at": prev.get("first_verified_at", now),
+                "times": int(prev.get("times", 0)) + 1,
                 "choice": choice,
                 "product_id": pid,
             }
@@ -1897,13 +1906,14 @@ def parse_confirmations(results):
 _SKIP_REASONS = (
     "cert番号の訂正 (今回は出品しない)",
     "目視に出せなかった (PSAデータ/カテゴリ不明)",
+    "既に別出品として live (二重出品ガード。識別ではなく在庫側の判断待ち)",
     "該当なし (カタログに依頼)",
     "保留 (次の走行でまた出ます)",
     "未回答",
 )
 
 
-def viewer_skip_reasons(certs, confirmed, results, fixes=(), unavailable=()):
+def viewer_skip_reasons(certs, confirmed, results, fixes=(), unavailable=(), dup_listed=()):
     """目視で出品に進まなかった cert を **理由ごと** にまとめる (純関数・test可)。
 
     ★2026-08-19: それまで理由は **引き算** で作っていた (見送り N件 − 該当なし M件 = 未回答)。
@@ -1918,12 +1928,15 @@ def viewer_skip_reasons(certs, confirmed, results, fixes=(), unavailable=()):
           for r in (results or [])}
     fixed = {str(c).strip() for c, _ in (fixes or ())}
     unavail = {str(c).strip() for c in (unavailable or ())}
+    dup = {str(c).strip() for c in (dup_listed or ())}
     buckets = {k: [] for k in _SKIP_REASONS}
     for cert in [str(c).strip() for c in (certs or []) if str(c).strip()]:
         if cert in (confirmed or {}):
             continue
         if cert in fixed:
             r = "cert番号の訂正 (今回は出品しない)"
+        elif cert in dup:
+            r = "既に別出品として live (二重出品ガード。識別ではなく在庫側の判断待ち)"
         elif cert in unavail:
             r = "目視に出せなかった (PSAデータ/カテゴリ不明)"
         elif by.get(cert) in ("NONE", "NG"):
@@ -2141,6 +2154,29 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         confirmed, _viewer_certs = {}, [str(c).strip() for c in certs if str(c).strip()]
     else:
         confirmed, _viewer_certs = split_verified(certs, _vc)
+
+    # ★2026-09-01 ユーザー指摘 (cert152976751/150181360 が毎回目視に出る):
+    #   PSA_REVIEW_ALL=1 (自動) は 2026-08-18 の意図的設計で「毎回全件見せる」
+    #   (番号打ち間違えの保険。この判定とは別軸なので維持する)。だが上の2件は
+    #   識別に一度も疑いが無く、本当の理由は「同じ cert = 同じ現物が既に別出品と
+    #   して生きている」= 二重出品ガードで何度確認しても build されない。
+    #   識別を何度聞いても解決しない問いを人に投げ続けるのは無意味なので、
+    #   **既に別出品として live な cert はここで弾く**(識別目視をスキップ。
+    #   判断は RESTOCK/End 側=別の依頼)。読めなければ従来どおり (fail-open。
+    #   このガードは補助であって、pre-build-verify 本体の fail-closed ではない)。
+    try:
+        import sheet_io as _sio
+        _dup_listed = _sio.listed_certs(_sio._product_ws().get_all_values()) | _sio.live_listed_certs()
+    except Exception as _e:                                        # noqa: BLE001
+        _dup_listed = set()
+        append_log_func(f"  ⚠️ 二重出品チェックをスキップ(読込失敗): {type(_e).__name__}\n")
+    _dup_skip = [c for c in _viewer_certs if c in _dup_listed]
+    if _dup_skip:
+        _viewer_certs = [c for c in _viewer_certs if c not in _dup_listed]
+        append_log_func(
+            f"  🚫 既に別出品として live (二重出品ガード) → 目視スキップ: "
+            f"{len(_dup_skip)}件 {_dup_skip[:5]}\n")
+
     n_cache = len(confirmed)
     targets = []
     _unavailable = []          # 目視に出せなかった cert (= 未回答ではない・2026-08-19)
@@ -2171,7 +2207,7 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         メール(内訳)と監査(問題提起)はこの行を読む。理由を引き算で作らせないための記録。
         """
         for _ln in render_skip_reasons(viewer_skip_reasons(
-                certs, confirmed, _results, _fixes, _unavailable)):
+                certs, confirmed, _results, _fixes, _unavailable, _dup_skip)):
             append_log_func(_ln + "\n")
 
     if n_cache:
