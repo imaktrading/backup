@@ -1,0 +1,37 @@
+{
+  "project": "gshock",
+  "program_items": [
+    {
+      "sku": "B0FJQKXN88",
+      "msg": "契約で出さないと決めた項目に値が入っています: Customized='No' — 扱いが無い。固定値で出さない (出品側の固定出力を止める)"
+    },
+    {
+      "sku": "B0FJQKXN88",
+      "msg": "契約で出さないと決めた項目に値が入っています: Vintage='No' — 定義が曖昧。固定値で出さない (出品側の固定出力を止める)"
+    }
+  ],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "gshock",
+      "item_id": "program:契約で出さないと決めた項目に値が入っています: Customized='No' ",
+      "target_field": "program_fix",
+      "finding_type": "program_fix",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "gshock",
+      "item_id": "program:契約で出さないと決めた項目に値が入っています: Vintage='No' — 定",
+      "target_field": "program_fix",
+      "finding_type": "program_fix",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 2,
+    "log": 0,
+    "recurring_missing": 2
+  }
+}

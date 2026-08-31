@@ -1,0 +1,30 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [],
+  "recurring_missing": [
+    {
+      "category": "tcg",
+      "item_id": "selfcheck:必須Item Specific 'Type' (タイプ) が空",
+      "target_field": "program_fix",
+      "finding_type": "program_fix",
+      "seen_count": 4,
+      "seen_days": 3,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert156843873",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "seen_days": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 0,
+    "recurring_missing": 2
+  }
+}

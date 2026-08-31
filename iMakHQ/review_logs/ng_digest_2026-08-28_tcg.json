@@ -1,0 +1,68 @@
+{
+  "project": "tcg",
+  "program_items": [
+    {
+      "sku": "PSA10-63355290",
+      "msg": "PSA 画像が1枚も無い"
+    }
+  ],
+  "log_signals": [
+    "catalog miss: 1件",
+    "error: 7件"
+  ],
+  "recurring_missing": [
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert155040105",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 75,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "program:PSA 画像が1枚も無い",
+      "target_field": "program_fix",
+      "finding_type": "program_fix",
+      "seen_count": 4,
+      "status": "pending"
+    },
+    {
+      "category": "pokemon_tcg",
+      "item_id": "cert55281762 POKEMON JAPANESE SWORD & SHIELD SHINY STAR V [FA/DITTO V SHINY STAR V] #323 (catalog S4a-323 は在る(画像あり)が人が現物と別絵柄と判断 variant欠落の疑い)",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 4,
+      "status": "pending"
+    },
+    {
+      "category": "tcg",
+      "item_id": "selfcheck:必須Item Specific 'Type' (タイプ) が空",
+      "target_field": "program_fix",
+      "finding_type": "program_fix",
+      "seen_count": 3,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert156843873",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    },
+    {
+      "category": "one_piece_tcg",
+      "item_id": "ONE PIECE JAPANESE PREMIUM BOOSTER -ONE PIECE CARD THE BEST- STORAGE BOX SET-004",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 2,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 1,
+    "log": 2,
+    "recurring_missing": 6
+  }
+}

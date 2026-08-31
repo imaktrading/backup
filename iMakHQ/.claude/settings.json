@@ -203,7 +203,13 @@
       "PowerShell(cd C:\\\\dev\\\\iMak\\\\iMakHQ; Select-String -Path tools\\\\status_now.py -Pattern \"daily_report|DAILY\" | Select-Object -First 3 | ForEach-Object { $_.Line.Trim\\(\\) })",
       "PowerShell($p = \"C:\\\\Users\\\\imax2\\\\.claude\\\\projects\\\\c--dev-iMak\\\\memory\\\\daily_report.md\"; $head = Get-Content $p -Encoding utf8 -TotalCount 6; $head; Write-Output \"---\\(全長\\)\"; \\(Get-Content $p -Encoding utf8\\).Count)",
       "PowerShell(cd C:\\\\dev\\\\iMak\\\\iMakHQ; python tools/claim.py list 2>&1 | Select-String -Pattern \"№76|№55|№34|№35\" | ForEach-Object { $_.Line })",
-      "Read(//c/dev/iMak_data/hq/requests/**)"
+      "Read(//c/dev/iMak_data/hq/requests/**)",
+      "Bash(PYTHONIOENCODING=utf-8 timeout 600 git push origin master)",
+      "Bash(PYTHONIOENCODING=utf-8 git log --oneline origin/master..HEAD)",
+      "Bash(PYTHONIOENCODING=utf-8 git log --oneline -1 origin/master)",
+      "PowerShell(python C:\\\\dev\\\\iMak\\\\iMakHQ\\\\tools\\\\claim.py list 2>&1)",
+      "Bash(grep -rn \"Features\" /c/dev/iMak/iMakHQ/../.claude/skills 2>/dev/null | head -20; ls /c/dev/iMak/.claude/skills 2>/dev/null)",
+      "Read(//c/dev/iMak/.claude/**)"
     ],
     "deny": [
       "Bash(python*fix_de_speedpak_shipping.py*)",
