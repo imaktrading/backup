@@ -29,6 +29,16 @@ import sys
 
 import requests
 
+# ★2026-09-01: cp932 コンソール (Windows既定) で絵文字 print が UnicodeEncodeError で
+#   クラッシュしていた。しかもクラッシュ位置が本体の eBay 書込 (create_ads) より**前**の
+#   プレビュー表示だったため、「対象11件→追加11」と出ていたのに実際は1件も書かれて
+#   いなかった (この行は計画件数の表示で、完了の証拠ではない)。他スクリプト
+#   (cull_end.py 等) と同じ reconfigure で防ぐ。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 API = "https://api.ebay.com/sell/marketing/v1"
