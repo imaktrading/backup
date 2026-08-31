@@ -16,7 +16,8 @@
     2. 今 在庫0 が続いているものを、経過日数の長い順に並べる
     3. 復活実績の統計を添えて CSV + メールで出す
 
-取り下げ (End) は既定でしない。--end-days N --execute を明示した時だけ実行する。
+取り下げ (End) は週次の自動実行で行う (2026-09-01 ユーザー指示)。
+何を・いつ・なぜ終了したかは logs/ended_listings.jsonl に必ず残す (仕入元URL付き = 再出品可能)。
 ★ End すると itemID が消え、**自動復活の対象から外れる** (再出品は新しい itemID になり、
   商品管理シートの差し替えが要る)。だから既定は「報告だけ」。
 
@@ -30,6 +31,7 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
+import json
 import re
 import sys
 from collections import defaultdict
@@ -43,8 +45,16 @@ if str(SCRIPT_DIR) not in sys.path:
 LOG_DIR = SCRIPT_DIR / "logs"
 OUT_DIR = SCRIPT_DIR / "logs" / "reports"
 
-#: 「まず戻らない」と見なす日数の既定 (物差しの実測 最長 35日 に対する安全側)。
+#: 「まず戻らない」と見なす日数の既定 (物差しの実測 最長 39日 に対する安全側)。
 DEFAULT_STALE_DAYS = 30
+
+#: 取り下げた出品の履歴 (何を・いつ・なぜ終了したか。後から再出品できるように仕入元URLも残す)
+ENDED_LEDGER = LOG_DIR / "ended_listings.jsonl"
+
+#: 1 回の自動実行で取り下げる上限。超えたら 1 件も取り下げずに人へ回す。
+#: 大量に出る = 巡回側の異常 (全件を誤って在庫0と判定した等) の疑いがあり、
+#: 誤って一括終了すると itemID が消えて元に戻せない (再出品は別 itemID)。
+MAX_AUTO_END = 30
 
 _LISTING_RE = re.compile(r"▶ listing (\d+) \[(\w+)\]")
 _STOCK_RE = re.compile(r"在庫: (\d+)/(\d+) あり")
@@ -128,11 +138,13 @@ def attach_titles(rows: list) -> None:
         import sheet_updater as su  # noqa: PLC0415
         sheet = su.open_sheet().worksheets()[0].get_all_values()
         title = {r[2]: r[1] for r in sheet[1:] if len(r) > 2 and r[2]}
+        url = {r[2]: (r[5] if len(r) > 5 else "") for r in sheet[1:] if len(r) > 2 and r[2]}
     except Exception as e:
         print(f"  [!] 商品名の取得を skip ({type(e).__name__}: {str(e)[:60]})", flush=True)
         return
     for r in rows:
         r["title"] = title.get(r["item_id"], "")
+        r["url"] = url.get(r["item_id"], "")      # 再出品する時の仕入元
 
 
 def format_report(rows: list, stats: dict, stale_days: int) -> str:
@@ -160,8 +172,43 @@ def format_report(rows: list, stats: dict, stale_days: int) -> str:
     return "\n".join(lines)
 
 
-def end_listings(rows: list, stale_days: int) -> dict:
-    """取り下げ候補を実際に End する (送った後に状態を確認する)."""
+def _append_history(entry: dict) -> None:
+    """取り下げた記録を残す (後から追えるように。silent に消さない)."""
+    try:
+        ENDED_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        with open(ENDED_LEDGER, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"  [!] 履歴に書けませんでした ({type(e).__name__}: {str(e)[:60]})", flush=True)
+
+
+def _mark_excluded(item_ids: set) -> int:
+    """終了した listing の行を FLG=1 (巡回対象外) にする。行は消さない.
+
+    終了済みの出品を巡回し続けると、毎回「eBay に無い」を検出してノイズになる。
+    再出品する時は HQ が新しい itemID を入れて FLG を戻す。
+    """
+    if not item_ids:
+        return 0
+    try:
+        import sheet_updater as su  # noqa: PLC0415
+        ws = su.open_sheet().worksheets()[0]
+        values = ws.get_all_values()
+        updated = 0
+        for idx, row in enumerate(values[1:], start=2):
+            iid = (row[su.MAIN_COL_LISTING_ID - 1] if len(row) >= su.MAIN_COL_LISTING_ID else "").strip()
+            flg = (row[su.MAIN_COL_FLG - 1] if len(row) >= su.MAIN_COL_FLG else "").strip()
+            if iid in item_ids and flg != "1":
+                ws.update(range_name=f"A{idx}", values=[["1"]])
+                updated += 1
+        return updated
+    except Exception as e:
+        print(f"  [!] シートの FLG 更新を skip ({type(e).__name__}: {str(e)[:60]})", flush=True)
+        return 0
+
+
+def end_listings(rows: list, stale_days: int, max_auto: int = MAX_AUTO_END) -> dict:
+    """取り下げ候補を実際に End する (送った後に状態を確認し、履歴を残す)."""
     inv_root = SCRIPT_DIR.parent.parent / "iMakInventory"
     if str(inv_root) not in sys.path:
         sys.path.insert(0, str(inv_root))
@@ -170,6 +217,13 @@ def end_listings(rows: list, stale_days: int) -> dict:
     )
 
     targets = [r for r in rows if r["days"] >= stale_days]
+    # 急増ガード: 一度に大量終了は「巡回が全件を誤判定した」疑いの方が高い。
+    # 取り下げは元に戻せない (itemID が消える) ので、多い時は 1 件も触らない。
+    if len(targets) > max_auto:
+        print(f"  [★HOLD] 対象が {len(targets)} 件 (上限 {max_auto}) → 1 件も取り下げません。"
+              f"巡回側の異常が無いか確認してください", flush=True)
+        return {"ended": [], "failed": [], "targets": len(targets), "held": True}
+
     done, failed = [], []
     for r in targets:
         iid = r["item_id"]
@@ -180,14 +234,29 @@ def end_listings(rows: list, stale_days: int) -> dict:
         xml = (_call_trading("GetItem", body, raw_xml_cap=None).get("raw_xml") or "")
         m = re.search(r"<ListingStatus>(\w+)</ListingStatus>", xml)
         status = m.group(1) if m else "?"
-        if status in ("Completed", "Ended"):
+        ok = status in ("Completed", "Ended")
+        _append_history({
+            "ended_at": datetime.now().isoformat(timespec="seconds"),
+            "item_id": iid, "brand": r.get("brand", ""), "title": r.get("title", ""),
+            "zero_since": r.get("zero_since"), "days_at_zero": r.get("days"),
+            "source_url": r.get("url", ""),          # 再出品する時の仕入元
+            "reason": f"在庫0が {r.get('days')} 日継続 (基準 {stale_days} 日)",
+            "verified_status": status, "verified_ok": ok,
+            "error_code": res.get("error_code"),
+        })
+        if ok:
             done.append(iid)
             print(f"  {iid}: 取り下げ完了 ({status})", flush=True)
         else:
             failed.append(iid)
             print(f"  {iid}: ★終了を確認できず (status={status} / "
                   f"err={res.get('error_code')})", flush=True)
-    return {"ended": done, "failed": failed, "targets": len(targets)}
+
+    excluded = _mark_excluded(set(done))
+    if excluded:
+        print(f"  シートの {excluded} 行を巡回対象外 (FLG=1) にしました", flush=True)
+    return {"ended": done, "failed": failed, "targets": len(targets),
+            "held": False, "excluded_rows": excluded}
 
 
 def main() -> int:

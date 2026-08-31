@@ -17,6 +17,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# 取下げの実処理は iMakInventory 側の eBay クライアントを使う (patch のために先に通す)
+_INV_ROOT = ROOT.parent.parent / "iMakInventory"
+if str(_INV_ROOT) not in sys.path:
+    sys.path.insert(0, str(_INV_ROOT))
+
 import stale_zero_report as sz  # noqa: E402
 
 
@@ -104,3 +109,90 @@ def test_report_says_ending_disables_auto_revive(tmp_path):
 def test_no_logs_is_reported_not_silently_empty(tmp_path):
     series, brand = sz.build_series(tmp_path)
     assert series == {} and brand == {}
+
+
+# ============================================================================
+# 自動 END (2026-09-01 ユーザー指示で有効化)
+# ============================================================================
+from unittest.mock import patch  # noqa: E402
+
+
+def _row(iid, days, brand="uniqlo"):
+    return {"item_id": iid, "brand": brand, "zero_since": "2026-07-01",
+            "days": days, "title": "t", "url": "https://www.uniqlo.com/x"}
+
+
+def _patch_ebay(status="Completed"):
+    """end_fixed_price_item と、終了後の状態確認をまとめて差し替える."""
+    mod = "ebay_actions.trading_api_client"
+    xml = f"<GetItemResponse><ListingStatus>{status}</ListingStatus></GetItemResponse>"
+    return (patch(f"{mod}.end_fixed_price_item", return_value={"success": True}),
+            patch(f"{mod}._call_trading", return_value={"raw_xml": xml}))
+
+
+def test_ends_only_items_over_threshold(tmp_path, monkeypatch):
+    monkeypatch.setattr(sz, "ENDED_LEDGER", tmp_path / "ended.jsonl")
+    monkeypatch.setattr(sz, "_mark_excluded", lambda ids: 0)
+    p1, p2 = _patch_ebay()
+    with p1, p2:
+        res = sz.end_listings([_row("111", 40), _row("222", 5)], stale_days=30)
+
+    assert res["ended"] == ["111"]           # 5日のものは触らない
+    assert res["failed"] == []
+
+
+def test_history_is_written_with_source_url(tmp_path, monkeypatch):
+    """★ 履歴が残ること。仕入元URLも残す (後で再出品できるように)."""
+    led = tmp_path / "ended.jsonl"
+    monkeypatch.setattr(sz, "ENDED_LEDGER", led)
+    monkeypatch.setattr(sz, "_mark_excluded", lambda ids: 0)
+    p1, p2 = _patch_ebay()
+    with p1, p2:
+        sz.end_listings([_row("111", 40)], stale_days=30)
+
+    import json as _json
+    rec = _json.loads(led.read_text(encoding="utf-8").splitlines()[0])
+    assert rec["item_id"] == "111"
+    assert rec["source_url"] == "https://www.uniqlo.com/x"
+    assert rec["days_at_zero"] == 40
+    assert rec["verified_ok"] is True
+    assert rec["ended_at"]
+
+
+def test_unverified_end_is_reported_not_counted_as_done(tmp_path, monkeypatch):
+    """送っただけで「終了した」と数えない (実際の状態で判定する)."""
+    monkeypatch.setattr(sz, "ENDED_LEDGER", tmp_path / "ended.jsonl")
+    monkeypatch.setattr(sz, "_mark_excluded", lambda ids: 0)
+    p1, p2 = _patch_ebay(status="Active")     # 終了できていない
+    with p1, p2:
+        res = sz.end_listings([_row("111", 40)], stale_days=30)
+
+    assert res["ended"] == []
+    assert res["failed"] == ["111"]
+
+
+def test_mass_end_is_held(tmp_path, monkeypatch):
+    """★ 一度に大量に出たら 1 件も終了しない (巡回側の異常の疑い)."""
+    monkeypatch.setattr(sz, "ENDED_LEDGER", tmp_path / "ended.jsonl")
+    called = []
+    monkeypatch.setattr(sz, "_mark_excluded", lambda ids: called.append(ids) or 0)
+    rows = [_row(str(i), 40) for i in range(40)]
+    p1, p2 = _patch_ebay()
+    with p1, p2:
+        res = sz.end_listings(rows, stale_days=30, max_auto=30)
+
+    assert res["held"] is True
+    assert res["ended"] == []
+    assert called == []                       # シートも触らない
+
+
+def test_ended_rows_are_excluded_from_patrol(tmp_path, monkeypatch):
+    """終了した行は巡回対象外にする (毎回「eBayに無い」を出さない)."""
+    monkeypatch.setattr(sz, "ENDED_LEDGER", tmp_path / "ended.jsonl")
+    seen = {}
+    monkeypatch.setattr(sz, "_mark_excluded", lambda ids: seen.update({"ids": ids}) or len(ids))
+    p1, p2 = _patch_ebay()
+    with p1, p2:
+        sz.end_listings([_row("111", 40)], stale_days=30)
+
+    assert seen["ids"] == {"111"}
