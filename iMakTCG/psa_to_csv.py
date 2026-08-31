@@ -2948,6 +2948,7 @@ def load_targets_from_sheet_psa():
                               listed_certs as _listed_certs,
                               live_listed_certs as _live_certs,
                               already_listed_reason as _already_listed,
+                              zero_qty_ghost_certs as _ghost_certs,
                               PRODUCT_COL_KEY as _KEY_COL)
         _listed = _listed_key_forms(all_values)
         # 出品済 cert は2つの根拠を union する。片方だけでは漏れる:
@@ -3026,13 +3027,26 @@ def load_targets_from_sheet_psa():
               f"→ {_skipped_nocost[:8]}{' …' if len(_skipped_nocost) > 8 else ''}")
         print(f"     (価格が無いと $100 固定で値付けされる = 赤字出品になるため出さない)")
     if _skipped_cert:
-        print(f"  🚫 二重出品ガード: 同一cert が既に出品済 → 除外 {len(_skipped_cert)}件 "
-              f"→ {_skipped_cert[:8]}{' …' if len(_skipped_cert) > 8 else ''}")
-        print(f"     (同じ cert = 同じ現物。二度出すと片方は必ず履行できない)")
-        # ★2026-08-07 重複くん要望: 抽出段で落とした cert を **後から追える形**で残す。
-        #   抽出段は「目視削減の前段」であって判定の権威ではない。権威は重複くん。
-        #   痕跡が無いと重複くんが「本来自分が捕まえるべきだった件」を audit できない。
-        record_cert_skips("same_cert_already_listed", _skipped_cert)
+        # ★2026-08-31 (catalog 依頼 cert152976751): 「itemID 非空 = 出品済」だけでは、
+        #   **取り下げ済み・器だけ残っている(qty=0)**行と、まだ生きている行を区別できない。
+        #   qty=0 の方は毎回黙って落とされ続け、目視で8回 OK と答えても何も起きなかった。
+        #   funnel の qty で分け、qty=0 は別の理由名で記録 + 別行で目立たせる (silent 禁止)。
+        _ghost = _ghost_certs(all_values, _skipped_cert, _latest_funnel_qty_map())
+        _live_skip = [c for c in _skipped_cert if c not in _ghost]
+        if _live_skip:
+            print(f"  🚫 二重出品ガード: 同一cert が既に出品済 → 除外 {len(_live_skip)}件 "
+                  f"→ {_live_skip[:8]}{' …' if len(_live_skip) > 8 else ''}")
+            print(f"     (同じ cert = 同じ現物。二度出すと片方は必ず履行できない)")
+            # ★2026-08-07 重複くん要望: 抽出段で落とした cert を **後から追える形**で残す。
+            #   抽出段は「目視削減の前段」であって判定の権威ではない。権威は重複くん。
+            #   痕跡が無いと重複くんが「本来自分が捕まえるべきだった件」を audit できない。
+            record_cert_skips("same_cert_already_listed", _live_skip)
+        if _ghost:
+            print(f"  ⚠️ 要対応: 出品の器はあるが在庫0 (取下げ済) → 除外 {len(_ghost)}件 "
+                  f"→ {sorted(_ghost)[:8]}{' …' if len(_ghost) > 8 else ''}")
+            print(f"     (RESTOCK で数量を戻すか、器を終了して出し直すかの判断が必要。"
+                  f"status_now.py に出ます)")
+            record_cert_skips("same_cert_zero_qty_ghost", sorted(_ghost))
     if _skipped_listed:
         print(f"  ⏭️ 既出品(同KEYが出品済)の2枚目を除外: {_skipped_listed}件 "
               f"(viewer毎回再表示の浪費防止。dedupと二重ではなく抽出段階で先に止める)")
@@ -3040,6 +3054,37 @@ def load_targets_from_sheet_psa():
 
 
 CERT_SKIP_LEDGER = r"C:\dev\iMak_data\hq\extract_cert_skips.jsonl"
+FUNNEL_DIR_FOR_GHOST_CHECK = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "iMakHQ", "funnel_output"))
+
+
+def _latest_funnel_qty_map(funnel_dir=None):
+    """最新 funnel CSV の {itemID: qty} (読めなければ空)。cert152976751 対応 (2026-08-31)。
+
+    eBay は叩かない (funnel は cull_end / shelf_evict と同じローカル CSV)。
+    ゴースト判定 (器はあるが在庫0) のためだけに使う。読めない/無い時は
+    空を返し、呼出側は fail-closed (= 従来どおり「まだ生きている」扱い) に倒れる。
+    """
+    import csv as _csv
+    import glob as _glob
+    out = {}
+    try:
+        fs = _glob.glob(os.path.join(funnel_dir or FUNNEL_DIR_FOR_GHOST_CHECK, "funnel_*.csv"))
+        if not fs:
+            return out
+        src = max(fs, key=os.path.getmtime)
+        with open(src, encoding="utf-8") as f:
+            for r in _csv.DictReader(f):
+                iid = (r.get("item_id") or "").strip()
+                if not iid:
+                    continue
+                try:
+                    out[iid] = float(str(r.get("qty") or 0).replace(",", ""))
+                except ValueError:
+                    continue
+    except OSError:
+        return {}
+    return out
 
 
 def record_cert_skips(reason, certs, detail=None, path=None, now=None, print_fn=print):

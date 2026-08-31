@@ -325,6 +325,33 @@ def build_cert_map(rows2d, itemid_col=PRODUCT_COL_ITEMID, cert_col=PRODUCT_COL_C
     return out
 
 
+def zero_qty_ghost_certs(all_values, certs, funnel_qty):
+    """skip 予定の cert のうち、器 (itemID) は在るが funnel 上で qty==0 の集合を返す。
+
+    ★2026-08-31: cert152976751 の実害 (catalog 依頼) から起こした。
+      `already_listed_reason` は「itemID が非空 = 出品済」としか見ておらず、
+      **在庫0で取り下げ済み・器だけ残っている**ケースを「まだ生きている出品」と
+      同じ扱いで毎回黙って落としていた (8回連続、目視で OK と答えても何も起きない)。
+      ここは判定を変えない (二重出品ガードは維持する)。呼出側が
+      「同じ落とすでも in理由 が違う」ことに気づけるよう、対象集合だけを分けて返す。
+
+    funnel_qty: {itemID(str): qty(float)} — 呼出側が最新 funnel CSV から作って渡す
+      (ここではファイルを読まない。純関数, test可)。
+      itemID が funnel に無い/qty不明の cert は **含めない** (fail-closed。
+      分からない物は従来どおり「まだ生きている」扱いのまま止める)。
+    """
+    cert_to_itemid = {c: iid for iid, c in build_cert_map(all_values).items()}
+    out = set()
+    for c in (certs or []):
+        iid = cert_to_itemid.get(str(c))
+        if iid is None:
+            continue
+        q = funnel_qty.get(iid)
+        if q is not None and float(q) == 0:
+            out.add(str(c))
+    return out
+
+
 def product_index():
     """商品管理シートを1回読んで (key_map, itemid_to_row, cert_map) を返す (I/O)。
 

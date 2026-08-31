@@ -91,6 +91,35 @@ def _viewer_disagreement(limit=5):
     return [f"計 {len(rows)}件 (直近 {len(out)}件)"] + out
 
 
+CERT_SKIP_LEDGER = r"C:\dev\iMak_data\hq\extract_cert_skips.jsonl"
+
+
+def _zero_qty_ghost_certs(limit=5):
+    """出品の器はあるが在庫0 (取下げ済) の cert = ②出品くんの引き方の宿題 (2026-08-31)。
+
+    ★catalog 依頼 cert152976751: `extract_cert_skips.jsonl` には毎回記録されていたが、
+      読む側がゼロで、目視で8回 OK と答えても何も起きないまま気づかれなかった
+      (`_viewer_disagreement` と同型の穴。同じ理由で現在地に出す)。
+    """
+    import json as _json
+    try:
+        with open(CERT_SKIP_LEDGER, encoding="utf-8", errors="replace") as f:
+            recs = [_json.loads(ln) for ln in f if ln.strip()]
+    except OSError:
+        return []
+    latest = {}          # cert → 最後に記録された時刻 (最新状態だけ見る)
+    for r in recs:
+        if r.get("reason") != "same_cert_zero_qty_ghost":
+            continue
+        for c in r.get("certs") or []:
+            latest[c] = r.get("ts", "")
+    if not latest:
+        return []
+    ordered = sorted(latest, key=lambda c: latest[c], reverse=True)
+    return [f"計 {len(latest)}件 (直近 {min(limit, len(ordered))}件)"] + [
+        f"cert{c}  最終検知 {latest[c]}" for c in ordered[:limit]]
+
+
 def _commits():
     out = _run(["git", "log", "--since=midnight",
                 "--format=%h %ad %s", "--date=format:%H:%M"])
@@ -186,6 +215,14 @@ def main():
         for ln in vd:
             print("  " + ln)
         print("  → catalog の欠落ではない。同定経路(viewer/adapter)を直す side")
+
+    gz = _zero_qty_ghost_certs()
+    if gz:
+        print("\n## 3c. ②の宿題 — 出品の器はあるが在庫0 (RESTOCK か End+出し直しの判断待ち)\n")
+        for ln in gz:
+            print("  " + ln)
+        print("  → 二重出品ガードで毎回黙って落ちている。RESTOCK で数量を戻すか、"
+              "器を終了して出し直すか決めること")
 
     for ln in _stalled():          # 動いている限り何も出ない (常時表示しない)
         print("\n" + ln)
