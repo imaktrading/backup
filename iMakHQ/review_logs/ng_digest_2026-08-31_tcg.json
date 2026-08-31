@@ -1,0 +1,23 @@
+{
+  "project": "tcg",
+  "program_items": [],
+  "log_signals": [
+    "catalog miss: 1件"
+  ],
+  "recurring_missing": [
+    {
+      "category": "tcg",
+      "item_id": "selfcheck:必須Item Specific 'Type' (タイプ) が空",
+      "target_field": "program_fix",
+      "finding_type": "program_fix",
+      "seen_count": 4,
+      "seen_days": 3,
+      "status": "pending"
+    }
+  ],
+  "counts": {
+    "program": 0,
+    "log": 1,
+    "recurring_missing": 1
+  }
+}
