@@ -1134,16 +1134,19 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     _signal_csv_up(csv_path, len(rows) - len(exclude_idx), dry_run, degraded)
     # --- PDCA: 台帳に蓄積 + 前回比トレンド + 再発検知 (dry-run は追記しない) ---
     _ledger_report(project, headers, rows, exclude_idx, program_items, seo_notes, dry_run)
+    # --- 決定論NG digest: program不整合 + logシグナル + 再発finding(pdca seen_count) を束ねる(無言スキップ防止=PDCA担保) ---
+    # ★2026-07-25: recurring は project-scoped(監査対象=project のカテゴリのみ)。missing_models/pdca は
+    # グローバル台帳のため、他プロジェクト由来(例 gshock 監査に dragonball_scg=TCG)の混入を除外。
+    # ★2026-09-01: `_pdca_accumulate` より**先**に読む。`_pdca_accumulate` 内の emit/prune が
+    # pending→done に落とすため、後から読むと同日中に closeされた再発が digest に一度も載らない
+    # (=digestが構造的に毎日0件に見える fail-OPEN)。出典: hq/requests/2026-09-01_act_code_proposals_tcg.md 提案1
+    recurring = filter_recurring_for_project(recurring_findings(_load_pdca_recurring()), project)
+    digest = _build_ng_digest(project, program_items, log_signals, recurring)
+    digest_path = _write_ng_digest(project, digest, dry_run)
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
     _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku,
                      audited_rows=len(rows),
                      audited_skus=[_row_sku(headers, r) for r in rows])
-    # --- 決定論NG digest: program不整合 + logシグナル + 再発finding(pdca seen_count) を束ねる(無言スキップ防止=PDCA担保) ---
-    # ★2026-07-25: recurring は project-scoped(監査対象=project のカテゴリのみ)。missing_models/pdca は
-    # グローバル台帳のため、他プロジェクト由来(例 gshock 監査に dragonball_scg=TCG)の混入を除外。
-    recurring = filter_recurring_for_project(recurring_findings(_load_pdca_recurring()), project)
-    digest = _build_ng_digest(project, program_items, log_signals, recurring)
-    digest_path = _write_ng_digest(project, digest, dry_run)
     if recurring:
         top = recurring[0]
         print(f"  🔁 再発finding(catalog依頼/修正で消えない) {len(recurring)}件 → 構造/コード疑い(Actで提案化)"
