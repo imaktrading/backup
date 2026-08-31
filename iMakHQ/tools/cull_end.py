@@ -153,12 +153,20 @@ def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None,
     age 不明(0)は対象外 (fail-closed)。テスト可能なよう純関数化。
     site=None で サイトの絞りを外す (件数の把握用。取り下げには使わない)。
     """
+    # ★2026-08-31: アパレル (UNIQLO/GU 等) を除外する。MIN_PRICE ($100) を撤廃するまでは
+    #   UT系Tシャツの多くが $100 未満で偶然弾かれていたが、撤廃した実測で 153件中92件が
+    #   アパレルだと判明した。shelf_evict.py の 2026-08-28 決定 (公式在庫が戻れば監視くんが
+    #   数量を戻すので、取り下げると戻せなくなる) と同じ理由でここも守る必要がある。
+    #   判定ロジックの二重管理を避けるため shelf_evict.is_protected を呼ぶ (遅延import:
+    #   shelf_evict は cull_end を import しており、モジュール先頭では循環になる)。
+    from shelf_evict import is_protected as _is_protected
     cull = [r for r in rows if "CULL" in (r.get("flags") or "").split("|")]
     done = done_ids or set()
     eligible = [r for r in cull
                 if (site is None or is_target_site(r, site))
                 and _i(r.get("age_days")) >= min_age and _f(r.get("price")) >= min_price
-                and r.get("item_id") not in done]
+                and r.get("item_id") not in done
+                and not _is_protected(r.get("title"))]
     # ★2026-08-24: **今月出品した分を先に**。当月の枠が戻るのはそこだけ
     #   (実測: 古い順だけで 361件 落として当月に戻ったのは 1.5%)。
     #   今月分は金額の大きい順 = 戻る額を最大化。それ以前は従来どおり age 降順
@@ -184,6 +192,9 @@ def end_status(row, done_ids=None, today=None, min_age=MIN_AGE, min_price=MIN_PR
         return "🗑 取下げ 済"
     if site is not None and not is_target_site(row, site):
         return "🗑 取下げ 未 (US以外 = eBaymag のミラー。親を落とせば消える)"
+    from shelf_evict import is_protected as _is_protected
+    if _is_protected(row.get("title")):
+        return "🗑 取下げ 未 (アパレル = 監視くんが公式在庫を見て自動復活)"
     age = _i(row.get("age_days"))
     if age < min_age:
         return f"🗑 取下げ 未 (出品 {min_age}日未満)" if age > 0 else "🗑 取下げ 未 (出品日 不明)"
