@@ -108,8 +108,14 @@ def test_status_cull_pending_reasons():
     nxt = LF.oos_status(_row(item_id="9"), cull_ids={"9"}, done_ids=set())
     assert nxt.startswith("🗑 取下げ 未") and "次回" in nxt
 
-    young = LF.oos_status(_row(item_id="9", age_days=3), cull_ids={"9"}, done_ids=set())
-    assert f"{cull_end.MIN_AGE}日未満" in young
+    # ★2026-08-31: MIN_AGE を 14→1 に変更 (在庫0の間は待っても表示が増えないため、
+    #   既知の若さでは待たない。0=年齢不明の sentinel だけ fail-closed で除外する)。
+    #   これにより「N日未満」枝は事実上 age==0 でしか届かず、その時は「不明」枝を返す。
+    unknown_age = LF.oos_status(_row(item_id="9", age_days=0), cull_ids={"9"}, done_ids=set())
+    assert "出品日 不明" in unknown_age
+
+    known_young = LF.oos_status(_row(item_id="9", age_days=1), cull_ids={"9"}, done_ids=set())
+    assert "次回" in known_young, "既知の年齢 (1日) は、もう待たされない"
 
     cheap = LF.oos_status(_row(item_id="9", price=20), cull_ids={"9"}, done_ids=set())
     assert "未満は枠に効かない" in cheap

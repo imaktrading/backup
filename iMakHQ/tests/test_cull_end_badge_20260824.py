@@ -65,10 +65,15 @@ def test_already_dropped_are_excluded(tmp_path, monkeypatch):
     assert got["remaining"] == 1 and got["done"] == 2
 
 
-def test_young_and_cheap_are_not_counted(tmp_path, monkeypatch):
-    """本処理と同じふるいを通す (age / 価格)。ラベルと実際がずれない。"""
+def test_unknown_age_and_cheap_are_not_counted(tmp_path, monkeypatch):
+    """本処理と同じふるいを通す (age / 価格)。ラベルと実際がずれない。
+
+    ★2026-08-31: MIN_AGE を 14→1 に変更 (在庫0の間は待っても表示が増えないので、
+      既知の若さでは待たない)。age==0 (=年齢不明の sentinel) だけ fail-closed で
+      引き続き除外する。
+    """
     monkeypatch.setattr(C, "load_done", lambda: set())
-    d = _funnel(tmp_path, [_row("a", age=1), _row("b", price=10), _row("c")])
+    d = _funnel(tmp_path, [_row("a", age=0), _row("b", price=10), _row("c")])
     assert C.count_workload(funnel_dir=d)["remaining"] == 1
 
 

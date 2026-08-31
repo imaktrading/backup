@@ -104,12 +104,18 @@ def test_live_picks_only_dead_ones():
 
 
 def test_live_rows_feed_select_unchanged():
-    """live の行が既存の select() にそのまま通ること (下流を作り直さない)。"""
+    """live の行が既存の select() にそのまま通ること (下流を作り直さない)。
+
+    ★2026-08-31: MIN_AGE を 14→1 に変更 (在庫0の間は待っても表示が増えないので、
+      既知の若さでは待たない)。age=5 も既知なのでもう対象に入る。
+      並び順は別ロジック (2026-08-24 制定「今月出品分を先に」): today=1/15 時点で
+      age=5 の "b" は今月出品 (1/10) → 先頭、age=99 の "a" は前月以前 → その後。
+    """
     import datetime
     rows = C.rows_from_live(_live(_it("a", age=99), _it("b", age=5)))
     cull, eligible, picked = C.select(rows, today=datetime.date(2030, 1, 15))
     assert len(cull) == 2
-    assert [r["item_id"] for r in eligible] == ["a"], "14日未満を拾っている"
+    assert [r["item_id"] for r in eligible] == ["b", "a"], "age=5 (既知) がもう待たされていない"
 
 
 def test_live_missing_fields_mean_zero():

@@ -3,7 +3,8 @@
 """在庫切れ対応ツール A(restock_worklist) / B(cull_end) の回帰テスト。
 
 B の安全策 (2026-06-05 ユーザー合意) が崩れないことを固定する:
-  - age>=14日 のみ (NEW_WAIT補正。2026-08-24 に 21→14)
+  - age>=1日 のみ (2026-08-24 に 21→14、2026-08-31 に 14→1。在庫0の間は待っても
+    表示が増えないので、既知の若さでは待たない)
   - age 不明(0)は fail-closed で対象外
   - **$100未満は対象外** (2026-08-24。枠は金額で詰まっており安い出品を落としても効かない)
   - CAP 200件/回 (burst禁止。2026-08-23 に 50→200)
@@ -44,18 +45,21 @@ def _row(item_id, flags="CULL", age=100, price=200.0, **kw):
 
 
 # ---------- B: cull_end.select ----------
-def test_cull_excludes_young_and_unknown_age():
+def test_cull_excludes_unknown_age():
+    """★2026-08-31: MIN_AGE を 14→1 に変更 (在庫0の間は待っても表示が増えないので、
+    既知の若さでは待たない)。age==0 (=年齢不明の sentinel) だけ fail-closed で除外する。
+    """
     rows = [
         _row("a", age=100),          # OK
-        _row("b", age=13),           # age<14 → 除外
+        _row("b", age=13),           # 既知の若さ → もう待たされない (OK)
         _row("c", age=0),            # age不明 → fail-closed 除外
-        _row("d", age=14),           # 境界 OK
+        _row("d", age=14),           # OK
         _row("e", flags="RESTOCK", age=100),  # CULL でない → 除外
     ]
     _cull, eligible, picked = cull_end.select(rows, today=_OLD)
     ids = {r["item_id"] for r in eligible}
-    assert ids == {"a", "d"}
-    assert all(cull_end._i(r["age_days"]) >= 14 for r in picked)
+    assert ids == {"a", "b", "d"}
+    assert all(cull_end._i(r["age_days"]) >= cull_end.MIN_AGE for r in picked)
 
 
 def test_cull_excludes_cheap():
