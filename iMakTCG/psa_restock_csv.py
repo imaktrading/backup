@@ -1044,6 +1044,21 @@ def parse_psa_page(text):
     data = {}
     lines = [l.strip() for l in text.split('\n') if l.strip()]
 
+    # 2026-08-31: PSA ページに書いてある項目 (グレード等) を拾う。
+    #   新規側 (psa_to_csv) は 2026-08-23 から拾っていたが、この fork には入っておらず
+    #   グレードを一次情報から確認できないまま再出品していた。ここが埋まると
+    #   (a) PSA10 ゲートが効き (b) ラベル画像を API に送らずに済む。
+    #   読み取りの規則は新規側と共有する (2か所に書くと必ず片方が腐る)。
+    try:
+        from psa_to_csv import _PSA_PAGE_FIELDS, _value_after_label
+        for _label, _key in _PSA_PAGE_FIELDS.items():
+            _v = _value_after_label(lines, _label)
+            if _v:
+                data[_key] = _v
+    except Exception as _e:                                       # noqa: BLE001
+        # 読めなくても止めない。Grade が空 = 後段が fail-closed 側 (画像で確認) に倒れる
+        print(f'    ⚠️ PSA ページ項目の読み取りをスキップ: {type(_e).__name__}: {_e}')
+
     for i, line in enumerate(lines):
         # "2025 GUNDAM JAPANESE DUAL IMPACT #055 GUNDAM GUSION REBAKE" パターン
         match = re.search(r'^(.+?)\s+#([\w-]+)\s+(.+)$', line)
@@ -1516,6 +1531,16 @@ def _pad_title_with_facts(title, year, rarity_short, set_code, target_min=70, ma
     return title
 
 
+# 2026-08-31: グレード文字列 ('GEM MT 10' → '10') の読み方は新規側と共有する。
+#   自前で書くと片方だけ直る (この fork がまさにそれで PSA10 ゲートを持っていなかった)。
+def _grade_number(item_grade):
+    try:
+        from psa_to_csv import grade_number
+    except Exception:                                             # noqa: BLE001
+        return ''          # 読めない = 空 → 後段が fail-closed (画像で確認 / 出品しない)
+    return grade_number(item_grade)
+
+
 def build_row(cert_number, price, data, description, driver=None, catalog_misses=None):
     subject = data.get('Subject', 'Unknown')
     card_number = data.get('CardNumber', '')
@@ -1848,8 +1873,32 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     except Exception as _e:
         print(f"    ⚠️ subject 正規化失敗、生 subject 使用: {type(_e).__name__}: {_e}")
         subject_clean = subject
-    claude_result = generate_title_with_claude(game, set_name, official_card_number, subject_clean, franchise, card_image_url)
+    # 2026-08-31: 本番 (TCG_USE_NEW_GEN=1) はタイトルを新コアが catalog 値で作り直すので、
+    #   ここで作った Claude タイトルは捨てられる。グレードは PSA ページの Item Grade から
+    #   読めるので、画像を API に送る必要が無い。新規側 (psa_to_csv) は 2026-08-23 に
+    #   同じ判定を入れており、この fork にだけ入っていなかった (= 払うだけの API 呼び出し)。
+    #   読めなかった時だけ従来どおり画像でラベルを確認する (fail-closed 維持)。
+    _page_grade = _grade_number(data.get('Grade'))
+    if os.environ.get('TCG_USE_NEW_GEN') == '1' and _page_grade:
+        claude_result = {}
+    else:
+        claude_result = generate_title_with_claude(
+            game, set_name, official_card_number, subject_clean, franchise, card_image_url)
     claude_result = claude_result or {}
+
+    # 2026-08-31: PSA10 だけ出品する規定 (2026-07-27 に PSA9 が4件 live に出て END した)。
+    #   新規側は 2026-08-23 から止めているが、この fork には**ゲートが無かった**。
+    #   C:Grade は '10' 固定・タイトルも 'PSA 10' で始まるため、PSA9 が混ざると
+    #   グレード誤表示 + PSA10 相場の誤参照になる。現物由来の値で確認できた時だけ通す。
+    _grade = _page_grade or str((claude_result or {}).get('psa_grade') or '').strip()
+    if _grade != '10':
+        _src = 'PSAページ' if _page_grade else ('ラベル画像' if _grade else '')
+        if _grade:
+            print(f'    🚫 PSA{_grade} を検出({_src}) → 再出品しない (PSA10 のみ出品する規定)')
+        else:
+            print('    🚫 グレードを確かめられなかった → 再出品しない '
+                  '(PSA10 のみ出品する規定)。PSA ページの Item Grade が読めていません')
+        return None
 
     # Item Specifics: 公式DB のみ採用 (2026-04-24 物理強制化、Claude フォールバック全廃)
     # グローバル CLAUDE.md「確証なきは空欄、公式サイトからの推定は不可」+ memory `enforce_in_python_not_prompt`
