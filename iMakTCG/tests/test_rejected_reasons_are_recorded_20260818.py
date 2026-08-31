@@ -55,10 +55,16 @@ class TestSelfCheckFailureBecomesABacklogItem:
         assert 'layer="code"' in block and 'finding_type="program_fix"' in block
 
     def test_deduped_by_symptom_not_by_card(self):
-        """同じ症状は1件に畳む (カードごとに積むと毎日増える)."""
+        """同じ症状は1件に畳む (カードごとに積むと毎日増える)。
+
+        ★2026-08-29 提案3: dkey に catalog 到達可否の真因ラベルも足した
+        (`catalog_reach_label`)。brand/cert 等の可変部は含めない固定ラベルなので、
+        同じ真因なら今までどおり1件に畳まれる。
+        """
         s = _src()
         i = s.index("この商品はCSVに含めません")
-        assert 'f"selfcheck:{str(_errors[0])[:60]}"' in s[i:i + 700]
+        block = s[i:i + 700]
+        assert 'f"selfcheck:{str(_errors[0])[:60]}|{catalog_reach_label(_catalog_hit)}"' in block
 
 
 class TestRecordingNeverBlocksListing:

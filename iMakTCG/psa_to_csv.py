@@ -2233,6 +2233,12 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             pid_by_cert[str(cert_number)] = pid
     game, set_name, franchise = detect_game_info(brand)
 
+    # 2026-08-29 提案2: selfcheck 失敗時に「catalog を引けたのか」を言えるようにする
+    # (①カタログの欠落 / ②出品くんの引き方 の判定をその場で付けるため)。
+    # 各 franchise の分岐が hit/miss を判定した時に更新する (下の各 elif ブロック)。
+    _catalog_hit = False
+    _catalog_pid = ""
+
     # 2026-07-30: 共通ヘルパ tcg_scope.is_out_of_scope に SSOT 集約。
     # 従来は build_row 内に 4 分岐 (Yu-Gi-Oh!/Heroes/Itajaga/Pokemon FAMILY) が個別 return None、
     # 加えて post_psa_review._route_none_to_catalog が同じ真理表を持たず missing_models.csv に
@@ -2367,6 +2373,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             print(f"    ⚠️ catalog_localization 失敗: {type(_e).__name__}: {_e}")
             # bandai は元のまま、既存挙動継続
         if bandai:
+            _catalog_hit = True
+            _catalog_pid = bandai.get("card_id") or bandai.get("product_id") or ""
             character = bandai.get("name_en") or character
             official_card_type = bandai.get("type_en", "")
             official_rarity = bandai.get("rarity_en", "")     # 既に eBay 形式 (SR/C/L→空)
@@ -2408,6 +2416,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         # ID 完全一致のみ、フォールバック禁止 (Pokemon 13件全滅事故再発防止).
         pokemon = catalog_psa.lookup_pokemon(brand, card_number, subject)
         if pokemon:
+            _catalog_hit = True
+            _catalog_pid = pokemon.get("card_id") or pokemon.get("product_id") or ""
             official_rarity = pokemon.get("rarity", "")
             # ★2026-08-26 撤去: `official_power = pokemon.get("hp")`。
             #   HP を C:Attack/Power に写していたので、catalog の attack_power_ebay が
@@ -2453,6 +2463,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             print(f"    ⚠️ Color は物理カード確認後に手動補完してください")
             _record_canonical_pid(db_card_id, "dragonball_scg")
             if db_card:
+                _catalog_hit = True
+                _catalog_pid = db_card_id
                 official_card_type = db_card.get("card_type", "")
                 official_rarity = db_card.get("rarity", "")
                 official_color = db_card.get("color", "")
@@ -2467,6 +2479,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             # 通常カード: iMakCatalog DB lookup
             db_card = catalog_psa.lookup_dragonball(brand, card_number, subject)
             if db_card:
+                _catalog_hit = True
+                _catalog_pid = db_card.get("card_id") or db_card.get("product_id") or ""
                 official_card_type = db_card.get("card_type", "")
                 official_rarity = db_card.get("rarity", "")     # 既に eBay 形式
                 official_color = db_card.get("color", "")
@@ -2495,6 +2509,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
         # ID 完全一致のみ + 名前検証. eBay フィルタ値変換は adapter で済.
         gd_card = catalog_psa.lookup_gundam(brand, card_number, subject)
         if gd_card:
+            _catalog_hit = True
+            _catalog_pid = gd_card.get("card_id") or gd_card.get("product_id") or ""
             official_card_type = gd_card.get("card_type", "")
             official_rarity = gd_card.get("rarity", "")     # 既に eBay 形式
             official_color = gd_card.get("color", "")
@@ -2521,6 +2537,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     elif franchise == "Yu-Gi-Oh!":
         ygo = catalog_psa.lookup_yugioh(brand, card_number, subject)
         if ygo:
+            _catalog_hit = True
+            _catalog_pid = ygo.get("card_id") or ygo.get("product_id") or ""
             try:
                 _raw_specs = ygo.get("specs")
                 if isinstance(_raw_specs, str):
@@ -2800,15 +2818,22 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
     for _w in _warnings:
         print(f"       ⚠️ {_w}")
     if _errors:
+        # ★2026-08-29 提案2: 「必須Item Specific が空」等の failure に catalog 到達可否を付記。
+        #   「引けなかった」=②出品くん / 「引けたが値が無い」=①カタログ、とその場で判定が付く。
+        _annotated_errors = [annotate_selfcheck_error(str(_e), _catalog_hit, _catalog_pid, brand)
+                             for _e in _errors]
         print(f"    ❌ セルフチェック失敗 (#{cert_number}):")
-        for _e in _errors:
+        for _e in _annotated_errors:
             print(f"       ❌ {_e}")
         print(f"    → この商品はCSVに含めません")
         # ★2026-08-18: ここで落ちた分は **ログに出るだけ** で誰にも届いていなかった。
         #   タイトル生成の不具合で毎回同じカードが落ちていても、人がログを読むまで
         #   分からない (cert151235549 ヤマトが実際にそうだった)。症状で dedup して積む。
-        _queue_finding("tcg", f"selfcheck:{str(_errors[0])[:60]}", "program_fix",
-                       f"#{cert_number}: {' / '.join(str(e) for e in _errors)[:100]}",
+        # ★2026-08-29 提案3: dkey に真因キー (catalog_reach_label) を含める。cert/brand は
+        #   evidence (本文) 側だけに置く — dkey に入れると1枚1行に割れてしまう。
+        _queue_finding("tcg", f"selfcheck:{str(_errors[0])[:60]}|{catalog_reach_label(_catalog_hit)}",
+                       "program_fix",
+                       f"#{cert_number}: {' / '.join(_annotated_errors)[:100]}",
                        layer="code", finding_type="program_fix")
         return None
 
@@ -3247,6 +3272,28 @@ def _queue_finding(category, item_id, field, evidence, *, layer="A",
     except Exception as e:                                     # noqa: BLE001
         print(f"    ⚠️ 記録できず (出品は継続): {type(e).__name__}: {e}")
         return False
+
+
+def catalog_reach_label(catalog_hit):
+    """selfcheck 失敗時の catalog 到達可否ラベル (純関数)。
+
+    ★2026-08-29 提案2: 「引けなかった」=②出品くんの引き方 / 「引けたが値が無い」=①カタログ、
+    とその場で 1丁目1番地の判定が付くようにする。brand/cert 等の可変部を含めない
+    (提案3: dkey にそのまま使うと brand が cert ごとに違うため1枚1行に割れてしまう)。
+    出典: hq/requests/2026-08-29_act_code_proposals_tcg_response.md 提案2・3
+    """
+    return "catalog=引けたが値空" if catalog_hit else "catalog=引けず"
+
+
+def annotate_selfcheck_error(error_msg, catalog_hit, catalog_pid, brand):
+    """selfcheck エラー文に catalog 到達可否を付記する (純関数)。
+
+    可変部 (brand/pid) はここ (人が読むログ本文) にだけ入れる。dkey には
+    `catalog_reach_label` の固定ラベルだけを使う (2026-08-29 提案2の条件)。
+    """
+    label = catalog_reach_label(catalog_hit)
+    detail = f"pid={catalog_pid}" if catalog_hit else f"brand={brand!r}"
+    return f"{error_msg} [{label}: {detail}]"
 
 
 def gate_catalog_misses(catalog_misses, csv_certs, pids_by_subject_fn):
