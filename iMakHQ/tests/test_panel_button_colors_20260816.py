@@ -54,8 +54,17 @@ def test_label_fits_in_the_button():
       いまは **件数をヒントに逃がしてラベルは固定** なので、高さも固定でよい。
       ユーザー指示「ラベルはシンプルにして、押すべき時は青色に。
       件数や詳細はヒントテキストに移行」。
+
+    ★2026-08-31 例外: 「棚を入れ替える」ボタンだけ、ユーザーが明示で
+      ラベルにも件数・金額を求めた。この1つだけは高さも伸びる (height=5)。
+      他のボタンがこの型に倣って際限なく伸びないよう、例外は
+      `kind == "shelf_evict"` に限定されていることまで確認する。
     """
     src = _src()
-    assert "b.config(text=base, height=3," in src, "ラベルを固定にしていない"
+    assert "b.config(text=text, height=(5 if extra else 3)," in src, "ラベルの既定挙動を変えている"
     assert "set_tip(" in src, "件数をヒントに回していない"
     assert "(16, 3, 2, 170) if compact else (18, 3, 4, 250)" in src, "既定の高さ/折返し幅が小さいまま"
+    i = src.index("def paint_hoju_badge")
+    body = src[i:i + 1600]
+    assert 'kind == "shelf_evict"' in body, "ラベル例外の対象が絞られていない"
+    assert body.count('kind + "_label"') >= 1, "ラベル例外の取り出し方が変わっている"

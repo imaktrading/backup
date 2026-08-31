@@ -1426,6 +1426,11 @@ SCRIPTS = [
         "label": "🌱 捨てた候補→新規出品の種",
         "label_fg": "#0a7",
         "badge": "newcand",
+        # ★2026-08-31: tip が無いと _attach_tip 自体が呼ばれず (_grid_named は
+        #   `if _tip else None`)、refresh_hoju_badge が数えていた件数 (n_txt) が
+        #   一度も画面に出ていなかった。ヒントに件数を出すにはこの1行が要る。
+        "tip": "補URL確証で「違う(別商品)」「要調査」と捨てた候補を、新規出品の種として"
+               "目視画面に戻します。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "newcand_confirm.py", "--limit=20"],
         "params": [],
@@ -1542,6 +1547,7 @@ SCRIPTS = [
         # 売れるカテゴリの1件に及ばないため。棚$1000あたり利益: Tシャツ¥3,501 / TCG¥97 / G-SHOCK¥0)。
         "category": None, "type": "utility",
         "label": "📉 棚を入れ替える (出品した分だけ・自動)",
+        "badge": "shelf_evict",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "shelf_evict.py", "--end"],
         "params": [],
@@ -3129,11 +3135,16 @@ class ListingPanel:
           件数や詳細はヒントテキストに移行」。
           以前は件数をラベルに焼いていたので、ボタンが4〜7行に伸びて何のボタンか
           読めなかった。**色 = 今押すべきか / ヒント = 何件あるか**に分けた。
+
+        ★2026-08-31 例外: 「棚を入れ替える」ボタンだけ、ユーザーが明示でラベルにも
+          件数・金額を求めた (`shelf_evict_label`)。他のボタンは上の決定のまま変えない。
         """
         act_kind = act_kind or {}
         for b, base, kind, set_tip, tip in self._hoju_btns:
             try:
-                b.config(text=base, height=3,
+                extra = (by_kind.get(kind + "_label") or "").strip() if kind == "shelf_evict" else ""
+                text = f"{base}\n{extra}" if extra else base
+                b.config(text=text, height=(5 if extra else 3),
                          fg=("#0066cc" if act_kind.get(kind) else "black"))
                 if set_tip:
                     n = (by_kind.get(kind) or "").strip()
@@ -3158,6 +3169,9 @@ class ListingPanel:
         for _b, _base, kind, _st, _tip in self._hoju_btns:
             v = cached.get(kind)
             out[kind] = (v + "\n※前回値 (🔄 で更新)") if v else "\nまだ数えていません (🔄 で更新)"
+            # ★2026-08-31: 棚入れ替えボタンのラベル (件数/金額) も前回値をそのまま出す。
+            if kind == "shelf_evict":
+                out[kind + "_label"] = cached.get(kind + "_label") or "…"
         if out:
             self.paint_hoju_badge(out)
 
@@ -3202,6 +3216,14 @@ class ListingPanel:
             "    d['cull']=CE.count_workload()\n"
             "except Exception as e:\n"
             "    d['cull']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # ★2026-08-31: 棚入れ替え (shelf_evict) の残数も同じ subprocess で数える。
+            #   count_workload は eBay を叩かない (live キャッシュがあれば使う・無ければ
+            #   その旨をヒントに出す。cull_end と同じ理由で表示のために API 枠を使わない)。
+            "try:\n"
+            "    import shelf_evict as SE\n"
+            "    d['shelf']=SE.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['shelf']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             "print(json.dumps(d))"
             % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
         )
@@ -3319,8 +3341,33 @@ class ListingPanel:
                     ce_txt += "\n※押しても0件 (これまでに %s件 落とし済み)" % ce.get("done", 0)
             else:
                 ce_txt = ""
+            # 📉 棚を入れ替える: 押したら何件・いくら空くか
+            #   (2026-08-31 ユーザー要望「ラベルに件数と金額を出せる?」)。
+            #   他ボタンは 2026-08-22 の決定でヒント側に寄せたが、このボタンだけは
+            #   明示の要望でラベルにも短い1行を出す (se_label)。詳細は従来どおりヒント (se_txt)。
+            se = (w0.get("shelf") or {}) if isinstance(w0, dict) else {}
+            if se.get("error"):
+                se_txt = "\n(残件 取得できず: %s)" % str(se["error"])[:40]
+                se_label = ""
+            elif se:
+                se_txt = ("\n今日の出品額 $%s → 目標 $%s\n選定 %s件 "
+                           "(①仕入元死 %s件 / ②滞留 %s件)\n空く額 $%s") % (
+                    f"{se.get('listed_today', 0):,.0f}", f"{se.get('target', 0):,.0f}",
+                    se.get("picked", 0), se.get("tier1", 0), se.get("tier2", 0),
+                    f"{se.get('amount', 0):,.0f}")
+                if se.get("cache_note"):
+                    se_txt += "\n" + se["cache_note"]
+                if se.get("picked"):
+                    se_label = "%s件 / $%s" % (se["picked"], f"{se.get('amount', 0):,.0f}")
+                elif se.get("target", 0) <= 0:
+                    se_label = "今日はまだ出品なし"
+                else:
+                    se_label = "対象なし"
+            else:
+                se_txt = se_label = ""
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
-                       "kuji_search": k_s, "kuji_confirm": k_c, "cull_end": ce_txt}
+                       "kuji_search": k_s, "kuji_confirm": k_c, "cull_end": ce_txt,
+                       "shelf_evict": se_txt, "shelf_evict_label": se_label}
             # ★2026-08-16: **押すと何か出てくる時だけ青**。0件なら黒のまま
             #   (「いつ押せばいいのか分からない」への答え。色 = 今やる価値があるか)。
             act_kind = {"hoju_search": bool(s.get("can")),
@@ -3331,7 +3378,8 @@ class ListingPanel:
                                             and (kj.get("search") or {}).get("can")),
                         "kuji_confirm": bool((kj.get("confirm") or {}).get("ready")),
                         # 落とすものが在る時だけ青 (0件なら押す意味が無い)
-                        "cull_end": bool(ce.get("remaining"))}
+                        "cull_end": bool(ce.get("remaining")),
+                        "shelf_evict": bool(se.get("picked"))}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。

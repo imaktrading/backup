@@ -134,11 +134,15 @@ def test_系統ごとに並ぶ():
 
 def test_件数をラベルに焼かない():
     """★以前は件数をラベルに足していたのでボタンが4〜7行に伸び、
-    何のボタンか読めなかった。ラベルは固定にする."""
+    何のボタンか読めなかった。ラベルは固定にする。
+
+    ★2026-08-31 例外: 「棚を入れ替える」ボタンだけ、ユーザーが明示で
+      ラベルにも件数・金額を求めた (kind == "shelf_evict" に限定)。"""
     i = SRC.index("def paint_hoju_badge")
-    body = SRC[i:i + 1400]
-    assert "b.config(text=base, height=3," in body
+    body = SRC[i:i + 1600]
+    assert "b.config(text=text, height=(5 if extra else 3)," in body
     assert "base + by_kind" not in body
+    assert 'kind == "shelf_evict"' in body
 
 
 def test_件数はヒントに出す():

@@ -259,6 +259,65 @@ def _load():
     return fr, shelf_of, cat_of
 
 
+def count_workload():
+    """押したら何件・いくら落とせるか (2026-08-31・ラベル/ヒント用、eBay を叩かない)。
+
+    ★badge の計算は開くたび自動で走る。live 一覧のキャッシュが無い/古い時に
+      ここで取りに行くと ~24 call の重い sweep が走ってしまう
+      (cull_end.count_workload と同じ理由で eBay を叩かない設計にする。
+      2026-08-24 に表示のための取得で API 上限を使い切り、取下げが5時間止まった)。
+      キャッシュが新しければ使い、無ければ「①はキャッシュ待ち」と正直に出す。
+
+    戻り: {"picked": 選定件数, "amount": 空く額, "target": 落とす目標額,
+           "listed_today": 今日の出品額, "tier1": ①件数, "tier2": ②件数,
+           "cache_note": 補足 (キャッシュが古い/無い時), "error": 読めなかった理由}
+    """
+    out = {"picked": 0, "amount": 0.0, "target": 0.0, "listed_today": 0.0,
+           "tier1": 0, "tier2": 0, "cache_note": "", "error": ""}
+    try:
+        listed = listed_today_amount()
+        target = listed * RATIO
+        out["listed_today"], out["target"] = listed, target
+        if target <= 0:
+            return out
+
+        import itemid_writeback_audit as A
+        rows, shelf_of, cat_of = [], None, None
+        if A.CACHE.exists():
+            import time as _t
+            age = _t.time() - A.CACHE.stat().st_mtime
+            if age < A.CACHE_MAX_AGE_SEC:
+                import json as _j
+                live = _j.loads(A.CACHE.read_text(encoding="utf-8"))
+                rows = rows_from_live(live, CE.load_done(), LF._title_key)
+                shelf_of = lambda r: _f(r.get("price")) + _f(r.get("_mirror"))  # noqa: E731
+            else:
+                out["cache_note"] = (
+                    "① live キャッシュが古い (%d時間前) → 押すと更新されます" % int(age / 3600))
+        else:
+            out["cache_note"] = "① live キャッシュがまだありません → 押すと作られます"
+
+        if not rows or sum(shelf_of(r) for r in rows) < target:
+            frows, fshelf, fcat = _load()
+            seen = {r["item_id"] for r in rows}
+            rows = rows + [r for r in frows if r.get("item_id") not in seen]
+            cat_of = fcat
+            _live_shelf = shelf_of
+            if _live_shelf:
+                def shelf_of(row, _l=_live_shelf, _f2=fshelf):  # noqa: F811
+                    return _l(row) if "_mirror" in row else _f2(row)
+            else:
+                shelf_of = fshelf
+
+        picked, total = pick(rows, target, shelf_of, cat_of)
+        byt = collections.Counter(t for t, _r in picked)
+        out.update(picked=len(picked), amount=total,
+                   tier1=byt.get(TIER_OOS, 0), tier2=byt.get(TIER_STALE, 0))
+    except Exception as e:                                     # noqa: BLE001
+        out["error"] = f"{type(e).__name__}: {e}"[:60]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--end", action="store_true", help="eBay に End を送る")
