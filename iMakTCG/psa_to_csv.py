@@ -773,6 +773,18 @@ def detect_game_info(brand):
     else:
         return brand, brand, brand
 
+
+# franchise (detect_game_info の第3戻り値) → catalog category key。
+# build_row 内の各 elif ブロックが _record_canonical_pid に渡す文字列リテラルと同じ対応。
+FRANCHISE_TO_CATALOG_CATEGORY = {
+    "One Piece": "one_piece_tcg",
+    "Pokemon": "pokemon_tcg",
+    "Dragon Ball": "dragonball_scg",
+    "Gundam": "gundam_tcg",
+    "Yu-Gi-Oh!": "yugioh_tcg",
+}
+
+
 def generate_title_with_claude(game, set_name, card_number, subject, franchise, card_image_url=None):
     """Claude APIを使ってeBayタイトル・カード情報を生成（画像対応）"""
     if not ANTHROPIC_API_KEY:
@@ -2380,7 +2392,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = bandai.get("finish") or ""
             official_card_size = bandai.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("one_piece_tcg", f"{brand}-{card_number}"))
+            catalog_misses.append(("one_piece_tcg", f"{brand}-{card_number}", subject,
+                                   str(cert_number), brand))
         # iMakCatalog miss → Vision に委ねる (fallback 構築は廃止、PSA Brand "P" + 番号
         # で誤った P-XXX を作ってしまい Vision の正値を遮断していた問題を解消)
 
@@ -2419,7 +2432,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             _record_canonical_pid(_catalog_pid_for_variant or pokemon.get("product_id"),
                                   "pokemon_tcg")
         elif catalog_misses is not None:
-            catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}"))
+            catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}", subject,
+                                   str(cert_number), brand))
 
         # 整合(先手): 確定した set 名を character/card_name 末尾から除去。
         # denylist 漏れ (Togekiss V Legendary Heartbeat / Corviknight Vmax Vmax Climax 型) の根本対策。
@@ -2473,7 +2487,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                 official_finish = db_card.get("finish") or ""
                 official_card_size = db_card.get("card_size") or ""
             elif catalog_misses is not None:
-                catalog_misses.append(("dragonball_scg", f"{brand}-{card_number}"))
+                catalog_misses.append(("dragonball_scg", f"{brand}-{card_number}", subject,
+                                       str(cert_number), brand))
 
     elif franchise == "Gundam":
         # iMakCatalog DB lookup (Phase 2: bandai_tcg_plus.fetch_card から移行).
@@ -2500,7 +2515,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = gd_card.get("finish") or ""
             official_card_size = gd_card.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("gundam_tcg", f"{brand}-{card_number}"))
+            catalog_misses.append(("gundam_tcg", f"{brand}-{card_number}", subject,
+                                   str(cert_number), brand))
 
     elif franchise == "Yu-Gi-Oh!":
         ygo = catalog_psa.lookup_yugioh(brand, card_number, subject)
@@ -2529,7 +2545,8 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = ygo.get("finish") or ""
             official_card_size = ygo.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("yugioh_tcg", f"{brand}-{card_number}"))
+            catalog_misses.append(("yugioh_tcg", f"{brand}-{card_number}", subject,
+                                   str(cert_number), brand))
 
     # ===== 画像主導カード特定の結果を反映 (新ルーチン由来) =====
     # confidence high/medium の場合、既存 lookup 結果より優先で official_* を上書き。
@@ -3232,6 +3249,68 @@ def _queue_finding(category, item_id, field, evidence, *, layer="A",
         return False
 
 
+def gate_catalog_misses(catalog_misses, csv_certs, pids_by_subject_fn):
+    """`build_row` の catalog_misses (ID lookup miss) を missing_models 行き / program 行きに振り分ける。
+
+    ★2026-08-31: `catalog_misses` は preflight の名前引きゲート (`gap_queue_target`,
+      2026-08-28) を一度も通らず missing_models.csv に直書きしていた。実害:
+      cert84299672 (ONE PIECE ENCORE PACK-004) は **同じ走行の入稿CSVに正しい値で載っている**
+      のに「catalog 未登録」と記録された。
+      出典: hq/requests/2026-08-31_act_code_proposals_tcg_response.md 提案1 (純関数, test可)
+
+    1. その cert が **同じ走行の CSV に載っている** (= 出品できた=引けている) → 両方から除外
+    2. 残りを subject 名だけで引き、**行が見つかれば** missing_models に書かず program 行き
+       (②「引き方」の課題。ID抽出/正規化のバグ疑い)
+    3. 名前でも見つからなければ (=空 token 等で確かめられない場合も含む) 従来どおり missing_models へ
+       (= 「未収録」と新たに断定するわけではなく、これまでと同じ記録のまま)
+
+    戻り: (missing:[(category,model)], program:[(category,model,subject,cert,hits)])
+    """
+    missing, program = [], []
+    for m in catalog_misses:
+        category, model, subject, cert, brand = m
+        if cert and cert in csv_certs:
+            continue
+        hits = []
+        try:
+            hits = pids_by_subject_fn(category, subject, brand) or []
+        except Exception:                                      # noqa: BLE001
+            hits = []
+        if hits:
+            program.append((category, model, subject, cert, hits))
+        else:
+            missing.append((category, model))
+    return missing, program
+
+
+def _gate_catalog_misses_io(catalog_misses, csv_certs):
+    """`gate_catalog_misses` の I/O 版 (catalog DB を開いて subject 名検索を実行)。
+
+    DB を開けない等の失敗時は **ゲートせず従来どおり全件 missing_models へ** (fail-closed
+    = 出品を止めない側優先。ここは「記録の粗さ」の話で、判定不能を握り潰しに倒さない)。
+    """
+    if not catalog_misses:
+        return [], []
+    try:
+        import sqlite3 as _sq3
+        _dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "iMakHQ", "tools")
+        if _dir not in sys.path:
+            sys.path.insert(0, _dir)
+        import psa_preflight as _pf
+        con = _sq3.connect(_pf.CATALOG_DB)
+        cur = con.cursor()
+
+        def _lookup(category, subject, brand):
+            return _pf.pids_by_subject(cur, category, subject, brand)
+
+        missing, program = gate_catalog_misses(catalog_misses, csv_certs, _lookup)
+        con.close()
+        return missing, program
+    except Exception as e:                                     # noqa: BLE001
+        print(f"    ⚠️ catalog_misses ゲート失敗 (従来どおり missing_models へ): {type(e).__name__}: {e}")
+        return [(c, m) for c, m, *_ in catalog_misses], []
+
+
 def _keys_for_dropped_dupes(sheet_rows, certs, cls, cert_col=8, key_col=34):
     """枠の前で落とす重複 cert → シートに書くべき ({join: row}, {join: KEY})。純関数.
 
@@ -3904,11 +3983,23 @@ def main():
     try:
         from canonical_pid_sidecar import write_sidecar as _write_pid_sidecar
         _certs_in_csv = {str(r[cert_col_idx]) for r in rows[1:]}
+        # ★2026-08-31 提案2: recorded (build_row lookup) が空でも category を落とさないため、
+        #   CSV 行が持つ確定値 (PSA Brand → franchise) から category を渡す。
+        _category_by_cert = {}
+        for _c, _d in card_info:
+            _brand = (_d or {}).get("Brand", "") if _d else ""
+            if not _brand:
+                continue
+            _fr = detect_game_info(_brand)[2]
+            _cat = FRANCHISE_TO_CATALOG_CATEGORY.get(_fr)
+            if _cat:
+                _category_by_cert[str(_c)] = _cat
         _sidecar_path = _write_pid_sidecar(
             output_file,
             pid_by_cert,
             certs_in_csv=_certs_in_csv,
             confirmed_pids=(_confirmed_pids if _verify_mode else None),
+            category_by_cert=_category_by_cert,
         )
         print(f"canonical PID sidecar: {_sidecar_path} ({len(pid_by_cert)} 件 tracked)")
     except Exception as _e:
@@ -3970,6 +4061,21 @@ def main():
             print(f"⚠️ チェッカー実行エラー: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
+
+    # ★2026-08-31: missing_models へ書く直前に1回ゲートを通す。
+    #   出品できた(=CSVに載った) cert / 名前で catalog に行が見つかる cert は
+    #   「未収録」ではなく「引き方(②)」の課題 → program_fix キューへ回す。
+    #   出典: hq/requests/2026-08-31_act_code_proposals_tcg_response.md 提案1
+    if catalog_misses:
+        _csv_certs = {str(r[cert_col_idx]) for r in rows[1:] if len(r) > cert_col_idx}
+        catalog_misses, _program_misses = _gate_catalog_misses_io(catalog_misses, _csv_certs)
+        if _program_misses:
+            print(f"  📎 名前候補あり (未収録と断定せず program_fix キューへ): {len(_program_misses)}件")
+            for category, model, subject, cert, hits in _program_misses:
+                _queue_finding(category, f"cert{cert}" if cert else model, "program_fix",
+                               f"引けないが未収録とは確認できていない(名前候補あり): "
+                               f"{model} subject={subject!r} candidates={hits[:3]}"[:200],
+                               layer="code", finding_type="program_fix", identity=subject[:200])
 
     # Catalog 未登録カード一覧 + 共有通知ファイル追記 (2026-05-09、gshock_to_csv と同パターン)
     if catalog_misses:
