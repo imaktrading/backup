@@ -77,12 +77,16 @@ def test_multi_value_order_does_not_matter():
 
 
 def test_columns_catalog_does_not_own_are_not_compared():
-    """Card Name (column.name_en) / Grade (psa_cert) / Finish (emit=false) は対象外。"""
-    assert not is_catalog_owned("C:Card Name", _CONTRACT)
+    """Grade (psa_cert) / Finish (emit=false) は対象外。
+
+    Card Name (column.name_en) は 2026-09-01 から対象 (誤ると SNAD 直結の項目が
+    無検査だったため。出典: hq/requests/2026-09-01_act_code_proposals_tcg_response.md 提案3)。
+    """
+    assert is_catalog_owned("C:Card Name", _CONTRACT)
     assert not is_catalog_owned("C:Grade", _CONTRACT)
     assert not is_catalog_owned("C:Finish", _CONTRACT)
     row = ["", "", "", "", "ちがう名前", "9", "Holo"]
-    assert _msgs(row, {"C:Card Name": "Luffy", "C:Grade": "10", "C:Finish": ""}) == []
+    assert _msgs(row, {"C:Grade": "10", "C:Finish": ""}) == []
 
 
 def test_unknown_column_is_not_judged():

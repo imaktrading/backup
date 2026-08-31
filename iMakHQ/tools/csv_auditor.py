@@ -104,7 +104,8 @@ _SHARED_PATHS = [os.path.join(WORKSPACE, "iMakeBayAPI")]
 
 
 from aspect_contract import (catalog_mismatch_findings,       # 2026-08-26 値の照合
-                             contract_findings, load_contract)  # 2026-08-22 契約照合
+                             contract_findings, load_contract,  # 2026-08-22 契約照合
+                             load_ebay_master)                  # 2026-09-01 Card Name 突合
 
 
 # ---------------------------------------------------------------------------
@@ -1008,6 +1009,7 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
 
     # --- 値そのものを catalog と突き合わせる (canonical sidecar 経由・2026-08-26) ---
     _sidecar = {} if is_generic else load_canonical_sidecar(csv_path)
+    _ebay_master = None if is_generic else load_ebay_master()
     if _contract and not is_generic:
         if _sidecar:
             print(f"  🔎 catalog と値を突合: {len(_sidecar)} 件 (canonical sidecar)")
@@ -1041,7 +1043,8 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
                 findings += psa_identity_findings(headers, row, _psa_cache_meta)
                 if _sidecar.get(_cert):
                     findings += catalog_mismatch_findings(
-                        headers, row, _contract, catalog_expected_fields(_sidecar[_cert]))
+                        headers, row, _contract, catalog_expected_fields(_sidecar[_cert]),
+                        ebay_master=_ebay_master)
         disps = [classify_finding(sev, msg) for sev, msg in findings]
         # PSA 側に写真が無い個体は出品しないが **プログラム修正依頼にはしない** (2026-08-28)
         _disps2 = [no_psa_photo_disposition(m, d, _psa_cache_meta)

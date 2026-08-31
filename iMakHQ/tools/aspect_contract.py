@@ -20,9 +20,15 @@
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 CONTRACT_PATH = Path(r"C:/dev/iMak_data/catalog/_contract_aspects.yaml")
+
+# eBay 実取得マスタ (commerce/taxonomy/v1, 2026-08-21 fetch)。`apply_ebay_filter_to_row` が
+# catalog の値を eBay 正規値に書き換えた分 (例 'Greninja ex' -> 'Greninja Ex') を、
+# 監査の catalog 突合で誤検出にしないために使う。読めなければ None (= 突合しない・従来どおり)。
+EBAY_MASTER_PATH = Path(r"C:/dev/iMak_data/hq/requests/ebay_183454_facet_master_20260821.json")
 
 # 契約の対象は Item Specifics (C:*) だけ。価格・送料・画像等は表の管轄外。
 _PREFIX = "C:"
@@ -121,19 +127,59 @@ def _values(v):
     return {p.strip() for p in parts if p.strip()}
 
 
+def load_ebay_master(path=None):
+    """eBay 実取得マスタを読む。{aspect名: {"all": [...], ...}}。読めなければ None。"""
+    p = Path(path) if path else EBAY_MASTER_PATH
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return data.get("aspects") or None
+
+
 def is_catalog_owned(col: str, contract) -> bool:
-    """その列の値を catalog が決めるか (emit=true かつ source が specs.*)。"""
+    """その列の値を catalog が決めるか (emit=true かつ source が specs.* または column.*)。
+
+    2026-09-01: `column.*` (例 Card Name ← column.name_en) も対象に含める。
+    ここを specs.* だけに絞っていたため、**誤ると SNAD 直結の Card Name が無検査**だった
+    (`apply_ebay_filter_to_row` が eBay 正規値に書き換えた行を監査が一度も見ていなかった)。
+    出典: hq/requests/2026-09-01_act_code_proposals_tcg_response.md 提案3
+    """
     rec = (contract or {}).get(aspect_of(col))
     if not rec or not rec.get("emit"):
         return False
-    return str(rec.get("source") or "").startswith("specs.")
+    source = str(rec.get("source") or "")
+    return source.startswith("specs.") or source.startswith("column.")
 
 
-def catalog_mismatch_findings(headers, row, contract=None, expected=None):
+def _casefold_set(values):
+    return {str(v).casefold() for v in values}
+
+
+def _accepted_as_ebay_normalized(aspect, got, want, ebay_master):
+    """got が catalog の値(want)と大文字小文字だけ違い、かつ eBay マスタの正規値そのものなら OK。
+
+    `apply_ebay_filter_to_row` が catalog の値を eBay の実取得マスタ (49,333件 実測) に
+    寄せて書き換えた分を正当と認める (誤検出防止)。名前そのものが別カードに変わった場合は
+    casefold でも一致しないので、ここでは通らず ERROR のまま止まる。
+    """
+    if not ebay_master or not got or not want:
+        return False
+    if _casefold_set(got) != _casefold_set(want):
+        return False
+    allowed = set((ebay_master.get(aspect) or {}).get("all") or [])
+    if not allowed:
+        return False
+    return got.issubset(allowed)
+
+
+def catalog_mismatch_findings(headers, row, contract=None, expected=None, ebay_master=None):
     """CSV の値と catalog の値の差だけを返す [(severity, msg)] (純関数)。
 
     expected: {CSV列名: catalog 由来の値}。**引けなかった列は入れない** —
       入っていない列は判定しない (catalog を引けなかったことを「不一致」に倒さない)。
+    ebay_master: {aspect名: {"all": [...]}}。eBay 正規値への正当な書き換えを誤検出しないため
+      (2026-09-01, `load_ebay_master()` で読んだものをそのまま渡す)。
     """
     if contract is None or not expected:
         return []
@@ -148,6 +194,8 @@ def catalog_mismatch_findings(headers, row, contract=None, expected=None):
         if got == want:
             continue
         aspect = aspect_of(col)
+        if _accepted_as_ebay_normalized(aspect, got, want, ebay_master):
+            continue
         if got and not want:
             out.append(("ERROR",
                         f"カタログが持たない値が入っています: {aspect}="
