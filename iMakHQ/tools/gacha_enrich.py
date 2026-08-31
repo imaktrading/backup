@@ -15,7 +15,10 @@ from __future__ import annotations
 import json
 import re
 
-MODEL = "claude-opus-5"
+# ★2026-08-31 ユーザー確定: Opus をやめて Sonnet に落とす (課金の見直し)。
+#   他カテゴリ (PSA / G-shock / メルカリ / 一番くじ / カタログ翻訳) は全部 Sonnet で
+#   回っており、ガチャだけ Opus だった理由が無い。戻したくなったらここ1行。
+MODEL = "claude-sonnet-4-6"
 
 _RULES = """- series_en: シリーズ名 (公式商品名の英語表記。公式に英語名があればそれを使う)
 - maker_en: メーカー名の英語表記 (Bandai / Takara Tomy A.R.T.S / Kitan Club / Qualia 等)

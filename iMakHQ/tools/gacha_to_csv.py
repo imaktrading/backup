@@ -57,7 +57,10 @@ CONDITION_ID = 1000            # New
 LOCATION = "Osaka"
 PROFIT_CATEGORY = "ガシャポン"   # pricing_engine のカテゴリ名 (R列の「カプセルトイ」の内部名)
 SHEET_CATEGORY = "カプセルトイ"   # シート R列の値
-MODEL = "claude-opus-5"
+# ★2026-08-31: この定数は**使っていない** (このファイルは API を叩かない)。
+#   実際に叩くのは gacha_enrich.py。置いたままだと「ここが Opus」と読めて
+#   課金の見直しで迷うので、そちらを唯一の決定口にする。
+from gacha_enrich import MODEL  # noqa: F401  (後方互換のため名前だけ残す)
 SCHEDULE_WEEKS = 2
 
 # ★出さない語 (fail-closed)。増やすのは可、減らすのは不可。
