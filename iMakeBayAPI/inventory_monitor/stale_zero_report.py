@@ -224,16 +224,35 @@ def end_listings(rows: list, stale_days: int, max_auto: int = MAX_AUTO_END) -> d
               f"巡回側の異常が無いか確認してください", flush=True)
         return {"ended": [], "failed": [], "targets": len(targets), "held": True}
 
-    done, failed = [], []
-    for r in targets:
-        iid = r["item_id"]
-        res = end_fixed_price_item(iid)
+    def _get_item(iid: str) -> tuple:
+        """(site, listing 状態) を返す。取れなければ (None, None)."""
         body = ("<?xml version='1.0' encoding='utf-8'?>"
                 "<GetItemRequest xmlns='urn:ebay:apis:eBLBaseComponents'>"
                 f"<ItemID>{iid}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>")
         xml = (_call_trading("GetItem", body, raw_xml_cap=None).get("raw_xml") or "")
-        m = re.search(r"<ListingStatus>(\w+)</ListingStatus>", xml)
-        status = m.group(1) if m else "?"
+        site = re.search(r"<Site>([^<]+)</Site>", xml)
+        st = re.search(r"<ListingStatus>(\w+)</ListingStatus>", xml)
+        return (site.group(1) if site else None), (st.group(1) if st else None)
+
+    done, failed, skipped = [], [], []
+    for r in targets:
+        iid = r["item_id"]
+        # ★ ミラーを終了しない (2026-08-24 の全社ルール)。UK/AU/CA/DE は eBaymag が
+        #   US の親から自動生成したもので、こちらの持ち物ではない。親 (US) を操作すれば
+        #   ミラーは付いてくる。site が読めない時も触らない (fail-closed)。
+        site, before = _get_item(iid)
+        if site != "US":
+            skipped.append(iid)
+            print(f"  {iid}: site={site} → 触りません (US 以外 / 不明はミラーの可能性)", flush=True)
+            continue
+        if before in ("Completed", "Ended"):
+            skipped.append(iid)
+            print(f"  {iid}: 既に終了済 ({before}) → 何もしません", flush=True)
+            continue
+
+        res = end_fixed_price_item(iid)
+        _, status = _get_item(iid)
+        status = status or "?"
         ok = status in ("Completed", "Ended")
         _append_history({
             "ended_at": datetime.now().isoformat(timespec="seconds"),
@@ -255,8 +274,10 @@ def end_listings(rows: list, stale_days: int, max_auto: int = MAX_AUTO_END) -> d
     excluded = _mark_excluded(set(done))
     if excluded:
         print(f"  シートの {excluded} 行を巡回対象外 (FLG=1) にしました", flush=True)
+    if skipped:
+        print(f"  触らなかったもの: {len(skipped)} 件 (US 以外 / 既に終了済)", flush=True)
     return {"ended": done, "failed": failed, "targets": len(targets),
-            "held": False, "excluded_rows": excluded}
+            "held": False, "excluded_rows": excluded, "skipped": skipped}
 
 
 def main() -> int:

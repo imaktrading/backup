@@ -130,9 +130,14 @@ def test_two_processes_do_not_lose_appends(ledger, tmp_path):
     )
     ledger.write_text("", encoding="utf-8")
 
-    procs = [subprocess.Popen([sys.executable, str(script), tag]) for tag in ("A", "B")]
+    procs = [subprocess.Popen([sys.executable, str(script), tag],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+             for tag in ("A", "B")]
     for p in procs:
-        assert p.wait(timeout=180) == 0
+        out, err = p.communicate(timeout=300)
+        # 失敗した理由が分からない test は直せない。子プロセスの出力を必ず出す
+        assert p.returncode == 0, (f"子プロセスが失敗: rc={p.returncode}\n"
+                                   f"stdout={out}\nstderr={err[-800:]}")
 
     ids = [e["item_id"] for e in _read(ledger)]
     assert len(ids) == 120, f"append が落ちた: {len(ids)}/120"

@@ -122,12 +122,19 @@ def _row(iid, days, brand="uniqlo"):
             "days": days, "title": "t", "url": "https://www.uniqlo.com/x"}
 
 
-def _patch_ebay(status="Completed"):
-    """end_fixed_price_item と、終了後の状態確認をまとめて差し替える."""
+def _patch_ebay(status="Completed", site="US", before="Active"):
+    """eBay 呼出を差し替える (1回目=終了前の確認、2回目=終了後の確認)."""
     mod = "ebay_actions.trading_api_client"
-    xml = f"<GetItemResponse><ListingStatus>{status}</ListingStatus></GetItemResponse>"
+    pre = f"<GetItemResponse><Site>{site}</Site><ListingStatus>{before}</ListingStatus></GetItemResponse>"
+    post = f"<GetItemResponse><Site>{site}</Site><ListingStatus>{status}</ListingStatus></GetItemResponse>"
+    seq = {"n": 0}
+
+    def call(name, body, **kw):
+        seq["n"] += 1
+        return {"raw_xml": pre if seq["n"] % 2 == 1 else post}
+
     return (patch(f"{mod}.end_fixed_price_item", return_value={"success": True}),
-            patch(f"{mod}._call_trading", return_value={"raw_xml": xml}))
+            patch(f"{mod}._call_trading", side_effect=call))
 
 
 def test_ends_only_items_over_threshold(tmp_path, monkeypatch):
@@ -196,3 +203,39 @@ def test_ended_rows_are_excluded_from_patrol(tmp_path, monkeypatch):
         sz.end_listings([_row("111", 40)], stale_days=30)
 
     assert seen["ids"] == {"111"}
+
+
+def test_ebaymag_mirror_is_never_ended(tmp_path, monkeypatch):
+    """★ UK/AU/CA/DE のミラーは触らない (eBaymag の持ち物。親を操作すれば付いてくる)."""
+    monkeypatch.setattr(sz, "ENDED_LEDGER", tmp_path / "ended.jsonl")
+    monkeypatch.setattr(sz, "_mark_excluded", lambda ids: 0)
+    p1, p2 = _patch_ebay(site="UK")
+    with p1, p2:
+        res = sz.end_listings([_row("111", 40)], stale_days=30)
+
+    assert res["ended"] == []
+    assert res["skipped"] == ["111"]
+
+
+def test_unknown_site_is_not_touched(tmp_path, monkeypatch):
+    """site が読めない = ミラーか判らない → 触らない (fail-closed)."""
+    monkeypatch.setattr(sz, "ENDED_LEDGER", tmp_path / "ended.jsonl")
+    monkeypatch.setattr(sz, "_mark_excluded", lambda ids: 0)
+    p1, p2 = _patch_ebay(site="")
+    with p1, p2:
+        res = sz.end_listings([_row("111", 40)], stale_days=30)
+
+    assert res["ended"] == []
+    assert res["skipped"] == ["111"]
+
+
+def test_already_ended_is_not_re_ended(tmp_path, monkeypatch):
+    """既に終了済のものに再度 End を送らない (API の無駄打ちをしない)."""
+    monkeypatch.setattr(sz, "ENDED_LEDGER", tmp_path / "ended.jsonl")
+    monkeypatch.setattr(sz, "_mark_excluded", lambda ids: 0)
+    p1, p2 = _patch_ebay(before="Completed")
+    with p1, p2:
+        res = sz.end_listings([_row("111", 40)], stale_days=30)
+
+    assert res["ended"] == []
+    assert res["skipped"] == ["111"]
