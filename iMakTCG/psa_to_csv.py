@@ -2400,8 +2400,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = bandai.get("finish") or ""
             official_card_size = bandai.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("one_piece_tcg", f"{brand}-{card_number}", subject,
-                                   str(cert_number), brand))
+            catalog_misses.append(("one_piece_tcg",
+                                   missing_model_text(cert_number, brand, subject, card_number),
+                                   subject, str(cert_number), brand))
         # iMakCatalog miss → Vision に委ねる (fallback 構築は廃止、PSA Brand "P" + 番号
         # で誤った P-XXX を作ってしまい Vision の正値を遮断していた問題を解消)
 
@@ -2442,8 +2443,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             _record_canonical_pid(_catalog_pid_for_variant or pokemon.get("product_id"),
                                   "pokemon_tcg")
         elif catalog_misses is not None:
-            catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}", subject,
-                                   str(cert_number), brand))
+            catalog_misses.append(("pokemon_tcg",
+                                   missing_model_text(cert_number, brand, subject, card_number),
+                                   subject, str(cert_number), brand))
 
         # 整合(先手): 確定した set 名を character/card_name 末尾から除去。
         # denylist 漏れ (Togekiss V Legendary Heartbeat / Corviknight Vmax Vmax Climax 型) の根本対策。
@@ -2501,8 +2503,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                 official_finish = db_card.get("finish") or ""
                 official_card_size = db_card.get("card_size") or ""
             elif catalog_misses is not None:
-                catalog_misses.append(("dragonball_scg", f"{brand}-{card_number}", subject,
-                                       str(cert_number), brand))
+                catalog_misses.append(("dragonball_scg",
+                                       missing_model_text(cert_number, brand, subject, card_number),
+                                       subject, str(cert_number), brand))
 
     elif franchise == "Gundam":
         # iMakCatalog DB lookup (Phase 2: bandai_tcg_plus.fetch_card から移行).
@@ -2531,8 +2534,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = gd_card.get("finish") or ""
             official_card_size = gd_card.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("gundam_tcg", f"{brand}-{card_number}", subject,
-                                   str(cert_number), brand))
+            catalog_misses.append(("gundam_tcg",
+                                   missing_model_text(cert_number, brand, subject, card_number),
+                                   subject, str(cert_number), brand))
 
     elif franchise == "Yu-Gi-Oh!":
         ygo = catalog_psa.lookup_yugioh(brand, card_number, subject)
@@ -2563,8 +2567,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = ygo.get("finish") or ""
             official_card_size = ygo.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("yugioh_tcg", f"{brand}-{card_number}", subject,
-                                   str(cert_number), brand))
+            catalog_misses.append(("yugioh_tcg",
+                                   missing_model_text(cert_number, brand, subject, card_number),
+                                   subject, str(cert_number), brand))
 
     # ===== 画像主導カード特定の結果を反映 (新ルーチン由来) =====
     # confidence high/medium の場合、既存 lookup 結果より優先で official_* を上書き。
@@ -3294,6 +3299,23 @@ def annotate_selfcheck_error(error_msg, catalog_hit, catalog_pid, brand):
     label = catalog_reach_label(catalog_hit)
     detail = f"pid={catalog_pid}" if catalog_hit else f"brand={brand!r}"
     return f"{error_msg} [{label}: {detail}]"
+
+
+def missing_model_text(cert_number, brand, subject, card_number):
+    """missing_models.csv の model 列を書式統一する (純関数)。
+
+    ★2026-09-01: 従来は `f"{brand}-{card_number}"` で cert を持たなかったため、
+    `pdca_store.normalize_item_key` の cert 抽出も `parse_missing_model_identity` の
+    identity 抽出も素通りしていた。結果、同じカードが cert 有り(post_psa_review 由来)/
+    cert 無し(psa_to_csv 由来)の2書式で pdca queue に別行として乗り、片方を close しても
+    もう片方が翌日また Catalog に届く事故が起きた (queue 590/622, ONE PIECE ENCORE PACK-004)。
+    `post_psa_review._route_none_to_catalog` と同じ書式 `cert{N} {brand} [{subject}] #{cardno}
+    (...)` に揃えることで、どちらの経路でも同じ cert キーに畳まれ、identity も自動で埋まる。
+    出典: hq/requests/2026-09-01_act_code_proposals_tcg_response.md 提案2
+    """
+    model = (f"cert{cert_number} {brand} [{subject}] #{card_number} "
+             f"(missing_models: catalog未登録)").replace(",", " ")
+    return " ".join(model.split())
 
 
 def gate_catalog_misses(catalog_misses, csv_certs, pids_by_subject_fn):
