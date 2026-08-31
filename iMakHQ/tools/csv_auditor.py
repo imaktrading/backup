@@ -131,6 +131,15 @@ def load_canonical_sidecar(csv_path):
         return {}
 
 
+def is_bare_sidecar_key(key):
+    """sidecar 鍵が `category:product_id` 形式でない (= catalog 突合を skip する対象) か (純関数)。
+
+    `catalog_expected_fields` が {} を返す条件と同じ判定を、監査側の件数カウントでも使う
+    (2026-08-31 提案2: 前置き無し鍵を黙って skip せず、専用の1行で数える)。
+    """
+    return bool(key) and ":" not in key
+
+
 def catalog_expected_fields(key):
     """`category:product_id` → 出品くんが catalog から作るはずの列の値。
 
@@ -1024,6 +1033,7 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     seo_notes = []
     all_vr = []               # 各行 validate_row 結果 (Claude総合レビュー文脈用)
     nophoto_skus = []         # PSA 側に写真が無くて除外した行 (黙って落とさないため数える)
+    bare_sidecar_keys = 0     # 前置き無し (category:pid でない) sidecar 鍵 = catalog突合skip (2026-08-31)
     for i, row in enumerate(rows, 1):
         _psa_cache_meta = None
         if is_generic:
@@ -1042,8 +1052,15 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
                 _psa_cache_meta = _psa_meta(_cert)
                 findings += psa_identity_findings(headers, row, _psa_cache_meta)
                 if _sidecar.get(_cert):
+                    _pid_key = _sidecar[_cert]
+                    if is_bare_sidecar_key(_pid_key):
+                        # ★2026-08-31: 前置き無し鍵は「照合しない」と黙って skip していた
+                        # (catalog_expected_fields が {} を返す=fail-OPEN)。監査くんは黙って
+                        # 素通りさせず、専用の1行で数える (既存の除外理由には混ぜない)。
+                        # 出典: hq/requests/2026-08-31_act_code_proposals_tcg_response.md 提案2
+                        bare_sidecar_keys += 1
                     findings += catalog_mismatch_findings(
-                        headers, row, _contract, catalog_expected_fields(_sidecar[_cert]),
+                        headers, row, _contract, catalog_expected_fields(_pid_key),
                         ebay_master=_ebay_master)
         disps = [classify_finding(sev, msg) for sev, msg in findings]
         # PSA 側に写真が無い個体は出品しないが **プログラム修正依頼にはしない** (2026-08-28)
@@ -1123,6 +1140,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
         print("     (PSA 側に写真が存在しない = 直すコードが無いので program修正依頼にはしません)")
     if catalog_items:
         print(f"  📝 カタログ向けの気づき {len(catalog_items)}件 (依頼書は出しません・レポートに記載)")
+    if bare_sidecar_keys:
+        print(f"  ⚠️ 前置き無しで照合できなかった鍵 {bare_sidecar_keys}件 (canonical sidecar) "
+              "→ catalog 突合をスキップ (fail-OPEN。iMakTCG 側の category 付与漏れの疑い)")
     prog_req = write_program_request(project, program_items, dry_run)
     log_signals = _scan_log(log_path, csv_path)
 

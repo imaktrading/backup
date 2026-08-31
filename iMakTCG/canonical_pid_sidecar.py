@@ -17,7 +17,7 @@ def sidecar_path_for(csv_path: str) -> str:
     return csv_path + ".canonical.json"
 
 
-def _keep_category(recorded: str, confirmed: str) -> str:
+def _keep_category(recorded: str, confirmed: str, category: str = "") -> str:
     """人が確定した PID を採るが、**ゲーム名 (category) は落とさない** (2026-08-23)。
 
     viewer が返す確定 PID は `ST02-001` のように category 前置きが無い。そのまま採ると
@@ -25,12 +25,21 @@ def _keep_category(recorded: str, confirmed: str) -> str:
     ゲームか決められなくなる。build_row が控えた `one_piece_tcg:ST02-001...` の
     前半だけを引き継いで `one_piece_tcg:<人が選んだPID>` にする。
     人が別候補を選んでも候補は同じゲーム内なので、前置きの引き継ぎは安全。
+
+    ★2026-08-31: `recorded` が空 (build_row の lookup 自体が失敗した cert) だと
+      前置きを引き継げず、確定 PID が裸のまま残っていた
+      (実害: cert84299672 "ST11-004_P" が裸で監査の catalog 突合から漏れた)。
+      呼び出し側が CSV 行から確定させた `category` (franchise / `C:Game`) を渡せば、
+      `recorded` が空でもそちらを使う。推測ではなく、その行が既に持っている確定値。
+      出典: hq/requests/2026-08-31_act_code_proposals_tcg_response.md 提案2
     """
     confirmed = (confirmed or "").strip()
     if not confirmed or ":" in confirmed:
         return confirmed
     if ":" in (recorded or ""):
         return f"{recorded.split(':', 1)[0]}:{confirmed}"
+    if category:
+        return f"{category}:{confirmed}"
     return confirmed
 
 
@@ -52,6 +61,7 @@ def write_sidecar(
     confirmed_pids=None,
     print_fn=print,
     now=None,
+    category_by_cert=None,
 ) -> str:
     """sidecar JSON を書き出す。
 
@@ -65,14 +75,18 @@ def write_sidecar(
             entry があればそちらで上書きする (最強権威 = 人が選んだ PID)
         print_fn: 通知に使う print (test 用に注入可)
         now: datetime を注入 (test 用)
-
+        category_by_cert: {cert: catalog category} (例 "one_piece_tcg")。build_row の
+            lookup が失敗して `pid_by_cert` に前置きが無い cert でも、CSV 行から
+            確定している category を `_keep_category` に渡す (2026-08-31 提案2)
     Returns:
         書き出した sidecar のパス
     """
     merged = {str(c): str(p) for c, p in (pid_by_cert or {}).items() if p}
     for c, p in (confirmed_pids or {}).items():
         if p:
-            merged[str(c)] = _keep_category(merged.get(str(c), ""), str(p))
+            merged[str(c)] = _keep_category(
+                merged.get(str(c), ""), str(p),
+                category=(category_by_cert or {}).get(str(c), ""))
 
     if certs_in_csv is not None:
         want = {str(c) for c in certs_in_csv}
