@@ -150,6 +150,12 @@ def extract_set_code_from_brand(brand: str) -> Optional[str]:
         # 公式「ONE PIECEカードゲーム BASE SHOPリミテッドカードコレクションvol.1」(LEADER 6枚)。
         # 券面番号は原典のまま (ST21-001 等) なので 'P' + promo fallback に番号で解かせる。
         "LIMITED CARD COLLECTION",
+        # 2026-08-31: 『ONE PIECE FILM RED』入場者プレゼント (アンコールパック /
+        #   フィナーレセット) と プレミアムカードコレクション。brand は
+        #   'ONE PIECE JAPANESE FILM RED: ENCORE PACK' 等で set_code を持たない。
+        #   'P' にして promo fallback に番号 + edition 照合で解かせる
+        #   (FILM RED の3商品は下の edition pair で分かれる)。
+        "FILM RED",
     ]
     if any(k in b for k in promo_keywords):
         return "P"
@@ -840,6 +846,11 @@ def _op_edition_matches(hay: str, sn: str) -> bool:
         #   (7枚 × _p1/_p2)。PSA brand は "... STORAGE BOX SET"。
         #   両側一致必須なので、同番号の PRB01 収録カードや通常弾には発火しない。
         ("STORAGE BOX SET", "ストレージボックスセット"),
+        # 2026-08-31: FILM RED は3商品ある (アンコールパック / フィナーレセット /
+        #   プレミアムカードコレクション)。"FILM RED" だけだと3つとも当たるので、
+        #   商品名まで両側一致させて分ける。
+        ("ENCORE PACK", "アンコールパック"),
+        ("FINALE", "フィナーレセット"),
     ):
         if en in hay and (jp in sn or jp in sn_upper):
             edition_hit = True
