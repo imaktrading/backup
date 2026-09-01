@@ -31,14 +31,6 @@ values:
     category: pokemon_tcg
     rows: 146
     jp_set: "ポケモンカードゲームDPt 拡張パック「ギンガの覇道」"
-  - value: "Mask of Change"
-    category: pokemon_tcg
-    rows: 133
-    jp_set: "拡張パック「変幻の仮面」"
-  - value: "Rocket Gang's Glory"
-    category: pokemon_tcg
-    rows: 132
-    jp_set: "拡張パック「ロケット団の栄光」"
   - value: "Beat of the Frontier"
     category: pokemon_tcg
     rows: 132
@@ -139,6 +131,14 @@ values:
     category: pokemon_tcg
     rows: 25
     jp_set: "ポケモンカードゲームBW 「プラズマ団パワードデッキ30」"
+  - value: "Mega Starter Set M Diancie-Ex"
+    category: pokemon_tcg
+    rows: 23
+    jp_set: "スターターセットMEGA メガディアンシーex"
+  - value: "Mega Starter Set M Gengar-Ex"
+    category: pokemon_tcg
+    rows: 23
+    jp_set: "スターターセットMEGA メガゲンガーex"
   - value: "Tapu Bulu GX Deck"
     category: pokemon_tcg
     rows: 23
@@ -189,7 +189,7 @@ values:
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg
-    rows: 1478
+    rows: 1481
     jp_set: "プロモーションカード"
   - value: "Premium Booster One Piece The Best"
     category: one_piece_tcg

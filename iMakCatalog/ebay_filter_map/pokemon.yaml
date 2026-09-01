@@ -346,6 +346,17 @@ set:
   - source: "スターターセットex ピカチュウex&パーモット"
     ebay: "Sv: Ex Starter Set Pikachu Ex & Pawmot"
     note: "2026-08-22 eBay master 実在値 (name 一致 / 21行)"
+  # 2026-09-01 (依頼 requests/2026-09-01_hq_mega_starter_set_name_ebay.md、44行が C:Set 空):
+  #   メガ時代 (M) のスターターセット2種。**eBay の Set 一覧に該当値なし**
+  #   (2,290値を実取得して 'Gengar'/'Diancie' 0件、'Mega Brave'/'Mega Symphonia' も0件)。
+  #   → 規約②「日本語セット名の英語表記を自由入力」。綴りは既存の eBay 値
+  #   'Xya: M Charizard-Ex Mega Battle Deck' に合わせて `M <Name>-Ex` とする。
+  - source: "スターターセットMEGA メガゲンガーex"
+    ebay: "Mega Starter Set M Gengar-Ex"
+    note: "2026-09-01 自製 (eBay 一覧に該当値なし / 22行)"
+  - source: "スターターセットMEGA メガディアンシーex"
+    ebay: "Mega Starter Set M Diancie-Ex"
+    note: "2026-09-01 自製 (eBay 一覧に該当値なし / 22行)"
   - source: "ポケモンカードゲームBW バトル強化デッキ60「レシラムEX」"
     ebay: "Bkr: Reshiram-Ex Battle Strength Deck"
     note: "2026-08-22 eBay master 実在値 (code 一致 / 20行)"

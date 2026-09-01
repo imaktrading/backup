@@ -153,7 +153,10 @@ class TestOtherCategoriesUnchanged(unittest.TestCase):
         #   (3787 → 1915)。requests/2026-08-21_hq_unmapped_sets_175_response.md
         # 2026-08-23: 公式の取り直しで収録弾が判明した 35行が埋まった (1915 → 1880)
         # 2026-08-23: §0c 是正で CP6 の変換表を足し、空欄だった 4行が埋まった (1880 -> 1876)
-        "pokemon_tcg": 1876,
+        # 2026-09-01: スターターセットMEGA 2種を変換表に足して 46行 埋めた (1876 -> 1830)
+        #   依頼 requests/2026-09-01_hq_mega_starter_set_name_ebay.md。eBay の Set 一覧に
+        #   該当値が無いことを実取得で確認したうえで、規約②の自由入力で値を決めた
+        "pokemon_tcg": 1830,
         "gundam_tcg": 6,
         "dragonball_scg": 136,
         "yugioh_tcg": 12150,
