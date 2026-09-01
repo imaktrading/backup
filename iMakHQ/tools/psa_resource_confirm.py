@@ -12,6 +12,11 @@ confirm_targets(items) はローカル http サーバを立て、確定ボタン
 build_confirm_html / ebay_listing_image / psa_image_for_cert 以外は I/O。
 """
 import html as _html
+
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from viewer_zoom import ZOOM_JS, ZOOM_OVERLAY, zoom_button  # noqa: E402
 import http.server
 import json
 import os
@@ -420,7 +425,8 @@ def build_confirm_html(items):
         psa_img = it.get("psa_image") or ""
         psa_tag = (f"<img src='{_proxied(psa_img)}' loading='lazy' onerror='imgFail(this,1)'>" if psa_img
                    else "<div class='ph'>現物PSA画像なし<br>eBayで確認</div>")
-        psa_col = f"<div class='col psa'><div class='cap'>① 現物(出品PSA)</div>{psa_tag}</div>"
+        psa_zoom = zoom_button(_proxied(psa_img), "", label="🔍 拡大") if psa_img else ""
+        psa_col = (f"<div class='col psa'><div class='cap'>① 現物(出品PSA) {psa_zoom}</div>{psa_tag}</div>")
 
         if cands:
             keys = [c.get("key") for c in cands]
@@ -433,9 +439,13 @@ def build_confirm_html(items):
                 cimg = c.get("image") or ""
                 ctag = (f"<img src='{_proxied(cimg)}' loading='lazy' onerror='imgFail(this,0)'>" if cimg
                         else "<div class='cph'>画像なし</div>")
+                # ★2026-09-01 ユーザー要望「虫眼鏡つけて」: 目視の目的は絵柄の見比べなので、
+                #   ①現物 と 候補 を **並べて**拡大する (viewer_zoom = 他の目視画面と同じ物)。
+                #   単独で全画面にすると見比べられない、は初版で踏んだ失敗。
+                zbtn = zoom_button(_proxied(cimg), _proxied(psa_img)) if cimg else ""
                 opts.append(
                     f"<label class='cand'><input type='radio' name='pick{idx}' value='{_html.escape(_s(ck))}'{chk}>"
-                    f"{ctag}<span class='clbl'>{_html.escape(_s(c.get('label')))}</span></label>")
+                    f"{ctag}<span class='clbl'>{_html.escape(_s(c.get('label')))} {zbtn}</span></label>")
             cat_inner = "<div class='cands'>" + "".join(opts) + "</div>"
         else:
             # ★2026-09-01: 「未収録→要追加」と一律に出していたため、**番号が読めていないだけ**の時も
@@ -473,7 +483,7 @@ def build_confirm_html(items):
             f"<style>{_CSS}</style></head><body>"
             # bar を先頭 = sticky top:0 (h1 の折返しでボタンが隠れないように・2026-08-02)
             f"<div id='main'>{bar}{head}<div class='grid'>{''.join(rows)}</div></div>"
-            f"<div id='done'></div><script>{_JS}</script></body></html>")
+            f"<div id='done'></div>{ZOOM_OVERLAY}<script>{_JS}{ZOOM_JS}</script></body></html>")
 
 
 def _serve_confirm(page_bytes, extract, timeout):
