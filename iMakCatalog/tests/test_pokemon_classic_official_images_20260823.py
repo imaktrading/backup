@@ -79,19 +79,33 @@ class TestClassicImageMapping(unittest.TestCase):
             self.assertEqual(_row(pid)["name_jp"], label,
                              f"{slot}: 券面 {label!r} と catalog の name_jp が違う")
 
-    def test_e_unmapped_rows_stay_empty(self):
-        """公式が画像を出していない 69行は空が正 (目視不能 = 出品しない)."""
+    def test_e_unmapped_rows_have_no_guessed_image(self):
+        """公式が画像を出していない 69行に **勝手な絵を入れない**.
+
+        2026-09-01 改訂: 元は「空が正」だったが、PSA スラブ実写を目視照合用に入れる道が
+        規約で開いている (CLAUDE.md「画像の第三者 source 例外規約」の4条件)。
+        実際 CLL-009 は「画像が無くて目視できない」と出品側から起票され、cert155921531 の
+        スラブ実写 (券面 `CLL 009/032` を確認) を入れて解決した。
+
+        守りたいのは「空であること」ではなく **出所の分からない絵が入らないこと**。
+        よって空 or 印つきの目視画像 (`review_image_psa_cert...`) のみ許す。
+        """
         mapped = {pid for pid, _ in MAPPED.values()}
         db = sqlite3.connect(api._DB_PATH)
-        rows = db.execute("SELECT product_id, images FROM products "
+        rows = db.execute("SELECT product_id, images, source, specs FROM products "
                           "WHERE category=? AND product_id LIKE 'CL%'", (CAT,)).fetchall()
         db.close()
         self.assertEqual(len(rows), 96, "CL* は 3デッキ x 32枚")
-        others = [(p, i) for p, i in rows if p not in mapped]
+        others = [r for r in rows if r[0] not in mapped]
         self.assertEqual(len(others), 69)
-        for pid, imgs in others:
-            self.assertIn(imgs, (None, "", "[]"),
-                          f"{pid}: 公式に画像が無いのに何か入っている: {imgs!r}")
+        for pid, imgs, source, specs in others:
+            if imgs in (None, "", "[]"):
+                continue
+            s = json.loads(specs or "{}")
+            self.assertIn("review_image_psa_cert", source or "",
+                          f"{pid}: 出所の分からない絵が入っている: {imgs!r}")
+            self.assertTrue(s.get("review_image_note"),
+                            f"{pid}: 目視用の注記が無い (何の絵か後で分からない)")
 
     def test_f_urls_are_official(self):
         for slot in MAPPED:
