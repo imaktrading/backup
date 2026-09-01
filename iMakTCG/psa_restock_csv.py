@@ -1119,7 +1119,15 @@ def get_psa_data(driver, cert_number):
     cache = _load_psa_cache()
     if cert_number in cache:
         cached = cache[cert_number]
-        if cached and cached.get('Subject'):
+        # ★2026-09-01: **グレードが入っていない保存分は取り直す**。
+        #   新規側 (psa_to_csv) は 2026-08-23 に同じ物を入れているが、この fork には
+        #   入っておらず、8/31 に PSA10 ゲートを付けた後も **保存済 cert は素通り**して
+        #   グレードが空のまま → 全件「確かめられなかった」で落ちていた。
+        #   実害 (2026-09-01): 再出品 16件中 15件がこれで落ち、CSV が1行になった。
+        #   1 cert につき一度だけ取り直せば、以降は保存分で足りる。
+        if cached and cached.get('Subject') and 'Grade' not in cached:
+            print(f"    ↻ グレード未取得のため PSA を取り直します (#{cert_number})")
+        elif cached and cached.get('Subject'):
             # iMakeBayAPI 共有 cache にも投入 (= local cache hit でも、 共有 cache 未登録なら書込)
             try:
                 import psa_api as _ihq_psa_api
@@ -1178,6 +1186,9 @@ def get_psa_data(driver, cert_number):
             print(f"\n    [DEBUG] {body[:400]}")
             return None
 
+        # 取り直しても読めない時に毎回 PSA を叩かないよう、キーだけは必ず置く
+        # (空 = 読めなかった → 後段が fail-closed 側 (ラベル画像で確認) に倒れる)
+        data.setdefault('Grade', '')
         # キャッシュに保存 (= ローカル既存)
         cache[cert_number] = data
         _save_psa_cache(cache)
