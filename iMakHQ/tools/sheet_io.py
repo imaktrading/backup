@@ -235,6 +235,23 @@ class _ColWriteGuard:
             guarded_cols = {PRODUCT_COL_COST_OVERRIDE: ("AN", _AN_DENY_MSG)}
         object.__setattr__(self, "_guarded", dict(guarded_cols))
 
+    def get_all_values(self, *a, **kw):
+        """商品管理シートの全読み。**表示目的の走行だけ** 1プロセス内で使い回す。
+
+        ★2026-09-01: パネルのボタンに件数を出す集計が同じシートを何度も読み、
+          1分あたりの読み取り上限 (429) に当たった
+          (実害: 出品くんの走行中に「出せるか」の塗り直しが落ちた)。
+          SHEET_READ_MEMO=1 の時だけ効かせる。**書いてから読み直す通常の走行は素通り**
+          (memo が効くと書込結果が見えなくなるため、既定は無効)。
+        """
+        ws = object.__getattribute__(self, "_ws")
+        if a or kw or not _memo_on():
+            return ws.get_all_values(*a, **kw)
+        k = ("prodws", getattr(ws, "id", None), getattr(getattr(ws, "spreadsheet", None), "id", None))
+        if k not in _READ_MEMO:
+            _READ_MEMO[k] = ws.get_all_values()
+        return _READ_MEMO[k]
+
     def __getattr__(self, name):
         attr = getattr(object.__getattribute__(self, "_ws"), name)
         if name in _ColWriteGuard._WRITE_METHODS and callable(attr):
@@ -473,6 +490,19 @@ def is_quota_error(e):
     return "429" in str(e) or "Quota exceeded" in str(e)
 
 
+# ★2026-09-01: **表示のためだけの読み取り**で 1分あたりの上限 (429) に当たった。
+#   実害: 出品くんの走行中に「出せるか」の塗り直しが 429 で落ちた (2026-09-01 19:56)。
+#   パネルのボタンに件数を出す集計は同じタブを何度も読むので、
+#   **その用途に限って** 1プロセス内で読み取りを使い回す。
+#   env で明示的に有効化した時だけ効かせる (書いてから読み直す通常の走行に影響させない)。
+_READ_MEMO = {}
+
+
+def _memo_on():
+    import os as _os
+    return _os.environ.get("SHEET_READ_MEMO") == "1"
+
+
 def read_tab(tab, sheet_id=MAINT_SHEET_ID, retries=3):
     """スプシ tab を 2d list で返す (I/O)。タブが無ければ []。
 
@@ -482,10 +512,16 @@ def read_tab(tab, sheet_id=MAINT_SHEET_ID, retries=3):
       (待たずに落とすと、目視の途中で全部やり直しになる)
     """
     import gspread
+    _k = ("tab", sheet_id, tab)
+    if _memo_on() and _k in _READ_MEMO:
+        return _READ_MEMO[_k]
     sh = _open(sheet_id)
     for attempt in range(retries + 1):
         try:
-            return sh.worksheet(tab).get_all_values()
+            _v = sh.worksheet(tab).get_all_values()
+            if _memo_on():
+                _READ_MEMO[_k] = _v
+            return _v
         except gspread.WorksheetNotFound:
             return []
         except Exception as e:                                    # noqa: BLE001

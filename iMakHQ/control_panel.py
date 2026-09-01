@@ -3293,7 +3293,11 @@ class ListingPanel:
                 r = subprocess.run([sys.executable, "-X", "utf8", "-c", code],
                                    capture_output=True, text=True, encoding="utf-8",
                                    errors="replace", timeout=180,
-                                   env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+                                   # ★2026-09-01: 件数を数えるだけの走行なので、同じタブを
+                                   #   何度も読まない (Sheets の 1分あたり読み取り上限 429 対策)。
+                                   #   書いてから読み直す通常の走行には効かせない。
+                                   env=dict(os.environ, PYTHONIOENCODING="utf-8",
+                                            SHEET_READ_MEMO="1"))
                 out = (r.stdout or "").strip()
                 if r.returncode != 0 or not out:
                     tail = (r.stderr or "").strip().splitlines()
