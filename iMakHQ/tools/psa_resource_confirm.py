@@ -438,7 +438,11 @@ def build_confirm_html(items):
                     f"{ctag}<span class='clbl'>{_html.escape(_s(c.get('label')))}</span></label>")
             cat_inner = "<div class='cands'>" + "".join(opts) + "</div>"
         else:
-            cat_inner = "<div class='ph'>catalog候補なし<br>(未収録→要追加)</div>"
+            # ★2026-09-01: 「未収録→要追加」と一律に出していたため、**番号が読めていないだけ**の時も
+            #   カタログのせいに見えていた (実測: 目視13件とも番号が空 = catalog を引いてすらいない)。
+            #   この表示を信じると カタログへ嘘の追加依頼を出すことになる。原因で言い分ける。
+            cat_inner = ("<div class='ph'>catalog候補なし<br>(未収録の可能性)</div>" if it.get("card_no")
+                         else "<div class='ph'>番号が読み取れない<br>(カタログは未確認)</div>")
         cat_col = f"<div class='col cat'><div class='cap'>② 候補(正しい変種を選択)</div>{cat_inner}</div>"
 
         rsn = ("<select class='rsn'>"
@@ -463,7 +467,8 @@ def build_confirm_html(items):
     bar = ("<div class='bar'><button class='go' onclick='go()'>✅ 確定して探索開始</button>"
            "<button onclick='setAll(true)'>全部ON</button>"
            "<button onclick='setAll(false)'>全部OFF</button>"
-           "<span style='color:#c33;font-size:13px'>※候補複数なら現物と同じ変種を選択。候補なし=要catalog追加</span></div>")
+           "<span style='color:#c33;font-size:13px'>※候補複数なら現物と同じ変種を選択。"
+           "「候補なし」=カタログ未収録の可能性 / 「番号が読み取れない」=こちら側の不具合(カタログ依頼にしない)</span></div>")
     return (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>PSA再仕入れ 確認</title>"
             f"<style>{_CSS}</style></head><body>"
             # bar を先頭 = sticky top:0 (h1 の折返しでボタンが隠れないように・2026-08-02)

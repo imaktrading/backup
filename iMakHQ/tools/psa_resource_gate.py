@@ -21,14 +21,59 @@ import os
 import re
 import sys
 
-# SNKRDUNK 突合用 card 番号 (ワンピース OP/ST/EB/P 系。SNKRDUNK name の [CARD] と突合)。
-# Pokemon は title が日本語で番号を持たない → canonical KEY から導出 (_key_card_number)。
-CARD_NUM_RE = re.compile(r"\b((?:OP|ST|EB|SB|GD)\d{2}-\d{3}|P-\d{2,3})\b", re.IGNORECASE)
+# タイトルから card 番号を取る。**作品ごとに書き方が違う**ので順に試す。
+#
+# ★2026-09-01: 旧実装は `(OP|ST|EB|SB|GD)nn-nnn | P-nnn` = **ワンピースの書き方だけ**で、
+#   ポケモンのコレクター番号 (058/095)・promo (261/SV-P)、ドラゴンボール (FB05-119 / E01-09)、
+#   ガンダム (GD02-072 / "GD02 #036" 形式) が **1件も取れなかった**。
+#   番号が空だと catalog を引きにすら行かない (`catalog_variants_for_cardno("")` は即 [])ため、
+#   目視ゲート②が常に「候補なし」になり、しかも画面には「未収録→要追加」と出て
+#   **カタログのせいに見えていた**。
+#   実測 (funnel_20260825 の PSA10 US 930件): 旧=374件しか取れない → 新=819件 (88%)。
+#   2026-07-24 の `2306ec3` は受け取る側 (card_number_text fallback) だけ直しており、
+#   **渡す側がずっと直っていなかった** (テストが番号を関数へ直接渡していたので緑のままだった)。
+CARD_NUM_PATTERNS = (
+    # ① コレクター番号 (ポケモン): 058/095 / 212/187 / 261/SV-P / 182/XY-P
+    re.compile(r"\b(\d{1,3}/[A-Za-z0-9\-]{1,5})\b"),
+    # ② セットコード: OP07-051 / ST01-012 / PRB02-014 / FB05-119 / E01-09 / GD02-072 / SV8a-093
+    re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?-\d{1,3}[A-Za-z]?)\b"),
+    # ③ 英字だけの promo: P-110 / RP-025 / FP-024
+    re.compile(r"\b([A-Z]{1,3}-\d{2,3})\b"),
+)
+# ④ セットコードと番号が離れている書き方: "One Piece OP02 Paramount War #036" / "Gundam GD02 #091"
+_BARE_NUM_RE = re.compile(r"#(\d{1,3})\b")
+_SET_TOKEN_RE = re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?)\b")
 
 
 def _card_number(title):
-    m = CARD_NUM_RE.search(title or "")
-    return m.group(1).upper() if m else None
+    """eBay タイトル → card 番号 (取れなければ None = fail-closed)。
+
+    推測はしない。**タイトルにその形で書かれている時だけ**返す。
+    番号だけ (`#036`) はどのセットか決まらないので、**同じタイトル内にセットコードが在る時だけ**
+    組み立てる (無ければ None のまま = 従来どおり人が「PSA番号補完」で入れる)。
+    """
+    t = title or ""
+    for rx in CARD_NUM_PATTERNS:
+        m = rx.search(t)
+        if m:
+            return m.group(1).upper()
+    m = _BARE_NUM_RE.search(t)
+    if m:
+        pre = _SET_TOKEN_RE.findall(t[:m.start()])
+        if pre:
+            return "%s-%03d" % (pre[-1].upper(), int(m.group(1)))
+    return None
+
+
+def _is_setcode_style(num):
+    """set-code 形式 (OP07-051) か。コレクター番号 (058/095) と区別する純関数。
+
+    KEY と title の食い違い警告は **同じ書き方どうし**でしか意味がない。
+    KEY='SM8B-231' と title='231/150' は同じカードの別表記なので、
+    ここを見ないと ポケモン全件で「タイトルが誤りの疑い」と誤警告する。
+    """
+    n = (num or "").strip()
+    return bool(n) and "/" not in n
 
 
 def _key_card_number(key):
@@ -70,7 +115,7 @@ def _resource_card_number(title, key, item_id=""):
     """
     ck = _key_card_number(key) or ""
     ct = _card_number(title) or ""
-    if ck and ct and ck.upper() != ct.upper():
+    if ck and ct and _is_setcode_style(ck) and _is_setcode_style(ct) and ck.upper() != ct.upper():
         print(f"  ⚠️ 番号不一致: eBayタイトル='{ct}' / KEY='{ck}' → **KEY を採用** "
               f"(itemID={item_id or '?'} / タイトル側が誤りの疑い = 要 revise 確認)", flush=True)
     return ck or ct or None      # 番号源が無ければ None (fail-closed。従来の戻り値規約を維持)

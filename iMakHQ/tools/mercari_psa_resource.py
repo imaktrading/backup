@@ -317,7 +317,11 @@ def catalog_variants_for_cardno(card_no, _db=r"C:/dev/iMak_data/catalog/products
             "WHERE (product_id=? COLLATE NOCASE OR product_id LIKE ? COLLATE NOCASE)" + _cat_sql,
             (card_no, card_no + "_%") + _cat_arg).fetchall()
         # フォールバック: product_id 不一致 かつ コレクター番号形式 → card_number_text で再検索
-        if not rows and _re.fullmatch(r"\d{1,3}/[A-Za-z0-9]{1,4}", card_no.strip()):
+        # ★2026-09-01: promo は `182/XY-P` `196/SV-P` の様に **ハイフンを含む**。
+        #   `[A-Za-z0-9]{1,4}` では弾かれ、catalog に在るのに候補0件だった
+        #   (実測 XYP-182 プテラEX / SV-P-196 イーブイ は card_number_text に
+        #    タイトルと同じ書式でそのまま入っている)。
+        if not rows and _re.fullmatch(r"\d{1,3}/[A-Za-z0-9\-]{1,5}", card_no.strip()):
             rows = con.execute(
                 f"SELECT {_cols} FROM products "
                 "WHERE json_extract(specs,'$.card_number_text')=?" + _cat_sql,
