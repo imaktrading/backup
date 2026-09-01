@@ -2461,17 +2461,30 @@ def main():
 
     driver.quit()
 
-    # ===== eBay API で市場価格を取得し StartPrice を更新 =====
-    ebay_keys = load_ebay_keys()
+    # ===== 価格 =====
+    # ★2026-09-01: 本家 psa_to_csv に 2026-08-13 に入った「相場停止 → cost-plus」が
+    #   **この fork だけ未適用**だった。結果、eBay API のキーが無い走行では価格更新ブロック
+    #   (`if ebay_token:`) ごと飛ばされ、**全行が DEFAULT_PRICE=$100 のまま CSV になっていた**。
+    #   実害 (2026-09-01): 仕入 ¥150,000 / 現行 $253.98 のカードが $100.00 で出力された。
+    #   相場は止まっているので **API は価格に一切使わない**のが正しい。
+    try:
+        from config_loader import is_market_lookup_enabled as _mkt_on
+        _market_lookup = _mkt_on()
+    except Exception:
+        _market_lookup = False
+
+    ebay_keys = load_ebay_keys() if _market_lookup else {}
     ebay_token = None
-    if ebay_keys.get("AppID") and ebay_keys.get("AppSecret"):
+    if not _market_lookup:
+        print("\n💲 価格: cost-plus のみ (相場取得は停止中 — global.yaml market_lookup)")
+    elif ebay_keys.get("AppID") and ebay_keys.get("AppSecret"):
         try:
             ebay_token = get_ebay_oauth_token(ebay_keys["AppID"], ebay_keys["AppSecret"])
             print(f"\n✓ eBay API接続OK — 市場価格を取得します")
         except Exception as e:
-            print(f"\n⚠️ eBay API接続失敗: {e} → デフォルト価格$100を使用")
+            print(f"\n⚠️ eBay API接続失敗: {e} → 相場は見ず cost-plus で値付けします")
     else:
-        print(f"\n⚠️ eBay APIキーなし → デフォルト価格$100を使用")
+        print(f"\n⚠️ eBay APIキーなし → 相場は見ず cost-plus で値付けします")
 
     # 利益計算パラメータ（SSOT: iMakeBayAPI/profit_params.py 経由で利益計算シートv2を参照）
     # sys.path はファイル冒頭で設定済のためここでは追加しない
@@ -2502,6 +2515,40 @@ def main():
     shipping_col_idx = headers.index("ShippingProfileName")
     cert_col_idx = headers.index("CDA:Certification Number - (ID: 27503)")
     skip_certs = set()  # NO-GO(乖離30%超)のcert番号
+    no_cost_certs = set()   # 仕入値が無く価格を決められなかった cert (= 出さない)
+
+    def _cost_plus_price(cost_jpy):
+        """相場を見ずに価格を出す = 相場ありの時と **同じ式** (pricing_engine)。
+
+        ★仕入値が無い時は **None を返して行ごと落とす** (fail-closed)。
+          旧実装は $100 を返していたが、再仕入れは **仕入値が必ず分かっている**
+          (「RESTOCK確定」タブの最安¥) ので、無いのは取り損ない。推測で値を付けない。
+        """
+        if cost_jpy is None:
+            return None
+        from pricing_engine import compute_listing_price as _pe
+        p = round(_pe(cost_jpy, 0, "TCG(PSA10)")["target_usd"], 2)
+        return int(p) + 0.98 if p > 10 else p
+
+    if not ebay_token:
+        # 相場停止 / キー無し / 接続失敗 の **どれでも** cost-plus で値付けする。
+        # ★ここを `not _market_lookup` だけにすると、キーが無い走行で値付けが
+        #   丸ごと飛び、DEFAULT_PRICE=$100 のまま出る (2026-09-01 の実害)。
+        for _cert, _data in card_info:
+            if _data is None:
+                continue
+            _idx = next((ri for ri in range(1, len(rows))
+                         if str(rows[ri][cert_col_idx]) == str(_cert)), None)
+            if _idx is None:
+                continue
+            _price = _cost_plus_price(cost_map.get(_cert))
+            if _price is None:
+                no_cost_certs.add(str(_cert))
+                print(f"    ❌ #{_cert}: 仕入値が無く価格を決められない → 出さない")
+                continue
+            rows[_idx][price_col_idx] = _price
+            rows[_idx][shipping_col_idx] = get_shipping_policy(_price)
+            print(f"    #{_cert}: ${_price}")
 
     if ebay_token:
         card_seq = 0  # ナンバリング用
@@ -2639,6 +2686,11 @@ def main():
             time.sleep(0.5)
 
     # NO-GOのカードをCSVから除外
+    if no_cost_certs:
+        rows = [rows[0]] + [r for r in rows[1:]
+                            if str(r[cert_col_idx]) not in no_cost_certs]
+        print(f"\n🚫 仕入値不明 {len(no_cost_certs)}件をCSVから除外しました (推測価格では出さない)")
+
     if skip_certs:
         rows = [rows[0]] + [
             r for r in rows[1:]
