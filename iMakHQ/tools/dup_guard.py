@@ -229,6 +229,34 @@ def plan_shared_url_cleanup(rows2d):
     return plan
 
 
+def _add_iid(index, key, iid):
+    """key に itemID を足す。**同じ itemID は1回だけ** (純関数)。
+
+    ★2026-09-01: 商品管理シートに同じ出品の行が2つある (実測 36 cert / 72行) ため、
+      素で append すると 1つの出品が「同一カード多重」に見えた
+      (実害: audit ② に `[358833464164, 358833464164]` と同じ番号が2回並ぶ)。
+      多重かどうかは **別々の出品が在るか**なので、itemID で重複を潰す。
+    """
+    v = index.setdefault(key, [])
+    if iid not in v:
+        v.append(iid)
+
+
+def duplicate_sheet_rows(rows2d):
+    """同じ cert が複数行にある = シートの行が重複している (純関数)。
+
+    ★2026-09-01: 補URL が2行に分かれて付く / 二重に数える、の元。
+      **消すのは人の判断** (どちらの行の仕入元URLを残すかが行ごとに違う) なので、
+      ここは検出して並べるだけにする。
+    """
+    out = {}
+    for i, r in enumerate(rows2d[1:], start=2):
+        cert = _cell(r, CERT)
+        if cert.isdigit() and len(cert) >= 6:
+            out.setdefault(cert, []).append(i)
+    return {c: rows for c, rows in out.items() if len(rows) > 1}
+
+
 def live_card_index(rows2d, titles_by_itemid=None, active_ids=None):
     """ACTIVE 行の カードキー → [itemID]。
 
@@ -255,11 +283,11 @@ def live_card_index(rows2d, titles_by_itemid=None, active_ids=None):
             continue
         k = _cell(r, KEY)
         if k and not k.startswith(("item:", "shops:")):
-            index.setdefault(group_key(k), []).append(iid)
+            _add_iid(index, group_key(k), iid)
             continue
         tok = card_token_from_title(titles_by_itemid.get(iid, ""))
         if tok:
-            index.setdefault("t:" + tok, []).append(iid)
+            _add_iid(index, "t:" + tok, iid)
         else:
             unkeyed.append(iid)
     return index, unkeyed
@@ -684,6 +712,15 @@ def audit(refresh_titles=True):
     #   TCG には0件) を直すかどうかの **判断材料**。実測すると今は
     #   未出品側 0件 / live どうし 3組(578種) しか無く、直しても助かる件がほぼ無い。
     #   → 直さない判断をしたので、**増えたら気づけるように常設で数える**。
+    dup_rows = duplicate_sheet_rows(vals)
+    print(f"⑥ 同じ cert が複数行にある (シートの行が重複): {len(dup_rows)}件"
+          + ("" if _os.environ.get("DUP_GUARD_VERBOSE") else "  (一覧は DUP_GUARD_VERBOSE=1 で)"))
+    if _os.environ.get("DUP_GUARD_VERBOSE"):
+        for c, rws in list(dup_rows.items())[:30]:
+            print(f"    - cert{c:12} rows={rws}")
+    if dup_rows:
+        print("    ※ 補URL が2行に分かれて付きます。**どちらを残すかは人の判断**なので自動では消しません")
+
     split = key_split_same_card(vals, titles)
     print(f"⑤ 同じカードなのに KEY が違う組 (catalog canonical 未統合の実害): {len(split)}組")
     for s in split[:10]:
@@ -692,6 +729,7 @@ def audit(refresh_titles=True):
                       "dup_cards": {k: v for k, v in dup_cards.items()},
                       "frozen_cost": frozen, "restock_collision": coll,
                       "key_split_same_card": split,
+                      "duplicate_sheet_rows": dup_rows,
                       "unkeyed": len(unkeyed), "active": n_act})
     if shared:
         print("‼ URL共有あり = 両方売れたら履行不能。片方の補URL差替 or 取下げが必要。")

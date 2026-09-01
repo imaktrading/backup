@@ -3728,6 +3728,61 @@ def main():
                     break
             _prescraped[cert] = d
             print(" ✓" if d else " 失敗")
+        # ★2026-09-01: **scrape が済んだ直後に、もう一度 重複を見る**。
+        #   枠を選ぶ前の LIVE-DUP は「まだ一度も scrape していない cert」を判定できない
+        #   (PSA の per-cert json が無い = 判定不能で残置)。その分は目視にも生成にも回った上で、
+        #   最後に重複くんが物理除外していた。
+        #   実測 2026-09-01: 18件生成 → 6件が live 重複で除外 (目視19件のうち6件も無駄)。
+        #   **判定の基準は後段の除外と同じ**なので、ここで落としても出品は1件も減らない。
+        #   減るのは 目視の手間 と 生成の課金だけ。
+        try:
+            _tools0 = r"C:/dev/iMak/iMakHQ/tools"
+            if _tools0 not in sys.path:
+                sys.path.insert(0, _tools0)
+            import dup_guard as _dg2
+            import psa_preflight as _pf2
+            import sheet_io as _si2
+            import sqlite3 as _sq32
+            _t2, _s2, _fresh2 = _dg2.ensure_fresh_live_cache()
+            _t2 = _t2 or {}
+            if _fresh2 and _t2:
+                _rows2 = _si2._product_ws().get_all_values()
+                _idx2, _ = _dg2.live_card_index(_rows2, _t2, set(_t2.keys()))
+                _con2 = _sq32.connect(_pf2.CATALOG_DB)
+                _dup2, _cls2 = [], {}
+                for _c2 in list(cert_numbers):
+                    if not _prescraped.get(_c2):
+                        continue
+                    _f2 = _pf2.PSA_CERTS_DIR / (str(_c2) + '.json')
+                    if not _f2.exists():
+                        continue
+                    try:
+                        _r3 = _pf2.classify(str(_c2), json.loads(_f2.read_text(encoding='utf-8')), _con2)
+                    except Exception:
+                        continue
+                    _pid2 = _r3.get('product_id') if isinstance(_r3, dict) else None
+                    if not _pid2:
+                        continue
+                    _cls2[_c2] = _r3
+                    if _dg2.group_key(str(_r3.get('category')) + ':' + str(_pid2)) in _idx2:
+                        _dup2.append(_c2)
+                _con2.close()
+                if _dup2:
+                    # 落とす前に KEY をシートへ (補URL に回すため。枠前の LIVE-DUP と同じ理由)
+                    try:
+                        _kr2, _kk2 = _keys_for_dropped_dupes(_rows2, _dup2, _cls2)
+                        if _kk2:
+                            _si2.write_keys(_kr2, _kk2)
+                            print(f'  🔗 補URL に回すため KEY を先に書込: {len(_kk2)}件')
+                    except Exception as _ke2:
+                        print(f'  ⚠️ KEY 先行書込 skip: {type(_ke2).__name__}: {_ke2}')
+                    cert_numbers = [_c for _c in cert_numbers if _c not in set(_dup2)]
+                    print(f'  ⏭️ scrape後に除外 [LIVE-DUP=同じカードが既に出品中]: {len(_dup2)}件 '
+                          f'→ {_dup2}')
+                    print('     (目視にも生成にも回さない。基準は後段の重複除外と同じなので出品は減らない)')
+        except Exception as _de2:
+            print(f'  ⚠️ scrape後の重複チェック skip: {type(_de2).__name__}: {_de2}')
+
         try:
             _tools = r"C:/dev/iMak/iMakHQ/tools"
             if _tools not in sys.path:
