@@ -1320,6 +1320,10 @@ SCRIPTS = [
     {
         "category": None, "type": "utility",
         "label": "🃏 PSA再仕入れ照合",
+        "badge": "psa_gate",
+        "tip": "在庫切れしたPSA10のうち、まだ需要がある物の仕入元 (メルカリ/スニダン) を探して、"
+               "現物と見比べて確定します。確定した分は次の ♻ でCSVになります。"
+               "1回で新規10件見つかるまで掘ります。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         # 2チャネル(Mercari＆SNKRDUNK)ゲート。探索前に①現物(出品PSA)=②catalog の目視確認ゲートが
         # ブラウザで開く→一致分だけ探索。不一致はPDCA台帳(原因別振り分け)。旧 mercari_psa_resource.py
@@ -1336,6 +1340,9 @@ SCRIPTS = [
         # RESTOCK後工程① 視覚確証で確定したカードを 新コア生成→Revise CSV化(手動UL用)。2026-06-18
         "category": None, "type": "utility",
         "label": "♻ RESTOCK Revise CSV生成",
+        "badge": "restock_build",
+        "tip": "🃏 で仕入元が確定した分を、出品しなおすCSVにします (手でアップロードする用)。"
+               "一度出した分は自動で除きます。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_restock_build.py"],
         "params": [],
@@ -1348,6 +1355,10 @@ SCRIPTS = [
         # RESTOCK後工程② アップロード反映後、実eBay qty を verify してスプシ書戻し(状態同期)。2026-06-18
         "category": None, "type": "utility",
         "label": "🔄 RESTOCK状態同期(書戻し)",
+        "badge": "restock_wb",
+        "tip": "♻ のCSVをアップロードした後に押します。eBayの実際の在庫数を見て、"
+               "本当に戻っている物だけ「実行済」にします。戻っていない物は残るので、"
+               "取りこぼしになりません。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_restock_writeback.py"],
         "params": [],
@@ -1364,6 +1375,9 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "📊 補URL件数感(status)",
         "label_fg": "#0a7",
+        "badge": "hoju_status",
+        "tip": "見るだけのボタン。仕入元の予備 (補URL) が何本あるかの内訳を出します。"
+               "押しても何も変わらないので、色は変わりません。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_hoju_fill.py", "status"],
         "params": [],
@@ -1477,6 +1491,9 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "🎴一番くじ補充① supply確定",
         "label_fg": "#0a7",
+        "badge": "kuji_supply",
+        "tip": "在庫切れした一番くじの仕入元を探して、現物と見比べて確定します。"
+               "確定した分は次の ② でCSVになります。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "ichibankuji_restock.py", "supply", "10"],
         "params": [],
@@ -1491,6 +1508,9 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "🎴一番くじ補充② 刷新→CSV",
         "label_fg": "#0a7",
+        "badge": "kuji_refresh",
+        "tip": "① で確定した分の説明文・画像を作りなおして、出品CSVにします。"
+               "① をやっていないと対象0件です。",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "ichibankuji_restock.py", "refresh-csv"],
         "params": [],
@@ -3235,6 +3255,30 @@ class ListingPanel:
             "    d['restock']=SR.count_workload()\n"
             "except Exception as e:\n"
             "    d['restock']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # ★2026-09-01 ユーザー要望「ボタンが増えて何をしたらいいか分からない」:
+            #   既存メンテのヒント無し 6個も同じ subprocess で数える。
+            #   どれも **スクレイプも eBay API も使わない** (材料は funnel CSV とスプシ)。
+            "try:\n"
+            "    import psa_resource_gate as PG\n"
+            "    d['psa_gate']=PG.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['psa_gate']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # RESTOCK確定タブは ♻ と 🔄 の両方が見るので **1回だけ読んで渡す**。
+            "try:\n"
+            "    from sheet_io import read_tab as _rt\n"
+            "    _rk=_rt('RESTOCK確定')\n"
+            "except Exception as e:\n"
+            "    _rk=None\n"
+            "try:\n"
+            "    import psa_restock_build as RB\n"
+            "    d['restock_build']=RB.count_workload(_rk)\n"
+            "except Exception as e:\n"
+            "    d['restock_build']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            "try:\n"
+            "    import psa_restock_writeback as RW\n"
+            "    d['restock_wb']=RW.count_workload(_rk)\n"
+            "except Exception as e:\n"
+            "    d['restock_wb']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             "print(json.dumps(d))"
             % os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
         )
@@ -3391,10 +3435,79 @@ class ListingPanel:
                         sr_txt += "\n※要確認は押すと分かります (売切れ終了→出し直しの可能性)"
             else:
                 sr_txt = ""
+            # ===== 2026-09-01: 既存メンテの残り6ボタン (ユーザー要望「何をしたらいいか分からない」) =====
+            #   出す数字は **押したら今すぐ動く件数だけ** (ユーザー決定)。0件なら黒のまま。
+            def _err(d, what):
+                return "\n(%s 取得できず: %s)" % (what, str(d["error"])[:40])
+
+            # 🃏 PSA再仕入れ照合: 今すぐ照合に出せる件数
+            pg = (w0.get("psa_gate") or {}) if isinstance(w0, dict) else {}
+            if pg.get("error"):
+                pg_txt = _err(pg, "件数")
+            elif pg:
+                pg_txt = "\n今すぐ照合できる %s件 (候補 %s件のうち)" % (
+                    pg.get("actionable", 0), pg.get("targets", 0))
+                if pg.get("processed"):
+                    pg_txt += "\n※確定/レビュー済で伏せている %s件" % pg["processed"]
+                if pg.get("note"):
+                    pg_txt += "\n※%s" % pg["note"]
+                if (pg.get("funnel_age") or 0) >= 3:
+                    pg_txt += "\n※ファネルが %s日前です (先に 📊 ファネル分析)" % pg["funnel_age"]
+                if not pg.get("actionable") and not pg.get("note"):
+                    pg_txt += "\n※押しても0件 (新しい候補が出るのはファネル更新後)"
+            else:
+                pg_txt = ""
+            # ♻ RESTOCK Revise CSV生成: 何件ぶん CSV が出るか
+            rb = (w0.get("restock_build") or {}) if isinstance(w0, dict) else {}
+            if rb.get("error"):
+                rb_txt = _err(rb, "件数")
+            elif rb:
+                rb_txt = "\nCSVにできる %s件" % rb.get("actionable", 0)
+                if rb.get("done"):
+                    rb_txt += " (出し済み %s件は除外)" % rb["done"]
+                if not rb.get("actionable"):
+                    rb_txt += "\n※押しても0件 (先に 🃏 で仕入元を確定)"
+            else:
+                rb_txt = ""
+            # 🔄 RESTOCK状態同期: 何件の実状態を確かめに行くか
+            rw = (w0.get("restock_wb") or {}) if isinstance(w0, dict) else {}
+            if rw.get("error"):
+                rw_txt = _err(rw, "件数")
+            elif rw:
+                rw_txt = "\n確かめに行く %s件 (実行済 %s件)" % (
+                    rw.get("actionable", 0), rw.get("done", 0))
+                if not rw.get("actionable"):
+                    rw_txt += "\n※押しても0件 (全部 実行済)"
+            else:
+                rw_txt = ""
+            # 📊 補URL件数感: **見るだけ**なので色は変えない。今の内訳をそのまま出す
+            hs_txt = "\nlive PSA %s件 / 補が薄い %s件\n(検索できる %s件 / 目視できる %s件)" % (
+                w.get("live_psa", "?"), tot, s["can"], cf["ready"])
+            # 🎴一番くじ補充① supply確定 / ② 刷新→CSV
+            kv = (kj.get("supply") or {}) if isinstance(kj, dict) else {}
+            kr = (kj.get("refresh") or {}) if isinstance(kj, dict) else {}
+            if kv.get("error"):
+                kv_txt = _err(kv, "件数")
+            elif kv.get("can") is None:
+                kv_txt = ""
+            else:
+                kv_txt = "\n目視に出せる %s件" % kv["can"]
+                if not kv["can"]:
+                    kv_txt += "\n※押しても0件 (在庫切れの一番くじが無い)"
+            if kr.get("error"):
+                kr_txt = _err(kr, "件数")
+            elif kr.get("can") is None:
+                kr_txt = ""
+            else:
+                kr_txt = "\nCSVにできる %s件" % kr["can"]
+                if not kr["can"]:
+                    kr_txt += "\n※押しても0件 (先に ① supply確定)"
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
                        "kuji_search": k_s, "kuji_confirm": k_c, "cull_end": ce_txt,
                        "shelf_evict": se_txt, "shelf_evict_label": se_label,
-                       "sold_restock": sr_txt}
+                       "sold_restock": sr_txt,
+                       "psa_gate": pg_txt, "restock_build": rb_txt, "restock_wb": rw_txt,
+                       "hoju_status": hs_txt, "kuji_supply": kv_txt, "kuji_refresh": kr_txt}
             # ★2026-08-16: **押すと何か出てくる時だけ青**。0件なら黒のまま
             #   (「いつ押せばいいのか分からない」への答え。色 = 今やる価値があるか)。
             act_kind = {"hoju_search": bool(s.get("can")),
@@ -3407,7 +3520,14 @@ class ListingPanel:
                         # 落とすものが在る時だけ青 (0件なら押す意味が無い)
                         "cull_end": bool(ce.get("remaining")),
                         "shelf_evict": bool(se.get("picked")),
-                        "sold_restock": bool(sr.get("actionable") or sr.get("unknown"))}
+                        "sold_restock": bool(sr.get("actionable") or sr.get("unknown")),
+                        # ★2026-09-01: 押したら今すぐ動く件数が1件でもある時だけ青。
+                        #   📊 補URL件数感 は **見るだけ**なので色を変えない (act_kind に入れない)。
+                        "psa_gate": bool(pg.get("actionable")),
+                        "restock_build": bool(rb.get("actionable")),
+                        "restock_wb": bool(rw.get("actionable")),
+                        "kuji_supply": bool(kv.get("can")),
+                        "kuji_refresh": bool(kr.get("can"))}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。

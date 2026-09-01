@@ -52,6 +52,49 @@ def classify_restock(confirmed_items, qty_map):
     return {"done": done, "pending": pending, "unknown": unknown, "status": status}
 
 
+def pending_rows_from_confirmed(rows):
+    """RESTOCK確定の2d行 → (まだ実行済でない件数, 実行済件数) (純関数)。
+
+    「押したら何件 verify しに行くか」= 実行済でない行。空欄 (まだ一度も見ていない) も含む。
+    """
+    if not rows or len(rows) < 2:
+        return 0, 0
+    h = rows[0]
+    si = h.index("RESTOCK状態") if "RESTOCK状態" in h else None
+    ii = h.index("itemID") if "itemID" in h else 0
+    todo = done = 0
+    for r in rows[1:]:
+        if not any(r) or not (r[ii] if ii < len(r) else "").strip():
+            continue
+        st = (r[si] if si is not None and si < len(r) else "") or ""
+        if ST_DONE in st:
+            done += 1
+        else:
+            todo += 1
+    return todo, done
+
+
+def count_workload(rows=None):
+    """押したら『何件の実状態を確かめに行くか』を数える (パネルのヒント用・2026-09-01).
+
+    ★数えるだけの段では eBay を1回も叩かない (qty の確認は押してから)。
+      材料は「RESTOCK確定」タブだけ。
+    """
+    try:
+        if rows is None:
+            import os as _os
+            import sys as _sys
+            _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+            _sys.path.insert(0, _os.path.normpath(_os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)), "..", "..", "iMakeBayAPI")))
+            from sheet_io import read_tab
+            rows = read_tab("RESTOCK確定")
+        todo, done = pending_rows_from_confirmed(rows)
+        return {"actionable": todo, "done": done, "total": todo + done}
+    except Exception as e:                                     # noqa: BLE001
+        return {"error": "%s: %s" % (type(e).__name__, e)}
+
+
 def reconcile_and_write(today):
     """「RESTOCK確定」タブを読み、各 itemID の実eBay qty を verify → スプシ書戻し(I/O)。
 

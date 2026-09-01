@@ -1046,6 +1046,56 @@ def _review_skip_active(date_str, today):
     return age < 0 or age < REVIEW_SKIP_COOLDOWN_DAYS
 
 
+def count_workload(today=None):
+    """押したら『今すぐ照合に出せる件数』を **探索せずに** 数える (パネルのヒント用・2026-09-01).
+
+    ★scrape も eBay API も1回も使わない。材料は funnel CSV とスプシ3タブだけ
+      (表示のために API 枠を使わない = cull_end / shelf_evict と同じ約束)。
+    ★絞り込みは `mercari_psa_resource.restock_psa10_candidates` を通す。
+      ボタン本体と同じ関数なので、条件が片方だけズレることがない。
+    """
+    import csv as _csv
+    import datetime as _dt
+    import glob as _glob
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import mercari_psa_resource as mp
+        files = _glob.glob(os.path.join(mp.FUNNEL_DIR, "funnel_*.csv"))
+        if not files:
+            return {"error": "funnel CSV が無い (先に 📊 ファネル分析)"}
+        src = max(files, key=os.path.getmtime)
+        frows = list(_csv.DictReader(open(src, encoding="utf-8")))
+        _all, cands = mp.restock_psa10_candidates(frows)
+        uniq, seen = [], set()
+        for r in cands:
+            iid = mp._ebay_item_id(r.get("ebay_url", "") or "")
+            if iid and iid in seen:
+                continue
+            if iid:
+                seen.add(iid)
+            uniq.append(iid)
+        age_d = (_dt.date.today() - _dt.date.fromtimestamp(os.path.getmtime(src))).days
+        base = {"targets": len(uniq), "funnel": os.path.basename(src), "funnel_age": age_d}
+        try:
+            from sheet_io import read_tab
+            t = today or _dt.date.today().isoformat()
+            processed = (_restock_confirmed_iids(read_tab("RESTOCK確定"))
+                         | _review_skip_iids(read_tab(REVIEW_SKIP_TAB), t))
+            excl = {(rr[0] or "").strip()
+                    for rr in (read_tab("RESTOCK対象外")[1:] or []) if rr and (rr[0] or "").strip()}
+        except Exception as e:                                 # noqa: BLE001
+            # スプシが読めない時は **多めに言わない**。全部を新規と数えると青になり続ける。
+            base.update({"actionable": 0, "note": "スプシ未読 (%s) = 件数は押すまで不明"
+                                                  % type(e).__name__})
+            return base
+        base.update({"actionable": sum(1 for i in uniq if i and i not in processed and i not in excl),
+                     "processed": sum(1 for i in uniq if i and i in processed),
+                     "excluded": sum(1 for i in uniq if i and i in excl)})
+        return base
+    except Exception as e:                                     # noqa: BLE001
+        return {"error": "%s: %s" % (type(e).__name__, e)}
+
+
 def _build_review_skip_rows(restock_cands, shown_idxs, confirmed_idxs, diff_idxs, today):
     """視覚確証でレビュー済だが未確定(違う/見送り)の行を作る(純関数)。
 

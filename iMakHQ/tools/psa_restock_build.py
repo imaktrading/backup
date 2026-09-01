@@ -101,6 +101,25 @@ def _pending_from_confirmed_rows(rows):
     return out, skipped_done
 
 
+def count_workload(rows=None):
+    """押したら『何件ぶん CSV が出るか』を数える (パネルのヒント用・2026-09-01).
+
+    eBay は1回も叩かない。材料は「RESTOCK確定」タブだけ。
+    判定は本体と同じ `_pending_from_confirmed_rows` を通す (二重実装しない)。
+    rows を渡せばスプシを読まない (同じ subprocess で writeback と読みを共有するため)。
+    """
+    try:
+        if rows is None:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from sheet_io import read_tab
+            rows = read_tab("RESTOCK確定")
+        pending, done = _pending_from_confirmed_rows(rows)
+        # cert# が引けない行は生成できない。ここでは判らないので件数は「確定 - 実行済」で言う。
+        return {"actionable": len(pending), "done": done, "total": len(pending) + done}
+    except Exception as e:                                     # noqa: BLE001
+        return {"error": "%s: %s" % (type(e).__name__, e)}
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8")

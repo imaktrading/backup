@@ -1145,8 +1145,27 @@ def count_workload():
     ready = sum(1 for t in targets
                 if _identify_cache_fresh(cache.get(str(t["item_id"])), today)
                 and (cache.get(str(t["item_id"])) or {}).get("candidates"))
+    # ★2026-09-01: 一番くじ補充①(supply確定) / ②(刷新→CSV) のヒント用。
+    #   ①= 今 目視に出せる OOS 一番くじ (cooldown 除外済) / ②= 確定済で まだ CSV にしていない分。
+    #   スクレイプは1回もしない (①はスプシ読み・②はローカル json)。
+    try:
+        supply_can = len(get_oos_ichibankuji(9999))
+    except Exception as e:                                     # noqa: BLE001
+        supply_can = None
+        supply_err = "%s: %s" % (type(e).__name__, e)
+    else:
+        supply_err = ""
+    try:
+        refresh_can = len(_load_confirmed() or {})
+    except Exception as e:                                     # noqa: BLE001
+        refresh_can = None
+        refresh_err = "%s: %s" % (type(e).__name__, e)
+    else:
+        refresh_err = ""
     return {"targets": len(targets), "search": {"can": len(targets)},
-            "confirm": {"ready": ready}}
+            "confirm": {"ready": ready},
+            "supply": {"can": supply_can, "error": supply_err},
+            "refresh": {"can": refresh_can, "error": refresh_err}}
 
 
 def pass_identify(n, cand_n, live=False):

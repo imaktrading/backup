@@ -417,6 +417,30 @@ def _is_multi_variant(card_no, category="", _cache={}):
     return _cache[ck]
 
 
+def restock_psa10_candidates(frows):
+    """funnel の行 → (RESTOCK∩PSA10, 実需フィルタ通過) を返す純関数 (test可)。
+
+    ★2026-09-01: パネルのヒント (「今すぐ照合できる何件か」) が同じ絞り込みを
+      使えるように切り出した。**真理表を2つ持たない**ため、CSV を書く
+      `build_input_from_funnel` も件数を数えるだけの `count_workload` も
+      ここだけを通す (片方だけ条件が変わる事故を防ぐ)。
+    """
+    def _f(r, k):
+        try:
+            return float(r.get(k) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _has_demand(r):
+        # 実需シグナル: 実売 or watch or organic impr が1以上(impr_total=広告込みは使わない)
+        return (_f(r, "sold_qty") >= 1 or _f(r, "sales90") >= 1
+                or _f(r, "watch") >= 1 or _f(r, "impr") >= 1)
+
+    restock_psa = [r for r in frows
+                   if "RESTOCK" in (r.get("flags") or "").split("|") and is_psa10(r.get("title", ""))]
+    return restock_psa, [r for r in restock_psa if _has_demand(r)]
+
+
 def build_input_from_funnel():
     """手動CSVが無いとき、最新 funnel_*.csv から PSA再仕入れ候補CSVを生成。
 
@@ -440,18 +464,7 @@ def build_input_from_funnel():
     fsrc = max(ffiles, key=os.path.getmtime)
     frows = list(csv.DictReader(open(fsrc, encoding="utf-8")))
 
-    def _has_demand(r):
-        def _f(k):
-            try:
-                return float(r.get(k) or 0)
-            except (TypeError, ValueError):
-                return 0.0
-        # 実需シグナル: 実売 or watch or organic impr が1以上(impr_total=広告込みは使わない)
-        return _f("sold_qty") >= 1 or _f("sales90") >= 1 or _f("watch") >= 1 or _f("impr") >= 1
-
-    restock_psa = [r for r in frows
-                   if "RESTOCK" in (r.get("flags") or "").split("|") and is_psa10(r.get("title", ""))]
-    cands = [r for r in restock_psa if _has_demand(r)]
+    restock_psa, cands = restock_psa10_candidates(frows)
     print(f"  絞り込み: RESTOCK∩PSA10 {len(restock_psa)}件 → 実需フィルタ(実売/watch/organic impr≥1) "
           f"{len(cands)}件 (impr_total のみの薄い層 {len(restock_psa)-len(cands)}件を除外)", flush=True)
     if not cands:
