@@ -9,12 +9,12 @@ values:
   # ── pokemon_tcg ──
   - value: "Start Deck 100 Battle Collection"
     category: pokemon_tcg
-    rows: 766
+    rows: 774
     jp_set: "スタートデッキ100 バトルコレクション"
   - value: "XY Promo"
     category: pokemon_tcg
-    rows: 275
-    jp_set: "ポケモンカードゲーム教室2013 参加賞"
+    rows: 326
+    jp_set: "ポケモンカードゲーム プロモーションカードパック(2015/5)"
   - value: "Mega Dream ex"
     category: pokemon_tcg
     rows: 250
@@ -25,8 +25,12 @@ values:
     jp_set: "エクストラバトルの日"
   - value: "Start Deck Generations"
     category: pokemon_tcg
-    rows: 175
+    rows: 178
     jp_set: "スタートデッキGenerations ピカチュウex・カビゴンex"
+  - value: "CoroCoro Comic December 2006"
+    category: pokemon_tcg
+    rows: 175
+    jp_set: "小学館『月刊コロコロコミック』2006年12月号付録"
   - value: "Galactic's Conquest"
     category: pokemon_tcg
     rows: 146
@@ -75,10 +79,22 @@ values:
     category: pokemon_tcg
     rows: 92
     jp_set: "拡張パック「メガシンフォニア」"
+  - value: "Pokemon Challenge Plaza 2009/9"
+    category: pokemon_tcg
+    rows: 92
+    jp_set: "ポケモンチャレンジひろば 2009/9"
+  - value: "M-P: Mega Promos"
+    category: pokemon_tcg
+    rows: 90
+    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Wild Blaze"
     category: pokemon_tcg
     rows: 85
     jp_set: "ポケモンカードゲームXY 拡張パック「ワイルドブレイズ」"
+  - value: "Pocket Monsters Card Game Starter Pack (20th Anniversary)"
+    category: pokemon_tcg
+    rows: 81
+    jp_set: "ポケモンカードゲームXY BREAK 「ポケットモンスターカードゲーム スターターパック」"
   - value: "Rage of the Broken Heavens"
     category: pokemon_tcg
     rows: 81
@@ -95,14 +111,18 @@ values:
     category: pokemon_tcg
     rows: 76
     jp_set: "ポケモンカードゲームXY 拡張パック「タイダルストーム」"
-  - value: "M-P: Mega Promos"
+  - value: "Anytime Anywhere Battle Academy"
     category: pokemon_tcg
-    rows: 75
-    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
+    rows: 74
+    jp_set: "いつでもどこでも バトルアカデミー"
   - value: "Reviving Legends"
     category: pokemon_tcg
     rows: 74
     jp_set: "ポケモンカードゲームLEGEND 拡張パック「よみがえる伝説」"
+  - value: "Grass Decidueye GX Starter Set"
+    category: pokemon_tcg
+    rows: 68
+    jp_set: "ポケモンカードゲーム サン&ムーン 「スターターセット草 ジュナイパーGX」"
   - value: "HeartGold Collection"
     category: pokemon_tcg
     rows: 68
@@ -121,16 +141,60 @@ values:
     jp_set: "ポケモンカードゲームXY 拡張パック「コレクションY」"
   - value: "Family Pokemon Card Game"
     category: pokemon_tcg
-    rows: 53
+    rows: 59
     jp_set: "ファミリーポケモンカードゲーム"
+  - value: "Mega Premium Trainer Box"
+    category: pokemon_tcg
+    rows: 51
+    jp_set: "プレミアムトレーナーボックスMEGA"
+  - value: "DPt Entry Pack 08"
+    category: pokemon_tcg
+    rows: 42
+    jp_set: "ポケモンカードゲームDP エントリーパック’08"
   - value: "Mewtwo ex Starter Deck"
     category: pokemon_tcg
     rows: 40
     jp_set: "スターターセット テラスタル「ミュウツーex」「ラウドボーンex」"
+  - value: "Charizard VSTAR vs Rayquaza VMAX Special Deck Set"
+    category: pokemon_tcg
+    rows: 32
+    jp_set: "スペシャルデッキセット リザードンVSTAR vs レックウザVMAX"
+  - value: "VSTAR Premium Trainer Box"
+    category: pokemon_tcg
+    rows: 30
+    jp_set: "プレミアムトレーナーボックス VSTAR"
+  - value: "Zacian & Zamazenta vs Eternatus Special Deck Set"
+    category: pokemon_tcg
+    rows: 30
+    jp_set: "スペシャルデッキセット ザシアン・ザマゼンタ vs ムゲンダイナ"
+  - value: "2009 Movie Release Random Pack"
+    category: pokemon_tcg
+    rows: 30
+    jp_set: "映画公開記念ランダムパック2009"
+  - value: "DP Battle Starter Pack Magmortar vs Electivire"
+    category: pokemon_tcg
+    rows: 28
+    jp_set: "ポケモンカードゲームDP 対戦スターターパック「ブーバーンVSエレキブル」"
+  - value: "Premium Trainer Box"
+    category: pokemon_tcg
+    rows: 27
+    jp_set: "「プレミアムトレーナーボックス」"
   - value: "Promo"
     category: pokemon_tcg
-    rows: 25
+    rows: 27
     jp_set: "ポケモンカードゲームBW 「プラズマ団パワードデッキ30」"
+  - value: "Start Deck 100 CoroCoro Comic Ver."
+    category: pokemon_tcg
+    rows: 25
+    jp_set: "スタートデッキ100 コロコロコミックver."
+  - value: "Inteleon VMAX High Class Deck"
+    category: pokemon_tcg
+    rows: 24
+    jp_set: "ハイクラスデッキ「インテレオンVMAX」"
+  - value: "DP Battle Starter Pack Heatran vs Regigigas"
+    category: pokemon_tcg
+    rows: 24
+    jp_set: "ポケモンカードゲームDP 対戦スターターパック「ヒードランVSレジギガス」"
   - value: "Mega Starter Set M Diancie-Ex"
     category: pokemon_tcg
     rows: 23
@@ -139,6 +203,14 @@ values:
     category: pokemon_tcg
     rows: 23
     jp_set: "スターターセットMEGA メガゲンガーex"
+  - value: "Sv: Ex Starter Set Sprigatito & Lucario Ex"
+    category: pokemon_tcg
+    rows: 23
+    jp_set: "スターターセットex ニャオハ＆ルカリオex"
+  - value: "Sv: Ex Starter Set Quaxly & Mimikyu Ex"
+    category: pokemon_tcg
+    rows: 23
+    jp_set: "スターターセットex クワッス＆ミミッキュex"
   - value: "Tapu Bulu GX Deck"
     category: pokemon_tcg
     rows: 23
@@ -147,10 +219,30 @@ values:
     category: pokemon_tcg
     rows: 22
     jp_set: "スターターセットVSTAR「ルカリオ」"
+  - value: "Sv: Ex Starter Set Fuecoco & Ampharos Ex"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "スターターセットex ホゲータ＆デンリュウex"
+  - value: "VSTAR & VMAX High Class Deck Zeraora"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "VSTAR&VMAX ハイクラスデッキ ゼラオラ"
+  - value: "VSTAR & VMAX High Class Deck Deoxys"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "VSTAR&VMAX ハイクラスデッキ デオキシス"
   - value: "Darkrai VSTAR Starter Set"
     category: pokemon_tcg
     rows: 21
     jp_set: "スターターセットVSTAR「ダークライ」"
+  - value: "Gengar VMAX High Class Deck"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "ハイクラスデッキ「ゲンガーVMAX」"
+  - value: "SC: Venusaur Starter Set Vmax"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "スターターセットVMAX フシギバナ"
   - value: "Flareon GX Deck"
     category: pokemon_tcg
     rows: 21
@@ -159,33 +251,557 @@ values:
     category: pokemon_tcg
     rows: 21
     jp_set: "ポケモンカードゲーム サン＆ムーン スターターセット伝説「ソルガレオGX ルナアーラGX」"
+  - value: "SC: Blastoise Starter Set Vmax"
+    category: pokemon_tcg
+    rows: 20
+    jp_set: "スターターセットVMAX カメックス"
   - value: "Umbreon & Darkrai GX Tag Team Deck"
     category: pokemon_tcg
     rows: 20
     jp_set: "スターターセット TAG TEAM GX 「ブラッキー&ダークライGX」"
+  - value: "Tyranitar Darkness Standard Deck"
+    category: pokemon_tcg
+    rows: 20
+    jp_set: "ポケモンカードゲームLEGEND 構築スタンダードデッキ「バンギラス悪」"
+  - value: "Steelix Metal Standard Deck"
+    category: pokemon_tcg
+    rows: 20
+    jp_set: "ポケモンカードゲームLEGEND 構築スタンダードデッキ「ハガネール鋼」"
+  - value: "Ultra Moon Deck Build Box"
+    category: pokemon_tcg
+    rows: 19
+    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラムーン」"
+  - value: "Pokemon Rumble x Pokemon Card Game"
+    category: pokemon_tcg
+    rows: 19
+    jp_set: "乱戦！ポケモンスクランブル×ポケモンカードゲーム"
+  - value: "Mewtwo vs Genesect 30-Card Deck Battle Set"
+    category: pokemon_tcg
+    rows: 18
+    jp_set: "ポケモンカードゲームBW 30枚デッキ対戦set「ミュウツーVSゲノセクト」"
+  - value: "BW First Set (Snivy Deck)"
+    category: pokemon_tcg
+    rows: 17
+    jp_set: "ポケモンカードゲームBW はじめてセット （ツタージャデッキ）"
+  - value: "BW First Set (Tepig Deck)"
+    category: pokemon_tcg
+    rows: 17
+    jp_set: "ポケモンカードゲームBW はじめてセット （ポカブデッキ）"
+  - value: "BW First Set (Oshawott Deck)"
+    category: pokemon_tcg
+    rows: 17
+    jp_set: "ポケモンカードゲームBW はじめてセット （ミジュマルデッキ）"
   - value: "25th Anniversary Golden Box"
     category: pokemon_tcg
     rows: 16
     jp_set: "25th ANNIVERSARY GOLDEN BOX"
+  - value: "BW First Set Pikachu Ver. (Snivy Deck)"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "ポケモンカードゲームBW はじめてセット ピカチュウver. （ツタージャデッキ）"
+  - value: "BW First Set National Pokedex Ver. (Snivy Deck)"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "ポケモンカードゲームBW はじめてセット 全国図鑑版 （ツタージャデッキ）"
+  - value: "BW First Set Pikachu Ver. (Tepig Deck)"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "ポケモンカードゲームBW はじめてセット ピカチュウver. （ポカブデッキ）"
+  - value: "BW First Set National Pokedex Ver. (Tepig Deck)"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "ポケモンカードゲームBW はじめてセット 全国図鑑版 （ポカブデッキ）"
+  - value: "BW First Set Pikachu Ver. (Oshawott Deck)"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "ポケモンカードゲームBW はじめてセット ピカチュウver. （ミジュマルデッキ）"
+  - value: "BW First Set National Pokedex Ver. (Oshawott Deck)"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "ポケモンカードゲームBW はじめてセット 全国図鑑版 （ミジュマルデッキ）"
+  - value: "Extra Regulation Box"
+    category: pokemon_tcg
+    rows: 15
+    jp_set: "「エクストラレギュレーションBOX」"
+  - value: "DP Battle Starter Pack Giratina vs Dialga (Giratina Deck)"
+    category: pokemon_tcg
+    rows: 14
+    jp_set: "ポケモンカードゲームDP 対戦スターターパック「ギラティナVSディアルガ」(ギラティナデッキ)"
+  - value: "Leafeon vs Metagross Expert Deck (Metagross)"
+    category: pokemon_tcg
+    rows: 14
+    jp_set: "ポケモンカードゲーム エキスパートデッキ リーフィアVSメタグロス ＋Online（メタグロスデッキ）"
   - value: "Espeon & Deoxys GX Tag Team Deck"
     category: pokemon_tcg
     rows: 13
     jp_set: "スターターセット TAG TEAM GX 「エーフィ&デオキシスGX」"
-  - value: "Extra Regulation Box"
+  - value: "CoroCoro Comic January 2017 Rockruff Deck"
+    category: pokemon_tcg
+    rows: 13
+    jp_set: "月刊コロコロコミック 2017年1月号付録「イワンコ全力デッキ」"
+  - value: "Ultra Sun & Ultra Moon Premium Trainer Box"
     category: pokemon_tcg
     rows: 12
-    jp_set: "「エクストラレギュレーションBOX」"
+    jp_set: "ポケモンカードゲーム サン&ムーン プレミアムトレーナーボックス ウルトラサン・ウルトラムーン"
   - value: "Vaporeon GX Deck"
     category: pokemon_tcg
     rows: 11
     jp_set: "スターターセット「水のシャワーズGX」"
+  - value: "Illustration Contest Winning Artwork Card"
+    category: pokemon_tcg
+    rows: 10
+    jp_set: "イラストコンテスト入賞作品カード"
+  - value: "2008 Movie Release Premium Seat"
+    category: pokemon_tcg
+    rows: 9
+    jp_set: "映画公開記念 プレミアムシート2008"
+  - value: "Official Sanctioned Event 2016/7"
+    category: pokemon_tcg
+    rows: 9
+    jp_set: "ポケモンカードゲーム公認自主イベント（2016/7）"
+  - value: "20th Anniversary Festa Anniversary Battle Victory Prize"
+    category: pokemon_tcg
+    rows: 9
+    jp_set: "ポケモンカードゲーム 20th アニバーサリーフェスタ 20th アニバーサリーバトル 勝利賞"
+  - value: "M Mewtwo X & M Mewtwo Y Card Box with Energy"
+    category: pokemon_tcg
+    rows: 9
+    jp_set: "エネルギーカード付き カードボックス メガミュウツーX・メガミュウツーY"
+  - value: "Pokemon Card Gym Prize 2016/8"
+    category: pokemon_tcg
+    rows: 9
+    jp_set: "ポケモンカードジム 景品（2016/8）"
+  - value: "Eevee Heroes VMAX Special Set"
+    category: pokemon_tcg
+    rows: 8
+    jp_set: "VMAXスペシャルセット イーブイヒーローズ"
   - value: "Jolteon GX Deck"
     category: pokemon_tcg
     rows: 8
     jp_set: "スターターセット「雷のサンダースGX」"
+  - value: "Rayquaza Pre-Battle Participation Prize"
+    category: pokemon_tcg
+    rows: 8
+    jp_set: "ポケモンカードゲーム レックウザプレバトル 参加賞"
+  - value: "Gym Badge Get Battle Participation Prize"
+    category: pokemon_tcg
+    rows: 8
+    jp_set: "ポケモンカードジム ジムバッジゲットバトル 参加賞"
+  - value: "Gym Badge Get Battle Top Finisher"
+    category: pokemon_tcg
+    rows: 8
+    jp_set: "ポケモンカードジム ジムバッジゲットバトル 上位入賞"
+  - value: "Ex Special Set (Japanese)"
+    category: pokemon_tcg
+    rows: 7
+    jp_set: "exスペシャルセット"
+  - value: "VSTAR Special Set"
+    category: pokemon_tcg
+    rows: 6
+    jp_set: "VSTARスペシャルセット"
+  - value: "Silver Lance & Jet-Black Spirit Jumbo Pack Set"
+    category: pokemon_tcg
+    rows: 6
+    jp_set: "ジャンボパックセット 白銀のランス＆漆黒のガイスト"
   - value: "Sm Promo"
     category: pokemon_tcg
     rows: 5
+  - value: "Mewtwo, Greninja & Zacian V-UNION Special Card Set"
+    category: pokemon_tcg
+    rows: 4
+    jp_set: "スペシャルカードセット ミュウツーV-UNION、ゲッコウガV-UNION、ザシアンV-UNION"
+  - value: "20th Anniversary Festa Play Point Original Card"
+    category: pokemon_tcg
+    rows: 4
+    jp_set: "ポケモンカードゲーム 20th アニバーサリーフェスタ プレイポイント オリジナルカード"
+  - value: "Battle Carnival 2011 Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "バトルカーニバル2011上位入賞"
+  - value: "World Challenge Tournament 2012 Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム ワールドチャレンジトーナメント2012 上位入賞"
+  - value: "Battle Carnival 2012 Autumn Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "バトルカーニバル2012オータム上位入賞"
+  - value: "Revived Legends"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "拡張パック「よみがえる伝説」"
+  - value: "Champions League 2017 Miyagi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2017 宮城"
+  - value: "Champions League 2017 Aichi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2017 愛知"
+  - value: "Champions League 2017 Chiba"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2017 千葉"
+  - value: "Champions League 2017 Okayama"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2017 岡山"
+  - value: "Champions League 2018 Yokohama"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2018 横浜"
+  - value: "Champions League 2018 Nagoya"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2018 名古屋"
+  - value: "Champions League 2023 Aichi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2023 愛知"
+  - value: "Champions League 2023 Miyagi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2023 宮城"
+  - value: "Champions League 2023 Niigata"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2023 新潟"
+  - value: "Champions League 2024 Yokohama"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2024 横浜"
+  - value: "Champions League 2024 Kyoto"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2024 京都"
+  - value: "Champions League 2024 Fukuoka"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2024 福岡"
+  - value: "Champions League 2024 Aichi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2024 愛知"
+  - value: "Champions League 2024 Sapporo"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2024 札幌"
+  - value: "Champions League 2025 Tokyo"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2025 東京"
+  - value: "Champions League 2025 Osaka"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2025 大阪"
+  - value: "Champions League 2025 Fukuoka"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2025 福岡"
+  - value: "Champions League 2025 Miyagi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2025 宮城"
+  - value: "Champions League 2025 Aichi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2025 愛知"
+  - value: "Battle Festa Victory Battle Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム バトルフェスタ ビクトリーバトル 上位入賞"
+  - value: "Charizard Mega Battle Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム リザードンメガバトル 上位入賞"
+  - value: "Battle Festa 2014 Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "バトルフェスタ2014 上位入賞"
+  - value: "Rayquaza Mega Battle Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "レックウザメガバトル 上位入賞"
+  - value: "Battle Festa 2015 CoroCoro Challenge Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "バトルフェスタ2015 コロコロチャレンジ 上位入賞"
+  - value: "Battle Festa 2015 Victory Battle Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "バトルフェスタ2015 ビクトリーバトル 上位入賞"
+  - value: "20th Anniversary Festa Classic Battle Top Finisher"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム 20th アニバーサリーフェスタ クラシックバトル 上位入賞"
+  - value: "Sv: Ceruledge Ex Stellar Tera Type Starter Set / Start Deck Generations / Battle Partners Deck Build Box"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "スターターセット テラスタイプ：ステラ ソウブレイズex スタートデッキ Generations デッキビルドBOX「バトルパートナーズ」"
+  - value: "Sv: Sylveon Ex Stellar Tera Type Starter Set / Start Deck Generations / Battle Partners Deck Build Box"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "スターターセット テラスタイプ：ステラ ニンフィアex スタートデッキ Generations デッキビルドBOX「バトルパートナーズ」"
+  - value: "Battle Carnival 2011 Clear Prize"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "バトルカーニバル2011クリア賞"
+  - value: "World Challenge Tournament 2012 Clear Prize"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケモンカードゲーム ワールドチャレンジトーナメント2012 クリア賞"
+  - value: "Pikachu World (Japanese)"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケモンカードゲーム ピカチュウ ワールド"
+  - value: "DP Entry Pack"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケモンカードゲームDP エントリーパック"
+  - value: "Pokekyun Collection Campaign"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケキュンコレクション キャンペーン"
+  - value: "J.League Family Join Days"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "Jリーグ「ファミリー Joinデイズ」"
+  - value: "EDION Stamp Campaign"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケモンカードゲーム EDIONスタンプキャンペーン"
+  - value: "Golden Present Campaign"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ゴールデンプレゼントキャンペーン"
+  - value: "Sv: Ceruledge & Sylveon Ex Stellar Tera Type Starter Sets / Start Deck Generations / Battle Partners Deck Build Box"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "スターターセット テラスタイプ：ステラ ソウブレイズex スターターセット テラスタイプ：ステラ ニンフィアex スタートデッキ Generations デッキビルドBOX「バトルパートナーズ」"
+  - value: "Sv: Ex Starter Set Sprigatito & Lucario Ex / Ex Start Decks / Ruler of the Black Flame Deck Build Box / Venusaur, Charizard & Blastoise Special Deck Set / Future Miraidon Ex Starter Deck & Build Set"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "スターターセットex ニャオハ＆ルカリオex exスタートデッキ デッキビルドBOX 黒炎の支配者 スペシャルデッキセットex フシギバナ・リザードン・カメックス スターターデッキ＆ビルドセット「未来のミライドンex」"
+  - value: "Sv: Ex Starter Set Sprigatito & Lucario Ex / Ruler of the Black Flame Deck Build Box / Future Miraidon Ex Starter Deck & Build Set"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "スターターセットex ニャオハ＆ルカリオex デッキビルドBOX 黒炎の支配者 スターターデッキ＆ビルドセット「未来のミライドンex」"
+  - value: "Sv: Ex Starter Set Fuecoco & Ampharos Ex / Ruler of the Black Flame Deck Build Box / Skeledirge Ex Terastal Starter Set / Venusaur, Charizard & Blastoise Special Deck Set / Future Miraidon Ex Starter Deck & Build Set"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "スターターセットex ホゲータ＆デンリュウex デッキビルドBOX 黒炎の支配者 スターターセット テラスタル ラウドボーンex スペシャルデッキセットex フシギバナ・リザードン・カメックス スターターデッキ＆ビルドセット「未来のミライドンex」"
+  - value: "Sv: Ex Starter Set Fuecoco & Ampharos Ex / Ex Starter Set Pikachu Ex & Pawmot / Ruler of the Black Flame Deck Build Box / Future Miraidon Ex Starter Deck & Build Set"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "スターターセットex ホゲータ＆デンリュウex スターターセットex ピカチュウex&パーモット デッキビルドBOX 黒炎の支配者 スターターデッキ＆ビルドセット「未来のミライドンex」"
+  - value: "Sv: Ex Starter Set Quaxly & Mimikyu Ex / Ruler of the Black Flame Deck Build Box / Venusaur, Charizard & Blastoise Special Deck Set / Future Miraidon Ex Starter Deck & Build Set"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "スターターセットex クワッス＆ミミッキュex デッキビルドBOX 黒炎の支配者 スペシャルデッキセットex フシギバナ・リザードン・カメックス スターターデッキ＆ビルドセット「未来のミライドンex」"
+  - value: "Sv: Ex Starter Set Quaxly & Mimikyu Ex / Ruler of the Black Flame Deck Build Box / Mewtwo Ex Terastal Starter Set / Future Miraidon Ex Starter Deck & Build Set"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "スターターセットex クワッス＆ミミッキュex デッキビルドBOX 黒炎の支配者 スターターセット テラスタル ミュウツーex スターターデッキ＆ビルドセット「未来のミライドンex」"
+  - value: "Trainer Battle Deck: Brock of Pewter City Gym"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "トレーナーバトルデッキ：ニビシティジムのタケシ"
+  - value: "Battle Carnival 2012 Autumn Victory Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "バトルカーニバル2012オータム勝利賞"
+  - value: "World Championships 2012 Participation Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "「ポケモンワールドチャンピオンシップス2012」参加記念カード"
+  - value: "World Championships 2011 Participation Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "「ポケモンワールドチャンピオンシップス2011」参加記念カード"
+  - value: "World Championships 2013 Participation Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "「ポケモンワールドチャンピオンシップス2013」参加記念カード"
+  - value: "Design Contest Grand Prize (Yochien)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／幼稚園"
+  - value: "Design Contest Grand Prize (Shogaku Ichinensei)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／小学一年生"
+  - value: "Design Contest Grand Prize (Shogaku Ninensei)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／小学二年生"
+  - value: "Design Contest Grand Prize (Shogaku Sannensei)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／小学三年生"
+  - value: "Design Contest Grand Prize (Shogaku Yonensei)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／小学四年生"
+  - value: "Design Contest Grand Prize (Shogaku Gonensei)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／小学五年生"
+  - value: "Design Contest Grand Prize (Shogaku Rokunensei)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／小学六年生"
+  - value: "Design Contest Grand Prize (Terebi-kun)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／てれびくん"
+  - value: "Design Contest Grand Prize (CoroCoro Comic)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／コロコロコミック"
+  - value: "Design Contest Grand Prize (Pucchigumi)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／ぷっちぐみ"
+  - value: "Design Contest Grand Prize (Pokemon Fan)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／ポケモンファン"
+  - value: "Design Contest Grand Prize (CoroCoro Ichiban!)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞 ／コロコロイチバン！"
+  - value: "Design Contest Grand Prize (Shonen Sunday)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム デザインコンテスト 最優秀賞／少年サンデー"
+  - value: "World Championships 2009 Participation Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "「ワールドチャンピオンシップス2009」参加記念カード"
+  - value: "DPt Entry Pack 08 DX"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲームDP エントリーパック’08 DX"
+  - value: "Mewtwo Strikes Back EVOLUTION Movie Pamphlet"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "映画「ミュウツーの逆襲 EVOLUTION」パンフレット"
+  - value: "Pokemon New Mon! Book"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンNewモン！BOOK"
+  - value: "Rayquaza Mega Battle Mega Pack"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "メガパック「レックウザメガバトル」"
+  - value: "CoroCoro Ichiban! December 2015"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "月刊コロコロイチバン！ 2015年12月号付録"
+  - value: "Noctowl BREAK Battle Top Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "「ヨルノズクBREAKバトル」 上位賞"
+  - value: "CoroCoro Ichiban! October 2016"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "月刊コロコロイチバン！ 2016年10月号付録"
+  - value: "Pokemon with You Wagon"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "POKÉMON with YOU ワゴン"
+  - value: "Gyarados Battle Participation Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ギャラドスバトル 参加賞"
+  - value: "Crobat BREAK Battle"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードジム クロバットBREAKバトル"
+  - value: "Hall of Fame Battle"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードジム 殿堂バトル"
+  - value: "World Championships 2017"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンワールドチャンピオンシップス2017"
+  - value: "World Championships 2018"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンワールドチャンピオンシップス2018"
+  - value: "World Championships 2019"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンワールドチャンピオンシップス2019"
+  - value: "World Championships 2023 Yokohama"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム ワールドチャンピオンシップス2023 横浜"
+  - value: "World Championships 2024"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンワールドチャンピオンシップス2024"
+  - value: "World Championships 2025"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンワールドチャンピオンシップス2025"
+  - value: "Pokemon Game Show Tournament Mystery Card Battle Participation Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "Pokémon Game Showトーナメント～「ミステリーカード」バトル～ 参加賞"
+  - value: "20th Anniversary Festa Showa vs Heisei Battle Team Victory Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム 20th アニバーサリーフェスタ 昭和VS平成 大バトル チーム勝利賞"
+  - value: "Gym Leader Championship Champion Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ジムリーダー決定戦 優勝賞"
+  - value: "Hall of Fame Battle Champion Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードジム 殿堂バトル 優勝賞"
+  - value: "Battle Festa 2014 Victory Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "バトルフェスタ2014 勝利賞"
+  - value: "Rayquaza Mega Battle Victory Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "レックウザメガバトル 勝利賞"
+  - value: "Battle Festa 2015 Victory Battle Victory Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "バトルフェスタ2015 ビクトリーバトル 勝利賞"
+  - value: "Battle Festa Victory Battle Victory Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム バトルフェスタ ビクトリーバトル 勝利賞"
+  - value: "World Championships 2014 Participation Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "「ポケモンワールドチャンピオンシップス2014」参加記念カード"
+  - value: "World Championships 2015 Participation Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンワールドチャンピオンシップス2015 参加記念カード"
+  - value: "World Championships 2016 Participation Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンワールドチャンピオンシップス2016 参加記念カード"
+  - value: "Battle Festa 2015 CoroCoro Challenge Victory Prize"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "バトルフェスタ2015 コロコロチャレンジ 勝利賞"
+  - value: "Advent of Arceus (Japanese)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "拡張パック「アルセウス光臨」"
+  - value: "Pokemon Center Kyoto Renewal Petal Dance Campaign"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンセンターキョウト移転リニューアル記念「はなびらのまい」キャンペーン"
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg

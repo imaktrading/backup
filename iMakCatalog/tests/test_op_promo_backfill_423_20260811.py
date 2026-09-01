@@ -156,7 +156,11 @@ class TestOtherCategoriesUnchanged(unittest.TestCase):
         # 2026-09-01: スターターセットMEGA 2種を変換表に足して 46行 埋めた (1876 -> 1830)
         #   依頼 requests/2026-09-01_hq_mega_starter_set_name_ebay.md。eBay の Set 一覧に
         #   該当値が無いことを実取得で確認したうえで、規約②の自由入力で値を決めた
-        "pokemon_tcg": 1830,
+        # 2026-09-02: 残り全部を埋めた (1830 -> 1)。156セット (1,442行) + 一部だけ空だった
+        #   38セット (387行)。8/22 に「eBay に値が無い = 天井」と決めた分が 8/23 のルール
+        #   (無ければ英語表記を自由入力・空欄にしない) で対象に戻っていた分の清算。
+        #   ★残る 1行 は set_name_official 自体が空 = セットが特定できない行。これは空欄が正しい
+        "pokemon_tcg": 1,
         "gundam_tcg": 6,
         "dragonball_scg": 136,
         "yugioh_tcg": 12150,
