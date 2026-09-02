@@ -37,6 +37,16 @@ else:
                                     "..", "iMakCatalog"))
 from integrations import psa_to_csv as catalog_psa
 
+# ★2026-09-02: catalog_misses の書式統一 + ゲート (psa_to_csv.py 側で先行実装済、fork なので
+#   psa_to_csv.py 自体は触らず関数だけ import する)。名前が同じ `catalog_psa` (= iMakCatalog の
+#   DB adapter) と紛らわしいが別物: これは同ディレクトリの通常生成器 iMakTCG/psa_to_csv.py。
+#   出典: hq/requests/2026-09-01_catalog_missing_models_bogus_id_response.md
+from psa_to_csv import (
+    missing_model_text as _missing_model_text,
+    _gate_catalog_misses_io,
+    _queue_finding as _tcg_queue_finding,
+)
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
@@ -1715,7 +1725,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = bandai.get("finish") or ""
             official_card_size = bandai.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("one_piece_tcg", f"{brand}-{card_number}"))
+            catalog_misses.append(("one_piece_tcg",
+                                   _missing_model_text(cert_number, brand, subject, card_number),
+                                   subject, str(cert_number), brand))
         # iMakCatalog miss → Vision に委ねる (fallback 構築は廃止、PSA Brand "P" + 番号
         # で誤った P-XXX を作ってしまい Vision の正値を遮断していた問題を解消)
 
@@ -1748,7 +1760,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             _catalog_pid_for_variant = pokemon.get("card_id")
             _catalog_category_for_variant = "pokemon_tcg"
         elif catalog_misses is not None:
-            catalog_misses.append(("pokemon_tcg", f"{brand}-{card_number}"))
+            catalog_misses.append(("pokemon_tcg",
+                                   _missing_model_text(cert_number, brand, subject, card_number),
+                                   subject, str(cert_number), brand))
 
         # 整合(先手): 確定した set 名を character/card_name 末尾から除去。
         # denylist 漏れ (Togekiss V Legendary Heartbeat / Corviknight Vmax Vmax Climax 型) の根本対策。
@@ -1798,7 +1812,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
                 official_finish = db_card.get("finish") or ""
                 official_card_size = db_card.get("card_size") or ""
             elif catalog_misses is not None:
-                catalog_misses.append(("dragonball_scg", f"{brand}-{card_number}"))
+                catalog_misses.append(("dragonball_scg",
+                                       _missing_model_text(cert_number, brand, subject, card_number),
+                                       subject, str(cert_number), brand))
 
     elif franchise == "Gundam":
         # iMakCatalog DB lookup (Phase 2: bandai_tcg_plus.fetch_card から移行).
@@ -1822,7 +1838,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = gd_card.get("finish") or ""
             official_card_size = gd_card.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("gundam_tcg", f"{brand}-{card_number}"))
+            catalog_misses.append(("gundam_tcg",
+                                   _missing_model_text(cert_number, brand, subject, card_number),
+                                   subject, str(cert_number), brand))
 
     elif franchise == "Yu-Gi-Oh!":
         ygo = catalog_psa.lookup_yugioh(brand, card_number, subject)
@@ -1851,7 +1869,9 @@ def build_row(cert_number, price, data, description, driver=None, catalog_misses
             official_finish = ygo.get("finish") or ""
             official_card_size = ygo.get("card_size") or ""
         elif catalog_misses is not None:
-            catalog_misses.append(("yugioh_tcg", f"{brand}-{card_number}"))
+            catalog_misses.append(("yugioh_tcg",
+                                   _missing_model_text(cert_number, brand, subject, card_number),
+                                   subject, str(cert_number), brand))
 
     # ===== 画像主導カード特定の結果を反映 (新ルーチン由来) =====
     # confidence high/medium の場合、既存 lookup 結果より優先で official_* を上書き。
@@ -2802,6 +2822,21 @@ def main():
             print(f"⚠️ チェッカー実行エラー: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
+
+    # ★2026-09-02: missing_models へ書く直前に1回ゲートを通す (psa_to_csv 4189-4202 と同じ)。
+    #   出品できた(=CSVに載った) cert / 名前で catalog に行が見つかる cert は
+    #   「未収録」ではなく「引き方(②)」の課題 → program_fix キューへ回す。
+    #   出典: hq/requests/2026-09-01_catalog_missing_models_bogus_id_response.md
+    if catalog_misses:
+        _csv_certs = {str(r[cert_col_idx]) for r in rows[1:] if len(r) > cert_col_idx}
+        catalog_misses, _program_misses = _gate_catalog_misses_io(catalog_misses, _csv_certs)
+        if _program_misses:
+            print(f"  📎 名前候補あり (未収録と断定せず program_fix キューへ): {len(_program_misses)}件")
+            for category, model, subject, cert, hits in _program_misses:
+                _tcg_queue_finding(category, f"cert{cert}" if cert else model, "program_fix",
+                               f"引けないが未収録とは確認できていない(名前候補あり): "
+                               f"{model} subject={subject!r} candidates={hits[:3]}"[:200],
+                               layer="code", finding_type="program_fix", identity=subject[:200])
 
     # Catalog 未登録カード一覧 + 共有通知ファイル追記 (2026-05-09、gshock_to_csv と同パターン)
     if catalog_misses:
