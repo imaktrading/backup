@@ -452,6 +452,16 @@ set:
 # Set code (公式原文の角括弧内コードからの fallback)
 # 例: "BOOSTER PACK -WINGS OF THE CAPTAIN- [OP-06]" → "OP-06" → "Wings of the Captain"
 # ============================================================================
+
+  # ---- 2026-09-02: 公式突合ツールで見つかった新弾を取り込んだ分。
+  #   eBay の One Piece CCG は Set 値を1つしか持たないので、既存の弾と同じ書き方
+  #   (英語の弾名。BOOSTER PACK -…- [OP-nn] の飾りは外す) で自製する。
+  - source: "BOOSTER PACK -THE WORLD’S STRONGEST WARRIORS- [OP-17]"
+    ebay: "The World’s Strongest Warriors"
+    note: "2026-09-02 自製 (eBay に One Piece の Set 値がほぼ無い)"
+  - source: "Set Sail Deck Set [SD-01]"
+    ebay: "Set Sail Deck Set"
+    note: "2026-09-02 自製 (eBay に One Piece の Set 値がほぼ無い)"
 set_code:
   # ----- Booster Pack (OP) -----
   # 注: Bandai data に [OP-07] 形式と [OP07] 形式が混在しているので両方マップする

@@ -871,6 +871,10 @@ values:
     category: one_piece_tcg
     rows: 182
     jp_set: "ブースターパック 決戦の刻【OP-16】"
+  - value: "The World’s Strongest Warriors"
+    category: one_piece_tcg
+    rows: 168
+    jp_set: "BOOSTER PACK -THE WORLD’S STRONGEST WARRIORS- [OP-17]"
   - value: "Legacy of the Master"
     category: one_piece_tcg
     rows: 165
@@ -1063,6 +1067,10 @@ values:
     category: one_piece_tcg
     rows: 12
     jp_set: "プレミアムカードコレクション-ベストセレクションvol.3-"
+  - value: "Set Sail Deck Set"
+    category: one_piece_tcg
+    rows: 10
+    jp_set: "Set Sail Deck Set [SD-01]"
   - value: "Admirable Collection vol.1"
     category: one_piece_tcg
     rows: 2
