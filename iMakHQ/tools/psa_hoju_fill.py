@@ -1581,8 +1581,12 @@ def main():
         for a in sys.argv[1:]:
             if a.startswith("--limit="):
                 limit = int(a.split("=", 1)[1])
+        # --limit=0 = 全件。夜のうちに全部温めておけば、朝のボタンは探さずに出せる
+        # (2026-09-03 ユーザー指示「全件やれば」)。当日済 skip と空振り台帳が効くので
+        # 実際に叩く数はこれより少ない。
+        limit = None if limit == 0 else limit
         tg = restock_targets()
-        print(f"RESTOCK候補 {len(tg)}件 を先読み(limit={limit})")
+        print(f"RESTOCK候補 {len(tg)}件 を先読み(limit={limit if limit else '全件'})")
         if tg:
             run_night_search(targets=tg, limit=limit)
         return

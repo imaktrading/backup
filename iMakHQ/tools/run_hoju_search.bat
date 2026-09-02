@@ -14,7 +14,7 @@ REM What it does (step 0 writes the KEY column; the rest only caches candidates)
 REM   0) fill blank canonical KEY  : key_backfill_live.py
 REM   1) zero-backup listings first  : search --limit=30
 REM   2) top-up (1 backup)           : search --max-backups=2 --limit=10
-REM   3) restock prefetch            : search-restock --limit=20
+REM   3) restock prefetch            : search-restock --limit=0 (all)
 REM   4) ichibankuji prefetch        : ichibankuji_restock.py prefetch 10
 REM   5) ichibankuji live aux        : ichibankuji_restock.py prefetch-live 10
 REM   30 items per run = slow and steady, to keep the BAN risk low.
@@ -62,7 +62,7 @@ python -u psa_hoju_fill.py search --max-backups=2 --limit=10 >> "%LOG%" 2>&1
 REM --- 3) prefetch for the RESTOCK gate (shares psa_research_cache, makes the
 REM        button answer instantly and cuts re-scraping)
 echo [restock] prefetch %date% %time% >> "%LOG%"
-python -u psa_hoju_fill.py search-restock --limit=20 >> "%LOG%" 2>&1
+python -u psa_hoju_fill.py search-restock --limit=0 >> "%LOG%" 2>&1
 
 REM --- 4) prefetch for ichibankuji aux URLs (candidates only, no UI, no sheet)
 echo [ichibankuji] prefetch %date% %time% >> "%LOG%"
