@@ -103,3 +103,70 @@ def test_disputed_catalog_value_is_held_back():
                             {"1": _live("Scarlet & Violet—Obsidian Flames")})
     assert fix == []
     assert skip["カタログに差戻し中"] == 1
+
+
+def test_same_set_with_code_prefix_is_not_a_title_error():
+    """`Snow Hazard` → `Sv2p: Snow Hazard` は同じセット。タイトルは誤りではないので触らない。"""
+    assert M.is_different_set("Snow Hazard", "Sv2p: Snow Hazard") is False
+    assert M.retitle("PSA 10 Pokemon Japanese Snow Hazard #076/071 Arctibax Art Rare 2023",
+                     "Snow Hazard", "Sv2p: Snow Hazard") is None
+
+
+def test_title_naming_a_different_set_is_rewritten():
+    """英語版の別セット名を名乗っているタイトルだけ差し替える。"""
+    assert M.is_different_set("Sword & Shield—Crown Zenith", "S12a: Vstar Universe") is True
+    t = "PSA 10 Pokemon Japanese Sword & Shield—Crown Zenith #194/172 Altaria Art"
+    out = M.retitle(t, "Sword & Shield—Crown Zenith", "S12a: Vstar Universe")
+    assert out == "PSA 10 Pokemon Japanese S12a: Vstar Universe #194/172 Altaria Art"
+    assert len(out) <= 80
+
+
+def test_retitle_gives_up_instead_of_guessing():
+    """綴りが見つからない / 80字に収まらない時は None (作り直さない)。"""
+    assert M.retitle("PSA 10 Pokemon #194 Altaria", "Crown Zenith", "S12a: Vstar Universe") is None
+    long_t = "PSA 10 Pokemon Japanese Crown Zenith " + "x" * 43
+    assert len(long_t) == 80
+    assert M.retitle(long_t, "Crown Zenith", "S12a: Vstar Universe Extra Long Name") is None
+
+
+def test_csv_rows_with_title_column():
+    fix = [{"itemID": "1", "new_set": "S12a: Vstar Universe",
+            "live_title": "old", "new_title": "new"}]
+    assert M.build_csv_rows(fix, with_title=True) == [["Revise", "1", "S12a: Vstar Universe", "new"]]
+    assert M.HEADER_WITH_TITLE[-1] == "*Title"
+
+
+def test_quantity_comes_from_quantity_minus_sold():
+    """GetItem は QuantityAvailable を返さない。ここを見ていると全件が「残数0」になる。"""
+    xml = ("<Title>t</Title><Site>US</Site><ListingStatus>Active</ListingStatus>"
+           "<Quantity>1</Quantity><QuantitySold>0</QuantitySold>")
+    assert M._parse_item(xml)["qty"] == 1
+    sold = xml.replace("<QuantitySold>0</QuantitySold>", "<QuantitySold>1</QuantitySold>")
+    assert M._parse_item(sold)["qty"] == 0
+
+
+def test_ended_listing_is_not_revised():
+    """終了した出品は触らない (Revise しても意味がなく、API を無駄に使う)。"""
+    live = {"1": {"set": "ちがう値", "site": "US", "qty": 1,
+                  "status": "Completed", "title": "t", "error": None}}
+    fix, skip = M.diff_rows([_t()], live)
+    assert fix == []
+    assert skip["残数0"] == 1
+
+
+def test_revise_xml_only_touches_set_and_title():
+    """触る項目だけ送る (他を送らない = 今の値が残る)。"""
+    x = M.revise_item_xml("820077373966", "S12a: Vstar Universe")
+    assert "<ItemID>820077373966</ItemID>" in x
+    assert "<Name>Set</Name><Value>S12a: Vstar Universe</Value>" in x
+    assert "<Title>" not in x
+    assert "Price" not in x and "Quantity" not in x
+    x2 = M.revise_item_xml("1", "S12a: Vstar Universe", "PSA 10 Pokemon S12a")
+    assert "<Title>PSA 10 Pokemon S12a</Title>" in x2
+
+
+def test_revise_xml_escapes_ampersand():
+    """`&` を素で入れると XML が壊れて revise が落ちる。"""
+    x = M.revise_item_xml("1", "Sv: Marnie's Morpeko & Grimmsnarl Ex")
+    assert "&amp;" in x
+    assert "Morpeko & Grim" not in x

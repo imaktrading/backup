@@ -49,7 +49,9 @@ USAGE_PATH = r"C:/dev/iMak_data/hq/ebay_api_usage.json"
 DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 EP = "https://api.ebay.com/ws/api.dll"
 COMPAT = "967"
-HEADER = ["*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)", "ItemID", "C:Set"]
+ACTION_COL = "*Action(SiteID=US|Country=JP|Currency=USD|Version=745|CC=UTF-8)"
+HEADER = [ACTION_COL, "ItemID", "C:Set"]
+HEADER_WITH_TITLE = [ACTION_COL, "ItemID", "C:Set", "*Title"]
 
 # カタログに差し戻し中の値 = **出品には送らない** (値の判断はカタログの持ち物なので、
 # こちらで直さず保留する)。カタログが直したらこの行を消す。
@@ -94,7 +96,7 @@ def diff_rows(targets, live_by_item):
         if g.get("site") != "US":
             skip["US以外"] += 1
             continue
-        if not g.get("qty"):
+        if g.get("status") not in (None, "Active") or not g.get("qty"):
             skip["残数0"] += 1
             continue
         cat = norm(t.get("cat_set"))
@@ -108,14 +110,62 @@ def diff_rows(targets, live_by_item):
         if cat in DISPUTED_SET_VALUES:
             skip["カタログに差戻し中"] += 1
             continue
-        fix.append({**t, "live_set": live, "new_set": cat,
-                    "live_title": norm(g.get("title"))})
+        lt = norm(g.get("title"))
+        fix.append({**t, "live_set": live, "new_set": cat, "live_title": lt,
+                    "new_title": retitle(lt, live, cat)})
     return fix, skip
 
 
-def build_csv_rows(fix):
+# タイトルの「別セットを名乗っているか」判定で無視する語 (どのセット名にも出るので
+# これが共通していても同じセットとは言えない)
+_SET_STOPWORDS = {"promo", "promos", "card", "cards", "collection", "pack", "the",
+                  "and", "set", "sets", "starter", "deck", "decks", "ex", "gx",
+                  "vmax", "vstar", "japanese", "pokemon"}
+
+
+def _set_words(s):
+    return {w.lower() for w in re.split(r"[^A-Za-z0-9]+", s or "")
+            if len(w) > 2 and w.lower() not in _SET_STOPWORDS}
+
+
+def is_different_set(old_set, new_set):
+    """2つのセット名が **別のセット**を指しているか。純関数。
+
+    `Snow Hazard` と `Sv2p: Snow Hazard` は同じセット (弾コードが付いただけ) なので False。
+    `Sword & Shield—Crown Zenith` と `S12a: Vstar Universe` は別セット = True。
+    タイトルを書き換えるのは True の時だけ (同じセットならタイトルは誤りではない)。
+    """
+    a, b = _set_words(old_set), _set_words(new_set)
+    if not a or not b:
+        return False
+    return not (a & b)
+
+
+def retitle(title, old_set, new_set, limit=80):
+    """タイトルが名乗っている**別セットの名前**を正しい値に差し替える。純関数。
+
+    差し替えられない (そのままの綴りで見つからない / 80字に収まらない) 時は
+    **None を返して触らない**。推測で作り直さない。
+    """
+    if not title or not old_set or not new_set:
+        return None
+    if not is_different_set(old_set, new_set):
+        return None
+    if old_set not in title:
+        return None
+    for repl in (new_set, new_set.split(":", 1)[-1].strip()):
+        out = title.replace(old_set, repl, 1)
+        if out != title and len(out) <= limit:
+            return out
+    return None
+
+
+def build_csv_rows(fix, with_title=False):
     """Revise CSV の行 (header 除く) を返す。純関数。"""
-    return [["Revise", f["itemID"], f["new_set"]] for f in fix]
+    if not with_title:
+        return [["Revise", f["itemID"], f["new_set"]] for f in fix]
+    return [["Revise", f["itemID"], f["new_set"], f.get("new_title") or f["live_title"]]
+            for f in fix]
 
 
 # ── I/O ────────────────────────────────────────────────────────────
@@ -170,11 +220,19 @@ def _parse_item(xml):
             s = v.group(1) if v else ""
             break
     site = re.search(r"<Site>(.*?)</Site>", xml, re.S)
-    qty = re.search(r"<QuantityAvailable>(\d+)</QuantityAvailable>", xml)
     err = re.search(r"<ShortMessage>(.*?)</ShortMessage>", xml, re.S)
+    # ★GetItem は `QuantityAvailable` を返さない (2026-09-02 実測)。これを見ていると
+    #   全件が「残数0」になって1件も直らない。残数は Quantity - QuantitySold で出す。
+    status = re.search(r"<ListingStatus>(.*?)</ListingStatus>", xml, re.S)
+    q = re.search(r"<Quantity>(\d+)</Quantity>", xml)
+    qs = re.search(r"<QuantitySold>(\d+)</QuantitySold>", xml)
+    qty = None
+    if q:
+        qty = int(q.group(1)) - (int(qs.group(1)) if qs else 0)
     return {"title": t.group(1) if t else None, "set": s,
             "site": site.group(1) if site else None,
-            "qty": int(qty.group(1)) if qty else None,
+            "status": status.group(1) if status else None,
+            "qty": qty,
             "error": err.group(1) if (err and not t) else None}
 
 
@@ -230,6 +288,58 @@ def fetch_live(item_ids, refresh=False):
     return cache
 
 
+def _esc(s):
+    """XML に入れる値をエスケープ (& < > を素で入れると Revise が落ちる)。純関数。"""
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def revise_item_xml(item_id, new_set, new_title=None):
+    """ReviseFixedPriceItem に渡す <Item> を組む。純関数。
+
+    **触る項目だけ送る**。他は送らないので今の値のまま残る。
+    """
+    parts = [f"<ItemID>{item_id}</ItemID>"]
+    if new_title:
+        parts.append(f"<Title>{_esc(new_title)}</Title>")
+    parts.append("<ItemSpecifics><NameValueList><Name>Set</Name>"
+                 f"<Value>{_esc(new_set)}</Value></NameValueList></ItemSpecifics>")
+    return "<Item>" + "".join(parts) + "</Item>"
+
+
+def send_revisions(fix, with_title=False, limit=0):
+    """eBay に revise を送る。戻り: (成功, 失敗[(itemID, 理由)])。
+
+    ★状態同期の安全原則: 送りっぱなしにしない。呼び側で必ず実状態を読み直して照合する。
+    """
+    import fix_de_speedpak_shipping as fx
+    todo = fix[:limit] if limit else fix
+    tok = fx.token()
+    ok, ng = [], []
+    for n, f in enumerate(todo, 1):
+        xml = revise_item_xml(f["itemID"], f["new_set"],
+                              f.get("new_title") if with_title else None)
+        done = False
+        for attempt in (1, 2):
+            resp = fx.post("ReviseFixedPriceItem", xml, tok, site="0")
+            if "<Ack>Success</Ack>" in resp or "<Ack>Warning</Ack>" in resp:
+                ok.append(f["itemID"])
+                done = True
+                break
+            if "expired" in resp.lower() and attempt == 1:
+                fx.refresh()
+                tok = fx.token()
+                continue
+            m = re.search(r"<LongMessage>(.*?)</LongMessage>", resp, re.S)
+            ng.append((f["itemID"], m.group(1) if m else resp[:160]))
+            done = True
+            break
+        if not done:
+            ng.append((f["itemID"], "retry 尽きた"))
+        if n % 20 == 0 or n == len(todo):
+            print(f"    送信 {n}/{len(todo)} (OK {len(ok)} / NG {len(ng)})", flush=True)
+    return ok, ng
+
+
 def load_targets(category=None):
     """商品管理シート + catalog から比較対象を組む。fail-closed。"""
     import sheet_io
@@ -282,6 +392,11 @@ def main():
     ap.add_argument("--all", action="store_true", help="全件 CSV を出す")
     ap.add_argument("--refresh", action="store_true", help="eBay の現在値を取り直す")
     ap.add_argument("--category", default=None, help="pokemon_tcg 等で絞る (既定=TCG全部)")
+    ap.add_argument("--with-title", action="store_true",
+                    help="別セットを名乗っているタイトルも一緒に直す")
+    ap.add_argument("--send", action="store_true",
+                    help="eBay に revise を送る (送った後その場で読み直して照合する)")
+    ap.add_argument("--limit", type=int, default=0, help="先頭 N 件だけ送る (0=全部)")
     a = ap.parse_args()
 
     targets, skipped = load_targets(a.category)
@@ -301,6 +416,17 @@ def main():
         print("\n  カテゴリ別のずれ: "
               + " / ".join(f"{k} {v}" for k, v in sorted(bycat.items())))
 
+    wrong_title = [f for f in fix if is_different_set(f["live_set"], f["new_set"])
+                   and f["live_set"] in f["live_title"]]
+    fixable = [f for f in wrong_title if f.get("new_title")]
+    print(f"\n  うち **タイトルが別セットを名乗っている**: {len(wrong_title)}件 "
+          f"(そのまま差し替えられる {len(fixable)} / 手当て要 "
+          f"{len(wrong_title) - len(fixable)})")
+    for f in wrong_title:
+        if not f.get("new_title"):
+            print(f"    ⚠ {f['itemID']} {f['pid']}  '{f['live_set']}' → '{f['new_set']}'")
+            print(f"       {f['live_title']}")
+
     pairs = {}
     for f in fix:
         pairs[(f["live_set"], f["new_set"])] = pairs.get((f["live_set"], f["new_set"]), 0) + 1
@@ -314,13 +440,16 @@ def main():
     if not fix:
         print("\nずれ 0件 → CSV は作りません")
         return
-    out_rows = build_csv_rows(fix[:1] if a.test else fix)
+    picked = fix[:1] if a.test else fix
+    if a.with_title:
+        picked = [f for f in picked if f.get("new_title")] if a.test else picked
+    out_rows = build_csv_rows(picked, with_title=a.with_title)
     stamp = datetime.date.today().strftime("%Y%m%d")
     tag = "TEST" if a.test else "ALL"
     out = os.path.join(DESK, f"live_set_revise_{tag}_{stamp}.csv")
     with open(out, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
-        w.writerow(HEADER)
+        w.writerow(HEADER_WITH_TITLE if a.with_title else HEADER)
         w.writerows(out_rows)
     print(f"\n→ {out}  ({len(out_rows)}行)")
     if a.test:
