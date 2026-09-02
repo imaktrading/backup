@@ -53,7 +53,11 @@ def test_out_of_stock_is_first():
 
 def test_old_and_unsold_is_second():
     assert SE.tier_of(_row(age=200, sold=0), category="TCG") == SE.TIER_STALE
-    assert SE.tier_of(_row(age=200, sold=0), category="G-shock") == SE.TIER_STALE
+    # ★2026-09-02: G-shock は 200日では落とさない。中央値284日で売れており、
+    #   180日超0.87% / 270日超1.32% と **まだ売れる時期**。線は365日に置いた
+    #   (365日超だけ96件で0件・在庫も180日未満と365日超に分かれて中間が空)。
+    assert SE.tier_of(_row(age=200, sold=0), category="G-shock") is None
+    assert SE.tier_of(_row(age=400, sold=0), category="G-shock") == SE.TIER_STALE
 
 
 def test_earning_categories_are_left_alone_when_supply_alive():
@@ -97,12 +101,19 @@ def test_watcher_alone_does_not_protect():
 
 # ---- どの順で落とすか ----
 
-def test_second_tier_orders_by_access_ascending():
-    """★閾値ではなく順位。アクセスの少ないものから落ちる。"""
-    seen_little = _row("little", impr=50, price=100.0)
-    seen_a_lot = _row("lots", impr=9000, price=100.0)
-    picked, _ = SE.pick([seen_a_lot, seen_little], target=50, shelf_of=_shelf, cat_of=_cat_of)
-    assert picked[0][1]["item_id"] == "little"
+def test_second_tier_orders_by_amount():
+    """★2026-09-02: ②も「空く額の大きい順」に変えた。
+
+    TCG の30日超では アクセス (表示/クリック/ウォッチ) のどの区分でも売却率が0%で、
+    **アクセスの多寡が結果を変えない**ことが実測で分かった
+    (表示5,000回以上の241件も、ウォッチ2以上の56件も、売れたのは0件)。
+    であれば 目標額に少ない件数で届く順 = 高い順に落とすのが正しい。
+    取り返しのつかない End の回数が減る。
+    """
+    cheap = _row("cheap", impr=50, price=100.0)
+    pricey = _row("pricey", impr=9000, price=900.0)
+    picked, _ = SE.pick([cheap, pricey], target=50, shelf_of=_shelf, cat_of=_cat_of)
+    assert picked[0][1]["item_id"] == "pricey"
 
 
 def test_out_of_stock_beats_everything():

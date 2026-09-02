@@ -40,6 +40,7 @@ import collections
 import csv
 import datetime
 import glob
+import io
 import os
 import re
 import sys
@@ -59,15 +60,32 @@ CSV_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__
 
 TIER_OOS, TIER_STALE = 1, 2
 TIER_NAME = {TIER_OOS: "① 仕入元が死んでいる",
-             TIER_STALE: "② 30日超・未販売 (アクセスの少ない順)"}
+             TIER_STALE: "② TCG 30日超・未販売 (空く額の大きい順)"}
 # 出品からこれ未満は「まだ判定できない」ので触らない。
 MIN_AGE_DAYS = 30
-# ★②(仕入元が活きている分)を落とすカテゴリ (2026-08-26 ユーザー確定)。
-#   棚の86%を占めるのがこの2つで、ここを入れ替えないと新規を出す場所が作れない。
-#   Tシャツ等は棚$1,000あたり利益 ¥3,501 と一番稼いでいるので触らない
-#   (実測: TCG ¥97 / G-SHOCK ¥0 に対して36倍)。
+# ★②(仕入元が活きている分)を落とすカテゴリ。
+#   2026-09-02 に **G-shock を外した**。生存分析 (売れていない在庫も母数に入れる) の結果:
+#     TCG      : 30日超は 239件中2件 (0.84%) しか売れない。売れた実績の最長は49日。
+#                ウォッチ/クリック/表示のどれで切っても 30日超は全区分0% (261件/761件で確認)。
+#                = 4方向から同じ答え。**30日を過ぎたTCGは売れない**
+#     G-shock  : 中央値284日で売れる。180日超でも0.87%、270日超で1.32% 売れている。
+#                「30日超・未販売」で落とすと、まだ売れる時期の在庫を捨てる。**対象外にする**
+#   他カテゴリ (Tシャツ/モンベル/フィギュア/バッグ) は分母20〜70件で売却率が0〜8%を
+#   行き来し、線を引けるデータが無い → 触らない (2026-09-02 ユーザー確定)。
 #   ①(仕入元が死んでいる)は **全カテゴリ**が対象。買えないものを残す意味は無い。
-STALE_CATEGORIES = ("TCG", "G-shock")
+# カテゴリごとの「これを過ぎたら売れない」日数。**カテゴリで全く違う**ので一律にしない。
+#   TCG     30日 : 30日超は239件中2件(0.84%)。売れた実績の最長49日。
+#                  ウォッチ/クリック/表示のどれで切っても30日超は全区分0%
+#                  (ウォッチ261件・クリック761件で確認) = 4方向から同じ答え
+#   G-shock 365日: 中央値284日で売れる。180日超0.87% / 270日超1.32% と**まだ売れる**。
+#                  365日超だけ96件で0件。在庫も180日未満(151件)と365日超(75件)に
+#                  分かれていて中間が空なので、線を引く場所を迷わない
+#   他カテゴリ    : 分母20〜70件で売却率が0〜8%を行き来し、線を引けるデータが無い。
+#                  データが貯まるまで **触らない** (2026-09-02 ユーザー確定)
+#   ★見直し前提: `python shelf_evict_review.py` で年齢別の売却率を出し直せる。
+#     四半期ごとに見て、数字が変わっていたらここを直す。
+STALE_MAX_AGE = {"TCG": 30, "G-shock": 365}
+STALE_CATEGORIES = tuple(STALE_MAX_AGE)
 
 
 def _f(v):
@@ -77,39 +95,136 @@ def _f(v):
         return 0.0
 
 
-def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIES):
+def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIES,
+            max_age=None):
     """その出品を落とす順の何番に置くか。触らないものは None (純関数, test可)。
 
     ★2026-08-26 ユーザー確定:
       ・**閾値を設けない**。「表示◯回以上なら」の線はカテゴリごとに桁が違って必ず取りこぼす。
-        「30日超・未販売」を対象にして、その中を **アクセスの少ない順** に落とす。
       ・**仕入元が死んでいる分は全カテゴリ**。買えないものを残す意味は無い。
-      ・**仕入元が活きている分は TCG と G-SHOCK だけ**。棚の86%がこの2つで、
-        稼いでいるカテゴリ (Tシャツ等) を減らすのは目的に反する。
+      ★2026-09-02 更新: 仕入元が活きている分は **TCG だけ**にした (G-shock を外した)。
+        根拠は STALE_CATEGORIES のコメント。落とす順は **空く額の大きい順**
+        (TCG 30日超ではアクセスの多寡で売却率が変わらないため)。
     """
     if _f(row.get("qty")) == 0:
         return TIER_OOS                   # 買えないので稼ぎようがない (全カテゴリ)
     if _f(row.get("sold_qty")) + _f(row.get("sales90")) > 0:
         return None                       # 売れた実績あり
-    if _f(row.get("age_days")) < min_age:
-        return None                       # まだ判定できない
     if stale_cats and category not in stale_cats:
-        return None                       # 稼いでいるカテゴリは触らない
+        return None                       # 線を引けるデータが無いカテゴリは触らない
+    # ★2026-09-02: 一律 min_age ではなく **カテゴリごとの日数**で判定する。
+    #   TCG を落とす日数(30)で G-shock を落とすと、まだ売れる時期の在庫を捨てる
+    #   (G-shock は中央値284日で売れる)。
+    limit = (max_age or STALE_MAX_AGE).get(category, min_age)
+    if _f(row.get("age_days")) <= limit:
+        return None                       # その日数まではまだ売れる
     return TIER_STALE
 
 
-def pick(rows, target, shelf_of, cat_of=None):
+DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
+PROMO_GLOB = r"C:/dev/iMak_data/seller_hub/reports/**/*promoted*.csv"
+
+
+def load_clicks(pattern=PROMO_GLOB):
+    """itemID → (クリック数, 広告表示数)。最新の広告レポートから (無ければ空)。
+
+    ★2026-09-02 ユーザー指示: 候補CSVに **価格・経過日数・表示・ウォッチ** を載せる。
+      「CSVだと経過日数やVIEW/WATCHが分からないから判断できない」ため。
+      クリックはファネルに無く広告レポートにしかないので、ここで読む。
+    """
+    import glob as _g
+    files = sorted(_g.glob(pattern, recursive=True), key=os.path.getmtime)
+    if not files:
+        return {}
+    out = {}
+    try:
+        rows = list(csv.reader(io.open(files[-1], encoding="utf-8-sig", errors="replace")))
+    except OSError:
+        return {}
+    hdr = next((i for i, r in enumerate(rows[:8])
+                if any((c or "").strip() == "Item ID" for c in r)), None)
+    if hdr is None:
+        return {}
+    h = [(c or "").strip() for c in rows[hdr]]
+    need = ("Item ID", "Total Promoted Listings Clicks",
+            "Promoted Listings Impressions (via eBay Placements)")
+    if any(n not in h for n in need):
+        return {}
+    ii, ci, mi = (h.index(n) for n in need)
+    for r in rows[hdr + 1:]:
+        if len(r) <= max(ii, ci, mi):
+            continue
+        iid = (r[ii] or "").strip()
+        if not iid:
+            continue
+        try:
+            out[iid] = (float((r[ci] or "0").replace(",", "")),
+                        float((r[mi] or "0").replace(",", "")))
+        except ValueError:
+            pass
+    return out
+
+
+CAND_HEADER = ["理由", "itemID", "タイトル", "カテゴリ", "価格$", "経過日数",
+               "表示", "クリック", "ウォッチ", "空く枠$", "eBay"]
+
+
+def candidate_rows(picked, shelf_of, cat_of=None, clicks=None):
+    """候補 → CSV の行 (純関数)。人が見て判断できる材料を全部載せる。"""
+    clicks = clicks or {}
+    out = []
+    for t, r in picked:
+        iid = r.get("item_id", "")
+        clk, pimpr = clicks.get(iid, ("", ""))
+        out.append([TIER_NAME.get(t, t), iid, (r.get("title") or "")[:70],
+                    (cat_of(r) if cat_of else ""), round(_f(r.get("price")), 2),
+                    int(_f(r.get("age_days"))),
+                    int(_f(r.get("impr_total")) or (pimpr or 0)),
+                    ("" if clk == "" else int(clk)), int(_f(r.get("watch"))),
+                    round(shelf_of(r)), r.get("ebay_url", "")])
+    return out
+
+
+def write_candidates(picked, shelf_of, cat_of=None, path=None, clicks=None):
+    """候補CSVを書く。書けなくても走行は止めない (おまけ)。戻り: 書けたパス or 空文字。"""
+    path = path or os.path.join(DESK, "棚END候補_%s.csv"
+                                % datetime.date.today().strftime("%Y%m%d"))
+    try:
+        with io.open(path, "w", encoding="utf-8-sig", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(CAND_HEADER)
+            for row in candidate_rows(picked, shelf_of, cat_of, clicks):
+                w.writerow(row)
+        return path
+    except OSError as e:                                       # noqa: BLE001
+        print("  ⚠ 候補CSVを書けません (%s)。画面の一覧で判断してください" % type(e).__name__)
+        return ""
+
+
+def pick(rows, target, shelf_of, cat_of=None, only_tier=None):
     """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。
 
-    ① は空く額の大きい順 (1件で空く額が大きいほうが先)。
-    ② は **アクセス (累計表示) の少ない順**。見てもらえていないものから畳む。
+    ①② とも **空く額の大きい順**。1件で空く額が大きいほうが先。
+
+    ★2026-09-02: ② を「アクセスの少ない順」から変えた。TCG の30日超では
+      アクセス (表示/クリック/ウォッチ) のどの区分でも売却率が0%で、
+      **アクセスの多寡が結果を変えない**ことが実測で分かったため
+      (表示5,000回以上の241件も、ウォッチ2以上の56件も、売れたのは0件)。
+      であれば **目標額に少ない件数で届く順** = 高い順に落とすのが正しい。
+      取り返しのつかない操作 (End) の回数が減る。
     """
     cand = []
     for r in rows:
         t = tier_of(r, category=(cat_of(r) if cat_of else None))
         if t is None:
             continue
-        rank = -shelf_of(r) if t == TIER_OOS else _f(r.get("impr_total"))
+        # ★2026-09-02 ユーザー指示: **在庫ありの取下げはボタンを分ける**。
+        #   ①(仕入元が死んでいる)は「買えないので落として損が無い」。
+        #   ②(在庫はあるが期限超え)は「売れるかもしれない物を捨てる」判断で、重さが違う。
+        #   混ぜて1つのボタンにすると、重い方を軽い気持ちで押すことになる。
+        if only_tier is not None and t != only_tier:
+            continue
+        rank = -shelf_of(r)          # ①② とも 空く額の大きい順
         cand.append((t, rank, r))
     cand.sort(key=lambda x: (x[0], x[1]))
     picked, total = [], 0.0
@@ -321,6 +436,8 @@ def count_workload():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--end", action="store_true", help="eBay に End を送る")
+    ap.add_argument("--tier", choices=("1", "2"), default=None,
+                    help="1=仕入元が死んでいる分だけ / 2=在庫はあるが期限超えだけ (既定は両方)")
     ap.add_argument("--amount", type=float, default=None, help="目標額を直接指定")
     ap.add_argument("--ratio", type=float, default=RATIO)
     a = ap.parse_args()
@@ -337,7 +454,11 @@ def main():
     #   足りない時だけ ②(表示回数の少ない順) のためにファネルを読む (古ければそう出す)。
     rows, shelf_of = _load_live()
     cat_of = None
-    if rows and shelf_of and sum(shelf_of(r) for r in rows) >= target:
+    # ★2026-09-02: --tier 2 (在庫ありだけ) の時は **必ず**ファネルを読む。
+    #   ①(数量0)で目標に届いても、②の候補はファネルにしか無いので、
+    #   短絡すると「落とせる候補がありません」になる (実際に踏んだ)。
+    _need_funnel = (getattr(a, "tier", None) == "2")
+    if not _need_funnel and rows and shelf_of and sum(shelf_of(r) for r in rows) >= target:
         print("  → ①だけで目標に届くので、レポート/ファネルは読みません")
     else:
         if rows:
@@ -355,7 +476,8 @@ def main():
     if target <= 0:
         print("  今日はまだ出品していないので、落とす分もありません")
         return 0
-    picked, total = pick(rows, target, shelf_of, cat_of)
+    picked, total = pick(rows, target, shelf_of, cat_of,
+                         only_tier=(int(a.tier) if getattr(a, "tier", None) else None))
     if not picked:
         print("  落とせる候補がありません")
         return 0
@@ -371,6 +493,10 @@ def main():
     for t, r in picked[:10]:
         print(f"   [{t}] ${shelf_of(r):8,.0f} 表示{_f(r.get('impr_total')):6.0f} "
               f"watch{_f(r.get('watch')):.0f}  {r['item_id']}  {(r.get('title') or '')[:44]}")
+    _p = write_candidates(picked, shelf_of, cat_of, clicks=load_clicks())
+    if _p:
+        print("\n  📄 候補CSV: %s" % _p)
+        print("     (価格・経過日数・表示・クリック・ウォッチ入り。中身を見て判断)")
     if not a.end:
         print("\n  → 実際に落とすには --end")
         return 0
