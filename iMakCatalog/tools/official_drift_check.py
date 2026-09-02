@@ -149,11 +149,23 @@ def main() -> None:
         except Exception:
             state = {}
 
+    # state は {sid: {"at": 日時, "ng": 差分件数}}。旧形式 (文字列) も読める。
+    def _at(v):
+        return v.get("at", "") if isinstance(v, dict) else (v or "")
+
+    def _ng(v):
+        return int(v.get("ng", 0)) if isinstance(v, dict) else 0
+
     if args.series:
         targets = [args.series]
     else:
         ids = series_ids(_get(LIST_URL.format(sid="550101")))
-        targets = sorted(ids, key=lambda s: state.get(s, ""))[:args.n]
+        # ★差分が残っている弾を **必ず先に**見る。
+        #   これが無いと、NG の弾が順番から外れて「全部 PASS」に見える
+        #   (2026-09-03: 検収を作った初日に、14件 NG の弾を飛ばして緑になりかけた)。
+        pending = [s for s in ids if _ng(state.get(s))]
+        rest = sorted([s for s in ids if s not in pending], key=lambda s: _at(state.get(s)))
+        targets = (pending + rest)[:max(args.n, len(pending))]
 
     conn = sqlite3.connect(str(api._DB_PATH))
     conn.row_factory = sqlite3.Row
@@ -185,7 +197,7 @@ def main() -> None:
             print(f"      [レア] {c['no']} 公式={c['rarity']!r} catalog={got}")
         for c, got in res["set_ng"][:5]:
             print(f"      [収録] {c['no']} 公式={c['get_info'][:34]!r} catalog={got}")
-        state[sid] = now
+        state[sid] = {"at": now, "ng": n}
         time.sleep(1.0)
     conn.close()
 
@@ -194,7 +206,8 @@ def main() -> None:
     print("")
     if fail:
         print(f"⚠️ 取得できなかった弾 {fail} 件 (= 検査できていない。正常ではない)")
-    print(f"突合 {total}枚 / 差分 {ng}件 / 未検査の弾 {len([1 for s in state if not state[s]])}")
+    left = [s for s, v in state.items() if (v.get("ng", 0) if isinstance(v, dict) else 0)]
+    print(f"突合 {total}枚 / 差分 {ng}件 / **差分が残っている弾 {len(left)}** {left[:6]}")
 
 
 if __name__ == "__main__":
