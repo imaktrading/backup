@@ -1274,6 +1274,28 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
                              rc.get("channel", ""), rc.get("cost", ""), rc.get("cur", ""),
                              _v8_label(rc.get("cost"), rc.get("cur"), mp),
                              " | ".join(u for u in urls if u), rc.get("ebay_url", ""), today])
+    # ★出品が終了していたらリストックでは戻せない → 新規出品に回す (2026-09-02)
+    if new_rows:
+        try:
+            from ebay_getitem_images import fetch_listing_status as _fls
+            _alive = {}
+
+            def _alive_of(iid):
+                if iid not in _alive:
+                    st = _fls(iid)
+                    _alive[iid] = None if st is None else (st == "Active")
+                return _alive[iid]
+
+            new_rows, _relist = split_confirmed_by_listing_alive(new_rows, _alive_of)
+            if _relist:
+                n = _append_new_listing_rows(_relist)
+                print(f"  ♻→🆕 出品が終了していた {n}件は **新規出品**に回しました "
+                      f"(商品管理シートに追加。リストックでは戻せないため)")
+                for r in _relist:
+                    print(f"       {r[0]} {(r[2] or '')[:52]}")
+        except Exception as e:                                 # noqa: BLE001
+            print(f"  ⚠ 出品状態の確認skip → 全件リストック扱い ({type(e).__name__}: {e})")
+
     # 既存(実行済含む)を維持しつつ新規確定を追加(上書きで既存を消さない)
     out = _merge_restock_out(_existing, new_rows, _default_header)
     try:
@@ -1295,6 +1317,57 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
     except Exception as e:
         print(f"  ⚠ {REVIEW_SKIP_TAB} 記録skip ({type(e).__name__}: {e})")
     _alert_restock_diffs(res.get("diffs") or [], res.get("skip") or 0, restock_cands, today)
+
+
+def split_confirmed_by_listing_alive(new_rows, alive_of):
+    """確定行を「リストック(出品が生きている)」と「新規出品(終了済)」に分ける。純関数。
+
+    ★2026-09-02: 終了した出品まで RESTOCK確定 に入れていた。リストックは **生きている出品の
+    数量を戻す**機能なので、終了済は何度回しても戻せず「cert#未解決→生成不可」で毎回止まる。
+    実測で5件が 7/24 から 40日 その状態だった。**在庫が戻った時点で行き先を分ける**。
+
+    alive_of(itemID) -> True(生きている) / False(終了済) / None(分からない)
+    分からない時は **リストック側に残す** (勝手に新規出品へ回さない = fail-closed)。
+    """
+    restock, relist = [], []
+    for r in new_rows:
+        iid = (r[0] or "").strip() if r else ""
+        (relist if (iid and alive_of(iid) is False) else restock).append(r)
+    return restock, relist
+
+
+def new_listing_rows_from_confirmed(rows):
+    """確定行 → 商品管理シートに足す「出品待ち」行。純関数。
+
+    B列(itemID)を空にするのが肝。空 = まだ出していない = 出品くんが拾う対象。
+    鑑定番号(I列)は入れない。**現物ごとに変わる**もので、買う物が決まってから決まる
+    (説明文側で吸収する作りなので、空のまま出せる)。
+    """
+    out = []
+    for r in rows:
+        urls = [u.strip() for u in (r[7] or "").split(" | ") if u.strip()]
+        row = [""] * 40
+        row[0] = urls[0] if urls else ""          # A 仕入元URL
+        row[2] = r[2] or ""                       # C タイトル
+        row[17] = "TCG"                           # R カテゴリ
+        for n, u in enumerate(urls[1:6]):         # AC-AG 補URL
+            row[28 + n] = u
+        out.append(row)
+    return out
+
+
+def _append_new_listing_rows(rows):
+    """終了済だった分を商品管理シートに「出品待ち」として足す (I/O)。失敗は警告のみ。"""
+    if not rows:
+        return 0
+    try:
+        import sheet_io as _sio
+        ws = _sio._product_ws()
+        ws.append_rows(new_listing_rows_from_confirmed(rows), value_input_option="RAW")
+        return len(rows)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 新規出品行の追加skip ({type(e).__name__}: {e})")
+        return 0
 
 
 def _alert_restock_diffs(diffs, skip, restock_cands, today):
