@@ -1114,6 +1114,21 @@ def _save_psa_cache(cache):
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
+def _upgrade_images(cert_number, data, cache):
+    """PSA 画像 URL を /large/ に上げる。判断は本家 psa_to_csv に委譲する。
+
+    ★fork に同じ処理を書かない。本家が直れば こちらも直る形にしておく
+      (2026-09-02: 相場停止/グレード取り直し/画像 と 3件続けて
+       「本家に入った修正が fork に無い」を踏んだため)。
+    """
+    try:
+        from psa_to_csv import _upgrade_cached_images
+        return _upgrade_cached_images(cert_number, data, cache)
+    except Exception as _e:                                    # noqa: BLE001
+        print(f"    ⚠️ 画像の /large/ 化 skip ({type(_e).__name__}) → 380px のまま出します")
+        return data
+
+
 def get_psa_data(driver, cert_number):
     # キャッシュチェック
     cache = _load_psa_cache()
@@ -1128,6 +1143,13 @@ def get_psa_data(driver, cert_number):
         if cached and cached.get('Subject') and 'Grade' not in cached:
             print(f"    ↻ グレード未取得のため PSA を取り直します (#{cert_number})")
         elif cached and cached.get('Subject'):
+            # ★2026-09-02: **画像を /large/ に上げる**。新規側 psa_to_csv は
+            #   2026-08-21 から上げているが、この fork に入っておらず
+            #   再出品CSVは16件とも /small/(380px) のままだった。
+            #   380px では eBay のズームが効かず (1600px以上が要る)、
+            #   スラブの状態が見えない = 高額カードほど買われにくい。
+            #   判断は本家の関数がやる (二重実装しない)。上げられなければ元のまま。
+            cached = _upgrade_images(cert_number, cached, cache)
             # iMakeBayAPI 共有 cache にも投入 (= local cache hit でも、 共有 cache 未登録なら書込)
             try:
                 import psa_api as _ihq_psa_api
@@ -1186,6 +1208,7 @@ def get_psa_data(driver, cert_number):
             print(f"\n    [DEBUG] {body[:400]}")
             return None
 
+        data = _upgrade_images(cert_number, data, cache)   # /large/ 化 (上と同じ理由)
         # 取り直しても読めない時に毎回 PSA を叩かないよう、キーだけは必ず置く
         # (空 = 読めなかった → 後段が fail-closed 側 (ラベル画像で確認) に倒れる)
         data.setdefault('Grade', '')
