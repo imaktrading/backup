@@ -2,10 +2,20 @@
   "project": "tcg",
   "program_items": [],
   "log_signals": [],
-  "recurring_missing": [],
+  "recurring_missing": [
+    {
+      "category": "one_piece_tcg",
+      "item_id": "cert155040105",
+      "target_field": "catalog_add",
+      "finding_type": "catalog_gap",
+      "seen_count": 312,
+      "seen_days": 5,
+      "status": "pending"
+    }
+  ],
   "counts": {
     "program": 0,
     "log": 0,
-    "recurring_missing": 0
+    "recurring_missing": 1
   }
 }
