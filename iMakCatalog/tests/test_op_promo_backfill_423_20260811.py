@@ -161,8 +161,11 @@ class TestOtherCategoriesUnchanged(unittest.TestCase):
         #   (無ければ英語表記を自由入力・空欄にしない) で対象に戻っていた分の清算。
         #   ★残る 1行 は set_name_official 自体が空 = セットが特定できない行。これは空欄が正しい
         "pokemon_tcg": 1,
-        "gundam_tcg": 6,
-        "dragonball_scg": 136,
+        # 2026-09-02: ユーザー指示で dragonball / gundam の空も埋めた (6 -> 0 / 136 -> 0)。
+        #   eBay master の Game 別一覧を実引きし、Fusion World のプロモ商品も Gundam も
+        #   eBay 側に値が無いことを確認したうえで規約②の自由入力で決めた
+        "gundam_tcg": 0,
+        "dragonball_scg": 0,
         "yugioh_tcg": 12150,
     }
 

@@ -1072,17 +1072,17 @@ values:
     category: dragonball_scg
     rows: 1592
     jp_set: "Promotion Cards"
-  - value: "Blazing Aura"
-    category: dragonball_scg
-    rows: 394
-    jp_set: "BOOSTER PACK -BLAZING AURA- [FB02]"
   - value: "Manga Booster 02"
     category: dragonball_scg
-    rows: 394
+    rows: 393
     jp_set: "MANGA BOOSTER 02 [SB02]"
+  - value: "Blazing Aura"
+    category: dragonball_scg
+    rows: 391
+    jp_set: "BOOSTER PACK -BLAZING AURA- [FB02]"
   - value: "New Adventure"
     category: dragonball_scg
-    rows: 365
+    rows: 363
     jp_set: "BOOSTER PACK -NEW ADVENTURE- [FB05]"
   - value: "Manga Booster 01"
     category: dragonball_scg
@@ -1094,11 +1094,11 @@ values:
     jp_set: "BOOSTER PACK -WISH FOR SHENRON- [FB07]"
   - value: "Rivals Clash"
     category: dragonball_scg
-    rows: 309
+    rows: 304
     jp_set: "BOOSTER PACK -RIVALS CLASH- [FB06]"
   - value: "Raging Roar"
     category: dragonball_scg
-    rows: 240
+    rows: 238
     jp_set: "BOOSTER PACK -RAGING ROAR- [FB03]"
   - value: "Dual Evolution"
     category: dragonball_scg
@@ -1106,11 +1106,11 @@ values:
     jp_set: "BOOSTER PACK -DUAL EVOLUTION- [FB09]"
   - value: "Ultra Limit"
     category: dragonball_scg
-    rows: 220
+    rows: 215
     jp_set: "BOOSTER PACK -ULTRA LIMIT- [FB04]"
   - value: "Awakened Pulse"
     category: dragonball_scg
-    rows: 208
+    rows: 204
     jp_set: "BOOSTER PACK -AWAKENED PULSE- [FB01]"
   - value: "Cross Force"
     category: dragonball_scg
@@ -1142,24 +1142,24 @@ values:
     jp_set: "STARTER DECK -VEGETA(MINI) SUPER SAIYAN 3- [FS08]"
   - value: "Starter Deck Son Goku"
     category: dragonball_scg
-    rows: 32
+    rows: 31
     jp_set: "STARTER DECK SON GOKU [FS01]"
-  - value: "Starter Deck Vegeta"
-    category: dragonball_scg
-    rows: 29
-    jp_set: "STARTER DECK VEGETA [FS02]"
   - value: "Starter Deck Bardock"
     category: dragonball_scg
     rows: 28
     jp_set: "STARTER DECK BARDOCK [FS05]"
   - value: "Starter Deck Frieza"
     category: dragonball_scg
-    rows: 28
+    rows: 27
     jp_set: "STARTER DECK FRIEZA [FS04]"
   - value: "Starter Deck Broly"
     category: dragonball_scg
-    rows: 28
+    rows: 27
     jp_set: "STARTER DECK BROLY [FS03]"
+  - value: "Starter Deck Vegeta"
+    category: dragonball_scg
+    rows: 26
+    jp_set: "STARTER DECK VEGETA [FS02]"
   - value: "Starter Deck Vegeta (Mini)"
     category: dragonball_scg
     rows: 24
@@ -1172,10 +1172,142 @@ values:
     category: dragonball_scg
     rows: 23
     jp_set: "STARTER DECK -SON GOKU(MINI)- [FS06]"
+  - value: "Energy Marker Pack 03"
+    category: dragonball_scg
+    rows: 18
+    jp_set: "エナジーマーカーパック03"
+  - value: "1st Anniversary Set"
+    category: dragonball_scg
+    rows: 16
+    jp_set: "1st アニバーサリーセット"
+  - value: "Energy Marker Pack 06"
+    category: dragonball_scg
+    rows: 12
+    jp_set: "エナジーマーカーパック06"
+  - value: "Energy Marker Pack 05"
+    category: dragonball_scg
+    rows: 11
+    jp_set: "エナジーマーカーパック05"
+  - value: "Energy Marker Pack 04"
+    category: dragonball_scg
+    rows: 10
+    jp_set: "エナジーマーカーパック04"
+  - value: "Energy Marker Pack 07"
+    category: dragonball_scg
+    rows: 10
+    jp_set: "エナジーマーカーパック07"
+  - value: "Energy Marker Pack 08"
+    category: dragonball_scg
+    rows: 10
+    jp_set: "エナジーマーカーパック08"
+  - value: "Energy Marker Pack 2nd Anniversary Edition"
+    category: dragonball_scg
+    rows: 10
+    jp_set: "エナジーマーカーパック 2nd Anniversary Edition"
+  - value: "Energy Marker Pack 10"
+    category: dragonball_scg
+    rows: 10
+    jp_set: "エナジーマーカーパック10"
+  - value: "Energy Marker Pack 09"
+    category: dragonball_scg
+    rows: 9
+    jp_set: "エナジーマーカーパック09"
+  - value: "Energy Marker Pack 02"
+    category: dragonball_scg
+    rows: 6
+    jp_set: "エナジーマーカーパック02"
+  - value: "Premium Card Collection 02"
+    category: dragonball_scg
+    rows: 6
+    jp_set: "プレミアムカードコレクション02"
+  - value: "Championship 2025-2026 Japan Finals Participation Prize"
+    category: dragonball_scg
+    rows: 5
+    jp_set: "CHAMPIONSHIP 2025-2026 JAPAN FINALS 参加記念品"
+  - value: "Dragon Ball Sparking! Zero Collector's Edition Exclusive Card"
+    category: dragonball_scg
+    rows: 4
+    jp_set: "DRAGON BALL Sparking! ZERO​ COLLECTOR'S EDITION​ 限定カード"
+  - value: "Energy Marker Pack -Shallot & Giblet-"
+    category: dragonball_scg
+    rows: 4
+    jp_set: "エナジーマーカーパック -シャロット＆ジブレット-"
+  - value: "Championship 2024-2025 Japan Finals Top 4"
+    category: dragonball_scg
+    rows: 3
+    jp_set: "Championship 2024-2025 日本決勝 TOP4"
+  - value: "Official Card Case & Card Sleeve Set 02 (Vegito)"
+    category: dragonball_scg
+    rows: 2
+    jp_set: "オフィシャルカードケース&カードスリーブセット02 <ベジット>"
+  - value: "Official Card Case & Card Sleeve Set 03 (Gogeta)"
+    category: dragonball_scg
+    rows: 2
+    jp_set: "オフィシャルカードケース&カードスリーブセット03 <ゴジータ>"
+  - value: "Official Card Case & Card Sleeve Set 04 (Broly)"
+    category: dragonball_scg
+    rows: 2
+    jp_set: "オフィシャルカードケース＆カードスリーブセット04 <ブロリー>"
+  - value: "Official Card Case 01 (Son Goku)"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "オフィシャルカードケース01 <孫悟空>"
+  - value: "Championship Set 02 -Vegito-"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "チャンピオンシップセット02 -ベジット-"
+  - value: "Championship Set 01 -Son Goku vs Frieza-"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "チャンピオンシップセット01 -孫悟空vsフリーザ-"
+  - value: "Premium Card Collection 01"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "プレミアムカードコレクション01"
+  - value: "Official Card Case & Card Sleeve Set 01 (Bardock)"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "オフィシャルカードケース&カードスリーブセット01 <バーダック>"
+  - value: "Championship 2024-2025 Japan Finals Participation Prize"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "Championship 2024-2025 日本決勝 参加記念品"
+  - value: "Championship 2024-2025 Grand Finals Participation Prize"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "Championship 2024-2025 GRANDFINALS 参加記念品"
+  - value: "Digital Exclusive Design Energy Marker MASTER"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "デジタル版限定デザインエナジーマーカー　MASTER"
+  - value: "Digital Exclusive Design Energy Marker GOD"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "デジタル版限定デザインエナジーマーカー　GOD"
+  - value: "Championship Set -Illustrations- 01"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "チャンピオンシップセット -ILLUSTRATIONS- 01"
+  - value: "Championship Set -Illustrations- 02"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "チャンピオンシップセット -ILLUSTRATIONS- 02"
   - value: "CHAMPIONSHIP 2025-2026 JAPAN FINALS TOP4"
     category: dragonball_scg
     rows: 1
     jp_set: "CHAMPIONSHIP 2025-2026 JAPAN FINALS TOP4"
+  - value: "Dragon Ball Genkidama Matsuri Attendance Prize"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "ドラゴンボール ゲンキダマツリ 来場記念品"
+  - value: "Bandai Card Games Fest 25-26 Attendance Prize"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "BANDAI CARD GAMES Fest 25-26 来場記念品"
+  - value: "Official Play Mat & Card Set Limited Edition 01"
+    category: dragonball_scg
+    rows: 1
+    jp_set: "オフィシャルプレイマット&カードセット Limited Edition 01"
   - value: "CHAMPIONSHIP 26-27 WAVE1"
     category: dragonball_scg
     rows: 1
@@ -1191,19 +1323,19 @@ values:
     jp_set: "Promotion Card"
   - value: "Steel Requiem"
     category: gundam_tcg
-    rows: 260
+    rows: 256
     jp_set: "Steel Requiem[GD03]"
-  - value: "Newtype Rising"
-    category: gundam_tcg
-    rows: 257
-    jp_set: "Newtype Rising [GD01]"
   - value: "Phantom Aria"
     category: gundam_tcg
     rows: 238
     jp_set: "Phantom Aria [GD04]"
+  - value: "Newtype Rising"
+    category: gundam_tcg
+    rows: 235
+    jp_set: "Newtype Rising [GD01]"
   - value: "Dual Impact"
     category: gundam_tcg
-    rows: 229
+    rows: 226
     jp_set: "Dual Impact [GD02]"
   - value: "Limited Box Beta Ver."
     category: gundam_tcg
@@ -1219,23 +1351,23 @@ values:
     jp_set: "Eternal Nexus [EB01]"
   - value: "SEED Strike"
     category: gundam_tcg
-    rows: 92
+    rows: 89
     jp_set: "SEED Strike [ST04]"
-  - value: "Zeon's Rush"
-    category: gundam_tcg
-    rows: 92
-    jp_set: "Zeon's Rush [ST03]"
   - value: "Heroic Beginnings"
     category: gundam_tcg
-    rows: 92
+    rows: 89
     jp_set: "Heroic Beginnings [ST01]"
-  - value: "Wings of Advance"
+  - value: "Zeon's Rush"
     category: gundam_tcg
     rows: 88
+    jp_set: "Zeon's Rush [ST03]"
+  - value: "Wings of Advance"
+    category: gundam_tcg
+    rows: 86
     jp_set: "Wings of Advance [ST02]"
   - value: "Iron Bloom"
     category: gundam_tcg
-    rows: 87
+    rows: 84
     jp_set: "Iron Bloom [ST05]"
   - value: "Edition Beta"
     category: gundam_tcg
@@ -1247,7 +1379,7 @@ values:
     jp_set: "Destiny Ignition [ST09]"
   - value: "Flash of Radiance"
     category: gundam_tcg
-    rows: 53
+    rows: 52
     jp_set: "Flash of Radiance [ST08]"
   - value: "Celestial Drive"
     category: gundam_tcg
@@ -1261,6 +1393,10 @@ values:
     category: gundam_tcg
     rows: 51
     jp_set: "Generation Pulse [ST10]"
+  - value: "Custom Deck Box Freedom Ascension [SC01]"
+    category: gundam_tcg
+    rows: 48
+    jp_set: "カスタムデッキボックス Freedom Ascension [SC01]"
   - value: "Premium Card Collection GQuuuuuuX"
     category: gundam_tcg
     rows: 7
@@ -1269,3 +1405,7 @@ values:
     category: gundam_tcg
     rows: 7
     jp_set: "Premium Card Collection GUNDAM ASSEMBLE Set -Mobile Suit Gundam IRON-BLOODED ORPHANS- [PC01A]"
+  - value: "Basic Cards"
+    category: gundam_tcg
+    rows: 3
+    jp_set: "基本カード"
