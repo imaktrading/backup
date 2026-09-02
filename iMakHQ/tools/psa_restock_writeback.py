@@ -5,7 +5,10 @@
 **実eBay状態(qty)を verify** してからスプシを更新する(state_sync_safety: fail-OPEN禁止)。
 
 - qty>=1 → RESTOCK実反映 = 実行済 → 「RESTOCK確定」status更新 + 「再仕入れ待ち」台帳を復活/解決
-- qty==0 → まだ未アップロード/未反映 = 入稿待ち(silentに済扱いしない=要対応に残す)
+- qty==0 かつ 出品が生きている → まだ未アップロード/未反映 = 入稿待ち(silentに済扱いしない)
+- qty==0 だが **出品が終了済** → 終了済。revise では戻せないので「入稿待ち」に置かない
+  (★2026-09-02: これを分けていなかったため、終了した3件が 7/24 から 40日ずっと
+   「要対応」に出続け、消える道が無かった。要対応リストを墓場にしない)
 - qty None → 取得不能 = 不明(fail-closed: 済にしない)
 
 classify_restock は純関数(test可)。I/O(GetItem qty / スプシ)は reconcile_and_write。
@@ -14,6 +17,7 @@ classify_restock は純関数(test可)。I/O(GetItem qty / スプシ)は reconci
 ST_DONE = "実行済(qty復活)"
 ST_PENDING = "入稿待ち(qty=0)"
 ST_UNKNOWN = "状態不明(要確認)"
+ST_ENDED = "終了済(reviseでは戻せない)"
 
 
 def first_supply_url(joined):
@@ -25,31 +29,39 @@ def first_supply_url(joined):
     return ""
 
 
-def classify_restock(confirmed_items, qty_map):
+def classify_restock(confirmed_items, qty_map, status_map=None):
     """RESTOCK確定 items を実eBay qty で分類(純関数)。
 
     Args:
         confirmed_items: [{"itemID":..}, ...]  (RESTOCK確定リスト)
         qty_map: {itemID: available_qty(int) or None}
+        status_map: {itemID: eBay ListingStatus} — 省略時は従来どおり(全部 生きている扱い)
     Returns:
-        {"done":[itemID...], "pending":[itemID...], "unknown":[itemID...], "status":{itemID: 状態文字}}
+        {"done":[], "pending":[], "ended":[], "unknown":[], "status":{itemID: 状態文字}}
     """
-    done, pending, unknown, status = [], [], [], {}
+    status_map = status_map or {}
+    done, pending, ended, unknown, status = [], [], [], [], {}
     for it in confirmed_items:
         iid = (it.get("itemID") or "").strip()
         if not iid:
             continue
         q = qty_map.get(iid)
+        st = status_map.get(iid)
         if q is None:
             unknown.append(iid)
             status[iid] = ST_UNKNOWN
         elif q >= 1:
             done.append(iid)
             status[iid] = ST_DONE
+        elif st and st != "Active":
+            # 終了した出品は revise で戻せない。「入稿待ち」に置くと永久に消えない
+            ended.append(iid)
+            status[iid] = ST_ENDED
         else:
             pending.append(iid)
             status[iid] = ST_PENDING
-    return {"done": done, "pending": pending, "unknown": unknown, "status": status}
+    return {"done": done, "pending": pending, "ended": ended,
+            "unknown": unknown, "status": status}
 
 
 def pending_rows_from_confirmed(rows):
@@ -108,7 +120,7 @@ def reconcile_and_write(today):
     sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                      "..", "..", "iMakeBayAPI")))
     from sheet_io import read_tab, write_rows_to_tab, product_index, restock_reactivate_master
-    from ebay_getitem_images import fetch_listing_qty
+    from ebay_getitem_images import fetch_listing_qty, fetch_listing_status
     import psa_restock_wait as prw
 
     rows = read_tab("RESTOCK確定")
@@ -121,7 +133,10 @@ def reconcile_and_write(today):
     body = [r for r in rows[1:] if any(r)]
     items = [{"itemID": (r[iid_i] if iid_i < len(r) else "")} for r in body]
     qty_map = {it["itemID"]: fetch_listing_qty(it["itemID"]) for it in items if it["itemID"]}
-    cls = classify_restock(items, qty_map)
+    # qty=0 の分だけ「出品が生きているか」を追加で見る (終了済を入稿待ちに混ぜない)
+    status_map = {iid: fetch_listing_status(iid)
+                  for iid, q in qty_map.items() if q is not None and q < 1}
+    cls = classify_restock(items, qty_map, status_map)
 
     # 復活分(qty>=1)の商品管理シート master 同期: A列(供給URL)更新 + D列(売り切れ)クリア
     # + N列(仕入れ価格=新コスト最安¥)。Revise出品価格は新コスト基準のV8なので master コストも揃える。
@@ -168,8 +183,8 @@ def reconcile_and_write(today):
         write_rows_to_tab("再仕入れ待ち", prw.to_tab_rows(wled2))
 
     return {"total": len(items), "done": len(cls["done"]),
-            "pending": len(cls["pending"]), "unknown": len(cls["unknown"]),
-            "master_synced": master_synced}
+            "pending": len(cls["pending"]), "ended": len(cls.get("ended") or []),
+            "unknown": len(cls["unknown"]), "master_synced": master_synced}
 
 
 def main():
@@ -182,7 +197,7 @@ def main():
     today = datetime.date.today().isoformat()
     st = reconcile_and_write(today)
     print(f"🔄 RESTOCK状態同期: 計{st['total']} / 実行済{st['done']} / "
-          f"入稿待ち{st['pending']} / 不明{st['unknown']}")
+          f"入稿待ち{st['pending']} / 終了済{st.get('ended', 0)} / 不明{st['unknown']}")
     print(f"   🔗 master同期(復活分): A列(供給URL)+D列(売り切れ解除)+N列(仕入れ価格=新コスト) = {st.get('master_synced', 0)}行")
     # 実行済化を PSA再仕入れ funnel の出品状態列にも反映(フロー内自動更新)。
     try:
@@ -191,8 +206,13 @@ def main():
         print(f"   📍 PSA再仕入れ 出品状態列 同期: {_t}")
     except Exception as _e:
         print(f"   ⚠ 出品状態列 同期skip: {type(_e).__name__}: {_e}")
+    if st.get("ended"):
+        print(f"   ℹ 終了済 {st['ended']}件は revise では戻せません "
+              f"(出し直すなら新規出品。要対応には数えません)")
     if st["pending"] or st["unknown"]:
         print("   ⚠ 入稿待ち/不明あり=要対応(silentに済化しない。反映後に再実行で解消)")
+    else:
+        print("   ✅ 入稿待ち・不明ともに 0件")
 
 
 if __name__ == "__main__":

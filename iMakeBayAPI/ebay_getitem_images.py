@@ -266,6 +266,48 @@ def fetch_listing_qty(item_id):
         return None
 
 
+def fetch_listing_status(item_id):
+    """item_id の listing が Active か Completed か等を返す。失敗/不明は None。
+
+    ★2026-09-02: 数量だけ見ていると、**終了した出品**も「まだ入稿していない(qty=0)」と
+    同じ扱いになる。実測で RESTOCK の「入稿待ち5件」のうち3件が既に終了しており、
+    revise では戻せないのに毎回「要対応」に出続けていた (7/24 から 40日)。
+    要対応リストを墓場にしないため、終了済は別に数える。
+    """
+    item_id = str(item_id).strip()
+    if not item_id:
+        return None
+    try:
+        k = _load_keys()
+        hdr = {
+            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
+            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
+            "Content-Type": "text/xml",
+        }
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
+            f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
+        )
+        text = None
+        for attempt in range(4):
+            try:
+                text = requests.post(_ENDPOINT, data=body.encode("utf-8"),
+                                     headers=hdr, timeout=30).text
+                break
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                if attempt < 3:
+                    time.sleep(3)
+                    continue
+                raise
+        m = re.search(r"<ListingStatus>(.*?)</ListingStatus>", text)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
 def fetch_listing_price(item_id):
     """item_id の listing の **現在価格を USD換算で** 返す: (price_usd: float, native_ccy: str) or (None, None)。
 
