@@ -57,6 +57,13 @@ set:
   - source: "基本カード"
     ebay: "Basic Cards"
     note: "2026-09-02 自製 (eBay の Game 一覧に該当なし)"
+
+  # ---- 2026-09-02 (2): 1つのセットに複数の値が入っていた分を揃えた。
+  #   プロモ商品なのに **元の弾の名前** が入っていた (product_id の頭から引いた値)。
+  #   規約③ (英語版/別セットの名前を使わない) 違反。セット単位の行で揃える。
+  - source: "Deck Build Box Freedom Ascension [SC01]"
+    ebay: "Deck Build Box Freedom Ascension [SC01]"
+    note: "2026-09-02 自製 (プロモ商品。元の弾名が入っていたのを是正)"
 set_code:
   # ----- Booster Pack (GD) -----
   - source: GD01
