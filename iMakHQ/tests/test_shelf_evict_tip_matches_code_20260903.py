@@ -27,7 +27,8 @@ import shelf_evict as SE  # noqa: E402
 
 def _tip():
     src = open(os.path.join(_HQ, "control_panel.py"), encoding="utf-8").read()
-    i = src.index('"label": "📉 棚を入れ替える')
+    # ★2026-09-03: ボタンを①②に分けたので、日数の説明は② (在庫ありを落とす) に移った
+    i = src.index('"label": "📉 棚② ')
     seg = src[i:i + 2500]
     j = seg.index('"tip":')
     return seg[j:seg.index('",\n', j)]
@@ -41,10 +42,11 @@ def test_tip_states_every_age_limit_actually_used():
 
 
 def test_tip_does_not_claim_access_order():
-    """並びは「空く額の大きい順」。アクセス順という古い説明を残さない。"""
-    tip = _tip()
-    assert "アクセスの少ない順" not in tip
-    assert "空く額の大きい順" in tip
+    """アクセス順という古い説明を残さない (並びは空く額の大きい順)。"""
+    src = open(os.path.join(_HQ, "control_panel.py"), encoding="utf-8").read()
+    i = src.index('"label": "📉 棚② ')
+    assert "アクセスの少ない順" not in src[i:i + 2500]
+    assert "空く額の大きい順" in src[src.index('"label": "📉 棚① '):][:2500]
 
 
 def test_code_really_sorts_by_freed_amount():

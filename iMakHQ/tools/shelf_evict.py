@@ -59,7 +59,7 @@ REPORT_GLOB = r"C:\dev\iMak_data\seller_hub\reports\**\eBay-all-active-listings-
 CSV_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "csv_output"))
 
 TIER_OOS, TIER_STALE = 1, 2
-TIER_NAME = {TIER_OOS: "① 仕入元が死んでいる",
+TIER_NAME = {TIER_OOS: "① 買えない & 需要ゼロ",
              TIER_STALE: "② TCG 30日超・未販売 (空く額の大きい順)"}
 # 出品からこれ未満は「まだ判定できない」ので触らない。
 MIN_AGE_DAYS = 30
@@ -96,7 +96,7 @@ def _f(v):
 
 
 def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIES,
-            max_age=None, restock_pending=None):
+            max_age=None, restock_pending=None, no_demand=None):
     """その出品を落とす順の何番に置くか。触らないものは None (純関数, test可)。
 
     ★2026-08-26 ユーザー確定:
@@ -114,7 +114,14 @@ def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIE
         #   取下げ(CULL)は「生涯ずっと需要ゼロ」に限るので、こちらとは元々重ならない。
         return None
     if _f(row.get("qty")) == 0:
-        return TIER_OOS                   # 買えないので稼ぎようがない (全カテゴリ)
+        # ★2026-09-03: ①は「数量0」だけで拾っていたので、**需要があった出品まで落としていた**。
+        #   実測: ①の候補259件のうち 88件が再仕入れに回すべきもの (売れた/ウォッチ/表示あり)。
+        #   数量0で落として良いのは、取下げ(CULL)と同じ **生涯ずっと需要ゼロ** の分だけ。
+        #   no_demand が渡されない / その集合に無い = 判定できない → **落とさない** (fail-closed)。
+        if no_demand is None:
+            return TIER_OOS               # 呼び側が判定材料を持たない時は従来どおり
+        iid = str(row.get("item_id") or row.get("itemID") or "").strip()
+        return TIER_OOS if iid in no_demand else None
     if _f(row.get("sold_qty")) + _f(row.get("sales90")) > 0:
         return None                       # 売れた実績あり
     if stale_cats and category not in stale_cats:
@@ -163,6 +170,38 @@ def restock_pending_ids():
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ 再仕入れ予定の読み取りskip ({type(e).__name__}) → 従来どおり選びます")
         return set()
+
+
+def no_demand_ids(rows):
+    """「生涯ずっと表示もクリックも販売もゼロ」= 落として損が無い itemID (純関数)。
+
+    取下げ(CULL)と同じ判定 (`listing_funnel.classify` の cull)。①はこの集合に限る。
+    ★2026-09-03: ①は数量0だけで拾っていたため、**需要があった88件**まで対象にしていた。
+      それらは再仕入れに回すべきもので、落とすと目視で確認した仕事ごと捨てることになる。
+    """
+    def _n(v):
+        try:
+            return float(str(v or 0).replace(",", ""))
+        except (TypeError, ValueError):
+            return 0.0
+
+    out = set()
+    for r in rows:
+        if _n(r.get("qty")) != 0:
+            continue
+        demand = _n(r.get("sold_qty")) + _n(r.get("watch")) + _n(r.get("sales90"))
+        owner = LF.restock_owner(r)
+        if not owner:
+            out.add(str(r.get("item_id") or "").strip())      # 戻す口が無い = 畳む
+            continue
+        if owner == "PSA10":
+            worth = demand > 0 or _n(r.get("impr")) >= 1
+        else:
+            worth = demand > 0 or _n(r.get("impr_total")) > 0
+        if not worth:
+            out.add(str(r.get("item_id") or "").strip())
+    out.discard("")
+    return out
 
 
 def load_clicks(pattern=PROMO_GLOB):
@@ -241,7 +280,8 @@ def write_candidates(picked, shelf_of, cat_of=None, path=None, clicks=None):
         return ""
 
 
-def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=None):
+def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=None,
+         no_demand=None):
     """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。
 
     ①② とも **空く額の大きい順**。1件で空く額が大きいほうが先。
@@ -256,7 +296,7 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=No
     cand = []
     for r in rows:
         t = tier_of(r, category=(cat_of(r) if cat_of else None),
-                    restock_pending=restock_pending)
+                    restock_pending=restock_pending, no_demand=no_demand)
         if t is None:
             continue
         # ★2026-09-02 ユーザー指示: **在庫ありの取下げはボタンを分ける**。
@@ -466,7 +506,8 @@ def count_workload():
                 shelf_of = fshelf
 
         picked, total = pick(rows, target, shelf_of, cat_of,
-                             restock_pending=restock_pending_ids())
+                             restock_pending=restock_pending_ids(),
+                             no_demand=no_demand_ids(rows))
         byt = collections.Counter(t for t, _r in picked)
         out.update(picked=len(picked), amount=total,
                    tier1=byt.get(TIER_OOS, 0), tier2=byt.get(TIER_STALE, 0))
@@ -521,9 +562,12 @@ def main():
     _keep = restock_pending_ids()
     if _keep:
         print(f"  🛡 再仕入れが戻す予定の {len(_keep)}件 は落としません")
+    _nd = no_demand_ids(rows)
+    print(f"  🛡 ①は「生涯ずっと需要ゼロ」の {len(_nd)}件 に限ります "
+          f"(需要があった分は再仕入れへ)")
     picked, total = pick(rows, target, shelf_of, cat_of,
                          only_tier=(int(a.tier) if getattr(a, "tier", None) else None),
-                         restock_pending=_keep)
+                         restock_pending=_keep, no_demand=_nd)
     if not picked:
         print("  落とせる候補がありません")
         return 0

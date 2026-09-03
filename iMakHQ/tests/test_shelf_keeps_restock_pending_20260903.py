@@ -51,3 +51,30 @@ def test_pick_passes_the_guard_through():
     picked, _ = SE.pick(rows, target=10**9, shelf_of=lambda r: 100.0,
                         restock_pending={"keep"})
     assert [r["item_id"] for _t, r in picked] == ["drop"]
+
+
+def test_tier1_is_limited_to_never_wanted_listings():
+    """①は「買えない」だけでなく **生涯需要ゼロ** に限る。
+
+    数量0だけで拾っていたため、再仕入れに回すべき88件まで対象にしていた (2026-09-03 実測)。
+    """
+    row = _oos("wanted")
+    assert SE.tier_of(row, no_demand={"other"}) is None      # 需要があった → 落とさない
+    assert SE.tier_of(row, no_demand={"wanted"}) == SE.TIER_OOS
+    assert SE.tier_of(row) == SE.TIER_OOS                    # 材料が無い時は従来どおり
+
+
+def test_no_demand_ids_matches_the_cull_rule():
+    """取下げ(CULL)と同じ判定。需要のかけらでもあれば ①に入れない。"""
+    rows = [
+        {"item_id": "dead", "qty": 0, "sold_qty": 0, "watch": 0, "sales90": 0,
+         "impr": 0, "impr_total": 0, "title": "PSA 10 Pokemon", "category": "TCG"},
+        {"item_id": "watched", "qty": 0, "sold_qty": 0, "watch": 3, "sales90": 0,
+         "impr": 0, "impr_total": 0, "title": "PSA 10 Pokemon", "category": "TCG"},
+        {"item_id": "instock", "qty": 1, "sold_qty": 0, "watch": 0, "sales90": 0,
+         "impr": 0, "impr_total": 0, "title": "PSA 10 Pokemon", "category": "TCG"},
+    ]
+    got = SE.no_demand_ids(rows)
+    assert "dead" in got
+    assert "watched" not in got          # ウォッチが付いた = 再仕入れに回す
+    assert "instock" not in got          # 在庫ありは①の話ではない

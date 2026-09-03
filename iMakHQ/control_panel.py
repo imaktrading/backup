@@ -1564,26 +1564,38 @@ SCRIPTS = [
         "open_after": r"C:/Users/imax2/OneDrive/デスクトップ/CULL出品停止候補_*.csv",
     },
     {
+        # ★2026-09-03 ユーザー確定: **在庫ありの取下げはボタンを分ける**。
+        #   ①は「買えないので落として損が無い」。②は「売れるかもしれない物を捨てる」
+        #   判断で重さが違う。混ぜると重い方を軽い気持ちで押すことになる。
+        "category": None, "type": "utility",
+        "label": "📉 棚② 売れない在庫を落とす (重い・要確認)",
+        "badge": None,
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "shelf_evict.py", "--end", "--tier", "2"],
+        "params": [],
+        "tip": "在庫はあるが売れていない出品を落とします。**売れるかもしれない物を"
+               "捨てる判断**なので、候補CSV (デスクトップ 棚END候補_日付.csv) を見てから"
+               "押してください。条件は 一度も売れていない / TCG 30日超・G-SHOCK 365日超 / "
+               "US出品。G-SHOCK は中央値284日で売れるので30日では落としません。",
+    },
+{
         # 棚割の入れ替え (2026-08-26)。出品リミットは **金額** $1M で、件数は半分以上あまっている。
         # 出品を続ける限り棚は埋まるので、**出した分より少し多く落とす**運用にする。
         # 落とす相手はカテゴリを跨いで横並びで選ぶ (売れないカテゴリの中で最適化しても、
         # 売れるカテゴリの1件に及ばないため。棚$1000あたり利益: Tシャツ¥3,501 / TCG¥97 / G-SHOCK¥0)。
         "category": None, "type": "utility",
-        "label": "📉 棚を入れ替える (出品した分だけ・自動)",
+        "label": "📉 棚① 買えない分で枠を空ける (自動)",
         "badge": "shelf_evict",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
-        "cmd": ["python", "shelf_evict.py", "--end"],
+        "cmd": ["python", "shelf_evict.py", "--end", "--tier", "1"],
         "params": [],
-        # ★2026-09-03: 9/2 にルールを変えた (d53e9d9) のにこの文だけ古いままだった。
-        #   「アクセスの少ない順」「G-SHOCK も30日」は**どちらも誤り**。コードは
-        #   STALE_MAX_AGE = {"TCG": 30, "G-shock": 365} / 並びは空く額の大きい順。
-        "tip": "その日に出した金額と同じだけ、稼いでいない出品を落とします。"
-               "順は ①仕入元が死んでいる(全カテゴリ) → ②在庫はあるが期限超え・未販売を"
-               "**空く額の大きい順**。期限は TCG=30日 / G-SHOCK=365日 "
-               "(実測の売却率から。G-SHOCK は中央値284日で売れるので30日では落とさない)。"
-               "期限内・売れた実績あり・US以外は触りません。",
+        # ★2026-09-03: ①と②でボタンを分けた。①は「買えない & 生涯需要ゼロ」に締めた
+        #   (数量0だけで拾っていたため、再仕入れに回すべき88件まで対象にしていた)。
+        "tip": "買えなくなった出品で枠を空けます。数量0 かつ **生涯ずっと表示も"
+               "クリックも販売もゼロ** の分だけ。需要があった分は再仕入れに回すので"
+               "落としません。その日に出した金額と同じだけ、空く額の大きい順に落とします。",
     },
-]
+    ]
 
 
 # ============ ログ着色パターン ============
@@ -2791,6 +2803,11 @@ class ListingPanel:
                 return "audit"     # 🔍 出品前チェック (新規パネルに表示)
             if any(s in cmd for s in ("listing_funnel", "demand_winners", "funnel_diff")):
                 return "analyze"   # 📊 分析 (Plan/Check)
+            # ★2026-09-03: 棚は①②で置き場所が違う。①は「買えない & 需要ゼロ」なので
+            #   在庫なしの整理と同じ棚、②は「在庫はあるが売れない」ので在庫ありの棚。
+            #   混ぜると重い方(②)を軽い気持ちで押すことになる (ユーザー指摘)。
+            if "shelf_evict.py" in cmd:
+                return "evict2" if "2" in cmd.split("--tier")[-1][:3] else "oos"
             if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
                 return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
             if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
@@ -2811,7 +2828,7 @@ class ListingPanel:
                 return "relist"
             return "report"
         ug = {"analyze": [], "oos": [], "discover": [], "relist": [], "report": [],
-              "audit": [], "hoju": []}
+              "audit": [], "hoju": [], "evict2": []}
         for idx in utilities:
             ug[_ugroup(idx)].append(idx)
 
@@ -3039,6 +3056,15 @@ class ListingPanel:
             d1.pack(fill="x", padx=4, pady=(6, 0))
             # 3列: 上段①②③ / 下段✏️タイトル改修(①下)・💲値下げ余地(②下) が縦に揃う
             _grid_named(d1, relist_items, ncol=3)
+            # ★2026-09-03: 在庫ありを「直す」と「落とす」で分ける。同じ枠に置くと、
+            #   取り返しのつかない End を、直すのと同じ気持ちで押すことになる。
+            if ug["evict2"]:
+                d1b = ttk.LabelFrame(
+                    scroll_frame,
+                    text="🪑 在庫あり — 落として枠を空ける (取り返しがつかない・候補CSVを見てから)",
+                    padding=4)
+                d1b.pack(fill="x", padx=4, pady=(6, 0))
+                _grid_named(d1b, [(SCRIPTS[i]["label"], i) for i in ug["evict2"]], ncol=3)
             d2 = ttk.LabelFrame(scroll_frame, text="📦 在庫なし — 再仕入れ / 整理", padding=4)
             d2.pack(fill="x", padx=4, pady=(6, 0))
             # d2 は 在庫補充(pack)を入れ子にするので、oosボタンは内側Frame(grid)に包む
