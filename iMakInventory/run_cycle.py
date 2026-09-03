@@ -47,6 +47,7 @@ from monitor_listings import process_sheet  # noqa: E402
 from sheet_updater import (  # noqa: E402
     HIGH_SHEET_ID, LOW_SHEET_ID, open_sheet_by_id,
     get_listings_worksheet, read_listings_rows, LISTINGS_GID,
+    CLEAR_DRAIN_CAP,
 )
 from ebay_actions.revise_csv_generator import (  # noqa: E402
     run as run_revise_csv,
@@ -694,15 +695,16 @@ def _phase_monitor(
                 "【消込急増ガード HOLD】" + ", ".join(
                     f"[{h['sheet']}] 新規{h.get('new_count', '?')}件 (候補{h['candidate_count']}件)"
                     for h in _held)
-                + " → 一括消込を保留 (誤一括削除を防止)。\n"
-                "  ★ 判定基準は **今 cycle 新規** (積み残しは cycle 毎に自動ドレインされるので "
-                "backlog では発火しない)。新規が一気に湧く = **scraper 系統崩壊の疑い** → "
-                "まず候補一覧の supplier 偏りと DOM 検体を確認。genuine と確認できたら:\n"
-                "    1) 確認: python -m tools.supervised_backup_drain\n"
-                "    2) 実削除: python -m tools.supervised_backup_drain --reverify-snkrdunk --execute\n"
-                "  (compare-and-clear + 復元アーカイブで安全。触るのは補URL(AC-AG)のみ)。\n"
-                "  ※ 万一 別supplier scraper の一斉偽sold崩壊の可能性が疑わしい時のみ、"
-                "先に候補一覧の supplier 偏りを確認すること。")
+                + " → この cycle の一括消込は見送り。\n"
+                "  ★ **手作業は不要**: 候補は 1 件ずつ「消す直前にもう一度 URL を引いて "
+                "2 回とも売切だった枠」だけに絞ってある。積み残しは次 cycle 以降に "
+                "自動で消し込まれる (1 cycle {cap} 件ずつ、古い順)。\n"
+                "  ★ この通知の意味は「1 cycle でこれだけ湧いたのは多い」という記録。"
+                "supplier が 1 つに偏っていたら scraper 系統崩壊を疑って DOM 検体を見ること。\n"
+                "  急いで消したい時だけ: python -m tools.supervised_backup_drain "
+                "[--reverify-snkrdunk --execute]\n"
+                "  (compare-and-clear + 復元アーカイブで安全。触るのは補URL(AC-AG)のみ)。".format(
+                    cap=CLEAR_DRAIN_CAP))
         if _mm:
             _parts.append(f"【compare-and-clear mismatch {len(_mm)}件】セル値≠確認URL "
                           "(HQ が生きた新URLに差替 or 変化) → 消さずに要対応記録。")

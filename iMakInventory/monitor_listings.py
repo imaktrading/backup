@@ -406,11 +406,23 @@ def check_one_row_with_fallback(row: dict, sleep_sec: float = DEFAULT_SLEEP_SEC,
         sub_results.append(sub)
         if sub["is_sold"] is False and hit_index < 0:
             hit_index = len(sub_results) - 1   # sub_results 内の index (価格採用に使う)
+        # ★ 2026-09-04: 売切と出た補URLは、消す前に その場でもう一度引いて確かめる。
+        #   1 回の取得で消すと、瞬間的な取得失敗や CSR の描画ズレで「生きている仕入元」を
+        #   消してしまう (2026-07-25 snkrdunk 偽sold 型)。2 回目も売切と言った枠だけ消込対象。
+        #   ★ is_sold 自体は書き換えない (取下げ判定/色塗り/救済 signal は従来どおり)。
+        #   消込だけが sold_reconfirmed=True を要求する = 誤削除に対してのみ厳しくする。
+        sold_reconfirmed = None
+        if sub["is_sold"] is True:
+            sub2 = _check_single_url(burl, sleep_sec, mercari_driver, amazon_driver,
+                                     model_number=_model)
+            sold_reconfirmed = (sub2["is_sold"] is True)
         backup_slot_results.append({
             "slot": slot_i,                    # 0-4 = AC-AG (列 29+slot_i)
             "url": burl,
             "is_sold": sub["is_sold"],         # True=売切 / False=在庫あり / None=不確定
             "error": sub["error"],
+            # True=2 回目も売切 (消込 OK) / False=2 回目は違った (温存) / None=1 回目が売切でない
+            "sold_reconfirmed": sold_reconfirmed,
         })
 
     result = _build_row_result(row, sub_results, hit_index=hit_index)
@@ -656,6 +668,33 @@ def order_backup_clear_candidates(candidates: list, seen: dict) -> tuple:
     ordered = sorted(candidates, key=lambda c: (updated[_backup_clear_key(c)],
                                                 c["row_index"], c["slot"]))
     return ordered, new_count, updated
+
+
+def collect_backup_clear_candidates(results: list) -> tuple:
+    """消込候補 (売切確定した補URL枠) を集める。
+
+    採るのは「2 回引いて 2 回とも売切だった枠」だけ (sold_reconfirmed)。
+    ★ 2026-09-04: 1 回の取得で消していたため、瞬間的な取得失敗や CSR の描画ズレで
+      生きた仕入元URLを消す余地があった (2026-07-25 snkrdunk 偽sold 型)。
+      2 回目で覆った枠は温存し、次 cycle で改めて判定させる。
+      error/None (判定不能) はそもそも候補にしない (従来どおり fail-closed)。
+
+    Returns: (candidates, reverify_dropped)
+    """
+    candidates, dropped = [], 0
+    for r in results:
+        for s in (r.get("backup_slot_results") or []):
+            if not (s and s.get("is_sold") is True and s.get("url")):
+                continue
+            if s.get("sold_reconfirmed") is False:
+                dropped += 1
+                continue
+            candidates.append({
+                "row_index":    r["row_index"],
+                "slot":         s["slot"],           # 0-4 = AC-AG
+                "expected_url": s["url"],
+            })
+    return candidates, dropped
 
 
 #: 本番の台帳 (import 時に確定)。test が差し替えた path と区別するために使う。
@@ -1614,18 +1653,10 @@ def process_sheet(
     # ── 補URL 売切消込の候補収集 (懸念2: fail-closed) ──
     # backup_slot_results (固定 5 枠 positional) の is_sold=True 枠のみ = 売切確定の補URL。
     # error/None (uncertain) は消さない。主URL (slot 概念外) は対象外。実 clear は下で compare-and-clear。
-    clear_candidates = []
-    for r in results:
-        slots = r.get("backup_slot_results")
-        if not slots:
-            continue
-        for s in slots:
-            if s and s.get("is_sold") is True and s.get("url"):
-                clear_candidates.append({
-                    "row_index":    r["row_index"],
-                    "slot":         s["slot"],           # 0-4 = AC-AG
-                    "expected_url": s["url"],
-                })
+    clear_candidates, reverify_dropped = collect_backup_clear_candidates(results)
+    if reverify_dropped:
+        log(f"  [補URL再確認] 売切と出た枠のうち {reverify_dropped} 件は 2 回目で覆った "
+            f"→ 消込せず温存 (誤削除の防止)")
 
     price_surge_held: list = []    # 価格急増ガードで M/K を HOLD した supplier (return で run_cycle へ)
     price_surge_stats: dict = {}

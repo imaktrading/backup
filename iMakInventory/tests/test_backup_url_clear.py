@@ -225,3 +225,73 @@ def test_ensure_sold_at_header_noop_when_already_set():
     ws.update = MagicMock()
     assert ensure_sold_at_header(ws) is False
     ws.update.assert_not_called()
+
+
+# ============================================================================
+# 消す直前の再確認 (2026-09-04)
+# ============================================================================
+def test_sold_backup_is_refetched_before_clearing(monkeypatch):
+    """売切と出た補URLは 2 回引く。 2 回目が覆ったら sold_reconfirmed=False (= 消さない)。"""
+    import monitor_listings as ml
+
+    calls = []
+
+    def fake_check(url, *a, **k):
+        calls.append(url)
+        # b2: 1 回目 売切 → 2 回目も売切 (genuine) / b3: 1 回目 売切 → 2 回目 在庫あり (偽sold)
+        if url == "https://main":
+            return {"url": url, "supplier": "mercari", "is_sold": True,
+                    "raw_status": "", "error": None, "price_jpy": None, "points_jpy": None}
+        seen = calls.count(url)
+        table = {"https://b2": [True, True], "https://b3": [True, False]}
+        return {"url": url, "supplier": "mercari", "is_sold": table[url][seen - 1],
+                "raw_status": "", "error": None, "price_jpy": None, "points_jpy": None}
+
+    monkeypatch.setattr(ml, "_check_single_url", fake_check)
+    row = {"row_index": 7, "url": "https://main",
+           "backup_url_slots": ["https://b2", "https://b3", None, None, None],
+           "current_sold": ""}
+    slots = ml.check_one_row_with_fallback(row)["backup_slot_results"]
+
+    assert calls.count("https://b2") == 2 and calls.count("https://b3") == 2  # 2 回引いた
+    assert slots[0]["sold_reconfirmed"] is True    # 消込 OK
+    assert slots[1]["sold_reconfirmed"] is False   # 温存 (偽sold を消さない)
+
+
+def test_in_stock_backup_is_not_refetched(monkeypatch):
+    """在庫ありの補URLは 1 回のまま (無駄な再取得をしない)。"""
+    import monitor_listings as ml
+
+    calls = []
+
+    def fake_check(url, *a, **k):
+        calls.append(url)
+        return {"url": url, "supplier": "mercari", "is_sold": False,
+                "raw_status": "", "error": None, "price_jpy": None, "points_jpy": None}
+
+    monkeypatch.setattr(ml, "_check_single_url", fake_check)
+    row = {"row_index": 8, "url": "https://main",
+           "backup_url_slots": ["https://b2", None, None, None, None],
+           "current_sold": ""}
+    slots = ml.check_one_row_with_fallback(row)["backup_slot_results"]
+    assert calls.count("https://b2") == 1
+    assert slots[0]["sold_reconfirmed"] is None
+
+
+def test_collect_candidates_skips_unreconfirmed():
+    """2 回目で覆った枠 (sold_reconfirmed=False) は消込候補に入らない。"""
+    import monitor_listings as ml
+
+    results = [{
+        "row_index": 12,
+        "backup_slot_results": [
+            {"slot": 0, "url": "https://genuine", "is_sold": True, "sold_reconfirmed": True},
+            {"slot": 1, "url": "https://flaky",   "is_sold": True, "sold_reconfirmed": False},
+            {"slot": 2, "url": "https://alive",   "is_sold": False, "sold_reconfirmed": None},
+            {"slot": 3, "url": "https://err",     "is_sold": None, "sold_reconfirmed": None},
+            None,
+        ],
+    }]
+    cands, dropped = ml.collect_backup_clear_candidates(results)
+    assert [c["expected_url"] for c in cands] == ["https://genuine"]
+    assert dropped == 1

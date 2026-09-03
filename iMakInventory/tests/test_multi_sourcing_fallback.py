@@ -64,7 +64,8 @@ def test_main_in_stock_all_candidates_checked():
     assert res["error"] is None
     assert res["candidates_checked"] == 3   # 主 + 補1 + 補2 全部チェック
     assert res["raw_status"] == "in_stock"
-    assert mock.call_count == 3
+    # 3 候補 + 売切だった補 2 本の再確認 (2026-09-04: 消す前にもう一度引く)
+    assert mock.call_count == 5
 
 
 def test_main_sold_backup_in_stock_returns_in_stock():
@@ -77,7 +78,7 @@ def test_main_sold_backup_in_stock_returns_in_stock():
     assert res["error"] is None
     assert "backup#1" in res["raw_status"]
     assert res["candidates_checked"] == 3   # 全候補チェック
-    assert mock.call_count == 3
+    assert mock.call_count == 4   # + 売切だった補2 の再確認
 
 
 def test_all_candidates_sold_returns_newly_sold():
@@ -115,7 +116,7 @@ def test_main_error_with_backup_in_stock_returns_in_stock_safe():
     assert res["is_sold"] is False
     assert res["error"] is None
     assert "backup#1" in res["raw_status"]
-    assert mock.call_count == 3   # 全候補チェック
+    assert mock.call_count == 4   # 全候補 + 売切だった補2 の再確認
 
 
 def test_all_errors_yields_uncertain():
