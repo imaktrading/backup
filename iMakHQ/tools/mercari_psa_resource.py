@@ -594,11 +594,27 @@ def _variant_matches(items, card_no, variant_hint=None, market_no=None):
         # 主因だった(2026-06-19 OP02-036パラレル/OP05-091 SP/P-066別プロモ 等)。精度優先で fail-closed。
         return []
     topgroup = [it for s, it in scored if s == top]    # 価格昇順保持
-    if len(topgroup) == 1:
-        return topgroup                                # set で一意
+    # ★2026-09-04: print種別(通常/パラレル/SP)は **候補が1件でも必ず見る**。
+    #   以前は「set で一意」を理由に1件なら素通ししていたが、そこが
+    #   『同じ番号の別変種を掴む』主因だった。実測で再現:
+    #     通常カード(hint print='')に対し、候補が「リーダーパラレル OP03-001」1件
+    #     → 採用されていた。同じものが2件あると正しく [] になる = 1件の時だけ緩い、
+    #     という逆さまの作りだった。
+    #   実害: 人が「違う」と外した249件のうち **81件が『番号一致・変種違い』**。
+    #   外すたび候補NG台帳に積まれ、やがて候補が尽きて「絞り込みで全滅」になる
+    #   (2026-09-03 実測 26件)。残務№64。
+    #   売り手が変種を書かない出品は落ちるが、それは fail-closed で正しい側。
     target = _print_signal(variant_hint)
-    matched = [it for it in topgroup if _item_print(it["name"]) == target]
-    return matched if matched else []     # 正 print種別の候補群 / 一意化不可は fail-closed
+    # ① 候補が print種別を **書いていて** target と違うものは落とす (候補が1件でも)。
+    #    「通常が欲しいのに『リーダーパラレル』」は、書いてある時点で確実に別物。
+    kept = [it for it in topgroup if _item_print(it["name"]) in ("", target)]
+    if not kept:
+        return []
+    # ② 書いていない候補は落とさない。メルカリは変種を書かない出品が多く、
+    #    落とすと在庫が実在するのに候補ゼロになる (2026-06-10 からの既存挙動)。
+    #    ただし **書いてあって一致する**候補が在るなら、そちらを優先する。
+    exact = [it for it in kept if _item_print(it["name"]) == target]
+    return exact if exact else kept
 
 
 def kw_variant_confident(name, variant_hint):
