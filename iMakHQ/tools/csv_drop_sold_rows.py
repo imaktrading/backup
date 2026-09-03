@@ -58,9 +58,11 @@ def supply_index(rows2d):
         info = {"sold": bool(_cell(r, D)), "checked": _cell(r, O), "url": url, "row": i}
         if cert:
             idx.setdefault(cert, info)
-        m = re.search(r"/(?:item/|shops/product/)(\w+)", url)
-        if m:
-            idx.setdefault(m.group(1), info)
+        # ★ 仕入先の id の取り方は sheet_io に1か所 (2026-09-03)。
+        #   各自に正規表現を持っていたため SNKRDUNK が両方で抜けていた。
+        _sid = sheet_io.supply_id_from_url(url)
+        if _sid:
+            idx.setdefault(_sid, info)
     return idx
 
 

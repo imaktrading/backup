@@ -29,6 +29,9 @@ import sys
 
 import requests
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sheet_io  # noqa: E402
+
 # ★2026-09-01: cp932 コンソール (Windows既定) で絵文字 print が UnicodeEncodeError で
 #   クラッシュしていた。しかもクラッシュ位置が本体の eBay 書込 (create_ads) より**前**の
 #   プレビュー表示だったため、「対象11件→追加11」と出ていたのに実際は1件も書かれて
@@ -75,9 +78,11 @@ def itemid_index(rows2d, itemid_col=1, cert_col=8, url_col=0):
             continue
         if g(cert_col):
             idx.setdefault(g(cert_col), iid)
-        m = re.search(r"/(?:item/|shops/product/)(\w+)", g(url_col))
-        if m:
-            idx.setdefault(m.group(1), iid)
+        # ★ 仕入先の id の取り方は sheet_io に1か所 (2026-09-03)。
+        #   各自に正規表現を持っていたため SNKRDUNK が両方で抜けていた。
+        _sid = sheet_io.supply_id_from_url(g(url_col))
+        if _sid:
+            idx.setdefault(_sid, iid)
     return idx
 
 

@@ -555,3 +555,27 @@ def write_rows_to_tab(tab, rows2d, sheet_id=MAINT_SHEET_ID):
         ws = sh.add_worksheet(title=tab, rows=max(10, len(rows2d) + 5), cols=max(4, ncols))
     ws.update(range_name="A1", values=rows2d, value_input_option="RAW")
     return len(rows2d)
+
+
+def supply_id_from_url(url):
+    """仕入元URL → 出品の CustomLabel(SKU) に使われる id。無ければ ""。純関数。
+
+    ★2026-09-03 新設。理由 (実害): SNKRDUNK 仕入の行だけ id が取れず、
+      ① 入稿直前の在庫確認が「シートに該当行が無い」で **fail-open** になり
+      ② 入稿後の itemID 書戻しと広告8%も付かなかった
+      (cert167145631 / ST18-005 Luffy-Tarou / itemID 820082424467)。
+      itemID がシートに無い出品は監視くんが取り下げられない = 一番危ない状態。
+
+    元は ads_add_new_listings と csv_drop_sold_rows が **同じ正規表現を各自持って**
+    いて、両方ともメルカリしか知らなかった。仕入元が増えるたび2か所直すのをやめ、
+    ここ1か所にする。
+    """
+    import re as _re
+    for pat in (r"/item/(\w+)",              # メルカリ  /item/m123...
+                r"/shops/product/(\w+)",     # メルカリShops
+                r"/used/(\w+)",              # SNKRDUNK  /apparels/520558/used/49216166
+                r"/dp/([A-Z0-9]{10})"):      # Amazon ASIN
+        m = _re.search(pat, url or "")
+        if m:
+            return m.group(1)
+    return ""
