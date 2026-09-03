@@ -153,7 +153,8 @@ def test_件数をラベルに焼かない():
       ラベルにも件数・金額を求めた (kind == "shelf_evict" に限定)。"""
     i = SRC.index("def paint_hoju_badge")
     body = SRC[i:i + 1600]
-    assert "b.config(text=text, height=(5 if extra else 3)," in body
+    # ★2026-09-04: 2段ラベル (2段目=進み具合) にしたので高さ4。棚だけ5。
+    assert "b.config(text=text, height=(5 if _shelf else 4)," in body
     assert "base + by_kind" not in body
     assert 'kind == "shelf_evict"' in body
 

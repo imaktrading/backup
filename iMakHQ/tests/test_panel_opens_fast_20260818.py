@@ -60,7 +60,7 @@ class TestThereIsAWayToRecount:
     def test_still_recounts_after_a_run(self):
         """走行後は今までどおり数え直す (押した分だけ減ったのが見える)."""
         s = _src()
-        assert re.search(r"走行後に残件を数え直す[\s\S]{0,200}self\.refresh_hoju_badge\(\)", s)
+        assert re.search(r"走行後に残件を数え直す[\s\S]{0,600}self\.refresh_hoju_badge\(\)", s)
 
 
 class TestNoBackgroundThreadForTk:

@@ -61,7 +61,8 @@ def test_label_fits_in_the_button():
       `kind == "shelf_evict"` に限定されていることまで確認する。
     """
     src = _src()
-    assert "b.config(text=text, height=(5 if extra else 3)," in src, "ラベルの既定挙動を変えている"
+    # ★2026-09-04: 2段ラベルにしたので高さ4。棚だけ件数/金額を焼くので5。
+    assert "b.config(text=text, height=(5 if _shelf else 4)," in src, "ラベルの高さの約束を変えている"
     assert "set_tip(" in src, "件数をヒントに回していない"
     assert "(16, 3, 2, 170) if compact else (18, 3, 4, 250)" in src, "既定の高さ/折返し幅が小さいまま"
     i = src.index("def paint_hoju_badge")

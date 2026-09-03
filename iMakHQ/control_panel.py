@@ -3289,6 +3289,71 @@ class ListingPanel:
             except Exception:                                     # noqa: BLE001
                 pass
 
+    # ── ①②③ の「どこまで行ったか」(2026-09-04 ユーザー要望) ─────────────
+    #   > ①②③あるやつは、順番に押すと思うけど、どこまで行ったか分からなくなる
+    #   押した時刻を記録して、ボタンの2段目に「今日 07:11 済」と出す。記憶に頼らない。
+    #   順番は下の表が唯一の定義。コードに「PSAなら〜」の分岐を書かない。
+    STEP_FLOWS = (
+        ("hoju_search", "hoju_confirm"),                          # 補URL ①探す→②目視
+        ("psa_gate", "restock_build", "restock_wb"),               # PSA再仕入れ ①→②→③
+        ("ut_search", "ut_confirm"),                              # UT補URL ①→②
+        ("ut_restock_search", "ut_restock_confirm", "ut_restore"),  # UT再仕入れ ①→②→③
+        ("kuji_search", "kuji_confirm"),                           # 一番くじ 探す→目視
+        ("kuji_supply", "kuji_refresh"),                           # 一番くじ 補充①→②
+    )
+
+    def _step_log_path(self):
+        return os.path.join(WORKSPACE, "..", "iMak_data", "hq", "button_last_run.json")
+
+    def _load_step_log(self):
+        """{badge: 'ISO日時'} を読む。壊れていても走行は止めない。"""
+        import json as _j
+        try:
+            with io.open(self._step_log_path(), encoding="utf-8") as f:
+                d = _j.load(f)
+            return d if isinstance(d, dict) else {}
+        except Exception:                                          # noqa: BLE001
+            return {}
+
+    def _remember_step_run(self, badge):
+        """走行が終わったボタンの時刻を残す (I/O)。書けなくても黙って諦めない。"""
+        if not badge:
+            return
+        import datetime as _dt
+        import json as _j
+        d = self._load_step_log()
+        d[badge] = _dt.datetime.now().isoformat(timespec="seconds")
+        try:
+            os.makedirs(os.path.dirname(self._step_log_path()), exist_ok=True)
+            with io.open(self._step_log_path(), "w", encoding="utf-8") as f:
+                f.write(_j.dumps(d, ensure_ascii=False))
+        except Exception as e:                                     # noqa: BLE001
+            self.append_log("(押した時刻の記録skip: %s)" % type(e).__name__)
+
+    @staticmethod
+    def step_marks(flows, log, act_kind, today):
+        """各ボタンの2段目に出す文字を決める (純関数・test可)。
+
+        戻り: {badge: '今日 07:11 済' / '← 次' / ''}
+        - 今日 押していれば時刻を出す (どこまで行ったかが記憶に頼らず分かる)
+        - まだ押していない **先頭** で、かつ仕事が在るものに「← 次」
+        - 日付が変われば自然に消える (today と比べるだけ)
+        """
+        out = {}
+        for flow in flows:
+            nxt_done = False
+            for b in flow:
+                t = (log or {}).get(b) or ""
+                if t[:10] == today:
+                    out[b] = "今日 %s 済" % t[11:16]
+                    continue
+                if not nxt_done and (act_kind or {}).get(b):
+                    out[b] = "← 次"
+                    nxt_done = True
+                else:
+                    out[b] = ""
+        return out
+
     def paint_hoju_badge(self, by_kind, act_kind=None):
         """数えた結果を **色とヒント** に出す (計算しない・純粋な描画)。
 
@@ -3301,11 +3366,20 @@ class ListingPanel:
           件数・金額を求めた (`shelf_evict_label`)。他のボタンは上の決定のまま変えない。
         """
         act_kind = act_kind or {}
+        # ★2026-09-04 ユーザー要望「①②③あるやつは、どこまで行ったか分からなくなる」
+        #   「ラベルは2段にしてね。1行並びだと見切れたりして、見づらいから」
+        #   → 2段目に「今日 07:11 済」/「← 次」。空でも2段のまま (高さを揺らさない)。
+        import datetime as _dtm
+        marks = self.step_marks(self.STEP_FLOWS, self._load_step_log(), act_kind,
+                                _dtm.date.today().isoformat())
         for b, base, kind, set_tip, tip in self._hoju_btns:
             try:
                 extra = (by_kind.get(kind + "_label") or "").strip() if kind == "shelf_evict" else ""
-                text = f"{base}\n{extra}" if extra else base
-                b.config(text=text, height=(5 if extra else 3),
+                _shelf = bool(extra)
+                if not extra:
+                    extra = marks.get(kind, "")
+                text = f"{base}\n{extra}" if extra else f"{base}\n"
+                b.config(text=text, height=(5 if _shelf else 4),
                          fg=("#0066cc" if act_kind.get(kind) else "black"))
                 if set_tip:
                     n = (by_kind.get(kind) or "").strip()
@@ -4191,6 +4265,11 @@ class ListingPanel:
                     self.now_processing.set("")
                     # ★走行後に残件を数え直す (押した分だけ減ったのが見える)
                     try:
+                        # ★2026-09-04: 押した時刻を先に残す (①②③のどこまで行ったか用)。
+                        #   数え直しの前に置く = 直後の描画にその回の分が載る。
+                        _i = getattr(self, "_current_idx", -1)
+                        if _i is not None and _i >= 0:
+                            self._remember_step_run((SCRIPTS[_i] or {}).get("badge"))
                         self.refresh_hoju_badge()
                     except Exception:                             # noqa: BLE001
                         pass
