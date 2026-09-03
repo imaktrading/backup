@@ -43,10 +43,7 @@ def test_tip_states_every_age_limit_actually_used():
 
 def test_tip_does_not_claim_access_order():
     """アクセス順という古い説明を残さない (並びは空く額の大きい順)。"""
-    src = open(os.path.join(_HQ, "control_panel.py"), encoding="utf-8").read()
-    i = src.index('"label": "📉 棚② ')
-    assert "アクセスの少ない順" not in src[i:i + 2500]
-    assert "空く額の大きい順" in src[src.index('"label": "📉 棚① '):][:2500]
+    assert "アクセスの少ない順" not in _tip()
 
 
 def test_code_really_sorts_by_freed_amount():

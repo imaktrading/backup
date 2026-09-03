@@ -505,7 +505,9 @@ def count_workload():
             else:
                 shelf_of = fshelf
 
-        picked, total = pick(rows, target, shelf_of, cat_of,
+        # ★2026-09-03: 棚のボタンは②だけになった (①は取下げに統合)。
+        #   ラベルの件数も②に揃える。①を混ぜると押しても出てこない数字になる。
+        picked, total = pick(rows, target, shelf_of, cat_of, only_tier=TIER_STALE,
                              restock_pending=restock_pending_ids(),
                              no_demand=no_demand_ids(rows))
         byt = collections.Counter(t for t, _r in picked)
