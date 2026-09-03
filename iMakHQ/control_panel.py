@@ -3347,6 +3347,13 @@ class ListingPanel:
             "    d['restock']=SR.count_workload()\n"
             "except Exception as e:\n"
             "    d['restock']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # ★2026-09-03: UT の補URL も同じ subprocess で数える。パネル側から直接
+            #   import していたら tools/ が sys.path に無く、毎回「取得できず」だった。
+            "try:\n"
+            "    import ut_hoju_fill as UT\n"
+            "    d['ut']=UT.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['ut']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             # ★2026-09-01 ユーザー要望「ボタンが増えて何をしたらいいか分からない」:
             #   既存メンテのヒント無し 6個も同じ subprocess で数える。
             #   どれも **スクレイプも eBay API も使わない** (材料は funnel CSV とスプシ)。
@@ -3602,12 +3609,10 @@ class ListingPanel:
                 kr_txt = "\nCSVにできる %s件" % kr["can"]
                 if not kr["can"]:
                     kr_txt += "\n※押しても0件 (先に ① supply確定)"
-            # ★2026-09-03: UT の補URL。押したら何件できるかを出す (メルカリは叩かない)
-            try:
-                import ut_hoju_fill as _uh
-                _ut = _uh.count_workload()
-            except Exception as _e:                              # noqa: BLE001
-                _ut = {"error": f"{type(_e).__name__}"}
+            # ★2026-09-03: UT の補URL。押したら何件できるかを出す (メルカリは叩かない)。
+            #   数えるのは上の subprocess 側 (tools/ が sys.path に入っている)。
+            #   ここで直接 import すると tools/ が見えず、毎回「取得できず」になっていた。
+            _ut = (w0.get("ut") or {}) if isinstance(w0, dict) else {}
             if _ut.get("error"):
                 ut_s_txt = ut_c_txt = "\n(残件 取得できず: %s)" % str(_ut["error"])[:40]
             else:

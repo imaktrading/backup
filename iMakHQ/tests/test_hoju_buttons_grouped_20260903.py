@@ -102,3 +102,16 @@ def test_cross_product_buttons_stay_out_of_the_boxes():
     """「全系統」の物は特定の商材の箱に入れない。"""
     i = _SRC.index("def _line_of(")
     assert '"全系統" in lab' in _SRC[i:i + 400]
+
+
+def test_ut_count_is_computed_in_the_shared_subprocess():
+    """件数は tools/ を sys.path に入れた subprocess で数える。
+
+    パネル側から直接 import していたら tools/ が見えず、毎回「取得できず」だった
+    (ユーザー指摘 2026-09-03)。他のボタン (PSA / 一番くじ / 取下げ / 棚) と同じ口に乗せる。
+    """
+    assert '"    import ut_hoju_fill as UT' in _SRC
+    assert "d['ut']=UT.count_workload()" in _SRC
+    # パネル側は集計結果から読むだけ (直接 import しない)
+    assert 'import ut_hoju_fill as _uh' not in _SRC
+    assert '_ut = (w0.get("ut") or {})' in _SRC
