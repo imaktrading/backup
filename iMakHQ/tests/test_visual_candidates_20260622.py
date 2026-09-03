@@ -41,7 +41,10 @@ def test_fallback_to_cands_then_best():
     out = g._build_visual_candidates(mr, c)
     assert [x["url"] for x in out] == ["b"]
 
-    out2 = g._build_visual_candidates({}, {"mercari_url": "b2", "mercari_jpy": 5, "snkrdunk_urls": []})
+    # ★2026-09-04: 価格の下限 (¥100) を入れたので、フォールバックの検査には
+    #   ありえる値を使う (¥5 は「安すぎる」で落ちる = それ自体は正しい動き)。
+    out2 = g._build_visual_candidates(
+        {}, {"mercari_url": "b2", "mercari_jpy": 5000, "snkrdunk_urls": []})
     assert out2 and out2[0]["url"] == "b2", "mrもcandsも無ければ best フォールバック"
 
 

@@ -599,7 +599,9 @@ def cost_sanity(cost_jpy, live_price_usd=None, fx_jpy_per_usd=None):
         return "仕入値が安すぎる ¥%s (下限 ¥%s = 取得失敗を0で埋めた等)" % (
             format(int(c), ","), format(int(lo), ","))
     if c > hi:
-        return "仕入値が高すぎる ¥%s (上限 ¥%s = ダミー価格か桁誤り)" % (
+        # ★上限は2つの意味を兼ねる: ダミー価格/桁誤りを弾く + 高すぎる仕入をしない
+        #   (2026-09-04 ユーザー確定で 30万→7万)。理由は global.yaml に実測付きで記載。
+        return "仕入値が上限を超えている ¥%s (上限 ¥%s)" % (
             format(int(c), ","), format(int(hi), ","))
 
     # 同じ数字の並び (1111111 / 999999 / 888888) は出品者が付けた「売る気のない」値段

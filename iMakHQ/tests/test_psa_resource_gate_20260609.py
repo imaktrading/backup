@@ -86,7 +86,9 @@ def test_http_shape_snkrdunk_unavailable():
 def test_http_shape_both_channels():
     http = {"available": True, "psa10_price_jpy": 63333,
             "card_url": "https://snkrdunk.com/apparels/520553"}
-    c = g.combine((158888, "m", "x"), http)
+    # ★2026-09-04: 仕入上限 ¥7万 を入れたので、この検査 (2チャネルの形) には
+    #   上限内の値を使う (旧 ¥158,888 は上限で落ちて mercari が消える)。
+    c = g.combine((68888, "m", "x"), http)
     assert set(c["channels"]) == {"mercari", "snkrdunk"}
     assert c["cheapest_jpy"] == 63333 and c["cheapest_channel"] == "snkrdunk"
 

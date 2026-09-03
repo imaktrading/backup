@@ -165,6 +165,24 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     """
     mr = mr or {}
     out, seen = [], set()
+    # ★2026-09-04: 上限を超える仕入値の候補は **目視にも出さない**。
+    #   ここは 補URL の目視画面が使う一覧なので、combine() の aux_urls とは別経路。
+    #   片方だけ絞ると「①探すには出ないのに補URLには入る」がまた起きる。
+    #   基準は pricing_engine.cost_sanity の1か所 (しきい値は global.yaml)。
+    def _ok(price):
+        if not isinstance(price, int) or price <= 0:
+            return True                    # 価格不明はここで落とさない (別経路で落ちる)
+        try:
+            import os as _os
+            import sys as _sys
+            _api = _os.path.join(_os.path.dirname(_os.path.dirname(
+                _os.path.dirname(_os.path.abspath(__file__)))), "iMakeBayAPI")
+            if _api not in _sys.path:
+                _sys.path.insert(0, _api)
+            from pricing_engine import cost_sanity
+        except Exception:                                      # noqa: BLE001
+            return True
+        return cost_sanity(price) is None
     # ★2026-08-01: all_cands は **同番号の全変種**(変種未確証) なので、そのまま並べると
     #   別変種が上に来て人が毎回「違う」を押す羽目になる。cands(= _variant_matches を通った
     #   **正変種**) に載っている URL を先頭へ寄せ、各候補に variant_ok を持たせて UI で
@@ -175,10 +193,10 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     merc = sorted(merc, key=lambda t: 0 if (t and len(t) > 1 and t[1] in verified) else 1)
     for t in merc[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
-        if url and url not in seen:
+        _p = t[0] if (t and isinstance(t[0], int)) else None
+        if url and url not in seen and _ok(_p):
             seen.add(url)
-            out.append({"channel": "mercari", "url": url,
-                        "price": (t[0] if t and isinstance(t[0], int) else None),
+            out.append({"channel": "mercari", "url": url, "price": _p,
                         "name": (t[2] if len(t) > 2 else ""),
                         "variant_ok": url in verified})
     # ★2026-08-01: 番号未確認 (名前一致のみ) の候補を **最後に** 足す。
@@ -187,16 +205,16 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     #   number_ok=False を持たせ、UI で明確に区別できるようにする。
     for t in (mr.get("loose_cands") or [])[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
-        if url and url not in seen:
+        _p = t[0] if (t and isinstance(t[0], int)) else None
+        if url and url not in seen and _ok(_p):
             seen.add(url)
-            out.append({"channel": "mercari", "url": url,
-                        "price": (t[0] if t and isinstance(t[0], int) else None),
+            out.append({"channel": "mercari", "url": url, "price": _p,
                         "name": (t[2] if len(t) > 2 else ""),
                         "variant_ok": False, "number_ok": False})
-    if not out and c.get("mercari_url"):            # 最終フォールバック(best のみ)
+    if not out and c.get("mercari_url") and _ok(c.get("mercari_jpy")):
         out.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
     for d in (c.get("snkrdunk_urls") or [])[:max_snkr]:
-        if d.get("url") and d["url"] not in seen:
+        if d.get("url") and d["url"] not in seen and _ok(d.get("price")):
             seen.add(d["url"])
             # snkrdunk は card_id で引いているので変種は特定済み (番号一致の全変種を混ぜない)。
             out.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price"),

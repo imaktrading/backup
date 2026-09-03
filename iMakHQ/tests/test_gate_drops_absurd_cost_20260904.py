@@ -69,3 +69,40 @@ def test_unknown_price_is_not_judged_here():
     r = combine(None, {"available": True, "psa10_price_jpy": None,
                        "psa10_listings": [{"price": None, "url": "https://snkrdunk.com/z"}]})
     assert r["snkrdunk_count"] == 1
+
+# ── 上限は経営判断も兼ねる (2026-09-04 ユーザー確定 30万→7万) ──────────
+def test_the_cap_is_seventy_thousand():
+    """実測で決めた値 (funnel_20260904 / 1,063件):
+         〜¥3万 922件 売れた31件 / ¥3–5万 107件 0件 / ¥5–7万 27件 1件
+         ¥7–10万 5件 0件 / ¥10万超 2件 0件
+    ¥7万 = 売価 $760.98 相当。既に出ている高額品は そのまま置く (今後の分だけ)。
+    """
+    import io as _io
+    y = _io.open(os.path.join(_ROOT, "iMakeBayAPI", "config", "global.yaml"),
+                 encoding="utf-8").read()
+    assert "max_jpy: 70000" in y
+
+
+def test_over_the_cap_is_rejected():
+    from pricing_engine import cost_sanity
+    assert cost_sanity(69999) is None
+    assert cost_sanity(70001)
+    assert cost_sanity(132500)          # 9/4 の ウタ ST16-001。今後は仕入れない
+
+
+def test_the_cap_also_applies_to_the_review_list():
+    """補URL の目視画面は combine とは **別経路**。片方だけ絞ると
+    「①探すには出ないのに補URLには入る」がまた起きる。"""
+    from psa_resource_gate import _build_visual_candidates
+    mr = {"cands": [(29999, "u1", "安い"), (132500, "u2", "高い")],
+          "all_cands": [(29999, "u1", "安い"), (132500, "u2", "高い")],
+          "loose_cands": [(80000, "u3", "番号未確認だが高い")]}
+    c = combine((29999, "u1", "安い"),
+                {"available": True, "psa10_price_jpy": 45000,
+                 "psa10_listings": [{"price": 45000, "url": "s1"},
+                                    {"price": 90000, "url": "s2"}]},
+                mercari_cands=mr["cands"])
+    got = [(x["channel"], x["price"]) for x in _build_visual_candidates(mr, c)]
+    assert got == [("mercari", 29999), ("snkrdunk", 45000)]
+    assert [(a["channel"], a["price"]) for a in c["aux_urls"]] == [
+        ("snkrdunk", 45000), ("mercari", 29999)]

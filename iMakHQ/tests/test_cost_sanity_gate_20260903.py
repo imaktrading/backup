@@ -61,9 +61,13 @@ def test_non_numeric_is_rejected():
 
 
 def test_ratio_against_the_live_price():
-    """再仕入れ: 現在価格の何倍にもなる = 元データが壊れている合図。"""
-    assert cost_sanity(100000, live_price_usd=20.0)      # 53倍
-    assert cost_sanity(100000, live_price_usd=400.0) is None
+    """再仕入れ: 現在価格の何倍にもなる = 元データが壊れている合図。
+
+    ★2026-09-04 に上限を 7万 に下げたので、比較には **上限内の値**を使う
+    (10万は上限で先に落ちてしまい、倍率の判定を通らない)。
+    """
+    assert cost_sanity(60000, live_price_usd=15.0)       # 40倍超
+    assert cost_sanity(60000, live_price_usd=400.0) is None
 
 
 # ── 門が実際に閉まるか ──────────────────────────────────────
