@@ -242,6 +242,14 @@ set:
     ebay: "Brightness of Hope"
     note: "2026-09-03 自製 (eBay の一覧に Fusion World は無い)"
 
+  # 2026-09-03 (2): FB11 の残りと ST01 を取り込んだ分 (公式突合で判明、424枚)。
+  - source: "ブースターパック BRIGHTNESS OF HOPE [FB11]"
+    ebay: "Brightness of Hope"
+    note: "2026-09-03 自製 (FB11 の日本語表記ゆれ。英語表記と同じ値に寄せる)"
+  - source: "STORY BOOSTER 01 [ST01]"
+    ebay: "Story Booster 01"
+    note: "2026-09-03 自製 (eBay の一覧に Fusion World は無い)"
+
 set_code:
   # ----- Booster Pack (Fusion Booster) -----
   - source: FB01

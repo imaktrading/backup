@@ -1078,7 +1078,7 @@ values:
   # ── dragonball_scg ──
   - value: "Promo Cards"
     category: dragonball_scg
-    rows: 1589
+    rows: 1848
     jp_set: "Promotion Cards"
   - value: "Manga Booster 02"
     category: dragonball_scg
@@ -1090,7 +1090,7 @@ values:
     jp_set: "BOOSTER PACK -BLAZING AURA- [FB02]"
   - value: "New Adventure"
     category: dragonball_scg
-    rows: 355
+    rows: 357
     jp_set: "BOOSTER PACK -NEW ADVENTURE- [FB05]"
   - value: "Manga Booster 01"
     category: dragonball_scg
@@ -1120,18 +1120,22 @@ values:
     category: dragonball_scg
     rows: 191
     jp_set: "BOOSTER PACK -AWAKENED PULSE- [FB01]"
+  - value: "Saiyan's Pride"
+    category: dragonball_scg
+    rows: 188
+    jp_set: "BOOSTER PACK -SAIYAN’S PRIDE- [FB08]"
   - value: "Cross Force"
     category: dragonball_scg
     rows: 188
     jp_set: "BOOSTER PACK CROSS FORCE [FB10]"
-  - value: "Saiyan's Pride"
-    category: dragonball_scg
-    rows: 186
-    jp_set: "BOOSTER PACK -SAIYAN’S PRIDE- [FB08]"
   - value: "Brightness of Hope"
     category: dragonball_scg
-    rows: 125
+    rows: 151
     jp_set: "BOOSTER PACK BRIGHTNESS OF HOPE [FB11]"
+  - value: "Story Booster 01"
+    category: dragonball_scg
+    rows: 135
+    jp_set: "STORY BOOSTER 01 [ST01]"
   - value: "Starter Deck EX The Phase of Evolution"
     category: dragonball_scg
     rows: 60
