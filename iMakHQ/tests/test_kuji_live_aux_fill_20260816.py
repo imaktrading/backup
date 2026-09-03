@@ -136,9 +136,14 @@ def test_detail_cache_is_used_and_fail_closed():
     状態/送料/評価は出品の固定属性なので取り直す必要がない。
     ただし **取れなかった分は焼かない** (失敗を『新品でない』として固定しない)。
     """
-    assert K.detail_cache_fresh({"cond": "新品、未使用", "date": K._today()})
-    assert not K.detail_cache_fresh({"cond": "", "date": K._today()}), "取得失敗を焼いている"
-    assert not K.detail_cache_fresh({"cond": "新品、未使用", "date": "2020-01-01"})
+    # ★2026-09-04: 「買えるか」も詳細ページでしか判らないので cache 項目に加えた。
+    #   未収録の古い entry は **取り直す** (欠けを False 扱いだと候補が全滅、
+    #   True 扱いだとオークションが通る)。
+    _ok = {"cond": "新品、未使用", "date": K._today(), "buyable": True}
+    assert K.detail_cache_fresh(_ok)
+    assert not K.detail_cache_fresh({"cond": "新品、未使用", "date": K._today()}),         "買えるか未収録の古い entry を使い回している"
+    assert not K.detail_cache_fresh({"cond": "", "date": K._today(), "buyable": True}),         "取得失敗を焼いている"
+    assert not K.detail_cache_fresh({**_ok, "date": "2020-01-01"})
     assert not K.detail_cache_fresh(None)
 
 

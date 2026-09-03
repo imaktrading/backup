@@ -166,11 +166,15 @@ class TestFilterRestored:
     その段を廃止した時に **絞りごと消えた**。新品でない物・評価100未満の個人セラーが
     目視画面に並んだ (ユーザー指摘「新品未使用だけにして、評価100以下も含まれている」)。"""
 
-    D = {"a": {"cond": "新品、未使用", "ship": "送料込み", "reviews": 320},
-         "b": {"cond": "目立った傷や汚れなし", "ship": "送料込み", "reviews": 320},
-         "c": {"cond": "新品、未使用", "ship": "着払い", "reviews": 320},
-         "d": {"cond": "新品、未使用", "ship": "送料込み", "reviews": 30},
-         "e": {"cond": "新品、未使用", "ship": "送料込み", "reviews": None}}
+    # ★2026-09-04: 候補は「今そのまま買える」ことも必須 (buyable)。
+    #   f = 中身は完璧だがオークション / g = 買えるか未収録の古いキャッシュ。
+    D = {"a": {"cond": "新品、未使用", "ship": "送料込み", "reviews": 320, "buyable": True},
+         "b": {"cond": "目立った傷や汚れなし", "ship": "送料込み", "reviews": 320, "buyable": True},
+         "c": {"cond": "新品、未使用", "ship": "着払い", "reviews": 320, "buyable": True},
+         "d": {"cond": "新品、未使用", "ship": "送料込み", "reviews": 30, "buyable": True},
+         "e": {"cond": "新品、未使用", "ship": "送料込み", "reviews": None, "buyable": True},
+         "f": {"cond": "新品、未使用", "ship": "送料込み", "reviews": 320, "buyable": False},
+         "g": {"cond": "新品、未使用", "ship": "送料込み", "reviews": 320}}
 
     def _run(self, keys):
         return [x["url"] for x in
@@ -178,6 +182,14 @@ class TestFilterRestored:
 
     def test_新品未使用だけ通す(self):
         assert self._run(["a", "b"]) == ["a"]
+
+    def test_オークションは落とす(self):
+        """★2026-09-04: 確定価格で買えないので仕入元にならない。"""
+        assert self._run(["f"]) == []
+
+    def test_買えるか未収録は落とす(self):
+        """判定できない物を通さない (fail-closed)。取り直せば次から通る。"""
+        assert self._run(["g"]) == []
 
     def test_着払いは落とす(self):
         """実原価が過小表示になる (既存の規約)."""
@@ -195,7 +207,8 @@ class TestFilterRestored:
 
     def test_Shopsは評価不問(self):
         d = {"https://jp.mercari.com/shops/product/x":
-             {"cond": "新品、未使用", "ship": "送料込み", "reviews": None}}
+             {"cond": "新品、未使用", "ship": "送料込み", "reviews": None,
+              "buyable": True}}
         got = R.filter_by_detail_cache(
             [{"url": "https://jp.mercari.com/shops/product/x"}], d)
         assert len(got) == 1

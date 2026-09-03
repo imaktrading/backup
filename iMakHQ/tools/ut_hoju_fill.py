@@ -142,8 +142,16 @@ def is_new_unused(cond):
     return "新品" in (cond or "")
 
 
-def usable_candidate(cond, ship, reviews, is_shops, min_reviews=MIN_REVIEWS):
-    """補URL に使えるか (純関数)。PSA の判定に「新品未使用」を足したもの。"""
+def usable_candidate(cond, ship, reviews, is_shops, min_reviews=MIN_REVIEWS,
+                     buyable=True):
+    """補URL に使えるか (純関数)。PSA の判定に「新品未使用」を足したもの。
+
+    ★2026-09-04: buyable (= 今そのまま買えるか) を足した。オークションと売り切れは
+      検索結果では見分けが付かず、詳細ページのボタンでしか判らない
+      (mercari_psa_resource.buyable_from_detail)。判定は PSA と同じものを使う。
+    """
+    if not buyable:
+        return False
     if not is_new_unused(cond):
         return False
     if ship != "送料込み":
@@ -274,10 +282,15 @@ def search(limit=None, sold_out=False):
                 try:
                     ok, ship, rev = mp._detail_supply_check(drv, href,
                                                             min_reviews=MIN_REVIEWS)
-                    cond, _ = mp._parse_cond_ship(drv.page_source)
+                    _src = drv.page_source
+                    cond, _ = mp._parse_cond_ship(_src)
+                    # ★2026-09-04: _detail_supply_check の ok は捨てているので、
+                    #   買えるかは自分で見る (捨てたまま足すと UT だけ素通りする)。
+                    _buyable = mp.buyable_from_detail(_src)
                 except Exception:                              # noqa: BLE001
                     continue
-                if usable_candidate(cond, ship, rev, mp._is_shops_url(href)):
+                if usable_candidate(cond, ship, rev, mp._is_shops_url(href),
+                                    buyable=_buyable):
                     cands.append({"channel": "mercari", "url": href,
                                   "price": it.get("price"), "name": it.get("name")})
             cache[t["itemID"]] = {"date": today, "size": t["size"],

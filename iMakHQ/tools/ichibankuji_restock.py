@@ -936,6 +936,10 @@ def detail_cache_fresh(entry, today=None, ttl_days=DETAIL_TTL_DAYS):
         return False
     if not entry.get("cond"):
         return False                      # 取れなかった分は再取得 (失敗を焼き付けない)
+    if "buyable" not in entry:
+        return False                      # ★2026-09-04 買えるか未収録の古い分は取り直す
+                                          #   (欠けを False 扱いにすると全滅、True 扱いだと
+                                          #    オークションが通る。取り直すのが唯一正しい)
     today = today or _today()
     try:
         d0 = datetime.date.fromisoformat(entry["date"])
@@ -961,15 +965,20 @@ def _cond_ship(drv, url, cache=None):
         time.sleep(3)
         src = drv.page_source
         cond, ship = _parse_cond_ship(src)
+        buyable = True
         try:
             import mercari_psa_resource as mp
             reviews = mp._parse_seller_reviews(src)
+            # ★2026-09-04: 今そのまま買えるか (オークション/売り切れを外す)。
+            #   検索結果では見分けが付かないので、詳細ページのボタンで見る。
+            buyable = mp.buyable_from_detail(src)
         except Exception:
             reviews = None
         if cache is not None and cond:
             # ★2026-08-22: 画面に出す材料も一緒に貯める (セラー名/星/発送までの日数)。
             #   判定には使わない。人が「買うか」を決めるための情報。
             cache[url] = {"cond": cond, "ship": ship, "reviews": reviews,
+                          "buyable": buyable,
                           "seller": _parse_seller_name(src),
                           "star": _parse_seller_star(src),
                           "ship_days": _parse_ship_days(src),
@@ -1001,10 +1010,16 @@ def _filter_new_freeship(drv, raw):
         cond, ship, reviews = _cond_ship(drv, c["href"], cache)
         if cond not in _KEEP_COND:
             continue
+        # ★2026-09-04: 買えるか は cache 側に入る (_cond_ship が書く)。
+        #   取れていない = 判定不能 は落とす (fail-closed)。
+        _buyable = (cache.get(c["href"]) or {}).get("buyable")
+        if _buyable is not True:
+            continue
         if mp is not None:
             ok = mp.candidate_passes_filter(cond, ship, reviews,
                                             mp._is_shops_url(c["href"]),
-                                            min_reviews=MIN_SELLER_REVIEWS)
+                                            min_reviews=MIN_SELLER_REVIEWS,
+                                            buyable=True)
         else:
             ok = (ship == "送料込み")
         if not ok:
@@ -1231,8 +1246,11 @@ def filter_by_detail_cache(cands, detail, keep_cond=None, min_reviews=None):
             continue                      # 判定不能 = 落とす
         if d["cond"] not in keep_cond:
             continue
+        if d.get("buyable") is not True:
+            continue                      # ★2026-09-04 オークション/売り切れ/判定不能は落とす
         if not mp.candidate_passes_filter(d["cond"], d.get("ship", ""), d.get("reviews"),
-                                          mp._is_shops_url(url), min_reviews=min_reviews):
+                                          mp._is_shops_url(url), min_reviews=min_reviews,
+                                          buyable=True):
             continue
         out.append(c)
     return out

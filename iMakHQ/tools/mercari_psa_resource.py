@@ -781,13 +781,34 @@ def _is_shops_url(href):
     return "/shops/product/" in (href or "")
 
 
-def candidate_passes_filter(cond, ship, reviews, is_shops, min_reviews=100, require_freeship=True):
-    """補URL候補が「送料込み + 個人は評価件数≥min_reviews」を満たすか(純関数・test可)。
+def buyable_from_detail(src):
+    """詳細ページHTML → 「今この値段でそのまま買えるか」(純関数・test可)。
 
+    ★2026-09-04: 検索結果ではオークションと通常出品の **見分けが付かなくなった**。
+      実測 (キーワード 'PSA10 ST01-012' の99セル): オークションのセルにも
+      'オークション/入札/現在価格/残り時間' は1つも出ず、itemtype も通常と同じ
+      ITEM_TYPE_MERCARI。data-testid / class / aria-label を集合比較しても
+      **差は商品名だけ**だった (2026-06-09 のマーカー方式はもう成り立たない)。
+      確実な鑑別子は詳細ページのボタンだけ:
+        通常出品 = checkout-button / オークション = bid-button。
+    売り切れも同じ所で落ちる (どちらのボタンも無い)。
+    """
+    if 'data-testid="bid-button"' in src:
+        return False                      # オークション = 確定価格で買えない
+    return 'data-testid="checkout-button"' in src
+
+
+def candidate_passes_filter(cond, ship, reviews, is_shops, min_reviews=100,
+                            require_freeship=True, buyable=True):
+    """候補が **仕入れるに値するか**(純関数・test可)。
+
+    - **今そのまま買える**こと (オークション/売り切れは不可)。2026-09-04 追加
     - 送料込み必須(着払い=実原価が過小表示→除外)。require_freeship=False で無効化可。
     - **個人(Shopsでない)のみ 評価件数≥min_reviews**。Shops(業者)は評価不問。
     - reviews=None(取れない)は個人なら不合格(fail-closed)。Shops は reviews 不要。
     """
+    if not buyable:
+        return False
     if require_freeship and ship != "送料込み":
         return False
     if not is_shops:
@@ -807,7 +828,8 @@ def _detail_supply_check(drv, href, min_reviews=100, require_freeship=True):
     _cond, ship = _parse_cond_ship(src)
     reviews = None if _is_shops_url(href) else _parse_seller_reviews(src)
     ok = candidate_passes_filter(_cond, ship, reviews, _is_shops_url(href),
-                                 min_reviews=min_reviews, require_freeship=require_freeship)
+                                 min_reviews=min_reviews, require_freeship=require_freeship,
+                                 buyable=buyable_from_detail(src))
     return (ok, ship, reviews)
 
 
@@ -829,14 +851,20 @@ def _filter_candidates_supply(drv, cands, min_reviews=100, keep=5):
     return out
 
 
-def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
+def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
     """各カードの メルカリ on_sale PSA10 を取得 → {idx: {"best":(price,url,name)|None, "cands":[(price,url,name),...]}}。
 
     best = 最安(価格判定用)、cands = 正変種 PSA10 を価格昇順で最大5件(補URL=両ch混合の代替候補用)。
     cards: [{"kw":検索語, "card_no":照合番号, "ebay_item_id":フォールバック用}] のリスト。
     キーワード検索で0件なら、ebay_item_id があれば画像検索フォールバックを試す。
-    freeship_min_reviews: None=フィルタ無し(既定=RESTOCKゲート等の従来挙動不変)。int を渡すと
-      候補を「送料込み + 個人セラー評価件数≥その値」に絞る(詳細ページ訪問=やや遅い。slice2 補URL用)。
+    freeship_min_reviews: 個人セラーの評価件数の下限 (既定 100)。候補は
+      「今そのまま買える + 送料込み + 個人セラー評価件数≥その値」に絞る (詳細ページ訪問)。
+      ★2026-09-04 既定を ON にした (ユーザー指示「この段階で、セラーフィルタ含めて
+        仕入れるに値するものにしておくべき」)。以前は opt-in で、渡していたのは
+        補URLの夜間検索だけ。①探す (psa_resource_gate) は無指定=素通しだった。
+        しかも両者は psa_research_cache を共有し、再検索の判定が「日付が今日」だけなので、
+        **その日に①探すを先に押すと補URL側は再検索せず、素通しの候補がそのまま流れていた**。
+      None を渡せば従来どおり無効化できる (調査用。通常は使わない)。
     """
     import undetected_chromedriver as uc
 
@@ -920,14 +948,17 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=None):
                         cands = [img]
                         all_cands = [img]
                         via = "画像検索"
-                # 補URL用フィルタ(opt-in): 送料込み + 個人セラー評価件数≥N に絞る(詳細訪問=遅い)。
-                # best も絞り込み後の最安(送料込み+評価OK)にする=価格判定も実仕入可の値になる。
+                # ★候補を確定する所で「仕入れるに値するか」を通す (2026-09-04)。
+                #   今そのまま買える(オークション/売り切れでない) + 送料込み + 個人は評価件数≥N。
+                #   **入口(①探す / 補URL夜間検索)を問わず必ず掛かる**。呼出側の引数まかせに
+                #   すると、渡し忘れた入口から素通りしたものが共有キャッシュに焼かれる。
+                # best も絞り込み後の最安にする = 価格判定も「実際に買える値段」になる。
                 if freeship_min_reviews is not None and cands:
                     _before = len(cands)
                     cands = _filter_candidates_supply(drv, cands, min_reviews=freeship_min_reviews)
                     best = cands[0] if cands else None
                     if _before != len(cands):
-                        via += f"+送料込み/評価≥{freeship_min_reviews}({_before}→{len(cands)})"
+                        via += f"+買える/送料込み/評価≥{freeship_min_reviews}({_before}→{len(cands)})"
                 # ★2026-08-01: 厳密一致(番号必須)が0件のときだけ、**名前一致のみ**の候補を
                 #   別枠で拾う。メルカリは番号を書かない出品が多く、そのままだと在庫が
                 #   実在しても「候補なし」になるため。番号未確認なので best/価格判定には

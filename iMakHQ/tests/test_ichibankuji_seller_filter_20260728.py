@@ -24,8 +24,12 @@ class _Drv:
         self.page_source = self.pages.get(url, "")
 
 
-def _page(cond="新品、未使用", ship="送料込み", reviews=None):
+def _page(cond="新品、未使用", ship="送料込み", reviews=None, buyable=True):
+    # ★ 2026-09-04: 候補は「今そのまま買える」ことが必須になった。
+    #   通常出品のページには checkout-button があるので、偽ページにも入れる
+    #   (オークションは bid-button、売り切れはどちらも無い)。
     s = f"商品の状態 {cond} 配送料の負担 {ship}"
+    s += ' data-testid="checkout-button"' if buyable else ' data-testid="bid-button"'
     if reviews is not None:
         s += f" {reviews}件のレビュー"
     return s
