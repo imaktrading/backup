@@ -66,3 +66,32 @@ def test_psa_paths_are_covered():
             (("iMakTCG", "check_csv.py"), "cost_issues")):
         s = _io.open(os.path.join(_ROOT, *rel), encoding="utf-8").read()
         assert need in s, rel[-1]
+
+def test_sold_restock_also_respects_the_cap():
+    """売れた物をもう一度出すのも『仕入れる』こと。新規と同じ基準にする。"""
+    s = _io.open(os.path.join(_ROOT, "iMakHQ", "tools", "sold_restock.py"),
+                 encoding="utf-8").read()
+    assert "cost_sanity" in s
+    i = s.index("price, profile = price_for(")
+    j = s.index("if not price:", i)
+    assert "_ng" in s[i:j], "上限を見ていない"
+    assert "補充しない" in s[i:j + 200]
+
+
+def test_every_way_of_sourcing_is_covered():
+    """仕入が発生する経路すべてに同じ上限が掛かっていること。
+
+    新規 (PSA / G-shock) / 再仕入れ / 売れた分の補充 / 補URL の4系統。
+    どれか1つ抜けると、そこから上限超が入ってくる。
+    """
+    checks = [
+        (("iMakTCG", "check_csv.py"), "cost_issues"),                 # PSA 新規
+        (("iMakHQ", "tools", "csv_auditor.py"), "cost_sanity_exclusions"),
+        (("iMakG-shock", "gshock_to_csv.py"), "cost_sanity"),         # G-shock 新規
+        (("iMakHQ", "tools", "psa_restock_build.py"), "_cost_sanity"),  # 再仕入れ生成
+        (("iMakHQ", "tools", "psa_resource_gate.py"), "cost_sanity"),   # 候補 + 補URL
+        (("iMakHQ", "tools", "sold_restock.py"), "cost_sanity"),      # 売れた分
+    ]
+    for rel, need in checks:
+        s = _io.open(os.path.join(_ROOT, *rel), encoding="utf-8").read()
+        assert need in s, "/".join(rel)

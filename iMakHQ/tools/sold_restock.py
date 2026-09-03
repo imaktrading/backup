@@ -316,12 +316,23 @@ def main():
             cost = _cost_from_row(row)
             stale = bool(cost)
         price, profile = price_for(cost, CATEGORY_FOR_PRICING.get(cat, "TCG(PSA10)"))
+        # ★2026-09-04: 仕入値の上限 (global.yaml cost_sanity) はここにも効かせる。
+        #   売れた物をもう一度出すのも「仕入れる」こと。新規と同じ基準にする。
+        try:
+            from pricing_engine import cost_sanity as _cs
+            _ng = _cs(int(float(cost))) if cost else None
+        except Exception:                                          # noqa: BLE001
+            _ng = None
 
         status, qty = ebay_status(fx, U, iid, tok)
         act = plan_action(status, qty)
         head = f"  [{cat}] row{n} {title}"
         if act in ("noop", "skip"):
             print(f"{head}\n     → {act} (eBay状態={status} qty={qty}) 触らない")
+            skipped += 1
+            continue
+        if _ng:
+            print(head + chr(10) + "     → " + _ng + " → 補充しない")
             skipped += 1
             continue
         if not price:
