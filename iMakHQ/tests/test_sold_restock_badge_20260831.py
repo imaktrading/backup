@@ -44,5 +44,6 @@ def test_button_is_registered_for_badge():
 def test_panel_counts_and_paints():
     assert "d['restock']=SR.count_workload()" in _SRC, "同じ subprocess で数えていない"
     assert '"sold_restock": sr_txt' in _SRC, "ヒントに出していない"
-    # ★2026-09-03: 押すかを自分で決める操作なので青にしない (件数はヒントに出す)
-    assert '"sold_restock": False' in _SRC
+    # ★2026-09-03 (後): 青 = **押さないと減らない残件がある**。
+    #   ユーザーは青いものしか押さないので、黒にすると永遠に押されない。
+    assert '"sold_restock": bool(sr.get("actionable") or sr.get("unknown"))' in _SRC

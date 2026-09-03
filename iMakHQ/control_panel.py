@@ -3684,41 +3684,39 @@ class ListingPanel:
                        "sold_restock": sr_txt,
                        "psa_gate": pg_txt, "restock_build": rb_txt, "restock_wb": rw_txt,
                        "hoju_status": hs_txt, "kuji_supply": kv_txt, "kuji_refresh": kr_txt}
-            # ★2026-08-16: **押すと何か出てくる時だけ青**。0件なら黒のまま
-            #   (「いつ押せばいいのか分からない」への答え。色 = 今やる価値があるか)。
-            # ★2026-09-03 ユーザー指摘「青いボタンが多くて、忙しい」。
-            #   青 = 「今これを押す」の合図なのに 17個が青になり得て、合図として死んでいた。
-            #   **探す系は夜間バッチが回すようになった**ので、青にしない。
-            #   人にしかできない **目視** と、その日にしか押せない **当日分** だけ青にする。
-            #   (夜が転んだ時は、目視の件数が0のままなので気づける)
-            act_kind = {"hoju_search": bool(s.get("can")),   # 🆕 当日分 = 出品直後に押す
-                        "ut_search": False,                  # 夜間バッチが回す
+            # ★青の意味 = **押さないと減らない残件がある** (2026-09-03 ユーザー確定)。
+            #   > 押さないと減らないのに黒文字だと、無意味
+            #   > 自動で消化されるのは、黒でいいけど
+            #   ユーザーは **青いものしか押さない**。黒にした箱は永久に押されないので、
+            #   件数をヒントに出しても意味がない = 機能を消したのと同じ。
+            #
+            #   黒にしてよいのは **夜間バッチが勝手に減らしてくれるものだけ**。
+            #   ただし夜が転んでいる日は減らないので、その日は青に戻す
+            #   (黒のままだと、自動が止まったことに誰も気づかず溜まり続ける)。
+            #   夜に回るのは探す系の4つだけ (tools/run_hoju_search.bat)。
+            _auto = bool(nightly.get("ok"))
+            act_kind = {
+                        # ── 夜間バッチが自動で減らす → 黒。夜が止まっている日だけ青
+                        "hoju_search": bool(s.get("can")) and not _auto,
+                        "ut_search": bool(_ut.get("search")) and not _auto,
+                        "ut_restock_search": bool(_ut.get("restock_search")) and not _auto,
+                        "kuji_search": bool((kj.get("search") or {}).get("can")) and not _auto,
+                        # ── ここから下は **人が押さないと永遠に減らない**。残件があれば青
                         "ut_confirm": bool(_ut.get("confirm")),
-                        "ut_restock_search": False,          # 夜間バッチが回す
                         "ut_restock_confirm": bool(_ut.get("restock_confirm")),
-                        # ③数量戻す は ②目視の続き (②を終えれば自然に押す)
-                        "ut_restore": False,
+                        "ut_restore": bool(_ut.get("restore")),
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
                         "newcand": bool(nc.get("show") or nc.get("auto")),
-                        # 夜間検索は自動で走る (2026-09-03 から run_kuji_night も夜間へ)
-                        "kuji_search": False,
                         "kuji_confirm": bool((kj.get("confirm") or {}).get("ready")),
-                        # ★2026-09-03: 取下げ / 棚 / 売れた分の補充 は青にしない。
-                        #   件数はヒントに出るが、押すかは日々の判断であって「今やれ」ではない。
-                        "cull_end": False,
-                        "shelf_evict": False,
-                        "sold_restock": False,
-                        # ★2026-09-01: 押したら今すぐ動く件数が1件でもある時だけ青。
-                        #   📊 補URL件数感 は **見るだけ**なので色を変えない (act_kind に入れない)。
-                        "psa_gate": bool(pg.get("actionable")),      # 目視あり
-                        "kuji_supply": bool(kv.get("can")),          # 目視あり
-                        # ★2026-09-03: 下は青にしない。
-                        #   ・②CSV / ③確認 は 目視の **続き**。目視を終えれば自然に押す
-                        #   ・取下げ / 棚 / 売れた分の補充 は **押すかを自分で決める**操作で、
-                        #     「今やれ」の合図ではない (件数はヒントに出る)
-                        "restock_build": False,
-                        "restock_wb": False,
-                        "kuji_refresh": False}
+                        "cull_end": bool(ce.get("remaining")),
+                        "shelf_evict": bool(se.get("picked")),
+                        "sold_restock": bool(sr.get("actionable") or sr.get("unknown")),
+                        "psa_gate": bool(pg.get("actionable")),
+                        "restock_build": bool(rb.get("actionable")),
+                        "restock_wb": bool(rw.get("actionable")),
+                        "kuji_supply": bool(kv.get("can")),
+                        "kuji_refresh": bool(kr.get("can"))}
+            # 📊 補URL件数感は **見るだけ** なので act_kind に入れない (色を変えない)
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。

@@ -65,8 +65,9 @@ def test_ut_buttons_show_counts():
     assert '"badge": "ut_search"' in _SRC
     assert '"badge": "ut_confirm"' in _SRC
     assert '"ut_search": ut_s_txt' in _SRC
-    # ★2026-09-03: 探す系は夜間バッチが回すので青にしない。目視だけ青。
-    assert '"ut_search": False' in _SRC
+    # ★2026-09-03 (後): 探す系は夜間バッチが減らすので黒。
+    #   ただし **夜が転んだ日は減らない**ので、その日は青に戻す。
+    assert '"ut_search": bool(_ut.get("search")) and not _auto' in _SRC
     assert '"ut_confirm": bool(_ut.get("confirm"))' in _SRC
 
 

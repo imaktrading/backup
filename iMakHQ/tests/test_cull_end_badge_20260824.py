@@ -112,9 +112,9 @@ def test_panel_counts_and_paints():
     src = _panel_src()
     assert "d['cull']=CE.count_workload()" in src, "同じ subprocess で数えていない"
     assert '"cull_end": ce_txt' in src, "ヒントに出していない"
-    # ★2026-09-03: 青は **人が目で見る作業** だけに絞った
-    #   (17個が青で合図として死んでいた)。件数はヒントに出す。
-    assert '"cull_end": False' in src, "青にしない指定が無い"
+    # ★2026-09-03 (後): 青 = **押さないと減らない残件がある**。
+    #   ユーザーは青いものしか押さないので、黒にすると永遠に押されない。
+    assert '"cull_end": bool(ce.get("remaining"))' in src, "残件があれば青、になっていない"
 
 
 @pytest.mark.parametrize("ce,blue", [

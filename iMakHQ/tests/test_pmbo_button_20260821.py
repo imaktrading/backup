@@ -194,8 +194,11 @@ def test_一番くじの件数を同じ集計で数える():
 
 def test_一番くじの夜間は自動が動いていれば黒():
     """★2026-09-03: 夜間検索は run_kuji_night.py が **毎晩** 回るようになったので、
-    もう朝に押す合図を出さない (青にしない)。"""
-    assert '"kuji_search": False' in SRC
+    自動が動いている限り朝に押す合図を出さない。
+
+    ただし **夜が止まった日は誰も減らさない**ので、その日は青に戻す
+    (黒のままだと自動が転んだことに気づけず、溜まり続ける)。"""
+    assert '"kuji_search": bool((kj.get("search") or {}).get("can")) and not _auto' in SRC
 
 
 def test_目視0件なら次に何をするか書く():
