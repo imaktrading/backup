@@ -57,3 +57,36 @@ def test_loose_candidates_drop_lots():
 def test_a_lot_only_result_yields_nothing():
     """まとめ売りしか無いなら候補ゼロ = 買えないので正しい。"""
     assert mp._variant_matches([LOT], "SV6A-067", HINT, "067/064") == []
+
+# ── どの商材から使っても同じか ──────────────────────────────
+def _cell(name, price, iid):
+    """メルカリ検索結果の item-cell を1つ作る (実機の形に合わせた最小版)。"""
+    return ('data-testid="item-cell"'
+            '<a href="/item/%s">'
+            '<div itemtype="ITEM_TYPE_MERCARI" '
+            'aria-label="%sの画像 %s円"></div></a>' % (iid, name, price))
+
+
+def test_the_search_parser_itself_drops_lots():
+    """PSA / 一番くじ / UT はどれもこの parser を通る = 1か所で全部に効く。
+
+    カテゴリごとに書くと、また片方だけ直る (SNKRDUNK の id 取得で実際に起きた)。
+    """
+    src = (_cell("PSA10 2枚 タッツー AR SV6a 067/064", "16,666", "m1")
+           + _cell("PSA10 タッツー AR SV6a 067/064", "17,000", "m2")
+           + _cell("一番くじ ワンピース A賞 シャンクス 2点セット", "9,800", "m3")
+           + _cell("一番くじ ワンピース A賞 シャンクス", "9,900", "m4")
+           + _cell("ユニクロ UT ワンピース Tシャツ 2枚セット L", "3,000", "m5"))
+    got = [i["name"] for i in mp.parse_mercari_items(src)]
+    assert got == ["PSA10 タッツー AR SV6a 067/064",
+                   "一番くじ ワンピース A賞 シャンクス"]
+
+
+def test_kuji_listings_are_single_prizes():
+    """一番くじの出品は A賞/B賞 等の単品なので、まとめ売りを落として良い。
+
+    実機確認 (2026-07-21 の入稿16行): すべて 'A Prize' 等の単品で、セット売りは0件。
+    ガチャのコンプ品はこの経路 (メルカリ検索) を使わない。
+    """
+    assert supply_lot_hint("一番くじ ワンピース A賞 シャンクス") is None
+    assert supply_lot_hint("一番くじ ワンピース A賞 シャンクス 2点セット") is not None

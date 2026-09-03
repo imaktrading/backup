@@ -529,38 +529,6 @@ _ALLOWED_ITEM_TYPES = ("ITEM_TYPE_MERCARI", "ITEM_TYPE_BEYOND")
 _AUCTION_MARKERS = ("オークション", "入札", "現在価格", "残り時間")
 
 
-def parse_mercari_items(src):
-    """検索結果HTMLを item-cell 単位で {type,name,price,href} に分解する純関数。
-
-    各 item-cell ブロック内の itemtype / aria-label('<名前>の画像 <価格>円') / href を
-    同一ブロックから取るので name·price·href が必ず対応する
-    (旧実装は names/prices/urls を別々の findall で取得→添字ズレで別カードの価格を拾う事故源。
-     2026-06-09 ユーザー指摘『2行目が違うカード』の構造的原因)。
-
-    通常出品のみ返す。①itemtype が _ALLOWED_ITEM_TYPES 以外を除外 ②cell内に _AUCTION_MARKERS が
-    あればオークションとして除外 (2026-06-09 ユーザー指摘『オークションは確定価格でなく仕入不可』)。
-    返り値は DOM順 (=価格昇順)。
-    """
-    items = []
-    for b in re.split(r'data-testid="item-cell"', src)[1:]:
-        it = re.search(r'itemtype="([A-Z_]+)"', b)
-        if not it or it.group(1) not in _ALLOWED_ITEM_TYPES:
-            continue
-        if any(mk in b for mk in _AUCTION_MARKERS):   # オークション cell を除外
-            continue
-        al = re.search(r'aria-label="(.+?)の画像\s*([\d,]+)円"', b)
-        if not al:
-            continue
-        hr = re.search(r'href="(/(?:item/m\w+|shops/product/\w+))"', b)
-        items.append({
-            "type": it.group(1),
-            "name": al.group(1).strip(),
-            "price": int(al.group(2).replace(",", "")),
-            "href": f"https://jp.mercari.com{hr.group(1)}" if hr else "",
-        })
-    return items
-
-
 def _is_lot(name):
     """その出品が「複数枚まとめ」と言っているか (2026-09-04)。
 
@@ -583,6 +551,45 @@ def _is_lot(name):
     except Exception:                                          # noqa: BLE001
         return False
     return bool(supply_lot_hint(name))
+
+
+def parse_mercari_items(src):
+    """検索結果HTMLを item-cell 単位で {type,name,price,href} に分解する純関数。
+
+    各 item-cell ブロック内の itemtype / aria-label('<名前>の画像 <価格>円') / href を
+    同一ブロックから取るので name·price·href が必ず対応する
+    (旧実装は names/prices/urls を別々の findall で取得→添字ズレで別カードの価格を拾う事故源。
+     2026-06-09 ユーザー指摘『2行目が違うカード』の構造的原因)。
+
+    通常出品のみ返す。①itemtype が _ALLOWED_ITEM_TYPES 以外を除外 ②cell内に _AUCTION_MARKERS が
+    あればオークションとして除外 (2026-06-09 ユーザー指摘『オークションは確定価格でなく仕入不可』)。
+    返り値は DOM順 (=価格昇順)。
+    """
+    items = []
+    for b in re.split(r'data-testid="item-cell"', src)[1:]:
+        it = re.search(r'itemtype="([A-Z_]+)"', b)
+        if not it or it.group(1) not in _ALLOWED_ITEM_TYPES:
+            continue
+        if any(mk in b for mk in _AUCTION_MARKERS):   # オークション cell を除外
+            continue
+        al = re.search(r'aria-label="(.+?)の画像\s*([\d,]+)円"', b)
+        if not al:
+            continue
+        # ★2026-09-04: まとめ売り/連番は **ここで落とす** = PSA / 一番くじ / UT の
+        #   どこから使っても同じになる (カテゴリごとに書くと、また片方だけ直る)。
+        #   1枚だけ買えない出品は、どの商材でも仕入元にならない。
+        #   実機で確認: 一番くじの出品は A賞/B賞 等の **単品**で、セット売りは無い
+        #   (2026-07-21 の入稿16行すべて単品)。ガチャのコンプ品はこの経路を使わない。
+        if _is_lot(al.group(1)):
+            continue
+        hr = re.search(r'href="(/(?:item/m\w+|shops/product/\w+))"', b)
+        items.append({
+            "type": it.group(1),
+            "name": al.group(1).strip(),
+            "price": int(al.group(2).replace(",", "")),
+            "href": f"https://jp.mercari.com{hr.group(1)}" if hr else "",
+        })
+    return items
 
 
 def _variant_matches(items, card_no, variant_hint=None, market_no=None):
