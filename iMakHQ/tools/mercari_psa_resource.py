@@ -561,6 +561,30 @@ def parse_mercari_items(src):
     return items
 
 
+def _is_lot(name):
+    """その出品が「複数枚まとめ」と言っているか (2026-09-04)。
+
+    ★まとめ売り・連番は **1枚だけ買えない**。買うと全部付いてくるので仕入値が
+      想定と違い、出品は1つしか作れない。出品する対象側では 2026-08-23 から
+      弾いていたが、**仕入候補側には当てていなかった**。
+      実測: 人が『違う』と外した候補249件のうち **34件がこれ**。機械で判るものを
+      毎回 人に見せていた。
+    判定は listing_common.supply_lot_hint の1か所 (規約の二重実装を避ける)。
+    読めない環境では False = 落とさない (候補を消す方に倒さない)。
+    """
+    try:
+        import os as _os
+        import sys as _sys
+        _api = _os.path.join(_os.path.dirname(_os.path.dirname(
+            _os.path.dirname(_os.path.abspath(__file__)))), "iMakeBayAPI")
+        if _api not in _sys.path:
+            _sys.path.insert(0, _api)
+        from listing_common import supply_lot_hint
+    except Exception:                                          # noqa: BLE001
+        return False
+    return bool(supply_lot_hint(name))
+
+
 def _variant_matches(items, card_no, variant_hint=None, market_no=None):
     """価格昇順 items から PSA10 かつ対象カード番号一致の **正変種** 候補を昇順 list で返す(純関数)。
 
@@ -573,6 +597,7 @@ def _variant_matches(items, card_no, variant_hint=None, market_no=None):
     """
     matches = [it for it in items  # DOM順 = 価格昇順
                if it["price"] > 0 and is_psa10(it["name"])
+               and not _is_lot(it["name"])          # ★まとめ売り/連番は1枚だけ買えない
                and _name_matches_card(it["name"], card_no, market_no)]
     if not matches:
         return []
@@ -684,6 +709,7 @@ def pick_psa10_loose_candidates(items, name_jp, limit=6):
     return [(it["price"], it["href"], it["name"])
             for it in items
             if it.get("price", 0) > 0 and is_psa10(it.get("name") or "")
+            and not _is_lot(it.get("name") or "")   # ★まとめ売り/連番は1枚だけ買えない
             and key in _norm_name(it.get("name"))][:limit]
 
 

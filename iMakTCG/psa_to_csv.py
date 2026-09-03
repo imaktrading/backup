@@ -1345,30 +1345,10 @@ def supplier_grade_hint(supplier_title):
     return m2.group(1).upper() if m2 else None
 
 
-# 仕入元が「1枚ではない」と書いている表現 (2026-08-23 ユーザー確認事項)。
-#   実データ 1,777行に当てて調整済。まとめ売り・連番スラブは、1枚だけ買うことができない
-#   (買うと全部付いてくる = 仕入値が想定と違う / 1つの出品しか作れないのに複数枚を抱える)。
-_SUPPLY_LOT = re.compile(
-    r"(まとめ売り|まとめて|セット売り|連番"
-    r"|(?<![0-9])([2-9]|[1-9][0-9])\s*枚)")
-# 「世界に4枚」「現存3枚」等は **希少さの自慢**であって出品枚数ではない。
-#   実データで唯一の誤検出がこれ (【8/8時点世界に4枚！】【PSA10】ロロノア・ゾロ)。
-_SUPPLY_LOT_NOT = re.compile(r"(世界|現存|全国|残り|人気|限定|中)[^、。]{0,8}$")
-
-
-def supply_lot_hint(supplier_title):
-    """仕入元タイトルが「複数枚まとめ」と言っているか (純関数)。
-
-    戻り: 根拠になった語 ('連番' '3枚' 等) / 単品と読めるなら None。
-    """
-    if not supplier_title:
-        return None
-    t = str(supplier_title)
-    for m in _SUPPLY_LOT.finditer(t):
-        if _SUPPLY_LOT_NOT.search(t[:m.start()]):
-            continue                      # 「世界に4枚」= 枚数の自慢。出品枚数ではない
-        return m.group(0)
-    return None
+# 仕入元が「1枚ではない」と書いている表現 → listing_common に移設 (2026-09-04)。
+#   仕入候補側 (mercari_psa_resource) からも同じ判定を使うため。
+#   名前はここでも使えるようにしておく (既存の呼出・テストがそのまま動く)。
+from listing_common import supply_lot_hint          # noqa: E402,F401
 
 
 def multi_card_certs(title_map):
