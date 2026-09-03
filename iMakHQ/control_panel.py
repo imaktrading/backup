@@ -1458,6 +1458,34 @@ SCRIPTS = [
         "skip_postprocess": True,
     },
     {
+        # ★2026-09-03: Tシャツの在庫切れ再仕入れ。PSA の「🃏 PSA再仕入れ照合」と同じ形。
+        #   実機で確認したとおり、売り切れの Tシャツも eBay 上は Active・数量0 のままなので
+        #   **数量を戻すだけ**でよい (新規出品ではない。当初 新規出品だと考えたのは誤り)。
+        "category": None, "type": "utility",
+        "label": "🛒 UT 在庫切れ再仕入れ (探す)",
+        "tip": "売り切れた UT の仕入元を探して溜めるだけ。シートには書かない。"
+               "新品未使用・送料込み・JPサイズ一致だけを候補にする。",
+        "badge": "ut_restock_search",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ut_hoju_fill.py", "restock-search"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "🛒 UT 在庫切れ再仕入れ (目視→戻す)",
+        "tip": "溜めた候補を現物と見比べて、同じ物だけ仕入元に採用する。"
+               "採用すると 仕入元URL更新 + 売り切れ解除 + 仕入値 seed まで行う。"
+               "eBay の数量を戻すのは RESTOCK と同じ口。",
+        "badge": "ut_restock_confirm",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ut_hoju_fill.py", "restock-confirm"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
         # ★2026-08-13: 補URL確証で「違う(別商品)」「要調査」と捨てた候補を、**新規出品の種**に戻す。
         #   「違う」は *その出品のカードでない* としか言っておらず、**別の実在カードの仕入元**である
         #   ことが多い (= 出品していないカードの供給を毎日捨てていた)。
@@ -3049,7 +3077,7 @@ class ListingPanel:
                 #   ここは **出品した後**の補URL確保だけ (ユーザー指摘)。
                 if not _idxs:
                     continue
-                box = ttk.LabelFrame(scroll_frame, text=f"📦 {_name} — 補URL確保 (出品した後の作業)",
+                box = ttk.LabelFrame(scroll_frame, text=f"📦 {_name} — 出品した後の作業 (補URL / 在庫切れ再仕入れ)",
                                      padding=4)
                 box.pack(fill="x", pady=(8, 0))
                 _boxed_idxs.update(_idxs)
@@ -3622,6 +3650,8 @@ class ListingPanel:
                     ut_c_txt += "\n※先に 夜間検索 を押す"
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
+                       "ut_restock_search": ut_rs_txt,
+                       "ut_restock_confirm": ut_rc_txt,
                        "kuji_search": k_s, "kuji_confirm": k_c, "cull_end": ce_txt,
                        "shelf_evict": se_txt, "shelf_evict_label": se_label,
                        "sold_restock": sr_txt,
@@ -3632,6 +3662,8 @@ class ListingPanel:
             act_kind = {"hoju_search": bool(s.get("can")),
                         "ut_search": bool(_ut.get("search")),
                         "ut_confirm": bool(_ut.get("confirm")),
+                        "ut_restock_search": bool(_ut.get("restock_search")),
+                        "ut_restock_confirm": bool(_ut.get("restock_confirm")),
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
                         "newcand": bool(nc.get("show") or nc.get("auto")),
                         # 夜間検索は自動で走るので、押す必要がある時だけ青

@@ -124,3 +124,33 @@ def test_count_workload_does_not_scrape():
     body = src[i:]
     assert "_new_driver" not in body
     assert "SEARCH_URL" not in body
+
+
+def test_restock_targets_are_the_sold_out_rows():
+    """再仕入れは **売り切れた行**、補URLは **売れていない行**。混ぜない。"""
+    import sys as _s
+    rows = [["", "itemID", "タイトル", "売切", "", "", "", "", "", "", "", "", "", "", "", "",
+             "", "カテゴリ"],
+            ["", "111", "推しの子 UT B小町 XXL", "",  "", "", "", "", "", "", "", "", "",
+             "", "", "", "", "Tシャツ"],
+            ["", "222", "怪獣8号 UT XL",        "○", "", "", "", "", "", "", "", "", "",
+             "", "", "", "", "Tシャツ"]]
+    live = U.select_targets(rows, sold_out=False)
+    sold = U.select_targets(rows, sold_out=True)
+    assert [t["itemID"] for t in live] == ["111"]
+    assert [t["itemID"] for t in sold] == ["222"]
+
+
+def test_restock_uses_its_own_cache():
+    """補URL と 再仕入れ で候補が混ざらない。"""
+    assert U.CACHE_PATH != U.RESTOCK_CACHE_PATH
+    assert U._cache_path(False) == U.CACHE_PATH
+    assert U._cache_path(True) == U.RESTOCK_CACHE_PATH
+
+
+def test_restock_writes_only_after_the_visual_check():
+    src = open(os.path.join(_HQ_TOOLS, "ut_hoju_fill.py"), encoding="utf-8").read()
+    i = src.index("def restock_confirm(")
+    j = src.index("restock_reactivate_master")
+    assert i < j
+    assert "prc.restock_confirm(items)" in src[i:j]

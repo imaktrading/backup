@@ -51,7 +51,7 @@ def test_panel_boxes_are_per_product_line_in_work_order():
     従来は 工程ごと (発見 / 出品前チェック / 補URL) の箱で、1つの箱に PSA と
     一番くじと UT が混ざり、自分の商材の次の一手が読み取れなかった。
     """
-    assert "📦 {_name} — 補URL確保 (出品した後の作業)" in _SRC
+    assert "📦 {_name} — 出品した後の作業 (補URL / 在庫切れ再仕入れ)" in _SRC
     # 作業順 (当日分 → 夜間検索 → 昼の目視) で並べている
     i = _SRC.index("_STEP = [")
     assert '"当日分", "夜間検索", "昼の目視"' in _SRC[i:i + 120]
