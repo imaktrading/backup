@@ -805,7 +805,7 @@ values:
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg
-    rows: 1481
+    rows: 1502
     jp_set: "プロモーションカード"
   - value: "Premium Booster One Piece The Best"
     category: one_piece_tcg
@@ -1128,6 +1128,10 @@ values:
     category: dragonball_scg
     rows: 186
     jp_set: "BOOSTER PACK -SAIYAN’S PRIDE- [FB08]"
+  - value: "Brightness of Hope"
+    category: dragonball_scg
+    rows: 125
+    jp_set: "BOOSTER PACK BRIGHTNESS OF HOPE [FB11]"
   - value: "Starter Deck EX The Phase of Evolution"
     category: dragonball_scg
     rows: 60

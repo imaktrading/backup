@@ -118,13 +118,25 @@ def check_pg(conn, pg: str) -> dict:
             "missing": missing, "name_ng": name_ng}
 
 
+def pg_of(product_id: str) -> str:
+    """product_id → 公式の弾コード (`pg`).
+
+    ★**最後の `-` より前が弾コード**。頭だけを取ると古い弾を落とす (2026-09-03):
+        BW1-Bb-001 → `BW1-Bb`   (`BW1` では公式が0件を返す)
+        DPt1-B-001 → `DPt1-B`   L1-Bhg-001 → `L1-Bhg`   M-P-001 → `M-P`
+    公式の画像フォルダ名 (`.../large/BW1-Bb/027101_P_KURUMIRU.jpg`) と一致する。
+    """
+    pid = (product_id or "").split("_")[0]
+    return pid.rsplit("-", 1)[0] if "-" in pid else ""
+
+
 def all_pgs(conn) -> list[str]:
-    """catalog に在る弾コード (product_id の頭)。数の多い順."""
+    """catalog に在る弾コード。数の多い順."""
     c = Counter()
     for (pid,) in conn.execute("SELECT product_id FROM products WHERE category=?", (CAT,)):
-        m = re.match(r"^([A-Za-z0-9]+)-", pid or "")
-        if m and m.group(1) not in ("cardID",):
-            c[m.group(1)] += 1
+        pg = pg_of(pid)
+        if pg and pg != "cardID":
+            c[pg] += 1
     return [k for k, _ in c.most_common()]
 
 

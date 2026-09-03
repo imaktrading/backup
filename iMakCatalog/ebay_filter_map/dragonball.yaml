@@ -235,6 +235,13 @@ set:
   - source: "選べるプロモーションカード"
     ebay: "Selectable Promotion Card"
     note: "2026-09-02 自製 (プロモ商品。元の弾名が入っていたのを是正)"
+  # 2026-09-03: 公式突合で FB11 が丸ごと未取り込みと分かり、scraper で 125枚を投入した分。
+  #   eBay の Dragon Ball Super Card Game 一覧は旧作 (2017-2022) だけで Fusion World は無い
+  #   → 規約② 英語の弾名を自製 (既存 FB01〜FB10 と同じ書き方)。
+  - source: "BOOSTER PACK BRIGHTNESS OF HOPE [FB11]"
+    ebay: "Brightness of Hope"
+    note: "2026-09-03 自製 (eBay の一覧に Fusion World は無い)"
+
 set_code:
   # ----- Booster Pack (Fusion Booster) -----
   - source: FB01
