@@ -111,20 +111,33 @@ def check_images(_):
         db.close()
 
 
-def check_audit(_):
-    """毎日の監査を **全カテゴリ**で走らせ、0 で維持する項目が 0 か見る."""
+def _audit_counters(cat: str) -> dict:
     out = subprocess.run([sys.executable, str(ROOT / "tools" / "set_name_integrity_audit.py"),
-                          "--cat", "all"], capture_output=True, text=True,
+                          "--cat", cat], capture_output=True, text=True,
                          encoding="utf-8", errors="replace").stdout
     m = re.search(r"COMPLETE: (.+?) ===", out)
-    if not m:
+    return dict(p.split("=", 1) for p in m.group(1).split() if "=" in p) if m else {}
+
+
+def check_audit(_):
+    """監査を **出品する4カテゴリ**で走らせ、0 で維持する項目が 0 か見る.
+
+    ★遊戯王は対象外 (2026-09-03 ユーザー確定: 出品していないので直さない)。
+      数字は出すが赤にしない。CLAUDE.md「遊戯王は直しの対象外」。
+    """
+    kv = {}
+    for cat in TCG:
+        for k, v in _audit_counters(cat).items():
+            kv[k] = str(int(kv.get(k, 0)) + int(v)) if v.isdigit() else v
+    if not kv:
         return False, "監査が完走しなかった"
-    kv = dict(p.split("=", 1) for p in m.group(1).split() if "=" in p)
     watched = ("era", "code_value_mismatch", "stage_on_non_pokemon", "card_type_unknown",
                "const_violation", "card_number_mismatch", "type_forbidden",
                "rarity_raw_stamped", "rarity_map_drift", "rarity_unmapped", "not_a_rarity")
     ng = {k: kv.get(k) for k in watched if kv.get(k) not in ("0", None)}
-    return (not ng), ("見張り項目 全 0" if not ng else f"0でない: {ng}")
+    ygo = _audit_counters("yugioh_tcg").get("not_a_rarity", "?")
+    tail = f" / 遊戯王 (対象外) not_a_rarity={ygo}"
+    return (not ng), (("見張り項目 全 0" if not ng else f"0でない: {ng}") + tail)
 
 
 def check_resolver(_):
@@ -172,7 +185,7 @@ CHECKS = [
     ("1セット1値", check_one_set_one_value),
     ("型のキー名", check_type_key),
     ("画像の終端マーク", check_images),
-    ("監査 (全カテゴリ)", check_audit),
+    ("監査 (出品4カテゴリ)", check_audit),
     ("cert → KEY (入口経由)", check_resolver),
     ("回帰テスト", check_tests),
     ("公式との突合", check_official_drift),
