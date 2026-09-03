@@ -305,3 +305,20 @@ def load_anthropic_key(api_key_file):
             return f.read().strip()
     except FileNotFoundError:
         return None
+
+
+def cost_issues(cost_jpy, live_price_usd=None):
+    """仕入値がありえない額なら [("ERROR", 理由)]、問題なければ []。
+
+    ★2026-09-03 新設。全カテゴリの check_csv.py がこれを呼ぶ (基準は1か所)。
+      実害: ダミー価格 ¥1,111,111 を拾って $11,707.98 の行を作り、
+      チェッカーは「✅ 問題なし」と表示した。表示が嘘だったのが一番まずい。
+    """
+    import os as _os
+    import sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    if _here not in _sys.path:
+        _sys.path.insert(0, _here)
+    from pricing_engine import cost_sanity
+    ng = cost_sanity(cost_jpy, live_price_usd=live_price_usd)
+    return [("ERROR", ng)] if ng else []

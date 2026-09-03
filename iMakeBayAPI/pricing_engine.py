@@ -563,3 +563,66 @@ if __name__ == "__main__":
         print(f"  → 価格 ${r['price']} 利益¥{r['profit_jpy']:.0f} 利益率{r['profit_target']*100:.0f}% status={r['status']}")
         if r['alert_msg']:
             print(f"  ALERT: {r['alert_msg']}")
+
+
+# ===================================================================
+# 仕入値の妥当性 (2026-09-03 ユーザー指示で新設)
+# ===================================================================
+# ★入れた理由 (実害): 仕入元 (メルカリ) の出品者が付けたダミー価格 ¥1,111,111 を
+#   そのまま拾い、cost-plus で **$11,707.98** の行を作った。現在価格 $83.98 の139倍。
+#   CSV監査くんも check_csv も「✅ 問題なし」で通した = 値段を見る門が1つも無かった
+#   (2026-08-13 に相場ゲートを止めて以来)。
+#
+# ここは **純関数**。カテゴリで分岐しない (値だけで決める)。しきい値は global.yaml。
+def cost_sanity(cost_jpy, live_price_usd=None, fx_jpy_per_usd=None):
+    """仕入値が現実的か。おかしければ **理由(str)**、問題なければ None を返す。
+
+    cost_jpy       : 仕入値 (円)
+    live_price_usd : 分かる時だけ渡す。再仕入れ (Revise) で現在の出品価格。
+                     新価格が現在価格の何倍にもなる = 元データが壊れている合図
+    fx_jpy_per_usd : live との比較に使う為替。None なら profit_params の値
+
+    ★None (仕入値なし) は **ここでは異常にしない**。値が無い行はそもそも価格が
+      出ないので、別の経路 (fail-closed) で落ちる。ここで嘘の理由を付けない。
+    """
+    import config_loader
+    cfg = config_loader.get_cost_sanity()
+    if not cfg.get("enabled", True) or cost_jpy is None:
+        return None
+    try:
+        c = float(cost_jpy)
+    except (TypeError, ValueError):
+        return "仕入値が数値でない: %r" % (cost_jpy,)
+
+    lo, hi = float(cfg["min_jpy"]), float(cfg["max_jpy"])
+    if c < lo:
+        return "仕入値が安すぎる ¥%s (下限 ¥%s = 取得失敗を0で埋めた等)" % (
+            format(int(c), ","), format(int(lo), ","))
+    if c > hi:
+        return "仕入値が高すぎる ¥%s (上限 ¥%s = ダミー価格か桁誤り)" % (
+            format(int(c), ","), format(int(hi), ","))
+
+    # 同じ数字の並び (1111111 / 999999 / 888888) は出品者が付けた「売る気のない」値段
+    n = int(cfg["repdigit_len"])
+    digits = str(int(c))
+    run = 1
+    for a, b in zip(digits, digits[1:]):
+        run = run + 1 if a == b else 1
+        if run >= n:
+            return "仕入値がダミー数字 ¥%s (同じ数字が%s桁以上)" % (
+                format(int(c), ","), n)
+
+    if live_price_usd:
+        if fx_jpy_per_usd is None:
+            try:
+                from profit_params import get_exchange_rate
+                fx_jpy_per_usd = get_exchange_rate()
+            except Exception:                                  # noqa: BLE001
+                fx_jpy_per_usd = None
+        if fx_jpy_per_usd:
+            new_usd = compute_listing_price(c, 0, "TCG(PSA10)").get("price")
+            ratio = float(cfg["max_ratio_vs_live"])
+            if new_usd and new_usd > float(live_price_usd) * ratio:
+                return "現在価格 $%s の %.1f倍 ($%s) になる (上限 %s倍)" % (
+                    live_price_usd, new_usd / float(live_price_usd), new_usd, ratio)
+    return None

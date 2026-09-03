@@ -1054,6 +1054,14 @@ def main(csv_path: str | None = None):
 
         # 1) 内部バリデーション
         issues = validate_row(row, i)
+        # ★ 2026-09-03: 仕入値がありえない額なら ERROR にする。
+        #   実害: ダミー価格 ¥1,111,111 を拾って $11,707.98 の行を作り、
+        #   ここが「✅ 問題なし」と表示した。基準は check_csv_core に1か所。
+        try:
+            from check_csv_core import cost_issues as _ci
+            issues = issues + _ci(cost_jpy)
+        except ImportError:
+            pass
         all_issues.append(issues)
 
         for sev, msg in issues:

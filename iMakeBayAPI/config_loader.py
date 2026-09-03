@@ -127,6 +127,22 @@ def is_ai_review_enabled() -> bool:
     return bool(load().get("ai_review", {}).get("enabled", False))
 
 
+def get_cost_sanity() -> Dict[str, Any]:
+    """仕入値の妥当性しきい値 (global.yaml cost_sanity)。
+
+    ★yaml に節が無い環境でも**止まる側**に倒す (既定 enabled=True + 既定値入り)。
+      値段の門は fail-closed。設定が読めないから素通し、では 2026-09-03 の
+      ¥1,111,111 → $11,707 の再発になる。
+    """
+    d = dict(load().get("cost_sanity") or {})
+    d.setdefault("enabled", True)
+    d.setdefault("max_jpy", 300000)
+    d.setdefault("min_jpy", 100)
+    d.setdefault("repdigit_len", 6)
+    d.setdefault("max_ratio_vs_live", 5.0)
+    return d
+
+
 def get_v5_pricing() -> Dict[str, Any]:
     """V5 価格決定設定 (= 35% markup + IFS 利益率 + G-SHOCK 国別 FVF + 国別 fees)."""
     return load().get("v5_pricing", {})

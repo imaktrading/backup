@@ -25,6 +25,22 @@ _CSV_OUT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__f
 _DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 
 
+def _cost_sanity(cost_jpy, live_price_usd=None):
+    """仕入値の妥当性 (pricing_engine が唯一の判定。ここには基準を書かない)。
+
+    読めない環境でも **止まる側**に倒す = 判定できない時は通さない、ではなく
+    「判定器が無い」を理由に素通しにしない。import 失敗はそのまま上げる。
+    """
+    import os as _os
+    import sys as _sys
+    _api = _os.path.join(_os.path.dirname(_os.path.dirname(
+        _os.path.dirname(_os.path.abspath(__file__)))), "iMakeBayAPI")
+    if _api not in _sys.path:
+        _sys.path.insert(0, _api)
+    from pricing_engine import cost_sanity
+    return cost_sanity(cost_jpy, live_price_usd=live_price_usd)
+
+
 def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key):
     """RESTOCK確定 rows → psa_to_csv RESTOCK入力 dict。純関数。
 
@@ -51,9 +67,22 @@ def build_restock_input(restock_rows, itemid_to_cert, itemid_to_key):
             forced[cert] = key
         if r.get("cost"):
             try:
-                cost[cert] = float(r["cost"])
+                _c = float(r["cost"])
             except (TypeError, ValueError):
-                pass
+                _c = None
+            if _c is not None:
+                # ★2026-09-03: 仕入値がありえない額なら **生成に回さない**。
+                #   実害: 仕入元のダミー価格 ¥1,111,111 をそのまま拾い、cost-plus で
+                #   $11,707.98 の Revise 行を作った (現在価格 $83.98 の139倍)。
+                #   判定は pricing_engine.cost_sanity (全カテゴリ共通・しきい値は global.yaml)。
+                _ng = _cost_sanity(_c)
+                if _ng:
+                    certs.pop()
+                    seen.discard(cert)
+                    forced.pop(cert, None)
+                    skipped.append((iid, "%s→生成不可" % _ng))
+                    continue
+                cost[cert] = _c
         if r.get("supply_url"):
             supply[cert] = r["supply_url"]
     return {"certs": certs, "forced": forced, "cost": cost, "supply_url": supply}, skipped

@@ -1109,6 +1109,14 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     for idx in dc["price_exclude"]:          # 価格 NO-GO を除外に合流
         if idx not in exclude_idx:
             exclude_idx.append(idx)
+    # ★仕入値の門は **相場の on/off と無関係に常に走る** (2026-09-03)。
+    #   API を叩かないので degrade しない。ここを deep 側に置くと、相場を
+    #   止めた日に値段の門まで一緒に消える (それが ¥1,111,111 事故の原因)。
+    cost_bad = cost_sanity_exclusions(mod, headers, rows, project, csv_path)
+    for idx, sku, why in cost_bad:
+        print(f"  ❌ [行{idx}] {sku}: {why} → 出品しない")
+        if idx not in exclude_idx:
+            exclude_idx.append(idx)
     exclude_idx.sort()
     seo_notes = seo_notes + dc["seo"]
     # タイトル SEO 監査 (PDF上位語の活用度。generic でも C:Brand で商品判定して適用)
@@ -2239,6 +2247,46 @@ def ebay_aspect_findings(headers, rows, project):
         if capped >= 30:
             break
     return notes
+
+
+def cost_sanity_exclusions(mod, headers, rows, project, csv_path):
+    """仕入値がありえない行を **出品しない** ものとして拾う。API を一切叩かない。
+
+    ★2026-09-03 新設 (ユーザー指示)。実害: 仕入元のダミー価格 ¥1,111,111 を
+      そのまま拾い cost-plus で **$11,707.98** の行を作った (現在価格 $83.98 の139倍)。
+      監査くんも check_csv も「✅ 問題なし」で通した = 値段を見る門が無かった
+      (2026-08-13 に相場ゲートを止めて以来)。
+
+    ★市場ゲート (deep_checks) とは **別に、常に走る**。相場の on/off に紐づけない。
+      相場を止めた日に値段の門まで一緒に消えたのが、そもそもの原因。
+
+    返り: [(1based行, sku, 理由)]
+    """
+    out = []
+    if mod is None:
+        return out
+    cost_key = (CATEGORY_MAP.get(project) or {}).get("cost_key")
+    if not cost_key:
+        return out
+    try:
+        cost_data = mod.load_cost_data(csv_path) or {}
+    except Exception:                                          # noqa: BLE001
+        cost_data = {}
+    if not cost_data:
+        return out
+    import os as _os
+    import sys as _sys
+    _api = _os.path.join(_os.path.dirname(_os.path.dirname(
+        _os.path.dirname(_os.path.abspath(__file__)))), "iMakeBayAPI")
+    if _api not in _sys.path:
+        _sys.path.insert(0, _api)
+    from pricing_engine import cost_sanity
+    for i, row in enumerate(rows):
+        key = mod.get_col(row, cost_key)
+        ng = cost_sanity(cost_data.get(key))
+        if ng:
+            out.append((i + 1, key or "?", ng))
+    return out
 
 
 def deep_checks(mod, headers, rows, all_vr, project, csv_path):
