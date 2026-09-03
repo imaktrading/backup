@@ -1754,6 +1754,7 @@ def main():
     rows = [headers]
     errors = []
     missing_models = []  # catalog 未登録 (要 Catalog Claude 拡充依頼)
+    skipped_cost = []    # 仕入値が上限超で出さなかった分 (2026-09-04)
 
     # ホワイトリスト検証（Pythonマッピングのバグ検出用、Claude無いのでリトライ不可）
     # 2026-05-05 専門化: 共有 whitelist_registry から gshock_whitelist (専用) に切替
@@ -1802,6 +1803,20 @@ def main():
                 _ps = re.sub(r"[^0-9]", "", price_jpy_str)
                 if _ps:
                     cost_jpy = int(_ps)
+            # ★2026-09-04 ユーザー指示「PSA と G-shock に7万のリミットを入れて」。
+            #   仕入値が上限を超える行は **生成しない** (作ってから監査で外すより早い)。
+            #   G-shock は cost の sidecar を書いていないので、後段の門 (CSV監査くん /
+            #   check_csv) は cost を読めず **効いていなかった**。ここが唯一効く場所。
+            #   基準は pricing_engine.cost_sanity (全カテゴリ共通・しきい値は global.yaml)。
+            try:
+                from pricing_engine import cost_sanity as _cs
+                _ng = _cs(cost_jpy)
+            except Exception:                                  # noqa: BLE001
+                _ng = None
+            if _ng:
+                print(f"    🚫 {_ng} → 出品しない ({model})")
+                skipped_cost.append((model, cost_jpy, _ng))
+                continue
             # eBay 中央値取得 (pricing_engine ALERT 判定 + V6 dispatcher で使用)
             ebay_median = 0.0
             if _fetch_ebay_median is not None:
@@ -1958,6 +1973,13 @@ def main():
         print(f"  {s} ({len(t)}字) {t}")
 
     print("\n⚠️ 要手動確認：Case Color / Band Color / Department / Style")
+
+    # 仕入値が上限を超えて出さなかった分 (2026-09-04)。黙って減らさず、必ず出す。
+    if skipped_cost:
+        print("")
+        print("🚫 仕入値が上限超で出品しなかった: %d件" % len(skipped_cost))
+        for _m, _c, _why in skipped_cost[:10]:
+            print(f"   {_m}  ¥{_c:,}  ({_why})")
 
     # Catalog 未登録モデル一覧 + 共有通知ファイル追記 (2026-05-08)
     if missing_models:
