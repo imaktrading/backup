@@ -1370,6 +1370,30 @@ def _append_new_listing_rows(rows):
         return 0
 
 
+def split_diffs_by_number_match(diffs, restock_cands):
+    """目視で外した候補を「検索の事故」と「絵柄違い」に分ける。純関数。
+
+    ★2026-09-03: 「違う」を全部 **検索の精度事故** として 🚨 を出していたが、
+    候補は基本 **カード番号で引いている**ので、番号が合っている候補を人が外すのは
+    **同じ番号の別の絵柄**を弾いただけ = 目視ゲートが正しく働いた形。直すものが無い。
+    実測 2026-09-03: 10件全部がこれで、毎回「今すぐ直せ」と出ていた (直す先が無い)。
+
+    本当に直すべきなのは **番号で引けなかった候補** (`number_ok=False` = 名前一致だけで
+    積んだ枠)。ここで別カードを掴んだなら検索側の問題。
+
+    戻り: (検索の事故[diff...], 絵柄違い[diff...])
+    """
+    bug, art = [], []
+    for d in diffs:
+        i = d.get("idx")
+        rc = restock_cands[i] if isinstance(i, int) and 0 <= i < len(restock_cands) else {}
+        url = (d.get("url") or "").strip()
+        cand = next((c for c in (rc.get("candidates") or [])
+                     if (c.get("url") or "").strip() == url), {})
+        (bug if cand.get("number_ok") is False else art).append(d)
+    return bug, art
+
+
 def _alert_restock_diffs(diffs, skip, restock_cands, today):
     """「違う(別カード)」=検索の精度事故。**率を待たず1件でも即対応**(悠長な閾値・トレンドは捨てる)。
     どのカードのどの候補が別物かを個別に surface + 即対応リスト化(各サイクルで空が正=放置は精度事故)。
@@ -1402,9 +1426,18 @@ def _alert_restock_diffs(diffs, skip, restock_cands, today):
                   f"(この出品にこのURLは次回から出さない・補URL側と共有)")
     except Exception as e:
         print(f"  ⚠ 候補NG台帳への記録skip ({type(e).__name__}: {e})")
-    print(f"🚨 違う即対応 {len(diffs)}件(見送り{skip})— 検索が別カードを拾った=精度事故。生成(検索)を今すぐ直す:")
+    # ★番号で引けた候補を人が外した = 同番号の別絵柄を弾いただけ。直す先が無いので騒がない
+    _bug, _art = split_diffs_by_number_match(diffs, restock_cands)
+    if _art:
+        print(f"  ✋ 絵柄違いで外した {len(_art)}件 (番号は一致。目視ゲートが効いた形= 正常。"
+              f"候補NG台帳に記録済なので次回は出ません)")
+    if not _bug:
+        print(f"  外し: 見送り{skip} / 検索の事故0(番号で引けた候補だけ=精度OK)")
+        return
+    print(f"🚨 違う即対応 {len(_bug)}件(見送り{skip})— **番号で引けなかった枠**が別カードを拾った"
+          f"=検索の事故。生成(検索)を直す:")
     rows = [["日付", "card_no", "title", "チャネル", "誤候補URL", "状態"]]
-    for d in diffs:
+    for d in _bug:
         i = d.get("idx")
         rc = restock_cands[i] if isinstance(i, int) and 0 <= i < len(restock_cands) else {}
         ch = next((c.get("channel") for c in (rc.get("candidates") or []) if c.get("url") == d.get("url")), "")
