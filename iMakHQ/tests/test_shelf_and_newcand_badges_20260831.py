@@ -73,7 +73,9 @@ def test_panel_counts_shelf_in_the_same_subprocess():
     assert "d['shelf']=SE.count_workload()" in _SRC
     assert '"shelf_evict": se_txt' in _SRC
     assert '"shelf_evict_label": se_label' in _SRC
-    assert '"shelf_evict": bool(se.get("picked"))' in _SRC
+    # ★2026-09-03: 青は **人が目で見る作業** だけに絞った
+    #   (17個が青で合図として死んでいた)。件数はヒントに出す。
+    assert '"shelf_evict": False' in _SRC
 
 
 def test_shelf_label_is_painted_onto_the_button_text():

@@ -193,9 +193,9 @@ def test_一番くじの件数を同じ集計で数える():
 
 
 def test_一番くじの夜間は自動が動いていれば黒():
-    """★PSA と同じ。自動で走るものを毎日青くすると、色が合図として死ぬ."""
-    i = SRC.index('"kuji_search": bool(')
-    assert 'not nightly["ok"]' in SRC[i:i + 160]
+    """★2026-09-03: 夜間検索は run_kuji_night.py が **毎晩** 回るようになったので、
+    もう朝に押す合図を出さない (青にしない)。"""
+    assert '"kuji_search": False' in SRC
 
 
 def test_目視0件なら次に何をするか書く():

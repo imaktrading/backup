@@ -3667,28 +3667,37 @@ class ListingPanel:
                        "hoju_status": hs_txt, "kuji_supply": kv_txt, "kuji_refresh": kr_txt}
             # ★2026-08-16: **押すと何か出てくる時だけ青**。0件なら黒のまま
             #   (「いつ押せばいいのか分からない」への答え。色 = 今やる価値があるか)。
-            act_kind = {"hoju_search": bool(s.get("can")),
-                        "ut_search": bool(_ut.get("search")),
+            # ★2026-09-03 ユーザー指摘「青いボタンが多くて、忙しい」。
+            #   青 = 「今これを押す」の合図なのに 17個が青になり得て、合図として死んでいた。
+            #   **探す系は夜間バッチが回すようになった**ので、青にしない。
+            #   人にしかできない **目視** と、その日にしか押せない **当日分** だけ青にする。
+            #   (夜が転んだ時は、目視の件数が0のままなので気づける)
+            act_kind = {"hoju_search": bool(s.get("can")),   # 🆕 当日分 = 出品直後に押す
+                        "ut_search": False,                  # 夜間バッチが回す
                         "ut_confirm": bool(_ut.get("confirm")),
-                        "ut_restock_search": bool(_ut.get("restock_search")),
+                        "ut_restock_search": False,          # 夜間バッチが回す
                         "ut_restock_confirm": bool(_ut.get("restock_confirm")),
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
                         "newcand": bool(nc.get("show") or nc.get("auto")),
-                        # 夜間検索は自動で走るので、押す必要がある時だけ青
-                        "kuji_search": bool(not nightly["ok"]
-                                            and (kj.get("search") or {}).get("can")),
+                        # 夜間検索は自動で走る (2026-09-03 から run_kuji_night も夜間へ)
+                        "kuji_search": False,
                         "kuji_confirm": bool((kj.get("confirm") or {}).get("ready")),
-                        # 落とすものが在る時だけ青 (0件なら押す意味が無い)
-                        "cull_end": bool(ce.get("remaining")),
-                        "shelf_evict": bool(se.get("picked")),
-                        "sold_restock": bool(sr.get("actionable") or sr.get("unknown")),
+                        # ★2026-09-03: 取下げ / 棚 / 売れた分の補充 は青にしない。
+                        #   件数はヒントに出るが、押すかは日々の判断であって「今やれ」ではない。
+                        "cull_end": False,
+                        "shelf_evict": False,
+                        "sold_restock": False,
                         # ★2026-09-01: 押したら今すぐ動く件数が1件でもある時だけ青。
                         #   📊 補URL件数感 は **見るだけ**なので色を変えない (act_kind に入れない)。
-                        "psa_gate": bool(pg.get("actionable")),
-                        "restock_build": bool(rb.get("actionable")),
-                        "restock_wb": bool(rw.get("actionable")),
-                        "kuji_supply": bool(kv.get("can")),
-                        "kuji_refresh": bool(kr.get("can"))}
+                        "psa_gate": bool(pg.get("actionable")),      # 目視あり
+                        "kuji_supply": bool(kv.get("can")),          # 目視あり
+                        # ★2026-09-03: 下は青にしない。
+                        #   ・②CSV / ③確認 は 目視の **続き**。目視を終えれば自然に押す
+                        #   ・取下げ / 棚 / 売れた分の補充 は **押すかを自分で決める**操作で、
+                        #     「今やれ」の合図ではない (件数はヒントに出る)
+                        "restock_build": False,
+                        "restock_wb": False,
+                        "kuji_refresh": False}
         except Exception as e:                                    # noqa: BLE001
             # 数えられない時は**黙って0と出さない**。分からないと書く。
             # ★理由まで出す。「取得できず」だけでは次に何をすればいいか分からない。
