@@ -221,7 +221,29 @@ def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
     channels = []
     cand = []  # (channel, price, url)
 
+    # ★2026-09-04: ありえない仕入値の候補は **この段階で外す** (ユーザー指示
+    #   「この段階で、セラーフィルタ含めて仕入れるに値するものにしておくべき」)。
+    #   実例: SNKRDUNK が S12A-126 に ¥1,111,111 を出しており、そのまま最安として
+    #   採られると 再仕入れ可 と判定され、cost-plus で $11,707 の行になる。
+    #   基準は pricing_engine.cost_sanity (全カテゴリ共通・しきい値は global.yaml)。
+    def _sane(price):
+        if not isinstance(price, int) or price <= 0:
+            return True                    # 価格不明はここでは判定しない (別経路で落ちる)
+        try:
+            import os as _os
+            import sys as _sys
+            _api = _os.path.join(_os.path.dirname(_os.path.dirname(
+                _os.path.dirname(_os.path.abspath(__file__)))), "iMakeBayAPI")
+            if _api not in _sys.path:
+                _sys.path.insert(0, _api)
+            from pricing_engine import cost_sanity
+        except Exception:                                      # noqa: BLE001
+            return True                    # 判定器が無い環境では従来どおり (後段の門が拾う)
+        return cost_sanity(price) is None
+
     m_price = mercari[0] if (mercari and isinstance(mercari[0], int) and mercari[0] > 0) else None
+    if m_price is not None and not _sane(m_price):
+        m_price = None
     if m_price:
         channels.append("mercari")
         cand.append(("mercari", m_price, mercari[1] if len(mercari) > 1 else ""))
@@ -258,6 +280,17 @@ def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
             if not snkrdunk_urls and snkrdunk.get("psa10_urls"):
                 snkrdunk_urls = [{"price": None, "url": u} for u in snkrdunk["psa10_urls"]]
             s_price = _min_price([d.get("price") for d in details if isinstance(d, dict)])
+        # ★ありえない値の出品は 補URL からも最安からも外す (2026-09-04)。
+        #   URL を1本も持たない形 (harvest shape の件数のみ) は触らない —
+        #   価格が無い=判定していないので、件数を勝手に0にしない。
+        if snkrdunk_urls:
+            _kept = [d for d in snkrdunk_urls if _sane(d.get("price"))]
+            if len(_kept) != len(snkrdunk_urls):
+                snkrdunk_urls = _kept
+                s_count = len(_kept)
+                s_price = _min_price([d.get("price") for d in _kept]) or None
+        elif s_price is not None and not _sane(s_price):
+            s_price = None
         if s_count > 0:
             channels.append("snkrdunk")
             s_url = snkrdunk_urls[0]["url"] if snkrdunk_urls else ""
@@ -273,6 +306,8 @@ def combine(mercari, snkrdunk, mercari_cands=None, max_aux=5):
     pool = []
     for c in (mercari_cands or []):
         if c and isinstance(c[0], int) and c[0] > 0 and len(c) > 1 and c[1]:
+            if not _sane(c[0]):            # ★ありえない値は補URLにも載せない
+                continue
             pool.append({"price": c[0], "url": c[1], "channel": "mercari"})
     for u in snkrdunk_urls:
         if u.get("url") and isinstance(u.get("price"), int) and u["price"] > 0:
