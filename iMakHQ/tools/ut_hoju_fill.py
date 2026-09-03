@@ -36,6 +36,7 @@ PSA は「型番」1本で同一個体が決まる。UT は **作品 + 柄 + サ
     python ut_hoju_fill.py confirm           # 目視で選んで 補URL(AC-AG) に書く
     python ut_hoju_fill.py restock-search    # 売り切れ行の仕入元を探して貯める
     python ut_hoju_fill.py restock-confirm   # 目視で選んで A列(仕入元URL)を更新
+    python ut_hoju_fill.py restore-qty       # eBay の数量を1に戻す (送信後に照合)
     (どちらの confirm も --dry-run で件数だけ)
 """
 from __future__ import annotations
@@ -394,6 +395,99 @@ def restock_confirm(dry_run=False):
     return n
 
 
+def rows_to_restore(rows2d, cache, category=CATEGORY):
+    """数量を戻す対象 → [{row, itemID}] (純関数)。
+
+    「売り切れ印が消えていて、再仕入れの候補を持っている」行 = 目視で仕入元を決めた分。
+    数量が戻れば売り切れ印は付かないままなので、二度送っても害はない (冪等)。
+    """
+    import sheet_io
+    B, SOLD = sheet_io.PRODUCT_COL_ITEMID, 3
+    CAT = sheet_io.PRODUCT_COL_CATEGORY
+
+    def cell(r, i):
+        return ((r[i] if len(r) > i else "") or "").strip()
+
+    out = []
+    for n, r in enumerate(rows2d[1:], start=2):
+        if cell(r, CAT) != category or not cell(r, B) or cell(r, SOLD):
+            continue
+        iid = cell(r, B)
+        if (cache.get(iid) or {}).get("candidates"):
+            out.append({"row": n, "itemID": iid})
+    return out
+
+
+def restore_qty(dry_run=False):
+    """目視で仕入元を決めた分の **eBay 数量を1に戻す** (I/O)。
+
+    ★送りっぱなしにしない。送った直後に読み直して、戻っていない分は「要対応」で出す
+      (状態同期の安全原則)。読めない物は戻ったことにしない。
+    """
+    import sheet_io
+    sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "iMakeBayAPI")))
+    import fix_de_speedpak_shipping as fx
+    from ebay_getitem_images import fetch_listing_qty
+
+    targets = rows_to_restore(sheet_io._product_ws().get_all_values(),
+                              load_cache(RESTOCK_CACHE_PATH))
+    print(f"▶ 数量を戻す対象: {len(targets)}件")
+    if not targets:
+        return 0
+    if dry_run:
+        for t in targets:
+            print(f"   {t['itemID']}")
+        return len(targets)
+    tok = fx.token()
+    ok, ng = [], []
+    for n, t in enumerate(targets, 1):
+        iid = t["itemID"]
+        if fetch_listing_qty(iid):
+            print(f"  [{n}/{len(targets)}] {iid} すでに戻っています")
+            ok.append(iid)
+            continue
+        xml = f"<Item><ItemID>{iid}</ItemID><Quantity>1</Quantity></Item>"
+        done = False
+        for attempt in (1, 2):
+            resp = fx.post("ReviseFixedPriceItem", xml, tok, site="0")
+            if "<Ack>Success</Ack>" in resp or "<Ack>Warning</Ack>" in resp:
+                ok.append(iid)
+                done = True
+                break
+            if "expired" in resp.lower() and attempt == 1:
+                fx.refresh()
+                tok = fx.token()
+                continue
+            m = re.search(r"<LongMessage>(.*?)</LongMessage>", resp, re.S)
+            ng.append((iid, m.group(1) if m else resp[:160]))
+            done = True
+            break
+        if not done:
+            ng.append((iid, "retry 尽きた"))
+        print(f"  [{n}/{len(targets)}] {iid} {'OK' if iid in ok else 'NG'}")
+    print(f"\n▶ 送信 OK {len(ok)} / NG {len(ng)}")
+    for iid, why in ng:
+        print(f"   ✗ {iid}: {why}")
+    # ★実物を読み直して照合する
+    print("\n▶ 実物を読み直して照合します...")
+    bad = [iid for iid in ok if not fetch_listing_qty(iid)]
+    # ★戻せた分はキャッシュから外す。残したままだと「数量を戻す N件」が永久に減らない。
+    #   戻っていない分 (bad) は **残す** = 次回もう一度対象に上がる (fail-closed)。
+    done = [iid for iid in ok if iid not in bad]
+    if done:
+        cache = load_cache(RESTOCK_CACHE_PATH)
+        for iid in done:
+            cache.pop(iid, None)
+        save_cache(cache, RESTOCK_CACHE_PATH)
+    if bad:
+        print(f"  ⚠️ **戻っていません {len(bad)}件 = 要対応** (次回もう一度対象に上がります)")
+        for iid in bad:
+            print(f"     ✗ {iid}")
+    else:
+        print(f"  ✅ {len(ok)}件すべて 数量1 を確認しました")
+    return len(ok) - len(bad)
+
+
 def _price_of(cache_entry, url):
     """選ばれた候補の値段 (純関数寄り)。分からなければ None。"""
     for c in ((cache_entry or {}).get("candidates") or []):
@@ -413,6 +507,8 @@ def main():
         search(limit=limit, sold_out=True)
     elif "restock-confirm" in args:
         restock_confirm(dry_run=dry)
+    elif "restore-qty" in args:
+        restore_qty(dry_run=dry)
     elif "search" in args:
         search(limit=limit)
     elif "confirm" in args:
@@ -433,7 +529,7 @@ def count_workload(today=None):
     """
     import datetime
     out = {"search": 0, "confirm": 0, "restock_search": 0, "restock_confirm": 0,
-           "error": ""}
+           "restore": 0, "error": ""}
     try:
         import sheet_io
         today = (today or datetime.date.today()).isoformat()
@@ -448,6 +544,7 @@ def count_workload(today=None):
             out[key + "confirm"] = sum(1 for iid, c in cache.items()
                                        if iid in ids and c.get("date") == today
                                        and c.get("candidates"))
+        out["restore"] = len(rows_to_restore(vals, load_cache(RESTOCK_CACHE_PATH)))
     except Exception as e:                                     # noqa: BLE001
         out["error"] = f"{type(e).__name__}: {e}"[:60]
     return out

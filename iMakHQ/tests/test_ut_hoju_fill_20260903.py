@@ -154,3 +154,30 @@ def test_restock_writes_only_after_the_visual_check():
     j = src.index("restock_reactivate_master")
     assert i < j
     assert "prc.restock_confirm(items)" in src[i:j]
+
+
+def test_restore_targets_are_the_confirmed_rows():
+    """数量を戻すのは「売り切れ印が消えていて、目視で仕入元を決めた」行だけ。"""
+    rows = [["", "itemID", "タイトル", "売切", "", "", "", "", "", "", "", "", "", "", "", "",
+             "", "カテゴリ"],
+            ["", "111", "決めた",   "",  "", "", "", "", "", "", "", "", "", "", "", "", "",
+             "Tシャツ"],
+            ["", "222", "まだ売切", "○", "", "", "", "", "", "", "", "", "", "", "", "", "",
+             "Tシャツ"],
+            ["", "333", "候補なし", "",  "", "", "", "", "", "", "", "", "", "", "", "", "",
+             "Tシャツ"]]
+    cache = {"111": {"candidates": [{"url": "u"}]}, "222": {"candidates": [{"url": "u"}]}}
+    got = U.rows_to_restore(rows, cache)
+    assert [t["itemID"] for t in got] == ["111"]
+
+
+def test_restore_verifies_before_calling_it_done():
+    """送りっぱなしにしない。戻っていない分はキャッシュに残して次回もう一度出す。"""
+    src = open(os.path.join(_HQ_TOOLS, "ut_hoju_fill.py"), encoding="utf-8").read()
+    i = src.index("def restore_qty(")
+    body = src[i:]
+    assert "実物を読み直して照合" in body
+    assert "bad = [iid for iid in ok if not fetch_listing_qty(iid)]" in body
+    # 戻せた分だけキャッシュから外す (bad は残す)
+    j = body.index("done = [iid for iid in ok if iid not in bad]")
+    assert "cache.pop(iid, None)" in body[j:j + 400]

@@ -1486,6 +1486,21 @@ SCRIPTS = [
         "skip_postprocess": True,
     },
     {
+        # ★2026-09-03: ②で仕入元を決めた分の **eBay 数量を1に戻す**。ここが無いと
+        #   シートだけ直って出品は売れないままだった (実測3件)。
+        #   送信後に読み直して照合し、戻っていない分は「要対応」で出す。
+        "category": None, "type": "utility",
+        "label": "🛒 UT 再仕入れ ③ 数量戻す",
+        "tip": "②で仕入元を決めた出品の数量を1に戻して、また売れる状態にします。"
+               "送った後に eBay を読み直して、戻ったかを1件ずつ確かめます。",
+        "badge": "ut_restore",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ut_hoju_fill.py", "restore-qty"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
         # ★2026-08-13: 補URL確証で「違う(別商品)」「要調査」と捨てた候補を、**新規出品の種**に戻す。
         #   「違う」は *その出品のカードでない* としか言っておらず、**別の実在カードの仕入元**である
         #   ことが多い (= 出品していないカードの供給を毎日捨てていた)。
@@ -3645,7 +3660,7 @@ class ListingPanel:
             #   ここで直接 import すると tools/ が見えず、毎回「取得できず」になっていた。
             _ut = (w0.get("ut") or {}) if isinstance(w0, dict) else {}
             if _ut.get("error"):
-                ut_s_txt = ut_c_txt = ut_rs_txt = ut_rc_txt = (
+                ut_s_txt = ut_c_txt = ut_rs_txt = ut_rc_txt = ut_rq_txt = (
                     "\n(残件 取得できず: %s)" % str(_ut["error"])[:40])
             else:
                 ut_s_txt = "\n探せる %s件" % _ut.get("search", 0)
@@ -3656,10 +3671,14 @@ class ListingPanel:
                 ut_rc_txt = "\n目視できる %s件" % _ut.get("restock_confirm", 0)
                 if not _ut.get("restock_confirm"):
                     ut_rc_txt += "\n※先に ① 探す を押す"
+                ut_rq_txt = "\n数量を戻す %s件" % _ut.get("restore", 0)
+                if not _ut.get("restore"):
+                    ut_rq_txt += "\n※先に ② 目視 を押す"
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
                        "ut_restock_search": ut_rs_txt,
                        "ut_restock_confirm": ut_rc_txt,
+                       "ut_restore": ut_rq_txt,
                        "kuji_search": k_s, "kuji_confirm": k_c, "cull_end": ce_txt,
                        "shelf_evict": se_txt, "shelf_evict_label": se_label,
                        "sold_restock": sr_txt,
@@ -3677,6 +3696,8 @@ class ListingPanel:
                         "ut_confirm": bool(_ut.get("confirm")),
                         "ut_restock_search": False,          # 夜間バッチが回す
                         "ut_restock_confirm": bool(_ut.get("restock_confirm")),
+                        # ③数量戻す は ②目視の続き (②を終えれば自然に押す)
+                        "ut_restore": False,
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
                         "newcand": bool(nc.get("show") or nc.get("auto")),
                         # 夜間検索は自動で走る (2026-09-03 から run_kuji_night も夜間へ)
