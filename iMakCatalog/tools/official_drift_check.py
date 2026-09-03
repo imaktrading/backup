@@ -79,8 +79,13 @@ def _norm(t: str) -> str:
     数字を出すツールが誤検出を出すと、直す側が振り回される。ここで畳む。
     """
     t = html.unescape(t or "")
-    return (t.replace("＆", "&").replace("’", "'").replace("！", "!")
-             .replace("　", " ").strip())
+    for a, b in (("＆", "&"), ("’", "'"), ("！", "!"), ("　", " "),
+                 # 2026-09-03: 全角/波ダッシュ/引用符の違いだけで「名前が違う」と出ていた
+                 #   (`モンキー・Ｄ・ルフィ` ↔ `モンキー・D・ルフィ` / `〜` ↔ `～` 等)。
+                 #   表記ゆれ自体は監査 §name_propagate が別に見張るので、ここでは畳む。
+                 ("Ｄ", "D"), ("〜", "～"), ("”", '"'), ("“", '"'), ("‟", '"')):
+        t = t.replace(a, b)
+    return t.strip()
 
 
 def parse_cards(page: str) -> list[dict]:
@@ -129,9 +134,10 @@ def check_series(conn, sid: str) -> dict:
         # 券面番号で引く。★set_name_official は catalog 側が英語の弾名で持つことがあるので
         #   照合キーにしない (2026-09-02: 一致条件にして 126枚全部を「欠落」と誤検出した)
         rows = conn.execute(
+            # ★source で絞らない (2026-09-03)。どの scraper が入れたかは「在るか」と関係ない。
+            #   絞っていたせいで OP-17 の 122枚を「欠落」と誤検出した (実際は在った)。
             "SELECT product_id, name, name_jp, set_name_official, specs FROM products "
-            "WHERE category=? AND (product_id=? OR product_id LIKE ?) "
-            "  AND IFNULL(source,'') LIKE '%opcg_official%'",
+            "WHERE category=? AND (product_id=? OR product_id LIKE ?)",
             (CATEGORY, c["no"], c["no"] + "_%")).fetchall()
         if not rows:
             missing.append(c)

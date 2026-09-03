@@ -163,6 +163,13 @@ def process(dry_run: bool):
             r_ebay = resolve_rarity_ebay(cat, rarity_raw)
             if r_ebay is None:
                 continue
+            # ★レアリティでない値は書かない (2026-09-03 追加、fail-closed)。
+            #   このスクリプトは未知の値を passthrough するので、遊戯王の `New` / `2` /
+            #   `European debut` のような値がそのまま C:Rarity に出ていた (117行)。
+            #   9/3 に空欄へ直した直後、**OP-17 取り込みでこれを再実行して復活させた**。
+            #   判定は監査 §8 と同じ関数を使う (二重定義しない)。
+            if not _LOOKS_LIKE_RARITY(r_ebay):
+                continue
             if specs.get("rarity_ebay") == r_ebay:
                 continue
             specs["rarity_ebay"] = r_ebay
@@ -178,6 +185,18 @@ def process(dry_run: bool):
         print(f"  {cat:<22} {n:>6,} | rarity_ebay+ {c:>5,}")
     db.close()
     print(f"\n=== grand updated: {grand_updated:,} ===")
+
+
+def _looks_like_rarity_import():
+    """監査 §8 の判定を借りる (import は関数内: このファイルは単体実行が前提)."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent.parent / "tools"))
+    import set_name_integrity_audit as _A
+    return _A._looks_like_rarity
+
+
+_LOOKS_LIKE_RARITY = _looks_like_rarity_import()
 
 
 def main():
