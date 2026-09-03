@@ -17,6 +17,13 @@ REM   2) top-up (1 backup)           : search --max-backups=2 --limit=10
 REM   3) restock prefetch            : search-restock --limit=0 (all)
 REM   4) ichibankuji prefetch        : ichibankuji_restock.py prefetch 10
 REM   5) ichibankuji live aux        : ichibankuji_restock.py prefetch-live 10
+REM   5c) UT aux-supply              : ut_hoju_fill.py search (all)
+REM   5d) UT restock                 : ut_hoju_fill.py restock-search (all)
+REM   6c) funnel + analyses           : listing_funnel / funnel_diff / demand_winners
+REM   6d) ichibankuji night search     : run_kuji_night.py
+REM   6e) price-down / title lists     : noconvert_pricedown / noclick_targets
+REM   NOTE: nothing here writes to eBay. Ending, relisting and restoring quantity
+REM         stay manual buttons on purpose (they are not reversible).
 REM   30 items per run = slow and steady, to keep the BAN risk low.
 REM   Google Sheets API can return 503, so step 1 retries up to 3 times.
 REM ---------------------------------------------------------------------------
@@ -82,6 +89,18 @@ REM         fields never change, so cache them here and the button only shows.
 echo [ichibankuji] prefetch-detail %date% %time% >> "%LOG%"
 python -u ichibankuji_restock.py prefetch-detail 120 >> "%LOG%" 2>&1
 
+REM --- 5c) UT (Uniqlo/GU collab tee) aux-supply candidates. Collect only; the
+REM         sheet is written after a human check in the daytime.
+REM         2026-09-03: the tee line stalled because the single supplier sold out
+REM         and the listing work was wasted. Same fix as PSA: keep spares.
+echo [ut] hoju search %date% %time% >> "%LOG%"
+python -u ut_hoju_fill.py search >> "%LOG%" 2>&1
+
+REM --- 5d) UT restock: sold-out tees are still Active with qty 0 (verified
+REM         2026-09-03), so finding a live supplier is enough to bring them back.
+echo [ut] restock search %date% %time% >> "%LOG%"
+python -u ut_hoju_fill.py restock-search >> "%LOG%" 2>&1
+
 REM --- 6) warm the daytime review screen (candidates -> ref image -> art match).
 REM        2026-08-16: pressing the daytime button spent ~7 of its 8 minutes
 REM        assembling the screen (fetch the listing image and AI-compare the art
@@ -101,6 +120,31 @@ REM         "no need to restock yet" was made on a false picture. A grey cell in
 REM         the itemID column now means "this row will never become a listing".
 echo [listable-flag] %date% %time% >> "%LOG%"
 python -u sheet_listable_flag.py --write >> "%LOG%" 2>&1
+
+REM --- 6c) refresh the funnel and the analyses that read it. These only read
+REM          reports and write spreadsheet tabs, so they are safe unattended.
+REM          2026-09-03: doing this at night means the morning buttons (shelf /
+REM          cull / restock counts) already have fresh numbers to work from.
+echo [funnel] %date% %time% >> "%LOG%"
+python -u listing_funnel.py >> "%LOG%" 2>&1
+echo [funnel-diff] %date% %time% >> "%LOG%"
+python -u funnel_diff.py >> "%LOG%" 2>&1
+echo [demand] %date% %time% >> "%LOG%"
+python -u demand_winners.py >> "%LOG%" 2>&1
+echo [restock-worklist] %date% %time% >> "%LOG%"
+python -u restock_worklist.py >> "%LOG%" 2>&1
+
+REM --- 6d) ichibankuji nightly search (was a manual button only; nothing else
+REM          ran it, so the daytime press had to do the searching itself).
+echo [kuji-night] %date% %time% >> "%LOG%"
+python -u run_kuji_night.py >> "%LOG%" 2>&1
+
+REM --- 6e) lists that the daytime buttons only display: price-down candidates
+REM          and title-rework candidates. Both write a spreadsheet tab only.
+echo [pricedown] %date% %time% >> "%LOG%"
+python -u noconvert_pricedown.py >> "%LOG%" 2>&1
+echo [title-rework] %date% %time% >> "%LOG%"
+python -u noclick_targets.py >> "%LOG%" 2>&1
 
 REM --- 7) write the "no backup URL at all" listings into one tab so they can be
 REM        seen at a glance (they are scattered rows in the master sheet).
