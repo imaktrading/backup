@@ -16,7 +16,7 @@ import threading
 import time
 import queue
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, simpledialog
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -1573,6 +1573,7 @@ SCRIPTS = [
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "shelf_evict.py", "--end", "--tier", "2"],
         "params": [],
+        "ask_amount": True,
         "tip": "在庫はあるが売れていない出品を落とします。**売れるかもしれない物を"
                "捨てる判断**なので、候補CSV (デスクトップ 棚END候補_日付.csv) を見てから"
                "押してください。条件は 一度も売れていない / TCG 30日超・G-SHOCK 365日超 / "
@@ -3670,6 +3671,26 @@ class ListingPanel:
             self.status_var.set("中止: N列関数の破損検知")
             return
         cmd = list(script["cmd"])
+        # ★2026-09-03: 棚は「その日に出した金額」まで落として止まる。もっと空けたい日は
+        #   何度押しても2回目以降はほぼ何も落ちない (目標がもう埋まっているため)。
+        #   押す回数で調整させず、**空けたい額を1回聞く**。空欄なら従来どおり。
+        if script.get("ask_amount"):
+            _v = simpledialog.askstring(
+                "いくら空けますか",
+                "空けたい金額 ($) を入れてください。\n"
+                "空欄のままなら「今日出品した金額と同じだけ」落とします。",
+                parent=self.root if hasattr(self, "root") else None)
+            if _v is None:
+                self.status_var.set("中止しました")
+                return
+            _v = _v.strip().replace(",", "").replace("$", "")
+            if _v:
+                try:
+                    float(_v)
+                except ValueError:
+                    messagebox.showerror("入力エラー", f"金額として読めません: {_v}")
+                    return
+                cmd.extend(["--amount", _v])
         for pname, entry in self.param_entries[idx].items():
             v = entry.get().strip()
             if v:
