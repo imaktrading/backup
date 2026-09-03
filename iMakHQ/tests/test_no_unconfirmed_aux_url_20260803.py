@@ -86,9 +86,14 @@ def test_visual_confirm_paths_are_the_only_writers():
     - `hoju_url_from_dupes.py`… cert/KEY で特定済みの実在個体を同KEYに紐づけるだけ
     - `kuji_hoju_fill.py`     … 一番くじ 補URL (目視UI。候補を写真・価格付きで並べて人が選ぶ。
                                 2026-08-20 追加。検索は文字列一致なので **目視が唯一の担保**)
+    - `ut_hoju_fill.py`       … UT 補URL (2026-09-03 追加)。PSA と同じ目視ビューア
+                                (`psa_resource_confirm.restock_confirm`) を通してから書く。
+                                UT は 作品+柄+サイズ+状態 が揃って初めて同じ商品なので、
+                                機械の絞り込みだけでは決められない = **目視が唯一の担保**
     """
     allowed = {"psa_hoju_fill.py", "ichibankuji_restock.py",
                "dup_guard.py", "hoju_url_from_dupes.py", "kuji_hoju_fill.py",
+               "ut_hoju_fill.py",
                "sheet_io.py",                 # 定義そのもの (書き手ではない)
                "ichibankuji_restock_poc.py"}  # POC。本番フローから呼ばれない
     offenders = {}
