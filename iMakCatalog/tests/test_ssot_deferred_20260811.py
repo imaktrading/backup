@@ -49,7 +49,9 @@ CODEFORM_EXPECTED = {
     "拡張パック「連撃マスター」":         "S5r: Rapid Strike Master",
     "強化拡張パック「双璧のファイター」":    "S5a: Peerless Fighters",
     "拡張パック「パラダイムトリガー」":     "S12: Paradigm Trigger",
-    "拡張パック「黒炎の支配者」":         "SV03: Obsidian Flames",
+    # 2026-09-03: 英語版 SV3 の名前をやめ、eBay master に在る日本語版の値へ
+    #   (依頼 requests/2026-09-02_sv3_english_set_name.md)
+    "拡張パック「黒炎の支配者」":         "Sv3: Ruler of the Black Flame",
     "拡張パック「スペースジャグラー」":     "S10p: Space Juggler",
     "拡張パック「タイムゲイザー」":        "S10d: Time Gazer",
     # ★2026-08-22 是正: 英語版 SV09 の名前が入っていた (別セット)。

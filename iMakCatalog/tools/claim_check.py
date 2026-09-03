@@ -180,6 +180,37 @@ def check_official_drift(quick):
     return m.group(2) == "0", f"{m.group(1)}枚 突合 / 差分 {m.group(2)}件 (累計で見た弾 {len(state)})"
 
 
+def check_table_matches_data(_):
+    """**変換表から計算した値 = 焼いてある値** (2026-09-03 追加).
+
+    「変換表は完成したのか」に機械で答えるチェック。表と焼いてある値が一致していれば、
+    表を直せばデータが直る = 表が唯一の口として機能している。
+    ズレていれば、表を直しても出品には効かない (= 完成していない)。
+
+    ★プロモの刷り (`SM-P-165` 等) は例外。set_name_official が「元々どの弾か」を指すので
+      表からは決められない (`tests/test_one_set_one_value_20260902.py` と同じ扱い)。
+    """
+    import api as _api  # noqa: E402
+    _promo = re.compile(r"(^|[-_])(P|[A-Z]{1,3}-?P)[-_]\d", re.IGNORECASE)
+    db = _db()
+    try:
+        ng = exempt = 0
+        for r in db.execute(
+                "SELECT category, product_id, set_name_official, specs FROM products "
+                "WHERE category IN ('pokemon_tcg','one_piece_tcg','dragonball_scg','gundam_tcg')"):
+            s_ = json.loads(r["specs"] or "{}")
+            stored = s_.get("set_name_ebay") or ""
+            der = _api.derive_set_name_ebay(r["category"], r["set_name_official"], r["product_id"])
+            if der and stored and der != stored:
+                if _promo.search(r["product_id"]):
+                    exempt += 1
+                else:
+                    ng += 1
+        return ng == 0, f"表と一致しない行 {ng} (プロモ刷りの例外 {exempt})"
+    finally:
+        db.close()
+
+
 def check_official_coverage(_):
     """**公式と1度も比べていないカテゴリを緑にしない** (2026-09-03 追加).
 
@@ -211,6 +242,7 @@ def check_official_coverage(_):
 CHECKS = [
     ("Set が空の行", check_set_empty),
     ("1セット1値", check_one_set_one_value),
+    ("変換表 = データ", check_table_matches_data),
     ("型のキー名", check_type_key),
     ("画像の終端マーク", check_images),
     ("監査 (出品4カテゴリ)", check_audit),

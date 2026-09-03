@@ -42,8 +42,8 @@ set:
     ebay: "S10b: Pokémon GO"
     note: HQ 2026-08-18 コード形裁定 (旧 "Pokémon GO", 101行)
   - source: "拡張パック「黒炎の支配者」"
-    ebay: "SV03: Obsidian Flames"
-    note: HQ 2026-08-18 コード形裁定 (旧 "Scarlet & Violet - Obsidian Flames", 141行)
+    ebay: "Sv3: Ruler of the Black Flame"
+    note: "2026-09-03 是正 (依頼 requests/2026-09-02_sv3_english_set_name.md)。旧 'SV03: Obsidian Flames' は **英語版 SV3 の名前**。eBay master に日本語版セットの値 'Sv3: Ruler of the Black Flame' が在るので規約①。141行"
   - source: "拡張パック「摩天パーフェクト」"
     ebay: "S7d: Skyscraping Perfection"
     note: "2026-08-23 ユーザー確定: 日本語版セットは自分の値を使う (旧 'SWSH07: Evolving Skies' = 英語版セット)。例外は作らない"
@@ -1238,8 +1238,8 @@ set_code:
     note: 拡張パック「ソード」(catalog set_name 裏取り 2026-06-21、旧swap是正)
     year: 2019
   - source: S4a
-    ebay: Shiny Star V
-    note: ハイクラスパック「シャイニースターV」
+    ebay: "S4a: Shiny Star V"
+    note: "2026-09-03 eBay master verbatim へ (旧 'Shiny Star V'。焼いてある値の方が正しく、表が古かった)"
     year: 2020
   - source: S6a
     ebay: "S6a: Eevee Heroes"
@@ -1302,14 +1302,14 @@ set_code:
     note: 拡張パック「パラダイムトリガー」
     year: 2022
   - source: S12a
-    ebay: VSTAR Universe
-    note: ハイクラスパック「VSTARユニバース」
+    ebay: "S12a: Vstar Universe"
+    note: "2026-09-03 eBay master verbatim へ (旧 'VSTAR Universe')"
     year: 2022
 
   # ----- Sun & Moon (SM / SMxx) -----
   - source: SM12a
-    ebay: Tag All Stars
-    note: ハイクラスパック「TAG TEAM GX タッグオールスターズ」
+    ebay: "Sm12a: Tag Team GX: Tag All Stars"
+    note: "2026-09-03 eBay master verbatim へ (旧 'Tag All Stars')"
     year: 2019
   - source: SM8b
     ebay: "Sm8b: GX Ultra Shiny"
@@ -1317,8 +1317,8 @@ set_code:
     note: ハイクラスパック「GXウルトラシャイニー」
     year: 2018
   - source: SM4p
-    ebay: GX Battle Boost
-    note: REVIEW eBay 値
+    ebay: "Sm4+: GX Battle Boost"
+    note: "2026-09-03 eBay master verbatim へ (旧 'GX Battle Boost')"
     year: 2017
   - source: SMH
     ebay: SM Promos

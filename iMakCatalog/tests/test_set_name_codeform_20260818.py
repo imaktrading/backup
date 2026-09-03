@@ -38,7 +38,11 @@ CODEFORM = {
     # "Sword & Shield - Chilling Reign":    "Swsh06: Sword & Shield - Chilling Reign",   # 2026-08-23 廃止 (英語版セット名は使わない)
     # "Sword & Shield - Lost Origin":       "Swsh11: Lost Origin",   # 2026-08-23 廃止 (英語版セット名は使わない)
     # "Sword & Shield - Silver Tempest":    "Swsh12: Sword & Shield - Silver Tempest",   # 2026-08-23 廃止 (英語版セット名は使わない)
-    "Scarlet & Violet - Obsidian Flames": "SV03: Obsidian Flames",
+    # 2026-09-03 除外: `SV03: Obsidian Flames` は **英語版 SV3 の名前**で、
+    #   日本語版セット (拡張パック「黒炎の支配者」) の値ではない。
+    #   eBay master に `Sv3: Ruler of the Black Flame` が在るので規約①でそちらへ。
+    #   依頼 requests/2026-09-02_sv3_english_set_name.md / migration 2026-09-03_sv3_english_set_name.py
+    #   (8/18 のコード形裁定より 8/23 の「英語版セット名は使わない」が優先)
     # "Prismatic Evolutions":               "Sv: Prismatic Evolutions",   # 2026-08-23 廃止 (英語版セット名は使わない。JP SV8a=テラスタルフェスex は Sv8a: Terastal Fest Ex)
     # ★2026-08-22 取り下げ: JP の 拡張パック「バトルパートナーズ」に英語版 SV09 の名前を
     #   入れていた (HQ 依頼 2026-08-22_hq_set_name_ebay_wrong_set_322)。eBay master には
@@ -54,7 +58,7 @@ CODEFORM = {
     "Shining Legends":                    "Sm3+: Shining Legends",
     "Pokémon GO":                         "S10b: Pokémon GO",
 }
-EXPECTED_ROWS = 321    # 2026-08-23: さらに Prismatic Evolutions (JP SV8a 237行) を廃止
+EXPECTED_ROWS = 180    # 2026-09-03: SV3 の 141行を英語版セット名から外した (321 -> 180)
 
 # 「表記の選択」ではないので巻き込んではいけない値 (2026-08-11 回答 §2/§3 + 別名ケース)
 # ★2026-08-21 窓口確定で 'Start Deck 100' / 'Premium Champion Pack' の carve-out は解除。
