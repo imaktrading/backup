@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from collections import Counter
@@ -60,9 +61,30 @@ def _card_type_map(db, cat: str) -> dict:
 
 
 def run(cat: str, commit: bool) -> int:
+    # ★変換表は **書き込みを始める前に**まとめて読む (2026-09-04)。
+    #   書き込みトランザクション中に api.derive_* が別コネクションで読みに行くと
+    #   `database is locked` で落ちる (実際に落ちた)。
     db = sqlite3.connect(str(api._DB_PATH))
     db.row_factory = sqlite3.Row
     ctmap = _card_type_map(db, cat)
+    setmap = {r[0]: r[1] for r in db.execute(
+        "SELECT source_value, ebay_value FROM ebay_filter_map "
+        "WHERE category=? AND field='set'", (cat,))}
+    codemap = {r[0]: r[1] for r in db.execute(
+        "SELECT source_value, ebay_value FROM ebay_filter_map "
+        "WHERE category=? AND field='set_code'", (cat,))}
+    rarmap = {r[0]: r[1] for r in db.execute(
+        "SELECT source_value, ebay_value FROM ebay_filter_map "
+        "WHERE category=? AND field='rarity'", (cat,))}
+
+    def _set_of(official, pid):
+        if official and official in setmap:
+            return setmap[official]
+        m = re.search(r"[\[【]([A-Za-z0-9\-]+)[\]】]", official or "")
+        if m and m.group(1) in codemap:
+            return codemap[m.group(1)]
+        head = (pid or "").split("_")[0].rsplit("-", 1)[0]
+        return codemap.get(head) or setmap.get(head)
     rows = db.execute(
         "SELECT id, product_id, set_name_official, specs FROM products "
         "WHERE category=? AND ("
@@ -72,7 +94,7 @@ def run(cat: str, commit: bool) -> int:
         "  IFNULL(json_extract(specs,'$.rarity_ebay'),'')='')", (cat,)).fetchall()
     print(f"=== 仕上げ {cat} ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(rows)}行 ===")
     game, maker = api.derive_game_ebay(cat), api.derive_manufacturer(cat)
-    filled, unmapped = Counter(), Counter()
+    filled, unmapped, done = Counter(), Counter(), 0
     for r in rows:
         s = json.loads(r["specs"] or "{}")
         before = json.dumps(s, sort_keys=True)
@@ -95,14 +117,14 @@ def run(cat: str, commit: bool) -> int:
                 unmapped[f"card_type={raw_ct!r}"] += 1
         raw_r = str(s.get("rarity") or s.get("Rarity") or "").strip()
         if raw_r and not s.get("rarity_ebay"):
-            v = api.derive_rarity_ebay(cat, raw_r)
+            v = rarmap.get(raw_r)
             if v:
                 s["rarity_ebay"] = v
                 filled["rarity_ebay"] += 1
             else:
                 unmapped[f"rarity={raw_r!r}"] += 1
         if not s.get("set_name_ebay"):
-            v = api.derive_set_name_ebay(cat, r["set_name_official"], r["product_id"])
+            v = _set_of(r["set_name_official"], r["product_id"])
             if v:
                 s["set_name_ebay"] = v
                 s["set_name_ebay_source"] = f"finish_ingest_{NOW[:10].replace('-', '')}"
@@ -112,6 +134,10 @@ def run(cat: str, commit: bool) -> int:
         if commit and json.dumps(s, sort_keys=True) != before:
             db.execute("UPDATE products SET specs=?, updated_at=? WHERE id=?",
                        (json.dumps(s, ensure_ascii=False), NOW, r["id"]))
+            done += 1
+            if done % 500 == 0:            # ★途中保存: 落ちても ここまでは残る
+                db.commit()
+                print(f"    ... {done}行 保存")
     if commit:
         db.commit()
     db.close()

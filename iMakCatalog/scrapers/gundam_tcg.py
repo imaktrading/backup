@@ -36,6 +36,17 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import api  # noqa: E402
 
+# ★出力の文字化けで **走行そのものを落とさない** (2026-09-04)。
+#   cp932 の Windows コンソールに絵文字を print しようとして UnicodeEncodeError で
+#   scraper が2回死んだ (dragonball 09-03 / pokemon 09-04)。取り込みが途中で止まり、
+#   出品に出る値の無い行が残る = いちばん厄介な壊れ方をする。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+
 # ============================================================================
 # 定数
 # ============================================================================

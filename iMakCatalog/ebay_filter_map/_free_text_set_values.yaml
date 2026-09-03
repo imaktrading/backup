@@ -19,10 +19,6 @@ values:
     category: pokemon_tcg
     rows: 250
     jp_set: "ハイクラスパック 「MEGAドリームex」"
-  - value: "Extra Battle Day"
-    category: pokemon_tcg
-    rows: 201
-    jp_set: "エクストラバトルの日"
   - value: "Start Deck Generations"
     category: pokemon_tcg
     rows: 178
@@ -35,6 +31,10 @@ values:
     category: pokemon_tcg
     rows: 146
     jp_set: "ポケモンカードゲームDPt 拡張パック「ギンガの覇道」"
+  - value: "The Best of XY"
+    category: pokemon_tcg
+    rows: 138
+    jp_set: "ハイクラスパック「THE BEST OF XY」"
   - value: "Beat of the Frontier"
     category: pokemon_tcg
     rows: 132
@@ -59,6 +59,10 @@ values:
     category: pokemon_tcg
     rows: 120
     jp_set: "拡張パック「ニンジャスピナー」"
+  - value: "Abyss Eye"
+    category: pokemon_tcg
+    rows: 118
+    jp_set: "拡張パック「アビスアイ」"
   - value: "Nihil Zero"
     category: pokemon_tcg
     rows: 117
@@ -99,10 +103,6 @@ values:
     category: pokemon_tcg
     rows: 81
     jp_set: "ポケモンカードゲームXY BREAK 拡張パック「破天の怒り」"
-  - value: "Abyss Eye"
-    category: pokemon_tcg
-    rows: 81
-    jp_set: "拡張パック「アビスアイ」"
   - value: "Gaia Volcano"
     category: pokemon_tcg
     rows: 76
@@ -111,14 +111,14 @@ values:
     category: pokemon_tcg
     rows: 76
     jp_set: "ポケモンカードゲームXY 拡張パック「タイダルストーム」"
-  - value: "Anytime Anywhere Battle Academy"
-    category: pokemon_tcg
-    rows: 74
-    jp_set: "いつでもどこでも バトルアカデミー"
   - value: "Reviving Legends"
     category: pokemon_tcg
     rows: 74
     jp_set: "ポケモンカードゲームLEGEND 拡張パック「よみがえる伝説」"
+  - value: "Storm Emeralda"
+    category: pokemon_tcg
+    rows: 73
+    jp_set: "拡張パック「ストームエメラルダ」"
   - value: "Grass Decidueye GX Starter Set"
     category: pokemon_tcg
     rows: 68
@@ -131,6 +131,10 @@ values:
     category: pokemon_tcg
     rows: 68
     jp_set: "ポケモンカードゲームLEGEND 拡張パック「ソウルシルバーコレクション」"
+  - value: "Anytime Anywhere Battle Academy"
+    category: pokemon_tcg
+    rows: 63
+    jp_set: "いつでもどこでも バトルアカデミー"
   - value: "Collection X"
     category: pokemon_tcg
     rows: 62
@@ -139,6 +143,10 @@ values:
     category: pokemon_tcg
     rows: 62
     jp_set: "ポケモンカードゲームXY 拡張パック「コレクションY」"
+  - value: "Extra Battle Day"
+    category: pokemon_tcg
+    rows: 61
+    jp_set: "エクストラバトルの日"
   - value: "Family Pokemon Card Game"
     category: pokemon_tcg
     rows: 59
@@ -153,7 +161,7 @@ values:
     jp_set: "ポケモンカードゲームDP エントリーパック’08"
   - value: "Mewtwo ex Starter Deck"
     category: pokemon_tcg
-    rows: 40
+    rows: 36
     jp_set: "スターターセット テラスタル「ミュウツーex」「ラウドボーンex」"
   - value: "Charizard VSTAR vs Rayquaza VMAX Special Deck Set"
     category: pokemon_tcg
@@ -255,6 +263,10 @@ values:
     category: pokemon_tcg
     rows: 20
     jp_set: "スターターセットVMAX カメックス"
+  - value: "Ultra Moon Deck Build Box"
+    category: pokemon_tcg
+    rows: 20
+    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラムーン」"
   - value: "Umbreon & Darkrai GX Tag Team Deck"
     category: pokemon_tcg
     rows: 20
@@ -267,10 +279,14 @@ values:
     category: pokemon_tcg
     rows: 20
     jp_set: "ポケモンカードゲームLEGEND 構築スタンダードデッキ「ハガネール鋼」"
-  - value: "Ultra Moon Deck Build Box"
+  - value: "Sv: Ex Starter Set Zorua & Zoroark Ex"
     category: pokemon_tcg
-    rows: 19
-    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラムーン」"
+    rows: 20
+    jp_set: "スターターセットex ゾロア＆ゾロアークex"
+  - value: "Sv: Ex Starter Set Eevee Ex"
+    category: pokemon_tcg
+    rows: 20
+    jp_set: "スターターセットex イーブイex"
   - value: "Pokemon Rumble x Pokemon Card Game"
     category: pokemon_tcg
     rows: 19
@@ -279,18 +295,10 @@ values:
     category: pokemon_tcg
     rows: 18
     jp_set: "ポケモンカードゲームBW 30枚デッキ対戦set「ミュウツーVSゲノセクト」"
-  - value: "BW First Set (Snivy Deck)"
+  - value: "Sv: Ex Starter Set Sprigatito & Meowscarada Ex"
     category: pokemon_tcg
-    rows: 17
-    jp_set: "ポケモンカードゲームBW はじめてセット （ツタージャデッキ）"
-  - value: "BW First Set (Tepig Deck)"
-    category: pokemon_tcg
-    rows: 17
-    jp_set: "ポケモンカードゲームBW はじめてセット （ポカブデッキ）"
-  - value: "BW First Set (Oshawott Deck)"
-    category: pokemon_tcg
-    rows: 17
-    jp_set: "ポケモンカードゲームBW はじめてセット （ミジュマルデッキ）"
+    rows: 18
+    jp_set: "スターターセットex ニャオハ＆マスカーニャex"
   - value: "25th Anniversary Golden Box"
     category: pokemon_tcg
     rows: 16
@@ -303,6 +311,10 @@ values:
     category: pokemon_tcg
     rows: 16
     jp_set: "ポケモンカードゲームBW はじめてセット 全国図鑑版 （ツタージャデッキ）"
+  - value: "BW First Set (Snivy Deck)"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "ポケモンカードゲームBW はじめてセット （ツタージャデッキ）"
   - value: "BW First Set Pikachu Ver. (Tepig Deck)"
     category: pokemon_tcg
     rows: 16
@@ -319,34 +331,54 @@ values:
     category: pokemon_tcg
     rows: 16
     jp_set: "ポケモンカードゲームBW はじめてセット 全国図鑑版 （ミジュマルデッキ）"
+  - value: "BW First Set (Oshawott Deck)"
+    category: pokemon_tcg
+    rows: 16
+    jp_set: "ポケモンカードゲームBW はじめてセット （ミジュマルデッキ）"
   - value: "Extra Regulation Box"
     category: pokemon_tcg
     rows: 15
     jp_set: "「エクストラレギュレーションBOX」"
-  - value: "DP Battle Starter Pack Giratina vs Dialga (Giratina Deck)"
+  - value: "BW First Set (Tepig Deck)"
+    category: pokemon_tcg
+    rows: 15
+    jp_set: "ポケモンカードゲームBW はじめてセット （ポカブデッキ）"
+  - value: "DP Battle Starter Pack Giratina vs Dialga (Dialga Deck)"
     category: pokemon_tcg
     rows: 14
-    jp_set: "ポケモンカードゲームDP 対戦スターターパック「ギラティナVSディアルガ」(ギラティナデッキ)"
+    jp_set: "ポケモンカードゲームDP 対戦スターターパック「ギラティナVSディアルガ」(ディアルガデッキ)"
   - value: "Leafeon vs Metagross Expert Deck (Metagross)"
     category: pokemon_tcg
     rows: 14
     jp_set: "ポケモンカードゲーム エキスパートデッキ リーフィアVSメタグロス ＋Online（メタグロスデッキ）"
+  - value: "M Mewtwo X & M Mewtwo Y Card Box with Energy"
+    category: pokemon_tcg
+    rows: 14
+    jp_set: "エネルギーカード付き カードボックス メガミュウツーX・メガミュウツーY"
   - value: "Espeon & Deoxys GX Tag Team Deck"
     category: pokemon_tcg
     rows: 13
     jp_set: "スターターセット TAG TEAM GX 「エーフィ&デオキシスGX」"
+  - value: "Ultra Sun & Ultra Moon Premium Trainer Box"
+    category: pokemon_tcg
+    rows: 13
+    jp_set: "ポケモンカードゲーム サン&ムーン プレミアムトレーナーボックス ウルトラサン・ウルトラムーン"
   - value: "CoroCoro Comic January 2017 Rockruff Deck"
     category: pokemon_tcg
     rows: 13
     jp_set: "月刊コロコロコミック 2017年1月号付録「イワンコ全力デッキ」"
-  - value: "Ultra Sun & Ultra Moon Premium Trainer Box"
+  - value: "Battle Academy (Japanese)"
     category: pokemon_tcg
-    rows: 12
-    jp_set: "ポケモンカードゲーム サン&ムーン プレミアムトレーナーボックス ウルトラサン・ウルトラムーン"
+    rows: 11
+    jp_set: "バトルアカデミー"
   - value: "Vaporeon GX Deck"
     category: pokemon_tcg
     rows: 11
     jp_set: "スターターセット「水のシャワーズGX」"
+  - value: "Championship Series 2027"
+    category: pokemon_tcg
+    rows: 11
+    jp_set: "ポケモンカードゲームチャンピオンシップシリーズ2027"
   - value: "Illustration Contest Winning Artwork Card"
     category: pokemon_tcg
     rows: 10
@@ -363,10 +395,6 @@ values:
     category: pokemon_tcg
     rows: 9
     jp_set: "ポケモンカードゲーム 20th アニバーサリーフェスタ 20th アニバーサリーバトル 勝利賞"
-  - value: "M Mewtwo X & M Mewtwo Y Card Box with Energy"
-    category: pokemon_tcg
-    rows: 9
-    jp_set: "エネルギーカード付き カードボックス メガミュウツーX・メガミュウツーY"
   - value: "Pokemon Card Gym Prize 2016/8"
     category: pokemon_tcg
     rows: 9
@@ -391,10 +419,18 @@ values:
     category: pokemon_tcg
     rows: 8
     jp_set: "ポケモンカードジム ジムバッジゲットバトル 上位入賞"
+  - value: "Friend Battle Together 2026"
+    category: pokemon_tcg
+    rows: 8
+    jp_set: "いっしょにフレンドバトル2026"
   - value: "Ex Special Set (Japanese)"
     category: pokemon_tcg
     rows: 7
     jp_set: "exスペシャルセット"
+  - value: "Mega Promo Card Pack Vol.5"
+    category: pokemon_tcg
+    rows: 7
+    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第5弾"
   - value: "VSTAR Special Set"
     category: pokemon_tcg
     rows: 6
@@ -406,6 +442,10 @@ values:
   - value: "Sm Promo"
     category: pokemon_tcg
     rows: 5
+  - value: "Sv: Mewtwo Ex & Skeledirge Ex Terastal Starter Sets"
+    category: pokemon_tcg
+    rows: 4
+    jp_set: "スターターセット テラスタル「ミュウツーex」「ラウドボーンex」"
   - value: "Mewtwo, Greninja & Zacian V-UNION Special Card Set"
     category: pokemon_tcg
     rows: 4
@@ -534,6 +574,30 @@ values:
     category: pokemon_tcg
     rows: 3
     jp_set: "ポケモンカードゲーム 20th アニバーサリーフェスタ クラシックバトル 上位入賞"
+  - value: "M Gallade ex SAR Get Battle"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム メガエルレイドex SARゲットバトル"
+  - value: "Champions League 2027 Yokohama"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2027 横浜"
+  - value: "Champions League 2027 Chiba"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2027 千葉"
+  - value: "Champions League 2027 Miyagi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2027 宮城"
+  - value: "Champions League 2027 Osaka"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2027 大阪"
+  - value: "Champions League 2027 Aichi"
+    category: pokemon_tcg
+    rows: 3
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2027 愛知"
   - value: "Sv: Ceruledge Ex Stellar Tera Type Starter Set / Start Deck Generations / Battle Partners Deck Build Box"
     category: pokemon_tcg
     rows: 2
@@ -554,6 +618,10 @@ values:
     category: pokemon_tcg
     rows: 2
     jp_set: "ポケモンカードゲーム ピカチュウ ワールド"
+  - value: "BW First Set for Girls (Tepig Deck)"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケモンカードゲームBW はじめてセット forガール （ポカブデッキ）"
   - value: "DP Entry Pack"
     category: pokemon_tcg
     rows: 2
@@ -574,6 +642,22 @@ values:
     category: pokemon_tcg
     rows: 2
     jp_set: "ゴールデンプレゼントキャンペーン"
+  - value: "Pokemon Pan Promo Card September 2016"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケモンパン プロモカード 2016年9月"
+  - value: "Black M Gardevoir Campaign"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "熱戦にそなえろ！黒いメガサーナイトキャンペーン"
+  - value: "Pokemon Pan Promo Card (Choco / Ham Mayo)"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケモンパン「チョコパン」・「ハムマヨネーズパン」 プロモカード"
+  - value: "Gym Promo Campaign 2026 H2"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ジムプロモキャンペーン2026下半期"
   - value: "Sv: Ceruledge & Sylveon Ex Stellar Tera Type Starter Sets / Start Deck Generations / Battle Partners Deck Build Box"
     category: pokemon_tcg
     rows: 1
@@ -686,6 +770,14 @@ values:
     category: pokemon_tcg
     rows: 1
     jp_set: "映画「ミュウツーの逆襲 EVOLUTION」パンフレット"
+  - value: "BW First Set for Girls (Snivy Deck)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲームBW はじめてセット forガール （ツタージャデッキ）"
+  - value: "BW First Set for Girls (Oshawott Deck)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲームBW はじめてセット forガール （ミジュマルデッキ）"
   - value: "Pokemon New Mon! Book"
     category: pokemon_tcg
     rows: 1
@@ -802,6 +894,30 @@ values:
     category: pokemon_tcg
     rows: 1
     jp_set: "ポケモンセンターキョウト移転リニューアル記念「はなびらのまい」キャンペーン"
+  - value: "7-Eleven Summer Campaign 2014"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "セブンイレブン限定サマーキャンペーン2014"
+  - value: "Marumiya Special Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "丸美屋 スペシャルカード"
+  - value: "World Championships 2026"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンワールドチャンピオンシップス2026"
+  - value: "As-Is Deck Battle"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "デッキそのままバトル"
+  - value: "Next Generation World Hobby Fair Original Holo Card"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "次世代ワールドホビーフェア オリジナルキラカード"
+  - value: "Championship Points (2026 Season)"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "チャンピオンシップポイント（2026シーズン）"
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg
@@ -1090,7 +1206,7 @@ values:
     jp_set: "BOOSTER PACK -BLAZING AURA- [FB02]"
   - value: "New Adventure"
     category: dragonball_scg
-    rows: 357
+    rows: 355
     jp_set: "BOOSTER PACK -NEW ADVENTURE- [FB05]"
   - value: "Manga Booster 01"
     category: dragonball_scg
@@ -1120,21 +1236,21 @@ values:
     category: dragonball_scg
     rows: 191
     jp_set: "BOOSTER PACK -AWAKENED PULSE- [FB01]"
-  - value: "Saiyan's Pride"
-    category: dragonball_scg
-    rows: 188
-    jp_set: "BOOSTER PACK -SAIYAN’S PRIDE- [FB08]"
   - value: "Cross Force"
     category: dragonball_scg
     rows: 188
     jp_set: "BOOSTER PACK CROSS FORCE [FB10]"
+  - value: "Saiyan's Pride"
+    category: dragonball_scg
+    rows: 186
+    jp_set: "BOOSTER PACK -SAIYAN’S PRIDE- [FB08]"
   - value: "Brightness of Hope"
     category: dragonball_scg
     rows: 151
     jp_set: "BOOSTER PACK BRIGHTNESS OF HOPE [FB11]"
   - value: "Story Booster 01"
     category: dragonball_scg
-    rows: 135
+    rows: 139
     jp_set: "STORY BOOSTER 01 [ST01]"
   - value: "Starter Deck EX The Phase of Evolution"
     category: dragonball_scg

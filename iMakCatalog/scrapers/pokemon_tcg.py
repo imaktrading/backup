@@ -35,6 +35,17 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import api  # noqa: E402
 
+# ★出力の文字化けで **走行そのものを落とさない** (2026-09-04)。
+#   cp932 の Windows コンソールに絵文字を print しようとして UnicodeEncodeError で
+#   scraper が2回死んだ (dragonball 09-03 / pokemon 09-04)。取り込みが途中で止まり、
+#   出品に出る値の無い行が残る = いちばん厄介な壊れ方をする。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+
 # ============================================================================
 # 定数
 # ============================================================================
@@ -564,7 +575,27 @@ def scrape(
         card_ids = card_ids[:limit]
 
     counts = {"added": 0, "updated": 0, "skipped": 0, "total_processed": 0}
+
+    # ★取り込み済みの cardID を **DB から**先に引いておく (2026-09-04)。
+    #   元は「detail cache のファイルが在るか」で判定していたので、cache が無い機械では
+    #   1枚も skip されず、23,198枚を毎回1枚ずつ取り直していた (数時間 + 途中で落ちると全部やり直し)。
+    #   行には source_url = .../details.php/card/<cardID> が入っているので、それを鍵にする。
+    known: set[str] = set()
+    if mode == "update":
+        con = api._connect()
+        try:
+            for (u,) in con.execute(
+                    "SELECT source_url FROM products WHERE category=? AND source_url LIKE '%details.php/card/%'",
+                    (CATEGORY,)):
+                known.add(str(u).rstrip("/").rsplit("/", 1)[-1])
+        finally:
+            con.close()
+        print(f"  取り込み済み {len(known)} 枚は飛ばす (途中で落ちても やり直しは残りだけ)")
+
     for i, cid in enumerate(card_ids):
+        if mode == "update" and str(cid) in known:
+            counts["skipped"] += 1
+            continue
         if mode == "update":
             # Skip if already in DB (we use a placeholder check via cardID-lookup)
             # We need to check by some product_id, but we don't know it without detail.

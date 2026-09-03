@@ -27,6 +27,7 @@ import json
 import os
 import re
 import sqlite3
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -154,6 +155,16 @@ def upsert(
     Returns:
         products.id (新規/既存に関わらず)
     """
+    # ★文字は **NFC (合成形) に揃えてから**入れる (2026-09-04)。
+    #   公式から分解形 (NFD: シ+゙) で入ってくることがあり、見た目が同じでも
+    #   変換表の完全一致が永久に外れる (2026-09-04 に 224行が Set 空欄のまま残った)。
+    #   掃除は migrations/2026-09-04_nfc_normalize.py、ここは再発防止。
+    name = unicodedata.normalize("NFC", name) if name else name
+    name_jp = unicodedata.normalize("NFC", name_jp) if name_jp else name_jp
+    name_en = unicodedata.normalize("NFC", name_en) if name_en else name_en
+    set_name = unicodedata.normalize("NFC", set_name) if set_name else set_name
+    set_name_official = (unicodedata.normalize("NFC", set_name_official)
+                         if set_name_official else set_name_official)
     now = datetime.now().isoformat(timespec="seconds")
     specs_json = json.dumps(specs, ensure_ascii=False)
     images_json = json.dumps(images or [], ensure_ascii=False)
