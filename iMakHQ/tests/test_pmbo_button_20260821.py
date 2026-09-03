@@ -129,6 +129,8 @@ def test_系統ごとに並ぶ():
     """
     i = SRC.index("for _name in (")
     assert '"PSA (TCG)", "Tシャツ (UT)", "一番くじ"' in SRC[i:i + 120]
+    # 置き場所は既存メンテ (補URLは出品した後の作業)
+    assert i > SRC.index("===== 🔧 既存メンテ =====")
     # 箱の中は作業順 (当日分 → 夜間検索 → 昼の目視)
     j = SRC.index("_STEP = [")
     assert '"当日分", "夜間検索", "昼の目視"' in SRC[j:j + 120]

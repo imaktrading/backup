@@ -51,12 +51,13 @@ def test_panel_boxes_are_per_product_line_in_work_order():
     従来は 工程ごと (発見 / 出品前チェック / 補URL) の箱で、1つの箱に PSA と
     一番くじと UT が混ざり、自分の商材の次の一手が読み取れなかった。
     """
-    assert "📦 {_name} — 出品 → 出品前チェック → 補URL" in _SRC
+    assert "📦 {_name} — 補URL確保 (出品した後の作業)" in _SRC
     # 作業順 (当日分 → 夜間検索 → 昼の目視) で並べている
     i = _SRC.index("_STEP = [")
     assert '"当日分", "夜間検索", "昼の目視"' in _SRC[i:i + 120]
-    # 箱に出す商材は、上のカテゴリ一覧では二重に出さない
-    assert '_BOXED = {"PSA TCG", "Tシャツ", "一番くじ"}' in _SRC
+    # ★2026-09-03: 置き場所は **既存メンテ**。補URLは出品した後の作業なので
+    #   新規出品パネルに置くのは誤り (ユーザー指摘)。
+    assert _SRC.index("for _name in (") > _SRC.index("===== 🔧 既存メンテ =====")
 
 
 def test_ut_buttons_show_counts():

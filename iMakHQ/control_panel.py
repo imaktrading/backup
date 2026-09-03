@@ -2886,11 +2886,9 @@ class ListingPanel:
             for col in range(n_cat_cols):
                 cat_grid.columnconfigure(col, weight=1, uniform="catcol")
             gi = 0
-            # ★2026-09-03: 商材の箱 (下) に出す3つは、ここでは出さない (二重に並ぶため)
-            _BOXED = {"PSA TCG", "Tシャツ", "一番くじ"}
             for cat_name in cat_order:
                 new_idx = categories[cat_name].get("new")
-                if new_idx is None or cat_name in _BOXED:
+                if new_idx is None:
                     continue
                 # ★2026-08-18: 1セル = カテゴリボタン (+ あれば 🤖自動)。
                 #   カテゴリは type ごとに1つしか持てないので、自動は **別 type** で登録する
@@ -2911,65 +2909,10 @@ class ListingPanel:
                               command=lambda idx=auto_idx: self.run_script(idx)).pack(
                         side="left", fill="both")
                 gi += 1
-            # ★2026-09-03 ユーザー要望「商材ごとに作業順に並べて、囲って」。
-            #   従来は 工程ごと (発見 / 出品前チェック / 補URL) に箱を作っていたので、
-            #   1つの箱の中に PSA と 一番くじ と UT が混ざり、**自分の商材の次の一手**が
-            #   読み取れなかった。箱を **商材**にして、中を **作業順**に並べる。
-            def _cmd_of(i):
-                return " ".join(SCRIPTS[i].get("cmd", []))
-
-            _confirm_idx = [i for i, sc in enumerate(SCRIPTS)
-                            if "psa_hoju_fill.py" in " ".join(sc.get("cmd", []))
-                            and "confirm" in sc.get("cmd", [])]
-
-            def _line_of(i):
-                """そのボタンがどの商材のものか。分からなければ None (箱に入れない)。"""
-                c = _cmd_of(i)
-                if "ichibankuji_restock.py" in c or "kuji_hoju_fill.py" in c:
-                    return "一番くじ"
-                if "ut_hoju_fill.py" in c:
-                    return "Tシャツ (UT)"
-                if "psa_hoju_fill.py" in c or "psa_" in c:
-                    return "PSA (TCG)"
-                return None
-
-            # 商材ごとの箱。中は **作業順** (出品 → 出品前チェック → 補URL 当日 → 夜間 → 目視)。
-            _STEP = ["当日分", "夜間検索", "昼の目視"]
-
-            def _step_rank(i):
-                lab = SCRIPTS[i].get("label", "")
-                for n, key in enumerate(_STEP):
-                    if key in lab:
-                        return n
-                return len(_STEP)
-
-            _lines = {}
-            for i in list(ug["hoju"]) + _confirm_idx + list(ug["audit"]):
-                ln = _line_of(i)
-                if ln and i not in _lines.setdefault(ln, []):
-                    _lines[ln].append(i)
-
-            for _name in ("PSA (TCG)", "Tシャツ (UT)", "一番くじ"):
-                _idxs = sorted(_lines.get(_name, []), key=_step_rank)
-                _cat = categories.get({"PSA (TCG)": "PSA TCG",
-                                       "Tシャツ (UT)": "Tシャツ",
-                                       "一番くじ": "一番くじ"}[_name], {})
-                _head = [_cat.get("new")] if _cat.get("new") is not None else []
-                if _cat.get("auto") is not None:
-                    _head.append(_cat["auto"])
-                if not _head and not _idxs:
-                    continue
-                box = ttk.LabelFrame(new_sec, text=f"📦 {_name} — 出品 → 出品前チェック → 補URL",
-                                     padding=4)
-                box.pack(fill="x", pady=(8, 0))
-                _grid_named(box, [(SCRIPTS[i]["label"], i) for i in _head + _idxs], ncol=4)
-
-            # 商材に紐づかない物 (発見・巡回 / 他カテゴリの出品) は下にまとめる
-            _rest = [i for i in ug["audit"] if _line_of(i) is None]
-            if _rest:
-                aud = ttk.LabelFrame(new_sec, text="🔍 出品前チェック (商材共通)", padding=4)
+            if ug["audit"]:
+                aud = ttk.LabelFrame(new_sec, text="🔍 出品前チェック (CSV生成後に実行)", padding=4)
                 aud.pack(fill="x", pady=(8, 0))
-                _grid_named(aud, [(SCRIPTS[i]["label"], i) for i in _rest])
+                _grid_named(aud, [(SCRIPTS[i]["label"], i) for i in ug["audit"]])
             if ug["discover"]:
                 disc = ttk.LabelFrame(new_sec, text="🔭 発見・巡回 (新規ネタ探し)", padding=4)
                 disc.pack(fill="x", pady=(8, 0))
@@ -3053,6 +2996,60 @@ class ListingPanel:
                 pass
 
             # 📊 分析 (押すと結果ファイルが開く)
+            # ★2026-09-03 ユーザー要望「商材ごとに作業順に並べて、囲って」。
+            #   従来は 工程ごと (発見 / 出品前チェック / 補URL) に箱を作っていたので、
+            #   1つの箱の中に PSA と 一番くじ と UT が混ざり、**自分の商材の次の一手**が
+            #   読み取れなかった。箱を **商材**にして、中を **作業順**に並べる。
+            def _cmd_of(i):
+                return " ".join(SCRIPTS[i].get("cmd", []))
+
+            _confirm_idx = [i for i, sc in enumerate(SCRIPTS)
+                            if "psa_hoju_fill.py" in " ".join(sc.get("cmd", []))
+                            and "confirm" in sc.get("cmd", [])]
+
+            def _line_of(i):
+                """そのボタンがどの商材のものか。分からなければ None (箱に入れない)。"""
+                c = _cmd_of(i)
+                if "ichibankuji_restock.py" in c or "kuji_hoju_fill.py" in c:
+                    return "一番くじ"
+                if "ut_hoju_fill.py" in c:
+                    return "Tシャツ (UT)"
+                if "psa_hoju_fill.py" in c or "psa_" in c:
+                    return "PSA (TCG)"
+                return None
+
+            # 商材ごとの箱。中は **作業順** (出品 → 出品前チェック → 補URL 当日 → 夜間 → 目視)。
+            _STEP = ["当日分", "夜間検索", "昼の目視"]
+
+            def _step_rank(i):
+                lab = SCRIPTS[i].get("label", "")
+                for n, key in enumerate(_STEP):
+                    if key in lab:
+                        return n
+                return len(_STEP)
+
+            _lines = {}
+            for i in list(ug["hoju"]) + _confirm_idx + list(ug["audit"]):
+                ln = _line_of(i)
+                if ln and i not in _lines.setdefault(ln, []):
+                    _lines[ln].append(i)
+
+            for _name in ("PSA (TCG)", "Tシャツ (UT)", "一番くじ"):
+                _idxs = sorted(_lines.get(_name, []), key=_step_rank)
+                _cat = categories.get({"PSA (TCG)": "PSA TCG",
+                                       "Tシャツ (UT)": "Tシャツ",
+                                       "一番くじ": "一番くじ"}[_name], {})
+                _head = [_cat.get("new")] if _cat.get("new") is not None else []
+                if _cat.get("auto") is not None:
+                    _head.append(_cat["auto"])
+                if not _head and not _idxs:
+                    continue
+                box = ttk.LabelFrame(scroll_frame, text=f"📦 {_name} — 補URL確保 (出品した後の作業)",
+                                     padding=4)
+                box.pack(fill="x", pady=(8, 0))
+                _grid_named(box, [(SCRIPTS[i]["label"], i) for i in _head + _idxs], ncol=4)
+
+
             ana = ttk.LabelFrame(scroll_frame, text="📊 分析 (押すと結果ファイルが開く)", padding=4)
             ana.pack(fill="x", padx=4, pady=(4, 0))
             _grid_named(ana, [(SCRIPTS[i]["label"], i) for i in ug["analyze"]])
