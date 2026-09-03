@@ -334,6 +334,51 @@ def listed_today_amount(csv_dir=CSV_DIR, today=None):
     return total
 
 
+
+EVICTED_LOG = r"C:/dev/iMak_data/hq/shelf_evicted_log.json"
+
+
+def evicted_today_amount(today=None, path=None):
+    """今日すでに棚で落とした額 (I/O)。読めなければ 0。
+
+    ★2026-09-03: 目標は「今日の出品額」なので、**押すたびに同じ額が落ちていた**
+      (実測: 空欄で2回押して $14,939 + $15,624 = 出品額の2倍)。
+      落とした分を覚えて、2回目からは残りだけにする。
+    """
+    import json as _j
+    today = (today or datetime.date.today()).isoformat()
+    try:
+        with io.open(path or EVICTED_LOG, encoding="utf-8") as f:
+            return _f((_j.load(f) or {}).get(today, 0))
+    except Exception:                                          # noqa: BLE001
+        return 0.0
+
+
+def remember_evicted(amount, today=None, path=None):
+    """落とした額を今日ぶんに足す。書けなくても処理は止めない。"""
+    import json as _j
+    path = path or EVICTED_LOG
+    today = (today or datetime.date.today()).isoformat()
+    try:
+        try:
+            with io.open(path, encoding="utf-8") as f:
+                data = _j.load(f) or {}
+        except Exception:                                      # noqa: BLE001
+            data = {}
+        data[today] = _f(data.get(today, 0)) + _f(amount)
+        for old in sorted(data)[:-14]:
+            data.pop(old, None)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "w", encoding="utf-8") as f:
+            _j.dump(data, f, ensure_ascii=False, indent=1, sort_keys=True)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+def remaining_target(listed, evicted, ratio=RATIO):
+    """今日あと いくら落としてよいか (純関数)。マイナスは0。"""
+    return max(0.0, listed * ratio - evicted)
+
 # ★落とさないカテゴリ (2026-08-28 ユーザー確定)。
 #   アパレル (UNIQLO/GU) はバリエーション出品で、**公式在庫が戻れば監視くんが数量を戻す**。
 #   出品が生きていれば復活できるが、**取り下げると戻せない** (出し直しになる)。
@@ -627,7 +672,16 @@ def main():
         pass
 
     listed = listed_today_amount()
-    target = a.amount if a.amount is not None else listed * a.ratio
+    if a.amount is not None:
+        target = a.amount
+    else:
+        # ★2026-09-03: 目標が「今日の出品額」だけだと、**押すたびに同じ額が落ちる**
+        #   (実測: 空欄で2回押して $14,939 + $15,624 = 出品額の2倍)。
+        #   今日すでに落とした分を引いて、残りだけにする。
+        _done_today = evicted_today_amount()
+        target = remaining_target(listed, _done_today, a.ratio)
+        if _done_today:
+            print(f"  ℹ 今日すでに ${_done_today:,.0f} 落としています → 残り ${target:,.0f}")
     print(f"今日の出品額 ${listed:,.0f} × {a.ratio} = **落とす目標 ${target:,.0f}**")
 
     # ★まず live 一覧で ①(数量0) を埋める。ここはレポートもファネルも要らず常に最新。
@@ -742,6 +796,8 @@ def main():
     #   落ちていないものは「要対応」として残す (状態同期の安全原則)。
     ok = _verify_ended(ok)
     if ok:
+        remember_evicted(sum(shelf_of(r) for _t, r in picked
+                             if r["item_id"] in set(ok)))
         import cull_writeback as CW
         n = CW.apply(set(ok), commit=True)
         print(f"▶ スプシ更新 → {n}行 (B列を空 + Q列に印)")
