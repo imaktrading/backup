@@ -154,19 +154,42 @@ def test_ended_listing_is_not_revised():
     assert skip["残数0"] == 1
 
 
-def test_revise_xml_only_touches_set_and_title():
-    """触る項目だけ送る (他を送らない = 今の値が残る)。"""
-    x = M.revise_item_xml("820077373966", "S12a: Vstar Universe")
+def test_revise_xml_touches_only_set_title_and_nothing_else():
+    """価格や数量は送らない (触らない項目は今の値が残る)。"""
+    x = M.revise_item_xml("820077373966", "S12a: Vstar Universe",
+                          aspects={"Game": ["Pokémon TCG"]})
     assert "<ItemID>820077373966</ItemID>" in x
     assert "<Name>Set</Name><Value>S12a: Vstar Universe</Value>" in x
     assert "<Title>" not in x
     assert "Price" not in x and "Quantity" not in x
-    x2 = M.revise_item_xml("1", "S12a: Vstar Universe", "PSA 10 Pokemon S12a")
+    x2 = M.revise_item_xml("1", "S12a: Vstar Universe", "PSA 10 Pokemon S12a",
+                           aspects={"Game": ["Pokémon TCG"]})
     assert "<Title>PSA 10 Pokemon S12a</Title>" in x2
 
 
 def test_revise_xml_escapes_ampersand():
     """`&` を素で入れると XML が壊れて revise が落ちる。"""
-    x = M.revise_item_xml("1", "Sv: Marnie's Morpeko & Grimmsnarl Ex")
+    x = M.revise_item_xml("1", "Sv: Marnie's Morpeko & Grimmsnarl Ex",
+                          aspects={"Game": ["Pokémon TCG"]})
     assert "&amp;" in x
     assert "Morpeko & Grim" not in x
+
+
+def test_revise_sends_every_existing_aspect_back():
+    """Item Specifics は丸ごと入れ替え。Set だけ送ると他が消えたと判定されて弾かれる
+    (2026-09-03 実測: 'The item specific Game is missing' で Failure)。"""
+    asp = {"Game": ["Pokémon TCG"], "Brand": ["Pokémon"], "Set": ["古い値"],
+           "Features": ["Holo", "1st Edition"]}
+    x = M.revise_item_xml("1", "S12a: Vstar Universe", aspects=asp)
+    assert "<Name>Game</Name><Value>Pokémon TCG</Value>" in x
+    assert "<Name>Brand</Name>" in x
+    assert "<Value>S12a: Vstar Universe</Value>" in x
+    assert "古い値" not in x                      # Set は差し替わる
+    assert x.count("<Value>Holo</Value>") == 1    # 複数値はそのまま複数で送る
+    assert "<Value>1st Edition</Value>" in x
+
+
+def test_revise_without_aspects_sends_no_item_specifics():
+    """今の値が読めない時は Item Specifics を一切送らない (消さない)。"""
+    x = M.revise_item_xml("1", "S12a: Vstar Universe")
+    assert "<ItemSpecifics>" not in x

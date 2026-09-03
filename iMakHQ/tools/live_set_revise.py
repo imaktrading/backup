@@ -293,17 +293,58 @@ def _esc(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def revise_item_xml(item_id, new_set, new_title=None):
+def revise_item_xml(item_id, new_set, new_title=None, aspects=None):
     """ReviseFixedPriceItem に渡す <Item> を組む。純関数。
 
-    **触る項目だけ送る**。他は送らないので今の値のまま残る。
+    ★Item Specifics は **差分ではなく丸ごと入れ替え**になる。Set だけ送ると
+    「Game / Brand などが無い」と言われて弾かれる (2026-09-03 実測 ErrorCode 21919303)。
+    だから `aspects` に **今ある項目を全部**渡し、Set だけ差し替えて送る。
+    aspects が無ければ Item Specifics を一切送らない (= 触らない)。
     """
     parts = [f"<ItemID>{item_id}</ItemID>"]
     if new_title:
         parts.append(f"<Title>{_esc(new_title)}</Title>")
-    parts.append("<ItemSpecifics><NameValueList><Name>Set</Name>"
-                 f"<Value>{_esc(new_set)}</Value></NameValueList></ItemSpecifics>")
+    if aspects:
+        merged = {k: list(v) for k, v in aspects.items() if v}
+        merged["Set"] = [new_set]
+        nv = "".join(
+            f"<NameValueList><Name>{_esc(n)}</Name>"
+            + "".join(f"<Value>{_esc(x)}</Value>" for x in vals)
+            + "</NameValueList>"
+            for n, vals in merged.items())
+        parts.append(f"<ItemSpecifics>{nv}</ItemSpecifics>")
     return "<Item>" + "".join(parts) + "</Item>"
+
+
+def fetch_aspects(item_id):
+    """親の Item Specifics を丸ごと読む (revise で送り返すため)。取れなければ None。"""
+    import requests
+    try:
+        k = _load_keys()
+        hdr = {"X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
+               "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT,
+               "X-EBAY-API-APP-NAME": k["AppID"], "X-EBAY-API-DEV-NAME": k["DevID"],
+               "X-EBAY-API-CERT-NAME": k["AppSecret"], "Content-Type": "text/xml"}
+        body = ('<?xml version="1.0" encoding="utf-8"?>'
+                '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
+                "<RequesterCredentials><eBayAuthToken>"
+                f"{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
+                f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel>"
+                "<IncludeItemSpecifics>true</IncludeItemSpecifics></GetItemRequest>")
+        x = decode_xml(requests.post(EP, data=body.encode("utf-8"),
+                                     headers=hdr, timeout=40).content)
+        _record_call("GetItem")
+        head = x.split("<Variations>")[0]
+        out = {}
+        for m in re.finditer(r"<NameValueList>(.*?)</NameValueList>", head, re.S):
+            b = m.group(1)
+            n = re.search(r"<Name>(.*?)</Name>", b, re.S)
+            if n:
+                out[norm(n.group(1))] = [norm(v)
+                                         for v in re.findall(r"<Value>(.*?)</Value>", b, re.S)]
+        return out or None
+    except Exception:
+        return None
 
 
 def send_revisions(fix, with_title=False, limit=0):
@@ -316,8 +357,12 @@ def send_revisions(fix, with_title=False, limit=0):
     tok = fx.token()
     ok, ng = [], []
     for n, f in enumerate(todo, 1):
+        asp = fetch_aspects(f["itemID"])
+        if not asp:
+            ng.append((f["itemID"], "今の Item Specifics が読めない → 送らない"))
+            continue
         xml = revise_item_xml(f["itemID"], f["new_set"],
-                              f.get("new_title") if with_title else None)
+                              f.get("new_title") if with_title else None, aspects=asp)
         done = False
         for attempt in (1, 2):
             resp = fx.post("ReviseFixedPriceItem", xml, tok, site="0")
@@ -338,6 +383,26 @@ def send_revisions(fix, with_title=False, limit=0):
         if n % 20 == 0 or n == len(todo):
             print(f"    送信 {n}/{len(todo)} (OK {len(ok)} / NG {len(ng)})", flush=True)
     return ok, ng
+
+
+def refetch(item_ids):
+    """送った分だけ eBay から読み直す (cache を捨てて取り直し、cache も更新する)。
+
+    ★送りっぱなしにしない (状態同期の安全原則)。cache を見たままだと
+    「送った = 直った」と思い込むことになる。
+    """
+    if not item_ids:
+        return {}
+    cache = {}
+    if os.path.exists(CACHE_PATH):
+        try:
+            cache = json.load(open(CACHE_PATH, encoding="utf-8"))
+        except Exception:
+            cache = {}
+    for iid in item_ids:
+        cache.pop(iid, None)
+    json.dump(cache, open(CACHE_PATH, "w", encoding="utf-8"), ensure_ascii=False)
+    return fetch_live(item_ids)
 
 
 def load_targets(category=None):
@@ -434,8 +499,41 @@ def main():
     for (lv, nv), n in sorted(pairs.items(), key=lambda x: -x[1])[:15]:
         print(f"    {n:4}  '{lv}' → '{nv}'")
 
+    if a.send:
+        if not fix:
+            print("\nずれ 0件 → 送るものはありません")
+            return
+        todo = fix[:a.limit] if a.limit else fix
+        print(f"\n▶ eBay に送ります: {len(todo)}件"
+              + (" (タイトルも)" if a.with_title else " (C:Set だけ)"))
+        ok, ng = send_revisions(fix, with_title=a.with_title, limit=a.limit)
+        print(f"  送信 OK {len(ok)} / NG {len(ng)}")
+        for iid, why in ng:
+            print(f"    ✗ {iid}: {why}")
+        # ★送りっぱなしにしない: その場で実状態を読み直して照合する
+        print("\n▶ 実状態を読み直して照合します...")
+        after = refetch(ok) if ok else {}
+        bad = []
+        for f in todo:
+            if f["itemID"] not in ok:
+                continue
+            g = after.get(f["itemID"]) or {}
+            if norm(g.get("set")) != norm(f["new_set"]):
+                bad.append((f["itemID"], norm(g.get("set")), f["new_set"]))
+        if bad:
+            print(f"  ⚠️ 反映を確認できない: {len(bad)}件 (**要対応**)")
+            for iid, got, want in bad:
+                print(f"    ✗ {iid}: eBay='{got}' 期待='{want}'")
+        elif ok:
+            print(f"  ✅ {len(ok)}件すべて反映を確認しました")
+        else:
+            print("  送れた件が無いので照合対象もありません")
+        if ng or bad:
+            print("\n⚠️ 未完了があります。完了ではありません。")
+        return
+
     if not (a.test or a.all):
-        print("\n(数えただけ。CSV を作るなら --test か --all)")
+        print("\n(数えただけ。CSV を作るなら --test か --all / 送るなら --send)")
         return
     if not fix:
         print("\nずれ 0件 → CSV は作りません")
