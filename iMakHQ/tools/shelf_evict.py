@@ -96,7 +96,7 @@ def _f(v):
 
 
 def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIES,
-            max_age=None):
+            max_age=None, restock_pending=None):
     """その出品を落とす順の何番に置くか。触らないものは None (純関数, test可)。
 
     ★2026-08-26 ユーザー確定:
@@ -106,6 +106,13 @@ def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIE
         根拠は STALE_CATEGORIES のコメント。落とす順は **空く額の大きい順**
         (TCG 30日超ではアクセスの多寡で売却率が変わらないため)。
     """
+    if restock_pending and str(row.get("item_id") or row.get("itemID") or "").strip() \
+            in restock_pending:
+        # ★2026-09-03: 再仕入れが「仕入元を見つけた、これから数量を戻す」と決めた出品。
+        #   ①(数量0)は需要を見ないので、放っておくと **戻す直前の出品を落とす**。
+        #   実測: 戻す予定12件のうち8件が①の対象に入っていた。
+        #   取下げ(CULL)は「生涯ずっと需要ゼロ」に限るので、こちらとは元々重ならない。
+        return None
     if _f(row.get("qty")) == 0:
         return TIER_OOS                   # 買えないので稼ぎようがない (全カテゴリ)
     if _f(row.get("sold_qty")) + _f(row.get("sales90")) > 0:
@@ -123,6 +130,39 @@ def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIE
 
 DESK = r"C:\Users\imax2\OneDrive\デスクトップ"
 PROMO_GLOB = r"C:/dev/iMak_data/seller_hub/reports/**/*promoted*.csv"
+
+
+def restock_pending_ids():
+    """再仕入れが「これから数量を戻す」と決めている itemID (I/O)。読めなければ空集合。
+
+    ★2026-09-03: ①(数量0)は需要を見ないので、**戻す直前の出品を落としていた**
+      (実測: 戻す予定12件のうち8件が①の対象)。ここで除く。
+      読めない時は空集合 = 従来どおりの動き (棚を止めない)。
+    """
+    try:
+        sys.path.insert(0, os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakeBayAPI")))
+        from sheet_io import read_tab
+        import psa_restock_writeback as W
+        rows = read_tab("RESTOCK確定")
+        if not rows or len(rows) < 2:
+            return set()
+        h = rows[0]
+        ii = h.index("itemID") if "itemID" in h else 0
+        si = h.index("RESTOCK状態") if "RESTOCK状態" in h else None
+        out = set()
+        for r in rows[1:]:
+            iid = (r[ii] if ii < len(r) else "").strip()
+            if not iid:
+                continue
+            st = (r[si] if (si is not None and si < len(r)) else "") or ""
+            if W.ST_DONE in st or W.ST_ENDED in st:
+                continue          # 既に戻した / 出品が終了している = 守る必要が無い
+            out.add(iid)
+        return out
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 再仕入れ予定の読み取りskip ({type(e).__name__}) → 従来どおり選びます")
+        return set()
 
 
 def load_clicks(pattern=PROMO_GLOB):
@@ -201,7 +241,7 @@ def write_candidates(picked, shelf_of, cat_of=None, path=None, clicks=None):
         return ""
 
 
-def pick(rows, target, shelf_of, cat_of=None, only_tier=None):
+def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=None):
     """目標額に届くまで、順位の上から選ぶ。戻り: (選んだ行, 空く額) 純関数, test可。
 
     ①② とも **空く額の大きい順**。1件で空く額が大きいほうが先。
@@ -215,7 +255,8 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None):
     """
     cand = []
     for r in rows:
-        t = tier_of(r, category=(cat_of(r) if cat_of else None))
+        t = tier_of(r, category=(cat_of(r) if cat_of else None),
+                    restock_pending=restock_pending)
         if t is None:
             continue
         # ★2026-09-02 ユーザー指示: **在庫ありの取下げはボタンを分ける**。
@@ -424,7 +465,8 @@ def count_workload():
             else:
                 shelf_of = fshelf
 
-        picked, total = pick(rows, target, shelf_of, cat_of)
+        picked, total = pick(rows, target, shelf_of, cat_of,
+                             restock_pending=restock_pending_ids())
         byt = collections.Counter(t for t, _r in picked)
         out.update(picked=len(picked), amount=total,
                    tier1=byt.get(TIER_OOS, 0), tier2=byt.get(TIER_STALE, 0))
@@ -471,13 +513,17 @@ def main():
         def shelf_of(row, _l=_live_shelf, _f2=fshelf):            # noqa: F811
             return _l(row) if "_mirror" in row else _f2(row)
 
-    print(f"対象: 仕入元が死んでいるもの(全カテゴリ) → {'/'.join(STALE_CATEGORIES)} の"
-          f"出品{MIN_AGE_DAYS}日超・未販売を アクセスの少ない順")
+    print("対象: 仕入元が死んでいるもの(全カテゴリ) → "
+          f"{'/'.join(STALE_CATEGORIES)} の 期限超え・未販売を 空く額の大きい順")
     if target <= 0:
         print("  今日はまだ出品していないので、落とす分もありません")
         return 0
+    _keep = restock_pending_ids()
+    if _keep:
+        print(f"  🛡 再仕入れが戻す予定の {len(_keep)}件 は落としません")
     picked, total = pick(rows, target, shelf_of, cat_of,
-                         only_tier=(int(a.tier) if getattr(a, "tier", None) else None))
+                         only_tier=(int(a.tier) if getattr(a, "tier", None) else None),
+                         restock_pending=_keep)
     if not picked:
         print("  落とせる候補がありません")
         return 0
