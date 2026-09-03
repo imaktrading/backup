@@ -65,6 +65,7 @@ from sheet_updater import (  # noqa: E402
     read_listings_rows,
     is_restockable_url,
     resolve_pricing_category,
+    NOT_LISTED_ITEM_ID,
 )
 
 
@@ -183,6 +184,25 @@ def prune_unresolvable_pending_revive(skipped: list) -> int:
         archive_path=DISCARDED_REVIVE_FILE,
         stamp_field="discarded_at",
         stamp_extra={"discard_reason": "row_not_found_by_item_id_expired"},
+    )
+
+
+def prune_not_listed_pending_revive() -> int:
+    """itemID="9999" (= 出品しないと決めた行) の entry を queue から退避する。
+
+    ★ 2026-09-04: 出品が存在しないので復活のしようがなく、queue に永久滞留していた
+      (44 件中 24 件、URL 4 本が 8/09 から毎 cycle 積み増し)。入口 (monitor_listings.
+      confirm_and_enqueue_revive) でも弾くが、既存分と取りこぼしをここで掃除する。
+      証跡は discarded_revive.jsonl に残す (silent drop 禁止)。
+    """
+    if not PENDING_REVIVE_FILE.exists():
+        return 0
+    return remove_entries(
+        PENDING_REVIVE_FILE,
+        lambda e: (e.get("item_id") or "").strip() == NOT_LISTED_ITEM_ID,
+        archive_path=DISCARDED_REVIVE_FILE,
+        stamp_field="discarded_at",
+        stamp_extra={"discard_reason": "not_listed_item_id_9999"},
     )
 
 
@@ -865,6 +885,9 @@ def run(
             n_pruned = prune_unresolvable_pending_revive(skipped)
             if n_pruned:
                 print(f"  [prune] 解決不能な pending entry {n_pruned} 件を archive へ退避")
+            n_not_listed = prune_not_listed_pending_revive()
+            if n_not_listed:
+                print(f"  [prune] 出品しない行 (itemID=9999) {n_not_listed} 件を archive へ退避")
         except Exception as e:
             print(f"  [!] pending_revive prune 失敗: {type(e).__name__}: {e}")
 

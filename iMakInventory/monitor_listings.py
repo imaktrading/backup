@@ -69,6 +69,7 @@ from sheet_updater import (  # noqa: E402
     _domain_of,
     ensure_listings_err_header,
     is_one_off_url,
+    NOT_LISTED_ITEM_ID,
 )
 from err_flag import (  # noqa: E402
     build_err_marker, marker_count, PERSISTENT_THRESHOLD, DEAD_SOURCE_THRESHOLD,
@@ -813,7 +814,11 @@ def confirm_and_enqueue_revive(
     observed_ids = set()
     for r in results:
         iid = (r.get("item_id") or "").strip()
-        if not iid:
+        # ★ 2026-09-04: itemID="9999" = 出品しないと決めた行 (出品が存在しない)。
+        #   復活させる出品が無いので queue に積んでも永久に消化されず、同じ URL が
+        #   毎 cycle 積み上がるだけだった (9/04 時点 pending_revive 44 件中 24 件、
+        #   URL 4 本が 8/09 から滞留)。入口で弾く。
+        if not iid or iid == NOT_LISTED_ITEM_ID:
             continue
         observed_ids.add(iid)
         delta = r.get("delta")

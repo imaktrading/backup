@@ -70,6 +70,9 @@ LISTINGS_GID = 851100680  # 商品管理シート タブ (両 spreadsheet で共
 #                 AC-AG=補 URL 1〜5 (HIGH のみ、2026-05-10 追加 / multi-sourcing fallback)
 LISTINGS_COL_URL = 1          # A: 仕入元 URL (Mercari/Amazon)
 LISTINGS_COL_ITEM_ID = 2      # B: eBay listing ID
+# ★ B 列 = "9999" は「値段が高い等で eBay に出さないと決めた行」の FLG (出品は存在しない)。
+#   placeholder の置換漏れではないので、出品を前提にする処理 (復活/取下げ) からは除外する。
+NOT_LISTED_ITEM_ID = "9999"
 LISTINGS_COL_TITLE = 3        # C: タイトル (日本語)
 LISTINGS_COL_SOLD = 4         # D: 売り切れ ← Inventory が "○" を書く
 LISTINGS_COL_PRICE = 6        # F: 出品時の価格 (¥) ← 触らない (履歴保存)

@@ -243,3 +243,31 @@ def test_last_run_state_never_written_to_production_dir(tmp_path):
         assert (tmp_path / rg.LAST_REVIVE_RUN_NAME).exists()
     after = prod.read_text(encoding="utf-8") if prod.exists() else None
     assert after == before, "本番の revive_last_run.json を書き換えている"
+
+
+def test_prune_not_listed_pending_revive_moves_9999_to_discarded(tmp_path, monkeypatch):
+    """★ 2026-09-04: 既存の itemID=9999 entry は discarded archive へ退避して queue から消す。"""
+    import json as _json
+    import ebay_actions.revive_csv_generator as RG
+
+    pending = tmp_path / "pending_revive.jsonl"
+    discarded = tmp_path / "discarded_revive.jsonl"
+    rows = [
+        {"ts": "2026-08-09T10:00:00", "sheet": "HIGH", "row_index": 5,
+         "url": "https://amazon.co.jp/dp/X", "item_id": "9999", "title": "出品しない行"},
+        {"ts": "2026-09-03T10:00:00", "sheet": "HIGH", "row_index": 6,
+         "url": "https://jp.mercari.com/item/m1", "item_id": "358849557579", "title": "実在出品"},
+    ]
+    pending.write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                       encoding="utf-8")
+    monkeypatch.setattr(RG, "PENDING_REVIVE_FILE", pending)
+    monkeypatch.setattr(RG, "DISCARDED_REVIVE_FILE", discarded)
+
+    assert RG.prune_not_listed_pending_revive() == 1
+
+    left = [_json.loads(x) for x in pending.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert [e["item_id"] for e in left] == ["358849557579"]
+    arch = [_json.loads(x) for x in discarded.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert arch[0]["item_id"] == "9999"
+    assert arch[0]["discard_reason"] == "not_listed_item_id_9999"
+    assert arch[0].get("discarded_at")

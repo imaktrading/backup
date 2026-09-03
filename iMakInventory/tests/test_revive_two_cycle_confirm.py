@@ -141,3 +141,37 @@ def test_dry_run_does_not_write_state_or_pending(tmp_path, monkeypatch):
     # state は書かれない (実巡回時に始めて記録される)
     assert not state_p.exists()
     assert not pending_p.exists()
+
+
+def test_not_listed_item_id_9999_never_enqueued(tmp_path, monkeypatch):
+    """★ 2026-09-04: itemID="9999" (出品しないと決めた行) は復活 queue に入れない。
+
+    出品が存在しないので復活のしようがなく、 queue に積むと永久滞留する
+    (9/04 実測: pending_revive 44 件中 24 件が 9999、 URL 4 本が 8/09 から蓄積)。
+    """
+    pending_p = tmp_path / "pending_revive.jsonl"
+    state_p = tmp_path / "newly_in_stock_state.json"
+    monkeypatch.setattr(ML, "PENDING_REVIVE_FILE", pending_p)
+    monkeypatch.setattr(ML, "NEWLY_IN_STOCK_STATE_FILE", state_p)
+    monkeypatch.setattr(ML, "DECISION_LOG_DIR", tmp_path)
+
+    # 1 cycle 目: state にすら載せない
+    stats = ML.confirm_and_enqueue_revive(
+        "HIGH", [_r("9999", delta="newly_in_stock", is_sold=False)], dry_run=False)
+    assert stats["first_seen"] == 0
+    assert not pending_p.exists()
+
+    # 2 cycle 目 (在庫継続) でも enqueue されない
+    stats = ML.confirm_and_enqueue_revive(
+        "HIGH", [_r("9999", delta="newly_in_stock", is_sold=False)], dry_run=False)
+    assert stats["promoted"] == 0
+    assert not pending_p.exists()
+
+    # 実在 itemID は従来どおり 2 cycle で enqueue される (弾きすぎていない)
+    ML.confirm_and_enqueue_revive(
+        "HIGH", [_r("IID_REAL", delta="newly_in_stock", is_sold=False)], dry_run=False)
+    stats = ML.confirm_and_enqueue_revive(
+        "HIGH", [_r("IID_REAL", delta="newly_in_stock", is_sold=False)], dry_run=False)
+    assert stats["promoted"] == 1
+    entries = [json.loads(x) for x in pending_p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert [e["item_id"] for e in entries] == ["IID_REAL"]
