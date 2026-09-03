@@ -3645,12 +3645,17 @@ class ListingPanel:
             #   ここで直接 import すると tools/ が見えず、毎回「取得できず」になっていた。
             _ut = (w0.get("ut") or {}) if isinstance(w0, dict) else {}
             if _ut.get("error"):
-                ut_s_txt = ut_c_txt = "\n(残件 取得できず: %s)" % str(_ut["error"])[:40]
+                ut_s_txt = ut_c_txt = ut_rs_txt = ut_rc_txt = (
+                    "\n(残件 取得できず: %s)" % str(_ut["error"])[:40])
             else:
                 ut_s_txt = "\n探せる %s件" % _ut.get("search", 0)
                 ut_c_txt = "\n目視できる %s件" % _ut.get("confirm", 0)
                 if not _ut.get("confirm"):
-                    ut_c_txt += "\n※先に 夜間検索 を押す"
+                    ut_c_txt += "\n※先に ② 夜に探す を押す"
+                ut_rs_txt = "\n探せる %s件 (売り切れ)" % _ut.get("restock_search", 0)
+                ut_rc_txt = "\n目視できる %s件" % _ut.get("restock_confirm", 0)
+                if not _ut.get("restock_confirm"):
+                    ut_rc_txt += "\n※先に ① 探す を押す"
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
                        "ut_restock_search": ut_rs_txt,

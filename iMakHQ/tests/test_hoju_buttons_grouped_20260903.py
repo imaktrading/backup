@@ -115,3 +115,19 @@ def test_ut_count_is_computed_in_the_shared_subprocess():
     # パネル側は集計結果から読むだけ (直接 import しない)
     assert 'import ut_hoju_fill as _uh' not in _SRC
     assert '_ut = (w0.get("ut") or {})' in _SRC
+
+
+def test_badge_texts_are_defined_on_every_path():
+    """件数の文字列が **どの分岐でも** 定義されていること。
+
+    ★2026-09-03 実害: UT の再仕入れ2つを足した時、エラー時の分岐でしか代入しておらず
+      正常時に NameError。ボタンの件数が「取得に失敗」になった (2回発生)。
+      by_kind に渡す名前は、その手前で必ず両方の分岐に現れる。
+    """
+    i = _SRC.index("by_kind = {")
+    head = _SRC[max(0, i - 2500):i]
+    names = re.findall(r'"[\w]+": (\w+_txt)', _SRC[i:i + 1400])
+    for n in sorted(set(names)):
+        if not n.startswith("ut_"):
+            continue                      # UT 以外は別ブロックで定義される
+        assert re.search(r"\b%s\s*=" % n, head), f"{n} が代入されていない"
