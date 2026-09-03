@@ -38,6 +38,37 @@ def test_ut_search_does_not_write_to_the_sheet():
 
 
 def test_panel_splits_the_three_product_lines():
-    assert '"PSA (TCG)": []' in _SRC or '_buckets = {"PSA (TCG)"' in _SRC
-    assert "UT (Tシャツ)" in _SRC
-    assert "一番くじ" in _SRC
+    """商材ごとに箱を作っている (PSA / UT / 一番くじ)。"""
+    i = _SRC.index('for _name in (')
+    assert '"PSA (TCG)", "Tシャツ (UT)", "一番くじ"' in _SRC[i:i + 120]
+    # どのボタンがどの商材かを判定している
+    assert "def _line_of(" in _SRC
+
+
+def test_panel_boxes_are_per_product_line_in_work_order():
+    """★2026-09-03 ユーザー要望「商材ごとに作業順に並べて、囲って」。
+
+    従来は 工程ごと (発見 / 出品前チェック / 補URL) の箱で、1つの箱に PSA と
+    一番くじと UT が混ざり、自分の商材の次の一手が読み取れなかった。
+    """
+    assert "📦 {_name} — 出品 → 出品前チェック → 補URL" in _SRC
+    # 作業順 (当日分 → 夜間検索 → 昼の目視) で並べている
+    i = _SRC.index("_STEP = [")
+    assert '"当日分", "夜間検索", "昼の目視"' in _SRC[i:i + 120]
+    # 箱に出す商材は、上のカテゴリ一覧では二重に出さない
+    assert '_BOXED = {"PSA TCG", "Tシャツ", "一番くじ"}' in _SRC
+
+
+def test_ut_buttons_show_counts():
+    """ヒントに件数を出し、押す価値がある時だけ青にする。"""
+    assert '"badge": "ut_search"' in _SRC
+    assert '"badge": "ut_confirm"' in _SRC
+    assert '"ut_search": ut_s_txt' in _SRC
+    assert '"ut_search": bool(_ut.get("search"))' in _SRC
+    assert '"ut_confirm": bool(_ut.get("confirm"))' in _SRC
+
+
+def test_every_ut_button_has_a_hint():
+    for lab in ('🔎 UT 補URL 夜間検索', '🩹 UT 補URL 昼の目視'):
+        i = _SRC.index('"label": "%s"' % lab)
+        assert '"tip"' in _SRC[i:i + 800], lab

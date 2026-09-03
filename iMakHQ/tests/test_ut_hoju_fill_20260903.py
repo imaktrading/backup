@@ -115,3 +115,12 @@ def test_writes_only_after_the_visual_check():
     # search は貯めるだけ (スプシに書かない)
     s = src.index("def search(")
     assert "write_aux_urls" not in src[s:i]
+
+
+def test_count_workload_does_not_scrape():
+    """ラベルの件数計算でメルカリを叩かない (表示のために時間を使わない)。"""
+    src = open(os.path.join(_HQ_TOOLS, "ut_hoju_fill.py"), encoding="utf-8").read()
+    i = src.index("def count_workload(")
+    body = src[i:]
+    assert "_new_driver" not in body
+    assert "SEARCH_URL" not in body

@@ -331,3 +331,27 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def count_workload(today=None):
+    """『押したら何件できるか』を **検索なし** で数える (パネルのラベル用)。
+
+    ★ここでメルカリを叩かない。表示のための取得で時間を使わない (PSA 側と同じ設計)。
+    戻り: {"search": 探せる件数, "confirm": 目視できる件数, "error": 読めなかった理由}
+    """
+    import datetime
+    out = {"search": 0, "confirm": 0, "error": ""}
+    try:
+        import sheet_io
+        today = (today or datetime.date.today()).isoformat()
+        targets = select_targets(sheet_io._product_ws().get_all_values())
+        out["search"] = sum(1 for t in targets
+                            if t["keyword"] and t["size"] and t["size"] != "KIDS")
+        live = {t["itemID"] for t in targets}
+        cache = load_cache()
+        out["confirm"] = sum(1 for iid, c in cache.items()
+                             if iid in live and c.get("date") == today
+                             and c.get("candidates"))
+    except Exception as e:                                     # noqa: BLE001
+        out["error"] = f"{type(e).__name__}: {e}"[:60]
+    return out

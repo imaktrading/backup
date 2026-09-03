@@ -123,16 +123,15 @@ def test_ヒントが出せなくてもボタンは動く():
 def test_系統ごとに並ぶ():
     """★「ボタン配置が、PSA、一番くじ、一番くじ、PSA になっている」.
 
-    ★2026-09-03: 並べ替え (_order) をやめ、**系統ごとの小枠**に分けた。
+    ★2026-09-03: 並べ替え (_order) も 工程ごとの箱もやめ、**商材ごとの箱**にした。
       UT が加わって3系統になり、順番だけではどれが何か分からなくなったため
-      (ユーザー要望「PSAなのか一番くじなのかTシャツなのかグルーピングして」)。
+      (ユーザー要望「商材ごとに作業順に並べて、囲って」)。
     """
-    i = SRC.index("_buckets = {")
-    body = SRC[i:i + 700]
-    for name in ("PSA (TCG)", "UT (Tシャツ)", "一番くじ"):
-        assert name in body, name
-    # 系統名の枠を作ってから並べている
-    assert SRC.index("_buckets = {") < SRC.index("ttk.LabelFrame(hj, text=_name")
+    i = SRC.index("for _name in (")
+    assert '"PSA (TCG)", "Tシャツ (UT)", "一番くじ"' in SRC[i:i + 120]
+    # 箱の中は作業順 (当日分 → 夜間検索 → 昼の目視)
+    j = SRC.index("_STEP = [")
+    assert '"当日分", "夜間検索", "昼の目視"' in SRC[j:j + 120]
 
 
 # ── 件数はヒントへ / 押すべき時は青 (2026-08-22 ユーザー指示) ────────────

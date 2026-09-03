@@ -63,4 +63,6 @@ def test_new_panel_renders_the_hoju_group():
     src = open(os.path.join(HQ, "control_panel.py"), encoding="utf-8").read()
     assert 'ug["hoju"]' in src
     assert '"hoju": []' in src
-    assert "出品後 補URL確保" in src
+    # ★2026-09-03: 箱を「工程」から **商材** に変えた (ユーザー要望
+    #   「商材ごとに作業順に並べて、囲って」)。見出しは商材名 + 作業順。
+    assert "出品 → 出品前チェック → 補URL" in src
