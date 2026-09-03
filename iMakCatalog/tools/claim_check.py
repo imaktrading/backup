@@ -180,6 +180,34 @@ def check_official_drift(quick):
     return m.group(2) == "0", f"{m.group(1)}枚 突合 / 差分 {m.group(2)}件 (累計で見た弾 {len(state)})"
 
 
+def check_official_coverage(_):
+    """**公式と1度も比べていないカテゴリを緑にしない** (2026-09-03 追加).
+
+    ユーザー指摘:「監査としてそれでいいの?」— 良くない。
+    突合が在るのは One Piece だけで、残り 3カテゴリ (30,116行 = 77%) は
+    「カタログの中で辻褄が合っている」しか見ていない。それを緑と呼ぶのは、
+    **測っていないから緑**と同じで、今週こちらが4回やった失敗そのもの。
+
+    したがって: 突合の口が無いカテゴリが1つでも在れば **FAIL**。
+    赤のままでよい。作るまでは「確かめていない」が正しい表示。
+    """
+    db = _db()
+    try:
+        rows = {c: n for c, n in db.execute(
+            "SELECT category, COUNT(*) FROM products WHERE category IN "
+            "('pokemon_tcg','one_piece_tcg','dragonball_scg','gundam_tcg') "
+            "GROUP BY category")}
+    finally:
+        db.close()
+    covered = {"one_piece_tcg"}                     # 突合の口が在るのは今ここだけ
+    miss = {c: n for c, n in rows.items() if c not in covered}
+    tot = sum(rows.values()) or 1
+    pct = 100 * sum(n for c, n in rows.items() if c in covered) // tot
+    detail = (f"公式と突合できるのは {pct}% ({'/'.join(sorted(covered))}) / "
+              f"未突合 {sum(miss.values())}行: " + ", ".join(f"{c}={n}" for c, n in sorted(miss.items())))
+    return (not miss), detail
+
+
 CHECKS = [
     ("Set が空の行", check_set_empty),
     ("1セット1値", check_one_set_one_value),
@@ -189,6 +217,7 @@ CHECKS = [
     ("cert → KEY (入口経由)", check_resolver),
     ("回帰テスト", check_tests),
     ("公式との突合", check_official_drift),
+    ("公式突合のカバー範囲", check_official_coverage),
 ]
 
 
