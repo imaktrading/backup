@@ -73,3 +73,32 @@ def test_every_ut_button_has_a_hint():
     for lab in ('🔎 UT 補URL 夜間検索', '🩹 UT 補URL 昼の目視'):
         i = _SRC.index('"label": "%s"' % lab)
         assert '"tip"' in _SRC[i:i + 800], lab
+
+
+def test_no_button_appears_in_two_places():
+    """同じボタンが 商材の箱 と 在庫補充枠 の両方に出ていた (ユーザー指摘)。"""
+    assert "_boxed_idxs = set()" in _SRC
+    # 在庫補充・在庫なし の枠は、箱に出した分を除いてから並べる
+    assert "for i in ug[\"report\"] if i not in _boxed_idxs" in _SRC
+    assert "for i in ug[\"oos\"] if i not in _boxed_idxs" in _SRC
+
+
+def test_boxes_have_no_listing_buttons():
+    """箱は **出品した後** の作業だけ。出品は新規出品パネルの仕事。"""
+    i = _SRC.index("for _name in (")
+    seg = _SRC[i:i + 1400]
+    assert "_head" not in seg, "箱に出品ボタン(新規/自動)が残っている"
+
+
+def test_all_kuji_entrypoints_are_recognised():
+    """一番くじの夜間検索は run_kuji_night.py。名前が違うだけで箱から漏れていた。"""
+    i = _SRC.index("def _line_of(")
+    seg = _SRC[i:i + 700]
+    for name in ("ichibankuji_restock.py", "kuji_hoju_fill.py", "run_kuji_night.py"):
+        assert name in seg, name
+
+
+def test_cross_product_buttons_stay_out_of_the_boxes():
+    """「全系統」の物は特定の商材の箱に入れない。"""
+    i = _SRC.index("def _line_of(")
+    assert '"全系統" in lab' in _SRC[i:i + 400]

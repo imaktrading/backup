@@ -3010,7 +3010,11 @@ class ListingPanel:
             def _line_of(i):
                 """そのボタンがどの商材のものか。分からなければ None (箱に入れない)。"""
                 c = _cmd_of(i)
-                if "ichibankuji_restock.py" in c or "kuji_hoju_fill.py" in c:
+                lab = SCRIPTS[i].get("label", "")
+                if "全系統" in lab:
+                    return None            # 商材をまたぐ物は箱に入れない
+                if any(k in c for k in ("ichibankuji_restock.py", "kuji_hoju_fill.py",
+                                        "run_kuji_night.py")):
                     return "一番くじ"
                 if "ut_hoju_fill.py" in c:
                     return "Tシャツ (UT)"
@@ -3029,25 +3033,27 @@ class ListingPanel:
                 return len(_STEP)
 
             _lines = {}
-            for i in list(ug["hoju"]) + _confirm_idx + list(ug["audit"]):
+            for i in (list(ug["hoju"]) + _confirm_idx + list(ug["report"])
+                      + list(ug["oos"])):
                 ln = _line_of(i)
                 if ln and i not in _lines.setdefault(ln, []):
                     _lines[ln].append(i)
 
+            _boxed_idxs = set()
             for _name in ("PSA (TCG)", "Tシャツ (UT)", "一番くじ"):
                 _idxs = sorted(_lines.get(_name, []), key=_step_rank)
                 _cat = categories.get({"PSA (TCG)": "PSA TCG",
                                        "Tシャツ (UT)": "Tシャツ",
                                        "一番くじ": "一番くじ"}[_name], {})
-                _head = [_cat.get("new")] if _cat.get("new") is not None else []
-                if _cat.get("auto") is not None:
-                    _head.append(_cat["auto"])
-                if not _head and not _idxs:
+                # ★2026-09-03: 箱に「新規/自動」は入れない。出品は新規出品パネルの仕事で、
+                #   ここは **出品した後**の補URL確保だけ (ユーザー指摘)。
+                if not _idxs:
                     continue
                 box = ttk.LabelFrame(scroll_frame, text=f"📦 {_name} — 補URL確保 (出品した後の作業)",
                                      padding=4)
                 box.pack(fill="x", pady=(8, 0))
-                _grid_named(box, [(SCRIPTS[i]["label"], i) for i in _head + _idxs], ncol=4)
+                _boxed_idxs.update(_idxs)
+                _grid_named(box, [(SCRIPTS[i]["label"], i) for i in _idxs], ncol=4)
 
 
             ana = ttk.LabelFrame(scroll_frame, text="📊 分析 (押すと結果ファイルが開く)", padding=4)
@@ -3122,7 +3128,8 @@ class ListingPanel:
             # (同一親で grid と pack を混在させると tkinter が描画失敗する。2026-07-01 修正)
             d2_oos = ttk.Frame(d2)
             d2_oos.pack(fill="x")
-            _grid_named(d2_oos, [(SCRIPTS[i]["label"], i) for i in ug["oos"]], ncol=4)
+            _grid_named(d2_oos, [(SCRIPTS[i]["label"], i)
+                                 for i in ug["oos"] if i not in _boxed_idxs], ncol=4)
 
             # ③ 在庫なし進捗: CULL停止の残件数(約何回分) と RESTOCK再仕入れ(US)商品数。
             def _oos_progress():
@@ -3165,11 +3172,14 @@ class ListingPanel:
             except Exception:
                 pass
 
-            if ug["report"]:
-                # 在庫補充 は 在庫なし(d2)枠の中に入れ子(2026-07-01)。3列=PSA再仕入れ3が1行目・一番くじ①②が2行目。
+            # ★2026-09-03: 補URL 系は **商材の箱**に集約したので、ここには出さない
+            #   (同じボタンが2か所に出ていた。ユーザー指摘)。
+            _rep = [i for i in ug["report"] if i not in _boxed_idxs]
+            if _rep:
+                # 在庫補充 は 在庫なし(d2)枠の中に入れ子(2026-07-01)。
                 rep = ttk.LabelFrame(d2, text="📦 在庫補充", padding=4)
                 rep.pack(fill="x", padx=4, pady=(6, 0))
-                _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in ug["report"]], ncol=3)
+                _grid_named(rep, [(SCRIPTS[i]["label"], i) for i in _rep], ncol=3)
 
         # 状態ライン
         status_frame = ttk.Frame(root)
