@@ -57,20 +57,20 @@ def test_失敗を黙って飲まない():
 # PSA と同じ 2段 (夜=検索 / 昼=目視)。画面も PSA の確証UI をそのまま使う。
 
 def test_一番くじの補URLボタンが2つある():
-    assert "🎴 くじ補URL slice2" in SRC
-    assert "🎴 くじ補URL slice3" in SRC
+    assert "🎴 一番くじ 補URL 夜間検索" in SRC
+    assert "🎴 一番くじ 補URL 昼の目視" in SRC
 
 
 def test_ラベルが長すぎない():
     """★2026-08-22「ラベルがボタンからはみ出ていて、どのボタンが何かわからない」。
     PSA の一番長いラベル (20字) 以下に収める."""
-    for lb in ("🎴 くじ補URL slice2", "🎴 くじ補URL slice3"):
+    for lb in ("🎴 一番くじ 補URL 夜間検索", "🎴 一番くじ 補URL 昼の目視"):
         assert len(lb) <= 20, lb
 
 
 def test_一番くじは絵文字で見分けられる():
     """★PSA と混ざって見えた。一番くじは 🎴 を頭に付けて系統を揃える."""
-    for lb in ("🎴 くじ補URL slice2", "🎴 くじ補URL slice3"):
+    for lb in ("🎴 一番くじ 補URL 夜間検索", "🎴 一番くじ 補URL 昼の目視"):
         assert lb.startswith("🎴")
 
 
@@ -107,8 +107,8 @@ def test_ラベルは短い():
 def test_詳細はヒントに逃がしている():
     """★「詳細はヒントテキストにしてボタンのラベルはシンプルに」."""
     assert "_attach_tip" in SRC
-    for lb in ("🔎 補URL slice2", "🩹 補URL slice3",
-               "🎴 くじ補URL slice2", "🎴 くじ補URL slice3"):
+    for lb in ("🔎 PSA 補URL 夜間検索", "🩹 PSA 補URL 昼の目視",
+               "🎴 一番くじ 補URL 夜間検索", "🎴 一番くじ 補URL 昼の目視"):
         i = SRC.index('"label": "%s"' % lb)
         assert '"tip"' in SRC[i:i + 400], lb
 
@@ -122,12 +122,17 @@ def test_ヒントが出せなくてもボタンは動く():
 
 def test_系統ごとに並ぶ():
     """★「ボタン配置が、PSA、一番くじ、一番くじ、PSA になっている」.
-    PSA をまとめてから 一番くじ。"""
-    i = SRC.index("_order = (")
-    body = SRC[i:i + 600]
-    # PSA (kuji でない物) を先に、一番くじを後ろに置いている
-    assert body.index('"ichibankuji_restock.py" not in') < body.index('_confirm_idx')
-    assert body.rindex('"ichibankuji_restock.py" in') > body.index('_confirm_idx')
+
+    ★2026-09-03: 並べ替え (_order) をやめ、**系統ごとの小枠**に分けた。
+      UT が加わって3系統になり、順番だけではどれが何か分からなくなったため
+      (ユーザー要望「PSAなのか一番くじなのかTシャツなのかグルーピングして」)。
+    """
+    i = SRC.index("_buckets = {")
+    body = SRC[i:i + 700]
+    for name in ("PSA (TCG)", "UT (Tシャツ)", "一番くじ"):
+        assert name in body, name
+    # 系統名の枠を作ってから並べている
+    assert SRC.index("_buckets = {") < SRC.index("ttk.LabelFrame(hj, text=_name")
 
 
 # ── 件数はヒントへ / 押すべき時は青 (2026-08-22 ユーザー指示) ────────────

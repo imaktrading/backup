@@ -1373,7 +1373,7 @@ SCRIPTS = [
     #   RESTOCKゲートと同一 primitives・共有cache。設計: discussion/2026-07-24_psa_hoju_url_replenishment_design.md ----
     {
         "category": None, "type": "utility",
-        "label": "📊 補URL件数感(status)",
+        "label": "📊 補URL 件数感 (全系統)",
         "label_fg": "#0a7",
         "badge": "hoju_status",
         "tip": "見るだけのボタン。仕入元の予備 (補URL) が何本あるかの内訳を出します。"
@@ -1389,7 +1389,7 @@ SCRIPTS = [
         # 当日の新規カードを拾えない(itemID がまだ無い)。itemID が付いた時点は人しか知らないため、
         # 自動化せずボタンにする(ユーザー提案)。対象は新規優先の並びで先頭に来る。
         "category": None, "type": "utility",
-        "label": "🆕 補URL 当日分",
+        "label": "🆕 PSA 補URL 当日分",
         "tip": "出品した直後に押す。その日に出した分だけ、仕入元の候補を今すぐ検索する。夜間検索(slice2)を待たずに供給を確保したい時に使う。",
         "badge": "hoju_search",
         "label_fg": "#0a7",
@@ -1401,7 +1401,7 @@ SCRIPTS = [
     {
         # slice2: 補が薄い live PSA を mercari/snkrdunk 検索→候補+画像を cache(補URL列は触らない)。無人可・停止可。
         "category": None, "type": "utility",
-        "label": "🔎 補URL slice2",
+        "label": "🔎 PSA 補URL 夜間検索",
         "tip": "夜間検索。補URLが薄い出品の仕入元候補を探して溜めるだけで、補URL欄には書かない。毎晩23:30 に自動で走るので、普段は押す必要がない。",
         "badge": "hoju_search",
         "label_fg": "#0a7",
@@ -1413,7 +1413,7 @@ SCRIPTS = [
     {
         # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
         "category": None, "type": "utility",
-        "label": "🩹 補URL slice3",
+        "label": "🩹 PSA 補URL 昼の目視",
         "tip": "昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。1回10件ずつ。出した分は最後までやり切る作り。",
         "badge": "hoju_confirm",
         "label_fg": "#0a7",
@@ -1429,6 +1429,31 @@ SCRIPTS = [
         #   タブが開いていた。書いた結果をその場で確認できる場所へ飛ばす。
         "open_url": ("https://docs.google.com/spreadsheets/d/"
                      "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
+    },
+    {
+        # ★2026-09-03: UT (ユニクロ/GUコラボT) の補URL。中古アパレルの出品が止まった原因は
+        #   「仕入元がすぐ売り切れて出品作業が無駄になる」ことだった (ユーザー談)。
+        #   PSA と同じ仕組みを持ち込む。検索は貯めるだけで、書くのは目視の後。
+        "category": None, "type": "utility",
+        "label": "🔎 UT 補URL 夜間検索",
+        "tip": "UT (ユニクロ/GUコラボT) の予備の仕入元を探して溜めるだけ。補URL欄には書かない。"
+               "新品未使用・送料込み・JPサイズ一致だけを候補にする (中古だと個体ごとの写真が要るため)。",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ut_hoju_fill.py", "search"],
+        "params": [],
+        "skip_postprocess": True,
+    },
+    {
+        "category": None, "type": "utility",
+        "label": "🩹 UT 補URL 昼の目視",
+        "tip": "溜めた UT の候補を現物と見比べて、同じ物だけ補URL欄に書く。"
+               "作品・柄・サイズが揃って初めて同じ商品なので、最後は目で見て決める。",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ut_hoju_fill.py", "confirm"],
+        "params": [],
+        "skip_postprocess": True,
     },
     {
         # ★2026-08-13: 補URL確証で「違う(別商品)」「要調査」と捨てた候補を、**新規出品の種**に戻す。
@@ -1458,7 +1483,7 @@ SCRIPTS = [
         # ★2026-08-22: 一番くじの補URLも PSA と同じ 2段 (夜=検索 / 昼=目視) にした。
         #   画面は PSA の確証UI をそのまま使う (見た目・操作が分かれないように)。
         "category": None, "type": "utility",
-        "label": "🎴 くじ補URL slice2",
+        "label": "🎴 一番くじ 補URL 夜間検索",
         "badge": "kuji_search",
         "tip": "一番くじ版の夜間検索。候補と、その詳細 (新品か/送料込みか/セラー評価) を先に取って溜める。補URL欄には書かない。",
         "label_fg": "#0a7",
@@ -1472,7 +1497,7 @@ SCRIPTS = [
     {
         # slice3: 夜に貯めた候補を現物と見比べて、選んだ分だけ補URL(AC-AG)へ書く。主URL不可触。
         "category": None, "type": "utility",
-        "label": "🎴 くじ補URL slice3",
+        "label": "🎴 一番くじ 補URL 昼の目視",
         "badge": "kuji_confirm",
         "tip": "一番くじ版の昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。新品・送料込み・セラー評価で先に絞ってある。1回10件ずつ。",
         "label_fg": "#0a7",
@@ -2805,6 +2830,9 @@ class ListingPanel:
             #   (ユーザー指示)。PSA と同じ導線 = 出品→itemID→補URL確保 の並び。
             if "ichibankuji_restock.py" in cmd and ("prefetch-live" in cmd or "hoju" in cmd):
                 return "hoju"
+            # ★2026-09-03: UT の補URL も同じ枠。系統ごとに小枠で分けて並べる
+            if "ut_hoju_fill.py" in cmd:
+                return "hoju"
             # 在庫あり listing を直す: 取下再出品①②③(NO_SEARCH) / ✏️タイトル(NO_CLICK) / 💲価格(NO_CONVERT)
             if any(s in cmd for s in ("relist_from_funnel", "relist_add_from_pending",
                                       "relist_writeback", "dump_us_qty1_sku",
@@ -2898,12 +2926,26 @@ class ListingPanel:
                                 and "confirm" in sc.get("cmd", [])]
                 # ★2026-08-22: 並びが PSA / くじ / くじ / PSA になっていた (ユーザー指摘)。
                 #   `ug["hoju"]` の後ろに PSA の昼確認を足していたため。**系統ごとに固める**。
-                _order = ([i for i in ug["hoju"] if "ichibankuji_restock.py" not in
-                           " ".join(SCRIPTS[i].get("cmd", []))]
-                          + _confirm_idx
-                          + [i for i in ug["hoju"] if "ichibankuji_restock.py" in
-                             " ".join(SCRIPTS[i].get("cmd", []))])
-                _grid_named(hj, [(SCRIPTS[i]["label"], i) for i in _order])
+                # ★2026-09-03 ユーザー要望「PSAなのか一番くじなのかTシャツなのか
+                #   グルーピングして分かりやすく」。系統ごとに小枠で分ける。
+                def _sys_of(i):
+                    c = " ".join(SCRIPTS[i].get("cmd", []))
+                    if "ichibankuji_restock.py" in c:
+                        return "一番くじ"
+                    if "ut_hoju_fill.py" in c:
+                        return "UT (Tシャツ)"
+                    return "PSA (TCG)"
+                _buckets = {"PSA (TCG)": [], "UT (Tシャツ)": [], "一番くじ": []}
+                for i in list(ug["hoju"]) + _confirm_idx:
+                    if i not in _buckets[_sys_of(i)]:
+                        _buckets[_sys_of(i)].append(i)
+                for _name, _idxs in _buckets.items():
+                    if not _idxs:
+                        continue
+                    _sub = ttk.LabelFrame(hj, text=_name, padding=3)
+                    _sub.pack(fill="x", pady=(3, 0))
+                    _grid_named(_sub, [(SCRIPTS[i]["label"], i) for i in _idxs],
+                                ncol=3, compact=True)
         else:
             # ===== 🔧 既存メンテ =====
             REPORTS_DIR = r"C:/dev/iMak_data/seller_hub/reports"

@@ -82,7 +82,15 @@ def test_keyword_keeps_the_work_name_and_drops_boilerplate():
     kw = U.build_keyword("推しの子 UT　Tシャツ（半袖）B小町　ユニクロ　ブラックXXL")
     assert "推しの子" in kw and "B小町" in kw
     assert "XXL" not in kw              # サイズは後で照合する
-    assert kw.startswith("ユニクロ UT")
+    assert "ブラック" not in kw          # 色も入れない
+    assert kw.endswith("UT Tシャツ")
+
+
+def test_keyword_stays_short():
+    """語を足すほど0件に近づく。実測: 6語で0件 / 4語で20件 (2026-09-03)。"""
+    kw = U.build_keyword("ドラゴンボール　悟空ブラック　キャラクターtシャツ　ビッグプリント　2XL")
+    assert kw == "ドラゴンボール 悟空 UT Tシャツ"
+    assert len(kw.split()) <= 4
 
 
 def test_keyword_is_blank_when_nothing_distinctive_remains():

@@ -39,7 +39,7 @@ SIX = [
     ("PSA再仕入れ照合", "psa_gate", "pg_txt"),
     ("RESTOCK Revise CSV生成", "restock_build", "rb_txt"),
     ("RESTOCK状態同期(書戻し)", "restock_wb", "rw_txt"),
-    ("補URL件数感(status)", "hoju_status", "hs_txt"),
+    ("補URL 件数感 (全系統)", "hoju_status", "hs_txt"),
     ("一番くじ補充① supply確定", "kuji_supply", "kv_txt"),
     ("一番くじ補充② 刷新→CSV", "kuji_refresh", "kr_txt"),
 ]

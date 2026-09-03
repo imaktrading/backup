@@ -82,30 +82,40 @@ def us_size_of(jp):
     return JP_TO_US.get((jp or "").upper(), "")
 
 
-def build_keyword(title):
+#  色・柄の言い回しは検索語に入れない。メルカリは **語を全部含む商品しか返さない**ので、
+#  1語増やすたびに0件へ近づく。実測 2026-09-03: 「ユニクロ UT 推しの子 B小町 ブラッ Tシャツ」
+#  で0件、「推しの子 UT Tシャツ B小町」で20件。色は目視で見分ければよい。
+_NOISE = ("ユニクロ", "UNIQLO", "UT", "Tシャツ", "ティーシャツ", "半袖", "グラフィック",
+          "プリント", "ビッグプリント", "キャラクター", "コラボ", "限定", "美品",
+          "新品", "未使用", "タグ付き", "タグ付", "メンズ", "レディース", "サイズ",
+          "ブラック", "ホワイト", "ネイビー", "グリーン", "ブルー", "オレンジ", "ベージュ",
+          "レッド", "イエロー", "グレー", "パープル", "ピンク", "白", "黒", "紺", "緑", "赤",
+          "半袖Tシャツ", "COLLECTION", "ARCHIVE", "アーカイブ")
+_KEY_WORDS = 2      # 検索語に残す語数の上限 (作品名 + 固有名)
+
+
+def build_keyword(title, max_words=_KEY_WORDS):
     """出品タイトルから メルカリの検索語を作る。作れなければ ''。
 
     ★きつく絞らない (ユーザー方針 2026-09-03「目視するから主要キーだけで」)。
-      作品名が拾えれば十分で、柄やサイズは目視で見分ける。
+      **語を足すほど0件に近づく**ので、作品名まわりの 2語だけ残して
+      「<語> UT Tシャツ」の形にする。色・柄・サイズは目視で見分ける。
     """
     t = (title or "").strip()
     if not t:
         return ""
-    # 出品タイトルに必ず入る語は検索語として役に立たないので落とす
-    drop = ("ユニクロ", "UNIQLO", "UT", "Tシャツ", "ティーシャツ", "半袖", "グラフィック",
-            "新品", "未使用", "タグ付き", "タグ付", "【", "】", "（", "）", "(", ")",
-            "メンズ", "レディース", "サイズ", "コラボ", "限定", "美品")
     s = t
-    for d in drop:
-        s = s.replace(d, " ")
-    s = re.sub(r"[A-Z0-9]*\d+(CM)?", " ", s.upper()) if False else s
-    # サイズ表記そのものは検索語から外す (JPサイズは後で照合する)
+    for d in _NOISE:
+        s = re.sub(re.escape(d), " ", s, flags=re.I)
+    s = re.sub(r"[【】（）()\[\]「」、,／/・]", " ", s)
+    # サイズ表記・数字だけの塊は検索語にしない (JPサイズは後で照合する)
     for token, _n in _SIZE_ALIASES:
         s = re.sub(r"(^|[^A-Za-z0-9])" + token + r"([^A-Za-z0-9]|$)", " ", s, flags=re.I)
-    s = re.sub(r"\s+", " ", s).strip()
-    if not s:
+    s = re.sub(r"(^|\s)\d+\s*(CM|センチ)?(\s|$)", " ", s, flags=re.I)
+    words = [w for w in re.split(r"[\s　]+", s) if len(w) >= 2][:max_words]
+    if not words:
         return ""
-    return f"ユニクロ UT {s} Tシャツ".strip()
+    return " ".join(words) + " UT Tシャツ"
 
 
 def size_matches(want, got):

@@ -21,7 +21,7 @@ def _src():
 
 def _button_block():
     s = _src()
-    i = s.index("🆕 補URL 当日分")
+    i = s.index("🆕 PSA 補URL 当日分")
     return s[i - 400:i + 400]
 
 
@@ -31,7 +31,7 @@ def test_auto_hook_is_not_reintroduced():
 
 
 def test_button_exists():
-    assert "🆕 補URL 当日分" in _src()
+    assert "🆕 PSA 補URL 当日分" in _src()
 
 
 def test_button_runs_search_only():
