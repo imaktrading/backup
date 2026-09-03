@@ -34,6 +34,7 @@ catalog は取り込んだ時点で終わりで、**後から公式が直して�
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import sqlite3
@@ -68,10 +69,24 @@ def series_ids(html: str) -> list[str]:
     return [v for v, _ in re.findall(r'<option[^>]*value="(\d+)"[^>]*>\s*([^<]+?)\s*</option>', html)]
 
 
-def parse_cards(html: str) -> list[dict]:
+def _norm(t: str) -> str:
+    """比べる前に **書き方の違い**だけ畳む (中身は変えない).
+
+    2026-09-03: 初回の全弾走査で「差分」に出た 4件は catalog の誤りではなく、
+    こちらの読み取りの粗さだった:
+      `キッド&amp;キラー` … HTML 実体参照を戻していなかった
+      `ホーディ＆ヒョウゾウ` … 全角 ＆ と半角 & の違い
+    数字を出すツールが誤検出を出すと、直す側が振り回される。ここで畳む。
+    """
+    t = html.unescape(t or "")
+    return (t.replace("＆", "&").replace("’", "'").replace("！", "!")
+             .replace("　", " ").strip())
+
+
+def parse_cards(page: str) -> list[dict]:
     """公式ページ → [{no, rarity, type, name, get_info}]  (重複は畳む)."""
     out, seen = [], set()
-    for b in re.split(r'(?=<dl class="modalCol")', html)[1:]:
+    for b in re.split(r'(?=<dl class="modalCol")', page)[1:]:
         m_info = re.search(r'class="infoCol">(.*?)</div>', b, re.S)
         m_name = re.search(r'class="cardName">([^<]+)<', b)
         m_get = re.search(r'class="getInfo"><h3>[^<]*</h3>(.*?)</div>', b, re.S)
@@ -85,8 +100,8 @@ def parse_cards(html: str) -> list[dict]:
             "no": cells[0],
             "rarity": cells[1] if len(cells) > 1 else "",
             "type": cells[2] if len(cells) > 2 else "",
-            "name": m_name.group(1).strip(),
-            "get_info": re.sub(r"<[^>]+>", " ", m_get.group(1)).strip() if m_get else "",
+            "name": _norm(m_name.group(1)),
+            "get_info": _norm(re.sub(r"<[^>]+>", " ", m_get.group(1))) if m_get else "",
         }
         key = (card["no"], card["name"], card["rarity"], card["get_info"])
         if key in seen:
@@ -121,8 +136,8 @@ def check_series(conn, sid: str) -> dict:
         if not rows:
             missing.append(c)
             continue
-        names = {(r["name"] or "").strip() for r in rows} | {(r["name_jp"] or "").strip() for r in rows}
-        if c["name"] not in names:
+        names = {_norm(r["name"] or "") for r in rows} | {_norm(r["name_jp"] or "") for r in rows}
+        if _norm(c["name"]) not in names:
             name_ng.append((c, sorted(x for x in names if x)[:3]))
         if c["rarity"]:
             rar = {str((json.loads(r["specs"] or "{}") or {}).get("rarity") or "").strip() for r in rows}
@@ -130,7 +145,7 @@ def check_series(conn, sid: str) -> dict:
                 rarity_ng.append((c, sorted(x for x in rar if x)[:3]))
         # 収録商品名: プロモ/限定は商品ごとに行が要る (3rd ANNIVERSARY SET の欠落はこの形)
         if check_set and c["get_info"] and not any(
-                (r["set_name_official"] or "") == c["get_info"] for r in rows):
+                _norm(r["set_name_official"] or "") == c["get_info"] for r in rows):
             set_ng.append((c, sorted({(r["set_name_official"] or "")[:34] for r in rows})[:3]))
     return {"sid": sid, "fetched": len(cards), "missing": missing,
             "name_ng": name_ng, "rarity_ng": rarity_ng, "set_ng": set_ng}
