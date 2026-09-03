@@ -22,17 +22,17 @@ def _labels():
 def test_every_aux_button_says_which_product_line():
     """系統名 (PSA / UT / 一番くじ / 全系統) が入っていること。"""
     for lab in _labels():
-        assert any(k in lab for k in ("PSA", "UT", "一番くじ", "全系統")), lab
+        assert any(k in lab for k in ("PSA", "UT", "くじ", "全系統")), lab
 
 
 def test_ut_has_both_search_and_confirm():
-    assert '"label": "🔎 UT 補URL 夜間検索"' in _SRC
-    assert '"label": "🩹 UT 補URL 昼の目視"' in _SRC
+    assert '"label": "🔎 UT 補URL ② 夜に探す"' in _SRC
+    assert '"label": "🩹 UT 補URL ③ 目視"' in _SRC
 
 
 def test_ut_search_does_not_write_to_the_sheet():
     """検索は貯めるだけ。書くのは目視の後 (補URLの決まり)。"""
-    i = _SRC.index('"label": "🔎 UT 補URL 夜間検索"')
+    i = _SRC.index('"label": "🔎 UT 補URL ② 夜に探す"')
     seg = _SRC[i:i + 700]
     assert '"ut_hoju_fill.py", "search"' in seg
 
@@ -53,8 +53,8 @@ def test_panel_boxes_are_per_product_line_in_work_order():
     """
     assert "📦 {_name} — 出品した後の作業 (補URL / 在庫切れ再仕入れ)" in _SRC
     # 作業順 (当日分 → 夜間検索 → 昼の目視) で並べている
-    i = _SRC.index("_STEP = [")
-    assert '"当日分", "夜間検索", "昼の目視"' in _SRC[i:i + 120]
+    i = _SRC.index("def _step_rank(")
+    assert '"①②③④"' in _SRC[i:i + 500]
     # ★2026-09-03: 置き場所は **既存メンテ**。補URLは出品した後の作業なので
     #   新規出品パネルに置くのは誤り (ユーザー指摘)。
     assert _SRC.index("for _name in (") > _SRC.index("===== 🔧 既存メンテ =====")
@@ -70,7 +70,7 @@ def test_ut_buttons_show_counts():
 
 
 def test_every_ut_button_has_a_hint():
-    for lab in ('🔎 UT 補URL 夜間検索', '🩹 UT 補URL 昼の目視'):
+    for lab in ('🔎 UT 補URL ② 夜に探す', '🩹 UT 補URL ③ 目視'):
         i = _SRC.index('"label": "%s"' % lab)
         assert '"tip"' in _SRC[i:i + 800], lab
 

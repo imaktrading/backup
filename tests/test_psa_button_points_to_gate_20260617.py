@@ -9,7 +9,7 @@ _SRC = (Path(__file__).resolve().parent.parent / "iMakHQ" / "control_panel.py").
 
 
 def test_psa_button_runs_gate_not_old_mercari_only():
-    i = _SRC.index("🃏 PSA再仕入れ照合")
+    i = _SRC.index("🛒 PSA 再仕入れ ① 探す")
     block = _SRC[i:i + 600]
     assert '"psa_resource_gate.py"' in block, "PSA再仕入れ照合ボタンが gate を起動していない"
     assert '"mercari_psa_resource.py"' not in block, "旧Mercari単体スクリプトに戻っている"

@@ -57,21 +57,28 @@ def test_失敗を黙って飲まない():
 # PSA と同じ 2段 (夜=検索 / 昼=目視)。画面も PSA の確証UI をそのまま使う。
 
 def test_一番くじの補URLボタンが2つある():
-    assert "🎴 一番くじ 補URL 夜間検索" in SRC
-    assert "🎴 一番くじ 補URL 昼の目視" in SRC
+    assert "🔎 くじ 補URL ② 夜に探す" in SRC
+    assert "🩹 くじ 補URL ③ 目視" in SRC
 
 
 def test_ラベルが長すぎない():
     """★2026-08-22「ラベルがボタンからはみ出ていて、どのボタンが何かわからない」。
     PSA の一番長いラベル (20字) 以下に収める."""
-    for lb in ("🎴 一番くじ 補URL 夜間検索", "🎴 一番くじ 補URL 昼の目視"):
+    for lb in ("🔎 くじ 補URL ② 夜に探す", "🩹 くじ 補URL ③ 目視"):
         assert len(lb) <= 20, lb
 
 
 def test_一番くじは絵文字で見分けられる():
-    """★PSA と混ざって見えた。一番くじは 🎴 を頭に付けて系統を揃える."""
-    for lb in ("🎴 一番くじ 補URL 夜間検索", "🎴 一番くじ 補URL 昼の目視"):
-        assert lb.startswith("🎴")
+    """★PSA と混ざって見えた。
+
+    ★2026-09-03: 商材名は **箱の見出し**に出るようになったので、絵文字は
+      商材ではなく **工程** を表すことにした (ユーザー要望「同じ機能なら表記統一」)。
+        🔎 = 探す / 🩹 = 目視 / 🛒 = 再仕入れ / 🆕 = 当日分
+      商材の区別は箱と、同じ箱に無い時の補足 (UT) / (くじ) で付ける。
+    """
+    for lb in ("🔎 くじ 補URL ② 夜に探す", "🩹 くじ 補URL ③ 目視"):
+        assert lb in SRC, lb
+        assert lb[0] in "🔎🩹🛒🆕"
 
 
 def test_夜と昼で別のコマンド():
@@ -107,8 +114,8 @@ def test_ラベルは短い():
 def test_詳細はヒントに逃がしている():
     """★「詳細はヒントテキストにしてボタンのラベルはシンプルに」."""
     assert "_attach_tip" in SRC
-    for lb in ("🔎 PSA 補URL 夜間検索", "🩹 PSA 補URL 昼の目視",
-               "🎴 一番くじ 補URL 夜間検索", "🎴 一番くじ 補URL 昼の目視"):
+    for lb in ("🔎 PSA 補URL ② 夜に探す", "🩹 PSA 補URL ③ 目視",
+               "🔎 くじ 補URL ② 夜に探す", "🩹 くじ 補URL ③ 目視"):
         i = SRC.index('"label": "%s"' % lb)
         assert '"tip"' in SRC[i:i + 400], lb
 
@@ -132,8 +139,8 @@ def test_系統ごとに並ぶ():
     # 置き場所は既存メンテ (補URLは出品した後の作業)
     assert i > SRC.index("===== 🔧 既存メンテ =====")
     # 箱の中は作業順 (当日分 → 夜間検索 → 昼の目視)
-    j = SRC.index("_STEP = [")
-    assert '"当日分", "夜間検索", "昼の目視"' in SRC[j:j + 120]
+    j = SRC.index("def _step_rank(")
+    assert '"①②③④"' in SRC[j:j + 500]
 
 
 # ── 件数はヒントへ / 押すべき時は青 (2026-08-22 ユーザー指示) ────────────

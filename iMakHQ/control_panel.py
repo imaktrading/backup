@@ -1319,7 +1319,7 @@ SCRIPTS = [
     #   一度きりの調査ツールで在庫あり文脈で紛らわしいためパネルから除外 (tools/ に .py は残置=直叩き可)。
     {
         "category": None, "type": "utility",
-        "label": "🃏 PSA再仕入れ照合",
+        "label": "🛒 PSA 再仕入れ ① 探す",
         "badge": "psa_gate",
         "tip": "在庫切れしたPSA10のうち、まだ需要がある物の仕入元 (メルカリ/スニダン) を探して、"
                "現物と見比べて確定します。確定した分は次の ♻ でCSVになります。"
@@ -1339,7 +1339,7 @@ SCRIPTS = [
     {
         # RESTOCK後工程① 視覚確証で確定したカードを 新コア生成→Revise CSV化(手動UL用)。2026-06-18
         "category": None, "type": "utility",
-        "label": "♻ RESTOCK Revise CSV生成",
+        "label": "🛒 PSA 再仕入れ ② CSV",
         "badge": "restock_build",
         "tip": "🃏 で仕入元が確定した分を、出品しなおすCSVにします (手でアップロードする用)。"
                "一度出した分は自動で除きます。",
@@ -1354,7 +1354,7 @@ SCRIPTS = [
     {
         # RESTOCK後工程② アップロード反映後、実eBay qty を verify してスプシ書戻し(状態同期)。2026-06-18
         "category": None, "type": "utility",
-        "label": "🔄 RESTOCK状態同期(書戻し)",
+        "label": "🛒 PSA 再仕入れ ③ 確認",
         "badge": "restock_wb",
         "tip": "♻ のCSVをアップロードした後に押します。eBayの実際の在庫数を見て、"
                "本当に戻っている物だけ「実行済」にします。戻っていない物は残るので、"
@@ -1389,7 +1389,7 @@ SCRIPTS = [
         # 当日の新規カードを拾えない(itemID がまだ無い)。itemID が付いた時点は人しか知らないため、
         # 自動化せずボタンにする(ユーザー提案)。対象は新規優先の並びで先頭に来る。
         "category": None, "type": "utility",
-        "label": "🆕 PSA 補URL 当日分",
+        "label": "🆕 PSA 補URL ① 当日分",
         "tip": "出品した直後に押す。その日に出した分だけ、仕入元の候補を今すぐ検索する。夜間検索(slice2)を待たずに供給を確保したい時に使う。",
         "badge": "hoju_search",
         "label_fg": "#0a7",
@@ -1401,7 +1401,7 @@ SCRIPTS = [
     {
         # slice2: 補が薄い live PSA を mercari/snkrdunk 検索→候補+画像を cache(補URL列は触らない)。無人可・停止可。
         "category": None, "type": "utility",
-        "label": "🔎 PSA 補URL 夜間検索",
+        "label": "🔎 PSA 補URL ② 夜に探す",
         "tip": "夜間検索。補URLが薄い出品の仕入元候補を探して溜めるだけで、補URL欄には書かない。毎晩23:30 に自動で走るので、普段は押す必要がない。",
         "badge": "hoju_search",
         "label_fg": "#0a7",
@@ -1413,7 +1413,7 @@ SCRIPTS = [
     {
         # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
         "category": None, "type": "utility",
-        "label": "🩹 PSA 補URL 昼の目視",
+        "label": "🩹 PSA 補URL ③ 目視",
         "tip": "昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。1回10件ずつ。出した分は最後までやり切る作り。",
         "badge": "hoju_confirm",
         "label_fg": "#0a7",
@@ -1435,7 +1435,7 @@ SCRIPTS = [
         #   「仕入元がすぐ売り切れて出品作業が無駄になる」ことだった (ユーザー談)。
         #   PSA と同じ仕組みを持ち込む。検索は貯めるだけで、書くのは目視の後。
         "category": None, "type": "utility",
-        "label": "🔎 UT 補URL 夜間検索",
+        "label": "🔎 UT 補URL ② 夜に探す",
         "badge": "ut_search",
         "tip": "UT (ユニクロ/GUコラボT) の予備の仕入元を探して溜めるだけ。補URL欄には書かない。"
                "新品未使用・送料込み・JPサイズ一致だけを候補にする (中古だと個体ごとの写真が要るため)。",
@@ -1447,7 +1447,7 @@ SCRIPTS = [
     },
     {
         "category": None, "type": "utility",
-        "label": "🩹 UT 補URL 昼の目視",
+        "label": "🩹 UT 補URL ③ 目視",
         "badge": "ut_confirm",
         "tip": "溜めた UT の候補を現物と見比べて、同じ物だけ補URL欄に書く。"
                "作品・柄・サイズが揃って初めて同じ商品なので、最後は目で見て決める。",
@@ -1462,7 +1462,7 @@ SCRIPTS = [
         #   実機で確認したとおり、売り切れの Tシャツも eBay 上は Active・数量0 のままなので
         #   **数量を戻すだけ**でよい (新規出品ではない。当初 新規出品だと考えたのは誤り)。
         "category": None, "type": "utility",
-        "label": "🛒 UT 在庫切れ再仕入れ (探す)",
+        "label": "🛒 UT 再仕入れ ① 探す",
         "tip": "売り切れた UT の仕入元を探して溜めるだけ。シートには書かない。"
                "新品未使用・送料込み・JPサイズ一致だけを候補にする。",
         "badge": "ut_restock_search",
@@ -1474,7 +1474,7 @@ SCRIPTS = [
     },
     {
         "category": None, "type": "utility",
-        "label": "🛒 UT 在庫切れ再仕入れ (目視→戻す)",
+        "label": "🛒 UT 再仕入れ ② 目視",
         "tip": "溜めた候補を現物と見比べて、同じ物だけ仕入元に採用する。"
                "採用すると 仕入元URL更新 + 売り切れ解除 + 仕入値 seed まで行う。"
                "eBay の数量を戻すのは RESTOCK と同じ口。",
@@ -1513,7 +1513,7 @@ SCRIPTS = [
         # ★2026-08-22: 一番くじの補URLも PSA と同じ 2段 (夜=検索 / 昼=目視) にした。
         #   画面は PSA の確証UI をそのまま使う (見た目・操作が分かれないように)。
         "category": None, "type": "utility",
-        "label": "🎴 一番くじ 補URL 夜間検索",
+        "label": "🔎 くじ 補URL ② 夜に探す",
         "badge": "kuji_search",
         "tip": "一番くじ版の夜間検索。候補と、その詳細 (新品か/送料込みか/セラー評価) を先に取って溜める。補URL欄には書かない。",
         "label_fg": "#0a7",
@@ -1527,7 +1527,7 @@ SCRIPTS = [
     {
         # slice3: 夜に貯めた候補を現物と見比べて、選んだ分だけ補URL(AC-AG)へ書く。主URL不可触。
         "category": None, "type": "utility",
-        "label": "🎴 一番くじ 補URL 昼の目視",
+        "label": "🩹 くじ 補URL ③ 目視",
         "badge": "kuji_confirm",
         "tip": "一番くじ版の昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。新品・送料込み・セラー評価で先に絞ってある。1回10件ずつ。",
         "label_fg": "#0a7",
@@ -1544,7 +1544,7 @@ SCRIPTS = [
     # ①でsupply確定(スプシ記録のみ・eBay未変更)→②で在庫復活+内容刷新を Revise/Add CSV 一括出力。
     {
         "category": None, "type": "utility",
-        "label": "🎴一番くじ補充① supply確定",
+        "label": "🛒 くじ 再仕入れ ① 目視",
         "label_fg": "#0a7",
         "badge": "kuji_supply",
         "tip": "在庫切れした一番くじの仕入元を探して、現物と見比べて確定します。"
@@ -1561,7 +1561,7 @@ SCRIPTS = [
     #   役割は slice2 (夜=候補集め) / slice3 (昼=目視して書く) の2つで足りる。
     {
         "category": None, "type": "utility",
-        "label": "🎴一番くじ補充② 刷新→CSV",
+        "label": "🛒 くじ 再仕入れ ② CSV",
         "label_fg": "#0a7",
         "badge": "kuji_refresh",
         "tip": "① で確定した分の説明文・画像を作りなおして、出品CSVにします。"
@@ -1589,7 +1589,9 @@ SCRIPTS = [
     {
         # A: 在庫切れ ∩ 需要実証済(RESTOCK) を全vein分まとめて再仕入れワークシート化 (2026-06-05)
         "category": None, "type": "utility",
-        "label": "🛒 在庫切れ再仕入れ",
+        "label": "📋 再仕入れ一覧 (全商材)",
+        "tip": "在庫切れ かつ 需要が実証済みの出品を、商材をまたいで1枚の表にまとめます。"
+               "押すとスプシの「再仕入れ」タブが開きます。個々の探索は商材ごとのボタンで。",
         "label_fg": "blue",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "restock_worklist.py"],
@@ -3050,15 +3052,16 @@ class ListingPanel:
                     return "PSA (TCG)"
                 return None
 
-            # 商材ごとの箱。中は **作業順** (出品 → 出品前チェック → 補URL 当日 → 夜間 → 目視)。
-            _STEP = ["当日分", "夜間検索", "昼の目視"]
-
+            # 商材ごとの箱。中は **作業順**。
+            # ★2026-09-03 ユーザー要望「同じ機能なら表記統一。配置順も流れで統一」。
+            #   ラベルを「<商材> <工程> ①②③」に揃えたので、並びもその順で決まる。
+            #     補URL          ① 当日分を探す → ② 夜に探す → ③ 目視して確定
+            #     在庫切れ再仕入れ ① 探す        → ② …        → ③ …
             def _step_rank(i):
                 lab = SCRIPTS[i].get("label", "")
-                for n, key in enumerate(_STEP):
-                    if key in lab:
-                        return n
-                return len(_STEP)
+                group = 0 if "補URL" in lab else (1 if "在庫切れ再仕入れ" in lab else 2)
+                step = next((n for n, mark in enumerate("①②③④") if mark in lab), 9)
+                return (group, step, lab)
 
             _lines = {}
             for i in (list(ug["hoju"]) + _confirm_idx + list(ug["report"])

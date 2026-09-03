@@ -2,7 +2,7 @@
 """既存メンテの残り6ボタンに「押したら何件動くか」を出す配線の回帰テスト (2026-09-01).
 
 ユーザー「ボタンが増えてきて、何をしたらいいのかわからない」。
-40個中ヒントが在るのは9個だけで、既存メンテの6個 (PSA再仕入れ照合 / RESTOCK Revise CSV /
+40個中ヒントが在るのは9個だけで、既存メンテの6個 (PSA 再仕入れ ① 探す / RESTOCK Revise CSV /
 RESTOCK状態同期 / 補URL件数感 / 一番くじ補充①②) は説明も件数も無かった。
 
 出す数字は **押したら今すぐ動く件数だけ** (ユーザー決定。0件なら黒のまま)。
@@ -36,12 +36,12 @@ def _fn_body(src, name):
 
 
 SIX = [
-    ("PSA再仕入れ照合", "psa_gate", "pg_txt"),
-    ("RESTOCK Revise CSV生成", "restock_build", "rb_txt"),
-    ("RESTOCK状態同期(書戻し)", "restock_wb", "rw_txt"),
+    ("PSA 再仕入れ ① 探す", "psa_gate", "pg_txt"),
+    ("PSA 再仕入れ ② CSV", "restock_build", "rb_txt"),
+    ("PSA 再仕入れ ③ 確認", "restock_wb", "rw_txt"),
     ("補URL 件数感 (全系統)", "hoju_status", "hs_txt"),
-    ("一番くじ補充① supply確定", "kuji_supply", "kv_txt"),
-    ("一番くじ補充② 刷新→CSV", "kuji_refresh", "kr_txt"),
+    ("くじ 再仕入れ ① 目視", "kuji_supply", "kv_txt"),
+    ("くじ 再仕入れ ② CSV", "kuji_refresh", "kr_txt"),
 ]
 
 

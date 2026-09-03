@@ -58,9 +58,10 @@ def test_new_listing_psatocsv_is_pristine_no_restock():
 
 def test_control_panel_has_restock_buttons():
     src = (Path(__file__).resolve().parent.parent / "iMakHQ" / "control_panel.py").read_text(encoding="utf-8")
-    i1 = src.index("RESTOCK Revise CSV生成")
+    # ★2026-09-03: ラベルを商材+工程に統一 (旧「RESTOCK Revise CSV生成」)
+    i1 = src.index('"label": "🛒 PSA 再仕入れ ② CSV"')
     assert '"psa_restock_build.py"' in src[i1:i1 + 400]      # ①生成ボタン
-    i2 = src.index("RESTOCK状態同期")
+    i2 = src.index('"label": "🛒 PSA 再仕入れ ③ 確認"')
     assert '"psa_restock_writeback.py"' in src[i2:i2 + 400]  # ②書戻しボタン
 
 
