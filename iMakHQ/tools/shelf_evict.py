@@ -492,6 +492,52 @@ def _load():
     return fr, shelf_of, cat_of
 
 
+def split_verified(status_by_item):
+    """送った分を「本当に終わった」「まだ生きている」に分ける。純関数。
+
+    ★2026-09-03: 画面に「✅ END」と出たのに **生きたままの出品**があった (実測)。
+      送信の戻り値を信じず、eBay の実状態で数え直す。
+      状態が読めないものは **終わった側に入れない** (fail-closed。
+      黙って済ませると、売れる状態で残ったことに誰も気づかない)。
+    戻り: (終わった itemID, 要対応 [(itemID, 状態)])
+    """
+    done, todo = [], []
+    for iid, st in status_by_item.items():
+        if st and st != "Active":
+            done.append(iid)
+        else:
+            todo.append((iid, st or "読めない"))
+    return done, todo
+
+
+def _verify_ended(ids):
+    """送った直後に eBay を読み直して、本当に終わったかを確かめる (I/O)。
+
+    戻り: 本当に終わった itemID。落ちていない分は画面に「要対応」で出す。
+    """
+    if not ids:
+        return ids
+    try:
+        from ebay_getitem_images import fetch_listing_status
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 照合できません ({type(e).__name__}) → 送信結果をそのまま使います")
+        return ids
+    print(f"\n▶ 実物を読み直して照合します ({len(ids)}件)...")
+    status = {}
+    for iid in ids:
+        try:
+            status[iid] = fetch_listing_status(iid)
+        except Exception:                                      # noqa: BLE001
+            status[iid] = None
+    done, todo = split_verified(status)
+    print(f"  ✅ 終了を確認 {len(done)}件")
+    if todo:
+        print(f"  ⚠️ **まだ生きています {len(todo)}件 = 要対応** (次回もう一度対象に上がります)")
+        for iid, st in todo:
+            print(f"     ✗ {iid}: {st}")
+    return done
+
+
 def count_workload():
     """押したら何件・いくら落とせるか (2026-08-31・ラベル/ヒント用、eBay を叩かない)。
 
@@ -691,6 +737,10 @@ def main():
     print(f"\n▶ eBay に送信 → 成功 {len(ok)}件 / {len(ids)}件")
     for iid, msg in ng[:8]:
         print(f"   ⚠ {iid}: {msg}")
+    # ★2026-09-03: 送りっぱなしにしない。画面の「成功」と実物が食い違った実例が出た
+    #   (落ちていない出品が ✅ と出ていた)。**送った直後に eBay を読み直して照合**し、
+    #   落ちていないものは「要対応」として残す (状態同期の安全原則)。
+    ok = _verify_ended(ok)
     if ok:
         import cull_writeback as CW
         n = CW.apply(set(ok), commit=True)
