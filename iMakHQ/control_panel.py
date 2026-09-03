@@ -3424,17 +3424,21 @@ class ListingPanel:
                 se_txt = "\n(残件 取得できず: %s)" % str(se["error"])[:40]
                 se_label = ""
             elif se:
-                se_txt = ("\n今日の出品額 $%s → 目標 $%s\n選定 %s件 "
-                           "(①仕入元死 %s件 / ②滞留 %s件)\n空く額 $%s") % (
-                    f"{se.get('listed_today', 0):,.0f}", f"{se.get('target', 0):,.0f}",
-                    se.get("picked", 0), se.get("tier1", 0), se.get("tier2", 0),
-                    f"{se.get('amount', 0):,.0f}")
+                se_txt = ("\n在庫はあるが売れない出品が %s件 ($%s ぶん)\n"
+                           "押すと「いくら空けますか」と聞きます\n"
+                           "今日の出品額 $%s") % (
+                    se.get("max_picked", 0), f"{se.get('max_amount', 0):,.0f}",
+                    f"{se.get('listed_today', 0):,.0f}")
                 if se.get("cache_note"):
                     se_txt += "\n" + se["cache_note"]
-                if se.get("picked"):
-                    se_label = "%s件 / $%s" % (se["picked"], f"{se.get('amount', 0):,.0f}")
-                elif se.get("target", 0) <= 0:
-                    se_label = "今日はまだ出品なし"
+                # ★2026-09-03: 押す前に額を聞けるようにしたので、ボタンには
+                #   **今日どこまで空けられるか (上限)** を出す。今日の出品額だけ出すと
+                #   「いくらまで指定できるのか」が分からない (ユーザー要望)。
+                if se.get("max_picked"):
+                    se_label = "最大 %s件 / $%s" % (
+                        se["max_picked"], f"{se.get('max_amount', 0):,.0f}")
+                    se_txt += "\n空欄で押すと 今日の出品分だけ ($%s)" % (
+                        f"{se.get('amount', 0):,.0f}")
                 else:
                     se_label = "対象なし"
             else:

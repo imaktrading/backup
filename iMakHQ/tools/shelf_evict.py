@@ -414,6 +414,30 @@ def _load_live():
     return rows, shelf_of
 
 
+CATEGORY_CACHE = r"C:/dev/iMak_data/hq/shelf_category_cache.json"
+
+
+def _category_cache_load():
+    """itemID→カテゴリ の前回の写し。無ければ空。"""
+    try:
+        import json as _j
+        with io.open(CATEGORY_CACHE, encoding="utf-8") as f:
+            return _j.load(f) or {}
+    except Exception:                                          # noqa: BLE001
+        return {}
+
+
+def _category_cache_save(by_item):
+    """写しを残す。書けなくても本処理は止めない。"""
+    try:
+        import json as _j
+        os.makedirs(os.path.dirname(CATEGORY_CACHE), exist_ok=True)
+        with io.open(CATEGORY_CACHE, "w", encoding="utf-8") as f:
+            _j.dump(by_item, f, ensure_ascii=False)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def _load():
     """(funnel の US 行, itemID→ミラー込み棚額, 行→カテゴリ) を返す。"""
     done = CE.load_done()
@@ -436,18 +460,31 @@ def _load():
         return _f(row.get("price")) + mir.get(LF._title_key(row.get("title")), 0.0)
 
     # カテゴリは商品管理シートの R列が正 (funnel の eBay カテゴリは混在して信用できない)。
-    import gspread
-    from google.oauth2.service_account import Credentials
-    gc = gspread.authorize(Credentials.from_service_account_file(
-        LF.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets",
-                               "https://www.googleapis.com/auth/drive"]))
-    by_item = {}
-    for sid in LF.SHEET_IDS:
-        for row in gc.open_by_key(sid).get_worksheet_by_id(LF.SHEET_GID).get_all_values()[1:]:
-            iid = (row[1] if len(row) > 1 else "").strip()
-            c = (row[17] if len(row) > 17 else "").strip()
-            if iid.isdigit() and c:
-                by_item[iid] = c
+    # ★2026-09-03: ここが Google の 500/503 で落ちると、ボタンの件数ラベルごと消える
+    #   (実測。表示のために毎回シートを叩いている)。取れた分をローカルに残し、
+    #   叩けなかった時は前回の写しを使う。カテゴリは日に何度も変わる値ではない。
+    by_item = _category_cache_load()
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        gc = gspread.authorize(Credentials.from_service_account_file(
+            LF.CREDS_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets",
+                                   "https://www.googleapis.com/auth/drive"]))
+        fresh = {}
+        for sid in LF.SHEET_IDS:
+            for row in gc.open_by_key(sid).get_worksheet_by_id(
+                    LF.SHEET_GID).get_all_values()[1:]:
+                iid = (row[1] if len(row) > 1 else "").strip()
+                c = (row[17] if len(row) > 17 else "").strip()
+                if iid.isdigit() and c:
+                    fresh[iid] = c
+        if fresh:
+            by_item = fresh
+            _category_cache_save(fresh)
+    except Exception as e:                                     # noqa: BLE001
+        if not by_item:
+            raise
+        print(f"  ⚠ カテゴリはシートを読めず前回の写しを使います ({type(e).__name__})")
 
     def cat_of(row):
         return by_item.get(row.get("item_id"))
@@ -469,13 +506,15 @@ def count_workload():
            "cache_note": 補足 (キャッシュが古い/無い時), "error": 読めなかった理由}
     """
     out = {"picked": 0, "amount": 0.0, "target": 0.0, "listed_today": 0.0,
-           "tier1": 0, "tier2": 0, "cache_note": "", "error": ""}
+           "tier1": 0, "tier2": 0, "max_picked": 0, "max_amount": 0.0,
+           "cache_note": "", "error": ""}
     try:
         listed = listed_today_amount()
         target = listed * RATIO
         out["listed_today"], out["target"] = listed, target
-        if target <= 0:
-            return out
+        # ★2026-09-03: 目標額を聞けるようにしたので、ボタンには **今日いくらまで空けられるか**
+        #   (=対象すべて) を出す。今日の出品額しか出さないと「押せる上限」が分からない。
+        #   出品が0件の日でも上限は出す (target<=0 でも先へ進む)。
 
         import itemid_writeback_audit as A
         rows, shelf_of, cat_of = [], None, None
@@ -493,7 +532,10 @@ def count_workload():
         else:
             out["cache_note"] = "① live キャッシュがまだありません → 押すと作られます"
 
-        if not rows or sum(shelf_of(r) for r in rows) < target:
+        # ★2026-09-03: ②(在庫はあるが売れない)は経過日数と販売実績が要る。live 一覧には
+        #   その列が無いので、**必ずファネルも読む**。読まないと ② が常に0件になり、
+        #   ボタンに「対象なし」と出てしまう (実測でそうなっていた)。ファネルはローカルCSV。
+        if True:
             frows, fshelf, fcat = _load()
             seen = {r["item_id"] for r in rows}
             rows = rows + [r for r in frows if r.get("item_id") not in seen]
@@ -507,12 +549,19 @@ def count_workload():
 
         # ★2026-09-03: 棚のボタンは②だけになった (①は取下げに統合)。
         #   ラベルの件数も②に揃える。①を混ぜると押しても出てこない数字になる。
-        picked, total = pick(rows, target, shelf_of, cat_of, only_tier=TIER_STALE,
-                             restock_pending=restock_pending_ids(),
-                             no_demand=no_demand_ids(rows))
-        byt = collections.Counter(t for t, _r in picked)
-        out.update(picked=len(picked), amount=total,
-                   tier1=byt.get(TIER_OOS, 0), tier2=byt.get(TIER_STALE, 0))
+        # ★2026-09-03: ラベル計算では **スプシを読まない**。再仕入れ予定の読み取りは
+        #   Google の 503 で落ちることがあり、そのたびボタンの件数が消える (実測)。
+        #   ここは表示なので、守りは押した時 (main) に効かせれば足りる。
+        _keep, _nd = set(), no_demand_ids(rows)
+        mpicked, mtotal = pick(rows, float("inf"), shelf_of, cat_of, only_tier=TIER_STALE,
+                               restock_pending=_keep, no_demand=_nd)
+        out.update(max_picked=len(mpicked), max_amount=mtotal)
+        if target > 0:
+            picked, total = pick(rows, target, shelf_of, cat_of, only_tier=TIER_STALE,
+                                 restock_pending=_keep, no_demand=_nd)
+            byt = collections.Counter(t for t, _r in picked)
+            out.update(picked=len(picked), amount=total,
+                       tier1=byt.get(TIER_OOS, 0), tier2=byt.get(TIER_STALE, 0))
     except Exception as e:                                     # noqa: BLE001
         out["error"] = f"{type(e).__name__}: {e}"[:60]
     return out
