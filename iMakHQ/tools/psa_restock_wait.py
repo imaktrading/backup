@@ -18,6 +18,14 @@ ST_REVIVED = "復活可(供給あり→RESTOCK)"
 # ★2026-07-24: 取得失敗(メルカリtimeout等)=在庫不明。End候補(供給なし確定)と区別して蓄積し
 # 毎回再取得する。台帳から漏れて追跡が切れる「孤児」を防ぐ(ユーザー指摘: 世代でリセットするな)。
 ST_UNKNOWN = "在庫不明(取得失敗・要再取得)"
+# ★2026-09-04 ユーザー指摘「再仕入れ対象の基準がおかしい。出品中で在庫がなくて、でしょ？」
+#   再仕入れは **生きている出品の数量を戻す**機能なので、対象は「出品中 かつ 在庫なし」。
+#   ファネル経路はこれを満たす (eBay の出品中レポートが元) が、**この台帳から合流させる
+#   経路は見ていなかった**。出品が終了すると funnel からは消えるのに台帳は持ち続けるため、
+#   終了済がよみがえって毎回 RESTOCK確定 に入り、cert が引けず「入稿待ち」で残り続けた
+#   (実測 2026-09-04: 5件)。
+#   行は消さない (需要の記録は資産)。status を分けて再チェックの対象から外す。
+ST_ENDED = "出品が終了済(reviseでは戻せない)"
 
 
 def ledger_from_rows(rows2d):
@@ -108,6 +116,7 @@ def recheck_targets(ledger):
     """
     out = []
     for r in ledger:
+        # ST_ENDED は対象外。出品が無いので数量を戻せない (供給が出ても行き先が無い)
         if r.get("status") not in (ST_WAIT, ST_UNKNOWN):   # 在庫不明も毎回再取得対象
             continue
         out.append({"itemID": r.get("itemID", ""), "key": r.get("KEY", ""),
@@ -126,3 +135,22 @@ def to_tab_rows(ledger):
     for r in sorted(ledger, key=_key):
         rows.append([r.get(c, "") for c in LEDGER_HEADER])
     return rows
+
+
+def mark_ended(ledger, ended_itemids, today):
+    """出品が終了していた itemID を ST_ENDED にする (純関数)。
+
+    行は消さない。「この出品は終わった」という事実も、需要の記録も資産なので残す。
+    戻り: (新 ledger, 変えた件数)
+    """
+    ids = {str(i).strip() for i in (ended_itemids or []) if str(i).strip()}
+    n = 0
+    out = []
+    for r in ledger:
+        r = dict(r)
+        if r.get("itemID") in ids and r.get("status") != ST_ENDED:
+            r["status"] = ST_ENDED
+            r["最終確認日"] = today
+            n += 1
+        out.append(r)
+    return out, n

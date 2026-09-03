@@ -700,18 +700,39 @@ def main():
     # 過去に「再仕入れ不能(End候補)」になった行を毎回再探索(供給は動的=後で出れば RESTOCK)。
     # 目視確定済(KEY付与済)なので確認ゲートは通さず、探索だけ合流する。
     try:
-        from sheet_io import read_tab
+        from sheet_io import read_tab, write_rows_to_tab
         import psa_restock_wait as prw
         wled = prw.ledger_from_rows(read_tab("再仕入れ待ち"))
         have = {mp._ebay_item_id(r.get("ebay_url", "") or "") for r in rows}
-        merged = 0
-        for t in prw.recheck_targets(wled):
-            if t["itemID"] and t["itemID"] not in have:
-                rows.append({"title": t["title"], "ebay_url": t["ebay_url"],
-                             "key": t["key"], "set_no": ""})
-                merged += 1
+        # ★2026-09-04 ユーザー指摘「再仕入れ対象の基準がおかしい。出品中で在庫がなくて、でしょ？」
+        #   再仕入れは **生きている出品の数量を戻す**機能。ファネル経路は eBay の出品中
+        #   レポートが元なので条件を満たすが、**この台帳経路は出品の生死を見ていなかった**。
+        #   出品が終了すると funnel からは消えるのに台帳は持ち続けるので、終了済が毎回
+        #   よみがえって RESTOCK確定 に入り、cert が引けず「入稿待ち」で残り続けていた
+        #   (実測 5件。CULL で落とした分も含むが、原因は取下げ基準ではなく **出品が無い**こと)。
+        from ebay_getitem_images import fetch_listing_status as _wls
+        _cands = [t for t in prw.recheck_targets(wled)
+                  if t["itemID"] and t["itemID"] not in have]
+        merged, _ended = 0, []
+        for t in _cands:
+            st = _wls(t["itemID"])
+            if st is not None and st != "Active":
+                _ended.append(t)          # 終了済 = 戻せない。分からない時は従来どおり合流
+                continue
+            rows.append({"title": t["title"], "ebay_url": t["ebay_url"],
+                         "key": t["key"], "set_no": ""})
+            merged += 1
         if merged:
             print(f"  ♻ 再仕入れ待ち台帳から {merged}件を再チェックに合流(目視済=skip)")
+        if _ended:
+            import datetime as _dtx
+            wled, _n = prw.mark_ended(wled, [t["itemID"] for t in _ended],
+                                      _dtx.date.today().isoformat())
+            write_rows_to_tab("再仕入れ待ち", prw.to_tab_rows(wled))
+            print(f"  🚫 出品が終了していた {len(_ended)}件は再仕入れの対象から外しました "
+                  f"(台帳に『終了済』で残す。reviseでは戻せない)")
+            for t in _ended[:8]:
+                print(f"       {t['itemID']} {(t.get('title') or '')[:52]}")
     except Exception as e:
         print(f"  ⚠ 待ち台帳読込skip ({type(e).__name__}: {e})")
 
