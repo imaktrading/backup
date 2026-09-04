@@ -1723,6 +1723,45 @@ _NIGHTLY_TASK = r"\iMakHQ_HojuSearch_2330"
 _NIGHTLY_CACHE = {}
 
 
+def nightly_last_run(log_dir=None):
+    """夜間バッチが **最後にいつ・どこまで** 走ったか (2026-09-04 ユーザー要望)。
+
+    > 夜間に探すのもやれているの？ラベルも更新されている？
+    > そやな。探せた件数と残数も
+
+    夜間はパネルを通らないので、ボタンの「今日 押した」には出ない。
+    代わりに `review_logs/hoju_search_cron_*.log` を読んで、開始/終了と段数を出す。
+    ★ログは1行ずつ `[段名] 日時` が入る。最後が `[end]` なら完走。
+      **無ければ「完走した」と言わない** (途中で止まったのを成功と読ませない)。
+
+    戻り: {"date","start","end","steps","done":bool,"last_step","error"}
+    """
+    import glob as _g
+    out = {"date": "", "start": "", "end": "", "steps": 0,
+           "done": False, "last_step": "", "error": ""}
+    try:
+        d = log_dir or os.path.join(WORKSPACE, "iMakHQ", "review_logs")
+        fs = _g.glob(os.path.join(d, "hoju_search_cron_*.log"))
+        if not fs:
+            out["error"] = "夜間ログがありません"
+            return out
+        src = max(fs, key=os.path.getmtime)
+        out["date"] = os.path.basename(src)[len("hoju_search_cron_"):-4]
+        txt = open(src, encoding="utf-8", errors="replace").read()
+        hits = re.findall(r"^\[([^\]]+)\]\s+(\S+\s+\S+)", txt, re.M)
+        if not hits:
+            out["error"] = "段が1つも記録されていません"
+            return out
+        out["steps"] = len(hits)
+        out["start"] = hits[0][1]
+        out["last_step"] = hits[-1][0]
+        out["done"] = hits[-1][0] == "end"
+        out["end"] = hits[-1][1] if out["done"] else ""
+    except Exception as e:                                     # noqa: BLE001
+        out["error"] = "%s: %s" % (type(e).__name__, e)
+    return out
+
+
 def nightly_search_state(task=_NIGHTLY_TASK):
     """補URL夜間検索の定期タスクの状態 (1セッション1回だけ見る)。
 
@@ -3740,6 +3779,21 @@ class ListingPanel:
             # 📊 補URL件数感: **見るだけ**なので色は変えない。今の内訳をそのまま出す
             hs_txt = "\nlive PSA %s件 / 補が薄い %s件\n(検索できる %s件 / 目視できる %s件)" % (
                 w.get("live_psa", "?"), tot, s["can"], cf["ready"])
+            # ★2026-09-04 ユーザー要望「夜間に探すのもやれているの？探せた件数と残数も」。
+            #   夜間はパネルを通らないので「今日 押した」には出ない。ここに実績を出す。
+            try:
+                _nl = nightly_last_run()
+                if _nl.get("error"):
+                    hs_txt += "\n夜間: %s" % _nl["error"]
+                elif _nl.get("done"):
+                    hs_txt += "\n夜間 %s: %s → %s 完走 (%s段)" % (
+                        _nl["date"], _nl["start"][-11:-3], _nl["end"][-11:-3], _nl["steps"])
+                    hs_txt += "\n  探せた %s件 / まだ %s件" % (s.get("done", 0), s["can"])
+                else:
+                    hs_txt += "\n⚠️ 夜間 %s は途中で止まっています (最後の段: %s)" % (
+                        _nl["date"], _nl["last_step"])
+            except Exception:                                 # noqa: BLE001
+                pass
             # 🎴一番くじ補充① supply確定 / ② 刷新→CSV
             kv = (kj.get("supply") or {}) if isinstance(kj, dict) else {}
             kr = (kj.get("refresh") or {}) if isinstance(kj, dict) else {}
