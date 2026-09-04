@@ -75,6 +75,10 @@ values:
     category: pokemon_tcg
     rows: 96
     jp_set: "ポケモンカードゲーム クラシック カメックス&スイクンexデッキ"
+  - value: "M-P: Mega Promos"
+    category: pokemon_tcg
+    rows: 93
+    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Mega Brave"
     category: pokemon_tcg
     rows: 92
@@ -87,10 +91,6 @@ values:
     category: pokemon_tcg
     rows: 92
     jp_set: "ポケモンチャレンジひろば 2009/9"
-  - value: "M-P: Mega Promos"
-    category: pokemon_tcg
-    rows: 90
-    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Wild Blaze"
     category: pokemon_tcg
     rows: 85
@@ -251,6 +251,10 @@ values:
     category: pokemon_tcg
     rows: 21
     jp_set: "スターターセットVMAX フシギバナ"
+  - value: "Ultra Moon Deck Build Box"
+    category: pokemon_tcg
+    rows: 21
+    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラムーン」"
   - value: "Flareon GX Deck"
     category: pokemon_tcg
     rows: 21
@@ -263,10 +267,6 @@ values:
     category: pokemon_tcg
     rows: 20
     jp_set: "スターターセットVMAX カメックス"
-  - value: "Ultra Moon Deck Build Box"
-    category: pokemon_tcg
-    rows: 20
-    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラムーン」"
   - value: "Umbreon & Darkrai GX Tag Team Deck"
     category: pokemon_tcg
     rows: 20
@@ -291,6 +291,10 @@ values:
     category: pokemon_tcg
     rows: 19
     jp_set: "乱戦！ポケモンスクランブル×ポケモンカードゲーム"
+  - value: "Extra Regulation Box"
+    category: pokemon_tcg
+    rows: 18
+    jp_set: "「エクストラレギュレーションBOX」"
   - value: "Mewtwo vs Genesect 30-Card Deck Battle Set"
     category: pokemon_tcg
     rows: 18
@@ -335,10 +339,6 @@ values:
     category: pokemon_tcg
     rows: 16
     jp_set: "ポケモンカードゲームBW はじめてセット （ミジュマルデッキ）"
-  - value: "Extra Regulation Box"
-    category: pokemon_tcg
-    rows: 15
-    jp_set: "「エクストラレギュレーションBOX」"
   - value: "BW First Set (Tepig Deck)"
     category: pokemon_tcg
     rows: 15
@@ -642,6 +642,10 @@ values:
     category: pokemon_tcg
     rows: 2
     jp_set: "ジムプロモキャンペーン2026下半期"
+  - value: "McDonald's Happy Meal 2025"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "マクドナルド「ハッピーセット2025」"
   - value: "Sv: Ceruledge & Sylveon Ex Stellar Tera Type Starter Sets / Start Deck Generations / Battle Partners Deck Build Box"
     category: pokemon_tcg
     rows: 1
@@ -894,6 +898,10 @@ values:
     category: pokemon_tcg
     rows: 1
     jp_set: "チャンピオンシップポイント（2026シーズン）"
+  - value: "Ultra Sun Deck Build Box"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラサン」"
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg

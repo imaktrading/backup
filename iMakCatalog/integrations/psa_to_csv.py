@@ -1814,7 +1814,24 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
         (r"STARTER SET VMAX.*CHARIZARD|CHARIZARD.*STARTER SET VMAX", "SCS-C"),
         (r"STARTER SET VMAX.*VENUSAUR|VENUSAUR.*STARTER SET VMAX",   "SCS-V"),
         (r"STARTER SET VMAX.*BLASTOISE|BLASTOISE.*STARTER SET VMAX", "SCS-B"),
+        # ★**先に入っている方**も明示する (2026-09-04)。PSA が弾コードを書かず
+        #   デッキ名だけ書く形 (`GRIMMSNARL STARTER SET VMAX`) だと、これが無いと
+        #   **そのデッキ自体が引けなくなる**。実測: 'EEVEE GX STARTER SET #007' のように
+        #   PSA はポケモン名を先に置く (dedupe の目視ログから確認)。
+        (r"STARTER SET VMAX.*GRIMMSNARL|GRIMMSNARL.*STARTER SET VMAX", "SCS"),
+        (r"STARTER SET V\b.*\bLIGHTNING|LIGHTNING.*STARTER SET V\b", "SA"),
+        # XY コード共用の商品 (2026-09-04)。番号が衝突する分だけ枝番を持つ。
+        (r"EXTRA REGULATION BOX", "XY-ERB"),
+        (r"ULTRA SUN.*DECK BUILD BOX|DECK BUILD BOX.*ULTRA SUN", "XY-US"),
+        (r"ULTRA MOON.*DECK BUILD BOX|DECK BUILD BOX.*ULTRA MOON", "XY-UM"),
     ]
+    # 30枚デッキ対戦set (MG) は **商品名に両方のポケモンが入る**
+    #   (`MEWTWO VS GENESECT DECK KIT MEWTWO`)。単純な含有判定だと必ず両方当たるので、
+    #   商品名の**後ろ側**(どちらのデッキか) だけを見る。
+    m_mg = re.search(r"MEWTWO\s*VS\s*GENESECT(.*)$", b)
+    if m_mg:
+        tail = m_mg.group(1)
+        return "MG-G" if "GENESECT" in tail else "MG"
     for pattern, code in deck_codes:
         if re.search(pattern, b):
             return code

@@ -1191,6 +1191,26 @@ set:
   - source: "熱戦にそなえろ！黒いメガサーナイトキャンペーン"
     ebay: "XY Promo"
     note: "2026-09-04 eBay master 実在値 (XY-P プロモ。配布キャンペーン名ではなく弾の値を使う)"
+
+  # ---- 2026-09-04 (2): 兄弟デッキの枝番で入った分。eBay master に在る値は verbatim。
+  - source: "スターターセットV 水"
+    ebay: "Sa: Water Starter Set V"
+    note: "2026-09-04 兄弟デッキ投入分"
+  - source: "スターターセットV 炎"
+    ebay: "Sa: Fire Starter Set V"
+    note: "2026-09-04 兄弟デッキ投入分"
+  - source: "スターターセットV 草"
+    ebay: "Sa: Grass Starter Set V"
+    note: "2026-09-04 兄弟デッキ投入分"
+  - source: "スターターセットV 闘"
+    ebay: "Sa: Fighting Starter Set V"
+    note: "2026-09-04 兄弟デッキ投入分"
+  - source: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラサン」"
+    ebay: "Ultra Sun Deck Build Box"
+    note: "2026-09-04 兄弟デッキ投入分"
+  - source: "マクドナルド「ハッピーセット2025」"
+    ebay: "McDonald's Happy Meal 2025"
+    note: "2026-09-04 兄弟デッキ投入分"
 set_code:
   # ----- Scarlet & Violet (SV / SVxx) -----
   - source: SV1V
