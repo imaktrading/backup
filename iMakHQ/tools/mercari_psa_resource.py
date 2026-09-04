@@ -17,6 +17,7 @@
 import csv
 import datetime
 import glob
+import json
 import os
 import re
 import sys
@@ -866,6 +867,41 @@ def candidate_passes_filter(cond, ship, reviews, is_shops, min_reviews=100,
     return True
 
 
+# 買えないと分かった URL を覚えておく置き場 (2026-09-04)。
+#   ★オークションかどうかは **詳細ページを開かないと判らない**。全候補を毎回開くのは
+#     遅すぎるので、一度 開いて「買えない」と分かった URL は覚えておき、以後どの出品でも
+#     出さない。ユーザー報告「補URL③に AUC がまだ出てる」への対応。
+#   候補NG台帳 (出品×URL) とは別物。こちらは **URL そのものが買えない** ので全出品で共通。
+NOT_BUYABLE_PATH = os.path.join("C:/dev/iMak_data/hq", "not_buyable_urls.json")
+
+
+def load_not_buyable(path=NOT_BUYABLE_PATH):
+    """{url: {"why","at"}} を読む。読めなければ空 (候補を消す方に倒さない)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:                                          # noqa: BLE001
+        return {}
+
+
+def remember_not_buyable(url, why, path=NOT_BUYABLE_PATH):
+    """買えないと分かった URL を覚える (I/O)。書けなくても走行は止めない。"""
+    if not url:
+        return
+    import datetime as _dt
+    d = load_not_buyable(path)
+    if url in d:
+        return
+    d[url] = {"why": why, "at": _dt.datetime.now().isoformat(timespec="seconds")}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def _detail_supply_check(drv, href, min_reviews=100, require_freeship=True):
     """詳細ページを訪問し candidate_passes_filter を評価 → (ok, ship, reviews)。失敗は (False,'',None)。"""
     try:
@@ -876,9 +912,13 @@ def _detail_supply_check(drv, href, min_reviews=100, require_freeship=True):
         return (False, "", None)
     _cond, ship = _parse_cond_ship(src)
     reviews = None if _is_shops_url(href) else _parse_seller_reviews(src)
+    _buyable = buyable_from_detail(src)
+    if not _buyable:
+        # 一度 開いて分かったことは捨てない。以後どの出品でも出さない。
+        remember_not_buyable(href, "オークション/売り切れ (詳細ページで判定)")
     ok = candidate_passes_filter(_cond, ship, reviews, _is_shops_url(href),
                                  min_reviews=min_reviews, require_freeship=require_freeship,
-                                 buyable=buyable_from_detail(src))
+                                 buyable=_buyable)
     return (ok, ship, reviews)
 
 

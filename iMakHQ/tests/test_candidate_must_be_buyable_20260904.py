@@ -91,7 +91,9 @@ def test_every_category_checks_buyability():
         assert need in s, f
     # PSA は _detail_supply_check 経由 (共通の判定を通る)
     s = _io.open(os.path.join(_TOOLS, "mercari_psa_resource.py"), encoding="utf-8").read()
-    assert "buyable=buyable_from_detail(src)" in s
+    # ★2026-09-04 (後): 判定結果を台帳にも残すため、一度 変数に受けてから渡す形にした。
+    assert "_buyable = buyable_from_detail(src)" in s
+    assert "buyable=_buyable" in s
 
 
 def test_ichibankuji_refetches_cache_without_buyable():

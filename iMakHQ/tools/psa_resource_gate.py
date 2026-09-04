@@ -165,6 +165,15 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     """
     mr = mr or {}
     out, seen = [], set()
+    # ★2026-09-04: 一度 開いて「買えない」と分かった URL は、どの出品でも出さない。
+    #   ユーザー報告「補URL③に AUC がまだ出てる」。オークションは詳細ページでしか
+    #   判らず、all_cands / loose_cands は詳細を開いていないので素通りしていた。
+    #   台帳は mercari_psa_resource が書く (詳細を開いた時)。読めなければ素通し。
+    try:
+        import mercari_psa_resource as _mpx
+        _ng_urls = set(_mpx.load_not_buyable() or {})
+    except Exception:                                          # noqa: BLE001
+        _ng_urls = set()
     # ★2026-09-04: 上限を超える仕入値の候補は **目視にも出さない**。
     #   ここは 補URL の目視画面が使う一覧なので、combine() の aux_urls とは別経路。
     #   片方だけ絞ると「①探すには出ないのに補URLには入る」がまた起きる。
@@ -194,7 +203,7 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     for t in merc[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
         _p = t[0] if (t and isinstance(t[0], int)) else None
-        if url and url not in seen and _ok(_p):
+        if url and url not in seen and url not in _ng_urls and _ok(_p):
             seen.add(url)
             out.append({"channel": "mercari", "url": url, "price": _p,
                         "name": (t[2] if len(t) > 2 else ""),
@@ -206,15 +215,20 @@ def _build_visual_candidates(mr, c, max_mercari=6, max_snkr=6):
     for t in (mr.get("loose_cands") or [])[:max_mercari]:
         url = t[1] if (t and len(t) > 1) else ""
         _p = t[0] if (t and isinstance(t[0], int)) else None
-        if url and url not in seen and _ok(_p):
+        if url and url not in seen and url not in _ng_urls and _ok(_p):
             seen.add(url)
             out.append({"channel": "mercari", "url": url, "price": _p,
                         "name": (t[2] if len(t) > 2 else ""),
                         "variant_ok": False, "number_ok": False})
-    if not out and c.get("mercari_url") and _ok(c.get("mercari_jpy")):
+    # ★最後の逃げ道も同じ門を通す (2026-09-04)。ここを抜いていたため、上の枠で
+    #   全部落ちて out が空になった時に、**落としたはずの URL が入り直していた**
+    #   (ユーザー報告「補URL③に AUC がまだ出てる」の実体)。
+    if (not out and c.get("mercari_url") and c["mercari_url"] not in _ng_urls
+            and _ok(c.get("mercari_jpy"))):
         out.append({"channel": "mercari", "url": c["mercari_url"], "price": c.get("mercari_jpy")})
     for d in (c.get("snkrdunk_urls") or [])[:max_snkr]:
-        if d.get("url") and d["url"] not in seen and _ok(d.get("price")):
+        if (d.get("url") and d["url"] not in seen
+                and d["url"] not in _ng_urls and _ok(d.get("price"))):
             seen.add(d["url"])
             # snkrdunk は card_id で引いているので変種は特定済み (番号一致の全変種を混ぜない)。
             out.append({"channel": "snkrdunk", "url": d["url"], "price": d.get("price"),
