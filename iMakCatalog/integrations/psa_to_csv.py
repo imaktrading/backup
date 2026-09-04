@@ -307,6 +307,19 @@ def _record_name_matches_subject(record: dict, subject: str) -> bool:
         folded_tokens = {f for f in (_fold_ascii(t) for t in tokens) if len(f) >= 3}
         if any(t in folded_combined for t in folded_tokens):
             return True
+    # 1c. PSA の **母音抜き略記** (2026-09-04)。ラベルの幅に収めるため
+    #     `GRDVR. & SYLVN. GX` のように母音を落として末尾に `.` を付ける書き方がある。
+    #     `.` で終わるトークンだけ、母音を抜いた骨格で比べる
+    #     (GRDVR ↔ Gardevoir → GRDVR / SYLVN ↔ Sylveon → SYLVN)。
+    #     ★`.` 付きのトークンに限る。普通の語まで母音を抜くと別カードに当たる。
+    #     実害: cert139291730 が「候補なし」で毎日 queue に載っていた (SM9a-067 は在る)。
+    dotted = [t for t in re.findall(r"[A-Z]{3,}\.", (subject or "").upper())]
+    if dotted:
+        def _skeleton(w: str) -> str:
+            return re.sub(r"[AEIOU\W_]", "", w.upper())
+        skel = _skeleton(combined)
+        if skel and all(_skeleton(t) in skel for t in dotted):
+            return True
     # 2. JA-only record: 日本語名 → 想定 EN tokens に変換して照合
     expected = _JA_CHAR_TO_EN_TOKENS.get(name_jp, set())
     if expected & tokens:

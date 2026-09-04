@@ -87,6 +87,16 @@ def official_cards(pg: str) -> list[dict]:
              "img": (c.get("cardThumbFile") or "").rsplit("/", 1)[-1]} for c in out]
 
 
+# ★catalog に **登録しないと決めてある**もの (CLAUDE.md「番号が無いカードは登録しない」)。
+#   公式には在るが、印刷番号が無く product_id を作れない = 構造的に入らない。
+#   差分に数えると永久に赤のままになるので、別枠で数える (隠さない)。
+_OUT_OF_SCOPE = re.compile(r"^基本.*エネルギー$")
+
+
+def _is_out_of_scope(name: str) -> bool:
+    return bool(_OUT_OF_SCOPE.match((name or "").strip()))
+
+
 def catalog_rows(conn, pg: str) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT product_id, name, name_jp, images FROM products "
@@ -106,16 +116,24 @@ def check_pg(conn, pg: str) -> dict:
         names.add((r["name"] or "").strip())
         names.add((r["name_jp"] or "").strip())
 
-    missing, name_ng = [], []
+    missing, name_ng, excluded, reprint = [], [], [], []
     for c in cards:
         r = by_img.get(c["img"])
         if r is None:
-            missing.append(c)
+            if _is_out_of_scope(c["name"]):
+                excluded.append(c)          # 差分ではない (登録しないと決めてある)
+            elif c["name"] in names:
+                # 同じ弾に **同じ名前の行が在る** = 別刷り (公式が絵を差し替え/再録した)。
+                # catalog は 1カード1行なので「カードが無い」わけではない。別枠で数える。
+                reprint.append(c)
+            else:
+                missing.append(c)
             continue
         if c["name"] and c["name"] not in {_clean(r["name"] or ""), _clean(r["name_jp"] or "")}:
             name_ng.append((c, r["product_id"], r["name_jp"] or r["name"]))
     return {"pg": pg, "fetched": len(cards), "rows": len(rows),
-            "missing": missing, "name_ng": name_ng}
+            "missing": missing, "name_ng": name_ng, "excluded": excluded,
+            "reprint": reprint}
 
 
 def pg_of(product_id: str) -> str:
@@ -162,7 +180,7 @@ def main() -> None:
 
     now = datetime.now().isoformat(timespec="seconds")
     print(f"=== 公式との突合 (pokemon / {len(targets)}弾) {now} ===")
-    total = ng = fail = 0
+    total = ng = fail = exc = rep = 0
     for pg in targets:
         try:
             res = check_pg(conn, pg)
@@ -175,6 +193,8 @@ def main() -> None:
             print(f"  ✗ pg={pg} {res['error']}")
             continue
         n = len(res["missing"]) + len(res["name_ng"])
+        exc += len(res.get("excluded") or [])
+        rep += len(res.get("reprint") or [])
         total += res["fetched"]
         ng += n
         print(f"  {'OK ' if n == 0 else '★NG'} pg={pg:8s} 公式 {res['fetched']:4d}枚 "
@@ -193,7 +213,8 @@ def main() -> None:
     print("")
     if fail:
         print(f"⚠️ 取得できなかった弾 {fail} 件 (= 検査できていない。正常ではない)")
-    print(f"突合 {total}枚 / 差分 {ng}件 / **差分が残っている弾 {len(left)}** {left[:8]}")
+    print(f"突合 {total}枚 / 差分 {ng}件 / 別刷り {rep}枚 / 対象外 {exc}枚 / "
+          f"**差分が残っている弾 {len(left)}** {left[:8]}")
 
 
 if __name__ == "__main__":

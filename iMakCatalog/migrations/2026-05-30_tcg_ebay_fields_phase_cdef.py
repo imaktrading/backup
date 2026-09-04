@@ -198,7 +198,11 @@ def process(dry_run: bool):
                 specs = {}
             changed = False
             # Phase F
-            if "finish" not in specs:
+            # ★2026-09-04 停止: `finish` を **レアリティから推測して書いてはいけない**
+            #   (CLAUDE.md「Finish は空欄が正」2026-08-22 ユーザー確定)。
+            #   同じカードにキラ版と通常版があり、レアリティは同じ = 当たらない。
+            #   このコードは 5/30 のもので、8/22 の決定より前。再実行しても書かない。
+            if False and "finish" not in specs:
                 finish = derive_finish(specs)
                 if finish:
                     specs["finish"] = finish
