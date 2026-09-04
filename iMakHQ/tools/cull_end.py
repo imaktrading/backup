@@ -214,10 +214,15 @@ def count_workload(funnel_dir=None, today=None):
 
     戻り: {"remaining": 残り全部, "next": 今回押したら出る件数, "cap": 1回の上限,
            "done": これまでに落とした数, "cull": CULL 全体, "src": 使った funnel,
+           "usd_next": 今回で空く出品枠($), "usd_remaining": 残り全部で空く額($),
            "error": 読めなかった理由}
+
+    ★2026-09-04 ユーザー要望「取下げは、金額開かないのかな」。
+      eBay の出品枠は **今 売れる状態にある出品の総額**で決まるので、
+      「何件落とせるか」より「いくら空くか」が判断材料になる (棚ボタンと同じ考え)。
     """
     out = {"remaining": 0, "next": 0, "cap": CAP, "done": 0, "cull": 0,
-           "src": "", "error": ""}
+           "usd_next": 0.0, "usd_remaining": 0.0, "src": "", "error": ""}
     try:
         fs = glob.glob(os.path.join(funnel_dir or FUNNEL_DIR, "funnel_*.csv"))
         if not fs:
@@ -227,8 +232,17 @@ def count_workload(funnel_dir=None, today=None):
         rows = list(csv.DictReader(open(src, encoding="utf-8")))
         done = load_done()
         cull, eligible, picked = select(rows, done_ids=done, today=today)
+        def _usd(rs):
+            t = 0.0
+            for r in rs:
+                try:
+                    t += float((r.get("price") or "0").strip() or 0)
+                except (TypeError, ValueError):
+                    pass
+            return round(t, 2)
         out.update(remaining=len(eligible), next=len(picked), done=len(done),
-                   cull=len(cull), src=os.path.basename(src))
+                   cull=len(cull), src=os.path.basename(src),
+                   usd_next=_usd(picked), usd_remaining=_usd(eligible))
     except Exception as e:                                     # noqa: BLE001
         out["error"] = f"{type(e).__name__}: {e}"[:60]
     return out

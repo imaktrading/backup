@@ -3622,6 +3622,13 @@ class ListingPanel:
             elif ce:
                 ce_txt = "\n今回 %s件 落とせます (残り %s件)" % (
                     ce.get("next", 0), ce.get("remaining", 0))
+                # ★2026-09-04 ユーザー要望「取下げは、金額開かないのかな」。
+                #   出品枠は **今 売れる状態にある出品の総額** で決まるので、
+                #   件数より「いくら空くか」が判断材料になる (棚ボタンと同じ)。
+                if ce.get("usd_next"):
+                    ce_txt += "\n出品枠が $%s 空きます" % format(int(ce["usd_next"]), ",")
+                    if ce.get("usd_remaining") and ce["usd_remaining"] != ce["usd_next"]:
+                        ce_txt += " (残り全部なら $%s)" % format(int(ce["usd_remaining"]), ",")
                 if ce.get("remaining", 0) > ce.get("cap", 0):
                     ce_txt += "\n※1回 %s件までなので あと %s回" % (
                         ce["cap"], -(-ce["remaining"] // ce["cap"]))
