@@ -3307,10 +3307,12 @@ class ListingPanel:
 
     def _load_step_log(self):
         """{badge: 'ISO日時'} を読む。壊れていても走行は止めない。"""
-        import json as _j
+        # ★io は module レベルに無いので **組込みの open** を使う (2026-09-04)。
+        #   io.open のままだと NameError を except が握って「常に空」になり、
+        #   時刻が一度も出なかった。
         try:
-            with io.open(self._step_log_path(), encoding="utf-8") as f:
-                d = _j.load(f)
+            with open(self._step_log_path(), encoding="utf-8") as f:
+                d = json.load(f)
             return d if isinstance(d, dict) else {}
         except Exception:                                          # noqa: BLE001
             return {}
@@ -3320,13 +3322,12 @@ class ListingPanel:
         if not badge:
             return
         import datetime as _dt
-        import json as _j
         d = self._load_step_log()
         d[badge] = _dt.datetime.now().isoformat(timespec="seconds")
         try:
             os.makedirs(os.path.dirname(self._step_log_path()), exist_ok=True)
-            with io.open(self._step_log_path(), "w", encoding="utf-8") as f:
-                f.write(_j.dumps(d, ensure_ascii=False))
+            with open(self._step_log_path(), "w", encoding="utf-8") as f:
+                f.write(json.dumps(d, ensure_ascii=False))
         except Exception as e:                                     # noqa: BLE001
             self.append_log("(押した時刻の記録skip: %s)" % type(e).__name__)
 

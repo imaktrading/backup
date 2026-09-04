@@ -87,3 +87,52 @@ def test_the_time_is_recorded_when_a_run_finishes():
     seg = _SRC[i:i + 700]
     assert "_remember_step_run" in seg
     assert seg.index("_remember_step_run") < seg.index("refresh_hoju_badge")
+
+# ── 実際に読み書きできるか (握りつぶしで「常に空」にならないこと) ──────
+def _borrow_methods():
+    """Tk を起動せず、記録まわりのメソッドだけ借りて動かす。"""
+    import json
+    import os as _os
+    tree = ast.parse(_SRC)
+    cls = next(n for n in tree.body
+               if isinstance(n, ast.ClassDef) and n.name == "ListingPanel")
+    want = {"_step_log_path", "_load_step_log", "_remember_step_run", "step_marks"}
+    fns = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in want]
+    flows = next(n for n in cls.body if isinstance(n, ast.Assign)
+                 and getattr(n.targets[0], "id", "") == "STEP_FLOWS")
+    ns = {"os": _os, "json": json, "WORKSPACE": r"c:/dev/iMak"}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=fns + [flows],
+                                                      type_ignores=[])), "<x>", "exec"), ns)
+
+    class P:
+        pass
+    for k in want:
+        setattr(P, k, ns[k])
+    P.STEP_FLOWS = ns["STEP_FLOWS"]
+    return P
+
+
+def test_the_log_can_actually_be_read_and_written(tmp_path):
+    """★実害: io が module に無いのに io.open を使っており、NameError を except が
+    握って **常に空** を返していた。時刻が一度も出なかった原因。
+    握りつぶす作りなので、実際に読み書きできることをテストで押さえる。
+    """
+    P = _borrow_methods()
+    p = P()
+    target = str(tmp_path / "button_last_run.json")
+    P._step_log_path = lambda self: target
+    assert p._load_step_log() == {}          # 無い時は空 (例外を投げない)
+    p._remember_step_run("psa_gate")
+    got = p._load_step_log()
+    assert list(got) == ["psa_gate"], got    # 書けて、読み戻せる
+    assert len(got["psa_gate"]) >= 16        # ISO 日時が入っている
+
+
+def test_no_badge_is_a_noop(tmp_path):
+    """badge を持たないボタン (新規出品など) では何も書かない。"""
+    P = _borrow_methods()
+    p = P()
+    target = str(tmp_path / "x.json")
+    P._step_log_path = lambda self: target
+    p._remember_step_run(None)
+    assert p._load_step_log() == {}
