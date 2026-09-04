@@ -121,7 +121,8 @@ def _pending_from_confirmed_rows(rows):
         if not any(r):
             continue
         status = (r[si] if si is not None and si < len(r) else "") or ""
-        if "実行済" in status:
+        # 終了済も「もう作らない」側。押しても revise では戻せない (2026-09-04)。
+        if "実行済" in status or "終了済" in status:
             skipped_done += 1
             continue
         out.append({"itemID": (r[ii] if ii is not None and ii < len(r) else ""),

@@ -65,3 +65,33 @@ def test_counts_match_what_the_generator_will_do():
     got = RB.count_workload(ROWS, itemid_to_cert={"1": "111", "2": "222"})
     assert got["done"] == done
     assert got["actionable"] + got["blocked"] == len(pending)
+
+# ── ③ も同じ (終了済は押しても動かない) ─────────────────────────
+def test_step3_separates_ended():
+    import psa_restock_writeback as RW
+    rows = [["itemID", "RESTOCK状態"],
+            ["1", "実行済(qty復活)"],
+            ["2", ""],
+            ["3", "終了済(reviseでは戻せない)"],
+            ["4", "入稿待ち(qty=0)"]]
+    todo, done, ended = RW.pending_rows_from_confirmed(rows)
+    assert (todo, done, ended) == (2, 1, 1)
+    got = RW.count_workload(rows)
+    assert got["actionable"] == 2 and got["ended"] == 1 and got["total"] == 4
+
+
+def test_step2_also_skips_ended():
+    """②も終了済は作らない (作っても revise で戻せない)。"""
+    rows = [["itemID", "最安¥", "RESTOCK状態"],
+            ["1", "1000", "終了済(reviseでは戻せない)"],
+            ["2", "2000", ""]]
+    got = RB.count_workload(rows, itemid_to_cert={"1": "a", "2": "b"})
+    assert got["actionable"] == 1 and got["done"] == 1
+
+
+def test_panel_shows_the_ended_count_on_step3():
+    import io as _io
+    s = _io.open(os.path.join(_ROOT, "iMakHQ", "control_panel.py"),
+                 encoding="utf-8").read()
+    i = s.index("確かめに行く %s件")
+    assert 'rw.get("ended")' in s[i:i + 700], "③のヒントに終了済を出していない"

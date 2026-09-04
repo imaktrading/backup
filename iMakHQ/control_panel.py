@@ -3718,6 +3718,10 @@ class ListingPanel:
             elif rw:
                 rw_txt = "\n確かめに行く %s件 (実行済 %s件)" % (
                     rw.get("actionable", 0), rw.get("done", 0))
+                # ★2026-09-04: 終了済は押しても動かない (revise では戻せない)。
+                #   件数に混ぜると押しても減らず「要対応」が消えない。
+                if rw.get("ended"):
+                    rw_txt += "\n※出品が終了した %s件は含めていません (出し直すなら新規出品)" % rw["ended"]
                 if not rw.get("actionable"):
                     rw_txt += "\n※押しても0件 (全部 実行済)"
             else:

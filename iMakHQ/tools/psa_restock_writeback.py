@@ -65,25 +65,31 @@ def classify_restock(confirmed_items, qty_map, status_map=None):
 
 
 def pending_rows_from_confirmed(rows):
-    """RESTOCK確定の2d行 → (まだ実行済でない件数, 実行済件数) (純関数)。
+    """RESTOCK確定の2d行 → (まだ実行済でない件数, 実行済件数, 終了済件数) (純関数)。
 
     「押したら何件 verify しに行くか」= 実行済でない行。空欄 (まだ一度も見ていない) も含む。
+
+    ★2026-09-04 ユーザー指摘「ヒントを頼りに作業している」。**終了済は押しても動かない**
+      (revise では戻せない) のに todo に混ぜていたので、押しても件数が減らず
+      「要対応」が消えなかった。前回の走行が書いた「終了済」を見て分ける。
     """
     if not rows or len(rows) < 2:
-        return 0, 0
+        return 0, 0, 0
     h = rows[0]
     si = h.index("RESTOCK状態") if "RESTOCK状態" in h else None
     ii = h.index("itemID") if "itemID" in h else 0
-    todo = done = 0
+    todo = done = ended = 0
     for r in rows[1:]:
         if not any(r) or not (r[ii] if ii < len(r) else "").strip():
             continue
         st = (r[si] if si is not None and si < len(r) else "") or ""
         if ST_DONE in st:
             done += 1
+        elif ST_ENDED in st or "終了済" in st:
+            ended += 1
         else:
             todo += 1
-    return todo, done
+    return todo, done, ended
 
 
 def count_workload(rows=None):
@@ -101,8 +107,10 @@ def count_workload(rows=None):
                 _os.path.dirname(_os.path.abspath(__file__)), "..", "..", "iMakeBayAPI")))
             from sheet_io import read_tab
             rows = read_tab("RESTOCK確定")
-        todo, done = pending_rows_from_confirmed(rows)
-        return {"actionable": todo, "done": done, "total": todo + done}
+        todo, done, ended = pending_rows_from_confirmed(rows)
+        # 終了済は押しても動かない。件数に混ぜず、別に出す (押す前に理由が分かる)。
+        return {"actionable": todo, "done": done, "ended": ended,
+                "total": todo + done + ended}
     except Exception as e:                                     # noqa: BLE001
         return {"error": "%s: %s" % (type(e).__name__, e)}
 

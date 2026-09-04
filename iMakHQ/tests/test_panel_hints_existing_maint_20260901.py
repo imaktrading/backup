@@ -120,7 +120,8 @@ def test_restock_writeback_counts_rows_not_done():
             ["222", ""],
             ["333", "状態不明(要確認)"],
             ["", "実行済(qty復活)"]]
-    assert RW.pending_rows_from_confirmed(rows) == (2, 1)
+    # ★2026-09-04: 終了済を3つ目として分けた (押しても動かないので todo に混ぜない)
+    assert RW.pending_rows_from_confirmed(rows) == (2, 1, 0)
     assert RW.count_workload(rows)["actionable"] == 2
 
 
