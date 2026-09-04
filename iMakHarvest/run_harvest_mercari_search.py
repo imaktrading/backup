@@ -46,6 +46,8 @@ def main(argv=None) -> int:
     ap.add_argument("--price-min", type=int, default=10000)
     ap.add_argument("--price-max", type=int, default=30000)
     ap.add_argument("--min-rating", type=int, default=100, help="セラー評価数の下限")
+    ap.add_argument("--condition-new", action="store_true",
+                    help="新品・未使用だけを対象にする (item_condition_id=1)")
     ap.add_argument("--no-identity", action="store_true", help="本人確認済 要件を外す")
     ap.add_argument("--cap-per-keyword", type=int, default=150)
     ap.add_argument("--max-details", type=int, default=0, help="詳細フェッチ上限 (0=無制限、POC用)")

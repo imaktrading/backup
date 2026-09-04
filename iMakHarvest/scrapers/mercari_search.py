@@ -125,12 +125,18 @@ SHIPPING_PAYER_SELLER = 2
 STATUS_ON_SALE = "on_sale"
 
 
+# 商品の状態 (メルカリの item_condition_id)。 1=新品、未使用 / 2=未使用に近い
+CONDITION_NEW = 1
+CONDITION_LIKE_NEW = 2
+
+
 def build_search_url(
     keyword: str,
     price_min: Optional[int] = None,
     price_max: Optional[int] = None,
     shipping_payer_id: Optional[int] = SHIPPING_PAYER_SELLER,
     status: Optional[str] = STATUS_ON_SALE,
+    item_condition_ids: Optional[list] = None,
 ) -> str:
     """キーワード + フィルタから Mercari フリマ検索 URL を組立てる.
 
@@ -147,6 +153,11 @@ def build_search_url(
         params.append(f"price_min={int(price_min)}")
     if price_max is not None:
         params.append(f"price_max={int(price_max)}")
+    if item_condition_ids:
+        # 2026-08-22: 新品・未使用だけを対象にする (user 確定)。
+        # 出品タイトルの末尾が NWT 固定なので、 中古が混ざると出品形式が使えない。
+        params.append("item_condition_id="
+                      + ",".join(str(int(i)) for i in item_condition_ids))
     return f"{MERCARI_SEARCH_BASE}?{'&'.join(params)}"
 
 
@@ -161,6 +172,7 @@ def collect_search_listing_urls(
     manual: bool = False,
     manual_done_event=None,
     shipping_payer_id: Optional[int] = SHIPPING_PAYER_SELLER,
+    item_condition_ids: Optional[list] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """検索 URL にナビゲートし listing URL 一覧を収集 (mercari_seller の資産流用).
@@ -173,7 +185,8 @@ def collect_search_listing_urls(
     """
     # shipping_payer_id=None で「送料込み」条件を外せる (既定は従来どおり 送料込みのみ)
     url = build_search_url(keyword, price_min, price_max,
-                           shipping_payer_id=shipping_payer_id)
+                           shipping_payer_id=shipping_payer_id,
+                           item_condition_ids=item_condition_ids)
     driver.get(url)
     # seller profile と同じく foreground 化 + hydration 待機 (5/26 fix と同思想)
     try:
@@ -248,6 +261,7 @@ def collect_multi_keyword_urls(
     cap_per_keyword: int = 150,
     manual: bool = False,
     shipping_payer_id: Optional[int] = SHIPPING_PAYER_SELLER,
+    item_condition_ids: Optional[list] = None,
     sleep_between_sec: float = 0.0,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
@@ -269,6 +283,7 @@ def collect_multi_keyword_urls(
             kw, driver, price_min=price_min, price_max=price_max,
             cap=cap_per_keyword, manual=manual,
             shipping_payer_id=shipping_payer_id,
+            item_condition_ids=item_condition_ids,
             progress_callback=progress_callback,
         )
         added = 0

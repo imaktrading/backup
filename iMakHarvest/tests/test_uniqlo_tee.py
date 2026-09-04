@@ -1,0 +1,50 @@
+"""tests/test_uniqlo_tee - メルカリのユニクロT判定 (2026-08-22 user 確定)."""
+from __future__ import annotations
+
+import pytest
+
+from uniqlo_tee import is_collab, is_new_condition, is_target, is_uniqlo_tee
+
+pytestmark = pytest.mark.offline
+
+
+@pytest.mark.parametrize("title", [
+    "ユニクロ UT ワンピース Tシャツ L 新品",
+    "UNIQLO UT ポケモン グラフィックTシャツ M",
+    "GU ジーユー コラボ Tシャツ 呪術廻戦 L",
+])
+def test_target_titles(title):
+    assert is_target(title)
+
+
+@pytest.mark.parametrize("title,why", [
+    ("ユニクロ 無地 Tシャツ 白 M", "コラボでない"),
+    ("ナイキ アニメ Tシャツ L", "ユニクロでない"),
+    ("ユニクロ UT ワンピース Tシャツ 3枚セット", "まとめ売り"),
+    ("ユニクロ UT ポケモン Tシャツ キッズ 120cm", "子供用"),
+    ("ユニクロ UT アニメ Tシャツ 汚れあり", "難あり"),
+])
+def test_rejected_titles(title, why):
+    assert not is_target(title), why
+
+
+def test_uniqlo_tee_needs_both_brand_and_tee():
+    assert not is_uniqlo_tee("ユニクロ パーカー ワンピース")     # T でない
+    assert not is_uniqlo_tee("アニメ Tシャツ")                   # ブランド不明
+
+
+def test_collab_alone_is_not_enough():
+    """コラボ語があっても ユニクロの T でなければ採らない."""
+    assert is_collab("ポケモン Tシャツ")
+    assert not is_target("ポケモン Tシャツ")
+
+
+@pytest.mark.parametrize("cond,ok", [
+    ("新品、未使用", True),
+    ("新品, 未使用", True),
+    ("未使用に近い", False),
+    ("目立った傷や汚れなし", False),
+    ("", False),
+])
+def test_is_new_condition(cond, ok):
+    assert is_new_condition(cond) is ok
