@@ -9,6 +9,7 @@
 純関数 (compute_priority / dedup_key / parse_request_md) は DB 非依存=テスト可能。
 """
 from __future__ import annotations
+import inspect
 import json
 import os
 import re
@@ -130,13 +131,14 @@ CREATE TABLE IF NOT EXISTS improvement_queue (
   status TEXT DEFAULT 'pending',
   identity TEXT DEFAULT '',
   catalog_state TEXT DEFAULT '',
+  last_writer TEXT DEFAULT '',
   created_ts TEXT, updated_ts TEXT, reviewed_ts TEXT
 );
 """
 
 # 既存DBに後付けする列 (CREATE TABLE IF NOT EXISTS は既存テーブルを変更しないため)
 _ADD_COLUMNS = {"identity": "TEXT DEFAULT ''", "seen_days": "INTEGER DEFAULT 1",
-                "catalog_state": "TEXT DEFAULT ''"}
+                "catalog_state": "TEXT DEFAULT ''", "last_writer": "TEXT DEFAULT ''"}
 
 # 列を足した直後だけ流す backfill (冪等: 列が既に有れば実行されない)。
 _BACKFILL = {
@@ -236,6 +238,22 @@ def should_reopen(row, observed_ts="", catalog_state="", reopen_closed=False):
     return True
 
 
+def _caller_filename() -> str:
+    """`upsert_improvement` を呼んだ直接の呼出元ファイル名 (純関数寄り、失敗時は '')。
+
+    ★2026-09-04: queue の evidence が REVIEW 固定のまま seen_count だけ増える経路があり、
+      台帳が「誰の観測か」を持っていないため特定できなかった (実測: queue 610 の evidence は
+      8/28 の resolver 修正以降も更新されていないのに seen_count は 99→540 に増えた)。
+      `source` 引数だけでは `import_missing_models` と `_queue_resolver_drop` が同じ
+      `source="missing_models"` を渡すため衝突する。呼出元ファイル名を別に持つ。
+      依頼書: hq/requests/2026-09-03_act_code_proposals_tcg.md 提案4
+    """
+    try:
+        return Path(inspect.stack()[2].filename).name
+    except Exception:                                          # noqa: BLE001
+        return ""
+
+
 def _has(row, col):
     """sqlite3.Row にその列が在るか (古い DB / 部分 SELECT を跨いでも落ちない)。"""
     try:
@@ -267,6 +285,9 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
       再検出時に空の既存行へ後から埋まる)。
     """
     dk = dedup_key(category, item_id, target_field, suggested_value)
+    # last_writer: 「誰がこの観測を書いたか」= source 引数 + 呼出元ファイル名。source だけでは
+    # 別の呼出元が同じ source 文字列 (例 "missing_models") を渡すと衝突するため両方持つ。
+    writer = f"{(source or '').strip()}:{_caller_filename()}".strip(":")
     row = con.execute("SELECT queue_id, seen_count, seen_days, status, identity, updated_ts,"
                       " reviewed_ts, catalog_state"
                       " FROM improvement_queue WHERE dkey=?",
@@ -295,19 +316,19 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
             (row["catalog_state"] if _has(row, "catalog_state") else "") or "")
         con.execute(
             "UPDATE improvement_queue SET seen_count=?, seen_days=?, priority=?, status=?, evidence=?,"
-            " confidence=?, identity=?, catalog_state=?, updated_ts=? WHERE queue_id=?",
-            (seen, days, pri, new_status, evidence, confidence, ident, state, ts,
+            " confidence=?, identity=?, catalog_state=?, last_writer=?, updated_ts=? WHERE queue_id=?",
+            (seen, days, pri, new_status, evidence, confidence, ident, state, writer, ts,
              row["queue_id"]))
         return row["queue_id"]
     pri = compute_priority(finding_type, 1, confidence)
     cur = con.execute(
         "INSERT INTO improvement_queue (dkey, category, item_id, target_field, suggested_value,"
         " evidence, source, layer, confidence, finding_type, seen_count, seen_days, priority, status,"
-        " identity, catalog_state, created_ts, updated_ts)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,1,1,?, 'pending', ?, ?, ?, ?)",
+        " identity, catalog_state, last_writer, created_ts, updated_ts)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,1,1,?, 'pending', ?, ?, ?, ?, ?)",
         (dk, category, item_id, target_field, suggested_value, evidence, source, layer,
          confidence, finding_type, pri, (identity or "").strip(),
-         (catalog_state or "").strip(), ts, ts))
+         (catalog_state or "").strip(), writer, ts, ts))
     return cur.lastrowid
 
 

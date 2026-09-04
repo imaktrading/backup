@@ -1221,23 +1221,32 @@ def recurring_findings(rows, min_seen=2):
     return out
 
 
-def _load_pdca_recurring(min_seen=2, limit=25):
+def _load_pdca_recurring(min_seen=2, limit=25, _con=None):
     """pdca.db improvement_queue から再発(pending・seen_days>=min_seen)を取得 (I/O・失敗は [])。
 
     ★2026-08-28: 条件を seen_count から seen_days に変えた (同日の再監査を再発にしない)。
+    ★2026-09-04: `finding_type='resolver_drop'` を除外する。resolver が「catalog に在る」と
+      判断して落とした件 (=正しく落とした件) は queue に残すが、再発 digest には載せない。
+      cert155040105 (queue 610) が seen_count 723 まで同じ行を再トリアージし続けていた。
+      依頼書: hq/requests/2026-09-02_act_code_proposals_tcg.md 提案1
+    _con: テスト用の DI (:memory: 等)。既定 None = 本番 pdca.db を自前で接続/close する。
     """
     try:
-        import pdca_store as _pdca
-        con = _pdca.connect()
+        con = _con
+        if con is None:
+            import pdca_store as _pdca
+            con = _pdca.connect()
         cur = con.execute(
             "SELECT category,item_id,target_field,finding_type,seen_count,seen_days,status "
             "FROM improvement_queue WHERE status='pending' AND seen_days>=? "
+            "AND finding_type NOT IN ('resolver_drop') "
             "ORDER BY seen_days DESC, seen_count DESC LIMIT ?", (min_seen, limit))
         rows = [{"category": r["category"], "item_id": r["item_id"],
                  "target_field": r["target_field"], "finding_type": r["finding_type"],
                  "seen_count": r["seen_count"], "seen_days": r["seen_days"],
                  "status": r["status"]} for r in cur.fetchall()]
-        con.close()
+        if _con is None:
+            con.close()
         return rows
     except Exception as _e:
         print(f"  ⚠️ pdca 再発取得skip: {type(_e).__name__}")

@@ -213,23 +213,44 @@ def _human_said_none(cert: str) -> bool:
     return isinstance(rec, dict) and (rec.get("choice") or "").upper() == "NONE"
 
 
-def _queue_resolver_drop(category: str, cert: str, model: str, status: str, found: str):
-    """resolver を根拠に落とした件を pdca queue に pending で積む (握り潰し禁止)。"""
+def _queue_resolver_drop(category: str, cert: str, model: str, status: str, found: str, con=None):
+    """resolver を根拠に落とした件を pdca queue に pending で積む (握り潰し禁止)。
+
+    ★2026-09-04: finding_type を `catalog_gap` → `resolver_drop` に変える。
+      resolver が「catalog に在る」と判断して落とした件を catalog_gap のまま積むと、
+      digest の再発判定 (`_load_pdca_recurring`) に永久に載り続ける (queue 610 は
+      seen_count 723 まで再トリアージされ続けた)。行は queue に残す (握り潰さない) が
+      種別を分けて再発扱いから外す。
+      あわせて observed_ts/catalog_state を渡す。この2つを渡さないと `should_reopen` の
+      ガードが no-op になり、閉じた次の走行で無条件に pending へ戻ってしまう
+      (8/29・9/2 に実測: 閉じた翌走行で必ず戻った)。
+      依頼書: hq/requests/2026-09-02_act_code_proposals_tcg.md 提案1+2 /
+              2026-09-03_act_code_proposals_tcg_response.md
+    con: テスト用の DI (:memory: 等)。既定 None = 本番 DB に自前で接続/commit/close する。
+    """
+    _own_con = con is None
     try:
         sys.path.insert(0, str(Path(__file__).parent))
         import pdca_store as _p
-        con = _p.connect()
-        _p.upsert_improvement(
+        if _own_con:
+            con = _p.connect()
+        qid = _p.upsert_improvement(
             con, category, f"cert{cert}", "catalog_add",
             evidence=f"resolver={status} 候補={found} (依頼は出さずここに積んだ)",
-            source="missing_models", finding_type="catalog_gap",
+            source="missing_models", finding_type="resolver_drop",
             identity=model[:200],
             ts=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            observed_ts=datetime.datetime.now().strftime("%Y-%m-%d"),
+            catalog_state=(found or status),
             reopen_closed=True)
         con.commit()
-        con.close()
+        if _own_con:
+            con.close()
+        print(f"    📋 pdca queue #{qid} に積んだ (resolver_drop): cert{cert}")
+        return qid
     except Exception as e:                  # noqa: BLE001
         print(f"[warn] pdca queue へ積めなかった cert{cert}: {e}")
+        return None
 
 
 def _filter_resolver_resolves(new_by_cat: dict[str, list[dict]],
