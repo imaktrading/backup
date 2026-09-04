@@ -33,7 +33,7 @@ values:
     jp_set: "ポケモンカードゲームDPt 拡張パック「ギンガの覇道」"
   - value: "The Best of XY"
     category: pokemon_tcg
-    rows: 138
+    rows: 144
     jp_set: "ハイクラスパック「THE BEST OF XY」"
   - value: "Beat of the Frontier"
     category: pokemon_tcg
@@ -159,9 +159,9 @@ values:
     category: pokemon_tcg
     rows: 42
     jp_set: "ポケモンカードゲームDP エントリーパック’08"
-  - value: "Mewtwo ex Starter Deck"
+  - value: "Sv: Mewtwo Ex & Skeledirge Ex Terastal Starter Sets"
     category: pokemon_tcg
-    rows: 36
+    rows: 40
     jp_set: "スターターセット テラスタル「ミュウツーex」「ラウドボーンex」"
   - value: "Charizard VSTAR vs Rayquaza VMAX Special Deck Set"
     category: pokemon_tcg
@@ -442,10 +442,6 @@ values:
   - value: "Sm Promo"
     category: pokemon_tcg
     rows: 5
-  - value: "Sv: Mewtwo Ex & Skeledirge Ex Terastal Starter Sets"
-    category: pokemon_tcg
-    rows: 4
-    jp_set: "スターターセット テラスタル「ミュウツーex」「ラウドボーンex」"
   - value: "Mewtwo, Greninja & Zacian V-UNION Special Card Set"
     category: pokemon_tcg
     rows: 4
@@ -642,18 +638,6 @@ values:
     category: pokemon_tcg
     rows: 2
     jp_set: "ゴールデンプレゼントキャンペーン"
-  - value: "Pokemon Pan Promo Card September 2016"
-    category: pokemon_tcg
-    rows: 2
-    jp_set: "ポケモンパン プロモカード 2016年9月"
-  - value: "Black M Gardevoir Campaign"
-    category: pokemon_tcg
-    rows: 2
-    jp_set: "熱戦にそなえろ！黒いメガサーナイトキャンペーン"
-  - value: "Pokemon Pan Promo Card (Choco / Ham Mayo)"
-    category: pokemon_tcg
-    rows: 2
-    jp_set: "ポケモンパン「チョコパン」・「ハムマヨネーズパン」 プロモカード"
   - value: "Gym Promo Campaign 2026 H2"
     category: pokemon_tcg
     rows: 2
@@ -810,6 +794,10 @@ values:
     category: pokemon_tcg
     rows: 1
     jp_set: "ポケモンカードジム クロバットBREAKバトル"
+  - value: "Champions League 2023 Kyoto"
+    category: pokemon_tcg
+    rows: 1
+    jp_set: "ポケモンカードゲーム チャンピオンズリーグ2023 京都"
   - value: "Hall of Fame Battle"
     category: pokemon_tcg
     rows: 1
@@ -894,14 +882,6 @@ values:
     category: pokemon_tcg
     rows: 1
     jp_set: "ポケモンセンターキョウト移転リニューアル記念「はなびらのまい」キャンペーン"
-  - value: "7-Eleven Summer Campaign 2014"
-    category: pokemon_tcg
-    rows: 1
-    jp_set: "セブンイレブン限定サマーキャンペーン2014"
-  - value: "Marumiya Special Card"
-    category: pokemon_tcg
-    rows: 1
-    jp_set: "丸美屋 スペシャルカード"
   - value: "World Championships 2026"
     category: pokemon_tcg
     rows: 1
@@ -910,10 +890,6 @@ values:
     category: pokemon_tcg
     rows: 1
     jp_set: "デッキそのままバトル"
-  - value: "Next Generation World Hobby Fair Original Holo Card"
-    category: pokemon_tcg
-    rows: 1
-    jp_set: "次世代ワールドホビーフェア オリジナルキラカード"
   - value: "Championship Points (2026 Season)"
     category: pokemon_tcg
     rows: 1

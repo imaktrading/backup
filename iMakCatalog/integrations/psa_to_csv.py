@@ -1802,6 +1802,22 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     #    PSA brand に code が dash 付きで明示されるパターンのみ安全に拾う.
     #    例: 'POKEMON JAPANESE MBD-MEGA STARTER SET MEGA DIANCIE EX' → 'MBD' (catalog: MBD-022 メロエッタ等)
     #    新 starter set 追加時はここに 1 行追記 (誤マッチ防止に \b...\b で token 限定)。
+    # ★兄弟デッキの枝番 (2026-09-04)。公式が同じ弾コード・番号を複数デッキに振るので、
+    #   catalog は後から入る方に枝番を付けている (scrapers/_pokemon_deck_codes.py)。
+    #   PSA ラベルには商品名が入るので、そこから枝番付きのコードを返す。
+    #   ★ここが無いと `#001` が **先に入っている方のデッキ**に当たる (誤出品)。
+    deck_codes = [
+        (r"STARTER SET V\b.*\bGRASS|GRASS.*STARTER SET V\b",     "SA-G"),
+        (r"STARTER SET V\b.*\bFIRE|FIRE.*STARTER SET V\b",       "SA-R"),
+        (r"STARTER SET V\b.*\bWATER|WATER.*STARTER SET V\b",     "SA-W"),
+        (r"STARTER SET V\b.*\bFIGHTING|FIGHTING.*STARTER SET V\b", "SA-F"),
+        (r"STARTER SET VMAX.*CHARIZARD|CHARIZARD.*STARTER SET VMAX", "SCS-C"),
+        (r"STARTER SET VMAX.*VENUSAUR|VENUSAUR.*STARTER SET VMAX",   "SCS-V"),
+        (r"STARTER SET VMAX.*BLASTOISE|BLASTOISE.*STARTER SET VMAX", "SCS-B"),
+    ]
+    for pattern, code in deck_codes:
+        if re.search(pattern, b):
+            return code
     letter_only_codes = [
         (r"\bMBD\b", "MBD"),   # メガブレイブ Mega Diancie EX スターターセット
         # 2026-08-21: PSA brand が "POKEMON JAPANESE CLL-TRADING CARD GAME CLASSIC ..." の

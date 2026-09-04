@@ -54,6 +54,7 @@ API = "https://www.pokemon-card.com/card-search/resultAPI.php"
 STATE = Path("C:/dev/iMak_data/catalog/_official_drift_pokemon_state.json")
 UA = {"User-Agent": "Mozilla/5.0"}
 CAT = "pokemon_tcg"
+KNOWN_IDS: dict = {}
 SLEEP = 0.6
 
 
@@ -115,10 +116,27 @@ def check_pg(conn, pg: str) -> dict:
             by_img[str(u).rsplit("/", 1)[-1]] = r
         names.add((r["name"] or "").strip())
         names.add((r["name_jp"] or "").strip())
+    # ★cardID でも引けるようにする (2026-09-04)。
+    #   画像のファイル名だけで照合すると、catalog が別の刷りの絵を持っている行や
+    #   `cardID-20514` 形の索引行を「無い」と誤検出する (429件のうち大半がこれだった)。
+    #   公式と同じ id なので、これが在れば **そのカードは catalog に在る**。
+    known_ids = KNOWN_IDS.get(pg)
+    if known_ids is None:
+        known_ids = set()
+        for (pid, url) in conn.execute(
+                "SELECT product_id, IFNULL(source_url,'') FROM products WHERE category=?", (CAT,)):
+            if "details.php/card/" in url:
+                known_ids.add(url.rstrip("/").rsplit("/", 1)[-1])
+            if (pid or "").startswith("cardID-"):
+                known_ids.add(pid.split("-", 1)[1])
+        KNOWN_IDS["*"] = known_ids
+        KNOWN_IDS[pg] = known_ids
 
     missing, name_ng, excluded, reprint = [], [], [], []
     for c in cards:
         r = by_img.get(c["img"])
+        if r is None and c["id"] in known_ids:
+            continue                      # cardID で catalog に在る (絵の刷り違い等)
         if r is None:
             if _is_out_of_scope(c["name"]):
                 excluded.append(c)          # 差分ではない (登録しないと決めてある)

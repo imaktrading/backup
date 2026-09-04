@@ -34,6 +34,7 @@ import requests
 # Allow `from api import ...` when run as script
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import api  # noqa: E402
+import _pokemon_deck_codes as _deck  # noqa: E402
 
 # ★出力の文字化けで **走行そのものを落とさない** (2026-09-04)。
 #   cp932 の Windows コンソールに絵文字を print しようとして UnicodeEncodeError で
@@ -471,6 +472,15 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
 # ============================================================================
 # product_id 派生
 # ============================================================================
+def _collides_with_other_product(pid: str, set_name_official: str) -> bool:
+    """その ID が **別の収録商品** の行に既に使われているか (2026-09-04)."""
+    rec = api.lookup(CATEGORY, pid)
+    if not rec:
+        return False
+    other = (rec.get("set_name_official") or "").strip()
+    return bool(other) and other != (set_name_official or "").strip()
+
+
 def derive_product_id(detail: dict) -> str:
     """detail dict から product_id を派生.
 
@@ -485,7 +495,19 @@ def derive_product_id(detail: dict) -> str:
         return f"{card_number}/{promo_code}"
     set_code = detail.get("set_code") or ""
     if set_code and card_number:
-        return f"{set_code}-{card_number}"
+        pid = f"{set_code}-{card_number}"
+        # ★兄弟デッキ対策 (2026-09-04)。公式は同じ弾コード・同じ番号を複数デッキに振るので、
+        #   そのままだと先に入った1デッキしか持てない (142枚が入らず、しかも別デッキの札を
+        #   返していた)。後から入る方に枝番を付ける。表に無い衝突は **入れずに報告**。
+        so = detail.get("set_name_official") or ""
+        suffix = _deck.deck_suffix(so)
+        if suffix:
+            pid = _deck.apply_suffix(pid, suffix)
+        elif suffix is None and _collides_with_other_product(pid, so):
+            print(f"  ⚠️ 枝番が未定義の衝突: {pid} ({so}) → 入れない "
+                  f"(scrapers/_pokemon_deck_codes.py に1行足す)")
+            return ""
+        return pid
     cid = detail.get("cardID") or ""
     return f"cardID-{cid}" if cid else ""
 
