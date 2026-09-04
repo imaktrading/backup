@@ -32,6 +32,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -49,6 +50,17 @@ ROOT_TO_WT = {
 }
 
 BEACON_MAX_AGE_SEC = 24 * 3600     # PID が読めない時だけ効く保険
+
+# ★2026-09-05: 「開いているだけ」を「作業中」と誤認しない。
+#   beacon の `at` は **セッションを開いた時刻**で、その後 一切 更新されない。
+#   そのため VS Code の窓を閉じずに放置すると、PID が生きている限り永久に
+#   「稼働中」と見え、dispatch が headless を立てない (= 依頼が届かない)。
+#   実害: catalog の窓が 2026-09-01 20:03 から開きっぱなしで、9/1 19:55 を最後に
+#   **4日間 1件も配達されず**、依頼6件が滞留した (残務№15 と同型)。
+#   活動の有無は会話ログ (.jsonl) の mtime で見る。ターンごとに書かれるので
+#   「今 作業中」と「開いたまま放置」を実際に区別できる唯一の信号。
+IDLE_MAX_SEC = 3 * 3600
+CLAUDE_PROJECTS = Path(os.path.expanduser("~")) / ".claude" / "projects"
 
 
 def _norm(p: str) -> str:
@@ -209,6 +221,47 @@ def _git_root(cwd: str) -> str:
         return ""
 
 
+def _slug(path: str) -> str:
+    """Claude が会話ログの dir 名に使う path の変換 (`:` `\` `/` `_` → `-`)."""
+    return re.sub(r"[:\/_]", "-", (path or "").rstrip("\/"))
+
+
+def last_activity(wt: str) -> "float | None":
+    """その worktree の会話ログの最終更新時刻 (epoch)。分からなければ None.
+
+    worktree ルート直下だけでなく **サブフォルダで開いたセッション**も見る
+    (catalog は `iMakCatalog/` で開かれており、ルートの dir は更新されない)。
+    """
+    root = next((r for r, name in ROOT_TO_WT.items() if name == wt), None)
+    if not root:
+        return None
+    prefix = _slug(root).lower()
+    newest = None
+    try:
+        for d in CLAUDE_PROJECTS.iterdir():
+            if not d.is_dir() or not d.name.lower().startswith(prefix):
+                continue
+            for f in d.glob("*.jsonl"):
+                try:
+                    m = f.stat().st_mtime
+                except OSError:
+                    continue
+                if newest is None or m > newest:
+                    newest = m
+    except OSError:
+        return None
+    return newest
+
+
+def idle_sec(wt: str, now: "float | None" = None) -> "float | None":
+    """最終活動からの経過秒。会話ログが読めなければ None (= 判定不能)."""
+    import time as _t
+    last = last_activity(wt)
+    if last is None:
+        return None
+    return (now or _t.time()) - last
+
+
 def active_session(wt: str, now: "float | None" = None) -> "dict | None":
     """その worktree で **今動いているセッション**。居なければ None。
 
@@ -225,7 +278,16 @@ def active_session(wt: str, now: "float | None" = None) -> "dict | None":
         return None
     pid = rec.get("pid")
     if isinstance(pid, int) and pid > 0:
-        return rec if pid_alive(pid) else None
+        if not pid_alive(pid):
+            return None
+        # ★最終活動が古ければ「窓が開いているだけ」= 作業中ではない → 居ない扱い。
+        #   判定不能 (会話ログが読めない) の時は従来どおり「居る」に倒す。
+        idle = idle_sec(wt, now)
+        if idle is not None and idle > IDLE_MAX_SEC:
+            return None
+        rec = dict(rec)
+        rec["idle_sec"] = idle
+        return rec
     try:
         age = (now or _t.time()) - p.stat().st_mtime
     except OSError:

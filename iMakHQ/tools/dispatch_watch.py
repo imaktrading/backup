@@ -55,6 +55,25 @@ def log(msg: str) -> None:
         pass
 
 
+# ★2026-09-05: **同じ skip を15秒おきに書き続けない**。
+#   catalog が 4日間 skip-session-live を返し続けた結果、この log が 117万行に膨らみ、
+#   「いつから止まっているのか」を読み取れなくなっていた (= 警告が warning として機能しない)。
+#   内容が変わらない行は QUIET_SEC に1回だけ出す。**内容が変われば即座に出る**ので、
+#   新しい情報を握り潰すことはない。
+QUIET_SEC = 10 * 60
+_last_said: dict[str, tuple[str, float]] = {}
+
+
+def log_throttled(key: str, msg: str, quiet: float = QUIET_SEC) -> None:
+    """同じ key で同じ本文が続く間は quiet 秒に1回だけ書く."""
+    prev = _last_said.get(key)
+    now = time.time()
+    if prev and prev[0] == msg and now - prev[1] < quiet:
+        return
+    _last_said[key] = (msg, now)
+    log(msg)
+
+
 def heartbeat_age() -> float | None:
     """heartbeat の経過秒。file が無ければ None (純関数に近い read-only)."""
     try:
@@ -87,13 +106,21 @@ def _run_one(wt: str, names: str, done: dict, fresh_names: list, inflight: set, 
     """1 worktree 分を最後まで走らせる (別スレッド)。例外は握って常駐を守る。"""
     try:
         _what = "実装" if mode == "implement" else "新規"
-        log(f"[{wt}] {_what} {len(fresh_names)}件 検出 → dispatch: {names}")
+        log_throttled(f"{wt}:{mode}:detect",
+                      f"[{wt}] {_what} {len(fresh_names)}件 検出 → dispatch: {names}")
         if not dw.acquire_lock(wt):
-            log(f"[{wt}] 同じ worktree の dispatch が実行中 → 次の周回で再試行")
+            log_throttled(f"{wt}:{mode}:busy",
+                          f"[{wt}] 同じ worktree の dispatch が実行中 → 次の周回で再試行")
             return
         try:
             r = dw._dispatch(wt, dry_run=False, mode=mode)
-            log(f"[{wt}] 完了: {r.get('status')} / {r.get('summary', '')}")
+            _st = r.get("status") or ""
+            _line = f"[{wt}] 完了: {_st} / {r.get('summary', '')}"
+            # skip は同じ理由が延々続く。実際に走った回 (ok/失敗) は必ず出す。
+            if _st.startswith("skip-"):
+                log_throttled(f"{wt}:{mode}:done", _line)
+            else:
+                log(_line)
             for v in r.get("violations", []):
                 log(f"[{wt}] ⚠️ {v}")
         finally:
@@ -116,8 +143,9 @@ def _run_one(wt: str, names: str, done: dict, fresh_names: list, inflight: set, 
                     now = time.time()
                     for n in fresh_names:
                         fail_at[(wt, n)] = now
-            log(f"[{wt}] ⚠️ 失敗のため処理済にしない "
-                f"({RETRY_COOLDOWN_SEC // 60}分後に再試行): {names}")
+            log_throttled(f"{wt}:{mode}:retry",
+                          f"[{wt}] ⚠️ 失敗のため処理済にしない "
+                          f"({RETRY_COOLDOWN_SEC // 60}分後に再試行): {names}")
     except Exception as e:
         log(f"[{wt}] !! 例外 (継続します): {type(e).__name__}: {e}")
     finally:

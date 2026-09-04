@@ -186,6 +186,19 @@ def _draft_is_closed(path: Path, stems: set[str]) -> bool:
     return False
 
 
+def _blocking_session(wt: str):
+    """その worktree の配達を止めている対話セッション。無ければ None.
+
+    判定不能なら None (= 止まっていない扱い)。警告を出す側なので、
+    誤って「止まっている」と騒がない方に倒す。
+    """
+    try:
+        import session_beacon
+        return session_beacon.active_session(wt)
+    except Exception:                                      # noqa: BLE001
+        return None
+
+
 def pending_for(worktree: str, recent_days: int = RECENT_DAYS):
     """(担当が処理する, 窓口が返す, 窓口レビュー待ち) の Path list を返す.
 
@@ -334,6 +347,24 @@ def main() -> int:
         grand_theirs += len(theirs)
         print(f"## {label} — 自分が返す {len(mine)}件 / 窓口宛 {len(theirs)}件"
               f" / レビュー待ち {len(drafts)}件 (最終 {_age(latest)})")
+        # ★2026-09-05: **配達が止まっていることを黙って隠さない**。
+        #   その worktree で対話セッションが動いている間、dispatch は headless を立てない
+        #   (二重作業を防ぐ正しい動き) が、これが**無警告**だったため catalog は 9/1 から
+        #   4日間 1件も配達されず、板には「要返球6件」としか出ていなかった。
+        #   止まっている事実と、いつから止まっているかをここに出す。
+        if mine:
+            _blocked = _blocking_session(wt)
+            if _blocked:
+                _oldest = min(p.stat().st_mtime for p in mine)
+                _idle = _blocked.get("idle_sec")
+                _idle_txt = f" / 最終活動 {_age(time.time() - _idle)}" if _idle else ""
+                _h = (time.time() - _oldest) / 3600
+                _mark = "⏸" if _h < 24 else "🔴"
+                print(f"- {_mark} **配達が止まっています** — 対話セッションが稼働中"
+                      f" (pid={_blocked.get('pid')}{_idle_txt}) のため headless を立てません。"
+                      f"最古の依頼は **{_age(_oldest)}** 待ち")
+                if _h >= 24:
+                    print(f"  → その窓で処理するか、**窓を閉じれば** {len(mine)}件が配達されます")
         for p in drafts[:MAX_SHOW]:
             # ★起票した窓口を必ず出す。書いていない依頼は「起票者不明」と出して、
             #   次に起票する人が名前を書くよう促す (誰のものでもない状態を作らない)。
