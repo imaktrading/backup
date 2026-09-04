@@ -130,21 +130,37 @@ def _pending_from_confirmed_rows(rows):
     return out, skipped_done
 
 
-def count_workload(rows=None):
+def count_workload(rows=None, itemid_to_cert=None):
     """押したら『何件ぶん CSV が出るか』を数える (パネルのヒント用・2026-09-01).
 
-    eBay は1回も叩かない。材料は「RESTOCK確定」タブだけ。
+    eBay は1回も叩かない。材料は「RESTOCK確定」タブと 商品管理シートの cert だけ。
     判定は本体と同じ `_pending_from_confirmed_rows` を通す (二重実装しない)。
     rows を渡せばスプシを読まない (同じ subprocess で writeback と読みを共有するため)。
+
+    ★2026-09-04 ユーザー指摘「ヒントテキストでは7件やけど (実際は5件しか出ない)」。
+      cert# が引けない行は **生成できない** のに件数に入れていた。実測でその差は
+      2件 (B列=9999 の見送り / 商品管理シートに itemID の行が無い分)。
+      押す前に「本当に何件出るか」が分かるよう、引けない分は blocked として分ける。
+      itemid_to_cert を渡さない時だけ自分で読む (呼び側が既に持っていれば読まない)。
     """
     try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         if rows is None:
-            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from sheet_io import read_tab
             rows = read_tab("RESTOCK確定")
         pending, done = _pending_from_confirmed_rows(rows)
-        # cert# が引けない行は生成できない。ここでは判らないので件数は「確定 - 実行済」で言う。
-        return {"actionable": len(pending), "done": done, "total": len(pending) + done}
+        if itemid_to_cert is None:
+            try:
+                from sheet_io import build_cert_map, _product_ws
+                itemid_to_cert = build_cert_map(_product_ws().get_all_values())
+            except Exception:                                  # noqa: BLE001
+                itemid_to_cert = None
+        blocked = 0
+        if itemid_to_cert is not None:
+            blocked = sum(1 for p in pending
+                          if not itemid_to_cert.get((p.get("itemID") or "").strip()))
+        return {"actionable": len(pending) - blocked, "done": done,
+                "blocked": blocked, "total": len(pending) + done}
     except Exception as e:                                     # noqa: BLE001
         return {"error": "%s: %s" % (type(e).__name__, e)}
 

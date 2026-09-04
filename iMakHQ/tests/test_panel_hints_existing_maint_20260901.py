@@ -105,7 +105,12 @@ def test_restock_build_counts_only_unlisted():
             ["222", "2000", "u2", ""],
             ["333", "3000", "u3", "入稿待ち(qty=0)"],
             []]
-    assert RB.count_workload(rows) == {"actionable": 2, "done": 1, "total": 3}
+    # ★2026-09-04: cert が引けない行は生成できないので blocked に分けた。
+    #   この検査の趣旨 (実行済を除く) は変えず、cert は両方引ける前提で渡す。
+    assert RB.count_workload(rows, itemid_to_cert={"222": "a", "333": "b"}) == {
+        "actionable": 2, "done": 1, "blocked": 0, "total": 3}
+    # cert が片方しか引けなければ、出るのは1件と言う
+    assert RB.count_workload(rows, itemid_to_cert={"222": "a"})["actionable"] == 1
 
 
 def test_restock_writeback_counts_rows_not_done():

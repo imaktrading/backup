@@ -3702,6 +3702,11 @@ class ListingPanel:
                 rb_txt = "\nCSVにできる %s件" % rb.get("actionable", 0)
                 if rb.get("done"):
                     rb_txt += " (出し済み %s件は除外)" % rb["done"]
+                # ★2026-09-04: cert が引けない行は **生成できない**。件数に混ぜると
+                #   「7件と出るのに5件しか出ない」になる (ユーザー指摘)。分けて出す。
+                if rb.get("blocked"):
+                    rb_txt += "\n※cert が引けず生成できない %s件は含めていません" % rb["blocked"]
+                    rb_txt += "\n  (商品管理シートに その itemID の行が無い / 見送り)"
                 if not rb.get("actionable"):
                     rb_txt += "\n※押しても0件 (先に 🃏 で仕入元を確定)"
             else:
