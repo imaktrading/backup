@@ -136,3 +136,33 @@ def test_no_badge_is_a_noop(tmp_path):
     P._step_log_path = lambda self: target
     p._remember_step_run(None)
     assert p._load_step_log() == {}
+
+# ── ①②③ の無い単発ボタン (2026-09-04 ユーザー: 棚②とか取下げとかは？) ──
+SINGLES = ("cull_end", "shelf_evict", "sold_restock", "newcand")
+
+
+def test_singles_show_only_whether_it_ran_today():
+    """順番が無いので「← 次」は出さない。今日やったかだけ。"""
+    got = _step_marks()((), {"cull_end": "2026-09-04T14:02:00"},
+                        {"cull_end": True, "shelf_evict": True}, "2026-09-04",
+                        SINGLES)
+    assert got["cull_end"] == "今日 14:02 済"
+    assert got["shelf_evict"] == ""       # 仕事は在るが「次」とは言わない
+
+
+def test_singles_clear_on_a_new_day():
+    got = _step_marks()((), {"cull_end": "2026-09-04T14:02:00"}, {}, "2026-09-05",
+                        SINGLES)
+    assert got["cull_end"] == ""
+
+
+def test_the_panel_passes_the_singles():
+    """表を作っただけで渡し忘れる、をやらない。"""
+    assert "STEP_SINGLES = (" in _SRC
+    i = _SRC.index("marks = self.step_marks(")
+    assert "self.STEP_SINGLES" in _SRC[i:i + 260]
+    j = _SRC.index("STEP_SINGLES = (")
+    seg = _SRC[j:j + 200]
+    for b in ("cull_end", "shelf_evict", "sold_restock"):
+        assert b in seg, b
+    assert "hoju_status" not in seg, "見るだけのボタンを入れている"

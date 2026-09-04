@@ -161,14 +161,14 @@ def test_件数をラベルに焼かない():
 
 def test_件数はヒントに出す():
     i = SRC.index("def paint_hoju_badge")
-    body = SRC[i:i + 1400]
+    body = SRC[i:i + 2600]
     assert "set_tip(" in body
 
 
 def test_押すべき時だけ青():
     """色が「今押すといい」の合図。件数が0なら黒のまま."""
     i = SRC.index("def paint_hoju_badge")
-    body = SRC[i:i + 1400]
+    body = SRC[i:i + 2600]
     assert '"#0066cc" if act_kind.get(kind) else "black"' in body
 
 

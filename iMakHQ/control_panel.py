@@ -3302,6 +3302,11 @@ class ListingPanel:
         ("kuji_supply", "kuji_refresh"),                           # 一番くじ 補充①→②
     )
 
+    # ①②③ の無い単発ボタン。順番が無いので「← 次」は出さないが、
+    #   「今日やったか」は知りたい (ユーザー: 棚②とか取下げとかは？ 2026-09-04)。
+    #   📊 補URL件数感 は **見るだけ**なので入れない。
+    STEP_SINGLES = ("cull_end", "shelf_evict", "sold_restock", "newcand")
+
     def _step_log_path(self):
         return os.path.join(WORKSPACE, "..", "iMak_data", "hq", "button_last_run.json")
 
@@ -3332,7 +3337,7 @@ class ListingPanel:
             self.append_log("(押した時刻の記録skip: %s)" % type(e).__name__)
 
     @staticmethod
-    def step_marks(flows, log, act_kind, today):
+    def step_marks(flows, log, act_kind, today, singles=()):
         """各ボタンの2段目に出す文字を決める (純関数・test可)。
 
         戻り: {badge: '今日 07:11 済' / '← 次' / ''}
@@ -3353,6 +3358,10 @@ class ListingPanel:
                     nxt_done = True
                 else:
                     out[b] = ""
+        # 単発ボタン: 順番が無いので「← 次」は付けず、今日やったかだけ出す
+        for b in (singles or ()):
+            t = (log or {}).get(b) or ""
+            out[b] = ("今日 %s 済" % t[11:16]) if t[:10] == today else ""
         return out
 
     def paint_hoju_badge(self, by_kind, act_kind=None):
@@ -3372,7 +3381,7 @@ class ListingPanel:
         #   → 2段目に「今日 07:11 済」/「← 次」。空でも2段のまま (高さを揺らさない)。
         import datetime as _dtm
         marks = self.step_marks(self.STEP_FLOWS, self._load_step_log(), act_kind,
-                                _dtm.date.today().isoformat())
+                                _dtm.date.today().isoformat(), self.STEP_SINGLES)
         for b, base, kind, set_tip, tip in self._hoju_btns:
             try:
                 extra = (by_kind.get(kind + "_label") or "").strip() if kind == "shelf_evict" else ""
