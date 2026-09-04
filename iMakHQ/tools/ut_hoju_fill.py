@@ -310,6 +310,51 @@ def search(limit=None, sold_out=False):
     return found
 
 
+# 目視で「違う」と外した候補の記録 (2026-09-04)。
+#   ★ユーザー報告「UT再仕入れ②だけど、前回見たものと同じのが出てくるけど」。
+#     UT には PSA の「補URL候補NG」に当たるものが無く、人が外しても翌日また同じ候補が
+#     並んでいた。人の1クリックを捨てないために、出品×URL で覚える。
+#   PSA 側はスプシのタブ、UT はローカル json (UT はタブを持っていないため)。
+NG_CAND_PATH = os.path.join("C:/dev/iMak_data/hq", "ut_cand_ng.json")
+
+
+def load_cand_ng(path=NG_CAND_PATH):
+    """{itemID: [url,...]} を読む。読めなければ空 (候補を消す方に倒さない)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return {k: list(v) for k, v in d.items()} if isinstance(d, dict) else {}
+    except Exception:                                          # noqa: BLE001
+        return {}
+
+
+def remember_cand_ng(pairs, path=NG_CAND_PATH):
+    """[(itemID, url)] を覚える (I/O)。書けなくても走行は止めない。"""
+    pairs = [(str(i).strip(), str(u).strip()) for i, u in (pairs or []) if i and u]
+    if not pairs:
+        return 0
+    d = load_cand_ng(path)
+    n = 0
+    for iid, url in pairs:
+        cur = d.setdefault(iid, [])
+        if url not in cur:
+            cur.append(url)
+            n += 1
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+    except Exception:                                          # noqa: BLE001
+        return 0
+    return n
+
+
+def drop_ng_candidates(cands, ng_urls):
+    """一度「違う」と外した候補を除く (純関数)。"""
+    ng = set(ng_urls or ())
+    return [c for c in (cands or []) if (c.get("url") or "") not in ng]
+
+
 def confirm(dry_run=False):
     """当日キャッシュの候補を目視で選び、補URL(AC-AG) に **既存を残して**書く。"""
     import datetime
@@ -320,26 +365,39 @@ def confirm(dry_run=False):
     vals = sheet_io._product_ws().get_all_values()
     targets = {t["itemID"]: t for t in select_targets(vals)}
     cache = load_cache()
+    ng = load_cand_ng()
 
-    items, back = [], []
+    items, back, n_allng = [], [], 0
     for iid, c in cache.items():
         if c.get("date") != today or not c.get("candidates"):
             continue
         t = targets.get(iid)
         if not t:
             continue                    # 補URLが埋まった / 売れた = もう対象でない
+        # ★2026-09-04: 前に「違う」と外した候補は出さない (再仕入れ側と同じ扱い)
+        _cands = drop_ng_candidates(c["candidates"], ng.get(iid))
+        if not _cands:
+            n_allng += 1
+            continue
         items.append({"idx": len(items), "title": t["title"], "card_no": t["size"],
                       "ebay_url": f"https://www.ebay.com/itm/{iid}",
                       "ref_image": prc.ebay_listing_image(iid) or "",
-                      "candidates": c["candidates"]})
+                      "candidates": _cands})
         back.append(t)
-    print(f"▶ 目視できる UT: {len(items)}件")
+    print(f"▶ 目視できる UT: {len(items)}件"
+          + (f" (前に外した候補しか無い {n_allng}件は出しません)" if n_allng else ""))
     if dry_run or not items:
         return 0
     res = prc.restock_confirm(items)
     if res is None:
         print("⚠ 目視が終わらなかったので、書き込みはしていません")
         return 0
+    # ★2026-09-04: 外した候補を覚える。これが無いと翌日また同じ物が並ぶ。
+    _ng_new = [(back[d["idx"]]["itemID"], d.get("url") or "")
+               for d in (res.get("diffs") or []) if isinstance(d.get("idx"), int)]
+    _n = remember_cand_ng(_ng_new)
+    if _n:
+        print(f"  🚫 違うと外した候補 {_n}件を記録しました (次回は出しません)")
     row_to_urls = {}
     for c in res.get("confirmed", []):
         t = back[c["idx"]]
@@ -367,26 +425,39 @@ def restock_confirm(dry_run=False):
     vals = sheet_io._product_ws().get_all_values()
     targets = {t["itemID"]: t for t in select_targets(vals, sold_out=True)}
     cache = load_cache(RESTOCK_CACHE_PATH)
+    ng = load_cand_ng()
 
-    items, back = [], []
+    items, back, n_allng = [], [], 0
     for iid, c in cache.items():
         if c.get("date") != today or not c.get("candidates"):
             continue
         t = targets.get(iid)
         if not t:
             continue                    # 売れた印が消えた = もう対象でない
+        # ★2026-09-04: 前に「違う」と外した候補は出さない (人の1クリックを捨てない)
+        _cands = drop_ng_candidates(c["candidates"], ng.get(iid))
+        if not _cands:
+            n_allng += 1
+            continue                    # 全部 外し済み = 見せる物が無い
         items.append({"idx": len(items), "title": t["title"], "card_no": t["size"],
                       "ebay_url": f"https://www.ebay.com/itm/{iid}",
                       "ref_image": prc.ebay_listing_image(iid) or "",
-                      "candidates": c["candidates"]})
+                      "candidates": _cands})
         back.append(t)
-    print(f"▶ 目視できる 売り切れ UT: {len(items)}件")
+    print(f"▶ 目視できる 売り切れ UT: {len(items)}件"
+          + (f" (前に外した候補しか無い {n_allng}件は出しません)" if n_allng else ""))
     if dry_run or not items:
         return 0
     res = prc.restock_confirm(items)
     if res is None:
         print("⚠ 目視が終わらなかったので、書き込みはしていません")
         return 0
+    # ★2026-09-04: 外した候補を覚える。これが無いと翌日また同じ物が並ぶ。
+    _ng_new = [(back[d["idx"]]["itemID"], d.get("url") or "")
+               for d in (res.get("diffs") or []) if isinstance(d.get("idx"), int)]
+    _n = remember_cand_ng(_ng_new)
+    if _n:
+        print(f"  🚫 違うと外した候補 {_n}件を記録しました (次回は出しません)")
     itemid_to_row, itemid_to_url, itemid_to_cost = {}, {}, {}
     for c in res.get("confirmed", []):
         t = back[c["idx"]]
