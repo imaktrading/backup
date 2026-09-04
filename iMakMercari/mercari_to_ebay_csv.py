@@ -1050,6 +1050,13 @@ def main():
                         item_specifics[_dk] = f"{_dv} cm"
                 item_specifics = normalize_specs(item_specifics, brand_hint=args.sheet or "")
                 title_en = enforce_brand_prefix(title_en, brand_hint=args.sheet or "")
+                # ★2026-09-04: Porter の Item Specifics を決定的に整える。
+                #   カタログが無いので Claude が毎回「書けそうな物」を足し引きし、
+                #   行ごとに列が変わっていた (実測 15件: Series 1件 / MPN・Type・
+                #   Description が各1件だけ / Size が実寸と逆転)。判断させず表で決める。
+                if (args.sheet or "") == "porter":
+                    import porter_specs as _psx
+                    item_specifics = _psx.finalize(item_specifics, title_en)
             except Exception as _e:
                 print(f"    ⚠️ spec_normalizer 失敗: {type(_e).__name__}: {_e}")
                 # 元値維持、既存挙動継続
