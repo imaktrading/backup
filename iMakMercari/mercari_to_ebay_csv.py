@@ -958,6 +958,7 @@ def main():
         price_jpy = row.get('商品価格', '')
         description_jp = row.get('商品説明', '')
         photo_urls = row.get('写真URL', '')
+        color_sheet = (row.get('色', '') or '').strip()   # 抽出時に入れた色 (S列)
 
         # 取下再出品②: relist は既存listingの再出品。元eBay listing から **画像 + condition** を継承
         # (再現性の高い設計)。① 画像=ソース(mercari/1kuji.com)から取り直さず元画像流用(汎用OG/失敗根治)。
@@ -1056,7 +1057,8 @@ def main():
                 #   Description が各1件だけ / Size が実寸と逆転)。判断させず表で決める。
                 if (args.sheet or "") == "porter":
                     import porter_specs as _psx
-                    item_specifics = _psx.finalize(item_specifics, title_en)
+                    item_specifics = _psx.finalize(item_specifics, title_en,
+                                                   sheet_color=color_sheet)
             except Exception as _e:
                 print(f"    ⚠️ spec_normalizer 失敗: {type(_e).__name__}: {_e}")
                 # 元値維持、既存挙動継続

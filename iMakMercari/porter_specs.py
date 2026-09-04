@@ -69,15 +69,59 @@ def size_from_width(width_in):
     return SIZE_MAX
 
 
-def finalize(specs, title):
+# 抽出時にシートへ入れた日本語の色 → eBay 公式16色 (2026-09-04 ユーザー確定)。
+#   ★「わざわざ抽出時に色をいれている」ので、生成は **シートを正**として使う。
+#     写真から読み直すと、人が入れた値が毎回捨てられる。
+#   実害: ネイビーが Black、ブラックが Multicolor で出ていた (2026-09-04 実測)。
+EBAY_COLORS = ("Beige", "Black", "Blue", "Brown", "Gold", "Gray", "Green", "Ivory",
+               "Multicolor", "Orange", "Pink", "Purple", "Red", "Silver", "White", "Yellow")
+JP_COLOR = (
+    ("ブラック", "Black"), ("黒", "Black"), ("チャコール", "Black"),
+    ("ネイビー", "Blue"), ("紺", "Blue"), ("ブルー", "Blue"), ("青", "Blue"),
+    ("セージ", "Green"), ("カーキ", "Green"), ("オリーブ", "Green"),
+    ("グリーン", "Green"), ("緑", "Green"),
+    ("ベージュ", "Beige"), ("ブラウン", "Brown"), ("茶", "Brown"),
+    ("グレー", "Gray"), ("シルバー", "Silver"), ("ゴールド", "Gold"),
+    ("アイボリー", "Ivory"), ("ホワイト", "White"), ("白", "White"),
+    ("オレンジ", "Orange"), ("ピンク", "Pink"), ("パープル", "Purple"),
+    ("紫", "Purple"), ("レッド", "Red"), ("赤", "Red"),
+    ("イエロー", "Yellow"), ("黄", "Yellow"),
+    ("マルチ", "Multicolor"), ("迷彩", "Multicolor"),
+)
+
+
+def ebay_color(sheet_color):
+    """シートの日本語の色 → eBay 公式16色 (純関数)。当たらなければ ""。
+
+    ★当たらない時は **空を返す** = 写真からの判断を残す。
+      当てずっぽうで別の色にしない (誤った色は SNAD のもと)。
+    """
+    t = (sheet_color or "").strip()
+    if not t:
+        return ""
+    for c in EBAY_COLORS:                      # 既に英語で入っている場合
+        if t.lower() == c.lower():
+            return c
+    for jp, en in JP_COLOR:
+        if jp in t:
+            return en
+    return ""
+
+
+def finalize(specs, title, sheet_color=""):
     """Porter の Item Specifics を決定的に整える (純関数)。
 
     ① 出さないと決めた項目を落とす
     ② Series をタイトルから入れる (既に入っていれば触らない)
     ③ Size を実寸(幅)から決める。実寸が無い時は元の値を残す (推測を消さない)
     ④ 寸法の 'Does not apply' は空にする (寸法欄に入れる値ではない)
+    ⑤ Color は **シートの色を正**にする。読めない時だけ写真の判断を残す
     """
     out = {k: v for k, v in (specs or {}).items() if k not in DROP}
+
+    c = ebay_color(sheet_color)
+    if c:
+        out["Color"] = c
 
     if not str(out.get("Series", "")).strip():
         s = series_from_title(title)

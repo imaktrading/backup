@@ -86,3 +86,36 @@ def test_generation_calls_it_only_for_porter():
     i = s.index("porter_specs")
     seg = s[max(0, i - 400):i + 200]
     assert '== "porter"' in seg, "porter 以外にも当ててしまっている"
+
+# ── 色は「抽出時にシートへ入れた値」を正にする (2026-09-04 ユーザー確定) ──
+# > わざわざ抽出時に色をいれている。生成時は、スプシを そのまま生成するようにして
+def test_sheet_color_wins_over_the_photo_guess():
+    """実害: シートに ブラック と在るのに Multicolor / ネイビーなのに Black が出ていた。"""
+    got = P.finalize({"Color": "Multicolor"}, TITLE, sheet_color="ブラック")
+    assert got["Color"] == "Black"
+    got2 = P.finalize({"Color": "Black"}, TITLE, sheet_color="ネイビー")
+    assert got2["Color"] == "Blue"
+
+
+def test_japanese_colors_map_to_the_ebay_sixteen():
+    assert P.ebay_color("セージグリーン") == "Green"      # eBay に Sage は無い
+    assert P.ebay_color("カーキ") == "Green"              # Khaki も無い
+    assert P.ebay_color("ワインレッド") == "Red"
+    assert P.ebay_color("Black") == "Black"               # 既に英語ならそのまま
+    for c in P.EBAY_COLORS:
+        assert P.ebay_color(c) == c
+
+
+def test_an_unreadable_sheet_color_keeps_the_photo_judgement():
+    """当てずっぽうで別の色にしない。空なら写真の判断を残す (誤色は SNAD のもと)。"""
+    assert P.ebay_color("") == ""
+    assert P.ebay_color("タンカー") == ""
+    assert P.finalize({"Color": "Multicolor"}, TITLE, sheet_color="")["Color"] == "Multicolor"
+    assert P.finalize({"Color": "Green"}, TITLE, sheet_color="謎の色")["Color"] == "Green"
+
+
+def test_generation_passes_the_sheet_color():
+    import io as _io
+    s = _io.open(os.path.join(_MER, "mercari_to_ebay_csv.py"), encoding="utf-8").read()
+    assert "color_sheet = (row.get('色', '')" in s, "シートの色を読んでいない"
+    assert "sheet_color=color_sheet" in s, "生成に渡していない"
