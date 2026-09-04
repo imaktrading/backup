@@ -197,6 +197,14 @@ def collect_search_listing_urls(
         driver.execute_script("window.focus();")
     except Exception:
         pass
+    # ★maximize + focus で **画面に出てきてしまう** (2026-08-22 user 指摘「CHROMEが邪魔」)。
+    #   描画は続けたまま隠し直す (`--disable-features=CalculateNativeWinOcclusion` 付きなので
+    #   隠しても件数は落ちない)。 IMAK_CHROME_ONSCREEN=1 の時は出したままにする。
+    try:
+        from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
+        hide_browser_window(driver)
+    except Exception:  # noqa: BLE001 - 隠せなくても収集は続ける
+        pass
     time.sleep(max(initial_wait_sec, MS.DEFAULT_INITIAL_PROFILE_WAIT_SEC))
 
     if manual:
