@@ -263,6 +263,16 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
     m = re.search(r"<h1[^>]*>([^<]+)</h1>", html_decoded)
     if m:
         out["name"] = m.group(1).strip()
+    else:
+        # ★h1 の中にタグが入っている頁がある (古いプロモ)。`[^<]+` だと取れず、
+        #   最後の `return out if "name" in out else None` で **カードごと落ちる**
+        #   (2026-09-04 実測 40枚)。タグを剥がして取り直す。
+        m = re.search(r"<h1[^>]*>(.*?)</h1>", html_decoded, re.S)
+        if m:
+            nm = re.sub(r"<[^>]+>", "", m.group(1))
+            nm = re.sub(r"\s+", " ", nm).strip()
+            if nm:
+                out["name"] = nm
 
     # Image URL → set_code, padded_id
     # 2026-05-28 fix:
@@ -301,6 +311,27 @@ def _parse_detail_html(html: str, card_id: int | str) -> dict | None:
             if m3:
                 out["card_number"] = m3.group(1)
                 out["card_number_promo_code"] = m3.group(2)  # 'SM-P' 等
+
+    # ★レギュレーションマークが無い古いプロモの救済 (2026-09-04)。
+    #   上の regex は `regulation_logo_NN/XX.gif` が番号の直前に在ることを前提にしている。
+    #   2014-2016 頃のプロモ (例 cardID 30644 メガゲンガーEX) にはマークが無く、
+    #   番号は `ゲンガーEX &nbsp;079&nbsp;/&nbsp;XY-P` のようにカード名の直後に出る。
+    #   取れないと card_number が空 → **カードごと落ちる** (実測 40枚)。
+    #   ★カード名の直後 60字以内に限って探す (関係ない数字を拾わないため)。
+    if not out.get("card_number") and out.get("name"):
+        _t = re.sub(r"<[^>]+>", " ", html_decoded)
+        _t = re.sub(r"[ \s]+", " ", _t)
+        _i = _t.find(out["name"])
+        if _i >= 0:
+            _m = re.search(r"\b(\d{1,3})\s*/\s*([A-Z][A-Z0-9-]{1,6}|\d{1,3})\b",
+                           _t[_i + len(out["name"]): _i + len(out["name"]) + 60])
+            if _m:
+                out["card_number_text"] = f"{_m.group(1)}/{_m.group(2)}"
+                out["card_number"] = _m.group(1)
+                if _m.group(2).isdigit():
+                    out["card_number_total"] = _m.group(2)
+                else:
+                    out["card_number_promo_code"] = _m.group(2)
 
     # Rarity (from rarity image filename: ic_rare_sar.gif → "SAR" / ic_rare_c_c.gif → "C")
     # Pokemon rarity image format: ic_rare_{rarity}[_{type_marker}].gif

@@ -13,7 +13,7 @@ values:
     jp_set: "スタートデッキ100 バトルコレクション"
   - value: "XY Promo"
     category: pokemon_tcg
-    rows: 326
+    rows: 330
     jp_set: "ポケモンカードゲーム プロモーションカードパック(2015/5)"
   - value: "Mega Dream ex"
     category: pokemon_tcg
@@ -75,10 +75,6 @@ values:
     category: pokemon_tcg
     rows: 96
     jp_set: "ポケモンカードゲーム クラシック カメックス&スイクンexデッキ"
-  - value: "M-P: Mega Promos"
-    category: pokemon_tcg
-    rows: 93
-    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Mega Brave"
     category: pokemon_tcg
     rows: 92
@@ -91,6 +87,10 @@ values:
     category: pokemon_tcg
     rows: 92
     jp_set: "ポケモンチャレンジひろば 2009/9"
+  - value: "M-P: Mega Promos"
+    category: pokemon_tcg
+    rows: 90
+    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Wild Blaze"
     category: pokemon_tcg
     rows: 85
@@ -642,10 +642,6 @@ values:
     category: pokemon_tcg
     rows: 2
     jp_set: "ジムプロモキャンペーン2026下半期"
-  - value: "McDonald's Happy Meal 2025"
-    category: pokemon_tcg
-    rows: 2
-    jp_set: "マクドナルド「ハッピーセット2025」"
   - value: "Sv: Ceruledge & Sylveon Ex Stellar Tera Type Starter Sets / Start Deck Generations / Battle Partners Deck Build Box"
     category: pokemon_tcg
     rows: 1
