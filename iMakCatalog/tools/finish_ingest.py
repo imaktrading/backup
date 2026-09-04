@@ -17,6 +17,7 @@ scraper が入れるのは **公式の生値だけ**。出品くんが読む `*_
     rarity_ebay                        api.derive_rarity_ebay (変換表)
     card_type_ebay                     既存行が使っている対応をそのまま (新語彙は作らない)
     set_name_ebay                      api.derive_set_name_ebay (変換表)
+    name_en (pokemon のみ)             PokeAPI 辞書 → 無ければ カード API 辞書
 
 ★変換表に無いものは **空欄のまま** (fail-closed)。何が引けなかったかは最後に一覧で出す。
   そこが「変換表に1行足す」作業の入口になる。
@@ -34,6 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scrapers"))
 import api  # noqa: E402
 
 try:
@@ -85,13 +87,50 @@ def run(cat: str, commit: bool) -> int:
             return codemap[m.group(1)]
         head = (pid or "").split("_")[0].rsplit("-", 1)[0]
         return codemap.get(head) or setmap.get(head)
+    # ★英語名の辞書も **書き込み前に**読む (pokemon のみ)。
+    #   scraper は日本語名しか入れないので、ここで付けないと 出品くんが英語名を出せない
+    #   (実測 2026-09-05: 新しく入れた 95行が name_en 空のまま = 出せない行になっていた)。
+    en1 = en2 = None
+    own_en: dict[str, str] = {}
+    own_cn: dict[str, str] = {}
+    if cat == "pokemon_tcg":
+        import pokemon_name_translation as T  # noqa
+
+        en1, en2 = T.load_pokeapi_dict(), T.load_api_dict()
+        # ★catalog が **既に使っている英語名**を最優先にする (2026-09-05)。
+        #   辞書は直訳を返すことがある: `ポケモンごっこ` → 'Imitation Pokémon'。
+        #   正しくは 'Poké Kid' で、PSA 実物で確かめて 7行に入れてある
+        #   (`psa_slab_confirmed_20260823`)。辞書を先に見ると **決着済みの名前を壊す**。
+        #   同じ日本語名に英語名が2つ在る行は使わない (どちらが正か決められない)。
+        _e: dict[str, set] = {}
+        _c: dict[str, set] = {}
+        for jp, en, cn in db.execute(
+                "SELECT name, name_en, json_extract(specs,'$.character_name') FROM products "
+                "WHERE category=? AND IFNULL(name,'')<>'' AND IFNULL(name_en,'')<>''", (cat,)):
+            _e.setdefault(jp, set()).add(en)
+            if cn:
+                _c.setdefault(jp, set()).add(cn)
+        own_en = {k: next(iter(v)) for k, v in _e.items() if len(v) == 1}
+        own_cn = {k: next(iter(v)) for k, v in _c.items() if len(v) == 1}
+
+        def _en(jp: str) -> tuple[str, str]:
+            if jp in own_en:
+                return own_en[jp], "catalog_same_name"
+            g = T.resolve_name_en(jp, en1, en2)
+            got = g[0] if isinstance(g, tuple) else g
+            if got:
+                return got, "pokeapi_finish_ingest"
+            v = en2.get(jp)          # トレーナーズ等 (既存 rule_trainer_dict と同じ出所)
+            return (v, "api_dict_finish_ingest") if v else ("", "")
+
     rows = db.execute(
-        "SELECT id, product_id, set_name_official, specs FROM products "
+        "SELECT id, product_id, set_name_official, name_jp, name, name_en, specs FROM products "
         "WHERE category=? AND ("
         "  IFNULL(json_extract(specs,'$.game_ebay'),'')='' OR"
         "  IFNULL(json_extract(specs,'$.set_name_ebay'),'')='' OR"
         "  IFNULL(json_extract(specs,'$.card_type_ebay'),'')='' OR"
-        "  IFNULL(json_extract(specs,'$.rarity_ebay'),'')='')", (cat,)).fetchall()
+        "  IFNULL(json_extract(specs,'$.rarity_ebay'),'')='' OR"
+        "  IFNULL(name_en,'')='')", (cat,)).fetchall()
     print(f"=== 仕上げ {cat} ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(rows)}行 ===")
     game, maker = api.derive_game_ebay(cat), api.derive_manufacturer(cat)
     filled, unmapped, done = Counter(), Counter(), 0
@@ -131,7 +170,21 @@ def run(cat: str, commit: bool) -> int:
                 filled["set_name_ebay"] += 1
             else:
                 unmapped[f"set={r['set_name_official']!r}"] += 1
-        if commit and json.dumps(s, sort_keys=True) != before:
+        new_en = new_en_src = ""
+        if en1 is not None and not (r["name_en"] or "").strip():
+            new_en, new_en_src = _en((r["name_jp"] or r["name"] or "").strip())
+            if new_en:
+                filled["name_en"] += 1
+                jp0 = (r["name_jp"] or r["name"] or "").strip()
+                if jp0 in own_cn and not s.get("character_name"):
+                    s["character_name"] = own_cn[jp0]
+                    filled["character_name"] += 1
+            else:
+                unmapped[f"name_en={(r['name_jp'] or r['name'])!r}"] += 1
+        if commit and (json.dumps(s, sort_keys=True) != before or new_en):
+            if new_en:
+                db.execute("UPDATE products SET name_en=?, name_en_source=? WHERE id=?",
+                           (new_en, new_en_src, r["id"]))
             db.execute("UPDATE products SET specs=?, updated_at=? WHERE id=?",
                        (json.dumps(s, ensure_ascii=False), NOW, r["id"]))
             done += 1

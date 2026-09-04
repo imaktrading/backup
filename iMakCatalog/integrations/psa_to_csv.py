@@ -1996,6 +1996,27 @@ def _set_code_lookup_variants(set_code: str) -> list[str]:
     return seen
 
 
+# 兄弟デッキ — 公式が **同じ収録商品名で2デッキ**を出していて、PSA のラベルでも
+#   どちらか決められないもの (2026-09-05)。両デッキとも番号が 001〜016 で同じなので、
+#   ラベルの `MEWTWO VS GENESECT` だけでは決まらない。**カード名で決める**。
+#   catalog 側は `MG` (ミュウツーデッキ) / `MG-G` (ゲノセクトデッキ) で分けてある。
+#   ★名前が合う方が無ければ何も返さない (fail-closed)。推測で片方を選ばない。
+_POKEMON_SIBLING_SETS: dict[str, tuple[str, ...]] = {
+    "MG": ("MG-G",),
+    "MG-G": ("MG",),
+}
+
+
+def _pokemon_sibling_record(set_code: str, cn_variants: list, subject: str):
+    """兄弟デッキ側に **PSA Subject と名前が合う** record があれば返す."""
+    for sib in _POKEMON_SIBLING_SETS.get(set_code, ()):
+        for cn in cn_variants:
+            cand = api.lookup(POKEMON_CATEGORY, f"{sib}-{cn}")
+            if cand is not None and _record_name_matches_subject(cand, subject):
+                return cand
+    return None
+
+
 def lookup_pokemon(
     brand: str,
     card_number: str,
@@ -2078,6 +2099,15 @@ def lookup_pokemon(
                     print(f"    🎯 iMakCatalog (Pokemon) FA/promo upgrade: "
                           f"{base_pid} → {promo_pid} ({cand['name']}, subject FA hint)")
                 break
+
+    # 3. 兄弟デッキ (MG / MG-G) — 番号が同じなので、名前が合わなければ隣を見る。
+    if record is None or not _record_name_matches_subject(record, subject):
+        sib = _pokemon_sibling_record(set_code, cn_variants, subject)
+        if sib is not None:
+            if verbose:
+                print(f"    🔁 iMakCatalog (Pokemon) 兄弟デッキ: {base_pid} → "
+                      f"{sib['product_id']} ({sib['name']}, subject={subject!r})")
+            record = sib
 
     if record is None:
         if verbose:

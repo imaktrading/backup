@@ -546,9 +546,21 @@ def derive_product_id(detail: dict) -> str:
 # ============================================================================
 # specs 構築
 # ============================================================================
+# 公式が使う進化段階はこの10語だけ (2026-09-05 実測: catalog 16,823行の全値)。
+#   ★ここで**関門にする**。detail は cache から来ることがあり、
+#     2026-08-23 に直す前の**古い読み取り**が cache に残っている
+#     (実測: SA-W-011 エネルギーつけかえ の cache に stage='基本'。効果文の
+#     「基本エネルギー」を拾った当時の値。トレーナーズに進化段階は無い)。
+#   語彙に無い値は **捨てる** (空欄が正しい)。推測で置き換えない。
+_OFFICIAL_STAGES = {"たね", "1進化", "2進化", "V進化", "M進化",
+                    "レベルアップ", "BREAK進化", "復元", "伝説", "V-UNION"}
+
+
 def build_specs(detail: dict) -> dict:
     """detail dict → DB 用 specs JSON."""
     specs: dict = {}
+    if detail.get("stage") and detail["stage"] not in _OFFICIAL_STAGES:
+        detail = {**detail, "stage": None}
     for key in ("hp", "stage", "type_en", "type_jp", "weakness", "resistance",
                 "retreat", "regulation", "rarity", "card_number_text",
                 "card_number_total"):

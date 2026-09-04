@@ -75,6 +75,10 @@ values:
     category: pokemon_tcg
     rows: 96
     jp_set: "ポケモンカードゲーム クラシック カメックス&スイクンexデッキ"
+  - value: "M-P: Mega Promos"
+    category: pokemon_tcg
+    rows: 95
+    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Mega Brave"
     category: pokemon_tcg
     rows: 92
@@ -87,10 +91,6 @@ values:
     category: pokemon_tcg
     rows: 92
     jp_set: "ポケモンチャレンジひろば 2009/9"
-  - value: "M-P: Mega Promos"
-    category: pokemon_tcg
-    rows: 90
-    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Wild Blaze"
     category: pokemon_tcg
     rows: 85
@@ -183,6 +183,10 @@ values:
     category: pokemon_tcg
     rows: 28
     jp_set: "ポケモンカードゲームDP 対戦スターターパック「ブーバーンVSエレキブル」"
+  - value: "Mewtwo vs Genesect 30-Card Deck Battle Set"
+    category: pokemon_tcg
+    rows: 28
+    jp_set: "ポケモンカードゲームBW 30枚デッキ対戦set「ミュウツーVSゲノセクト」"
   - value: "Premium Trainer Box"
     category: pokemon_tcg
     rows: 27
@@ -219,6 +223,10 @@ values:
     category: pokemon_tcg
     rows: 23
     jp_set: "スターターセットex クワッス＆ミミッキュex"
+  - value: "Ultra Moon Deck Build Box"
+    category: pokemon_tcg
+    rows: 23
+    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラムーン」"
   - value: "Tapu Bulu GX Deck"
     category: pokemon_tcg
     rows: 23
@@ -251,10 +259,6 @@ values:
     category: pokemon_tcg
     rows: 21
     jp_set: "スターターセットVMAX フシギバナ"
-  - value: "Ultra Moon Deck Build Box"
-    category: pokemon_tcg
-    rows: 21
-    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラムーン」"
   - value: "Flareon GX Deck"
     category: pokemon_tcg
     rows: 21
@@ -267,6 +271,10 @@ values:
     category: pokemon_tcg
     rows: 20
     jp_set: "スターターセットVMAX カメックス"
+  - value: "Extra Regulation Box"
+    category: pokemon_tcg
+    rows: 20
+    jp_set: "「エクストラレギュレーションBOX」"
   - value: "Umbreon & Darkrai GX Tag Team Deck"
     category: pokemon_tcg
     rows: 20
@@ -291,14 +299,6 @@ values:
     category: pokemon_tcg
     rows: 19
     jp_set: "乱戦！ポケモンスクランブル×ポケモンカードゲーム"
-  - value: "Extra Regulation Box"
-    category: pokemon_tcg
-    rows: 18
-    jp_set: "「エクストラレギュレーションBOX」"
-  - value: "Mewtwo vs Genesect 30-Card Deck Battle Set"
-    category: pokemon_tcg
-    rows: 18
-    jp_set: "ポケモンカードゲームBW 30枚デッキ対戦set「ミュウツーVSゲノセクト」"
   - value: "Sv: Ex Starter Set Sprigatito & Meowscarada Ex"
     category: pokemon_tcg
     rows: 18
@@ -642,6 +642,14 @@ values:
     category: pokemon_tcg
     rows: 2
     jp_set: "ジムプロモキャンペーン2026下半期"
+  - value: "Ultra Sun Deck Build Box"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラサン」"
+  - value: "McDonald's Happy Meal 2025"
+    category: pokemon_tcg
+    rows: 2
+    jp_set: "マクドナルド「ハッピーセット2025」"
   - value: "Sv: Ceruledge & Sylveon Ex Stellar Tera Type Starter Sets / Start Deck Generations / Battle Partners Deck Build Box"
     category: pokemon_tcg
     rows: 1
@@ -894,10 +902,6 @@ values:
     category: pokemon_tcg
     rows: 1
     jp_set: "チャンピオンシップポイント（2026シーズン）"
-  - value: "Ultra Sun Deck Build Box"
-    category: pokemon_tcg
-    rows: 1
-    jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラサン」"
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg

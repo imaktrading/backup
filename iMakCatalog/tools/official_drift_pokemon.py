@@ -85,6 +85,11 @@ def official_cards(pg: str) -> list[dict]:
         out.extend(_fetch(pg, page).get("cardList") or [])
     return [{"id": str(c.get("cardID") or ""),
              "name": _clean(c.get("cardNameViewText") or c.get("cardNameAltText") or ""),
+             # ★別綴り (2026-09-05)。公式は「メガ」「◇」等の**印を span 画像**で出すので、
+             #   タグを剥がすと文字が消える (`<span pcg-megamark>ルカリオEX` → `ルカリオEX`)。
+             #   alt には印が文字で入っている (`メガルカリオEX`) ので、**どちらか一致でOK**にする。
+             #   片方だけを正にすると、正しい行が2つの綴りの間で行ったり来たりする。
+             "alt": _clean(c.get("cardNameAltText") or ""),
              "img": (c.get("cardThumbFile") or "").rsplit("/", 1)[-1]} for c in out]
 
 
@@ -99,10 +104,12 @@ def _is_out_of_scope(name: str) -> bool:
 
 
 def catalog_rows(conn, pg: str) -> list[sqlite3.Row]:
-    return conn.execute(
+    """その弾の行。**画像フォルダが一致する行**も拾う (product_id の頭と一致しないため)."""
+    rows = conn.execute(
         "SELECT product_id, name, name_jp, images FROM products "
-        "WHERE category=? AND (product_id=? OR product_id LIKE ?)",
-        (CAT, pg, pg + "-%")).fetchall()
+        "WHERE category=? AND (product_id=? OR product_id LIKE ? OR images LIKE ?)",
+        (CAT, pg, pg + "-%", f"%/large/{pg}/%")).fetchall()
+    return rows
 
 
 def check_pg(conn, pg: str) -> dict:
@@ -140,14 +147,16 @@ def check_pg(conn, pg: str) -> dict:
         if r is None:
             if _is_out_of_scope(c["name"]):
                 excluded.append(c)          # 差分ではない (登録しないと決めてある)
-            elif c["name"] in names:
+            elif c["name"] in names or (c.get("alt") and c["alt"] in names):
                 # 同じ弾に **同じ名前の行が在る** = 別刷り (公式が絵を差し替え/再録した)。
                 # catalog は 1カード1行なので「カードが無い」わけではない。別枠で数える。
                 reprint.append(c)
             else:
                 missing.append(c)
             continue
-        if c["name"] and c["name"] not in {_clean(r["name"] or ""), _clean(r["name_jp"] or "")}:
+        got = {_clean(r["name"] or ""), _clean(r["name_jp"] or "")}
+        want = {x for x in (c["name"], c.get("alt")) if x}
+        if want and not (want & got):
             name_ng.append((c, r["product_id"], r["name_jp"] or r["name"]))
     return {"pg": pg, "fetched": len(cards), "rows": len(rows),
             "missing": missing, "name_ng": name_ng, "excluded": excluded,
@@ -167,20 +176,115 @@ def pg_of(product_id: str) -> str:
 
 
 def all_pgs(conn) -> list[str]:
-    """catalog に在る弾コード。数の多い順."""
+    """catalog に在る弾コード。数の多い順.
+
+    ★**画像フォルダ**を第一の根拠にする (2026-09-05)。公式 `pg` は画像フォルダ名
+    (`.../large/XY7-B/...`) と同じで、product_id の頭とは限らない
+    (`XY7-B-095` は頭を取ると `XY7-B` になるが、`SV3-001` は `SV3`)。
+    フォルダから取れば **公式が受け付ける綴り**そのものになる。
+    フォルダが無い行だけ product_id から推定する。
+    """
     c = Counter()
-    for (pid,) in conn.execute("SELECT product_id FROM products WHERE category=?", (CAT,)):
-        pg = pg_of(pid)
+    for (pid, images) in conn.execute(
+            "SELECT product_id, images FROM products WHERE category=?", (CAT,)):
+        pg = ""
+        for u in json.loads(images or "[]"):
+            m = re.search(r"/large/([^/]+)/", str(u))
+            if m:
+                pg = m.group(1)
+                break
+        pg = pg or pg_of(pid)
         if pg and pg != "cardID":
             c[pg] += 1
     return [k for k, _ in c.most_common()]
+
+
+
+def known_card_ids(conn) -> set:
+    """catalog が持っている公式 cardID (source_url の末尾 / `cardID-*` の product_id)."""
+    ids = set()
+    for (pid, url) in conn.execute(
+            "SELECT product_id, IFNULL(source_url,'') FROM products WHERE category=?", (CAT,)):
+        if "details.php/card/" in url:
+            ids.add(url.rstrip("/").rsplit("/", 1)[-1])
+        if (pid or "").startswith("cardID-"):
+            ids.add(pid.split("-", 1)[1])
+    return ids
+
+
+def check_all(conn) -> dict:
+    """★弾を使わない総当たり (2026-09-05).
+
+    `pg=<弾コード>` は **公式が受け付けない綴りがある** (`DP` / `XY-P` / `SMSMP` 等 7弾)。
+    弾ごとの突合だけだと、その7弾は永久に「取得できない」= **検査できない穴**になる。
+
+    公式の全カード一覧を1回取り、**画像フォルダで束ねてから**弾ごとと同じ突合をする。
+    `pg` の綴りを一切使わないので、**取得できない弾が無くなる**。
+    数え方 (欠落 / 別刷り / 対象外) は弾ごとの突合と同じ。
+    """
+    sys.path.insert(0, str(ROOT / "scrapers"))
+    import pokemon_tcg as P  # noqa
+    raw = P.list_all_cards()
+    known = known_card_ids(conn)
+
+    groups: dict[str, list] = {}
+    for c in raw:
+        m = re.search(r"/large/([^/]+)/", str(c.get("cardThumbFile") or ""))
+        groups.setdefault(m.group(1) if m else "(不明)", []).append(
+            {"id": str(c.get("cardID") or ""),
+             "name": _clean(c.get("cardNameViewText") or c.get("cardNameAltText") or ""),
+             "alt": _clean(c.get("cardNameAltText") or ""),
+             "img": (c.get("cardThumbFile") or "").rsplit("/", 1)[-1]})
+
+    miss, rep, exc, per = 0, 0, 0, {}
+    for pg, cards in groups.items():
+        rows = catalog_rows(conn, pg)
+        by_img, names = {}, set()
+        for r in rows:
+            for u in json.loads(r["images"] or "[]"):
+                by_img[str(u).rsplit("/", 1)[-1]] = r
+            names.add((r["name"] or "").strip())
+            names.add((r["name_jp"] or "").strip())
+        out = []
+        for c in cards:
+            if c["img"] in by_img or c["id"] in known:
+                continue
+            if _is_out_of_scope(c["name"]):
+                exc += 1
+            elif c["name"] in names or (c["alt"] and c["alt"] in names):
+                rep += 1
+            else:
+                out.append(c)
+        if out:
+            per[pg] = out
+            miss += len(out)
+    return {"fetched": len(raw), "known": len(known), "groups": len(groups),
+            "missing": miss, "reprint": rep, "excluded": exc, "per": per}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pg", help="弾コードを指定")
     ap.add_argument("--n", type=int, default=5, help="見る弾の数 (既定 5)")
+    ap.add_argument("--all", action="store_true",
+                    help="弾を使わず、公式の全カードを cardID で突き合わせる")
     a = ap.parse_args()
+
+    if a.all:
+        conn = sqlite3.connect(str(api._DB_PATH))
+        conn.row_factory = sqlite3.Row
+        res = check_all(conn)
+        conn.close()
+        print(f"=== 公式の全カードと突合 (pokemon) {datetime.now().isoformat(timespec='seconds')} ===")
+        print(f"  公式 {res['fetched']}枚 / {res['groups']}弾 "
+              f"/ 別刷り {res['reprint']}枚 / 対象外 {res['excluded']}枚")
+        for pg, cs in sorted(res["per"].items(), key=lambda x: -len(x[1])):
+            print(f"  ★NG pg={pg:10s} 欠落 {len(cs)}枚")
+            for c in cs[:5]:
+                print(f"      [欠落] {c['name']} (cardID {c['id']} / {c['img']})")
+        print("")
+        print(f"**欠落 {res['missing']}枚 / 差分が残っている弾 {len(res['per'])}**")
+        sys.exit(0 if not res["missing"] else 1)
 
     state = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
     conn = sqlite3.connect(str(api._DB_PATH))

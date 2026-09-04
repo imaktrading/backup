@@ -230,7 +230,12 @@ def check_official_coverage(_):
             "GROUP BY category")}
     finally:
         db.close()
-    covered = {"one_piece_tcg"}                     # 突合の口が在るのは今ここだけ
+    # 突合の口 (2026-09-05 に4カテゴリすべて揃った):
+    #   one_piece_tcg    tools/official_drift_check.py     (シリーズページ)
+    #   pokemon_tcg      tools/official_drift_pokemon.py   (resultAPI / --all は全カード)
+    #   gundam_tcg       tools/official_drift_bandai.py    (list API)
+    #   dragonball_scg   tools/official_drift_bandai.py    (list API)
+    covered = {"one_piece_tcg", "pokemon_tcg", "gundam_tcg", "dragonball_scg"}
     miss = {c: n for c, n in rows.items() if c not in covered}
     tot = sum(rows.values()) or 1
     pct = 100 * sum(n for c, n in rows.items() if c in covered) // tot
