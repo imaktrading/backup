@@ -43,11 +43,17 @@ def test_end_status_explains_apparel_protection():
 
 
 def test_protection_logic_is_not_duplicated():
-    """判定は shelf_evict.is_protected に一本化する (二重管理で片方が腐るのを防ぐ)。"""
+    """判定は shelf_evict.is_protected に一本化する (二重管理で片方が腐るのを防ぐ)。
+
+    ★2026-09-05: 除外判定を select() から reject_reason() に移した
+    (画面表示と判定が食い違っていたため)。見る先を移しただけで意図は同じ。
+    """
     import inspect
-    src = inspect.getsource(C.select)
+    src = inspect.getsource(C.reject_reason)
     assert "from shelf_evict import is_protected" in src
     assert "PROTECTED_TITLE" not in src, "cull_end 側に正規表現を複製している"
+    # select() は自前でフィルタを書き直さず reject_reason だけを見る
+    assert "reject_reason" in inspect.getsource(C.select)
 
 
 def test_cull_and_shelf_evict_agree_on_what_is_protected():

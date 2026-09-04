@@ -17,6 +17,7 @@ CULL = qty=0 ∩ 一度も売れず watcher も付かず。掲載しても無害
 出力 : End CSV → C:/dev/iMak_data/revise/cull_end_YYYYMMDD.csv
        確認用一覧 → デスクトップ CULL出品停止候補_YYYYMMDD.csv
 """
+import collections
 import csv
 import datetime
 import glob
@@ -146,6 +147,31 @@ def is_target_site(row, site=TARGET_SITE):
     return (row.get("site") or "").strip().upper() == site
 
 
+# ★2026-09-05: 除外理由は **ここだけ**で定義する。
+#   従来はフィルタ (select の内包表記) と 画面表示 (len(cull)-len(eligible) の引き算) が
+#   別々に書かれており、**引き算した数を「age<1日/age不明/$0未満」と決め打ちで表示**していた。
+#   実測 (9/5 の走行): 除外150件の内訳は 既落とし77 + アパレル保護76 で、
+#   年齢や価格で外れた行は **0件**。数字は正しいのに理由が嘘という状態だった。
+#   判定と集計が同じ1本を通るようにして、二度と食い違わないようにする。
+def reject_reason(row, done=(), min_age=MIN_AGE, min_price=MIN_PRICE, site=TARGET_SITE):
+    """CULL 行を End 対象から外す理由。対象なら None。
+
+    並び = 判定順。**select() はこの関数だけを見る** (フィルタを二重に書かない)。
+    """
+    from shelf_evict import is_protected as _is_protected
+    if not (site is None or is_target_site(row, site)):
+        return "US以外 (eBaymag のミラー。親の US を落とせば付いてくる)"
+    if _i(row.get("age_days")) < min_age:
+        return f"age<{min_age}日 / age不明"
+    if _f(row.get("price")) < min_price:
+        return f"${min_price:.0f}未満"
+    if row.get("item_id") in done:
+        return "既に落とした"
+    if _is_protected(row.get("title")):
+        return "アパレル保護 (公式在庫が戻れば監視くんが数量を戻す)"
+    return None
+
+
 def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None,
            done_ids=None, site=TARGET_SITE):
     """CULL ∩ US ∩ age>=min_age を age降順・価格昇順で並べ、先頭 cap 件。
@@ -159,14 +185,10 @@ def select(rows, cap=CAP, min_age=MIN_AGE, min_price=MIN_PRICE, today=None,
     #   数量を戻すので、取り下げると戻せなくなる) と同じ理由でここも守る必要がある。
     #   判定ロジックの二重管理を避けるため shelf_evict.is_protected を呼ぶ (遅延import:
     #   shelf_evict は cull_end を import しており、モジュール先頭では循環になる)。
-    from shelf_evict import is_protected as _is_protected
     cull = [r for r in rows if "CULL" in (r.get("flags") or "").split("|")]
     done = done_ids or set()
     eligible = [r for r in cull
-                if (site is None or is_target_site(r, site))
-                and _i(r.get("age_days")) >= min_age and _f(r.get("price")) >= min_price
-                and r.get("item_id") not in done
-                and not _is_protected(r.get("title"))]
+                if reject_reason(r, done, min_age, min_price, site) is None]
     # ★2026-08-24: **今月出品した分を先に**。当月の枠が戻るのはそこだけ
     #   (実測: 古い順だけで 361件 落として当月に戻ったのは 1.5%)。
     #   今月分は金額の大きい順 = 戻る額を最大化。それ以前は従来どおり age 降順
@@ -445,18 +467,13 @@ def main():
 
     print(f"対象 funnel: {src}")
     print(f"CULL(在庫切れ&需要皆無) = {len(cull)}件")
-    _mirror = sum(1 for r in cull if not is_target_site(r))
-    if _mirror:
-        print(f"  ※ US 以外 (eBaymag のミラー) を除外 = {_mirror}件 "
-              f"(親の US を落とせば付いてくる)")
-    if done_ids:
-        print(f"  ※ 既に落とした分を除外 = {len(done_ids)}件 "
-              f"(押すたびに次の{CAP}件が出ます)")
-    print(f"  うち US かつ age>={MIN_AGE}日 かつ ${MIN_PRICE:.0f}以上 = {len(eligible)}件")
+    # ★理由は数えた実数のみ出す (引き算した数に理由を後付けしない)。
+    for _why, _n in collections.Counter(
+            w for r in cull if (w := reject_reason(r, done_ids))).most_common():
+        _hint = f" (押すたびに次の{CAP}件が出ます)" if _why == "既に落とした" else ""
+        print(f"  ※ 除外 {_n}件 — {_why}{_hint}")
+    print(f"  → 残った候補 = {len(eligible)}件")
     print(f"  今回 End 対象 (CAP {CAP}/回, age降順) = {len(picked)}件")
-    skipped_young = len(cull) - len(eligible)
-    if skipped_young:
-        print(f"  ※ age<{MIN_AGE}日 / age不明 / ${MIN_PRICE:.0f}未満 で対象外 = {skipped_young}件")
     if not picked:
         print("対象なし。処理終了。")
         return
