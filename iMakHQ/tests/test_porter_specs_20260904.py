@@ -115,7 +115,14 @@ def test_an_unreadable_sheet_color_keeps_the_photo_judgement():
 
 
 def test_generation_passes_the_sheet_color():
+    """★配線は3か所ある。1つでも欠けると「シートを見ている」つもりで見ていない。
+
+    実害 (2026-09-04): finalize と呼び出しは直したが **loader が dict に色を入れて
+    いなかった**ので、row.get('色') が常に空。再走しても色が直らなかった。
+    """
     import io as _io
     s = _io.open(os.path.join(_MER, "mercari_to_ebay_csv.py"), encoding="utf-8").read()
-    assert "color_sheet = (row.get('色', '')" in s, "シートの色を読んでいない"
-    assert "sheet_color=color_sheet" in s, "生成に渡していない"
+    assert 'color_jp = row[18]' in s, "① loader がS列を読んでいない"
+    assert '"色": color_jp' in s, "② loader が dict に入れていない"
+    assert "color_sheet = (row.get('色', '')" in s, "③ 生成側が読んでいない"
+    assert "sheet_color=color_sheet" in s, "④ finalize に渡していない"

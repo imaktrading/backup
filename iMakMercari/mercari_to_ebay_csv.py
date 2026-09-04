@@ -826,6 +826,7 @@ def load_targets_from_sheet(sheet_cfg, only_urls=None):
         description = row[7] if len(row) > 7 else ""
         condition_id = row[11] if len(row) > 11 else ""  # L列 ConditionID (1000=新品/3000=中古)
         category = row[17] if len(row) > 17 else ""  # R列
+        color_jp = row[18] if len(row) > 18 else ""  # S列 色 (抽出時に入れた値)
         if not url or (cat_filter and category != cat_filter):
             continue
         if only_urls is not None:
@@ -845,6 +846,9 @@ def load_targets_from_sheet(sheet_cfg, only_urls=None):
                 "商品価格": price,
                 "写真URL": photo_urls,
                 "商品説明": description,
+                # ★2026-09-04: 抽出時に入れた色を生成へ渡す。ここに入れていなかったため
+                #   row.get('色') が常に空で、シートの値が毎回捨てられていた。
+                "色": color_jp,
             })
     return targets
 
