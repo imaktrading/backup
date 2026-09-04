@@ -28,6 +28,19 @@ def test_rejected_titles(title, why):
     assert not is_target(title), why
 
 
+def test_dress_is_not_a_one_piece_collab():
+    """★実害 (2026-08-22): 服の「ワンピース」をアニメ ONE PIECE として拾っていた."""
+    from uniqlo_tee import is_dress
+    dress = "UNIQLO クルーネックTワンピース 半袖 ダークグレー L 新品ユニクロ"
+    assert is_dress(dress)
+    assert not is_target(dress)
+    # アニメの方は通す
+    anime = "ユニクロ UT ワンピース ONE PIECE Tシャツ Mサイズ 新品未使用"
+    assert not is_dress(anime)
+    assert is_target(anime)
+    assert is_target("⭐️ONE PIECE UNIQLO ユニクロTシャツ　XL⭐️")
+
+
 def test_uniqlo_tee_needs_both_brand_and_tee():
     assert not is_uniqlo_tee("ユニクロ パーカー ワンピース")     # T でない
     assert not is_uniqlo_tee("アニメ Tシャツ")                   # ブランド不明

@@ -36,10 +36,32 @@ NG_RE = re.compile(
 NEW_CONDITION_RE = re.compile(r"新品[、,]?\s*未使用")
 
 
+# 服の「ワンピース」= 婦人服。 アニメの ONE PIECE と字面が同じなので分けて判定する
+_DRESS_RE = re.compile(r"ワンピース")
+_ONEPIECE_ANIME_RE = re.compile(
+    r"ONE\s?PIECE|ルフィ|麦わら|ゾロ|ナミ|サンジ|チョッパー|エース|ロビン|ウソップ|尾田",
+    re.IGNORECASE)
+
+
+def is_dress(title: str) -> bool:
+    """服のワンピース (婦人服) か。 アニメの ONE PIECE と取り違えないため.
+
+    判定: 「ワンピース」があって、 ①ONE PIECE / キャラ名が無く、
+    かつ ②「Tシャツ」とも書いていない → 服のワンピース。
+    (`ユニクロ UT ワンピース Tシャツ` は アニメ。 `クルーネックTワンピース 半袖` は服)
+    """
+    t = title or ""
+    if not _DRESS_RE.search(t):
+        return False
+    if _ONEPIECE_ANIME_RE.search(t):
+        return False
+    return "Tシャツ" not in t
+
+
 def is_uniqlo_tee(title: str) -> bool:
     """ユニクロ/GU の T シャツか (タイトルだけで判定)."""
     t = title or ""
-    if NG_RE.search(t):
+    if NG_RE.search(t) or is_dress(t):
         return False
     return bool(BRAND_RE.search(t) and TEE_RE.search(t))
 
