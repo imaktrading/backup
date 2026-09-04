@@ -451,6 +451,14 @@ def collect_seller_listing_urls(
             driver.execute_script("window.focus();")
         except Exception:
             pass
+        if not wait_for_manual_load:
+            # ★手動 click 待ち以外は画面に出さない (2026-08-22 user 確定)。
+            # 手動モードは user が「もっと見る」を押すので **表示したまま**にする。
+            try:
+                from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
+                hide_browser_window(driver)
+            except Exception:  # noqa: BLE001
+                pass
         # 初期 hydration 待機 (= profile page は重め、 5/26 fix で 12s → 18s 延長)
         time.sleep(max(initial_wait_sec, DEFAULT_INITIAL_PROFILE_WAIT_SEC))
         if wait_for_manual_load:

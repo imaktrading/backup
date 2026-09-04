@@ -858,6 +858,13 @@ def run_poc(
             driver.maximize_window()
         except Exception:
             pass
+    # ★画面に出さない (2026-08-22 user 確定「言われなくても常に気配りしろ」)。
+        # maximize + focus は前面に出すので、 直後に隠し直す。 描画は続くので件数は落ちない。
+        try:
+            from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
+            hide_browser_window(driver)
+        except Exception:  # noqa: BLE001
+            pass
         per_series: list[dict] = []
         ok_count = 0
         not_found_count = 0
