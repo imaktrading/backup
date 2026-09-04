@@ -3670,6 +3670,10 @@ class ListingPanel:
                         sr.get("actionable", 0), sr.get("unknown", 0), sr.get("done", 0))
                     if sr.get("unknown"):
                         sr_txt += "\n※要確認は押すと分かります (売切れ終了→出し直しの可能性)"
+                    # ★2026-09-04: 仕入値が取れない行は押しても止まる。
+                    #   青にすると押しても減らないので、別に出す。
+                    if sr.get("blocked"):
+                        sr_txt += "\n※仕入値が取れず送れない %s件 (--cost で渡すか、先に調べる)" % sr["blocked"]
             else:
                 sr_txt = ""
             # ===== 2026-09-01: 既存メンテの残り6ボタン (ユーザー要望「何をしたらいいか分からない」) =====

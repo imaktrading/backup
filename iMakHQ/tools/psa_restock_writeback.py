@@ -92,7 +92,7 @@ def pending_rows_from_confirmed(rows):
     return todo, done, ended
 
 
-def count_workload(rows=None):
+def count_workload(rows=None, itemid_to_cert=None):
     """押したら『何件の実状態を確かめに行くか』を数える (パネルのヒント用・2026-09-01).
 
     ★数えるだけの段では eBay を1回も叩かない (qty の確認は押してから)。
@@ -108,9 +108,19 @@ def count_workload(rows=None):
             from sheet_io import read_tab
             rows = read_tab("RESTOCK確定")
         todo, done, ended = pending_rows_from_confirmed(rows)
-        # 終了済は押しても動かない。件数に混ぜず、別に出す (押す前に理由が分かる)。
-        return {"actionable": todo, "done": done, "ended": ended,
-                "total": todo + done + ended}
+        # ★2026-09-04 ユーザー指摘「押しても永久に減らず、青のままだと意味ないやん」。
+        #   cert が引けない行は ②で CSV を作れない = ③を何回押しても実行済にならない。
+        #   青 (= 押せば減る) から外し、**別の手当てが要る件**として出す。
+        #   基準は ②と同じ (psa_restock_build と二重実装しない)。
+        blocked = 0
+        try:
+            import psa_restock_build as _RB
+            b = _RB.count_workload(rows, itemid_to_cert=itemid_to_cert)
+            blocked = int(b.get("blocked") or 0)
+        except Exception:                                      # noqa: BLE001
+            blocked = 0
+        return {"actionable": max(todo - blocked, 0), "done": done, "ended": ended,
+                "blocked": blocked, "total": todo + done + ended}
     except Exception as e:                                     # noqa: BLE001
         return {"error": "%s: %s" % (type(e).__name__, e)}
 

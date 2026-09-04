@@ -201,7 +201,8 @@ def count_workload():
            (live キャッシュで Active&qty=0 と確認できた分), unknown: キャッシュに無く
            判定できない件数 (Completed=要 relist の可能性。押せば分かる), done: 既に補充済,
            error: 読めなかった理由}"""
-    out = {"report": False, "actionable": 0, "unknown": 0, "done": 0, "error": ""}
+    out = {"report": False, "actionable": 0, "unknown": 0, "done": 0,
+           "blocked": 0, "error": ""}
     try:
         src = W._find_desk_report()
         if not src:
@@ -235,11 +236,19 @@ def count_workload():
             _key = (row[S.PRODUCT_COL_KEY] or "").strip() if len(row) > S.PRODUCT_COL_KEY else ""
             if _key and _key in already:
                 continue
+            # ★2026-09-04: 仕入値が取れない行は **押しても止まる** (本体が
+            #   「仕入値が取れないので止めます」で skip)。青にすると押しても減らない。
+            #   本体と同じ _cost_from_row を通す (二重実装しない)。cost_override や
+            #   当日の調査結果で埋まる可能性は残るので、0 にせず blocked として出す。
+            _has_cost = bool(_cost_from_row(row))
             info = cache_raw.get(iid)
             if info is None:
                 out["unknown"] += 1
             elif int(info.get("avail") or 0) == 0:
-                out["actionable"] += 1
+                if _has_cost:
+                    out["actionable"] += 1
+                else:
+                    out["blocked"] = out.get("blocked", 0) + 1
             # avail > 0 = 既に在庫あり (noop)。候補にも数えない。
     except Exception as e:                                          # noqa: BLE001
         out["error"] = f"{type(e).__name__}: {e}"[:60]

@@ -122,7 +122,10 @@ def test_restock_writeback_counts_rows_not_done():
             ["", "実行済(qty復活)"]]
     # ★2026-09-04: 終了済を3つ目として分けた (押しても動かないので todo に混ぜない)
     assert RW.pending_rows_from_confirmed(rows) == (2, 1, 0)
-    assert RW.count_workload(rows)["actionable"] == 2
+    # ★2026-09-04: cert が引けない行は ③でも青にしない (押しても永久に減らないため)。
+    #   ここは「実行済を除く」の検査なので、cert は引ける前提で渡す
+    #   (None を渡すと本物のスプシを読みに行ってしまう)。
+    assert RW.count_workload(rows, itemid_to_cert={"222": "a", "333": "b"})["actionable"] == 2
 
 
 def test_count_workload_never_calls_ebay():

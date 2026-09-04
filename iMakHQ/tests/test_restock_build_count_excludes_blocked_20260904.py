@@ -76,8 +76,11 @@ def test_step3_separates_ended():
             ["4", "入稿待ち(qty=0)"]]
     todo, done, ended = RW.pending_rows_from_confirmed(rows)
     assert (todo, done, ended) == (2, 1, 1)
-    got = RW.count_workload(rows)
+    got = RW.count_workload(rows, itemid_to_cert={"2": "a", "4": "b"})
     assert got["actionable"] == 2 and got["ended"] == 1 and got["total"] == 4
+    # cert が引けない行は ③でも青にしない (押しても永久に減らない)
+    got2 = RW.count_workload(rows, itemid_to_cert={"2": "a"})
+    assert got2["actionable"] == 1 and got2["blocked"] == 1
 
 
 def test_step2_also_skips_ended():
