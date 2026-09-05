@@ -1744,10 +1744,10 @@ def process_sheet(
                 bc = backup_clear_result
                 if bc.get("surge") or bc.get("held"):
                     log(f"  [★補URL消込 急増ガード発火] 新規 {bc.get('new_count', '?')} 件 > 閾値 "
-                        f"(候補 {bc['candidate_count']} 件) → 一括消込を保留。"
-                        f"新規が一気に湧く = scraper 系統崩壊の疑い → 検体確認。"
-                        f"genuine と確認できたら "
-                        f"`python -m tools.supervised_backup_drain [--reverify-snkrdunk --execute]`。")
+                        f"(候補 {bc['candidate_count']} 件) → この cycle の一括消込は見送り "
+                        f"(次 cycle 以降に {CLEAR_DRAIN_CAP} 件/cycle で自動ドレイン、手作業不要)。"
+                        f"1 cycle でこれだけ湧いたのは多い = supplier が 1 つに偏っていたら "
+                        f"scraper 系統崩壊を疑って DOM 検体を見ること。")
                 elif bc.get("deferred"):
                     log(f"  [OK] 補URL消込: cleared={bc['cleared']} / candidate={bc['candidate_count']} "
                         f"(新規 {bc.get('new_count', '?')}) / 次 cycle 繰越={bc['deferred']} "
