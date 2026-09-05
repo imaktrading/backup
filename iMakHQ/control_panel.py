@@ -1536,6 +1536,7 @@ SCRIPTS = [
         "category": None, "type": "utility",
         "label": "🌱 種→出品行に追加 (証明番号)",
         "label_fg": "#0a7",
+        "badge": "newcand_high",
         "tip": "上のボタンで『出品』と判定された候補を、証明番号を打って商品管理シートに"
                "足します。写真で番号を読んで入力 → 入れた分だけ追加されます。"
                "同じ番号・同じカードが既にあるものは足しません。",
@@ -3414,12 +3415,13 @@ class ListingPanel:
         ("ut_restock_search", "ut_restock_confirm", "ut_restore"),  # UT再仕入れ ①→②→③
         ("kuji_search", "kuji_confirm"),                           # 一番くじ 探す→目視
         ("kuji_supply", "kuji_refresh"),                           # 一番くじ 補充①→②
+        ("newcand", "newcand_high"),                               # 種 ①目視→②証明番号
     )
 
     # ①②③ の無い単発ボタン。順番が無いので「← 次」は出さないが、
     #   「今日やったか」は知りたい (ユーザー: 棚②とか取下げとかは？ 2026-09-04)。
     #   📊 補URL件数感 は **見るだけ**なので入れない。
-    STEP_SINGLES = ("cull_end", "shelf_evict", "sold_restock", "newcand")
+    STEP_SINGLES = ("cull_end", "shelf_evict", "sold_restock")
 
     def _step_log_path(self):
         return os.path.join(WORKSPACE, "..", "iMak_data", "hq", "button_last_run.json")
@@ -3560,6 +3562,12 @@ class ListingPanel:
             "    d['newcand']=N.count_workload()\n"
             "except Exception as e:\n"
             "    d['newcand']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # ★2026-09-05: 『種→出品行に追加 (証明番号)』の残件。読むのは
+            #   新規出品候補 タブ1枚だけ (API もスクレイプも使わない)。
+            "try:\n"
+            "    d['newcand_high']=N.count_workload_high()\n"
+            "except Exception as e:\n"
+            "    d['newcand_high']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             # ★2026-08-22: 一番くじも同じ subprocess で数える (ユーザー要望)。
             #   片方が転んでも もう片方のヒントは出す。
             "try:\n"
@@ -3919,7 +3927,17 @@ class ListingPanel:
                 ut_rq_txt = "\n数量を戻す %s件" % _ut.get("restore", 0)
                 if not _ut.get("restore"):
                     ut_rq_txt += "\n※先に ② 目視 を押す"
+            # ★2026-09-05: 『種→出品行に追加』。証明番号を打つまで進まないので、
+            #   残件があれば必ず青にする (夜間では消えない)。
+            _nh = (w0.get("newcand_high") or {}) if isinstance(w0, dict) else {}
+            if _nh.get("error"):
+                nh_txt = "\n(残件 取得できず: %s)" % str(_nh["error"])[:40]
+            elif _nh.get("pending"):
+                nh_txt = "\n証明番号を打つ %s件" % _nh["pending"]
+            else:
+                nh_txt = "\n※押しても0件 (先に 🌱 捨てた候補→新規出品の種)"
             by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
+                       "newcand_high": nh_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
                        "ut_restock_search": ut_rs_txt,
                        "ut_restock_confirm": ut_rc_txt,
@@ -3952,6 +3970,8 @@ class ListingPanel:
                         "ut_restore": bool(_ut.get("restore")),
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
                         "newcand": bool(nc.get("show") or nc.get("auto")),
+                        # 人が証明番号を打たないと永遠に減らない = 残件があれば青
+                        "newcand_high": bool(_nh.get("pending")),
                         "kuji_confirm": bool((kj.get("confirm") or {}).get("ready")),
                         "cull_end": bool(ce.get("remaining")),
                         "shelf_evict": bool(se.get("picked")),
@@ -3972,7 +3992,8 @@ class ListingPanel:
                 by_kind = {k: v + "\n※前回値" for k, v in cached.items()}
             else:
                 msg = f"\n(残件 取得できず: {why[:40]})"
-                by_kind = {"hoju_search": msg, "hoju_confirm": msg, "newcand": msg}
+                by_kind = {"hoju_search": msg, "hoju_confirm": msg, "newcand": msg,
+                           "newcand_high": msg}
             try:
                 self.append_log(f"⚠️ 補URL 残件の取得に失敗: {why}\n")
             except Exception:                                     # noqa: BLE001

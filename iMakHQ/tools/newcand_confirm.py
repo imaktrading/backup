@@ -1041,6 +1041,19 @@ def count_workload(limit=0):
             "pending": st.get("pending", 0)}
 
 
+def count_workload_high():
+    """『種→出品行に追加』ボタンのラベル用 (I/O)。{"pending": 証明番号待ちの件数}。
+
+    ★スクレイプも eBay API も使わない。読むのは 新規出品候補 タブ 1枚だけ。
+      押したら何件 画面に出るかを出す (母数ではない)。
+    """
+    try:
+        rows = migrate_out_rows(_read_tab(OUT_TAB))
+    except Exception as e:                                     # noqa: BLE001
+        return {"error": "%s: %s" % (type(e).__name__, e)}
+    return {"pending": len(pending_list_rows(rows))}
+
+
 def save(items, res):
     """結論を書き分ける (I/O)。戻り: {list, catalog, out, hold} 件数。
 

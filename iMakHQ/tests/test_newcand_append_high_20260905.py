@@ -146,3 +146,39 @@ def test_sync_status_also_looks_at_the_aux_columns():
     assert "prod_aux" in blk
     assert "済(補URL)" in blk
     assert "HIGH_AUX0" in blk
+
+
+# ---------------------------------------------- ボタンのヒント / 件数 / 青
+
+def test_button_has_tip_count_and_blue():
+    """ヒント・件数・青の3つが揃っていること。
+
+    ★2026-09-03 ユーザー確定「押さないと減らないのに黒文字だと、無意味」。
+      ユーザーは青いものしか押さない = 青にしないと機能を消したのと同じ。
+      証明番号は人が打つまで永遠に減らないので、残件があれば必ず青。
+    """
+    i = _PANEL.index('"🌱 種→出品行に追加 (証明番号)"')
+    blk = _PANEL[i - 400:i + 900]
+    assert '"badge": "newcand_high"' in blk, "badge が無い = 件数が出ない"
+    assert '"tip":' in blk, "tip が無いと _attach_tip が呼ばれず件数も出ない"
+    assert '"label_fg"' in blk
+    # 件数の文言と、青の判定
+    assert "証明番号を打つ %s件" in _PANEL
+    assert '"newcand_high": bool(_nh.get("pending"))' in _PANEL
+    # 数えるのは subprocess 側 (パネルから直接 import すると tools/ が見えない)
+    assert "d['newcand_high']=N.count_workload_high()" in _PANEL
+
+
+def test_count_workload_high_is_cheap():
+    """API もスクレイプも使わない (ラベルのために枠を使わない約束)。"""
+    src = _SRC[_SRC.index("def count_workload_high"):]
+    body = src[:src.index("def save(")]
+    assert "_read_tab(OUT_TAB)" in body
+    assert "_read_product" not in body
+    assert "_serve_confirm" not in body
+
+
+def test_button_is_step_two_of_the_seed_flow():
+    """①目視 → ②証明番号 の並びとして「どこまで行ったか」を出す。"""
+    assert '("newcand", "newcand_high"),' in _PANEL
+    assert '"sold_restock")' in _PANEL          # STEP_SINGLES から newcand が抜けた
