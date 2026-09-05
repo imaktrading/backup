@@ -50,28 +50,28 @@ def _open_run_log(category):
 # ============ 進捗ダッシュボード: カテゴリ定義 ============
 # (ラベル, 検索キーワード, eBayカテゴリID, 目標出品数, 月次追加目標)
 # ※ eBay Browse APIは q=* を受け付けないため、カテゴリ特定キーワードで絞る
-# カテゴリは スプシR列から自動取得。target/monthly は既知カテゴリは下記から、未知は DEFAULT_TARGETS を適用
-# 新カテゴリをスプシに追加 → ダッシュボードに自動表示（コード修正不要）
-DEFAULT_TARGETS = (50, 10)  # (全期間目標, 月次目標) 未知カテゴリ用
-
-CATEGORY_TARGETS = {
-    # ラベル(スプシR列値): (全期間目標, 月次目標)
-    "Tシャツ":              (250, 50),
-    "G-shock":              (350, 30),
-    "TCG":                  (150, 40),
-    "アウトドア・ジャケット": (80, 15),
-    "バッグ":               (60, 10),
-    "一番くじ":              (120, 20),
-    "tomica":               (50, 10),
-    "カプセルトイ":          (100, 20),
-    "フィギュア":            (200, 30),
-    "グッズ":               (150, 25),
-    "スニーカー":            (50, 10),
-    "ヴィンテージ":          (30, 5),
-    "ゴルフ":               (20, 5),
-    "リール":               (15, 3),
-    "その他":               (10, 2),
+# カテゴリは スプシR列から自動取得。新カテゴリを足すとダッシュボードに自動表示される。
+#
+# ★2026-09-05: 目標を **件数から金額 (US価格$) に変えた**。
+#   棚割り見直し (デスクトップ `棚割り見直し_20260903.pptx`) の結論が
+#   「詰まっているのは件数ではなく金額」。件数枠は 6,041/12,000 = 50% しか使っていないのに、
+#   金額枠は $973,895/$1,000,000 = 97% 埋まっている。
+#   件数で測ると、棚を13倍食う PSA が「目標150に対し 545件 = 進捗363% ✅達成」と出て、
+#   **減らすべきものが「もう十分」に見えていた**。金額なら 予算$70,000 に対し $131,732 =
+#   超過 と正しく出る。予算は pptx「結論1 棚割り」の配分をそのまま写す (自分で決めない)。
+CATEGORY_BUDGET_USD = {
+    # ラベル(スプシR列値): 棚割りの予算 (US価格$)
+    "アウトドア・ジャケット": 40000,   # モンベル。$1あたりの稼ぎが PSA の35倍なのに $2,474 しか置いていない
+    "Tシャツ":               60000,   # ユニクロ/GU
+    "TCG":                   70000,   # PSA。1件あたり利益は最高 (6,043円) だが棚を13倍食う → 半分にして残す
+    "G-shock":               30000,
+    "バッグ":                15000,   # ポーター
+    "フィギュア":             8000,
 }
+# 棚割りに出てこないカテゴリ (一番くじ / カプセルトイ / グッズ 等) は **予算を置かない**。
+# pptx の6カテゴリで $223,000 を配っており、残りは実測で数千ドル。
+# 勝手に数字を作らず「—」と出す (現在額は出るので、見えなくなるわけではない)。
+SHELF_BUDGET_TOTAL_USD = 229661   # US価格ベースの棚予算 (ミラー込み枠 $1,000,000 ÷ 4.35倍)
 
 # ============ 統合High/Lowスプシ から進捗集計 ============
 # 統合シート構造: A=URL, B=ItemID, D=売り切れ, R=カテゴリ, U=追加日(YYYY-MM-DD)
@@ -1933,6 +1933,19 @@ def _month_start_iso():
 
 _CACHED_SHEET_COUNTS = {"data": None, "ts": 0}
 
+def _empty_cat():
+    return {'current': 0, 'monthly': 0, 'usd': 0.0, 'monthly_usd': 0.0, 'no_price': 0}
+
+
+def _to_usd(text):
+    """シートの価格セル ("$242.98" / "242.98" / "") → float。読めなければ 0.0 (純関数)."""
+    t = (text or "").replace("$", "").replace(",", "").strip()
+    try:
+        return float(t)
+    except ValueError:
+        return 0.0
+
+
 def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
     """統合High/Low シートを読込→R列で自動グルーピングしてカウント返す。
     Returns: {category_label: {'current': int, 'monthly': int}}
@@ -1967,8 +1980,9 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
         for key, data in ex.map(_read, args_list):
             sheet_data[key] = data
 
-    # R列で自動グルーピング
-    result = {}  # category → {current, monthly}
+    # R列で自動グルーピング。★2026-09-05: 件数だけでなく **US価格の合計** も持つ
+    #   (棚割りの単位が金額なので、金額が無いと進捗が出せない)。M列 = 今の出品価格。
+    result = {}  # category → {current, monthly, usd, monthly_usd}
     seen_ids = set()  # 公式在庫シートとの重複排除用
     for sheet_key, rows in sheet_data.items():
         for row in rows:
@@ -1976,17 +1990,23 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
             url      = row[0].strip()
             item_id  = row[1].strip()
             sold     = row[3].strip()
+            price    = row[12].strip()          # M列 = 今の出品価格 (US$)
             cat      = row[17].strip()
             added    = row[20].strip()
             if not url or not cat:
                 continue
             if cat not in result:
-                result[cat] = {'current': 0, 'monthly': 0}
+                result[cat] = _empty_cat()
+            usd = _to_usd(price)
             if item_id and not sold:
                 result[cat]['current'] += 1
+                result[cat]['usd'] += usd
+                if usd == 0.0:
+                    result[cat]['no_price'] += 1
                 seen_ids.add(item_id)
             if added.startswith(month_yyyymm):
                 result[cat]['monthly'] += 1
+                result[cat]['monthly_usd'] += usd
 
     # ★公式在庫要チェック シート1 を現在数に合算 (item ID で重複排除)
     try:
@@ -1998,7 +2018,11 @@ def _fetch_consolidated_counts(month_yyyymm, cache_seconds=60):
             if not item_id or item_id in seen_ids:
                 continue
             cat = _official_stock_category(src_url)
-            result.setdefault(cat, {'current': 0, 'monthly': 0})['current'] += 1
+            # ★このシートには出品価格の列が無いので **件数だけ**足す。金額に入らない分は
+            #   no_price として数え、画面に「金額に入っていない件数」を出す (黙って過少にしない)。
+            _c = result.setdefault(cat, _empty_cat())
+            _c['current'] += 1
+            _c['no_price'] += 1
             seen_ids.add(item_id)
     except Exception as e:
         print(f"⚠️ 公式在庫シート読込失敗: {e}")
@@ -2213,25 +2237,30 @@ class HomePanel:
 
         def _tags(tree):
             for tag, bg, fg in (("done", "#d4ffd4", "#006600"), ("blue", "#d4e6ff", "#003366"),
-                                ("yel", "#fff4c4", "#806600"), ("red", "#ffd4d4", "#800000")):
+                                ("yel", "#fff4c4", "#806600"), ("red", "#ffd4d4", "#800000"),
+                                # ★予算オーバー = 減らす側。達成(緑)と同じ色にすると
+                                #   「もう十分」に見えてしまう (件数目標だった頃の実害)。
+                                ("over", "#ffe0c0", "#8a3b00")):
                 tree.tag_configure(tag, background=bg, foreground=fg)
             tree.tag_configure("total", background="#e0e0ff", foreground="#000066", font=("", 10, "bold"))
 
-        dash_frame = ttk.LabelFrame(prog_row, text="📊 総合進捗 (vs 目標)", padding=6)
+        dash_frame = ttk.LabelFrame(prog_row, text="📊 棚割り (US価格$ vs 予算)", padding=6)
         dash_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-        cols = ("カテゴリ", "目標", "現在", "不足", "進捗", "優先度")
+        cols = ("カテゴリ", "予算$", "現在$", "過不足$", "進捗", "優先度")
         self.tree = ttk.Treeview(dash_frame, columns=cols, show="headings", height=9)
-        for c, w in zip(cols, (130, 44, 44, 44, 130, 50)):
+        for c, w in zip(cols, (128, 68, 68, 80, 120, 58)):
             self.tree.heading(c, text=c)
             self.tree.column(c, width=w, anchor="w" if c in ("カテゴリ", "進捗") else "center")
         self.tree.pack(fill="both", expand=True)
         _tags(self.tree)
 
-        month_frame = ttk.LabelFrame(prog_row, text="📅 今月の進捗 (月次目標)", padding=6)
+        # ★棚割り (pptx) に月次の配分は書かれていないので **目標は出さない**。
+        #   無い数字を作ると、また実態と合わない分母ができる。
+        month_frame = ttk.LabelFrame(prog_row, text="📅 今月 追加した分", padding=6)
         month_frame.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
-        mcols = ("カテゴリ", "目標", "現在", "不足", "進捗")
+        mcols = ("カテゴリ", "追加$", "件数")
         self.month_tree = ttk.Treeview(month_frame, columns=mcols, show="headings", height=9)
-        for c, w in zip(mcols, (130, 54, 54, 44, 130)):
+        for c, w in zip(mcols, (170, 100, 80)):
             self.month_tree.heading(c, text=c)
             self.month_tree.column(c, width=w, anchor="w" if c in ("カテゴリ", "進捗") else "center")
         self.month_tree.pack(fill="both", expand=True)
@@ -2714,10 +2743,12 @@ class HomePanel:
             filled = pct // 5
             return "█" * filled + "░" * (20 - filled) + f"  {pct}%"
 
-        def _color_tag(pct, target):
-            if target == 0:
+        def _color_tag(pct, budget):
+            if not budget:
                 return ""
-            if pct >= 100:
+            if pct > 105:
+                return "over"          # 予算オーバー = 減らす側。達成(緑)と混ぜない
+            if pct >= 90:
                 return "done"
             elif pct >= 66:
                 return "blue"
@@ -2726,70 +2757,88 @@ class HomePanel:
             else:
                 return "red"
 
-        # スプシR列から自動取得したカテゴリを反復
-        # 既知カテゴリは CATEGORY_TARGETS から、未知は DEFAULT_TARGETS を適用
-        # 表示順: CATEGORY_TARGETS の定義順 → 未知カテゴリ
-        ordered_cats = list(CATEGORY_TARGETS.keys())
+        # スプシR列から自動取得したカテゴリを反復。
+        # 表示順: 棚割りに予算があるカテゴリ (pptx の順) → 予算の無いカテゴリ
+        ordered_cats = list(CATEGORY_BUDGET_USD.keys())
         for cat in sheet_counts.keys():
             if cat not in ordered_cats:
                 ordered_cats.append(cat)
 
+        no_price_total = 0
         for label in ordered_cats:
-            sc = sheet_counts.get(label, {'current': 0, 'monthly': 0})
+            sc = sheet_counts.get(label) or _empty_cat()
             count = sc['current']
-            month_count = sc['monthly']
-            target, monthly = CATEGORY_TARGETS.get(label, DEFAULT_TARGETS)
+            usd = sc.get('usd', 0.0)
+            no_price_total += sc.get('no_price', 0)
+            budget = CATEGORY_BUDGET_USD.get(label)
 
-            # 総合進捗
-            lack = max(0, target - count)
-            pct = min(100, int(count / target * 100)) if target else 0
-            priority = "✅達成" if lack == 0 else ("🔴高" if lack > target * 0.5 else ("🟡中" if lack > target * 0.2 else "🟢低"))
-            tag = _color_tag(pct, target)
-            total_rows.append((label, target, count, lack, _bar(pct), priority, tag))
-            if lack > target * 0.5:
-                reco_lines.append(f"🔴 {label}: 目標まで{lack}件不足 → 最優先で出品")
+            # ─ 総合進捗 (金額)。予算が無いカテゴリは「—」で出す (数字を作らない)
+            if budget:
+                gap = budget - usd
+                pct = int(usd / budget * 100)
+                if gap < 0:
+                    gap_txt = f"超過 ${-gap:,.0f}"
+                    priority = "🔻減らす"
+                    reco_lines.append(
+                        f"🔻 {label}: 予算より ${-gap:,.0f} 多い → 棚を入れ替える ({count}件)")
+                else:
+                    gap_txt = f"${gap:,.0f}"
+                    priority = ("✅達成" if pct >= 90 else
+                                ("🔴高" if pct < 50 else ("🟡中" if pct < 80 else "🟢低")))
+                    if pct < 50:
+                        reco_lines.append(
+                            f"🔴 {label}: 予算まで ${gap:,.0f} 空いている → ここに出す ({count}件)")
+                bar = _bar(min(100, pct)) if pct <= 100 else f"{'█' * 20}  {pct}%"
+                tag = _color_tag(pct, budget)
+                total_rows.append((label, f"${budget:,.0f}", f"${usd:,.0f}",
+                                   gap_txt, bar, priority, tag, budget, usd))
+            else:
+                total_rows.append((label, "—", f"${usd:,.0f}", "—", "", f"{count}件",
+                                   "", 0, usd))
 
-            # 月次進捗
-            mlack = max(0, monthly - month_count)
-            mpct = min(100, int(month_count / monthly * 100)) if monthly else 0
-            mtag = _color_tag(mpct, monthly)
-            month_rows.append((label, monthly, month_count, mlack, _bar(mpct), mtag))
+            # ─ 今月 追加した分。★棚割りに月次の配分は書かれていないので目標は出さない
+            month_rows.append((label, f"${sc.get('monthly_usd', 0.0):,.0f}",
+                               f"{sc['monthly']}件", "", sc.get('monthly_usd', 0.0),
+                               sc['monthly']))
 
         def apply():
             # 総合進捗テーブル
-            total_cur = sum(r[2] for r in total_rows if isinstance(r[2], int))
-            total_tgt = sum(r[1] for r in total_rows if isinstance(r[1], int))
-            total_lack = sum(r[3] for r in total_rows if isinstance(r[3], int))
-            total_pct = min(100, int(total_cur / total_tgt * 100)) if total_tgt else 0
+            # 合計は **棚予算 $229,661 に対して今いくら置いているか**
+            total_usd = sum(r[8] for r in total_rows)
+            total_pct = int(total_usd / SHELF_BUDGET_TOTAL_USD * 100) if SHELF_BUDGET_TOTAL_USD else 0
+            total_gap = SHELF_BUDGET_TOTAL_USD - total_usd
             for r in total_rows:
                 tag = r[6]
                 self.tree.insert("", "end", values=r[:6], tags=(tag,) if tag else ())
             self.tree.insert("", "end",
-                values=("━━━ 合計 ━━━", total_tgt, total_cur, total_lack, _bar(total_pct), f"{total_pct}%"),
+                values=("━━━ 棚予算 合計 ━━━",
+                        f"${SHELF_BUDGET_TOTAL_USD:,.0f}", f"${total_usd:,.0f}",
+                        (f"超過 ${-total_gap:,.0f}" if total_gap < 0 else f"${total_gap:,.0f}"),
+                        _bar(min(100, total_pct)), f"{total_pct}%"),
                 tags=("total",))
 
             # 月次進捗テーブル
-            m_cur = sum(r[2] for r in month_rows if isinstance(r[2], int))
-            m_tgt = sum(r[1] for r in month_rows if isinstance(r[1], int))
-            m_lack = sum(r[3] for r in month_rows if isinstance(r[3], int))
-            m_pct = min(100, int(m_cur / m_tgt * 100)) if m_tgt else 0
+            m_usd = sum(r[4] for r in month_rows)
+            m_cnt = sum(r[5] for r in month_rows)
             for r in month_rows:
-                tag = r[5]
-                self.month_tree.insert("", "end", values=r[:5], tags=(tag,) if tag else ())
+                self.month_tree.insert("", "end", values=r[:3])
             self.month_tree.insert("", "end",
-                values=("━━━ 合計 ━━━", m_tgt, m_cur, m_lack, _bar(m_pct)),
+                values=("━━━ 合計 ━━━",
+                        f"${m_usd:,.0f}", f"{m_cnt}件"),
                 tags=("total",))
 
+            total_cnt = sum(v.get("current", 0) for v in sheet_counts.values())
+            _np = f" | 価格未取得 {no_price_total}件" if no_price_total else ""
             self.store_info_var.set(
                 f"セラー: {EBAY_SELLER} | "
                 f"Feedback: {stats.get('feedback_score','?')} ({stats.get('feedback_percentage','?')}%) | "
                 f"総アクティブ: {stats.get('total_active','?')}件 "
-                f"(7カテゴリ合計: {total_cur}件 | 今月追加: {m_cur}件)"
+                f"(棚: ${total_usd:,.0f} / {total_cnt}件 | 今月追加: ${m_usd:,.0f} / {m_cnt}件{_np})"
             )
             if reco_lines:
                 self._set_reco("\n".join(reco_lines), fg="#cc0000")
             else:
-                self._set_reco("全カテゴリ目標達成🎉 新しいカテゴリ展開を検討", fg="#006600")
+                self._set_reco("棚割りどおり🎉 予算の空きも超過もありません", fg="#006600")
         self.root.after(0, apply)
 
 

@@ -64,8 +64,18 @@ def test_snkrdunk_single_match_multivariant_hint_confirmed():
 
 
 def test_mercari_multivariant_flag_in_card_query():
-    """build_card_query が多変種フラグを持つ(画像検索fail-closedの根拠)。"""
+    """多変種フラグが catalog の変種数で決まる(画像検索fail-closedの根拠)。
+
+    ★2026-09-05: 元は「OP13-004 は単一」と **特定カードの変種数を焼いて**いたが、
+      catalog に `OP13-004_p3` (メラメラの実争奪戦 上位記念品) が入って 2変種になり、
+      実装は正しいままテストだけが赤くなった。カードは増え続けるので、
+      **判定の仕組み**を見る形にする (実 catalog は「多変種を多変種と読む」だけ確かめる)。
+    """
     mp = _load("mercari_psa_resource")
-    # 実catalog依存: P-066は多変種、OP13-004は単一
+    # 実 catalog: 多変種プロモを多変種と読む (この対策の対象そのもの。変種が減ることはない)
     assert mp._is_multi_variant("P-066") is True
-    assert mp._is_multi_variant("OP13-004") is False
+    # 仕組み: catalog の変種が 2件以上なら True、1件なら False
+    mp._is_multi_variant.__defaults__[1].clear()          # 番号ごとの cache を空にする
+    mp.catalog_variants_for_cardno = lambda cn, category="": [1, 2] if cn == "MULTI" else [1]
+    assert mp._is_multi_variant("MULTI") is True
+    assert mp._is_multi_variant("SINGLE") is False
