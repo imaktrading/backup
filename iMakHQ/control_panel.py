@@ -3797,6 +3797,11 @@ class ListingPanel:
                                "(在庫が出たら自動で戻る。押しても動かせない)" % pg["supply_wait"])
                 if pg.get("processed"):
                     pg_txt += "\n※確定/レビュー済で伏せている %s件" % pg["processed"]
+                # ★2026-09-05: 目視した分が どの数字にも出ず「押しても動かない」と
+                #   見えていた (9/5 に56件 目視したのにラベル不変)。資産として出す。
+                if pg.get("variant_confirmed"):
+                    pg_txt += ("\n※変種を目視で確定済 %s件 "
+                               "(次回から再目視しません)" % pg["variant_confirmed"])
                 if pg.get("note"):
                     pg_txt += "\n※%s" % pg["note"]
                 if (pg.get("funnel_age") or 0) >= 3:

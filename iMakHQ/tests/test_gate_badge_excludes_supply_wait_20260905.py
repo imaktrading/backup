@@ -56,3 +56,18 @@ def test_label_shows_supply_wait_separately():
 def test_label_no_longer_blames_only_the_funnel():
     """0件の理由を「ファネル更新待ち」だけにしない (実際は在庫待ちが主因)。"""
     assert "仕入元に在庫が出るか、ファネルが更新されるまで増えません" in _PANEL_SRC
+
+
+# ------------------------------------------------ 目視した分を見せる
+
+def test_variant_confirmed_is_counted_and_shown():
+    """目視で変種を確定した分がラベルに出る。
+
+    9/5 に56件 目視したのに どの数字にも現れず「押しても動かない」と見えていた。
+    「残り何件 目視が要るか」は商品管理シート全体を読まないと出せず、ここは
+    API 枠を使わない約束なので **確定した件数**を出す。
+    """
+    assert '"variant_confirmed":' in _GATE_SRC
+    assert 'read_tab("PSA目視確定済")' in _GATE_SRC
+    assert "変種を目視で確定済 %s件" in _PANEL_SRC
+    assert "次回から再目視しません" in _PANEL_SRC

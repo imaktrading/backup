@@ -1237,6 +1237,14 @@ def count_workload(today=None):
                          | _review_skip_iids(read_tab(REVIEW_SKIP_TAB), t))
             excl = {(rr[0] or "").strip()
                     for rr in (read_tab("RESTOCK対象外")[1:] or []) if rr and (rr[0] or "").strip()}
+            # ★2026-09-05: 目視で変種を確定した分は **次回から再目視されない資産**なので、
+            #   進んだことが分かるようにラベルに出す。ユーザー指摘「押して目視したのに
+            #   ラベルが動かない」— 実際 9/5 に56件を目視したが、どの数字にも現れなかった。
+            #   「残り何件 目視が要るか」は商品管理シート全体(KEY列)を読まないと出せず、
+            #   ここは API 枠を使わない約束なので **確定した件数だけ**を出す。
+            variant_ok = {(rr[0] or "").strip()
+                          for rr in (read_tab("PSA目視確定済")[1:] or [])
+                          if rr and (rr[0] or "").strip()}
         except Exception as e:                                 # noqa: BLE001
             # スプシが読めない時は **多めに言わない**。全部を新規と数えると青になり続ける。
             base.update({"actionable": 0, "note": "スプシ未読 (%s) = 件数は押すまで不明"
@@ -1262,6 +1270,7 @@ def count_workload(today=None):
                      "supply_wait": sum(1 for i in uniq if i and i not in processed
                                         and i not in excl and i in supply_wait),
                      "processed": sum(1 for i in uniq if i and i in processed),
+                     "variant_confirmed": sum(1 for i in uniq if i and i in variant_ok),
                      "excluded": sum(1 for i in uniq if i and i in excl)})
         return base
     except Exception as e:                                     # noqa: BLE001
