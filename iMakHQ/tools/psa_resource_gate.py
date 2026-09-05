@@ -1242,7 +1242,25 @@ def count_workload(today=None):
             base.update({"actionable": 0, "note": "スプシ未読 (%s) = 件数は押すまで不明"
                                                   % type(e).__name__})
             return base
-        base.update({"actionable": sum(1 for i in uniq if i and i not in processed and i not in excl),
+        # ★2026-09-05: **仕入元に在庫が無い行を「今すぐ照合できる」に混ぜない**。
+        #   実測: ラベルは 44件 と出ていたが、押して実際に照合に出たのは 0件。
+        #   44件のうち **43件が「待ち(供給なし)」** で、メルカリにもスニダンにも
+        #   在庫が無い = 照合しようがない行だった。供給が出れば台帳が自動で
+        #   「復活可」に変わり、その時に照合対象へ戻る。人が押しても動かせない。
+        supply_wait = set()
+        try:
+            import psa_restock_wait as _prw
+            for r in _prw.ledger_from_rows(read_tab("再仕入れ待ち")):
+                if str(r.get("status")) in (_prw.ST_WAIT, _prw.ST_UNKNOWN):
+                    _i = str(r.get("itemID") or "").strip()
+                    if _i:
+                        supply_wait.add(_i)
+        except Exception:                                      # noqa: BLE001
+            supply_wait = set()          # 読めない時は差し引かない (多めに言わない側に倒さない)
+        base.update({"actionable": sum(1 for i in uniq if i and i not in processed
+                                       and i not in excl and i not in supply_wait),
+                     "supply_wait": sum(1 for i in uniq if i and i not in processed
+                                        and i not in excl and i in supply_wait),
                      "processed": sum(1 for i in uniq if i and i in processed),
                      "excluded": sum(1 for i in uniq if i and i in excl)})
         return base

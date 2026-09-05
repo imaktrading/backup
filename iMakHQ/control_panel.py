@@ -3789,6 +3789,12 @@ class ListingPanel:
             elif pg:
                 pg_txt = "\n今すぐ照合できる %s件 (候補 %s件のうち)" % (
                     pg.get("actionable", 0), pg.get("targets", 0))
+                # ★2026-09-05: 仕入元に在庫が無い行は **押しても動かせない**。
+                #   ここを「今すぐ照合できる」に混ぜていたため、ラベルが 44件 と出て
+                #   実際に出たのは 0件だった (43件が供給待ちだった)。分けて出す。
+                if pg.get("supply_wait"):
+                    pg_txt += ("\n※仕入元の在庫待ち %s件 "
+                               "(在庫が出たら自動で戻る。押しても動かせない)" % pg["supply_wait"])
                 if pg.get("processed"):
                     pg_txt += "\n※確定/レビュー済で伏せている %s件" % pg["processed"]
                 if pg.get("note"):
@@ -3796,7 +3802,8 @@ class ListingPanel:
                 if (pg.get("funnel_age") or 0) >= 3:
                     pg_txt += "\n※ファネルが %s日前です (先に 📊 ファネル分析)" % pg["funnel_age"]
                 if not pg.get("actionable") and not pg.get("note"):
-                    pg_txt += "\n※押しても0件 (新しい候補が出るのはファネル更新後)"
+                    pg_txt += ("\n※押しても0件 "
+                               "(仕入元に在庫が出るか、ファネルが更新されるまで増えません)")
             else:
                 pg_txt = ""
             # ♻ RESTOCK Revise CSV生成: 何件ぶん CSV が出るか
