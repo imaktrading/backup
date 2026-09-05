@@ -977,8 +977,10 @@ def sync_status():
                 r.append("")
             u = _nurl(r[OUT_URL_COL])
             mark = "済" if u in prod_main else ("済(補URL)" if u in prod_aux else "")
-            r[OUT_DONE_COL] = mark
-            n_done += 1 if mark else 0
+            cur = (r[OUT_DONE_COL] or "").strip()
+            if mark or cur in AUTO_MARKS:
+                r[OUT_DONE_COL] = mark          # 自分で付けた印だけ計算し直す
+            n_done += 1 if (r[OUT_DONE_COL] or "").strip() else 0
         sheet_io.write_rows_to_tab(OUT_TAB, [OUT_HEADER] + out_rows)
         print(f"  🔖 {OUT_TAB}: HIGH転記済 {n_done}/{len(out_rows)}件")
 
@@ -1155,6 +1157,10 @@ HIGH_CERT_COL = 8          # I列
 HIGH_URL_COL, HIGH_TITLE_COL, HIGH_CAT_COL = 0, 2, 17
 HIGH_AUX0, HIGH_AUXN = 28, 5
 DONE_MARK_HIGH = "済(HIGH)"
+DONE_MARK_SOLD = "売り切れ"
+# sync_status が毎回 計算し直してよい印。ここに無い印 (人が押した「売り切れ」等) は残す。
+# ★これが無いと、人が付けた結論が次の同期で消えて **同じ候補が永久に出続ける**。
+AUTO_MARKS = ("", "済", "済(補URL)", DONE_MARK_HIGH)
 
 
 def pending_list_rows(out_rows):
@@ -1244,7 +1250,9 @@ def build_cert_html(items):
             "<div class='k'>%s%s</div>"
             "<a href='%s' target='_blank'>仕入元ページを開く (写真で番号を読む)</a>"
             "<div><label>証明番号 <input class='cert' inputmode='numeric' "
-            "placeholder='例 12345678'></label></div>"
+            "placeholder='例 12345678'></label>"
+            "<label class='so'><input type='checkbox' class='sold'> 売り切れ"
+            "(次から出さない)</label></div>"
             "</div></div>" % (
                 it["i"], _html.escape(it["url"]), _html.escape(photo),
                 _html.escape(it["title"]), _html.escape(it["key"] or it["pid"] or ""),
@@ -1257,35 +1265,46 @@ def build_cert_html(items):
            ".t{font-weight:bold}.k{color:#666;font-size:12px}"
            "input.cert{font-size:18px;padding:4px;width:180px;border:2px solid #06c;"
            "border-radius:4px}"
+           ".so{margin-left:14px;color:#a33;font-size:13px}"
+           ".card:has(.sold:checked){opacity:.55;background:#fff2f2}"
            ".bar{position:sticky;top:0;background:#fff;padding:8px;"
            "border-bottom:1px solid #ccc;margin:-12px -12px 12px}"
            "button{font-size:16px;padding:6px 16px}")
-    js = ("function go(){var out=[];"
+    js = ("function go(){var out=[],sold=[];"
           "document.querySelectorAll('.card').forEach(function(c){"
+          "var i=parseInt(c.dataset.i);"
+          "if(c.querySelector('.sold').checked){sold.push(i);return;}"
           "var v=c.querySelector('.cert').value.trim();"
-          "if(v) out.push({i:parseInt(c.dataset.i), cert:v});});"
-          "if(!out.length){alert('証明番号が1件も入っていません。"
-          "入れた分だけ追加します。入れなかった分は次回また出ます。');return;}"
+          "if(v) out.push({i:i, cert:v});});"
+          "if(!out.length&&!sold.length){alert('証明番号も売り切れも付いていません。"
+          "付けた分だけ処理します。何もしなければ次回また出ます。');return;}"
           "fetch('/',{method:'POST',headers:{'Content-Type':'application/json'},"
-          "body:JSON.stringify({certs:out})}).then(function(){"
-          "document.body.innerHTML='<h2>追加しました。閉じてください</h2>';});}")
+          "body:JSON.stringify({certs:out, sold:sold})}).then(function(){"
+          "document.body.innerHTML='<h2>受け付けました。閉じてください</h2>';});}")
     head = ("<div class='bar'><b>新規出品の種 %d件</b> — 写真で証明番号を読んで入れてください。"
-            "入れた分だけ商品管理シートに足します (入れないものは次回また出ます)。"
-            "<button onclick='go()'>OK 入れた分を追加</button></div>" % len(items))
+            "入れた分だけ商品管理シートに足します。"
+            "<b>売り切れていたら「売り切れ」に印</b>を付けてください (次から出しません)。"
+            "何も付けなかったものは次回また出ます。"
+            "<button onclick='go()'>OK 付けた分を処理</button></div>" % len(items))
     return ("<!doctype html><meta charset='utf-8'><title>新規出品の種 — 証明番号</title>"
             "<style>%s</style>%s%s<script>%s</script>" % (
                 css, head, "".join(cards), js)).encode("utf-8")
 
 
 def parse_cert_result(payload):
-    """POST(JSON) → {tab行index: cert} (純関数)。"""
-    out = {}
+    """POST(JSON) → {"certs": {tab行index: cert}, "sold": {index}} (純関数)。"""
+    out, sold = {}, set()
     for c in (payload or {}).get("certs") or []:
         try:
             out[int(c.get("i"))] = str(c.get("cert") or "").strip()
         except (TypeError, ValueError):
             continue
-    return out
+    for i in (payload or {}).get("sold") or []:
+        try:
+            sold.add(int(i))
+        except (TypeError, ValueError):
+            continue
+    return {"certs": out, "sold": sold}
 
 
 def run_append_high(timeout=10800, dry_run=False):
@@ -1310,24 +1329,32 @@ def run_append_high(timeout=10800, dry_run=False):
     if res is None:
         print("  入力されなかった (タイムアウト/未操作) → 何も足さない")
         return 1
-    rows, marked, skipped = plan_high_rows(items, res, existing_certs, listed, out_rows)
+    sold = res.get("sold") or set()
+    rows, marked, skipped = plan_high_rows(items, res.get("certs") or {},
+                                           existing_certs, listed, out_rows)
     for url, why in skipped:
         print("  skip 足しません: %s — %s" % (why, url[:60]))
-    if not rows:
+    if rows:
+        ws = sheet_io._product_ws()
+        ws.append_rows(rows, value_input_option="RAW")
+        print("  + 商品管理シートに %d行 追加 (B列=itemID は空 = 出品くんが拾う)" % len(rows))
+    else:
         print("  足す行はありませんでした")
+    if not rows and not sold:
         return 0
-    ws = sheet_io._product_ws()
-    ws.append_rows(rows, value_input_option="RAW")
-    print("  + 商品管理シートに %d行 追加 (B列=itemID は空 = 出品くんが拾う)" % len(rows))
 
     body = []
     for i, r in enumerate(out_rows):
         r = list(r) + [""] * (len(OUT_HEADER) - len(r))
         if i in marked:
             r[OUT_DONE_COL] = DONE_MARK_HIGH
+        elif i in sold:
+            # その現物はもう買えない = この行は終わり。同じカードの別の仕入元が
+            # 後で見つかれば、別の行としてまた候補に上がる。
+            r[OUT_DONE_COL] = DONE_MARK_SOLD
         body.append(r[:len(OUT_HEADER)])
     sheet_io.write_rows_to_tab(OUT_TAB, [OUT_HEADER] + body)
-    print("  mark 新規出品候補: 転記済 +%d件" % len(marked))
+    print("  mark 新規出品候補: 転記済 +%d件 / 売り切れ +%d件" % (len(marked), len(sold)))
     return 0
 
 

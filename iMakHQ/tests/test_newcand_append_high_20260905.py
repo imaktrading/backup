@@ -128,9 +128,10 @@ def test_html_has_a_cert_input_per_candidate():
 
 
 def test_parse_cert_result():
-    assert N.parse_cert_result({"certs": [{"i": 3, "cert": " 12345678 "}]}) == {3: "12345678"}
-    assert N.parse_cert_result({}) == {}
-    assert N.parse_cert_result({"certs": [{"i": "x"}]}) == {}
+    r = N.parse_cert_result({"certs": [{"i": 3, "cert": " 12345678 "}]})
+    assert r["certs"] == {3: "12345678"} and r["sold"] == set()
+    assert N.parse_cert_result({}) == {"certs": {}, "sold": set()}
+    assert N.parse_cert_result({"certs": [{"i": "x"}]})["certs"] == {}
 
 
 def test_panel_has_the_button():
@@ -182,3 +183,36 @@ def test_button_is_step_two_of_the_seed_flow():
     """①目視 → ②証明番号 の並びとして「どこまで行ったか」を出す。"""
     assert '("newcand", "newcand_high"),' in _PANEL
     assert '"sold_restock")' in _PANEL          # STEP_SINGLES から newcand が抜けた
+
+
+# ---------------------------------------------- 売り切れ (半数がこれ)
+
+def test_sold_out_is_parsed():
+    r = N.parse_cert_result({"certs": [{"i": 1, "cert": "12345678"}], "sold": [2, "3", "x"]})
+    assert r["certs"] == {1: "12345678"}
+    assert r["sold"] == {2, 3}
+
+
+def test_html_has_a_sold_out_checkbox():
+    items = N.pending_list_rows([_row(N.USE_LIST, "", U % 1)])
+    html = N.build_cert_html(items).decode("utf-8")
+    assert "class='sold'" in html
+    assert "売り切れ" in html
+
+
+def test_sync_status_keeps_marks_it_did_not_set():
+    """人が付けた「売り切れ」を次の同期で消さない。
+
+    ★これが無いと結論が消えて **同じ候補が永久に出続ける**。
+      同型の穴を今日1つ踏んでいる (補URL欄に入れた分が毎回「未転記」に戻っていた)。
+    """
+    assert N.DONE_MARK_SOLD == "売り切れ"
+    assert N.DONE_MARK_SOLD not in N.AUTO_MARKS
+    i = _SRC.index("def sync_status()")
+    blk = _SRC[i:i + 2600]
+    assert "cur in AUTO_MARKS" in blk
+
+
+def test_sold_out_row_is_not_offered_again():
+    rows = [_row(N.USE_LIST, N.DONE_MARK_SOLD, U % 1)]
+    assert N.pending_list_rows(rows) == []
