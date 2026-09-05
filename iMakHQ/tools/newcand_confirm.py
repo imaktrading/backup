@@ -953,18 +953,30 @@ def sync_status():
     out_rows = migrate_out_rows(_read_tab(OUT_TAB))
     ng_rows = [r for r in (_read_tab(NG_TAB))[1:] if r]
 
-    # (1) 商品管理シートの A列(仕入元URL) に在れば「転記済」
+    # (1) 商品管理シートに在れば「転記済」。
+    #     ★2026-09-05: A列(主な仕入元)だけを見ていたため、**補URL欄(AC-AG)に入れた分が
+    #       毎回「未転記」に戻されていた**。用途=補URL の行は AC-AG に入るのが正しい
+    #       行き先なので、そこも見る (見ないと同じ候補を人に何度も見せることになる)。
     n_done = 0
     try:
-        prod = {_nurl(r[0]) for r in _read_product()[1:] if r and r[0]}
+        prod_main, prod_aux = set(), set()
+        for r in _read_product()[1:]:
+            if not r:
+                continue
+            if len(r) > 0 and r[0]:
+                prod_main.add(_nurl(r[0]))
+            for k in range(HIGH_AUX0, HIGH_AUX0 + HIGH_AUXN):
+                if len(r) > k and r[k]:
+                    prod_aux.add(_nurl(r[k]))
     except Exception as e:
         print(f"  ⚠ 商品管理シートを読めず転記チェック skip ({type(e).__name__})")
-        prod = None
-    if prod is not None and out_rows:
+        prod_main = None
+    if prod_main is not None and out_rows:
         for r in out_rows:
             while len(r) < len(OUT_HEADER):
                 r.append("")
-            mark = "済" if _nurl(r[OUT_URL_COL]) in prod else ""
+            u = _nurl(r[OUT_URL_COL])
+            mark = "済" if u in prod_main else ("済(補URL)" if u in prod_aux else "")
             r[OUT_DONE_COL] = mark
             n_done += 1 if mark else 0
         sheet_io.write_rows_to_tab(OUT_TAB, [OUT_HEADER] + out_rows)
@@ -1117,6 +1129,195 @@ def save(items, res):
     return {"list": len(picks), "catalog": len(creqs), "out": len(outs), "hold": n_hold}
 
 
+# ---------------------------------------------------------------------------
+# 用途=出品 の候補を、証明番号(cert)を入れて商品管理シートに足す (2026-09-05)。
+#
+# ★ここだけ cert が要る。再出品(リストック)は説明文で吸収するので cert 空でも進めるが、
+#   **新規出品は cert が出発点**。生成器 (iMakTCG/psa_to_csv.py) は cert で PSA を引いて
+#   カード・グレード・画像を決めるので、cert が無いと1枚も作れない。
+#   cert は現物ごとに違うので機械では埋められない = 人が候補の写真を見て打つ。
+# ---------------------------------------------------------------------------
+CERT_RE = re.compile(r"^\d{7,10}$")
+HIGH_CERT_COL = 8          # I列
+HIGH_URL_COL, HIGH_TITLE_COL, HIGH_CAT_COL = 0, 2, 17
+HIGH_AUX0, HIGH_AUXN = 28, 5
+DONE_MARK_HIGH = "済(HIGH)"
+
+
+def pending_list_rows(out_rows):
+    """新規出品候補 → まだ HIGH に足していない『用途=出品』の行 (純関数)。"""
+    out = []
+    for i, r in enumerate(out_rows):
+        r = list(r) + [""] * 12
+        if (r[0] or "").strip() != USE_LIST:
+            continue
+        if (r[OUT_DONE_COL] or "").strip():
+            continue
+        if not (r[OUT_URL_COL] or "").strip():
+            continue
+        out.append({"i": i, "url": r[OUT_URL_COL].strip(),
+                    "title": (r[3] or "").strip(),
+                    "price": (r[4] or "").strip(),
+                    "key": (r[OUT_KEY_COL] or "").strip(),
+                    "pid": (r[8] or "").strip()})
+    return out
+
+
+def aux_urls_for(key, out_rows, exclude_url):
+    """同じカードの他の仕入元 (用途=補URL) → 新しい行の補URL欄に入れる (純関数)。"""
+    urls = []
+    for r in out_rows:
+        r = list(r) + [""] * 12
+        if (r[0] or "").strip() != USE_AUX:
+            continue
+        if not key or (r[OUT_KEY_COL] or "").strip() != key:
+            continue
+        u = (r[OUT_URL_COL] or "").strip()
+        if u and u != exclude_url and u not in urls:
+            urls.append(u)
+    return urls[:HIGH_AUXN]
+
+
+def plan_high_rows(items, certs, existing_certs=(), listed_keys=(), out_rows=()):
+    """{tab行index: cert} → 商品管理シートに足す行 (純関数)。
+
+    足さない条件 (どれも **黙って落とさず理由を返す**):
+      - cert が数字でない (打ち間違い)
+      - その cert が既にシートに在る = 同じ現物を2回出す
+      - そのカード(KEY)が既に出品中 = 同じカードを2枚出す
+    戻り: (rows[[40列]], marked{tab行index}, skipped[(url, 理由)])
+    """
+    have = {str(c).strip() for c in (existing_certs or []) if str(c).strip()}
+    listed = {str(k).strip() for k in (listed_keys or []) if str(k).strip()}
+    rows, marked, skipped, used_cert = [], set(), [], set()
+    for it in items:
+        cert = str(certs.get(it["i"], "") or "").strip()
+        if not cert:
+            continue                      # 未入力 = 保留。次回また出す
+        if not CERT_RE.match(cert):
+            skipped.append((it["url"], "証明番号が数字でない: %r" % cert))
+            continue
+        if cert in have or cert in used_cert:
+            skipped.append((it["url"], "その証明番号は既にシートに在る (%s)" % cert))
+            continue
+        if it["key"] and it["key"] in listed:
+            skipped.append((it["url"], "同じカードが既に出品中 (%s)" % it["key"]))
+            continue
+        row = [""] * 40
+        row[HIGH_URL_COL] = it["url"]
+        row[HIGH_TITLE_COL] = it["title"]
+        row[HIGH_CERT_COL] = cert
+        row[HIGH_CAT_COL] = SHEET_CATEGORY
+        # ★AI列(KEY)は書かない。未出品の行に KEY が入ると重複くんが「出品済」と読んで
+        #   その card を丸ごとブロックする (orphan KEY 事故)。同定は cert が持つ。
+        for n, u in enumerate(aux_urls_for(it["key"], out_rows, it["url"])):
+            row[HIGH_AUX0 + n] = u
+        rows.append(row)
+        marked.add(it["i"])
+        used_cert.add(cert)
+    return rows, marked, skipped
+
+
+def build_cert_html(items):
+    """候補の写真とタイトルを見せて、証明番号を打ってもらう HTML (純関数)。"""
+    cards = []
+    for it in items:
+        photo = prc._proxied(it["url"])
+        price = " / 仕入 %s円" % it["price"] if it["price"] else ""
+        cards.append(
+            "<div class='card' data-i='%d'>"
+            "<a href='%s' target='_blank'><img src='%s' loading='lazy'></a>"
+            "<div class='meta'><div class='t'>%s</div>"
+            "<div class='k'>%s%s</div>"
+            "<a href='%s' target='_blank'>仕入元ページを開く (写真で番号を読む)</a>"
+            "<div><label>証明番号 <input class='cert' inputmode='numeric' "
+            "placeholder='例 12345678'></label></div>"
+            "</div></div>" % (
+                it["i"], _html.escape(it["url"]), _html.escape(photo),
+                _html.escape(it["title"]), _html.escape(it["key"] or it["pid"] or ""),
+                _html.escape(price), _html.escape(it["url"])))
+    css = ("body{font-family:sans-serif;margin:12px;background:#fafafa}"
+           ".card{display:flex;gap:12px;border:1px solid #ddd;border-radius:6px;"
+           "background:#fff;padding:8px;margin-bottom:8px}"
+           ".card img{width:180px;height:240px;object-fit:contain;background:#f4f4f4}"
+           ".meta{flex:1;font-size:13px;line-height:1.6}"
+           ".t{font-weight:bold}.k{color:#666;font-size:12px}"
+           "input.cert{font-size:18px;padding:4px;width:180px;border:2px solid #06c;"
+           "border-radius:4px}"
+           ".bar{position:sticky;top:0;background:#fff;padding:8px;"
+           "border-bottom:1px solid #ccc;margin:-12px -12px 12px}"
+           "button{font-size:16px;padding:6px 16px}")
+    js = ("function go(){var out=[];"
+          "document.querySelectorAll('.card').forEach(function(c){"
+          "var v=c.querySelector('.cert').value.trim();"
+          "if(v) out.push({i:parseInt(c.dataset.i), cert:v});});"
+          "if(!out.length){alert('証明番号が1件も入っていません。"
+          "入れた分だけ追加します。入れなかった分は次回また出ます。');return;}"
+          "fetch('/',{method:'POST',headers:{'Content-Type':'application/json'},"
+          "body:JSON.stringify({certs:out})}).then(function(){"
+          "document.body.innerHTML='<h2>追加しました。閉じてください</h2>';});}")
+    head = ("<div class='bar'><b>新規出品の種 %d件</b> — 写真で証明番号を読んで入れてください。"
+            "入れた分だけ商品管理シートに足します (入れないものは次回また出ます)。"
+            "<button onclick='go()'>OK 入れた分を追加</button></div>" % len(items))
+    return ("<!doctype html><meta charset='utf-8'><title>新規出品の種 — 証明番号</title>"
+            "<style>%s</style>%s%s<script>%s</script>" % (
+                css, head, "".join(cards), js)).encode("utf-8")
+
+
+def parse_cert_result(payload):
+    """POST(JSON) → {tab行index: cert} (純関数)。"""
+    out = {}
+    for c in (payload or {}).get("certs") or []:
+        try:
+            out[int(c.get("i"))] = str(c.get("cert") or "").strip()
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def run_append_high(timeout=10800, dry_run=False):
+    """用途=出品 の候補に証明番号を付けて商品管理シートへ足す (impure)。"""
+    out_rows = migrate_out_rows(_read_tab(OUT_TAB))
+    items = pending_list_rows(out_rows)
+    if not items:
+        print("  HIGH に足す『用途=出品』の候補はありません")
+        return 0
+    print("  用途=出品 で未転記 %d件" % len(items))
+    if dry_run:
+        for it in items[:20]:
+            print("   %-28s %s" % (it["key"] or "?", it["title"][:44]))
+        return 0
+
+    prod = _read_product()
+    existing_certs = [r[HIGH_CERT_COL] for r in prod[1:]
+                      if r and len(r) > HIGH_CERT_COL and (r[HIGH_CERT_COL] or "").strip()]
+    listed = already_listed_keys() | live_key_set()
+
+    res = prc._serve_confirm(build_cert_html(items), parse_cert_result, timeout)
+    if res is None:
+        print("  入力されなかった (タイムアウト/未操作) → 何も足さない")
+        return 1
+    rows, marked, skipped = plan_high_rows(items, res, existing_certs, listed, out_rows)
+    for url, why in skipped:
+        print("  skip 足しません: %s — %s" % (why, url[:60]))
+    if not rows:
+        print("  足す行はありませんでした")
+        return 0
+    ws = sheet_io._product_ws()
+    ws.append_rows(rows, value_input_option="RAW")
+    print("  + 商品管理シートに %d行 追加 (B列=itemID は空 = 出品くんが拾う)" % len(rows))
+
+    body = []
+    for i, r in enumerate(out_rows):
+        r = list(r) + [""] * (len(OUT_HEADER) - len(r))
+        if i in marked:
+            r[OUT_DONE_COL] = DONE_MARK_HIGH
+        body.append(r[:len(OUT_HEADER)])
+    sheet_io.write_rows_to_tab(OUT_TAB, [OUT_HEADER] + body)
+    print("  mark 新規出品候補: 転記済 +%d件" % len(marked))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="先頭N件だけ見る (0=全部)")
@@ -1124,12 +1325,17 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="件数と内訳だけ出して終わる")
     ap.add_argument("--sync-only", action="store_true",
                     help="目視は開かず、HIGH転記済/結論の印だけ付け直す")
+    ap.add_argument("--append-high", action="store_true",
+                    help="用途=出品 の候補に証明番号を入れて商品管理シートへ足す")
     a = ap.parse_args()
 
     print("▶ 捨てた仕入候補 → 新規出品の種 (目視)")
     if a.sync_only:
         sync_status()
         return 0
+    if a.append_high:
+        sync_status()
+        return run_append_high(timeout=a.timeout, dry_run=a.dry_run)
     sync_status()          # 走行前にも最新化 (手でHIGHに貼った分がすぐ反映される)
     items = load_items(limit=a.limit, write=not a.dry_run)
     if not items:

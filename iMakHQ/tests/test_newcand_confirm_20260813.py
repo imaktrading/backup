@@ -260,19 +260,33 @@ def test_guess_category_from_title():
 # 8. 保管は「貼り付け先の列名」で (商品管理シートへの自動追加はしない)
 # ---------------------------------------------------------------------------
 def test_out_header_is_paste_ready():
-    """ユーザー確定「シートへの追加は危険。保管されていたらコピペする」。
-
-    見出しが貼り付け先の列名になっていること + 自動 append をしていないこと。
-    """
+    """見出しが貼り付け先の列名になっていること (手で貼る運用は残っている)。"""
     assert N.OUT_HEADER[:8] == ["用途", "HIGH転記", "A列:仕入元URL", "C列:タイトル",
                                 "M列:仕入価格(円)", "I列:cert", "R列:カテゴリ", "AI列:KEY"]
+
+
+def test_the_only_write_path_is_the_cert_screen():
+    """商品管理シートへ書くのは **証明番号を打った時だけ**。
+
+    ★2026-08-13 の決定は「シートへの追加は危険。保管されていたらコピペする」だったが、
+      2026-09-05 にユーザーが変更:「用途が出品のも、HIGHに追記してよ。他でもやってる
+      からいいでしょ。証明番号いれないとだめだね。追加するときに証明番号を入力する
+      HTMLをかますか」。
+
+      危険だった理由 (勝手に行が増える) は **人が写真を見て証明番号を打つ画面**で
+      塞いでいる: 番号を打たなかった候補は1行も足さない。
+      なので「一切書かない」ではなく「その画面を通した時だけ書く」を守る。
+    """
     src = open(os.path.join(_TOOLS, "newcand_confirm.py"), encoding="utf-8").read()
-    # 商品管理シートは **読むだけ** (転記済チェック用)。書き込み系は一切呼ばない。
-    assert "append_row" not in src
-    assert "batch_update" not in src
-    for line in src.splitlines():
-        if "_product_ws()" in line:
-            assert "get_all_values()" in line, f"商品管理シートに書き込んでいる: {line}"
+    # 追加は run_append_high の中の1箇所だけ
+    assert src.count("append_rows(") == 1
+    i = src.index("append_rows(")
+    fn = src.rindex("def ", 0, i)
+    assert src[fn:fn + 40].startswith("def run_append_high"), src[fn:fn + 40]
+    # その関数は 人が打った cert を通してからでないと行を作らない
+    body = src[fn:src.index("def main():")]
+    assert "_serve_confirm(build_cert_html" in body
+    assert "plan_high_rows(" in body
 
 
 def test_save_builds_paste_row(monkeypatch):

@@ -1528,6 +1528,26 @@ SCRIPTS = [
                      "1UAVBdosIqqOI8qx-P-4k_ftTGuGWGzfIOU7vk7S2dz4/edit#gid=641366106"),
     },
     {
+        # ★2026-09-05 ユーザー指示「用途が出品のも、HIGHに追記してよ。証明番号いれないと
+        #   だめだね。追加するときに証明番号を入力するHTMLをかますか」。
+        #   用途=補URL の分は夜間バッチ (psa_hoju_fill newcand-aux) が自動で入れるが、
+        #   用途=出品 は **証明番号が要る**ので機械では埋められない (現物ごとに違う)。
+        #   写真を見て番号を打つ画面をここで出す。
+        "category": None, "type": "utility",
+        "label": "🌱 種→出品行に追加 (証明番号)",
+        "label_fg": "#0a7",
+        "tip": "上のボタンで『出品』と判定された候補を、証明番号を打って商品管理シートに"
+               "足します。写真で番号を読んで入力 → 入れた分だけ追加されます。"
+               "同じ番号・同じカードが既にあるものは足しません。",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "newcand_confirm.py", "--append-high"],
+        "params": [],
+        "skip_postprocess": True,
+        # 書込先は商品管理シート本体 (B列=itemID 空 = 出品くんが拾う行として足す)。
+        "open_url": ("https://docs.google.com/spreadsheets/d/"
+                     "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit"),
+    },
+    {
         # ★2026-08-22: 一番くじの補URLも PSA と同じ 2段 (夜=検索 / 昼=目視) にした。
         #   画面は PSA の確証UI をそのまま使う (見た目・操作が分かれないように)。
         "category": None, "type": "utility",
