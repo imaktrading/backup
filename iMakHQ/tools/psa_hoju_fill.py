@@ -696,6 +696,50 @@ def compute_backurl_additions(existing, new_urls, max_slots=None):
     return full[:max_slots], added
 
 
+# ★2026-09-05 ユーザー指示:
+#   「せっかく見つけた訳だから、全ての補と見比べて、最安を最大5件持つべきでは？」
+#
+#   従来 (compute_backurl_additions) は **既存を必ず残して空き枠だけ**埋めていた。
+#   そのため補が5本埋まっている出品では、その日 目視で確認した **もっと安い供給が
+#   1本も入らなかった**。補URLは「売れた時にどこから買うか」なので、安い順に持つ方が
+#   利益が出る (仕入値は N列 = 今の最安が正、という既存の考え方とも揃う)。
+def rank_backurls(existing, new_urls, price_by_url=None, max_slots=None):
+    """既存補URL + 今日 確定したURL を **安い順**に並べ直して最大 max_slots 本にする (純関数)。
+
+    - 値段が分かる URL (= 今日の候補に出ている) を安い順に前へ
+    - 値段が分からない URL (= 今日の候補に出ていない既存) はその後ろに元の順で置く
+      → 5本ぶん もっと安いものが確定した時だけ押し出される。押し出す根拠が無いなら残る
+    - 主URL(A列) はここでは扱わない (呼び手が別管理)
+
+    Returns: (full, added, removed)
+    """
+    if max_slots is None:
+        max_slots = AUXN
+    prices = price_by_url or {}
+
+    def _price(u):
+        return prices.get(_norm_url(u))
+
+    pool, seen = [], set()
+    for u in list(existing or []) + list(new_urls or []):
+        u = (u or "").strip()
+        if not u:
+            continue
+        n = _norm_url(u)
+        if n in seen:
+            continue
+        seen.add(n)
+        pool.append(u)
+    # 安定ソート: 値段が分かる方を先に、その中は安い順。分からない分は元の順のまま後ろへ
+    ranked = sorted(pool, key=lambda u: (0, _price(u)) if _price(u) is not None else (1, 0))
+    full = ranked[:max_slots]
+    kept = {_norm_url(u) for u in full}
+    before = {_norm_url(u) for u in (existing or []) if u}
+    added = [u for u in full if _norm_url(u) not in before]
+    removed = [u for u in (existing or []) if u and _norm_url(u) not in kept]
+    return full, added, removed
+
+
 # 確証スキップの cooldown (2026-07-29)。設計 (discussion/2026-07-24_..._design.md:65) は
 # 「cooldown付き skip台帳で一定期間再表示しない … 数日後再挑戦」だったが、**実装は期限なし**で
 # 一度でも外すと二度と補URLが付かなかった (= その出品は永久に丸腰)。
@@ -954,20 +998,25 @@ def run_status(max_backups=1):
               f"  ※これは足切り前の母数。実数ではない")
 
 
-def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, aux_max=None):
+def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, aux_max=None,
+                       price_by_url=None):
     """確定URL → 補URL書込計画 {row: [URL×5]} を決める **純関数**(I/Oなし・test可)。
 
     - guard_ok=False (= URL共有ガードを組めなかった) なら **何も書かない**。
       ガード無効のまま書くと、他出品が使用中の仕入元URLを掴み、両方売れた時に片方が
       履行不能 → キャンセル → Defect。「判定不能は skip、破壊的動作に倒さない」に従う。
-    - guard_ok=True なら 他出品所有のURLを落とした上で、既存保持・空き枠のみ埋める。
-    戻り: (aux_writeback{row: [5要素]}, 追加URL総数, 落としたURL [(url, [owner...])])
+    - guard_ok=True なら 他出品所有のURLを落とした上で、**既存と新規を合わせて安い順**に
+      並べ直し 最大5本にする (2026-09-05。従来は既存保持+空き枠のみだったので、
+      補が埋まっている出品には もっと安い供給が1本も入らなかった)。
+    price_by_url: {idx: {正規化URL: 価格}}。値段の分かるURLだけが安い順に前へ出る。
+    戻り: (aux_writeback{row: [5要素]}, 追加URL総数,
+           他出品所有で落としたURL [(url, [owner...])], 押し出した既存 [(itemID, url)])
     """
     aux_max = aux_max or AUXN
     if not guard_ok:
-        return {}, 0, []
+        return {}, 0, [], []
     import dup_guard as _dg
-    aux_writeback, added_total, dropped_all = {}, 0, []
+    aux_writeback, added_total, dropped_all, replaced_all = {}, 0, [], []
     for idx, urls in confirmed.items():
         t = item_targets[idx]
         row = t["row"]
@@ -975,11 +1024,14 @@ def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, au
         urls, dropped = _dg.filter_urls_owned_by_others(urls, owner_by_url, _cell(r, B))
         dropped_all.extend(dropped)
         existing = [u for u in (_cell(r, AUX0 + k) for k in range(aux_max)) if u]
-        full, added = compute_backurl_additions(existing, urls, aux_max)
-        if added:
+        full, added, removed = rank_backurls(existing, urls,
+                                             (price_by_url or {}).get(idx), aux_max)
+        # 並びが変わっただけでも書く (安い順に持ち直すのが目的なので)
+        if added or removed or full != existing:
             aux_writeback[row] = full
             added_total += len(added)
-    return aux_writeback, added_total, dropped_all
+            replaced_all.extend((t.get("itemID"), u) for u in removed)
+    return aux_writeback, added_total, dropped_all, replaced_all
 
 
 def build_confirm_context(vals, cache, today, verbose=False):
@@ -1453,10 +1505,22 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         print(f"⚠️要対応 URL共有ガードを組めず **補URL書込を中止**: {type(_e_dg).__name__}: {_e_dg}")
         _guard_ok = False
 
-    aux_writeback, added_total, dropped = plan_aux_writeback(
-        confirmed, item_targets, vals, _owner_by_url, _guard_ok)
+    # ★2026-09-05: 値段を渡す。既存と新規を **合わせて安い順**に持ち直すため
+    #   (値段が分かるのは「今日の候補に出ている URL」だけ)。
+    _price_by_idx = {}
+    for _i in confirmed:
+        _price_by_idx[_i] = {
+            _u: _p for _u, (_n, _p) in
+            cand_info_by_url((items[_i] or {}).get("candidates") if _i < len(items) else None).items()
+            if isinstance(_p, int) and _p > 0
+        }
+    aux_writeback, added_total, dropped, replaced = plan_aux_writeback(
+        confirmed, item_targets, vals, _owner_by_url, _guard_ok,
+        price_by_url=_price_by_idx)
     for _u, _own in dropped:
         print(f"  ⛔ 補URL除外(他出品が使用中 {_own}): {_u[:70]}")
+    for _iid, _u in replaced:
+        print(f"  ♻ 補URL入替(もっと安いのが5本そろった) {_iid}: {_u[:70]}")
     written = 0
     if not _guard_ok:
         print("  (ガード不成立のため書込0行。確証結果は台帳に残るので再実行で復帰できます)")
@@ -1464,7 +1528,8 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
         try:
             from sheet_io import write_aux_urls
             written = write_aux_urls(aux_writeback)
-            print(f"🔗 補URL(AC-AG) 冪等書込: {written}行 / 追加URL {added_total}本 (既存保持・空き枠のみ)")
+            print(f"🔗 補URL(AC-AG) 書込: {written}行 / 追加URL {added_total}本 "
+                  f"/ 入替 {len(replaced)}本 (安い順に最大{AUXN}本)")
         except Exception as e:
             print(f"⚠ 補URL書込失敗: {type(e).__name__}: {e}")
     else:

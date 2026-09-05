@@ -30,7 +30,7 @@ def test_guard_not_ready_writes_nothing():
     """★ガードを組めなかったら 1行も書かない(fail-closed)。"""
     vals = _vals([_row(url="https://jp.mercari.com/item/m1", iid="111")])
     targets = [{"row": 2}]
-    wb, added, dropped = hf.plan_aux_writeback(
+    wb, added, dropped, _rep = hf.plan_aux_writeback(
         {0: ["https://jp.mercari.com/item/m9"]}, targets, vals, {}, guard_ok=False)
     assert wb == {} and added == 0 and dropped == []
 
@@ -38,7 +38,7 @@ def test_guard_not_ready_writes_nothing():
 def test_guard_ok_writes_free_urls():
     vals = _vals([_row(url="https://jp.mercari.com/item/m1", iid="111")])
     targets = [{"row": 2}]
-    wb, added, dropped = hf.plan_aux_writeback(
+    wb, added, dropped, _rep = hf.plan_aux_writeback(
         {0: ["https://jp.mercari.com/item/m9"]}, targets, vals, {}, guard_ok=True)
     assert added == 1 and dropped == []
     assert wb[2][0] == "https://jp.mercari.com/item/m9"
@@ -49,18 +49,22 @@ def test_guard_drops_url_owned_by_other_listing():
     vals = _vals([_row(url="https://jp.mercari.com/item/m1", iid="111")])
     targets = [{"row": 2}]
     owner = {"https://jp.mercari.com/item/m5": ["222"]}
-    wb, added, dropped = hf.plan_aux_writeback(
+    wb, added, dropped, _rep = hf.plan_aux_writeback(
         {0: ["https://jp.mercari.com/item/m5"]}, targets, vals, owner, guard_ok=True)
     assert wb == {} and added == 0
     assert dropped == [("https://jp.mercari.com/item/m5", ["222"])]
 
 
 def test_existing_aux_are_preserved():
-    """既存の補URLは消さない(冪等・read-merge-write)。"""
+    """既存の補URLは消さない (値段が分からない = 押し出す根拠が無いので残る)。
+
+    ★2026-09-05: 「既存は必ず残す」から「安い順に最大5本」に変えたが、
+      値段の分からない既存を理由なく消すことはしない。
+    """
     vals = _vals([_row(url="https://jp.mercari.com/item/m1", iid="111",
                        aux=("https://jp.mercari.com/item/mA",))])
     targets = [{"row": 2}]
-    wb, added, _ = hf.plan_aux_writeback(
+    wb, added, _, _rep = hf.plan_aux_writeback(
         {0: ["https://jp.mercari.com/item/mB"]}, targets, vals, {}, guard_ok=True)
     assert wb[2][:2] == ["https://jp.mercari.com/item/mA", "https://jp.mercari.com/item/mB"]
     assert added == 1
