@@ -754,6 +754,106 @@ def rank_backurls(existing, new_urls, price_by_url=None, max_slots=None):
     return full, added, removed
 
 
+# ---------------------------------------------------------------------------
+# 「新規出品候補」タブに寝ている **補URL用**の仕入元を、対応する出品の補URL欄へ入れる。
+#
+# ★2026-09-05 ユーザー指示。捨てた候補を人が同定し直して 新規出品候補 タブに積む所までは
+#   出来ていたが、**用途=補URL(2枚目以降) の行には行き先が書かれていなかった**。
+#   実測 (2026-09-05): タブ183件のうち 163件が補URL用で、159件が未転記のまま。
+#   同じ日に「補URLが1本も無い出品が45件」と出ていたのに、その供給がここに寝ていた。
+#   カードの同定は人が済ませているので、新しい判断は要らない = 機械で入れてよい。
+# ---------------------------------------------------------------------------
+NEWCAND_TAB = "新規出品候補"
+NEWCAND_USE_COL, NEWCAND_DONE_COL, NEWCAND_URL_COL = 0, 1, 2
+NEWCAND_PRICE_COL, NEWCAND_KEY_COL = 4, 7
+NEWCAND_USE_AUX = "補URL(2枚目以降)"
+NEWCAND_DONE_MARK = "済(補URL)"
+
+
+def pending_newcand_aux(rows2d):
+    """新規出品候補タブ → まだ入れていない補URL用の行 {KEY: [(url, price)]} (純関数)。
+
+    用途が「補URL(2枚目以降)」で、転記の印が無い行だけ。KEY が無い行は捨てる
+    (どの出品に足すか決められない = fail-closed)。
+    """
+    out = {}
+    for r in (rows2d[1:] if rows2d and len(rows2d) > 1 else []):
+        r = list(r) + [""] * 12
+        if (r[NEWCAND_USE_COL] or "").strip() != NEWCAND_USE_AUX:
+            continue
+        if (r[NEWCAND_DONE_COL] or "").strip():
+            continue
+        url = (r[NEWCAND_URL_COL] or "").strip()
+        key = (r[NEWCAND_KEY_COL] or "").strip()
+        if not url or not key:
+            continue
+        try:
+            price = int(str(r[NEWCAND_PRICE_COL]).strip())
+        except (TypeError, ValueError):
+            price = None
+        out.setdefault(key, []).append((url, price))
+    return out
+
+
+def live_rows_by_key(vals):
+    """商品管理シート → {KEY: 行番号(1-indexed)}。live な PSA 行だけ (純関数)。
+
+    同じ KEY が複数あれば **補が薄い方**に入れる (丸腰から埋めるのが趣旨)。
+    """
+    out = {}
+    for i, r in enumerate(vals[1:], start=2):
+        if not _cell(r, B) or _cell(r, D):          # 未出品 / 売り切れ
+            continue
+        if _cell(r, CATEGORY) != "TCG":
+            continue
+        key = _cell(r, KEY)
+        if not key:
+            continue
+        cur = out.get(key)
+        if cur is None or _backup_count(vals[i - 1]) < _backup_count(vals[cur - 1]):
+            out[key] = i
+    return out
+
+
+def plan_newcand_aux(pending, vals, owner_by_url, guard_ok, aux_max=None):
+    """{KEY: [(url, price)]} → 補URL書込計画 (純関数)。
+
+    - guard_ok=False なら何も書かない (他出品が使っている仕入元を掴むと、両方売れた時に
+      片方が履行不能 = キャンセル。判定不能は破壊側に倒さない)
+    - 主URL(A列) と同じ URL は入れない (同じ供給を2回数えても厚みにならない)
+    戻り: (aux_writeback{row: [5要素]}, used_urls{使えた URL}, skipped{KEY: 理由})
+    """
+    aux_max = aux_max or AUXN
+    if not guard_ok:
+        return {}, set(), {k: "URL共有ガードを組めず中止" for k in pending}
+    import dup_guard as _dg
+    by_key = live_rows_by_key(vals)
+    wb, used, skipped = {}, set(), {}
+    for key, items in pending.items():
+        row = by_key.get(key)
+        if not row:
+            skipped[key] = "対応する出品が無い(未出品/売切/KEY未一致)"
+            continue
+        r = vals[row - 1] if 0 < row <= len(vals) else []
+        urls = [u for u, _p in items]
+        urls, _dropped = _dg.filter_urls_owned_by_others(urls, owner_by_url, _cell(r, B))
+        main = _norm_url(_cell(r, A))
+        urls = [u for u in urls if _norm_url(u) != main]
+        if not urls:
+            skipped[key] = "他出品が使用中 / 主URLと同じ"
+            continue
+        existing = [u for u in (_cell(r, AUX0 + k) for k in range(aux_max)) if u]
+        prices = {_norm_url(u): p for u, p in items if p}
+        full, added, _removed = rank_backurls(existing, urls, prices, aux_max)
+        if full != existing:
+            wb[row] = full
+        used.update(u for u in urls if u in full or _norm_url(u) in
+                    {_norm_url(x) for x in full})
+        if not added:
+            skipped[key] = "もっと安い補が既に5本ある"
+    return wb, used, skipped
+
+
 # 確証スキップの cooldown (2026-07-29)。設計 (discussion/2026-07-24_..._design.md:65) は
 # 「cooldown付き skip台帳で一定期間再表示しない … 数日後再挑戦」だったが、**実装は期限なし**で
 # 一度でも外すと二度と補URLが付かなかった (= その出品は永久に丸腰)。
@@ -1640,6 +1740,68 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
     return {"confirmed": len(confirmed), "written_rows": written, "added_urls": added_total}
 
 
+def run_newcand_aux(dry_run=False):
+    """新規出品候補タブの補URL用の行を、対応する出品の補URL欄(AC-AG)へ入れる (impure)。
+
+    人が既にカードを同定済みなので新しい判断は要らない。無人で回してよい。
+    """
+    from sheet_io import read_tab, write_rows_to_tab, write_aux_urls
+    import dup_guard as _dg
+
+    tab = read_tab(NEWCAND_TAB)
+    pending = pending_newcand_aux(tab)
+    if not pending:
+        print("新規出品候補: 入れる補URLはありません")
+        return 0
+    n_url = sum(len(v) for v in pending.values())
+    print(f"新規出品候補: 未転記の補URL {n_url}本 / {len(pending)}カード")
+
+    vals = _read_high()
+    guard_ok = True
+    owner_by_url = {}
+    try:
+        for _r in vals[1:]:
+            if not _cell(_r, B) or _cell(_r, D):
+                continue
+            for _u in [_cell(_r, A)] + [_cell(_r, AUX0 + k) for k in range(AUXN)]:
+                _n = _dg.norm_url(_u)
+                if _n:
+                    owner_by_url.setdefault(_n, set()).add(_cell(_r, B))
+        owner_by_url = {k: sorted(v) for k, v in owner_by_url.items()}
+    except Exception as e:                                     # noqa: BLE001
+        print(f"⚠️要対応 URL共有ガードを組めず **書込を中止**: {type(e).__name__}: {e}")
+        guard_ok = False
+
+    wb, used, skipped = plan_newcand_aux(pending, vals, owner_by_url, guard_ok)
+    for key, why in sorted(skipped.items()):
+        print(f"  ⏭ {key}: {why}")
+    if not wb:
+        print("  入れられる行はありませんでした")
+        return 0
+    if dry_run:
+        print(f"  (dry-run) {len(wb)}行 に書き込む予定")
+        return 0
+    n = write_aux_urls(wb)
+    print(f"🔗 補URL(AC-AG) 書込: {n}行 (安い順に最大{AUXN}本)")
+
+    # 使えた URL に転記済の印。次回もう出さない (人が同じ行を何度も見ない)。
+    marked = 0
+    used_norm = {_norm_url(u) for u in used}
+    body = []
+    for r in (tab[1:] if len(tab) > 1 else []):
+        r = list(r) + [""] * 12
+        if ((r[NEWCAND_USE_COL] or "").strip() == NEWCAND_USE_AUX
+                and not (r[NEWCAND_DONE_COL] or "").strip()
+                and _norm_url(r[NEWCAND_URL_COL]) in used_norm):
+            r[NEWCAND_DONE_COL] = NEWCAND_DONE_MARK
+            marked += 1
+        body.append(r[:len(tab[0])])
+    if marked:
+        write_rows_to_tab(NEWCAND_TAB, [list(tab[0])] + body)
+        print(f"  🔖 新規出品候補: 転記済 +{marked}本")
+    return n
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -1677,6 +1839,9 @@ def main():
         print(f"RESTOCK候補 {len(tg)}件 を先読み(limit={limit if limit else '全件'})")
         if tg:
             run_night_search(targets=tg, limit=limit)
+        return
+    if "newcand-aux" in sys.argv:
+        run_newcand_aux(dry_run="--dry-run" in sys.argv)
         return
     if "confirm" in sys.argv:
         max_backups, limit, dry = CONFIRM_MAX_BACKUPS, None, "--dry-run" in sys.argv

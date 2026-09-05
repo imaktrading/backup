@@ -16,6 +16,7 @@ REM   1) zero-backup listings first  : search --limit=30
 REM   2) top-up (1 backup)           : search --max-backups=2 --limit=10
 REM   3) restock prefetch            : search-restock --limit=0 (all)
 REM   3b) restock stock re-check     : psa_resource_gate.py --nightly (ledger only)
+REM   3c) spare supply from newcand   : psa_hoju_fill.py newcand-aux
 REM   4) ichibankuji prefetch        : ichibankuji_restock.py prefetch 10
 REM   5) ichibankuji live aux        : ichibankuji_restock.py prefetch-live 10
 REM   5c) UT aux-supply              : ut_hoju_fill.py search (all)
@@ -83,6 +84,15 @@ echo [restock-recheck] %date% %time% >> "%LOG%"
 set RESTOCK_TARGET_NEW=0
 python -u psa_resource_gate.py --nightly >> "%LOG%" 2>&1
 set RESTOCK_TARGET_NEW=
+
+REM --- 3c) move the spare supply URLs that a human already identified (the tab
+REM         "new listing candidates", rows marked as aux use) into the aux columns
+REM         of the matching listing. 2026-09-05: those rows had no destination at
+REM         all, so 163 of them were sitting unused while 45 listings had no spare
+REM         supplier at all. The card is already confirmed by a human, so no new
+REM         judgement is needed here.
+echo [newcand-aux] %date% %time% >> "%LOG%"
+python -u psa_hoju_fill.py newcand-aux >> "%LOG%" 2>&1
 
 REM --- 4) prefetch for ichibankuji aux URLs (candidates only, no UI, no sheet)
 echo [ichibankuji] prefetch %date% %time% >> "%LOG%"
