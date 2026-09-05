@@ -3577,11 +3577,29 @@ def main():
         except Exception as _de:
             print(f"  ⚠️ 重複の前置き skip: {type(_de).__name__}: {_de}")
         _con.close()
+        # ★2026-09-05: 仕入値の上限は **枠を選ぶ前に**見る。
+        #   従来は 目視 → build → 監査 の最後で落としていたため、上限を超えた行を
+        #   毎回 人に目視させてから捨てていた。行は未出品のまま残るので翌日また出る
+        #   (ユーザー指摘「以前目視したのが出てくる」の原因の1つ)。
+        #   仕入値はこの時点で既に分かっている (cost_map) ので、ここで落とせる。
+        try:
+            import pricing_engine as _pe
+            _hi = []
+            for _c in list(_kept):
+                _why = _pe.cost_sanity(cost_map.get(_c))
+                if _why and "上限" in _why:
+                    _hi.append(_c)
+                    _kept.remove(_c)
+            if _hi:
+                _drop["COST-CAP"] = _hi
+        except Exception as _ce:                               # noqa: BLE001
+            print(f"  ⚠️ 仕入値の前置き skip: {type(_ce).__name__}: {_ce}")
         if _drop:
             for _st, _cs in _drop.items():
                 _label = {"GAP": "catalog に行が無い(未収録の疑い)",
                           "OUT-OF-SCOPE": "参入しないゲーム",
                           "NO-IMAGE": "catalogに画像が無く目視不能",
+                          "COST-CAP": "仕入値が上限を超えている(目視しても最後に落ちる)",
                           "LIVE-DUP": "同じカードが既に出品中(後段で必ず除外される)"}.get(_st, _st)
                 print(f"  ⏭️ 枠を選ぶ前に除外 [{_st}={_label}]: {len(_cs)}件 → {_cs[:6]}")
             print(f"     (従来は10件に絞った後で落ちていた分。GAP は missing_models 経由で catalog へ)")

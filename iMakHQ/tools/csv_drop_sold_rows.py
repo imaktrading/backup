@@ -46,23 +46,43 @@ def cert_from_label(label):
     return m.group(1) if m else None
 
 
+def _better(cur, new):
+    """同じ鍵に2行ある時、どちらを採るか (純関数)。生きている方を採る。
+
+    ★2026-09-05: ここが `setdefault` = **先に出てきた行が勝ち** だったため、
+      同じ現物(cert)が2行あって片方が売切だと、**売切の方の行**で在庫を判定していた。
+      生成器は D列=○ の行を除外して **生きている方の行** で CSV を作っているのに、
+      入稿直前の判定だけが死んだ行を見て「仕入元が売り切れ」と落としていた。
+      実害: cert152976751 が 8/25〜9/5 の **13回**、cert150181360 が6回、
+      毎回 目視まで人を通してから捨てられていた (どちらも仕入元は生きていた)。
+      同じ cert が複数行にあるのは実測54件 (未出品どうしの重複35件)。
+    """
+    if cur is None:
+        return new
+    if cur["sold"] != new["sold"]:
+        return new if not new["sold"] else cur      # 売切でない方を採る
+    if not cur["url"] and new["url"]:
+        return new                                   # URL がある方を採る
+    return cur                                       # 同条件なら先に出てきた方 (従来どおり)
+
+
 def supply_index(rows2d):
     """シート → {cert or SKU: {"sold": bool, "checked": str, "url": str, "row": int}} (純関数)。
 
     メルカリ由来の行は CustomLabel が URL 末尾 (`m21409027696`) なので、cert と URL 末尾の
-    両方を鍵にする。
+    両方を鍵にする。同じ鍵が複数行にある時は **生きている行**を採る (_better)。
     """
     idx = {}
     for i, r in enumerate(rows2d[1:], start=2):
         url, cert = _cell(r, A), _cell(r, I)
         info = {"sold": bool(_cell(r, D)), "checked": _cell(r, O), "url": url, "row": i}
         if cert:
-            idx.setdefault(cert, info)
+            idx[cert] = _better(idx.get(cert), info)
         # ★ 仕入先の id の取り方は sheet_io に1か所 (2026-09-03)。
         #   各自に正規表現を持っていたため SNKRDUNK が両方で抜けていた。
         _sid = sheet_io.supply_id_from_url(url)
         if _sid:
-            idx.setdefault(_sid, info)
+            idx[_sid] = _better(idx.get(_sid), info)
     return idx
 
 
