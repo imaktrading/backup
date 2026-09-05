@@ -171,6 +171,7 @@ iMakeBayAPI/de_speedpak_failed.json
 
 # RESTOCK 用 Chrome profile (runtime・再生成可)
 iMakHQ/chrome_profile_psa_restock/
+iMakHQ/chrome_profile_ebaymag/
 
 # dispatch (常駐 watcher / worktree 委譲) の実行時生成物 — 再生成可・履歴に不要
 # 2026-07-29: dispatch.lock を commit すると別プロセスが「実行中」と誤認して永久に止まる
