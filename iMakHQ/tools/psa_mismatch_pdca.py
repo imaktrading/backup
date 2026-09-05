@@ -21,6 +21,11 @@ ROUTE_LABEL = {
     "cert": "商品管理シートI列cert是正",
     "listing": "eBay出品revision",
     "unknown": "要調査",
+    # ★2026-09-05: card番号が空 = **catalog を引きにすら行っていない**。
+    #   catalog が誤っているかどうか判定できていないので、依頼書に混ぜてはいけない。
+    #   2026-09-01 に画面表示だけ言い分けたが、依頼書の中身は直っていなかった。
+    #   実害: 9/5 に 39件の依頼を出し、うち29件がこれだった (取り下げ済)。
+    "no_cardno": "番号が読めない(カタログ未確認・こちら側)",
 }
 
 
@@ -108,12 +113,18 @@ def to_tab_rows(ledger):
 
 
 def route_buckets(ledger):
-    """未対処のみ 振り分けキー別に集約 → {route: [dict,...]}。Act(対処)で使う。"""
+    """未対処のみ 振り分けキー別に集約 → {route: [dict,...]}。Act(対処)で使う。
+
+    ★card番号が空の行は catalog に回さない (`no_cardno`)。番号が無いと catalog を
+      引けないので、「catalog が誤っている」と言える根拠がそもそも無い。
+    """
     out = {}
     for r in ledger:
         if str(r.get("status")) == "解決":
             continue
         route = classify_route(r.get("原因"))
+        if route == "catalog" and not str(r.get("card_no") or "").strip():
+            route = "no_cardno"
         out.setdefault(route, []).append(r)
     return out
 

@@ -460,6 +460,11 @@ def _backfill_snkr_card_image(cached, row, mp, sp):
     return updated
 
 
+# ★2026-09-05: 商品管理シートを読めたか。読めていない走行では catalog へ依頼を出さない
+#   (番号もKEYも空になるのは **こちら側の読取失敗**であって catalog の誤りではない)。
+SHEET_READ_OK = True
+
+
 def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):
     """確認ゲートの不一致(OFF)を PDCA で回す: read台帳→reconcile→write→原因別ルーティング→トレンド。
 
@@ -495,7 +500,15 @@ def _run_mismatch_pdca(rejected, confirmed_idx, idx_row, targets, cert_map, mp):
             print("   原因内訳: " + " ".join(
                 f"{pdca.ROUTE_LABEL.get(k, k)}={v}" for k, v in st["by_route"].items()))
         buckets = pdca.route_buckets(ledger)
+        _nn = len(buckets.get("no_cardno") or [])
+        if _nn:
+            print(f"   → 番号が読めない {_nn}件は **カタログ依頼に含めません** "
+                  "(catalog を引いていないので誤りと言えない。台帳「PSA不一致台帳」参照)")
         cat = buckets.get("catalog") or []
+        if cat and not SHEET_READ_OK:
+            print(f"   🚫 Catalog修正依頼 {len(cat)}件は **書きません** "
+                  "(このセッションはシートを読めていない = 判定の前提が無い)")
+            cat = []
         if cat:
             reqdir = r"C:/dev/iMak_data/catalog/requests"
             os.makedirs(reqdir, exist_ok=True)
@@ -545,7 +558,15 @@ def main():
                 keyed += 1
         print(f"  canonical KEY 付与: {keyed}/{len(rows)}枚 (商品管理シート itemID join)")
     except Exception as e:
+        # ★2026-09-05: ここで失敗すると **全行が「番号もKEYも無い」**状態で目視に出る。
+        #   9/5 18:20 に Google の読取上限 (429) でこれが起き、84件すべてが未確認扱いになり、
+        #   外した分が catalog の誤りとして 39件の依頼書になった (取り下げ済)。
+        #   探索は続けてよいが、**こちらが読めなかっただけの事を相手の誤りとして送らない**。
+        global SHEET_READ_OK
+        SHEET_READ_OK = False
         print(f"  ⚠ canonical KEY map 取得失敗 ({type(e).__name__}: {e}) — bare番号で続行")
+        print("  🚫 シートを読めていないので、この走行では **カタログ修正依頼を出しません** "
+              "(番号/KEY が空なのは catalog のせいではないため)")
 
     # --- Step6 P1b: itemID join 漏れを「出品時 目視確定」資産で補完 (2026-07-24) ---
     # 出品時に HTML viewer で確定した変種は verified_certs.json (cert→product_id) に資産化されている。

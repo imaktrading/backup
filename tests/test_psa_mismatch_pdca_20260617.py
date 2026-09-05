@@ -54,7 +54,10 @@ def test_reconcile_reopen_after_resolved():
 
 
 def test_route_buckets_excludes_resolved():
-    led, _ = pdca.reconcile([], [_rej("111", "catalog"), _rej("222", "cert")],
+    # ★2026-09-05: card番号が無い行は catalog に回さなくなった (no_cardno)。
+    #   この test が見たいのは「解決済を出さない」ことなので、番号を入れて本筋を保つ。
+    led, _ = pdca.reconcile([], [_rej("111", "catalog", card_no="OP11-106"),
+                                 _rej("222", "cert")],
                             set(), "2026-06-17")
     led, _ = pdca.reconcile(led, [], {"222"}, "2026-06-18")   # 222 解決
     b = pdca.route_buckets(led)

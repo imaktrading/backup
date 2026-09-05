@@ -342,6 +342,13 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .clbl{flex:1;min-width:220px;font-size:13px;word-break:break-word;line-height:1.45}
 .rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px}
 .cand:has(.ck:not(:checked)) .rsn{display:inline-flex}
+/* ★2026-09-05: 事前ゲート(①現物 vs ②catalog候補)の理由 select は `.cand` の中ではなく
+   `.card` の直下にある。上の行は候補ピッカー用なので、こちらは **一度も表示されていなかった**。
+   人が選べないまま既定の `catalog` が送られ、9/5 に「カード番号すら空」の29件を含む
+   39件の修正依頼が catalog に飛んだ (取り下げ済)。外した行では必ず出す。 */
+.card.off > .rsn{display:block;font-size:13px;color:#333;margin-top:6px;padding:3px;
+                 border:2px solid #c33;border-radius:4px;background:#fff5f5}
+.card.off > .rsn.unset{background:#ffe0e0}
 .rb{font-size:10px;padding:1px 5px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:pointer}
 /* 要調査 = 判断を保留して残す印。捨てる系(違う/見送り)と色で区別する */
 .rb.probe{border-color:#0a7;color:#076}
@@ -385,16 +392,25 @@ function tog(i){var c=document.getElementById('c'+i);
 function setAll(v){document.querySelectorAll('.card input[type=checkbox]').forEach(function(b){
   b.checked=v; tog(b.closest('.card').dataset.idx);});}
 function go(){
-  var conf=[], rej=[];
+  var conf=[], rej=[], unset=0, first=null;
   document.querySelectorAll('.card').forEach(function(c){
     var i=parseInt(c.dataset.idx);
     var pick=c.querySelector('input[type=radio]:checked');
     if(c.querySelector('input[type=checkbox]').checked && pick){
       conf.push({idx:i, key:pick.value});
     } else {
-      rej.push({idx:i, reason:c.querySelector('.rsn').value});
+      var r=c.querySelector('.rsn').value;
+      /* ★2026-09-05: 理由が空のまま送らせない。既定で catalog が入っていたせいで
+         「番号すら読めていない」行までカタログの誤りとして依頼書になっていた。 */
+      if(!r){ unset++; if(!first) first=c; }
+      rej.push({idx:i, reason:r});
     }
   });
+  if(unset){
+    alert('外した理由が未選択の行が '+unset+'件あります。理由を選ばないと、どこを直すか決められません (勝手にカタログのせいにしません)。');
+    if(first){ first.scrollIntoView({block:'center'}); first.querySelector('.rsn').focus(); }
+    return;
+  }
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({confirmed:conf, rejected:rej})}).then(function(){
     document.getElementById('main').style.display='none';
@@ -455,7 +471,12 @@ def build_confirm_html(items):
                          else "<div class='ph'>番号が読み取れない<br>(カタログは未確認)</div>")
         cat_col = f"<div class='col cat'><div class='cap'>② 候補(正しい変種を選択)</div>{cat_inner}</div>"
 
-        rsn = ("<select class='rsn'>"
+        # ★2026-09-05: 先頭を **空**にする。従来は先頭が `catalog` で既定選択されていたため、
+        #   理由を触らずに外すと **全部カタログのせい**として送られていた。
+        #   ここは 1丁目1番地「カタログが誤りと安易に判断して依頼を出すな」に直接抵触する。
+        #   探索後の画面では 2026-07-30 に同じ理由で既定を外している (こちらが漏れていた)。
+        rsn = ("<select class='rsn unset' onchange=\"this.classList.toggle('unset',!this.value)\">"
+               "<option value=''>▼ 外した理由を選んでください</option>"
                "<option value='catalog'>②候補が無い/合わない(catalog誤・未収録)</option>"
                "<option value='cert'>①現物が違う(商品管理シートcert#誤)</option>"
                "<option value='listing'>①②一致だが売った物と違う(出品誤)</option>"
