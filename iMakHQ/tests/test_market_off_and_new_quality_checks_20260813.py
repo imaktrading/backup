@@ -194,9 +194,11 @@ def test_hoju_badge_explains_zero():
     """★「目視できる0件」の時に理由を出す。件数だけだと押して空振りする
     (status の安い母数 37件 と、足切り後の実数 0件 が食い違うため)。"""
     src = open(r"C:\dev\iMak\iMakHQ\control_panel.py", encoding="utf-8").read()
-    i = src.index("目視できる %s件")
+    i = src.index('c_txt = self.todo_line("hoju_confirm"')   # ★2026-09-06 文言統一
     block = src[i:i + 1400]
-    assert "押しても0件" in block
+    # ★2026-09-06: 「押しても0件」の一言は todo_line が全ボタン共通で書くようになった。
+    #   ここで見るのは **その後に理由が続くか**。
+    assert "※押しても0件" in src, "0件の時に押しても無駄だと書いていない"
     assert "市場にその版が無い" in block, "待ち/手が打てる の2分類で出していない"
     assert "手が打てる" in block
     assert "split_blocked" in block, "語彙が psa_hoju_fill と別定義になっている"

@@ -164,7 +164,9 @@ def test_button_has_tip_count_and_blue():
     assert '"tip":' in blk, "tip が無いと _attach_tip が呼ばれず件数も出ない"
     assert '"label_fg"' in blk
     # 件数の文言と、青の判定
-    assert "証明番号を打つ %s件" in _PANEL
+    # ★2026-09-06: 文言は全ボタン共通の「残り N件 — 今回 …」に統一した。
+    assert 'todo_line("newcand_high", _nh["pending"]' in _PANEL
+    assert "証明番号を打ちます" in _PANEL
     assert '"newcand_high": bool(_nh.get("pending"))' in _PANEL
     # 数えるのは subprocess 側 (パネルから直接 import すると tools/ が見えない)
     assert "d['newcand_high']=N.count_workload_high()" in _PANEL
@@ -182,7 +184,8 @@ def test_count_workload_high_is_cheap():
 def test_button_is_step_two_of_the_seed_flow():
     """①目視 → ②証明番号 の並びとして「どこまで行ったか」を出す。"""
     assert '("newcand", "newcand_high"),' in _PANEL
-    assert '"sold_restock")' in _PANEL          # STEP_SINGLES から newcand が抜けた
+    assert '"newcand"' not in _PANEL.split("STEP_SINGLES = (")[1].split(")")[0], \
+        "STEP_SINGLES に newcand が戻っていない (①②の順番を持つため)"
 
 
 # ---------------------------------------------- 売り切れ (半数がこれ)

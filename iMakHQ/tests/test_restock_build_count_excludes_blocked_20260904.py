@@ -53,7 +53,7 @@ def test_the_panel_shows_the_blocked_count():
     import io as _io
     s = _io.open(os.path.join(_ROOT, "iMakHQ", "control_panel.py"),
                  encoding="utf-8").read()
-    i = s.index('rb_txt = "')
+    i = s.index("rb_txt = self.todo_line")   # ★2026-09-06 文言統一
     seg = s[i:i + 900]
     assert 'rb.get("blocked")' in seg, "ヒントに出していない"
     assert "生成できない" in seg
@@ -96,5 +96,5 @@ def test_panel_shows_the_ended_count_on_step3():
     import io as _io
     s = _io.open(os.path.join(_ROOT, "iMakHQ", "control_panel.py"),
                  encoding="utf-8").read()
-    i = s.index("確かめに行く %s件")
+    i = s.index('rw_txt = (self.todo_line("restock_wb"')   # ★2026-09-06 文言統一
     assert 'rw.get("ended")' in s[i:i + 700], "③のヒントに終了済を出していない"

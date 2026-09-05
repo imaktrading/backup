@@ -20,9 +20,14 @@ def _src():
 
 
 def _button_block():
+    """そのボタンの dict エントリ全体。
+
+    ★2026-09-06: 以前は前後400字の窓で切っていたが、コメントを足しただけで
+      cmd が窓の外に出て落ちた。エントリの終わりまでを見る。
+    """
     s = _src()
     i = s.index("🆕 PSA 補URL ① 当日分")
-    return s[i - 400:i + 400]
+    return s[i:s.index("\n    },", i)]
 
 
 def test_auto_hook_is_not_reintroduced():

@@ -57,7 +57,7 @@ def test_a_bad_price_does_not_break_the_count(tmp_path, monkeypatch):
 def test_the_panel_shows_the_amount():
     s = _io.open(os.path.join(_ROOT, "iMakHQ", "control_panel.py"),
                  encoding="utf-8").read()
-    i = s.index("今回 %s件 落とせます")
+    i = s.index("ce_txt = (")            # ★2026-09-06 文言統一で目印を変更
     assert 'ce.get("usd_next")' in s[i:i + 700], "取下げのヒントに金額を出していない"
 
 

@@ -1355,12 +1355,17 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
     live = len(select_backfill_targets(vals, max_backups=AUXN + 1))
 
     # --- 検索(slice2) 側 ---
-    s_can = s_nocardno = s_done = 0
+    # ★2026-09-06: 「① 当日分」は ② と同じ数字を出していた (badge 共有)。
+    #   ①は出品直後に押すボタンなので **今日 出した分でまだ探せていない件数** を別に数える。
+    #   0件なら押す必要が無い、と一目で分かるようにするため。
+    s_can = s_nocardno = s_done = s_today = 0
     for t in targets:
         if _entry_complete(cache.get(t["itemID"]), today):
             s_done += 1
         elif (build_search_query(t, mp).get("card_no") or ""):
             s_can += 1
+            if (t.get("listed_at") or "")[:10] == today:
+                s_today += 1
         else:
             s_nocardno += 1
 
@@ -1412,7 +1417,8 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
             ready += 1
     return {"live_psa": live, "targets": len(targets),
             "confirm_targets": len(c_targets),
-            "search": {"can": s_can, "no_cardno": s_nocardno, "done": s_done},
+            "search": {"can": s_can, "no_cardno": s_nocardno, "done": s_done,
+                       "today_can": s_today},
             "confirm": {"ready": ready, "unjudged": unjudged,
                         "blocked": {k: stats[k] for k in STOP_REASONS}}}
 

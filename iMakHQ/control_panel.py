@@ -1390,8 +1390,12 @@ SCRIPTS = [
         # 自動化せずボタンにする(ユーザー提案)。対象は新規優先の並びで先頭に来る。
         "category": None, "type": "utility",
         "label": "🆕 PSA 補URL ① 当日分",
-        "tip": "出品した直後に押す。その日に出した分だけ、仕入元の候補を今すぐ検索する。夜間検索(slice2)を待たずに供給を確保したい時に使う。",
-        "badge": "hoju_search",
+        "tip": "出品した直後に押す。夜間検索(23:30)を待たずに、今すぐ仕入元の候補を探す。"
+               "対象は 補が薄い順・新しい順の先頭15件なので、押した直後は当日出した分から埋まる。",
+        # ★2026-09-06: ② と同じ "hoju_search" を共有していたので、件数もヒントも色も
+        #   ②と完全に同じだった。①は出品直後に押すボタンなのに「夜間に自動 (押す必要なし)」
+        #   と出て、夜間が動いている限り **一度も青にならなかった**。自前の badge にする。
+        "badge": "hoju_search_now",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         "cmd": ["python", "psa_hoju_fill.py", "search", "--limit=15"],
@@ -3444,7 +3448,34 @@ class ListingPanel:
     # ①②③ の無い単発ボタン。順番が無いので「← 次」は出さないが、
     #   「今日やったか」は知りたい (ユーザー: 棚②とか取下げとかは？ 2026-09-04)。
     #   📊 補URL件数感 は **見るだけ**なので入れない。
-    STEP_SINGLES = ("cull_end", "shelf_evict", "sold_restock")
+    STEP_SINGLES = ("cull_end", "shelf_evict", "sold_restock",
+                    # 補URL (1) 当日分: 出品直後に押す単発。順番には並ばない
+                    "hoju_search_now")
+
+    # ── ボタン1回で片づく上限 (2026-09-06 ユーザー指示) ────────────────
+    #   > どのボタンもそうだけど、そのボタンで、処理する件数が何件残っているか
+    #   1回で全部 終わらないボタンがあるのに「押すと44件」とだけ出していたので、
+    #   押した後に減っていないように見えた。**残り** と **今回** を分けて出す。
+    #   数字は SCRIPTS の cmd (--limit) と各モジュールの CAP が正。ここに写さない。
+    PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "newcand": 20}
+
+    @classmethod
+    def todo_line(cls, kind, remaining, verb):
+        """全ボタン共通の1行目。「残り何件 / 今回 何件」を同じ言い回しで出す。
+
+        remaining=0 のときは **押しても減らない**とはっきり書く (理由は呼び手が足す)。
+        """
+        try:
+            remaining = int(remaining or 0)
+        except (TypeError, ValueError):
+            remaining = 0
+        if not remaining:
+            return "\n※押しても0件"
+        cap = cls.PRESS_CAP.get(kind)
+        if cap and remaining > cap:
+            return "\n残り %d件 — 今回 %d件 %s (あと約%d回)" % (
+                remaining, cap, verb, -(-remaining // cap))
+        return "\n残り %d件 — 今回 全部 %s" % (remaining, verb)
 
     def _step_log_path(self):
         return os.path.join(WORKSPACE, "..", "iMak_data", "hq", "button_last_run.json")
@@ -3705,26 +3736,48 @@ class ListingPanel:
             #   ただし自動が止まっている時は押す必要があるので、その時だけそう出す。
             nightly = nightly_search_state()
             if nightly["ok"]:
-                s_txt = "\n夜間%sに自動 (押す必要なし)\n今夜の対象 %s件" % (nightly["at"], s["can"])
+                s_txt = (self.todo_line("hoju_search", s["can"], "探します")
+                         + "\n夜間%s に自動で走ります (押す必要なし)" % nightly["at"])
             else:
-                s_txt = "\n⚠️ 夜間自動が止まっています (%s)\n押して検索できる %s件" % (
-                    nightly["why"], s["can"])
+                s_txt = (self.todo_line("hoju_search", s["can"], "探します")
+                         + "\n⚠️ 夜間自動が止まっています (%s)" % nightly["why"])
             if s["no_cardno"]:
                 s_txt += "\n※探索不能 %s件 (番号なし)" % s["no_cardno"]
-            c_txt = "\n目視できる %s件 (補0本 %s件のうち)" % (cf["ready"], tot)
-            if cf["unjudged"]:
-                c_txt += "\n※絵柄が未判定 %s件 (押すと判定)" % cf["unjudged"]
+            # 🆕 ① 当日分: **今日 出した分でまだ探せていない件数**。0件なら押さなくていい。
+            #   (2026-09-06: ここが ② と同じ数字で「押す必要なし」と出ていた)
+            _tdy = s.get("today_can", 0)
+            sn_txt = self.todo_line("hoju_search_now", _tdy, "探します")
+            if _tdy:
+                sn_txt += "\n今日 出した分。夜間23:30 を待たずに今すぐ探します"
+            else:
+                sn_txt += " (今日 出した分は 探し済み / まだ出していない)"
+                if s["can"]:
+                    sn_txt += "\n古い分の %s件は 夜間が自動で探します" % s["can"]
+            # 🩹 ③ 目視: **押したら何が起きるか**を先に書く (2026-09-06 ユーザー指摘)。
+            #   「目視できる 0件 / ※絵柄が未判定 44件」だと、0件を見て押さなくていいと読める。
+            #   未判定は **押せば絵柄を見比べ、同じ物はそのまま目視に出る** = 押す価値がある。
+            #   母数も confirm 側 (補が薄い) に直す。tot は探す側の母数で、別の数字だった。
+            _rdy, _unj, _ctot = cf["ready"], cf["unjudged"], w.get("confirm_targets", tot)
+            c_txt = self.todo_line("hoju_confirm", _rdy + _unj, "目視します")
+            if _rdy and _unj:
+                c_txt += ("\n内訳: すぐ目視 %s件 / 絵柄を見比べる %s件"
+                          "\n見比べた分も 同じ物ならそのまま目視に出ます") % (_rdy, _unj)
+            elif _unj:
+                c_txt += ("\n全部 まだ絵柄を判定していない分です"
+                          "\n押すと見比べて、同じ物だけ目視に出ます")
+            elif not _rdy:
+                c_txt += " (補が薄い %s件のうち)" % _ctot
             # ★2026-08-14: 0件の時に**理由**を出す。件数だけだと「候補は37件ある」のに
             #   押して空振りする (status の安い母数と、足切り後の実数が食い違うため)。
             #   何で消えたのかが分かれば、次に何をすべきかが決まる。
             # ★2026-08-15: 内部の理由名を並べても読めない (ユーザー指摘「ん?ってなる」)。
             #   **「市場にその版が無い(待ち)」と「手が打てる」** の2分類で出す。
             #   語彙は psa_hoju_fill.split_blocked が SSOT (status と同じ言葉になる)。
-            if not cf["ready"] and not cf["unjudged"]:
+            if not _rdy and not _unj:
                 try:
                     import psa_hoju_fill as _H
                     _sp = _H.split_blocked(cf.get("blocked") or {})
-                    c_txt += "\n※押しても0件"
+                    # ★2026-09-06: 0件の一言は todo_line が既に書いている。ここで足すと二重。
                     if _sp["wait"]:
                         c_txt += "\n  市場にその版が無い %s件 (%s)" % (
                             _sp["wait"],
@@ -3742,21 +3795,26 @@ class ListingPanel:
             elif not nc.get("show") and not nc.get("auto"):
                 n_txt = "\n※押しても0件 (全部 結論済)"
             else:
-                n_txt = "\n目視 %s件" % nc.get("show", 0)
+                n_txt = self.todo_line("newcand", nc.get("show", 0), "目視します")
                 if nc.get("auto"):
-                    n_txt += " (+自動で補URL %s件)" % nc["auto"]
+                    n_txt += "\nこのほか 自動で補URLに回る %s件" % nc["auto"]
             # 🎴 一番くじ: PSA と同じ考え方 (押したら何件できるか)。2026-08-22 ユーザー要望
             kj = (w0.get("kuji") or {}) if isinstance(w0, dict) else {}
             if kj.get("error"):
                 k_s = k_c = "\n(残件 取得できず: %s)" % str(kj["error"])[:40]
             elif kj:
-                k_s = "\n今夜の対象 %s件 (補0本 %s件)" % (
-                    (kj.get("search") or {}).get("can", 0), kj.get("zero", 0))
+                # ★2026-09-06: 母数に kj["zero"] を出していたが、ichibankuji_restock は
+                #   そのキーを返していない = **いつも「補0本 0件」**と嘘を出していた。
+                #   実際に返ってくる targets (補が薄い件数) に直す。
+                k_s = (self.todo_line("kuji_search",
+                                      (kj.get("search") or {}).get("can", 0), "探します")
+                       + "\n(補が薄い %s件のうち)" % kj.get("targets", 0))
                 if (kj.get("search") or {}).get("no_query"):
                     k_s += "\n※検索語が作れない %s件" % kj["search"]["no_query"]
-                k_c = "\n目視できる %s件" % (kj.get("confirm") or {}).get("ready", 0)
+                k_c = self.todo_line("kuji_confirm",
+                                     (kj.get("confirm") or {}).get("ready", 0), "目視します")
                 if not (kj.get("confirm") or {}).get("ready"):
-                    k_c += "\n※先に slice2 (夜間検索) を回してください"
+                    k_c += " (先に ② 夜に探す を回してください)"
             else:
                 k_s = k_c = ""
             # 🗑 取下げ (CULL): 押したら何件落ちるか + あと何件残っているか
@@ -3765,8 +3823,9 @@ class ListingPanel:
             if ce.get("error"):
                 ce_txt = "\n(残件 取得できず: %s)" % str(ce["error"])[:40]
             elif ce:
-                ce_txt = "\n今回 %s件 落とせます (残り %s件)" % (
-                    ce.get("next", 0), ce.get("remaining", 0))
+                _cn, _cr = ce.get("next", 0), ce.get("remaining", 0)
+                ce_txt = ("\n残り %d件 — 今回 %d件 落とします" % (_cr, _cn)
+                          if _cr else "\n※押しても0件")
                 # ★2026-09-04 ユーザー要望「取下げは、金額開かないのかな」。
                 #   出品枠は **今 売れる状態にある出品の総額** で決まるので、
                 #   件数より「いくら空くか」が判断材料になる (棚ボタンと同じ)。
@@ -3775,10 +3834,10 @@ class ListingPanel:
                     if ce.get("usd_remaining") and ce["usd_remaining"] != ce["usd_next"]:
                         ce_txt += " (残り全部なら $%s)" % format(int(ce["usd_remaining"]), ",")
                 if ce.get("remaining", 0) > ce.get("cap", 0):
-                    ce_txt += "\n※1回 %s件までなので あと %s回" % (
+                    ce_txt += "\n(1回 %s件までなので あと約%s回)" % (
                         ce["cap"], -(-ce["remaining"] // ce["cap"]))
                 if not ce.get("remaining"):
-                    ce_txt += "\n※押しても0件 (これまでに %s件 落とし済み)" % ce.get("done", 0)
+                    ce_txt += " (これまでに %s件 落とし済み)" % ce.get("done", 0)
             else:
                 ce_txt = ""
             # 📉 棚を入れ替える: 押したら何件・いくら空くか
@@ -3790,8 +3849,8 @@ class ListingPanel:
                 se_txt = "\n(残件 取得できず: %s)" % str(se["error"])[:40]
                 se_label = ""
             elif se:
-                se_txt = ("\n在庫はあるが売れない出品が %s件 ($%s ぶん)\n"
-                           "押すと「いくら空けますか」と聞きます\n"
+                se_txt = ("\n残り %s件 — 今回 押すと「いくら空けますか」と聞きます"
+                           "\n(在庫はあるが売れない出品 $%s ぶん)\n"
                            "今日の出品額 $%s") % (
                     se.get("max_picked", 0), f"{se.get('max_amount', 0):,.0f}",
                     f"{se.get('listed_today', 0):,.0f}")
@@ -3818,8 +3877,10 @@ class ListingPanel:
                 if not sr.get("report"):
                     sr_txt = "\n※注文レポート未DL (デスクトップに ebay-all-orders-report-*.csv)"
                 else:
-                    sr_txt = "\n今すぐ送れる %s件 (要確認 %s件・補充済 %s件)" % (
-                        sr.get("actionable", 0), sr.get("unknown", 0), sr.get("done", 0))
+                    sr_txt = (self.todo_line("sold_restock", sr.get("actionable", 0),
+                                             "送ります")
+                              + "\n(要確認 %s件・補充済 %s件)" % (
+                                  sr.get("unknown", 0), sr.get("done", 0)))
                     if sr.get("unknown"):
                         sr_txt += "\n※要確認は押すと分かります (売切れ終了→出し直しの可能性)"
                     # ★2026-09-04: 仕入値が取れない行は押しても止まる。
@@ -3838,8 +3899,8 @@ class ListingPanel:
             if pg.get("error"):
                 pg_txt = _err(pg, "件数")
             elif pg:
-                pg_txt = "\n今すぐ照合できる %s件 (候補 %s件のうち)" % (
-                    pg.get("actionable", 0), pg.get("targets", 0))
+                pg_txt = (self.todo_line("psa_gate", pg.get("actionable", 0), "照合します")
+                          + "\n(候補 %s件のうち)" % pg.get("targets", 0))
                 # ★2026-09-05: 仕入元に在庫が無い行は **押しても動かせない**。
                 #   ここを「今すぐ照合できる」に混ぜていたため、ラベルが 44件 と出て
                 #   実際に出たのは 0件だった (43件が供給待ちだった)。分けて出す。
@@ -3858,8 +3919,7 @@ class ListingPanel:
                 if (pg.get("funnel_age") or 0) >= 3:
                     pg_txt += "\n※ファネルが %s日前です (先に 📊 ファネル分析)" % pg["funnel_age"]
                 if not pg.get("actionable") and not pg.get("note"):
-                    pg_txt += ("\n※押しても0件 "
-                               "(仕入元に在庫が出るか、ファネルが更新されるまで増えません)")
+                    pg_txt += ("\n(仕入元に在庫が出るか、ファネルが更新されるまで増えません)")
             else:
                 pg_txt = ""
             # ♻ RESTOCK Revise CSV生成: 何件ぶん CSV が出るか
@@ -3867,16 +3927,17 @@ class ListingPanel:
             if rb.get("error"):
                 rb_txt = _err(rb, "件数")
             elif rb:
-                rb_txt = "\nCSVにできる %s件" % rb.get("actionable", 0)
+                rb_txt = self.todo_line("restock_build", rb.get("actionable", 0),
+                                        "CSVにします")
                 if rb.get("done"):
-                    rb_txt += " (出し済み %s件は除外)" % rb["done"]
+                    rb_txt += "\n(出し済み %s件は除外)" % rb["done"]
                 # ★2026-09-04: cert が引けない行は **生成できない**。件数に混ぜると
                 #   「7件と出るのに5件しか出ない」になる (ユーザー指摘)。分けて出す。
                 if rb.get("blocked"):
                     rb_txt += "\n※cert が引けず生成できない %s件は含めていません" % rb["blocked"]
                     rb_txt += "\n  (商品管理シートに その itemID の行が無い / 見送り)"
                 if not rb.get("actionable"):
-                    rb_txt += "\n※押しても0件 (先に 🃏 で仕入元を確定)"
+                    rb_txt += " (先に ① 探す で仕入元を確定)"
             else:
                 rb_txt = ""
             # 🔄 RESTOCK状態同期: 何件の実状態を確かめに行くか
@@ -3884,19 +3945,22 @@ class ListingPanel:
             if rw.get("error"):
                 rw_txt = _err(rw, "件数")
             elif rw:
-                rw_txt = "\n確かめに行く %s件 (実行済 %s件)" % (
-                    rw.get("actionable", 0), rw.get("done", 0))
+                rw_txt = (self.todo_line("restock_wb", rw.get("actionable", 0),
+                                         "確かめます")
+                          + "\n(実行済 %s件)" % rw.get("done", 0))
                 # ★2026-09-04: 終了済は押しても動かない (revise では戻せない)。
                 #   件数に混ぜると押しても減らず「要対応」が消えない。
                 if rw.get("ended"):
                     rw_txt += "\n※出品が終了した %s件は含めていません (出し直すなら新規出品)" % rw["ended"]
                 if not rw.get("actionable"):
-                    rw_txt += "\n※押しても0件 (全部 実行済)"
+                    rw_txt += " (全部 実行済)"
             else:
                 rw_txt = ""
             # 📊 補URL件数感: **見るだけ**なので色は変えない。今の内訳をそのまま出す
+            # ★2026-09-06: 「目視できる」は ③ のボタンと同じ数え方にする。ここだけ
+            #   ready しか見ていなかったので、③が「残り44件」の日に 0件と出ていた。
             hs_txt = "\nlive PSA %s件 / 補が薄い %s件\n(検索できる %s件 / 目視できる %s件)" % (
-                w.get("live_psa", "?"), tot, s["can"], cf["ready"])
+                w.get("live_psa", "?"), tot, s["can"], _rdy + _unj)
             # ★2026-09-04 ユーザー要望「夜間に探すのもやれているの？探せた件数と残数も」。
             #   夜間はパネルを通らないので「今日 押した」には出ない。ここに実績を出す。
             try:
@@ -3920,17 +3984,17 @@ class ListingPanel:
             elif kv.get("can") is None:
                 kv_txt = ""
             else:
-                kv_txt = "\n目視に出せる %s件" % kv["can"]
+                kv_txt = self.todo_line("kuji_supply", kv["can"], "目視します")
                 if not kv["can"]:
-                    kv_txt += "\n※押しても0件 (在庫切れの一番くじが無い)"
+                    kv_txt += " (在庫切れの一番くじが無い)"
             if kr.get("error"):
                 kr_txt = _err(kr, "件数")
             elif kr.get("can") is None:
                 kr_txt = ""
             else:
-                kr_txt = "\nCSVにできる %s件" % kr["can"]
+                kr_txt = self.todo_line("kuji_refresh", kr["can"], "CSVにします")
                 if not kr["can"]:
-                    kr_txt += "\n※押しても0件 (先に ① supply確定)"
+                    kr_txt += " (先に ① 目視 を押す)"
             # ★2026-09-03: UT の補URL。押したら何件できるかを出す (メルカリは叩かない)。
             #   数えるのは上の subprocess 側 (tools/ が sys.path に入っている)。
             #   ここで直接 import すると tools/ が見えず、毎回「取得できず」になっていた。
@@ -3939,27 +4003,33 @@ class ListingPanel:
                 ut_s_txt = ut_c_txt = ut_rs_txt = ut_rc_txt = ut_rq_txt = (
                     "\n(残件 取得できず: %s)" % str(_ut["error"])[:40])
             else:
-                ut_s_txt = "\n探せる %s件" % _ut.get("search", 0)
-                ut_c_txt = "\n目視できる %s件" % _ut.get("confirm", 0)
+                ut_s_txt = self.todo_line("ut_search", _ut.get("search", 0), "探します")
+                ut_c_txt = self.todo_line("ut_confirm", _ut.get("confirm", 0), "目視します")
                 if not _ut.get("confirm"):
-                    ut_c_txt += "\n※先に ② 夜に探す を押す"
-                ut_rs_txt = "\n探せる %s件 (売り切れ)" % _ut.get("restock_search", 0)
-                ut_rc_txt = "\n目視できる %s件" % _ut.get("restock_confirm", 0)
+                    ut_c_txt += " (先に ② 夜に探す を押す)"
+                ut_rs_txt = (self.todo_line("ut_restock_search",
+                                            _ut.get("restock_search", 0), "探します")
+                             + "\n(売り切れた出品の仕入れ直し)")
+                ut_rc_txt = self.todo_line("ut_restock_confirm",
+                                           _ut.get("restock_confirm", 0), "目視します")
                 if not _ut.get("restock_confirm"):
-                    ut_rc_txt += "\n※先に ① 探す を押す"
-                ut_rq_txt = "\n数量を戻す %s件" % _ut.get("restore", 0)
+                    ut_rc_txt += " (先に ① 探す を押す)"
+                ut_rq_txt = self.todo_line("ut_restore", _ut.get("restore", 0),
+                                           "数量を戻します")
                 if not _ut.get("restore"):
-                    ut_rq_txt += "\n※先に ② 目視 を押す"
+                    ut_rq_txt += " (先に ② 目視 を押す)"
             # ★2026-09-05: 『種→出品行に追加』。証明番号を打つまで進まないので、
             #   残件があれば必ず青にする (夜間では消えない)。
             _nh = (w0.get("newcand_high") or {}) if isinstance(w0, dict) else {}
             if _nh.get("error"):
                 nh_txt = "\n(残件 取得できず: %s)" % str(_nh["error"])[:40]
             elif _nh.get("pending"):
-                nh_txt = "\n証明番号を打つ %s件" % _nh["pending"]
+                nh_txt = self.todo_line("newcand_high", _nh["pending"],
+                                        "証明番号を打ちます")
             else:
                 nh_txt = "\n※押しても0件 (先に 🌱 捨てた候補→新規出品の種)"
-            by_kind = {"hoju_search": s_txt, "hoju_confirm": c_txt, "newcand": n_txt,
+            by_kind = {"hoju_search": s_txt, "hoju_search_now": sn_txt,
+                       "hoju_confirm": c_txt, "newcand": n_txt,
                        "newcand_high": nh_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
                        "ut_restock_search": ut_rs_txt,
@@ -3984,6 +4054,9 @@ class ListingPanel:
             act_kind = {
                         # ── 夜間バッチが自動で減らす → 黒。夜が止まっている日だけ青
                         "hoju_search": bool(s.get("can")) and not _auto,
+                        # (1) 当日分は **夜間ルールの対象外**。今日出した分は夜まで無防備
+                        #   なので、夜間が動いていても残っていれば青にする (2026-09-06)。
+                        "hoju_search_now": bool(s.get("today_can")),
                         "ut_search": bool(_ut.get("search")) and not _auto,
                         "ut_restock_search": bool(_ut.get("restock_search")) and not _auto,
                         "kuji_search": bool((kj.get("search") or {}).get("can")) and not _auto,
@@ -4015,7 +4088,8 @@ class ListingPanel:
                 by_kind = {k: v + "\n※前回値" for k, v in cached.items()}
             else:
                 msg = f"\n(残件 取得できず: {why[:40]})"
-                by_kind = {"hoju_search": msg, "hoju_confirm": msg, "newcand": msg,
+                by_kind = {"hoju_search": msg, "hoju_search_now": msg,
+                           "hoju_confirm": msg, "newcand": msg,
                            "newcand_high": msg}
             try:
                 self.append_log(f"⚠️ 補URL 残件の取得に失敗: {why}\n")
