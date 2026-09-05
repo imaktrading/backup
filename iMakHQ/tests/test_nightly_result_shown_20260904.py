@@ -69,5 +69,7 @@ def test_the_panel_shows_it_on_the_status_button():
     i = _SRC.index('hs_txt = "')
     seg = _SRC[i:i + 1400]
     assert "nightly_last_run()" in seg
-    assert "探せた" in seg and "まだ" in seg
+    # ★2026-09-06: 「探せた」は暦日でなく **その夜の日付** で数えるようになった。
+    #   夜間は23:30開始なので、暦日で数えると朝は必ず0件だった (実測 128件 → 0件表示)。
+    assert "その夜に探せた" in seg and "今夜また探す" in seg
     assert "途中で止まっています" in seg

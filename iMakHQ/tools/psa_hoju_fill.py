@@ -1415,8 +1415,19 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
             unjudged += 1        # 判定待ちが混ざる = 押すまで出るか確定しない
         else:
             ready += 1
+    # ★2026-09-06: 「その夜に何件 探せたか」を出すため、**探した日ごと**の件数を返す。
+    #   done は「今日(暦日)探し済み」なので、夜間は 23:30 開始で前日の日付が焼かれ、
+    #   朝に見ると **必ず 0件** になっていた (実測: 9/5 の夜に128件 探せていたのに
+    #   パネルは「探せた 0件」と出していた)。日付を跨ぐ仕事を暦日で数えない。
+    by_date = collections.Counter()
+    for _e in cache.values():
+        if (isinstance(_e, dict) and _e.get("date")
+                and "mercari" in _e and "snkrdunk" in _e):
+            by_date[_e["date"]] += 1
+
     return {"live_psa": live, "targets": len(targets),
             "confirm_targets": len(c_targets),
+            "searched_by_date": dict(by_date),
             "search": {"can": s_can, "no_cardno": s_nocardno, "done": s_done,
                        "today_can": s_today},
             "confirm": {"ready": ready, "unjudged": unjudged,

@@ -3871,22 +3871,25 @@ class ListingPanel:
             # 🔁 売れた分を補充: 押したら何件アクションが起きるか
             #   (2026-08-31 ユーザー要望「放置しちゃう」)。
             sr = (w0.get("restock") or {}) if isinstance(w0, dict) else {}
-            if sr.get("error"):
+            # ★2026-09-06: レポート未DL は **数えられなかった失敗ではなく前提不足**。
+            #   error を先に見ていたので「(残件 取得できず: 注文レポートがありません…)」と
+            #   出て、こちらが何をすればいいのか読み取れなかった (下の分岐は死んでいた)。
+            if sr and not sr.get("report"):
+                sr_txt = ("\n※押しても0件 — 先に注文レポートをDL"
+                          "\n(デスクトップに ebay-all-orders-report-*.csv)")
+            elif sr.get("error"):
                 sr_txt = "\n(残件 取得できず: %s)" % str(sr["error"])[:40]
             elif sr:
-                if not sr.get("report"):
-                    sr_txt = "\n※注文レポート未DL (デスクトップに ebay-all-orders-report-*.csv)"
-                else:
-                    sr_txt = (self.todo_line("sold_restock", sr.get("actionable", 0),
-                                             "送ります")
-                              + "\n(要確認 %s件・補充済 %s件)" % (
-                                  sr.get("unknown", 0), sr.get("done", 0)))
-                    if sr.get("unknown"):
-                        sr_txt += "\n※要確認は押すと分かります (売切れ終了→出し直しの可能性)"
-                    # ★2026-09-04: 仕入値が取れない行は押しても止まる。
-                    #   青にすると押しても減らないので、別に出す。
-                    if sr.get("blocked"):
-                        sr_txt += "\n※仕入値が取れず送れない %s件 (--cost で渡すか、先に調べる)" % sr["blocked"]
+                sr_txt = (self.todo_line("sold_restock", sr.get("actionable", 0),
+                                         "送ります")
+                          + "\n(要確認 %s件・補充済 %s件)" % (
+                              sr.get("unknown", 0), sr.get("done", 0)))
+                if sr.get("unknown"):
+                    sr_txt += "\n※要確認は押すと分かります (売切れ終了→出し直しの可能性)"
+                # ★2026-09-04: 仕入値が取れない行は押しても止まる。
+                #   青にすると押しても減らないので、別に出す。
+                if sr.get("blocked"):
+                    sr_txt += "\n※仕入値が取れず送れない %s件 (--cost で渡すか、先に調べる)" % sr["blocked"]
             else:
                 sr_txt = ""
             # ===== 2026-09-01: 既存メンテの残り6ボタン (ユーザー要望「何をしたらいいか分からない」) =====
@@ -3970,7 +3973,15 @@ class ListingPanel:
                 elif _nl.get("done"):
                     hs_txt += "\n夜間 %s: %s → %s 完走 (%s段)" % (
                         _nl["date"], _nl["start"][-11:-3], _nl["end"][-11:-3], _nl["steps"])
-                    hs_txt += "\n  探せた %s件 / まだ %s件" % (s.get("done", 0), s["can"])
+                    # ★2026-09-06: 以前は s["done"] (= 今日 探し済み) を出していたが、
+                    #   夜間は 23:30 開始なので結果には **前日の日付**が焼かれる。
+                    #   朝に見ると必ず「探せた 0件」= 動いていないように見えていた
+                    #   (実測 9/5: 128件 探せていた)。その夜の日付で数える。
+                    _done_that_night = (w.get("searched_by_date") or {}).get(_nl["date"], 0)
+                    hs_txt += "\n  その夜に探せた %s件 / 今夜また探す %s件" % (
+                        _done_that_night, s["can"])
+                    if not _done_that_night:
+                        hs_txt += "\n  ⚠️ 完走しているのに1件も探せていません"
                 else:
                     hs_txt += "\n⚠️ 夜間 %s は途中で止まっています (最後の段: %s)" % (
                         _nl["date"], _nl["last_step"])
