@@ -3007,17 +3007,30 @@ class ListingPanel:
             ug[_ugroup(idx)].append(idx)
 
         # 共通: (label, idx) のリストを ncol 列グリッドで描画 (compact=詰めた配置)
-        def _grid_named(parent, items, ncol=4, compact=False):
+        def _grid_named(parent, items, ncol=4, compact=False, groups=None):
             # height=2 で2行ぶんの高さを確保 (ラベルが折返しても見切れない)。width は最小値=
             # columnconfigure(weight) と sticky="nsew" で実幅は親いっぱいに伸びる。
             # ★2026-08-16 ユーザー指示「ラベルがボタンからはみ出ている」。
             #   2行では残件ラベル(最大4行)が見切れる → 3行ぶん確保し、折返し幅も広げる。
             #   残件つきボタンは refresh_hoju_badge が行数に合わせて更に伸ばす。
             w, h, pad, wl = (16, 3, 2, 170) if compact else (18, 3, 4, 250)
-            ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない (右の空セル防止)
+            # ★2026-09-06 ユーザー指示「補①②③を横に、その下に再仕入れ①②③」。
+            #   groups=[[補URLの並び], [再仕入れの並び], ...] を渡すと **1グループ=新しい行**
+            #   から置く。流し込みだと 補③の隣に 再① が来て、工程の区切りが読めなかった。
+            if groups is not None:
+                items = [it for g in groups for it in g]
+                ncol = max(ncol, max(len(g) for g in groups))
+                placed, _row = [], 0
+                for g in groups:
+                    for c, it in enumerate(g):
+                        placed.append((_row + c // ncol, c % ncol, it))
+                    _row += max(1, -(-len(g) // ncol))
+            else:
+                ncol = max(1, min(ncol, len(items)))  # 項目数より多い列は作らない (右の空セル防止)
+                placed = [(k // ncol, k % ncol, it) for k, it in enumerate(items)]
             for col in range(ncol):
                 parent.columnconfigure(col, weight=1, uniform=f"g{id(parent)}")
-            for k, (text, idx) in enumerate(items):
+            for _r, _c, (text, idx) in placed:
                 # ★2026-08-16 ユーザー指示: **既定は全部黒**。青は「今押すといい」だけに使う
                 #   (色が意味を持たないと、どれを押せばいいか分からない)。
                 #   青にするのは残件ラベルを持つボタンだけで、refresh_hoju_badge が
@@ -3026,7 +3039,7 @@ class ListingPanel:
                 b = tk.Button(parent, text=text, font=("", 9, "bold"), fg=color,
                               width=w, height=h, wraplength=wl, justify="center",
                               command=lambda i=idx: self.run_script(i))
-                b.grid(row=k // ncol, column=k % ncol, padx=pad, pady=pad, sticky="nsew")
+                b.grid(row=_r, column=_c, padx=pad, pady=pad, sticky="nsew")
                 # ★残件をラベルに出すボタンは参照を持つ (2026-08-09 ユーザー要望)。
                 #   ログ末尾まで読まないと残件が分からず、押す前に「あと何回か」が見えなかった。
                 # ★2026-08-22 ユーザー要望「詳細はヒントテキストにしてラベルはシンプルに」
@@ -3189,7 +3202,9 @@ class ListingPanel:
             #     在庫切れ再仕入れ ① 探す        → ② …        → ③ …
             def _step_rank(i):
                 lab = SCRIPTS[i].get("label", "")
-                group = 0 if "補URL" in lab else (1 if "在庫切れ再仕入れ" in lab else 2)
+                # ★2026-09-06: 実ラベルは「🛒 PSA 再仕入れ ①」で「在庫切れ再仕入れ」ではない。
+                #   一致しないので再仕入れが全部その他(2)に落ち、補URLの隣に並んでいた。
+                group = 0 if "補URL" in lab else (1 if "再仕入れ" in lab else 2)
                 step = next((n for n, mark in enumerate("①②③④") if mark in lab), 9)
                 return (group, step, lab)
 
@@ -3214,7 +3229,15 @@ class ListingPanel:
                                      padding=4)
                 box.pack(fill="x", pady=(8, 0))
                 _boxed_idxs.update(_idxs)
-                _grid_named(box, [(SCRIPTS[i]["label"], i) for i in _idxs], ncol=4)
+                # ★2026-09-06 ユーザー指示: 補URL を1行、その下に 再仕入れ を1行。
+                #   工程(補URL / 再仕入れ)ごとに行を変え、①②③が縦に揃うようにする。
+                _groups = []
+                for _g in (0, 1, 2):
+                    _gi = [i for i in _idxs if _step_rank(i)[0] == _g]
+                    if _gi:
+                        _groups.append([(SCRIPTS[i]["label"], i) for i in _gi])
+                # ncol=3 固定: 3つの箱でボタン幅と ①②③ の列位置を揃える
+                _grid_named(box, [], ncol=3, groups=_groups)
 
 
             ana = ttk.LabelFrame(scroll_frame, text="📊 分析 (押すと結果ファイルが開く)", padding=4)

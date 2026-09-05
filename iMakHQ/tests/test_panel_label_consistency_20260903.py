@@ -64,5 +64,8 @@ def test_order_comes_from_the_label_itself():
     i = _SRC.index("def _step_rank(")
     body = _SRC[i:i + 500]
     assert '"補URL" in lab' in body
-    assert '"在庫切れ再仕入れ" in lab' in body
+    # ★2026-09-06 訂正: ここは長らく "在庫切れ再仕入れ" を見ていたが、実ラベルは
+    #   「🛒 PSA 再仕入れ ①」で **一度も一致していなかった** (= 再仕入れが全部
+    #   その他扱いのまま並んでいた)。実ラベルと同じ語で見る。
+    assert '"再仕入れ" in lab' in body
     assert '"①②③④"' in body
