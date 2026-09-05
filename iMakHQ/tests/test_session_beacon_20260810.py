@@ -98,6 +98,17 @@ def test_process_table_is_real_and_contains_self():
 
 def _use_tmp(monkeypatch, tmp_path):
     monkeypatch.setattr(B, "SESSIONS_DIR", tmp_path)
+    _stub_activity(monkeypatch)
+
+
+def _stub_activity(monkeypatch, ago_sec=0):
+    """★2026-09-05: active_session が **実際の会話ログの mtime** を見るようになった
+    (窓を開けっ放しにしただけの状態を「作業中」と読まないため)。
+    テストが実ユーザーの会話ログに依存すると、走らせる時刻で結果が変わる。
+    ここで固定して切り離す。
+    """
+    import time as _t
+    monkeypatch.setattr(B, "last_activity", lambda wt: _t.time() - ago_sec)
 
 
 def test_stamp_and_active_session(monkeypatch, tmp_path):
@@ -155,6 +166,7 @@ def test_dispatch_skips_when_session_is_live(monkeypatch, tmp_path):
     import dispatch_worktree as D
     monkeypatch.setattr(B, "SESSIONS_DIR", tmp_path)
     monkeypatch.setattr(B, "_git_root", lambda cwd: r"C:\dev\iMak_catalog")
+    _stub_activity(monkeypatch)
     B.stamp()
     assert D._active_session("catalog") is not None
     assert D._active_session("harvest") is None

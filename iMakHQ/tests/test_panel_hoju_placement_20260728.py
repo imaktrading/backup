@@ -29,7 +29,7 @@ def _ugroup(cmd):
         return "oos"
     if any(s in c for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
         return "discover"
-    if "psa_hoju_fill.py" in c and "--limit=15" in c:
+    if "psa_hoju_fill.py search" in c and "--limit=15" in c:
         return "hoju"
     return "report"
 

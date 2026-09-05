@@ -1414,14 +1414,17 @@ SCRIPTS = [
         # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
         "category": None, "type": "utility",
         "label": "🩹 PSA 補URL ③ 目視",
-        "tip": "昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。1回10件ずつ。出した分は最後までやり切る作り。",
+        "tip": "昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。"
+               "補は安い順に最大5本 持ち直す (高い分は押し出される)。1回15件ずつ。"
+               "出した分は最後までやり切る作り。",
         "badge": "hoju_confirm",
         "label_fg": "#0a7",
         "cwd": f"{WORKSPACE}/iMakHQ/tools",
         # ★2026-07-28: 1回10件ずつ(ユーザー要望「途中で辞められないから」)。
+        #   → 2026-09-05 ユーザー指示で **15件**。
         # 確証UIは全件まとめて送信する作り = 出した分は最後までやり切る必要がある。
-        # 補が埋まった行は次回 select_backfill_targets から自然に外れるので、押すたびに続きが出る。
-        "cmd": ["python", "psa_hoju_fill.py", "confirm", "--limit=10"],
+        # 対象は 補<5 (満杯未満) で、補が少ない行から出る (psa_hoju_fill.CONFIRM_MAX_BACKUPS)。
+        "cmd": ["python", "psa_hoju_fill.py", "confirm", "--limit=15"],
         "params": [],
         "skip_postprocess": True,
         # ★2026-08-09: 従来は「既存メンテ」スプシの**先頭タブ(抽出ロジック)**を開いていた。
@@ -2959,7 +2962,10 @@ class ListingPanel:
             # ★2026-07-28: 出品直後に押す補URL2ボタン(🆕検索/🩹確証)は **新規出品パネル**に置く。
             # 出品→itemID書込→補URL確保 は一連の流れなので、既存メンテ側に離すと導線が切れる
             # (ユーザー指示)。件数感/夜間検索は定常運用なのでメンテ側に残す。
-            if "psa_hoju_fill.py" in cmd and "--limit=15" in cmd:
+            # ★2026-09-05: 判定を `psa_hoju_fill.py search` まで含める。
+            #   `--limit=15` だけで見ていたので、③目視を 10→15件 にした瞬間に
+            #   ③まで新規パネル扱いになった (件数でボタンを見分けるのは壊れやすい)。
+            if "psa_hoju_fill.py search" in cmd and "--limit=15" in cmd:
                 return "hoju"      # 🆕 は出品直後専用 = 新規パネルのみ
             # ★2026-08-22: 一番くじの補URL2ボタンも **新規出品パネル**に置く
             #   (ユーザー指示)。PSA と同じ導線 = 出品→itemID→補URL確保 の並び。

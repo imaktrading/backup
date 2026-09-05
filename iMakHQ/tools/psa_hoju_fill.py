@@ -35,6 +35,16 @@ CATEGORY = 17                                                      # R (カテ�
 LISTED_AT = 20                                                     # U (出品日時。新規優先の並べ替えキー)
 KEY = sheet_io.PRODUCT_COL_KEY                                     # 34
 AUX0, AUXN = sheet_io.PRODUCT_COL_AUX_START, sheet_io.PRODUCT_AUX_MAX  # 28, 5
+
+# 「何本まで補があったら対象にするか」。★2026-09-05 に **探す側と目視側で分けた**。
+#   探す側 (夜間) は 補0本 = 丸腰の出品を最優先で埋める。ここは従来どおり。
+#   目視側 (③) は **満杯未満すべて**。従来は目視も 補0本 だけだったため、
+#   補が1本でもある出品は目視に一度も出て来ず、9/5 に入れた「既存と見比べて安い順に
+#   最大5本 持つ」が **通り道が無くて発火しなかった**。
+#   実測 (2026-09-05): 補0本 45件 / 補≤1本 209件 / 満杯未満 409件。
+#   = 364件が どのボタンにも出ないまま、高い仕入元を持ち続けていた。
+SEARCH_MAX_BACKUPS = 1
+CONFIRM_MAX_BACKUPS = AUXN          # 補<5 = 満杯未満
 HIGH_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 HIGH_GID = 851100680
 
@@ -101,6 +111,10 @@ def select_backfill_targets(rows2d, max_backups=1):
         })
     # 新規優先 (出品日時の降順)。同着は行番号昇順で安定させる。
     out.sort(key=lambda t: (t["listed_at"], -t["row"]), reverse=True)
+    # ★2026-09-05: **補が少ない順**を上に置く (安定ソートなので同数の中は新規優先のまま)。
+    #   目視の対象を満杯未満まで広げたので、これが無いと 補4本の出品が
+    #   丸腰(補0本)より先に出てしまう。丸腰の方が死ぬ。
+    out.sort(key=lambda t: t["n_backups"])
     return out
 
 
@@ -1209,7 +1223,7 @@ def prime_ref_images(targets, verbose=True):
     return got
 
 
-def count_workload(max_backups=1, today=None):
+def count_workload(max_backups=None, today=None, confirm_max_backups=None):
     """『押したら何件できるか』を **API/スクレイプ無し** で数える (SSOT)。
 
     パネルのボタンラベルと status_now が両方これを使う。返り値:
@@ -1228,9 +1242,15 @@ def count_workload(max_backups=1, today=None):
     import psa_art_match as art
     import psa_resource_confirm as prc
 
+    # ★2026-09-05: 探す側と目視側で対象の広さが違う (探す=丸腰優先 / 目視=満杯未満)。
+    #   1本の targets で両方数えるとボタンのラベルが実際に出る件数と食い違う。
+    max_backups = SEARCH_MAX_BACKUPS if max_backups is None else max_backups
+    confirm_max_backups = (CONFIRM_MAX_BACKUPS if confirm_max_backups is None
+                           else confirm_max_backups)
     today = today or datetime.date.today().isoformat()
     vals = _read_high()
     targets = select_backfill_targets(vals, max_backups=max_backups)
+    c_targets = select_backfill_targets(vals, max_backups=confirm_max_backups)
     cache = _load_cache()
     live = len(select_backfill_targets(vals, max_backups=AUXN + 1))
 
@@ -1281,7 +1301,7 @@ def count_workload(max_backups=1, today=None):
         return keep, dropped
 
     ready = unjudged = 0
-    for t in targets:
+    for t in c_targets:
         cands, _ref, _why, _ = confirm_survivors(
             t, vals, cache, ctx, today, ref_of=_ref_of, art_of=_art_of, stats=stats)
         if not cands:
@@ -1291,16 +1311,18 @@ def count_workload(max_backups=1, today=None):
         else:
             ready += 1
     return {"live_psa": live, "targets": len(targets),
+            "confirm_targets": len(c_targets),
             "search": {"can": s_can, "no_cardno": s_nocardno, "done": s_done},
             "confirm": {"ready": ready, "unjudged": unjudged,
                         "blocked": {k: stats[k] for k in STOP_REASONS}}}
 
 
-def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
+def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
     """昼の確認(impure)。slice2 が焼いた当日キャッシュから候補を出し、現物と視覚確証→
-    確定URLを補URL(AC-AG)へ **既存保持+空き枠のみ** 冪等書込(hoju同規約)。主URL(A)は触らない。
+    確定URLを補URL(AC-AG)へ **安い順に最大5本** 書く(2026-09-05)。主URL(A)は触らない。
 
-    - 対象 = 補<閾値 live PSA で、当日キャッシュに候補がある行(=slice2 で在庫確認済)。
+    - 対象 = 補<閾値 (既定 CONFIRM_MAX_BACKUPS = 満杯未満) の live PSA で、
+      当日キャッシュに候補がある行(=slice2 で在庫確認済)。補が少ない行から出る。
     - スキップ台帳(見送り/違う)にある itemID は再表示しない(前回判断の尊重)。
     - 補が閾値以上に増えた行は select_backfill_targets から自然に外れる(=補URL自体がレジューム状態)。
     - dry_run: 書込せず件数/内訳のみ(確証UIも出さない)。
@@ -1312,6 +1334,7 @@ def run_daytime_confirm(max_backups=1, limit=None, dry_run=False):
     import psa_resource_gate as gate
 
     today = datetime.date.today().isoformat()
+    max_backups = CONFIRM_MAX_BACKUPS if max_backups is None else max_backups
     vals = _read_high()
     targets = select_backfill_targets(vals, max_backups=max_backups)
     cache = _load_cache()
@@ -1656,7 +1679,7 @@ def main():
             run_night_search(targets=tg, limit=limit)
         return
     if "confirm" in sys.argv:
-        max_backups, limit, dry = 1, None, "--dry-run" in sys.argv
+        max_backups, limit, dry = CONFIRM_MAX_BACKUPS, None, "--dry-run" in sys.argv
         for a in sys.argv[1:]:
             if a.startswith("--max-backups="):
                 max_backups = int(a.split("=", 1)[1])
