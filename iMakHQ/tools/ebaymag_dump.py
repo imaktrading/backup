@@ -73,9 +73,37 @@ def merge_seen(chunks):
     return out
 
 
+def merge_rows(batches):
+    """スクロール中に拾った行 (セルのリスト) → 重複を落として1本にする。
+
+    ★行ごと丸ごとで重複を見る (2026-09-06)。1行1行を文字として畳むと、
+      「7」「いいえ」のような **どの行にも出る値が消えて列が壊れる**
+      (実際、最初の版で 180件のポリシーの時間と返品可が全部落ちた)。
+    """
+    out, seen = [], set()
+    for batch in batches or []:
+        for row in batch or []:
+            cells = [str(c).replace("\n", " ").strip() for c in row]
+            if not any(cells):
+                continue
+            key = "\t".join(cells)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(cells)
+    return out
+
+
 def looks_logged_out(url, text):
-    """ログイン前の画面か。保存してから気づくのを防ぐ。"""
-    if re.search(r"/(login|signin|sign_in|auth)\b", url or "", re.I):
+    """ログイン前の画面か。保存してから気づくのを防ぐ。
+
+    ★2026-09-06: **eBaymag に居ること**を先に見る。以前は文字だけで見ていたので、
+      Google のパスワード画面を「入れた」と誤判定した (そこでは何も取れない)。
+    """
+    u = url or ""
+    if not re.match(r"https?://(www\.)?ebaymag\.com(/|$)", u, re.I):
+        return True                       # 認証の途中 / 別サイト = まだ
+    if re.search(r"/(login|signin|sign_in|auth)\b", u, re.I):
         return True
     t = (text or "")[:2000].lower()
     if not t.strip():
@@ -128,16 +156,43 @@ return [best.scrollTop, best.scrollHeight];
 """
 
 
-def scroll_and_collect(driver, pause=0.7, max_steps=400):
-    """最後まで送りながら、その都度 見えている文字を集める。
+# 表の行 (role=row / セルは role=cell)。eBaymag のポリシー一覧はこの作り。
+_ROWS_JS = """
+return Array.from(document.querySelectorAll('[role="row"]')).map(r => {
+  const cells = r.querySelectorAll('[role="cell"],[role="gridcell"],[role="columnheader"]');
+  return Array.from(cells.length ? cells : r.children).map(c => (c.innerText||'').trim());
+});
+"""
 
-    途中で描画が差し替わる作り (仮想スクロール) でも取りこぼさないよう、
-    **1画面ごとに拾って** 最後にまとめる。
+
+def wait_until_loaded(driver, seconds=60, poll=2.0):
+    """一覧が出るまで待つ。**決め打ちの秒数で諦めない** (2026-09-06)。
+
+    eBaymag は開いた直後「配送ポリシーを読み込んでいます...」だけを出す。
+    そこで拾うと 0行のファイルができて、取れたのか失敗したのか分からない。
     """
-    chunks, last_top, stuck = [], -1, 0
+    end = time.time() + seconds
+    while time.time() < end:
+        n = len(driver.execute_script(_ROWS_JS) or [])
+        if n > 1:
+            return n
+        time.sleep(poll)
+    return 0
+
+
+def scroll_and_collect(driver, pause=0.7, max_steps=400):
+    """最後まで送りながら、その都度 見えている中身を集める。
+
+    途中で描画が差し替わる作り (仮想スクロール = 見えている行しか無い) なので、
+    **1画面ごとに拾って** 最後にまとめる。
+    表があれば行として、無ければ文字として拾う。
+    戻り: (行のかたまり[], 文字のかたまり[])
+    """
+    batches, chunks, last_top, stuck = [], [], -1, 0
     kind, h, ch = driver.execute_script(_SCROLLER_JS)
     print("[INFO] スクロール対象=%s  高さ=%s / 画面=%s" % (kind, h, ch))
     for i in range(max_steps):
+        batches.append(driver.execute_script(_ROWS_JS))
         chunks.append(driver.execute_script("return document.body.innerText;"))
         top, height = driver.execute_script(_SCROLL_STEP_JS)
         time.sleep(pause)
@@ -149,9 +204,49 @@ def scroll_and_collect(driver, pause=0.7, max_steps=400):
             stuck = 0
         last_top = top
         if i and i % 20 == 0:
-            print("   … %d画面ぶん (位置 %s / %s)" % (i, top, height))
+            print("   … %d画面ぶん (位置 %s / %s / ここまで %d行)"
+                  % (i, top, height, len(merge_rows(batches))))
+    batches.append(driver.execute_script(_ROWS_JS))
     chunks.append(driver.execute_script("return document.body.innerText;"))
-    return chunks
+    return batches, chunks
+
+
+def wait_for_login(driver, seconds=300, poll=3.0):
+    """ログインが済むまで待つ。**Enter を押させない** (2026-09-06)。
+
+    以前は input() で待っていたが、こちらから走らせると入力が届かず
+    決め打ちの秒数で待つしかなかった。画面を見て、入れた瞬間に進む。
+    戻り: 入れたか (bool)
+    """
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            txt = driver.execute_script("return document.body.innerText;")
+            if not looks_logged_out(driver.current_url, txt):
+                return True
+        except Exception:                                         # noqa: BLE001
+            pass
+        left = int(end - time.time())
+        print("   ログイン待ち… あと %d秒 (%s)" % (left, driver.current_url[:60]))
+        time.sleep(poll)
+    return False
+
+
+def collect_links(driver):
+    """画面内のリンク [(文字, URL)]。どの画面を落とせばいいか探す用。"""
+    try:
+        pairs = driver.execute_script(
+            "return Array.from(document.querySelectorAll('a[href]'))"
+            ".map(a => [ (a.innerText||'').trim(), a.href ]);")
+    except Exception:                                             # noqa: BLE001
+        return []
+    out, seen = [], set()
+    for t, u in pairs or []:
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        out.append((t, u))
+    return out
 
 
 def main():
@@ -162,9 +257,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="", help="落としたい画面の URL")
     ap.add_argument("--login", action="store_true",
-                    help="ログインだけする (ブラウザが開くので手で入って Enter)")
+                    help="ブラウザを開いてログインを待つ (入れたら自動で進む)")
+    ap.add_argument("--login-seconds", type=int, default=300,
+                    help="ログインを待つ秒数 (既定 300)")
     ap.add_argument("--out", default=DESKTOP, help="出力先フォルダ (既定: デスクトップ)")
     ap.add_argument("--wait", type=float, default=6.0, help="開いてから待つ秒数")
+    ap.add_argument("--load-seconds", type=int, default=60,
+                    help="一覧が出るまで待つ秒数 (既定 60)")
     ap.add_argument("--pause", type=float, default=0.7, help="1スクロールごとの待ち秒")
     ap.add_argument("--headless", action="store_true", help="窓を出さずに走らせる")
     a = ap.parse_args()
@@ -177,16 +276,15 @@ def main():
     try:
         if a.login:
             driver.get(HOME)
-            print("ブラウザで eBaymag にログインしてください。")
-            print("済んだらこの画面で Enter を押す (ログインはこの端末に残ります)")
-            try:
-                input()
-            except EOFError:
-                print("※ 対話できない環境です。窓が開いている間に入ってください (60秒待ちます)")
-                time.sleep(60)
-            print("[OK] プロファイル: %s" % PROFILE)
+            print("ブラウザで eBaymag にログインしてください (ログインはこの端末に残ります)")
+            print("入れたら自動で先へ進みます。Enter は要りません。")
+            if not wait_for_login(driver, a.login_seconds):
+                print("⚠️ 時間内にログインを確認できませんでした (%s)" % driver.current_url)
+                print("   もう一度 --login で開き直すか、--login-seconds を伸ばしてください。")
+                return 1
+            print("[OK] ログインを確認しました。プロファイル: %s" % PROFILE)
             if not a.url:
-                return 0
+                a.url = driver.current_url        # 入った先の画面をそのまま落とす
 
         driver.get(a.url)
         time.sleep(a.wait)
@@ -197,21 +295,40 @@ def main():
             print("   ※ 中身は保存していません (ログイン画面を保存しても意味がないため)")
             return 1
 
-        chunks = scroll_and_collect(driver, pause=a.pause)
+        n0 = wait_until_loaded(driver, a.load_seconds)
+        print("[INFO] 一覧の初期行数: %d" % n0)
+        batches, chunks = scroll_and_collect(driver, pause=a.pause)
+        rows = merge_rows(batches)
         lines = merge_seen(chunks)
         html = driver.page_source
+        links = collect_links(driver)
 
         os.makedirs(a.out, exist_ok=True)
         stem = out_name(a.url)
         txt_p = os.path.join(a.out, stem + ".txt")
         html_p = os.path.join(a.out, stem + ".html")
+        links_p = os.path.join(a.out, stem + ".links.txt")
         with open(txt_p, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
         with open(html_p, "w", encoding="utf-8") as f:
             f.write(html)
-        print("\n[OK] %d行 取れました" % len(lines))
+        with open(links_p, "w", encoding="utf-8") as f:
+            f.write("\n".join("%s\t%s" % (t.replace("\n", " "), u) for t, u in links))
+        print("\n[OK] 文字 %d行 / リンク %d本" % (len(lines), len(links)))
         print("  文字   : %s" % txt_p)
+        print("  リンク : %s" % links_p)
         print("  元データ: %s" % html_p)
+        if rows:
+            csv_p = os.path.join(a.out, stem + ".csv")
+            import csv as _csv
+            width = max(len(r) for r in rows)
+            with open(csv_p, "w", newline="", encoding="utf-8-sig") as f:
+                w = _csv.writer(f)
+                for r in rows:
+                    w.writerow(r + [""] * (width - len(r)))
+            print("  表     : %s  (%d行 × %d列)" % (csv_p, len(rows), width))
+        else:
+            print("  ※ 表の行が見つからなかったので CSV は出していません")
         return 0
     finally:
         try:

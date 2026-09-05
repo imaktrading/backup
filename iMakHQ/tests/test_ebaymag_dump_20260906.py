@@ -41,10 +41,43 @@ class TestMergeSeen:
         assert M.merge_seen([]) == [] and M.merge_seen([None, ""]) == []
 
 
+class TestMergeRows:
+    def test_same_value_in_two_rows_survives(self, M):
+        """★列が潰れないこと。行ごと丸ごとで重複を見る。
+
+        文字として畳んでいた最初の版では、どの行にも出る「7」「いいえ」が
+        消えて、180件のポリシーの時間と返品可が全部落ちた。
+        """
+        got = M.merge_rows([
+            [["DDP-A-P09 / 0613 / JP", "7", "いいえ"],
+             ["DDP-A-P11 / 8FC3 / JP", "7", "いいえ"]],
+        ])
+        assert got == [["DDP-A-P09 / 0613 / JP", "7", "いいえ"],
+                       ["DDP-A-P11 / 8FC3 / JP", "7", "いいえ"]]
+
+    def test_the_same_row_seen_twice_is_dropped(self, M):
+        """スクロールで同じ行を何度も拾うので、行が丸ごと同じなら1本にする。"""
+        r = ["DDP-A-P24 / BE87 / JP", "7", "いいえ", "7"]
+        assert M.merge_rows([[r], [r], [r]]) == [r]
+
+    def test_blank_rows_are_skipped(self, M):
+        assert M.merge_rows([[["", "  ", ""]]]) == []
+
+    def test_newlines_inside_a_cell_do_not_break_the_row(self, M):
+        got = M.merge_rows([[["D\nDDP-A-P09 / 0613 / JP", "7"]]])
+        assert got == [["D DDP-A-P09 / 0613 / JP", "7"]]
+
+
 class TestLoggedOutDetection:
     def test_login_url_is_caught(self, M):
         assert M.looks_logged_out("https://ebaymag.com/login", "whatever")
         assert M.looks_logged_out("https://ebaymag.com/users/sign_in", "x")
+
+    def test_other_sites_are_not_logged_in(self, M):
+        """★認証の途中を「入れた」と読まない (2026-09-06 実際に誤判定した)。"""
+        assert M.looks_logged_out(
+            "https://accounts.google.com/v3/signin/challenge/pwd?TL=x", "パスワード")
+        assert M.looks_logged_out("https://signin.ebay.com/signin?ru=x", "")
 
     def test_blank_page_is_caught(self, M):
         """真っ白 = 読み込めていない。空を「取れた」と言わない。"""
