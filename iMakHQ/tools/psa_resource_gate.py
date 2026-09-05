@@ -460,6 +460,17 @@ def _backfill_snkr_card_image(cached, row, mp, sp):
     return updated
 
 
+# ★2026-09-05 ユーザー指示「事故がない部分は夜間に回して」。
+#   --nightly = **人の判断が要らない所だけ**を無人で回すモード:
+#     - 変種を目視で確定済の行だけを対象にする (未確定を混ぜると別変種の在庫を見て
+#       「復活可」にしてしまう = 誤仕入れの入口)
+#     - ブラウザを開かない (目視ゲートも RESTOCK視覚確証も出さない)
+#     - 不一致PDCA / カタログ依頼書を書かない (人が理由を選んでいないため)
+#   やるのは「仕入元にまた在庫が出たか」の再チェックと、再仕入れ待ち台帳の更新だけ。
+#   これが無いと 在庫が戻っても ①を押すまで誰も気づけなかった (2026-09-05 判明)。
+NIGHTLY = False
+
+
 # ★2026-09-05: 商品管理シートを読めたか。読めていない走行では catalog へ依頼を出さない
 #   (番号もKEYも空になるのは **こちら側の読取失敗**であって catalog の誤りではない)。
 SHEET_READ_OK = True
@@ -533,6 +544,11 @@ def main():
     for a in sys.argv[1:]:
         if a.startswith("--limit="):
             limit = int(a.split("=", 1)[1])
+    global NIGHTLY
+    NIGHTLY = "--nightly" in sys.argv
+    if NIGHTLY:
+        print("🌙 夜間モード: 変種確定済のみ / ブラウザなし / 台帳更新まで "
+              "(目視・カタログ依頼・RESTOCK確定は人のボタンで)")
 
     rows, mp = _load_restock_psa10()
     if not rows:
@@ -642,6 +658,10 @@ def main():
                 todo.append((i, r))
         if auto_idx:
             print(f"  ⏭ 変種確定済(KEYあり) {len(auto_idx)}件は再目視スキップ。新規/未解決 {len(todo)}件のみ目視")
+        if NIGHTLY and todo:
+            # 未確定は人が見るまで触らない。夜間は確定済の在庫再チェックだけ。
+            print(f"  🌙 未確定 {len(todo)}件は夜間では扱いません (①のボタンで目視してください)")
+            todo = []
 
         targets_by_idx = {}    # {row index: target}
         if todo:
@@ -719,8 +739,9 @@ def main():
         # auto_idx(itemID join / 過去目視で KEY 解決済=今回スキップ)も「確定」として渡す。
         # これを渡さないと、KEY が入って解決済の行が台帳で永久に「未対処」のまま毎日再発行される
         # (= Catalog への同一依頼の無限再発行。2026-06-18 真因)。
-        _run_mismatch_pdca(rejected, list(auto_idx) + [c["idx"] for c in confirmed],
-                           idx_row, targets_by_idx, cert_map, mp)
+        if not NIGHTLY:
+            _run_mismatch_pdca(rejected, list(auto_idx) + [c["idx"] for c in confirmed],
+                               idx_row, targets_by_idx, cert_map, mp)
         # 確定した変種KEYを商品管理シートAI列に書戻し(目視を資産化=次回から解決済)
         if writeback:
             try:
@@ -1085,7 +1106,7 @@ def main():
     # --- POC-A: RESTOCK視覚確証ビューア(再仕入れ可のみ)→ RESTOCK確定リスト + V8自動利益判定 ---
     # 不可逆(RESTOCK=出品復活→売れたら仕入)の前に「① 現物 vs 仕入候補(買う物)」を視覚一致確認。
     # 確定分を「RESTOCK確定」タブに出力(eBay書込はしない=手動GO。POC-B/iMakReviseで revise)。
-    if "--no-confirm" not in sys.argv and restock_cands:
+    if not NIGHTLY and "--no-confirm" not in sys.argv and restock_cands:
         _run_restock_confirm(restock_cands, mp, cert_map)
 
 
