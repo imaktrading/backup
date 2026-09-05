@@ -477,8 +477,16 @@ Format: {"japanese_name_1": "english_name_1", "japanese_name_2": "english_name_2
                 txt = m.group(0)
             d = json.loads(txt)
             for k, v in d.items():
-                if isinstance(v, str) and v.strip():
-                    out[k] = v.strip()
+                if not (isinstance(v, str) and v.strip()):
+                    continue
+                v = v.strip()
+                # ★確信が無い時、モデルは末尾に `?` を付けて返す (2026-09-05 実測:
+                #   42件中 33件が `M Zeraora ex?` / `Muk?` の形だった)。
+                #   そのまま入れると **出品の名前に `?` が出る**。確証なし = 空欄が正しい。
+                if v.endswith("?") or v.endswith("？"):
+                    print(f"      · 確証なしとして捨てる: {k} -> {v!r}")
+                    continue
+                out[k] = v
             print(f"  [{i+len(batch):>5d}/{total}] batch ok: {len(d)} translated")
         except Exception as e:
             print(f"  [{i+len(batch):>5d}/{total}] ERR: {type(e).__name__}: {str(e)[:150]}")

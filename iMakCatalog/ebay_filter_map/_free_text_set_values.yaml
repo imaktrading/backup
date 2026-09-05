@@ -75,10 +75,6 @@ values:
     category: pokemon_tcg
     rows: 96
     jp_set: "ポケモンカードゲーム クラシック カメックス&スイクンexデッキ"
-  - value: "M-P: Mega Promos"
-    category: pokemon_tcg
-    rows: 95
-    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Mega Brave"
     category: pokemon_tcg
     rows: 92
@@ -115,6 +111,10 @@ values:
     category: pokemon_tcg
     rows: 74
     jp_set: "ポケモンカードゲームLEGEND 拡張パック「よみがえる伝説」"
+  - value: "M-P: Mega Promos"
+    category: pokemon_tcg
+    rows: 73
+    jp_set: "ポケモンカードゲーム MEGA プロモカードパック第1弾"
   - value: "Storm Emeralda"
     category: pokemon_tcg
     rows: 73
@@ -231,6 +231,10 @@ values:
     category: pokemon_tcg
     rows: 23
     jp_set: "ポケモンカードゲーム サン&ムーン「スターターセット改造「カプ・ブルルGX」」"
+  - value: "Start Deck 100 Battle Collection Korochao Ver."
+    category: pokemon_tcg
+    rows: 23
+    jp_set: "スタートデッキ100 バトルコレクション コロちゃおVer."
   - value: "Lucario VSTAR Starter Set"
     category: pokemon_tcg
     rows: 22
@@ -443,6 +447,10 @@ values:
     category: pokemon_tcg
     rows: 6
     jp_set: "ジャンボパックセット 白銀のランス＆漆黒のガイスト"
+  - value: "McDonald's Happy Meal 2025"
+    category: pokemon_tcg
+    rows: 6
+    jp_set: "マクドナルド「ハッピーセット2025」"
   - value: "Sm Promo"
     category: pokemon_tcg
     rows: 5
@@ -650,10 +658,6 @@ values:
     category: pokemon_tcg
     rows: 2
     jp_set: "ポケモンカードゲーム サン&ムーン デッキビルドBOX「ウルトラサン」"
-  - value: "McDonald's Happy Meal 2025"
-    category: pokemon_tcg
-    rows: 2
-    jp_set: "マクドナルド「ハッピーセット2025」"
   - value: "Sv: Ceruledge & Sylveon Ex Stellar Tera Type Starter Sets / Start Deck Generations / Battle Partners Deck Build Box"
     category: pokemon_tcg
     rows: 1

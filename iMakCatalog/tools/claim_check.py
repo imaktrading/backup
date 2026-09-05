@@ -244,11 +244,40 @@ def check_official_coverage(_):
     return (not miss), detail
 
 
+def check_one_card_one_name(_):
+    """**同じカードに英語名が2つ以上あれば FAIL** (2026-09-05 追加).
+
+    2026-09-05 実測で 34件。半分は「別のカードの英語名が混ざっている」形で、
+    出すと **絵と英語名が別のカード** = 誤出品になる
+    (`基本水エネルギー` に `Bellibolt`、`博士の研究` に `Poké Kid`)。
+    外の正解表が要らない (割れているだけで判る) ので、ここで 0 を維持する。
+    """
+    cats = {"pokemon_tcg": "name", "one_piece_tcg": "name_jp",
+            "dragonball_scg": "name_jp", "gundam_tcg": "name_jp"}
+    db = _db()
+    try:
+        bad = {}
+        for cat, col in cats.items():
+            by = {}
+            for jp, en in db.execute(
+                    f"SELECT {col}, name_en FROM products WHERE category=? "
+                    f"AND IFNULL({col},'')<>'' AND IFNULL(name_en,'')<>''", (cat,)):
+                by.setdefault(jp, set()).add(en)
+            n = sum(1 for v in by.values() if len(v) > 1)
+            if n:
+                bad[cat] = n
+    finally:
+        db.close()
+    return (not bad), (f"英語名が割れているカード {sum(bad.values())} "
+                       + (str(bad) if bad else "0"))
+
+
 CHECKS = [
     ("Set が空の行", check_set_empty),
     ("1セット1値", check_one_set_one_value),
     ("変換表 = データ", check_table_matches_data),
     ("型のキー名", check_type_key),
+    ("1カード1名 (英語名)", check_one_card_one_name),
     ("画像の終端マーク", check_images),
     ("監査 (出品4カテゴリ)", check_audit),
     ("cert → KEY (入口経由)", check_resolver),

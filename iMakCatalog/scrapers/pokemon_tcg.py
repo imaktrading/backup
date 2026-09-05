@@ -24,6 +24,8 @@ import argparse
 import html
 import json
 import re
+import sqlite3
+from collections import Counter
 import sys
 import time
 from datetime import datetime
@@ -512,6 +514,24 @@ def _collides_with_other_product(pid: str, set_name_official: str) -> bool:
     return bool(other) and other != (set_name_official or "").strip()
 
 
+def _promo_head(detail: dict) -> str:
+    """プロモの product_id の頭を **既存行から学ぶ** (画像フォルダが同じ行の書き方)."""
+    url = str(detail.get("image_url") or "")
+    m = re.search(r"/large/([^/]+)/", url)
+    if not m:
+        return ""
+    folder = m.group(1)
+    db = sqlite3.connect(str(api._DB_PATH))
+    try:
+        rows = db.execute(
+            "SELECT product_id FROM products WHERE category=? AND product_id NOT LIKE '%/%' "
+            "AND images LIKE ?", (CATEGORY, f"%/large/{folder}/%")).fetchall()
+    finally:
+        db.close()
+    heads = Counter(p.rsplit("-", 1)[0] for (p,) in rows if "-" in (p or ""))
+    return heads.most_common(1)[0][0] if heads else ""
+
+
 def derive_product_id(detail: dict) -> str:
     """detail dict から product_id を派生.
 
@@ -523,6 +543,14 @@ def derive_product_id(detail: dict) -> str:
     card_number = detail.get("card_number") or ""
     promo_code = detail.get("card_number_promo_code") or ""
     if promo_code and card_number:
+        # ★catalog の書き方に合わせる (2026-09-05)。券面は `020/M-P` だが、
+        #   catalog は `M-P-020` (画像フォルダ `XY-P` は `XYP-011`) で持っている。
+        #   券面のまま入れると **同じカードが2つの ID で並び**、出品くんが引けない
+        #   (2026-09-04 に 47件を直したのに、また 7件 増えていた = 発生源がここ)。
+        #   頭は **既存行から学ぶ**。学べなければ券面のままにして、あとで気づけるようにする。
+        head = _promo_head(detail) or ""
+        if head:
+            return f"{head}-{card_number}"
         return f"{card_number}/{promo_code}"
     set_code = detail.get("set_code") or ""
     if set_code and card_number:

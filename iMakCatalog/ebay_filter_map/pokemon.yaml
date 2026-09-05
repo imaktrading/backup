@@ -1244,6 +1244,9 @@ set:
   - source: "拡張パック「超爆インパクト」"
     ebay: "Sm8: Super-Burst Impact"
     note: "2026-09-04 既存行と同じ値"
+  - source: "スタートデッキ100 バトルコレクション コロちゃおVer."
+    ebay: "Start Deck 100 Battle Collection Korochao Ver."
+    note: "券面 001/023 の独自ナンバリング。M-P の通し番号とは別商品 (2026-09-05)"
 set_code:
   # ----- Scarlet & Violet (SV / SVxx) -----
   - source: SV1V
