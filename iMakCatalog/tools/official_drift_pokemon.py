@@ -35,6 +35,7 @@ import re
 import sqlite3
 import sys
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 from collections import Counter
@@ -72,7 +73,9 @@ def _clean(t: str) -> str:
       `フェローチェ&amp;マッシブーンGX`                     … 実体参照を戻していない
       `シェイミ<span class="pcg pcg-prismstar"></span>`   … 公式は ◇(プリズムスター) を span で出す
     """
-    t = re.sub(r"<[^>]+>", "", html.unescape(t or ""))
+    # ★NFC に寄せる (2026-09-05)。公式が互換漢字を使っている字があり、
+    #   画面では同じに見えるのに一致しない (ワンピの `蓮` で実際に出た)。
+    t = unicodedata.normalize("NFC", re.sub(r"<[^>]+>", "", html.unescape(t or "")))
     return t.replace("＆", "&").replace("　", " ").strip()
 
 

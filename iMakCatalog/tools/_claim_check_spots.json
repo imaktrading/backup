@@ -1,12 +1,82 @@
 [
- {"label": "リミテッドvol.1 #001", "category": "one_piece_tcg", "brand": "ONE PIECE JAPANESE LIMITED CARD COLLECTION VOL.1", "card_no": "001", "subject": "MONKEY D. LUFFY", "expect": "ST21-001_p2"},
- {"label": "3周年 #079", "category": "one_piece_tcg", "brand": "ONE PIECE JAPANESE 3RD ANNIVERSARY SET", "card_no": "079", "subject": "LUFFY/KING OF PIRATES", "expect": "OP12-079_AN03"},
- {"label": "3周年 #118", "category": "one_piece_tcg", "brand": "ONE PIECE JAPANESE 3RD ANNIVERSARY SET", "card_no": "118", "subject": "SABO", "expect": "OP07-118_AN03"},
- {"label": "3周年 #005", "category": "one_piece_tcg", "brand": "ONE PIECE JAPANESE 3RD ANNIVERSARY SET", "card_no": "005", "subject": "PORTGAS D. ACE", "expect": "ST15-005_AN03"},
- {"label": "ストレージBOX #004", "category": "one_piece_tcg", "brand": "ONE PIECE JAPANESE PREMIUM BOOSTER -ONE PIECE CARD THE BEST- STORAGE BOX SET", "card_no": "004", "subject": "BOA HANCOCK", "expect": "ST17-004_p1"},
- {"label": "FILM RED アンコール #004", "category": "one_piece_tcg", "brand": "ONE PIECE JAPANESE FILM RED: ENCORE PACK", "card_no": "004", "subject": "NEW GENESIS", "expect": "ST11-004_p1"},
- {"label": "DON DAY'24", "category": "one_piece_tcg", "brand": "ONE PIECE JAPANESE PREMIUM CARD COLLECTION -ONE PIECE DAY'24-", "card_no": "", "subject": "DON!! CARD", "expect": "DON-OP-DAY-24-003"},
- {"label": "MBG-003", "category": "pokemon_tcg", "brand": "POKEMON JAPANESE MBG-MEGA STARTER SET MEGA GENGAR EX", "card_no": "003", "subject": "M GENGAR EX", "expect": "MBG-003"},
- {"label": "CLL-009", "category": "pokemon_tcg", "brand": "POKEMON JAPANESE CLL-TRADING CARD GAME CLASSIC CHARIZARD & HO-OH EX DECK", "card_no": "009", "subject": "RAICHU", "expect": "CLL-009"},
- {"label": "3周年 未登録は出さない", "category": "one_piece_tcg", "brand": "ONE PIECE JAPANESE 3RD ANNIVERSARY SET", "card_no": "001", "subject": "MONKEY D. LUFFY", "expect": ""}
+ {
+  "label": "リミテッドvol.1 #001",
+  "category": "one_piece_tcg",
+  "brand": "ONE PIECE JAPANESE LIMITED CARD COLLECTION VOL.1",
+  "card_no": "001",
+  "subject": "MONKEY D. LUFFY",
+  "expect": "ST21-001_p2"
+ },
+ {
+  "label": "3周年 #079",
+  "category": "one_piece_tcg",
+  "brand": "ONE PIECE JAPANESE 3RD ANNIVERSARY SET",
+  "card_no": "079",
+  "subject": "LUFFY/KING OF PIRATES",
+  "expect": "OP12-079_p1"
+ },
+ {
+  "label": "3周年 #118",
+  "category": "one_piece_tcg",
+  "brand": "ONE PIECE JAPANESE 3RD ANNIVERSARY SET",
+  "card_no": "118",
+  "subject": "SABO",
+  "expect": "OP07-118_p3"
+ },
+ {
+  "label": "3周年 #005",
+  "category": "one_piece_tcg",
+  "brand": "ONE PIECE JAPANESE 3RD ANNIVERSARY SET",
+  "card_no": "005",
+  "subject": "PORTGAS D. ACE",
+  "expect": "ST15-005_p2"
+ },
+ {
+  "label": "ストレージBOX #004",
+  "category": "one_piece_tcg",
+  "brand": "ONE PIECE JAPANESE PREMIUM BOOSTER -ONE PIECE CARD THE BEST- STORAGE BOX SET",
+  "card_no": "004",
+  "subject": "BOA HANCOCK",
+  "expect": "ST17-004_p1"
+ },
+ {
+  "label": "FILM RED アンコール #004",
+  "category": "one_piece_tcg",
+  "brand": "ONE PIECE JAPANESE FILM RED: ENCORE PACK",
+  "card_no": "004",
+  "subject": "NEW GENESIS",
+  "expect": "ST11-004_p1"
+ },
+ {
+  "label": "DON DAY'24",
+  "category": "one_piece_tcg",
+  "brand": "ONE PIECE JAPANESE PREMIUM CARD COLLECTION -ONE PIECE DAY'24-",
+  "card_no": "",
+  "subject": "DON!! CARD",
+  "expect": "DON-OP-DAY-24-003"
+ },
+ {
+  "label": "MBG-003",
+  "category": "pokemon_tcg",
+  "brand": "POKEMON JAPANESE MBG-MEGA STARTER SET MEGA GENGAR EX",
+  "card_no": "003",
+  "subject": "M GENGAR EX",
+  "expect": "MBG-003"
+ },
+ {
+  "label": "CLL-009",
+  "category": "pokemon_tcg",
+  "brand": "POKEMON JAPANESE CLL-TRADING CARD GAME CLASSIC CHARIZARD & HO-OH EX DECK",
+  "card_no": "009",
+  "subject": "RAICHU",
+  "expect": "CLL-009"
+ },
+ {
+  "label": "3周年 未登録は出さない",
+  "category": "one_piece_tcg",
+  "brand": "ONE PIECE JAPANESE 3RD ANNIVERSARY SET",
+  "card_no": "001",
+  "subject": "MONKEY D. LUFFY",
+  "expect": ""
+ }
 ]

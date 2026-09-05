@@ -25,12 +25,15 @@ sys.path.insert(0, str(ROOT))
 from integrations.psa_to_csv import lookup_one_piece  # noqa: E402
 
 BRAND = "ONE PIECE JAPANESE 3RD ANNIVERSARY SET"
-SET_OFFICIAL = "3rd ANNIVERSARY SET"
+# ★2026-09-05: 公式がこの商品の収録一覧を出した。手作りの `_AN03` は公式の `_pN` に
+#   一本化した (migrations/2026-09-05_an03_superseded_by_official.py)。
+#   CLAUDE.md「公式が載せたら公式値で上書きする」どおりの入れ替え。
+SET_OFFICIAL = "ONE PIECE カードゲーム 3rd ANNIVERSARY SET"
 
 REGISTERED = [
-    ("079", "LUFFY/KING OF PIRATES", "OP12-079_AN03", "OP12-079"),
-    ("118", "SABO", "OP07-118_AN03", "OP07-118"),
-    ("005", "PORTGAS D. ACE", "ST15-005_AN03", "ST15-005"),   # 2026-08-29 cert152977069
+    ("079", "LUFFY/KING OF PIRATES", "OP12-079_p1", "OP12-079"),
+    ("118", "SABO", "OP07-118_p3", "OP07-118"),
+    ("005", "PORTGAS D. ACE", "ST15-005_p2", "ST15-005"),   # 2026-08-29 cert152977069
 ]
 
 

@@ -355,6 +355,10 @@ values:
     category: pokemon_tcg
     rows: 14
     jp_set: "エネルギーカード付き カードボックス メガミュウツーX・メガミュウツーY"
+  - value: "DP Battle Starter Pack Giratina vs Dialga (Giratina Deck)"
+    category: pokemon_tcg
+    rows: 14
+    jp_set: "ポケモンカードゲームDP 対戦スターターパック「ギラティナVSディアルガ」(ギラティナデッキ)"
   - value: "Espeon & Deoxys GX Tag Team Deck"
     category: pokemon_tcg
     rows: 13
@@ -905,7 +909,7 @@ values:
   # ── one_piece_tcg ──
   - value: "Promo Cards"
     category: one_piece_tcg
-    rows: 1502
+    rows: 1538
     jp_set: "プロモーションカード"
   - value: "Premium Booster One Piece The Best"
     category: one_piece_tcg
@@ -933,12 +937,8 @@ values:
     jp_set: "BOOSTER PACK THE AZURE SEA’S SEVEN- [OP14-EB04]"
   - value: "Carrying On His Will"
     category: one_piece_tcg
-    rows: 215
+    rows: 214
     jp_set: "BOOSTER PACK -CARRYING ON HIS WILL-[OP-13]"
-  - value: "Adventure on Kami's Island"
-    category: one_piece_tcg
-    rows: 212
-    jp_set: "BOOSTER PACK -ADVENTURE ON KAMI’S ISLAND- [OP15-EB04]"
   - value: "A Fist of Divine Speed"
     category: one_piece_tcg
     rows: 199
@@ -973,8 +973,12 @@ values:
     jp_set: "ブースターパック 決戦の刻【OP-16】"
   - value: "The World’s Strongest Warriors"
     category: one_piece_tcg
-    rows: 168
+    rows: 181
     jp_set: "BOOSTER PACK -THE WORLD’S STRONGEST WARRIORS- [OP-17]"
+  - value: "Adventure on Kami's Island"
+    category: one_piece_tcg
+    rows: 171
+    jp_set: "BOOSTER PACK -ADVENTURE ON KAMI’S ISLAND- [OP15-EB04]"
   - value: "Legacy of the Master"
     category: one_piece_tcg
     rows: 165
@@ -991,6 +995,10 @@ values:
     category: one_piece_tcg
     rows: 107
     jp_set: "EXTRA BOOSTER -ONE PIECE HEROINES EDITION- [EB-03]"
+  - value: "Egghead Crisis"
+    category: one_piece_tcg
+    rows: 91
+    jp_set: "エクストラブースター EGGHEAD CRISIS【EB-04】"
   - value: "Ace & Newgate"
     category: one_piece_tcg
     rows: 59
@@ -1015,13 +1023,9 @@ values:
     category: one_piece_tcg
     rows: 51
     jp_set: "STARTER DECK -Worst Generation- [ST-02]"
-  - value: "Egghead Crisis"
-    category: one_piece_tcg
-    rows: 50
-    jp_set: "エクストラブースター EGGHEAD CRISIS【EB-04】"
   - value: "DON Card"
     category: one_piece_tcg
-    rows: 50
+    rows: 49
     jp_set: "通常デザイン"
   - value: "Egghead"
     category: one_piece_tcg

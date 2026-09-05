@@ -1832,6 +1832,11 @@ def extract_set_code_from_brand_pokemon(brand: str) -> Optional[str]:
     if m_mg:
         tail = m_mg.group(1)
         return "MG-G" if "GENESECT" in tail else "MG"
+    # 対戦スターターパック「ギラティナVSディアルガ」も同型 (2026-09-05)。
+    #   どちら側か決まらなくても、兄弟デッキ (_POKEMON_SIBLING_SETS) が名前で選び直す。
+    m_gd = re.search(r"GIRATINA\s*VS\s*DIALGA(.*)$", b)
+    if m_gd:
+        return "DPs-S-G" if "GIRATINA" in m_gd.group(1) else "DPs-S"
     for pattern, code in deck_codes:
         if re.search(pattern, b):
             return code
@@ -2004,6 +2009,9 @@ def _set_code_lookup_variants(set_code: str) -> list[str]:
 _POKEMON_SIBLING_SETS: dict[str, tuple[str, ...]] = {
     "MG": ("MG-G",),
     "MG-G": ("MG",),
+    # 対戦スターターパック「ギラティナVSディアルガ」も同じ形 (ラベルに両方の名前が入る)。
+    "DPs-S": ("DPs-S-G",),
+    "DPs-S-G": ("DPs-S",),
 }
 
 

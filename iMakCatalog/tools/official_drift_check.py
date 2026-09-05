@@ -39,6 +39,7 @@ import json
 import re
 import sqlite3
 import sys
+import unicodedata
 import time
 import urllib.request
 from datetime import datetime
@@ -78,7 +79,10 @@ def _norm(t: str) -> str:
       `ホーディ＆ヒョウゾウ` … 全角 ＆ と半角 & の違い
     数字を出すツールが誤検出を出すと、直す側が振り回される。ここで畳む。
     """
-    t = html.unescape(t or "")
+    # ★2026-09-05: 公式が **互換漢字**を使っている字がある
+    #   (`蓮` ではなく `蓮`。画面では同じ「蓮」に見える)。
+    #   NFC に寄せると同じ字になる。これで `EB04-049 指銃 黄蓮` の誤検出が消える。
+    t = unicodedata.normalize("NFC", html.unescape(t or ""))
     for a, b in (("＆", "&"), ("’", "'"), ("！", "!"), ("　", " "),
                  # 2026-09-03: 全角/波ダッシュ/引用符の違いだけで「名前が違う」と出ていた
                  #   (`モンキー・Ｄ・ルフィ` ↔ `モンキー・D・ルフィ` / `〜` ↔ `～` 等)。
@@ -147,7 +151,15 @@ def check_series(conn, sid: str) -> dict:
             name_ng.append((c, sorted(x for x in names if x)[:3]))
         if c["rarity"]:
             rar = {str((json.loads(r["specs"] or "{}") or {}).get("rarity") or "").strip() for r in rows}
-            if c["rarity"] not in rar:
+            # ★複合コードを1つとみなす (2026-09-05)。
+            #   公式の一覧ページはレアリティを1つしか出さないが、カードに印が2つ在るものが
+            #   あり、catalog は空白区切りの複合で持っている (`SP P` = SP と P)。
+            #   HQ 裁定 (2026-08-18 / tests/test_rarity_sp_composite_20260818.py) で
+            #   **複合のまま持つ**と決めてあるので、こちらが合わせる。
+            #   `SPカード` は `SP` と同じ (公式が同じ印を2通りに書く)。
+            want = {c["rarity"], c["rarity"].replace("カード", "")}
+            toks = {t for v in rar for t in v.split()} | rar
+            if not (want & toks):
                 rarity_ng.append((c, sorted(x for x in rar if x)[:3]))
         # 収録商品名: プロモ/限定は商品ごとに行が要る (3rd ANNIVERSARY SET の欠落はこの形)
         if check_set and c["get_info"] and not any(
