@@ -36,7 +36,7 @@ def test_build_html_handles_list_ref_label():
     # catalog hint は list で来る → _html.escape が落ちない(2026-06-17 実機crash回帰)
     import os
     import tempfile
-    out = os.path.join(tempfile.gettempdir(), "psa_resource_review_listlabel.html")
+    out = os.path.join(tempfile.mkdtemp(prefix="psa_html_"), "psa_resource_review_listlabel.html")
     p = prh.build_html([{"title": ["A", "B"], "ref_image": "https://x/r.jpg",
                          "ref_label": ["OP11", "SR"], "ng": False, "candidates": []}], out)
     h = open(p, encoding="utf-8").read()
@@ -54,7 +54,7 @@ def test_build_html_writes_ref_and_candidates():
             {"channel": "mercari", "url": "https://jp.mercari.com/item/m1", "price": 105000, "image": "https://static.mercdn.net/x_1.jpg", "is_main": False},
         ],
     }]
-    out = os.path.join(tempfile.gettempdir(), "psa_resource_review_test.html")
+    out = os.path.join(tempfile.mkdtemp(prefix="psa_html_"), "psa_resource_review_test.html")
     p = prh.build_html(items, out)
     htmltext = open(p, encoding="utf-8").read()
     assert "ref.jpg" in htmltext          # 正カード画像
