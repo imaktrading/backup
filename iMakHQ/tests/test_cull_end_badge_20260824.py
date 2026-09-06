@@ -25,6 +25,18 @@ if _TOOLS not in sys.path:
 import cull_end as C  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_live(monkeypatch):
+    """★2026-09-06: count_workload は出品中の実状態も見るようになった。
+
+    ここで見たいのは **funnel からの数え方**なので、live 一覧は無い状態に固定する
+    (実機のキャッシュを読むと、作り物の item_id が全部 除外されてしまう)。
+    live 一覧を使う側の試験は test_cull_count_uses_live_20260906.py にある。
+    """
+    monkeypatch.setattr(C, "live_snapshot", lambda: (None, ""))
+
+
+
 def _funnel(tmp_path, rows):
     p = tmp_path / "funnel_20260824.csv"
     cols = ["item_id", "title", "price", "age_days", "flags", "site"]

@@ -3838,6 +3838,14 @@ class ListingPanel:
                         ce["cap"], -(-ce["remaining"] // ce["cap"]))
                 if not ce.get("remaining"):
                     ce_txt += " (これまでに %s件 落とし済み)" % ce.get("done", 0)
+                # ★2026-09-06: funnel は静的なので、補充されて在庫が戻った分が候補に残る。
+                #   「8件落とせます」と出したのに押したら0件、が実際に起きた (ユーザー指摘)。
+                #   落とせない理由と、どうすれば候補から消えるかを書く。
+                if ce.get("restocked"):
+                    ce_txt += ("\n※在庫が戻って落とせない %s件 "
+                               "(📊 ファネル分析 を回すと候補から消えます)" % ce["restocked"])
+                if ce.get("note"):
+                    ce_txt += "\n※%s" % ce["note"]
             else:
                 ce_txt = ""
             # 📉 棚を入れ替える: 押したら何件・いくら空くか

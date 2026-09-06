@@ -14,12 +14,25 @@ import io as _io
 import os
 import sys
 
+import pytest
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _TOOLS = os.path.join(_ROOT, "iMakHQ", "tools")
 if _TOOLS not in sys.path:
     sys.path.insert(0, _TOOLS)
 
 import cull_end as C                                           # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_live(monkeypatch):
+    """★2026-09-06: count_workload は出品中の実状態も見るようになった。
+
+    ここで見たいのは **funnel からの金額の数え方**なので、live 一覧は無い状態に固定する
+    (実機のキャッシュを読むと、作り物の item_id が全部 除外されてしまう)。
+    """
+    monkeypatch.setattr(C, "live_snapshot", lambda: (None, ""))
+
 
 
 def _funnel(tmp_path, rows):

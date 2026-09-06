@@ -227,6 +227,46 @@ def end_status(row, done_ids=None, today=None, min_age=MIN_AGE, min_price=MIN_PR
     return "🗑 取下げ 未 (次回の対象)"
 
 
+
+def still_oos(row, live):
+    """その行が **今も数量0で生きているか** (純関数, test可)。
+
+    live = {itemID: {"avail": 数量, ...}} (itemid_writeback_audit のキャッシュ)。
+    - live に居ない = 既に終了している → 落とす対象ではない
+    - avail > 0 = 補充されて在庫が戻っている → 落としてはいけない
+    """
+    it = (live or {}).get(str(row.get("item_id") or "").strip())
+    if not isinstance(it, dict):
+        return False
+    try:
+        return int(it.get("avail") or 0) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def live_snapshot():
+    """出品中の実状態。**eBay は叩かない** (あるキャッシュを読むだけ)。
+
+    戻り: (dict or None, 但し書き)。読めなければ (None, 理由)。
+    """
+    try:
+        import json as _j
+        import time as _t
+        import itemid_writeback_audit as _A
+        if not _A.CACHE.exists():
+            return None, "live 一覧が未取得 (押すまで実状態は分かりません)"
+        d = _j.loads(_A.CACHE.read_text(encoding="utf-8"))
+        if not isinstance(d, dict) or not d:
+            return None, "live 一覧が空 (押すまで実状態は分かりません)"
+        age = _t.time() - _A.CACHE.stat().st_mtime
+        note = ""
+        if age > getattr(_A, "CACHE_MAX_AGE_SEC", 7200):
+            note = "live 一覧が %d時間前のものです" % (age // 3600)
+        return d, note
+    except Exception as e:                                     # noqa: BLE001
+        return None, "live 一覧を読めません (%s)" % type(e).__name__
+
+
 def count_workload(funnel_dir=None, today=None):
     """押したら何件落とせるか / あと何件残っているか (2026-08-24 ユーザー要望)。
 
@@ -244,7 +284,9 @@ def count_workload(funnel_dir=None, today=None):
       「何件落とせるか」より「いくら空くか」が判断材料になる (棚ボタンと同じ考え)。
     """
     out = {"remaining": 0, "next": 0, "cap": CAP, "done": 0, "cull": 0,
-           "usd_next": 0.0, "usd_remaining": 0.0, "src": "", "error": ""}
+           "usd_next": 0.0, "usd_remaining": 0.0, "src": "", "error": "",
+           # ★2026-09-06: 在庫が戻って落とせなくなった数と、live 一覧についての但し書き
+           "restocked": 0, "note": ""}
     try:
         fs = glob.glob(os.path.join(funnel_dir or FUNNEL_DIR, "funnel_*.csv"))
         if not fs:
@@ -254,6 +296,17 @@ def count_workload(funnel_dir=None, today=None):
         rows = list(csv.DictReader(open(src, encoding="utf-8")))
         done = load_done()
         cull, eligible, picked = select(rows, done_ids=done, today=today)
+        # ★2026-09-06: funnel は静的なので、**補充されて在庫が戻った分**が候補に残る。
+        #   実際 9/6 は「8件落とせます / $1,454 空きます」と出たのに、押したら
+        #   8件とも qty=1 で除外され 0件だった (main() は落とす前に実機を見るため)。
+        #   ここでも同じものを見る。ただし **eBay は叩かない** — 既にある live 一覧を
+        #   読むだけ (表示のために API 枠を使わない方針は変えない)。
+        live, out["note"] = live_snapshot()
+        if live:
+            n_before = len(eligible)
+            eligible = [r for r in eligible if still_oos(r, live)]
+            out["restocked"] = n_before - len(eligible)
+            picked = eligible[:CAP]
         def _usd(rs):
             t = 0.0
             for r in rs:
