@@ -961,6 +961,59 @@ def _merge_ng_rows(existing_rows, new_rows, header):
     return [header] + kept + list(new_rows)
 
 
+# ★2026-09-06 ユーザー指示: 「PSA10でない」を「違う」から分けた。
+#   「違う」は **検索が別カードを拾った精度事故** を数えるセンサーで、グレード違いを混ぜると
+#   数字が濁る (番号は合っているので事故ではない)。さらに「違う」は 補URL候補NG 経由で
+#   🌱(新規出品の種) に流れるため、**PSA10限定運用なのに人が二度見て捨てる**往復が出ていた。
+#   → 2つの台帳に同時に落として、その1クリックを「二度と出さない」に効かせる。
+NOTPSA_REASON = "対象外: PSA10ではない (別グレード/未鑑定)"
+
+
+def build_notpsa_rows(entries, today):
+    """「PSA10でない」で外した候補 → (補URL候補NG行, 新規候補NG行) を作る (純関数)。
+
+    entries: [{"itemID","cert","url","title","cand_title","cand_price"}]
+    - 補URL候補NG : その出品にこのURLを二度と出さない (補URL側の除外に効く)
+    - 新規候補NG  : 🌱(新規出品の種) に出さない。**理由が残る**ので人が二度見しない
+    """
+    ng, newcand_ng = [], []
+    for e in entries or []:
+        url = (e.get("url") or "").strip()
+        if not url:
+            continue
+        ng.append([e.get("itemID", ""), e.get("cert", ""), url,
+                   (e.get("title") or "")[:60], today,
+                   e.get("cand_title", ""), e.get("cand_price", "")])
+        newcand_ng.append([url, NOTPSA_REASON, today, e.get("cand_title", "")])
+    return ng, newcand_ng
+
+
+def record_not_psa10(entries, today=None):
+    """「PSA10でない」を2つの台帳へ記録 (I/O)。戻り: 記録した件数。
+
+    片方だけ書くと意味が半分になる (補URL候補NG だけ = 🌱にまた出る /
+    新規候補NG だけ = 補URL候補としてまた出る) ので、両方に書く。
+    """
+    import datetime as _dt
+    today = today or _dt.date.today().isoformat()
+    ng_new, nc_new = build_notpsa_rows(entries, today)
+    if not ng_new:
+        return 0
+    from sheet_io import read_tab, write_rows_to_tab
+    write_rows_to_tab(NG_CAND_TAB,
+                      _merge_ng_rows(read_tab(NG_CAND_TAB), ng_new, NG_CAND_HEADER))
+    # 新規候補NG は newcand_confirm が持つ台帳。列定義はそちらを正とする (ズレ防止)
+    import newcand_confirm as _nc
+    cur = read_tab(_nc.NG_TAB)
+    body = [r for r in (cur[1:] if cur else []) if r and (r[0] or "").strip()]
+    have = {(r[0] or "").strip() for r in body}
+    add = [r for r in nc_new if r[0] not in have]
+    write_rows_to_tab(_nc.NG_TAB, [_nc.NG_HEADER] + body + add)
+    print(f"  🚫 PSA10でない {len(ng_new)}件 記録 "
+          f"({NG_CAND_TAB} / {_nc.NG_TAB} +{len(add)}件・次回から出しません)")
+    return len(ng_new)
+
+
 def _has_new_supply(seen_urls, current_urls):
     """前回外した時に見せた候補と比べて **新しい出品が出ているか**(純関数)。
 
@@ -1155,50 +1208,33 @@ def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, au
 #   判断を押しても翌日また同じ候補が並ぶので、目視が信用されなくなる
 #   (2026-06-22 に「同じ3件が毎回出る」と指摘されたのと同じ形)。
 #
-#   直し方: cooldown 満了の側にも新供給の条件を付ける。ただし
-#   **供給が動かない出品を永久に伏せない** (2026-07-29 の「永久に丸腰」に戻さない)。
-#   その安全弁が MAX_HIDE。
-CONFIRM_SKIP_MAX_HIDE_DAYS = 14
+#   ★直し方 (ユーザー確定 2026-09-06「日数に関わらず、出さなければいいのでは？」):
+#   **日数では戻さない。新しい供給が出るまで出さない。**
+#   同じ候補をもう一度見せても、前回と同じ判断をするだけで意味が無い。
+#
+#   2026-07-29 の「一度外すと永久に丸腰」には戻らない。あの時は新供給の判定自体が
+#   無かったのが原因で、今は市場に新しい出品が1件でも出れば その時点で出る。
+#   伏せている数は昼確認のログに「台帳skip N」として毎回出る (黙って消さない)。
 
 
-def _days_since(date_str, today):
-    """台帳の日付から今日までの日数。読めなければ None。"""
-    try:
-        import datetime
-        return (datetime.date.fromisoformat((today or "").strip())
-                - datetime.date.fromisoformat((date_str or "").strip())).days
-    except Exception:
-        return None
+def skip_iids_now(rows, cand_urls_by_iid):
+    """今 伏せる itemID (純関数, test可)。**新しい供給が出るまで出さない**。
 
+    - 前回 見せた候補に無いURLが在る → 出す
+    - それ以外 → 伏せる
+    - 前回の候補を記録していない旧行は判断材料が無いので出す (_has_new_supply が True)
 
-def skip_iids_now(rows, today, cand_urls_by_iid, max_hide_days=None):
-    """今 伏せる itemID (純関数, test可)。
-
-    - **新しい供給が出ている** → 出す (cooldown 中でも)
-    - cooldown 中 → 伏せる
-    - cooldown 満了でも **前回と同じ候補しか無い** → まだ伏せる (同じ物を毎日見せない)
-    - ただし max_hide_days を過ぎたら出す (供給が動かない出品を永久に伏せない)
-
-    cand_urls_by_iid: {itemID: [今の候補URL]}。判定材料が無い行は安全側 (伏せる)。
+    cand_urls_by_iid: {itemID: [今の候補URL]}
     """
-    max_hide = CONFIRM_SKIP_MAX_HIDE_DAYS if max_hide_days is None else max_hide_days
     seen_by_iid = _seen_urls_by_iid(rows)
     out = set()
     for r in (rows[1:] if rows and len(rows) > 1 else []):
         iid = (r[0] or "").strip() if r else ""
         if not iid:
             continue
-        reason = r[3] if len(r) > 3 else ""
-        date_str = r[4] if len(r) > 4 else ""
         cur = (cand_urls_by_iid or {}).get(iid) or []
-        if _has_new_supply(seen_by_iid.get(iid), cur):
-            continue                         # 新しい供給 = 出す価値がある
-        if _skip_row_active(reason, date_str, today):
-            out.add(iid)                     # cooldown 中
-            continue
-        age = _days_since(date_str, today)
-        if age is None or age < max_hide:
-            out.add(iid)                     # 供給が同じ = まだ出さない
+        if not _has_new_supply(seen_by_iid.get(iid), cur):
+            out.add(iid)
     return out
 
 
@@ -1214,10 +1250,10 @@ def build_confirm_context(vals, cache, today, verbose=False):
         _skip_rows = read_tab(CONFIRM_SKIP_TAB)
         _all_skip = _skip_iids_from_tab(_skip_rows)
         _seen_urls = _seen_urls_by_iid(_skip_rows)
-        # ★2026-09-06: 「新供給が出た時だけ出す」を cooldown 満了の側にも効かせる。
+        # ★2026-09-06: **新しい供給が出るまで出さない** (日数では戻さない)。
         #   以前は1日経つと供給が同じでも必ず戻ってきていた (= 同じ候補を毎日 見せる)。
         _cands_by_iid = {i: _cache_candidate_urls(cache.get(i)) for i in _all_skip}
-        skip_iids = skip_iids_now(_skip_rows, today, _cands_by_iid)
+        skip_iids = skip_iids_now(_skip_rows, _cands_by_iid)
         revived = len(_all_skip) - len(skip_iids)
         newsupply = {i for i in _all_skip
                      if i not in skip_iids
@@ -1753,6 +1789,24 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
             print(f"  📝 {CONFIRM_SKIP_TAB}: +{len(new_skip)}件 記録(次回は再表示しない・再検討は同タブ行削除)")
         except Exception as e:
             print(f"  ⚠ {CONFIRM_SKIP_TAB} 記録skip ({type(e).__name__}: {e})")
+    # --- 「PSA10でない」を対象外として記録 (2026-09-06) ---
+    #   「違う」に混ぜない。混ぜると精度事故の数字が濁り、🌱(新規出品の種) にも回ってしまう。
+    _np = []
+    for d in (res.get("notpsa") or []):
+        _i, _u = d.get("idx"), (d.get("url") or "").strip()
+        if _i is None or not _u or _i >= len(item_targets):
+            continue
+        _t = item_targets[_i]
+        _ci = cand_info_by_url((items[_i] or {}).get("candidates")) if _i < len(items) else {}
+        _ct, _cp = _ci.get(_norm_url(_u), ("", ""))
+        _np.append({"itemID": _t["itemID"], "cert": _t.get("cert", ""), "url": _u,
+                    "title": _t.get("title", ""), "cand_title": _ct, "cand_price": _cp})
+    if _np:
+        try:
+            record_not_psa10(_np, today)
+        except Exception as e:
+            print(f"  ⚠ PSA10でない の記録skip ({type(e).__name__}: {e})")
+
     # --- 候補単位の「違う」を負例として台帳へ (2026-07-29) ---
     # ここが無いと、出品自体が確定した場合に「違う」の1クリックが警告1行で消えていた
     # (次回また同じ別カードが候補に並ぶ)。押した判断は必ず次回に効かせる。
