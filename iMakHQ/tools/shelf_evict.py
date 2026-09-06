@@ -327,10 +327,8 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=No
     return picked, total
 
 
-def listed_today_amount(csv_dir=CSV_DIR, today=None):
-    """その日に作った入稿CSVの金額合計 (US価格)。純関数寄り, test可。"""
-    today = today or datetime.date.today()
-    stamp = today.strftime("%Y%m%d")
+def _upload_amount_on(csv_dir, stamp):
+    """その日付の入稿CSVの金額合計 (US価格)。無ければ 0。"""
     total = 0.0
     for p in glob.glob(os.path.join(csv_dir, f"*_upload_{stamp}_*.csv")):
         if p.endswith((".bak", ".json")):
@@ -342,6 +340,39 @@ def listed_today_amount(csv_dir=CSV_DIR, today=None):
         except OSError:
             continue
     return total
+
+
+def upload_days(csv_dir=CSV_DIR):
+    """入稿CSVがある日付 (YYYYMMDD) を新しい順に。純関数寄り, test可。"""
+    import re as _re
+    days = set()
+    for p in glob.glob(os.path.join(csv_dir, "*_upload_*.csv")):
+        if p.endswith((".bak", ".json")):
+            continue
+        m = _re.search(r"_upload_(\d{8})_", os.path.basename(p))
+        if m:
+            days.add(m.group(1))
+    return sorted(days, reverse=True)
+
+
+def listed_today_amount(csv_dir=CSV_DIR, today=None):
+    """落とす目標額のもとになる出品額 (US価格)。
+
+    ★2026-09-06 ユーザー確定「金額指定なしなら **前回の出品額ぶん**」。
+      それまでは「その日の出品額」だったので、出品していない日は $0 になり
+      **押しても何も落ちなかった** (実際 9/6 に押して0件)。
+      出していない日でも棚は回したいので、**直近で出品した日の額**を使う。
+      その日に出していればその額 = 従来と同じ動き。
+    """
+    today = today or datetime.date.today()
+    total = _upload_amount_on(csv_dir, today.strftime("%Y%m%d"))
+    if total > 0:
+        return total
+    for stamp in upload_days(csv_dir):
+        v = _upload_amount_on(csv_dir, stamp)
+        if v > 0:
+            return v
+    return 0.0
 
 
 
