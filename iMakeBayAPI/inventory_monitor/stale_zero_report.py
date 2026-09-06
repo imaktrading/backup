@@ -172,6 +172,30 @@ def format_report(rows: list, stats: dict, stale_days: int) -> str:
     return "\n".join(lines)
 
 
+def already_ended_ids() -> set:
+    """これまでに取り下げた itemID (= 履歴)。二度と候補に出さないために使う。
+
+    ★ 2026-09-07: 終了済みの出品が翌週以降も「取り下げ候補」に並び続けていた
+      (9/07 の候補 26 件は全て 9/01 に終了済み)。毎回 eBay に問い合わせて
+      「既に終了済」と分かってから外していたので、無駄な API と
+      「対象 26 / 完了 3」という読めない報告になっていた。
+    """
+    ids = set()
+    if not ENDED_LEDGER.exists():
+        return ids
+    try:
+        for line in ENDED_LEDGER.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            d = json.loads(line)
+            if d.get("verified_ok") and d.get("item_id"):
+                ids.add(str(d["item_id"]).strip())
+    except (OSError, json.JSONDecodeError):
+        return ids       # 読めない時は外さない (= 従来どおり全部候補、安全側)
+    return ids
+
+
 def _append_history(entry: dict) -> None:
     """取り下げた記録を残す (後から追えるように。silent に消さない)."""
     try:
@@ -296,6 +320,12 @@ def main() -> int:
         return 2
 
     rows = stuck_at_zero(series, brand)
+    _ended_before = already_ended_ids()
+    if _ended_before:
+        _before = len(rows)
+        rows = [r for r in rows if r["item_id"] not in _ended_before]
+        if _before != len(rows):
+            print(f"(取り下げ済み {_before - len(rows)} 件は候補から外しました)", flush=True)
     attach_titles(rows)
     stats = recovery_stats(series)
     report = format_report(rows, stats, args.days)
@@ -316,7 +346,8 @@ def main() -> int:
         print(f"\n=== {args.end_days}日以上を取り下げます ===", flush=True)
         ended = end_listings(rows, args.end_days)
         report += (f"\n\n■ 取り下げ実行: 対象 {ended['targets']} 件 / "
-                   f"完了 {len(ended['ended'])} 件 / 未完了 {len(ended['failed'])} 件")
+                   f"完了 {len(ended['ended'])} 件 / 未完了 {len(ended['failed'])} 件 / "
+                   f"触らなかったもの {len(ended.get('skipped') or [])} 件 (US 以外のミラー / 既に終了済)")
     elif args.end_days is not None:
         print(f"\n(--execute が無いので取り下げは実行していません)", flush=True)
 
