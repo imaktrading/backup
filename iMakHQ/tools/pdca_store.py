@@ -292,6 +292,22 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
                       " reviewed_ts, catalog_state"
                       " FROM improvement_queue WHERE dkey=?",
                       (dk,)).fetchone()
+    if not row:
+        # ★2026-09-06: dkey に category が入っているため、category だけ訂正した観測は
+        #   「別物」として新規登録され、訂正前の行がそのまま残って同じ依頼が2行に増える
+        #   (実測: queue 630 one_piece_tcg → 633 gundam_tcg で同じ「キラヤマト」が2行、
+        #   依頼書: hq/requests/2026-09-06_act_code_proposals_tcg.md 提案3)。
+        #   item_id(正規化)+target_field+suggested_value が一致する pending 行が在れば
+        #   「category を訂正しただけ」とみなし、新規行を作らずその行の category/dkey を書き換える。
+        nk = normalize_item_key(item_id)
+        for cand in con.execute(
+                "SELECT queue_id, seen_count, seen_days, status, identity, updated_ts,"
+                " reviewed_ts, catalog_state, item_id"
+                " FROM improvement_queue WHERE target_field=? AND suggested_value=? AND status='pending'",
+                (target_field, (suggested_value or ""))).fetchall():
+            if normalize_item_key(cand["item_id"]) == nk:
+                row = cand
+                break
     if row:
         seen = (row["seen_count"] or 1) + 1
         # ★2026-08-28: 同じCSVをその日に2回監査しただけで「再発」にしない。
@@ -315,9 +331,10 @@ def upsert_improvement(con, category, item_id, target_field, suggested_value="",
         state = (catalog_state or "").strip() or (
             (row["catalog_state"] if _has(row, "catalog_state") else "") or "")
         con.execute(
-            "UPDATE improvement_queue SET seen_count=?, seen_days=?, priority=?, status=?, evidence=?,"
-            " confidence=?, identity=?, catalog_state=?, last_writer=?, updated_ts=? WHERE queue_id=?",
-            (seen, days, pri, new_status, evidence, confidence, ident, state, writer, ts,
+            "UPDATE improvement_queue SET category=?, dkey=?, seen_count=?, seen_days=?, priority=?,"
+            " status=?, evidence=?, confidence=?, identity=?, catalog_state=?, last_writer=?,"
+            " updated_ts=? WHERE queue_id=?",
+            (category, dk, seen, days, pri, new_status, evidence, confidence, ident, state, writer, ts,
              row["queue_id"]))
         return row["queue_id"]
     pri = compute_priority(finding_type, 1, confidence)
@@ -336,6 +353,12 @@ def set_status(con, queue_id, status, ts=""):
     con.execute("UPDATE improvement_queue SET status=?, reviewed_ts=? WHERE queue_id=?", (status, ts, queue_id))
 
 
+# newcand_confirm.py が「カード番号が取れなかった目視候補」に付ける marker。この prefix が
+# 付いた item_id は cert 形式にも set-code 形式にもならないので resolver は一生 identity を
+# 出せない (2026-09-06)。
+_RESOLVER_UNREADABLE_PREFIX = "番号不明"
+
+
 def prune_resolved_gaps(con, resolve_fn, ts="", sources=("missing_models",)):
     """解決済の catalog_gap を queue から落とす(status='done')= 「真の未解決のみ」に保つ。
 
@@ -343,20 +366,29 @@ def prune_resolved_gaps(con, resolve_fn, ts="", sources=("missing_models",)):
     これを done 化しないと emit_consolidated_request が毎回 stale を再発行し、Catalog に同じ
     依頼が積み続ける(2026-06-18 Catalog 指摘B: pending の約60%が解決済 stale)。
 
+    ★2026-09-06: `番号不明` で始まる item_id (カード番号が取れなかった目視候補) は resolver が
+      何と照合すればよいか一生特定できない。resolve_fn=False のまま無限 pending にせず
+      `resolver_gap` (既存 status) に落として、まとめ依頼の層Aから外す (emit 側は status='pending'
+      しか拾わないので、これだけで再送が止まる)。catalog 側は既に依頼投入済で対応不要。
+      依頼書: hq/requests/2026-09-06_act_code_proposals_tcg.md 提案2
+
     Args:
         resolve_fn: (category, item_id) -> bool。catalog で解決可能(=もう gap でない)なら True。
         sources: prune 対象の source(既定: psa_to_csv 由来の missing_models のみ。md_import 等は触らない)。
     Returns:
-        {"pruned": n, "checked": m, "remaining_pending": k}
+        {"pruned": n, "checked": m, "remaining_pending": k, "resolver_gap": g}
     """
     ph = ",".join("?" * len(sources))
     rows = con.execute(
         f"SELECT queue_id, category, item_id, identity, evidence FROM improvement_queue "
         f"WHERE status='pending' AND source IN ({ph})", tuple(sources)).fetchall()
     pruned = 0
+    gapped = 0
+    pruned_item_ids = []
     for r in rows:
         # 候補 pid は identity/evidence に書いてあるので resolver に渡す (2026-08-28)。
         hints = f"{r['identity'] or ''} {r['evidence'] or ''}".strip()
+        errored = False
         try:
             try:
                 ok = resolve_fn(r["category"], r["item_id"], hints)
@@ -364,13 +396,19 @@ def prune_resolved_gaps(con, resolve_fn, ts="", sources=("missing_models",)):
                 ok = resolve_fn(r["category"], r["item_id"])   # 旧2引数の resolve_fn
         except Exception:
             ok = False                       # 解決判定失敗は触らない(fail-closed=残す)
+            errored = True
         if ok:
             set_status(con, r["queue_id"], "done", ts)
             pruned += 1
+            pruned_item_ids.append(r["item_id"])
+        elif not errored and (r["item_id"] or "").strip().startswith(_RESOLVER_UNREADABLE_PREFIX):
+            set_status(con, r["queue_id"], "resolver_gap", ts)
+            gapped += 1
     con.commit()
     remaining = con.execute(
         "SELECT COUNT(*) FROM improvement_queue WHERE status='pending'").fetchone()[0]
-    return {"pruned": pruned, "checked": len(rows), "remaining_pending": remaining}
+    return {"pruned": pruned, "checked": len(rows), "remaining_pending": remaining,
+            "resolver_gap": gapped, "pruned_item_ids": pruned_item_ids}
 
 
 def close_not_redetected(con, category, seen_dkeys, audited_item_ids, ts="", *,
@@ -944,14 +982,45 @@ def emit_consolidated_request(con, category, out_dir, today, held_out=None, veri
         *(_queue_table(layer_b) if layer_b else ["(なし)"]),
     ]
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    (Path(out_dir) / f"{today}_pdca_catalog_queue_{category}.md").write_text("\n".join(body), encoding="utf-8")
+    stem = f"{today}_pdca_catalog_queue_{category}"
+    (Path(out_dir) / f"{stem}.md").write_text("\n".join(body), encoding="utf-8")
+    # ★2026-09-06: まとめ依頼の topic (`pdca_catalog_queue_{category}`) は queue の item_id と
+    #   一致しないので、`sync_processed` の topic==item_id 経路では **0件も閉じられない**
+    #   (Catalog が答えても queue は pending のまま毎日再送される)。
+    #   この依頼に載せた queue_id を sidecar に記録し、`sync_processed` 側で読ませる。
+    #   依頼書: hq/requests/2026-09-06_act_code_proposals_tcg.md 提案1
+    (Path(out_dir) / f"{stem}.queue_ids.json").write_text(
+        json.dumps([r["queue_id"] for r in pend]), encoding="utf-8")
     return len(pend)
+
+
+def _sync_from_queue_id_sidecar(con, requests_dir: Path, date: str, topic: str, ts: str) -> int:
+    """まとめ依頼の sidecar (`emit_consolidated_request` が書いた queue_id 一覧) で閉じる。"""
+    if not date:
+        return 0
+    side = requests_dir / f"{date}_{topic}.queue_ids.json"
+    if not side.is_file():
+        return 0
+    try:
+        ids = json.loads(side.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    ids = [i for i in (ids or []) if isinstance(i, int)]
+    if not ids:
+        return 0
+    ph = ",".join("?" * len(ids))
+    cur = con.execute(
+        f"UPDATE improvement_queue SET status='done', reviewed_ts=? "
+        f"WHERE queue_id IN ({ph}) AND status='pending'", (ts, *ids))
+    return cur.rowcount
 
 
 def sync_processed(con, requests_dir, ts=""):
     """requests_dir の処理済 .md (_processed/_response/_expired) を queue=done に同期 (ループ閉じ)。
 
     Catalog が依頼を処理 → ファイル名が done を示す → 対応 topic の queue を done に。
+    per-item 依頼 (topic=item_id) はそのまま一致で閉じる。まとめ依頼 (topic=pdca_catalog_queue_*)
+    は item_id に一致しないので、emit 時に書いた queue_id sidecar でも閉じる (2026-09-06)。
     Returns: done 同期した件数。
     """
     p = Path(requests_dir)
@@ -966,6 +1035,7 @@ def sync_processed(con, requests_dir, ts=""):
             "UPDATE improvement_queue SET status='done', reviewed_ts=?"
             " WHERE item_id=? AND status='pending'", (ts, meta["topic"]))
         synced += cur.rowcount
+        synced += _sync_from_queue_id_sidecar(con, p, meta["date"], meta["topic"], ts)
     return synced
 
 

@@ -132,6 +132,54 @@ def guess_category(title, variants=()):
 # カード番号の書式。TCG は `OP05-002` / `FB01-071` 系、ポケモンは印刷番号 `006/020` 系。
 _CARD_NO_RE = re.compile(r"([A-Z]{1,4}\d{1,2}[a-z]?-\d{2,4}|\d{2,3}/\d{2,3})", re.I)
 
+# ★2026-09-05: 抽出番号 (`it["card_no"]`) を catalog 再チェックにかける時の正規化候補作り。
+# `127/193` (ポケモン印刷番号=分母つき) はそのままでは catalog の product_id (`M2a-127`) に
+# 当たらない。分母を落とし、タイトル中のセット記号 (`m2a`) を拾って大小を正規化してから組む。
+_PRINTNO_RE = re.compile(r"^(\d{2,3})/\d{2,3}$")
+_SET_PREFIX_HINT_RE = re.compile(r"\b([A-Za-z]{1,4}\d{1,2}[a-z]?)\b")
+_SET_PREFIX_HINT_STOPWORDS = {"psa10", "psa9", "psa8"}   # 全タイトルに乗るノイズ語
+# catalog の product_id 表記 = 先頭letter大文字 + 数字 + 末尾1文字だけ小文字 (`OP05` / `M2a`)。
+_ID_HEAD_RE = re.compile(r"^([A-Za-z]{1,4})(\d{1,2})([A-Za-z]?)$")
+
+
+def _normalize_set_prefix(token):
+    """セット記号の大小を catalog 表記に正規化 (純関数)。`m2a`→`M2a` / `op05`→`OP05`。"""
+    m = _ID_HEAD_RE.match(token or "")
+    if not m:
+        return token
+    letters, digits, tail = m.groups()
+    return f"{letters.upper()}{digits}{tail.lower()}"
+
+
+def extraction_recheck_candidates(card_no, title):
+    """抽出番号 → catalog 再チェック用の正規化候補 list (純関数, test可)。
+
+    依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案4
+    """
+    s = (card_no or "").strip()
+    if not s:
+        return []
+    cands = [s]
+    m = _PRINTNO_RE.match(s)
+    if m:
+        num = m.group(1)
+        cands.append(num)
+        for hint in _SET_PREFIX_HINT_RE.findall(title or ""):
+            if hint.lower() in _SET_PREFIX_HINT_STOPWORDS:
+                continue
+            cands.append(f"{_normalize_set_prefix(hint)}-{num}")
+    elif "-" in s:
+        head, _, tail = s.partition("-")
+        norm = f"{_normalize_set_prefix(head)}-{tail}"
+        if norm != s:
+            cands.append(norm)
+    seen, out = set(), []
+    for c in cands:
+        if c and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
 
 def _today():
     return datetime.datetime.now().strftime("%Y-%m-%d")
@@ -1164,6 +1212,7 @@ def save(items, res):
     typed = {c["idx"]: c["no"] for c in res.get("card_nos", [])}
     creqs, creq_ng = [], []
     n_recheck = 0
+    n_no_number = 0
     for i in res["catalog_reqs"]:
         it = by_idx.get(i)
         if not it:
@@ -1172,14 +1221,34 @@ def save(items, res):
         if typed.get(i) and catalog_variants(typed[i]):
             n_recheck += 1          # 入力番号で catalog に在った → 依頼しない
             continue
+        # ★2026-09-05: 打鍵番号だけでなく、タイトルから抽出した番号 (`it["card_no"]`) にも
+        #   同じ再チェックをかける。分母つき/大小不一致のままだと catalog に実在しても
+        #   当たらず、空振りの追加依頼になっていた (実測: m2a 127/193 → M2a-127 は在った)。
+        #   依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案4
+        if not typed.get(i) and it["card_no"] and any(
+                catalog_variants(c)
+                for c in extraction_recheck_candidates(it["card_no"], it["title"])):
+            n_recheck += 1
+            continue
         cat = guess_category(it["title"], it["variants"])
         model = (f"{card_no or '番号不明'} {it['title'][:60]} "
                  f"(捨てた仕入候補の目視 {today} / {it['url']})")
+        # ★2026-09-05: カード番号が無い依頼は catalog 側が「決められません」としか返せない
+        #   (実測: シャンクス OP09-001 ほか8刷りが在るのに、番号不明では特定不能で空振り3日連続)。
+        #   ここで落として捨てず・対象外にもせず、次回また目視に出す (missing_models.csv には
+        #   一切載せない = auto_catalog_add_request.py の入口検査に届く前に止める)。
+        #   依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案3 /
+        #           hq/requests/2026-09-06_act_code_proposals_tcg.md 提案2(入口)
+        if not card_no:
+            n_no_number += 1
+            continue
         creqs.append([cat, model, f"{today} 00:00:00"])
         creq_ng.append([it["url"], "カタログ未収録 → 追加依頼を起票", today,
                         (it["title"] or "")[:60]])
     if n_recheck:
         print(f"  ↩ 入力された番号で catalog に在った {n_recheck}件 → 依頼せず次回に候補を出す")
+    if n_no_number:
+        print(f"  ⏭️ 番号不明で入口検査に落とした {n_no_number}件 → 依頼せず次回また目視に出す")
     if creqs:
         n = append_missing_models(creqs)
         _append_tab(NG_TAB, NG_HEADER, creq_ng)

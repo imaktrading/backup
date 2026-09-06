@@ -357,6 +357,13 @@ def reject_reason(category: str, model: str) -> str | None:
         return "カテゴリ空 (どの作品か判らない依頼は catalog 側で調べようがない)"
     if not title_part(model):
         return "タイトル空 (カード名が無い依頼は catalog 側で調べようがない)"
+    # ★2026-09-05: カード番号が無い依頼は catalog 側が「どの刷りか決められません」としか
+    #   返せない (実測: シャンクス OP09-001 ほか8刷りが在るのに、番号不明では特定不能で
+    #   3日連続 空振り)。newcand_confirm.py の save() が番号が取れなかった目視候補に
+    #   付ける marker で入口検査する。
+    #   依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案3
+    if (model or "").strip().startswith("番号不明"):
+        return "番号不明 (カード番号が無いとどの刷りか catalog 側で決められない)"
     return None
 
 

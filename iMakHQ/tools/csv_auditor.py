@@ -51,6 +51,7 @@ CSV_DIR = os.path.join(WORKSPACE, "iMakHQ", "csv_output")
 REVIEW_DIR = os.path.join(WORKSPACE, "iMakHQ", "review_logs")
 CATALOG_REQ_DIR = r"C:\dev\iMak_data\catalog\requests"
 MISSING_MODELS_PATH = r"C:/dev/iMak_data/catalog/missing_models.csv"  # psa_to_csv 検出の catalog未登録
+MISSING_MODELS_PROCESSED_PATH = r"C:/dev/iMak_data/catalog/missing_models_processed.csv"
 CATALOG_DB = r"C:/dev/iMak_data/catalog/products.sqlite"              # 解決済 prune の照合先
 # identity 未解決で Catalog へ送らなかった分の残件リスト (毎監査 上書き = 常に全件再掲)
 UNRESOLVED_IDENTITY_PATH = os.path.join(REVIEW_DIR, "pdca_identity_unresolved.md")
@@ -1153,6 +1154,7 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
               "→ catalog 突合をスキップ (fail-OPEN。iMakTCG 側の category 付与漏れの疑い)")
     prog_req = write_program_request(project, program_items, dry_run)
     log_signals = _scan_log(log_path, csv_path)
+    log_signal_lines = _scan_log_samples(log_path, csv_path)
 
     # ★AI 段 (TitleAgent / Vision / AI総合レビュー) が落ちていないか。落ちていれば緑で終わらせない。
     degraded = ai_degraded(log_path, dc.get("claude", ""), csv_path)
@@ -1172,7 +1174,7 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # pending→done に落とすため、後から読むと同日中に closeされた再発が digest に一度も載らない
     # (=digestが構造的に毎日0件に見える fail-OPEN)。出典: hq/requests/2026-09-01_act_code_proposals_tcg.md 提案1
     recurring = filter_recurring_for_project(recurring_findings(_load_pdca_recurring()), project)
-    digest = _build_ng_digest(project, program_items, log_signals, recurring)
+    digest = _build_ng_digest(project, program_items, log_signals, recurring, log_signal_lines)
     digest_path = _write_ng_digest(project, digest, dry_run)
     # --- PDCA spiral-up: 改善キュー蓄積 → 集約発行 → 完了同期 (write-only・絶対に監査を壊さない) ---
     _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku,
@@ -1270,12 +1272,18 @@ def _load_open_program_fix(limit=50):
         return []
 
 
-def _build_ng_digest(project, program_items, log_signals, recurring):
-    """決定論で検出した NG を1つに束ねる (純関数, test可)。headless が各項目を必ず処分する元。"""
+def _build_ng_digest(project, program_items, log_signals, recurring, log_signal_lines=None):
+    """決定論で検出した NG を1つに束ねる (純関数, test可)。headless が各項目を必ず処分する元。
+
+    `log_signal_lines`: log_signals の内訳 (当たった行の実文、先頭3件・各80字)。
+    Act が digest だけを見て処分を書けるように、ログを読み直させない
+    (依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案1)。
+    """
     return {
         "project": project,
         "program_items": [{"sku": s, "msg": m} for s, m in program_items],
         "log_signals": list(log_signals or []),
+        "log_signal_lines": list(log_signal_lines or []),
         "recurring_missing": recurring,
         "counts": {"program": len(program_items), "log": len(log_signals or []),
                    "recurring_missing": len(recurring)},
@@ -1876,6 +1884,12 @@ def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by
         try:
             pr = _pdca.prune_resolved_gaps(con, _pdca.make_catalog_resolver(CATALOG_DB), ts=ts)
             pruned = pr["pruned"]
+            # ★2026-09-06: 解決済(done化)した行を missing_models.csv に残したままだと、
+            #   台帳が「まだ未収録」と言い続け、Act が毎回手で消す羽目になる (21日で16日放置の実害)。
+            #   done にした model はそのまま missing_models_processed.csv へ移す。
+            moved = _move_resolved_missing_models(pr.get("pruned_item_ids"))
+            if moved:
+                print(f"  🧹 台帳掃除: 解決済 {moved}件を missing_models.csv → missing_models_processed.csv")
         except Exception as _pe:
             print(f"  ⚠️ PDCA prune skip: {type(_pe).__name__}: {_pe}")
         synced = _pdca.sync_processed(con, CATALOG_REQ_DIR, ts=ts)        # ループ閉じ
@@ -2128,6 +2142,41 @@ def ai_degraded(log_path="", claude_text="", csv_path="", run_logs_dir=""):
     return out
 
 
+def _move_resolved_missing_models(item_ids):
+    """`prune_resolved_gaps` が done にした model 行を missing_models.csv から
+    missing_models_processed.csv へ移す (I/O)。
+
+    missing_models.csv は消えない台帳で、done にしても行が残るため Act が毎回手で
+    消す羽目になっていた (実測: 21日で16日放置)。ここで移せば台帳が「今も未解決」
+    だけを映すようになる (依頼書: hq/requests/2026-09-06_act_code_proposals_tcg.md 提案4)。
+    Returns: 移した件数。
+    """
+    ids = {m for m in (item_ids or []) if m}
+    if not ids or not os.path.exists(MISSING_MODELS_PATH):
+        return 0
+    import csv as _csv
+    with open(MISSING_MODELS_PATH, encoding="utf-8-sig", newline="") as f:
+        rows = list(_csv.DictReader(f))
+    kept = [r for r in rows if (r.get("model") or "") not in ids]
+    moved = [r for r in rows if (r.get("model") or "") in ids]
+    if not moved:
+        return 0
+    with open(MISSING_MODELS_PATH, "w", encoding="utf-8", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(["category", "model", "detected_at"])
+        for r in kept:
+            w.writerow([r.get("category", ""), r.get("model", ""), r.get("detected_at", "")])
+    is_new = not os.path.exists(MISSING_MODELS_PROCESSED_PATH) or \
+        os.path.getsize(MISSING_MODELS_PROCESSED_PATH) == 0
+    with open(MISSING_MODELS_PROCESSED_PATH, "a", encoding="utf-8", newline="") as f:
+        w = _csv.writer(f)
+        if is_new:
+            w.writerow(["category", "model", "detected_at"])
+        for r in moved:
+            w.writerow([r.get("category", ""), r.get("model", ""), r.get("detected_at", "")])
+    return len(moved)
+
+
 def _scan_log(log_path="", csv_path="", run_logs_dir=""):
     """logシグナルを拾う。`--log` が無くても **生成ログを自力で見つけて**読む (2026-08-19)。
 
@@ -2137,6 +2186,14 @@ def _scan_log(log_path="", csv_path="", run_logs_dir=""):
     if not txt:
         return []
     return scan_log_lines(txt)
+
+
+def _scan_log_samples(log_path="", csv_path="", run_logs_dir=""):
+    """digest 用: `_scan_log` と同じログを見て、当たった行の実文サンプルを返す。"""
+    txt = read_run_logs(log_path, csv_path, run_logs_dir)
+    if not txt:
+        return []
+    return _signal_line_samples(txt)
 
 
 # ★2026-08-21: 「ラベルの出現」ではなく「**0でない件数**」を数える。
@@ -2161,6 +2218,18 @@ _CATALOG_MISS_RE = re.compile(r"Catalog\s*未登録カード\s*(\d+)\s*件")
 _SCAN_PATS = [("HOLD/gate", re.compile(r"\bHOLD\b|gate_row_or_hold|csv_hold")),
               ("error", re.compile(r"❌|Traceback|Stacktrace|[Ee]rror:|ERROR|取得中.*失敗"))]
 
+# ★2026-09-05: `❌ 除外(出品しない): N件` / `❌ エラー: N件` は check_csv.py の集計行で、
+#   同じ事象を per-row の明細行 (`❌ 仕入値が上限を超えている ...`) と二重に説明するだけ。
+#   両方を「1行=1件」で足すと、実際は2件の異常が「除外2件+エラー2件+明細2行=4件」に水増しされる
+#   (依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案1)。
+_ERROR_SUMMARY_RES = (re.compile(r"❌\s*除外\(出品しない\)[:：]\s*(\d+)\s*件"),
+                      re.compile(r"❌\s*エラー[:：]\s*(\d+)\s*件"))
+
+
+def _is_error_summary_line(line):
+    """`❌ 除外(出品しない): N件` / `❌ エラー: N件` の集計行か。"""
+    return any(p.search(line or "") for p in _ERROR_SUMMARY_RES)
+
 
 def line_is_signal(line, pat):
     """ログ1行を数えるか (純関数, test可)。
@@ -2174,6 +2243,38 @@ def line_is_signal(line, pat):
     return int(m.group(1)) > 0 if m else True
 
 
+def _count_error_signal(lines):
+    """`error` ラベルの件数 (純関数, test可)。
+
+    集計行と明細行が両方在る時は、明細行 (1行=1件の実際の異常) だけを数え、
+    集計行は数えない (同じ件を2度説明しているだけ)。どちらか一方しか無い時は
+    従来どおり「マッチした行数」で数える (0件ルール・Traceback単体検出を壊さない)。
+    """
+    pat = dict(_SCAN_PATS)["error"]
+    matched = [ln for ln in lines if line_is_signal(ln, pat)]
+    detail = [ln for ln in matched if not _is_error_summary_line(ln)]
+    summary = [ln for ln in matched if _is_error_summary_line(ln)]
+    if detail and summary:
+        return len(detail)
+    return len(matched)
+
+
+def _signal_line_samples(txt, limit=3, maxlen=80):
+    """digest 用: シグナルに当たった行の実文を先頭 limit 件、各 maxlen 字で返す (純関数, test可)。
+
+    Act が digest (JSON) だけを見て処分を書けるように、ログを読み直させない。
+    """
+    lines = (txt or "").splitlines()
+    pats = [_CATALOG_MISS_RE] + [p for _, p in _SCAN_PATS]
+    out = []
+    for ln in lines:
+        if any(line_is_signal(ln, p) for p in pats):
+            out.append(ln.strip()[:maxlen])
+            if len(out) >= limit:
+                break
+    return out
+
+
 def scan_log_lines(txt):
     """生成ログ本文 → logシグナル list (純関数, test可)。"""
     lines = (txt or "").splitlines()
@@ -2183,7 +2284,8 @@ def scan_log_lines(txt):
     if n_miss:
         sig.append(f"catalog miss: {n_miss}件")
     for label, pat in _SCAN_PATS:
-        n = sum(1 for ln in lines if line_is_signal(ln, pat))
+        n = _count_error_signal(lines) if label == "error" else \
+            sum(1 for ln in lines if line_is_signal(ln, pat))
         if n:
             sig.append(f"{label}: {n}件")
     return sig
