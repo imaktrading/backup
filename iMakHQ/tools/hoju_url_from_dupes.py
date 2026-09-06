@@ -24,6 +24,22 @@ def _cell(row, idx):
     return (row[idx].strip() if len(row) > idx else "")
 
 
+def _norm(url):
+    """URL の表記ゆれを吸収して突合キーにする (純関数)。
+
+    dup_guard と同じ正規化を使う (「共有している」の判定が2か所でズレると意味がない)。
+    読めない時は小文字化 + 末尾スラッシュ落としだけの素朴な正規化に落とす。
+    """
+    u = (url or "").strip()
+    if not u:
+        return ""
+    try:
+        import dup_guard
+        return dup_guard.norm_url(u) or ""
+    except Exception:                                          # noqa: BLE001
+        return u.split("?")[0].rstrip("/").lower()
+
+
 def compute_additions(vals, live_ids=None):
     """(pure) rows2d(header含む) → (plan, warns)。I/O 無しで test 可能。
 
@@ -53,6 +69,21 @@ def compute_additions(vals, live_ids=None):
         if live_ids is not None and iid not in live_ids:
             continue                      # eBay に無い = 出品が終わっている → 足す先でない
         live_by_key.setdefault(key, []).append((i, r))
+    # ★2026-09-06: **他の出品が既に使っている仕入元**は足さない。
+    #   従来のガード (assigned) は *その走行の中だけ* で、既にシートに入っている分を
+    #   見ていなかった。付ける先の行の中身しか照合しないので、日をまたぐと同じURLが
+    #   2出品に付く。実害: m80392401851 が 820034256174 と 820034337348 の両方の
+    #   補URLに入り、dup_guard が「★① 仕入元URL共有 = 両方売れたら履行不能」と検出。
+    #   出品済(B非空)の行の A列 + 補URL列を、URL の持ち主として先に押さえる。
+    owner_by_url = {}
+    for i, r in enumerate(vals[1:], start=2):
+        iid = _cell(r, B)
+        if not iid:
+            continue                      # 未出品の行は枠を押さえない (これから使う側)
+        for u in [_cell(r, A)] + [_cell(r, AUX0 + k) for k in range(AUXN)]:
+            n = _norm(u)
+            if n:
+                owner_by_url.setdefault(n, set()).add(iid)
     plan, warns, assigned = {}, [], set()
     for i, r in enumerate(vals[1:], start=2):
         iid, url, cert, key, sold = _cell(r, B), _cell(r, A), _cell(r, I), _cell(r, KEY), _cell(r, D)
@@ -65,6 +96,12 @@ def compute_additions(vals, live_ids=None):
         if url in assigned:
             continue          # 1本の仕入元を2出品に付けない (両方売れたら片方 履行不能)
         prow, pr = pick_primary(primaries, plan)
+        # 既に **別の出品** が使っている仕入元なら足さない (走行をまたいだ共有を防ぐ)
+        _own = owner_by_url.get(_norm(url), set()) - {_cell(pr, B)}
+        if _own:
+            warns.append(f"url={url} は既に他の出品 {sorted(_own)} が使用中 → 足さない "
+                         f"(1本の仕入元を2出品に付けると両方売れた時に履行不能)")
+            continue
         if len(primaries) > 1:
             warns.append(f"KEY={key} live出品 {len(primaries)}件 → row {prow} に付けた "
                          f"(渇いている順 / 2枚目 cert={cert})")
