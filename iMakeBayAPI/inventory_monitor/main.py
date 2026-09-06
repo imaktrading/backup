@@ -639,6 +639,19 @@ def alert_if_increased(current: int, all_updates: Optional[list] = None,
         save_restore_state(all_updates)
 
 
+def _state_path(path):
+    """pytest 実行中は本番の state file に書かない.
+
+    ★ 2026-09-07: test が二段確認 state (_last_needs_action_skus.json) を
+      空で上書きしていた。空になると次 cycle は「前 cycle に対処要が無かった」と
+      読むので、確定済の取下げが 1 cycle (8h) 遅れる = 安全側の情報が消える。
+      iMakInventory の _ledger_path と同じ考え方 (本番台帳を test から守る)。
+    """
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return path
+    return path.with_name(path.stem + "_TESTRUN" + path.suffix)
+
+
 def save_needs_action_state(all_updates: list) -> None:
     """今 cycle の **qty=0 化対象** SKU を state file に保存 (二段確認用、Phase 4 で利用).
 
@@ -658,7 +671,7 @@ def save_needs_action_state(all_updates: list) -> None:
         if u.get("needs_action")
         and u.get("supplier_stock_mark") == "✕"   # = 仕入元 ✕ のみ (qty=0 化対象)
     ]
-    TWO_CYCLE_STATE.write_text(
+    _state_path(TWO_CYCLE_STATE).write_text(
         json.dumps({
             "checked_at": datetime.now().isoformat(),
             "count":      len(needs),
@@ -722,7 +735,7 @@ def save_restore_state(all_updates: list) -> None:
         if u.get("needs_action")
         and u.get("supplier_stock_mark") == "◎"   # 仕入元 ◎ のみ (qty 復活対象)
     ]
-    RESTORE_TWO_CYCLE_STATE.write_text(
+    _state_path(RESTORE_TWO_CYCLE_STATE).write_text(
         json.dumps({
             "checked_at": datetime.now().isoformat(),
             "count":      len(restore),

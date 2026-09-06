@@ -91,3 +91,26 @@ def test_reproduce_incident_sequence(mm):
     mm.alert_if_increased(281, persist=False, scope="full")     # 17:03 dry-run 全件
     assert _state(mm)["count"] == 278                            # 基準は LIVE のまま
     assert len(mm._sent) == 1 and "+3" in mm._sent[0][0]         # 278→281 の実増加分のみ通報
+
+
+# ============================================================================
+# 二段確認 state を test が壊さない (2026-09-07)
+# ============================================================================
+def test_two_cycle_state_is_not_written_during_tests():
+    """pytest 実行中は本番の _last_needs_action_skus.json に書かない.
+
+    ★ 実害 (2026-09-07): test が空の state で上書きし、次 cycle が
+      「前 cycle に対処要が無かった」と読む状態になっていた。
+      確定済の取下げが 1 cycle (8h) 遅れる = 安全側の情報が消える。
+    """
+    import main as m
+    assert m._state_path(m.TWO_CYCLE_STATE).name.endswith("_TESTRUN.json")
+    assert m._state_path(m.RESTORE_TWO_CYCLE_STATE).name.endswith("_TESTRUN.json")
+
+    before = m.TWO_CYCLE_STATE.read_text(encoding="utf-8") if m.TWO_CYCLE_STATE.exists() else None
+    m.save_needs_action_state([
+        {"listing_id": "x", "sku_id": "s", "size": "M", "color": "BK",
+         "needs_action": True, "supplier_stock_mark": "✕"},
+    ])
+    after = m.TWO_CYCLE_STATE.read_text(encoding="utf-8") if m.TWO_CYCLE_STATE.exists() else None
+    assert after == before          # 本番 state は不変
