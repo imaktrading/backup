@@ -64,9 +64,19 @@ echo [warn] zero-backup step failed 3 times >> "%LOG%"
 goto :done
 
 :topup
-REM --- 2) keep stocking listings that have only one backup, so we never run dry
-echo [topup] max-backups=2 %date% %time% >> "%LOG%"
-python -u psa_hoju_fill.py search --max-backups=2 --limit=10 >> "%LOG%" 2>&1
+REM --- 2) keep stocking listings that are not yet full (fewer than 5 backups).
+REM        2026-09-06: this step used --max-backups=2 --limit=10, so the night
+REM        only ever refreshed 40 listings (30 zero-backup + 10 one-backup) while
+REM        the daytime review screen covers every listing below 5 backups (398).
+REM        The review screen only accepts a cache entry that is 3 days old or
+REM        less, so 325 of those 398 were permanently stuck as "not searched yet"
+REM        and never appeared no matter how often the button was pressed.
+REM        398 / 3 days = ~133 per night. Measured rate is ~2.2 items/min, so this
+REM        adds roughly an hour; the night still ends well before the morning.
+REM        Do NOT narrow the daytime threshold instead: listings with 1-4 backups
+REM        must reach the screen or the cheaper-supplier swap never fires (2026-09-05).
+echo [topup] max-backups=5 %date% %time% >> "%LOG%"
+python -u psa_hoju_fill.py search --max-backups=5 --limit=130 >> "%LOG%" 2>&1
 
 REM --- 3) prefetch for the RESTOCK gate (shares psa_research_cache, makes the
 REM        button answer instantly and cuts re-scraping)

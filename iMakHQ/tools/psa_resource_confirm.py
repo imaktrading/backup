@@ -353,6 +353,9 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 /* 要調査 = 判断を保留して残す印。捨てる系(違う/見送り)と色で区別する */
 .rb.probe{border-color:#0a7;color:#076}
 .rb.probe.sel{background:#0a7;color:#fff}
+/* PSA10でない = グレード対象外。捨てる系だが「違う(精度事故)」とは別物なので色を分ける */
+.rb.notpsa{border-color:#a06;color:#a06}
+.rb.notpsa.sel{background:#a06;color:#fff}
 .vok{font-size:10px;padding:1px 5px;border-radius:3px;background:#2a7;color:#fff;font-weight:bold}
 .vng{font-size:10px;padding:1px 5px;border-radius:3px;background:#e80;color:#fff;font-weight:bold}
 .nng{font-size:10px;padding:1px 5px;border-radius:3px;background:#c00;color:#fff;font-weight:bold}
@@ -507,11 +510,16 @@ def build_confirm_html(items):
             f"<div id='done'></div>{ZOOM_OVERLAY}<script>{_JS}{ZOOM_JS}</script></body></html>")
 
 
-def _serve_confirm(page_bytes, extract, timeout):
+def _serve_confirm(page_bytes, extract, timeout, api=None):
     """page を /img プロキシ付きで配信し、POST(JSON)を extract(data)->result で受けて返す。
 
     画像は多数並行のため ThreadingHTTPServer + サーバ側取得(ホットリンク/DNS/CORS回避)。
     確定ボタンが押される(POST)まで待ち、extract の戻りを返す。タイムアウト/未確定は None。
+
+    api: /api/... の GET を受ける関数 api(path, query_dict) -> dict (None で404)。
+         ★2026-09-06: 画面を開いたまま追加の問い合わせをするために足した
+           (カード番号を打った所でカタログを引いて、その場で候補を出す)。
+           確定 (POST) は従来どおり1回きりで、api は何度呼んでも画面を閉じない。
     """
     state = {"done": False, "result": None}
 
@@ -520,6 +528,24 @@ def _serve_confirm(page_bytes, extract, timeout):
             pass
 
         def do_GET(self):
+            if api and self.path.startswith("/api/"):
+                p = urllib.parse.urlparse(self.path)
+                q = {k: v[0] for k, v in urllib.parse.parse_qs(p.query).items()}
+                try:
+                    out = api(p.path, q)
+                except Exception as e:                       # noqa: BLE001
+                    out = {"error": f"{type(e).__name__}: {e}"}
+                if out is None:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps(out, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path.startswith("/img?"):
                 u = (urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("u") or [""])[0]
                 # 出品ページURL(mercari/snkrdunk)→実画像URLに解決してから取得。
@@ -604,7 +630,7 @@ function setRsn(btn){var cand=btn.closest('.cand'); var ck=cand.querySelector('.
   ck.dataset.rsn=btn.dataset.r;
   cand.querySelectorAll('.rb').forEach(function(b){b.classList.toggle('sel', b.dataset.r===btn.dataset.r);});}
 function go(){
-  var conf=[]; var diffs=[]; var probes=[]; var skip=0; var unset=0;
+  var conf=[]; var diffs=[]; var probes=[]; var notpsa=[]; var skip=0; var unset=0;
   document.querySelectorAll('.card').forEach(function(c){
     var idx=parseInt(c.dataset.idx); var urls=[];
     c.querySelectorAll('.ck').forEach(function(ck){
@@ -612,6 +638,8 @@ function go(){
       else if(ck.dataset.rsn==='diff'){diffs.push({idx:idx, url:ck.dataset.url});}
       /* ★要調査は「見送り」に混ぜない。混ぜると後で拾えず、印を付けた意味が消える */
       else if(ck.dataset.rsn==='probe'){probes.push({idx:idx, url:ck.dataset.url});}
+      /* ★PSA10でない = グレード対象外。見送りにも「違う」にも混ぜない (2026-09-06) */
+      else if(ck.dataset.rsn==='notpsa'){notpsa.push({idx:idx, url:ck.dataset.url});}
       else{skip++; if(!ck.dataset.rsn) unset++;}});
     if(urls.length) conf.push({idx:idx, urls:urls});
   });
@@ -620,13 +648,14 @@ function go(){
   var msg=[];
   if(diffs.length) msg.push('違う(別商品)が'+diffs.length+'件 — 検索の精度事故=即対応対象です。');
   if(probes.length) msg.push('要調査(同じかも)が'+probes.length+'件 — 台帳に記録します。補URLには書きません。');
+  if(notpsa.length) msg.push('PSA10でないが'+notpsa.length+'件 — 対象外として記録します。新規出品の種にも出ません。');
   if(unset) msg.push('理由未選択が'+unset+'件 — 見送りとして記録します。別商品なら「違う」を押してください。');
   /* ★2026-08-01: ここは Python の**非 raw** 文字列なので \n と書くと本物の改行が埋まり、
      JS の文字列リテラルが行途中で切れて SyntaxError → この script ブロックの関数が
      **全部未定義**になる (zoom/upd/setAll/setRsn/go/imgFail が丸ごと死ぬ)。必ず \\n と書く。 */
   if(msg.length && !confirm(msg.join('\\n')+'\\n\\n確定しますか?')) return;
   fetch('/confirm',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({confirmed:conf, diffs:diffs, probes:probes, skip:skip})}).then(function(){
+    body:JSON.stringify({confirmed:conf, diffs:diffs, probes:probes, notpsa:notpsa, skip:skip})}).then(function(){
     document.getElementById('main').style.display='none';
     var d=document.getElementById('done'); d.style.display='block';
     d.textContent='✅ RESTOCK確定 '+conf.length+'件。ターミナルに戻ってください。';});
@@ -789,6 +818,14 @@ def build_restock_html(items):
                 f"<button type='button' class='rb probe' data-r='probe' onclick='setRsn(this)'"
                 f" title='ラベルの書き方は違うが同じカードの可能性が濃厚。今は判断せず、後で調べる印を付ける'>"
                 f"🔎 要調査(同じかも)</button>"
+                # ★2026-09-06 ユーザー指示: 「PSA10でない」を「違う」に混ぜない。
+                #   混ぜると (a)「違う」= 検索の精度事故 の数字が濁る (グレード違いは検索の
+                #   事故ではない。番号は合っている) (b) 補URL候補NG 経由で 🌱(新規出品の種) に
+                #   回り、**PSA10限定運用なのに人がもう一度見て捨てる**往復が出る。
+                #   専用の理由にして、その1クリックを「二度と出さない」に効かせる。
+                f"<button type='button' class='rb notpsa' data-r='notpsa' onclick='setRsn(this)'"
+                f" title='カードは合っているがグレードが対象外。PSA9以下 / CGC・BGS 等の別鑑定 / 未鑑定'>"
+                f"PSA10でない</button>"
                 f"</span></span></label>")
         if not cand_html:
             cand_html = ["<div class='cph'>仕入候補なし</div>"]
@@ -904,7 +941,11 @@ def parse_restock_result(data):
     #   「仕入れる」に倒すと誤った変種を掴む。**保留のまま記録できる第3の受け皿**が要る。
     probes = [{"idx": int(d["idx"]), "url": d.get("url", "")}
               for d in (data.get("probes") or []) if d.get("idx") is not None]
-    return {"confirmed": out, "diffs": diffs, "probes": probes,
+    # ★2026-09-06: 「PSA10でない」= カードは合っているがグレードが対象外。
+    #   diffs(検索の精度事故) にも skip(business判断) にも入れない。
+    notpsa = [{"idx": int(d["idx"]), "url": d.get("url", "")}
+              for d in (data.get("notpsa") or []) if d.get("idx") is not None]
+    return {"confirmed": out, "diffs": diffs, "probes": probes, "notpsa": notpsa,
             "skip": int(data.get("skip") or 0)}
 
 

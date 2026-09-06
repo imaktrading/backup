@@ -1298,19 +1298,24 @@ def count_workload(today=None):
         return {"error": "%s: %s" % (type(e).__name__, e)}
 
 
-def _build_review_skip_rows(restock_cands, shown_idxs, confirmed_idxs, diff_idxs, today):
-    """視覚確証でレビュー済だが未確定(違う/見送り)の行を作る(純関数)。
+def _build_review_skip_rows(restock_cands, shown_idxs, confirmed_idxs, diff_idxs, today,
+                            notpsa_idxs=None):
+    """視覚確証でレビュー済だが未確定(違う/見送り/PSA10でない)の行を作る(純関数)。
 
-    shown - confirmed = 違う + 見送り。次回から視覚確証に出さないため記録する。
-    理由: diff_idxs にあれば「違う」、なければ「見送り」。
+    shown - confirmed = 違う + 見送り + PSA10でない。次回から視覚確証に出さないため記録する。
+    理由: diff_idxs にあれば「違う」、notpsa_idxs にあれば「PSA10でない」、他は「見送り」。
+    ★2026-09-06: 台帳の理由が「見送り(=買わない business 判断)」に化けると、後から
+      「なぜ止まっているか」が読めなくなるので分ける。
     """
     out = []
+    notpsa_idxs = notpsa_idxs or set()
     for n in sorted(shown_idxs - confirmed_idxs):
         rc = restock_cands[n] if isinstance(n, int) and 0 <= n < len(restock_cands) else {}
         iid = (rc.get("itemID") or "").strip()
         if not iid:
             continue
-        reason = "違う" if n in diff_idxs else "見送り"
+        reason = ("違う" if n in diff_idxs
+                  else "PSA10でない" if n in notpsa_idxs else "見送り")
         out.append([iid, rc.get("card_no", ""), rc.get("title", ""), reason, today, rc.get("ebay_url", "")])
     return out
 
@@ -1466,13 +1471,32 @@ def _run_restock_confirm(restock_cands, mp, cert_map):
         from sheet_io import write_rows_to_tab as _wt2
         shown_idxs = {it["idx"] for it in items}
         diff_idxs = {d.get("idx") for d in (res.get("diffs") or []) if d.get("idx") is not None}
-        new_skip = _build_review_skip_rows(restock_cands, shown_idxs, set(sel.keys()), diff_idxs, today)
+        notpsa_idxs = {d.get("idx") for d in (res.get("notpsa") or []) if d.get("idx") is not None}
+        new_skip = _build_review_skip_rows(restock_cands, shown_idxs, set(sel.keys()), diff_idxs,
+                                           today, notpsa_idxs)
         if new_skip:
             skip_out = _merge_skip_rows(_skip_existing, new_skip, REVIEW_SKIP_HEADER)
             _wt2(REVIEW_SKIP_TAB, skip_out)
             print(f"  📝 {REVIEW_SKIP_TAB}: +{len(new_skip)}件 記録(次回は視覚確証に出さない・再検討は同タブ行削除で復活)")
     except Exception as e:
         print(f"  ⚠ {REVIEW_SKIP_TAB} 記録skip ({type(e).__name__}: {e})")
+    # ★2026-09-06: 「PSA10でない」= グレード対象外。「違う(精度事故)」に混ぜず、
+    #   補URL候補NG と 新規候補NG の両方に落とす (補URLにも 🌱新規出品の種にも二度と出ない)。
+    _np = []
+    for d in (res.get("notpsa") or []):
+        _i, _u = d.get("idx"), (d.get("url") or "").strip()
+        if _i is None or not _u or _i >= len(restock_cands):
+            continue
+        _c = restock_cands[_i]
+        _np.append({"itemID": _c.get("itemID", ""), "cert": _c.get("cert", ""), "url": _u,
+                    "title": _c.get("title", ""), "cand_title": "", "cand_price": ""})
+    if _np:
+        try:
+            import psa_hoju_fill as _hf3
+            _hf3.record_not_psa10(_np, today)
+        except Exception as e:
+            print(f"  ⚠ PSA10でない の記録skip ({type(e).__name__}: {e})")
+
     _alert_restock_diffs(res.get("diffs") or [], res.get("skip") or 0, restock_cands, today)
 
 
