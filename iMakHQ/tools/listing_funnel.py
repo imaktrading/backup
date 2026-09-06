@@ -560,9 +560,13 @@ FUNNEL_BUCKETS = [
     ("CULL", "在庫切れ・戻す口が無い or 需要皆無", "在庫=0 ∩ (戻す担当なし or 需要=0)"),
     ("DEAD_SIMPLE", "非US等・LQR無 (簡易判定)", "判定基盤無 ∩ 販売0 ∩ watch0"),
 ]
+# ★2026-09-07 ユーザー要望: `age_days` と `supply_url` をタブにも出す。
+#   「在庫ありの落とす候補」は **出品からの日数** で切る (30日回転 / 2026-09-06 決定) のに、
+#   タブにその列が無く、CSV を開かないと切り分けられなかった。
+#   supply_url は「戻せるか」の判断材料で、relist で itemID が変わっても不変のキー。
 FUNNEL_COLS = ["item_id", "title", "site", "category", "price", "trend_price", "qty",
                "sold_qty", "sales90", "watch", "impr", "ctr%", "impr_total", "ctr_total%",
-               "photos", "keywords", "relist_status", "ebay_url"]
+               "photos", "keywords", "relist_status", "age_days", "supply_url", "ebay_url"]
 
 
 def _funnel_vals(r):
@@ -571,6 +575,7 @@ def _funnel_vals(r):
             round(r["impr"], 1), round(r["ctr"] * 100, 2),
             round(r.get("impr_total", 0), 1), round(r.get("ctr_total", 0) * 100, 2),
             r.get("photos", 0), r.get("keywords", 0), r.get("relist_status", ""),
+            r.get("age_days", 0), r.get("supply_url", ""),
             r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
 
 
