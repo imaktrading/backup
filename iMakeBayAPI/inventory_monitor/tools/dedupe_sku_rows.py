@@ -48,9 +48,30 @@ def plan_deletions(rows: list) -> tuple:
     return sorted(delete), detail
 
 
+def plan_blank_size_deletions(rows: list) -> list:
+    """サイズ空欄の行のうち、同じ listing に **サイズ入りの行がある** ものを消す。
+
+    ★ 2026-09-07: UUID 同期の置き土産で、同じ listing にサイズ空欄の行が 42 行
+      重なっていた (358276337811)。空欄行は (size, color) 突合に乗らないので
+      一度も更新されず、巡回の役に立たないまま件数だけ膨らませる。
+      サイズ入りの行が無い listing の空欄行は **唯一の記録** なので残す。
+    """
+    sized = collections.defaultdict(int)
+    for r in rows:
+        if len(r) > 6 and r[3].strip() and r[6].strip():
+            sized[r[3].strip()] += 1
+    out = []
+    for i, r in enumerate(rows, 2):
+        if len(r) > 6 and r[3].strip() and not r[6].strip() and sized.get(r[3].strip()):
+            out.append(i)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--execute", action="store_true", help="実削除 (既定は dry-run)")
+    ap.add_argument("--include-blank-size", action="store_true",
+                    help="サイズ空欄の重複行も消す (同 listing にサイズ入り行がある場合のみ)")
     args = ap.parse_args()
 
     sh = open_sheet()
@@ -58,6 +79,11 @@ def main() -> int:
     values = ws.get_all_values()
     rows = values[1:]
     delete, detail = plan_deletions(rows)
+    if args.include_blank_size:
+        blank = plan_blank_size_deletions(rows)
+        if blank:
+            print(f"  サイズ空欄の重複行: {len(blank)} 行 (同 listing にサイズ入り行あり)")
+        delete = sorted(set(delete) | set(blank))
 
     for d in detail:
         print(f"  {d['key']}: {d['rows']} 行 → row{d['keep']} を残して {d['rows'] - 1} 行削除")

@@ -404,9 +404,16 @@ def main():
     if latest_report:
         after_steps.append(("uuid_sync",
                             [PY, "sku_uuid_sync.py", "--report", latest_report, "--execute"]))
+        # ★ 2026-09-07: K 列 (eBay 現Qty) を実 eBay に合わせる。
+        #   これが日次に入っておらず手動ツール止まりだったため、取下げ済でも K=1 のまま
+        #   残った行が 218 件あり、「仕入元✕ × eBay在庫あり」として永久に対処要と
+        #   数えられていた (要対処 277 件のうち大半がこれ = 増減アラートが意味を失う)。
+        after_steps.append(("qty_sync",
+                            [PY, "ebay_qty_sync.py", "--report", latest_report, "--execute"]))
     else:
-        _log(">>> step uuid_sync: skip (eBay report 未 DL)")
+        _log(">>> step uuid_sync / qty_sync: skip (eBay report 未 DL)")
         step_results.append(("uuid_sync", False))
+        step_results.append(("qty_sync", False))
     after_steps.append(("zero",    [PY, "auto_qty_zero.py", "--mode=zero", "--execute"]))
     after_steps.append(("restore", [PY, "auto_qty_zero.py", "--mode=restore", "--execute"]))
     # 2026-05-29 cycle 末 audit + 自動修復 (= silent fail 検知 + heal、 課題 #2 拡張版)

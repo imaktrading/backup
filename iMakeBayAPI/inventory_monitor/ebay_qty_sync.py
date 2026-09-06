@@ -81,9 +81,12 @@ def match_qty_updates(uuid_qty: dict, sheet_skus: list) -> list:
     results = []
     for sheet_idx, row in enumerate(sheet_skus, start=2):
         r = list(row) + [""] * max(0, 12 - len(row))
-        # 対処済 (B=TRUE) 行はスキップ
-        if r[1].strip().upper() in ("TRUE", "VRAI"):
-            continue
+        # 対処済 (B=TRUE) 行は原則スキップ。ただし **下げる方向 (qty を減らす)** だけは
+        # 反映する。skip の目的は「古い report で取下げ結果を巻き戻さない」ことなので、
+        # 減らす向きは巻き戻しにならない。
+        # ★ 2026-09-07: この skip のせいで、取下げ済なのに K=1 のまま残った行が
+        #   76 件あり、「仕入元✕ × eBay在庫あり」として永久に対処要と数えられていた。
+        _done = r[1].strip().upper() in ("TRUE", "VRAI")
         listing_id = r[3].strip()
         sku_uuid = r[5].strip()
         if not UUID_RE.match(sku_uuid):
@@ -98,6 +101,8 @@ def match_qty_updates(uuid_qty: dict, sheet_skus: list) -> list:
             current_qty = int(r[10]) if r[10].strip() not in ("", "-") else 0
         except ValueError:
             current_qty = 0
+        if _done and new_qty >= current_qty:
+            continue                     # 対処済 行は 増やす/据置 の書込をしない
         results.append({
             "row_index":  sheet_idx,
             "listing_id": r[3].strip(),
@@ -107,6 +112,49 @@ def match_qty_updates(uuid_qty: dict, sheet_skus: list) -> list:
             "changed":    current_qty != new_qty,
         })
     return results
+
+
+VANISHED_SURGE_MAX = 300     # 1 回で K=0 にする上限 (超えたら止めて報告 = 誤一括の防止)
+REPORT_MIN_ROWS = 500        # report がこの行数未満なら壊れている疑い → 何もしない
+
+
+def find_vanished_rows(ebay_data: dict, uuid_qty: dict, sheet_skus: list) -> list:
+    """eBay に枠が無いのに K 列が >0 のまま残っている行を拾う (仕入元 ✕ の行のみ)。
+
+    ★ 2026-09-07: K 列 (eBay 現Qty) はシート自身の値を書き戻しているだけなので、
+      出品や variation が終了しても 1 のまま残り、その行は「仕入元✕ × eBay在庫あり」
+      = 永久に対処要として数え続けられていた (実測 136 行)。要対処の件数が実態と
+      合わなくなり、増減アラートが意味を失う。
+
+    ★ 仕入元 ✕ の行だけを対象にする。◎ の行を 0 にすると「仕入復活 × eBay 在庫0」
+      = 復活対象と見なされ、存在しない枠に qty=1 を送りに行くため。
+
+    Returns: [{"row_index", "listing_id", "sku_id", "current_qty", "new_qty": 0, "reason"}]
+    """
+    active = {str(k).strip() for k in ebay_data}
+    out = []
+    for sheet_idx, row in enumerate(sheet_skus, start=2):
+        r = list(row) + [""] * max(0, 12 - len(row))
+        if r[8].strip() != "✕":            # 仕入元 ✕ の行のみ
+            continue
+        try:
+            cur = int(r[10]) if r[10].strip() not in ("", "-") else 0
+        except ValueError:
+            continue
+        if cur <= 0:
+            continue
+        listing_id, sku_uuid = r[3].strip(), r[5].strip()
+        if not listing_id:
+            continue
+        if listing_id not in active:
+            reason = "listing_not_active"          # 出品自体が終了している
+        elif UUID_RE.match(sku_uuid) and (listing_id, sku_uuid) not in uuid_qty:
+            reason = "variation_not_in_listing"    # 出品はあるがその枠が無い
+        else:
+            continue                               # 判定できない行は触らない
+        out.append({"row_index": sheet_idx, "listing_id": listing_id, "sku_id": sku_uuid,
+                    "current_qty": cur, "new_qty": 0, "reason": reason})
+    return out
 
 
 def sync_from_csv(csv_path: Path, execute: bool = False) -> dict:
@@ -122,18 +170,27 @@ def sync_from_csv(csv_path: Path, execute: bool = False) -> dict:
     sheet_skus = read_sku_rows(sh)
     updates = match_qty_updates(uuid_qty, sheet_skus)
     changed = [u for u in updates if u["changed"]]
-    if execute and changed:
+
+    # eBay に枠が無いのに K>0 で残っている行 (= 対処要の万年カウント) を 0 に戻す
+    vanished, vanished_held = [], False
+    if len(sheet_skus) and sum(len(v) for v in ebay_data.values()) >= REPORT_MIN_ROWS:
+        vanished = find_vanished_rows(ebay_data, uuid_qty, sheet_skus)
+        if len(vanished) > VANISHED_SURGE_MAX:
+            vanished_held, vanished = True, []     # 一括で消しにいかない (report 不良の疑い)
+    if execute and (changed or vanished):
         sku_ws = get_sku_worksheet(sh)
         cell_updates = [
             {"range": f"K{u['row_index']}", "values": [[u["new_qty"]]]}
-            for u in changed
+            for u in changed + vanished
         ]
         sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
     return {
         "checked": len(updates),
         "changed": len(changed),
-        "executed": bool(execute and changed),
-        "details": changed[:20],  # 先頭 20 件のみ
+        "vanished": len(vanished),
+        "vanished_held": vanished_held,
+        "executed": bool(execute and (changed or vanished)),
+        "details": (changed + vanished)[:20],  # 先頭 20 件のみ
     }
 
 
@@ -142,49 +199,24 @@ def main():
     parser.add_argument("--report", required=True, help="eBay active listing report CSV path")
     parser.add_argument("--execute", action="store_true", help="本番書込 (default dry-run)")
     args = parser.parse_args()
-    is_dry_run = not args.execute
 
     csv_path = Path(args.report)
-    print(f"[1/3] report 読込: {csv_path.name}")
-    ebay_data = parse_ebay_report(csv_path)
-    uuid_qty = build_uuid_to_qty(ebay_data)
-    print(f"  variation listing: {len(ebay_data)} 件、UUID→qty entry: {len(uuid_qty)} 件")
-
-    print(f"[2/3] スプシ読込 + matching")
-    sh = open_sheet()
-    sheet_skus = read_sku_rows(sh)
-    updates = match_qty_updates(uuid_qty, sheet_skus)
-    changed = [u for u in updates if u["changed"]]
-    print(f"  match: {len(updates)} 件、うち K 列乖離: {len(changed)} 件")
-
-    if changed[:10]:
-        print(f"\n  サンプル (max 10 件):")
-        for u in changed[:10]:
-            print(f"    row {u['row_index']} listing {u['listing_id']}: "
-                  f"K {u['current_qty']} → {u['new_qty']}")
-
-    print(f"\n[3/3] {'dry-run' if is_dry_run else '実書込'}")
+    print(f"[1/2] report: {csv_path.name}")
+    res = sync_from_csv(csv_path, execute=args.execute)
+    print(f"[2/2] {'実書込' if args.execute else 'dry-run'}")
+    print(f"  K 列乖離: {res['changed']} 件 / eBay に枠が無く K>0 のまま: {res['vanished']} 件"
+          f"{' (件数が多すぎるため保留)' if res.get('vanished_held') else ''}")
+    if res.get("vanished_held"):
+        print(f"  ★ K=0 化を保留しました (上限 {VANISHED_SURGE_MAX} 件超)。"
+              f"report が壊れていないか確認してください。")
+    for u in res["details"][:10]:
+        print(f"    row {u['row_index']} listing {u['listing_id']}: "
+              f"K {u['current_qty']} → {u['new_qty']}"
+              f"{' (' + u['reason'] + ')' if u.get('reason') else ''}")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if is_dry_run:
-        out_path = LOG_DIR / f"ebay_qty_sync_dryrun_{ts}.json"
-        out_path.write_text(json.dumps(updates, ensure_ascii=False, indent=2),
-                            encoding="utf-8")
-        print(f"  dry-run 結果: {out_path}")
-    else:
-        if not changed:
-            print("  K 列乖離なし、書込スキップ")
-            return
-        sku_ws = get_sku_worksheet(sh)
-        cell_updates = [
-            {"range": f"K{u['row_index']}", "values": [[u["new_qty"]]]}
-            for u in changed
-        ]
-        sku_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
-        print(f"  [OK] K 列書換: {len(cell_updates)} cells")
-        out_path = LOG_DIR / f"ebay_qty_sync_executed_{ts}.json"
-        out_path.write_text(json.dumps(changed, ensure_ascii=False, indent=2),
-                            encoding="utf-8")
-        print(f"  実行記録: {out_path}")
+    out = LOG_DIR / f"ebay_qty_sync_{'executed' if args.execute else 'dryrun'}_{ts}.json"
+    out.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  記録: {out}")
 
 
 if __name__ == "__main__":

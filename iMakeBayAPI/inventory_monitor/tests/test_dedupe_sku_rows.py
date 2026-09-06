@@ -46,3 +46,14 @@ def test_size_blank_rows_are_never_deleted():
 def test_no_duplicates_means_nothing_to_delete():
     rows = [_row("444", "S", "BK"), _row("444", "M", "BK"), _row("555", "S", "BK")]
     assert plan_deletions(rows)[0] == []
+
+
+def test_blank_size_rows_are_deleted_only_when_a_sized_row_exists():
+    """サイズ空欄行は、同じ listing にサイズ入り行がある時だけ消す (唯一の記録は残す)."""
+    from tools.dedupe_sku_rows import plan_blank_size_deletions
+    rows = [
+        _row("111", "M", "BK"),    # row2 サイズ入り
+        _row("111", "", "BK"),     # row3 空欄 → 消す
+        _row("222", "", "BK"),     # row4 空欄だが 222 にサイズ入り行が無い → 残す
+    ]
+    assert plan_blank_size_deletions(rows) == [3]
