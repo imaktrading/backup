@@ -28,6 +28,9 @@ def test_retries_on_connection_error_then_succeeds(monkeypatch):
 
     monkeypatch.setattr(m.requests, "post", fake_post)
     monkeypatch.setattr(m, "_load_keys", lambda: {"AppID": "", "DevID": "", "AppSecret": "", "AuthToken": ""})
+    # ★2026-09-06: 認証を OAuth に寄せたので _access_token も requests.post を使う。
+    #   ここで止めないと「GetItem の呼び出し回数」にトークン取得ぶんが混ざる。
+    monkeypatch.setattr(m, "_access_token", lambda: "dummy-token")
     monkeypatch.setattr(m.time, "sleep", lambda s: None)
     out = m.fetch_listing_images("999", _cache={})
     assert out == ["http://x/1.jpg", "http://x/2.jpg"]
@@ -40,6 +43,9 @@ def test_failure_not_cached_as_empty(monkeypatch):
 
     monkeypatch.setattr(m.requests, "post", always_fail)
     monkeypatch.setattr(m, "_load_keys", lambda: {"AppID": "", "DevID": "", "AppSecret": "", "AuthToken": ""})
+    # ★2026-09-06: 認証を OAuth に寄せたので _access_token も requests.post を使う。
+    #   ここで止めないと「GetItem の呼び出し回数」にトークン取得ぶんが混ざる。
+    monkeypatch.setattr(m, "_access_token", lambda: "dummy-token")
     monkeypatch.setattr(m.time, "sleep", lambda s: None)
     cache = {}
     assert m.fetch_listing_images("888", _cache=cache) == []
@@ -58,6 +64,9 @@ def test_retries_on_read_timeout_then_succeeds(monkeypatch):
 
     monkeypatch.setattr(m.requests, "post", fake_post)
     monkeypatch.setattr(m, "_load_keys", lambda: {"AppID": "", "DevID": "", "AppSecret": "", "AuthToken": ""})
+    # ★2026-09-06: 認証を OAuth に寄せたので _access_token も requests.post を使う。
+    #   ここで止めないと「GetItem の呼び出し回数」にトークン取得ぶんが混ざる。
+    monkeypatch.setattr(m, "_access_token", lambda: "dummy-token")
     monkeypatch.setattr(m.time, "sleep", lambda s: None)
     out = m.fetch_listing_images("777", _cache={})
     assert out == ["http://x/1.jpg", "http://x/2.jpg"]

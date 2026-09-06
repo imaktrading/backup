@@ -32,6 +32,69 @@ def _load_keys():
     return k
 
 
+# ── 認証 (2026-09-06) ───────────────────────────────────────────────
+# 旧 Auth'n'Auth の AuthToken は **約18ヶ月で hard expire** し、更新の口が無い
+# (発行し直すには人が開発者ポータルを触るしかない)。実際 2026-09-06 に切れていて、
+# 取下げ / 補URL目視の画像 / 価格見直し / 一番くじ再仕入れ が **黙って空を返していた**。
+#
+# Trading API は OAuth のトークンも受け付ける (X-EBAY-API-IAF-TOKEN)。
+# OAuth の refresh_token は自分で更新されるので、こちらに寄せれば期限切れが起きない。
+# 実測 2026-09-06: itemID 358845054366 で IAF=Success / 旧AuthToken=hard expired。
+class TradingAuthError(RuntimeError):
+    """認証が通らなかった。**空で返さず必ず外へ出す** (黙って0件にしない)。"""
+
+
+_TOK = {"value": "", "until": 0.0}
+
+
+def _access_token():
+    """OAuth のアクセストークン (2時間ぶん)。切れていれば refresh で取り直す。"""
+    if _TOK["value"] and time.time() < _TOK["until"]:
+        return _TOK["value"]
+    import base64
+    import json
+    from credentials import token_path
+    k = _load_keys()
+    with open(token_path("trading"), encoding="utf-8") as f:
+        d = json.load(f)
+    b = base64.b64encode(("%s:%s" % (k["AppID"], k["AppSecret"])).encode()).decode()
+    r = requests.post("https://api.ebay.com/identity/v1/oauth2/token",
+                      headers={"Authorization": "Basic " + b,
+                               "Content-Type": "application/x-www-form-urlencoded"},
+                      data={"grant_type": "refresh_token", "refresh_token": d["refresh_token"]},
+                      timeout=30)
+    if r.status_code != 200:
+        raise TradingAuthError("OAuth の更新に失敗 (HTTP %s): %s"
+                               % (r.status_code, r.text[:200]))
+    j = r.json()
+    _TOK["value"] = j["access_token"]
+    _TOK["until"] = time.time() + max(60, int(j.get("expires_in") or 7200) - 300)
+    return _TOK["value"]
+
+
+def _headers(call="GetItem", site="0"):
+    """Trading API のヘッダ。鍵は OAuth 側に一本化する。"""
+    return {"X-EBAY-API-CALL-NAME": call,
+            "X-EBAY-API-SITEID": str(site),
+            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT,
+            "X-EBAY-API-IAF-TOKEN": _access_token(),
+            "Content-Type": "text/xml"}
+
+
+_AUTH_NG = re.compile(r"(token is hard expired|Authorisation token|Invalid token|"
+                      r"Auth token is invalid|expired)", re.I)
+
+
+def _check_auth(text):
+    """認証で落ちていたら **例外にする**。空で返すと誰も気づかない。"""
+    if not text:
+        return
+    if "<Ack>Failure</Ack>" in text and _AUTH_NG.search(text):
+        m = re.search(r"<ShortMessage>(.*?)</ShortMessage>", text)
+        raise TradingAuthError(m.group(1) if m else "認証エラー")
+
+
+
 def fetch_listing_images(item_id, _cache={}):
     """item_id の listing の PictureURL を順序保持で返す (失敗時は空list)。
 
@@ -43,20 +106,10 @@ def fetch_listing_images(item_id, _cache={}):
     if item_id in _cache:
         return _cache[item_id]
     try:
-        k = _load_keys()
-        hdr = {
-            "X-EBAY-API-CALL-NAME": "GetItem",
-            "X-EBAY-API-SITEID": "0",
-            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT,
-            "X-EBAY-API-APP-NAME": k["AppID"],
-            "X-EBAY-API-DEV-NAME": k["DevID"],
-            "X-EBAY-API-CERT-NAME": k["AppSecret"],
-            "Content-Type": "text/xml",
-        }
+        hdr = _headers()
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
             f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
         )
         # DNS瞬断/接続エラー/読取タイムアウトは数回リトライ(無いと画像が虫食いで欠落する。2026-06-17)。
@@ -74,6 +127,7 @@ def fetch_listing_images(item_id, _cache={}):
                     continue
                 raise
         # PictureDetails 内の PictureURL を順序保持で抽出
+        _check_auth(r.text)
         pics = re.findall(r"<PictureURL>(.*?)</PictureURL>", r.text)
         # 重複除去 (順序保持)
         seen, out = set(), []
@@ -84,6 +138,8 @@ def fetch_listing_images(item_id, _cache={}):
                 out.append(p)
         _cache[item_id] = out
         return out
+    except TradingAuthError:
+        raise            # ★認証切れは黙らせない
     except Exception:
         return []
 
@@ -112,23 +168,17 @@ def fetch_listing_condition(item_id):
     if not item_id:
         return None
     try:
-        k = _load_keys()
-        hdr = {
-            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
-            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
-            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
-            "Content-Type": "text/xml",
-        }
+        hdr = _headers()
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
             f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
         )
         text = None
         for attempt in range(4):
             try:
                 text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                _check_auth(text)
                 break
             except requests.exceptions.ConnectionError:
                 if attempt < 3:
@@ -137,6 +187,8 @@ def fetch_listing_condition(item_id):
                 raise
         m = re.search(r"<ConditionID>(\d+)</ConditionID>", text)
         return int(m.group(1)) if m else None
+    except TradingAuthError:
+        raise            # ★認証切れは黙らせない
     except Exception:
         return None
 
@@ -191,17 +243,10 @@ def fetch_listing_status(item_id):
     if not item_id:
         return None
     try:
-        k = _load_keys()
-        hdr = {
-            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
-            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
-            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
-            "Content-Type": "text/xml",
-        }
+        hdr = _headers()
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
             f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
         )
         text = None
@@ -209,6 +254,7 @@ def fetch_listing_status(item_id):
             try:
                 text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr,
                                      timeout=30).text
+                _check_auth(text)
                 break
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
                 if attempt < 3:
@@ -217,6 +263,8 @@ def fetch_listing_status(item_id):
                 raise
         m = re.search(r"<ListingStatus>(\w+)</ListingStatus>", text or "")
         return m.group(1) if m else None
+    except TradingAuthError:
+        raise            # ★認証切れは黙らせない
     except Exception:
         return None
 
@@ -231,23 +279,17 @@ def fetch_listing_qty(item_id):
     if not item_id:
         return None
     try:
-        k = _load_keys()
-        hdr = {
-            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
-            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
-            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
-            "Content-Type": "text/xml",
-        }
+        hdr = _headers()
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
             f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
         )
         text = None
         for attempt in range(4):
             try:
                 text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                _check_auth(text)
                 break
             except requests.exceptions.ConnectionError:
                 if attempt < 3:
@@ -262,6 +304,8 @@ def fetch_listing_qty(item_id):
         if q is None:
             return None
         return q - (qs or 0)
+    except TradingAuthError:
+        raise            # ★認証切れは黙らせない
     except Exception:
         return None
 
@@ -278,17 +322,10 @@ def fetch_listing_status(item_id):
     if not item_id:
         return None
     try:
-        k = _load_keys()
-        hdr = {
-            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
-            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
-            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
-            "Content-Type": "text/xml",
-        }
+        hdr = _headers()
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
             f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
         )
         text = None
@@ -296,6 +333,7 @@ def fetch_listing_status(item_id):
             try:
                 text = requests.post(_ENDPOINT, data=body.encode("utf-8"),
                                      headers=hdr, timeout=30).text
+                _check_auth(text)
                 break
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
                 if attempt < 3:
@@ -304,6 +342,8 @@ def fetch_listing_status(item_id):
                 raise
         m = re.search(r"<ListingStatus>(.*?)</ListingStatus>", text)
         return m.group(1) if m else None
+    except TradingAuthError:
+        raise            # ★認証切れは黙らせない
     except Exception:
         return None
 
@@ -319,23 +359,17 @@ def fetch_listing_price(item_id):
     if not item_id:
         return None, None
     try:
-        k = _load_keys()
-        hdr = {
-            "X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
-            "X-EBAY-API-COMPATIBILITY-LEVEL": _COMPAT, "X-EBAY-API-APP-NAME": k["AppID"],
-            "X-EBAY-API-DEV-NAME": k["DevID"], "X-EBAY-API-CERT-NAME": k["AppSecret"],
-            "Content-Type": "text/xml",
-        }
+        hdr = _headers()
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f"<RequesterCredentials><eBayAuthToken>{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
             f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>"
         )
         text = None
         for attempt in range(4):
             try:
                 text = requests.post(_ENDPOINT, data=body.encode("utf-8"), headers=hdr, timeout=30).text
+                _check_auth(text)
                 break
             except requests.exceptions.ConnectionError:
                 if attempt < 3:
@@ -343,6 +377,8 @@ def fetch_listing_price(item_id):
                     continue
                 raise
         return _parse_getitem_price(text)
+    except TradingAuthError:
+        raise            # ★認証切れは黙らせない
     except Exception:
         return None, None
 
