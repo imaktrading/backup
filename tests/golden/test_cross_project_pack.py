@@ -34,11 +34,15 @@ except ImportError:
 # 2026-06-03: v8 国別モデルへ同期。ライブ pricing_engine SSOT (gsheet V4-copy) の実値で凍結。
 #   G-SHOCK 0.1325→0.1375 / Tシャツ(UT) 0.153→0.14 / 一番くじ 0.1325/¥2500→0.14/¥3000。
 #   TCG(PSA10) は v8 でも 0.1325/¥2000 で不変。
+# 2026-09-07: 価格の元シートを V4-copy (1P1yf) から **V9 本体** に一本化した (第二 SSOT の解消)。
+#   V9 は 一番くじ / フィギュアの送料想定を ¥4,000 に更新済みで、V4-copy は ¥3,000 のままだった。
+#   = ここの凍結値も V4-copy の写しだったので、V9 に合わせて 3000→4000 に更新する。
+#   TCG(PSA10) / G-SHOCK / Tシャツ(UT) は両シート同値のため不変。
 EXPECTED_BY_PROJECT = {
     "iMakTCG":          {"category": "TCG(PSA10)", "fvf": 0.1325, "shipping_jpy": 2000},
     "iMakG-shock":      {"category": "G-SHOCK",    "fvf": 0.1375, "shipping_jpy": 2000},
     "iMakMercari":      {"category": "Tシャツ(UT)", "fvf": 0.14,   "shipping_jpy": 2000},
-    "iMak_ichibankuji": {"category": "一番くじ",    "fvf": 0.14,   "shipping_jpy": 3000},
+    "iMak_ichibankuji": {"category": "一番くじ",    "fvf": 0.14,   "shipping_jpy": 4000},
 }
 
 

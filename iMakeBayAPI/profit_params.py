@@ -4,7 +4,7 @@ iMak Trading Japan - 利益計算パラメータ SSOT (Single Source of Truth)
 
 データソース優先順位 (2026-07-31 改訂: Excel フォールバックを廃止):
   1. ローカルキャッシュ (cache/profit_params_cache.json): GS取得結果を1時間保持
-  2. Google Sheets (PRIMARY): GSHEET_URL (V4 copy, pricing_engine 専用)
+  2. Google Sheets (PRIMARY): GSHEET_URL (= 利益計算スプシ v9_GS 本体。2026-09-07 に複製 1P1yf から切替)
   3. ローカルキャッシュ (stale 許容): GS 不達時に期限切れでも使う
   4. yaml フォールバック: iMakeBayAPI/config/global.yaml (= SSOT)
 
@@ -31,7 +31,18 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 import config_loader  # noqa: E402
 
-GSHEET_URL = "https://docs.google.com/spreadsheets/d/1P1yfzWogDr3aw4aB8Yy1PkJzp1rEGNt5s_bAeXW5Pl4/edit"  # 2026-05-18: V4 (利益計算シート_v4_GS) のコピー、pricing_engine 専用 (= V4 本体は触らない)
+# ★2026-09-07: 参照先を V9 (利益計算スプシ本体) に一本化した。
+#   旧: 1P1yf... = 2026-05-18 に V4 から取った**複製**で、人が編集していない第二の元ネタだった。
+#   V9 は ユーザーが実際に編集しているシートで、offer_calc.py も既にこちらを読む。
+#   切替時 実測 (2026-09-07): 為替 (B2/F2/H2/J2) と手数料 (B3:B5) は両シート同値。
+#   **カテゴリは20行中3行が違い、V9 側が高い** = 最低価格が上がる (安全側):
+#     一番くじ  送料 3000 → 4000   (新規出品 +$10)
+#     フィギュア 送料 3000 → 4000   (新規出品 +$10)
+#     ゴルフ    fvf 0.1325 → 0.133 (新規出品 +$1)
+#   V8 (旧SSOT) は 3000/3000/0.133 で、**V9 だけが 4000** に更新されていた。
+#   どちらが正かは V9 を直して決めること (シートが1枚になったので、値の議論はシート上で完結する)。
+#   経緯: hq/requests/2026-09-03_pricing_sheet_source_1P1yf_vs_v9_ssot_check*.md
+GSHEET_URL = "https://docs.google.com/spreadsheets/d/1YLnR4aW5cgjquYXUaNPb_hnVwrHegobZyh-eAT6tVM0/edit"  # 利益計算スプシ v9_GS (SSOT)
 CREDS_PATH = WORKSPACE_ROOT / "double-hold-421922-7c0d38d3f73d.json"
 GSCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
