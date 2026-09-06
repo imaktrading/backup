@@ -348,7 +348,20 @@ def process_listing(sh, main_row: dict, dry_run: bool = False,
                     picked = m
                     break
             if picked is None and matched:
-                picked = matched[0]   # fallback: 任意 1 行
+                if ebay_size:
+                    # ★ 2026-09-07: eBay が売っている size が仕入元に無い = 買えない。
+                    #   旧実装は「任意の 1 行」を採用していたため、別 size の在庫で
+                    #   「在庫あり」と判定していた (357100744887 は eBay が JP XL、
+                    #   仕入元の NV/PB は S しか無いのに 在庫 1/1 あり と出ていた)。
+                    #   色が消えた時と同じ damage class なので、同じく売切扱いにする。
+                    picked = dict(matched[0])
+                    picked["supplier_in_stock"] = False
+                    picked["supplier_quantity"] = 0
+                    log(f"    [size 不在] eBay の size {ebay_size!r} が仕入元に無い "
+                        f"(仕入元 size: {sorted({m.get('size', '') for m in matched})}) → 売切扱い")
+                else:
+                    # title に JP サイズが無く比較できない → 従来どおり任意 1 行 (判定は継続)
+                    picked = matched[0]
             if picked is not None:
                 # eBay title 由来の size + SKU を採用
                 if ebay_size: picked["size"] = ebay_size
@@ -371,6 +384,63 @@ def process_listing(sh, main_row: dict, dry_run: bool = False,
                 matched = []
             if before != len(matched):
                 log(f"    単独 listing 集約: {before} → {len(matched)} 件 (eBay size={ebay_size!r})")
+
+    # ★ 2026-09-07: 仕入元から **枠ごと消えた** variation を売切として拾う。
+    #   matched は「仕入元に今ある枠」しか作らないので、色やサイズが丸ごと落ちると
+    #   その行は 1 度も更新されず ◎ のまま凍り、eBay の出品だけが生き残る。
+    #   実害: 358278977272 (プラズマ1000) の PRBL は montbell から消えたのに
+    #   シートは 7/24 から ◎ のまま、eBay に 3 枠 (JP S/M/XL) 生存していた。
+    #   条件: ページから枠が取れている時だけ (取れていない = 判定不能なので触らない)、
+    #        かつ eBay に実在する variation だけ (シートの旧行を掘り起こさない)。
+    _page_has_skus = bool(info.get("skus")) or bool(info.get("total_skus"))
+    if _page_has_skus and sheet_skus and ebay_valid is not None:
+        from sku_uuid_sync import normalize_size_for_match as _nz  # noqa: PLC0415
+        _covered = {(_nz(m.get("size", "")),
+                     _nz(m.get("color", "") or listing_default_color)) for m in matched}
+        _ebay_keys = {(s, c) for (l, s, c) in ebay_valid["set"] if l == listing_id}
+        _ebay_sizes = {s for (s, _c) in _ebay_keys}
+        _is_single = listing_id in ebay_valid.get("single_listings", {})
+        # ★ 「消えた」と言い切れる根拠がある枠だけ拾う (生きた出品を誤って落とさないため)。
+        #   a) 色一覧を返す supplier (montbell) で、その色が一覧に無い → 色が消えた
+        #   b) 今 fetch した色と同じ色の行なのに その size が取れなかった → size が消えた
+        #   これ以外 (別 URL の色 / 色コード表記のズレ) は根拠にならないので触らない。
+        #   ★ 実測 (2026-09-07 全107件): この絞りが無いと、同じ itemID に 2 つの商品 URL が
+        #     紐づいた出品 (358359585353 / 358711287999) が互いを「消えた」と判定し合い、
+        #     買える出品まで売切にしていた。
+        _page_colors = {_nz(c) for c in (info.get("available_color_codes") or [])}
+        _fetched_color = (_nz(info.get("color", ""))
+                          if info.get("color", "") not in ("ALL", "") else "")
+        _vanished = []
+        for sk in sheet_skus:
+            _k = (_nz(sk.get("size", "")), _nz(sk.get("color", "") or listing_default_color))
+            if _k in _covered:
+                continue
+            # eBay に無い variation (= シートの旧行) は掘り起こさない
+            if _is_single or not _ebay_keys:
+                continue
+            if _k not in _ebay_keys and _k[0] not in _ebay_sizes:
+                continue
+            _color_gone = bool(_page_colors) and bool(_k[1]) and _k[1] not in _page_colors
+            _size_gone = bool(_fetched_color) and _k[1] == _fetched_color
+            if not (_color_gone or _size_gone):
+                continue
+            _vanished.append({
+                "row_index":         sk.get("row_index"),
+                "sku_id":            sk.get("sku_id", ""),
+                "size":              sk.get("size", ""),
+                "color":             sk.get("color", "") or listing_default_color,
+                "supplier_in_stock": False,      # 仕入元から枠ごと消えた = 買えない
+                "supplier_quantity": 0,
+                "supplier_price":    _sheet_supplier_price(all_sku_rows, sk.get("row_index")),
+                "list_price":        None,
+                "ebay_qty":          sk.get("ebay_qty", 0),
+                "uniqlo_l2id":       "",
+                "uniqlo_communication_code": "",
+            })
+        if _vanished:
+            log(f"    [枠消滅] 仕入元から消えた variation {len(_vanished)} 件 → 売切扱い "
+                f"({sorted({(v['size'], v['color']) for v in _vanished})[:5]})")
+            matched = matched + _vanished
 
     updates = []
     needs_action_count = 0
