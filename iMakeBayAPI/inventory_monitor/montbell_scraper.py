@@ -394,6 +394,14 @@ def fetch_product_inventory(
         "color_display_code": target,
         "fetched_at": datetime.now().isoformat(timespec="seconds"),
         "skus": skus,
+        # ★ 2026-09-07: 色フィルタを掛ける **前** に、ページから何枠取れたか。
+        #   skus が 0 件の時に「ページは読めたがこの色が消えた (= 買えない)」と
+        #   「ページから 1 枠も取れなかった (= 判定不能)」を呼出側で切り分けるために要る。
+        #   これが無いと両方 0 件に見え、色が消えた出品が在庫ありのまま残る
+        #   (357100729078 サンダーパス Orange が 9/02〜9/07 の 5 日間そうなった)。
+        "total_skus": len(quantities) + len(status_by_size_color),
+        "available_color_codes": sorted({c for (_sz, c) in quantities}
+                                        | {c for (_sz, c) in status_by_size_color}),
     }
 
 

@@ -234,6 +234,21 @@ def match_uniqlo_with_sheet(uniqlo_skus: list, sheet_skus: list) -> list:
 # ============================================================================
 # 1 listing 処理
 # ============================================================================
+def _sheet_supplier_price(all_sku_rows: list, row_index):
+    """SKU シートの J 列 (仕入元価格) を row_index から読む。 取れなければ None。"""
+    if not all_sku_rows or not isinstance(row_index, int):
+        return None
+    i = row_index - 2                      # sheet_rows は 2 行目始まり (header 除去済)
+    if not (0 <= i < len(all_sku_rows)):
+        return None
+    row = all_sku_rows[i]
+    raw = (row[9] if len(row) >= 10 else "").strip()
+    try:
+        return int(float(raw.replace(",", ""))) if raw else None
+    except ValueError:
+        return None
+
+
 def process_listing(sh, main_row: dict, dry_run: bool = False,
                     all_sku_rows: list | None = None) -> dict:
     """1 listing 分の処理. Returns: {"updates": [...], "needs_action_count": N}
@@ -264,6 +279,39 @@ def process_listing(sh, main_row: dict, dry_run: bool = False,
 
     listing_default_color = info.get("color", "") if info.get("color", "") not in ("ALL", "") else ""
     matched = match_supplier_skus_with_sheet(info["skus"], sheet_skus, listing_default_color)
+
+    # ★ 2026-09-07: 仕入元ページから この出品の枠が 1 つも取れなかった時の扱い。
+    #   旧実装は matched=[] のまま素通りし「在庫 0/0 あり、要対処 0」= 何もしない だった。
+    #   売切ではなく「見つからない」なので危険側 (出品が生き残る) に倒れており、
+    #   実害: 357100729078 (サンダーパス Orange) は色が公式から消えた 9/02 以降 5 日間
+    #   出品が生きたまま残り、オファーが来た。
+    #   切り分け: ページは読めていて他の色が並んでいる → この色が消えた = 買えない (売切扱い)。
+    #             ページから 1 枠も取れない → 判定不能なので触らない (fail-closed、非 silent)。
+    if not matched and sheet_skus:
+        _total = info.get("total_skus")
+        if isinstance(_total, int) and _total > 0:
+            log(f"    [色消滅] 仕入元に {info.get('color', '') or '該当色'} が無い "
+                f"(ページには {_total} 枠 / 現存色 {info.get('available_color_codes')}) → 売切扱い")
+            matched = [{
+                "row_index":         sk.get("row_index"),
+                "sku_id":            sk.get("sku_id", ""),
+                "size":              sk.get("size", ""),
+                "color":             sk.get("color", "") or listing_default_color,
+                "supplier_in_stock": False,          # 仕入元から消えた = 買えない
+                "supplier_quantity": 0,
+                # 値は取れないので、シートに載っている前回価格をそのまま書き戻す
+                # (None を渡すと J 列が空になり、最後にいくらだったかが消える)
+                "supplier_price":    _sheet_supplier_price(all_sku_rows, sk.get("row_index")),
+                "list_price":        None,
+                "ebay_qty":          sk.get("ebay_qty", 0),
+                "uniqlo_l2id":       "",
+                "uniqlo_communication_code": "",
+            } for sk in sheet_skus]
+        else:
+            log(f"    [!] 仕入元ページから 1 枠も取れず (判定不能) → 触らない "
+                f"(シート {len(sheet_skus)} 行はそのまま)")
+            return {"updates": [], "needs_action_count": 0,
+                    "error": "supplier_page_returned_no_skus"}
 
     # eBay variation filter (= eBay 出品にない size/color は SKU シートに書かない)
     # ebay_valid_set は main() 冒頭で eBay listing report から構築 (= 全 listing 共通)
