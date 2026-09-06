@@ -72,3 +72,38 @@ def test_total_skus_missing_is_also_left_untouched(monkeypatch):
     res = main.process_listing(None, _row(), all_sku_rows=SHEET_ROWS)
     assert res["updates"] == []
     assert res["error"] == "supplier_page_returned_no_skus"
+
+
+# ============================================================================
+# 単独 listing の行増殖 (2026-09-07)
+# ============================================================================
+SINGLE_SHEET_ROWS = [
+    ["FALSE", "TRUE", "", "357100744887", "t", "Montbell", "XL", "NV/PB", "◎", "10850", "1", ""],
+]
+
+
+def test_single_listing_binds_to_existing_row_not_append(monkeypatch):
+    """仕入元 size(S) と eBay size(XL) が違っても既存行に紐づく (毎 cycle append しない).
+
+    実害: 357100744887 が 1 cycle 1 行ずつ増え 91 行になった (3 行/日)。
+    """
+    monkeypatch.setattr(main, "fetch_supplier_inventory", lambda *a, **k: {
+        "name": "サンダーパス ジャケット Men's", "color": "NV/PB", "total_skus": 14,
+        "skus": [{"size": "S", "color_code": "NV/PB", "in_stock": True,
+                  "quantity": 2, "price_jpy": 10850, "promo_price_jpy": 10850}],
+    })
+    monkeypatch.setitem(main.__dict__, "_EBAY_VALID_VARIATIONS", {
+        "listings_with_var": set(),
+        "single_listings": {"357100744887": {"size": "XL", "sku": "Montbell"}},
+        "set": set(),
+    })
+    row = {"listing_id": "357100744887", "title": "サンダーパス Men's BLUE",
+           "url": "https://webshop.montbell.jp/goods/disp_fo.php?product_id=1128635",
+           "supplier": "montbell"}
+    res = main.process_listing(None, row, all_sku_rows=SINGLE_SHEET_ROWS)
+
+    assert len(res["updates"]) == 1
+    u = res["updates"][0]
+    assert u["row_index"] == 2          # 既存行に紐づく (None なら append される)
+    assert u["size"] == "XL"            # eBay 由来 size は従来どおり採用
+    assert u["supplier_stock_mark"] == "◎"

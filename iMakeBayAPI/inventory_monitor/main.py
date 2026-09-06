@@ -353,6 +353,19 @@ def process_listing(sh, main_row: dict, dry_run: bool = False,
                 # eBay title 由来の size + SKU を採用
                 if ebay_size: picked["size"] = ebay_size
                 if ebay_sku:  picked["sku_id"] = ebay_sku
+                # ★ 2026-09-07: 単独 listing は SKU シート 1 行に対応する。
+                #   size を eBay 由来 (例 "XL") に書き換えると、仕入元の size (例 "S") で
+                #   引いた突合結果が外れたまま row_index=None で残り、毎 cycle 1 行ずつ
+                #   append されていた (357100744887 が 91 行、357100729078 が 28 行に増殖。
+                #   実測 1 cycle 1 行 = 3 行/日)。既存行があるならそこに紐づけ直す。
+                if picked.get("row_index") is None and sheet_skus:
+                    base = min(sheet_skus, key=lambda x: x.get("row_index") or 10**9)
+                    picked["row_index"] = base.get("row_index")
+                    picked["ebay_qty"] = base.get("ebay_qty", picked.get("ebay_qty", 0))
+                    if not (picked.get("sku_id") or "").strip():
+                        picked["sku_id"] = base.get("sku_id", "")
+                    log(f"    単独 listing 既存行に紐づけ: row{picked['row_index']} "
+                        f"(size を eBay 由来 {ebay_size!r} に書換えたため突合が外れていた)")
                 matched = [picked]
             else:
                 matched = []
