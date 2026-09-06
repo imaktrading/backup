@@ -554,6 +554,31 @@ function pickV(el){
   box.dataset.pid=el.dataset.pid; box.dataset.cat=el.dataset.cat;
   setAct(box.querySelector('button.go'));
 }
+/* ★2026-09-06: 番号を打ったら **その場でカタログを引いて候補を出す**。
+   従来は「打つ→確定→次回また開く」の2往復で、その間 候補ゼロの画面を見た人が
+   「カタログに無い」と判断して追加依頼を押していた (9/6 実測: 押した16件すべて、
+   番号を入れたら在ったので依頼が取り消された = 押し損)。 */
+function lookupNo(inp){
+  var box=inp.closest('.it'); var no=inp.value.trim();
+  if(!no || no===inp.dataset.asked) return;
+  inp.dataset.asked=no;
+  var slot=box.querySelector('.vslot');
+  if(slot) slot.innerHTML="<div class='one'>カタログを引いています… ("+no+")</div>";
+  fetch('/api/variants?no='+encodeURIComponent(no)).then(function(r){return r.json();})
+   .then(function(d){
+     if(!slot) return;
+     if(d.error){slot.innerHTML="<div class='warn'>引けませんでした: "+d.error+"</div>"; return;}
+     if(d.n){
+       slot.innerHTML=d.html;
+     } else {
+       /* 番号で引いても無い = ここで初めて「カタログに無い」が確定する */
+       slot.innerHTML="<div class='warn'>⚠ 入力された番号 <b>"+no+"</b> で探しても候補なし = "
+                     +"<b>カタログに無い</b>。<br>→ 「カタログに無い→追加依頼」を押してください</div>";
+     }
+   }).catch(function(e){
+     if(slot) slot.innerHTML="<div class='warn'>引けませんでした ("+e+")</div>";
+   });
+}
 /* ★理由を選んだら、そのまま「対象外」に確定する (ボタンと理由の二度手間をなくす)。
    逆に、対象外以外を選び直したら理由は消す (残っていると誤解のもと)。 */
 function pickRsn(sel){
@@ -605,6 +630,62 @@ function go(){
 """
 
 
+def variant_cards_html(vs):
+    """カタログ候補 → 並べて選ばせる HTML (純関数)。
+
+    ★2026-09-06: 番号を打った所で **その場で引き直す** ため、最初の描画と
+      あとから差し込む描画で同じ関数を使う (見た目と onclick がズレると選べなくなる)。
+    """
+    if not vs:
+        return ""
+    # ★2026-08-13 ユーザー指摘「英語版では一致しているけど、日本語版が候補にない」。
+    #   英語版だけしか無い = **日本語版がカタログに未収録** ということ。
+    #   英語版を黙って消すと手掛かりが消えるので、印を付けて残し、
+    #   「カタログに無い→追加依頼」に誘導する (= それも立派な結論)。
+    no_ja = all(v.get("en_only") for v in vs)
+    # ★必ず画像付きで並べる。1件でもカードとして出す (文字だけだと見比べられない)。
+    cards = "".join(
+        f"<div class='v' data-pid=\"{_html.escape(v['pid'])}\" "
+        f"data-cat=\"{_html.escape(v['category'])}\" onclick='pickV(this)'>"
+        + (f"<img src='{_html.escape(prc._proxied(v['image']))}' loading='lazy' "
+           f"onerror='imgFail(this)'>"
+           if v["image"] else
+           "<div style='width:100px;height:135px;display:flex;align-items:center;"
+           "justify-content:center;color:#999;border:1px dashed #ccc'>画像なし</div>")
+        + f"<div class='pid'>{_html.escape(v['pid'])}</div>"
+        + f"<div class='nm'>{_html.escape((v.get('name') or '')[:16])}</div>"
+        + ("<div class='en'>英語版のみ</div>" if v.get("en_only") else "")
+        + f"<button class='zb' data-img=\"{_html.escape(prc._proxied(v['image']))}\" "
+          f"data-pid=\"{_html.escape(v['pid'])}\" "
+          f"onclick='zoom(event,this,\"cat\")'>🔍</button>"
+        + "</div>" for v in vs)
+    head = (f"<div class='one'>カタログ候補 {len(vs)}件 — 絵柄を見て選んでください</div>"
+            if len(vs) > 1 else
+            "<div class='one'>カタログ候補 1件 — 絵柄が合っていれば選んでください</div>")
+    if no_ja:
+        head += ("<div class='warn'>⚠ 候補が<b>英語版しかありません</b>。"
+                 "絵柄が合っていても<b>日本語版がカタログに未収録</b>なので、"
+                 "「カタログに無い→追加依頼」を押してください</div>")
+    return head + f"<div class='vs'>{cards}</div>"
+
+
+def lookup_api(path, query):
+    """画面から呼ぶ問い合わせ (I/O)。/api/variants?no=OP05-002 → 候補の HTML。
+
+    ★2026-09-06 ユーザー要望。従来は「番号を入れる → 確定 → 次回また開く」の2往復で、
+      その間 人は「候補ゼロ = カタログに無い」と読んで追加依頼を押していた
+      (実測 9/6: 押した16件すべて、番号を入れたらカタログに在って依頼が取り消された)。
+      打った所で引いて見せれば、その場で版まで決まる。
+    """
+    if path != "/api/variants":
+        return None
+    no = (query.get("no") or "").strip().upper()
+    if not no:
+        return {"n": 0, "html": "", "no": ""}
+    vs = catalog_variants(no)
+    return {"n": len(vs), "no": no, "html": variant_cards_html(vs)}
+
+
 def build_html(items):
     """items → 目視ページ (bytes)。純関数。"""
     # ★2026-08-13 ユーザー指示「何をしたらいいのか、分かりやすい構成にしてな」。
@@ -652,35 +733,7 @@ def build_html(items):
         title = it["title"] or "(タイトル不明 — リンクを開いて確認)"
         vs = it["variants"]
         if vs:
-            # ★2026-08-13 ユーザー指摘「英語版では一致しているけど、日本語版が候補にない」。
-            #   英語版だけしか無い = **日本語版がカタログに未収録** ということ。
-            #   英語版を黙って消すと手掛かりが消えるので、印を付けて残し、
-            #   「カタログに無い→追加依頼」に誘導する (= それも立派な結論)。
-            no_ja = vs and all(v.get("en_only") for v in vs)
-            # ★必ず画像付きで並べる。1件でもカードとして出す (文字だけだと見比べられない)。
-            cards = "".join(
-                f"<div class='v' data-pid=\"{_html.escape(v['pid'])}\" "
-                f"data-cat=\"{_html.escape(v['category'])}\" onclick='pickV(this)'>"
-                + (f"<img src='{_html.escape(prc._proxied(v['image']))}' loading='lazy' "
-                   f"onerror='imgFail(this)'>"
-                   if v["image"] else
-                   "<div style='width:100px;height:135px;display:flex;align-items:center;"
-                   "justify-content:center;color:#999;border:1px dashed #ccc'>画像なし</div>")
-                + f"<div class='pid'>{_html.escape(v['pid'])}</div>"
-                + f"<div class='nm'>{_html.escape((v.get('name') or '')[:16])}</div>"
-                + ("<div class='en'>英語版のみ</div>" if v.get("en_only") else "")
-                + f"<button class='zb' data-img=\"{_html.escape(prc._proxied(v['image']))}\" "
-                  f"data-pid=\"{_html.escape(v['pid'])}\" "
-                  f"onclick='zoom(event,this,\"cat\")'>🔍</button>"
-                + "</div>" for v in vs)
-            head = (f"<div class='one'>カタログ候補 {len(vs)}件 — 絵柄を見て選んでください</div>"
-                    if len(vs) > 1 else
-                    "<div class='one'>カタログ候補 1件 — 絵柄が合っていれば選んでください</div>")
-            if no_ja:
-                head += ("<div class='warn'>⚠ 候補が<b>英語版しかありません</b>。"
-                         "絵柄が合っていても<b>日本語版がカタログに未収録</b>なので、"
-                         "「カタログに無い→追加依頼」を押してください</div>")
-            body_v = head + f"<div class='vs'>{cards}</div>"
+            body_v = variant_cards_html(vs)
         elif it.get("no_from_typed"):
             # 番号を人が入れたのに候補ゼロ = catalog に無い、が確定した状態
             body_v = ("<div class='warn'>⚠ 入力された番号 "
@@ -702,9 +755,10 @@ def build_html(items):
             + (f" ｜ <b>同じカードの別の仕入元 {len(it.get('dups') or [])}件も同じ結論にします</b>"
                if it.get("dups") else "")
             + "</div>"
-            f"{body_v}"
+            f"<div class='vslot'>{body_v}</div>"
             f"<div class='act'>カード番号 <input class='cno' "
-            f"value=\"{_html.escape(it['card_no'] or '')}\" placeholder='例 OP05-002'>"
+            f"value=\"{_html.escape(it['card_no'] or '')}\" placeholder='例 OP05-002' "
+            f"onchange='lookupNo(this)' onblur='lookupNo(this)'>"
             "<button class='go' data-a='go' onclick='setAct(this)'>出品する</button>"
             "<button class='cat' data-a='cat' onclick='setAct(this)'>"
             "カタログに無い→追加依頼</button>"
@@ -878,12 +932,26 @@ def save_auto_aux(items):
 
 
 def already_listed_keys():
-    """既に『出品』として保管済の KEY (I/O)。走行をまたいでも二重に出品候補にしない。"""
+    """既に『出品』として **商品管理シートへ送り済** の KEY (I/O)。
+
+    走行をまたいでも同じカードを2枚 出品候補にしないための集合。
+
+    ★2026-09-06: 転記済かどうかを見ておらず、**まだ足していない行の KEY まで**入れていた。
+      その結果、足そうとしている行が自分自身とぶつかり
+      「同じカードが既に出品中」で **100% 弾かれる** (実測: 未転記16件が全部これ。
+      本当に出品中だったものは0件)。人が証明番号を16件打ち込んで追加0件、
+      印も付かないので翌日また同じ16件が出ていた。
+      → **HIGH転記済(または売り切れ)の行だけ**を「もう埋まっている」と数える。
+    """
     keys = set()
     for r in migrate_out_rows(_read_tab(OUT_TAB)):
-        if (len(r) > OUT_KEY_COL and (r[0] or "").strip() == USE_LIST
-                and (r[OUT_KEY_COL] or "").strip()):
-            keys.add(r[OUT_KEY_COL].strip())
+        if len(r) <= OUT_KEY_COL or (r[0] or "").strip() != USE_LIST:
+            continue
+        if not (r[OUT_KEY_COL] or "").strip():
+            continue
+        if not (len(r) > OUT_DONE_COL and (r[OUT_DONE_COL] or "").strip()):
+            continue                       # 未転記 = まだ枠は埋まっていない
+        keys.add(r[OUT_KEY_COL].strip())
     return keys
 
 
@@ -1197,6 +1265,25 @@ def aux_urls_for(key, out_rows, exclude_url):
     return urls[:HIGH_AUXN]
 
 
+def demote_listed_to_aux(items, listed_keys):
+    """既に出品中のカードは **用途=補URL に落とす** (純関数)。戻り: (残す items, 落とした idx)。
+
+    ★2026-09-06: 用途は台帳に積んだ時点の判定なので、後からそのカードが出品されると
+      **一生 足せない行**が「用途=出品」に残る。実害 (9/6): 19件の画面で人が証明番号を
+      16件打ち込んだのに、全部「同じカードが既に出品中」で捨てられ、追加は0件。
+      しかも印が付かないので次回また同じ16件が出る (押しても減らないボタン)。
+      2枚目は出さないのが正だが、**仕入元としては使える**ので補URLに回す (捨てない)。
+    """
+    listed = {str(k).strip() for k in (listed_keys or []) if str(k).strip()}
+    keep, demoted = [], set()
+    for it in items:
+        if it.get("key") and it["key"] in listed:
+            demoted.add(it["i"])
+        else:
+            keep.append(it)
+    return keep, demoted
+
+
 def plan_high_rows(items, certs, existing_certs=(), listed_keys=(), out_rows=()):
     """{tab行index: cert} → 商品管理シートに足す行 (純関数)。
 
@@ -1243,9 +1330,14 @@ def build_cert_html(items):
     for it in items:
         photo = prc._proxied(it["url"])
         price = " / 仕入 %s円" % it["price"] if it["price"] else ""
+        # ★2026-09-06 ユーザー要望: 証明番号は PSA ラベルの右上に印字されている。
+        #   180x240 に縮めた写真では読めず、毎回 仕入元ページを開き直していた。
+        #   同じ画像を3倍にして**右上だけ**切り出したものを横に並べる (追加の通信なし)。
         cards.append(
             "<div class='card' data-i='%d'>"
             "<a href='%s' target='_blank'><img src='%s' loading='lazy'></a>"
+            "<div class='zoomtr' title='上半分を2倍 (ラベルの証明番号を読む用)'>"
+            "<img src='%s' loading='lazy'><span>上半分 2倍</span></div>"
             "<div class='meta'><div class='t'>%s</div>"
             "<div class='k'>%s%s</div>"
             "<a href='%s' target='_blank'>仕入元ページを開く (写真で番号を読む)</a>"
@@ -1254,13 +1346,23 @@ def build_cert_html(items):
             "<label class='so'><input type='checkbox' class='sold'> 売り切れ"
             "(次から出さない)</label></div>"
             "</div></div>" % (
-                it["i"], _html.escape(it["url"]), _html.escape(photo),
+                it["i"], _html.escape(it["url"]), _html.escape(photo), _html.escape(photo),
                 _html.escape(it["title"]), _html.escape(it["key"] or it["pid"] or ""),
                 _html.escape(price), _html.escape(it["url"])))
     css = ("body{font-family:sans-serif;margin:12px;background:#fafafa}"
            ".card{display:flex;gap:12px;border:1px solid #ddd;border-radius:6px;"
            "background:#fff;padding:8px;margin-bottom:8px}"
            ".card img{width:180px;height:240px;object-fit:contain;background:#f4f4f4}"
+           # ★2026-09-06 修正: 最初は「右上の角」だけを 180px 幅で切り出したが、写真の構図が
+           #   まちまちで別の場所が写り、見切れて読めなかった (ユーザー報告)。
+           #   ラベルは写真の**上部に横長**で写るので、**幅いっぱいのまま上半分を2倍**にする。
+           #   幅 360 = 元表示 180px の2倍。左上に寄せて、下にはみ出した分だけ隠す。
+           ".zoomtr{position:relative;width:360px;height:170px;overflow:hidden;"
+           "border:1px solid #ddd;border-radius:4px;background:#f4f4f4;flex:none}"
+           ".zoomtr img{position:absolute;top:0;left:0;width:360px;height:auto;"
+           "max-width:none;object-fit:contain}"
+           ".zoomtr span{position:absolute;left:0;bottom:0;background:rgba(0,0,0,.6);"
+           "color:#fff;font-size:10px;padding:1px 5px;border-radius:0 4px 0 0}"
            ".meta{flex:1;font-size:13px;line-height:1.6}"
            ".t{font-weight:bold}.k{color:#666;font-size:12px}"
            "input.cert{font-size:18px;padding:4px;width:180px;border:2px solid #06c;"
@@ -1324,6 +1426,24 @@ def run_append_high(timeout=10800, dry_run=False):
     existing_certs = [r[HIGH_CERT_COL] for r in prod[1:]
                       if r and len(r) > HIGH_CERT_COL and (r[HIGH_CERT_COL] or "").strip()]
     listed = already_listed_keys() | live_key_set()
+
+    # ★2026-09-06: 画面に出す前に「もう出品済のカード」を補URLへ落とす。
+    #   人に証明番号を打たせてから捨てるのは二重の無駄 (9/6 に16件ぶん実際に起きた)。
+    items, demoted = demote_listed_to_aux(items, listed)
+    if demoted:
+        body = []
+        for i, r in enumerate(out_rows):
+            r = list(r) + [""] * (len(OUT_HEADER) - len(r))
+            if i in demoted:
+                r[0] = USE_AUX
+            body.append(r[:len(OUT_HEADER)])
+        sheet_io.write_rows_to_tab(OUT_TAB, [OUT_HEADER] + body)
+        out_rows = body
+        print("  ↩ 同じカードが既に出品中 %d件 → 用途=補URL に回しました "
+              "(2枚目は出さない。仕入元としては夜間が使います)" % len(demoted))
+    if not items:
+        print("  足せる候補は残りませんでした (全部 補URL に回りました)")
+        return 0
 
     res = prc._serve_confirm(build_cert_html(items), parse_cert_result, timeout)
     if res is None:
@@ -1389,7 +1509,7 @@ def main():
         for it in items[:15]:
             print(f"   {it['card_no'] or '?':<12} 版{len(it['variants'])} {it['title'][:50]}")
         return 0
-    res = prc._serve_confirm(build_html(items), parse_result, a.timeout)
+    res = prc._serve_confirm(build_html(items), parse_result, a.timeout, api=lookup_api)
     if res is None:
         print("  確定されなかった (タイムアウト/未操作) → 何も書かない")
         return 1

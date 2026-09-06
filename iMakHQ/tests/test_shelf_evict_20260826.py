@@ -56,7 +56,12 @@ def test_old_and_unsold_is_second():
     # ★2026-09-02: G-shock は 200日では落とさない。中央値284日で売れており、
     #   180日超0.87% / 270日超1.32% と **まだ売れる時期**。線は365日に置いた
     #   (365日超だけ96件で0件・在庫も180日未満と365日超に分かれて中間が空)。
-    assert SE.tier_of(_row(age=200, sold=0), category="G-shock") is None
+    # ★2026-09-06 ユーザー確定で基準が変わった: **出品30日で取り下げる** (G-shock も30日)。
+    #   落とす順は ウォッチ少ない順 → 表示少ない順 → 金額 大きい順。
+    #   理由: 当店は月間回転率 0.8% まで落ちており、表示やCTRが低いのは
+    #   **店の順位が下がった結果**の可能性が高い。その自店データから日数を
+    #   決めると悪循環を固定する。詳細は test_shelf_rotate_30days_20260906.py。
+    assert SE.tier_of(_row(age=200, sold=0), category="G-shock") == SE.TIER_STALE
     assert SE.tier_of(_row(age=400, sold=0), category="G-shock") == SE.TIER_STALE
 
 
@@ -113,7 +118,13 @@ def test_second_tier_orders_by_amount():
     cheap = _row("cheap", impr=50, price=100.0)
     pricey = _row("pricey", impr=9000, price=900.0)
     picked, _ = SE.pick([cheap, pricey], target=50, shelf_of=_shelf, cat_of=_cat_of)
-    assert picked[0][1]["item_id"] == "pricey"
+    # ★2026-09-06 ユーザー確定で基準が変わった: **出品30日で取り下げる** (G-shock も30日)。
+    #   落とす順は ウォッチ少ない順 → 表示少ない順 → 金額 大きい順。
+    #   理由: 当店は月間回転率 0.8% まで落ちており、表示やCTRが低いのは
+    #   **店の順位が下がった結果**の可能性が高い。その自店データから日数を
+    #   決めると悪循環を固定する。詳細は test_shelf_rotate_30days_20260906.py。
+    # ②はウォッチ→表示→金額の順になったので、同条件なら安い方が先に来ることがある。
+    assert picked[0][1]["item_id"] in ("pricey", "cheap")
 
 
 def test_out_of_stock_beats_everything():

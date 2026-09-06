@@ -49,10 +49,23 @@ def test_tip_does_not_claim_access_order():
 def test_code_really_sorts_by_freed_amount():
     """ヒントの根拠。並びが空く額の降順であること。"""
     src = open(os.path.join(_TOOLS, "shelf_evict.py"), encoding="utf-8").read()
-    assert re.search(r"rank\s*=\s*-shelf_of\(r\)", src), "空く額の降順で並べていない"
+    # ★2026-09-06 ユーザー確定で基準が変わった: **出品30日で取り下げる** (G-shock も30日)。
+    #   落とす順は ウォッチ少ない順 → 表示少ない順 → 金額 大きい順。
+    #   理由: 当店は月間回転率 0.8% まで落ちており、表示やCTRが低いのは
+    #   **店の順位が下がった結果**の可能性が高い。その自店データから日数を
+    #   決めると悪循環を固定する。詳細は test_shelf_rotate_30days_20260906.py。
+    # ① は今も 空く額の降順。② はウォッチ→表示→金額。
+    assert re.search(r"rank = \(0, 0, -shelf_of\(r\)\)", src), "①が空く額の降順でない"
+    assert '_f(r.get("watch")),' in src, "②がウォッチ順でない"
 
 
-def test_gshock_is_not_dropped_at_30_days():
-    """G-SHOCK は中央値284日で売れる。30日で落とすと売れる在庫を捨てる。"""
-    assert SE.STALE_MAX_AGE["G-shock"] > SE.STALE_MAX_AGE["TCG"]
-    assert SE.STALE_MAX_AGE["G-shock"] == 365
+def test_gshock_is_dropped_at_30_days_too():
+    """★2026-09-06 ユーザー確定で **G-shock も30日**になった。
+
+    2026-09-02 は「G-SHOCK は中央値284日で売れるので30日で落とすと売れる在庫を捨てる」
+    としていたが、その根拠は **月間回転率 0.8% まで落ちた自店データ** だった。
+    店の順位が下がっている状態の数字なので、そこから日数を決めると悪循環を固定する。
+    実際、取下げを始めてからオファーが増えており、棚を減らす方向が効いている。
+    → 予測をやめて **30日で回す**。効果は月間回転率で測る。
+    """
+    assert SE.STALE_MAX_AGE["G-shock"] == SE.STALE_MAX_AGE["TCG"] == 30

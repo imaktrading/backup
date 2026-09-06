@@ -33,7 +33,12 @@ def _row(iid="1", qty=1, sold=0, age=100, impr=0, price=100.0, watch=0):
 
 def test_thresholds_are_per_category():
     """一律の日数にしない。カテゴリで30倍ちがう。"""
-    assert SE.STALE_MAX_AGE == {"TCG": 30, "G-shock": 365}
+    # ★2026-09-06 ユーザー確定で基準が変わった: **出品30日で取り下げる** (G-shock も30日)。
+    #   落とす順は ウォッチ少ない順 → 表示少ない順 → 金額 大きい順。
+    #   理由: 当店は月間回転率 0.8% まで落ちており、表示やCTRが低いのは
+    #   **店の順位が下がった結果**の可能性が高い。その自店データから日数を
+    #   決めると悪循環を固定する。詳細は test_shelf_rotate_30days_20260906.py。
+    assert SE.STALE_MAX_AGE == {"TCG": 30, "G-shock": 30}
 
 
 def test_tcg_dies_at_30_days():
@@ -41,12 +46,18 @@ def test_tcg_dies_at_30_days():
     assert SE.tier_of(_row(age=31), category="TCG") == SE.TIER_STALE
 
 
-def test_gshock_survives_until_365():
-    """G-shock は中央値284日で売れる。30日や90日で落とすと売れる在庫を捨てる。"""
-    for age in (31, 100, 200, 300, 365):
-        assert SE.tier_of(_row(age=age), category="G-shock") is None, "%d日で落としている" % age
-    assert SE.tier_of(_row(age=366), category="G-shock") == SE.TIER_STALE
+def test_gshock_is_now_dropped_at_30_days():
+    """★2026-09-06 ユーザー確定で **G-shock も30日**になった。
 
+    2026-09-02 は「G-SHOCK は中央値284日で売れるので30日で落とすと売れる在庫を捨てる」
+    としていたが、その根拠は **月間回転率 0.8% まで落ちた自店データ** だった。
+    店の順位が下がっている状態の数字なので、そこから日数を決めると悪循環を固定する。
+    実際、取下げを始めてからオファーが増えており、棚を減らす方向が効いている。
+    → 予測をやめて **30日で回す**。効果は月間回転率で測る。
+    """
+    assert SE.STALE_MAX_AGE["G-shock"] == 30
+    assert SE.tier_of(_row(age=30), category="G-shock") is None
+    assert SE.tier_of(_row(age=31), category="G-shock") == SE.TIER_STALE
 
 def test_other_categories_are_never_dropped_by_age():
     """線を引けるデータが無いカテゴリは触らない (Tシャツは365日超が最も売れる)。"""
