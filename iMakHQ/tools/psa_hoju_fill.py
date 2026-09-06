@@ -1148,6 +1148,60 @@ def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, au
     return aux_writeback, added_total, dropped_all, replaced_all
 
 
+# ★2026-09-06 ユーザー指摘「同じものが補URL③に何度も出てくる」。
+#   設計 (2026-07-29) は「短い cooldown + **新供給が出た時だけ出す**」の併用だったが、
+#   実装は新供給を **cooldown 中の前倒し表示** にしか使っておらず、
+#   1日経つと **供給が1件も変わっていなくても必ず戻ってきた**。
+#   判断を押しても翌日また同じ候補が並ぶので、目視が信用されなくなる
+#   (2026-06-22 に「同じ3件が毎回出る」と指摘されたのと同じ形)。
+#
+#   直し方: cooldown 満了の側にも新供給の条件を付ける。ただし
+#   **供給が動かない出品を永久に伏せない** (2026-07-29 の「永久に丸腰」に戻さない)。
+#   その安全弁が MAX_HIDE。
+CONFIRM_SKIP_MAX_HIDE_DAYS = 14
+
+
+def _days_since(date_str, today):
+    """台帳の日付から今日までの日数。読めなければ None。"""
+    try:
+        import datetime
+        return (datetime.date.fromisoformat((today or "").strip())
+                - datetime.date.fromisoformat((date_str or "").strip())).days
+    except Exception:
+        return None
+
+
+def skip_iids_now(rows, today, cand_urls_by_iid, max_hide_days=None):
+    """今 伏せる itemID (純関数, test可)。
+
+    - **新しい供給が出ている** → 出す (cooldown 中でも)
+    - cooldown 中 → 伏せる
+    - cooldown 満了でも **前回と同じ候補しか無い** → まだ伏せる (同じ物を毎日見せない)
+    - ただし max_hide_days を過ぎたら出す (供給が動かない出品を永久に伏せない)
+
+    cand_urls_by_iid: {itemID: [今の候補URL]}。判定材料が無い行は安全側 (伏せる)。
+    """
+    max_hide = CONFIRM_SKIP_MAX_HIDE_DAYS if max_hide_days is None else max_hide_days
+    seen_by_iid = _seen_urls_by_iid(rows)
+    out = set()
+    for r in (rows[1:] if rows and len(rows) > 1 else []):
+        iid = (r[0] or "").strip() if r else ""
+        if not iid:
+            continue
+        reason = r[3] if len(r) > 3 else ""
+        date_str = r[4] if len(r) > 4 else ""
+        cur = (cand_urls_by_iid or {}).get(iid) or []
+        if _has_new_supply(seen_by_iid.get(iid), cur):
+            continue                         # 新しい供給 = 出す価値がある
+        if _skip_row_active(reason, date_str, today):
+            out.add(iid)                     # cooldown 中
+            continue
+        age = _days_since(date_str, today)
+        if age is None or age < max_hide:
+            out.add(iid)                     # 供給が同じ = まだ出さない
+    return out
+
+
 def build_confirm_context(vals, cache, today, verbose=False):
     """confirm の前提 (skip台帳 / 候補NG / 他出品が使用中のURL) を1回だけ作る。
 
@@ -1158,14 +1212,16 @@ def build_confirm_context(vals, cache, today, verbose=False):
     try:
         from sheet_io import read_tab
         _skip_rows = read_tab(CONFIRM_SKIP_TAB)
-        skip_iids = _skip_iids_from_tab(_skip_rows, today=today)
         _all_skip = _skip_iids_from_tab(_skip_rows)
         _seen_urls = _seen_urls_by_iid(_skip_rows)
+        # ★2026-09-06: 「新供給が出た時だけ出す」を cooldown 満了の側にも効かせる。
+        #   以前は1日経つと供給が同じでも必ず戻ってきていた (= 同じ候補を毎日 見せる)。
+        _cands_by_iid = {i: _cache_candidate_urls(cache.get(i)) for i in _all_skip}
+        skip_iids = skip_iids_now(_skip_rows, today, _cands_by_iid)
         revived = len(_all_skip) - len(skip_iids)
-        # ★新供給が出ていれば cooldown 中でも出す (前回見せた候補に無いURLが在る)。
-        newsupply = {i for i in skip_iids
-                     if _has_new_supply(_seen_urls.get(i), _cache_candidate_urls(cache.get(i)))}
-        skip_iids -= newsupply
+        newsupply = {i for i in _all_skip
+                     if i not in skip_iids
+                     and _has_new_supply(_seen_urls.get(i), _cands_by_iid.get(i))}
     except Exception:
         skip_iids, revived, newsupply = set(), 0, set()
     try:
