@@ -18,6 +18,7 @@ scraper が入れるのは **公式の生値だけ**。出品くんが読む `*_
     card_type_ebay                     既存行が使っている対応をそのまま (新語彙は作らない)
     set_name_ebay                      api.derive_set_name_ebay (変換表)
     name_en (pokemon のみ)             PokeAPI 辞書 → 無ければ カード API 辞書
+    hp/stage/color/attack 系           生値 → eBay 語彙 (tcg_ebay_normalized_fields の PLAN)
 
 ★変換表に無いものは **空欄のまま** (fail-closed)。何が引けなかったかは最後に一覧で出す。
   そこが「変換表に1行足す」作業の入口になる。
@@ -36,12 +37,46 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scrapers"))
+sys.path.insert(0, str(ROOT / "tools"))
 import api  # noqa: E402
+import tcg_ebay_normalized_fields_20260615 as N  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
+
+
+# ★生値 → eBay 語彙 (2026-09-06 追加)。
+#   これを **取り込みの一部**にしていなかったので、9/04〜9/05 に入れた行に
+#   `hp_ebay` / `stage_ebay` / `color_ebay` が付かず、Item Specifics が3つ空で出た
+#   (CSV監査くん 依頼 `2026-09-06_ebay_aspect_fields_missing_on_new_ingests.md`)。
+#   規則は既存の `tools/tcg_ebay_normalized_fields_20260615.py` の PLAN をそのまま使う。
+#   ★ポケモンの `type_en` → `color_ebay` だけ 8/23 の migration にしか無かったので、ここに足す。
+#     eBay の Attribute の値表に在るものだけ通す (無ければ空欄 = fail-closed)。
+_ATTR_MASTER = Path("C:/dev/iMak_data/catalog/_input/ebay_aspects_183454_latest.json")
+
+
+def _attr_values() -> set:
+    try:
+        d = json.loads(_ATTR_MASTER.read_text(encoding="utf-8"))
+        a = d.get("aspects", d).get("Attribute/MTG:Color") or {}
+        return set(a.get("all") or [])
+    except Exception:
+        return set()
+
+
+_ATTR_OK = _attr_values()
+
+
+def _pokemon_type_to_color(raw):
+    v = str(raw or "").strip()
+    return v if v in _ATTR_OK else ""
+
+
+PLAN = {k: list(v) for k, v in N.PLAN.items()}
+PLAN["pokemon_tcg"].append(("color_ebay", "type_en", _pokemon_type_to_color))
+
 
 NOW = datetime.now().isoformat(timespec="seconds")
 CONSTANTS = {"card_size_ebay": "Standard", "language": "Japanese",
@@ -123,14 +158,12 @@ def run(cat: str, commit: bool) -> int:
             v = en2.get(jp)          # トレーナーズ等 (既存 rule_trainer_dict と同じ出所)
             return (v, "api_dict_finish_ingest") if v else ("", "")
 
+    # ★カテゴリの全行を見る (2026-09-06)。条件で絞ると、条件に入れ忘れた項目が
+    #   永久に埋まらない (実際 hp/stage/color がそれで 1,500行ずつ空のままだった)。
+    #   specs が変わった行だけ書くので、余分な更新は起きない。
     rows = db.execute(
         "SELECT id, product_id, set_name_official, name_jp, name, name_en, specs FROM products "
-        "WHERE category=? AND ("
-        "  IFNULL(json_extract(specs,'$.game_ebay'),'')='' OR"
-        "  IFNULL(json_extract(specs,'$.set_name_ebay'),'')='' OR"
-        "  IFNULL(json_extract(specs,'$.card_type_ebay'),'')='' OR"
-        "  IFNULL(json_extract(specs,'$.rarity_ebay'),'')='' OR"
-        "  IFNULL(name_en,'')='')", (cat,)).fetchall()
+        "WHERE category=?", (cat,)).fetchall()
     print(f"=== 仕上げ {cat} ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(rows)}行 ===")
     game, maker = api.derive_game_ebay(cat), api.derive_manufacturer(cat)
     filled, unmapped, done = Counter(), Counter(), 0
@@ -147,6 +180,18 @@ def run(cat: str, commit: bool) -> int:
             if not s.get(k):
                 s[k] = v
                 filled[k] += 1
+        for dst, src_key, fn in PLAN.get(cat, []):
+            if str(s.get(dst) or "").strip():
+                continue
+            raw = s.get(src_key)
+            if raw is None or not str(raw).strip():
+                continue
+            v = fn(raw)
+            if v:
+                s[dst] = v
+                filled[dst] += 1
+            else:
+                unmapped[f"{src_key}={str(raw)[:20]!r}"] += 1
         raw_ct = str(s.get("card_type") or s.get("Card Type") or "").strip()
         if raw_ct and not s.get("card_type_ebay"):
             if raw_ct in ctmap:

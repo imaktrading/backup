@@ -272,12 +272,44 @@ def check_one_card_one_name(_):
                        + (str(bad) if bad else "0"))
 
 
+def check_raw_to_ebay(_):
+    """**生値があるのに eBay 用の値が無い行**を 0 に保つ (2026-09-06 追加).
+
+    `hp` / `stage` / `type_en` / `color` / `power` / `ap` は公式の生値で、出品くんが読むのは
+    `*_ebay` の方。落とす処理が取り込みの一部でなかったため、9/04〜9/05 に入れた行で
+    HP / Stage / Attribute が空のまま CSV に出た (1,558行)。
+    `finish_ingest.PLAN` が値を出せるのに空の行だけ数える (`-` や対応の無い進化段階は出ない)。
+    """
+    sys.path.insert(0, str(ROOT / "tools"))
+    import finish_ingest as F  # noqa
+    db = _db()
+    try:
+        bad = {}
+        for cat, plan in F.PLAN.items():
+            n = 0
+            for (sp,) in db.execute("SELECT specs FROM products WHERE category=?", (cat,)):
+                s = json.loads(sp or "{}")
+                for dst, src, fn in plan:
+                    if str(s.get(dst) or "").strip():
+                        continue
+                    raw = s.get(src)
+                    if raw is not None and str(raw).strip() and fn(raw):
+                        n += 1
+            if n:
+                bad[cat] = n
+    finally:
+        db.close()
+    return (not bad), (f"eBay 用の値が付いていない行 {sum(bad.values())} {bad}" if bad
+                       else "eBay 用の値が付いていない行 0")
+
+
 CHECKS = [
     ("Set が空の行", check_set_empty),
     ("1セット1値", check_one_set_one_value),
     ("変換表 = データ", check_table_matches_data),
     ("型のキー名", check_type_key),
     ("1カード1名 (英語名)", check_one_card_one_name),
+    ("生値 → eBay の値", check_raw_to_ebay),
     ("画像の終端マーク", check_images),
     ("監査 (出品4カテゴリ)", check_audit),
     ("cert → KEY (入口経由)", check_resolver),
