@@ -53,6 +53,11 @@ HQ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROFILE = os.path.join(HQ, "chrome_profile_ebaymag")
 DESKTOP = os.path.join(os.path.expanduser("~"), "OneDrive", "デスクトップ")
 HOME = "https://ebaymag.com/"
+# ★2026-09-06 ユーザー指摘「何回もログインボタン押さなあかん」。
+#   eBaymag のログイン cookie は **セッション限り** (has_expires=0) なので、
+#   Chrome を閉じた瞬間に消える。プロファイルを共有しても残らない。
+#   閉じる前に自分で書き出し、開いた後に流し込む。共有領域に置く (鍵と同じ扱い)。
+COOKIE_FILE = r"C:\dev\iMak_data\credentials\ebaymag_cookies.json"
 
 
 # ── 純関数 (test 可) ────────────────────────────────────────────────
@@ -132,6 +137,49 @@ def open_browser(headless=False):
         opts.add_argument("--headless=new")
     maj = detect_chrome_major()
     return uc.Chrome(options=opts, version_main=maj) if maj else uc.Chrome(options=opts)
+
+
+def save_cookies(driver, path=COOKIE_FILE):
+    """セッション限りの cookie も含めて書き出す (CDP は expires 無しも返す)。"""
+    import json
+    try:
+        ck = driver.execute_cdp_cmd("Network.getAllCookies", {}).get("cookies", [])
+        ck = [c for c in ck if "ebaymag" in (c.get("domain") or "")]
+        if not ck:
+            return 0
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(ck, f, ensure_ascii=False)
+        return len(ck)
+    except Exception as e:                                        # noqa: BLE001
+        print("(cookie の保存に失敗: %s)" % type(e).__name__)
+        return 0
+
+
+def load_cookies(driver, path=COOKIE_FILE):
+    """前回の cookie を流し込む。無ければ何もしない (ログインを求められるだけ)。"""
+    import json
+    if not os.path.exists(path):
+        return 0
+    try:
+        with open(path, encoding="utf-8") as f:
+            ck = json.load(f)
+    except Exception:                                             # noqa: BLE001
+        return 0
+    n = 0
+    for c in ck:
+        d = {k: c[k] for k in ("name", "value", "domain", "path") if k in c}
+        for k in ("secure", "httpOnly", "sameSite"):
+            if c.get(k) not in (None, ""):
+                d[k] = c[k]
+        # セッション限りだったものは **期限を付けて**保存し直す (閉じても消えないように)
+        d["expires"] = c.get("expires") or (time.time() + 60 * 60 * 24 * 14)
+        try:
+            driver.execute_cdp_cmd("Network.setCookie", d)
+            n += 1
+        except Exception:                                         # noqa: BLE001
+            pass
+    return n
 
 
 _SCROLLER_JS = """
@@ -274,15 +322,23 @@ def main():
 
     driver = open_browser(headless=a.headless and not a.login)
     try:
-        if a.login:
+        # 前回の cookie を先に流し込む (これが無いと毎回ログインを聞かれる)
+        driver.get(HOME)
+        n_ck = load_cookies(driver)
+        if n_ck:
+            print("[INFO] 前回の cookie を %d本 復元しました" % n_ck)
             driver.get(HOME)
-            print("ブラウザで eBaymag にログインしてください (ログインはこの端末に残ります)")
+            time.sleep(3)
+
+        if a.login or looks_logged_out(
+                driver.current_url, driver.execute_script("return document.body.innerText;")):
+            print("ブラウザで eBaymag にログインしてください (次回からは聞かれません)")
             print("入れたら自動で先へ進みます。Enter は要りません。")
             if not wait_for_login(driver, a.login_seconds):
                 print("⚠️ 時間内にログインを確認できませんでした (%s)" % driver.current_url)
-                print("   もう一度 --login で開き直すか、--login-seconds を伸ばしてください。")
+                print("   --login-seconds を伸ばして、もう一度やってみてください。")
                 return 1
-            print("[OK] ログインを確認しました。プロファイル: %s" % PROFILE)
+            print("[OK] ログインを確認しました (cookie %d本 保存)" % save_cookies(driver))
             if not a.url:
                 a.url = driver.current_url        # 入った先の画面をそのまま落とす
 
@@ -291,9 +347,9 @@ def main():
         head = driver.execute_script("return document.body.innerText;")
         if looks_logged_out(driver.current_url, head):
             print("⚠️ ログインしていない画面に見えます (%s)" % driver.current_url)
-            print("   先に `python ebaymag_dump.py --login` を実行してください。")
             print("   ※ 中身は保存していません (ログイン画面を保存しても意味がないため)")
             return 1
+        save_cookies(driver)                      # 使えた cookie を最新にしておく
 
         n0 = wait_until_loaded(driver, a.load_seconds)
         print("[INFO] 一覧の初期行数: %d" % n0)
