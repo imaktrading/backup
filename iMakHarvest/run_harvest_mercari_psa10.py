@@ -316,7 +316,7 @@ def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
         rej[key] = rej.get(key, 0) + 1
         # ★user 指示 (2026-08-18): 鑑定番号が読めなかった分は捨てずに I列空欄で入れる
         # (目視で拾うため)。 grade が PSA10 でない等 「対象外と分かった」 物は従来通り捨てる。
-        if key == "cert_unreadable":
+        if key == "cert_unreadable" and not SKIP_UNREADABLE:
             # ★グレードを見ずに入れると PSA9 / BGS / ARS / CCG / 生カードまで並ぶ
             # (2026-08-18 user 指摘)。 PSA10 の確証が無い物は 目視待ちにも入れない。
             if not psa_grade_gate.looks_like_psa10(title=detail.get("title") or "",
