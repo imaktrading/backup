@@ -279,6 +279,37 @@ _JA_CHAR_TO_EN_TOKENS: dict[str, set[str]] = {
 }
 
 
+def _subject_tokens_all(subject: str) -> set[str]:
+    """`_subject_tokens` の **長さ制限なし**版 (2026-09-07).
+
+    `_subject_tokens` は3文字未満を捨てるので、カード名が `N` (ポケモン) や `AZ` のように
+    1〜2文字だと **subject から名前が消え**、必ず「名前不一致」で reject になっていた
+    (依頼 `2026-09-07_hq_subject_short_name_match.md`。該当する catalog 行は30行)。
+    逆向きの照合 (カタログ名の語が subject に在るか) では長さで捨てない。
+    """
+    out: set[str] = set()
+    for w in re.split(r"[\s/\-:：&]+", (subject or "").upper()):
+        w = w.strip(".,;:'’\"")
+        if not w or w.isdigit() or w in _SUBJECT_STOPWORDS:
+            continue
+        out.add(w)
+    return out
+
+
+def _record_name_tokens(record: dict) -> list[set[str]]:
+    """カタログ側の名前を subject と同じ区切りで割ったもの (name / name_en / name_jp)."""
+    out: list[set[str]] = []
+    for key in ("name", "name_en", "name_jp"):
+        v = (record.get(key) or "").upper().strip()
+        if not v:
+            continue
+        toks = {w.strip(".,;:'’\"") for w in re.split(r"[\s/\-:：&]+", v)}
+        toks = {t for t in toks if t and not t.isdigit() and t not in _SUBJECT_STOPWORDS}
+        if toks:
+            out.append(toks)
+    return out
+
+
 def _record_name_matches_subject(record: dict, subject: str) -> bool:
     """ID hit した record の name (en + jp) が PSA Subject トークンと交差するか.
 
@@ -324,6 +355,16 @@ def _record_name_matches_subject(record: dict, subject: str) -> bool:
     expected = _JA_CHAR_TO_EN_TOKENS.get(name_jp, set())
     if expected & tokens:
         return True
+    # 3. 逆向き — **カタログ名の語が subject に丸ごと在るか** (2026-09-07)。
+    #    1〜2文字のカード名 (`N` / `AZ`) は `_subject_tokens` が捨てるので、
+    #    subject → カタログ名 の一方向だけでは永久に当たらなかった。
+    #    ★カタログ名の語を **全部** 含むことを求める (部分一致にしない)。
+    #    ★ID 完全一致の後の照合なので、名前検索フォールバックにはならない。
+    all_tokens = _subject_tokens_all(subject)
+    if all_tokens:
+        for name_toks in _record_name_tokens(record):
+            if name_toks <= all_tokens:
+                return True
     return False
 
 
