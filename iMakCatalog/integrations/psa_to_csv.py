@@ -740,17 +740,26 @@ def _search_one_piece_reprint_by_number(
     finally:
         conn.close()
 
-    pat = re.compile(rf"^[A-Z]+\d*-{re.escape(card_number)}_(.+)$")
+    pat = re.compile(rf"^([A-Z]+\d*-{re.escape(card_number)})_(.+)$")
+    # 1回目: PSA の set_code を名乗る行 (従来どおり)。ここで **どの弾のカードか**が決まる。
+    bases: set[str] = set()
+    for r in rows:
+        m = pat.match(r["product_id"])
+        if m and psa_sc_up in m.group(2).upper().split("_"):
+            bases.add(m.group(1))
+
+    # 2回目: **同じ弾・同じ番号の他の刷り**も候補に入れる (2026-09-07)。
+    #   依頼 `2026-09-07_reprint_fallback_misses_alt_art_row.md`:
+    #   set_code を名乗る行だけに絞っていたので、別絵柄の `_p1` が
+    #   **最初から候補に入っておらず**、`wants_alt` の加点 (+150/+100) が効きようがなかった。
+    #   実害: `ST18-005 LUFFY-TAROU SPECIAL ALTERNATE ART` が通常絵の `_OP11` で出た。
+    #   ★広げるのは `{弾}-{番号}` が一致する行だけ。番号だけで他の弾に広げない
+    #     (`EB01-057` の別絵柄は拾うが、`ST18-057` は拾わない)。
+    #   ★名前照合 (`_record_name_matches_subject`) は従来どおり全候補に掛かる。
     candidates: list[dict] = []
     for r in rows:
-        pid = r["product_id"]
-        m = pat.match(pid)
-        if not m:
-            continue
-        suffix = m.group(1)
-        # PSA set_code (例 'OP11') が suffix のどこかに含まれることを要求
-        # (suffix は 'OP11' / 'OP11_p' / 'OP11_LF' 等の形式)
-        if psa_sc_up not in suffix.upper().split("_"):
+        m = pat.match(r["product_id"])
+        if not m or m.group(1) not in bases:
             continue
         rec = api._row_to_dict(r)
         if _record_name_matches_subject(rec, subject):
@@ -771,25 +780,54 @@ def _search_one_piece_reprint_by_number(
     wants_alt = "ALTERNATE ART" in subj_up or "ALT ART" in subj_up
     _ALT_SUFFIXES = ("_p", "_p1", "_p2", "_p3", "_p4", "_p5")
 
+    def _names_psa_set(c: dict) -> bool:
+        """その行が **PSA のセット記号の商品**を名乗っているか (2026-09-07).
+
+        鍵の suffix (`_OP11`) だけでなく **収録商品名**も見る。別絵柄の行は
+        suffix を持たず、商品名の方に入っているため
+        (`ST18-005_p1` = `ブースターパック 神速の拳【OP-11】`)。
+        記号の中の `-` は落として比べる (`OP11` ↔ `OP-11` / `PRB01` ↔ `PRB-01`)。
+        """
+        m2 = pat.match(c.get("product_id", ""))
+        if m2 and psa_sc_up in m2.group(2).upper().split("_"):
+            return True
+        so = re.sub(r"[^A-Z0-9]", "", (c.get("set_name_official") or "").upper())
+        return bool(psa_sc_up) and psa_sc_up in so
+
     def _score(c: dict) -> int:
         pid = c.get("product_id", "")
         specs = c.get("specs") or {}
-        rarity = specs.get("Rarity", "")
+        # ★rarity のキーは小文字 (`Rarity` では常に空だった。2026-09-07 修正)
+        rarity = specs.get("rarity") or specs.get("Rarity") or ""
         s = 0
+        # ★PSA のセット記号の商品を名乗る行を優先 (2026-09-07)。
+        #   候補を「同じ弾・同じ番号の全刷り」に広げたので、どの商品の刷りかで先に絞る。
+        #   これが無いと `PRB01` の cert が `OP-01` の別絵柄を掴む。
+        if _names_psa_set(c):
+            s += 200
         # SP Alt ヒント時: '_SP' / '_dummy' suffix / rarity に 'SP' 含むものを優先
         if wants_sp:
             if "_SP" in pid:
                 s += 200
             if "_dummy" in pid:
                 s += 100
-            if "SP" in (rarity or "").upper():
+            if "SP" in rarity.upper():
                 s += 50
-        # ALT ART ヒント時: canonical な illustration_type で当てる (2026-08-12)
+        # ALT ART ヒント時
         if wants_alt:
-            illus = specs.get("illustration_type")
-            if illus == "Original":
+            # ★1. canonical な別絵柄の印を最優先 (2026-09-07)。
+            #    `variant_type='alt_art'` / `features_ebay` に 'Alternative Art' が
+            #    **別絵柄そのものを表す印**。illustration_type は絵の系統 (原作/アニメ) で、
+            #    別絵柄かどうかとは別の話。実害: `ST18-005 LUFFY-TAROU SPECIAL ALTERNATE ART`
+            #    が通常絵の `_OP11` (illustration_type='Original' で +150) を選んでいた。
+            feat = specs.get("features_ebay") or specs.get("features") or ""
+            if specs.get("variant_type") == "alt_art" or "Alternative Art" in str(feat)                     or "Alt Art" in str(feat):
+                s += 300
+            # 2. 印を持たない古い record は illustration_type で当てる (2026-08-12 の裁定)。
+            #    `OP01-024_PRB01` は base='Anime' / 別絵柄='Original' で、ここでしか判らない。
+            elif specs.get("illustration_type") == "Original":
                 s += 150
-            elif not illus and any(pid.endswith(sfx) for sfx in _ALT_SUFFIXES):
+            elif not specs.get("illustration_type") and any(pid.endswith(sfx) for sfx in _ALT_SUFFIXES):
                 s += 100
         if not wants_sp and not wants_alt:
             # 通常: 短い product_id (base reprint) 優先

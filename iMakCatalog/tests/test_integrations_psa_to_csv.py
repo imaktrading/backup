@@ -359,7 +359,13 @@ class TestNameVerification:
 
     def test_reprint_fallback_resolves_shirahoshi_sp_alt(self):
         """SP Alt fallback: PSA brand=OP11, num=057, subject=SHIRAHOSHI SP ALT
-        → OP11-057 base (Pedro) reject 後、EB01-057_OP11_dummy (Shirahoshi SP) を救済."""
+        → OP11-057 base (Pedro) reject 後、**別絵柄の行**を救済.
+
+        ★2026-09-07 に期待値を `EB01-057_OP11*` から `EB01-057_p2` に変えた。
+          依頼 `2026-09-07_reprint_fallback_misses_alt_art_row.md`:
+          `_OP11` は **通常絵**の行で、別絵柄 (`variant_type='alt_art'`) は `_p1` / `_p2`。
+          そのまま出すと別絵柄のカードが通常絵の値で出る (実際に出品2件に乗った)。
+          `_p2` は 収録商品も `ブースターパック 神速の拳【OP-11】` で PSA のセット記号と一致。"""
         result = catalog_psa.lookup_one_piece(
             brand="ONE PIECE JAPANESE OP11-A FIST OF DIVINE SPEED",
             card_number="057",
@@ -367,7 +373,7 @@ class TestNameVerification:
             verbose=False,
         )
         assert result is not None
-        assert result["card_id"].startswith("EB01-057_OP11")
+        assert result["card_id"] == "EB01-057_p2"
         # 名前が Shirahoshi
         name_combined = (result.get("name_en") or "") + (result.get("name_jp") or "")
         assert "Shirahoshi" in name_combined or "しらほし" in name_combined
@@ -400,12 +406,19 @@ class TestNameVerification:
         `2026-08-12_op_reprint_scoring_alt_art_response.md`):
 
         PSA Brand 'PRB01' + card_number '024' + subject 'MONKEY D. LUFFY ALTERNATE ART'
-        の reprint fallback で、base `OP01-024_PRB01` (illustration_type='Anime') ではなく
-        ALT ART の `OP01-024_PRB01_p` (illustration_type='Original') が選ばれること.
+        の reprint fallback で、**通常絵ではなく別絵柄**の行が選ばれること.
 
-        旧 logic は _SP / _dummy / SP-rarity のいずれにも当たらず両候補 0 点同点 →
-        安定ソートで base が勝っていた. 新 logic は canonical な illustration_type='Original'
-        に +150 を与えて ALT を本命として当てる.
+        ★2026-09-07 に期待値を `OP01-024_PRB01_p` から `OP01-024_p2` に変えた。
+          同じ現物を指す行が2つあり、`_p2` の方が **別絵柄の印を持つ** canonical な行:
+
+              OP01-024_PRB01_p  vt='premium_booster' illustration_type='Original'
+              OP01-024_p2       vt='alt_art' features='Alternative Art'
+                                収録商品='ONE PIECE CARD THE BEST【PRB-01】' (PSA の PRB01 と一致)
+
+          `illustration_type` は絵の系統 (原作/アニメ) で、**別絵柄かどうかとは別の話**。
+          8/12 はそれしか手掛かりが無かったので使ったが、`ST18-005` では通常絵の行が
+          'Original' を持っていて逆に働いた (出品2件に誤った値が乗った)。
+          → 別絵柄の印を最優先にし、`illustration_type` は印を持たない行の保険に降ろした。
         """
         result = catalog_psa.lookup_one_piece(
             brand="ONE PIECE JAPANESE PRB01",
@@ -414,7 +427,7 @@ class TestNameVerification:
             verbose=False,
         )
         assert result is not None
-        assert result["card_id"] == "OP01-024_PRB01_p", (
+        assert result["card_id"] == "OP01-024_p2", (
             f"ALT ART should win over base, got {result['card_id']!r}"
         )
 
@@ -434,7 +447,7 @@ class TestNameVerification:
             verbose=False,
         )
         assert result is not None
-        assert result["card_id"] == "OP01-024_PRB01_p"
+        assert result["card_id"] == "OP01-024_p2"
 
 
 # ============================================================================
@@ -521,3 +534,46 @@ class TestSetCodeToEbayName:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestReprintFallbackAltArtRow20260907:
+    """別絵柄なのに通常絵の行を引いていた (2026-09-07).
+
+    依頼: `requests/2026-09-07_reprint_fallback_misses_alt_art_row.md`
+
+    候補が **PSA のセット記号を suffix に持つ行だけ**に絞られていたので、
+    別絵柄の `_p1` / `_p2` が最初から候補に入っていなかった。
+    `wants_alt` の加点は入っていたが、当てる相手が居なかった。
+
+    実害: 2026-09-07 に出品2件 (`820082424467` / `820009097705`) が
+    通常絵の値 (rarity / Features) で eBay に上がった。
+    """
+
+    def test_alt_art_row_is_chosen(self):
+        for brand, num, subj, want in (
+            ("ONE PIECE JAPANESE OP11-A FIST OF DIVINE SPEED", "005",
+             "LUFFY-TAROU SPECIAL ALTERNATE ART", "ST18-005_p1"),
+            ("ONE PIECE JAPANESE OP11-A FIST OF DIVINE SPEED", "057",
+             "SHIRAHOSHI SPECIAL ALTERNATE ART", "EB01-057_p2"),
+            ("ONE PIECE JAPANESE OP06-WINGS OF THE CAPTAIN", "091",
+             "REBECCA SPECIAL ALTERNATE ART", "OP05-091_p2"),
+        ):
+            r = catalog_psa.lookup_one_piece(brand, num, subj, verbose=False)
+            assert r is not None, subj
+            assert r["card_id"] == want, f"{subj}: {r['card_id']} != {want}"
+
+    def test_stays_in_the_psa_product(self):
+        """候補を広げても **PSA が名乗る商品**から出ない.
+
+        `PRB01` の cert が `ROMANCE DAWN【OP-01】` の別絵柄 (`OP01-024_p1`) を
+        掴まないこと。収録商品名の中のセット記号でも判定する。
+        """
+        r = catalog_psa.lookup_one_piece(
+            "ONE PIECE JAPANESE PRB01", "024", "MONKEY D. LUFFY ALTERNATE ART", verbose=False)
+        assert r["card_id"] == "OP01-024_p2"
+
+    def test_no_alt_hint_keeps_base(self):
+        """subject に別絵柄のヒントが無ければ従来どおり (広げた影響を受けない)."""
+        r = catalog_psa.lookup_one_piece(
+            "ONE PIECE JAPANESE OP11", "057", "", verbose=False)
+        assert r["card_id"] == "OP11-057"
