@@ -15,7 +15,9 @@
 
 落とす順 (上から埋めて、目標額に達したら止める):
     ① 仕入元が死んでいる   … 買えないので稼ぎようがない。**全カテゴリ**。空く額の大きい順
-    ② 出品30日超・未販売   … **TCG と G-SHOCK だけ**。アクセス (累計表示) の少ない順
+    ② 出品30日超・未販売   … **TCG と G-SHOCK だけ**。売れない作品から
+                             (ガンダム/ドラゴンボール → ワンピース → G-SHOCK → ポケモン)
+                             → 同じ作品ならウォッチ・表示の少ない順
 
     ★閾値は設けない (2026-08-26 ユーザー確定)。「表示◯回以上なら」という線は
       カテゴリごとに桁が違って必ずどちらかを取りこぼすので、順位で決める。
@@ -60,7 +62,7 @@ CSV_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__
 
 TIER_OOS, TIER_STALE = 1, 2
 TIER_NAME = {TIER_OOS: "① 買えない & 需要ゼロ",
-             TIER_STALE: "② TCG 30日超・未販売 (空く額の大きい順)"}
+             TIER_STALE: "② TCG/G-SHOCK 30日超・未販売 (売れない作品 → ウォッチ少ない順)"}
 # 出品からこれ未満は「まだ判定できない」ので触らない。
 MIN_AGE_DAYS = 30
 # ★②(仕入元が活きている分)を落とすカテゴリ。
@@ -100,6 +102,33 @@ def _f(v):
         return 0.0
 
 
+# ★2026-09-07 ユーザー確定: ② は **売れない作品から先に落とす**。
+#   ポケモンを最後まで残す (= 落とすのは一番最後)。
+#   根拠 (2026-09-07 実測。注文レポート 8/07〜9/05 と live 出品数):
+#     ポケモン      273件 → 17件売れた (6.2%/月)  ← 唯一 売れている
+#     G-SHOCK      217件 →  3件 (1.4%)
+#     ワンピース      211件 →  2件 (0.9%)
+#     ガンダム        15件 →  0件 / ドラゴンボール 10件 → 0件 (母数が小さいので断定はしない)
+#   ★見直し前提: 数字が変われば順番も変える。同じ集計は
+#     `ebay-all-orders-report` の Item Title を作品で数えれば出る。
+FRANCHISE_ORDER = (
+    (("gundam", "dragon ball", "dragonball"), 0),   # 実績0 → 先に落とす
+    (("one piece",), 1),
+    (("g-shock", "gshock", "g shock"), 2),
+    (("pokemon",), 3),                              # 唯一売れている → 最後まで残す
+)
+FRANCHISE_OTHER = 1                                  # 判定できないものは真ん中 (極端に扱わない)
+
+
+def franchise_rank(title):
+    """② の落とす順で使う作品の順位。小さいほど先に落ちる (純関数, test可)。"""
+    t = (title or "").lower()
+    for keys, rank in FRANCHISE_ORDER:
+        if any(k in t for k in keys):
+            return rank
+    return FRANCHISE_OTHER
+
+
 def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIES,
             max_age=None, restock_pending=None, no_demand=None):
     """その出品を落とす順の何番に置くか。触らないものは None (純関数, test可)。
@@ -107,9 +136,9 @@ def tier_of(row, min_age=MIN_AGE_DAYS, category=None, stale_cats=STALE_CATEGORIE
     ★2026-08-26 ユーザー確定:
       ・**閾値を設けない**。「表示◯回以上なら」の線はカテゴリごとに桁が違って必ず取りこぼす。
       ・**仕入元が死んでいる分は全カテゴリ**。買えないものを残す意味は無い。
-      ★2026-09-02 更新: 仕入元が活きている分は **TCG だけ**にした (G-shock を外した)。
-        根拠は STALE_CATEGORIES のコメント。落とす順は **空く額の大きい順**
-        (TCG 30日超ではアクセスの多寡で売却率が変わらないため)。
+      ★2026-09-06 更新: 仕入元が活きている分は **TCG と G-SHOCK** (どちらも30日)。
+        2026-09-02 に G-shock を外したが、9/06 の「30日で回す」で戻した。
+        落とす順は **売れない作品から → ウォッチ少ない順** (pick の docstring 参照)。
     """
     if restock_pending and str(row.get("item_id") or row.get("itemID") or "").strip() \
             in restock_pending:
@@ -291,7 +320,10 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=No
 
     ① は 空く額の大きい順 (買えないので、少ない回数で目標に届くのが正しい)。
 
-    ★2026-09-06 ユーザー確定: ② は **ウォッチ少ない順 → 表示少ない順 → 金額 大きい順**。
+    ★2026-09-07 ユーザー確定: ② は **売れない作品から**。ポケモンは最後まで残す
+      (順位は FRANCHISE_ORDER。根拠の実測もそこに書いてある)。
+
+    ★2026-09-06 ユーザー確定: 作品が同じなら **ウォッチ少ない順 → 表示少ない順 → 金額 大きい順**。
       2026-09-02 に「アクセスは結果を変えない」として金額順にしたが、その判断は
       **回転率0.8%まで落ちた自店データ** に基づいていた。店の順位が下がっている状態では
       アクセスの少なさが商品の良し悪しを表さないため、この結論自体が信用できない。
@@ -313,7 +345,8 @@ def pick(rows, target, shelf_of, cat_of=None, only_tier=None, restock_pending=No
         if t == TIER_OOS:
             rank = (0, 0, -shelf_of(r))              # ① 空く額の大きい順
         else:
-            rank = (_f(r.get("watch")),              # ② ウォッチ少ない順
+            rank = (franchise_rank(r.get("title")),  # ② 売れない作品から (2026-09-07)
+                    _f(r.get("watch")),              #    → ウォッチ少ない順
                     _f(r.get("impr_total")),         #    → 表示少ない順
                     -shelf_of(r))                    #    → 金額 大きい順
         cand.append((t, rank, r))
@@ -747,7 +780,7 @@ def main():
             return _l(row) if "_mirror" in row else _f2(row)
 
     print("対象: 仕入元が死んでいるもの(全カテゴリ) → "
-          f"{'/'.join(STALE_CATEGORIES)} の 期限超え・未販売を 空く額の大きい順")
+          f"{'/'.join(STALE_CATEGORIES)} の 期限超え・未販売を 売れない作品 → ウォッチ少ない順")
     if target <= 0:
         print("  今日はまだ出品していないので、落とす分もありません")
         return 0
