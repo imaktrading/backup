@@ -505,16 +505,48 @@ def _filter_suppression(new_by_cat: dict[str, list[dict]],
     return removed
 
 
+# ★2026-09-08 (提案4): この CSV は **2つの意味**を1つの形で持っていた。
+#   auto_catalog_add_request (= カタログに依頼を出した) と csv_auditor
+#   (= カタログに収録されて解決した) が同じ3列で追記しており、どちらの理由で
+#   入った行なのか区別できなかった。
+#   実測: 191行中1件が既に二重 (gundam_tcg / ニュータイプチャレンジ2026)。
+#   `reason` 列を足して分ける。**既存行は `requested` 扱い**で移行する
+#   (解決していない物を resolved にすると、二度と出てこなくなる)。
+PROCESSED_HEADER = ["category", "model", "detected_at", "reason"]
+REASON_REQUESTED = "requested"
+REASON_RESOLVED = "resolved"
+
+
+def ensure_processed_header(path: Path | None = None) -> None:
+    """`reason` 列の無い旧形式ファイルを、既存行 `requested` 付きへ1回だけ移行する。
+
+    csv_auditor.py 側 (`_move_resolved_missing_models`) も同じ物理ファイルに
+    書くため、どちらが先に走っても安全なようにここで冪等にする。
+    """
+    p = path or PROCESSED_CSV
+    if not p.exists() or p.stat().st_size == 0:
+        return
+    with p.open(encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.reader(f))
+    if not rows or "reason" in rows[0]:
+        return
+    with p.open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(PROCESSED_HEADER)
+        for r in rows[1:]:
+            category, model, detected_at = (r + ["", "", ""])[:3]
+            w.writerow([category, model, detected_at, REASON_REQUESTED])
+
+
 def _load_processed() -> set[tuple[str, str]]:
-    if not PROCESSED_CSV.exists():
-        return set()
-    keys: set[tuple[str, str]] = set()
-    # ★2026-08-19: BOM 付きで書かれた行があると 1列目のキーが "﻿category" になり
-    #   KeyError で watcher ごと止まる。読む側だけ utf-8-sig にする (書く側は触らない)。
-    with PROCESSED_CSV.open(encoding="utf-8-sig") as f:
-        for r in csv.DictReader(f):
-            keys.add((r["category"], r["model"]))
-    return keys
+    """`reason == requested` の行だけを sentinel として読む (提案4)。
+
+    `resolved` (= カタログに収録されて解決した) を sentinel に含めると、
+    同じ (category, model) が将来また未登録として検出された時に
+    「依頼済」と誤読して黙って依頼を出さなくなる (fail-OPEN)。
+    """
+    return {(r["category"], r["model"]) for r in load_processed_rows()
+            if r["reason"] == REASON_REQUESTED}
 
 
 def load_processed_rows() -> list[dict]:
@@ -522,9 +554,12 @@ def load_processed_rows() -> list[dict]:
 
     移行方針: 既存191行は依頼を出しただけで解決の確認は取れていないので requested。
     """
+    ensure_processed_header()
     if not PROCESSED_CSV.exists():
         return []
     out = []
+    # ★2026-08-19: BOM 付きで書かれた行があると 1列目のキーが "﻿category" になり
+    #   KeyError で watcher ごと止まる。読む側だけ utf-8-sig にする (書く側は触らない)。
     with PROCESSED_CSV.open(encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             out.append({"category": r.get("category", ""), "model": r.get("model", ""),
@@ -534,18 +569,8 @@ def load_processed_rows() -> list[dict]:
     return out
 
 
-# ★2026-09-08 (提案4): この CSV は **2つの意味**を1つの形で持っていた。
-#   ここ (= カタログに依頼を出した) と csv_auditor (= カタログに収録されて解決した) が
-#   同じ3列で追記しており、どちらの理由で入った行なのか区別できない。
-#   実測: 191行中1件が既に二重 (gundam_tcg / ニュータイプチャレンジ2026)。
-#   `reason` 列を足して分ける。**既存行は `requested` 扱い**で移行する
-#   (解決していない物を resolved にすると、二度と出てこなくなる)。
-PROCESSED_HEADER = ["category", "model", "detected_at", "reason"]
-REASON_REQUESTED = "requested"
-REASON_RESOLVED = "resolved"
-
-
 def _append_processed(rows: list[dict], reason: str = REASON_REQUESTED) -> None:
+    ensure_processed_header()
     is_new = not PROCESSED_CSV.exists() or PROCESSED_CSV.stat().st_size == 0
     with PROCESSED_CSV.open("a", encoding="utf-8", newline="") as f:
         w = csv.writer(f)

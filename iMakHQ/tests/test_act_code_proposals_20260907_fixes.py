@@ -87,3 +87,38 @@ def test_resolved_rows_are_written_with_reason():
     body = src[i:src.index("\ndef ", i + 10)]
     assert '"resolved"' in body
     assert '"category", "model", "detected_at", "reason"' in body
+
+
+def test_load_processed_sentinel_ignores_resolved_rows(tmp_path, monkeypatch):
+    """resolved (=解決済) を sentinel に含めると、再発時に黙って依頼を出さなくなる
+    (fail-OPEN)。`_load_processed` は requested だけを読むこと."""
+    f = tmp_path / "p.csv"
+    with f.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(R.PROCESSED_HEADER)
+        w.writerow(["gundam_tcg", "X-001", "2026-09-01", "requested"])
+        w.writerow(["gundam_tcg", "X-002", "2026-09-02", "resolved"])
+    monkeypatch.setattr(R, "PROCESSED_CSV", f)
+    keys = R._load_processed()
+    assert ("gundam_tcg", "X-001") in keys
+    assert ("gundam_tcg", "X-002") not in keys
+
+
+def test_ensure_processed_header_migrates_old_file_in_place(tmp_path):
+    """既存191行のような旧形式 (reason列なし) は requested 付きへ移行し、行数を保つ."""
+    f = tmp_path / "p.csv"
+    with f.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["category", "model", "detected_at"])
+        w.writerow(["gundam_tcg", "X-001", "2026-09-01"])
+        w.writerow(["gshock", "GM-5640GEM-1JR", "2026-05-09 15:38:14"])
+    R.ensure_processed_header(f)
+    with f.open(encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) == 2
+    assert all(r["reason"] == "requested" for r in rows)
+    # 冪等: 2回目は何もしない (壊れない)
+    R.ensure_processed_header(f)
+    with f.open(encoding="utf-8") as fh:
+        rows2 = list(csv.DictReader(fh))
+    assert rows2 == rows

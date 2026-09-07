@@ -2197,11 +2197,14 @@ def _move_resolved_missing_models(item_ids):
         w.writerow(["category", "model", "detected_at"])
         for r in kept:
             w.writerow([r.get("category", ""), r.get("model", ""), r.get("detected_at", "")])
-    is_new = not os.path.exists(MISSING_MODELS_PROCESSED_PATH) or \
-        os.path.getsize(MISSING_MODELS_PROCESSED_PATH) == 0
     # ★2026-09-08 (提案4): ここは「カタログに収録されて **解決した**」印。
     #   依頼を出しただけの行 (auto_catalog_add_request) と同じ形で書いていたため
-    #   区別できなかった。`reason` 列で分ける。
+    #   区別できなかった。`reason` 列で分ける。旧形式 (reason 列なし) が残っていれば
+    #   先に移行してから追記する (どちらのモジュールが先に走っても一致させる)。
+    import auto_catalog_add_request as _acar
+    _acar.ensure_processed_header(_acar.Path(MISSING_MODELS_PROCESSED_PATH))
+    is_new = not os.path.exists(MISSING_MODELS_PROCESSED_PATH) or \
+        os.path.getsize(MISSING_MODELS_PROCESSED_PATH) == 0
     with open(MISSING_MODELS_PROCESSED_PATH, "a", encoding="utf-8", newline="") as f:
         w = _csv.writer(f)
         if is_new:
