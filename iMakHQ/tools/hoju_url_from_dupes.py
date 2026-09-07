@@ -41,6 +41,76 @@ def _norm(url):
         return u.split("?")[0].rstrip("/").lower()
 
 
+# ★2026-09-08 (監視くん→HQ 2026-09-08_hoju_url_dead_on_arrival / ユーザーGO):
+#   補URL に **書いた時点で既に死んでいる URL** が入っていた。従来のゲートは候補行の
+#   D列(仕入元 売り切れ)しか見ておらず、この列は **監視くんの巡回でしか更新されない**。
+#   23:30 の書込み時点で古ければ、死んだURLがそのまま入る。
+#   補URLは「主が売れた時に買う先」なので、死んでいると意味がない。
+#   → 2段で見る: ① 既に「買えない」と分かっている台帳で落とす (無料)
+#                ② 残りは詳細ページをその場で開いて確かめる (--no-verify で無効化)
+def drop_known_dead(urls):
+    """「買えない」と分かっている URL を落とす (I/O。台帳が読めなければ素通し)。
+
+    戻り: (残す, 落とした[(url, 理由)])
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import mercari_psa_resource as mp
+        dead = mp.load_not_buyable() or {}
+    except Exception:                                          # noqa: BLE001
+        return list(urls or []), []
+    keep, drop = [], []
+    for u in (urls or []):
+        hit = dead.get(u) or dead.get((u or "").strip())
+        (drop.append((u, (hit or {}).get("why", "買えない台帳に在り")))
+         if hit else keep.append(u))
+    return keep, drop
+
+
+def verify_alive(urls, verbose=True):
+    """詳細ページを開いて **今そのまま買えるか**を確かめる (I/O)。
+
+    戻り: (生きている, 死んでいる[(url, 理由)])。
+    driver を起こせない / 例外は **落とさない** (fail-open。書込み自体は今までどおり)。
+    買えないと分かったURLは台帳に覚えるので、次回は無料で落ちる。
+    """
+    urls = list(urls or [])
+    if not urls:
+        return [], []
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import mercari_psa_resource as mp
+        drv = mp.new_scrape_driver()
+    except Exception as e:                                     # noqa: BLE001
+        if verbose:
+            print(f"  ⚠ 在庫のその場確認は skip ({type(e).__name__}) — 今までどおり書きます")
+        return urls, []
+    alive, dead = [], []
+    try:
+        for u in urls:
+            try:
+                drv.get(u)
+                import time as _t
+                _t.sleep(3)
+                ok = mp.buyable_from_detail(drv.page_source)
+            except Exception as e:                             # noqa: BLE001
+                if verbose:
+                    print(f"  ⚠ {u[:50]} 開けず ({type(e).__name__}) → 落とさない")
+                alive.append(u)
+                continue
+            if ok:
+                alive.append(u)
+            else:
+                dead.append((u, "詳細ページで『買えない』(売切/オークション)"))
+                mp.remember_not_buyable(u, "補URL書込み直前の確認で売切/オークション")
+    finally:
+        try:
+            drv.quit()
+        except Exception:                                      # noqa: BLE001
+            pass
+    return alive, dead
+
+
 def price_by_url_from_cache():
     """{正規化URL: 価格} を 補URL探索キャッシュから作る (I/O。読めなければ空)。
 
@@ -281,6 +351,24 @@ def main():
             print(f"  row {row} (itemID={v['itemid']}){mark}: 既存{len(v['existing'])}件 → 追加 {v['add']}")
     for w in warns[:30]:
         print("  ⚠️", w)
+    # ★2026-09-08: 書く直前に「今 買えるか」を確かめる (死んだURLを補URLに入れない)。
+    #   ① 台帳で無料で落とす → ② 残りを詳細ページで確認 (--no-verify で②を無効化)
+    if do_write and plan:
+        _cands = sorted({u for v in plan.values() for u in v["add"]})
+        _keep, _known = drop_known_dead(_cands)
+        _dead = list(_known)
+        if "--no-verify" not in sys.argv:
+            _keep, _live_dead = verify_alive(_keep)
+            _dead += _live_dead
+        if _dead:
+            print(f"  🚫 死んでいる仕入元を {len(_dead)}本 落としました (補URLに入れない)")
+            for u, why in _dead[:10]:
+                print(f"     - {u[:60]} … {why}")
+        _alive = set(_keep)
+        for v in plan.values():
+            v["add"] = [u for u in v["add"] if u in _alive]
+            if v.get("full"):
+                v["full"] = [u for u in v["full"] if u in _alive or u in v["existing"]]
     if do_write:
         row_to_urls = {row: (v.get("full") or (v["existing"] + v["add"]))[:AUXN]
                        for row, v in plan.items() if v["add"]}

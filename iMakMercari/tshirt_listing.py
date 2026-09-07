@@ -121,6 +121,18 @@ HEADERS = {
 }
 
 
+def _size_type(size, department):
+    """eBay が受け付ける Size Type (共通実装に委譲。ここで作り直さない)。"""
+    try:
+        from listing_common import size_type_for
+    except ImportError:
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "..", "iMakeBayAPI"))
+        from listing_common import size_type_for
+    return size_type_for(size, department)
+
+
 def load_ebay_keys():
     keys = {}
     try:
@@ -792,7 +804,10 @@ def main():
             "", store_cat,  # ConditionDescription空（新品には不要）
             specs.get("Brand", "Uniqlo"),
             specs.get("Type", "T-Shirt"),
-            specs.get("Size Type", "Regular"),
+            # ★2026-09-08: "Regular" 固定だと eBay が 3XL の組合せを弾き、日次の値段更新が
+            #   毎日その1件だけ失敗していた (実害 itemID 356740464473)。サイズから決める。
+            _size_type(result.get("size_us", specs.get("Size", "")),
+                       specs.get("Department", "Unisex Adults")),
             result.get("size_us", specs.get("Size", "")),
             specs.get("Color", ""),
             specs.get("Department", "Unisex Adults"),

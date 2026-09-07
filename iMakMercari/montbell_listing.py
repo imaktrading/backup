@@ -110,6 +110,18 @@ _CATALOG_SPEC_MAP = {
 }
 
 
+def _size_type(size, department):
+    """eBay が受け付ける Size Type (共通実装に委譲。ここで作り直さない)。"""
+    try:
+        from listing_common import size_type_for
+    except ImportError:
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "..", "iMakeBayAPI"))
+        from listing_common import size_type_for
+    return size_type_for(size, department)
+
+
 def _merge_catalog_spec(specs, catalog_spec):
     """iMakCatalog の specs (snake_case) を eBay Item Specifics (PascalCase) に変換して上書き.
     catalog_spec は確証ある公式値なので、Claude Vision の推測値を上書きする.
@@ -933,7 +945,8 @@ def main():
             condition_desc, STORE_CATEGORY,
             specs.get("Brand", "montbell"),
             specs.get("Type", "Jacket"),
-            specs.get("Size Type", "Regular"),
+            # ★2026-09-08: サイズから決める (3XL 以上は Big & Tall でないと eBay が弾く)
+            _size_type(size_us, specs.get("Department", "Men")),
             size_us,
             color,
             specs.get("Department", "Men"),

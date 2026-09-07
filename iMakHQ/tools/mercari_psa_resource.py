@@ -940,6 +940,41 @@ def _filter_candidates_supply(drv, cands, min_reviews=100, keep=5):
     return out
 
 
+# ★2026-09-08: 補URL の書込み直前に在庫を見るため、driver の作り方を **モジュール直下**へ出した
+#   (中身は変えていない)。二重実装すると profile やバージョン固定の方針が割れるため。
+import undetected_chromedriver as uc
+
+SCRAPE_DRIVER_DOC = True
+
+
+def new_scrape_driver():
+    # ★2026-07-28: **専用プロファイル**を持たせる(従来は指定なし=毎回まっさらな一時profile)。
+    # 一番くじ側は既に専用profileで cookie を保温しており、PSA 側だけ「初回訪問の匿名 headless」
+    # として最も弾かれやすかった。ジョブごとに別ディレクトリなので他ジョブとロックが競合しない。
+    # **ログインはしない**(仕入アカBAN→仕入不能を避ける。一番くじと同方針)。
+    # profile が他プロセスに掴まれている等で起動できない時は一時profileへ fallback(走行を止めない)。
+    _quiet_chromedriver()          # ★黒窓を出さない(無人cron中に出っぱなしになる・2026-07-30)
+
+    def _mk(profile_dir):
+        opts = uc.ChromeOptions()
+        opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
+        opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1400")
+        if profile_dir:
+            opts.add_argument(f"--user-data-dir={profile_dir}")
+        _maj = _chrome_major()
+        return uc.Chrome(options=opts, version_main=_maj) if _maj else uc.Chrome(options=opts)
+
+    try:
+        os.makedirs(PSA_SCRAPE_PROFILE_DIR, exist_ok=True)
+        d = _mk(PSA_SCRAPE_PROFILE_DIR)
+    except Exception as e:      # noqa: BLE001
+        import tempfile
+        print(f"  ⚠ 専用profile で起動できず一時profileへ({type(e).__name__}) — "
+              f"cookie保温は効かないが走行は継続", flush=True)
+        d = _mk(tempfile.mkdtemp(prefix="psa_mercari_"))
+    d.set_page_load_timeout(50)
+    return d
+
 def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
     """各カードの メルカリ on_sale PSA10 を取得 → {idx: {"best":(price,url,name)|None, "cands":[(price,url,name),...]}}。
 
@@ -955,35 +990,10 @@ def fetch_mercari_cheapest(cards, freeship_min_reviews=100):
         **その日に①探すを先に押すと補URL側は再検索せず、素通しの候補がそのまま流れていた**。
       None を渡せば従来どおり無効化できる (調査用。通常は使わない)。
     """
-    import undetected_chromedriver as uc
+    import undetected_chromedriver as uc  # noqa: F401
 
     def _new_driver():
-        # ★2026-07-28: **専用プロファイル**を持たせる(従来は指定なし=毎回まっさらな一時profile)。
-        # 一番くじ側は既に専用profileで cookie を保温しており、PSA 側だけ「初回訪問の匿名 headless」
-        # として最も弾かれやすかった。ジョブごとに別ディレクトリなので他ジョブとロックが競合しない。
-        # **ログインはしない**(仕入アカBAN→仕入不能を避ける。一番くじと同方針)。
-        # profile が他プロセスに掴まれている等で起動できない時は一時profileへ fallback(走行を止めない)。
-        _quiet_chromedriver()          # ★黒窓を出さない(無人cron中に出っぱなしになる・2026-07-30)
-
-        def _mk(profile_dir):
-            opts = uc.ChromeOptions()
-            opts.add_argument("--headless=new"); opts.add_argument("--no-sandbox")
-            opts.add_argument("--lang=ja-JP"); opts.add_argument("--window-size=1280,1400")
-            if profile_dir:
-                opts.add_argument(f"--user-data-dir={profile_dir}")
-            _maj = _chrome_major()
-            return uc.Chrome(options=opts, version_main=_maj) if _maj else uc.Chrome(options=opts)
-
-        try:
-            os.makedirs(PSA_SCRAPE_PROFILE_DIR, exist_ok=True)
-            d = _mk(PSA_SCRAPE_PROFILE_DIR)
-        except Exception as e:      # noqa: BLE001
-            import tempfile
-            print(f"  ⚠ 専用profile で起動できず一時profileへ({type(e).__name__}) — "
-                  f"cookie保温は効かないが走行は継続", flush=True)
-            d = _mk(tempfile.mkdtemp(prefix="psa_mercari_"))
-        d.set_page_load_timeout(50)
-        return d
+        return new_scrape_driver()
 
     # ★2026-07-24 確実性優先(ユーザー方針): driver を _RESTART_EVERY 件ごとに作り直す。
     # 長時間セッションで uc.Chrome が不安定化し途中でクラッシュ→以降 全 item timeout(2026-07-24

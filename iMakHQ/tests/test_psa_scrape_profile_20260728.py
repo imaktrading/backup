@@ -30,7 +30,9 @@ def test_profile_dirs_do_not_collide_between_jobs():
 
 
 def test_driver_uses_profile_and_falls_back():
-    src = inspect.getsource(mp.fetch_mercari_cheapest)
+    # ★2026-09-08: driver の作り方を `new_scrape_driver` としてモジュール直下へ出した
+    #   (補URL の書込み直前チェックが同じ driver を使うため)。中身は変えていない。
+    src = inspect.getsource(mp.new_scrape_driver)
     assert "--user-data-dir=" in src
     assert "PSA_SCRAPE_PROFILE_DIR" in src
     assert "mkdtemp" in src          # 起動できない時の fallback
@@ -38,6 +40,7 @@ def test_driver_uses_profile_and_falls_back():
 
 def test_no_login_in_scrape_path():
     """仕入アカウントにログインしない (BAN=仕入不能に直結)。"""
-    src = inspect.getsource(mp.fetch_mercari_cheapest)
+    src = (inspect.getsource(mp.fetch_mercari_cheapest)
+           + inspect.getsource(mp.new_scrape_driver))
     for ng in ("login", "password", "signin"):
         assert ng not in src.lower()

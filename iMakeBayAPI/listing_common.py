@@ -81,6 +81,28 @@ SKU_PREFIX_BY_CATEGORY = {
 }
 
 
+# ★2026-09-07 ユーザー実害 (リバイスくん依頼 2026-09-08): eBay が
+#   `"Regular" is not a valid Size Type for the Size "3XL"` で Revise を弾き、
+#   日次の値段更新がその1件だけ毎日 失敗していた (9/01・9/02・9/08 とも同じ出品)。
+#   原因は **Size Type を "Regular" 固定で出していた**こと (= ②出品くん側)。
+#   eBay の Men's トップスは 3XL 以上を Big & Tall 扱いにしないと組合せが通らない
+#   (実測: itemID 356740464473 を Big & Tall に直したら通った)。
+#   2XL は "Regular" のまま通っている実績があるので触らない (推測で広げない)。
+_BIG_AND_TALL_SIZES = ("3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
+                       "XXXL", "XXXXL", "3L", "4L")
+
+
+def size_type_for(size: str, department: str = "Men") -> str:
+    """その Size に対して eBay が受け付ける Size Type (純関数, test可)。
+
+    Men の 3XL 以上だけ "Big & Tall"。それ以外は "Regular"。
+    """
+    s = (size or "").strip().upper().replace(" ", "")
+    if (department or "").strip().lower() not in ("men", "men's", "mens"):
+        return "Regular"
+    return "Big & Tall" if s in _BIG_AND_TALL_SIZES else "Regular"
+
+
 def extract_sku_from_url(url: str, category: str = None) -> str:
     """URLの末尾12文字を SKU として抽出（スプシURL逆引き用）。
     クエリ・末尾スラッシュ除去後、末尾12文字。空URLはカテゴリprefix+日時。"""
