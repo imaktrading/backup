@@ -566,7 +566,50 @@ FUNNEL_BUCKETS = [
 #   supply_url は「戻せるか」の判断材料で、relist で itemID が変わっても不変のキー。
 FUNNEL_COLS = ["item_id", "title", "site", "category", "price", "trend_price", "qty",
                "sold_qty", "sales90", "watch", "impr", "ctr%", "impr_total", "ctr_total%",
-               "photos", "keywords", "relist_status", "age_days", "supply_url", "ebay_url"]
+               "photos", "keywords", "relist_status", "age_days", "supply_url",
+               "落とすグループ", "ebay_url"]
+
+
+# ★2026-09-07 ユーザー要望: 在庫ありのどれが「落とす候補」かを **表の上で分けられる**ようにする。
+#   判定は棚 (`shelf_evict`) の関数をそのまま呼ぶ。ここで作り直すと、ボタンが落とす順と
+#   表の見え方が食い違う (今日の「価格の元ネタが2枚」と同じ壊れ方をする)。
+_EVICT_KEEP_SOLD = "残す (売れた)"
+_EVICT_WAIT = "様子見 (30日未満)"
+_EVICT_OUT = "対象外 (カテゴリ)"
+
+
+def _evict_category(title):
+    """棚が使うカテゴリ名 (TCG / G-shock)。対象外は None (純関数, test可)."""
+    t = (title or "").lower()
+    if "g-shock" in t or "gshock" in t or "g shock" in t:
+        return "G-shock"
+    if t.startswith("psa 10") or t.startswith("psa10"):
+        return "TCG"
+    return None
+
+
+def evict_group(r):
+    """在庫ありの行が「落とす候補」のどれに入るか (純関数, test可)。
+
+    落とす順そのものを表に出す。並べ替えれば、上から落ちる順になる。
+    在庫なし(qty=0)は 取下げ(CULL)側の話なので空欄 (在庫なしタブは「状態」列が持つ)。
+    """
+    try:
+        import shelf_evict as se
+    except Exception:                                          # noqa: BLE001
+        return ""                                              # 読めなければ空欄 (表は出す)
+    if se._f(r.get("qty")) == 0:
+        return ""
+    if se._f(r.get("sold_qty")) + se._f(r.get("sales90")) > 0:
+        return _EVICT_KEEP_SOLD
+    cat = _evict_category(r.get("title"))
+    if cat is None:
+        return _EVICT_OUT
+    if se._f(r.get("age_days")) <= se.STALE_MAX_AGE.get(cat, se.MIN_AGE_DAYS):
+        return _EVICT_WAIT
+    names = {0: "ガンダム/ドラゴンボール", 1: "ワンピース・その他", 2: "G-SHOCK", 3: "ポケモン"}
+    rank = se.franchise_rank(r.get("title"))
+    return f"落とす{rank + 1} {names.get(rank, '')}".strip()
 
 
 def _funnel_vals(r):
@@ -575,7 +618,7 @@ def _funnel_vals(r):
             round(r["impr"], 1), round(r["ctr"] * 100, 2),
             round(r.get("impr_total", 0), 1), round(r.get("ctr_total", 0) * 100, 2),
             r.get("photos", 0), r.get("keywords", 0), r.get("relist_status", ""),
-            r.get("age_days", 0), r.get("supply_url", ""),
+            r.get("age_days", 0), r.get("supply_url", ""), evict_group(r),
             r.get("ebay_url") or f"https://www.ebay.com/itm/{r['item_id']}"]
 
 
