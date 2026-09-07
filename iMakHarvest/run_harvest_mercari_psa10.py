@@ -477,7 +477,8 @@ def _dump(payload: dict, path: Path, quiet: bool = False) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--price-min", type=int, default=3000)
-    ap.add_argument("--price-max", type=int, default=100000)
+    # ★上限は 7万円 (2026-09-05 user 確定)。 既定にしておく = 付け忘れても効く
+    ap.add_argument("--price-max", type=int, default=70000)
     ap.add_argument("--min-rating", type=int, default=100, help="セラー評価数の下限")
     ap.add_argument("--no-identity", action="store_true", help="本人確認済 要件を外す")
     ap.add_argument("--cap-per-keyword", type=int, default=100)

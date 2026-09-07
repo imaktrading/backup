@@ -100,3 +100,13 @@ def test_is_bundle(title, bundle):
     """PSA10 は現物1枚に鑑定番号1つ。まとめ売りは出品の材料にならない."""
     from scrapers.psa_grade_gate import is_bundle
     assert is_bundle(title) is bundle
+
+
+def test_price_cap_is_the_default():
+    """★7万円上限は既定 (2026-09-05 user 確定)。 付け忘れても効くようにする."""
+    import argparse
+    import run_harvest_mercari_psa10 as R
+    ap = argparse.ArgumentParser()
+    # main() と同じ既定値を持つことだけ確認する (実行はしない)
+    src = open(R.__file__, encoding="utf-8").read()
+    assert '"--price-max", type=int, default=70000' in src
