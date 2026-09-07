@@ -93,5 +93,6 @@ class TestNoTimeBasedRelease:
         src = io.open(os.path.join(_TOOLS, "psa_hoju_fill.py"), encoding="utf-8").read()
         i = src.index("def build_confirm_context(")
         body = src[i:i + 1600]
-        assert "skip_iids_now(_skip_rows, _cands_by_iid)" in body
+        # ★2026-09-07: 戻す条件を「番号一致の新供給だけ」に絞ったので第3引数が付いた。
+        assert "skip_iids_now(_skip_rows, _cands_by_iid, _strict_by_iid)" in body
         assert "_skip_iids_from_tab(_skip_rows, today=today)" not in body

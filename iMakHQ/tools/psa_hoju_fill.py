@@ -1222,14 +1222,32 @@ def plan_aux_writeback(confirmed, item_targets, vals, owner_by_url, guard_ok, au
 #   伏せている数は昼確認のログに「台帳skip N」として毎回出る (黙って消さない)。
 
 
-def skip_iids_now(rows, cand_urls_by_iid):
+def _cache_strict_candidate_urls(entry):
+    """キャッシュ1件 → **番号まで一致した**候補URLだけ (純関数)。
+
+    ★2026-09-07 ユーザー指摘「目視したカードが再度出ている。時間の無駄」。
+      一度「違う」と判定した札を戻す条件が「新しいURLが1本でも出たら」だったため、
+      夜の探すが毎晩1本 拾うたびに同じ札が戻ってきていた (実測: 台帳65件中50件が復活状態)。
+      戻すのは **番号まで一致した供給が出た時だけ** にする。
+      `all_cands`/`loose_cands` は番号未確認の枠なので、ここでは数えない。
+    """
+    m = (entry or {}).get("mercari") or {}
+    if not isinstance(m, dict):
+        return []
+    rows = m.get("cands") or []
+    return [t[1] for t in rows if t and len(t) > 1 and t[1]]
+
+
+def skip_iids_now(rows, cand_urls_by_iid, strict_urls_by_iid=None):
     """今 伏せる itemID (純関数, test可)。**新しい供給が出るまで出さない**。
 
-    - 前回 見せた候補に無いURLが在る → 出す
+    - 前回 見せた候補に無い **番号一致の** URLが在る → 出す
     - それ以外 → 伏せる
     - 前回の候補を記録していない旧行は判断材料が無いので出す (_has_new_supply が True)
 
-    cand_urls_by_iid: {itemID: [今の候補URL]}
+    cand_urls_by_iid:   {itemID: [今の候補URL]} (記録との突合用)
+    strict_urls_by_iid: {itemID: [番号まで一致した候補URL]}。渡さなければ従来どおり
+                        全候補で判定する (呼び側が用意できない時に伏せ過ぎないため)。
     """
     seen_by_iid = _seen_urls_by_iid(rows)
     out = set()
@@ -1238,6 +1256,12 @@ def skip_iids_now(rows, cand_urls_by_iid):
         if not iid:
             continue
         cur = (cand_urls_by_iid or {}).get(iid) or []
+        if strict_urls_by_iid is not None:
+            # 新しく出たURL のうち **番号一致** のものだけを「戻す理由」にする
+            strict = set(_norm_urls((strict_urls_by_iid or {}).get(iid)))
+            seen = set(_norm_urls(seen_by_iid.get(iid)))
+            if seen:
+                cur = [u for u in _norm_urls(cur) if u in strict]
         if not _has_new_supply(seen_by_iid.get(iid), cur):
             out.add(iid)
     return out
@@ -1258,7 +1282,8 @@ def build_confirm_context(vals, cache, today, verbose=False):
         # ★2026-09-06: **新しい供給が出るまで出さない** (日数では戻さない)。
         #   以前は1日経つと供給が同じでも必ず戻ってきていた (= 同じ候補を毎日 見せる)。
         _cands_by_iid = {i: _cache_candidate_urls(cache.get(i)) for i in _all_skip}
-        skip_iids = skip_iids_now(_skip_rows, _cands_by_iid)
+        _strict_by_iid = {i: _cache_strict_candidate_urls(cache.get(i)) for i in _all_skip}
+        skip_iids = skip_iids_now(_skip_rows, _cands_by_iid, _strict_by_iid)
         revived = len(_all_skip) - len(skip_iids)
         newsupply = {i for i in _all_skip
                      if i not in skip_iids

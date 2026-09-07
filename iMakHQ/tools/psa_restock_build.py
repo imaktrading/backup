@@ -131,6 +131,44 @@ def _pending_from_confirmed_rows(rows):
     return out, skipped_done
 
 
+# ★2026-09-07 ユーザー指摘「①②③、更新してもヒントテキスト変わらんぞ」。
+#   ②の残数は「RESTOCK確定の入稿待ち行数」なので、**CSV を作っただけでは動かない**
+#   (動くのは 人が上げて ③ が eBay の在庫を見た後)。押した直後に必ず同じ数字が出る。
+#   → その日 CSV に出した itemID を控えて、残数から引く。
+#   日付が変われば台帳は無効 (上げ忘れた分は翌日また出す = 取りこぼさない)。
+_BUILT_LEDGER = os.path.join(r"C:\dev\iMak_data\hq", "restock_built_today.json")
+
+
+def _today_str():
+    import datetime
+    return datetime.date.today().isoformat()
+
+
+def built_today(today=None, path=_BUILT_LEDGER):
+    """その日 CSV に出した itemID (純関数に近い I/O。読めなければ空集合)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:                                          # noqa: BLE001
+        return set()
+    if (d or {}).get("date") != (today or _today_str()):
+        return set()
+    return {str(i).strip() for i in (d.get("itemIDs") or []) if str(i).strip()}
+
+
+def record_built(item_ids, today=None, path=_BUILT_LEDGER):
+    """CSV に出した itemID を控える。同じ日に2回押したら**足す**(前回分を消さない)。"""
+    today = today or _today_str()
+    ids = set(built_today(today, path)) | {str(i).strip() for i in item_ids if str(i).strip()}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"date": today, "itemIDs": sorted(ids)}, f, ensure_ascii=False, indent=1)
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 生成済み台帳を書けません (ヒントが減らないだけ): {type(e).__name__}: {e}")
+    return len(ids)
+
+
 def count_workload(rows=None, itemid_to_cert=None):
     """押したら『何件ぶん CSV が出るか』を数える (パネルのヒント用・2026-09-01).
 
@@ -160,8 +198,12 @@ def count_workload(rows=None, itemid_to_cert=None):
         if itemid_to_cert is not None:
             blocked = sum(1 for p in pending
                           if not itemid_to_cert.get((p.get("itemID") or "").strip()))
-        return {"actionable": len(pending) - blocked, "done": done,
-                "blocked": blocked, "total": len(pending) + done}
+        built = built_today()
+        built_n = sum(1 for p in pending
+                      if (p.get("itemID") or "").strip() in built)
+        return {"actionable": len(pending) - blocked - built_n, "done": done,
+                "blocked": blocked, "built_today": built_n,
+                "total": len(pending) + done}
     except Exception as e:                                     # noqa: BLE001
         return {"error": "%s: %s" % (type(e).__name__, e)}
 
@@ -211,6 +253,12 @@ def main():
         sys.exit("本実行で生成された Add CSV(tcg_upload_*.csv)が見つからない")
     add_csv = new_files[-1]   # 本実行で新規生成された分だけから選ぶ(並走の他CSVを掴まない)
     print(f"✅ Add CSV生成: {add_csv}")
+    # ★2026-09-07: 押した直後にヒントが減るよう、CSV に出した分を控える (詳細は _BUILT_LEDGER)。
+    _skipped_ids = {str(i).strip() for i, _ in skipped}
+    _built = [r["itemID"] for r in rows
+              if (r.get("itemID") or "").strip() and r["itemID"] not in _skipped_ids]
+    record_built(_built)
+    print(f"  🗒 今回CSVに出した {len(_built)}件を控えました (ヒントの残数から引きます)")
     # Add→Revise 変換は **control_panel の post-chain (excluder/title-fix/dedup) の後** に実施する
     # (control_panel が restock_revise=True を見て _run_restock_revise_for_latest_csv を呼ぶ)。
     # ここで変換すると dedup 前=赤字/重複/旧タイトルが混入する(2026-06-19 バグ)→ 変換しない。

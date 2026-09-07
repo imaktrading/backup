@@ -107,8 +107,10 @@ def test_restock_build_counts_only_unlisted():
             []]
     # ★2026-09-04: cert が引けない行は生成できないので blocked に分けた。
     #   この検査の趣旨 (実行済を除く) は変えず、cert は両方引ける前提で渡す。
+    # ★2026-09-07: その日 CSV に出した分を残数から引くようにしたので built_today が付く
+    #   (押した直後にヒントが減らない、というユーザー指摘への対応)。
     assert RB.count_workload(rows, itemid_to_cert={"222": "a", "333": "b"}) == {
-        "actionable": 2, "done": 1, "blocked": 0, "total": 3}
+        "actionable": 2, "done": 1, "blocked": 0, "built_today": 0, "total": 3}
     # cert が片方しか引けなければ、出るのは1件と言う
     assert RB.count_workload(rows, itemid_to_cert={"222": "a"})["actionable"] == 1
 
