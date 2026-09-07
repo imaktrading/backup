@@ -517,14 +517,43 @@ def _load_processed() -> set[tuple[str, str]]:
     return keys
 
 
-def _append_processed(rows: list[dict]) -> None:
+def load_processed_rows() -> list[dict]:
+    """処理済 CSV の全行 (reason 付き)。**`reason` が無い古い行は `requested`** (純関数寄り I/O)。
+
+    移行方針: 既存191行は依頼を出しただけで解決の確認は取れていないので requested。
+    """
+    if not PROCESSED_CSV.exists():
+        return []
+    out = []
+    with PROCESSED_CSV.open(encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            out.append({"category": r.get("category", ""), "model": r.get("model", ""),
+                        "detected_at": r.get("detected_at", ""),
+                        "reason": (r.get("reason") or REASON_REQUESTED).strip()
+                        or REASON_REQUESTED})
+    return out
+
+
+# ★2026-09-08 (提案4): この CSV は **2つの意味**を1つの形で持っていた。
+#   ここ (= カタログに依頼を出した) と csv_auditor (= カタログに収録されて解決した) が
+#   同じ3列で追記しており、どちらの理由で入った行なのか区別できない。
+#   実測: 191行中1件が既に二重 (gundam_tcg / ニュータイプチャレンジ2026)。
+#   `reason` 列を足して分ける。**既存行は `requested` 扱い**で移行する
+#   (解決していない物を resolved にすると、二度と出てこなくなる)。
+PROCESSED_HEADER = ["category", "model", "detected_at", "reason"]
+REASON_REQUESTED = "requested"
+REASON_RESOLVED = "resolved"
+
+
+def _append_processed(rows: list[dict], reason: str = REASON_REQUESTED) -> None:
     is_new = not PROCESSED_CSV.exists() or PROCESSED_CSV.stat().st_size == 0
     with PROCESSED_CSV.open("a", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         if is_new:
-            w.writerow(["category", "model", "detected_at"])
+            w.writerow(PROCESSED_HEADER)
         for r in rows:
-            w.writerow([r["category"], r["model"], r["detected_at"]])
+            w.writerow([r["category"], r["model"], r["detected_at"],
+                        r.get("reason") or reason])
 
 
 def _prune_old_missing(unique: dict[tuple[str, str], dict], max_age_days: int = 30,

@@ -563,7 +563,14 @@ _SETCODE_RE = _re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?-\d{1,4})\b", _re.I)
 #   (実測: `('one_piece_tcg','cert155040105')` → False で永久に auto-close されない)。
 _PID_VARIANT_RE = _re.compile(r"\b([A-Z]{1,4}\d{1,2}[a-z]?-\d{1,4}(?:_[A-Za-z0-9]+)+)", _re.I)
 _PRINTNO_RE = _re.compile(r"\b(\d{2,3}/[A-Z0-9\-]{2,6})\b", _re.I)
-_SETHINT_RE = _re.compile(r"\b([A-Z]{2,4}\d?)\b")
+# ★2026-09-08 (提案1): 旧 regex は **数字のあとに英字が付く型**を拾えないだけでなく，
+#   `ST01` `OP09` `EB01` のような **2桁数字**も拾えていなかった
+#   (実測: M2A / SV7A / S8B / ST01 / OP09 / EB01 / PRB02 は全部 0件。CP3 だけ当たっていた)。
+#   印刷番号との組合せ照合が丸ごと効いていなかった。
+#   ★絞りは **catalog 実在の prefix** が担う: hints は `_resolve` で
+#     `product_id LIKE '<hint>-%'` + 印刷番号の完全一致 でしか使わないので，
+#     実在しない記号は当たらない (regex を広げても誤解決は増えない)。
+_SETHINT_RE = _re.compile(r"\b([A-Z]{2,4}\d{0,2}[A-Z]?|[A-Z]\d{1,2}[A-Z]?)\b")
 
 
 def candidate_ids(item_id):

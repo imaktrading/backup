@@ -169,9 +169,83 @@ def verify(suspects, limit=0, verbose=True):
     return suspects
 
 
+def build_mail(payload):
+    """検査結果 → (件名, 本文) (純関数)。
+
+    ★「有無」と「次に何をするか」だけ書く。一覧は長くしない (読む側のトークンも時間も食う)。
+      0件の時も **必ず送る**。届かないと「動いていない」のか「異常なし」なのか分からない。
+    """
+    sus = payload.get("suspects") or []
+    verified = payload.get("verified")
+    bad = [s for s in sus if s.get("mismatch")]
+    checked = payload.get("checked", 0)
+    if verified:
+        head = f"別カードの混入 {len(bad)}件" if bad else "別カードの混入なし (確認済)"
+    else:
+        head = f"要確認 {len(sus)}件" if sus else "異常なし"
+    subject = f"[仕入元チェック] {head} / 照合 {checked}件"
+
+    lines = [f"出品中 {checked}件を照合しました。", ""]
+    if not sus:
+        lines += ["■ 結果: 異常なし",
+                  "  仕入値が不自然に安い出品はありませんでした。対応は不要です。"]
+    else:
+        lines += [f"■ ① 値段が不自然に安い: {len(sus)}件",
+                  "  (仕入値が『番号一致で見つかっている供給の最安』の6割未満)", ""]
+        for s in sus[:15]:
+            lines.append(f"  {s['itemID']}  仕入 {s['cost']:,.0f}円 / 最安 {s['cheapest']:,.0f}円"
+                         f" ({s['ratio']*100:.0f}%)  {s['title'][:28]}")
+        if len(sus) > 15:
+            lines.append(f"  … 他 {len(sus)-15}件")
+        lines += ["",
+                  "  ※ これは『人が見る順番』であって、判定ではありません。",
+                  "     安いのが本物のことが多いです (特価・ケース傷あり等)。",
+                  "     2026-09-08 の初回は 14件中 0件が本当の混入でした。"]
+    if verified:
+        lines += ["", f"■ ② 仕入元の商品名まで確認済: 別カード {len(bad)}件"]
+        for s in bad:
+            lines.append(f"  ★ {s['itemID']} KEY={s['key']}")
+            for c in s.get("checked") or []:
+                if c.get("verdict") == "★不一致":
+                    lines.append(f"      {c['url']}  番号={c.get('no')}  {c.get('title','')[:40]}")
+    elif sus:
+        lines += ["", "■ 次にやること",
+                  "  1) 仕入元の商品名まで確かめる (ブラウザ・数分):",
+                  "     python C:/dev/iMak/iMakHQ/tools/supply_card_mismatch.py --verify --limit 10",
+                  "  2) 別カードだった時の直し方は skill `supply-card-mismatch` に手順があります",
+                  "     (M列だけ直す / N列は関数なので触らない / 価格は pricing_engine で出す)"]
+    return subject, "\n".join(lines)
+
+
+def send_mail(payload):
+    """メールを送る (I/O)。★失敗を握り潰さない (届かないのに成功扱いが一番まずい)。"""
+    import subprocess
+    import tempfile
+    subject, body = build_mail(payload)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as f:
+        f.write(body)
+        path = f.name
+    try:
+        r = subprocess.run([sys.executable, r"C:\dev\iMak_data\tools\send_mail.py",
+                            "--subject", subject, "--body-file", path],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=300)
+        if r.returncode == 0:
+            print(f"  ✉ メール送信: {subject}")
+        else:
+            print(f"  ⚠ メール送信 失敗 (exit {r.returncode}): {(r.stderr or r.stdout)[:200]}")
+        return r.returncode == 0
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--verify", action="store_true", help="仕入元の商品名まで読んで確かめる")
+    ap.add_argument("--mail", action="store_true", help="結果をメールで送る (0件でも送る)")
     ap.add_argument("--limit", type=int, default=0, help="②で見る件数の上限")
     ap.add_argument("--ratio", type=float, default=CHEAP_RATIO)
     a = ap.parse_args()
@@ -196,11 +270,14 @@ def main():
         print(f"\n★別カードの疑い {len(bad)}件 / 見た {sum(1 for s in suspects if 'checked' in s)}件")
         if not bad:
             print("  ②まで通して0件 = 安いのは本物。①の件数だけで騒がないこと。")
+    payload = {"checked": checked, "ratio": a.ratio, "verified": bool(a.verify),
+               "suspects": suspects}
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
-        json.dump({"checked": checked, "ratio": a.ratio, "verified": bool(a.verify),
-                   "suspects": suspects}, f, ensure_ascii=False, indent=1)
+        json.dump(payload, f, ensure_ascii=False, indent=1)
     print(f"\n記録: {os.path.normpath(OUT_PATH)}")
+    if a.mail:
+        send_mail(payload)
 
 
 if __name__ == "__main__":

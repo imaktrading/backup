@@ -187,8 +187,10 @@ REM          Nothing else would ever have noticed. Stage 1 only (free, a few sec
 REM          list the rows whose cost is far below the cheapest number-verified supply.
 REM          Stage 2 (opening each supplier page) stays a human-triggered step, because
 REM          a low price is often genuine - 2026-09-08: 14 flagged, 0 actually wrong.
+REM          --mail sends the result every night, INCLUDING when nothing is wrong:
+REM          silence must not be ambiguous between "all clear" and "the job died".
 echo [supply-mismatch] %date% %time% >> "%LOG%"
-python -u supply_card_mismatch.py >> "%LOG%" 2>&1
+python -u supply_card_mismatch.py --mail >> "%LOG%" 2>&1
 
 REM --- 7) write the "no backup URL at all" listings into one tab so they can be
 REM        seen at a glance (they are scattered rows in the master sheet).

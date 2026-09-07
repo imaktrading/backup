@@ -1173,6 +1173,9 @@ def audit(csv_path, dry_run=False, with_market=False, log_path=None):
     # ★2026-09-01: `_pdca_accumulate` より**先**に読む。`_pdca_accumulate` 内の emit/prune が
     # pending→done に落とすため、後から読むと同日中に closeされた再発が digest に一度も載らない
     # (=digestが構造的に毎日0件に見える fail-OPEN)。出典: hq/requests/2026-09-01_act_code_proposals_tcg.md 提案1
+    # ★2026-09-08 (提案2): digest を作る前に **状態だけ**直す (解決済を done に落とす)。
+    #   これをしないと、既に片づいた件が毎日 `pending` として digest に載り続ける。
+    _pdca_prune_resolved(dry_run)
     recurring = filter_recurring_for_project(recurring_findings(_load_pdca_recurring()), project)
     digest = _build_ng_digest(project, program_items, log_signals, recurring, log_signal_lines)
     digest_path = _write_ng_digest(project, digest, dry_run)
@@ -1844,6 +1847,34 @@ def _resolve_identity(sku: str, identity_by_sku: dict | None) -> str:
     return _identity_from_csv_history(s)
 
 
+def _pdca_prune_resolved(dry_run):
+    """catalog に後から収録された gap を **digest を作る前に** done 化する (2026-09-08 提案2)。
+
+    経緯 (2つの要求がぶつかっていた):
+      - 2026-09-01: digest を `_pdca_accumulate` より **先**に読むようにした。
+        後から読むと、同じ日に close された再発が digest に一度も載らない (fail-OPEN)。
+      - 2026-09-07: その結果、**既に解決済 (resolver_gap) の件が digest に `pending` のまま載る**
+        (実測: queue 629/631 のシャンクス OP09 001)。数字が実態を映していない。
+
+    → 「状態を直す (prune)」と「新しい依頼を出す (emit)」を分けて、prune だけ先に走らせる。
+      emit は今までどおり digest の後。これで両方の要求を満たす。
+    dry-run では何も書かない。失敗しても監査本体は止めない (write-only)。
+    """
+    if dry_run:
+        return 0
+    try:
+        import pdca_store as _pdca
+        con = _pdca.connect()
+        pr = _pdca.prune_resolved_gaps(con, _pdca.make_catalog_resolver(CATALOG_DB), ts=_today())
+        moved = _move_resolved_missing_models(pr.get("pruned_item_ids"))
+        if moved:
+            print(f"  🧹 台帳掃除: 解決済 {moved}件を missing_models.csv → missing_models_processed.csv")
+        return pr.get("pruned") or 0
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠️ PDCA prune(先出し) skip: {type(e).__name__}: {e}")
+        return 0
+
+
 def _pdca_accumulate(project, catalog_items, program_items, dry_run, identity_by_sku=None,
                      audited_rows=0, audited_skus=None):
     """catalog/program 指摘を pdca.db 改善キューに蓄積し、dedup済 catalog 依頼を集約発行 +
@@ -2168,12 +2199,16 @@ def _move_resolved_missing_models(item_ids):
             w.writerow([r.get("category", ""), r.get("model", ""), r.get("detected_at", "")])
     is_new = not os.path.exists(MISSING_MODELS_PROCESSED_PATH) or \
         os.path.getsize(MISSING_MODELS_PROCESSED_PATH) == 0
+    # ★2026-09-08 (提案4): ここは「カタログに収録されて **解決した**」印。
+    #   依頼を出しただけの行 (auto_catalog_add_request) と同じ形で書いていたため
+    #   区別できなかった。`reason` 列で分ける。
     with open(MISSING_MODELS_PROCESSED_PATH, "a", encoding="utf-8", newline="") as f:
         w = _csv.writer(f)
         if is_new:
-            w.writerow(["category", "model", "detected_at"])
+            w.writerow(["category", "model", "detected_at", "reason"])
         for r in moved:
-            w.writerow([r.get("category", ""), r.get("model", ""), r.get("detected_at", "")])
+            w.writerow([r.get("category", ""), r.get("model", ""),
+                        r.get("detected_at", ""), "resolved"])
     return len(moved)
 
 
@@ -2216,7 +2251,16 @@ _CATALOG_MISS_RE = re.compile(r"Catalog\s*未登録カード\s*(\d+)\s*件")
 #   まず出ない。常時ニセ1件が乗ると、本物が来ても見分けがつかない (狼少年 = fail-OPEN)。
 #   依頼書: hq/requests/2026-08-24_act_code_proposals_tcg.md ①
 _SCAN_PATS = [("HOLD/gate", re.compile(r"\bHOLD\b|gate_row_or_hold|csv_hold")),
-              ("error", re.compile(r"❌|Traceback|Stacktrace|[Ee]rror:|ERROR|取得中.*失敗"))]
+              # ★2026-09-08 (提案3): `取得中.*失敗` は **同じ行に両方在る時**しか当たらない。
+              #   PSA が取れなかった時のログは
+              #     取得中(確認用): #936643273...
+              #     [DEBUG] ... (ページ本文が数十行)
+              #      失敗
+              #   と **失敗が単独行**で出るので、1件も数えられていなかった
+              #   (9/07 の #936643273 が実害)。行頭の `失敗` を足す。
+              #   `成功: 13件 / 失敗: 0件` の集計行は行頭が「成功」なので当たらない。
+              ("error", re.compile(r"❌|Traceback|Stacktrace|[Ee]rror:|ERROR|"
+                                   r"取得中.*失敗|^\s*失敗\s*$"))]
 
 # ★2026-09-05: `❌ 除外(出品しない): N件` / `❌ エラー: N件` は check_csv.py の集計行で、
 #   同じ事象を per-row の明細行 (`❌ 仕入値が上限を超えている ...`) と二重に説明するだけ。
