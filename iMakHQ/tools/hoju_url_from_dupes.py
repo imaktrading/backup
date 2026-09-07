@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tools/
 import sheet_io
 
 A, B, D, I, KEY = 0, 1, 3, 8, sheet_io.PRODUCT_COL_KEY   # 34
+F, M = 5, 12                      # F=商品価格 / M=現在価格 (2枚目行の値段)
 AUX0, AUXN = sheet_io.PRODUCT_COL_AUX_START, sheet_io.PRODUCT_AUX_MAX  # 28, 5
 
 
@@ -40,7 +41,93 @@ def _norm(url):
         return u.split("?")[0].rstrip("/").lower()
 
 
-def compute_additions(vals, live_ids=None):
+def price_by_url_from_cache():
+    """{正規化URL: 価格} を 補URL探索キャッシュから作る (I/O。読めなければ空)。
+
+    ★2026-09-07 ユーザー指示「満杯で捨てるのは徒労。修正して」。
+      目視 (`psa_hoju_fill`) は既に **安い順に5本へ持ち直す**が、この自動追記は
+      満杯なら新しい供給を捨てていた (実測: 1走行で23本 溢れ)。同じ考え方に揃える。
+      値段は目視と同じキャッシュから取る (二重定義しない)。
+    """
+    out = {}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import psa_hoju_fill as _H
+        for entry in (_H._load_cache() or {}).values():
+            m = (entry or {}).get("mercari") or {}
+            if not isinstance(m, dict):
+                continue
+            for key in ("cands", "all_cands", "loose_cands"):
+                for row in (m.get(key) or []):
+                    if row and len(row) > 1 and row[1]:
+                        n = _norm(row[1])
+                        if n and n not in out:
+                            try:
+                                out[n] = float(row[0])
+                            except (TypeError, ValueError):
+                                pass
+            # ★snkrdunk 側も入れる。既存の補URLは snkrdunk が多く、ここを見ないと
+            #   「値段が比べられない」で入替が一度も起きない (2026-09-07 実測: 23本全部)。
+            sd = (entry or {}).get("snkrdunk") or {}
+            for lst in (sd.get("psa10_listings") or []):
+                u = (lst or {}).get("url")
+                if not u:
+                    continue
+                n = _norm(u)
+                if n and n not in out:
+                    try:
+                        out[n] = float(lst.get("price"))
+                    except (TypeError, ValueError):
+                        pass
+    except Exception:                                          # noqa: BLE001
+        return {}
+    return out
+
+
+def row_price(r):
+    """2枚目行の出品価格 (M=現在価格 → F=商品価格 の順)。取れなければ None (純関数)。
+
+    ★N(仕入値)は使わない。既存枠の値段は **出品価格** なので、揃えないと比較にならない
+      (N はポイント還元を引いた後の値)。
+    """
+    import re as _re
+    for col in (M, F):
+        v = _cell(r, col)
+        d = _re.sub(r"[^0-9]", "", str(v or ""))
+        if d:
+            return float(d)
+    return None
+
+
+def plan_replacement(existing, url, prices, aux_max=None, new_price=None):
+    """満杯の補URL枠に、**より安い**新URLを入れる時の並び (純関数, test可)。
+
+    戻り: (full, removed) / 入れ替えない時は (None, [])。
+    押し出してよいのは **値段が分かっていて、新URLより高い** 既存だけ。
+      値段が分からない既存を押し出すと「もっと安いかもしれない供給」を根拠なく捨てる。
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from psa_hoju_fill import rank_backurls, AUXN as _AUXN
+    except Exception:                                          # noqa: BLE001
+        return None, []
+    aux_max = aux_max or _AUXN
+    new_p = new_price if new_price is not None else (prices or {}).get(_norm(url))
+    if new_p is None:
+        return None, []                   # 新URLの値段が分からない = 比べられない
+    prices = dict(prices or {})
+    prices[_norm(url)] = new_p            # 行の値段を使う (キャッシュに無いことが多い)
+    full, added, removed = rank_backurls(existing, [url], prices, aux_max)
+    if not added or not removed:
+        return None, []
+    for u in removed:
+        old_p = (prices or {}).get(_norm(u))
+        if old_p is None or old_p <= new_p:
+            return None, []               # 根拠なく押し出さない
+    return full, removed
+
+
+def compute_additions(vals, live_ids=None, prices=None):
     """(pure) rows2d(header含む) → (plan, warns)。I/O 無しで test 可能。
 
     plan = {primary_row(1-indexed): {'itemid','existing','add','skip','supply_dead'}}。
@@ -113,7 +200,26 @@ def compute_additions(vals, live_ids=None):
         if url in existing:
             d["skip"].append(url)
         elif len(existing) + len(d["add"]) >= AUXN:
-            warns.append(f"row {prow}(itemID={_cell(pr,B)}) 補URL満杯(5) → url={url} 溢れ(売切上書きは未実装)")
+            _cur = (d.get("full") or (existing + d["add"]))[:AUXN]
+            _full, _removed = plan_replacement(_cur, url, prices, new_price=row_price(r))
+            if _full:
+                d["full"] = _full
+                d["add"].append(url)
+                d.setdefault("replaced", []).extend(_removed)
+                assigned.add(url)
+                warns.append(f"row {prow}(itemID={_cell(pr,B)}) 補URL満杯(5) → "
+                             f"**より安いので入替** {_removed} を外して url={url} を入れた")
+            else:
+                _np = row_price(r) if row_price(r) is not None else (prices or {}).get(_norm(url))
+                _known = [(prices or {}).get(_norm(u)) for u in _cur]
+                if _np is None:
+                    _why = "新しい方の値段が分からない"
+                elif all(x is not None for x in _known):
+                    _why = f"既存5本の方が安い (新 ¥{int(_np):,} / 既存 最高 ¥{int(max(_known)):,})"
+                else:
+                    _why = "既存に値段の分からない枠がある (根拠なく押し出さない)"
+                warns.append(f"row {prow}(itemID={_cell(pr,B)}) 補URL満杯(5) → url={url} "
+                             f"入れず ({_why})")
         elif url not in d["add"]:
             d["add"].append(url)
             assigned.add(url)
@@ -159,7 +265,8 @@ def main():
     do_write = "--write" in sys.argv
     vals = sheet_io._product_ws().get_all_values()
     live_ids = load_live_ids()
-    plan, warns = compute_additions(vals, live_ids)
+    prices = price_by_url_from_cache()
+    plan, warns = compute_additions(vals, live_ids, prices)
     mode = "実書込" if do_write else "dry-run"
     total_add = sum(len(v["add"]) for v in plan.values())
     urgent = sum(len(v["add"]) for v in plan.values() if v["add"] and v.get("supply_dead"))
@@ -175,7 +282,8 @@ def main():
     for w in warns[:30]:
         print("  ⚠️", w)
     if do_write:
-        row_to_urls = {row: (v["existing"] + v["add"])[:AUXN] for row, v in plan.items() if v["add"]}
+        row_to_urls = {row: (v.get("full") or (v["existing"] + v["add"]))[:AUXN]
+                       for row, v in plan.items() if v["add"]}
         n = sheet_io.write_aux_urls(row_to_urls)
         missing = verify_written(row_to_urls)
         if missing:
