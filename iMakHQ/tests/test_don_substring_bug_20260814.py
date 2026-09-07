@@ -26,7 +26,13 @@ def test_donquixote_is_not_treated_as_don_card():
     got = R._catalog_lookup_expected(
         "ONE PIECE JAPANESE OP03-PILLARS OF STRENGTH",
         "DONQUIXOTE DOFLAMINGO WANTED ALTERNATE ART", "009", "one_piece_tcg")
-    assert got == "ST03-009_OP03", f"ドフラミンゴを解決できていない: {got}"
+    # ★2026-09-07: カタログが「別絵柄なのに通常絵の行を引く」を直した (cd73e43) ため、
+    #   `WANTED ALTERNATE ART` がどの刷り (`_OP03` か `_p1`) に解決するかは
+    #   **カタログ側の判断**で、あちらのテストが持っている。ここで固定すると
+    #   カタログを直すたびに HQ のテストが落ちる (実際 9/07 に落ちた)。
+    #   このテストの趣旨は「DONQUIXOTE を DON!!カードと誤判定しない」なので、
+    #   ドフラミンゴの行に解決できていれば合格とする。
+    assert got and got.startswith("ST03-009"), f"ドフラミンゴを解決できていない: {got}"
 
 
 def test_don_branch_matches_the_real_don_card_only():

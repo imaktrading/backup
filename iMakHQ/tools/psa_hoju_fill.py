@@ -1312,10 +1312,14 @@ def build_confirm_context(vals, cache, today, verbose=False):
             print(f"  ⚠ 使用中URLマップを作れず、表示前の除外はskip ({type(_e0).__name__})")
         used_by_others, guard_ok = {}, False
     if verbose:
+        # ★2026-09-07: 文言が古かった。日数 (cooldown) で戻す仕掛けは 9/06 に廃止し、
+        #   今は **番号まで一致した新しい供給が出た時だけ** 戻す。中身と違うことを
+        #   画面に書かない (パネルの嘘を残さない)。
         if revived:
-            print(f"  ♻ cooldown 満了 {revived}件 → 再表示対象に復帰 (台帳の行は残す)")
+            print(f"  ♻ 判定済みだが新しい供給が出た {revived}件 → もう一度 出します "
+                  f"(台帳の行は残す)")
         if newsupply:
-            print(f"  🆕 新しい供給が出た {len(newsupply)}件 → cooldown 中だが再表示する")
+            print(f"  🆕 うち番号まで一致した供給 {len(newsupply)}件")
     return {"skip_iids": skip_iids, "ng_by_iid": ng_by_iid, "used_by_others": used_by_others,
             "revived": revived, "newsupply": newsupply, "guard_ok": guard_ok}
 
