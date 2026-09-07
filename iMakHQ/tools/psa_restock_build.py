@@ -169,6 +169,35 @@ def record_built(item_ids, today=None, path=_BUILT_LEDGER):
     return len(ids)
 
 
+# ★2026-09-07: 「CSV は作れるが上げられない」行の台帳。
+#   生成はできるので cert/仕入値の門には掛からないが、入稿前の確認で毎回 落ちる行がある
+#   (例: カタログでカードを同定できず、必須の項目が空のまま出る = 上げると既存の値が消える)。
+#   これを数え続けると「押せば進む1件」に見えるが、実際は押しても永久に進まない。
+#   窓口が落とした時にここへ記録し、**どのボタンの残数からも外す**。
+#   復活は行を消すだけ (カタログの KEY が決まれば消す)。
+_UNDELIVERABLE = os.path.join(r"C:\dev\iMak_data\hq", "restock_undeliverable.json")
+
+
+def undeliverable(path=_UNDELIVERABLE):
+    """上げられないと分かっている itemID → 理由 (読めなければ空)。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:                                          # noqa: BLE001
+        return {}
+    return {str(k).strip(): v for k, v in (d or {}).items() if str(k).strip()}
+
+
+def mark_undeliverable(item_id, reason, path=_UNDELIVERABLE):
+    """上げられない行を記録する (窓口が入稿前に落とした時に呼ぶ)。"""
+    d = undeliverable(path)
+    d[str(item_id).strip()] = str(reason)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    return len(d)
+
+
 def count_workload(rows=None, itemid_to_cert=None):
     """押したら『何件ぶん CSV が出るか』を数える (パネルのヒント用・2026-09-01).
 
@@ -194,14 +223,29 @@ def count_workload(rows=None, itemid_to_cert=None):
                 itemid_to_cert = build_cert_map(_product_ws().get_all_values())
             except Exception:                                  # noqa: BLE001
                 itemid_to_cert = None
+        # ★2026-09-07 ユーザー指摘「やる事が残っていないなら残数は0で黒文字やろ。主旨を理解しろ」。
+        #   ここは cert の有無しか見ておらず、**生成に回らない行を「押せば出る」と数えていた**
+        #   (実例: 仕入値 ¥132,500 が上限超えで生成不可なのに 1件と表示)。
+        #   数えるのをやめて、**本体と同じ `build_restock_input` に通した結果**を数える。
+        #   こうすれば弾く理由が増えても、ヒントが勝手に付いてくる (二重定義しない)。
         blocked = 0
+        actionable = len(pending)
         if itemid_to_cert is not None:
-            blocked = sum(1 for p in pending
-                          if not itemid_to_cert.get((p.get("itemID") or "").strip()))
+            inp, skipped = build_restock_input(pending, itemid_to_cert, {})
+            blocked = len(skipped)
+            actionable = len(inp["certs"])
+            # 生成はできるが上げられないと分かっている行も「押せば進む」から外す
+            _nd = undeliverable()
+            if _nd:
+                _cert_of = {(p.get("itemID") or "").strip(): itemid_to_cert.get(
+                    (p.get("itemID") or "").strip()) for p in pending}
+                _hit = {c for i, c in _cert_of.items() if c and i in _nd and c in inp["certs"]}
+                actionable -= len(_hit)
+                blocked += len(_hit)
         built = built_today()
         built_n = sum(1 for p in pending
                       if (p.get("itemID") or "").strip() in built)
-        return {"actionable": len(pending) - blocked - built_n, "done": done,
+        return {"actionable": max(actionable - built_n, 0), "done": done,
                 "blocked": blocked, "built_today": built_n,
                 "total": len(pending) + done}
     except Exception as e:                                     # noqa: BLE001
