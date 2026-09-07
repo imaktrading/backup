@@ -199,6 +199,25 @@ def _load_keys():
     return k
 
 
+def _oauth_headers(call="GetItem", site="0"):
+    """Trading API のヘッダを **OAuth 側の口**から借りる (2026-09-07)。
+
+    鍵の持ち方を2か所に分けると、片方だけ切れて「動いているのに何も見つけない」道具ができる。
+    実際 2026-09-06 に旧 AuthToken が hard expire し、9/6 の修正が当たった
+    `ebay_getitem_images` は復活したが、こちらは漏れて空を返し続けていた。
+    """
+    sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "iMakeBayAPI")))
+    import ebay_getitem_images as G
+    return G._headers(call, site)
+
+
+def _check_auth(xml):
+    """認証で落ちていたら例外にする (空を返して黙らない)。OAuth 側と同じ判定を使う。"""
+    sys.path.insert(0, os.path.normpath(os.path.join(HERE, "..", "..", "iMakeBayAPI")))
+    import ebay_getitem_images as G
+    G._check_auth(xml)
+
+
 def decode_xml(content):
     """eBay の応答バイト列を文字列にする。
 
@@ -247,20 +266,17 @@ def fetch_live(item_ids, refresh=False):
             cache = {}
     todo = [i for i in item_ids if i not in cache]
     if todo:
-        k = _load_keys()
         print(f"  eBay から取得: {len(todo)}件 (cache {len(item_ids) - len(todo)}件)",
               flush=True)
         for n, iid in enumerate(todo, 1):
-            hdr = {"X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
-                   "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT,
-                   "X-EBAY-API-APP-NAME": k["AppID"],
-                   "X-EBAY-API-DEV-NAME": k["DevID"],
-                   "X-EBAY-API-CERT-NAME": k["AppSecret"],
-                   "Content-Type": "text/xml"}
+            # ★2026-09-07: 旧 Auth'n'Auth の AuthToken は 2026-09-06 に hard expire した。
+            #   9/6 に ebay_getitem_images を OAuth (X-EBAY-API-IAF-TOKEN) へ寄せた際、
+            #   **この道具が漏れていた**ため、GetItem が毎回 "Auth token is hard expired"
+            #   で空を返し、C:Set のズレを1件も見つけられない状態だった。
+            #   OAuth の refresh_token は自分で更新されるので同じ口に寄せる。
+            hdr = _oauth_headers("GetItem")
             body = ('<?xml version="1.0" encoding="utf-8"?>'
                     '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-                    "<RequesterCredentials><eBayAuthToken>"
-                    f"{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
                     f"<ItemID>{iid}</ItemID>"
                     "<DetailLevel>ReturnAll</DetailLevel>"
                     "<IncludeItemSpecifics>true</IncludeItemSpecifics>"
@@ -270,7 +286,9 @@ def fetch_live(item_ids, refresh=False):
                 try:
                     r = requests.post(EP, data=body.encode("utf-8"),
                                       headers=hdr, timeout=40)
-                    got = _parse_item(decode_xml(r.content))
+                    xml = decode_xml(r.content)
+                    _check_auth(xml)      # 認証で落ちたら例外。空を返して黙らない
+                    got = _parse_item(xml)
                     break
                 except Exception as e:                        # noqa: BLE001
                     if attempt == 3:
