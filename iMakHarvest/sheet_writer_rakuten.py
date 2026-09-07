@@ -9,7 +9,7 @@
 | A | 楽天の商品URL |
 | C | 日本語タイトル |
 | E | `新品` |
-| F | 商品価格 |
+| F | **仕入原価 = 商品価格 + 送料** (数値のみ) |
 | G | 写真URL |
 | H | 商品説明 (無ければ空) |
 | I | **公式URL** (商品ページ優先 / 無ければメーカー公式サイト) |
@@ -119,7 +119,10 @@ def build_row(item: dict, column_count: int = DEFAULT_COLUMN_COUNT) -> list:
     row[COL_URL - 1] = (item.get("url") or "").strip()
     row[COL_TITLE - 1] = str(item.get("title") or "").strip()
     row[COL_CONDITION - 1] = CONDITION
-    row[COL_PRICE - 1] = price
+    # ★F列は **送料込みの総額** (2026-09-05 user 確定「価格はF列に入れる」)。
+    #   本体だけを入れると、 送料が乗る店 (トイサンタは約9割が有料) で仕入原価を誤る。
+    #   内訳は H列に文章で残してある。
+    row[COL_PRICE - 1] = total
     row[COL_IMAGES - 1] = image_str
     desc = str(item.get("description") or "")
     fee = item.get("shipping_fee")

@@ -605,3 +605,21 @@ def test_food_toy_quota_defaults_to_ten():
     assert foodtoy_over_quota("食玩", 10, 10) is True
     # 通常のカプセルトイは 食玩の枠に食われない
     assert foodtoy_over_quota("", 999, 10) is False
+
+
+def test_price_column_f_holds_the_shipping_included_total():
+    """★F列 = 仕入原価 (本体+送料) (2026-09-05 user 確定「中間スプシの価格はF列で」).
+
+    本体だけを入れると、送料が乗る店 (トイサンタは約9割が有料) で仕入原価を誤る。
+    """
+    from sheet_writer_rakuten import COL_CURRENT_PRICE, COL_PRICE, build_row
+    row = build_row({"url": "https://item.rakuten.co.jp/auc-toysanta/x1/",
+                     "title": "テスト 全5種セット", "price_jpy": "2500",
+                     "shipping_fee": 680, "total_jpy": "3180"})
+    assert row[COL_PRICE - 1] == "3180"
+    assert row[COL_CURRENT_PRICE - 1] == "3180"
+    # 送料無料なら本体がそのまま総額
+    free = build_row({"url": "https://item.rakuten.co.jp/mirakikaku/x2/",
+                      "title": "テスト 全5種セット", "price_jpy": "1980",
+                      "shipping_fee": 0, "total_jpy": "1980"})
+    assert free[COL_PRICE - 1] == "1980"
