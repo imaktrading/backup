@@ -698,13 +698,13 @@ def _phase_monitor(
                 + " → この cycle の一括消込は見送り。\n"
                 "  ★ **手作業は不要**: 候補は 1 件ずつ「消す直前にもう一度 URL を引いて "
                 "2 回とも売切だった枠」だけに絞ってある。積み残しは次 cycle 以降に "
-                "自動で消し込まれる (1 cycle {cap} 件ずつ、古い順)。\n"
+                "自動で消し込まれる (1 cycle の上限は {cap})。\n"
                 "  ★ この通知の意味は「1 cycle でこれだけ湧いたのは多い」という記録。"
                 "supplier が 1 つに偏っていたら scraper 系統崩壊を疑って DOM 検体を見ること。\n"
                 "  急いで消したい時だけ: python -m tools.supervised_backup_drain "
                 "[--reverify-snkrdunk --execute]\n"
                 "  (compare-and-clear + 復元アーカイブで安全。触るのは補URL(AC-AG)のみ)。".format(
-                    cap=CLEAR_DRAIN_CAP))
+                    cap=(f"{CLEAR_DRAIN_CAP} 件" if CLEAR_DRAIN_CAP else "無し")))
         if _mm:
             _parts.append(f"【compare-and-clear mismatch {len(_mm)}件】セル値≠確認URL "
                           "(HQ が生きた新URLに差替 or 変化) → 消さずに要対応記録。")

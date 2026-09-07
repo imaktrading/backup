@@ -126,6 +126,7 @@ LISTINGS_COL_CATEGORY = 18    # R
 # ★ 止めるのは「scraper 系統崩壊で一斉に誤判定」した時だけ。全補URL 1,335 本が一度に
 #   消えると補充では追いつかないため、明らかに異常な規模でだけ HOLD する。
 CLEAR_SURGE_THRESHOLD = 150   # 1 cycle で **新規** 補URL消込がこの件数超なら HOLD + ALERT
+CLEAR_SURGE_RATIO = 0.25      # 補URL 総数のこの割合を超えた時も HOLD (総数が増えても効く)
 CLEAR_DRAIN_CAP = None        # 1 cycle で消し込む上限 (None = 上限なし)
 
 # ── 価格急増ガード (M/K 書込側、2026-07-23) ──────────────────────────────
@@ -615,7 +616,8 @@ def paint_backup_url_cells(ws, paints: list) -> dict:
 def clear_sold_backup_cells(ws, clear_candidates: list,
                             enable_surge_guard: bool = True,
                             new_count: int = None,
-                            drain_cap: int = None) -> dict:
+                            drain_cap: int = None,
+                            total_backup_urls: int = None) -> dict:
     """売切確定 (is_sold=True) の補URL (AC-AG) セルを compare-and-clear で消込.
 
     ★ 2026-07-25 実装 (HQ 補URL能動充填 Phase2 の消し手)。役割分離: HQ=空き枠に足す /
@@ -642,6 +644,8 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
         enable_surge_guard: 消込急増ガードを有効化 (default True、緊急 override 用に False 可)。
         new_count: 今 cycle 初出の候補数 (急増ガードの判定基準)。None なら全件を新規扱い (後方互換)。
         drain_cap: 1 cycle の消込上限。None なら無制限 (手動ドレイン tool 用)。
+        total_backup_urls: シート上の補URL 総数。渡すと閾値を「総数の CLEAR_SURGE_RATIO」
+                          にも連動させる (= 補充で総数が増えても夜間バッチで誤発火しない)。
 
     Returns: {"cleared": N, "skipped_mismatch": [...], "held": bool,
               "candidate_count": N, "surge": bool, "deferred": N}
@@ -652,8 +656,15 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
                 "candidate_count": 0, "surge": False, "cleared_entries": [], "deferred": 0}
 
     # 消込急増ガード: 新規が異常件数なら消込せず HOLD (caller が ALERT)。
+    # ★ 2026-09-08: 固定 150 だと HQ の夜間補充 (23:30) で毎晩 誤発火する。
+    #   実測 (09-08 01:02): 補充で補URL が 1,335 → 約 1,670 本に増え、その中の
+    #   既に売切だった 160 本が一気に候補化 = 総数の 11%。scraper 崩壊なら「総数に対して
+    #   桁違いの割合」が一斉に立つので、割合でも見る (絶対値と割合の大きい方を閾値にする)。
     surge_basis = n if new_count is None else new_count
-    if enable_surge_guard and surge_basis > CLEAR_SURGE_THRESHOLD:
+    threshold = CLEAR_SURGE_THRESHOLD
+    if total_backup_urls:
+        threshold = max(threshold, int(total_backup_urls * CLEAR_SURGE_RATIO))
+    if enable_surge_guard and surge_basis > threshold:
         return {"cleared": 0, "skipped_mismatch": [], "held": True,
                 "candidate_count": n, "surge": True, "cleared_entries": [],
                 "deferred": 0, "new_count": surge_basis}

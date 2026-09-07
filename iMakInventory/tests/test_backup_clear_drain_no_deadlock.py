@@ -144,3 +144,26 @@ def test_empty_seen_treats_all_as_new_failsafe():
     cands = _cands(3)
     _, new_count, _ = order_backup_clear_candidates(cands, {})
     assert new_count == 3
+
+
+def test_surge_threshold_scales_with_total_backup_urls():
+    """★ 2026-09-08: 閾値は補URL総数にも連動する (夜間補充で毎晩 誤発火しないため).
+
+    実害: HQ の夜間補充 (23:30) で補URL が 1,335 → 約 1,670 本に増え、その中の
+    既に売切だった 160 本が一気に候補化。固定 150 だと毎晩ここで止まる。
+    scraper 崩壊なら総数に対して桁違いの割合が一斉に立つので、割合でも見る。
+    """
+    from sheet_updater import clear_sold_backup_cells
+    rows = {i: ["u%d" % i, "", "", "", ""] for i in range(1, 161)}
+
+    # 総数 1,670 本のうち 160 本 (約 10%) → 通常の補充 → 止めない
+    res = clear_sold_backup_cells(_ws(rows), _cands(160), new_count=160,
+                                  drain_cap=None, total_backup_urls=1670)
+    assert res["held"] is False
+    assert res["cleared"] == 160
+
+    # 総数 400 本のうち 160 本 (40%) → 系統崩壊の疑い → 止める
+    res = clear_sold_backup_cells(_ws(rows), _cands(160), new_count=160,
+                                  drain_cap=None, total_backup_urls=400)
+    assert res["held"] is True
+    assert res["cleared"] == 0

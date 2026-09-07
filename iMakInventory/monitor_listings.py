@@ -1720,8 +1720,11 @@ def process_sheet(
                 _seen = load_backup_clear_seen(sheet_label)
                 clear_candidates, _new_cnt, _seen_upd = order_backup_clear_candidates(
                     clear_candidates, _seen)
+                _total_bu = sum(1 for _r in rows
+                                for _s in (_r.get("backup_url_slots") or []) if _s)
                 backup_clear_result = clear_sold_backup_cells(
-                    ws, clear_candidates, new_count=_new_cnt, drain_cap=CLEAR_DRAIN_CAP)
+                    ws, clear_candidates, new_count=_new_cnt, drain_cap=CLEAR_DRAIN_CAP,
+                    total_backup_urls=_total_bu)
                 try:
                     save_backup_clear_seen(sheet_label, _seen_upd)
                 except Exception as _se:
