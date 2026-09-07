@@ -48,21 +48,19 @@ def test_existing_collectors_are_unchanged():
 
 
 def test_psa10_rows_are_copy_ready():
+    """★2026-09-08 変更: 仕入値は **F列だけ**。N には書かない。
+
+    user 確定「仕入値は F のみ。それ以外にあると HIGH が壊れる」。
+    HIGH の N は ARRAYFORMULA が流れている列で、行ごとコピーで値が入ると
+    spill が塞がり列全体が壊れる。
+    """
     cand = {"url": "https://jp.mercari.com/item/m2", "title": "PSA10 ルフィ",
             "price_jpy": 9800, "vision": {"cert": "123456789"}, "cert_readable": True}
     item = build_sheet_items([cand], [])[0]
     r = _build_row(item)
     assert r[COL_CERT - 1] == "123456789"
-    assert r[COL_PURCHASE_PRICE - 1] == "9800"
+    assert r[COL_PRICE - 1] == "9800"          # F = 仕入値
+    assert r[COL_PURCHASE_PRICE - 1] == ""     # N は空のまま
     assert r[COL_CATEGORY - 1] == "TCG"
     assert r[CTR_COL - 1] == ""
-
-
-def test_unreadable_rows_also_get_high_columns():
-    """I列空欄で入れる行も、 目視で番号を入れたらそのままコピーできる形にする."""
-    cand = {"url": "https://jp.mercari.com/item/m3", "title": "PSA10 ナミ",
-            "price_jpy": 5000, "vision": {"cert": ""}, "cert_readable": False}
-    r = _build_row(build_sheet_items([], [cand])[0])
-    assert r[COL_CERT - 1] == ""
-    assert r[COL_PURCHASE_PRICE - 1] == "5000"
     assert r[COL_CATEGORY - 1] == "TCG"

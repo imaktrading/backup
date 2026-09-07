@@ -422,9 +422,11 @@ def build_sheet_items(kept: list[dict], unreadable: list[dict]) -> list[dict]:
             "price_jpy": c.get("price_jpy"), "image_urls": c.get("image_urls"),
             "description": c.get("description"),
             "cert": cert,  # I 列 (本番へ移した時の出品くんの入口)
-            # 本番 (HIGH) で全 PSA 行が埋まっている列。 行ごとコピーで済むよう先に埋める
-            # (2026-08-18 実測: N 1310/1310、 R 1310/1310)。 P列は HIGH 側の数式なので触らない。
-            "fill_high_columns": True,   # N: 仕入れ価格 = 商品価格
+            # ★N列 (仕入れ価格) には書かない (2026-09-08 user 確定
+            #   「仕入値は F のみ。それ以外にあると HIGH が壊れる」)。
+            #   HIGH の N は ARRAYFORMULA が上から流れている列で、 行ごとコピーで
+            #   値が入ると spill が塞がって列全体が壊れる。 仕入値は F列だけに置く。
+            "fill_high_columns": False,
             "category": "TCG",           # R: カテゴリ
         }
 

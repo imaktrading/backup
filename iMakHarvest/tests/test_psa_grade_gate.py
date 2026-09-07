@@ -110,3 +110,15 @@ def test_price_cap_is_the_default():
     # main() と同じ既定値を持つことだけ確認する (実行はしない)
     src = open(R.__file__, encoding="utf-8").read()
     assert '"--price-max", type=int, default=70000' in src
+
+
+def test_n_column_is_never_filled():
+    """★仕入値は F列だけ。N (HIGH の ARRAYFORMULA 列) には書かない (2026-09-08 user 確定)."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1]
+           / "run_harvest_mercari_psa10.py").read_text(encoding="utf-8")
+    assert '"fill_high_columns": False' in src
+    from sheet_writer_amazon import _build_row
+    row = _build_row({"url": "https://jp.mercari.com/item/m1", "title": "t",
+                      "price_jpy": "5000", "fill_high_columns": False})
+    assert row[13] == ""      # N
