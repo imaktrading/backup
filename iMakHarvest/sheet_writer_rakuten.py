@@ -36,7 +36,9 @@ from sheet_writer_amazon import (
 
 CATEGORY = "カプセルトイ"     # R列 (HQ 確認: 表記ゆれ禁止。 ガシャポン/ガチャガチャ は別扱い)
 CONDITION = "新品"
-COL_CURRENT_PRICE = 13        # M: 現在価格(円) - 監視くんが使う列。 書込可
+# ★M列には **書かない** (2026-09-08 user 確定「仕入値は F のみ。他にあると HIGH が壊れる」)。
+#   仕入原価は F列 (本体+送料) の1か所だけに置く。
+COL_CURRENT_PRICE = 13        # M: 現在価格(円) - 監視くんが後で入れる列。 こちらは触らない
 # ★公式URL は **I列** (2026-08-21 user 確定)。 HQ から「I は英語タイトル列なので
 #   V に移してほしい」と依頼が来て一度移したが、 **I列は user が指定した場所**なので戻した。
 #   入れる中身は 公式の **商品ページ** を優先し、 無ければメーカー公式サイト。
@@ -136,7 +138,7 @@ def build_row(item: dict, column_count: int = DEFAULT_COLUMN_COUNT) -> list:
     imgs = item.get("official_images") or []
     row[COL_OFFICIAL_IMAGES - 1] = (imgs if isinstance(imgs, str)
                                     else "|".join(str(u) for u in imgs if u))  # W
-    row[COL_CURRENT_PRICE - 1] = total          # M: 送料込みの総額 (数値のみ)
+    # M列は空のまま (上のコメント参照)
     row[COL_CATEGORY - 1] = CATEGORY            # R
     # S: 食玩の印。 判定は収集側 (`rakuten_item.classify_food_toy`) で済ませてある。
     # ここでタイトルから当て直さない (「チョコ」等はキャラ名にも出る = 必ず誤判定する)

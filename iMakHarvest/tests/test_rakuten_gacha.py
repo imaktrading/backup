@@ -221,7 +221,7 @@ def test_build_row_columns():
     assert row[COL_TITLE - 1].startswith("【コンプリート】")
     assert row[COL_CONDITION - 1] == "新品"
     assert row[COL_PRICE - 1] == "2000"
-    assert row[COL_CURRENT_PRICE - 1] == "2000"   # M: 監視くんが使う列
+    assert row[COL_CURRENT_PRICE - 1] == ""       # M には書かない (仕入値は F のみ)
     assert row[COL_CATEGORY - 1] == CATEGORY == "カプセルトイ"
     assert row[COL_IMAGES - 1] == "https://image.rakuten.co.jp/a.jpg"
 
@@ -374,12 +374,15 @@ def test_extract_shipping_fee(text, fee):
     assert extract_shipping_fee(text) == fee
 
 
-def test_build_row_puts_total_in_m_and_breakdown_in_h():
-    from sheet_writer_rakuten import COL_CURRENT_PRICE, COL_DESCRIPTION, build_row
+def test_build_row_puts_total_in_f_and_breakdown_in_h():
+    """★仕入値は **F列だけ**。M には書かない (2026-09-08 user 確定: HIGH が壊れるため)."""
+    from sheet_writer_rakuten import (COL_CURRENT_PRICE, COL_DESCRIPTION,
+                                      COL_PRICE, build_row)
     row = build_row({"url": "https://item.rakuten.co.jp/auc-toysanta/x1/",
                      "title": "テスト 全5種セット", "price_jpy": "2820",
                      "shipping_fee": 680, "total_jpy": "3500", "description": "説明"})
-    assert row[COL_CURRENT_PRICE - 1] == "3500"          # M = 送料込み総額
+    assert row[COL_PRICE - 1] == "3500"                  # F = 送料込み総額
+    assert row[COL_CURRENT_PRICE - 1] == ""              # M は空
     assert "本体2820円 + 送料680円 = 3500円" in row[COL_DESCRIPTION - 1]
 
 
@@ -617,7 +620,8 @@ def test_price_column_f_holds_the_shipping_included_total():
                      "title": "テスト 全5種セット", "price_jpy": "2500",
                      "shipping_fee": 680, "total_jpy": "3180"})
     assert row[COL_PRICE - 1] == "3180"
-    assert row[COL_CURRENT_PRICE - 1] == "3180"
+    # ★M列には書かない (2026-09-08 user 確定「仕入値は F のみ」)
+    assert row[COL_CURRENT_PRICE - 1] == ""
     # 送料無料なら本体がそのまま総額
     free = build_row({"url": "https://item.rakuten.co.jp/mirakikaku/x2/",
                       "title": "テスト 全5種セット", "price_jpy": "1980",
