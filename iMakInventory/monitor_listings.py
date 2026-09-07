@@ -1745,13 +1745,13 @@ def process_sheet(
                 if bc.get("surge") or bc.get("held"):
                     log(f"  [★補URL消込 急増ガード発火] 新規 {bc.get('new_count', '?')} 件 > 閾値 "
                         f"(候補 {bc['candidate_count']} 件) → この cycle の一括消込は見送り "
-                        f"(次 cycle 以降に {CLEAR_DRAIN_CAP} 件/cycle で自動ドレイン、手作業不要)。"
+                        f"(次 cycle 以降に自動ドレイン、手作業不要)。"
                         f"1 cycle でこれだけ湧いたのは多い = supplier が 1 つに偏っていたら "
                         f"scraper 系統崩壊を疑って DOM 検体を見ること。")
                 elif bc.get("deferred"):
                     log(f"  [OK] 補URL消込: cleared={bc['cleared']} / candidate={bc['candidate_count']} "
                         f"(新規 {bc.get('new_count', '?')}) / 次 cycle 繰越={bc['deferred']} "
-                        f"(1 cycle 上限 {CLEAR_DRAIN_CAP} 件、古い順にドレイン中) "
+                        f"(1 cycle 上限 {CLEAR_DRAIN_CAP or '無制限'}、古い順にドレイン中) "
                         f"/ skipped(HQ差替等 mismatch)={len(bc['skipped_mismatch'])}")
                 else:
                     log(f"  [OK] 補URL消込: cleared={bc['cleared']} / candidate={bc['candidate_count']} "

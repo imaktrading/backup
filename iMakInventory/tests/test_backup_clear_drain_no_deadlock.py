@@ -71,20 +71,34 @@ def test_new_count_omitted_falls_back_to_total():
 # ドレイン上限 (backlog が毎 cycle 必ず減る)
 # ============================================================================
 def test_drain_cap_clears_partially_and_defers_rest():
-    from sheet_updater import clear_sold_backup_cells, CLEAR_DRAIN_CAP
-    n = CLEAR_DRAIN_CAP + 7
+    """cap を渡した時は その件数だけ消して残りを繰越す (機構自体の回帰テスト)."""
+    from sheet_updater import clear_sold_backup_cells
+    cap = 20
+    n = cap + 7
     rows = {i: ["u%d" % i, "", "", "", ""] for i in range(1, n + 1)}
-    res = clear_sold_backup_cells(_ws(rows), _cands(n), new_count=1,
-                                  drain_cap=CLEAR_DRAIN_CAP)
-    assert res["cleared"] == CLEAR_DRAIN_CAP
+    res = clear_sold_backup_cells(_ws(rows), _cands(n), new_count=1, drain_cap=cap)
+    assert res["cleared"] == cap
     assert res["deferred"] == 7
     assert res["held"] is False        # 繰越は HOLD ではない = ALERT にしない
 
 
+def test_production_setting_has_no_drain_cap():
+    """★ 2026-09-07 ユーザー判断: 死んだ補URLは上限なく掃除する.
+
+    上限があると入ってくる量に追いつかず、予備枠 (5本) が死骸で埋まって
+    **新しい補充が入らない** (実測: 65 行が死骸持ち、うち 15 行が 5/5 埋まり)。
+    誤って消しても復元アーカイブがあり、補充も毎晩回るので取り返せる。
+    止めるのは scraper 系統崩壊 (= 一斉誤判定) の時だけ。
+    """
+    from sheet_updater import CLEAR_DRAIN_CAP, CLEAR_SURGE_THRESHOLD
+    assert CLEAR_DRAIN_CAP is None
+    assert CLEAR_SURGE_THRESHOLD >= 100     # 通常の山 (実測 最大 66) では止めない
+
+
 def test_backlog_drains_to_zero_over_cycles():
-    """繰越を含む backlog が cycle を重ねて必ず 0 に収束する (恒久 HOLD しない)."""
+    """backlog は必ず 0 に収束する (恒久 HOLD しない)。本番設定では 1 cycle で終わる."""
     from sheet_updater import clear_sold_backup_cells, CLEAR_DRAIN_CAP
-    backlog = _cands(75)               # 08-12 の実測 backlog と同数
+    backlog = _cands(101)              # 09-07 の実測 backlog と同数
     cycles = 0
     while backlog:
         rows = {c["row_index"]: [c["expected_url"], "", "", "", ""] for c in backlog}
@@ -94,8 +108,8 @@ def test_backlog_drains_to_zero_over_cycles():
         assert res["cleared"] > 0      # 1 件も進まない cycle があれば deadlock
         backlog = backlog[res["cleared"]:]
         cycles += 1
-        assert cycles <= 10            # 75 件は 8h×4 cycle 程度で終わるはず
-    assert cycles == 4
+        assert cycles <= 10
+    assert cycles == 1                 # 上限なし = その cycle で消し切る
 
 
 # ============================================================================
