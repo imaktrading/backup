@@ -179,6 +179,17 @@ python -u noconvert_pricedown.py >> "%LOG%" 2>&1
 echo [title-rework] %date% %time% >> "%LOG%"
 python -u noclick_targets.py >> "%LOG%" 2>&1
 
+REM --- 6f) find listings whose supplier is a DIFFERENT card.
+REM          2026-09-08: found only because a buyer asked. A spare-supply URL pointed at
+REM          a different, cheaper card; its price became "cheapest supply now" in the
+REM          sheet and the cost-plus price came out at USD 155.98 instead of 405.98.
+REM          Nothing else would ever have noticed. Stage 1 only (free, a few seconds):
+REM          list the rows whose cost is far below the cheapest number-verified supply.
+REM          Stage 2 (opening each supplier page) stays a human-triggered step, because
+REM          a low price is often genuine - 2026-09-08: 14 flagged, 0 actually wrong.
+echo [supply-mismatch] %date% %time% >> "%LOG%"
+python -u supply_card_mismatch.py >> "%LOG%" 2>&1
+
 REM --- 7) write the "no backup URL at all" listings into one tab so they can be
 REM        seen at a glance (they are scattered rows in the master sheet).
 REM        Writes only that tab; never touches the master sheet.
