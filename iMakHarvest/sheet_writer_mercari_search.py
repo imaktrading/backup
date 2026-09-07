@@ -146,6 +146,14 @@ def append_mercari_search_items(
     next_row = last_row + 1
     end_col_letter = _col_to_letter(column_count)
     end_row = next_row + len(new_rows) - 1
+    # ★行が足りなければ先に足す (2026-09-07 実害: `Range exceeds grid limits` で
+    #   走行が落ち、 Vision まで通した328件の書込が丸ごと失敗した)。
+    try:
+        short = end_row - int(getattr(ws, "row_count", 0) or 0)
+        if short > 0:
+            ws.add_rows(short + 200)
+    except Exception:  # noqa: BLE001 - 足せなくても書込は試す
+        pass
     ws.update(
         range_name=f"A{next_row}:{end_col_letter}{end_row}",
         values=new_rows,
