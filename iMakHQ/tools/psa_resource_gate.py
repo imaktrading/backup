@@ -1254,8 +1254,13 @@ def count_workload(today=None):
         try:
             from sheet_io import read_tab
             t = today or _dt.date.today().isoformat()
+            # ★2026-09-07 ユーザー指摘「①、押しても件数が変わらない。段取りを組んでいるので
+            #   正確に出せ」。ここだけ **日数で復活する数え方** (today 付き) をしていたため、
+            #   ボタン本体 (:880 は today を渡さない = レビュー済は再表示しない) と食い違い、
+            #   「1件あります」と出しているのに押すと「照合対象なし」になっていた。
+            #   数える側は **本体と同じ呼び方**にする (t は使わない)。
             processed = (_restock_confirmed_iids(read_tab("RESTOCK確定"))
-                         | _review_skip_iids(read_tab(REVIEW_SKIP_TAB), t))
+                         | _review_skip_iids(read_tab(REVIEW_SKIP_TAB)))
             excl = {(rr[0] or "").strip()
                     for rr in (read_tab("RESTOCK対象外")[1:] or []) if rr and (rr[0] or "").strip()}
             # ★2026-09-05: 目視で変種を確定した分は **次回から再目視されない資産**なので、
