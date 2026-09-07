@@ -25,13 +25,13 @@ def _sus(**kw):
 
 def test_clean_result_still_sends_a_mail():
     s, b = S.build_mail({"checked": 339, "suspects": [], "verified": False})
-    assert "異常なし" in s and "照合 339件" in s
+    assert "異常なし" in s and "339件" in s
     assert "対応は不要" in b
 
 
 def test_suspects_are_listed_with_next_step():
     s, b = S.build_mail({"checked": 339, "suspects": [_sus()], "verified": False})
-    assert "要確認 1件" in s
+    assert "安く出しすぎの疑い 1件" in s
     assert "111" in b and "10,900" in b
     assert "--verify" in b            # 次にやることが本文に入っている
     assert "supply-card-mismatch" in b  # 直し方の在り処
@@ -40,21 +40,21 @@ def test_suspects_are_listed_with_next_step():
 def test_mail_says_the_flag_is_not_a_verdict():
     """①の件数を『不具合N件』と読ませない (初回は14件中0件だった)。"""
     _, b = S.build_mail({"checked": 339, "suspects": [_sus()], "verified": False})
-    assert "判定ではありません" in b
+    assert "『不具合』とは言えません" in b
 
 
 def test_verified_result_reports_real_mismatches():
     sus = _sus(mismatch=1, checked=[{"url": "https://x/1", "verdict": "★不一致",
                                      "no": "OP07-033", "title": "別カード"}])
     s, b = S.build_mail({"checked": 339, "suspects": [sus], "verified": True})
-    assert "別カードの混入 1件" in s
+    assert "安く出しすぎ 1件" in s
     assert "OP07-033" in b
 
 
 def test_verified_and_clean_says_so():
     s, _ = S.build_mail({"checked": 339, "suspects": [_sus(mismatch=0, checked=[])],
                          "verified": True})
-    assert "混入なし" in s
+    assert "なし" in s
 
 
 def test_long_list_is_truncated():

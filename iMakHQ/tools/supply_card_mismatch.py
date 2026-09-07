@@ -45,6 +45,7 @@ import psa_hoju_fill as hf                                    # noqa: E402
 
 # 「安すぎる」の線。0.6 = 番号一致の最安の6割未満。2026-09-08 の実測でこの線で 316→14件。
 CHEAP_RATIO = 0.6
+CAT_COL, PSA_CATEGORY = 17, "TCG"      # R列 = 商材。PSA の行はここが TCG
 OUT_PATH = os.path.join(HERE, "..", "review_logs", "supply_card_mismatch.json")
 
 
@@ -78,17 +79,33 @@ def known_prices(entry):
 
 
 def find_suspects(vals, cache, ratio=CHEAP_RATIO):
-    """① 値段の形で絞る (純関数)。戻り: (suspects, 照合できた件数)。"""
-    suspects, checked = [], 0
+    """① 値段の形で絞る (純関数)。戻り: (suspects, 内訳dict)。
+
+    ★内訳を返すのは、**見ていない分を隠さない**ため。比べる相手 (同じカードの相場) が
+      無い出品は素通りになる。「503件中339件しか見ていない」と言えないと、
+      残り164件に同じ事故が隠れていても「全部見た」と誤解する (2026-09-08 ユーザー指摘)。
+    """
+    suspects = []
+    stat = {"listed": 0, "compared": 0, "no_cost": 0, "no_market": 0}
     for r in vals[1:]:
         iid, cert = _cell(r, hf.B).strip(), _cell(r, hf.CERT).strip()
         if not iid or not cert or _cell(r, 3).strip():        # 出品中のみ / 売切は除く
             continue
+        # ★PSA (R列='TCG') だけ (2026-09-08 ユーザー指示)。この検査は「同じカードの相場」を
+        #   カード番号の検索で作るので、カード以外は比べる土俵に乗らない。実際バッグの行が
+        #   3件 紛れていた (cert 欄に商品名が入っており「cert 有り」を満たしてしまう)。
+        if _cell(r, CAT_COL).strip() != PSA_CATEGORY:
+            continue
+        stat["listed"] += 1
         cost = _num(_cell(r, 13)) or _num(_cell(r, 12)) or _num(_cell(r, 5))
         prices = known_prices(cache.get(iid))
-        if not cost or not prices:
+        if not cost:
+            stat["no_cost"] += 1
             continue
-        checked += 1
+        if not prices:
+            stat["no_market"] += 1
+            continue
+        stat["compared"] += 1
         cheapest = min(prices)
         if cost < cheapest * ratio:
             suspects.append({
@@ -100,7 +117,7 @@ def find_suspects(vals, cache, ratio=CHEAP_RATIO):
                                      + [_cell(r, hf.AUX0 + k) for k in range(hf.AUXN)]) if u],
             })
     suspects.sort(key=lambda s: s["ratio"])
-    return suspects, checked
+    return suspects, stat
 
 
 def number_matches(key, card_no):
@@ -180,40 +197,70 @@ def build_mail(payload):
     bad = [s for s in sus if s.get("mismatch")]
     checked = payload.get("checked", 0)
     if verified:
-        head = f"別カードの混入 {len(bad)}件" if bad else "別カードの混入なし (確認済)"
+        head = f"安く出しすぎ {len(bad)}件" if bad else "安く出しすぎ なし (確認済)"
     else:
-        head = f"要確認 {len(sus)}件" if sus else "異常なし"
-    subject = f"[仕入元チェック] {head} / 照合 {checked}件"
+        head = f"安く出しすぎの疑い {len(sus)}件" if sus else "異常なし"
+    subject = f"[仕入元チェック] {head} / 出品 {checked}件を確認"
 
-    lines = [f"出品中 {checked}件を照合しました。", ""]
+    # ★「見た件数」と「見ていない件数」を必ず一緒に出す。比べる相手 (同じカードの相場) が
+    #   無い出品は素通りになるので、これを隠すと「全部見た」と誤解される (2026-09-08 指摘)。
+    st = payload.get("stat") or {}
+    scope = f"PSAの出品 {st.get('listed', checked)}件のうち {checked}件を確認"
+    if st.get("no_market"):
+        scope += f" (残り {st['no_market']}件は比べる相場がまだ無く、見ていません)"
+
+    lines = []
     if not sus:
-        lines += ["■ 結果: 異常なし",
-                  "  仕入値が不自然に安い出品はありませんでした。対応は不要です。"]
-    else:
-        lines += [f"■ ① 値段が不自然に安い: {len(sus)}件",
-                  "  (仕入値が『番号一致で見つかっている供給の最安』の6割未満)", ""]
-        for s in sus[:15]:
-            lines.append(f"  {s['itemID']}  仕入 {s['cost']:,.0f}円 / 最安 {s['cheapest']:,.0f}円"
-                         f" ({s['ratio']*100:.0f}%)  {s['title'][:28]}")
-        if len(sus) > 15:
-            lines.append(f"  … 他 {len(sus)-15}件")
-        lines += ["",
-                  "  ※ これは『人が見る順番』であって、判定ではありません。",
-                  "     安いのが本物のことが多いです (特価・ケース傷あり等)。",
-                  "     2026-09-08 の初回は 14件中 0件が本当の混入でした。"]
+        lines += [scope + "。", "おかしな値段の出品はありませんでした。対応は不要です。"]
+        return subject, "\n".join(lines)
+
+    lines += [
+        scope + "。",
+        "",
+        "■ 何を見つけたか",
+        f"  同じカードの相場よりずっと安い値段で仕入れたことになっている出品が {len(sus)}件。",
+        "  出品価格は仕入値から自動で決まるので、**その分だけ安く売りに出ている**",
+        "  可能性があります。",
+        "",
+        "  よくある原因: 仕入元のURLに **別のカード** が入っている。",
+        "  実例 (2026-09-08): ブラッキーの出品に別カードの安い仕入元が入り、",
+        "  $155.98 で出ていた (正しくは $405.98)。バイヤーに聞かれて初めて分かった。",
+        "",
+        "■ 該当した出品",
+        "  (うちの仕入値 / 同じカードの相場・最安)",
+        "",
+    ]
+    for s in sus[:15]:
+        lines.append(f"  {s['itemID']}  {s['cost']:,.0f}円 / 相場 {s['cheapest']:,.0f}円"
+                     f"  → 相場の{s['ratio']*100:.0f}%  {s['title'][:26]}")
+    if len(sus) > 15:
+        lines.append(f"  … 他 {len(sus)-15}件")
+    lines += [
+        "",
+        "■ ただし、これだけでは『不具合』とは言えません",
+        "  安いのが本物のこともよくあります (特価・ケース傷あり など)。",
+        "  実際 2026-09-08 の初回は、この14件を全部調べて **本当の間違いは0件** でした。",
+        "  この一覧は『どれから見るか』の順番です。",
+    ]
     if verified:
-        lines += ["", f"■ ② 仕入元の商品名まで確認済: 別カード {len(bad)}件"]
+        lines += ["", f"■ 仕入元の中身まで確認しました → 本当に別カードだったもの: {len(bad)}件"]
         for s in bad:
-            lines.append(f"  ★ {s['itemID']} KEY={s['key']}")
+            lines.append(f"  ★ {s['itemID']} (出品しているカード: {s['key']})")
             for c in s.get("checked") or []:
                 if c.get("verdict") == "★不一致":
-                    lines.append(f"      {c['url']}  番号={c.get('no')}  {c.get('title','')[:40]}")
-    elif sus:
-        lines += ["", "■ 次にやること",
-                  "  1) 仕入元の商品名まで確かめる (ブラウザ・数分):",
-                  "     python C:/dev/iMak/iMakHQ/tools/supply_card_mismatch.py --verify --limit 10",
-                  "  2) 別カードだった時の直し方は skill `supply-card-mismatch` に手順があります",
-                  "     (M列だけ直す / N列は関数なので触らない / 価格は pricing_engine で出す)"]
+                    lines.append(f"      仕入元は別のカード ({c.get('no')}): "
+                                 f"{c.get('title','')[:40]}")
+                    lines.append(f"      {c['url']}")
+    else:
+        lines += [
+            "",
+            "■ 次にやること",
+            "  仕入元のページを開いて、本当に同じカードか確かめます (数分):",
+            "",
+            "    python C:/dev/iMak/iMakHQ/tools/supply_card_mismatch.py --verify --limit 10",
+            "",
+            "  別カードだった時の直し方は、Claude に『supply-card-mismatch』と言えば手順が出ます。",
+        ]
     return subject, "\n".join(lines)
 
 
@@ -255,9 +302,10 @@ def main():
     if os.path.exists(hf.CACHE_PATH):
         with open(hf.CACHE_PATH, encoding="utf-8") as f:
             cache = json.load(f)
-    suspects, checked = find_suspects(vals, cache, a.ratio)
-    print(f"仕入元が別カードでないかの検査: 照合できた出品 {checked}件 / "
-          f"① 値段が安すぎる {len(suspects)}件 (最安の{a.ratio*100:.0f}%未満)")
+    suspects, stat = find_suspects(vals, cache, a.ratio)
+    print(f"仕入元が別カードでないかの検査: 出品中 {stat['listed']}件 / "
+          f"比べられた {stat['compared']}件 (相場の材料が無く見ていない {stat['no_market']}件) / "
+          f"① 値段が安すぎる {len(suspects)}件 (相場の{a.ratio*100:.0f}%未満)")
     if not suspects:
         print("  ① で0件。②は不要。")
     for s in suspects[:20]:
@@ -270,8 +318,8 @@ def main():
         print(f"\n★別カードの疑い {len(bad)}件 / 見た {sum(1 for s in suspects if 'checked' in s)}件")
         if not bad:
             print("  ②まで通して0件 = 安いのは本物。①の件数だけで騒がないこと。")
-    payload = {"checked": checked, "ratio": a.ratio, "verified": bool(a.verify),
-               "suspects": suspects}
+    payload = {"checked": stat["compared"], "stat": stat, "ratio": a.ratio,
+               "verified": bool(a.verify), "suspects": suspects}
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=1)
