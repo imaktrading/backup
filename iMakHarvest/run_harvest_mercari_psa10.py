@@ -292,6 +292,11 @@ def _process_one(url, driver, args, claimed, rej, vision_errors, failed=None):
         rej[key] += 1
         return None
 
+    # ★複数枚のまとめ売りは採らない (2026-09-05 user 確定)。 Vision に投げる前に落とす
+    if psa_grade_gate.is_bundle(detail.get("title") or ""):
+        rej["bundle"] = rej.get("bundle", 0) + 1
+        return None
+
     images = [u for u in (detail.get("image_urls") or []) if u.startswith("http")]
     if not images:
         rej["no_image"] += 1

@@ -82,3 +82,21 @@ def test_ccg_is_not_a_grader():
 def test_letters_around_do_not_false_match():
     """STARS の ARS 等に当たらない."""
     assert looks_like_psa10(title="PSA10 STARS ルフィ OP01-024")
+
+
+# --------------------------------------------------------------------------
+# 複数枚のまとめ売りは採らない (2026-09-05 user 確定)
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("title,bundle", [
+    ("ポケモンカード PSA10 リザードンex SR", False),
+    ("PSA10 ミュウツー SR 美品 1枚", False),
+    ("PSA10 ポケカ 3枚セット", True),
+    ("PSA10 まとめ売り ポケモンカード", True),
+    ("PSA10 ピカチュウ 2枚", True),
+    ("ポケカ PSA10 コンプ", True),
+    ("PSA10 リーリエ PSA10 マリィ", True),
+])
+def test_is_bundle(title, bundle):
+    """PSA10 は現物1枚に鑑定番号1つ。まとめ売りは出品の材料にならない."""
+    from scrapers.psa_grade_gate import is_bundle
+    assert is_bundle(title) is bundle

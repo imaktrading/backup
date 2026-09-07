@@ -201,8 +201,12 @@ def collect_search_listing_urls(
     #   描画は続けたまま隠し直す (`--disable-features=CalculateNativeWinOcclusion` 付きなので
     #   隠しても件数は落ちない)。 IMAK_CHROME_ONSCREEN=1 の時は出したままにする。
     try:
-        from scrapers._chrome_util import hide_browser_window  # noqa: PLC0415
+        from scrapers._chrome_util import (  # noqa: PLC0415
+            hide_browser_window, hide_chrome_windows_for_profile,
+        )
         hide_browser_window(driver)
+        # タイトル方式は ページ側の書き換えで外すことがあるので、 profile 方式でも隠す
+        hide_chrome_windows_for_profile(MS.CHROME_PROFILE_DIR_ANON)
     except Exception:  # noqa: BLE001 - 隠せなくても収集は続ける
         pass
     time.sleep(max(initial_wait_sec, MS.DEFAULT_INITIAL_PROFILE_WAIT_SEC))

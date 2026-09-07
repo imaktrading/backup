@@ -71,6 +71,52 @@ def onscreen_requested() -> bool:
     return os.environ.get("IMAK_CHROME_ONSCREEN", "").strip() in ("1", "true", "yes")
 
 
+def hide_chrome_windows_for_profile(profile_dir: str) -> int:
+    """`--user-data-dir` が profile_dir の chrome の **表示中ウィンドウを隠す**.
+
+    2026-09-05 追加。 `hide_browser_window` は「自分でタイトルを付けて探す」方式なので、
+    **ページ側がタイトルを書き換えると隠し損ねる** (実測: 収集中に画面へ出ていた)。
+    こちらは プロセス (起動時の profile) で特定するので取りこぼさない。
+    ユーザーの通常ブラウザは `--user-data-dir` が違うので触らない。
+    """
+    if os.name != "nt" or not profile_dir or onscreen_requested():
+        return 0
+    import ctypes  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    key = os.path.basename(os.path.normpath(profile_dir))
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+          f"Where-Object {{ $_.CommandLine -like '*{key}*' }} | "
+          "ForEach-Object { $_.ProcessId }")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                             capture_output=True, text=True, timeout=60)
+        pids = {int(x) for x in (out.stdout or "").split() if x.strip().isdigit()}
+    except Exception:  # noqa: BLE001
+        return 0
+    if not pids:
+        return 0
+
+    user32 = ctypes.windll.user32
+    hidden = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _cb(hwnd, _lparam):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value in pids and user32.IsWindowVisible(hwnd):
+            user32.ShowWindow(hwnd, _SW_HIDE)
+            hidden.append(hwnd)
+        return True
+
+    try:
+        user32.EnumWindows(_cb, 0)
+    except Exception:  # noqa: BLE001
+        return 0
+    return len(hidden)
+
+
 def hide_browser_window(driver) -> bool:
     """driver のウィンドウを隠す (Windows のみ)。 隠せたら True.
 
