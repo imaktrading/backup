@@ -401,6 +401,38 @@ def filter_candidates_known_urls(cands, known_urls):
     return keep, drop
 
 
+# ★2026-09-07: 目視で「違う」と外された候補を数えたら、**番号は合っているのに刷りが違う**
+#   ものが大半だった (実測: 記録 407件中 38件が「候補だけパラレル」)。番号の門は通るので
+#   人が毎回 弾いている = 目視の時間がそこに消えている。
+#   通常の札にパラレルの候補が出たら、その場で外す。
+#   ★一方向にしか効かせない: こちらがパラレル (★ / -P / SP 等の表記ゆれが多い) の時は
+#   **外さない**。表記を取りこぼして本物の供給を捨てる方が損なので、迷う側は人に見せる。
+_CAND_PARALLEL_WORDS = ("パラレル", "PARALLEL", "parallel", "コミパラ", "リーパラ", "パラ)")
+_OURS_PARALLEL_WORDS = _CAND_PARALLEL_WORDS + ("★", "☆", "-P]", "-P］", "SEC-P", "SP-", "(SP", "／P")
+
+
+def candidate_variant_conflicts(our_title, cand_title):
+    """候補が **こちらと違う刷り (パラレル)** を名乗っているか (純関数, test可)。
+
+    True = 外してよい。判定材料が無い/こちらもパラレルなら False (= 人に見せる)。
+    """
+    c = (cand_title or "")
+    if not any(k in c for k in _CAND_PARALLEL_WORDS):
+        return False                      # 候補がパラレルと言っていない = 判定しない
+    o = (our_title or "")
+    if any(k in o for k in _OURS_PARALLEL_WORDS):
+        return False                      # こちらもパラレル = 同じ刷りかもしれない
+    return True
+
+
+def filter_candidates_by_variant(cands, our_title):
+    """候補リストから **違う刷り(パラレル)** を除く。戻り: (残す, 落とした)。純関数。"""
+    keep, drop = [], []
+    for c in (cands or []):
+        (drop if candidate_variant_conflicts(our_title, c.get("name")) else keep).append(c)
+    return keep, drop
+
+
 def filter_candidates_by_number(cands, card_no):
     """候補リストから明らかな別番号を除く。戻り: (残す, 落とした)。純関数(test可)。"""
     keep, drop = [], []
@@ -1326,7 +1358,8 @@ def build_confirm_context(vals, cache, today, verbose=False):
 
 # 足切りで止まった理由。**ラベル・status_now・confirm のログが同じ語彙を使う**。
 STOP_REASONS = ("skip_ledger", "no_cache", "no_cand", "no_cardno",
-                "all_known", "all_number", "all_ng", "all_used", "no_ref", "all_art")
+                "all_known", "all_number", "all_variant", "all_ng", "all_used",
+                "no_ref", "all_art")
 
 # ★2026-08-15 ユーザー指示「そういう分類にしてくれないと、ん?ってなる」。
 #   内部の理由名 (all_art / all_ng / no_cand …) をそのまま出していたので読めなかった。
@@ -1334,12 +1367,14 @@ STOP_REASONS = ("skip_ledger", "no_cache", "no_cand", "no_cardno",
 #   同じ1つの事情だった (実証: ステューシー OP07-085 の候補3件は全部 OP11 の
 #   SPECIAL ALTERNATE ART = 別カード。人の「違う」判断は正しかった)。
 #   なので **「待ち」か「手が打てる」か** の2つに畳んで出す。
-WAIT_REASONS = ("all_art", "all_ng", "no_cand", "all_known", "all_used")   # 市場にその版が無い
+WAIT_REASONS = ("all_art", "all_ng", "no_cand", "all_known", "all_used",
+                "all_variant")                                             # 市場にその版が無い
 ACT_REASONS = ("no_cache", "all_number", "no_cardno", "skip_ledger")       # こちらで動かせる
 _REASON_JA = {"all_art": "絵柄が別カード", "all_ng": "過去に別カードと確認済",
               "no_cand": "候補が出ない", "all_known": "候補が主URLと同じ",
               "all_used": "既に使用済", "no_cache": "未検索(今夜の巡回で解決)",
-              "all_number": "番号違い", "no_cardno": "カード番号が取れない",
+              "all_number": "番号違い", "all_variant": "刷り違い(パラレル)",
+              "no_cardno": "カード番号が取れない",
               "skip_ledger": "見送り中(翌日復活)", "no_ref": "現物画像が無い"}
 
 
@@ -1402,6 +1437,11 @@ def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
     if not cands:
         stats["all_number"] += 1
         return [], "", "all_number", []
+    cands, dropped_var = filter_candidates_by_variant(cands, t.get("title"))
+    stats["cand_variant"] += len(dropped_var)
+    if not cands:
+        stats["all_variant"] += 1
+        return [], "", "all_variant", []
     # ★過去に人が「違う」と判定した候補は二度と出さない
     cands, dropped_ng = filter_candidates_rejected(cands, ctx["ng_by_iid"].get(iid))
     stats["cand_ng"] += len(dropped_ng)
@@ -1687,6 +1727,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
     print(f"昼確認: 対象(補<{max_backups}) {len(targets)}件 / キャッシュ未取得skip {no_cache} / "
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
           f"既知URL除外 {stats['cand_known']}候補 / 番号不一致で除外 {stats['cand_number']}候補 / "
+          f"刷り違い(パラレル)で除外 {stats['cand_variant']}候補 / "
           f"過去に「違う」除外 {stats['cand_ng']}候補 / "
           f"他出品が使用中で除外 {stats['cand_used']}候補 / "
           f"絵柄が明らかに別で除外 {stats['cand_art']}候補"
