@@ -30,14 +30,17 @@ def test_classify_no_false_positive_pokemon():
 
 
 def test_balanced_sample_round_robin():
-    # Pokemon 大半でも OP/DB が均等に入る
+    # ★2026-09-08: 均等(1:1:1)は **ポケモン70%** に変わった (ユーザー確定)。
+    #   均等をやめた根拠は tcg_batch_select.POKEMON_SHARE のコメント (実測)。
+    #   ここは「昔の均等の形」を残す検査なので pokemon_share=0 を明示して従来動作を見る。
     certs = [f"p{i}" for i in range(20)] + [f"o{i}" for i in range(5)] + [f"d{i}" for i in range(3)]
     tmap = {}
     for c in certs:
         if c.startswith("p"): tmap[c] = "ピカチュウ ポケモンカード"
         elif c.startswith("o"): tmap[c] = "ルフィ ワンピース"
         else: tmap[c] = "悟空 ドラゴンボールカード"
-    picked = bs.balanced_sample(certs, tmap, 9, shuffle=lambda x: None)  # shuffle無効=決定的
+    picked = bs.balanced_sample(certs, tmap, 9, shuffle=lambda x: None,
+                                pokemon_share=0)  # shuffle無効=決定的
     fr = [bs.classify_franchise(tmap[c]) for c in picked]
     assert len(picked) == 9
     # round-robin Pok→OP→DB → 3/3/3
@@ -48,7 +51,7 @@ def test_balanced_sample_exhausted_group_filled_by_others():
     # DB が2件しか無い → 残りは Pokemon/OP で埋める (取りこぼさず limit 達成)
     certs = [f"p{i}" for i in range(20)] + [f"o{i}" for i in range(20)] + ["d0", "d1"]
     tmap = {c: ("ポケモン" if c[0] == "p" else "ワンピース" if c[0] == "o" else "ドラゴンボール") for c in certs}
-    picked = bs.balanced_sample(certs, tmap, 10, shuffle=lambda x: None)
+    picked = bs.balanced_sample(certs, tmap, 10, shuffle=lambda x: None, pokemon_share=0)
     fr = [bs.classify_franchise(tmap[c]) for c in picked]
     assert len(picked) == 10
     assert fr.count("DragonBall") == 2            # 在庫分だけ

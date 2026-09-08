@@ -3634,7 +3634,12 @@ def main():
         else:
             import collections as _collections
             from tcg_batch_select import balanced_sample, classify_franchise
-            cert_numbers = balanced_sample(cert_numbers, mercari_title_map, PSA_BATCH_LIMIT)
+            # ★2026-09-08 ユーザー確定「ポケモン70%、売れ筋優先。それ以外は適当でいい」。
+            #   売れ筋 = ファネル(自分の出品の実績)のセット別スコア。
+            #   点を付けられない物 (鍵が無い/形が違う) は後ろにランダムのまま置く。
+            from tcg_batch_select import build_demand_of
+            cert_numbers = balanced_sample(cert_numbers, mercari_title_map, PSA_BATCH_LIMIT,
+                                           demand_of=build_demand_of(cert_numbers))
             _dist = _collections.Counter(classify_franchise(mercari_title_map.get(c, "")) for c in cert_numbers)
             print(f"⚠️ {total}件中 franchise均等 {PSA_BATCH_LIMIT} 件を処理 "
                   f"(内訳 {dict(_dist)} / 残 {total-PSA_BATCH_LIMIT} 件は次回再走)")

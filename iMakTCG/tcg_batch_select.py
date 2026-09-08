@@ -263,22 +263,103 @@ def classify_franchise(title):
     return "Pokemon"                   # 既定 = 在庫の大半
 
 
-def balanced_sample(certs, title_map, limit, shuffle=None):
-    """franchise 均等に round-robin で limit 件選ぶ。
+# ★2026-09-08 ユーザー確定「ポケモン7」。均等(1:1:1)をやめ、**ポケモン7割**にする。
+#   根拠 (2026-09-08 実測 / funnel + US live):
+#     ポケモン    273件 / 棚 $53,439 / 売れた 11 → $1万あたり 2.06
+#     ワンピース   211件 / 棚 $60,086 / 売れた  3 → $1万あたり 0.50
+#     ガンダム     15件 / ドラゴンボール 10件 → どちらも 売れた 0
+#   2026-06-23 に均等にしたのは「ワンピ/DB が滞留するから」だったが、3ヶ月回した結果
+#   **滞留ではなく売れていなかった**ことが分かった。棚(金額枠)は超過中なので、
+#   同じ $ を使うなら効率の高い方に寄せる。
+#   残り3割は ワンピース→ドラゴンボール→その他 の順ぐりで配る (0件にはしない = 需要の再確認枠)。
+POKEMON_SHARE = 0.7
 
-    各 franchise 内はシャッフル(上位行偏り防止)。巡回は Pokemon→OnePiece→DragonBall→その他。
-    ある franchise が尽きたら飛ばして他で埋めるので、在庫が偏っていても「可能な限り均等」になる。
+
+def demand_by_set(funnel_rows):
+    """ファネル(出品ごとの実績) → {セット記号: 需要スコア} (純関数, test可)。
+
+    ★2026-09-08 ユーザー確定「ポケモン70%、売れ筋優先」。
+      配点は既存の需要スコア (demand_winners.py) をそのまま使う:
+        実売*100 + watch*8 + 表示*0.05  (信頼度: 実売 >> watch > 表示)
+      PSA の実売は月14件と薄いので、**点数の大半はウォッチで決まる**。
+      「売れた実績」ではなく「欲しがられている気配」の順、という理解で使うこと。
+    セット記号は英語タイトルの `#SV8a-203` / `#203/187` 形式から取る。
+    """
+    out = {}
+    for r in (funnel_rows or []):
+        t = (r.get("title") or "")
+        if not t.lower().startswith("psa 10"):
+            continue
+        # ワンピ等: `#OP09-001` / ポケモン: `Sv8a: Terastal…` (番号は `#203/187` で
+        # セット記号を持たないので、セット名の前置きから取る)
+        m = re.search(r"#([A-Za-z0-9]{1,6})-\d{1,4}", t) or \
+            re.search(r"\b([A-Za-z]{1,3}\d{1,2}[A-Za-z]?):", t)
+        if not m:
+            continue
+        def _f(k):
+            try:
+                return float(r.get(k) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+        s = m.group(1).upper()
+        out[s] = out.get(s, 0.0) + (_f("sold_qty") + _f("sales90")) * 100             + _f("watch") * 8 + _f("impr_total") * 0.05
+    return out
+
+
+def set_of_key(key):
+    """商品管理シートの鍵 (`pokemon_tcg:SV8a-203` / `OP09-001_p1`) → セット記号 (純関数)。
+
+    取れない鍵 (`item:m123...` / 空) は None = **売れ筋の順位を付けられない**。
+    """
+    k = (key or "").strip()
+    if not k:
+        return None
+    m = re.match(r"^(?:[a-z_]+:)?([A-Za-z0-9]{1,6})-\d{1,4}", k)
+    return m.group(1).upper() if m else None
+
+
+def balanced_sample(certs, title_map, limit, shuffle=None, cost_of=None,
+                    pokemon_share=None, explore=0.2, demand_of=None):
+    """franchise 比率つきで limit 件選ぶ (既定: ポケモン7割 / 残り3割は他を順ぐり)。
+
+    各グループ内の順番 (2026-09-08 ユーザー確定):
+      - **仕入値の安い順**。実測で 出品価格 $100未満の売却率 5.2% に対し $400超は 1.6%。
+        安いほど売れ、しかも同じ棚(金額)でたくさん出せる。
+      - ただし `explore` の割合だけ **ランダム**を混ぜる。値段の分からない物や
+        まだ出したことのない系統を、順位だけで永久に殺さないため。
+    cost_of: cert → 仕入値(円) を返す関数。None / 取れない cert は「値段不明」として
+             安い順の後ろに置く (推測で前に出さない)。
     shuffle: list を in-place シャッフルする関数 (既定 random.shuffle、test 用に注入可)。
-    戻り: 選ばれた cert の list (順序も round-robin)。
+    戻り: 選ばれた cert の list。
     """
     if shuffle is None:
         import random
         shuffle = random.shuffle
+    share = POKEMON_SHARE if pokemon_share is None else pokemon_share
     groups = {}
     for c in certs:
         groups.setdefault(classify_franchise((title_map or {}).get(c, "")), []).append(c)
     for g in groups.values():
-        shuffle(g)
+        shuffle(g)                      # 探索枠 (安い順を当てる前の並びをランダムにしておく)
+    if demand_of is not None:
+        # ★売れ筋優先 (2026-09-08 ユーザー確定)。順位を付けられない物 (鍵が無い/形が違う)
+        #   は **後ろにランダムのまま** 置く (「それ以外は適当でいい」)。
+        #   出品が進んで順位付きが減れば、そのぶん出番が回る。
+        for name, g in groups.items():
+            scored = [(demand_of(c), c) for c in g]
+            known = sorted([(d, c) for d, c in scored if d is not None],
+                           key=lambda x: -x[0])
+            unknown = [c for d, c in scored if d is None]
+            groups[name] = [c for _, c in known] + unknown
+    elif cost_of is not None:
+        n_explore = max(0, int(round(limit * explore)))
+        for name, g in groups.items():
+            keep_random = g[:n_explore]              # ランダムのまま残す分
+            rest = g[n_explore:]
+            rest.sort(key=lambda c: (cost_of(c) is None, cost_of(c) or 0))
+            groups[name] = keep_random + rest
+    if share and "Pokemon" in groups:
+        return _sample_with_share(groups, limit, share)
     order = [g for g in _PRIMARY if g in groups] + [g for g in groups if g not in _PRIMARY]
     picked, i = [], 0
     while len(picked) < limit and any(groups[g] for g in order):
@@ -287,3 +368,61 @@ def balanced_sample(certs, title_map, limit, shuffle=None):
             picked.append(groups[g].pop(0))
         i += 1
     return picked[:limit]
+
+
+def _sample_with_share(groups, limit, share):
+    """ポケモンに `share` の枠を割り当て、残りを他グループへ順ぐりに配る (純関数)。
+
+    ポケモンが足りなければ他で埋め、他が無ければポケモンで埋める (枠を空けない)。
+    """
+    pk = list(groups.get("Pokemon") or [])
+    others_order = [g for g in _PRIMARY if g != "Pokemon" and groups.get(g)] +                    [g for g in groups if g not in _PRIMARY and groups.get(g)]
+    others = {g: list(groups[g]) for g in others_order}
+    n_pk = min(len(pk), int(round(limit * share)))
+    picked = pk[:n_pk]
+    i = 0
+    while len(picked) < limit and any(others[g] for g in others_order):
+        g = others_order[i % len(others_order)]
+        if others[g]:
+            picked.append(others[g].pop(0))
+        i += 1
+    if len(picked) < limit:                 # 他が尽きた → ポケモンで埋める
+        picked += pk[n_pk:n_pk + (limit - len(picked))]
+    return picked[:limit]
+
+
+FUNNEL_GLOB = r"C:/dev/iMak/iMakHQ/funnel_output/funnel_*.csv"
+
+
+def build_demand_of(certs, funnel_glob=None, key_map=None):
+    """cert → 売れ筋スコア を返す関数を作る (I/O。材料が無ければ全部 None = 従来の順)。
+
+    ★2026-09-08 ユーザー確定「ポケモン70%、売れ筋優先。それ以外は適当でいい」。
+      鍵 (商品管理シート AI列) からセット記号を取り、ファネルのセット別スコアを引く。
+      点が付くのは実測でプールの44% (2026-09-08: 1,172件中513件)。残りは None。
+    """
+    import csv as _csv
+    import glob as _glob
+    import os as _os
+    try:
+        files = _glob.glob(funnel_glob or FUNNEL_GLOB)
+        if not files:
+            return lambda c: None
+        src = max(files, key=_os.path.getmtime)
+        with open(src, encoding="utf-8") as f:
+            score = demand_by_set(list(_csv.DictReader(f)))
+        if key_map is None:
+            import sys as _sys
+            _sys.path.insert(0, r"C:/dev/iMak/iMakHQ/tools")
+            _sys.path.insert(0, r"C:/dev/iMak/iMakeBayAPI")
+            import sheet_io as _sio
+            vals = _sio._product_ws().get_all_values()
+            kc, ic = _sio.PRODUCT_COL_KEY, 8
+            key_map = {(r[ic] or "").strip(): (r[kc] if len(r) > kc else "")
+                       for r in vals[1:] if len(r) > ic and (r[ic] or "").strip()}
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  ⚠ 売れ筋の点を作れませんでした ({type(e).__name__}) → 従来の順で選びます")
+        return lambda c: None
+    n = sum(1 for c in certs if score.get(set_of_key(key_map.get(c, ""))) is not None)
+    print(f"  🔥 売れ筋順: {n}/{len(certs)}件に点が付きます (残りは点なし=後ろ・順不同)")
+    return lambda c: score.get(set_of_key(key_map.get(c, "")))
