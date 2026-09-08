@@ -164,10 +164,17 @@ def set_confirmed(name, variant_hint):
 
 
 def _print_signal(variant_hint):
-    """canonical変種の print種別を返す: 'SPC'(SP/特別) / 'P'(パラレル/alt art) / ''(通常)。
+    """canonical変種の print種別: 'SPC'(SP/特別) / 'P'(パラレル/alt art) / ''(通常) / None(不明)。
 
     hint(card_meta_for_key の list)に variant_type='alt_art' / rarity='SPカード' 等が入る。
     同一set内の 通常 vs パラレル vs SP を marketplace の print マーカーと突合する基準。
+
+    ★2026-09-08: **手がかりが1つも無い時に ''(通常) を返していた** = 分からないのに
+      「通常版だ」と決めつけていた。同じ番号で 通常/パラレル/SP が並ぶのは実測で
+      **120件中80件 (67%)**。決めつけると平気で別の版を掴む
+      (実例 PRB02-014: SR-P を探して通常の SR を返した)。
+      → 判断材料が無い時は **None (不明)** を返し、呼び手は fail-closed にする。
+      「通常だと分かっている」(rarity 等が在り、パラレルの印が無い) とは区別する。
     """
     parts = variant_hint if isinstance(variant_hint, (list, tuple)) else [variant_hint]
     s = " ".join(str(p) for p in parts if p).upper()
@@ -175,6 +182,11 @@ def _print_signal(variant_hint):
         return "SPC"
     if "ALT_ART" in s or "PARALLEL" in s or "パラレル".upper() in s or "*" in s:
         return "P"               # rarity の * (Dragon Ball の L*/SR*/R* 等=パラレル)も検出
+    # ここに来た = パラレル/SP の印は無い。ただし「通常だ」と言えるのは **レアリティが
+    # 分かっている時だけ**。セット名しか無い hint で '通常' を返すと、同じ set の
+    # 通常版を掴む (実例 PRB02-014: SR-P を探して SR を返した)。
+    if not re.search(r"\b(SSR|SR|SEC|UR|HR|CSR|AR|TR|MA|UC|RR|R|C|L|P)\b", s):
+        return None                            # 版を決める材料が無い → 不明
     return ""
 
 
