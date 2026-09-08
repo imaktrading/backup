@@ -372,6 +372,17 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .zm{font-size:13px;padding:0 6px;border:1px solid #bbb;border-radius:3px;background:#fff;cursor:zoom-in;line-height:1.6}
 #zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;cursor:zoom-out}
 #zov img{max-width:46vw;max-height:88vh;object-fit:contain;background:#fff;display:block}
+/* ★2026-09-08 ユーザー「目視の際は、ラベルを見比べるよ。それが一番確実」。
+   全体表示だとラベルの文字が小さい。L キー / ボタンで **上半分を2倍** に切り替える。
+   PSA のラベルは上端にあり、そこに 作品・セット・変種 が印字されている。
+   実害: ST10-006 は版が8つあり全部 SR。商品名では見分けが付かず、通常版の安い供給を
+   掴んで $202.98 で出ていた (正しくは $814.98)。ラベルには ONE PIECE DAY と出ていた。 */
+#zov.label .zwrap{height:44vh;overflow:hidden;position:relative;background:#fff}
+#zov.label .zwrap img{max-width:none;max-height:none;width:92vw;position:absolute;
+  top:0;left:50%;transform:translateX(-50%)}
+#zov .zlbtn{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:100;
+  font-size:14px;padding:6px 16px;border-radius:6px;border:none;background:#0a7;color:#fff;
+  cursor:pointer}
 #zov.on{display:flex;gap:16px}
 #zref,#zcand{text-align:center}
 #zov .zc{color:#fff;font-size:15px;font-weight:bold;margin-bottom:6px}
@@ -616,7 +627,16 @@ function zoom(ev,btn){ev.preventDefault(); ev.stopPropagation();
   R.querySelector('img').src=btn.dataset.img;
   o.classList.add('on');}
 function zclose(ev){ev.preventDefault(); document.getElementById('zov').classList.remove('on');}
-document.addEventListener('keydown',function(e){if(e.key==='Escape')document.getElementById('zov').classList.remove('on');});
+/* ★ラベル拡大 (2026-09-08)。上半分を2倍にして、現物と候補のラベルを見比べる。
+   同じ番号でも版が違えば別カード。見分けが付くのはラベルの印字だけ、という場面が多い。 */
+function zlabel(ev){if(ev){ev.preventDefault(); ev.stopPropagation();}
+  var o=document.getElementById('zov'); o.classList.toggle('label');
+  var b=o.querySelector('.zlbtn');
+  if(b) b.textContent = o.classList.contains('label')
+    ? '🔍 ラベル拡大 中 (L で戻す)' : '🔍 ラベルを拡大 (L)';}
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape')document.getElementById('zov').classList.remove('on');
+  if((e.key==='l'||e.key==='L')&&document.getElementById('zov').classList.contains('on')) zlabel(null);});
 function imgFail(el,big){var d=document.createElement('div'); d.className=big?'ph':'cph';
   d.textContent='画像なし'; if(el.parentNode) el.parentNode.replaceChild(d,el);}
 function upd(i){var c=document.getElementById('c'+i);
@@ -913,10 +933,14 @@ def build_restock_html(items):
             #   h1 の下に bar を敷くと隠れる。操作ボタンを常に画面上端に出す。
             f"<div id='main'>{bar}{head}{_LABEL_NOTE_HTML}<div class='grid'>{''.join(rows)}</div></div>"
             f"<div id='zov' onclick='zclose(event)'>"
-            f"<div id='zref'><div class='zc'>① 現物(出品)</div><img alt=''></div>"
+            f"<button type='button' class='zlbtn' onclick='zlabel(event)'>"
+            f"🔍 ラベルを拡大 (L)</button>"
+            f"<div id='zref'><div class='zc'>① 現物(出品)</div>"
+            f"<div class='zwrap'><img alt=''></div></div>"
             f"<div id='zcand'><div class='zc'>仕入候補</div>"
             f"<div class='zn'>ラベルの<b>書式違い</b>は別カードの根拠になりません — "
-            f"<b>番号・変種名・絵柄</b>で判定</div><img alt=''></div></div>"
+            f"<b>番号・変種名・絵柄</b>で判定</div>"
+            f"<div class='zwrap'><img alt=''></div></div></div>"
             f"<div id='done'></div><script>{_JS_RESTOCK}</script></body></html>")
 
 
