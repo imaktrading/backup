@@ -122,3 +122,19 @@ def test_n_column_is_never_filled():
     row = _build_row({"url": "https://jp.mercari.com/item/m1", "title": "t",
                       "price_jpy": "5000", "fill_high_columns": False})
     assert row[13] == ""      # N
+
+
+@pytest.mark.parametrize("title,bundle", [
+    # ★連番 = 鑑定番号が連続した複数枚 (2026-09-08 user 指摘)
+    ("PSA10 連番 テラパゴスex SAR", True),
+    ("psa10連番 エールストライクガンダム イージスガンダム", True),
+    ("ドラゴンボールヒーローズ トランクス 孫悟天 PSA10 9 連番", True),
+    ("【PSA10/9セット】レックウザVMAX RRR", True),          # グレード違いの詰め合わせ
+    # ★「ペア」「セット」は商品名に入るので落とさない (誤爆させない)
+    ("ポケモンカード カシオペア SAR PSA10", False),
+    ("【PSA10】リーフィアEX PROMO バトル強化セット 草 / 闘", False),
+    ("PSA10 ピカチュウ Vスタートセット 雷", False),
+])
+def test_is_bundle_covers_renban_without_false_positives(title, bundle):
+    from scrapers.psa_grade_gate import is_bundle
+    assert is_bundle(title) is bundle
