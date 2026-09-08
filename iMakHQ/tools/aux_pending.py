@@ -86,3 +86,25 @@ if __name__ == "__main__":
         print(f"  {src}: {n}本")
     for r in rows[-10:]:
         print(f"  {r.get('date')} row{r.get('row')} {r.get('itemID')} {r.get('url')[:60]}")
+
+
+def consume(pairs, path=None):
+    """人に見せ終わった分を待ち行列から外す (I/O)。戻り: 外した本数。
+
+    ★見せた時点で結論は出ている (チェックを残す=採用 / 外す=理由つきで台帳へ)。
+      外さないと毎回同じものが並び、「押しても減らない画面」になる。
+    """
+    p = path or PATH
+    rows = load(p)
+    if not rows:
+        return 0
+    gone = {(str(i or "").strip(), (u or "").strip()) for i, u in (pairs or [])}
+    keep = [r for r in rows
+            if (str(r.get("itemID") or "").strip(), (r.get("url") or "").strip()) not in gone]
+    n = len(rows) - len(keep)
+    if not n:
+        return 0
+    with open(p, "w", encoding="utf-8") as f:
+        for r in keep:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    return n

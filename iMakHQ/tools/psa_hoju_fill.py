@@ -1629,6 +1629,31 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
     skip_iids = ctx["skip_iids"]
     stats = collections.Counter()
 
+    # ★2026-09-08: 自動で書くのをやめた分 (目視待ち) を、この画面に合流させる。
+    #   ここに出さないと「積んだだけで誰も見ない」= 補URLが増えなくなる。
+    _pending_by_iid, _shown_pending = {}, []
+    try:
+        import aux_pending
+        _price_of = {}
+        try:
+            import hoju_url_from_dupes as _hd
+            _price_of = _hd.price_by_url_from_cache()
+        except Exception:                                      # noqa: BLE001
+            _price_of = {}
+        for _r in aux_pending.load():
+            _iid = (_r.get("itemID") or "").strip()
+            if not _iid:
+                continue
+            _pending_by_iid.setdefault(_iid, []).append(
+                {"url": _r["url"], "source": _r.get("source", ""),
+                 "price": _price_of.get(_norm_url(_r["url"])),
+                 "site": "mercari" if "mercari" in _r["url"] else ""})
+        if _pending_by_iid:
+            print(f"  ＋目視待ちの補URL {sum(len(v) for v in _pending_by_iid.values())}本 "
+                  f"({len(_pending_by_iid)}出品) を候補に混ぜます")
+    except Exception as _e:                                    # noqa: BLE001
+        print(f"  ⚠ 目視待ちの読込skip ({type(_e).__name__})")
+
     # 当日キャッシュに候補がある対象だけを確証items化(idx=items内index→書込時に target へ戻す)
     items, item_targets = [], []
     art_all_dropped = 0
@@ -1685,6 +1710,19 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
                                     _c.get("drop_why") or _c.get("art_reason", "")))
         if why == "all_art":
             art_all_dropped += 1
+        # ★2026-09-08: 自動経路を閉じた分 (目視待ち) を **候補として混ぜる**。
+        #   積むだけだと補URLが一切増えなくなる。人が見て採否を決める形にするのが指示。
+        #   現物画像が無い行には混ぜない (見比べる相手が無いと判定できない)
+        _pend = _pending_by_iid.get(iid) or []
+        if _pend and ref:
+            _have = {_norm_url(c.get("url")) for c in cands}
+            for _p in _pend:
+                if _norm_url(_p["url"]) in _have:
+                    continue
+                cands = list(cands) + [{"url": _p["url"], "site": _p.get("site") or "",
+                                        "price": _p.get("price"),
+                                        "note": f"目視待ち ({_p.get('source','')})"}]
+                _shown_pending.append((iid, _p["url"]))
         if not cands:
             continue
         cn = t["_card_no"]
@@ -1841,6 +1879,17 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
             print(f"⚠ 補URL書込失敗: {type(e).__name__}: {e}")
     else:
         print("  書込対象なし(全て既存収載 or 満杯 or 確定ゼロ)。")
+
+    # ★2026-09-08: 画面に出した「目視待ち」は、採否が決まったので待ち行列から外す。
+    #   外さないと毎回同じものが並び、押しても減らない画面になる
+    #   (チェックを残した分は上で書込済、外した分は理由つきで台帳に記録済)。
+    if _shown_pending:
+        try:
+            import aux_pending
+            _n = aux_pending.consume(_shown_pending)
+            print(f"  ✅ 目視待ちから {_n}本 を落としました (見せた分は結論が出た)")
+        except Exception as _e:                                # noqa: BLE001
+            print(f"  ⚠ 目視待ちの後始末skip ({type(_e).__name__})")
 
     # --- 見送り/違う を台帳へ(次回再表示しない)+ 違う=検索精度事故アラート ---
     diffs = {d.get("idx") for d in (res.get("diffs") or []) if d.get("idx") is not None}

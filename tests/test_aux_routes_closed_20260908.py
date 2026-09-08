@@ -84,3 +84,41 @@ def test_source_of_returns_the_last_writer():
     recs = (aux_url_log.build_records({1: ["https://x/1"]}, "自動", today="2026-09-01")
             + aux_url_log.build_records({2: ["https://x/1"]}, "目視", today="2026-09-08"))
     assert aux_url_log.source_of("https://x/1", recs)["source"] == "目視"
+
+
+def test_pending_is_consumed_after_being_shown():
+    """見せた分は待ち行列から外す。外さないと毎回同じものが並ぶ。"""
+    import json
+    import tempfile
+    p = os.path.join(tempfile.mkdtemp(), "pending.jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        for r in ({"itemID": "1", "url": "https://x/1"},
+                  {"itemID": "1", "url": "https://x/2"},
+                  {"itemID": "2", "url": "https://x/3"}):
+            f.write(json.dumps(r) + "\n")
+    assert aux_pending.consume([("1", "https://x/1")], path=p) == 1
+    left = [r["url"] for r in aux_pending.load(p)]
+    assert left == ["https://x/2", "https://x/3"]
+
+
+def test_consume_is_a_no_op_when_nothing_matches():
+    import json
+    import tempfile
+    p = os.path.join(tempfile.mkdtemp(), "pending.jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"itemID": "1", "url": "https://x/1"}) + "\n")
+    assert aux_pending.consume([("9", "https://x/9")], path=p) == 0
+    assert len(aux_pending.load(p)) == 1
+
+
+def test_review_screen_merges_the_pending_queue():
+    """積んだだけでは補URLが増えない。目視画面に合流していること。"""
+    s = _src("psa_hoju_fill.py")
+    assert "_pending_by_iid" in s and "目視待ち" in s
+    assert "aux_pending.consume(_shown_pending)" in s
+
+
+def test_pending_needs_a_reference_image():
+    """現物画像が無い行には混ぜない (見比べる相手が無いと判定できない)。"""
+    s = _src("psa_hoju_fill.py")
+    assert "if _pend and ref:" in s
