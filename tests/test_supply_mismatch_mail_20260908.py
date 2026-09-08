@@ -69,3 +69,24 @@ def test_nightly_batch_sends_the_mail():
     m = re.search(r"supply_card_mismatch\.py([^\r\n]*)", txt)
     assert m, "夜間バッチに検査が入っていない"
     assert "--mail" in m.group(1), "夜間はメールまで送る (見に行かないと分からない形にしない)"
+
+
+def test_price_drop_is_reported_first():
+    """値下がりは『今日 起きた変化』なので、標準の一覧より先に出す。
+
+    事故はいつも「別カードの安い供給が入った瞬間」に起きる。
+    """
+    s, b = S.build_mail({"checked": 336, "stat": {"listed": 463, "no_market": 127},
+                         "suspects": [], "verified": False,
+                         "drops": [{"itemID": "820049712142", "prev": 75000, "now": 15000,
+                                    "ratio": 0.2, "title": "ルフィ DAY プロモ"}]})
+    assert "値下がり 1件" in s
+    assert b.startswith("★今日、仕入値が大きく下がった")
+    assert "75,000円 → 15,000円" in b
+
+
+def test_no_drop_no_section():
+    _, b = S.build_mail({"checked": 336, "stat": {"listed": 463}, "suspects": [],
+                         "verified": False, "drops": []})
+    assert "値下がり" not in b
+    assert "対応は不要" in b

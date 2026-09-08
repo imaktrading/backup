@@ -120,6 +120,47 @@ def find_suspects(vals, cache, ratio=CHEAP_RATIO):
     return suspects, stat
 
 
+COST_LEDGER = os.path.join(HERE, "..", "review_logs", "supply_cost_history.json")
+DROP_RATIO = 0.6      # 前回の6割未満に下がったら「今日 大きく下がった」
+
+
+def load_cost_ledger(path=None):
+    p = path or COST_LEDGER
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:                                         # noqa: BLE001
+        return {}
+
+
+def find_cost_drops(vals, ledger, ratio=DROP_RATIO):
+    """**今日 仕入値が大きく下がった** 出品を見つける (純関数)。戻り: (drops, 新しい台帳)。
+
+    ★「今いくら安いか」では門にならない。2026-09-08 実測で、取得時の半値未満は 57件 あり、
+      その多くは **正常な値下がり** (安い仕入元を見つけたら価格を下げるのは狙ってやっている)。
+      事故は「**別カードの安い供給が入った瞬間**に値段が飛ぶ」ことなので、
+      標準の状態ではなく **変化** を見る。変化なら1日数件で、人が見られる量になる。
+    """
+    drops, new = [], {}
+    for r in vals[1:]:
+        iid = _cell(r, hf.B).strip()
+        if not iid or _cell(r, CAT_COL).strip() != PSA_CATEGORY:
+            continue
+        cost = _num(_cell(r, 13)) or _num(_cell(r, 12))
+        if not cost:
+            continue
+        new[iid] = cost
+        prev = (ledger or {}).get(iid)
+        if prev and cost < prev * ratio:
+            drops.append({"itemID": iid, "prev": prev, "now": cost,
+                          "ratio": round(cost / prev, 3), "key": _cell(r, hf.KEY),
+                          "title": _cell(r, 2)[:60]})
+    drops.sort(key=lambda d: d["ratio"])
+    return drops, new
+
+
 def number_matches(key, card_no):
     """KEY と 商品名から取れた番号が同じカードか (純関数)。
 
@@ -193,14 +234,30 @@ def build_mail(payload):
       0件の時も **必ず送る**。届かないと「動いていない」のか「異常なし」なのか分からない。
     """
     sus = payload.get("suspects") or []
+    drops = payload.get("drops") or []
     verified = payload.get("verified")
     bad = [s for s in sus if s.get("mismatch")]
     checked = payload.get("checked", 0)
+    if drops:
+        # ★値下がりは「今日 起きた変化」なので、標準の一覧より先に出す。
+        #   事故はいつも「別カードの安い供給が入った瞬間」に起きる。
+        lines = [f"★今日、仕入値が大きく下がった出品が {len(drops)}件 あります。",
+                 "  値段は仕入値から自動で決まるので、**そのぶん安く売りに出ます**。",
+                 "  安い仕入元が本当に同じカードか、先に確かめてください。", ""]
+        for d in drops[:10]:
+            lines.append(f"  {d['itemID']}  {d['prev']:,.0f}円 → {d['now']:,.0f}円"
+                         f" ({d['ratio']*100:.0f}%)  {d['title'][:26]}")
+        if len(drops) > 10:
+            lines.append(f"  … 他 {len(drops)-10}件")
+        lines += ["", "-" * 40, ""]
+        head_drop = f"値下がり {len(drops)}件 / "
+    else:
+        lines, head_drop = [], ""
     if verified:
         head = f"安く出しすぎ {len(bad)}件" if bad else "安く出しすぎ なし (確認済)"
     else:
         head = f"安く出しすぎの疑い {len(sus)}件" if sus else "異常なし"
-    subject = f"[仕入元チェック] {head} / 出品 {checked}件を確認"
+    subject = f"[仕入元チェック] {head_drop}{head} / 出品 {checked}件を確認"
 
     # ★「見た件数」と「見ていない件数」を必ず一緒に出す。比べる相手 (同じカードの相場) が
     #   無い出品は素通りになるので、これを隠すと「全部見た」と誤解される (2026-09-08 指摘)。
@@ -209,9 +266,10 @@ def build_mail(payload):
     if st.get("no_market"):
         scope += f" (残り {st['no_market']}件は比べる相場がまだ無く、見ていません)"
 
-    lines = []
     if not sus:
-        lines += [scope + "。", "おかしな値段の出品はありませんでした。対応は不要です。"]
+        lines += [scope + "。",
+                  "1段目の一覧 (相場より安すぎる出品) は0件です。" if drops
+                  else "おかしな値段の出品はありませんでした。対応は不要です。"]
         return subject, "\n".join(lines)
 
     lines += [
@@ -302,6 +360,8 @@ def main():
     if os.path.exists(hf.CACHE_PATH):
         with open(hf.CACHE_PATH, encoding="utf-8") as f:
             cache = json.load(f)
+    ledger = load_cost_ledger()
+    drops, new_ledger = find_cost_drops(vals, ledger)
     suspects, stat = find_suspects(vals, cache, a.ratio)
     print(f"仕入元が別カードでないかの検査: 出品中 {stat['listed']}件 / "
           f"比べられた {stat['compared']}件 (相場の材料が無く見ていない {stat['no_market']}件) / "
@@ -318,8 +378,23 @@ def main():
         print(f"\n★別カードの疑い {len(bad)}件 / 見た {sum(1 for s in suspects if 'checked' in s)}件")
         if not bad:
             print("  ②まで通して0件 = 安いのは本物。①の件数だけで騒がないこと。")
+    if drops:
+        print(f"\n★今日 仕入値が大きく下がった出品: {len(drops)}件 "
+              f"(前回の{DROP_RATIO*100:.0f}%未満)")
+        for d in drops[:10]:
+            print(f"  {d['itemID']}  ¥{d['prev']:,.0f} → ¥{d['now']:,.0f}"
+                  f" ({d['ratio']*100:3.0f}%)  {d['title'][:32]}")
+    elif ledger:
+        print("\n今日 大きく下がった出品はありません。")
+    else:
+        print(f"\n(値下がりの見張りは今回が初回。次回から比べます / "
+              f"{len(new_ledger)}件を記録)")
+    os.makedirs(os.path.dirname(COST_LEDGER), exist_ok=True)
+    with open(COST_LEDGER, "w", encoding="utf-8") as f:
+        json.dump(new_ledger, f, ensure_ascii=False)
+
     payload = {"checked": stat["compared"], "stat": stat, "ratio": a.ratio,
-               "verified": bool(a.verify), "suspects": suspects}
+               "verified": bool(a.verify), "suspects": suspects, "drops": drops}
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=1)

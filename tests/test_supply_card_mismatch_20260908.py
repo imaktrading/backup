@@ -99,3 +99,29 @@ def test_unchecked_rows_are_counted_not_hidden():
             _row("222", "c2", "1000", "k", "b")]
     sus, st = S.find_suspects(vals, _cache("111", [50000]))
     assert st["listed"] == 2 and st["compared"] == 1 and st["no_market"] == 1
+
+
+def test_cost_drop_needs_a_previous_value():
+    """初回は比べる相手が無い = 何も出さない (台帳だけ作る)。"""
+    vals = [["h"] * N, _row("111", "c1", "15000", "k", "t")]
+    drops, new = S.find_cost_drops(vals, {})
+    assert drops == [] and new == {"111": 15000}
+
+
+def test_big_drop_is_reported():
+    vals = [["h"] * N, _row("111", "c1", "15000", "k", "ルフィ")]
+    drops, new = S.find_cost_drops(vals, {"111": 75000})
+    assert len(drops) == 1 and drops[0]["prev"] == 75000 and drops[0]["now"] == 15000
+
+
+def test_small_drop_is_ignored():
+    """じわじわ下がるのは正常 (安い仕入元を見つけたら下げるのが狙い)。"""
+    vals = [["h"] * N, _row("111", "c1", "70000", "k", "ルフィ")]
+    drops, _ = S.find_cost_drops(vals, {"111": 75000})
+    assert drops == []
+
+
+def test_drop_watch_is_psa_only():
+    vals = [["h"] * N, _row("111", "c1", "1000", "k", "バッグ", cat="バッグ")]
+    drops, new = S.find_cost_drops(vals, {"111": 75000})
+    assert drops == [] and new == {}
