@@ -458,6 +458,26 @@ def restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost=None)
     if not itemid_to_row:
         return 0
     ws = _product_ws()
+    # ★2026-09-08: M は **seed (空欄を埋める) のつもりが、毎回 上書き**していた。
+    #   「RESTOCK確定」タブの最安¥ は確定した時点の値で、後から古くなる。走行のたびに
+    #   それを書き戻すので、**人が直した仕入値が古い値に戻る**。
+    #   実害: 820049712142 を ¥57,747 に直した後、今どの仕入元にも無い ¥15,000 に戻っていた
+    #   (その値で cost-plus が回ると、また安く出品される)。
+    #   → 既に値が入っている行の M は触らない。空欄のときだけ seed する。
+    have_m, checked = {}, False
+    if hasattr(ws, "get") and (itemid_to_cost or {}):
+        rows_needed = [r for r in itemid_to_row.values() if r]
+        if rows_needed:
+            try:
+                lo, hi = min(rows_needed), max(rows_needed)
+                col = ws.get(f"M{lo}:M{hi}") or []
+                for off, cellv in enumerate(col):
+                    have_m[lo + off] = (cellv[0].strip() if cellv else "")
+                checked = True
+            except Exception:                                  # noqa: BLE001
+                # 読めた *はず* が失敗した = 潰すかどうか判断できない → seed しない。
+                # seed を1回落としても N は F(取得時価格) に落ちるだけで、安く出る方には倒れない。
+                have_m, checked = {}, True
     reqs = []
     n = 0
     for iid, row in itemid_to_row.items():
@@ -468,8 +488,10 @@ def restock_reactivate_master(itemid_to_row, itemid_to_url, itemid_to_cost=None)
             reqs.append({"range": f"A{row}", "values": [[url]]})    # A列(idx0)=URL(供給先)
         reqs.append({"range": f"D{row}", "values": [[""]]})          # D列(idx3)=売り切れクリア
         cost = _to_yen_int((itemid_to_cost or {}).get(iid, ""))
-        if cost:
-            reqs.append({"range": f"M{row}", "values": [[cost]]})    # M列(idx12)=現在価格 seed → N=M-K で動的追随
+        # M列(idx12)=現在価格。**空欄のときだけ** seed → N=(M or F)−K が拾う。
+        # 既に値がある = 誰か(人 / 監視くんの最安追随)が入れたもの。古い確定値で潰さない。
+        if cost and (not checked or not have_m.get(row, "")):
+            reqs.append({"range": f"M{row}", "values": [[cost]]})
         n += 1
     if reqs:
         ws.batch_update(reqs, value_input_option="RAW")
