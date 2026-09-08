@@ -2090,6 +2090,23 @@ def split_verified(certs, vc):
     return confirmed, viewer
 
 
+def dedupe_certs_keep_order(certs):
+    """cert list から重複を除く (並び順は保つ・純関数, test可)。
+
+    ★2026-09-08 ユーザー報告「最後の1個が合ってるを押せない」。同じ cert が2回入ると
+      2枚目のカードの HTML id (btns_<cert> / target_<cert> / cand_<cert>_*) が1枚目と
+      衝突し、クリックが1枚目に効く = 押しても何も起きないカードになる。回答数も
+      15/16 とズレ、「未回答1件」が永久に消えない。cert は現物1枚に1つ。
+    """
+    seen, out = set(), []
+    for c in certs or []:
+        if c in seen:
+            continue
+        seen.add(c)
+        out.append(c)
+    return out
+
+
 def prior_choices(certs, vc) -> dict:
     """人が前に出した答え (OK/CHOSEN + product_id) を cert ごとに拾う (純関数)。
 
@@ -2176,6 +2193,16 @@ def run_pre_build_verify(certs, append_log_func, *, open_browser=True, timeout_s
         append_log_func(
             f"  🚫 既に別出品として live (二重出品ガード) → 目視スキップ: "
             f"{len(_dup_skip)}件 {_dup_skip[:5]}\n")
+
+    # ★2026-09-08 ユーザー報告「最後の1個が合ってるを押せない」。
+    #   同じ cert が2回入っていると、2枚目のカードは HTML の id (btns_<cert> /
+    #   target_<cert> / cand_<cert>_*) が1枚目と衝突し、クリックが1枚目に効く =
+    #   **押しても何も起きないカード**になる。件数も 15/16 とズレて「未回答1件」が
+    #   永久に消えない。cert は現物1枚に1つなので、並び順を保って1つに畳む。
+    _uniq_c = dedupe_certs_keep_order(_viewer_certs)
+    if len(_uniq_c) != len(_viewer_certs):
+        append_log_func("  🧹 同じ cert が重複 %d件 → 1つに畳みました%s" % (len(_viewer_certs) - len(_uniq_c), chr(10)))
+    _viewer_certs = _uniq_c
 
     n_cache = len(confirmed)
     targets = []
