@@ -372,6 +372,24 @@ def main():
     if do_write:
         row_to_urls = {row: (v.get("full") or (v["existing"] + v["add"]))[:AUXN]
                        for row, v in plan.items() if v["add"]}
+        # ★2026-09-08 ユーザー指示「勝手に補に追加するルートは閉じて、必ず目視を通る様にして」。
+        #   この経路は **KEY が一致する行**から URL を配るが、元の行の KEY が誤っていれば
+        #   誤った版を配る (KEY 取り違えは 2026-09-07 に実在。同じ番号の別版は商品名で
+        #   見分けが付かない)。実害3件はすべて買い手の問い合わせで発覚した。
+        #   → シートには書かず、目視待ちに積む。AUX_AUTO_WRITE=1 で従来動作に戻せる。
+        if os.environ.get("AUX_AUTO_WRITE") != "1":
+            import aux_pending
+            item_of = {row: v.get("itemid", "") for row, v in plan.items()}
+            existing_by_row = {row: v.get("existing") or [] for row, v in plan.items()}
+            n_q = aux_pending.queue({row: [u for u in v["add"]] for row, v in plan.items()
+                                     if v["add"]},
+                                    source="2枚目の自動追記",
+                                    existing_by_row=existing_by_row, item_of=item_of)
+            print(f"=== 書込は行いません (2026-09-08 ユーザー指示)。"
+                  f"目視待ちに {n_q}本 積みました ===")
+            print("   人が採否を決めます: python aux_pending.py で中身を確認")
+            _record(0, total_add, urgent, len(warns), unverified=0)
+            return
         n = sheet_io.write_aux_urls(row_to_urls)
         missing = verify_written(row_to_urls)
         if missing:

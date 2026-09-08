@@ -1983,6 +1983,17 @@ def run_newcand_aux(dry_run=False):
     if dry_run:
         print(f"  (dry-run) {len(wb)}行 に書き込む予定")
         return 0
+    # ★2026-09-08 ユーザー指示「勝手に補に追加するルートは閉じて、必ず目視を通る様にして」。
+    #   この経路は 新規出品候補タブの 用途=補URL 行を KEY で配るが、KEY が誤っていれば
+    #   誤った版を配る。同じ番号の別版は商品名で見分けが付かない (ST10-006 は版8つ・全部SR)。
+    #   実害3件 (2026-09-08) はすべて買い手の問い合わせ/オファーで発覚した。
+    #   → シートには書かず、目視待ちに積む。AUX_AUTO_WRITE=1 で従来動作に戻せる。
+    if os.environ.get("AUX_AUTO_WRITE") != "1":
+        import aux_pending
+        n_q = aux_pending.queue(wb, source="捨てた候補の転記(夜間)")
+        print(f"🔗 書込は行いません (ユーザー指示)。目視待ちに {n_q}本 積みました "
+              f"(python aux_pending.py で確認)")
+        return 0
     n = write_aux_urls(wb)
     print(f"🔗 補URL(AC-AG) 書込: {n}行 (安い順に最大{AUXN}本)")
 
