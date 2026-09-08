@@ -1221,6 +1221,28 @@ def _review_skip_active(date_str, today):
     return age < 0 or age < REVIEW_SKIP_COOLDOWN_DAYS
 
 
+def count_variant_todo(cands, keymap, cert_map, verified, variant_ok, *, item_id):
+    """探索前の「変種の確認」に出る件数 (純関数・test可)。
+
+    ★2026-09-08 ユーザー指摘「目視する件数であるべきじゃないの?」。パネルのヒントは
+      3段目 (仕入元と見比べる) しか数えておらず、押して最初に開く 1段目 (①現物 vs
+      ②catalog の変種確認) が数字に無かった (ヒント1件 / HTML 2件)。
+
+    KEY が決まっていない行だけが目視に出る。KEY の出どころは本体 (:568/:588) と同じ順で
+      ① 行が既に持っている  ② itemID→商品管理シート  ③ cert→出品時の目視確定資産
+    どれでも決まらず、過去に目視で確定もしていない行を数える。
+    """
+    n = 0
+    for r in cands:
+        iid = item_id(r)
+        k = r.get("key") or (keymap.get(iid) if iid else None)
+        if not k and verified:
+            k = key_from_verified_cert((cert_map or {}).get(iid, ""), verified)
+        if not k and iid not in (variant_ok or set()):
+            n += 1
+    return n
+
+
 def count_workload(today=None):
     """押したら『今すぐ照合に出せる件数』を **探索せずに** 数える (パネルのヒント用・2026-09-01).
 
@@ -1291,6 +1313,19 @@ def count_workload(today=None):
                         supply_wait.add(_i)
         except Exception:                                      # noqa: BLE001
             supply_wait = set()          # 読めない時は差し引かない (多めに言わない側に倒さない)
+        # ★2026-09-08 ユーザー指摘「目視する件数であるべきじゃないの?」。
+        #   ここは 3段目 (仕入元と見比べる) しか数えておらず、押して最初に開く
+        #   **1段目 (①現物 vs ②catalog の変種確認)** が数字に出ていなかった。
+        #   実測: ヒントが「残り1件」なのに HTML には 2件出る、という食い違いになる。
+        #   1段目は KEY(どの版か)が未確定の行 = 探索前に必ず人が見る分なので、ここで数える。
+        try:
+            from sheet_io import product_index as _pi
+            _keymap, _, _certmap = _pi()
+            base["variant_todo"] = count_variant_todo(
+                cands, _keymap, _certmap, load_verified_certs(), variant_ok,
+                item_id=lambda r: mp._ebay_item_id(r.get("ebay_url", "") or ""))
+        except Exception:                                      # noqa: BLE001
+            pass                          # 読めない時は出さない (多めに言わない側に倒さない)
         base.update({"actionable": sum(1 for i in uniq if i and i not in processed
                                        and i not in excl and i not in supply_wait),
                      "supply_wait": sum(1 for i in uniq if i and i not in processed

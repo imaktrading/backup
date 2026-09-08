@@ -3910,8 +3910,18 @@ class ListingPanel:
             if pg.get("error"):
                 pg_txt = _err(pg, "件数")
             elif pg:
-                pg_txt = (self.todo_line("psa_gate", pg.get("actionable", 0), "照合します")
-                          + "\n(候補 %s件のうち)" % pg.get("targets", 0))
+                # ★2026-09-08 ユーザー指摘「目視する件数であるべきじゃないの?」。
+                #   ここは 3段目(仕入元と見比べる)だけを出しており、押して最初に開く
+                #   1段目(①現物 vs ②catalog の変種確認)が数字に入っていなかった。
+                #   実測: ヒント「残り1件」に対し HTML には 2件 出ていた。
+                #   1行目は **押したら人が見る枚数** = 変種確認 + 仕入元照合 にする
+                #   (探索中に在庫待ちが戻ると3段目は増えるので、この数字は下限)。
+                _vt = pg.get("variant_todo")
+                _ac = pg.get("actionable", 0)
+                pg_txt = self.todo_line("psa_gate", (_vt or 0) + _ac, "目視します")
+                if _vt:
+                    pg_txt += "\n内訳: 変種の確認 %s件 → 仕入元と見比べる %s件" % (_vt, _ac)
+                pg_txt += "\n(候補 %s件のうち)" % pg.get("targets", 0)
                 # ★2026-09-05: 仕入元に在庫が無い行は **押しても動かせない**。
                 #   ここを「今すぐ照合できる」に混ぜていたため、ラベルが 44件 と出て
                 #   実際に出たのは 0件だった (43件が供給待ちだった)。分けて出す。
@@ -4091,7 +4101,8 @@ class ListingPanel:
                         "cull_end": bool(ce.get("remaining")),
                         "shelf_evict": bool(se.get("picked")),
                         "sold_restock": bool(sr.get("actionable") or sr.get("unknown")),
-                        "psa_gate": bool(pg.get("actionable")),
+                        # 変種の確認だけが残っている時も押せば人が見る = 青にする (2026-09-08)
+                        "psa_gate": bool(pg.get("actionable") or pg.get("variant_todo")),
                         "restock_build": bool(rb.get("actionable")),
                         "restock_wb": bool(rw.get("actionable")),
                         "kuji_supply": bool(kv.get("can")),
