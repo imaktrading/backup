@@ -2,9 +2,14 @@
 
 > ①はさっきやって、１やで。/ ヒントテキストの件数見て、仕事の段取りを組んでいるんだから、正確に出せよ
 
-ヒント側だけ `_review_skip_iids(rows, today)` (= 日数で復活する数え方) を使っており、
-ボタン本体 (:880 は today を渡さない = レビュー済は再表示しない) と食い違っていた。
-実害: レビュー済で二度と出ない1件を「1件あります」と出し続け、押すと「照合対象なし」。
+★2026-09-08 訂正。9/07 はヒントを「cooldown を見ない側」に合わせたが、**合わせる先を
+間違えていた**。本体はレビュー済を2か所で読む:
+    :880  探索ループの新規カウント … cooldown を見ない
+    :1400 HTMLに何を出すかの判定   … cooldown で復活させる  ← 画面の件数はこちら
+9/07 の実害 (1件と出るのに押すと0件) は復活のせいではなく、**仕入元の在庫が無い行を
+混ぜていた**ことが原因で、それは 9/05 の supply_wait 差引で解決済だった。
+実測 2026-09-08: 台帳8行のうち7件が本体では復活し、ヒント1件に対し HTML は2件出た。
+よってヒントは **:1400 と同じ (today を渡す)** で数える。
 """
 import io
 import os
@@ -20,16 +25,23 @@ import psa_resource_gate as PG  # noqa: E402
 HDR = ["itemID", "card_no", "title", "理由", "日付", "ebay_url"]
 
 
-def test_review_skipped_stays_skipped_regardless_of_days():
+def test_review_skip_without_today_returns_all_rows():
+    """today を渡さない呼び方は「全行を伏せる」(API の素の挙動)。"""
     rows = [HDR, ["111", "OP13-120", "t", "違う", "2026-01-01", "u"]]
-    assert PG._review_skip_iids(rows) == {"111"}, "日付が古くても再表示しない (本体の規則)"
+    assert PG._review_skip_iids(rows) == {"111"}
 
 
-def test_hint_uses_the_same_call_as_the_button():
-    """数える側とボタン側が同じ呼び方であること (片方だけ変わると また食い違う)."""
+def test_review_skip_with_today_revives_expired_rows():
+    """today を渡すと cooldown 満了は復活する = HTMLに出る側の規則。"""
+    rows = [HDR, ["111", "OP13-120", "t", "違う", "2026-01-01", "u"]]
+    assert PG._review_skip_iids(rows, today="2026-09-08") == set()
+
+
+def test_hint_uses_the_same_call_as_the_screen():
+    """ヒントは **画面に出す側 (:1400)** と同じ呼び方で数える (2026-09-08 訂正)."""
     src = io.open(os.path.join(TOOLS, "psa_resource_gate.py"), encoding="utf-8").read()
     i = src.index("def count_workload(")
-    body = src[i:src.index("\ndef ", i + 10)]
-    assert "_review_skip_iids(read_tab(REVIEW_SKIP_TAB))" in body
-    assert "_review_skip_iids(read_tab(REVIEW_SKIP_TAB), t)" not in body, (
-        "ヒントだけ cooldown で復活させない")
+    body = src[i:src.index(chr(10) + "def ", i + 10)]
+    assert "_review_skip_iids(read_tab(REVIEW_SKIP_TAB), today=t)" in body
+    # 画面側 (:1400) も cooldown を見ている = 両者が同じ規則であることを固定する
+    assert "_review_skip_iids(_skip_existing, today=_today_for_skip)" in src

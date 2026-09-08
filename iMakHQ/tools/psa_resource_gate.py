@@ -1221,7 +1221,8 @@ def _review_skip_active(date_str, today):
     return age < 0 or age < REVIEW_SKIP_COOLDOWN_DAYS
 
 
-def count_variant_todo(cands, keymap, cert_map, verified, variant_ok, *, item_id):
+def count_variant_todo(cands, keymap, cert_map, verified, variant_ok, *, item_id,
+                       excluded=None):
     """探索前の「変種の確認」に出る件数 (純関数・test可)。
 
     ★2026-09-08 ユーザー指摘「目視する件数であるべきじゃないの?」。パネルのヒントは
@@ -1231,10 +1232,13 @@ def count_variant_todo(cands, keymap, cert_map, verified, variant_ok, *, item_id
     KEY が決まっていない行だけが目視に出る。KEY の出どころは本体 (:568/:588) と同じ順で
       ① 行が既に持っている  ② itemID→商品管理シート  ③ cert→出品時の目視確定資産
     どれでも決まらず、過去に目視で確定もしていない行を数える。
+    excluded (RESTOCK対象外) は本体が :412 で先に落とすので、ここでも落とす。
     """
     n = 0
     for r in cands:
         iid = item_id(r)
+        if iid in (excluded or set()):
+            continue          # 対象外 (catalog非対応カテゴリ等) は本体が先に落とす行
         k = r.get("key") or (keymap.get(iid) if iid else None)
         if not k and verified:
             k = key_from_verified_cert((cert_map or {}).get(iid, ""), verified)
@@ -1276,13 +1280,16 @@ def count_workload(today=None):
         try:
             from sheet_io import read_tab
             t = today or _dt.date.today().isoformat()
-            # ★2026-09-07 ユーザー指摘「①、押しても件数が変わらない。段取りを組んでいるので
-            #   正確に出せ」。ここだけ **日数で復活する数え方** (today 付き) をしていたため、
-            #   ボタン本体 (:880 は today を渡さない = レビュー済は再表示しない) と食い違い、
-            #   「1件あります」と出しているのに押すと「照合対象なし」になっていた。
-            #   数える側は **本体と同じ呼び方**にする (t は使わない)。
+            # ★2026-09-08 再訂正。本体には レビュー済を読む所が **2つ** ある:
+            #     :880  探索ループの「新規N件」カウント        … cooldown を見ない
+            #     :1400 視覚確証HTMLに何を出すかの判定         … cooldown で復活させる
+            #   HTML に出る件数を決めるのは後者なので、**こちらに合わせる** (today を渡す)。
+            #   9/07 に前者へ合わせたのは誤り。実測 2026-09-08: 台帳8行のうち cooldown が
+            #   満了した7件が本体では復活しており、ヒント1件に対し HTML は 2件出ていた。
+            #   9/07 の「1件と出るのに押すと0件」は復活のせいではなく **仕入元の在庫が
+            #   無い行を混ぜていた**ことが原因で、それは 9/05 の supply_wait 差引で解決済。
             processed = (_restock_confirmed_iids(read_tab("RESTOCK確定"))
-                         | _review_skip_iids(read_tab(REVIEW_SKIP_TAB)))
+                         | _review_skip_iids(read_tab(REVIEW_SKIP_TAB), today=t))
             excl = {(rr[0] or "").strip()
                     for rr in (read_tab("RESTOCK対象外")[1:] or []) if rr and (rr[0] or "").strip()}
             # ★2026-09-05: 目視で変種を確定した分は **次回から再目視されない資産**なので、
@@ -1321,9 +1328,13 @@ def count_workload(today=None):
         try:
             from sheet_io import product_index as _pi
             _keymap, _, _certmap = _pi()
+            # ★対象外 (catalog非対応カテゴリ等) は本体が :412 で先に落とすので、
+            #   ここでも落とす。入れたままだと「変種の確認 2件」と出て 実際は0件になる
+            #   (実測 2026-09-08: Weiss Schwarz 2件が RESTOCK対象外 に入っていた)。
             base["variant_todo"] = count_variant_todo(
                 cands, _keymap, _certmap, load_verified_certs(), variant_ok,
-                item_id=lambda r: mp._ebay_item_id(r.get("ebay_url", "") or ""))
+                item_id=lambda r: mp._ebay_item_id(r.get("ebay_url", "") or ""),
+                excluded=excl)
         except Exception:                                      # noqa: BLE001
             pass                          # 読めない時は出さない (多めに言わない側に倒さない)
         base.update({"actionable": sum(1 for i in uniq if i and i not in processed
