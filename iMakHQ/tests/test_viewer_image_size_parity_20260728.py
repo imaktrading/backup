@@ -28,6 +28,8 @@ def test_psa_confirm_candidate_is_not_smaller_than_reference():
 
     ★2026-09-08 ユーザー指示「両方はいらない。候補だけ」で **同寸 → 候補≧現物** に緩めた。
       元の趣旨は「候補が小さいと変種を見分けられない」なので、候補が大きい分には反しない。
+    ★同日 追加指示「現物ももう少し大きく」で 現物も 300x405 に。今は再び同寸だが、
+      条件は **候補≧現物** のまま (どちらかを上げても落ちない)。
     """
     s = _src("psa_resource_confirm.py")
     ref_w = _px(r"\.col\.psa img\{width:(\d+)px", s)

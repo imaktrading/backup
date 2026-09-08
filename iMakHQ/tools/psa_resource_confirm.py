@@ -333,9 +333,10 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .col.cat .cap{color:#2a7;font-weight:bold}
 /* ★候補を現物より **小さくしない** こと (2026-07-28 ユーザー指示)。小さいと
    ★の有無・パラレル・番号が見分けられず、目視の精度がサイズで頭打ちになる。
-   2026-09-08 ユーザー指示「両方はいらない。候補だけ」→ **現物は 200x270 のまま**、
-   候補だけ 300x405 に。候補の方が大きいのは上の指示に反しない。 */
-.col.psa img{width:200px;height:270px;object-fit:contain;display:block;margin:2px auto;border:1px solid #eee;background:#fafafa}
+   2026-09-08 ①「両方はいらない。候補だけ」で候補のみ 300x405 にしたが、同日
+   ②「現物ももう少し大きく」→ **現物も 300x405 に揃える** (①の 200x270 据置は取消)。
+   ここは ①現物 / ②今の仕入元 の両方に効く (どちらも col psa)。 */
+.col.psa img{width:300px;height:405px;object-fit:contain;display:block;margin:2px auto;border:1px solid #eee;background:#fafafa}
 .ph{min-height:120px;display:flex;align-items:center;justify-content:center;color:#c33;
     font-size:12px;border:1px dashed #c33;margin:2px;text-align:center;padding:4px}
 /* ★2026-09-08 ユーザー要望「補の画像をもう少し大きく」。候補は 200x270 → 300x405。
