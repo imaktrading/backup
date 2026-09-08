@@ -338,19 +338,17 @@ def fetch_aspects(item_id):
     """親の Item Specifics を丸ごと読む (revise で送り返すため)。取れなければ None。"""
     import requests
     try:
-        k = _load_keys()
-        hdr = {"X-EBAY-API-CALL-NAME": "GetItem", "X-EBAY-API-SITEID": "0",
-               "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT,
-               "X-EBAY-API-APP-NAME": k["AppID"], "X-EBAY-API-DEV-NAME": k["DevID"],
-               "X-EBAY-API-CERT-NAME": k["AppSecret"], "Content-Type": "text/xml"}
+        # ★2026-09-07: ここも旧 AuthToken のままだった (fetch_live と同じ穴)。
+        #   丸ごと入替に使う「今の全項目」が取れないと、Revise は送れないか、
+        #   送れても他の項目を消す。認証は OAuth の口に一本化する。
+        hdr = _oauth_headers("GetItem")
         body = ('<?xml version="1.0" encoding="utf-8"?>'
                 '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-                "<RequesterCredentials><eBayAuthToken>"
-                f"{k['AuthToken']}</eBayAuthToken></RequesterCredentials>"
                 f"<ItemID>{item_id}</ItemID><DetailLevel>ReturnAll</DetailLevel>"
                 "<IncludeItemSpecifics>true</IncludeItemSpecifics></GetItemRequest>")
         x = decode_xml(requests.post(EP, data=body.encode("utf-8"),
                                      headers=hdr, timeout=40).content)
+        _check_auth(x)
         _record_call("GetItem")
         head = x.split("<Variations>")[0]
         out = {}
