@@ -23,14 +23,18 @@ def _px(pattern, text):
     return int(m.group(1))
 
 
-def test_psa_confirm_candidate_matches_reference():
-    """PSA 確証UI: 現物 .col.psa img と 候補 .cand img が同寸。"""
+def test_psa_confirm_candidate_is_not_smaller_than_reference():
+    """PSA 確証UI: 候補 .cand img が 現物 .col.psa img より **小さくない**。
+
+    ★2026-09-08 ユーザー指示「両方はいらない。候補だけ」で **同寸 → 候補≧現物** に緩めた。
+      元の趣旨は「候補が小さいと変種を見分けられない」なので、候補が大きい分には反しない。
+    """
     s = _src("psa_resource_confirm.py")
     ref_w = _px(r"\.col\.psa img\{width:(\d+)px", s)
     ref_h = _px(r"\.col\.psa img\{width:\d+px;height:(\d+)px", s)
     cand_w = _px(r"\.cand img\{width:(\d+)px", s)
     cand_h = _px(r"\.cand img\{width:\d+px;height:(\d+)px", s)
-    assert (cand_w, cand_h) == (ref_w, ref_h)
+    assert cand_w >= ref_w and cand_h >= ref_h, (cand_w, cand_h, ref_w, ref_h)
 
 
 def test_psa_review_layout_stays_at_7_25():

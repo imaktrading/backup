@@ -331,13 +331,19 @@ h1{background:#2a7;color:#fff;margin:0;padding:12px 16px;font-size:17px}
 .col .cap{font-size:11px;color:#666;text-align:center}
 .col.psa .cap{color:#06c;font-weight:bold}
 .col.cat .cap{color:#2a7;font-weight:bold}
+/* ★候補を現物より **小さくしない** こと (2026-07-28 ユーザー指示)。小さいと
+   ★の有無・パラレル・番号が見分けられず、目視の精度がサイズで頭打ちになる。
+   2026-09-08 ユーザー指示「両方はいらない。候補だけ」→ **現物は 200x270 のまま**、
+   候補だけ 300x405 に。候補の方が大きいのは上の指示に反しない。 */
 .col.psa img{width:200px;height:270px;object-fit:contain;display:block;margin:2px auto;border:1px solid #eee;background:#fafafa}
 .ph{min-height:120px;display:flex;align-items:center;justify-content:center;color:#c33;
     font-size:12px;border:1px dashed #c33;margin:2px;text-align:center;padding:4px}
-.cands{display:flex;flex-direction:column;gap:5px;height:290px;overflow-y:auto;overflow-x:hidden}
+/* ★2026-09-08 ユーザー要望「補の画像をもう少し大きく」。候補は 200x270 → 300x405。
+   1件ぶんの高さが増えるので、枠の高さも 290 → 430 に合わせる (1件が切れずに収まる)。 */
+.cands{display:flex;flex-direction:column;gap:5px;height:430px;overflow-y:auto;overflow-x:hidden}
 .cand{display:flex;align-items:flex-start;gap:8px;border:1px solid #eee;border-radius:4px;padding:3px 4px;cursor:pointer}
-.cand img{width:200px;height:270px;object-fit:contain;border:1px solid #eee;margin:0;background:#fafafa}
-.cand .cph{width:200px;height:270px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;border:1px dashed #ccc}
+.cand img{width:300px;height:405px;object-fit:contain;border:1px solid #eee;margin:0;background:#fafafa}
+.cand .cph{width:300px;height:405px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;border:1px dashed #ccc}
 .cand:has(input:checked){border-color:#2a7;background:#eafaf1}
 .clbl{flex:1;min-width:220px;font-size:13px;word-break:break-word;line-height:1.45}
 .rsn{display:none;margin-top:3px;font-size:10px;color:#888;align-items:center;gap:3px}
