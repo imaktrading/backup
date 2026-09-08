@@ -49,7 +49,13 @@ SEARCH_MAX_BACKUPS = 1
 #   探す側が 補0本+補1本 の1晩40件のままだったため、目視の対象398件のうち325件が
 #   「キャッシュ未取得」= 画面に一生出てこない残になっていた (押しても減らないボタン)。
 #   閾値を下げて辻褄を合わせると 9/5 に塞いだ穴が開くので、**夜間を広げる**方で直す。
-CONFIRM_MAX_BACKUPS = AUXN          # 補<5 = 満杯未満
+# ★2026-09-08 ユーザー確定「補は5枠だけど、残が3になったら発動」。
+#   補<5 (満杯未満) を対象にしていたため、**4本ある札の値段最適化**に目視時間の大半が
+#   消えていた (実測: 追加72本のうち42本が入替 = 既に補が在る札の差し替え)。
+#   4本あれば「1本切れても死なない」目的は満たしているので、**3本以下**で発動にする。
+#   4〜5本の札の最安入替は、人ではなく **自動追記** に任せる
+#   (`hoju_url_from_dupes` が満杯でも安い方に持ち直す。2026-09-07 実装)。
+CONFIRM_MAX_BACKUPS = 4             # 補<4 = **3本以下**で発動
 HIGH_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 HIGH_GID = 851100680
 
@@ -423,6 +429,59 @@ def candidate_variant_conflicts(our_title, cand_title):
     if any(k in o for k in _OURS_PARALLEL_WORDS):
         return False                      # こちらもパラレル = 同じ刷りかもしれない
     return True
+
+
+def _row_cost_and_dead(t, vals):
+    """その出品の (今の仕入値N, 主URLが売り切れか) を返す (I/Oなし・純関数寄り)。"""
+    import re as _re
+    row = t.get("row")
+    r = vals[row - 1] if (row and 0 < row <= len(vals)) else []
+    def _cell_(i):
+        return r[i] if len(r) > i else ""
+    d = _re.sub(r"[^0-9]", "", str(_cell_(13) or ""))     # N列 = 仕入値
+    return (int(d) if d else None), bool(str(_cell_(3) or "").strip())   # D列 = 売り切れ
+
+
+def candidate_cost_conflicts(price, now_cost, main_dead):
+    """その候補を **目視に出す価値が無い** か (純関数, test可)。
+
+    ★2026-09-08 ユーザー確定。補URLは「主が売れた時に買う先」なので、
+      **今の仕入値より高い候補を押さえても、その値段で買えば利益が消える**
+      (出品価格は N列の仕入値から決めている)。実測: 候補987本の54%が今より高かった。
+    True = 出さない。ただし:
+      - 主URLが売り切れ (供給ゼロ) の札は **高くても押さえる価値がある** → 出す
+      - 値段が分からない候補は判定しない → 出す (fail-open)
+    """
+    if main_dead:
+        return False
+    if price is None or not now_cost:
+        return False
+    return price > now_cost
+
+
+def filter_candidates_by_cost(cands, t, vals):
+    """今の仕入値より高い候補を除く。戻り: (残す, 落とした)。"""
+    now_cost, main_dead = _row_cost_and_dead(t, vals)
+    try:
+        import hoju_url_from_dupes as _hd
+        prices = _price_cache_get(_hd)
+    except Exception:                                          # noqa: BLE001
+        return list(cands or []), []
+    keep, drop = [], []
+    for c in (cands or []):
+        p = prices.get(_norm_url(c.get("url")))
+        (drop if candidate_cost_conflicts(p, now_cost, main_dead) else keep).append(c)
+    return keep, drop
+
+
+_PRICE_CACHE = {}
+
+
+def _price_cache_get(hd):
+    """URL→値段 の表を1走行に1回だけ作る (毎カード作り直すと重い)。"""
+    if "v" not in _PRICE_CACHE:
+        _PRICE_CACHE["v"] = hd.price_by_url_from_cache()
+    return _PRICE_CACHE["v"]
 
 
 def filter_candidates_by_variant(cands, our_title):
@@ -1358,8 +1417,8 @@ def build_confirm_context(vals, cache, today, verbose=False):
 
 # 足切りで止まった理由。**ラベル・status_now・confirm のログが同じ語彙を使う**。
 STOP_REASONS = ("skip_ledger", "no_cache", "no_cand", "no_cardno",
-                "all_known", "all_number", "all_variant", "all_ng", "all_used",
-                "no_ref", "all_art")
+                "all_known", "all_number", "all_variant", "all_cost", "all_ng",
+                "all_used", "no_ref", "all_art")
 
 # ★2026-08-15 ユーザー指示「そういう分類にしてくれないと、ん?ってなる」。
 #   内部の理由名 (all_art / all_ng / no_cand …) をそのまま出していたので読めなかった。
@@ -1368,12 +1427,13 @@ STOP_REASONS = ("skip_ledger", "no_cache", "no_cand", "no_cardno",
 #   SPECIAL ALTERNATE ART = 別カード。人の「違う」判断は正しかった)。
 #   なので **「待ち」か「手が打てる」か** の2つに畳んで出す。
 WAIT_REASONS = ("all_art", "all_ng", "no_cand", "all_known", "all_used",
-                "all_variant")                                             # 市場にその版が無い
+                "all_variant", "all_cost")                                 # 市場にその版が無い
 ACT_REASONS = ("no_cache", "all_number", "no_cardno", "skip_ledger")       # こちらで動かせる
 _REASON_JA = {"all_art": "絵柄が別カード", "all_ng": "過去に別カードと確認済",
               "no_cand": "候補が出ない", "all_known": "候補が主URLと同じ",
               "all_used": "既に使用済", "no_cache": "未検索(今夜の巡回で解決)",
               "all_number": "番号違い", "all_variant": "刷り違い(パラレル)",
+              "all_cost": "今より高い仕入元",
               "no_cardno": "カード番号が取れない",
               "skip_ledger": "見送り中(翌日復活)", "no_ref": "現物画像が無い"}
 
@@ -1437,6 +1497,11 @@ def confirm_survivors(t, vals, cache, ctx, today, *, ref_of, art_of, stats):
     if not cands:
         stats["all_number"] += 1
         return [], "", "all_number", []
+    cands, dropped_cost = filter_candidates_by_cost(cands, t, vals)
+    stats["cand_cost"] += len(dropped_cost)
+    if not cands:
+        stats["all_cost"] += 1
+        return [], "", "all_cost", []
     cands, dropped_var = filter_candidates_by_variant(cands, t.get("title"))
     stats["cand_variant"] += len(dropped_var)
     if not cands:
@@ -1766,6 +1831,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
           f"既知URL除外 {stats['cand_known']}候補 / 番号不一致で除外 {stats['cand_number']}候補 / "
           f"刷り違い(パラレル)で除外 {stats['cand_variant']}候補 / "
+          f"今より高くて除外 {stats['cand_cost']}候補 / "
           f"過去に「違う」除外 {stats['cand_ng']}候補 / "
           f"他出品が使用中で除外 {stats['cand_used']}候補 / "
           f"絵柄が明らかに別で除外 {stats['cand_art']}候補"

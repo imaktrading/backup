@@ -44,16 +44,26 @@ def _vals(rows):
 
 
 def test_thresholds_are_split_between_search_and_confirm():
+    # ★2026-09-08 ユーザー確定「補は5枠だけど、残が3になったら発動」。
+    #   9/05 は「満杯未満すべて」だったが、**4本ある札の値段最適化**に目視時間の
+    #   大半が消えていた (実測: 追加72本のうち42本が入替)。4本あれば
+    #   「1本切れても死なない」は満たすので、目視は3本以下に絞る。
+    #   4〜5本の最安入替は自動追記 (hoju_url_from_dupes) が担う。
     assert H.SEARCH_MAX_BACKUPS == 1          # 探す側は丸腰優先 (従来どおり)
-    assert H.CONFIRM_MAX_BACKUPS == H.AUXN    # 目視は満杯未満すべて
+    assert H.CONFIRM_MAX_BACKUPS == 4         # 目視は補3本以下
 
 
 def test_partially_filled_rows_reach_the_confirm_flow():
-    """補1〜4本の出品が目視の対象に入る (今回の穴そのもの)。"""
+    """補1〜3本の出品が目視の対象に入る (9/05 の穴は塞いだまま)。
+
+    ★2026-09-08: 補4本は目視から外した (自動追記に任せる)。9/05 の趣旨
+      「補が少ない札が どのボタンにも出ない」は 1〜3本が出るので満たしている。
+    """
     vals = _vals([
         _row("a", aux=()),                       # 補0
         _row("b", aux=("u1",)),                  # 補1
-        _row("c", aux=("u1", "u2", "u3", "u4")),  # 補4
+        _row("c", aux=("u1", "u2", "u3")),        # 補3 = 出る (境界)
+        _row("e", aux=("u1", "u2", "u3", "u4")),  # 補4 = 出ない (自動追記に任せる)
         _row("d", aux=("u1", "u2", "u3", "u4", "u5")),  # 満杯 = 対象外
     ])
     ids = [t["itemID"] for t in
