@@ -1594,8 +1594,8 @@ def _append_new_listing_rows(rows):
         return 0
     try:
         import sheet_io as _sio
-        ws = _sio._product_ws()
-        ws.append_rows(new_listing_rows_from_confirmed(rows), value_input_option="RAW")
+        # ★2026-09-09: 直接 append は 40列 = A..AN を書き、N(数式列)を塞ぐ (全行 #REF!)。
+        _sio.append_product_rows(new_listing_rows_from_confirmed(rows))
         return len(rows)
     except Exception as e:                                     # noqa: BLE001
         print(f"  ⚠ 新規出品行の追加skip ({type(e).__name__}: {e})")

@@ -278,9 +278,14 @@ def test_the_only_write_path_is_the_cert_screen():
       なので「一切書かない」ではなく「その画面を通した時だけ書く」を守る。
     """
     src = open(os.path.join(_TOOLS, "newcand_confirm.py"), encoding="utf-8").read()
+    # ★2026-09-09: 生の `ws.append_rows` は **禁止**。40列ぶんの行を append すると
+    #   N列(=ARRAYFORMULA の spill 出力)を塞ぎ、全行の仕入値が #REF! で消える
+    #   (実害: N1=#REF! で 出品中721行を含む全2,435行が空になった)。
+    #   N/AN を踏まない `sheet_io.append_product_rows` を通す。
+    assert src.count("ws.append_rows(") == 0
     # 追加は run_append_high の中の1箇所だけ
-    assert src.count("append_rows(") == 1
-    i = src.index("append_rows(")
+    assert src.count("append_product_rows(") == 1
+    i = src.index("append_product_rows(")
     fn = src.rindex("def ", 0, i)
     assert src[fn:fn + 40].startswith("def run_append_high"), src[fn:fn + 40]
     # その関数は 人が打った cert を通してからでないと行を作らない

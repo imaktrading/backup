@@ -1292,6 +1292,12 @@ def save(items, res):
 CERT_RE = re.compile(r"^\d{7,10}$")
 HIGH_CERT_COL = 8          # I列
 HIGH_URL_COL, HIGH_TITLE_COL, HIGH_CAT_COL = 0, 2, 17
+# ★2026-09-09 ユーザー指摘「価格とかスプシに入れなくてもいいの?」。候補タブには
+#   「M列:仕入価格(円)」として値を持っているのに、出品行に写していなかった。
+#   実測: 未出品(証明番号あり) 1,714行のうち **515行が M列 空**。
+#   M は N=(M or F)−K が拾う seed で、以降は監視くんの最安が毎cycle上書きする
+#   (RESTOCK と同じ作法)。N には**絶対に書かない** (数式列)。
+HIGH_PRICE_COL = 12        # M列 (現在価格。仕入値の種)
 HIGH_AUX0, HIGH_AUXN = 28, 5
 DONE_MARK_HIGH = "済(HIGH)"
 DONE_MARK_SOLD = "売り切れ"
@@ -1383,6 +1389,8 @@ def plan_high_rows(items, certs, existing_certs=(), listed_keys=(), out_rows=())
         row[HIGH_TITLE_COL] = it["title"]
         row[HIGH_CERT_COL] = cert
         row[HIGH_CAT_COL] = SHEET_CATEGORY
+        if it.get("price"):
+            row[HIGH_PRICE_COL] = it["price"]     # M列 = 仕入値の種 (N は数式が作る)
         # ★AI列(KEY)は書かない。未出品の行に KEY が入ると重複くんが「出品済」と読んで
         #   その card を丸ごとブロックする (orphan KEY 事故)。同定は cert が持つ。
         for n, u in enumerate(aux_urls_for(it["key"], out_rows, it["url"])):
@@ -1524,8 +1532,9 @@ def run_append_high(timeout=10800, dry_run=False):
     for url, why in skipped:
         print("  skip 足しません: %s — %s" % (why, url[:60]))
     if rows:
-        ws = sheet_io._product_ws()
-        ws.append_rows(rows, value_input_option="RAW")
+        # ★2026-09-09: 直接 append すると 40列 = A..AN を書き、N(数式列)を塞いで
+        #   全行の仕入値が #REF! で消える。N/AN を踏まないヘルパ経由にする。
+        sheet_io.append_product_rows(rows)
         print("  + 商品管理シートに %d行 追加 (B列=itemID は空 = 出品くんが拾う)" % len(rows))
     else:
         print("  足す行はありませんでした")

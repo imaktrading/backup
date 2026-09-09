@@ -226,7 +226,14 @@ class _ColWriteGuard:
     guarded_cols: {列idx0: (列名, deny メッセージ)} の dict。列ごとに違う理由メッセージ。
     """
 
-    _WRITE_METHODS = ("batch_update", "update", "update_acell", "update_cell", "update_cells")
+    # ★2026-09-09 `append_row` / `append_rows` を追加。ここに無かったため、
+    #   **40列ぶんの行を append する経路がガードを素通り**していた。
+    #   実害: 種→出品行 (`newcand_confirm`) が `[""] * 40` を append し、N列(数式)を塞いで
+    #   N1=#REF! → 出品中721行を含む全行の仕入値が空になった (2026-09-09 発見)。
+    #   2026-08-02 の ichibankuji_restock と**同型の再発**。前回は書く側だけ直したので、
+    #   別の入口 (append) から同じ穴に落ちた。今回は **出口** を塞ぐ。
+    _WRITE_METHODS = ("batch_update", "update", "update_acell", "update_cell", "update_cells",
+                      "append_row", "append_rows")
 
     def __init__(self, ws, guarded_cols=None):
         object.__setattr__(self, "_ws", ws)
@@ -280,6 +287,16 @@ class _ColWriteGuard:
             for col in guarded:
                 if args[1] == col + 1:                # gspread は 1-indexed
                     self._deny(col, f"update_cell col={args[1]}")
+        elif name in ("append_row", "append_rows") and args:
+            # append は列を指定しない = **行の長さ**で どこまで書くかが決まる。
+            # 守る列に届く長さなら、その列に (空文字であっても) セルを作るので弾く。
+            rows = args[0] or []
+            if rows and not isinstance(rows[0], (list, tuple)):
+                rows = [rows]                       # append_row は1行ぶん
+            width = max((len(r) for r in rows), default=0)
+            for col in sorted(guarded):
+                if width > col:
+                    self._deny(col, f"{name} width={width} (>{col} 列目に届く)")
         elif name == "update_cells" and args:
             for c in (args[0] or []):
                 col1 = getattr(c, "col", None)
@@ -322,6 +339,48 @@ def _product_ws():
     if ws is None:
         raise RuntimeError(f"商品管理シート gid={PRODUCT_GID} が見つからない")
     return _ColWriteGuard(ws, _PRODUCT_GUARDED_COLS)
+
+
+def _first_row_of_updated_range(rng):
+    """gspread の append 応答 `'商品管理シート!A2760:M2761'` → 2760 (取れなければ None)."""
+    import re as _re
+    m = _re.search(r"![A-Z]+(\d+)", str(rng or ""))
+    return int(m.group(1)) if m else None
+
+
+def append_product_rows(rows, value_input_option="RAW"):
+    """商品管理シートに行を足す (**N列と AN列を1セルも踏まない**)。
+
+    ★2026-09-09: `ws.append_rows([[""] * 40])` は A..AN を全部書くので、N(ARRAYFORMULA の
+      spill 出力) が塞がれて **全行の仕入値が #REF! で消える**。行を足す側は N を書きたい
+      わけではなく、40列の空行を作っていただけだった。
+      → **A..M を append し、O..AM は別レンジで書く**。N と AN はそもそも送らない。
+      (AN=39 は廃止済み列なので、行の幅を 39列 = A..AM に切る)
+
+    rows: 行の配列 (長さは可変。39列を超える分は捨てる)
+    戻り: 追記した行数
+    """
+    if not rows:
+        return 0
+    ws = _product_ws()
+    width = PRODUCT_COL_COST_OVERRIDE                  # 39 = A..AM (AN は含めない)
+    body = [(list(r) + [""] * width)[:width] for r in rows]
+    resp = ws.append_rows([r[:PRODUCT_COL_COST] for r in body],   # A..M
+                          value_input_option=value_input_option)
+    first = _first_row_of_updated_range(
+        ((resp or {}).get("updates") or {}).get("updatedRange"))
+    if first is None:
+        # 行番号が取れない = 残りの列を書く先が決められない。**黙って捨てない**。
+        raise RuntimeError("append の応答から行番号が取れませんでした。"
+                           "A..M は追記済みなので、O..AM (補URL/カテゴリ) は要手当て")
+    reqs = []
+    for i, r in enumerate(body):
+        tail = r[PRODUCT_COL_COST + 1:]                # O..AM
+        if any(str(v).strip() for v in tail):
+            reqs.append({"range": f"O{first + i}:AM{first + i}", "values": [tail]})
+    if reqs:
+        ws.batch_update(reqs, value_input_option=value_input_option)
+    return len(body)
 
 
 def product_key_map():
