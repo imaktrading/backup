@@ -64,6 +64,35 @@ def classify_restock(confirmed_items, qty_map, status_map=None):
             "unknown": unknown, "status": status}
 
 
+def pending_iids_from_confirmed(rows):
+    """RESTOCK確定の2d行 → (まだ実行済でない, 実行済, 終了済) の **itemID 集合** (純関数)。
+
+    ★2026-09-10 ユーザー指摘「残1と出て、押しても直らないなら意味がない」。
+      件数を引き算で出すと、同じ札を2回引く/引き忘れる事故が起きる (実際 ②で発生)。
+      **集合で持てば二重に引けない**ので、数える側は必ずこちらを使う。
+    """
+    if not rows or len(rows) < 2:
+        return set(), set(), set()
+    h = rows[0]
+    si = h.index("RESTOCK状態") if "RESTOCK状態" in h else None
+    ii = h.index("itemID") if "itemID" in h else 0
+    todo, done, ended = set(), set(), set()
+    for r in rows[1:]:
+        if not any(r):
+            continue
+        iid = (r[ii] if ii < len(r) else "").strip()
+        if not iid:
+            continue
+        st = (r[si] if si is not None and si < len(r) else "") or ""
+        if ST_DONE in st:
+            done.add(iid)
+        elif ST_ENDED in st or "終了済" in st:
+            ended.add(iid)
+        else:
+            todo.add(iid)
+    return todo, done, ended
+
+
 def pending_rows_from_confirmed(rows):
     """RESTOCK確定の2d行 → (まだ実行済でない件数, 実行済件数, 終了済件数) (純関数)。
 
@@ -107,20 +136,24 @@ def count_workload(rows=None, itemid_to_cert=None):
                 _os.path.dirname(_os.path.abspath(__file__)), "..", "..", "iMakeBayAPI")))
             from sheet_io import read_tab
             rows = read_tab("RESTOCK確定")
-        todo, done, ended = pending_rows_from_confirmed(rows)
+        todo_iids, done_iids, ended_iids = pending_iids_from_confirmed(rows)
+        todo, done, ended = len(todo_iids), len(done_iids), len(ended_iids)
         # ★2026-09-04 ユーザー指摘「押しても永久に減らず、青のままだと意味ないやん」。
         #   cert が引けない行は ②で CSV を作れない = ③を何回押しても実行済にならない。
         #   青 (= 押せば減る) から外し、**別の手当てが要る件**として出す。
         #   基準は ②と同じ (psa_restock_build と二重実装しない)。
-        blocked = 0
+        # ★2026-09-10: 件数どうしを引かない。**②が「作れない」と言った itemID の集合**を
+        #   引く。数を引くと、母集合が違う/同じ札が両方に居る時に必ず狂う。
+        blocked_iids = set()
         try:
             import psa_restock_build as _RB
             b = _RB.count_workload(rows, itemid_to_cert=itemid_to_cert)
-            blocked = int(b.get("blocked") or 0)
+            blocked_iids = set(b.get("blocked_iids") or ())
         except Exception:                                      # noqa: BLE001
-            blocked = 0
-        return {"actionable": max(todo - blocked, 0), "done": done, "ended": ended,
-                "blocked": blocked, "total": todo + done + ended}
+            blocked_iids = set()
+        live = todo_iids - blocked_iids
+        return {"actionable": len(live), "done": done, "ended": ended,
+                "blocked": len(todo_iids) - len(live), "total": todo + done + ended}
     except Exception as e:                                     # noqa: BLE001
         return {"error": "%s: %s" % (type(e).__name__, e)}
 

@@ -109,8 +109,13 @@ def test_restock_build_counts_only_unlisted():
     #   この検査の趣旨 (実行済を除く) は変えず、cert は両方引ける前提で渡す。
     # ★2026-09-07: その日 CSV に出した分を残数から引くようにしたので built_today が付く
     #   (押した直後にヒントが減らない、というユーザー指摘への対応)。
-    assert RB.count_workload(rows, itemid_to_cert={"222": "a", "333": "b"}) == {
+    # ★2026-09-10: 残数を引き算で出すのをやめ、**集合**で出すようにした
+    #   (同じ札を二重に引く事故の根治)。③へ渡すため blocked_iids が増えている。
+    #   検査の趣旨 (実行済を除く) は変えない。
+    got = RB.count_workload(rows, itemid_to_cert={"222": "a", "333": "b"})
+    assert {k: got[k] for k in ("actionable", "done", "blocked", "built_today", "total")} == {
         "actionable": 2, "done": 1, "blocked": 0, "built_today": 0, "total": 3}
+    assert got["blocked_iids"] == []
     # cert が片方しか引けなければ、出るのは1件と言う
     assert RB.count_workload(rows, itemid_to_cert={"222": "a"})["actionable"] == 1
 

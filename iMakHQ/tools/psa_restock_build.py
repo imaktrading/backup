@@ -248,14 +248,24 @@ def count_workload(rows=None, itemid_to_cert=None):
             #   今日もう出した分を引く時、**上で既に外した行まで もう一度引いていた**
             #   (同じ札を二重に減算)。実測: 出せるのは2件なのに 1件と表示。
             #   残っている cert の中だけで数える。
-            built_n = sum(1 for i, c in _cert_of.items() if c in _live and i in built)
-            actionable = len(_live)
-        else:
-            built_n = sum(1 for p in pending
-                          if (p.get("itemID") or "").strip() in built)
-        return {"actionable": max(actionable - built_n, 0), "done": done,
-                "blocked": blocked, "built_today": built_n,
-                "total": len(pending) + done}
+            # ★2026-09-10 ユーザー指示「残1と出て押しても直らないなら意味がない」。
+            #   件数を引き算しない。**押せば出る itemID の集合**を作り、その大きさを返す。
+            #   集合なら同じ札を二重に引くことが原理的に起きない。
+            _live_iids = {i for i, c in _cert_of.items() if c in _live}
+            _blocked_iids = {i for i in _cert_of if i not in _live_iids}
+            _built_iids = _live_iids & set(built)
+            _actionable_iids = _live_iids - _built_iids
+            return {"actionable": len(_actionable_iids), "done": done,
+                    "blocked": blocked, "built_today": len(_built_iids),
+                    "blocked_iids": sorted(_blocked_iids | _built_iids),
+                    "total": len(pending) + done}
+        # cert を渡されなかった時 (= 生成可否を判定できない) も集合で数える
+        _p_iids = {(p.get("itemID") or "").strip() for p in pending
+                   if (p.get("itemID") or "").strip()}
+        _built_iids = _p_iids & set(built)
+        return {"actionable": len(_p_iids - _built_iids), "done": done,
+                "blocked": blocked, "built_today": len(_built_iids),
+                "blocked_iids": sorted(_built_iids), "total": len(pending) + done}
     except Exception as e:                                     # noqa: BLE001
         return {"error": "%s: %s" % (type(e).__name__, e)}
 
