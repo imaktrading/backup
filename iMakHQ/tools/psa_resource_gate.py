@@ -1247,6 +1247,41 @@ def count_variant_todo(cands, keymap, cert_map, verified, variant_ok, *, item_id
     return n
 
 
+def count_ng_blocked(uniq_iids, cache, ng_by_iid, combine_fn, build_cands_fn):
+    """**押しても画面に出ない**札を数える (純関数寄り, test可)。
+
+    ★2026-09-10 ユーザー指摘「作業できる残数じゃないと意味がないといったよね?」。
+      候補が全部「過去に人が違うと判定済み」の札は、確証UIが丸ごと飛ばす
+      (:1437 の `if not _keep: continue`)。押しても出てこないのに「残り1件」と
+      出続けていた (実例 358724052004 / OP13-120 サボ: 候補3本とも NG 台帳に在り)。
+      新しい仕入元が出るまで人には何もできないので、**作業できる数から外す**。
+
+    判らないもの (今日のキャッシュが無い / 候補が取れない) は数えない = そのまま
+    「作業できる」に残す (押せば探索して出るかもしれないため)。
+    戻り: 出せない itemID の set。
+    """
+    blocked = set()
+    for iid in uniq_iids:
+        ng = (ng_by_iid or {}).get(iid)
+        if not ng:
+            continue                       # NG 台帳に無い = 塞がれていない
+        entry = (cache or {}).get(iid) or {}
+        mr = entry.get("mercari") or {}
+        try:
+            c = combine_fn(mr.get("best"), entry.get("snkrdunk"),
+                           mercari_cands=mr.get("cands"), max_aux=5)
+            cands = build_cands_fn(mr, c)
+        except Exception:                                      # noqa: BLE001
+            continue
+        if not cands:
+            continue                       # 候補が判らない = 判定しない
+        import psa_hoju_fill as _hf
+        keep, _ = _hf.filter_candidates_rejected(cands, ng)
+        if not keep:
+            blocked.add(iid)
+    return blocked
+
+
 def count_workload(today=None):
     """押したら『今すぐ照合に出せる件数』を **探索せずに** 数える (パネルのヒント用・2026-09-01).
 
@@ -1337,8 +1372,24 @@ def count_workload(today=None):
                 excluded=excl)
         except Exception:                                      # noqa: BLE001
             pass                          # 読めない時は出さない (多めに言わない側に倒さない)
+        # ★2026-09-10: 候補が全部「違う」判定済 = 押しても画面に出ない札を外す。
+        try:
+            import json as _json
+            import psa_hoju_fill as _hf2
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "psa_research_cache.json"), encoding="utf-8") as _f:
+                _cache = _json.load(_f)
+            _ng_map = _hf2._ng_urls_by_iid(read_tab(_hf2.NG_CAND_TAB))
+            ng_blocked = count_ng_blocked(
+                [i for i in uniq if i and i not in processed and i not in excl
+                 and i not in supply_wait],
+                _cache, _ng_map, combine, _build_visual_candidates)
+        except Exception:                                      # noqa: BLE001
+            ng_blocked = set()             # 判らない時は外さない (作業できる側に残す)
+        base["ng_blocked"] = len(ng_blocked)
         base.update({"actionable": sum(1 for i in uniq if i and i not in processed
-                                       and i not in excl and i not in supply_wait),
+                                       and i not in excl and i not in supply_wait
+                                       and i not in ng_blocked),
                      "supply_wait": sum(1 for i in uniq if i and i not in processed
                                         and i not in excl and i in supply_wait),
                      "processed": sum(1 for i in uniq if i and i in processed),

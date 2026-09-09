@@ -107,3 +107,55 @@ def test_review_skip_cooldown_revives_old_rows():
     assert "old" not in active, "cooldown 満了は復活する"
     assert "new" in active and "nodate" in active
     assert PG._review_skip_iids(rows) == {"old", "new", "nodate"}
+
+
+class _FakeHF:
+    pass
+
+
+def _combine(best, snkr, mercari_cands=None, max_aux=5):
+    return {"cheapest_url": (best or [None, None])[1] if best else None}
+
+
+def _cands_from(mr, c):
+    return [{"url": u} for u in (mr.get("urls") or [])]
+
+
+def test_all_candidates_rejected_is_not_counted_as_work():
+    """候補が全部「違う」判定済の札は **押しても画面に出ない** ので残数に入れない。
+
+    ★2026-09-10 ユーザー指摘「作業できる残数じゃないと意味がないといったよね?」。
+      実例 358724052004 (OP13-120 サボ): 候補3本とも NG 台帳に在り、確証UIは
+      丸ごと飛ばすのに「残り1件」と出続けていた。
+    """
+    cache = {"A": {"mercari": {"urls": ["https://x/1", "https://x/2"]}}}
+    ng = {"A": {"https://x/1", "https://x/2"}}
+    got = PG.count_ng_blocked(["A"], cache, ng, _combine, _cands_from)
+    assert got == {"A"}
+
+
+def test_one_fresh_candidate_keeps_it_as_work():
+    """1本でも新しい候補が残るなら、それは作業できる。"""
+    cache = {"A": {"mercari": {"urls": ["https://x/1", "https://x/9"]}}}
+    ng = {"A": {"https://x/1"}}
+    assert PG.count_ng_blocked(["A"], cache, ng, _combine, _cands_from) == set()
+
+
+def test_unknown_is_left_as_work():
+    """今日のキャッシュが無い / 候補が取れない時は外さない (少なく言い過ぎない)。"""
+    ng = {"A": {"https://x/1"}}
+    assert PG.count_ng_blocked(["A"], {}, ng, _combine, _cands_from) == set()
+    cache = {"A": {"mercari": {"urls": []}}}
+    assert PG.count_ng_blocked(["A"], cache, ng, _combine, _cands_from) == set()
+
+
+def test_no_ng_ledger_entry_is_left_as_work():
+    cache = {"A": {"mercari": {"urls": ["https://x/1"]}}}
+    assert PG.count_ng_blocked(["A"], cache, {}, _combine, _cands_from) == set()
+
+
+def test_panel_shows_why_it_is_zero():
+    """0件になった理由 (候補が全部NG) を画面に出す。"""
+    src = open(os.path.join(ROOT, "control_panel.py"), encoding="utf-8").read()
+    assert 'pg.get("ng_blocked")' in src
+    assert "候補が全部「違う」判定済" in src
