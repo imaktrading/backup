@@ -81,7 +81,10 @@ def check() -> dict:
             continue
         if not s.get("enriched_at"):
             no_fields += 1
-        elif not s.get("size_chart"):
+        elif not (s.get("size_chart") or s.get("size_chart_absent_at")):
+            # ★`size_chart_absent_at` は「公式が寸法を消した」「衣類でない」と
+            #   実測で確定した行。取りこぼしではないので数に入れない
+            #   (2026-09-10: 23件を「まだ」と誤って出していた)
             no_chart += 1
     missing = [i for i in stock if i.get("productId") not in have]
     return {"stock": len(stock), "missing": missing,
