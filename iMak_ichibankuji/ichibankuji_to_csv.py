@@ -954,11 +954,16 @@ def phase2_transfer_to_sheet(intermediate_path):
         sub_info = f" (補URL {sub_n} 件)" if sub_n else ""
         print(f"  {r.get('prize','')} {r.get('prize_title','')[:25]} → 価格 ¥{r.get('cost_jpy','-')}{sub_info}")
 
-    ws.update(
-        range_name=f"A{next_row}:AG{next_row + len(new_rows) - 1}",
-        values=new_rows,
-        value_input_option='USER_ENTERED',
-    )
+    # ★2026-09-09: A:AG の一括書込は **N列 (仕入れ価格 = ARRAYFORMULA の spill 出力)** を
+    #   空文字で塞ぐ。1セルでも塞ぐと N1=#REF! になり **全行の仕入値が消える**
+    #   (実害 2026-09-09: 出品中721行を含む2,435行が空。同型は 2026-08-02 にも発生)。
+    #   → N を挟んで **A:M と O:AG の2本**に割る。N には何も送らない。
+    #   (row_33[13] は元から未設定 = 書きたい値ではなく、ただの詰め物だった)
+    _last = next_row + len(new_rows) - 1
+    ws.batch_update([
+        {"range": f"A{next_row}:M{_last}", "values": [r[:13] for r in new_rows]},
+        {"range": f"O{next_row}:AG{_last}", "values": [r[14:] for r in new_rows]},
+    ], value_input_option='USER_ENTERED')
     print(f"\n✅ 統合Hight に {len(new_rows)}行 追記 (行 {next_row}〜)")
     print(f"次のステップ: ▶実行 で 統合Hight (R=一番くじ, ItemID空) → eBay CSV生成")
 
