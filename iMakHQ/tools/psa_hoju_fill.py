@@ -56,6 +56,15 @@ SEARCH_MAX_BACKUPS = 1
 #   4〜5本の札の最安入替は、人ではなく **自動追記** に任せる
 #   (`hoju_url_from_dupes` が満杯でも安い方に持ち直す。2026-09-07 実装)。
 CONFIRM_MAX_BACKUPS = 4             # 補<4 = **3本以下**で発動
+
+# ★2026-09-09 ユーザー確定「補は十分にあるからねー。1000円以上にしようか」。
+#   入れ替え (補4〜5本) は **もっと安い仕入元に替える**のが目的なので、
+#   今と同じ値段の候補を出しても入れ替わらない = 目視だけさせて何も変わらない。
+#   実測 (2026-09-09): 入れ替えに出ていた 55件のうち **10件は同額の候補しか無く**、
+#   押しても1本も替わらないカードだった。差額 ¥1,000 未満も 目視1枚の手間に見合わない。
+#   ★補充 (補0〜3本) には効かせない。丸腰の出品にとって同額の仕入元は「値下げ」ではなく
+#     **予備の本数そのもの**で、切れた時に生き残るための供給。
+SWAP_MIN_GAIN = 1000                # 入れ替えは「今より ¥1,000以上 安い」候補だけ目視に出す
 HIGH_SHEET_ID = "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk"
 HIGH_GID = 851100680
 
@@ -450,12 +459,15 @@ def _row_cost_and_dead(t, vals):
     return (int(d) if d else None), bool(str(_cell_(3) or "").strip())   # D列 = 売り切れ
 
 
-def candidate_cost_conflicts(price, now_cost, main_dead):
+def candidate_cost_conflicts(price, now_cost, main_dead, min_gain=0):
     """その候補を **目視に出す価値が無い** か (純関数, test可)。
 
     ★2026-09-08 ユーザー確定。補URLは「主が売れた時に買う先」なので、
       **今の仕入値より高い候補を押さえても、その値段で買えば利益が消える**
       (出品価格は N列の仕入値から決めている)。実測: 候補987本の54%が今より高かった。
+    ★2026-09-09 ユーザー確定。min_gain = **今より最低いくら安くないと出さないか**。
+      入れ替え (補が足りている札) は SWAP_MIN_GAIN=¥1,000。同額の候補は
+      入れ替わらないのに目視だけさせるため。補充側は 0 のまま (予備は同額でも価値がある)。
     True = 出さない。ただし:
       - 主URLが売り切れ (供給ゼロ) の札は **高くても押さえる価値がある** → 出す
       - 値段が分からない候補は判定しない → 出す (fail-open)
@@ -464,12 +476,26 @@ def candidate_cost_conflicts(price, now_cost, main_dead):
         return False
     if price is None or not now_cost:
         return False
-    return price > now_cost
+    return price > now_cost - (min_gain or 0)
+
+
+def min_gain_for(t):
+    """その出品で「目視に出す価値がある差額」(円)。補が満杯側=入れ替えだけ ¥1,000 要求。
+
+    ★ボタンの引数ではなく **行の補URL本数** で決める。パネルの件数表示 (count_workload) と
+      実走行 (run_daytime_confirm) は同じ confirm_survivors を通るので、ここ1か所で
+      決めておけば「20件と出て10件しか出ない」がそもそも起きない。
+    """
+    return SWAP_MIN_GAIN if (t or {}).get("n_backups", 0) >= CONFIRM_MAX_BACKUPS else 0
 
 
 def filter_candidates_by_cost(cands, t, vals):
-    """今の仕入値より高い候補を除く。戻り: (残す, 落とした)。"""
+    """今の仕入値より高い候補を除く (入れ替えは ¥1,000以上安くない分も除く)。
+
+    戻り: (残す, 落とした)。
+    """
     now_cost, main_dead = _row_cost_and_dead(t, vals)
+    min_gain = min_gain_for(t)
     try:
         import hoju_url_from_dupes as _hd
         prices = _price_cache_get(_hd)
@@ -478,7 +504,8 @@ def filter_candidates_by_cost(cands, t, vals):
     keep, drop = [], []
     for c in (cands or []):
         p = prices.get(_norm_url(c.get("url")))
-        (drop if candidate_cost_conflicts(p, now_cost, main_dead) else keep).append(c)
+        (drop if candidate_cost_conflicts(p, now_cost, main_dead, min_gain)
+         else keep).append(c)
     return keep, drop
 
 
@@ -1851,7 +1878,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
           f"候補なしskip {no_cand} / 探索不能skip {no_cardno} / 現物画像なしskip {no_ref} / "
           f"既知URL除外 {stats['cand_known']}候補 / 番号不一致で除外 {stats['cand_number']}候補 / "
           f"刷り違い(パラレル)で除外 {stats['cand_variant']}候補 / "
-          f"今より高くて除外 {stats['cand_cost']}候補 / "
+          f"高い/ほぼ同額(入替は¥{SWAP_MIN_GAIN}以上安い分だけ)で除外 {stats['cand_cost']}候補 / "
           f"過去に「違う」除外 {stats['cand_ng']}候補 / "
           f"他出品が使用中で除外 {stats['cand_used']}候補 / "
           f"絵柄が明らかに別で除外 {stats['cand_art']}候補"
