@@ -338,6 +338,43 @@ def _run_step(cmd, cwd=None, env=None, timeout=None, encoding=None,
     return _step_result(rc, out, err)
 
 
+def badge_number(text):
+    """ボタンのヒント文から「押したら片づく件数」を読む (純関数, test可)。
+
+    ★2026-09-10 ユーザー指示「押したら作業できる残件数を表示して欲しい」。
+      数え方を直すだけでは、また別の理由でズレる (同じボタンで4回起きた)。
+      **押した後に本当に減ったか**を毎回突き合わせるために、表示から数を読む。
+    読めなければ None (= 突き合わせない)。
+    """
+    t = text or ""
+    if "押しても0件" in t:
+        return 0
+    m = re.search(r"残り\s*(\d+)\s*件", t)
+    return int(m.group(1)) if m else None
+
+
+def badge_did_not_move(before, after):
+    """押したのに減らなかったか (純関数)。判らない時は False (騒がない)。"""
+    if before is None or after is None:
+        return False
+    return before > 0 and after >= before
+
+
+def _record_badge_drift(badge, label, before, after):
+    """減らなかった事実を残す (I/O・失敗しても走行は止めない)。"""
+    try:
+        import json as _json
+        path = os.path.join(WORKSPACE, "iMakHQ", "review_logs", "badge_drift.jsonl")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps({"at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                 "badge": badge, "label": label,
+                                 "before": before, "after": after},
+                                ensure_ascii=False) + chr(10))
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
 def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
     """csv_output/ の最新 CSV に対して rarara を実行.
 
@@ -4426,6 +4463,15 @@ class ListingPanel:
             if sys.platform == "win32":
                 creationflags = subprocess.CREATE_NO_WINDOW
             self._listing_start_ts = time.time()  # rarara が今回 CSV のみ対象にするための基準
+            # ★2026-09-10: 押す前の表示件数を控える。走行後に減ったかを突き合わせる
+            #   (「残1と出て押しても直らない」を機械が気づけるようにする)。
+            try:
+                _bk = (script or {}).get("badge")
+                _cache = self._hoju_badge_cache() or {}
+                self._badge_before = (_bk, badge_number(_cache.get(_bk)),
+                                      script.get("label", ""))
+            except Exception:                                  # noqa: BLE001
+                self._badge_before = None
             self.proc = subprocess.Popen(
                 cmd, cwd=cwd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -4731,6 +4777,7 @@ class ListingPanel:
                         if _i is not None and _i >= 0:
                             self._remember_step_run((SCRIPTS[_i] or {}).get("badge"))
                         self.refresh_hoju_badge()
+                        self._check_badge_moved()
                     except Exception:                             # noqa: BLE001
                         pass
                 else:
@@ -4738,6 +4785,30 @@ class ListingPanel:
         except queue.Empty:
             pass
         self.root.after(100, self.poll_queue)
+
+    def _check_badge_moved(self):
+        """押したのに件数が減らなかったら、その場で言う (2026-09-10 ユーザー指示)。
+
+        > 押したら作業できる残件数を表示して欲しい
+
+        数え方を直すだけでは、また別の理由でズレる (同じボタンで4回起きた)。
+        **押した結果と表示が合っているか**を毎回確かめ、合っていなければ黙らない。
+        """
+        before = getattr(self, "_badge_before", None)
+        self._badge_before = None
+        if not before:
+            return
+        badge, n_before, label = before
+        if not badge or n_before is None:
+            return
+        after = badge_number((self._hoju_badge_cache() or {}).get(badge))
+        if badge_did_not_move(n_before, after):
+            self.append_log(
+                "%s⚠️ 押しても件数が減りませんでした (%s: %s件 → %s件)。%s"
+                "   表示が『作業できる件数』になっていない可能性があります"
+                " — review_logs/badge_drift.jsonl に記録しました%s"
+                % (chr(10), label or badge, n_before, after, chr(10), chr(10)))
+            _record_badge_drift(badge, label, n_before, after)
 
     def stop_script(self):
         _kill_process_tree(self.proc, self.append_log)
