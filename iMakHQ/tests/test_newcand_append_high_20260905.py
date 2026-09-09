@@ -130,7 +130,8 @@ def test_html_has_a_cert_input_per_candidate():
 def test_parse_cert_result():
     r = N.parse_cert_result({"certs": [{"i": 3, "cert": " 12345678 "}]})
     assert r["certs"] == {3: "12345678"} and r["sold"] == set()
-    assert N.parse_cert_result({}) == {"certs": {}, "sold": set()}
+    # ★2026-09-09 「番号が読めない」を足したので nonum も返る (古い形の POST でも壊れない)
+    assert N.parse_cert_result({}) == {"certs": {}, "sold": set(), "nonum": set()}
     assert N.parse_cert_result({"certs": [{"i": "x"}]})["certs"] == {}
 
 

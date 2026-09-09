@@ -1301,6 +1301,11 @@ HIGH_PRICE_COL = 12        # M列 (現在価格。仕入値の種)
 HIGH_AUX0, HIGH_AUXN = 28, 5
 DONE_MARK_HIGH = "済(HIGH)"
 DONE_MARK_SOLD = "売り切れ"
+# ★2026-09-09 ユーザー指示「カード番号読みとれずを追加して、対応終了にしてほしい。
+#   隠している人がいるからね」。証明番号を写真に写していない出品者がいて、
+#   番号を打てない = 印が付かない = **同じ候補が毎回出続ける**。
+#   人が「読めない」と判断したらそこで終わりにする (次から出さない)。
+DONE_MARK_NONUM = "番号読めず"
 # sync_status が毎回 計算し直してよい印。ここに無い印 (人が押した「売り切れ」等) は残す。
 # ★これが無いと、人が付けた結論が次の同期で消えて **同じ候補が永久に出続ける**。
 AUTO_MARKS = ("", "済", "済(補URL)", DONE_MARK_HIGH)
@@ -1421,6 +1426,8 @@ def build_cert_html(items):
             "<div><label>証明番号 <input class='cert' inputmode='numeric' "
             "placeholder='例 12345678'></label>"
             "<label class='so'><input type='checkbox' class='sold'> 売り切れ"
+            "(次から出さない)</label>"
+            "<label class='nn'><input type='checkbox' class='nonum'> 番号が読めない"
             "(次から出さない)</label></div>"
             "</div></div>" % (
                 it["i"], _html.escape(it["url"]), _html.escape(photo), _html.escape(photo),
@@ -1445,25 +1452,30 @@ def build_cert_html(items):
            "input.cert{font-size:18px;padding:4px;width:180px;border:2px solid #06c;"
            "border-radius:4px}"
            ".so{margin-left:14px;color:#a33;font-size:13px}"
+           ".so{margin-left:14px;color:#a33;font-size:13px}"
+           ".nn{margin-left:14px;color:#a60;font-size:13px}"
            ".card:has(.sold:checked){opacity:.55;background:#fff2f2}"
+           ".card:has(.nonum:checked){opacity:.55;background:#fdf6ec}"
            ".bar{position:sticky;top:0;background:#fff;padding:8px;"
            "border-bottom:1px solid #ccc;margin:-12px -12px 12px}"
            "button{font-size:16px;padding:6px 16px}")
-    js = ("function go(){var out=[],sold=[];"
+    js = ("function go(){var out=[],sold=[],nonum=[];"
           "document.querySelectorAll('.card').forEach(function(c){"
           "var i=parseInt(c.dataset.i);"
           "if(c.querySelector('.sold').checked){sold.push(i);return;}"
+          "if(c.querySelector('.nonum').checked){nonum.push(i);return;}"
           "var v=c.querySelector('.cert').value.trim();"
           "if(v) out.push({i:i, cert:v});});"
-          "if(!out.length&&!sold.length){alert('証明番号も売り切れも付いていません。"
+          "if(!out.length&&!sold.length&&!nonum.length){alert('何も付いていません。"
           "付けた分だけ処理します。何もしなければ次回また出ます。');return;}"
           "fetch('/',{method:'POST',headers:{'Content-Type':'application/json'},"
-          "body:JSON.stringify({certs:out, sold:sold})}).then(function(){"
+          "body:JSON.stringify({certs:out, sold:sold, nonum:nonum})}).then(function(){"
           "document.body.innerHTML='<h2>受け付けました。閉じてください</h2>';});}")
     head = ("<div class='bar'><b>新規出品の種 %d件</b> — 写真で証明番号を読んで入れてください。"
             "入れた分だけ商品管理シートに足します。"
-            "<b>売り切れていたら「売り切れ」に印</b>を付けてください (次から出しません)。"
-            "何も付けなかったものは次回また出ます。"
+            "<b>売り切れていたら「売り切れ」</b>、"
+            "<b>写真に番号が写っていなければ「番号が読めない」</b>に印を付けてください "
+            "(どちらも次から出しません)。何も付けなかったものは次回また出ます。"
             "<button onclick='go()'>OK 付けた分を処理</button></div>" % len(items))
     return ("<!doctype html><meta charset='utf-8'><title>新規出品の種 — 証明番号</title>"
             "<style>%s</style>%s%s<script>%s</script>" % (
@@ -1471,19 +1483,24 @@ def build_cert_html(items):
 
 
 def parse_cert_result(payload):
-    """POST(JSON) → {"certs": {tab行index: cert}, "sold": {index}} (純関数)。"""
-    out, sold = {}, set()
+    """POST(JSON) → {"certs": {行index: cert}, "sold": {index}, "nonum": {index}} (純関数)。
+
+    nonum = **写真に証明番号が写っていない**と人が判断したもの (2026-09-09)。
+    番号を隠して出品する人がいるので、打てないまま毎回 同じ候補が出続けていた。
+    """
+    out, sold, nonum = {}, set(), set()
     for c in (payload or {}).get("certs") or []:
         try:
             out[int(c.get("i"))] = str(c.get("cert") or "").strip()
         except (TypeError, ValueError):
             continue
-    for i in (payload or {}).get("sold") or []:
-        try:
-            sold.add(int(i))
-        except (TypeError, ValueError):
-            continue
-    return {"certs": out, "sold": sold}
+    for key, dst in (("sold", sold), ("nonum", nonum)):
+        for i in (payload or {}).get(key) or []:
+            try:
+                dst.add(int(i))
+            except (TypeError, ValueError):
+                continue
+    return {"certs": out, "sold": sold, "nonum": nonum}
 
 
 def run_append_high(timeout=10800, dry_run=False):
@@ -1527,6 +1544,7 @@ def run_append_high(timeout=10800, dry_run=False):
         print("  入力されなかった (タイムアウト/未操作) → 何も足さない")
         return 1
     sold = res.get("sold") or set()
+    nonum = res.get("nonum") or set()
     rows, marked, skipped = plan_high_rows(items, res.get("certs") or {},
                                            existing_certs, listed, out_rows)
     for url, why in skipped:
@@ -1538,7 +1556,7 @@ def run_append_high(timeout=10800, dry_run=False):
         print("  + 商品管理シートに %d行 追加 (B列=itemID は空 = 出品くんが拾う)" % len(rows))
     else:
         print("  足す行はありませんでした")
-    if not rows and not sold:
+    if not rows and not sold and not nonum:
         return 0
 
     body = []
@@ -1550,9 +1568,14 @@ def run_append_high(timeout=10800, dry_run=False):
             # その現物はもう買えない = この行は終わり。同じカードの別の仕入元が
             # 後で見つかれば、別の行としてまた候補に上がる。
             r[OUT_DONE_COL] = DONE_MARK_SOLD
+        elif i in nonum:
+            # 写真に証明番号が写っていない = 打てない = この行は終わり。
+            # 番号は現物ごとに違うので推測で入れてはいけない (別の現物の番号になる)。
+            r[OUT_DONE_COL] = DONE_MARK_NONUM
         body.append(r[:len(OUT_HEADER)])
     sheet_io.write_rows_to_tab(OUT_TAB, [OUT_HEADER] + body)
-    print("  mark 新規出品候補: 転記済 +%d件 / 売り切れ +%d件" % (len(marked), len(sold)))
+    print("  mark 新規出品候補: 転記済 +%d件 / 売り切れ +%d件 / 番号読めず +%d件"
+          % (len(marked), len(sold), len(nonum)))
     return 0
 
 
