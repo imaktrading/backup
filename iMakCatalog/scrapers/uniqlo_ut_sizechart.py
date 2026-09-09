@@ -53,6 +53,12 @@ try:
 except Exception:
     pass
 
+# ブランドで違うのは **ホストと category** だけ。中身 (モーダルの操作・見出しの読み方) は同じ。
+#   ★列の並びは UNIQLO と GU で違うが、`_columns` が見出しから学ぶので分岐は要らない。
+BRANDS = {
+    "uniqlo": ("uniqlo_ut", "https://www.uniqlo.com/jp/ja/products/{pid}/00"),
+    "gu": ("gu", "https://www.gu-global.com/jp/ja/products/{pid}/00"),
+}
 CATEGORY = "uniqlo_ut"
 PDP = "https://www.uniqlo.com/jp/ja/products/{pid}/00"
 KID_GENDERS = {"KIDS", "BABY"}
@@ -76,6 +82,10 @@ def _chrome_major():
 
 def new_driver():
     import undetected_chromedriver as uc
+    # ★uc の `__del__` が終了処理でこけ、Windows で `OSError: [WinError 6]` を
+    #   再帰的に投げて **走行ごと落ちる** (2026-09-09 実測: 836/1114 で死亡)。
+    #   後始末は自分で `quit()` しているので、GC 側の後始末は黙らせる。
+    uc.Chrome.__del__ = lambda self: None
     o = uc.ChromeOptions()
     o.add_argument("--headless=new")
     o.add_argument("--no-sandbox")
@@ -104,55 +114,102 @@ def _click(d, txt, exact=False):
 _NUM = re.compile(r"\d+(?:\.\d+)?(?:\s+\d+/\d+)?|\d+/\d+")
 
 
+# 公式の見出し語 -> こちらのキー
+_COL = {"身丈": "length", "肩幅": "shoulder", "身幅": "chest", "裄丈": "sleeve",
+        "袖丈": "sleeve"}
+
+
+def _columns(seg: str) -> list[str] | None:
+    """見出しを読んで **列の並びを公式から学ぶ**。
+
+    ★並びをコードに固定しない。UNIQLO は 身丈/肩幅/身幅/裄丈 だが、
+      **GU は 身丈/裄丈/肩幅/身幅** で順番が違う (skill `apparel-tee-listing`)。
+      固定すると列が1本ずれ、肩幅の欄に裄丈が入る
+      (graniph で実際に起きた「前身丈/身丈 の部分一致で1本ずれた」事故と同じ形)。
+
+    ★**列の数も固定しない**。オーバーサイズ/ドロップショルダーの型は
+      **肩幅を測らない**ので 3列 (身丈/身幅/裄丈) で出る (2026-09-09 実測: 63件が該当)。
+      4列前提だとこれが丸ごと落ちる。
+    """
+    head = seg[:200]
+    cols, seen = [], set()
+    for w in re.findall(r"身丈|肩幅|身幅|裄丈|袖丈", head):
+        k = _COL[w]
+        if k not in seen:
+            seen.add(k)
+            cols.append(k)
+    return cols if 2 <= len(cols) <= 5 else None
+
+
 def parse_table(body: str) -> list[dict] | None:
     """モーダルの本文 -> [{size, length, shoulder, chest, sleeve}].
 
-    ★ラベルは公式の並び (身丈 / 肩幅 / 身幅 / 裄丈) をそのまま採る。並べ替えない
-      (skill `apparel-tee-listing`: UNIQLO = Length / Shoulder / Chest / Sleeve)。
-    ★4つ揃わない行は捨てる (欠けたまま入れない = fail-closed)。
+    ★列の並び **と数** は 見出しから学ぶ (`_columns`)。コードに固定しない。
+    ★見出しの数だけ数字が揃わない行は捨てる (欠けたまま入れない = fail-closed)。
     """
     i = body.find("サイズ 身丈")
     if i < 0:
         return None
     seg = body[i:i + 2000]
+    cols = _columns(seg)
+    if not cols:
+        return None
     lines = [x.strip() for x in seg.split("\n") if x.strip()]
     rows, j = [], 0
     while j < len(lines):
         if lines[j].upper() in SIZE_LABELS:
             nums, k = [], j + 1
-            while k < len(lines) and len(nums) < 4:
+            while k < len(lines) and len(nums) < len(cols):
                 if lines[k].upper() in SIZE_LABELS:
                     break
                 if _NUM.fullmatch(lines[k]):
                     nums.append(lines[k])
                 k += 1
-            if len(nums) == 4:
-                rows.append({"size": lines[j], "length": nums[0], "shoulder": nums[1],
-                             "chest": nums[2], "sleeve": nums[3]})
+            if len(nums) == len(cols):
+                row = {"size": lines[j]}
+                row.update(dict(zip(cols, nums)))
+                rows.append(row)
             j = k
         else:
             j += 1
     return rows or None
 
 
-def fetch_chart(d, pid: str) -> tuple[list[dict] | None, list[dict] | None, str]:
-    """(cm 表, inch 表, 生テキスト)。
+def fetch_chart(d, pid: str) -> tuple[list[dict] | None, list[dict] | None, str, bool]:
+    """(cm 表, inch 表, 生テキスト, 公式が消しているか)。
 
     ★**cm と inch の両方**を残す。cm が公式の生値 (小数)、inch は出品がそのまま使う形
       (`27 1/4` のような分数で出る)。片方だけにすると、もう片方が要った時に取り直しになる
       — 廃盤後は取り直せない。
     """
     d.get(PDP.format(pid=pid))
+    time.sleep(6)
+    # ★まず **button 要素**を直接押す。text 一致の総当たりだと、同じ文言の
+    #   別要素を押してモーダルが開かないことがある (2026-09-09 実測: 14件が開かず、
+    #   button を JS で押したら開いた)。
+    btns = [e for e in d.find_elements("xpath", "//button")
+            if "サイズを確認" in (e.text or "")]
+    if btns:
+        d.execute_script('arguments[0].scrollIntoView({block:"center"});', btns[0])
+        time.sleep(1)
+        d.execute_script("arguments[0].click();", btns[0])
+    else:
+        _click(d, "サイズを確認")
     time.sleep(5)
-    _click(d, "サイズを確認")
-    time.sleep(4)
+    opened = d.find_element("tag name", "body").text
+    if "サイズ表" in opened and "仕上がり寸" not in opened:
+        # ★モーダルは開いたが **公式が実寸表を消している** (2026-09-09 実測: 古い在庫なし
+        #   商品 23件が該当)。「商品サイズの比較 / 身長別着丈ガイド」しか残っていない。
+        #   取りこぼしではないので、呼び出し側で印を付けて次回から叩かない。
+        return None, None, opened, True
     _click(d, "仕上がり寸", exact=True)
     time.sleep(3)
     body_cm = d.find_element("tag name", "body").text
     _click(d, "inch", exact=True)
     time.sleep(3)
     body_in = d.find_element("tag name", "body").text
-    return parse_table(body_cm), parse_table(body_in), body_cm + "\n===INCH===\n" + body_in
+    return (parse_table(body_cm), parse_table(body_in),
+            body_cm + "\n===INCH===\n" + body_in, False)
 
 
 def targets(db, include_kids: bool) -> list[sqlite3.Row]:
@@ -167,6 +224,10 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
         if s.get("size_chart"):
             done += 1
             continue
+        if s.get("size_chart_absent_at"):
+            # 公式が寸法を消している (実測で確定済)。叩き直しても出てこない
+            gone += 1
+            continue
         if s.get("official_gone_at") or not s.get("enriched_at"):
             # 廃盤 = もう取れない / まだ生死を確かめていない行は先に uniqlo_ut_enrich.py
             # (1件15秒の Selenium を、消えている商品に使わない)
@@ -178,7 +239,9 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
     return out
 
 
-def run(commit: bool, include_kids: bool, limit: int | None) -> None:
+def run(commit: bool, include_kids: bool, limit: int | None, brand: str = "uniqlo") -> None:
+    global CATEGORY, PDP
+    CATEGORY, PDP = BRANDS[brand]
     # ★他のセッション (回帰テスト等) が DB を掴んでいても待つ。
     #   待たないと `database is locked` で走行ごと落ちる (2026-09-09 実際に落ちた)。
     db = sqlite3.connect(str(api._DB_PATH), timeout=120)
@@ -186,7 +249,7 @@ def run(commit: bool, include_kids: bool, limit: int | None) -> None:
     rows = targets(db, include_kids)
     if limit:
         rows = rows[:limit]
-    print(f"=== UT 実寸表 ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(rows)}行 ===")
+    print(f"=== {brand} 実寸表 ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(rows)}行 ===")
     if not rows:
         return
 
@@ -203,9 +266,23 @@ def run(commit: bool, include_kids: bool, limit: int | None) -> None:
                 d = new_driver()
             pid = r["product_id"]
             try:
-                cm, inch, body = fetch_chart(d, pid)
+                cm, inch, body, absent = fetch_chart(d, pid)
             except Exception as e:
                 stat[type(e).__name__] += 1
+                continue
+            if absent:
+                # 公式が寸法を消している = 取りこぼしではない。印を付けて次回から叩かない
+                stat["公式が実寸表を消している"] += 1
+                if commit:
+                    sp = json.loads(r["specs"] or "{}")
+                    sp["size_chart_absent_at"] = now
+                    sp["size_chart_absent_reason"] = (
+                        "公式のサイズ表モーダルに 仕上がり寸/ヌード寸 が無い "
+                        "(商品サイズの比較 と 身長別着丈ガイド だけ)。"
+                        "古い在庫なし商品で公式が寸法を消したもの。取りこぼしではない。")
+                    db.execute("UPDATE products SET specs=?, updated_at=? WHERE id=?",
+                               (json.dumps(sp, ensure_ascii=False), now, r["id"]))
+                    db.commit()
                 continue
             if not cm and not inch:
                 stat["表が開かなかった"] += 1
@@ -263,8 +340,9 @@ def main() -> None:
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--include-kids", action="store_true")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--brand", choices=sorted(BRANDS), default="uniqlo")
     a = ap.parse_args()
-    run(a.commit, a.include_kids, a.limit)
+    run(a.commit, a.include_kids, a.limit, a.brand)
 
 
 if __name__ == "__main__":
