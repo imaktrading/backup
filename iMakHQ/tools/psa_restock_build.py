@@ -230,21 +230,29 @@ def count_workload(rows=None, itemid_to_cert=None):
         #   こうすれば弾く理由が増えても、ヒントが勝手に付いてくる (二重定義しない)。
         blocked = 0
         actionable = len(pending)
+        built = built_today()
+        built_n = 0
         if itemid_to_cert is not None:
             inp, skipped = build_restock_input(pending, itemid_to_cert, {})
             blocked = len(skipped)
-            actionable = len(inp["certs"])
-            # 生成はできるが上げられないと分かっている行も「押せば進む」から外す
+            _live = set(inp["certs"])          # 押せば CSV に出る cert
+            _cert_of = {(p.get("itemID") or "").strip(): itemid_to_cert.get(
+                (p.get("itemID") or "").strip()) for p in pending}
+            # 生成はできるが上げられないと分かっている行は「押せば進む」から外す
             _nd = undeliverable()
             if _nd:
-                _cert_of = {(p.get("itemID") or "").strip(): itemid_to_cert.get(
-                    (p.get("itemID") or "").strip()) for p in pending}
-                _hit = {c for i, c in _cert_of.items() if c and i in _nd and c in inp["certs"]}
-                actionable -= len(_hit)
+                _hit = {c for i, c in _cert_of.items() if c and i in _nd and c in _live}
+                _live -= _hit
                 blocked += len(_hit)
-        built = built_today()
-        built_n = sum(1 for p in pending
-                      if (p.get("itemID") or "").strip() in built)
+            # ★2026-09-10 ユーザー指摘「③やったら②がまた1になった」。
+            #   今日もう出した分を引く時、**上で既に外した行まで もう一度引いていた**
+            #   (同じ札を二重に減算)。実測: 出せるのは2件なのに 1件と表示。
+            #   残っている cert の中だけで数える。
+            built_n = sum(1 for i, c in _cert_of.items() if c in _live and i in built)
+            actionable = len(_live)
+        else:
+            built_n = sum(1 for p in pending
+                          if (p.get("itemID") or "").strip() in built)
         return {"actionable": max(actionable - built_n, 0), "done": done,
                 "blocked": blocked, "built_today": built_n,
                 "total": len(pending) + done}
