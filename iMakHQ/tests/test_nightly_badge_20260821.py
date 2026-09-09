@@ -32,7 +32,10 @@ def _fake(returncode, out):
 
 def _run(monkeypatch, returncode, out):
     C._NIGHTLY_CACHE.clear()
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _fake(returncode, out))
+    # ★2026-09-09: 出品くんは素の subprocess.run をやめ、**パイプを使わない**
+    #   `_run_step` に統一した (孫プロセスがパイプを握って永久に固まるため)。
+    #   差し替える所も新しい入口に合わせる。
+    monkeypatch.setattr(C, "_run_step", lambda *a, **k: _fake(returncode, out))
     got = C.nightly_search_state()
     C._NIGHTLY_CACHE.clear()
     return got
@@ -66,7 +69,7 @@ def test_確認できなくても自動と言い切らない(monkeypatch):
     def boom(*a, **k):
         raise OSError("x")
     C._NIGHTLY_CACHE.clear()
-    monkeypatch.setattr(subprocess, "run", boom)
+    monkeypatch.setattr(C, "_run_step", boom)
     got = C.nightly_search_state()
     C._NIGHTLY_CACHE.clear()
     assert got["ok"] is False

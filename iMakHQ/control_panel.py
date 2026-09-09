@@ -248,6 +248,96 @@ def _run_excluder_for_latest_csv(append_log_func, captured_stdout: str):
 # から共通利用. 本体 listing script は無変更. orchestrator 側の 1 step 追加.
 # ロールバック: この関数 + 各 panel の呼出 1 行 をコメントアウトで完全復元.
 # ============================================================================
+def _step_result(returncode, stdout, stderr):
+    """`subprocess.run` の戻りの代わり (returncode / stdout / stderr だけ持つ)。
+
+    ★クラスで書かない: SCRIPTS を取り出すテストが **最初のクラス定義までを exec** する
+      作りなので、ここにクラスを置くと SCRIPTS が読めなくなる (2026-09-09 に踏んだ)。
+    """
+    import types
+    return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def _kill_tree(pid):
+    """子・孫まとめて止める (Windows は taskkill /T)。止められなくても例外は出さない。"""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True, timeout=30)
+        else:
+            os.kill(pid, 9)
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+def _run_step(cmd, cwd=None, env=None, timeout=None, encoding=None,
+              errors="replace", text=None, **_ignored):
+    """後処理チェーンの1手を走らせる。**パイプを使わず一時ファイルに受ける**。
+
+    ★2026-09-09 ユーザー報告「PSAの自動、固まってない?」。2晩続けて **同じ場所**
+      (CSV完成 → 締めの4手に入る手前) で出品くんが止まり、CPU 0・子プロセス無し・
+      応答無しのまま朝まで動かなかった。
+
+      `_run_step(capture_output=True)` はパイプを作る。パイプの書き込み側は
+      **孫プロセス (Selenium の chrome 等) にも受け継がれる**ので、子を timeout で
+      殺しても孫が生きている限り「読み終わり」が来ない。run はそこで永久に待つ
+      (Windows で有名な詰まり方)。タイムアウトを付けても効かないのはこのため。
+
+      パイプをやめて一時ファイルに書かせれば、孫が生きていても待たされない。
+      時間切れの時は **孫まで** 止める (taskkill /T)。
+
+    互換: `_run_step(..., capture_output=True, text=True)` と同じ使い方ができる。
+    時間切れは同じく `subprocess.TimeoutExpired` を投げる (呼び手の except はそのまま)。
+    """
+    import tempfile
+    fo = tempfile.NamedTemporaryFile(prefix="imak_step_out_", suffix=".txt",
+                                     delete=False, mode="w+b")
+    fe = tempfile.NamedTemporaryFile(prefix="imak_step_err_", suffix=".txt",
+                                     delete=False, mode="w+b")
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    timed_out = False
+    try:
+        p = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=fo, stderr=fe,
+                             creationflags=creationflags)
+        try:
+            rc = p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _kill_tree(p.pid)
+            try:
+                rc = p.wait(timeout=30)
+            except Exception:                                  # noqa: BLE001
+                rc = -1
+    finally:
+        for f in (fo, fe):
+            try:
+                f.close()
+            except Exception:                                  # noqa: BLE001
+                pass
+
+    # subprocess.run と同じ約束: text/encoding を指定しなければ **bytes** を返す
+    # (schtasks は cp932 で出すので、呼び手が自分で decode している所がある)。
+    _as_text = bool(text) or bool(encoding)
+
+    def _read(path):
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except Exception:                                      # noqa: BLE001
+            raw = b""
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        return raw.decode(encoding or "utf-8", errors) if _as_text else raw
+
+    out, err = _read(fo.name), _read(fe.name)
+    if timed_out:
+        raise subprocess.TimeoutExpired(cmd, timeout, output=out, stderr=err)
+    return _step_result(rc, out, err)
+
+
 def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
     """csv_output/ の最新 CSV に対して rarara を実行.
 
@@ -280,7 +370,7 @@ def _run_rarara_for_latest_csv(append_log_func, since_ts=None):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        r = subprocess.run(
+        r = _run_step(
             [sys.executable, rarara_path, latest_csv],
             env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
@@ -418,7 +508,7 @@ def _write_keys_for_livedup_removed(append_log_func, latest_csv, pre_rows, pre_h
             w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
             w.writerow(pre_header)
             w.writerows(removed)
-        r = subprocess.run(
+        r = _run_step(
             [sys.executable, "-m", "dedupe.checker", "--write-keys-from-csv", tmp],
             cwd=DEDUPE_WORKTREE, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=180, env=env)
@@ -488,7 +578,7 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("======================================================================\n")
     try:
         _dgp = os.path.join(WORKSPACE, "iMakHQ", "tools", "dup_guard.py")
-        r = subprocess.run([sys.executable, _dgp, "--refresh-cache"],
+        r = _run_step([sys.executable, _dgp, "--refresh-cache"],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=300, env=env)
         if r.stdout:
@@ -507,7 +597,7 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("▶ 重複くん dedupe_excluder ((KEY1, KEY2) tuple 物理除外)\n")
     append_log_func("======================================================================\n")
     try:
-        r = subprocess.run(
+        r = _run_step(
             [sys.executable, "-m", "dedupe.checker", "--check-csv", latest_csv],
             cwd=DEDUPE_WORKTREE,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -544,7 +634,7 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("======================================================================\n")
     try:
         idd = os.path.join(WORKSPACE, "iMakHQ", "tools", "tcg_intra_csv_dedup.py")
-        r = subprocess.run([sys.executable, idd, latest_csv, "--execute"],
+        r = _run_step([sys.executable, idd, latest_csv, "--execute"],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=60, env=env)
         if r.stdout:
@@ -569,7 +659,7 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("▶ 重複くん write-keys-from-csv (HIGH I 列 cert 経由で KEY 事前書込)\n")
     append_log_func("======================================================================\n")
     try:
-        r = subprocess.run(
+        r = _run_step(
             [sys.executable, "-m", "dedupe.checker", "--write-keys-from-csv", latest_csv],
             cwd=DEDUPE_WORKTREE,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -600,7 +690,7 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
                   ["--audit", "--no-refresh"]):
         try:
             _dgp = os.path.join(WORKSPACE, "iMakHQ", "tools", "dup_guard.py")
-            r = subprocess.run([sys.executable, _dgp] + _mode,
+            r = _run_step([sys.executable, _dgp] + _mode,
                                capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=180, env=env)
             if r.stdout:
@@ -621,7 +711,7 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("======================================================================\n")
     try:
         hoju = os.path.join(WORKSPACE, "iMakHQ", "tools", "hoju_url_from_dupes.py")
-        r = subprocess.run(
+        r = _run_step(
             [sys.executable, hoju, "--write"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=120, env=env,
@@ -656,7 +746,7 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
         pass
     try:
         drop = os.path.join(WORKSPACE, "iMakHQ", "tools", "csv_drop_sold_rows.py")
-        r = subprocess.run(
+        r = _run_step(
             [sys.executable, drop, latest_csv, "--write"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=420, env=env,
@@ -698,7 +788,7 @@ def _run_dedupe_for_latest_csv(append_log_func, since_ts=None):
     append_log_func("======================================================================\n")
     try:
         flag = os.path.join(WORKSPACE, "iMakHQ", "tools", "sheet_listable_flag.py")
-        r = subprocess.run(
+        r = _run_step(
             [sys.executable, flag, "--write"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=300, env=env,
@@ -776,7 +866,7 @@ def _run_auto_full_tail(append_log_func, env):
         append_log_func(f"▶ {label}\n")
         append_log_func("======================================================================\n")
         try:
-            r = subprocess.run(cmd, cwd=tools, capture_output=True, text=True,
+            r = _run_step(cmd, cwd=tools, capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=1800, env=env)
             if r.stdout:
                 append_log_func(r.stdout)
@@ -1003,7 +1093,7 @@ def _mail_upload_result(append_log_func, result_json, env):
     append_log_func("▶ 出品結果をメール送信\n")
     append_log_func("======================================================================\n")
     try:
-        r = subprocess.run([sys.executable, r"C:\dev\iMak_data\tools\send_mail.py",
+        r = _run_step([sys.executable, r"C:\dev\iMak_data\tools\send_mail.py",
                             "--subject", subject, "--body-file", body_file],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=300, env=env)
@@ -1822,7 +1912,7 @@ def nightly_search_state(task=_NIGHTLY_TASK):
     out = {"ok": False, "at": "23:30", "why": "確認できず"}
     try:
         import subprocess
-        r = subprocess.run(["schtasks", "/query", "/tn", task, "/fo", "csv"],
+        r = _run_step(["schtasks", "/query", "/tn", task, "/fo", "csv"],
                            capture_output=True, timeout=15)
         txt = r.stdout.decode("cp932", errors="replace")
         if r.returncode != 0:
@@ -2505,7 +2595,7 @@ class HomePanel:
         import subprocess
 
         try:
-            r = subprocess.run(["schtasks", "/query", "/fo", "LIST", "/v"],
+            r = _run_step(["schtasks", "/query", "/fo", "LIST", "/v"],
                                capture_output=True, text=True,
                                encoding="cp932", errors="replace", timeout=120)
             seen = {}
@@ -2588,7 +2678,7 @@ class HomePanel:
         try:
             script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "tools", "worktree_board.py")
-            r = subprocess.run([sys.executable, "-X", "utf8", script],
+            r = _run_step([sys.executable, "-X", "utf8", script],
                                capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=120,
                                env=dict(os.environ, PYTHONIOENCODING="utf-8"))
@@ -2649,7 +2739,7 @@ class HomePanel:
             env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
             _label("💰 取得中…")
             try:
-                r = subprocess.run([sys.executable, "-X", "utf8", script],
+                r = _run_step([sys.executable, "-X", "utf8", script],
                                    cwd=os.path.dirname(script), env=env,
                                    capture_output=True, text=True,
                                    encoding="utf-8", errors="replace", timeout=900)
@@ -2687,7 +2777,7 @@ class HomePanel:
             args = [sys.executable, "-X", "utf8", script] + (["--write"] if write else [])
             _label("📣 実行中…" if write else "📣 数えています…")
             try:
-                r = subprocess.run(args, cwd=os.path.dirname(script), env=env,
+                r = _run_step(args, cwd=os.path.dirname(script), env=env,
                                    capture_output=True, text=True,
                                    encoding="utf-8", errors="replace",
                                    timeout=10800 if write else 1800)
@@ -2898,7 +2988,7 @@ def _kill_process_tree(proc, log=None):
     if proc and proc.poll() is None:
         try:
             if sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                _run_step(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                                capture_output=True, creationflags=flags)
             else:
                 proc.terminate()
@@ -2913,7 +3003,7 @@ def _kill_process_tree(proc, log=None):
         if log:
             log("実行中スクリプトなし (Selenium が残っていれば下記で停止)\n")
     if sys.platform == "win32":
-        r = subprocess.run(["taskkill", "/F", "/T", "/IM", "chromedriver.exe"],
+        r = _run_step(["taskkill", "/F", "/T", "/IM", "chromedriver.exe"],
                            capture_output=True, creationflags=flags)
         if r.returncode == 0 and log:
             log("🛑 残存 Selenium(chromedriver) も停止\n")
@@ -3716,7 +3806,7 @@ class ListingPanel:
         w = None
         for attempt in (1, 2):
             try:
-                r = subprocess.run([sys.executable, "-X", "utf8", "-c", code],
+                r = _run_step([sys.executable, "-X", "utf8", "-c", code],
                                    capture_output=True, text=True, encoding="utf-8",
                                    errors="replace", timeout=180,
                                    # ★2026-09-01: 件数を数えるだけの走行なので、同じタブを
@@ -4178,6 +4268,16 @@ class ListingPanel:
                 break
         if not applied:
             self.log.insert("end", text)
+        # ★2026-09-09: **工程の見出しを run log にも時刻付きで残す**。
+        #   run log には子プロセスの出力しか入っていなかったので、CSVが出来た後の
+        #   後処理で固まった時に「どこで止まったか」が一切残らなかった (2晩とも
+        #   ファイルの更新時刻から推測するしかなかった)。見出しだけなら量も増えない。
+        try:
+            if self._run_log and text.lstrip().startswith("▶"):
+                self._run_log.write("[%s] %s" % (time.strftime("%H:%M:%S"), text.lstrip()))
+                self._run_log.flush()
+        except Exception:                                      # noqa: BLE001
+            pass
         # ログ膨張防止: 5000行を超えたら古い行を削除（メモリ枯渇対策）
         try:
             line_count = int(self.log.index('end-1c').split('.')[0])
@@ -4201,7 +4301,7 @@ class ListingPanel:
         try:
             tool = os.path.join(WORKSPACE, "iMakHQ", "tools", "psa_orphan_key_clean.py")
             flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            r = subprocess.run([sys.executable, tool, "--execute"],
+            r = _run_step([sys.executable, tool, "--execute"],
                                capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=180, creationflags=flags)
             if r.stdout:
