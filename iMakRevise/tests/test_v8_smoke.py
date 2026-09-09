@@ -38,9 +38,12 @@ REFERENCE_CASES = [
         "expected_price": 62.98, "expected_shipping": 32.23,
     },
     {
+        # 2026-09-09: 本元 iMak df7e12b でフィギュア送料見込みが ¥3,000→¥4,000 に是正され
+        # (2枚あった価格シートの複製=stale の方を読んでいたバグ修正)、この参照値もそれに追随。
+        # FX ドリフトではなく実額の是正 — 前回 (744b712) の「参照値更新は誤り」とは別種。
         "item_id": "357056658672", "title": "Pokemon Figure",
         "category": "フィギュア", "cost_jpy": 5030,
-        "expected_price": 98.98, "expected_shipping": 19.88,
+        "expected_price": 107.98, "expected_shipping": 23.55,
     },
     {
         "item_id": "358564731464", "title": "Casio G-Shock GA-2100",
