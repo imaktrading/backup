@@ -81,7 +81,12 @@ LOCK_STALE_HOURS = 6
 #      (skip 時だけでなく毎 cycle 末に全 label を突合 = 「そもそも task が発火しない」も検知できる)
 LOCK_WAIT_MINUTES = 45          # lock 解放待ちの上限 (次 cycle を潰さない範囲)
 LOCK_WAIT_POLL_SEC = 60
-CYCLE_INTERVAL_HOURS = {"SHEET": 4, "LOW": 8}   # 各 label の巡回間隔 (Task Scheduler と対)
+# ★ 2026-09-09 ユーザー判断: SHEET(HIGH) を 4h → 6h に変更 (01:30/07:30/13:30/19:30)。
+#   仕入候補 +486 行 (2,259 → 2,745) と補URL強化で 1 巡回が 2.2h → 最長 4.8h に伸び、
+#   4h 間隔では前の回が終わらないうちに次が来て skip されていた
+#   (09-09: 17:30 の回が入れず、完走が 08:38 → 18:15 の 9.6h 空いた)。
+#   Task Scheduler の trigger と対で変更すること (片方だけ直すと staleness が誤発火する)。
+CYCLE_INTERVAL_HOURS = {"SHEET": 6, "LOW": 8}   # 各 label の巡回間隔 (Task Scheduler と対)
 CYCLE_STALE_MULT = 2.2                          # この倍率を超えたら「止まっている」
 CYCLE_STALE_ALERT_STATE = DECISION_LOG_DIR / "cycle_staleness_alert_state.json"
 CYCLE_STALE_ALERT_THROTTLE_HOURS = 6            # 同 label の再告知間隔 (アラート疲労防止)

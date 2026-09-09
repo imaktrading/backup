@@ -190,3 +190,15 @@ def test_acquire_lock_gives_up_after_deadline(tmp_path, monkeypatch):
     monkeypatch.setattr(rc, "LOCK_WAIT_POLL_SEC", 0)
     monkeypatch.setattr(rc.time, "sleep", lambda _s: None)
     assert rc._acquire_lock(test_mode=True, wait_minutes=0) is False
+
+
+def test_sheet_interval_matches_task_scheduler_6h():
+    """★ 2026-09-09: SHEET(HIGH) は 6h 間隔 (01:30/07:30/13:30/19:30)。
+
+    Task Scheduler の trigger と対。片方だけ直すと staleness が誤発火する。
+    4h だった頃は 1 巡回 4.8h に対して間隔が足りず、17:30 の回が入れずに
+    完走が 9.6h 空いた (09-09)。
+    """
+    from run_cycle import CYCLE_INTERVAL_HOURS
+    assert CYCLE_INTERVAL_HOURS["SHEET"] == 6
+    assert CYCLE_INTERVAL_HOURS["LOW"] == 8
