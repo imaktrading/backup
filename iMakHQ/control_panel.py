@@ -1417,9 +1417,9 @@ SCRIPTS = [
     {
         # slice3: cache済候補を現物と視覚確証(ブラウザ)→正変種だけ補URL(AC-AG)へ既存保持+空き枠冪等書込。主URL不可触。
         "category": None, "type": "utility",
-        "label": "🩹 PSA 補URL ③ 目視",
-        "tip": "昼の目視確認。夜に溜めた候補を現物と見比べて、同じ物だけ補URL欄に書く。"
-               "補は安い順に最大5本 持ち直す (高い分は押し出される)。1回15件ずつ。"
+        "label": "🩹 PSA 補URL ③ 補充",
+        "tip": "毎日。仕入元が1〜2本しか無い出品に、予備を足す。切れたら出品が死ぬので急ぐ方。"
+               "夜に溜めた候補を現物と見比べて、同じ物だけ書く。1回15件ずつ。"
                "出した分は最後までやり切る作り。",
         "badge": "hoju_confirm",
         "label_fg": "#0a7",
@@ -1427,13 +1427,33 @@ SCRIPTS = [
         # ★2026-07-28: 1回10件ずつ(ユーザー要望「途中で辞められないから」)。
         #   → 2026-09-05 ユーザー指示で **15件**。
         # 確証UIは全件まとめて送信する作り = 出した分は最後までやり切る必要がある。
-        # 対象は 補<5 (満杯未満) で、補が少ない行から出る (psa_hoju_fill.CONFIRM_MAX_BACKUPS)。
-        "cmd": ["python", "psa_hoju_fill.py", "confirm", "--limit=15"],
+        # ★2026-09-09 ユーザー指示で **補充と入れ替えを別ボタンに分けた**。ここは補0〜3本。
+        #   混ざっていると、丸腰(補0本)の補充が「もう足りている出品の値下げ」に埋もれる。
+        "cmd": ["python", "psa_hoju_fill.py", "confirm", "--max-backups=4", "--limit=15"],
         "params": [],
         "skip_postprocess": True,
         # ★2026-08-09: 従来は「既存メンテ」スプシの**先頭タブ(抽出ロジック)**を開いていた。
         #   slice3 が書くのは **商品管理シートの補URL列(AC-AG)** なので、まったく関係ない
         #   タブが開いていた。書いた結果をその場で確認できる場所へ飛ばす。
+        "open_url": ("https://docs.google.com/spreadsheets/d/"
+                     "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
+    },
+    {
+        # ★2026-09-09 ユーザー指示: 補充と入れ替えは **別の仕事**なので分ける。
+        #   「入れ替えは毎日しなくても2日おきで、貯まった中から最安を選ぶ方が効率がいい」
+        #   = 候補が薄いうちに選び直すと、明日もっと安いものが来て また入れ替えになる。
+        "category": None, "type": "utility",
+        "label": "💱 PSA 補URL ③ 入れ替え",
+        "tip": "予備が足りている出品(補4〜5本)を、もっと安い仕入元に入れ替える。"
+               "毎日やらなくてよい。2日おきに押すと候補が貯まっていて、より安いものを選べる。"
+               "利益を上げる方の作業。1回15件ずつ。",
+        "badge": "hoju_swap",
+        "label_fg": "#0a7",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "psa_hoju_fill.py", "confirm",
+                "--min-backups=4", "--max-backups=6", "--limit=15"],
+        "params": [],
+        "skip_postprocess": True,
         "open_url": ("https://docs.google.com/spreadsheets/d/"
                      "19kj8NqWHIGP1ptQDeGePw077hpdl6dNOO-v2J10HCjk/edit#gid=851100680"),
     },
@@ -3457,7 +3477,8 @@ class ListingPanel:
     #   1回で全部 終わらないボタンがあるのに「押すと44件」とだけ出していたので、
     #   押した後に減っていないように見えた。**残り** と **今回** を分けて出す。
     #   数字は SCRIPTS の cmd (--limit) と各モジュールの CAP が正。ここに写さない。
-    PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "newcand": 20}
+    PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "hoju_swap": 15,
+                 "newcand": 20}
 
     @classmethod
     def todo_line(cls, kind, remaining, verb):
@@ -3767,6 +3788,17 @@ class ListingPanel:
                           "\n押すと見比べて、同じ物だけ目視に出ます")
             elif not _rdy:
                 c_txt += " (補が薄い %s件のうち)" % _ctot
+            # 💱 入れ替え (2026-09-09 ユーザー指示で分離)。毎日でなく2日おき運用なので、
+            #   0件でも「明日また貯まる」と分かる文にする。
+            _sw = w.get("swap") or {}
+            _sw_rdy, _sw_unj = _sw.get("ready", 0), _sw.get("unjudged", 0)
+            if _sw_rdy or _sw_unj:
+                sw_txt = self.todo_line("hoju_swap", _sw_rdy + _sw_unj, "目視します")
+                sw_txt += ("\n予備が足りている %s件のうち (もっと安い仕入元に替える)"
+                           % w.get("swap_targets", 0))
+            else:
+                sw_txt = ("\n※今は0件 (対象 %s件)。2日おきに押せば候補が貯まっています"
+                          % w.get("swap_targets", 0))
             # ★2026-08-14: 0件の時に**理由**を出す。件数だけだと「候補は37件ある」のに
             #   押して空振りする (status の安い母数と、足切り後の実数が食い違うため)。
             #   何で消えたのかが分かれば、次に何をすべきかが決まる。
@@ -4058,7 +4090,7 @@ class ListingPanel:
             else:
                 nh_txt = "\n※押しても0件 (先に 🌱 捨てた候補→新規出品の種)"
             by_kind = {"hoju_search": s_txt, "hoju_search_now": sn_txt,
-                       "hoju_confirm": c_txt, "newcand": n_txt,
+                       "hoju_confirm": c_txt, "hoju_swap": sw_txt, "newcand": n_txt,
                        "newcand_high": nh_txt,
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
                        "ut_restock_search": ut_rs_txt,
@@ -4094,6 +4126,8 @@ class ListingPanel:
                         "ut_restock_confirm": bool(_ut.get("restock_confirm")),
                         "ut_restore": bool(_ut.get("restore")),
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
+                        "hoju_swap": bool((w.get("swap") or {}).get("ready")
+                                          or (w.get("swap") or {}).get("unjudged")),
                         "newcand": bool(nc.get("show") or nc.get("auto")),
                         # 人が証明番号を打たないと永遠に減らない = 残件があれば青
                         "newcand_high": bool(_nh.get("pending")),

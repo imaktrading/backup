@@ -48,7 +48,7 @@ def test_search_button_is_new_panel_only():
 
 def test_confirm_button_stays_in_maintenance_and_is_also_shown_in_new_panel():
     """🩹 は既存backlogの定常消化でも使うのでメンテ側に残し、新規パネルには併置する。"""
-    assert _group_of("🩹 PSA 補URL ③ 目視") == "report"   # 実体はメンテ側
+    assert _group_of("🩹 PSA 補URL ③ 補充") == "report"   # 実体はメンテ側
     src = open(os.path.join(HQ, "control_panel.py"), encoding="utf-8").read()
     assert "_confirm_idx" in src                                  # 新規パネルにも並べている
 

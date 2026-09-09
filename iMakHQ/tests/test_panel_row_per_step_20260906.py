@@ -27,7 +27,9 @@ _SRC = io.open(os.path.join(_HQ, "control_panel.py"), encoding="utf-8").read()
 
 # 期待する並び: {箱: [[1行目のラベル片], [2行目のラベル片]]}
 EXPECT = {
-    "PSA (TCG)":   [["PSA 補URL ①", "PSA 補URL ②", "PSA 補URL ③"],
+    # ★2026-09-09: ③を「補充」と「入れ替え」に分けた (ユーザー指示)。目的が別で、
+    #   急ぎ方も違う (補充=毎日 / 入れ替え=2日おき)。同じ行に4つ並ぶ。
+    "PSA (TCG)":   [["PSA 補URL ①", "PSA 補URL ②", "PSA 補URL ③", "PSA 補URL ③"],
                     ["PSA 再仕入れ ①", "PSA 再仕入れ ②", "PSA 再仕入れ ③"]],
     "Tシャツ (UT)": [["UT 補URL ②", "UT 補URL ③"],
                     ["UT 再仕入れ ①", "UT 再仕入れ ②", "UT 再仕入れ ③"]],

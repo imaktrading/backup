@@ -114,7 +114,8 @@ def test_ラベルは短い():
 def test_詳細はヒントに逃がしている():
     """★「詳細はヒントテキストにしてボタンのラベルはシンプルに」."""
     assert "_attach_tip" in SRC
-    for lb in ("🔎 PSA 補URL ② 夜に探す", "🩹 PSA 補URL ③ 目視",
+    # ★2026-09-09: PSA の ③ は「補充 / 入れ替え」に分割 (ユーザー指示)
+    for lb in ("🔎 PSA 補URL ② 夜に探す", "🩹 PSA 補URL ③ 補充", "💱 PSA 補URL ③ 入れ替え",
                "🔎 くじ 補URL ② 夜に探す", "🩹 くじ 補URL ③ 目視"):
         i = SRC.index('"label": "%s"' % lb)
         assert '"tip"' in SRC[i:i + 400], lb

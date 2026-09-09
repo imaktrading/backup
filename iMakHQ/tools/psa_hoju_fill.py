@@ -84,11 +84,17 @@ def _listed_sort_key(row):
     return v if len(v) >= 10 and v[:4].isdigit() else ""
 
 
-def select_backfill_targets(rows2d, max_backups=1):
-    """HIGH rows2d(header含む) → 補<max_backups の live PSA 行リスト。純関数(test可)。
+def select_backfill_targets(rows2d, max_backups=1, min_backups=0):
+    """HIGH rows2d(header含む) → 補が min_backups以上 max_backups未満 の live PSA 行。純関数。
 
     max_backups=1 → 補 0本のみ(残1件でリフィル=定常の既定)。
     初期一括は呼び手が大きめ(例 5)を渡して「満杯未満すべて」を対象にできる。
+
+    ★2026-09-09 ユーザー指示: 目視を **目的で2つに分ける**ため min_backups を足した。
+      「切れたら死ぬ出品の補充」と「もう足りている出品を安い仕入元に入れ替える」は
+      別の仕事で、急ぎ方も違う。同じ画面に混ぜると、丸腰の補充が入れ替えに埋もれる。
+        補充   : min=0 max=4 (補0〜3本 / 実測 322件) — 毎日
+        入れ替え: min=4 max=6 (補4〜5本 / 実測 149件) — 2日おき (候補が貯まってから選ぶ方が安い)
     Returns: [{row(1-indexed), itemID, cert, key, card_no_title, n_backups, empty_slots}]
 
     ★2026-07-28: **新規出品を最優先**に並べ替える (出品日時 U列の降順)。
@@ -111,6 +117,8 @@ def select_backfill_targets(rows2d, max_backups=1):
             continue
         nb = _backup_count(r)
         if nb >= max_backups:           # 既に閾値以上の補あり = 対象外
+            continue
+        if nb < min_backups:            # 下限未満 = 別のボタン(補充)の担当
             continue
         key = _cell(r, KEY)
         if not key and not cert:        # 供給検索の起点なし = skip(fail-closed)
@@ -1636,13 +1644,23 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
                 keep.append(c)
         return keep, dropped
 
+    # ★2026-09-09: ボタンを **補充 / 入れ替え** に分けたので、件数も分けて数える。
+    #   同じループで両方数える (シート読みもキャッシュも1回のまま)。
     ready = unjudged = 0
-    for t in c_targets:
+    swap_ready = swap_unjudged = 0
+    swap_targets = select_backfill_targets(vals, max_backups=AUXN + 1,
+                                           min_backups=CONFIRM_MAX_BACKUPS)
+    for t in list(c_targets) + list(swap_targets):
+        is_swap = t["n_backups"] >= CONFIRM_MAX_BACKUPS
         cands, _ref, _why, _ = confirm_survivors(
             t, vals, cache, ctx, today, ref_of=_ref_of, art_of=_art_of, stats=stats)
         if not cands:
             continue
-        if any(c.get("_art_unjudged") for c in cands):
+        waiting = any(c.get("_art_unjudged") for c in cands)
+        if is_swap:
+            swap_unjudged += 1 if waiting else 0
+            swap_ready += 0 if waiting else 1
+        elif waiting:
             unjudged += 1        # 判定待ちが混ざる = 押すまで出るか確定しない
         else:
             ready += 1
@@ -1661,11 +1679,13 @@ def count_workload(max_backups=None, today=None, confirm_max_backups=None):
             "searched_by_date": dict(by_date),
             "search": {"can": s_can, "no_cardno": s_nocardno, "done": s_done,
                        "today_can": s_today},
+            "swap_targets": len(swap_targets),
             "confirm": {"ready": ready, "unjudged": unjudged,
-                        "blocked": {k: stats[k] for k in STOP_REASONS}}}
+                        "blocked": {k: stats[k] for k in STOP_REASONS}},
+            "swap": {"ready": swap_ready, "unjudged": swap_unjudged}}
 
 
-def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
+def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups=0):
     """昼の確認(impure)。slice2 が焼いた当日キャッシュから候補を出し、現物と視覚確証→
     確定URLを補URL(AC-AG)へ **安い順に最大5本** 書く(2026-09-05)。主URL(A)は触らない。
 
@@ -1684,7 +1704,7 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False):
     today = datetime.date.today().isoformat()
     max_backups = CONFIRM_MAX_BACKUPS if max_backups is None else max_backups
     vals = _read_high()
-    targets = select_backfill_targets(vals, max_backups=max_backups)
+    targets = select_backfill_targets(vals, max_backups=max_backups, min_backups=min_backups)
     cache = _load_cache()
 
     # ★前提(skip台帳 cooldown / 候補NG / 他出品が使用中のURL)は build_confirm_context に1本化。
@@ -2173,12 +2193,16 @@ def main():
         return
     if "confirm" in sys.argv:
         max_backups, limit, dry = CONFIRM_MAX_BACKUPS, None, "--dry-run" in sys.argv
+        min_backups = 0
         for a in sys.argv[1:]:
             if a.startswith("--max-backups="):
                 max_backups = int(a.split("=", 1)[1])
+            elif a.startswith("--min-backups="):
+                min_backups = int(a.split("=", 1)[1])
             elif a.startswith("--limit="):
                 limit = int(a.split("=", 1)[1])
-        run_daytime_confirm(max_backups=max_backups, limit=limit, dry_run=dry)
+        run_daytime_confirm(max_backups=max_backups, limit=limit, dry_run=dry,
+                            min_backups=min_backups)
         return
     if "workload" in sys.argv:
         # ボタンのラベル / status_now が使う件数を JSON で1行。**API/スクレイプ無し**。

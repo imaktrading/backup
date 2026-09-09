@@ -103,4 +103,5 @@ def test_newest_first_within_the_same_backup_count():
 def test_panel_confirm_button_runs_15_items():
     """③目視は1回15件 (2026-09-05 ユーザー指示で 10→15)。"""
     src = open(os.path.join(_HQ, "control_panel.py"), encoding="utf-8").read()
-    assert '"psa_hoju_fill.py", "confirm", "--limit=15"' in src
+    # ★2026-09-09: ③を 補充/入れ替え に分割。補充は 補<4 で 1回15件
+    assert '"psa_hoju_fill.py", "confirm", "--max-backups=4", "--limit=15"' in src
