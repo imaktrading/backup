@@ -65,6 +65,30 @@ def _hoju():
     return _run([sys.executable, "-c", code]).strip()
 
 
+def _cost_column():
+    """仕入値の列 (商品管理シート N) が生きているか。**1セル読むだけ**。
+
+    ★2026-09-09: N は `=ARRAYFORMULA((M or F)−K)` の spill 出力で、誰かが N に1セル
+      書くと N1=#REF! になり **全行の仕入値が消える**。実際に消えていたのに、気づいたのは
+      人が偶然 別件で聞いた時だった (出品中721行が空のまま気づかれず)。
+      仕入値は cost-plus の入力そのものなので、**壊れた事実をその日のうちに見つける**。
+      書込側は塞いだ (guard + 源流test) が、人が手で触る/新しい経路が生える余地は残る。
+    """
+    code = (
+        "import sys;sys.path.insert(0,r'%s');"
+        "import sheet_io;v=sheet_io._product_ws().acell('N1').value or '';"
+        "print(('NG|' + v) if ('#REF' in v or not v.strip()) else 'OK')" % HERE
+    )
+    out = _run([sys.executable, "-c", code]).strip()
+    if out.startswith("OK"):
+        return ""                              # 正常時は黙る (現在地を長くしない)
+    if out.startswith("NG|"):
+        return ("🔴 **仕入値の列(N)が死んでいます**: N1=%s"
+                " → 誰かが N に書いた。全行の仕入値が空 = cost-plus が回らない。"
+                " 直し方: N2:N<最終行> を消すと式が再展開する"
+                " (犯人の探し方は daily_report 2026-09-09)" % out[3:].strip())
+    return "⚠ 仕入値の列(N)を確認できませんでした: %s" % (out[:80] or "(無応答)")
+
 VIEWER_DISAGREEMENT = r"C:\dev\iMak_data\catalog\viewer_disagreement.log"
 
 
@@ -341,6 +365,9 @@ def main():
 
     print("\n## 3. 出品の数字\n")
     print("  " + _hoju())
+    _cc = _cost_column()
+    if _cc:
+        print("  " + _cc)
 
     vd = _viewer_disagreement()
     if vd:
