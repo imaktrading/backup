@@ -501,12 +501,15 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     #   残りの供給URLは**補URL**にすればいい (捨てない = 供給の厚み)。
     #   ① 既に結論が出ているカード → 人に見せず自動で補URLへ
     #   ② 今回まとめて出てくる同じカード → 先頭1件だけ見せ、残りは確定時に自動で補URLへ
-    auto_aux, items, groups = [], [], {}
+    auto_aux, items, groups, over_cap = [], [], {}, []
     for p in all_items:
         no = p["card_no"]
         if no and no in decided:
             p["decided"] = decided[no]
             auto_aux.append(p)
+            continue
+        if over_cost_cap(p.get("price")):
+            over_cap.append(p)             # 生成で必ず落ちる = 見せない (silent drop はしない)
             continue
         if no and no in groups:
             groups[no].append(p)
@@ -526,8 +529,13 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
         print(f"  ♻ 結論済カードの別の仕入元 {len(auto_aux)}件 (DRY-RUN: 書かない)")
     for i, it in enumerate(items):
         it["idx"] = i
+    if over_cap:
+        print("  💸 仕入値が上限を超えていて除外 %d件 (目視しても生成で落ちる): %s"
+              % (len(over_cap), ", ".join(
+                  "¥%s" % format(int(x["price"]), ",") for x in over_cap[:6])))
     if stats is not None:
-        stats.update({"pending": len(all_items), "show": len(items), "auto": len(auto_aux)})
+        stats.update({"pending": len(all_items), "show": len(items), "auto": len(auto_aux),
+                      "over_cap": len(over_cap)})
     return items
 
 
@@ -1406,6 +1414,35 @@ def plan_high_rows(items, certs, existing_certs=(), listed_keys=(), out_rows=())
     return rows, marked, skipped
 
 
+def over_cost_cap(price):
+    """仕入値が上限を超えているか。しきい値は **持たない** (pricing_engine に委ねる)。
+
+    ★2026-09-09 ユーザー確定「外そう、時間の無駄だし」。
+      上限 (`global.yaml` cost_sanity.max_jpy = 現在 ¥70,000 / 2026-09-04 ユーザー確定) を
+      超えた種は、目視して証明番号まで打っても **生成の段階で COST-CAP で落ちる**
+      (`psa_to_csv.py:3580` が「枠を選ぶ前」に同じ判定をしている)。
+      落ちると分かっている物を人に見せない。実測 2026-09-09: 種40件のうち4件が上限超
+      (¥85,722 / ¥118,450 / ¥128,000 / ¥199,800)。
+    値段が分からない / 判定できない時は **止めない** (fail-open)。
+    ここで新しいしきい値を作らない = 上限の定義は1か所のまま。
+    """
+    if price in (None, ""):
+        return False
+    if isinstance(price, str):
+        # 台帳の値は "21,999" / "¥21,999" のこともある。数字にしてから渡す
+        price = re.sub(r"[^0-9]", "", price)
+        if not price:
+            return False
+    try:
+        sys.path.insert(0, os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "iMakeBayAPI")))
+        import pricing_engine as _pe
+        why = _pe.cost_sanity(price)
+    except Exception:                                          # noqa: BLE001
+        return False
+    return bool(why and "上限" in why)
+
+
 def build_cert_html(items):
     """候補の写真とタイトルを見せて、証明番号を打ってもらう HTML (純関数)。"""
     cards = []
@@ -1507,6 +1544,13 @@ def run_append_high(timeout=10800, dry_run=False):
     """用途=出品 の候補に証明番号を付けて商品管理シートへ足す (impure)。"""
     out_rows = migrate_out_rows(_read_tab(OUT_TAB))
     items = pending_list_rows(out_rows)
+    # ★2026-09-09: 上限超は **証明番号を打たせる前**に外す。打っても生成で落ちるので、
+    #   打った時間がまるごと無駄になる (ユーザー「外そう、時間の無駄だし」)。
+    _over = [it for it in items if over_cost_cap(it.get("price"))]
+    if _over:
+        items = [it for it in items if not over_cost_cap(it.get("price"))]
+        print("  💸 仕入値が上限を超えていて除外 %d件 (打っても生成で落ちる): %s"
+              % (len(_over), ", ".join("¥%s" % str(x.get("price")) for x in _over[:6])))
     if not items:
         print("  HIGH に足す『用途=出品』の候補はありません")
         return 0
