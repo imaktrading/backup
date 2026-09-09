@@ -5130,6 +5130,27 @@ def _ensure_single_instance(port=53247):
         return False
 
 
+def _sweep_orphan_drivers(log=None):
+    """置き去りのブラウザを落とす (2026-09-10 ユーザー要望「常に要らんものは落として」)。
+
+    落とすのは **持ち主 (起動した python) が居なくなった自動操作ブラウザだけ**。
+    ユーザーが自分で開いた Chrome と、**走行中の仕事のブラウザ** (監視くん等) は残す
+    (2026-07-28 のユーザー判断: 他人の driver を巻き添えにしない)。
+    失敗しても起動・実行は止めない。
+    """
+    try:
+        _tools = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
+        if _tools not in sys.path:
+            sys.path.insert(0, _tools)
+        import kill_orphan_drivers as _kod
+        n = _kod.run(log=(log or (lambda _m: None)))
+        return n
+    except Exception as e:                                     # noqa: BLE001
+        if log:
+            log("(置き去りブラウザの掃除 skip: %s)%s" % (type(e).__name__, chr(10)))
+        return 0
+
+
 def _flush_dns_at_startup():
     """出品くん起動時に Windows DNS cache を flush.
 
@@ -5154,12 +5175,34 @@ def _flush_dns_at_startup():
         pass
 
 
+SWEEP_EVERY_MS = 10 * 60 * 1000        # 10分おき
+
+
+def _start_orphan_sweeper(root, every_ms=SWEEP_EVERY_MS):
+    """置き去りブラウザの掃除を **開いている間ずっと** 回す (2026-09-10 ユーザー要望)。
+
+    プロセス一覧を取るのに1〜2秒かかるので別スレッドで回す (画面を止めない)。
+    落とすのは持ち主が居なくなった分だけなので、走行中の仕事とはぶつからない。
+    """
+    def _tick():
+        threading.Thread(target=_sweep_orphan_drivers, daemon=True).start()
+        try:
+            if root.winfo_exists():
+                root.after(every_ms, _tick)
+        except Exception:                                      # noqa: BLE001
+            pass
+    root.after(every_ms, _tick)
+
+
 def main():
     _flush_dns_at_startup()
+    # ★2026-09-10: 起動時に置き去りのブラウザを掃除する。走行中の分は残す。
+    _sweep_orphan_drivers(log=lambda m: print("[startup] %s" % str(m).rstrip()))
     if not _ensure_single_instance():
         return
     root = tk.Tk()
     HomePanel(root)
+    _start_orphan_sweeper(root)
     root.mainloop()
 
 
