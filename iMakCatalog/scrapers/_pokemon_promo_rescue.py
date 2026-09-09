@@ -29,7 +29,7 @@ import pokemon_tcg as pt  # noqa: E402
 
 def find_cardid_fallback_records() -> list[tuple[int, str]]:
     """DB から cardID-XXXX 形式の records を抽出. Returns [(db_id, card_id), ...]"""
-    conn = sqlite3.connect(api._DB_PATH)
+    conn = sqlite3.connect(api._DB_PATH, timeout=120)
     rows = conn.execute(
         "SELECT id, product_id FROM products "
         "WHERE category='pokemon_tcg' AND product_id LIKE 'cardID-%'"
@@ -66,7 +66,7 @@ def rescue_one(db_id: int, card_id: str, dry_run: bool = False) -> dict:
         print(f"  [DRY] {card_id} → {new_pid} ({detail.get('name', '')})")
         return {"status": "would_update", "card_id": card_id, "new_pid": new_pid}
 
-    conn = sqlite3.connect(api._DB_PATH)
+    conn = sqlite3.connect(api._DB_PATH, timeout=120)
     try:
         # Check if new_pid already exists (collision)
         existing = conn.execute(

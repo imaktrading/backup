@@ -215,7 +215,7 @@ def main() -> int:
     ap.add_argument("--offline", action="store_true", help="公式を叩かず現状集計だけ")
     args = ap.parse_args()
 
-    con = sqlite3.connect(str(api._DB_PATH))
+    con = sqlite3.connect(str(api._DB_PATH), timeout=120)
     con.row_factory = sqlite3.Row
     rows = load_rows(con)
     marked = con.execute(

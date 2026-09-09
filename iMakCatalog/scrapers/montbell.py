@@ -837,7 +837,7 @@ def backfill_from_disp_fo(limit: Optional[int] = None,
     import json as _json
     import api  # type: ignore
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
     cur.execute(
         "SELECT product_id, source, name, name_jp, specs, source_url "

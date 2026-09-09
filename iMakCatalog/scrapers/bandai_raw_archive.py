@@ -42,7 +42,7 @@ ID_RE = re.compile(r"/api/user/card/(\d+)")
 
 
 def run(cat: str, limit: int | None, refetch: bool) -> Counter:
-    db = sqlite3.connect(api._DB_PATH)
+    db = sqlite3.connect(api._DB_PATH, timeout=120)
     rows = db.execute("SELECT source_url FROM products WHERE category=? AND "
                       "source_url LIKE '%api/user/card/%'", (cat,)).fetchall()
     ids = []

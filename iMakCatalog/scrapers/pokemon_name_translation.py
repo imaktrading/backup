@@ -505,7 +505,7 @@ def run(smoke: int = 0, rule_only: bool = False, dry_run: bool = False) -> None:
     print(f"PokéAPI 辞書: {len(poke_dict):,} 件")
     print(f"API cache: {len(api_dict):,} 件")
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -643,7 +643,7 @@ def run(smoke: int = 0, rule_only: bool = False, dry_run: bool = False) -> None:
 
 def export_to_csv(out_path: str) -> None:
     """HQ 検証用 CSV エクスポート."""
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""SELECT product_id, name_jp, name_en, name_en_source, set_name, source_url
                            FROM products WHERE category = ?

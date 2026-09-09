@@ -521,7 +521,7 @@ def _promo_head(detail: dict) -> str:
     if not m:
         return ""
     folder = m.group(1)
-    db = sqlite3.connect(str(api._DB_PATH))
+    db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     try:
         rows = db.execute(
             "SELECT product_id FROM products WHERE category=? AND product_id NOT LIKE '%/%' "

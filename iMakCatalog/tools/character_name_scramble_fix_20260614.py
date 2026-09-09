@@ -34,7 +34,7 @@ def is_desync(ne, cn) -> bool:
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     dry = "--apply" not in sys.argv
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=120)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT id, product_id, name_en, specs FROM products WHERE category=?",

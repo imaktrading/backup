@@ -200,7 +200,7 @@ def main() -> None:
         rest = sorted([s for s in ids if s not in pending], key=lambda s: _at(state.get(s)))
         targets = (pending + rest)[:max(args.n, len(pending))]
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     conn.row_factory = sqlite3.Row
     now = datetime.now().isoformat(timespec="seconds")
     total = ng = fail = 0

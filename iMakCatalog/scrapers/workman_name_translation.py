@@ -106,7 +106,7 @@ def translate_via_api(names: list[str]) -> dict[str, str]:
 
 
 def run(smoke: int = 0, dry_run: bool = False) -> None:
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute("""SELECT product_id, name, name_jp FROM products

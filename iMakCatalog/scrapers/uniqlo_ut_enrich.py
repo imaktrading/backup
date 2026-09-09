@@ -108,14 +108,29 @@ def archive_pdp(pid: str) -> None:
         pass
 
 
+# ★一番大きい絵を採る (2026-09-09 実測)。
+#   `?impolicy=quality` を付けると 1500x2000 -> **2100x2800** になる
+#   (幅を上げてもこれが上限。main / sub / feature とも同じ)。
+#   色チップ (chip) は 100x100 のままなので付けない (容量だけ6倍になる)。
+BIG = "?impolicy=quality"
+
+
+def big(u: str) -> str:
+    if not u or "?" in u or "/chip/" in u:
+        return u
+    return u + BIG
+
+
 def all_images(images: dict) -> list[str]:
     """images の4種 (main / sub / features / chip) を1本の並びにする。
 
     公式の並び順を保つ (main -> sub -> features -> chip)。出品の1枚目は main。
+    ★**一番大きい形**で入れる (上の BIG)。
     """
     out: list[str] = []
 
     def add(u):
+        u = big(u)
         if u and u not in out:
             out.append(u)
 

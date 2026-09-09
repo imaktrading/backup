@@ -286,7 +286,7 @@ def names_own_setcode(value: str, set_code: str) -> bool:
 
 
 def audit(categories):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=120)
     conn.row_factory = sqlite3.Row
     # name_jp は §0d でしか使わない。**列が無い DB でも落とさない**
     # (test の最小 fixture は products を 5列だけで作る。2026-08-24 にここで 14本落とした)
@@ -780,7 +780,7 @@ def main():
     import os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from name_guard import find_variant_name_violations, find_facet_n1_candidates  # noqa: E402
-    _conn = sqlite3.connect(str(DB_PATH))
+    _conn = sqlite3.connect(str(DB_PATH), timeout=120)
     _cats = categories or ["pokemon_tcg", "one_piece_tcg", "gundam_tcg",
                            "dragonball_scg", "yugioh_tcg"]
     name_viol = []

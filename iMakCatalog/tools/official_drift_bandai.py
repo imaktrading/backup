@@ -72,7 +72,7 @@ def check(cat: str) -> dict:
     cards = official(cat)
     if not cards:
         return {"cat": cat, "error": "公式 API が0件を返した"}
-    db = sqlite3.connect(str(api._DB_PATH))
+    db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
     try:
         rows = db.execute(

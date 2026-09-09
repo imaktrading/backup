@@ -183,7 +183,7 @@ def rescue(targets: list[str], window: int = 200,
     Returns:
         {"rescued": [pid, ...], "not_found": [pid, ...], "skipped": [pid, ...]}
     """
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
 
     result: dict[str, list[str]] = {"rescued": [], "not_found": [], "skipped": []}
@@ -263,7 +263,7 @@ def main():
                if args.targets else list(DEFAULT_TARGETS))
 
     if args.probe:
-        conn = sqlite3.connect(str(api._DB_PATH))
+        conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
         cur = conn.cursor()
         for pid in targets:
             parsed = parse_target(pid)

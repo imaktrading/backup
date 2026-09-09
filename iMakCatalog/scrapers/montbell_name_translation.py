@@ -253,7 +253,7 @@ def get_pending_records() -> list:
     import sqlite3
     import api  # type: ignore
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
     cur.execute(
         "SELECT product_id, name_jp FROM products "
@@ -273,7 +273,7 @@ def get_records_by_keyword(keywords: list) -> list:
 
     if not keywords:
         return []
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
     where_clause = " OR ".join(["name_jp LIKE ?"] * len(keywords))
     params = [CATEGORY] + [f"%{k}%" for k in keywords]
@@ -394,7 +394,7 @@ def export_for_review(out_path: str, limit: Optional[int] = None) -> int:
     import sqlite3
     import api  # type: ignore
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
     sql = (
         "SELECT product_id, name_jp, name_en, name_en_source, source "

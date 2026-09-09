@@ -809,7 +809,7 @@ def reprocess_in_place() -> dict:
     import sqlite3
     import json as _json
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
     cur.execute(
         "SELECT product_id, name_jp, specs FROM products WHERE category = ? ORDER BY product_id",
@@ -923,7 +923,7 @@ def reprocess_all_active() -> dict:
     import sqlite3
     import json as _json
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
     cur.execute(
         "SELECT product_id, specs FROM products WHERE category = ? ORDER BY product_id",

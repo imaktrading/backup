@@ -274,7 +274,7 @@ def main() -> None:
     a = ap.parse_args()
 
     if a.all:
-        conn = sqlite3.connect(str(api._DB_PATH))
+        conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
         conn.row_factory = sqlite3.Row
         res = check_all(conn)
         conn.close()
@@ -290,7 +290,7 @@ def main() -> None:
         sys.exit(0 if not res["missing"] else 1)
 
     state = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     conn.row_factory = sqlite3.Row
 
     if a.pg:

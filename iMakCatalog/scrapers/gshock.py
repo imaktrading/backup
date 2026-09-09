@@ -250,7 +250,7 @@ def _scrape_log_start() -> Optional[int]:
     try:
         import sqlite3
         db_path = Path(r"C:/dev/iMak_data/catalog/products.sqlite")
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path), timeout=120)
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO scrape_log (category, started_at, status) VALUES (?, ?, 'running')",
@@ -273,7 +273,7 @@ def _scrape_log_finish(log_id: Optional[int], status: str,
     try:
         import sqlite3
         db_path = Path(r"C:/dev/iMak_data/catalog/products.sqlite")
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path), timeout=120)
         conn.execute(
             "UPDATE scrape_log SET finished_at = ?, status = ?, "
             "products_added = ?, error_message = ? WHERE id = ?",
@@ -872,7 +872,7 @@ def update_official_specs(only_missing: bool = False, limit: Optional[int] = Non
     import sqlite3
     import undetected_chromedriver as uc  # type: ignore
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
     # skip 既に公式 spec fetch 済 record (official_spec_fetched=True)
     cur.execute(
@@ -970,7 +970,7 @@ def apply_base_specs_to_catalog() -> int:
     import json as _json
     import api  # type: ignore
 
-    conn = sqlite3.connect(str(api._DB_PATH))
+    conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
     cur = conn.cursor()
     cur.execute("SELECT product_id, specs FROM products WHERE category = ?", (CATEGORY,))
     rows = cur.fetchall()

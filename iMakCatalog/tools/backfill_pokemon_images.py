@@ -45,7 +45,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    con = sqlite3.connect(str(api._DB_PATH)); con.row_factory = sqlite3.Row; cur = con.cursor()
+    con = sqlite3.connect(str(api._DB_PATH), timeout=120); con.row_factory = sqlite3.Row; cur = con.cursor()
     rows = cur.execute(
         "SELECT id, product_id, name_jp, name_en, specs, source FROM products "
         "WHERE category=? AND (images IS NULL OR images IN ('','[]')) ORDER BY product_id", (CAT,)

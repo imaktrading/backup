@@ -122,7 +122,7 @@ def main():
                     help="'all' で全カテゴリ (既定: pokemon_tcg のみ。他は凍結)")
     args = ap.parse_args()
 
-    db = sqlite3.connect(api._DB_PATH)
+    db = sqlite3.connect(api._DB_PATH, timeout=120)
     db.row_factory = sqlite3.Row
     if args.category == "all":
         rows = db.execute("SELECT id, category, product_id, set_name_official, specs FROM products "

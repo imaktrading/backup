@@ -95,7 +95,7 @@ PLAN = {
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     dry = "--apply" not in sys.argv
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=120)
     conn.row_factory = sqlite3.Row
 
     bak = {}

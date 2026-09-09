@@ -101,7 +101,7 @@ def run(cat: str, commit: bool) -> int:
     # ★変換表は **書き込みを始める前に**まとめて読む (2026-09-04)。
     #   書き込みトランザクション中に api.derive_* が別コネクションで読みに行くと
     #   `database is locked` で落ちる (実際に落ちた)。
-    db = sqlite3.connect(str(api._DB_PATH))
+    db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
     ctmap = _card_type_map(db, cat)
     setmap = {r[0]: r[1] for r in db.execute(

@@ -82,7 +82,7 @@ def main():
     ap.add_argument("--commit", action="store_true")
     args = ap.parse_args()
 
-    db = sqlite3.connect(api._DB_PATH)
+    db = sqlite3.connect(api._DB_PATH, timeout=120)
     db.row_factory = sqlite3.Row
     rows = collect(db)
 

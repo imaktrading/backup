@@ -54,7 +54,7 @@ SPOT = ROOT / "tools" / "_claim_check_spots.json"
 
 
 def _db():
-    c = sqlite3.connect(str(api._DB_PATH))
+    c = sqlite3.connect(str(api._DB_PATH), timeout=120)
     c.row_factory = sqlite3.Row
     return c
 
@@ -303,6 +303,28 @@ def check_raw_to_ebay(_):
                        else "eBay 用の値が付いていない行 0")
 
 
+def check_uniqlo_stock(quick):
+    """**公式在庫に在るのに catalog に無い UT** を 0 に保つ (2026-09-09 追加).
+
+    2026-05-05 に取り込んだきりで、公式在庫 265件のうち **150件が抜けていた**
+    (ちいかわ / ポケモン / 集英社100周年マンガUT …)。ユーザーが
+    「公式在庫での出品物で見てみて」と言うまで誰も気づいていない。
+    UT は廃盤になると公式から全部消える (実寸表は復元手段が無い) ので、
+    **出たそばから取る**のが要になる。
+    """
+    if quick:
+        return True, "(--quick のため未実行)"
+    sys.path.insert(0, str(ROOT / "tools"))
+    import official_drift_uniqlo as U  # noqa
+    try:
+        res = U.check()
+    except Exception as e:
+        return False, f"公式在庫が取れなかった: {type(e).__name__} {e}"
+    n = len(res["missing"])
+    return (n == 0), (f"公式在庫 {res['stock']}件 / catalog に無い {n}件"
+                      f" / 値がまだ {res['no_fields']} / 実寸表がまだ {res['no_chart']}")
+
+
 CHECKS = [
     ("Set が空の行", check_set_empty),
     ("1セット1値", check_one_set_one_value),
@@ -316,6 +338,7 @@ CHECKS = [
     ("回帰テスト", check_tests),
     ("公式との突合", check_official_drift),
     ("公式突合のカバー範囲", check_official_coverage),
+    ("UT 公式在庫との突合", check_uniqlo_stock),
 ]
 
 

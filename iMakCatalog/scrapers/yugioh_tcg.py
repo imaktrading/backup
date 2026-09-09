@@ -150,7 +150,7 @@ def scrape(mode: str = "update", limit: Optional[int] = None,
     existing_ids: set[str] = set()
     if mode == "update":
         import sqlite3
-        conn = sqlite3.connect(str(api._DB_PATH))
+        conn = sqlite3.connect(str(api._DB_PATH), timeout=120)
         for (pid,) in conn.execute(
             "SELECT product_id FROM products WHERE category = ?", (CATEGORY,)
         ).fetchall():
