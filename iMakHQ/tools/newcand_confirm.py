@@ -1544,13 +1544,10 @@ def run_append_high(timeout=10800, dry_run=False):
     """用途=出品 の候補に証明番号を付けて商品管理シートへ足す (impure)。"""
     out_rows = migrate_out_rows(_read_tab(OUT_TAB))
     items = pending_list_rows(out_rows)
-    # ★2026-09-09: 上限超は **証明番号を打たせる前**に外す。打っても生成で落ちるので、
-    #   打った時間がまるごと無駄になる (ユーザー「外そう、時間の無駄だし」)。
-    _over = [it for it in items if over_cost_cap(it.get("price"))]
-    if _over:
-        items = [it for it in items if not over_cost_cap(it.get("price"))]
-        print("  💸 仕入値が上限を超えていて除外 %d件 (打っても生成で落ちる): %s"
-              % (len(_over), ", ".join("¥%s" % str(x.get("price")) for x in _over[:6])))
+    # ★2026-09-09: ここでは上限で外さない (ユーザー指示は ①目視 の方だけ)。
+    #   技術的にもここで隠すと **印が付かないまま消える** = その行は永久に未処理で残る。
+    #   上限は ①目視 で外すので、以後 台帳に上がってこない。既に台帳に居る分は
+    #   人が「売り切れ」/「番号読めず」で閉じられるよう、そのまま見せる。
     if not items:
         print("  HIGH に足す『用途=出品』の候補はありません")
         return 0

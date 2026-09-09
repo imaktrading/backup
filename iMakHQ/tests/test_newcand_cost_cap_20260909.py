@@ -47,18 +47,26 @@ def test_しきい値を自分で持っていない():
     assert "70000" not in body, "上限の数値をコードに焼いている"
 
 
-def test_両方の画面で外している():
-    """①目視 と ②証明番号 の両方。片方だけだと結局 人が触ることになる。"""
-    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "tools", "newcand_confirm.py"), encoding="utf-8").read()
+def _src():
+    return open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "tools", "newcand_confirm.py"), encoding="utf-8").read()
+
+
+def test_外すのは1画面目だけ():
+    """★ユーザー指示は「捨てた候補→新規出品の種」(①目視) だけ。②には入れない。
+
+    技術的にも ② で隠すと **印が付かないまま消える** = その行は永久に未処理で残る。
+    ① で外せば台帳に上がってこないし、既に台帳に居る分は人が
+    「売り切れ」/「番号読めず」で閉じられる。
+    """
+    src = _src()
     scr1 = src[src.index("auto_aux, items, groups, over_cap"):]
-    assert "over_cost_cap(p.get(\"price\"))" in scr1[:800]
+    assert 'over_cost_cap(p.get("price"))' in scr1[:800]
     scr2 = src[src.index("def run_append_high("):]
-    assert "over_cost_cap(it.get(\"price\"))" in scr2[:1200]
+    scr2 = scr2[:scr2.index("def main(")]
+    assert "over_cost_cap(" not in scr2, "②(証明番号)で外している = 指示にない絞り込み"
 
 
 def test_黙って捨てない():
     """除外したら必ず件数と値段を出す (silent drop 禁止)。"""
-    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "tools", "newcand_confirm.py"), encoding="utf-8").read()
-    assert src.count("仕入値が上限を超えていて除外") == 2
+    assert _src().count("仕入値が上限を超えていて除外") == 1
