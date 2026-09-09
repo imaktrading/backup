@@ -248,3 +248,13 @@
 ### 注記: /doctor の CLAUDE.md trim 未コミット
 
 - CLAUDE.md は前回 /doctor で古いディレクトリツリー27行を削除済 (作業ツリー・ユーザーレビュー用)。本日の commit には含めない
+
+---
+
+## 2026-09-09
+
+### 商品管理シート N列破壊 調査依頼 (HQ窓口) → append無し/N跨ぎ無し + 源流ガード追加
+
+- 決定: ① 重複くんに append_row(s) 皆無・書込は単一セル(D4/AI35/AJ36/ヘッダ)のみで N(14)跨ぎ無し=事故経路なし。② HQ の源流test を worktree用に移植し将来混入を防止
+- 変更: tests/test_no_wide_write_over_n_column.py 新規 (HIGH19kj8Nq/LOW1jF9vgg 走査、N跨ぎliteralレンジ+append_row(s)を落とす、自己テスト付)。回答 2026-09-09_sheet_append_must_not_touch_n_column_response.md
+- 検証: grep で append 0件・書込全て rowcol_to_a1 単一セル確認。新規test 3 passed (現状違反ゼロ=preventive)
