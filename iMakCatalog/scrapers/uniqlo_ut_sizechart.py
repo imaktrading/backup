@@ -179,7 +179,9 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
 
 
 def run(commit: bool, include_kids: bool, limit: int | None) -> None:
-    db = sqlite3.connect(str(api._DB_PATH))
+    # ★他のセッション (回帰テスト等) が DB を掴んでいても待つ。
+    #   待たないと `database is locked` で走行ごと落ちる (2026-09-09 実際に落ちた)。
+    db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
     rows = targets(db, include_kids)
     if limit:
@@ -219,10 +221,27 @@ def run(commit: bool, include_kids: bool, limit: int | None) -> None:
                 if inch:
                     s["size_chart_inch"] = inch
                 s["size_chart_at"] = now
-                db.execute("UPDATE products SET specs=?, updated_at=? WHERE id=?",
-                           (json.dumps(s, ensure_ascii=False), now, r["id"]))
-                db.commit()                  # ★1件ごとに保存 (1件15秒。取り直しが高い)
-                ok += 1
+                # ★DB が塞がっていても **走行を落とさない** (2026-09-09)。
+                #   回帰テスト (3〜5分) が掴んでいる間は timeout でも足りず、
+                #   2回とも走行ごと落ちた。待って、駄目なら次の商品へ進む
+                #   (生テキストは倉庫に在るので、後から入れ直せる)。
+                saved = False
+                for attempt in range(6):
+                    try:
+                        db.execute("UPDATE products SET specs=?, updated_at=? WHERE id=?",
+                                   (json.dumps(s, ensure_ascii=False), now, r["id"]))
+                        db.commit()          # ★1件ごとに保存 (1件15秒。取り直しが高い)
+                        saved = True
+                        break
+                    except sqlite3.OperationalError as e:
+                        if "locked" not in str(e):
+                            raise
+                        stat["DB が塞がって待った"] += 1
+                        time.sleep(20)
+                if saved:
+                    ok += 1
+                else:
+                    stat["DB に入れられず (倉庫には在る)"] += 1
             if i % 10 == 0:
                 print(f"    ... {i}/{len(rows)} (取れた {stat['取れた']})", flush=True)
     finally:

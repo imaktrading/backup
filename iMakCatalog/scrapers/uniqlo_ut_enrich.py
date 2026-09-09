@@ -154,7 +154,9 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
 
 
 def run(commit: bool, include_kids: bool, limit: int | None) -> None:
-    db = sqlite3.connect(str(api._DB_PATH))
+    # ★他のセッション (回帰テスト等) が DB を掴んでいても待つ。
+    #   待たないと `database is locked` で走行ごと落ちる (2026-09-09 実際に落ちた)。
+    db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
     rows = targets(db, include_kids)
     if limit:

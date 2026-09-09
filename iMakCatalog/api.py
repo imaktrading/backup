@@ -44,7 +44,10 @@ _SCHEMA_PATH = Path(__file__).parent / "db" / "schema.sql"
 def _connect() -> sqlite3.Connection:
     """DB 接続を返す。未初期化なら schema.sql を実行。"""
     is_new = not _DB_PATH.exists()
-    conn = sqlite3.connect(str(_DB_PATH))
+    # ★DB は 全 worktree 共有。取り込みが走っている最中に読むと
+    #   `database is locked` で即座に落ちる (2026-09-04 / 09-09 に実際に落ちた)。
+    #   待てば済む話なので待つ。既定の 5秒では取り込みの1トランザクションに足りない。
+    conn = sqlite3.connect(str(_DB_PATH), timeout=120)
     conn.row_factory = sqlite3.Row
     if is_new and _SCHEMA_PATH.exists():
         with open(_SCHEMA_PATH, encoding="utf-8") as f:
