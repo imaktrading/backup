@@ -257,7 +257,9 @@ def append_new_urls(
     if not new_rows:
         return {"appended": 0, "skipped_existing": skipped, "input": len(items)}
 
-    ws.append_rows(new_rows, value_input_option="USER_ENTERED")
+    # ★append を使わない (2026-09-09 HQ 依頼)。 N列 (spill) を塞ぐため
+    from sheet_append import append_rows_safe  # noqa: PLC0415
+    append_rows_safe(ws, new_rows)
 
     return {
         "appended": len(new_rows),

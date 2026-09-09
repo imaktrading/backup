@@ -26,17 +26,47 @@ pytestmark = pytest.mark.offline
 
 
 class _MockWorksheet:
-    """get_all_values / append_rows のみ実装した最小モック."""
+    """get_all_values / batch_update のみ実装した最小モック.
+
+    ★2026-09-09: 商品管理シートへの追記は `append_rows` をやめ、 N列/AN列を避けた
+    range 書込 (`sheet_append.append_rows_safe`) になった。 append は列を左から
+    埋めるので N (ARRAYFORMULA の spill 出力) を塞いで全行を #REF! にする。
+    `append_calls` は **書き込まれた行を range から組み立て直したもの**を返す。
+    """
+
+    row_count = 10000
 
     def __init__(self, existing_rows: list[list[str]]):
         self._values = existing_rows
-        self.append_calls: list[list[list[str]]] = []
         self.append_kwargs: list[dict] = []
         self.update_calls: list[tuple] = []
         self.batch_update_calls: list[list] = []
 
+    @property
+    def append_calls(self):
+        """batch_update の指示から 追記された行を復元する (N列は空で埋め戻す)."""
+        out = []
+        for args, kwargs in self.batch_update_calls:
+            reqs = args[0] if args else kwargs.get("data") or []
+            rows: dict = {}
+            for req in reqs:
+                rng = req["range"]
+                start_col = _col_num(rng.split(":")[0].rstrip("0123456789"))
+                for i, vals in enumerate(req["values"]):
+                    row = rows.setdefault(i, {})
+                    for j, v in enumerate(vals):
+                        row[start_col + j] = v
+            if rows:
+                width = max(max(r) for r in rows.values())
+                out.append([[rows[i].get(c + 1, "") for c in range(width)]
+                            for i in sorted(rows)])
+        return out
+
     def get_all_values(self):
         return self._values
+
+    def add_rows(self, n):  # noqa: D401 - モック
+        self.row_count += n
 
     def append_rows(self, rows, value_input_option=None, table_range=None):  # noqa: ARG002
         self.append_calls.append(rows)
@@ -48,6 +78,13 @@ class _MockWorksheet:
 
     def batch_update(self, *args, **kwargs):  # noqa: ARG002
         self.batch_update_calls.append((args, kwargs))
+
+
+def _col_num(letters: str) -> int:
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch) - 64)
+    return n
 
 
 def _empty_row(url: str = "", ebay_id: str = "") -> list[str]:
@@ -344,26 +381,34 @@ class TestAppendNewUrls:
         assert result["appended"] == 1
         assert result["skipped_existing"] == 1
 
-    def test_does_not_call_update_or_batch_update(self):
-        # 既存行を一切上書きしないことの担保 (CLAUDE.md: 既存スプシ行を上書きしない)
-        ws = _ws_with_existing_urls(["m11111111111"])
-        items = [
-            {"url": "https://jp.mercari.com/item/m22222222222"},
-        ]
-        append_new_urls(ws, items)
-        assert ws.update_calls == []
-        assert ws.batch_update_calls == []
+    def test_writes_only_below_the_existing_rows(self):
+        """既存行を一切上書きしない (CLAUDE.md: 既存スプシ行を上書きしない).
 
-    def test_append_anchors_table_range_at_a1(self):
-        # 回帰テスト (2026-06-17): append_rows は table_range="A1" 固定で呼ばれること。
-        # 既定 None だと Sheets API の表検出が col A 以外のスパース列を表と誤認し、
-        # 新行を右方向にずらして着地させる (HIGH 出品日列 U に stray 値があり Porter が
-        # U 列起点に +20 列ずれた事故)。A1 起点固定で col A 本表末尾に左詰め append される。
+        2026-09-09 変更: append_rows をやめ range 書込にしたので、 **書込先の行番号が
+        既存行より下か**で担保する (以前は「batch_update を呼ばない」で見ていた)。
+        """
+        ws = _ws_with_existing_urls(["m11111111111"])   # ヘッダ + 1行 = 2行
+        append_new_urls(ws, [{"url": "https://jp.mercari.com/item/m22222222222"}])
+        assert ws.update_calls == []
+        starts = [int("".join(c for c in req["range"].split(":")[0] if c.isdigit()))
+                  for args, _ in ws.batch_update_calls for req in args[0]]
+        assert starts and min(starts) > len(ws.get_all_values())
+
+    def test_write_starts_at_column_a_and_skips_n(self):
+        """A列起点で左詰め、 かつ **N列 (14) には書かない**.
+
+        2026-06-17 の事故 (表検出が U列を表と誤認して +20列ずれた) は range 指定で
+        起きなくなった。 2026-09-09 からは N列を跨がないことも合わせて担保する。
+        """
         ws = _ws_with_existing_urls(["m11111111111"])
-        items = [{"url": "https://jp.mercari.com/item/m22222222222"}]
-        append_new_urls(ws, items)
-        assert len(ws.append_kwargs) == 1
-        assert ws.append_kwargs[0]["table_range"] == "A1"
+        append_new_urls(ws, [{"url": "https://jp.mercari.com/item/m22222222222"}])
+        ranges = [req["range"] for args, _ in ws.batch_update_calls for req in args[0]]
+        assert ranges[0].startswith("A")
+        for rng in ranges:
+            a, b = rng.split(":")
+            lo = _col_num("".join(c for c in a if c.isalpha()))
+            hi = _col_num("".join(c for c in b if c.isalpha()))
+            assert not (lo <= 14 <= hi), f"{rng} が N列を含む"
 
     def test_empty_input(self):
         ws = _ws_with_existing_urls([])

@@ -315,7 +315,10 @@ def append_new_urls(
     # 表検出が col A 以外のスパース列ブロックを表と誤認し、新行を右方向にずらして着地させる
     # 事故が起きる。2026-06-17: HIGH の出品日列(U)に stray 値があり Porter 7 行が U 列起点に
     # +20 列ずれて誤書込された)。A1 起点固定で必ず col A の本表末尾に左詰め append される。
-    ws.append_rows(new_rows, value_input_option="USER_ENTERED", table_range="A1")
+    # ★append を使わない (2026-09-09 HQ 依頼)。 行の長さが14以上あると N列 (spill の
+    #   出力) に空文字を書いて塞ぎ、 **商品管理シートの N が全行 #REF! で空になる**。
+    from sheet_append import append_rows_safe  # noqa: PLC0415
+    append_rows_safe(ws, new_rows)
 
     return {
         "appended": len(new_rows),

@@ -17,20 +17,52 @@ from sheet_writer_amazon import (
 pytestmark = pytest.mark.offline
 
 
+def _col_num(letters: str) -> int:
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch) - 64)
+    return n
+
+
 class _MockWorksheet:
-    """get_all_values / append_rows のみ実装した最小モック."""
+    """get_all_values / batch_update のみ実装した最小モック.
+
+    ★2026-09-09: 追記は `append_rows` をやめ、 N列/AN列を避けた range 書込になった
+    (append は列を左から埋めるので N = ARRAYFORMULA の spill 出力を塞ぐ)。
+    `append_calls` は range 書込から行を復元して返す。
+    """
+
+    row_count = 10000
 
     def __init__(self, existing_rows: list[list[str]]):
         self._values = existing_rows
-        self.append_calls: list[list[list[str]]] = []
         self.update_calls: list[tuple] = []
         self.batch_update_calls: list[list] = []
+
+    @property
+    def append_calls(self):
+        out = []
+        for args, kwargs in self.batch_update_calls:
+            reqs = args[0] if args else kwargs.get("data") or []
+            rows: dict = {}
+            for req in reqs:
+                start = _col_num("".join(c for c in req["range"].split(":")[0]
+                                         if c.isalpha()))
+                for i, vals in enumerate(req["values"]):
+                    row = rows.setdefault(i, {})
+                    for j, v in enumerate(vals):
+                        row[start + j] = v
+            if rows:
+                width = max(max(r) for r in rows.values())
+                out.append([[rows[i].get(c + 1, "") for c in range(width)]
+                            for i in sorted(rows)])
+        return out
 
     def get_all_values(self):
         return self._values
 
-    def append_rows(self, rows, value_input_option=None):  # noqa: ARG002
-        self.append_calls.append(rows)
+    def add_rows(self, n):
+        self.row_count += n
 
     def update(self, *args, **kwargs):  # noqa: ARG002
         self.update_calls.append((args, kwargs))
@@ -243,13 +275,24 @@ class TestAppendNewUrls:
         assert result["appended"] == 1
         assert result["skipped_existing"] == 0
 
-    def test_does_not_call_update_or_batch_update(self):
-        # 既存行を一切上書きしない (CLAUDE.md: 既存スプシ行を上書きしない)
+    def test_writes_only_below_existing_rows(self):
+        """既存行を一切上書きしない (CLAUDE.md: 既存スプシ行を上書きしない).
+
+        2026-09-09 変更: append_rows をやめ range 書込にしたので、 **書込先の行番号が
+        既存行より下か** と **N列を跨がないか** で担保する。
+        """
         ws = _ws_with_existing_amazon_urls(["B08N5WRWNW"])
-        items = [{"url": "https://www.amazon.co.jp/dp/B0ABCDEFGH"}]
-        append_new_urls(ws, items)
+        append_new_urls(ws, [{"url": "https://www.amazon.co.jp/dp/B0ABCDEFGH"}])
         assert ws.update_calls == []
-        assert ws.batch_update_calls == []
+        reqs = [req for args, _ in ws.batch_update_calls for req in args[0]]
+        assert reqs
+        for req in reqs:
+            a, b = req["range"].split(":")
+            start_row = int("".join(c for c in a if c.isdigit()))
+            assert start_row > len(ws.get_all_values())
+            lo = _col_num("".join(c for c in a if c.isalpha()))
+            hi = _col_num("".join(c for c in b if c.isalpha()))
+            assert not (lo <= 14 <= hi), f"{req['range']} が N列を含む"
 
     def test_empty_input(self):
         ws = _ws_with_existing_amazon_urls([])
