@@ -101,16 +101,19 @@ def test_unchecked_rows_are_counted_not_hidden():
     assert st["listed"] == 2 and st["compared"] == 1 and st["no_market"] == 1
 
 
+# ★2026-09-10: 下落の見張りは **出品IDの形をした行だけ** を見る
+#   (itemID 9999 の見送り行 37件が1枠を取り合い、誤報4件を出したため)。
+#   ここの作り物も実物と同じ12桁にする。
 def test_cost_drop_needs_a_previous_value():
     """初回は比べる相手が無い = 何も出さない (台帳だけ作る)。"""
-    vals = [["h"] * N, _row("111", "c1", "15000", "k", "t")]
+    vals = [["h"] * N, _row("358806710830", "c1", "15000", "k", "t")]
     drops, new = S.find_cost_drops(vals, {})
-    assert drops == [] and new == {"111": 15000}
+    assert drops == [] and new == {"358806710830": 15000}
 
 
 def test_big_drop_is_reported():
-    vals = [["h"] * N, _row("111", "c1", "15000", "k", "ルフィ")]
-    drops, new = S.find_cost_drops(vals, {"111": 75000})
+    vals = [["h"] * N, _row("358806710830", "c1", "15000", "k", "ルフィ")]
+    drops, new = S.find_cost_drops(vals, {"358806710830": 75000})
     assert len(drops) == 1 and drops[0]["prev"] == 75000 and drops[0]["now"] == 15000
 
 

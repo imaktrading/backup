@@ -135,6 +135,19 @@ def load_cost_ledger(path=None):
         return {}
 
 
+def is_real_listing_id(iid):
+    """eBay の出品IDか (純関数)。`9999` のような目印は出品ではない。
+
+    ★2026-09-10 実害: 商品管理シートには itemID `9999` (見送りの目印) の行が **37行**あり、
+      台帳は itemID をキーにしているので **37行が1つの枠を取り合う**。書いた順で
+      「前回 84,999円」になり、別の行が今日 4,000円だと「95%下がった」と誤報した
+      (14件のうち4件がこれ)。出品ではない行は最初から見ない。
+    """
+    s = (iid or "").strip()
+    return s.isdigit() and len(s) >= 10
+
+
+
 def find_cost_drops(vals, ledger, ratio=DROP_RATIO):
     """**今日 仕入値が大きく下がった** 出品を見つける (純関数)。戻り: (drops, 新しい台帳)。
 
@@ -146,7 +159,7 @@ def find_cost_drops(vals, ledger, ratio=DROP_RATIO):
     drops, new = [], {}
     for r in vals[1:]:
         iid = _cell(r, hf.B).strip()
-        if not iid or _cell(r, CAT_COL).strip() != PSA_CATEGORY:
+        if not is_real_listing_id(iid) or _cell(r, CAT_COL).strip() != PSA_CATEGORY:
             continue
         cost = _num(_cell(r, 13)) or _num(_cell(r, 12))
         if not cost:
