@@ -1412,7 +1412,9 @@ def plan_high_rows(items, certs, existing_certs=(), listed_keys=(), out_rows=())
             continue
         row = [""] * 40
         row[HIGH_URL_COL] = it["url"]
-        row[HIGH_TITLE_COL] = it["title"]
+        # 仕入元にタイトルが無い時 (snkrdunk) は、人が選んだカタログのカード名を入れる。
+        # 空のままだと作品の振り分けが既定の Pokemon に倒れる (2026-09-09)。
+        row[HIGH_TITLE_COL] = it["title"] or catalog_title_for(it.get("key"), it.get("pid"))
         row[HIGH_CERT_COL] = cert
         row[HIGH_CAT_COL] = SHEET_CATEGORY
         if it.get("price"):
@@ -1425,6 +1427,46 @@ def plan_high_rows(items, certs, existing_certs=(), listed_keys=(), out_rows=())
         marked.add(it["i"])
         used_cert.add(cert)
     return rows, marked, skipped
+
+
+# ★カタログの実カテゴリ名で持つ。ドラゴンボールは `dragonball_scg` (`_tcg` ではない)。
+#   実測 2026-09-09: `SELECT category, COUNT(*) FROM products GROUP BY category`
+#   → yugioh_tcg / pokemon_tcg / one_piece_tcg / **dragonball_scg** / gundam_tcg …
+#   綴りを間違えると作品名が付かず、番号 (SB02-053 等) も判定に使えないので
+#   **既定の Pokemon に倒れる** = ポケモン70%の枠を食う。
+_FRANCHISE_JP = {"one_piece_tcg": "ワンピース", "pokemon_tcg": "ポケモン",
+                 "dragonball_scg": "ドラゴンボール", "dragonball_tcg": "ドラゴンボール"}
+
+
+def catalog_title_for(key, pid, db=DB_PATH):
+    """人が選んだカード (KEY/product_id) から C列に入れるタイトルを作る。無ければ ""。
+
+    ★2026-09-09: snkrdunk の候補は **仕入元にタイトルが無い** (キャッシュが持っていない)。
+      C列が空でも CSV は cert から作れるが、**シートのタイトルを見ている門が3つある**:
+        - 仕入元が「PSA9」と書いているのを検出 (`psa_to_csv.non_psa10_certs`)
+        - まとめ売りの検出 (`multi_card_certs`)
+        - 作品の振り分け (`tcg_batch_select.classify_franchise` / ポケモン70%)
+      空だと3つ目が **既定の Pokemon 扱い**になり、ワンピースのカードがポケモン枠を食う
+      (実測 2026-09-09: 行2760/2761 はどちらもワンピース)。
+      snkrdunk は PSA10 専用の一覧から取るので、1つ目・2つ目は構造的に問題ない。
+    作品名を頭に付けるのは、番号だけでは判定できない版があるため (`P-041` 等)。
+    人が目視で選んだカタログの値なので推測ではない。
+    """
+    if not pid:
+        return ""
+    try:
+        con = sqlite3.connect(db)
+        con.row_factory = sqlite3.Row
+        r = con.execute("SELECT category, name, name_en FROM products WHERE product_id = ?",
+                        (pid,)).fetchone()
+        con.close()
+    except Exception:                                          # noqa: BLE001
+        return ""
+    if not r:
+        return ""
+    cat = (r["category"] or "") or str(key or "").split(":")[0]
+    parts = [_FRANCHISE_JP.get(cat, ""), (r["name"] or r["name_en"] or "").strip(), pid]
+    return " ".join(x for x in parts if x)
 
 
 def over_cost_cap(price):
