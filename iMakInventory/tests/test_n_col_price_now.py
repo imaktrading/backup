@@ -227,9 +227,15 @@ def test_enable_points_false_halts_k_write():
     assert "K8" not in ranges
 
 
-def test_price_col_idx_n_for_unmigrated_high_sheet():
-    """★ price_col_idx=14 (未移行 HIGH) なら現在価格を N(14) に書き、 M(13) は触らない.
-    (HIGH col13='価格上昇有無' への破損を回避、 HQ 準備前は従来 N 書込を維持)."""
+def test_price_col_idx_n_falls_back_to_m():
+    """★ 2026-09-09 方針変更: N(14) には**書かない**。14 を渡されても M(13) に倒す.
+
+    旧仕様 (2026-07-22 以前) は「未移行 HIGH は N に書く」だったが、HIGH/LOW とも
+    07-22 に M へ移行して未移行シートは消滅した。さらに N は
+    =ARRAYFORMULA((M or F)−K) の spill 出力になり、**1セルでも塞ぐと全行が死ぬ**
+    (09-09 実害: HQ の append で N1 が #REF! になり N が全行 空になった)。
+    → コードから N を書く経路自体を無くす。
+    """
     from sheet_updater import update_listings_sold_marks, LISTINGS_COL_PRICE_NOW
     ws = MagicMock()
     ws.batch_update = MagicMock()
@@ -238,10 +244,10 @@ def test_price_col_idx_n_for_unmigrated_high_sheet():
     res = update_listings_sold_marks(ws, updates,
                                      price_col_idx=LISTINGS_COL_PRICE_NOW,  # 14 = N
                                      enable_points=False)
-    assert res["m_writes"] == 1  # 価格書込カウント (列は N)
+    assert res["m_writes"] == 1
     ranges = {c["range"]: c["values"][0][0] for c in ws.batch_update.call_args[0][0]}
-    assert ranges.get("N5") == 3000
-    assert "M5" not in ranges
+    assert ranges.get("M5") == 3000
+    assert "N5" not in ranges
 
 
 def test_points_jpy_non_int_skips_k_column():

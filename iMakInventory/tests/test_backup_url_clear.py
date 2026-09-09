@@ -295,3 +295,34 @@ def test_collect_candidates_skips_unreconfirmed():
     cands, dropped = ml.collect_backup_clear_candidates(results)
     assert [c["expected_url"] for c in cands] == ["https://genuine"]
     assert dropped == 1
+
+
+# ============================================================================
+# N / AN 列は コードから書かない (2026-09-09)
+# ============================================================================
+def test_protected_columns_are_dropped_from_writes():
+    """N(14)/AN(40) への書込は弾く。N は関数の出力で、1セル塞ぐと全行が死ぬ.
+
+    実害 (2026-09-09): HQ の append で N1 が #REF! になり、出品中721行 +
+    未出品1,714行の N (仕入れ価格) が全部 空になった。
+    """
+    from sheet_updater import _protected_ranges, _drop_protected
+    ups = [{"range": "D5"}, {"range": "N5"}, {"range": "M5"},
+           {"range": "AN5"}, {"range": "AO5"}, {"range": "A5:L5"}]
+    assert set(_protected_ranges(ups)) == {"N5", "AN5"}
+    kept = [u["range"] for u in _drop_protected(ups, "test")]
+    assert kept == ["D5", "M5", "AO5", "A5:L5"]
+
+
+def test_price_write_never_targets_n_column():
+    """呼出側が N(14) を渡しても M(13) に倒す (未移行シートは 2026-07-22 に消滅)."""
+    from unittest.mock import MagicMock
+    import sheet_updater as su
+    ws = MagicMock()
+    ws.get_all_values = MagicMock(return_value=[[""] * 41 for _ in range(6)])
+    su.update_listings_sold_marks(
+        ws, [{"row_index": 5, "sold": False, "price_jpy": 1000, "checked_at": "x"}],
+        price_col_idx=su.LISTINGS_COL_PRICE_NOW)          # わざと N を渡す
+    written = {u["range"] for u in ws.batch_update.call_args[0][0]}
+    assert not any(r.startswith("N") for r in written)
+    assert any(r.startswith("M") for r in written)

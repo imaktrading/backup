@@ -141,6 +141,42 @@ PRICE_SURGE_MIN_ROWS = 10      # 判定に要する supplier あたり最小 (pr
 PRICE_SURGE_MIN_RATIO = 0.5    # 急変行 / 判定対象行 がこの割合以上 → 系統崩壊とみなし HOLD
 
 
+# ★ 2026-09-09: 商品管理シートの N(14) と AN(40) は **コードから書かない列**。
+#   N は =ARRAYFORMULA((M or F)−K) の spill 出力で、**1セルでも塞ぐと全行が死ぬ**
+#   (09-09 実害: HQ の append で N1 が #REF! になり 出品中721行+未出品1,714行の N が全部空)。
+#   価格を反映したい時は M(13、現在価格) に書く。
+LISTINGS_PROTECTED_COLS = frozenset({14, 40})     # N, AN
+
+
+def _protected_ranges(cell_updates: list) -> list:
+    """守る列 (N/AN) を触る書込があれば、その range 文字列を返す。"""
+    import re as _re  # noqa: PLC0415
+    hit = []
+    for u in cell_updates or []:
+        rng = u.get("range") if isinstance(u, dict) else None
+        if not isinstance(rng, str):
+            continue
+        for col in _re.findall(r"([A-Z]{1,2})\d+", rng.upper()):
+            n = 0
+            for ch in col:
+                n = n * 26 + (ord(ch) - 64)
+            if n in LISTINGS_PROTECTED_COLS:
+                hit.append(rng)
+                break
+    return hit
+
+
+def _drop_protected(cell_updates: list, where: str) -> list:
+    """守る列への書込を落とす (silent drop 禁止なので必ず print する)。"""
+    bad = set(_protected_ranges(cell_updates))
+    if not bad:
+        return cell_updates
+    print(f"  [!] {where}: N/AN 列への書込 {len(bad)} 件を弾きました "
+          f"(この2列は関数の出力。書くと全行が壊れる): {sorted(bad)[:5]}")
+    return [u for u in cell_updates
+            if not (isinstance(u, dict) and u.get("range") in bad)]
+
+
 # ============================================================================
 # 認証 / スプシオープン
 # ============================================================================
@@ -425,7 +461,9 @@ def update_listings_sold_marks(ws, updates: list,
                 })
                 ah_writes += 1
             cell_updates.append({
-                "range": f"{_col_letter(price_col_idx)}{row_idx}",  # 移行済=M(13) / 未移行=N(14)
+                # ★ 2026-09-09: 書込先は必ず M(13)。N(14) は関数の出力なので書かない
+                #   (未移行シートは 2026-07-22 に消滅。呼出側が 14 を渡してきたら M に倒す)
+                "range": f"{_col_letter(price_col_idx if price_col_idx != LISTINGS_COL_PRICE_NOW else LISTINGS_COL_PRICE_NOW_M)}{row_idx}",
                 "values": [[price_jpy]],
             })
             m_writes += 1
@@ -471,7 +509,8 @@ def update_listings_sold_marks(ws, updates: list,
             })
             sold_at_clears += 1
 
-    ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+    ws.batch_update(_drop_protected(cell_updates, "update_listings_sold_marks"),
+                    value_input_option="USER_ENTERED")
     return {"updated": len(updates), "d_writes": d_writes, "o_writes": o_writes,
             "m_writes": m_writes, "k_writes": k_writes, "ah_writes": ah_writes,
             "err_writes": err_writes, "m_held": m_held, "sold_at_writes": sold_at_writes,
@@ -707,7 +746,8 @@ def clear_sold_backup_cells(ws, clear_candidates: list,
                             "expected_url": expected, "actual": actual})
 
     if cell_updates:
-        ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+        ws.batch_update(_drop_protected(cell_updates, "clear_sold_backup_cells"),
+                        value_input_option="USER_ENTERED")
 
     return {"cleared": cleared, "skipped_mismatch": skipped, "held": False,
             "candidate_count": n, "surge": False, "cleared_entries": cleared_entries,
