@@ -203,6 +203,15 @@ def url_title_map(cache):
 
     ★「違う」を押した時に候補のタイトルを保存していなかったので、後から引くにはここしかない。
       cands / all_cands / loose_cands / best の4か所に [価格, url, タイトル] で入っている。
+
+    ★2026-09-09 ユーザー指摘「何件か、価格入ってないけど」。**mercari しか見ていなかった**。
+      実測: 台帳の価格なし47件のうち **44件が snkrdunk**。
+      snkrdunk は `snkrdunk.psa10_listings` に {price, url, image} で入っている
+      (タイトルは持たないので "" のまま)。値段が無いと:
+        - 仕入値の上限で外せない (fail-open で素通りする)
+        - 商品管理シートに足した時に M列が空 = 仕入値が作れない
+      補URL側 (`hoju_url_from_dupes.price_by_url_from_cache`) は 2026-09-07 に
+      同じ穴を塞いでいた。こちらだけ残っていた。
     """
     out = {}
     for _iid, v in (cache or {}).items():
@@ -215,6 +224,10 @@ def url_title_map(cache):
             for c in lst:
                 if isinstance(c, (list, tuple)) and len(c) >= 3 and c[1]:
                     out[c[1]] = (c[0], c[2])
+        for lst in ((v or {}).get("snkrdunk") or {}).get("psa10_listings") or []:
+            u = (lst or {}).get("url")
+            if u and u not in out:
+                out[u] = (lst.get("price"), "")      # snkrdunk はタイトルを持たない
     return out
 
 
