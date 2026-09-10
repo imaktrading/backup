@@ -231,6 +231,26 @@ def url_title_map(cache):
     return out
 
 
+def url_image_map(cache):
+    """探索 cache → {候補URL: 実カードの画像URL} (純関数)。
+
+    ★2026-09-10 ユーザー指摘「スニダンだけ画像が出てこないのはおかしくない?」。
+      画面は URL をプロキシに渡して画像を作っていたが、**snkrdunk の商品ページの
+      og:image はサイト既定のロゴ**なので、カードの絵が出ない (mercari は CDN の
+      実画像に解決できるので出る)。
+      snkrdunk は `snkrdunk.psa10_listings` に {price, url, **image**} を持っている
+      ので、それを使えば出る。補URL側の確証画面 (psa_resource_confirm) は
+      2026-08 に同じ対応済みで、こちらだけ残っていた。
+    """
+    out = {}
+    for _iid, v in (cache or {}).items():
+        for lst in ((v or {}).get("snkrdunk") or {}).get("psa10_listings") or []:
+            u, img = (lst or {}).get("url"), (lst or {}).get("image")
+            if u and img and u not in out:
+                out[u] = img
+    return out
+
+
 def pending_rows(src_rows, done_urls):
     """台帳の行 → 未処理だけ (純関数)。done_urls に有る url は落とす。
 
@@ -482,10 +502,12 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
             typed_no[r[0].strip()] = r[1].strip().upper()
     try:
         with open(CACHE_PATH, encoding="utf-8") as f:
-            u2t = url_title_map(json.load(f))
+            _cache_json = json.load(f)
+            u2t = url_title_map(_cache_json)
+            u2i = url_image_map(_cache_json)
     except Exception as e:
         print(f"⚠ 探索cache を読めない ({type(e).__name__}) → タイトル復元なしで続行")
-        u2t = {}
+        u2t, u2i = {}, {}
 
     # 既に結論が出ているカード + **既に eBay に出品中**のカード
     #   どちらも「人に見せる必要が無い」= 供給URLだけ補URLとして拾えばいい。
@@ -506,7 +528,8 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
         card_no = typed_no.get(p["url"], "") or extract_card_no(title)
         p["no_from_typed"] = bool(typed_no.get(p["url"]))
         variants = catalog_candidates(title, card_no) if resolve else []
-        p.update({"price": price, "title": title, "card_no": card_no, "variants": variants})
+        p.update({"price": price, "title": title, "card_no": card_no, "variants": variants,
+                  "image": u2i.get(p["url"], "")})
         all_items.append(p)
 
     # ★2026-08-13 ユーザー指摘「同じカードとか画像がないとか多いんだけど」。
@@ -793,7 +816,7 @@ def build_html(items):
             ttl, col, note = _SECTIONS[st]
             parts.append(f"<h2 class='sec' style='border-color:{col};color:{col}'>{ttl}"
                          f"<span class='note'>{note}</span></h2>")
-        photo = prc._proxied(it["url"])
+        photo = prc._proxied(it.get("image") or it["url"])
         ph = (f"<div class='ph'><a href='{_html.escape(it['url'])}' target='_blank'>"
               f"<img src='{_html.escape(photo)}' loading='lazy' onerror='imgFail(this)'></a>"
               f"<div><button class='zb2' onclick='zoom(event,this,\"cand\")'>🔍 拡大</button></div>"
@@ -1502,7 +1525,7 @@ def build_cert_html(items):
     """候補の写真とタイトルを見せて、証明番号を打ってもらう HTML (純関数)。"""
     cards = []
     for it in items:
-        photo = prc._proxied(it["url"])
+        photo = prc._proxied(it.get("image") or it["url"])
         price = " / 仕入 %s円" % it["price"] if it["price"] else ""
         # ★2026-09-06 ユーザー要望: 証明番号は PSA ラベルの右上に印字されている。
         #   180x240 に縮めた写真では読めず、毎回 仕入元ページを開き直していた。
