@@ -235,10 +235,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python C:/dev/iMak/iMakHQ/tools/audit_catchup.py"
-          },
-          {
-            "type": "command",
             "command": "python C:/dev/iMak/iMakHQ/tools/adv_delta.py"
           }
         ]
