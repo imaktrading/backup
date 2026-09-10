@@ -53,6 +53,7 @@ if str(_CATALOG_ROOT) not in sys.path:
 import api  # noqa: E402
 sys.path.insert(0, str(_CATALOG_ROOT / "scrapers"))
 import _raw_store  # noqa: E402
+import uniqlo_ut as U  # noqa: E402
 import uniqlo_ut_enrich as E  # noqa: E402
 
 try:
@@ -211,7 +212,13 @@ def run(commit: bool, limit: int | None) -> None:
             continue
 
         imgs = E.all_images(d.get("images") or {}) if src == "official" else images_of(pid)
+        # ★性別を必ず入れる (2026-09-10)。入れないと キッズが「大人」として扱われ、
+        #   実寸表の Selenium が 1件15秒かけて叩きに行く (実際に11件やった)。
+        #   detail API の genderName は **小文字** (`kids` / `men`) なので大文字にそろえる。
+        gender = (d.get("genderName") or "").strip().upper()
         specs = {
+            "gender": gender,
+            "department": U._gender_to_dept(gender),
             "composition": d.get("composition") or "",
             "design_detail": d.get("designDetail") or "",
             "long_description": d.get("longDescription") or "",

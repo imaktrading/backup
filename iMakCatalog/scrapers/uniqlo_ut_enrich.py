@@ -154,17 +154,24 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
     rows = db.execute(
         "SELECT id, product_id, name, images, specs FROM products WHERE category=?",
         (CATEGORY,)).fetchall()
-    out, skipped, kids = [], 0, 0
+    out, skipped, kids, notprod = [], 0, 0, 0
     for r in rows:
         s = json.loads(r["specs"] or "{}")
         if not include_kids and str(s.get("gender") or "").upper() in KID_GENDERS:
             kids += 1
             continue
+        # ★商品でない行は叩かない (2026-09-10)。コラボの紹介記事を丸ごと1行として
+        #   持っている分 (`FP-*`) は商品番号ではないので、公式 API が毎回 400 を返す。
+        #   欠落ではないので、対象から外す。
+        if s.get("is_collab_overview"):
+            notprod += 1
+            continue
         if s.get("enriched_at") or s.get("official_gone_at"):
             skipped += 1
             continue
         out.append(r)
-    print(f"  済み {skipped}行 は飛ばす / キッズ・ベビー {kids}行 は対象外")
+    print(f"  済み {skipped}行 は飛ばす / キッズ・ベビー {kids}行 は対象外 / "
+          f"商品でない行 (コラボ紹介) {notprod}行 は対象外")
     return out
 
 
