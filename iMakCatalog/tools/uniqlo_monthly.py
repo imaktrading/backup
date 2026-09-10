@@ -49,12 +49,19 @@ except Exception:
 
 STEPS = [
     ("公式在庫の新商品",     ["scrapers/uniqlo_ut.py", "--update"]),
+    # ★公式の検索は「今買えるもの」しか返さない。**買えないものが仕入れ対象**なので、
+    #   Wayback と 隣の番号から品番を拾う (2026-09-10 新設)
+    ("買えない UT を掘る",   ["scrapers/uniqlo_ut_discover.py", "--commit"]),
     ("UT の値を仕上げ",      ["scrapers/uniqlo_ut_enrich.py", "--commit"]),
     ("コラボ紹介文",         ["scrapers/uniqlo_ut_collab.py", "--commit"]),
     ("GU の取り込み",        ["scrapers/gu_graphic_tee.py", "--commit"]),
     ("UT の実寸表",          ["scrapers/uniqlo_ut_sizechart.py", "--commit"]),
     ("GU の実寸表",          ["scrapers/uniqlo_ut_sizechart.py", "--brand", "gu", "--commit"]),
+    # ★在庫は毎回取り直す。「公式で買えるか」が仕入れ対象かどうかそのものなので
+    ("UT の在庫",            ["scrapers/uniqlo_ut_stock.py", "--commit"]),
+    ("GU の在庫",            ["scrapers/uniqlo_ut_stock.py", "--brand", "gu", "--commit"]),
     ("公式在庫との突合",      ["tools/official_drift_uniqlo.py"]),
+    ("カタログHTML",         ["tools/ut_catalog_html.py"]),
 ]
 
 

@@ -50,6 +50,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as cf
 import json
 import re
 import sqlite3
@@ -88,7 +89,7 @@ _PID = re.compile(r"(?:/products/|products%2F)(E\d{6}-\d{3})")
 # ★UT の判定は公式のパンくず。名前で見ると キッズの「〜 UT」が入る
 UT_CATEGORY = "ut graphic tees"
 KID = {"KIDS", "BABY"}
-SLEEP_API = 0.45          # 公式 API
+SLEEP_API = 0.25          # 公式 API (並行して叩くので短め)
 SLEEP_SEARCH = 8.0        # 検索エンジン (連投すると閉める)
 WALK_MISS = 6             # 隣を歩く時、何回続けて空振りしたら止めるか
 
@@ -263,6 +264,16 @@ def detail(pid: str) -> dict | None:
     return r
 
 
+def _polite(fn):
+    """並行で叩く時も、1本あたり必ず間を空ける (公式に負担をかけない)."""
+    def inner(pid: str):
+        try:
+            return fn(pid)
+        finally:
+            time.sleep(SLEEP_API)
+    return inner
+
+
 def store(db, pid: str, d: dict, now: str) -> None:
     """見つけた UT を catalog に入れる (現行の取り込みと同じ形)."""
     imgs = E.all_images(d.get("images") or {})
@@ -324,26 +335,32 @@ def run(args) -> None:
         cand |= from_wayback()
 
     probed = set(st["probed"])
-    todo = sorted(c for c in cand if c not in known and c not in probed)
+    todo = [c for c in cand if c not in known and c not in probed]
     skip = len([c for c in cand if c not in known]) - len(todo)
+    # ★新しい番号から見る。UT は **E42xxxx〜E49xxxx に固まっている**
+    #   (2026-09-10 実測: 既知1,592件が全部 E4 台)。古い番号は最後に回す
+    todo.sort(key=lambda p: -int(p[1:7]))
     print(f"\n  候補 {len(cand):,}件 / 確かめるのは {len(todo):,}件 "
           f"(catalog に在る分と 叩き済み {skip:,}件 は飛ばす)")
     if args.limit:
         todo = todo[:args.limit]
     print(f"=== UT を探す ({'APPLY' if args.commit else 'DRY-RUN'}) — "
-          f"対象 {len(todo):,}件 ===", flush=True)
+          f"対象 {len(todo):,}件 / 同時 {args.workers}本 ===", flush=True)
 
-    for i, pid in enumerate(todo, 1):
-        d = detail(pid)
-        probed.add(pid)
-        if d is None:
-            stat["UT ではない / 消えている"] += 1
-        else:
-            keep(pid, d)
-        if i % 25 == 0:                     # ★途中保存
-            st["probed"] = list(probed)
-            save_state(st)
-        time.sleep(SLEEP_API)
+    # ★取りに行くのは並行、**保存は1本**にする (sqlite を複数から書かない)
+    with cf.ThreadPoolExecutor(max_workers=args.workers) as pool:
+        for i, (pid, d) in enumerate(
+                zip(todo, pool.map(_polite(detail), todo, chunksize=1)), 1):
+            probed.add(pid)
+            if d is None:
+                stat["UT ではない / 消えている"] += 1
+            else:
+                keep(pid, d)
+            if i % 200 == 0:                # ★途中保存
+                st["probed"] = list(probed)
+                save_state(st)
+                print(f"    {i:,}/{len(todo):,} 済み / "
+                      f"見つけた {stat['見つけた']:,}件", flush=True)
     st["probed"] = list(probed)
     save_state(st)
 
@@ -370,6 +387,8 @@ def main() -> None:
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int, help="確かめる品番の数を絞る (動作確認用)")
     ap.add_argument("--kw-limit", type=int, help="投げる検索語の数を絞る (動作確認用)")
+    ap.add_argument("--workers", type=int, default=5,
+                    help="公式 API を同時に叩く本数 (既定5。保存は1本のまま)")
     a = ap.parse_args()
     if not (a.search or a.neighbors or a.wayback):
         # ★既定は Wayback + 隣の番号。検索は弾かれるので明示した時だけ

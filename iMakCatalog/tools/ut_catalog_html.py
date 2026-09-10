@@ -110,6 +110,12 @@ def collect() -> list[dict]:
                 "cb": s.get("collab") or "", "cf": s.get("character_family") or "",
                 "cn": s.get("collab_official_name") or "",
                 "ct": s.get("collab_official_text") or "",
+                # ★仕入れの判断そのもの: 公式で買えるものは商売にならない
+                "b2": ("公式で買える" if s.get("in_stock")
+                       else ("買えない" if s.get("stock_checked_at") else "未確認")),
+                "st": s.get("stock_total") or 0,
+                "ss": s.get("stock_by_size") or {},
+                "so": (s.get("sold_out_since") or "")[:10],
                 "u": PDP[brand].format(pid=r["product_id"]),
                 "k": _initial(r["name"] or ""),
             })
@@ -124,7 +130,9 @@ def build(rows: list[dict]) -> str:
     n_sc = sum(1 for x in rows if x["sc"])
     n_or = sum(1 for x in rows if x["or"])
     n_ct = sum(1 for x in rows if x["ct"])
+    n_buy = sum(1 for x in rows if x["b2"] == "買えない")
     facets = {
+        "仕入れ対象か": Counter(x["b2"] for x in rows),
         "ブランド": Counter(x["b"] for x in rows),
         "状態": Counter(x["s"] for x in rows),
         "性別": Counter(x["g"] for x in rows),
@@ -143,7 +151,7 @@ def build(rows: list[dict]) -> str:
     return _TEMPLATE.replace("__DATA__", data).replace("__FACETS__", fjson) \
         .replace("__HAVE__", hjson).replace("__NOW__", now) \
         .replace("__N__", f"{len(rows):,}").replace("__NIMG__", f"{n_img:,}") \
-        .replace("__NSC__", f"{n_sc:,}")
+        .replace("__NSC__", f"{n_sc:,}").replace("__NBUY__", f"{n_buy:,}")
 
 
 _TEMPLATE = r"""<!doctype html>
@@ -195,6 +203,7 @@ _TEMPLATE = r"""<!doctype html>
  .c .sub{font-size:11px;color:var(--dim);margin-top:4px;display:flex;gap:6px;flex-wrap:wrap}
  .pill{font-size:10px;border-radius:4px;padding:0 4px;background:var(--chip)}
  .pill.gone{background:#7c2d12;color:#fed7aa}
+ .pill.buy{background:var(--accent);color:#fff}
  .pill.gu{background:#1e3a8a;color:#dbeafe}
  #ov{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.62);display:none;
      overflow-y:auto;padding:26px 16px}
@@ -221,7 +230,8 @@ _TEMPLATE = r"""<!doctype html>
 <header>
  <h1>ユニクロ <b>UT</b> / GU カタログ</h1>
  <input id="q" placeholder="商品名・品番・コラボ名・素材で検索">
- <div class="stat">__N__着 / 画像 __NIMG__枚 / 実寸表 __NSC__件 &nbsp;·&nbsp; __NOW__</div>
+ <div class="stat">__N__着 / 画像 __NIMG__枚 / 実寸表 __NSC__件 ·
+   <b style="color:var(--accent)">公式で買えない __NBUY__着</b> = 仕入れ対象 &nbsp;·&nbsp; __NOW__</div>
 </header>
 <div class="wrap">
  <aside id="idx"></aside>
@@ -230,7 +240,7 @@ _TEMPLATE = r"""<!doctype html>
 <div id="ov"><div class="dl" id="dl"></div></div>
 <script>
 const D=__DATA__, F=__FACETS__, H=__HAVE__;
-const KEY={"ブランド":"b","状態":"s","性別":"g","シリーズ・キャラ":"cf","コラボ":"cb","頭文字":"k"};
+const KEY={"仕入れ対象か":"b2","ブランド":"b","状態":"s","性別":"g","シリーズ・キャラ":"cf","コラボ":"cb","頭文字":"k"};
 const HAVEF={"実寸表あり":r=>r.sc.length,"原産国あり":r=>r.or.length,
              "コラボ紹介文あり":r=>r.ct,"画像5枚以上":r=>r.i.length>=5};
 let sel={}, have=null, q="";
@@ -285,6 +295,7 @@ function draw(){
    <img loading="lazy" src="${r.t}" alt="">
    <div class="m"><div class="nm">${esc(r.n)}</div><div class="sub">
      <span class="pill${r.b==="GU"?" gu":""}">${r.b}</span>
+     ${r.b2==="買えない"?'<span class="pill buy">買えない</span>':""}
      ${r.s==="廃盤"?'<span class="pill gone">廃盤</span>':""}
      ${r.sc.length?'<span class="pill">実寸表</span>':""}
      <span>${r.i.length}枚</span></div></div></div>`).join("");
@@ -303,7 +314,9 @@ function openItem(pid){
  const kv=[["品番",r.p],["ブランド",r.b],["状態",r.s],["性別",r.g],
    ["価格",r.pr?("¥"+Number(r.pr).toLocaleString()):""],["色",r.c.join(" / ")],
    ["サイズ",r.z.join(" / ")],["素材",r.co],["原産国",r.or.join(" / ")],
-   ["シリーズ",r.cf],["コラボ",r.cb],["お手入れ",r.ca]]
+   ["シリーズ",r.cf],["コラボ",r.cb],["お手入れ",r.ca],
+   ["公式在庫",r.b2==="未確認"?"":(r.b2+(r.st?` (${r.st}点)`:"")+(r.so?` / ${r.so} から売り切れ`:""))],
+   ["サイズ別在庫",Object.keys(r.ss||{}).length?Object.entries(r.ss).map(([k,v])=>`${k}:${v}`).join("  "):""]]
    .filter(x=>x[1]).map(([k,v])=>`<div><b>${k}</b><span>${esc(v)}</span></div>`).join("");
  document.getElementById("dl").innerHTML=`
   <span class="close" onclick="document.getElementById('ov').classList.remove('on')">×</span>
