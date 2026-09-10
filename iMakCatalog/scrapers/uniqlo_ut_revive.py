@@ -172,11 +172,20 @@ def from_wayback(pid: str) -> tuple[dict | None, str]:
     return None, ""
 
 
-def run(commit: bool, limit: int | None) -> None:
+def run(commit: bool, limit: int | None, pids_file: str | None = None) -> None:
     db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
     pids = unknown_pids(db)
     print(f"  倉庫に写っていて catalog に無い商品番号: {len(pids)}件")
+    if pids_file:
+        # ★HQ 等から貰った品番リストも同じ経路 (公式→Wayback) で救済する (2026-09-10)。
+        #   `uniqlo_ut_discover.pids_from_file` を再利用 (uniqlo.com の行だけ拾う)。
+        import uniqlo_ut_discover as D
+        have = {x[0] for x in db.execute(
+            "SELECT product_id FROM products WHERE category IN ('uniqlo_ut','gu')")}
+        extra = sorted(D.pids_from_file(pids_file) - have - set(pids))
+        print(f"  外部リストから追加: {len(extra)}件")
+        pids = sorted(set(pids) | set(extra))
     if limit:
         pids = pids[:limit]
     print(f"=== 廃盤品の救済 ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(pids)}件 ===")
@@ -256,8 +265,10 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--pids-file", help="外部から貰った品番リスト (CSV/1行1品番)。"
+                    "uniqlo.com の行だけ拾い、公式→Wayback の順で救済する")
     a = ap.parse_args()
-    run(a.commit, a.limit)
+    run(a.commit, a.limit, a.pids_file)
 
 
 if __name__ == "__main__":

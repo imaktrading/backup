@@ -224,6 +224,26 @@ def from_neighbors(seeds: set[str], known: set[str], st: dict, on_found) -> set[
     return found
 
 
+def pids_from_file(path: str) -> set[str]:
+    """外部から貰った品番リストを読む (2026-09-10)。
+
+    HQ 発行の仕入元URL dump (`FLG,item_id,title,supply_url,ebay_url` の CSV) や
+    1行1品番のテキストをそのまま渡せる。**uniqlo.com の行だけ**から品番を拾う
+    (同じ CSV に gu-global.com の行が混ざっていても、この scraper (uniqlo_ut) には
+    取り込まない — GU は `gu_graphic_tee.py` の担当)。
+    """
+    out: set[str] = set()
+    text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+    for line in text.splitlines():
+        if "uniqlo.com" in line:
+            out |= set(_PID.findall(line))
+        else:
+            m = re.fullmatch(r"\s*(E\d{6}-\d{3})\s*", line)
+            if m:
+                out.add(m.group(1))
+    return out
+
+
 def from_wayback() -> set[str]:
     """Wayback の商品URLから品番を集める (2026-09-10 実測 21,694件)."""
     rows = json.loads(_get(CDX, timeout=240))[1:]
@@ -333,6 +353,8 @@ def run(args) -> None:
         cand |= from_search(kw[:args.kw_limit] if args.kw_limit else kw, st)
     if args.wayback:
         cand |= from_wayback()
+    if args.pids_file:
+        cand |= pids_from_file(args.pids_file)
 
     probed = set(st["probed"])
     todo = [c for c in cand if c not in known and c not in probed]
@@ -384,13 +406,15 @@ def main() -> None:
     ap.add_argument("--search", action="store_true", help="コラボ名で検索して拾う")
     ap.add_argument("--neighbors", action="store_true", help="既知の品番の前後を歩く")
     ap.add_argument("--wayback", action="store_true", help="Wayback の商品URLから拾う")
+    ap.add_argument("--pids-file", help="外部から貰った品番リスト (CSV/1行1品番)。"
+                    "uniqlo.com の行だけ拾う")
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int, help="確かめる品番の数を絞る (動作確認用)")
     ap.add_argument("--kw-limit", type=int, help="投げる検索語の数を絞る (動作確認用)")
     ap.add_argument("--workers", type=int, default=5,
                     help="公式 API を同時に叩く本数 (既定5。保存は1本のまま)")
     a = ap.parse_args()
-    if not (a.search or a.neighbors or a.wayback):
+    if not (a.search or a.neighbors or a.wayback or a.pids_file):
         # ★既定は Wayback + 隣の番号。検索は弾かれるので明示した時だけ
         a.wayback = a.neighbors = True
     run(a)
