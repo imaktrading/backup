@@ -63,3 +63,35 @@ def test_grouping_falls_back_to_the_card_when_the_number_is_unknown():
     src = open(os.path.join(TOOLS, "newcand_confirm.py"), encoding="utf-8").read()
     assert 'gkey = no or (("sd:" + snkrdunk_card_id(p["url"]))' in src
     assert 'groups.get(it.get("_gkey") or "", [])' in src
+
+
+def test_official_product_number_wins_over_the_name():
+    """番号は項目 (productNumber) を第一に使う (名前の解析は表記ゆれで外れる)。"""
+    c = {"1": {"snkrdunk": {"card_number": "OP01-120",
+                            "card_name": "ちがう名前 [XX-999]",
+                            "psa10_listings": [{"url": "u1"}]}}}
+    assert N.snkrdunk_number_map(c) == {"u1": "OP01-120"}
+
+
+def test_falls_back_to_the_name_when_no_field():
+    c = {"1": {"snkrdunk": {"card_name": "ポケカ [SV2a 201/165] ピカ",
+                            "psa10_listings": [{"url": "u2"}]}}}
+    assert N.snkrdunk_number_map(c) == {"u2": "201/165"}
+
+
+def test_neither_means_ask_the_human():
+    c = {"1": {"snkrdunk": {"psa10_listings": [{"url": "u3"}]}}}
+    assert N.snkrdunk_number_map(c) == {}
+
+
+def test_scraper_keeps_the_product_number():
+    src = open(os.path.join(TOOLS, "snkrdunk_psa_resource.py"), encoding="utf-8").read()
+    assert '_meta["product_number"] = (it.get("productNumber") or "").strip()' in src
+    assert src.count('"card_number"') >= 3
+
+
+def test_viewer_counts_where_the_number_came_from():
+    """「次から精度が上がる」を実測で言えるように出どころを数える。"""
+    src = open(os.path.join(TOOLS, "newcand_confirm.py"), encoding="utf-8").read()
+    assert "カード番号の出どころ" in src
+    assert '"スニダンの項目"' in src

@@ -260,6 +260,27 @@ def typed_no_for(url, typed_by_url, typed_by_card):
     return (typed_by_card or {}).get(cid, "") if cid else ""
 
 
+def snkrdunk_number_map(cache):
+    """探索 cache → {候補URL: スニダンが持っている カード番号} (純関数)。
+
+    ★2026-09-10: 番号は **項目 (productNumber)** を第一とし、無い時だけ商品名から読む。
+      名前は表記ゆれがあるが、項目は外れない。どちらも無ければ空 = 今まで通り人に聞く。
+    """
+    out = {}
+    for _iid, v in (cache or {}).items():
+        sd = (v or {}).get("snkrdunk") or {}
+        no = (sd.get("card_number") or "").strip()
+        if not no:
+            no = extract_card_no(sd.get("card_name") or "") or ""
+        if not no:
+            continue
+        for lst in sd.get("psa10_listings") or []:
+            u = (lst or {}).get("url")
+            if u:
+                out.setdefault(u, no)
+    return out
+
+
 def url_image_map(cache):
     """探索 cache → {候補URL: 実カードの画像URL} (純関数)。
 
@@ -539,9 +560,10 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
             _cache_json = json.load(f)
             u2t = url_title_map(_cache_json)
             u2i = url_image_map(_cache_json)
+            u2n = snkrdunk_number_map(_cache_json)
     except Exception as e:
         print(f"⚠ 探索cache を読めない ({type(e).__name__}) → タイトル復元なしで続行")
-        u2t, u2i = {}, {}
+        u2t, u2i, u2n = {}, {}, {}
 
     # 既に結論が出ているカード + **既に eBay に出品中**のカード
     #   どちらも「人に見せる必要が無い」= 供給URLだけ補URLとして拾えばいい。
@@ -549,6 +571,8 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     decided.update(decided_cards())      # 目視で決めた版を優先
 
     all_items = []
+    import collections as _collections
+    _no_src = _collections.Counter()
     for p in pending_rows(src_rows, done):
         price, title = u2t.get(p["url"], (None, ""))
         # 台帳に保存済のタイトルがあればそちらが正 (押した時点の実物)
@@ -560,8 +584,15 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
                 pass
         # ★目視で入れた番号が最優先 (機械が読めなかった/読み違えた分を人が上書きできる)
         _typed = typed_no_for(p["url"], typed_no, typed_by_card)
-        card_no = _typed or extract_card_no(title)
+        # 人が打った番号 → スニダンが持っている番号 → 商品名から読む、の順
+        _from_sd = u2n.get(p["url"], "")
+        _from_title = extract_card_no(title)
+        card_no = _typed or _from_sd or _from_title
         p["no_from_typed"] = bool(_typed)
+        # ★2026-09-10: どこから番号が来たかを数える (「次から精度が上がる」を実測で言うため)
+        _no_src["人が打った" if _typed else
+                ("スニダンの項目" if _from_sd else
+                 ("商品名から" if _from_title else "読めない"))] += 1
         variants = catalog_candidates(title, card_no) if resolve else []
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants,
                   "image": u2i.get(p["url"], "")})
@@ -601,6 +632,9 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     # limit で切った先の同カードも拾えるよう、items の分だけ dups を確定させる
     for it in items:
         it["dups"] = groups.get(it.get("_gkey") or "", []) if it.get("_gkey") else []
+    if _no_src:
+        print("  🔢 カード番号の出どころ: "
+              + " / ".join(f"{k} {v}件" for k, v in _no_src.most_common()))
     if auto_aux and write:
         save_auto_aux(auto_aux)
     elif auto_aux:
