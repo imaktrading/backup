@@ -13,7 +13,8 @@ CULL = qty=0 ∩ 一度も売れず watcher も付かず。掲載しても無害
   3. 自動アップ無し (End CSV を生成するのみ。eBay FileExchange へは人が手動アップ)。
   並び: age 降順 (最も長く需要0=最も確実に dead を先に) → 同 age は価格昇順 (損失小を先に)。
 
-入力 : ../funnel_output/funnel_*.csv (CULL flag, age_days)
+入力 : ../funnel_output/funnel_*.csv か cull_live_*.csv の新しい方 (CULL flag, age_days)
+       cull_live は夜の処理が出品一覧から毎晩作る (2026-09-10〜 レポート不要)
 出力 : End CSV → C:/dev/iMak_data/revise/cull_end_YYYYMMDD.csv
        確認用一覧 → デスクトップ CULL出品停止候補_YYYYMMDD.csv
 """
@@ -267,6 +268,19 @@ def live_snapshot():
         return None, "live 一覧を読めません (%s)" % type(e).__name__
 
 
+def latest_source(funnel_dir=None):
+    """候補の元にするファイル = funnel_*.csv と cull_live_*.csv の **新しい方** (無ければ None)。
+
+    ★2026-09-10: funnel は Seller Hub レポートを人が置かないと更新されず (4日古いと中断)、
+      取下げの候補が 9/8 から増えなかった。cull_live は出品一覧から毎晩 CULL 行だけを作る。
+      どちらも同じ CULL 判定 (listing_funnel.classify) なので、新しい方を使えばよい。
+    """
+    d = funnel_dir or FUNNEL_DIR
+    fs = (glob.glob(os.path.join(d, "funnel_*.csv"))
+          + glob.glob(os.path.join(d, "cull_live_*.csv")))
+    return max(fs, key=os.path.getmtime) if fs else None
+
+
 def count_workload(funnel_dir=None, today=None):
     """押したら何件落とせるか / あと何件残っているか (2026-08-24 ユーザー要望)。
 
@@ -288,11 +302,10 @@ def count_workload(funnel_dir=None, today=None):
            # ★2026-09-06: 在庫が戻って落とせなくなった数と、live 一覧についての但し書き
            "restocked": 0, "note": ""}
     try:
-        fs = glob.glob(os.path.join(funnel_dir or FUNNEL_DIR, "funnel_*.csv"))
-        if not fs:
+        src = latest_source(funnel_dir)
+        if not src:
             out["error"] = "funnel_*.csv がありません (先に『📊 ファネル分析』)"
             return out
-        src = max(fs, key=os.path.getmtime)
         rows = list(csv.DictReader(open(src, encoding="utf-8")))
         done = load_done()
         cull, eligible, picked = select(rows, done_ids=done, today=today)
@@ -509,10 +522,9 @@ def main():
         rows = rows_from_live(_fetch_active_live)
         src = "eBay ActiveList (live)"
     else:
-        fs = glob.glob(os.path.join(FUNNEL_DIR, "funnel_*.csv"))
-        if not fs:
+        src = latest_source()
+        if not src:
             sys.exit("funnel_*.csv がありません。先に『📊 ファネル分析』を実行してください。")
-        src = max(fs, key=os.path.getmtime)
         rows = list(csv.DictReader(open(src, encoding="utf-8")))
         src = os.path.basename(src)
     done_ids = load_done()

@@ -172,6 +172,17 @@ CACHE = Path(r"C:\dev\iMak_data\hq\itemid_audit_live_cache.json")
 CSV_DIR = Path(r"C:\dev\iMak\iMakHQ\csv_output")
 CACHE_MAX_AGE_SEC = 2 * 3600      # 2h 以内なら再取得しない
 
+# ★2026-09-10: 出品URLのドメイン → サイト。UK/AU/CA/DE は eBaymag のミラー。
+#   知らないドメインは "" (= ミラーか判らない → US として扱わない = 触らない)。
+_SITE_BY_HOST = {"www.ebay.com": "US", "www.ebay.co.uk": "UK", "www.ebay.com.au": "AU",
+                 "www.ebay.ca": "CA", "www.ebay.de": "DE"}
+
+
+def site_from_url(url):
+    """ViewItemURL → "US"/"UK"/"AU"/"CA"/"DE"。判らなければ "" (純関数)。"""
+    m = re.match(r"https?://([^/]+)/", url or "")
+    return _SITE_BY_HOST.get(m.group(1).lower(), "") if m else ""
+
 
 def _fetch_live(use_cache: bool = True):
     """live 一覧を取る。**2時間以内のキャッシュがあれば再取得しない**。
@@ -232,6 +243,12 @@ def _fetch_live(use_cache: bool = True):
                              r'</ConvertedCurrentPrice>', it)
             start = re.search(r'<TimeLeft>|<StartTime>(.*?)</StartTime>', it)
             ttl = re.search(r'<Title>(.*?)</Title>', it, re.S)
+            # ★2026-09-10: 取下げ候補 (cull_live) を「レポートを落とさずに」毎晩出すため、
+            #   売れた数 / ウォッチ数 / サイト / 出品日時 も持たせる。eBay は 0 の要素を省くので
+            #   無い = 0。`start` は TimeLeft に先に当たって空になることがあるので別キーにした。
+            wc = re.search(r'<WatchCount>(\d+)</WatchCount>', it)
+            url = re.search(r'<ViewItemURL>(.*?)</ViewItemURL>', it)
+            st = re.search(r'<StartTime>(.*?)</StartTime>', it)
             if m:
                 live[m.group(1)] = {
                     "avail": (int(q.group(1)) if q else 0) - (int(qs.group(1)) if qs else 0),
@@ -240,7 +257,11 @@ def _fetch_live(use_cache: bool = True):
                     "usd": float(conv.group(1)) if conv else (
                         float(cur.group(2)) if cur and cur.group(1) == "USD" else 0.0),
                     "start": (start.group(1) or "") if start else "",
-                    "title": (ttl.group(1) if ttl else "")}
+                    "title": (ttl.group(1) if ttl else ""),
+                    "sold": int(qs.group(1)) if qs else 0,
+                    "watch": int(wc.group(1)) if wc else 0,
+                    "site": site_from_url(url.group(1) if url else ""),
+                    "start_time": st.group(1) if st else ""}
         if len(items) < 200:
             break
     if expected is not None and len(live) < expected:

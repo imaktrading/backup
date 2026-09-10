@@ -167,6 +167,16 @@ python -u demand_winners.py >> "%LOG%" 2>&1
 echo [restock-worklist] %date% %time% >> "%LOG%"
 python -u restock_worklist.py >> "%LOG%" 2>&1
 
+REM --- 6c2) cull (take-down) candidates from the live listing list.
+REM          2026-09-10: the funnel above stops by itself when the Seller Hub
+REM          reports are 4+ days old, and only a human can download them. So the
+REM          take-down button stayed at the 09-08 candidates for days. The live
+REM          list (about 20 API calls, shared 2h cache) has everything the cull
+REM          decision needs. Writes funnel_output\cull_live_YYYYMMDD.csv only;
+REM          nothing is ended here (the button checks each item before ending).
+echo [cull-live] %date% %time% >> "%LOG%"
+python -u cull_live.py >> "%LOG%" 2>&1
+
 REM --- 6d) ichibankuji nightly search (was a manual button only; nothing else
 REM          ran it, so the daytime press had to do the searching itself).
 echo [kuji-night] %date% %time% >> "%LOG%"
