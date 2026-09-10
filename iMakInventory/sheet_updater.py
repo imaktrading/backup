@@ -109,9 +109,8 @@ LISTINGS_ERR_FLG_HEADER = "巡回ERR"
 LISTINGS_COL_SOLD_AT = 41     # AO
 LISTINGS_SOLD_AT_HEADER = "売切日時"
 # R列 (0-index 17 = 1-based 18) = カテゴリ (G-shock / TCG / 一番くじ / Tシャツ / バッグ 等)。
-# 復活の採算 gate で pricing_engine.compute_listing_price(cost_jpy, None, category) を
-# 呼ぶ時に必要。 生値はスプシ表記 (G-shock 等) なので CAT_SHEET_TO_PRICING でカテゴリ表記
-# に正規化する (2026-08-07 revive_qty1_impl_response §12-1 の実測に基づく)。
+# (旧: 復活の採算 gate が pricing_engine に渡していた。2026-09-10 に採算 gate 廃止で未使用。
+#  監視くんは価格を持たない。列の読み取りだけ残す)
 LISTINGS_COL_CATEGORY = 18    # R
 
 # ── 補URL 売切消込 急増ガード (2026-07-25) ─────────────────────────────────
@@ -297,8 +296,7 @@ def read_listings_rows(
             "current_m_jpy_str": (row[LISTINGS_COL_PRICE_NOW_M - 1] if len(row) >= LISTINGS_COL_PRICE_NOW_M else "").strip(),
             # AK 列 (巡回ERR) の現状値 = 前 cycle までの連続エラー marker。re-mark 時の回数累積に使う
             "err_flag_prev": (row[LISTINGS_COL_ERR_FLG - 1] if len(row) >= LISTINGS_COL_ERR_FLG else "").strip(),
-            # R 列 (カテゴリ) 生値 (G-shock / TCG / 一番くじ 等)。復活の採算 gate で pricing_engine
-            # を呼ぶ時に resolve_pricing_category で正規化する (2026-08-07 revive_qty1_impl §4)。
+            # R 列 (カテゴリ) 生値 (G-shock / TCG / 一番くじ 等)。記録用 (採算 gate は 2026-09-10 廃止)。
             "category": (row[LISTINGS_COL_CATEGORY - 1] if len(row) >= LISTINGS_COL_CATEGORY else "").strip(),
         })
     return rows
@@ -907,44 +905,6 @@ def is_one_off_url(url: str) -> bool:
     if ("mercari.com" in u or "mercari.jp" in u) and "/shops/product/" not in u:
         return True   # メルカリ個人 (jp.mercari.com/item/mXXXX)
     return any(k in u for k in _ONE_OFF_HOST_KEYS)
-
-
-# ============================================================================
-# 復活 (revive) 用 カテゴリ変換表 (2026-08-07 revive_qty1_impl §4)
-# ============================================================================
-# シートの R 列 (LISTINGS_COL_CATEGORY) 生値 → pricing_engine.compute_listing_price
-# の category 引数 (= profit_params のカテゴリ名)。
-#
-# ★SSOT のミラー: `iMakHQ/tools/offer_calc.py:51 CAT2CALC` と同一値。 別実装で作り直す
-# ことを避けるため literal 転記 (他 worktree の tool を import できない制約のため。
-# HQ 側で更新があれば同じ内容にする必要がある)。
-#
-# ★fail-closed: この表に無いカテゴリ (バッグ / グッズ / アウトドア・ジャケット /
-# グリグラ / カプセルトイ 等) は復活候補から skip する (= 採算計算不能 = 誤復活防止)。
-# 拡充は窓口 (HQ) が持つ。 監視くん側での「推測 map 追加」 は禁止 (SSOT 崩壊防止)。
-CAT_SHEET_TO_PRICING = {
-    "TCG":       "TCG(PSA10)",
-    "PSA":       "TCG(PSA10)",
-    "G-SHOCK":   "G-SHOCK",
-    "Tシャツ":   "Tシャツ(UT)",
-    "montbell":  "Montbell(軽)",
-    "一番くじ":  "一番くじ",
-}
-
-
-def resolve_pricing_category(cat_sheet: str) -> Optional[str]:
-    """シートのカテゴリ生値 (R列) → pricing_engine カテゴリ名。 fail-closed。
-
-    大文字小文字を無視した部分一致 (offer_calc.py:234 と同じ引き方)。
-    ヒットしなければ None (= 復活対象から除外、 skip_no_category として計上)。
-    """
-    s = (cat_sheet or "").lower()
-    if not s:
-        return None
-    for k, v in CAT_SHEET_TO_PRICING.items():
-        if k.lower() in s:
-            return v
-    return None
 
 
 def read_main_active_rows(sh, supplier_filter: str = "all") -> list:

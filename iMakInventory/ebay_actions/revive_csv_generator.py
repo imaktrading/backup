@@ -15,7 +15,8 @@ gate 順:
   ① URL白リスト     : 「在庫数を持つ仕入元」 のみ復活 (fail-closed)
   ② 3点セット       : D=空 AND AK(巡回ERR)=空 AND O(チェック時刻)=直近cycle内
   ③ 二重出品        : 同 canonical KEY (AI列) の別 itemID が live かつ qty>0 なら復活しない
-  ④ 採算            : pricing_engine 推奨価格 ≤ 現在の出品価格 なら OK (書かない)
+  ④ 復活済み        : eBay が既に qty>0 なら何もしない
+  (旧 ④ 採算 は 2026-09-10 廃止。監視くんは価格を持たない。値段は Revise が V9 で持つ)
 
 出力:
   csv_output/revive_<sheet_label>_<ts>.csv  (FileExchange 形式 / Quantity=1)
@@ -50,10 +51,6 @@ ROOT_DIR = SCRIPT_DIR.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-# pricing_engine (別ディレクトリ、 同一 worktree の iMakeBayAPI 配下) を通す
-_PRICING_ENGINE_PATH = ROOT_DIR.parent / "iMakeBayAPI"
-if str(_PRICING_ENGINE_PATH) not in sys.path:
-    sys.path.insert(0, str(_PRICING_ENGINE_PATH))
 
 from ledger_lock import remove_entries  # noqa: E402
 from sheet_updater import (  # noqa: E402
@@ -64,7 +61,6 @@ from sheet_updater import (  # noqa: E402
     get_listings_worksheet,
     read_listings_rows,
     is_restockable_url,
-    resolve_pricing_category,
     NOT_LISTED_ITEM_ID,
 )
 
@@ -281,115 +277,12 @@ def build_sheet_key_map(rows: list) -> dict:
 
 
 # ============================================================================
-# gate ④ 採算 (pricing_engine)
+# (旧) gate ④ 採算 — 2026-09-10 ユーザー判断で廃止
 # ============================================================================
-def _load_pricing_engine():
-    """遅延 import (import failure でも monitor 本体は動く fail-safe)。"""
-    from pricing_engine import compute_listing_price  # noqa: PLC0415
-    return compute_listing_price
-
-
-def _parse_int_yen(s) -> Optional[int]:
-    """スプシ生文字列 (¥1,500 / '1500' / '') → int(円)。 不能 → None。"""
-    if s is None:
-        return None
-    digits = "".join(ch for ch in str(s) if ch.isdigit())
-    if not digits:
-        return None
-    try:
-        return int(digits)
-    except ValueError:
-        return None
-
-
-def resolve_cost_jpy(row: dict) -> Optional[int]:
-    """行から仕入値 (円) を解決。
-
-    V8 SSOT: 「今の最安値 = M または F」 を採る (memory: amazon_points_net_cost_system +
-    an_column_abolished)。 M 列 (現在価格) を優先 → 空なら F 列 (出品時価格)。
-    """
-    m = _parse_int_yen(row.get("current_m_jpy_str"))
-    if m is not None and m > 0:
-        return m
-    # F 列は read_listings_rows の "price" (LISTINGS_COL_PRICE=6)。 raw 文字列を parse。
-    f = _parse_int_yen(row.get("price"))
-    if f is not None and f > 0:
-        return f
-    return None
-
-
-def check_pricing_gate(row: dict, cur_price_usd: Optional[float],
-                        compute_fn=None) -> tuple[str, dict]:
-    """採算 gate。 「推奨価格 ≤ 現在の出品価格 → 復活可」 の単純比較のみ。
-
-    Args:
-        row:          read_listings_rows dict (+ pending entry 由来)
-        cur_price_usd: eBay GetItem で取った現在の StartPrice (USD)。 None なら
-                      "skip_no_price" (復活しない、 fail-closed)
-        compute_fn:   pricing_engine.compute_listing_price (テスト用 injection)
-
-    Returns: (verdict, detail)
-      verdict:
-        "ok"                     : 復活可
-        "hold_below_recommended" : 推奨価格 > 現在価格 = 価格改定待ち
-        "skip_no_cost"           : 仕入値が取れず fail-closed
-        "skip_no_price"          : eBay 現在価格が取れず fail-closed
-        "skip_no_category"       : R 列 カテゴリ不明 / CAT2CALC 未対応
-        "skip_pricing_engine_err": pricing_engine.compute_listing_price が ValueError 等
-    """
-    cost_jpy = resolve_cost_jpy(row)
-    if cost_jpy is None:
-        return "skip_no_cost", {"reason": "no_cost_source"}
-    if cur_price_usd is None:
-        return "skip_no_price", {"reason": "no_ebay_start_price"}
-
-    cat_pricing = resolve_pricing_category(row.get("category") or "")
-    if cat_pricing is None:
-        # 依頼書 §12-1: 変換できないカテゴリは fail-closed で復活させない
-        # ("価格改定待ち" ではなく skip_no_category として別計上)
-        return "skip_no_category", {
-            "reason": "cat_not_in_map",
-            "cat_sheet": row.get("category") or "",
-        }
-    if compute_fn is None:
-        try:
-            compute_fn = _load_pricing_engine()
-        except Exception as e:
-            return "skip_pricing_engine_err", {
-                "reason": "import_failed",
-                "error": f"{type(e).__name__}: {e}",
-            }
-    try:
-        # median_usd=None = 「中央値なしモード」 → NO_MEDIAN status で price だけ返る
-        rec = compute_fn(cost_jpy, None, cat_pricing)
-    except Exception as e:
-        return "skip_pricing_engine_err", {
-            "reason": "compute_failed",
-            "error": f"{type(e).__name__}: {e}",
-            "cat_sheet": row.get("category") or "",
-            "cat_pricing": cat_pricing,
-            "cost_jpy": cost_jpy,
-        }
-    rec_price = rec.get("price") if isinstance(rec, dict) else None
-    if rec_price is None:
-        return "skip_pricing_engine_err", {"reason": "no_price_in_result"}
-
-    if cur_price_usd >= rec_price:
-        return "ok", {
-            "cost_jpy": cost_jpy,
-            "rec_usd": rec_price,
-            "cur_usd": cur_price_usd,
-            "cat_pricing": cat_pricing,
-        }
-    gap_pct = round((rec_price - cur_price_usd) / rec_price * 100, 1) if rec_price else 0.0
-    return "hold_below_recommended", {
-        "cost_jpy": cost_jpy,
-        "rec_usd": rec_price,
-        "cur_usd": cur_price_usd,
-        "cat_pricing": cat_pricing,
-        "gap_pct": gap_pct,
-    }
-
+# 監視くんは価格を持たない (4者の役割表 2026-08-22: 監視くん=仕入元がまだ買えるか)。
+# 採算チェックは 2026-05-01 のコピーの pricing_engine (為替 159.245 / 一番くじ送料 ¥2,500)
+# で動いていて、本元 V9 (為替 153.762 / 送料 ¥4,000) とずれていた。値段は Revise が毎日 V9 に
+# 合わせるので、ここで二重に持たない。復活は「今 eBay に付いている価格」のまま行う。
 
 # ============================================================================
 # eBay GetItem — 現在 StartPrice (USD) と available qty を 1 call で取る
@@ -652,7 +545,7 @@ def apply_gates(
     Args:
         fetch_price_fn: (item_id) -> (start_price_usd, available_qty) の callable。
                         None なら _fetch_ebay_start_price_and_qty を token load して使う。
-        compute_fn:     pricing_engine.compute_listing_price (テスト用 injection)。
+        compute_fn:     未使用 (2026-09-10 に採算チェック廃止。呼出側互換のため引数だけ残す)。
 
     Returns: (allowed, deferred, price_hold)
       allowed:    CSV 出力対象 (qty=1 化する行)
@@ -693,26 +586,18 @@ def apply_gates(
             deferred.append({**c, "skip_reason": reason, "gate": "duplicate_live"})
             continue
 
-        # ④ 採算 (最後: eBay API 消費するので上流で落とせるものは先に落とす)
+        # ④ 既に復活済みなら何もしない (eBay API 消費するので最後)
+        # ★ 2026-09-10: 旧 ④ 採算チェックは廃止 (監視くんは価格を持たない / 値段は Revise が V9 で持つ)
         iid = (c.get("item_id") or "").strip()
         cur_price_usd = None
         if iid:
             price, ebay_qty = _resolve_price_qty(iid)
             cur_price_usd = price
-            # 追加安全策: eBay がすでに qty>0 (= 何らかの理由で既に復活済) なら skip
             if ebay_qty is not None and ebay_qty > 0:
                 deferred.append({**c, "skip_reason": f"ebay_already_qty_{ebay_qty}",
                                  "gate": "already_live"})
                 continue
-        verdict, detail = check_pricing_gate(c, cur_price_usd, compute_fn=compute_fn)
-        if verdict == "ok":
-            allowed.append({**c, "gate_detail": detail})
-        elif verdict == "hold_below_recommended":
-            price_hold.append({**c, "skip_reason": verdict, "gate": "pricing",
-                               "gate_detail": detail})
-        else:
-            deferred.append({**c, "skip_reason": verdict, "gate": "pricing",
-                             "gate_detail": detail})
+        allowed.append({**c, "gate_detail": {"cur_usd": cur_price_usd}})
     return allowed, deferred, price_hold
 
 

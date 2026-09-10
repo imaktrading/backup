@@ -1,10 +1,14 @@
-"""復活 採算 gate の regression test (2026-08-07 revive_qty1_impl §4).
+"""復活に採算チェックを掛けない (2026-09-10 ユーザー判断で廃止) の regression test.
 
-依頼書 完了条件 4 「採算の回帰テスト (推奨価格 > 現在価格 の行が復活せず「価格改定待ち」)」。
+旧: 2026-08-07 に「推奨価格 > 現在価格 なら復活させず価格改定待ち」の gate を入れていた。
+廃止理由:
+- 監視くんは価格を持たない (4者の役割表 2026-08-22: 監視くん = 仕入元がまだ買えるか)
+- 採算計算は 2026-05-01 のコピーの pricing_engine で、本元 V9 とずれていた
+  (為替 159.245 vs 153.762 / 一番くじ送料 ¥2,500 vs ¥4,000)
+- 値段は Revise が毎日 V9 に合わせるので、二重に持つ必要がない
 
-`check_pricing_gate` と apply_gates() 経由の 価格 gate が、
-「推奨価格 ≤ 現在の出品価格 → 復活可 / それ以外 → 価格改定待ち or skip」 を
-担保する。 価格は決めない・書かない (V8 SSOT の管轄)。
+ここでは「値段・カテゴリ・仕入値の有無で復活を止めない」ことと、
+値段と無関係な安全チェック (既に復活済み) は残っていることを固定する。
 """
 from __future__ import annotations
 
@@ -16,178 +20,60 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ebay_actions.revive_csv_generator import check_pricing_gate, apply_gates  # noqa: E402
-from sheet_updater import resolve_pricing_category  # noqa: E402
+import ebay_actions.revive_csv_generator as RG  # noqa: E402
 
 
-def _row(cur_m="10000", price="10000", category="G-SHOCK"):
+def _valid_row(iid, category="G-SHOCK", cur_m="10000", price="10000"):
     return {
-        "current_m_jpy_str": cur_m,
-        "price": price,
-        "category": category,
-        "current_sold": "",
-        "err_flag_prev": "",
-        "checked_at": "2026/08/07 12:00:00",
-    }
-
-
-# ============================================================================
-# CAT_SHEET_TO_PRICING (sheet 生値 → pricing_engine カテゴリ) の SSOT ミラー
-# ============================================================================
-def test_resolve_pricing_category_maps_common_values():
-    """依頼書 §12-1 で実測した「変換 OK/NG」 一覧の再現テスト。"""
-    assert resolve_pricing_category("G-SHOCK") == "G-SHOCK"
-    assert resolve_pricing_category("G-shock") == "G-SHOCK"     # 大小無視
-    assert resolve_pricing_category("TCG") == "TCG(PSA10)"
-    assert resolve_pricing_category("PSA") == "TCG(PSA10)"
-    assert resolve_pricing_category("Tシャツ") == "Tシャツ(UT)"
-    assert resolve_pricing_category("montbell") == "Montbell(軽)"
-    assert resolve_pricing_category("一番くじ") == "一番くじ"
-    # ★ fail-closed: 未対応カテゴリは None (= 復活対象外)
-    assert resolve_pricing_category("バッグ") is None
-    assert resolve_pricing_category("アウトドア・ジャケット") is None
-    assert resolve_pricing_category("グリグラ") is None
-    assert resolve_pricing_category("カプセルトイ") is None
-    assert resolve_pricing_category("") is None
-    assert resolve_pricing_category(None) is None
-
-
-# ============================================================================
-# check_pricing_gate 単体
-# ============================================================================
-def test_pricing_gate_ok_when_cur_gte_recommended():
-    """現在価格 ≥ 推奨価格 → 復活可 ("ok")。"""
-    r = _row(cur_m="10000")
-    verdict, detail = check_pricing_gate(r, cur_price_usd=300.0,
-                                          compute_fn=lambda c, m, cat: {"price": 250.98})
-    assert verdict == "ok"
-    assert detail["cur_usd"] == 300.0
-    assert detail["rec_usd"] == 250.98
-
-
-def test_pricing_gate_hold_when_cur_below_recommended():
-    """現在価格 < 推奨価格 → 価格改定待ち ("hold_below_recommended")。"""
-    r = _row(cur_m="10000")
-    verdict, detail = check_pricing_gate(r, cur_price_usd=200.0,
-                                          compute_fn=lambda c, m, cat: {"price": 300.98})
-    assert verdict == "hold_below_recommended"
-    assert detail["gap_pct"] > 0
-
-
-def test_pricing_gate_skip_no_cost():
-    """仕入値 取れず → skip_no_cost (復活しない、 fail-closed)。"""
-    r = _row(cur_m="", price="")
-    verdict, _ = check_pricing_gate(r, cur_price_usd=300.0,
-                                     compute_fn=lambda c, m, cat: {"price": 100.0})
-    assert verdict == "skip_no_cost"
-
-
-def test_pricing_gate_skip_no_price():
-    """eBay 現在価格 取れず → skip_no_price (復活しない、 fail-closed)。"""
-    r = _row(cur_m="10000")
-    verdict, _ = check_pricing_gate(r, cur_price_usd=None,
-                                     compute_fn=lambda c, m, cat: {"price": 100.0})
-    assert verdict == "skip_no_price"
-
-
-def test_pricing_gate_skip_no_category_unmapped():
-    """CAT2CALC に無いカテゴリ (バッグ等) → skip_no_category (復活しない、 fail-closed)。"""
-    r = _row(cur_m="10000", category="バッグ")
-    verdict, detail = check_pricing_gate(r, cur_price_usd=100.0,
-                                          compute_fn=lambda c, m, cat: {"price": 50.0})
-    assert verdict == "skip_no_category"
-    assert detail["cat_sheet"] == "バッグ"
-
-
-def test_pricing_gate_engine_error_returns_skip():
-    """pricing_engine.compute_listing_price が例外 → skip (壊れて復活はしない)。"""
-    r = _row(cur_m="10000")
-
-    def raiser(*a, **k):
-        raise ValueError("boom")
-
-    verdict, detail = check_pricing_gate(r, cur_price_usd=100.0, compute_fn=raiser)
-    assert verdict == "skip_pricing_engine_err"
-    assert "boom" in detail["error"]
-
-
-# ============================================================================
-# apply_gates 経由: 採算割れは price_hold に、 通過は allowed に
-# ============================================================================
-def _valid_row(iid, cur_m="10000", price="10000"):
-    return {
-        "row_index": int(iid[-3:]) if iid[-3:].isdigit() else 100,
+        "row_index": 100,
         "url": "https://amazon.co.jp/dp/B00000000X",
         "item_id": iid,
         "title": iid,
         "current_sold": "",
         "err_flag_prev": "",
-        "checked_at": "2026/08/07 12:00:00",
+        "checked_at": "2026/09/10 12:00:00",
         "sheet_label": "HIGH",
         "key_number": "",
-        "category": "G-SHOCK",
+        "category": category,
         "price": price,
         "current_m_jpy_str": cur_m,
     }
 
 
-def test_apply_gates_price_hold_routes_to_price_hold_list():
-    """apply_gates: 採算割れ 1 件 / OK 1 件 / no_category 1 件 → 分岐が正しい。"""
-    cycle_start = datetime(2026, 8, 7, 11, 0, 0)
-    candidates = [
-        _valid_row("IID_OK_001"),
-        _valid_row("IID_HOLD_002"),
-        _valid_row("IID_NOCAT_003"),
+def _run(candidates, fetch):
+    return RG.apply_gates(
+        candidates=candidates,
+        sheet_key_maps={"HIGH": {}},
+        cycle_started_at=datetime(2026, 9, 10, 11, 0, 0),
+        active_qty_map={},
+        fetch_price_fn=fetch,
+    )
+
+
+def test_pricing_gate_is_gone():
+    """採算チェックの関数と価格カテゴリ表は 監視くんに残っていない."""
+    import sheet_updater
+    assert not hasattr(RG, "check_pricing_gate")
+    assert not hasattr(RG, "_load_pricing_engine")
+    assert not hasattr(sheet_updater, "resolve_pricing_category")
+    assert not hasattr(sheet_updater, "CAT_SHEET_TO_PRICING")
+
+
+def test_low_price_unmapped_category_or_no_cost_do_not_block_revive():
+    """値段が安い / カテゴリが価格表に無い / 仕入値が空 でも 復活は止めない."""
+    cands = [
+        _valid_row("IID_CHEAP_001"),                           # eBay 価格が安い
+        _valid_row("IID_BAG_002", category="バッグ"),          # 旧: skip_no_category
+        _valid_row("IID_NOCOST_003", cur_m="", price=""),      # 旧: skip_no_cost
     ]
-    # IID_NOCAT_003 だけカテゴリを未対応に (バッグ)
-    candidates[2]["category"] = "バッグ"
-
-    # rec_price: OK=200 vs cur=300 → allowed / HOLD=400 vs cur=300 → price_hold
-    def _fetch(iid):
-        return (300.0, 0)
-
-    def _compute(cost, med, cat):
-        # 呼ばれるのは OK と HOLD の 2 件 (NOCAT は resolve_pricing_category で先に落ちる)
-        if med is not None:
-            raise AssertionError("復活の compute は median_usd=None で呼ぶ規約")
-        # cost_jpy 10000 で HOLD は高い値、 OK は低い値
-        return {"price": 400.98 if cost == 10000 and False else 200.98}
-    # 別 approach: item ごとに切り替えるため cost_jpy を変える方が確実
-    candidates[1]["current_m_jpy_str"] = "50000"  # HOLD 側は仕入値変えて識別
-
-    def _compute2(cost, med, cat):
-        assert med is None
-        return {"price": 400.98 if cost >= 20000 else 100.98}
-
-    allowed, deferred, price_hold = apply_gates(
-        candidates=candidates,
-        sheet_key_maps={"HIGH": {}},
-        cycle_started_at=cycle_start,
-        active_qty_map={},
-        fetch_price_fn=_fetch,
-        compute_fn=_compute2,
-    )
-    allowed_iids = {c["item_id"] for c in allowed}
-    hold_iids = {c["item_id"] for c in price_hold}
-    deferred_iids = {c["item_id"] for c in deferred}
-    assert "IID_OK_001" in allowed_iids
-    assert "IID_HOLD_002" in hold_iids
-    assert "IID_NOCAT_003" in deferred_iids
-    nocat = next(c for c in deferred if c["item_id"] == "IID_NOCAT_003")
-    assert nocat["skip_reason"] == "skip_no_category"
+    allowed, deferred, price_hold = _run(cands, lambda iid: (1.00, 0))
+    assert {c["item_id"] for c in allowed} == {"IID_CHEAP_001", "IID_BAG_002", "IID_NOCOST_003"}
+    assert deferred == []
+    assert price_hold == []                                    # 価格改定待ちは もう作らない
 
 
-def test_apply_gates_recommended_equal_current_is_ok():
-    """境界: 推奨価格 == 現在価格 → 復活可 (等号は許容)。"""
-    cycle_start = datetime(2026, 8, 7, 11, 0, 0)
-    candidates = [_valid_row("IID_EQ_010")]
-    allowed, deferred, _ = apply_gates(
-        candidates=candidates,
-        sheet_key_maps={"HIGH": {}},
-        cycle_started_at=cycle_start,
-        active_qty_map={},
-        fetch_price_fn=lambda iid: (200.98, 0),
-        compute_fn=lambda cost, med, cat: {"price": 200.98},
-    )
-    assert len(allowed) == 1
-    assert allowed[0]["item_id"] == "IID_EQ_010"
+def test_already_live_is_still_skipped():
+    """値段と無関係な安全チェック (eBay が既に qty>0) は残す."""
+    allowed, deferred, _ = _run([_valid_row("IID_LIVE_001")], lambda iid: (99.0, 1))
+    assert allowed == []
+    assert deferred[0]["skip_reason"] == "ebay_already_qty_1"
