@@ -330,6 +330,11 @@ def resolve_card_id(card_number, timeout=_TIMEOUT_SEC, variant_hint=None, _meta=
         return None
     if _meta is not None:
         _meta["thumbnail"] = it.get("thumbnailUrl") or ""
+        # ★2026-09-10 ユーザー指摘「スニダンにもタイトルはあります」。
+        #   search の name には **番号が [SV2a 201/165] の形で入っている**のに保存して
+        #   いなかったため、目視画面でスニダン候補だけタイトル空 = 番号が読めず、
+        #   人が毎回 手で番号を打っていた (実測: 打った番号100件のうち54件がスニダン)。
+        _meta["name"] = (it.get("name") or "").strip()
     return it.get("id")
 
 
@@ -483,6 +488,7 @@ def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant
     if cid is None:
         return {"_error": "card_not_found", "available": False, "psa10_price_jpy": None}
     card_image = _meta.get("thumbnail", "")          # RESTOCK確証で出す実カード画像(全PSA10出品で共通)
+    card_name = _meta.get("name", "")                # 商品名 (番号が [SV2a 201/165] の形で入る)
     listings = fetch_psa10_listings(cid, timeout=timeout)
     if listings is not None:                         # 出品API成功 = これを正とする
         if listings:
@@ -495,10 +501,10 @@ def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant
             ]
             return {"available": True, "psa10_price_jpy": psa10_listings[0]["price"],
                     "conditions": {}, "card_id": cid, "card_image": card_image,
-                    "card_url": psa10_listings[0]["url"],
+                    "card_name": card_name, "card_url": psa10_listings[0]["url"],
                     "psa10_listings": psa10_listings}
         return {"available": False, "psa10_price_jpy": None, "conditions": {},
-                "card_id": cid, "card_image": card_image,
+                "card_id": cid, "card_image": card_image, "card_name": card_name,
                 "card_url": CARD_PAGE_TMPL.format(card_id=cid),
                 "psa10_listings": []}
     # 出品API不調 → min-prices フォールバック
@@ -506,6 +512,7 @@ def check_by_keyword(card_number, condition=PSA10, timeout=_TIMEOUT_SEC, variant
     if "_error" not in res:
         res["card_id"] = cid
         res["card_image"] = card_image
+        res["card_name"] = card_name
         res["card_url"] = CARD_PAGE_TMPL.format(card_id=cid)
     return res
 

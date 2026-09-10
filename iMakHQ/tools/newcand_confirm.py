@@ -224,11 +224,40 @@ def url_title_map(cache):
             for c in lst:
                 if isinstance(c, (list, tuple)) and len(c) >= 3 and c[1]:
                     out[c[1]] = (c[0], c[2])
-        for lst in ((v or {}).get("snkrdunk") or {}).get("psa10_listings") or []:
+        # ★2026-09-10 ユーザー指摘「スニダンにもタイトルはあります」。
+        #   検索APIの name (番号が [SV2a 201/165] の形で入る) を snkrdunk 側も保存する
+        #   ようにしたので、それを候補のタイトルとして使う。これが無いと番号が読めず、
+        #   **同じカードでも出品ごとに人へ番号を聞き直していた**
+        #   (実測 2026-09-10: 打った番号100件のうち54件がスニダン)。
+        _sd = (v or {}).get("snkrdunk") or {}
+        _nm = (_sd.get("card_name") or "").strip()
+        for lst in _sd.get("psa10_listings") or []:
             u = (lst or {}).get("url")
             if u and u not in out:
-                out[u] = (lst.get("price"), "")      # snkrdunk はタイトルを持たない
+                out[u] = (lst.get("price"), _nm)
     return out
+
+
+def snkrdunk_card_id(url):
+    """スニダンURL → カードの番号 (純関数)。`apparels/165931/used/49618379` → `165931`。
+
+    ★2026-09-10 ユーザー指摘「過去カード番号を入れて確定させたのに、また入れないといけない」。
+      打った番号を **出品URLごと** に覚えていたため、同じカードの別の出品が出ると
+      また聞いていた (実測: 打った番号100件のうちスニダン54件 = カード26種。
+      その日の候補19件のうち2件は、既に番号を打ったカードの別出品だった)。
+      URLの `apparels/<id>` はカードそのものを指すので、これをキーに足す。
+    """
+    m = re.search(r"snkrdunk\.com/apparels/(\d+)", url or "")
+    return m.group(1) if m else ""
+
+
+def typed_no_for(url, typed_by_url, typed_by_card):
+    """その候補に使える「人が打った番号」(純関数)。URL一致 → 同じカード の順。"""
+    hit = (typed_by_url or {}).get(url)
+    if hit:
+        return hit
+    cid = snkrdunk_card_id(url)
+    return (typed_by_card or {}).get(cid, "") if cid else ""
 
 
 def url_image_map(cache):
@@ -497,9 +526,14 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
     done |= {_nurl(r[0]) for r in _read_tab(NG_TAB)[1:] if r and r[0]}
     # 前回 目視で入れたカード番号 (タイトルが無くてもここから引ける)
     typed_no = {}
+    typed_by_card = {}
     for r in (_read_tab(CNO_TAB))[1:]:
         if r and len(r) > 1 and r[0] and r[1]:
-            typed_no[r[0].strip()] = r[1].strip().upper()
+            _u, _no = r[0].strip(), r[1].strip().upper()
+            typed_no[_u] = _no
+            _cid = snkrdunk_card_id(_u)
+            if _cid:
+                typed_by_card.setdefault(_cid, _no)
     try:
         with open(CACHE_PATH, encoding="utf-8") as f:
             _cache_json = json.load(f)
@@ -525,8 +559,9 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
             except Exception:
                 pass
         # ★目視で入れた番号が最優先 (機械が読めなかった/読み違えた分を人が上書きできる)
-        card_no = typed_no.get(p["url"], "") or extract_card_no(title)
-        p["no_from_typed"] = bool(typed_no.get(p["url"]))
+        _typed = typed_no_for(p["url"], typed_no, typed_by_card)
+        card_no = _typed or extract_card_no(title)
+        p["no_from_typed"] = bool(_typed)
         variants = catalog_candidates(title, card_no) if resolve else []
         p.update({"price": price, "title": title, "card_no": card_no, "variants": variants,
                   "image": u2i.get(p["url"], "")})
@@ -547,18 +582,25 @@ def load_items(limit=0, write=True, resolve=True, stats=None):
         if over_cost_cap(p.get("price")):
             over_cap.append(p)             # 生成で必ず落ちる = 見せない (silent drop はしない)
             continue
-        if no and no in groups:
-            groups[no].append(p)
+        # ★2026-09-10 ユーザー指摘「また番号を入れないといけないのが出てくる」。
+        #   まとめる鍵が card_no だけだったので、**番号が読めない候補は1件も
+        #   まとまらず**、同じカードが何件も並んでいた (実測: 20件中6件が同じ
+        #   スニダンのカード 428666 = 同じ番号を6回 打たされる)。
+        #   番号が読めない時は **スニダンのカード番号** でまとめる (URLで判る)。
+        gkey = no or (("sd:" + snkrdunk_card_id(p["url"])) if snkrdunk_card_id(p["url"]) else "")
+        p["_gkey"] = gkey
+        if gkey and gkey in groups:
+            groups[gkey].append(p)
             continue
-        if no:
-            groups[no] = []
-        p["dups"] = groups.get(no) if no else None
+        if gkey:
+            groups[gkey] = []
+        p["dups"] = groups.get(gkey) if gkey else None
         items.append(p)
         if limit and len(items) >= limit:
             break
     # limit で切った先の同カードも拾えるよう、items の分だけ dups を確定させる
     for it in items:
-        it["dups"] = groups.get(it["card_no"], []) if it["card_no"] else []
+        it["dups"] = groups.get(it.get("_gkey") or "", []) if it.get("_gkey") else []
     if auto_aux and write:
         save_auto_aux(auto_aux)
     elif auto_aux:
