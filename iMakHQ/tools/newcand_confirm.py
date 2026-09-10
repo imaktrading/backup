@@ -714,11 +714,57 @@ function go(){
   if(noreason) msg+='\\n\\n対象外なのに理由が未選択 '+noreason+'件 — 理由が無いものは未結論に戻します。';
   if(holds.length) msg+='\\n\\n未結論は次回また出ます (ここを0にするのが目標)。';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?')) return;
-  fetch('/',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({picks:picks,catalog_reqs:creq,outs:outs,holds:holds,
-                         card_nos:cnos})}).then(function(){
-    document.body.innerHTML='<h1>確定しました。ウィンドウを閉じてください。</h1>';});
+  _send({picks:picks,catalog_reqs:creq,outs:outs,holds:holds,card_nos:cnos},
+        '<h1>確定しました。ウィンドウを閉じてください。</h1>');
 }
+"""
+
+
+# ★2026-09-10 実害: 確証画面を配信していたサーバが先に落ちた後、ユーザーが20件を
+#   目視して確定を押したが **無反応** だった (fetch に .catch が無く、失敗が画面に出ない)。
+#   受け口を同じポートで立て直して拾えたが、ページを閉じられていたら消えていた。
+#   → 送信前にブラウザ側へ下書きを残し、失敗したら赤帯で知らせて保存させる。
+SAVE_JS = """
+function _draftKey(){return 'imak_confirm_draft_'+location.port;}
+function _saveDraft(p){try{localStorage.setItem(_draftKey(),
+  JSON.stringify({at:Date.now(),payload:p}));}catch(e){}}
+function _clearDraft(){try{localStorage.removeItem(_draftKey());}catch(e){}}
+function _sendFailed(p,e){
+  _saveDraft(p);
+  var b=document.getElementById('sendfail')||document.createElement('div');
+  b.id='sendfail';
+  b.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#a00;'
+    +'color:#fff;padding:12px 16px;font-size:15px;line-height:1.6';
+  var url=URL.createObjectURL(new Blob([JSON.stringify(p)],{type:'application/json'}));
+  b.innerHTML='⚠ 送信できませんでした ('+e+')。<b>入力は消えていません。</b><br>'
+    +'この画面を閉じる前に <a href="'+url+'" download="confirm_result.json" '
+    +'style="color:#ff0;font-weight:bold">結果を保存</a> を押して、そのファイルを渡してください。';
+  document.body.appendChild(b);
+}
+function _send(p,doneHtml){
+  _saveDraft(p);
+  fetch('/',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(p)}).then(function(r){
+      if(!r.ok){throw new Error('HTTP '+r.status);}
+      _clearDraft();
+      document.body.innerHTML=doneHtml;
+    }).catch(function(e){_sendFailed(p,e);});
+}
+window.addEventListener('load',function(){
+  try{
+    var d=localStorage.getItem(_draftKey());
+    if(!d)return;
+    var o=JSON.parse(d);
+    var url=URL.createObjectURL(new Blob([JSON.stringify(o.payload)],{type:'application/json'}));
+    var b=document.createElement('div');
+    b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;background:#c60;'
+      +'color:#fff;padding:8px 14px;font-size:14px';
+    b.innerHTML='前回 送信できなかった入力が残っています ('
+      +new Date(o.at).toLocaleString()+') — '
+      +'<a href="'+url+'" download="confirm_result.json" style="color:#ff0">保存</a>';
+    document.body.appendChild(b);
+  }catch(e){}
+});
 """
 
 
@@ -865,7 +911,8 @@ def build_html(items):
         "<div id='zov' onclick='zclose()'>"
         "<div id='zl'><div class='zc'>仕入候補の写真</div><img alt=''></div>"
         "<div id='zr'><div class='zc'>カタログ</div><img alt=''></div></div>")
-    parts.append(f"<button id='go' onclick='go()'>確定</button><script>{_JS}</script>")
+    parts.append(f"<button id='go' onclick='go()'>確定</button>"
+                 f"<script>{SAVE_JS}{_JS}</script>")
     return "".join(parts).encode("utf-8")
 
 
@@ -1583,9 +1630,8 @@ def build_cert_html(items):
           "if(v) out.push({i:i, cert:v});});"
           "if(!out.length&&!sold.length&&!nonum.length){alert('何も付いていません。"
           "付けた分だけ処理します。何もしなければ次回また出ます。');return;}"
-          "fetch('/',{method:'POST',headers:{'Content-Type':'application/json'},"
-          "body:JSON.stringify({certs:out, sold:sold, nonum:nonum})}).then(function(){"
-          "document.body.innerHTML='<h2>受け付けました。閉じてください</h2>';});}")
+          "_send({certs:out, sold:sold, nonum:nonum},"
+          "'<h2>受け付けました。閉じてください</h2>');}")
     head = ("<div class='bar'><b>新規出品の種 %d件</b> — 写真で証明番号を読んで入れてください。"
             "入れた分だけ商品管理シートに足します。"
             "<b>売り切れていたら「売り切れ」</b>、"
@@ -1593,8 +1639,8 @@ def build_cert_html(items):
             "(どちらも次から出しません)。何も付けなかったものは次回また出ます。"
             "<button onclick='go()'>OK 付けた分を処理</button></div>" % len(items))
     return ("<!doctype html><meta charset='utf-8'><title>新規出品の種 — 証明番号</title>"
-            "<style>%s</style>%s%s<script>%s</script>" % (
-                css, head, "".join(cards), js)).encode("utf-8")
+            "<style>%s</style>%s%s<script>%s%s</script>" % (
+                css, head, "".join(cards), SAVE_JS, js)).encode("utf-8")
 
 
 def parse_cert_result(payload):
