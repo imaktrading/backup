@@ -33,8 +33,16 @@ COL_A, COL_ITEMID, COL_CERT, COL_CAT = 0, 1, 8, 17
 
 # eBay SKU の形 → 突合キー。出品くんが入れている値をそのまま使う (新しい規約を作らない)
 _RE_PSA_SKU = re.compile(r"^PSA10-(\d{6,10})$")
-_RE_SUPPLY_SKU = re.compile(r"^(m\d{8,}|[A-Z0-9]{10})$")
-_RE_SUPPLY_URL = re.compile(r"/dp/([A-Z0-9]{10})|/item/(m\d+)|/shops/product/([A-Za-z0-9]+)")
+# ★2026-09-11: **スニダンが入っていなかった**。スニダン仕入の出品は SKU = 出品ID (数字だけ /
+#   例 48714850)、仕入元URL = `snkrdunk.com/apparels/<カード>/used/<出品ID>`。どちらの形にも
+#   当たらないので、出品直後の書き戻しを1回取りこぼすと **二度と拾えなかった**。
+#   実害 (2026-09-11): SB02-001 を 20:06 に出品 (820113987395) → B列が空のまま →
+#   20:13 の 🤖自動 が同じ行を「未出品」として選び直し → eBay が重複で拒否 →
+#   1件目で止まる設計なので **同じ走行の他10件も出品されなかった**。
+#   同日「スニダンだけ見ていない」は3件目 (種の値段 / 補URLの値段 / これ)。
+_RE_SUPPLY_SKU = re.compile(r"^(m\d{8,}|[A-Z0-9]{10}|\d{6,10})$")
+_RE_SUPPLY_URL = re.compile(r"/dp/([A-Z0-9]{10})|/item/(m\d+)|/shops/product/([A-Za-z0-9]+)"
+                            r"|snkrdunk\.com/apparels/\d+/used/(\d+)")
 
 
 def build_live_index(live: dict) -> tuple[dict, dict]:
