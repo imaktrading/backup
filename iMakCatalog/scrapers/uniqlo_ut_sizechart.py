@@ -38,6 +38,7 @@ import re
 import sqlite3
 import sys
 import time
+import zlib
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -267,6 +268,11 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
     return out
 
 
+def _shard_of(pid: str, n: int) -> int:
+    """品番だけで決まる担当 (いつ数えても同じ行は同じ1本に当たる)."""
+    return zlib.crc32(pid.encode("utf-8")) % n
+
+
 def _start_driver():
     """ブラウザを起こす。並行で走らせると起動がぶつかることがあるので粘る."""
     for attempt in range(4):
@@ -289,9 +295,11 @@ def run(commit: bool, include_kids: bool, limit: int | None, brand: str = "uniql
     rows = targets(db, include_kids)
     if shard:
         # ★1件40秒かかる (2026-09-11 実測)。ブラウザを複数本立てて分担する。
-        #   k/n = n 本のうち k 本目。同じ行を2本が取らない
+        #   k/n = n 本のうち k 本目。**品番で**割り振る (並びの順番で割ると、
+        #   起動のずれの間に他の1本が取った分だけ番号がずれ、誰も取らない行と
+        #   2本が取る行ができる。2026-09-11 実測で 115行が取り残された)
         k, n = shard
-        rows = [r for i, r in enumerate(rows) if i % n == k]
+        rows = [r for r in rows if _shard_of(r["product_id"], n) == k]
     if limit:
         rows = rows[:limit]
     print(f"=== {brand} 実寸表 ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(rows)}行 ===")
