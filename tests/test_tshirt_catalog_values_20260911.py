@@ -257,6 +257,59 @@ class TestGraniphTitle:
             B.build_title(self._p(ip="架空の作品"))
 
 
+class TestNoDuplicateListing:
+    """★2026-09-12「補の概念とか重複出品とか PSA と同じ運用にするんだよ」(設計 iMakHQ/UT_FLOW.md).
+
+    UT は 1出品 = 1色1サイズ。同じ商品・色・サイズが出品中なら出さず、補URLに回す。
+    """
+    LED = {"https://live": {"decision": "go", "product_id": "E1", "color": "BLUE", "size": "3XL(4L)"},
+           "https://new": {"decision": "go", "product_id": "E1", "color": "BLUE", "size": "3XL"},
+           "https://other": {"decision": "go", "product_id": "E1", "color": "BLUE", "size": "M"}}
+
+    def _rows(self, aux=()):
+        hdr = [""] * 33
+        live = [""] * 33
+        live[0], live[1] = "https://live", "358900000001"
+        for i, u in enumerate(aux):
+            live[28 + i] = u
+        unlisted = [""] * 33
+        unlisted[0] = "https://new"
+        return [hdr, live, unlisted]
+
+    def test_key_has_color_and_size(self):
+        assert V.identity_key("E1", "blue", "3XL") == "uniqlo_ut:E1:BLUE:3XL"
+        assert V.identity_key("E1", "", "3XL") == ""
+
+    def test_listed_identity_is_found(self):
+        got = V.listed_identities(self._rows(), self.LED)
+        assert list(got) == ["uniqlo_ut:E1:BLUE:3XL"]
+        assert got["uniqlo_ut:E1:BLUE:3XL"]["row"] == 2      # シートの行番号
+
+    def test_unlisted_rows_are_not_counted(self):
+        """B列が空 = まだ出していない → 止める相手にしない."""
+        rows = self._rows()
+        rows[1][1] = ""
+        assert V.listed_identities(rows, self.LED) == {}
+
+    def test_different_size_is_a_different_listing(self):
+        got = V.listed_identities(self._rows(), self.LED)
+        assert V.identity_key("E1", "BLUE", "M") not in got
+
+    def test_aux_merge(self):
+        assert V.merge_aux(["https://a"], "https://b") == ["https://a", "https://b"]
+        assert V.merge_aux(["https://a"], "https://a") == ["https://a"]          # 二重に足さない
+        full = [f"https://{i}" for i in range(5)]
+        assert V.merge_aux(full, "https://x") == full                            # 5本で満杯
+
+    def test_listing_skips_and_moves_to_aux(self):
+        src = (_ROOT / "iMakMercari" / "tshirt_listing.py").read_text(encoding="utf-8")
+        i = src.index("_live = ut_listed.get(_key)")
+        body = src[i:i + 900]
+        assert "UCV.merge_aux(" in body and "continue" in body
+        assert "UCV.write_aux(ut_aux_add)" in src
+        assert "ut_run[_key]" in src, "同じ走行に同じ物が2つあっても1つだけにする"
+
+
 class TestListingWiring:
     SRC = (_ROOT / "iMakMercari" / "tshirt_listing.py").read_text(encoding="utf-8")
 

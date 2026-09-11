@@ -231,10 +231,69 @@ def build_values(product, color_name, size_text):
     if s.get("themes"):
         specs["Theme"] = ", ".join(s["themes"])
     return {"specs": specs, "size_jp": size, "size_us": JP_TO_US.get(size, ""),
+            "product_id": product.get("product_id", ""), "color_name": color_name,
             "material_line": mat_line, "origin_line": coo_line,
             "chart_html": chart_html(chart_row(s.get("size_chart_inch"), size), size),
             "collab_jp": s.get("collab") or product.get("name") or "", "is_gu": is_gu,
             "work_en": work}
+
+
+# ── 二重出品を止める (PSA と同じ運用。設計: iMakHQ/UT_FLOW.md) ──────
+COL_URL, COL_ITEMID = 0, 1
+COL_AUX_START, AUX_MAX = 28, 5          # AC..AG = 補URL 1..5
+
+
+def identity_key(pid, color_name, size_jp):
+    """canonical KEY。**1出品 = 1色1サイズ** なので色とサイズまで入れる (純関数)。
+
+    例: uniqlo_ut:E480691-000:BLUE:3XL
+    """
+    if not (pid and color_name and size_jp):
+        return ""
+    return f"uniqlo_ut:{pid}:{color_name.upper()}:{size_jp.upper()}"
+
+
+def listed_identities(rows2d, ledger):
+    """商品管理シート → {KEY: {"row": 行番号, "item_id":…, "aux": [補URL…]}} (純関数)。
+
+    出品済み (B列に itemID がある) かつ 目視で特定済み (台帳にある) 行だけ。
+    """
+    out = {}
+    for i, r in enumerate(rows2d[1:], start=2):
+        if len(r) <= COL_ITEMID or not (r[COL_ITEMID] or "").strip():
+            continue
+        e = (ledger or {}).get((r[COL_URL] or "").strip())
+        if not e or e.get("decision") != "go":
+            continue
+        key = identity_key(e.get("product_id"), e.get("color"), jp_size(e.get("size") or ""))
+        if not key:
+            continue
+        aux = [u.strip() for u in r[COL_AUX_START:COL_AUX_START + AUX_MAX] if u.strip()] \
+            if len(r) > COL_AUX_START else []
+        out[key] = {"row": i, "item_id": r[COL_ITEMID].strip(), "aux": aux}
+    return out
+
+
+def merge_aux(existing, url, max_n=AUX_MAX):
+    """補URL に1本足す (既にあれば そのまま / 5本埋まっていたら足さない)。純関数。"""
+    urls = [u for u in (existing or []) if u.strip()]
+    if url and url not in urls and len(urls) < max_n:
+        urls = urls + [url]
+    return urls
+
+
+def write_aux(row_to_urls):
+    """補URL列 (AC-AG) に書く (I/O)。書けなければ 0 を返し、本処理は止めない。"""
+    if not row_to_urls:
+        return 0
+    try:
+        import sys as _sys
+        _sys.path.insert(0, r"C:\dev\iMak\iMakHQ\tools")
+        import sheet_io
+        return sheet_io.write_aux_urls(row_to_urls)
+    except Exception as e:                                         # noqa: BLE001
+        print(f"  ⚠ 補URL を書けませんでした ({type(e).__name__}: {e})")
+        return 0
 
 
 def catalog_facts_text(v):

@@ -471,7 +471,7 @@ def get_listing_targets():
                 "description": description,
                 "size_text": size_text,
             })
-    return targets, ws
+    return targets, ws, all_values
 
 
 def get_uniqlo_official_image(collab_name):
@@ -637,7 +637,7 @@ def main():
 
     # スプシからリスティング対象を取得
     print("スプシ読み込み中...")
-    targets, ws = get_listing_targets()
+    targets, ws, all_values = get_listing_targets()
     print(f"リスティング対象: {len(targets)}件\n")
 
     if not targets:
@@ -683,6 +683,17 @@ def main():
     import ut_catalog_values as UCV
     from whitelist_registry import validate_and_normalize as _wl_validate
     ut_ledger = UCV.load_ledger()
+    # ★2026-09-12 ユーザー「補の概念とか重複出品とか PSA と同じ運用にするんだよ」(設計 iMakHQ/UT_FLOW.md):
+    #   同じ商品・色・サイズが**既に出品中**なら出さない。捨てずに、その出品の補URLに足す
+    #   (無在庫なので仕入元は多いほど強い。PSA の「2つ目は補URLへ」と同じ)
+    ut_listed = UCV.listed_identities(all_values, ut_ledger)
+    ut_aux_add = {}
+    ut_run = {}          # この走行で CSV に入れた分 (同じ走行に同じ物が2つある時も1つだけ出す)
+
+    def _aux_of(sheet_row):
+        r = all_values[sheet_row - 1] if len(all_values) >= sheet_row else []
+        return [u.strip() for u in r[UCV.COL_AUX_START:UCV.COL_AUX_START + UCV.AUX_MAX]
+                if u.strip()] if len(r) > UCV.COL_AUX_START else []
 
     for idx, target in enumerate(targets):
         title_jp = target["title_jp"]
@@ -699,6 +710,20 @@ def main():
             continue
         if cat_v:
             print(f"    📚 目視で特定済み {cat_v['product_id']} → 色/素材/原産国/サイズ表をカタログから写す")
+            _key = UCV.identity_key(cat_v["product_id"], cat_v["color_name"], cat_v["size_jp"])
+            _live = ut_listed.get(_key) or ut_run.get(_key)
+            if _live:
+                # 二重出品にしない。この仕入元は既存の出品の補URLに回す
+                _urls = UCV.merge_aux(_live["aux"], target["url"])
+                if _urls != _live["aux"]:
+                    ut_aux_add[_live["row"]] = _urls
+                    _live["aux"] = _urls
+                    print(f"    ♻ 同じ商品・色・サイズが出品中 ({_live['item_id']}) "
+                          f"→ 出さずに補URLに足す")
+                else:
+                    print(f"    ⏸ 同じ商品・色・サイズが出品中 ({_live['item_id']}) "
+                          f"/ 補URLは満杯かすでに登録済み → スキップ")
+                continue
 
         # 画像取得
         photo_urls = target["photo_urls"]
@@ -906,10 +931,19 @@ def main():
             print(f"    🟠 HOLD: {custom_label} → {_errs}")
             continue
         rows.append(row)
+        if cat_v:
+            # この走行で出す分も「出品済み」と同じ扱いにする (同じ物の2つ目は補URLへ)
+            ut_run[_key] = {"row": target["row"], "aux": _aux_of(target["row"]),
+                            "item_id": "この走行で出品"}
         print(f"    💲 ${price} (仕入¥{cost_jpy})")
         print()
 
         time.sleep(2)
+
+    # 二重出品を避けて補URLに回した分を書く (出品より先に書く = CSV が落ちても仕入元は残る)
+    if ut_aux_add:
+        n_aux = UCV.write_aux(ut_aux_add)
+        print(f"\n♻ 出品中の商品に 補URL を追加: {n_aux}行")
 
     # CSV出力
     if len(rows) > 1:
