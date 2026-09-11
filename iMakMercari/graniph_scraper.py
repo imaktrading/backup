@@ -42,6 +42,7 @@ class GraniphProduct:
     size_table: list       # [SizeRow(label_jp="着丈", values_cm={"SS": 62.5, ...}), ...]
     url: str
     origin_jp: str = ""    # 原産国 (PDP の「原産国」欄。例 "ベトナム" / "中国")。無ければ空
+    ip_jp: str = ""        # 作品名 (JSON-LD の brand = IP名。例 "名探偵コナン")。graniph ではない
 
 
 def _fetch_html(url: str, timeout: int = 30) -> str:
@@ -204,4 +205,13 @@ def scrape(url: str) -> GraniphProduct:
         size_table=size_table,
         url=url,
         origin_jp=_parse_origin(html),
+        ip_jp=_brand_name(jsonld),
     )
+
+
+def _brand_name(jsonld: dict) -> str:
+    """JSON-LD の brand (dict か文字列) → 名前。graniph では IP 名が入る。"""
+    b = jsonld.get("brand") or ""
+    if isinstance(b, dict):
+        b = b.get("name") or ""
+    return str(b).strip()

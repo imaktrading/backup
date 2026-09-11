@@ -333,23 +333,34 @@ def derive_fit(name_jp: str) -> str:
     return "Regular"
 
 
+def work_en_of(p: GraniphProduct) -> str:
+    """作品名 (JSON-LD の brand = IP 名) → 公式英語表記。表に無ければ止める (№138)。"""
+    import ut_catalog_values as UCV
+    work = UCV.work_name_en([getattr(p, "ip_jp", ""), p.name_jp], UCV.load_works())
+    if not work:
+        raise UCV.NotListable(f"作品名が対応表に無い: {getattr(p, 'ip_jp', '') or p.name_jp[:30]} "
+                              "→ iMakMercari/ut_title_names.yaml に公式の英語表記を足す")
+    return work
+
+
 def build_title(p: GraniphProduct) -> str:
-    """タイトル生成 (80字以内、Graniph SEO + サイズ幅を親では明示せず variation で表現)."""
-    fit = "Oversized " if derive_fit(p.name_jp) == "Relaxed" else ""
+    """タイトル生成 (80字以内。skill apparel-tee-listing の graniph 節の形)。
+
+    形: [作品] Anime Graphic Tee Graniph Japan [色] NWT
+    ★2026-09-11: 作品名が入っておらず、skill で禁止の "Japan Exclusive" を付けていた
+      (graniph は公式が海外へ直販しているので虚偽になる)。作品名は対応表で英語表記に同定する。
+    """
+    work = work_en_of(p)
+    fit = "Oversized" if derive_fit(p.name_jp) == "Relaxed" else ""
     type_str = derive_type_from_name(p.name_jp)
     sleeve = derive_sleeve_length(p.name_jp)
     color_en = color_jp_to_en(p.color_jp)
-    # 例: "Graniph Oversized Half-Zip T-Shirt Beige Japan Exclusive NWT Unisex"
     if "ハーフジップ" in p.name_jp:
-        style_word = "Half-Zip"
-        parts = [BRAND_FREE_TEXT, fit + style_word, type_str, color_en,
-                 "Japan Exclusive", "NWT", "Unisex"]
+        parts = [work, fit, "Half-Zip", type_str, BRAND_FREE_TEXT, "Japan", color_en, "NWT"]
     else:
-        parts = [BRAND_FREE_TEXT, fit.strip() if fit else "",
-                 sleeve if sleeve != "Short Sleeve" else "",
-                 type_str, color_en,
-                 "Graphic Tee" if type_str == "T-Shirt" else "",
-                 "Japan Exclusive", "NWT", "Unisex"]
+        parts = [work, fit, sleeve if sleeve != "Short Sleeve" else "",
+                 "Anime Graphic Tee" if type_str == "T-Shirt" else type_str,
+                 BRAND_FREE_TEXT, "Japan", color_en, "NWT"]
     title = " ".join(w for w in parts if w).strip()
     # 80 字 hard cap
     if len(title) > 80:

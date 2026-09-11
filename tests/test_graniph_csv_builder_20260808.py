@@ -41,7 +41,7 @@ _HTML_FIXTURE = '''<html><head></head><body>
 "name": "テスト｜ハーフジップビッグシルエットTシャツ",
 "description": "テスト説明",
 "url": "https://www.graniph.com/item-detail/019001564303",
-"brand": {"@type": "Brand","name": "テスト"},
+"brand": {"@type": "Brand","name": "名探偵コナン"},
 "audience": {"@type": "PeopleAudience","suggestedGender": "unisex"},
 "productGroupID": "019001564",
 "material": "ポリエステル 65%  綿 35%",

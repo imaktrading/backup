@@ -181,6 +181,67 @@ class TestCountryOfOriginColumn:
         assert GS._parse_origin("<dt>素材</dt>") == ""
 
 
+class TestWorkNames:
+    """№138: 作品名は表で公式英語表記に同定。表に無ければ止める."""
+    W = {"呪術廻戦": "Jujutsu Kaisen", "ドラえもん": "Doraemon", "ルーヴル美術館": "Louvre",
+         "ポケモン": "Pokémon", "HUNTER×HUNTER": "Hunter x Hunter"}
+
+    def test_lookup(self):
+        assert V.work_name_en(["マンガUT 集英社創業100周年 /呪術廻戦"], self.W) == "Jujutsu Kaisen"
+        assert V.work_name_en(["hunter × hunter"], self.W) == "Hunter x Hunter"
+
+    def test_longest_key_wins(self):
+        assert V.work_name_en(["ドラえもん ＆ ルーヴル美術館（UT）"], self.W) == "Louvre"
+
+    def test_unknown(self):
+        assert V.work_name_en(["佐藤可士和展"], self.W) == ""
+
+    def test_real_table_loads_and_has_the_main_works(self):
+        w = V.load_works()
+        for jp, en in (("呪術廻戦", "Jujutsu Kaisen"), ("鬼滅の刃", "Demon Slayer"),
+                       ("ポケモン", "Pokémon"), ("ONE PIECE", "One Piece")):
+            assert w[jp] == en
+
+    def test_unknown_work_is_not_listed(self):
+        with pytest.raises(V.NotListable, match="対応表に無い"):
+            V.build_values(_prod(collab="日本土産（NIPPON MIYAGE）", character_family=""), "WHITE", "XL")
+
+    def test_character_family_is_the_table_value(self):
+        v = V.build_values(_prod(collab="ポケモン", character_family="Pokemon"), "WHITE", "XL")
+        assert v["specs"]["Character Family"] == "Pokémon" and v["work_en"] == "Pokémon"
+
+    def test_title_check_ignores_accents_and_case(self):
+        assert V.title_has("UNIQLO UT Pokemon Eevee T-Shirt", "Pokémon")
+        assert V.title_has("UNIQLO UT HUNTER X HUNTER Tee", "Hunter x Hunter")
+        assert not V.title_has("UNIQLO UT Pocket Monsters Tee", "Pokémon")
+
+    def test_listing_skips_when_title_lacks_the_work(self):
+        src = (_ROOT / "iMakMercari" / "tshirt_listing.py").read_text(encoding="utf-8")
+        i = src.index('UCV.title_has(title_en, cat_v["work_en"])')
+        assert "continue" in src[i:i + 200]
+
+
+class TestGraniphTitle:
+    def _p(self, ip="名探偵コナン", name="テスト｜ビッグシルエットTシャツ"):
+        import graniph_scraper as GS
+        return GS.GraniphProduct(item_code="019001564303", product_group_id="019001564",
+                                 color_code="303", name_jp=name, description_jp="", material_jp="綿 100%",
+                                 color_jp="ブラック", suggested_gender="unisex", price_regular_jpy=3000,
+                                 price_sale_jpy=None, image_urls=[], sizes=["M"], size_all_declared=["M"],
+                                 stock={"M": 1}, size_table=[], url="u", ip_jp=ip)
+
+    def test_title_has_work_and_no_japan_exclusive(self):
+        import graniph_csv_builder as B
+        t = B.build_title(self._p())
+        assert t.startswith("Detective Conan ") and "Graniph Japan" in t and "Exclusive" not in t
+        assert t.endswith("NWT") and len(t) <= 80
+
+    def test_unknown_ip_stops(self):
+        import graniph_csv_builder as B
+        with pytest.raises(V.NotListable):
+            B.build_title(self._p(ip="架空の作品"))
+
+
 class TestListingWiring:
     SRC = (_ROOT / "iMakMercari" / "tshirt_listing.py").read_text(encoding="utf-8")
 

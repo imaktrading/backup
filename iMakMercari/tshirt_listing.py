@@ -752,6 +752,11 @@ def main():
             category="tshirt", target_min=70, max_chars=80,
         )
         print(f"    ✨ {title_en} ({len(title_en)}字)")
+        # ★№138: 目視で特定した行は、作品名が対応表の英語表記どおりタイトルに入っていること
+        #   (AI が別の綴りに言い換えると、買い手の検索語と一致しない)。入っていなければ出さない
+        if cat_v and not UCV.title_has(title_en, cat_v["work_en"]):
+            print(f"    ⏸ スキップ: タイトルに作品名 '{cat_v['work_en']}' が入っていない")
+            continue
 
         # TOPセラーItem Specifics参照 + eBay中央値取得
         ebay_median = 0

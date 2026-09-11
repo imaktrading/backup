@@ -18,12 +18,57 @@ from __future__ import annotations
 
 import html as _html
 import json
+import os
 import re
 import sqlite3
 import unicodedata
 
 DB_PATH = r"C:/dev/iMak_data/catalog/products.sqlite"
 LEDGER = r"C:/dev/iMak_data/hq/ut_identity.json"
+TITLE_NAMES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ut_title_names.yaml")
+
+
+# ── 作品名の英語表記 (№138) ─────────────────────────────────────────
+_WORKS = None
+
+
+def load_works(path=TITLE_NAMES):
+    """ut_title_names.yaml の works (日本語/英語キー → 公式英語表記)。"""
+    global _WORKS
+    if _WORKS is not None and path == TITLE_NAMES:
+        return _WORKS
+    import yaml
+    with open(path, encoding="utf-8") as f:
+        works = (yaml.safe_load(f) or {}).get("works") or {}
+    works = {str(k): str(v) for k, v in works.items() if k and v}
+    if path == TITLE_NAMES:
+        _WORKS = works
+    return works
+
+
+def _nk(s):
+    """照合用 (全角半角・大小・空白・記号を無視)。純関数。"""
+    s = unicodedata.normalize("NFKC", s or "").lower()
+    return re.sub(r"[\s・･=＝×☆―\-:：!！'’【】「」()（）]+", "", s)
+
+
+def work_name_en(texts, works):
+    """商品の文字列群 → 作品の公式英語表記 (表に無ければ "")。**長いキーから先に**当てる。純関数。"""
+    t = _nk(" ".join(x for x in texts if x))
+    for k in sorted(works, key=lambda k: -len(_nk(k))):
+        nk = _nk(k)
+        if nk and nk in t:
+            return works[k]
+    return ""
+
+
+def title_has(title, name):
+    """タイトルにその英語名が入っているか (大小・アクセント・記号を無視)。純関数。"""
+    def f(s):
+        s = unicodedata.normalize("NFKD", s or "")
+        s = "".join(ch for ch in s if not unicodedata.combining(ch))
+        return re.sub(r"[^a-z0-9]+", "", s.lower())
+    return bool(name) and f(name) in f(title)
 
 FIBER_EN = {"綿": "Cotton", "コットン": "Cotton", "ポリエステル": "Polyester",
             "ポリウレタン": "Polyurethane", "レーヨン": "Rayon", "ナイロン": "Nylon",
@@ -163,6 +208,12 @@ def build_values(product, color_name, size_text):
         raise NotListable(f"サイズを読めない: {size_text!r}")
     mat_spec, mat_line = main_material(s.get("composition"))
     coo_spec, coo_line = origin(s.get("countries_of_origin"))
+    # №138: 作品名は表で公式英語表記に同定する。表に無ければ出さない (綴りのブレを止める)
+    work = work_name_en([s.get("collab"), s.get("collab_official_name"), product.get("name"),
+                         s.get("character_family")], load_works())
+    if not work:
+        raise NotListable(f"作品名が対応表に無い: {(s.get('collab') or product.get('name') or '')[:30]} "
+                          f"→ iMakMercari/ut_title_names.yaml に公式の英語表記を足す")
     is_gu = product.get("category") == "gu"
     specs = {"Color": col["ebay_color"], "Material": mat_spec, "Department": dept,
              "Model": str(s.get("l1_id") or ""),
@@ -171,8 +222,7 @@ def build_values(product, color_name, size_text):
              "Product Line": "GU" if is_gu else "Uniqlo UT"}
     if s.get("fit"):
         specs["Fit"] = s["fit"]
-    if s.get("character_family"):
-        specs["Character Family"] = s["character_family"]
+    specs["Character Family"] = work
     if s.get("character"):
         specs["Character"] = s["character"]
     if s.get("themes"):
@@ -180,18 +230,19 @@ def build_values(product, color_name, size_text):
     return {"specs": specs, "size_jp": size, "size_us": JP_TO_US.get(size, ""),
             "material_line": mat_line, "origin_line": coo_line,
             "chart_html": chart_html(chart_row(s.get("size_chart_inch"), size), size),
-            "collab_jp": s.get("collab") or product.get("name") or "", "is_gu": is_gu}
+            "collab_jp": s.get("collab") or product.get("name") or "", "is_gu": is_gu,
+            "work_en": work}
 
 
 def catalog_facts_text(v):
     """Claude にタイトルを書かせる時に渡す事実 (英語)。純関数。"""
     sp = v["specs"]
-    fam = sp.get("Character Family", "")
     return ("Catalog facts (authoritative — use these, do not contradict them):\n"
             f"- Brand line: {'UNIQLO GU' if v['is_gu'] else 'UNIQLO UT'}\n"
             f"- Color: {sp['Color']}\n"
             f"- Size: JP {v['size_jp']}" + (f" (US {v['size_us']})" if v['size_us'] else "") + "\n"
-            + (f"- Series / franchise: {fam}\n" if fam else "")
+            + f"- Series / franchise (put this EXACT English name in the title, spelled as given): "
+              f"{v['work_en']}\n"
             + (f"- Character: {sp['Character']}\n" if sp.get("Character") else "")
             + f"- Official Japanese product name (for identifying the work only): {v['collab_jp']}\n")
 

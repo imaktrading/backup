@@ -1,0 +1,139 @@
+# UT / GU / graniph の作品名 → 公式の英語表記 (№138・2026-09-11)
+#
+# タイトルの作品名と Item Specifics の Character Family に使う。
+# ★これは「翻訳」ではなく「公式英語表記への同定」。買い手が検索窓に打つ語と一致しないと売れない
+#   (鬼滅の刃 → Demon Slayer であって Blade of Demon Destruction ではない)。
+# ★表に無い作品は **出品しない (止める)**。止まったら、公式の英語表記を確かめてここに1行足す。
+#   自信の無い表記は足さない (推測で埋めない)。
+# キー: カタログの作品名 (商品名・コラボ名の一部) か、カタログの character_family (英語)。
+#       照合は大文字小文字・全角半角・記号を無視し、**長いキーから先に** 当てる。
+# 英語は、出品先の eBay で使われている表記に合わせる (例: Pokémon はアクセント付き)。
+
+works:
+  # ── アニメ・マンガ ──
+  呪術廻戦: Jujutsu Kaisen
+  ワンピース: One Piece
+  ONE PIECE: One Piece
+  ドラゴンボールDAIMA: Dragon Ball Daima
+  ドラゴンボール: Dragon Ball
+  Dragon Ball: Dragon Ball
+  鬼滅の刃: Demon Slayer
+  Demon Slayer: Demon Slayer
+  NARUTO: Naruto
+  ナルト: Naruto
+  HUNTER×HUNTER: Hunter x Hunter
+  ハンターハンター: Hunter x Hunter
+  SPY×FAMILY: Spy x Family
+  スパイファミリー: Spy x Family
+  チェンソーマン: Chainsaw Man
+  ダンダダン: Dandadan
+  Dandadan: Dandadan
+  ブルーロック: Blue Lock
+  推しの子: Oshi no Ko
+  進撃の巨人: Attack on Titan
+  僕のヒーローアカデミア: My Hero Academia
+  ヒロアカ: My Hero Academia
+  機動戦士ガンダム: Gundam
+  ガンダム: Gundam
+  ガンプラ: Gundam
+  遊☆戯☆王: Yu-Gi-Oh!
+  るろうに剣心: Rurouni Kenshin
+  ハイキュー: Haikyu!!
+  怪獣8号: Kaiju No. 8
+  エヴァンゲリオン: Evangelion
+  名探偵コナン: Detective Conan
+  幽☆遊☆白書: Yu Yu Hakusho
+  ジョジョの奇妙な冒険: JoJo's Bizarre Adventure
+  ベルセルク: Berserk
+  Berserk: Berserk
+  攻殻機動隊: Ghost in the Shell
+  Ghost in the Shell: Ghost in the Shell
+  ドラえもん: Doraemon
+  新海誠: Makoto Shinkai
+  黒子のバスケ: Kuroko's Basketball
+  銀魂: Gintama
+  スラムダンク: Slam Dunk
+  SLAM DUNK: Slam Dunk
+  東京リベンジャーズ: Tokyo Revengers
+  葬送のフリーレン: Frieren
+  ちいかわ: Chiikawa
+  約束のネバーランド: The Promised Neverland
+  東京喰種: Tokyo Ghoul
+  BLEACH: Bleach
+  ブリーチ: Bleach
+  DEATH NOTE: Death Note
+  デスノート: Death Note
+  北斗の拳: Fist of the North Star
+  聖闘士星矢: Saint Seiya
+  週刊少年ジャンプ: Weekly Shonen Jump
+  # ── ゲーム ──
+  ポケモン: Pokémon
+  ポケットモンスター: Pokémon
+  Pokemon: Pokémon
+  スーパーマリオ: Super Mario
+  Super Mario: Super Mario
+  マリオカート: Mario Kart
+  スプラトゥーン: Splatoon
+  マインクラフト: Minecraft
+  Minecraft: Minecraft
+  ドラゴンクエスト: Dragon Quest
+  Dragon Quest: Dragon Quest
+  ファイナルファンタジー: Final Fantasy
+  プレイステーション: PlayStation
+  星のカービィ: Kirby
+  ゼルダの伝説: The Legend of Zelda
+  # ── カートゥーン・映画 ──
+  ピーナッツ: Peanuts
+  Peanuts: Peanuts
+  ディズニー: Disney
+  Disney: Disney
+  ミッキー: Disney
+  # MAGIC FOR ALL は UNIQLO の Disney コラボの総称 (買い手は Disney で探す)
+  MAGIC FOR ALL: Disney
+  マジック フォー オール: Disney
+  マジックフォーオール: Disney
+  ピクサー: Pixar
+  PIXAR: Pixar
+  トイ・ストーリー: Toy Story
+  ライオン・キング: The Lion King
+  ズートピア: Zootopia
+  スター・ウォーズ: Star Wars
+  Star Wars: Star Wars
+  マーベル: Marvel
+  セサミストリート: Sesame Street
+  スポンジ・ボブ: SpongeBob SquarePants
+  # ── アーティスト・美術館 ──
+  アンディ・ウォーホル: Andy Warhol
+  Andy Warhol: Andy Warhol
+  ジャン＝ミシェル・バスキア: Jean-Michel Basquiat
+  ジャン=ミシェル・バスキア: Jean-Michel Basquiat
+  Jean-Michel Basquiat: Jean-Michel Basquiat
+  キース・ヘリング: Keith Haring
+  キース・へリング: Keith Haring
+  Keith Haring: Keith Haring
+  カウズ: KAWS
+  KAWS: KAWS
+  浮世絵: Ukiyo-e
+  Ukiyo-e: Ukiyo-e
+  北斎: Hokusai
+  MoMA: MoMA
+  ルーヴル美術館: Louvre
+  Louvre: Louvre
+  テート: Tate
+  Tate: Tate
+  パブロ・ピカソ: Pablo Picasso
+  アンリ・マティス: Henri Matisse
+  ソール・ライター: Saul Leiter
+  エリオット・アーウィット: Elliott Erwitt
+  マグナム・フォト: Magnum Photos
+  長場雄: Yu Nagaba
+  花井祐介: Yusuke Hanai
+  VERDY: Verdy
+  佐藤可士和: Kashiwa Sato
+  スティーブン・エスポ・パワーズ: Stephen Powers
+  ライアン・マッギンレー: Ryan McGinley
+  ガール スケートボード: Girl Skateboards
+  藤子・F・不二雄: Fujiko F. Fujio
+  # ── 音楽 ──
+  YOASOBI: YOASOBI
+  米津玄師: Kenshi Yonezu
