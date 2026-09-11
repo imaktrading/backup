@@ -349,6 +349,8 @@ def _cards_html(cands, color_jp=""):
             + f"<div class='nm'>{_html.escape(p['name'][:22])}</div>"
             + f"<div class='nm'>{_html.escape((p['collab'] or p['character_family'])[:18])}"
             + (" ・公式売切" if p.get("sold_out") else "") + "</div>"
+            # ★色の一覧がカタログに無い商品は、選んでも色を決められず出品できない (catalog に確認中)
+            + ("" if p["colors"] else "<div class='nm' style='color:#a40'>色がカタログに無い</div>")
             + f"<button class='zb' data-img=\"{_html.escape(prc._proxied(img))}\" "
               f"onclick='zoom(event,this)'>🔍</button></div>")
     return (f"<div class='one'>カタログ候補 {len(cands)}件 — 柄を見て1つ選び、色を確かめてください</div>"

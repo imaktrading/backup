@@ -385,20 +385,29 @@ def load_description():
         return "Brand new item shipped from Japan."
 
 
-def build_description(template, collab, color, size_jp, size_us):
-    """NEW.txtテンプレートにスペックブロックを挿入"""
+def build_description(template, collab, color, size_jp, size_us, cat=None):
+    """NEW.txtテンプレートにスペックブロックを挿入
+
+    cat: 目視で特定した行のカタログの値 (ut_catalog_values.build_values)。
+         ★2026-09-11: ある時は素材・原産国・実寸を **カタログから** 出す (無い時は従来どおり)。
+    """
+    material = (cat or {}).get("material_line") or "100% Cotton"
+    origin = (cat or {}).get("origin_line") or ""
+    chart = (cat or {}).get("chart_html") or ""
+    note_tail = ("See the actual measurements below." if chart
+                 else "Please refer to the size chart images for detailed measurements.")
     specs_html = f"""
 <p><span style="text-decoration: underline;"><strong>Product Specifications</strong></span></p>
 <ul>
 <li><b>Collaboration:</b> {collab}</li>
 <li><b>Brand:</b> Uniqlo UT</li>
-<li><b>Material:</b> 100% Cotton</li>
-<li><b>Color:</b> {color}</li>
+<li><b>Material:</b> {material}</li>
+""" + (f"<li><b>Country of Origin:</b> {origin}</li>\n" if origin else "") + f"""<li><b>Color:</b> {color}</li>
 <li><b>Size:</b> Japan {size_jp} (US {size_us}), Regular fit</li>
 <li><b>Condition:</b> Brand new with tags</li>
 </ul>
-<p><strong>⚠ Size Note:</strong> This item is Japan size {size_jp}. The actual fit is equivalent to US size {size_us}. Please refer to the size chart images for detailed measurements.</p>
-"""
+<p><strong>⚠ Size Note:</strong> This item is Japan size {size_jp}. The actual fit is equivalent to US size {size_us}. {note_tail}</p>
+{chart}"""
     # Shipping セクションの直前にスペックブロックを挿入
     marker = '<p><span style="text-decoration: underline;"><strong>Shipping'
     if marker in template:
@@ -444,6 +453,7 @@ def get_listing_targets():
         photo_urls = row[6] if len(row) > 6 else ""
         description = row[7] if len(row) > 7 else ""
         category = row[17] if len(row) > 17 else ""  # R列
+        size_text = row[19] if len(row) > 19 else ""  # T列 (目視で特定した行のサイズ)
 
         # 再出品 SKU filter 適用時は URL末尾12文字一致のみ通す
         if only_skus and _sku_of(url) not in only_skus:
@@ -459,6 +469,7 @@ def get_listing_targets():
                 "price_jpy": price,
                 "photo_urls": photo_urls,
                 "description": description,
+                "size_text": size_text,
             })
     return targets, ws
 
@@ -536,7 +547,8 @@ def _parse_json_lenient(text):
         return obj
 
 
-def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b64, max_retries=2):
+def call_claude_api(title_jp, description_jp, condition_jp, price_jpy, images_b64, max_retries=2,
+                    facts=""):
     """Claude APIでリスティング情報生成 + ホワイトリスト検証 + 違反時リトライ.
     違反があればフィードバックを添えて再リクエスト（最大max_retries回）。
     最後まで違反残れば正規化値で進めて警告表示。"""
@@ -558,7 +570,7 @@ Title (Japanese): {title_jp}
 Condition: {condition_jp}
 Price (JPY): {price_jpy}
 Description: {description_jp}
-
+{facts}
 Generate an eBay listing for this UNIQLO UT T-shirt.""",
     })
 
@@ -662,10 +674,27 @@ def main():
 
     rows = [csv_headers]
 
+    # ★2026-09-11 ユーザー「カタログの値」: 目視で特定した行 (iMakHQ/tools/ut_identify.py) は
+    #   色・素材・原産国・サイズ表などを **カタログから写す** (写真から AI に推測させない)。
+    #   特定されていない行は従来どおり。
+    import ut_catalog_values as UCV
+    from whitelist_registry import validate_and_normalize as _wl_validate
+    ut_ledger = UCV.load_ledger()
+
     for idx, target in enumerate(targets):
         title_jp = target["title_jp"]
         print(f"[{idx+1}/{len(targets)}] {title_jp[:50]}")
         print(f"    URL: {target['url']}")
+
+        cat_v = None
+        try:
+            cat_v = UCV.values_for_url(target["url"], target.get("size_text", ""), ut_ledger)
+        except UCV.NotListable as e:
+            # 特定済みなのに写せない = 推測に戻さない。その行は出さない
+            print(f"    ⏸ 目視で特定済みだが カタログの値で出せない → スキップ: {e}")
+            continue
+        if cat_v:
+            print(f"    📚 目視で特定済み {cat_v['product_id']} → 色/素材/原産国/サイズ表をカタログから写す")
 
         # 画像取得
         photo_urls = target["photo_urls"]
@@ -685,6 +714,7 @@ def main():
         result = call_claude_api(
             title_jp, target["description"], target["condition"],
             target["price_jpy"], images_b64,
+            facts=UCV.catalog_facts_text(cat_v) if cat_v else "",
         )
 
         if not result:
@@ -695,6 +725,16 @@ def main():
         collab = result.get("collab", "")
         specs = result.get("item_specifics", {})
         condition_desc = result.get("condition_description", "")
+        if cat_v:
+            try:
+                specs = UCV.apply_to_specs(specs, cat_v, _wl_validate)
+            except UCV.NotListable as e:
+                print(f"    ⏸ スキップ: {e}")
+                continue
+            result["size_jp"] = cat_v["size_jp"]
+            if cat_v["size_us"]:
+                result["size_us"] = cat_v["size_us"]
+            result["model_number"] = cat_v["specs"]["Model"]
 
         # 80字超過の場合、Short Sleeveを削って調整 (eBay制約)
         if len(title_en) > 80:
@@ -723,7 +763,12 @@ def main():
                     if key not in specs and val:
                         print(f"    ℹ️ TOPセラー '{key}' = '{val}'（参考）")
                 # 空欄の項目をTOPセラーで補完（参考値として）
+                # ★2026-09-11: カタログから写した項目は補完しない (2か国の原産国を空欄に
+                #   しているのに、他人の出品の値で埋め直してしまう)
+                _from_cat = set((cat_v or {}).get("specs", {}))
                 for key, val in top_specs.items():
+                    if key in _from_cat:
+                        continue
                     if key in specs and not specs[key] and val:
                         specs[key] = val
                         print(f"    📋 '{key}' をTOPセラー値で補完: {val}")
@@ -778,8 +823,11 @@ def main():
         if not specs.get("Closure"):
             specs["Closure"] = "Pullover"
         # Country of Origin: タグから読めた国名は尊重、空なら "Does not apply"（推測禁止ルール）
-        coo = specs.get("Country/Region of Manufacture") or result.get("country_of_origin", "")
-        specs["Country/Region of Manufacture"] = coo if coo else "Does not apply"
+        # ★2026-09-11: 目視で特定した行は カタログの値そのまま。2か国の商品は空欄のまま
+        #   (説明文に両方書く。2026-09-09 決定)。写真の読み取りで埋め直さない。
+        if not cat_v:
+            coo = specs.get("Country/Region of Manufacture") or result.get("country_of_origin", "")
+            specs["Country/Region of Manufacture"] = coo if coo else "Does not apply"
         # Model: result.model_number から取得（タグから読めなければ空）
         if not specs.get("Model"):
             specs["Model"] = result.get("model_number", "")
@@ -799,6 +847,7 @@ def main():
                 specs.get("Color", ""),
                 result.get("size_jp", ""),
                 result.get("size_us", specs.get("Size", "")),
+                cat=cat_v,
             ), "FixedPrice", "GTC", 1, LOCATION,
             1, shipping, RETURN_POLICY, PAYMENT_POLICY,
             "", store_cat,  # ConditionDescription空（新品には不要）
