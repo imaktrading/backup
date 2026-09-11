@@ -69,9 +69,26 @@ def main(argv=None) -> int:
                     help="フリマアシスト『もっと見る』を手動 click して件数を伸ばす")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--label", default="uniqlo_ut", help="中間スプシ tab (= mercari_<label>)")
+    ap.add_argument("--from-catalog", type=int, default=0, metavar="N",
+                    help="カタログの公式売り切れ UT のコラボ名から N 語を作って検索する "
+                         "(2026-09-11 Advisor POC)")
+    ap.add_argument("--max-keep", type=int, default=0,
+                    help="この件数を集めたら止める (POC 用。0=止めない)")
+    ap.add_argument("--no-tag-read", action="store_true",
+                    help="タグの商品番号を Vision で読まない")
     args = ap.parse_args(argv)
 
-    keywords = args.keywords or DEFAULT_KEYWORDS
+    # ★カタログ起点: 公式売り切れ UT のコラボ名で引く (「公式で買えない新品未使用」を狙う)
+    term_of: dict[str, str] = {}          # 検索語 -> カタログのコラボ名 (目視の材料)
+    if args.from_catalog:
+        import uniqlo_catalog_terms as T  # noqa: PLC0415
+        from scrapers.rakuten_search import is_excluded_category  # noqa: PLC0415
+        terms = T.build_terms(args.from_catalog, excluded=is_excluded_category)
+        keywords = [T.query_for(t["term"]) for t in terms]
+        term_of = {T.query_for(t["term"]): t["term"] for t in terms}
+        _log(f"カタログの売り切れ UT から {len(keywords)} 語")
+    else:
+        keywords = args.keywords or DEFAULT_KEYWORDS
     headless = args.headless and not args.manual
     conds = None if args.allow_used else [MSch.CONDITION_NEW]
     _log(f"開始: 語={len(keywords)} 価格={args.price_min}-{args.price_max} "
@@ -88,13 +105,27 @@ def main(argv=None) -> int:
            "seller_rating": 0, "no_identity": 0, "fetch_fail": 0}
     collected = {"urls": [], "by_keyword": {}}
     try:
-        collected = MSch.collect_multi_keyword_urls(
-            keywords, driver, price_min=args.price_min, price_max=args.price_max,
-            cap_per_keyword=args.cap_per_keyword, manual=args.manual,
-            item_condition_ids=conds, sleep_between_sec=8.0,
-            progress_callback=lambda n, m: _log(f"  収集 {m}"),
-        )
-        urls = collected["urls"]
+        # 語ごとに集める = 各URLを **どの語で見つけたか** を覚えておける (X列の材料)
+        found_by: dict[str, str] = {}
+        urls, by_kw = [], {}
+        for idx, kw in enumerate(keywords):
+            if idx:
+                time.sleep(8.0)
+            r = MSch.collect_search_listing_urls(
+                kw, driver, price_min=args.price_min, price_max=args.price_max,
+                cap=args.cap_per_keyword, manual=args.manual,
+                item_condition_ids=conds,
+                progress_callback=lambda n, m: _log(f"  収集 {m}"))
+            added = 0
+            for u in r["urls"]:
+                if u in found_by:
+                    continue
+                found_by[u] = term_of.get(kw, "")
+                urls.append(u)
+                added += 1
+            by_kw[kw] = added
+            _log(f"  '{kw}': 新規 {added}")
+        collected = {"urls": urls, "by_keyword": by_kw}
         _log(f"収集: {len(urls)} URL / by_keyword={collected['by_keyword']}")
         if args.max_details:
             urls = urls[:args.max_details]
@@ -131,9 +162,21 @@ def main(argv=None) -> int:
             item = dict(detail)
             item["url"] = url
             item["seller_rating_count"] = q.get("rating_count")
+            # 目視の材料 (KEY ではない。 AI列には書かない)
+            item["found_by_term"] = found_by.get(url, "")
+            if not args.no_tag_read:
+                from scrapers.ut_tag_vision import read_tag_number  # noqa: PLC0415
+                tag = read_tag_number(detail.get("image_urls") or [])
+                item["tag_number"] = tag["number"]
+                if tag["error"]:
+                    rej["tag_read_error"] = rej.get("tag_read_error", 0) + 1
             kept.append(item)
             _log(f"  keep {len(kept)}件目 ¥{detail.get('price_jpy')} "
-                 f"[{detail.get('condition')}] {title[:38]}")
+                 f"[{item.get('found_by_term') or '-'}] tag={item.get('tag_number') or '-'} "
+                 f"{title[:32]}")
+            if args.max_keep and len(kept) >= args.max_keep:
+                _log(f"{args.max_keep}件に達したので止めます")
+                break
             time.sleep(1.0)
     finally:
         try:
@@ -159,7 +202,9 @@ def main(argv=None) -> int:
     items = [{"url": k["url"], "title": k.get("title"), "condition": k.get("condition"),
               "price_jpy": k.get("price_jpy"), "image_urls": k.get("image_urls"),
               "description": k.get("description"), "size": k.get("size"),
-              "color": k.get("color")} for k in kept]
+              "color": k.get("color"),
+              "found_by_term": k.get("found_by_term"),     # X
+              "tag_number": k.get("tag_number")} for k in kept]    # Y
     _log(f"[SHEET] {append_mercari_search_items(items, label=args.label)}")
     return 0
 

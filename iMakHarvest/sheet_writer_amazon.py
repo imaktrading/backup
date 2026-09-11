@@ -69,6 +69,9 @@ COL_KEY = 35           # AI: 型番 (canonical 候補) - 2026-06-11 HQ 規約: �
 # 書込み列数 default. A〜AI (1-35) を含む 35 列構成。
 # (= 2026-06-11 HQ 依頼書: Amazon G-shock 型番を AI 列に生で入れる)
 DEFAULT_COLUMN_COUNT = 35
+# UT の目視材料 (2026-09-11)。 N/P/AI (KEY) は使わない
+COL_UT_FOUND_BY = 24      # X
+COL_UT_TAG_NUMBER = 25    # Y
 
 # dedupe 用 ASIN regex
 # /dp/<ASIN>, /gp/product/<ASIN>, /gp/aw/d/<ASIN> をカバー
@@ -190,7 +193,12 @@ def _build_row(item: dict) -> list:
     # V (22): Amazon 月販売数 (= 2026-06-11 user 指示、 生 verbatim 「過去1ヶ月で N 点以上購入」)
     monthly_sales = str(item.get("monthly_sales_text") or "").strip()
     row[COL_MONTHLY_SALES - 1] = monthly_sales
-    # W-AH (23-34) は空欄
+    # X (24) / Y (25): UT の目視材料 (2026-09-11 Advisor POC)。 KEY ではない
+    #   X = その行を見つけた検索語 (= カタログのコラボ名)
+    #   Y = タグ写真から読めた6桁の商品番号 (読めた時だけ)
+    row[COL_UT_FOUND_BY - 1] = str(item.get("found_by_term") or "")
+    row[COL_UT_TAG_NUMBER - 1] = str(item.get("tag_number") or "")
+    # W, Z-AH は空欄
     # AI (35): 型番 (canonical 候補) を 生 verbatim で書込 (= 2026-06-11 HQ 規約)
     raw_model = str(
         item.get("model_number")
