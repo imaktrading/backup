@@ -115,6 +115,26 @@ def _text(h: str) -> str:
     return re.sub(r"\n\s*\n+", "\n", t).strip()
 
 
+# ★UT ではないライン / 企画。タイトルに Tシャツ があっても UT ではない (2026-09-11 実測で35件混ざった)
+NOT_UT_LINES = ("ユニクロ ユー", "ユニクロ：シー", "ユニクロ:シー", "JW アンダーソン",
+                "J.W.アンダーソン", "マメ クロゴウチ", "マルニ", "マリメッコ", "コントワー",
+                "セオリー", "アレキサンダー ワン", "エアリズム", "ヒートテック", "感謝祭",
+                "年末祭", "新年祭", "キャンペーン", "「+S」", "プラスジェイ", "+J", "イネス",
+                "アニヤ・ハインドマーチ", "クレア・ワイト・ケラー", "ルメール", "ヘルムート ラング",
+                "ルームウェア", "オープン", "リニューアル")
+
+
+def is_ut_article(title: str, detail: str) -> bool:
+    """UT の記事か。タイトル/【詳細】に UT、またはタイトルに Tシャツ・スウェット。
+    UT でないライン (ユニクロ ユー / JW アンダーソン 等) と店舗・セールの記事は外す.
+    ★昔の UT コラボ記事はタイトルに「UT」が無い (例「ユニクロ新作コラボTシャツ、
+      ジュリアン・オピー…」) ので、Tシャツ でも拾う。"""
+    if any(w in title for w in NOT_UT_LINES) and "UT" not in title:
+        return False
+    return bool(re.search(r"UT", title) or re.search(r"\bUT\b|「UT」|UT」", detail)
+                or re.search(r"Tシャツ|スウェット", title))
+
+
 def parse_article(nid: str, h: str) -> dict:
     title = htmllib.unescape((re.findall(r"<title>(.*?)</title>", h) or [""])[0])
     title = re.sub(r"\s*-\s*ファッションプレス\s*$", "", title)
@@ -146,11 +166,10 @@ def parse_article(nid: str, h: str) -> dict:
     for w300 in re.findall(rf'data-src="(/img/news/{nid}/w300_[^"]+)"', h):
         photos.append(BASE + w300.replace("/w300_", "/"))
     photos = list(dict.fromkeys(photos))
-    is_ut = bool(re.search(r"UT", title) or re.search(r"\bUT\b|「UT」|UT」", detail)
-                 or re.search(r"Tシャツ|スウェット", title))
     return {
         "id": nid, "url": f"{BASE}/news/{nid}", "title": title, "published": pub,
-        "brands": brands, "is_ut": is_ut, "detail_text": detail, "detail": fields,
+        "brands": brands, "is_ut": is_ut_article(title, detail), "detail_text": detail,
+        "detail": fields,
         "body": body, "figures": figures, "photos": photos,
     }
 

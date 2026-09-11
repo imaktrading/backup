@@ -37,8 +37,12 @@ try:
 except Exception:
     pass
 
-SRC = Path("C:/dev/iMak_data/catalog/fashion_press/uniqlo_articles.json")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scrapers"))
+import fashion_press_uniqlo as F  # noqa: E402  (UT の記事かの判定は1か所)
+
+SRC =Path("C:/dev/iMak_data/catalog/fashion_press/uniqlo_articles.json")
 OUT = Path("C:/dev/iMak_data/catalog/fp_ut_timeline.html")
+GAP = Path("C:/dev/iMak_data/catalog/fashion_press/ut_gap.json")   # tools/fp_ut_gap.py
 USER_DIR = Path("C:/Users/imax2/OneDrive/デスクトップ/ebay/出品関係/UNIQLO UT")
 
 
@@ -60,9 +64,11 @@ def _thumb(url: str) -> str:
 
 def build() -> tuple[str, int]:
     data = json.loads(SRC.read_text(encoding="utf-8"))["articles"]
-    arts = sorted((a for a in data.values() if a.get("is_ut")),
+    arts = sorted((a for a in data.values()
+                   if F.is_ut_article(a.get("title") or "", a.get("detail_text") or "")),
                   key=lambda a: a.get("published") or "", reverse=True)
     mine = user_folders()
+    gap = json.loads(GAP.read_text(encoding="utf-8")) if GAP.exists() else {}
     by_year: dict[str, list] = defaultdict(list)
     for a in arts:
         by_year[(a.get("published") or "????")[:4]].append(a)
@@ -77,13 +83,25 @@ def build() -> tuple[str, int]:
             figs = a.get("figures") or []
             if not figs:   # 本文に写真が無い古い記事は写真一覧から
                 figs = [{"url": u, "caption": ""} for u in (a.get("photos") or [])[:12]]
+            local = a.get("images_local") or {}
+
+            def src(u: str) -> str:
+                # ★倉庫に在れば倉庫の写真を使う (Fashion Press が消しても見える)
+                return Path(local[u]).as_uri() if u in local else u
             imgs = "".join(
-                f'<a href="{e(f["url"])}" target="_blank"><figure>'
-                f'<img loading="lazy" src="{e(_thumb(f["url"]))}" alt="">'
+                f'<a href="{e(src(f["url"]))}" target="_blank"><figure>'
+                f'<img loading="lazy" src="{e(src(f["url"]) if f["url"] in local else _thumb(f["url"]))}" alt="">'
                 f'<figcaption>{e(f.get("caption") or "")}</figcaption></figure></a>'
                 for f in figs)
             badge = (f'<span class="mine">手元にあり: {e(mine[a["id"]])}</span>'
                      if a["id"] in mine else "")
+            g = gap.get(a["id"]) or {}
+            n_cat, want = g.get("catalog_count", 0), g.get("article_patterns")
+            if n_cat == 0:
+                badge += '<span class="none">カタログ 0件 (写真のみ)</span>'
+            else:
+                badge += (f'<span class="cat">カタログ {n_cat}件'
+                          f'{f" / 記事 {want}柄" if want else ""}</span>')
             search = e(" ".join([a.get("title", ""), a.get("detail_text", ""),
                                  " ".join(f.get("caption", "") for f in figs)]).lower())
             parts.append(f"""
@@ -110,6 +128,8 @@ article{{background:#fff;border:1px solid #e3e3e3;border-radius:6px;padding:10px
 article h3{{margin:4px 0;font-size:15px}}
 .meta{{color:#666;font-size:12px}}
 .mine{{background:#e8f4ea;color:#185a2a;border-radius:3px;padding:1px 6px;margin-left:6px}}
+.cat{{background:#e8eef8;color:#1d3f73;border-radius:3px;padding:1px 6px;margin-left:6px}}
+.none{{background:#fbeaea;color:#8a1c1c;border-radius:3px;padding:1px 6px;margin-left:6px}}
 pre{{white-space:pre-wrap;font:12px/1.5 system-ui,sans-serif;background:#f6f6f6;padding:6px;margin:6px 0}}
 .figs{{display:flex;flex-wrap:wrap;gap:6px}}
 .figs a{{text-decoration:none;color:#444}}
