@@ -221,6 +221,26 @@ class TestSave:
         assert U.save(self.ITEMS, res, now="T") == (0, 0) and sent == []
 
 
+class TestColorPicker:
+    """★2026-09-12「同じ柄で色違い何であり得る? 要らない気もする」→ 1色なら欄を出さない.
+
+    実測: 1色 1,958件 / 色違い 56件 (2〜4色)。
+    """
+
+    def test_single_color_is_decided_by_picking_the_card(self):
+        html = U.build_html([{"idx": 2, "row": _row("https://a"), "cands": []}], []).decode("utf-8")
+        assert "class='colwrap' style='display:none'" in html          # 既定は隠れている
+        i = html.index("function fillColors")
+        body = html[i:i + 500]
+        assert "cs.length===1" in body and "wrap.style.display='none'" in body
+        assert "cs.length>1" in body                                   # 色違いの時だけ出す
+
+    def test_multi_color_card_is_marked(self):
+        p = _p("E1", name="ガンダム UT", colors=("BLACK", "PURPLE"))
+        html = U.build_html([{"idx": 2, "row": _row("https://a"), "cands": [p]}], []).decode("utf-8")
+        assert "色違い 2色" in html
+
+
 class TestColorFilter:
     """★2026-09-12「色が明らかに違うのは、外せないかな」."""
 

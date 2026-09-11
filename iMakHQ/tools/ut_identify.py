@@ -454,8 +454,10 @@ def _cards_html(cands, color_jp=""):
             + (" ・公式売切" if p.get("sold_out") else "") + "</div>"
             # ★色の一覧がカタログに無い商品は、選んでも色を決められず出品できない (catalog に確認中)
             + ("" if p["colors"] else "<div class='nm' style='color:#a40'>色がカタログに無い</div>")
+            + (f"<div class='nm' style='color:#06a'>色違い {len(p['colors'])}色</div>"
+               if len(p["colors"]) > 1 else "")
             + "<button class='zb' onclick='zoom(event,this)' title='メルカリの写真と公式画像を全部並べる'>🔍</button></div>")
-    return (f"<div class='one'>カタログ候補 {len(cands)}件 — 柄を見て1つ選び、色を確かめてください</div>"
+    return (f"<div class='one'>カタログ候補 {len(cands)}件 — 柄を見て1つ選んでください</div>"
             f"<div class='vs'>{''.join(cards)}</div>")
 
 
@@ -515,10 +517,15 @@ function zclose(){document.getElementById('zov').classList.remove('on');}
 /* サブ画像を押すと、そのカードの大きい画像を入れ替える (カードは選ばない) */
 function swapImg(ev,t){ev.stopPropagation();var m=t.closest('.v').querySelector('img.main');if(m)m.src=t.src;}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')zclose();});
-function fillColors(box,v){var sel=box.querySelector('select.col');var cs=[];
+/* ★2026-09-12 ユーザー「同じ柄で色違いなんてあり得る? 要らない気もする」:
+   1色の商品が 1,958 / 色違いがあるのは 56 (実測)。1色なら押した時点で決め、
+   色違いがある商品だけ選ぶ欄を出す (メルカリの色に合う色は最初から選ぶ) */
+function fillColors(box,v){var sel=box.querySelector('select.col');var wrap=box.querySelector('.colwrap');var cs=[];
   try{cs=JSON.parse(v.dataset.colors||'[]');}catch(e){}
+  if(cs.length===1){sel.innerHTML="<option selected>"+cs[0]+"</option>";wrap.style.display='none';return;}
   sel.innerHTML="<option value=''>色を選ぶ</option>"+cs.map(function(c){
-    return "<option"+(c===v.dataset.defcolor?" selected":"")+">"+c+"</option>";}).join('');}
+    return "<option"+(c===v.dataset.defcolor?" selected":"")+">"+c+"</option>";}).join('');
+  wrap.style.display=cs.length>1?'':'none';}
 function pickV(el){var box=el.closest('.it');
   box.querySelectorAll('.v').forEach(function(v){v.classList.remove('sel');});
   el.classList.add('sel');box.dataset.pid=el.dataset.pid;fillColors(box,el);
@@ -573,7 +580,8 @@ def build_html(items, catalog):
     parts = ["<!doctype html><meta charset='utf-8'><title>UT 目視特定</title>",
              f"<style>{_CSS}</style>",
              "<h1>メルカリの新品 UT → カタログの商品を選ぶ</h1>",
-             f"<div class='sum'>全 {len(items)}件。写真と同じ柄の商品を選び、<b>色を確かめて</b>「この商品」。"
+             f"<div class='sum'>全 {len(items)}件。写真と同じ柄の商品を選んで「この商品」"
+             "(同じ柄で色違いがある商品だけ、色を選ぶ欄が出ます)。"
              "候補に無ければ検索欄に作品名・キャラ名・商品番号(6桁)。"
              "<b>確信が無ければ選ばない</b> (違う柄を出すと別デザイン発送になります)。</div>"]
     for it in items:
@@ -607,7 +615,8 @@ def build_html(items, catalog):
             + f"<div class='vslot'>{_cards_html(it['cands'], r[C_COLOR])}</div>"
             "<div class='act'>検索 <input class='q' placeholder='作品名 / キャラ / 6桁番号' "
             "onchange='lookup(this)'>"
-            "色 <select class='col'><option value=''>先に商品を選ぶ</option></select>"
+            "<span class='colwrap' style='display:none'>色違いあり → 色 "
+            "<select class='col'><option value=''></option></select></span>"
             "<button class='go' data-a='go' onclick='setAct(this)'>この商品</button>"
             "<button class='skip' data-a='skip' onclick='setAct(this)' "
             "title='商品と色は合っているが、今回は出さない (高い / 出品者が不安)'>一致・見送り</button>"
