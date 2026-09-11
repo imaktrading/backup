@@ -198,6 +198,20 @@ def image_for(p, color_name=""):
     return imgs[0] if imgs else ""
 
 
+def gallery(p, color_name=""):
+    """その商品の公式画像を全部 (その色の表 → サブ画像 → 他の色の表)。色見本 (chip) は除く。純関数。
+
+    ★2026-09-12 ユーザー「Tシャツはバックプリントもあるから、画像一枚だけだと見逃しちゃうね」。
+      背面がサブ画像のどれに入っているかは商品ごとに違う (sub3/sub6/sub11…) ので、
+      決め打ちせず全部並べる。
+    """
+    imgs = [u for u in (p.get("images") or []) if "/chip/" not in u]
+    main = image_for(p, color_name)
+    subs = [u for u in imgs if "/sub/" in u]
+    others = [u for u in imgs if u != main and u not in subs]
+    return ([main] if main else []) + subs + others
+
+
 def rank_candidates(text, color_jp, catalog, hint_kw="", tag_no="", limit=MAX_CANDS):
     """行の文字 → カタログ候補 (点数順)。**並べるだけで確定はしない**。純関数。
 
@@ -330,6 +344,7 @@ def parse_result(data):
 
 # ── カタログ ────────────────────────────────────────────────────────
 _CATALOG = None
+KIDS_GENDERS = {"KIDS", "BABY"}      # 候補に出さない (キッズは出品対象外)
 
 
 def load_catalog(db=DB_PATH):
@@ -347,6 +362,10 @@ def load_catalog(db=DB_PATH):
         except ValueError:
             s = {}
         if s.get("not_tee"):
+            continue
+        # ★2026-09-12 ユーザー「候補にキッズモデルの写真がある。キッズはそもそも対象外」。
+        #   抽出くんもキッズは集めない (skill harvest-targeting)。候補に出すと取り違えの元
+        if (s.get("gender") or "").strip().upper() in KIDS_GENDERS:
             continue
         try:
             imgs = json.loads(images or "[]") or s.get("image_urls") or []
@@ -379,20 +398,26 @@ def _cards_html(cands, color_jp=""):
     for p in cands:
         dc = pick_color(p["colors"], color_jp)
         img = image_for(p, dc)
+        gal = [prc._proxied(u) for u in gallery(p, dc)]
+        # サブ画像 (背面・着用) を小さく並べる。押すと上の大きい画像が入れ替わる (カードは選ばない)
+        thumbs = "".join(f"<img src='{_html.escape(u)}' loading='lazy' onerror='this.remove()' "
+                         f"onclick='swapImg(event,this)'>" for u in gal[1:7])
         cards.append(
             f"<div class='v' data-pid=\"{_html.escape(p['pid'])}\" "
             f"data-colors=\"{_html.escape(json.dumps([c['name'] for c in p['colors']], ensure_ascii=False))}\" "
+            f"data-imgs=\"{_html.escape(json.dumps(gal))}\" "
             f"data-defcolor=\"{_html.escape(dc)}\" onclick='pickV(this)'>"
-            + (f"<img src='{_html.escape(prc._proxied(img))}' loading='lazy' onerror='imgFail(this)'>"
+            + (f"<img class='main' src='{_html.escape(prc._proxied(img))}' loading='lazy' onerror='imgFail(this)'>"
                if img else "<div class='noimg'>画像なし</div>")
+            + (f"<div class='th'>{thumbs}</div>" if thumbs else "")
+            + (f"<div class='nm'>画像 {len(gal)}枚 (🔍で全部)</div>" if len(gal) > 1 else "")
             + f"<div class='pid'>{_html.escape(p['pid'])}</div>"
             + f"<div class='nm'>{_html.escape(p['name'][:22])}</div>"
             + f"<div class='nm'>{_html.escape((p['collab'] or p['character_family'])[:18])}"
             + (" ・公式売切" if p.get("sold_out") else "") + "</div>"
             # ★色の一覧がカタログに無い商品は、選んでも色を決められず出品できない (catalog に確認中)
             + ("" if p["colors"] else "<div class='nm' style='color:#a40'>色がカタログに無い</div>")
-            + f"<button class='zb' data-img=\"{_html.escape(prc._proxied(img))}\" "
-              f"onclick='zoom(event,this)'>🔍</button></div>")
+            + "<button class='zb' onclick='zoom(event,this)' title='メルカリの写真と公式画像を全部並べる'>🔍</button></div>")
     return (f"<div class='one'>カタログ候補 {len(cands)}件 — 柄を見て1つ選び、色を確かめてください</div>"
             f"<div class='vs'>{''.join(cards)}</div>")
 
@@ -404,13 +429,15 @@ h1{font-size:16px;margin:0 0 6px}.sum{font-size:12px;color:#555;margin-bottom:10
 .it.done{opacity:.45}
 .ph{display:flex;flex-direction:column;gap:4px}
 .ph img{width:170px;height:220px;object-fit:contain;background:#f4f4f4;border:1px solid #eee}
-.ph .sm{display:flex;gap:4px}.ph .sm img{width:54px;height:70px}
+.ph .sm{display:flex;flex-wrap:wrap;gap:3px;width:172px}.ph .sm img{width:40px;height:52px;object-fit:cover}
 .body{flex:1;min-width:0}.t{font-size:13px;font-weight:bold;word-break:break-all}
 .meta{font-size:11px;color:#666;margin:2px 0 6px}
 .vs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
 .v{position:relative;border:1px solid #ccc;border-radius:4px;padding:4px;cursor:pointer;text-align:center;font-size:10px;width:118px}
 .v.sel{border-color:#0a7;background:#e7f7f1;box-shadow:0 0 0 1px #0a7 inset}
-.v img,.noimg{width:106px;height:140px;object-fit:contain;background:#f7f7f7}
+.v img.main,.noimg{width:106px;height:140px;object-fit:contain;background:#f7f7f7}
+.v .th{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin:2px 0}
+.v .th img{width:33px;height:44px;object-fit:cover;border:1px solid #ddd;cursor:zoom-in}
 .noimg{display:flex;align-items:center;justify-content:center;color:#999;border:1px dashed #ccc}
 .v .pid{font-weight:bold}.v .nm{color:#666}
 .v .zb{position:absolute;top:2px;right:2px;font-size:11px;padding:0 4px}
@@ -423,19 +450,33 @@ button.ng{border-color:#c33;color:#900}button.ng.sel{background:#c33;color:#fff}
 button.hold.sel{background:#888;color:#fff}
 button.skip{border-color:#06a;color:#06a}button.skip.sel{background:#06a;color:#fff}
 input.q{font-size:12px;width:170px}select{font-size:12px}
-#zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;gap:20px}
-#zov.on{display:flex}#zov img{max-height:84vh;max-width:44vw;object-fit:contain;background:#fff}
+#zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:99;justify-content:center;gap:16px;padding:10px}
+#zov.on{display:flex}
+#zov .zcol{width:46vw;height:94vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+#zov .zcap{color:#fff;font-size:13px;position:sticky;top:0;background:#222;padding:4px}
+#zov .zcol img{width:100%;object-fit:contain;background:#fff}
+#zov .zx{position:fixed;top:8px;right:12px;font-size:14px;z-index:100}
+.ph .zall{font-size:11px}
 #go{position:fixed;right:14px;bottom:14px;font-size:15px;padding:10px 20px;background:#0a7;color:#fff;border:none;border-radius:6px}
 """
 
 _JS = """
 function imgFail(el){var d=document.createElement('div');d.className='noimg';d.textContent='画像なし';
   if(el.parentNode) el.parentNode.replaceChild(d,el);}
+/* 🔍 = メルカリの写真 (左) と、その候補の公式画像 (右) を **全部** 縦に並べて見比べる。
+   ★2026-09-12: バックプリントは表の画像1枚では見えない。背面がどのサブ画像かは商品ごとに違う */
+function _col(id,cap,urls){var c=document.getElementById(id);
+  c.innerHTML="<div class='zcap'>"+cap+" ("+urls.length+"枚)</div>"+urls.map(function(u){
+    return "<img src='"+u+"' loading='lazy' onerror='this.remove()'>";}).join('');}
 function zoom(ev,el){ev.preventDefault();ev.stopPropagation();var box=el.closest('.it');
-  var o=document.getElementById('zov');o.querySelector('#zl').src=box.dataset.photo||'';
-  o.querySelector('#zr').src=el.dataset.img||((box.querySelector('.v.sel .zb')||{dataset:{}}).dataset.img)||'';
-  o.classList.add('on');}
+  var v=el.closest('.v')||box.querySelector('.v.sel')||box.querySelector('.v');
+  var ph=[],ca=[];try{ph=JSON.parse(box.dataset.photos||'[]');}catch(e){}
+  try{ca=v?JSON.parse(v.dataset.imgs||'[]'):[];}catch(e){}
+  _col('zl','メルカリの写真',ph);_col('zr','カタログ '+(v?v.dataset.pid:'(候補なし)'),ca);
+  document.getElementById('zov').classList.add('on');}
 function zclose(){document.getElementById('zov').classList.remove('on');}
+/* サブ画像を押すと、そのカードの大きい画像を入れ替える (カードは選ばない) */
+function swapImg(ev,t){ev.stopPropagation();var m=t.closest('.v').querySelector('img.main');if(m)m.src=t.src;}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')zclose();});
 function fillColors(box,v){var sel=box.querySelector('select.col');var cs=[];
   try{cs=JSON.parse(v.dataset.colors||'[]');}catch(e){}
@@ -502,16 +543,20 @@ def build_html(items, catalog):
         r = it["row"]
         photos = [u for u in (r[C_PHOTOS] or "").split("|") if u.strip()]
         main = prc._proxied(photos[0]) if photos else ""
+        # メルカリの写真は全部 (背面の写真が2枚目以降にあることが多い)
         sm = "".join(f"<a href='{_html.escape(r[C_URL])}' target='_blank'>"
                      f"<img src='{_html.escape(prc._proxied(u))}' loading='lazy' onerror='imgFail(this)'></a>"
-                     for u in photos[1:4])
+                     for u in photos[1:10])
         ph = (f"<div class='ph'><a href='{_html.escape(r[C_URL])}' target='_blank'>"
               f"<img src='{_html.escape(main)}' loading='lazy' onerror='imgFail(this)'></a>"
-              f"<div class='sm'>{sm}</div></div>")
+              f"<div class='sm'>{sm}</div>"
+              "<button class='zall' onclick='zoom(event,this)'>🔍 全部の写真を並べて見比べる</button></div>")
+        photos_json = json.dumps([prc._proxied(u) for u in photos[:10]])
         price = f"¥{int(r[C_PRICE]):,}" if str(r[C_PRICE]).isdigit() else (r[C_PRICE] or "")
         parts.append(
             f"<div class='it' data-idx='{it['idx']}' data-pid='' data-color=\"{_html.escape(r[C_COLOR])}\" "
-            f"data-photo=\"{_html.escape(main)}\">{ph}<div class='body'>"
+            f"data-photo=\"{_html.escape(main)}\" data-photos=\"{_html.escape(photos_json)}\">"
+            f"{ph}<div class='body'>"
             f"<div class='t'>{_html.escape((r[C_TITLE] or '')[:110])}</div>"
             f"<div class='meta'>{_html.escape(price)} ｜ 色 {_html.escape(r[C_COLOR] or '?')} ｜ "
             f"サイズ {_html.escape(r[C_SIZE] or '?')}"
@@ -535,7 +580,9 @@ def build_html(items, catalog):
             + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in SKIP_REASONS)
             + "</optgroup></select><button class='hold' data-a='hold' onclick='setAct(this)'>保留</button>"
             "</div></div></div>")
-    parts.append("<div id='zov' onclick='zclose()'><img id='zl' alt=''><img id='zr' alt=''></div>")
+    parts.append("<div id='zov' onclick='if(event.target===this)zclose()'>"
+                 "<div class='zcol' id='zl'></div><div class='zcol' id='zr'></div>"
+                 "<button class='zx' onclick='zclose()'>× 閉じる (Esc)</button></div>")
     parts.append(f"<button id='go' onclick='go()'>確定</button><script>{save_js}{_JS}</script>")
     return "".join(parts).encode("utf-8")
 

@@ -221,6 +221,45 @@ class TestSave:
         assert U.save(self.ITEMS, res, now="T") == (0, 0) and sent == []
 
 
+class TestNoKids:
+    def test_kids_and_baby_are_not_candidates(self, tmp_path):
+        """★2026-09-12「キッズはそもそも対象外だから外さないとね」."""
+        import sqlite3
+        db = tmp_path / "p.sqlite"
+        con = sqlite3.connect(db)
+        con.execute("create table products (category, product_id, name, specs, images)")
+        for pid, g in (("M", "MEN"), ("K", "KIDS"), ("B", "BABY"), ("GK", "kids"), ("U", "UNISEX")):
+            con.execute("insert into products values ('uniqlo_ut', ?, 'ポケモン UT', ?, '[]')",
+                        (pid, json.dumps({"gender": g, "collab": "ポケモン"})))
+        con.commit()
+        con.close()
+        got = {p["pid"] for p in U.load_catalog(str(db))}
+        assert got == {"M", "U"}
+
+
+class TestGallery:
+    """★2026-09-12「バックプリントもあるから、画像一枚だけだと見逃しちゃう」."""
+
+    def test_all_images_color_main_first_no_chip(self):
+        p = _p("E1", l1="482770", colors=("WHITE", "BLACK"))
+        base = "https://image.uniqlo.com/UQ/ST3/jp/imagesgoods/482770/"
+        p["images"] = [base + "item/jpgoods_00_482770_3x4.jpg", base + "item/jpgoods_01_482770_3x4.jpg",
+                       base + "sub/jpgoods_482770_sub3_3x4.jpg", base + "sub/goods_482770_sub14_3x4.jpg",
+                       base + "chip/goods_00_482770_chip.jpg"]
+        g = U.gallery(p, "BLACK")
+        assert g[0].endswith("jpgoods_01_482770_3x4.jpg")          # 選んだ色の表
+        assert any("sub14" in u for u in g) and not any("/chip/" in u for u in g)
+        assert len(g) == 4
+
+    def test_page_carries_every_photo_for_side_by_side(self):
+        p = _p("E1", name="ポケモン UT")
+        p["images"] = ["https://x/item/a.jpg", "https://x/sub/b.jpg", "https://x/sub/c.jpg"]
+        it = {"idx": 2, "row": _row("https://a"), "cands": [p]}
+        html = U.build_html([it], []).decode("utf-8")
+        assert "data-imgs=" in html and "data-photos=" in html
+        assert "swapImg(" in html and "全部の写真を並べて見比べる" in html
+
+
 class TestPage:
     def test_page_builds_and_keeps_input_on_send_failure(self):
         it = {"idx": 2, "row": _row("https://a", title="UNIQLO UT ポケモン"), "cands": [_p("E1", name="ポケモン UT")]}
