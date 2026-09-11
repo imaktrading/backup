@@ -63,6 +63,15 @@ REM         Placed before step 1 because step 1 can jump to :done on failure.
 echo [pmbo] %date% %time% >> "%LOG%"
 python -u -X utf8 mirror_promo_bestoffer.py --write >> "%LOG%" 2>&1
 
+REM --- 0c) write the canonical KEY on UT rows that are already listed.
+REM         2026-09-12: the dedupe tool blocks double listings by KEY. UT rows are
+REM         identified by eye (ut_identify) but had no KEY, so the same shirt in the
+REM         same colour and size could be listed twice. Only rows with an itemID and
+REM         a decided colour/size get a KEY (never a row that is not listed yet:
+REM         a KEY on an unlisted row reads as "already listed" and blocks it forever).
+echo [ut-key] %date% %time% >> "%LOG%"
+python -u ut_key_backfill.py --write >> "%LOG%" 2>&1
+
 REM --- 1) zero-backup listings (a listing whose only supplier died = instant death)
 for %%i in (1 2 3) do (
     echo [try %%i] zero-backup %date% %time% >> "%LOG%"
