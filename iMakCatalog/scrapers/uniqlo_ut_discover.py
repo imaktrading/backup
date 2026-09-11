@@ -88,6 +88,10 @@ UA = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.
 _PID = re.compile(r"(?:/products/|products%2F)(E\d{6}-\d{3})")
 # ★UT の判定は公式のパンくず。名前で見ると キッズの「〜 UT」が入る
 UT_CATEGORY = "ut graphic tees"
+# ★category だけでは足りない。公式は **無地の手袋・ストール・アートブック** まで
+#   "ut graphic tees" / subcategory "others" / class "accessories" に置いている
+#   (2026-09-11 実測: 探索で拾った 602件のうち 194件がこれ)。**class が tops の物だけ**
+UT_CLASS = "tops"
 KID = {"KIDS", "BABY"}
 SLEEP_API = 0.25          # 公式 API (並行して叩くので短め)
 SLEEP_SEARCH = 8.0        # 検索エンジン (連投すると閉める)
@@ -199,8 +203,14 @@ def from_neighbors(seeds: set[str], known: set[str], st: dict, on_found) -> set[
             while miss < WALK_MISS:
                 n += step
                 pid = f"E{n:06d}-000"
-                if pid in known or pid in probed:
+                if pid in known:
                     miss = 0                      # 既に知っている = まだ塊の中
+                    continue
+                if pid in probed:
+                    # ★叩き済みで UT でなかった = 空振り。叩き直さずに数える
+                    #   (以前は「塊の中」扱いにしていて、再実行のたびに 6つ先まで
+                    #    叩き直していた。2026-09-11 再開時に起点1件あたり12回 余計に叩いた)
+                    miss += 1
                     continue
                 probed.add(pid)
                 d = detail(pid)
@@ -272,8 +282,10 @@ def detail(pid: str) -> dict | None:
     except Exception:
         _DETAIL_CACHE[pid] = None
         return None
-    cat = ((r.get("breadcrumbs") or {}).get("category") or {}).get("name") or ""
-    if cat != UT_CATEGORY:
+    bc = r.get("breadcrumbs") or {}
+    cat = (bc.get("category") or {}).get("name") or ""
+    cls = (bc.get("class") or {}).get("name") or ""
+    if cat != UT_CATEGORY or cls != UT_CLASS:
         _DETAIL_CACHE[pid] = None
         return None
     if (r.get("genderName") or "").strip().upper() in KID:
