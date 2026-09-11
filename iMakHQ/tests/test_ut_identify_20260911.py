@@ -221,6 +221,31 @@ class TestSave:
         assert U.save(self.ITEMS, res, now="T") == (0, 0) and sent == []
 
 
+class TestColorFilter:
+    """★2026-09-12「色が明らかに違うのは、外せないかな」."""
+
+    def test_clearly_different_is_hidden(self):
+        assert not U.color_ok(_p("A", colors=("WHITE",)), "ブラック")
+        assert U.color_ok(_p("A", colors=("WHITE", "BLACK")), "ブラック")
+
+    def test_near_colors_are_kept(self):
+        """出品者の書き方の揺れで正解を隠さない."""
+        assert U.color_ok(_p("A", colors=("OFF WHITE",)), "ホワイト")
+        assert U.color_ok(_p("A", colors=("NATURAL",)), "ホワイト")
+        assert U.color_ok(_p("A", colors=("DARK GRAY",)), "グレー")
+        assert U.color_ok(_p("A", colors=("BLUE",)), "ネイビー")
+
+    def test_unknown_is_kept(self):
+        assert U.color_ok(_p("A", colors=("WHITE",)), "")
+        assert U.color_ok(_p("A", colors=("WHITE",)), "マルチカラー")
+        assert U.color_ok(_p("A", colors=()), "ブラック")
+        assert U.color_ok(_p("A", colors=("WHITE", "Other")), "ブラック")    # 柄物は判断できない
+
+    def test_hidden_count_is_shown(self):
+        it = {"idx": 2, "row": _row("https://a"), "cands": [], "hidden_color": 3}
+        assert "3件を隠しました" in U.build_html([it], []).decode("utf-8")
+
+
 class TestNoKids:
     def test_kids_and_baby_are_not_candidates(self, tmp_path):
         """★2026-09-12「キッズはそもそも対象外だから外さないとね」."""

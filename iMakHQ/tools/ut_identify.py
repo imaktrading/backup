@@ -174,6 +174,43 @@ def color_word(jp):
     return ""
 
 
+# 「明らかに違う」の判定に使う近い色の束 (★2026-09-12 ユーザー「色が明らかに違うのは、外せないかな」)。
+#   出品者の書き方の揺れ (白 / オフホワイト / ナチュラル 等) で正解を隠さないよう、近い色は同じ扱い
+_COLOR_NEAR = {
+    "WHITE": ("WHITE", "OFF WHITE", "NATURAL", "CREAM", "IVORY"),
+    "OFF WHITE": ("WHITE", "OFF WHITE", "NATURAL", "CREAM", "IVORY"),
+    "NATURAL": ("WHITE", "OFF WHITE", "NATURAL", "CREAM", "IVORY", "BEIGE"),
+    "CREAM": ("WHITE", "OFF WHITE", "NATURAL", "CREAM", "IVORY", "BEIGE", "YELLOW"),
+    "BLACK": ("BLACK",),
+    "GRAY": ("GRAY", "GREY", "CHARCOAL"),
+    "NAVY": ("NAVY", "BLUE"),
+    "BLUE": ("BLUE", "NAVY"),
+    "RED": ("RED", "WINE"),
+    "GREEN": ("GREEN", "OLIVE"),
+    "YELLOW": ("YELLOW", "CREAM"),
+    "PINK": ("PINK", "RED"),
+    "BEIGE": ("BEIGE", "NATURAL", "CREAM", "BROWN"),
+    "BROWN": ("BROWN", "BEIGE"),
+    "PURPLE": ("PURPLE",),
+    "ORANGE": ("ORANGE",),
+}
+
+
+def color_ok(p, color_jp):
+    """メルカリの色と、その商品の色の一覧が **明らかに違わない** か。純関数。
+
+    判らない時は True (隠さない): メルカリの色が空 / 知らない色 / 商品の色の一覧が無い。
+    """
+    w = color_word(color_jp)
+    near = _COLOR_NEAR.get(w)
+    names = [c["name"].upper() for c in (p.get("colors") or [])]
+    if not near or not names:
+        return True
+    if any(name in ("OTHER", "MULTI", "MULTICOLOR") for name in names):
+        return True                      # 柄物など、色名で判断できない商品は隠さない
+    return any(n in name for name in names for n in near)
+
+
 def pick_color(colors, jp):
     """カタログの色一覧からメルカリの色に合う名前 (無ければ "")。純関数。"""
     w = color_word(jp)
@@ -245,7 +282,7 @@ def rank_candidates(text, color_jp, catalog, hint_kw="", tag_no="", limit=MAX_CA
             sc += 2
         out.append((sc, p))
     out.sort(key=lambda x: (-x[0], x[1]["pid"]))
-    return [p for _sc, p in out[:limit]]
+    return [p for _sc, p in (out[:limit] if limit else out)]        # limit=0 = 全部
 
 
 def search_catalog(q, catalog, limit=MAX_CANDS):
@@ -564,6 +601,9 @@ def build_html(items, catalog):
             + (f" ｜ タグの番号 <b>{_html.escape(r[C_TAG])}</b>" if r[C_TAG] else "")
             + f" ｜ {_html.escape((r[C_DESC] or '')[:80])}</div>"
             + (f"<div class='warn'>⚠ {_html.escape(it['warn'])}</div>" if it.get("warn") else "")
+            + (f"<div class='nm' style='font-size:11px;color:#666'>色が明らかに違う候補 "
+               f"{it['hidden_color']}件を隠しました (出品者の色の書き違いなら 検索欄で全部出ます)</div>"
+               if it.get("hidden_color") else "")
             + f"<div class='vslot'>{_cards_html(it['cands'], r[C_COLOR])}</div>"
             "<div class='act'>検索 <input class='q' placeholder='作品名 / キャラ / 6桁番号' "
             "onchange='lookup(this)'>"
@@ -631,9 +671,12 @@ def load_items(limit=DEFAULT_LIMIT):
     items = []
     for i, r in rows[:limit] if limit else rows:
         text = " ".join([r[C_TITLE], r[C_DESC]])
-        items.append({"idx": i, "row": r,
-                      "cands": rank_candidates(text, r[C_COLOR], catalog,
-                                               hint_kw=r[C_KW], tag_no=r[C_TAG]),
+        allc = rank_candidates(text, r[C_COLOR], catalog, hint_kw=r[C_KW], tag_no=r[C_TAG],
+                               limit=0)
+        # 色が明らかに違う候補は隠す (件数は画面に出す。検索欄では色で絞らない)
+        keep = [p for p in allc if color_ok(p, r[C_COLOR])]
+        items.append({"idx": i, "row": r, "cands": keep[:MAX_CANDS],
+                      "hidden_color": len(allc) - len(keep),
                       "warn": tag_conflict(r[C_TAG], r[C_KW], catalog)})
     return items, len(rows)
 
