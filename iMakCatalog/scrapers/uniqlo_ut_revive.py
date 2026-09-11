@@ -162,7 +162,10 @@ def images_of(pid: str) -> list[str]:
 
 def _pdp_product(h: str, pid: str) -> dict | None:
     """Wayback の商品ページに埋まっている product JSON を取り出す."""
+    # ★2022年頃のページは `productEntity`、それ以降は `pdpEntity` (2026-09-11 実測)
     i = h.find('"pdpEntity"')
+    if i < 0:
+        i = h.find('"productEntity"')
     if i < 0:
         return None
     j = h.find('"product":', i)
@@ -241,6 +244,42 @@ def _fetch_one(pid: str) -> tuple[str, dict | None, str, str, list[str], str]:
         imgs = E.all_images(d.get("images") or {}) if d.get("images") else images_of(pid)
     time.sleep(SLEEP)
     return pid, d, src, raw, imgs, err
+
+
+def run_from_raw(commit: bool) -> None:
+    """保管してある Wayback のページ (`revive_<pid>`) を **読み直すだけ** で起こす.
+
+    ★2026-09-11: 以前の取り方は "name" を正規表現で拾い、最初の空の name を掴んで
+      本物の UT を「UT ではない」と捨てていた。ページは保管してあるので取り直さない。
+    """
+    db = sqlite3.connect(str(api._DB_PATH), timeout=120)
+    db.row_factory = sqlite3.Row
+    have = {x[0] for x in db.execute(
+        "SELECT product_id FROM products WHERE category IN ('uniqlo_ut','gu')")}
+    files = sorted(f for f in os.listdir(RAW) if f.startswith("revive_"))
+    todo = [(f, f[len("revive_"):len("revive_") + 11]) for f in files]
+    todo = [(f, p) for f, p in todo if p not in have]
+    print(f"  保管ページ {len(files)}件 / catalog に在る {len(files) - len(todo)}件 は飛ばす")
+    print(f"=== 保管ページから起こす ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(todo)}件 ===")
+    now = datetime.now().isoformat(timespec="seconds")
+    stat, n = Counter(), 0
+    for f, pid in todo:
+        with gzip.open(RAW / f, "rb") as fh:
+            h = fh.read().decode("utf-8", "ignore")
+        d = _pdp_product(h, pid)
+        if not d:
+            stat["ページに商品の JSON が無い"] += 1
+            continue
+        m = re.search(r"/web/(\d{14})", h)
+        src = f"wayback_{m.group(1)}" if m else "wayback_saved"
+        imgs = E.all_images(d.get("images") or {}) if (d.get("images") and is_ut(d)) else []
+        _save_one(db, pid, d, src, "", imgs, "", now, commit, stat)
+        n += stat.pop("_saved", 0)
+    db.close()
+    print("")
+    for k, v in stat.most_common():
+        print(f"  {k:24s} {v}")
+    print(f"\n{'適用' if commit else '(dry-run — --commit で適用)'} {n}件")
 
 
 def run(commit: bool, limit: int | None, pids_file: str | None = None,
@@ -335,9 +374,14 @@ def main() -> None:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--pids-file", help="外部から貰った品番リスト (CSV/1行1品番)。"
                     "このリストだけを 公式→Wayback の順で救済する")
-    ap.add_argument("--workers", type=int, default=4, help="同時に取りに行く本数")
+    ap.add_argument("--workers", type=int, default=2, help="同時に取りに行く本数 (Wayback は2本まで)")
+    ap.add_argument("--from-raw", action="store_true",
+                    help="保管してある Wayback のページを読み直すだけで起こす (取りに行かない)")
     a = ap.parse_args()
-    run(a.commit, a.limit, a.pids_file, a.workers)
+    if a.from_raw:
+        run_from_raw(a.commit)
+    else:
+        run(a.commit, a.limit, a.pids_file, a.workers)
 
 
 if __name__ == "__main__":
