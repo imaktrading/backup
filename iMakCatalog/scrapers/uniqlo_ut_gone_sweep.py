@@ -137,6 +137,78 @@ def run(limit: int | None, workers: int, revive: bool, commit: bool,
         R.run(commit, None, str(CAND), workers=2)
 
 
+NB_STATE = Path("C:/dev/iMak_data/catalog/_ut_gone_neighbors_state.json")
+NB_CAND = Path("C:/dev/iMak_data/catalog/_ut_gone_neighbor_candidates.txt")
+WALK_MISS = 6
+
+
+def run_neighbors(workers: int) -> None:
+    """UT の品番の **前後** を歩く。コラボの柄は連番で並ぶ (例 E481118/119/120 が鬼滅)。
+
+    ★判定はレビュー API なので **廃盤の番号も見える** (探索の隣歩きは detail API で、
+      廃盤の隣を全部「空振り」にしていた)。キッズも同じコラボの塊なので歩き続ける。
+    ★判定済みは叩き直さない (本判定の state と、この歩きの state の両方を見る)。
+    """
+    db = sqlite3.connect(str(api._DB_PATH), timeout=120)
+    rows = db.execute("SELECT product_id, specs FROM products WHERE category='uniqlo_ut'").fetchall()
+    db.close()
+    have = {p for p, _ in rows}
+    main_checked = load_state()["checked"]
+    nb = json.loads(NB_STATE.read_text(encoding="utf-8")) if NB_STATE.exists() else {"checked": {}}
+    known = dict(main_checked)
+    known.update(nb["checked"])
+    member = {"ut", "kids"}                      # 塊の中とみなす判定
+    seeds = sorted({int(p[1:7]) for p in have if p.endswith("-000")}
+                   | {int(p[1:7]) for p, v in known.items() if v in member})
+    print(f"  起点 {len(seeds):,}件 / 判定済み {len(known):,}件 は叩き直さない", flush=True)
+
+    def verdict(pid: str) -> str:
+        if pid in have:
+            return "ut"
+        if pid in known:
+            return known[pid]
+        v = classify(pid)
+        nb["checked"][pid] = v
+        known[pid] = v
+        return v
+
+    queue, seen, done, found = list(seeds), set(seeds), 0, 0
+    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        while queue:
+            batch, queue = queue[:workers], queue[workers:]
+            # 起点ごとに前後を歩く (起点の中は順番、起点どうしは並行)
+            def walk(n0: int) -> list[int]:
+                hits = []
+                for step in (-1, 1):
+                    miss, n = 0, n0
+                    while miss < WALK_MISS and 100000 <= n + step <= 999999:
+                        n += step
+                        v = verdict(f"E{n:06d}-000")
+                        if v in member:
+                            miss = 0
+                            if v == "ut" and f"E{n:06d}-000" not in have:
+                                hits.append(n)
+                        else:
+                            miss += 1
+                return hits
+            for hits in ex.map(walk, batch):
+                for n in hits:
+                    found += 1
+                    if n not in seen:            # 見つけた先からも歩く
+                        seen.add(n)
+                        queue.append(n)
+            done += len(batch)
+            if done % 100 < workers:
+                NB_STATE.write_text(json.dumps(nb, ensure_ascii=False), encoding="utf-8")
+                cand = sorted(p for p, v in nb["checked"].items() if v == "ut" and p not in have)
+                NB_CAND.write_text("\n".join(cand), encoding="ascii")
+                print(f"    起点 {done:,} 済み / 残り {len(queue):,} / 新しい UT {len(cand):,}", flush=True)
+    NB_STATE.write_text(json.dumps(nb, ensure_ascii=False), encoding="utf-8")
+    cand = sorted(p for p, v in nb["checked"].items() if v == "ut" and p not in have)
+    NB_CAND.write_text("\n".join(cand), encoding="ascii")
+    print(f"\n  前後で見つけた大人の UT (catalog に無い): {len(cand):,}件 → {NB_CAND}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int)
@@ -144,8 +216,13 @@ def main() -> None:
     ap.add_argument("--revive", action="store_true", help="判定のあと Wayback で起こす")
     ap.add_argument("--commit", action="store_true", help="--revive の結果を保存する")
     ap.add_argument("--extra", action="append", help="足す品番リスト (Google で拾った分など)")
+    ap.add_argument("--neighbors", action="store_true",
+                    help="UT の前後の品番を歩く (レビュー API で判定。廃盤も見える)")
     a = ap.parse_args()
-    run(a.limit, a.workers, a.revive, a.commit, a.extra)
+    if a.neighbors:
+        run_neighbors(a.workers)
+    else:
+        run(a.limit, a.workers, a.revive, a.commit, a.extra)
 
 
 if __name__ == "__main__":

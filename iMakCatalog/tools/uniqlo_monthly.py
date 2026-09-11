@@ -52,6 +52,15 @@ STEPS = [
     # ★公式の検索は「今買えるもの」しか返さない。**買えないものが仕入れ対象**なので、
     #   Wayback と 隣の番号から品番を拾う (2026-09-10 新設)
     ("買えない UT を掘る",   ["scrapers/uniqlo_ut_discover.py", "--commit"]),
+    # ★廃盤 (公式 detail が 404) の UT はレビュー API で判定して Wayback から起こす。
+    #   探索は 404 を捨てるので、これが無いと「買えない物」を落とす (2026-09-11)
+    ("廃盤 UT を判定して起こす", ["scrapers/uniqlo_ut_gone_sweep.py", "--revive", "--commit"]),
+    ("廃盤 UT の前後を歩く",  ["scrapers/uniqlo_ut_gone_sweep.py", "--neighbors"]),
+    ("前後で見つけた分を起こす", ["scrapers/uniqlo_ut_revive.py", "--commit", "--pids-file",
+                              "C:/dev/iMak_data/catalog/_ut_gone_neighbor_candidates.txt"]),
+    # Fashion Press (記事と写真を倉庫へ。済みは飛ばす)
+    ("Fashion Press の記事", ["scrapers/fashion_press_uniqlo.py", "--commit"]),
+    ("Fashion Press の写真", ["scrapers/fashion_press_images.py"]),
     ("UT の値を仕上げ",      ["scrapers/uniqlo_ut_enrich.py", "--commit"]),
     ("コラボ紹介文",         ["scrapers/uniqlo_ut_collab.py", "--commit"]),
     ("GU の取り込み",        ["scrapers/gu_graphic_tee.py", "--commit"]),
@@ -62,6 +71,7 @@ STEPS = [
     ("GU の在庫",            ["scrapers/uniqlo_ut_stock.py", "--brand", "gu", "--commit"]),
     ("公式在庫との突合",      ["tools/official_drift_uniqlo.py"]),
     ("カタログHTML",         ["tools/ut_catalog_html.py"]),
+    ("UT コラボ年表HTML",    ["tools/fp_ut_timeline_html.py"]),
 ]
 
 
