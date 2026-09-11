@@ -197,6 +197,13 @@ REM          nothing is ended here (the button checks each item before ending).
 echo [cull-live] %date% %time% >> "%LOG%"
 python -u cull_live.py >> "%LOG%" 2>&1
 
+REM --- 6c3) UT: which works actually sell -> the order in which Harvest collects.
+REM          2026-09-12 (design iMakHQ/UT_FLOW.md, step 12): Harvest was going through the
+REM          catalog's sold-out collab names by count. This hands it the demand order
+REM          instead (sales x3 + watchers + shown). Writes one json in the shared area.
+echo [ut-demand] %date% %time% >> "%LOG%"
+python -u ut_demand_words.py --write >> "%LOG%" 2>&1
+
 REM --- 6d) ichibankuji nightly search (was a manual button only; nothing else
 REM          ran it, so the daytime press had to do the searching itself).
 echo [kuji-night] %date% %time% >> "%LOG%"
