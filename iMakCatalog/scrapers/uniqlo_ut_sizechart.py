@@ -63,7 +63,9 @@ BRANDS = {
 CATEGORY = "uniqlo_ut"
 PDP = "https://www.uniqlo.com/jp/ja/products/{pid}/00"
 KID_GENDERS = {"KIDS", "BABY"}
-RESTART_EVERY = 40
+# ★同じブラウザで開き続けるとメモリが溜まる (2026-09-11 実測: 13件で 2GB)。
+#   開き直しは1回15秒ほどなので、10件ごとでも遅くならない
+RESTART_EVERY = 10
 SIZE_LABELS = ("XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL",
                "SS", "MM", "LL", "3L", "4L")
 
