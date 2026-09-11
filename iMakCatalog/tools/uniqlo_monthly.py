@@ -58,6 +58,10 @@ STEPS = [
     ("廃盤 UT の前後を歩く",  ["scrapers/uniqlo_ut_gone_sweep.py", "--neighbors"]),
     ("前後で見つけた分を起こす", ["scrapers/uniqlo_ut_revive.py", "--commit", "--pids-file",
                               "C:/dev/iMak_data/catalog/_ut_gone_neighbor_candidates.txt"]),
+    # 中身が公式にも Wayback にも無い廃盤 UT は、画像とコラボ名だけで入れる (data_level=images_only)
+    ("中身の無い廃盤 UT を画像だけで", ["scrapers/uniqlo_ut_images_only.py", "--commit",
+                              "--pids-file", "C:/dev/iMak_data/catalog/_ut_gone_candidates.txt",
+                              "--pids-file", "C:/dev/iMak_data/catalog/_ut_gone_neighbor_candidates.txt"]),
     # Fashion Press (記事と写真を倉庫へ。済みは飛ばす)
     ("Fashion Press の記事", ["scrapers/fashion_press_uniqlo.py", "--commit"]),
     ("Fashion Press の写真", ["scrapers/fashion_press_images.py"]),
