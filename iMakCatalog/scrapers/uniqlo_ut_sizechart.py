@@ -32,6 +32,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import re
 import sqlite3
@@ -212,6 +213,19 @@ def fetch_chart(d, pid: str) -> tuple[list[dict] | None, list[dict] | None, str,
             body_cm + "\n===INCH===\n" + body_in, False)
 
 
+def official_class(pid: str) -> str | None:
+    """保管してある公式 detail の class (tops / accessories …)。生 JSON が無ければ None."""
+    p = Path(f"C:/dev/iMak_data/catalog/_raw/{CATEGORY}/detail_{pid}.json.gz")
+    if not p.exists():
+        return None
+    try:
+        r = json.loads(gzip.open(p, "rt", encoding="utf-8").read())
+    except Exception:
+        return None
+    r = r.get("result", r)
+    return ((r.get("breadcrumbs") or {}).get("class") or {}).get("name") or ""
+
+
 def targets(db, include_kids: bool) -> list[sqlite3.Row]:
     rows = db.execute("SELECT id, product_id, name, specs FROM products WHERE category=?",
                       (CATEGORY,)).fetchall()
@@ -232,6 +246,11 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
             # 公式が寸法を消している (実測で確定済)。叩き直しても出てこない
             gone += 1
             continue
+        if official_class(r["product_id"]) not in (None, "tops"):
+            # ★手袋・ストール・肌着など UT でない物 (公式の class が tops でない)。
+            #   公式が "ut graphic tees" に置いていても UT ではない (2026-09-11)
+            gone += 1
+            continue
         if s.get("official_gone_at") or not s.get("enriched_at"):
             # 廃盤 = もう取れない / まだ生死を確かめていない行は先に uniqlo_ut_enrich.py
             # (1件15秒の Selenium を、消えている商品に使わない)
@@ -243,7 +262,19 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
     return out
 
 
-def run(commit: bool, include_kids: bool, limit: int | None, brand: str = "uniqlo") -> None:
+def _start_driver():
+    """ブラウザを起こす。並行で走らせると起動がぶつかることがあるので粘る."""
+    for attempt in range(4):
+        try:
+            return new_driver()
+        except Exception:
+            if attempt == 3:
+                raise
+            time.sleep(15 * (attempt + 1))
+
+
+def run(commit: bool, include_kids: bool, limit: int | None, brand: str = "uniqlo",
+        shard: tuple[int, int] | None = None) -> None:
     global CATEGORY, PDP
     CATEGORY, PDP = BRANDS[brand]
     # ★他のセッション (回帰テスト等) が DB を掴んでいても待つ。
@@ -251,6 +282,11 @@ def run(commit: bool, include_kids: bool, limit: int | None, brand: str = "uniql
     db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
     rows = targets(db, include_kids)
+    if shard:
+        # ★1件40秒かかる (2026-09-11 実測)。ブラウザを複数本立てて分担する。
+        #   k/n = n 本のうち k 本目。同じ行を2本が取らない
+        k, n = shard
+        rows = [r for i, r in enumerate(rows) if i % n == k]
     if limit:
         rows = rows[:limit]
     print(f"=== {brand} 実寸表 ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(rows)}行 ===")
@@ -267,7 +303,7 @@ def run(commit: bool, include_kids: bool, limit: int | None, brand: str = "uniql
                         d.quit()
                     except Exception:
                         pass
-                d = new_driver()
+                d = _start_driver()
             pid = r["product_id"]
             try:
                 cm, inch, body, absent = fetch_chart(d, pid)
@@ -345,8 +381,10 @@ def main() -> None:
     ap.add_argument("--include-kids", action="store_true")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--brand", choices=sorted(BRANDS), default="uniqlo")
+    ap.add_argument("--shard", help="k/n — n 本で分担するうちの k 本目 (0 始まり)")
     a = ap.parse_args()
-    run(a.commit, a.include_kids, a.limit, a.brand)
+    shard = tuple(int(x) for x in a.shard.split("/")) if a.shard else None
+    run(a.commit, a.include_kids, a.limit, a.brand, shard)
 
 
 if __name__ == "__main__":
