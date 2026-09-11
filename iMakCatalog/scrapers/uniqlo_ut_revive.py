@@ -131,34 +131,25 @@ def unknown_pids(db) -> list[str]:
 
 
 def images_of(pid: str) -> list[str]:
-    """品番から画像URLを総当たりで見つける (CDN は生きている)."""
+    """品番から画像URLを総当たりで見つける (CDN は生きている).
+
+    ★問い合わせは **並行** (2026-09-11)。順番に 1回1秒 x 約250回で 1件310秒かかり、
+      663件が11時間の見込みになった。候補を全部まとめて投げ、当たった物だけ残す。
+      色ごとに置き場所 (日本向け / アジア共通 x 綴り2通り) の最初に当たった1つを採る。
+    """
     l1 = pid[1:7]
+    main = [[base.format(l1=l1) + f"item/{pre}_{col}_{l1}_3x4.jpg"
+             for base in _IMG_BASES for pre in _IMG_PRE] for col in COLORS]
+    subs = [[base.format(l1=l1) + f"sub/{pre}_{l1}_sub{n}_3x4.jpg"
+             for base in _IMG_BASES for pre in _IMG_PRE] for n in range(1, 30)]
+    urls = [u for grp in main + subs for u in grp]
+    with cf.ThreadPoolExecutor(max_workers=24) as ex:
+        ok = dict(zip(urls, ex.map(_head_ok, urls)))
     out: list[str] = []
-    for col in COLORS:                       # メイン (色ごと)
-        for base in _IMG_BASES:
-            for pre in _IMG_PRE:
-                u = base.format(l1=l1) + f"item/{pre}_{col}_{l1}_3x4.jpg"
-                if _head_ok(u):
-                    out.append(u + E.BIG)
-                    break
-            else:
-                continue
-            break
-    miss = 0
-    for n in range(1, 30):                   # サブ (連番。飛ぶことがあるので少し粘る)
-        found = False
-        for base in _IMG_BASES:
-            for pre in _IMG_PRE:
-                u = base.format(l1=l1) + f"sub/{pre}_{l1}_sub{n}_3x4.jpg"
-                if _head_ok(u):
-                    out.append(u + E.BIG)
-                    found = True
-                    break
-            if found:
-                break
-        miss = 0 if found else miss + 1
-        if miss >= 8:
-            break
+    for grp in main + subs:                  # 色の順 → サブ番号の順。各組は最初に当たった1つ
+        hit = next((u for u in grp if ok.get(u)), None)
+        if hit:
+            out.append(hit + E.BIG)
     return out
 
 
