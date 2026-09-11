@@ -65,8 +65,10 @@ except Exception:
 CATEGORY = "uniqlo_ut"
 RAW = Path("C:/dev/iMak_data/catalog/_raw/uniqlo_ut")
 PDP = "https://www.uniqlo.com/jp/ja/products/{pid}/00"
+# 月ごとに1件ずつ (同じ月の保存は中身が同じ)。並びは呼び出し側で新しい順にする
 CDX = ("http://web.archive.org/cdx/search/cdx?url=uniqlo.com/jp/ja/products/{pid}*"
-       "&output=json&fl=original,timestamp&filter=statuscode:200&collapse=urlkey&limit=3")
+       "&output=json&fl=original,timestamp&filter=statuscode:200&collapse=timestamp:6")
+WAYBACK_TRIES = 6
 SNAP = "https://web.archive.org/web/{ts}id_/{url}"
 UA = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                      "(KHTML, like Gecko) Chrome/140.0 Safari/537.36")}
@@ -189,11 +191,18 @@ def is_ut(d: dict) -> bool:
 
 
 def from_wayback(pid: str) -> tuple[dict | None, str]:
-    """Wayback の商品ページから 当時の値を取る."""
+    """Wayback の商品ページから 当時の値を取る.
+
+    ★**新しい保存から**読む (2026-09-11)。2021年頃のページは表示後に中身を読み込む作りで、
+      その頃の保存は中身の無い殻 (18KB)。同じ品番でも 2022年以降の保存には
+      product JSON が丸ごと入っている (実測: E440689 細田守 UT は 2021年の10件が殻、
+      2022-12 の1件に全部入っていた)。以前は古い順に3件だけ見て諦めていた。
+    """
     try:
         rows = json.loads(_get(CDX.format(pid=pid)))[1:]
     except Exception:
         return None, ""
+    rows = sorted(rows, key=lambda r: r[1], reverse=True)[:WAYBACK_TRIES]
     for original, ts in [(r[0], r[1]) for r in rows]:
         try:
             h = _get(SNAP.format(ts=ts, url=original), timeout=90)
