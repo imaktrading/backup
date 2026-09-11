@@ -149,6 +149,19 @@ class TestParse:
         assert got["picks"] == [{"idx": 2, "pid": "A", "color": "WHITE"}]
         assert got["nocat"] == [4] and got["outs"] == [{"idx": 5, "reason": "used"}]
 
+    def test_skip_needs_product_color_and_reason(self):
+        """一致・見送り (2026-09-12): 商品と色は合っているが出さない。理由必須."""
+        got = U.parse_result({"skips": [{"idx": 2, "pid": "A", "color": "WHITE", "reason": "skip_price"},
+                                        {"idx": 3, "pid": "A", "color": "WHITE", "reason": ""},
+                                        {"idx": 4, "pid": "", "color": "WHITE", "reason": "skip_price"}]})
+        assert got["skips"] == [{"idx": 2, "pid": "A", "color": "WHITE", "reason": "skip_price"}]
+
+    def test_reason_lists(self):
+        """PSA の理由を流用 (仕入元売り切れ等)。見送りと対象外は混ぜない."""
+        assert "gone" in dict(U.OUT_REASONS)
+        assert all(k.startswith("skip_") for k, _ in U.SKIP_REASONS)
+        assert not any(k.startswith("skip_") for k, _ in U.OUT_REASONS)
+
 
 class TestSave:
     def _setup(self, tmp_path, monkeypatch, fail=False):
@@ -183,6 +196,16 @@ class TestSave:
         d = json.loads(led.read_text(encoding="utf-8"))
         assert d["https://a"]["product_id"] == "E1" and d["https://a"]["color"] == "WHITE"
         assert d["https://b"]["decision"] == "nocat" and d["https://c"]["reason"] == "used"
+
+    def test_skip_keeps_identity_but_adds_no_row(self, tmp_path, monkeypatch):
+        """★見送りでも特定結果は資産として残す。出品行には足さない."""
+        led, sent = self._setup(tmp_path, monkeypatch)
+        res = {"picks": [], "skips": [{"idx": 2, "pid": "E1", "color": "WHITE", "reason": "skip_price"}],
+               "nocat": [], "outs": [], "holds": []}
+        assert U.save(self.ITEMS, res, now="T") == (0, 1) and sent == []
+        d = json.loads(led.read_text(encoding="utf-8"))
+        assert d["https://a"] == {"decision": "skip", "product_id": "E1", "color": "WHITE",
+                                  "reason": "skip_price", "title": "t", "size": "M", "at": "T"}
 
     def test_sheet_failure_leaves_ledger_untouched(self, tmp_path, monkeypatch):
         """★先に台帳を書くと、シートに入らなかった行が「決着済み」になって二度と出ない."""

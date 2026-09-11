@@ -61,13 +61,24 @@ C_KW = 23      # X列 = その行を見つけた検索語 (= カタログのコ�
 C_TAG = 24     # Y列 = タグ写真から読めた6桁の番号 (読めた時だけ)
 _WIDTH = C_TAG + 1
 
+# 対象外 = そもそも出品の材料にならない (商品も決まらない)。PSA の目視 (newcand_confirm) と語をそろえた
 OUT_REASONS = [
     ("used", "中古・難あり"),
-    ("not_tee", "Tシャツではない / UT・GUではない"),
-    ("bundle", "まとめ売り"),
+    ("not_tee", "別ジャンル (Tシャツではない / UT・GUではない)"),
+    ("bundle", "まとめ売り・複数枚"),
     ("kids", "キッズ"),
     ("unclear", "写真で柄が分からない"),
+    # ★2026-09-12 ユーザー「PSAの理由を流用できるものは追加して、仕入元売り切れとか」
+    ("gone", "仕入元が売り切れ・ページが消えた"),
     ("other", "その他"),
+]
+# ★見送り = **商品は一致した**が今回は出さない (PSA の「見送り(商品は合っている)」と同じ意味)。
+#   「対象外」と混ぜない: 見送りは特定結果 (商品と色) を台帳に残す = 後で出したくなった時に使える
+#   (listing_data_is_permanent_asset)。出品行には足さない。
+SKIP_REASONS = [
+    ("skip_price", "仕入値が高い (利益が出ない)"),
+    ("skip_seller", "出品者が不安 (評価・発送)"),
+    ("skip_other", "その他"),
 ]
 
 # メルカリの色 (日本語) → カタログの色名に含まれる語
@@ -293,22 +304,27 @@ def parse_result(data):
             except (TypeError, ValueError):
                 pass
         return out
-    picks = []
-    for p in data.get("picks") or []:
-        try:
-            idx = int(p.get("idx"))
-        except (TypeError, ValueError, AttributeError):
-            continue
-        pid, color = (p.get("pid") or "").strip(), (p.get("color") or "").strip()
-        if pid and color:
-            picks.append({"idx": idx, "pid": pid, "color": color})
+    def _picks(key, need_reason=False):
+        out = []
+        for p in data.get(key) or []:
+            try:
+                idx = int(p.get("idx"))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            pid, color = (p.get("pid") or "").strip(), (p.get("color") or "").strip()
+            reason = (p.get("reason") or "").strip()
+            if pid and color and (reason or not need_reason):
+                out.append({"idx": idx, "pid": pid, "color": color, **({"reason": reason} if need_reason else {})})
+        return out
+    picks = _picks("picks")
+    skips = _picks("skips", need_reason=True)
     outs = []
     for o in data.get("outs") or []:
         try:
             outs.append({"idx": int(o.get("idx")), "reason": (o.get("reason") or "").strip()})
         except (TypeError, ValueError, AttributeError):
             continue
-    return {"picks": picks, "nocat": _ints(data.get("nocat")),
+    return {"picks": picks, "skips": skips, "nocat": _ints(data.get("nocat")),
             "outs": [o for o in outs if o["reason"]], "holds": _ints(data.get("holds"))}
 
 
@@ -405,6 +421,7 @@ button.go{border-color:#0a7;color:#065}button.go.sel{background:#0a7;color:#fff}
 button.cat{border-color:#a60;color:#a60}button.cat.sel{background:#a60;color:#fff}
 button.ng{border-color:#c33;color:#900}button.ng.sel{background:#c33;color:#fff}
 button.hold.sel{background:#888;color:#fff}
+button.skip{border-color:#06a;color:#06a}button.skip.sel{background:#06a;color:#fff}
 input.q{font-size:12px;width:170px}select{font-size:12px}
 #zov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;align-items:center;justify-content:center;gap:20px}
 #zov.on{display:flex}#zov img{max-height:84vh;max-width:44vw;object-fit:contain;background:#fff}
@@ -434,26 +451,39 @@ function lookup(inp){var box=inp.closest('.it');var q=inp.value.trim();
   fetch('/api/search?q='+encodeURIComponent(q)+'&color='+encodeURIComponent(box.dataset.color||''))
    .then(function(r){return r.json();}).then(function(d){slot.innerHTML=d.html||'';})
    .catch(function(e){slot.innerHTML="<div class='warn'>引けませんでした ("+e+")</div>";});}
-function pickRsn(sel){if(sel.value)setAct(sel.closest('.it').querySelector("button[data-a='out']"));}
+/* 理由を選んだら、その理由の種類 (対象外 / 一致・見送り) のボタンに確定する */
+function pickRsn(sel){if(!sel.value)return;
+  var a=sel.value.indexOf('skip_')===0?'skip':'out';
+  setAct(sel.closest('.it').querySelector("button[data-a='"+a+"']"));}
 function setAct(btn){var box=btn.closest('.it');
   box.querySelectorAll('.act button').forEach(function(b){b.classList.remove('sel');});
   btn.classList.add('sel');box.dataset.act=btn.dataset.a;
-  if(btn.dataset.a!=='out'){var s=box.querySelector('select.rsn');if(s)s.value='';}
+  var s=box.querySelector('select.rsn');
+  if(s){var isSkip=s.value.indexOf('skip_')===0;
+    if(btn.dataset.a==='out'&&isSkip)s.value='';
+    if(btn.dataset.a==='skip'&&s.value&&!isSkip)s.value='';
+    if(btn.dataset.a!=='out'&&btn.dataset.a!=='skip')s.value='';}
   box.classList.toggle('done',btn.dataset.a!=='go');}
-function go(){var picks=[],nocat=[],outs=[],holds=[],nocolor=0,noreason=0;
+function go(){var picks=[],skips=[],nocat=[],outs=[],holds=[],nocolor=0,noreason=0;
   document.querySelectorAll('.it').forEach(function(b){var a=b.dataset.act||'';var idx=parseInt(b.dataset.idx,10);
-    if(a==='go'){var c=(b.querySelector('select.col')||{}).value||'';
+    var c=(b.querySelector('select.col')||{}).value||'';var r=(b.querySelector('select.rsn')||{}).value||'';
+    if(a==='go'){
       if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}else{picks.push({idx:idx,pid:b.dataset.pid,color:c});}}
+    else if(a==='skip'){
+      if(!b.dataset.pid||!c){nocolor++;holds.push(idx);}
+      else if(r.indexOf('skip_')!==0){noreason++;holds.push(idx);}
+      else{skips.push({idx:idx,pid:b.dataset.pid,color:c,reason:r});}}
     else if(a==='cat'){nocat.push(idx);}
-    else if(a==='out'){var r=(b.querySelector('select.rsn')||{}).value||'';
-      if(!r){noreason++;holds.push(idx);}else{outs.push({idx:idx,reason:r});}}
+    else if(a==='out'){
+      if(!r||r.indexOf('skip_')===0){noreason++;holds.push(idx);}else{outs.push({idx:idx,reason:r});}}
     else{holds.push(idx);}});
-  var msg='出品行に追加 '+picks.length+'件 / カタログに無い '+nocat.length+'件 / 対象外 '+outs.length
-    +'件 / 未結論 '+holds.length+'件';
+  var msg='出品行に追加 '+picks.length+'件 / 一致・見送り '+skips.length+'件 / カタログに無い '+nocat.length
+    +'件 / 対象外 '+outs.length+'件 / 未結論 '+holds.length+'件';
   if(nocolor)msg+='\\n\\n商品か色が未選択 '+nocolor+'件 — 未結論に戻します';
-  if(noreason)msg+='\\n\\n対象外なのに理由が未選択 '+noreason+'件 — 未結論に戻します';
+  if(noreason)msg+='\\n\\n対象外/見送りなのに理由が未選択 '+noreason+'件 — 未結論に戻します';
   if(!confirm(msg+'\\n\\nこの内容で確定しますか?'))return;
-  _send({picks:picks,nocat:nocat,outs:outs,holds:holds},'<h1>確定しました。ウィンドウを閉じてください。</h1>');}
+  _send({picks:picks,skips:skips,nocat:nocat,outs:outs,holds:holds},
+        '<h1>確定しました。ウィンドウを閉じてください。</h1>');}
 """
 
 
@@ -494,11 +524,16 @@ def build_html(items, catalog):
             "onchange='lookup(this)'>"
             "色 <select class='col'><option value=''>先に商品を選ぶ</option></select>"
             "<button class='go' data-a='go' onclick='setAct(this)'>この商品</button>"
+            "<button class='skip' data-a='skip' onclick='setAct(this)' "
+            "title='商品と色は合っているが、今回は出さない (高い / 出品者が不安)'>一致・見送り</button>"
             "<button class='cat' data-a='cat' onclick='setAct(this)'>カタログに無い</button>"
             "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
             "<select class='rsn' onchange='pickRsn(this)'><option value=''>理由を選ぶ</option>"
+            "<optgroup label='対象外 (商品が決まらない・材料にならない)'>"
             + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in OUT_REASONS)
-            + "</select><button class='hold' data-a='hold' onclick='setAct(this)'>保留</button>"
+            + "</optgroup><optgroup label='一致・見送り (商品と色は合っている)'>"
+            + "".join(f"<option value='{k}'>{_html.escape(v)}</option>" for k, v in SKIP_REASONS)
+            + "</optgroup></select><button class='hold' data-a='hold' onclick='setAct(this)'>保留</button>"
             "</div></div></div>")
     parts.append("<div id='zov' onclick='zclose()'><img id='zl' alt=''><img id='zr' alt=''></div>")
     parts.append(f"<button id='go' onclick='go()'>確定</button><script>{save_js}{_JS}</script>")
@@ -588,6 +623,15 @@ def save(items, res, now=None):
             in_high.add(url)
         add_led[url] = {"decision": "go", "product_id": p["pid"], "color": p["color"],
                         "title": r[C_TITLE], "size": r[C_SIZE], "at": now}
+    for p in res.get("skips") or []:
+        it = by_idx.get(p["idx"])
+        if not it or p["pid"] not in catalog:
+            continue
+        r = it["row"]
+        # 商品は一致したが今回は出さない。**特定結果は残す** (出品行には足さない)
+        add_led[r[C_URL].strip()] = {"decision": "skip", "product_id": p["pid"], "color": p["color"],
+                                     "reason": p["reason"], "title": r[C_TITLE], "size": r[C_SIZE],
+                                     "at": now}
     for idx in res["nocat"]:
         it = by_idx.get(idx)
         if it:
@@ -631,7 +675,8 @@ def main():
         return 1
     n_add, n_led = save(items, res)
     print(f"✅ 商品管理シートに追加 {n_add}件 (Tシャツ行・出品くんが拾う) / 台帳に記録 {n_led}件")
-    print(f"   内訳: この商品 {len(res['picks'])} / カタログに無い {len(res['nocat'])} / "
+    print(f"   内訳: この商品 {len(res['picks'])} / 一致・見送り {len(res['skips'])} / "
+          f"カタログに無い {len(res['nocat'])} / "
           f"対象外 {len(res['outs'])} / 未結論 {len(res['holds'])} (未結論は次回また出ます)")
     return 0
 
