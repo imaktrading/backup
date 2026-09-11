@@ -24,8 +24,11 @@ REM   5d) UT restock                 : ut_hoju_fill.py restock-search (all)
 REM   6c) funnel + analyses           : listing_funnel / funnel_diff / demand_winners
 REM   6d) ichibankuji night search     : run_kuji_night.py
 REM   6e) price-down / title lists     : noconvert_pricedown / noclick_targets
-REM   NOTE: nothing here writes to eBay. Ending, relisting and restoring quantity
-REM         stay manual buttons on purpose (they are not reversible).
+REM   0b) mirror ads 10% + best offer: mirror_promo_bestoffer.py --write
+REM   NOTE: the only eBay write here is 0b (adds an ad / turns on best offer on
+REM         UK/AU/CA mirrors that lack them; never removes or changes a price).
+REM         Ending, relisting and restoring quantity stay manual buttons on
+REM         purpose (they are not reversible).
 REM   30 items per run = slow and steady, to keep the BAN risk low.
 REM   Google Sheets API can return 503, so step 1 retries up to 3 times.
 REM ---------------------------------------------------------------------------
@@ -51,6 +54,14 @@ REM        a human at listing time), so no review is needed. fail-closed: it
 REM        writes nothing when the cert cannot be resolved.
 echo [keyfill] %date% %time% >> "%LOG%"
 python -u key_backfill_live.py >> "%LOG%" 2>&1
+
+REM --- 0b) mirror ads + best offer (2026-09-11 user: "make it nightly").
+REM         Same as the Pm/Bo button. About 1 minute: one listing sweep, then it
+REM         sends only to mirrors that still lack them; listings that can never
+REM         get best offer (category, eBay warning 20135) are skipped for 30 days.
+REM         Placed before step 1 because step 1 can jump to :done on failure.
+echo [pmbo] %date% %time% >> "%LOG%"
+python -u -X utf8 mirror_promo_bestoffer.py --write >> "%LOG%" 2>&1
 
 REM --- 1) zero-backup listings (a listing whose only supplier died = instant death)
 for %%i in (1 2 3) do (

@@ -185,6 +185,16 @@ class TestFetchPagesInParallel:
         assert [i["item_id"] for i in items] == ["1", "2", "3", "4", "5", "6"] and missing == []
 
 
+class TestNightly:
+    def test_nightly_batch_runs_it_before_the_step_that_can_abort(self):
+        """★2026-09-11 ユーザー「夜間自動にしよう」。step 1 は失敗すると :done へ飛ぶので、その前に置く."""
+        import io
+        bat = io.open(os.path.join(os.path.dirname(__file__), "..", "tools", "run_hoju_search.bat"),
+                      encoding="ascii").read()
+        i = bat.index("mirror_promo_bestoffer.py --write")
+        assert i < bat.index("psa_hoju_fill.py search --limit=30")
+
+
 class TestWarning20135:
     """★2026-09-11 本丸: eBay は「このカテゴリはベストオファー非対応」を **Warning** で返す。
     Warning を一律 OK にしていたので、付いていない 261件を毎回「成功」と数えて送り直していた
