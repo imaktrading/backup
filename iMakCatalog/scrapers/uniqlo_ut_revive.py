@@ -345,7 +345,10 @@ def _save_one(db, pid, d, src, raw, imgs, err, now, commit, stat) -> None:
     #   実寸表の Selenium が 1件15秒かけて叩きに行く (実際に11件やった)。
     #   detail API の genderName は **小文字** (`kids` / `men`) なので大文字にそろえる。
     gender = (d.get("genderName") or "").strip().upper()
-    specs = {
+    # ★色の一覧・サイズ・価格・eBay 固定値は、検索 API の取り込みと同じ組み立てを通す
+    #   (2026-09-11: 以前は画像と説明文だけで、出品側が色を選べずに止まった)
+    specs = U.specs_from_detail(d)
+    specs.update({
         "gender": gender,
         "department": U._gender_to_dept(gender),
         "composition": d.get("composition") or "",
@@ -356,7 +359,10 @@ def _save_one(db, pid, d, src, raw, imgs, err, now, commit, stat) -> None:
         "image_urls": imgs,
         "revived_at": now, "revived_from": src,
         "official_gone_at": None if src == "official" else now,
-    }
+    })
+    col = (((d.get("breadcrumbs") or {}).get("subcategory") or {}).get("locale") or "")
+    if col:
+        specs["collab"] = col
     if src == "official":
         specs["countries_of_origin"] = [x.get("code") for x in
                                         (d.get("countriesOfOrigin") or []) if x.get("code")]

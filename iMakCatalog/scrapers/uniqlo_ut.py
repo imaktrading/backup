@@ -359,6 +359,9 @@ def _parse_item(item: dict) -> dict:
 
     name_jp = (item.get("name") or "").strip()
     gender = (item.get("genderName") or "").strip()  # MEN/WOMEN/BOYS/GIRLS/BABY
+    # ★検索 API は「男女兼用」、detail API は「unisex」と書く。UNISEX にそろえる (2026-09-11)
+    if gender == "男女兼用" or gender.upper() == "UNISEX":
+        gender = "UNISEX"
 
     # colors: 各 color の name + filter + eBay 正規化
     color_variants = []
@@ -464,6 +467,21 @@ def _parse_item(item: dict) -> dict:
         },
         "images": image_urls,
     }
+
+
+def specs_from_detail(d: dict) -> dict:
+    """公式 detail API (または Wayback のページに埋まっている同じ形の product JSON) から、
+    検索 API の取り込みと **同じ specs** を作る (2026-09-11).
+
+    ★探索 (`uniqlo_ut_discover.py`) と廃盤の起こし (`uniqlo_ut_revive.py`) は、画像と説明文
+      しか書いていなかった。色の一覧 (`color_variants` / `ebay_colors`)・サイズ・価格・
+      eBay の固定値が無く、出品側が色を選べずに止まった (Advisor 依頼 2026-09-11, 529件)。
+      detail も colors / sizes / prices を持っているので、`_parse_item` をそのまま通す。
+    """
+    item = dict(d)
+    if not item.get("l1Id"):
+        item["l1Id"] = (d.get("l1Ids") or [""])[0]
+    return (_parse_item(item) or {}).get("specs") or {}
 
 
 def _extract_collab_from_name(name_jp: str) -> str:

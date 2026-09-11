@@ -310,7 +310,10 @@ def store(db, pid: str, d: dict, now: str) -> None:
     """見つけた UT を catalog に入れる (現行の取り込みと同じ形)."""
     imgs = E.all_images(d.get("images") or {})
     gender = (d.get("genderName") or "").strip().upper()
-    specs = {
+    # ★色の一覧・サイズ・価格・eBay 固定値は検索 API の取り込みと同じ組み立てを通す
+    #   (2026-09-11: 以前は画像と説明文だけで、出品側が色を選べずに止まった)
+    specs = U.specs_from_detail(d)
+    specs.update({
         "gender": gender, "department": U._gender_to_dept(gender),
         "composition": d.get("composition") or "",
         "design_detail": d.get("designDetail") or "",
@@ -323,7 +326,7 @@ def store(db, pid: str, d: dict, now: str) -> None:
         "image_urls": imgs, "enriched_at": now, "discovered_at": now,
         "l1_id": (d.get("l1Ids") or [None])[0],
         "collab": (((d.get("breadcrumbs") or {}).get("subcategory") or {}).get("locale") or ""),
-    }
+    })
     api.upsert(category=CATEGORY, product_id=pid,
                name=d.get("name") or "", name_jp=d.get("name") or "",
                set_name=None, set_name_official=None, card_set_id=None,
