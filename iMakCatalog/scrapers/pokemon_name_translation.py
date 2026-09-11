@@ -62,7 +62,7 @@ TRAINER_NAME_MAP: dict[str, str] = {
     # Scarlet/Violet era (HQ 提示)
     "ナンジャモ":      "Iono",
     "シロナ":          "Cynthia",
-    "ボタン":          "Atticus",
+    "ボタン":          "Penny",    # ★2026-09-11 是正 (Atticus はシュウメイ。Bulbapedia 再取得)
     "カエデ":          "Tulip",
     "メロコ":          "Mela",
     "グルーシャ":      "Grusha",
