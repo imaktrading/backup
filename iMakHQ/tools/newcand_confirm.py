@@ -430,7 +430,11 @@ def _is_other_card(pid, card_no):
     版は `_p1` `_P` `_EB02_LF` のように **区切り記号**が続く。数字が続くのは別番号。
     """
     tail = str(pid or "")[len(card_no):]
-    return bool(tail) and tail[0].isdigit()
+    # ★2026-09-11: `-` で続くのも **別の番号**。版は `_` で続く (`_p1` / `_EB02_LF`)。
+    #   `PRB02` (セット名だけ) で引くと `PRB02-001`〜`-012` の **別カード12枚**が全部
+    #   「版」として当たり、「カタログに在った → 次回に候補を出す」→ 人が「無い」→ …の
+    #   **無限ループ**で、押しても件数が減らなかった (実例: ドン!!カード ハンニャバル)。
+    return bool(tail) and (tail[0].isdigit() or tail[0] == "-")
 
 
 def catalog_variants(card_no, db=DB_PATH):
@@ -1385,14 +1389,21 @@ def save(items, res):
         if not it:
             continue
         card_no = typed.get(i) or it["card_no"]
-        if typed.get(i) and catalog_variants(typed[i]):
+        # ★2026-09-11: **その番号の候補を人がもう見ている**なら、「無い」は人の結論。
+        #   「番号が catalog に在る」≠「その版が catalog に在る」。候補を見せた上で
+        #   「無い」と押されたのに「在ったので次回また候補を出す」に戻すと、同じ候補を
+        #   見せて同じ答えを貰うだけの **無限ループ**になる (押しても件数が減らない)。
+        #   再チェックが要るのは、番号を **今 初めて打った** (= まだ候補を見せていない) 時だけ。
+        _seen = bool(it.get("variants")) and (
+            not typed.get(i) or typed[i].upper() == (it["card_no"] or "").upper())
+        if not _seen and typed.get(i) and catalog_variants(typed[i]):
             n_recheck += 1          # 入力番号で catalog に在った → 依頼しない
             continue
         # ★2026-09-05: 打鍵番号だけでなく、タイトルから抽出した番号 (`it["card_no"]`) にも
         #   同じ再チェックをかける。分母つき/大小不一致のままだと catalog に実在しても
         #   当たらず、空振りの追加依頼になっていた (実測: m2a 127/193 → M2a-127 は在った)。
         #   依頼書: hq/requests/2026-09-05_act_code_proposals_tcg.md 提案4
-        if not typed.get(i) and it["card_no"] and any(
+        if not _seen and not typed.get(i) and it["card_no"] and any(
                 catalog_variants(c)
                 for c in extraction_recheck_candidates(it["card_no"], it["title"])):
             n_recheck += 1
