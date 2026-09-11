@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as cf
 import gzip
 import json
 import os
@@ -84,9 +85,22 @@ COLORS = ("00", "01", "02", "03", "04", "05", "06", "08", "09", "10", "11", "12"
           "66", "67", "68", "69", "70", "71", "72")
 
 
-def _get(url: str, timeout: int = 60) -> str:
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=timeout) as r:
-        return r.read().decode("utf-8", "ignore")
+def _get(url: str, timeout: int = 60, tries: int = 3) -> str:
+    """★Wayback は時々 詰まる/切れる (2026-09-11 実測: 同じ品番が1回目は取れず2回目は取れた)。
+    404 以外は間を空けて粘る."""
+    for i in range(tries):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA),
+                                        timeout=timeout) as r:
+                return r.read().decode("utf-8", "ignore")
+        except urllib.error.HTTPError as e:
+            if e.code == 404 or i == tries - 1:
+                raise
+        except Exception:
+            if i == tries - 1:
+                raise
+        time.sleep(8 * (i + 1))
+    raise RuntimeError("unreachable")
 
 
 def _head_ok(url: str) -> bool:
@@ -146,6 +160,31 @@ def images_of(pid: str) -> list[str]:
     return out
 
 
+def _pdp_product(h: str, pid: str) -> dict | None:
+    """Wayback の商品ページに埋まっている product JSON を取り出す."""
+    i = h.find('"pdpEntity"')
+    if i < 0:
+        return None
+    j = h.find('"product":', i)
+    if j < 0 or j - i > 400:
+        return None
+    try:
+        p, _ = json.JSONDecoder().raw_decode(h[j + len('"product":'):])
+    except Exception:
+        return None
+    return p if isinstance(p, dict) else None
+
+
+def is_ut(d: dict) -> bool:
+    """UT か。パンくずが在れば **公式の分類** (category=ut graphic tees かつ class=tops)。
+    無ければ名前で見る (古い取り方で取った値)."""
+    bc = d.get("breadcrumbs") or {}
+    if bc:
+        return ((bc.get("category") or {}).get("name") == "ut graphic tees"
+                and (bc.get("class") or {}).get("name") == "tops")
+    return bool(_IS_UT.search(d.get("name") or ""))
+
+
 def from_wayback(pid: str) -> tuple[dict | None, str]:
     """Wayback の商品ページから 当時の値を取る."""
     try:
@@ -157,6 +196,14 @@ def from_wayback(pid: str) -> tuple[dict | None, str]:
             h = _get(SNAP.format(ts=ts, url=original), timeout=90)
         except Exception:
             continue
+        # ★ページには公式 detail と同じ形の JSON が丸ごと埋まっている
+        #   (`"pdpEntity":{"E472114-000-00":{..."product":{...}}}`)。これを読むのが正。
+        #   以前は `"name":"..."` を正規表現で拾っていて、**最初に出てくる空の name** を
+        #   掴んでいた (2026-09-11 実測: 怪獣8号 UT 4件を「UT ではない」と捨てた)
+        p = _pdp_product(h, pid)
+        if p and (p.get("composition") or p.get("longDescription") or p.get("name")):
+            p["_snapshot"] = ts
+            return p, h
         d: dict = {}
         for key in ("name", "composition", "designDetail",
                     "longDescription", "shortDescription", "careInstruction"):
@@ -172,87 +219,59 @@ def from_wayback(pid: str) -> tuple[dict | None, str]:
     return None, ""
 
 
-def run(commit: bool, limit: int | None, pids_file: str | None = None) -> None:
+def _fetch_one(pid: str) -> tuple[str, dict | None, str, str, list[str], str]:
+    """1品番を 公式 → Wayback の順で取る (並行で呼ぶ。DB には触らない)."""
+    src, d, raw, err = "", None, "", ""
+    try:                                      # 1. 公式がまだ生きていないか
+        live = E.fetch(pid)
+        if live:
+            d, src = live, "official"
+    except urllib.error.HTTPError:
+        pass
+    except Exception as e:
+        err = type(e).__name__
+    if d is None:                             # 2. Wayback
+        d, raw = from_wayback(pid)
+        if d:
+            src = f"wayback_{d.get('_snapshot', '')}"
+    imgs: list[str] = []
+    if d is not None and is_ut(d):
+        # ★Wayback のページの JSON にも公式と同じ images が在る。在ればそれを使う
+        #   (総当たりの images_of は 1枚しか当たらないことがある)
+        imgs = E.all_images(d.get("images") or {}) if d.get("images") else images_of(pid)
+    time.sleep(SLEEP)
+    return pid, d, src, raw, imgs, err
+
+
+def run(commit: bool, limit: int | None, pids_file: str | None = None,
+        workers: int = 4) -> None:
     db = sqlite3.connect(str(api._DB_PATH), timeout=120)
     db.row_factory = sqlite3.Row
-    pids = unknown_pids(db)
-    print(f"  倉庫に写っていて catalog に無い商品番号: {len(pids)}件")
+    have = {x[0] for x in db.execute(
+        "SELECT product_id FROM products WHERE category IN ('uniqlo_ut','gu')")}
     if pids_file:
-        # ★HQ 等から貰った品番リストも同じ経路 (公式→Wayback) で救済する (2026-09-10)。
-        #   `uniqlo_ut_discover.pids_from_file` を再利用 (uniqlo.com の行だけ拾う)。
+        # ★渡されたリスト **だけ** を救済する (2026-09-11)。以前は倉庫の未収録分も
+        #   全部混ぜていて、4件を確かめるつもりが 10分以上回り続けた。
         import uniqlo_ut_discover as D
-        have = {x[0] for x in db.execute(
-            "SELECT product_id FROM products WHERE category IN ('uniqlo_ut','gu')")}
-        extra = sorted(D.pids_from_file(pids_file) - have - set(pids))
-        print(f"  外部リストから追加: {len(extra)}件")
-        pids = sorted(set(pids) | set(extra))
+        listed = D.pids_from_file(pids_file)
+        pids = sorted(listed - have)
+        print(f"  リストの品番 {len(listed)}件 / catalog に在る {len(listed) - len(pids)}件 は飛ばす")
+    else:
+        pids = unknown_pids(db)
+        print(f"  倉庫に写っていて catalog に無い商品番号: {len(pids)}件")
     if limit:
         pids = pids[:limit]
-    print(f"=== 廃盤品の救済 ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(pids)}件 ===")
+    print(f"=== 廃盤品の救済 ({'APPLY' if commit else 'DRY-RUN'}) — 対象 {len(pids)}件 "
+          f"/ 同時 {workers}本 ===", flush=True)
 
     now = datetime.now().isoformat(timespec="seconds")
     stat, n = Counter(), 0
-    for pid in pids:
-        src, d = "", None
-        try:                                  # 1. 公式がまだ生きていないか
-            live = E.fetch(pid)
-            if live:
-                d, src = live, "official"
-        except urllib.error.HTTPError:
-            pass
-        except Exception as e:
-            stat[type(e).__name__] += 1
-        if d is None:                         # 2. Wayback
-            d, raw = from_wayback(pid)
-            if d:
-                src = f"wayback_{d.get('_snapshot', '')}"
-                _raw_store.save(CATEGORY, f"revive_{pid}", raw, PDP.format(pid=pid),
-                                ext="html")
-        if d is None:
-            stat["値が取れない"] += 1
-            time.sleep(SLEEP)
-            continue
-        # ★UT 以外は入れない (2026-09-10)。コラボページの HTML には関連商品が混ざるので、
-        #   そのまま入れるとリネンシャツやレギンスまで `uniqlo_ut` に入る。
-        nm = d.get("name") or ""
-        if not _IS_UT.search(nm):
-            stat["UT ではない"] += 1
-            time.sleep(SLEEP)
-            continue
-
-        imgs = E.all_images(d.get("images") or {}) if src == "official" else images_of(pid)
-        # ★性別を必ず入れる (2026-09-10)。入れないと キッズが「大人」として扱われ、
-        #   実寸表の Selenium が 1件15秒かけて叩きに行く (実際に11件やった)。
-        #   detail API の genderName は **小文字** (`kids` / `men`) なので大文字にそろえる。
-        gender = (d.get("genderName") or "").strip().upper()
-        specs = {
-            "gender": gender,
-            "department": U._gender_to_dept(gender),
-            "composition": d.get("composition") or "",
-            "design_detail": d.get("designDetail") or "",
-            "long_description": d.get("longDescription") or "",
-            "short_description": d.get("shortDescription") or "",
-            "care_instruction": d.get("careInstruction") or "",
-            "image_urls": imgs,
-            "revived_at": now, "revived_from": src,
-            "official_gone_at": None if src == "official" else now,
-        }
-        if src == "official":
-            specs["countries_of_origin"] = [x.get("code") for x in
-                                            (d.get("countriesOfOrigin") or []) if x.get("code")]
-            specs["enriched_at"] = now
-        stat[f"取れた ({src.split('_')[0]})"] += 1
-        stat["画像あり"] += bool(imgs)
-        print(f"    + {pid}  画像 {len(imgs):2d}枚  {src:18s} "
-              f"{(d.get('name') or '')[:34]}", flush=True)
-        if commit:
-            api.upsert(category=CATEGORY, product_id=pid,
-                       name=d.get("name") or "", name_jp=d.get("name") or "",
-                       set_name=None, set_name_official=None, card_set_id=None,
-                       language="ja", specs=specs, images=imgs,
-                       source=f"uniqlo_revive_{src}", source_url=PDP.format(pid=pid))
-            n += 1
-        time.sleep(SLEEP)
+    # ★取りに行くのは並行、**保存は1本** (sqlite を複数から書かない)
+    with cf.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = pool.map(_fetch_one, pids)
+        for pid, d, src, raw, imgs, err in results:
+            _save_one(db, pid, d, src, raw, imgs, err, now, commit, stat)
+            n += stat.pop("_saved", 0)
     db.close()
     print("")
     for k, v in stat.most_common():
@@ -261,14 +280,64 @@ def run(commit: bool, limit: int | None, pids_file: str | None = None) -> None:
     print(f"{'適用' if commit else '(dry-run — --commit で適用)'} {n}件")
 
 
+def _save_one(db, pid, d, src, raw, imgs, err, now, commit, stat) -> None:
+    if err:
+        stat[err] += 1
+    if d is None:
+        stat["値が取れない"] += 1
+        return
+    if raw:
+        _raw_store.save(CATEGORY, f"revive_{pid}", raw, PDP.format(pid=pid), ext="html")
+    # ★UT 以外は入れない (2026-09-10)。コラボページの HTML には関連商品が混ざるので、
+    #   そのまま入れるとリネンシャツやレギンスまで `uniqlo_ut` に入る。
+    if not is_ut(d):
+        stat["UT ではない"] += 1
+        return
+    # ★性別を必ず入れる (2026-09-10)。入れないと キッズが「大人」として扱われ、
+    #   実寸表の Selenium が 1件15秒かけて叩きに行く (実際に11件やった)。
+    #   detail API の genderName は **小文字** (`kids` / `men`) なので大文字にそろえる。
+    gender = (d.get("genderName") or "").strip().upper()
+    specs = {
+        "gender": gender,
+        "department": U._gender_to_dept(gender),
+        "composition": d.get("composition") or "",
+        "design_detail": d.get("designDetail") or "",
+        "long_description": d.get("longDescription") or "",
+        "short_description": d.get("shortDescription") or "",
+        "care_instruction": d.get("careInstruction") or "",
+        "image_urls": imgs,
+        "revived_at": now, "revived_from": src,
+        "official_gone_at": None if src == "official" else now,
+    }
+    if src == "official":
+        specs["countries_of_origin"] = [x.get("code") for x in
+                                        (d.get("countriesOfOrigin") or []) if x.get("code")]
+        specs["enriched_at"] = now
+    stat[f"取れた ({src.split('_')[0]})"] += 1
+    stat["画像あり"] += bool(imgs)
+    print(f"    + {pid}  画像 {len(imgs):2d}枚  {src:18s} "
+          f"{(d.get('name') or '')[:34]}", flush=True)
+    if commit:
+        try:                               # ★1件の失敗で走行を落とさない
+            api.upsert(category=CATEGORY, product_id=pid,
+                       name=d.get("name") or "", name_jp=d.get("name") or "",
+                       set_name=None, set_name_official=None, card_set_id=None,
+                       language="ja", specs=specs, images=imgs,
+                       source=f"uniqlo_revive_{src}", source_url=PDP.format(pid=pid))
+            stat["_saved"] += 1
+        except Exception as e:
+            stat[f"保存できない ({type(e).__name__})"] += 1
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--pids-file", help="外部から貰った品番リスト (CSV/1行1品番)。"
-                    "uniqlo.com の行だけ拾い、公式→Wayback の順で救済する")
+                    "このリストだけを 公式→Wayback の順で救済する")
+    ap.add_argument("--workers", type=int, default=4, help="同時に取りに行く本数")
     a = ap.parse_args()
-    run(a.commit, a.limit, a.pids_file)
+    run(a.commit, a.limit, a.pids_file, a.workers)
 
 
 if __name__ == "__main__":
