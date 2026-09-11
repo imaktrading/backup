@@ -347,6 +347,16 @@ def high_row(r, color_jp=""):
     return row
 
 
+def _size_from(text):
+    """タイトルからサイズを読む (出品側と同じ判定を使う。決められなければ "")。"""
+    try:
+        sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
+        from ut_catalog_values import jp_size
+    except ImportError:
+        return ""
+    return jp_size(text)
+
+
 def tag_conflict(tag_no, hint_kw, catalog):
     """タグの番号が指す商品と、見つけた検索語が食い違うか → 警告文 (無ければ "")。純関数。
 
@@ -807,8 +817,10 @@ def save(items, res, now=None):
         if url not in in_high:
             add_rows.append(high_row(r))
             in_high.add(url)
+        # サイズ欄が空の出品はタイトルから読む (決められない時は空のまま = 出品側で止まる)
         add_led[url] = {"decision": "go", "product_id": p["pid"], "color": p["color"],
-                        "title": r[C_TITLE], "size": r[C_SIZE], "at": now}
+                        "title": r[C_TITLE], "size": r[C_SIZE] or _size_from(r[C_TITLE]),
+                        "at": now}
     for p in res.get("skips") or []:
         it = by_idx.get(p["idx"])
         if not it or p["pid"] not in catalog:

@@ -88,11 +88,14 @@ class NotListable(ValueError):
 
 # ── 純関数 ──────────────────────────────────────────────────────────
 def jp_size(text):
-    """「XL(LL)」「3XL(4L)」「M」→ カタログのサイズ名 (2XL は XXL)。取れなければ ""。純関数。"""
-    m = _SIZE_RE.search((text or "").upper())
-    if not m:
-        return ""
-    return {"2XL": "XXL"}.get(m.group(1), m.group(1))
+    """「XL(LL)」「3XL(4L)」「M」→ カタログのサイズ名 (2XL は XXL)。取れなければ ""。純関数。
+
+    ★2026-09-12: メルカリのサイズ欄が空で、タイトルにしか書かれていない出品がある
+      (「…Tシャツ XL」「Mサイズ」)。タイトルからも読むが、**違うサイズが2つ以上**書いてある時は
+      決められないので "" (推測しない = その行は出さない)。
+    """
+    found = {{"2XL": "XXL"}.get(s, s) for s in _SIZE_RE.findall((text or "").upper())}
+    return found.pop() if len(found) == 1 else ""
 
 
 def main_material(composition):
@@ -273,9 +276,10 @@ def load_product(product_id, db=DB_PATH):
     return {"category": r[0], "product_id": r[1], "name": r[2] or "", "specs": specs}
 
 
-def values_for_url(url, size_text, ledger=None):
+def values_for_url(url, size_text, ledger=None, title=""):
     """その仕入元URLが目視で特定済みなら、写す値 (dict)。特定されていなければ None。
 
+    size_text: シートのサイズ欄。空なら台帳のサイズ、それも空なら **タイトル** から読む。
     特定済みなのに写せない時は NotListable (推測に戻さない = その行は出さない)。
     """
     led = ledger if ledger is not None else load_ledger()
@@ -285,7 +289,8 @@ def values_for_url(url, size_text, ledger=None):
     p = load_product(e.get("product_id") or "")
     if not p:
         raise NotListable(f"特定した商品 {e.get('product_id')} がカタログに無い")
-    v = build_values(p, e.get("color") or "", size_text or e.get("size") or "")
+    size = next((s for s in (size_text, e.get("size"), title) if jp_size(s or "")), "")
+    v = build_values(p, e.get("color") or "", size)
     v["product_id"] = p["product_id"]
     return v
 

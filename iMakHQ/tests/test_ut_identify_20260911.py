@@ -168,6 +168,9 @@ class TestSave:
     def _setup(self, tmp_path, monkeypatch, fail=False):
         led = tmp_path / "led.json"
         monkeypatch.setattr(U, "LEDGER", str(led))
+        # ★カタログの依頼書の置き場も必ず差し替える (本物の requests に test の行を書かない。
+        #   2026-09-12 に実際に1行 混ざった)
+        monkeypatch.setattr(U, "CATALOG_REQ_DIR", str(tmp_path))
         monkeypatch.setattr(U, "load_ledger", lambda path=None: {})
         monkeypatch.setattr(U, "save_ledger",
                             lambda d, path=None: led.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8"))

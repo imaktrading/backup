@@ -691,7 +691,8 @@ def main():
 
         cat_v = None
         try:
-            cat_v = UCV.values_for_url(target["url"], target.get("size_text", ""), ut_ledger)
+            cat_v = UCV.values_for_url(target["url"], target.get("size_text", ""), ut_ledger,
+                                       title=title_jp)
         except UCV.NotListable as e:
             # 特定済みなのに写せない = 推測に戻さない。その行は出さない
             print(f"    ⏸ 目視で特定済みだが カタログの値で出せない → スキップ: {e}")

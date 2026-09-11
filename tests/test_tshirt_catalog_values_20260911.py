@@ -89,9 +89,24 @@ class TestOrigin:
 
 class TestSize:
     @pytest.mark.parametrize("txt,jp", [("XL(LL)", "XL"), ("3XL(4L)", "3XL"), ("2XL(3L)", "XXL"),
-                                        ("M", "M"), ("", ""), ("フリー", "")])
+                                        ("M", "M"), ("", ""), ("フリー", ""),
+                                        # ★2026-09-12: サイズ欄が空でタイトルにしか無い出品
+                                        ("⭐️ONE PIECE UNIQLO ユニクロTシャツ　XL⭐️", "XL"),
+                                        ("新品 UNIQLO UT ONE PIECE Tシャツ Mサイズ", "M"),
+                                        ("4XL(5L)以上", "4XL")])
     def test_jp_size(self, txt, jp):
         assert V.jp_size(txt) == jp
+
+    def test_two_sizes_in_one_title_is_not_guessed(self):
+        """違うサイズが2つ書いてあったら決めない (推測で出品しない)."""
+        assert V.jp_size("ユニクロ UT Tシャツ M・L 2枚") == ""
+
+    def test_title_is_the_last_resort(self):
+        led = {"https://a": {"decision": "go", "product_id": "E1", "color": "WHITE", "size": ""}}
+        import unittest.mock as m
+        with m.patch.object(V, "load_product", lambda pid, db=None: _prod()):
+            v = V.values_for_url("https://a", "", led, title="新品 UNIQLO UT ONE PIECE Tシャツ Mサイズ")
+        assert v["size_jp"] == "M" and v["size_us"] == "S"
 
 
 class TestBuildValues:
