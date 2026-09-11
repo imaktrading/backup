@@ -39,9 +39,16 @@ def test_adult_sizes_are_read():
     assert U.jp_size_of("【ユニクロ】UNIQLOUTゼルダの伝説 半袖Tシャツ【L】コラボ♡白") == "L"
 
 
-def test_ll_and_2xl_are_the_same_as_xxl():
-    assert U.jp_size_of("ユニクロ UT Tシャツ LL") == "XXL"
+def test_japanese_size_names():
+    """★2026-09-12 訂正: **LL は XL**、3L が XXL (前は LL を XXL と読んでいた)。
+
+    メルカリの UT はこの対応で書かれている: 「XL(LL)」「2XL(3L)」「3XL(4L)」。
+    読み違えると、XL の出品に XXL の候補を並べてしまう。
+    """
+    assert U.jp_size_of("ユニクロ UT Tシャツ LL") == "XL"
+    assert U.jp_size_of("ユニクロ UT Tシャツ 3L") == "XXL"
     assert U.jp_size_of("ユニクロ UT Tシャツ 2XL") == "XXL"
+    assert U.jp_size_of("ユニクロ UT Tシャツ XL(LL)") == "XL"
 
 
 def test_unknown_size_is_blank():

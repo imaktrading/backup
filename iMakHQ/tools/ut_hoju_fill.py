@@ -67,8 +67,12 @@ SEARCH_URL = "https://jp.mercari.com/search?status=on_sale&order=asc&sort=price&
 JP_TO_US = {"S": "XS", "M": "S", "L": "M", "XL": "L",
             "XXL": "XL", "3XL": "2XL", "4XL": "3XL"}
 
+# ★2026-09-12: 日本の表記は **LL = XL**、3L = XXL、4L = 3XL、5L = 4XL。
+#   「LL → XXL」と読んでいたので、「XL(LL)」の出品に **1サイズ大きい候補**を並べていた
+#   (メルカリの UT は「XL(LL)」「3XL(4L)」の形で書かれる)。長い表記から先に見る。
 _SIZE_ALIASES = [("4XL", "4XL"), ("3XL", "3XL"), ("XXL", "XXL"), ("2XL", "XXL"),
-                 ("LL", "XXL"), ("XL", "XL"), ("XS", "XS"),
+                 ("5L", "4XL"), ("4L", "3XL"), ("3L", "XXL"), ("2L", "XL"), ("LL", "XL"),
+                 ("XL", "XL"), ("XS", "XS"),
                  ("L", "L"), ("M", "M"), ("S", "S")]
 
 
@@ -130,6 +134,52 @@ def build_keyword(title, max_words=_KEY_WORDS):
     return " ".join(words) + " UT Tシャツ"
 
 
+_COLLAB_NOT_A_NAME = ("その他", "-", "ー", "")
+
+
+def catalog_keyword(name_jp, collab_jp, max_words=_KEY_WORDS):
+    """カタログの作品名から検索語を作る (純関数)。作れなければ ''。
+
+    ★2026-09-12 (設計 iMakHQ/UT_FLOW.md): 目視で商品が決まった行は、**出品者の書いた
+      タイトル**ではなく **カタログの作品名**で探す。タイトルは店ごとに語がばらつくので、
+      同じ商品でも探し方が毎回変わっていた。
+      コラボ名は「ドラゴンボール / ドラゴンボールDAIMA」のように併記があるので先頭を採り、
+      商品名しか無い時 (呪術廻戦 等) は「マンガUT 集英社創業100周年 /呪術廻戦」の **末尾**を採る。
+    """
+    src = (collab_jp or "").strip()
+    if src in _COLLAB_NOT_A_NAME:
+        src = ""                      # 「その他」は作品名ではない (検索語にすると全く別の物が出る)
+    if src:
+        src = re.split(r"[/／]", src)[0]
+    else:
+        n = (name_jp or "").strip()
+        src = re.split(r"[/／]", n)[-1] if re.search(r"[/／]", n) else n
+    return build_keyword(src, max_words)
+
+
+def identity_hints(ledger, load_product=None):
+    """目視で特定した行 → {仕入元URL: {"kw": 検索語, "size": JPサイズ}} (I/O: カタログを引く)。"""
+    if load_product is None:
+        sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
+        from ut_catalog_values import load_product
+    out, cache = {}, {}
+    for url, e in (ledger or {}).items():
+        if (e or {}).get("decision") != "go" or not e.get("product_id"):
+            continue
+        pid = e["product_id"]
+        if pid not in cache:
+            cache[pid] = load_product(pid)
+        p = cache[pid]
+        if not p:
+            continue
+        kw = catalog_keyword(p.get("name"), (p.get("specs") or {}).get("collab"))
+        if kw:
+            # サイズはシートの欄が空のことがあるので、台帳のサイズ → 出品タイトル の順に読む
+            out[url] = {"kw": kw,
+                        "size": jp_size_of(e.get("size") or "") or jp_size_of(e.get("title") or "")}
+    return out
+
+
 def size_matches(want, got):
     """JP サイズが同じか。どちらかが読めない / 子供服なら False (fail-closed)。"""
     if not want or not got or "KIDS" in (want, got):
@@ -161,14 +211,15 @@ def usable_candidate(cond, ship, reviews, is_shops, min_reviews=MIN_REVIEWS,
     return True
 
 
-def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=False):
+def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=False, hints=None):
     """探す対象の UT 行 → [{row, itemID, title, size, have}] (純関数)。
 
     sold_out=False (既定) … **出品中**で補URL が max_backups 未満の行 = 予備を足す
     sold_out=True         … **売り切れた**行 = また買える仕入元を探す (再仕入れ)
+    hints … 目視で特定した行の {仕入元URL: {kw, size}} (identity_hints)。あればそちらを使う。
     """
     import sheet_io
-    B, SOLD, TITLE = sheet_io.PRODUCT_COL_ITEMID, 3, 2
+    B, SOLD, TITLE, URL = sheet_io.PRODUCT_COL_ITEMID, 3, 2, 0
     CAT = sheet_io.PRODUCT_COL_CATEGORY
     AUX = sheet_io.PRODUCT_COL_AUX_START
 
@@ -189,9 +240,11 @@ def select_targets(rows2d, max_backups=AUX_MAX, category=CATEGORY, sold_out=Fals
         if not sold_out and len(have) >= max_backups:
             continue
         title = cell(r, TITLE)
+        hint = (hints or {}).get(cell(r, URL)) or {}
         out.append({"row": n, "itemID": cell(r, B), "title": title,
-                    "size": jp_size_of(title), "have": have,
-                    "keyword": build_keyword(title)})
+                    "size": hint.get("size") or jp_size_of(title), "have": have,
+                    "keyword": hint.get("kw") or build_keyword(title),
+                    "from_catalog": bool(hint.get("kw"))})
     return out
 
 
@@ -251,12 +304,23 @@ def search(limit=None, sold_out=False):
     import sheet_io
 
     today = datetime.date.today().isoformat()
-    targets = select_targets(sheet_io._product_ws().get_all_values(), sold_out=sold_out)
+    # 目視で特定した行は カタログの作品名で探す (タイトルの語は店ごとにばらつく)
+    try:
+        sys.path.insert(0, r"C:\dev\iMak\iMakMercari")
+        from ut_catalog_values import load_ledger as _led
+        hints = identity_hints(_led())
+    except Exception as e:                                     # noqa: BLE001
+        print(f"  (特定済みの検索語を読めず、タイトルから作ります: {type(e).__name__})")
+        hints = {}
+    targets = select_targets(sheet_io._product_ws().get_all_values(), sold_out=sold_out,
+                             hints=hints)
     targets = [t for t in targets if t["keyword"] and t["size"] and t["size"] != "KIDS"]
     if limit:
         targets = targets[:limit]
     what = "売り切れて再仕入れしたい" if sold_out else "補URLが足りない"
-    print(f"▶ {what} UT: {len(targets)}件 を探します")
+    n_cat = sum(1 for t in targets if t.get("from_catalog"))
+    print(f"▶ {what} UT: {len(targets)}件 を探します "
+          f"(うち {n_cat}件 はカタログの作品名で探す / 残りは出品タイトルから)")
     if not targets:
         return 0
     cache = load_cache(_cache_path(sold_out))
