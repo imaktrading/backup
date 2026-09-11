@@ -2793,14 +2793,21 @@ class HomePanel:
     def open_mirror_pmbo(self):
         """UK/AU/CA のミラー出品に 広告10% と ベストオファー を付ける (2026-08-21)。
 
-        ★いきなり書かない。**まず対象を数えて見せて、人が了解してから**実行する。
-          3,500件規模を1件ずつ書き換える処理なので、押し間違いで走らせない。
+        ★2026-09-11 ユーザー「押して延々件数数えて、やりますか?が出てくる。押したらやれよ」:
+          確認をやめ、**押したら実行**する。数える段は実行の中で1回だけ走る
+          (以前は 数える → OK → 実行 で一覧を2回取っていた)。
+          付けるのは「付いていない物だけ」で、既に広告/ベストオファーがある物は触らない。
+          走っている間にもう一度押しても2本目は起動しない。
         """
         import threading
 
         btn = getattr(self, "pmbo_btn", None)
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "tools", "mirror_promo_bestoffer.py")
+        if getattr(self, "_pmbo_running", False):
+            messagebox.showinfo("Pm/Bo", "実行中です。終わったら結果を出します。")
+            return
+        self._pmbo_running = True
 
         def _label(text):
             if btn is not None:
@@ -2809,38 +2816,30 @@ class HomePanel:
                 except Exception:                             # noqa: BLE001
                     pass
 
-        def _run(write):
+        def _run():
             env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
-            args = [sys.executable, "-X", "utf8", script] + (["--write"] if write else [])
-            _label("📣 実行中…" if write else "📣 数えています…")
+            args = [sys.executable, "-X", "utf8", script, "--write"]
+            _label("📣 実行中…")
             try:
                 r = _run_step(args, cwd=os.path.dirname(script), env=env,
                                    capture_output=True, text=True,
-                                   encoding="utf-8", errors="replace",
-                                   timeout=10800 if write else 1800)
+                                   encoding="utf-8", errors="replace", timeout=10800)
                 out = (r.stdout or "") + (r.stderr or "")
                 if r.returncode not in (0, 1):
                     raise RuntimeError(out[-400:])
+                # 1件ごとの失敗行と途中経過は畳む (件数は最後の行に出る)。
+                #   行頭が字下げ無しの「⚠️ 取れなかったページ」は残す。
+                summary = "\n".join(ln for ln in out.splitlines()
+                                     if ln.strip() and not ln.startswith(("  ⚠️ ", "    ")))
+                self.root.after(0, lambda: messagebox.showinfo("Pm/Bo 完了", summary[-1500:]))
             except Exception as e:                            # noqa: BLE001
                 self.root.after(0, lambda: messagebox.showerror(
                     "Pm/Bo", f"失敗しました:\n{e}"))
+            finally:
+                self._pmbo_running = False
                 _label("📣 Pm/Bo")
-                return
-            _label("📣 Pm/Bo")
-            if write:
-                self.root.after(0, lambda: messagebox.showinfo("Pm/Bo 完了", out[-1500:]))
-                return
-            # 一覧を見せて、了解が取れた時だけ本番へ
-            summary = "\n".join(ln for ln in out.splitlines()
-                                 if ln.strip() and not ln.startswith("→"))
 
-            def _ask():
-                if messagebox.askyesno("Pm/Bo — この内容で付けますか",
-                                       summary[-1500:] + "\n\n実行しますか?"):
-                    threading.Thread(target=_run, args=(True,), daemon=True).start()
-            self.root.after(0, _ask)
-
-        threading.Thread(target=_run, args=(False,), daemon=True).start()
+        threading.Thread(target=_run, daemon=True).start()
 
     def open_listing(self, mode="new"):
         """新規出品 / 既存メンテ を別ウィンドウで開く（既にあれば前面表示）。"""

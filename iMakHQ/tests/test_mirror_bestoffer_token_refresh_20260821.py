@@ -65,13 +65,19 @@ def test_other_errors_are_not_treated_as_token_error():
     assert not M._is_token_error("")
 
 
-def test_loop_refreshes_and_retries_once_on_expiry():
-    """失効を掴んだら その場で取り直して1回やり直す (次の周回に送らない)."""
-    src = open(os.path.join(os.path.dirname(__file__), "..", "tools",
-                            "mirror_promo_bestoffer.py"), encoding="utf-8").read()
-    assert "if _is_token_error(res):" in src
-    assert "trading.force()" in src
-    assert "res = enable_best_offer(fx, trading.get(), key, i)" in src
+def test_loop_refreshes_and_retries_once_on_expiry(tmp_path, monkeypatch):
+    """失効を掴んだら その場で取り直して1回やり直す (次の周回に送らない).
+    ★2026-09-11: 並列送信に変えたので、動きで確かめる."""
+    monkeypatch.setattr(M, "PROGRESS_LOG", str(tmp_path / "p.jsonl"))
+    fx = FakeFx()
+    t = M.TradingToken(fx)
+    calls = []
+
+    def send(_fx, tok, key, i):
+        calls.append(tok)
+        return "NG: IAF token supplied is expired." if tok == "tok0" else "OK"
+    ok_by, ng, _na = M.send_best_offers(fx, t, [("uk", "1")], workers=1, send=send)
+    assert calls == ["tok0", "tok1"] and ok_by == {"uk": 1} and ng == 0
 
 
 def test_progress_is_recorded_per_item():
@@ -114,11 +120,12 @@ def test_without_state_table_falls_back_to_item_flag():
 def test_state_fetch_uses_getsellerlist_not_activelist():
     src = open(os.path.join(os.path.dirname(__file__), "..", "tools",
                             "mirror_promo_bestoffer.py"), encoding="utf-8").read()
-    i = src.find("def fetch_best_offer_state")
+    i = src.find("def fetch_listings")
     assert i > 0
-    body = src[i:i + 2000]
+    body = src[i:i + 2500]
     assert "GetSellerList" in body
     assert "GranularityLevel" in body
+    assert "GetMyeBaySelling" not in src, "一覧を2本取る作りに戻っている (2026-09-11)"
 
 
 def test_duplicate_item_ids_are_dropped():

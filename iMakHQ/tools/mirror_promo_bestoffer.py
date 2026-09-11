@@ -13,10 +13,21 @@
 
 安全側の作り:
     - 既定は **一覧を出すだけ**。`--write` を付けた時だけ eBay に書く
+      (★2026-09-11 ユーザー「押したらやれよ」: パネルのボタンは確認なしで --write を呼ぶ)
     - **既に広告に入っている出品は触らない** (eBaymag が作った 5%/9% のキャンペーンに
       入っている物がある。率を勝手に上書きすると取り合いになる)
     - 既にベストオファーが付いている出品も触らない
-    - サイトの判定は **ViewItemURL のドメイン**。Site 要素は ActiveList では返らない
+    - ★2026-09-11: 出品一覧は **GetSellerList 1回の走査だけ**で取る (サイト/状態/ベストオファー
+      が全部入っている)。サイトは `<Site>` で見る (GetSellerList の ViewItemURL は
+      ミラーでも ebay.com になる)。**走査で見えた出品しか送らない** = 分からない物は触らない
+
+★2026-09-11 に遅さの原因を実測で潰した (ユーザー「手でやったらすぐなのに」):
+    - 押すと「数える」で全部取り → OK → 「実行」で **また全部取り直して**いた (2回)
+    - ActiveList の読み方が XML 全体を拾い、**終了済みの出品**まで送っていた (185回 失敗)
+    - 状態表の取得が1ページでも欠けると、残りが「付いていない」扱いになり、
+      **成功済みに送り直して**いた (累計 1,454回。9/11 の走行は 256件中 163件がこれ)
+    - サイズ表記が eBay に通らないミラーは何度送っても落ちる (206回)。1週間は送らない
+    - 1件ずつ直列で ~2.8秒/件 → 4本並列
 
 使い方:
     python mirror_promo_bestoffer.py              # 対象を数えるだけ
@@ -50,31 +61,62 @@ SITES = {
 }
 
 
+# GetSellerList の <Site> → サイトの略称。US / Germany 等はここに無い = 対象外。
+SITE_BY_NAME = {"UK": "uk", "Australia": "au", "Canada": "ca"}
+
+
 # ── 純関数 (test 可) ────────────────────────────────────────────────
-def site_of(view_item_url):
-    """ViewItemURL → サイトの略称。分からなければ空 (推測しない)。"""
-    m = re.search(r"https?://(?:www\.)?([^/]+)", view_item_url or "")
-    host = m.group(1).lower() if m else ""
-    for key, (dom, _s, _m, _c) in SITES.items():
-        if host == dom or host.endswith("." + dom):
-            return key
-    return ""
+def parse_seller_list(xml):
+    """GetSellerList (Fine) の1ページ → [{item_id, site, best_offer, title}] (純関数)。
 
-
-def parse_active(xml):
-    """ActiveList の XML → [{item_id, site, best_offer, title}] (純関数)。"""
+    - サイトは `<Site>`。知らない名前は空 (= 触らない)
+    - `<ListingStatus>` が Active 以外は入れない (終了済みに送らない)
+    - `<BestOfferEnabled>` は付いていない時に省かれる → 無い = 付いていない
+    """
     out = []
     for it in re.findall(r"<Item>(.*?)</Item>", xml or "", re.S):
         iid = re.search(r"<ItemID>(\d+)</ItemID>", it)
-        url = re.search(r"<ViewItemURL>(.*?)</ViewItemURL>", it)
+        st = re.search(r"<ListingStatus>(\w+)</ListingStatus>", it)
+        if not iid or not st or st.group(1) != "Active":
+            continue
+        site = re.search(r"<Site>(\w+)</Site>", it)
         bo = re.search(r"<BestOfferEnabled>(\w+)</BestOfferEnabled>", it)
         ttl = re.search(r"<Title>(.*?)</Title>", it)
-        if not iid:
-            continue
         out.append({"item_id": iid.group(1),
-                    "site": site_of(url.group(1) if url else ""),
-                    "best_offer": (bo.group(1).lower() == "true") if bo else False,
+                    "site": SITE_BY_NAME.get(site.group(1) if site else "", ""),
+                    "best_offer": bool(bo) and bo.group(1).lower() == "true",
                     "title": ttl.group(1) if ttl else ""})
+    return out
+
+
+# 何度送っても同じ理由で落ちる結果 → 何日 送らないか。
+#   サイズ表記: eBaymag が値を直すまで通らない (累計 206回)。1週間おきに1回だけ試す
+#   20135: そのサイトのカテゴリにベストオファーが無い。eBay は **Warning (=成功扱い) で返す**
+#          ので、以前は「成功」と数えて押すたびに送り直していた (9/11 は 409件中 261件がこれ。
+#          1件に6回送っていた)。カテゴリの仕様なので 30日おきに1回だけ試す
+PERMANENT_NG = (("is not a valid value", 7), ("20135", 30))
+BO_UNAVAILABLE = "SKIP: このカテゴリはベストオファー非対応 (20135)"
+
+
+def recently_failed_for_good(log_lines, now=None):
+    """進捗ログ → **最後の結果**が PERMANENT_NG で、まだ待つ日数内の itemID の集合 (純関数)。"""
+    import datetime
+    now = now or datetime.datetime.now()
+    last = {}
+    for ln in log_lines:
+        try:
+            r = json.loads(ln)
+            last[r["item_id"]] = (r["ts"], r.get("result") or "")
+        except (ValueError, KeyError, TypeError):
+            continue
+    out = set()
+    for iid, (ts, res) in last.items():
+        try:
+            t = datetime.datetime.fromisoformat(ts)
+        except ValueError:
+            continue
+        if any(k in res and (now - t).days < d for k, d in PERMANENT_NG):
+            out.add(iid)
     return out
 
 
@@ -122,66 +164,55 @@ def _mk_headers(tok, marketplace):
             "Content-Type": "application/json"}
 
 
-def fetch_active(fx, tok):
-    """出品中を全ページ取る。取り切れなければ **例外**。
+def fetch_listings(fx, trading, page_tries=3):
+    """出品中を GetSellerList (Fine) で全部取る → (items, 取れなかったページ番号の list)。
 
-    途中で切れたのを「全部」と思うと、未処理を「対応済」と誤認する
-    (failclosed_must_skip_not_destructive と同じ理由)。
-    """
-    items, page = [], 1
-    while page <= 40:
-        inner = ("<ActiveList><Include>true</Include><Pagination>"
-                 "<EntriesPerPage>200</EntriesPerPage>"
-                 "<PageNumber>%d</PageNumber></Pagination></ActiveList>"
-                 "<DetailLevel>ReturnAll</DetailLevel>" % page)
-        xml = fx.post("GetMyeBaySelling", inner, tok, site="0")
-        if "<Ack>Failure</Ack>" in (xml or ""):
-            raise RuntimeError("ActiveList の取得に失敗 (%d ページ目)" % page)
-        got = parse_active(xml)
-        if not got:
-            break
-        items.extend(got)
-        page += 1
-    return items
-
-
-def fetch_best_offer_state(fx, tok, windows=4):
-    """{itemID: ベストオファーが付いているか} を GetSellerList で取る。
-
-    ★2026-08-21: `GetMyeBaySelling(ActiveList)` は **BestOfferEnabled を返さない**。
-      それに気づかず ActiveList で判定していたので、全件が「付いていない」に見え、
-      **毎回 3,504件を送り直す**作りになっていた (前回 1,787件は実際には成功していたのに、
-      再走行でまた全部送るところだった)。GetSellerList は GranularityLevel=Fine で返す。
-      取得は 200件/ページなので、3,504回の書込を数十回の読取に置き換えられる。
-
-    EndTime の窓は eBay 側の上限が 121日なので、110日ずつ前に進めて足す。
+    ★2026-08-21: ActiveList は BestOfferEnabled を返さないので GetSellerList を使う。
+    ★2026-09-11: 以前は ActiveList (一覧) と GetSellerList (状態) の2本を取っていた。
+      状態の側は Failure のページで **黙って打ち切り**、残りの出品が「付いていない」扱いに
+      なって成功済みに送り直していた。今は1本だけ取り、
+      - Failure / 空のページは その場で page_tries 回 取り直す
+      - それでも取れないページは **送らない** (見えていない出品は触らない) で、件数を報告する
+    EndTimeFrom = 今 → 終了済みは最初から入らない。GTC は30日で更新されるので窓は1つで足りる
+    (eBay の上限は 121日)。
     """
     import datetime
-    out = {}
+    from concurrent.futures import ThreadPoolExecutor
     now = datetime.datetime.utcnow()
-    for w in range(windows):
-        lo = now + datetime.timedelta(days=110 * w - 1)
-        hi = now + datetime.timedelta(days=110 * (w + 1) - 1)
-        for page in range(1, 60):
-            inner = ("<GranularityLevel>Fine</GranularityLevel>"
-                     "<EndTimeFrom>%sZ</EndTimeFrom><EndTimeTo>%sZ</EndTimeTo>"
-                     "<Pagination><EntriesPerPage>200</EntriesPerPage>"
-                     "<PageNumber>%d</PageNumber></Pagination>"
-                     % (lo.strftime("%Y-%m-%dT%H:%M:%S"),
-                        hi.strftime("%Y-%m-%dT%H:%M:%S"), page))
-            xml = fx.post("GetSellerList", inner, tok, site="0")
-            if "<Ack>Failure</Ack>" in (xml or ""):
-                break
-            got = 0
-            for it in re.findall(r"<Item>(.*?)</Item>", xml or "", re.S):
-                iid = re.search(r"<ItemID>(\d+)</ItemID>", it)
-                bo = re.search(r"<BestOfferEnabled>(\w+)</BestOfferEnabled>", it)
-                if iid:
-                    got += 1
-                    out[iid.group(1)] = bool(bo) and bo.group(1).lower() == "true"
-            if got < 200:
-                break
-    return out
+    lo = now.strftime("%Y-%m-%dT%H:%M:%S")
+    hi = (now + datetime.timedelta(days=119)).strftime("%Y-%m-%dT%H:%M:%S")
+
+    def get_page(page):
+        inner = ("<GranularityLevel>Fine</GranularityLevel>"
+                 "<EndTimeFrom>%sZ</EndTimeFrom><EndTimeTo>%sZ</EndTimeTo>"
+                 "<Pagination><EntriesPerPage>200</EntriesPerPage>"
+                 "<PageNumber>%d</PageNumber></Pagination>" % (lo, hi, page))
+        for _ in range(page_tries):
+            tok = trading.get()
+            xml = fx.post("GetSellerList", inner, tok, site="0") or ""
+            if "<Ack>Failure</Ack>" not in xml and "<ItemArray>" in xml:
+                return xml
+            if _is_token_error(xml):
+                trading.force(stale=tok)
+            time.sleep(2)
+        return ""
+
+    first = get_page(1)
+    m = re.search(r"<TotalNumberOfPages>(\d+)</TotalNumberOfPages>", first)
+    if not m:
+        raise RuntimeError("出品一覧の1ページ目が取れません (件数が分からないので中止)")
+    pages = int(m.group(1))
+    # ★2026-09-11: 1ページ ~7秒 × 19ページ = 2分強が待ちの大半。2ページ目以降は並べて取る
+    #   (呼出回数は同じ)。並び順は元のページ順に戻す。
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        rest = list(ex.map(get_page, range(2, pages + 1)))
+    items, missing = [], []
+    for page, xml in zip(range(1, pages + 1), [first] + rest):
+        if xml:
+            items.extend(parse_seller_list(xml))
+        else:
+            missing.append(page)
+    return items, missing
 
 
 def fetch_advertised(tok):
@@ -210,6 +241,7 @@ def fetch_advertised(tok):
 
 
 ADS_CHUNK = 200      # bulk API の1回あたり上限。超えた分は黙って捨てられる
+AD_EXISTS = "SKIP: 既に広告あり"
 
 
 def add_ads(tok, site_key, item_ids):
@@ -233,10 +265,14 @@ def add_ads(tok, site_key, item_ids):
         for res in r.json().get("responses", []):
             i = str(res.get("listingId"))
             seen.add(i)
+            errs = "; ".join(e.get("message", "") for e in (res.get("errors") or []))
             if res.get("statusCode") in (200, 201):
                 out.append((i, "OK"))
+            elif "already exists" in errs:
+                # ★2026-09-11: RUNNING 以外のキャンペーンに入っている広告は fetch_advertised に
+                #   見えず、毎回送って「既にある」で落ちていた (6件)。触らない側に数える
+                out.append((i, AD_EXISTS))
             else:
-                errs = "; ".join(e.get("message", "") for e in (res.get("errors") or []))
                 out.append((i, "NG %s: %s" % (res.get("statusCode"), errs[:90])))
         # 応答が返ってこなかった分を「成功」に数えない (silent drop を作らない)
         for i in chunk:
@@ -259,34 +295,53 @@ class TradingToken:
     """
 
     def __init__(self, fx):
+        import threading
         self.fx = fx
         self.value = fx.token()
         self.at = time.time()
         self.refreshed = 0
+        self._lock = threading.Lock()      # ★2026-09-11: 並列で送るので取り直しは1本ずつ
 
     def get(self):
         if time.time() - self.at >= TOKEN_MAX_AGE_SEC:
             self.force()
         return self.value
 
-    def force(self):
-        self.fx.refresh()
-        self.value = self.fx.token()
-        self.at = time.time()
-        self.refreshed += 1
-        print("    (トークンを取り直しました %d回目)" % self.refreshed, flush=True)
+    def force(self, stale=None):
+        """取り直す。stale を渡すと、**その値のままの時だけ**取り直す
+        (並列の4本が同時に失効を掴んでも、取り直しは1回で済む)。"""
+        with self._lock:
+            if stale is not None and self.value != stale:
+                return
+            self.fx.refresh()
+            self.value = self.fx.token()
+            self.at = time.time()
+            self.refreshed += 1
+            print("    (トークンを取り直しました %d回目)" % self.refreshed, flush=True)
+
+
+import threading                                 # noqa: E402
+_LOG_LOCK = threading.Lock()
 
 
 def _log_progress(site_key, item_id, res):
     """1件ごとに追記する。**途中で落ちても どこまで済んだか残す**ため。"""
     try:
         os.makedirs(os.path.dirname(PROGRESS_LOG), exist_ok=True)
-        with open(PROGRESS_LOG, "a", encoding="utf-8") as f:
+        with _LOG_LOCK, open(PROGRESS_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                 "site": site_key, "item_id": item_id,
                                 "result": res}, ensure_ascii=False) + chr(10))
     except OSError:
         pass                                     # 記録できなくても本処理は続ける
+
+
+def _read_progress_lines():
+    try:
+        with open(PROGRESS_LOG, encoding="utf-8") as f:
+            return f.readlines()
+    except OSError:
+        return []
 
 
 def _is_token_error(res):
@@ -303,6 +358,10 @@ def enable_best_offer(fx, tok, site_key, item_id):
              "<BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails></Item>" % item_id)
     xml = fx.post("ReviseFixedPriceItem", inner, tok, site=sid)
     ack = re.search(r"<Ack>(\w+)</Ack>", xml or "")
+    # ★2026-09-11: カテゴリがベストオファー非対応だと eBay は **Warning 20135** で返し、
+    #   付かない。Warning を一律「OK」にしていたので、付いていない物を成功と数えていた。
+    if re.search(r"<ErrorCode>20135</ErrorCode>", xml or ""):
+        return BO_UNAVAILABLE
     if ack and ack.group(1) in ("Success", "Warning"):
         return "OK"
     msgs = re.findall(r"<LongMessage>(.*?)</LongMessage>", xml or "")
@@ -322,22 +381,26 @@ def main():
 
     import ads_add_new_listings as ADS
     import fix_de_speedpak_shipping as fx
+    t0 = time.time()
     fx.refresh()
     trading = TradingToken(fx)
-    trading_tok = trading.get()
     sell_tok = ADS._token()
 
-    items = fetch_active(fx, trading_tok)
-    print("出品中 %d件 を確認" % len(items))
+    items, missing = fetch_listings(fx, trading)
+    print("出品中 %d件 を確認 (%.0f秒)" % (len(items), time.time() - t0), flush=True)
+    if missing:
+        print("⚠️ 取れなかったページ %d枚 (%s) — そこに載っている出品は今回 送りません"
+              % (len(missing), ",".join(map(str, missing))))
     advertised = fetch_advertised(sell_tok)
-    print("すでに広告に入っている出品 %d件 (サイト横断・eBaymag 分を含む)" % len(advertised))
-    bo_state = fetch_best_offer_state(fx, trading.get())
-    print("ベストオファーの状態を取得: %d件 (うち付いている %d件)"
-          % (len(bo_state), sum(1 for v in bo_state.values() if v)))
+    print("すでに広告に入っている出品 %d件 (サイト横断・eBaymag 分を含む)" % len(advertised),
+          flush=True)
 
-    todo = plan(items, advertised, a.only, bo_state)
+    todo = plan(items, advertised, a.only)
+    skip = recently_failed_for_good(_read_progress_lines())
     for key in SITES:
         d = todo[key]
+        d["skipped"] = [i for i in d["bo"] if i in skip]
+        d["bo"] = [i for i in d["bo"] if i not in skip]
         if a.limit:
             d["promo"], d["bo"] = d["promo"][:a.limit], d["bo"][:a.limit]
         print("\n=== %s (%s)" % (key.upper(), SITES[key][0]))
@@ -345,6 +408,8 @@ def main():
               % (len(d["promo"]), d["ad_exists"]))
         print("  ベストオファーを付ける: %d件 / 既にあり(触らない): %d件"
               % (len(d["bo"]), d["bo_exists"]))
+        if d["skipped"]:
+            print("  (付けられない/サイズ表記で落ちる %d件は送らない)" % len(d["skipped"]))
 
     if not a.write:
         print("\n→ 実際に付けるには --write")
@@ -354,32 +419,71 @@ def main():
     for key in SITES:
         d = todo[key]
         if d["promo"]:
-            for i, res in add_ads(sell_tok, key, d["promo"]):
-                if res != "OK":
+            res_ads = add_ads(sell_tok, key, d["promo"])
+            for i, res in res_ads:
+                if res not in ("OK", AD_EXISTS):
                     ng += 1
                     print("  ⚠️ %s 広告 %s: %s" % (key, i, res))
-            print("  ✅ %s 広告10%%: %d件 送信" % (key.upper(), len(d["promo"])))
-        done = 0
-        for n, i in enumerate(d["bo"], 1):
-            res = enable_best_offer(fx, trading.get(), key, i)
-            if _is_token_error(res):
-                # 失効を掴んだら **その場で取り直して1回だけやり直す** (次の周回に送らない)
-                trading.force()
-                res = enable_best_offer(fx, trading.get(), key, i)
-            ok = res == "OK"
-            done += ok
-            if not ok:
-                ng += 1
-                print("  ⚠️ %s ベストオファー %s: %s" % (key, i, res), flush=True)
-            _log_progress(key, i, res)
-            if n % 100 == 0:
-                print("    %s %d/%d 済 (成功 %d)" % (key.upper(), n, len(d["bo"]), done),
-                      flush=True)
-        if d["bo"]:
-            print("  ✅ %s ベストオファー: %d件中 %d件 成功" % (key.upper(), len(d["bo"]), done),
-                  flush=True)
-    print(("\n失敗 %d件" % ng) if ng else "\n全件 成功")
+            print("  ✅ %s 広告10%%: %d件 付けた (既にあった %d件)"
+                  % (key.upper(), sum(1 for _i, r in res_ads if r == "OK"),
+                     sum(1 for _i, r in res_ads if r == AD_EXISTS)), flush=True)
+    jobs = [(key, i) for key in SITES for i in todo[key]["bo"]]
+    ok_by, ng_bo, na = send_best_offers(fx, trading, jobs)
+    ng += ng_bo
+    for key in SITES:
+        if todo[key]["bo"]:
+            print("  ✅ %s ベストオファー: %d件中 %d件 成功"
+                  % (key.upper(), len(todo[key]["bo"]), ok_by.get(key, 0)), flush=True)
+    if na:
+        print("  (カテゴリがベストオファー非対応で付けられない %d件 — 30日は送りません)" % na)
+    print("\n所要 %.0f秒" % (time.time() - t0))
+    print(("失敗 %d件" % ng) if ng else "全件 成功")
     return 1 if ng else 0
+
+
+WORKERS = 4      # ★2026-09-11: 1件 ~2.8秒の待ちが大半なので並べる。呼出回数は変わらない
+
+
+def send_best_offers(fx, trading, jobs, workers=WORKERS, send=None):
+    """[(site_key, itemID)] にベストオファーを付ける → ({site: 成功数}, 失敗数, 付けられない数)。
+
+    send は test 用 (既定は enable_best_offer)。1件ごとに進捗ログへ書く。
+    「付けられない」(カテゴリ非対応) は失敗に数えない (こちらで直せる物ではない)。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    send = send or enable_best_offer
+    ok_by, lock, state = {}, threading.Lock(), {"n": 0, "ng": 0, "na": 0}
+
+    def _send(tok, key, i):
+        try:
+            return send(fx, tok, key, i)
+        except Exception as e:                             # noqa: BLE001
+            return "NG: %s: %s" % (type(e).__name__, str(e)[:80])   # 1件の例外で全体を止めない
+
+    def one(job):
+        key, i = job
+        tok = trading.get()
+        res = _send(tok, key, i)
+        if _is_token_error(res):
+            # 失効を掴んだら **その場で取り直して1回だけやり直す** (次の周回に送らない)
+            trading.force(stale=tok)
+            res = _send(trading.get(), key, i)
+        _log_progress(key, i, res)
+        with lock:
+            state["n"] += 1
+            if res == "OK":
+                ok_by[key] = ok_by.get(key, 0) + 1
+            elif res == BO_UNAVAILABLE:
+                state["na"] += 1
+            else:
+                state["ng"] += 1
+                print("  ⚠️ %s ベストオファー %s: %s" % (key, i, res), flush=True)
+            if state["n"] % 100 == 0:
+                print("    ベストオファー %d/%d 済" % (state["n"], len(jobs)), flush=True)
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        list(ex.map(one, jobs))
+    return ok_by, state["ng"], state["na"]
 
 
 if __name__ == "__main__":

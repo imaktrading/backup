@@ -32,12 +32,19 @@ def test_オファー対応の隣にある():
     assert i_pm < i_of, "オファー対応 より後に pack すると隣に並ばない"
 
 
-def test_押しても即実行しない():
-    """★確認を挟む。3,500件を1件ずつ書き換えるので、押し間違いで走らせない."""
+def test_押したら実行する():
+    """★2026-09-11 ユーザー「押して延々件数数えて、やりますか?が出てくる。押したらやれよ」.
+    (2026-08-21 の「確認を挟む」はこの指示で撤回。付けるのは付いていない物だけ)"""
     body = SRC[SRC.index("def open_mirror_pmbo"):SRC.index("def open_listing")]
-    assert "askyesno" in body
-    # 最初の起動は --write なし (数えるだけ)
-    assert "args=(False,)" in body
+    assert "askyesno" not in body
+    assert 'script, "--write"]' in body
+
+
+def test_二重に走らせない():
+    """押し直しで2本走ると、同じ出品に2回送る."""
+    body = SRC[SRC.index("def open_mirror_pmbo"):SRC.index("def open_listing")]
+    assert "_pmbo_running" in body
+    assert "self._pmbo_running = False" in body[body.index("finally:"):]
 
 
 def test_同じ道具を呼んでいる():
