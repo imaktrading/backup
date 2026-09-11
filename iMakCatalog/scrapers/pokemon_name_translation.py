@@ -63,22 +63,22 @@ TRAINER_NAME_MAP: dict[str, str] = {
     "ナンジャモ":      "Iono",
     "シロナ":          "Cynthia",
     "ボタン":          "Penny",    # ★2026-09-11 是正 (Atticus はシュウメイ。Bulbapedia 再取得)
-    "カエデ":          "Tulip",
+    "カエデ":          "Katy",    # ★2026-09-11 是正 (Bulbapedia jname 一致)
     "メロコ":          "Mela",
     "グルーシャ":      "Grusha",
-    "リップ":          "Tyme",
+    "リップ":          "Tulip",    # ★2026-09-11 是正 (Bulbapedia jname 一致)
     "ハッサク":        "Hassel",
-    "フトゥー":        "Brassius",
-    "サザレ":          "Lacey",
+    # "フトゥー": 削除 2026-09-11 (英語名が別人。Bulbapedia で正解が確定しないので空欄=出さない)
+    "サザレ":          "Perrin",    # ★2026-09-11 是正 (Bulbapedia jname 一致)
     "ペパー":          "Arven",
     "ネモ":            "Nemona",
-    "オモダカ":        "Crispin",
+    "オモダカ":        "Geeta",    # ★2026-09-11 是正 (Bulbapedia jname 一致)
     "ナタネ":          "Gardenia",
     # Sword/Shield era (頻出)
     "マリィ":          "Marnie",
     "ホップ":          "Hop",
     "ローズ":          "Rose",
-    "オリーヴ":        "Olive",
+    "オリーヴ":        "Oleana",    # ★2026-09-11 是正 (Bulbapedia jname 一致)
     "ビート":          "Bede",
     "サイトウ":        "Bea",
     "オニオン":        "Allister",
@@ -86,7 +86,7 @@ TRAINER_NAME_MAP: dict[str, str] = {
     "ネズ":            "Piers",
     "マクワ":          "Gordie",
     "メロン":          "Melony",
-    "ラビ":            "Klara",
+    # "ラビ": 削除 2026-09-11 (英語名が別人。Bulbapedia で正解が確定しないので空欄=出さない)
     "セイボリー":      "Avery",
     # Sun/Moon era
     "リーリエ":        "Lillie",
@@ -102,7 +102,7 @@ TRAINER_NAME_MAP: dict[str, str] = {
     "ヒカリ":          "Dawn",
     "コウキ":          "Lucas",
     "アカギ":          "Cyrus",
-    "リッシ":          "Cynthia",  # 確認要
+    # "リッシ": 削除 2026-09-11 (英語名が別人。Bulbapedia で正解が確定しないので空欄=出さない)
     # Kanto/Johto
     "サトシ":          "Ash",
     "カスミ":          "Misty",
@@ -114,7 +114,7 @@ TRAINER_NAME_MAP: dict[str, str] = {
     "レッド":          "Red",
     "グリーン":        "Blue",   # ※ アニメ版グリーン (= ゲーム英Blue)
     "ヒビキ":          "Ethan",
-    "ジュン":          "Crystal",
+    # "ジュン": 削除 2026-09-11 (英語名が別人。Bulbapedia で正解が確定しないので空欄=出さない)
     "ナナミ":          "Daisy",
     "オーキド博士":    "Professor Oak",
     # XY era
