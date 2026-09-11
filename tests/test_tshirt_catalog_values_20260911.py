@@ -58,6 +58,23 @@ class TestMaterial:
             V.main_material("[00 WHITE] 100% 綿 [09 BLACK] 90% 綿, 10% ポリエステル")
 
 
+class TestEbayVocabulary:
+    """★2026-09-11 Taxonomy API (15687) で確認した eBay の選択肢に合わせる."""
+
+    def test_rayon_is_viscose_on_ebay(self):
+        assert V.main_material("100% レーヨン") == ("Viscose", "100% Rayon")
+
+    def test_blend_values_exist_only_for_cotton_and_polyester(self):
+        assert V.main_material("76% 綿, 24% ナイロン")[0] == "Cotton Blend"
+        assert V.main_material("60% レーヨン, 40% 綿")[0] == "Viscose"
+
+    def test_country_value_drops_does_not_apply(self):
+        """"Does not apply" は Country of Origin の選択肢に無い."""
+        assert V.country_value("Does not apply") == ""
+        assert V.country_value("Vietnam") == "Vietnam"
+        assert V.country_value("ベトナム") == ""
+
+
 class TestOrigin:
     def test_one_country(self):
         assert V.origin(["VN"]) == ("Vietnam", "Vietnam")
@@ -138,6 +155,30 @@ class TestApply:
         v = V.build_values(_prod(), "WHITE", "XL")
         with pytest.raises(V.NotListable):
             V.apply_to_specs({}, v, fake_validate)
+
+
+class TestCountryOfOriginColumn:
+    """№137: Tシャツ (15687/53159) の eBay の項目名は Country of Origin."""
+
+    def test_tshirt_uses_country_of_origin(self):
+        src = (_ROOT / "iMakMercari" / "tshirt_listing.py").read_text(encoding="utf-8")
+        assert '"C:Country of Origin"' in src
+        assert '"C:Country/Region of Manufacture"' not in src
+        assert "UCV.country_value(" in src
+
+    def test_graniph_uses_country_of_origin_from_the_official_page(self):
+        """★graniph は "Japan" 固定だった。実物は ベトナム/中国 (公式 PDP で確認)."""
+        src = (_ROOT / "iMakMercari" / "graniph_csv_builder.py").read_text(encoding="utf-8")
+        assert '"C:Country of Origin"' in src and '"Japan",  ' not in src
+        import graniph_csv_builder as GB
+        assert GB.country_jp_to_en("ベトナム") == "Vietnam" and GB.country_jp_to_en("中国") == "China"
+        assert GB.country_jp_to_en("?") == ""
+
+    def test_graniph_scraper_reads_origin(self):
+        import graniph_scraper as GS
+        html = "<dt>素材</dt><dd> 綿 100% </dd><dt>原産国</dt><dd> ベトナム </dd><dt>返品</dt>"
+        assert GS._parse_origin(html) == "ベトナム"
+        assert GS._parse_origin("<dt>素材</dt>") == ""
 
 
 class TestListingWiring:

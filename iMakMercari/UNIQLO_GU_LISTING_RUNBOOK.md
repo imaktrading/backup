@@ -59,7 +59,7 @@ python uniqlo_size_fetch.py {productId} {colorCode} {sizeCode}
 固定テンプレ（eBay検索ボリューム順・これに🔴を差す）:
 ```
 Brand=Uniqlo / Size=Regular - XS,S,M,L,XL,2XL,3XL,4XL / 🔴Color / Department=Unisex Adults(Women'sはWomen)
-Type=T-Shirt / Theme=Anime & Manga / Sleeve Length=Short Sleeve / 🔴Character / Pattern=Graphic Print
+Type=T-Shirt / Theme=Anime (★"Anime & Manga" は eBay に無い値。2026-09-11 確認) / Sleeve Length=Short Sleeve / 🔴Character / Pattern=Graphic Print
 🔴Character Family / 🔴Country of Origin / Features=All Seasons / Neckline=Crew Neck / Material=Cotton
 Fit=Regular(loose系=Relaxed) / Vintage=No / Fabric Type=Jersey / Product Line=Uniqlo UT
 Personalize=No / Handmade=No / Season=Fall / Year Manufactured=2020-2029 / Garment Care=Machine Washable
@@ -67,7 +67,8 @@ Personalize=No / Handmade=No / Season=Fall / Year Manufactured=2020-2029 / Garme
 - **Material は公式 composition から**（画像推測禁止）。綿100%が標準だが blend なら要修正。
 - **★Brand / Product Line はブランド依存**（2026-07-19）: UNIQLO → `Brand=Uniqlo` / `Product Line=Uniqlo UT`。GU → `Brand=GU` / `Product Line=GU`。
   上のテンプレの `Brand=Uniqlo` / `Product Line=Uniqlo UT` は UNIQLO 用。GU では GU に差し替える。
-- Women's カテゴリ=**53159**(Women's Tops)/ ストアカテゴリ=`42213521010`。Men's=15687。Women'sは Fit に "Oversized" 無し→ loose系=**Relaxed**、語はタイトル/Descriptionで担保。
+- Women's カテゴリ=**53159**(Women's Tops)/ ストアカテゴリ=`42213521010`。Men's=15687。
+  53159 は Character 欄あり・**Character Family 欄なし** (2026-09-11 Taxonomy API 確認)。Women'sは Fit に "Oversized" 無し→ loose系=**Relaxed**、語はタイトル/Descriptionで担保。
 
 ## 6. Description（例listingのHTMLテンプレを踏襲）
 - 構成: ①コラボ紹介(公式longDescription翻訳) ②Product Specs(バリエーションはSize行削除=軸へ) ③**実測テーブル(全サイズ・列=Length/Shoulder/Chest/Sleeve, 行=US(JP))** ④Fit note ⑤**Sheerness(必須・落とすな)**。

@@ -28,6 +28,7 @@ LEDGER = r"C:/dev/iMak_data/hq/ut_identity.json"
 FIBER_EN = {"綿": "Cotton", "コットン": "Cotton", "ポリエステル": "Polyester",
             "ポリウレタン": "Polyurethane", "レーヨン": "Rayon", "ナイロン": "Nylon",
             "アクリル": "Acrylic", "麻": "Linen", "毛": "Wool", "キュプラ": "Cupro"}
+EBAY_MATERIAL = {"Rayon": "Viscose"}      # 説明文は Rayon のまま、Item Specifics だけ eBay の語
 COUNTRY_EN = {"VN": "Vietnam", "CN": "China", "MY": "Malaysia", "BD": "Bangladesh",
               "IN": "India", "ID": "Indonesia", "KH": "Cambodia", "TH": "Thailand",
               "MM": "Myanmar", "LK": "Sri Lanka", "PK": "Pakistan", "TR": "Turkey", "JP": "Japan"}
@@ -87,8 +88,27 @@ def main_material(composition):
         out.append((int(pct), en))
     out.sort(key=lambda x: -x[0])
     line = ", ".join(f"{p}% {en}" for p, en in out)
-    spec = out[0][1] if len(out) == 1 and out[0][0] == 100 else f"{out[0][1]} Blend"
+    # ★Item Specifics は eBay の選択肢の語で (2026-09-11 Taxonomy API 15687 で確認):
+    #   Rayon は無く Viscose / 混紡の値は Cotton Blend と Polyester Blend だけ
+    prim = out[0][1]
+    ebay_prim = EBAY_MATERIAL.get(prim, prim)
+    if len(out) == 1 and out[0][0] == 100:
+        spec = ebay_prim
+    elif prim in ("Cotton", "Polyester"):
+        spec = f"{prim} Blend"
+    else:
+        spec = ebay_prim
     return spec, line
+
+
+def country_value(v):
+    """CSV の C:Country of Origin に入れてよい値か (eBay の国名リストにある物だけ)。純関数。
+
+    ★"Does not apply" は Tシャツ (15687) の選択肢に無い (2026-09-11 Taxonomy API で確認)。
+      写真から読んだ値もここを通す = 知らない国名は空欄。
+    """
+    v = (v or "").strip()
+    return v if v in set(COUNTRY_EN.values()) else ""
 
 
 def origin(codes):

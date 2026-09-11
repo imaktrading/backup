@@ -41,6 +41,7 @@ class GraniphProduct:
     stock: dict            # {"SS": 20, "S": 33, ...}  real_quantity per size
     size_table: list       # [SizeRow(label_jp="着丈", values_cm={"SS": 62.5, ...}), ...]
     url: str
+    origin_jp: str = ""    # 原産国 (PDP の「原産国」欄。例 "ベトナム" / "中国")。無ければ空
 
 
 def _fetch_html(url: str, timeout: int = 30) -> str:
@@ -146,6 +147,16 @@ def _parse_size_table(html: str) -> list:
     return result
 
 
+def _parse_origin(html: str) -> str:
+    """PDP の「原産国」欄 (`<dt>原産国</dt><dd> ベトナム </dd>`) → "ベトナム"。無ければ ""。
+
+    ★2026-09-11: 以前は取っておらず、出品側が原産国を "Japan" に固定していた。
+      実物は ベトナム / 中国 (公式 PDP で確認) = 事実と違う値で出品していた。
+    """
+    m = re.search(r"原産国\s*</dt>\s*<dd[^>]*>\s*([^<]+?)\s*</dd>", html or "")
+    return m.group(1).strip() if m else ""
+
+
 def _extract_ids(item_code: str, jsonld: dict) -> tuple:
     pg_id = str(jsonld.get("productGroupID") or "").strip()
     if not pg_id:
@@ -192,4 +203,5 @@ def scrape(url: str) -> GraniphProduct:
         stock=stock,
         size_table=size_table,
         url=url,
+        origin_jp=_parse_origin(html),
     )

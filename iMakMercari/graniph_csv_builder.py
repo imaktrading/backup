@@ -118,7 +118,7 @@ CSV_HEADERS = [
     "C:Fit", "C:Closure", "C:Sleeve Length", "C:Neckline",
     "C:Season", "C:Theme", "C:Product Line",
     "C:Vintage", "C:Personalize", "C:Handmade",
-    "C:Country/Region of Manufacture", "C:Garment Care",
+    "C:Country of Origin", "C:Garment Care",
 ]
 
 
@@ -211,6 +211,20 @@ def color_jp_to_en(color_jp: str) -> str:
         "チャコール": "Charcoal Gray",
     }
     return table.get(color_jp.strip(), color_jp)
+
+
+_COUNTRY_JP_EN = {"中国": "China", "ベトナム": "Vietnam", "日本": "Japan", "バングラデシュ": "Bangladesh",
+                  "インド": "India", "インドネシア": "Indonesia", "カンボジア": "Cambodia",
+                  "ミャンマー": "Myanmar", "タイ": "Thailand", "マレーシア": "Malaysia",
+                  "スリランカ": "Sri Lanka", "パキスタン": "Pakistan", "トルコ": "Turkey"}
+
+
+def country_jp_to_en(country_jp: str) -> str:
+    """公式の原産国 (日本語) → eBay の Country of Origin の値。訳に無ければ ""。純関数。
+
+    ★日本語を出品に出さない & 推測で埋めない (項目は required=False なので空欄で通る)。
+    """
+    return _COUNTRY_JP_EN.get((country_jp or "").strip(), "")
 
 
 def material_jp_to_en(material_jp: str) -> str:
@@ -493,7 +507,10 @@ def build_parent_row(
         "No",                                # C:Vintage
         "No",                                # C:Personalize
         "No",                                # C:Handmade
-        "Japan",                             # C:Country/Region of Manufacture (graniph は国内縫製多)
+        # ★2026-09-11: "Japan" 固定をやめ、公式 PDP の「原産国」を写す (実物は ベトナム/中国)。
+        #   項目名も Tシャツ(15687/53159) の eBay 定義 "Country of Origin" に合わせた (№137)。
+        #   訳が無い国は空欄 (推測しない。required=False)
+        country_jp_to_en(getattr(p, "origin_jp", "")),   # C:Country of Origin
         "Machine Washable",                  # C:Garment Care
     ]
 

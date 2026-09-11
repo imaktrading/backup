@@ -669,7 +669,10 @@ def main():
         "C:Neckline", "C:Sleeve Length", "C:Material", "C:Fabric Type",
         "C:Features", "C:Fit", "C:Product Line", "C:Model", "C:Accents",
         "C:Year Manufactured", "C:Vintage", "C:Personalize", "C:Handmade",
-        "C:Country/Region of Manufacture", "C:Garment Care", "C:Season", "C:Closure",
+        # ★2026-09-11 (№137): Tシャツ (15687) の eBay の項目名は "Country of Origin"。
+        #   "Country/Region of Manufacture" はこのカテゴリに存在せず、フィルタに載っていなかった
+        #   (Taxonomy API で確認: 244か国から選ぶ形 / "Does not apply" は選択肢に無い)
+        "C:Country of Origin", "C:Garment Care", "C:Season", "C:Closure",
     ]
 
     rows = [csv_headers]
@@ -827,7 +830,7 @@ def main():
         #   (説明文に両方書く。2026-09-09 決定)。写真の読み取りで埋め直さない。
         if not cat_v:
             coo = specs.get("Country/Region of Manufacture") or result.get("country_of_origin", "")
-            specs["Country/Region of Manufacture"] = coo if coo else "Does not apply"
+            specs["Country/Region of Manufacture"] = coo
         # Model: result.model_number から取得（タグから読めなければ空）
         if not specs.get("Model"):
             specs["Model"] = result.get("model_number", "")
@@ -878,7 +881,8 @@ def main():
             specs.get("Vintage", "No"),
             specs.get("Personalize", "No"),
             specs.get("Handmade", "No"),
-            specs.get("Country/Region of Manufacture", "Does not apply"),
+            # eBay の国名リストにある値だけ。"Does not apply" や読めない値は空欄 (required=False)
+            UCV.country_value(specs.get("Country/Region of Manufacture", "")),
             specs.get("Garment Care", "Machine Washable"),
             specs.get("Season", "Spring, Summer, Fall"),
             specs.get("Closure", "Pullover"),
