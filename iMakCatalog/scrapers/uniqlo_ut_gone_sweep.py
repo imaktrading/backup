@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """廃盤で公式から消えた UT を **全部** 洗い出して起こす (2026-09-11 新設).
 
 ## なぜ要るか
@@ -34,6 +34,7 @@ import concurrent.futures as cf
 import json
 import sqlite3
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -59,7 +60,39 @@ KID = {"KIDS", "BABY"}
 SLEEP = 0.25
 
 
+VERDICTS = Path("C:/dev/iMak_data/catalog/_ut_gone_verdicts.jsonl")
+_LOCK = threading.Lock()
+
+
+def _record(pid: str, v: str) -> None:
+    """★判定は **1件ごとに追記で残す** (2026-09-11 ユーザー指示「取れたものは漏らさず保存しろ」)。
+    state は200件ごとにしか書かないので、落ちるとその間の判定が消えていた."""
+    if v == "err":
+        return
+    with _LOCK, VERDICTS.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"pid": pid, "v": v}, ensure_ascii=False) + "\n")
+
+
+def recorded() -> dict[str, str]:
+    """追記で残した判定を全部読む (state より新しい分も拾う)."""
+    out: dict[str, str] = {}
+    if VERDICTS.exists():
+        for ln in VERDICTS.read_text(encoding="utf-8").splitlines():
+            try:
+                j = json.loads(ln)
+                out[j["pid"]] = j["v"]
+            except Exception:
+                continue
+    return out
+
+
 def classify(pid: str) -> str:
+    v = _classify(pid)
+    _record(pid, v)
+    return v
+
+
+def _classify(pid: str) -> str:
     """'ut' / 'kids' / 'not_ut' / 'none' (reviews も無い) / 'err'."""
     try:
         with urllib.request.urlopen(urllib.request.Request(REVIEWS.format(pid=pid),
@@ -83,9 +116,9 @@ def classify(pid: str) -> str:
 
 
 def load_state() -> dict:
-    if STATE.exists():
-        return json.loads(STATE.read_text(encoding="utf-8"))
-    return {"checked": {}}
+    st = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {"checked": {}}
+    st["checked"].update(recorded())          # 追記で残した判定 (落ちる直前の分も) を足す
+    return st
 
 
 def save_state(st: dict) -> None:
@@ -204,11 +237,11 @@ def run_neighbors(workers: int) -> None:
             done += len(batch)
             if done % 100 < workers:
                 NB_STATE.write_text(json.dumps(nb, ensure_ascii=False), encoding="utf-8")
-                cand = sorted(p for p, v in nb["checked"].items() if v == "ut" and p not in have)
+                cand = sorted(p for p, v in known.items() if v == "ut" and p not in have)
                 NB_CAND.write_text("\n".join(cand), encoding="ascii")
                 print(f"    起点 {done:,} 済み / 残り {len(queue):,} / 新しい UT {len(cand):,}", flush=True)
     NB_STATE.write_text(json.dumps(nb, ensure_ascii=False), encoding="utf-8")
-    cand = sorted(p for p, v in nb["checked"].items() if v == "ut" and p not in have)
+    cand = sorted(p for p, v in known.items() if v == "ut" and p not in have)
     NB_CAND.write_text("\n".join(cand), encoding="ascii")
     print(f"\n  前後で見つけた大人の UT (catalog に無い): {len(cand):,}件 → {NB_CAND}")
 
