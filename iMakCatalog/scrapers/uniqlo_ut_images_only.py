@@ -148,6 +148,13 @@ def main() -> None:
             print(f"    + {pid}  画像 {len(imgs):2d}枚  色 {','.join(codes):12s} {collab[:30]}",
                   flush=True)
             if a.commit:
+                # ★保存の直前にもう一度見る。その間に中身のある行 (公式 / Wayback) が入って
+                #   いたら、画像だけの行で上書きしない
+                with sqlite3.connect(str(api._DB_PATH), timeout=120) as chk:
+                    if chk.execute("SELECT 1 FROM products WHERE category=? AND product_id=?",
+                                   (CATEGORY, pid)).fetchone():
+                        stat["その間に中身のある行が入った (触らない)"] += 1
+                        continue
                 try:
                     api.upsert(category=CATEGORY, product_id=pid, name=label,
                                name_jp=label, set_name=None, set_name_official=None,
