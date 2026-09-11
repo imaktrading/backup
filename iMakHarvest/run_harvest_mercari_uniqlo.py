@@ -143,7 +143,11 @@ def main(argv=None) -> int:
             if not uniqlo_tee.is_uniqlo_tee(title):
                 rej["not_uniqlo_tee"] += 1
                 continue
-            if not uniqlo_tee.is_collab(title):
+            # ★カタログの語で見つけた行は、 その語がタイトルに入っていればコラボ物とみなす
+            #   (佐藤可士和展 / POP MART / TOKYO 等は 手書きのコラボ語リストに無く、
+            #    POC 初回で12件を「コラボでない」で落としていた)
+            found_term = found_by.get(url, "")
+            if not uniqlo_tee.is_collab(title) and not (found_term and found_term in title):
                 # 無地・エアリズムは海外で価格が付かない (user 確定 2026-08-22)
                 rej["not_collab"] += 1
                 continue
