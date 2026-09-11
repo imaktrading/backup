@@ -133,8 +133,12 @@ def run(limit: int | None, workers: int, revive: bool, commit: bool,
         print(f"  {k:10s} {v:,}")
     print(f"\n  catalog に無い大人の UT: {n_ut:,}件 → {CAND}")
     if revive:
-        import uniqlo_ut_revive as R
-        R.run(commit, None, str(CAND), workers=2)
+        # ★別の処理として起動する (2026-09-11)。同じ処理の中で import すると、判定の前に
+        #   読み込んだ古い uniqlo_ut と組み合わさり、後から足した関数が無くて落ちた
+        import subprocess
+        subprocess.run([sys.executable, str(_CATALOG_ROOT / "scrapers" / "uniqlo_ut_revive.py"),
+                        *(["--commit"] if commit else []), "--workers", "2",
+                        "--pids-file", str(CAND)], check=False)
 
 
 NB_STATE = Path("C:/dev/iMak_data/catalog/_ut_gone_neighbors_state.json")

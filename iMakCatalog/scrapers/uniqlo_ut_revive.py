@@ -246,6 +246,13 @@ def _fetch_one(pid: str) -> tuple[str, dict | None, str, str, list[str], str]:
         d, raw = from_wayback(pid)
         if d:
             src = f"wayback_{d.get('_snapshot', '')}"
+            # ★取ったページは **その場で** 倉庫へ (2026-09-11)。保存を本体側の1本に任せていたら、
+            #   本体が1件目で落ちた時に 611件ぶんの Wayback 取得 (1時間半) が全部消えた。
+            #   倉庫に在れば `--from-raw` で取り直さずに起こせる
+            try:
+                _raw_store.save(CATEGORY, f"revive_{pid}", raw, PDP.format(pid=pid), ext="html")
+            except Exception:
+                pass
     imgs: list[str] = []
     if d is not None and is_ut(d):
         # ★Wayback のページの JSON にも公式と同じ images が在る。在ればそれを使う
@@ -334,8 +341,7 @@ def _save_one(db, pid, d, src, raw, imgs, err, now, commit, stat) -> None:
     if d is None:
         stat["値が取れない"] += 1
         return
-    if raw:
-        _raw_store.save(CATEGORY, f"revive_{pid}", raw, PDP.format(pid=pid), ext="html")
+    # (Wayback のページは取った側 `_fetch_one` で倉庫に保存済み)
     # ★UT 以外は入れない (2026-09-10)。コラボページの HTML には関連商品が混ざるので、
     #   そのまま入れるとリネンシャツやレギンスまで `uniqlo_ut` に入る。
     if not is_ut(d):
