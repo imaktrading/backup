@@ -1,0 +1,196 @@
+# -*- coding: utf-8 -*-
+"""UT の目視特定 (2026-09-11 ユーザー「PSAと同じように目視で特定させよう」).
+
+メルカリの新品 UT を、カタログの商品に **人が** 当てる。機械は候補を並べるだけ。
+- 2026-08-22 ユーザー確定: 機械で商品を確定しない (柄違いが何十種もある)
+- 抽出くんの実測 2026-09-11: タグの番号だけで当てると 呪術廻戦 に ポケモンUT が付いた例がある
+"""
+from __future__ import annotations
+
+import io
+import json
+import os
+import sys
+
+import pytest
+
+_HQ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_HQ, "tools"))
+import ut_identify as U  # noqa: E402
+
+
+def _p(pid, name="", collab="", fam="", char="", l1="", colors=("WHITE",), sold_out=True, desc=""):
+    p = {"pid": pid, "name": name, "collab": collab, "collab_official_name": "",
+         "character_family": fam, "character": char, "l1": l1, "gender": "MEN",
+         "colors": [{"name": c, "displayCode": "%02d" % i} for i, c in enumerate(colors)],
+         "images": [], "sold_out": sold_out}
+    p["_tok"] = U._tokens(p)
+    p["_desc"] = U.norm(name + desc)
+    return p
+
+
+class TestTokens:
+    def test_work_name_only_in_product_name_is_found(self):
+        """★呪術廻戦は collab が空で商品名にしか無い (78件中13件が候補なしだった)."""
+        assert "呪術廻戦" in _p("A", name="マンガUT 集英社創業100周年 /呪術廻戦")["_tok"]
+
+    def test_generic_words_are_not_tokens(self):
+        """★「タグ付き」の「付き」で全商品に当たっていた."""
+        t = _p("A", name="すみっコぐらし UT グラフィックTシャツ コンプリートセット（半袖） シーンぬいぐるみ（たぴおかケーキ）付き")["_tok"]
+        assert "すみっコぐらし" in t
+        assert not any(g in x for x in t for g in ("付き", "グラフィック", "半袖", "セット"))
+
+    def test_part_number_is_dropped_too(self):
+        """メルカリは「ジョジョの奇妙な冒険3」の部の番号を書かない."""
+        assert "ジョジョの奇妙な冒険" in _p("A", name="グラフィックT ジョジョの奇妙な冒険3")["_tok"]
+
+
+class TestColor:
+    def test_jp_to_catalog(self):
+        cs = [{"name": "WHITE"}, {"name": "OFF WHITE"}, {"name": "NAVY"}]
+        assert U.pick_color(cs, "ホワイト") == "WHITE"
+        assert U.pick_color(cs, "オフホワイト") == "OFF WHITE"
+        assert U.pick_color(cs, "ネイビー") == "NAVY"
+        assert U.pick_color(cs, "ピンク") == ""
+        assert U.pick_color(cs, "") == ""
+
+
+class TestRank:
+    CAT = [_p("POKE1", name="ポケモン UT", collab="ポケモン", desc="ブラッキー"),
+           _p("POKE2", name="ポケモン UT", collab="ポケモン", desc="ピカチュウ"),
+           _p("JJK", name="マンガUT /呪術廻戦", l1="486159"),
+           _p("MARIO", name="マリオ UT", fam="Super Mario")]
+
+    def test_unrelated_products_are_not_listed(self):
+        got = U.rank_candidates("UNIQLO UT ポケモン Tシャツ S", "", self.CAT)
+        assert {p["pid"] for p in got} == {"POKE1", "POKE2"}
+
+    def test_character_in_title_puts_that_design_first(self):
+        got = U.rank_candidates("UNIQLO UT ポケモン ブラッキー Tシャツ", "", self.CAT)
+        assert got[0]["pid"] == "POKE1"
+
+    def test_alias_only_lists_candidates(self):
+        got = U.rank_candidates("ユニクロ ポケットモンスター UT ピカチュウ", "", self.CAT)
+        assert got and got[0]["pid"] == "POKE2"
+
+    def test_tag_number_goes_first_but_is_only_a_candidate(self):
+        """番号は先頭に置くだけ。確定は人 (呪術廻戦にポケモンの番号が出た例がある)."""
+        got = U.rank_candidates("ポケモン Tシャツ", "", self.CAT, tag_no="486159")
+        assert got[0]["pid"] == "JJK" and len(got) == 3
+
+    def test_nothing_matches(self):
+        assert U.rank_candidates("海外限定 ジブリ トトロ", "", self.CAT) == []
+
+
+def _row(url, title="t", sold="", price="1650", color="ホワイト", size="M"):
+    r = [""] * 36
+    r[U.C_URL], r[U.C_TITLE], r[U.C_SOLD], r[U.C_PRICE] = url, title, sold, price
+    r[U.C_COND], r[U.C_PHOTOS], r[U.C_DESC] = "新品、未使用", "a.jpg|b.jpg", "desc"
+    r[U.C_COLOR], r[U.C_SIZE] = color, size
+    r[13], r[34] = "999", "should-not-copy"          # N / KEY
+    return r
+
+
+class TestPending:
+    def test_filters(self):
+        src = [["hdr"], _row("https://a"), _row("https://b", sold="売"), _row("https://c"),
+               _row("https://d"), _row("")]
+        got = U.pending_rows(src, decided={"https://c": {}}, in_high={"https://d"})
+        assert [r[U.C_URL] for _i, r in got] == ["https://a"]
+        assert got[0][0] == 2                       # シートの行番号
+
+
+class TestHighRow:
+    def test_copies_only_safe_columns(self):
+        """N (数式) / M (監視くんの列) / KEY は書かない。仕入値は F だけ."""
+        h = U.high_row(_row("https://a"))
+        assert h[U.C_URL] == "https://a" and h[U.C_PRICE] == "1650" and h[U.C_CAT] == "Tシャツ"
+        assert h[U.C_COLOR] == "ホワイト" and h[U.C_SIZE] == "M"
+        assert len(h) == U.C_SIZE + 1               # AI (KEY) まで届かない
+        assert h[12] == "" and h[13] == ""          # M / N
+
+
+class TestParse:
+    def test_pick_needs_product_and_color(self):
+        got = U.parse_result({"picks": [{"idx": 2, "pid": "A", "color": "WHITE"},
+                                        {"idx": 3, "pid": "B", "color": ""},
+                                        {"idx": "x", "pid": "C", "color": "NAVY"}],
+                              "nocat": [4, "y"], "outs": [{"idx": 5, "reason": "used"},
+                                                          {"idx": 6, "reason": ""}]})
+        assert got["picks"] == [{"idx": 2, "pid": "A", "color": "WHITE"}]
+        assert got["nocat"] == [4] and got["outs"] == [{"idx": 5, "reason": "used"}]
+
+
+class TestSave:
+    def _setup(self, tmp_path, monkeypatch, fail=False):
+        led = tmp_path / "led.json"
+        monkeypatch.setattr(U, "LEDGER", str(led))
+        monkeypatch.setattr(U, "load_ledger", lambda path=None: {})
+        monkeypatch.setattr(U, "save_ledger",
+                            lambda d, path=None: led.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8"))
+        monkeypatch.setattr(U, "_high_urls", lambda: set())
+        monkeypatch.setattr(U, "load_catalog", lambda db=None: [_p("E1")])
+        sent = []
+        import sheet_io
+
+        def app(rows, **k):
+            if fail:
+                raise RuntimeError("quota")
+            sent.extend(rows)
+            return len(rows)
+        monkeypatch.setattr(sheet_io, "append_product_rows", app)
+        return led, sent
+
+    ITEMS = [{"idx": 2, "row": _row("https://a"), "cands": []},
+             {"idx": 3, "row": _row("https://b"), "cands": []},
+             {"idx": 4, "row": _row("https://c"), "cands": []}]
+
+    def test_writes_rows_and_ledger(self, tmp_path, monkeypatch):
+        led, sent = self._setup(tmp_path, monkeypatch)
+        res = {"picks": [{"idx": 2, "pid": "E1", "color": "WHITE"}], "nocat": [3],
+               "outs": [{"idx": 4, "reason": "used"}], "holds": []}
+        assert U.save(self.ITEMS, res, now="T") == (1, 3)
+        assert [r[U.C_URL] for r in sent] == ["https://a"]
+        d = json.loads(led.read_text(encoding="utf-8"))
+        assert d["https://a"]["product_id"] == "E1" and d["https://a"]["color"] == "WHITE"
+        assert d["https://b"]["decision"] == "nocat" and d["https://c"]["reason"] == "used"
+
+    def test_sheet_failure_leaves_ledger_untouched(self, tmp_path, monkeypatch):
+        """★先に台帳を書くと、シートに入らなかった行が「決着済み」になって二度と出ない."""
+        led, _ = self._setup(tmp_path, monkeypatch, fail=True)
+        res = {"picks": [{"idx": 2, "pid": "E1", "color": "WHITE"}], "nocat": [], "outs": [], "holds": []}
+        with pytest.raises(RuntimeError):
+            U.save(self.ITEMS, res, now="T")
+        assert not led.exists()
+
+    def test_unknown_product_is_not_written(self, tmp_path, monkeypatch):
+        led, sent = self._setup(tmp_path, monkeypatch)
+        res = {"picks": [{"idx": 2, "pid": "NOPE", "color": "WHITE"}], "nocat": [], "outs": [], "holds": []}
+        assert U.save(self.ITEMS, res, now="T") == (0, 0) and sent == []
+
+
+class TestPage:
+    def test_page_builds_and_keeps_input_on_send_failure(self):
+        it = {"idx": 2, "row": _row("https://a", title="UNIQLO UT ポケモン"), "cands": [_p("E1", name="ポケモン UT")]}
+        html = U.build_html([it], []).decode("utf-8")
+        assert "E1" in html and "この商品" in html and "カタログに無い" in html
+        assert "_sendFailed" in html, "送信失敗を黙らせない (356c396)"
+        assert "imak_confirm_draft_ut_identify" in html, "下書きのキーがポート依存だと次回に出ない"
+
+    def test_search_api(self):
+        got = U.lookup_api("/api/search", {"q": "ポケモン"}, catalog=[_p("E1", name="ポケモン UT")])
+        assert got["n"] == 1 and "E1" in got["html"]
+        assert U.lookup_api("/other", {}, catalog=[]) is None
+
+
+class TestPanel:
+    SRC = io.open(os.path.join(_HQ, "control_panel.py"), encoding="utf-8").read()
+
+    def test_button_is_on_the_new_listing_panel(self):
+        assert '"ut_identify.py", "--limit=20"' in self.SRC
+        i = self.SRC.index("def _ugroup(")
+        assert '"ut_identify.py"' in self.SRC[i:i + 1500]
+
+    def test_badge_counts_and_turns_blue(self):
+        assert "d['ut_identify']=UI.count_workload()" in self.SRC
+        assert '"ut_identify": bool(_ui.get("pending"))' in self.SRC

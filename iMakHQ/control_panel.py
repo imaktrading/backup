@@ -1355,6 +1355,21 @@ SCRIPTS = [
         "cmd": ["python", "mercari_scout.py"],
         "params": [],
     },
+    {
+        # ★2026-09-11 ユーザー「PSAと同じように目視で特定させよう」。
+        #   抽出くんが集めたメルカリの新品 UT (中間スプシ mercari_uniqlo_ut) を、カタログの
+        #   商品に人が当てる。機械では確定しない (柄違いが何十種もある = 取り違えは別デザイン発送)。
+        #   選んだ行は商品管理シートに Tシャツ行として足し、特定結果は台帳に残す (KEY 列は書かない)。
+        "category": None, "type": "utility",
+        "label": "🩹 UT 新品 目視特定",
+        "badge": "ut_identify",
+        "tip": "メルカリの新品UTの写真の横に、カタログの候補を公式画像で並べます。"
+               "同じ柄の商品と色を選ぶと、出品行に追加されます。確信が無ければ選ばない。",
+        "cwd": f"{WORKSPACE}/iMakHQ/tools",
+        "cmd": ["python", "ut_identify.py", "--limit=20"],
+        "params": [],
+        "skip_postprocess": True,
+    },
     # 2026-06-04: 月次レポート生成 / 今、見る はパネルから削除 (ファネル分析が上位互換。.py は残置)
     # 取下再出品 ①②③ を上段、✏️タイトル改修/💲値下げ余地 を下段に並べる (3列グリッド=d1)。
     # 表示順は _ugroup "relist" 群の SCRIPTS 出現順なので ①②③→タイトル改修→値下げ余地 の順で置く。
@@ -3128,8 +3143,9 @@ class ListingPanel:
                 return "evict2" if "2" in cmd.split("--tier")[-1][:3] else "oos"
             if any(s in cmd for s in ("mercari_psa_resource", "restock_worklist", "cull_end")):
                 return "oos"       # 在庫なし 再仕入れ(RESTOCK) / 整理(CULL)
-            if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py")):
-                return "discover"  # 新規ネタ探し
+            if any(s in cmd for s in ("casio_finder", "montbell_outlet_scraper", "mercari_scout.py",
+                                      "ut_identify.py")):
+                return "discover"  # 新規ネタ探し (UT 目視特定は出品前の作業なので新規パネル)
             # ★2026-07-28: 出品直後に押す補URL2ボタン(🆕検索/🩹確証)は **新規出品パネル**に置く。
             # 出品→itemID書込→補URL確保 は一連の流れなので、既存メンテ側に離すと導線が切れる
             # (ユーザー指示)。件数感/夜間検索は定常運用なのでメンテ側に残す。
@@ -3596,7 +3612,7 @@ class ListingPanel:
     #   📊 補URL件数感 は **見るだけ**なので入れない。
     STEP_SINGLES = ("cull_end", "shelf_evict", "sold_restock",
                     # 補URL (1) 当日分: 出品直後に押す単発。順番には並ばない
-                    "hoju_search_now")
+                    "hoju_search_now", "ut_identify")
 
     # ── ボタン1回で片づく上限 (2026-09-06 ユーザー指示) ────────────────
     #   > どのボタンもそうだけど、そのボタンで、処理する件数が何件残っているか
@@ -3604,7 +3620,7 @@ class ListingPanel:
     #   押した後に減っていないように見えた。**残り** と **今回** を分けて出す。
     #   数字は SCRIPTS の cmd (--limit) と各モジュールの CAP が正。ここに写さない。
     PRESS_CAP = {"hoju_search_now": 15, "hoju_confirm": 15, "hoju_swap": 15,
-                 "newcand": 20}
+                 "newcand": 20, "ut_identify": 20}
 
     @classmethod
     def todo_line(cls, kind, remaining, verb):
@@ -3807,6 +3823,12 @@ class ListingPanel:
             "    d['ut']=UT.count_workload()\n"
             "except Exception as e:\n"
             "    d['ut']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
+            # ★2026-09-11: UT 新品の目視特定 (中間スプシの未決着行)
+            "try:\n"
+            "    import ut_identify as UI\n"
+            "    d['ut_identify']=UI.count_workload()\n"
+            "except Exception as e:\n"
+            "    d['ut_identify']={'error':'%%s: %%s'%%(type(e).__name__,e)}\n"
             # ★2026-09-01 ユーザー要望「ボタンが増えて何をしたらいいか分からない」:
             #   既存メンテのヒント無し 6個も同じ subprocess で数える。
             #   どれも **スクレイプも eBay API も使わない** (材料は funnel CSV とスプシ)。
@@ -4212,6 +4234,13 @@ class ListingPanel:
                                            "数量を戻します")
                 if not _ut.get("restore"):
                     ut_rq_txt += " (先に ② 目視 を押す)"
+            _ui = (w0.get("ut_identify") or {}) if isinstance(w0, dict) else {}
+            if _ui.get("error"):
+                ui_txt = "\n(残件 取得できず: %s)" % str(_ui["error"])[:40]
+            else:
+                ui_txt = self.todo_line("ut_identify", _ui.get("pending", 0), "目視します")
+                if not _ui.get("pending"):
+                    ui_txt += " (抽出くんの新しい収集待ち)"
             # ★2026-09-05: 『種→出品行に追加』。証明番号を打つまで進まないので、
             #   残件があれば必ず青にする (夜間では消えない)。
             _nh = (w0.get("newcand_high") or {}) if isinstance(w0, dict) else {}
@@ -4228,7 +4257,7 @@ class ListingPanel:
                        "ut_search": ut_s_txt, "ut_confirm": ut_c_txt,
                        "ut_restock_search": ut_rs_txt,
                        "ut_restock_confirm": ut_rc_txt,
-                       "ut_restore": ut_rq_txt,
+                       "ut_restore": ut_rq_txt, "ut_identify": ui_txt,
                        "kuji_search": k_s, "kuji_confirm": k_c, "cull_end": ce_txt,
                        "shelf_evict": se_txt, "shelf_evict_label": se_label,
                        "sold_restock": sr_txt,
@@ -4258,6 +4287,7 @@ class ListingPanel:
                         "ut_confirm": bool(_ut.get("confirm")),
                         "ut_restock_confirm": bool(_ut.get("restock_confirm")),
                         "ut_restore": bool(_ut.get("restore")),
+                        "ut_identify": bool(_ui.get("pending")),
                         "hoju_confirm": bool(cf.get("ready") or cf.get("unjudged")),
                         "hoju_swap": bool((w.get("swap") or {}).get("ready")
                                           or (w.get("swap") or {}).get("unjudged")),
