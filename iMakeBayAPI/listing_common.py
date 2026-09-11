@@ -810,7 +810,14 @@ def banned_title_words_in(title: str, banned_words) -> list:
 # 照合ルールは banned_title_words_in と同じ単語境界。2026-08-09 の教訓
 # (語リストだけコピーして照合が部分一致にズレた) を繰り返さないため、
 # **語も除去関数もここが SSOT**。post_title_fix / csv_auditor は import して使う。
-MISCAT_TITLE_WORDS = ("pack", "packs", "box", "boxes", "lot", "lots",
+# ★2026-09-11 `pk` を追加。PSA のラベル表記 `MINI-TIN PK SET VOL.2-BISAI` (Pk = Pack の略) が
+#   そのままタイトルに入り、eBay が「不適切な語 / ポリシー違反」で拒否した
+#   (240 とは別の文言だが、効き方は同じ = 語を抜くと通る)。VerifyAddItem で切り分け済:
+#     `Mini-Tin Pk Set Vol.2`   → Failure   /   `Mini-Tin Set Vol.2` → OK
+#     `Pk Set Vol.2`            → Failure   (= `Pk` 単独で弾かれる)
+#   実害: 🤖自動 が1件目の失敗で止まる設計なので、この1語で同じ走行の他の行も出なかった。
+#   ★`Pack` に直すのは不可 (この表の `pack` で弾かれる)。**抜く**のが正しい。
+MISCAT_TITLE_WORDS = ("pack", "packs", "pk", "box", "boxes", "lot", "lots",
                       "bundle", "bundles", "set of")
 SINGLES_CATEGORY = "183454"
 

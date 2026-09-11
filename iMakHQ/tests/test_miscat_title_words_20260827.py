@@ -165,3 +165,22 @@ def test_auditor_flags_miscat_word_before_upload():
 
 def test_auditor_ignores_non_singles_category():
     assert A.native_findings(["*Title", "*Category"], [GARDEVOIR_TITLE, "183050"]) == []
+
+
+# ---------------------------------------------------------------- 2026-09-11 `pk`
+# PSA のラベル表記 `MINI-TIN PK SET VOL.2-BISAI` (Pk = Pack の略) が eBay に拒否された。
+# VerifyAddItem で切り分け済: `Pk` を抜くと通る / `Pack` に直すと 240 の語になる。
+
+def test_pk_2026_09_11_は抜く():
+    import listing_common as _L
+    t = "PSA 10 One Piece Japanese Mini-Tin Pk Set Vol.2-Bisai #P-113 Jewelry Bonney"
+    out, changed = _L.strip_miscat_title_words(t, "Jewelry Bonney")
+    assert changed
+    assert out == "PSA 10 One Piece Japanese Mini-Tin Set Vol.2-Bisai #P-113 Jewelry Bonney"
+    assert _L.miscat_title_words_in(out) == []
+
+
+def test_pk_2026_09_11_語の一部は触らない():
+    import listing_common as _L
+    for t in ("PSA 10 Pokemon Pikachu", "Pkmn Promo", "Spark Card"):
+        assert _L.miscat_title_words_in(t) == [], t
