@@ -88,6 +88,8 @@ def collect() -> list[dict]:
                 continue
             if s.get("is_collab_overview"):        # 商品でない行 (コラボの紹介記事)
                 continue
+            if s.get("not_tee"):                   # 手袋・ストール・リラコ等 (2026-09-11)
+                continue
             imgs = json.loads(r["images"] or "[]") or s.get("image_urls") or []
             live = not s.get("official_gone_at")
             out.append({

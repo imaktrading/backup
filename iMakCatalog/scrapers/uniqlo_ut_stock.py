@@ -124,7 +124,8 @@ def targets(db, include_kids: bool) -> list[sqlite3.Row]:
         if not include_kids and str(s.get("gender") or "").upper() in KID:
             kids += 1
             continue
-        if s.get("is_collab_overview"):
+        if s.get("is_collab_overview") or s.get("not_tee"):
+            # 商品でない行 / Tシャツでない物 (手袋・リラコ等。2026-09-11)
             notprod += 1
             continue
         out.append(r)
