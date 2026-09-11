@@ -94,6 +94,9 @@ def new_driver():
     o.add_argument("--no-sandbox")
     o.add_argument("--window-size=1500,2800")
     o.add_argument("--lang=ja-JP")
+    # ★画像は読まない。実寸表は文字で、商品ページの画像が重い
+    #   (2026-09-11 実測: 開いた直後で 1本 1.6〜2.3GB)
+    o.add_argument("--blink-settings=imagesEnabled=false")
     return uc.Chrome(options=o, version_main=_chrome_major())
 
 
