@@ -82,6 +82,35 @@ class TestRank:
         assert U.rank_candidates("海外限定 ジブリ トトロ", "", self.CAT) == []
 
 
+class TestHarvestHints:
+    """抽出くんの POC (2026-09-11): X列=見つけた語 / Y列=タグの番号 を目視の材料に使う."""
+    CAT = TestRank.CAT
+
+    def test_keyword_ranks_that_collab_first(self):
+        got = U.rank_candidates("UNIQLO UT Tシャツ", "", self.CAT, hint_kw="ポケモン")
+        assert {p["pid"] for p in got} == {"POKE1", "POKE2"}
+
+    def test_conflict_is_warned(self):
+        """番号が読めた18件中5件で語と食い違った。どちらが正しいかは人が写真で決める."""
+        w = U.tag_conflict("486159", "ポケモン", self.CAT)
+        assert "食い違う" in w and "呪術廻戦" in w
+
+    def test_conflicting_tag_does_not_jump_to_the_top(self):
+        """★POC: 486159 (ポケモン) が無関係の出品に何度も出た。語と食い違う番号では上げない."""
+        got = U.rank_candidates("UNIQLO UT ポケモン 呪術廻戦", "", self.CAT,
+                                hint_kw="ポケモン", tag_no="486159")
+        assert got[0]["pid"] != "JJK"
+
+    def test_matching_tag_is_silent(self):
+        assert U.tag_conflict("486159", "呪術廻戦", self.CAT) == ""
+
+    def test_unknown_tag(self):
+        assert "カタログに無い" in U.tag_conflict("999999", "ポケモン", self.CAT)
+
+    def test_no_tag(self):
+        assert U.tag_conflict("", "ポケモン", self.CAT) == ""
+
+
 def _row(url, title="t", sold="", price="1650", color="ホワイト", size="M"):
     r = [""] * 36
     r[U.C_URL], r[U.C_TITLE], r[U.C_SOLD], r[U.C_PRICE] = url, title, sold, price

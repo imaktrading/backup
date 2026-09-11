@@ -56,6 +56,10 @@ MAX_CANDS = 24
 # 中間スプシ / 商品管理シート の列 (0始まり)。2つのシートは A..T の並びが同じ
 C_URL, C_TITLE, C_SOLD, C_COND, C_PRICE, C_PHOTOS, C_DESC = 0, 2, 3, 4, 5, 6, 7
 C_CAT, C_COLOR, C_SIZE = 17, 18, 19
+# ★2026-09-11 抽出くんの POC: 目視の材料 (中間スプシだけ。商品管理シートには写さない)
+C_KW = 23      # X列 = その行を見つけた検索語 (= カタログのコラボ名)
+C_TAG = 24     # Y列 = タグ写真から読めた6桁の番号 (読めた時だけ)
+_WIDTH = C_TAG + 1
 
 OUT_REASONS = [
     ("used", "中古・難あり"),
@@ -198,9 +202,11 @@ def rank_candidates(text, color_jp, catalog, hint_kw="", tag_no="", limit=MAX_CA
     out = []
     for p in catalog:
         sc = 0
-        if tag_no and p.get("l1") == tag_no:
-            sc += 100
         toks = p["_tok"]
+        # タグの番号は、見つけた語と食い違わない時だけ先頭に上げる
+        # (★POC 2026-09-11: 486159 が ウォーホル/バスキア/ヘリング の出品に何度も出た = 誤読)
+        if tag_no and p.get("l1") == tag_no and (not kw or kw in toks):
+            sc += 100
         if kw and kw in toks:
             sc += 50
         if any(tok in t for tok in toks):
@@ -235,7 +241,7 @@ def pending_rows(src, decided, in_high):
     """
     out = []
     for i, r in enumerate(src[1:], start=2):
-        r = list(r) + [""] * (C_SIZE + 1 - len(r))
+        r = list(r) + [""] * (_WIDTH - len(r))
         url = (r[C_URL] or "").strip()
         if not url.startswith("http") or (r[C_SOLD] or "").strip():
             continue
@@ -257,6 +263,24 @@ def high_row(r, color_jp=""):
     row[C_COLOR] = color_jp or (r[C_COLOR] if C_COLOR < len(r) else "")
     row[C_CAT] = SHEET_CATEGORY
     return row
+
+
+def tag_conflict(tag_no, hint_kw, catalog):
+    """タグの番号が指す商品と、見つけた検索語が食い違うか → 警告文 (無ければ "")。純関数。
+
+    ★抽出くんの POC (2026-09-11): 番号が読めた18件中5件で食い違った (Vision の誤読か、
+      同じ語で別の商品が引っかかったか)。どちらが正しいかは写真を見ないと決まらない。
+    """
+    tag_no, kw = (tag_no or "").strip(), norm(hint_kw)
+    if not tag_no:
+        return ""
+    hit = next((p for p in catalog if p.get("l1") == tag_no), None)
+    if hit is None:
+        return f"タグの番号 {tag_no} はカタログに無い (海外限定・旧作かも)"
+    if kw and kw not in hit["_tok"]:
+        return (f"タグの番号 {tag_no} は「{hit['name'][:20]}」を指していて、"
+                f"見つけた語「{hint_kw}」と食い違う — 写真で確かめる")
+    return ""
 
 
 def parse_result(data):
@@ -460,8 +484,12 @@ def build_html(items, catalog):
             f"data-photo=\"{_html.escape(main)}\">{ph}<div class='body'>"
             f"<div class='t'>{_html.escape((r[C_TITLE] or '')[:110])}</div>"
             f"<div class='meta'>{_html.escape(price)} ｜ 色 {_html.escape(r[C_COLOR] or '?')} ｜ "
-            f"サイズ {_html.escape(r[C_SIZE] or '?')} ｜ {_html.escape((r[C_DESC] or '')[:80])}</div>"
-            f"<div class='vslot'>{_cards_html(it['cands'], r[C_COLOR])}</div>"
+            f"サイズ {_html.escape(r[C_SIZE] or '?')}"
+            + (f" ｜ 見つけた語 <b>{_html.escape(r[C_KW])}</b>" if r[C_KW] else "")
+            + (f" ｜ タグの番号 <b>{_html.escape(r[C_TAG])}</b>" if r[C_TAG] else "")
+            + f" ｜ {_html.escape((r[C_DESC] or '')[:80])}</div>"
+            + (f"<div class='warn'>⚠ {_html.escape(it['warn'])}</div>" if it.get("warn") else "")
+            + f"<div class='vslot'>{_cards_html(it['cands'], r[C_COLOR])}</div>"
             "<div class='act'>検索 <input class='q' placeholder='作品名 / キャラ / 6桁番号' "
             "onchange='lookup(this)'>"
             "色 <select class='col'><option value=''>先に商品を選ぶ</option></select>"
@@ -521,7 +549,10 @@ def load_items(limit=DEFAULT_LIMIT):
     items = []
     for i, r in rows[:limit] if limit else rows:
         text = " ".join([r[C_TITLE], r[C_DESC]])
-        items.append({"idx": i, "row": r, "cands": rank_candidates(text, r[C_COLOR], catalog)})
+        items.append({"idx": i, "row": r,
+                      "cands": rank_candidates(text, r[C_COLOR], catalog,
+                                               hint_kw=r[C_KW], tag_no=r[C_TAG]),
+                      "warn": tag_conflict(r[C_TAG], r[C_KW], catalog)})
     return items, len(rows)
 
 
