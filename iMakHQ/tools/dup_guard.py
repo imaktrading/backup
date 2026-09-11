@@ -589,7 +589,7 @@ def cache_age_hours(path=None, now=None):
     return ((now or datetime.now()) - gen).total_seconds() / 3600.0
 
 
-def ensure_fresh_live_cache(max_age_h=CACHE_MAX_AGE_H):
+def ensure_fresh_live_cache(max_age_h=CACHE_MAX_AGE_H, force=False):
     """live cache が古ければ eBay から取り直す。戻り: (titles, skus, ok)。
 
     ★2026-08-07 発覚: この cache を **更新する担当が居なかった**。
@@ -602,10 +602,18 @@ def ensure_fresh_live_cache(max_age_h=CACHE_MAX_AGE_H):
     どちらも黙って起きるので、**入稿の直前に自分で新鮮さを保証する**。
     """
     age = cache_age_hours()
-    if age is not None and age <= max_age_h:
+    # ★2026-09-11: force=True は年齢に関係なく取り直す (重複チェック直前の専用)。
+    #   6時間以内なら「最新」とみなしていたため、**キャッシュを作った後の出品を知らないまま**
+    #   「最新」と表示していた。実害: 19:53 の走行が 20:06 に出品した SB02-001 (820113987395)
+    #   を 20:13 の走行の重複チェックが見逃し、eBay の重複拒否で同じ走行の10件が止まった。
+    #   年齢はキャッシュの新しさを保証しない。**間に出品があれば中身は古い**。
+    if not force and age is not None and age <= max_age_h:
         return _load_live_cache(), _load_live_skus(), True
-    print(f"  ↻ live cache が{'無い/壊れている' if age is None else f'{age:.1f}時間前と古い'}"
-          f" → eBay から取り直します")
+    if force and age is not None and age <= max_age_h:
+        print(f"  ↻ live cache ({age:.1f}時間前) を重複チェックの直前なので取り直します")
+    else:
+        print(f"  ↻ live cache が{'無い/壊れている' if age is None else f'{age:.1f}時間前と古い'}"
+              f" → eBay から取り直します")
     titles, skus = _ebay_active_titles()
     if titles:
         _save_live_cache(titles, skus)
@@ -955,8 +963,11 @@ def main():
         # 従来は cache を取り直すのが後段の dup_guard だけだったため、
         # 「excluder は素通り・dup_guard がたまたま拾う」順序になっていた
         # (2026-08-09 実測: age=23.7h で excluder が skip、重複2件は後段で辛うじて除外)。
-        _t, _s, ok = ensure_fresh_live_cache()
-        print(f"  live cache: {'最新' if ok else '⚠️ 取り直せず(古いまま)'}"
+        # ★2026-09-11: ここは **毎回 取り直す** (force)。この手順の目的は「除外を素通り
+        #   させない」ことで、年齢で省くと直前の走行の出品を知らないまま除外が走る。
+        #   取り直しは実測 37秒 / API 十数回 (1,044件)。走行全体 (約13分) に対して小さい。
+        _t, _s, ok = ensure_fresh_live_cache(force=True)
+        print(f"  live cache: {'eBay から取り直した' if ok else '⚠️ 取り直せず(古いまま)'}"
               f" / {len(_t or {})} 件")
         return 0 if ok else 2
     if "--audit" in args:
