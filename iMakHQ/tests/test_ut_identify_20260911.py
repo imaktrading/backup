@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import datetime
 import io
 import json
 import os
@@ -219,6 +220,55 @@ class TestSave:
         led, sent = self._setup(tmp_path, monkeypatch)
         res = {"picks": [{"idx": 2, "pid": "NOPE", "color": "WHITE"}], "nocat": [], "outs": [], "holds": []}
         assert U.save(self.ITEMS, res, now="T") == (0, 0) and sent == []
+
+
+class TestCatalogRequest:
+    """★2026-09-12「カタログに無い → 追加依頼の経路はいるよね」(PSA と同じ着地)."""
+    ROWS = [{"url": "https://a", "title": "ジブリ トトロ UT", "color": "ブラック", "size": "L",
+             "tag": "", "kw": "", "photo": "https://img/a.jpg"}]
+
+    def test_builds_a_plain_request(self):
+        md = U.request_md(self.ROWS, datetime.date(2026, 9, 12))
+        assert "ジブリ トトロ UT" in md and "https://a" in md and "①カタログのデータ" in md
+
+    def test_same_url_is_not_written_twice(self):
+        first = U.request_md(self.ROWS, datetime.date(2026, 9, 12))
+        assert U.request_md(self.ROWS, datetime.date(2026, 9, 12), existing=first) == ""
+
+    def test_appends_new_rows_to_todays_file(self):
+        first = U.request_md(self.ROWS, datetime.date(2026, 9, 12))
+        more = [dict(self.ROWS[0], url="https://b", title="別の商品")]
+        md = U.request_md(more, datetime.date(2026, 9, 12), existing=first)
+        assert "https://b" in md and md.startswith(first)
+
+    def test_filed_rows_come_back_after_a_week(self):
+        """カタログが追加したらまた候補が出る。出しっぱなしにしない."""
+        now = datetime.datetime(2026, 9, 20)
+        old = {"decision": "nocat", "at": "2026-09-12T10:00:00"}
+        new = {"decision": "nocat", "at": "2026-09-19T10:00:00"}
+        assert U._retry_nocat(old, now) and not U._retry_nocat(new, now)
+        assert not U._retry_nocat({"decision": "go", "at": "2026-01-01T00:00:00"}, now)
+
+    def test_save_files_the_request(self, tmp_path, monkeypatch):
+        led, sent = TestSave()._setup(tmp_path, monkeypatch)
+        monkeypatch.setattr(U, "CATALOG_REQ_DIR", str(tmp_path))
+        res = {"picks": [], "skips": [], "nocat": [3], "outs": [], "holds": []}
+        U.save(TestSave.ITEMS, res, now="T")
+        f = list(tmp_path.glob("*_ut_not_in_catalog.md"))
+        assert f and "https://b" in f[0].read_text(encoding="utf-8")
+
+
+class TestOnlyUnbuyable:
+    """★2026-09-12「公式で買えないものだけに対象を絞ってほしい」."""
+
+    def test_in_stock_products_are_hidden_with_a_count(self):
+        it = {"idx": 2, "row": _row("https://a"), "cands": [], "hidden_instock": 2}
+        assert "公式で今買える候補 2件を隠しました" in U.build_html([it], []).decode("utf-8")
+
+    def test_search_marks_them_instead_of_hiding(self):
+        p = _p("E1", name="ポケモン UT", sold_out=False)
+        html = U._cards_html([p])
+        assert "公式で今買える" in html and "E1" in html
 
 
 class TestColorPicker:

@@ -296,10 +296,28 @@ def search_catalog(q, catalog, limit=MAX_CANDS):
     return hits[:limit]
 
 
-def pending_rows(src, decided, in_high):
+NOCAT_RETRY_DAYS = 7      # カタログ追加依頼を出した行を、もう一度見るまでの日数
+
+
+def _retry_nocat(entry, today=None):
+    """「カタログに無い」で依頼を出した行を、もう一度目視に出す頃か (純関数)。
+
+    ★カタログが追加したら候補が出るようになる。出しっぱなしだと二度と見ないので戻す。
+    """
+    if (entry or {}).get("decision") != "nocat":
+        return False
+    try:
+        t = datetime.datetime.fromisoformat(entry.get("at") or "")
+    except ValueError:
+        return True
+    return ((today or datetime.datetime.now()) - t).days >= NOCAT_RETRY_DAYS
+
+
+def pending_rows(src, decided, in_high, today=None):
     """中間タブ → 目視に出す行 [(行番号, row)]。純関数。
 
     出さない: URL 無し / 売り切れ印 / 台帳で決着済み / 商品管理シートに既にある URL。
+    ただし「カタログに無い」で依頼を出した行は NOCAT_RETRY_DAYS 後にまた出す。
     """
     out = []
     for i, r in enumerate(src[1:], start=2):
@@ -307,7 +325,9 @@ def pending_rows(src, decided, in_high):
         url = (r[C_URL] or "").strip()
         if not url.startswith("http") or (r[C_SOLD] or "").strip():
             continue
-        if url in decided or url in in_high:
+        if url in in_high:
+            continue
+        if url in decided and not _retry_nocat(decided.get(url), today):
             continue
         out.append((i, r))
     return out
@@ -450,8 +470,9 @@ def _cards_html(cands, color_jp=""):
             + (f"<div class='nm'>画像 {len(gal)}枚 (🔍で全部)</div>" if len(gal) > 1 else "")
             + f"<div class='pid'>{_html.escape(p['pid'])}</div>"
             + f"<div class='nm'>{_html.escape(p['name'][:22])}</div>"
-            + f"<div class='nm'>{_html.escape((p['collab'] or p['character_family'])[:18])}"
-            + (" ・公式売切" if p.get("sold_out") else "") + "</div>"
+            + f"<div class='nm'>{_html.escape((p['collab'] or p['character_family'])[:18])}</div>"
+            + ("" if p.get("sold_out") else
+               "<div class='nm' style='color:#a40'>⚠ 公式で今買える (対象外)</div>")
             # ★色の一覧がカタログに無い商品は、選んでも色を決められず出品できない (catalog に確認中)
             + ("" if p["colors"] else "<div class='nm' style='color:#a40'>色がカタログに無い</div>")
             + (f"<div class='nm' style='color:#06a'>色違い {len(p['colors'])}色</div>"
@@ -582,7 +603,7 @@ def build_html(items, catalog):
              "<h1>メルカリの新品 UT → カタログの商品を選ぶ</h1>",
              f"<div class='sum'>全 {len(items)}件。写真と同じ柄の商品を選んで「この商品」"
              "(同じ柄で色違いがある商品だけ、色を選ぶ欄が出ます)。"
-             "候補に無ければ検索欄に作品名・キャラ名・商品番号(6桁)。"
+             "候補は<b>公式で買えない物だけ</b>。無ければ検索欄に作品名・キャラ名・商品番号(6桁)。"
              "<b>確信が無ければ選ばない</b> (違う柄を出すと別デザイン発送になります)。</div>"]
     for it in items:
         r = it["row"]
@@ -612,6 +633,9 @@ def build_html(items, catalog):
             + (f"<div class='nm' style='font-size:11px;color:#666'>色が明らかに違う候補 "
                f"{it['hidden_color']}件を隠しました (出品者の色の書き違いなら 検索欄で全部出ます)</div>"
                if it.get("hidden_color") else "")
+            + (f"<div class='nm' style='font-size:11px;color:#666'>公式で今買える候補 "
+               f"{it['hidden_instock']}件を隠しました (公式で買えない物だけが対象)</div>"
+               if it.get("hidden_instock") else "")
             + f"<div class='vslot'>{_cards_html(it['cands'], r[C_COLOR])}</div>"
             "<div class='act'>検索 <input class='q' placeholder='作品名 / キャラ / 6桁番号' "
             "onchange='lookup(this)'>"
@@ -620,7 +644,9 @@ def build_html(items, catalog):
             "<button class='go' data-a='go' onclick='setAct(this)'>この商品</button>"
             "<button class='skip' data-a='skip' onclick='setAct(this)' "
             "title='商品と色は合っているが、今回は出さない (高い / 出品者が不安)'>一致・見送り</button>"
-            "<button class='cat' data-a='cat' onclick='setAct(this)'>カタログに無い</button>"
+            "<button class='cat' data-a='cat' onclick='setAct(this)' "
+            "title='カタログに追加依頼を出す。追加されたら1週間後にまたこの画面に出ます'>"
+            "カタログに無い→追加依頼</button>"
             "<button class='ng' data-a='out' onclick='setAct(this)'>対象外</button>"
             "<select class='rsn' onchange='pickRsn(this)'><option value=''>理由を選ぶ</option>"
             "<optgroup label='対象外 (商品が決まらない・材料にならない)'>"
@@ -646,6 +672,63 @@ def lookup_api(path, query, catalog=None):
 
 
 # ── 読み書き (I/O) ──────────────────────────────────────────────────
+CATALOG_REQ_DIR = r"C:/dev/iMak_data/catalog/requests"
+
+
+def request_md(rows, today=None, existing=""):
+    """「カタログに無い」行 → カタログへの追加依頼書 (純関数)。
+
+    ★PSA の目視と同じ着地: 「該当なし」で捨てずに **カタログ追加依頼**にする。
+      UT は型番が読めないことが多いので、PSA の自動起票 (missing_models.csv = 型番前提) には
+      乗せず、商品名・写真・仕入元URLを並べた依頼書を出す。
+    existing: 同じ日の依頼書が既にある時はその本文 (同じ URL は二度書かない)。
+    """
+    today = today or datetime.date.today()
+    have = set(re.findall(r"https?://\S+", existing))
+    new = [r for r in rows if (r.get("url") or "") not in have]
+    if not new:
+        return ""
+    head = existing or (
+        f"# 依頼: メルカリで見つけた UT/GU が カタログに無い ({today:%Y-%m-%d})\n\n"
+        f"- 依頼日 {today:%Y-%m-%d} / 依頼者 出品くん (UT 目視特定) / 緊急度 低 / フェーズ: 追加\n"
+        "- 判定: ①カタログのデータ (公式に在ったはずの商品がカタログに無い)\n\n"
+        "## 経緯\n\n"
+        "メルカリの新品 UT を目視でカタログの商品に当てる画面 (`iMakHQ/tools/ut_identify.py`) で、\n"
+        "**カタログに候補が無かった**行です。海外限定・旧作・GU など、公式の検索に出ない物が多いはずです。\n"
+        "**分かる範囲で構いません。** 無い物は「無い」と返してください (出品側はその行を出しません)。\n\n"
+        "## 見つからなかった商品\n\n"
+        "| メルカリのタイトル | 色 | サイズ | タグの番号 | 見つけた語 | 仕入元 | 写真 |\n"
+        "|---|---|---|---|---|---|---|\n")
+    body = "".join(
+        "| {title} | {color} | {size} | {tag} | {kw} | {url} | {photo} |\n".format(
+            title=(r.get("title") or "").replace("|", "／")[:60],
+            color=r.get("color") or "", size=r.get("size") or "",
+            tag=r.get("tag") or "-", kw=r.get("kw") or "-",
+            url=r.get("url") or "", photo=r.get("photo") or "-")
+        for r in new)
+    return head + body
+
+
+def write_catalog_request(rows, dir_path=CATALOG_REQ_DIR, today=None):
+    """依頼書を書く (同じ日の分は追記)。戻り: (path, 追加件数)。書けなければ (None, 0)。"""
+    if not rows:
+        return None, 0
+    today = today or datetime.date.today()
+    path = os.path.join(dir_path, f"{today:%Y-%m-%d}_ut_not_in_catalog.md")
+    try:
+        existing = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        md = request_md(rows, today, existing)
+        if not md:
+            return path, 0
+        os.makedirs(dir_path, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(md)
+        return path, md.count("\n| ") if not existing else len(rows)
+    except OSError as e:                                           # noqa: BLE001
+        print(f"  ⚠ カタログ依頼書を書けませんでした ({e}) — 台帳には残っています")
+        return None, 0
+
+
 def load_ledger(path=LEDGER):
     try:
         with open(path, encoding="utf-8") as f:
@@ -684,8 +767,12 @@ def load_items(limit=DEFAULT_LIMIT):
                                limit=0)
         # 色が明らかに違う候補は隠す (件数は画面に出す。検索欄では色で絞らない)
         keep = [p for p in allc if color_ok(p, r[C_COLOR])]
-        items.append({"idx": i, "row": r, "cands": keep[:MAX_CANDS],
+        # ★2026-09-12 ユーザー「公式で買えないものだけに対象を絞ってほしい」:
+        #   公式で今買える商品は、メルカリから仕入れて出す物ではない (目的は「公式では買えない物」)
+        oos = [p for p in keep if p.get("sold_out")]
+        items.append({"idx": i, "row": r, "cands": oos[:MAX_CANDS],
                       "hidden_color": len(allc) - len(keep),
+                      "hidden_instock": len(keep) - len(oos),
                       "warn": tag_conflict(r[C_TAG], r[C_KW], catalog)})
     return items, len(rows)
 
@@ -731,10 +818,17 @@ def save(items, res, now=None):
         add_led[r[C_URL].strip()] = {"decision": "skip", "product_id": p["pid"], "color": p["color"],
                                      "reason": p["reason"], "title": r[C_TITLE], "size": r[C_SIZE],
                                      "at": now}
+    req_rows = []
     for idx in res["nocat"]:
         it = by_idx.get(idx)
-        if it:
-            add_led[it["row"][C_URL].strip()] = {"decision": "nocat", "title": it["row"][C_TITLE], "at": now}
+        if not it:
+            continue
+        r = it["row"]
+        photos = [u for u in (r[C_PHOTOS] or "").split("|") if u.strip()]
+        req_rows.append({"url": r[C_URL].strip(), "title": r[C_TITLE], "color": r[C_COLOR],
+                         "size": r[C_SIZE], "tag": r[C_TAG], "kw": r[C_KW],
+                         "photo": photos[0] if photos else ""})
+        add_led[r[C_URL].strip()] = {"decision": "nocat", "title": r[C_TITLE], "at": now}
     for o in res["outs"]:
         it = by_idx.get(o["idx"])
         if it:
@@ -742,6 +836,10 @@ def save(items, res, now=None):
                                                  "title": it["row"][C_TITLE], "at": now}
     if add_rows:
         sheet_io.append_product_rows(add_rows)         # 失敗したら例外 = 台帳は書かない
+    # カタログに無い分は追加依頼にする (置き場は呼び出し時に読む = test で差し替えられる)
+    req_path, n_req = write_catalog_request(req_rows, CATALOG_REQ_DIR)
+    if n_req:
+        print(f"  📮 カタログに追加依頼: {n_req}件 → {os.path.basename(req_path)}")
     led.update(add_led)
     save_ledger(led)
     return len(add_rows), len(add_led)
@@ -775,7 +873,7 @@ def main():
     n_add, n_led = save(items, res)
     print(f"✅ 商品管理シートに追加 {n_add}件 (Tシャツ行・出品くんが拾う) / 台帳に記録 {n_led}件")
     print(f"   内訳: この商品 {len(res['picks'])} / 一致・見送り {len(res['skips'])} / "
-          f"カタログに無い {len(res['nocat'])} / "
+          f"カタログに無い→追加依頼 {len(res['nocat'])} / "
           f"対象外 {len(res['outs'])} / 未結論 {len(res['holds'])} (未結論は次回また出ます)")
     return 0
 
