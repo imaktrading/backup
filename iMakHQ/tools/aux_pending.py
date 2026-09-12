@@ -30,24 +30,39 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PATH = os.path.join(HERE, "..", "review_logs", "aux_url_pending.jsonl")
 
 
-def build_rows(row_to_urls, source, existing_by_row=None, item_of=None, today=None):
-    """積む行を作る (純関数)。**既にシートに在る URL は積まない** (二度見せない)。"""
+def build_rows(row_to_urls, source, existing_by_row=None, item_of=None, today=None,
+               already=None):
+    """積む行を作る (純関数)。**既にシートに在る URL は積まない** (二度見せない)。
+
+    ★2026-09-12 追加 `already`: **既に待ち行列に居る (行, URL) も積まない**。
+      これが無かったので、毎晩 同じ物が積み直されていた
+      (実測 2026-09-13: 951本 のうち 実質ユニークは 439本 = 512本 が積み直し)。
+      人が見るまで消えない待ち行列なので、書く側が冪等でないと際限なく膨らむ。
+    """
     today = today or datetime.date.today().isoformat()
+    seen = set(already or ())
     out = []
     for row, urls in (row_to_urls or {}).items():
         have = {(u or "").strip() for u in (existing_by_row or {}).get(row, []) if u}
         for u in (urls or []):
             u = (u or "").strip()
-            if not u or u in have:
+            if not u or u in have or (row, u) in seen:
                 continue
+            seen.add((row, u))
             out.append({"date": today, "source": source, "row": row,
                         "itemID": (item_of or {}).get(row, ""), "url": u})
     return out
 
 
+def queued_pairs(path=None):
+    """今 待ち行列に居る (行, URL) の集合 (I/O)。"""
+    return {(r.get("row"), (r.get("url") or "").strip()) for r in load(path)}
+
+
 def queue(row_to_urls, source, existing_by_row=None, item_of=None, path=None):
-    """目視待ちに積む (I/O)。戻り: 積んだ本数。"""
-    rows = build_rows(row_to_urls, source, existing_by_row, item_of)
+    """目視待ちに積む (I/O)。戻り: 積んだ本数。既に居る分は積み直さない。"""
+    rows = build_rows(row_to_urls, source, existing_by_row, item_of,
+                      already=queued_pairs(path))
     if not rows:
         return 0
     p = path or PATH
@@ -75,17 +90,27 @@ def load(path=None):
     return out
 
 
-if __name__ == "__main__":
-    import collections
-    import io
-    import sys
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-    rows = load()
-    print(f"補URL 目視待ち: {len(rows)}本")
-    for src, n in collections.Counter(r.get("source") for r in rows).most_common():
-        print(f"  {src}: {n}本")
-    for r in rows[-10:]:
-        print(f"  {r.get('date')} row{r.get('row')} {r.get('itemID')} {r.get('url')[:60]}")
+def dedupe(path=None):
+    """同じ (行, URL) が何度も積まれた分を1本にまとめる (I/O)。戻り: 消した本数。
+
+    ★2026-09-13: 積む側が冪等でなかった間に貯まった分の後片付け。一番古い1本を残す
+      (いつから待っているかが分かる方が役に立つ)。
+    """
+    p = path or PATH
+    rows = load(p)
+    seen, keep = set(), []
+    for r in rows:
+        k = (r.get("row"), (r.get("url") or "").strip())
+        if k in seen:
+            continue
+        seen.add(k)
+        keep.append(r)
+    n = len(rows) - len(keep)
+    if n:
+        with open(p, "w", encoding="utf-8") as f:
+            for r in keep:
+                f.write(json.dumps(r, ensure_ascii=False) + chr(10))
+    return n
 
 
 def consume(pairs, path=None):
@@ -108,3 +133,18 @@ def consume(pairs, path=None):
         for r in keep:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     return n
+
+
+if __name__ == "__main__":
+    import collections
+    import io
+    import sys
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    if "--dedupe" in sys.argv:
+        print(f"積み直しの重複を {dedupe()}本 まとめました")
+    rows = load()
+    print(f"補URL 目視待ち: {len(rows)}本")
+    for src, n in collections.Counter(r.get("source") for r in rows).most_common():
+        print(f"  {src}: {n}本")
+    for r in rows[-10:]:
+        print(f"  {r.get('date')} row{r.get('row')} {r.get('itemID')} {r.get('url')[:60]}")

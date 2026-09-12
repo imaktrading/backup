@@ -1752,8 +1752,14 @@ def run_daytime_confirm(max_backups=None, limit=None, dry_run=False, min_backups
             _price_of = _hd.price_by_url_from_cache()
         except Exception:                                      # noqa: BLE001
             _price_of = {}
+        # ★2026-09-13: itemID が空の行が 886本 溜まっていた (夜間の書き手が入れていなかった)。
+        #   捨てずに **行番号からシートの B列を引いて**拾う。積んだ物を必ず人に見せる。
         for _r in aux_pending.load():
             _iid = (_r.get("itemID") or "").strip()
+            if not _iid:
+                _row = _r.get("row")
+                if isinstance(_row, int) and 0 < _row <= len(vals):
+                    _iid = _cell(vals[_row - 1], B)
             if not _iid:
                 continue
             _pending_by_iid.setdefault(_iid, []).append(
@@ -2152,7 +2158,14 @@ def run_newcand_aux(dry_run=False):
     #   → シートには書かず、目視待ちに積む。AUX_AUTO_WRITE=1 で従来動作に戻せる。
     if os.environ.get("AUX_AUTO_WRITE") != "1":
         import aux_pending
-        n_q = aux_pending.queue(wb, source="捨てた候補の転記(夜間)")
+        # ★2026-09-13: ここは itemID を渡していなかった。見る側 (③補充の画面) は itemID で
+        #   引くので、**積んだ分の93% が一度も画面に出てこなかった** (実測 951本中 886本)。
+        #   itemID はシートの B列にあり、行番号から引ける。新しい台帳は作らない。
+        item_of = {row: _cell(vals[row - 1], B) for row in wb if 0 < row <= len(vals)}
+        existing_by_row = {row: [_cell(vals[row - 1], AUX0 + k) for k in range(AUXN)]
+                           for row in wb if 0 < row <= len(vals)}
+        n_q = aux_pending.queue(wb, source="捨てた候補の転記(夜間)",
+                                existing_by_row=existing_by_row, item_of=item_of)
         print(f"🔗 書込は行いません (ユーザー指示)。目視待ちに {n_q}本 積みました "
               f"(python aux_pending.py で確認)")
         return 0
