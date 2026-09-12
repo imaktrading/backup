@@ -342,6 +342,42 @@ class TestNoDuplicateListing:
         assert "ut_run[_key]" in src, "同じ走行に同じ物が2つあっても1つだけにする"
 
 
+class TestOfficialListings:
+    """★2026-09-12「公式在庫をどうするかだね」「SKUあるけど」.
+
+    公式仕入の出品は eBay 側に商品番号が無い (SKU は "UNIQLO official website" / 変種は UUID) が、
+    シート1 (出品ID→公式URL) と SKU詳細 (出品ID→色・サイズ・在庫) を突き合わせれば
+    メルカリ仕入と同じ KEY を作れる。監視くんが毎日更新しているので手作業ではない。
+    """
+    MAIN = [["FLG", "title", "item ID", "", "ebay URL", "URL", "CHK date"],
+            ["", "ポケモン UT", "358364940197", "", "https://ebay/x",
+             "https://www.uniqlo.com/jp/ja/products/E482756-000/00", "2026/09/01"],
+            ["", "URL無し", "358000000000", "", "", "", ""]]
+    SKU = [["対処要", "対処済", "対処日", "listing ID", "title", "eBay SKU ID", "サイズ", "色",
+            "仕入元在庫", "仕入元価格", "eBay 現Qty", "自動CHK日"],
+           ["FALSE", "TRUE", "", "358364940197", "ポケモン UT", "uuid-1", "XL", "WHITE", "✕", "1500", "1", ""],
+           ["FALSE", "TRUE", "", "358364940197", "ポケモン UT", "uuid-2", "M", "WHITE", "○", "1500", "1", ""],
+           ["FALSE", "TRUE", "", "358000000000", "URL無し", "uuid-3", "M", "BLACK", "○", "0", "0", ""]]
+
+    def test_builds_the_same_key_as_mercari_rows(self):
+        got = V.official_identities(self.MAIN, self.SKU)
+        assert got["uniqlo_ut:482756:WHITE:L"]["item_id"] == "358364940197"   # JP XL = US L
+        assert got["uniqlo_ut:482756:WHITE:S"]["official_stock"] == "○"       # JP M = US S
+
+    def test_rows_without_an_official_url_are_skipped(self):
+        got = V.official_identities(self.MAIN, self.SKU)
+        assert all(v["item_id"] != "358000000000" for v in got.values())
+
+    def test_empty_input(self):
+        assert V.official_identities([], []) == {} and V.official_identities(None, None) == {}
+
+    def test_listing_skips_them(self):
+        src = (_ROOT / "iMakMercari" / "tshirt_listing.py").read_text(encoding="utf-8")
+        assert "UCV.load_official_identities()" in src
+        i = src.index("_off = ut_official.get(_key)")
+        assert "continue" in src[i:i + 400] and "二重出品にしない" in src[i:i + 400]
+
+
 class TestListingWiring:
     SRC = (_ROOT / "iMakMercari" / "tshirt_listing.py").read_text(encoding="utf-8")
 

@@ -687,6 +687,8 @@ def main():
     #   同じ商品・色・サイズが**既に出品中**なら出さない。捨てずに、その出品の補URLに足す
     #   (無在庫なので仕入元は多いほど強い。PSA の「2つ目は補URLへ」と同じ)
     ut_listed = UCV.listed_identities(all_values, ut_ledger)
+    # 公式仕入で出している商品 (バリエーション出品) とも重ねない。同じ商品・色・サイズは eBay から見て同じ物
+    ut_official = UCV.load_official_identities()
     ut_aux_add = {}
     ut_run = {}          # この走行で CSV に入れた分 (同じ走行に同じ物が2つある時も1つだけ出す)
 
@@ -719,6 +721,13 @@ def main():
             print(f"    📚 目視で特定済み {cat_v['product_id']} → 色/素材/原産国/サイズ表をカタログから写す")
             # KEY は出品に出す値 (CSV の C:Model / C:Color / C:Size) と同じ材料で作る
             _key = UCV.identity_key(cat_v["product_id"], cat_v["specs"]["Color"], cat_v["size_jp"])
+            _off = ut_official.get(_key)
+            if _off:
+                # 公式仕入の出品が同じ商品・色・サイズを持っている → 出さない
+                # (補URLの欄が無い出品なので、回す先も無い。仕入元は残るので後で使える)
+                print(f"    ⏸ 公式仕入で出品中 ({_off['item_id']} / 公式在庫 {_off['official_stock'] or '?'}) "
+                      f"→ 二重出品にしない")
+                continue
             _live = ut_listed.get(_key) or ut_run.get(_key)
             if _live:
                 # 二重出品にしない。この仕入元は既存の出品の補URLに回す

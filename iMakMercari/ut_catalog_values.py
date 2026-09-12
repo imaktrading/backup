@@ -318,6 +318,56 @@ def listed_identities(rows2d, ledger):
     return out
 
 
+# 公式仕入の出品 (バリエーション出品) を追う表。出品ID → 公式URL / SKUごとの 色・サイズ・在庫
+OFFICIAL_SHEET_ID = "101KL6KxMugKqZeSp2W5L2ykTvT0Zwd3RzlfsHgiJsg0"
+OFFICIAL_MAIN_TAB, OFFICIAL_SKU_TAB = "シート1", "SKU詳細"
+
+
+def official_identities(main_rows, sku_rows):
+    """公式仕入の出品 → {KEY: {"item_id", "size", "color", "official_stock"}} (純関数)。
+
+    ★2026-09-12 ユーザー「公式在庫をどうするかだね」「SKUあるけど」:
+      公式仕入の出品は eBay 側に商品番号を持たない (SKU は "UNIQLO official website"、
+      バリエーションの SKU は UUID) が、
+        シート1: 出品ID → 公式URL (= 商品番号)
+        SKU詳細: 出品ID → バリエーションごとの 色・サイズ・仕入元在庫 (監視くんが毎日更新)
+      の2つを突き合わせれば、**メルカリ仕入と同じ KEY** を機械で作れる。
+      これで「公式仕入で出している物を、メルカリ仕入でもう1本出す」を止められる。
+    """
+    pid_by_item = {}
+    for r in main_rows[1:] if main_rows else []:
+        item = (r[2] if len(r) > 2 else "").strip()
+        m = re.search(r"/products/(E\d{6})", r[5] if len(r) > 5 else "")
+        if item and m:
+            pid_by_item[item] = m.group(1)
+    out = {}
+    for r in sku_rows[1:] if sku_rows else []:
+        item = (r[3] if len(r) > 3 else "").strip()
+        pid = pid_by_item.get(item)
+        if not pid:
+            continue
+        size_jp = (r[6] if len(r) > 6 else "").strip()
+        color = (r[7] if len(r) > 7 else "").strip()
+        key = identity_key(pid, color, size_jp)
+        if key:
+            out[key] = {"item_id": item, "size": size_jp, "color": color,
+                        "official_stock": (r[8] if len(r) > 8 else "").strip()}
+    return out
+
+
+def load_official_identities(sheet_id=OFFICIAL_SHEET_ID):
+    """公式在庫の表2つを読んで KEY 一覧にする (I/O)。読めなければ {} (止めない)。"""
+    try:
+        import sys as _sys
+        _sys.path.insert(0, r"C:\dev\iMak\iMakHQ\tools")
+        import sheet_io
+        return official_identities(sheet_io.read_tab(OFFICIAL_MAIN_TAB, sheet_id=sheet_id),
+                                   sheet_io.read_tab(OFFICIAL_SKU_TAB, sheet_id=sheet_id))
+    except Exception as e:                                         # noqa: BLE001
+        print(f"  ⚠ 公式在庫の表を読めませんでした ({type(e).__name__}: {e}) → 公式との重複は見ません")
+        return {}
+
+
 def merge_aux(existing, url, max_n=AUX_MAX):
     """補URL に1本足す (既にあれば そのまま / 5本埋まっていたら足さない)。純関数。"""
     urls = [u for u in (existing or []) if u.strip()]
